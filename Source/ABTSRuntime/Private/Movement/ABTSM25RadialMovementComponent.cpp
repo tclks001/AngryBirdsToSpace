@@ -174,7 +174,7 @@ void UABTSM25RadialMovementComponent::ResolveBaseSphereContact()
 	const FVector Center = ResolvedPlanet->GetPlanetCenterWorld();
 	const FVector Location = Character->GetActorLocation();
 	const FVector Up = ResolvedPlanet->GetRadialUpAtWorldLocation(Location);
-	const float DesiredRadius = ResolvedPlanet->GetPlanetRadiusCM() + CapsuleHalfHeight;
+	const float DesiredRadius = ResolvedPlanet->GetSurfaceRadiusAtDirection(Up) + CapsuleHalfHeight;
 	const float CurrentRadius = FVector::Distance(Location, Center);
 	const float RadialSpeed = FVector::DotProduct(Velocity, Up);
 

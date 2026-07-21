@@ -37,7 +37,7 @@ public:
 
 	/** Explicit rebuild entry for runtime tests. M2 does not rebuild in OnConstruction. */
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M2")
-	bool RebuildPlanet();
+	virtual bool RebuildPlanet();
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M2")
 	FVector GetSurfaceWorldLocation(const FVector& UnitDirection, float HeightOffsetCM = 0.0f) const;
@@ -48,6 +48,14 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M2")
 	float GetPlanetRadiusCM() const { return PlanetRadiusCM; }
+
+	/** Presentation surface radius. M2 returns the base sphere; M3 overrides it with the TaskGraph height field. */
+	UFUNCTION(BlueprintPure, Category = "ABTS|Surface")
+	virtual float GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const;
+
+	/** Presentation surface normal. Gameplay radial Up remains GetRadialUpAtWorldLocation. */
+	UFUNCTION(BlueprintPure, Category = "ABTS|Surface")
+	virtual FVector GetSurfaceNormalAtDirection(const FVector& UnitDirection) const;
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M2")
 	FVector GetRadialUpAtWorldLocation(const FVector& WorldLocation) const;
@@ -91,9 +99,10 @@ public:
 		TArray<FIntVector> Triangles;
 	};
 
-private:
-
+	/** Shared topology utility for later presentation stages. */
 	static void BuildUnitIcosphere(int32 Subdivision, FUnitSphereMesh& OutMesh);
+
+private:
 	static void SubdivideOnce(FUnitSphereMesh& Mesh);
 	static int32 CountWrongProceduralMeshWinding(const FUnitSphereMesh& Mesh);
 	void BuildLogicalTopology();

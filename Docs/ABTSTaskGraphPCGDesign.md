@@ -19,6 +19,17 @@ WorldSeed
 
 `CellTopo` 是唯一逻辑源。每个 Task、资源、建筑、道路、河段、桥梁、可达性判定均必须可追溯至 `CellId` 或相邻 Cell 边；不得根据连续网格三角形、材质水体 Mask 或 HISM 实例归属决定 Gameplay。
 
+## 1.1 M3 表现层接口边界
+
+本稿负责生成逻辑 TaskGraph、Cell 区域、道路/水网/桥址边状态与建筑锚点；M3 表现实现、SDF 材质、连续网格径向高度和 HISM 规则见 [`M3TaskGraphTerrainPresentationDesign.md`](M3TaskGraphTerrainPresentationDesign.md)。两稿通过只读接口衔接：
+
+```text
+TaskGraph PCG -> CellId / TerrainType / bRoad / bWater / bBuildingAnchor
+             -> M3 TerrainVisualField / Material / HISM / BuildingSpawnSite
+```
+
+其中 `bWater` 是 TaskGraph/BridgeGate 服务玩法的逻辑标签，而非由连续表面最低点、材质蓝色像素或 HISM 位置推导。M3 可以把它渲染为水色或低频下凹，但不能改变其逻辑归属或可达性。
+
 ## 2. 数据模型
 
 ### 2.1 Gameplay Task Graph

@@ -69,6 +69,16 @@ FVector AABTSM2Planet::GetRadialUpAtWorldLocation(const FVector& WorldLocation) 
 	return Radial.IsNearlyZero() ? FVector::UpVector : Radial.GetSafeNormal();
 }
 
+float AABTSM2Planet::GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const
+{
+	return PlanetRadiusCM;
+}
+
+FVector AABTSM2Planet::GetSurfaceNormalAtDirection(const FVector& UnitDirection) const
+{
+	return UnitDirection.IsNearlyZero() ? FVector::UpVector : UnitDirection.GetSafeNormal();
+}
+
 FTransform AABTSM2Planet::GetNorthPoleSpawnTransform(const float HeightOffsetCM) const
 {
 	const FVector Up = FVector::UpVector;
