@@ -101,6 +101,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0", ClampMax = "8"))
 	int32 InstancesPerCell = 2;
 
+	/** 0 keeps trees purely radial; 1 fully follows the rendered terrain normal. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.5"))
+	float ForestSurfaceNormalBlend = 0.2f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ForestHISM;
 

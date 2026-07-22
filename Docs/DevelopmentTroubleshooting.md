@@ -91,3 +91,7 @@
 ### 道路和其他地形交界仍呈六边形折线
 
 道路的根因是曾用 `bRoad` 填充整块 Cell，现由 `Transport CellEdge` 构造 Cell 中心连续线并写入 `M3_RoadSegmentLUT`。地形曾尝试简化 dual-edge 外轮廓，但失败原因是材质的基础归属仍取最近 Cell，轮廓之外依然保留 Voronoi 六边形。最终修复由 `FABTSM3TerrainFeatureVisualBuilder` 连接同类相邻 Cell 中心，材质比较四类线网的最近距离，以 line-feature Voronoi 完全替代 Cell-center Voronoi。验收日志要求 `[ABTS][M3][LinearSDF] RoadSegments > 0`、`TerrainFeatures > 0`、`DroppedRoadRefs=0`；`PrunedTerrainRefs` 是三环候选压缩统计，不要求为 0。
+
+### 树木 Pivot 正确但在坡面上严重侧倒
+
+根因是树木局部 `+Z` 完全使用连续地表法线；地表法线适合岩石贴坡，却不等于树木生长方向。修复后树木以球心径向为主，在径向与地表法线之间按 `ForestSurfaceNormalBlend` 做归一化插值，默认 `0.2`；岩石不受影响。验收 `[ABTS][M3][HISM]` 中 `MaxAppliedTilt` 应明显小于 `MaxSurfaceTilt`。若仍显得过斜，将权重降至 `0.1`；设为 `0` 可使所有树完全径向直立。

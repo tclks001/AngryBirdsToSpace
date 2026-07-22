@@ -330,6 +330,8 @@ void AABTSM3Planet::BuildDecorInstances()
 
 	int32 EligibleForestCells = 0;
 	int32 EligibleRockCells = 0;
+	float MaxForestSurfaceTiltDegrees = 0.0f;
+	float MaxForestAppliedTiltDegrees = 0.0f;
 
 	for (int32 CellId = 0; CellId < LogicalCells.Num(); ++CellId)
 	{
@@ -356,9 +358,26 @@ void AABTSM3Planet::BuildDecorInstances()
 			const int32 NeighborId = LogicalCells[CellId].NeighborCellIds[Stream.RandRange(0, LogicalCells[CellId].NeighborCellIds.Num() - 1)];
 			const FVector Direction = FMath::Lerp(Center, LogicalCells[NeighborId].UnitCenter, Stream.FRandRange(0.0f, 0.42f)).GetSafeNormal();
 			const float Radius = TerrainVisualField->GetSurfaceRadius(Direction) - 8.0f;
-			const FVector Up = TerrainVisualField->GetSurfaceNormal(Direction);
+			const FVector RadialUp = Direction;
+			FVector SurfaceUp = TerrainVisualField->GetSurfaceNormal(Direction).GetSafeNormal();
+			if (FVector::DotProduct(SurfaceUp, RadialUp) < 0.0f) SurfaceUp *= -1.0f;
+			FVector Up = SurfaceUp;
+			if (TargetHISM == ForestHISM)
+			{
+				// A tree should visually grow away from the planet, not lie along every
+				// local terrain ripple. Keep radial Up dominant and use the surface
+				// normal only as a controlled slope response.
+				const float SurfaceBlend = FMath::Clamp(ForestSurfaceNormalBlend, 0.0f, 1.0f);
+				Up = FMath::Lerp(RadialUp, SurfaceUp, SurfaceBlend).GetSafeNormal();
+				if (Up.IsNearlyZero()) Up = RadialUp;
+				const float SurfaceTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(RadialUp, SurfaceUp), -1.0f, 1.0f)));
+				const float AppliedTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(RadialUp, Up), -1.0f, 1.0f)));
+				MaxForestSurfaceTiltDegrees = FMath::Max(MaxForestSurfaceTiltDegrees, SurfaceTiltDegrees);
+				MaxForestAppliedTiltDegrees = FMath::Max(MaxForestAppliedTiltDegrees, AppliedTiltDegrees);
+			}
 			FVector Forward = FVector::VectorPlaneProject(LogicalCells[NeighborId].UnitCenter - Center, Up).GetSafeNormal();
-			if (Forward.IsNearlyZero()) Forward = FVector::ForwardVector;
+			if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+			if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
 			const FQuat Rotation = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
 			const float Scale = Stream.FRandRange(0.75f, 1.25f);
 			TargetHISM->AddInstance(FTransform(Rotation, Direction * Radius, FVector(Scale)), false);
@@ -366,9 +385,10 @@ void AABTSM3Planet::BuildDecorInstances()
 	}
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3][HISM] ForestMesh=%s RockMesh=%s ForestMaterialsValid=%d RockMaterialsValid=%d EligibleForestCells=%d EligibleRockCells=%d ForestInstances=%d RockInstances=%d"),
+		TEXT("[ABTS][M3][HISM] ForestMesh=%s RockMesh=%s ForestMaterialsValid=%d RockMaterialsValid=%d EligibleForestCells=%d EligibleRockCells=%d ForestInstances=%d RockInstances=%d ForestNormalBlend=%.2f MaxSurfaceTilt=%.2f MaxAppliedTilt=%.2f"),
 		*GetNameSafe(ResolvedForestMesh), *GetNameSafe(ResolvedRockMesh), bForestMaterialsValid ? 1 : 0, bRockMaterialsValid ? 1 : 0, EligibleForestCells, EligibleRockCells,
-		ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount());
+		ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), FMath::Clamp(ForestSurfaceNormalBlend, 0.0f, 1.0f),
+		MaxForestSurfaceTiltDegrees, MaxForestAppliedTiltDegrees);
 }
 
 void AABTSM3Planet::BuildBuildingSpawnSites()
