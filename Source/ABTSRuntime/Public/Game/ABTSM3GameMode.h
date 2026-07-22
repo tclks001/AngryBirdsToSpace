@@ -15,5 +15,10 @@ class ABTSRUNTIME_API AABTSM3GameMode : public AGameModeBase
 public:
 	AABTSM3GameMode();
 	virtual void BeginPlay() override;
-};
 
+private:
+	void TryPlacePlayerAtInitialRoad();
+
+	FTimerHandle InitialRoadSpawnTimer;
+	int32 InitialRoadSpawnAttempts = 0;
+};

@@ -1,197 +1,483 @@
-# ABTS：Task Graph 驱动的球面 PCG 设计
+# ABTS：Task Graph 驱动的球面 PCG 最终核心设计
 
-> 状态：实现前详稿。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
+> 状态：V2 核心管线已实现，弹弓攻击解、资源经济和局部 Room 原型将在对应玩法里程碑接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)。
 >
-> 目标：先生成可通关、可分支、由能力门决定探索倾向的玩法图，再把它嵌入 `CellTopo`；连续球面仅表现最终逻辑结果。
+> 目标：先生成可通关、可分支、可被能力门验证的 Gameplay 图，再将它嵌入 `CellTopo`；地形、水网、道路、资源、建筑与弹弓攻击解共同服务该图。连续球面只渲染结果。
 
-## 1. 核心原则
+## 1. 调研结论与项目取舍
 
-借鉴《饥荒》的不是二维 Voronoi 形状，而是“任务图先行、物理布局后置、生成后验证”的层次。
+成熟 PCG 很少让单一算法同时负责剧情节奏、可达性、自然地貌和局部美术。可复用的共性是：先规定玩家必须经历的结构，再生成空间，最后填充变化并求解验证。
+
+| 作品/方法 | 可复用方法 | 对 ABTS 的启示 | 不直接照搬 |
+| --- | --- | --- | --- |
+| 《饥荒》Tasks / Rooms | Task 图、Lock/Key、Room 模板、物理布局失败重试 | 先锁定任务依赖和区域职责，再分配球面 Cell | 不照搬二维岛屿 Voronoi 与大世界内容量 |
+| 《Spelunky》 | 先生成保证可通关的 solution path，再从符合出入口契约的房间模板填充，最后放陷阱与奖励 | 主线可达性必须早于地形装饰；Room 原型必须保护入口/出口 | 不使用规则网格房间和平台跳跃模板 |
+| 《Unexplored》的 Cyclic Dungeon Generation | 先用任务/锁/钥匙构成主环、支环与捷径，再将图翻译为空间 | 一个后期开启的回环比随机交叉连接更有玩法意义 | 不生成复杂地牢嵌套环，比赛版只保留一个支环 |
+| 《XCOM 2》的 Plot and Parcel | 高层 Plot 决定道路和战术结构，手工 Parcel 提供可靠局部质量，再做组合 | Task 区域应由可测试的 Room/SetPiece 原型组合，不应全靠噪声 | 不需要方格街区、掩体网格和大量手工地块 |
+| 《Warframe》/模块化关卡 | 带连接器和标签的手工模块按约束拼接 | 弹弓槽、桥址、建筑施工台应是带端口的 Set Piece，而非随机点 | 球面开放地表不适合整图模块拼接 |
+| 《Deep Rock Galactic》 | 任务控制洞穴拓扑，空间节点与连接走廊分离，再以体积手段补形 | Task Seed/Room Cluster 与连接 Corridor 应分别生成 | 不需要体素洞穴和任意挖掘 |
+| 《No Man's Sky》/Minecraft | 分层、确定性、可按 Seed 重建的连续场；大尺度形状与小尺度细节分离 | Hash 派生随机流、低频高度与局部装饰必须解耦 | 噪声不能决定主线、桥锁和攻击解 |
+| Dwarf Fortress / 水文模拟 | 高程、降水、汇流与河流有因果关系，生成后检查世界条件 | 非关键河网可由逻辑高度导出，河宽由汇流量决定 | 比赛版不模拟气候、地质与历史 |
+| Red Blob Games Mapgen | 明确承认“为游戏需求设计的不真实地形”；Voronoi/Delaunay、高程、河流分层 | 游戏可读性优先于地理真实性；水文是受约束的表现真实性 | 不要求海岸岛屿或完整蒸发降雨模型 |
+| WFC / 约束求解 | 擅长局部相邻规则和样式一致性，但可能矛盾、回溯或失败 | 只用于 Task 内有限 Room/装饰标签，设置步数和回退 | 禁止对 10,242 Cell 全局 WFC，也不让 WFC 决定任务图 |
+| Search-based PCG | 生成候选，以可玩性指标打分、修复、重试 | 使用分层验证器和有限候选搜索选择最佳布局 | 不做昂贵遗传算法或运行时长时间优化 |
+
+最终采用“Constructive + Constrained Search + Validation”混合路线：高层结构构造式生成，空间布局在候选集中评分选择，局部地形使用场与规则补形，最后由能力状态求解器验证。算法的作品亮点不是随机量，而是证明道路、水网、建筑、弹弓和任务锁属于同一份可解的球面图。
+
+调研入口与参考资料见文末第 16 节。
+
+## 2. 不变量与层级
 
 ```text
 WorldSeed
--> Gameplay Task Graph：区域、锁、钥匙、主线与支线
--> CellTopo Spatial Graph：为每个 Task 分配连通 Cell，确定边界与连接边
--> Terrain / River / Road / Target Graph：赋予高度、河道、道路、弹弓槽、建筑目标和卫星引力走廊
--> Validation：以当前能力集合验证可达性与反绕过
--> Continuous Surface / HISM / Actor：只渲染和碰撞
+  -> Mission Graph：主线、支线、Key/Lock、节奏预算
+  -> Spatial Skeleton：Task Seed、Room、连接走廊、能力门割集
+  -> CellTopo Fields：区域、高度、湿度、坡度、可建造性
+  -> Hydrology：汇流河网 + Gameplay 强制河障
+  -> Transport：道路、桥址、浅滩、后期开启捷径
+  -> Set Pieces：出生点、工作台、弹弓槽、目标建筑、熔炉、发射场
+  -> Resources / Decor：配方保底、风险收益、HISM
+  -> Multi-state Solver：可达性、反绕过、资源经济、攻击解
+  -> Continuous Surface / Material / HISM / Actor：只读表现
 ```
 
-`CellTopo` 是唯一逻辑源。每个 Task、资源、建筑、道路、河段、桥梁、可达性判定均必须可追溯至 `CellId` 或相邻 Cell 边；不得根据连续网格三角形、材质水体 Mask 或 HISM 实例归属决定 Gameplay。
+必须始终成立：
 
-## 1.1 M3 表现层接口边界
+- `CellTopo` 是唯一逻辑源。所有状态归属到 `CellId` 或规范化相邻边键 `Min(CellA,CellB), Max(CellA,CellB)`。
+- Task Graph 描述“为什么去那里”；Spatial Graph 描述“区域如何相连”；道路和河流描述“怎样走、为何受阻”。三者不能合并成一个 `bRoad` 数组。
+- 逻辑高度先于连续网格。不得通过渲染网格最低点反推河流或可建造性。
+- 每次重建从全新结果对象开始，不复用旧 `bRoad`、`RoadDistance`、河段、锚点或验证缓存。
+- 固定 `WorldSeed + GeneratorVersion + ConfigHash` 必须生成完全一致的逻辑结果。
 
-本稿负责生成逻辑 TaskGraph、Cell 区域、道路/水网/桥址边状态与建筑锚点；M3 表现实现、SDF 材质、连续网格径向高度和 HISM 规则见 [`M3TaskGraphTerrainPresentationDesign.md`](M3TaskGraphTerrainPresentationDesign.md)。两稿通过只读接口衔接：
+## 3. 最终数据模型
 
-```text
-TaskGraph PCG -> CellId / TerrainType / bRoad / bWater / bBuildingAnchor
-             -> M3 TerrainVisualField / Material / HISM / BuildingSpawnSite
+### 3.1 Mission Task 与连接
+
+```cpp
+struct FABTSTaskNode
+{
+    int32 TaskId;
+    EABTSTaskType Type;
+    EABTSProgressPhase Phase;
+    TSet<FGameplayTag> RequiredKeys;
+    TSet<FGameplayTag> ProvidedKeys;
+    TArray<EABTSSetPieceType> RequiredSetPieces;
+    FInt32Range RegionCellBudget;
+    FInt32Range DistanceFromStart;
+    int32 SeedCellId;
+    TArray<int32> RoomIds;
+};
+
+struct FABTSTaskLink
+{
+    int32 LinkId;
+    int32 TaskA;
+    int32 TaskB;
+    EABTSLinkRole Role; // MainPath / Branch / LockedGate / LateShortcut
+    FGameplayTag RequiredKey;
+    TArray<int32> CorridorCells;
+    TArray<FABTSCellEdgeKey> CorridorEdges;
+};
 ```
 
-其中 `bWater` 是 TaskGraph/BridgeGate 服务玩法的逻辑标签，而非由连续表面最低点、材质蓝色像素或 HISM 位置推导。M3 可以把它渲染为水色或低频下凹，但不能改变其逻辑归属或可达性。
+`LinkedTaskIds` 不足以表达锁和空间连接，最终实现必须使用显式 `TaskLink`。Task ID 不再假设等于数组下标。
 
-## 2. 数据模型
+### 3.2 Cell 状态
 
-### 2.1 Gameplay Task Graph
+```cpp
+struct FABTSCellPCGState
+{
+    int32 TaskId;
+    int32 RoomId;
+    EABTSTerrainType TerrainType;
+    float BaseHeight01;
+    float Moisture01;
+    float BuildSlopeDegrees;
+    int32 MainRoadDistance;
+    int32 NearestRoadDistance;
+    EABTSCellFlags Flags; // Water/Lake/Wetland/Road/Buildable/Reserved...
+};
+```
 
-每个 Task 是一个“有玩法职责的区域”，而不是一个纯地形标签。
-
-| 字段 | 含义 |
-| --- | --- |
-| `TaskId` | 稳定 ID，供 Seed 与日志使用。 |
-| `TaskType` | `Start` / `Workshop` / `SlingshotRange` / `TargetBuilding` / `BridgeGate` / `SatelliteWindow` / `FurnaceRuins` / `LaunchSite` / `Scout`. |
-| `RequiredKeys` | 进入或完成该 Task 所需能力/状态。 |
-| `ProvidedKeys` | 完成后授予的能力或资源状态。 |
-| `RequiredSetPieces` | 必须容纳的弹弓槽、桥址、模块化建筑、卫星窗口、遗址等。 |
-| `RoomArchetypes` | Task 内 Cell Cluster 的地块和内容配额。 |
-| `bMainPath` | 是否为必经主线。 |
-
-Key 不是背包物品本身，而是可达性验证的抽象状态：`BuildWorkbench`、`SimpleSlingshotReady`、`TargetDestroyed`、`HaveWood`、`BridgeBuilt`、`ReinforcedSlingshotReady`、`SatelliteShotSolved`、`HaveCrystalCore`。
-
-### 2.2 CellTopo Spatial Graph
+### 3.3 边状态
 
 ```cpp
 struct FABTSCellEdgeState
 {
-    int32 CellA;
-    int32 CellB; // 必须互为 NeighborCellIds
-    EABTSEdgeType Type; // Land / Road / Stream / ShallowRiver / DeepRiver / LakeShore
-    EABTSCrossingType Crossing; // None / Ford / FallenLog / BridgeSite / Bridge
+    FABTSCellEdgeKey Key;
+    EABTSTransportFlags Transport; // Trail / MainRoad / Bridge
+    EABTSWaterEdgeType Water;      // None / Stream / Shallow / Deep / LakeShore
+    EABTSCrossingType Crossing;    // None / Ford / FallenLog / BridgeSite / Bridge
+    int32 DownstreamCellId;
+    float FlowAccumulation;
+    FGameplayTag RequiredKey;
     bool bBlocksOnFoot;
 };
 ```
 
-河流与道路均保存为相邻 Cell 边集合；同一条边允许同时是 `Road + Bridge`，但深河边不允许无 Crossing 的道路穿越。
+道路和水系以边为主，Cell Flag 只是材质与快速查询的派生缓存。同一条边可以是 `ShallowRiver + BridgeSite`，建桥后切为 `ShallowRiver + Bridge`。
 
-## 3. 初版任务图模板
+### 3.4 Room 与 Set Piece
 
-初版只生成一个高价值目标和一颗卫星；不随机增删主线 Task，只随机空间位置、区域形状和表现。固定模板保证纵向切片稳定。
+Room 是 Task 内的连通 Cell Cluster，至少包含：`RoomId`、`Archetype`、入口边、出口边、Cell 预算、地形倾向、预留 Anchor。Set Piece 是带空间端口的约束模板，例如：
+
+- `StartCamp`：出生 Cell、主路出口、树枝/石料保底槽；
+- `WorkbenchPad`：中心与至少一个平缓相邻建筑 Cell；
+- `SlingshotPair`：两桩中心、槽轴、允许等级、攻击扇区；
+- `TargetBuildingPad`：地基 Footprint、弱点朝向、道路外距离；
+- `BridgeGate`：两岸 Cell、河边、道路入口/出口和阻断状态；
+- `FurnaceLaunchPair`：相邻联动 Cell；
+- `SatelliteWindow`：发射槽、卫星方向和轨迹约束。
+
+## 4. 比赛版 Mission Graph
+
+主线 Task 类型固定，空间、支线挂接点、Room 原型与晚期回环可变。固定主线保证一周内的通关闭环，PCG 价值体现在多层空间求解，而不是随机删掉核心玩法。
 
 ```text
-Start -- Workbench -- SlingshotRange -- TargetBuilding -- [BridgeGate] -- FurnaceRuins -- LaunchSite
-                                \-- Scout -- SatelliteWindow --/
+Start -> Workshop -> SlingshotRange -> TargetBuilding -> BridgeGate -> FurnaceRuins -> LaunchSite
+                         \-> Scout -> SatelliteWindow -----------/
+                                      \-- LateShortcut ----------/
 ```
 
-| Task | 所需 Key | 提供 Key / 内容 | 空间约束 |
+| Task | Required | Provided | 硬空间职责 |
 | --- | --- | --- | --- |
-| Start | 无 | 初始树枝、石料、队伍出生点 | 必有平缓 Cell、道路入口和树枝槽。 |
-| Workbench | 无 | 工作台、桩/弦配方 | 至少一对相邻平缓建筑 Cell。 |
-| SlingshotRange | `BuildWorkbench` | 配对弹弓槽与攻击教学射界 | 槽轴、地形及水域共同保证唯一目标可被攻击。 |
-| TargetBuilding | `SimpleSlingshotReady` | 木材/金属部件货仓 | 在主路外，`RoadDistance` 高于阈值，视域受遮挡。 |
-| BridgeGate | `HaveWood` | 桥址、对岸道路 | 可选或主线阻断边；初版只需一个。 |
-| SatelliteWindow | `ReinforcedSlingshotReady` | 卫星引力走廊与高价值攻击解 | 位于潮汐锁定卫星下方的主星发射范围。 |
-| FurnaceRuins | `TargetDestroyed` | 熔炉与太空弹弓施工邻接条件 | 非水、平缓、遗址锚点明确。 |
-| LaunchSite | `HaveCrystalCore` 或初版替代配方 | 终局 | 与遗址同 Cell 或相邻 Cell 可施工。 |
+| Start | 无 | 基础树枝/石料 | 平缓出生点、可见主路、资源保底 |
+| Workshop | 无 | `BuildWorkbench` | 至少两个相邻平缓 Cell，邻接联动接口 |
+| SlingshotRange | `BuildWorkbench` | `SimpleSlingshotReady` | 简易弹弓槽、教学目标、可验证短程弹道 |
+| TargetBuilding | `SimpleSlingshotReady` | `TargetDestroyed + HaveWood` | 道路外目标、遮挡与弱点、材料货仓 |
+| BridgeGate | `HaveWood` | `BridgeBuilt` | 水系割集、唯一合法主线 Crossing |
+| FurnaceRuins | `TargetDestroyed`，若启用主线桥锁再加 `BridgeBuilt` | `ReinforcedSlingshotReady` | 熔炉/工作台相邻条件、平缓遗址 |
+| Scout | 简易或强化弹弓 | 探索标记 | 非关键支线，不持有唯一主线 Key |
+| SatelliteWindow | `ReinforcedSlingshotReady` | `SatelliteShotSolved + HaveCrystalCore` | 强化弹弓轨迹可解、普通弹弓不可替代 |
+| LaunchSite | `HaveCrystalCore` | 通关 | 与熔炉同区或相邻、终局施工位 |
 
-桥梁建成前，若 BridgeGate 被设为主线锁，则不得从其他边绕过它；桥梁建成后，对岸道路和后续 Task 必须可达。初版可让桥梁作为同一目标的第二个材料用途，而不以它承载全部主线内容。
+Mission Graph 构造流程：
 
-## 4. CellTopo 落地算法
+1. 实例化必需主线节点和 Key/Lock。
+2. 从允许挂接点抽取 1 个 Scout/Satellite 支线模板。
+3. 在桥后或卫星后增加至多 1 条 `LateShortcut`，其 RequiredKey 必须晚于 BridgeGate，不能提前绕锁。
+4. 执行抽象状态搜索；若 Mission Graph 本身无法按阶段解锁，物理布局开始前就拒绝。
 
-### 4.1 分配 Task 种子与区域
+## 5. 确定性随机与尝试协议
 
-1. 选择 Start Cell，要求 `BuildSlope` 合格且非水体。
-2. 按主线顺序从 Start 沿球面图选择 Task Seed；最小图距离、最大图距离和与已分配 Task 的缓冲距离均为可配置范围。
-3. 每个 Task 从 Seed 向外进行受限 BFS，直到满足最小 Cell 数；扩张禁止吞并已分配区域和预留河道走廊。
-4. 在 Task 内再切分 1–3 个 Room Cluster，例如主路旁的树枝槽、河岸桥址、道路外的建筑施工台和卫星发射窗口。
-5. 若任何必需 Set Piece 没有足够连续且平缓的候选 Cell，则丢弃本次布局并以 `Hash(WorldSeed, RetryIndex)` 重试。
-
-首版可用拓扑图距离衡量远近；不依赖世界坐标直线距离判定逻辑连通。
-
-### 4.2 主线与支线连接
-
-任务连接优先生成一棵主线树，再添加有限回环：
-
-- 主线相邻 Task 必须由至少一条 `Land` 或可解锁 `Crossing` 边相连。
-- 支线从已解锁主线 Task 分叉，奖励仅提供资源、侦察或后期捷径，不能持有主线唯一 Key。
-- 至多增加一个后期开启的回环；它应减少折返，但不能绕过 BridgeGate。
-- 生成道路前，先将任务连接转换为 CellTopo 上的路径走廊。
-
-## 5. 河网、道路与能力门
-
-### 5.1 河网
-
-河网以 CellTopo 的逻辑高度作为输入，以 Task 边界与 BridgeGate 作为硬约束。
-
-1. 保留旧项目的 Priority-Flood 填洼和无环下游父链思路，生成可汇流的 `FromCell -> ToCell` 河段。
-2. 在 BridgeGate 处强制选择一条任务连接边作为浅河；两岸分别属于主路与对岸目标/遗址侧的可达区。
-3. 河宽由汇流量分级，而非由材质宽度决定：细流可直接过，浅河需 Crossing，深河/湖泊封锁。
-4. 禁止河流占用 Start、工作台、熔炉和终局施工 Cell；河岸/湿地是资源分布加权标签，不是独立自由形状。
-5. 深河只用于边界、远景和支线分隔，不能让玩家必须依赖尚未设计的飞行或游泳机制。
-
-### 5.2 道路
-
-道路在逻辑连接确定后，以 CellTopo 最短路径生成。寻路代价应优先经过平缓、非水、低装饰密度 Cell，避开深河、湖泊、陡坡和密林核心；跨河仅允许经过 Ford、FallenLog、BridgeSite 或 Bridge。
-
-道路是软引导而非快捷数值系统：用于主控/跟随路径偏好、相机视线、弹弓槽布置和玩家视觉导航。计算每 Cell 到主路的图距离 `RoadDistance`；建筑价值、结构模板复杂度、资源货仓与视域遮挡均由该值分级。道路不能改变锁的可达性。
-
-### 5.3 桥梁状态变化
+禁止让所有阶段共享并顺序消费一个 `FRandomStream`，否则早期多抽一次随机数会改变整张地图。每个阶段使用独立派生 Seed：
 
 ```text
-初始：BridgeSite 边 = ShallowRiver + bBlocksOnFoot
-摧毁建筑并回收木材：玩家可在桥址执行建造
-建成：Crossing = Bridge，边变为可步行，重新计算可达性
+StageSeed = Hash(WorldSeed, GeneratorVersion, StageTag, AttemptIndex)
+ItemSeed  = Hash(StageSeed, StableTaskId/CellId/EdgeKey, LocalIndex)
 ```
 
-桥梁是边状态变更，不改变 CellTopo、不挖连续地形、不重建河网。
+建议 StageTag：`Mission`、`TaskSeeds`、`Regions`、`Height`、`Hydrology`、`Roads`、`SetPieces`、`Resources`、`Decor`。逻辑结果记录 `GeneratorVersion`，算法升级后旧 Seed 仍可辨识。
 
-## 6. 建筑、弹弓槽与卫星约束
+完整尝试最多 8 次。一次尝试内优先做局部候选回退；只有结构性失败才进入下一个 Attempt。8 次失败后使用同一 WorldSeed 派生的已验证保底布局，不返回半张地图。
 
-### 6.1 结构化建筑
+## 6. 阶段 A：构建 CellTopo 分析缓存
 
-建筑不是独立资源点。每个目标建筑以 `CellTopo` 建筑施工台为锚点，并从模板生成 `Anchor`（地基）、`LoadPath`（承重件）、`Payload`（货仓）、`Trigger`（绳索/活塞/炸药）与 `WeakPoint`（可读弱点）。道路距离越大，模板允许的模块数、装置数和货仓价值越高；初版只选一座 12–25 刚体、1–3 个装置的目标建筑。
+对 10,242 Cell 只计算一次：
 
-建筑逻辑库存仅在 Payload 暴露时变为可自动回收；视觉碎块不会决定材料数量。鸟撞击后，由当前发射鸟的飞越、落地或回收半径把已暴露货仓写入全队库存。
+1. 规范化全部相邻边键，验证边双向一致、12 个五邻接 Cell 与其余六邻接 Cell。
+2. 预计算球面图的 Landmark 距离近似；关键候选之间再执行精确 BFS/Dijkstra。避免每个候选都全图 `Acos`。
+3. 为每个 Cell 建立稳定切平面基，供槽轴、河岸、建筑朝向使用；不以世界 Z 判断局部方向。
+4. 初始所有 CellState/EdgeState 为默认值；每轮尝试创建新的 `FABTSWorldPCGResult`。
 
-### 6.2 弹弓槽
+## 7. 阶段 B：空间骨架与 Task Seed
 
-弹弓槽是 PCG 预放置的 CellTopo 锚点对，带有槽位朝向、配对 ID、允许组件等级、可攻击方向扇区和最小/最大桩距。两桩与弹弦完成后才产生完整弹弓。目标建筑生成后必须验证：至少一个相应等级槽位存在不被山脊/深水立即遮挡的预测攻击解；因此建筑位置、槽轴和地形不能彼此解耦。
+### 7.1 Start
 
-### 6.3 卫星与引力走廊
+Start 从满足下列条件的候选中按稳定随机抽样 32 个，再评分选择：
 
-卫星相对主星的方向由 WorldSeed 固定；卫星使用独立 `Sub=2/3` CellTopo，只生成少量高价值建筑。主星上位于卫星下方的发射槽可获得 `SatelliteWindow` 标签。强化弹弓的高抛轨迹进入窗口后附加卫星引力；PCG 必须验证该偏转让至少一个远端/卫星目标可命中，且普通简易弹弓无法替代。
+- 不在五边形异常点附近的强制要求可以作为软分；
+- 有连续 7–12 个可作为平缓地的邻域；
+- 到预计 BridgeGate 和 LaunchSite 有足够图距离；
+- 局部邻接方向分布均匀，不形成狭窄尖角。
 
-## 7. 生成后验证
+### 7.2 主线走廊骨架
 
-验证应使用同一份 `FABTSCellEdgeState` 和能力状态，不使用渲染碰撞、道路网格或水体材质。
+不再用 `Normalize(Lerp(StartDirection, EndDirection, Alpha))` 摆一条直线。改为先生成一条带转折的球面主线骨架：
 
-| 阶段 | 允许 Key | 必须可达 | 必须不可达 |
+1. 从 Start 以图距离区间选 16–32 个 LaunchSite 候选，排除近对跖数值退化区。
+2. 对每个终点生成 3–5 条带方向惯性的候选骨架路径。代价包含步长、转角、与自身距离、预留支线空间；此时尚不使用最终地形。
+3. 沿骨架累计图距离放置主线 Task，但允许在目标距离窗内左右偏移，不要求共线。
+4. 对整组 Seed 评分，而不是逐个贪心：
+
+```text
+ScoreSeeds =
+  + TaskDistanceWindow
+  + RegionCapacity
+  + BranchSpace
+  + BridgeCutPotential
+  + ScenicCurvature
+  - SeedCrowding
+  - AntipodalDegeneracy
+  - CorridorSelfApproach
+```
+
+5. 从前 K 个布局中用派生随机流选择，避免永远输出唯一最优但保持质量下限。
+
+### 7.3 支线与回环
+
+SatelliteWindow 不插在主线直线上。它从 SlingshotRange/TargetBuilding 邻近阶段分叉，要求与主路保持最小距离，并在桥后或发射区重新连接。LateShortcut 的两端先在 Mission Graph 确定，空间路径后生成；它在对应 Key 获得前保持阻断。
+
+## 8. 阶段 C：Task Region 与 Room Cluster
+
+禁止用全图“最近 Task Seed”一次性 Voronoi，因为它会让端点 Task 吞掉球面背面、让中间 Task 变成狭窄色带。
+
+采用带预算的多源区域生长：
+
+1. 为 Task 按职责配置 `Min/Target/MaxCells`，比赛版总玩法区只占球面的一部分；未分配区成为 Background/Wilderness，而不是硬塞给最近 Task。
+2. 先为每条 TaskLink 预留 2–4 Cell 宽 Corridor Mask。
+3. 所有 Task 从 Seed 同步使用优先队列扩张，优先级包含：到 Seed 距离、紧凑度、目标预算、期望地形、与 Corridor 接触、边界长度。
+4. 达到 Target 后显著提高扩张代价，达到 Max 后停止；禁止吞并其他 Task、关键 Corridor 和硬保留区。
+5. 检查每个 Task Region 连通，入口到出口至少有两条局部候选路线；只有 BridgeGate 允许被设计为单一割口。
+6. 剩余 Cell 用低成本扩张为 Wilderness Terrain Patch，不创建 Gameplay Task。
+
+Task 内再生成 1–3 个 Room Cluster：入口 Room、玩法 Room、出口/奖励 Room。Room 采用受限生长或小型 BSP 式预算切分，不做全局 WFC。每个 Room 先声明端口与 Set Piece 配额，再分配地形标签。
+
+## 9. 阶段 D：低频高度场
+
+高度既要给水文输入，也要保护 Gameplay。顺序为“硬锚点 → 低频场 → 约束松弛”，不使用渲染网格反求。
+
+1. 给 Task/Room 指定高度带，而非整个 Task 单一常数，例如 Plain `[0.08,0.20]`、Forest `[0.12,0.35]`、Highland `[0.35,0.65]`、Mountain `[0.65,0.95]`。
+2. 建立硬锚点：Start、建筑 Footprint、弹弓槽、道路门口、桥两岸、Furnace/LaunchSite 的高度与最大坡度。
+3. 叠加 3–6 个球面 RBF/测地距离低频基元：山丘、山脊、盆地和谷向；Noise 只扰动非关键区。
+4. 对 Cell 图进行有限次拉普拉斯松弛，同时钉住硬锚点和山脊/河谷引导点。
+5. 从相邻 Cell 高差估算逻辑坡度，若 Set Piece Footprint 超阈值则局部压平并再次松弛；这属于逻辑 PCG 数据，不读取连续网格。
+6. 保留 `PreWaterHeight` 与 `FinalHeight`：前者用于自然汇流，后者允许河道和道路有限雕刻。
+
+## 10. 阶段 E：水网与 Gameplay 河障
+
+本项目采用“受约束水文”，不是纯模拟，也不是 BridgeGate 周围随便三个水 Cell。
+
+### 10.1 自然水文骨架
+
+1. 在 `PreWaterHeight` 上运行 Priority-Flood，消除无出口小洼地或将保留洼地标为 Lake Basin。
+2. 每个非湖 Cell 选择严格更低的相邻 Cell 为 Downstream；相等时用稳定 Edge Hash 破平，保证无环。
+3. 按高度降序累计 `FlowAccumulation = LocalRunoff + UpstreamSum`。
+4. 从高地/湿润区选择彼此有最小间距的水源；沿 Downstream 追踪到湖、湿地汇或背景排水区。
+5. 按汇流量分为 Stream、ShallowRiver、DeepRiver；低流量支流可裁剪，控制视觉密度。
+
+### 10.2 BridgeGate 强制割集
+
+自然水文只提供候选。BridgeGate 必须满足 Gameplay：
+
+1. 在桥前 Task 集合与桥后 Task 集合之间计算 CellTopo 边界割集。
+2. 从割集中选择地形、河向和道路方向合适的 BridgeSite Edge，要求两岸有平缓 Approach Cells。
+3. 将自然河道引导到该割集，并扩展为连续水障带；允许小范围调高/调低非锚点 Cell 形成可信河谷。
+4. 暂时移除所有 Crossing，用可达性验证证明桥前无法到达桥后；若仍可绕行，则扩展水障、使用深水/湖岸封闭缺口，或换候选割集。
+5. 只在选中的 BridgeSite 允许主线 Crossing。浅支流可以另有 Ford，但不得跨越同一主线割集形成绕锁。
+6. 桥建成后仅改变该 Edge 的 Crossing 与通行状态，不重建河网和连续球面。
+
+这使“河流真实感”和“任务门”兼容：自然水文决定大部分形态，Gameplay 割集决定唯一不可妥协的过河关系。
+
+## 11. 阶段 F：道路网络
+
+道路在高度和水网确定后生成，使用 A* 或 Dijkstra，不再使用无权 BFS。每条 TaskLink 都有独立路径角色。
+
+```text
+Cost(CellA -> CellB) =
+    BaseLength
+  + SlopePenalty
+  + TurnPenalty(previous edge, next edge)
+  + TerrainPenalty
+  + WaterPenalty/CrossingPenalty
+  + SetPieceExclusionPenalty
+  + DenseForestPenalty
+  - ExistingRoadReuseBonus
+  - CorridorPreference
+```
+
+硬规则：
+
+- DeepRiver/LakeShore 无合法 Crossing 时不可通行；
+- LockedGate 在当前阶段不可通行；
+- 建筑 Footprint、弹弓桩和保留河岸不可占用；
+- 主路必须经过 BridgeSite Edge，而不是走入一个 `bWater` Cell；
+- 路径每步记录 Edge，Cell 的 `bRoad` 仅为派生显示数据。
+
+生成顺序：主线道路 → 支线路径 → 后期开启捷径 → 次要资源 Trail。后生成道路享受复用奖励，形成真实汇合；同时设置最大共线复用，避免所有支路完全塌成一条线。对主路做一次离散平滑：在不增加锁绕过、不越水、不超坡度的前提下替换锯齿拐点。
+
+生成后分别计算：
+
+- `MainRoadDistance`：到主线道路的拓扑距离；
+- `NearestRoadDistance`：到任意道路距离；
+- `ProgressDistance`：从 Start 沿已解锁交通图的代价距离。
+
+三者不能混为一个 `RoadDistance`。目标价值主要参考 MainRoadDistance，任务进度参考 ProgressDistance。
+
+## 12. 阶段 G：Set Piece、攻击解与资源经济
+
+### 12.1 放置顺序
+
+按照约束最强优先：BridgeGate → SatelliteWindow → Slingshot/Target Pair → Furnace/Launch Pair → Workshop → Start Resources → 普通资源与装饰。每类先枚举候选，再评分，不在失败后随便找最近 Cell。
+
+### 12.2 建筑和相邻联动
+
+- 建筑仅能锚定在逻辑坡度合格的 CellTopo 中心点；Footprint 需要的相邻 Cell 也必须合法。
+- Workbench/Furnace 联动使用 `NeighborCellIds` 或显式相邻边判断。
+- 建筑入口朝道路，目标弱点朝合法弹弓攻击扇区；这两个方向可能冲突，候选评分需要同时考虑。
+
+### 12.3 弹弓—目标联合求解
+
+不能先随机放建筑，再期望玩家能打中。每个候选组合执行低成本弹道采样：
+
+1. 枚举弹弓槽 Anchor Pair、允许桩距与槽轴。
+2. 枚举目标建筑 Footprint、弱点位置和朝向模板。
+3. 采样若干拉伸量/发射角；沿预测轨迹查询球面逻辑高度、水障和预留碰撞体包围体。
+4. 简易弹弓至少有一条命中教学/主目标的解；强化弹弓至少有一条进入 SatelliteWindow 后命中高价值目标的解。
+5. 需要能力区分时验证反例：普通弹弓的速度域不存在卫星目标解。
+
+PCG 只保存经验证的 Solution Witness：槽位、目标、参数范围、最小净空。运行时仍允许玩家找到其他解。
+
+### 12.4 资源保底与风险收益
+
+资源生成先满足配方不变量，再随机填充：
+
+- P0 可达区的树枝与石料足够建造简易弹弓，并留 20% 容错；
+- 桥前目标货仓提供建桥所需木材；禁止把唯一木材放到桥后；
+- 强化/终局材料只在对应能力可达后出现，但失败/落水不得永久锁死；
+- 离主路更远、地形风险更高的可选资源价值更高；主线唯一 Key 不放在随机 HISM 上。
+
+## 13. 阶段 H：多状态验证、修复与重试
+
+验证器直接读取 Task、Cell 和 Edge 数据，不读取材质、HISM 或连续网格碰撞。
+
+### 13.1 状态搜索
+
+状态至少包含 `CurrentReachableCells + AcquiredKeys + ResourceThresholdFlags`。对比赛版 Key 数量很少，可用 BFS/位集闭包：
+
+| Phase | 初始能力 | 必须可达/可完成 | 必须不可达 |
 | --- | --- | --- | --- |
-| P0 | 无 | Start、Workbench、树枝槽 | 道路外目标的完整攻击解。 |
-| P1 | `SimpleSlingshotReady` | SlingshotRange、TargetBuilding 攻击解 | 卫星目标/强化攻击解。 |
-| P2 | `TargetDestroyed + HaveWood` | BridgeSite、熔炉材料 | 被桥锁保护的对岸路线（若启用）。 |
-| P3 | `ReinforcedSlingshotReady` | SatelliteWindow、卫星偏转攻击解 | 无法由普通弹弓替代的高价值目标。 |
-| P4 | `HaveCrystalCore` | FurnaceRuins、LaunchSite | 无。 |
+| P0 | 无 | Start、Workshop、基础资源 | 主目标完成、桥后区域 |
+| P1 | `SimpleSlingshotReady` | Target 攻击 Solution Witness | Satellite 高价值解 |
+| P2 | `TargetDestroyed + HaveWood` | BridgeSite 建造入口 | 未建桥时的桥后主线 |
+| P3 | `BridgeBuilt` | FurnaceRuins、强化施工 | 不得被其他 Ford 绕过桥锁 |
+| P4 | `ReinforcedSlingshotReady` | SatelliteWindow 强化轨迹 | 普通弹弓替代解 |
+| P5 | `HaveCrystalCore` | LaunchSite 与终局 | 无 |
 
-此外验证：
+### 13.2 验证项
 
-- 每个必需建筑存在合法 Cell；熔炉存在工作台相邻 Cell。
-- 必需低价值资源满足首轮桩/弦配方；目标建筑货仓满足强化或终局材料下限。
-- 目标建筑的 `RoadDistance`、视域遮挡、弱点朝向、弹弓槽攻击解和货仓暴露条件均符合模板。
-- 主线路径不会被河网意外封死，也不会绕开启用的 BridgeGate。
-- 卫星引力走廊存在强化弹弓的实际可命中轨迹。
-- 连续地表对所有逻辑 Cell 中心均能查询到可用渲染高度；该项只验证表现映射，不反写逻辑。
+- Task Graph 按 Key 顺序可解，无自锁、无唯一 Key 位于自身锁后。
+- 每个 Task Region 连通，所有 Required Set Piece 均在本 Task 或允许边界内。
+- 桥前/桥后在无桥时确实分离，建桥后连通；LateShortcut 不提前绕锁。
+- 主路连续、坡度合格、只通过合法 Crossing；道路不会穿越建筑 Footprint。
+- 水网 Downstream 无环，河段连续，深水不吞掉关键锚点。
+- 建筑、弹弓和联动 Cell 的逻辑坡度与邻接关系合法。
+- 简易/强化弹弓分别存在所需攻击解和能力区分反例。
+- 每阶段资源下限满足，关键物资不会因唯一一次失败永久丢失。
+- 所有数组、CellId、TaskId、RoomId、EdgeKey 均合法；无旧结果残留。
 
-## 8. 失败重试、可复现性与日志
+### 13.3 局部修复优先级
 
-每次完整尝试使用派生种子：
+1. 道路失败：换第 K 条路径、调整转角权重或换 BridgeSite Approach。
+2. 水障可绕：封闭最短绕行缺口或换割集，不整图加水。
+3. Set Piece 无候选：在所属 Room 内局部压平/换原型/扩 1 圈预算。
+4. 攻击解失败：旋转槽轴和弱点、换候选 Cell，再考虑局部降低遮挡。
+5. 区域容量失败、Mission 锁失败或多处结构冲突：整次 Attempt 重试。
+
+所有修复有次数上限并写日志，避免无限循环和难以复现的隐式补丁。
+
+## 14. 评分、质量与多样性
+
+通过硬验证的候选再按软指标评分：
 
 ```text
-AttemptSeed = Hash(WorldSeed, RetryIndex)
+FinalScore =
+  3.0 * ProgressionReadability
++ 2.5 * BridgeGateClarity
++ 2.0 * AttackSolutionQuality
++ 1.5 * RoadNaturalness
++ 1.0 * RegionCompactness
++ 1.0 * ScenicVariety
++ 1.0 * OptionalExplorationValue
+- 2.0 * ExcessiveBacktracking
+- 1.5 * RoadZigzag
+- 1.0 * TinyTerrainPatches
 ```
 
-限制最大尝试次数，例如 8。若均失败，输出每项验证的失败原因，并切换到同一 WorldSeed 对应的保底模板；保底模板的 Task 图、关键桥址和必需 Set Piece 均固定，局部 Decor 仍可随机。
+不要只取绝对最高分，否则不同 Seed 会趋同。保留前 3 个通过候选，按归一化权重确定性抽取。多样性来自：空间骨架转折、Task 区形状、支线挂接、河流支系、道路复用、Room 原型和 Set Piece 朝向；不来自破坏 Key 顺序。
 
-每次生成至少记录：
+## 15. 实现模块、日志与验收
+
+### 15.1 建议模块
+
+| 模块 | 单一职责 |
+| --- | --- |
+| `FABTSMissionGraphBuilder` | Task/Link/Key 模板实例化与抽象可解性 |
+| `FABTSCellGraphCache` | EdgeKey、距离、局部切平面与查询 |
+| `FABTSSpatialSkeletonBuilder` | 主线骨架、Task Seed、支线与回环候选 |
+| `FABTSRegionGrower` | Task/Room 带预算连通生长 |
+| `FABTSHeightFieldGenerator` | 低频高度、锚点、坡度与局部平整 |
+| `FABTSHydrologyGenerator` | Priority-Flood、Downstream、汇流和河级别 |
+| `FABTSGateCarver` | BridgeGate 割集、水障与反绕过 |
+| `FABTSRoadPlanner` | 加权寻路、复用、平滑与距离场 |
+| `FABTSSetPieceSolver` | 建筑、弹弓、桥、卫星窗口候选求解 |
+| `FABTSBallisticValidator` | 简化弹道、净空和能力区分 |
+| `FABTSWorldValidator` | 多阶段可达性、资源、拓扑与诊断 |
+| `FABTSWorldPCGOrchestrator` | Stage Seed、Attempt、局部修复和保底 |
+
+避免重新把全部阶段塞回 `FABTSM3TaskGraphGenerator.cpp`。各模块输入输出使用普通结构体，便于自动测试；`AABTSM3Planet` 只编排并把最终结果交给表现层。
+
+### 15.2 调试快照
+
+每阶段可选择输出只读 Debug Snapshot：Task Graph、Region、Height、Flow、River Class、Road Cost、Reachability Phase、SetPiece Candidates。建议让材质 Debug Mode 按 LUT 显示这些逻辑层，便于区分“算法没生成”和“材质没渲染”。
+
+日志至少包含：
 
 ```text
-[ABTS][PCG] Seed=%d Retry=%d Tasks=%d Cells=%d Roads=%d Rivers=%d BridgeEdges=%d Targets=%d Satellites=%d
-[ABTS][PCG] Target=%d RoadDistance=%d SlotPair=%d AttackSolution=%d SatelliteSolution=%d
-[ABTS][PCG] Reachability P0=%d P1=%d P2=%d P3=%d P4=%d
-[ABTS][PCG] Reject=%s
+[ABTS][PCG][Attempt] Seed=%d Version=%d Attempt=%d ConfigHash=%u
+[ABTS][PCG][Mission] Tasks=%d Links=%d Keys=%d AbstractSolvable=%d
+[ABTS][PCG][Regions] Assigned=%d Wilderness=%d MinTask=%d MaxTask=%d
+[ABTS][PCG][Water] Sources=%d Segments=%d Shallow=%d Deep=%d BridgeCut=%d Bypass=%d
+[ABTS][PCG][Road] MainEdges=%d BranchEdges=%d AvgSlope=%.2f MaxTurn=%.2f
+[ABTS][PCG][SetPiece] Type=%s Candidates=%d ChosenCell=%d Witness=%d
+[ABTS][PCG][Validate] Phase=%d Reachable=%d Required=%d Forbidden=%d Result=%d
+[ABTS][PCG][Repair] Stage=%s Action=%s Count=%d
+[ABTS][PCG][Reject] Stage=%s Code=%s Cell=%d Edge=(%d,%d)
 ```
 
-## 9. 初版范围与后续扩展
+### 15.3 自动验收
 
-初版只实现固定 Task 模板、一条主路、一个弹弓槽对、一座模块化目标建筑、一个可选桥址、一颗卫星及一条强化引力走廊。可将多目标建筑生态、多个卫星、复杂 WFC、动态洪水、道路速度、多个桥梁类型和全局生态密度留到后续。
+- 固定 20 个 Golden Seeds，每个运行两次，逻辑结果 Hash 必须一致。
+- 连续更换 Seed 重建同一 Actor，结果必须等于 fresh Actor，不允许旧道路/河网残留。
+- 100 个 Seed 批量生成：100% 使用保底前成功或明确进入保底；不得崩溃、死循环、非法索引。
+- 每个 Seed 通过 P0–P5、桥锁反绕过、弹道 Witness、资源下限和水文无环验证。
+- 记录各阶段耗时。比赛版目标：Editor Development 下逻辑 PCG `P95 < 2s`，完整连续网格和 HISM 构建另计但总进入可玩状态控制在 20 秒内。
+- 固定展示 Seed 还需人工验收：从出生点能读到道路；河流明确切割路线；目标虽离路但可侦察；桥建造前后路线变化可见；普通/强化弹弓的攻击空间有明显区别。
 
-验收时，使用固定 Seed 演示：道路引导至弹弓槽；道路外目标因距离和遮挡需要正确槽位与弹道；建筑连锁坍塌后由发射鸟自动回收货仓；桥梁、水网与卫星引力走廊产生可见且可验证的物理/可达性效果；日志显示每阶段 CellTopo 可达性和攻击解；连续地表、水体、道路、建筑与卫星表现均与逻辑图一致。
+## 16. 调研来源
+
+以下资料用于提炼方法，不意味着本项目复制其具体实现：
+
+- Darius Kazemi, [Spelunky Generator Lessons Part 1: Generating the Solution Path](http://tinysubversions.com/spelunkyGen/) 与 [Part 2: Generating the Rooms](https://tinysubversions.com/spelunkyGen2/)：先保证解路径，再用满足端口的模板填充。
+- Derek Yu, *Spelunky* 制作资料：随机房间模板与手工设计规则结合。
+- Joris Dormans, *Adventures in Level Design / Cyclic Dungeon Generation*；以及 [AI and Games 对 Unexplored 的讲解](https://www.youtube.com/watch?v=LRp9vLk7amg)：用任务、锁和环构造有意义的探索结构。
+- Firaxis, [Plot and Parcel: Procedural Level Design in XCOM 2](https://www.youtube.com/watch?v=5jrq5rDI4dk)：高层 Plot 与可测试 Parcel 的分层组合。
+- Ghost Ship Games, [Deep Rock Galactic - Procedural Level Generation](https://www.youtube.com/watch?v=cDcoMdHYdQg)：任务拓扑、洞室与连接空间的分层。
+- Hello Games, [Continuous World Generation in No Man's Sky](https://www.youtube.com/watch?v=sCRzxEEcO2Y)：确定性、分层连续场与按需重建。
+- Kate Compton, [Practical Procedural Generation for Everyone](https://www.youtube.com/watch?v=WumyfLEa6bU)：生成器可控性、分层随机与设计意图。
+- Brian Bucklew, [Tile-Based Map Generation using Wave Function Collapse in Caves of Qud](https://www.youtube.com/watch?v=AdCgi9E90jw)；Maxim Gumin, [WaveFunctionCollapse](https://github.com/mxgmn/WaveFunctionCollapse)：局部相邻约束、失败与回退边界。
+- BorisTheBrave, [Wave Function Collapse Explained](https://www.boristhebrave.com/2020/04/13/wave-function-collapse-explained/)：将 WFC 视为约束求解，而不是万能地图算法。
+- Amit Patel / Red Blob Games, [Mapgen2 Procedural Island Map Generator](https://www.redblobgames.com/maps/mapgen2/)：为 Gameplay 设计地貌、区域/高程/河流分层。
+- Barnes, Lehman, Mulla, *Priority-flood: An optimal depression-filling and watershed-labeling algorithm for digital elevation models*：Priority-Flood 水文基础。
+- Shaker, Togelius, Nelson, [Procedural Content Generation in Games](https://pcgbook.com/)：Constructive、Search-based 与验证驱动 PCG 的方法框架。
+- [Dwarf Fortress World Generation](https://dwarffortresswiki.org/index.php/World_generation)：高程、气候、水文与历史模拟的分层世界生成案例。
+
+## 17. 与当前 M3 演示实现的迁移关系
+
+当前源码的七节点线性模板、最近 Seed 全图分区、BridgeGate 三水 Cell 和无权 BFS 道路只视为 M3 表现联调器。迁移顺序建议：
+
+1. 先引入 `WorldPCGResult + TaskLink + EdgeState`，保留现有渲染接口兼容派生 `bRoad/bWater`。
+2. 实现新鲜结果对象、Stage Seed、Mission Graph 和多状态可达性验证。
+3. 替换 Task Seed/全图 Voronoi为骨架候选与预算区域生长。
+4. 实现逻辑高度、水文与 BridgeGate 割集。
+5. 用加权 RoadPlanner 替换无权 BFS。
+6. 加入 SetPiece/弹道联合求解与资源保底。
+7. 最后扩展 M3 LUT 表现河边、道路边和 Debug Snapshot；表现层不得反向成为 Gameplay 数据源。
+
+首个可验收纵向切片只要求一条主线、一个支线环、一个桥锁、一个目标建筑、一对简易弹弓槽和一个卫星窗口，但必须完整通过同一套 P0–P5 求解器。这样 PCG 的“核心”体现在规则相互作用与可证明通关，而不是地图看起来随机。
+
+### 17.1 V2 已实现范围（2026-07-21）
+
+当前代码已完成：显式九节点 Mission Graph 与九条 `TaskLink`、主线弯曲骨架与支线、带预算连通区域生长和 Wilderness、低频逻辑高度/湿度/坡度、平缓建筑锚点、汇流河边、球面闭合 BridgeGate 割集、显式 `CellEdgeState`、带地形/坡度/水障代价的道路、三类道路距离、桥前不可达/桥后可达验证、阶段派生 Seed、有限 Attempt、兼容 M3 的 `bRoad/bWater` 派生缓存及详细日志。
+
+尚未在本次 V2 中伪造的部分：Room 原型库、真实弹弓弹道 Witness、阶段资源库存求解和失败后的保底模板。这些系统需要 M5–M9 的真实配方、建筑 Footprint、弹弓参数和卫星引力接口；数据结构与模块边界已经预留，接入时不得退回通过渲染碰撞或 HISM 反推逻辑。

@@ -43,6 +43,10 @@
 | 现象 | 根因 | 修复 | 防回归验证 |
 | --- | --- | --- | --- |
 | 地形/道路/水网通过材质像素、网格三角形或 HISM InstanceId 判定 | 将表现层误当作逻辑层。 | 所有逻辑只写 `CellId`、`NeighborCellIds` 和相邻 Cell 边状态；连续球面只消费数据。 | M3+ 的资源、道路、河段、桥梁和建筑均可由 CellTopo 数据重建。 |
+| `ABTSM3Planet` 下有 HISM 组件但场景中没有任何实例 | Actor 的 `Forest/Rock Instance Mesh` 为空；旧逻辑仍用它覆盖地图实例或 Blueprint 组件已经配置的 `Static Mesh`，将可绘制网格清空。 | 网格按 Actor 字段、组件字段、Engine Basic Shape 占位的顺序解析；只有 Actor 字段非空时才覆盖组件。查看 `[ABTS][M3][HISM]` 的 Mesh、EligibleCells 和 Instances。 | 未配置美术资产时仍可看到 Cone/Cube 占位；配置组件网格后重建不会被清空。 |
+| HISM 实例存在，但树和岩石材质不显示或回退默认材质 | 网格材质没有编译 `Instanced Static Meshes` 着色器排列；普通 StaticMesh 正常不代表 HISM 可用。 | 在材质 Details → Usage 启用 `Used with Instanced Static Meshes` 并保存；检查 `[ABTS][M3][HISM]` 的 `ForestMaterialsValid` / `RockMaterialsValid`。 | `M_PineTree`、`M_Stone` 均输出 MaterialsValid=1，fresh Editor 中不再回退默认材质。 |
+| 在同一 `ABTSM3Planet` 上更换 `WorldSeed` 后，道路仍保留旧走向或道路数量异常增加 | `TArray::SetNum` 在长度不变时保留已有 CellState；而道路生成只新增 `bRoad=true`，未清理上一次的 `bRoad` 与 `RoadDistance`。 | 每次 TaskGraph 生成前对 `OutCellStates` 先执行 `Reset()`，再按当前 CellTopo 数量 `SetNum()`。 | 连续以不同 Seed 重建时，第二次道路集合只由第二次 TaskGraph 生成。 |
+| 新 RoadPlanner 在第一个 Link 上长时间无响应，PCG 日志停在 Hydrology 之后 | A* 开放集使用 `TArray::HeapPop` 的默认收缩策略，每次 Pop 都可能触发内存重分配；10242 Cell 搜索退化为分钟级。 | 开放集预留 Cell 数量，并以 `HeapPop(Node, EAllowShrinking::No)` 弹出；保留最大 Pop 次数防御。 | 固定 Seed 的 Mission/Spatial/Height/Hydrology/Roads/Validate 逻辑阶段总计约 10ms，不再超时。 |
 | 多次运行后 Cell 数量异常 | 重建函数追加旧网格/拓扑状态。 | 每次 `BuildUnitIcosphere` 清空顶点和三角形；`RebuildPlanet` 重新构造逻辑与表现。 | Sub=5 始终 10,242 Cells，Sub=7 始终 327,680 Triangles。 |
 
 ## 5. M2 球面角色与相机
@@ -66,6 +70,7 @@
 | 角色只有初始点能跳，修正阈值后又变成任何位置都不能跳 | 严格以 `RadialSpeed <= 0` 判定会受曲率误差影响；只读取上一帧的 `bGrounded` 又会让跳跃依赖 Tick 顺序，空格在瞬时非接地帧被永久丢弃。 | 消费跳跃前先按当前位置刷新几何接地；向外速度未超过 `UngroundSpeedCMPerSec` 时保持接地；用 `JumpBufferSeconds` 短暂保留输入，接地时清除径向速度。 | 落地、持续移动、转向和松键后分别按空格，均能稳定起跳；空中不能二段跳。 |
 | 地面惯性滑动、反向时横向漂移异常 | 输入加速度不断叠加到旧切线速度，旧方向需要很久才能抵消。 | 地面状态按输入计算目标切线速度，再分别以地面加速度和刹车速度向目标收敛；仅空中保留加速度式控制。 | 松键后快速、平滑停下；左右反向没有绕弧漂移或持续滑行。 |
 | 跳跃仍无效且原因不明 | 仅凭最终画面无法区分输入没有到达、没有发现星球、未接地、跳跃被接受后立刻落回地面。 | 搜索 `[ABTS][M2.5][Jump]` 和 `[ABTS][M2.5][Ground]`。日志按输入到角色、输入缓冲、接地状态、跳跃接受/缓冲超时的顺序输出关键状态。 | 按一次空格即可在 Output Log 中复现完整链路；根据首个缺失或警告节点定位责任模块。 |
+| M3 玩家仍从地图 PlayerStart 开始，或传送后弹飞 | PlayerStart 是 UE 创建 Pawn 的临时入口；TaskGraph/Planet 和 Pawn 的 BeginPlay 顺序不固定，且传送前可能已经积累径向速度。 | `ABTSM3GameMode` 延迟查询 Start Task 首个道路 Cell，使用 M3 表面半径 + Capsule Half Height 放置角色；传送前清零 M2.5 速度、接地和跳跃缓冲。 | 日志仅出现一次 `[ABTS][M3][Spawn] Player placed at Start road`；改变 WorldSeed 后出生位置随 Start Task 改变。 |
 
 ## 6. PCG 与后续玩法预防项
 
@@ -75,3 +80,14 @@
 | 河网纯视觉、主线被随机阻断或绕过 | 河段、道路与桥梁全部是 CellTopo 边状态；生成后按 Key 阶段运行可达性验证。 |
 | 建筑在球面随意倾斜或相邻判定依赖世界距离 | 建筑固定于平缓 Cell 中心；朝向使用局部径向 Up；熔炉/工作台等联动只用 `NeighborCellIds`。 |
 | 青翎跨河采集绕过桥梁门 | 初版允许短时侦察、自动回归与信息解锁；不允许携带主线资源、建桥或完成关键配方。 |
+### 河道呈六边形拼接
+
+根因是表现层把 Cell 的 `bWater` 当作完整水面，材质只按最近 Cell/Voronoi 区域着色，河流边线没有进入独立距离场。修复后由 CellTopo 水边生成 `M3_RiverSegmentLUT`，Custom HLSL 对每条语义化线段计算像素到线段的最近距离，并以半宽和颜色混合宽度生成 River Mask；自然水文使用 Cell 中心流向线，Gameplay 割集使用 dual edge，地形高度也只在线段附近局部下凹。若仍出现六边形边界，检查运行日志 `[ABTS][M3][RiverSDF] Segments=...`，以及材质 Custom 是否包含 `RiverSegmentLUT`、`RiverSegmentCount`、`RiverColor` 三个输入。
+
+### 河流变成一排互不相连的短条纹
+
+根因一是混淆了图边的两种几何表达：自然水文 `CellEdge(A,B)` 表示从 A 流向 B，视觉中心线必须连接两个 Cell 中心；A/B 的 Voronoi 公共边（dual edge）与流向垂直，只适合表达 Gameplay 割集水障。根因二是局部河段 LUT 曾按固定一环邻居登记，河宽与混合带超出一环后会在 Cell 行切换处被硬裁断。修复后由 `FABTSM3RiverVisualBuilder` 按边语义选择 centerline/dual，并按实际 SDF 影响半径建立局部索引。验收日志要求 `FlowCenterlines > 0`、`BarrierDuals > 0` 且 `DroppedLocalRefs=0`。
+
+### 道路和其他地形交界仍呈六边形折线
+
+道路的根因是曾用 `bRoad` 填充整块 Cell，现由 `Transport CellEdge` 构造 Cell 中心连续线并写入 `M3_RoadSegmentLUT`。地形曾尝试简化 dual-edge 外轮廓，但失败原因是材质的基础归属仍取最近 Cell，轮廓之外依然保留 Voronoi 六边形。最终修复由 `FABTSM3TerrainFeatureVisualBuilder` 连接同类相邻 Cell 中心，材质比较四类线网的最近距离，以 line-feature Voronoi 完全替代 Cell-center Voronoi。验收日志要求 `[ABTS][M3][LinearSDF] RoadSegments > 0`、`TerrainFeatures > 0`、`DroppedRoadRefs=0`；`PrunedTerrainRefs` 是三环候选压缩统计，不要求为 0。

@@ -8,17 +8,24 @@ void FABTSM3TerrainVisualField::Initialize(
 	const float InBaseRadiusCM,
 	const float InHeightScaleCM,
 	const float InWaterDepthCM,
-	const float InBlendWidthCM,
+	const float InHeightBlendWidthCM,
+	const float InColorBlendWidthCM,
 	const TArray<FABTSM2Cell>& InCells,
-	const TArray<FABTSM3CellState>& InCellStates)
+	const TArray<FABTSM3CellState>& InCellStates,
+	const TArray<FABTSM3CellEdgeState>& InEdgeStates,
+	const float InStreamHalfWidthCM,
+	const float InShallowRiverHalfWidthCM,
+	const float InDeepRiverHalfWidthCM)
 {
 	BaseRadiusCM = InBaseRadiusCM;
 	HeightScaleCM = FMath::Max(0.0f, InHeightScaleCM);
 	WaterDepthCM = FMath::Max(0.0f, InWaterDepthCM);
-	BlendWidthCM = FMath::Max(1.0f, InBlendWidthCM);
+	HeightBlendWidthCM = FMath::Max(1.0f, InHeightBlendWidthCM);
+	ColorBlendWidthCM = FMath::Max(1.0f, InColorBlendWidthCM);
 	Cells = &InCells;
 	CellStates = &InCellStates;
 	BuildBoundarySegments();
+	BuildRiverSegments(InEdgeStates, InStreamHalfWidthCM, InShallowRiverHalfWidthCM, InDeepRiverHalfWidthCM);
 }
 
 int32 FABTSM3TerrainVisualField::FindNearestCell(const FVector& UnitDirection, int32 StartCellHint) const
@@ -51,7 +58,7 @@ float FABTSM3TerrainVisualField::GetCellHeightCM(const int32 CellId) const
 {
 	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return 0.0f;
 	const FABTSM3CellState& State = (*CellStates)[CellId];
-	return State.LogicalHeight01 * HeightScaleCM - (State.bWater ? WaterDepthCM : 0.0f);
+	return State.LogicalHeight01 * HeightScaleCM;
 }
 
 float FABTSM3TerrainVisualField::GetDistanceToSegmentCM(
@@ -67,29 +74,97 @@ float FABTSM3TerrainVisualField::GetDistanceToSegmentCM(
 	return FVector::Distance(UnitDirection, ClosestPoint) * BaseRadiusCM;
 }
 
+void FABTSM3TerrainVisualField::FindTwoNearestTerrainFeatures(
+	const FVector& UnitDirection,
+	const int32 CellId,
+	const FABTSM3BoundarySegment*& OutBest,
+	float& OutBestDistanceCM,
+	const FABTSM3BoundarySegment*& OutSecond,
+	float& OutSecondDistanceCM) const
+{
+	OutBest = nullptr;
+	OutSecond = nullptr;
+	OutBestDistanceCM = TNumericLimits<float>::Max();
+	OutSecondDistanceCM = TNumericLimits<float>::Max();
+	const FABTSM3BoundarySegment* NearestByType[5] = {};
+	float DistanceByType[5] = {
+		TNumericLimits<float>::Max(), TNumericLimits<float>::Max(), TNumericLimits<float>::Max(),
+		TNumericLimits<float>::Max(), TNumericLimits<float>::Max()};
+	for (const FABTSM3BoundarySegment& Feature : GetBoundarySegments(CellId))
+	{
+		const int32 TypeIndex = static_cast<int32>(Feature.TerrainType);
+		if (TypeIndex < 0 || TypeIndex >= UE_ARRAY_COUNT(DistanceByType)) continue;
+		const float DistanceCM = GetDistanceToSegmentCM(UnitDirection, Feature);
+		if (DistanceCM < DistanceByType[TypeIndex])
+		{
+			DistanceByType[TypeIndex] = DistanceCM;
+			NearestByType[TypeIndex] = &Feature;
+		}
+	}
+	for (int32 TypeIndex = 0; TypeIndex < UE_ARRAY_COUNT(DistanceByType); ++TypeIndex)
+	{
+		if (NearestByType[TypeIndex] == nullptr) continue;
+		if (DistanceByType[TypeIndex] < OutBestDistanceCM)
+		{
+			OutSecond = OutBest;
+			OutSecondDistanceCM = OutBestDistanceCM;
+			OutBest = NearestByType[TypeIndex];
+			OutBestDistanceCM = DistanceByType[TypeIndex];
+		}
+		else if (DistanceByType[TypeIndex] < OutSecondDistanceCM)
+		{
+			OutSecond = NearestByType[TypeIndex];
+			OutSecondDistanceCM = DistanceByType[TypeIndex];
+		}
+	}
+}
+
 float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) const
 {
 	if (!IsReady()) return BaseRadiusCM;
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
 	float HeightCM = GetCellHeightCM(CellId);
-	float NearestDistanceCM = TNumericLimits<float>::Max();
-	int32 OtherCellId = INDEX_NONE;
-	for (const FABTSM3BoundarySegment& Segment : BoundarySegmentsByCell[CellId])
+	// Water is an edge property. Deform only a narrow band around the generated
+	// flow-centerline or barrier-dual segment; never lower an entire logical Cell (which creates a
+	// hexagonal/ Voronoi-shaped river).
+	float NearestRiverDistanceCM = TNumericLimits<float>::Max();
+	float NearestRiverHalfWidthCM = 0.0f;
+	if (RiverSegmentsByCell.IsValidIndex(CellId))
+	for (const FABTSM3RiverVisualSegment& River : RiverSegmentsByCell[CellId])
 	{
-		const float DistanceCM = GetDistanceToSegmentCM(Direction, Segment);
-		if (DistanceCM < NearestDistanceCM)
+		const FVector SegmentVector = River.EndUnit - River.StartUnit;
+		const float SegmentLengthSq = SegmentVector.SizeSquared();
+		const float Projection = SegmentLengthSq > SMALL_NUMBER
+			? FMath::Clamp(FVector::DotProduct(Direction - River.StartUnit, SegmentVector) / SegmentLengthSq, 0.0f, 1.0f)
+			: 0.0f;
+		const FVector Closest = River.StartUnit + Projection * SegmentVector;
+		const float DistanceCM = FVector::Distance(Direction, Closest) * BaseRadiusCM;
+		if (DistanceCM < NearestRiverDistanceCM)
 		{
-			NearestDistanceCM = DistanceCM;
-			OtherCellId = Segment.OtherCellId;
+			NearestRiverDistanceCM = DistanceCM;
+			NearestRiverHalfWidthCM = River.HalfWidthCM;
 		}
 	}
-
-	if (OtherCellId != INDEX_NONE && NearestDistanceCM < BlendWidthCM)
+	if (NearestRiverDistanceCM < TNumericLimits<float>::Max())
 	{
-		const float Alpha = FMath::SmoothStep(0.0f, BlendWidthCM, NearestDistanceCM);
-		const float BoundaryHeight = 0.5f * (HeightCM + GetCellHeightCM(OtherCellId));
-		HeightCM = FMath::Lerp(BoundaryHeight, HeightCM, Alpha);
+		const float RiverBlendWidthCM = FMath::Max(HeightBlendWidthCM, 1.0f);
+		const float RiverAlpha = 1.0f - FMath::SmoothStep(NearestRiverHalfWidthCM, NearestRiverHalfWidthCM + RiverBlendWidthCM, NearestRiverDistanceCM);
+		HeightCM -= WaterDepthCM * RiverAlpha;
+	}
+	const FABTSM3BoundarySegment* BestTerrain = nullptr;
+	const FABTSM3BoundarySegment* SecondTerrain = nullptr;
+	float BestTerrainDistanceCM = 0.0f;
+	float SecondTerrainDistanceCM = 0.0f;
+	FindTwoNearestTerrainFeatures(Direction, CellId, BestTerrain, BestTerrainDistanceCM, SecondTerrain, SecondTerrainDistanceCM);
+	if (BestTerrain != nullptr && SecondTerrain != nullptr
+		&& SecondTerrainDistanceCM - BestTerrainDistanceCM < HeightBlendWidthCM * 2.0f)
+	{
+		const float BestHeight = 0.5f * (GetCellHeightCM(BestTerrain->SourceCellAId) + GetCellHeightCM(BestTerrain->SourceCellBId));
+		const float SecondHeight = 0.5f * (GetCellHeightCM(SecondTerrain->SourceCellAId) + GetCellHeightCM(SecondTerrain->SourceCellBId));
+		const float Separation = SecondTerrainDistanceCM - BestTerrainDistanceCM;
+		const float BestWeight = FMath::SmoothStep(0.0f, HeightBlendWidthCM * 2.0f, Separation);
+		HeightCM = FMath::Lerp(0.5f * (BestHeight + SecondHeight), BestHeight, BestWeight);
 	}
 	return BaseRadiusCM + HeightCM;
 }
@@ -125,28 +200,47 @@ FLinearColor FABTSM3TerrainVisualField::GetCellColor(const int32 CellId) const
 	}
 }
 
+FLinearColor FABTSM3TerrainVisualField::GetCellLandColor(const int32 CellId) const
+{
+	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return FLinearColor::Gray;
+	// bWater is a compatibility/cache flag derived from river edges. It must not
+	// turn the entire logical Cell into a hexagonal water polygon in the material.
+	if ((*CellStates)[CellId].TerrainType != EABTSM3TerrainType::Water) return GetCellColor(CellId);
+	if ((*CellStates)[CellId].LogicalHeight01 >= 0.62f) return FLinearColor(0.32f, 0.30f, 0.28f);
+	if ((*CellStates)[CellId].LogicalHeight01 >= 0.38f) return FLinearColor(0.45f, 0.34f, 0.18f);
+	return (*CellStates)[CellId].Moisture01 >= 0.48f ? FLinearColor(0.08f, 0.28f, 0.10f) : FLinearColor(0.28f, 0.46f, 0.18f);
+}
+
 FLinearColor FABTSM3TerrainVisualField::GetDebugTerrainColor(const FVector& UnitDirection) const
 {
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
-	FLinearColor Color = GetCellColor(CellId);
-	float NearestDistanceCM = TNumericLimits<float>::Max();
-	int32 OtherCellId = INDEX_NONE;
-	for (const FABTSM3BoundarySegment& Segment : BoundarySegmentsByCell[CellId])
-	{
-		const float DistanceCM = GetDistanceToSegmentCM(Direction, Segment);
-		if (DistanceCM < NearestDistanceCM)
-		{
-			NearestDistanceCM = DistanceCM;
-			OtherCellId = Segment.OtherCellId;
-		}
-	}
-	if (OtherCellId != INDEX_NONE && NearestDistanceCM < BlendWidthCM)
-	{
-		const float Alpha = FMath::SmoothStep(0.0f, BlendWidthCM, NearestDistanceCM);
-		Color = FMath::Lerp(0.5f * (Color + GetCellColor(OtherCellId)), Color, Alpha);
-	}
-	return Color;
+	const FABTSM3BoundarySegment* Best = nullptr;
+	const FABTSM3BoundarySegment* Second = nullptr;
+	float BestDistance = 0.0f, SecondDistance = 0.0f;
+	FindTwoNearestTerrainFeatures(Direction, CellId, Best, BestDistance, Second, SecondDistance);
+	if (Best == nullptr) return GetCellColor(CellId);
+	const FLinearColor BestColor = GetCellColor(Best->SourceCellAId);
+	if (Second == nullptr) return BestColor;
+	const FLinearColor SecondColor = GetCellColor(Second->SourceCellAId);
+	const float BestWeight = FMath::SmoothStep(0.0f, ColorBlendWidthCM * 2.0f, SecondDistance - BestDistance);
+	return FMath::Lerp(0.5f * (BestColor + SecondColor), BestColor, BestWeight);
+}
+
+FLinearColor FABTSM3TerrainVisualField::GetDebugLandColor(const FVector& UnitDirection) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	const int32 CellId = FindNearestCell(Direction);
+	const FABTSM3BoundarySegment* Best = nullptr;
+	const FABTSM3BoundarySegment* Second = nullptr;
+	float BestDistance = 0.0f, SecondDistance = 0.0f;
+	FindTwoNearestTerrainFeatures(Direction, CellId, Best, BestDistance, Second, SecondDistance);
+	if (Best == nullptr) return GetCellLandColor(CellId);
+	const FLinearColor BestColor = GetCellLandColor(Best->SourceCellAId);
+	if (Second == nullptr) return BestColor;
+	const FLinearColor SecondColor = GetCellLandColor(Second->SourceCellAId);
+	const float BestWeight = FMath::SmoothStep(0.0f, ColorBlendWidthCM * 2.0f, SecondDistance - BestDistance);
+	return FMath::Lerp(0.5f * (BestColor + SecondColor), BestColor, BestWeight);
 }
 
 const TArray<FABTSM3BoundarySegment>& FABTSM3TerrainVisualField::GetBoundarySegments(const int32 CellId) const
@@ -159,24 +253,35 @@ void FABTSM3TerrainVisualField::BuildBoundarySegments()
 {
 	BoundarySegmentsByCell.Reset();
 	if (Cells == nullptr || CellStates == nullptr || Cells->Num() != CellStates->Num()) return;
+	TArray<FABTSM3TerrainFeatureVisualSegment> TerrainFeatures;
+	FABTSM3TerrainFeatureVisualBuilder::BuildSegments(*Cells, *CellStates, TerrainFeatures);
+	TArray<TArray<int32>> SegmentIndicesByCell;
+	int32 DroppedReferences = 0;
+	FABTSM3TerrainFeatureVisualBuilder::BuildLocalSegmentIndices(*Cells, TerrainFeatures, 3, 32, BaseRadiusCM, SegmentIndicesByCell, DroppedReferences);
 	BoundarySegmentsByCell.SetNum(Cells->Num());
-
-	for (int32 CellA = 0; CellA < Cells->Num(); ++CellA)
+	for (int32 CellId = 0; CellId < SegmentIndicesByCell.Num(); ++CellId)
 	{
-		for (const int32 CellB : (*Cells)[CellA].NeighborCellIds)
+		for (const int32 SegmentIndex : SegmentIndicesByCell[CellId])
 		{
-			if (CellB < CellA || (*CellStates)[CellA].TerrainType == (*CellStates)[CellB].TerrainType) continue;
-			TArray<int32, TInlineAllocator<2>> CommonNeighbors;
-			for (const int32 Candidate : (*Cells)[CellA].NeighborCellIds)
-			{
-				if (Candidate != CellB && (*Cells)[CellB].NeighborCellIds.Contains(Candidate)) CommonNeighbors.Add(Candidate);
-			}
-			if (CommonNeighbors.Num() != 2) continue;
-			const FVector Start = ((*Cells)[CellA].UnitCenter + (*Cells)[CellB].UnitCenter + (*Cells)[CommonNeighbors[0]].UnitCenter).GetSafeNormal();
-			const FVector End = ((*Cells)[CellA].UnitCenter + (*Cells)[CellB].UnitCenter + (*Cells)[CommonNeighbors[1]].UnitCenter).GetSafeNormal();
-			BoundarySegmentsByCell[CellA].Add({Start, End, CellB});
-			BoundarySegmentsByCell[CellB].Add({Start, End, CellA});
+			const FABTSM3TerrainFeatureVisualSegment& Segment = TerrainFeatures[SegmentIndex];
+			BoundarySegmentsByCell[CellId].Add({Segment.StartUnit, Segment.EndUnit, Segment.TerrainType, Segment.SourceCellAId, Segment.SourceCellBId});
 		}
 	}
 }
 
+void FABTSM3TerrainVisualField::BuildRiverSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates, const float StreamHalfWidthCM, const float ShallowRiverHalfWidthCM, const float DeepRiverHalfWidthCM)
+{
+	RiverSegmentsByCell.Reset();
+	if (Cells == nullptr) return;
+	TArray<FABTSM3RiverVisualSegment> Segments;
+	FABTSM3RiverVisualBuilder::BuildSegments(*Cells, EdgeStates, StreamHalfWidthCM, ShallowRiverHalfWidthCM, DeepRiverHalfWidthCM, Segments);
+	TArray<TArray<int32>> SegmentIndicesByCell;
+	int32 DroppedReferences = 0;
+	FABTSM3RiverVisualBuilder::BuildLocalSegmentIndices(*Cells, Segments, BaseRadiusCM, FMath::Max(ColorBlendWidthCM, HeightBlendWidthCM), 0, SegmentIndicesByCell, DroppedReferences);
+	RiverSegmentsByCell.SetNum(Cells->Num());
+	for (int32 CellId = 0; CellId < SegmentIndicesByCell.Num(); ++CellId)
+	{
+		RiverSegmentsByCell[CellId].Reserve(SegmentIndicesByCell[CellId].Num());
+		for (const int32 SegmentIndex : SegmentIndicesByCell[CellId]) RiverSegmentsByCell[CellId].Add(Segments[SegmentIndex]);
+	}
+}

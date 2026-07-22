@@ -7,19 +7,17 @@
 
 struct FABTSM2Cell;
 
-/** Deterministic logical generator. It never reads render vertices, materials, collision, or HISM instances. */
+/** Deterministic orchestrator for the gameplay-first spherical PCG pipeline. */
 class ABTSRUNTIME_API FABTSM3TaskGraphGenerator
 {
 public:
 	bool Generate(
 		int32 WorldSeed,
+		const FABTSM3PCGConfig& Config,
 		const TArray<FABTSM2Cell>& Cells,
 		TArray<FABTSM3TaskNode>& OutTasks,
-		TArray<FABTSM3CellState>& OutCellStates) const;
-
-private:
-	static TArray<int32> FindPath(const TArray<FABTSM2Cell>& Cells, int32 StartCellId, int32 GoalCellId);
-	static void AssignTaskRegions(const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks, TArray<FABTSM3CellState>& CellStates);
-	static void BuildRoads(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks, TArray<FABTSM3CellState>& CellStates);
+		TArray<FABTSM3TaskLink>& OutTaskLinks,
+		TArray<FABTSM3CellState>& OutCellStates,
+		TArray<FABTSM3CellEdgeState>& OutEdgeStates,
+		FABTSM3PCGSummary& OutSummary) const;
 };
-

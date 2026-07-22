@@ -54,7 +54,7 @@ M3 不需要也不会读取“最低连续顶点”“材质水色”“HISM 命
 
 ## 3. 低频高度与边界距离 SDF
 
-每个 Cell 的低频高度来自 TaskGraph 的地形解释；Plain 接近零、Forest 为低丘、Highland/Mountain 更高、TaskGraph 指定 Water 轻微下凹。没有任何 fBm 或随机高频位移。
+每个 Cell 的低频高度来自 TaskGraph 的地形解释；Plain 接近零、Forest 为低丘、Highland/Mountain 更高、TaskGraph 指定 Water 轻微下凹。没有任何 fBm 或随机高频位移。`HeightBlendWidthCM` 只控制这些几何高度在地形边界的平滑半径；`TerrainBlendWidthCM`（材质参数名 `M3_BlendWidthCM`）只控制颜色 SDF 的平滑半径。两者故意独立，调整道路/地形颜色过渡不会改变角色接地高度或坡度。
 
 对相邻且地形类型不同的 Cell 边 `(A,B)`，使用两侧共同邻居构成的两个 dual corner 得到边界端点 `E0`、`E1`。对表面像素方向 `P`，距离使用线段投影：
 
@@ -64,7 +64,9 @@ Q = E0 + t * (E1 - E0)
 d = |P - Q| * PlanetRadiusCM
 ```
 
-`t` 的 clamp 是本阶段的关键：垂足位于端点外时，`Q` 自动成为端点，所以距离自动退化为点到点距离；垂足位于边段内部时，才是点到直线的垂距。SDF 边缘使用 `smoothstep(0, BlendWidthCM, d)` 在两侧地形颜色和低频高度之间过渡。
+`t` 的 clamp 是本阶段的关键：垂足位于端点外时，`Q` 自动成为端点，所以距离自动退化为点到点距离；垂足位于边段内部时，才是点到直线的垂距。颜色 SDF 使用 `smoothstep(0, M3_BlendWidthCM, d)`，高度场使用独立 `HeightBlendWidthCM`。
+
+道路也是 CellTopo 的 `bRoad` 标签，不是额外绘制的样条或网格。道路状态不同的相邻 Cell 同样写入边界线段 LUT；材质把 `CellVisualLUT.a` 解释为道路 mask，并用 `M3_RoadColor` 做同一套线段 SDF 平滑混色。因此道路可以跨越 Plain/Forest/Highland，且道路颜色宽度只受 `M3_BlendWidthCM` 影响，不会改变低频地形高度。实现中道路专属边界标记为“仅颜色”，`GetSurfaceRadius` 会跳过它们；只有地形类别变化的边界才进入 `HeightBlendWidthCM`。
 
 这与“只算像素到最近 Cell 中心距离”不同：同一地形的相邻 Cell 不再产生六边形/五边形棋盘接缝；真正参与 SDF 的是**不同地形区域围成的线段边界**。
 
@@ -73,12 +75,24 @@ d = |P - Q| * PlanetRadiusCM
 1. 关闭 PIE，编译 `AngryBirdsToSpaceEditor Win64 Development`，重新打开 Editor。
 2. 复制 `/Game/Maps/L_ABTS_M2_5` 为 `/Game/Maps/L_ABTS_M3`。
 3. 删除或替换原有 `BP_ABTSM2Planet`：创建 Blueprint `BP_ABTSM3Planet`，父类选 `ABTSM3Planet`，拖入场景并放在 `(0,0,0)`。
-4. 保持 `LogicalSubdivision=5`、`SurfaceSubdivision=7`、`PlanetRadiusCM=10000`。首轮保持 `MacroHeightScaleCM=900`、`TaskWaterDepthCM=80`、`TerrainBlendWidthCM=240`、`WorldSeed=312503`。
+4. 保持 `LogicalSubdivision=5`、`SurfaceSubdivision=7`、`PlanetRadiusCM=10000`。首轮保持 `MacroHeightScaleCM=900`、`TaskWaterDepthCM=80`、`HeightBlendWidthCM=160`、`TerrainBlendWidthCM=240`、`RoadColor=(0.22,0.12,0.045,1)`、`WorldSeed=312503`。
 5. 在 **World Settings > GameMode Override** 选择原生 `ABTSM3GameMode`。它继续使用 M2.5 径向角色与跳跃。
 6. 先不要给 `TerrainMaterial` 赋值，运行一次 PIE 确认 Output Log 出现 `[ABTS][M3] Ready=1`。此时可先用 Vertex Color 调试材质查看 C++ 计算的纯色结果。
-7. 在 `BP_ABTSM3Planet` 的 `ForestHISM` 与 `RockHISM` 上分别指定低面数树/岩石或临时 Engine Basic Shape；务必保持 **Collision Enabled = No Collision**。也可通过 `Forest Instance Mesh`、`Rock Instance Mesh` 指定同一资产。
+7. 在 `BP_ABTSM3Planet` 的 `ForestHISM` 与 `RockHISM` 上分别指定低面数树/岩石；务必保持 **Collision Enabled = No Collision**。也可通过 Actor 的 `Forest Instance Mesh`、`Rock Instance Mesh` 指定同一资产，Actor 字段优先于组件字段。两处均未配置时，代码自动以 Engine Basic Shape 的 Cone/Cube 作为可见验收占位，不会生成“有组件但无网格”的空 HISM。
 
 建筑尚未生成。运行时 `GetBuildingSpawnSites()` 输出工作台、目标建筑、熔炉与发射场的预留 Transform，M4 模块化建筑只能从这些接口消费位置。
+
+### 4.1 玩家初始道路出生点
+
+`ABTSM3GameMode` 不把地图里的 `PlayerStart` 当作最终位置。游戏开始后，它等待 `AABTSM3Planet` 完成 TaskGraph/地表重建，再查询 `GetInitialRoadSpawnTransform`：
+
+- 位置为 `Start` Task 的 `SeedCellId`；若未来模板不把 Seed 放在道路上，则退化为 Start 区域内第一个 `bRoad=true` 的 Cell。
+- 高度为该方向的 M3 低频表面半径加角色 Capsule Half Height，返回值是角色中心而不是脚底点。
+- 朝向为 Start 道路通往下一个主线 Task 的第一条相邻道路边切线；角色本地 `+Z` 仍使用球面径向 Up。
+- 传送前清零 M2.5 径向速度、跳跃缓冲和接地缓存，防止 PlayerStart 阶段积累的速度被带到出生点。
+- GameMode 最多每 `0.1s` 重试一次、共 `30` 次，以处理 Pawn 与 Planet 的 BeginPlay 顺序；成功日志为 `[ABTS][M3][Spawn] Player placed at Start road`。
+
+地图仍需保留一个合法 `PlayerStart`，用于 UE 创建并 Possess Pawn；它只承担临时生成入口，不决定 M3 最终出生位置。
 
 ## 5. 编辑器：M3 SDF 纯色材质
 
@@ -105,6 +119,9 @@ d = |P - Q| * PlanetRadiusCM
 | Scalar Parameter | `M3_PlanetRadiusCM` | 默认 `10000` |
 | Scalar Parameter | `M3_BlendWidthCM` | 默认 `240` |
 | Vector Parameter | `M3_PlanetCenter` | 默认 `(0,0,0,1)` |
+| Vector Parameter | `M3_RoadColor` | 默认 `(0.22,0.12,0.045,1)` |
+| Texture Object Parameter | `M3_RoadSegmentLUT` | 道路局部中心线槽位，Linear Color |
+| Scalar Parameter | `M3_RoadSegmentCount` | 默认 `16`，运行时由 C++ 覆盖 |
 
 三个 Texture Object Parameter 的 **Sampler Type** 均选 `Linear Color`。节点默认纹理不能留空；运行时会由 `UABTSM3TerrainMaterialBridge` 覆盖为 `PF_A32B32G32R32F` LUT。
 
@@ -131,6 +148,9 @@ d = |P - Q| * PlanetRadiusCM
 | `CellCount` | `M3_CellCount` |
 | `PlanetRadiusCM` | `M3_PlanetRadiusCM` |
 | `BlendWidthCM` | `M3_BlendWidthCM` |
+| `RoadColor` | `M3_RoadColor` |
+| `RoadSegmentLUT` | `M3_RoadSegmentLUT` |
+| `RoadSegmentCount` | `M3_RoadSegmentCount` |
 
 粘贴以下**可直接使用的完整 Code**。它不定义顶层函数；`saturate(t)` 即是线段垂足越界时退化为端点距离的实现。
 
@@ -152,7 +172,9 @@ float dot2 = dot(p, d2.xyz);
 int chosen = dot0 >= dot1 && dot0 >= dot2 ? c0 : (dot1 >= dot2 ? c1 : c2);
 
 float2 chosenUV = float2((chosen + 0.5) / CellCount, 0.5);
-float3 baseColor = CellVisualLUT.SampleLevel(CellVisualLUTSampler, chosenUV, 0).rgb;
+float4 chosenVisual = CellVisualLUT.SampleLevel(CellVisualLUTSampler, chosenUV, 0);
+float3 baseTerrainColor = chosenVisual.rgb;
+float roadMask = chosenVisual.a;
 float nearestDistance = 1e20;
 int otherCell = -1;
 
@@ -181,19 +203,24 @@ for (int slot = 0; slot < 6; ++slot)
 if (otherCell >= 0 && nearestDistance < BlendWidthCM)
 {
     float2 otherUV = float2((otherCell + 0.5) / CellCount, 0.5);
-    float3 otherColor = CellVisualLUT.SampleLevel(CellVisualLUTSampler, otherUV, 0).rgb;
+    float4 otherVisual = CellVisualLUT.SampleLevel(CellVisualLUTSampler, otherUV, 0);
     float insideWeight = smoothstep(0.0, BlendWidthCM, nearestDistance);
-    baseColor = lerp(0.5 * (baseColor + otherColor), baseColor, insideWeight);
+    baseTerrainColor = lerp(0.5 * (baseTerrainColor + otherVisual.rgb), baseTerrainColor, insideWeight);
+    roadMask = lerp(0.5 * (roadMask + otherVisual.a), roadMask, insideWeight);
 }
 
-return baseColor;
+return lerp(baseTerrainColor, RoadColor.rgb, saturate(roadMask));
 ```
 
 最后将 Custom 输出接 `Base Color`，保留 `Roughness=0.82`、`Metallic=0`，不要连接像素 Normal；M3 已在 C++ 端写入高度感知顶点法线。保存并回到 `BP_ABTSM3Planet`，重新 PIE。
 
 ## 6. HISM 规则
 
-`ForestHISM` 仅在 Forest Cell 内放树，`RockHISM` 仅在 Mountain Cell 内放岩石。每个实例由 `Hash(WorldSeed, CellId, Slot)` 得到稳定方向、旋转和缩放；其位置通过同一 `TerrainVisualField` 查询表面半径与法线。道路、水体、施工台 Cell 不放装饰；所有 HISM 为 `NoCollision`。
+`ForestHISM` 仅在 Forest Cell 内放树，`RockHISM` 仅在 Mountain Cell 内放岩石。每个实例由 `Hash(WorldSeed, CellId, Slot)` 得到稳定方向、旋转和缩放；其位置通过同一 `TerrainVisualField` 查询表面半径与法线。道路、水体、施工台 Cell 不放装饰；道路本身由 SDF 纯色显示，不新增道路 HISM；所有 HISM 为 `NoCollision`。
+
+网格解析顺序为：Actor 的 `Forest/Rock Instance Mesh` → 对应 HISM 组件的 `Static Mesh` → Engine Cone/Cube 验收占位。重建不得用空 Actor 字段覆盖组件已经配置的网格。日志 `[ABTS][M3][HISM]` 会同时报告最终网格、符合摆放条件的 Cell 数和实际实例数；若 Cell 数大于 0 而实例数为 0，优先检查网格解析与 `InstancesPerCell`。
+
+HISM 使用的每个材质还必须在材质 Details 的 **Usage** 中启用 **Used with Instanced Static Meshes**，否则普通 StaticMesh 预览正常，HISM 却会使用默认材质或缺失对应渲染结果。当前 `M_PineTree` 与 `M_Stone` 已启用该 Usage；代码会把验证结果输出为 `ForestMaterialsValid` / `RockMaterialsValid`。
 
 M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` 是唯一建筑预留接口，包含 `CellId`、TaskType、WorldTransform 与坡度；M4 才在这些位置生成模块与刚体。
 
@@ -203,9 +230,11 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 2. 改变 `WorldSeed` 后，Task 方向与区域形状改变，但所有逻辑标签仍可追溯到 CellId。
 3. 山地/高地连续隆起，Water 仅在 TaskGraph 指定区域下凹；完全没有 fBm 颗粒、高频波纹或由最低点自动生成的河网。
 4. 纯色材质在同类地形 Cell 之间没有六边形棋盘缝；不同地形交界沿区域线段平滑混色。把视角移到边界端点外，确认混色按端点距离圆滑收束。
-5. 放置带 `BlockAll` 的测试物体，M2.5 角色仍能跳跃并沿 M3 表面径向接地；角色 Down 始终朝球心。
-6. HISM 开关不改变 `QuerySurface`、CellId、道路、水体或建筑施工位；关闭 HISM 后连续地表仍完整。
-7. `GetBuildingSpawnSites()` 返回施工位，但场景中没有模块化建筑或建筑刚体。
+5. 主线 `bRoad` Cell 显示 `M3_RoadColor`；道路与非道路交界沿同一线段 SDF 平滑过渡。调大 `TerrainBlendWidthCM` 时只改变颜色带宽，调大 `HeightBlendWidthCM` 时只改变坡面/接地过渡。
+6. 放置带 `BlockAll` 的测试物体，M2.5 角色仍能跳跃并沿 M3 表面径向接地；角色 Down 始终朝球心。
+7. HISM 开关不改变 `QuerySurface`、CellId、道路、水体或建筑施工位；关闭 HISM 后连续地表仍完整。
+8. `GetBuildingSpawnSites()` 返回施工位，但场景中没有模块化建筑或建筑刚体。
+9. 每次进入 PIE，玩家最终位于 Start Task 的道路 Cell，朝向下一个主线 Task；移动前 Output Log 出现一次 `[ABTS][M3][Spawn] Player placed at Start road`。改变 `WorldSeed` 后出生点随 TaskGraph 改变，而不是停留在地图 `PlayerStart`。
 
 ## 8. 排错
 
@@ -217,6 +246,10 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 | 山体光照像光滑球或有三角分块 | 不要在材质中用世界 Z 重写 Normal。确认 `GetSurfaceNormalAtDirection` 写入了 PMC 顶点法线；重新 `RebuildPlanet`。 |
 | 树石悬空或穿入太深 | 确认 HISM 只从 `TerrainVisualField` 查询半径/法线，且保持默认 `-8cm` 埋入偏移；不要用 `CellCenter * PlanetRadius`。 |
 | 水体随高度最低点迁移 | 这是错误实现。检查逻辑端只写 TaskGraph `bWater`，不要从网格、材质或 `QuerySurface` 回读水体。 |
+| 道路没有颜色或只显示硬方块 | 确认 Custom 节点新增了 `RoadColor` 输入并连接 `M3_RoadColor`，且使用 `CellVisualLUT.a` 作为道路 mask。道路/非道路状态不同的 Cell 会自动写入边界线段；不要用 HISM 或样条代替该逻辑标签。 |
+| 调整颜色带宽却让角色坡度改变 | `TerrainBlendWidthCM` 只应进入 `M3_BlendWidthCM`；检查 `HeightBlendWidthCM` 是否仍单独传给 `TerrainVisualField`。 |
+| 玩家仍停在地图 PlayerStart | 确认地图使用 `ABTSM3GameMode`，场景内 Actor 是 `ABTSM3Planet` 而非 M2 Planet；查看 `[ABTS][M3][Spawn]`。连续 30 次失败日志会分别显示 Planet/Pawn 是否就绪。 |
+| 玩家出生后下沉、弹飞或方向错误 | Spawn 查询必须传 Capsule Half Height，且传送前调用 `RadialMovement.ResetMotionState()`；旋转用 `MakeFromXZ(RoadForward, SpawnDirection)`，不能使用世界 Z。 |
 
 ## 9. M3 性能预算
 
@@ -225,3 +258,20 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 - 当前 Custom 节点每像素最多采样 3 次方向 LUT、1 次自身颜色 LUT、12 次边界端点 LUT和 1 次邻区颜色 LUT。M3 以正确性为先；进入性能优化阶段后可按可见区域、边界 Cell 压缩或预计算最近边段减少采样。
 - Fresh Commandlet 中，`Sub=7` 的逻辑生成、低频网格、碰撞与无材质资源重建约在 8 秒内完成，进程峰值物理内存约 `2.25GB`（含完整 Editor-Cmd 启动成本）。比赛版本不应在正常游玩中频繁全量重建。
 - HISM 每种装饰默认不超过 `InstancesPerCell * 匹配地形 Cell 数`，并统一 `NoCollision`。首轮 GPU 验收目标为地表材质增量小于约 `2ms @ 1080p`；若超过预算，先降低边界采样次数或用较低 `SurfaceSubdivision` 做材质调试，不能删除 CellTopo 逻辑。
+### 河流边线 SDF（修复六边形拼接）
+
+水体的逻辑标记仍来自 `FABTSM3CellEdgeState::Water`，但表现层不得把 `bWater` 当作整块 Cell 的填充区域。`UABTSM3TerrainMaterialBridge` 为每条水边生成 `M3_RiverSegmentLUT`，每个局部槽的第一像素存起点方向与半宽，第二像素存终点方向与水体类型。
+
+线段端点必须根据 Edge 的语义决定：具有 `DownstreamCellId` 且不承担阻断职责的自然水文边，中心线连接 `CellA.UnitCenter -> CellB.UnitCenter`，相邻下游边因此共享 Cell 中心并形成连续水道；`bBlocksOnFoot` 的 Gameplay 割集边则用 A/B 两侧共同邻居构造的两个 dual corner，因为这些公共边首尾相接后才形成连续的阻断水带。不可把自然水文边也转换成 dual edge——dual edge 与 A→B 流向近似垂直，会让连续河网变成一排横向短条纹。
+
+材质 Custom 节点查询当前 Cell 的固定 24 个局部河段槽位，使用 `saturate(dot(P-A,B-A)/|B-A|²)` 将垂足限制在线段内，计算像素到线段的最近距离；距离小于半宽时混合 `M3_RiverColor`。C++ 按“河段半宽 + 颜色 BlendWidth + Cell 外接半径”计算每个 Cell 必须持有的河段，并按距离保留最近 24 条；运行日志中的 `DroppedLocalRefs` 必须为 0。这样不会在 LUT Cell 行切换处把宽河硬裁成一截一截，同时也避免每像素遍历全图河网。`M3_BoundarySegmentLUT` 仍只负责地形/道路边界，不能承担河流主体。
+
+几何高度同样按到最近河流线段的距离局部下凹，`GetCellHeightCM()` 不再依据 `bWater` 对整个 Cell 降低半径，避免产生六边形凹陷。
+
+### 道路中心线与地形轮廓 SDF
+
+道路不得再使用 `FABTSM3CellState::bRoad` 填满整个 Cell。表现层从 `FABTSM3CellEdgeState::Transport` 读取道路边，使用 `CellA.UnitCenter -> CellB.UnitCenter` 作为连续中心线：`TrailVisualHalfWidthCM` 控制小径半宽，`MainRoadVisualHalfWidthCM` 控制主路半宽。道路写入独立的 `M3_RoadSegmentLUT`，材质与河流相同地计算像素到线段的最近距离，再混合 `M3_RoadColor`。`bRoad` 只保留为 Gameplay/快速查询缓存。
+
+仅简化不同地形之间的 dual-edge 外轮廓仍然不够：像素的基础归属若继续取最近 Cell，六边形 Voronoi 分区仍会在轮廓之外残留。最终方案由 `FABTSM3TerrainFeatureVisualBuilder` 把每对“相邻且陆地类型相同”的 Cell 中心连接成线段；没有同类邻居的孤立 Cell 退化为点特征。材质在当前 Cell 的三环邻域中查询这些线段，分别求 Plain/Forest/Highland/Mountain 四类线网的最近距离，再按最近与次近距离差连续混色。这是 line-feature Voronoi，而不是 Cell-center Voronoi，因此地形归属边界不再继承六边形 Cell 外形。
+
+每个 Cell 从三环候选中强制保留每一种出现地形的最近特征，再按距离补足至 32 槽；`PrunedTerrainRefs` 表示被安全裁掉的远端冗余线段，不是视觉数据丢失。CPU 高度场消费同一组最近/次近地形特征，所以颜色交界和坡面交界使用同一连续场。该场仅从 CellTopo 派生，不回写 TaskGraph、可建造性或道路可达性。

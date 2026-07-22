@@ -22,6 +22,7 @@ public:
 
 	void SetMoveInput(const FVector& Direction, float Scale);
 	void QueueJump();
+	void ResetMotionState();
 	bool IsGrounded() const { return bGrounded; }
 
 private:

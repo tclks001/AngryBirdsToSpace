@@ -12,6 +12,7 @@ class UProceduralMeshComponent;
 class UTexture2D;
 struct FABTSM2Cell;
 struct FABTSM3CellState;
+struct FABTSM3CellEdgeState;
 class FABTSM3TerrainVisualField;
 
 /** Owns transient GPU lookup textures used by the hand-authored M3 SDF material. */
@@ -27,8 +28,16 @@ public:
 		const FVector& PlanetCenterWorld,
 		float PlanetRadiusCM,
 		float BlendWidthCM,
+		const FLinearColor& RoadColor,
+		float TrailVisualHalfWidthCM,
+		float MainRoadVisualHalfWidthCM,
+		const FLinearColor& RiverColor,
+		float StreamVisualHalfWidthCM,
+		float ShallowRiverVisualHalfWidthCM,
+		float DeepRiverVisualHalfWidthCM,
 		const TArray<FABTSM2Cell>& Cells,
 		const TArray<FABTSM3CellState>& CellStates,
+		const TArray<FABTSM3CellEdgeState>& EdgeStates,
 		const FABTSM3TerrainVisualField& VisualField);
 
 private:
@@ -44,6 +53,11 @@ private:
 	TObjectPtr<UTexture2D> BoundarySegmentLUT;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> RoadSegmentLUT;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> RiverSegmentLUT;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TerrainMID;
 };
-

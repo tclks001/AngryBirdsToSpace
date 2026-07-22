@@ -41,6 +41,14 @@ void UABTSM25RadialMovementComponent::QueueJump()
 		JumpBufferRemainingSeconds);
 }
 
+void UABTSM25RadialMovementComponent::ResetMotionState()
+{
+	Velocity = FVector::ZeroVector;
+	PendingMoveVector = FVector::ZeroVector;
+	JumpBufferRemainingSeconds = 0.0f;
+	bGrounded = false;
+}
+
 void UABTSM25RadialMovementComponent::TickComponent(const float DeltaTime, const ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
