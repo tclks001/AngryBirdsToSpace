@@ -10,6 +10,7 @@
 #include "GameFramework/Character.h"
 #include "Movement/ABTSRadialSurfaceSuspensionComponent.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "ProceduralMeshComponent.h"
 
 UABTSRadialForceMovementComponent::UABTSRadialForceMovementComponent()
@@ -208,16 +209,29 @@ void UABTSRadialForceMovementComponent::MoveIgnoringTerrain(
 	// Ignore only the continuous terrain mesh. Other Planet-owned components may
 	// later become gameplay obstacles and must remain eligible for the sweep.
 	QueryParams.AddIgnoredComponent(ResolvedPlanet.ContinuousSurface.Get());
+	// Party members are locomotion peers, never obstacles. Explicitly ignore all
+	// bird actors as a second line of defence so auxiliary collision components
+	// on a future bird model cannot reintroduce a deadlock.
+	for (TActorIterator<AABTSM25BirdCharacter> It(World); It; ++It)
+	{
+		if (*It != &Character) QueryParams.AddIgnoredActor(*It);
+	}
+	const ECollisionChannel MovingObjectChannel = Capsule->GetCollisionObjectType();
+	const FCollisionResponseParams MovingResponseParams(Capsule->GetCollisionResponseToChannels());
 	const auto SweepDelta = [&](const FVector& Start, const FVector& Delta, FHitResult& OutHit)
 	{
-		return World->SweepSingleByProfile(
+		// Do not query by profile name here. A profile lookup rebuilds the default
+		// Pawn responses and discards per-instance overrides such as the M4 party's
+		// Pawn=Ignore setting, causing touching birds to block each other anyway.
+		return World->SweepSingleByChannel(
 			OutHit,
 			Start,
 			Start + Delta,
 			Character.GetActorQuat(),
-			Capsule->GetCollisionProfileName(),
+			MovingObjectChannel,
 			Shape,
-			QueryParams);
+			QueryParams,
+			MovingResponseParams);
 	};
 
 	const FVector Start = Character.GetActorLocation();

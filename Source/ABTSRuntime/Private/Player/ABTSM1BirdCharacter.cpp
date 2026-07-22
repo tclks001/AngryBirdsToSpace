@@ -42,6 +42,28 @@ AABTSM1BirdCharacter::AABTSM1BirdCharacter()
 	FollowCamera->bUsePawnControlRotation = false;
 }
 
+void AABTSM1BirdCharacter::SetBirdVisualMesh(UStaticMesh* InMesh)
+{
+	if (BirdVisual == nullptr) return;
+	if (InMesh != nullptr)
+	{
+		BirdVisual->SetStaticMesh(InMesh);
+		return;
+	}
+
+	static UStaticMesh* FallbackSphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	BirdVisual->SetStaticMesh(FallbackSphere);
+}
+
+void AABTSM1BirdCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	if (BirdMeshOverride != nullptr)
+	{
+		SetBirdVisualMesh(BirdMeshOverride);
+	}
+}
+
 void AABTSM1BirdCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);

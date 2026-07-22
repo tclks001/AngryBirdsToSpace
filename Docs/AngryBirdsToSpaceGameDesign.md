@@ -82,6 +82,12 @@
 4. 发射、撞击建筑或距离过远时暂时脱队；飞行结束后自动回收附近已暴露的材料，再归队。
 5. 初版不建设全球 NavMesh。跟随采用球面方向追踪、简单避障与最大距离保护；卡住的鸟以短距离飞跃/回收至安全位置并播放落羽特效。
 
+鸟群跟随采用无环队列链而非所有鸟直接追逐主控：跟随目标来自前导鸟的 CellTopo 路径历史，舒适距离内不施加移动力，落后后才以 Arrival、路径约束和 Separation 组合追赶。跳跃沿路径传播 Jump Event，后排到达跳点且高度差确有需要时才依次跳跃；空中仅施加受限切向修正。M4 详细 gameplay 规则见 [BirdPartyFollowingGameplayDesign.md](BirdPartyFollowingGameplayDesign.md)。
+
+M4 的 C++ 落地、头像/模型配置、HUD 操作和验收步骤见 [M4BirdPartyImplementationDesign.md](M4BirdPartyImplementationDesign.md)。弹弓在本阶段只保留四鸟资格查询接口，实际发射延后验收。
+
+M4 最终视角采用玩家持有的球面 Orbit Camera：相机方位独立于角色朝向，WASD 使用相机相对切向基准，RMB 调整环绕和俯视角，滚轮缩放；切换主控时保留 Orbit 状态并只平滑迁移注视锚点。详细方案与调研依据见 [M4MultiCharacterOrbitCameraDesign.md](M4MultiCharacterOrbitCameraDesign.md)。
+
 ### 4.3 弹弓
 
 - 主路与指定发射台 Cell 预生成一对弹弓槽；将同级的两枚弹弓桩插入槽位并连接弹弓弦后，才进入发射模式。树枝槽只允许青翎快速近射。

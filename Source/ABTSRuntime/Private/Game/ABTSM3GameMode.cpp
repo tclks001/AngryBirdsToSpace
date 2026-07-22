@@ -58,6 +58,7 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 			}
 			Character->SetActorTransform(SpawnTransform, false, nullptr, ETeleportType::TeleportPhysics);
 			PlayerController->SetControlRotation(SpawnTransform.Rotator());
+			OnInitialPlayerPlaced(*Character, SpawnTransform, SpawnCellId);
 			GetWorldTimerManager().ClearTimer(InitialRoadSpawnTimer);
 			UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][Spawn] Player placed at Start road. Cell=%d Location=(%.1f,%.1f,%.1f) Attempts=%d"),
 				SpawnCellId,
@@ -80,4 +81,8 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 			Planet ? 1 : 0,
 			Character ? 1 : 0);
 	}
+}
+
+void AABTSM3GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, const int32 SpawnCellId)
+{
 }

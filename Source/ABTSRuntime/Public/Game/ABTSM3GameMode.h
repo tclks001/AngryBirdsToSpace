@@ -16,6 +16,12 @@ public:
 	AABTSM3GameMode();
 	virtual void BeginPlay() override;
 
+
+protected:
+	/** Stage hook called after the initial player is placed on the generated road. */
+	virtual void OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, int32 SpawnCellId);
+
+
 private:
 	void TryPlacePlayerAtInitialRoad();
 

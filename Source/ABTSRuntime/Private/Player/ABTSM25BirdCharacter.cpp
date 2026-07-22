@@ -3,6 +3,7 @@
 #include "Player/ABTSM25BirdCharacter.h"
 
 #include "ABTSRuntime.h"
+#include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Movement/ABTSMovementModeSelector.h"
@@ -50,6 +51,72 @@ void AABTSM25BirdCharacter::ResetRadialMovementState()
 	ForceMovement->ResetMotionState();
 }
 
+void AABTSM25BirdCharacter::SetBirdIdentity(
+	const EABTSBirdId InBirdId,
+	const EABTSBirdSlingshotCapability InCapability,
+	const bool bInPlayerControlled)
+{
+	BirdId = InBirdId;
+	SlingshotCapability = InCapability;
+	SetPartyControlled(bInPlayerControlled);
+}
+
+void AABTSM25BirdCharacter::SetPartyControlled(const bool bInPlayerControlled)
+{
+	bPartyControlled = bInPlayerControlled;
+}
+
+void AABTSM25BirdCharacter::SetPartyCollisionIsolation(const bool bIsolateFromParty)
+{
+	if (GetCapsuleComponent() == nullptr) return;
+	// Party birds are not gameplay obstacles for one another. WorldStatic
+	// buildings and terrain keep their normal responses.
+	GetCapsuleComponent()->SetCollisionResponseToChannel(
+		ECC_Pawn,
+		bIsolateFromParty ? ECR_Ignore : ECR_Block);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(
+		ECC_Camera,
+		bIsolateFromParty ? ECR_Ignore : ECR_Block);
+}
+
+bool AABTSM25BirdCharacter::CanUseSlingshotCapability(const EABTSBirdSlingshotCapability RequiredCapability) const
+{
+	return SlingshotCapability == RequiredCapability;
+}
+
+void AABTSM25BirdCharacter::ApplyMoveInput(const FVector& Direction, const float Scale)
+{
+	if (MovementMode == EABTSBirdMovementMode::ForceSuspension)
+	{
+		ForceMovement->SetMoveInput(Direction, Scale);
+	}
+	else
+	{
+		RadialMovement->SetMoveInput(Direction, Scale);
+	}
+}
+
+void AABTSM25BirdCharacter::ApplyPartyMoveInput(const FVector& Direction, const float Scale)
+{
+	if (bPartyControlled || Direction.IsNearlyZero() || FMath::IsNearlyZero(Scale)) return;
+	GetSphericalSurface()->SetMovementFacing(Scale >= 0.0f ? Direction : -Direction);
+	ApplyMoveInput(Direction, Scale);
+}
+
+void AABTSM25BirdCharacter::ApplyPartyJump()
+{
+	if (bPartyControlled) return;
+	if (MovementMode == EABTSBirdMovementMode::ForceSuspension) ForceMovement->QueueJump();
+	else RadialMovement->QueueJump();
+}
+
+bool AABTSM25BirdCharacter::IsRadiallyGrounded() const
+{
+	return MovementMode == EABTSBirdMovementMode::ForceSuspension
+		? ForceMovement->IsGrounded()
+		: RadialMovement->IsGrounded();
+}
+
 void AABTSM25BirdCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	check(PlayerInputComponent);
@@ -66,14 +133,7 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsForward(const float Value)
 	{
 		const FVector Direction = GetSphericalSurface()->GetTangentForward();
 		GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
-		if (MovementMode == EABTSBirdMovementMode::ForceSuspension)
-		{
-			ForceMovement->SetMoveInput(Direction, Value);
-		}
-		else
-		{
-			RadialMovement->SetMoveInput(Direction, Value);
-		}
+		if (bPartyControlled) ApplyMoveInput(Direction, Value);
 	}
 }
 
@@ -83,14 +143,7 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsRight(const float Value)
 	{
 		const FVector Direction = GetSphericalSurface()->GetTangentRight();
 		GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
-		if (MovementMode == EABTSBirdMovementMode::ForceSuspension)
-		{
-			ForceMovement->SetMoveInput(Direction, Value);
-		}
-		else
-		{
-			RadialMovement->SetMoveInput(Direction, Value);
-		}
+		if (bPartyControlled) ApplyMoveInput(Direction, Value);
 	}
 }
 
@@ -108,6 +161,7 @@ void AABTSM25BirdCharacter::BeginRadialJump()
 {
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][Jump] Space input reached AABTSM25BirdCharacter. Mode=%s"),
 		MovementMode == EABTSBirdMovementMode::ForceSuspension ? TEXT("ForceSuspension") : TEXT("LegacySweep"));
+	if (!bPartyControlled) return;
 	if (MovementMode == EABTSBirdMovementMode::ForceSuspension)
 	{
 		ForceMovement->QueueJump();
