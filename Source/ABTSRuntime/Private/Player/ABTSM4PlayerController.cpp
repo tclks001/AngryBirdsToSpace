@@ -52,6 +52,7 @@ void AABTSM4PlayerController::SetupInputComponent()
 
 void AABTSM4PlayerController::CycleBird()
 {
+	if (bGameplayInputBlocked) return;
 	for (TActorIterator<AABTSBirdParty> It(GetWorld()); It; ++It)
 	{
 		if (It->CycleControlledBird()) return;
@@ -60,6 +61,7 @@ void AABTSM4PlayerController::CycleBird()
 
 void AABTSM4PlayerController::BeginOrbitInput()
 {
+	if (bGameplayInputBlocked) return;
 	bOrbitInputHeld = true;
 	bSavedCursorPositionValid = GetMousePosition(SavedCursorX, SavedCursorY);
 	SetCursorInteractionMode(false);
@@ -94,24 +96,35 @@ void AABTSM4PlayerController::SetCursorInteractionMode(const bool bEnableCursor)
 
 void AABTSM4PlayerController::ApplyOrbitYaw(const float Value)
 {
+	if (bGameplayInputBlocked) return;
 	const bool bGamepadInput = FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_RightX)) > 0.05f;
 	if (PartyCamera && (bOrbitInputHeld || bGamepadInput)) PartyCamera->AddOrbitYawInput(Value);
 }
 
 void AABTSM4PlayerController::ApplyOrbitPitch(const float Value)
 {
+	if (bGameplayInputBlocked) return;
 	const bool bGamepadInput = FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_RightY)) > 0.05f;
 	if (PartyCamera && (bOrbitInputHeld || bGamepadInput)) PartyCamera->AddOrbitPitchInput(Value);
 }
 
 void AABTSM4PlayerController::ApplyCameraZoom(const float Value)
 {
+	if (bGameplayInputBlocked) return;
 	if (PartyCamera) PartyCamera->AddZoomInput(Value);
 }
 
 void AABTSM4PlayerController::RecenterCamera()
 {
+	if (bGameplayInputBlocked) return;
 	if (PartyCamera) PartyCamera->RequestRecenter();
+}
+
+void AABTSM4PlayerController::SetGameplayInputBlocked(const bool bBlocked)
+{
+	bGameplayInputBlocked = bBlocked;
+	SetIgnoreMoveInput(bBlocked);
+	SetIgnoreLookInput(bBlocked);
 }
 
 bool AABTSM4PlayerController::GetCameraRelativeMovementBasis(

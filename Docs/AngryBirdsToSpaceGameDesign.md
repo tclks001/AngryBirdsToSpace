@@ -86,6 +86,8 @@
 
 M4 的 C++ 落地、头像/模型配置、HUD 操作和验收步骤见 [M4BirdPartyImplementationDesign.md](M4BirdPartyImplementationDesign.md)。弹弓在本阶段只保留四鸟资格查询接口，实际发射延后验收。
 
+小鸟之外的低模资产采购、AI 辅助生成、Blender 收口、弹弓桩/弦/袋的 Socket 与骨骼契约，以及赛后 AI 使用报告模板见 [LowPolyAssetProductionAndAIReportWorkflow.md](LowPolyAssetProductionAndAIReportWorkflow.md)。所有弹弓视觉资产都必须遵守“两桩、两段弦、中央弹丸袋”的结构；槽位与发射逻辑仍由 CellTopo Anchor Pair 决定。
+
 M4 最终视角采用玩家持有的球面 Orbit Camera：相机方位独立于角色朝向，WASD 使用相机相对切向基准，RMB 调整环绕和俯视角，滚轮缩放；切换主控时保留 Orbit 状态并只平滑迁移注视锚点。详细方案与调研依据见 [M4MultiCharacterOrbitCameraDesign.md](M4MultiCharacterOrbitCameraDesign.md)。
 
 ### 4.3 弹弓
@@ -228,7 +230,8 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M2 | 球面环境 | `CellTopo Sub=5` 与 `Continuous Surface Sub=7` 可生成、可碰撞、可行走。 |
 | M3 | 主路 PCG | 基于 CellTopo 生成主路、道路距离场、水网/桥址、弹弓槽和一座道路外目标建筑；生成日志验证目标位置与可攻击性。 |
 | M4 | 鸟群 | 四鸟可见；Tab/HUD 切换；蓝鸟树枝近射、红/黄简易弹弓、黑鸟强化弹弓的入口与限制明确。 |
-| M5 | 加工与组件 | 工作台、熔炉、桩/弦配方；建筑只能落在平缓 Cell 中心，熔炉与工作台的 Cell 邻接联动生效。 |
+| M5 | 加工与组件 | 共享物品栏、背包/加工界面、红鸟加工权限、附近工作台/熔炉配方和制作数量流程已实现；正式站点放置、拾取与弹弓组件表现进入 M5.1。详见 [M5InventoryCraftingImplementationDesign.md](M5InventoryCraftingImplementationDesign.md)。 |
+| M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 弹弓槽和桩/弦两次点击装配。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
 | M6 | 弹弓槽 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。 |
 | M7 | 建筑生成与破坏 | 生成一座模块化建筑，含承重件、至少一个连锁装置和材料货仓；鸟撞击可使其结构性坍塌。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |

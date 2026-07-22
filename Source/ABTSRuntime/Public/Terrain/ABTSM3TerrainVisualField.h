@@ -18,6 +18,20 @@ struct FABTSM3BoundarySegment
 	int32 SourceCellBId = INDEX_NONE;
 };
 
+/** CPU-side counterpart of the M3 line-SDF terrain presentation query. */
+struct FABTSM3SurfaceSDFSample
+{
+	int32 CellId = INDEX_NONE;
+	EABTSM3TerrainType PrimaryTerrain = EABTSM3TerrainType::Plain;
+	EABTSM3TerrainType SecondaryTerrain = EABTSM3TerrainType::Plain;
+	/** Weight of PrimaryTerrain after the same line-feature interpolation used by the terrain color field. */
+	float PrimaryTerrainWeight = 1.0f;
+	/** 0..1 masks reconstructed from the same CPU line segments that feed the material LUT. */
+	float RoadWeight = 0.0f;
+	float RiverWeight = 0.0f;
+	FVector SurfaceNormal = FVector::UpVector;
+};
+
 /** Pure presentation field derived from immutable CellTopo PCG output. */
 class ABTSRUNTIME_API FABTSM3TerrainVisualField
 {
@@ -32,6 +46,8 @@ public:
 		const TArray<FABTSM2Cell>& InCells,
 		const TArray<FABTSM3CellState>& InCellStates,
 		const TArray<FABTSM3CellEdgeState>& InEdgeStates,
+		float InTrailRoadHalfWidthCM,
+		float InMainRoadHalfWidthCM,
 		float InStreamHalfWidthCM,
 		float InShallowRiverHalfWidthCM,
 		float InDeepRiverHalfWidthCM);
@@ -40,6 +56,8 @@ public:
 	int32 FindNearestCell(const FVector& UnitDirection, int32 StartCellHint = 0) const;
 	float GetSurfaceRadius(const FVector& UnitDirection) const;
 	FVector GetSurfaceNormal(const FVector& UnitDirection) const;
+	/** Samples terrain, road and river line-SDF weights on CPU; never reads GPU material pixels. */
+	bool QuerySurfaceSDF(const FVector& UnitDirection, float PhysicsBlendWidthCM, FABTSM3SurfaceSDFSample& OutSample) const;
 	FLinearColor GetDebugTerrainColor(const FVector& UnitDirection) const;
 	/** Land-only color used by the material LUT; rivers are rendered from edge segments. */
 	FLinearColor GetDebugLandColor(const FVector& UnitDirection) const;
@@ -48,6 +66,7 @@ public:
 private:
 	void BuildBoundarySegments();
 	void BuildRiverSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates, float StreamHalfWidthCM, float ShallowRiverHalfWidthCM, float DeepRiverHalfWidthCM);
+	void BuildRoadSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates);
 	float GetCellHeightCM(int32 CellId) const;
 	float GetInterpolatedHeightCM(const FVector& UnitDirection, int32 NearestCellId) const;
 	float GetDistanceToSegmentCM(const FVector& UnitDirection, const FABTSM3BoundarySegment& Segment) const;
@@ -61,8 +80,11 @@ private:
 	float HeightBlendWidthCM = 160.0f;
 	float ColorBlendWidthCM = 240.0f;
 	float NormalSmoothingDistanceCM = 160.0f;
+	float TrailRoadHalfWidthCM = 80.0f;
+	float MainRoadHalfWidthCM = 180.0f;
 	const TArray<FABTSM2Cell>* Cells = nullptr;
 	const TArray<FABTSM3CellState>* CellStates = nullptr;
 	TArray<TArray<FABTSM3BoundarySegment>> BoundarySegmentsByCell;
 	TArray<TArray<FABTSM3RiverVisualSegment>> RiverSegmentsByCell;
+	TArray<TArray<FABTSM3RiverVisualSegment>> RoadSegmentsByCell;
 };

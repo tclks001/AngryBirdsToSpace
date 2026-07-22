@@ -9,6 +9,7 @@
 class AABTSM2Planet;
 class ACharacter;
 class UABTSRadialSurfaceSuspensionComponent;
+struct FABTSRadialSuspensionSample;
 
 /** Force-integrated player movement with CellTopo-derived radial suspension. */
 UCLASS(ClassGroup = (ABTS), meta = (BlueprintSpawnableComponent))
@@ -31,8 +32,10 @@ private:
 	AABTSM2Planet* FindPlanet();
 	UABTSRadialSurfaceSuspensionComponent* FindSuspension();
 	void SimulateSubstep(ACharacter& Character, AABTSM2Planet& ResolvedPlanet, float DeltaTime);
-	void MoveIgnoringTerrain(ACharacter& Character, const AABTSM2Planet& ResolvedPlanet, const FVector& RequestedDelta);
-	void ResolveBlockingHit(const FHitResult& Hit);
+	bool EnsureGroundClearance(ACharacter& Character, const AABTSM2Planet& ResolvedPlanet, const FABTSRadialSuspensionSample& Surface);
+	FVector BuildGroundFollowingDelta(const ACharacter& Character, const AABTSM2Planet& ResolvedPlanet, const FABTSRadialSuspensionSample& Surface, const FVector& RequestedDelta) const;
+	void MoveWithCollision(ACharacter& Character, const AABTSM2Planet& ResolvedPlanet, const FVector& RequestedDelta);
+	void ResolveBlockingHit(const FHitResult& Hit, const AABTSM2Planet& ResolvedPlanet);
 
 	/** Virtual mass keeps force values meaningful; acceleration remains mass-independent. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Force", meta = (ClampMin = "0.1", UIMax = "200.0"))
@@ -54,6 +57,18 @@ private:
 	/** Air drag is intentionally weak and never damps the radial jump velocity. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Drag", meta = (ClampMin = "0.0", UIMax = "5.0"))
 	float AirTangentDragPerSecond = 0.18f;
+
+	/** Always opposes the complete velocity vector, including airborne radial motion. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Drag", meta = (ClampMin = "0.0", UIMax = "5.0"))
+	float AirDragPerSecond = 0.32f;
+
+	/** Minimum incoming normal speed required before a terrain profile may bounce the bird. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Contact", meta = (ClampMin = "0.0", UIMax = "3000.0"))
+	float BounceSpeedThresholdCMPerSec = 260.0f;
+
+	/** Ground height following is disabled while falling faster than this; landing must come from the capsule sweep. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Contact", meta = (ClampMin = "0.0", UIMax = "500.0"))
+	float MaxGroundFollowDescentSpeedCMPerSec = 35.0f;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Speed", meta = (ClampMin = "1.0", UIMax = "2000.0"))
 	float DesignMaxGroundSpeedCMPerSec = 680.0f;

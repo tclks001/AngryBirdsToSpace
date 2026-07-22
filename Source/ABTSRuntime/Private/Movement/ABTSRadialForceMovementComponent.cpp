@@ -10,6 +10,7 @@
 #include "GameFramework/Character.h"
 #include "Movement/ABTSRadialSurfaceSuspensionComponent.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Terrain/ABTSM3Planet.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "ProceduralMeshComponent.h"
 
@@ -24,11 +25,12 @@ void UABTSRadialForceMovementComponent::BeginPlay()
 	Super::BeginPlay();
 	AddTickPrerequisiteActor(GetOwner());
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][ForceSuspension] Movement ready. Mass=%.1f Gravity=%.1f MoveAccel=%.1f GroundDrag=%.2f TerminalSpeed=%.1f Step=%.5f"),
+		TEXT("[ABTS][ForceSuspension] Movement ready. Mass=%.1f Gravity=%.1f MoveAccel=%.1f GroundDrag=%.2f AirDrag=%.2f TerminalSpeed=%.1f Step=%.5f"),
 		VirtualMassKG,
 		GravityAccelerationCMPerSec2,
 		GroundMoveAccelerationCMPerSec2,
 		GroundDragPerSecond,
+		AirDragPerSecond,
 		GroundDragPerSecond > SMALL_NUMBER ? GroundMoveAccelerationCMPerSec2 / GroundDragPerSecond : 0.0f,
 		MaxSimulationStepSeconds);
 }
@@ -136,6 +138,17 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 		Velocity,
 		GravityAccelerationCMPerSec2,
 		DeltaTime);
+	if (EnsureGroundClearance(Character, ResolvedPlanet, Surface))
+	{
+		// Refresh immediately after a spawn/penetration correction; stale support
+		// data would otherwise apply one substep of force from the old radius.
+		Surface = ResolvedSuspension->Evaluate(
+			ResolvedPlanet,
+			Character,
+			Velocity,
+			GravityAccelerationCMPerSec2,
+			DeltaTime);
+	}
 
 	bool bJumpAccepted = false;
 	if (JumpBufferRemainingSeconds > 0.0f && Surface.bGrounded)
@@ -166,14 +179,25 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	}
 
 	const FVector Input = FVector::VectorPlaneProject(PendingMoveVector, Surface.RadialUp).GetClampedToMaxSize(1.0f);
-	const FVector MovementPlaneNormal = Surface.bSupportActive ? Surface.SurfaceNormal : Surface.RadialUp;
+	// Support may begin slightly above the ground to damp a landing. It is not a
+	// collision contact, so it must not grant ground control or ground friction.
+	const FVector MovementPlaneNormal = Surface.bGrounded ? Surface.SurfaceNormal : Surface.RadialUp;
 	const FVector MoveDirection = FVector::VectorPlaneProject(Input, MovementPlaneNormal).GetSafeNormal();
 	const float InputMagnitude = Input.Size();
 	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, MovementPlaneNormal);
-	const float ControlScale = Surface.bSupportActive ? 1.0f : FMath::Clamp(AirControlScale, 0.0f, 1.0f);
-	const float DragPerSecond = Surface.bSupportActive
+	const float ControlScale = Surface.bGrounded ? 1.0f : FMath::Clamp(AirControlScale, 0.0f, 1.0f);
+	float DragPerSecond = Surface.bGrounded
 		? FMath::Max(0.0f, GroundDragPerSecond)
 		: FMath::Max(0.0f, AirTangentDragPerSecond);
+	if (Surface.bGrounded)
+	{
+		if (const AABTSM3Planet* M3Planet = Cast<AABTSM3Planet>(&ResolvedPlanet))
+		{
+			FABTSM3SurfacePhysicsSample PhysicsSample;
+			const FVector Direction = (Character.GetActorLocation() - ResolvedPlanet.GetPlanetCenterWorld()).GetSafeNormal();
+			if (M3Planet->QuerySurfacePhysics(Direction, PhysicsSample)) DragPerSecond = PhysicsSample.GroundDragPerSecond;
+		}
+	}
 	const float MassKG = FMath::Max(0.1f, VirtualMassKG);
 
 	const FVector GravityForce = -Surface.RadialUp * (MassKG * GravityAccelerationCMPerSec2);
@@ -181,18 +205,58 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	const FVector MoveForce = MoveDirection * (MassKG * GroundMoveAccelerationCMPerSec2 * ControlScale * InputMagnitude);
 	FVector DragForce = -TangentVelocity * (MassKG * DragPerSecond);
 	const float TangentSpeed = TangentVelocity.Size();
-	if (Surface.bSupportActive && TangentSpeed > DesignMaxGroundSpeedCMPerSec)
+	if (Surface.bGrounded && TangentSpeed > DesignMaxGroundSpeedCMPerSec)
 	{
 		DragForce -= TangentVelocity.GetSafeNormal()
 			* (MassKG * OverspeedDragPerSecond * (TangentSpeed - DesignMaxGroundSpeedCMPerSec));
 	}
 
-	const FVector NetForce = GravityForce + SupportForce + MoveForce + DragForce;
+	const FVector AirDragForce = -Velocity * (MassKG * FMath::Max(0.0f, AirDragPerSecond));
+	const FVector NetForce = GravityForce + SupportForce + MoveForce + DragForce + AirDragForce;
 	Velocity += (NetForce / MassKG) * DeltaTime;
-	MoveIgnoringTerrain(Character, ResolvedPlanet, Velocity * DeltaTime);
+	const FVector RequestedDelta = BuildGroundFollowingDelta(Character, ResolvedPlanet, Surface, Velocity * DeltaTime);
+	MoveWithCollision(Character, ResolvedPlanet, RequestedDelta);
 }
 
-void UABTSRadialForceMovementComponent::MoveIgnoringTerrain(
+bool UABTSRadialForceMovementComponent::EnsureGroundClearance(
+	ACharacter& Character,
+	const AABTSM2Planet& ResolvedPlanet,
+	const FABTSRadialSuspensionSample& Surface)
+{
+	if (!Surface.bSupportActive || Surface.HeightAboveTargetCM >= -KINDA_SMALL_NUMBER) return false;
+	const FVector Center = ResolvedPlanet.GetPlanetCenterWorld();
+	const FVector Up = ResolvedPlanet.GetRadialUpAtWorldLocation(Character.GetActorLocation());
+	Character.SetActorLocation(Center + Up * Surface.DesiredCenterRadiusCM, false, nullptr, ETeleportType::TeleportPhysics);
+	UE_LOG(LogABTSRuntime, Verbose,
+		TEXT("[ABTS][M5.2][GroundContact] Depenetrated radial support by %.2fcm."),
+		-Surface.HeightAboveTargetCM);
+	return true;
+}
+
+FVector UABTSRadialForceMovementComponent::BuildGroundFollowingDelta(
+	const ACharacter& Character,
+	const AABTSM2Planet& ResolvedPlanet,
+	const FABTSRadialSuspensionSample& Surface,
+	const FVector& RequestedDelta) const
+{
+	if (!Surface.bGrounded
+		|| Surface.RadialSpeedCMPerSec < -FMath::Max(0.0f, MaxGroundFollowDescentSpeedCMPerSec)
+		|| RequestedDelta.IsNearlyZero()) return RequestedDelta;
+	const FVector Center = ResolvedPlanet.GetPlanetCenterWorld();
+	const FVector Start = Character.GetActorLocation();
+	const FVector PredictedUp = ResolvedPlanet.GetRadialUpAtWorldLocation(Start + RequestedDelta);
+	const FVector PredictedNormal = ResolvedPlanet.GetSurfaceNormalAtDirection(PredictedUp).GetSafeNormal();
+	const UCapsuleComponent* Capsule = Character.GetCapsuleComponent();
+	if (Capsule == nullptr || PredictedNormal.IsNearlyZero()) return RequestedDelta;
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CylinderHalfHeight = FMath::Max(0.0f, Capsule->GetScaledCapsuleHalfHeight() - CapsuleRadius);
+	const float NormalUpDot = FMath::Max(FVector::DotProduct(PredictedNormal, PredictedUp), Surface.MinimumGroundNormalUpDot);
+	const float SupportOffset = CylinderHalfHeight + CapsuleRadius / NormalUpDot;
+	const float TargetRadius = ResolvedPlanet.GetSurfaceRadiusAtDirection(PredictedUp) + SupportOffset + Surface.GroundClearanceCM;
+	return Center + PredictedUp * TargetRadius - Start;
+}
+
+void UABTSRadialForceMovementComponent::MoveWithCollision(
 	ACharacter& Character,
 	const AABTSM2Planet& ResolvedPlanet,
 	const FVector& RequestedDelta)
@@ -206,9 +270,9 @@ void UABTSRadialForceMovementComponent::MoveIgnoringTerrain(
 		Capsule->GetScaledCapsuleRadius(),
 		Capsule->GetScaledCapsuleHalfHeight());
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ABTSForceSuspensionMove), false, &Character);
-	// Ignore only the continuous terrain mesh. Other Planet-owned components may
-	// later become gameplay obstacles and must remain eligible for the sweep.
-	QueryParams.AddIgnoredComponent(ResolvedPlanet.ContinuousSurface.Get());
+	// The continuous surface is deliberately included.  Contact is resolved by
+	// the same capsule sweep that handles HISM and buildings; radial suspension
+	// is now only a near-ground stabilizer rather than a penetration recovery.
 	// Party members are locomotion peers, never obstacles. Explicitly ignore all
 	// bird actors as a second line of defence so auxiliary collision components
 	// on a future bird model cannot reintroduce a deadlock.
@@ -234,16 +298,34 @@ void UABTSRadialForceMovementComponent::MoveIgnoringTerrain(
 			MovingResponseParams);
 	};
 
-	const FVector Start = Character.GetActorLocation();
+	FVector Start = Character.GetActorLocation();
 	FHitResult Hit;
-	if (!SweepDelta(Start, RequestedDelta, Hit) || !Hit.bBlockingHit)
+	bool bBlockingHit = SweepDelta(Start, RequestedDelta, Hit) && Hit.bBlockingHit;
+	if (bBlockingHit && Hit.bStartPenetrating)
+	{
+		// A complex procedural triangle can report a zero-time block after an
+		// externally teleported spawn or a streaming rebuild. Never leave the
+		// kinematic bird permanently at Time=0: move it out by the reported
+		// penetration plus a small skin, then repeat the actual requested sweep.
+		FVector DepenetrationNormal = Hit.Normal.GetSafeNormal();
+		if (DepenetrationNormal.IsNearlyZero()) DepenetrationNormal = ResolvedPlanet.GetRadialUpAtWorldLocation(Start);
+		const float DepenetrationCM = FMath::Clamp(Hit.PenetrationDepth + 2.0f, 2.0f, 120.0f);
+		Start += DepenetrationNormal * DepenetrationCM;
+		Character.SetActorLocation(Start, false, nullptr, ETeleportType::TeleportPhysics);
+		Hit.Reset();
+		bBlockingHit = SweepDelta(Start, RequestedDelta, Hit) && Hit.bBlockingHit;
+		UE_LOG(LogABTSRuntime, Verbose,
+			TEXT("[ABTS][M5.2][GroundContact] Recovered zero-time sweep penetration by %.2fcm."),
+			DepenetrationCM);
+	}
+	if (!bBlockingHit)
 	{
 		Character.SetActorLocation(Start + RequestedDelta, false, nullptr, ETeleportType::TeleportPhysics);
 		return;
 	}
 
 	Character.SetActorLocation(Hit.Location, false, nullptr, ETeleportType::TeleportPhysics);
-	ResolveBlockingHit(Hit);
+	ResolveBlockingHit(Hit, ResolvedPlanet);
 	const FVector RemainingDelta = RequestedDelta * (1.0f - Hit.Time);
 	const FVector SlideDelta = FVector::VectorPlaneProject(RemainingDelta, Hit.ImpactNormal);
 	if (SlideDelta.IsNearlyZero()) return;
@@ -257,16 +339,26 @@ void UABTSRadialForceMovementComponent::MoveIgnoringTerrain(
 	else
 	{
 		Character.SetActorLocation(SlideHit.Location, false, nullptr, ETeleportType::TeleportPhysics);
-		ResolveBlockingHit(SlideHit);
+		ResolveBlockingHit(SlideHit, ResolvedPlanet);
 	}
 }
 
-void UABTSRadialForceMovementComponent::ResolveBlockingHit(const FHitResult& Hit)
+void UABTSRadialForceMovementComponent::ResolveBlockingHit(const FHitResult& Hit, const AABTSM2Planet& ResolvedPlanet)
 {
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	const float IntoSurfaceSpeed = FVector::DotProduct(Velocity, Normal);
 	if (IntoSurfaceSpeed < 0.0f)
 	{
 		Velocity -= Normal * IntoSurfaceSpeed;
+		if (const AABTSM3Planet* M3Planet = Cast<AABTSM3Planet>(&ResolvedPlanet))
+		{
+			FABTSM3SurfacePhysicsSample PhysicsSample;
+			const FVector Direction = (Hit.ImpactPoint - ResolvedPlanet.GetPlanetCenterWorld()).GetSafeNormal();
+			if (M3Planet->QuerySurfacePhysics(Direction, PhysicsSample)
+				&& -IntoSurfaceSpeed >= BounceSpeedThresholdCMPerSec)
+			{
+				Velocity += Normal * (-IntoSurfaceSpeed * PhysicsSample.Restitution);
+			}
+		}
 	}
 }

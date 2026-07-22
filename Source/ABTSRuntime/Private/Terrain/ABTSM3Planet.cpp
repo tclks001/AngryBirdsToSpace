@@ -48,13 +48,21 @@ AABTSM3Planet::AABTSM3Planet()
 
 	ForestHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("ForestHISM"));
 	ForestHISM->SetupAttachment(ContinuousSurface);
-	ForestHISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Instances remain static presentation/collision geometry until a future M6
+	// launch hit explicitly converts one instance into a pooled destruction proxy.
+	ForestHISM->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	ForestHISM->SetCollisionObjectType(ECC_WorldStatic);
+	ForestHISM->SetCollisionResponseToAllChannels(ECR_Block);
+	ForestHISM->SetSimulatePhysics(false);
 	ForestHISM->SetMobility(EComponentMobility::Movable);
 	ForestHISM->SetStaticMesh(ForestPreviewMesh.Object);
 
 	RockHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("RockHISM"));
 	RockHISM->SetupAttachment(ContinuousSurface);
-	RockHISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RockHISM->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	RockHISM->SetCollisionObjectType(ECC_WorldStatic);
+	RockHISM->SetCollisionResponseToAllChannels(ECR_Block);
+	RockHISM->SetSimulatePhysics(false);
 	RockHISM->SetMobility(EComponentMobility::Movable);
 	RockHISM->SetStaticMesh(RockPreviewMesh.Object);
 }
@@ -64,7 +72,7 @@ bool AABTSM3Planet::RebuildPlanet()
 	if (!AABTSM2Planet::RebuildPlanet() || !GenerateLogicalTerrain()) return false;
 	TerrainVisualField = MakeUnique<FABTSM3TerrainVisualField>();
 	TerrainVisualField->Initialize(PlanetRadiusCM, MacroHeightScaleCM, TaskWaterDepthCM, HeightBlendWidthCM, TerrainBlendWidthCM, SurfaceNormalSmoothingDistanceCM,
-		LogicalCells, GeneratedCellStates, GeneratedEdgeStates,
+		LogicalCells, GeneratedCellStates, GeneratedEdgeStates, TrailVisualHalfWidthCM, MainRoadVisualHalfWidthCM,
 		StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM);
 	BuildM3ContinuousSurface();
 	bool bMaterialReady = false;
@@ -84,6 +92,11 @@ bool AABTSM3Planet::RebuildPlanet()
 	}
 	BuildDecorInstances();
 	BuildBuildingSpawnSites();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M5.2][Collision] ForestHISM=%s RockHISM=%s StaticPhysics=1 DestroyableOutsideLaunch=0 PhysicsBlend=%.1f"),
+		*UEnum::GetValueAsString(ForestHISM->GetCollisionEnabled()),
+		*UEnum::GetValueAsString(RockHISM->GetCollisionEnabled()),
+		SurfacePhysicsBlendWidthCM);
 
 	int32 RoadCells = 0;
 	int32 WaterCells = 0;
@@ -137,6 +150,33 @@ bool AABTSM3Planet::QuerySurface(
 	OutWorldNormal = TerrainVisualField->GetSurfaceNormal(Direction);
 	OutCellId = TerrainVisualField->FindNearestCell(Direction);
 	return OutCellId != INDEX_NONE;
+}
+
+bool AABTSM3Planet::QuerySurfacePhysics(const FVector& UnitDirection, FABTSM3SurfacePhysicsSample& OutSample) const
+{
+	OutSample = FABTSM3SurfacePhysicsSample();
+	if (!TerrainVisualField || !TerrainVisualField->QuerySurfaceSDF(UnitDirection, SurfacePhysicsBlendWidthCM, OutSample.SDF)) return false;
+
+	const auto ResolveProfile = [this](const EABTSM3TerrainType Type) -> const FABTSM3SurfacePhysicsProfile&
+	{
+		switch (Type)
+		{
+		case EABTSM3TerrainType::Forest: return ForestPhysics;
+		case EABTSM3TerrainType::Highland: return HighlandPhysics;
+		case EABTSM3TerrainType::Mountain: return MountainPhysics;
+		default: return PlainPhysics;
+		}
+	};
+	const FABTSM3SurfacePhysicsProfile& Primary = ResolveProfile(OutSample.SDF.PrimaryTerrain);
+	const FABTSM3SurfacePhysicsProfile& Secondary = ResolveProfile(OutSample.SDF.SecondaryTerrain);
+	const float PrimaryWeight = FMath::Clamp(OutSample.SDF.PrimaryTerrainWeight, 0.0f, 1.0f);
+	OutSample.GroundDragPerSecond = FMath::Lerp(Secondary.GroundDragPerSecond, Primary.GroundDragPerSecond, PrimaryWeight);
+	OutSample.Restitution = FMath::Lerp(Secondary.Restitution, Primary.Restitution, PrimaryWeight);
+	OutSample.GroundDragPerSecond = FMath::Lerp(OutSample.GroundDragPerSecond, RoadPhysics.GroundDragPerSecond, OutSample.SDF.RoadWeight);
+	OutSample.Restitution = FMath::Lerp(OutSample.Restitution, RoadPhysics.Restitution, OutSample.SDF.RoadWeight);
+	OutSample.GroundDragPerSecond = FMath::Lerp(OutSample.GroundDragPerSecond, RiverPhysics.GroundDragPerSecond, OutSample.SDF.RiverWeight);
+	OutSample.Restitution = FMath::Lerp(OutSample.Restitution, RiverPhysics.Restitution, OutSample.SDF.RiverWeight);
+	return true;
 }
 
 bool AABTSM3Planet::GetInitialRoadSpawnTransform(

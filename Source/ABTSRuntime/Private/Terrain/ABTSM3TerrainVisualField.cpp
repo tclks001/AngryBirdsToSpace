@@ -14,6 +14,8 @@ void FABTSM3TerrainVisualField::Initialize(
 	const TArray<FABTSM2Cell>& InCells,
 	const TArray<FABTSM3CellState>& InCellStates,
 	const TArray<FABTSM3CellEdgeState>& InEdgeStates,
+	const float InTrailRoadHalfWidthCM,
+	const float InMainRoadHalfWidthCM,
 	const float InStreamHalfWidthCM,
 	const float InShallowRiverHalfWidthCM,
 	const float InDeepRiverHalfWidthCM)
@@ -24,10 +26,13 @@ void FABTSM3TerrainVisualField::Initialize(
 	HeightBlendWidthCM = FMath::Max(1.0f, InHeightBlendWidthCM);
 	ColorBlendWidthCM = FMath::Max(1.0f, InColorBlendWidthCM);
 	NormalSmoothingDistanceCM = FMath::Max(1.0f, InNormalSmoothingDistanceCM);
+	TrailRoadHalfWidthCM = FMath::Max(1.0f, InTrailRoadHalfWidthCM);
+	MainRoadHalfWidthCM = FMath::Max(1.0f, InMainRoadHalfWidthCM);
 	Cells = &InCells;
 	CellStates = &InCellStates;
 	BuildBoundarySegments();
 	BuildRiverSegments(InEdgeStates, InStreamHalfWidthCM, InShallowRiverHalfWidthCM, InDeepRiverHalfWidthCM);
+	BuildRoadSegments(InEdgeStates);
 }
 
 int32 FABTSM3TerrainVisualField::FindNearestCell(const FVector& UnitDirection, int32 StartCellHint) const
@@ -257,6 +262,58 @@ FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection
 	return Normal.IsNearlyZero() ? Up : Normal;
 }
 
+bool FABTSM3TerrainVisualField::QuerySurfaceSDF(
+	const FVector& UnitDirection,
+	const float PhysicsBlendWidthCM,
+	FABTSM3SurfaceSDFSample& OutSample) const
+{
+	OutSample = FABTSM3SurfaceSDFSample();
+	if (!IsReady() || UnitDirection.IsNearlyZero() || CellStates == nullptr) return false;
+
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	const int32 CellId = FindNearestCell(Direction);
+	if (!CellStates->IsValidIndex(CellId)) return false;
+	OutSample.CellId = CellId;
+	OutSample.PrimaryTerrain = FABTSM3TerrainFeatureVisualBuilder::ResolveLandType((*CellStates)[CellId]);
+	OutSample.SecondaryTerrain = OutSample.PrimaryTerrain;
+	OutSample.SurfaceNormal = GetSurfaceNormal(Direction);
+
+	const FABTSM3BoundarySegment* Best = nullptr;
+	const FABTSM3BoundarySegment* Second = nullptr;
+	float BestDistanceCM = 0.0f;
+	float SecondDistanceCM = 0.0f;
+	FindTwoNearestTerrainFeatures(Direction, CellId, Best, BestDistanceCM, Second, SecondDistanceCM);
+	if (Best != nullptr && CellStates->IsValidIndex(Best->SourceCellAId))
+	{
+		OutSample.PrimaryTerrain = FABTSM3TerrainFeatureVisualBuilder::ResolveLandType((*CellStates)[Best->SourceCellAId]);
+		if (Second != nullptr && CellStates->IsValidIndex(Second->SourceCellAId))
+		{
+			OutSample.SecondaryTerrain = FABTSM3TerrainFeatureVisualBuilder::ResolveLandType((*CellStates)[Second->SourceCellAId]);
+			const float WidthCM = FMath::Max(1.0f, PhysicsBlendWidthCM);
+			OutSample.PrimaryTerrainWeight = FMath::SmoothStep(0.0f, WidthCM * 2.0f, SecondDistanceCM - BestDistanceCM);
+		}
+	}
+
+	const auto ComputeLinearMask = [&](const TArray<TArray<FABTSM3RiverVisualSegment>>& SegmentsByCell)
+	{
+		if (!SegmentsByCell.IsValidIndex(CellId)) return 0.0f;
+		float BestMask = 0.0f;
+		for (const FABTSM3RiverVisualSegment& Segment : SegmentsByCell[CellId])
+		{
+			const float DistanceCM = FABTSM3RiverVisualBuilder::GetDistanceToSegmentCM(Direction, Segment, BaseRadiusCM);
+			const float Mask = 1.0f - FMath::SmoothStep(
+				Segment.HalfWidthCM,
+				Segment.HalfWidthCM + FMath::Max(1.0f, PhysicsBlendWidthCM),
+				DistanceCM);
+			BestMask = FMath::Max(BestMask, Mask);
+		}
+		return BestMask;
+	};
+	OutSample.RoadWeight = ComputeLinearMask(RoadSegmentsByCell);
+	OutSample.RiverWeight = ComputeLinearMask(RiverSegmentsByCell);
+	return true;
+}
+
 FLinearColor FABTSM3TerrainVisualField::GetCellColor(const int32 CellId) const
 {
 	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return FLinearColor::Gray;
@@ -353,5 +410,23 @@ void FABTSM3TerrainVisualField::BuildRiverSegments(const TArray<FABTSM3CellEdgeS
 	{
 		RiverSegmentsByCell[CellId].Reserve(SegmentIndicesByCell[CellId].Num());
 		for (const int32 SegmentIndex : SegmentIndicesByCell[CellId]) RiverSegmentsByCell[CellId].Add(Segments[SegmentIndex]);
+	}
+}
+
+void FABTSM3TerrainVisualField::BuildRoadSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates)
+{
+	RoadSegmentsByCell.Reset();
+	if (Cells == nullptr) return;
+	TArray<FABTSM3RiverVisualSegment> Segments;
+	// These widths are visual defaults only. Physics has its own transition width,
+	// while the road centerlines remain the same CellTopo transport edges.
+	FABTSM3RiverVisualBuilder::BuildRoadSegments(*Cells, EdgeStates, TrailRoadHalfWidthCM, MainRoadHalfWidthCM, Segments);
+	TArray<TArray<int32>> SegmentIndicesByCell;
+	int32 DroppedReferences = 0;
+	FABTSM3RiverVisualBuilder::BuildLocalSegmentIndices(*Cells, Segments, BaseRadiusCM, ColorBlendWidthCM, 0, SegmentIndicesByCell, DroppedReferences);
+	RoadSegmentsByCell.SetNum(Cells->Num());
+	for (int32 CellId = 0; CellId < SegmentIndicesByCell.Num(); ++CellId)
+	{
+		for (const int32 SegmentIndex : SegmentIndicesByCell[CellId]) RoadSegmentsByCell[CellId].Add(Segments[SegmentIndex]);
 	}
 }

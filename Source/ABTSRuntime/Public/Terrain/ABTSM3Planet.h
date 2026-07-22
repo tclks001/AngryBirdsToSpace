@@ -13,6 +13,38 @@ class UMaterialInterface;
 class UStaticMesh;
 class UABTSM3TerrainMaterialBridge;
 
+USTRUCT(BlueprintType)
+struct FABTSM3SurfacePhysicsProfile
+{
+	GENERATED_BODY()
+
+	FABTSM3SurfacePhysicsProfile() = default;
+	FABTSM3SurfacePhysicsProfile(const float InGroundDragPerSecond, const float InRestitution)
+		: GroundDragPerSecond(InGroundDragPerSecond), Restitution(InRestitution) {}
+
+	/** Linear tangential resistance consumed by the kinematic force mover. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics", meta = (ClampMin = "0.0", ClampMax = "30.0"))
+	float GroundDragPerSecond = 5.3f;
+
+	/** Fraction of incoming normal speed returned after a sufficiently hard surface impact. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Restitution = 0.02f;
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM3SurfacePhysicsSample
+{
+	GENERATED_BODY()
+
+	FABTSM3SurfaceSDFSample SDF;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	float GroundDragPerSecond = 5.3f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	float Restitution = 0.02f;
+};
+
 /** M3 presentation planet. CellTopo and TaskGraph remain the only gameplay sources. */
 UCLASS(BlueprintType)
 class ABTSRUNTIME_API AABTSM3Planet : public AABTSM2Planet
@@ -45,6 +77,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Surface")
 	bool QuerySurface(const FVector& UnitDirection, FVector& OutWorldPosition, FVector& OutWorldNormal, float& OutSurfaceRadius, int32& OutCellId) const;
 
+	/** CPU reconstruction of the terrain material's SDF weights for collision response. */
+	bool QuerySurfacePhysics(const FVector& UnitDirection, FABTSM3SurfacePhysicsSample& OutSample) const;
+
 	/** Character-center spawn transform at the Start Task's first logical road Cell. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Spawn")
 	bool GetInitialRoadSpawnTransform(float SurfaceOffsetCM, FTransform& OutWorldTransform, int32& OutCellId) const;
@@ -71,6 +106,28 @@ public:
 	/** World-space radius of the central-difference stencil used to smooth terrain vertex normals. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "10.0", ClampMax = "800.0", UIMin = "40.0", UIMax = "400.0"))
 	float SurfaceNormalSmoothingDistanceCM = 160.0f;
+
+	/** Independent from visual color blending, so art changes do not silently change locomotion. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics", meta = (ClampMin = "1.0", ClampMax = "1200.0"))
+	float SurfacePhysicsBlendWidthCM = 240.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	FABTSM3SurfacePhysicsProfile PlainPhysics = {5.3f, 0.02f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	FABTSM3SurfacePhysicsProfile ForestPhysics = {6.2f, 0.01f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	FABTSM3SurfacePhysicsProfile HighlandPhysics = {5.8f, 0.04f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	FABTSM3SurfacePhysicsProfile MountainPhysics = {4.1f, 0.16f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	FABTSM3SurfacePhysicsProfile RoadPhysics = {3.0f, 0.04f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
+	FABTSM3SurfacePhysicsProfile RiverPhysics = {11.0f, 0.0f};
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Material")
 	FLinearColor RoadColor = FLinearColor(0.22f, 0.12f, 0.045f, 1.0f);

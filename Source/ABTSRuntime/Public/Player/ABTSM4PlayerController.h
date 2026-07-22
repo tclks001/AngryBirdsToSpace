@@ -23,6 +23,8 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	void SetGameplayInputBlocked(bool bBlocked);
+	bool IsGameplayInputBlocked() const { return bGameplayInputBlocked; }
 
 private:
 	void CycleBird();
@@ -42,4 +44,5 @@ private:
 	bool bSavedCursorPositionValid = false;
 	float SavedCursorX = 0.0f;
 	float SavedCursorY = 0.0f;
+	bool bGameplayInputBlocked = false;
 };

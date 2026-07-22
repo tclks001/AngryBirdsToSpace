@@ -17,6 +17,8 @@ struct FABTSRadialSuspensionSample
 	float DesiredCenterRadiusCM = 0.0f;
 	float HeightAboveTargetCM = 0.0f;
 	float RadialSpeedCMPerSec = 0.0f;
+	float GroundClearanceCM = 5.0f;
+	float MinimumGroundNormalUpDot = 0.2f;
 	float OutwardSupportAccelerationCMPerSec2 = 0.0f;
 	bool bSupportActive = false;
 	bool bGrounded = false;
@@ -46,9 +48,13 @@ public:
 	bool IsGrounded() const { return bGrounded; }
 
 private:
-	/** Small visual clearance above the queried surface, in addition to capsule half-height. */
+	/** Collision skin above the queried surface. Keeps a contact capsule out of the complex terrain triangles. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Ground", meta = (ClampMin = "0.0", UIMax = "20.0"))
-	float GroundClearanceCM = 2.0f;
+	float GroundClearanceCM = 8.0f;
+
+	/** Lowest supported dot(SurfaceNormal, RadialUp), preventing steep visual triangles from producing an unbounded capsule offset. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Ground", meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	float MinimumGroundNormalUpDot = 0.2f;
 
 	/** Maximum height above the target radius at which the suspension may capture a falling character. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Ground", meta = (ClampMin = "1.0", UIMax = "200.0"))

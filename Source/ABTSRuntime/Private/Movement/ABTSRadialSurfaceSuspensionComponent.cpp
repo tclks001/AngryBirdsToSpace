@@ -29,10 +29,22 @@ FABTSRadialSuspensionSample UABTSRadialSurfaceSuspensionComponent::Evaluate(
 		Sample.SurfaceNormal = Sample.RadialUp;
 	}
 
-	const float CapsuleHalfHeight = Character.GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const UCapsuleComponent* Capsule = Character.GetCapsuleComponent();
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CylinderHalfHeight = FMath::Max(0.0f, CapsuleHalfHeight - CapsuleRadius);
+	const float NormalUpDot = FMath::Max(
+		FVector::DotProduct(Sample.SurfaceNormal, Sample.RadialUp),
+		FMath::Clamp(MinimumGroundNormalUpDot, 0.05f, 1.0f));
+	// The capsule remains radially aligned while the M3 terrain is tilted. A
+	// HalfHeight-only offset embeds its lower side in uphill triangles. This is
+	// the same support geometry used by the legacy sweep mover.
+	const float GroundCenterOffsetCM = CylinderHalfHeight + CapsuleRadius / NormalUpDot;
+	Sample.GroundClearanceCM = FMath::Max(5.0f, GroundClearanceCM);
+	Sample.MinimumGroundNormalUpDot = FMath::Clamp(MinimumGroundNormalUpDot, 0.05f, 1.0f);
 	Sample.DesiredCenterRadiusCM = Planet.GetSurfaceRadiusAtDirection(Sample.RadialUp)
-		+ CapsuleHalfHeight
-		+ FMath::Max(0.0f, GroundClearanceCM);
+		+ GroundCenterOffsetCM
+		+ Sample.GroundClearanceCM;
 	const float CurrentRadiusCM = FVector::Distance(CharacterLocation, PlanetCenter);
 	Sample.HeightAboveTargetCM = CurrentRadiusCM - Sample.DesiredCenterRadiusCM;
 	Sample.RadialSpeedCMPerSec = FVector::DotProduct(Velocity, Sample.RadialUp);
