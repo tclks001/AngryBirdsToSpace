@@ -3,10 +3,12 @@
 > 状态：已实现 C++，等待创建 M2.5 地图入口并完成 PIE / Standalone 验收。
 >
 > 前置：[M2PlanetSurfaceDesign.md](M2PlanetSurfaceDesign.md)。本阶段只替换角色运动，不修改 `CellTopo`、连续球面拓扑、PCG 或资源玩法。
+>
+> M3 坡面现已新增默认的力模型与径向悬挂移动，并保留本稿旧 Sweep 实现作为对照，详见 [ForceSuspensionMovementDesign.md](ForceSuspensionMovementDesign.md)。
 
 ## 1. 目标与边界
 
-M2.5 将 M2 的“每帧强制贴回球面”替换为带速度的径向运动：角色受球心方向的持续加速度，能在基础球壳上接地、沿切平面行走、碰到阻挡体时滑动，并可按空格跳离表面再落回。
+M2.5 将 M2 的“每帧强制贴回球面”替换为带速度的径向运动：角色在空中受球心方向的持续加速度，能在基础球壳和 M3 平滑高度场上接地、沿地表切平面行走、碰到阻挡体时滑动，并可按空格跳离表面再落回。角色姿态的 Down 始终朝球心，不随地表法线歪斜。
 
 本期的“物理”是可控的 kinematic Character Capsule 运动，不是将角色改成 Chaos 模拟刚体。这样能稳定支持第三人称控制、未来建筑/树木碰撞和弹射玩法，同时仍保持 M2 的球面局部坐标系。
 
@@ -33,6 +35,16 @@ if CurrentRadius <= DesiredCenterRadius + GroundSnapTolerance
     remove all radial velocity
     Grounded = outward radial speed <= UngroundSpeed
 ```
+
+M3 坡面上的 `DesiredCenterRadius` 不能只使用 `SurfaceRadius + CapsuleHalfHeight`。胶囊轴仍沿球心径向，坡面法线为 `N`、径向为 `Up` 时，中心支撑偏移为：
+
+```text
+CylinderHalfHeight = CapsuleHalfHeight - CapsuleRadius
+GroundCenterOffset = CylinderHalfHeight + CapsuleRadius / dot(N, Up)
+DesiredCenterRadius = SurfaceRadius + GroundCenterOffset
+```
+
+接地移动先将输入投影到平滑地表法线 `N` 的切平面，使速度本身包含连续爬坡所需的径向分量。接地帧不再额外施加向内重力，残余高度误差由 `GroundSnapSpeedCMPerSec` 限速修正。进入接地使用 `GroundSnapToleranceCM`，保持接地使用更宽的 `GroundDetachToleranceCM`，避免浮点误差和三角碰撞造成状态抖动。角色旋转仍只使用径向 `Up`。
 
 接地并不要求径向速度严格小于等于零。角色沿曲面移动时，上一帧的切线速度相对新位置的 `Up` 会天然出现极小的向外分量；若以该分量直接清除 `Grounded`，角色离开初始点后会被误判为空中状态。因此，仅当向外速度超过 `UngroundSpeedCMPerSec`（默认 `120`）时才真正离地；跳跃初速度 `620` 足以越过该阈值。
 
@@ -83,6 +95,7 @@ Capsule Sweep 首次命中阻挡物后，未消耗位移会投影到碰撞面切
 | 空格无反应 | 检查 `DefaultInput.ini` 的 `ABTS_Jump -> SpaceBar`，以及地图 GameMode 是 `ABTSM25GameMode`。 |
 | 仅在初始点能跳，或变成任何位置都不能跳 | 除了曲面移动产生微小径向速度外，跳跃还可能读取上一帧的接地缓存并在当帧立即丢弃输入。消费空格前刷新几何接地，并用 `JumpBufferSeconds` 短暂保留输入；确认 `UngroundSpeedCMPerSec` 默认 `120`。 |
 | 松开输入后惯性滑动或转向漂移异常 | 持续向当前速度叠加输入加速度会保留旧方向速度。接地时应向 `TangentInput * MaxGroundSpeed` 目标速度收敛，松键时向零速度收敛。 |
+| M3 连续坡面上移动时逐帧卡顿 | 旧实现把接地速度投影到径向切平面并继续施加向内重力，胶囊会反复撞入坡面；随后硬贴地又清除爬坡所需的径向速度。斜坡上只加 Capsule Half Height 还会使胶囊侧缘轻微嵌入。使用平滑地表切线速度、斜面 capsule support offset、接地迟滞和限速径向修正；Down 方向仍保持径向。 |
 | 一直无法二连跳 | 这是预期：只有 Grounded 才能 Jump。若角色悬空无法落地，检查 Planet 已 `Ready=1`、半径和 Player Start。 |
 | 角色穿过 Cube | Cube 必须启用 Collision、Profile 为 `BlockAll`；确认 M2.5 Pawn 使用 Capsule 而不是关闭碰撞的 BirdVisual。 |
 | 角色落到球体内部 | 检查 `DesiredCenterRadius = PlanetRadius + CapsuleHalfHeight`；不要将 Capsule 半高误写为半径。 |

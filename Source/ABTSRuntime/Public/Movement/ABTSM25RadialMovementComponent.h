@@ -7,6 +7,7 @@
 #include "ABTSM25RadialMovementComponent.generated.h"
 
 class AABTSM2Planet;
+class ACharacter;
 
 /** Kinematic radial gravity, sweep collision and jump for M2.5. */
 UCLASS(ClassGroup = (ABTS), meta = (BlueprintSpawnableComponent))
@@ -28,8 +29,9 @@ public:
 private:
 	AABTSM2Planet* FindPlanet();
 	void IntegrateMotion(float DeltaTime);
-	void ResolveBaseSphereContact();
+	void ResolveBaseSphereContact(float DeltaTime);
 	void ResolveBlockingHit(const FHitResult& Hit);
+	float GetGroundCenterOffsetCM(const ACharacter& Character, const FVector& RadialUp, const FVector& SurfaceNormal) const;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Gravity", meta = (ClampMin = "0.0"))
 	float GravityAccelerationCMPerSec2 = 980.0f;
@@ -56,6 +58,18 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Collision", meta = (ClampMin = "0.0"))
 	float GroundSnapToleranceCM = 8.0f;
+
+	/** Extra separation before an already grounded character becomes airborne. Prevents contact flicker on slopes. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Collision", meta = (ClampMin = "0.0"))
+	float GroundDetachToleranceCM = 24.0f;
+
+	/** Maximum radial ground correction. Ground travel supplies the main slope height change; snap only removes residual error. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Collision", meta = (ClampMin = "0.0"))
+	float GroundSnapSpeedCMPerSec = 1800.0f;
+
+	/** Lower bound used by the capsule support calculation on unusually steep presentation normals. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Collision", meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	float MinimumGroundNormalUpDot = 0.35f;
 
 	/** Outward radial speed required to leave the grounded state. Avoids false airborne states while moving along a curved surface. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Collision", meta = (ClampMin = "0.0"))

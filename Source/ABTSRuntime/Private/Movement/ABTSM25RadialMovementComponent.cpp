@@ -18,11 +18,13 @@ void UABTSM25RadialMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	AddTickPrerequisiteActor(GetOwner());
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M2.5][Jump] Movement ready. Gravity=%.1f JumpSpeed=%.1f Buffer=%.3f Snap=%.1f Unground=%.1f"),
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M2.5][Jump] Movement ready. Gravity=%.1f JumpSpeed=%.1f Buffer=%.3f Snap=%.1f Detach=%.1f SnapSpeed=%.1f Unground=%.1f"),
 		GravityAccelerationCMPerSec2,
 		JumpSpeedCMPerSec,
 		JumpBufferSeconds,
 		GroundSnapToleranceCM,
+		GroundDetachToleranceCM,
+		GroundSnapSpeedCMPerSec,
 		UngroundSpeedCMPerSec);
 }
 
@@ -98,7 +100,7 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 
 	// Refresh contact before consuming input. Reading only last frame's cached
 	// state makes a jump press dependent on tick order and transient contact loss.
-	ResolveBaseSphereContact();
+	ResolveBaseSphereContact(DeltaTime * 0.5f);
 	if (JumpBufferRemainingSeconds > 0.0f && bGrounded)
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Up) + Up * JumpSpeedCMPerSec;
@@ -123,27 +125,40 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 	const FVector TangentInput = FVector::VectorPlaneProject(PendingMoveVector, Up).GetClampedToMaxSize(1.0f);
 	if (bGrounded)
 	{
-		const FVector TargetGroundVelocity = TangentInput * MaxGroundSpeedCMPerSec;
+		// Radial tangent input is horizontal only on the base sphere. On M3 terrain it
+		// must be lifted into the smooth surface tangent plane; otherwise the capsule
+		// repeatedly drives into an uphill triangle and loses travel to the sweep.
+		FVector SurfaceNormal = ResolvedPlanet->GetSurfaceNormalAtDirection(Up).GetSafeNormal();
+		if (SurfaceNormal.IsNearlyZero() || FVector::DotProduct(SurfaceNormal, Up) < 0.0f)
+		{
+			SurfaceNormal = Up;
+		}
+		const float InputMagnitude = TangentInput.Size();
+		const FVector SurfaceMoveDirection = FVector::VectorPlaneProject(TangentInput, SurfaceNormal).GetSafeNormal();
+		const FVector TargetGroundVelocity = SurfaceMoveDirection * (InputMagnitude * MaxGroundSpeedCMPerSec);
 		const float ChangeRate = TangentInput.IsNearlyZero()
 			? GroundBrakingCMPerSec2
 			: GroundAccelerationCMPerSec2;
 		Velocity = FMath::VInterpConstantTo(
-			FVector::VectorPlaneProject(Velocity, Up),
+			FVector::VectorPlaneProject(Velocity, SurfaceNormal),
 			TargetGroundVelocity,
 			DeltaTime,
 			ChangeRate);
+		if (Velocity.SizeSquared() > FMath::Square(MaxGroundSpeedCMPerSec))
+		{
+			Velocity = Velocity.GetSafeNormal() * MaxGroundSpeedCMPerSec;
+		}
 	}
 	else
 	{
 		Velocity += TangentInput * GroundAccelerationCMPerSec2 * AirControlScale * DeltaTime;
+		const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
+		if (TangentVelocity.SizeSquared() > FMath::Square(MaxGroundSpeedCMPerSec))
+		{
+			Velocity += TangentVelocity.GetSafeNormal() * (MaxGroundSpeedCMPerSec - TangentVelocity.Size());
+		}
+		Velocity -= Up * GravityAccelerationCMPerSec2 * DeltaTime;
 	}
-
-	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
-	if (TangentVelocity.SizeSquared() > FMath::Square(MaxGroundSpeedCMPerSec))
-	{
-		Velocity += TangentVelocity.GetSafeNormal() * (MaxGroundSpeedCMPerSec - TangentVelocity.Size());
-	}
-	Velocity -= Up * GravityAccelerationCMPerSec2 * DeltaTime;
 
 	const FVector RequestedDelta = Velocity * DeltaTime;
 	FHitResult Hit;
@@ -166,10 +181,27 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 			}
 		}
 	}
-	ResolveBaseSphereContact();
+	ResolveBaseSphereContact(DeltaTime * 0.5f);
 }
 
-void UABTSM25RadialMovementComponent::ResolveBaseSphereContact()
+float UABTSM25RadialMovementComponent::GetGroundCenterOffsetCM(
+	const ACharacter& Character,
+	const FVector& RadialUp,
+	const FVector& SurfaceNormal) const
+{
+	const UCapsuleComponent* Capsule = Character.GetCapsuleComponent();
+	const float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CylinderHalfHeight = FMath::Max(0.0f, CapsuleHalfHeight - CapsuleRadius);
+	const float NormalUpDot = FMath::Max(FVector::DotProduct(SurfaceNormal, RadialUp), MinimumGroundNormalUpDot);
+
+	// A capsule on a tilted plane needs more radial clearance than HalfHeight.
+	// Support along N is CylinderHalfHeight * dot(N, Up) + Radius; converting it
+	// back to a radial center offset gives CylinderHalfHeight + Radius / dot.
+	return CylinderHalfHeight + CapsuleRadius / NormalUpDot;
+}
+
+void UABTSM25RadialMovementComponent::ResolveBaseSphereContact(const float DeltaTime)
 {
 	ACharacter* Character = Cast<ACharacter>(GetOwner());
 	AABTSM2Planet* ResolvedPlanet = Planet.Get();
@@ -178,36 +210,53 @@ void UABTSM25RadialMovementComponent::ResolveBaseSphereContact()
 		return;
 	}
 
-	const float CapsuleHalfHeight = Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 	const FVector Center = ResolvedPlanet->GetPlanetCenterWorld();
 	const FVector Location = Character->GetActorLocation();
 	const FVector Up = ResolvedPlanet->GetRadialUpAtWorldLocation(Location);
-	const float DesiredRadius = ResolvedPlanet->GetSurfaceRadiusAtDirection(Up) + CapsuleHalfHeight;
+	FVector SurfaceNormal = ResolvedPlanet->GetSurfaceNormalAtDirection(Up).GetSafeNormal();
+	if (SurfaceNormal.IsNearlyZero() || FVector::DotProduct(SurfaceNormal, Up) < 0.0f)
+	{
+		SurfaceNormal = Up;
+	}
+	const float SurfaceNormalUpDot = FVector::DotProduct(SurfaceNormal, Up);
+	const float DesiredRadius = ResolvedPlanet->GetSurfaceRadiusAtDirection(Up)
+		+ GetGroundCenterOffsetCM(*Character, Up, SurfaceNormal);
 	const float CurrentRadius = FVector::Distance(Location, Center);
 	const float RadialSpeed = FVector::DotProduct(Velocity, Up);
 
-	const bool bAtBaseSphere = CurrentRadius <= DesiredRadius + GroundSnapToleranceCM;
-	const bool bExplicitlyLaunching = RadialSpeed > UngroundSpeedCMPerSec;
 	const bool bWasGrounded = bGrounded;
+	const float ContactToleranceCM = bWasGrounded ? GroundDetachToleranceCM : GroundSnapToleranceCM;
+	const bool bAtBaseSphere = CurrentRadius <= DesiredRadius + ContactToleranceCM;
+	// Ordinary uphill velocity also has an outward radial component. It must not
+	// detach an existing ground contact; only an already-airborne launch uses this
+	// speed gate (the jump path explicitly clears bGrounded first).
+	const bool bExplicitlyLaunching = !bWasGrounded && RadialSpeed > UngroundSpeedCMPerSec;
 	bGrounded = bAtBaseSphere && !bExplicitlyLaunching;
 	if (bWasGrounded != bGrounded)
 	{
-		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M2.5][Ground] %s. Radius=%.2f Desired=%.2f Delta=%.2f RadialSpeed=%.2f AtSphere=%d Launching=%d"),
+		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M2.5][Ground] %s. Radius=%.2f Desired=%.2f Delta=%.2f RadialSpeed=%.2f NormalUp=%.3f Tolerance=%.1f AtSphere=%d Launching=%d"),
 			bGrounded ? TEXT("Grounded") : TEXT("Airborne"),
 			CurrentRadius,
 			DesiredRadius,
 			CurrentRadius - DesiredRadius,
 			RadialSpeed,
+			SurfaceNormalUpDot,
+			ContactToleranceCM,
 			bAtBaseSphere ? 1 : 0,
 			bExplicitlyLaunching ? 1 : 0);
 	}
 	if (bGrounded)
 	{
-		Character->SetActorLocation(Center + Up * DesiredRadius, false, nullptr, ETeleportType::TeleportPhysics);
-		// A tangent velocity at the previous position gains a small outward radial
-		// component when evaluated against this position's Up. Remove it on contact
-		// so walking cannot accidentally disable jumping.
-		Velocity = FVector::VectorPlaneProject(Velocity, Up);
+		const float CorrectedRadius = FMath::FInterpConstantTo(
+			CurrentRadius,
+			DesiredRadius,
+			FMath::Max(DeltaTime, 0.0f),
+			GroundSnapSpeedCMPerSec);
+		Character->SetActorLocation(Center + Up * CorrectedRadius, false, nullptr, ETeleportType::TeleportPhysics);
+		// Keep the velocity along the actual smooth terrain. Projecting it onto the
+		// radial plane would erase the climb component and recreate the impact/snap
+		// cycle on every uphill frame.
+		Velocity = FVector::VectorPlaneProject(Velocity, SurfaceNormal);
 	}
 }
 

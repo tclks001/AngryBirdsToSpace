@@ -70,6 +70,8 @@
 | 角色只有初始点能跳，修正阈值后又变成任何位置都不能跳 | 严格以 `RadialSpeed <= 0` 判定会受曲率误差影响；只读取上一帧的 `bGrounded` 又会让跳跃依赖 Tick 顺序，空格在瞬时非接地帧被永久丢弃。 | 消费跳跃前先按当前位置刷新几何接地；向外速度未超过 `UngroundSpeedCMPerSec` 时保持接地；用 `JumpBufferSeconds` 短暂保留输入，接地时清除径向速度。 | 落地、持续移动、转向和松键后分别按空格，均能稳定起跳；空中不能二段跳。 |
 | 地面惯性滑动、反向时横向漂移异常 | 输入加速度不断叠加到旧切线速度，旧方向需要很久才能抵消。 | 地面状态按输入计算目标切线速度，再分别以地面加速度和刹车速度向目标收敛；仅空中保留加速度式控制。 | 松键后快速、平滑停下；左右反向没有绕弧漂移或持续滑行。 |
 | 跳跃仍无效且原因不明 | 仅凭最终画面无法区分输入没有到达、没有发现星球、未接地、跳跃被接受后立刻落回地面。 | 搜索 `[ABTS][M2.5][Jump]` 和 `[ABTS][M2.5][Ground]`。日志按输入到角色、输入缓冲、接地状态、跳跃接受/缓冲超时的顺序输出关键状态。 | 按一次空格即可在 Output Log 中复现完整链路；根据首个缺失或警告节点定位责任模块。 |
+| M3 高度平滑后角色爬坡强烈卡顿 | 旧移动始终把速度投影到径向切平面，并在接地帧继续施加向内重力；胶囊因此不断撞入坡面，Sweep 丢失位移后再被硬贴到新高度。胶囊中心只加 `HalfHeight` 也没有补偿坡面法线倾斜，侧面会轻微嵌入三角面。 | 接地移动改为投影到 `GetSurfaceNormalAtDirection` 的平滑地表切平面；接地时不重复施加重力；用胶囊对斜面的 support offset 计算中心高度；接地进入/退出使用不同容差，并限速修正残余径向误差。角色姿态与 Down 仍只采用球心径向。 | 连续上坡时速度稳定，不再出现“碰撞停顿—径向瞬移”循环；`[ABTS][M2.5][Ground]` 不应在普通坡面上逐帧 Grounded/Airborne 抖动，空格跳跃仍出现 `Accepted`。 |
+| 旧坡面修正后仍有逐三角形卡顿 | 程序化地面使用 `Complex As Simple`；平滑顶点法线只影响渲染，Sweep/Chaos 接触仍读取三角形几何面法线。继续调整贴地速度无法消除接触法线跳变。 | 选择 `ForceSuspension`：`ContinuousSurface` 不再参加玩家障碍 Sweep，移动读取 CellTopo 派生表面查询并通过径向弹簧支撑；其他组件和 Actor 仍可参与 Sweep。使用 `ABTSMovementModeSelector` 在关卡中切换新旧模式。 | 日志为 `Active=ForceSuspension LegacyTick=0 ForceTick=1`；连续爬坡没有周期性停顿，Cube 仍能阻挡玩家。 |
 | M3 玩家仍从地图 PlayerStart 开始，或传送后弹飞 | PlayerStart 是 UE 创建 Pawn 的临时入口；TaskGraph/Planet 和 Pawn 的 BeginPlay 顺序不固定，且传送前可能已经积累径向速度。 | `ABTSM3GameMode` 延迟查询 Start Task 首个道路 Cell，使用 M3 表面半径 + Capsule Half Height 放置角色；传送前清零 M2.5 速度、接地和跳跃缓冲。 | 日志仅出现一次 `[ABTS][M3][Spawn] Player placed at Start road`；改变 WorldSeed 后出生位置随 Start Task 改变。 |
 
 ## 6. PCG 与后续玩法预防项

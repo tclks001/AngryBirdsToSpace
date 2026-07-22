@@ -9,7 +9,6 @@
 #include "GameFramework/PlayerController.h"
 #include "Player/ABTSM1PlayerController.h"
 #include "Player/ABTSM25BirdCharacter.h"
-#include "Movement/ABTSM25RadialMovementComponent.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UI/ABTSM1HUD.h"
@@ -53,9 +52,9 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 		int32 SpawnCellId = INDEX_NONE;
 		if (Planet->GetInitialRoadSpawnTransform(CapsuleHalfHeight, SpawnTransform, SpawnCellId))
 		{
-			if (UABTSM25RadialMovementComponent* RadialMovement = Character->FindComponentByClass<UABTSM25RadialMovementComponent>())
+			if (AABTSM25BirdCharacter* BirdCharacter = Cast<AABTSM25BirdCharacter>(Character))
 			{
-				RadialMovement->ResetMotionState();
+				BirdCharacter->ResetRadialMovementState();
 			}
 			Character->SetActorTransform(SpawnTransform, false, nullptr, ETeleportType::TeleportPhysics);
 			PlayerController->SetControlRotation(SpawnTransform.Rotator());
