@@ -28,6 +28,7 @@ public:
 		float InWaterDepthCM,
 		float InHeightBlendWidthCM,
 		float InColorBlendWidthCM,
+		float InNormalSmoothingDistanceCM,
 		const TArray<FABTSM2Cell>& InCells,
 		const TArray<FABTSM3CellState>& InCellStates,
 		const TArray<FABTSM3CellEdgeState>& InEdgeStates,
@@ -48,6 +49,7 @@ private:
 	void BuildBoundarySegments();
 	void BuildRiverSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates, float StreamHalfWidthCM, float ShallowRiverHalfWidthCM, float DeepRiverHalfWidthCM);
 	float GetCellHeightCM(int32 CellId) const;
+	float GetInterpolatedHeightCM(const FVector& UnitDirection, int32 NearestCellId) const;
 	float GetDistanceToSegmentCM(const FVector& UnitDirection, const FABTSM3BoundarySegment& Segment) const;
 	void FindTwoNearestTerrainFeatures(const FVector& UnitDirection, int32 CellId, const FABTSM3BoundarySegment*& OutBest, float& OutBestDistanceCM, const FABTSM3BoundarySegment*& OutSecond, float& OutSecondDistanceCM) const;
 	FLinearColor GetCellColor(int32 CellId) const;
@@ -58,6 +60,7 @@ private:
 	float WaterDepthCM = 80.0f;
 	float HeightBlendWidthCM = 160.0f;
 	float ColorBlendWidthCM = 240.0f;
+	float NormalSmoothingDistanceCM = 160.0f;
 	const TArray<FABTSM2Cell>* Cells = nullptr;
 	const TArray<FABTSM3CellState>* CellStates = nullptr;
 	TArray<TArray<FABTSM3BoundarySegment>> BoundarySegmentsByCell;

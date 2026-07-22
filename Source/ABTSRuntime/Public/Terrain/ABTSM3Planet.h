@@ -68,6 +68,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "1.0"))
 	float HeightBlendWidthCM = 160.0f;
 
+	/** World-space radius of the central-difference stencil used to smooth terrain vertex normals. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "10.0", ClampMax = "800.0", UIMin = "40.0", UIMax = "400.0"))
+	float SurfaceNormalSmoothingDistanceCM = 160.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Material")
 	FLinearColor RoadColor = FLinearColor(0.22f, 0.12f, 0.045f, 1.0f);
 

@@ -10,6 +10,7 @@ void FABTSM3TerrainVisualField::Initialize(
 	const float InWaterDepthCM,
 	const float InHeightBlendWidthCM,
 	const float InColorBlendWidthCM,
+	const float InNormalSmoothingDistanceCM,
 	const TArray<FABTSM2Cell>& InCells,
 	const TArray<FABTSM3CellState>& InCellStates,
 	const TArray<FABTSM3CellEdgeState>& InEdgeStates,
@@ -22,6 +23,7 @@ void FABTSM3TerrainVisualField::Initialize(
 	WaterDepthCM = FMath::Max(0.0f, InWaterDepthCM);
 	HeightBlendWidthCM = FMath::Max(1.0f, InHeightBlendWidthCM);
 	ColorBlendWidthCM = FMath::Max(1.0f, InColorBlendWidthCM);
+	NormalSmoothingDistanceCM = FMath::Max(1.0f, InNormalSmoothingDistanceCM);
 	Cells = &InCells;
 	CellStates = &InCellStates;
 	BuildBoundarySegments();
@@ -59,6 +61,76 @@ float FABTSM3TerrainVisualField::GetCellHeightCM(const int32 CellId) const
 	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return 0.0f;
 	const FABTSM3CellState& State = (*CellStates)[CellId];
 	return State.LogicalHeight01 * HeightScaleCM;
+}
+
+float FABTSM3TerrainVisualField::GetInterpolatedHeightCM(const FVector& UnitDirection, const int32 NearestCellId) const
+{
+	if (Cells == nullptr || !Cells->IsValidIndex(NearestCellId)) return 0.0f;
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	const FABTSM2Cell& CenterCell = (*Cells)[NearestCellId];
+	float BestMinimumWeight = -TNumericLimits<float>::Max();
+	float BestHeightCM = GetCellHeightCM(NearestCellId);
+	bool bFoundTriangle = false;
+
+	for (int32 FirstIndex = 0; FirstIndex < CenterCell.NeighborCellIds.Num(); ++FirstIndex)
+	{
+		const int32 CellB = CenterCell.NeighborCellIds[FirstIndex];
+		for (int32 SecondIndex = FirstIndex + 1; SecondIndex < CenterCell.NeighborCellIds.Num(); ++SecondIndex)
+		{
+			const int32 CellC = CenterCell.NeighborCellIds[SecondIndex];
+			if (!(*Cells)[CellB].NeighborCellIds.Contains(CellC)) continue;
+			const FVector A = CenterCell.UnitCenter;
+			const FVector B = (*Cells)[CellB].UnitCenter;
+			const FVector C = (*Cells)[CellC].UnitCenter;
+			const FVector Edge0 = B - A;
+			const FVector Edge1 = C - A;
+			const FVector PlaneNormal = FVector::CrossProduct(Edge0, Edge1);
+			const float RayDenominator = FVector::DotProduct(PlaneNormal, Direction);
+			if (FMath::Abs(RayDenominator) <= SMALL_NUMBER) continue;
+			const float RayDistance = FVector::DotProduct(PlaneNormal, A) / RayDenominator;
+			if (RayDistance <= 0.0f) continue;
+			const FVector Point = Direction * RayDistance;
+			const FVector ToPoint = Point - A;
+			const float D00 = FVector::DotProduct(Edge0, Edge0);
+			const float D01 = FVector::DotProduct(Edge0, Edge1);
+			const float D11 = FVector::DotProduct(Edge1, Edge1);
+			const float D20 = FVector::DotProduct(ToPoint, Edge0);
+			const float D21 = FVector::DotProduct(ToPoint, Edge1);
+			const float Denominator = D00 * D11 - D01 * D01;
+			if (FMath::Abs(Denominator) <= SMALL_NUMBER) continue;
+			const float WeightB = (D11 * D20 - D01 * D21) / Denominator;
+			const float WeightC = (D00 * D21 - D01 * D20) / Denominator;
+			const float WeightA = 1.0f - WeightB - WeightC;
+			const float MinimumWeight = FMath::Min3(WeightA, WeightB, WeightC);
+			if (MinimumWeight < -0.002f || MinimumWeight <= BestMinimumWeight) continue;
+			const float ClampedA = FMath::Max(0.0f, WeightA);
+			const float ClampedB = FMath::Max(0.0f, WeightB);
+			const float ClampedC = FMath::Max(0.0f, WeightC);
+			const float WeightSum = FMath::Max(ClampedA + ClampedB + ClampedC, UE_SMALL_NUMBER);
+			BestHeightCM = (ClampedA * GetCellHeightCM(NearestCellId)
+				+ ClampedB * GetCellHeightCM(CellB)
+				+ ClampedC * GetCellHeightCM(CellC)) / WeightSum;
+			BestMinimumWeight = MinimumWeight;
+			bFoundTriangle = true;
+		}
+	}
+
+	if (bFoundTriangle) return BestHeightCM;
+	// Defensive fallback at numerical seams: inverse chord-distance weighting over
+	// the nearest Cell and its one-ring neighbors remains continuous enough to
+	// avoid returning the old piecewise-constant Cell height.
+	float WeightedHeight = 0.0f;
+	float WeightSum = 0.0f;
+	const auto Accumulate = [&](const int32 CellId)
+	{
+		const float DistanceSquared = FVector::DistSquared(Direction, (*Cells)[CellId].UnitCenter);
+		const float Weight = 1.0f / FMath::Max(DistanceSquared, 1.e-6f);
+		WeightedHeight += Weight * GetCellHeightCM(CellId);
+		WeightSum += Weight;
+	};
+	Accumulate(NearestCellId);
+	for (const int32 NeighborId : CenterCell.NeighborCellIds) Accumulate(NeighborId);
+	return WeightSum > 0.0f ? WeightedHeight / WeightSum : GetCellHeightCM(NearestCellId);
 }
 
 float FABTSM3TerrainVisualField::GetDistanceToSegmentCM(
@@ -124,7 +196,7 @@ float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) 
 	if (!IsReady()) return BaseRadiusCM;
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
-	float HeightCM = GetCellHeightCM(CellId);
+	float HeightCM = GetInterpolatedHeightCM(Direction, CellId);
 	// Water is an edge property. Deform only a narrow band around the generated
 	// flow-centerline or barrier-dual segment; never lower an entire logical Cell (which creates a
 	// hexagonal/ Voronoi-shaped river).
@@ -152,20 +224,6 @@ float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) 
 		const float RiverAlpha = 1.0f - FMath::SmoothStep(NearestRiverHalfWidthCM, NearestRiverHalfWidthCM + RiverBlendWidthCM, NearestRiverDistanceCM);
 		HeightCM -= WaterDepthCM * RiverAlpha;
 	}
-	const FABTSM3BoundarySegment* BestTerrain = nullptr;
-	const FABTSM3BoundarySegment* SecondTerrain = nullptr;
-	float BestTerrainDistanceCM = 0.0f;
-	float SecondTerrainDistanceCM = 0.0f;
-	FindTwoNearestTerrainFeatures(Direction, CellId, BestTerrain, BestTerrainDistanceCM, SecondTerrain, SecondTerrainDistanceCM);
-	if (BestTerrain != nullptr && SecondTerrain != nullptr
-		&& SecondTerrainDistanceCM - BestTerrainDistanceCM < HeightBlendWidthCM * 2.0f)
-	{
-		const float BestHeight = 0.5f * (GetCellHeightCM(BestTerrain->SourceCellAId) + GetCellHeightCM(BestTerrain->SourceCellBId));
-		const float SecondHeight = 0.5f * (GetCellHeightCM(SecondTerrain->SourceCellAId) + GetCellHeightCM(SecondTerrain->SourceCellBId));
-		const float Separation = SecondTerrainDistanceCM - BestTerrainDistanceCM;
-		const float BestWeight = FMath::SmoothStep(0.0f, HeightBlendWidthCM * 2.0f, Separation);
-		HeightCM = FMath::Lerp(0.5f * (BestHeight + SecondHeight), BestHeight, BestWeight);
-	}
 	return BaseRadiusCM + HeightCM;
 }
 
@@ -175,14 +233,26 @@ FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection
 	FVector TangentX = FVector::CrossProduct(FVector::UpVector, Up).GetSafeNormal();
 	if (TangentX.IsNearlyZero()) TangentX = FVector::ForwardVector;
 	const FVector TangentY = FVector::CrossProduct(Up, TangentX).GetSafeNormal();
-	constexpr float SampleAngle = 0.0008f;
+	const float SampleAngle = FMath::Clamp(NormalSmoothingDistanceCM / FMath::Max(BaseRadiusCM, 1.0f), 0.0001f, 0.08f);
 	const FVector X0 = (Up - TangentX * SampleAngle).GetSafeNormal();
 	const FVector X1 = (Up + TangentX * SampleAngle).GetSafeNormal();
 	const FVector Y0 = (Up - TangentY * SampleAngle).GetSafeNormal();
 	const FVector Y1 = (Up + TangentY * SampleAngle).GetSafeNormal();
 	const FVector DX = X1 * GetSurfaceRadius(X1) - X0 * GetSurfaceRadius(X0);
 	const FVector DY = Y1 * GetSurfaceRadius(Y1) - Y0 * GetSurfaceRadius(Y0);
-	FVector Normal = FVector::CrossProduct(DX, DY).GetSafeNormal();
+	const FVector Diagonal0 = (TangentX + TangentY).GetSafeNormal();
+	const FVector Diagonal1 = (-TangentX + TangentY).GetSafeNormal();
+	const FVector D00 = (Up - Diagonal0 * SampleAngle).GetSafeNormal();
+	const FVector D01 = (Up + Diagonal0 * SampleAngle).GetSafeNormal();
+	const FVector D10 = (Up - Diagonal1 * SampleAngle).GetSafeNormal();
+	const FVector D11 = (Up + Diagonal1 * SampleAngle).GetSafeNormal();
+	const FVector DD0 = D01 * GetSurfaceRadius(D01) - D00 * GetSurfaceRadius(D00);
+	const FVector DD1 = D11 * GetSurfaceRadius(D11) - D10 * GetSurfaceRadius(D10);
+	FVector NormalXY = FVector::CrossProduct(DX, DY).GetSafeNormal();
+	FVector NormalDiagonal = FVector::CrossProduct(DD0, DD1).GetSafeNormal();
+	if (FVector::DotProduct(NormalXY, Up) < 0.0f) NormalXY *= -1.0f;
+	if (FVector::DotProduct(NormalDiagonal, Up) < 0.0f) NormalDiagonal *= -1.0f;
+	FVector Normal = (NormalXY + NormalDiagonal).GetSafeNormal();
 	if (FVector::DotProduct(Normal, Up) < 0.0f) Normal *= -1.0f;
 	return Normal.IsNearlyZero() ? Up : Normal;
 }

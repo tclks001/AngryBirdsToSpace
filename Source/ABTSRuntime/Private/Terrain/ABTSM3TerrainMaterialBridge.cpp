@@ -35,7 +35,9 @@ UTexture2D* UABTSM3TerrainMaterialBridge::CreateFloatTexture(
 	Texture->Filter = TF_Nearest;
 	Texture->SRGB = false;
 	Texture->NeverStream = true;
+	#if WITH_EDITORONLY_DATA
 	Texture->MipGenSettings = TMGS_NoMipmaps;
+	#endif
 	Texture->CompressionSettings = TC_VectorDisplacementmap;
 	FTexturePlatformData* PlatformData = Texture->GetPlatformData();
 	if (PlatformData == nullptr || PlatformData->Mips.IsEmpty()) return nullptr;

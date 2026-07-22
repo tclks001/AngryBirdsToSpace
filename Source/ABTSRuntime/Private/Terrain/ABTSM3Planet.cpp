@@ -63,7 +63,7 @@ bool AABTSM3Planet::RebuildPlanet()
 {
 	if (!AABTSM2Planet::RebuildPlanet() || !GenerateLogicalTerrain()) return false;
 	TerrainVisualField = MakeUnique<FABTSM3TerrainVisualField>();
-	TerrainVisualField->Initialize(PlanetRadiusCM, MacroHeightScaleCM, TaskWaterDepthCM, HeightBlendWidthCM, TerrainBlendWidthCM,
+	TerrainVisualField->Initialize(PlanetRadiusCM, MacroHeightScaleCM, TaskWaterDepthCM, HeightBlendWidthCM, TerrainBlendWidthCM, SurfaceNormalSmoothingDistanceCM,
 		LogicalCells, GeneratedCellStates, GeneratedEdgeStates,
 		StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM);
 	BuildM3ContinuousSurface();
@@ -250,6 +250,8 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 	Triangles.Reserve(Mesh.Triangles.Num() * 3);
 	Normals.Reserve(Mesh.Triangles.Num() * 3);
 	Colors.Reserve(Mesh.Triangles.Num() * 3);
+	float MaxSurfaceNormalTiltDegrees = 0.0f;
+	int32 ExtremeSurfaceNormalCount = 0;
 
 	for (const FIntVector& Triangle : Mesh.Triangles)
 	{
@@ -270,7 +272,11 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 			const int32 CellId = FindNearestCell(Unit);
 			const int32 BaseIndex = Vertices.Num();
 			Vertices.Add(Unit * TerrainVisualField->GetSurfaceRadius(Unit));
-			Normals.Add(TerrainVisualField->GetSurfaceNormal(Unit));
+			const FVector SurfaceNormal = TerrainVisualField->GetSurfaceNormal(Unit);
+			Normals.Add(SurfaceNormal);
+			const float NormalTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Unit, SurfaceNormal), -1.0f, 1.0f)));
+			MaxSurfaceNormalTiltDegrees = FMath::Max(MaxSurfaceNormalTiltDegrees, NormalTiltDegrees);
+			ExtremeSurfaceNormalCount += NormalTiltDegrees > 80.0f ? 1 : 0;
 			// UV0/1/2 are constant per triangle: three material candidate CellIds.
 			// UV3 is one-hot so the material can reconstruct barycentric role if needed.
 			UV0.Add(EncodedA);
@@ -285,6 +291,8 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 	ContinuousSurface->ClearAllMeshSections();
 	ContinuousSurface->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, UV3, Colors, Tangents, true, false);
 	if (TerrainMaterial) ContinuousSurface->SetMaterial(0, TerrainMaterial);
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][SurfaceNormals] SmoothingDistance=%.1f MaxTilt=%.2f ExtremeOver80=%d Vertices=%d"),
+		SurfaceNormalSmoothingDistanceCM, MaxSurfaceNormalTiltDegrees, ExtremeSurfaceNormalCount, Normals.Num());
 }
 
 void AABTSM3Planet::BuildDecorInstances()

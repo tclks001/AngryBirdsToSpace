@@ -95,3 +95,7 @@
 ### 树木 Pivot 正确但在坡面上严重侧倒
 
 根因是树木局部 `+Z` 完全使用连续地表法线；地表法线适合岩石贴坡，却不等于树木生长方向。修复后树木以球心径向为主，在径向与地表法线之间按 `ForestSurfaceNormalBlend` 做归一化插值，默认 `0.2`；岩石不受影响。验收 `[ABTS][M3][HISM]` 中 `MaxAppliedTilt` 应明显小于 `MaxSurfaceTilt`。若仍显得过斜，将权重降至 `0.1`；设为 `0` 可使所有树完全径向直立。
+
+### 地表出现六边形黑色阴影斑纹
+
+根因是几何半径曾直接取最近 Cell 的离散逻辑高度，产生六边形台阶；法线又只用约 `8cm` 的差分半径，跨台阶时得到近乎水平或翻折的异常法线。修复后高度在 CellTopo 三角形内做重心插值，法线以默认 `160cm` 的正交+对角中心差分平滑。检查 `[ABTS][M3][SurfaceNormals]`：若 `ExtremeOver80` 很大，先确认 `SurfaceNormalSmoothingDistanceCM` 未被旧 Blueprint 覆盖为极小值；可在 `120–240cm` 之间调节，数值越大越平缓。

@@ -224,6 +224,8 @@ HISM 使用的每个材质还必须在材质 Details 的 **Usage** 中启用 **U
 
 树木的局部 `+Z` 不能完全跟随连续地表法线，否则在宏观高度交界或陡坡上会出现大幅侧倒。树木使用 `normalize(lerp(RadialUp, SurfaceNormal, ForestSurfaceNormalBlend))`，默认权重 `0.2`，即以球心径向为主、只吸收 20% 的坡面倾斜；岩石继续完整贴合地表法线。Pivot 必须位于树干底部中心且模型局部 `+Z` 指向树梢。日志 `[ABTS][M3][HISM]` 同时输出 `MaxSurfaceTilt` 与实际应用后的 `MaxAppliedTilt`，后者应显著更小。
 
+地表几何高度不能直接使用最近 Cell 的常量高度，否则 Cell 边界会形成六边形台阶，极小距离的法线差分会把台阶解释成近乎竖直的坡面。`FABTSM3TerrainVisualField` 在包含查询方向的 CellTopo 三角形内对三个逻辑高度做重心插值，使半径场跨三角形连续；数值边界采用一环逆距离插值兜底。顶点法线用 `SurfaceNormalSmoothingDistanceCM` 指定的世界空间中心差分半径，默认 `160cm`，并平均正交与对角两组梯度，消除方向偏置和六边形阴影斑纹。日志 `[ABTS][M3][SurfaceNormals]` 中 `ExtremeOver80` 应为 0 或接近 0。
+
 M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` 是唯一建筑预留接口，包含 `CellId`、TaskType、WorldTransform 与坡度；M4 才在这些位置生成模块与刚体。
 
 ## 7. 验收
