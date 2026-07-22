@@ -80,22 +80,23 @@ ABTSM4GameMode
 
 HUD 开启鼠标指针和 Game+UI 输入；图标位置始终固定，不因主控切换重排。
 
-### 3.4 队伍俯视相机（临时实现）
+### 3.4 球面多角色 Orbit Camera
 
-M4 使用独立 `ABTSM4PartyCamera` 作为 PlayerController 的固定 ViewTarget，不再直接使用每只鸟自带的 SpringArm 相机。队伍相机始终按主控鸟当前位置的球面径向抬高，从主控前向的后方观察，并精确注视主控附近的目标点。
+M4 使用独立 `ABTSM4PartyCamera` 作为 PlayerController 的固定 ViewTarget，不再直接使用每只鸟自带的 SpringArm 相机。相机持久保存玩家选择的球面切向 OrbitForward、Elevation 和 Distance；角色朝向变化不会重置这些状态。
 
-`ABTSBirdPartySettings > Camera` 可调整：
+`ABTSBirdPartySettings > Camera > Orbit/Follow/Input/Obstruction` 可调整：
 
-- `Camera Height CM`：沿当地径向抬高，默认 `720`。
-- `Camera Back Distance CM`：沿主控切向后退，默认 `320`。
-- `Camera Look At Height CM`：注视点相对主控的径向高度，默认 `30`。
-- `Camera Position Lag Speed`：位置跟随平滑速度，默认 `4.5`。
-- `Camera Rotation Lag Speed`：旋转平滑速度，默认 `7.0`。
-- `Camera Field Of View Degrees`：默认 `52`。
+- `Orbit Distance CM`：默认 `850`，范围默认 `550–1300`。
+- `Default Elevation Degrees`：默认 `60°`；运行时可在 `-85°` 仰视到 `+85°` 俯视之间连续调节。
+- `Camera Look At Height CM`：注视点相对主控的径向高度。
+- `Orbit Yaw/Pitch Degrees Per Input`：RMB/右摇杆灵敏度。
+- `Orbit Zoom Step CM`：滚轮缩放步长。
+- `Camera Switch Blend Seconds`：默认 `0.48 s`。
+- `Orbit Pivot/Rotation Follow Speed`：普通跟随平滑。
+- `Camera Probe Radius`、最小遮挡距离、收缩/恢复速度：软遮挡参数。
+- `Camera Field Of View Degrees`：默认 `52°`。
 
-默认视线与“竖直向下”只相差约 `25°`，因此保持明显俯视。切换主控时 ViewTarget 不改变，只更新相机的目标鸟，并通过位置/旋转插值平滑移动。鸟 Capsule 同时忽略 Camera 通道，避免旧相机或其他 Camera Trace 被邻近鸟触发。
-
-该版本仍以主控鸟 `ActorForward` 决定相机后方，导致 WASD 改变角色朝向时镜头也改变方向，且没有独立玩家 Orbit 输入。下一版应按 [M4MultiCharacterOrbitCameraDesign.md](M4MultiCharacterOrbitCameraDesign.md) 替换为球面持久 Orbit Camera；本节参数仅用于当前临时实现，不再作为最终相机契约。
+默认 Elevation 为 `60°`，保持明显俯视。WASD 使用 OrbitForward/Right 作为球面切向移动基准，角色只转向移动意图，不带动相机。按住 RMB 捕获并隐藏光标以调节 Yaw/Elevation，松开后恢复 HUD 光标；滚轮缩放，R 主动回正。切换主控时 ViewTarget 和 Orbit 状态不变，只用球面 Pivot Blend 平滑迁移目标。Camera Sphere Sweep 显式忽略所有鸟，并以快速收缩、慢速恢复避免遮挡弹跳。完整契约见 [M4MultiCharacterOrbitCameraDesign.md](M4MultiCharacterOrbitCameraDesign.md)。
 
 ## 4. 跟随规则落地
 
@@ -109,7 +110,7 @@ Red -> Blue -> Yellow -> Black
 
 切换主控后，以新主控为根，在剩余成员中按当前球面距离逐个选择最近鸟，生成稳定、无环的新链。HUD 仍保持 Red、Blue、Yellow、Black 原位置。
 
-局部分离只在小于 `SeparationDistanceCM` 时加入排斥意图，不使用全队质心 Cohesion。严重脱队且连续三秒没有进展时，鸟回收到其前导的安全 breadcrumb，而不是主控脚下。
+局部分离只在小于 `SeparationDistanceCM` 时加入排斥意图，不使用全队质心 Cohesion。排斥输入按进入分离半径的深度做平方渐强，在边界处连续归零；它与跟随 Arrival 分别计算，非跟随状态不会因为触发分离而额外获得朝队列槽位的拉力。合力接近抵消时不施力也不更新朝向，避免阈值附近的拉斥切换放大为旋转振荡。严重脱队且连续三秒没有进展时，鸟回收到其前导的安全 breadcrumb，而不是主控脚下。
 
 鸟群成员的 Capsule 会互相忽略 Pawn 碰撞，避免两个鸟体接触后被移动 Sweep 互相顶死；ForceSuspension 的手动查询必须读取 Capsule 实例的 Collision Response，不能使用会恢复默认响应的 `SweepSingleByProfile`。这不会忽略 WorldStatic 的 Cube、建筑或地形障碍。过近时仍会施加 Separation 意图，让鸟主动拉开，而不是依赖碰撞把它们分开。
 
@@ -150,7 +151,8 @@ Black
 ```text
 [ABTS][M4][Party] Initialized=1 Members=4 Controlled=Red ...
 [ABTS][M4] Party entry ready=1 StartCell=...
-[ABTS][M4][Controller] HUD mouse input and party switching ready.
+[ABTS][M4][Controller] Orbit camera, HUD mouse input and party switching ready.
+[ABTS][M4][OrbitCamera] ... RollError=0.000
 ```
 
 切换时：

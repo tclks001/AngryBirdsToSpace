@@ -1,6 +1,6 @@
 # M4：球面多角色 Orbit Camera 设计
 
-> 状态：方案已确定，等待替换当前“角色 Forward 驱动”的临时队伍相机。
+> 状态：C++ 已按本方案实现，等待编辑器手感与遮挡视觉验收。
 >
 > 本稿规定相机体验、球面数学、输入映射、主控切换和遮挡策略。它不修改鸟群跟随、移动力模型或 HUD 固定头像顺序。
 
@@ -56,7 +56,7 @@ CameraLocation = BirdLocation + RadialUp * Height - BirdForward * BackDistance
 
 ```text
 OrbitForwardTangent  // 玩家选择的水平观察方向
-ElevationDegrees     // 相机高于当地切平面的角度
+ElevationDegrees     // 有符号俯仰角：正值俯视，负值仰视
 OrbitDistanceCM      // 相机到注视锚点的距离
 ```
 
@@ -76,7 +76,17 @@ CameraLocation = Pivot
 CameraRotation = LookAt(CameraLocation, Pivot)
 ```
 
-这样 `Elevation=90°` 是正上方俯视，`Elevation=0°` 是当地地平线。推荐默认 `58°–65°`，既能看到前方道路，也保持清楚的俯视关系。
+`LookAt` 不能只用 Forward 构造。相机屏幕 Up 必须显式锁定为 `RadialUp` 在相机图像平面上的投影：
+
+```text
+LookDirection = normalize(Pivot - CameraLocation)
+ScreenUp = normalize(ProjectOnPlane(RadialUp, LookDirection))
+CameraBasis = MakeFromXZ(LookDirection, ScreenUp)
+```
+
+旋转平滑使用最短弧四元数插值；插值结果每帧再用当前 `RadialUp` 重建一次 X/Z 正交基，以消除四元数中间姿态可能出现的 Roll。禁止只调用 `MakeFromX`，也禁止对 Pitch/Yaw/Roll 欧拉角直接插值。
+
+这样 `Elevation=+85°` 接近正上方俯视，`Elevation=0°` 是当地地平线，`Elevation=-85°` 接近从地表向上仰视。运行时固定限制为 `[-85°, +85°]`；不允许到达正负 `90°`，因为此时 LookDirection 与 RadialUp 平行，屏幕 Up 投影会数值退化。推荐默认 `58°–65°`，既能看到前方道路，也保持清楚的俯视关系，但玩家可以连续穿过水平视角进入仰视。
 
 ### 4.1 球面移动时的方向运输
 
@@ -188,7 +198,7 @@ TargetScreenY ≈ 0.56–0.62
 4. 命中时快速缩短有效距离，避免穿模。
 5. 障碍消失时慢速恢复距离，避免“弹簧弹出”。
 6. 使用进入/退出不同速度和 `10–25 cm` 迟滞。
-7. 相机最小距离限制为 `240–320 cm`。
+7. 通常构图距离不应过近；但碰撞安全优先于舒适距离。进入负 Elevation 后轨道射线会靠近地表，命中时允许相机收缩到地面之前，禁止为了维持旧的最小臂长而把相机推入地形。
 
 建议：
 
@@ -217,9 +227,8 @@ ProbeRadiusCM           = 18–28
 | 参数 | 默认值 | 范围 |
 | --- | ---: | ---: |
 | `OrbitDistanceCM` | 850 | 550–1300 |
-| `DefaultElevationDegrees` | 60° | 35°–75° |
-| `MinElevationDegrees` | 35° | 25°–50° |
-| `MaxElevationDegrees` | 76° | 65°–85° |
+| `DefaultElevationDegrees` | 60° | -85°–+85° |
+| 运行时 Pitch 范围 | -85°–+85° | 固定安全范围 |
 | `LookAtHeightCM` | 35 | 0–120 |
 | `FieldOfViewDegrees` | 52° | 45°–70° |
 | `TargetSwitchBlendSeconds` | 0.48 s | 0.30–0.75 s |
@@ -265,7 +274,7 @@ ProbeRadiusCM           = 18–28
 ### 12.2 手动视角
 
 1. 按住 RMB 左右拖动，可绕主控连续旋转。
-2. RMB 上下拖动可在 Elevation 范围内改变俯视角。
+2. RMB 上下拖动可从 `+85°` 俯视连续经过 `0°` 水平视角，到达 `-85°` 仰视；两个方向都只在 85° 截断。
 3. 滚轮缩放不改变俯视方向。
 4. 松开 RMB 后光标恢复，能够点击四个固定 HUD 头像。
 5. 不操作相机时不会自动回到角色背后。

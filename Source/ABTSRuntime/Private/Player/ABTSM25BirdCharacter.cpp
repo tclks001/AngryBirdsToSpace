@@ -11,6 +11,7 @@
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSRadialSurfaceSuspensionComponent.h"
 #include "Planet/ABTSM2SphericalSurfaceComponent.h"
+#include "Player/ABTSM4PlayerController.h"
 
 AABTSM25BirdCharacter::AABTSM25BirdCharacter()
 {
@@ -131,7 +132,12 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsForward(const float Value)
 {
 	if (!FMath::IsNearlyZero(Value) && GetSphericalSurface()->IsSurfaceFrameReady())
 	{
-		const FVector Direction = GetSphericalSurface()->GetTangentForward();
+		FVector Direction = GetSphericalSurface()->GetTangentForward();
+		FVector CameraRight = FVector::ZeroVector;
+		if (const AABTSM4PlayerController* M4Controller = Cast<AABTSM4PlayerController>(Controller))
+		{
+			M4Controller->GetCameraRelativeMovementBasis(GetActorLocation(), Direction, CameraRight);
+		}
 		GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
 		if (bPartyControlled) ApplyMoveInput(Direction, Value);
 	}
@@ -141,7 +147,12 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsRight(const float Value)
 {
 	if (!FMath::IsNearlyZero(Value) && GetSphericalSurface()->IsSurfaceFrameReady())
 	{
-		const FVector Direction = GetSphericalSurface()->GetTangentRight();
+		FVector CameraForward = FVector::ZeroVector;
+		FVector Direction = GetSphericalSurface()->GetTangentRight();
+		if (const AABTSM4PlayerController* M4Controller = Cast<AABTSM4PlayerController>(Controller))
+		{
+			M4Controller->GetCameraRelativeMovementBasis(GetActorLocation(), CameraForward, Direction);
+		}
 		GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
 		if (bPartyControlled) ApplyMoveInput(Direction, Value);
 	}
@@ -149,11 +160,13 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsRight(const float Value)
 
 void AABTSM25BirdCharacter::TurnWithRadialPhysics(const float Value)
 {
+	if (Controller && Controller->IsA<AABTSM4PlayerController>()) return;
 	TurnOnSphere(Value);
 }
 
 void AABTSM25BirdCharacter::LookWithRadialPhysics(const float Value)
 {
+	if (Controller && Controller->IsA<AABTSM4PlayerController>()) return;
 	LookOnSphere(Value);
 }
 

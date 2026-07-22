@@ -19,14 +19,27 @@ public:
 
 	virtual void SetupInputComponent() override;
 	virtual void OnPossess(APawn* InPawn) override;
+	bool GetCameraRelativeMovementBasis(const FVector& WorldLocation, FVector& OutForward, FVector& OutRight) const;
 
 protected:
 	virtual void BeginPlay() override;
 
 private:
 	void CycleBird();
+	void BeginOrbitInput();
+	void EndOrbitInput();
+	void ApplyOrbitYaw(float Value);
+	void ApplyOrbitPitch(float Value);
+	void ApplyCameraZoom(float Value);
+	void RecenterCamera();
+	void SetCursorInteractionMode(bool bEnableCursor);
 	void EnsurePartyCameraView();
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM4PartyCamera> PartyCamera;
+
+	bool bOrbitInputHeld = false;
+	bool bSavedCursorPositionValid = false;
+	float SavedCursorX = 0.0f;
+	float SavedCursorY = 0.0f;
 };

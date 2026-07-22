@@ -78,14 +78,15 @@ bool AABTSBirdParty::InitializeParty(AABTSM25BirdCharacter* InitialLeader)
 		}
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M4][Party] Initialized=%d Members=%d Controlled=Red PawnCollisionIgnored=%d Settings=%s QueueSpacing=%.1f FollowStart=%.1f FollowStop=%.1f"),
+		TEXT("[ABTS][M4][Party] Initialized=%d Members=%d Controlled=Red PawnCollisionIgnored=%d Settings=%s QueueSpacing=%.1f FollowStart=%.1f FollowStop=%.1f Separation=%.1f Steering=SoftContinuous"),
 		bPartyReady ? 1 : 0,
 		PartyMembers.Num(),
 		PawnCollisionIgnoredCount,
 		*GetNameSafe(Settings.Get()),
 		Settings.IsValid() ? Settings->QueueSpacingCM : 190.0f,
 		Settings.IsValid() ? Settings->FollowStartDistanceCM : 250.0f,
-		Settings.IsValid() ? Settings->FollowStopDistanceCM : 145.0f);
+		Settings.IsValid() ? Settings->FollowStopDistanceCM : 145.0f,
+		Settings.IsValid() ? Settings->SeparationDistanceCM : 95.0f);
 	return bPartyReady;
 }
 
@@ -291,27 +292,51 @@ void AABTSBirdParty::UpdateFollower(
 		const float Distance = Offset.Size();
 		if (Distance > SMALL_NUMBER && Distance < SeparationDistance)
 		{
+			// A squared falloff makes separation a soft steering intent. The old
+			// normalized command turned even a sub-centimetre threshold crossing
+			// into almost full acceleration, so inertia repeatedly crossed the
+			// boundary and flipped the bird's facing direction every frame.
+			const float Proximity = 1.0f - Distance / FMath::Max(SeparationDistance, 1.0f);
 			Separation += FVector::VectorPlaneProject(Offset, Up).GetSafeNormal()
-				* (1.0f - Distance / SeparationDistance);
+				* FMath::Square(Proximity);
 		}
-		else if (Distance <= SMALL_NUMBER && Other == LeaderBird)
+		else if (Distance <= SMALL_NUMBER)
 		{
-			const FVector FallbackSeparation = FVector::VectorPlaneProject(
-				((ABTSBirdIdToIndex(Follower.BirdId) & 1) == 0 ? Bird->GetActorRightVector() : -Bird->GetActorRightVector()),
-				Up).GetSafeNormal();
-			Separation += FallbackSeparation;
+			// Exact overlap has no geometric escape direction. Use a stable,
+			// pair-antisymmetric tangent so both birds choose opposite sides.
+			const bool bUsePositiveSide = ABTSBirdIdToIndex(Follower.BirdId) < ABTSBirdIdToIndex(Other->GetBirdId());
+			const FVector ReferenceAxis = FMath::Abs(FVector::DotProduct(Up, FVector::UpVector)) < 0.9f
+				? FVector::UpVector
+				: FVector::ForwardVector;
+			const FVector PairTangent = FVector::CrossProduct(ReferenceAxis, Up).GetSafeNormal();
+			Separation += bUsePositiveSide ? PairTangent : -PairTangent;
 		}
 	}
 
-	if (Follower.bFollowing || !Separation.IsNearlyZero())
+	// Follow and separation are independent continuous steering commands.
+	// In particular, a resting follower must not receive a hidden pull toward
+	// its target merely because a neighbour activated separation.
+	FVector MoveCommand = Separation * 0.85f;
+	if (Follower.bFollowing)
 	{
 		const FVector FollowDirection = FVector::VectorPlaneProject(Target.Location - Bird->GetActorLocation(), Up).GetSafeNormal();
-		const FVector MoveDirection = (FollowDirection + Separation * 0.85f).GetSafeNormal();
-		const float ArrivalScale = FMath::Clamp((DistanceToTarget - FollowStop) / FMath::Max(FollowStart - FollowStop, 1.0f), 0.22f, 1.0f);
-		const float MoveScale = Follower.bFollowing
-			? (DistanceToTarget >= SevereDistance ? 1.0f : ArrivalScale)
-			: 0.65f;
-		Bird->ApplyPartyMoveInput(MoveDirection, MoveScale);
+		const float ArrivalScale = DistanceToTarget >= SevereDistance
+			? 1.0f
+			: FMath::Clamp(
+				(DistanceToTarget - FollowStop) / FMath::Max(FollowStart - FollowStop, 1.0f),
+				0.0f,
+				1.0f);
+		MoveCommand += FollowDirection * ArrivalScale;
+	}
+
+	MoveCommand = MoveCommand.GetClampedToMaxSize(1.0f);
+	const float MoveScale = MoveCommand.Size();
+	// Ignore a nearly cancelled command. Besides avoiding meaningless force,
+	// this prevents microscopic direction changes from snapping visual facing.
+	constexpr float SteeringDeadZone = 0.035f;
+	if (MoveScale > SteeringDeadZone)
+	{
+		Bird->ApplyPartyMoveInput(MoveCommand / MoveScale, MoveScale);
 	}
 
 	if (DistanceToTarget >= SevereDistance)
@@ -384,7 +409,6 @@ bool AABTSBirdParty::SwitchControlledBird(const EABTSBirdId NewBirdId)
 	OldBird->SetPartyControlled(false);
 	NewBird->SetPartyControlled(true);
 	PlayerController->Possess(NewBird);
-	PlayerController->SetControlRotation(NewBird->GetActorRotation());
 	ControlledBirdId = NewBirdId;
 	RebuildQueue(NewBirdId);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M4][Switch] Controlled=%d Queue=%d,%d,%d,%d"),
