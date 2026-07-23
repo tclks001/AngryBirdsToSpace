@@ -8,6 +8,7 @@
 
 class AABTSM51SlingshotDirtHole;
 class AABTSM51SlingshotStake;
+class AABTSM51SlingshotCord;
 class AABTSM51WorldSystem;
 
 /** M5.1 controller routes left click between HUD, world actors and ground placement. */
@@ -20,11 +21,13 @@ public:
 	virtual void SetupInputComponent() override;
 	void InteractWithDirtHole(AABTSM51SlingshotDirtHole* Hole);
 	void InteractWithStake(AABTSM51SlingshotStake* Stake);
+	virtual void InteractWithSlingshotCord(AABTSM51SlingshotCord* Cord) {}
+
+protected:
+	virtual void PrimaryWorldInteract();
 
 private:
-	void PrimaryWorldInteract();
 	AABTSM51WorldSystem* FindWorldSystem();
 
 	TWeakObjectPtr<AABTSM51WorldSystem> WorldSystem;
 };
-

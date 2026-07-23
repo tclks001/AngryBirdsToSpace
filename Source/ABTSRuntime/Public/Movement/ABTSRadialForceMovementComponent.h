@@ -11,6 +11,8 @@ class ACharacter;
 class UABTSRadialSurfaceSuspensionComponent;
 struct FABTSRadialSuspensionSample;
 
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FABTSBlockingImpactDelegate, const FHitResult&, float, const FVector&);
+
 /** Force-integrated player movement with CellTopo-derived radial suspension. */
 UCLASS(ClassGroup = (ABTS), meta = (BlueprintSpawnableComponent))
 class ABTSRUNTIME_API UABTSRadialForceMovementComponent : public UActorComponent
@@ -26,7 +28,23 @@ public:
 	void SetMoveInput(const FVector& Direction, float Scale);
 	void QueueJump();
 	void ResetMotionState();
+	/** Clears follower/player steering momentum without invalidating the current ground-contact cache. */
+	void ClearControlHandoffState();
+	void ClearControlHandoffInput();
+	void ClearControlHandoffVelocity();
+	/** Places a newly controlled follower on its CellTopo-derived surface and establishes stable contact. */
+	bool StabilizeForGroundedControlHandoff();
+	void GrantControlHandoffJumpGrace(float Seconds);
 	bool IsGrounded() const;
+	void BeginBallisticFlight(const FVector& InitialVelocity, float InFlightAirDragPerSecond);
+	void EndBallisticFlight(bool bResetVelocity);
+	void SetVelocity(const FVector& InVelocity) { Velocity = InVelocity; }
+	const FVector& GetVelocity() const { return Velocity; }
+	const FVector& GetPendingMoveVector() const { return PendingMoveVector; }
+	float GetJumpBufferRemainingSeconds() const { return JumpBufferRemainingSeconds; }
+	float GetControlHandoffJumpGraceRemainingSeconds() const { return ControlHandoffJumpGraceRemainingSeconds; }
+	bool IsBallisticFlight() const { return bBallisticFlight; }
+	FABTSBlockingImpactDelegate& OnBlockingImpact() { return BlockingImpact; }
 
 private:
 	AABTSM2Planet* FindPlanet();
@@ -53,6 +71,10 @@ private:
 	/** Linear tangent drag. 3600 / 5.3 gives a terminal ground speed near 680 cm/s. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Drag", meta = (ClampMin = "0.0", UIMax = "20.0"))
 	float GroundDragPerSecond = 5.3f;
+
+	/** Extra static/rolling resistance when grounded with no command; prevents directional momentum from masquerading as input. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Drag", meta = (ClampMin = "0.0", UIMax = "40.0"))
+	float GroundIdleBrakePerSecond = 14.0f;
 
 	/** Air drag is intentionally weak and never damps the radial jump velocity. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Drag", meta = (ClampMin = "0.0", UIMax = "5.0"))
@@ -96,4 +118,8 @@ private:
 	FVector PendingMoveVector = FVector::ZeroVector;
 	float JumpBufferRemainingSeconds = 0.0f;
 	bool bLoggedNoDependencies = false;
+	bool bBallisticFlight = false;
+	float BallisticFlightAirDragPerSecond = 0.08f;
+	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;
+	FABTSBlockingImpactDelegate BlockingImpact;
 };

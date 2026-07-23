@@ -101,8 +101,16 @@ AABTSM51SlingshotCord::AABTSM51SlingshotCord()
 	if (Cube.Succeeded()) Visual->SetStaticMesh(Cube.Object);
 }
 
-void AABTSM51SlingshotCord::InitializeCord(const FVector& EndpointA, const FVector& EndpointB)
+void AABTSM51SlingshotCord::InitializeCord(
+	AABTSM51SlingshotStake* InStakeA,
+	AABTSM51SlingshotStake* InStakeB,
+	const FVector& InEndpointA,
+	const FVector& InEndpointB)
 {
+	StakeA = InStakeA;
+	StakeB = InStakeB;
+	EndpointA = InEndpointA;
+	EndpointB = InEndpointB;
 	const FVector Delta = EndpointB - EndpointA;
 	const float Length = Delta.Size();
 	if (Length <= SMALL_NUMBER) return;
@@ -111,3 +119,17 @@ void AABTSM51SlingshotCord::InitializeCord(const FVector& EndpointA, const FVect
 	Visual->SetRelativeScale3D(FVector(Length / 100.0f, 0.035f, 0.035f));
 }
 
+EABTSItemId AABTSM51SlingshotCord::GetStakeItem() const
+{
+	return StakeA.IsValid() ? StakeA->GetStakeItem() : EABTSItemId::SimpleStake;
+}
+
+void AABTSM51SlingshotCord::NotifyActorOnClicked(const FKey ButtonPressed)
+{
+	Super::NotifyActorOnClicked(ButtonPressed);
+	if (ButtonPressed != EKeys::LeftMouseButton || GetWorld() == nullptr) return;
+	if (AABTSM51PlayerController* Controller = Cast<AABTSM51PlayerController>(GetWorld()->GetFirstPlayerController()))
+	{
+		Controller->InteractWithSlingshotCord(this);
+	}
+}

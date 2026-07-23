@@ -167,7 +167,7 @@ bool AABTSBirdParty::SpawnFollowers(AABTSM25BirdCharacter& InitialLeader)
 void AABTSBirdParty::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!bPartyReady || DeltaSeconds <= SMALL_NUMBER) return;
+	if (!bPartyReady || bSlingshotMode || DeltaSeconds <= SMALL_NUMBER) return;
 	RecordPathsAndJumpEvents(DeltaSeconds);
 	UpdateFollowers(DeltaSeconds);
 }
@@ -407,11 +407,17 @@ bool AABTSBirdParty::SwitchControlledBird(const EABTSBirdId NewBirdId)
 	if (NewBird == nullptr || OldBird == nullptr || PlayerController == nullptr) return false;
 
 	OldBird->SetPartyControlled(false);
-	NewBird->SetPartyControlled(true);
 	PlayerController->Possess(NewBird);
+	NewBird->SetPartyControlled(true);
+	// Possession callbacks and input-stack rebuilds are complete at this point.
+	// Clear both sides afterwards so no pre-transfer force survives into physics.
+	OldBird->ClearControlHandoffState();
+	NewBird->ClearControlHandoffState();
+	OldBird->BeginControlHandoffDiagnostics();
+	NewBird->BeginControlHandoffDiagnostics();
 	ControlledBirdId = NewBirdId;
 	RebuildQueue(NewBirdId);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M4][Switch] Controlled=%d Queue=%d,%d,%d,%d"),
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M4][Switch] Controlled=%d Queue=%d,%d,%d,%d NewLeaderGroundAligned=1 Authority=Possession"),
 		ABTSBirdIdToIndex(ControlledBirdId),
 		ABTSBirdIdToIndex(QueueOrder[0]),
 		ABTSBirdIdToIndex(QueueOrder[1]),

@@ -48,7 +48,25 @@ void UABTSM25RadialMovementComponent::ResetMotionState()
 	Velocity = FVector::ZeroVector;
 	PendingMoveVector = FVector::ZeroVector;
 	JumpBufferRemainingSeconds = 0.0f;
+	ControlHandoffJumpGraceRemainingSeconds = 0.0f;
 	bGrounded = false;
+}
+
+void UABTSM25RadialMovementComponent::ClearControlHandoffState()
+{
+	ClearControlHandoffVelocity();
+	JumpBufferRemainingSeconds = 0.0f;
+}
+
+void UABTSM25RadialMovementComponent::ClearControlHandoffVelocity()
+{
+	Velocity = FVector::ZeroVector;
+	PendingMoveVector = FVector::ZeroVector;
+}
+
+void UABTSM25RadialMovementComponent::GrantControlHandoffJumpGrace(const float Seconds)
+{
+	ControlHandoffJumpGraceRemainingSeconds = FMath::Max(ControlHandoffJumpGraceRemainingSeconds, FMath::Max(0.0f, Seconds));
 }
 
 void UABTSM25RadialMovementComponent::TickComponent(const float DeltaTime, const ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -101,7 +119,7 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 	// Refresh contact before consuming input. Reading only last frame's cached
 	// state makes a jump press dependent on tick order and transient contact loss.
 	ResolveBaseSphereContact(DeltaTime * 0.5f);
-	if (JumpBufferRemainingSeconds > 0.0f && bGrounded)
+	if (JumpBufferRemainingSeconds > 0.0f && (bGrounded || ControlHandoffJumpGraceRemainingSeconds > 0.0f))
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Up) + Up * JumpSpeedCMPerSec;
 		bGrounded = false;
@@ -121,6 +139,7 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 			UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M2.5][Jump] Rejected: buffer expired while not grounded."));
 		}
 	}
+	ControlHandoffJumpGraceRemainingSeconds = FMath::Max(0.0f, ControlHandoffJumpGraceRemainingSeconds - DeltaTime);
 
 	const FVector TangentInput = FVector::VectorPlaneProject(PendingMoveVector, Up).GetClampedToMaxSize(1.0f);
 	if (bGrounded)

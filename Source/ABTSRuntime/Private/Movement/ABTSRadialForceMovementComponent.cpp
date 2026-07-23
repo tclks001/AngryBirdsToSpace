@@ -25,11 +25,12 @@ void UABTSRadialForceMovementComponent::BeginPlay()
 	Super::BeginPlay();
 	AddTickPrerequisiteActor(GetOwner());
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][ForceSuspension] Movement ready. Mass=%.1f Gravity=%.1f MoveAccel=%.1f GroundDrag=%.2f AirDrag=%.2f TerminalSpeed=%.1f Step=%.5f"),
+		TEXT("[ABTS][ForceSuspension] Movement ready. Mass=%.1f Gravity=%.1f MoveAccel=%.1f GroundDrag=%.2f IdleBrake=%.2f AirDrag=%.2f TerminalSpeed=%.1f Step=%.5f"),
 		VirtualMassKG,
 		GravityAccelerationCMPerSec2,
 		GroundMoveAccelerationCMPerSec2,
 		GroundDragPerSecond,
+		GroundIdleBrakePerSecond,
 		AirDragPerSecond,
 		GroundDragPerSecond > SMALL_NUMBER ? GroundMoveAccelerationCMPerSec2 / GroundDragPerSecond : 0.0f,
 		MaxSimulationStepSeconds);
@@ -92,10 +93,98 @@ void UABTSRadialForceMovementComponent::ResetMotionState()
 	Velocity = FVector::ZeroVector;
 	PendingMoveVector = FVector::ZeroVector;
 	JumpBufferRemainingSeconds = 0.0f;
+	ControlHandoffJumpGraceRemainingSeconds = 0.0f;
 	if (UABTSRadialSurfaceSuspensionComponent* ResolvedSuspension = FindSuspension())
 	{
 		ResolvedSuspension->ResetSuspensionState();
 	}
+}
+
+void UABTSRadialForceMovementComponent::ClearControlHandoffState()
+{
+	ClearControlHandoffVelocity();
+	JumpBufferRemainingSeconds = 0.0f;
+	bBallisticFlight = false;
+}
+
+void UABTSRadialForceMovementComponent::ClearControlHandoffInput()
+{
+	PendingMoveVector = FVector::ZeroVector;
+	JumpBufferRemainingSeconds = 0.0f;
+	ControlHandoffJumpGraceRemainingSeconds = 0.0f;
+	bBallisticFlight = false;
+}
+
+void UABTSRadialForceMovementComponent::ClearControlHandoffVelocity()
+{
+	Velocity = FVector::ZeroVector;
+	PendingMoveVector = FVector::ZeroVector;
+}
+
+bool UABTSRadialForceMovementComponent::StabilizeForGroundedControlHandoff()
+{
+	ACharacter* Character = Cast<ACharacter>(GetOwner());
+	AABTSM2Planet* ResolvedPlanet = FindPlanet();
+	UABTSRadialSurfaceSuspensionComponent* ResolvedSuspension = FindSuspension();
+	if (Character == nullptr || ResolvedPlanet == nullptr || ResolvedSuspension == nullptr) return false;
+
+	const FVector OriginalVelocity = Velocity;
+	const FABTSRadialSuspensionSample Before = ResolvedSuspension->Evaluate(
+		*ResolvedPlanet,
+		*Character,
+		Velocity,
+		GravityAccelerationCMPerSec2,
+		0.0f);
+	const bool bNeedsSurfaceAlignment = !Before.bGrounded;
+	ClearControlHandoffState();
+	if (bNeedsSurfaceAlignment)
+	{
+		const FVector Center = ResolvedPlanet->GetPlanetCenterWorld();
+		Character->SetActorLocation(
+			Center + Before.RadialUp * Before.DesiredCenterRadiusCM,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+	}
+	ResolvedSuspension->ResetSuspensionState();
+	const FABTSRadialSuspensionSample After = ResolvedSuspension->Evaluate(
+		*ResolvedPlanet,
+		*Character,
+		Velocity,
+		GravityAccelerationCMPerSec2,
+		0.0f);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M4][HandoffGround] Snapped=%d BeforeGround=%d BeforeHeight=%.2f BeforeSpeed=%.2f AfterGround=%d AfterHeight=%.2f"),
+		bNeedsSurfaceAlignment ? 1 : 0,
+		Before.bGrounded ? 1 : 0,
+		Before.HeightAboveTargetCM,
+		FVector::DotProduct(OriginalVelocity, Before.RadialUp),
+		After.bGrounded ? 1 : 0,
+		After.HeightAboveTargetCM);
+	return After.bGrounded;
+}
+
+void UABTSRadialForceMovementComponent::GrantControlHandoffJumpGrace(const float Seconds)
+{
+	ControlHandoffJumpGraceRemainingSeconds = FMath::Max(ControlHandoffJumpGraceRemainingSeconds, FMath::Max(0.0f, Seconds));
+}
+
+void UABTSRadialForceMovementComponent::BeginBallisticFlight(
+	const FVector& InitialVelocity,
+	const float InFlightAirDragPerSecond)
+{
+	bBallisticFlight = true;
+	BallisticFlightAirDragPerSecond = FMath::Max(0.0f, InFlightAirDragPerSecond);
+	Velocity = InitialVelocity;
+	PendingMoveVector = FVector::ZeroVector;
+	JumpBufferRemainingSeconds = 0.0f;
+	if (UABTSRadialSurfaceSuspensionComponent* ResolvedSuspension = FindSuspension()) ResolvedSuspension->ResetSuspensionState();
+}
+
+void UABTSRadialForceMovementComponent::EndBallisticFlight(const bool bResetVelocity)
+{
+	bBallisticFlight = false;
+	if (bResetVelocity) ResetMotionState();
 }
 
 bool UABTSRadialForceMovementComponent::IsGrounded() const
@@ -132,11 +221,16 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	UABTSRadialSurfaceSuspensionComponent* ResolvedSuspension = FindSuspension();
 	if (ResolvedSuspension == nullptr) return;
 
+	const float CurrentRadiusCM = FVector::Distance(Character.GetActorLocation(), ResolvedPlanet.GetPlanetCenterWorld());
+	const float ReferenceRadiusCM = FMath::Max(ResolvedPlanet.GetPlanetRadiusCM(), 1.0f);
+	const float LocalGravityAcceleration = bBallisticFlight
+		? GravityAccelerationCMPerSec2 * FMath::Square(ReferenceRadiusCM / FMath::Max(CurrentRadiusCM, 1.0f))
+		: GravityAccelerationCMPerSec2;
 	FABTSRadialSuspensionSample Surface = ResolvedSuspension->Evaluate(
 		ResolvedPlanet,
 		Character,
 		Velocity,
-		GravityAccelerationCMPerSec2,
+		LocalGravityAcceleration,
 		DeltaTime);
 	if (EnsureGroundClearance(Character, ResolvedPlanet, Surface))
 	{
@@ -146,12 +240,12 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 			ResolvedPlanet,
 			Character,
 			Velocity,
-			GravityAccelerationCMPerSec2,
+			LocalGravityAcceleration,
 			DeltaTime);
 	}
 
 	bool bJumpAccepted = false;
-	if (JumpBufferRemainingSeconds > 0.0f && Surface.bGrounded)
+	if (JumpBufferRemainingSeconds > 0.0f && (Surface.bGrounded || ControlHandoffJumpGraceRemainingSeconds > 0.0f))
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Surface.RadialUp) + Surface.RadialUp * JumpSpeedCMPerSec;
 		ResolvedSuspension->NotifyJump();
@@ -177,8 +271,11 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 				TEXT("[ABTS][ForceSuspension][Jump] Rejected: buffer expired while not grounded."));
 		}
 	}
+	ControlHandoffJumpGraceRemainingSeconds = FMath::Max(0.0f, ControlHandoffJumpGraceRemainingSeconds - DeltaTime);
 
-	const FVector Input = FVector::VectorPlaneProject(PendingMoveVector, Surface.RadialUp).GetClampedToMaxSize(1.0f);
+	const FVector Input = bBallisticFlight
+		? FVector::ZeroVector
+		: FVector::VectorPlaneProject(PendingMoveVector, Surface.RadialUp).GetClampedToMaxSize(1.0f);
 	// Support may begin slightly above the ground to damp a landing. It is not a
 	// collision contact, so it must not grant ground control or ground friction.
 	const FVector MovementPlaneNormal = Surface.bGrounded ? Surface.SurfaceNormal : Surface.RadialUp;
@@ -197,10 +294,11 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 			const FVector Direction = (Character.GetActorLocation() - ResolvedPlanet.GetPlanetCenterWorld()).GetSafeNormal();
 			if (M3Planet->QuerySurfacePhysics(Direction, PhysicsSample)) DragPerSecond = PhysicsSample.GroundDragPerSecond;
 		}
+		if (InputMagnitude <= 0.01f) DragPerSecond = FMath::Max(DragPerSecond, GroundIdleBrakePerSecond);
 	}
 	const float MassKG = FMath::Max(0.1f, VirtualMassKG);
 
-	const FVector GravityForce = -Surface.RadialUp * (MassKG * GravityAccelerationCMPerSec2);
+	const FVector GravityForce = -Surface.RadialUp * (MassKG * LocalGravityAcceleration);
 	const FVector SupportForce = Surface.RadialUp * (MassKG * Surface.OutwardSupportAccelerationCMPerSec2);
 	const FVector MoveForce = MoveDirection * (MassKG * GroundMoveAccelerationCMPerSec2 * ControlScale * InputMagnitude);
 	FVector DragForce = -TangentVelocity * (MassKG * DragPerSecond);
@@ -211,9 +309,18 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 			* (MassKG * OverspeedDragPerSecond * (TangentSpeed - DesignMaxGroundSpeedCMPerSec));
 	}
 
-	const FVector AirDragForce = -Velocity * (MassKG * FMath::Max(0.0f, AirDragPerSecond));
+	const float ResolvedAirDrag = bBallisticFlight ? BallisticFlightAirDragPerSecond : AirDragPerSecond;
+	const FVector AirDragForce = -Velocity * (MassKG * FMath::Max(0.0f, ResolvedAirDrag));
 	const FVector NetForce = GravityForce + SupportForce + MoveForce + DragForce + AirDragForce;
 	Velocity += (NetForce / MassKG) * DeltaTime;
+	if (Surface.bGrounded)
+	{
+		// BuildGroundFollowingDelta owns radial ground tracking. Keeping a second
+		// radial velocity state lets spring overshoot alternate Grounded/Airborne
+		// and generates false M4 jump events. Ground velocity is therefore purely
+		// tangential; slopes are followed by the CellTopo-derived target radius.
+		Velocity = FVector::VectorPlaneProject(Velocity, Surface.RadialUp);
+	}
 	const FVector RequestedDelta = BuildGroundFollowingDelta(Character, ResolvedPlanet, Surface, Velocity * DeltaTime);
 	MoveWithCollision(Character, ResolvedPlanet, RequestedDelta);
 }
@@ -226,10 +333,19 @@ bool UABTSRadialForceMovementComponent::EnsureGroundClearance(
 	if (!Surface.bSupportActive || Surface.HeightAboveTargetCM >= -KINDA_SMALL_NUMBER) return false;
 	const FVector Center = ResolvedPlanet.GetPlanetCenterWorld();
 	const FVector Up = ResolvedPlanet.GetRadialUpAtWorldLocation(Character.GetActorLocation());
+	const float InwardRadialSpeed = FVector::DotProduct(Velocity, Up);
+	if (InwardRadialSpeed < 0.0f)
+	{
+		// Position depenetration and velocity resolution are one contact operation.
+		// Keeping an inward velocity after teleporting to the support radius made
+		// the next substep penetrate again and drove the spring to +/-MaxSupport.
+		Velocity -= Up * InwardRadialSpeed;
+	}
 	Character.SetActorLocation(Center + Up * Surface.DesiredCenterRadiusCM, false, nullptr, ETeleportType::TeleportPhysics);
-	UE_LOG(LogABTSRuntime, Verbose,
-		TEXT("[ABTS][M5.2][GroundContact] Depenetrated radial support by %.2fcm."),
-		-Surface.HeightAboveTargetCM);
+	UE_LOG(LogABTSRuntime, VeryVerbose,
+		TEXT("[ABTS][M5.2][GroundContact] Depenetrated=%.2f RemovedInwardSpeed=%.2f"),
+		-Surface.HeightAboveTargetCM,
+		FMath::Max(0.0f, -InwardRadialSpeed));
 	return true;
 }
 
@@ -345,6 +461,7 @@ void UABTSRadialForceMovementComponent::MoveWithCollision(
 
 void UABTSRadialForceMovementComponent::ResolveBlockingHit(const FHitResult& Hit, const AABTSM2Planet& ResolvedPlanet)
 {
+	const FVector IncomingVelocity = Velocity;
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	const float IntoSurfaceSpeed = FVector::DotProduct(Velocity, Normal);
 	if (IntoSurfaceSpeed < 0.0f)
@@ -360,5 +477,9 @@ void UABTSRadialForceMovementComponent::ResolveBlockingHit(const FHitResult& Hit
 				Velocity += Normal * (-IntoSurfaceSpeed * PhysicsSample.Restitution);
 			}
 		}
+	}
+	if (bBallisticFlight)
+	{
+		BlockingImpact.Broadcast(Hit, FMath::Max(0.0f, -FVector::DotProduct(IncomingVelocity, Normal)), IncomingVelocity);
 	}
 }

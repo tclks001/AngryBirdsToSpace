@@ -20,6 +20,7 @@ public:
 	virtual void SetupInputComponent() override;
 	virtual void OnPossess(APawn* InPawn) override;
 	bool GetCameraRelativeMovementBasis(const FVector& WorldLocation, FVector& OutForward, FVector& OutRight) const;
+	void RestorePartyCameraView() { EnsurePartyCameraView(); }
 
 protected:
 	virtual void BeginPlay() override;

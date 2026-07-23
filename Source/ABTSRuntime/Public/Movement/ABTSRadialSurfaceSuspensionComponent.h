@@ -46,6 +46,7 @@ public:
 	void NotifyJump();
 	void ResetSuspensionState();
 	bool IsGrounded() const { return bGrounded; }
+	bool IsJumpDetachActive() const { return bJumpDetachActive; }
 
 private:
 	/** Collision skin above the queried surface. Keeps a contact capsule out of the complex terrain triangles. */
@@ -67,6 +68,10 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Ground", meta = (ClampMin = "0.0", UIMax = "100.0"))
 	float GroundedExitDistanceCM = 24.0f;
 
+	/** Outward radial speed above this always means airborne, even inside the distance hysteresis band. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Ground", meta = (ClampMin = "0.0", UIMax = "1000.0"))
+	float UngroundSpeedCMPerSec = 120.0f;
+
 	/** Natural frequency of the radial spring. Higher values track terrain faster but require smaller simulation steps. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Spring", meta = (ClampMin = "0.1", ClampMax = "20.0", UIMax = "10.0"))
 	float SpringFrequencyHz = 4.0f;
@@ -78,10 +83,12 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Spring", meta = (ClampMin = "100.0", UIMax = "20000.0"))
 	float MaxSupportAccelerationCMPerSec2 = 7000.0f;
 
-	/** Prevents the suspension from immediately catching the character after a jump impulse. */
+	/** Minimum time for which a jump disables support. Support also stays disabled for the complete outward ascent. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Suspension|Jump", meta = (ClampMin = "0.0", UIMax = "0.5"))
 	float JumpSupportDisableSeconds = 0.14f;
 
 	bool bGrounded = false;
+	/** A jump must finish its outward ascent before radial support may capture it again. */
+	bool bJumpDetachActive = false;
 	float SupportDisabledRemainingSeconds = 0.0f;
 };

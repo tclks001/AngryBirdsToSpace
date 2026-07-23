@@ -71,6 +71,8 @@ public:
 	AABTSBirdPartySettings* GetResolvedSettings() const { return Settings.Get(); }
 	bool IsPartyReady() const { return bPartyReady; }
 	int32 GetMemberCount() const { return PartyMembers.Num(); }
+	const TArray<TObjectPtr<AABTSM25BirdCharacter>>& GetPartyMembers() const { return PartyMembers; }
+	void SetSlingshotMode(bool bEnabled) { bSlingshotMode = bEnabled; }
 
 private:
 	void BuildResolvedPresentation();
@@ -103,4 +105,5 @@ private:
 	int32 PathGeneration = 1;
 	int32 NextJumpSerial = 1;
 	bool bPartyReady = false;
+	bool bSlingshotMode = false;
 };

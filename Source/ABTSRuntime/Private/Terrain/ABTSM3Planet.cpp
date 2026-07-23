@@ -50,7 +50,7 @@ AABTSM3Planet::AABTSM3Planet()
 	ForestHISM->SetupAttachment(ContinuousSurface);
 	// Instances remain static presentation/collision geometry until a future M6
 	// launch hit explicitly converts one instance into a pooled destruction proxy.
-	ForestHISM->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	ForestHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	ForestHISM->SetCollisionObjectType(ECC_WorldStatic);
 	ForestHISM->SetCollisionResponseToAllChannels(ECR_Block);
 	ForestHISM->SetSimulatePhysics(false);
@@ -59,7 +59,7 @@ AABTSM3Planet::AABTSM3Planet()
 
 	RockHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("RockHISM"));
 	RockHISM->SetupAttachment(ContinuousSurface);
-	RockHISM->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	RockHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	RockHISM->SetCollisionObjectType(ECC_WorldStatic);
 	RockHISM->SetCollisionResponseToAllChannels(ECR_Block);
 	RockHISM->SetSimulatePhysics(false);

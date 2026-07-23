@@ -232,6 +232,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M4 | 鸟群 | 四鸟可见；Tab/HUD 切换；蓝鸟树枝近射、红/黄简易弹弓、黑鸟强化弹弓的入口与限制明确。 |
 | M5 | 加工与组件 | 共享物品栏、背包/加工界面、红鸟加工权限、附近工作台/熔炉配方和制作数量流程已实现；正式站点放置、拾取与弹弓组件表现进入 M5.1。详见 [M5InventoryCraftingImplementationDesign.md](M5InventoryCraftingImplementationDesign.md)。 |
 | M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 弹弓槽和桩/弦两次点击装配。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
+| M6 | 弹弓发射与碰撞 | 已连接弹弓进入瞄准/拉伸/万有引力预测/发射闭环；HISM 按命中提升动态代理并支持连锁破坏，黑鸟支持手动/延时爆炸，落地静默后物体冻结与队伍回归。详见 [M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。 |
 | M6 | 弹弓槽 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。 |
 | M7 | 建筑生成与破坏 | 生成一座模块化建筑，含承重件、至少一个连锁装置和材料货仓；鸟撞击可使其结构性坍塌。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |

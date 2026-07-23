@@ -24,7 +24,15 @@ public:
 	void SetMoveInput(const FVector& Direction, float Scale);
 	void QueueJump();
 	void ResetMotionState();
+	/** Clears handoff momentum but preserves bGrounded so an immediate jump remains valid. */
+	void ClearControlHandoffState();
+	void ClearControlHandoffVelocity();
+	void GrantControlHandoffJumpGrace(float Seconds);
 	bool IsGrounded() const { return bGrounded; }
+	const FVector& GetVelocity() const { return Velocity; }
+	const FVector& GetPendingMoveVector() const { return PendingMoveVector; }
+	float GetJumpBufferRemainingSeconds() const { return JumpBufferRemainingSeconds; }
+	float GetControlHandoffJumpGraceRemainingSeconds() const { return ControlHandoffJumpGraceRemainingSeconds; }
 
 private:
 	AABTSM2Planet* FindPlanet();
@@ -81,4 +89,5 @@ private:
 	bool bGrounded = false;
 	bool bLoggedNoReadyPlanet = false;
 	float JumpBufferRemainingSeconds = 0.0f;
+	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;
 };

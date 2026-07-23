@@ -83,10 +83,18 @@ class ABTSRUNTIME_API AABTSM51SlingshotCord : public AActor
 
 public:
 	AABTSM51SlingshotCord();
-	void InitializeCord(const FVector& EndpointA, const FVector& EndpointB);
+	void InitializeCord(AABTSM51SlingshotStake* InStakeA, AABTSM51SlingshotStake* InStakeB, const FVector& InEndpointA, const FVector& InEndpointB);
+	FVector GetEndpointA() const { return EndpointA; }
+	FVector GetEndpointB() const { return EndpointB; }
+	EABTSItemId GetStakeItem() const;
+	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Visual;
-};
 
+	TWeakObjectPtr<AABTSM51SlingshotStake> StakeA;
+	TWeakObjectPtr<AABTSM51SlingshotStake> StakeB;
+	FVector EndpointA = FVector::ZeroVector;
+	FVector EndpointB = FVector::ZeroVector;
+};

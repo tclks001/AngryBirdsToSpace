@@ -315,7 +315,7 @@ bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
 	const FVector EndpointB = Stake.GetActorLocation() + Stake.GetUnitDirection() * 80.0f;
 	AABTSM51SlingshotCord* Cord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(CordClass, FTransform::Identity);
 	if (Cord == nullptr) return false;
-	Cord->InitializeCord(EndpointA, EndpointB);
+	Cord->InitializeCord(First, &Stake, EndpointA, EndpointB);
 	First->SetHasCord(true);
 	Stake.SetHasCord(true);
 	PendingCordStake.Reset();

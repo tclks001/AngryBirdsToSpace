@@ -26,6 +26,7 @@ void AABTSM51PlayerController::PrimaryWorldInteract()
 	{
 		if (Hit.GetActor() && (Hit.GetActor()->IsA<AABTSM51SlingshotDirtHole>()
 			|| Hit.GetActor()->IsA<AABTSM51SlingshotStake>()
+			|| Hit.GetActor()->IsA<AABTSM51SlingshotCord>()
 			|| Hit.GetActor()->IsA<AABTSCraftingStation>())) return;
 	}
 	if (AABTSM51WorldSystem* System = FindWorldSystem()) System->PlaceHeldToolAtAim(*this);
@@ -57,4 +58,3 @@ AABTSM51WorldSystem* AABTSM51PlayerController::FindWorldSystem()
 	}
 	return nullptr;
 }
-

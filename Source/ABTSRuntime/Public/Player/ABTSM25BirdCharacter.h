@@ -29,10 +29,17 @@ public:
 	AABTSM25BirdCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void UnPossessed() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	/** Clears both implementations so a spawn teleport cannot retain stale velocity. */
 	void ResetRadialMovementState();
+	/** Used by party control changes; unlike ResetRadialMovementState it preserves grounding. */
+	void ClearControlHandoffState();
+	void BeginControlHandoffDiagnostics(float Seconds = 4.0f);
+	bool IsControlHandoffDiagnosticsActive() const { return ControlDiagnosticRemainingSeconds > 0.0f; }
 	void SetBirdIdentity(EABTSBirdId InBirdId, EABTSBirdSlingshotCapability InCapability, bool bInPlayerControlled);
 	void SetPartyCollisionIsolation(bool bIsolateFromParty);
 	void SetPartyControlled(bool bInPlayerControlled);
@@ -44,6 +51,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M4|Slingshot")
 	bool CanUseSlingshotCapability(EABTSBirdSlingshotCapability RequiredCapability) const;
 	bool IsPartyControlled() const { return bPartyControlled; }
+	void EnterSlingshotPouch(const FVector& WorldLocation, const FQuat& WorldRotation);
+	void LaunchFromSlingshot(const FVector& InitialVelocity, float FlightAirDragPerSecond);
+	void BeginSlingshotReturn();
+	void FinishSlingshotReturn();
+	void SetSlingshotVelocity(const FVector& InVelocity);
+	FVector GetSlingshotVelocity() const;
+	bool IsSlingshotFlightActive() const;
+	UABTSRadialForceMovementComponent* GetForceMovementComponent() const { return ForceMovement; }
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|Movement")
 	EABTSBirdMovementMode GetSelectedMovementMode() const { return MovementMode; }
@@ -56,6 +71,7 @@ private:
 	void TurnWithRadialPhysics(float Value);
 	void LookWithRadialPhysics(float Value);
 	void BeginRadialJump();
+	void LogControlDiagnosticSnapshot();
 
 	/** Select on the C++ class defaults or a Blueprint child before starting PIE. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|Movement", meta = (AllowPrivateAccess = "true"))
@@ -69,6 +85,9 @@ private:
 	EABTSBirdSlingshotCapability SlingshotCapability = EABTSBirdSlingshotCapability::Simple;
 
 	bool bPartyControlled = true;
+	float ControlDiagnosticRemainingSeconds = 0.0f;
+	float ControlDiagnosticLogAccumulator = 0.0f;
+	ECollisionEnabled::Type SavedCapsuleCollision = ECollisionEnabled::QueryAndPhysics;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|Movement|Legacy", meta = (AllowPrivateAccess = "true", NoEditInline))
 	TObjectPtr<UABTSM25RadialMovementComponent> RadialMovement;
