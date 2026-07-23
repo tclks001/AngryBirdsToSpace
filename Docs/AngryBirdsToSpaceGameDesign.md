@@ -221,6 +221,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 
 > M1 的 C++ 职责、编辑器建图步骤、验收与排错见 [M1IndependentEntryDesign.md](M1IndependentEntryDesign.md)。
 > M2.5 的径向引力、碰撞、跳跃与编辑器验收见 [M25RadialGravityAndJumpDesign.md](M25RadialGravityAndJumpDesign.md)。
+> 当前已验收的 Chaos 刚体球面移动、碰撞与编辑器配置见 [ChaosRigidBodyMovementDesign.md](ChaosRigidBodyMovementDesign.md)。旧 `ForceSuspension`/`LegacySweep` 仅作为对照路线保留。
 
 初版目标：先完成一个目标的完整纵向切片，验证 PCG 与物理弹射真正相互决定；暂不扩展为多建筑、多卫星或完整资源阶梯。评审视频应保留地图生成、道路/水网、建筑坍塌、卫星引力和终局的过程证据。
 

@@ -5,6 +5,8 @@
 > 前置：[M2PlanetSurfaceDesign.md](M2PlanetSurfaceDesign.md)。本阶段只替换角色运动，不修改 `CellTopo`、连续球面拓扑、PCG 或资源玩法。
 >
 > M3 坡面现已新增默认的力模型与径向悬挂移动，并保留本稿旧 Sweep 实现作为对照，详见 [ForceSuspensionMovementDesign.md](ForceSuspensionMovementDesign.md)。
+>
+> 当前已完成验收的正式移动路线为 Chaos 刚体；其独立设计、碰撞边界、参数与验收见 [ChaosRigidBodyMovementDesign.md](ChaosRigidBodyMovementDesign.md)。本稿及力悬挂稿保留为历史对照与回归路径。
 
 ## 1. 目标与边界
 
