@@ -3,6 +3,7 @@
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -67,6 +68,7 @@ bool AABTSM6SlingshotSystem::ResolveDependencies()
 {
 	if (!Party.IsValid()) for (TActorIterator<AABTSBirdParty> It(GetWorld()); It; ++It) { Party = *It; break; }
 	if (!Planet.IsValid()) for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It) if (It->IsPlanetReady()) { Planet = *It; break; }
+	if (!BuildingMaterialSystem.IsValid()) for (TActorIterator<AABTSM7BuildingMaterialSystem> It(GetWorld()); It; ++It) { BuildingMaterialSystem = *It; break; }
 	return Party.IsValid() && Party->IsPartyReady() && Planet.IsValid();
 }
 
@@ -218,8 +220,13 @@ void AABTSM6SlingshotSystem::BuildLaunchFrame(AABTSM51SlingshotCord& Cord, AABTS
 	SlingCenter = (Cord.GetEndpointA() + Cord.GetEndpointB()) * 0.5f;
 	SlingUp = Planet->GetRadialUpAtWorldLocation(SlingCenter);
 	SlingRight = FVector::VectorPlaneProject(Cord.GetEndpointB() - Cord.GetEndpointA(), SlingUp).GetSafeNormal();
-	SlingForward = FVector::VectorPlaneProject(SlingCenter - Bird.GetActorLocation(), SlingUp).GetSafeNormal();
-	if (SlingForward.IsNearlyZero()) SlingForward = FVector::CrossProduct(SlingRight, SlingUp).GetSafeNormal();
+	// The cord's tangent-plane normal is the fixed launch axis and camera axis.
+	// Choose the side facing the bird only once on entry; cursor pull does not
+	// mutate this frame.
+	SlingForward = FVector::CrossProduct(SlingRight, SlingUp).GetSafeNormal();
+	const FVector BirdSide = FVector::VectorPlaneProject(SlingCenter - Bird.GetActorLocation(), SlingUp).GetSafeNormal();
+	if (SlingForward.IsNearlyZero()) SlingForward = BirdSide;
+	if (!BirdSide.IsNearlyZero() && FVector::DotProduct(SlingForward, BirdSide) < 0.0f) SlingForward *= -1.0f;
 	if (FVector::DotProduct(FVector::CrossProduct(SlingUp, SlingForward), SlingRight) < 0.0f) SlingRight *= -1.0f;
 	RestPouchLocation = SlingCenter - SlingForward * 115.0f + SlingUp * 42.0f;
 	PouchLocation = RestPouchLocation;
@@ -284,7 +291,6 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
 	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
 	LaunchedBird->SetActorLocationAndRotation(PouchLocation, FRotationMatrix::MakeFromXZ(Direction, SlingUp).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
-	if (SlingshotCamera) SlingshotCamera->SetAimFrame(SlingCenter, Direction, SlingUp);
 }
 
 FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const
@@ -387,9 +393,28 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 	const FABTSM6MaterialImpactProfile& MaterialProfile = GetMaterialProfile(Material);
 	const float KnockThreshold = BirdProfile.KnockSpeedCMPerSec * MaterialProfile.KnockThresholdMultiplier;
 	const float BreakThreshold = BirdProfile.BreakSpeedCMPerSec * MaterialProfile.BreakThresholdMultiplier;
-	if (UHierarchicalInstancedStaticMeshComponent* HISM = Cast<UHierarchicalInstancedStaticMeshComponent>(Hit.GetComponent()))
+	const bool bHandledByM7 = BuildingMaterialSystem.IsValid()
+		&& BuildingMaterialSystem->HandleBirdImpact(Hit.GetComponent(), Hit.Item, NormalSpeedCMPerSec, IncomingVelocity, LaunchedBird->GetBirdId());
+	if (!bHandledByM7)
 	{
-		PromoteOrBreakHISM(*HISM, Hit.Item, Material, NormalSpeedCMPerSec, IncomingVelocity, KnockThreshold, BreakThreshold);
+		if (UHierarchicalInstancedStaticMeshComponent* HISM = Cast<UHierarchicalInstancedStaticMeshComponent>(Hit.GetComponent()))
+		{
+			PromoteOrBreakHISM(*HISM, Hit.Item, Material, NormalSpeedCMPerSec, IncomingVelocity, KnockThreshold, BreakThreshold);
+		}
+		else if (AABTSM6DestructibleProxy* Proxy = Cast<AABTSM6DestructibleProxy>(Hit.GetActor()))
+		{
+			if (NormalSpeedCMPerSec >= BreakThreshold)
+			{
+				Proxy->Shatter();
+				DynamicProxies.RemoveAllSwap([Proxy](const TWeakObjectPtr<AABTSM6DestructibleProxy>& Entry){ return !Entry.IsValid() || Entry.Get() == Proxy; });
+				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][ProxyBreak] Material=%d Speed=%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec);
+			}
+			else if (NormalSpeedCMPerSec >= KnockThreshold)
+			{
+				Proxy->Reactivate(IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f);
+				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][ProxyReactivated] Material=%d Speed=%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec);
+			}
+		}
 	}
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	const FVector Tangent = FVector::VectorPlaneProject(IncomingVelocity, Normal);
@@ -424,29 +449,53 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 	if (!LaunchedBird.IsValid() || bBlackDetonated) return;
 	bBlackDetonated = true;
 	int32 BrokenInstances = 0;
+	int32 ImpulsedInstances = 0;
 	for (UHierarchicalInstancedStaticMeshComponent* HISM : {Planet->ForestHISM.Get(), Planet->RockHISM.Get()})
 	{
 		if (HISM == nullptr) continue;
-		TArray<int32> Indices = HISM->GetInstancesOverlappingSphere(LaunchedBird->GetActorLocation(), BlackExplosionRadiusCM, true);
+		TArray<int32> Indices = HISM->GetInstancesOverlappingSphere(LaunchedBird->GetActorLocation(), BlackExplosionImpulseRadiusCM, true);
 		Indices.Sort(TGreater<int32>());
-		for (const int32 Index : Indices) if (HISM->RemoveInstance(Index)) ++BrokenInstances;
+		for (const int32 Index : Indices)
+		{
+			FTransform Transform;
+			if (!HISM->GetInstanceTransform(Index, Transform, true)) continue;
+			const FVector Delta = Transform.GetLocation() - LaunchedBird->GetActorLocation();
+			if (Delta.Size() <= BlackExplosionRadiusCM)
+			{
+				if (HISM->RemoveInstance(Index)) ++BrokenInstances;
+			}
+			else
+			{
+				const EABTSM6ImpactMaterial Type = ResolveMaterial(HISM);
+				const float Speed = BlackExplosionImpulseSpeedCMPerSec * (1.0f - Delta.Size() / FMath::Max(BlackExplosionImpulseRadiusCM, 1.0f));
+				if (PromoteOrBreakHISM(*HISM, Index, Type, Speed, Delta, 0.0f, BIG_NUMBER)) ++ImpulsedInstances;
+			}
+		}
 	}
 	int32 BrokenProxies = 0;
 	for (int32 Index = DynamicProxies.Num() - 1; Index >= 0; --Index)
 	{
 		AABTSM6DestructibleProxy* Proxy = DynamicProxies[Index].Get();
 		if (Proxy == nullptr) { DynamicProxies.RemoveAtSwap(Index); continue; }
-		if (FVector::DistSquared(Proxy->GetActorLocation(), LaunchedBird->GetActorLocation()) <= FMath::Square(BlackExplosionRadiusCM))
+		const FVector Delta = Proxy->GetActorLocation() - LaunchedBird->GetActorLocation();
+		if (Delta.SizeSquared() <= FMath::Square(BlackExplosionRadiusCM))
 		{
 			Proxy->Shatter(); DynamicProxies.RemoveAtSwap(Index); ++BrokenProxies;
 		}
+		else if (Delta.SizeSquared() <= FMath::Square(BlackExplosionImpulseRadiusCM))
+		{
+			const float Speed = BlackExplosionImpulseSpeedCMPerSec * (1.0f - Delta.Size() / BlackExplosionImpulseRadiusCM);
+			Proxy->Reactivate(Delta.GetSafeNormal() * Speed);
+		}
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][BlackExplosion] Manual=%d Radius=%.1f HISM=%d Proxies=%d"), bManual ? 1 : 0, BlackExplosionRadiusCM, BrokenInstances, BrokenProxies);
+	if (BuildingMaterialSystem.IsValid()) BuildingMaterialSystem->ApplyRadialBlast(LaunchedBird->GetActorLocation(), BlackExplosionRadiusCM, BlackExplosionImpulseRadiusCM, BlackExplosionImpulseSpeedCMPerSec);
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][BlackExplosion] Manual=%d DestroyRadius=%.1f ImpulseRadius=%.1f HISM=%d Impulsed=%d Proxies=%d"), bManual ? 1 : 0, BlackExplosionRadiusCM, BlackExplosionImpulseRadiusCM, BrokenInstances, ImpulsedInstances, BrokenProxies);
 }
 
 void AABTSM6SlingshotSystem::FreezeDynamicProxies()
 {
 	for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies) if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get()) Proxy->Freeze();
+	if (BuildingMaterialSystem.IsValid()) BuildingMaterialSystem->FreezeDynamicModules();
 }
 
 void AABTSM6SlingshotSystem::BeginReturn()

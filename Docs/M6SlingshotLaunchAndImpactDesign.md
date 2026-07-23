@@ -47,6 +47,12 @@ Acceleration = normalize(Center - Position) * mu / Radius²
 
 并加入与速度反向的线性空气阻力。浅蓝色隔点 Debug Point 构成虚线；预览不查询碰撞、不计算反弹。
 
+### 4.1 固定发射视角
+
+进入发射模式时，系统以弹弓弦在当地球面切平面内的垂线建立固定发射轴，并选择当前主控鸟所在一侧作为正向。该轴在 `Ready` 与 `Pulling` 整个阶段保持不变：鼠标拖拽仅改变弹丸袋偏移和实际发射速度/方向，不再更新瞄准相机的中心、朝向或滚转。
+
+相机固定在发射轴后方，以略仰视角看向该轴前方；屏幕 Up 始终由弹弓中心的球面径向 Up 投影得到。`AABTSM6SlingshotCamera` 的 `ABTS | M6 | Aim` 分类提供以下可调参数：`AimDistanceCM`、`AimPitchDegrees`、`AimTargetForwardDistanceCM`、`AimTargetHeightCM` 与 `AimCameraBlendSpeed`，分别控制镜头距离、仰视角、前视构图距离、目标高度及进入发射模式时的平滑速度。
+
 ## 5. 飞行与碰撞
 
 发射后 Force Movement 进入 BallisticFlight：
@@ -68,9 +74,11 @@ HISM 实例达到撞开阈值后：
 
 动态代理撞击其他 HISM 时使用连锁阈值继续提升或破坏；自身高速碰撞也会碎裂。M6 按需求暂不处理密集森林中代理同时激活产生的拥挤问题。
 
+发射结束后，未碎裂的动态代理会停止模拟并转为 `WorldStatic + QueryAndPhysics`：它们保留被撞歪后的姿态，并持续阻挡 Chaos 行走和后续发射，不能降级为 `QueryOnly`。后续发射再次命中已冻结代理时，达到撞开阈值会重新启用其刚体并施加冲量；达到破坏阈值会将其碎裂移除。
+
 ## 6. 黑鸟
 
-黑鸟飞行时左键点击黑鸟 Actor 可立即手动引爆。第一次显著碰撞会启动默认 `2.2s` 自动引信。爆炸使用世界空间球形范围查询，无视遮挡和碰撞：范围内树/石 HISM 实例直接移除，动态代理直接碎裂。当前不生成粒子、声效、伤害衰减或掉落。
+黑鸟飞行时左键点击黑鸟 Actor 可立即手动引爆。第一次显著碰撞会启动默认 `2.2s` 自动引信。爆炸使用世界空间球形范围查询，无视遮挡和碰撞：`BlackExplosionRadiusCM` 近圈内树石与 M7 建筑材料直接破坏；延伸至 `BlackExplosionImpulseRadiusCM` 的外圈对象提升或重新激活为动态刚体，并受到按距离衰减的径向冲量。当前不生成粒子、声效或掉落。
 
 ## 7. 结束与回归
 

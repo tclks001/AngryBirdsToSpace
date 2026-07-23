@@ -14,6 +14,7 @@ class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
 class AABTSM6DestructibleProxy;
 class AABTSM6SlingshotCamera;
+class AABTSM7BuildingMaterialSystem;
 class UHierarchicalInstancedStaticMeshComponent;
 
 /** M6 launch, trajectory, impact promotion, explosion and return coordinator. */
@@ -97,7 +98,12 @@ private:
 	float ProxyChainBreakSpeedCMPerSec = 760.0f;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Black Bird", meta = (ClampMin = "50.0"))
-	float BlackExplosionRadiusCM = 700.0f;
+	float BlackExplosionRadiusCM = 360.0f;
+	/** Outer ring: objects survive but are promoted/reactivated and pushed away. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Black Bird", meta = (ClampMin = "50.0"))
+	float BlackExplosionImpulseRadiusCM = 760.0f;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Black Bird", meta = (ClampMin = "0.0"))
+	float BlackExplosionImpulseSpeedCMPerSec = 1500.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Black Bird", meta = (ClampMin = "0.0"))
 	float BlackAutoFuseSeconds = 2.2f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return", meta = (ClampMin = "0.1"))
@@ -109,6 +115,7 @@ private:
 	TWeakObjectPtr<AABTSM3Planet> Planet;
 	TWeakObjectPtr<AABTSM25BirdCharacter> LaunchedBird;
 	TWeakObjectPtr<AABTSM51SlingshotCord> ActiveCord;
+	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> BuildingMaterialSystem;
 	TObjectPtr<AABTSM6SlingshotCamera> SlingshotCamera;
 	TArray<TWeakObjectPtr<AABTSM6DestructibleProxy>> DynamicProxies;
 	EABTSM6LaunchState LaunchState = EABTSM6LaunchState::Inactive;

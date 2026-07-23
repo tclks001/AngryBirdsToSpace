@@ -21,6 +21,8 @@ public:
 	AABTSM6DestructibleProxy();
 	virtual void Tick(float DeltaSeconds) override;
 	void ActivateProxy(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FVector& InitialImpulse, const FVector& InPlanetCenter, float InGravityAcceleration);
+	/** Turns a previously frozen tilted instance back into a moving Chaos body. */
+	void Reactivate(const FVector& Impulse);
 	void Freeze();
 	void Shatter();
 	EABTSM6ImpactMaterial GetImpactMaterial() const { return ImpactMaterial; }

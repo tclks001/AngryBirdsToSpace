@@ -52,8 +52,22 @@ void AABTSM6DestructibleProxy::Freeze()
 	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 	Visual->SetSimulatePhysics(false);
-	Visual->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	// Frozen means static, not non-physical.  QueryOnly removes the shape from
+	// Chaos, allowing both walking birds and future projectiles to pass through.
+	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Visual->SetCollisionObjectType(ECC_WorldStatic);
+}
+
+void AABTSM6DestructibleProxy::Reactivate(const FVector& Impulse)
+{
+	if (Visual == nullptr) return;
+	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Visual->SetCollisionObjectType(ECC_PhysicsBody);
+	Visual->SetSimulatePhysics(true);
+	Visual->SetEnableGravity(false);
+	Visual->WakeAllRigidBodies();
+	Visual->AddImpulse(Impulse, NAME_None, true);
+	bActiveDynamic = true;
 }
 
 void AABTSM6DestructibleProxy::Shatter()

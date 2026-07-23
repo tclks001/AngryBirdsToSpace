@@ -38,12 +38,16 @@ void AABTSM6SlingshotCamera::Tick(const float DeltaSeconds)
 
 void AABTSM6SlingshotCamera::UpdateAim(const float DeltaSeconds)
 {
-	const FVector DesiredLocation = AimCenter - AimForward * AimDistanceCM + AimUp * AimCameraHeightCM;
-	const FVector Target = AimCenter + AimForward * 900.0f + AimUp * AimLookHeightCM;
+	// Use only the cord frame captured on launch-mode entry. Pulling the pouch
+	// must not rotate or translate the camera around the slingshot.
+	const float PitchRadians = FMath::DegreesToRadians(AimPitchDegrees);
+	const FVector BackAndUp = (-AimForward * FMath::Cos(PitchRadians) + AimUp * FMath::Sin(PitchRadians)).GetSafeNormal();
+	const FVector DesiredLocation = AimCenter + BackAndUp * AimDistanceCM;
+	const FVector Target = AimCenter + AimForward * AimTargetForwardDistanceCM + AimUp * AimTargetHeightCM;
 	const FVector Look = (Target - DesiredLocation).GetSafeNormal();
 	const FVector ScreenUp = FVector::VectorPlaneProject(AimUp, Look).GetSafeNormal();
 	const FQuat Rotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
-	SetActorLocationAndRotation(DeltaSeconds > 0.0f ? FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, 10.0f) : DesiredLocation, Rotation);
+	SetActorLocationAndRotation(DeltaSeconds > 0.0f ? FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, AimCameraBlendSpeed) : DesiredLocation, Rotation);
 }
 
 void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
