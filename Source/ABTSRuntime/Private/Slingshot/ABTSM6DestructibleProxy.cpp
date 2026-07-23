@@ -25,6 +25,7 @@ void AABTSM6DestructibleProxy::ActivateProxy(
 	const FVector& InPlanetCenter,
 	const float InGravityAcceleration)
 {
+	bPlanarGravity = false;
 	ImpactMaterial = InMaterial;
 	PlanetCenter = InPlanetCenter;
 	GravityAccelerationCMPerSec2 = FMath::Max(0.0f, InGravityAcceleration);
@@ -38,11 +39,25 @@ void AABTSM6DestructibleProxy::ActivateProxy(
 	bActiveDynamic = true;
 }
 
+void AABTSM6DestructibleProxy::ActivateProxyPlanar(
+	UStaticMesh* Mesh,
+	const FTransform& Transform,
+	const EABTSM6ImpactMaterial InMaterial,
+	const FVector& InitialImpulse,
+	const FVector& InGravityUp,
+	const float InGravityAcceleration)
+{
+	ActivateProxy(Mesh, Transform, InMaterial, InitialImpulse, FVector::ZeroVector, InGravityAcceleration);
+	bPlanarGravity = true;
+	PlanarGravityUp = InGravityUp.GetSafeNormal();
+	if (PlanarGravityUp.IsNearlyZero()) PlanarGravityUp = FVector::UpVector;
+}
+
 void AABTSM6DestructibleProxy::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (!bActiveDynamic || !Visual->IsSimulatingPhysics()) return;
-	const FVector Direction = (PlanetCenter - Visual->GetComponentLocation()).GetSafeNormal();
+	const FVector Direction = bPlanarGravity ? -PlanarGravityUp : (PlanetCenter - Visual->GetComponentLocation()).GetSafeNormal();
 	Visual->AddForce(Direction * GravityAccelerationCMPerSec2, NAME_None, true);
 }
 

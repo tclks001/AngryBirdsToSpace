@@ -222,6 +222,8 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 > M1 的 C++ 职责、编辑器建图步骤、验收与排错见 [M1IndependentEntryDesign.md](M1IndependentEntryDesign.md)。
 > M2.5 的径向引力、碰撞、跳跃与编辑器验收见 [M25RadialGravityAndJumpDesign.md](M25RadialGravityAndJumpDesign.md)。
 > 当前已验收的 Chaos 刚体球面移动、碰撞与编辑器配置见 [ChaosRigidBodyMovementDesign.md](ChaosRigidBodyMovementDesign.md)。旧 `ForceSuspension`/`LegacySweep` 仅作为对照路线保留。
+> M6/M7 物理碰撞破坏爽感调研、阈值悖论分析和后续实现指导见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
+> M7.1 平面物理测试台、可拖拽关卡 Actor、四档完整弹弓与编辑器搭建步骤见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。该测试台与正式 CellTopo/球面 PCG 并行，不改变正式地图逻辑源。
 
 初版目标：先完成一个目标的完整纵向切片，验证 PCG 与物理弹射真正相互决定；暂不扩展为多建筑、多卫星或完整资源阶梯。评审视频应保留地图生成、道路/水网、建筑坍塌、卫星引力和终局的过程证据。
 
@@ -235,6 +237,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 弹弓槽和桩/弦两次点击装配。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
 | M6 | 弹弓、发射与碰撞 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。已连接弹弓进入瞄准/拉伸/万有引力预测/发射闭环；HISM 按命中提升动态代理并支持连锁破坏，黑鸟支持手动/延时爆炸，落地静默后物体冻结与队伍回归。详见 [M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。 |
 | M7 | 建筑生成与破坏 | 首先完成木/石/铁/玻璃砖、绳/链、炸药桶和弹簧活塞的参数化材料层与近破坏/远冲击规则，详见 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)；随后再生成模块化建筑、承重图与结构性坍塌。 |
+| M7.1 | 平面物理测试台 | 独立平面 GameMode、可摆放 Floor/PlayerStart、树石 HISM、四材质砖、四档完整弹弓和模块化建筑锚点；支持编辑器实时变换、平面 Chaos 移动与恒向重力弹射。详见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `Sub=2/3` 潮汐锁定卫星和引力走廊；强化发射预览与实际轨迹发生可见偏转。 |
 | M10 | 侦察 | 青翎近射侦察更新小地图，标记道路外目标与引力走廊。 |

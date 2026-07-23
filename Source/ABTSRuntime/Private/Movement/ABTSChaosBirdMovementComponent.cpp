@@ -45,6 +45,27 @@ void UABTSChaosBirdMovementComponent::SetChaosEnabled(const bool bEnabled)
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][ChaosMovement] Enabled=%d Body=%s"), bEnabled ? 1 : 0, *GetNameSafe(ResolveBody()));
 }
 
+void UABTSChaosBirdMovementComponent::ConfigurePlanarTestMode(
+	const bool bEnabled,
+	const FVector& InPlaneOrigin,
+	const FVector& InPlaneUp)
+{
+	bPlanarTestMode = bEnabled;
+	PlanarOrigin = InPlaneOrigin;
+	PlanarUp = InPlaneUp.GetSafeNormal();
+	if (PlanarUp.IsNearlyZero()) PlanarUp = FVector::UpVector;
+	if (bEnabled) Planet.Reset();
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7.1][ChaosMovement] Planar=%d Up=(%.3f,%.3f,%.3f)"),
+		bEnabled ? 1 : 0, PlanarUp.X, PlanarUp.Y, PlanarUp.Z);
+}
+
+FVector UABTSChaosBirdMovementComponent::GetMovementUpAt(const FVector& WorldLocation) const
+{
+	if (bPlanarTestMode) return PlanarUp;
+	if (Planet.IsValid()) return Planet->GetRadialUpAtWorldLocation(WorldLocation);
+	return FVector::UpVector;
+}
+
 void UABTSChaosBirdMovementComponent::ConfigureCollisionGrounding(const float MaxGroundAngleDegrees)
 {
 	CollisionGroundMaxAngleDegrees = FMath::Clamp(MaxGroundAngleDegrees, 0.0f, 89.0f);
@@ -130,8 +151,8 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 {
 	AABTSM2Planet* ResolvedPlanet = FindPlanet();
 	UPrimitiveComponent* Body = ResolveBody();
-	if (ResolvedPlanet == nullptr || Body == nullptr || !Body->IsSimulatingPhysics()) return;
-	const FVector RadialUp = ResolvedPlanet->GetRadialUpAtWorldLocation(Body->GetComponentLocation());
+	if ((!bPlanarTestMode && ResolvedPlanet == nullptr) || Body == nullptr || !Body->IsSimulatingPhysics()) return;
+	const FVector RadialUp = bPlanarTestMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(Body->GetComponentLocation());
 	const float Mass = FMath::Max(0.1f, Body->GetMass());
 	Body->AddForce(-RadialUp * (Mass * GravityAccelerationCMPerSec2), NAME_None, false);
 
@@ -178,11 +199,11 @@ void UABTSChaosBirdMovementComponent::TryGroundFromHit(const FHitResult& Hit)
 {
 	if (!bChaosEnabled || !Hit.bBlockingHit) return;
 	AABTSM2Planet* ResolvedPlanet = FindPlanet();
-	if (ResolvedPlanet == nullptr) return;
+	if (!bPlanarTestMode && ResolvedPlanet == nullptr) return;
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	FVector SampleLocation = GetOwner()->GetActorLocation();
 	if (!Hit.ImpactPoint.IsNearlyZero()) SampleLocation = FVector(Hit.ImpactPoint);
-	const FVector RadialUp = ResolvedPlanet->GetRadialUpAtWorldLocation(SampleLocation);
+	const FVector RadialUp = bPlanarTestMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(SampleLocation);
 	const float Dot = FVector::DotProduct(Normal, RadialUp);
 	const float MinDot = FMath::Cos(FMath::DegreesToRadians(CollisionGroundMaxAngleDegrees));
 	if (Normal.IsNearlyZero() || Dot < MinDot) return;
@@ -200,6 +221,7 @@ void UABTSChaosBirdMovementComponent::TryGroundFromHit(const FHitResult& Hit)
 
 AABTSM2Planet* UABTSChaosBirdMovementComponent::FindPlanet()
 {
+	if (bPlanarTestMode) return nullptr;
 	if (Planet.IsValid() && Planet->IsPlanetReady()) return Planet.Get();
 	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
 	{

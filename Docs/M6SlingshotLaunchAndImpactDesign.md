@@ -1,6 +1,8 @@
 # M6：弹弓发射、弹道与碰撞破坏
 
 > 状态：首版 C++ 闭环已实现，使用现有 M5.1 弹弓桩/弦、M4 鸟群与 M5.2 HISM 碰撞；等待 PIE 手感和视觉验收。
+>
+> 物理碰撞爽感、阈值悖论和后续损伤/结构升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 
 ## 1. 阶段目标
 

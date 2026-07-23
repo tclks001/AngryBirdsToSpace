@@ -28,6 +28,10 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void SetChaosEnabled(bool bEnabled);
+	/** Enables constant-direction gravity for the standalone M7.1 floor. */
+	void ConfigurePlanarTestMode(bool bEnabled, const FVector& InPlaneOrigin, const FVector& InPlaneUp);
+	FVector GetMovementUpAt(const FVector& WorldLocation) const;
+	bool IsPlanarTestMode() const { return bPlanarTestMode; }
 	void ConfigureCollisionGrounding(float MaxGroundAngleDegrees);
 	void SetMoveInput(const FVector& Direction, float Scale);
 	void QueueJump();
@@ -74,6 +78,9 @@ private:
 	float CollisionGroundMaxAngleDegrees = 55.0f;
 
 	TWeakObjectPtr<AABTSM2Planet> Planet;
+	FVector PlanarOrigin = FVector::ZeroVector;
+	FVector PlanarUp = FVector::UpVector;
+	bool bPlanarTestMode = false;
 	FVector PendingMoveVector = FVector::ZeroVector;
 	bool bChaosEnabled = false;
 	bool bGrounded = false;

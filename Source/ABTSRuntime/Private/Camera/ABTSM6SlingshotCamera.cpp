@@ -27,6 +27,17 @@ void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Pl
 {
 	Bird = InBird;
 	Planet = InPlanet;
+	bPlanarFollow = false;
+	bFollowBird = true;
+}
+
+void AABTSM6SlingshotCamera::FollowBirdPlanar(AABTSM25BirdCharacter* InBird, const FVector& InPlanarUp)
+{
+	Bird = InBird;
+	Planet.Reset();
+	PlanarFollowUp = InPlanarUp.GetSafeNormal();
+	if (PlanarFollowUp.IsNearlyZero()) PlanarFollowUp = FVector::UpVector;
+	bPlanarFollow = true;
 	bFollowBird = true;
 }
 
@@ -54,8 +65,8 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 {
 	AABTSM25BirdCharacter* TargetBird = Bird.Get();
 	AABTSM2Planet* TargetPlanet = Planet.Get();
-	if (TargetBird == nullptr || TargetPlanet == nullptr) return;
-	const FVector Up = TargetPlanet->GetRadialUpAtWorldLocation(TargetBird->GetActorLocation());
+	if (TargetBird == nullptr || (!bPlanarFollow && TargetPlanet == nullptr)) return;
+	const FVector Up = bPlanarFollow ? PlanarFollowUp : TargetPlanet->GetRadialUpAtWorldLocation(TargetBird->GetActorLocation());
 	FVector Forward = FVector::VectorPlaneProject(TargetBird->GetSlingshotVelocity(), Up).GetSafeNormal();
 	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(TargetBird->GetActorForwardVector(), Up).GetSafeNormal();
 	const FVector DesiredLocation = TargetBird->GetActorLocation() - Forward * FlightDistanceCM + Up * FlightHeightCM;

@@ -81,6 +81,18 @@ void AABTSM51SlingshotStake::InitializeStake(
 	UnitDirection = InUnitDirection.GetSafeNormal();
 }
 
+void AABTSM51SlingshotStake::ConfigureVisualDimensions(
+	const float DiameterCM,
+	const float HeightCM,
+	UMaterialInterface* Material)
+{
+	Visual->SetRelativeScale3D(FVector(
+		FMath::Max(1.0f, DiameterCM) / 100.0f,
+		FMath::Max(1.0f, DiameterCM) / 100.0f,
+		FMath::Max(1.0f, HeightCM) / 100.0f));
+	if (Material) Visual->SetMaterial(0, Material);
+}
+
 void AABTSM51SlingshotStake::NotifyActorOnClicked(const FKey ButtonPressed)
 {
 	Super::NotifyActorOnClicked(ButtonPressed);
@@ -107,8 +119,21 @@ void AABTSM51SlingshotCord::InitializeCord(
 	const FVector& InEndpointA,
 	const FVector& InEndpointB)
 {
+	const EABTSSlingshotTier InferredTier = InStakeA && InStakeA->GetStakeItem() == EABTSItemId::ReinforcedStake
+		? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple;
+	InitializeCordWithTier(InStakeA, InStakeB, InEndpointA, InEndpointB, InferredTier);
+}
+
+void AABTSM51SlingshotCord::InitializeCordWithTier(
+	AABTSM51SlingshotStake* InStakeA,
+	AABTSM51SlingshotStake* InStakeB,
+	const FVector& InEndpointA,
+	const FVector& InEndpointB,
+	const EABTSSlingshotTier InTier)
+{
 	StakeA = InStakeA;
 	StakeB = InStakeB;
+	SlingshotTier = InTier;
 	EndpointA = InEndpointA;
 	EndpointB = InEndpointB;
 	const FVector Delta = EndpointB - EndpointA;
@@ -117,6 +142,14 @@ void AABTSM51SlingshotCord::InitializeCord(
 	SetActorLocation((EndpointA + EndpointB) * 0.5f);
 	SetActorRotation(FRotationMatrix::MakeFromX(Delta / Length).ToQuat());
 	Visual->SetRelativeScale3D(FVector(Length / 100.0f, 0.035f, 0.035f));
+}
+
+void AABTSM51SlingshotCord::ConfigureVisualThickness(const float ThicknessCM, UMaterialInterface* Material)
+{
+	const FVector CurrentScale = Visual->GetRelativeScale3D();
+	const float ThicknessScale = FMath::Max(1.0f, ThicknessCM) / 100.0f;
+	Visual->SetRelativeScale3D(FVector(CurrentScale.X, ThicknessScale, ThicknessScale));
+	if (Material) Visual->SetMaterial(0, Material);
 }
 
 EABTSItemId AABTSM51SlingshotCord::GetStakeItem() const

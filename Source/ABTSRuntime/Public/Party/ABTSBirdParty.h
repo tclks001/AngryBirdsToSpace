@@ -54,6 +54,10 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	bool InitializeParty(AABTSM25BirdCharacter* InitialLeader);
+	bool InitializePlanarParty(AABTSM25BirdCharacter* InitialLeader, const FVector& InPlaneOrigin, const FVector& InPlaneUp);
+	bool IsPlanarParty() const { return bPlanarMode; }
+	FVector GetSurfaceUpAt(const FVector& WorldLocation) const;
+	const FVector& GetPlanarOrigin() const { return PlanarOrigin; }
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M4|Party")
 	bool SwitchControlledBird(EABTSBirdId NewBirdId);
@@ -112,4 +116,7 @@ private:
 	bool bFollowModeInitialized = false;
 	bool bPartyReady = false;
 	bool bSlingshotMode = false;
+	bool bPlanarMode = false;
+	FVector PlanarOrigin = FVector::ZeroVector;
+	FVector PlanarUp = FVector::UpVector;
 };

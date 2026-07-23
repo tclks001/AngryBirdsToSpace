@@ -93,9 +93,10 @@ FVector AABTSM4PartyCamera::BlendPivotOnSphere(
 void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForceInstant)
 {
 	AABTSBirdParty* ResolvedParty = FindParty();
-	AABTSM2Planet* ResolvedPlanet = FindPlanet();
+	const bool bPlanar = ResolvedParty && ResolvedParty->IsPlanarParty();
+	AABTSM2Planet* ResolvedPlanet = bPlanar ? nullptr : FindPlanet();
 	AABTSM25BirdCharacter* TargetBird = ResolvedParty ? ResolvedParty->GetControlledBird() : nullptr;
-	if (ResolvedParty == nullptr || ResolvedPlanet == nullptr || TargetBird == nullptr) return;
+	if (ResolvedParty == nullptr || (!bPlanar && ResolvedPlanet == nullptr) || TargetBird == nullptr) return;
 
 	const AABTSBirdPartySettings* Settings = ResolvedParty->GetResolvedSettings();
 	const float LookAtHeightCM = Settings ? Settings->CameraLookAtHeightCM : 35.0f;
@@ -109,9 +110,9 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	ElevationDegrees = FMath::Clamp(ElevationDegrees, -OrbitPitchLimitDegrees, OrbitPitchLimitDegrees);
 	OrbitDistanceCM = FMath::Clamp(OrbitDistanceCM, FMath::Min(MinDistance, MaxDistance), FMath::Max(MinDistance, MaxDistance));
 
-	const FVector PlanetCenter = ResolvedPlanet->GetPlanetCenterWorld();
+	const FVector PlanetCenter = bPlanar ? ResolvedParty->GetPlanarOrigin() : ResolvedPlanet->GetPlanetCenterWorld();
 	const FVector TargetLocation = TargetBird->GetActorLocation();
-	const FVector TargetUp = ResolvedPlanet->GetRadialUpAtWorldLocation(TargetLocation);
+	const FVector TargetUp = ResolvedParty->GetSurfaceUpAt(TargetLocation);
 	const FVector RawPivot = TargetLocation + TargetUp * LookAtHeightCM;
 	const bool bTargetChanged = LastTargetBird.Get() != TargetBird;
 	if (!bInitializedView)
@@ -132,7 +133,9 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 		SwitchElapsedSeconds += FMath::Max(0.0f, DeltaSeconds);
 		const float LinearAlpha = FMath::Clamp(SwitchElapsedSeconds / FMath::Max(SwitchBlendSeconds, SMALL_NUMBER), 0.0f, 1.0f);
 		const float EasedAlpha = FMath::SmoothStep(0.0f, 1.0f, LinearAlpha);
-		SmoothedPivot = BlendPivotOnSphere(SwitchStartPivot, RawPivot, EasedAlpha, PlanetCenter);
+		SmoothedPivot = bPlanar
+			? FMath::Lerp(SwitchStartPivot, RawPivot, EasedAlpha)
+			: BlendPivotOnSphere(SwitchStartPivot, RawPivot, EasedAlpha, PlanetCenter);
 		bSwitchBlendActive = LinearAlpha < 1.0f;
 	}
 	else if (bForceInstant || !bInitializedView)
@@ -142,11 +145,15 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	else if (FVector::Distance(SmoothedPivot, RawPivot) > DeadZoneCM)
 	{
 		const FVector Interpolated = FMath::VInterpTo(SmoothedPivot, RawPivot, DeltaSeconds, PivotFollowSpeed);
-		const float TargetRadius = FVector::Distance(RawPivot, PlanetCenter);
-		SmoothedPivot = PlanetCenter + (Interpolated - PlanetCenter).GetSafeNormal() * TargetRadius;
+		if (bPlanar) SmoothedPivot = Interpolated;
+		else
+		{
+			const float TargetRadius = FVector::Distance(RawPivot, PlanetCenter);
+			SmoothedPivot = PlanetCenter + (Interpolated - PlanetCenter).GetSafeNormal() * TargetRadius;
+		}
 	}
 
-	const FVector CameraUp = (SmoothedPivot - PlanetCenter).GetSafeNormal();
+	const FVector CameraUp = bPlanar ? TargetUp : (SmoothedPivot - PlanetCenter).GetSafeNormal();
 	TransportOrbitForward(CameraUp);
 	if (bRecenterRequested)
 	{
@@ -300,8 +307,9 @@ bool AABTSM4PartyCamera::GetMovementBasisAt(
 	FVector& OutRight) const
 {
 	const AABTSM2Planet* ResolvedPlanet = Planet.Get();
-	if (!bInitializedView || ResolvedPlanet == nullptr) return false;
-	const FVector Up = ResolvedPlanet->GetRadialUpAtWorldLocation(WorldLocation);
+	const AABTSBirdParty* ResolvedParty = Party.Get();
+	if (!bInitializedView || ResolvedParty == nullptr || (!ResolvedParty->IsPlanarParty() && ResolvedPlanet == nullptr)) return false;
+	const FVector Up = ResolvedParty->GetSurfaceUpAt(WorldLocation);
 	OutForward = FVector::VectorPlaneProject(OrbitForwardTangent, Up).GetSafeNormal();
 	OutRight = FVector::CrossProduct(Up, OutForward).GetSafeNormal();
 	return !OutForward.IsNearlyZero() && !OutRight.IsNearlyZero();

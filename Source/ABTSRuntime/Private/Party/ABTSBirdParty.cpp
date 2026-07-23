@@ -90,6 +90,28 @@ bool AABTSBirdParty::InitializeParty(AABTSM25BirdCharacter* InitialLeader)
 	return bPartyReady;
 }
 
+bool AABTSBirdParty::InitializePlanarParty(
+	AABTSM25BirdCharacter* InitialLeader,
+	const FVector& InPlaneOrigin,
+	const FVector& InPlaneUp)
+{
+	if (bPartyReady) return true;
+	if (InitialLeader == nullptr) return false;
+	bPlanarMode = true;
+	PlanarOrigin = InPlaneOrigin;
+	PlanarUp = InPlaneUp.GetSafeNormal();
+	if (PlanarUp.IsNearlyZero()) PlanarUp = FVector::UpVector;
+	for (TActorIterator<AABTSBirdPartySettings> It(GetWorld()); It; ++It) { Settings = *It; break; }
+	BuildResolvedPresentation();
+	InitialLeader->EnablePlanarChaosMovement(PlanarOrigin, PlanarUp);
+	if (!SpawnFollowers(*InitialLeader)) return false;
+	RebuildQueue(EABTSBirdId::Red);
+	bPartyReady = PartyMembers.Num() == BirdCount;
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7.1][Party] Planar=%d Members=%d Up=(%.3f,%.3f,%.3f)"),
+		bPartyReady ? 1 : 0, PartyMembers.Num(), PlanarUp.X, PlanarUp.Y, PlanarUp.Z);
+	return bPartyReady;
+}
+
 void AABTSBirdParty::BuildResolvedPresentation()
 {
 	ResolvedPresentation.Reset();
@@ -117,26 +139,36 @@ bool AABTSBirdParty::SpawnFollowers(AABTSM25BirdCharacter& InitialLeader)
 	InitialLeader.SetPartyCollisionIsolation(true);
 	InitialLeader.SetBirdVisualMesh(RedPresentation.BirdMesh);
 
-	AABTSM2Planet* ResolvedPlanet = FindPlanet();
-	if (ResolvedPlanet == nullptr) return false;
+	AABTSM2Planet* ResolvedPlanet = bPlanarMode ? nullptr : FindPlanet();
+	if (!bPlanarMode && ResolvedPlanet == nullptr) return false;
 	const FVector LeaderLocation = InitialLeader.GetActorLocation();
-	const FVector Center = ResolvedPlanet->GetPlanetCenterWorld();
-	const FVector LeaderUp = ResolvedPlanet->GetRadialUpAtWorldLocation(LeaderLocation);
+	const FVector Center = bPlanarMode ? PlanarOrigin : ResolvedPlanet->GetPlanetCenterWorld();
+	const FVector LeaderUp = bPlanarMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(LeaderLocation);
 	FVector BackDirection = -FVector::VectorPlaneProject(InitialLeader.GetActorForwardVector(), LeaderUp).GetSafeNormal();
 	if (BackDirection.IsNearlyZero()) BackDirection = FVector::CrossProduct(LeaderUp, FVector::RightVector).GetSafeNormal();
 	const float QueueSpacing = Settings.IsValid() ? Settings->QueueSpacingCM : 190.0f;
-	const float BaseRadius = FVector::Distance(LeaderLocation, Center);
 
 	for (int32 Index = 1; Index < BirdCount; ++Index)
 	{
 		const EABTSBirdId BirdId = static_cast<EABTSBirdId>(Index);
-		const float Angle = QueueSpacing * Index / FMath::Max(ResolvedPlanet->GetPlanetRadiusCM(), 1.0f);
-		const FVector SpawnDirection = (LeaderUp * FMath::Cos(Angle) + BackDirection * FMath::Sin(Angle)).GetSafeNormal();
 		const float CapsuleHalfHeight = InitialLeader.GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-		const float SpawnRadius = ResolvedPlanet->GetSurfaceRadiusAtDirection(SpawnDirection) + CapsuleHalfHeight + 2.0f;
-		const FVector SpawnLocation = Center + SpawnDirection * SpawnRadius;
-		const FVector SpawnForward = FVector::VectorPlaneProject(-BackDirection, SpawnDirection).GetSafeNormal();
-		const FTransform SpawnTransform(FRotationMatrix::MakeFromXZ(SpawnForward, SpawnDirection).ToQuat(), SpawnLocation);
+		FVector SpawnUp = LeaderUp;
+		FVector SpawnLocation;
+		if (bPlanarMode)
+		{
+			SpawnLocation = LeaderLocation + BackDirection * QueueSpacing * Index;
+			const float Height = FVector::DotProduct(SpawnLocation - PlanarOrigin, PlanarUp);
+			SpawnLocation += PlanarUp * (CapsuleHalfHeight + 2.0f - Height);
+		}
+		else
+		{
+			const float Angle = QueueSpacing * Index / FMath::Max(ResolvedPlanet->GetPlanetRadiusCM(), 1.0f);
+			SpawnUp = (LeaderUp * FMath::Cos(Angle) + BackDirection * FMath::Sin(Angle)).GetSafeNormal();
+			const float SpawnRadius = ResolvedPlanet->GetSurfaceRadiusAtDirection(SpawnUp) + CapsuleHalfHeight + 2.0f;
+			SpawnLocation = Center + SpawnUp * SpawnRadius;
+		}
+		const FVector SpawnForward = FVector::VectorPlaneProject(-BackDirection, SpawnUp).GetSafeNormal();
+		const FTransform SpawnTransform(FRotationMatrix::MakeFromXZ(SpawnForward, SpawnUp).ToQuat(), SpawnLocation);
 		FActorSpawnParameters SpawnParameters;
 		SpawnParameters.Owner = this;
 		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -149,6 +181,7 @@ bool AABTSBirdParty::SpawnFollowers(AABTSM25BirdCharacter& InitialLeader)
 		Bird->SetBirdIdentity(BirdId, Presentation.SlingshotCapability, false);
 		Bird->SetPartyCollisionIsolation(true);
 		Bird->SetBirdVisualMesh(Presentation.BirdMesh);
+		if (bPlanarMode) Bird->EnablePlanarChaosMovement(PlanarOrigin, PlanarUp);
 		Bird->ResetRadialMovementState();
 		PartyMembers.Add(Bird);
 	}
@@ -195,8 +228,8 @@ void AABTSBirdParty::Tick(const float DeltaSeconds)
 
 void AABTSBirdParty::RecordPathsAndJumpEvents(const float DeltaSeconds)
 {
-	AABTSM2Planet* ResolvedPlanet = FindPlanet();
-	if (ResolvedPlanet == nullptr) return;
+	AABTSM2Planet* ResolvedPlanet = bPlanarMode ? nullptr : FindPlanet();
+	if (!bPlanarMode && ResolvedPlanet == nullptr) return;
 	for (FABTSBirdPartyRuntime& Runtime : RuntimeByFixedId)
 	{
 		AABTSM25BirdCharacter* Bird = Runtime.Bird.Get();
@@ -209,7 +242,9 @@ void AABTSBirdParty::RecordPathsAndJumpEvents(const float DeltaSeconds)
 			Event.Serial = NextJumpSerial++;
 			Event.PathGeneration = PathGeneration;
 			Event.TakeoffLocation = Bird->GetActorLocation();
-			Event.TakeoffRadiusCM = FVector::Distance(Event.TakeoffLocation, ResolvedPlanet->GetPlanetCenterWorld());
+			Event.TakeoffRadiusCM = bPlanarMode
+				? FVector::DotProduct(Event.TakeoffLocation - PlanarOrigin, PlanarUp)
+				: FVector::Distance(Event.TakeoffLocation, ResolvedPlanet->GetPlanetCenterWorld());
 			if (Runtime.JumpEvents.Num() > MaxJumpEvents) Runtime.JumpEvents.RemoveAt(0);
 		}
 		if (!bGrounded && !Runtime.JumpEvents.IsEmpty())
@@ -217,7 +252,9 @@ void AABTSBirdParty::RecordPathsAndJumpEvents(const float DeltaSeconds)
 			FABTSBirdJumpEvent& Event = Runtime.JumpEvents.Last();
 			if (!Event.bLanded && Event.PathGeneration == PathGeneration)
 			{
-				const float CurrentRadius = FVector::Distance(Bird->GetActorLocation(), ResolvedPlanet->GetPlanetCenterWorld());
+				const float CurrentRadius = bPlanarMode
+					? FVector::DotProduct(Bird->GetActorLocation() - PlanarOrigin, PlanarUp)
+					: FVector::Distance(Bird->GetActorLocation(), ResolvedPlanet->GetPlanetCenterWorld());
 				Event.MaxHeightAboveTakeoffCM = FMath::Max(Event.MaxHeightAboveTakeoffCM, CurrentRadius - Event.TakeoffRadiusCM);
 			}
 		}
@@ -283,8 +320,8 @@ void AABTSBirdParty::UpdateFollower(
 {
 	AABTSM25BirdCharacter* Bird = Follower.Bird.Get();
 	AABTSM25BirdCharacter* LeaderBird = Predecessor.Bird.Get();
-	AABTSM2Planet* ResolvedPlanet = FindPlanet();
-	if (Bird == nullptr || LeaderBird == nullptr || ResolvedPlanet == nullptr) return;
+	AABTSM2Planet* ResolvedPlanet = bPlanarMode ? nullptr : FindPlanet();
+	if (Bird == nullptr || LeaderBird == nullptr || (!bPlanarMode && ResolvedPlanet == nullptr)) return;
 
 	FABTSBirdPathSample Target;
 	const float QueueSpacing = Settings.IsValid() ? Settings->QueueSpacingCM : 190.0f;
@@ -315,7 +352,7 @@ void AABTSBirdParty::UpdateFollower(
 	if (!bUsingDirectControlledBirdFollowExperiment) TryPropagateJump(Follower, Predecessor, Target);
 	FVector Separation = FVector::ZeroVector;
 	const float SeparationDistance = Settings.IsValid() ? Settings->SeparationDistanceCM : 95.0f;
-	const FVector Up = ResolvedPlanet->GetRadialUpAtWorldLocation(Bird->GetActorLocation());
+	const FVector Up = bPlanarMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(Bird->GetActorLocation());
 	for (AABTSM25BirdCharacter* Other : PartyMembers)
 	{
 		if (Other == nullptr || Other == Bird) continue;
@@ -413,8 +450,19 @@ void AABTSBirdParty::TryPropagateJump(
 void AABTSBirdParty::RecoverFollower(FABTSBirdPartyRuntime& Follower, const FABTSBirdPathSample& SafeTarget)
 {
 	AABTSM25BirdCharacter* Bird = Follower.Bird.Get();
-	AABTSM2Planet* ResolvedPlanet = FindPlanet();
-	if (Bird == nullptr || ResolvedPlanet == nullptr) return;
+	AABTSM2Planet* ResolvedPlanet = bPlanarMode ? nullptr : FindPlanet();
+	if (Bird == nullptr || (!bPlanarMode && ResolvedPlanet == nullptr)) return;
+	if (bPlanarMode)
+	{
+		const float CapsuleHalfHeight = Bird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		FVector Location = SafeTarget.Location;
+		Location += PlanarUp * (CapsuleHalfHeight + 4.0f - FVector::DotProduct(Location - PlanarOrigin, PlanarUp));
+		Bird->ResetRadialMovementState();
+		Bird->SetActorLocation(Location, false, nullptr, ETeleportType::TeleportPhysics);
+		Follower.SevereDetachSeconds = 0.0f;
+		Follower.PreviousTargetDistanceCM = 0.0f;
+		return;
+	}
 	const FVector Center = ResolvedPlanet->GetPlanetCenterWorld();
 	const FVector Direction = (SafeTarget.Location - Center).GetSafeNormal();
 	const float Radius = ResolvedPlanet->GetSurfaceRadiusAtDirection(Direction)
@@ -572,10 +620,16 @@ AABTSM2Planet* AABTSBirdParty::FindPlanet()
 
 float AABTSBirdParty::GetSurfaceDistanceCM(const FVector& A, const FVector& B) const
 {
-	if (!Planet.IsValid()) return FVector::Distance(A, B);
+	if (bPlanarMode || !Planet.IsValid()) return FVector::Distance(A, B);
 	const FVector Center = Planet->GetPlanetCenterWorld();
 	const FVector DirectionA = (A - Center).GetSafeNormal();
 	const FVector DirectionB = (B - Center).GetSafeNormal();
 	const float Angle = FMath::Acos(FMath::Clamp(FVector::DotProduct(DirectionA, DirectionB), -1.0f, 1.0f));
 	return Angle * Planet->GetPlanetRadiusCM();
+}
+
+FVector AABTSBirdParty::GetSurfaceUpAt(const FVector& WorldLocation) const
+{
+	if (bPlanarMode) return PlanarUp;
+	return Planet.IsValid() ? Planet->GetRadialUpAtWorldLocation(WorldLocation) : FVector::UpVector;
 }

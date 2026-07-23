@@ -3,6 +3,10 @@
 > 状态：基础材料 C++ 已实现；本阶段只验收材料库、参数化生成和破坏响应，不生成完整建筑。
 >
 > 前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。后续建筑拼装器只调用本稿公开的添加接口，不重复实现材质、碰撞或爆炸。
+>
+> 本阶段的碰撞爽感、持续损伤和结构破坏升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
+>
+> 手工搭建平面碰撞关卡、摆放四材质砖与四档完整弹弓的独立测试入口见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
 
 ## 1. 阶段边界
 
@@ -108,4 +112,3 @@ M6 黑鸟同步改为双范围：`BlackExplosionRadiusCM` 是近处破坏半径�
 - 不生成碎片、材料掉落、爆炸 Niagara、音效或镜头震动；
 - 不做模块对象池和大规模同时激活预算；
 - 不保存被破坏或移动后的建筑状态。
-

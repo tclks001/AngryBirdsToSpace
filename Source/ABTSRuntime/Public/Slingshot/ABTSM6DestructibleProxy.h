@@ -21,6 +21,7 @@ public:
 	AABTSM6DestructibleProxy();
 	virtual void Tick(float DeltaSeconds) override;
 	void ActivateProxy(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FVector& InitialImpulse, const FVector& InPlanetCenter, float InGravityAcceleration);
+	void ActivateProxyPlanar(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FVector& InitialImpulse, const FVector& InGravityUp, float InGravityAcceleration);
 	/** Turns a previously frozen tilted instance back into a moving Chaos body. */
 	void Reactivate(const FVector& Impulse);
 	void Freeze();
@@ -38,5 +39,7 @@ private:
 	FVector PlanetCenter = FVector::ZeroVector;
 	float GravityAccelerationCMPerSec2 = 980.0f;
 	bool bActiveDynamic = false;
+	bool bPlanarGravity = false;
+	FVector PlanarGravityUp = FVector::UpVector;
 };
 

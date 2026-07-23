@@ -20,6 +20,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	void SetAimFrame(const FVector& InCenter, const FVector& InForward, const FVector& InUp);
 	void FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet);
+	void FollowBirdPlanar(AABTSM25BirdCharacter* InBird, const FVector& InPlanarUp);
 
 private:
 	void UpdateAim(float DeltaSeconds);
@@ -30,6 +31,8 @@ private:
 	FVector AimCenter = FVector::ZeroVector;
 	FVector AimForward = FVector::ForwardVector;
 	FVector AimUp = FVector::UpVector;
+	FVector PlanarFollowUp = FVector::UpVector;
+	bool bPlanarFollow = false;
 	bool bFollowBird = false;
 
 	/** Distance from the fixed slingshot-frame focus to the launch camera. */

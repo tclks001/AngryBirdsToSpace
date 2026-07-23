@@ -36,6 +36,7 @@ public:
 	bool TryManualBlackDetonation(AActor* ClickedActor);
 	void HandleProxyImpact(AABTSM6DestructibleProxy& Proxy, const FHitResult& Hit, float NormalSpeedCMPerSec);
 	void ConfigureDebugSlingshots(bool bEnable, int32 InStartCellId);
+	void ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp);
 
 	EABTSM6LaunchState GetLaunchState() const { return LaunchState; }
 	bool IsLaunchModeActive() const { return LaunchState != EABTSM6LaunchState::Inactive; }
@@ -113,6 +114,9 @@ private:
 
 	TWeakObjectPtr<AABTSBirdParty> Party;
 	TWeakObjectPtr<AABTSM3Planet> Planet;
+	FVector PlanarOrigin = FVector::ZeroVector;
+	FVector PlanarUp = FVector::UpVector;
+	bool bPlanarTestMode = false;
 	TWeakObjectPtr<AABTSM25BirdCharacter> LaunchedBird;
 	TWeakObjectPtr<AABTSM51SlingshotCord> ActiveCord;
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> BuildingMaterialSystem;

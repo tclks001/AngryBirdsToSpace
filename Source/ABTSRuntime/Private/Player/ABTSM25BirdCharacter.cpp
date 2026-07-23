@@ -114,6 +114,20 @@ void AABTSM25BirdCharacter::ResetRadialMovementState()
 	ChaosMovement->ResetMotionState();
 }
 
+void AABTSM25BirdCharacter::EnablePlanarChaosMovement(const FVector& PlaneOrigin, const FVector& PlaneUp)
+{
+	bPlanarChaosMode = true;
+	MovementMode = EABTSBirdMovementMode::ChaosRigidBody;
+	RadialMovement->SetComponentTickEnabled(false);
+	ForceMovement->SetComponentTickEnabled(false);
+	ChaosMovement->ConfigurePlanarTestMode(true, PlaneOrigin, PlaneUp);
+	ChaosMovement->SetComponentTickEnabled(true);
+	ConfigureChaosPhysicsBody(true);
+	GetSphericalSurface()->SetApplyActorFrame(false);
+	ChaosMovement->SetChaosEnabled(true);
+	ResetRadialMovementState();
+}
+
 void AABTSM25BirdCharacter::AddPartyTickPrerequisite(AActor* PartyActor)
 {
 	if (PartyActor == nullptr) return;
@@ -373,15 +387,20 @@ void AABTSM25BirdCharacter::HandleControllerRoutedMoveForward(const float Value)
 
 void AABTSM25BirdCharacter::ProcessMoveWithRadialPhysicsForward(const float Value, const bool bControllerRouted)
 {
-	if (!FMath::IsNearlyZero(Value) && GetSphericalSurface()->IsSurfaceFrameReady())
+	if (!FMath::IsNearlyZero(Value) && (bPlanarChaosMode || GetSphericalSurface()->IsSurfaceFrameReady()))
 	{
-		FVector Direction = GetSphericalSurface()->GetTangentForward();
+		const FVector Up = bPlanarChaosMode
+			? ChaosMovement->GetMovementUpAt(GetActorLocation())
+			: GetSphericalSurface()->GetRadialUp();
+		FVector Direction = bPlanarChaosMode
+			? FVector::VectorPlaneProject(GetActorForwardVector(), Up).GetSafeNormal()
+			: GetSphericalSurface()->GetTangentForward();
 		FVector CameraRight = FVector::ZeroVector;
 		if (const AABTSM4PlayerController* M4Controller = Cast<AABTSM4PlayerController>(Controller))
 		{
 			M4Controller->GetCameraRelativeMovementBasis(GetActorLocation(), Direction, CameraRight);
 		}
-		GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
+		if (!bPlanarChaosMode) GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
 		const bool bAccepted = Controller != nullptr && IsLocallyControlled();
 		if (IsControlHandoffDiagnosticsActive())
 		{
@@ -410,15 +429,20 @@ void AABTSM25BirdCharacter::HandleControllerRoutedMoveRight(const float Value)
 
 void AABTSM25BirdCharacter::ProcessMoveWithRadialPhysicsRight(const float Value, const bool bControllerRouted)
 {
-	if (!FMath::IsNearlyZero(Value) && GetSphericalSurface()->IsSurfaceFrameReady())
+	if (!FMath::IsNearlyZero(Value) && (bPlanarChaosMode || GetSphericalSurface()->IsSurfaceFrameReady()))
 	{
+		const FVector Up = bPlanarChaosMode
+			? ChaosMovement->GetMovementUpAt(GetActorLocation())
+			: GetSphericalSurface()->GetRadialUp();
 		FVector CameraForward = FVector::ZeroVector;
-		FVector Direction = GetSphericalSurface()->GetTangentRight();
+		FVector Direction = bPlanarChaosMode
+			? FVector::CrossProduct(Up, FVector::VectorPlaneProject(GetActorForwardVector(), Up).GetSafeNormal()).GetSafeNormal()
+			: GetSphericalSurface()->GetTangentRight();
 		if (const AABTSM4PlayerController* M4Controller = Cast<AABTSM4PlayerController>(Controller))
 		{
 			M4Controller->GetCameraRelativeMovementBasis(GetActorLocation(), CameraForward, Direction);
 		}
-		GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
+		if (!bPlanarChaosMode) GetSphericalSurface()->SetMovementFacing(Value >= 0.0f ? Direction : -Direction);
 		const bool bAccepted = Controller != nullptr && IsLocallyControlled();
 		if (IsControlHandoffDiagnosticsActive())
 		{
@@ -482,9 +506,14 @@ void AABTSM25BirdCharacter::ProcessRadialJump(const bool bControllerRouted)
 void AABTSM25BirdCharacter::UpdateChaosVisualFrame()
 {
 	UStaticMeshComponent* Visual = GetBirdVisual();
-	if (Visual == nullptr || !GetSphericalSurface()->IsSurfaceFrameReady()) return;
-	const FVector Up = GetSphericalSurface()->GetRadialUp();
-	FVector Forward = GetSphericalSurface()->GetActorForwardTangent();
+	if (Visual == nullptr) return;
+	if (!bPlanarChaosMode && !GetSphericalSurface()->IsSurfaceFrameReady()) return;
+	const FVector Up = bPlanarChaosMode
+		? ChaosMovement->GetMovementUpAt(GetActorLocation())
+		: GetSphericalSurface()->GetRadialUp();
+	FVector Forward = bPlanarChaosMode
+		? FVector::VectorPlaneProject(GetActorForwardVector(), Up).GetSafeNormal()
+		: GetSphericalSurface()->GetActorForwardTangent();
 	const FVector Velocity = ChaosMovement->GetVelocity();
 	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
 	if (!TangentVelocity.IsNearlyZero(25.0f)) Forward = TangentVelocity.GetSafeNormal();

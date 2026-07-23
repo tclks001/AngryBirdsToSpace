@@ -17,6 +17,7 @@
 #include "Player/ABTSM6PlayerController.h"
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
 
 AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
@@ -64,12 +65,21 @@ void AABTSM6SlingshotSystem::ConfigureDebugSlingshots(const bool bEnable, const 
 	DebugStartCellId = InStartCellId;
 }
 
+void AABTSM6SlingshotSystem::ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp)
+{
+	bPlanarTestMode = true;
+	PlanarOrigin = InPlaneOrigin;
+	PlanarUp = InPlaneUp.GetSafeNormal();
+	if (PlanarUp.IsNearlyZero()) PlanarUp = FVector::UpVector;
+	Planet.Reset();
+}
+
 bool AABTSM6SlingshotSystem::ResolveDependencies()
 {
 	if (!Party.IsValid()) for (TActorIterator<AABTSBirdParty> It(GetWorld()); It; ++It) { Party = *It; break; }
-	if (!Planet.IsValid()) for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It) if (It->IsPlanetReady()) { Planet = *It; break; }
+	if (!bPlanarTestMode && !Planet.IsValid()) for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It) if (It->IsPlanetReady()) { Planet = *It; break; }
 	if (!BuildingMaterialSystem.IsValid()) for (TActorIterator<AABTSM7BuildingMaterialSystem> It(GetWorld()); It; ++It) { BuildingMaterialSystem = *It; break; }
-	return Party.IsValid() && Party->IsPartyReady() && Planet.IsValid();
+	return Party.IsValid() && Party->IsPartyReady() && (bPlanarTestMode || Planet.IsValid());
 }
 
 void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
@@ -175,8 +185,17 @@ void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 
 bool AABTSM6SlingshotSystem::IsBirdAllowed(const AABTSM25BirdCharacter& Bird, const AABTSM51SlingshotCord& Cord) const
 {
-	const bool bReinforced = Cord.GetStakeItem() == EABTSItemId::ReinforcedStake;
-	return bReinforced || Bird.GetSlingshotCapability() != EABTSBirdSlingshotCapability::Reinforced;
+	switch (Cord.GetSlingshotTier())
+	{
+	case EABTSSlingshotTier::Twig:
+		return Bird.GetSlingshotCapability() == EABTSBirdSlingshotCapability::TwigScout;
+	case EABTSSlingshotTier::Simple:
+		return Bird.GetSlingshotCapability() != EABTSBirdSlingshotCapability::Reinforced;
+	case EABTSSlingshotTier::Reinforced:
+	case EABTSSlingshotTier::Space:
+	default:
+		return true;
+	}
 }
 
 bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
@@ -218,7 +237,7 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 void AABTSM6SlingshotSystem::BuildLaunchFrame(AABTSM51SlingshotCord& Cord, AABTSM25BirdCharacter& Bird)
 {
 	SlingCenter = (Cord.GetEndpointA() + Cord.GetEndpointB()) * 0.5f;
-	SlingUp = Planet->GetRadialUpAtWorldLocation(SlingCenter);
+	SlingUp = bPlanarTestMode ? PlanarUp : Planet->GetRadialUpAtWorldLocation(SlingCenter);
 	SlingRight = FVector::VectorPlaneProject(Cord.GetEndpointB() - Cord.GetEndpointA(), SlingUp).GetSafeNormal();
 	// The cord's tangent-plane normal is the fixed launch axis and camera axis.
 	// Choose the side facing the bird only once on entry; cursor pull does not
@@ -234,7 +253,7 @@ void AABTSM6SlingshotSystem::BuildLaunchFrame(AABTSM51SlingshotCord& Cord, AABTS
 
 void AABTSM6SlingshotSystem::ArrangeWaitingBirds()
 {
-	if (!Party.IsValid() || !Planet.IsValid()) return;
+	if (!Party.IsValid() || (!bPlanarTestMode && !Planet.IsValid())) return;
 	int32 WaitingIndex = 0;
 	for (AABTSM25BirdCharacter* Bird : Party->GetPartyMembers())
 	{
@@ -242,10 +261,22 @@ void AABTSM6SlingshotSystem::ArrangeWaitingBirds()
 		const float Side = WaitingIndex % 2 == 0 ? -1.0f : 1.0f;
 		const float Row = 1.0f + static_cast<float>(WaitingIndex / 2);
 		const FVector Approx = SlingCenter + SlingRight * Side * (220.0f * Row) - SlingForward * 210.0f;
-		const FVector Direction = (Approx - Planet->GetPlanetCenterWorld()).GetSafeNormal();
-		const float Radius = Planet->GetSurfaceRadiusAtDirection(Direction) + Bird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f;
+		FVector Direction = SlingUp;
+		FVector WaitingLocation;
+		if (bPlanarTestMode)
+		{
+			WaitingLocation = Approx;
+			const float DesiredHeight = Bird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f;
+			WaitingLocation += PlanarUp * (DesiredHeight - FVector::DotProduct(WaitingLocation - PlanarOrigin, PlanarUp));
+		}
+		else
+		{
+			Direction = (Approx - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+			const float Radius = Planet->GetSurfaceRadiusAtDirection(Direction) + Bird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f;
+			WaitingLocation = Planet->GetPlanetCenterWorld() + Direction * Radius;
+		}
 		Bird->ResetRadialMovementState();
-		Bird->SetActorLocationAndRotation(Planet->GetPlanetCenterWorld() + Direction * Radius, FRotationMatrix::MakeFromXZ(SlingForward, Direction).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+		Bird->SetActorLocationAndRotation(WaitingLocation, FRotationMatrix::MakeFromXZ(SlingForward, Direction).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
 		++WaitingIndex;
 	}
 }
@@ -301,17 +332,20 @@ FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const
 
 void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 {
-	if (!Planet.IsValid() || LaunchState != EABTSM6LaunchState::Pulling) return;
+	if ((!bPlanarTestMode && !Planet.IsValid()) || LaunchState != EABTSM6LaunchState::Pulling) return;
 	FVector Position = PouchLocation;
 	FVector Velocity = ComputeLaunchVelocity();
-	const FVector Center = Planet->GetPlanetCenterWorld();
-	const float Mu = 980.0f * FMath::Square(Planet->GetPlanetRadiusCM());
+	const FVector Center = bPlanarTestMode ? FVector::ZeroVector : Planet->GetPlanetCenterWorld();
+	const float Mu = bPlanarTestMode ? 0.0f : 980.0f * FMath::Square(Planet->GetPlanetRadiusCM());
 	for (int32 Index = 0; Index < TrajectorySampleCount; ++Index)
 	{
 		if ((Index & 1) == 0) DrawDebugPoint(GetWorld(), Position, TrajectoryPointSize, FColor(176, 224, 255), false, 0.0f, 0);
 		const FVector ToCenter = Center - Position;
 		const float Radius = FMath::Max(ToCenter.Size(), 1.0f);
-		const FVector Acceleration = ToCenter / Radius * (Mu / FMath::Square(Radius)) - Velocity * FlightAirDragPerSecond;
+		const FVector Gravity = bPlanarTestMode
+			? -PlanarUp * 980.0f
+			: ToCenter / Radius * (Mu / FMath::Square(Radius));
+		const FVector Acceleration = Gravity - Velocity * FlightAirDragPerSecond;
 		Velocity += Acceleration * TrajectoryStepSeconds;
 		Position += Velocity * TrajectoryStepSeconds;
 	}
@@ -327,7 +361,11 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 	QuietElapsedSeconds = 0.0f;
 	BlackFuseRemainingSeconds = -1.0f;
 	bBlackDetonated = false;
-	if (SlingshotCamera) SlingshotCamera->FollowBird(LaunchedBird.Get(), Planet.Get());
+	if (SlingshotCamera)
+	{
+		if (bPlanarTestMode) SlingshotCamera->FollowBirdPlanar(LaunchedBird.Get(), PlanarUp);
+		else SlingshotCamera->FollowBird(LaunchedBird.Get(), Planet.Get());
+	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Launch] Bird=%d Speed=%.1f Pull=%.2f"), ABTSBirdIdToIndex(LaunchedBird->GetBirdId()), Velocity.Size(), PullAlpha);
 }
 
@@ -347,10 +385,15 @@ const FABTSM6MaterialImpactProfile& AABTSM6SlingshotSystem::GetMaterialProfile(c
 
 EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveComponent* Component) const
 {
-	if (Component == Planet->ForestHISM) return EABTSM6ImpactMaterial::Wood;
-	if (Component == Planet->RockHISM) return EABTSM6ImpactMaterial::Stone;
+	if (Planet.IsValid() && Component == Planet->ForestHISM) return EABTSM6ImpactMaterial::Wood;
+	if (Planet.IsValid() && Component == Planet->RockHISM) return EABTSM6ImpactMaterial::Stone;
+	if (Component && Component->GetOwner() && Component->GetOwner()->IsA<AABTSM71TreeHISMActor>()) return EABTSM6ImpactMaterial::Wood;
+	if (Component && Component->GetOwner() && Component->GetOwner()->IsA<AABTSM71RockHISMActor>()) return EABTSM6ImpactMaterial::Stone;
 	if (const AABTSM6DestructibleProxy* Proxy = Component ? Cast<AABTSM6DestructibleProxy>(Component->GetOwner()) : nullptr) return Proxy->GetImpactMaterial();
-	return Component && Component->GetOwner() == Planet.Get() ? EABTSM6ImpactMaterial::Terrain : EABTSM6ImpactMaterial::Building;
+	const AActor* ComponentOwner = Component ? Component->GetOwner() : nullptr;
+	return ComponentOwner && ((Planet.IsValid() && ComponentOwner == Planet.Get())
+		|| ComponentOwner->IsA<AABTSM71PhysicsTestStage>())
+		? EABTSM6ImpactMaterial::Terrain : EABTSM6ImpactMaterial::Building;
 }
 
 bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
@@ -378,7 +421,14 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 	AABTSM6DestructibleProxy* Proxy = GetWorld()->SpawnActor<AABTSM6DestructibleProxy>(ProxyClass, Transform, Params);
 	if (Proxy)
 	{
-		Proxy->ActivateProxy(Mesh, Transform, Material, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f, Planet->GetPlanetCenterWorld(), 980.0f);
+		if (bPlanarTestMode)
+		{
+			Proxy->ActivateProxyPlanar(Mesh, Transform, Material, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f, PlanarUp, 980.0f);
+		}
+		else
+		{
+			Proxy->ActivateProxy(Mesh, Transform, Material, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f, Planet->GetPlanetCenterWorld(), 980.0f);
+		}
 		DynamicProxies.Add(Proxy);
 	}
 	return true;
@@ -450,7 +500,17 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 	bBlackDetonated = true;
 	int32 BrokenInstances = 0;
 	int32 ImpulsedInstances = 0;
-	for (UHierarchicalInstancedStaticMeshComponent* HISM : {Planet->ForestHISM.Get(), Planet->RockHISM.Get()})
+	TArray<UHierarchicalInstancedStaticMeshComponent*> ExplosionHISMs;
+	if (Planet.IsValid())
+	{
+		ExplosionHISMs.Add(Planet->ForestHISM.Get());
+		ExplosionHISMs.Add(Planet->RockHISM.Get());
+	}
+	if (bPlanarTestMode)
+	{
+		for (TActorIterator<AABTSM71PlaceableHISMActor> It(GetWorld()); It; ++It) ExplosionHISMs.Add(It->GetHISM());
+	}
+	for (UHierarchicalInstancedStaticMeshComponent* HISM : ExplosionHISMs)
 	{
 		if (HISM == nullptr) continue;
 		TArray<int32> Indices = HISM->GetInstancesOverlappingSphere(LaunchedBird->GetActorLocation(), BlackExplosionImpulseRadiusCM, true);
@@ -505,8 +565,17 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	LaunchedBird->BeginSlingshotReturn();
 	ReturnStartLocation = LaunchedBird->GetActorLocation();
 	const FVector ApproxTarget = SlingCenter - SlingForward * 230.0f;
-	const FVector Direction = (ApproxTarget - Planet->GetPlanetCenterWorld()).GetSafeNormal();
-	ReturnTargetLocation = Planet->GetPlanetCenterWorld() + Direction * (Planet->GetSurfaceRadiusAtDirection(Direction) + LaunchedBird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f);
+	if (bPlanarTestMode)
+	{
+		ReturnTargetLocation = ApproxTarget;
+		const float DesiredHeight = LaunchedBird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f;
+		ReturnTargetLocation += PlanarUp * (DesiredHeight - FVector::DotProduct(ReturnTargetLocation - PlanarOrigin, PlanarUp));
+	}
+	else
+	{
+		const FVector Direction = (ApproxTarget - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+		ReturnTargetLocation = Planet->GetPlanetCenterWorld() + Direction * (Planet->GetSurfaceRadiusAtDirection(Direction) + LaunchedBird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f);
+	}
 	ReturnElapsedSeconds = 0.0f;
 	LaunchState = EABTSM6LaunchState::Returning;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Begin FlightSeconds=%.2f Proxies=%d"), FlightElapsedSeconds, DynamicProxies.Num());
@@ -517,6 +586,14 @@ void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
 	if (!LaunchedBird.IsValid()) { FinishReturn(); return; }
 	ReturnElapsedSeconds += DeltaSeconds;
 	const float Alpha = FMath::Clamp(ReturnElapsedSeconds / FMath::Max(ReturnDurationSeconds, 0.1f), 0.0f, 1.0f);
+	if (bPlanarTestMode)
+	{
+		const FVector Location = FMath::Lerp(ReturnStartLocation, ReturnTargetLocation, FMath::SmoothStep(0.0f, 1.0f, Alpha))
+			+ PlanarUp * (FMath::Sin(Alpha * PI) * 280.0f);
+		LaunchedBird->SetActorLocationAndRotation(Location, FRotationMatrix::MakeFromXZ(SlingForward, PlanarUp).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+		if (Alpha >= 1.0f) FinishReturn();
+		return;
+	}
 	const FVector Center = Planet->GetPlanetCenterWorld();
 	const FVector StartOffset = ReturnStartLocation - Center;
 	const FVector EndOffset = ReturnTargetLocation - Center;

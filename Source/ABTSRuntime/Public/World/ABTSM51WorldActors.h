@@ -5,9 +5,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Inventory/ABTSInventoryTypes.h"
+#include "Slingshot/ABTSSlingshotTypes.h"
 #include "ABTSM51WorldActors.generated.h"
 
 class UStaticMeshComponent;
+class UMaterialInterface;
 
 UCLASS()
 class ABTSRUNTIME_API AABTSM51PickupItem : public AActor
@@ -59,6 +61,7 @@ class ABTSRUNTIME_API AABTSM51SlingshotStake : public AActor
 public:
 	AABTSM51SlingshotStake();
 	void InitializeStake(EABTSItemId InStakeItem, int32 InCellId, const FVector& InUnitDirection);
+	void ConfigureVisualDimensions(float DiameterCM, float HeightCM, UMaterialInterface* Material = nullptr);
 	EABTSItemId GetStakeItem() const { return StakeItem; }
 	int32 GetCellId() const { return CellId; }
 	const FVector& GetUnitDirection() const { return UnitDirection; }
@@ -84,9 +87,12 @@ class ABTSRUNTIME_API AABTSM51SlingshotCord : public AActor
 public:
 	AABTSM51SlingshotCord();
 	void InitializeCord(AABTSM51SlingshotStake* InStakeA, AABTSM51SlingshotStake* InStakeB, const FVector& InEndpointA, const FVector& InEndpointB);
+	void InitializeCordWithTier(AABTSM51SlingshotStake* InStakeA, AABTSM51SlingshotStake* InStakeB, const FVector& InEndpointA, const FVector& InEndpointB, EABTSSlingshotTier InTier);
+	void ConfigureVisualThickness(float ThicknessCM, UMaterialInterface* Material = nullptr);
 	FVector GetEndpointA() const { return EndpointA; }
 	FVector GetEndpointB() const { return EndpointB; }
 	EABTSItemId GetStakeItem() const;
+	EABTSSlingshotTier GetSlingshotTier() const { return SlingshotTier; }
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
@@ -97,4 +103,5 @@ private:
 	TWeakObjectPtr<AABTSM51SlingshotStake> StakeB;
 	FVector EndpointA = FVector::ZeroVector;
 	FVector EndpointB = FVector::ZeroVector;
+	EABTSSlingshotTier SlingshotTier = EABTSSlingshotTier::Simple;
 };

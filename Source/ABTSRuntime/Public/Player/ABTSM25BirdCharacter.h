@@ -72,6 +72,8 @@ public:
 	UABTSRadialForceMovementComponent* GetForceMovementComponent() const { return ForceMovement; }
 	UABTSChaosBirdMovementComponent* GetChaosMovementComponent() const { return ChaosMovement; }
 	UPrimitiveComponent* GetChaosPhysicsBody() const;
+	/** Forces the isolated M7.1 floor to use Chaos plus constant planar gravity. */
+	void EnablePlanarChaosMovement(const FVector& PlaneOrigin, const FVector& PlaneUp);
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|Movement")
 	EABTSBirdMovementMode GetSelectedMovementMode() const { return MovementMode; }
@@ -130,4 +132,5 @@ private:
 	float SavedChaosCapsuleRadius = 42.0f;
 	float SavedChaosCapsuleHalfHeight = 60.0f;
 	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
+	bool bPlanarChaosMode = false;
 };
