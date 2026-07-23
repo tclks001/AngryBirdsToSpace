@@ -10,13 +10,16 @@
 class UABTSM25RadialMovementComponent;
 class UABTSRadialForceMovementComponent;
 class UABTSRadialSurfaceSuspensionComponent;
+class UABTSChaosBirdMovementComponent;
+class UPrimitiveComponent;
 
 /** Editor-selectable player movement implementation. */
 UENUM(BlueprintType)
 enum class EABTSBirdMovementMode : uint8
 {
 	ForceSuspension UMETA(DisplayName = "Force + Radial Suspension (Recommended)"),
-	LegacySweep UMETA(DisplayName = "Legacy Kinematic Sweep")
+	LegacySweep UMETA(DisplayName = "Legacy Kinematic Sweep"),
+	ChaosRigidBody UMETA(DisplayName = "Chaos Rigid Body")
 };
 
 /** M2.5 playable bird: input shell for radial gravity, collision and jump. */
@@ -36,8 +39,16 @@ public:
 
 	/** Clears both implementations so a spawn teleport cannot retain stale velocity. */
 	void ResetRadialMovementState();
+	/** Ensures M4 writes follower steering before either movement implementation consumes it. */
+	void AddPartyTickPrerequisite(AActor* PartyActor);
 	/** Used by party control changes; unlike ResetRadialMovementState it preserves grounding. */
 	void ClearControlHandoffState();
+	/** M4 diagnostic handoff: clear both mover implementations completely, then rebuild only the selected mover's stable ground contact. */
+	bool ResetForControlHandoffCacheExperiment();
+	/** M4 input-routing diagnostic entry points. They intentionally use the same movement logic as the pawn bindings. */
+	void HandleControllerRoutedMoveForward(float Value);
+	void HandleControllerRoutedMoveRight(float Value);
+	void HandleControllerRoutedJump();
 	void BeginControlHandoffDiagnostics(float Seconds = 4.0f);
 	bool IsControlHandoffDiagnosticsActive() const { return ControlDiagnosticRemainingSeconds > 0.0f; }
 	void SetBirdIdentity(EABTSBirdId InBirdId, EABTSBirdSlingshotCapability InCapability, bool bInPlayerControlled);
@@ -59,6 +70,8 @@ public:
 	FVector GetSlingshotVelocity() const;
 	bool IsSlingshotFlightActive() const;
 	UABTSRadialForceMovementComponent* GetForceMovementComponent() const { return ForceMovement; }
+	UABTSChaosBirdMovementComponent* GetChaosMovementComponent() const { return ChaosMovement; }
+	UPrimitiveComponent* GetChaosPhysicsBody() const;
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|Movement")
 	EABTSBirdMovementMode GetSelectedMovementMode() const { return MovementMode; }
@@ -71,6 +84,15 @@ private:
 	void TurnWithRadialPhysics(float Value);
 	void LookWithRadialPhysics(float Value);
 	void BeginRadialJump();
+	void ProcessMoveWithRadialPhysicsForward(float Value, bool bControllerRouted);
+	void ProcessMoveWithRadialPhysicsRight(float Value, bool bControllerRouted);
+	void ProcessRadialJump(bool bControllerRouted);
+	bool IsControllerRoutedMovementInputExperimentEnabled() const;
+	bool IsClearMotionBeforePlayerJumpExperimentEnabled() const;
+	void ApplyClearMotionBeforeJumpExperiment();
+	void UpdateChaosVisualFrame();
+	void ConfigureChaosPhysicsBody(bool bEnable);
+	void SetLocomotionCollisionEnabled(ECollisionEnabled::Type CollisionEnabled);
 	void LogControlDiagnosticSnapshot();
 
 	/** Select on the C++ class defaults or a Blueprint child before starting PIE. */
@@ -97,4 +119,15 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|Movement|Force", meta = (AllowPrivateAccess = "true", NoEditInline))
 	TObjectPtr<UABTSRadialSurfaceSuspensionComponent> SurfaceSuspension;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|Movement|Chaos", meta = (AllowPrivateAccess = "true", NoEditInline))
+	TObjectPtr<UABTSChaosBirdMovementComponent> ChaosMovement;
+
+	/** Dedicated StaticMesh sphere used as the Chaos root body; never used by the legacy movers. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|Movement|Chaos", meta = (AllowPrivateAccess = "true", NoEditInline))
+	TObjectPtr<UStaticMeshComponent> ChaosPhysicsSphere;
+
+	float SavedChaosCapsuleRadius = 42.0f;
+	float SavedChaosCapsuleHalfHeight = 60.0f;
+	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
 };

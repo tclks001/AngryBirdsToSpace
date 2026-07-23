@@ -70,8 +70,10 @@ AABTSM3Planet::AABTSM3Planet()
 bool AABTSM3Planet::RebuildPlanet()
 {
 	if (!AABTSM2Planet::RebuildPlanet() || !GenerateLogicalTerrain()) return false;
+	const float ResolvedHeightScaleCM = bDisableTerrainHeightVariationExperiment ? 0.0f : MacroHeightScaleCM;
+	const float ResolvedWaterDepthCM = bDisableTerrainHeightVariationExperiment ? 0.0f : TaskWaterDepthCM;
 	TerrainVisualField = MakeUnique<FABTSM3TerrainVisualField>();
-	TerrainVisualField->Initialize(PlanetRadiusCM, MacroHeightScaleCM, TaskWaterDepthCM, HeightBlendWidthCM, TerrainBlendWidthCM, SurfaceNormalSmoothingDistanceCM,
+	TerrainVisualField->Initialize(PlanetRadiusCM, ResolvedHeightScaleCM, ResolvedWaterDepthCM, HeightBlendWidthCM, TerrainBlendWidthCM, SurfaceNormalSmoothingDistanceCM,
 		LogicalCells, GeneratedCellStates, GeneratedEdgeStates, TrailVisualHalfWidthCM, MainRoadVisualHalfWidthCM,
 		StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM);
 	BuildM3ContinuousSurface();
@@ -105,9 +107,10 @@ bool AABTSM3Planet::RebuildPlanet()
 		RoadCells += State.bRoad ? 1 : 0;
 		WaterCells += State.bWater ? 1 : 0;
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3] Ready=%d Seed=%d Version=%d Attempt=%d Tasks=%d Links=%d Cells=%d Edges=%d RoadCells=%d WaterCells=%d Buildings=%d ForestInstances=%d RockInstances=%d MaterialAssigned=%d MaterialReady=%d"),
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3] Ready=%d Seed=%d Version=%d Attempt=%d Tasks=%d Links=%d Cells=%d Edges=%d RoadCells=%d WaterCells=%d Buildings=%d ForestInstances=%d RockInstances=%d MaterialAssigned=%d MaterialReady=%d FlatHeightExperiment=%d EffectiveHeightScale=%.1f EffectiveWaterDepth=%.1f"),
 		bPresentationReady ? 1 : 0, WorldSeed, PCGSummary.GeneratorVersion, PCGSummary.AttemptIndex, GeneratedTasks.Num(), GeneratedTaskLinks.Num(),
-		GeneratedCellStates.Num(), GeneratedEdgeStates.Num(), RoadCells, WaterCells, BuildingSpawnSites.Num(), ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), TerrainMaterial ? 1 : 0, bMaterialReady ? 1 : 0);
+		GeneratedCellStates.Num(), GeneratedEdgeStates.Num(), RoadCells, WaterCells, BuildingSpawnSites.Num(), ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), TerrainMaterial ? 1 : 0, bMaterialReady ? 1 : 0,
+		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM);
 	return bPresentationReady;
 }
 
@@ -330,6 +333,8 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 
 	ContinuousSurface->ClearAllMeshSections();
 	ContinuousSurface->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, UV3, Colors, Tangents, true, false);
+	// Rebuild Chaos state after installing the runtime-generated M3 section.
+	ContinuousSurface->RecreatePhysicsState();
 	if (TerrainMaterial) ContinuousSurface->SetMaterial(0, TerrainMaterial);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][SurfaceNormals] SmoothingDistance=%.1f MaxTilt=%.2f ExtremeOver80=%d Vertices=%d"),
 		SurfaceNormalSmoothingDistanceCM, MaxSurfaceNormalTiltDegrees, ExtremeSurfaceNormalCount, Normals.Num());

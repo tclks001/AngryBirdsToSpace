@@ -158,6 +158,7 @@ bool AABTSBirdParty::SpawnFollowers(AABTSM25BirdCharacter& InitialLeader)
 		FABTSBirdPartyRuntime& Runtime = RuntimeByFixedId[Index];
 		Runtime.BirdId = static_cast<EABTSBirdId>(Index);
 		Runtime.Bird = PartyMembers[Index];
+		PartyMembers[Index]->AddPartyTickPrerequisite(this);
 		Runtime.bWasGrounded = PartyMembers[Index]->IsRadiallyGrounded();
 		RecordPathSample(Runtime);
 	}
@@ -168,7 +169,27 @@ void AABTSBirdParty::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (!bPartyReady || bSlingshotMode || DeltaSeconds <= SMALL_NUMBER) return;
-	RecordPathsAndJumpEvents(DeltaSeconds);
+	const bool bUseDirectExperiment = Settings.IsValid()
+		&& Settings->bUseDirectControlledBirdFollowExperiment;
+	if (!bFollowModeInitialized || bUsingDirectControlledBirdFollowExperiment != bUseDirectExperiment)
+	{
+		bFollowModeInitialized = true;
+		bUsingDirectControlledBirdFollowExperiment = bUseDirectExperiment;
+		++PathGeneration;
+		ResetFollowingRuntimeState(!bUseDirectExperiment);
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M4][FollowExperiment] Mode=%s Breadcrumbs=%d JumpPropagation=%d Target=%s"),
+			bUseDirectExperiment ? TEXT("DirectControlled") : TEXT("BreadcrumbQueue"),
+			bUseDirectExperiment ? 0 : 1,
+			bUseDirectExperiment ? 0 : 1,
+			bUseDirectExperiment ? TEXT("ControlledBirdLivePosition") : TEXT("PredecessorBreadcrumb"));
+	}
+	if (!bUseDirectExperiment) RecordPathsAndJumpEvents(DeltaSeconds);
+	if (FollowerUpdatePauseRemainingSeconds > 0.0f)
+	{
+		FollowerUpdatePauseRemainingSeconds = FMath::Max(0.0f, FollowerUpdatePauseRemainingSeconds - DeltaSeconds);
+		return;
+	}
 	UpdateFollowers(DeltaSeconds);
 }
 
@@ -267,7 +288,17 @@ void AABTSBirdParty::UpdateFollower(
 
 	FABTSBirdPathSample Target;
 	const float QueueSpacing = Settings.IsValid() ? Settings->QueueSpacingCM : 190.0f;
-	if (!FindTargetBehind(Predecessor, QueueSpacing, Target)) return;
+	if (bUsingDirectControlledBirdFollowExperiment)
+	{
+		AABTSM25BirdCharacter* ControlledBird = GetControlledBird();
+		if (ControlledBird == nullptr || ControlledBird == Bird) return;
+		Target.Location = ControlledBird->GetActorLocation();
+		Target.Forward = ControlledBird->GetActorForwardVector();
+	}
+	else if (!FindTargetBehind(Predecessor, QueueSpacing, Target))
+	{
+		return;
+	}
 	const float DistanceToTarget = GetSurfaceDistanceCM(Bird->GetActorLocation(), Target.Location);
 	const float FollowStart = Settings.IsValid() ? Settings->FollowStartDistanceCM : 250.0f;
 	const float FollowStop = Settings.IsValid() ? Settings->FollowStopDistanceCM : 145.0f;
@@ -281,7 +312,7 @@ void AABTSBirdParty::UpdateFollower(
 		Follower.bFollowing = true;
 	}
 
-	TryPropagateJump(Follower, Predecessor, Target);
+	if (!bUsingDirectControlledBirdFollowExperiment) TryPropagateJump(Follower, Predecessor, Target);
 	FVector Separation = FVector::ZeroVector;
 	const float SeparationDistance = Settings.IsValid() ? Settings->SeparationDistanceCM : 95.0f;
 	const FVector Up = ResolvedPlanet->GetRadialUpAtWorldLocation(Bird->GetActorLocation());
@@ -412,17 +443,29 @@ bool AABTSBirdParty::SwitchControlledBird(const EABTSBirdId NewBirdId)
 	// Possession callbacks and input-stack rebuilds are complete at this point.
 	// Clear both sides afterwards so no pre-transfer force survives into physics.
 	OldBird->ClearControlHandoffState();
-	NewBird->ClearControlHandoffState();
+	const bool bClearNewLeaderMotionCaches = Settings.IsValid()
+		&& Settings->bClearNewLeaderMotionCachesOnHandoffExperiment;
+	if (bClearNewLeaderMotionCaches)
+	{
+		NewBird->ResetForControlHandoffCacheExperiment();
+	}
+	else
+	{
+		NewBird->ClearControlHandoffState();
+	}
 	OldBird->BeginControlHandoffDiagnostics();
 	NewBird->BeginControlHandoffDiagnostics();
 	ControlledBirdId = NewBirdId;
 	RebuildQueue(NewBirdId);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M4][Switch] Controlled=%d Queue=%d,%d,%d,%d NewLeaderGroundAligned=1 Authority=Possession"),
+	FollowerUpdatePauseRemainingSeconds = 0.05f;
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M4][Switch] Controlled=%d Queue=%d,%d,%d,%d NewLeaderGroundAligned=1 CacheClearExperiment=%d PartyTickBeforeMovement=1 Pause=%.2f Authority=Possession"),
 		ABTSBirdIdToIndex(ControlledBirdId),
 		ABTSBirdIdToIndex(QueueOrder[0]),
 		ABTSBirdIdToIndex(QueueOrder[1]),
 		ABTSBirdIdToIndex(QueueOrder[2]),
-		ABTSBirdIdToIndex(QueueOrder[3]));
+		ABTSBirdIdToIndex(QueueOrder[3]),
+		bClearNewLeaderMotionCaches ? 1 : 0,
+		FollowerUpdatePauseRemainingSeconds);
 	return true;
 }
 
@@ -465,12 +508,27 @@ void AABTSBirdParty::RebuildQueue(const EABTSBirdId NewLeaderId)
 		Remaining.RemoveAt(BestArrayIndex);
 	}
 	++PathGeneration;
+	ResetFollowingRuntimeState(!bUsingDirectControlledBirdFollowExperiment);
+}
+
+void AABTSBirdParty::ResetFollowingRuntimeState(const bool bSeedPaths)
+{
 	for (FABTSBirdPartyRuntime& Runtime : RuntimeByFixedId)
 	{
 		Runtime.bFollowing = false;
+		Runtime.Path.Reset();
 		Runtime.JumpEvents.Reset();
 		Runtime.LastConsumedJumpSerial = INDEX_NONE;
 		Runtime.SevereDetachSeconds = 0.0f;
+		Runtime.PreviousTargetDistanceCM = TNumericLimits<float>::Max();
+		Runtime.bWasGrounded = Runtime.Bird.IsValid() && Runtime.Bird->IsRadiallyGrounded();
+	}
+	if (!bSeedPaths) return;
+	// Breadcrumbs belong to a queue generation. Reusing paths recorded while a
+	// bird had another predecessor makes the new queue steer along stale roles.
+	for (FABTSBirdPartyRuntime& Runtime : RuntimeByFixedId)
+	{
+		RecordPathSample(Runtime);
 	}
 }
 

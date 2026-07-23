@@ -33,7 +33,10 @@ AABTSM2Planet::AABTSM2Planet()
 	SetRootComponent(ContinuousSurface);
 	ContinuousSurface->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	ContinuousSurface->bUseComplexAsSimpleCollision = true;
-	ContinuousSurface->SetMobility(EComponentMobility::Movable);
+	// The generated planet is immutable after creation. A static owner is
+	// required for reliable Chaos support of dynamic bird bodies using the
+	// procedural mesh's complex-as-simple collision.
+	ContinuousSurface->SetMobility(EComponentMobility::Static);
 }
 
 void AABTSM2Planet::BeginPlay()
@@ -226,6 +229,9 @@ void AABTSM2Planet::BuildContinuousSurface()
 
 	ContinuousSurface->ClearAllMeshSections();
 	ContinuousSurface->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
+	// The section is created at runtime; rebuild the physics state so Chaos sees
+	// the generated complex triangles immediately.
+	ContinuousSurface->RecreatePhysicsState();
 	SurfaceTriangleCount = RenderMesh.Triangles.Num();
 }
 

@@ -7,6 +7,7 @@
 #include "ABTSM4PlayerController.generated.h"
 
 class AABTSM4PartyCamera;
+class AABTSBirdParty;
 
 /** M4 local controller: persistent clickable party HUD and Tab cycling. */
 UCLASS()
@@ -20,6 +21,10 @@ public:
 	virtual void SetupInputComponent() override;
 	virtual void OnPossess(APawn* InPawn) override;
 	bool GetCameraRelativeMovementBasis(const FVector& WorldLocation, FVector& OutForward, FVector& OutRight) const;
+	/** True only while the level's M4 experiment bypasses the possessed pawn input stack for WASD and Space. */
+	bool IsControllerRoutedMovementInputExperimentEnabled() const;
+	/** True while the jump-time drift intervention is enabled on the level's party settings. */
+	bool IsClearMotionBeforePlayerJumpExperimentEnabled() const;
 	void RestorePartyCameraView() { EnsurePartyCameraView(); }
 
 protected:
@@ -35,8 +40,12 @@ private:
 	void ApplyOrbitPitch(float Value);
 	void ApplyCameraZoom(float Value);
 	void RecenterCamera();
+	void RouteMoveForwardToControlledBird(float Value);
+	void RouteMoveRightToControlledBird(float Value);
+	void RouteJumpToControlledBird();
 	void SetCursorInteractionMode(bool bEnableCursor);
 	void EnsurePartyCameraView();
+	AABTSBirdParty* FindParty() const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM4PartyCamera> PartyCamera;

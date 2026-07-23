@@ -4,21 +4,33 @@
 
 #include "ABTSRuntime.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Movement/ABTSMovementModeSelector.h"
+#include "Movement/ABTSChaosBirdMovementComponent.h"
 #include "Movement/ABTSM25RadialMovementComponent.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSRadialSurfaceSuspensionComponent.h"
 #include "Planet/ABTSM2SphericalSurfaceComponent.h"
 #include "Player/ABTSM4PlayerController.h"
+#include "UObject/ConstructorHelpers.h"
 
 AABTSM25BirdCharacter::AABTSM25BirdCharacter()
 {
 	RadialMovement = CreateDefaultSubobject<UABTSM25RadialMovementComponent>(TEXT("RadialMovement"));
 	ForceMovement = CreateDefaultSubobject<UABTSRadialForceMovementComponent>(TEXT("ForceMovement"));
 	SurfaceSuspension = CreateDefaultSubobject<UABTSRadialSurfaceSuspensionComponent>(TEXT("SurfaceSuspension"));
+	ChaosMovement = CreateDefaultSubobject<UABTSChaosBirdMovementComponent>(TEXT("ChaosMovement"));
+	ChaosPhysicsSphere = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ChaosPhysicsSphere"));
+	ChaosPhysicsSphere->SetupAttachment(GetCapsuleComponent());
+	ChaosPhysicsSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ChaosPhysicsSphere->SetVisibility(false);
+	ChaosPhysicsSphere->SetHiddenInGame(true);
+	ChaosPhysicsSphere->SetGenerateOverlapEvents(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ChaosSphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (ChaosSphereMesh.Succeeded()) ChaosPhysicsSphere->SetStaticMesh(ChaosSphereMesh.Object);
 }
 
 void AABTSM25BirdCharacter::BeginPlay()
@@ -32,6 +44,7 @@ void AABTSM25BirdCharacter::BeginPlay()
 void AABTSM25BirdCharacter::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody) UpdateChaosVisualFrame();
 	if (ControlDiagnosticRemainingSeconds <= 0.0f) return;
 	ControlDiagnosticRemainingSeconds = FMath::Max(0.0f, ControlDiagnosticRemainingSeconds - DeltaSeconds);
 	ControlDiagnosticLogAccumulator += DeltaSeconds;
@@ -58,31 +71,65 @@ void AABTSM25BirdCharacter::UnPossessed()
 
 void AABTSM25BirdCharacter::ConfigureMovementMode()
 {
+	bool bUseCollisionGroundingExperiment = false;
+	float CollisionGroundMaxAngleDegrees = 55.0f;
 	for (TActorIterator<AABTSMovementModeSelector> It(GetWorld()); It; ++It)
 	{
 		MovementMode = It->MovementMode;
+		bUseCollisionGroundingExperiment = It->bUseCollisionNormalGroundingExperiment;
+		CollisionGroundMaxAngleDegrees = It->CollisionGroundMaxAngleDegrees;
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][MovementMode] Level selector found: %s"), *GetNameSafe(*It));
 		break;
 	}
+	RadialMovement->ConfigureCollisionGroundingExperiment(
+		bUseCollisionGroundingExperiment,
+		CollisionGroundMaxAngleDegrees);
+	ForceMovement->ConfigureCollisionGroundingExperiment(
+		bUseCollisionGroundingExperiment,
+		CollisionGroundMaxAngleDegrees);
 	const bool bUseForceSuspension = MovementMode == EABTSBirdMovementMode::ForceSuspension;
-	RadialMovement->SetComponentTickEnabled(!bUseForceSuspension);
+	const bool bUseLegacySweep = MovementMode == EABTSBirdMovementMode::LegacySweep;
+	const bool bUseChaos = MovementMode == EABTSBirdMovementMode::ChaosRigidBody;
+	RadialMovement->SetComponentTickEnabled(bUseLegacySweep);
 	ForceMovement->SetComponentTickEnabled(bUseForceSuspension);
+	ChaosMovement->SetComponentTickEnabled(bUseChaos);
+	ChaosMovement->ConfigureCollisionGrounding(CollisionGroundMaxAngleDegrees);
+	ConfigureChaosPhysicsBody(bUseChaos);
+	GetSphericalSurface()->SetApplyActorFrame(!bUseChaos);
+	ChaosMovement->SetChaosEnabled(bUseChaos);
 	ResetRadialMovementState();
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][MovementMode] Active=%s LegacyTick=%d ForceTick=%d"),
-		bUseForceSuspension ? TEXT("ForceSuspension") : TEXT("LegacySweep"),
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][MovementMode] Active=%s LegacyTick=%d ForceTick=%d ChaosTick=%d CollisionGroundExperiment=%d MaxGroundAngle=%.1f"),
+		bUseForceSuspension ? TEXT("ForceSuspension") : bUseLegacySweep ? TEXT("LegacySweep") : TEXT("ChaosRigidBody"),
 		RadialMovement->IsComponentTickEnabled() ? 1 : 0,
-		ForceMovement->IsComponentTickEnabled() ? 1 : 0);
+		ForceMovement->IsComponentTickEnabled() ? 1 : 0,
+		ChaosMovement->IsComponentTickEnabled() ? 1 : 0,
+		bUseCollisionGroundingExperiment ? 1 : 0,
+		FMath::Clamp(CollisionGroundMaxAngleDegrees, 0.0f, 89.0f));
 }
 
 void AABTSM25BirdCharacter::ResetRadialMovementState()
 {
 	RadialMovement->ResetMotionState();
 	ForceMovement->ResetMotionState();
+	ChaosMovement->ResetMotionState();
+}
+
+void AABTSM25BirdCharacter::AddPartyTickPrerequisite(AActor* PartyActor)
+{
+	if (PartyActor == nullptr) return;
+	RadialMovement->AddTickPrerequisiteActor(PartyActor);
+	ForceMovement->AddTickPrerequisiteActor(PartyActor);
+	ChaosMovement->AddTickPrerequisiteActor(PartyActor);
 }
 
 void AABTSM25BirdCharacter::ClearControlHandoffState()
 {
 	RadialMovement->ClearControlHandoffState();
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		ChaosMovement->ClearControlHandoffState();
+		return;
+	}
 	// A newly possessed follower may currently be airborne because it was
 	// executing a queued follow jump. Clearing velocity alone leaves it suspended
 	// above the surface, so gravity looks like an autonomous post-switch command.
@@ -100,6 +147,31 @@ void AABTSM25BirdCharacter::ClearControlHandoffState()
 	}
 	RadialMovement->GrantControlHandoffJumpGrace(0.28f);
 	ForceMovement->GrantControlHandoffJumpGrace(0.28f);
+}
+
+bool AABTSM25BirdCharacter::ResetForControlHandoffCacheExperiment()
+{
+	// This deliberately resets both implementations, even though only one ticks.
+	// A later editor mode change must not revive a velocity, buffered jump or
+	// contact cache captured while this bird was still a follower.
+	RadialMovement->ResetMotionState();
+	ForceMovement->EndBallisticFlight(true);
+	ForceMovement->ResetMotionState();
+	ChaosMovement->EndBallisticFlight(true);
+	ChaosMovement->ResetMotionState();
+
+	bool bGroundContactRebuilt = false;
+	if (MovementMode == EABTSBirdMovementMode::ForceSuspension)
+	{
+		bGroundContactRebuilt = ForceMovement->StabilizeForGroundedControlHandoff();
+	}
+
+	UE_LOG(LogABTSRuntime, Warning,
+		TEXT("[ABTS][M4][HandoffExperiment] Bird=%d MotionCachesCleared=1 Mode=%d GroundRebuilt=%d"),
+		ABTSBirdIdToIndex(BirdId),
+		static_cast<int32>(MovementMode),
+		bGroundContactRebuilt ? 1 : 0);
+	return bGroundContactRebuilt;
 }
 
 void AABTSM25BirdCharacter::BeginControlHandoffDiagnostics(const float Seconds)
@@ -138,6 +210,11 @@ void AABTSM25BirdCharacter::SetPartyCollisionIsolation(const bool bIsolateFromPa
 	GetCapsuleComponent()->SetCollisionResponseToChannel(
 		ECC_Camera,
 		bIsolateFromParty ? ECR_Ignore : ECR_Block);
+	if (ChaosPhysicsSphere)
+	{
+		ChaosPhysicsSphere->SetCollisionResponseToChannel(ECC_Pawn, bIsolateFromParty ? ECR_Ignore : ECR_Block);
+		ChaosPhysicsSphere->SetCollisionResponseToChannel(ECC_Camera, bIsolateFromParty ? ECR_Ignore : ECR_Block);
+	}
 }
 
 bool AABTSM25BirdCharacter::CanUseSlingshotCapability(const EABTSBirdSlingshotCapability RequiredCapability) const
@@ -148,7 +225,13 @@ bool AABTSM25BirdCharacter::CanUseSlingshotCapability(const EABTSBirdSlingshotCa
 void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, const FQuat& WorldRotation)
 {
 	SavedCapsuleCollision = GetCapsuleComponent()->GetCollisionEnabled();
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SavedChaosBodyCollision = ChaosPhysicsSphere ? ChaosPhysicsSphere->GetCollisionEnabled() : ECollisionEnabled::NoCollision;
+	SetLocomotionCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		ChaosMovement->EndBallisticFlight(true);
+		ChaosMovement->SetChaosEnabled(false);
+	}
 	ForceMovement->EndBallisticFlight(true);
 	ForceMovement->SetComponentTickEnabled(false);
 	SetActorLocationAndRotation(WorldLocation, WorldRotation, false, nullptr, ETeleportType::TeleportPhysics);
@@ -156,37 +239,63 @@ void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, co
 
 void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, const float FlightAirDragPerSecond)
 {
-	GetCapsuleComponent()->SetCollisionEnabled(SavedCapsuleCollision);
+	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		ChaosMovement->SetChaosEnabled(true);
+		ChaosMovement->SetComponentTickEnabled(true);
+		ChaosMovement->BeginBallisticFlight(InitialVelocity, FlightAirDragPerSecond);
+		return;
+	}
 	ForceMovement->SetComponentTickEnabled(true);
 	ForceMovement->BeginBallisticFlight(InitialVelocity, FlightAirDragPerSecond);
 }
 
 void AABTSM25BirdCharacter::BeginSlingshotReturn()
 {
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SetLocomotionCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		ChaosMovement->EndBallisticFlight(true);
+		ChaosMovement->SetChaosEnabled(false);
+	}
 	ForceMovement->EndBallisticFlight(true);
 	ForceMovement->SetComponentTickEnabled(false);
 }
 
 void AABTSM25BirdCharacter::FinishSlingshotReturn()
 {
-	GetCapsuleComponent()->SetCollisionEnabled(SavedCapsuleCollision);
+	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		ChaosMovement->SetChaosEnabled(true);
+		ChaosMovement->SetComponentTickEnabled(true);
+		ChaosMovement->EndBallisticFlight(true);
+		return;
+	}
 	ForceMovement->SetComponentTickEnabled(true);
 	ForceMovement->EndBallisticFlight(true);
 }
 
 void AABTSM25BirdCharacter::SetSlingshotVelocity(const FVector& InVelocity)
 {
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		ChaosMovement->SetVelocity(InVelocity);
+		return;
+	}
 	ForceMovement->SetVelocity(InVelocity);
 }
 
 FVector AABTSM25BirdCharacter::GetSlingshotVelocity() const
 {
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody) return ChaosMovement->GetVelocity();
 	return ForceMovement->GetVelocity();
 }
 
 bool AABTSM25BirdCharacter::IsSlingshotFlightActive() const
 {
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody) return ChaosMovement->IsBallisticFlight();
 	return ForceMovement->IsBallisticFlight();
 }
 
@@ -196,10 +305,11 @@ void AABTSM25BirdCharacter::ApplyMoveInput(const FVector& Direction, const float
 	{
 		ForceMovement->SetMoveInput(Direction, Scale);
 	}
-	else
+	else if (MovementMode == EABTSBirdMovementMode::LegacySweep)
 	{
 		RadialMovement->SetMoveInput(Direction, Scale);
 	}
+	else ChaosMovement->SetMoveInput(Direction, Scale);
 }
 
 void AABTSM25BirdCharacter::ApplyPartyMoveInput(const FVector& Direction, const float Scale)
@@ -229,14 +339,15 @@ void AABTSM25BirdCharacter::ApplyPartyJump()
 		return;
 	}
 	if (MovementMode == EABTSBirdMovementMode::ForceSuspension) ForceMovement->QueueJump();
-	else RadialMovement->QueueJump();
+	else if (MovementMode == EABTSBirdMovementMode::LegacySweep) RadialMovement->QueueJump();
+	else ChaosMovement->QueueJump();
 }
 
 bool AABTSM25BirdCharacter::IsRadiallyGrounded() const
 {
-	return MovementMode == EABTSBirdMovementMode::ForceSuspension
-		? ForceMovement->IsGrounded()
-		: RadialMovement->IsGrounded();
+	if (MovementMode == EABTSBirdMovementMode::ForceSuspension) return ForceMovement->IsGrounded();
+	if (MovementMode == EABTSBirdMovementMode::LegacySweep) return RadialMovement->IsGrounded();
+	return ChaosMovement->IsGrounded();
 }
 
 void AABTSM25BirdCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -250,6 +361,17 @@ void AABTSM25BirdCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 }
 
 void AABTSM25BirdCharacter::MoveWithRadialPhysicsForward(const float Value)
+{
+	if (IsControllerRoutedMovementInputExperimentEnabled()) return;
+	ProcessMoveWithRadialPhysicsForward(Value, false);
+}
+
+void AABTSM25BirdCharacter::HandleControllerRoutedMoveForward(const float Value)
+{
+	ProcessMoveWithRadialPhysicsForward(Value, true);
+}
+
+void AABTSM25BirdCharacter::ProcessMoveWithRadialPhysicsForward(const float Value, const bool bControllerRouted)
 {
 	if (!FMath::IsNearlyZero(Value) && GetSphericalSurface()->IsSurfaceFrameReady())
 	{
@@ -265,8 +387,9 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsForward(const float Value)
 		{
 			const APlayerController* PlayerController = Cast<APlayerController>(Controller);
 			UE_LOG(LogABTSRuntime, Warning,
-				TEXT("[ABTS][M4][HandoffDiag][PlayerForward] Bird=%d Value=%.2f Accepted=%d Controller=%s W=%d S=%d"),
-				ABTSBirdIdToIndex(BirdId), Value, bAccepted ? 1 : 0, *GetNameSafe(Controller),
+			TEXT("[ABTS][M4][HandoffDiag][%sForward] Bird=%d Value=%.2f Accepted=%d Controller=%s W=%d S=%d"),
+			bControllerRouted ? TEXT("ControllerRouted") : TEXT("Player"),
+			ABTSBirdIdToIndex(BirdId), Value, bAccepted ? 1 : 0, *GetNameSafe(Controller),
 				PlayerController && PlayerController->IsInputKeyDown(EKeys::W) ? 1 : 0,
 				PlayerController && PlayerController->IsInputKeyDown(EKeys::S) ? 1 : 0);
 		}
@@ -275,6 +398,17 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsForward(const float Value)
 }
 
 void AABTSM25BirdCharacter::MoveWithRadialPhysicsRight(const float Value)
+{
+	if (IsControllerRoutedMovementInputExperimentEnabled()) return;
+	ProcessMoveWithRadialPhysicsRight(Value, false);
+}
+
+void AABTSM25BirdCharacter::HandleControllerRoutedMoveRight(const float Value)
+{
+	ProcessMoveWithRadialPhysicsRight(Value, true);
+}
+
+void AABTSM25BirdCharacter::ProcessMoveWithRadialPhysicsRight(const float Value, const bool bControllerRouted)
 {
 	if (!FMath::IsNearlyZero(Value) && GetSphericalSurface()->IsSurfaceFrameReady())
 	{
@@ -290,8 +424,9 @@ void AABTSM25BirdCharacter::MoveWithRadialPhysicsRight(const float Value)
 		{
 			const APlayerController* PlayerController = Cast<APlayerController>(Controller);
 			UE_LOG(LogABTSRuntime, Warning,
-				TEXT("[ABTS][M4][HandoffDiag][PlayerRight] Bird=%d Value=%.2f Accepted=%d Controller=%s D=%d A=%d"),
-				ABTSBirdIdToIndex(BirdId), Value, bAccepted ? 1 : 0, *GetNameSafe(Controller),
+			TEXT("[ABTS][M4][HandoffDiag][%sRight] Bird=%d Value=%.2f Accepted=%d Controller=%s D=%d A=%d"),
+			bControllerRouted ? TEXT("ControllerRouted") : TEXT("Player"),
+			ABTSBirdIdToIndex(BirdId), Value, bAccepted ? 1 : 0, *GetNameSafe(Controller),
 				PlayerController && PlayerController->IsInputKeyDown(EKeys::D) ? 1 : 0,
 				PlayerController && PlayerController->IsInputKeyDown(EKeys::A) ? 1 : 0);
 		}
@@ -313,19 +448,142 @@ void AABTSM25BirdCharacter::LookWithRadialPhysics(const float Value)
 
 void AABTSM25BirdCharacter::BeginRadialJump()
 {
+	if (IsControllerRoutedMovementInputExperimentEnabled()) return;
+	ProcessRadialJump(false);
+}
+
+void AABTSM25BirdCharacter::HandleControllerRoutedJump()
+{
+	ProcessRadialJump(true);
+}
+
+void AABTSM25BirdCharacter::ProcessRadialJump(const bool bControllerRouted)
+{
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][Jump] Space input reached AABTSM25BirdCharacter. Mode=%s"),
-		MovementMode == EABTSBirdMovementMode::ForceSuspension ? TEXT("ForceSuspension") : TEXT("LegacySweep"));
+		MovementMode == EABTSBirdMovementMode::ForceSuspension ? TEXT("ForceSuspension") : MovementMode == EABTSBirdMovementMode::LegacySweep ? TEXT("LegacySweep") : TEXT("ChaosRigidBody"));
 	const bool bAccepted = Controller != nullptr && IsLocallyControlled();
-	if (IsControlHandoffDiagnosticsActive()) UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M4][HandoffDiag][PlayerJump] Bird=%d Accepted=%d Controller=%s Grounded=%d"), ABTSBirdIdToIndex(BirdId), bAccepted ? 1 : 0, *GetNameSafe(Controller), IsRadiallyGrounded() ? 1 : 0);
+	if (IsControlHandoffDiagnosticsActive()) UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M4][HandoffDiag][%sJump] Bird=%d Accepted=%d Controller=%s Grounded=%d"), bControllerRouted ? TEXT("ControllerRouted") : TEXT("Player"), ABTSBirdIdToIndex(BirdId), bAccepted ? 1 : 0, *GetNameSafe(Controller), IsRadiallyGrounded() ? 1 : 0);
 	if (!bAccepted) return;
+	if (IsClearMotionBeforePlayerJumpExperimentEnabled())
+	{
+		ApplyClearMotionBeforeJumpExperiment();
+	}
 	if (MovementMode == EABTSBirdMovementMode::ForceSuspension)
 	{
 		ForceMovement->QueueJump();
 	}
-	else
+	else if (MovementMode == EABTSBirdMovementMode::LegacySweep)
 	{
 		RadialMovement->QueueJump();
 	}
+	else ChaosMovement->QueueJump();
+}
+
+void AABTSM25BirdCharacter::UpdateChaosVisualFrame()
+{
+	UStaticMeshComponent* Visual = GetBirdVisual();
+	if (Visual == nullptr || !GetSphericalSurface()->IsSurfaceFrameReady()) return;
+	const FVector Up = GetSphericalSurface()->GetRadialUp();
+	FVector Forward = GetSphericalSurface()->GetActorForwardTangent();
+	const FVector Velocity = ChaosMovement->GetVelocity();
+	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
+	if (!TangentVelocity.IsNearlyZero(25.0f)) Forward = TangentVelocity.GetSafeNormal();
+	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+	Visual->SetWorldRotation(FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat());
+}
+
+UPrimitiveComponent* AABTSM25BirdCharacter::GetChaosPhysicsBody() const
+{
+	return ChaosPhysicsSphere;
+}
+
+void AABTSM25BirdCharacter::ConfigureChaosPhysicsBody(const bool bEnable)
+{
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (Capsule == nullptr || ChaosPhysicsSphere == nullptr) return;
+	SavedChaosCapsuleRadius = Capsule->GetUnscaledCapsuleRadius();
+	SavedChaosCapsuleHalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
+	if (!bEnable)
+	{
+		ChaosPhysicsSphere->SetSimulatePhysics(false);
+		ChaosPhysicsSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return;
+	}
+
+	const FTransform ActorTransform = GetActorTransform();
+	ChaosPhysicsSphere->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	SetRootComponent(ChaosPhysicsSphere);
+	ChaosPhysicsSphere->SetWorldTransform(ActorTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	Capsule->AttachToComponent(ChaosPhysicsSphere, FAttachmentTransformRules::KeepWorldTransform);
+	Capsule->SetRelativeTransform(FTransform::Identity);
+	const float EngineSphereRadiusCM = 50.0f;
+	ChaosPhysicsSphere->SetRelativeScale3D(FVector(SavedChaosCapsuleRadius / EngineSphereRadiusCM));
+	ChaosPhysicsSphere->SetCollisionProfileName(UCollisionProfile::PhysicsActor_ProfileName);
+	ChaosPhysicsSphere->SetCollisionObjectType(ECC_Pawn);
+	ChaosPhysicsSphere->SetCollisionResponseToChannels(Capsule->GetCollisionResponseToChannels());
+	ChaosPhysicsSphere->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][ChaosMovement] DedicatedSphereBody=1 Mesh=%s Radius=%.1f Root=%s CapsuleCollision=%s SphereCollision=%s"),
+		*GetNameSafe(ChaosPhysicsSphere->GetStaticMesh()), SavedChaosCapsuleRadius, *GetNameSafe(GetRootComponent()),
+		*UEnum::GetValueAsString(Capsule->GetCollisionEnabled()),
+		*UEnum::GetValueAsString(ChaosPhysicsSphere->GetCollisionEnabled()));
+}
+
+void AABTSM25BirdCharacter::SetLocomotionCollisionEnabled(const ECollisionEnabled::Type CollisionEnabled)
+{
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		if (ChaosPhysicsSphere) ChaosPhysicsSphere->SetCollisionEnabled(CollisionEnabled);
+		if (GetCapsuleComponent()) GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+	else if (GetCapsuleComponent())
+	{
+		GetCapsuleComponent()->SetCollisionEnabled(CollisionEnabled);
+	}
+}
+
+bool AABTSM25BirdCharacter::IsControllerRoutedMovementInputExperimentEnabled() const
+{
+	const AABTSM4PlayerController* M4Controller = Cast<AABTSM4PlayerController>(Controller);
+	return M4Controller != nullptr && M4Controller->IsControllerRoutedMovementInputExperimentEnabled();
+}
+
+bool AABTSM25BirdCharacter::IsClearMotionBeforePlayerJumpExperimentEnabled() const
+{
+	const AABTSM4PlayerController* M4Controller = Cast<AABTSM4PlayerController>(Controller);
+	return M4Controller != nullptr && M4Controller->IsClearMotionBeforePlayerJumpExperimentEnabled();
+}
+
+void AABTSM25BirdCharacter::ApplyClearMotionBeforeJumpExperiment()
+{
+	const FVector ForceVelocityBefore = ForceMovement->GetVelocity();
+	const FVector ForcePendingBefore = ForceMovement->GetPendingMoveVector();
+	const FVector LegacyVelocityBefore = RadialMovement->GetVelocity();
+	const FVector LegacyPendingBefore = RadialMovement->GetPendingMoveVector();
+	const bool bForceGroundedBefore = ForceMovement->IsGrounded();
+	const bool bLegacyGroundedBefore = RadialMovement->IsGrounded();
+	const bool bJumpDetachBefore = SurfaceSuspension->IsJumpDetachActive();
+
+	// This intentionally preserves grounding, suspension state, jump buffers and actor transform.
+	// It changes only the motion state that a blocking tree collision would remove.
+	ForceMovement->ClearControlHandoffVelocity();
+	RadialMovement->ClearControlHandoffVelocity();
+
+	UE_LOG(LogABTSRuntime, Warning,
+		TEXT("[ABTS][M4][DriftJumpExperiment] Bird=%d Mode=%s Grounded=%d ForceGround=%d LegacyGround=%d Detach=%d ForceSpeedBefore=%.2f LegacySpeedBefore=%.2f ForceVelBefore=(%.1f,%.1f,%.1f) LegacyVelBefore=(%.1f,%.1f,%.1f) ForcePendingBefore=(%.2f,%.2f,%.2f) LegacyPendingBefore=(%.2f,%.2f,%.2f) Cleared=1"),
+		ABTSBirdIdToIndex(BirdId),
+		MovementMode == EABTSBirdMovementMode::ForceSuspension ? TEXT("ForceSuspension") : TEXT("LegacySweep"),
+		IsRadiallyGrounded() ? 1 : 0,
+		bForceGroundedBefore ? 1 : 0,
+		bLegacyGroundedBefore ? 1 : 0,
+		bJumpDetachBefore ? 1 : 0,
+		ForceVelocityBefore.Size(),
+		LegacyVelocityBefore.Size(),
+		ForceVelocityBefore.X, ForceVelocityBefore.Y, ForceVelocityBefore.Z,
+		LegacyVelocityBefore.X, LegacyVelocityBefore.Y, LegacyVelocityBefore.Z,
+		ForcePendingBefore.X, ForcePendingBefore.Y, ForcePendingBefore.Z,
+		LegacyPendingBefore.X, LegacyPendingBefore.Y, LegacyPendingBefore.Z);
 }
 
 void AABTSM25BirdCharacter::LogControlDiagnosticSnapshot()

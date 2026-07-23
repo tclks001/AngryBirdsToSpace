@@ -10,6 +10,7 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
+#include "Movement/ABTSChaosBirdMovementComponent.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Player/ABTSM6PlayerController.h"
@@ -191,7 +192,14 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	Party->SetSlingshotMode(true);
 	ArrangeWaitingBirds();
 	Bird->EnterSlingshotPouch(RestPouchLocation, FRotationMatrix::MakeFromXZ(SlingForward, SlingUp).ToQuat());
-	if (UABTSRadialForceMovementComponent* Movement = Bird->GetForceMovementComponent()) Movement->OnBlockingImpact().AddUObject(this, &AABTSM6SlingshotSystem::HandleBirdImpact);
+	if (Bird->GetSelectedMovementMode() == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		if (UABTSChaosBirdMovementComponent* Movement = Bird->GetChaosMovementComponent()) Movement->OnBlockingImpact().AddUObject(this, &AABTSM6SlingshotSystem::HandleBirdImpact);
+	}
+	else if (UABTSRadialForceMovementComponent* Movement = Bird->GetForceMovementComponent())
+	{
+		Movement->OnBlockingImpact().AddUObject(this, &AABTSM6SlingshotSystem::HandleBirdImpact);
+	}
 	if (AABTSM6PlayerController* PC = Cast<AABTSM6PlayerController>(GetWorld()->GetFirstPlayerController()))
 	{
 		PC->SetLaunchModeInputBlocked(true);
@@ -475,6 +483,7 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	if (LaunchedBird.IsValid())
 	{
 		if (UABTSRadialForceMovementComponent* Movement = LaunchedBird->GetForceMovementComponent()) Movement->OnBlockingImpact().RemoveAll(this);
+		if (UABTSChaosBirdMovementComponent* Movement = LaunchedBird->GetChaosMovementComponent()) Movement->OnBlockingImpact().RemoveAll(this);
 		LaunchedBird->FinishSlingshotReturn();
 	}
 	if (Party.IsValid()) Party->SetSlingshotMode(false);

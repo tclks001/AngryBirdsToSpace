@@ -96,6 +96,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "0.0"))
 	float TaskWaterDepthCM = 80.0f;
 
+	/**
+	 * Diagnostic flat-surface experiment. Keeps TaskGraph terrain types, roads,
+	 * rivers, materials and HISM placement, but removes all radial height
+	 * variation (including the river depression) from the rendered/query surface.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Experiment")
+	bool bDisableTerrainHeightVariationExperiment = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "1.0"))
 	float TerrainBlendWidthCM = 240.0f;
 

@@ -7,6 +7,8 @@
 #include "EngineUtils.h"
 #include "InputCoreTypes.h"
 #include "Party/ABTSBirdParty.h"
+#include "Party/ABTSBirdPartySettings.h"
+#include "Player/ABTSM25BirdCharacter.h"
 
 AABTSM4PlayerController::AABTSM4PlayerController()
 {
@@ -45,9 +47,68 @@ void AABTSM4PlayerController::SetupInputComponent()
 	InputComponent->BindAction(TEXT("ABTS_CameraOrbitHold"), IE_Pressed, this, &AABTSM4PlayerController::BeginOrbitInput);
 	InputComponent->BindAction(TEXT("ABTS_CameraOrbitHold"), IE_Released, this, &AABTSM4PlayerController::EndOrbitInput);
 	InputComponent->BindAction(TEXT("ABTS_CameraRecenter"), IE_Pressed, this, &AABTSM4PlayerController::RecenterCamera);
+	// These experiment bindings are always registered so the editor toggle can
+	// change at runtime. They must never consume input: when the experiment is
+	// off, Pawn input remains the authoritative path; when it is on, the pawn
+	// callbacks explicitly no-op and only this controller route acts.
+	FInputAxisBinding& RoutedForwardBinding = InputComponent->BindAxis(TEXT("ABTS_MoveForward"), this, &AABTSM4PlayerController::RouteMoveForwardToControlledBird);
+	RoutedForwardBinding.bConsumeInput = false;
+	FInputAxisBinding& RoutedRightBinding = InputComponent->BindAxis(TEXT("ABTS_MoveRight"), this, &AABTSM4PlayerController::RouteMoveRightToControlledBird);
+	RoutedRightBinding.bConsumeInput = false;
+	FInputActionBinding& RoutedJumpBinding = InputComponent->BindAction(TEXT("ABTS_Jump"), IE_Pressed, this, &AABTSM4PlayerController::RouteJumpToControlledBird);
+	RoutedJumpBinding.bConsumeInput = false;
 	InputComponent->BindAxis(TEXT("ABTS_Turn"), this, &AABTSM4PlayerController::ApplyOrbitYaw);
 	InputComponent->BindAxis(TEXT("ABTS_LookUp"), this, &AABTSM4PlayerController::ApplyOrbitPitch);
 	InputComponent->BindAxis(TEXT("ABTS_CameraZoom"), this, &AABTSM4PlayerController::ApplyCameraZoom);
+}
+
+bool AABTSM4PlayerController::IsControllerRoutedMovementInputExperimentEnabled() const
+{
+	const AABTSBirdParty* Party = FindParty();
+	const AABTSBirdPartySettings* Settings = Party ? Party->GetResolvedSettings() : nullptr;
+	return Settings != nullptr && Settings->bUseControllerRoutedMovementInputExperiment;
+}
+
+bool AABTSM4PlayerController::IsClearMotionBeforePlayerJumpExperimentEnabled() const
+{
+	const AABTSBirdParty* Party = FindParty();
+	const AABTSBirdPartySettings* Settings = Party ? Party->GetResolvedSettings() : nullptr;
+	return Settings != nullptr && Settings->bClearMotionImmediatelyBeforePlayerJumpExperiment;
+}
+
+void AABTSM4PlayerController::RouteMoveForwardToControlledBird(const float Value)
+{
+	if (bGameplayInputBlocked || FMath::IsNearlyZero(Value) || !IsControllerRoutedMovementInputExperimentEnabled()) return;
+	AABTSBirdParty* Party = FindParty();
+	AABTSM25BirdCharacter* Bird = Party ? Party->GetControlledBird() : nullptr;
+	if (Bird == nullptr) return;
+	if (Bird->IsControlHandoffDiagnosticsActive()) UE_LOG(LogABTSRuntime, Warning,
+		TEXT("[ABTS][M4][InputExperiment] RoutedForward Target=%d Value=%.2f ControllerPawn=%s"),
+		ABTSBirdIdToIndex(Bird->GetBirdId()), Value, *GetNameSafe(GetPawn()));
+	Bird->HandleControllerRoutedMoveForward(Value);
+}
+
+void AABTSM4PlayerController::RouteMoveRightToControlledBird(const float Value)
+{
+	if (bGameplayInputBlocked || FMath::IsNearlyZero(Value) || !IsControllerRoutedMovementInputExperimentEnabled()) return;
+	AABTSBirdParty* Party = FindParty();
+	AABTSM25BirdCharacter* Bird = Party ? Party->GetControlledBird() : nullptr;
+	if (Bird == nullptr) return;
+	if (Bird->IsControlHandoffDiagnosticsActive()) UE_LOG(LogABTSRuntime, Warning,
+		TEXT("[ABTS][M4][InputExperiment] RoutedRight Target=%d Value=%.2f ControllerPawn=%s"),
+		ABTSBirdIdToIndex(Bird->GetBirdId()), Value, *GetNameSafe(GetPawn()));
+	Bird->HandleControllerRoutedMoveRight(Value);
+}
+
+void AABTSM4PlayerController::RouteJumpToControlledBird()
+{
+	if (bGameplayInputBlocked || !IsControllerRoutedMovementInputExperimentEnabled()) return;
+	AABTSBirdParty* Party = FindParty();
+	AABTSM25BirdCharacter* Bird = Party ? Party->GetControlledBird() : nullptr;
+	if (Bird == nullptr) return;
+	UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M4][InputExperiment] RoutedJump Target=%d ControllerPawn=%s"),
+		ABTSBirdIdToIndex(Bird->GetBirdId()), *GetNameSafe(GetPawn()));
+	Bird->HandleControllerRoutedJump();
 }
 
 void AABTSM4PlayerController::CycleBird()
@@ -133,4 +194,13 @@ bool AABTSM4PlayerController::GetCameraRelativeMovementBasis(
 	FVector& OutRight) const
 {
 	return PartyCamera != nullptr && PartyCamera->GetMovementBasisAt(WorldLocation, OutForward, OutRight);
+}
+
+AABTSBirdParty* AABTSM4PlayerController::FindParty() const
+{
+	for (TActorIterator<AABTSBirdParty> It(GetWorld()); It; ++It)
+	{
+		return *It;
+	}
+	return nullptr;
 }

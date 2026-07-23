@@ -34,6 +34,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Formation", meta = (ClampMin = "300.0", UIMax = "3000.0"))
 	float SevereDetachDistanceCM = 1200.0f;
 
+	/** Diagnostic alternative: followers steer directly toward the live controlled-bird position, without breadcrumbs or M4 jump-event propagation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Experiment")
+	bool bUseDirectControlledBirdFollowExperiment = false;
+
+	/** Diagnostic alternative: when control changes, discard every cached movement value on the new leader before rebuilding its deterministic CellTopo ground contact. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Experiment")
+	bool bClearNewLeaderMotionCachesOnHandoffExperiment = false;
+
+	/** Diagnostic alternative: PlayerController, rather than the possessed pawn's InputComponent, routes WASD and Space to the current party leader. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Experiment")
+	bool bUseControllerRoutedMovementInputExperiment = false;
+
+	/**
+	 * Diagnostic intervention for post-handoff drift: immediately before an accepted player jump,
+	 * clear both movement implementations' velocity and pending move vector without changing contact state.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Experiment")
+	bool bClearMotionImmediatelyBeforePlayerJumpExperiment = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Path", meta = (ClampMin = "5.0", UIMax = "100.0"))
 	float PathSampleSpacingCM = 32.0f;
 

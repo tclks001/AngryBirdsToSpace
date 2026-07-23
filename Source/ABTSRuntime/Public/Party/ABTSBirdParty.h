@@ -78,6 +78,7 @@ private:
 	void BuildResolvedPresentation();
 	bool SpawnFollowers(AABTSM25BirdCharacter& InitialLeader);
 	void RebuildQueue(EABTSBirdId NewLeaderId);
+	void ResetFollowingRuntimeState(bool bSeedPaths);
 	void RecordPathsAndJumpEvents(float DeltaSeconds);
 	void UpdateFollowers(float DeltaSeconds);
 	void UpdateFollower(FABTSBirdPartyRuntime& Follower, FABTSBirdPartyRuntime& Predecessor, float DeltaSeconds);
@@ -104,6 +105,11 @@ private:
 	EABTSBirdId ControlledBirdId = EABTSBirdId::Red;
 	int32 PathGeneration = 1;
 	int32 NextJumpSerial = 1;
+	/** One short post-switch barrier prevents the old queue from emitting commands in the handoff frame. */
+	float FollowerUpdatePauseRemainingSeconds = 0.0f;
+	/** Cached editor experiment mode. A mode transition must discard breadcrumb-derived runtime state. */
+	bool bUsingDirectControlledBirdFollowExperiment = false;
+	bool bFollowModeInitialized = false;
 	bool bPartyReady = false;
 	bool bSlingshotMode = false;
 };

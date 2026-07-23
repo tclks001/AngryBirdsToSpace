@@ -23,6 +23,7 @@ public:
 
 	void SetSurfaceOffsetCM(float InSurfaceOffsetCM);
 	void SetProjectToBaseSurface(bool bInProjectToBaseSurface);
+	void SetApplyActorFrame(bool bInApplyActorFrame) { bApplyActorFrame = bInApplyActorFrame; }
 	bool UpdateSurfaceFrame();
 	void SetMovementFacing(const FVector& WorldDirection);
 	void AddCameraYaw(float InputValue);
@@ -30,7 +31,9 @@ public:
 
 	FVector GetTangentForward() const { return CameraForwardTangent; }
 	FVector GetTangentRight() const;
+	FVector GetActorForwardTangent() const { return ActorForwardTangent; }
 	FVector GetDownDirection() const { return -RadialUp; }
+	FVector GetRadialUp() const { return RadialUp; }
 	bool IsSurfaceFrameReady() const { return Planet != nullptr && !RadialUp.IsNearlyZero(); }
 
 private:
@@ -58,4 +61,5 @@ private:
 	float CameraPitchDegrees = -18.0f;
 	bool bInitialized = false;
 	bool bProjectToBaseSurface = true;
+	bool bApplyActorFrame = true;
 };

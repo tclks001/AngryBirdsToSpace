@@ -23,6 +23,7 @@ public:
 
 	void SetMoveInput(const FVector& Direction, float Scale);
 	void QueueJump();
+	void ConfigureCollisionGroundingExperiment(bool bEnabled, float MaxGroundAngleDegrees);
 	void ResetMotionState();
 	/** Clears handoff momentum but preserves bGrounded so an immediate jump remains valid. */
 	void ClearControlHandoffState();
@@ -39,6 +40,7 @@ private:
 	void IntegrateMotion(float DeltaTime);
 	void ResolveBaseSphereContact(float DeltaTime);
 	void ResolveBlockingHit(const FHitResult& Hit);
+	void TryEstablishCollisionGround(const FHitResult& Hit);
 	float GetGroundCenterOffsetCM(const ACharacter& Character, const FVector& RadialUp, const FVector& SurfaceNormal) const;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M2.5|Gravity", meta = (ClampMin = "0.0"))
@@ -90,4 +92,6 @@ private:
 	bool bLoggedNoReadyPlanet = false;
 	float JumpBufferRemainingSeconds = 0.0f;
 	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;
+	bool bUseCollisionNormalGroundingExperiment = false;
+	float CollisionGroundMaxAngleDegrees = 55.0f;
 };

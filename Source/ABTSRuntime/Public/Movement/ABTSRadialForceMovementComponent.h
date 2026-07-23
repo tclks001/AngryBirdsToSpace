@@ -27,6 +27,7 @@ public:
 
 	void SetMoveInput(const FVector& Direction, float Scale);
 	void QueueJump();
+	void ConfigureCollisionGroundingExperiment(bool bEnabled, float MaxGroundAngleDegrees);
 	void ResetMotionState();
 	/** Clears follower/player steering momentum without invalidating the current ground-contact cache. */
 	void ClearControlHandoffState();
@@ -54,6 +55,7 @@ private:
 	FVector BuildGroundFollowingDelta(const ACharacter& Character, const AABTSM2Planet& ResolvedPlanet, const FABTSRadialSuspensionSample& Surface, const FVector& RequestedDelta) const;
 	void MoveWithCollision(ACharacter& Character, const AABTSM2Planet& ResolvedPlanet, const FVector& RequestedDelta);
 	void ResolveBlockingHit(const FHitResult& Hit, const AABTSM2Planet& ResolvedPlanet);
+	void TryEstablishCollisionGround(const FHitResult& Hit, const AABTSM2Planet& ResolvedPlanet);
 
 	/** Virtual mass keeps force values meaningful; acceleration remains mass-independent. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Force", meta = (ClampMin = "0.1", UIMax = "200.0"))
@@ -121,5 +123,8 @@ private:
 	bool bBallisticFlight = false;
 	float BallisticFlightAirDragPerSecond = 0.08f;
 	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;
+	bool bUseCollisionNormalGroundingExperiment = false;
+	bool bCollisionGrounded = false;
+	float CollisionGroundMaxAngleDegrees = 55.0f;
 	FABTSBlockingImpactDelegate BlockingImpact;
 };

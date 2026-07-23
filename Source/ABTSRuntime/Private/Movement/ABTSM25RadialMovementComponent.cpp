@@ -43,6 +43,15 @@ void UABTSM25RadialMovementComponent::QueueJump()
 		JumpBufferRemainingSeconds);
 }
 
+void UABTSM25RadialMovementComponent::ConfigureCollisionGroundingExperiment(
+	const bool bEnabled,
+	const float MaxGroundAngleDegrees)
+{
+	bUseCollisionNormalGroundingExperiment = bEnabled;
+	CollisionGroundMaxAngleDegrees = FMath::Clamp(MaxGroundAngleDegrees, 0.0f, 89.0f);
+	bGrounded = false;
+}
+
 void UABTSM25RadialMovementComponent::ResetMotionState()
 {
 	Velocity = FVector::ZeroVector;
@@ -119,11 +128,20 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 	// Refresh contact before consuming input. Reading only last frame's cached
 	// state makes a jump press dependent on tick order and transient contact loss.
 	ResolveBaseSphereContact(DeltaTime * 0.5f);
-	if (JumpBufferRemainingSeconds > 0.0f && (bGrounded || ControlHandoffJumpGraceRemainingSeconds > 0.0f))
+	const bool bMayJump = bUseCollisionNormalGroundingExperiment
+		? bGrounded
+		: bGrounded || ControlHandoffJumpGraceRemainingSeconds > 0.0f;
+	if (JumpBufferRemainingSeconds > 0.0f && bMayJump)
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Up) + Up * JumpSpeedCMPerSec;
 		bGrounded = false;
 		JumpBufferRemainingSeconds = 0.0f;
+		if (bUseCollisionNormalGroundingExperiment)
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][GroundCollisionExperiment] AirborneByJump Owner=%s; waiting for next qualifying blocking hit."),
+				*GetNameSafe(GetOwner()));
+		}
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M2.5][Jump] Accepted. Speed=%.1f Up=(%.3f,%.3f,%.3f)"),
 			JumpSpeedCMPerSec,
 			Up.X,
@@ -222,6 +240,7 @@ float UABTSM25RadialMovementComponent::GetGroundCenterOffsetCM(
 
 void UABTSM25RadialMovementComponent::ResolveBaseSphereContact(const float DeltaTime)
 {
+	if (bUseCollisionNormalGroundingExperiment) return;
 	ACharacter* Character = Cast<ACharacter>(GetOwner());
 	AABTSM2Planet* ResolvedPlanet = Planet.Get();
 	if (Character == nullptr || ResolvedPlanet == nullptr)
@@ -281,10 +300,38 @@ void UABTSM25RadialMovementComponent::ResolveBaseSphereContact(const float Delta
 
 void UABTSM25RadialMovementComponent::ResolveBlockingHit(const FHitResult& Hit)
 {
+	TryEstablishCollisionGround(Hit);
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	const float IntoSurfaceSpeed = FVector::DotProduct(Velocity, Normal);
 	if (IntoSurfaceSpeed < 0.0f)
 	{
 		Velocity -= Normal * IntoSurfaceSpeed;
+	}
+}
+
+void UABTSM25RadialMovementComponent::TryEstablishCollisionGround(const FHitResult& Hit)
+{
+	if (!bUseCollisionNormalGroundingExperiment || !Hit.bBlockingHit) return;
+	AABTSM2Planet* ResolvedPlanet = Planet.Get();
+	if (ResolvedPlanet == nullptr) return;
+	const FVector CollisionNormal = Hit.ImpactNormal.GetSafeNormal();
+	FVector SampleLocation = GetOwner()->GetActorLocation();
+	if (!Hit.ImpactPoint.IsNearlyZero()) SampleLocation = FVector(Hit.ImpactPoint);
+	const FVector RadialUp = ResolvedPlanet->GetRadialUpAtWorldLocation(SampleLocation);
+	const float NormalUpDot = FVector::DotProduct(CollisionNormal, RadialUp);
+	const float MinimumGroundDot = FMath::Cos(FMath::DegreesToRadians(CollisionGroundMaxAngleDegrees));
+	if (CollisionNormal.IsNearlyZero() || NormalUpDot < MinimumGroundDot) return;
+
+	const bool bWasGrounded = bGrounded;
+	bGrounded = true;
+	if (!bWasGrounded)
+	{
+		const float AngleDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(NormalUpDot, -1.0f, 1.0f)));
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][GroundCollisionExperiment] Grounded Owner=%s HitActor=%s HitComponent=%s Angle=%.2f MaxAngle=%.2f Normal=(%.3f,%.3f,%.3f) RadialUp=(%.3f,%.3f,%.3f)"),
+			*GetNameSafe(GetOwner()), *GetNameSafe(Hit.GetActor()), *GetNameSafe(Hit.GetComponent()),
+			AngleDegrees, CollisionGroundMaxAngleDegrees,
+			CollisionNormal.X, CollisionNormal.Y, CollisionNormal.Z,
+			RadialUp.X, RadialUp.Y, RadialUp.Z);
 	}
 }

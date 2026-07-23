@@ -42,7 +42,7 @@ bool UABTSM2SphericalSurfaceComponent::UpdateSurfaceFrame()
 
 	ActorForwardTangent = ProjectToTangent(ActorForwardTangent, Character->GetActorForwardVector());
 	CameraForwardTangent = ProjectToTangent(CameraForwardTangent, ActorForwardTangent);
-	ApplyActorFrame(*Character);
+	if (bApplyActorFrame) ApplyActorFrame(*Character);
 	ApplyCameraFrame(*Character);
 	bInitialized = true;
 	return true;
