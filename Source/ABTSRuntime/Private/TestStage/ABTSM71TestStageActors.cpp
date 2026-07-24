@@ -3,10 +3,14 @@
 #include "TestStage/ABTSM71TestStageActors.h"
 
 #include "ABTSRuntime.h"
+#include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM7BuildingModule.h"
 #include "Components/ArrowComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "TimerManager.h"
+#include "EngineUtils.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSM51WorldActors.h"
 
@@ -25,6 +29,14 @@ namespace
 			ActorRotation * LocalRotation,
 			Owner.GetActorLocation() + ActorRotation.RotateVector(LocalPositionWithoutActorScale),
 			WorldScale);
+	}
+
+	FVector DivideScaleSafely(const FVector& Scale, const FVector& Divisor)
+	{
+		return FVector(
+			FMath::IsNearlyZero(Divisor.X) ? 1.0f : Scale.X / Divisor.X,
+			FMath::IsNearlyZero(Divisor.Y) ? 1.0f : Scale.Y / Divisor.Y,
+			FMath::IsNearlyZero(Divisor.Z) ? 1.0f : Scale.Z / Divisor.Z);
 	}
 }
 
@@ -142,6 +154,94 @@ AABTSM71GlassBrickActor::AABTSM71GlassBrickActor()
 	FallbackColor = FLinearColor(0.20f, 0.62f, 0.78f, 0.42f);
 }
 
+AABTSM71PlaceableDeviceActor::AABTSM71PlaceableDeviceActor()
+{
+	PrimaryActorTick.bCanEverTick = false;
+	DevicePreview = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DevicePreview"));
+	SetRootComponent(DevicePreview);
+	DevicePreview->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DevicePreview->SetGenerateOverlapEvents(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	if (Cylinder.Succeeded()) DeviceMesh = Cylinder.Object;
+}
+
+void AABTSM71PlaceableDeviceActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	DevicePreview->SetStaticMesh(DeviceMesh);
+	if (DeviceMaterial) DevicePreview->SetMaterial(0, DeviceMaterial);
+	DevicePreview->SetRelativeScale3D(FVector(
+		FMath::Max(1.0f, DiameterCM) / BasicShapeSizeCM,
+		FMath::Max(1.0f, DiameterCM) / BasicShapeSizeCM,
+		FMath::Max(1.0f, LengthCM) / BasicShapeSizeCM));
+}
+
+void AABTSM71PlaceableDeviceActor::BeginPlay()
+{
+	Super::BeginPlay();
+	TryFindRuntimeSystem();
+}
+
+void AABTSM71PlaceableDeviceActor::InitializeRuntimeDevice(AABTSM7BuildingMaterialSystem* MaterialSystem)
+{
+	if (RuntimeDevice.IsValid() || MaterialSystem == nullptr || GetWorld() == nullptr) return;
+	RuntimeSystem = MaterialSystem;
+	FABTSM7DeviceSpec Spec;
+	Spec.Kind = DeviceKind;
+	Spec.LengthCM = FMath::Max(1.0f, LengthCM);
+	Spec.DiameterCM = FMath::Max(1.0f, DiameterCM);
+	// DevicePreview is currently the actor root, so OnConstruction's preview-size
+	// scale is also present in GetActorTransform(). The runtime module applies the
+	// same Length/Diameter scale in ConfigureCylinder; remove only that preview
+	// scale here so the physical shape receives the authored dimensions once.
+	const FVector PreviewShapeScale(
+		Spec.DiameterCM / BasicShapeSizeCM,
+		Spec.DiameterCM / BasicShapeSizeCM,
+		Spec.LengthCM / BasicShapeSizeCM);
+	FTransform RuntimeTransform = GetActorTransform();
+	const FVector RuntimeAdditionalScale = DivideScaleSafely(RuntimeTransform.GetScale3D(), PreviewShapeScale);
+	RuntimeTransform.SetScale3D(RuntimeAdditionalScale);
+	AABTSM7BuildingModule* Module = MaterialSystem->SpawnDeviceWithOverrides(
+		Spec, RuntimeTransform, DeviceMesh, DeviceMaterial);
+	RuntimeDevice = Module;
+	if (Module)
+	{
+		DevicePreview->SetHiddenInGame(true);
+		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7.1][Device] Spawned Kind=%d Actor=%s Length=%.1f Diameter=%.1f PreviewScale=(%.2f,%.2f,%.2f) RuntimeAdditionalScale=(%.2f,%.2f,%.2f)"),
+			static_cast<int32>(DeviceKind), *GetName(), Spec.LengthCM, Spec.DiameterCM,
+			PreviewShapeScale.X, PreviewShapeScale.Y, PreviewShapeScale.Z,
+			RuntimeAdditionalScale.X, RuntimeAdditionalScale.Y, RuntimeAdditionalScale.Z);
+	}
+}
+
+void AABTSM71PlaceableDeviceActor::TryFindRuntimeSystem()
+{
+	if (RuntimeDevice.IsValid() || GetWorld() == nullptr) return;
+	for (TActorIterator<AABTSM7BuildingMaterialSystem> It(GetWorld()); It; ++It)
+	{
+		InitializeRuntimeDevice(*It);
+		return;
+	}
+	if (++SystemSearchAttempts < 40)
+	{
+		GetWorldTimerManager().SetTimer(SystemSearchTimer, this, &AABTSM71PlaceableDeviceActor::TryFindRuntimeSystem, 0.1f, false);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M7.1][Device] No material system for %s"), *GetName());
+	}
+}
+
+AABTSM71ExplosiveBarrelActor::AABTSM71ExplosiveBarrelActor()
+{
+	SetDeviceKind(EABTSM7ModuleKind::ExplosiveBarrel);
+}
+
+AABTSM71SpringPistonActor::AABTSM71SpringPistonActor()
+{
+	SetDeviceKind(EABTSM7ModuleKind::SpringPiston);
+}
+
 AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -150,8 +250,10 @@ AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
 	StakePreviewA = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StakePreviewA"));
 	StakePreviewB = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StakePreviewB"));
 	CordPreview = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordPreview"));
+	CordPreviewB = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordPreviewB"));
+	PouchPreview = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PouchPreview"));
 	LaunchDirection = CreateDefaultSubobject<UArrowComponent>(TEXT("LaunchDirection"));
-	for (UStaticMeshComponent* Component : {StakePreviewA.Get(), StakePreviewB.Get(), CordPreview.Get()})
+	for (UStaticMeshComponent* Component : {StakePreviewA.Get(), StakePreviewB.Get(), CordPreview.Get(), CordPreviewB.Get(), PouchPreview.Get()})
 	{
 		Component->SetupAttachment(Root);
 		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -163,12 +265,25 @@ AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
 	LaunchDirection->SetHiddenInGame(true);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (Cylinder.Succeeded())
 	{
-		StakePreviewA->SetStaticMesh(Cylinder.Object);
-		StakePreviewB->SetStaticMesh(Cylinder.Object);
+		DefaultStakeMesh = Cylinder.Object;
+		StakePreviewA->SetStaticMesh(DefaultStakeMesh);
+		StakePreviewB->SetStaticMesh(DefaultStakeMesh);
 	}
-	if (Cube.Succeeded()) CordPreview->SetStaticMesh(Cube.Object);
+	if (Cube.Succeeded())
+	{
+		DefaultCordMesh = Cube.Object;
+		CordPreview->SetStaticMesh(DefaultCordMesh);
+		CordPreviewB->SetStaticMesh(DefaultCordMesh);
+	}
+	if (Sphere.Succeeded())
+	{
+		DefaultPouchMesh = Sphere.Object;
+		PouchPreview->SetStaticMesh(DefaultPouchMesh);
+	}
+	PouchVisual.LocalScale = FVector(0.45f, 0.90f, 0.12f);
 }
 
 void AABTSM71PlaceableSlingshotActor::OnConstruction(const FTransform& Transform)
@@ -184,22 +299,51 @@ void AABTSM71PlaceableSlingshotActor::UpdatePreview()
 	const FVector ShapeScale(StakeDiameterCM / BasicShapeSizeCM, StakeDiameterCM / BasicShapeSizeCM, StakeHeightCM / BasicShapeSizeCM);
 	const FVector BaseA(0.0f, -HalfSpacing, StakeHeightCM * 0.5f);
 	const FVector BaseB(0.0f, HalfSpacing, StakeHeightCM * 0.5f);
-	StakePreviewA->SetWorldTransform(MakeWorldShapeTransform(*this, BaseA, FQuat::Identity, ShapeScale));
-	StakePreviewB->SetWorldTransform(MakeWorldShapeTransform(*this, BaseB, FQuat::Identity, ShapeScale));
-	const FVector EndpointA = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, -HalfSpacing, StakeHeightCM));
-	const FVector EndpointB = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, HalfSpacing, StakeHeightCM));
-	const FVector Delta = EndpointB - EndpointA;
-	const float Length = Delta.Size();
-	CordPreview->SetWorldTransform(FTransform(
-		FRotationMatrix::MakeFromX(Delta.GetSafeNormal()).ToQuat(),
-		(EndpointA + EndpointB) * 0.5f,
-		FVector(Length / BasicShapeSizeCM, CordThicknessCM / BasicShapeSizeCM, CordThicknessCM / BasicShapeSizeCM)));
-	if (StakeMaterial)
+	StakePreviewA->SetStaticMesh(StakeVisual.Mesh ? StakeVisual.Mesh : DefaultStakeMesh);
+	StakePreviewB->SetStaticMesh(StakeVisual.Mesh ? StakeVisual.Mesh : DefaultStakeMesh);
+	const FVector StakeOffset = StakeVisual.LocalOffsetCM;
+	StakePreviewA->SetWorldTransform(MakeWorldShapeTransform(*this, BaseA + StakeOffset, StakeVisual.LocalRotation.Quaternion(), ShapeScale * StakeVisual.LocalScale));
+	StakePreviewB->SetWorldTransform(MakeWorldShapeTransform(*this, BaseB + StakeOffset, StakeVisual.LocalRotation.Quaternion(), ShapeScale * StakeVisual.LocalScale));
+	const FVector EndpointA = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, -HalfSpacing, StakeHeightCM) + ConnectionLayout.StakeAConnectionOffsetCM);
+	const FVector EndpointB = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, HalfSpacing, StakeHeightCM) + ConnectionLayout.StakeBConnectionOffsetCM);
+	const FVector PouchCenter = (EndpointA + EndpointB) * 0.5f + GetActorQuat().RotateVector(ConnectionLayout.RestPouchOffsetCM);
+	const FVector PouchAnchorA = PouchCenter + GetActorQuat().RotateVector(ConnectionLayout.PouchAConnectionOffsetCM);
+	const FVector PouchAnchorB = PouchCenter + GetActorQuat().RotateVector(ConnectionLayout.PouchBConnectionOffsetCM);
+	CordPreview->SetStaticMesh(CordVisual.Mesh ? CordVisual.Mesh : DefaultCordMesh);
+	CordPreviewB->SetStaticMesh(CordVisual.Mesh ? CordVisual.Mesh : DefaultCordMesh);
+	auto SetPreviewSegment = [this](UStaticMeshComponent* Component, const FVector& Start, const FVector& End)
 	{
-		StakePreviewA->SetMaterial(0, StakeMaterial);
-		StakePreviewB->SetMaterial(0, StakeMaterial);
+		const FVector Delta = End - Start;
+		const float Length = Delta.Size();
+		if (Length <= SMALL_NUMBER) return;
+		const FQuat BaseRotation = FQuat::FindBetweenNormals(FVector::UpVector, Delta / Length);
+		const FTransform BaseTransform(BaseRotation, (Start + End) * 0.5f,
+			FVector(CordThicknessCM / BasicShapeSizeCM, CordThicknessCM / BasicShapeSizeCM, Length / BasicShapeSizeCM));
+		Component->SetWorldTransform(FTransform(
+			BaseRotation * CordVisual.LocalRotation.Quaternion(),
+			BaseTransform.TransformPosition(CordVisual.LocalOffsetCM),
+			BaseTransform.GetScale3D() * CordVisual.LocalScale));
+	};
+	SetPreviewSegment(CordPreview, EndpointA, PouchAnchorA);
+	SetPreviewSegment(CordPreviewB, EndpointB, PouchAnchorB);
+	PouchPreview->SetStaticMesh(PouchVisual.Mesh ? PouchVisual.Mesh : DefaultPouchMesh);
+	PouchPreview->SetVisibility(PouchPreview->GetStaticMesh() != nullptr);
+	const FTransform PouchBaseTransform(GetActorQuat(), PouchCenter, FVector::OneVector);
+	PouchPreview->SetWorldTransform(FTransform(
+		PouchBaseTransform.GetRotation() * PouchVisual.LocalRotation.Quaternion(),
+		PouchBaseTransform.TransformPosition(PouchVisual.LocalOffsetCM),
+		PouchVisual.LocalScale));
+	if (StakeVisual.Material)
+	{
+		StakePreviewA->SetMaterial(0, StakeVisual.Material);
+		StakePreviewB->SetMaterial(0, StakeVisual.Material);
 	}
-	if (CordMaterial) CordPreview->SetMaterial(0, CordMaterial);
+	if (CordVisual.Material)
+	{
+		CordPreview->SetMaterial(0, CordVisual.Material);
+		CordPreviewB->SetMaterial(0, CordVisual.Material);
+	}
+	if (PouchVisual.Material) PouchPreview->SetMaterial(0, PouchVisual.Material);
 }
 
 void AABTSM71PlaceableSlingshotActor::BeginPlay()
@@ -228,14 +372,14 @@ void AABTSM71PlaceableSlingshotActor::SpawnRuntimeSlingshot()
 		? EABTSItemId::SimpleStake : EABTSItemId::ReinforcedStake;
 	StakeA->InitializeStake(StakeItem, INDEX_NONE, Up);
 	StakeB->InitializeStake(StakeItem, INDEX_NONE, Up);
-	StakeA->ConfigureVisualDimensions(StakeDiameterCM, StakeHeightCM, StakeMaterial);
-	StakeB->ConfigureVisualDimensions(StakeDiameterCM, StakeHeightCM, StakeMaterial);
+	StakeA->ApplyVisualSlot(StakeVisual, StakeDiameterCM, StakeHeightCM);
+	StakeB->ApplyVisualSlot(StakeVisual, StakeDiameterCM, StakeHeightCM);
 	StakeA->SetHasCord(true);
 	StakeB->SetHasCord(true);
 	AABTSM51SlingshotCord* Cord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(AABTSM51SlingshotCord::StaticClass(), FTransform::Identity, Params);
 	if (Cord == nullptr) return;
 	Cord->InitializeCordWithTier(StakeA, StakeB, EndpointA, EndpointB, SlingshotTier);
-	Cord->ConfigureVisualThickness(CordThicknessCM, CordMaterial);
+	Cord->ConfigureTwoCordVisuals(CordVisual, PouchVisual, ConnectionLayout, CordThicknessCM);
 	RuntimeStakeA = StakeA;
 	RuntimeStakeB = StakeB;
 	RuntimeCord = Cord;

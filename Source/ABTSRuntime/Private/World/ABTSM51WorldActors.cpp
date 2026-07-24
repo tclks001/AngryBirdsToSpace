@@ -14,6 +14,52 @@ namespace
 		Mesh.SetCollisionResponseToAllChannels(ECR_Ignore);
 		Mesh.SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
+
+	void ConfigureVisualOnlyMesh(UStaticMeshComponent& Mesh)
+	{
+		Mesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh.SetGenerateOverlapEvents(false);
+	}
+
+	void SetSegmentBetween(
+		UStaticMeshComponent& Mesh,
+		const FVector& Start,
+		const FVector& End,
+		const float ThicknessCM,
+		const FABTSSlingshotVisualSlot& VisualSlot)
+	{
+		const FVector Delta = End - Start;
+		const float Length = Delta.Size();
+		if (Length <= SMALL_NUMBER) return;
+		const FVector Direction = Delta / Length;
+		const FQuat Rotation = FQuat::FindBetweenNormals(FVector::UpVector, Direction);
+		const FTransform BaseTransform(
+			Rotation,
+			(Start + End) * 0.5f,
+			FVector(ThicknessCM / 100.0f, ThicknessCM / 100.0f, Length / 100.0f));
+		Mesh.SetWorldTransform(FTransform(
+			Rotation * VisualSlot.LocalRotation.Quaternion(),
+			BaseTransform.TransformPosition(VisualSlot.LocalOffsetCM),
+			BaseTransform.GetScale3D() * VisualSlot.LocalScale));
+	}
+
+	FQuat BuildSlingshotVisualRotation(
+		const FVector& EndpointA,
+		const FVector& EndpointB,
+		const AABTSM51SlingshotStake* StakeA,
+		const AABTSM51SlingshotStake* StakeB)
+	{
+		const FVector Right = (EndpointB - EndpointA).GetSafeNormal();
+		FVector Up = FVector::UpVector;
+		if (StakeA != nullptr && StakeB != nullptr)
+		{
+			Up = (StakeA->GetUnitDirection() + StakeB->GetUnitDirection()).GetSafeNormal();
+		}
+		Up = FVector::VectorPlaneProject(Up, Right).GetSafeNormal();
+		if (Up.IsNearlyZero()) Up = FVector::VectorPlaneProject(FVector::UpVector, Right).GetSafeNormal();
+		const FVector Forward = FVector::CrossProduct(Right, Up).GetSafeNormal();
+		return FRotationMatrix::MakeFromXY(Forward, Right).ToQuat();
+	}
 }
 
 AABTSM51PickupItem::AABTSM51PickupItem()
@@ -93,6 +139,23 @@ void AABTSM51SlingshotStake::ConfigureVisualDimensions(
 	if (Material) Visual->SetMaterial(0, Material);
 }
 
+void AABTSM51SlingshotStake::ApplyVisualSlot(
+	const FABTSSlingshotVisualSlot& VisualSlot,
+	const float DiameterCM,
+	const float HeightCM)
+{
+	if (VisualSlot.Mesh) Visual->SetStaticMesh(VisualSlot.Mesh);
+	if (VisualSlot.Material) Visual->SetMaterial(0, VisualSlot.Material);
+	const FTransform BaseTransform = GetActorTransform();
+	const FQuat BaseRotation = BaseTransform.GetRotation();
+	SetActorLocation(BaseTransform.TransformPosition(VisualSlot.LocalOffsetCM), false, nullptr, ETeleportType::TeleportPhysics);
+	SetActorRotation((BaseRotation * VisualSlot.LocalRotation.Quaternion()).Rotator(), ETeleportType::TeleportPhysics);
+	SetActorScale3D(FVector(
+		FMath::Max(1.0f, DiameterCM) / 100.0f,
+		FMath::Max(1.0f, DiameterCM) / 100.0f,
+		FMath::Max(1.0f, HeightCM) / 100.0f) * VisualSlot.LocalScale);
+}
+
 void AABTSM51SlingshotStake::NotifyActorOnClicked(const FKey ButtonPressed)
 {
 	Super::NotifyActorOnClicked(ButtonPressed);
@@ -109,8 +172,31 @@ AABTSM51SlingshotCord::AABTSM51SlingshotCord()
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordVisual"));
 	SetRootComponent(Visual);
 	ConfigureInteractionMesh(*Visual);
+	CordSegmentA = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordSegmentA"));
+	CordSegmentB = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordSegmentB"));
+	PouchVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PouchVisual"));
+	CordSegmentA->SetupAttachment(Visual);
+	CordSegmentB->SetupAttachment(Visual);
+	PouchVisual->SetupAttachment(Visual);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (Cube.Succeeded()) Visual->SetStaticMesh(Cube.Object);
+	if (Cylinder.Succeeded())
+	{
+		DefaultCordCylinderMesh = Cylinder.Object;
+		CordSegmentA->SetStaticMesh(DefaultCordCylinderMesh);
+		CordSegmentB->SetStaticMesh(DefaultCordCylinderMesh);
+	}
+	if (Sphere.Succeeded())
+	{
+		DefaultPouchSphereMesh = Sphere.Object;
+		PouchVisual->SetStaticMesh(DefaultPouchSphereMesh);
+	}
+	PouchVisualSlot.LocalScale = FVector(0.45f, 0.90f, 0.12f);
+	ConfigureVisualOnlyMesh(*CordSegmentA);
+	ConfigureVisualOnlyMesh(*CordSegmentB);
+	ConfigureVisualOnlyMesh(*PouchVisual);
 }
 
 void AABTSM51SlingshotCord::InitializeCord(
@@ -142,6 +228,7 @@ void AABTSM51SlingshotCord::InitializeCordWithTier(
 	SetActorLocation((EndpointA + EndpointB) * 0.5f);
 	SetActorRotation(FRotationMatrix::MakeFromX(Delta / Length).ToQuat());
 	Visual->SetRelativeScale3D(FVector(Length / 100.0f, 0.035f, 0.035f));
+	ConfigureTwoCordVisuals(CordVisualSlot, PouchVisualSlot, ConnectionLayout, CordThicknessCM);
 }
 
 void AABTSM51SlingshotCord::ConfigureVisualThickness(const float ThicknessCM, UMaterialInterface* Material)
@@ -150,6 +237,86 @@ void AABTSM51SlingshotCord::ConfigureVisualThickness(const float ThicknessCM, UM
 	const float ThicknessScale = FMath::Max(1.0f, ThicknessCM) / 100.0f;
 	Visual->SetRelativeScale3D(FVector(CurrentScale.X, ThicknessScale, ThicknessScale));
 	if (Material) Visual->SetMaterial(0, Material);
+}
+
+void AABTSM51SlingshotCord::ApplyVisualSlot(const FABTSSlingshotVisualSlot& VisualSlot, const float ThicknessCM)
+{
+	if (VisualSlot.Mesh) Visual->SetStaticMesh(VisualSlot.Mesh);
+	if (VisualSlot.Material) Visual->SetMaterial(0, VisualSlot.Material);
+	const FTransform BaseTransform = GetActorTransform();
+	SetActorLocation(BaseTransform.TransformPosition(VisualSlot.LocalOffsetCM), false, nullptr, ETeleportType::TeleportPhysics);
+	SetActorRotation((BaseTransform.GetRotation() * VisualSlot.LocalRotation.Quaternion()).Rotator(), ETeleportType::TeleportPhysics);
+	const FVector CurrentScale = Visual->GetRelativeScale3D();
+	Visual->SetRelativeScale3D(FVector(
+		CurrentScale.X * VisualSlot.LocalScale.X,
+		FMath::Max(1.0f, ThicknessCM) / 100.0f * VisualSlot.LocalScale.Y,
+		FMath::Max(1.0f, ThicknessCM) / 100.0f * VisualSlot.LocalScale.Z));
+}
+
+void AABTSM51SlingshotCord::ConfigureTwoCordVisuals(
+	const FABTSSlingshotVisualSlot& CordSlot,
+	const FABTSSlingshotVisualSlot& PouchSlot,
+	const FABTSSlingshotConnectionLayout& Layout,
+	const float ThicknessCM)
+{
+	CordVisualSlot = CordSlot;
+	PouchVisualSlot = PouchSlot;
+	ConnectionLayout = Layout;
+	CordThicknessCM = FMath::Max(0.1f, ThicknessCM);
+
+	CordSegmentA->SetStaticMesh(CordSlot.Mesh ? CordSlot.Mesh : DefaultCordCylinderMesh);
+	CordSegmentB->SetStaticMesh(CordSlot.Mesh ? CordSlot.Mesh : DefaultCordCylinderMesh);
+	PouchVisual->SetStaticMesh(PouchSlot.Mesh ? PouchSlot.Mesh : DefaultPouchSphereMesh);
+	if (CordSlot.Material)
+	{
+		CordSegmentA->SetMaterial(0, CordSlot.Material);
+		CordSegmentB->SetMaterial(0, CordSlot.Material);
+	}
+	if (PouchSlot.Material) PouchVisual->SetMaterial(0, PouchSlot.Material);
+
+	// Keep the original crossbar mesh as the click/trace target only.
+	Visual->SetVisibility(false, false);
+	Visual->SetHiddenInGame(true, false);
+	CordSegmentA->SetVisibility(true, true);
+	CordSegmentB->SetVisibility(true, true);
+	PouchVisual->SetVisibility(true, true);
+	ResetPouchVisualToRest();
+}
+
+FTransform AABTSM51SlingshotCord::GetRestPouchTransform() const
+{
+	const FQuat LayoutRotation = BuildSlingshotVisualRotation(EndpointA, EndpointB, StakeA.Get(), StakeB.Get());
+	const FVector StakeAnchorA = EndpointA + LayoutRotation.RotateVector(ConnectionLayout.StakeAConnectionOffsetCM);
+	const FVector StakeAnchorB = EndpointB + LayoutRotation.RotateVector(ConnectionLayout.StakeBConnectionOffsetCM);
+	const FVector Center = (StakeAnchorA + StakeAnchorB) * 0.5f
+		+ LayoutRotation.RotateVector(ConnectionLayout.RestPouchOffsetCM);
+	return FTransform(LayoutRotation, Center, FVector::OneVector);
+}
+
+void AABTSM51SlingshotCord::ResetPouchVisualToRest()
+{
+	UpdatePulledPouchVisual(GetRestPouchTransform().GetLocation(), GetRestPouchTransform().GetRotation());
+}
+
+void AABTSM51SlingshotCord::UpdatePulledPouchVisual(const FVector& WorldLocation, const FQuat& WorldRotation)
+{
+	if (CordSegmentA == nullptr || CordSegmentB == nullptr || PouchVisual == nullptr) return;
+	const FQuat LayoutRotation = BuildSlingshotVisualRotation(EndpointA, EndpointB, StakeA.Get(), StakeB.Get());
+	const FVector StakeAnchorA = EndpointA + LayoutRotation.RotateVector(ConnectionLayout.StakeAConnectionOffsetCM);
+	const FVector StakeAnchorB = EndpointB + LayoutRotation.RotateVector(ConnectionLayout.StakeBConnectionOffsetCM);
+	const FVector PouchAnchorA = WorldLocation + WorldRotation.RotateVector(ConnectionLayout.PouchAConnectionOffsetCM);
+	const FVector PouchAnchorB = WorldLocation + WorldRotation.RotateVector(ConnectionLayout.PouchBConnectionOffsetCM);
+	SetSegmentBetween(*CordSegmentA, StakeAnchorA, PouchAnchorA, CordThicknessCM, CordVisualSlot);
+	SetSegmentBetween(*CordSegmentB, StakeAnchorB, PouchAnchorB, CordThicknessCM, CordVisualSlot);
+
+	const FTransform BaseTransform(WorldRotation, WorldLocation, FVector::OneVector);
+	PouchVisual->SetWorldTransform(FTransform(
+		WorldRotation * PouchVisualSlot.LocalRotation.Quaternion(),
+		BaseTransform.TransformPosition(PouchVisualSlot.LocalOffsetCM),
+		PouchVisualSlot.LocalScale));
+	CordSegmentA->SetVisibility(true, true);
+	CordSegmentB->SetVisibility(true, true);
+	PouchVisual->SetVisibility(true, true);
 }
 
 EABTSItemId AABTSM51SlingshotCord::GetStakeItem() const

@@ -17,7 +17,8 @@ Inactive
   -- 点击可用弹弓弦 --> Ready
   -- 左键按中弹丸袋 --> Pulling
   -- 松开左键 -------> Flying
-  -- 落地且无显著碰撞 PostLandingQuietSeconds --> Returning
+  -- 发射鸟落地 -----> Settling
+  -- 全部动态刚体持续稳定，或达到最大等待时间 --> Returning
   -- 回归完成 -------> Inactive
 ```
 
@@ -84,7 +85,11 @@ HISM 实例达到撞开阈值后：
 
 ## 7. 结束与回归
 
-发射鸟在飞行至少 1 秒后，如果已接地且 `PostLandingQuietSeconds` 内没有超过显著阈值的碰撞，进入 Returning：
+发射鸟在飞行至少 1 秒并接地后进入 `Settling`。该阶段仍维持 Chaos、径向/平面重力、黑鸟引信和连锁碰撞，不立即冻结场景。`FABTSM6PhysicsSettleMonitor` 每隔 `SettleSampleIntervalSeconds` 汇总 M6 动态代理与 M7 动态模块：只有全部刚体的线速度低于 `SettleLinearSpeedThresholdCMPerSec`、角速度低于 `SettleAngularSpeedThresholdDegPerSec`，并连续保持 `SettleStableHoldSeconds`，同时距离最后一次显著冲击、爆炸、活塞释放或动态提升超过 `SettleMinimumPostActivitySeconds`，才进入 Returning。
+
+黑鸟爆炸、炸药桶爆炸、弹簧活塞释放、发射鸟显著碰撞、代理显著碰撞以及 M7 模块重新激活均重置活动时间。发射鸟在 Settling 中重新离地也会重置稳定窗口。由于径向重力通过逐帧 `AddForce` 实现，Chaos Awake 只用于诊断，最终判据以线速度、角速度和连续稳定时间为准，避免在抛物线最高点或低位移高速旋转时误判静止。
+
+若场景因微抖或长时间滚动在 `SettleMaximumWaitSeconds` 内仍未稳定，则输出 `[ABTS][M6][Settle] ForcedTimeout` 并强制进入 Returning，防止玩法闭环永久阻塞。正常稳定输出 `Settled`，采样期间每秒输出一次动态刚体数量、移动数量、最大线速度、最大角速度和稳定累计时间。进入 Returning 后：
 
 - 全部未碎裂动态代理关闭 Simulate Physics，保留当前位置和旋转，变为静态查询/碰撞物；
 - 鸟关闭碰撞与移动 Tick，沿球面弧线飞回弹弓后方；
@@ -95,6 +100,7 @@ HISM 实例达到撞开阈值后：
 1. 关闭 PIE 并编译；建议复制 M5.1 地图为 `L_ABTS_M6`。
 2. World Settings → GameMode Override 选择 `ABTSM6GameMode`，或创建 `BP_ABTSM6GameMode` 子类后选择它。
 3. 若要调参数，创建 `BP_ABTSM6SlingshotSystem`，在 GameMode 的 `SlingshotSystemClass` 中引用它。
+   - `ABTS | M6 | Return | Settlement` 暴露线速度阈值、角速度阈值、持续稳定时间、冲击后最短等待、最大等待和采样间隔；默认分别为 `20 cm/s`、`10 deg/s`、`2.0s`、`2.5s`、`15s`、`0.1s`。
 4. 树与石 Static Mesh 必须配置 Simple Collision。HISM 在 M6 为 `QueryAndPhysics + WorldStatic + SimulatePhysics=false`。
 5. 进入游戏，收集/加工并在两个 DirtHole 安装同类桩，再连接对应弦。
 
@@ -120,8 +126,8 @@ HISM 实例达到撞开阈值后：
 6. 低速撞树石只改变鸟速度；中速将实例撞开；高速将实例撞碎。
 7. 动态树石能撞击其他 HISM 并触发连锁响应。
 8. 黑鸟可点击提前引爆，也能在碰撞后自动引爆。
-9. 落地静默后动态物保持最终位置并冻结，鸟飞回弹弓，普通相机和控制恢复。
-10. 日志包含 `[ABTS][M6][Enter]`、`[Launch]`、`[Impact]`、`[Return]`；无 Fatal、assert 或 ensure。
+9. 鸟落地后进入 Settling；爆炸弹飞的物体必须完成下落和后续碰撞，全部动态物持续低速后才保持最终位置并冻结。
+10. 日志包含 `[ABTS][M6][Enter]`、`[Launch]`、`[Impact]`、`[Settle] Begin`、`[Settle] Settled` 和 `[Return]`；正常测试不出现 `ForcedTimeout`、Fatal、assert 或 ensure。
 
 ## 10. 已知首版边界
 

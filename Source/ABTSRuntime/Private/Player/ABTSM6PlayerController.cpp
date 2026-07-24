@@ -39,7 +39,8 @@ void AABTSM6PlayerController::PrimaryWorldInteract()
 		System->BeginPull(*this);
 		return;
 	}
-	if (System->GetLaunchState() == EABTSM6LaunchState::Flying)
+	if (System->GetLaunchState() == EABTSM6LaunchState::Flying
+		|| System->GetLaunchState() == EABTSM6LaunchState::Settling)
 	{
 		FHitResult Hit;
 		if (GetHitResultUnderCursor(ECC_Visibility, false, Hit)) System->TryManualBlackDetonation(Hit.GetActor());

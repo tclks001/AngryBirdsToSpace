@@ -14,6 +14,7 @@ public class ABTSRuntime : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"InputCore",
+			"PhysicsCore",
 			"ProceduralMeshComponent",
 		});
 	}

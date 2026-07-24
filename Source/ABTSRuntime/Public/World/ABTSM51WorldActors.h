@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Inventory/ABTSInventoryTypes.h"
 #include "Slingshot/ABTSSlingshotTypes.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "ABTSM51WorldActors.generated.h"
 
 class UStaticMeshComponent;
@@ -62,6 +63,7 @@ public:
 	AABTSM51SlingshotStake();
 	void InitializeStake(EABTSItemId InStakeItem, int32 InCellId, const FVector& InUnitDirection);
 	void ConfigureVisualDimensions(float DiameterCM, float HeightCM, UMaterialInterface* Material = nullptr);
+	void ApplyVisualSlot(const FABTSSlingshotVisualSlot& VisualSlot, float DiameterCM, float HeightCM);
 	EABTSItemId GetStakeItem() const { return StakeItem; }
 	int32 GetCellId() const { return CellId; }
 	const FVector& GetUnitDirection() const { return UnitDirection; }
@@ -89,6 +91,13 @@ public:
 	void InitializeCord(AABTSM51SlingshotStake* InStakeA, AABTSM51SlingshotStake* InStakeB, const FVector& InEndpointA, const FVector& InEndpointB);
 	void InitializeCordWithTier(AABTSM51SlingshotStake* InStakeA, AABTSM51SlingshotStake* InStakeB, const FVector& InEndpointA, const FVector& InEndpointB, EABTSSlingshotTier InTier);
 	void ConfigureVisualThickness(float ThicknessCM, UMaterialInterface* Material = nullptr);
+	void ApplyVisualSlot(const FABTSSlingshotVisualSlot& VisualSlot, float ThicknessCM);
+	void SetPouchVisualSlot(const FABTSSlingshotVisualSlot& InVisualSlot) { PouchVisualSlot = InVisualSlot; }
+	const FABTSSlingshotVisualSlot& GetPouchVisualSlot() const { return PouchVisualSlot; }
+	void ConfigureTwoCordVisuals(const FABTSSlingshotVisualSlot& CordSlot, const FABTSSlingshotVisualSlot& PouchSlot, const FABTSSlingshotConnectionLayout& Layout, float ThicknessCM);
+	void UpdatePulledPouchVisual(const FVector& WorldLocation, const FQuat& WorldRotation);
+	void ResetPouchVisualToRest();
+	FTransform GetRestPouchTransform() const;
 	FVector GetEndpointA() const { return EndpointA; }
 	FVector GetEndpointB() const { return EndpointB; }
 	EABTSItemId GetStakeItem() const;
@@ -98,10 +107,22 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Visual;
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> CordSegmentA;
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> CordSegmentB;
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> PouchVisual;
 
 	TWeakObjectPtr<AABTSM51SlingshotStake> StakeA;
 	TWeakObjectPtr<AABTSM51SlingshotStake> StakeB;
 	FVector EndpointA = FVector::ZeroVector;
 	FVector EndpointB = FVector::ZeroVector;
 	EABTSSlingshotTier SlingshotTier = EABTSSlingshotTier::Simple;
+	FABTSSlingshotVisualSlot PouchVisualSlot;
+	FABTSSlingshotVisualSlot CordVisualSlot;
+	FABTSSlingshotConnectionLayout ConnectionLayout;
+	float CordThicknessCM = 3.5f;
+	TObjectPtr<UStaticMesh> DefaultCordCylinderMesh;
+	TObjectPtr<UStaticMesh> DefaultPouchSphereMesh;
 };

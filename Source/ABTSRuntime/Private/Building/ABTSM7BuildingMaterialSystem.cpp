@@ -4,12 +4,14 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "Building/ABTSM7PenetrationValidator.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -50,6 +52,16 @@ AABTSM7BuildingMaterialSystem::AABTSM7BuildingMaterialSystem()
 	AddProfile(EABTSM7BuildingMaterial::Stone, 680.0f, 1280.0f, FLinearColor(0.32f, 0.34f, 0.38f));
 	AddProfile(EABTSM7BuildingMaterial::Iron, 820.0f, 1580.0f, FLinearColor(0.12f, 0.16f, 0.20f));
 	AddProfile(EABTSM7BuildingMaterial::Glass, 280.0f, 520.0f, FLinearColor(0.20f, 0.62f, 0.78f, 0.42f));
+	for (FABTSM7MaterialProfile& Profile : MaterialProfiles)
+	{
+		switch (Profile.Material)
+		{
+		case EABTSM7BuildingMaterial::Wood: Profile.DynamicFriction = 0.72f; Profile.StaticFriction = 0.88f; Profile.Restitution = 0.05f; Profile.DensityGPerCubicCM = 0.62f; Profile.DamageAtBreakSpeed = 108.0f; Profile.PushVelocityTransfer = 0.86f; break;
+		case EABTSM7BuildingMaterial::Stone: Profile.DynamicFriction = 0.82f; Profile.StaticFriction = 0.98f; Profile.Restitution = 0.16f; Profile.DensityGPerCubicCM = 2.55f; Profile.DamageAtBreakSpeed = 88.0f; Profile.PushVelocityTransfer = 0.52f; break;
+		case EABTSM7BuildingMaterial::Iron: Profile.DynamicFriction = 0.56f; Profile.StaticFriction = 0.70f; Profile.Restitution = 0.24f; Profile.DensityGPerCubicCM = 7.85f; Profile.DamageAtBreakSpeed = 68.0f; Profile.PushVelocityTransfer = 0.38f; break;
+		default: Profile.DynamicFriction = 0.36f; Profile.StaticFriction = 0.46f; Profile.Restitution = 0.12f; Profile.DensityGPerCubicCM = 2.50f; Profile.DamageAtBreakSpeed = 160.0f; Profile.PushVelocityTransfer = 0.68f; break;
+		}
+	}
 }
 
 void AABTSM7BuildingMaterialSystem::BeginPlay()
@@ -73,6 +85,10 @@ void AABTSM7BuildingMaterialSystem::BeginPlay()
 	StoneBrickHISM->SetMaterial(0, GetMaterial(EABTSM7BuildingMaterial::Stone));
 	IronBrickHISM->SetMaterial(0, GetMaterial(EABTSM7BuildingMaterial::Iron));
 	GlassBrickHISM->SetMaterial(0, GetMaterial(EABTSM7BuildingMaterial::Glass));
+	ApplyHISMPhysicalMaterial(*WoodBrickHISM, EABTSM7BuildingMaterial::Wood, TEXT("ABTSWoodBrickPhysics"));
+	ApplyHISMPhysicalMaterial(*StoneBrickHISM, EABTSM7BuildingMaterial::Stone, TEXT("ABTSStoneBrickPhysics"));
+	ApplyHISMPhysicalMaterial(*IronBrickHISM, EABTSM7BuildingMaterial::Iron, TEXT("ABTSIronBrickPhysics"));
+	ApplyHISMPhysicalMaterial(*GlassBrickHISM, EABTSM7BuildingMaterial::Glass, TEXT("ABTSGlassBrickPhysics"));
 	if (bSpawnTestSetAtStart) SpawnTestSet();
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7] MaterialSystem ready Planet=%d TestSet=%d Profiles=%d"), Planet.IsValid() ? 1 : 0, bSpawnTestSetAtStart ? 1 : 0, MaterialProfiles.Num());
 }
@@ -98,17 +114,36 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnSuspension(const FABT
 	if (!Module) return nullptr;
 	const EABTSM7BuildingMaterial Material = Spec.Kind == EABTSM7ModuleKind::Rope ? EABTSM7BuildingMaterial::Wood : EABTSM7BuildingMaterial::Iron;
 	Module->ConfigureCylinder(SharedCylinderMesh, Spec.Kind == EABTSM7ModuleKind::Rope ? RopeMaterial.Get() : ChainMaterial.Get(), Spec.Kind, Material, Spec.LengthCM, Spec.RadiusCM * 2.0f, WorldTransform);
+	Module->ConfigureImpactPhysics(GetProfile(Material));
 	Modules.Add(Module);
 	return Module;
 }
 
 AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnDevice(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform)
 {
+	return SpawnDeviceWithOverrides(Spec, WorldTransform, nullptr, nullptr);
+}
+
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnDeviceWithOverrides(
+	const FABTSM7DeviceSpec& Spec,
+	const FTransform& WorldTransform,
+	UStaticMesh* OverrideMesh,
+	UMaterialInterface* OverrideMaterial)
+{
 	if (Spec.Kind != EABTSM7ModuleKind::ExplosiveBarrel && Spec.Kind != EABTSM7ModuleKind::SpringPiston) return nullptr;
 	FActorSpawnParameters Params; Params.Owner = this; Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	AABTSM7BuildingModule* Module = GetWorld()->SpawnActor<AABTSM7BuildingModule>(AABTSM7BuildingModule::StaticClass(), WorldTransform, Params);
 	if (!Module) return nullptr;
-	Module->ConfigureCylinder(SharedCylinderMesh, Spec.Kind == EABTSM7ModuleKind::ExplosiveBarrel ? ExplosiveMaterial.Get() : SpringMaterial.Get(), Spec.Kind, EABTSM7BuildingMaterial::Iron, Spec.LengthCM, Spec.DiameterCM, WorldTransform);
+	UStaticMesh* RuntimeMesh = OverrideMesh ? OverrideMesh : SharedCylinderMesh.Get();
+	UMaterialInterface* RuntimeMaterial = OverrideMaterial
+		? OverrideMaterial
+		: (Spec.Kind == EABTSM7ModuleKind::ExplosiveBarrel ? ExplosiveMaterial.Get() : SpringMaterial.Get());
+	if (RuntimeMaterial == nullptr) RuntimeMaterial = GetMaterial(EABTSM7BuildingMaterial::Iron);
+	FTransform ModuleTransform = WorldTransform;
+	const FVector ShapeScale = ModuleTransform.GetScale3D().GetAbs();
+	ModuleTransform.SetScale3D(FVector::OneVector);
+	Module->ConfigureCylinder(RuntimeMesh, RuntimeMaterial, Spec.Kind, EABTSM7BuildingMaterial::Iron, Spec.LengthCM, Spec.DiameterCM, ModuleTransform, ShapeScale);
+	Module->ConfigureImpactPhysics(GetProfile(EABTSM7BuildingMaterial::Iron));
 	Modules.Add(Module);
 	return Module;
 }
@@ -142,6 +177,37 @@ const FABTSM7MaterialProfile& AABTSM7BuildingMaterialSystem::GetProfile(const EA
 	return Default;
 }
 
+float AABTSM7BuildingMaterialSystem::ComputeDamageGain(const FABTSM7MaterialProfile& Profile, const float NormalSpeedCMPerSec, const float BreakSpeedCMPerSec) const
+{
+	if (NormalSpeedCMPerSec < 60.0f) return 0.0f;
+	return Profile.DamageAtBreakSpeed * FMath::Square(NormalSpeedCMPerSec / FMath::Max(BreakSpeedCMPerSec, 1.0f));
+}
+
+uint64 AABTSM7BuildingMaterialSystem::GetHISMDamageKey(const UHierarchicalInstancedStaticMeshComponent& HISM, const int32 InstanceIndex) const
+{
+	FTransform Transform;
+	if (!HISM.GetInstanceTransform(InstanceIndex, Transform, true)) return 0;
+	const FVector Location = Transform.GetLocation();
+	uint32 Hash = PointerHash(&HISM);
+	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(Location.X / 5.0f)));
+	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(Location.Y / 5.0f)));
+	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(Location.Z / 5.0f)));
+	// Instance indices are compacted by HISM removal, so do not use them as a
+	// persistent damage identity. A static instance keeps its world transform.
+	return static_cast<uint64>(Hash);
+}
+
+void AABTSM7BuildingMaterialSystem::ApplyHISMPhysicalMaterial(UHierarchicalInstancedStaticMeshComponent& HISM, const EABTSM7BuildingMaterial Material, const TCHAR* DebugName)
+{
+	const FABTSM7MaterialProfile& Profile = GetProfile(Material);
+	UPhysicalMaterial* Physical = NewObject<UPhysicalMaterial>(this, FName(DebugName), RF_Transient);
+	Physical->Friction = Profile.DynamicFriction; Physical->StaticFriction = Profile.StaticFriction; Physical->Restitution = Profile.Restitution; Physical->Density = Profile.DensityGPerCubicCM;
+	Physical->bOverrideFrictionCombineMode = true; Physical->FrictionCombineMode = EFrictionCombineMode::Average;
+	Physical->bOverrideRestitutionCombineMode = true; Physical->RestitutionCombineMode = EFrictionCombineMode::Average;
+	HISM.SetPhysMaterialOverride(Physical);
+	RuntimePhysicalMaterials.Add(Physical);
+}
+
 float AABTSM7BuildingMaterialSystem::GetBirdThresholdScale(const EABTSBirdId BirdId) const
 {
 	switch (BirdId)
@@ -160,7 +226,7 @@ bool AABTSM7BuildingMaterialSystem::OwnsPrimitive(const UPrimitiveComponent* Com
 	return Cast<AABTSM7BuildingModule>(Component->GetOwner()) != nullptr;
 }
 
-AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, const int32 InstanceIndex, const EABTSM7BuildingMaterial Material, const FVector& Impulse)
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, const int32 InstanceIndex, const EABTSM7BuildingMaterial Material, const FVector& Impulse, const bool bActivateImmediately)
 {
 	FTransform Transform;
 	if (!HISM.GetInstanceTransform(InstanceIndex, Transform, true)) return nullptr;
@@ -169,9 +235,89 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::PromoteBrick(UHierarchical
 	AABTSM7BuildingModule* Module = GetWorld()->SpawnActor<AABTSM7BuildingModule>(AABTSM7BuildingModule::StaticClass(), Transform, Params);
 	if (!Module) return nullptr;
 	Module->ConfigureBrick(SharedBrickMesh, GetMaterial(Material), Material, Transform);
-	Module->ActivateDynamic(Impulse, Planet.IsValid() ? Planet->GetPlanetCenterWorld() : FVector::ZeroVector, 980.0f);
+	Module->ConfigureImpactPhysics(GetProfile(Material));
+	if (bActivateImmediately) ActivateModuleForLaunch(*Module, Impulse);
 	Modules.Add(Module);
 	return Module;
+}
+
+void AABTSM7BuildingMaterialSystem::ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse)
+{
+	MarkPhysicsActivity();
+	Module.SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
+	if (bLaunchPhysicsPlanar)
+	{
+		Module.ActivateDynamicPlanar(InitialImpulse, LaunchGravityReference, LaunchGravityAccelerationCMPerSec2);
+	}
+	else
+	{
+		const FVector Center = !LaunchGravityReference.IsNearlyZero()
+			? LaunchGravityReference
+			: (Planet.IsValid() ? Planet->GetPlanetCenterWorld() : FVector::ZeroVector);
+		Module.ActivateDynamic(InitialImpulse, Center, LaunchGravityAccelerationCMPerSec2);
+	}
+}
+
+void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
+	const bool bPlanar,
+	const FVector& GravityReference,
+	const float GravityAcceleration,
+	const float ContactDamageGraceSeconds)
+{
+	bLaunchPhysicsPlanar = bPlanar;
+	LaunchGravityReference = GravityReference;
+	LaunchGravityAccelerationCMPerSec2 = FMath::Max(0.0f, GravityAcceleration);
+	if (ContactDamageGraceSeconds >= 0.0f)
+	{
+		LaunchContactDamageGraceSeconds = ContactDamageGraceSeconds;
+	}
+
+	int32 PromotedCount = 0;
+	const auto PromoteAll = [this, &PromotedCount](UHierarchicalInstancedStaticMeshComponent* HISM, const EABTSM7BuildingMaterial Material)
+	{
+		if (HISM == nullptr) return;
+		for (int32 Index = HISM->GetInstanceCount() - 1; Index >= 0; --Index)
+		{
+			if (PromoteBrick(*HISM, Index, Material, FVector::ZeroVector, false)) ++PromotedCount;
+		}
+	};
+	PromoteAll(WoodBrickHISM, EABTSM7BuildingMaterial::Wood);
+	PromoteAll(StoneBrickHISM, EABTSM7BuildingMaterial::Stone);
+	PromoteAll(IronBrickHISM, EABTSM7BuildingMaterial::Iron);
+	PromoteAll(GlassBrickHISM, EABTSM7BuildingMaterial::Glass);
+
+	TArray<AABTSM7BuildingModule*> PendingModules;
+	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
+	{
+		if (AABTSM7BuildingModule* Module = Modules[Index].Get())
+		{
+			if (!Module->IsDynamic()) PendingModules.Add(Module);
+		}
+		else
+		{
+			Modules.RemoveAtSwap(Index);
+		}
+	}
+	const FABTSM7PenetrationValidationStats Validation = FABTSM7PenetrationValidator::ValidateAndRepair(
+		*GetWorld(), PendingModules, InitialPenetrationRepairToleranceCM, InitialPenetrationRepairPasses);
+	for (AABTSM7BuildingModule* Module : PendingModules)
+	{
+		if (IsValid(Module) && !Module->IsDynamic()) ActivateModuleForLaunch(*Module);
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d Gravity=%.1f ContactGrace=%.3f PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
+		bLaunchPhysicsPlanar ? 1 : 0,
+		PromotedCount,
+		PendingModules.Num(),
+		LaunchGravityAccelerationCMPerSec2,
+		LaunchContactDamageGraceSeconds,
+		Validation.DetectedPairCount,
+		Validation.RepairCount,
+		Validation.LargeErrorPairCount,
+		Validation.RemainingSmallPairCount,
+		Validation.MaximumDetectedDepthCM,
+		InitialPenetrationRepairToleranceCM,
+		InitialPenetrationRepairPasses);
 }
 
 bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Component, const int32 InstanceIndex, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity, const EABTSBirdId BirdId)
@@ -188,13 +334,29 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 	const float Break = Profile.BreakSpeedCMPerSec * Scale;
 	if (UHierarchicalInstancedStaticMeshComponent* HISM = Cast<UHierarchicalInstancedStaticMeshComponent>(Component))
 	{
-		if (InstanceIndex < 0 || NormalSpeedCMPerSec < Knock) return true;
-		if (NormalSpeedCMPerSec >= Break) HISM->RemoveInstance(InstanceIndex);
-		else PromoteBrick(*HISM, InstanceIndex, Material, IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * 0.75f);
+		if (InstanceIndex < 0) return true;
+		const uint64 DamageKey = GetHISMDamageKey(*HISM, InstanceIndex);
+		const float DamageAfter = HISMDamageByStableKey.FindRef(DamageKey) + ComputeDamageGain(Profile, NormalSpeedCMPerSec, Break);
+		HISMDamageByStableKey.Add(DamageKey, DamageAfter);
+		if (DamageAfter >= Profile.BreakDamage)
+		{
+			HISM->RemoveInstance(InstanceIndex);
+			HISMDamageByStableKey.Remove(DamageKey);
+			UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7][DamageBreak] Material=%d Damage=%.1f/%.1f"), static_cast<int32>(Material), DamageAfter, Profile.BreakDamage);
+		}
+		else if (NormalSpeedCMPerSec >= Knock)
+		{
+			if (AABTSM7BuildingModule* Module = PromoteBrick(*HISM, InstanceIndex, Material, IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * Profile.PushVelocityTransfer))
+			{
+				Module->ApplyImpactDamage(DamageAfter);
+				HISMDamageByStableKey.Remove(DamageKey);
+			}
+		}
 	}
 	else if (AABTSM7BuildingModule* Module = Cast<AABTSM7BuildingModule>(Component->GetOwner()))
 	{
-		if (NormalSpeedCMPerSec >= Break)
+		const bool bDamageBreak = Module->ApplyImpactDamage(ComputeDamageGain(Profile, NormalSpeedCMPerSec, Break));
+		if (bDamageBreak || NormalSpeedCMPerSec >= Break * 1.35f)
 		{
 			const EABTSM7ModuleKind Kind = Module->GetModuleKind();
 			const FVector Origin = Module->GetActorLocation();
@@ -203,7 +365,7 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 			if (Kind == EABTSM7ModuleKind::ExplosiveBarrel) ApplyRadialBlast(Origin, BarrelDestroyRadiusCM, BarrelImpulseRadiusCM, BarrelImpulseSpeedCMPerSec);
 			else if (Kind == EABTSM7ModuleKind::SpringPiston) ApplyDirectionalBlast(Origin, Axis, PistonDestroyLengthCM, PistonImpulseLengthCM, PistonEffectRadiusCM, PistonImpulseSpeedCMPerSec);
 		}
-		else if (NormalSpeedCMPerSec >= Knock) Module->ActivateDynamic(IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * 0.75f, Planet.IsValid() ? Planet->GetPlanetCenterWorld() : FVector::ZeroVector, 980.0f);
+		else if (NormalSpeedCMPerSec >= Knock) ActivateModuleForLaunch(*Module, IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * Profile.PushVelocityTransfer);
 	}
 	return true;
 }
@@ -228,12 +390,13 @@ void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent*
 	else if (AABTSM7BuildingModule* Module = Cast<AABTSM7BuildingModule>(Component ? Component->GetOwner() : nullptr))
 	{
 		if (bDestroy) Module->BreakModule();
-		else Module->ActivateDynamic(ImpulseDirection.GetSafeNormal() * ImpulseSpeed, Planet.IsValid() ? Planet->GetPlanetCenterWorld() : FVector::ZeroVector, 980.0f);
+		else ActivateModuleForLaunch(*Module, ImpulseDirection.GetSafeNormal() * ImpulseSpeed);
 	}
 }
 
 void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, const float DestroyRadiusCM, const float ImpulseRadiusCM, const float ImpulseSpeedCMPerSec)
 {
+	MarkPhysicsActivity();
 	for (UHierarchicalInstancedStaticMeshComponent* HISM : {WoodBrickHISM.Get(), StoneBrickHISM.Get(), IronBrickHISM.Get(), GlassBrickHISM.Get()})
 	{
 		TArray<int32> Indices = HISM->GetInstancesOverlappingSphere(Origin, ImpulseRadiusCM, true);
@@ -255,6 +418,7 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 
 void AABTSM7BuildingMaterialSystem::ApplyDirectionalBlast(const FVector& Origin, const FVector& Axis, const float DestroyLengthCM, const float ImpulseLengthCM, const float EffectRadiusCM, const float ImpulseSpeedCMPerSec)
 {
+	MarkPhysicsActivity();
 	const FVector UnitAxis = Axis.GetSafeNormal();
 	for (UHierarchicalInstancedStaticMeshComponent* HISM : {WoodBrickHISM.Get(), StoneBrickHISM.Get(), IronBrickHISM.Get(), GlassBrickHISM.Get()})
 	{
@@ -287,6 +451,22 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 	{
 		if (AABTSM7BuildingModule* Module = Modules[Index].Get()) Module->Freeze(); else Modules.RemoveAtSwap(Index);
 	}
+}
+
+void AABTSM7BuildingMaterialSystem::AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const
+{
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		const AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr || !Module->IsDynamic()) continue;
+		UStaticMeshComponent* Body = Module->GetMeshComponent();
+		if (Body != nullptr && Body->IsSimulatingPhysics()) OutBodies.Add(Body);
+	}
+}
+
+void AABTSM7BuildingMaterialSystem::MarkPhysicsActivity()
+{
+	if (const UWorld* World = GetWorld()) LastPhysicsActivityTimeSeconds = World->GetTimeSeconds();
 }
 
 void AABTSM7BuildingMaterialSystem::ConfigureTestSet(const bool bEnable, const FTransform& SpawnTransform)

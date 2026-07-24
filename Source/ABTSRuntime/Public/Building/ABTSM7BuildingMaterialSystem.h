@@ -12,7 +12,9 @@ class AABTSM3Planet;
 class AABTSM7BuildingModule;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
+class UPrimitiveComponent;
 class UStaticMesh;
+class UPhysicalMaterial;
 
 /** M7 material library. Building layout/generation is deliberately deferred. */
 UCLASS(BlueprintType)
@@ -32,12 +34,18 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Device")
 	AABTSM7BuildingModule* SpawnDevice(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
+	AABTSM7BuildingModule* SpawnDeviceWithOverrides(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform, UStaticMesh* OverrideMesh, UMaterialInterface* OverrideMaterial);
 
 	bool OwnsPrimitive(const UPrimitiveComponent* Component) const;
 	bool HandleBirdImpact(UPrimitiveComponent* Component, int32 InstanceIndex, float NormalSpeedCMPerSec, const FVector& IncomingVelocity, EABTSBirdId BirdId);
 	void HandleModuleChainImpact(AABTSM7BuildingModule& Source, const FHitResult& Hit, float NormalSpeedCMPerSec);
 	void ApplyRadialBlast(const FVector& Origin, float DestroyRadiusCM, float ImpulseRadiusCM, float ImpulseSpeedCMPerSec);
 	void ApplyDirectionalBlast(const FVector& Origin, const FVector& Axis, float DestroyLengthCM, float ImpulseLengthCM, float EffectRadiusCM, float ImpulseSpeedCMPerSec);
+	/** Promotes all building HISM instances and enables gravity on every module for the launch phase. */
+	void BeginLaunchPhysics(bool bPlanar, const FVector& GravityReference, float GravityAcceleration, float ContactDamageGraceSeconds = -1.0f);
+	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
+	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
+	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
 	void FreezeDynamicModules();
 	void ConfigureTestSet(bool bEnable, const FTransform& SpawnTransform);
 
@@ -55,7 +63,12 @@ private:
 	UMaterialInterface* GetMaterial(EABTSM7BuildingMaterial Material) const;
 	const FABTSM7MaterialProfile& GetProfile(EABTSM7BuildingMaterial Material) const;
 	float GetBirdThresholdScale(EABTSBirdId BirdId) const;
-	AABTSM7BuildingModule* PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM7BuildingMaterial Material, const FVector& Impulse);
+	float ComputeDamageGain(const FABTSM7MaterialProfile& Profile, float NormalSpeedCMPerSec, float BreakSpeedCMPerSec) const;
+	uint64 GetHISMDamageKey(const UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex) const;
+	void ApplyHISMPhysicalMaterial(UHierarchicalInstancedStaticMeshComponent& HISM, EABTSM7BuildingMaterial Material, const TCHAR* DebugName);
+	void ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse = FVector::ZeroVector);
+	void MarkPhysicsActivity();
+	AABTSM7BuildingModule* PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM7BuildingMaterial Material, const FVector& Impulse, bool bActivateImmediately = true);
 	void BreakOrImpulsePrimitive(UPrimitiveComponent* Component, int32 InstanceIndex, const FVector& ImpulseDirection, float ImpulseSpeed, bool bDestroy);
 	void SpawnTestSet();
 
@@ -107,9 +120,24 @@ private:
 	float PistonEffectRadiusCM = 180.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Damage", meta = (ClampMin = "0.0"))
 	float PistonImpulseSpeedCMPerSec = 1400.0f;
+	/** Prevents activation overlap/depenetration contacts from becoming damage. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Damage", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+	float LaunchContactDamageGraceSeconds = 0.20f;
+	/** Small initial penetration is repaired before any M7 module enters Chaos. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Contact Stability", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "10.0"))
+	float InitialPenetrationRepairToleranceCM = 2.0f;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Contact Stability", meta = (ClampMin = "1", ClampMax = "32", UIMin = "1", UIMax = "16"))
+	int32 InitialPenetrationRepairPasses = 8;
 
 	TWeakObjectPtr<AABTSM3Planet> Planet;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> Modules;
+	TMap<uint64, float> HISMDamageByStableKey;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UPhysicalMaterial>> RuntimePhysicalMaterials;
+	bool bLaunchPhysicsPlanar = false;
+	FVector LaunchGravityReference = FVector::ZeroVector;
+	float LaunchGravityAccelerationCMPerSec2 = 980.0f;
+	float LastPhysicsActivityTimeSeconds = -BIG_NUMBER;
 	bool bSpawnTestSetAtStart = false;
 	FTransform TestSetTransform = FTransform::Identity;
 };

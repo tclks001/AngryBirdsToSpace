@@ -7,9 +7,12 @@
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
 #include "Party/ABTSBirdParty.h"
@@ -24,6 +27,14 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PostPhysics;
+	VisualRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VisualRoot"));
+	SetRootComponent(VisualRoot);
+	PouchVisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PouchVisualMesh"));
+	PouchVisualMesh->SetupAttachment(VisualRoot);
+	PouchVisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PouchVisualMesh->SetGenerateOverlapEvents(false);
+	PouchVisualMesh->SetHiddenInGame(true);
+	PouchVisualMesh->SetVisibility(false);
 	ProxyClass = AABTSM6DestructibleProxy::StaticClass();
 	CameraClass = AABTSM6SlingshotCamera::StaticClass();
 
@@ -44,13 +55,70 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 	AddMaterial(EABTSM6ImpactMaterial::Terrain, 10.0f, 10.0f, 0.58f, 0.10f);
 	AddMaterial(EABTSM6ImpactMaterial::Wood, 0.82f, 0.82f, 0.72f, 0.06f);
 	AddMaterial(EABTSM6ImpactMaterial::Stone, 1.20f, 1.30f, 0.48f, 0.22f);
+	AddMaterial(EABTSM6ImpactMaterial::Iron, 1.38f, 1.55f, 0.42f, 0.24f);
+	AddMaterial(EABTSM6ImpactMaterial::Glass, 0.62f, 0.48f, 0.64f, 0.10f);
 	AddMaterial(EABTSM6ImpactMaterial::Building, 1.0f, 1.0f, 0.55f, 0.12f);
+	for (FABTSM6MaterialImpactProfile& Profile : MaterialImpactProfiles)
+	{
+		switch (Profile.Material)
+		{
+		case EABTSM6ImpactMaterial::Wood:
+			Profile.DynamicFriction = 0.72f; Profile.StaticFriction = 0.88f; Profile.ObjectRestitution = 0.05f; Profile.DensityGPerCubicCM = 0.62f; Profile.DamageAtBreakSpeed = 105.0f; Profile.PushVelocityTransfer = 0.86f; break;
+		case EABTSM6ImpactMaterial::Stone:
+			Profile.DynamicFriction = 0.80f; Profile.StaticFriction = 0.95f; Profile.ObjectRestitution = 0.18f; Profile.DensityGPerCubicCM = 2.55f; Profile.DamageAtBreakSpeed = 86.0f; Profile.PushVelocityTransfer = 0.52f; break;
+		case EABTSM6ImpactMaterial::Iron:
+			Profile.DynamicFriction = 0.56f; Profile.StaticFriction = 0.70f; Profile.ObjectRestitution = 0.24f; Profile.DensityGPerCubicCM = 7.85f; Profile.DamageAtBreakSpeed = 68.0f; Profile.PushVelocityTransfer = 0.38f; break;
+		case EABTSM6ImpactMaterial::Glass:
+			Profile.DynamicFriction = 0.36f; Profile.StaticFriction = 0.46f; Profile.ObjectRestitution = 0.12f; Profile.DensityGPerCubicCM = 2.50f; Profile.DamageAtBreakSpeed = 160.0f; Profile.PushVelocityTransfer = 0.68f; break;
+		default:
+			Profile.DynamicFriction = 0.70f; Profile.StaticFriction = 0.82f; Profile.ObjectRestitution = 0.08f; Profile.DensityGPerCubicCM = 1.0f; break;
+		}
+	}
 }
 
 void AABTSM6SlingshotSystem::BeginPlay()
 {
 	Super::BeginPlay();
 	ResolveDependencies();
+	const auto ApplyStaticPhysics = [this](UPrimitiveComponent* Component, const EABTSM6ImpactMaterial Material, const TCHAR* Name)
+	{
+		if (Component == nullptr) return;
+		const FABTSM6MaterialImpactProfile& Profile = GetMaterialProfile(Material);
+		UPhysicalMaterial* Physical = NewObject<UPhysicalMaterial>(this, FName(Name), RF_Transient);
+		Physical->Friction = Profile.DynamicFriction; Physical->StaticFriction = Profile.StaticFriction; Physical->Restitution = Profile.ObjectRestitution; Physical->Density = Profile.DensityGPerCubicCM;
+		Physical->bOverrideFrictionCombineMode = true; Physical->FrictionCombineMode = EFrictionCombineMode::Average;
+		Physical->bOverrideRestitutionCombineMode = true; Physical->RestitutionCombineMode = EFrictionCombineMode::Average;
+		Component->SetPhysMaterialOverride(Physical);
+		RuntimeImpactPhysicalMaterials.Add(Physical);
+	};
+	if (Planet.IsValid())
+	{
+		ApplyStaticPhysics(Planet->ForestHISM, EABTSM6ImpactMaterial::Wood, TEXT("ABTSForestImpactPhysics"));
+		ApplyStaticPhysics(Planet->RockHISM, EABTSM6ImpactMaterial::Stone, TEXT("ABTSRockImpactPhysics"));
+	}
+	if (bPlanarTestMode)
+	{
+		for (TActorIterator<AABTSM71TreeHISMActor> It(GetWorld()); It; ++It)
+		{
+			ApplyStaticPhysics(It->GetHISM(), EABTSM6ImpactMaterial::Wood, TEXT("ABTSPlanarTreeImpactPhysics"));
+		}
+		for (TActorIterator<AABTSM71RockHISMActor> It(GetWorld()); It; ++It)
+		{
+			ApplyStaticPhysics(It->GetHISM(), EABTSM6ImpactMaterial::Stone, TEXT("ABTSPlanarRockImpactPhysics"));
+		}
+		for (TActorIterator<AABTSM71PlaceableBrickActor> It(GetWorld()); It; ++It)
+		{
+			EABTSM6ImpactMaterial Material = EABTSM6ImpactMaterial::Wood;
+			switch (It->GetBuildingMaterial())
+			{
+			case EABTSM7BuildingMaterial::Stone: Material = EABTSM6ImpactMaterial::Stone; break;
+			case EABTSM7BuildingMaterial::Iron: Material = EABTSM6ImpactMaterial::Iron; break;
+			case EABTSM7BuildingMaterial::Glass: Material = EABTSM6ImpactMaterial::Glass; break;
+			default: break;
+			}
+			ApplyStaticPhysics(It->GetHISM(), Material, TEXT("ABTSPlanarBrickImpactPhysics"));
+		}
+	}
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -91,19 +159,20 @@ void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 		UpdatePouchAndPreview();
 		DrawPredictedTrajectory();
 	}
-	else if (LaunchState == EABTSM6LaunchState::Flying)
+	else if (LaunchState == EABTSM6LaunchState::Flying || LaunchState == EABTSM6LaunchState::Settling)
 	{
 		FlightElapsedSeconds += DeltaSeconds;
-		QuietElapsedSeconds += DeltaSeconds;
 		if (BlackFuseRemainingSeconds >= 0.0f && !bBlackDetonated)
 		{
 			BlackFuseRemainingSeconds -= DeltaSeconds;
 			if (BlackFuseRemainingSeconds <= 0.0f) DetonateBlackBird(false);
 		}
-		if (LaunchedBird.IsValid() && FlightElapsedSeconds > 1.0f && LaunchedBird->IsRadiallyGrounded() && QuietElapsedSeconds >= PostLandingQuietSeconds)
+		if (LaunchState == EABTSM6LaunchState::Flying && LaunchedBird.IsValid()
+			&& FlightElapsedSeconds > 1.0f && LaunchedBird->IsRadiallyGrounded())
 		{
-			BeginReturn();
+			BeginSettlement();
 		}
+		if (LaunchState == EABTSM6LaunchState::Settling) UpdatePhysicsSettlement(DeltaSeconds);
 	}
 	else if (LaunchState == EABTSM6LaunchState::Returning)
 	{
@@ -210,6 +279,7 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	ActiveCord = &Cord;
 	LaunchedBird = Bird;
 	BuildLaunchFrame(Cord, *Bird);
+	ConfigurePouchVisual(Cord);
 	Party->SetSlingshotMode(true);
 	ArrangeWaitingBirds();
 	Bird->EnterSlingshotPouch(RestPouchLocation, FRotationMatrix::MakeFromXZ(SlingForward, SlingUp).ToQuat());
@@ -247,7 +317,7 @@ void AABTSM6SlingshotSystem::BuildLaunchFrame(AABTSM51SlingshotCord& Cord, AABTS
 	if (SlingForward.IsNearlyZero()) SlingForward = BirdSide;
 	if (!BirdSide.IsNearlyZero() && FVector::DotProduct(SlingForward, BirdSide) < 0.0f) SlingForward *= -1.0f;
 	if (FVector::DotProduct(FVector::CrossProduct(SlingUp, SlingForward), SlingRight) < 0.0f) SlingRight *= -1.0f;
-	RestPouchLocation = SlingCenter - SlingForward * 115.0f + SlingUp * 42.0f;
+	RestPouchLocation = Cord.GetRestPouchTransform().GetLocation();
 	PouchLocation = RestPouchLocation;
 }
 
@@ -301,7 +371,9 @@ void AABTSM6SlingshotSystem::UpdateAimFromCursor(APlayerController& Controller)
 	const FVector PlaneNormal = SlingshotCamera ? SlingshotCamera->GetActorForwardVector() : SlingForward;
 	const float Denominator = FVector::DotProduct(RayDirection, PlaneNormal);
 	if (FMath::Abs(Denominator) <= SMALL_NUMBER) return;
-	const float PullDistance = FMath::Lerp(MinPullDistanceCM, MaxPullDistanceCM, PullAlpha);
+	const float PullDistance = LaunchState == EABTSM6LaunchState::Pulling
+		? FMath::Lerp(MinPullDistanceCM, MaxPullDistanceCM, PullAlpha)
+		: 0.0f;
 	const FVector PulledPlaneCenter = RestPouchLocation - SlingForward * PullDistance;
 	const float Distance = FVector::DotProduct(PulledPlaneCenter - RayOrigin, PlaneNormal) / Denominator;
 	if (Distance <= 0.0f) return;
@@ -321,7 +393,29 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 	const float PullDistance = FMath::Lerp(MinPullDistanceCM, MaxPullDistanceCM, PullAlpha);
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
 	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
-	LaunchedBird->SetActorLocationAndRotation(PouchLocation, FRotationMatrix::MakeFromXZ(Direction, SlingUp).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+	const FQuat PouchRotation = FRotationMatrix::MakeFromXZ(Direction, SlingUp).ToQuat();
+	LaunchedBird->SetActorLocationAndRotation(PouchLocation, PouchRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	UpdatePouchVisual(PouchRotation);
+}
+
+void AABTSM6SlingshotSystem::ConfigurePouchVisual(const AABTSM51SlingshotCord& Cord)
+{
+	ActivePouchVisualSlot = Cord.GetPouchVisualSlot();
+	// The cord actor owns the authoritative pouch and both elastic segments.
+	// Keep this native component hidden for compatibility with existing blueprints.
+	SetPouchVisualActive(false);
+}
+
+void AABTSM6SlingshotSystem::UpdatePouchVisual(const FQuat& PouchRotation)
+{
+	if (ActiveCord.IsValid()) ActiveCord->UpdatePulledPouchVisual(PouchLocation, PouchRotation);
+}
+
+void AABTSM6SlingshotSystem::SetPouchVisualActive(const bool bActive)
+{
+	if (PouchVisualMesh == nullptr) return;
+	PouchVisualMesh->SetVisibility(bActive, true);
+	PouchVisualMesh->SetHiddenInGame(!bActive, true);
 }
 
 FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const
@@ -355,18 +449,31 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !LaunchedBird.IsValid()) return;
 	const FVector Velocity = ComputeLaunchVelocity();
-	LaunchedBird->LaunchFromSlingshot(Velocity, FlightAirDragPerSecond);
+	SetPouchVisualActive(false);
+	if (ActiveCord.IsValid()) ActiveCord->ResetPouchVisualToRest();
+	// Ready/Pulling are aiming-only states. Scene objects must remain static
+	// until the bird actually leaves the pouch.
 	LaunchState = EABTSM6LaunchState::Flying;
+	LaunchedBird->LaunchFromSlingshot(Velocity, FlightAirDragPerSecond);
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Launch] Bird=%d Speed=%.1f Pull=%.2f"), ABTSBirdIdToIndex(LaunchedBird->GetBirdId()), Velocity.Size(), PullAlpha);
+	BeginLaunchGravityPhase();
 	FlightElapsedSeconds = 0.0f;
-	QuietElapsedSeconds = 0.0f;
 	BlackFuseRemainingSeconds = -1.0f;
 	bBlackDetonated = false;
+	FABTSM6PhysicsSettleConfig SettleConfig;
+	SettleConfig.LinearSpeedThresholdCMPerSec = SettleLinearSpeedThresholdCMPerSec;
+	SettleConfig.AngularSpeedThresholdDegPerSec = SettleAngularSpeedThresholdDegPerSec;
+	SettleConfig.StableHoldSeconds = SettleStableHoldSeconds;
+	SettleConfig.MinimumPostActivitySeconds = SettleMinimumPostActivitySeconds;
+	SettleConfig.MaximumWaitSeconds = SettleMaximumWaitSeconds;
+	SettleConfig.SampleIntervalSeconds = SettleSampleIntervalSeconds;
+	PhysicsSettleMonitor.Configure(SettleConfig);
+	PhysicsSettleMonitor.Reset(GetWorld()->GetTimeSeconds());
 	if (SlingshotCamera)
 	{
 		if (bPlanarTestMode) SlingshotCamera->FollowBirdPlanar(LaunchedBird.Get(), PlanarUp);
 		else SlingshotCamera->FollowBird(LaunchedBird.Get(), Planet.Get());
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Launch] Bird=%d Speed=%.1f Pull=%.2f"), ABTSBirdIdToIndex(LaunchedBird->GetBirdId()), Velocity.Size(), PullAlpha);
 }
 
 const FABTSM6BirdImpactProfile& AABTSM6SlingshotSystem::GetBirdProfile(const EABTSBirdId BirdId) const
@@ -389,6 +496,16 @@ EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveCo
 	if (Planet.IsValid() && Component == Planet->RockHISM) return EABTSM6ImpactMaterial::Stone;
 	if (Component && Component->GetOwner() && Component->GetOwner()->IsA<AABTSM71TreeHISMActor>()) return EABTSM6ImpactMaterial::Wood;
 	if (Component && Component->GetOwner() && Component->GetOwner()->IsA<AABTSM71RockHISMActor>()) return EABTSM6ImpactMaterial::Stone;
+	if (const AABTSM71PlaceableBrickActor* Brick = Component ? Cast<AABTSM71PlaceableBrickActor>(Component->GetOwner()) : nullptr)
+	{
+		switch (Brick->GetBuildingMaterial())
+		{
+		case EABTSM7BuildingMaterial::Stone: return EABTSM6ImpactMaterial::Stone;
+		case EABTSM7BuildingMaterial::Iron: return EABTSM6ImpactMaterial::Iron;
+		case EABTSM7BuildingMaterial::Glass: return EABTSM6ImpactMaterial::Glass;
+		default: return EABTSM6ImpactMaterial::Wood;
+		}
+	}
 	if (const AABTSM6DestructibleProxy* Proxy = Component ? Cast<AABTSM6DestructibleProxy>(Component->GetOwner()) : nullptr) return Proxy->GetImpactMaterial();
 	const AActor* ComponentOwner = Component ? Component->GetOwner() : nullptr;
 	return ComponentOwner && ((Planet.IsValid() && ComponentOwner == Planet.Get())
@@ -396,23 +513,108 @@ EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveCo
 		? EABTSM6ImpactMaterial::Terrain : EABTSM6ImpactMaterial::Building;
 }
 
+float AABTSM6SlingshotSystem::ComputeDamageGain(
+	const FABTSM6MaterialImpactProfile& MaterialProfile,
+	const float NormalSpeedCMPerSec,
+	const float BreakThreshold) const
+{
+	if (NormalSpeedCMPerSec < SignificantImpactSpeedCMPerSec) return 0.0f;
+	const float NormalizedSpeed = NormalSpeedCMPerSec / FMath::Max(BreakThreshold, 1.0f);
+	return MaterialProfile.DamageAtBreakSpeed * FMath::Square(FMath::Max(0.0f, NormalizedSpeed));
+}
+
+uint64 AABTSM6SlingshotSystem::GetHISMDamageKey(const UHierarchicalInstancedStaticMeshComponent& HISM, const int32 InstanceIndex) const
+{
+	FTransform Transform;
+	if (!HISM.GetInstanceTransform(InstanceIndex, Transform, true)) return 0;
+	const FVector Location = Transform.GetLocation();
+	const int32 X = FMath::RoundToInt(Location.X / 5.0f);
+	const int32 Y = FMath::RoundToInt(Location.Y / 5.0f);
+	const int32 Z = FMath::RoundToInt(Location.Z / 5.0f);
+	uint32 Hash = PointerHash(&HISM);
+	Hash = HashCombineFast(Hash, GetTypeHash(X));
+	Hash = HashCombineFast(Hash, GetTypeHash(Y));
+	Hash = HashCombineFast(Hash, GetTypeHash(Z));
+	// Instance indices change after RemoveInstance; the quantized world transform
+	// is the stable identity while this HISM entry remains static.
+	return static_cast<uint64>(Hash);
+}
+
+int32 AABTSM6SlingshotSystem::PromoteHISMForLaunchGravity(UHierarchicalInstancedStaticMeshComponent& HISM)
+{
+	TArray<int32> Indices = HISM.GetInstancesOverlappingSphere(SlingCenter, LaunchGravityActivationRadiusCM, true);
+	Indices.Sort(TGreater<int32>());
+	int32 PromotedCount = 0;
+	const EABTSM6ImpactMaterial Material = ResolveMaterial(&HISM);
+	const FABTSM6MaterialImpactProfile& Profile = GetMaterialProfile(Material);
+	for (const int32 Index : Indices)
+	{
+		if (PromoteOrBreakHISM(HISM, Index, Material, Profile, 0.0f, FVector::ZeroVector, 0.0f, BIG_NUMBER, 0.0f))
+		{
+			++PromotedCount;
+		}
+	}
+	return PromotedCount;
+}
+
+void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
+{
+	if (BuildingMaterialSystem.IsValid())
+	{
+		BuildingMaterialSystem->BeginLaunchPhysics(
+			bPlanarTestMode,
+			bPlanarTestMode ? PlanarUp : Planet->GetPlanetCenterWorld(),
+			LaunchObjectGravityAccelerationCMPerSec2,
+			LaunchContactDamageGraceSeconds);
+	}
+
+	for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies)
+	{
+		if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get())
+		{
+			Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
+			Proxy->Reactivate(FVector::ZeroVector);
+		}
+	}
+
+	int32 PromotedCount = 0;
+	if (bPlanarTestMode)
+	{
+		for (TActorIterator<AABTSM71PlaceableHISMActor> It(GetWorld()); It; ++It)
+		{
+			if (UHierarchicalInstancedStaticMeshComponent* HISM = It->GetHISM()) PromotedCount += PromoteHISMForLaunchGravity(*HISM);
+		}
+	}
+	else if (Planet.IsValid())
+	{
+		PromotedCount += PromoteHISMForLaunchGravity(*Planet->ForestHISM);
+		PromotedCount += PromoteHISMForLaunchGravity(*Planet->RockHISM);
+	}
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ContactGrace=%.3f"),
+		bPlanarTestMode ? 1 : 0, LaunchGravityActivationRadiusCM, PromotedCount, DynamicProxies.Num(), LaunchContactDamageGraceSeconds);
+}
+
 bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 	UHierarchicalInstancedStaticMeshComponent& HISM,
 	const int32 InstanceIndex,
 	const EABTSM6ImpactMaterial Material,
+	const FABTSM6MaterialImpactProfile& MaterialProfile,
 	const float NormalSpeedCMPerSec,
 	const FVector& ImpulseDirection,
 	const float KnockThreshold,
-	const float BreakThreshold)
+	const float BreakThreshold,
+	const float AccumulatedDamage)
 {
 	if (InstanceIndex < 0 || InstanceIndex >= HISM.GetInstanceCount() || NormalSpeedCMPerSec < KnockThreshold) return false;
 	FTransform Transform;
 	if (!HISM.GetInstanceTransform(InstanceIndex, Transform, true)) return false;
 	UStaticMesh* Mesh = HISM.GetStaticMesh();
+	const uint64 DamageKey = GetHISMDamageKey(HISM, InstanceIndex);
 	HISM.RemoveInstance(InstanceIndex);
-	if (NormalSpeedCMPerSec >= BreakThreshold)
+	HISMDamageByStableKey.Remove(DamageKey);
+	if (AccumulatedDamage >= MaterialProfile.BreakDamage || NormalSpeedCMPerSec >= BreakThreshold * 1.35f)
 	{
-		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Break] Material=%d Speed=%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec);
+		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Break] Material=%d Speed=%.1f Damage=%.1f/%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec, AccumulatedDamage, MaterialProfile.BreakDamage);
 		return true;
 	}
 	FActorSpawnParameters Params;
@@ -421,13 +623,14 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 	AABTSM6DestructibleProxy* Proxy = GetWorld()->SpawnActor<AABTSM6DestructibleProxy>(ProxyClass, Transform, Params);
 	if (Proxy)
 	{
+		Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
 		if (bPlanarTestMode)
 		{
-			Proxy->ActivateProxyPlanar(Mesh, Transform, Material, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f, PlanarUp, 980.0f);
+			Proxy->ActivateProxyPlanar(Mesh, Transform, Material, MaterialProfile, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * MaterialProfile.PushVelocityTransfer, PlanarUp, 980.0f, AccumulatedDamage);
 		}
 		else
 		{
-			Proxy->ActivateProxy(Mesh, Transform, Material, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f, Planet->GetPlanetCenterWorld(), 980.0f);
+			Proxy->ActivateProxy(Mesh, Transform, Material, MaterialProfile, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * MaterialProfile.PushVelocityTransfer, Planet->GetPlanetCenterWorld(), 980.0f, AccumulatedDamage);
 		}
 		DynamicProxies.Add(Proxy);
 	}
@@ -436,8 +639,8 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
-	if (LaunchState != EABTSM6LaunchState::Flying || !LaunchedBird.IsValid()) return;
-	if (NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec) QuietElapsedSeconds = 0.0f;
+	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
+	if (NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec) MarkPhysicsActivity();
 	const EABTSM6ImpactMaterial Material = ResolveMaterial(Hit.GetComponent());
 	const FABTSM6BirdImpactProfile& BirdProfile = GetBirdProfile(LaunchedBird->GetBirdId());
 	const FABTSM6MaterialImpactProfile& MaterialProfile = GetMaterialProfile(Material);
@@ -449,11 +652,25 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 	{
 		if (UHierarchicalInstancedStaticMeshComponent* HISM = Cast<UHierarchicalInstancedStaticMeshComponent>(Hit.GetComponent()))
 		{
-			PromoteOrBreakHISM(*HISM, Hit.Item, Material, NormalSpeedCMPerSec, IncomingVelocity, KnockThreshold, BreakThreshold);
+			const uint64 DamageKey = GetHISMDamageKey(*HISM, Hit.Item);
+			const float DamageBefore = HISMDamageByStableKey.FindRef(DamageKey);
+			const float DamageAfter = DamageBefore + ComputeDamageGain(MaterialProfile, NormalSpeedCMPerSec, BreakThreshold);
+			HISMDamageByStableKey.Add(DamageKey, DamageAfter);
+			if (DamageAfter >= MaterialProfile.BreakDamage && NormalSpeedCMPerSec < KnockThreshold)
+			{
+				HISM->RemoveInstance(Hit.Item);
+				HISMDamageByStableKey.Remove(DamageKey);
+				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][HISMDamageBreak] Material=%d Damage=%.1f/%.1f"), static_cast<int32>(Material), DamageAfter, MaterialProfile.BreakDamage);
+			}
+			else
+			{
+				PromoteOrBreakHISM(*HISM, Hit.Item, Material, MaterialProfile, NormalSpeedCMPerSec, IncomingVelocity, KnockThreshold, BreakThreshold, DamageAfter);
+			}
 		}
 		else if (AABTSM6DestructibleProxy* Proxy = Cast<AABTSM6DestructibleProxy>(Hit.GetActor()))
 		{
-			if (NormalSpeedCMPerSec >= BreakThreshold)
+			const bool bBroken = Proxy->ApplyImpactDamage(ComputeDamageGain(MaterialProfile, NormalSpeedCMPerSec, BreakThreshold));
+			if (bBroken || NormalSpeedCMPerSec >= BreakThreshold * 1.35f)
 			{
 				Proxy->Shatter();
 				DynamicProxies.RemoveAllSwap([Proxy](const TWeakObjectPtr<AABTSM6DestructibleProxy>& Entry){ return !Entry.IsValid() || Entry.Get() == Proxy; });
@@ -461,8 +678,8 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 			}
 			else if (NormalSpeedCMPerSec >= KnockThreshold)
 			{
-				Proxy->Reactivate(IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * 0.72f);
-				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][ProxyReactivated] Material=%d Speed=%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec);
+				Proxy->Reactivate(IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * MaterialProfile.PushVelocityTransfer);
+				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][ProxyDamaged] Material=%d Speed=%.1f Damage=%.1f/%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec, Proxy->GetCurrentDamage(), Proxy->GetBreakDamage());
 			}
 		}
 	}
@@ -478,18 +695,23 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 
 void AABTSM6SlingshotSystem::HandleProxyImpact(AABTSM6DestructibleProxy& Proxy, const FHitResult& Hit, const float NormalSpeedCMPerSec)
 {
-	if (LaunchState != EABTSM6LaunchState::Flying) return;
+	if (LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) return;
+	if (NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec) MarkPhysicsActivity();
 	if (UHierarchicalInstancedStaticMeshComponent* HISM = Cast<UHierarchicalInstancedStaticMeshComponent>(Hit.GetComponent()))
 	{
 		const EABTSM6ImpactMaterial TargetMaterial = ResolveMaterial(HISM);
-		PromoteOrBreakHISM(*HISM, Hit.Item, TargetMaterial, NormalSpeedCMPerSec, Proxy.GetMeshComponent()->GetPhysicsLinearVelocity(), ProxyChainBreakSpeedCMPerSec * 0.65f, ProxyChainBreakSpeedCMPerSec);
+		const FABTSM6MaterialImpactProfile& TargetProfile = GetMaterialProfile(TargetMaterial);
+		const float Damage = ComputeDamageGain(TargetProfile, NormalSpeedCMPerSec, ProxyChainBreakSpeedCMPerSec);
+		PromoteOrBreakHISM(*HISM, Hit.Item, TargetMaterial, TargetProfile, NormalSpeedCMPerSec, Proxy.GetMeshComponent()->GetPhysicsLinearVelocity(), ProxyChainBreakSpeedCMPerSec * 0.65f, ProxyChainBreakSpeedCMPerSec, Damage);
 	}
 	if (NormalSpeedCMPerSec >= ProxyChainBreakSpeedCMPerSec) Proxy.Shatter();
 }
 
 bool AABTSM6SlingshotSystem::TryManualBlackDetonation(AActor* ClickedActor)
 {
-	if (LaunchState != EABTSM6LaunchState::Flying || !LaunchedBird.IsValid() || ClickedActor != LaunchedBird.Get() || LaunchedBird->GetBirdId() != EABTSBirdId::Black || bBlackDetonated) return false;
+	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling)
+		|| !LaunchedBird.IsValid() || ClickedActor != LaunchedBird.Get()
+		|| LaunchedBird->GetBirdId() != EABTSBirdId::Black || bBlackDetonated) return false;
 	DetonateBlackBird(true);
 	return true;
 }
@@ -498,6 +720,7 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 {
 	if (!LaunchedBird.IsValid() || bBlackDetonated) return;
 	bBlackDetonated = true;
+	MarkPhysicsActivity();
 	int32 BrokenInstances = 0;
 	int32 ImpulsedInstances = 0;
 	TArray<UHierarchicalInstancedStaticMeshComponent*> ExplosionHISMs;
@@ -528,7 +751,8 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 			{
 				const EABTSM6ImpactMaterial Type = ResolveMaterial(HISM);
 				const float Speed = BlackExplosionImpulseSpeedCMPerSec * (1.0f - Delta.Size() / FMath::Max(BlackExplosionImpulseRadiusCM, 1.0f));
-				if (PromoteOrBreakHISM(*HISM, Index, Type, Speed, Delta, 0.0f, BIG_NUMBER)) ++ImpulsedInstances;
+				const FABTSM6MaterialImpactProfile& Profile = GetMaterialProfile(Type);
+				if (PromoteOrBreakHISM(*HISM, Index, Type, Profile, Speed, Delta, 0.0f, BIG_NUMBER, 0.0f)) ++ImpulsedInstances;
 			}
 		}
 	}
@@ -550,76 +774,4 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 	}
 	if (BuildingMaterialSystem.IsValid()) BuildingMaterialSystem->ApplyRadialBlast(LaunchedBird->GetActorLocation(), BlackExplosionRadiusCM, BlackExplosionImpulseRadiusCM, BlackExplosionImpulseSpeedCMPerSec);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][BlackExplosion] Manual=%d DestroyRadius=%.1f ImpulseRadius=%.1f HISM=%d Impulsed=%d Proxies=%d"), bManual ? 1 : 0, BlackExplosionRadiusCM, BlackExplosionImpulseRadiusCM, BrokenInstances, ImpulsedInstances, BrokenProxies);
-}
-
-void AABTSM6SlingshotSystem::FreezeDynamicProxies()
-{
-	for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies) if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get()) Proxy->Freeze();
-	if (BuildingMaterialSystem.IsValid()) BuildingMaterialSystem->FreezeDynamicModules();
-}
-
-void AABTSM6SlingshotSystem::BeginReturn()
-{
-	if (!LaunchedBird.IsValid()) return;
-	FreezeDynamicProxies();
-	LaunchedBird->BeginSlingshotReturn();
-	ReturnStartLocation = LaunchedBird->GetActorLocation();
-	const FVector ApproxTarget = SlingCenter - SlingForward * 230.0f;
-	if (bPlanarTestMode)
-	{
-		ReturnTargetLocation = ApproxTarget;
-		const float DesiredHeight = LaunchedBird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f;
-		ReturnTargetLocation += PlanarUp * (DesiredHeight - FVector::DotProduct(ReturnTargetLocation - PlanarOrigin, PlanarUp));
-	}
-	else
-	{
-		const FVector Direction = (ApproxTarget - Planet->GetPlanetCenterWorld()).GetSafeNormal();
-		ReturnTargetLocation = Planet->GetPlanetCenterWorld() + Direction * (Planet->GetSurfaceRadiusAtDirection(Direction) + LaunchedBird->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.0f);
-	}
-	ReturnElapsedSeconds = 0.0f;
-	LaunchState = EABTSM6LaunchState::Returning;
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Begin FlightSeconds=%.2f Proxies=%d"), FlightElapsedSeconds, DynamicProxies.Num());
-}
-
-void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
-{
-	if (!LaunchedBird.IsValid()) { FinishReturn(); return; }
-	ReturnElapsedSeconds += DeltaSeconds;
-	const float Alpha = FMath::Clamp(ReturnElapsedSeconds / FMath::Max(ReturnDurationSeconds, 0.1f), 0.0f, 1.0f);
-	if (bPlanarTestMode)
-	{
-		const FVector Location = FMath::Lerp(ReturnStartLocation, ReturnTargetLocation, FMath::SmoothStep(0.0f, 1.0f, Alpha))
-			+ PlanarUp * (FMath::Sin(Alpha * PI) * 280.0f);
-		LaunchedBird->SetActorLocationAndRotation(Location, FRotationMatrix::MakeFromXZ(SlingForward, PlanarUp).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
-		if (Alpha >= 1.0f) FinishReturn();
-		return;
-	}
-	const FVector Center = Planet->GetPlanetCenterWorld();
-	const FVector StartOffset = ReturnStartLocation - Center;
-	const FVector EndOffset = ReturnTargetLocation - Center;
-	const FQuat Arc = FQuat::FindBetweenNormals(StartOffset.GetSafeNormal(), EndOffset.GetSafeNormal());
-	const FVector Direction = FQuat::Slerp(FQuat::Identity, Arc, FMath::SmoothStep(0.0f, 1.0f, Alpha)).RotateVector(StartOffset.GetSafeNormal()).GetSafeNormal();
-	const float Radius = FMath::Lerp(StartOffset.Size(), EndOffset.Size(), Alpha) + FMath::Sin(Alpha * PI) * 280.0f;
-	LaunchedBird->SetActorLocationAndRotation(Center + Direction * Radius, FRotationMatrix::MakeFromXZ(SlingForward, Direction).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
-	if (Alpha >= 1.0f) FinishReturn();
-}
-
-void AABTSM6SlingshotSystem::FinishReturn()
-{
-	if (LaunchedBird.IsValid())
-	{
-		if (UABTSRadialForceMovementComponent* Movement = LaunchedBird->GetForceMovementComponent()) Movement->OnBlockingImpact().RemoveAll(this);
-		if (UABTSChaosBirdMovementComponent* Movement = LaunchedBird->GetChaosMovementComponent()) Movement->OnBlockingImpact().RemoveAll(this);
-		LaunchedBird->FinishSlingshotReturn();
-	}
-	if (Party.IsValid()) Party->SetSlingshotMode(false);
-	if (AABTSM6PlayerController* PC = Cast<AABTSM6PlayerController>(GetWorld()->GetFirstPlayerController()))
-	{
-		PC->SetLaunchModeInputBlocked(false);
-		PC->RestorePartyCameraView();
-	}
-	LaunchState = EABTSM6LaunchState::Inactive;
-	ActiveCord.Reset();
-	LaunchedBird.Reset();
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Complete StaticProxies=%d"), DynamicProxies.Num());
 }

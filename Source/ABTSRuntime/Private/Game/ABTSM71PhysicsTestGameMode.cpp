@@ -72,6 +72,13 @@ void AABTSM71PhysicsTestGameMode::BeginPlay()
 	}
 	AABTSM7BuildingMaterialSystem* MaterialSystem = World->SpawnActor<AABTSM7BuildingMaterialSystem>(
 		BuildingMaterialSystemClass, FTransform::Identity, Params);
+	if (MaterialSystem)
+	{
+		for (TActorIterator<AABTSM71PlaceableDeviceActor> It(World); It; ++It)
+		{
+			It->InitializeRuntimeDevice(MaterialSystem);
+		}
+	}
 
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M7.1] Planar test stage ready Party=%d Slingshot=%d Materials=%d Spawn=(%.1f,%.1f,%.1f) Up=(%.3f,%.3f,%.3f)"),

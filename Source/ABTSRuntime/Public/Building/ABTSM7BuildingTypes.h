@@ -38,6 +38,27 @@ struct FABTSM7MaterialProfile
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0"))
 	float BreakSpeedCMPerSec = 1050.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics", meta = (ClampMin = "0.0"))
+	float DynamicFriction = 0.62f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics", meta = (ClampMin = "0.0"))
+	float StaticFriction = 0.78f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Restitution = 0.08f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics", meta = (ClampMin = "0.01"))
+	float DensityGPerCubicCM = 0.65f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0"))
+	float DamageAtBreakSpeed = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "1.0"))
+	float BreakDamage = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float PushVelocityTransfer = 0.75f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FLinearColor FallbackColor = FLinearColor(0.42f, 0.18f, 0.05f, 1.0f);
 };
@@ -84,4 +105,3 @@ struct FABTSM7DeviceSpec
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1.0"))
 	float DiameterCM = 90.0f;
 };
-

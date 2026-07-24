@@ -8,6 +8,7 @@
 #include "ABTSM6DestructibleProxy.generated.h"
 
 class AABTSM6SlingshotSystem;
+class UPhysicalMaterial;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -20,14 +21,19 @@ class ABTSRUNTIME_API AABTSM6DestructibleProxy : public AActor
 public:
 	AABTSM6DestructibleProxy();
 	virtual void Tick(float DeltaSeconds) override;
-	void ActivateProxy(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FVector& InitialImpulse, const FVector& InPlanetCenter, float InGravityAcceleration);
-	void ActivateProxyPlanar(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FVector& InitialImpulse, const FVector& InGravityUp, float InGravityAcceleration);
+	void ActivateProxy(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FABTSM6MaterialImpactProfile& PhysicsProfile, const FVector& InitialImpulse, const FVector& InPlanetCenter, float InGravityAcceleration, float InitialDamage = 0.0f);
+	void ActivateProxyPlanar(UStaticMesh* Mesh, const FTransform& Transform, EABTSM6ImpactMaterial InMaterial, const FABTSM6MaterialImpactProfile& PhysicsProfile, const FVector& InitialImpulse, const FVector& InGravityUp, float InGravityAcceleration, float InitialDamage = 0.0f);
+	/** Ignores activation overlap/depenetration contacts for a short period. */
+	void SetContactDamageGraceSeconds(float Seconds) { ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds); }
 	/** Turns a previously frozen tilted instance back into a moving Chaos body. */
 	void Reactivate(const FVector& Impulse);
 	void Freeze();
 	void Shatter();
+	bool ApplyImpactDamage(float DamageGain);
 	EABTSM6ImpactMaterial GetImpactMaterial() const { return ImpactMaterial; }
 	UStaticMeshComponent* GetMeshComponent() const { return Visual; }
+	float GetCurrentDamage() const { return CurrentDamage; }
+	float GetBreakDamage() const { return BreakDamage; }
 
 private:
 	UFUNCTION()
@@ -41,5 +47,12 @@ private:
 	bool bActiveDynamic = false;
 	bool bPlanarGravity = false;
 	FVector PlanarGravityUp = FVector::UpVector;
+	UPROPERTY(Transient)
+	TObjectPtr<UPhysicalMaterial> ImpactPhysicalMaterial;
+	float CurrentDamage = 0.0f;
+	float BreakDamage = 100.0f;
+	float LastDamageImpactSeconds = -BIG_NUMBER;
+	float ContactDamageGraceSeconds = 0.20f;
+	float ContactDamageEnabledTimeSeconds = 0.0f;
 };
 

@@ -7,10 +7,13 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerStart.h"
 #include "Slingshot/ABTSSlingshotTypes.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "ABTSM71TestStageActors.generated.h"
 
 class AABTSM51SlingshotCord;
 class AABTSM51SlingshotStake;
+class AABTSM7BuildingModule;
+class AABTSM7BuildingMaterialSystem;
 class UArrowComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
@@ -144,6 +147,61 @@ class ABTSRUNTIME_API AABTSM71GlassBrickActor : public AABTSM71PlaceableBrickAct
 public: AABTSM71GlassBrickActor();
 };
 
+/** Editor-placeable M7 dynamic device. PIE creates the shared M7 Chaos module. */
+UCLASS(Abstract, BlueprintType, Blueprintable, meta = (DisplayName = "M7.1 Placeable Device"))
+class ABTSRUNTIME_API AABTSM71PlaceableDeviceActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	AABTSM71PlaceableDeviceActor();
+	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
+
+	/** Called by the M7.1 GameMode after its shared material system is spawned. */
+	void InitializeRuntimeDevice(AABTSM7BuildingMaterialSystem* MaterialSystem);
+
+protected:
+	void SetDeviceKind(EABTSM7ModuleKind InKind) { DeviceKind = InKind; }
+
+private:
+	void TryFindRuntimeSystem();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1|Device", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMeshComponent> DevicePreview;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1|Device", meta = (AllowPrivateAccess = "true"))
+	EABTSM7ModuleKind DeviceKind = EABTSM7ModuleKind::ExplosiveBarrel;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1|Device", meta = (ClampMin = "1.0", AllowPrivateAccess = "true"))
+	float LengthCM = 180.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1|Device", meta = (ClampMin = "1.0", AllowPrivateAccess = "true"))
+	float DiameterCM = 90.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1|Assets", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMesh> DeviceMesh;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1|Assets", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> DeviceMaterial;
+
+	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeSystem;
+	TWeakObjectPtr<AABTSM7BuildingModule> RuntimeDevice;
+	int32 SystemSearchAttempts = 0;
+	FTimerHandle SystemSearchTimer;
+};
+
+UCLASS(BlueprintType, meta = (DisplayName = "M7.1 Explosive Barrel"))
+class ABTSRUNTIME_API AABTSM71ExplosiveBarrelActor : public AABTSM71PlaceableDeviceActor
+{
+	GENERATED_BODY()
+public:
+	AABTSM71ExplosiveBarrelActor();
+};
+
+UCLASS(BlueprintType, meta = (DisplayName = "M7.1 Spring Piston"))
+class ABTSRUNTIME_API AABTSM71SpringPistonActor : public AABTSM71PlaceableDeviceActor
+{
+	GENERATED_BODY()
+public:
+	AABTSM71SpringPistonActor();
+};
+
 /** Complete editor-placeable slingshot. Local Y separates stakes; local +X is launch direction. */
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "M7.1 Complete Slingshot"))
 class ABTSRUNTIME_API AABTSM71PlaceableSlingshotActor : public AActor
@@ -171,6 +229,10 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.1|Slingshot")
 	TObjectPtr<UStaticMeshComponent> CordPreview;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.1|Slingshot")
+	TObjectPtr<UStaticMeshComponent> CordPreviewB;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.1|Slingshot")
+	TObjectPtr<UStaticMeshComponent> PouchPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.1|Slingshot")
 	TObjectPtr<UArrowComponent> LaunchDirection;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot")
@@ -183,14 +245,24 @@ private:
 	float StakeDiameterCM = 28.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot", meta = (ClampMin = "1.0"))
 	float CordThicknessCM = 3.5f;
-	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot")
-	TObjectPtr<UMaterialInterface> StakeMaterial;
-	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot")
-	TObjectPtr<UMaterialInterface> CordMaterial;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot|Stake")
+	FABTSSlingshotVisualSlot StakeVisual;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot|Cord")
+	FABTSSlingshotVisualSlot CordVisual;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot|Pouch")
+	FABTSSlingshotVisualSlot PouchVisual;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot|Connections")
+	FABTSSlingshotConnectionLayout ConnectionLayout;
 
 	TWeakObjectPtr<AABTSM51SlingshotStake> RuntimeStakeA;
 	TWeakObjectPtr<AABTSM51SlingshotStake> RuntimeStakeB;
 	TWeakObjectPtr<AABTSM51SlingshotCord> RuntimeCord;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> DefaultStakeMesh;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> DefaultCordMesh;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> DefaultPouchMesh;
 };
 
 UCLASS(BlueprintType, meta = (DisplayName = "M7.1 Twig Slingshot"))

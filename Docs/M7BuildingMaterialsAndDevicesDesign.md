@@ -112,3 +112,63 @@ M6 黑鸟同步改为双范围：`BlackExplosionRadiusCM` 是近处破坏半径�
 - 不生成碎片、材料掉落、爆炸 Niagara、音效或镜头震动；
 - 不做模块对象池和大规模同时激活预算；
 - 不保存被破坏或移动后的建筑状态。
+
+## 9. M7.2：材质碰撞、累计损伤与反馈
+
+`MaterialProfiles` 现除原有撞开/破坏速度外，增加以下可编辑参数：
+
+| 参数 | 作用 | 建议 |
+| --- | --- | --- |
+| `DynamicFriction` / `StaticFriction` | Chaos 滑动与静止摩擦 | 木较高、石最高、铁较低、玻璃较低 |
+| `Restitution` | 模块刚体的法向反弹 | 木低，石/铁略高，玻璃中低 |
+| `DensityGPerCubicCM` | Chaos 根据碰撞体体积计算质量 | 木约 0.62、石约 2.55、铁约 7.85 |
+| `DamageAtBreakSpeed` | 一次正面命中达到 `BreakSpeed` 时写入的损伤 | 默认约 100 |
+| `BreakDamage` | 累积损伤上限 | 默认 100；提高可形成更多次中速撞击 |
+| `PushVelocityTransfer` | 由鸟/爆炸速度转化为目标速度的比例 | 木高、石中、铁低 |
+
+响应遵循：接触（仅碰撞）→ 推动（HISM 提升为 Chaos 模块）→ 损伤累计 → 破坏。静态 HISM 在未达到推动门槛时也会按稳定世界变换键保存损伤；提升后损伤复制给 `AABTSM7BuildingModule`，冻结后再次命中仍可重新激活或继续损伤。树/石 HISM 使用 M6 的同类 Profile，和建筑砖一样拥有摩擦、弹性、密度和累计损伤。
+
+当前无 Niagara/音效资产时，物理反馈由偏心/速度传递、可读的姿态变化和运行日志承担。后续材质可读取每实例或模块损伤值制作裂纹、闪白与局部破损，且不改变本期物理判定。
+
+### 9.1 验收补充
+
+1. 同速撞木、石、铁动态模块：木应最容易位移，石更稳，铁最难推动；它们停止后的滑动距离和反弹不同。
+2. 对同一木砖连续中速命中：首次推动，后续命中累计损伤，达到 `BreakDamage` 后才移除。
+3. 擦边命中不应与正面命中一样快速破坏；重点观察法向速度。
+4. 被撞歪并冻结的树、石或模块仍应阻挡行走，并在下一次发射中重新成为可损伤、可推动目标。
+5. 输出日志中应出现 `[ABTS][M6][HISMDamageBreak]`、`[ABTS][M6][ProxyDamaged]` 或 `[ABTS][M7][DamageBreak]`，用于记录损伤破坏。
+
+### 9.2 排错
+
+| 症状 | 根因 | 处理 |
+| --- | --- | --- |
+| 中速首击仍直接消失 | `DamageAtBreakSpeed` 或 `BreakDamage` 过低 | 提高 `BreakDamage`，或降低 `DamageAtBreakSpeed` |
+| 物体被撞开但滑得太远 | `DynamicFriction` 太低 | 提高动态摩擦并检查网格碰撞形状 |
+| 物体几乎无法推动 | 密度过高或 `PushVelocityTransfer` 太低 | 先调整传递比例，再调整密度 |
+| 冻结物体无法再次响应 | 模块未保留 `QueryAndPhysics` 或没有走重新激活分支 | 检查 `Freeze` 和命中日志 |
+
+## 10. 发射阶段重力与支撑失效
+
+建筑块不能长期保持静态 HISM，否则下方砖块被撞飞或破坏后，上方实例仍不会参与 Chaos，表现为悬浮。现在发射阶段采用以下生命周期：
+
+```text
+Inactive
+  -> 点击弹弓进入 Ready/Pulling（建筑仍保持静态）
+  -> 松开弹弓，鸟进入 Flying
+  -> M7 四类砖 HISM 全部提升为 AABTSM7BuildingModule
+  -> 已冻结的砖、绳、链、炸药桶、活塞重新开启 Chaos
+  -> 平面测试场使用 -PlanarUp 重力；球面地图使用指向球心的径向重力
+  -> 下层支撑移动/破坏，上层物块自然坠落并产生链式碰撞
+  -> BeginReturn 时停止模拟，保留最终姿态和 QueryAndPhysics 阻挡
+```
+
+动态化后的 `LaunchContactDamageGraceSeconds`（默认 `0.20 s`）属于接触稳定窗口：Chaos 在解决初始贴合或轻微穿插时产生的接触不累计损伤。窗口结束后只把两个物体沿碰撞法线相互靠近的速度作为有效撞击；解穿和回弹产生的分离速度不再通过绝对值伪装成撞击。该保护不影响鸟的直接命中，且正常的后续高速模块连锁碰撞仍参与累计损伤。
+
+树、石和 M7.1 手摆 HISM 不会在全地图范围全部 Actor 化，而只在弹弓周围 `LaunchGravityActivationRadiusCM` 内提升为临时 Chaos 代理。这样发射区域内所有可交互物体都会受重力，同时避免一次发射唤醒整颗星球的森林。
+
+`AABTSM6SlingshotSystem > ABTS | M6 | Impact` 新增：
+
+- `LaunchGravityActivationRadiusCM`：弹弓周围环境 HISM 的重力激活半径，默认 `6000 cm`。
+- `LaunchObjectGravityAccelerationCMPerSec2`：发射阶段物体重力加速度，默认 `980 cm/s²`。
+
+验收日志：进入发射模式时应出现 `[ABTS][M7][LaunchGravity]` 和 `[ABTS][M6][LaunchGravity]`，其中分别记录建筑提升数量、环境 HISM 提升数量、平面/球面模式与重力值。
