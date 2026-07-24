@@ -50,6 +50,8 @@ public:
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
 	void FreezeDynamicModules();
 	void ConfigureTestSet(bool bEnable, const FTransform& SpawnTransform);
+	/** Copies the authoritative runtime tuning for deterministic M7.3 analysis without exposing Actor state. */
+	void CopyMaterialProfiles(TArray<FABTSM7MaterialProfile>& OutProfiles) const;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Brick")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WoodBrickHISM;

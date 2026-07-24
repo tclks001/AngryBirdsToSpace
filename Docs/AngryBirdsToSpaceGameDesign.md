@@ -239,6 +239,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M7 | 建筑生成与破坏 | 木/石/铁/玻璃砖、绳/链、炸药桶和弹簧活塞已具备参数化材料层；材质 Profile 驱动 Chaos 摩擦、弹性、密度、推动传递与累计损伤。进入发射阶段后建筑块统一参与平面/球面重力，下层支撑失效会使上层自然坠落，返回阶段冻结并保留最终姿态。详见 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)；后续模块化建筑采用“结构语法 + 支撑图 + 稳定性预模拟 + 弱点攻击验证 + 搜索筛选”，调研与 M7.3 算法见 [M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。 |
 | M7.1 | 平面物理测试台 | 独立平面 GameMode、可摆放 Floor/PlayerStart、树石 HISM、四材质砖、四档完整弹弓和模块化建筑锚点；支持编辑器实时变换、平面 Chaos 移动与恒向重力弹射。详见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。 |
 | M7.3-A | 稳定积木建筑 | 三种确定性轮廓、平面/球面统一 Ground Adapter、Footprint 校验、平坦施工台、地基脚、支撑 DAG、静态校验和短时 Chaos 空载验证；可在 M7.1 放置并击打，也可在首个球面建筑 Anchor 生成。详见 [M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。 |
+| M7.3-B | 弱点与难度 | 对支撑 DAG 逐节点执行 Ground 可达性反事实探针，按真实材质密度计算失撑质量，以攻击方向暴露度和 M7 Profile 破坏成本选择弱点；支持非弱点有限强化、红色编辑器高亮、难度窗口与确定性自动化测试。详见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `Sub=2/3` 潮汐锁定卫星和引力走廊；强化发射预览与实际轨迹发生可见偏转。 |
 | M10 | 侦察 | 青翎近射侦察更新小地图，标记道路外目标与引力走廊。 |

@@ -1,7 +1,7 @@
 # M7.3-A：稳定积木建筑实现设计
 
-> 状态：C++ 已实现，待编辑器资产与 PIE 视觉/物理验收。  
-> 上位算法：[M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。  
+> 状态：已完成编辑器、PIE 与物理验收。
+> 上位算法：[M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。
 > 平面测试场：[M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
 
 ## 1. 阶段目标与边界
@@ -244,9 +244,9 @@ ContactAreaCM2
 3. 设置覆盖验证时长的接触损伤 Grace，防止初始接触被当成破坏；
 4. 平面模式施加恒定 `-GravityUp`，球面模式施加朝向 Planet Center 的径向重力；
 5. 模拟 `IdleValidationSeconds`；
-6. 记录最大位移和最大旋转；
+6. 将位移分解为施工平面内漂移和沿重力轴的接触沉降，同时记录总位移和最大旋转；
 7. 冻结模块并重新显示；
-8. 与 `MaxIdleDisplacementCM`、`MaxIdleRotationDegrees` 比较；
+8. 平面漂移与 `MaxIdleDisplacementCM` 比较，法向沉降与 `MaxIdleSettlementCM` 比较，旋转与 `MaxIdleRotationDegrees` 比较；
 9. 不稳定时输出 Error 和 `RejectReason`。
 
 日志：
@@ -291,6 +291,7 @@ BeamHeightCM = 58
 bRunIdleChaosValidation = true
 IdleValidationSeconds = 1.25
 MaxIdleDisplacementCM = 4
+MaxIdleSettlementCM = 6
 MaxIdleRotationDegrees = 2
 ```
 
@@ -384,6 +385,7 @@ Accepted=1
 - `bRunIdleChaosValidation`
 - `IdleValidationSeconds`
 - `MaxIdleDisplacementCM`
+- `MaxIdleSettlementCM`
 - `MaxIdleRotationDegrees`
 - `ValidationGravityCMPerSec2`
 
@@ -426,7 +428,7 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 
 - `[Generated]` 计数与所选轮廓相符；
 - `[Reject]` 带明确原因；
-- `[IdleValidation]` 输出秒数、最大位移、最大旋转和 Accepted；
+- `[IdleValidation]` 输出秒数、总位移、平面漂移、法向沉降、最大旋转和 Accepted；
 - M7 入口输出 `M73A=1`。
 
 ## 13. 排错
@@ -458,6 +460,8 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 - 后续搜索式生成应先用当前 Static Validator 淘汰绝大多数候选。
 
 ## 15. 下一阶段接口
+
+> M7.3-B 已基于以下接口实现，详见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。
 
 M7.3-B 可直接消费：
 

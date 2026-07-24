@@ -22,6 +22,17 @@ enum class EABTSM73Silhouette : uint8
 	TwinTowerBridge
 };
 
+/** Structural role assigned by the M7.3-B counterfactual weak-point pass. */
+UENUM(BlueprintType)
+enum class EABTSM73WeakPointRole : uint8
+{
+	None,
+	GroundSupport,
+	VerticalSupport,
+	LoadBearingDeck,
+	BridgeConnector
+};
+
 /** Editor-facing M7.3-A generation and validation preset. */
 USTRUCT(BlueprintType)
 struct FABTSM73GenerationSettings
@@ -94,11 +105,88 @@ struct FABTSM73GenerationSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.1", UIMax = "5.0"))
 	float IdleValidationSeconds = 1.25f;
 
+	/** Maximum drift along the construction plane during the hidden idle simulation. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.0", UIMax = "50.0"))
 	float MaxIdleDisplacementCM = 4.0f;
 
+	/** Small normal-axis contact settling is separate from a real storey losing support. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.0", UIMax = "50.0"))
+	float MaxIdleSettlementCM = 6.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.0", UIMax = "30.0"))
 	float MaxIdleRotationDegrees = 2.0f;
+};
+
+/** Editor-facing M7.3-B weak-point and graph-probe difficulty window. */
+USTRUCT(BlueprintType)
+struct FABTSM73DifficultySettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points")
+	bool bEnableWeakPointPlanning = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points", meta = (ClampMin = "1", ClampMax = "3"))
+	int32 WeakPointCount = 1;
+
+	/** Selects a material tier from the real M7 profile ordering instead of relying on enum order. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points")
+	bool bAutoSelectWeakPointMaterial = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points", meta = (EditCondition = "!bAutoSelectWeakPointMaterial"))
+	EABTSM7BuildingMaterial WeakPointMaterial = EABTSM7BuildingMaterial::Glass;
+
+	/** Relative effort tier: 1 is the easiest configured material and 4 is the hardest. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "1", ClampMax = "4"))
+	int32 TargetBirdHits = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinWeakCollapseRatio = 0.05f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TargetWeakCollapseRatio = 0.20f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxSingleWeakCollapseRatio = 0.70f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinWeakPointExposure = 0.35f;
+
+	/** Maximum predicted unsupported-mass ratio per material-effort tier for a non-weak hit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxNonWeakEffect = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points", meta = (ClampMin = "0.0", UIMax = "1000.0"))
+	float MinWeakPointSeparationCM = 180.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxWeakPointAffectedOverlap = 0.60f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reinforcement")
+	bool bReinforceNonWeakCriticalNodes = true;
+
+	/** Stone is the default to add resistance without the extreme mass jump of an iron floor slab. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reinforcement")
+	EABTSM7BuildingMaterial ReinforcementMaterial = EABTSM7BuildingMaterial::Stone;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reinforcement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ReinforcementImpactThreshold = 0.20f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reinforcement", meta = (ClampMin = "0", ClampMax = "16"))
+	int32 MaxReinforcedNodeCount = 4;
+
+	/** Weak-point structural loss per effort tier must exceed the best ordinary hit by this factor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "1.0", UIMax = "5.0"))
+	float MinWeakPointAdvantage = 1.50f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+	bool bRejectOutsideDifficultyWindow = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+	bool bShowWeakPointDebug = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (ClampMin = "1.0", ClampMax = "1.25"))
+	float WeakPointDebugScale = 1.04f;
 };
 
 /** Last deterministic generation/validation result exposed in Details and logs. */
@@ -136,6 +224,30 @@ struct FABTSM73GenerationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	float MaxFoundationDepthCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weak Points")
+	int32 WeakPointCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weak Points")
+	int32 ReinforcedNodeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weak Points")
+	int32 PrimaryWeakPointNodeId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weak Points")
+	float BestWeakPointScore = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Difficulty")
+	float PredictedWeakCollapseRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Difficulty")
+	float PredictedNonWeakEffect = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Difficulty")
+	int32 EstimatedWeakPointHits = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Difficulty")
+	float DifficultyScore = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	FString RejectReason;

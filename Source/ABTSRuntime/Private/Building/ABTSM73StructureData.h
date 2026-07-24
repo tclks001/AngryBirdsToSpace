@@ -9,8 +9,29 @@ struct FABTSM73BrickNode
 {
 	int32 NodeId = INDEX_NONE;
 	EABTSM7BuildingMaterial Material = EABTSM7BuildingMaterial::Wood;
+	EABTSM7BuildingMaterial OriginalMaterial = EABTSM7BuildingMaterial::Wood;
 	FVector LocalCenter = FVector::ZeroVector;
 	FVector DimensionsCM = FVector(100.0f);
+	EABTSM73WeakPointRole WeakPointRole = EABTSM73WeakPointRole::None;
+	float WeakPointScore = 0.0f;
+	float UnsupportedMassRatio = 0.0f;
+	float AttackExposure = 0.0f;
+	int32 EstimatedHits = 0;
+	bool bWeakPoint = false;
+	bool bReinforcedCriticalNode = false;
+};
+
+struct FABTSM73WeakPointRecord
+{
+	int32 NodeId = INDEX_NONE;
+	EABTSM73WeakPointRole Role = EABTSM73WeakPointRole::None;
+	float UnsupportedMassRatio = 0.0f;
+	float Exposure = 0.0f;
+	float Readability = 0.0f;
+	float LocalBreakEffort = 0.0f;
+	float Score = 0.0f;
+	int32 EstimatedHits = 0;
+	TArray<int32> UnsupportedNodeIds;
 };
 
 struct FABTSM73SupportEdge
@@ -43,6 +64,8 @@ struct FABTSM73StructureData
 	TArray<FABTSM73BrickNode> Bricks;
 	TArray<FABTSM73SupportEdge> SupportEdges;
 	TArray<int32> GroundNodeIds;
+	TArray<FABTSM73WeakPointRecord> WeakPoints;
+	TArray<int32> ReinforcedNodeIds;
 	TArray<FVector2D> GroundSupportPoints;
 	TArray<FABTSM73GroundSample> GroundSamples;
 	TArray<FABTSM73FoundationFoot> FoundationFeet;
@@ -54,6 +77,11 @@ struct FABTSM73StructureData
 	float MaxSlopeDegrees = 0.0f;
 	float TerrainDeltaCM = 0.0f;
 	float MaxFoundationDepthCM = 0.0f;
+	float BestWeakPointScore = 0.0f;
+	float PredictedWeakCollapseRatio = 0.0f;
+	float PredictedNonWeakEffect = 0.0f;
+	float DifficultyScore = 0.0f;
+	int32 EstimatedWeakPointHits = 0;
 };
 
 struct FABTSM73GroundContext
@@ -67,4 +95,3 @@ struct FABTSM73GroundContext
 	TWeakObjectPtr<class AABTSM71PhysicsTestStage> TestStage;
 	int32 AnchorCellId = INDEX_NONE;
 };
-

@@ -16,9 +16,10 @@ class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 
-/** Editor-placeable M7.3-A deterministic stable building for planar and spherical worlds. */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "M7.3-A Stable Building Generator"))
+/** Editor-placeable M7.3 stable building with deterministic weak-point planning. */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "M7.3 Stable Building Generator"))
 class ABTSRUNTIME_API AABTSM73StableBuildingActor : public AActor
 {
 	GENERATED_BODY()
@@ -43,7 +44,10 @@ public:
 
 private:
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,
-		struct FABTSM73StructureData& OutData, FString& OutError);
+		struct FABTSM73StructureData& OutData, FString& OutError,
+		const AABTSM7BuildingMaterialSystem* MaterialProfileSource = nullptr);
+	void FillGenerationSummary(const FABTSM73GroundContext& Context, const FABTSM73StructureData& Data,
+		bool bAccepted, const FString& Error);
 	void UpdatePreviewComponents(const FABTSM73GroundContext& Context, const FABTSM73StructureData& Data);
 	void UpdateFoundationComponents(const FABTSM73GroundContext& Context, const FABTSM73StructureData& Data);
 	void ClearBrickPreviews();
@@ -64,6 +68,8 @@ private:
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> IronPreview;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Preview")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-B|Preview")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WeakPointPreview;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Foundation")
 	TObjectPtr<UStaticMeshComponent> FoundationCap;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Foundation")
@@ -78,6 +84,8 @@ private:
 	int32 AnchorCellId = INDEX_NONE;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Generation")
 	FABTSM73GenerationSettings GenerationSettings;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
+	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")
 	bool bRunIdleChaosValidation = true;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation", meta = (ClampMin = "0.0", UIMax = "3000.0"))
@@ -88,6 +96,10 @@ private:
 	TObjectPtr<UStaticMesh> BrickMesh;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Assets")
 	TObjectPtr<UMaterialInterface> FoundationMaterial;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Debug")
+	TObjectPtr<UMaterialInterface> WeakPointDebugMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> WeakPointDebugMID;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Result")
 	FABTSM73GenerationSummary GenerationSummary;
@@ -95,6 +107,7 @@ private:
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
+	TMap<int32, TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModulesByNodeId;
 	TArray<FTransform> IdleInitialTransforms;
 	FTimerHandle MaterialSystemSearchTimer;
 	int32 MaterialSystemSearchAttempts = 0;

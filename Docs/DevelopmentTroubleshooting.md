@@ -118,4 +118,15 @@
 | 现象 | 根因 | 修复 | 防回归验证 |
 | --- | --- | --- | --- |
 | `ABTSM73StableBuildingActor` 沿 Z 拖动时只有枢轴/主体暂时移动，基座保持原位；松手后整栋又被拉回测试台 | 平面 Ground Adapter 在每次 `OnConstruction` 中无条件把 Actor Location 沿 Stage Up 投影回 Floor，覆盖了编辑器 Z 变换；FoundationCap/Feet 又是 Static Mobility，无法跟随世界变换。 | 增加 `bSnapPlanarAnchorToTestStage`，默认关闭并以 Actor 完整 XYZ 作为局部施工平面；只有显式打开才执行贴地投影。FoundationCap/Feet 改为 Movable Mobility，但保持 `SimulatePhysics=false` 和阻挡碰撞。 | 在 M7.1 中分别沿 X/Y/Z 拖动并松手，主体、Cap、Feet 和枢轴始终整体移动且不回弹；打开 Snap 后才自动落到测试台；退出 PIE 不再出现 `FoundationCap 的移动性必须为可移动`。 |
+
+## 8. M7.3-B 弱点与难度
+
+| 症状 | 根因 | 修复 | 验收 |
+| --- | --- | --- | --- |
+| `TwinTowerBridge` 报 `InsufficientWeakPoints:0:1`，但肉眼看上层有很多木砖 | 使用按块数直觉设置了过高失撑比例；铁质桥面按真实密度计算后占整栋质量很大，单侧木塔失撑质量比例可能低于 10% | 弱点指标坚持 `体积 × M7 Profile 密度`；默认 `MinWeakCollapseRatio` 校准为 `0.05`，不要退回按块计数 | `ABTS.M73B.WeakPointPlanner` 的三种轮廓均通过，TwinTowerBridge 产生有效弱点和非空失撑子图 |
+| Editor 与 PIE 的 WeakPoint NodeId 不一致 | Editor 无 MaterialSystem 时使用共享默认 Profile，而 Runtime MaterialSystem 的可编辑 Profile 已改变强度/密度排序 | 默认 Profile 由 `FABTSM7MaterialProfileLibrary` 单点提供；Runtime 通过 `CopyMaterialProfiles` 注入实际数据。若手工改 Profile，按 Runtime 日志作为最终结果并同步调参 | 对照 `[M7.3-B][WeakPoint]`；同一 Profile、Seed 和朝向下 NodeId 必须一致 |
+| 弱点规划失败后仍残留半块玻璃或强化材料 | 直接在输入 Data 上边筛选边改写，失败没有回滚 | Planner 在副本上事务式规划，只在全部难度门槛通过后 Move 回输出 | 设置不可能窗口后稳定拒绝，`WeakPoints` 为空且所有 `Material == OriginalMaterial` |
+| 弱点击碎但普通低层梁更容易导致整栋倒塌 | 只选择弱点，没有检查其他高影响节点的单位材料成本 | 计算 `PredictedNonWeakEffect`，有限强化高影响非弱点，并要求 `WeakPointAdvantage >= MinWeakPointAdvantage` | 默认弱点单位成本结构效果至少为普通攻击的 1.5 倍；实际 M7.1 对照击打仍需验收 |
+| 把所有关键梁强化为 Iron 后建筑质量和二次冲击异常 | 铁密度远高于木，大型铁楼板会显著改变总质量和 Chaos 响应 | 默认强化使用 Stone，并限制数量；Iron 只作为显式硬难度选择，换料后重算质量与难度 | 空载验证无弹飞；弱点最终比例仍在窗口内；普通攻击不再一碰全倒 |
+| 空载日志 `MaxMove` 约 4–6cm 且旋转很小，却被判不稳定 | 旧验证将沿重力轴的小幅接触落座和施工平面内失稳漂移合并成一个总位移 | 将位移分解为 `MaxDrift` 与 `MaxSettlement`；默认分别限制 4cm/6cm，总位移只保留诊断 | 五层平面单塔换料后 `MaxDrift` 仍在 4cm 内、`MaxSettlement` 在 6cm 内则通过；真实掉落一层会远超沉降上限 |
 | Gatehouse 或 TwinTowerBridge 将 `Levels` 调到 5 后预览全部消失，并显示 `BrickBudgetExceeded:51:50`（新版 Twin 为 `53:50`） | Builder 在生成完几何后执行 `MaxBrickCount` 硬预算。双塔主体每层 10 块；Gatehouse 总数为 `10*Levels+1`，TwinTowerBridge 总数为 `10*Levels+3`。默认预算 50，因此 5 层必然拒绝；`RebuildPreview` 在生成前先清空旧实例，使拒绝结果表现为“全部消失”。 | 这不是材质/HISM 丢失。临时测试可提高 Actor 的 `GenerationSettings.MaxBrickCount`；正式关卡优先保持 4 层以内，或在后续将非关键构件合并/HISM 化后再提高预算。 | 分别测试 Levels 4/5：默认预算下 4 层可生成，5 层稳定输出明确的 `BrickBudgetExceeded`；提高 MaxBrickCount 后 5 层恢复，且 active body 计数纳入性能验收。 |

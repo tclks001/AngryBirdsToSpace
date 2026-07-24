@@ -854,7 +854,8 @@ ModifyPlanarTestFloor = false
 | `GenerationAttemptBudget` | 语法候选最大尝试数 |
 | `StaticValidationBudgetMS` | 静态分析预算 |
 | `StabilitySimulationSeconds` | 空载 Chaos 验证时长 |
-| `MaxIdleDisplacementCM` | 空载最大允许位移 |
+| `MaxIdleDisplacementCM` | 空载时沿施工平面的最大允许漂移 |
+| `MaxIdleSettlementCM` | 沿重力轴允许的微小接触沉降；必须远低于单层坠落高度 |
 | `MaxIdleRotationDeg` | 空载最大允许旋转 |
 | `MinPerturbationSurvivalSeconds` | 小扰动后最低稳定时间 |
 | `PhysicsRolloutBudget` | 攻击模拟数量预算 |
@@ -1034,7 +1035,7 @@ FinalScore =
 [ABTS][M7.3][Reject][Support] Node=... NoGroundPath=1
 [ABTS][M7.3][Reject][COM] Subtree=... Margin=-...cm
 [ABTS][M7.3][WeakPoint] Node=... UnsupportedMass=... Exposure=... Score=...
-[ABTS][M7.3][IdleValidation] Seconds=... MaxMove=... MaxRotation=... Accepted=...
+[ABTS][M7.3][IdleValidation] Seconds=... MaxMove=... MaxDrift=... MaxSettlement=... MaxRotation=... Accepted=...
 [ABTS][M7.3][AttackValidation] Type=Weak/NonWeak CollapseRatio=... Settled=...
 [ABTS][M7.3][Accepted] Score=... Difficulty=... Novelty=... Cost=...
 ```
@@ -1057,11 +1058,13 @@ FinalScore =
 
 ### M7.3-B：弱点与难度
 
-- 加入割点/支配节点分析；
-- 生成单柱、接缝和材料弱点；
-- 运行弱点与非弱点攻击探针；
-- 根据 `TargetBirdHits` 筛选；
-- 加入调试热力图。
+> 独立工程实现、参数、编辑器步骤与验收见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。
+
+- 已以虚拟 Ground Root 和有向支撑图逐节点执行移除反事实，不使用会误判多 Ground 冗余的普通无向割点；
+- 已按 `CollisionVolume × FABTSM7MaterialProfile.Density` 计算失撑质量，并从真实 Profile 排序推导 `TargetBirdHits` 相对成本层级；
+- 已加入固定射线暴露度、失撑子图重叠/间距限制、材料弱点、有限非弱点强化和难度窗口；
+- 已实现弱点与非弱点的确定性图探针对照、红色 Editor 高亮、Summary、日志和自动化测试；
+- 实际等冲量 Chaos 攻击 rollout 仍在 M7.1 手工击打验收，批量隐藏 World 验证留给候选搜索阶段。
 
 ### M7.3-C：装置连锁
 
@@ -1092,7 +1095,7 @@ FinalScore =
 - 所有 FoundationFoot 深度不超过 `MaxFoundationDepthCM`，超限候选必须换位置、缩小或拆平台；
 - 发射阶段开始后，无鸟撞击时建筑不出现可见弹起、自旋、滑移或自行断裂；
 - 初始最大穿透不超过修复容差，超过者必须拒绝而非带病运行；
-- `MaxIdleDisplacementCM`、`MaxIdleRotationDeg` 在预设阈值内；
+- `MaxIdleDisplacementCM`、`MaxIdleSettlementCM`、`MaxIdleRotationDeg` 在预设阈值内；
 - 绳/链没有初始爆冲，炸药桶和活塞不会因初始接触自动触发。
 
 ### 14.2 可破坏性

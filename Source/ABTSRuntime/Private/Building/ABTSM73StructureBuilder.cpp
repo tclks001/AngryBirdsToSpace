@@ -28,6 +28,7 @@ void FABTSM73StructureBuilder::AddBrick(
 	FABTSM73BrickNode& Node = Data.Bricks.AddDefaulted_GetRef();
 	Node.NodeId = Data.Bricks.Num() - 1;
 	Node.Material = Material;
+	Node.OriginalMaterial = Material;
 	Node.LocalCenter = Center;
 	Node.DimensionsCM = Dimensions.ComponentMax(FVector(1.0f));
 }
