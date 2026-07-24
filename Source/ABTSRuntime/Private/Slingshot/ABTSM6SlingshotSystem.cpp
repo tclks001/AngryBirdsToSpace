@@ -23,6 +23,22 @@
 #include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
 
+namespace
+{
+	/** Keeps pouch local +Y on the stable stake-to-stake side while local +Z follows launch. */
+	FQuat MakePulledPouchRotation(const FVector& LaunchDirection, const FVector& PreferredRight)
+	{
+		const FVector PouchForwardZ = LaunchDirection.GetSafeNormal();
+		FVector PouchSideY = FVector::VectorPlaneProject(PreferredRight, PouchForwardZ).GetSafeNormal();
+		if (PouchSideY.IsNearlyZero())
+		{
+			const FVector FallbackAxis = FMath::Abs(PouchForwardZ.Z) < 0.9f ? FVector::UpVector : FVector::ForwardVector;
+			PouchSideY = FVector::CrossProduct(PouchForwardZ, FallbackAxis).GetSafeNormal();
+		}
+		return FRotationMatrix::MakeFromYZ(PouchSideY, PouchForwardZ).ToQuat();
+	}
+}
+
 AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -282,7 +298,8 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	ConfigurePouchVisual(Cord);
 	Party->SetSlingshotMode(true);
 	ArrangeWaitingBirds();
-	Bird->EnterSlingshotPouch(RestPouchLocation, FRotationMatrix::MakeFromXZ(SlingForward, SlingUp).ToQuat());
+	const FQuat RestPouchRotation = Cord.GetRestPouchTransform().GetRotation();
+	Bird->EnterSlingshotPouch(GetBirdInPouchLocation(RestPouchRotation), RestPouchRotation);
 	if (Bird->GetSelectedMovementMode() == EABTSBirdMovementMode::ChaosRigidBody)
 	{
 		if (UABTSChaosBirdMovementComponent* Movement = Bird->GetChaosMovementComponent()) Movement->OnBlockingImpact().AddUObject(this, &AABTSM6SlingshotSystem::HandleBirdImpact);
@@ -393,8 +410,9 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 	const float PullDistance = FMath::Lerp(MinPullDistanceCM, MaxPullDistanceCM, PullAlpha);
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
 	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
-	const FQuat PouchRotation = FRotationMatrix::MakeFromXZ(Direction, SlingUp).ToQuat();
-	LaunchedBird->SetActorLocationAndRotation(PouchLocation, PouchRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
+	LaunchedBird->SetActorLocationAndRotation(
+		GetBirdInPouchLocation(PouchRotation), PouchRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	UpdatePouchVisual(PouchRotation);
 }
 
@@ -416,6 +434,11 @@ void AABTSM6SlingshotSystem::SetPouchVisualActive(const bool bActive)
 	if (PouchVisualMesh == nullptr) return;
 	PouchVisualMesh->SetVisibility(bActive, true);
 	PouchVisualMesh->SetHiddenInGame(!bActive, true);
+}
+
+FVector AABTSM6SlingshotSystem::GetBirdInPouchLocation(const FQuat& PouchRotation) const
+{
+	return PouchLocation + PouchRotation.RotateVector(FVector(0.0f, 0.0f, BirdInPouchOffsetCM));
 }
 
 FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const

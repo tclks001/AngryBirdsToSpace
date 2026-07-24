@@ -59,14 +59,14 @@
 | 项目 | 严格约定 |
 |---|---|
 | 枢轴点 | 袋体 Bounds 几何中心 |
-| 本地 X | 前后深度，`+X` 对应发射方向 |
+| 本地 X | 由本地 Y/Z 按右手坐标系派生；不承载发射方向 |
 | 本地 Y | 左右宽度、两根弦的连接方向 |
-| 本地 Z | 袋体厚度法线 |
+| 本地 Z | 待机时朝局部上方；进入 Ready/Pulling 后朝即时发射方向，可指向前方或后方 |
 | 推荐源 Bounds | `42 × 60 × 12 cm`（X × Y × Z） |
 | 默认运行目标 Bounds | `PouchSizeCM=(42,60,12)` |
 | 默认 Slot 修正 | Offset `0,0,0`；Rotation `0,0,0`；Scale `1,1,1` |
 
-袋体弦连接点不从模型顶点或 Socket 自动推导，而由 `PouchAConnectionOffsetCM` 和 `PouchBConnectionOffsetCM` 指定。默认分别为 `(0,-18,0)` 与 `(0,18,0)`，必须落在袋体左右范围内。
+袋体弦连接点不从模型顶点或 Socket 自动推导，而由 `PouchAConnectionOffsetCM` 和 `PouchBConnectionOffsetCM` 指定。默认分别为 `(0,-18,0)` 与 `(0,18,0)`，必须落在袋体左右范围内。两个偏移会乘以 `PouchVisual.LocalScale` 的各轴绝对值：例如将 `PouchVisual.LocalScale.Y` 调为 `1.5` 时，默认弦端会从 Y=`±18 cm` 同步扩展到 `±27 cm`，始终保持在袋体边缘的相对位置。拉伸时袋体局部 Y 始终投影到固定的桩间方向；两根弦还会按总长度最短的方式选择对应袋边，杜绝反向瞄准时形成交叉 X。
 
 ## 4. 目标尺寸适配和枢轴处理
 
@@ -87,8 +87,9 @@
 - `StakeAConnectionOffsetCM`、`StakeBConnectionOffsetCM`：从自动计算的桩顶位置继续偏移，用于把弦端移动到桩顶内侧。
 - `RestPouchOffsetCM`：两桩弦端中点到待机袋中心的偏移；默认零向量。
 - `PouchAConnectionOffsetCM`、`PouchBConnectionOffsetCM`：袋局部左右弦端，默认 `(0,-18,0)` 与 `(0,18,0)`。
+- `BirdInPouchOffsetCM`：位于 `AABTSM6SlingshotSystem / ABTS|M6|Visual`，默认 `20 cm`；表示鸟 Actor 相对袋中心沿袋体局部 `+Z` 的偏移，四只鸟共享该参数。
 
-连接参数都是最终空间中的真实厘米数，不随网格源尺寸变化。更换模型时，先保持布局参数不变并确认三个模型协议，再只微调连接点。
+连接参数不随网格源 Bounds 变化；但会随 `PouchVisual.LocalScale` 成比例变化，使弦端与袋体视觉缩放同步。更换模型时，先保持布局参数不变并确认三个模型协议，再只微调连接点。
 
 ## 6. 编辑器配置步骤
 
@@ -109,6 +110,7 @@ CordThicknessCM = 3.5
 PouchSizeCM = (42, 60, 12)
 PouchAConnectionOffsetCM = (0, -18, 0)
 PouchBConnectionOffsetCM = (0, 18, 0)
+BirdInPouchOffsetCM = 20
 ```
 
 ## 7. 无模型回退协议
@@ -126,7 +128,10 @@ PouchBConnectionOffsetCM = (0, 18, 0)
 3. 更换任意实际源长度的弦模型后，最终弦粗仍等于 `CordThicknessCM`，长度恰好连接两端。
 4. 编辑 `PouchSizeCM` 时袋体按 X/Y/Z 目标 Bounds 变化，弦连接点不被模型缩放重复放大。
 5. 沿 Actor Y 缩放时仅改变桩间距；预览和 PIE 中连接关系一致。
-6. M6 拉动期间只有袋移动，两根弦持续连接四个端点，松手与回归后恢复待机状态。
+6. 调整 `PouchVisual.LocalScale.Y` 时，两根弦的袋端沿 Y 等比例移动；预览和 PIE 中一致。
+7. 向任意方向拉伸时，袋体本地 `+Z` 对齐即时发射方向，本地 `+Y` 保持桩间侧向；两根弦不得交叉连接。
+8. `BirdInPouchOffsetCM=20` 时，鸟体中心始终位于袋中心沿当前袋体局部 `+Z` 的 20 cm 位置；改变发射方向后偏移随袋体旋转。
+9. M6 拉动期间只有袋移动，两根弦持续连接四个端点，松手与回归后恢复待机状态。
 
 ## 9. 排错
 

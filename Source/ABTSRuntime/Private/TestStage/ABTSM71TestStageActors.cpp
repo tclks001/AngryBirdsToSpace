@@ -296,8 +296,10 @@ void AABTSM71PlaceableSlingshotActor::UpdatePreview()
 	const FVector EndpointA = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, -HalfSpacing, StakeHeightCM) + ConnectionLayout.StakeAConnectionOffsetCM);
 	const FVector EndpointB = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, HalfSpacing, StakeHeightCM) + ConnectionLayout.StakeBConnectionOffsetCM);
 	const FVector PouchCenter = (EndpointA + EndpointB) * 0.5f + GetActorQuat().RotateVector(ConnectionLayout.RestPouchOffsetCM);
-	const FVector PouchAnchorA = PouchCenter + GetActorQuat().RotateVector(ConnectionLayout.PouchAConnectionOffsetCM);
-	const FVector PouchAnchorB = PouchCenter + GetActorQuat().RotateVector(ConnectionLayout.PouchBConnectionOffsetCM);
+	const FVector PouchAnchorA = PouchCenter + GetActorQuat().RotateVector(
+		ABTSScaleSlingshotPouchConnectionOffset(ConnectionLayout.PouchAConnectionOffsetCM, PouchVisual));
+	const FVector PouchAnchorB = PouchCenter + GetActorQuat().RotateVector(
+		ABTSScaleSlingshotPouchConnectionOffset(ConnectionLayout.PouchBConnectionOffsetCM, PouchVisual));
 	CordPreview->SetStaticMesh(CordVisual.Mesh ? CordVisual.Mesh : DefaultCordMesh);
 	CordPreviewB->SetStaticMesh(CordVisual.Mesh ? CordVisual.Mesh : DefaultCordMesh);
 	auto SetPreviewSegment = [this](UStaticMeshComponent* Component, const FVector& Start, const FVector& End)

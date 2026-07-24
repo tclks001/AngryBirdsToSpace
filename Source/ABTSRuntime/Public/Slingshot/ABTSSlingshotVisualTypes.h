@@ -75,3 +75,11 @@ ABTSRUNTIME_API FTransform ABTSMakeSlingshotVisualTransform(
 	const FVector& TargetSizeCM,
 	const FABTSSlingshotVisualSlot& VisualSlot,
 	EABTSSlingshotVisualAnchor Anchor);
+
+/**
+ * Converts an authored pouch-local attachment offset into its displayed offset.
+ * Pouch LocalScale is visual scale, so its magnitude must also scale the cord anchors.
+ */
+ABTSRUNTIME_API FVector ABTSScaleSlingshotPouchConnectionOffset(
+	const FVector& AuthoredOffsetCM,
+	const FABTSSlingshotVisualSlot& PouchVisualSlot);

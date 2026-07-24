@@ -43,6 +43,23 @@ namespace
 			EABTSSlingshotVisualAnchor::BoundsCenter));
 	}
 
+	/** Each visible cord is assigned to the closest pouch side, so a rotated pouch cannot form an X. */
+	void MatchCordEndpointsToPouchSides(
+		const FVector& StakeAnchorA,
+		const FVector& StakeAnchorB,
+		FVector& InOutPouchAnchorA,
+		FVector& InOutPouchAnchorB)
+	{
+		const float DirectCost = FVector::DistSquared(StakeAnchorA, InOutPouchAnchorA)
+			+ FVector::DistSquared(StakeAnchorB, InOutPouchAnchorB);
+		const float CrossedCost = FVector::DistSquared(StakeAnchorA, InOutPouchAnchorB)
+			+ FVector::DistSquared(StakeAnchorB, InOutPouchAnchorA);
+		if (CrossedCost < DirectCost)
+		{
+			Swap(InOutPouchAnchorA, InOutPouchAnchorB);
+		}
+	}
+
 	FQuat BuildSlingshotVisualRotation(
 		const FVector& EndpointA,
 		const FVector& EndpointB,
@@ -318,8 +335,11 @@ void AABTSM51SlingshotCord::UpdatePulledPouchVisual(const FVector& WorldLocation
 	const FQuat LayoutRotation = BuildSlingshotVisualRotation(EndpointA, EndpointB, StakeA.Get(), StakeB.Get());
 	const FVector StakeAnchorA = EndpointA + LayoutRotation.RotateVector(ConnectionLayout.StakeAConnectionOffsetCM);
 	const FVector StakeAnchorB = EndpointB + LayoutRotation.RotateVector(ConnectionLayout.StakeBConnectionOffsetCM);
-	const FVector PouchAnchorA = WorldLocation + WorldRotation.RotateVector(ConnectionLayout.PouchAConnectionOffsetCM);
-	const FVector PouchAnchorB = WorldLocation + WorldRotation.RotateVector(ConnectionLayout.PouchBConnectionOffsetCM);
+	FVector PouchAnchorA = WorldLocation + WorldRotation.RotateVector(
+		ABTSScaleSlingshotPouchConnectionOffset(ConnectionLayout.PouchAConnectionOffsetCM, PouchVisualSlot));
+	FVector PouchAnchorB = WorldLocation + WorldRotation.RotateVector(
+		ABTSScaleSlingshotPouchConnectionOffset(ConnectionLayout.PouchBConnectionOffsetCM, PouchVisualSlot));
+	MatchCordEndpointsToPouchSides(StakeAnchorA, StakeAnchorB, PouchAnchorA, PouchAnchorB);
 	SetSegmentBetween(*CordSegmentA, StakeAnchorA, PouchAnchorA, CordThicknessCM, CordVisualSlot);
 	SetSegmentBetween(*CordSegmentB, StakeAnchorB, PouchAnchorB, CordThicknessCM, CordVisualSlot);
 

@@ -55,6 +55,7 @@ private:
 	void ConfigurePouchVisual(const AABTSM51SlingshotCord& Cord);
 	void UpdatePouchVisual(const FQuat& PouchRotation);
 	void SetPouchVisualActive(bool bActive);
+	FVector GetBirdInPouchLocation(const FQuat& PouchRotation) const;
 	void DrawPredictedTrajectory() const;
 	FVector ComputeLaunchVelocity() const;
 	void HandleBirdImpact(const FHitResult& Hit, float NormalSpeedCMPerSec, const FVector& IncomingVelocity);
@@ -98,6 +99,9 @@ private:
 	float FlightAirDragPerSecond = 0.08f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Launch", meta = (ClampMin = "20.0"))
 	float MaxAimPlaneOffsetCM = 260.0f;
+	/** Shared local +Z offset from the pouch centre to the bird actor while aiming. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Visual", meta = (UIMin = "-100.0", UIMax = "100.0"))
+	float BirdInPouchOffsetCM = 20.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Trajectory", meta = (ClampMin = "8", ClampMax = "128"))
 	int32 TrajectorySampleCount = 54;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Trajectory", meta = (ClampMin = "0.01", ClampMax = "0.25"))

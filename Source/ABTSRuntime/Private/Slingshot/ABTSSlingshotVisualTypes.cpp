@@ -50,3 +50,13 @@ FTransform ABTSMakeSlingshotVisualTransform(
 		TargetAnchorWorld + OffsetWorld - PivotCorrectionWorld,
 		FinalScale);
 }
+
+FVector ABTSScaleSlingshotPouchConnectionOffset(
+	const FVector& AuthoredOffsetCM,
+	const FABTSSlingshotVisualSlot& PouchVisualSlot)
+{
+	return AuthoredOffsetCM * FVector(
+		FMath::Max(0.001f, FMath::Abs(PouchVisualSlot.LocalScale.X)),
+		FMath::Max(0.001f, FMath::Abs(PouchVisualSlot.LocalScale.Y)),
+		FMath::Max(0.001f, FMath::Abs(PouchVisualSlot.LocalScale.Z)));
+}
