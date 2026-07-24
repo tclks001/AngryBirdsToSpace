@@ -197,9 +197,11 @@ FootLength = FootTop - FootBottom
 ### 6.3 TwinTowerBridge
 
 - 两个独立塔体；
-- 顶部使用较窄铁质桥梁连接；
-- M7.3-A 暂不生成中层桥，避免桥梁与上层柱体占据相同空间；
-- 中层桥和连接弱点留给后续连接/弱点规划阶段。
+- 在约半高楼层生成真正的中部连廊，而不是在两塔顶部再放一根门梁；
+- 连廊由一块铁质桥面和沿攻击方向两侧的护栏组成；
+- 桥面沿 Y 跨越两塔，并在两端伸入塔楼板形成竖向支撑；
+- 桥面沿 X 保持较窄，位于下一层前后角柱之间的中央通道，因此不会与角柱穿透；
+- 护栏由桥面支撑，使 TwinTowerBridge 在轮廓和支撑图上都与 Gatehouse 明确不同。
 
 Seed 只在安全范围内扰动宽度、深度和层高，保证同一 Seed 可复现且不会用完全随机旋转破坏稳定性。
 
@@ -393,7 +395,7 @@ Accepted=1
 ABTS.M73A.DefaultStructuresAreStaticallyStable
 ```
 
-它会对三种默认轮廓分别验证生成成功、砖块预算、Ground Node、Support Edge 和静态稳定性。该测试不能替代地图中的实际 Chaos、模型碰撞和弹弓视觉验收。
+它会对三种默认轮廓分别验证生成成功、砖块预算、Ground Node、Support Edge 和静态稳定性，并固定检查五层 Gatehouse/TwinTowerBridge 分别产生 `BrickBudgetExceeded:51:50` 与 `53:50`，防止该现象以后被误判为渲染丢失。该测试不能替代地图中的实际 Chaos、模型碰撞和弹弓视觉验收。
 
 ### 功能
 
@@ -418,7 +420,7 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 - 建筑主体保持统一径向 Up，不随每块地面的法线分别倾斜；
 - 球面边缘空隙由地基脚填补；
 - 地基顶板不穿入地面；
-- Gatehouse/TwinTower 的连接梁位于塔顶上方，不与塔顶梁重合。
+- Gatehouse 的连接梁位于塔顶上方；TwinTowerBridge 的桥面和护栏位于中层，两种轮廓必须一眼可区分。
 
 ### 日志
 
@@ -432,6 +434,7 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 | 症状 | 根因 | 处理 |
 | --- | --- | --- |
 | 编辑器看不到建筑 | `bShowEditorPreview` 关闭或静态校验拒绝 | 查看 GenerationSummary.RejectReason |
+| Gatehouse/TwinTowerBridge 在 `Levels >= 5` 时全部消失，`RejectReason=BrickBudgetExceeded:51:50` 或 `53:50` | 不是渲染错误：每座塔每层为 `4 柱 + 1 楼板=5` 块，双塔每层共 10 块；Gatehouse 再加 1 根顶部门梁，因此 5 层为 51 块；新版 TwinTowerBridge 再加桥面和两道护栏，因此 5 层为 53 块。默认 `MaxBrickCount=50` 会执行硬拒绝，预览先被清空，因此看起来像全部消失。 | 测试高层建筑时提高 `GenerationSettings.MaxBrickCount`，或把 Levels 降到 4；正式作品应优先合并构件/分级激活，不要无预算地提高全局刚体上限。 |
 | 沿 Z 拖动后建筑被拉回地面，基座不随 Actor 移动 | 旧 Ground Adapter 无条件把 Anchor 投影到 TestStage，且 Foundation 组件错误标为 Static | 默认关闭 `bSnapPlanarAnchorToTestStage`；FoundationCap/Feet 使用 Movable Mobility，但保持非模拟碰撞 |
 | 退出 PIE 报 `FoundationCap 的移动性必须为可移动` | Static 组件在 OnConstruction/运行时被写入 WorldTransform | 使用当前 C++ 的 Movable Foundation 组件；重新编译并重开 Editor，避免仍加载旧 DLL |
 | PIE 中出现两套砖 | Preview 未清空或 Runtime 初始化重复 | 检查 `[Generated]` 是否重复；`bRuntimeSpawned` 应阻止二次生成 |

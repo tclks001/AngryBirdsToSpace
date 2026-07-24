@@ -35,8 +35,22 @@ bool FABTSM73DefaultStructuresTest::RunTest(const FString& Parameters)
 		const bool bStable = Validator.Validate(Settings, Data, Error);
 		TestTrue(FString::Printf(TEXT("Silhouette %d validates: %s"), static_cast<int32>(Silhouette), *Error), bStable);
 	}
+
+	// Guard the deliberate 50-body budget behavior. These exact counts explain
+	// why a rejected preview disappears instead of indicating an HISM/render bug.
+	FABTSM73GenerationSettings BudgetSettings;
+	BudgetSettings.Levels = 5;
+	BudgetSettings.MaxBrickCount = 50;
+	FABTSM73StructureData BudgetData;
+	FString BudgetError;
+	BudgetSettings.Silhouette = EABTSM73Silhouette::Gatehouse;
+	TestFalse(TEXT("Five-level Gatehouse exceeds the default budget"), Builder.Build(BudgetSettings, BudgetData, BudgetError));
+	TestEqual(TEXT("Gatehouse budget diagnostic is stable"), BudgetError, FString(TEXT("BrickBudgetExceeded:51:50")));
+	BudgetSettings.Silhouette = EABTSM73Silhouette::TwinTowerBridge;
+	BudgetError.Reset();
+	TestFalse(TEXT("Five-level corridor bridge exceeds the default budget"), Builder.Build(BudgetSettings, BudgetData, BudgetError));
+	TestEqual(TEXT("Twin bridge budget diagnostic is stable"), BudgetError, FString(TEXT("BrickBudgetExceeded:53:50")));
 	return true;
 }
 
 #endif
-

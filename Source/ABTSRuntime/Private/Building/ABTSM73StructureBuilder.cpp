@@ -124,11 +124,31 @@ bool FABTSM73StructureBuilder::Build(
 			AddFourColumnStorey(OutData, OffsetY, TowerWidth, Depth, BottomZ, LevelHeight, Column, Beam,
 				Settings.PrimaryMaterial, true);
 		}
-		// M7.3-A keeps the bridge on the top course so no upper tower column can
-		// overlap the span. Mid-height bridges are deferred to the connection pass.
-		const float BridgeZ = Levels * LevelHeight + Beam * 0.5f;
-		AddBrick(OutData, FVector(0.0f, 0.0f, BridgeZ), FVector(Depth * 0.82f, Gap + Column * 2.0f, Beam),
+		// A true middle corridor: the deck lands on the two tower floor slabs,
+		// while its narrow X depth stays inside the aisle between front/back corner
+		// columns of the next storey. This gives it vertical support without the
+		// penetration that the old full-depth mid-height bridge produced.
+		const int32 BridgeFloor = FMath::Clamp(Levels / 2, 1, FMath::Max(1, Levels - 1));
+		const float BridgeBaseZ = BridgeFloor * LevelHeight;
+		const float AvailableAisleDepth = FMath::Max(8.0f, Depth - Column * 2.0f);
+		const float CorridorDepth = FMath::Max(8.0f, AvailableAisleDepth - 8.0f);
+		const float LandingOverlap = FMath::Min(Column * 0.70f, TowerWidth * 0.25f);
+		const float CorridorLength = Gap + LandingOverlap * 2.0f;
+		AddBrick(OutData,
+			FVector(0.0f, 0.0f, BridgeBaseZ + Beam * 0.5f),
+			FVector(CorridorDepth, CorridorLength, Beam),
 			EABTSM7BuildingMaterial::Iron);
+
+		const float RailThickness = FMath::Clamp(Column * 0.20f, 8.0f, CorridorDepth * 0.30f);
+		const float RailHeight = FMath::Max(12.0f, LevelHeight - Beam * 2.0f);
+		const float RailX = FMath::Max(0.0f, CorridorDepth * 0.5f - RailThickness * 0.5f);
+		for (const float X : {-RailX, RailX})
+		{
+			AddBrick(OutData,
+				FVector(X, 0.0f, BridgeBaseZ + Beam + RailHeight * 0.5f),
+				FVector(RailThickness, CorridorLength, RailHeight),
+				Settings.PrimaryMaterial);
+		}
 		break;
 	}
 	default:
