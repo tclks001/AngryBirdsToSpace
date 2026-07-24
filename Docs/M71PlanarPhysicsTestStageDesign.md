@@ -3,6 +3,8 @@
 > 状态：C++ 已实现。M7.1 是与正式球面 TaskGraph 地图并行的实验关卡，不改变正式地图的 `CellTopo` 逻辑源约束。
 >
 > 前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)、[M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)。
+>
+> M7.3-A 已提供可直接拖入本测试台、生成并击打的 `M7.3-A Stable Building Generator`；其参数、空载 Chaos 验证和验收步骤见 [M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。原 `M7.1 Modular Building Anchor` 仅保留为旧布局标记。
 
 ## 1. 阶段目标与边界
 

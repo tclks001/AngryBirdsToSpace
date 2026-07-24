@@ -106,6 +106,29 @@ int32 AABTSM7BuildingMaterialSystem::AddBrick(const FABTSM7BrickSpec& Spec, cons
 	return HISM->AddInstance(InstanceTransform, true);
 }
 
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnBrickModule(
+	const FABTSM7BrickSpec& Spec,
+	const FTransform& WorldTransform)
+{
+	if (GetWorld() == nullptr || SharedBrickMesh == nullptr) return nullptr;
+	FActorSpawnParameters Params;
+	Params.Owner = this;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM7BuildingModule* Module = GetWorld()->SpawnActor<AABTSM7BuildingModule>(
+		AABTSM7BuildingModule::StaticClass(), WorldTransform, Params);
+	if (Module == nullptr) return nullptr;
+	FTransform BrickTransform = WorldTransform;
+	const FVector SafeDimensions(
+		FMath::Max(1.0f, Spec.DimensionsCM.X),
+		FMath::Max(1.0f, Spec.DimensionsCM.Y),
+		FMath::Max(1.0f, Spec.DimensionsCM.Z));
+	BrickTransform.SetScale3D(WorldTransform.GetScale3D() * (SafeDimensions / SharedCubeSizeCM));
+	Module->ConfigureBrick(SharedBrickMesh, GetMaterial(Spec.Material), Spec.Material, BrickTransform);
+	Module->ConfigureImpactPhysics(GetProfile(Spec.Material));
+	Modules.Add(Module);
+	return Module;
+}
+
 AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnSuspension(const FABTSM7SuspensionSpec& Spec, const FTransform& WorldTransform)
 {
 	if (Spec.Kind != EABTSM7ModuleKind::Rope && Spec.Kind != EABTSM7ModuleKind::IronChain) return nullptr;

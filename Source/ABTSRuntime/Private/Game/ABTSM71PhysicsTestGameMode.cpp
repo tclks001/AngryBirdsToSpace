@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -77,6 +78,10 @@ void AABTSM71PhysicsTestGameMode::BeginPlay()
 		for (TActorIterator<AABTSM71PlaceableDeviceActor> It(World); It; ++It)
 		{
 			It->InitializeRuntimeDevice(MaterialSystem);
+		}
+		for (TActorIterator<AABTSM73StableBuildingActor> It(World); It; ++It)
+		{
+			It->InitializeRuntimeBuilding(MaterialSystem);
 		}
 	}
 

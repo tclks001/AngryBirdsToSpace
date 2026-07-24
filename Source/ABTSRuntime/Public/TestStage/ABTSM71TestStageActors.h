@@ -296,7 +296,7 @@ class ABTSRUNTIME_API AABTSM71SpaceSlingshotActor : public AABTSM71PlaceableSlin
 public: AABTSM71SpaceSlingshotActor();
 };
 
-/** Marker reserved for the future modular building generator. */
+/** Legacy layout marker. Use AABTSM73StableBuildingActor for generated, hittable M7.3-A structures. */
 UCLASS(BlueprintType, meta = (DisplayName = "M7.1 Modular Building Anchor"))
 class ABTSRUNTIME_API AABTSM71ModularBuildingAnchor : public AActor
 {

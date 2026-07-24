@@ -28,6 +28,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Brick")
 	int32 AddBrick(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
+	/** Creates a static per-brick Actor used by M7.3 validated structures; launch physics activates it with every other module. */
+	AABTSM7BuildingModule* SpawnBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Suspension")
 	AABTSM7BuildingModule* SpawnSuspension(const FABTSM7SuspensionSpec& Spec, const FTransform& WorldTransform);

@@ -236,8 +236,9 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M5 | 加工与组件 | 共享物品栏、背包/加工界面、红鸟加工权限、附近工作台/熔炉配方和制作数量流程已实现；正式站点放置、拾取与弹弓组件表现进入 M5.1。详见 [M5InventoryCraftingImplementationDesign.md](M5InventoryCraftingImplementationDesign.md)。 |
 | M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 弹弓槽和桩/弦两次点击装配。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
 | M6 | 弹弓、发射与碰撞 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。已连接弹弓进入瞄准/拉伸/万有引力预测/发射闭环；HISM 按命中提升动态代理并支持连锁破坏，黑鸟支持手动/延时爆炸，落地静默后物体冻结与队伍回归。玩法见 [M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)，双弦、弹珠袋和模型协议见 [M6SlingshotVisualPresentationDesign.md](M6SlingshotVisualPresentationDesign.md)。 |
-| M7 | 建筑生成与破坏 | 木/石/铁/玻璃砖、绳/链、炸药桶和弹簧活塞已具备参数化材料层；材质 Profile 驱动 Chaos 摩擦、弹性、密度、推动传递与累计损伤。进入发射阶段后建筑块统一参与平面/球面重力，下层支撑失效会使上层自然坠落，返回阶段冻结并保留最终姿态。详见 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)；后续再生成模块化建筑、承重图与结构性坍塌。 |
+| M7 | 建筑生成与破坏 | 木/石/铁/玻璃砖、绳/链、炸药桶和弹簧活塞已具备参数化材料层；材质 Profile 驱动 Chaos 摩擦、弹性、密度、推动传递与累计损伤。进入发射阶段后建筑块统一参与平面/球面重力，下层支撑失效会使上层自然坠落，返回阶段冻结并保留最终姿态。详见 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)；后续模块化建筑采用“结构语法 + 支撑图 + 稳定性预模拟 + 弱点攻击验证 + 搜索筛选”，调研与 M7.3 算法见 [M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。 |
 | M7.1 | 平面物理测试台 | 独立平面 GameMode、可摆放 Floor/PlayerStart、树石 HISM、四材质砖、四档完整弹弓和模块化建筑锚点；支持编辑器实时变换、平面 Chaos 移动与恒向重力弹射。详见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。 |
+| M7.3-A | 稳定积木建筑 | 三种确定性轮廓、平面/球面统一 Ground Adapter、Footprint 校验、平坦施工台、地基脚、支撑 DAG、静态校验和短时 Chaos 空载验证；可在 M7.1 放置并击打，也可在首个球面建筑 Anchor 生成。详见 [M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `Sub=2/3` 潮汐锁定卫星和引力走廊；强化发射预览与实际轨迹发生可见偏转。 |
 | M10 | 侦察 | 青翎近射侦察更新小地图，标记道路外目标与引力走廊。 |

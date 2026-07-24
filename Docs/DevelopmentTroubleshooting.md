@@ -112,3 +112,9 @@
 ### 地表出现六边形黑色阴影斑纹
 
 根因是几何半径曾直接取最近 Cell 的离散逻辑高度，产生六边形台阶；法线又只用约 `8cm` 的差分半径，跨台阶时得到近乎水平或翻折的异常法线。修复后高度在 CellTopo 三角形内做重心插值，法线以默认 `160cm` 的正交+对角中心差分平滑。检查 `[ABTS][M3][SurfaceNormals]`：若 `ExtremeOver80` 很大，先确认 `SurfaceNormalSmoothingDistanceCM` 未被旧 Blueprint 覆盖为极小值；可在 `120–240cm` 之间调节，数值越大越平缓。
+
+## 7. M7.3-A 稳定积木建筑
+
+| 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| `ABTSM73StableBuildingActor` 沿 Z 拖动时只有枢轴/主体暂时移动，基座保持原位；松手后整栋又被拉回测试台 | 平面 Ground Adapter 在每次 `OnConstruction` 中无条件把 Actor Location 沿 Stage Up 投影回 Floor，覆盖了编辑器 Z 变换；FoundationCap/Feet 又是 Static Mobility，无法跟随世界变换。 | 增加 `bSnapPlanarAnchorToTestStage`，默认关闭并以 Actor 完整 XYZ 作为局部施工平面；只有显式打开才执行贴地投影。FoundationCap/Feet 改为 Movable Mobility，但保持 `SimulatePhysics=false` 和阻挡碰撞。 | 在 M7.1 中分别沿 X/Y/Z 拖动并松手，主体、Cap、Feet 和枢轴始终整体移动且不回弹；打开 Snap 后才自动落到测试台；退出 PIE 不再出现 `FoundationCap 的移动性必须为可移动`。 |
