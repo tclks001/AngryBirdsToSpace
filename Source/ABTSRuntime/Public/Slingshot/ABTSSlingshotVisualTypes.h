@@ -8,6 +8,13 @@
 class UMaterialInterface;
 class UStaticMesh;
 
+/** Which geometric point of a mesh is aligned to the authored slingshot anchor. */
+enum class EABTSSlingshotVisualAnchor : uint8
+{
+	BoundsCenter,
+	BoundsBottomCenter
+};
+
 /** Editor-facing mesh binding and local correction for one slingshot visual part. */
 USTRUCT(BlueprintType)
 struct FABTSSlingshotVisualSlot
@@ -56,3 +63,15 @@ struct FABTSSlingshotConnectionLayout
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Connections")
 	FVector PouchBConnectionOffsetCM = FVector(0.0f, 18.0f, 0.0f);
 };
+
+/**
+ * Fits a visual mesh to an explicit world-space size and aligns one of its bounds anchors.
+ * LocalOffsetCM remains a real centimetre offset and is deliberately not multiplied by mesh scale.
+ */
+ABTSRUNTIME_API FTransform ABTSMakeSlingshotVisualTransform(
+	const UStaticMesh* Mesh,
+	const FVector& TargetAnchorWorld,
+	const FQuat& TargetRotation,
+	const FVector& TargetSizeCM,
+	const FABTSSlingshotVisualSlot& VisualSlot,
+	EABTSSlingshotVisualAnchor Anchor);

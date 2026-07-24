@@ -2,6 +2,7 @@
 
 #include "World/ABTSM51WorldActors.h"
 
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Player/ABTSM51PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
@@ -33,14 +34,13 @@ namespace
 		if (Length <= SMALL_NUMBER) return;
 		const FVector Direction = Delta / Length;
 		const FQuat Rotation = FQuat::FindBetweenNormals(FVector::UpVector, Direction);
-		const FTransform BaseTransform(
-			Rotation,
+		Mesh.SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+			Mesh.GetStaticMesh(),
 			(Start + End) * 0.5f,
-			FVector(ThicknessCM / 100.0f, ThicknessCM / 100.0f, Length / 100.0f));
-		Mesh.SetWorldTransform(FTransform(
-			Rotation * VisualSlot.LocalRotation.Quaternion(),
-			BaseTransform.TransformPosition(VisualSlot.LocalOffsetCM),
-			BaseTransform.GetScale3D() * VisualSlot.LocalScale));
+			Rotation,
+			FVector(ThicknessCM, ThicknessCM, Length),
+			VisualSlot,
+			EABTSSlingshotVisualAnchor::BoundsCenter));
 	}
 
 	FQuat BuildSlingshotVisualRotation(
@@ -109,8 +109,10 @@ void AABTSM51SlingshotDirtHole::NotifyActorOnClicked(const FKey ButtonPressed)
 AABTSM51SlingshotStake::AABTSM51SlingshotStake()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("StakeRoot"));
+	SetRootComponent(Root);
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StakeVisual"));
-	SetRootComponent(Visual);
+	Visual->SetupAttachment(Root);
 	ConfigureInteractionMesh(*Visual);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (Cylinder.Succeeded()) Visual->SetStaticMesh(Cylinder.Object);
@@ -132,10 +134,16 @@ void AABTSM51SlingshotStake::ConfigureVisualDimensions(
 	const float HeightCM,
 	UMaterialInterface* Material)
 {
-	Visual->SetRelativeScale3D(FVector(
-		FMath::Max(1.0f, DiameterCM) / 100.0f,
-		FMath::Max(1.0f, DiameterCM) / 100.0f,
-		FMath::Max(1.0f, HeightCM) / 100.0f));
+	const float SafeDiameterCM = FMath::Max(1.0f, DiameterCM);
+	const float SafeHeightCM = FMath::Max(1.0f, HeightCM);
+	const FVector BaseWorld = GetActorLocation() - GetActorUpVector() * (SafeHeightCM * 0.5f);
+	Visual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+		Visual->GetStaticMesh(),
+		BaseWorld,
+		GetActorQuat(),
+		FVector(SafeDiameterCM, SafeDiameterCM, SafeHeightCM),
+		FABTSSlingshotVisualSlot(),
+		EABTSSlingshotVisualAnchor::BoundsBottomCenter));
 	if (Material) Visual->SetMaterial(0, Material);
 }
 
@@ -146,14 +154,16 @@ void AABTSM51SlingshotStake::ApplyVisualSlot(
 {
 	if (VisualSlot.Mesh) Visual->SetStaticMesh(VisualSlot.Mesh);
 	if (VisualSlot.Material) Visual->SetMaterial(0, VisualSlot.Material);
-	const FTransform BaseTransform = GetActorTransform();
-	const FQuat BaseRotation = BaseTransform.GetRotation();
-	SetActorLocation(BaseTransform.TransformPosition(VisualSlot.LocalOffsetCM), false, nullptr, ETeleportType::TeleportPhysics);
-	SetActorRotation((BaseRotation * VisualSlot.LocalRotation.Quaternion()).Rotator(), ETeleportType::TeleportPhysics);
-	SetActorScale3D(FVector(
-		FMath::Max(1.0f, DiameterCM) / 100.0f,
-		FMath::Max(1.0f, DiameterCM) / 100.0f,
-		FMath::Max(1.0f, HeightCM) / 100.0f) * VisualSlot.LocalScale);
+	const float SafeDiameterCM = FMath::Max(1.0f, DiameterCM);
+	const float SafeHeightCM = FMath::Max(1.0f, HeightCM);
+	const FVector BaseWorld = GetActorLocation() - GetActorUpVector() * (SafeHeightCM * 0.5f);
+	Visual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+		Visual->GetStaticMesh(),
+		BaseWorld,
+		GetActorQuat(),
+		FVector(SafeDiameterCM, SafeDiameterCM, SafeHeightCM),
+		VisualSlot,
+		EABTSSlingshotVisualAnchor::BoundsBottomCenter));
 }
 
 void AABTSM51SlingshotStake::NotifyActorOnClicked(const FKey ButtonPressed)
@@ -193,7 +203,6 @@ AABTSM51SlingshotCord::AABTSM51SlingshotCord()
 		DefaultPouchSphereMesh = Sphere.Object;
 		PouchVisual->SetStaticMesh(DefaultPouchSphereMesh);
 	}
-	PouchVisualSlot.LocalScale = FVector(0.45f, 0.90f, 0.12f);
 	ConfigureVisualOnlyMesh(*CordSegmentA);
 	ConfigureVisualOnlyMesh(*CordSegmentB);
 	ConfigureVisualOnlyMesh(*PouchVisual);
@@ -257,12 +266,17 @@ void AABTSM51SlingshotCord::ConfigureTwoCordVisuals(
 	const FABTSSlingshotVisualSlot& CordSlot,
 	const FABTSSlingshotVisualSlot& PouchSlot,
 	const FABTSSlingshotConnectionLayout& Layout,
-	const float ThicknessCM)
+	const float ThicknessCM,
+	const FVector& InPouchSizeCM)
 {
 	CordVisualSlot = CordSlot;
 	PouchVisualSlot = PouchSlot;
 	ConnectionLayout = Layout;
 	CordThicknessCM = FMath::Max(0.1f, ThicknessCM);
+	PouchSizeCM = FVector(
+		FMath::Max(1.0f, FMath::Abs(InPouchSizeCM.X)),
+		FMath::Max(1.0f, FMath::Abs(InPouchSizeCM.Y)),
+		FMath::Max(1.0f, FMath::Abs(InPouchSizeCM.Z)));
 
 	CordSegmentA->SetStaticMesh(CordSlot.Mesh ? CordSlot.Mesh : DefaultCordCylinderMesh);
 	CordSegmentB->SetStaticMesh(CordSlot.Mesh ? CordSlot.Mesh : DefaultCordCylinderMesh);
@@ -309,11 +323,13 @@ void AABTSM51SlingshotCord::UpdatePulledPouchVisual(const FVector& WorldLocation
 	SetSegmentBetween(*CordSegmentA, StakeAnchorA, PouchAnchorA, CordThicknessCM, CordVisualSlot);
 	SetSegmentBetween(*CordSegmentB, StakeAnchorB, PouchAnchorB, CordThicknessCM, CordVisualSlot);
 
-	const FTransform BaseTransform(WorldRotation, WorldLocation, FVector::OneVector);
-	PouchVisual->SetWorldTransform(FTransform(
-		WorldRotation * PouchVisualSlot.LocalRotation.Quaternion(),
-		BaseTransform.TransformPosition(PouchVisualSlot.LocalOffsetCM),
-		PouchVisualSlot.LocalScale));
+	PouchVisual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+		PouchVisual->GetStaticMesh(),
+		WorldLocation,
+		WorldRotation,
+		PouchSizeCM,
+		PouchVisualSlot,
+		EABTSSlingshotVisualAnchor::BoundsCenter));
 	CordSegmentA->SetVisibility(true, true);
 	CordSegmentB->SetVisibility(true, true);
 	PouchVisual->SetVisibility(true, true);

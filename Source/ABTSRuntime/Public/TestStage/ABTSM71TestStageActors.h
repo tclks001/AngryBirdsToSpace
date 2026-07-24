@@ -245,6 +245,9 @@ private:
 	float StakeDiameterCM = 28.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot", meta = (ClampMin = "1.0"))
 	float CordThicknessCM = 3.5f;
+	/** Target X/Y/Z bounds of the pouch: launch-depth, stake-to-stake width, thickness. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot", meta = (ClampMin = "1.0"))
+	FVector PouchSizeCM = FVector(42.0f, 60.0f, 12.0f);
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot|Stake")
 	FABTSSlingshotVisualSlot StakeVisual;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.1|Slingshot|Cord")

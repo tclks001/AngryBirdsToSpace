@@ -2,52 +2,140 @@
 
 > 状态：M7.1/M6 共享的弹弓视觉协议与实现说明。本文只描述弹弓桩、双弹弓弦和弹珠袋的表现，不改变 M6 的发射判定、弹道或破坏规则。
 
-## 1. 目标
+## 1. 目标与统一原则
 
-弹弓在待机、瞄准、拉伸和发射前后都保持完整可读的构型：两个桩固定，左右两根弦分别连接桩顶与弹珠袋两侧，只有袋中心在拉伸时移动。运行时由 `AABTSM51SlingshotCord` 持有两根弦和袋体视觉；旧的横向交互网格仅保留为鼠标点击/可见性查询碰撞，不再渲染。
+弹弓由两个固定桩、两段可伸缩弹弓弦和一个可移动弹珠袋组成。待机、瞄准与拉伸阶段只移动弹珠袋；桩始终固定，弦每帧根据两个连接端点重建长度和姿态。
 
-## 2. 坐标和连接协议
+所有正式静态网格体都遵守同一原则：
 
-弹弓 Actor 的局部约定为：`+X` 发射方向，`+Y` 为两桩分布轴（A 在负 Y，B 在正 Y），`+Z` 为向上。所有连接参数都是 Actor 局部厘米向量，并在球面上由桩的平均地表法线重建视觉旋转，因此不会把球面径向误当作世界 Z。
+- UE 单位为厘米，导入 `Uniform Scale` 使用 `1.0`，DCC 导出前应用物体缩放。
+- `Mesh` 的尺寸由导入后的 Static Mesh Bounds 判断，代码自动缩放到编辑器中的目标厘米尺寸，不再假设源模型一定长 100 cm。
+- `LocalScale` 默认必须为 `(1,1,1)`，只用于最后的美术微调，不能再承担厘米换算。
+- `LocalOffsetCM` 默认必须为 `(0,0,0)`，表示适配后的厘米偏移，不会再随模型缩放倍增。
+- 符合协议的模型必须使用零 `LocalRotation`；只有旧资产轴向错误时才临时用它修正。
 
-`FABTSSlingshotConnectionLayout` 参数位于 `ABTS | M7.1 | Slingshot | Connections`：
+## 2. 弹弓局部坐标
 
-- `StakeAConnectionOffsetCM`、`StakeBConnectionOffsetCM`：从自动计算的桩顶向量偏移。
-- `RestPouchOffsetCM`：两桩连接点中点到待机袋中心的偏移；默认零向量，即袋位于两桩顶部中间。
-- `PouchAConnectionOffsetCM`、`PouchBConnectionOffsetCM`：袋局部左右连接点，默认 `(0,-18,0)` 与 `(0,18,0)`。
+完整弹弓 Actor 的局部坐标严格定义为：
 
-## 3. 视觉状态
+| 轴 | 含义 |
+|---|---|
+| `+X` | 发射方向、弹珠袋向后拉动时的反方向参考轴 |
+| `+Y` | 两个桩的排列方向；A 位于负 Y，B 位于正 Y |
+| `+Z` | 弹弓向上方向；球面地图中由局部径向/地表朝向决定 |
 
-- 待机：两弦连接桩顶和袋两侧，袋位于中点。
-- Ready/Pulling：桩不动，袋按 M6 的鼠标投影位置移动，两根弦每帧按两端点距离重定位和拉伸。
-- Flying/Returning：袋和弦恢复为待机构型或按发射状态隐藏，鸟由 M6 控制；发射资格和碰撞逻辑不受视觉组件影响。
+沿测试台弹弓 Actor 的 Y 轴缩放只修改桩间距；X/Z Actor Scale 不参与弹弓几何尺寸。桩高、弦粗和袋尺寸必须通过专属厘米参数调整。
 
-## 4. 编辑器参数
+## 3. 静态网格体规格
 
-在 `AABTSM71PlaceableSlingshotActor` 中配置：
+### 3.1 弹弓桩 `StakeVisual`
 
-- `Stake`：`Mesh/Material/LocalOffsetCM/LocalRotation/LocalScale`。
-- `Cord`：同样的模型槽；缺省使用细圆柱。
-- `Pouch`：同样的模型槽；缺省使用非均匀缩放的球体，视觉上为扁平椭圆片。
-- `StakeHeightCM`、`StakeDiameterCM`、`CordThicknessCM`：几何基准尺寸。
+| 项目 | 严格约定 |
+|---|---|
+| 枢轴点 | 桩底截面的几何中心，即本地 `(0,0,0)` |
+| 向上轴 | 本地 `+Z` |
+| 横截面 | 位于本地 XY 平面 |
+| 推荐源 Bounds | `20 × 20 × 100 cm`（X × Y × Z） |
+| 默认运行目标 Bounds | `28 × 28 × 220 cm`，分别来自 `StakeDiameterCM` 与 `StakeHeightCM` |
+| 默认 Slot 修正 | Offset `0,0,0`；Rotation `0,0,0`；Scale `1,1,1` |
 
-沿测试台弹弓 Actor 的 Y 轴缩放只改变桩间距；X/Z 缩放不改变间距规则。构造预览和 PIE 生成使用同一套连接计算。
+桩模型不得包含地面、空节点造成的额外 Bounds，也不得有顶点低于底面。代码以 Bounds 底面中心对齐桩基准点，并按实际导入 Bounds 适配目标直径和高度。因此 UE 的中心枢轴回退圆柱体与底部枢轴正式模型都能落在同一底面；正式资产仍必须采用底部枢轴，便于单独拖入关卡时正确吸附地面。
 
-## 5. 模型协议
+### 3.2 弹弓弦 `CordVisual`
 
-- 弹弓桩：原点在底部中心，模型向上轴为本地 Z；网格不应包含额外的地面偏移。
-- 弹弓弦：原点在长度中心，长度轴为本地 Z，横截面位于 XY；模型默认长度按 100 cm 基准缩放。
-- 弹珠袋：原点在袋中心；本地 Y 表示左右连接方向，本地 X 朝发射方向，本地 Z 为袋厚度法线。连接点由 `PouchA/BConnectionOffsetCM` 提供，不依赖模型顶点位置。
+| 项目 | 严格约定 |
+|---|---|
+| 枢轴点 | 弦段 Bounds 的长度中心 |
+| 长度轴 | 本地 `+Z`，端点位于 `-Z/+Z` |
+| 横截面 | 位于本地 XY 平面，X/Y 尺寸相等 |
+| 推荐源 Bounds | `4 × 4 × 100 cm`（X × Y × Z） |
+| 运行目标 Bounds | `CordThicknessCM × CordThicknessCM × 当前端点距离` |
+| 默认 Slot 修正 | Offset `0,0,0`；Rotation `0,0,0`；Scale `1,1,1` |
 
-替换资产时优先调整对应 Slot 的局部偏移、旋转和缩放，不修改 Actor 的布局参数。只要遵守原点和轴向协议，无模型回退状态下调好的手感可以直接迁移到正式资产。
+弦的长度完全由两端连接点决定。不要在模型中预留松弛弧线、额外尾巴或不可见辅助几何，否则这些内容也会进入 Bounds 并造成视觉压缩。若需要弯曲弦，应另行升级为样条或骨骼表现，不能混入当前直线网格协议。
 
-## 6. 验收
+### 3.3 弹珠袋 `PouchVisual`
 
-1. 在 M7.1 测试台拖入任一四档弹弓，未配置模型时可看到粗圆柱桩、两根细圆柱弦和扁平袋体。
-2. 沿 Y 缩放 Actor，两个桩和两根弦的连接保持正确，袋仍位于顶部中间。
-3. 点击弦进入 M6，拖动鼠标时只有袋移动，两根弦端点连续跟随且不出现横向旧弦。
-4. 松开鼠标后视觉不阻挡鸟的碰撞和轨迹；返回待机后双弦和袋重新显示。
+| 项目 | 严格约定 |
+|---|---|
+| 枢轴点 | 袋体 Bounds 几何中心 |
+| 本地 X | 前后深度，`+X` 对应发射方向 |
+| 本地 Y | 左右宽度、两根弦的连接方向 |
+| 本地 Z | 袋体厚度法线 |
+| 推荐源 Bounds | `42 × 60 × 12 cm`（X × Y × Z） |
+| 默认运行目标 Bounds | `PouchSizeCM=(42,60,12)` |
+| 默认 Slot 修正 | Offset `0,0,0`；Rotation `0,0,0`；Scale `1,1,1` |
 
-## 7. 排错
+袋体弦连接点不从模型顶点或 Socket 自动推导，而由 `PouchAConnectionOffsetCM` 和 `PouchBConnectionOffsetCM` 指定。默认分别为 `(0,-18,0)` 与 `(0,18,0)`，必须落在袋体左右范围内。
 
-袋偏离中点：检查 `RestPouchOffsetCM` 和 Actor 局部轴；弦接反：交换 `PouchA/BConnectionOffsetCM`；桩插地：确认桩模型原点在底部；弦扭转：确认弦长度轴为本地 Z，并只用 Cord Slot 修正旋转。
+## 4. 目标尺寸适配和枢轴处理
+
+`ABTSMakeSlingshotVisualTransform` 是编辑器预览和 PIE 运行时共用的唯一视觉适配入口：
+
+1. 读取当前 Static Mesh 的导入后 Bounds。
+2. 用目标 X/Y/Z 厘米尺寸分别除以源 Bounds 尺寸，得到 Fit Scale。
+3. 乘以 Slot `LocalScale` 美术微调值。
+4. 桩使用 `BoundsBottomCenter` 对齐桩底；弦和袋使用 `BoundsCenter` 对齐。
+5. 最后施加未参与缩放的 `LocalOffsetCM`。
+
+这条规则修复了旧实现的两个问题：旧代码把所有模型都当成 `100 × 100 × 100 cm` 的 UE 基础几何体；同时把桩 Actor 放在半高位置后直接把自定义模型枢轴放到该位置。底部枢轴模型因此从腰部开始生长，自定义弦也会被再次按 100 cm 基准拉伸。现在模型自身的 Bounds 和锚点均被显式纳入计算。
+
+## 5. 连接参数
+
+`FABTSSlingshotConnectionLayout` 位于 `ABTS | M7.1 | Slingshot | Connections`：
+
+- `StakeAConnectionOffsetCM`、`StakeBConnectionOffsetCM`：从自动计算的桩顶位置继续偏移，用于把弦端移动到桩顶内侧。
+- `RestPouchOffsetCM`：两桩弦端中点到待机袋中心的偏移；默认零向量。
+- `PouchAConnectionOffsetCM`、`PouchBConnectionOffsetCM`：袋局部左右弦端，默认 `(0,-18,0)` 与 `(0,18,0)`。
+
+连接参数都是最终空间中的真实厘米数，不随网格源尺寸变化。更换模型时，先保持布局参数不变并确认三个模型协议，再只微调连接点。
+
+## 6. 编辑器配置步骤
+
+1. 在 Static Mesh Editor 中打开资产，检查 `Approx Size` 和 Bounds，确认轴向、尺寸与枢轴协议。
+2. 在 M7.1 测试场选中 `AABTSM71PlaceableSlingshotActor`。
+3. 设置 `StakeVisual.Mesh`、`CordVisual.Mesh`、`PouchVisual.Mesh`，先把三个 Slot 的 Offset/Rotation 归零、Scale 设为一。
+4. 用 `StakeHeightCM`、`StakeDiameterCM`、`CordThicknessCM` 和 `PouchSizeCM` 调整最终厘米尺寸。
+5. 确认总体尺寸正确后，再用连接参数调整弦端；最后才允许使用 Slot 微调。
+6. 不要用 Actor X/Z Scale 修正模型大小，也不要用很小的 `LocalScale` 抵消错误的导入单位。
+
+推荐初始值：
+
+```text
+BaseStakeSpacingCM = 210
+StakeHeightCM = 220
+StakeDiameterCM = 28
+CordThicknessCM = 3.5
+PouchSizeCM = (42, 60, 12)
+PouchAConnectionOffsetCM = (0, -18, 0)
+PouchBConnectionOffsetCM = (0, 18, 0)
+```
+
+## 7. 无模型回退协议
+
+- 桩：UE Engine Cylinder，原始中心枢轴；代码以其 Bounds 底面重新对齐，因此不会要求正式底部枢轴模型迁就回退模型。
+- 弦：UE Engine Cylinder，按 Bounds 中心和本地 Z 轴拉伸。
+- 袋：UE Engine Sphere，自动适配 `PouchSizeCM` 成为扁平椭圆片。
+
+回退模型的枢轴差异只存在于资产内部，最终三者都经过相同的 Bounds 锚点适配。不得再把回退圆柱体的中心枢轴假设传播给正式桩模型。
+
+## 8. 验收
+
+1. 未配置模型时，桩底位于 Actor 地面，桩顶高度等于 `StakeHeightCM`。
+2. 换成符合协议的底部枢轴桩后，底面和桩顶位置与回退模型一致，不会从半高处开始。
+3. 更换任意实际源长度的弦模型后，最终弦粗仍等于 `CordThicknessCM`，长度恰好连接两端。
+4. 编辑 `PouchSizeCM` 时袋体按 X/Y/Z 目标 Bounds 变化，弦连接点不被模型缩放重复放大。
+5. 沿 Actor Y 缩放时仅改变桩间距；预览和 PIE 中连接关系一致。
+6. M6 拉动期间只有袋移动，两根弦持续连接四个端点，松手与回归后恢复待机状态。
+
+## 9. 排错
+
+| 现象 | 检查项 |
+|---|---|
+| 桩仍从腰部开始 | 确认使用的是本次编译后的类；将 `StakeVisual.LocalOffsetCM` 归零，并检查模型 Bounds 是否含隐藏地面/辅助几何 |
+| 桩太粗或太细 | 调整 `StakeDiameterCM`；不要先改 Slot Scale |
+| 弦太长或越过连接点 | 检查弦长度轴是否为本地 Z，模型是否包含额外尾部几何，`CordVisual.LocalScale.Z` 是否为 1 |
+| 弦太细 | 调整 `CordThicknessCM`；检查源 Bounds 是否含远离主体的顶点 |
+| 袋体巨大或极薄 | 将旧实例的 `PouchVisual.LocalScale` 重置为 `(1,1,1)`，再使用 `PouchSizeCM` |
+| 全部模型统一偏移 | 检查 Slot Offset；它现在是未缩放的真实厘米值，旧补偿值通常应清零 |
+| 预览正常、PIE 异常 | 确认没有旧派生 Blueprint 覆盖 Slot 默认值，并对实例执行 Reset to Default 后重新保存 |

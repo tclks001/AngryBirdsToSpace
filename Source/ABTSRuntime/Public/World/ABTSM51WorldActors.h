@@ -10,6 +10,7 @@
 #include "ABTSM51WorldActors.generated.h"
 
 class UStaticMeshComponent;
+class USceneComponent;
 class UMaterialInterface;
 
 UCLASS()
@@ -72,6 +73,10 @@ public:
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
+	/** Stable gameplay transform at the stake centre; visual pivot correction must not move it. */
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<USceneComponent> Root;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Visual;
 
@@ -94,7 +99,12 @@ public:
 	void ApplyVisualSlot(const FABTSSlingshotVisualSlot& VisualSlot, float ThicknessCM);
 	void SetPouchVisualSlot(const FABTSSlingshotVisualSlot& InVisualSlot) { PouchVisualSlot = InVisualSlot; }
 	const FABTSSlingshotVisualSlot& GetPouchVisualSlot() const { return PouchVisualSlot; }
-	void ConfigureTwoCordVisuals(const FABTSSlingshotVisualSlot& CordSlot, const FABTSSlingshotVisualSlot& PouchSlot, const FABTSSlingshotConnectionLayout& Layout, float ThicknessCM);
+	void ConfigureTwoCordVisuals(
+		const FABTSSlingshotVisualSlot& CordSlot,
+		const FABTSSlingshotVisualSlot& PouchSlot,
+		const FABTSSlingshotConnectionLayout& Layout,
+		float ThicknessCM,
+		const FVector& InPouchSizeCM = FVector(42.0f, 60.0f, 12.0f));
 	void UpdatePulledPouchVisual(const FVector& WorldLocation, const FQuat& WorldRotation);
 	void ResetPouchVisualToRest();
 	FTransform GetRestPouchTransform() const;
@@ -123,6 +133,7 @@ private:
 	FABTSSlingshotVisualSlot CordVisualSlot;
 	FABTSSlingshotConnectionLayout ConnectionLayout;
 	float CordThicknessCM = 3.5f;
+	FVector PouchSizeCM = FVector(42.0f, 60.0f, 12.0f);
 	TObjectPtr<UStaticMesh> DefaultCordCylinderMesh;
 	TObjectPtr<UStaticMesh> DefaultPouchSphereMesh;
 };

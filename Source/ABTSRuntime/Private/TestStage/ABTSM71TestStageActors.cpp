@@ -18,19 +18,6 @@ namespace
 {
 	constexpr float BasicShapeSizeCM = 100.0f;
 
-	FTransform MakeWorldShapeTransform(
-		const AActor& Owner,
-		const FVector& LocalPositionWithoutActorScale,
-		const FQuat& LocalRotation,
-		const FVector& WorldScale)
-	{
-		const FQuat ActorRotation = Owner.GetActorQuat();
-		return FTransform(
-			ActorRotation * LocalRotation,
-			Owner.GetActorLocation() + ActorRotation.RotateVector(LocalPositionWithoutActorScale),
-			WorldScale);
-	}
-
 	FVector DivideScaleSafely(const FVector& Scale, const FVector& Divisor)
 	{
 		return FVector(
@@ -283,7 +270,6 @@ AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
 		DefaultPouchMesh = Sphere.Object;
 		PouchPreview->SetStaticMesh(DefaultPouchMesh);
 	}
-	PouchVisual.LocalScale = FVector(0.45f, 0.90f, 0.12f);
 }
 
 void AABTSM71PlaceableSlingshotActor::OnConstruction(const FTransform& Transform)
@@ -296,14 +282,17 @@ void AABTSM71PlaceableSlingshotActor::UpdatePreview()
 {
 	const float YScaleOnly = FMath::Max(0.01f, FMath::Abs(GetActorScale3D().Y));
 	const float HalfSpacing = BaseStakeSpacingCM * YScaleOnly * 0.5f;
-	const FVector ShapeScale(StakeDiameterCM / BasicShapeSizeCM, StakeDiameterCM / BasicShapeSizeCM, StakeHeightCM / BasicShapeSizeCM);
-	const FVector BaseA(0.0f, -HalfSpacing, StakeHeightCM * 0.5f);
-	const FVector BaseB(0.0f, HalfSpacing, StakeHeightCM * 0.5f);
+	const FVector BaseAWorld = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, -HalfSpacing, 0.0f));
+	const FVector BaseBWorld = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, HalfSpacing, 0.0f));
 	StakePreviewA->SetStaticMesh(StakeVisual.Mesh ? StakeVisual.Mesh : DefaultStakeMesh);
 	StakePreviewB->SetStaticMesh(StakeVisual.Mesh ? StakeVisual.Mesh : DefaultStakeMesh);
-	const FVector StakeOffset = StakeVisual.LocalOffsetCM;
-	StakePreviewA->SetWorldTransform(MakeWorldShapeTransform(*this, BaseA + StakeOffset, StakeVisual.LocalRotation.Quaternion(), ShapeScale * StakeVisual.LocalScale));
-	StakePreviewB->SetWorldTransform(MakeWorldShapeTransform(*this, BaseB + StakeOffset, StakeVisual.LocalRotation.Quaternion(), ShapeScale * StakeVisual.LocalScale));
+	const FVector StakeTargetSize(FMath::Max(1.0f, StakeDiameterCM), FMath::Max(1.0f, StakeDiameterCM), FMath::Max(1.0f, StakeHeightCM));
+	StakePreviewA->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+		StakePreviewA->GetStaticMesh(), BaseAWorld, GetActorQuat(), StakeTargetSize, StakeVisual,
+		EABTSSlingshotVisualAnchor::BoundsBottomCenter));
+	StakePreviewB->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+		StakePreviewB->GetStaticMesh(), BaseBWorld, GetActorQuat(), StakeTargetSize, StakeVisual,
+		EABTSSlingshotVisualAnchor::BoundsBottomCenter));
 	const FVector EndpointA = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, -HalfSpacing, StakeHeightCM) + ConnectionLayout.StakeAConnectionOffsetCM);
 	const FVector EndpointB = GetActorLocation() + GetActorQuat().RotateVector(FVector(0.0f, HalfSpacing, StakeHeightCM) + ConnectionLayout.StakeBConnectionOffsetCM);
 	const FVector PouchCenter = (EndpointA + EndpointB) * 0.5f + GetActorQuat().RotateVector(ConnectionLayout.RestPouchOffsetCM);
@@ -317,22 +306,21 @@ void AABTSM71PlaceableSlingshotActor::UpdatePreview()
 		const float Length = Delta.Size();
 		if (Length <= SMALL_NUMBER) return;
 		const FQuat BaseRotation = FQuat::FindBetweenNormals(FVector::UpVector, Delta / Length);
-		const FTransform BaseTransform(BaseRotation, (Start + End) * 0.5f,
-			FVector(CordThicknessCM / BasicShapeSizeCM, CordThicknessCM / BasicShapeSizeCM, Length / BasicShapeSizeCM));
-		Component->SetWorldTransform(FTransform(
-			BaseRotation * CordVisual.LocalRotation.Quaternion(),
-			BaseTransform.TransformPosition(CordVisual.LocalOffsetCM),
-			BaseTransform.GetScale3D() * CordVisual.LocalScale));
+		Component->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+			Component->GetStaticMesh(),
+			(Start + End) * 0.5f,
+			BaseRotation,
+			FVector(CordThicknessCM, CordThicknessCM, Length),
+			CordVisual,
+			EABTSSlingshotVisualAnchor::BoundsCenter));
 	};
 	SetPreviewSegment(CordPreview, EndpointA, PouchAnchorA);
 	SetPreviewSegment(CordPreviewB, EndpointB, PouchAnchorB);
 	PouchPreview->SetStaticMesh(PouchVisual.Mesh ? PouchVisual.Mesh : DefaultPouchMesh);
 	PouchPreview->SetVisibility(PouchPreview->GetStaticMesh() != nullptr);
-	const FTransform PouchBaseTransform(GetActorQuat(), PouchCenter, FVector::OneVector);
-	PouchPreview->SetWorldTransform(FTransform(
-		PouchBaseTransform.GetRotation() * PouchVisual.LocalRotation.Quaternion(),
-		PouchBaseTransform.TransformPosition(PouchVisual.LocalOffsetCM),
-		PouchVisual.LocalScale));
+	PouchPreview->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
+		PouchPreview->GetStaticMesh(), PouchCenter, GetActorQuat(), PouchSizeCM, PouchVisual,
+		EABTSSlingshotVisualAnchor::BoundsCenter));
 	if (StakeVisual.Material)
 	{
 		StakePreviewA->SetMaterial(0, StakeVisual.Material);
@@ -379,7 +367,7 @@ void AABTSM71PlaceableSlingshotActor::SpawnRuntimeSlingshot()
 	AABTSM51SlingshotCord* Cord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(AABTSM51SlingshotCord::StaticClass(), FTransform::Identity, Params);
 	if (Cord == nullptr) return;
 	Cord->InitializeCordWithTier(StakeA, StakeB, EndpointA, EndpointB, SlingshotTier);
-	Cord->ConfigureTwoCordVisuals(CordVisual, PouchVisual, ConnectionLayout, CordThicknessCM);
+	Cord->ConfigureTwoCordVisuals(CordVisual, PouchVisual, ConnectionLayout, CordThicknessCM, PouchSizeCM);
 	RuntimeStakeA = StakeA;
 	RuntimeStakeB = StakeB;
 	RuntimeCord = Cord;
