@@ -2,7 +2,7 @@
 
 > 文档性质：M7.3 新路线的独立调研与算法设计；本轮不修改 C++、地图或资产。
 >
-> 状态：调研与方案完成，待按文末阶段拆分实施。
+> 状态：调研与方案完成；纯数据语法阶段已落地，见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 
@@ -777,6 +777,8 @@ FailureFrontier
 
 ### M7.3-DAG-1：纯数据 IR 与递归语法
 
+> 工程实现、确定性 Seed、预算终止、自动化测试与验收见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)。
+
 - 实现 Series/Parallel 表达式、支撑策略与推导树；
 - 固定生成三种基准表达式；
 - 实现深度、节点、规则步数和预估砖预算；
@@ -928,4 +930,3 @@ ABTS.M73DAG.NoveltyBatch
 3. Microsoft Learn. [Introduction to Jigsaw Structures](https://learn.microsoft.com/en-us/minecraft/creator/documents/structures/introductiontojigsawstructures?view=minecraft-bedrock-stable)。
 4. SideFX. [Labs Building Generator 4.0](https://www.sidefx.com/docs/houdini/nodes/sop/labs--building_generator-4.0.html)。
 5. Epic Games. [Chaos Geometry Collection Clustering](https://dev.epicgames.com/documentation/en-us/unreal-engine/cluster-geometry-collections-user-guide-in-unreal-engine) · [Chaos Fields](https://dev.epicgames.com/documentation/en-us/unreal-engine/chaos-fields-user-guide-in-unreal-engine)。
-

@@ -10,7 +10,7 @@ namespace
 	constexpr int32 ExposureGridSize = 5;
 	constexpr float OcclusionToleranceCM = 0.5f;
 
-	double NodeMass(
+	double AnalysisNodeMass(
 		const FABTSM73BrickNode& Node,
 		const TConstArrayView<FABTSM7MaterialProfile> Profiles)
 	{
@@ -253,7 +253,7 @@ namespace ABTSM73WeakPointAnalysis
 		OutUnsupported.Reset();
 		for (const FABTSM73BrickNode& Node : Data.Bricks)
 		{
-			const double Mass = NodeMass(Node, Profiles);
+			const double Mass = AnalysisNodeMass(Node, Profiles);
 			TotalMass += Mass;
 			if (Node.NodeId != RemovedNodeId && !Reachable.Contains(Node.NodeId))
 			{

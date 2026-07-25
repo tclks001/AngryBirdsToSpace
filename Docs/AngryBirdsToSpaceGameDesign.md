@@ -13,7 +13,7 @@
 - 鸟群、相机与 UI：[鸟群跟随 Gameplay](BirdPartyFollowingGameplayDesign.md) · [M4 工程落地](M4BirdPartyImplementationDesign.md) · [M4 Orbit Camera](M4MultiCharacterOrbitCameraDesign.md) · [UI 系统](UISystemDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
 - 物品与世界交互：[M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/放置/装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md)
 - 弹弓与物理破坏：[M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 弹弓视觉](M6SlingshotVisualPresentationDesign.md) · [物理碰撞破坏调研](PhysicsImpactDestructionResearch.md)
-- 建筑：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点（Legacy 对照）](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)
+- 建筑：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点（Legacy 对照）](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 新路线调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-1 纯数据语法实现](M73DAG1RecursiveGrammarImplementationDesign.md)
 - 资产与工程参考：[Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md)
 
 ## 1. 概念与终局
@@ -256,6 +256,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M7.3-B | 弱点与难度 | 对支撑 DAG 逐节点执行 Ground 可达性反事实探针，按真实材质密度计算失撑质量，以攻击方向暴露度和 M7 Profile 破坏成本选择弱点；支持非弱点有限强化、红色编辑器高亮、难度窗口与确定性自动化测试。详见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。 |
 | M7.3-B2 | 结构弱点与失效验证 | 在最终支撑图建立前合成关键角、非对称双支撑和偏置接缝三种无装置弱点，以 Contact Hull、载荷 COM、`TipMargin` 和 `ReseatRisk` 同时保证完整时稳定、破坏后倾覆且不易原位承接。详见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。 |
 | M7.3-DAG | 递归主体承载图 PCG | 新路线以轮廓 Macro DAG 为低频骨架，通过串联/并联规则递归细分，再编译为砖块并从真实碰撞反建 Contact DAG；弱点从主体中下部 Failure Frontier 推导，以主体受影响质量、旁路、倾覆/滑移和 Chaos 反事实验证，解决 B2 只让顶部冠段掉落的问题。旧 A/B/B2 保留为 Legacy 对照。详见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。 |
+| M7.3-DAG-1 | 纯数据递归语法 | 已建立独塔、拱门、双塔桥基准表达式，Series/Parallel 与并联策略，路径级确定性递归、抽象/砖块预估预算终止、Macro 支撑 DAG、Ground/Top frontier、规范表达式/拓扑 Hash 和纯数据自动化测试；不接 Actor、砖块或 Chaos，不改变 Legacy 地图行为。详见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `Sub=2/3` 潮汐锁定卫星和引力走廊；强化发射预览与实际轨迹发生可见偏转。 |
 | M10 | 侦察 | 青翎近射侦察更新小地图，标记道路外目标与引力走廊。 |

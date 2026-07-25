@@ -146,4 +146,12 @@
 | 四个 Seed 下 SingleTower 弱点仍只沿局部 Y 倾倒，或多塔弱点朝中心 Connector | 旧双支撑模板只用 `Corner.Y`，忽略 X 象限；多塔若原样保留内向弱侧，则会被中心 Connector 遮挡，或为了避让而离开承台 | `AsymmetricDualSupport` 的整条支撑线由 `Corner.X` 选择 `+X/-X`，弱柱由 `Corner.Y` 选择，`TipDirection` 使用完整四象限 Corner；Gate/Twin 将朝中心的弱侧镜像至所选塔外侧 | 192 组矩阵通过；四象限断言明确针对 SingleTower/双支撑，Gate/Twin 验证弱侧始终朝所选塔外侧，不要求同一多塔轮廓保留四个最终局部象限 |
 | `IdlePenetrationValidation` 显示 `Repairs>0`，微调后看起来仍能站立 | 微调改变了真实 Module Transform，但 Builder 支撑边、Contact Hull 和 B2 `TipMargin` 仍基于原生成几何；继续验收会产生数据与 Chaos 不一致的假通过 | M7.3-A 将任意 `Repairs>0`、`LargeErrors>0` 或 `RemainingSmall>0` 直接判为 `IdlePenetrationInvalid`，不进入 quiet-window；从 Pivot、Simple Collision、生成尺寸和间隙上消除穿透 | 合格建筑预检必须为 `Repairs=0 LargeErrors=0 RemainingSmall=0`；出现修复时日志紧接 `PenetrationRejected=1 ... Accepted=0` |
 | 三种 B2 Pattern 看起来相同，击毁弱点只掉顶部小段 | 基础主楼仍是四柱整板重复；`WeaknessStructureBuilder` 从 `HighestDeck` 添加共用的 Carrier 与两个 Payload；`PostFailureValidator` 从最高处 Carrier 向上收集，测试又固定断言受影响节点为 3 | 不继续用尺寸/材料掩盖；B2 保留为 Legacy 顶冠对照，新路线改为递归主体 Macro DAG，并从中下部 Failure Frontier 推导弱点，最终以真实 Contact DAG 和 Chaos 反事实验证 | 新路线要求主体受影响质量/高度跨度达到门槛、无旁路、弱点攻击显著优于普通攻击；详见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) |
+
+## 10. M7.3-DAG 递归主体建筑
+
+| 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| 新增 DAG-1 源文件后，Unity Build 报 `WeakPointAnalysis.cpp` 与 `PostFailureValidator.cpp` 的匿名命名空间 `NodeMass` 重定义 | 两个旧 `.cpp` 都定义了同签名内部函数；此前恰好位于不同 Unity 编译单元，新文件改变 Adaptive Unity 分桶后进入同一 TU | 分别改为 `AnalysisNodeMass` 和 `FailureProbeNodeMass`，不改变质量公式与调用结果 | Editor 构建成功；fresh-process `ABTS.M73A/B/B2` 四项 Legacy 回归全部 Success |
+| 扩大 `ExpansionStepBudget` 后旧递归路径改变 | 使用共享 `FRandomStream` 会让随机结果依赖调用总次数和遍历顺序 | DAG-1 以 `Seed + Version + Preset + DerivationPath + Salt` 生成路径级随机；候选顺序和规则选择使用不同 Salt | `ABTS.M73DAG.RecursiveExpansionDeterminism` 对短/长预算比较轨迹前缀 |
+| 预估砖预算耗尽时整栋生成失败 | 若沿用 Legacy 的生成后总量检查，会再次出现 `51:50` 式整栋消失 | 每次规则应用前检查下一步抽象节点和预估砖成本；超限时保留当前合法 DAG 并标记 `bBudgetTerminated` | `ABTS.M73DAG.BudgetTermination` 验证仅一次二分可用时仍成功输出五个 Macro |
 | Idle 验证失败后建筑、地基一起消失，或担心不可见地基仍阻挡 Gameplay | 失败统一进入 `RejectRuntimeStructure`；这是刻意的事务回滚，而不是简单隐藏主体。继续保留失败模块或 Foundation 会让无效结构参与 M6/M7 碰撞 | 销毁所有 Runtime Module，清空 RuntimeModules、Node→Module 映射和 Idle 缓存，停止 Tick；隐藏 FoundationCap、清空 FoundationFeet，并把二者碰撞设为 `NoCollision`。后续重试通过 `UpdateFoundationComponents` 恢复 Foundation 可见性、实例与 `QueryAndPhysics` 碰撞，再重新装配验证 | `Accepted=0` 后场景中无该建筑模块、鸟和弹丸不会撞到隐形 Foundation；修复参数并重新初始化后 Foundation 和模块完整恢复，重新执行穿透与 quiet-window 验证 |

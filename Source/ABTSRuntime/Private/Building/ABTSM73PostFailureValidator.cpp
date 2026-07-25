@@ -8,7 +8,7 @@
 
 namespace
 {
-	double NodeMass(
+	double FailureProbeNodeMass(
 		const FABTSM73BrickNode& Node,
 		const TConstArrayView<FABTSM7MaterialProfile> Profiles)
 	{
@@ -142,7 +142,7 @@ namespace
 		{
 			const FABTSM73BrickNode* Node = FindNode(Data, NodeId);
 			if (Node == nullptr) return false;
-			const double Mass = NodeMass(*Node, Profiles);
+			const double Mass = FailureProbeNodeMass(*Node, Profiles);
 			OutMass += Mass;
 			OutCenterOfMass += Node->LocalCenter * Mass;
 			OutBottomZ = FMath::Min(OutBottomZ, Node->LocalCenter.Z - Node->DimensionsCM.Z * 0.5f);
@@ -187,7 +187,7 @@ bool FABTSM73PostFailureValidator::EvaluateAuthoredIntent(
 		return false;
 	}
 	double TotalMass = 0.0;
-	for (const FABTSM73BrickNode& Node : Data.Bricks) TotalMass += NodeMass(Node, MaterialProfiles);
+	for (const FABTSM73BrickNode& Node : Data.Bricks) TotalMass += FailureProbeNodeMass(Node, MaterialProfiles);
 	OutResult.AffectedMassRatio = TotalMass > SMALL_NUMBER ? static_cast<float>(AffectedMass / TotalMass) : 0.0f;
 
 	TArray<FVector2D> FullContactPoints;
