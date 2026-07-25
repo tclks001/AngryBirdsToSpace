@@ -20,6 +20,9 @@ private:
 		const FABTSM73DAGGenerationResult& Graph, const FABTSM73DAGLayoutSettings& Settings,
 		const TMap<int32, int32>& MacroByExpression, FABTSM73DAGSpatialLayout& InOutLayout,
 		FString& OutError) const;
+	bool AssignStructuralLevels(const FABTSM73DAGGenerationResult& Graph,
+		const FABTSM73DAGLayoutSettings& Settings, FABTSM73DAGSpatialLayout& InOutLayout,
+		FString& OutError) const;
 	bool SelectSparseSupports(const FABTSM73DAGGenerationResult& Graph,
 		const FABTSM73DAGLayoutSettings& Settings, FABTSM73DAGSpatialLayout& InOutLayout,
 		FString& OutError) const;

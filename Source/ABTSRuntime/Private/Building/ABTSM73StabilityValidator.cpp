@@ -7,7 +7,7 @@
 
 namespace
 {
-	FBox NodeBox(const FABTSM73BrickNode& Node)
+	FBox StabilityNodeBox(const FABTSM73BrickNode& Node)
 	{
 		return FBox(Node.LocalCenter - Node.DimensionsCM * 0.5f, Node.LocalCenter + Node.DimensionsCM * 0.5f);
 	}
@@ -17,7 +17,7 @@ namespace
 		return FMath::Min(MaxA, MaxB) - FMath::Max(MinA, MinB);
 	}
 
-	float Cross2D(const FVector2D& Origin, const FVector2D& A, const FVector2D& B)
+	float StabilityCross2D(const FVector2D& Origin, const FVector2D& A, const FVector2D& B)
 	{
 		return (A.X - Origin.X) * (B.Y - Origin.Y) - (A.Y - Origin.Y) * (B.X - Origin.X);
 	}
@@ -41,7 +41,7 @@ namespace
 		TArray<FVector2D> Hull;
 		for (const FVector2D& Point : Points)
 		{
-			while (Hull.Num() >= 2 && Cross2D(Hull[Hull.Num() - 2], Hull.Last(), Point) <= KINDA_SMALL_NUMBER)
+			while (Hull.Num() >= 2 && StabilityCross2D(Hull[Hull.Num() - 2], Hull.Last(), Point) <= KINDA_SMALL_NUMBER)
 			{
 				Hull.Pop();
 			}
@@ -51,7 +51,7 @@ namespace
 		for (int32 Index = Points.Num() - 2; Index >= 0; --Index)
 		{
 			const FVector2D& Point = Points[Index];
-			while (Hull.Num() > LowerCount && Cross2D(Hull[Hull.Num() - 2], Hull.Last(), Point) <= KINDA_SMALL_NUMBER)
+			while (Hull.Num() > LowerCount && StabilityCross2D(Hull[Hull.Num() - 2], Hull.Last(), Point) <= KINDA_SMALL_NUMBER)
 			{
 				Hull.Pop();
 			}
@@ -68,7 +68,7 @@ namespace
 		bool bHasNegative = false;
 		for (int32 Index = 0; Index < Hull.Num(); ++Index)
 		{
-			const float Side = Cross2D(Hull[Index], Hull[(Index + 1) % Hull.Num()], Point);
+			const float Side = StabilityCross2D(Hull[Index], Hull[(Index + 1) % Hull.Num()], Point);
 			bHasPositive |= Side > KINDA_SMALL_NUMBER;
 			bHasNegative |= Side < -KINDA_SMALL_NUMBER;
 			if (bHasPositive && bHasNegative) return false;
@@ -115,10 +115,10 @@ bool FABTSM73StabilityValidator::Validate(
 	constexpr float PenetrationToleranceCM = 0.25f;
 	for (int32 A = 0; A < Data.Bricks.Num(); ++A)
 	{
-		const FBox BoxA = NodeBox(Data.Bricks[A]);
+		const FBox BoxA = StabilityNodeBox(Data.Bricks[A]);
 		for (int32 B = A + 1; B < Data.Bricks.Num(); ++B)
 		{
-			const FBox BoxB = NodeBox(Data.Bricks[B]);
+			const FBox BoxB = StabilityNodeBox(Data.Bricks[B]);
 			const float X = PositiveOverlap(BoxA.Min.X, BoxA.Max.X, BoxB.Min.X, BoxB.Max.X);
 			const float Y = PositiveOverlap(BoxA.Min.Y, BoxA.Max.Y, BoxB.Min.Y, BoxB.Max.Y);
 			const float Z = PositiveOverlap(BoxA.Min.Z, BoxA.Max.Z, BoxB.Min.Z, BoxB.Max.Z);

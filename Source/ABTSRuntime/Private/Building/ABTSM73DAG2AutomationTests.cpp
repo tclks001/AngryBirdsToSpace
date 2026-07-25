@@ -254,4 +254,70 @@ bool FABTSM73DAGNestingLayoutTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAGStructuralContinuityTest,
+	"ABTS.M73DAG.StructuralRankAndPhysicalContinuity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAGStructuralContinuityTest::RunTest(const FString& Parameters)
+{
+	FABTSM73GenerationSettings BuildingSettings;
+	BuildingSettings.GenerationAlgorithm = EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	BuildingSettings.bGenerateStructuralWeakness = false;
+	BuildingSettings.MaxBrickCount = 256;
+	FABTSM73DAGGenerationSettings DAGSettings;
+	DAGSettings.Preset = EABTSM73DAGPreset::TwinTowerBridge;
+	DAGSettings.BuildingSeed = 730121;
+	DAGSettings.MaxExpansionDepth = 3;
+	DAGSettings.ExpansionStepBudget = 12;
+	DAGSettings.MaxAbstractNodeCount = 128;
+	DAGSettings.MaxEstimatedBrickCount = 256;
+	DAGSettings.ReservedWeaknessBrickCount = 0;
+	FABTSM73DAGLayoutSettings LayoutSettings;
+	// Give recursive Parallel splits enough XY space. TargetHeight deliberately
+	// remains at its normal value: structural rank must resolve Z independently.
+	LayoutSettings.TargetWidthCM = 1600.0f;
+	LayoutSettings.TargetDepthCM = 1600.0f;
+	FABTSM73DAGBuildingPipeline Pipeline;
+	FABTSM73StructureData Data;
+	FString Error;
+	const bool bBuilt = Pipeline.Build(DAGSettings, LayoutSettings, BuildingSettings, Data, Error);
+	TestTrue(FString::Printf(TEXT("High-budget mixed DAG builds without local Z-scope rejection: %s"), *Error), bBuilt);
+	if (!bBuilt) return false;
+
+	TSet<int32> SupportedLoadMacros;
+	for (const FABTSM73DAGPhysicalSupportMapping& Mapping : Data.DAGPhysicalSupportMappings)
+	{
+		SupportedLoadMacros.Add(Mapping.LoadMacroNodeId);
+		if (!Data.Bricks.IsValidIndex(Mapping.SupportPlateNodeId)
+			|| !Data.Bricks.IsValidIndex(Mapping.LoadPlateNodeId)) continue;
+		const FABTSM73BrickNode& Lower = Data.Bricks[Mapping.SupportPlateNodeId];
+		const FABTSM73BrickNode& Upper = Data.Bricks[Mapping.LoadPlateNodeId];
+		TestEqual(TEXT("Every selected physical support spans exactly one structural rank"),
+			Upper.StoreyIndex, Lower.StoreyIndex + 1);
+		for (const int32 ColumnId : Mapping.ColumnNodeIds)
+		{
+			if (!Data.Bricks.IsValidIndex(ColumnId)) continue;
+			TestTrue(TEXT("Every realized column meets the minimum clear height"),
+				Data.Bricks[ColumnId].DimensionsCM.Z + KINDA_SMALL_NUMBER >= LayoutSettings.MinColumnHeightCM);
+		}
+	}
+	TSet<int32> GroundMacros;
+	for (const FABTSM73BrickNode& Brick : Data.Bricks)
+	{
+		if (Brick.MacroNodeId != INDEX_NONE
+			&& Brick.LocalCenter.Z - Brick.DimensionsCM.Z * 0.5f <= LayoutSettings.ContactToleranceCM)
+		{
+			GroundMacros.Add(Brick.MacroNodeId);
+		}
+	}
+	for (const FABTSM73BrickNode& Brick : Data.Bricks)
+	{
+		if (Brick.MacroNodeId == INDEX_NONE || GroundMacros.Contains(Brick.MacroNodeId)) continue;
+		TestTrue(FString::Printf(TEXT("Non-ground macro plate %d has a visible physical support"), Brick.MacroNodeId),
+			SupportedLoadMacros.Contains(Brick.MacroNodeId));
+	}
+	return true;
+}
+
 #endif

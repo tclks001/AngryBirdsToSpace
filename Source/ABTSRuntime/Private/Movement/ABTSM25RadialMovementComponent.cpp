@@ -263,8 +263,8 @@ void UABTSM25RadialMovementComponent::ResolveBaseSphereContact(const float Delta
 	const float RadialSpeed = FVector::DotProduct(Velocity, Up);
 
 	const bool bWasGrounded = bGrounded;
-	const float ContactToleranceCM = bWasGrounded ? GroundDetachToleranceCM : GroundSnapToleranceCM;
-	const bool bAtBaseSphere = CurrentRadius <= DesiredRadius + ContactToleranceCM;
+	const float ActiveContactToleranceCM = bWasGrounded ? GroundDetachToleranceCM : GroundSnapToleranceCM;
+	const bool bAtBaseSphere = CurrentRadius <= DesiredRadius + ActiveContactToleranceCM;
 	// Ordinary uphill velocity also has an outward radial component. It must not
 	// detach an existing ground contact; only an already-airborne launch uses this
 	// speed gate (the jump path explicitly clears bGrounded first).
@@ -279,7 +279,7 @@ void UABTSM25RadialMovementComponent::ResolveBaseSphereContact(const float Delta
 			CurrentRadius - DesiredRadius,
 			RadialSpeed,
 			SurfaceNormalUpDot,
-			ContactToleranceCM,
+			ActiveContactToleranceCM,
 			bAtBaseSphere ? 1 : 0,
 			bExplicitlyLaunching ? 1 : 0);
 	}

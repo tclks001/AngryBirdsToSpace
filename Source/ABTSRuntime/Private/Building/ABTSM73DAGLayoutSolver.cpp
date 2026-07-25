@@ -173,6 +173,11 @@ bool FABTSM73DAGLayoutSolver::Solve(
 		OutLayout.RejectReason = OutError;
 		return false;
 	}
+	if (!AssignStructuralLevels(Graph, Settings, OutLayout, OutError))
+	{
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
 	OutLayout.bAccepted = true;
 	return true;
 }
@@ -201,8 +206,7 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 			OutError = FString::Printf(TEXT("DAGMacroForExpressionMissing:%d"), ExpressionNodeId);
 			return false;
 		}
-		if (ScopeSize.X < Settings.MinPlateExtentCM || ScopeSize.Y < Settings.MinPlateExtentCM
-			|| ScopeSize.Z < Settings.PlateThicknessCM)
+		if (ScopeSize.X < Settings.MinPlateExtentCM || ScopeSize.Y < Settings.MinPlateExtentCM)
 		{
 			OutError = FString::Printf(TEXT("DAGScopeTooSmall:%d:%.1f:%.1f:%.1f"), *MacroNodeId, ScopeSize.X, ScopeSize.Y, ScopeSize.Z);
 			return false;
@@ -213,9 +217,11 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 		Layout.bGroundTerminal = IsGroundMacro(Graph, *MacroNodeId);
 		Layout.PlateDimensionsCM = FVector(ScopeSize.X * Settings.PlateFootprintRatio,
 			ScopeSize.Y * Settings.PlateFootprintRatio, Settings.PlateThicknessCM);
-		Layout.PlateCenter = Scope.GetCenter();
-		if (Layout.bGroundTerminal) Layout.PlateCenter.Z = Scope.Min.Z + Settings.PlateThicknessCM * 0.5f;
-		Layout.StructuralLevel = FMath::RoundToInt(Layout.PlateCenter.Z / FMath::Max(1.0f, Settings.PlateThicknessCM));
+		// Recursive expression scopes own only the XY footprint. Z is solved later
+		// from the compiled support DAG, so grammar depth cannot create short or
+		// same-height physical columns.
+		Layout.PlateCenter = FVector(Scope.GetCenter().X, Scope.GetCenter().Y, 0.0f);
+		Layout.StructuralLevel = INDEX_NONE;
 		return true;
 	}
 	if (Expression.ChildNodeIds.Num() < 2)
@@ -234,20 +240,11 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 	}
 	if (Expression.Operator == EABTSM73DAGOperator::Series)
 	{
-		const float AvailableHeight = ScopeSize.Z - Settings.SeriesGapCM * static_cast<float>(ChildCount - 1);
-		const float ChildHeight = AvailableHeight / static_cast<float>(ChildCount);
-		if (ChildHeight < Settings.PlateThicknessCM)
-		{
-			OutError = FString::Printf(TEXT("DAGSeriesScopeTooShort:%d:%.1f"), ExpressionNodeId, ChildHeight);
-			return false;
-		}
-		float TopZ = Scope.Max.Z;
+		// A Series operator describes support order, not another subdivision of
+		// the height budget. All children retain the same XY construction scope.
 		for (const int32 ChildId : LayoutChildren)
 		{
-			const float BottomZ = TopZ - ChildHeight;
-			const FBox ChildScope(FVector(Scope.Min.X, Scope.Min.Y, BottomZ), FVector(Scope.Max.X, Scope.Max.Y, TopZ));
-			if (!AssignExpressionScope(ChildId, ChildScope, Graph, Settings, MacroByExpression, InOutLayout, OutError)) return false;
-			TopZ = BottomZ - Settings.SeriesGapCM;
+			if (!AssignExpressionScope(ChildId, Scope, Graph, Settings, MacroByExpression, InOutLayout, OutError)) return false;
 		}
 		return true;
 	}
@@ -281,6 +278,59 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 	return true;
 }
 
+bool FABTSM73DAGLayoutSolver::AssignStructuralLevels(
+	const FABTSM73DAGGenerationResult& Graph,
+	const FABTSM73DAGLayoutSettings& Settings,
+	FABTSM73DAGSpatialLayout& InOutLayout,
+	FString& OutError) const
+{
+	TMap<int32, int32> LevelByMacro;
+	for (const FABTSM73DAGMacroNode& Macro : Graph.MacroNodes) LevelByMacro.Add(Macro.NodeId, 0);
+
+	// Support -> Load is a DAG. Repeated relaxation computes its longest-path
+	// rank without relying on expression recursion depth or node numbering.
+	for (int32 Pass = 0; Pass < Graph.MacroNodes.Num(); ++Pass)
+	{
+		bool bChanged = false;
+		for (const FABTSM73DAGSelectedSupport& Edge : InOutLayout.SelectedSupports)
+		{
+			const int32* SupportLevel = LevelByMacro.Find(Edge.SupportMacroNodeId);
+			int32* LoadLevel = LevelByMacro.Find(Edge.LoadMacroNodeId);
+			if (SupportLevel == nullptr || LoadLevel == nullptr)
+			{
+				OutError = TEXT("DAGStructuralLevelNodeMissing");
+				return false;
+			}
+			const int32 RequiredLevel = *SupportLevel + 1;
+			if (*LoadLevel < RequiredLevel) { *LoadLevel = RequiredLevel; bChanged = true; }
+		}
+		if (!bChanged) break;
+		if (Pass == Graph.MacroNodes.Num() - 1)
+		{
+			OutError = TEXT("DAGStructuralLevelCycle");
+			return false;
+		}
+	}
+
+	int32 MaxLevel = 0;
+	for (const TPair<int32, int32>& Pair : LevelByMacro) MaxLevel = FMath::Max(MaxLevel, Pair.Value);
+	const float RequiredPitch = Settings.PlateThicknessCM + Settings.MinColumnHeightCM;
+	const float TargetPitch = MaxLevel > 0
+		? (Settings.TargetHeightCM - Settings.PlateThicknessCM) / static_cast<float>(MaxLevel)
+		: RequiredPitch;
+	const float LevelPitch = FMath::Max(RequiredPitch, TargetPitch);
+	for (FABTSM73DAGMacroLayout& Layout : InOutLayout.MacroLayouts)
+	{
+		const int32* Level = LevelByMacro.Find(Layout.MacroNodeId);
+		if (Level == nullptr) { OutError = TEXT("DAGStructuralLevelLayoutMissing"); return false; }
+		Layout.StructuralLevel = *Level;
+		Layout.PlateCenter.Z = Settings.PlateThicknessCM * 0.5f + LevelPitch * static_cast<float>(*Level);
+		Layout.AllowedScope.Min.Z = Layout.PlateCenter.Z - Settings.PlateThicknessCM * 0.5f;
+		Layout.AllowedScope.Max.Z = Layout.PlateCenter.Z + Settings.PlateThicknessCM * 0.5f;
+	}
+	return true;
+}
+
 bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	const FABTSM73DAGGenerationResult& Graph,
 	const FABTSM73DAGLayoutSettings& Settings,
@@ -288,6 +338,19 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	FString& OutError) const
 {
 	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> CandidatesByLoad;
+	TMap<int32, int32> ProvisionalLevelByMacro;
+	for (const FABTSM73DAGMacroNode& Macro : Graph.MacroNodes) ProvisionalLevelByMacro.Add(Macro.NodeId, 0);
+	for (int32 Pass = 0; Pass < Graph.MacroNodes.Num(); ++Pass)
+	{
+		bool bChanged = false;
+		for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
+		{
+			const int32 SupportLevel = ProvisionalLevelByMacro.FindRef(Edge.SupportNodeId);
+			int32& LoadLevel = ProvisionalLevelByMacro.FindChecked(Edge.LoadNodeId);
+			if (LoadLevel < SupportLevel + 1) { LoadLevel = SupportLevel + 1; bChanged = true; }
+		}
+		if (!bChanged) break;
+	}
 	for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
 	{
 		const FABTSM73DAGMacroLayout* Support = FindLayout(InOutLayout, Edge.SupportNodeId);
@@ -333,12 +396,33 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		}
 		Candidates->Sort([](const FABTSM73DAGSelectedSupport& A, const FABTSM73DAGSelectedSupport& B)
 		{
+			// Prefer a self-stable physical footprint. A single logical edge that
+			// realizes a tripod/four-point hull is safer than mixing unrelated DAG
+			// parents whose upstream chains can resolve to different structural ranks.
+			const bool bASingleInterface = A.SupportPattern == EABTSM73DAGSupportPattern::SingleColumnInterface;
+			const bool bBSingleInterface = B.SupportPattern == EABTSM73DAGSupportPattern::SingleColumnInterface;
+			if (bASingleInterface != bBSingleInterface) return !bASingleInterface;
 			if (!FMath::IsNearlyEqual(A.Cost, B.Cost)) return A.Cost < B.Cost;
 			return A.SupportMacroNodeId < B.SupportMacroNodeId;
 		});
+		// Multiple parents may jointly stabilize a wide plate, but they must come
+		// from one structural rank. Prefer the highest feasible rank so the chosen
+		// physical graph remains continuous without multi-storey columns.
+		int32 ChosenParentLevel = INDEX_NONE;
+		for (const FABTSM73DAGSelectedSupport& Candidate : *Candidates)
+		{
+			ChosenParentLevel = FMath::Max(ChosenParentLevel,
+				ProvisionalLevelByMacro.FindRef(Candidate.SupportMacroNodeId));
+		}
+		TArray<FABTSM73DAGSelectedSupport> SameLevelCandidates;
+		for (const FABTSM73DAGSelectedSupport& Candidate : *Candidates)
+		{
+			if (ProvisionalLevelByMacro.FindRef(Candidate.SupportMacroNodeId) == ChosenParentLevel)
+				SameLevelCandidates.Add(Candidate);
+		}
 		const int32 SelectedCount = FMath::Min3(Settings.PreferredLogicalSupportsPerLoad,
-			Settings.MaxLogicalSupportsPerLoad, Candidates->Num());
-		for (int32 Index = 0; Index < SelectedCount; ++Index) InOutLayout.SelectedSupports.Add((*Candidates)[Index]);
+			Settings.MaxLogicalSupportsPerLoad, SameLevelCandidates.Num());
+		for (int32 Index = 0; Index < SelectedCount; ++Index) InOutLayout.SelectedSupports.Add(SameLevelCandidates[Index]);
 	}
 	if (InOutLayout.SelectedSupports.IsEmpty())
 	{

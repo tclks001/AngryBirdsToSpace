@@ -99,6 +99,16 @@ Expansion Step Budget = 0
 | `DAGNoFeasibleSupport` | 接触交集无法容纳所选三角/四角支撑 | 增大 Scope、减小柱宽或切换较小 Pattern；不要降低 Clearance 至 0 |
 | Parallel 一开启便 `DAGNoFeasibleSupport` | 相邻并联层分支数不同，单条逻辑入边的投影较窄，但多条入边本应共同承载同一楼板 | 开启窄支撑与自适应宽度；窄入边可记录为内部 `SingleColumnInterface`，实际宽度不低于 `MinAdaptiveColumnWidthCM` |
 | 嵌套 Series 报 `DAGSeriesScopeTooShort`，提高总高度后仍快速复发 | 同类 Series 曾在每层递归重复均分父 Scope，造成高度预算指数缩水 | 同类 Series/Parallel 在布局阶段关联扁平化，在一个父 Scope 内只分割一次 |
+
+### XY Scope 与结构 Z 层级解耦
+
+递归表达式的 Scope 现在只决定楼板的 XY 占地范围。Series 表达的是承载先后关系，不再继续切分局部高度。最终 Support DAG 按 `Support -> Load` 方向求最长路径层级，所有楼板的 Z 坐标由层级统一确定。
+
+层间距至少为 `PlateThicknessCM + MinColumnHeightCM`。`TargetHeightCM` 是目标高度；当递归层数增多、目标高度不足时，布局会自动扩高到满足最小柱高，不再以 `DAGSeriesScopeTooShort` 或 `DAGColumnTooShort` 拒绝。
+
+物理支撑只允许连接相邻结构层。非地基楼板若没有相邻层、XY 相交且能容纳支撑模式的入边，会明确报 `DAGNoFeasibleSupport`，不能静默生成悬空楼板或用一根贯通多层的长柱掩盖拓扑错误。
+
+自动化 `ABTS.M73DAG.StructuralRankAndPhysicalContinuity` 使用高 Expansion Step Budget 验证：每个非地基 Macro 楼板都有物理支撑、每条支撑只跨一层、每根柱满足最小净高。
 | `COMOutsideSupportHull` | 楼板质心落在实际接触凸包之外 | 改三柱/四柱，增加可行交集，或调整 Plate 尺寸；不要回退到 AABB 判定 |
 | `ContactAreaTooSmall` | 细柱总接触面积低于 DAG 专用承压比例 | 默认保持 `0.04`；提高柱宽或柱数。支撑凸包通过不能替代最低承压面积，但无需沿用 Legacy 的 12% |
 | 三柱仍看似一条线 | `TwoColumnLine` 被选中，或可行区域过窄而被拒绝 | 选择 `ThreeColumnTripod`；检查 X/Y Scope 是否同时足够 |
