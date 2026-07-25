@@ -113,6 +113,13 @@ struct FABTSM73DAGLayoutSettings
 	float MinPlateExtentCM = 90.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Plates", meta = (ClampMin = "0.50", ClampMax = "1.0"))
 	float PlateFootprintRatio = 0.92f;
+	/** DAG-2.2 may lower the local plate extent threshold for deeply nested Parallel scopes instead of rejecting the topology. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.2|Adaptive Plates")
+	bool bEnableAdaptiveGeometry = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.2|Adaptive Plates", meta = (ClampMin = "20.0", UIMax = "160.0"))
+	float MinAdaptivePlateExtentCM = 42.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.2|Adaptive Plates", meta = (ClampMin = "10.0", UIMax = "160.0"))
+	float MinAdaptivePlateThicknessCM = 24.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Columns", meta = (ClampMin = "20.0", UIMax = "180.0"))
 	float ColumnWidthCM = 56.0f;
@@ -131,6 +138,12 @@ struct FABTSM73DAGLayoutSettings
 	bool bAllowAdaptiveColumnWidth = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.1|Columns", meta = (ClampMin = "12.0", UIMax = "100.0"))
 	float MinAdaptiveColumnWidthCM = 24.0f;
+	/** Upper limit used when a wide plate needs more contact area. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.2|Adaptive Columns", meta = (ClampMin = "20.0", UIMax = "240.0"))
+	float MaxAdaptiveColumnWidthCM = 96.0f;
+	/** Allows the solver to promote 2/3-column supports to four columns when contact area is insufficient. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.2|Adaptive Columns")
+	bool bAllowAdaptiveColumnCount = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Sparse Support", meta = (ClampMin = "1", ClampMax = "4"))
 	int32 PreferredLogicalSupportsPerLoad = 2;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Sparse Support", meta = (ClampMin = "1", ClampMax = "8"))

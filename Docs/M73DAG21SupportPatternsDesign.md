@@ -1,5 +1,7 @@
 # M7.3-DAG-2.1：支撑模式与轻量化构件设计
 
+> 后续阶段：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md)
+
 > 状态：C++ 已实现，Editor 编译、DAG 自动化与 Legacy A/B/B2 回归均通过；等待 M7.1 和球面场景的手工视觉/物理验收。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG 总体调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-B2 Legacy 对照](M73B2StructuralWeaknessAndFailureValidationDesign.md)
@@ -109,7 +111,9 @@ Expansion Step Budget = 0
 物理支撑只允许连接相邻结构层。非地基楼板若没有相邻层、XY 相交且能容纳支撑模式的入边，会明确报 `DAGNoFeasibleSupport`，不能静默生成悬空楼板或用一根贯通多层的长柱掩盖拓扑错误。
 
 自动化 `ABTS.M73DAG.StructuralRankAndPhysicalContinuity` 使用高 Expansion Step Budget 验证：每个非地基 Macro 楼板都有物理支撑、每条支撑只跨一层、每根柱满足最小净高。
+
 | `COMOutsideSupportHull` | 楼板质心落在实际接触凸包之外 | 改三柱/四柱，增加可行交集，或调整 Plate 尺寸；不要回退到 AABB 判定 |
+| --- | --- | --- |
 | `ContactAreaTooSmall` | 细柱总接触面积低于 DAG 专用承压比例 | 默认保持 `0.04`；提高柱宽或柱数。支撑凸包通过不能替代最低承压面积，但无需沿用 Legacy 的 12% |
 | 三柱仍看似一条线 | `TwoColumnLine` 被选中，或可行区域过窄而被拒绝 | 选择 `ThreeColumnTripod`；检查 X/Y Scope 是否同时足够 |
 | 旧地图仍是粗柱厚板 | Actor 实例序列化保留了 DAG-2.0 旧数值 | 手动设置 `56 / 40` 并 Rebuild Preview |

@@ -58,8 +58,41 @@ namespace
 	}
 
 	bool ResolveSupportPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
-		EABTSM73DAGSupportPattern& OutPattern, float& OutColumnWidthCM)
+		const float LoadPlateAreaCM2, EABTSM73DAGSupportPattern& OutPattern, float& OutColumnWidthCM)
 	{
+		auto ColumnCount = [](const EABTSM73DAGSupportPattern Pattern)
+		{
+			switch (Pattern)
+			{
+			case EABTSM73DAGSupportPattern::SingleColumnInterface: return 1;
+			case EABTSM73DAGSupportPattern::TwoColumnLine: return 2;
+			case EABTSM73DAGSupportPattern::ThreeColumnTripod: return 3;
+			case EABTSM73DAGSupportPattern::FourColumnFootprint: return 4;
+			default: return 1;
+			}
+		};
+		auto TryAdaptivePattern = [&](const EABTSM73DAGSupportPattern Pattern)
+		{
+			const float RequiredWidth = FMath::Sqrt(FMath::Max(0.0f,
+				Settings.MinSupportContactAreaRatio * LoadPlateAreaCM2 / static_cast<float>(ColumnCount(Pattern))));
+			const float Width = FMath::Clamp(FMath::Max(Settings.ColumnWidthCM, RequiredWidth),
+				Settings.MinAdaptiveColumnWidthCM, Settings.MaxAdaptiveColumnWidthCM);
+			if (RequiredWidth > Settings.MaxAdaptiveColumnWidthCM + KINDA_SMALL_NUMBER
+				|| !CanFitSupportPattern(Region, Settings, Pattern, Width)) return false;
+			OutPattern = Pattern;
+			OutColumnWidthCM = Width;
+			return true;
+		};
+		if (Settings.bEnableAdaptiveGeometry)
+		{
+			if (TryAdaptivePattern(Settings.SupportPattern)) return true;
+			if (Settings.bAllowAdaptiveColumnCount)
+			{
+				if (TryAdaptivePattern(EABTSM73DAGSupportPattern::FourColumnFootprint)) return true;
+				if (TryAdaptivePattern(EABTSM73DAGSupportPattern::ThreeColumnTripod)) return true;
+				if (TryAdaptivePattern(EABTSM73DAGSupportPattern::TwoColumnLine)) return true;
+			}
+		}
 		if (CanFitSupportPattern(Region, Settings, Settings.SupportPattern, Settings.ColumnWidthCM))
 		{
 			OutPattern = Settings.SupportPattern;
@@ -206,7 +239,9 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 			OutError = FString::Printf(TEXT("DAGMacroForExpressionMissing:%d"), ExpressionNodeId);
 			return false;
 		}
-		if (ScopeSize.X < Settings.MinPlateExtentCM || ScopeSize.Y < Settings.MinPlateExtentCM)
+		const float RequiredPlateExtent = Settings.bEnableAdaptiveGeometry
+			? Settings.MinAdaptivePlateExtentCM : Settings.MinPlateExtentCM;
+		if (ScopeSize.X < RequiredPlateExtent || ScopeSize.Y < RequiredPlateExtent)
 		{
 			OutError = FString::Printf(TEXT("DAGScopeTooSmall:%d:%.1f:%.1f:%.1f"), *MacroNodeId, ScopeSize.X, ScopeSize.Y, ScopeSize.Z);
 			return false;
@@ -215,8 +250,13 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 		Layout.MacroNodeId = *MacroNodeId;
 		Layout.AllowedScope = Scope;
 		Layout.bGroundTerminal = IsGroundMacro(Graph, *MacroNodeId);
+		const float NarrowExtentRatio = FMath::Clamp(
+			FMath::Min(ScopeSize.X, ScopeSize.Y) / FMath::Max(1.0f, Settings.MinPlateExtentCM), 0.0f, 1.0f);
+		const float RealizedPlateThickness = Settings.bEnableAdaptiveGeometry
+			? FMath::Lerp(Settings.MinAdaptivePlateThicknessCM, Settings.PlateThicknessCM, NarrowExtentRatio)
+			: Settings.PlateThicknessCM;
 		Layout.PlateDimensionsCM = FVector(ScopeSize.X * Settings.PlateFootprintRatio,
-			ScopeSize.Y * Settings.PlateFootprintRatio, Settings.PlateThicknessCM);
+			ScopeSize.Y * Settings.PlateFootprintRatio, RealizedPlateThickness);
 		// Recursive expression scopes own only the XY footprint. Z is solved later
 		// from the compiled support DAG, so grammar depth cannot create short or
 		// same-height physical columns.
@@ -253,7 +293,9 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 	const float AxisLength = bSplitX ? ScopeSize.X : ScopeSize.Y;
 	const float AvailableLength = AxisLength - Settings.ParallelGapCM * static_cast<float>(ChildCount - 1);
 	const float ChildLength = AvailableLength / static_cast<float>(ChildCount);
-	if (ChildLength < Settings.MinPlateExtentCM)
+	const float RequiredChildExtent = Settings.bEnableAdaptiveGeometry
+		? Settings.MinAdaptivePlateExtentCM : Settings.MinPlateExtentCM;
+	if (ChildLength < RequiredChildExtent)
 	{
 		OutError = FString::Printf(TEXT("DAGParallelScopeTooNarrow:%d:%.1f"), ExpressionNodeId, ChildLength);
 		return false;
@@ -324,7 +366,7 @@ bool FABTSM73DAGLayoutSolver::AssignStructuralLevels(
 		const int32* Level = LevelByMacro.Find(Layout.MacroNodeId);
 		if (Level == nullptr) { OutError = TEXT("DAGStructuralLevelLayoutMissing"); return false; }
 		Layout.StructuralLevel = *Level;
-		Layout.PlateCenter.Z = Settings.PlateThicknessCM * 0.5f + LevelPitch * static_cast<float>(*Level);
+		Layout.PlateCenter.Z = Layout.PlateDimensionsCM.Z * 0.5f + LevelPitch * static_cast<float>(*Level);
 		Layout.AllowedScope.Min.Z = Layout.PlateCenter.Z - Settings.PlateThicknessCM * 0.5f;
 		Layout.AllowedScope.Max.Z = Layout.PlateCenter.Z + Settings.PlateThicknessCM * 0.5f;
 	}
@@ -368,7 +410,8 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		}
 		EABTSM73DAGSupportPattern ResolvedPattern = Settings.SupportPattern;
 		float ResolvedColumnWidthCM = Settings.ColumnWidthCM;
-		if (!ResolveSupportPattern(Intersection, Settings, ResolvedPattern, ResolvedColumnWidthCM))
+		const float LoadPlateAreaCM2 = Load->PlateDimensionsCM.X * Load->PlateDimensionsCM.Y;
+		if (!ResolveSupportPattern(Intersection, Settings, LoadPlateAreaCM2, ResolvedPattern, ResolvedColumnWidthCM))
 		{
 			++InOutLayout.RejectedCandidateEdgeCount;
 			continue;

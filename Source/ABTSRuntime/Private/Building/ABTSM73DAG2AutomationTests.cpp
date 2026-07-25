@@ -320,4 +320,53 @@ bool FABTSM73DAGStructuralContinuityTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAGAdaptiveGeometryTest,
+	"ABTS.M73DAG.AdaptivePlateAndColumnGeometry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAGAdaptiveGeometryTest::RunTest(const FString& Parameters)
+{
+	FABTSM73GenerationSettings BuildingSettings;
+	BuildingSettings.GenerationAlgorithm = EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	BuildingSettings.bGenerateStructuralWeakness = false;
+	BuildingSettings.MaxBrickCount = 160;
+	FABTSM73DAGBuildingPipeline Pipeline;
+	FABTSM73DAGGenerationSettings WideDAG;
+	WideDAG.Preset = EABTSM73DAGPreset::SingleTower;
+	WideDAG.MaxExpansionDepth = 0;
+	WideDAG.ExpansionStepBudget = 0;
+	WideDAG.ReservedWeaknessBrickCount = 0;
+	FABTSM73DAGLayoutSettings WideLayout;
+	WideLayout.TargetWidthCM = 1000.0f;
+	WideLayout.TargetDepthCM = 600.0f;
+	WideLayout.MaxAdaptiveColumnWidthCM = 120.0f;
+	FABTSM73StructureData WideData;
+	FString Error;
+	TestTrue(FString::Printf(TEXT("Wide plates resolve adaptive supports: %s"), *Error),
+		Pipeline.Build(WideDAG, WideLayout, BuildingSettings, WideData, Error));
+	bool bWidenedColumn = false;
+	for (const FABTSM73DAGPhysicalSupportMapping& Mapping : WideData.DAGPhysicalSupportMappings)
+		bWidenedColumn |= Mapping.RealizedColumnWidthCM > WideLayout.ColumnWidthCM + KINDA_SMALL_NUMBER;
+	TestTrue(TEXT("Wide plate realizes a wider column than the authored baseline"), bWidenedColumn);
+
+	FABTSM73DAGGenerationSettings NarrowDAG;
+	NarrowDAG.Preset = EABTSM73DAGPreset::TwinTowerBridge;
+	NarrowDAG.MaxExpansionDepth = 1;
+	NarrowDAG.ExpansionStepBudget = 4;
+	NarrowDAG.MaxEstimatedBrickCount = 160;
+	NarrowDAG.ReservedWeaknessBrickCount = 0;
+	NarrowDAG.SeriesRuleWeight = 0.0f;
+	NarrowDAG.ParallelRuleWeight = 1.0f;
+	FABTSM73DAGLayoutSettings NarrowLayout;
+	NarrowLayout.TargetWidthCM = 500.0f;
+	NarrowLayout.MinPlateExtentCM = 90.0f;
+	NarrowLayout.MinAdaptivePlateExtentCM = 42.0f;
+	FABTSM73StructureData NarrowData;
+	Error.Reset();
+	TestTrue(FString::Printf(TEXT("Narrow recursive Parallel uses adaptive plate bounds: %s"), *Error),
+		Pipeline.Build(NarrowDAG, NarrowLayout, BuildingSettings, NarrowData, Error));
+	return true;
+}
+
 #endif
