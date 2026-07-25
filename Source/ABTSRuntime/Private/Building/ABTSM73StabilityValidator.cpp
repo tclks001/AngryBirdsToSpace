@@ -16,6 +16,65 @@ namespace
 	{
 		return FMath::Min(MaxA, MaxB) - FMath::Max(MinA, MinB);
 	}
+
+	float Cross2D(const FVector2D& Origin, const FVector2D& A, const FVector2D& B)
+	{
+		return (A.X - Origin.X) * (B.Y - Origin.Y) - (A.Y - Origin.Y) * (B.X - Origin.X);
+	}
+
+	TArray<FVector2D> BuildConvexHull(TArray<FVector2D> Points)
+	{
+		Points.Sort([](const FVector2D& A, const FVector2D& B)
+		{
+			return !FMath::IsNearlyEqual(A.X, B.X) ? A.X < B.X : A.Y < B.Y;
+		});
+		TArray<FVector2D> UniquePoints;
+		for (const FVector2D& Point : Points)
+		{
+			if (UniquePoints.IsEmpty() || !UniquePoints.Last().Equals(Point, KINDA_SMALL_NUMBER))
+			{
+				UniquePoints.Add(Point);
+			}
+		}
+		Points = MoveTemp(UniquePoints);
+		if (Points.Num() <= 2) return Points;
+		TArray<FVector2D> Hull;
+		for (const FVector2D& Point : Points)
+		{
+			while (Hull.Num() >= 2 && Cross2D(Hull[Hull.Num() - 2], Hull.Last(), Point) <= KINDA_SMALL_NUMBER)
+			{
+				Hull.Pop();
+			}
+			Hull.Add(Point);
+		}
+		const int32 LowerCount = Hull.Num();
+		for (int32 Index = Points.Num() - 2; Index >= 0; --Index)
+		{
+			const FVector2D& Point = Points[Index];
+			while (Hull.Num() > LowerCount && Cross2D(Hull[Hull.Num() - 2], Hull.Last(), Point) <= KINDA_SMALL_NUMBER)
+			{
+				Hull.Pop();
+			}
+			Hull.Add(Point);
+		}
+		Hull.Pop();
+		return Hull;
+	}
+
+	bool IsInsideConvexHull(const FVector2D& Point, const TArray<FVector2D>& Hull)
+	{
+		if (Hull.Num() < 3) return false;
+		bool bHasPositive = false;
+		bool bHasNegative = false;
+		for (int32 Index = 0; Index < Hull.Num(); ++Index)
+		{
+			const float Side = Cross2D(Hull[Index], Hull[(Index + 1) % Hull.Num()], Point);
+			bHasPositive |= Side > KINDA_SMALL_NUMBER;
+			bHasNegative |= Side < -KINDA_SMALL_NUMBER;
+			if (bHasPositive && bHasNegative) return false;
+		}
+		return true;
+	}
 }
 
 bool FABTSM73StabilityValidator::HasGroundPath(
@@ -84,10 +143,7 @@ bool FABTSM73StabilityValidator::Validate(
 		}
 
 		if (Data.GroundNodeIds.Contains(Node.NodeId)) continue;
-		float MinX = BIG_NUMBER;
-		float MinY = BIG_NUMBER;
-		float MaxX = -BIG_NUMBER;
-		float MaxY = -BIG_NUMBER;
+		TArray<FVector2D> ContactCorners;
 		float ContactArea = 0.0f;
 		for (const FABTSM73SupportEdge& Edge : Data.SupportEdges)
 		{
@@ -100,20 +156,24 @@ bool FABTSM73StabilityValidator::Validate(
 			const float YMin = FMath::Max(Node.LocalCenter.Y - Node.DimensionsCM.Y * 0.5f, Lower.LocalCenter.Y - Lower.DimensionsCM.Y * 0.5f);
 			const float YMax = FMath::Min(Node.LocalCenter.Y + Node.DimensionsCM.Y * 0.5f, Lower.LocalCenter.Y + Lower.DimensionsCM.Y * 0.5f);
 			if (XMax <= XMin || YMax <= YMin) continue;
-			MinX = FMath::Min(MinX, XMin); MaxX = FMath::Max(MaxX, XMax);
-			MinY = FMath::Min(MinY, YMin); MaxY = FMath::Max(MaxY, YMax);
+			ContactCorners.Add(FVector2D(XMin, YMin));
+			ContactCorners.Add(FVector2D(XMax, YMin));
+			ContactCorners.Add(FVector2D(XMin, YMax));
+			ContactCorners.Add(FVector2D(XMax, YMax));
 			ContactArea += Edge.ContactAreaCM2;
 		}
 		const float BottomArea = FMath::Max(1.0f, Node.DimensionsCM.X * Node.DimensionsCM.Y);
-		if (ContactArea / BottomArea < Settings.MinContactAreaRatio)
+		const float RequiredContactAreaRatio = Data.DAGPhysicalSupportMappings.IsEmpty()
+			? Settings.MinContactAreaRatio
+			: Data.DAGMinSupportContactAreaRatio;
+		if (ContactArea / BottomArea < RequiredContactAreaRatio)
 		{
 			OutError = FString::Printf(TEXT("ContactAreaTooSmall:%d:%.3f"), Node.NodeId, ContactArea / BottomArea);
 			return false;
 		}
-		if (Node.LocalCenter.X < MinX - KINDA_SMALL_NUMBER || Node.LocalCenter.X > MaxX + KINDA_SMALL_NUMBER
-			|| Node.LocalCenter.Y < MinY - KINDA_SMALL_NUMBER || Node.LocalCenter.Y > MaxY + KINDA_SMALL_NUMBER)
+		if (!IsInsideConvexHull(FVector2D(Node.LocalCenter.X, Node.LocalCenter.Y), BuildConvexHull(MoveTemp(ContactCorners))))
 		{
-			OutError = FString::Printf(TEXT("COMOutsideSupport:%d"), Node.NodeId);
+			OutError = FString::Printf(TEXT("COMOutsideSupportHull:%d"), Node.NodeId);
 			return false;
 		}
 	}

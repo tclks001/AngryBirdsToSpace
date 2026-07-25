@@ -43,6 +43,17 @@ enum class EABTSM73DAGRule : uint8
 	ParallelSplit
 };
 
+/** Physical support footprint emitted for one selected logical DAG edge. Kept in the realized mapping for later weakness planning. */
+UENUM(BlueprintType)
+enum class EABTSM73DAGSupportPattern : uint8
+{
+	TwoColumnLine,
+	ThreeColumnTripod,
+	FourColumnFootprint,
+	/** Internal lowering only: multiple narrow logical edges jointly form the load's 2/3/4-point support hull. */
+	SingleColumnInterface UMETA(Hidden)
+};
+
 /** Pure-data M7.3-DAG generation settings. No Actor or World access is allowed here. */
 USTRUCT(BlueprintType)
 struct FABTSM73DAGGenerationSettings
@@ -97,26 +108,38 @@ struct FABTSM73DAGLayoutSettings
 	bool bAlternateParallelAxes = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Plates", meta = (ClampMin = "20.0", UIMax = "160.0"))
-	float PlateThicknessCM = 58.0f;
+	float PlateThicknessCM = 40.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Plates", meta = (ClampMin = "40.0", UIMax = "400.0"))
 	float MinPlateExtentCM = 90.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Plates", meta = (ClampMin = "0.50", ClampMax = "1.0"))
 	float PlateFootprintRatio = 0.92f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Columns", meta = (ClampMin = "20.0", UIMax = "180.0"))
-	float ColumnWidthCM = 88.0f;
+	float ColumnWidthCM = 56.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Columns", meta = (ClampMin = "10.0", UIMax = "300.0"))
 	float MinColumnHeightCM = 30.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Columns", meta = (ClampMin = "0.0", UIMax = "30.0"))
 	float ColumnClearanceCM = 3.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Columns", meta = (ClampMin = "1", ClampMax = "2"))
-	int32 ColumnsPerSelectedSupport = 2;
+	/** Two columns form a line, while three/four columns form an actual two-dimensional support hull. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Columns")
+	EABTSM73DAGSupportPattern SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
+	/** Narrow parallel branches may lower Tripod/FourColumn to TwoColumnLine. The realized mapping records the actual pattern for DAG-3 weakness planning. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.1|Columns")
+	bool bAllowNarrowSupportFallback = true;
+	/** Narrow graph interfaces may reduce their physical column width instead of rejecting a collectively supported load. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.1|Columns")
+	bool bAllowAdaptiveColumnWidth = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.1|Columns", meta = (ClampMin = "12.0", UIMax = "100.0"))
+	float MinAdaptiveColumnWidthCM = 24.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Sparse Support", meta = (ClampMin = "1", ClampMax = "4"))
 	int32 PreferredLogicalSupportsPerLoad = 2;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Sparse Support", meta = (ClampMin = "1", ClampMax = "8"))
 	int32 MaxLogicalSupportsPerLoad = 2;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2|Validation", meta = (ClampMin = "0.01", UIMax = "10.0"))
 	float ContactToleranceCM = 0.5f;
+	/** Minimum summed column contact area divided by the supported plate area. Hull containment remains the primary stability test. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-2.1|Validation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinSupportContactAreaRatio = 0.04f;
 };
 
 /** One node in the rule derivation tree. An Atom is a terminal structural region. */
@@ -158,6 +181,8 @@ struct FABTSM73DAGSelectedSupport
 	int32 SupportMacroNodeId = INDEX_NONE;
 	int32 LoadMacroNodeId = INDEX_NONE;
 	FBox2D FeasibleColumnRegion;
+	EABTSM73DAGSupportPattern SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
+	float RealizedColumnWidthCM = 0.0f;
 	float Cost = 0.0f;
 };
 

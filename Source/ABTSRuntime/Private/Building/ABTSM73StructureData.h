@@ -101,6 +101,8 @@ struct FABTSM73DAGPhysicalSupportMapping
 	int32 LoadMacroNodeId = INDEX_NONE;
 	int32 SupportPlateNodeId = INDEX_NONE;
 	int32 LoadPlateNodeId = INDEX_NONE;
+	EABTSM73DAGSupportPattern SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
+	float RealizedColumnWidthCM = 0.0f;
 	TArray<int32> ColumnNodeIds;
 };
 
@@ -152,6 +154,7 @@ struct FABTSM73StructureData
 	int32 DAGSelectedSupportCount = 0;
 	int32 DAGMissingRequiredContactCount = 0;
 	int32 DAGUnexpectedBypassCount = 0;
+	float DAGMinSupportContactAreaRatio = 0.0f;
 	uint32 DAGTopologyHash = 0;
 };
 

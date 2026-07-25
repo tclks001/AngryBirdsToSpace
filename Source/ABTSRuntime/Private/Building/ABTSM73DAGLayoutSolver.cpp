@@ -35,6 +35,95 @@ namespace
 	{
 		return Graph.GroundNodeIds.Contains(MacroNodeId);
 	}
+
+	bool CanFitSupportPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
+		const EABTSM73DAGSupportPattern Pattern, const float ColumnWidthCM)
+	{
+		if (!Region.bIsValid) return false;
+		const FVector2D Size = Region.GetSize();
+		const float SingleAxis = ColumnWidthCM + Settings.ColumnClearanceCM * 2.0f;
+		const float PairAxis = ColumnWidthCM * 2.0f + Settings.ColumnClearanceCM * 3.0f;
+		switch (Pattern)
+		{
+		case EABTSM73DAGSupportPattern::SingleColumnInterface:
+			return Size.X >= SingleAxis && Size.Y >= SingleAxis;
+		case EABTSM73DAGSupportPattern::TwoColumnLine:
+			return FMath::Min(Size.X, Size.Y) >= SingleAxis && FMath::Max(Size.X, Size.Y) >= PairAxis;
+		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
+		case EABTSM73DAGSupportPattern::FourColumnFootprint:
+			return Size.X >= PairAxis && Size.Y >= PairAxis;
+		default:
+			return false;
+		}
+	}
+
+	bool ResolveSupportPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
+		EABTSM73DAGSupportPattern& OutPattern, float& OutColumnWidthCM)
+	{
+		if (CanFitSupportPattern(Region, Settings, Settings.SupportPattern, Settings.ColumnWidthCM))
+		{
+			OutPattern = Settings.SupportPattern;
+			OutColumnWidthCM = Settings.ColumnWidthCM;
+			return true;
+		}
+		if (Settings.bAllowNarrowSupportFallback
+			&& Settings.SupportPattern != EABTSM73DAGSupportPattern::TwoColumnLine
+			&& CanFitSupportPattern(Region, Settings, EABTSM73DAGSupportPattern::TwoColumnLine, Settings.ColumnWidthCM))
+		{
+			OutPattern = EABTSM73DAGSupportPattern::TwoColumnLine;
+			OutColumnWidthCM = Settings.ColumnWidthCM;
+			return true;
+		}
+		if (Settings.bAllowNarrowSupportFallback && Settings.bAllowAdaptiveColumnWidth)
+		{
+			const FVector2D Size = Region.GetSize();
+			const float SingleAdaptiveWidth = FMath::Min3(Settings.ColumnWidthCM,
+				static_cast<float>(Size.X) - Settings.ColumnClearanceCM * 2.0f,
+				static_cast<float>(Size.Y) - Settings.ColumnClearanceCM * 2.0f);
+			if (SingleAdaptiveWidth >= Settings.MinAdaptiveColumnWidthCM
+				&& CanFitSupportPattern(Region, Settings, EABTSM73DAGSupportPattern::SingleColumnInterface,
+					SingleAdaptiveWidth))
+			{
+				OutPattern = EABTSM73DAGSupportPattern::SingleColumnInterface;
+				OutColumnWidthCM = SingleAdaptiveWidth;
+				return true;
+			}
+			const float WidthByShortAxis = FMath::Min(Size.X, Size.Y) - Settings.ColumnClearanceCM * 2.0f;
+			const float WidthByLongAxis = (FMath::Max(Size.X, Size.Y) - Settings.ColumnClearanceCM * 3.0f) * 0.5f;
+			const float AdaptiveWidth = FMath::Min3(Settings.ColumnWidthCM, WidthByShortAxis, WidthByLongAxis);
+			if (AdaptiveWidth >= Settings.MinAdaptiveColumnWidthCM
+				&& CanFitSupportPattern(Region, Settings, EABTSM73DAGSupportPattern::TwoColumnLine, AdaptiveWidth))
+			{
+				OutPattern = EABTSM73DAGSupportPattern::TwoColumnLine;
+				OutColumnWidthCM = AdaptiveWidth;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void GatherAssociativeLayoutChildren(const int32 NodeId, const EABTSM73DAGOperator Operator,
+		const EABTSM73DAGParallelPolicy ParallelPolicy, const FABTSM73DAGGenerationResult& Graph,
+		TArray<int32>& OutChildren)
+	{
+		if (!Graph.ExpressionNodes.IsValidIndex(NodeId)) return;
+		const FABTSM73DAGExpressionNode& Node = Graph.ExpressionNodes[NodeId];
+		const bool bSameOperator = Node.Operator == Operator
+			&& (Operator != EABTSM73DAGOperator::Parallel || Node.ParallelPolicy == ParallelPolicy);
+		if (!bSameOperator)
+		{
+			OutChildren.Add(NodeId);
+			return;
+		}
+		for (const int32 ChildId : Node.ChildNodeIds)
+		{
+			const FABTSM73DAGExpressionNode& Child = Graph.ExpressionNodes[ChildId];
+			const bool bFlattenChild = Child.Operator == Operator
+				&& (Operator != EABTSM73DAGOperator::Parallel || Child.ParallelPolicy == ParallelPolicy);
+			if (bFlattenChild) GatherAssociativeLayoutChildren(ChildId, Operator, ParallelPolicy, Graph, OutChildren);
+			else OutChildren.Add(ChildId);
+		}
+	}
 }
 
 bool FABTSM73DAGLayoutSolver::Solve(
@@ -53,7 +142,7 @@ bool FABTSM73DAGLayoutSolver::Solve(
 	}
 	if (Settings.TargetWidthCM < Settings.MinPlateExtentCM || Settings.TargetDepthCM < Settings.MinPlateExtentCM
 		|| Settings.TargetHeightCM <= Settings.PlateThicknessCM || Settings.PlateFootprintRatio <= 0.0f
-		|| Settings.PlateFootprintRatio > 1.0f || Settings.ColumnsPerSelectedSupport < 1
+		|| Settings.PlateFootprintRatio > 1.0f
 		|| Settings.PreferredLogicalSupportsPerLoad < 1 || Settings.MaxLogicalSupportsPerLoad < 1)
 	{
 		OutError = TEXT("DAGLayoutSettingsInvalid");
@@ -135,7 +224,14 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 		return false;
 	}
 
-	const int32 ChildCount = Expression.ChildNodeIds.Num();
+	TArray<int32> LayoutChildren;
+	GatherAssociativeLayoutChildren(ExpressionNodeId, Expression.Operator, Expression.ParallelPolicy, Graph, LayoutChildren);
+	const int32 ChildCount = LayoutChildren.Num();
+	if (ChildCount < 2)
+	{
+		OutError = FString::Printf(TEXT("DAGScopeFlattenedOperatorArity:%d"), ExpressionNodeId);
+		return false;
+	}
 	if (Expression.Operator == EABTSM73DAGOperator::Series)
 	{
 		const float AvailableHeight = ScopeSize.Z - Settings.SeriesGapCM * static_cast<float>(ChildCount - 1);
@@ -146,7 +242,7 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 			return false;
 		}
 		float TopZ = Scope.Max.Z;
-		for (const int32 ChildId : Expression.ChildNodeIds)
+		for (const int32 ChildId : LayoutChildren)
 		{
 			const float BottomZ = TopZ - ChildHeight;
 			const FBox ChildScope(FVector(Scope.Min.X, Scope.Min.Y, BottomZ), FVector(Scope.Max.X, Scope.Max.Y, TopZ));
@@ -166,7 +262,7 @@ bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 		return false;
 	}
 	float Cursor = bSplitX ? Scope.Min.X : Scope.Min.Y;
-	for (const int32 ChildId : Expression.ChildNodeIds)
+	for (const int32 ChildId : LayoutChildren)
 	{
 		FBox ChildScope = Scope;
 		if (bSplitX)
@@ -192,10 +288,6 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	FString& OutError) const
 {
 	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> CandidatesByLoad;
-	const float MinimumPairAxis = Settings.ColumnsPerSelectedSupport > 1
-		? Settings.ColumnsPerSelectedSupport * Settings.ColumnWidthCM
-			+ static_cast<float>(Settings.ColumnsPerSelectedSupport - 1) * Settings.ColumnClearanceCM
-		: Settings.ColumnWidthCM;
 	for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
 	{
 		const FABTSM73DAGMacroLayout* Support = FindLayout(InOutLayout, Edge.SupportNodeId);
@@ -211,9 +303,9 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 			++InOutLayout.RejectedCandidateEdgeCount;
 			continue;
 		}
-		const FVector2D Size = Intersection.GetSize();
-		if (FMath::Min(Size.X, Size.Y) < Settings.ColumnWidthCM + Settings.ColumnClearanceCM * 2.0f
-			|| FMath::Max(Size.X, Size.Y) < MinimumPairAxis + Settings.ColumnClearanceCM * 2.0f)
+		EABTSM73DAGSupportPattern ResolvedPattern = Settings.SupportPattern;
+		float ResolvedColumnWidthCM = Settings.ColumnWidthCM;
+		if (!ResolveSupportPattern(Intersection, Settings, ResolvedPattern, ResolvedColumnWidthCM))
 		{
 			++InOutLayout.RejectedCandidateEdgeCount;
 			continue;
@@ -222,6 +314,8 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		Candidate.SupportMacroNodeId = Edge.SupportNodeId;
 		Candidate.LoadMacroNodeId = Edge.LoadNodeId;
 		Candidate.FeasibleColumnRegion = Intersection;
+		Candidate.SupportPattern = ResolvedPattern;
+		Candidate.RealizedColumnWidthCM = ResolvedColumnWidthCM;
 		Candidate.Cost = FVector2D::Distance(FVector2D(Support->PlateCenter.X, Support->PlateCenter.Y),
 			FVector2D(Load->PlateCenter.X, Load->PlateCenter.Y));
 	}
@@ -232,7 +326,9 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		TArray<FABTSM73DAGSelectedSupport>* Candidates = CandidatesByLoad.Find(LoadLayout.MacroNodeId);
 		if (Candidates == nullptr || Candidates->IsEmpty())
 		{
-			OutError = FString::Printf(TEXT("DAGNoFeasibleSupport:%d"), LoadLayout.MacroNodeId);
+			OutError = FString::Printf(TEXT("DAGNoFeasibleSupport:%d:Center=%.1f,%.1f:Size=%.1f,%.1f"),
+				LoadLayout.MacroNodeId, LoadLayout.PlateCenter.X, LoadLayout.PlateCenter.Y,
+				LoadLayout.PlateDimensionsCM.X, LoadLayout.PlateDimensionsCM.Y);
 			return false;
 		}
 		Candidates->Sort([](const FABTSM73DAGSelectedSupport& A, const FABTSM73DAGSelectedSupport& B)

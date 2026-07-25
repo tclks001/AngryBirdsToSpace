@@ -28,30 +28,69 @@ namespace
 	}
 
 	bool MakeColumnCenters(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
+		const EABTSM73DAGSupportPattern Pattern, const float ColumnWidthCM,
 		TArray<FVector2D>& OutCenters)
 	{
 		OutCenters.Reset();
-		const float Half = Settings.ColumnWidthCM * 0.5f + Settings.ColumnClearanceCM;
+		const float Half = ColumnWidthCM * 0.5f + Settings.ColumnClearanceCM;
 		const FVector2D SafeMin = Region.Min + FVector2D(Half, Half);
 		const FVector2D SafeMax = Region.Max - FVector2D(Half, Half);
 		if (SafeMax.X < SafeMin.X || SafeMax.Y < SafeMin.Y) return false;
 		const FVector2D Center = (SafeMin + SafeMax) * 0.5f;
-		if (Settings.ColumnsPerSelectedSupport == 1)
+		const FVector2D SafeSpan = SafeMax - SafeMin;
+		// SafeMin/SafeMax already include half a column plus clearance. Use the
+		// complete safe span so thin columns produce the largest valid support hull.
+		const float OffsetX = SafeSpan.X * 0.5f;
+		const float OffsetY = SafeSpan.Y * 0.5f;
+		switch (Pattern)
 		{
+		case EABTSM73DAGSupportPattern::SingleColumnInterface:
 			OutCenters.Add(Center);
 			return true;
+		case EABTSM73DAGSupportPattern::TwoColumnLine:
+		{
+			const bool bAlongX = SafeSpan.X >= SafeSpan.Y;
+			if ((bAlongX ? OffsetX : OffsetY) <= KINDA_SMALL_NUMBER) return false;
+			if (bAlongX)
+			{
+				OutCenters.Add(Center + FVector2D(-OffsetX, 0.0f));
+				OutCenters.Add(Center + FVector2D(OffsetX, 0.0f));
+			}
+			else
+			{
+				OutCenters.Add(Center + FVector2D(0.0f, -OffsetY));
+				OutCenters.Add(Center + FVector2D(0.0f, OffsetY));
+			}
+			return true;
 		}
-		const bool bAlongX = SafeMax.X - SafeMin.X >= SafeMax.Y - SafeMin.Y;
-		const float Available = bAlongX ? SafeMax.X - SafeMin.X : SafeMax.Y - SafeMin.Y;
-		const float Offset = FMath::Min(Available * 0.25f, Settings.ColumnWidthCM * 0.75f);
-		if (Offset <= KINDA_SMALL_NUMBER) return false;
-		FVector2D First = Center;
-		FVector2D Second = Center;
-		if (bAlongX) { First.X -= Offset; Second.X += Offset; }
-		else { First.Y -= Offset; Second.Y += Offset; }
-		OutCenters.Add(First);
-		OutCenters.Add(Second);
-		return true;
+		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
+		{
+			if (OffsetX <= KINDA_SMALL_NUMBER || OffsetY <= KINDA_SMALL_NUMBER) return false;
+			const bool bBaseAlongX = SafeSpan.X >= SafeSpan.Y;
+			if (bBaseAlongX)
+			{
+				OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY));
+				OutCenters.Add(Center + FVector2D(OffsetX, -OffsetY));
+				OutCenters.Add(Center + FVector2D(0.0f, OffsetY));
+			}
+			else
+			{
+				OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY));
+				OutCenters.Add(Center + FVector2D(-OffsetX, OffsetY));
+				OutCenters.Add(Center + FVector2D(OffsetX, 0.0f));
+			}
+			return true;
+		}
+		case EABTSM73DAGSupportPattern::FourColumnFootprint:
+			if (OffsetX <= KINDA_SMALL_NUMBER || OffsetY <= KINDA_SMALL_NUMBER) return false;
+			OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY));
+			OutCenters.Add(Center + FVector2D(OffsetX, -OffsetY));
+			OutCenters.Add(Center + FVector2D(-OffsetX, OffsetY));
+			OutCenters.Add(Center + FVector2D(OffsetX, OffsetY));
+			return true;
+		default:
+			return false;
+		}
 	}
 }
 
@@ -120,7 +159,10 @@ bool FABTSM73DAGModuleCompiler::Compile(
 			return false;
 		}
 		TArray<FVector2D> Centers;
-		if (!MakeColumnCenters(Support.FeasibleColumnRegion, LayoutSettings, Centers))
+		const float RealizedColumnWidthCM = Support.RealizedColumnWidthCM > 0.0f
+			? Support.RealizedColumnWidthCM : LayoutSettings.ColumnWidthCM;
+		if (!MakeColumnCenters(Support.FeasibleColumnRegion, LayoutSettings, Support.SupportPattern,
+			RealizedColumnWidthCM, Centers))
 		{
 			OutError = FString::Printf(TEXT("DAGColumnRegionInvalid:%d:%d"), Support.SupportMacroNodeId, Support.LoadMacroNodeId);
 			return false;
@@ -130,16 +172,19 @@ bool FABTSM73DAGModuleCompiler::Compile(
 		Mapping.LoadMacroNodeId = Support.LoadMacroNodeId;
 		Mapping.SupportPlateNodeId = *SupportPlateId;
 		Mapping.LoadPlateNodeId = *LoadPlateId;
+		Mapping.SupportPattern = Support.SupportPattern;
+		Mapping.RealizedColumnWidthCM = RealizedColumnWidthCM;
 		for (const FVector2D& CenterXY : Centers)
 		{
 			AddBrick(OutData, INDEX_NONE, FVector(CenterXY.X, CenterXY.Y, (BottomZ + TopZ) * 0.5f),
-				FVector(LayoutSettings.ColumnWidthCM, LayoutSettings.ColumnWidthCM, Height),
+				FVector(RealizedColumnWidthCM, RealizedColumnWidthCM, Height),
 				EABTSM73BrickSemanticRole::Column, LoadLayout->StructuralLevel, BuildingSettings.PrimaryMaterial);
 			Mapping.ColumnNodeIds.Add(OutData.Bricks.Last().NodeId);
 		}
 	}
 	OutData.DAGMacroNodeCount = Graph.MacroNodes.Num();
 	OutData.DAGSelectedSupportCount = Layout.SelectedSupports.Num();
+	OutData.DAGMinSupportContactAreaRatio = LayoutSettings.MinSupportContactAreaRatio;
 	OutData.DAGTopologyHash = Graph.CanonicalTopologyHash;
 	FABTSM73DAGContactGraphBuilder ContactBuilder;
 	if (!ContactBuilder.RebuildAndAudit(LayoutSettings, OutData, OutError)) return false;

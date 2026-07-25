@@ -1,6 +1,6 @@
 # M7.3-DAG-2：空间布局与模块编译设计
 
-> 状态：C++ 已实现、编译与 fresh-process 自动化已通过；待在 M7.1 平面测试台和球面场景进行手工视觉/碰撞验收。
+> 状态：C++ 已实现、编译与 fresh-process 自动化已通过；支撑模式、轻量化尺寸与凸包校验已由 [M7.3-DAG-2.1](M73DAG21SupportPatternsDesign.md) 扩展。待在 M7.1 平面测试台和球面场景进行手工视觉/碰撞验收。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [DAG 总体调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG-1 语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [M7.3-A Legacy 对照](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
@@ -14,7 +14,7 @@
 Derivation Tree
 -> Blueprint Support DAG
 -> Scope Layout + Selected Sparse Supports
--> Plate / Column Pair BrickNodes
+-> Plate / Support Pattern BrickNodes
 -> Realized Contact DAG
 -> 既有 Ground Adapter / Preview / Runtime Chaos
 ```
@@ -39,7 +39,7 @@ DAG-1 的一层 `A+B` 到相邻层 `C+D` 可以产生多条合法候选边，但
 每条候选 `Support Plate -> Load Plate` 必须同时满足：
 
 1. 两 Plate 的 XY 投影有交集；
-2. 交集足以放下 Column Pair、`ColumnClearanceCM` 与 `ColumnWidthCM`；
+2. 交集足以放下所选二/三/四柱模式、`ColumnClearanceCM` 与 `ColumnWidthCM`；
 3. 两 Plate 之间的净高度不少于 `MinColumnHeightCM`；
 4. 同一 Load 最多选 `PreferredLogicalSupportsPerLoad` 条，硬上限为 `MaxLogicalSupportsPerLoad`。
 
@@ -48,7 +48,7 @@ DAG-1 的一层 `A+B` 到相邻层 `C+D` 可以产生多条合法候选边，但
 ## 4. 模块编译与真实接触审计
 
 - 每个 Macro 降低为一个 `Plate` BrickNode；
-- 每条已选逻辑支撑默认降低为 `ColumnsPerSelectedSupport=2` 根竖柱。双柱让宽 Plate 的支撑域可通过既有稳定性检查；
+- 每条已选逻辑支撑的两/三/四柱模式、轻量化默认参数与凸包校验见 [M7.3-DAG-2.1](M73DAG21SupportPatternsDesign.md)；
 - 所有节点写回现有 `FABTSM73StructureData.Bricks`，因此 Editor HISM Preview、M7 Runtime Module、Ground Adapter、M7.1 平面测试台、球面地基脚与 Chaos 生命周期均复用；
 - 编译后从最终轴对齐碰撞盒反建 `Realized Contact DAG`，并审计每条已选逻辑支撑必须实现为 `SupportPlate -> Column -> LoadPlate`。
 
@@ -75,8 +75,8 @@ DAG-1 的一层 `A+B` 到相邻层 `C+D` 可以产生多条合法候选边，但
 
 ```text
 TargetWidthCM=460, TargetDepthCM=300, TargetHeightCM=760
-PlateThicknessCM=58, ColumnWidthCM=88
-ColumnsPerSelectedSupport=2
+PlateThicknessCM=40, ColumnWidthCM=56
+SupportPattern=ThreeColumnTripod
 PreferredLogicalSupportsPerLoad=2, MaxLogicalSupportsPerLoad=2
 ```
 
@@ -108,7 +108,7 @@ Preset=1 Seed=731022 Macro=3 Sparse=1 Bricks=5 PhysicalEdges=4 Hash=1987612131
 | 现象/日志 | 根因 | 处理 |
 | --- | --- | --- |
 | `DAGParallelScopeTooNarrow` | 并联 Scope 在 Gap、最小 Plate 尺寸后不足 | 增大目标宽/深，降低 `ParallelGapCM` 或减少递归并联深度 |
-| `DAGNoFeasibleSupport` | 上下 Plate 无可放置 Column Pair 的投影交集 | 改 Preset/Seed、增大 Plate Scope，或留待后续 Beam/Span 原语 |
+| `DAGNoFeasibleSupport` | 上下 Plate 无可放置所选支撑模式的投影交集 | 改 Preset/Seed、增大 Plate Scope、使用较小支撑模式，或留待后续 Beam/Span 原语 |
 | `DAGColumnTooShort` | 上下板净高度低于最小柱高 | 增大 `TargetHeightCM`、减少 Series 层数或降低 `MinColumnHeightCM` |
 | `DAGMissingRequiredContact` | 编译后的柱未真正接触任一板 | 检查 Plate 厚度、Column Clearance、缩放和碰撞网格 Pivot；不要只改 authored edge |
 | `DAGUnexpectedBypass` | 最终盒体产生了未授权横向/斜向接触 | 增大 Scope/Series Gap，缩小 Plate Footprint 或调整候选选择 |

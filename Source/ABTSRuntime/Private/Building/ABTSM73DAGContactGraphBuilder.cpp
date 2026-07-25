@@ -12,14 +12,14 @@ namespace
 		return FBox(Node.LocalCenter - Node.DimensionsCM * 0.5f, Node.LocalCenter + Node.DimensionsCM * 0.5f);
 	}
 
-	uint64 MakeEdgeKey(const int32 LowerNodeId, const int32 UpperNodeId)
+	uint64 MakeContactEdgeKey(const int32 LowerNodeId, const int32 UpperNodeId)
 	{
 		return (static_cast<uint64>(static_cast<uint32>(LowerNodeId)) << 32) | static_cast<uint32>(UpperNodeId);
 	}
 
 	bool HasEdge(const TSet<uint64>& EdgeKeys, const int32 LowerNodeId, const int32 UpperNodeId)
 	{
-		return EdgeKeys.Contains(MakeEdgeKey(LowerNodeId, UpperNodeId));
+		return EdgeKeys.Contains(MakeContactEdgeKey(LowerNodeId, UpperNodeId));
 	}
 }
 
@@ -73,7 +73,7 @@ bool FABTSM73DAGContactGraphBuilder::RebuildAndAudit(
 			Edge.LowerNodeId = Lower.NodeId;
 			Edge.UpperNodeId = Upper.NodeId;
 			Edge.ContactAreaCM2 = XOverlap * YOverlap;
-			RealizedEdges.Add(MakeEdgeKey(Lower.NodeId, Upper.NodeId));
+			RealizedEdges.Add(MakeContactEdgeKey(Lower.NodeId, Upper.NodeId));
 		}
 	}
 
@@ -82,8 +82,8 @@ bool FABTSM73DAGContactGraphBuilder::RebuildAndAudit(
 	{
 		for (const int32 ColumnNodeId : Mapping.ColumnNodeIds)
 		{
-			ExpectedEdges.Add(MakeEdgeKey(Mapping.SupportPlateNodeId, ColumnNodeId));
-			ExpectedEdges.Add(MakeEdgeKey(ColumnNodeId, Mapping.LoadPlateNodeId));
+			ExpectedEdges.Add(MakeContactEdgeKey(Mapping.SupportPlateNodeId, ColumnNodeId));
+			ExpectedEdges.Add(MakeContactEdgeKey(ColumnNodeId, Mapping.LoadPlateNodeId));
 			if (!HasEdge(RealizedEdges, Mapping.SupportPlateNodeId, ColumnNodeId)
 				|| !HasEdge(RealizedEdges, ColumnNodeId, Mapping.LoadPlateNodeId))
 			{

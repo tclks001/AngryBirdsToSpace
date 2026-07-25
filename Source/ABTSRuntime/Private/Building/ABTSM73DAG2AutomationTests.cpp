@@ -22,6 +22,18 @@ namespace
 			&& A.SemanticRole == B.SemanticRole
 			&& A.StoreyIndex == B.StoreyIndex;
 	}
+
+	int32 ExpectedColumnCount(const EABTSM73DAGSupportPattern Pattern)
+	{
+		switch (Pattern)
+		{
+		case EABTSM73DAGSupportPattern::TwoColumnLine: return 2;
+		case EABTSM73DAGSupportPattern::ThreeColumnTripod: return 3;
+		case EABTSM73DAGSupportPattern::FourColumnFootprint: return 4;
+		case EABTSM73DAGSupportPattern::SingleColumnInterface: return 1;
+		default: return 0;
+		}
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -112,6 +124,133 @@ bool FABTSM73DAGSparseSupportTest::RunTest(const FString& Parameters)
 			static_cast<int32>(DAGSettings.Preset), DAGSettings.BuildingSeed, Data.DAGMacroNodeCount,
 			Data.DAGSelectedSupportCount, Data.Bricks.Num(), Data.SupportEdges.Num(), Data.DAGTopologyHash);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAGSupportPatternTest,
+	"ABTS.M73DAG.SupportPatternsAndHullValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAGSupportPatternTest::RunTest(const FString& Parameters)
+{
+	FABTSM73GenerationSettings BuildingSettings;
+	BuildingSettings.GenerationAlgorithm = EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	BuildingSettings.bGenerateStructuralWeakness = false;
+	FABTSM73DAGGenerationSettings DAGSettings;
+	DAGSettings.Preset = EABTSM73DAGPreset::SingleTower;
+	DAGSettings.MaxExpansionDepth = 0;
+	DAGSettings.ExpansionStepBudget = 0;
+	DAGSettings.ReservedWeaknessBrickCount = 0;
+	FABTSM73DAGBuildingPipeline Pipeline;
+	FABTSM73StabilityValidator Validator;
+	for (const EABTSM73DAGSupportPattern Pattern : {
+		EABTSM73DAGSupportPattern::TwoColumnLine,
+		EABTSM73DAGSupportPattern::ThreeColumnTripod,
+		EABTSM73DAGSupportPattern::FourColumnFootprint})
+	{
+		FABTSM73DAGLayoutSettings LayoutSettings;
+		LayoutSettings.SupportPattern = Pattern;
+		FABTSM73StructureData Data;
+		FString Error;
+		TestTrue(FString::Printf(TEXT("Support pattern %d builds: %s"), static_cast<int32>(Pattern), *Error),
+			Pipeline.Build(DAGSettings, LayoutSettings, BuildingSettings, Data, Error));
+		if (!Data.DAGPhysicalSupportMappings.IsEmpty())
+		{
+			for (const FABTSM73DAGPhysicalSupportMapping& Mapping : Data.DAGPhysicalSupportMappings)
+			{
+				TestEqual(TEXT("Physical mapping retains the selected support pattern"), Mapping.SupportPattern, Pattern);
+				TestEqual(TEXT("Every selected support emits its intended column count"),
+					Mapping.ColumnNodeIds.Num(), ExpectedColumnCount(Pattern));
+				TArray<FVector2D> Centers;
+				for (const int32 ColumnNodeId : Mapping.ColumnNodeIds)
+				{
+					if (Data.Bricks.IsValidIndex(ColumnNodeId))
+					{
+						Centers.Add(FVector2D(Data.Bricks[ColumnNodeId].LocalCenter));
+					}
+				}
+				for (int32 A = 0; A < Centers.Num(); ++A)
+				{
+					for (int32 B = A + 1; B < Centers.Num(); ++B)
+					{
+						TestTrue(TEXT("Support columns preserve their requested clearance"),
+							FVector2D::Distance(Centers[A], Centers[B]) + KINDA_SMALL_NUMBER
+							>= LayoutSettings.ColumnWidthCM + LayoutSettings.ColumnClearanceCM);
+					}
+				}
+				if (Pattern == EABTSM73DAGSupportPattern::ThreeColumnTripod && Centers.Num() == 3)
+				{
+					const float TwiceTriangleArea = FMath::Abs(
+						(Centers[1].X - Centers[0].X) * (Centers[2].Y - Centers[0].Y)
+						- (Centers[1].Y - Centers[0].Y) * (Centers[2].X - Centers[0].X));
+					TestTrue(TEXT("Tripod columns form a two-dimensional support triangle"), TwiceTriangleArea > 1.0f);
+				}
+			}
+		}
+		TestTrue(FString::Printf(TEXT("Support pattern %d passes convex-hull stability: %s"), static_cast<int32>(Pattern), *Error),
+			Validator.Validate(BuildingSettings, Data, Error));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAGNestingLayoutTest,
+	"ABTS.M73DAG.AssociativeNestingAndParallelFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAGNestingLayoutTest::RunTest(const FString& Parameters)
+{
+	FABTSM73GenerationSettings BuildingSettings;
+	BuildingSettings.GenerationAlgorithm = EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	BuildingSettings.bGenerateStructuralWeakness = false;
+	BuildingSettings.MaxBrickCount = 100;
+	FABTSM73DAGBuildingPipeline Pipeline;
+
+	// Nested Series is associative. Flattening it before Z allocation prevents
+	// each recursion level from repeatedly halving the same height budget.
+	FABTSM73DAGGenerationSettings SeriesDAG;
+	SeriesDAG.Preset = EABTSM73DAGPreset::SingleTower;
+	SeriesDAG.MaxExpansionDepth = 2;
+	SeriesDAG.ExpansionStepBudget = 6;
+	SeriesDAG.MaxEstimatedBrickCount = 100;
+	SeriesDAG.ReservedWeaknessBrickCount = 0;
+	SeriesDAG.SeriesRuleWeight = 1.0f;
+	SeriesDAG.ParallelRuleWeight = 0.0f;
+	FABTSM73DAGLayoutSettings SeriesLayout;
+	SeriesLayout.TargetHeightCM = 760.0f;
+	FABTSM73StructureData SeriesData;
+	FString Error;
+	TestTrue(FString::Printf(TEXT("Nested Series fits one shared height allocation: %s"), *Error),
+		Pipeline.Build(SeriesDAG, SeriesLayout, BuildingSettings, SeriesData, Error));
+
+	// Nested Parallel may create a narrow branch. It must preserve the topology
+	// by realizing that edge as a line pair instead of rejecting the whole graph.
+	FABTSM73DAGGenerationSettings ParallelDAG;
+	ParallelDAG.Preset = EABTSM73DAGPreset::TwinTowerBridge;
+	ParallelDAG.MaxExpansionDepth = 1;
+	ParallelDAG.ExpansionStepBudget = 4;
+	ParallelDAG.MaxEstimatedBrickCount = 100;
+	ParallelDAG.ReservedWeaknessBrickCount = 0;
+	ParallelDAG.SeriesRuleWeight = 0.0f;
+	ParallelDAG.ParallelRuleWeight = 1.0f;
+	FABTSM73DAGLayoutSettings ParallelLayout;
+	ParallelLayout.bAllowNarrowSupportFallback = true;
+	FABTSM73StructureData ParallelData;
+	Error.Reset();
+	TestTrue(FString::Printf(TEXT("Nested Parallel uses a feasible support fallback: %s"), *Error),
+		Pipeline.Build(ParallelDAG, ParallelLayout, BuildingSettings, ParallelData, Error));
+	bool bUsedNarrowInterface = false;
+	bool bUsedAdaptiveWidth = false;
+	for (const FABTSM73DAGPhysicalSupportMapping& Mapping : ParallelData.DAGPhysicalSupportMappings)
+	{
+		bUsedNarrowInterface |= Mapping.SupportPattern == EABTSM73DAGSupportPattern::TwoColumnLine
+			|| Mapping.SupportPattern == EABTSM73DAGSupportPattern::SingleColumnInterface;
+		bUsedAdaptiveWidth |= Mapping.RealizedColumnWidthCM > 0.0f
+			&& Mapping.RealizedColumnWidthCM < ParallelLayout.ColumnWidthCM - KINDA_SMALL_NUMBER;
+	}
+	TestTrue(TEXT("At least one narrow parallel support records an explicit narrow-interface fallback"), bUsedNarrowInterface);
+	TestTrue(TEXT("At least one narrow parallel support records an adaptive column width"), bUsedAdaptiveWidth);
 	return true;
 }
 
