@@ -1,6 +1,6 @@
 # M7.3-DAG-1：递归支撑图纯数据语法实现设计
 
-> 状态：C++ 已落地并完成 fresh-process 自动化验收；本文记录实现边界、数据契约、验证和后续接入方式。
+> 状态：C++ 已落地并完成 fresh-process 自动化验收；其空间编译接入已由 [M7.3-DAG-2](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) 实现。本文记录 DAG-1 的边界、数据契约与拓扑验证。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [DAG 总体调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A Legacy 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
@@ -353,9 +353,9 @@ TEST COMPLETE. EXIT CODE: 0
 | DAG-1 通过但未来砖块站不住 | DAG-1 不包含几何、接触和质量 | 由 DAG-2 的 Layout/Contact/Static 验证负责 |
 | 新增源文件后 Unity Build 报两个匿名命名空间 `NodeMass` 重定义 | `PostFailureValidator.cpp` 和 `WeakPointAnalysis.cpp` 原有同名内部函数曾处于不同 Unity TU；源文件分桶变化后被合并 | 分别改名为 `FailureProbeNodeMass` 与 `AnalysisNodeMass`，计算和调用语义不变；不要依赖 Unity 分桶隔离同名内部实现 |
 
-## 13. 下一阶段接口
+## 13. 后续接口
 
-M7.3-DAG-2 读取：
+M7.3-DAG-2 已读取：
 
 ```text
 ExpressionNodes
@@ -367,4 +367,4 @@ CanonicalExpression
 CanonicalTopologyHash
 ```
 
-并新增每个 Macro 的 Envelope、LocalFrame、Support Port、原语类型与最小砖成本。DAG-2 成功后才编译到 Legacy 可消费的 `FABTSM73StructureData`。DAG-1 本身不应直接依赖 `AABTSM73StableBuildingActor`。
+并以 Scope、Plate 和竖直 Column Pair 编译为 Legacy 可消费的 `FABTSM73StructureData`；详见 [M73DAG2SpatialLayoutAndModuleCompilationDesign.md](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。DAG-1 本身仍不直接依赖 `AABTSM73StableBuildingActor`。

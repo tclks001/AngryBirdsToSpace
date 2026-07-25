@@ -49,7 +49,9 @@ bool FABTSM73StabilityValidator::Validate(
 {
 	OutError.Reset();
 	if (Data.Bricks.IsEmpty()) { OutError = TEXT("NoBrickNodes"); return false; }
-	if (Data.GroundNodeIds.Num() < 2) { OutError = TEXT("InsufficientGroundNodes"); return false; }
+	// DAG-2 can lower a single wide Foundation plate. Legacy uses multiple ground columns,
+	// but the physical FoundationCap already supplies the external ground support.
+	if (Data.GroundNodeIds.IsEmpty()) { OutError = TEXT("NoGroundNodes"); return false; }
 
 	constexpr float PenetrationToleranceCM = 0.25f;
 	for (int32 A = 0; A < Data.Bricks.Num(); ++A)

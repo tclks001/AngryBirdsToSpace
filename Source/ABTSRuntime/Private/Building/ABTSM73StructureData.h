@@ -20,6 +20,8 @@ enum class EABTSM73BrickSemanticRole : uint8
 struct FABTSM73BrickNode
 {
 	int32 NodeId = INDEX_NONE;
+	/** DAG-2 source macro node. INDEX_NONE means Legacy or a physical helper such as a column. */
+	int32 MacroNodeId = INDEX_NONE;
 	EABTSM7BuildingMaterial Material = EABTSM7BuildingMaterial::Wood;
 	EABTSM7BuildingMaterial OriginalMaterial = EABTSM7BuildingMaterial::Wood;
 	FVector LocalCenter = FVector::ZeroVector;
@@ -92,6 +94,16 @@ struct FABTSM73SupportEdge
 	float ContactAreaCM2 = 0.0f;
 };
 
+/** DAG-2 logical support mapped to its physical plate/column contact chain. */
+struct FABTSM73DAGPhysicalSupportMapping
+{
+	int32 SupportMacroNodeId = INDEX_NONE;
+	int32 LoadMacroNodeId = INDEX_NONE;
+	int32 SupportPlateNodeId = INDEX_NONE;
+	int32 LoadPlateNodeId = INDEX_NONE;
+	TArray<int32> ColumnNodeIds;
+};
+
 struct FABTSM73GroundSample
 {
 	FVector2D LocalXY = FVector2D::ZeroVector;
@@ -114,6 +126,7 @@ struct FABTSM73StructureData
 {
 	TArray<FABTSM73BrickNode> Bricks;
 	TArray<FABTSM73SupportEdge> SupportEdges;
+	TArray<FABTSM73DAGPhysicalSupportMapping> DAGPhysicalSupportMappings;
 	TArray<int32> GroundNodeIds;
 	TArray<FABTSM73StructuralWeaknessIntent> StructuralWeaknessIntents;
 	TArray<FABTSM73FailureProbeResult> FailureProbeResults;
@@ -135,6 +148,11 @@ struct FABTSM73StructureData
 	float PredictedNonWeakEffect = 0.0f;
 	float DifficultyScore = 0.0f;
 	int32 EstimatedWeakPointHits = 0;
+	int32 DAGMacroNodeCount = 0;
+	int32 DAGSelectedSupportCount = 0;
+	int32 DAGMissingRequiredContactCount = 0;
+	int32 DAGUnexpectedBypassCount = 0;
+	uint32 DAGTopologyHash = 0;
 };
 
 struct FABTSM73GroundContext

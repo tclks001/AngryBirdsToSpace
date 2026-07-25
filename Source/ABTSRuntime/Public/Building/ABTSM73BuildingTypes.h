@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Building/ABTSM73DAGTypes.h"
 #include "Building/ABTSM7BuildingTypes.h"
 #include "ABTSM73BuildingTypes.generated.h"
 
@@ -12,6 +13,14 @@ enum class EABTSM73GroundMode : uint8
 	Auto,
 	PlanarTestStage,
 	SphericalCellTopo
+};
+
+/** Keeps the already accepted fixed-layer generator intact while DAG-2 is introduced in parallel. */
+UENUM(BlueprintType)
+enum class EABTSM73GenerationAlgorithm : uint8
+{
+	LegacyLayeredAB2,
+	RecursiveSupportDAG
 };
 
 UENUM(BlueprintType)
@@ -59,6 +68,9 @@ struct FABTSM73GenerationSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
 	int32 BuildingSeed = 7301;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+	EABTSM73GenerationAlgorithm GenerationAlgorithm = EABTSM73GenerationAlgorithm::LegacyLayeredAB2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
 	EABTSM73Silhouette Silhouette = EABTSM73Silhouette::SingleTower;
@@ -157,7 +169,7 @@ struct FABTSM73GenerationSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.05", UIMax = "2.0"))
 	float IdleStableHoldSeconds = 0.45f;
 
-	/** Hard timeout: a structure still moving here is genuinely unstable. */
+	/** Hard observation limit. A timeout still rejects meaningful displacement, settlement or rotation; bounded Chaos contact jitter is frozen and accepted. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.5", UIMax = "10.0"))
 	float IdleValidationMaxSeconds = 6.0f;
 
@@ -284,6 +296,24 @@ struct FABTSM73GenerationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 GroundNodeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
+	EABTSM73GenerationAlgorithm GenerationAlgorithm = EABTSM73GenerationAlgorithm::LegacyLayeredAB2;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
+	int32 DAGMacroNodeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
+	int32 DAGSelectedSupportCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
+	int32 DAGMissingRequiredContactCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
+	int32 DAGUnexpectedBypassCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
+	int64 DAGTopologyHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;

@@ -54,7 +54,7 @@ namespace
 		return true;
 	}
 
-	uint64 MakeEdgeKey(const int32 SupportNodeId, const int32 LoadNodeId)
+	uint64 MakeValidationEdgeKey(const int32 SupportNodeId, const int32 LoadNodeId)
 	{
 		return (static_cast<uint64>(static_cast<uint32>(SupportNodeId)) << 32)
 			| static_cast<uint32>(LoadNodeId);
@@ -138,7 +138,7 @@ bool FABTSM73DAGValidator::Validate(
 			OutError = TEXT("InvalidSupportEdge");
 			return false;
 		}
-		const uint64 EdgeKey = MakeEdgeKey(Edge.SupportNodeId, Edge.LoadNodeId);
+		const uint64 EdgeKey = MakeValidationEdgeKey(Edge.SupportNodeId, Edge.LoadNodeId);
 		if (UniqueEdges.Contains(EdgeKey))
 		{
 			OutError = TEXT("DuplicateSupportEdge");

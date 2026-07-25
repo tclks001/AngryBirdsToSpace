@@ -2,7 +2,7 @@
 
 > 文档性质：M7.3 新路线的独立调研与算法设计；本轮不修改 C++、地图或资产。
 >
-> 状态：调研与方案完成；纯数据语法阶段已落地，见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)。
+> 状态：调研与方案完成；纯数据语法阶段已落地，见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)；Scope、稀疏支撑、模块编译与真实接触审计已落地，见 [M73DAG2SpatialLayoutAndModuleCompilationDesign.md](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 

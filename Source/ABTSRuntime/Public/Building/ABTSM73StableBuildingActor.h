@@ -85,6 +85,12 @@ private:
 	int32 AnchorCellId = INDEX_NONE;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Generation")
 	FABTSM73GenerationSettings GenerationSettings;
+	/** DAG-1 topology settings. Used only when GenerationAlgorithm is RecursiveSupportDAG. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-1|Generation")
+	FABTSM73DAGGenerationSettings DAGGenerationSettings;
+	/** DAG-2 Scope split, sparse support and plate/column lowering settings. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-2|Layout")
+	FABTSM73DAGLayoutSettings DAGLayoutSettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")
