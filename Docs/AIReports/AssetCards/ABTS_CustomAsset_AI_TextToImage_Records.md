@@ -1,8 +1,66 @@
-# ABTS 定制资产 AI 文生图记录
+# ABTS 定制资产 AI 生成与低模收口记录
 
-> 记录范围：工作台、熔炉、桥、弹弓桩，以及四种弹弓弦的 Hunyuan 文生图阶段。后续使用 Hunyuan3D 图生 3D 时，必须把采用的概念图、原始 3D 文件、人工编辑和授权截图补回对应记录。
+> 记录范围：本文件记录本项目目前采用的完整 Hunyuan 资产工作流，以及工作台、熔炉、桥、弹弓槽、弹弓桩、弹丸袋、弹弓弦、炸药桶和弹簧等定制资产。所有原画与对应低模位于 `C:\workspace\AngryBirdsToSpaceAIAsset`。
 >
-> 共同流程：Hunyuan 文生图 → 选择概念图 → Hunyuan3D 图生 3D → Blender/UE 资产收口。以下提示词均要求原创、低模、孤立、无文字和无外部 IP。
+> **统一生产流程（当前实际采用）**：
+>
+> `HY Image 3.0 Instruct 文生图低模原画`
+> `→ 选择/修正原画`
+> `→ Hunyuan3D 图生 3D 高模`
+> `→ Hunyuan3D「低模拓扑-三角面-指定面数」生成低模`
+> `→ Hunyuan3D「纹理绘制-图生纹理」以原画为参考生成纹理`
+> `→ UE 导入、材质收口、Pivot/Socket/碰撞/尺寸校正`
+>
+> 原画、FBX 低模、纹理和最终 UE 资产必须建立一一对应关系。AI 只负责视觉资产候选；CellTopo、建筑占用、道路/水网、骨骼命名、Socket、碰撞和 Gameplay 参数由人工确定。
+
+## 0.1 本次工作流的工具与文件证据
+
+| 阶段 | 工具/功能 | 产物 | 证据位置 |
+| --- | --- | --- | --- |
+| 概念设计 | HY Image 3.0 Instruct | 低模原画 PNG | `C:\workspace\AngryBirdsToSpaceAIAsset\*.png` |
+| 高模生成 | Hunyuan3D 图生 3D | 原始高模（中间产物） | 按资产单独归档；不直接进 UE |
+| 拓扑减面 | 低模拓扑-三角面-指定面数 | 指定面数低模 FBX | `C:\workspace\AngryBirdsToSpaceAIAsset\*低模.fbx` |
+| 纹理生成 | 纹理绘制-图生纹理 | BaseColor/Normal/Roughness/Metallic 等纹理 | 对应 `*.fbm` 目录或 UE 导入纹理 |
+| 人工收口 | UE 5.8、必要时 Blender | Pivot、Socket、材质实例、碰撞、命名 | UE 资产与本记录的补录字段 |
+
+## 0.2 当前源资产清单与特殊拆分规则
+
+| 资产 | 原画 | 低模 | 特殊处理 |
+| --- | --- | --- | --- |
+| 弹弓槽 | `弹弓槽.png` | `弹弓槽低模.fbx` | 使用新的 Hunyuan 工作流替代旧 `ABTS_SlingshotDirtHole_Road_v001` 记录；道路预生成无碰撞视觉资产。 |
+| 弹弓桩 | `树枝桩.png`、`简易桩.png`、`强化桩.png`、`太空桩.png` | 对应四个 `*桩低模.fbx` | 四种桩共用同一低模拓扑；通过四张不同原画生成/应用不同纹理，不重复生成四套几何。 |
+| 弹弓弦 | `弹弓弦.png` | `弹弓弦低模.fbx` | 只生成白膜低模；材质由人工在 UE 制作，运行时由 Spline/Cable 控制长度。 |
+| 桥面 | `桥面.png` | `桥面低模.fbx` | 从桥原画拆出桥面部分，作为独立网格。 |
+| 桥绳 | `桥绳.png` | `桥绳低模.fbx` | 从桥原画拆出桥绳部分，桥面与两根绳子在 UE 中拼装。 |
+| 工作台/熔炉 | 对应 PNG | 对应低模 FBX | 视觉主体与交互挂点由人工收口。 |
+| 炸药桶/弹簧 | 对应 PNG | 对应低模 FBX | 炸药桶爆炸、弹簧活塞弹出均由 Gameplay/动画驱动，模型不决定物理。 |
+
+## 0.3 命名与归档规则
+
+每个资产至少保存以下记录：
+
+```text
+AssetId
+原画文件
+高模生成日期与截图
+低模拓扑目标三角面数
+低模 FBX 文件
+图生纹理输入原画
+生成的纹理文件
+UE 导入路径
+人工修改内容
+授权/比赛规则截图
+```
+
+推荐将中间文件按以下方式归档：
+
+```text
+C:\workspace\AngryBirdsToSpaceAIAsset\
+├─ Concepts\        # HY Image 3.0 原画
+├─ HighPoly\        # Hunyuan3D 图生 3D 中间高模
+├─ LowPoly\         # 指定三角面数后的 FBX
+└─ Textures\        # 图生纹理输出
+```
 
 ## 0. 通用记录字段
 
@@ -10,10 +68,11 @@
 - 图生 3D 工具：Hunyuan3D（版本/套餐：待补填）
 - 生成日期：待补填
 - 商业/比赛授权核对日期：待补填
-- 概念图目录：`SourceArt/AI/Concepts/<AssetId>/`
-- Hunyuan3D 原始输出目录：`SourceArt/AI/3D/<AssetId>/`
+- 概念图目录：`C:\workspace\AngryBirdsToSpaceAIAsset\` 下对应的 PNG（当前以中文资产名保存）
+- 低模 FBX 目录：`C:\workspace\AngryBirdsToSpaceAIAsset\` 下对应的 `*低模.fbx`
+- Hunyuan3D 高模：中间产物，建议归档到 `C:\workspace\AngryBirdsToSpaceAIAsset\HighPoly\<AssetId>\`，不直接导入 UE
 - 最终 UE 目录：`/Game/ABTS/Art/`
-- 每条记录必须保存：完整提示词、采用图、未采用图、生成截图、原始 3D 输出、人工编辑说明和许可证截图。
+- 每条记录必须保存：HY Image 3.0 完整提示词、采用图、未采用图、Hunyuan3D 生成截图、原始高模、低模拓扑目标面数、低模 FBX、图生纹理输入/输出、人工编辑说明和许可证截图。
 
 ## 1. 工作台
 
@@ -225,4 +284,3 @@ no excessive glowing effects, no dense PBR microdetail
 ```
 
 AI 不得决定以下最终内容：CellTopo CellId、Anchor Pair、道路切线、球面径向姿态、建筑占用、物理碰撞、骨骼命名、Socket 变换、发射弹道和资源库存。
-
