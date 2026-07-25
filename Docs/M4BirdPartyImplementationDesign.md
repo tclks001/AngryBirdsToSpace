@@ -3,6 +3,8 @@
 > 状态：C++ 已实现，等待编辑器视觉与交互验收。
 >
 > Gameplay 规则来源：[BirdPartyFollowingGameplayDesign.md](BirdPartyFollowingGameplayDesign.md)。本稿只说明 M4 落地、编辑器配置和验收。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [球面 Orbit Camera](M4MultiCharacterOrbitCameraDesign.md) · [UI 系统](UISystemDesign.md) · [M5 背包与加工](M5InventoryCraftingImplementationDesign.md)
 
 ## 1. 本阶段范围
 

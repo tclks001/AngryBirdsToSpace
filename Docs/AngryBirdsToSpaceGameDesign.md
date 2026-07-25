@@ -4,6 +4,18 @@
 >
 > 目标：在一个月内完成一款以 PCG 和物理为核心的第三人称 3D 小行星采集、建造与发射游戏；第一周完成中期评审可实际游玩的闭环。
 
+## 0. 文档导航
+
+本稿只维护全局玩法、阶段状态和跨系统约束；实现参数、编辑器步骤、验收与排错保留在对应详稿中。
+
+- 入口与球面基础：[M1](M1IndependentEntryDesign.md) · [M2 CellTopo/连续球面](M2PlanetSurfaceDesign.md) · [M2.5 径向引力与跳跃](M25RadialGravityAndJumpDesign.md) · [Chaos 刚体移动（当前正式路线）](ChaosRigidBodyMovementDesign.md) · [力悬挂移动（历史对照）](ForceSuspensionMovementDesign.md)
+- PCG 与地形：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M3 地形表现与 HISM](M3TaskGraphTerrainPresentationDesign.md)
+- 鸟群、相机与 UI：[鸟群跟随 Gameplay](BirdPartyFollowingGameplayDesign.md) · [M4 工程落地](M4BirdPartyImplementationDesign.md) · [M4 Orbit Camera](M4MultiCharacterOrbitCameraDesign.md) · [UI 系统](UISystemDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
+- 物品与世界交互：[M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/放置/装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md)
+- 弹弓与物理破坏：[M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 弹弓视觉](M6SlingshotVisualPresentationDesign.md) · [物理碰撞破坏调研](PhysicsImpactDestructionResearch.md)
+- 建筑：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点（Legacy 对照）](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)
+- 资产与工程参考：[Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md)
+
 ## 1. 概念与终局
 
 四只具有不同撞击特性的鸟被困在一颗程序化生成的小行星上。玩家沿主路推进、在预生成的弹弓槽中安装弹弓桩与弹弓弦，把同伴发射到远离道路的结构化建筑；建筑的物理连锁坍塌暴露并产出材料，小鸟自动回收材料。玩家据此加工更强的弹弓组件，利用球面地形、河网、桥梁和低轨卫星的引力走廊击溃更高价值目标，最终完成钢铁太空弹弓并飞离星球。
@@ -85,6 +97,8 @@
 鸟群跟随采用无环队列链而非所有鸟直接追逐主控：跟随目标来自前导鸟的 CellTopo 路径历史，舒适距离内不施加移动力，落后后才以 Arrival、路径约束和 Separation 组合追赶。跳跃沿路径传播 Jump Event，后排到达跳点且高度差确有需要时才依次跳跃；空中仅施加受限切向修正。M4 详细 gameplay 规则见 [BirdPartyFollowingGameplayDesign.md](BirdPartyFollowingGameplayDesign.md)。
 
 M4 的 C++ 落地、头像/模型配置、HUD 操作和验收步骤见 [M4BirdPartyImplementationDesign.md](M4BirdPartyImplementationDesign.md)。弹弓在本阶段只保留四鸟资格查询接口，实际发射延后验收。
+
+CuteBird 的 UE 5.1 → UE 5.8 安全迁移、Red/Blue/Yellow/Black 的外观预设映射、首版动画清单、Root Motion 约束和后续 Skeletal Mesh 表现层接口见 [CuteBirdMigrationAndAnimationDesign.md](CuteBirdMigrationAndAnimationDesign.md)。CuteBird 只替换鸟的表现层，不替代 ABTS 的角色物理、球面移动或鸟群逻辑。
 
 小鸟之外的低模资产采购、AI 辅助生成、Blender 收口、弹弓桩/弦/袋的 Socket 与骨骼契约，以及赛后 AI 使用报告模板见 [LowPolyAssetProductionAndAIReportWorkflow.md](LowPolyAssetProductionAndAIReportWorkflow.md)。所有弹弓视觉资产都必须遵守“两桩、两段弦、中央弹丸袋”的结构；槽位与发射逻辑仍由 CellTopo Anchor Pair 决定。
 
@@ -240,6 +254,8 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M7.1 | 平面物理测试台 | 独立平面 GameMode、可摆放 Floor/PlayerStart、树石 HISM、四材质砖、四档完整弹弓和模块化建筑锚点；支持编辑器实时变换、平面 Chaos 移动与恒向重力弹射。详见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。 |
 | M7.3-A | 稳定积木建筑 | 三种确定性轮廓、平面/球面统一 Ground Adapter、Footprint 校验、平坦施工台、地基脚、支撑 DAG、静态校验和短时 Chaos 空载验证；可在 M7.1 放置并击打，也可在首个球面建筑 Anchor 生成。详见 [M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。 |
 | M7.3-B | 弱点与难度 | 对支撑 DAG 逐节点执行 Ground 可达性反事实探针，按真实材质密度计算失撑质量，以攻击方向暴露度和 M7 Profile 破坏成本选择弱点；支持非弱点有限强化、红色编辑器高亮、难度窗口与确定性自动化测试。详见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。 |
+| M7.3-B2 | 结构弱点与失效验证 | 在最终支撑图建立前合成关键角、非对称双支撑和偏置接缝三种无装置弱点，以 Contact Hull、载荷 COM、`TipMargin` 和 `ReseatRisk` 同时保证完整时稳定、破坏后倾覆且不易原位承接。详见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。 |
+| M7.3-DAG | 递归主体承载图 PCG | 新路线以轮廓 Macro DAG 为低频骨架，通过串联/并联规则递归细分，再编译为砖块并从真实碰撞反建 Contact DAG；弱点从主体中下部 Failure Frontier 推导，以主体受影响质量、旁路、倾覆/滑移和 Chaos 反事实验证，解决 B2 只让顶部冠段掉落的问题。旧 A/B/B2 保留为 Legacy 对照。详见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `Sub=2/3` 潮汐锁定卫星和引力走廊；强化发射预览与实际轨迹发生可见偏转。 |
 | M10 | 侦察 | 青翎近射侦察更新小地图，标记道路外目标与引力走廊。 |

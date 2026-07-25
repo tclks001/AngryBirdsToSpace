@@ -1,6 +1,8 @@
 # M6 弹弓视觉表现设计
 
 > 状态：M7.1/M6 共享的弹弓视觉协议与实现说明。本文只描述弹弓桩、双弹弓弦和弹珠袋的表现，不改变 M6 的发射判定、弹道或破坏规则。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md)
 
 ## 1. 目标与统一原则
 

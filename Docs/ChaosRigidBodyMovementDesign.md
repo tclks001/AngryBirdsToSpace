@@ -3,6 +3,8 @@
 > 状态：已实现并完成 PIE 验收。当前推荐的角色移动路线为 `ChaosRigidBody`。
 >
 > 前置：球面环境见 [M2PlanetSurfaceDesign.md](M2PlanetSurfaceDesign.md)，M2.5 的历史运动路线见 [M25RadialGravityAndJumpDesign.md](M25RadialGravityAndJumpDesign.md)，地表碰撞/材质物理参数见 [M52CollisionAndMovementDesign.md](M52CollisionAndMovementDesign.md)。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [力悬挂历史对照](ForceSuspensionMovementDesign.md) · [M4 鸟群落地](M4BirdPartyImplementationDesign.md) · [M6 发射状态衔接](M6SlingshotLaunchAndImpactDesign.md)
 
 ## 1. 目标与范围
 

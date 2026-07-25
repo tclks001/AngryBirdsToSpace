@@ -3,6 +3,8 @@
 > 编码：UTF-8，简体中文。
 >
 > 用途：沉淀本项目已经遇到或已经被设计约束覆盖的问题。新增问题时，记录“现象—根因—修复—防回归验证”，不要只保留最后一次临时改动。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)
 
 ## 1. 使用规则
 
@@ -123,10 +125,25 @@
 
 | 症状 | 根因 | 修复 | 验收 |
 | --- | --- | --- | --- |
-| `TwinTowerBridge` 报 `InsufficientWeakPoints:0:1`，但肉眼看上层有很多木砖 | 使用按块数直觉设置了过高失撑比例；铁质桥面按真实密度计算后占整栋质量很大，单侧木塔失撑质量比例可能低于 10% | 弱点指标坚持 `体积 × M7 Profile 密度`；默认 `MinWeakCollapseRatio` 校准为 `0.05`，不要退回按块计数 | `ABTS.M73B.WeakPointPlanner` 的三种轮廓均通过，TwinTowerBridge 产生有效弱点和非空失撑子图 |
+| `TwinTowerBridge` 报 `InsufficientWeakPoints:0:1`，但肉眼看上层有很多木砖 | 使用按块数直觉设置了过高失撑比例；铁质桥面和 B2 载荷按真实密度计算后占比与块数直觉不同 | 弱点指标坚持 `体积 × M7 Profile 密度`；B2 当前默认 `MinWeakCollapseRatio=0.02`，并新增 Tip/Reseat 硬门槛，不退回按块计数 | `ABTS.M73B.WeakPointPlanner` 与 `ABTS.M73B2.StructuralWeaknessFailure` 均通过，TwinTowerBridge 产生有效 `AffectedNodeIds` |
 | Editor 与 PIE 的 WeakPoint NodeId 不一致 | Editor 无 MaterialSystem 时使用共享默认 Profile，而 Runtime MaterialSystem 的可编辑 Profile 已改变强度/密度排序 | 默认 Profile 由 `FABTSM7MaterialProfileLibrary` 单点提供；Runtime 通过 `CopyMaterialProfiles` 注入实际数据。若手工改 Profile，按 Runtime 日志作为最终结果并同步调参 | 对照 `[M7.3-B][WeakPoint]`；同一 Profile、Seed 和朝向下 NodeId 必须一致 |
 | 弱点规划失败后仍残留半块玻璃或强化材料 | 直接在输入 Data 上边筛选边改写，失败没有回滚 | Planner 在副本上事务式规划，只在全部难度门槛通过后 Move 回输出 | 设置不可能窗口后稳定拒绝，`WeakPoints` 为空且所有 `Material == OriginalMaterial` |
 | 弱点击碎但普通低层梁更容易导致整栋倒塌 | 只选择弱点，没有检查其他高影响节点的单位材料成本 | 计算 `PredictedNonWeakEffect`，有限强化高影响非弱点，并要求 `WeakPointAdvantage >= MinWeakPointAdvantage` | 默认弱点单位成本结构效果至少为普通攻击的 1.5 倍；实际 M7.1 对照击打仍需验收 |
 | 把所有关键梁强化为 Iron 后建筑质量和二次冲击异常 | 铁密度远高于木，大型铁楼板会显著改变总质量和 Chaos 响应 | 默认强化使用 Stone，并限制数量；Iron 只作为显式硬难度选择，换料后重算质量与难度 | 空载验证无弹飞；弱点最终比例仍在窗口内；普通攻击不再一碰全倒 |
 | 空载日志 `MaxMove` 约 4–6cm 且旋转很小，却被判不稳定 | 旧验证将沿重力轴的小幅接触落座和施工平面内失稳漂移合并成一个总位移 | 将位移分解为 `MaxDrift` 与 `MaxSettlement`；默认分别限制 4cm/6cm，总位移只保留诊断 | 五层平面单塔换料后 `MaxDrift` 仍在 4cm 内、`MaxSettlement` 在 6cm 内则通过；真实掉落一层会远超沉降上限 |
 | Gatehouse 或 TwinTowerBridge 将 `Levels` 调到 5 后预览全部消失，并显示 `BrickBudgetExceeded:51:50`（新版 Twin 为 `53:50`） | Builder 在生成完几何后执行 `MaxBrickCount` 硬预算。双塔主体每层 10 块；Gatehouse 总数为 `10*Levels+1`，TwinTowerBridge 总数为 `10*Levels+3`。默认预算 50，因此 5 层必然拒绝；`RebuildPreview` 在生成前先清空旧实例，使拒绝结果表现为“全部消失”。 | 这不是材质/HISM 丢失。临时测试可提高 Actor 的 `GenerationSettings.MaxBrickCount`；正式关卡优先保持 4 层以内，或在后续将非关键构件合并/HISM 化后再提高预算。 | 分别测试 Levels 4/5：默认预算下 4 层可生成，5 层稳定输出明确的 `BrickBudgetExceeded`；提高 MaxBrickCount 后 5 层恢复，且 active body 计数纳入性能验收。 |
+
+## 9. M7.3-B2 结构弱点与失效验证
+
+| 症状 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| Gatehouse 增加顶部关键角后报 `BrickPenetration`，或普通木楼板成为比玻璃弱柱更有效的旁路目标 | 将关键角顶冠放在塔顶木 Deck 时，新增支撑与中央门梁同高；简单向外挪开后，木 Deck 又会承托整个弱点段，破坏难度优势 | Gatehouse 的 `CriticalCorner` 改为落在两塔共用的顶层铁质门梁上：门梁顶部与弱支撑底部只接触，且强门梁不会成为低成本旁路弱点 | `ABTS.M73B2.StructuralWeaknessFailure` 中 Gatehouse 静态/优势校验通过；M7.1 预览无重叠和初始弹飞 |
+| `TwinTowerBridge + Iron` 报 `B2TipMarginTooSmall:4.005:8.000`，而较轻 Carrier 可以通过 | Carrier 使用 `PrimaryMaterial`，Payload 固定为 Stone；Iron 的 `7.85g/cm3` 密度使受影响 COM 更受 Carrier 本体支配。只有比例偏置 `WeaknessBiasRatio=0.72` 时，换料后的 COM 没有足够绝对越界余量；这不是浮点误差 | 保留比例偏置，并在其后沿预测倾覆方向追加共享的 `WeaknessTipReserveCM=5.0`；Carrier 与 Payload 整体平移，随后再执行最终 Failure Probe，不用降低 `MinTipMarginCM` 掩盖失败 | 同一 Twin/Iron 用例由旧 `TipMargin=4.005cm` 提高到 `9.010cm`；192 组 Seed×轮廓×材质×层数矩阵全部满足 `Initial>=2`、`Tip>=8`、`Reseat<=0.35` |
+| 弱点日志仍是 `[M7.3-B][WeakPoint]`，误以为 B2 没有运行 | 为兼容既有检索保留了日志标签，B2 没有另起一套平行弱点系统 | 通过 `Pattern/Collapse/InitialMargin/TipMargin/Reseat/Affected` 新字段识别 B2；Summary 同步显示模板和失效指标 | 默认三种轮廓日志均包含这些字段，`Affected>0`，Summary 与 Primary WeakPoint 一致 |
+| 图探针通过但 Carrier 在 Chaos 中只局部碎落 | 美术或运行时把 B2 的单 Carrier 静默拆成多个独立刚体，破坏了一个 COM/Contact Hull 的验证前提 | 当前 Carrier 必须对应一个完整刚体；未来如需拼块外观，新增显式 RigidGroup 后再扩展验证 | Runtime Node→Module 映射中 Carrier 唯一；M7.1 击中弱支撑后 Carrier 与 Payload 作为同一载荷闭包倾覆 |
+| 对角布置的两个石质 Payload 在物理启动时互相顶开 | Payload 是轴对齐盒体；只沿对角线使用固定中心距离会让 X/Y 两轴投影仍重叠 | 按垂直方向在 X/Y 上的最大投影反算中心半距，并保留 4cm 间隙；尺寸变化后重跑静态穿透校验 | TwinTowerBridge 不再出现 Payload-Payload `BrickPenetration`，空载不自发弹开 |
+| Twin/Iron 空载在固定 `1.25s` 截止时由 Payload 产生 `MaxDrift=4.48cm`，主体旋转仅 `0.57°`，因此被误判失败 | 固定时刻只比较累计位移，没有判断接触是否已经收敛；截止时线速度仍为 `7.68cm/s`、角速度为 `1.63deg/s`。预校验得到 `Pairs=0/Repairs=0`，把 Tip Reserve 从 `5.0` 降到 `4.25` 也只把漂移改为 `4.42cm`，共同排除了初始穿透和 COM Reserve 是主因 | Idle 改为最短观察 `1.25s`、所有刚体连续低于 `4cm/s` 与 `1.5deg/s` 达 `0.45s` 才收敛、硬上限 `6s`；预校验复用 M7 `PenetrationValidator`，通过后 `Freeze()` 保留实际落座 Transform | fresh M7.1 运行在 `3.63s` 完成、`Stable=0.47`、`TimedOut=0`；最终 `MaxDrift=3.02cm`、`MaxSettlement=2.95cm`、`MaxRotation=0.53°`、速度 `1.44cm/s / 1.41deg/s`、`Accepted=1` |
+| 四个 Seed 下 SingleTower 弱点仍只沿局部 Y 倾倒，或多塔弱点朝中心 Connector | 旧双支撑模板只用 `Corner.Y`，忽略 X 象限；多塔若原样保留内向弱侧，则会被中心 Connector 遮挡，或为了避让而离开承台 | `AsymmetricDualSupport` 的整条支撑线由 `Corner.X` 选择 `+X/-X`，弱柱由 `Corner.Y` 选择，`TipDirection` 使用完整四象限 Corner；Gate/Twin 将朝中心的弱侧镜像至所选塔外侧 | 192 组矩阵通过；四象限断言明确针对 SingleTower/双支撑，Gate/Twin 验证弱侧始终朝所选塔外侧，不要求同一多塔轮廓保留四个最终局部象限 |
+| `IdlePenetrationValidation` 显示 `Repairs>0`，微调后看起来仍能站立 | 微调改变了真实 Module Transform，但 Builder 支撑边、Contact Hull 和 B2 `TipMargin` 仍基于原生成几何；继续验收会产生数据与 Chaos 不一致的假通过 | M7.3-A 将任意 `Repairs>0`、`LargeErrors>0` 或 `RemainingSmall>0` 直接判为 `IdlePenetrationInvalid`，不进入 quiet-window；从 Pivot、Simple Collision、生成尺寸和间隙上消除穿透 | 合格建筑预检必须为 `Repairs=0 LargeErrors=0 RemainingSmall=0`；出现修复时日志紧接 `PenetrationRejected=1 ... Accepted=0` |
+| 三种 B2 Pattern 看起来相同，击毁弱点只掉顶部小段 | 基础主楼仍是四柱整板重复；`WeaknessStructureBuilder` 从 `HighestDeck` 添加共用的 Carrier 与两个 Payload；`PostFailureValidator` 从最高处 Carrier 向上收集，测试又固定断言受影响节点为 3 | 不继续用尺寸/材料掩盖；B2 保留为 Legacy 顶冠对照，新路线改为递归主体 Macro DAG，并从中下部 Failure Frontier 推导弱点，最终以真实 Contact DAG 和 Chaos 反事实验证 | 新路线要求主体受影响质量/高度跨度达到门槛、无旁路、弱点攻击显著优于普通攻击；详见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) |
+| Idle 验证失败后建筑、地基一起消失，或担心不可见地基仍阻挡 Gameplay | 失败统一进入 `RejectRuntimeStructure`；这是刻意的事务回滚，而不是简单隐藏主体。继续保留失败模块或 Foundation 会让无效结构参与 M6/M7 碰撞 | 销毁所有 Runtime Module，清空 RuntimeModules、Node→Module 映射和 Idle 缓存，停止 Tick；隐藏 FoundationCap、清空 FoundationFeet，并把二者碰撞设为 `NoCollision`。后续重试通过 `UpdateFoundationComponents` 恢复 Foundation 可见性、实例与 `QueryAndPhysics` 碰撞，再重新装配验证 | `Accepted=0` 后场景中无该建筑模块、鸟和弹丸不会撞到隐形 Foundation；修复参数并重新初始化后 Foundation 和模块完整恢复，重新执行穿透与 quiet-window 验证 |

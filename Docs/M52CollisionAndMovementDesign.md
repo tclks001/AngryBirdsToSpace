@@ -1,6 +1,8 @@
 # M5.2：碰撞与移动效果优化
 
 > 状态：C++ 已实现；需要在 M3/M5 地图中进行 PIE 视觉手感验收。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M3 地形/HISM](M3TaskGraphTerrainPresentationDesign.md) · [M5.1 世界物品与放置](M51WorldItemsPlacementSlingshotDesign.md) · [Chaos 刚体移动（当前正式路线）](ChaosRigidBodyMovementDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md)
 
 ## 1. 目标与边界
 

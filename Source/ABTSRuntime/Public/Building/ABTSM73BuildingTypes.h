@@ -22,6 +22,24 @@ enum class EABTSM73Silhouette : uint8
 	TwinTowerBridge
 };
 
+/** Device-free M7.3-B2 structural weakness geometry. */
+UENUM(BlueprintType)
+enum class EABTSM73StructuralWeaknessPattern : uint8
+{
+	Auto,
+	CriticalCorner,
+	AsymmetricDualSupport,
+	OffsetSeam
+};
+
+UENUM(BlueprintType)
+enum class EABTSM73PredictedCollapseMode : uint8
+{
+	None,
+	Tip,
+	SlideAndTip
+};
+
 /** Structural role assigned by the M7.3-B counterfactual weak-point pass. */
 UENUM(BlueprintType)
 enum class EABTSM73WeakPointRole : uint8
@@ -53,6 +71,35 @@ struct FABTSM73GenerationSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation", meta = (ClampMin = "5", ClampMax = "100"))
 	int32 MaxBrickCount = 50;
+
+	/** Adds one authored top weakness segment before support edges are finalized. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry")
+	bool bGenerateStructuralWeakness = true;
+
+	/** Auto maps the three current silhouettes to different B2 templates. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (EditCondition = "bGenerateStructuralWeakness"))
+	EABTSM73StructuralWeaknessPattern StructuralWeaknessPattern = EABTSM73StructuralWeaknessPattern::Auto;
+
+	/** -1 chooses one tower deterministically from BuildingSeed; SingleTower always uses bay 0. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (ClampMin = "-1", ClampMax = "1", EditCondition = "bGenerateStructuralWeakness"))
+	int32 StructuralWeaknessBayIndex = -1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (ClampMin = "0.40", ClampMax = "0.85", EditCondition = "bGenerateStructuralWeakness"))
+	float WeaknessFootprintRatio = 0.62f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (ClampMin = "40.0", UIMax = "240.0", EditCondition = "bGenerateStructuralWeakness"))
+	float WeaknessSupportHeightCM = 110.0f;
+
+	/** Bias of the carrier/load COM toward the breakable support, relative to support span. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (ClampMin = "0.10", ClampMax = "0.80", EditCondition = "bGenerateStructuralWeakness"))
+	float WeaknessBiasRatio = 0.72f;
+
+	/** Absolute COM reserve along the intended failure direction, after proportional bias. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (ClampMin = "0.0", UIMax = "20.0", EditCondition = "bGenerateStructuralWeakness"))
+	float WeaknessTipReserveCM = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weakness Geometry", meta = (ClampMin = "40.0", UIMax = "300.0", EditCondition = "bGenerateStructuralWeakness"))
+	float WeaknessPayloadHeightCM = 130.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dimensions", meta = (ClampMin = "80.0", UIMax = "800.0"))
 	float BayWidthCM = 360.0f;
@@ -102,8 +149,23 @@ struct FABTSM73GenerationSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.01", ClampMax = "1.0"))
 	float MinContactAreaRatio = 0.12f;
 
+	/** Minimum hidden Chaos observation before a quiet window may complete. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.1", UIMax = "5.0"))
 	float IdleValidationSeconds = 1.25f;
+
+	/** Continuous low-motion time required before the hidden pre-settle is frozen. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.05", UIMax = "2.0"))
+	float IdleStableHoldSeconds = 0.45f;
+
+	/** Hard timeout: a structure still moving here is genuinely unstable. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.5", UIMax = "10.0"))
+	float IdleValidationMaxSeconds = 6.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.0", UIMax = "50.0"))
+	float IdleLinearSpeedThresholdCMPerSec = 4.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.0", UIMax = "10.0"))
+	float IdleAngularSpeedThresholdDegPerSec = 1.5f;
 
 	/** Maximum drift along the construction plane during the hidden idle simulation. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.0", UIMax = "50.0"))
@@ -141,7 +203,7 @@ struct FABTSM73DifficultySettings
 	int32 TargetBirdHits = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MinWeakCollapseRatio = 0.05f;
+	float MinWeakCollapseRatio = 0.02f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float TargetWeakCollapseRatio = 0.20f;
@@ -161,6 +223,19 @@ struct FABTSM73DifficultySettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weak Points", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float MaxWeakPointAffectedOverlap = 0.60f;
+
+	/** Prevents the old aligned-floor proxy from being accepted as a physical weak point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "B2 Failure Validation")
+	bool bRequireAuthoredStructuralWeakness = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "B2 Failure Validation", meta = (ClampMin = "0.0", UIMax = "50.0"))
+	float MinInitialSupportMarginCM = 2.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "B2 Failure Validation", meta = (ClampMin = "0.0", UIMax = "100.0"))
+	float MinTipMarginCM = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "B2 Failure Validation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxReseatRisk = 0.35f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reinforcement")
 	bool bReinforceNonWeakCriticalNodes = true;
@@ -248,6 +323,18 @@ struct FABTSM73GenerationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Difficulty")
 	float DifficultyScore = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "B2 Failure")
+	EABTSM73StructuralWeaknessPattern StructuralWeaknessPattern = EABTSM73StructuralWeaknessPattern::Auto;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "B2 Failure")
+	EABTSM73PredictedCollapseMode PredictedCollapseMode = EABTSM73PredictedCollapseMode::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "B2 Failure")
+	float PrimaryTipMarginCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "B2 Failure")
+	float PrimaryReseatRisk = 1.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	FString RejectReason;

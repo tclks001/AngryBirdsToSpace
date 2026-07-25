@@ -270,6 +270,15 @@ void AABTSM7BuildingMaterialSystem::ActivateModuleForLaunch(AABTSM7BuildingModul
 	}
 }
 
+FABTSM7PenetrationValidationStats AABTSM7BuildingMaterialSystem::ValidateAndRepairPendingModules(
+	const TArray<AABTSM7BuildingModule*>& PendingModules) const
+{
+	return GetWorld() != nullptr
+		? FABTSM7PenetrationValidator::ValidateAndRepair(
+			*GetWorld(), PendingModules, InitialPenetrationRepairToleranceCM, InitialPenetrationRepairPasses)
+		: FABTSM7PenetrationValidationStats();
+}
+
 void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 	const bool bPlanar,
 	const FVector& GravityReference,
@@ -310,8 +319,7 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 			Modules.RemoveAtSwap(Index);
 		}
 	}
-	const FABTSM7PenetrationValidationStats Validation = FABTSM7PenetrationValidator::ValidateAndRepair(
-		*GetWorld(), PendingModules, InitialPenetrationRepairToleranceCM, InitialPenetrationRepairPasses);
+	const FABTSM7PenetrationValidationStats Validation = ValidateAndRepairPendingModules(PendingModules);
 	for (AABTSM7BuildingModule* Module : PendingModules)
 	{
 		if (IsValid(Module) && !Module->IsDynamic()) ActivateModuleForLaunch(*Module);

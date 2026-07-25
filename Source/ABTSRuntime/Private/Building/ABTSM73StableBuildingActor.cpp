@@ -11,6 +11,7 @@
 #include "Building/ABTSM7MaterialProfileLibrary.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "Building/ABTSM7PenetrationValidator.h"
 #include "Components/ArrowComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -166,6 +167,14 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 	GenerationSummary.PredictedNonWeakEffect = Data.PredictedNonWeakEffect;
 	GenerationSummary.EstimatedWeakPointHits = Data.EstimatedWeakPointHits;
 	GenerationSummary.DifficultyScore = Data.DifficultyScore;
+	if (!Data.WeakPoints.IsEmpty())
+	{
+		const FABTSM73WeakPointRecord& Primary = Data.WeakPoints[0];
+		GenerationSummary.StructuralWeaknessPattern = Primary.StructuralPattern;
+		GenerationSummary.PredictedCollapseMode = Primary.CollapseMode;
+		GenerationSummary.PrimaryTipMarginCM = Primary.TipMarginCM;
+		GenerationSummary.PrimaryReseatRisk = Primary.ReseatRisk;
+	}
 	GenerationSummary.RejectReason = Error;
 }
 
@@ -248,6 +257,10 @@ void AABTSM73StableBuildingActor::UpdateFoundationComponents(
 	const FABTSM73GroundContext& Context,
 	const FABTSM73StructureData& Data)
 {
+	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	FoundationFeet->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	const FVector2D Extent = Data.FootprintHalfExtent + FVector2D(FMath::Max(0.0f, GenerationSettings.FoundationMarginCM));
 	const float CapHeight = FMath::Max(10.0f, Data.FoundationCapTopCM - Data.FoundationCapBottomCM);
 	FoundationCap->SetWorldTransform(WorldBoxTransform(Context,
@@ -311,6 +324,15 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		}
 	}
 	bRuntimeSpawned = RuntimeModules.Num() == Data.Bricks.Num();
+	if (!bRuntimeSpawned)
+	{
+		for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
+		{
+			if (AABTSM7BuildingModule* Module = Weak.Get()) Module->Destroy();
+		}
+		RuntimeModules.Reset();
+		RuntimeModulesByNodeId.Reset();
+	}
 	ClearBrickPreviews();
 	bRuntimePlanar = Context.bPlanar;
 	RuntimeGravityReference = Context.bPlanar
@@ -328,10 +350,13 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	{
 		const TWeakObjectPtr<AABTSM7BuildingModule>* Module = RuntimeModulesByNodeId.Find(WeakPoint.NodeId);
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M7.3-B][WeakPoint] Actor=%s Node=%d Role=%d Module=%s UnsupportedMass=%.3f Exposure=%.3f Hits=%d Score=%.3f"),
+			TEXT("[ABTS][M7.3-B][WeakPoint] Actor=%s Node=%d Role=%d Module=%s UnsupportedMass=%.3f Exposure=%.3f Hits=%d Score=%.3f Pattern=%d Collapse=%d InitialMargin=%.2f TipMargin=%.2f Reseat=%.3f Affected=%d"),
 			*GetName(), WeakPoint.NodeId, static_cast<int32>(WeakPoint.Role),
 			Module != nullptr && Module->IsValid() ? *Module->Get()->GetName() : TEXT("None"),
-			WeakPoint.UnsupportedMassRatio, WeakPoint.Exposure, WeakPoint.EstimatedHits, WeakPoint.Score);
+			WeakPoint.UnsupportedMassRatio, WeakPoint.Exposure, WeakPoint.EstimatedHits, WeakPoint.Score,
+			static_cast<int32>(WeakPoint.StructuralPattern), static_cast<int32>(WeakPoint.CollapseMode),
+			WeakPoint.InitialSupportMarginCM, WeakPoint.TipMarginCM, WeakPoint.ReseatRisk,
+			WeakPoint.AffectedNodeIds.Num());
 	}
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M7.3-B][Difficulty] Actor=%s WeakPoints=%d Reinforced=%d WeakCollapse=%.3f NonWeakEffect=%.3f Hits=%d Score=%.3f"),
@@ -342,17 +367,49 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 void AABTSM73StableBuildingActor::BeginIdleValidation(const FABTSM73GroundContext& Context)
 {
 	IdleInitialTransforms.Reset();
+	TArray<AABTSM7BuildingModule*> PendingModules;
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
 	{
 		AABTSM7BuildingModule* Module = Weak.Get();
 		if (Module == nullptr) continue;
-		IdleInitialTransforms.Add(Module->GetActorTransform());
-		Module->SetContactDamageGraceSeconds(GenerationSettings.IdleValidationSeconds + 0.5f);
+		PendingModules.Add(Module);
+	}
+	const FABTSM7PenetrationValidationStats ContactValidation = RuntimeMaterialSystem.IsValid()
+		? RuntimeMaterialSystem->ValidateAndRepairPendingModules(PendingModules)
+		: FABTSM7PenetrationValidationStats();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7.3-A][IdlePenetrationValidation] Actor=%s Modules=%d Pairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f"),
+		*GetName(), PendingModules.Num(), ContactValidation.DetectedPairCount, ContactValidation.RepairCount,
+		ContactValidation.LargeErrorPairCount, ContactValidation.RemainingSmallPairCount,
+		ContactValidation.MaximumDetectedDepthCM);
+	if (ContactValidation.RepairCount > 0
+		|| ContactValidation.LargeErrorPairCount > 0
+		|| ContactValidation.RemainingSmallPairCount > 0)
+	{
+		const FString RejectReason = FString::Printf(
+			TEXT("IdlePenetrationInvalid:Repairs=%d:Large=%d:RemainingSmall=%d:MaxDepth=%.4f"),
+			ContactValidation.RepairCount, ContactValidation.LargeErrorPairCount, ContactValidation.RemainingSmallPairCount,
+			ContactValidation.MaximumDetectedDepthCM);
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s PenetrationRejected=1 Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Accepted=0"),
+			*GetName(), ContactValidation.RepairCount, ContactValidation.LargeErrorPairCount, ContactValidation.RemainingSmallPairCount,
+			ContactValidation.MaximumDetectedDepthCM);
+		RejectRuntimeStructure(RejectReason);
+		return;
+	}
+	for (AABTSM7BuildingModule* Module : PendingModules)
+	{
+		if (!IsValid(Module)) continue;
+		IdleInitialTransforms.Add(Module, Module->GetActorTransform());
+		Module->SetContactDamageGraceSeconds(FMath::Max(
+			GenerationSettings.IdleValidationMaxSeconds,
+			GenerationSettings.IdleValidationSeconds + GenerationSettings.IdleStableHoldSeconds) + 0.5f);
 		Module->GetMeshComponent()->SetVisibility(false, true);
 		if (Context.bPlanar) Module->ActivateDynamicPlanar(FVector::ZeroVector, Context.GravityUp, ValidationGravityCMPerSec2);
 		else Module->ActivateDynamic(FVector::ZeroVector, RuntimeGravityReference, ValidationGravityCMPerSec2);
 	}
 	IdleValidationElapsed = 0.0f;
+	IdleStableElapsed = 0.0f;
 	bIdleValidationRunning = true;
 	SetActorTickEnabled(true);
 }
@@ -362,59 +419,142 @@ void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	if (!bIdleValidationRunning) return;
 	IdleValidationElapsed += DeltaSeconds;
-	if (IdleValidationElapsed >= GenerationSettings.IdleValidationSeconds) FinishIdleValidation();
+	bool bAnyBodyMoving = false;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
+	{
+		const AABTSM7BuildingModule* Module = Weak.Get();
+		const UStaticMeshComponent* Mesh = Module != nullptr ? Module->GetMeshComponent() : nullptr;
+		if (Mesh == nullptr || !Mesh->IsSimulatingPhysics()) continue;
+		if (Mesh->GetPhysicsLinearVelocity().Size() > GenerationSettings.IdleLinearSpeedThresholdCMPerSec
+			|| Mesh->GetPhysicsAngularVelocityInDegrees().Size() > GenerationSettings.IdleAngularSpeedThresholdDegPerSec)
+		{
+			bAnyBodyMoving = true;
+			break;
+		}
+	}
+	if (IdleValidationElapsed >= GenerationSettings.IdleValidationSeconds && !bAnyBodyMoving)
+	{
+		IdleStableElapsed += FMath::Max(0.0f, DeltaSeconds);
+	}
+	else
+	{
+		IdleStableElapsed = 0.0f;
+	}
+	if (IdleStableElapsed >= GenerationSettings.IdleStableHoldSeconds)
+	{
+		FinishIdleValidation(false);
+	}
+	else if (IdleValidationElapsed >= FMath::Max(
+		GenerationSettings.IdleValidationMaxSeconds,
+		GenerationSettings.IdleValidationSeconds + GenerationSettings.IdleStableHoldSeconds))
+	{
+		FinishIdleValidation(true);
+	}
 }
 
-void AABTSM73StableBuildingActor::FinishIdleValidation()
+void AABTSM73StableBuildingActor::FinishIdleValidation(const bool bTimedOut)
 {
 	float MaxMove = 0.0f;
 	float MaxPlanarDrift = 0.0f;
 	float MaxSettlement = 0.0f;
 	float MaxRotation = 0.0f;
-	int32 ValidIndex = 0;
+	float MaxLinearSpeed = 0.0f;
+	float MaxAngularSpeed = 0.0f;
+	int32 AwakeBodyCount = 0;
+	TWeakObjectPtr<AABTSM7BuildingModule> MaxMoveModule;
+	TWeakObjectPtr<AABTSM7BuildingModule> MaxDriftModule;
+	TWeakObjectPtr<AABTSM7BuildingModule> MaxSettlementModule;
+	TWeakObjectPtr<AABTSM7BuildingModule> MaxRotationModule;
+	FVector MaxMoveDelta = FVector::ZeroVector;
+	FVector MaxDriftDelta = FVector::ZeroVector;
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
 	{
 		AABTSM7BuildingModule* Module = Weak.Get();
 		if (Module == nullptr) continue;
-		if (IdleInitialTransforms.IsValidIndex(ValidIndex))
+		if (UStaticMeshComponent* Mesh = Module->GetMeshComponent())
 		{
-			const FTransform& Initial = IdleInitialTransforms[ValidIndex];
-			const FVector Delta = Module->GetActorLocation() - Initial.GetLocation();
+			MaxLinearSpeed = FMath::Max(MaxLinearSpeed, Mesh->GetPhysicsLinearVelocity().Size());
+			MaxAngularSpeed = FMath::Max(MaxAngularSpeed, Mesh->GetPhysicsAngularVelocityInDegrees().Size());
+			if (Mesh->IsAnyRigidBodyAwake()) ++AwakeBodyCount;
+		}
+		if (const FTransform* Initial = IdleInitialTransforms.Find(Module))
+		{
+			const FVector Delta = Module->GetActorLocation() - Initial->GetLocation();
 			FVector Up = bRuntimePlanar
 				? RuntimeGravityReference.GetSafeNormal()
-				: (Initial.GetLocation() - RuntimeGravityReference).GetSafeNormal();
+				: (Initial->GetLocation() - RuntimeGravityReference).GetSafeNormal();
 			if (Up.IsNearlyZero()) Up = FVector::UpVector;
-			MaxMove = FMath::Max(MaxMove, Delta.Size());
-			MaxPlanarDrift = FMath::Max(MaxPlanarDrift, FVector::VectorPlaneProject(Delta, Up).Size());
-			MaxSettlement = FMath::Max(MaxSettlement, FMath::Abs(FVector::DotProduct(Delta, Up)));
-			MaxRotation = FMath::Max(MaxRotation, FMath::RadiansToDegrees(Initial.GetRotation().AngularDistance(Module->GetActorQuat())));
+			const float Move = Delta.Size();
+			const float PlanarDrift = FVector::VectorPlaneProject(Delta, Up).Size();
+			const float Settlement = FMath::Abs(FVector::DotProduct(Delta, Up));
+			const float Rotation = FMath::RadiansToDegrees(Initial->GetRotation().AngularDistance(Module->GetActorQuat()));
+			if (Move > MaxMove) { MaxMove = Move; MaxMoveModule = Module; MaxMoveDelta = Delta; }
+			if (PlanarDrift > MaxPlanarDrift) { MaxPlanarDrift = PlanarDrift; MaxDriftModule = Module; MaxDriftDelta = Delta; }
+			if (Settlement > MaxSettlement) { MaxSettlement = Settlement; MaxSettlementModule = Module; }
+			if (Rotation > MaxRotation) { MaxRotation = Rotation; MaxRotationModule = Module; }
 		}
-		++ValidIndex;
 		Module->Freeze();
 		Module->GetMeshComponent()->SetVisibility(true, true);
 	}
 	bIdleValidationRunning = false;
 	SetActorTickEnabled(false);
-	const bool bAccepted = MaxPlanarDrift <= GenerationSettings.MaxIdleDisplacementCM
+	const auto DescribeModule = [this](const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule)
+	{
+		const AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr) return FString(TEXT("None"));
+		int32 NodeId = INDEX_NONE;
+		for (const TPair<int32, TWeakObjectPtr<AABTSM7BuildingModule>>& Pair : RuntimeModulesByNodeId)
+		{
+			if (Pair.Value.Get() == Module) { NodeId = Pair.Key; break; }
+		}
+		return FString::Printf(TEXT("%s(Node=%d)"), *Module->GetName(), NodeId);
+	};
+	const bool bAccepted = !bTimedOut
+		&& MaxPlanarDrift <= GenerationSettings.MaxIdleDisplacementCM
 		&& MaxSettlement <= GenerationSettings.MaxIdleSettlementCM
 		&& MaxRotation <= GenerationSettings.MaxIdleRotationDegrees;
 	GenerationSummary.bAccepted = GenerationSummary.bAccepted && bAccepted;
 	if (!bAccepted)
 	{
 		GenerationSummary.RejectReason = FString::Printf(
-			TEXT("IdleChaosUnstable:Move=%.2f:Drift=%.2f:Settlement=%.2f:Rotation=%.2f"),
-			MaxMove, MaxPlanarDrift, MaxSettlement, MaxRotation);
+			TEXT("IdleChaosUnstable:TimedOut=%d:Move=%.2f:Drift=%.2f:Settlement=%.2f:Rotation=%.2f"),
+			bTimedOut ? 1 : 0, MaxMove, MaxPlanarDrift, MaxSettlement, MaxRotation);
 	}
 	if (bAccepted)
 	{
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s Seconds=%.2f MaxMove=%.2f MaxDrift=%.2f MaxSettlement=%.2f MaxRotation=%.2f Accepted=1"),
-			*GetName(), IdleValidationElapsed, MaxMove, MaxPlanarDrift, MaxSettlement, MaxRotation);
+			TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s Seconds=%.2f Stable=%.2f TimedOut=0 MaxMove=%.2f MoveDelta=%s MoveModule=%s MaxDrift=%.2f DriftDelta=%s DriftModule=%s MaxSettlement=%.2f SettlementModule=%s MaxRotation=%.2f RotationModule=%s MaxLinearSpeed=%.2f MaxAngularSpeed=%.2f Awake=%d Accepted=1"),
+			*GetName(), IdleValidationElapsed, IdleStableElapsed, MaxMove, *MaxMoveDelta.ToCompactString(), *DescribeModule(MaxMoveModule), MaxPlanarDrift,
+			*MaxDriftDelta.ToCompactString(), *DescribeModule(MaxDriftModule), MaxSettlement, *DescribeModule(MaxSettlementModule),
+			MaxRotation, *DescribeModule(MaxRotationModule), MaxLinearSpeed, MaxAngularSpeed, AwakeBodyCount);
 	}
 	else
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s Seconds=%.2f MaxMove=%.2f MaxDrift=%.2f MaxSettlement=%.2f MaxRotation=%.2f Accepted=0"),
-			*GetName(), IdleValidationElapsed, MaxMove, MaxPlanarDrift, MaxSettlement, MaxRotation);
+			TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s Seconds=%.2f Stable=%.2f TimedOut=%d MaxMove=%.2f MoveDelta=%s MoveModule=%s MaxDrift=%.2f DriftDelta=%s DriftModule=%s MaxSettlement=%.2f SettlementModule=%s MaxRotation=%.2f RotationModule=%s MaxLinearSpeed=%.2f MaxAngularSpeed=%.2f Awake=%d Accepted=0"),
+			*GetName(), IdleValidationElapsed, IdleStableElapsed, bTimedOut ? 1 : 0, MaxMove, *MaxMoveDelta.ToCompactString(), *DescribeModule(MaxMoveModule), MaxPlanarDrift,
+			*MaxDriftDelta.ToCompactString(), *DescribeModule(MaxDriftModule), MaxSettlement, *DescribeModule(MaxSettlementModule),
+			MaxRotation, *DescribeModule(MaxRotationModule), MaxLinearSpeed, MaxAngularSpeed, AwakeBodyCount);
+		RejectRuntimeStructure(GenerationSummary.RejectReason);
 	}
+}
+
+void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
+{
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
+	{
+		if (AABTSM7BuildingModule* Module = Weak.Get()) Module->Destroy();
+	}
+	RuntimeModules.Reset();
+	RuntimeModulesByNodeId.Reset();
+	IdleInitialTransforms.Reset();
+	bRuntimeSpawned = false;
+	bIdleValidationRunning = false;
+	SetActorTickEnabled(false);
+	FoundationCap->SetVisibility(false, true);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoundationFeet->ClearInstances();
+	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GenerationSummary.bAccepted = false;
+	GenerationSummary.RejectReason = Reason;
 }

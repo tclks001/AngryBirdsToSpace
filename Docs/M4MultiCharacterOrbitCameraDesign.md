@@ -3,6 +3,8 @@
 > 状态：C++ 已按本方案实现，等待编辑器手感与遮挡视觉验收。
 >
 > 本稿规定相机体验、球面数学、输入映射、主控切换和遮挡策略。它不修改鸟群跟随、移动力模型或 HUD 固定头像顺序。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [鸟群 Gameplay](BirdPartyFollowingGameplayDesign.md) · [M4 工程落地](M4BirdPartyImplementationDesign.md) · [UI 系统](UISystemDesign.md)
 
 ## 1. 当前问题与根因
 

@@ -3,6 +3,8 @@
 > 状态：M5 已由 M5.1 接续；测试库存和出生点自动工作台/熔炉已移除，真实拾取与放置规则见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。
 >
 > 本阶段只实现共享库存、配方规则、附近站点检测、红鸟加工权限和 UI。地图物品刷新、拾取、工作台/熔炉放置、弹弓槽/桩/弦表现均属于 M5.1。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [UI 系统](UISystemDesign.md) · [M4 小队头像 HUD](M4BirdPartyImplementationDesign.md) · [M5.1 世界物品与装配](M51WorldItemsPlacementSlingshotDesign.md)
 
 ## 1. 阶段验收目标
 

@@ -4,6 +4,7 @@
 
 #include "Building/ABTSM73BuildingTypes.h"
 #include "Building/ABTSM73StructureData.h"
+#include "Building/ABTSM73WeaknessStructureBuilder.h"
 
 namespace
 {
@@ -23,7 +24,10 @@ void FABTSM73StructureBuilder::AddBrick(
 	FABTSM73StructureData& Data,
 	const FVector& Center,
 	const FVector& Dimensions,
-	const EABTSM7BuildingMaterial Material)
+	const EABTSM7BuildingMaterial Material,
+	const EABTSM73BrickSemanticRole SemanticRole,
+	const int32 StoreyIndex,
+	const int32 BayIndex)
 {
 	FABTSM73BrickNode& Node = Data.Bricks.AddDefaulted_GetRef();
 	Node.NodeId = Data.Bricks.Num() - 1;
@@ -31,6 +35,9 @@ void FABTSM73StructureBuilder::AddBrick(
 	Node.OriginalMaterial = Material;
 	Node.LocalCenter = Center;
 	Node.DimensionsCM = Dimensions.ComponentMax(FVector(1.0f));
+	Node.SemanticRole = SemanticRole;
+	Node.StoreyIndex = StoreyIndex;
+	Node.BayIndex = BayIndex;
 }
 
 void FABTSM73StructureBuilder::AddFourColumnStorey(
@@ -43,7 +50,9 @@ void FABTSM73StructureBuilder::AddFourColumnStorey(
 	const float ColumnWidth,
 	const float BeamHeight,
 	const EABTSM7BuildingMaterial Material,
-	const bool bAddRoof)
+	const bool bAddRoof,
+	const int32 StoreyIndex,
+	const int32 BayIndex)
 {
 	const float HalfX = FMath::Max(0.0f, Depth * 0.5f - ColumnWidth * 0.5f);
 	const float HalfY = FMath::Max(0.0f, Width * 0.5f - ColumnWidth * 0.5f);
@@ -53,13 +62,14 @@ void FABTSM73StructureBuilder::AddFourColumnStorey(
 	{
 		for (const float Y : {CenterY - HalfY, CenterY + HalfY})
 		{
-			AddBrick(Data, FVector(X, Y, ColumnZ), FVector(ColumnWidth, ColumnWidth, ColumnHeight), Material);
+			AddBrick(Data, FVector(X, Y, ColumnZ), FVector(ColumnWidth, ColumnWidth, ColumnHeight), Material,
+				EABTSM73BrickSemanticRole::Column, StoreyIndex, BayIndex);
 		}
 	}
 	if (bAddRoof)
 	{
 		AddBrick(Data, FVector(0.0f, CenterY, BottomZ + ColumnHeight + BeamHeight * 0.5f),
-			FVector(Depth, Width, BeamHeight), Material);
+			FVector(Depth, Width, BeamHeight), Material, EABTSM73BrickSemanticRole::Deck, StoreyIndex, BayIndex);
 	}
 }
 
@@ -87,7 +97,7 @@ bool FABTSM73StructureBuilder::Build(
 		{
 			const float Taper = FMath::Pow(0.94f, static_cast<float>(Level));
 			AddFourColumnStorey(OutData, 0.0f, Width * Taper, Depth * Taper, BottomZ,
-				LevelHeight, Column, Beam, Settings.PrimaryMaterial, true);
+				LevelHeight, Column, Beam, Settings.PrimaryMaterial, true, Level, 0);
 			BottomZ += LevelHeight;
 		}
 		break;
@@ -101,15 +111,15 @@ bool FABTSM73StructureBuilder::Build(
 		{
 			const float BottomZ = Level * LevelHeight;
 			AddFourColumnStorey(OutData, -OffsetY, TowerWidth, Depth, BottomZ, LevelHeight, Column, Beam,
-				Settings.PrimaryMaterial, true);
+				Settings.PrimaryMaterial, true, Level, 0);
 			AddFourColumnStorey(OutData, OffsetY, TowerWidth, Depth, BottomZ, LevelHeight, Column, Beam,
-				Settings.PrimaryMaterial, true);
+				Settings.PrimaryMaterial, true, Level, 1);
 		}
 		// The connecting lintel is a new course above both tower caps. Placing it
 		// at the same Z as the cap beams creates a large initial penetration.
 		const float LintelZ = Levels * LevelHeight + Beam * 0.5f;
 		AddBrick(OutData, FVector(0.0f, 0.0f, LintelZ), FVector(Depth, Gap + Column * 2.0f, Beam),
-			EABTSM7BuildingMaterial::Iron);
+			EABTSM7BuildingMaterial::Iron, EABTSM73BrickSemanticRole::Connector, Levels, INDEX_NONE);
 		break;
 	}
 	case EABTSM73Silhouette::TwinTowerBridge:
@@ -121,9 +131,9 @@ bool FABTSM73StructureBuilder::Build(
 		{
 			const float BottomZ = Level * LevelHeight;
 			AddFourColumnStorey(OutData, -OffsetY, TowerWidth, Depth, BottomZ, LevelHeight, Column, Beam,
-				Settings.PrimaryMaterial, true);
+				Settings.PrimaryMaterial, true, Level, 0);
 			AddFourColumnStorey(OutData, OffsetY, TowerWidth, Depth, BottomZ, LevelHeight, Column, Beam,
-				Settings.PrimaryMaterial, true);
+				Settings.PrimaryMaterial, true, Level, 1);
 		}
 		// A true middle corridor: the deck lands on the two tower floor slabs,
 		// while its narrow X depth stays inside the aisle between front/back corner
@@ -138,7 +148,7 @@ bool FABTSM73StructureBuilder::Build(
 		AddBrick(OutData,
 			FVector(0.0f, 0.0f, BridgeBaseZ + Beam * 0.5f),
 			FVector(CorridorDepth, CorridorLength, Beam),
-			EABTSM7BuildingMaterial::Iron);
+			EABTSM7BuildingMaterial::Iron, EABTSM73BrickSemanticRole::Connector, BridgeFloor, INDEX_NONE);
 
 		const float RailThickness = FMath::Clamp(Column * 0.20f, 8.0f, CorridorDepth * 0.30f);
 		const float RailHeight = FMath::Max(12.0f, LevelHeight - Beam * 2.0f);
@@ -148,7 +158,7 @@ bool FABTSM73StructureBuilder::Build(
 			AddBrick(OutData,
 				FVector(X, 0.0f, BridgeBaseZ + Beam + RailHeight * 0.5f),
 				FVector(RailThickness, CorridorLength, RailHeight),
-				Settings.PrimaryMaterial);
+				Settings.PrimaryMaterial, EABTSM73BrickSemanticRole::Rail, BridgeFloor, INDEX_NONE);
 		}
 		break;
 	}
@@ -157,17 +167,25 @@ bool FABTSM73StructureBuilder::Build(
 		return false;
 	}
 
-	FinalizeBoundsAndSupports(OutData);
 	if (OutData.Bricks.IsEmpty())
 	{
 		OutError = TEXT("NoBricksGenerated");
 		return false;
 	}
-	if (OutData.Bricks.Num() > FMath::Clamp(Settings.MaxBrickCount, 5, 100))
+	const int32 BrickBudget = FMath::Clamp(Settings.MaxBrickCount, 5, 100);
+	if (OutData.Bricks.Num() > BrickBudget)
 	{
 		OutError = FString::Printf(TEXT("BrickBudgetExceeded:%d:%d"), OutData.Bricks.Num(), Settings.MaxBrickCount);
 		return false;
 	}
+	FABTSM73WeaknessStructureBuilder WeaknessBuilder;
+	if (!WeaknessBuilder.Apply(Settings, LevelHeight, Column, Beam, OutData, OutError)) return false;
+	if (OutData.Bricks.Num() > BrickBudget)
+	{
+		OutError = FString::Printf(TEXT("BrickBudgetExceededWithWeakness:%d:%d"), OutData.Bricks.Num(), Settings.MaxBrickCount);
+		return false;
+	}
+	FinalizeBoundsAndSupports(OutData);
 	return true;
 }
 

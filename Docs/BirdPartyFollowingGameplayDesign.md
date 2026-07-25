@@ -3,6 +3,8 @@
 > 文档定位：M4 前置玩法设计，只规定玩家可感知的鸟群规则、状态、阈值语义与验收效果；不规定 C++ 类、组件、行为树资产、Blackboard Key 或文件结构。
 >
 > 核心结论：初版采用“确定性队列拓扑 + 连续 Steering/施力 + 少量离散状态”的混合方案。不要把逐帧距离控制写成行为树，也不要让所有鸟直接追逐主控鸟。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M4 工程落地](M4BirdPartyImplementationDesign.md) · [M4 球面 Orbit Camera](M4MultiCharacterOrbitCameraDesign.md) · [UI 系统](UISystemDesign.md)
 
 ## 1. 体验目标
 

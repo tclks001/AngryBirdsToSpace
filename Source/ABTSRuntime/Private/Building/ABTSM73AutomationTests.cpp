@@ -26,6 +26,7 @@ bool FABTSM73DefaultStructuresTest::RunTest(const FString& Parameters)
 	{
 		FABTSM73GenerationSettings Settings;
 		Settings.Silhouette = Silhouette;
+		Settings.bGenerateStructuralWeakness = false;
 		FABTSM73StructureData Data;
 		FString Error;
 		const bool bBuilt = Builder.Build(Settings, Data, Error);
@@ -113,10 +114,11 @@ bool FABTSM73WeakPointPlannerTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Weak-point metadata reaches the brick node"), Node->bWeakPoint);
 			TestEqual(TEXT("Default one-tier weak point uses actual easiest profile"), Node->Material, EABTSM7BuildingMaterial::Glass);
 			TestTrue(TEXT("Weak point is visible from attack direction"), WeakPoint.Exposure >= Difficulty.MinWeakPointExposure);
-			TestTrue(TEXT("Weak point disconnects a non-empty support subtree"), !WeakPoint.UnsupportedNodeIds.IsEmpty());
+			TestTrue(TEXT("Weak point destabilizes a non-empty authored load set"), !WeakPoint.AffectedNodeIds.IsEmpty());
 		}
 		Error.Reset();
-		TestTrue(TEXT("Material reassignment remains statically valid"), Validator.Validate(Settings, Data, Error));
+		const bool bStillStable = Validator.Validate(Settings, Data, Error);
+		TestTrue(FString::Printf(TEXT("Material reassignment remains statically valid: %s"), *Error), bStillStable);
 
 		FABTSM73StructureData DeterministicData;
 		TestTrue(TEXT("Determinism rebuild succeeds"), Builder.Build(Settings, DeterministicData, Error));

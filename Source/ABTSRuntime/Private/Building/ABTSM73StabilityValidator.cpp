@@ -70,6 +70,8 @@ bool FABTSM73StabilityValidator::Validate(
 	}
 
 	TMap<int32, bool> GroundPathCache;
+	TMap<int32, const FABTSM73BrickNode*> NodesById;
+	for (const FABTSM73BrickNode& Node : Data.Bricks) NodesById.Add(Node.NodeId, &Node);
 	for (const FABTSM73BrickNode& Node : Data.Bricks)
 	{
 		TSet<int32> Visiting;
@@ -87,8 +89,10 @@ bool FABTSM73StabilityValidator::Validate(
 		float ContactArea = 0.0f;
 		for (const FABTSM73SupportEdge& Edge : Data.SupportEdges)
 		{
-			if (Edge.UpperNodeId != Node.NodeId || !Data.Bricks.IsValidIndex(Edge.LowerNodeId)) continue;
-			const FABTSM73BrickNode& Lower = Data.Bricks[Edge.LowerNodeId];
+			if (Edge.UpperNodeId != Node.NodeId) continue;
+			const FABTSM73BrickNode* const* LowerPtr = NodesById.Find(Edge.LowerNodeId);
+			if (LowerPtr == nullptr || *LowerPtr == nullptr) continue;
+			const FABTSM73BrickNode& Lower = **LowerPtr;
 			const float XMin = FMath::Max(Node.LocalCenter.X - Node.DimensionsCM.X * 0.5f, Lower.LocalCenter.X - Lower.DimensionsCM.X * 0.5f);
 			const float XMax = FMath::Min(Node.LocalCenter.X + Node.DimensionsCM.X * 0.5f, Lower.LocalCenter.X + Lower.DimensionsCM.X * 0.5f);
 			const float YMin = FMath::Max(Node.LocalCenter.Y - Node.DimensionsCM.Y * 0.5f, Lower.LocalCenter.Y - Lower.DimensionsCM.Y * 0.5f);
@@ -113,4 +117,3 @@ bool FABTSM73StabilityValidator::Validate(
 	}
 	return true;
 }
-

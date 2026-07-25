@@ -3,6 +3,7 @@
 > 状态：C++、编辑器预览和纯数据自动化测试已实现；待在 M7.1 中完成模型视觉与实际弹弓击打验收。
 > 上一阶段：[M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。
 > 总体算法：[M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。
+> B2 扩展：Legacy 顶部结构段、Contact Hull/COM、`TipMargin`、`ReseatRisk` 与防原位承接验收见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。主体内部弱点和递归支撑 DAG 新路线见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。项目阶段索引见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 
 ## 1. 阶段目标
 
@@ -36,6 +37,8 @@ M7.3-B 解决的不是“挑一块砖随机换成玻璃”，而是以下 Gamepl
 - 弱点 HUD、锁定提示或教程动画。
 
 这里的“攻击探针”是确定性的结构图反事实探针。实际碰撞、倒塌方向和二次连锁仍需在 M7.1 用现有 M6/M7 物理链路验收；不能把图预测等同于最终 Chaos 结果。
+
+B2 已补上本稿原始图探针没有覆盖的物理失效语义：弱点几何在支撑边建立前主动生成，完整时必须静稳，移除后必须具备正 `TipMargin` 且 `ReseatRisk` 不越界。默认开启 `bRequireAuthoredStructuralWeakness` 后，普通对齐楼板不再仅凭 Ground 失联比例被接受为最终弱点。
 
 ## 2. 模块边界
 
@@ -268,7 +271,7 @@ bAutoSelectWeakPointMaterial = true
 TargetBirdHits = 1
 WeakPointMaterial = Glass              # 仅手工选材时使用
 
-MinWeakCollapseRatio = 0.05
+MinWeakCollapseRatio = 0.02
 TargetWeakCollapseRatio = 0.20
 MaxSingleWeakCollapseRatio = 0.70
 MinWeakPointExposure = 0.35
@@ -288,7 +291,7 @@ bShowWeakPointDebug = true
 WeakPointDebugScale = 1.04
 ```
 
-默认最小失撑质量比为 5%，不是按砖数设置。TwinTowerBridge 的铁质桥面在真实质量中占比很高，一侧木塔的若干失撑块可能只占整栋质量的一小部分；若仍使用按块数直觉设置 10%–20% 下限，会错误地判定没有弱点。
+默认最小失效质量比为 2%，不是按砖数设置。B2 的 TwinTowerBridge authored load 在真实密度口径下接近 2%；若仍使用按块数直觉设置 10%–20% 下限，会错误地判定没有弱点。实际难度不能只靠提高该下限，应与 `TipMargin`、`ReseatRisk`、射界和弱点优势共同判断。
 
 ## 10. 编辑器操作：M7.1 平面实验台
 
@@ -311,7 +314,7 @@ WeakPointDebugScale = 1.04
 - 弱点外侧一层略放大的红色 Debug Cube；
 - `GenerationSummary.WeakPointCount = 1`；
 - `PrimaryWeakPointNodeId` 为有效 NodeId；
-- `PredictedWeakCollapseRatio >= 0.05`；
+- `PredictedWeakCollapseRatio >= 0.02`；
 - `PredictedNonWeakEffect <= 0.25`；
 - `RejectReason` 为空。
 
@@ -338,7 +341,7 @@ WeakPointDebugScale = 1.04
 2. 确认建筑没有初始抖动、穿透或自发倾倒。
 3. 用同一鸟、尽量相近的拉力先撞一次普通柱/墙面，记录局部移动和破坏。
 4. 重新开始 PIE，以同一鸟和相近拉力攻击红色预览对应的真实弱点位置。
-5. 弱点击碎后，`UnsupportedNodeIds` 对应的上层应失去支撑并自然进入 Chaos 下落。
+5. 弱点击碎后，B2 authored weakness 的 `AffectedNodeIds` 对应 Carrier/载荷应自然进入 Chaos 倾覆或下落；普通旧图候选仍使用 `UnsupportedNodeIds`。
 6. 普通攻击可以推动、累计损伤或造成局部反馈，但其结构损失应明显低于弱点攻击。
 7. 检查倒塌没有在鸟抵达前发生，FoundationCap/Feet 仍保持静态。
 
@@ -492,10 +495,10 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 | 症状 | 根因 | 处理 |
 | --- | --- | --- |
 | 建筑预览全部消失，`InsufficientWeakPoints` | 难度窗口、暴露度、弱点数量或子图重叠要求过严 | 先恢复默认值；`WeakPointCount=1`；降低 Min Ratio/Exposure；确认攻击箭头方向 |
-| TwinTowerBridge 找不到弱点 | 铁桥面质量使单侧木塔失撑质量占比低，仍按块数直觉设了过高 Min Ratio | 使用质量口径；从默认 `MinWeakCollapseRatio=0.05` 起调 |
+| TwinTowerBridge 找不到弱点 | 铁桥面和 B2 顶部载荷按真实密度计入总质量，仍按块数直觉设了过高 Min Ratio | 使用质量口径；从当前默认 `MinWeakCollapseRatio=0.02` 起调，并同时检查 B2 Tip/Reseat 指标 |
 | 弱点红框在建筑背面 | AttackDirection 箭头被理解成“指向弹弓” | 箭头应与鸟的飞行方向同向；旋转 Actor 后 Rebuild |
 | 弱点红框不显示 | Debug 关闭、规划被拒绝或材质父项不能设置 Color | 检查 Summary；打开 Debug；给 `WeakPointDebugMaterial` 指定红色材质 |
-| 弱点击碎但上层不掉 | 实际 Mesh 有未建模接触，或碰撞体尺寸与生成 AABB 不一致 | 检查 Simple Collision、Pivot、最终 Scale；比较 UnsupportedNodeIds 与场景接触 |
+| 弱点击碎但上层不掉 | 实际 Mesh 有未建模接触，或碰撞体尺寸与生成 AABB 不一致 | 检查 Simple Collision、Pivot、最终 Scale；B2 比较 `AffectedNodeIds`，旧图候选比较 `UnsupportedNodeIds` |
 | 打普通位置同样整栋倒 | 普通高影响梁未强化、MaxNonWeakEffect 太宽或现有材料 Profile 太脆 | 降低 MaxNonWeakEffect/强化阈值；用 Stone 强化；重新跑击打对照 |
 | 强化后整栋很重、二次碰撞异常 | 大楼板被改为 Iron，密度远高于木 | 恢复默认 Stone；减少强化数量；重做空载和击打验收 |
 | 换料后 `MaxMove` 略超 4cm，但建筑没有倾斜 | 旧空载验证把法向接触沉降与沿施工平面的失稳漂移混为一个总位移 | 当前实现分别记录 `MaxDrift` 与 `MaxSettlement`；默认漂移上限 4cm、沉降上限 6cm，真正掉落一层仍会远超沉降上限 |
@@ -506,7 +509,9 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 
 ## 17. 下一阶段接口
 
-M7.3-C 可直接基于当前 `WeakPointRecord.UnsupportedNodeIds` 和 `WeakPointRole` 添加：
+> B2 已将真实失效载荷写入 `WeakPointRecord.AffectedNodeIds`；模板、Carrier 约束与验证门槛见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。
+
+M7.3-C 可直接基于当前 `WeakPointRecord.AffectedNodeIds` 和 `WeakPointRole` 添加：
 
 - 覆盖关键节点的炸药桶；
 - 将上层推出支撑区的弹簧活塞；

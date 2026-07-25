@@ -15,6 +15,7 @@ class UMaterialInterface;
 class UPrimitiveComponent;
 class UStaticMesh;
 class UPhysicalMaterial;
+struct FABTSM7PenetrationValidationStats;
 
 /** M7 material library. Building layout/generation is deliberately deferred. */
 UCLASS(BlueprintType)
@@ -45,6 +46,9 @@ public:
 	void ApplyDirectionalBlast(const FVector& Origin, const FVector& Axis, float DestroyLengthCM, float ImpulseLengthCM, float EffectRadiusCM, float ImpulseSpeedCMPerSec);
 	/** Promotes all building HISM instances and enables gravity on every module for the launch phase. */
 	void BeginLaunchPhysics(bool bPlanar, const FVector& GravityReference, float GravityAcceleration, float ContactDamageGraceSeconds = -1.0f);
+	/** Runs the same pre-Chaos contact repair used by launch physics on a caller-owned module subset. */
+	FABTSM7PenetrationValidationStats ValidateAndRepairPendingModules(
+		const TArray<AABTSM7BuildingModule*>& PendingModules) const;
 	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
 	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }

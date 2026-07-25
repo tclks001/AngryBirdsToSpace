@@ -5,6 +5,18 @@
 #include "CoreMinimal.h"
 #include "Building/ABTSM73BuildingTypes.h"
 
+enum class EABTSM73BrickSemanticRole : uint8
+{
+	Unknown,
+	Column,
+	Deck,
+	Connector,
+	Rail,
+	WeakSupport,
+	Carrier,
+	Payload
+};
+
 struct FABTSM73BrickNode
 {
 	int32 NodeId = INDEX_NONE;
@@ -12,6 +24,9 @@ struct FABTSM73BrickNode
 	EABTSM7BuildingMaterial OriginalMaterial = EABTSM7BuildingMaterial::Wood;
 	FVector LocalCenter = FVector::ZeroVector;
 	FVector DimensionsCM = FVector(100.0f);
+	EABTSM73BrickSemanticRole SemanticRole = EABTSM73BrickSemanticRole::Unknown;
+	int32 StoreyIndex = INDEX_NONE;
+	int32 BayIndex = INDEX_NONE;
 	EABTSM73WeakPointRole WeakPointRole = EABTSM73WeakPointRole::None;
 	float WeakPointScore = 0.0f;
 	float UnsupportedMassRatio = 0.0f;
@@ -19,6 +34,36 @@ struct FABTSM73BrickNode
 	int32 EstimatedHits = 0;
 	bool bWeakPoint = false;
 	bool bReinforcedCriticalNode = false;
+};
+
+struct FABTSM73StructuralWeaknessIntent
+{
+	EABTSM73StructuralWeaknessPattern Pattern = EABTSM73StructuralWeaknessPattern::Auto;
+	EABTSM73PredictedCollapseMode ExpectedCollapseMode = EABTSM73PredictedCollapseMode::None;
+	int32 CandidateNodeId = INDEX_NONE;
+	int32 CarrierNodeId = INDEX_NONE;
+	int32 BayIndex = INDEX_NONE;
+	FVector ExpectedTipDirectionLocal = FVector::ForwardVector;
+	TArray<int32> DirectSupportNodeIds;
+	TArray<int32> PayloadNodeIds;
+};
+
+struct FABTSM73FailureProbeResult
+{
+	bool bValid = false;
+	bool bWouldReseat = true;
+	int32 CandidateNodeId = INDEX_NONE;
+	int32 CarrierNodeId = INDEX_NONE;
+	EABTSM73StructuralWeaknessPattern Pattern = EABTSM73StructuralWeaknessPattern::Auto;
+	EABTSM73PredictedCollapseMode CollapseMode = EABTSM73PredictedCollapseMode::None;
+	FVector AffectedCenterOfMassLocal = FVector::ZeroVector;
+	FVector TipDirectionLocal = FVector::ZeroVector;
+	float AffectedMassRatio = 0.0f;
+	float InitialSupportMarginCM = 0.0f;
+	float TipMarginCM = 0.0f;
+	float ReseatRisk = 1.0f;
+	TArray<int32> AffectedNodeIds;
+	FString RejectReason;
 };
 
 struct FABTSM73WeakPointRecord
@@ -32,6 +77,12 @@ struct FABTSM73WeakPointRecord
 	float Score = 0.0f;
 	int32 EstimatedHits = 0;
 	TArray<int32> UnsupportedNodeIds;
+	TArray<int32> AffectedNodeIds;
+	EABTSM73StructuralWeaknessPattern StructuralPattern = EABTSM73StructuralWeaknessPattern::Auto;
+	EABTSM73PredictedCollapseMode CollapseMode = EABTSM73PredictedCollapseMode::None;
+	float InitialSupportMarginCM = 0.0f;
+	float TipMarginCM = 0.0f;
+	float ReseatRisk = 1.0f;
 };
 
 struct FABTSM73SupportEdge
@@ -64,6 +115,8 @@ struct FABTSM73StructureData
 	TArray<FABTSM73BrickNode> Bricks;
 	TArray<FABTSM73SupportEdge> SupportEdges;
 	TArray<int32> GroundNodeIds;
+	TArray<FABTSM73StructuralWeaknessIntent> StructuralWeaknessIntents;
+	TArray<FABTSM73FailureProbeResult> FailureProbeResults;
 	TArray<FABTSM73WeakPointRecord> WeakPoints;
 	TArray<int32> ReinforcedNodeIds;
 	TArray<FVector2D> GroundSupportPoints;

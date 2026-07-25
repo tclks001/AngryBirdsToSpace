@@ -2,7 +2,7 @@
 
 > 状态：已实现 C++，等待创建 M2.5 地图入口并完成 PIE / Standalone 验收。
 >
-> 前置：[M2PlanetSurfaceDesign.md](M2PlanetSurfaceDesign.md)。本阶段只替换角色运动，不修改 `CellTopo`、连续球面拓扑、PCG 或资源玩法。
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · 前置：[M2 球面](M2PlanetSurfaceDesign.md)。本阶段只替换角色运动，不修改 `CellTopo`、连续球面拓扑、PCG 或资源玩法。
 >
 > M3 坡面现已新增默认的力模型与径向悬挂移动，并保留本稿旧 Sweep 实现作为对照，详见 [ForceSuspensionMovementDesign.md](ForceSuspensionMovementDesign.md)。
 >

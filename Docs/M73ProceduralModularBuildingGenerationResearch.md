@@ -3,6 +3,10 @@
 > 文档性质：M7.3 前置调研与生成算法设计。  
 > 本文负责“如何生成稳定、多样、可读且有明确弱点的积木建筑”；现有材料碰撞、累计损伤、爆炸与冲击实现仍以 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md) 为准。  
 > 本阶段不在本文中实现 C++，也不改变 `CellTopo` 作为正式球面世界逻辑源的约束。
+>
+> 实现导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)
+
+> 后续路线说明：A/B/B2 已建立稳定建筑、图选点和顶部局部失效的工程基线，但 B2 的弱点冠段不负责主楼整体坍塌。基于主体 Macro DAG 递归、内部 Failure Frontier、真实接触图与 Chaos 反事实的新方案见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。本文保留为原方案与工程经验对照。
 
 ## 1. 结论先行
 
@@ -558,6 +562,8 @@ SafetyFactor = EdgeCapacity / EdgeLoad
 
 ### 6.6 第 6 层：弱点合成
 
+> 三种无装置弱点结构、完整/失效接触凸包、`TipMargin` 与 `ReseatRisk` 的工程实现见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。
+
 弱点不应随机挑一块改成玻璃。应先分析支撑图，再选择高影响节点。
 
 #### 候选发现
@@ -1065,6 +1071,15 @@ FinalScore =
 - 已加入固定射线暴露度、失撑子图重叠/间距限制、材料弱点、有限非弱点强化和难度窗口；
 - 已实现弱点与非弱点的确定性图探针对照、红色 Editor 高亮、Summary、日志和自动化测试；
 - 实际等冲量 Chaos 攻击 rollout 仍在 M7.1 手工击打验收，批量隐藏 World 验证留给候选搜索阶段。
+
+### M7.3-B2：结构弱点与失效验证
+
+> 独立结构模板、失效数学、编辑器参数、M7.1 击打步骤与排错见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。
+
+- 在支撑边最终构建前生成关键角、非对称双支撑或偏置接缝结构段；
+- 完整状态要求载荷 COM 位于 Contact Hull 内，移除 Candidate 后要求 COM 越过剩余支撑域；
+- 以 `TipMargin` 和 `ReseatRisk` 拒绝“打掉仍能站立”与“垂直下落后原位承接”；
+- B2 只负责无装置结构失效，装置连锁留给 C，多 Seed/Chaos 统计搜索留给 D。
 
 ### M7.3-C：装置连锁
 

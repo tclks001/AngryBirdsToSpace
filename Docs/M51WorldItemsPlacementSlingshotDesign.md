@@ -3,6 +3,8 @@
 > 状态：C++ 机制已实现，使用 Engine 基础形体作为资产回退，等待编辑器视觉与操作验收。
 >
 > 本阶段只实现基础物品刷新/自动拾取、手持栏、工作台/熔炉放置、弹弓槽、桩与弦的装配规则。真实资产、建筑模块和弹射行为仍属于后续阶段。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [UI 系统](UISystemDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md) · [M6 弹弓发射](M6SlingshotLaunchAndImpactDesign.md)
 
 ## 1. 逻辑源约束
 

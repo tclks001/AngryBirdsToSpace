@@ -3,6 +3,8 @@
 > 状态：C++ 已实现；需要按本文在编辑器创建 M3 地图、M3 Planet Blueprint 和材质资产。
 >
 > 逻辑 PCG 上游：[`ABTSTaskGraphPCGDesign.md`](ABTSTaskGraphPCGDesign.md)。本文不定义玩法锁、可达性、河流最低点、道路寻路或桥梁状态；它们只由 TaskGraph/CellTopo 生成并通过接口提供给表现层。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [M5.2 碰撞与 CPU SDF 物理采样](M52CollisionAndMovementDesign.md) · [开发排错](DevelopmentTroubleshooting.md)
 
 ## 1. M3 目标与边界
 

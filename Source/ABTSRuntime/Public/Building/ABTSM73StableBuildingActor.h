@@ -53,7 +53,8 @@ private:
 	void ClearBrickPreviews();
 	void TryFindRuntimeMaterialSystem();
 	void BeginIdleValidation(const FABTSM73GroundContext& Context);
-	void FinishIdleValidation();
+	void FinishIdleValidation(bool bTimedOut);
+	void RejectRuntimeStructure(const FString& Reason);
 	UHierarchicalInstancedStaticMeshComponent* GetPreviewForMaterial(EABTSM7BuildingMaterial Material) const;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Components")
@@ -108,10 +109,11 @@ private:
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
 	TMap<int32, TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModulesByNodeId;
-	TArray<FTransform> IdleInitialTransforms;
+	TMap<TWeakObjectPtr<AABTSM7BuildingModule>, FTransform> IdleInitialTransforms;
 	FTimerHandle MaterialSystemSearchTimer;
 	int32 MaterialSystemSearchAttempts = 0;
 	float IdleValidationElapsed = 0.0f;
+	float IdleStableElapsed = 0.0f;
 	bool bRuntimeSpawned = false;
 	bool bIdleValidationRunning = false;
 	bool bRuntimePlanar = true;

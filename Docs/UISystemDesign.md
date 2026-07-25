@@ -1,6 +1,8 @@
 # AngryBirdsToSpace UI 系统设计
 
 > 文档定位：维护整个项目的玩家可见 UI 规则与信息层级，不记录某个里程碑的 C++ 文件、类拆分或具体工程落地。当前覆盖 M4 小队头像 HUD 与 M5 物品栏、背包、加工界面。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M4 鸟群与头像 HUD 落地](M4BirdPartyImplementationDesign.md) · [M5 背包/加工落地](M5InventoryCraftingImplementationDesign.md) · [M5.1 手持栏与世界物品](M51WorldItemsPlacementSlingshotDesign.md)
 
 ## 1. UI 总原则
 

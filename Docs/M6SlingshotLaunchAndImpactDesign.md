@@ -3,6 +3,8 @@
 > 状态：首版 C++ 闭环已实现，使用现有 M5.1 弹弓桩/弦、M4 鸟群与 M5.2 HISM 碰撞；等待 PIE 手感和视觉验收。
 >
 > 物理碰撞爽感、阈值悖论和后续损伤/结构升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M5.1 弹弓装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞](M52CollisionAndMovementDesign.md) · [M6 视觉协议](M6SlingshotVisualPresentationDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
 ## 1. 阶段目标
 

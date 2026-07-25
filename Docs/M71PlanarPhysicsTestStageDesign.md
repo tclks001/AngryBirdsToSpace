@@ -5,6 +5,8 @@
 > 前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)、[M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)。
 >
 > M7.3-A 已提供可直接拖入本测试台、生成并击打的 `M7.3-A Stable Building Generator`；其参数、空载 Chaos 验证和验收步骤见 [M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。原 `M7.1 Modular Building Anchor` 仅保留为旧布局标记。
+>
+> 弱点测试下游：[M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md) 负责选点/难度，[M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md) 负责三种结构弱点及实际击打对照。项目总览见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 
 ## 1. 阶段目标与边界
 

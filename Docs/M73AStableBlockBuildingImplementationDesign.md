@@ -3,6 +3,7 @@
 > 状态：已完成编辑器、PIE 与物理验收。
 > 上位算法：[M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。
 > 平面测试场：[M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
+> 下游：[M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md) 负责图选点与难度；[M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md) 负责 Legacy 顶部局部结构弱点；主体 Macro DAG 递归、内部 Failure Frontier 与真实接触图新路线见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)；项目阶段索引见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 
 ## 1. 阶段目标与边界
 
@@ -42,7 +43,7 @@ AABTSM7BuildingMaterialSystem::SpawnBrickModule
 
 生成。
 
-它们在普通状态下是静态碰撞 Actor；空载验证时短暂启用 Chaos，验证后再次冻结；进入 M6 发射阶段后由现有 `BeginLaunchPhysics` 统一激活。因此不会出现编辑器预览 HISM 与运行时碰撞体重复。
+它们在普通状态下是静态碰撞 Actor；空载验证时短暂启用 Chaos，达到连续静稳窗口后在已经落座的位置再次冻结；进入 M6 发射阶段后由现有 `BeginLaunchPhysics` 统一激活。因此不会出现编辑器预览 HISM 与运行时碰撞体重复，也不会把预沉降结果强行恢复到尚未解算接触的初始 Transform。
 
 ### 2.2 施工台的 M7.3-A 表示
 
@@ -239,23 +240,31 @@ ContactAreaCM2
 
 运行时砖块生成后：
 
-1. 记录全部模块初始 Transform；
-2. 隐藏其渲染，但保留真实碰撞；
-3. 设置覆盖验证时长的接触损伤 Grace，防止初始接触被当成破坏；
+1. 收集本建筑的全部 Runtime Module，并在启用 Chaos 前复用 M7 `PenetrationValidator` 检查初始穿透；
+2. 只要结果包含任意 `Repairs>0`、`LargeErrors>0` 或 `RemainingSmall>0`，立即以 `IdlePenetrationInvalid` 拒绝，不进入隐藏 Chaos。共享 Validator 可能为了给出完整诊断而执行误差内微调，但 M7.3-A 不再把“修过以后能模拟”视为通过，防止运行时几何偏离 Builder 支撑图、Contact Hull 和 B2 `TipMargin`；仅零穿透、零修复时才记录原始 Transform 作为 Idle 基线；
+3. 隐藏模块渲染但保留真实碰撞，并设置覆盖最长验证时间的接触损伤 Grace，防止初始接触被当成破坏；
 4. 平面模式施加恒定 `-GravityUp`，球面模式施加朝向 Planet Center 的径向重力；
-5. 模拟 `IdleValidationSeconds`；
-6. 将位移分解为施工平面内漂移和沿重力轴的接触沉降，同时记录总位移和最大旋转；
-7. 冻结模块并重新显示；
-8. 平面漂移与 `MaxIdleDisplacementCM` 比较，法向沉降与 `MaxIdleSettlementCM` 比较，旋转与 `MaxIdleRotationDegrees` 比较；
-9. 不稳定时输出 Error 和 `RejectReason`。
+5. 至少模拟 `IdleValidationSeconds=1.25s`。达到最短观察时间后，只有所有刚体同时满足线速度不超过 `4cm/s`、角速度不超过 `1.5deg/s`，才累计静稳时间；任一刚体重新越界就把静稳计时归零；
+6. 连续静稳达到 `IdleStableHoldSeconds=0.45s` 后通过收敛检查；若到 `IdleValidationMaxSeconds=6s` 仍未满足，则以 `TimedOut=1` 拒绝；
+7. 将相对预校验基线的位移分解为施工平面内漂移和沿重力轴的接触沉降，同时记录总位移、最大旋转、结束速度和 Awake 数量；
+8. 平面漂移与 `MaxIdleDisplacementCM` 比较，法向沉降与 `MaxIdleSettlementCM` 比较，旋转与 `MaxIdleRotationDegrees` 比较；速度静稳、未超时和三个几何门槛必须同时满足；
+9. 在最终落座 Transform 上执行 `Freeze()` 并重新显示，不把模块传送回验证前位置；
+10. 不稳定时输出 Error 和带 `TimedOut` 的 `RejectReason`，随后统一调用 `RejectRuntimeStructure`；
+11. `RejectRuntimeStructure` 销毁全部 Runtime Module，清空模块数组、Node→Module 映射和 Idle Transform 缓存，停止 Tick，并隐藏、禁用 `FoundationCap` 与 `FoundationFeet`。被拒绝的半成品不会留下隐形碰撞体，也不能继续参与 M6/M7 Gameplay；
+12. 后续显式重新初始化/重试时，正常装配路径会再次调用 `UpdateFoundationComponents`，恢复 Foundation 可见性、实例和 `QueryAndPhysics` 碰撞，然后再生成新模块并重新执行完整验证。
 
 日志：
 
 ```text
 [ABTS][M7.3-A][Generated]
 [ABTS][M7.3-A][Reject]
+[ABTS][M7.3-A][IdlePenetrationValidation]
 [ABTS][M7.3-A][IdleValidation]
 ```
+
+`IdlePenetrationValidation` 应先报告模块数、穿透对、修复数和最大深度；`Repairs` 也必须为 0，不能只检查 `LargeErrors`。预检拒绝时直接输出 `PenetrationRejected=1`，不会继续出现正常的 quiet-window 结果。预检通过后，`IdleValidation` 会额外报告 `Stable`、`TimedOut`、`MaxLinearSpeed`、`MaxAngularSpeed` 与 `Awake`。`Awake` 仅用于诊断，当前收敛依据是实际线/角速度连续低于门槛，而不是要求 Chaos 已把所有刚体标记为 Sleep。
+
+无论失败发生在穿透预检还是 quiet-window 结束阶段，最终语义都不是“保留建筑但标记红灯”，而是彻底撤销本次 Runtime Structure。`GenerationSummary.bAccepted=false` 后，模块与 Foundation 都不应再阻挡鸟、弹丸或其他物体。
 
 ## 9. 编辑器操作：M7.1 平面实验台
 
@@ -290,6 +299,10 @@ ColumnWidthCM = 74
 BeamHeightCM = 58
 bRunIdleChaosValidation = true
 IdleValidationSeconds = 1.25
+IdleStableHoldSeconds = 0.45
+IdleValidationMaxSeconds = 6
+IdleLinearSpeedThresholdCMPerSec = 4
+IdleAngularSpeedThresholdDegPerSec = 1.5
 MaxIdleDisplacementCM = 4
 MaxIdleSettlementCM = 6
 MaxIdleRotationDegrees = 2
@@ -308,7 +321,7 @@ MaxIdleRotationDegrees = 2
 ### 9.4 PIE 与击打
 
 1. PIE。
-2. 等待约 1.5 秒，让空载验证完成。
+2. 等待 `[IdleValidation]` 日志；默认最早约 `1.70s` 完成，仍在运动时会继续观察，但不会超过约 `6s`。
 3. Output Log 应先出现 `[Generated] Accepted=1`，再出现 `[IdleValidation] ... Accepted=1`。
 4. 建筑在验证过程中不应可见抖动或弹飞。
 5. 使用场景弹弓进入发射模式并击打建筑。
@@ -383,7 +396,11 @@ Accepted=1
 
 - `MinContactAreaRatio`
 - `bRunIdleChaosValidation`
-- `IdleValidationSeconds`
+- `IdleValidationSeconds`（最短观察时间）
+- `IdleStableHoldSeconds`
+- `IdleValidationMaxSeconds`
+- `IdleLinearSpeedThresholdCMPerSec`
+- `IdleAngularSpeedThresholdDegPerSec`
 - `MaxIdleDisplacementCM`
 - `MaxIdleSettlementCM`
 - `MaxIdleRotationDegrees`
@@ -407,6 +424,7 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 - 球面只改变承载面适配和世界 Transform；
 - 主体进入 M6/M7 发射与破坏链路；
 - Foundation 层不被错误激活。
+- Idle 验证拒绝后不残留 Runtime Module、Node 映射或 Foundation 碰撞；修正参数并重新初始化后 Foundation 和整栋结构能够重新创建。
 
 ### 稳定性
 
@@ -428,7 +446,9 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 
 - `[Generated]` 计数与所选轮廓相符；
 - `[Reject]` 带明确原因；
-- `[IdleValidation]` 输出秒数、总位移、平面漂移、法向沉降、最大旋转和 Accepted；
+- `[IdlePenetrationValidation]` 输出穿透对、修复数、大误差与最大深度；
+- 只有 `Repairs=0`、`LargeErrors=0`、`RemainingSmall=0` 才允许进入 quiet-window；任何自动微调都必须使本次生成拒绝；
+- `[IdleValidation]` 输出总时间、连续静稳时间、是否超时、总位移、平面漂移、法向沉降、最大旋转、结束线/角速度、Awake 数量和 Accepted；
 - M7 入口输出 `M73A=1`。
 
 ## 13. 排错
@@ -445,15 +465,18 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 | `FootprintCellNotBuildable` | 球面 Footprint 覆盖水域或不可建 Cell | 换 Anchor、缩小建筑或减少层数/占地 |
 | `AngularSpanTooLarge` | 建筑相对星球半径过宽 | 缩小占地；多平台拆分留待后续 |
 | `BrickPenetration` | 参数使柱、梁或连接梁占据同一体积 | 恢复默认尺寸；查看节点编号 |
+| `IdlePenetrationInvalid:Repairs>0` | 运行时真实 Collision 与生成尺寸存在小穿透；虽然共享 Validator 能微调，但继续模拟会让支撑图和 B2 COM/Contact Hull 失真 | 不放宽为“修复后继续”；校准 Mesh Pivot、Simple Collision、Node 尺寸或间隙，直到预检原始结果为零修复 |
+| Idle `Accepted=0` 后整栋建筑和 Foundation 消失 | 这是 `RejectRuntimeStructure` 的预期失败清理，不是渲染丢失：失败结构已销毁模块、清空映射并关闭 Foundation 碰撞，禁止半成品继续参与 Gameplay | 先按 `RejectReason` 修复几何或静稳问题，再走正式初始化/重试；`UpdateFoundationComponents` 会恢复 Foundation 可见性、实例与碰撞，然后重新生成模块 |
 | `NoGroundPath` | 某层没有实际接触支撑 | 检查层高、梁高和柱高关系 |
 | 空载验证整体散开 | 碰撞面、质量差或生成接触仍不稳定 | 检查 Simple Collision、Sub-Stepping 和 IdleValidation 日志 |
+| `TimedOut=1`，但位移/旋转尚未越界 | 至少一个刚体始终未连续 `0.45s` 低于线/角速度阈值，不能仅凭某一帧位移很小判为稳定 | 查看 `MaxLinearSpeed`、`MaxAngularSpeed` 和最大移动模块；修复持续滑动/震荡，或在有证据时单独校准速度门槛，不要只延长最大时长 |
 | 发射后砖不动 | 未通过共享 MaterialSystem 生成或未进入 M6 发射状态 | 检查 `[Generated]` 与 M6 `BeginLaunchPhysics` 日志 |
 | Foundation 一起飞走 | Foundation 被错误加入 M7 Modules | Foundation 只能由生成器静态组件持有 |
 
 ## 14. 性能预算
 
 - 单栋目标约 15–45 个砖 Actor，取决于轮廓和层数；
-- 默认仅当前测试建筑运行一次约 1.25 秒空载验证；
+- 默认仅当前测试建筑运行一次隐藏空载验证；最早约 `1.70s` 收敛，持续运动时最多 `6s`；
 - Editor Preview 使用 4 个 HISM + Foundation HISM，不为每块预览生成 Actor；
 - 正式地图仍遵守同时活跃刚体不超过约 50 的主设计预算；
 - 批量 PCG 时不能让所有候选都进入 Chaos，本阶段 Actor 验证用于最终候选；
@@ -462,6 +485,7 @@ ABTS.M73A.DefaultStructuresAreStaticallyStable
 ## 15. 下一阶段接口
 
 > M7.3-B 已基于以下接口实现，详见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。
+> B2 在同一接口上增加 authored weakness geometry、Carrier 载荷闭包和失效探针，详见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。
 
 M7.3-B 可直接消费：
 

@@ -3,6 +3,8 @@
 > 状态：资产生产规范。本文只规定小鸟之外的低模资产如何取得、生成、清理、导入和记录；不实现 M6 弹弓代码，不替代现有球面 PCG、CellTopo 或建筑玩法设计。
 >
 > 已知前提：四只小鸟的模型与全套动画使用已购买的 `CuteBird` 资产包；其余资产遵循本文。比赛允许 AI 资产，但赛后必须提交全部 AI 使用行为报告。
+>
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md) · [M6 弹弓视觉协议](M6SlingshotVisualPresentationDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 
 ## 1. 目标与不可突破的约束
 

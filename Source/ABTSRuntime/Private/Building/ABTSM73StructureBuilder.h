@@ -7,6 +7,7 @@
 
 struct FABTSM73GenerationSettings;
 struct FABTSM73StructureData;
+enum class EABTSM73BrickSemanticRole : uint8;
 
 /** Deterministic M7.3-A brick grammar. It owns no UObjects or world state. */
 class FABTSM73StructureBuilder
@@ -15,8 +16,10 @@ public:
 	bool Build(const FABTSM73GenerationSettings& Settings, FABTSM73StructureData& OutData, FString& OutError) const;
 
 private:
-	static void AddBrick(FABTSM73StructureData& Data, const FVector& Center, const FVector& Dimensions, EABTSM7BuildingMaterial Material);
+	static void AddBrick(FABTSM73StructureData& Data, const FVector& Center, const FVector& Dimensions,
+		EABTSM7BuildingMaterial Material, EABTSM73BrickSemanticRole SemanticRole, int32 StoreyIndex, int32 BayIndex);
 	static void AddFourColumnStorey(FABTSM73StructureData& Data, float CenterY, float Width, float Depth, float BottomZ,
-		float LevelHeight, float ColumnWidth, float BeamHeight, EABTSM7BuildingMaterial Material, bool bAddRoof);
+		float LevelHeight, float ColumnWidth, float BeamHeight, EABTSM7BuildingMaterial Material, bool bAddRoof,
+		int32 StoreyIndex, int32 BayIndex);
 	static void FinalizeBoundsAndSupports(FABTSM73StructureData& Data);
 };

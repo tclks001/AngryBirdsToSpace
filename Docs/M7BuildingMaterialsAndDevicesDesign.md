@@ -7,6 +7,8 @@
 > 本阶段的碰撞爽感、持续损伤和结构破坏升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 >
 > 手工搭建平面碰撞关卡、摆放四材质砖与四档完整弹弓的独立测试入口见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
+>
+> 后续建筑生成：[M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构弱点与失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md)。项目总览见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 
 ## 1. 阶段边界
 

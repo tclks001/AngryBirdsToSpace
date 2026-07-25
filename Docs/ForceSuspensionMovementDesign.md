@@ -3,6 +3,8 @@
 > 状态：C++ 已实现。默认启用 `ForceSuspension`，旧 `LegacySweep` 完整保留用于对照。
 >
 > 上游约束：`CellTopo` 仍是地形唯一逻辑源；移动系统只读取 Planet 提供的 CellTopo 派生表面高度与法线，不把连续渲染网格或碰撞结果反写到 PCG。
+>
+> 历史路线导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2.5 径向引力与跳跃](M25RadialGravityAndJumpDesign.md) · [Chaos 刚体移动（当前正式路线）](ChaosRigidBodyMovementDesign.md) · [M5.2 地表碰撞与材质响应](M52CollisionAndMovementDesign.md)
 
 ## 1. 修复目标
 

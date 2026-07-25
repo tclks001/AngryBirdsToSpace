@@ -3,6 +3,8 @@
 > 用途：为 AngryBirdsToSpace 的弹射、碰撞、链式破坏和建筑材料参数提供设计依据。
 >
 > 结论先行：当前“高速直接碎、低速完全不动”的问题，不应通过单纯调整两个速度阈值解决。应把碰撞结果拆成四个连续层级：**接触/偏转、推动、损伤累积、结构破坏**。速度只影响冲量和损伤增长率，不能直接决定唯一结果。
+>
+> 落地导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-B2 结构失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md)
 
 ## 1. 调研范围与可核查资料
 
@@ -251,4 +253,3 @@ BuildingGraph
 -> 局部坍塌
 -> 余波继续改变下一步弹道
 ```
-
