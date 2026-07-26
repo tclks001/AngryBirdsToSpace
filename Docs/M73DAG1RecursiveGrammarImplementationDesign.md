@@ -2,7 +2,7 @@
 
 > 状态：C++ 已落地并完成 fresh-process 自动化验收；其空间编译接入已由 [M7.3-DAG-2](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) 实现。本文记录 DAG-1 的边界、数据契约与拓扑验证。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [DAG 总体调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A Legacy 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
+> 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。直接下游：[DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A Legacy 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
 ## 1. 阶段目标
 

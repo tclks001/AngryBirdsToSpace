@@ -2,7 +2,7 @@
 
 > 状态：代码与独立 fresh-process 自动化测试 `ABTS.M73B2.StructuralWeaknessFailure` 已通过；M7.1 实际弹弓击打与倒塌观感仍待用户视觉验收。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
+> 父级：[M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。前置：[M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
 > 定位更新：本稿实现的是加在现有主体最高处的局部冠段失效，自动化也只要求 `Carrier + 两个 Payload` 三个节点受影响；它不证明整栋主体会坍塌。该实现与测试保留为 Legacy 对照。主体中下部承载瓶颈、递归图语法和主体级联的新设计见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 

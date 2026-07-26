@@ -2,7 +2,7 @@
 
 > 状态：C++ 已实现、编译与 fresh-process 自动化已通过；支撑模式、轻量化尺寸与凸包校验已由 [M7.3-DAG-2.1](M73DAG21SupportPatternsDesign.md) 扩展。待在 M7.1 平面测试台和球面场景进行手工视觉/碰撞验收。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [DAG 总体调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG-1 语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [M7.3-A Legacy 对照](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
+> 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。前置：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md)。子阶段：[DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A Legacy 对照](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
 ## 1. 目标与边界
 

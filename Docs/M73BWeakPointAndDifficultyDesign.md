@@ -1,8 +1,7 @@
 # M7.3-B：弱点与难度实现设计
 
 > 状态：C++、编辑器预览和纯数据自动化测试已实现；待在 M7.1 中完成模型视觉与实际弹弓击打验收。
-> 上一阶段：[M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。
-> 总体算法：[M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。
+> 父级：[M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。前置：[M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。
 > B2 扩展：Legacy 顶部结构段、Contact Hull/COM、`TipMargin`、`ReseatRisk` 与防原位承接验收见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。主体内部弱点和递归支撑 DAG 新路线见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。项目阶段索引见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 
 ## 1. 阶段目标

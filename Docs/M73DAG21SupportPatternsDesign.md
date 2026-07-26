@@ -1,6 +1,6 @@
 # M7.3-DAG-2.1：支撑模式与轻量化构件设计
 
-> 后续阶段：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md)
+> 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。后续阶段：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。
 
 > 状态：C++ 已实现，Editor 编译、DAG 自动化与 Legacy A/B/B2 回归均通过；等待 M7.1 和球面场景的手工视觉/物理验收。
 >

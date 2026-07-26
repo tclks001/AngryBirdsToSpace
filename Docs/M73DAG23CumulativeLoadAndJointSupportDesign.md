@@ -1,5 +1,7 @@
 # M7.3-DAG2.3：累计荷载与联合支撑求解
 
+> 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。前置：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md)。后续研究：[建筑语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
+
 ## 目标
 
 将 DAG-2 的物理构件生成从“每条 Logical Support 独立生成柱组”改为“每块 Load Plate 按其累计荷载选择联合柱组”。

@@ -1,6 +1,6 @@
 # M7.3-DAG2.2 自适应楼板与支撑几何设计
 
-> 后续阶段：[M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)
+> 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。前置：[M7.3-DAG2.1 支撑模式](M73DAG21SupportPatternsDesign.md)。后续阶段：[M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。
 
 ## 目标
 

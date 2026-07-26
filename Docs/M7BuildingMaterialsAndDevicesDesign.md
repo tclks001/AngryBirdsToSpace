@@ -2,13 +2,13 @@
 
 > 状态：基础材料 C++ 已实现；本阶段只验收材料库、参数化生成和破坏响应，不生成完整建筑。
 >
-> 前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。后续建筑拼装器只调用本稿公开的添加接口，不重复实现材质、碰撞或爆炸。
+> 父级：[主设计稿](AngryBirdsToSpaceGameDesign.md)。前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。后续建筑拼装器只调用本稿公开的添加接口，不重复实现材质、碰撞或爆炸。
 >
 > 本阶段的碰撞爽感、持续损伤和结构破坏升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 >
-> 手工搭建平面碰撞关卡、摆放四材质砖与四档完整弹弓的独立测试入口见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
+> 子设计稿：[物理碰撞破坏爽感调研](PhysicsImpactDestructionResearch.md) · [M7.1 平面物理测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。手工搭建平面碰撞关卡、摆放四材质砖与四档完整弹弓的独立测试入口见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
 >
-> 后续建筑生成：[M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构弱点与失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md)。项目总览见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
+> 后续建筑生成：[M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构弱点与失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归承载图](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [建筑语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。项目总览见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 
 ## 1. 阶段边界
 

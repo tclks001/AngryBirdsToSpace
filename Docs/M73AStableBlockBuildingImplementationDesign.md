@@ -1,7 +1,7 @@
 # M7.3-A：稳定积木建筑实现设计
 
 > 状态：已完成编辑器、PIE 与物理验收。
-> 上位算法：[M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。
+> 父级：[M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。
 > 平面测试场：[M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
 > 下游：[M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md) 负责图选点与难度；[M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md) 负责 Legacy 顶部局部结构弱点；主体 Macro DAG 递归、内部 Failure Frontier 与真实接触图新路线见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)；项目阶段索引见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
 

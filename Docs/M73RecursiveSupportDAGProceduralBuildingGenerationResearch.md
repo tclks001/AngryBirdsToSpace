@@ -2,9 +2,9 @@
 
 > 文档性质：M7.3 新路线的独立调研与算法设计；本轮不修改 C++、地图或资产。
 >
-> 状态：调研与方案完成；纯数据语法阶段已落地，见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)；Scope、稀疏支撑、模块编译与真实接触审计已落地，见 [M73DAG2SpatialLayoutAndModuleCompilationDesign.md](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。
+> 状态：调研与方案完成；纯数据语法阶段已落地，见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)；Scope、稀疏支撑、模块编译与真实接触审计已落地，见 [M73DAG2SpatialLayoutAndModuleCompilationDesign.md](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。建筑外观语义 WFC 与承载 DAG 拟合的后续调研见 [M73WFCBuildingEnvelopeAndDAGFittingResearch.md](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
+> 父级：[M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md)。子阶段：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 
 ## 1. 结论先行
 

@@ -4,7 +4,7 @@
 > 本文负责“如何生成稳定、多样、可读且有明确弱点的积木建筑”；现有材料碰撞、累计损伤、爆炸与冲击实现仍以 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md) 为准。  
 > 本阶段不在本文中实现 C++，也不改变 `CellTopo` 作为正式球面世界逻辑源的约束。
 >
-> 实现导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)
+> 父级：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。实现导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [建筑语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)
 
 > 后续路线说明：A/B/B2 已建立稳定建筑、图选点和顶部局部失效的工程基线，但 B2 的弱点冠段不负责主楼整体坍塌。基于主体 Macro DAG 递归、内部 Failure Frontier、真实接触图与 Chaos 反事实的新方案见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。本文保留为原方案与工程经验对照。
 
