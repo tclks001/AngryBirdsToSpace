@@ -9,7 +9,7 @@
 
 namespace
 {
-	const FABTSM73DAGMacroLayout* FindLayout(const FABTSM73DAGSpatialLayout& Layout, const int32 MacroNodeId)
+	const FABTSM73DAGMacroLayout* FindMacroLayoutForCompilation(const FABTSM73DAGSpatialLayout& Layout, const int32 MacroNodeId)
 	{
 		return Layout.MacroLayouts.FindByPredicate([MacroNodeId](const FABTSM73DAGMacroLayout& Candidate)
 		{
@@ -143,8 +143,8 @@ bool FABTSM73DAGModuleCompiler::Compile(
 	{
 		const int32* SupportPlateId = PlateByMacro.Find(Support.SupportMacroNodeId);
 		const int32* LoadPlateId = PlateByMacro.Find(Support.LoadMacroNodeId);
-		const FABTSM73DAGMacroLayout* SupportLayout = FindLayout(Layout, Support.SupportMacroNodeId);
-		const FABTSM73DAGMacroLayout* LoadLayout = FindLayout(Layout, Support.LoadMacroNodeId);
+		const FABTSM73DAGMacroLayout* SupportLayout = FindMacroLayoutForCompilation(Layout, Support.SupportMacroNodeId);
+		const FABTSM73DAGMacroLayout* LoadLayout = FindMacroLayoutForCompilation(Layout, Support.LoadMacroNodeId);
 		if (SupportPlateId == nullptr || LoadPlateId == nullptr || SupportLayout == nullptr || LoadLayout == nullptr)
 		{
 			OutError = TEXT("DAGCompilePlateMappingMissing");

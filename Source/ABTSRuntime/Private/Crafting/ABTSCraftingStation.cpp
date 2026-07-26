@@ -4,6 +4,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Materials/MaterialInterface.h"
 #include "Player/ABTSM5PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -19,9 +20,21 @@ AABTSCraftingStation::AABTSCraftingStation()
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Visual->SetCollisionResponseToAllChannels(ECR_Ignore);
 	Visual->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (Cube.Succeeded()) Visual->SetStaticMesh(Cube.Object);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Workbench(TEXT("/Game/StaticMesh/Workbench/SM_Workbench.SM_Workbench"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WorkbenchMaterial(TEXT("/Game/StaticMesh/Workbench/MI_Workbench.MI_Workbench"));
+	if (Workbench.Succeeded()) Visual->SetStaticMesh(Workbench.Object);
+	if (WorkbenchMaterial.Succeeded()) Visual->SetMaterial(0, WorkbenchMaterial.Object);
 	Visual->SetRelativeScale3D(FVector(0.8f, 0.8f, 0.45f));
+}
+
+void AABTSCraftingStation::SetStationType(const EABTSCraftingStationType InStationType)
+{
+	StationType = InStationType;
+	if (Visual == nullptr || InStationType != EABTSCraftingStationType::Furnace) return;
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Furnace(TEXT("/Game/StaticMesh/Furnace/SM_Furnace.SM_Furnace"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FurnaceMaterial(TEXT("/Game/StaticMesh/Furnace/MI_Furnace.MI_Furnace"));
+	if (Furnace.Succeeded()) Visual->SetStaticMesh(Furnace.Object);
+	if (FurnaceMaterial.Succeeded()) Visual->SetMaterial(0, FurnaceMaterial.Object);
 }
 
 bool AABTSCraftingStation::IsWithinUseRange(const FVector& WorldLocation) const

@@ -20,7 +20,7 @@ public:
 
 	EABTSCraftingStationType GetStationType() const { return StationType; }
 	/** Used by the M5 runtime spawn owner before the station begins gameplay. */
-	void SetStationType(EABTSCraftingStationType InStationType) { StationType = InStationType; }
+	void SetStationType(EABTSCraftingStationType InStationType);
 	void SetCellId(int32 InCellId) { CellId = InCellId; }
 	int32 GetCellId() const { return CellId; }
 	float GetUseRangeCM() const { return UseRangeCM; }

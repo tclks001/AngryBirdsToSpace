@@ -82,15 +82,19 @@ void AABTSM71PlaceableHISMActor::OnConstruction(const FTransform& Transform)
 
 AABTSM71TreeHISMActor::AABTSM71TreeHISMActor()
 {
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (Cylinder.Succeeded()) InstanceMesh = Cylinder.Object;
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Tree(TEXT("/Game/StaticMesh/Tree/SM_PineTree_PivotFixed.SM_PineTree_PivotFixed"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TreeMaterial(TEXT("/Game/StaticMesh/Tree/M_PineTree.M_PineTree"));
+	if (Tree.Succeeded()) InstanceMesh = Tree.Object;
+	if (TreeMaterial.Succeeded()) InstanceMaterial = TreeMaterial.Object;
 	SetActorScale3D(FVector(0.65f, 0.65f, 3.2f));
 }
 
 AABTSM71RockHISMActor::AABTSM71RockHISMActor()
 {
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (Sphere.Succeeded()) InstanceMesh = Sphere.Object;
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stone(TEXT("/Game/StaticMesh/Stone/SM_Stone1.SM_Stone1"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneMaterial(TEXT("/Game/StaticMesh/Stone/M_Stone.M_Stone"));
+	if (Stone.Succeeded()) InstanceMesh = Stone.Object;
+	if (StoneMaterial.Succeeded()) InstanceMaterial = StoneMaterial.Object;
 	SetActorScale3D(FVector(1.2f, 0.9f, 0.75f));
 }
 
@@ -121,24 +125,32 @@ AABTSM71WoodBrickActor::AABTSM71WoodBrickActor()
 {
 	BuildingMaterial = EABTSM7BuildingMaterial::Wood;
 	FallbackColor = FLinearColor(0.38f, 0.13f, 0.035f);
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Wood.MI_Bricks_Wood"));
+	if (Material.Succeeded()) InstanceMaterial = Material.Object;
 }
 
 AABTSM71StoneBrickActor::AABTSM71StoneBrickActor()
 {
 	BuildingMaterial = EABTSM7BuildingMaterial::Stone;
 	FallbackColor = FLinearColor(0.32f, 0.34f, 0.38f);
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Stone.MI_Bricks_Stone"));
+	if (Material.Succeeded()) InstanceMaterial = Material.Object;
 }
 
 AABTSM71IronBrickActor::AABTSM71IronBrickActor()
 {
 	BuildingMaterial = EABTSM7BuildingMaterial::Iron;
 	FallbackColor = FLinearColor(0.12f, 0.16f, 0.20f);
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Steel.MI_Bricks_Steel"));
+	if (Material.Succeeded()) InstanceMaterial = Material.Object;
 }
 
 AABTSM71GlassBrickActor::AABTSM71GlassBrickActor()
 {
 	BuildingMaterial = EABTSM7BuildingMaterial::Glass;
 	FallbackColor = FLinearColor(0.20f, 0.62f, 0.78f, 0.42f);
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Glass.MI_Bricks_Glass"));
+	if (Material.Succeeded()) InstanceMaterial = Material.Object;
 }
 
 AABTSM71PlaceableDeviceActor::AABTSM71PlaceableDeviceActor()
@@ -222,11 +234,17 @@ void AABTSM71PlaceableDeviceActor::TryFindRuntimeSystem()
 AABTSM71ExplosiveBarrelActor::AABTSM71ExplosiveBarrelActor()
 {
 	SetDeviceKind(EABTSM7ModuleKind::ExplosiveBarrel);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Mesh(TEXT("/Game/StaticMesh/Dynamite/SM_Dynamite.SM_Dynamite"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/StaticMesh/Dynamite/MI_Dynamite.MI_Dynamite"));
+	SetDeviceVisualAssets(Mesh.Succeeded() ? Mesh.Object : nullptr, Material.Succeeded() ? Material.Object : nullptr);
 }
 
 AABTSM71SpringPistonActor::AABTSM71SpringPistonActor()
 {
 	SetDeviceKind(EABTSM7ModuleKind::SpringPiston);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Mesh(TEXT("/Game/StaticMesh/Spring/SM_Spring.SM_Spring"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/StaticMesh/Spring/MI_Spring.MI_Spring"));
+	SetDeviceVisualAssets(Mesh.Succeeded() ? Mesh.Object : nullptr, Material.Succeeded() ? Material.Object : nullptr);
 }
 
 AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
@@ -250,26 +268,38 @@ AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
 	LaunchDirection->SetArrowColor(FColor::Green);
 	LaunchDirection->ArrowSize = 2.0f;
 	LaunchDirection->SetHiddenInGame(true);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (Cylinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stake(TEXT("/Game/StaticMesh/Stake/Simple/SM_Stake_Simple.SM_Stake_Simple"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cord(TEXT("/Game/StaticMesh/Cord/Simple/SM_Cord_Simple.SM_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Simple/SM_Pouch_Simple.SM_Pouch_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StakeMaterial(TEXT("/Game/StaticMesh/Stake/Simple/MI_Stake_Simple.MI_Stake_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CordMaterial(TEXT("/Game/StaticMesh/Cord/Simple/MI_Cord_Simple.MI_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Simple/MI_Pouch_Simple.MI_Pouch_Simple"));
+	if (Stake.Succeeded())
 	{
-		DefaultStakeMesh = Cylinder.Object;
+		DefaultStakeMesh = Stake.Object;
 		StakePreviewA->SetStaticMesh(DefaultStakeMesh);
 		StakePreviewB->SetStaticMesh(DefaultStakeMesh);
 	}
-	if (Cube.Succeeded())
+	if (Cord.Succeeded())
 	{
-		DefaultCordMesh = Cube.Object;
+		DefaultCordMesh = Cord.Object;
 		CordPreview->SetStaticMesh(DefaultCordMesh);
 		CordPreviewB->SetStaticMesh(DefaultCordMesh);
 	}
-	if (Sphere.Succeeded())
+	if (Pouch.Succeeded())
 	{
-		DefaultPouchMesh = Sphere.Object;
+		DefaultPouchMesh = Pouch.Object;
 		PouchPreview->SetStaticMesh(DefaultPouchMesh);
 	}
+	if (StakeMaterial.Succeeded()) { StakePreviewA->SetMaterial(0, StakeMaterial.Object); StakePreviewB->SetMaterial(0, StakeMaterial.Object); }
+	if (CordMaterial.Succeeded()) { CordPreview->SetMaterial(0, CordMaterial.Object); CordPreviewB->SetMaterial(0, CordMaterial.Object); }
+	if (PouchMaterial.Succeeded()) PouchPreview->SetMaterial(0, PouchMaterial.Object);
+	// Geometry and connection tuning is shared by every native slingshot tier.
+	// BP_TwigStringshot was the verified visual reference; tiers only change assets.
+	SetSlingshotTuning(210.0f, 220.0f, 28.0f, 3.5f, FVector(42.0f, 60.0f, 12.0f),
+		FRotator(0.0f, 43.04357f, 0.0f), FVector(3.0f, 3.0f, 1.1f),
+		FVector(2.5f, 2.5f, 1.0f), FVector(1.5f, 2.0f, 1.5f),
+		FVector(0.0f, 0.0f, -30.0f), FVector(0.0f, -27.0f, 0.0f), FVector(0.0f, 27.0f, 0.0f));
 }
 
 void AABTSM71PlaceableSlingshotActor::OnConstruction(const FTransform& Transform)
@@ -342,6 +372,42 @@ void AABTSM71PlaceableSlingshotActor::BeginPlay()
 	SpawnRuntimeSlingshot();
 }
 
+void AABTSM71PlaceableSlingshotActor::SetSlingshotVisualAssets(
+	UStaticMesh* StakeMesh, UMaterialInterface* StakeMaterial,
+	UStaticMesh* CordMesh, UMaterialInterface* CordMaterial,
+	UStaticMesh* PouchMesh, UMaterialInterface* PouchMaterial)
+{
+	StakeVisual.Mesh = StakeMesh;
+	StakeVisual.Material = StakeMaterial;
+	CordVisual.Mesh = CordMesh;
+	CordVisual.Material = CordMaterial;
+	PouchVisual.Mesh = PouchMesh;
+	PouchVisual.Material = PouchMaterial;
+	if (StakeMesh != nullptr) DefaultStakeMesh = StakeMesh;
+	if (CordMesh != nullptr) DefaultCordMesh = CordMesh;
+	if (PouchMesh != nullptr) DefaultPouchMesh = PouchMesh;
+}
+
+void AABTSM71PlaceableSlingshotActor::SetSlingshotTuning(
+	const float InBaseStakeSpacingCM, const float InStakeHeightCM, const float InStakeDiameterCM,
+	const float InCordThicknessCM, const FVector& InPouchSizeCM, const FRotator& InStakeRotation,
+	const FVector& InStakeScale, const FVector& InCordScale, const FVector& InPouchScale,
+	const FVector& InRestPouchOffsetCM, const FVector& InPouchAOffsetCM, const FVector& InPouchBOffsetCM)
+{
+	BaseStakeSpacingCM = InBaseStakeSpacingCM;
+	StakeHeightCM = InStakeHeightCM;
+	StakeDiameterCM = InStakeDiameterCM;
+	CordThicknessCM = InCordThicknessCM;
+	PouchSizeCM = InPouchSizeCM;
+	StakeVisual.LocalRotation = InStakeRotation;
+	StakeVisual.LocalScale = InStakeScale;
+	CordVisual.LocalScale = InCordScale;
+	PouchVisual.LocalScale = InPouchScale;
+	ConnectionLayout.RestPouchOffsetCM = InRestPouchOffsetCM;
+	ConnectionLayout.PouchAConnectionOffsetCM = InPouchAOffsetCM;
+	ConnectionLayout.PouchBConnectionOffsetCM = InPouchBOffsetCM;
+}
+
 void AABTSM71PlaceableSlingshotActor::SpawnRuntimeSlingshot()
 {
 	if (GetWorld() == nullptr || RuntimeCord.IsValid()) return;
@@ -377,10 +443,53 @@ void AABTSM71PlaceableSlingshotActor::SpawnRuntimeSlingshot()
 		static_cast<int32>(SlingshotTier), GetActorForwardVector().X, GetActorForwardVector().Y, GetActorForwardVector().Z, HalfSpacing * 2.0f);
 }
 
-AABTSM71TwigSlingshotActor::AABTSM71TwigSlingshotActor() { SetSlingshotTier(EABTSSlingshotTier::Twig); }
-AABTSM71SimpleSlingshotActor::AABTSM71SimpleSlingshotActor() { SetSlingshotTier(EABTSSlingshotTier::Simple); }
-AABTSM71ReinforcedSlingshotActor::AABTSM71ReinforcedSlingshotActor() { SetSlingshotTier(EABTSSlingshotTier::Reinforced); }
-AABTSM71SpaceSlingshotActor::AABTSM71SpaceSlingshotActor() { SetSlingshotTier(EABTSSlingshotTier::Space); }
+AABTSM71TwigSlingshotActor::AABTSM71TwigSlingshotActor()
+{
+	SetSlingshotTier(EABTSSlingshotTier::Twig);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stake(TEXT("/Game/StaticMesh/Stake/Twig/SM_Stake_Twig.SM_Stake_Twig"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StakeMaterial(TEXT("/Game/StaticMesh/Stake/Twig/MI_Stake_Twig.MI_Stake_Twig"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cord(TEXT("/Game/StaticMesh/Cord/Twig/SM_Cord_Twig.SM_Cord_Twig"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CordMaterial(TEXT("/Game/StaticMesh/Cord/Twig/MI_Cord_Twig.MI_Cord_Twig"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Twig/SM_Pouch_Twig.SM_Pouch_Twig"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Twig/MI_Pouch_Twig.MI_Pouch_Twig"));
+	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+}
+
+AABTSM71SimpleSlingshotActor::AABTSM71SimpleSlingshotActor()
+{
+	SetSlingshotTier(EABTSSlingshotTier::Simple);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stake(TEXT("/Game/StaticMesh/Stake/Simple/SM_Stake_Simple.SM_Stake_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StakeMaterial(TEXT("/Game/StaticMesh/Stake/Simple/MI_Stake_Simple.MI_Stake_Simple"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cord(TEXT("/Game/StaticMesh/Cord/Simple/SM_Cord_Simple.SM_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CordMaterial(TEXT("/Game/StaticMesh/Cord/Simple/MI_Cord_Simple.MI_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Simple/SM_Pouch_Simple.SM_Pouch_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Simple/MI_Pouch_Simple.MI_Pouch_Simple"));
+	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+}
+
+AABTSM71ReinforcedSlingshotActor::AABTSM71ReinforcedSlingshotActor()
+{
+	SetSlingshotTier(EABTSSlingshotTier::Reinforced);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stake(TEXT("/Game/StaticMesh/Stake/Reinforced/SM_Stack_Reinforced.SM_Stack_Reinforced"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StakeMaterial(TEXT("/Game/StaticMesh/Stake/Reinforced/MI_Stack_Reinforced.MI_Stack_Reinforced"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cord(TEXT("/Game/StaticMesh/Cord/Reinforced/SM_Cord_Reinforced.SM_Cord_Reinforced"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CordMaterial(TEXT("/Game/StaticMesh/Cord/Reinforced/MI_Cord_Reinforced.MI_Cord_Reinforced"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Reinforced/SM_Pouch_Reinforced.SM_Pouch_Reinforced"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Reinforced/MI_Pouch_Reinforced.MI_Pouch_Reinforced"));
+	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+}
+
+AABTSM71SpaceSlingshotActor::AABTSM71SpaceSlingshotActor()
+{
+	SetSlingshotTier(EABTSSlingshotTier::Space);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stake(TEXT("/Game/StaticMesh/Stake/Steel/SM_Stack_Steel.SM_Stack_Steel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StakeMaterial(TEXT("/Game/StaticMesh/Stake/Steel/MI_Stack_Steel.MI_Stack_Steel"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cord(TEXT("/Game/StaticMesh/Cord/Steel/SM_Cord_Steel.SM_Cord_Steel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CordMaterial(TEXT("/Game/StaticMesh/Cord/Steel/MI_Cord_Steel.MI_Cord_Steel"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Steel/SM_Pouch_Steel.SM_Pouch_Steel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Steel/MI_Pouch_Steel.MI_Pouch_Steel"));
+	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+}
 
 AABTSM71ModularBuildingAnchor::AABTSM71ModularBuildingAnchor()
 {

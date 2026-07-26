@@ -70,6 +70,8 @@
 
 袋体弦连接点不从模型顶点或 Socket 自动推导，而由 `PouchAConnectionOffsetCM` 和 `PouchBConnectionOffsetCM` 指定。默认分别为 `(0,-18,0)` 与 `(0,18,0)`，必须落在袋体左右范围内。两个偏移会乘以 `PouchVisual.LocalScale` 的各轴绝对值：例如将 `PouchVisual.LocalScale.Y` 调为 `1.5` 时，默认弦端会从 Y=`±18 cm` 同步扩展到 `±27 cm`，始终保持在袋体边缘的相对位置。拉伸时袋体局部 Y 始终投影到固定的桩间方向；两根弦还会按总长度最短的方式选择对应袋边，杜绝反向瞄准时形成交叉 X。
 
+弹珠袋也是完整弹弓唯一的进入发射模式点击目标：`PouchVisual` 开启 `QueryOnly + Visibility Block`，两根可见弦和旧根部横条均为 `NoCollision`。点击袋体仍由所属 `AABTSM51SlingshotCord` 的 Actor 回调转交给 M6 控制器；袋模型不承担弹道、拉力或碰撞逻辑。
+
 ## 4. 目标尺寸适配和枢轴处理
 
 `ABTSMakeSlingshotVisualTransform` 是编辑器预览和 PIE 运行时共用的唯一视觉适配入口：

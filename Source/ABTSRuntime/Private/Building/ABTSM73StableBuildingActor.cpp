@@ -71,6 +71,10 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	FoundationFeet->SetMobility(EComponentMobility::Movable);
 	FoundationFeet->SetGenerateOverlapEvents(false);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WoodMaterial(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Wood.MI_Bricks_Wood"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneMaterial(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Stone.MI_Bricks_Stone"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SteelMaterial(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Steel.MI_Bricks_Steel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlassMaterial(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Glass.MI_Bricks_Glass"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicShapeMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (Cube.Succeeded())
 	{
@@ -81,6 +85,10 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 		WeakPointPreview->SetStaticMesh(Cube.Object);
 	}
 	if (BasicShapeMaterial.Succeeded()) WeakPointDebugMaterial = BasicShapeMaterial.Object;
+	if (WoodMaterial.Succeeded()) WoodPreview->SetMaterial(0, WoodMaterial.Object);
+	if (StoneMaterial.Succeeded()) StonePreview->SetMaterial(0, StoneMaterial.Object);
+	if (SteelMaterial.Succeeded()) IronPreview->SetMaterial(0, SteelMaterial.Object);
+	if (GlassMaterial.Succeeded()) GlassPreview->SetMaterial(0, GlassMaterial.Object);
 }
 
 void AABTSM73StableBuildingActor::OnConstruction(const FTransform& Transform)

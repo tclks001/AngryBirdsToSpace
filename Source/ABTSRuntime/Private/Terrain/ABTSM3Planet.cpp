@@ -45,6 +45,14 @@ AABTSM3Planet::AABTSM3Planet()
 		TEXT("/Engine/BasicShapes/Cone.Cone"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> RockPreviewMesh(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ForestAssetMesh(
+		TEXT("/Game/StaticMesh/Tree/SM_PineTree_PivotFixed.SM_PineTree_PivotFixed"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> RockAssetMesh(
+		TEXT("/Game/StaticMesh/Stone/SM_Stone1.SM_Stone1"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ForestAssetMaterial(
+		TEXT("/Game/StaticMesh/Tree/M_PineTree.M_PineTree"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockAssetMaterial(
+		TEXT("/Game/StaticMesh/Stone/M_Stone.M_Stone"));
 
 	ForestHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("ForestHISM"));
 	ForestHISM->SetupAttachment(ContinuousSurface);
@@ -55,7 +63,8 @@ AABTSM3Planet::AABTSM3Planet()
 	ForestHISM->SetCollisionResponseToAllChannels(ECR_Block);
 	ForestHISM->SetSimulatePhysics(false);
 	ForestHISM->SetMobility(EComponentMobility::Movable);
-	ForestHISM->SetStaticMesh(ForestPreviewMesh.Object);
+	ForestHISM->SetStaticMesh(ForestAssetMesh.Succeeded() ? ForestAssetMesh.Object : ForestPreviewMesh.Object);
+	if (ForestAssetMaterial.Succeeded()) ForestHISM->SetMaterial(0, ForestAssetMaterial.Object);
 
 	RockHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("RockHISM"));
 	RockHISM->SetupAttachment(ContinuousSurface);
@@ -64,7 +73,8 @@ AABTSM3Planet::AABTSM3Planet()
 	RockHISM->SetCollisionResponseToAllChannels(ECR_Block);
 	RockHISM->SetSimulatePhysics(false);
 	RockHISM->SetMobility(EComponentMobility::Movable);
-	RockHISM->SetStaticMesh(RockPreviewMesh.Object);
+	RockHISM->SetStaticMesh(RockAssetMesh.Succeeded() ? RockAssetMesh.Object : RockPreviewMesh.Object);
+	if (RockAssetMaterial.Succeeded()) RockHISM->SetMaterial(0, RockAssetMaterial.Object);
 }
 
 bool AABTSM3Planet::RebuildPlanet()

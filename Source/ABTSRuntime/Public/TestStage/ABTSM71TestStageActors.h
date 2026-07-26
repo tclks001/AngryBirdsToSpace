@@ -163,6 +163,7 @@ public:
 
 protected:
 	void SetDeviceKind(EABTSM7ModuleKind InKind) { DeviceKind = InKind; }
+	void SetDeviceVisualAssets(UStaticMesh* InMesh, UMaterialInterface* InMaterial) { DeviceMesh = InMesh; DeviceMaterial = InMaterial; }
 
 private:
 	void TryFindRuntimeSystem();
@@ -215,6 +216,13 @@ public:
 
 protected:
 	void SetSlingshotTier(EABTSSlingshotTier InTier) { SlingshotTier = InTier; }
+	void SetSlingshotVisualAssets(UStaticMesh* StakeMesh, UMaterialInterface* StakeMaterial,
+		UStaticMesh* CordMesh, UMaterialInterface* CordMaterial,
+		UStaticMesh* PouchMesh, UMaterialInterface* PouchMaterial);
+	void SetSlingshotTuning(float InBaseStakeSpacingCM, float InStakeHeightCM, float InStakeDiameterCM,
+		float InCordThicknessCM, const FVector& InPouchSizeCM, const FRotator& InStakeRotation,
+		const FVector& InStakeScale, const FVector& InCordScale, const FVector& InPouchScale,
+		const FVector& InRestPouchOffsetCM, const FVector& InPouchAOffsetCM, const FVector& InPouchBOffsetCM);
 
 private:
 	void UpdatePreview();

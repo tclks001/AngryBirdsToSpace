@@ -2,6 +2,7 @@
 
 #include "Building/ABTSM73DAGLayoutSolver.h"
 
+#include "Building/ABTSM73DAGLoadSupportSolver.h"
 #include "Building/ABTSM73DAGTypes.h"
 
 namespace
@@ -58,27 +59,15 @@ namespace
 	}
 
 	bool ResolveSupportPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
-		const float LoadPlateAreaCM2, EABTSM73DAGSupportPattern& OutPattern, float& OutColumnWidthCM)
+		EABTSM73DAGSupportPattern& OutPattern, float& OutColumnWidthCM)
 	{
-		auto ColumnCount = [](const EABTSM73DAGSupportPattern Pattern)
-		{
-			switch (Pattern)
-			{
-			case EABTSM73DAGSupportPattern::SingleColumnInterface: return 1;
-			case EABTSM73DAGSupportPattern::TwoColumnLine: return 2;
-			case EABTSM73DAGSupportPattern::ThreeColumnTripod: return 3;
-			case EABTSM73DAGSupportPattern::FourColumnFootprint: return 4;
-			default: return 1;
-			}
-		};
 		auto TryAdaptivePattern = [&](const EABTSM73DAGSupportPattern Pattern)
 		{
-			const float RequiredWidth = FMath::Sqrt(FMath::Max(0.0f,
-				Settings.MinSupportContactAreaRatio * LoadPlateAreaCM2 / static_cast<float>(ColumnCount(Pattern))));
-			const float Width = FMath::Clamp(FMath::Max(Settings.ColumnWidthCM, RequiredWidth),
-				Settings.MinAdaptiveColumnWidthCM, Settings.MaxAdaptiveColumnWidthCM);
-			if (RequiredWidth > Settings.MaxAdaptiveColumnWidthCM + KINDA_SMALL_NUMBER
-				|| !CanFitSupportPattern(Region, Settings, Pattern, Width)) return false;
+			// DAG-2.3 distributes one load plate's required contact area across a
+			// whole support group. At candidate stage only retain a physically
+			// placeable local interface; the joint solver resolves its final width.
+			const float Width = Settings.MinAdaptiveColumnWidthCM;
+			if (!CanFitSupportPattern(Region, Settings, Pattern, Width)) return false;
 			OutPattern = Pattern;
 			OutColumnWidthCM = Width;
 			return true;
@@ -380,19 +369,6 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	FString& OutError) const
 {
 	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> CandidatesByLoad;
-	TMap<int32, int32> ProvisionalLevelByMacro;
-	for (const FABTSM73DAGMacroNode& Macro : Graph.MacroNodes) ProvisionalLevelByMacro.Add(Macro.NodeId, 0);
-	for (int32 Pass = 0; Pass < Graph.MacroNodes.Num(); ++Pass)
-	{
-		bool bChanged = false;
-		for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
-		{
-			const int32 SupportLevel = ProvisionalLevelByMacro.FindRef(Edge.SupportNodeId);
-			int32& LoadLevel = ProvisionalLevelByMacro.FindChecked(Edge.LoadNodeId);
-			if (LoadLevel < SupportLevel + 1) { LoadLevel = SupportLevel + 1; bChanged = true; }
-		}
-		if (!bChanged) break;
-	}
 	for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
 	{
 		const FABTSM73DAGMacroLayout* Support = FindLayout(InOutLayout, Edge.SupportNodeId);
@@ -410,8 +386,7 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		}
 		EABTSM73DAGSupportPattern ResolvedPattern = Settings.SupportPattern;
 		float ResolvedColumnWidthCM = Settings.ColumnWidthCM;
-		const float LoadPlateAreaCM2 = Load->PlateDimensionsCM.X * Load->PlateDimensionsCM.Y;
-		if (!ResolveSupportPattern(Intersection, Settings, LoadPlateAreaCM2, ResolvedPattern, ResolvedColumnWidthCM))
+		if (!ResolveSupportPattern(Intersection, Settings, ResolvedPattern, ResolvedColumnWidthCM))
 		{
 			++InOutLayout.RejectedCandidateEdgeCount;
 			continue;
@@ -426,51 +401,6 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 			FVector2D(Load->PlateCenter.X, Load->PlateCenter.Y));
 	}
 
-	for (const FABTSM73DAGMacroLayout& LoadLayout : InOutLayout.MacroLayouts)
-	{
-		if (LoadLayout.bGroundTerminal) continue;
-		TArray<FABTSM73DAGSelectedSupport>* Candidates = CandidatesByLoad.Find(LoadLayout.MacroNodeId);
-		if (Candidates == nullptr || Candidates->IsEmpty())
-		{
-			OutError = FString::Printf(TEXT("DAGNoFeasibleSupport:%d:Center=%.1f,%.1f:Size=%.1f,%.1f"),
-				LoadLayout.MacroNodeId, LoadLayout.PlateCenter.X, LoadLayout.PlateCenter.Y,
-				LoadLayout.PlateDimensionsCM.X, LoadLayout.PlateDimensionsCM.Y);
-			return false;
-		}
-		Candidates->Sort([](const FABTSM73DAGSelectedSupport& A, const FABTSM73DAGSelectedSupport& B)
-		{
-			// Prefer a self-stable physical footprint. A single logical edge that
-			// realizes a tripod/four-point hull is safer than mixing unrelated DAG
-			// parents whose upstream chains can resolve to different structural ranks.
-			const bool bASingleInterface = A.SupportPattern == EABTSM73DAGSupportPattern::SingleColumnInterface;
-			const bool bBSingleInterface = B.SupportPattern == EABTSM73DAGSupportPattern::SingleColumnInterface;
-			if (bASingleInterface != bBSingleInterface) return !bASingleInterface;
-			if (!FMath::IsNearlyEqual(A.Cost, B.Cost)) return A.Cost < B.Cost;
-			return A.SupportMacroNodeId < B.SupportMacroNodeId;
-		});
-		// Multiple parents may jointly stabilize a wide plate, but they must come
-		// from one structural rank. Prefer the highest feasible rank so the chosen
-		// physical graph remains continuous without multi-storey columns.
-		int32 ChosenParentLevel = INDEX_NONE;
-		for (const FABTSM73DAGSelectedSupport& Candidate : *Candidates)
-		{
-			ChosenParentLevel = FMath::Max(ChosenParentLevel,
-				ProvisionalLevelByMacro.FindRef(Candidate.SupportMacroNodeId));
-		}
-		TArray<FABTSM73DAGSelectedSupport> SameLevelCandidates;
-		for (const FABTSM73DAGSelectedSupport& Candidate : *Candidates)
-		{
-			if (ProvisionalLevelByMacro.FindRef(Candidate.SupportMacroNodeId) == ChosenParentLevel)
-				SameLevelCandidates.Add(Candidate);
-		}
-		const int32 SelectedCount = FMath::Min3(Settings.PreferredLogicalSupportsPerLoad,
-			Settings.MaxLogicalSupportsPerLoad, SameLevelCandidates.Num());
-		for (int32 Index = 0; Index < SelectedCount; ++Index) InOutLayout.SelectedSupports.Add(SameLevelCandidates[Index]);
-	}
-	if (InOutLayout.SelectedSupports.IsEmpty())
-	{
-		OutError = TEXT("DAGSparseSupportEmpty");
-		return false;
-	}
-	return true;
+	FABTSM73DAGLoadSupportSolver LoadSupportSolver;
+	return LoadSupportSolver.Solve(Graph, Settings, CandidatesByLoad, InOutLayout, OutError);
 }

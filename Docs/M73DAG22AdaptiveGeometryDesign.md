@@ -1,5 +1,7 @@
 # M7.3-DAG2.2 自适应楼板与支撑几何设计
 
+> 后续阶段：[M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)
+
 ## 目标
 
 解决递归拱门与双塔中参数可行区间互相冲突的问题：扩大 Layout 时不应频繁因 `ContactAreaTooSmall` 或 `COMOutsideSupportHull` 失败，缩小时也不应立即因 `DAGParallelScopeTooNarrow` 失败。

@@ -110,7 +110,7 @@ Expansion Step Budget = 0
 
 物理支撑只允许连接相邻结构层。非地基楼板若没有相邻层、XY 相交且能容纳支撑模式的入边，会明确报 `DAGNoFeasibleSupport`，不能静默生成悬空楼板或用一根贯通多层的长柱掩盖拓扑错误。
 
-自动化 `ABTS.M73DAG.StructuralRankAndPhysicalContinuity` 使用高 Expansion Step Budget 验证：每个非地基 Macro 楼板都有物理支撑、每条支撑只跨一层、每根柱满足最小净高。
+自动化 `ABTS.M73DAG.StructuralRankAndPhysicalContinuity` 现由 DAG2.3 维护：验证默认双塔一层递归下每个非地基 Macro 楼板都有物理支撑、每根柱满足最小净高，并允许只有在联合荷载凸包需要时才出现的跨层承载脊柱。
 
 | `COMOutsideSupportHull` | 楼板质心落在实际接触凸包之外 | 改三柱/四柱，增加可行交集，或调整 Plate 尺寸；不要回退到 AABB 判定 |
 | --- | --- | --- |

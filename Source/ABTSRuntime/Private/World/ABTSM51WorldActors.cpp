@@ -103,8 +103,10 @@ AABTSM51SlingshotDirtHole::AABTSM51SlingshotDirtHole()
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DirtHoleVisual"));
 	SetRootComponent(Visual);
 	ConfigureInteractionMesh(*Visual);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (Cylinder.Succeeded()) Visual->SetStaticMesh(Cylinder.Object);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DirtHole(TEXT("/Game/StaticMesh/SlingshotDirtHole/SM_SlingshotDitHole.SM_SlingshotDitHole"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DirtHoleMaterial(TEXT("/Game/StaticMesh/SlingshotDirtHole/MI_SlingshotDitHole.MI_SlingshotDitHole"));
+	if (DirtHole.Succeeded()) Visual->SetStaticMesh(DirtHole.Object);
+	if (DirtHoleMaterial.Succeeded()) Visual->SetMaterial(0, DirtHoleMaterial.Object);
 	Visual->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.06f));
 }
 
@@ -131,8 +133,10 @@ AABTSM51SlingshotStake::AABTSM51SlingshotStake()
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StakeVisual"));
 	Visual->SetupAttachment(Root);
 	ConfigureInteractionMesh(*Visual);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (Cylinder.Succeeded()) Visual->SetStaticMesh(Cylinder.Object);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Stake(TEXT("/Game/StaticMesh/Stake/Simple/SM_Stake_Simple.SM_Stake_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StakeMaterial(TEXT("/Game/StaticMesh/Stake/Simple/MI_Stake_Simple.MI_Stake_Simple"));
+	if (Stake.Succeeded()) Visual->SetStaticMesh(Stake.Object);
+	if (StakeMaterial.Succeeded()) Visual->SetMaterial(0, StakeMaterial.Object);
 	Visual->SetRelativeScale3D(FVector(0.14f, 0.14f, 1.1f));
 }
 
@@ -198,31 +202,39 @@ AABTSM51SlingshotCord::AABTSM51SlingshotCord()
 	PrimaryActorTick.bCanEverTick = false;
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordVisual"));
 	SetRootComponent(Visual);
-	ConfigureInteractionMesh(*Visual);
+	// The root is a legacy transform carrier only. It must never remain as an
+	// invisible click target after the two visible cord segments replace it.
+	ConfigureVisualOnlyMesh(*Visual);
 	CordSegmentA = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordSegmentA"));
 	CordSegmentB = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordSegmentB"));
 	PouchVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PouchVisual"));
 	CordSegmentA->SetupAttachment(Visual);
 	CordSegmentB->SetupAttachment(Visual);
 	PouchVisual->SetupAttachment(Visual);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (Cube.Succeeded()) Visual->SetStaticMesh(Cube.Object);
-	if (Cylinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cord(TEXT("/Game/StaticMesh/Cord/Simple/SM_Cord_Simple.SM_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CordMaterial(TEXT("/Game/StaticMesh/Cord/Simple/MI_Cord_Simple.MI_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Simple/SM_Pouch_Simple.SM_Pouch_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Simple/MI_Pouch_Simple.MI_Pouch_Simple"));
+	if (Cord.Succeeded()) Visual->SetStaticMesh(Cord.Object);
+	if (Cord.Succeeded())
 	{
-		DefaultCordCylinderMesh = Cylinder.Object;
+		DefaultCordCylinderMesh = Cord.Object;
 		CordSegmentA->SetStaticMesh(DefaultCordCylinderMesh);
 		CordSegmentB->SetStaticMesh(DefaultCordCylinderMesh);
 	}
-	if (Sphere.Succeeded())
+	if (Pouch.Succeeded())
 	{
-		DefaultPouchSphereMesh = Sphere.Object;
+		DefaultPouchSphereMesh = Pouch.Object;
 		PouchVisual->SetStaticMesh(DefaultPouchSphereMesh);
 	}
+	if (CordMaterial.Succeeded()) { CordSegmentA->SetMaterial(0, CordMaterial.Object); CordSegmentB->SetMaterial(0, CordMaterial.Object); }
+	if (PouchMaterial.Succeeded()) PouchVisual->SetMaterial(0, PouchMaterial.Object);
 	ConfigureVisualOnlyMesh(*CordSegmentA);
 	ConfigureVisualOnlyMesh(*CordSegmentB);
-	ConfigureVisualOnlyMesh(*PouchVisual);
+	// Launch mode is entered by clicking the visible pouch, not an invisible
+	// crossbar or either cord segment. The Actor click callback still identifies
+	// this AABTSM51SlingshotCord for the controller.
+	ConfigureInteractionMesh(*PouchVisual);
 }
 
 void AABTSM51SlingshotCord::InitializeCord(
@@ -305,7 +317,8 @@ void AABTSM51SlingshotCord::ConfigureTwoCordVisuals(
 	}
 	if (PouchSlot.Material) PouchVisual->SetMaterial(0, PouchSlot.Material);
 
-	// Keep the original crossbar mesh as the click/trace target only.
+	// The original crossbar is no longer an interaction target. Only the visible
+	// pouch keeps Visibility collision; both cord segments are presentation only.
 	Visual->SetVisibility(false, false);
 	Visual->SetHiddenInGame(true, false);
 	CordSegmentA->SetVisibility(true, true);

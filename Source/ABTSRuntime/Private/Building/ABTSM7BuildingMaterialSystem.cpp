@@ -40,9 +40,25 @@ AABTSM7BuildingMaterialSystem::AABTSM7BuildingMaterialSystem()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicShapeMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WoodBrick(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Wood.MI_Bricks_Wood"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneBrick(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Stone.MI_Bricks_Stone"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SteelBrick(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Steel.MI_Bricks_Steel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlassBrick(TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Glass.MI_Bricks_Glass"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SimpleCord(TEXT("/Game/StaticMesh/Cord/Simple/MI_Cord_Simple.MI_Cord_Simple"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SteelCord(TEXT("/Game/StaticMesh/Cord/Steel/MI_Cord_Steel.MI_Cord_Steel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DynamiteMaterial(TEXT("/Game/StaticMesh/Dynamite/MI_Dynamite.MI_Dynamite"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SpringMaterialAsset(TEXT("/Game/StaticMesh/Spring/MI_Spring.MI_Spring"));
 	if (Cube.Succeeded()) SharedBrickMesh = Cube.Object;
 	if (Cylinder.Succeeded()) SharedCylinderMesh = Cylinder.Object;
 	if (BasicShapeMaterial.Succeeded()) FallbackMaterialParent = BasicShapeMaterial.Object;
+	if (WoodBrick.Succeeded()) WoodMaterial = WoodBrick.Object;
+	if (StoneBrick.Succeeded()) StoneMaterial = StoneBrick.Object;
+	if (SteelBrick.Succeeded()) IronMaterial = SteelBrick.Object;
+	if (GlassBrick.Succeeded()) GlassMaterial = GlassBrick.Object;
+	if (SimpleCord.Succeeded()) RopeMaterial = SimpleCord.Object;
+	if (SteelCord.Succeeded()) ChainMaterial = SteelCord.Object;
+	if (DynamiteMaterial.Succeeded()) ExplosiveMaterial = DynamiteMaterial.Object;
+	if (SpringMaterialAsset.Succeeded()) SpringMaterial = SpringMaterialAsset.Object;
 
 	MaterialProfiles = FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
 }
