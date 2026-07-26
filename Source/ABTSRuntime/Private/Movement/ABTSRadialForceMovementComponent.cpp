@@ -13,6 +13,7 @@
 #include "Terrain/ABTSM3Planet.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "ProceduralMeshComponent.h"
+#include "World/ABTSM9GravityQuery.h"
 
 UABTSRadialForceMovementComponent::UABTSRadialForceMovementComponent()
 {
@@ -86,6 +87,11 @@ void UABTSRadialForceMovementComponent::QueueJump()
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][ForceSuspension][Jump] Input queued. Grounded=%d Buffer=%.3f"),
 		IsGrounded() ? 1 : 0,
 		JumpBufferRemainingSeconds);
+}
+
+void UABTSRadialForceMovementComponent::SetDeveloperWalkingSpeedMultiplier(const float InMultiplier)
+{
+	DeveloperWalkingSpeedMultiplier = FMath::Clamp(InMultiplier, 1.0f, 10.0f);
 }
 
 void UABTSRadialForceMovementComponent::ConfigureCollisionGroundingExperiment(
@@ -331,19 +337,21 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	const float MassKG = FMath::Max(0.1f, VirtualMassKG);
 
 	const FVector GravityForce = -Surface.RadialUp * (MassKG * LocalGravityAcceleration);
+	const FVector SatelliteGravityForce = ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Character.GetActorLocation()) * MassKG;
 	const FVector SupportForce = Surface.RadialUp * (MassKG * Surface.OutwardSupportAccelerationCMPerSec2);
-	const FVector MoveForce = MoveDirection * (MassKG * GroundMoveAccelerationCMPerSec2 * ControlScale * InputMagnitude);
+	const float EffectiveMaxGroundSpeed = DesignMaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
+	const FVector MoveForce = MoveDirection * (MassKG * GroundMoveAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier * ControlScale * InputMagnitude);
 	FVector DragForce = -TangentVelocity * (MassKG * DragPerSecond);
 	const float TangentSpeed = TangentVelocity.Size();
-	if (Surface.bGrounded && TangentSpeed > DesignMaxGroundSpeedCMPerSec)
+	if (Surface.bGrounded && TangentSpeed > EffectiveMaxGroundSpeed)
 	{
 		DragForce -= TangentVelocity.GetSafeNormal()
-			* (MassKG * OverspeedDragPerSecond * (TangentSpeed - DesignMaxGroundSpeedCMPerSec));
+			* (MassKG * OverspeedDragPerSecond * (TangentSpeed - EffectiveMaxGroundSpeed));
 	}
 
 	const float ResolvedAirDrag = bBallisticFlight ? BallisticFlightAirDragPerSecond : AirDragPerSecond;
 	const FVector AirDragForce = -Velocity * (MassKG * FMath::Max(0.0f, ResolvedAirDrag));
-	const FVector NetForce = GravityForce + SupportForce + MoveForce + DragForce + AirDragForce;
+	const FVector NetForce = GravityForce + SatelliteGravityForce + SupportForce + MoveForce + DragForce + AirDragForce;
 	Velocity += (NetForce / MassKG) * DeltaTime;
 	if (Surface.bGrounded)
 	{

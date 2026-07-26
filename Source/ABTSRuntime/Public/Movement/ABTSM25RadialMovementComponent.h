@@ -22,6 +22,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void SetMoveInput(const FVector& Direction, float Scale);
+	/** Debug-only walking multiplier. It affects tangential movement, never jump speed. */
+	void SetDeveloperWalkingSpeedMultiplier(float InMultiplier);
 	void QueueJump();
 	void ConfigureCollisionGroundingExperiment(bool bEnabled, float MaxGroundAngleDegrees);
 	void ResetMotionState();
@@ -94,4 +96,5 @@ private:
 	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;
 	bool bUseCollisionNormalGroundingExperiment = false;
 	float CollisionGroundMaxAngleDegrees = 55.0f;
+	float DeveloperWalkingSpeedMultiplier = 1.0f;
 };

@@ -216,6 +216,20 @@ int32 AABTSM51WorldSystem::SelectPlacementCell(const FVector& UnitDirection) con
 	return BestCell;
 }
 
+int32 AABTSM51WorldSystem::SelectDeveloperStakeCell(const FVector& UnitDirection) const
+{
+	if (!Planet.IsValid()) return INDEX_NONE;
+	int32 BestCell = INDEX_NONE;
+	float BestDot = -1.0f;
+	for (int32 CellId = 0; CellId < Planet->LogicalCells.Num(); ++CellId)
+	{
+		if (IsCellOccupied(CellId)) continue;
+		const float Dot = FVector::DotProduct(UnitDirection, Planet->LogicalCells[CellId].UnitCenter);
+		if (Dot > BestDot) { BestDot = Dot; BestCell = CellId; }
+	}
+	return BestCell;
+}
+
 bool AABTSM51WorldSystem::IsCellOccupied(const int32 CellId) const
 {
 	return OccupiedCells.Contains(CellId);
@@ -264,6 +278,48 @@ bool AABTSM51WorldSystem::PlaceHeldToolAtAim(APlayerController& Controller)
 	return true;
 }
 
+bool AABTSM51WorldSystem::PlaceHeldStakeAtAim(APlayerController& Controller)
+{
+	if (!bAllowDeveloperAnyCellStakePlacement) return false;
+	AABTSCraftingSystem* System = FindCraftingSystem();
+	UABTSInventoryComponent* Inventory = System ? System->GetInventory() : nullptr;
+	EABTSItemId Held;
+	if (Inventory == nullptr || !Inventory->GetHeldItem(Held) || !ABTSIsSlingshotStake(Held)) return false;
+	if (!Planet.IsValid()) { LogPlaceFailure(TEXT("NoPlanet")); return false; }
+	FVector Origin;
+	FVector Direction;
+	if (!Controller.DeprojectMousePositionToWorld(Origin, Direction)) { LogPlaceFailure(TEXT("NoAimRay")); return false; }
+	const FVector PlanetCenter = Planet->GetPlanetCenterWorld();
+	FVector AimPoint = Origin + Direction * PlacementTraceDistanceCM;
+	FHitResult SurfaceHit;
+	if (Controller.GetHitResultUnderCursor(ECC_Visibility, false, SurfaceHit) && SurfaceHit.bBlockingHit)
+	{
+		AimPoint = SurfaceHit.ImpactPoint;
+	}
+	const int32 CellId = SelectDeveloperStakeCell((AimPoint - PlanetCenter).GetSafeNormal());
+	if (CellId == INDEX_NONE) { LogPlaceFailure(TEXT("NoUnoccupiedCell")); return false; }
+	FTransform Transform;
+	const EABTSSlingshotTier Tier = Held == EABTSItemId::Branch
+		? EABTSSlingshotTier::Twig
+		: (Held == EABTSItemId::ReinforcedStake
+			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
+	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(Tier);
+	if (!QueryCellTransform(CellId, Preset.StakeHeightCM * 0.5f, Transform)) { LogPlaceFailure(TEXT("SurfaceQuery")); return false; }
+	if (Controller.GetPawn() == nullptr || FVector::Distance(Controller.GetPawn()->GetActorLocation(), Transform.GetLocation()) > PlacementReachCM)
+	{
+		LogPlaceFailure(TEXT("OutOfReach"));
+		return false;
+	}
+	AABTSM51SlingshotStake* Stake = GetWorld()->SpawnActor<AABTSM51SlingshotStake>(StakeClass, Transform);
+	if (Stake == nullptr) { LogPlaceFailure(TEXT("SpawnFailed")); return false; }
+	Stake->InitializeStake(Held, CellId, Planet->LogicalCells[CellId].UnitCenter);
+	OccupiedCells.Add(CellId);
+	Inventory->RemoveItem(Held, 1);
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][DebugStake] Installed=%s Cell=%d AllowAnyCell=1"),
+		*ABTSGetItemFallbackLabel(Held), CellId);
+	return true;
+}
+
 bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)
 {
 	AABTSCraftingSystem* System = FindCraftingSystem();
@@ -273,7 +329,13 @@ bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)
 	const FVector Up = (Hole.GetActorLocation() - Planet->GetPlanetCenterWorld()).GetSafeNormal();
 	FVector Forward = FVector::VectorPlaneProject(Hole.GetActorForwardVector(), Up).GetSafeNormal();
 	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
-	const FTransform Transform(FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat(), Hole.GetActorLocation() + Up * 58.0f);
+	const EABTSSlingshotTier Tier = Held == EABTSItemId::Branch
+		? EABTSSlingshotTier::Twig
+		: (Held == EABTSItemId::ReinforcedStake
+			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
+	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(Tier);
+	const FTransform Transform(FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat(),
+		Hole.GetActorLocation() + Up * (Preset.StakeHeightCM * 0.5f));
 	AABTSM51SlingshotStake* Stake = GetWorld()->SpawnActor<AABTSM51SlingshotStake>(StakeClass, Transform);
 	if (Stake == nullptr) return false;
 	Stake->InitializeStake(Held, Hole.GetCellId(), Up);
@@ -285,6 +347,7 @@ bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)
 
 EABTSItemId AABTSM51WorldSystem::ResolveStakeForCord(const EABTSItemId CordItem) const
 {
+	if (CordItem == EABTSItemId::PlantFiber) return EABTSItemId::Branch;
 	return CordItem == EABTSItemId::ReinforcedCord ? EABTSItemId::ReinforcedStake : EABTSItemId::SimpleStake;
 }
 
@@ -311,8 +374,8 @@ bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
 		LogPlaceFailure(TEXT("StakeArcOrType"));
 		return false;
 	}
-	const FVector EndpointA = First->GetActorLocation() + First->GetUnitDirection() * 80.0f;
-	const FVector EndpointB = Stake.GetActorLocation() + Stake.GetUnitDirection() * 80.0f;
+	const FVector EndpointA = First->GetVisualTopWorldLocation();
+	const FVector EndpointB = Stake.GetVisualTopWorldLocation();
 	AABTSM51SlingshotCord* Cord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(CordClass, FTransform::Identity);
 	if (Cord == nullptr) return false;
 	Cord->InitializeCord(First, &Stake, EndpointA, EndpointB);

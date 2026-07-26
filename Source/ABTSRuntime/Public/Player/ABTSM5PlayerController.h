@@ -25,6 +25,8 @@ public:
 	AABTSCraftingSystem* FindCraftingSystem();
 
 private:
+	void ScrollCraftingInventory(float Value);
+
 	bool bCraftingInterfaceOpen = false;
 	TWeakObjectPtr<AABTSCraftingSystem> CraftingSystem;
 };

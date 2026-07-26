@@ -28,6 +28,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void SetChaosEnabled(bool bEnabled);
+	/** Debug-only walking multiplier. It affects tangential steering, never launch velocity. */
+	void SetDeveloperWalkingSpeedMultiplier(float InMultiplier);
 	/** Enables constant-direction gravity for the standalone M7.1 floor. */
 	void ConfigurePlanarTestMode(bool bEnabled, const FVector& InPlaneOrigin, const FVector& InPlaneUp);
 	FVector GetMovementUpAt(const FVector& WorldLocation) const;
@@ -88,6 +90,7 @@ private:
 	bool bBallisticFlight = false;
 	float LastGroundContactAgeSeconds = BIG_NUMBER;
 	float BallisticAirDragPerSecond = 0.08f;
+	float DeveloperWalkingSpeedMultiplier = 1.0f;
 	FVector PreviousPhysicsVelocity = FVector::ZeroVector;
 	FABTSChaosBlockingImpactDelegate BlockingImpact;
 };

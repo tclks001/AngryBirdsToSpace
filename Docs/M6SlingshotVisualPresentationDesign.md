@@ -125,7 +125,18 @@ BirdInPouchOffsetCM = 20
 
 回退模型的枢轴差异只存在于资产内部，最终三者都经过相同的 Bounds 锚点适配。不得再把回退圆柱体的中心枢轴假设传播给正式桩模型。
 
-## 8. 验收
+## 8. 测试台与球面地图共享
+
+`FABTSSlingshotVisualPreset` 现在是四档弹弓的原生默认视觉契约。它包含桩距/尺寸、弦粗、袋尺寸、Stake/Cord/Pouch 的 `VisualSlot`（Mesh、Material、Local Offset、Local Rotation、Local Scale）与全部连接偏移。
+
+- M7.1 的 Twig、Simple、Reinforced、Space 完整弹弓从该 Preset 取得默认值；已有 Blueprint 仍可在 Details 中覆盖。
+- M5.1 在球面上单独安放的 Stake 初始化时也应用相同 Tier 的 `StakeVisual`、桩高和桩底 Pivot 规则；其 Actor 中心自动位于半桩高，桩底落在 SlingshotDirtHole 表面。
+- 两个球面 Stake 被弹弓弦连接时，Cord 自动以同 Tier Preset 创建双弦和待机袋体；端点来自真实桩顶，不再使用旧的固定 `80cm` 代理高度。
+- `AABTSM6SlingshotSystem` 的球面 Debug Slingshots 不再手工拼装基础 Stake/Cord，而是直接生成 M7.1 Complete Slingshot Actor。它继承同一套视觉组件、缩放、旋转、枢轴和连接规则；在 `ABTS | M6 | Debug | Slingshot Visual` 可替换 Simple/Reinforced 的 Blueprint 子类，并以 `DebugSlingshotActorScale` 复现测试台的 Actor Scale。
+
+因此，测试台上已调好的完整弹弓 Blueprint 可直接指定给球面 Debug Class；不要再在球面代码中复制或单独补偿其 Mesh Scale/Rotation。
+
+## 9. 验收
 
 1. 未配置模型时，桩底位于 Actor 地面，桩顶高度等于 `StakeHeightCM`。
 2. 换成符合协议的底部枢轴桩后，底面和桩顶位置与回退模型一致，不会从半高处开始。
@@ -137,7 +148,7 @@ BirdInPouchOffsetCM = 20
 8. `BirdInPouchOffsetCM=20` 时，鸟体中心始终位于袋中心沿当前袋体局部 `+Z` 的 20 cm 位置；改变发射方向后偏移随袋体旋转。
 9. M6 拉动期间只有袋移动，两根弦持续连接四个端点，松手与回归后恢复待机状态。
 
-## 9. 排错
+## 10. 排错
 
 | 现象 | 检查项 |
 |---|---|
@@ -148,3 +159,28 @@ BirdInPouchOffsetCM = 20
 | 袋体巨大或极薄 | 将旧实例的 `PouchVisual.LocalScale` 重置为 `(1,1,1)`，再使用 `PouchSizeCM` |
 | 全部模型统一偏移 | 检查 Slot Offset；它现在是未缩放的真实厘米值，旧补偿值通常应清零 |
 | 预览正常、PIE 异常 | 确认没有旧派生 Blueprint 覆盖 Slot 默认值，并对实例执行 Reset to Default 后重新保存 |
+| 球面单桩底部悬空/埋入 | 确认使用 M5.1 当前代码；Stake Actor 应位于半个 `StakeHeightCM` 高度，视觉底部由 BoundsBottomCenter 对齐 DirtHole |
+| 球面 Debug 弹弓外观与测试台不同 | 在 M6 System 的 `DebugSimpleSlingshotClass` / `DebugReinforcedSlingshotClass` 指向同一个测试台 Blueprint 子类，检查 `DebugSlingshotActorScale` |
+
+## 启动期有界分批 Chaos 预结算
+
+世界生成完毕后，`AABTSM6SlingshotSystem` 会在首次发射前运行一次有界预结算。旧实现把球面上全部树石 HISM 同时转换为独立刚体：默认地图会产生约 `8526` 个 Proxy Tick 与 Chaos Body，部分物体在球面重力下持续滑落，导致预结算永不完成且 PIE 只有约 `3~4 FPS`。当前实现禁止这条全量 Actor 化路径。
+
+预结算分为两阶段：
+
+1. M7 建筑材料先独立进入严格结算。只有线速度、角速度连续低于阈值达到稳定窗口后才冻结；超过 `Startup Settle Diagnostic Period Seconds` 仍未稳定时记录错误并有界退出，不能永久阻塞玩法。
+2. 树石 HISM 先在 `Startup HISM Overlap Search Radius CM` 内进行空间粗筛，再用实例 Chaos Body 检查真实相交；没有可用凸简单碰撞时，仅对中心距离小于 `Startup HISM Fallback Center Distance CM` 的极近实例使用保守回退。未重叠的实例始终保留在 HISM 中。
+3. 重叠候选按降序稳定索引排队，每批最多 `Startup HISM Max Simultaneous Bodies` 个，默认 `384`。每批仅运行 `Startup HISM Batch Relaxation Seconds`，默认 `0.75 s`，用于完成接触去穿透；长时间沿坡滑动不是启动修复目标，窗口结束即停止。
+4. 每批结算位置批量回写原 Forest/Rock HISM，临时 Proxy 随即销毁。世界加载完成后不会遗留数千个独立 StaticMesh Actor，也不会破坏 HISM 渲染合批。
+5. M7 接触伤害在启动阶段完全延后。预结算期间点击弹弓会输出 `Launch blocked`；全部批次完成后才标记 `WorldReady=1`。
+
+正式发射时，已存在的 Proxy 只会在 `Launch Gravity Activation Radius CM` 内重新激活；飞行中的鸟仍可直接命中并激活半径外的静态 Proxy，不需要全图同时模拟。
+
+PIE 验收日志：
+
+```text
+[ABTS][StartupPhysics] Begin ... HISMInstances=8526 ... Candidates=... BatchLimit=384 ...
+[ABTS][StartupPhysics] BatchBegin ...
+[ABTS][StartupPhysics] BatchRestored ... DynamicProxies=0
+[ABTS][StartupPhysics] Complete WorldReady=1 ... StaticProxies=0
+```

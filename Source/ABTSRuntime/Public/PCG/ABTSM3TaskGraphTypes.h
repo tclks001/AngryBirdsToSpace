@@ -247,6 +247,35 @@ struct FABTSM3PCGConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG", meta = (ClampMin = "1.0", ClampMax = "25.0"))
 	float MaxBuildSlopeDegrees = 8.0f;
+
+	/**
+	 * Minimum CellTopo clearance around every task building anchor. The M7 sphere
+	 * consumes this certified region for its footprint, not merely the seed Cell.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings", meta = (ClampMin = "1", ClampMax = "4"))
+	int32 BuildingPadClearanceRingCells = 2;
+};
+
+/**
+ * Presentation/physics construction pad derived from a CellTopo building anchor.
+ * It never changes the logical CellTopo height or topology; it only defines the
+ * local tangent-plane surface sampled by the continuous terrain renderer/query.
+ */
+USTRUCT(BlueprintType)
+struct FABTSM3BuildingPadSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
+	bool bEnableTerrainFlattening = true;
+
+	/** Half size of the level inner construction area. It must cover a building's footprint and foundation margin. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings", meta = (ClampMin = "100.0", UIMax = "1600.0"))
+	FVector2D HalfExtentCM = FVector2D(650.0f, 450.0f);
+
+	/** Smooth tangent-plane to terrain transition outside the inner rectangular construction area. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings", meta = (ClampMin = "10.0", UIMax = "800.0"))
+	float EdgeBlendWidthCM = 180.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -291,6 +320,9 @@ struct FABTSM3BuildingSpawnSite
 	GENERATED_BODY()
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
+	int32 TaskId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
 	int32 CellId = INDEX_NONE;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
@@ -301,4 +333,28 @@ struct FABTSM3BuildingSpawnSite
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
 	float MaxSlopeDegrees = 0.0f;
+
+	/** CellTopo-derived radial normal used as the local vertical for the construction pad and building. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	FVector AnchorDirection = FVector::UpVector;
+
+	/** Tangent-plane axes in planet-local/world orientation; no mesh vertex is a logical source. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	FVector TangentForward = FVector::ForwardVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	FVector TangentRight = FVector::RightVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	FVector2D PadHalfExtentCM = FVector2D::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	float PadEdgeBlendWidthCM = 0.0f;
+
+	/** Surface radius at the anchor before pad flattening; defines the tangent construction plane. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	float PadTargetRadiusCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Building Pad")
+	bool bTerrainPadApplied = false;
 };

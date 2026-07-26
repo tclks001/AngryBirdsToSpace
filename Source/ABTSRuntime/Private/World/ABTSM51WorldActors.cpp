@@ -148,6 +148,18 @@ void AABTSM51SlingshotStake::InitializeStake(
 	StakeItem = InStakeItem;
 	CellId = InCellId;
 	UnitDirection = InUnitDirection.GetSafeNormal();
+	const EABTSSlingshotTier Tier = StakeItem == EABTSItemId::Branch
+		? EABTSSlingshotTier::Twig
+		: (StakeItem == EABTSItemId::ReinforcedStake
+			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
+	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(Tier);
+	ApplyVisualSlot(Preset.StakeVisual, Preset.StakeDiameterCM, Preset.StakeHeightCM);
+}
+
+FVector AABTSM51SlingshotStake::GetVisualTopWorldLocation() const
+{
+	const FVector Up = UnitDirection.IsNearlyZero() ? GetActorUpVector().GetSafeNormal() : UnitDirection;
+	return GetActorLocation() + Up * (VisualHeightCM * 0.5f);
 }
 
 void AABTSM51SlingshotStake::ConfigureVisualDimensions(
@@ -157,6 +169,7 @@ void AABTSM51SlingshotStake::ConfigureVisualDimensions(
 {
 	const float SafeDiameterCM = FMath::Max(1.0f, DiameterCM);
 	const float SafeHeightCM = FMath::Max(1.0f, HeightCM);
+	VisualHeightCM = SafeHeightCM;
 	const FVector BaseWorld = GetActorLocation() - GetActorUpVector() * (SafeHeightCM * 0.5f);
 	Visual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
 		Visual->GetStaticMesh(),
@@ -177,6 +190,7 @@ void AABTSM51SlingshotStake::ApplyVisualSlot(
 	if (VisualSlot.Material) Visual->SetMaterial(0, VisualSlot.Material);
 	const float SafeDiameterCM = FMath::Max(1.0f, DiameterCM);
 	const float SafeHeightCM = FMath::Max(1.0f, HeightCM);
+	VisualHeightCM = SafeHeightCM;
 	const FVector BaseWorld = GetActorLocation() - GetActorUpVector() * (SafeHeightCM * 0.5f);
 	Visual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
 		Visual->GetStaticMesh(),
@@ -243,8 +257,11 @@ void AABTSM51SlingshotCord::InitializeCord(
 	const FVector& InEndpointA,
 	const FVector& InEndpointB)
 {
-	const EABTSSlingshotTier InferredTier = InStakeA && InStakeA->GetStakeItem() == EABTSItemId::ReinforcedStake
-		? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple;
+	const EABTSItemId StakeItem = InStakeA ? InStakeA->GetStakeItem() : EABTSItemId::SimpleStake;
+	const EABTSSlingshotTier InferredTier = StakeItem == EABTSItemId::Branch
+		? EABTSSlingshotTier::Twig
+		: (StakeItem == EABTSItemId::ReinforcedStake
+			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
 	InitializeCordWithTier(InStakeA, InStakeB, InEndpointA, InEndpointB, InferredTier);
 }
 
@@ -266,7 +283,9 @@ void AABTSM51SlingshotCord::InitializeCordWithTier(
 	SetActorLocation((EndpointA + EndpointB) * 0.5f);
 	SetActorRotation(FRotationMatrix::MakeFromX(Delta / Length).ToQuat());
 	Visual->SetRelativeScale3D(FVector(Length / 100.0f, 0.035f, 0.035f));
-	ConfigureTwoCordVisuals(CordVisualSlot, PouchVisualSlot, ConnectionLayout, CordThicknessCM);
+	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(InTier);
+	ConfigureTwoCordVisuals(Preset.CordVisual, Preset.PouchVisual, Preset.ConnectionLayout,
+		Preset.CordThicknessCM, Preset.PouchSizeCM);
 }
 
 void AABTSM51SlingshotCord::ConfigureVisualThickness(const float ThicknessCM, UMaterialInterface* Material)

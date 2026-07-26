@@ -68,6 +68,7 @@ public:
 	EABTSItemId GetStakeItem() const { return StakeItem; }
 	int32 GetCellId() const { return CellId; }
 	const FVector& GetUnitDirection() const { return UnitDirection; }
+	FVector GetVisualTopWorldLocation() const;
 	bool HasCord() const { return bHasCord; }
 	void SetHasCord(bool bValue) { bHasCord = bValue; }
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
@@ -83,6 +84,7 @@ private:
 	EABTSItemId StakeItem = EABTSItemId::SimpleStake;
 	int32 CellId = INDEX_NONE;
 	FVector UnitDirection = FVector::UpVector;
+	float VisualHeightCM = 220.0f;
 	bool bHasCord = false;
 };
 

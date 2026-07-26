@@ -23,6 +23,8 @@ public:
 	virtual void NotifyHitBoxBeginCursorOver(FName BoxName) override;
 	virtual void NotifyHitBoxEndCursorOver(FName BoxName) override;
 	void ResetCraftingSelection();
+	/** Routes the mouse wheel to the left-side backpack while the modal is open. */
+	void ScrollInventoryRows(float WheelValue);
 
 private:
 	void DrawHotbar(AABTSCraftingSystem& System);
@@ -36,6 +38,7 @@ private:
 	AABTSCraftingSystem* FindCraftingSystem();
 	AABTSM5PlayerController* GetM5Controller() const;
 	FName MakeHotbarName(int32 Slot) const;
+	FName MakeInventoryItemName(int32 VisibleItemIndex) const;
 	FName MakeRecipeName(int32 RecipeIndex) const;
 	FString BuildFailureTooltip(const FABTSCraftingEvaluation& Evaluation, const UABTSInventoryComponent& Inventory) const;
 
@@ -44,7 +47,10 @@ private:
 	FName SelectedRecipeId;
 	FName InvalidHighlightRecipeId;
 	int32 PendingCraftCount = 1;
+	int32 InventoryScrollRowOffset = 0;
+	int32 MaxInventoryScrollRowOffset = 0;
 	double InvalidHighlightUntilSeconds = 0.0;
+	TArray<EABTSItemId> VisibleInventoryItemIds;
 	TArray<FName> VisibleRecipeIds;
 };
 

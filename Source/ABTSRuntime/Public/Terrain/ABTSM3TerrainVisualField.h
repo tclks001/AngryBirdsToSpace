@@ -53,6 +53,10 @@ public:
 		float InDeepRiverHalfWidthCM);
 
 	bool IsReady() const { return Cells != nullptr && CellStates != nullptr && BoundarySegmentsByCell.Num() == Cells->Num(); }
+	/** Adds CellTopo-derived local tangent construction pads after the base field is initialized. */
+	void SetBuildingPads(const TArray<FABTSM3BuildingSpawnSite>& InSites);
+	/** Used by HISM placement to keep decoration out of the construction footprint. */
+	bool IsInsideBuildingPad(const FVector& UnitDirection) const;
 	int32 FindNearestCell(const FVector& UnitDirection, int32 StartCellHint = 0) const;
 	float GetSurfaceRadius(const FVector& UnitDirection) const;
 	FVector GetSurfaceNormal(const FVector& UnitDirection) const;
@@ -61,6 +65,14 @@ public:
 	FLinearColor GetDebugTerrainColor(const FVector& UnitDirection) const;
 	/** Land-only color used by the material LUT; rivers are rendered from edge segments. */
 	FLinearColor GetDebugLandColor(const FVector& UnitDirection) const;
+	/** M10-only color query: one nearest-cell walk, no height or surface-normal work. */
+	bool QueryScoutMapColor(
+		const FVector& UnitDirection,
+		const FLinearColor& RoadColor,
+		const FLinearColor& RiverColor,
+		int32 StartCellHint,
+		int32& OutCellId,
+		FLinearColor& OutColor) const;
 	const TArray<FABTSM3BoundarySegment>& GetBoundarySegments(int32 CellId) const;
 
 private:
@@ -69,6 +81,9 @@ private:
 	void BuildRoadSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates);
 	float GetCellHeightCM(int32 CellId) const;
 	float GetInterpolatedHeightCM(const FVector& UnitDirection, int32 NearestCellId) const;
+	float GetUnpaddedSurfaceRadius(const FVector& UnitDirection) const;
+	float ApplyBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const;
+	float GetBuildingPadSignedDistanceCM(const FVector& UnitDirection, float RadiusCM, const FABTSM3BuildingSpawnSite& Pad) const;
 	float GetDistanceToSegmentCM(const FVector& UnitDirection, const FABTSM3BoundarySegment& Segment) const;
 	void FindTwoNearestTerrainFeatures(const FVector& UnitDirection, int32 CellId, const FABTSM3BoundarySegment*& OutBest, float& OutBestDistanceCM, const FABTSM3BoundarySegment*& OutSecond, float& OutSecondDistanceCM) const;
 	FLinearColor GetCellColor(int32 CellId) const;
@@ -87,4 +102,5 @@ private:
 	TArray<TArray<FABTSM3BoundarySegment>> BoundarySegmentsByCell;
 	TArray<TArray<FABTSM3RiverVisualSegment>> RiverSegmentsByCell;
 	TArray<TArray<FABTSM3RiverVisualSegment>> RoadSegmentsByCell;
+	TArray<FABTSM3BuildingSpawnSite> BuildingPads;
 };

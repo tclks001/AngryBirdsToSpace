@@ -64,6 +64,14 @@ public:
 		TArray<FABTSM3CellState>& CellStates, TArray<FABTSM3CellEdgeState>& EdgeStates, const FABTSM3CellEdgeKey& BridgeEdge) const;
 };
 
+/** Picks one CellTopo anchor per building task only after water/road generation can certify its full footprint. */
+class FBuildingPadPlanner
+{
+public:
+	bool Place(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks,
+		int32 ClearanceRingCells, TArray<FABTSM3CellState>& CellStates, FString& OutFailure) const;
+};
+
 class FWorldValidator
 {
 public:

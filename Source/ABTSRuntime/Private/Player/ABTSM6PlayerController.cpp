@@ -60,6 +60,9 @@ void AABTSM6PlayerController::M6PrimaryReleased()
 void AABTSM6PlayerController::M6AdjustPower(const float Value)
 {
 	if (FMath::IsNearlyZero(Value)) return;
+	// M5 owns the wheel while its modal backpack is open.  Do not let an armed
+	// slingshot consume the same input behind that interface.
+	if (IsCraftingInterfaceOpen()) return;
 	if (AABTSM6SlingshotSystem* System = FindSlingshotSystem()) System->AdjustPullPower(Value);
 }
 

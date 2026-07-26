@@ -15,6 +15,7 @@
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSCollisionChannels.h"
 
 namespace
 {
@@ -34,7 +35,7 @@ AABTSM7BuildingMaterialSystem::AABTSM7BuildingMaterialSystem()
 	{
 		HISM->SetupAttachment(Root);
 		HISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		HISM->SetCollisionObjectType(ECC_WorldStatic);
+		HISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 		HISM->SetCollisionResponseToAllChannels(ECR_Block);
 	}
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -203,6 +204,13 @@ const FABTSM7MaterialProfile& AABTSM7BuildingMaterialSystem::GetProfile(const EA
 void AABTSM7BuildingMaterialSystem::CopyMaterialProfiles(TArray<FABTSM7MaterialProfile>& OutProfiles) const
 {
 	OutProfiles = MaterialProfiles;
+}
+
+void AABTSM7BuildingMaterialSystem::NotifyBrickRecovered(const EABTSM7BuildingMaterial Material, const int32 Quantity)
+{
+	if (Quantity <= 0) return;
+	OnMaterialRecovered.Broadcast(Material, Quantity);
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M8][Recovery] Material=%d Quantity=%d"), static_cast<int32>(Material), Quantity);
 }
 
 float AABTSM7BuildingMaterialSystem::ComputeDamageGain(const FABTSM7MaterialProfile& Profile, const float NormalSpeedCMPerSec, const float BreakSpeedCMPerSec) const
@@ -376,7 +384,7 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 		HISMDamageByStableKey.Add(DamageKey, DamageAfter);
 		if (DamageAfter >= Profile.BreakDamage)
 		{
-			HISM->RemoveInstance(InstanceIndex);
+			if (HISM->RemoveInstance(InstanceIndex)) NotifyBrickRecovered(Material);
 			HISMDamageByStableKey.Remove(DamageKey);
 			UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7][DamageBreak] Material=%d Damage=%.1f/%.1f"), static_cast<int32>(Material), DamageAfter, Profile.BreakDamage);
 		}
@@ -397,6 +405,7 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 			const EABTSM7ModuleKind Kind = Module->GetModuleKind();
 			const FVector Origin = Module->GetActorLocation();
 			const FVector Axis = Module->GetActorUpVector();
+			if (Kind == EABTSM7ModuleKind::Brick) NotifyBrickRecovered(Module->GetBuildingMaterial());
 			Module->BreakModule();
 			if (Kind == EABTSM7ModuleKind::ExplosiveBarrel) ApplyRadialBlast(Origin, BarrelDestroyRadiusCM, BarrelImpulseRadiusCM, BarrelImpulseSpeedCMPerSec);
 			else if (Kind == EABTSM7ModuleKind::SpringPiston) ApplyDirectionalBlast(Origin, Axis, PistonDestroyLengthCM, PistonImpulseLengthCM, PistonEffectRadiusCM, PistonImpulseSpeedCMPerSec);
@@ -420,12 +429,19 @@ void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent*
 		if (HISM == StoneBrickHISM) Material = EABTSM7BuildingMaterial::Stone;
 		else if (HISM == IronBrickHISM) Material = EABTSM7BuildingMaterial::Iron;
 		else if (HISM == GlassBrickHISM) Material = EABTSM7BuildingMaterial::Glass;
-		if (bDestroy) HISM->RemoveInstance(InstanceIndex);
+		if (bDestroy)
+		{
+			if (HISM->RemoveInstance(InstanceIndex)) NotifyBrickRecovered(Material);
+		}
 		else PromoteBrick(*HISM, InstanceIndex, Material, ImpulseDirection.GetSafeNormal() * ImpulseSpeed);
 	}
 	else if (AABTSM7BuildingModule* Module = Cast<AABTSM7BuildingModule>(Component ? Component->GetOwner() : nullptr))
 	{
-		if (bDestroy) Module->BreakModule();
+		if (bDestroy)
+		{
+			if (Module->GetModuleKind() == EABTSM7ModuleKind::Brick) NotifyBrickRecovered(Module->GetBuildingMaterial());
+			Module->BreakModule();
+		}
 		else ActivateModuleForLaunch(*Module, ImpulseDirection.GetSafeNormal() * ImpulseSpeed);
 	}
 }
@@ -486,6 +502,17 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
 	{
 		if (AABTSM7BuildingModule* Module = Modules[Index].Get()) Module->Freeze(); else Modules.RemoveAtSwap(Index);
+	}
+}
+
+void AABTSM7BuildingMaterialSystem::SetDynamicContactDamageGraceSeconds(const float Seconds)
+{
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		if (AABTSM7BuildingModule* Module = WeakModule.Get(); Module && Module->IsDynamic())
+		{
+			Module->SetContactDamageGraceSeconds(Seconds);
+		}
 	}
 }
 

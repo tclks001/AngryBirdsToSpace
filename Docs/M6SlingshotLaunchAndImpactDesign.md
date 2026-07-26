@@ -31,6 +31,7 @@ Inactive
 - SimpleStake 弹弓不能发射 `Reinforced` 能力的黑鸟；
 - ReinforcedStake 弹弓可以发射四只鸟；
 - 青鸟 TwigScout、红鸟和黄鸟可使用简易弹弓；
+- `Twig` 树枝弹弓只接受 `TwigScout` 能力（默认且正式配置为青翎），完整发射结束事件会保留回飞前的最终落点供 [M10 侦察小地图](M10ScoutMinimapDesign.md) 使用；
 - 当前验证由 `AABTSM51SlingshotCord` 保存两根桩引用与端点，不依赖渲染 Mesh 猜测类型。
 
 ## 4. 瞄准、拉力与弹道

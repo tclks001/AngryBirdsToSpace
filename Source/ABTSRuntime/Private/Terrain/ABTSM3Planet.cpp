@@ -11,6 +11,7 @@
 #include "Terrain/ABTSM3TerrainVisualField.h"
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSCollisionChannels.h"
 
 namespace
 {
@@ -59,7 +60,7 @@ AABTSM3Planet::AABTSM3Planet()
 	// Instances remain static presentation/collision geometry until a future M6
 	// launch hit explicitly converts one instance into a pooled destruction proxy.
 	ForestHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	ForestHISM->SetCollisionObjectType(ECC_WorldStatic);
+	ForestHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	ForestHISM->SetCollisionResponseToAllChannels(ECR_Block);
 	ForestHISM->SetSimulatePhysics(false);
 	ForestHISM->SetMobility(EComponentMobility::Movable);
@@ -69,7 +70,7 @@ AABTSM3Planet::AABTSM3Planet()
 	RockHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("RockHISM"));
 	RockHISM->SetupAttachment(ContinuousSurface);
 	RockHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	RockHISM->SetCollisionObjectType(ECC_WorldStatic);
+	RockHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	RockHISM->SetCollisionResponseToAllChannels(ECR_Block);
 	RockHISM->SetSimulatePhysics(false);
 	RockHISM->SetMobility(EComponentMobility::Movable);
@@ -86,6 +87,12 @@ bool AABTSM3Planet::RebuildPlanet()
 	TerrainVisualField->Initialize(PlanetRadiusCM, ResolvedHeightScaleCM, ResolvedWaterDepthCM, HeightBlendWidthCM, TerrainBlendWidthCM, SurfaceNormalSmoothingDistanceCM,
 		LogicalCells, GeneratedCellStates, GeneratedEdgeStates, TrailVisualHalfWidthCM, MainRoadVisualHalfWidthCM,
 		StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM);
+	// First resolve CellTopo anchors on the unmodified field. The field then applies
+	// tangent construction pads and the sites are rebuilt so every downstream user
+	// (mesh, collision query, HISM and M7 building) reads the same final surface.
+	BuildBuildingSpawnSites();
+	TerrainVisualField->SetBuildingPads(BuildingSpawnSites);
+	BuildBuildingSpawnSites();
 	BuildM3ContinuousSurface();
 	bool bMaterialReady = false;
 	bool bPresentationReady = true;
@@ -103,7 +110,6 @@ bool AABTSM3Planet::RebuildPlanet()
 		}
 	}
 	BuildDecorInstances();
-	BuildBuildingSpawnSites();
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M5.2][Collision] ForestHISM=%s RockHISM=%s StaticPhysics=1 DestroyableOutsideLaunch=0 PhysicsBlend=%.1f"),
 		*UEnum::GetValueAsString(ForestHISM->GetCollisionEnabled()),
@@ -190,6 +196,21 @@ bool AABTSM3Planet::QuerySurfacePhysics(const FVector& UnitDirection, FABTSM3Sur
 	OutSample.GroundDragPerSecond = FMath::Lerp(OutSample.GroundDragPerSecond, RiverPhysics.GroundDragPerSecond, OutSample.SDF.RiverWeight);
 	OutSample.Restitution = FMath::Lerp(OutSample.Restitution, RiverPhysics.Restitution, OutSample.SDF.RiverWeight);
 	return true;
+}
+
+bool AABTSM3Planet::QueryScoutMapTerrainColor(
+	const FVector& UnitDirection,
+	FLinearColor& OutColor,
+	const int32 StartCellHint,
+	int32* OutCellId) const
+{
+	OutColor = FLinearColor::Black;
+	if (!TerrainVisualField || !TerrainVisualField->IsReady() || UnitDirection.IsNearlyZero()) return false;
+	int32 ResolvedCellId = INDEX_NONE;
+	const bool bResult = TerrainVisualField->QueryScoutMapColor(
+		UnitDirection, RoadColor, RiverColor, StartCellHint, ResolvedCellId, OutColor);
+	if (OutCellId) *OutCellId = ResolvedCellId;
+	return bResult;
 }
 
 bool AABTSM3Planet::GetInitialRoadSpawnTransform(
@@ -352,6 +373,11 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 
 void AABTSM3Planet::BuildDecorInstances()
 {
+	// Blueprint children created before the debug obstacle channel existed can
+	// serialize their old WorldStatic component type. Reapply the runtime
+	// contract whenever the instances are rebuilt.
+	ForestHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	RockHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	ForestHISM->ClearInstances();
 	RockHISM->ClearInstances();
 
@@ -420,6 +446,7 @@ void AABTSM3Planet::BuildDecorInstances()
 		{
 			const int32 NeighborId = LogicalCells[CellId].NeighborCellIds[Stream.RandRange(0, LogicalCells[CellId].NeighborCellIds.Num() - 1)];
 			const FVector Direction = FMath::Lerp(Center, LogicalCells[NeighborId].UnitCenter, Stream.FRandRange(0.0f, 0.42f)).GetSafeNormal();
+			if (TerrainVisualField->IsInsideBuildingPad(Direction)) continue;
 			const float Radius = TerrainVisualField->GetSurfaceRadius(Direction) - 8.0f;
 			const FVector RadialUp = Direction;
 			FVector SurfaceUp = TerrainVisualField->GetSurfaceNormal(Direction).GetSafeNormal();
@@ -461,13 +488,25 @@ void AABTSM3Planet::BuildBuildingSpawnSites()
 	{
 		if (!GeneratedCellStates[CellId].bBuildingAnchor) continue;
 		const FVector Direction = LogicalCells[CellId].UnitCenter;
-		const FVector Normal = TerrainVisualField->GetSurfaceNormal(Direction);
-		FVector Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Normal).GetSafeNormal();
-		if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::RightVector, Normal).GetSafeNormal();
+		const FVector SurfaceNormal = TerrainVisualField->GetSurfaceNormal(Direction);
+		// Buildings use CellTopo's radial normal as their construction vertical. This
+		// keeps the pad, ground adapter and runtime gravity in one shared frame.
+		const FVector PadUp = Direction.GetSafeNormal();
+		FVector Forward = FVector::VectorPlaneProject(FVector::ForwardVector, PadUp).GetSafeNormal();
+		if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::RightVector, PadUp).GetSafeNormal();
 		FABTSM3BuildingSpawnSite& Site = BuildingSpawnSites.AddDefaulted_GetRef();
 		Site.CellId = CellId;
-		Site.TaskType = GeneratedTasks[GeneratedCellStates[CellId].TaskId].Type;
-		Site.WorldTransform = FTransform(FRotationMatrix::MakeFromXZ(Forward, Normal).ToQuat(), GetPlanetCenterWorld() + Direction * TerrainVisualField->GetSurfaceRadius(Direction));
-		Site.MaxSlopeDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Direction, Normal), -1.0f, 1.0f)));
+		Site.TaskId = GeneratedCellStates[CellId].TaskId;
+		Site.TaskType = GeneratedTasks.IsValidIndex(Site.TaskId) ? GeneratedTasks[Site.TaskId].Type : EABTSM3TaskType::Unassigned;
+		Site.AnchorDirection = PadUp;
+		Site.TangentForward = Forward;
+		Site.TangentRight = FVector::CrossProduct(PadUp, Forward).GetSafeNormal();
+		Site.PadHalfExtentCM = BuildingPadSettings.HalfExtentCM;
+		Site.PadEdgeBlendWidthCM = BuildingPadSettings.EdgeBlendWidthCM;
+		Site.PadTargetRadiusCM = TerrainVisualField->GetSurfaceRadius(Direction);
+		Site.bTerrainPadApplied = BuildingPadSettings.bEnableTerrainFlattening;
+		Site.WorldTransform = FTransform(FRotationMatrix::MakeFromXZ(Forward, PadUp).ToQuat(),
+			GetPlanetCenterWorld() + Direction * Site.PadTargetRadiusCM);
+		Site.MaxSlopeDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(PadUp, SurfaceNormal), -1.0f, 1.0f)));
 	}
 }

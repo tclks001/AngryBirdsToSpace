@@ -13,7 +13,7 @@ namespace
 		FVector2D FirstMoment = FVector2D::ZeroVector;
 	};
 
-	const FABTSM73DAGMacroLayout* FindLayout(const FABTSM73DAGSpatialLayout& Layout, const int32 MacroNodeId)
+	const FABTSM73DAGMacroLayout* FindLoadSupportLayout(const FABTSM73DAGSpatialLayout& Layout, const int32 MacroNodeId)
 	{
 		return Layout.MacroLayouts.FindByPredicate([MacroNodeId](const FABTSM73DAGMacroLayout& Candidate)
 		{
@@ -172,7 +172,7 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 
 	for (const int32 LoadId : LoadOrder)
 	{
-		const FABTSM73DAGMacroLayout* Load = FindLayout(InOutLayout, LoadId);
+		const FABTSM73DAGMacroLayout* Load = FindLoadSupportLayout(InOutLayout, LoadId);
 		const TArray<FABTSM73DAGSelectedSupport>* Candidates = CandidatesByLoad.Find(LoadId);
 		if (Load == nullptr || Candidates == nullptr || Candidates->IsEmpty()) { OutError = FString::Printf(TEXT("DAGNoLoadSupportCandidates:%d"), LoadId); return false; }
 		const FLoadState& LoadState = States.FindChecked(LoadId);
@@ -183,8 +183,8 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 		TArray<FABTSM73DAGSelectedSupport> JointCandidates = *Candidates;
 		JointCandidates.Sort([&Resultant, &InOutLayout](const FABTSM73DAGSelectedSupport& A, const FABTSM73DAGSelectedSupport& B)
 		{
-			const FABTSM73DAGMacroLayout* LayoutA = FindLayout(InOutLayout, A.SupportMacroNodeId);
-			const FABTSM73DAGMacroLayout* LayoutB = FindLayout(InOutLayout, B.SupportMacroNodeId);
+			const FABTSM73DAGMacroLayout* LayoutA = FindLoadSupportLayout(InOutLayout, A.SupportMacroNodeId);
+			const FABTSM73DAGMacroLayout* LayoutB = FindLoadSupportLayout(InOutLayout, B.SupportMacroNodeId);
 			const float DistanceA = LayoutA ? FVector2D::Distance(Resultant, FVector2D(LayoutA->PlateCenter)) : TNumericLimits<float>::Max();
 			const float DistanceB = LayoutB ? FVector2D::Distance(Resultant, FVector2D(LayoutB->PlateCenter)) : TNumericLimits<float>::Max();
 			return !FMath::IsNearlyEqual(DistanceA, DistanceB) ? DistanceA < DistanceB : A.SupportMacroNodeId < B.SupportMacroNodeId;

@@ -5,6 +5,7 @@
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
+#include "World/ABTSCollisionChannels.h"
 
 AABTSM7BuildingModule::AABTSM7BuildingModule()
 {
@@ -13,6 +14,7 @@ AABTSM7BuildingModule::AABTSM7BuildingModule()
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ModuleVisual"));
 	SetRootComponent(Visual);
 	Visual->SetCollisionProfileName(TEXT("BlockAll"));
+	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Visual->SetNotifyRigidBodyCollision(true);
 	Visual->SetGenerateOverlapEvents(false);
@@ -91,7 +93,7 @@ void AABTSM7BuildingModule::Freeze()
 	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 	Visual->SetSimulatePhysics(false);
-	Visual->SetCollisionObjectType(ECC_WorldStatic);
+	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 

@@ -43,6 +43,7 @@ bool FABTSM3TaskGraphGenerator::Generate(
 		FHeightFieldGenerator Height;
 		FHydrologyGenerator Hydrology;
 		FRoadPlanner Roads;
+		FBuildingPadPlanner BuildingPads;
 		FWorldValidator Validator;
 		FABTSM3CellEdgeKey BridgeEdge;
 
@@ -63,6 +64,11 @@ bool FABTSM3TaskGraphGenerator::Generate(
 		{
 			bSuccess = Roads.Build(Cells, CandidateTasks, CandidateLinks, CandidateCells, CandidateEdges, BridgeEdge);
 			UE_LOG(LogABTSRuntime, Verbose, TEXT("[ABTS][PCG][Stage] Attempt=%d Roads=%d TimeMS=%.2f"), Attempt, bSuccess ? 1 : 0, (FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
+		}
+		if (bSuccess)
+		{
+			bSuccess = BuildingPads.Place(Cells, CandidateTasks, Config.BuildingPadClearanceRingCells, CandidateCells, Failure);
+			UE_LOG(LogABTSRuntime, Verbose, TEXT("[ABTS][PCG][Stage] Attempt=%d BuildingPads=%d TimeMS=%.2f"), Attempt, bSuccess ? 1 : 0, (FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
 		}
 		if (bSuccess)
 		{

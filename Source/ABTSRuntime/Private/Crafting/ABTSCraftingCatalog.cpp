@@ -51,6 +51,8 @@ void UABTSCraftingCatalog::BuildDefaultRecipes()
 			{ Ingredient(EABTSItemId::Branch, 2), Ingredient(EABTSItemId::PlantFiber, 3) }),
 		Recipe(TEXT("FurnaceKit"), TEXT("Furnace Kit"), EABTSItemId::FurnaceKit, 1, EABTSCraftingStationType::Workbench,
 			{ Ingredient(EABTSItemId::Stone, 8), Ingredient(EABTSItemId::Wood, 4) }),
+		Recipe(TEXT("BridgeKit"), TEXT("Bridge Kit"), EABTSItemId::BridgeKit, 1, EABTSCraftingStationType::Workbench,
+			{ Ingredient(EABTSItemId::Wood, 6), Ingredient(EABTSItemId::Stone, 2) }),
 		Recipe(TEXT("ReinforcedStake"), TEXT("Reinforced Stake"), EABTSItemId::ReinforcedStake, 1, EABTSCraftingStationType::Furnace,
 			{ Ingredient(EABTSItemId::MetalParts, 4), Ingredient(EABTSItemId::Stone, 3) }),
 		Recipe(TEXT("ReinforcedCord"), TEXT("Reinforced Cord"), EABTSItemId::ReinforcedCord, 1, EABTSCraftingStationType::Furnace,

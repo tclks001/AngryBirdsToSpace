@@ -26,6 +26,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void SetMoveInput(const FVector& Direction, float Scale);
+	/** Debug-only walking multiplier. It affects ground control only, never M6 ballistic velocity. */
+	void SetDeveloperWalkingSpeedMultiplier(float InMultiplier);
 	void QueueJump();
 	void ConfigureCollisionGroundingExperiment(bool bEnabled, float MaxGroundAngleDegrees);
 	void ResetMotionState();
@@ -126,5 +128,6 @@ private:
 	bool bUseCollisionNormalGroundingExperiment = false;
 	bool bCollisionGrounded = false;
 	float CollisionGroundMaxAngleDegrees = 55.0f;
+	float DeveloperWalkingSpeedMultiplier = 1.0f;
 	FABTSBlockingImpactDelegate BlockingImpact;
 };

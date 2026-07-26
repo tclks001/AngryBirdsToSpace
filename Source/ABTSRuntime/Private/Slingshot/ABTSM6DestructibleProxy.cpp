@@ -5,10 +5,12 @@
 #include "Components/StaticMeshComponent.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
+#include "World/ABTSCollisionChannels.h"
 
 AABTSM6DestructibleProxy::AABTSM6DestructibleProxy()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DynamicVisual"));
 	SetRootComponent(Visual);
@@ -51,6 +53,7 @@ void AABTSM6DestructibleProxy::ActivateProxy(
 	Visual->SetEnableGravity(false);
 	Visual->WakeAllRigidBodies();
 	Visual->AddImpulse(InitialImpulse, NAME_None, true);
+	SetActorTickEnabled(true);
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	ContactDamageEnabledTimeSeconds = Now + ContactDamageGraceSeconds;
 	LastDamageImpactSeconds = -BIG_NUMBER;
@@ -90,13 +93,14 @@ void AABTSM6DestructibleProxy::Tick(const float DeltaSeconds)
 void AABTSM6DestructibleProxy::Freeze()
 {
 	bActiveDynamic = false;
+	SetActorTickEnabled(false);
 	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 	Visual->SetSimulatePhysics(false);
 	// Frozen means static, not non-physical.  QueryOnly removes the shape from
 	// Chaos, allowing both walking birds and future projectiles to pass through.
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	Visual->SetCollisionObjectType(ECC_WorldStatic);
+	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 }
 
 void AABTSM6DestructibleProxy::Reactivate(const FVector& Impulse)
@@ -108,6 +112,7 @@ void AABTSM6DestructibleProxy::Reactivate(const FVector& Impulse)
 	Visual->SetEnableGravity(false);
 	Visual->WakeAllRigidBodies();
 	Visual->AddImpulse(Impulse, NAME_None, true);
+	SetActorTickEnabled(true);
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	ContactDamageEnabledTimeSeconds = Now + ContactDamageGraceSeconds;
 	LastDamageImpactSeconds = -BIG_NUMBER;
@@ -117,6 +122,7 @@ void AABTSM6DestructibleProxy::Reactivate(const FVector& Impulse)
 void AABTSM6DestructibleProxy::Shatter()
 {
 	bActiveDynamic = false;
+	SetActorTickEnabled(false);
 	Destroy();
 }
 

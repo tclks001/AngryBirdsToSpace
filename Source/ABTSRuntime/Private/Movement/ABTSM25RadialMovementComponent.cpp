@@ -43,6 +43,11 @@ void UABTSM25RadialMovementComponent::QueueJump()
 		JumpBufferRemainingSeconds);
 }
 
+void UABTSM25RadialMovementComponent::SetDeveloperWalkingSpeedMultiplier(const float InMultiplier)
+{
+	DeveloperWalkingSpeedMultiplier = FMath::Clamp(InMultiplier, 1.0f, 10.0f);
+}
+
 void UABTSM25RadialMovementComponent::ConfigureCollisionGroundingExperiment(
 	const bool bEnabled,
 	const float MaxGroundAngleDegrees)
@@ -172,27 +177,31 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 		}
 		const float InputMagnitude = TangentInput.Size();
 		const FVector SurfaceMoveDirection = FVector::VectorPlaneProject(TangentInput, SurfaceNormal).GetSafeNormal();
-		const FVector TargetGroundVelocity = SurfaceMoveDirection * (InputMagnitude * MaxGroundSpeedCMPerSec);
+		const float EffectiveMaxGroundSpeed = MaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
+		const float EffectiveAcceleration = GroundAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier;
+		const float EffectiveBraking = GroundBrakingCMPerSec2 * DeveloperWalkingSpeedMultiplier;
+		const FVector TargetGroundVelocity = SurfaceMoveDirection * (InputMagnitude * EffectiveMaxGroundSpeed);
 		const float ChangeRate = TangentInput.IsNearlyZero()
-			? GroundBrakingCMPerSec2
-			: GroundAccelerationCMPerSec2;
+			? EffectiveBraking
+			: EffectiveAcceleration;
 		Velocity = FMath::VInterpConstantTo(
 			FVector::VectorPlaneProject(Velocity, SurfaceNormal),
 			TargetGroundVelocity,
 			DeltaTime,
 			ChangeRate);
-		if (Velocity.SizeSquared() > FMath::Square(MaxGroundSpeedCMPerSec))
+		if (Velocity.SizeSquared() > FMath::Square(EffectiveMaxGroundSpeed))
 		{
-			Velocity = Velocity.GetSafeNormal() * MaxGroundSpeedCMPerSec;
+			Velocity = Velocity.GetSafeNormal() * EffectiveMaxGroundSpeed;
 		}
 	}
 	else
 	{
-		Velocity += TangentInput * GroundAccelerationCMPerSec2 * AirControlScale * DeltaTime;
+		const float EffectiveMaxGroundSpeed = MaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
+		Velocity += TangentInput * GroundAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier * AirControlScale * DeltaTime;
 		const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
-		if (TangentVelocity.SizeSquared() > FMath::Square(MaxGroundSpeedCMPerSec))
+		if (TangentVelocity.SizeSquared() > FMath::Square(EffectiveMaxGroundSpeed))
 		{
-			Velocity += TangentVelocity.GetSafeNormal() * (MaxGroundSpeedCMPerSec - TangentVelocity.Size());
+			Velocity += TangentVelocity.GetSafeNormal() * (EffectiveMaxGroundSpeed - TangentVelocity.Size());
 		}
 		Velocity -= Up * GravityAccelerationCMPerSec2 * DeltaTime;
 	}

@@ -18,7 +18,7 @@ namespace
 		return static_cast<double>(D.X) * D.Y * D.Z * Density;
 	}
 
-	float Cross2D(const FVector2D& O, const FVector2D& A, const FVector2D& B)
+	float CrossFailureHull2D(const FVector2D& O, const FVector2D& A, const FVector2D& B)
 	{
 		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
 	}
@@ -38,14 +38,14 @@ namespace
 		TArray<FVector2D> Lower;
 		for (const FVector2D& Point : Points)
 		{
-			while (Lower.Num() >= 2 && Cross2D(Lower[Lower.Num() - 2], Lower.Last(), Point) <= KINDA_SMALL_NUMBER) Lower.Pop();
+			while (Lower.Num() >= 2 && CrossFailureHull2D(Lower[Lower.Num() - 2], Lower.Last(), Point) <= KINDA_SMALL_NUMBER) Lower.Pop();
 			Lower.Add(Point);
 		}
 		TArray<FVector2D> Upper;
 		for (int32 Index = Points.Num() - 1; Index >= 0; --Index)
 		{
 			const FVector2D& Point = Points[Index];
-			while (Upper.Num() >= 2 && Cross2D(Upper[Upper.Num() - 2], Upper.Last(), Point) <= KINDA_SMALL_NUMBER) Upper.Pop();
+			while (Upper.Num() >= 2 && CrossFailureHull2D(Upper[Upper.Num() - 2], Upper.Last(), Point) <= KINDA_SMALL_NUMBER) Upper.Pop();
 			Upper.Add(Point);
 		}
 		Lower.Pop();
@@ -74,7 +74,7 @@ namespace
 		{
 			const FVector2D& A = Hull[Index];
 			const FVector2D& B = Hull[(Index + 1) % Hull.Num()];
-			if (Cross2D(A, B, Point) < -KINDA_SMALL_NUMBER) bInside = false;
+			if (CrossFailureHull2D(A, B, Point) < -KINDA_SMALL_NUMBER) bInside = false;
 			MinimumDistance = FMath::Min(MinimumDistance, PointSegmentDistance(Point, A, B));
 		}
 		return bInside ? MinimumDistance : -MinimumDistance;

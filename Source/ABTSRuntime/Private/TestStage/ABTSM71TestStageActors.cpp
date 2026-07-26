@@ -13,6 +13,7 @@
 #include "EngineUtils.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSM51WorldActors.h"
+#include "World/ABTSCollisionChannels.h"
 
 namespace
 {
@@ -66,7 +67,7 @@ AABTSM71PlaceableHISMActor::AABTSM71PlaceableHISMActor()
 	HISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("PlaceableHISM"));
 	SetRootComponent(HISM);
 	HISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	HISM->SetCollisionObjectType(ECC_WorldStatic);
+	HISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	HISM->SetCollisionResponseToAllChannels(ECR_Block);
 	HISM->SetGenerateOverlapEvents(false);
 }
@@ -74,6 +75,7 @@ AABTSM71PlaceableHISMActor::AABTSM71PlaceableHISMActor()
 void AABTSM71PlaceableHISMActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	HISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	HISM->SetStaticMesh(InstanceMesh);
 	if (InstanceMaterial) HISM->SetMaterial(0, InstanceMaterial);
 	HISM->ClearInstances();
@@ -300,6 +302,7 @@ AABTSM71PlaceableSlingshotActor::AABTSM71PlaceableSlingshotActor()
 		FRotator(0.0f, 43.04357f, 0.0f), FVector(3.0f, 3.0f, 1.1f),
 		FVector(2.5f, 2.5f, 1.0f), FVector(1.5f, 2.0f, 1.5f),
 		FVector(0.0f, 0.0f, -30.0f), FVector(0.0f, -27.0f, 0.0f), FVector(0.0f, 27.0f, 0.0f));
+	ApplySlingshotVisualPreset(ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Simple));
 }
 
 void AABTSM71PlaceableSlingshotActor::OnConstruction(const FTransform& Transform)
@@ -408,6 +411,22 @@ void AABTSM71PlaceableSlingshotActor::SetSlingshotTuning(
 	ConnectionLayout.PouchBConnectionOffsetCM = InPouchBOffsetCM;
 }
 
+void AABTSM71PlaceableSlingshotActor::ApplySlingshotVisualPreset(const FABTSSlingshotVisualPreset& Preset)
+{
+	BaseStakeSpacingCM = Preset.BaseStakeSpacingCM;
+	StakeHeightCM = Preset.StakeHeightCM;
+	StakeDiameterCM = Preset.StakeDiameterCM;
+	CordThicknessCM = Preset.CordThicknessCM;
+	PouchSizeCM = Preset.PouchSizeCM;
+	StakeVisual = Preset.StakeVisual;
+	CordVisual = Preset.CordVisual;
+	PouchVisual = Preset.PouchVisual;
+	ConnectionLayout = Preset.ConnectionLayout;
+	DefaultStakeMesh = StakeVisual.Mesh;
+	DefaultCordMesh = CordVisual.Mesh;
+	DefaultPouchMesh = PouchVisual.Mesh;
+}
+
 void AABTSM71PlaceableSlingshotActor::SpawnRuntimeSlingshot()
 {
 	if (GetWorld() == nullptr || RuntimeCord.IsValid()) return;
@@ -453,6 +472,7 @@ AABTSM71TwigSlingshotActor::AABTSM71TwigSlingshotActor()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Twig/SM_Pouch_Twig.SM_Pouch_Twig"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Twig/MI_Pouch_Twig.MI_Pouch_Twig"));
 	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+	ApplySlingshotVisualPreset(ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Twig));
 }
 
 AABTSM71SimpleSlingshotActor::AABTSM71SimpleSlingshotActor()
@@ -465,6 +485,7 @@ AABTSM71SimpleSlingshotActor::AABTSM71SimpleSlingshotActor()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Simple/SM_Pouch_Simple.SM_Pouch_Simple"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Simple/MI_Pouch_Simple.MI_Pouch_Simple"));
 	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+	ApplySlingshotVisualPreset(ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Simple));
 }
 
 AABTSM71ReinforcedSlingshotActor::AABTSM71ReinforcedSlingshotActor()
@@ -477,6 +498,7 @@ AABTSM71ReinforcedSlingshotActor::AABTSM71ReinforcedSlingshotActor()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Reinforced/SM_Pouch_Reinforced.SM_Pouch_Reinforced"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Reinforced/MI_Pouch_Reinforced.MI_Pouch_Reinforced"));
 	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+	ApplySlingshotVisualPreset(ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Reinforced));
 }
 
 AABTSM71SpaceSlingshotActor::AABTSM71SpaceSlingshotActor()
@@ -489,6 +511,7 @@ AABTSM71SpaceSlingshotActor::AABTSM71SpaceSlingshotActor()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pouch(TEXT("/Game/StaticMesh/Pouch/Steel/SM_Pouch_Steel.SM_Pouch_Steel"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PouchMaterial(TEXT("/Game/StaticMesh/Pouch/Steel/MI_Pouch_Steel.MI_Pouch_Steel"));
 	SetSlingshotVisualAssets(Stake.Object, StakeMaterial.Object, Cord.Object, CordMaterial.Object, Pouch.Object, PouchMaterial.Object);
+	ApplySlingshotVisualPreset(ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Space));
 }
 
 AABTSM71ModularBuildingAnchor::AABTSM71ModularBuildingAnchor()

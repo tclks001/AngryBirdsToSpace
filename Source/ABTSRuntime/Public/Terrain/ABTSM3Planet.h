@@ -80,6 +80,13 @@ public:
 	/** CPU reconstruction of the terrain material's SDF weights for collision response. */
 	bool QuerySurfacePhysics(const FVector& UnitDirection, FABTSM3SurfacePhysicsSample& OutSample) const;
 
+	/** CPU counterpart of the final land + road + river SDF color used by M10. */
+	bool QueryScoutMapTerrainColor(
+		const FVector& UnitDirection,
+		FLinearColor& OutColor,
+		int32 StartCellHint = 0,
+		int32* OutCellId = nullptr) const;
+
 	/** Character-center spawn transform at the Start Task's first logical road Cell. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Spawn")
 	bool GetInitialRoadSpawnTransform(float SurfaceOffsetCM, FTransform& OutWorldTransform, int32& OutCellId) const;
@@ -89,6 +96,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	FABTSM3PCGConfig PCGConfig;
+
+	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
+	FABTSM3BuildingPadSettings BuildingPadSettings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "0.0"))
 	float MacroHeightScaleCM = 900.0f;

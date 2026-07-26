@@ -17,6 +17,9 @@ class UStaticMesh;
 class UPhysicalMaterial;
 struct FABTSM7PenetrationValidationStats;
 
+/** Emitted only when an actual M7 brick is removed from the world. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FABTSM7MaterialRecoveredNative, EABTSM7BuildingMaterial /* Material */, int32 /* Quantity */);
+
 /** M7 material library. Building layout/generation is deliberately deferred. */
 UCLASS(BlueprintType)
 class ABTSRUNTIME_API AABTSM7BuildingMaterialSystem : public AActor
@@ -52,10 +55,15 @@ public:
 	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
 	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
+	/** Extends the damage grace on all currently dynamic modules without changing their gravity or launch configuration. */
+	void SetDynamicContactDamageGraceSeconds(float Seconds);
 	void FreezeDynamicModules();
 	void ConfigureTestSet(bool bEnable, const FTransform& SpawnTransform);
 	/** Copies the authoritative runtime tuning for deterministic M7.3 analysis without exposing Actor state. */
 	void CopyMaterialProfiles(TArray<FABTSM7MaterialProfile>& OutProfiles) const;
+
+	/** M8 subscribes here to turn destroyed building bricks into shared-inventory materials. */
+	FABTSM7MaterialRecoveredNative OnMaterialRecovered;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Brick")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WoodBrickHISM;
@@ -78,6 +86,7 @@ private:
 	void MarkPhysicsActivity();
 	AABTSM7BuildingModule* PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM7BuildingMaterial Material, const FVector& Impulse, bool bActivateImmediately = true);
 	void BreakOrImpulsePrimitive(UPrimitiveComponent* Component, int32 InstanceIndex, const FVector& ImpulseDirection, float ImpulseSpeed, bool bDestroy);
+	void NotifyBrickRecovered(EABTSM7BuildingMaterial Material, int32 Quantity = 1);
 	void SpawnTestSet();
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")

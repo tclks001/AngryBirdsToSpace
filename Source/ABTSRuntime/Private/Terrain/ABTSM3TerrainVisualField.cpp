@@ -35,6 +35,31 @@ void FABTSM3TerrainVisualField::Initialize(
 	BuildRoadSegments(InEdgeStates);
 }
 
+void FABTSM3TerrainVisualField::SetBuildingPads(const TArray<FABTSM3BuildingSpawnSite>& InSites)
+{
+	BuildingPads.Reset();
+	for (const FABTSM3BuildingSpawnSite& Site : InSites)
+	{
+		if (!Site.bTerrainPadApplied || Site.PadTargetRadiusCM <= 0.0f
+			|| Site.PadHalfExtentCM.X <= 0.0f || Site.PadHalfExtentCM.Y <= 0.0f)
+		{
+			continue;
+		}
+		BuildingPads.Add(Site);
+	}
+}
+
+bool FABTSM3TerrainVisualField::IsInsideBuildingPad(const FVector& UnitDirection) const
+{
+	if (BuildingPads.IsEmpty() || UnitDirection.IsNearlyZero()) return false;
+	const float Radius = GetUnpaddedSurfaceRadius(UnitDirection.GetSafeNormal());
+	for (const FABTSM3BuildingSpawnSite& Pad : BuildingPads)
+	{
+		if (GetBuildingPadSignedDistanceCM(UnitDirection, Radius, Pad) <= 0.0f) return true;
+	}
+	return false;
+}
+
 int32 FABTSM3TerrainVisualField::FindNearestCell(const FVector& UnitDirection, int32 StartCellHint) const
 {
 	if (Cells == nullptr || Cells->IsEmpty()) return INDEX_NONE;
@@ -196,7 +221,7 @@ void FABTSM3TerrainVisualField::FindTwoNearestTerrainFeatures(
 	}
 }
 
-float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) const
+float FABTSM3TerrainVisualField::GetUnpaddedSurfaceRadius(const FVector& UnitDirection) const
 {
 	if (!IsReady()) return BaseRadiusCM;
 	const FVector Direction = UnitDirection.GetSafeNormal();
@@ -230,6 +255,46 @@ float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) 
 		HeightCM -= WaterDepthCM * RiverAlpha;
 	}
 	return BaseRadiusCM + HeightCM;
+}
+
+float FABTSM3TerrainVisualField::GetBuildingPadSignedDistanceCM(
+	const FVector& UnitDirection,
+	const float RadiusCM,
+	const FABTSM3BuildingSpawnSite& Pad) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	const FVector Anchor = Pad.AnchorDirection.GetSafeNormal() * Pad.PadTargetRadiusCM;
+	const FVector Point = Direction * RadiusCM;
+	const FVector Offset = Point - Anchor;
+	const float LocalX = FVector::DotProduct(Offset, Pad.TangentForward.GetSafeNormal());
+	const float LocalY = FVector::DotProduct(Offset, Pad.TangentRight.GetSafeNormal());
+	const FVector2D Delta(FMath::Abs(LocalX) - Pad.PadHalfExtentCM.X, FMath::Abs(LocalY) - Pad.PadHalfExtentCM.Y);
+	const FVector2D Outside(FMath::Max(0.0f, Delta.X), FMath::Max(0.0f, Delta.Y));
+	return Outside.Size() + FMath::Min(FMath::Max(Delta.X, Delta.Y), 0.0f);
+}
+
+float FABTSM3TerrainVisualField::ApplyBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	for (const FABTSM3BuildingSpawnSite& Pad : BuildingPads)
+	{
+		const float Denominator = FVector::DotProduct(Pad.AnchorDirection.GetSafeNormal(), Direction);
+		if (Denominator <= 0.25f) continue;
+		const float SignedDistance = GetBuildingPadSignedDistanceCM(Direction, UnpaddedRadiusCM, Pad);
+		const float BlendWidth = FMath::Max(1.0f, Pad.PadEdgeBlendWidthCM);
+		const float BlendAlpha = 1.0f - FMath::SmoothStep(0.0f, BlendWidth, FMath::Max(0.0f, SignedDistance));
+		if (BlendAlpha <= 0.0f) continue;
+		// Intersect this radial ray with the tangent plane through the CellTopo anchor.
+		const float TangentPlaneRadius = Pad.PadTargetRadiusCM / Denominator;
+		UnpaddedRadiusCM = FMath::Lerp(UnpaddedRadiusCM, TangentPlaneRadius, BlendAlpha);
+	}
+	return UnpaddedRadiusCM;
+}
+
+float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	return ApplyBuildingPadRadius(Direction, GetUnpaddedSurfaceRadius(Direction));
 }
 
 FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection) const
@@ -368,6 +433,68 @@ FLinearColor FABTSM3TerrainVisualField::GetDebugLandColor(const FVector& UnitDir
 	const FLinearColor SecondColor = GetCellLandColor(Second->SourceCellAId);
 	const float BestWeight = FMath::SmoothStep(0.0f, ColorBlendWidthCM * 2.0f, SecondDistance - BestDistance);
 	return FMath::Lerp(0.5f * (BestColor + SecondColor), BestColor, BestWeight);
+}
+
+bool FABTSM3TerrainVisualField::QueryScoutMapColor(
+	const FVector& UnitDirection,
+	const FLinearColor& RoadColor,
+	const FLinearColor& RiverColor,
+	const int32 StartCellHint,
+	int32& OutCellId,
+	FLinearColor& OutColor) const
+{
+	OutCellId = INDEX_NONE;
+	OutColor = FLinearColor::Black;
+	if (!IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutCellId = FindNearestCell(Direction, StartCellHint);
+	if (OutCellId == INDEX_NONE) return false;
+
+	const FABTSM3BoundarySegment* Best = nullptr;
+	const FABTSM3BoundarySegment* Second = nullptr;
+	float BestDistanceCM = 0.0f;
+	float SecondDistanceCM = 0.0f;
+	FindTwoNearestTerrainFeatures(Direction, OutCellId, Best, BestDistanceCM, Second, SecondDistanceCM);
+	if (Best == nullptr)
+	{
+		OutColor = GetCellLandColor(OutCellId);
+	}
+	else
+	{
+		const FLinearColor BestColor = GetCellLandColor(Best->SourceCellAId);
+		if (Second == nullptr)
+		{
+			OutColor = BestColor;
+		}
+		else
+		{
+			const FLinearColor SecondColor = GetCellLandColor(Second->SourceCellAId);
+			const float BestWeight = FMath::SmoothStep(
+				0.0f, ColorBlendWidthCM * 2.0f, SecondDistanceCM - BestDistanceCM);
+			OutColor = FMath::Lerp(0.5f * (BestColor + SecondColor), BestColor, BestWeight);
+		}
+	}
+
+	const auto ComputeLinearMask = [&](const TArray<TArray<FABTSM3RiverVisualSegment>>& SegmentsByCell)
+	{
+		if (!SegmentsByCell.IsValidIndex(OutCellId)) return 0.0f;
+		float BestMask = 0.0f;
+		for (const FABTSM3RiverVisualSegment& Segment : SegmentsByCell[OutCellId])
+		{
+			const float DistanceCM = FABTSM3RiverVisualBuilder::GetDistanceToSegmentCM(
+				Direction, Segment, BaseRadiusCM);
+			const float Mask = 1.0f - FMath::SmoothStep(
+				Segment.HalfWidthCM,
+				Segment.HalfWidthCM + FMath::Max(1.0f, ColorBlendWidthCM),
+				DistanceCM);
+			BestMask = FMath::Max(BestMask, Mask);
+		}
+		return BestMask;
+	};
+	OutColor = FMath::Lerp(OutColor, RoadColor, ComputeLinearMask(RoadSegmentsByCell));
+	OutColor = FMath::Lerp(OutColor, RiverColor, ComputeLinearMask(RiverSegmentsByCell));
+	OutColor.A = 1.0f;
+	return true;
 }
 
 const TArray<FABTSM3BoundarySegment>& FABTSM3TerrainVisualField::GetBoundarySegments(const int32 CellId) const

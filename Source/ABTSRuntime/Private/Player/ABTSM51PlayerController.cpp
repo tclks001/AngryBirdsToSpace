@@ -7,6 +7,7 @@
 #include "GameFramework/HUD.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM51WorldSystem.h"
+#include "World/ABTSM8RecoveryBridgeSystem.h"
 
 void AABTSM51PlayerController::SetupInputComponent()
 {
@@ -29,7 +30,15 @@ void AABTSM51PlayerController::PrimaryWorldInteract()
 			|| Hit.GetActor()->IsA<AABTSM51SlingshotCord>()
 			|| Hit.GetActor()->IsA<AABTSCraftingStation>())) return;
 	}
-	if (AABTSM51WorldSystem* System = FindWorldSystem()) System->PlaceHeldToolAtAim(*this);
+	if (AABTSM51WorldSystem* System = FindWorldSystem())
+	{
+		if (System->PlaceHeldToolAtAim(*this)) return;
+		if (System->PlaceHeldStakeAtAim(*this)) return;
+	}
+	for (TActorIterator<AABTSM8RecoveryBridgeSystem> It(GetWorld()); It; ++It)
+	{
+		if (It->PlaceHeldBridgeAtAim(*this)) return;
+	}
 }
 
 void AABTSM51PlayerController::InteractWithDirtHole(AABTSM51SlingshotDirtHole* Hole)

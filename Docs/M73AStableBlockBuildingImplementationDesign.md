@@ -1,6 +1,6 @@
 # M7.3-A：稳定积木建筑实现设计
 
-> 状态：已完成编辑器、PIE 与物理验收。
+> 状态：已完成编辑器、PIE 与物理验收；球面 TaskGraph 批量接入与连续地形施工台见后续 [M7TaskGraphSphericalBuildingIntegrationDesign.md](M7TaskGraphSphericalBuildingIntegrationDesign.md)。
 > 父级：[M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。
 > 平面测试场：[M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
 > 下游：[M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md) 负责图选点与难度；[M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md) 负责 Legacy 顶部局部结构弱点；主体 Macro DAG 递归、内部 Failure Frontier 与真实接触图新路线见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)；项目阶段索引见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
@@ -27,7 +27,7 @@ M7.3-A 只完成“能够可靠站立并进入现有 M6/M7 破坏链路”的积
 - 多平台球面建筑；
 - 绳、锁链、炸药桶和活塞结构语法；
 - 搜索式 PCG、攻击探针和难度评分；
-- 将 M3 连续地形本身切削成施工台；
+- 将 M3 连续地形本身切削成施工台（已由后续 M7 收口阶段独立完成，见 [M7TaskGraphSphericalBuildingIntegrationDesign.md](M7TaskGraphSphericalBuildingIntegrationDesign.md)）；
 - 自动材料掉落、建筑库存和任务完成条件。
 
 ## 2. 实现决策
@@ -47,7 +47,7 @@ AABTSM7BuildingMaterialSystem::SpawnBrickModule
 
 ### 2.2 施工台的 M7.3-A 表示
 
-上位设计允许把球面高度场混合成真正的平面施工台。M7.3-A 为优先兼容 M7.1，并避免运行时重建整颗高细分球面，先采用非破坏式表示：
+M7.3-A 为优先兼容 M7.1，原始实现采用非破坏式表示：
 
 ```text
 原地面
@@ -56,7 +56,7 @@ AABTSM7BuildingMaterialSystem::SpawnBrickModule
 -> Gameplay 建筑主体
 ```
 
-`FoundationCap` 是真正参与碰撞的平坦施工面，位于 Footprint 内最高地面之上；地基脚填补其与地表之间的高度。后续若增加 M3 地形 Pad 变形，只需替换 Ground Adapter 的施工台表现，建筑主体、支撑图和验证器不变。
+`FoundationCap` 是真正参与碰撞的平坦施工面，位于 Footprint 内最高地面之上；地基脚填补其与地表之间的高度。后续 M7 收口已增加 `AABTSM3Planet.BuildingPadSettings`：连续表面在每个 CellTopo Anchor 的局部切平面内变平，并与原始高度场平滑相接。`GroundAdapter` 仍保持不变，因为它本来就通过 `QuerySurface` 消费最终地表；FoundationCap/Feet 继续保留，用于碰撞稳定和关闭 Terrain Pad 时的兼容回退。
 
 ### 2.3 地形适配层不作为 Gameplay 弱点
 

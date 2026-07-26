@@ -22,6 +22,8 @@ namespace
 	const FName QuantityCraft(TEXT("ABTS_M5_QtyCraft"));
 	const FName QuantityCancel(TEXT("ABTS_M5_QtyCancel"));
 	constexpr float HotbarSlotSize = 78.0f;
+	constexpr float InventoryRowHeight = 46.0f;
+	constexpr float InventoryCellHeight = 42.0f;
 	constexpr float RecipeRowHeight = 66.0f;
 
 	int32 EvaluationSortRank(const FABTSCraftingEvaluation& Value)
@@ -62,6 +64,11 @@ void AABTSM5InventoryHUD::DrawCell(const FVector2D& Origin, const FVector2D& Siz
 FName AABTSM5InventoryHUD::MakeHotbarName(const int32 Slot) const
 {
 	return FName(*FString::Printf(TEXT("ABTS_M5_Hotbar_%d"), Slot));
+}
+
+FName AABTSM5InventoryHUD::MakeInventoryItemName(const int32 VisibleItemIndex) const
+{
+	return FName(*FString::Printf(TEXT("ABTS_M5_InventoryItem_%d"), VisibleItemIndex));
 }
 
 FName AABTSM5InventoryHUD::MakeRecipeName(const int32 RecipeIndex) const
@@ -148,19 +155,50 @@ void AABTSM5InventoryHUD::DrawInventoryPanel(
 	const FVector2D& Size)
 {
 	DrawPanel(Origin, Size, FLinearColor(0.08f, 0.085f, 0.105f, 0.98f));
-	DrawText(TEXT("Owned items"), FLinearColor(0.92f, 0.93f, 1.0f), Origin.X + 12.0f, Origin.Y + 10.0f,
-		GEngine->GetSmallFont(), 1.0f, false);
-	float Y = Origin.Y + 40.0f;
+	TArray<const FABTSItemStack*> NonEmptyStacks;
 	for (const FABTSItemStack& Stack : Inventory.GetOrderedStacks())
 	{
-		if (Stack.Quantity <= 0) continue;
-		DrawCell(FVector2D(Origin.X + 10.0f, Y), FVector2D(Size.X - 20.0f, 42.0f), FLinearColor(0.13f, 0.14f, 0.17f, 1.0f));
+		if (Stack.Quantity > 0) NonEmptyStacks.Add(&Stack);
+	}
+	const int32 VisibleRowCount = FMath::Max(1, FMath::FloorToInt((Size.Y - 48.0f) / InventoryRowHeight));
+	MaxInventoryScrollRowOffset = FMath::Max(0, NonEmptyStacks.Num() - VisibleRowCount);
+	InventoryScrollRowOffset = FMath::Clamp(InventoryScrollRowOffset, 0, MaxInventoryScrollRowOffset);
+	DrawText(FString::Printf(TEXT("Owned items  %d/%d"),
+		FMath::Min(NonEmptyStacks.Num(), InventoryScrollRowOffset + VisibleRowCount), NonEmptyStacks.Num()),
+		FLinearColor(0.92f, 0.93f, 1.0f), Origin.X + 12.0f, Origin.Y + 10.0f, GEngine->GetSmallFont(), 0.92f, false);
+	if (MaxInventoryScrollRowOffset > 0)
+	{
+		DrawText(TEXT("WHEEL"), FLinearColor(0.72f, 0.76f, 0.88f), Origin.X + Size.X - 58.0f, Origin.Y + 10.0f,
+			GEngine->GetSmallFont(), 0.7f, false);
+		const float TrackTop = Origin.Y + 42.0f;
+		const float TrackHeight = Size.Y - 52.0f;
+		const float ThumbHeight = FMath::Max(20.0f, TrackHeight * static_cast<float>(VisibleRowCount) / NonEmptyStacks.Num());
+		const float ThumbAlpha = static_cast<float>(InventoryScrollRowOffset) / MaxInventoryScrollRowOffset;
+		DrawPanel(FVector2D(Origin.X + Size.X - 8.0f, TrackTop), FVector2D(4.0f, TrackHeight), FLinearColor(0.18f, 0.20f, 0.26f, 0.9f));
+		DrawPanel(FVector2D(Origin.X + Size.X - 8.0f, TrackTop + (TrackHeight - ThumbHeight) * ThumbAlpha),
+			FVector2D(4.0f, ThumbHeight), FLinearColor(0.72f, 0.77f, 0.9f, 0.95f));
+	}
+	VisibleInventoryItemIds.Reset();
+	float Y = Origin.Y + 40.0f;
+	const int32 LastExclusive = FMath::Min(NonEmptyStacks.Num(), InventoryScrollRowOffset + VisibleRowCount);
+	for (int32 StackIndex = InventoryScrollRowOffset; StackIndex < LastExclusive; ++StackIndex)
+	{
+		const FABTSItemStack& Stack = *NonEmptyStacks[StackIndex];
+		const bool bHeld = [&Inventory, &Stack]()
+		{
+			EABTSItemId HeldItemId;
+			return Inventory.GetHeldItem(HeldItemId) && HeldItemId == Stack.ItemId;
+		}();
+		DrawCell(FVector2D(Origin.X + 10.0f, Y), FVector2D(Size.X - 24.0f, InventoryCellHeight),
+			bHeld ? FLinearColor(0.34f, 0.23f, 0.08f, 1.0f) : FLinearColor(0.13f, 0.14f, 0.17f, 1.0f));
 		DrawText(ABTSGetItemFallbackLabel(Stack.ItemId), FLinearColor::White,
 			Origin.X + 20.0f, Y + 9.0f, GEngine->GetSmallFont(), 0.92f, false);
 		DrawText(FString::Printf(TEXT("x%d"), Stack.Quantity), FLinearColor(1.0f, 0.9f, 0.32f),
 			Origin.X + Size.X - 68.0f, Y + 9.0f, GEngine->GetSmallFont(), 0.92f, false);
-		Y += 46.0f;
-		if (Y + 42.0f > Origin.Y + Size.Y) break;
+		VisibleInventoryItemIds.Add(Stack.ItemId);
+		AddHitBox(FVector2D(Origin.X + 10.0f, Y), FVector2D(Size.X - 24.0f, InventoryCellHeight),
+			MakeInventoryItemName(VisibleInventoryItemIds.Num() - 1), true, 60);
+		Y += InventoryRowHeight;
 	}
 }
 
@@ -319,6 +357,17 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 		System->GetInventory()->ClearHeldItem();
 		return;
 	}
+	const FString Name = BoxName.ToString();
+	const FString InventoryItemPrefix(TEXT("ABTS_M5_InventoryItem_"));
+	if (Name.StartsWith(InventoryItemPrefix))
+	{
+		const int32 VisibleItemIndex = FCString::Atoi(*Name.RightChop(InventoryItemPrefix.Len()));
+		if (VisibleInventoryItemIds.IsValidIndex(VisibleItemIndex))
+		{
+			System->GetInventory()->SetHeldItem(VisibleInventoryItemIds[VisibleItemIndex]);
+		}
+		return;
+	}
 	if (BoxName.ToString().StartsWith(TEXT("ABTS_M5_Hotbar_")))
 	{
 		const FString Prefix(TEXT("ABTS_M5_Hotbar_"));
@@ -346,7 +395,6 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 		}
 		return;
 	}
-	const FString Name = BoxName.ToString();
 	if (!Name.StartsWith(TEXT("ABTS_M5_Recipe_"))) return;
 	const int32 Index = FCString::Atoi(*Name.RightChop(16));
 	if (!VisibleRecipeIds.IsValidIndex(Index)) return;
@@ -383,6 +431,14 @@ void AABTSM5InventoryHUD::ResetCraftingSelection()
 {
 	SelectedRecipeId = NAME_None;
 	PendingCraftCount = 1;
+}
+
+void AABTSM5InventoryHUD::ScrollInventoryRows(const float WheelValue)
+{
+	if (FMath::IsNearlyZero(WheelValue) || MaxInventoryScrollRowOffset <= 0) return;
+	// Positive wheel values conventionally scroll the content upward (toward earlier acquisitions).
+	InventoryScrollRowOffset = FMath::Clamp(InventoryScrollRowOffset - FMath::RoundToInt(WheelValue),
+		0, MaxInventoryScrollRowOffset);
 }
 
 AABTSCraftingSystem* AABTSM5InventoryHUD::FindCraftingSystem()

@@ -27,9 +27,12 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	bool PlaceHeldToolAtAim(APlayerController& Controller);
+	/** Debug placement path: a held stake can be installed at any unoccupied CellTopo cell without a DirtHole. */
+	bool PlaceHeldStakeAtAim(APlayerController& Controller);
 	bool InstallHeldStake(AABTSM51SlingshotDirtHole& Hole);
 	bool SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake);
 	AABTSCraftingSystem* FindCraftingSystem() const;
+	void SetDeveloperAnyCellStakePlacementEnabled(bool bEnabled) { bAllowDeveloperAnyCellStakePlacement = bEnabled; }
 
 private:
 	bool InitializeWorldContent();
@@ -38,6 +41,7 @@ private:
 	void CollectNearbyPickups();
 	bool QueryCellTransform(int32 CellId, float SurfaceOffsetCM, FTransform& OutTransform) const;
 	int32 SelectPlacementCell(const FVector& UnitDirection) const;
+	int32 SelectDeveloperStakeCell(const FVector& UnitDirection) const;
 	bool IsCellOccupied(int32 CellId) const;
 	EABTSItemId ResolveStakeForCord(EABTSItemId CordItem) const;
 	void LogPlaceFailure(const TCHAR* Reason) const;
@@ -66,6 +70,10 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Slingshot", meta = (ClampMin = "0.001", ClampMax = "0.5"))
 	float MaxStakeArcRadians = 0.12f;
+
+	/** Allows stake placement at any unoccupied CellTopo center, including water and non-buildable cells. Cords still use MaxStakeArcRadians. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Debug")
+	bool bAllowDeveloperAnyCellStakePlacement = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M5.1|Classes")
 	TSubclassOf<AABTSM51PickupItem> PickupClass;

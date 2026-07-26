@@ -27,7 +27,7 @@ namespace
 		return Count;
 	}
 
-	bool MakeColumnCenters(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
+	bool MakeCompilerColumnCenters(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
 		const EABTSM73DAGSupportPattern Pattern, const float ColumnWidthCM,
 		TArray<FVector2D>& OutCenters)
 	{
@@ -161,7 +161,7 @@ bool FABTSM73DAGModuleCompiler::Compile(
 		TArray<FVector2D> Centers;
 		const float RealizedColumnWidthCM = Support.RealizedColumnWidthCM > 0.0f
 			? Support.RealizedColumnWidthCM : LayoutSettings.ColumnWidthCM;
-		if (!MakeColumnCenters(Support.FeasibleColumnRegion, LayoutSettings, Support.SupportPattern,
+		if (!MakeCompilerColumnCenters(Support.FeasibleColumnRegion, LayoutSettings, Support.SupportPattern,
 			RealizedColumnWidthCM, Centers))
 		{
 			OutError = FString::Printf(TEXT("DAGColumnRegionInvalid:%d:%d"), Support.SupportMacroNodeId, Support.LoadMacroNodeId);

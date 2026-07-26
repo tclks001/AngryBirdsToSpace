@@ -36,11 +36,24 @@ public:
 	/** Used by a future TaskGraph spawner; the anchor remains a CellTopo id. */
 	void ConfigureSphericalAnchor(AABTSM3Planet* Planet, int32 CellId, const FTransform& DesiredFacing);
 
+	/** Applies a TaskGraph-owned profile before FinishSpawning constructs the runtime building. */
+	void ConfigureTaskGraphGeneration(
+		const FABTSM73GenerationSettings& InGenerationSettings,
+		const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
+		const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+		const FABTSM73DifficultySettings& InDifficultySettings);
+
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
 	bool RebuildPreview();
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M7.3-A")
 	const FABTSM73GenerationSummary& GetGenerationSummary() const { return GenerationSummary; }
+
+	/** Live module centroid for one building-level M10 marker; false hides rejected or fully destroyed buildings. */
+	bool QueryScoutMapMarkerLocation(
+		const AABTSM3Planet* ExpectedPlanet,
+		FVector& OutWorldLocation,
+		int32& OutLiveModuleCount) const;
 
 private:
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,

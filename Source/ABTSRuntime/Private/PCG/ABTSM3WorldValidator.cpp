@@ -109,17 +109,29 @@ bool FWorldValidator::Validate(
 		OutFailure = TEXT("MissingBridgeEdge");
 		return false;
 	}
-	for (const FABTSM3TaskNode& Task : Tasks)
+	TMap<int32, int32> BuildingAnchorCountByTask;
+	for (int32 CellId = 0; CellId < CellStates.Num(); ++CellId)
 	{
-		if (!CellStates[Task.SeedCellId].bBuildingAnchor) continue;
-		if (CellStates[Task.SeedCellId].bWater)
+		const FABTSM3CellState& State = CellStates[CellId];
+		if (!State.bBuildingAnchor) continue;
+		if (!State.bBuildable || State.bWater)
 		{
-			OutFailure = FString::Printf(TEXT("BuildingAnchorInWater_%d"), Task.TaskId);
+			OutFailure = FString::Printf(TEXT("BuildingAnchorInvalid:%d"), CellId);
 			return false;
 		}
-		if (!CellStates[Task.SeedCellId].bBuildable)
+		if (FindTaskIndexById(Tasks, State.TaskId) == INDEX_NONE)
 		{
-			OutFailure = FString::Printf(TEXT("BuildingAnchorTooSteep_%d"), Task.TaskId);
+			OutFailure = FString::Printf(TEXT("BuildingAnchorTaskMissing:%d"), CellId);
+			return false;
+		}
+		BuildingAnchorCountByTask.FindOrAdd(State.TaskId)++;
+	}
+	for (const FABTSM3TaskNode& Task : Tasks)
+	{
+		const FTaskSpec* Spec = GetTaskSpecs().FindByPredicate([Type = Task.Type](const FTaskSpec& Candidate) { return Candidate.Type == Type; });
+		if (Spec != nullptr && Spec->bBuilding && BuildingAnchorCountByTask.FindRef(Task.TaskId) != 1)
+		{
+			OutFailure = FString::Printf(TEXT("BuildingAnchorCountInvalid:%d:%d"), Task.TaskId, BuildingAnchorCountByTask.FindRef(Task.TaskId));
 			return false;
 		}
 	}

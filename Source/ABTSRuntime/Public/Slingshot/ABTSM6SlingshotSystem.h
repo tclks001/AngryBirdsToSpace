@@ -17,10 +17,22 @@ class AABTSM51SlingshotCord;
 class AABTSM6DestructibleProxy;
 class AABTSM6SlingshotCamera;
 class AABTSM7BuildingMaterialSystem;
+class AABTSM71PlaceableSlingshotActor;
 class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 class UPhysicalMaterial;
+
+/** One HISM component's descending, index-stable startup overlap queue. */
+struct FABTSM6StartupHISMWarmupQueue
+{
+	TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Component;
+	TArray<int32> CandidateIndicesDescending;
+	int32 NextCandidateOffset = 0;
+};
+
+/** Fired once after a launched bird has returned and M6 is inactive again. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FABTSM6LaunchCompletedNative, EABTSBirdId, const FVector&);
 
 /** M6 launch, trajectory, impact promotion, explosion and return coordinator. */
 UCLASS(BlueprintType)
@@ -45,6 +57,12 @@ public:
 
 	EABTSM6LaunchState GetLaunchState() const { return LaunchState; }
 	bool IsLaunchModeActive() const { return LaunchState != EABTSM6LaunchState::Inactive; }
+	/** True only after startup Chaos settling has frozen every promoted world body. */
+	bool IsStartupPhysicsWarmupComplete() const { return !bEnableStartupPhysicsWarmup || bStartupPhysicsWarmupComplete; }
+	/** The location is the final settled landing point captured before return flight begins. */
+	FABTSM6LaunchCompletedNative& OnLaunchCompleted() { return LaunchCompletedNative; }
+	/** Stable source for M10; callers must not cache HISM indices or proxy pointers across refreshes. */
+	void GatherLiveDestructibleProxies(TArray<AABTSM6DestructibleProxy*>& OutProxies) const;
 
 private:
 	bool ResolveDependencies();
@@ -67,6 +85,16 @@ private:
 	uint64 GetHISMDamageKey(const UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex) const;
 	void BeginLaunchGravityPhase();
 	int32 PromoteHISMForLaunchGravity(UHierarchicalInstancedStaticMeshComponent& HISM);
+	void UpdateStartupPhysicsWarmup(float DeltaSeconds);
+	void BeginStartupPhysicsWarmup();
+	int32 BuildStartupHISMOverlapQueues(
+		const TArray<UHierarchicalInstancedStaticMeshComponent*>& HISMs,
+		int32& OutOverlapPairCount,
+		int32& OutFallbackPairCount);
+	int32 StartNextStartupHISMWarmupBatch();
+	bool HasPendingStartupHISMCandidates() const;
+	int32 RestoreStartupHISMProxies();
+	void FinishStartupPhysicsWarmup(const FABTSM6PhysicsActivitySummary& Summary);
 	void DetonateBlackBird(bool bManual);
 	void BeginSettlement();
 	void UpdatePhysicsSettlement(float DeltaSeconds);
@@ -126,6 +154,33 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Impact", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
 	float LaunchContactDamageGraceSeconds = 0.20f;
 
+	/** Runs once after placement. Buildings and only overlapping HISM candidates settle before the first launch. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics")
+	bool bEnableStartupPhysicsWarmup = true;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "0.0", UIMax = "5.0"))
+	float StartupPhysicsWarmupInitialDelaySeconds = 0.25f;
+	/** HISM origins farther apart than this are never expensive-tested for startup overlap. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "10.0", UIMax = "1000.0", Units = "cm"))
+	float StartupHISMOverlapSearchRadiusCM = 260.0f;
+	/** Conservative fallback for meshes without usable convex simple collision. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "0.0", UIMax = "300.0", Units = "cm"))
+	float StartupHISMFallbackCenterDistanceCM = 45.0f;
+	/** Hard upper bound on simultaneous startup HISM Chaos proxies. Remaining candidates run in later batches. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "8", ClampMax = "512"))
+	int32 StartupHISMMaxSimultaneousBodies = 384;
+	/** Fixed penetration-relaxation window for each HISM batch; long downhill motion is deliberately frozen afterward. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "0.1", UIMax = "3.0", Units = "s"))
+	float StartupHISMBatchRelaxationSeconds = 0.75f;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "0.0", UIMax = "100.0"))
+	float StartupSettleLinearSpeedThresholdCMPerSec = 8.0f;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "0.0", UIMax = "100.0"))
+	float StartupSettleAngularSpeedThresholdDegPerSec = 4.0f;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "0.0", UIMax = "10.0"))
+	float StartupSettleStableHoldSeconds = 1.25f;
+	/** Per-batch hard deadline. A pathological batch is frozen with an error instead of blocking PIE forever. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Startup Physics", meta = (ClampMin = "1.0", UIMax = "30.0", Units = "s"))
+	float StartupSettleDiagnosticPeriodSeconds = 6.0f;
+
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Black Bird", meta = (ClampMin = "50.0"))
 	float BlackExplosionRadiusCM = 360.0f;
 	/** Outer ring: objects survive but are promoted/reactivated and pushed away. */
@@ -183,9 +238,35 @@ private:
 	float ReturnElapsedSeconds = 0.0f;
 	float BlackFuseRemainingSeconds = -1.0f;
 	bool bBlackDetonated = false;
+	FABTSM6LaunchCompletedNative LaunchCompletedNative;
+	FVector PendingCompletedLandingLocation = FVector::ZeroVector;
+	EABTSBirdId PendingCompletedBirdId = EABTSBirdId::Red;
+	bool bHasPendingLaunchCompletion = false;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug")
 	bool bSpawnDebugSlingshotsAtStart = false;
+	/** Reuses the M7.1 complete-slingshot classes, including their VisualSlot scale, rotation and pivot rules. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
+	TSubclassOf<AABTSM71PlaceableSlingshotActor> DebugSimpleSlingshotClass;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
+	TSubclassOf<AABTSM71PlaceableSlingshotActor> DebugReinforcedSlingshotClass;
+	/** Mirrors the M7.1 placeable Actor scale; only local Y changes stake spacing by design. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
+	FVector DebugSlingshotActorScale = FVector::OneVector;
 	bool bDebugSlingshotsSpawned = false;
 	int32 DebugStartCellId = INDEX_NONE;
 	FABTSM6PhysicsSettleMonitor PhysicsSettleMonitor;
 	float NextSettleDiagnosticTimeSeconds = 0.0f;
+	FABTSM6PhysicsSettleMonitor StartupPhysicsSettleMonitor;
+	TArray<FABTSM6StartupHISMWarmupQueue> StartupHISMWarmupQueues;
+	TMap<TWeakObjectPtr<AABTSM6DestructibleProxy>, TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>> StartupProxySourceHISMs;
+	float StartupPhysicsWarmupEligibleTimeSeconds = 0.0f;
+	float NextStartupWarmupDiagnosticTimeSeconds = 0.0f;
+	int32 StartupHISMWarmupTotalCandidates = 0;
+	int32 StartupHISMWarmupPromotedTotal = 0;
+	int32 StartupHISMWarmupBatchIndex = 0;
+	int32 StartupHISMWarmupTimedOutBatches = 0;
+	bool bStartupBuildingSettlementActive = false;
+	bool bStartupPhysicsWarmupStarted = false;
+	bool bStartupPhysicsWarmupComplete = false;
+	bool bStartupPhysicsWarmupWaitingLogged = false;
 };

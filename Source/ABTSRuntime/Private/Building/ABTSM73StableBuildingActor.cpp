@@ -22,6 +22,7 @@
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSCollisionChannels.h"
 
 namespace
 {
@@ -61,12 +62,14 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	WeakPointPreview->SetGenerateOverlapEvents(false);
 	FoundationCap->SetupAttachment(Root);
 	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationCap->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	FoundationCap->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	// These components are non-simulating supports, but the generator is freely
 	// transformable in the editor and rebuilds their world transforms.
 	FoundationCap->SetMobility(EComponentMobility::Movable);
 	FoundationFeet->SetupAttachment(Root);
 	FoundationFeet->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationFeet->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	FoundationFeet->SetMobility(EComponentMobility::Movable);
 	FoundationFeet->SetGenerateOverlapEvents(false);
@@ -112,6 +115,24 @@ void AABTSM73StableBuildingActor::ConfigureSphericalAnchor(
 	GroundMode = EABTSM73GroundMode::SphericalCellTopo;
 	AnchorCellId = CellId;
 	SetActorTransform(DesiredFacing, false, nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
+	const FABTSM73GenerationSettings& InGenerationSettings,
+	const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
+	const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+	const FABTSM73DifficultySettings& InDifficultySettings)
+{
+	if (bRuntimeSpawned)
+	{
+		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M7][TaskGraphBuilding] Ignored late profile Actor=%s"), *GetName());
+		return;
+	}
+	GenerationSettings = InGenerationSettings;
+	DAGGenerationSettings = InDAGGenerationSettings;
+	DAGGenerationSettings.BuildingSeed = GenerationSettings.BuildingSeed;
+	DAGLayoutSettings = InDAGLayoutSettings;
+	DifficultySettings = InDifficultySettings;
 }
 
 bool AABTSM73StableBuildingActor::BuildResolvedStructure(
@@ -288,8 +309,10 @@ void AABTSM73StableBuildingActor::UpdateFoundationComponents(
 	const FABTSM73StructureData& Data)
 {
 	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationCap->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	FoundationCap->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	FoundationFeet->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationFeet->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	const FVector2D Extent = Data.FootprintHalfExtent + FVector2D(FMath::Max(0.0f, GenerationSettings.FoundationMarginCM));
 	const float CapHeight = FMath::Max(10.0f, Data.FoundationCapTopCM - Data.FoundationCapBottomCM);

@@ -223,6 +223,8 @@ protected:
 		float InCordThicknessCM, const FVector& InPouchSizeCM, const FRotator& InStakeRotation,
 		const FVector& InStakeScale, const FVector& InCordScale, const FVector& InPouchScale,
 		const FVector& InRestPouchOffsetCM, const FVector& InPouchAOffsetCM, const FVector& InPouchBOffsetCM);
+	/** Uses the same default contract consumed by standalone M5.1 stakes and sphere debug slingshots. */
+	void ApplySlingshotVisualPreset(const FABTSSlingshotVisualPreset& Preset);
 
 private:
 	void UpdatePreview();

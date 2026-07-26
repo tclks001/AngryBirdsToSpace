@@ -9,6 +9,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Player/ABTSM25BirdCharacter.h"
+#include "World/ABTSM9GravityQuery.h"
 
 UABTSChaosBirdMovementComponent::UABTSChaosBirdMovementComponent()
 {
@@ -43,6 +44,11 @@ void UABTSChaosBirdMovementComponent::SetChaosEnabled(const bool bEnabled)
 	}
 	if (!bEnabled) ResetMotionState();
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][ChaosMovement] Enabled=%d Body=%s"), bEnabled ? 1 : 0, *GetNameSafe(ResolveBody()));
+}
+
+void UABTSChaosBirdMovementComponent::SetDeveloperWalkingSpeedMultiplier(const float InMultiplier)
+{
+	DeveloperWalkingSpeedMultiplier = FMath::Clamp(InMultiplier, 1.0f, 10.0f);
 }
 
 void UABTSChaosBirdMovementComponent::ConfigurePlanarTestMode(
@@ -155,6 +161,10 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	const FVector RadialUp = bPlanarTestMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(Body->GetComponentLocation());
 	const float Mass = FMath::Max(0.1f, Body->GetMass());
 	Body->AddForce(-RadialUp * (Mass * GravityAccelerationCMPerSec2), NAME_None, false);
+	if (!bPlanarTestMode)
+	{
+		Body->AddForce(ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Body->GetComponentLocation()) * Mass, NAME_None, false);
+	}
 
 	if (bJumpQueued && bGrounded)
 	{
@@ -173,10 +183,12 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	}
 
 	const FVector Input = PendingMoveVector.GetClampedToMaxSize(1.0f);
+	const float EffectiveMaxGroundSpeed = MaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
 	const FVector DesiredTangentVelocity = FVector::VectorPlaneProject(Input, RadialUp).GetClampedToMaxSize(1.0f)
-		* MaxGroundSpeedCMPerSec;
+		* EffectiveMaxGroundSpeed;
 	const FVector CurrentTangentVelocity = FVector::VectorPlaneProject(Body->GetPhysicsLinearVelocity(), RadialUp);
-	const float Acceleration = Input.IsNearlyZero() ? GroundBrakingCMPerSec2 : GroundAccelerationCMPerSec2;
+	const float Acceleration = (Input.IsNearlyZero() ? GroundBrakingCMPerSec2 : GroundAccelerationCMPerSec2)
+		* DeveloperWalkingSpeedMultiplier;
 	const FVector DeltaVelocity = (DesiredTangentVelocity - CurrentTangentVelocity)
 		.GetClampedToMaxSize(FMath::Max(0.0f, Acceleration) * DeltaTime);
 	Body->AddImpulse(DeltaVelocity * Mass, NAME_None, false);

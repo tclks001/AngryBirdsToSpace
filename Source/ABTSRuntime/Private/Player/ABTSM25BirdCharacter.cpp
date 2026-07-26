@@ -16,6 +16,7 @@
 #include "Planet/ABTSM2SphericalSurfaceComponent.h"
 #include "Player/ABTSM4PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSCollisionChannels.h"
 
 AABTSM25BirdCharacter::AABTSM25BirdCharacter()
 {
@@ -229,6 +230,21 @@ void AABTSM25BirdCharacter::SetPartyCollisionIsolation(const bool bIsolateFromPa
 		ChaosPhysicsSphere->SetCollisionResponseToChannel(ECC_Pawn, bIsolateFromParty ? ECR_Ignore : ECR_Block);
 		ChaosPhysicsSphere->SetCollisionResponseToChannel(ECC_Camera, bIsolateFromParty ? ECR_Ignore : ECR_Block);
 	}
+}
+
+void AABTSM25BirdCharacter::SetDeveloperWalkEnabled(const bool bEnabled, const float SpeedMultiplier)
+{
+	bDeveloperWalkEnabled = bEnabled;
+	const float ResolvedMultiplier = bEnabled ? FMath::Clamp(SpeedMultiplier, 1.0f, 10.0f) : 1.0f;
+	const ECollisionResponse Response = bEnabled ? ECR_Ignore : ECR_Block;
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, Response);
+	if (ChaosPhysicsSphere)
+	{
+		ChaosPhysicsSphere->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, Response);
+	}
+	RadialMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
+	ForceMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
+	ChaosMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
 }
 
 bool AABTSM25BirdCharacter::CanUseSlingshotCapability(const EABTSBirdSlingshotCapability RequiredCapability) const
@@ -550,6 +566,7 @@ void AABTSM25BirdCharacter::ConfigureChaosPhysicsBody(const bool bEnable)
 	ChaosPhysicsSphere->SetCollisionProfileName(UCollisionProfile::PhysicsActor_ProfileName);
 	ChaosPhysicsSphere->SetCollisionObjectType(ECC_Pawn);
 	ChaosPhysicsSphere->SetCollisionResponseToChannels(Capsule->GetCollisionResponseToChannels());
+	ChaosPhysicsSphere->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, bDeveloperWalkEnabled ? ECR_Ignore : ECR_Block);
 	ChaosPhysicsSphere->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	UE_LOG(LogABTSRuntime, Log,

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Slingshot/ABTSSlingshotTypes.h"
 #include "ABTSSlingshotVisualTypes.generated.h"
 
 class UMaterialInterface;
@@ -63,6 +64,46 @@ struct FABTSSlingshotConnectionLayout
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Connections")
 	FVector PouchBConnectionOffsetCM = FVector(0.0f, 18.0f, 0.0f);
 };
+
+/**
+ * Complete visual/tuning contract shared by M7.1 test-stage actors and the
+ * CellTopo sphere. All dimensions are final world centimetres before slot scale.
+ */
+USTRUCT(BlueprintType)
+struct FABTSSlingshotVisualPreset
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry", meta = (ClampMin = "50.0"))
+	float BaseStakeSpacingCM = 210.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry", meta = (ClampMin = "20.0"))
+	float StakeHeightCM = 220.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry", meta = (ClampMin = "1.0"))
+	float StakeDiameterCM = 28.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry", meta = (ClampMin = "1.0"))
+	float CordThicknessCM = 3.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry", meta = (ClampMin = "1.0"))
+	FVector PouchSizeCM = FVector(42.0f, 60.0f, 12.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stake")
+	FABTSSlingshotVisualSlot StakeVisual;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cord")
+	FABTSSlingshotVisualSlot CordVisual;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pouch")
+	FABTSSlingshotVisualSlot PouchVisual;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Connections")
+	FABTSSlingshotConnectionLayout ConnectionLayout;
+};
+
+/** Native defaults shared by all tiers. Blueprint subclasses may override any preset field afterwards. */
+ABTSRUNTIME_API FABTSSlingshotVisualPreset ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier Tier);
 
 /**
  * Fits a visual mesh to an explicit world-space size and aligns one of its bounds anchors.

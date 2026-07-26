@@ -53,6 +53,8 @@ public:
 	bool IsControlHandoffDiagnosticsActive() const { return ControlDiagnosticRemainingSeconds > 0.0f; }
 	void SetBirdIdentity(EABTSBirdId InBirdId, EABTSBirdSlingshotCapability InCapability, bool bInPlayerControlled);
 	void SetPartyCollisionIsolation(bool bIsolateFromParty);
+	/** Makes this bird ignore ABTSDeveloperObstacle while preserving terrain collision and applies a walking-only speed multiplier. */
+	void SetDeveloperWalkEnabled(bool bEnabled, float SpeedMultiplier);
 	void SetPartyControlled(bool bInPlayerControlled);
 	void ApplyPartyMoveInput(const FVector& Direction, float Scale);
 	void ApplyPartyJump();
@@ -133,4 +135,5 @@ private:
 	float SavedChaosCapsuleHalfHeight = 60.0f;
 	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
 	bool bPlanarChaosMode = false;
+	bool bDeveloperWalkEnabled = false;
 };

@@ -102,6 +102,12 @@ void AABTSM6SlingshotSystem::FreezeDynamicProxies()
 void AABTSM6SlingshotSystem::BeginReturn()
 {
 	if (!LaunchedBird.IsValid()) return;
+	// Capture the settled landing point before BeginSlingshotReturn/UpdateReturn
+	// moves the bird back to the slingshot. M10 consumes this only after M6 has
+	// fully restored walking mode and the party camera.
+	PendingCompletedBirdId = LaunchedBird->GetBirdId();
+	PendingCompletedLandingLocation = LaunchedBird->GetActorLocation();
+	bHasPendingLaunchCompletion = true;
 	FreezeDynamicProxies();
 	LaunchedBird->BeginSlingshotReturn();
 	ReturnStartLocation = LaunchedBird->GetActorLocation();
@@ -148,6 +154,9 @@ void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
 
 void AABTSM6SlingshotSystem::FinishReturn()
 {
+	const bool bShouldBroadcastCompletion = bHasPendingLaunchCompletion;
+	const EABTSBirdId CompletedBirdId = PendingCompletedBirdId;
+	const FVector CompletedLandingLocation = PendingCompletedLandingLocation;
 	SetPouchVisualActive(false);
 	if (LaunchedBird.IsValid())
 	{
@@ -164,5 +173,10 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	LaunchState = EABTSM6LaunchState::Inactive;
 	ActiveCord.Reset();
 	LaunchedBird.Reset();
+	bHasPendingLaunchCompletion = false;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Complete StaticProxies=%d"), DynamicProxies.Num());
+	if (bShouldBroadcastCompletion)
+	{
+		LaunchCompletedNative.Broadcast(CompletedBirdId, CompletedLandingLocation);
+	}
 }

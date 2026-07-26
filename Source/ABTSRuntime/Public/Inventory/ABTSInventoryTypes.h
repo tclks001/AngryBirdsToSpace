@@ -20,7 +20,9 @@ enum class EABTSItemId : uint8
 	FurnaceKit UMETA(DisplayName = "熔炉组件"),
 	ReinforcedStake UMETA(DisplayName = "强化弹弓桩"),
 	ReinforcedCord UMETA(DisplayName = "强化弹弓弦"),
-	SpaceSlingshotPart UMETA(DisplayName = "太空弹弓部件")
+	SpaceSlingshotPart UMETA(DisplayName = "太空弹弓部件"),
+	Glass UMETA(DisplayName = "玻璃"),
+	BridgeKit UMETA(DisplayName = "桥梁组件")
 };
 
 USTRUCT(BlueprintType)
@@ -54,5 +56,7 @@ struct FABTSHotbarSlot
 ABTSRUNTIME_API FText ABTSGetItemDisplayName(EABTSItemId ItemId);
 ABTSRUNTIME_API FString ABTSGetItemFallbackLabel(EABTSItemId ItemId);
 ABTSRUNTIME_API bool ABTSIsPlaceableTool(EABTSItemId ItemId);
+ABTSRUNTIME_API bool ABTSIsBridgeKit(EABTSItemId ItemId);
 ABTSRUNTIME_API bool ABTSIsSlingshotStake(EABTSItemId ItemId);
 ABTSRUNTIME_API bool ABTSIsSlingshotCord(EABTSItemId ItemId);
+ABTSRUNTIME_API const TArray<EABTSItemId>& ABTSGetAllItemIds();

@@ -12,6 +12,16 @@ void AABTSM5PlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
 	InputComponent->BindAction(TEXT("ABTS_ToggleCrafting"), IE_Pressed, this, &AABTSM5PlayerController::ToggleCraftingInterface);
+	InputComponent->BindAxis(TEXT("ABTS_CameraZoom"), this, &AABTSM5PlayerController::ScrollCraftingInventory);
+}
+
+void AABTSM5PlayerController::ScrollCraftingInventory(const float Value)
+{
+	if (!bCraftingInterfaceOpen || FMath::IsNearlyZero(Value)) return;
+	if (AABTSM5InventoryHUD* InventoryHUD = Cast<AABTSM5InventoryHUD>(GetHUD()))
+	{
+		InventoryHUD->ScrollInventoryRows(Value);
+	}
 }
 
 void AABTSM5PlayerController::OpenCraftingInterface()

@@ -19,6 +19,8 @@ FText ABTSGetItemDisplayName(const EABTSItemId ItemId)
 	case EABTSItemId::ReinforcedStake: return FText::FromString(TEXT("强化弹弓桩"));
 	case EABTSItemId::ReinforcedCord: return FText::FromString(TEXT("强化弹弓弦"));
 	case EABTSItemId::SpaceSlingshotPart: return FText::FromString(TEXT("太空弹弓部件"));
+	case EABTSItemId::Glass: return FText::FromString(TEXT("玻璃"));
+	case EABTSItemId::BridgeKit: return FText::FromString(TEXT("桥梁组件"));
 	default: return FText::FromString(TEXT("未知物品"));
 	}
 }
@@ -40,6 +42,8 @@ FString ABTSGetItemFallbackLabel(const EABTSItemId ItemId)
 	case EABTSItemId::ReinforcedStake: return TEXT("Reinforced Stake");
 	case EABTSItemId::ReinforcedCord: return TEXT("Reinforced Cord");
 	case EABTSItemId::SpaceSlingshotPart: return TEXT("Space Sling Part");
+	case EABTSItemId::Glass: return TEXT("Glass");
+	case EABTSItemId::BridgeKit: return TEXT("Bridge Kit");
 	default: return TEXT("Unknown Item");
 	}
 }
@@ -49,12 +53,43 @@ bool ABTSIsPlaceableTool(const EABTSItemId ItemId)
 	return ItemId == EABTSItemId::WorkbenchKit || ItemId == EABTSItemId::FurnaceKit;
 }
 
+bool ABTSIsBridgeKit(const EABTSItemId ItemId)
+{
+	return ItemId == EABTSItemId::BridgeKit;
+}
+
 bool ABTSIsSlingshotStake(const EABTSItemId ItemId)
 {
-	return ItemId == EABTSItemId::SimpleStake || ItemId == EABTSItemId::ReinforcedStake;
+	return ItemId == EABTSItemId::Branch
+		|| ItemId == EABTSItemId::SimpleStake
+		|| ItemId == EABTSItemId::ReinforcedStake;
 }
 
 bool ABTSIsSlingshotCord(const EABTSItemId ItemId)
 {
-	return ItemId == EABTSItemId::SimpleCord || ItemId == EABTSItemId::ReinforcedCord;
+	return ItemId == EABTSItemId::PlantFiber
+		|| ItemId == EABTSItemId::SimpleCord
+		|| ItemId == EABTSItemId::ReinforcedCord;
+}
+
+const TArray<EABTSItemId>& ABTSGetAllItemIds()
+{
+	static const TArray<EABTSItemId> Items = {
+		EABTSItemId::Branch,
+		EABTSItemId::Stone,
+		EABTSItemId::Wood,
+		EABTSItemId::PlantFiber,
+		EABTSItemId::MetalParts,
+		EABTSItemId::CrystalCore,
+		EABTSItemId::WorkbenchKit,
+		EABTSItemId::SimpleStake,
+		EABTSItemId::SimpleCord,
+		EABTSItemId::FurnaceKit,
+		EABTSItemId::ReinforcedStake,
+		EABTSItemId::ReinforcedCord,
+		EABTSItemId::SpaceSlingshotPart,
+		EABTSItemId::Glass,
+		EABTSItemId::BridgeKit
+	};
+	return Items;
 }

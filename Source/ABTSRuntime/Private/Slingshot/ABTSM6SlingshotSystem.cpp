@@ -22,6 +22,7 @@
 #include "Terrain/ABTSM3Planet.h"
 #include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
+#include "World/ABTSM9GravityQuery.h"
 
 namespace
 {
@@ -53,6 +54,8 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 	PouchVisualMesh->SetVisibility(false);
 	ProxyClass = AABTSM6DestructibleProxy::StaticClass();
 	CameraClass = AABTSM6SlingshotCamera::StaticClass();
+	DebugSimpleSlingshotClass = AABTSM71SimpleSlingshotActor::StaticClass();
+	DebugReinforcedSlingshotClass = AABTSM71ReinforcedSlingshotActor::StaticClass();
 
 	const auto AddBird = [this](const EABTSBirdId Id, const float Knock, const float Break, const float Retain, const float Bounce)
 	{
@@ -95,6 +98,20 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 void AABTSM6SlingshotSystem::BeginPlay()
 {
 	Super::BeginPlay();
+	bStartupPhysicsWarmupComplete = !bEnableStartupPhysicsWarmup;
+	bStartupPhysicsWarmupStarted = false;
+	bStartupPhysicsWarmupWaitingLogged = false;
+	StartupPhysicsWarmupEligibleTimeSeconds = GetWorld()
+		? GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, StartupPhysicsWarmupInitialDelaySeconds)
+		: 0.0f;
+	FABTSM6PhysicsSettleConfig StartupConfig;
+	StartupConfig.LinearSpeedThresholdCMPerSec = StartupSettleLinearSpeedThresholdCMPerSec;
+	StartupConfig.AngularSpeedThresholdDegPerSec = StartupSettleAngularSpeedThresholdDegPerSec;
+	StartupConfig.StableHoldSeconds = StartupSettleStableHoldSeconds;
+	StartupConfig.MinimumPostActivitySeconds = 0.0f;
+	StartupConfig.MaximumWaitSeconds = StartupSettleDiagnosticPeriodSeconds;
+	StartupConfig.SampleIntervalSeconds = 0.1f;
+	StartupPhysicsSettleMonitor.Configure(StartupConfig);
 	ResolveDependencies();
 	const auto ApplyStaticPhysics = [this](UPrimitiveComponent* Component, const EABTSM6ImpactMaterial Material, const TCHAR* Name)
 	{
@@ -169,6 +186,7 @@ bool AABTSM6SlingshotSystem::ResolveDependencies()
 void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!IsStartupPhysicsWarmupComplete()) UpdateStartupPhysicsWarmup(DeltaSeconds);
 	if (bSpawnDebugSlingshotsAtStart && !bDebugSlingshotsSpawned) SpawnDebugSlingshots();
 	if (LaunchState == EABTSM6LaunchState::Ready || LaunchState == EABTSM6LaunchState::Pulling)
 	{
@@ -219,32 +237,15 @@ bool AABTSM6SlingshotSystem::SpawnDebugSlingshotPair(
 	const EABTSItemId StakeItem)
 {
 	if (!Planet.IsValid() || GetWorld() == nullptr) return false;
-	const FVector Center = Planet->GetPlanetCenterWorld();
-	const FVector Up = CenterDirection.GetSafeNormal();
-	const FVector Forward = FVector::VectorPlaneProject(LaunchDirection, Up).GetSafeNormal();
-	const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
-	if (Forward.IsNearlyZero() || Right.IsNearlyZero()) return false;
-	const float SurfaceRadius = Planet->GetSurfaceRadiusAtDirection(Up);
-	const FVector StakeDirectionA = (Up * SurfaceRadius - Right * 105.0f).GetSafeNormal();
-	const FVector StakeDirectionB = (Up * SurfaceRadius + Right * 105.0f).GetSafeNormal();
-	FTransform TransformA, TransformB;
-	if (!QueryDebugSurfaceTransform(StakeDirectionA, Forward, 58.0f, TransformA)
-		|| !QueryDebugSurfaceTransform(StakeDirectionB, Forward, 58.0f, TransformB)) return false;
+	const TSubclassOf<AABTSM71PlaceableSlingshotActor> SlingshotClass = StakeItem == EABTSItemId::ReinforcedStake
+		? DebugReinforcedSlingshotClass : DebugSimpleSlingshotClass;
+	if (!SlingshotClass) return false;
+	FTransform SpawnTransform;
+	if (!QueryDebugSurfaceTransform(CenterDirection, LaunchDirection, 0.0f, SpawnTransform)) return false;
+	SpawnTransform.SetScale3D(DebugSlingshotActorScale.ComponentMax(FVector(0.01f)));
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AABTSM51SlingshotStake* StakeA = GetWorld()->SpawnActor<AABTSM51SlingshotStake>(AABTSM51SlingshotStake::StaticClass(), TransformA, Params);
-	AABTSM51SlingshotStake* StakeB = GetWorld()->SpawnActor<AABTSM51SlingshotStake>(AABTSM51SlingshotStake::StaticClass(), TransformB, Params);
-	if (StakeA == nullptr || StakeB == nullptr) return false;
-	StakeA->InitializeStake(StakeItem, INDEX_NONE, StakeDirectionA);
-	StakeB->InitializeStake(StakeItem, INDEX_NONE, StakeDirectionB);
-	StakeA->SetHasCord(true);
-	StakeB->SetHasCord(true);
-	const FVector EndpointA = StakeA->GetActorLocation() + StakeDirectionA * 80.0f;
-	const FVector EndpointB = StakeB->GetActorLocation() + StakeDirectionB * 80.0f;
-	AABTSM51SlingshotCord* Cord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(AABTSM51SlingshotCord::StaticClass(), FTransform::Identity, Params);
-	if (Cord == nullptr) return false;
-	Cord->InitializeCord(StakeA, StakeB, EndpointA, EndpointB);
-	return true;
+	return GetWorld()->SpawnActor<AABTSM71PlaceableSlingshotActor>(SlingshotClass, SpawnTransform, Params) != nullptr;
 }
 
 void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
@@ -285,6 +286,11 @@ bool AABTSM6SlingshotSystem::IsBirdAllowed(const AABTSM25BirdCharacter& Bird, co
 
 bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 {
+	if (!IsStartupPhysicsWarmupComplete())
+	{
+		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][StartupPhysics] Launch blocked: world Chaos settling is still in progress."));
+		return false;
+	}
 	if (LaunchState != EABTSM6LaunchState::Inactive || !ResolveDependencies()) return false;
 	AABTSM25BirdCharacter* Bird = Party->GetControlledBird();
 	if (Bird == nullptr || !IsBirdAllowed(*Bird, Cord))
@@ -294,6 +300,7 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	}
 	ActiveCord = &Cord;
 	LaunchedBird = Bird;
+	bHasPendingLaunchCompletion = false;
 	BuildLaunchFrame(Cord, *Bird);
 	ConfigurePouchVisual(Cord);
 	Party->SetSlingshotMode(true);
@@ -462,7 +469,10 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 		const FVector Gravity = bPlanarTestMode
 			? -PlanarUp * 980.0f
 			: ToCenter / Radius * (Mu / FMath::Square(Radius));
-		const FVector Acceleration = Gravity - Velocity * FlightAirDragPerSecond;
+		const FVector SatelliteGravity = bPlanarTestMode
+			? FVector::ZeroVector
+			: ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Position);
+		const FVector Acceleration = Gravity + SatelliteGravity - Velocity * FlightAirDragPerSecond;
 		Velocity += Acceleration * TrajectoryStepSeconds;
 		Position += Velocity * TrajectoryStepSeconds;
 	}
@@ -591,12 +601,22 @@ void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
 			LaunchContactDamageGraceSeconds);
 	}
 
+	DynamicProxies.RemoveAllSwap([](const TWeakObjectPtr<AABTSM6DestructibleProxy>& Entry)
+	{
+		return !Entry.IsValid();
+	});
+	const float ActivationRadiusSquared = FMath::Square(FMath::Max(0.0f, LaunchGravityActivationRadiusCM));
+	int32 ReactivatedProxyCount = 0;
 	for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies)
 	{
 		if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get())
 		{
+			const UStaticMeshComponent* ProxyMesh = Proxy->GetMeshComponent();
+			const FVector ProxyLocation = ProxyMesh ? ProxyMesh->GetComponentLocation() : Proxy->GetActorLocation();
+			if (FVector::DistSquared(ProxyLocation, SlingCenter) > ActivationRadiusSquared) continue;
 			Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
 			Proxy->Reactivate(FVector::ZeroVector);
+			++ReactivatedProxyCount;
 		}
 	}
 
@@ -613,8 +633,9 @@ void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
 		PromotedCount += PromoteHISMForLaunchGravity(*Planet->ForestHISM);
 		PromotedCount += PromoteHISMForLaunchGravity(*Planet->RockHISM);
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ContactGrace=%.3f"),
-		bPlanarTestMode ? 1 : 0, LaunchGravityActivationRadiusCM, PromotedCount, DynamicProxies.Num(), LaunchContactDamageGraceSeconds);
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ReactivatedProxies=%d ContactGrace=%.3f"),
+		bPlanarTestMode ? 1 : 0, LaunchGravityActivationRadiusCM, PromotedCount,
+		DynamicProxies.Num(), ReactivatedProxyCount, LaunchContactDamageGraceSeconds);
 }
 
 bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
