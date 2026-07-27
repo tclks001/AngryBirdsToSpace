@@ -35,6 +35,14 @@ void AABTSM10ScoutMapSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+bool AABTSM10ScoutMapSystem::CopyCurrentTrajectoryPreview(
+	FABTSM6TrajectoryPreview& OutPreview) const
+{
+	return bScoutMapRevealed
+		&& SlingshotSystem.IsValid()
+		&& SlingshotSystem->CopyCurrentTrajectoryPreview(OutPreview);
+}
+
 void AABTSM10ScoutMapSystem::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);

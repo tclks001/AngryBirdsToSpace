@@ -171,6 +171,7 @@ void AABTSM6SlingshotSystem::FinishReturn()
 		PC->RestorePartyCameraView();
 	}
 	LaunchState = EABTSM6LaunchState::Inactive;
+	ClearCurrentTrajectoryPreview();
 	ActiveCord.Reset();
 	LaunchedBird.Reset();
 	bHasPendingLaunchCompletion = false;

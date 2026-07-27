@@ -63,6 +63,8 @@ public:
 	FABTSM6LaunchCompletedNative& OnLaunchCompleted() { return LaunchCompletedNative; }
 	/** Stable source for M10; callers must not cache HISM indices or proxy pointers across refreshes. */
 	void GatherLiveDestructibleProxies(TArray<AABTSM6DestructibleProxy*>& OutProxies) const;
+	/** Copies the same prediction currently drawn by M6. Valid only while the pouch is being pulled. */
+	bool CopyCurrentTrajectoryPreview(FABTSM6TrajectoryPreview& OutPreview) const;
 
 private:
 	bool ResolveDependencies();
@@ -74,6 +76,8 @@ private:
 	void UpdatePouchVisual(const FQuat& PouchRotation);
 	void SetPouchVisualActive(bool bActive);
 	FVector GetBirdInPouchLocation(const FQuat& PouchRotation) const;
+	void RebuildCurrentTrajectoryPreview();
+	void ClearCurrentTrajectoryPreview();
 	void DrawPredictedTrajectory() const;
 	FVector ComputeLaunchVelocity() const;
 	void HandleBirdImpact(const FHitResult& Hit, float NormalSpeedCMPerSec, const FVector& IncomingVelocity);
@@ -132,6 +136,9 @@ private:
 	float BirdInPouchOffsetCM = 20.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Trajectory", meta = (ClampMin = "8", ClampMax = "128"))
 	int32 TrajectorySampleCount = 54;
+	/** Reinforced-tier prediction budget used to find a distant primary-surface landing for M10.1. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Trajectory", meta = (ClampMin = "54", ClampMax = "512"))
+	int32 ReinforcedLandingPredictionSampleCount = 160;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Trajectory", meta = (ClampMin = "0.01", ClampMax = "0.25"))
 	float TrajectoryStepSeconds = 0.075f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Trajectory", meta = (ClampMin = "1.0", ClampMax = "30.0"))
@@ -231,6 +238,11 @@ private:
 	FVector RestPouchLocation = FVector::ZeroVector;
 	FVector PouchLocation = FVector::ZeroVector;
 	FVector AimPlaneOffset = FVector::ZeroVector;
+	FABTSM6TrajectoryPreview CurrentTrajectoryPreview;
+	FVector LastTrajectoryPreviewStart = FVector::ZeroVector;
+	FVector LastTrajectoryPreviewVelocity = FVector::ZeroVector;
+	EABTSSlingshotTier LastTrajectoryPreviewTier = EABTSSlingshotTier::Simple;
+	bool bCurrentTrajectoryPreviewValid = false;
 	FVector ReturnStartLocation = FVector::ZeroVector;
 	FVector ReturnTargetLocation = FVector::ZeroVector;
 	float PullAlpha = 0.55f;

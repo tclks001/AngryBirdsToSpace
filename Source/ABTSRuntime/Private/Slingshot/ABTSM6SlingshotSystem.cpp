@@ -191,7 +191,15 @@ void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 	if (LaunchState == EABTSM6LaunchState::Ready || LaunchState == EABTSM6LaunchState::Pulling)
 	{
 		UpdatePouchAndPreview();
-		DrawPredictedTrajectory();
+		if (LaunchState == EABTSM6LaunchState::Pulling)
+		{
+			RebuildCurrentTrajectoryPreview();
+			DrawPredictedTrajectory();
+		}
+		else
+		{
+			ClearCurrentTrajectoryPreview();
+		}
 	}
 	else if (LaunchState == EABTSM6LaunchState::Flying || LaunchState == EABTSM6LaunchState::Settling)
 	{
@@ -300,6 +308,7 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	}
 	ActiveCord = &Cord;
 	LaunchedBird = Bird;
+	ClearCurrentTrajectoryPreview();
 	bHasPendingLaunchCompletion = false;
 	BuildLaunchFrame(Cord, *Bird);
 	ConfigurePouchVisual(Cord);
@@ -456,25 +465,17 @@ FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const
 
 void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 {
-	if ((!bPlanarTestMode && !Planet.IsValid()) || LaunchState != EABTSM6LaunchState::Pulling) return;
-	FVector Position = PouchLocation;
-	FVector Velocity = ComputeLaunchVelocity();
-	const FVector Center = bPlanarTestMode ? FVector::ZeroVector : Planet->GetPlanetCenterWorld();
-	const float Mu = bPlanarTestMode ? 0.0f : 980.0f * FMath::Square(Planet->GetPlanetRadiusCM());
-	for (int32 Index = 0; Index < TrajectorySampleCount; ++Index)
+	if (LaunchState != EABTSM6LaunchState::Pulling || !bCurrentTrajectoryPreviewValid) return;
+	const int32 VisiblePointCount = FMath::Min(
+		FMath::Clamp(TrajectorySampleCount, 8, 128),
+		CurrentTrajectoryPreview.WorldPoints.Num());
+	for (int32 Index = 0; Index < VisiblePointCount; ++Index)
 	{
-		if ((Index & 1) == 0) DrawDebugPoint(GetWorld(), Position, TrajectoryPointSize, FColor(176, 224, 255), false, 0.0f, 0);
-		const FVector ToCenter = Center - Position;
-		const float Radius = FMath::Max(ToCenter.Size(), 1.0f);
-		const FVector Gravity = bPlanarTestMode
-			? -PlanarUp * 980.0f
-			: ToCenter / Radius * (Mu / FMath::Square(Radius));
-		const FVector SatelliteGravity = bPlanarTestMode
-			? FVector::ZeroVector
-			: ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Position);
-		const FVector Acceleration = Gravity + SatelliteGravity - Velocity * FlightAirDragPerSecond;
-		Velocity += Acceleration * TrajectoryStepSeconds;
-		Position += Velocity * TrajectoryStepSeconds;
+		if ((Index & 1) == 0)
+		{
+			DrawDebugPoint(GetWorld(), CurrentTrajectoryPreview.WorldPoints[Index],
+				TrajectoryPointSize, FColor(176, 224, 255), false, 0.0f, 0);
+		}
 	}
 }
 
@@ -482,6 +483,7 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !LaunchedBird.IsValid()) return;
 	const FVector Velocity = ComputeLaunchVelocity();
+	ClearCurrentTrajectoryPreview();
 	SetPouchVisualActive(false);
 	if (ActiveCord.IsValid()) ActiveCord->ResetPouchVisualToRest();
 	// Ready/Pulling are aiming-only states. Scene objects must remain static

@@ -13,6 +13,7 @@ class AABTSM6SlingshotSystem;
 class AABTSM6DestructibleProxy;
 class UHierarchicalInstancedStaticMeshComponent;
 class UTexture2D;
+struct FABTSM6TrajectoryPreview;
 
 /** Owns one fixed spherical scout snapshot plus live projected environment markers. */
 UCLASS(BlueprintType)
@@ -35,6 +36,8 @@ public:
 	const TArray<FABTSM10ScoutMapMarker>& GetEnvironmentMarkers() const { return EnvironmentMarkers; }
 	/** Maps a world point into the immutable reveal frame. +X is east, +Y is screen-down. */
 	bool ProjectWorldLocation(const FVector& WorldLocation, FVector2D& OutNormalizedMapPosition) const;
+	/** Copies M6's authoritative aim prediction; this system never integrates a second HUD-only trajectory. */
+	bool CopyCurrentTrajectoryPreview(FABTSM6TrajectoryPreview& OutPreview) const;
 
 private:
 	bool ResolveDependencies();

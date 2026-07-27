@@ -8,6 +8,7 @@
 #include "EngineUtils.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
+#include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "World/ABTSM10ScoutMapSystem.h"
 
 void AABTSM10ScoutMapHUD::DrawHUD()
@@ -69,6 +70,10 @@ void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)
 			FLinearColor(1.0f, 0.53f, 0.08f, 1.0f));
 	}
 
+	// Prediction is more transient and important than environment landmarks,
+	// while live bird portraits remain the topmost minimap information layer.
+	DrawTrajectoryPreview(System, Center, Radius);
+
 	AABTSBirdParty* ResolvedParty = FindScoutParty();
 	if (ResolvedParty != nullptr && ResolvedParty->IsPartyReady())
 	{
@@ -100,6 +105,115 @@ void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)
 	{
 		DrawText(TEXT("SCOUT MAP"), FLinearColor(0.88f, 0.94f, 1.0f), Origin.X + 10.0f,
 			Origin.Y + Diameter + 8.0f, GEngine->GetSmallFont(), 0.88f, false);
+	}
+}
+
+void AABTSM10ScoutMapHUD::DrawTrajectoryPreview(
+	AABTSM10ScoutMapSystem& System,
+	const FVector2D& MapCenter,
+	const float MapRadius)
+{
+	if (Canvas == nullptr) return;
+	const FABTSM10ScoutMapSettings& Settings = System.GetSettings();
+	if (!Settings.bShowReinforcedTrajectoryPreview) return;
+
+	FABTSM6TrajectoryPreview Preview;
+	if (!System.CopyCurrentTrajectoryPreview(Preview)
+		|| Preview.SlingshotTier != EABTSSlingshotTier::Reinforced
+		|| !Preview.bHasPrimarySurfaceLanding)
+	{
+		return;
+	}
+
+	// The landing governs visibility for the complete overlay. A trajectory may
+	// briefly cross the scout cap, but that alone must not reveal an unknown aim.
+	FVector2D LandingMapPosition;
+	if (!System.ProjectWorldLocation(Preview.PrimarySurfaceLandingWorld, LandingMapPosition)) return;
+
+	const float Thickness = FMath::Clamp(Settings.TrajectoryLineThicknessPx, 0.5f, 10.0f);
+	const float DashLength = FMath::Clamp(Settings.TrajectoryDashLengthPx, 1.0f, 40.0f);
+	const float GapLength = FMath::Clamp(Settings.TrajectoryGapLengthPx, 0.0f, 40.0f);
+	FVector2D PreviousScreenPosition = FVector2D::ZeroVector;
+	bool bPreviousPointInsideMap = false;
+	float DashPatternDistance = 0.0f;
+	for (const FVector& WorldPoint : Preview.WorldPoints)
+	{
+		FVector2D MapPosition;
+		const bool bPointInsideMap = System.ProjectWorldLocation(WorldPoint, MapPosition);
+		if (bPointInsideMap)
+		{
+			const FVector2D ScreenPosition = MapCenter + MapPosition * MapRadius;
+			// A large discontinuity indicates a spherical projection seam. Do not
+			// draw a false chord across the scout disc.
+			const bool bContinuousProjection = bPreviousPointInsideMap
+				&& FVector2D::Distance(PreviousScreenPosition, ScreenPosition) <= MapRadius * 0.5f;
+			if (bContinuousProjection)
+			{
+				DrawDashedMapSegment(PreviousScreenPosition, ScreenPosition,
+					FLinearColor(0.96f, 0.98f, 1.0f, 0.95f), Thickness, DashLength, GapLength,
+					DashPatternDistance);
+			}
+			else
+			{
+				DashPatternDistance = 0.0f;
+			}
+			PreviousScreenPosition = ScreenPosition;
+		}
+		bPreviousPointInsideMap = bPointInsideMap;
+	}
+
+	const FVector2D LandingScreenPosition = MapCenter + LandingMapPosition * MapRadius;
+	const float HalfCrossSize = FMath::Clamp(Settings.PredictedLandingCrossSizePx, 4.0f, 64.0f) * 0.5f;
+	const float CrossThickness = FMath::Clamp(Settings.PredictedLandingCrossThicknessPx, 0.5f, 10.0f);
+	const FVector2D DownRight(HalfCrossSize, HalfCrossSize);
+	const FVector2D UpRight(HalfCrossSize, -HalfCrossSize);
+	// Dark underlay keeps the marker legible over snow, road and white dashes.
+	DrawLine(LandingScreenPosition.X - DownRight.X, LandingScreenPosition.Y - DownRight.Y,
+		LandingScreenPosition.X + DownRight.X, LandingScreenPosition.Y + DownRight.Y,
+		FLinearColor(0.02f, 0.01f, 0.01f, 0.95f), CrossThickness + 2.0f);
+	DrawLine(LandingScreenPosition.X - UpRight.X, LandingScreenPosition.Y - UpRight.Y,
+		LandingScreenPosition.X + UpRight.X, LandingScreenPosition.Y + UpRight.Y,
+		FLinearColor(0.02f, 0.01f, 0.01f, 0.95f), CrossThickness + 2.0f);
+	DrawLine(LandingScreenPosition.X - DownRight.X, LandingScreenPosition.Y - DownRight.Y,
+		LandingScreenPosition.X + DownRight.X, LandingScreenPosition.Y + DownRight.Y,
+		FLinearColor(1.0f, 0.035f, 0.025f, 1.0f), CrossThickness);
+	DrawLine(LandingScreenPosition.X - UpRight.X, LandingScreenPosition.Y - UpRight.Y,
+		LandingScreenPosition.X + UpRight.X, LandingScreenPosition.Y + UpRight.Y,
+		FLinearColor(1.0f, 0.035f, 0.025f, 1.0f), CrossThickness);
+}
+
+void AABTSM10ScoutMapHUD::DrawDashedMapSegment(
+	const FVector2D& Start,
+	const FVector2D& End,
+	const FLinearColor& Color,
+	const float Thickness,
+	const float DashLength,
+	const float GapLength,
+	float& InOutPatternDistance)
+{
+	const FVector2D Segment = End - Start;
+	const float SegmentLength = Segment.Size();
+	if (SegmentLength <= KINDA_SMALL_NUMBER) return;
+	const FVector2D Direction = Segment / SegmentLength;
+	const float Period = FMath::Max(DashLength + GapLength, 1.0f);
+	float Cursor = 0.0f;
+	while (Cursor < SegmentLength)
+	{
+		const float PatternPosition = FMath::Fmod(InOutPatternDistance, Period);
+		const bool bInsideDash = PatternPosition < DashLength;
+		const float RemainingPatternLength = bInsideDash
+			? DashLength - PatternPosition
+			: Period - PatternPosition;
+		const float StepLength = FMath::Min(FMath::Max(RemainingPatternLength, 0.01f), SegmentLength - Cursor);
+		if (bInsideDash)
+		{
+			const FVector2D DashStartPosition = Start + Direction * Cursor;
+			const FVector2D DashEndPosition = Start + Direction * (Cursor + StepLength);
+			DrawLine(DashStartPosition.X, DashStartPosition.Y, DashEndPosition.X, DashEndPosition.Y,
+				Color, Thickness);
+		}
+		Cursor += StepLength;
+		InOutPatternDistance = FMath::Fmod(InOutPatternDistance + StepLength, Period);
 	}
 }
 

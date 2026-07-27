@@ -69,6 +69,26 @@ struct FABTSM10ScoutMapSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Icons", meta = (ClampMin = "6.0", ClampMax = "128.0"))
 	float BirdIconSizePx = 28.0f;
+
+	/** Shows the reinforced-slingshot prediction only when its landing lies inside this scout snapshot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview")
+	bool bShowReinforcedTrajectoryPreview = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview", meta = (ClampMin = "1.0", ClampMax = "40.0"))
+	float TrajectoryDashLengthPx = 6.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview", meta = (ClampMin = "0.0", ClampMax = "40.0"))
+	float TrajectoryGapLengthPx = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview", meta = (ClampMin = "0.5", ClampMax = "10.0"))
+	float TrajectoryLineThicknessPx = 1.8f;
+
+	/** Full width and height of the red predicted-landing X. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview", meta = (ClampMin = "4.0", ClampMax = "64.0"))
+	float PredictedLandingCrossSizePx = 14.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview", meta = (ClampMin = "0.5", ClampMax = "10.0"))
+	float PredictedLandingCrossThicknessPx = 2.5f;
 };
 
 /** One already-projected, fixed-frame environment icon consumed by the HUD. */

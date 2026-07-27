@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Party/ABTSBirdTypes.h"
+#include "Slingshot/ABTSSlingshotTypes.h"
 #include "ABTSM6Types.generated.h"
 
 UENUM(BlueprintType)
@@ -26,6 +27,44 @@ enum class EABTSM6ImpactMaterial : uint8
 	Iron,
 	Glass,
 	Building
+};
+
+/** Immutable copy of one M6 aim prediction, consumed by M10 without re-integrating physics in the HUD. */
+USTRUCT(BlueprintType)
+struct FABTSM6TrajectoryPreview
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	EABTSSlingshotTier SlingshotTier = EABTSSlingshotTier::Simple;
+
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FVector> WorldPoints;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector InitialWorldLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector InitialWorldVelocity = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bHasPrimarySurfaceLanding = false;
+
+	/** Presentation-surface point, not the predicted bird-centre contact point. */
+	UPROPERTY(BlueprintReadOnly)
+	FVector PrimarySurfaceLandingWorld = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector PrimarySurfaceLandingVelocity = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 LandingCellId = INDEX_NONE;
+
+	UPROPERTY(BlueprintReadOnly)
+	float LandingTimeSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float PredictedPathLengthCM = 0.0f;
 };
 
 USTRUCT(BlueprintType)

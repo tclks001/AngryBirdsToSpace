@@ -160,7 +160,15 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	if ((!bPlanarTestMode && ResolvedPlanet == nullptr) || Body == nullptr || !Body->IsSimulatingPhysics()) return;
 	const FVector RadialUp = bPlanarTestMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(Body->GetComponentLocation());
 	const float Mass = FMath::Max(0.1f, Body->GetMass());
-	Body->AddForce(-RadialUp * (Mass * GravityAccelerationCMPerSec2), NAME_None, false);
+	float LocalGravityAcceleration = GravityAccelerationCMPerSec2;
+	if (bBallisticFlight && !bPlanarTestMode)
+	{
+		const float ReferenceRadiusCM = FMath::Max(ResolvedPlanet->GetPlanetRadiusCM(), 1.0f);
+		const float CurrentRadiusCM = FMath::Max(
+			FVector::Distance(Body->GetComponentLocation(), ResolvedPlanet->GetPlanetCenterWorld()), 1.0f);
+		LocalGravityAcceleration *= FMath::Square(ReferenceRadiusCM / CurrentRadiusCM);
+	}
+	Body->AddForce(-RadialUp * (Mass * LocalGravityAcceleration), NAME_None, false);
 	if (!bPlanarTestMode)
 	{
 		Body->AddForce(ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Body->GetComponentLocation()) * Mass, NAME_None, false);
