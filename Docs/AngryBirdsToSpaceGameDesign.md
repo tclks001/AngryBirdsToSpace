@@ -16,7 +16,7 @@
 - 物品与世界交互：[M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/放置/装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md) · [M8 自动回收与桥梁](M8AutoRecoveryAndBridgesDesign.md)
 - 弹弓与物理破坏：[M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 弹弓视觉](M6SlingshotVisualPresentationDesign.md) · [物理碰撞破坏调研](PhysicsImpactDestructionResearch.md)
 - 建筑：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点（Legacy 对照）](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 新路线调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-1 纯数据语法实现](M73DAG1RecursiveGrammarImplementationDesign.md) · [M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [M7.3-DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [M7.3-DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [建筑语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)
-- 卫星与侦察：[M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)
+- 卫星与侦察：[M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)
 - 资产与工程参考：[Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md)
 
 ## 1. 概念与终局
@@ -266,7 +266,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `CellTopo Sub=2`、渲染 `Sub=4` 的纯灰卫星；以最终 `LaunchSite` 的 CellTopo Seed 锚定，局部逆平方引力叠加到鸟体与预览弹道。详见 [M9SatelliteGravityDesign.md](M9SatelliteGravityDesign.md)。 |
 | M10 | 青翎侦察小地图 | 树枝与植物纤维在弹弓槽装配 Twig 弹弓，仅青翎可发射；完整发射结束后以最终落点固化球面侦察圆盘，显示 SDF 地形、道路、河网、树石、建筑和四鸟位置，并持续跟踪 Chaos 位移与破坏。详见 [M10ScoutMinimapDesign.md](M10ScoutMinimapDesign.md)。 |
-| M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点画中画；超长路径显示包含主星、弹弓、落点、轨道和相关卫星的二维截面图。M10.1-A 的青翎小地图白色虚线轨迹与红色 `X` 落点已验收；当前 M10.1-B 以一台限频 `SceneCapture2D + RenderTarget` 沿落点前接触速度反向固定距离看向落点，并以落点径向锁定画面 Roll。画中画只在强化弹弓 Pulling、已有侦察图且预测首个主星落点仍在侦察圆内时显示；其余视图和完整走廊后续实现。详见 [M101BeyondHorizonLaunchInterfaceDesign.md](M101BeyondHorizonLaunchInterfaceDesign.md)。 |
+| M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点画中画；轨迹足够长或落点离开主视距时自动显示左下圆形轨道全景图。M10.1-A 小地图轨迹与 M10.1-B 落点画中画均已完成 PIE 验收；M10.1-C 已实现整条轨迹的最佳拟合平面、正交投影与凸包自适应取景，使弹弓固定在图左侧，并以理想主星的世界绝对经纬网、无经纬网卫星以及球后虚线/可见实线解释空间偏转。C++ 编译已通过，待 PIE 视觉验收。详见 [M10.1 总设计](M101BeyondHorizonLaunchInterfaceDesign.md)与 [M10.1-C 实现详稿](M101COrbitalOverviewDiagramDesign.md)。 |
 | M11 | 发射/终局表演 | 钢铁太空弹弓、完整终局 |
 
 初版演示顺序：展示固定 Seed 生成的主路、河网、桥址、道路外建筑、弹弓槽与卫星；青翎从树枝槽近射侦察并标记目标；玩家收集保底树枝/石料，在工作台加工两桩与弹弦；组装简易弹弓并发射红鸟或黄鸟击中建筑弱点；建筑的模块与装置连锁坍塌，发射鸟自动回收材料；以木材修桥或加工强化部件；展示卫星引力走廊使强化发射偏转；完成钢铁太空弹弓和终局表演。

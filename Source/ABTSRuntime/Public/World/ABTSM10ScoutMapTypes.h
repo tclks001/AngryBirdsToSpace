@@ -140,6 +140,64 @@ struct FABTSM10ScoutMapSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Trajectory")
 	FLinearColor LandingViewTrajectoryColor = FLinearColor(0.69f, 0.88f, 1.0f, 1.0f);
+
+	/** Enables the M10.1-C fitted-plane orbital overview for long reinforced predictions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview")
+	bool bShowOrbitalOverview = true;
+
+	/** First-show threshold, calibrated to appear just before the default launch camera loses the landing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Visibility",
+		meta = (ClampMin = "1000.0", ClampMax = "200000.0", Units = "cm"))
+	float OrbitalDiagramMinPathLengthCM = 2500.0f;
+
+	/** Once visible, the overview remains until path length falls this far below the first-show threshold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Visibility",
+		meta = (ClampMin = "0.0", ClampMax = "10000.0", Units = "cm"))
+	float OrbitalDiagramPathLengthHysteresisCM = 800.0f;
+
+	/** Main-view safe-frame inset used as a fallback so an off-screen landing can never precede the overview. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Visibility",
+		meta = (ClampMin = "0.0", ClampMax = "0.25"))
+	float OrbitalDiagramViewportInsetRatio = 0.06f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Layout",
+		meta = (ClampMin = "120.0", ClampMax = "700.0"))
+	float OrbitalDiagramDiameterPx = 250.0f;
+
+	/** Vertical gap from the scout-map top edge plus its diameter to the overview top edge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Layout",
+		meta = (ClampMin = "0.0", ClampMax = "200.0"))
+	float OrbitalDiagramScoutMapGapPx = 32.0f;
+
+	/** Bottom-screen space reserved for the M5 inventory hotbar and its help label. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Layout",
+		meta = (ClampMin = "80.0", ClampMax = "300.0"))
+	float OrbitalDiagramBottomReservedPx = 116.0f;
+
+	/** Screen-space padding between the complete projected trajectory and the circular frame. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Layout",
+		meta = (ClampMin = "4.0", ClampMax = "64.0"))
+	float OrbitalDiagramContentPaddingPx = 14.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Grid",
+		meta = (ClampMin = "15.0", ClampMax = "90.0", Units = "deg"))
+	float OrbitalDiagramLatitudeStepDegrees = 30.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Grid",
+		meta = (ClampMin = "15.0", ClampMax = "90.0", Units = "deg"))
+	float OrbitalDiagramLongitudeStepDegrees = 30.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Trajectory",
+		meta = (ClampMin = "0.5", ClampMax = "10.0"))
+	float OrbitalDiagramTrajectoryThicknessPx = 2.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Trajectory",
+		meta = (ClampMin = "1.0", ClampMax = "40.0"))
+	float OrbitalDiagramOccludedDashLengthPx = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Trajectory",
+		meta = (ClampMin = "0.0", ClampMax = "40.0"))
+	float OrbitalDiagramOccludedGapLengthPx = 4.0f;
 };
 
 /** One already-projected, fixed-frame environment icon consumed by the HUD. */

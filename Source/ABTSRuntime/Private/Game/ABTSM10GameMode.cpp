@@ -42,11 +42,13 @@ void AABTSM10GameMode::OnInitialPlayerPlaced(
 		UGameplayStatics::FinishSpawningActor(System, FTransform::Identity);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M10] Entry ready=%d StartCell=%d RadiusRatio=%.3f OverrideCM=%.1f Icons(Tree=%d Stone=%d Building=%d)"),
+		TEXT("[ABTS][M10] Entry ready=%d StartCell=%d RadiusRatio=%.3f OverrideCM=%.1f Icons(Tree=%d Stone=%d Building=%d) OrbitalOverview=%d MinPathCM=%.1f DiameterPx=%.1f"),
 		System ? 1 : 0, SpawnCellId, ScoutMapSettings.ScoutRadiusPrimaryRatio,
 		ScoutMapSettings.ScoutRadiusOverrideCM,
 		ScoutMapSettings.TreeIconTexture ? 1 : 0,
 		ScoutMapSettings.StoneIconTexture ? 1 : 0,
-		ScoutMapSettings.BuildingIconTexture ? 1 : 0);
+		ScoutMapSettings.BuildingIconTexture ? 1 : 0,
+		ScoutMapSettings.bShowOrbitalOverview ? 1 : 0,
+		ScoutMapSettings.OrbitalDiagramMinPathLengthCM,
+		ScoutMapSettings.OrbitalDiagramDiameterPx);
 }
-

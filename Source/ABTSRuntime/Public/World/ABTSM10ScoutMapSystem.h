@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Party/ABTSBirdTypes.h"
+#include "World/ABTSM101OrbitalOverviewTypes.h"
 #include "World/ABTSM10ScoutMapTypes.h"
 #include "ABTSM10ScoutMapSystem.generated.h"
 
@@ -46,6 +47,10 @@ public:
 	bool IsLandingPreviewActive() const;
 	/** Runtime-only render target consumed by the M10 HUD; nullptr while no capture was initialized. */
 	UTextureRenderTarget2D* GetLandingPreviewRenderTarget() const;
+	/** True while M10.1-C has a long reinforced prediction and a valid fitted-plane snapshot. */
+	bool IsOrbitalOverviewActive() const { return OrbitalOverviewSnapshot.bValid; }
+	/** Screen-independent projected geometry consumed read-only by the HUD. */
+	const FABTSM101OrbitalOverviewSnapshot& GetOrbitalOverviewSnapshot() const { return OrbitalOverviewSnapshot; }
 
 private:
 	bool ResolveDependencies();
@@ -63,6 +68,9 @@ private:
 	bool IsInsideEnvironmentBroadphase(const FVector& WorldLocation) const;
 	void UpdateLandingPreview(float DeltaSeconds);
 	void EnsureLandingPreviewCamera();
+	void UpdateOrbitalOverview();
+	bool BuildOrbitalOverviewSnapshot(const FABTSM6TrajectoryPreview& Preview);
+	void ClearOrbitalOverview(bool bLogTransition);
 
 	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M10")
 	FABTSM10ScoutMapSettings Settings;
@@ -82,6 +90,13 @@ private:
 	float ResolvedScoutRadiusCM = 0.0f;
 	float DependencyResolveAccumulatorSeconds = 0.5f;
 	float EnvironmentRefreshAccumulatorSeconds = 0.0f;
+	FABTSM101OrbitalOverviewSnapshot OrbitalOverviewSnapshot;
+	FVector CachedOrbitalPreviewStart = FVector::ZeroVector;
+	FVector CachedOrbitalPreviewVelocity = FVector::ZeroVector;
+	float CachedOrbitalPreviewPathLengthCM = -1.0f;
+	int32 CachedOrbitalPreviewPointCount = 0;
+	FVector LastOrbitalPlaneNormal = FVector::ZeroVector;
+	FVector LastOrbitalHorizontalAxis = FVector::ZeroVector;
 	bool bBoundToSlingshot = false;
 	bool bScoutMapRevealed = false;
 };

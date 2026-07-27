@@ -194,7 +194,7 @@ M10 地图揭示完成后，可作为 [M10.1 超视距目标与引力走廊](M10
 - 松开左键、切换离开 `Pulling` 或失去有效预测时立即移除叠加；底图、环境图标和四鸟位置保持不变；
 - M10 HUD 只投影 M6 的预测快照，不自行积分主星/卫星引力。
 
-M10.1-A 已验收。M10.1-B 已完成 C++：屏幕中上部远端落点 `SceneCapture2D + RenderTarget` 画中画与小地图并列显示，HUD 会在视口允许时避开左上角侦察圆并在窄屏时缩小画框，待 PIE 视觉验收；它属于 [M10.1 详稿](M101BeyondHorizonLaunchInterfaceDesign.md) 的独立发射界面，不改变小地图的 CPU SDF 底图、固定投影和环境标记职责；超长轨迹二维轨道截面图仍属后续阶段。
+M10.1-A 与 M10.1-B 均已验收。B 的屏幕中上部远端落点 `SceneCapture2D + RenderTarget` 画中画会在视口允许时避开左上角侦察圆，并在窄屏时缩小画框。当前 M10.1-C 已实现侦察圆下方的拟合截面轨道全景图，C++ 与编译完成、待 PIE；它直接消费完整 M6 预测，不受 A/B 的“落点必须在侦察圆内”资格限制。三者都属于 [M10.1 总设计](M101BeyondHorizonLaunchInterfaceDesign.md) 的独立发射界面，不改变小地图的 CPU SDF 底图、固定投影和环境标记职责；C 的数学、参数与交接见 [M10.1-C 轨道全景图详稿](M101COrbitalOverviewDiagramDesign.md)。
 
 ## 7. 工程接口与职责边界
 
@@ -380,7 +380,7 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 - [x] 虚线在圆盘边界正确断开，不出现跨盘长线；红色 `X` 不贴边伪造圆外落点。
 - [x] 预测叠加位于地形和环境标记之上，红色落点不会被建筑图标遮住；四鸟头像仍在最上层。
 
-### 11.6 M10.1-B 远端落点画中画（C++ 已完成，待 PIE 验收）
+### 11.6 M10.1-B 远端落点画中画（已 PIE 验收）
 
 - [x] 仅在强化弹弓 `Pulling`、已有有效侦察图、预测存在首次主星地表落点且该落点属于侦察圆时显示。
 - [x] 相机位置由落点前接触速度的反向延长线和 `Camera Distance CM` 唯一决定，相机始终看向落点。
@@ -388,6 +388,10 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 - [x] 远端 RenderTarget 显示同源预测轨迹末段，且末端落点可见。
 - [x] 松开、发射、返回、预测无落点或落点离开侦察圆时，当帧隐藏并停止捕获；M10 小地图不受影响。
 - [x] 同时最多一台复用 SceneCapture2D，捕获频率不超过 `Capture Hz`。
+
+### 11.7 M10.1-C 拟合截面轨道全景图（C++ 与编译完成，待 PIE）
+
+C 不扩展 M10 小地图自身的揭示范围或底图职责。完整验收清单只维护在 [M10.1-C 轨道全景图详稿](M101COrbitalOverviewDiagramDesign.md) 与 [项目工作流交接清单](ABTSProjectWorkflow.md)，本稿不重复。
 
 ## 12. 性能预算
 

@@ -51,6 +51,7 @@ void AABTSM10ScoutMapSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		LandingPreviewCamera->Destroy();
 		LandingPreviewCamera = nullptr;
 	}
+	ClearOrbitalOverview(false);
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -99,6 +100,7 @@ void AABTSM10ScoutMapSystem::Tick(const float DeltaSeconds)
 		DependencyResolveAccumulatorSeconds = 0.0f;
 	}
 	UpdateLandingPreview(DeltaSeconds);
+	UpdateOrbitalOverview();
 	if (!bScoutMapRevealed) return;
 
 	EnvironmentRefreshAccumulatorSeconds += DeltaSeconds;

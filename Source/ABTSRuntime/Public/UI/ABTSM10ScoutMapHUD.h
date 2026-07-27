@@ -22,6 +22,7 @@ public:
 private:
 	void DrawScoutMap(AABTSM10ScoutMapSystem& System);
 	void DrawLandingPreview(AABTSM10ScoutMapSystem& System);
+	void DrawOrbitalOverview(AABTSM10ScoutMapSystem& System);
 	void DrawTrajectoryPreview(
 		AABTSM10ScoutMapSystem& System,
 		const FVector2D& MapCenter,

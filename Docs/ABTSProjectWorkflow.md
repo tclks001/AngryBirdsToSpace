@@ -8,10 +8,10 @@
 
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
-- 当前验收项：M10.1-A（强化弹弓小地图轨迹与红色落点）已验收；M10.1-B（远端落点画中画）已完成 C++ 与编译，待 PIE 视觉验收。
-- 默认下一步：先完成 M10.1-B 的 PIE 验收；若无新的优先级指令，再进入 M10.1-C 的星球尺度二维轨道截面图。完整目标选择与引力走廊属于 M10.1-D，尚未授权实现。
+- 当前验收项：M10.1-A（强化弹弓小地图轨迹与红色落点）和 M10.1-B（远端落点画中画）均已完成 PIE 验收；M10.1-C（星球尺度拟合截面轨道全景图）已完成 C++ 与编译，待 PIE 视觉验收。
+- 默认下一步：按 M10.1-C 详稿完成 PIE 视觉/交互验收并回写结果。完整目标选择、影响事件标签与引力走廊属于 M10.1-D，尚未授权实现。
 
-当前阶段的唯一详细入口为：[M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)。
+当前阶段父级入口为：[M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)；当前实现与交接详稿为：[M10.1-C 星球尺度拟合截面轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
 
 ## 2. 不可违反的项目约束
 
@@ -42,19 +42,22 @@
 | 物品、放置与通行 | [M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/弹弓装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞/移动](M52CollisionAndMovementDesign.md) · [M8 自动回收/桥梁](M8AutoRecoveryAndBridgesDesign.md) |
 | 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 材料/装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) |
-| 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面](M101BeyondHorizonLaunchInterfaceDesign.md) |
+| 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) |
 | 资产与排错 | [Low Poly/AI 资产流程](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md) |
 
 ## 5. 当前验收与交接清单
 
-### M10.1-B PIE 验收
+### M10.1-C PIE 验收与交接
 
-1. 以青翎完成一次侦察，确认左上角固定小地图已生成。
-2. 使用强化弹弓进入 `Pulling`，让预测红色 `X` 落在侦察圆内。
-3. 确认屏幕中上部出现远端画中画：相机看向落点、画面 Up 不滚转、末段浅色点状轨迹可见。
-4. 松开左键发射，或将预测落点调出侦察圆；确认画中画当帧消失，小地图保持存在。
+1. 以青翎完成一次侦察；强化弹弓 `Pulling` 的路径达到可调阈值，或落点离开主视图/被主星遮挡时，确认圆图自动出现，不要求落点进入侦察圆。
+2. 确认圆图位于侦察圆下方、物品 HUD 左侧相邻区域，不遮挡弹弓；改变窗口尺寸后仍在安全区。
+3. 确认弹弓在图左侧、完整预测轨迹始终进入圆图安全边距；轨迹变长时自动拉远，主星允许被裁切。
+4. 调整会产生三维偏转的发射方向，确认全部轨迹点投影连续，截面不无故左右/上下翻转。
+5. 确认主星只显示基础正球与世界绝对经纬网，不显示 HISM、SDF、高程、道路、建筑、资源或侦察弧；卫星不显示经纬网。
+6. 确认原始三维轨迹位于主星或卫星后方时为虚线，前方为实线，切换处稳定。
+7. 松开发射或使预测失效，确认圆图当帧退出；核对没有新增 SceneCapture、RenderTarget 或 HUD 积分器。
 
-日志、参数与排错路径见：[M10 小地图](M10ScoutMinimapDesign.md)和[M10.1 发射界面](M101BeyondHorizonLaunchInterfaceDesign.md)。
+严格参数、数学、验收与排错见：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。父级边界见：[M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md)；上游同源数据见：[M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md)与[M9 卫星](M9SatelliteGravityDesign.md)。
 
 ## 6. 本文维护规则
 

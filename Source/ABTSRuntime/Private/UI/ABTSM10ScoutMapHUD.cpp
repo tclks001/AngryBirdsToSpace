@@ -20,6 +20,7 @@ void AABTSM10ScoutMapHUD::DrawHUD()
 	{
 		if (AABTSM10ScoutMapSystem* System = FindScoutMapSystem(); System && System->IsScoutMapRevealed())
 		{
+			DrawOrbitalOverview(*System);
 			DrawScoutMap(*System);
 			DrawLandingPreview(*System);
 		}
