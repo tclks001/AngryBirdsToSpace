@@ -164,3 +164,9 @@
 | Parallel 后左右支撑区域均存在，但报 `COMOutsideSupportHull` | 旧 DAG2.2 按单条候选边独立计算接触面积并按距离截断；最终仅保留一侧柱组，或把左右联合承载误当成独立承载 | DAG2.3 从顶层向下传播累计质量与一阶力矩，以每块 Load Plate 的联合柱脚凸包覆盖累计合力点为选组条件 | 默认 TwinTowerBridge（Seed=7301、Budget=1）和 `ABTS.M73DAG.StructuralRankAndPhysicalContinuity` |
 | 物理预览有柱，但审计报 `DAGMissingRequiredContact` 或 `DAGUnexpectedBypass` | authored 图与最终碰撞盒的真实触碰不同：柱太短、Clearance 过大，或 Plate 体量横向接触形成旁路 | 只以重建后的 Realized Contact DAG 判定；调 `PlateThicknessCM`、`ColumnClearanceCM`、Scope/Gap 后重新构建 | `ABTS.M73DAG.ScopeLayoutAndModuleCompilation` 要求 Missing=0 且 Bypass=0 |
 | Idle 验证失败后建筑、地基一起消失，或担心不可见地基仍阻挡 Gameplay | 失败统一进入 `RejectRuntimeStructure`；这是刻意的事务回滚，而不是简单隐藏主体。继续保留失败模块或 Foundation 会让无效结构参与 M6/M7 碰撞 | 销毁所有 Runtime Module，清空 RuntimeModules、Node→Module 映射和 Idle 缓存，停止 Tick；隐藏 FoundationCap、清空 FoundationFeet，并把二者碰撞设为 `NoCollision`。后续重试通过 `UpdateFoundationComponents` 恢复 Foundation 可见性、实例与 `QueryAndPhysics` 碰撞，再重新装配验证 | `Accepted=0` 后场景中无该建筑模块、鸟和弹丸不会撞到隐形 Foundation；修复参数并重新初始化后 Foundation 和模块完整恢复，重新执行穿透与 quiet-window 验证 |
+
+## 11. M10.1 远端落点画中画
+
+| 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| PIE 中画中画边框和 `LANDING PREVIEW` 标题正常出现，日志也有 `Camera spawned` / `Activated`，但内部始终呈深色黑屏 | SceneCapture 与 RenderTarget 实际已经创建并捕获；问题发生在 HUD 合成。UE 5.8 的 `SCS_FinalColorLDR` 只保证 RGB，默认桌面 Tonemapper 在未启用 Alpha 传播时把输出 Alpha 保持为 0。`UCanvas::K2_DrawTexture` 默认使用 `BLEND_Translucent`，因此有效 RGB 被零 Alpha 完全滤掉，只剩画框底色 | 绘制远端 RenderTarget 时显式传入 `BLEND_Opaque`，直接消费捕获的 RGB；不为单个 HUD 画中画全局开启 `r.PostProcessing.PropagateAlpha` | Editor Development 编译成功；PIE 重复 M10.1-B 流程时画框内能看到落点地形和浅色末段轨迹，松开左键或落点离开侦察圆后当帧隐藏；日志不出现新的 Renderer/Material Error |

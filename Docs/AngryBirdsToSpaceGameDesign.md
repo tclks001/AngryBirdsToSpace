@@ -8,6 +8,8 @@
 
 本稿只维护全局玩法、阶段状态和跨系统约束；实现参数、编辑器步骤、验收与排错保留在对应详稿中。
 
+> 新对话或阶段交接请先阅读：[项目工作流与开发入口](ABTSProjectWorkflow.md)。
+
 - 入口与球面基础：[M1](M1IndependentEntryDesign.md) · [M2 CellTopo/连续球面](M2PlanetSurfaceDesign.md) · [M2.5 径向引力与跳跃](M25RadialGravityAndJumpDesign.md) · [Chaos 刚体移动（当前正式路线）](ChaosRigidBodyMovementDesign.md) · [力悬挂移动（历史对照）](ForceSuspensionMovementDesign.md)
 - PCG 与地形：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M3 地形表现与 HISM](M3TaskGraphTerrainPresentationDesign.md)
 - 鸟群、相机与 UI：[鸟群跟随 Gameplay](BirdPartyFollowingGameplayDesign.md) · [M4 工程落地](M4BirdPartyImplementationDesign.md) · [M4 Orbit Camera](M4MultiCharacterOrbitCameraDesign.md) · [UI 系统](UISystemDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
@@ -264,7 +266,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `CellTopo Sub=2`、渲染 `Sub=4` 的纯灰卫星；以最终 `LaunchSite` 的 CellTopo Seed 锚定，局部逆平方引力叠加到鸟体与预览弹道。详见 [M9SatelliteGravityDesign.md](M9SatelliteGravityDesign.md)。 |
 | M10 | 青翎侦察小地图 | 树枝与植物纤维在弹弓槽装配 Twig 弹弓，仅青翎可发射；完整发射结束后以最终落点固化球面侦察圆盘，显示 SDF 地形、道路、河网、树石、建筑和四鸟位置，并持续跟踪 Chaos 位移与破坏。详见 [M10ScoutMinimapDesign.md](M10ScoutMinimapDesign.md)。 |
-| M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点摄像机；超长路径显示包含主星、弹弓、落点、轨道和相关卫星的二维截面图。本期先落地青翎小地图白色虚线轨迹与红色 `X` 落点，且仅在落点属于当前侦察圆时显示；其余视图和完整走廊后续实现。详见 [M101BeyondHorizonLaunchInterfaceDesign.md](M101BeyondHorizonLaunchInterfaceDesign.md)。 |
+| M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点画中画；超长路径显示包含主星、弹弓、落点、轨道和相关卫星的二维截面图。M10.1-A 的青翎小地图白色虚线轨迹与红色 `X` 落点已验收；当前 M10.1-B 以一台限频 `SceneCapture2D + RenderTarget` 沿落点前接触速度反向固定距离看向落点，并以落点径向锁定画面 Roll。画中画只在强化弹弓 Pulling、已有侦察图且预测首个主星落点仍在侦察圆内时显示；其余视图和完整走廊后续实现。详见 [M101BeyondHorizonLaunchInterfaceDesign.md](M101BeyondHorizonLaunchInterfaceDesign.md)。 |
 | M11 | 发射/终局表演 | 钢铁太空弹弓、完整终局 |
 
 初版演示顺序：展示固定 Seed 生成的主路、河网、桥址、道路外建筑、弹弓槽与卫星；青翎从树枝槽近射侦察并标记目标；玩家收集保底树枝/石料，在工作台加工两桩与弹弦；组装简易弹弓并发射红鸟或黄鸟击中建筑弱点；建筑的模块与装置连锁坍塌，发射鸟自动回收材料；以木材修桥或加工强化部件；展示卫星引力走廊使强化发射偏转；完成钢铁太空弹弓和终局表演。

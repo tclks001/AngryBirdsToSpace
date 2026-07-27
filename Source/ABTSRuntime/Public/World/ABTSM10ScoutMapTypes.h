@@ -89,6 +89,57 @@ struct FABTSM10ScoutMapSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview", meta = (ClampMin = "0.5", ClampMax = "10.0"))
 	float PredictedLandingCrossThicknessPx = 2.5f;
+
+	/** Enables the M10.1-B SceneCapture only for an eligible reinforced Pulling trajectory. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview")
+	bool bShowReinforcedLandingPreview = true;
+
+	/** Width of the screen-top landing picture-in-picture, in pixels. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Layout", meta = (ClampMin = "180.0", ClampMax = "1200.0"))
+	float LandingViewScreenWidthPx = 420.0f;
+
+	/** Height of the screen-top landing picture-in-picture, in pixels. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Layout", meta = (ClampMin = "100.0", ClampMax = "700.0"))
+	float LandingViewScreenHeightPx = 236.0f;
+
+	/** Vertical distance from the top screen edge to the outer picture-in-picture frame. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Layout", meta = (ClampMin = "0.0", ClampMax = "400.0"))
+	float LandingViewTopMarginPx = 24.0f;
+
+	/** Runtime render-target width. Keep modest: this capture exists only while the pouch is pulled. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Performance", meta = (ClampMin = "128", ClampMax = "2048"))
+	int32 LandingViewRenderTargetWidth = 512;
+
+	/** Runtime render-target height. Match the screen-frame aspect ratio where possible. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Performance", meta = (ClampMin = "72", ClampMax = "2048"))
+	int32 LandingViewRenderTargetHeight = 288;
+
+	/** Manual SceneCapture cadence; zero is intentionally not allowed to prevent a per-frame accidental capture path. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Performance", meta = (ClampMin = "1.0", ClampMax = "60.0", Units = "Hz"))
+	float LandingViewCaptureHz = 20.0f;
+
+	/** Fixed centimetre distance along the reverse extension of the predicted landing-incidence vector. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Camera", meta = (ClampMin = "100.0", ClampMax = "100000.0", Units = "cm"))
+	float LandingViewCameraDistanceCM = 1200.0f;
+
+	/** Horizontal field of view of the landing SceneCapture. The camera direction itself always follows the incidence vector. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Camera", meta = (ClampMin = "10.0", ClampMax = "120.0", Units = "deg"))
+	float LandingViewFieldOfViewDegrees = 46.0f;
+
+	/** Diameter of each sparse world-space prediction point rendered only into the landing SceneCapture. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Trajectory", meta = (ClampMin = "1.0", ClampMax = "100.0", Units = "cm"))
+	float LandingViewTrajectoryPointSizeCM = 8.0f;
+
+	/** Use every Nth M6 prediction point to retain the existing dotted trajectory language. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Trajectory", meta = (ClampMin = "1", ClampMax = "16"))
+	int32 LandingViewTrajectoryStride = 2;
+
+	/** Upper bound for visible terminal trajectory points; older launch-side samples are intentionally omitted. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Trajectory", meta = (ClampMin = "8", ClampMax = "128"))
+	int32 LandingViewTrajectoryPointCount = 48;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Trajectory")
+	FLinearColor LandingViewTrajectoryColor = FLinearColor(0.69f, 0.88f, 1.0f, 1.0f);
 };
 
 /** One already-projected, fixed-frame environment icon consumed by the HUD. */

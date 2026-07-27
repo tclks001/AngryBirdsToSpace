@@ -4,6 +4,7 @@
 
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
 #include "Party/ABTSBirdParty.h"
@@ -20,9 +21,67 @@ void AABTSM10ScoutMapHUD::DrawHUD()
 		if (AABTSM10ScoutMapSystem* System = FindScoutMapSystem(); System && System->IsScoutMapRevealed())
 		{
 			DrawScoutMap(*System);
+			DrawLandingPreview(*System);
 		}
 	}
 	Super::DrawHUD();
+}
+
+void AABTSM10ScoutMapHUD::DrawLandingPreview(AABTSM10ScoutMapSystem& System)
+{
+	if (Canvas == nullptr || !System.IsLandingPreviewActive()) return;
+	UTextureRenderTarget2D* RenderTarget = System.GetLandingPreviewRenderTarget();
+	if (RenderTarget == nullptr) return;
+	const FABTSM10ScoutMapSettings& Settings = System.GetSettings();
+	const float RequestedWidth = FMath::Clamp(Settings.LandingViewScreenWidthPx, 180.0f, 1200.0f);
+	const float RequestedHeight = FMath::Clamp(Settings.LandingViewScreenHeightPx, 100.0f, 700.0f);
+	const float TopMargin = FMath::Clamp(Settings.LandingViewTopMarginPx, 0.0f, 400.0f);
+	const float FramePadding = 6.0f;
+	const float AvailableHeight = FMath::Max(0.0f, Canvas->ClipY - TopMargin);
+	const float MaxFrameWidth = FMath::Max(0.0f, Canvas->ClipX);
+	const float MaxFrameHeight = AvailableHeight;
+	const float RequestedFrameWidth = RequestedWidth + FramePadding * 2.0f;
+	const float RequestedFrameHeight = RequestedHeight + FramePadding * 2.0f;
+	float ScaleToFit = FMath::Min(1.0f, FMath::Min(
+		MaxFrameWidth / FMath::Max(RequestedFrameWidth, 1.0f),
+		MaxFrameHeight / FMath::Max(RequestedFrameHeight, 1.0f)));
+	const float ScoutRight = FMath::Clamp(Settings.TopLeftMarginPx, 0.0f, 200.0f)
+		+ FMath::Clamp(Settings.MapDiameterPx, 120.0f, 700.0f) + 12.0f;
+	const float PreferredWidth = RequestedFrameWidth * ScaleToFit;
+	const float RightSideWidth = FMath::Max(0.0f, Canvas->ClipX - ScoutRight);
+	if (RightSideWidth > FramePadding * 2.0f && PreferredWidth > RightSideWidth)
+	{
+		ScaleToFit = FMath::Min(ScaleToFit, RightSideWidth / RequestedFrameWidth);
+	}
+	const float FrameWidth = RequestedFrameWidth * ScaleToFit;
+	const float FrameHeight = RequestedFrameHeight * ScaleToFit;
+	if (FrameWidth <= FramePadding * 2.0f || FrameHeight <= FramePadding * 2.0f) return;
+
+	// Keep the preview clear of the fixed top-left scout map wherever the viewport
+	// permits it; on narrow screens scale it down instead of covering the map.
+	const float PreferredLeft = FMath::Max(0.0f, (Canvas->ClipX - FrameWidth) * 0.5f);
+	const float SafeLeft = FMath::Min(FMath::Max(0.0f, ScoutRight), FMath::Max(0.0f, Canvas->ClipX - FrameWidth));
+	const float FrameLeft = FMath::Max(PreferredLeft, SafeLeft);
+	const FVector2D OuterSize(FrameWidth, FrameHeight);
+	const FVector2D OuterOrigin(FrameLeft, TopMargin);
+	const float ScaledPadding = FramePadding * ScaleToFit;
+	const FVector2D ImageOrigin = OuterOrigin + FVector2D(ScaledPadding, ScaledPadding);
+	const FVector2D ImageSize(FrameWidth - ScaledPadding * 2.0f, FrameHeight - ScaledPadding * 2.0f);
+
+	Canvas->K2_DrawTexture(Canvas->DefaultTexture, OuterOrigin, OuterSize, FVector2D::ZeroVector,
+		FVector2D::UnitVector, FLinearColor(0.006f, 0.012f, 0.023f, 0.94f));
+	Canvas->K2_DrawBox(OuterOrigin, OuterSize, 2.0f, FLinearColor(0.60f, 0.82f, 1.0f, 0.96f));
+	// FinalColorLDR guarantees the captured image in RGB, but its alpha is zero
+	// on the default desktop tonemapper path when alpha propagation is disabled.
+	// Canvas defaults to translucent blending, which would discard that valid RGB.
+	Canvas->K2_DrawTexture(RenderTarget, ImageOrigin, ImageSize, FVector2D::ZeroVector,
+		FVector2D::UnitVector, FLinearColor::White, BLEND_Opaque);
+	Canvas->K2_DrawBox(ImageOrigin, ImageSize, 1.0f, FLinearColor(0.05f, 0.08f, 0.14f, 0.95f));
+	if (GEngine)
+	{
+		DrawText(TEXT("LANDING PREVIEW"), FLinearColor(0.89f, 0.95f, 1.0f),
+			OuterOrigin.X + 10.0f, OuterOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.82f, false);
+	}
 }
 
 void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)

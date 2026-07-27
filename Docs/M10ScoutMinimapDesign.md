@@ -194,7 +194,7 @@ M10 地图揭示完成后，可作为 [M10.1 超视距目标与引力走廊](M10
 - 松开左键、切换离开 `Pulling` 或失去有效预测时立即移除叠加；底图、环境图标和四鸟位置保持不变；
 - M10 HUD 只投影 M6 的预测快照，不自行积分主星/卫星引力。
 
-屏幕中上部远端落点摄像机和超长轨迹二维轨道截面图属于 M10.1 后续阶段，不属于 M10 小地图自身的 SceneCapture 方案。
+M10.1-A 已验收。M10.1-B 已完成 C++：屏幕中上部远端落点 `SceneCapture2D + RenderTarget` 画中画与小地图并列显示，HUD 会在视口允许时避开左上角侦察圆并在窄屏时缩小画框，待 PIE 视觉验收；它属于 [M10.1 详稿](M101BeyondHorizonLaunchInterfaceDesign.md) 的独立发射界面，不改变小地图的 CPU SDF 底图、固定投影和环境标记职责；超长轨迹二维轨道截面图仍属后续阶段。
 
 ## 7. 工程接口与职责边界
 
@@ -237,6 +237,19 @@ M10 只读取这些系统的公开结果。它不能反向修改 Cell 地形类�
 | `Trajectory Line Thickness Px` | `1.8` | 白色虚线线宽 |
 | `Predicted Landing Cross Size Px` | `14` | 红色 `X` 尺寸 |
 | `Predicted Landing Cross Thickness Px` | `2.5` | 红色 `X` 线宽 |
+| `Show Reinforced Landing Preview` | `true` | M10.1-B 远端落点画中画总开关；只影响强化弹弓 Pulling 的独立 Capture，不影响小地图本体 |
+| `Landing View Screen Width Px` | `420` | 远端落点画中画 HUD 宽度 |
+| `Landing View Screen Height Px` | `236` | 远端落点画中画 HUD 高度 |
+| `Landing View Top Margin Px` | `24` | 远端落点画中画距离屏幕上边缘的边距；水平方向居中 |
+| `Render Target Width` | `512` | 远端落点 RenderTarget 宽度 |
+| `Render Target Height` | `288` | 远端落点 RenderTarget 高度 |
+| `Capture Hz` | `20` | 合法 Pulling 中 CaptureScene 更新频率上限 |
+| `Camera Distance CM` | `1200` | 相机至预测落点的固定距离，沿落点前接触速度反向延长线放置 |
+| `Field Of View Degrees` | `46` | 远端落点摄像机 FOV |
+| `Trajectory Point Size CM` | `8` | 远端轨迹末段表现点尺寸 |
+| `Trajectory Point Stride` | `2` | 远端轨迹末段表现点的预测采样步长 |
+| `Landing View Trajectory Point Count` | `48` | 远端画中画保留的末段预测点上限 |
+| `Landing View Trajectory Color` | 浅蓝白 | 远端轨迹表现点颜色 |
 
 C++ 默认纹理路径为：
 
@@ -285,6 +298,15 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 7. 等待小队相机恢复，确认左上角出现小地图。
 8. 移动、切鸟和旋转相机，确认地图中心及北向不变，四鸟头像按实际位置移动。
 
+### 9.4 M10.1-B 远端落点画中画验收准备
+
+1. 沿用 9.3 的流程，先让青翎完成一次侦察，使左上角已存在有效小地图。
+2. 切换至可使用强化弹弓的鸟，点击已连接的强化弹弓进入 `Ready`；在 GameMode Defaults 中确认 `Show Reinforced Landing Preview=true`。
+3. 按住弹珠袋进入 `Pulling`，调整拉力，使 M6 预测到主星地表落点且落点位于当前青翎侦察圆内。
+4. 确认屏幕中上部出现远端画中画：画面从轨迹接近方向观察预定落点，且能看到末段轨迹指向落点。
+5. 连续微调鼠标和滚轮，确认主视图不被切走；远端画中画的地平径向 Up 稳定、不滚转、不反向。
+6. 令预测落点离开侦察圆，或松开左键发射，确认画中画当帧消失；左上角侦察地图仍保留。
+
 ## 10. 运行日志
 
 ### 10.1 正常链路
@@ -296,6 +318,9 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 [ABTS][M5.1][Cord] Complete ArcRadians=... Item=Plant Fiber
 [ABTS][M6][Return] Complete StaticProxies=...
 [ABTS][M10][Reveal] Bird=Blue Landing=(...) Radius=2500.0 Ratio=0.250 Resolution=192 Markers=...
+[ABTS][M10.1][LandingPreview] Camera spawned=ABTSM101LandingPreviewCamera_...
+[ABTS][M10.1][LandingPreview] Activated Distance=1200.0 FOV=46.0 CaptureHz=20.0
+[ABTS][M10.1][LandingPreview] Hidden
 ```
 
 主星半径默认 `10000 cm` 时，比例 `0.25` 对应 `Radius=2500 cm`。
@@ -311,6 +336,8 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 ```
 
 `Entry ready=1` 只说明 M10 系统已生成；真正地图创建成功必须看到 `[ABTS][M10][Reveal]`。
+
+`[ABTS][M10.1][LandingPreview] Activated` 只会在强化弹弓 `Pulling`、预测落点在当前侦察圆内时出现；在松开、发射或落点离圈后应紧随一条 `Hidden`，而不会继续出现新的 `CaptureScene` 更新。
 
 ## 11. 验收清单
 
@@ -346,12 +373,21 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 - [ ] 打开背包/加工界面后，模态面板覆盖地图。
 - [ ] 点击地图区域不会阻止世界点击，也不会触发传送或放置。
 
-### 11.5 M10.1 预测叠加
+### 11.5 M10.1-A 预测叠加（已验收）
 
-- [ ] 强化弹弓 Pulling 且预测落点位于侦察圆内时，白色虚线与红色 `X` 同时出现。
-- [ ] 落点不在侦察圆、未找到地表落点、松开左键或使用其他档位时，两者均不显示。
-- [ ] 虚线在圆盘边界正确断开，不出现跨盘长线；红色 `X` 不贴边伪造圆外落点。
-- [ ] 预测叠加位于地形和环境标记之上，红色落点不会被建筑图标遮住；四鸟头像仍在最上层。
+- [x] 强化弹弓 Pulling 且预测落点位于侦察圆内时，白色虚线与红色 `X` 同时出现。
+- [x] 落点不在侦察圆、未找到地表落点、松开左键或使用其他档位时，两者均不显示。
+- [x] 虚线在圆盘边界正确断开，不出现跨盘长线；红色 `X` 不贴边伪造圆外落点。
+- [x] 预测叠加位于地形和环境标记之上，红色落点不会被建筑图标遮住；四鸟头像仍在最上层。
+
+### 11.6 M10.1-B 远端落点画中画（C++ 已完成，待 PIE 验收）
+
+- [x] 仅在强化弹弓 `Pulling`、已有有效侦察图、预测存在首次主星地表落点且该落点属于侦察圆时显示。
+- [x] 相机位置由落点前接触速度的反向延长线和 `Camera Distance CM` 唯一决定，相机始终看向落点。
+- [x] 画面 Up 从落点径向向量投影得到，连续调弓时无 Roll、无翻转。
+- [x] 远端 RenderTarget 显示同源预测轨迹末段，且末端落点可见。
+- [x] 松开、发射、返回、预测无落点或落点离开侦察圆时，当帧隐藏并停止捕获；M10 小地图不受影响。
+- [x] 同时最多一台复用 SceneCapture2D，捕获频率不超过 `Capture Hz`。
 
 ## 12. 性能预算
 
@@ -364,6 +400,7 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 - 再次侦察会创建新的瞬态纹理并替换旧引用；旧纹理由 UObject 生命周期回收，不持久化到 Content。
 - 当前 CPU 查询从球面方向重建 SDF，不产生 GPU Readback、SceneCapture 或第二套高细分地形网格。
 - M10.1 预测叠加只投影 M6 已缓存的采样点并绘制 Canvas 线段，不重新积分弹道、不重建底图，也不提高环境标记刷新频率。
+- M10.1-B 仅在合法 Pulling 时以 `Capture Hz` 更新一台可复用的远端 `SceneCapture2D`；HUD 在两次捕获间复用最近 RenderTarget，资格失效当帧隐藏而不是等待下一帧 Capture。
 
 若首次揭示出现可感知卡顿，按以下顺序优化：先将分辨率降至 `192` 或 `128`，再考虑分帧生成纹理；不得退回最近 Cell 六边形着色。
 
@@ -391,6 +428,10 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 | 强化弹弓拉弓时没有预测轨迹 | 必须已经有有效青翎地图、弹弓 Tier 为 Reinforced、M6 状态为 Pulling，且预测器找到的首次主星地表落点位于侦察圆内 |
 | 只有一小段轨迹但没有红色 X | 不允许出现此状态；落点资格失败时整条预测叠加都应隐藏，检查 HUD 是否先验证落点投影再绘制采样点 |
 | 虚线横跨整个圆盘 | 两个圆内采样点之间夹有越界点或投影跳变；越界必须断段，异常大的相邻屏幕距离也应拒绝连接 |
+| 远端画中画从未出现 | 检查强化弹弓、M6 `Pulling`、有效侦察图、首个主星落点和落点投影资格；任一不成立均应隐藏 |
+| 远端画面上下颠倒或滚转 | 相机 Up 未从落点径向向量投影，或投影退化没有受控回退；参照 M10.1-B 的 `ScreenUp` 规则 |
+| 远端画中画在松开后仍停留 | Capture 的资格检查只放在限频分支；应每帧先隐藏，再按频率决定是否 CaptureScene |
+| 拉弓后明显掉帧 | 重复创建 SceneCapture/RenderTarget，或 Capture Hz 未限速；对象应复用，默认 20 Hz |
 | 首次揭示明显卡顿 | 将 `TerrainTextureResolution` 从默认 192 降到 128；不得改回最近 Cell 六边形着色 |
 | 切换 M10 后尚未侦察就持续极卡 | 这不是小地图底图；检查 `[StartupPhysics] Begin`。不得出现 `PromotedHISM=8526 DynamicBodies=8594` 的旧全量路径，应看到 `Candidates`、`BatchLimit`、`BatchRestored` 和最终 `WorldReady=1` |
 
@@ -398,7 +439,7 @@ M9 的 `Allow Developer Any Cell Slingshot Stake Placement` 只用于排错任�
 
 - 多次侦察区域的并集合并、战争迷雾保存和读档；
 - 小地图点击、路径规划、导航箭头、缩放与拖拽；
-- M10 小地图自身的 SceneCapture 航拍、山体遮挡、高度阴影或建筑轮廓栅格化；M10.1 后续远端落点摄像机是独立画中画系统，不改变本条边界；
+- M10 小地图自身的 SceneCapture 航拍、山体遮挡、高度阴影或建筑轮廓栅格化；M10.1-B 已实现的远端落点摄像机是独立画中画系统，不改变本条边界；
 - 每块建筑砖的独立图标；
 - 卫星表面小地图与主星/卫星跨天体投影；
 - 地形运行时改造后的底图局部重绘；当前地形底图在下一次青翎侦察时整体重建。

@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM73StableBuildingActor.h"
+#include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Texture2D.h"
@@ -15,6 +16,9 @@
 AABTSM10ScoutMapSystem::AABTSM10ScoutMapSystem()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	// M6 publishes/revokes its trajectory snapshot in PostPhysics. Sampling it
+	// afterwards prevents a one-frame stale landing preview on release.
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 }
 
 void AABTSM10ScoutMapSystem::Configure(const FABTSM10ScoutMapSettings& InSettings)
@@ -30,8 +34,23 @@ void AABTSM10ScoutMapSystem::BeginPlay()
 
 void AABTSM10ScoutMapSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (SlingshotSystem.IsValid()) SlingshotSystem->OnLaunchCompleted().RemoveAll(this);
+	if (SlingshotSystem.IsValid())
+	{
+		SlingshotSystem->OnLaunchCompleted().RemoveAll(this);
+		if (bBoundToSlingshot)
+		{
+			RemoveTickPrerequisiteActor(SlingshotSystem.Get());
+		}
+	}
 	bBoundToSlingshot = false;
+	if (LandingPreviewCamera)
+	{
+		// The preview is a runtime child spawned by this system; destroy it here
+		// instead of leaving an orphan if the system itself is removed in-game.
+		LandingPreviewCamera->DeactivatePreview();
+		LandingPreviewCamera->Destroy();
+		LandingPreviewCamera = nullptr;
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -41,6 +60,26 @@ bool AABTSM10ScoutMapSystem::CopyCurrentTrajectoryPreview(
 	return bScoutMapRevealed
 		&& SlingshotSystem.IsValid()
 		&& SlingshotSystem->CopyCurrentTrajectoryPreview(OutPreview);
+}
+
+bool AABTSM10ScoutMapSystem::TryGetQualifiedReinforcedLandingPreview(
+	FABTSM6TrajectoryPreview& OutPreview) const
+{
+	FVector2D LandingMapPosition;
+	return CopyCurrentTrajectoryPreview(OutPreview)
+		&& OutPreview.SlingshotTier == EABTSSlingshotTier::Reinforced
+		&& OutPreview.bHasPrimarySurfaceLanding
+		&& ProjectWorldLocation(OutPreview.PrimarySurfaceLandingWorld, LandingMapPosition);
+}
+
+bool AABTSM10ScoutMapSystem::IsLandingPreviewActive() const
+{
+	return LandingPreviewCamera != nullptr && LandingPreviewCamera->IsPreviewActive();
+}
+
+UTextureRenderTarget2D* AABTSM10ScoutMapSystem::GetLandingPreviewRenderTarget() const
+{
+	return LandingPreviewCamera ? LandingPreviewCamera->GetRenderTarget() : nullptr;
 }
 
 void AABTSM10ScoutMapSystem::Tick(const float DeltaSeconds)
@@ -59,6 +98,7 @@ void AABTSM10ScoutMapSystem::Tick(const float DeltaSeconds)
 	{
 		DependencyResolveAccumulatorSeconds = 0.0f;
 	}
+	UpdateLandingPreview(DeltaSeconds);
 	if (!bScoutMapRevealed) return;
 
 	EnvironmentRefreshAccumulatorSeconds += DeltaSeconds;
@@ -67,6 +107,44 @@ void AABTSM10ScoutMapSystem::Tick(const float DeltaSeconds)
 	{
 		EnvironmentRefreshAccumulatorSeconds = FMath::Fmod(EnvironmentRefreshAccumulatorSeconds, RefreshInterval);
 		RefreshEnvironmentMarkers();
+	}
+}
+
+void AABTSM10ScoutMapSystem::EnsureLandingPreviewCamera()
+{
+	if (LandingPreviewCamera != nullptr || GetWorld() == nullptr) return;
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	LandingPreviewCamera = GetWorld()->SpawnActor<AABTSM101LandingPreviewCamera>(
+		AABTSM101LandingPreviewCamera::StaticClass(), FTransform::Identity, SpawnParameters);
+	if (LandingPreviewCamera)
+	{
+		LandingPreviewCamera->Configure(Settings);
+		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M10.1][LandingPreview] Camera spawned=%s"),
+			*LandingPreviewCamera->GetName());
+	}
+}
+
+void AABTSM10ScoutMapSystem::UpdateLandingPreview(const float DeltaSeconds)
+{
+	if (!Settings.bShowReinforcedLandingPreview || !bScoutMapRevealed || !Planet.IsValid())
+	{
+		if (LandingPreviewCamera) LandingPreviewCamera->DeactivatePreview();
+		return;
+	}
+
+	FABTSM6TrajectoryPreview Preview;
+	if (!TryGetQualifiedReinforcedLandingPreview(Preview))
+	{
+		if (LandingPreviewCamera) LandingPreviewCamera->DeactivatePreview();
+		return;
+	}
+
+	EnsureLandingPreviewCamera();
+	if (LandingPreviewCamera)
+	{
+		LandingPreviewCamera->UpdatePreview(Preview, *Planet.Get(), DeltaSeconds);
 	}
 }
 
@@ -86,6 +164,8 @@ bool AABTSM10ScoutMapSystem::ResolveDependencies()
 
 	if (!SlingshotSystem.IsValid())
 	{
+		// Weak-pointer invalidation means the prior actor is already gone; do not
+		// pass a null prerequisite through the actor tick API.
 		bBoundToSlingshot = false;
 		for (TActorIterator<AABTSM6SlingshotSystem> It(GetWorld()); It; ++It)
 		{
@@ -96,6 +176,10 @@ bool AABTSM10ScoutMapSystem::ResolveDependencies()
 	if (SlingshotSystem.IsValid() && !bBoundToSlingshot)
 	{
 		SlingshotSystem->OnLaunchCompleted().AddUObject(this, &AABTSM10ScoutMapSystem::HandleLaunchCompleted);
+		if (PrimaryActorTick.IsTickFunctionEnabled() && SlingshotSystem->PrimaryActorTick.IsTickFunctionEnabled())
+		{
+			AddTickPrerequisiteActor(SlingshotSystem.Get());
+		}
 		bBoundToSlingshot = true;
 	}
 	return Planet.IsValid() && bBoundToSlingshot;

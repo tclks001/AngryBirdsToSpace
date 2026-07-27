@@ -11,8 +11,10 @@
 class AABTSM3Planet;
 class AABTSM6SlingshotSystem;
 class AABTSM6DestructibleProxy;
+class AABTSM101LandingPreviewCamera;
 class UHierarchicalInstancedStaticMeshComponent;
 class UTexture2D;
+class UTextureRenderTarget2D;
 struct FABTSM6TrajectoryPreview;
 
 /** Owns one fixed spherical scout snapshot plus live projected environment markers. */
@@ -38,6 +40,12 @@ public:
 	bool ProjectWorldLocation(const FVector& WorldLocation, FVector2D& OutNormalizedMapPosition) const;
 	/** Copies M6's authoritative aim prediction; this system never integrates a second HUD-only trajectory. */
 	bool CopyCurrentTrajectoryPreview(FABTSM6TrajectoryPreview& OutPreview) const;
+	/** Narrow M10.1-B eligibility gate shared by the SceneCapture path and any future landing UI. */
+	bool TryGetQualifiedReinforcedLandingPreview(FABTSM6TrajectoryPreview& OutPreview) const;
+	/** True only while the scoped M10.1-B SceneCapture is currently eligible and visible. */
+	bool IsLandingPreviewActive() const;
+	/** Runtime-only render target consumed by the M10 HUD; nullptr while no capture was initialized. */
+	UTextureRenderTarget2D* GetLandingPreviewRenderTarget() const;
 
 private:
 	bool ResolveDependencies();
@@ -53,6 +61,8 @@ private:
 	void AppendHISMMarkers(UHierarchicalInstancedStaticMeshComponent* HISM, EABTSM10ScoutMarkerType Type);
 	void AppendMarker(const FVector& WorldLocation, EABTSM10ScoutMarkerType Type);
 	bool IsInsideEnvironmentBroadphase(const FVector& WorldLocation) const;
+	void UpdateLandingPreview(float DeltaSeconds);
+	void EnsureLandingPreviewCamera();
 
 	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M10")
 	FABTSM10ScoutMapSettings Settings;
@@ -62,6 +72,8 @@ private:
 
 	TWeakObjectPtr<AABTSM3Planet> Planet;
 	TWeakObjectPtr<AABTSM6SlingshotSystem> SlingshotSystem;
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM101LandingPreviewCamera> LandingPreviewCamera;
 	TArray<FABTSM10ScoutMapMarker> EnvironmentMarkers;
 	TArray<AABTSM6DestructibleProxy*> ProxyRefreshScratch;
 	FVector RevealCenterUnit = FVector::UpVector;
