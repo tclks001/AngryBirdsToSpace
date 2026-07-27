@@ -2,7 +2,7 @@
 
 > 文档定位：本稿记录 M10 的玩法闭环、固定球面投影、地图数据来源、编辑器配置、验收与排错。M10 不改变 TaskGraph、CellTopo、M3 地形生成或 M6 破坏规则，只把已有逻辑结果转译为一次侦察所得的固定圆形地图。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [UI 系统设计](UISystemDesign.md) · [M5.1 世界物品与弹弓放置](M51WorldItemsPlacementSlingshotDesign.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M3 地形视觉表现](M3TaskGraphTerrainPresentationDesign.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [UI 系统设计](UISystemDesign.md) · [M5.1 世界物品与弹弓放置](M51WorldItemsPlacementSlingshotDesign.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M3 地形视觉表现](M3TaskGraphTerrainPresentationDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)
 
 ## 1. 阶段目标
 

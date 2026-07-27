@@ -4,7 +4,7 @@
 >
 > 物理碰撞爽感、阈值悖论和后续损伤/结构升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M5.1 弹弓装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞](M52CollisionAndMovementDesign.md) · [M6 视觉协议](M6SlingshotVisualPresentationDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M5.1 弹弓装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞](M52CollisionAndMovementDesign.md) · [M6 视觉协议](M6SlingshotVisualPresentationDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)
 
 ## 1. 阶段目标
 
