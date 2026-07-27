@@ -16,12 +16,12 @@
 - 物品与世界交互：[M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/放置/装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md) · [M8 自动回收与桥梁](M8AutoRecoveryAndBridgesDesign.md)
 - 弹弓与物理破坏：[M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 弹弓视觉](M6SlingshotVisualPresentationDesign.md) · [物理碰撞破坏调研](PhysicsImpactDestructionResearch.md)
 - 建筑：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点（Legacy 对照）](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 新路线调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-1 纯数据语法实现](M73DAG1RecursiveGrammarImplementationDesign.md) · [M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [M7.3-DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [M7.3-DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [建筑语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)
-- 卫星与侦察：[M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)
+- 卫星、侦察与终局：[M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)
 - 资产与工程参考：[Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md)
 
 ## 1. 概念与终局
 
-四只具有不同撞击特性的鸟被困在一颗程序化生成的小行星上。玩家沿主路推进、在预生成的弹弓槽中安装弹弓桩与弹弓弦，把同伴发射到远离道路的结构化建筑；建筑的物理连锁坍塌暴露并产出材料，小鸟自动回收材料。玩家据此加工更强的弹弓组件，利用球面地形、河网、桥梁和低轨卫星的引力走廊击溃更高价值目标，最终完成钢铁太空弹弓并飞离星球。
+一只无颜色的白色 CuteBird 被外星人抓走，四只具有不同撞击特性的彩色小鸟被困在一颗程序化生成的小行星上。玩家沿主路推进、在预生成的弹弓槽中安装弹弓桩与弹弓弦，把同伴发射到远离道路的结构化建筑；建筑的物理连锁坍塌暴露并产出材料，小鸟自动回收材料。玩家据此加工更强的弹弓组件，利用球面地形、河网、桥梁和低轨卫星的引力走廊击溃更高价值目标，最终完成钢铁太空弹弓，通过三颗固定行星的连续引力弹弓命中遥远 UFO，并救回白色小鸟。
 
 ```text
 沿主路发现弹弓槽
@@ -29,13 +29,14 @@
 -> 发射鸟摧毁近处模块化建筑
 -> 自动回收材料并加工强化组件
 -> 借河谷、桥梁与卫星引力走廊击毁远端高价值建筑
--> 钢铁太空弹弓
--> 飞离星球
+-> 找到太空弹弓槽并完成钢铁太空弹弓
+-> 精调一条依次经过三颗行星的终局轨迹
+-> 命中 UFO，四鸟完成攻击并救回白色小鸟
 ```
 
 本作不复刻既有弹弓游戏。鸟名、轮廓、动作、音效、任务叙事和美术资产均使用原创设计；核心是“在球面环境中弹射同伴解决采集与建造问题”。
 
-最终发射必须是真实演出：四鸟就位、弹弓蓄力、鸟群被抛向天空、球面重力逐步淡出、镜头拉远，首次展示小行星悬浮在宇宙中。
+最终发射必须同时是可解的轨道谜题和完整演出：玩家从全景轨迹图理解三次偏转与增能，发射后依次近掠三颗行星，镜头在全局轨迹和近距离速度感之间切换，最终命中 UFO；随后四鸟完成攻击并救出白色小鸟。M11 的物理取舍、确定性边界和实施门槛见 [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 
 ## 2. 设计支柱
 
@@ -266,10 +267,10 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
 | M9 | 卫星与强化弹弓 | 生成一颗 `CellTopo Sub=2`、渲染 `Sub=4` 的纯灰卫星；以最终 `LaunchSite` 的 CellTopo Seed 锚定，局部逆平方引力叠加到鸟体与预览弹道。详见 [M9SatelliteGravityDesign.md](M9SatelliteGravityDesign.md)。 |
 | M10 | 青翎侦察小地图 | 树枝与植物纤维在弹弓槽装配 Twig 弹弓，仅青翎可发射；完整发射结束后以最终落点固化球面侦察圆盘，显示 SDF 地形、道路、河网、树石、建筑和四鸟位置，并持续跟踪 Chaos 位移与破坏。详见 [M10ScoutMinimapDesign.md](M10ScoutMinimapDesign.md)。 |
-| M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点画中画；轨迹足够长或落点离开主视距时自动显示左下圆形轨道全景图。M10.1-A 小地图轨迹与 M10.1-B 落点画中画均已完成 PIE 验收；M10.1-C 已实现整条轨迹的最佳拟合平面、正交投影与凸包自适应取景，使弹弓固定在图左侧，并以理想主星的世界绝对经纬网、无经纬网卫星以及球后虚线/可见实线解释空间偏转。C++ 编译已通过，待 PIE 视觉验收。详见 [M10.1 总设计](M101BeyondHorizonLaunchInterfaceDesign.md)与 [M10.1-C 实现详稿](M101COrbitalOverviewDiagramDesign.md)。 |
-| M11 | 发射/终局表演 | 钢铁太空弹弓、完整终局 |
+| M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点画中画；轨迹足够长或落点离开主视距时自动显示左下圆形轨道全景图。M10.1-A/B/C 初版均已完成 PIE 验收；C 已实现整条轨迹的最佳拟合平面、正交投影与凸包自适应取景，使弹弓固定在图左侧，并以理想主星的世界绝对经纬网、无经纬网卫星以及球后虚线/可见实线解释空间偏转。通用目标选择与走廊 M10.1-D 延期。详见 [M10.1 总设计](M101BeyondHorizonLaunchInterfaceDesign.md)与 [M10.1-C 实现详稿](M101COrbitalOverviewDiagramDesign.md)。 |
+| M11 | 三重引力弹弓终局 | 收集并装配太空弹弓后，在手工布置、位置固定的终局场景中通过三颗静止行星依次偏转、增能并命中 UFO，救出 `BP_Cute_Bird_0` 白色小鸟。首版推荐同一 World 的锁定终局层以保留库存与 Party；独立地图必须先有入口快照。算法预演已完成，推荐“中心天体束缚 + 自然偏转 + 虚拟公转动量 + B-plane 走廊 + 预演/实飞同源求解器”；当前待确认，尚未实施。详见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。 |
 
-初版演示顺序：展示固定 Seed 生成的主路、河网、桥址、道路外建筑、弹弓槽与卫星；青翎从树枝槽近射侦察并标记目标；玩家收集保底树枝/石料，在工作台加工两桩与弹弦；组装简易弹弓并发射红鸟或黄鸟击中建筑弱点；建筑的模块与装置连锁坍塌，发射鸟自动回收材料；以木材修桥或加工强化部件；展示卫星引力走廊使强化发射偏转；完成钢铁太空弹弓和终局表演。
+初版演示顺序：展示固定 Seed 生成的主路、河网、桥址、道路外建筑、弹弓槽与卫星；青翎从树枝槽近射侦察并标记目标；玩家收集保底树枝/石料，在工作台加工两桩与弹弦；组装简易弹弓并发射红鸟或黄鸟击中建筑弱点；建筑的模块与装置连锁坍塌，发射鸟自动回收材料；以木材修桥或加工强化部件；展示卫星引力走廊使强化发射偏转；完成钢铁太空弹弓；在固定终局场景中依次完成三次引力弹弓并命中 UFO，救出白色小鸟。
 
 中期不要求完成昼夜、天气、大规模 HISM 装饰。
 

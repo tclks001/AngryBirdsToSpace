@@ -4,7 +4,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -20,16 +20,16 @@ AABTSM1BirdCharacter::AABTSM1BirdCharacter()
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	BirdVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BirdVisual"));
+	BirdVisual = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("BirdVisual"));
 	BirdVisual->SetupAttachment(GetCapsuleComponent());
-	BirdVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -18.0f));
-	BirdVisual->SetRelativeScale3D(FVector(0.78f, 0.78f, 0.66f));
 	BirdVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereMesh.Succeeded())
-	{
-		BirdVisual->SetStaticMesh(SphereMesh.Object);
-	}
+	BirdVisual->SetGenerateOverlapEvents(false);
+	BirdVisual->SetSimulatePhysics(false);
+	BirdVisual->SetCanEverAffectNavigation(false);
+	BirdVisual->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> CuteBirdMesh(TEXT("/Game/CuteBird/Meshes/SM_Cute_Bird.SM_Cute_Bird"));
+	if (CuteBirdMesh.Succeeded()) BirdVisual->SetSkeletalMesh(CuteBirdMesh.Object);
+	ApplyBirdVisualTransform();
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(GetCapsuleComponent());
@@ -42,26 +42,24 @@ AABTSM1BirdCharacter::AABTSM1BirdCharacter()
 	FollowCamera->bUsePawnControlRotation = false;
 }
 
-void AABTSM1BirdCharacter::SetBirdVisualMesh(UStaticMesh* InMesh)
-{
-	if (BirdVisual == nullptr) return;
-	if (InMesh != nullptr)
-	{
-		BirdVisual->SetStaticMesh(InMesh);
-		return;
-	}
-
-	static UStaticMesh* FallbackSphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	BirdVisual->SetStaticMesh(FallbackSphere);
-}
-
 void AABTSM1BirdCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	if (BirdMeshOverride != nullptr)
-	{
-		SetBirdVisualMesh(BirdMeshOverride);
-	}
+	ApplyBirdVisualTransform();
+}
+
+void AABTSM1BirdCharacter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyBirdVisualTransform();
+}
+
+void AABTSM1BirdCharacter::ApplyBirdVisualTransform()
+{
+	if (BirdVisual == nullptr) return;
+	BirdVisual->SetRelativeLocation(BirdVisualRelativeLocation);
+	BirdVisual->SetRelativeRotation(BirdVisualRelativeRotation);
+	BirdVisual->SetRelativeScale3D(BirdVisualRelativeScale.ComponentMax(FVector(0.01f)));
 }
 
 void AABTSM1BirdCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

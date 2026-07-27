@@ -139,3 +139,7 @@ HISM 实例达到撞开阈值后：
 - M6 不生成掉落，不回收到代理池；
 - 不处理密集森林的同时唤醒预算、代理互穿或碰撞风暴；
 - 黑鸟爆炸没有表现资产、音效和镜头震动。
+
+## 11. M11 Space 档下游边界
+
+M6 的 Twig/Simple/Reinforced 预演、Chaos 实飞和碰撞链路保持不变。M11 的三重近星飞越会放大当前粗预览与逐帧实飞之间的误差，因此 Space 档若获批准，应在 Release 后交由一个预演/实飞同源的固定步长 provider 接管，而不是继续扩展 `FABTSM6TrajectoryPreview` 或在 HUD 内建立第二套积分器。完整取舍见 [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。

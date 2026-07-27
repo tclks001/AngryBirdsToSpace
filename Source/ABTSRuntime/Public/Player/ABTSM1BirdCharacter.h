@@ -8,7 +8,7 @@
 
 class UCameraComponent;
 class USpringArmComponent;
-class UStaticMeshComponent;
+class USkeletalMeshComponent;
 
 /** Temporary third-person playable representation for M1; it deliberately owns no inventory or party logic. */
 UCLASS(BlueprintType)
@@ -20,24 +20,37 @@ public:
 	AABTSM1BirdCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
-	UFUNCTION(BlueprintCallable, Category = "ABTS|Bird|Presentation")
-	void SetBirdVisualMesh(UStaticMesh* InMesh);
-
 	UFUNCTION(BlueprintPure, Category = "ABTS|Bird|Presentation")
-	UStaticMeshComponent* GetBirdVisual() const { return BirdVisual; }
+	USkeletalMeshComponent* GetBirdVisual() const { return BirdVisual; }
+
+protected:
+	/** Local mesh-axis correction used by physics-driven visual frames. */
+	FQuat GetBirdVisualAxisCorrection() const { return BirdVisualRelativeRotation.Quaternion(); }
+	/** User-authored offset from the collision support point, expressed in the presentation frame. */
+	const FVector& GetBirdVisualRelativeLocation() const { return BirdVisualRelativeLocation; }
 
 private:
+	void ApplyBirdVisualTransform();
 	void MoveForward(float Value);
 	void MoveRight(float Value);
 
-	/** Optional per-class model. Null falls back to the native engine sphere. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|Bird|Presentation", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UStaticMesh> BirdMeshOverride;
+	/** Purely visual offset; Chaos applies it from the sphere support point and it never moves either collision body. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|Bird|Presentation|Transform", meta = (AllowPrivateAccess = "true", MakeEditWidget = "true"))
+	FVector BirdVisualRelativeLocation = FVector::ZeroVector;
+
+	/** Purely visual local orientation. Adjust this when the imported mesh faces a different forward axis. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|Bird|Presentation|Transform", meta = (AllowPrivateAccess = "true"))
+	FRotator BirdVisualRelativeRotation = FRotator(0.0f, -90.0f, 0.0f);
+
+	/** Purely visual local scale. It never changes the collision size or physical mass. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|Bird|Presentation|Transform", meta = (AllowPrivateAccess = "true", ClampMin = "0.01"))
+	FVector BirdVisualRelativeScale = FVector(4.0f);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M1", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UStaticMeshComponent> BirdVisual;
+	TObjectPtr<USkeletalMeshComponent> BirdVisual;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M1", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USpringArmComponent> CameraBoom;

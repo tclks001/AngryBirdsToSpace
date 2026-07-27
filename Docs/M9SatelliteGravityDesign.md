@@ -88,3 +88,7 @@ PIE 日志应出现：
 [ABTS][M9][Debug] DeveloperWalk=1 Birds=4 SpeedMultiplier=4.0 AnyCellStake=1
 [ABTS][M5.1][DebugStake] Installed=... Cell=... AllowAnyCell=1
 ```
+
+## 7. M11 下游边界
+
+M9 的一颗静止卫星和逆平方引力继续作为普通球面关卡的局部偏转基线。固定点质量只能改变轨迹方向，不能让原本受中心天体束缚的飞行获得永久净能量；M11 因而不会把三颗终局行星做成三个 `AABTSM9Satellite`。终局采用独立普通 Actor、固定布局、虚拟公转动量与同源确定性求解器，详见 [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。

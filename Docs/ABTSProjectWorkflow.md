@@ -8,16 +8,17 @@
 
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
-- 当前验收项：M10.1-A（强化弹弓小地图轨迹与红色落点）和 M10.1-B（远端落点画中画）均已完成 PIE 验收；M10.1-C（星球尺度拟合截面轨道全景图）已完成 C++ 与编译，待 PIE 视觉验收。
-- 默认下一步：按 M10.1-C 详稿完成 PIE 视觉/交互验收并回写结果。完整目标选择、影响事件标签与引力走廊属于 M10.1-D，尚未授权实现。
+- 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
+- 当前阶段：M11 终局三重引力弹弓的调研与算法预演已完成，推荐“固定视觉行星 + 虚拟公转动量 + 自然偏转 + B-plane 走廊 + 同源确定性求解器”，尚未授权实施。
+- 默认下一步：确认 M11 的物理路线、玩家输入、四鸟表现、轨迹界面和进度连续性五项决策；确认后从无 World/Actor 的 `M11-A` 纯数据求解器与测试夹具开始，不直接制作终局演出。
 
-当前阶段父级入口为：[M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)；当前实现与交接详稿为：[M10.1-C 星球尺度拟合截面轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
+当前阶段父级入口为：[主设计稿的 M11 终局阶段](AngryBirdsToSpaceGameDesign.md#1-概念与终局)；当前设计与交接详稿为：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 
 ## 2. 不可违反的项目约束
 
-1. `CellTopo` 永远是球面 Gameplay 的逻辑源：地形类型、道路、水网、桥址、建筑/资源逻辑与可达性均由它或 Task Graph 派生；连续球面只负责渲染与碰撞表现。
-2. M6 的实际飞行与碰撞是权威物理链路；HUD、小地图、远端画中画和后续走廊只能消费其只读预测快照，不能维护第二套积分器。
-3. 四鸟正式移动路线为 Chaos 刚体碰撞；旧 `ForceSuspension` 与 `LegacySweep` 仅保留为历史对照。
+1. `CellTopo` 永远是球面地表 Gameplay 的逻辑源：地形类型、道路、水网、桥址、建筑/资源逻辑与可达性均由它或 Task Graph 派生；连续球面只负责渲染与碰撞表现。M11 的中心天体、三颗助推行星和 UFO 是明确的固定太空场景体，不反向成为地表逻辑源。
+2. M1–M10 的实际飞行与碰撞继续以 M6 为权威链路，HUD、小地图和画中画只能消费其只读预测快照。M11 Space 档若获批准，必须由同一个专用固定步长求解器同时驱动预演与实飞，不能在 HUD、Chaos 或另一组件中复制第二套轨道积分。
+3. 四鸟常规行走与 M1–M10 发射的正式移动路线为 Chaos 刚体碰撞；旧 `ForceSuspension` 与 `LegacySweep` 仅保留为历史对照。M11 Space 深空段若获批准，按上一条由同源确定性运动接管，命中目标后才切回 Chaos 表现。
 4. 新功能按独立职责拆分 C++ 类；单个源文件接近 600 行时优先拆分。编辑器可调值必须以带注释的 `UPROPERTY` 暴露，不把配置硬编码进 HUD 或临时脚本。
 
 详细依据：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md)。
@@ -43,21 +44,23 @@
 | 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 材料/装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) |
 | 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) |
+| 终局轨道谜题 | [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) |
 | 资产与排错 | [Low Poly/AI 资产流程](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md) |
 
 ## 5. 当前验收与交接清单
 
-### M10.1-C PIE 验收与交接
+### M11 算法预演交接
 
-1. 以青翎完成一次侦察；强化弹弓 `Pulling` 的路径达到可调阈值，或落点离开主视图/被主星遮挡时，确认圆图自动出现，不要求落点进入侦察圆。
-2. 确认圆图位于侦察圆下方、物品 HUD 左侧相邻区域，不遮挡弹弓；改变窗口尺寸后仍在安全区。
-3. 确认弹弓在图左侧、完整预测轨迹始终进入圆图安全边距；轨迹变长时自动拉远，主星允许被裁切。
-4. 调整会产生三维偏转的发射方向，确认全部轨迹点投影连续，截面不无故左右/上下翻转。
-5. 确认主星只显示基础正球与世界绝对经纬网，不显示 HISM、SDF、高程、道路、建筑、资源或侦察弧；卫星不显示经纬网。
-6. 确认原始三维轨迹位于主星或卫星后方时为虚线，前方为实线，切换处稳定。
-7. 松开发射或使预测失效，确认圆图当帧退出；核对没有新增 SceneCapture、RenderTarget 或 HUD 积分器。
+1. 确认固定行星的纯保守引力不能产生净加速，因此 M11 不直接复用 M9 作为完整算法。
+2. 确认是否采用“中心天体束缚 + 固定行星自然偏转 + 虚拟公转动量换能 + B-plane 顺序走廊”的推荐模型。
+3. 确认首版是否锁定发射功率，只让玩家调整偏航与俯仰。
+4. 确认四鸟终局表现是否采用“一只领航鸟运行权威轨迹，其余三鸟离开近景后编队跟随”。
+5. 确认 Space 档是否自动进入较大的终局轨迹模式，并保留圆形收起态。
+6. 确认首版是否采用同一 World 的锁定终局层以原样保留库存与 Party；若选择独立地图，先批准并实现版本化入口快照。
+7. 用户提供三颗行星与 UFO 静态网格时，核对 Pivot、视觉半径、环朝向和 UFO 挂点；玩法球、作用圈和引力参数不从网格 Bounds 自动推断。
+8. 五项决策批准后只进入 `M11-A`：先实现纯数据求解器、能量阶梯、步长收敛、确定性与助推消融测试；预演/实飞同源接管留到 `M11-C`，不同时制作地图、美术和结局。
 
-严格参数、数学、验收与排错见：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。父级边界见：[M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md)；上游同源数据见：[M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md)与[M9 卫星](M9SatelliteGravityDesign.md)。
+算法、接口、HUD 语义、资产契约和验收矩阵见：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。已验收的上游表现见：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)；既有物理边界见：[M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md)与[M9 卫星](M9SatelliteGravityDesign.md)。
 
 ## 6. 本文维护规则
 

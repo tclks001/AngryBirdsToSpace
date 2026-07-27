@@ -1,10 +1,10 @@
 # M10.1-C：星球尺度拟合截面轨道全景图设计与实现
 
-> 状态：设计已确认，C++ 与 `AngryBirdsToSpaceEditor Win64 Development` 编译已完成；当前待 PIE 视觉验收。
+> 状态：设计、C++、`AngryBirdsToSpaceEditor Win64 Development` 编译与 PIE 视觉验收均已完成；M10.1-C 已验收。
 >
 > 父级：[M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md)。
 >
-> 导航：[项目工作流](ABTSProjectWorkflow.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md)
+> 导航：[项目工作流](ABTSProjectWorkflow.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)
 
 ## 1. 目标、边界与非目标
 
@@ -270,36 +270,36 @@ PredictedPathLengthCM
 
 ## 13. PIE 验收清单
 
-自动化基线已完成：`AngryBirdsToSpaceEditor Win64 Development` 全量增量编译成功；随后以全新 `UnrealEditor -game` 进程加载 `L_ABTS_M10`，确认磁盘 DLL、`BP_ABTSM10GameMode`、主星、卫星、M6 与 M10 系统完成初始化，并输出 `OrbitalOverview=1 MinPathCM=2500 DiameterPx=250` 后正常退出。该检查不替代下面的可交互 PIE 构图与线型目视验收。
+自动化基线已完成：`AngryBirdsToSpaceEditor Win64 Development` 全量增量编译成功；随后以全新 `UnrealEditor -game` 进程加载 `L_ABTS_M10`，确认磁盘 DLL、`BP_ABTSM10GameMode`、主星、卫星、M6 与 M10 系统完成初始化，并输出 `OrbitalOverview=1 MinPathCM=2500 DiameterPx=250` 后正常退出。下列可交互 PIE 构图与线型项目已由用户完成验收。
 
 ### 13.1 显示资格与布局
 
-- [ ] 强化弹弓 `Pulling` 的路径首次达到阈值时圆图自动出现，不要求红色落点进入侦察圆。
-- [ ] 路径在阈值附近微调时不闪烁；跌破隐藏阈值、松开发射或预测失效后正确消失。
-- [ ] 1333×745 基准视口中圆图位于侦察圆下方、物品 HUD 左侧相邻区域，不遮挡弹弓。
-- [ ] 改变窗口大小后圆图保持在屏幕内；空间不足时缩小而不是覆盖物品栏。
+- [x] 强化弹弓 `Pulling` 的路径首次达到阈值时圆图自动出现，不要求红色落点进入侦察圆。
+- [x] 路径在阈值附近微调时不闪烁；跌破隐藏阈值、松开发射或预测失效后正确消失。
+- [x] 1333×745 基准视口中圆图位于侦察圆下方、物品 HUD 左侧相邻区域，不遮挡弹弓。
+- [x] 改变窗口大小后圆图保持在屏幕内；空间不足时缩小而不是覆盖物品栏。
 
 ### 13.2 投影与构图
 
-- [ ] 弹弓发射点位于完整轨迹的左侧；连续微调不会无故左右翻转或上下颠倒。
-- [ ] 完整预测轨迹始终进入圆图安全边距，轨迹变长时自动拉远，主星允许只显示一部分。
-- [ ] 卫星引力使轨迹不共面时，全部原始轨迹点被正交投影到同一拟合截面，线段连续。
-- [ ] 不存在有效落点但预测路径足够长时，圆图仍可显示完整已有轨迹，仅不绘制落点 `X`。
+- [x] 弹弓发射点位于完整轨迹的左侧；连续微调不会无故左右翻转或上下颠倒。
+- [x] 完整预测轨迹始终进入圆图安全边距，轨迹变长时自动拉远，主星允许只显示一部分。
+- [x] 卫星引力使轨迹不共面时，全部原始轨迹点被正交投影到同一拟合截面，线段连续。
+- [x] 不存在有效落点但预测路径足够长时，圆图仍可显示完整已有轨迹，仅不绘制落点 `X`。
 
 ### 13.3 球体与空间关系
 
-- [ ] 主星显示基础正球轮廓和世界绝对经纬网；改变发射方向时经纬网投影随截面变化。
-- [ ] 主星不显示地表起伏、SDF、道路、河流、树石、建筑、物品、鸟或侦察覆盖。
-- [ ] 卫星只显示理想圆形轮廓，不显示经纬网。
-- [ ] 位于主星或卫星前方的轨迹为实线；球体后方的轨迹为虚线；切线附近切换稳定。
-- [ ] 遮挡关系来自原始三维深度：同一二维交点会因前后位置不同显示不同线型。
+- [x] 主星显示基础正球轮廓和世界绝对经纬网；改变发射方向时经纬网投影随截面变化。
+- [x] 主星不显示地表起伏、SDF、道路、河流、树石、建筑、物品、鸟或侦察覆盖。
+- [x] 卫星只显示理想圆形轮廓，不显示经纬网。
+- [x] 位于主星或卫星前方的轨迹为实线；球体后方的轨迹为虚线；切线附近切换稳定。
+- [x] 遮挡关系来自原始三维深度：同一二维交点会因前后位置不同显示不同线型。
 
 ### 13.4 一致性与性能
 
-- [ ] 圆图、小地图、落点画中画和 M6 世界虚线消费同一份 `FABTSM6TrajectoryPreview`。
-- [ ] M10.1-C 不创建新的 SceneCapture/RenderTarget，也不驱动鸟体、碰撞或引力。
-- [ ] Pulling 中没有明显长帧；默认网格密度下圆图 GameThread 增量满足预算。
-- [ ] 修改公开参数后无需修改 C++ 即可重新标定阈值、尺寸、间距和虚线。
+- [x] 圆图、小地图、落点画中画和 M6 世界虚线消费同一份 `FABTSM6TrajectoryPreview`。
+- [x] M10.1-C 不创建新的 SceneCapture/RenderTarget，也不驱动鸟体、碰撞或引力。
+- [x] Pulling 中没有明显长帧；默认网格密度下圆图 GameThread 增量满足预算。
+- [x] 修改公开参数后无需修改 C++ 即可重新标定阈值、尺寸、间距和虚线。
 
 ## 14. 排错表
 
@@ -323,6 +323,7 @@ PredictedPathLengthCM
 - 同级 M10.1-A：继续负责侦察圆内轨迹和红色落点；
 - 同级 M10.1-B：继续负责侦察范围内真实落点画中画；
 - 下游 M10.1-D：可在本图上增加已侦察目标、影响事件和走廊，但不得改变 C 的投影、缩放和遮挡语义；
+- 下游 M11：复用本稿的拟合、构图、球体遮挡和裁剪语义，但由独立轨迹结果提供三颗固定行星、UFO 与助推事件，不依赖青翎侦察或主星落点；见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)；
 - 未来失重区/旋风场：应向预测快照增加带稳定 ID 的影响事件，再投影到本图；不能由 HUD 根据轨迹弯曲形状猜测力源。
 
 返回父级：[M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)

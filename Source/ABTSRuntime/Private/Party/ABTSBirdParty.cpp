@@ -137,7 +137,6 @@ bool AABTSBirdParty::SpawnFollowers(AABTSM25BirdCharacter& InitialLeader)
 	const FABTSBirdPresentationConfig& RedPresentation = ResolvedPresentation[ABTSBirdIdToIndex(EABTSBirdId::Red)];
 	InitialLeader.SetBirdIdentity(EABTSBirdId::Red, RedPresentation.SlingshotCapability, true);
 	InitialLeader.SetPartyCollisionIsolation(true);
-	InitialLeader.SetBirdVisualMesh(RedPresentation.BirdMesh);
 
 	AABTSM2Planet* ResolvedPlanet = bPlanarMode ? nullptr : FindPlanet();
 	if (!bPlanarMode && ResolvedPlanet == nullptr) return false;
@@ -180,7 +179,6 @@ bool AABTSBirdParty::SpawnFollowers(AABTSM25BirdCharacter& InitialLeader)
 		const FABTSBirdPresentationConfig& Presentation = ResolvedPresentation[Index];
 		Bird->SetBirdIdentity(BirdId, Presentation.SlingshotCapability, false);
 		Bird->SetPartyCollisionIsolation(true);
-		Bird->SetBirdVisualMesh(Presentation.BirdMesh);
 		if (bPlanarMode) Bird->EnablePlanarChaosMovement(PlanarOrigin, PlanarUp);
 		Bird->ResetRadialMovementState();
 		PartyMembers.Add(Bird);
