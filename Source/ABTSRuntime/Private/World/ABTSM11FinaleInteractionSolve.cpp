@@ -4,6 +4,8 @@
 
 #include "ABTSRuntime.h"
 #include "Async/Async.h"
+#include "Components/CapsuleComponent.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM11GravityAssistSolver.h"
@@ -78,11 +80,9 @@ void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 	bPreviewDirty = false;
 	bPreviewSolveInFlight = true;
 	PreviewSubmitAccumulatorSeconds = 0.0;
-	TWeakObjectPtr<AABTSM11FinaleInteractionSystem> WeakThis(this);
-	Async(
+	PreviewSolveFuture = Async(
 		EAsyncExecution::ThreadPool,
 		[
-			WeakThis,
 			Preset,
 			QualifiedRequest,
 			Input,
@@ -121,15 +121,7 @@ void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 					}
 				}
 			}
-			AsyncTask(
-				ENamedThreads::GameThread,
-				[WeakThis, Payload]()
-				{
-					if (WeakThis.IsValid())
-					{
-						WeakThis->HandlePreviewSolveCompleted(Payload);
-					}
-				});
+			return Payload;
 		});
 }
 
@@ -157,10 +149,9 @@ void AABTSM11FinaleInteractionSystem::QueueNominalPhysicalSolve()
 	}
 
 	bNominalSolveInFlight = true;
-	TWeakObjectPtr<AABTSM11FinaleInteractionSystem> WeakThis(this);
-	Async(
+	NominalSolveFuture = Async(
 		EAsyncExecution::ThreadPool,
-		[WeakThis, Request]()
+		[Request]()
 		{
 			TSharedPtr<FABTSM11NominalSolvePayload> Payload =
 				MakeShared<FABTSM11NominalSolvePayload>();
@@ -169,22 +160,43 @@ void AABTSM11FinaleInteractionSystem::QueueNominalPhysicalSolve()
 					Request,
 					Payload->Result,
 					&Payload->Failure);
-			AsyncTask(
-				ENamedThreads::GameThread,
-				[WeakThis, Payload]()
-				{
-					if (WeakThis.IsValid())
-					{
-						WeakThis->HandleNominalSolveCompleted(Payload);
-					}
-				});
+			return Payload;
 		});
+}
+
+void AABTSM11FinaleInteractionSystem::DrainCompletedSolves()
+{
+	check(IsInGameThread());
+	// Poll futures only from the Actor's native Tick. A ThreadPool completion
+	// must never create a GameThread task carrying the worker's empty FAppTime
+	// inherited context into SceneCapture or component render updates.
+	if (NominalSolveFuture.IsValid()
+		&& NominalSolveFuture.IsReady())
+	{
+		HandleNominalSolveCompleted(
+			NominalSolveFuture.Consume());
+	}
+	if (PreviewSolveFuture.IsValid()
+		&& PreviewSolveFuture.IsReady())
+	{
+		HandlePreviewSolveCompleted(
+			PreviewSolveFuture.Consume());
+	}
 }
 
 void AABTSM11FinaleInteractionSystem::HandlePreviewSolveCompleted(
 	TSharedPtr<FABTSM11PreviewSolvePayload> Payload)
 {
+	check(IsInGameThread());
 	bPreviewSolveInFlight = false;
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		&& InteractionState
+			!= EABTSM11FinaleInteractionState::ReleasePending)
+	{
+		// Exit/recovery invalidates presentation publication. The worker owns
+		// only pure data, so a late result can be discarded without cleanup.
+		return;
+	}
 	if (!Payload.IsValid() || !Payload->bSolved)
 	{
 		const FString Reason = Payload.IsValid()
@@ -265,6 +277,7 @@ void AABTSM11FinaleInteractionSystem::HandlePreviewSolveCompleted(
 void AABTSM11FinaleInteractionSystem::HandleNominalSolveCompleted(
 	TSharedPtr<FABTSM11NominalSolvePayload> Payload)
 {
+	check(IsInGameThread());
 	bNominalSolveInFlight = false;
 	if (!Payload.IsValid()
 		|| !Payload->bSolved
@@ -357,7 +370,7 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 		PreviewPlaybackPlan.Points,
 		LatestQualifiedResult.ValidationHash,
 		DiagramSnapshot);
-	UpdateTargetCapture();
+	MarkTargetCaptureDirty();
 }
 
 bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
@@ -388,6 +401,33 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	ReleasedPlaybackPlan = PreviewPlaybackPlan;
 	PlaybackElapsedSeconds =
 		ReleasedPlaybackPlan.Points[0].TimeSeconds;
+	double BirdClearanceCM = 50.0;
+	if (IsValid(AttemptBird)
+		&& IsValid(AttemptBird->GetCapsuleComponent()))
+	{
+		BirdClearanceCM =
+			AttemptBird->GetCapsuleComponent()
+				->GetScaledCapsuleHalfHeight()
+			+ 10.0;
+	}
+	PlaybackPresentationEndTimeSeconds =
+		ReleasedPlaybackPlan.bPhysicalTargetHit
+		? ReleasedPlaybackPlan.DurationSeconds
+		: ABTSM11ResolveFailurePresentationEndTime(
+			FinaleSystem->GetLayoutPreset(),
+			LatestQualifiedResult,
+			ReleasedPlaybackPlan,
+			BirdClearanceCM);
+	if (!ReleasedPlaybackPlan.bPhysicalTargetHit)
+	{
+		const double FailureDurationCap =
+			FMath::Max(1.0, MaximumFailureFlightDisplaySeconds)
+			* FMath::Max(0.1, PlaybackTimeScale);
+		PlaybackPresentationEndTimeSeconds = FMath::Min(
+			PlaybackPresentationEndTimeSeconds,
+			ReleasedPlaybackPlan.Points[0].TimeSeconds
+				+ FailureDurationCap);
+	}
 	InteractionState = EABTSM11FinaleInteractionState::Launched;
 	if (IsValid(ActiveCord))
 	{
@@ -396,11 +436,12 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d Physical=%d Transfer=%d"),
+		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d Physical=%d Transfer=%d PresentationEnd=%.3f"),
 		ReleasedPlaybackPlan.ReleasedTrajectoryHash,
 		ReleasedPlaybackPlan.PlanHash,
 		ReleasedPlaybackPlan.bQualifiedF4 ? 1 : 0,
 		ReleasedPlaybackPlan.bPhysicalTargetHit ? 1 : 0,
-		ReleasedPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0);
+		ReleasedPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0,
+		PlaybackPresentationEndTimeSeconds);
 	return true;
 }

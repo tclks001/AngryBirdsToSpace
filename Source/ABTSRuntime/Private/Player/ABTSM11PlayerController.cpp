@@ -4,6 +4,7 @@
 
 #include "EngineUtils.h"
 #include "Game/ABTSM11GameMode.h"
+#include "InputCoreTypes.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM51WorldActors.h"
@@ -42,15 +43,37 @@ void AABTSM11PlayerController::PlayerTick(const float DeltaTime)
 		FindM11Interaction();
 	const bool bActive =
 		Interaction != nullptr && Interaction->IsFinaleActive();
+	if (bActive)
+	{
+		PrimaryReleaseGate.UpdateEntryButtonState(
+			IsInputKeyDown(EKeys::LeftMouseButton));
+		if (bM11PointerCaptureNeedsRefresh || bShowMouseCursor)
+		{
+			ApplyM11PointerMode(true);
+			bM11PointerCaptureNeedsRefresh = false;
+		}
+	}
 	if (bActive != bWasM11FinaleActive)
 	{
-		SetLaunchModeInputBlocked(bActive);
+		SetM11FinaleInputMode(bActive);
 		if (!bActive)
 		{
-			RestorePartyCameraView();
+			PrimaryReleaseGate.Reset();
 		}
 		bWasM11FinaleActive = bActive;
 	}
+}
+
+void AABTSM11PlayerController::FlushPressedKeys()
+{
+	// Focus loss must invalidate a partially armed launch. A fresh full
+	// press/release gesture is required after the viewport becomes active.
+	PrimaryReleaseGate.Reset();
+	if (bWasM11FinaleActive)
+	{
+		bM11PointerCaptureNeedsRefresh = true;
+	}
+	Super::FlushPressedKeys();
 }
 
 void AABTSM11PlayerController::InteractWithSlingshotCord(
@@ -73,7 +96,10 @@ void AABTSM11PlayerController::InteractWithSlingshotCord(
 		{
 			if (Interaction->TryEnterFinale(*Cord, *this))
 			{
-				SetLaunchModeInputBlocked(true);
+				// The actor click that entered aim must be consumed in full.
+				// Only a later press/release pair may launch.
+				PrimaryReleaseGate.Enter(true);
+				SetM11FinaleInputMode(true);
 				bWasM11FinaleActive = true;
 			}
 		}
@@ -88,6 +114,8 @@ void AABTSM11PlayerController::PrimaryWorldInteract()
 		FindM11Interaction();
 		Interaction != nullptr && Interaction->IsFinaleActive())
 	{
+		PrimaryReleaseGate.OnPrimaryPressed(
+			Interaction->IsAiming());
 		return;
 	}
 
@@ -124,7 +152,9 @@ void AABTSM11PlayerController::M11PrimaryReleased()
 {
 	if (AABTSM11FinaleInteractionSystem* Interaction =
 		FindM11Interaction();
-		Interaction != nullptr && Interaction->IsAiming())
+		Interaction != nullptr
+		&& PrimaryReleaseGate.OnPrimaryReleased(
+			Interaction->IsAiming()))
 	{
 		Interaction->RequestRelease();
 	}
@@ -179,6 +209,51 @@ void AABTSM11PlayerController::M11Cancel()
 	{
 		Interaction->CancelStabilizerOrResetAttempt();
 	}
+}
+
+void AABTSM11PlayerController::SetM11FinaleInputMode(
+	const bool bActive)
+{
+	SetLaunchModeInputBlocked(bActive);
+	if (bActive)
+	{
+		if (!bM11SavedPointerEventFlags)
+		{
+			bSavedClickEvents = bEnableClickEvents;
+			bSavedMouseOverEvents = bEnableMouseOverEvents;
+			bM11SavedPointerEventFlags = true;
+		}
+		// Finale launch presses are consumed by InputComponent only. Prevent
+		// the same press from also clicking a stake, slot, or crafting actor.
+		bEnableClickEvents = false;
+		bEnableMouseOverEvents = false;
+	}
+	else if (bM11SavedPointerEventFlags)
+	{
+		bEnableClickEvents = bSavedClickEvents;
+		bEnableMouseOverEvents = bSavedMouseOverEvents;
+		bM11SavedPointerEventFlags = false;
+	}
+	ApplyM11PointerMode(bActive);
+	bM11PointerCaptureNeedsRefresh = false;
+}
+
+void AABTSM11PlayerController::ApplyM11PointerMode(
+	const bool bActive)
+{
+	bShowMouseCursor = !bActive;
+	if (bActive)
+	{
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+		return;
+	}
+	FInputModeGameAndUI InputMode;
+	InputMode.SetHideCursorDuringCapture(false);
+	InputMode.SetLockMouseToViewportBehavior(
+		EMouseLockMode::LockOnCapture);
+	SetInputMode(InputMode);
+	RestorePartyCameraView();
 }
 
 AABTSM11FinaleInteractionSystem*

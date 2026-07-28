@@ -1,6 +1,6 @@
 # M11-C：终局轨道交互、全景 HUD 与确定性实飞
 
-> 状态：M11-B 已完成用户 PIE 验收；M11-C C++、默认 Development Editor 全链接、强制完整 Unity 全链接、全新进程 Unit/Runtime、21,025 输入/558 F4 接管闭包及上游快速回归均已通过；等待用户按第 12 节完成 PIE。
+> 状态：M11-B 已完成用户 PIE 验收；M11-C 初版与本轮 PIE 回归修复的 C++、强制完整 Unity 全链接、全新进程 Unit/Runtime、21,025 输入/558 F4 接管闭包及上游快速回归均已通过；等待用户按第 12 节重新完成有渲染 PIE。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
@@ -29,17 +29,18 @@ M11-C 把 M11-B 的冻结终局布局和 M11-A 的唯一积分器接入玩家操
 7. Release 后以缓存轨迹按绝对求解器时间插值移动，不按渲染帧积分；
 8. F4 到 800 cm UFO 的完整接管闭包：同输入可物理命中时保持同输入到底，否则只在 F4 之后显示 C2 `TerminalTransfer` 再接 nominal 物理尾段；
 9. 终局结果与 M9 的存在、位置、可见性和引力参数隔离；
-10. Development Editor 全链接、全新进程自动化和 PIE 验收清单。
+10. 错误发射的有界可读镜头、黑屏内安全原位恢复和可立即重试的最小失败闭环；
+11. Development Editor 全链接、全新进程自动化和 PIE 验收清单。
 
 ### 2.2 延期到 M11-D
 
 - 四鸟同时进入弹珠袋及完整编队标架；
 - 星空材质切换、雾云关闭、曝光和环境状态快照；
 - 白鸟救援、UFO 破坏、接触后的局部 Chaos 演出；
-- 常规失败的 3–6 秒镜头、黑屏和进入终局前的完整 Party/环境原位恢复；
+- 四鸟 Party、星空/雾云和剧情镜头共同参与的完整 Attempt Snapshot 与失败演出扩展；
 - 最终音频、镜头节奏和剧情收尾。
 
-M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞和接管合同；M11-D 只能消费这一条冻结播放计划，不能再建立第二套飞行模拟。
+M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M11-D 只能扩展四鸟/环境/剧情快照并消费这一条冻结播放计划，不能再建立第二套飞行模拟。
 
 ## 3. 权威数据流
 
@@ -80,10 +81,10 @@ AABTSM11FinaleSystem Ready
 ### 4.1 玩法状态
 
 ```text
-Locked -> Ready -> Aiming -> ReleasePending -> Launched
+Locked -> Ready -> Aiming -> ReleasePending -> Launched -> TargetHit
                     ^               |             |
-                    |               v             +-> TargetHit
-                    +----------- Failed <---------+
+                    |               v             v
+                    +----------- Recovering <- Failed
 ```
 
 - `Locked`：上游身份尚未通过；
@@ -92,9 +93,10 @@ Locked -> Ready -> Aiming -> ReleasePending -> Launched
 - `ReleasePending`：冻结当前 controlled input，等待完全相同 revision 的结果；
 - `Launched`：按冻结 Playback Plan 移动；
 - `TargetHit`：实际 800 cm UFO 接触完成；不是 16,000 cm F4 合格拦截；
-- `Failed`：依赖丢失、身份失败、求解失败或播放合同失败。
+- `Failed`：有真实尝试时播放有界失败反馈并淡入黑屏；无尝试的初始化/身份失败保持 fail-closed；
+- `Recovering`：已在全黑帧中原位恢复，等待淡出完成并回到 `Ready`。
 
-M11-D 可以在 `TargetHit` 后接救援演出，并在 `Failed` 后接完整失败镜头和黑屏复位；不得改变 M11-C 已冻结的轨迹结果。
+M11-D 可以在 `TargetHit` 后接救援演出，并扩展 `Failed/Recovering` 的四鸟、环境和剧情镜头；不得改变 M11-C 已冻结的轨迹结果或最小安全恢复时序。
 
 ### 4.2 Space 与普通弹弓隔离
 
@@ -102,7 +104,9 @@ M11-D 可以在 `TargetHit` 后接救援演出，并在 `Failed` 后接完整失
 
 - `IsFinaleSpaceSlingshot()==true` 时由 M11 拦截，M11 依赖无效也 fail-closed，绝不落入 M6 Chaos Release；
 - Twig/Simple/Reinforced 等普通弹弓继续走 M6 public 状态机；
-- M11 活跃时消费瞄准轴、滚轮、Release 和取消；退出后恢复普通控制；
+- 进入终局的那次鼠标按下/抬起只负责进入，必须等到后续一次新的按下再抬起才允许 Release；
+- M11 活跃时使用隐藏光标的 `GameOnly` 相对鼠标输入，消费瞄准轴、滚轮、Release 和取消，并暂时关闭 Actor 点击/悬停事件；焦点丢失会清除已武装 Release，退出后恢复原控制和点击设置；
+- 袋和鸟的表现位置随 `Yaw/Pitch/Power` 移动，求解器 Pouch 初始位置始终保持冻结的 canonical 值；
 - M6 原绑定即使仍被调用，也因 Space 从未进入 M6 状态而无权发射。
 
 ## 5. 异步预演与 Release 身份
@@ -113,8 +117,9 @@ M11-D 可以在 `TargetHit` 后接救援演出，并在 `Failed` 后接完整失
 
 - 同时最多一个后台求解；
 - 新输入到来时只标记 dirty，不为每个鼠标采样无限排队；
-- 后台只捕获 Preset、Request、输入和 revision 的值拷贝；
-- 回到 Game Thread 后只发布与当前 revision 和输入完全相同的结果；
+- 后台只捕获 Preset、Request、输入和 revision 的值拷贝，并只返回纯数据 `TFuture`；
+- `AABTSM11FinaleInteractionSystem::Tick` 在 Game Thread 轮询并一次性 `Consume()` 已完成 future，再发布与当前 revision 和输入完全相同的结果；
+- 后台线程不得直接排入 Scene Capture 或其他 Renderer 工作；Capture 只标记 dirty，并在同一 Actor 原生 Tick 尾部执行；
 - stale 结果被丢弃，不能驱动稳定器、HUD 或 Release；
 - nominal 800 cm 轨迹在初始化后单独异步求一次并缓存。
 
@@ -178,7 +183,8 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 7. 只有确实位于任一天体后方的轨迹段画虚线，其他段画实线；
 8. 主星绝对经纬网以 World 坐标定义，再变换到终局局部和平面；三颗助推星不画经纬网；
 9. 三颗行星和 UFO 使用简单平面线条 glyph，不依赖静态网格轮廓；
-10. 保留段类型/遮挡变化后抽稀到可控绘制点数，分类仍使用完整求解器 Result。
+10. 保留段类型/遮挡变化后抽稀到可控绘制点数，分类仍使用完整求解器 Result；
+11. 轨迹、主星、助推星作用圈、全部行星/UFO glyph 都先在归一化图空间裁剪到单位圆，禁止任何图元越出左下圆形面板。
 
 圆形轨道图放在屏幕左下、侦察圆下方和物品 HUD 旁；终局层先绘制，M10/M5 既有 HUD 后绘制，保证物品与 modal 不被覆盖。远端接近预览位于屏幕上方中部。
 
@@ -213,16 +219,30 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 
 这不是 Release 时的隐藏吸附：玩家输入、玩家轨迹和 F4 结果都保持不变，转移只在玩家已经完成三次助推和合格拦截后出现。
 
+### 9.4 失败安全与恢复
+
+错误发射仍先播放自己的权威点列。表现终点由与实飞相同的 Hermite 插值求得：按鸟体净空半径检测主星和三颗行星，停在第一次解析体碰撞前；没有体碰撞的长时间 miss 最多展示 `6 s` 实时时长，避免失败轨迹把玩家锁住数十秒。
+
+到达表现终点后执行冻结的最小失败时序：
+
+1. 保留可读失败画面 `1.25 s`；
+2. 用 `0.60 s` 淡入全黑；
+3. 在全黑阶段只恢复一次鸟、弹弓袋、Party 模式和输入/点击路由；
+4. 至少提交一帧全黑，再保持 `0.40 s` 并用 `0.45 s` 淡出；
+5. 回到 `Ready`，下一次点击可重新进入终局。
+
+大帧间隔跨越恢复边界时也必须钳制到全黑边界，不能把全黑帧整个跳过。鸟回位的顺序固定为“保持碰撞关闭 → 传送到进入终局前的 Transform → 恢复运动/碰撞”，防止鸟在失败端点重新启用碰撞后嵌入主星。黑屏覆盖层在 `Super::DrawHUD()` 后绘制，确保库存、Party HUD 和 modal 都不能盖到黑屏上方。M11-D 只扩展四鸟、环境和剧情快照，不替换该安全恢复原语。
+
 ## 10. 代码落点
 
 | 文件/类型 | 职责 |
 |---|---|
-| `ABTSM11FinaleInteractionTypes.*` | 稳定器、目标选择、播放与轨道图纯数据合同 |
+| `ABTSM11FinaleInteractionTypes.*` | 稳定器、目标选择、播放、失败恢复、输入 Release 门和轨道图纯数据合同 |
 | `ABTSM11FinalePlayback.cpp` | 同输入优先、C2 转移、nominal tail、绝对时间采样和 Plan Hash |
 | `ABTSM11OrbitalDiagram.cpp` | 拟合平面、投影、自适应构图、解析遮挡和绝对经纬网 |
-| `AABTSM11FinaleInteractionSystem` | 身份门、异步预演、Release、单鸟播放、Scene Capture 和状态机 |
-| `AABTSM11PlayerController` | Space/M6 fail-closed 分流与 M11 输入 |
-| `AABTSM11FinaleHUD` | 终局轨道图、远端预览、稳定器/目标/功率反馈 |
+| `AABTSM11FinaleInteractionSystem` | 身份门、纯数据 future 回收、Release、单鸟播放、Game Thread Scene Capture、失败恢复和状态机 |
+| `AABTSM11PlayerController` | Space/M6 fail-closed 分流、进入手势隔离、相对鼠标捕获与 M11 输入 |
+| `AABTSM11FinaleHUD` | 圆形裁剪后的终局轨道图、远端预览、稳定器/目标/功率反馈和失败黑屏 |
 | `AABTSM11GameMode` | M11-B Ready 后创建唯一 Interaction System，并使用 M11 Controller/HUD |
 
 `ABTSM11FinaleSystem`、M11-A Solver、M11-B Preset/认证、M6、M9 和 M10.1-C 共享源码都不为本阶段改变算法语义。
@@ -237,6 +257,7 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 | `ABTS.M11C.Unit.TargetSelector` | 最早未完成助推、前进/回退滞回、qualified 与 physical UFO 语义 |
 | `ABTS.M11C.Unit.PreviewReleasePlayback` | Preview/Release Hash、同输入直达、C2 转移、30/60/120 Hz 绝对时间采样 |
 | `ABTS.M11C.Unit.OrbitalDiagram` | 完整构图、发射点在左、球后虚线、可见实线和主星绝对经纬网 |
+| `ABTS.M11C.Unit.PIERegressionContracts` | 进入手势 Release 门、焦点丢失、表现袋/权威 Pouch 分离、失败全黑恢复与 Hermite 体净空终点、圆形 glyph 裁剪 |
 
 ### 11.2 F4 接管闭包
 
@@ -267,26 +288,30 @@ M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B Const
 | 门槛 | 结果 | 证据 |
 |---|---:|---|
 | Development Editor 强制完整 Unity 全链接 | 通过 | `-ForceUnity -DisableAdaptiveUnity`，`Result: Succeeded` |
-| `ABTS.M11C.Unit` | `4/4` | `Saved/Logs/M11C-20260729-001048-Unit-Final.log` |
-| `ABTS.M11C.Runtime` | `1/1` | `Saved/Logs/M11C-20260729-001128-Runtime-Final.log` |
+| `ABTS.M11C.Unit` | `5/5` | `Saved/Logs/M11C-20260729-030948-PIEFix-Unit-Final2.log` |
+| `ABTS.M11C.Runtime` | `1/1` | `Saved/Logs/M11C-20260729-031028-PIEFix-Runtime-Final2.log` |
 | `ABTS.M11C.Certification.TerminalTransferDomain` | `1/1` | `Saved/Logs/M11C-20260729-000655-TerminalTransferDomain-Final.log` |
-| `ABTS.Contracts` | `2/2` | `Saved/Logs/M11C-20260729-001212-Regression-Contracts.log` |
-| `ABTS.M110` | `4/4` | `Saved/Logs/M11C-20260729-001251-Regression-M110.log` |
-| `ABTS.M11A` | `8/8` | `Saved/Logs/M11C-20260729-001339-Regression-M11A.log` |
-| `ABTS.M11B.Unit` | `8/8` | `Saved/Logs/M11C-20260729-001424-Regression-M11B-Unit.log` |
-| `ABTS.M11B.Runtime` | `4/4` | `Saved/Logs/M11C-20260729-001506-Regression-M11B-Runtime.log` |
-| `ABTS.M7`（含 M7.3） | `14/14` | `Saved/Logs/M11C-20260729-001605-Regression-M7.log` |
+| `ABTS.Contracts` | `2/2` | `Saved/Logs/M11C-20260729-031125-PIEFix-Regression-Contracts-Final2.log` |
+| `ABTS.M110` | `4/4` | `Saved/Logs/M11C-20260729-031205-PIEFix-Regression-M110-Final2.log` |
+| `ABTS.M11A` | `8/8` | `Saved/Logs/M11C-20260729-031251-PIEFix-Regression-M11A-Final2.log` |
+| `ABTS.M11B.Unit` | `8/8` | `Saved/Logs/M11C-20260729-031333-PIEFix-Regression-M11B-Unit-Final2.log` |
+| `ABTS.M11B.Runtime` | `4/4` | `Saved/Logs/M11C-20260729-031414-PIEFix-Regression-M11B-Runtime-Final2.log` |
+| `ABTS.M7`（含 M7.3） | `14/14` | `Saved/Logs/M11C-20260729-031453-PIEFix-Regression-M7-Final2.log` |
 
 接管闭包现场重扫得到 `21,025` 个样本、`558` 个 F4，计划分布为 `DirectPhysical=1`、`VisibleTerminalTransfer=557`、失败 `0`。每条计划都由当前输入重新求 qualified/physical 结果，再接受冻结 nominal tail；没有把标准输入扩大成玩家成功域。
 
 强制 Unity 首轮复现并确认了并行工作树报告的符号问题：`ABTSM11FinaleSystem.cpp` 匿名命名空间的通用 `IsFiniteVector` 会与 `ABTSM11GravityAssist::IsFiniteVector` 进入同一翻译单元并造成未限定调用歧义。现已改为职责唯一的 `IsFiniteFinaleBoundaryVector`。同一门槛还发现并修复了 M11-C 两个 cpp 各自名为 `SameInput` 的 Unity 重定义，分别改为 `SameInteractionInput` 和 `SameSolvedInput`；最终强制 Unity 全链接通过。
+
+本轮 PIE 报告的 `FAppTime` ensure 根因也已确认：旧实现从普通 ThreadPool worker 直接 `AsyncTask(GameThread)` 发布结果，worker 没有从 Game Thread 继承 `FAppTime` 上下文，随后触发的 Scene Capture/Renderer 工作会沿错误上下文链进入渲染。现改为 worker 只返回纯数据 future，由 Actor 原生 Game Thread Tick 一次性消费；Scene Capture 只在该 Tick 尾部执行。自动化使用 `NullRHI`，因此能验证合同与生命周期但不能证明实际 Renderer 像素路径；第 12 节有渲染 PIE 仍是最终验收门槛。
 
 ## 12. PIE 验收
 
 ### 12.1 进入与输入
 
 - [ ] 实际验收地图使用 M11 GameMode；日志先出现 M11-B Ready，再出现 M11-C Entry Ready；
-- [ ] 点击唯一 Space 弹弓进入终局瞄准，当前受控鸟与袋位于求解器 Pouch 首点，无可见瞬移；
+- [ ] 点击唯一 Space 弹弓进入终局瞄准，松开这次进入点击不会立即发射；必须再次按下并松开才会 Release；
+- [ ] 鸟与袋进入后立即采用当前输入的拉弓表现位置，第一次鼠标移动就连续跟随；表现拉伸不改变预演/Release 的 canonical Pouch 初态；
+- [ ] 终局内为隐藏光标相对鼠标输入；切出窗口、切回窗口或使用一次右键镜头操作后不会丢失瞄准，也不会因遗留 Release 自动发射；
 - [ ] 普通弹弓仍按 M6 发射；Space 弹弓不会触发 Chaos Release；
 - [ ] 鼠标可调整 Yaw/Pitch，滚轮可连续调整 Power；初始输入不是 nominal 标准答案；
 - [ ] `R` 可退出 Stable 或重置当前 M11-C 尝试。
@@ -294,10 +319,12 @@ M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B Const
 ### 12.2 HUD 与可读性
 
 - [ ] 左下圆形轨道图不遮挡侦察图、物品栏和弹弓；
+- [ ] 主星、三颗行星、作用圈、UFO 和全部轨迹线都被严格裁剪在圆形面板内，没有行星或 glyph 越界；
 - [ ] 轨迹完整显示且发射点在左，偏转时拟合平面与构图稳定；
 - [ ] 主星绝对经纬网随视角/发射方向表达空间关系，三颗助推星不画经纬网；
 - [ ] 天体后方轨迹为虚线、无遮挡轨迹为实线；琥珀色 TerminalTransfer 仍为实线；
 - [ ] 行星 ①→②→③→UFO 预览只在对应助推有效后推进，边界移动时无高频闪烁；
+- [ ] 连续进入、退出并重新进入终局，远端预览正常刷新；日志中不再出现 `FAppTime`/`IsInGameThread()` ensure；
 - [ ] 未成功接近时显示真实 miss，不把 16k qualified 包络画成 800 cm UFO 接触；
 - [ ] HUD 不显示 nominal 轨迹、标准三轴数值或精确修正箭头。
 
@@ -314,6 +341,9 @@ M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B Const
 - [ ] Release 后轨迹与最后一帧预演一致，日志的 Source/Plan Hash 非零；
 - [ ] 30/60/120 fps 或明显帧率波动不改变路径和结局；
 - [ ] 失败输入只沿自己的轨迹飞偏/撞击，不突然切向标准答案；
+- [ ] 撞主星/行星的错误发射在鸟体接触前结束表现，随后出现完整黑屏并恢复；鸟不会先重新启用碰撞再传送，也不会扎入地表卡死；
+- [ ] 没有体碰撞的长 miss 在有限时间内进入失败黑屏，不会按求解器几十秒全时长锁住玩家；
+- [ ] 恢复只发生一次，至少显示一帧完全黑屏；淡出后鸟、弹弓袋、Party 模式和输入路由可立即再次使用；
 - [ ] F4 同输入能物理接触时直接抵达 UFO；
 - [ ] F4 同输入不能接触时，先完整抵达自己的 qualified endpoint，再显示琥珀色连续转移并接 nominal tail；
 - [ ] 转移起止没有位置、朝向或速度跳变，不穿主星/三颗行星；
@@ -326,6 +356,9 @@ M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B Const
 [ABTS][M11-C][GameMode] Entry Ready=1 StartCell=...
 [ABTS][M11-C][Interaction] Ready ...
 [ABTS][M11-C][Release] Source=0x... Plan=0x... F4=... Physical=... Transfer=...
+[ABTS][M11-C][Failure] Begin Reason=... Hold=... FadeIn=... Black=... FadeOut=...
+[ABTS][M11-C][Failure] RestoredAtBlack Reason=...
+[ABTS][M11-C][Failure] RecoveryComplete Reason=...
 [ABTS][M11-C][Playback] TargetHit Plan=0x... Transfer=...
 ```
 
@@ -334,10 +367,10 @@ M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B Const
 ## 13. M11-D 交接清单
 
 1. M11-D 只把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的切线/法线标架，不复制积分器；
-2. 环境切换和 Attempt Snapshot 必须在进入 M11-C 前保存，退出/失败后原位恢复；
+2. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
 3. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
 4. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
-5. 失败镜头使用 M11-C 已分类的最早可证原因；没有公开证据时使用通用 miss，不在表现层重算物理；
+5. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
 6. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
 
 ## 14. 多工作树集成交接

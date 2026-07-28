@@ -14,7 +14,8 @@ enum class EABTSM11FinaleInteractionState : uint8
 	ReleasePending,
 	Launched,
 	TargetHit,
-	Failed
+	Failed,
+	Recovering
 };
 
 enum class EABTSM11PrefixStabilizerPhase : uint8
@@ -58,6 +59,31 @@ enum class EABTSM11FailureReason : uint8
 	Timeout,
 	MissUFO,
 	SolverFailure
+};
+
+/**
+ * Separates the click that enters finale aim from the later click that
+ * intentionally launches. This remains robust if PIE changes mouse capture
+ * before the entry click's release event is delivered.
+ */
+class ABTSRUNTIME_API FABTSM11PrimaryReleaseGate final
+{
+public:
+	void Enter(bool bEntryButtonDown);
+	void Reset();
+	void UpdateEntryButtonState(bool bButtonDown);
+	void OnPrimaryPressed(bool bIsAiming);
+	bool OnPrimaryReleased(bool bIsAiming);
+
+	bool IsLaunchArmed() const { return bLaunchArmed; }
+	bool IsWaitingForEntryRelease() const
+	{
+		return bWaitingForEntryRelease;
+	}
+
+private:
+	bool bWaitingForEntryRelease = false;
+	bool bLaunchArmed = false;
 };
 
 struct ABTSRUNTIME_API FABTSM11PrefixStabilizerConfig
@@ -221,6 +247,46 @@ struct ABTSRUNTIME_API FABTSM11PlaybackPlan
 		EABTSM11PlaybackSegmentKind* OutSegmentKind = nullptr) const;
 };
 
+enum class EABTSM11FailurePresentationPhase : uint8
+{
+	Inactive = 0,
+	Hold,
+	FadeToBlack,
+	BlackHold,
+	FadeFromBlack,
+	Complete
+};
+
+struct ABTSRUNTIME_API FABTSM11FailurePresentationConfig
+{
+	double ReadableHoldSeconds = 1.25;
+	double FadeToBlackSeconds = 0.60;
+	double BlackHoldSeconds = 0.40;
+	double FadeFromBlackSeconds = 0.45;
+
+	bool IsValid() const;
+};
+
+/** Deterministic failure fade clock; World restoration is emitted exactly once. */
+class ABTSRUNTIME_API FABTSM11FailurePresentationTimeline final
+{
+public:
+	bool Begin(const FABTSM11FailurePresentationConfig& InConfig);
+	void Reset();
+	void Advance(double DeltaSeconds, bool& bOutShouldRestoreWorld);
+
+	bool IsActive() const;
+	bool IsComplete() const;
+	double GetBlackoutAlpha() const;
+	EABTSM11FailurePresentationPhase GetPhase() const;
+
+private:
+	FABTSM11FailurePresentationConfig Config;
+	double ElapsedSeconds = 0.0;
+	bool bStarted = false;
+	bool bRestoreWorldIssued = false;
+};
+
 struct ABTSRUNTIME_API FABTSM11DiagramPoint
 {
 	FVector2d Position = FVector2d::ZeroVector;
@@ -275,6 +341,29 @@ public:
 		FABTSM11OrbitalDiagramSnapshot& OutSnapshot,
 		int32 MaximumTrajectoryPointCount = 900);
 };
+
+/** Presentation-only pull pose. The solver still launches at PouchLocalPositionCM. */
+ABTSRUNTIME_API FVector3d ABTSM11ComputeAimPouchLocalPosition(
+	const FABTSM11FinaleLaunchModel& LaunchModel,
+	const FABTSM11FinaleLaunchInput& Input,
+	double MinimumPullDistanceCM,
+	double MaximumPullDistanceCM,
+	double MaximumPitchDropCM);
+
+/**
+ * Finds a visual stop before an analytic body-collision endpoint. The
+ * authoritative trajectory and playback-plan hash remain unchanged.
+ */
+ABTSRUNTIME_API double ABTSM11ResolveFailurePresentationEndTime(
+	const FABTSM11FinaleLayoutPreset& Preset,
+	const FABTSM11TrajectoryResult& Result,
+	const FABTSM11PlaybackPlan& Plan,
+	double BirdClearanceCM);
+
+/** Shared circular-panel clipping used by every M11 diagram primitive. */
+ABTSRUNTIME_API bool ABTSM11ClipDiagramSegmentToUnitCircle(
+	FVector2d& InOutStart,
+	FVector2d& InOutEnd);
 
 ABTSRUNTIME_API EABTSM11FailureReason ABTSM11ClassifyFailure(
 	const FABTSM11TrajectoryResult& Result,

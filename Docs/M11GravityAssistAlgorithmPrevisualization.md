@@ -1,6 +1,6 @@
 # M11：终局三重引力弹弓算法预演
 
-> 状态：产品路线已确认；M11.0、M11-A 与 M11-B 均已完成，M11-B 已通过用户 PIE。[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)的 C++、全链接、全新进程自动化和完整 F4 接管闭包已通过，等待用户 PIE；M11-D 终局演出尚未开始。
+> 状态：产品路线已确认；M11.0、M11-A 与 M11-B 均已完成，M11-B 已通过用户 PIE。[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)初版及本轮 PIE 回归修复的 C++、强制 Unity 全链接、全新进程自动化和完整 F4 接管闭包已通过，等待用户重新进行有渲染 PIE；M11-D 终局演出尚未开始。
 >
 > 父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md)。
 >
@@ -677,6 +677,8 @@ Launched / AssistN / FinalApproach
 
 玩家可以在尚未瞄准 UFO 时提前发射。失败演出播放到第一个不可恢复原因已清晰可见：撞击播到撞击，错过行星播到明显分离，长时间束缚轨道可时间加速；建议把常规失败反馈控制在约 `3–6s`，再用约 `0.5–0.8s` 淡出至黑。黑屏期间恢复 Party、弹弓、镜头、环境和输入状态，不能重新生成 World 或清空库存。第一次正确飞行播放全部近掠演出；重试可缩短非关键镜头。
 
+M11-C 已先为当前受控鸟实现这一合同的最小安全闭环：按真实 Hermite 轨迹和鸟体净空裁剪体碰撞终点、限制非碰撞 miss 的展示时长、全黑帧内恢复鸟/弹弓/输入，并保证碰撞只在传送回原位后恢复。M11-D 应在同一恢复点扩展四鸟 Party、星空/雾云、镜头和剧情状态，不能另建失败物理或第二套复位状态机。
+
 ## 10. 资产交接契约
 
 用户后续提供三颗行星与 UFO 静态网格时，每个资产只需满足表现契约：
@@ -742,8 +744,8 @@ Launched / AssistN / FinalApproach
 | `M11.0` | LaunchSite 唯一 Space-only 槽、无玻璃建筑、Space 桩/弦配方、M9 练习卫星远置与 M11 引力隔离 | 三行星积分、终局 HUD、星空演出 |
 | [`M11-A`](M11AGravityAssistSolverDesign.md) | 无 World/Actor 的纯数据求解器与测试夹具；中心束缚、单颗自然偏转、虚拟动量换能、步长收敛、确定性与助推消融自动化 | 地图、实飞接管、美术、终局演出 |
 | [`M11-B`](M11BFinaleLayoutCertificationDesign.md) | 局部布局离线搜索、认证预设、三颗 Body Actor、合格终端拦截/独立几何 UFO、全 `Yaw × Pitch × Power` 的 F4 唯一性与局部前缀内核报告 | 完整 HUD、终端 coast 与剧情 |
-| [`M11-C`](M11CFinaleInteractionAndPlaybackDesign.md) | 冻结并复现轨道投影语义，加入简笔行星/UFO、逐目标接近预览、前缀稳定器；Space 实飞同源接管；F4 后显式 C2 TerminalTransfer 闭合到 800 cm UFO | 标准答案、隐形吸附、Chaos 深空飞行 |
-| `M11-D` | 四鸟同袋/队列、星空环境切换、白鸟救援、失败黑屏复位与完整 PIE 验收 | 独立终局地图、运动行星、多人同步 |
+| [`M11-C`](M11CFinaleInteractionAndPlaybackDesign.md) | 冻结并复现轨道投影语义，加入简笔行星/UFO、逐目标接近预览、前缀稳定器；Space 实飞同源接管；F4 后显式 C2 TerminalTransfer 闭合到 800 cm UFO；当前受控鸟的有界失败黑屏与安全恢复 | 标准答案、隐形吸附、Chaos 深空飞行 |
+| `M11-D` | 四鸟同袋/队列、星空环境切换、白鸟救援、完整 Party/环境/剧情失败快照扩展与终局 PIE 验收 | 独立终局地图、运动行星、多人同步 |
 
 M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用已知、固定的三行星和 UFO 场景，建立自己的顺序事件与走廊数据，不把尚未完成的通用目标系统设为前置依赖。
 
@@ -760,7 +762,7 @@ M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用�
 
 当前 [M11.0 前置收口](M110PreFinaleClosureDesign.md)、[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) 与 [M11-B](M11BFinaleLayoutCertificationDesign.md) 均已完成，M11-B 也已通过用户 PIE。围绕全域发现出的唯一 `F4` 族，最终局部精化闭包得到 `F=(6244,1890,981,558)`、局部分量数 `(1,1,1,1)`、TargetHit `558`、几何接触旁路 `0`；F4 为 `20×18 px`、14 个连续 Power 切片。v1 通过增强行星③虚拟动量并要求终端 `Q>=0.95`，把宽前缀练习走廊和最终高质量拦截资格分开。完整 Hash 与扫描合同见 [M11-B 第 9.2 节](M11BFinaleLayoutCertificationDesign.md#92-v1-冻结认证报告)。
 
-当前默认工作是 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md) 的 C++、自动化与用户 PIE。M11 专属工作树不修改 `Content/Maps/Test.umap`；集成后的实际验收地图/GameMode Blueprint 必须继续接入 M11 GameMode/Finale System 生命周期。
+当前默认工作是按 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md) 第 12 节重新完成有渲染 PIE，重点复验 Game Thread Scene Capture、进入手势、拉弓跟随、圆形 HUD 裁剪和失败黑屏恢复。M11 专属工作树不修改 `Content/Maps/Test.umap`；集成后的实际验收地图/GameMode Blueprint 必须继续接入 M11 GameMode/Finale System 生命周期。
 
 ## 14. 资料来源
 

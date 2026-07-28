@@ -495,6 +495,217 @@ bool FABTSM11COrbitalDiagramTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CPIERegressionContractsTest,
+	"ABTS.M11C.Unit.PIERegressionContracts",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CPIERegressionContractsTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+
+	FABTSM11PrimaryReleaseGate ReleaseGate;
+	ReleaseGate.Enter(true);
+	TestFalse(
+		TEXT("The click that enters finale cannot launch on release"),
+		ReleaseGate.OnPrimaryReleased(true));
+	ReleaseGate.OnPrimaryPressed(true);
+	TestTrue(
+		TEXT("A later intentional press/release launches"),
+		ReleaseGate.OnPrimaryReleased(true));
+	ReleaseGate.Enter(true);
+	ReleaseGate.UpdateEntryButtonState(false);
+	TestFalse(
+		TEXT("A delayed entry release stays consumed without a new press"),
+		ReleaseGate.OnPrimaryReleased(true));
+	ReleaseGate.OnPrimaryPressed(true);
+	TestTrue(
+		TEXT("Mouse recapture does not prevent a later launch gesture"),
+		ReleaseGate.OnPrimaryReleased(true));
+	ReleaseGate.Enter(false);
+	ReleaseGate.OnPrimaryPressed(true);
+	ReleaseGate.Reset();
+	TestFalse(
+		TEXT("Focus loss cancels an armed launch gesture"),
+		ReleaseGate.OnPrimaryReleased(true));
+
+	const FABTSM11FinaleLayoutPreset Preset =
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
+	FABTSM11FinaleLaunchInput LowPull = Preset.NominalInput;
+	LowPull.Power = Preset.LaunchModel.MinimumPower;
+	FABTSM11FinaleLaunchInput HighPull = Preset.NominalInput;
+	HighPull.Power = Preset.LaunchModel.MaximumPower;
+	const FVector3d LowVisualPosition =
+		ABTSM11ComputeAimPouchLocalPosition(
+			Preset.LaunchModel,
+			LowPull,
+			60.0,
+			180.0,
+			70.0);
+	const FVector3d HighVisualPosition =
+		ABTSM11ComputeAimPouchLocalPosition(
+			Preset.LaunchModel,
+			HighPull,
+			60.0,
+			180.0,
+			70.0);
+	TestFalse(
+		TEXT("Power visibly changes the pulled-pouch pose"),
+		LowVisualPosition.Equals(HighVisualPosition, 1.0e-6));
+	FABTSM11TrajectoryRequest LowRequest;
+	FABTSM11TrajectoryRequest HighRequest;
+	TestTrue(
+		TEXT("Both visual-pose inputs still build authoritative requests"),
+		Preset.BuildRequest(LowPull, 0x7u, LowRequest)
+			&& Preset.BuildRequest(HighPull, 0x7u, HighRequest));
+	TestTrue(
+		TEXT("Visual pull never moves the solver launch origin"),
+		LowRequest.InitialPositionCM.Equals(
+			Preset.LaunchModel.PouchLocalPositionCM,
+			1.0e-9)
+		&& HighRequest.InitialPositionCM.Equals(
+			Preset.LaunchModel.PouchLocalPositionCM,
+			1.0e-9));
+
+	FABTSM11FailurePresentationConfig FailureConfig;
+	FailureConfig.ReadableHoldSeconds = 0.10;
+	FailureConfig.FadeToBlackSeconds = 0.20;
+	FailureConfig.BlackHoldSeconds = 0.10;
+	FailureConfig.FadeFromBlackSeconds = 0.20;
+	FABTSM11FailurePresentationTimeline FailureTimeline;
+	TestTrue(
+		TEXT("Failure presentation accepts a deterministic timing contract"),
+		FailureTimeline.Begin(FailureConfig));
+	bool bRestoreWorld = false;
+	FailureTimeline.Advance(0.29, bRestoreWorld);
+	TestFalse(
+		TEXT("World is not restored before full black"),
+		bRestoreWorld);
+	FailureTimeline.Advance(0.02, bRestoreWorld);
+	TestTrue(
+		TEXT("World restoration is emitted at full black"),
+		bRestoreWorld);
+	TestTrue(
+		TEXT("Failure reaches full black at the restoration boundary"),
+		FMath::IsNearlyEqual(
+			FailureTimeline.GetBlackoutAlpha(),
+			1.0,
+			1.0e-9));
+	FailureTimeline.Advance(0.01, bRestoreWorld);
+	TestFalse(
+		TEXT("World restoration is not emitted twice"),
+		bRestoreWorld);
+	FailureTimeline.Advance(0.30, bRestoreWorld);
+	TestTrue(
+		TEXT("Failure fade completes and cannot remain stuck"),
+		FailureTimeline.IsComplete());
+	TestTrue(
+		TEXT("Failure timeline can restart for another attempt"),
+		FailureTimeline.Begin(FailureConfig));
+	FailureTimeline.Advance(10.0, bRestoreWorld);
+	TestTrue(
+		TEXT("A long hitch still emits restoration"),
+		bRestoreWorld);
+	TestTrue(
+		TEXT("A long hitch is clamped to a visible full-black frame"),
+		!FailureTimeline.IsComplete()
+			&& FMath::IsNearlyEqual(
+				FailureTimeline.GetBlackoutAlpha(),
+				1.0,
+				1.0e-9));
+	FailureTimeline.Advance(0.31, bRestoreWorld);
+	TestTrue(
+		TEXT("The clamped hitch resumes and completes normally"),
+		FailureTimeline.IsComplete());
+
+	const FABTSM11GravityBodySpec& Primary =
+		Preset.CanonicalScenario.Bodies[0];
+	const double BirdClearanceCM = 50.0;
+	const double SafeRadius = FMath::Max(
+		Primary.VisualRadiusCM,
+		Primary.CollisionRadiusCM) + BirdClearanceCM;
+	FABTSM11TrajectoryResult CollisionResult;
+	CollisionResult.Termination =
+		EABTSM11TrajectoryTermination::BodyCollision;
+	FABTSM11TrajectoryEvent& Collision =
+		CollisionResult.Events.AddDefaulted_GetRef();
+	Collision.Type = EABTSM11TrajectoryEventType::BodyCollision;
+	Collision.BodyId = Primary.BodyId;
+	FABTSM11PlaybackPlan CollisionPlan;
+	FABTSM11PlaybackPoint& Outside =
+		CollisionPlan.Points.AddDefaulted_GetRef();
+	Outside.TimeSeconds = 0.0;
+	Outside.PositionCM = Primary.CenterCM
+		+ FVector3d(SafeRadius + 100.0, 0.0, 0.0);
+	FABTSM11PlaybackPoint& Inside =
+		CollisionPlan.Points.AddDefaulted_GetRef();
+	Inside.TimeSeconds = 1.0;
+	Inside.PositionCM = Primary.CenterCM;
+	CollisionPlan.DurationSeconds = 1.0;
+	CollisionPlan.PlanHash = 0x11c0ffeeull;
+	const TArray<FABTSM11PlaybackPoint> OriginalPoints =
+		CollisionPlan.Points;
+	const uint64 OriginalPlanHash = CollisionPlan.PlanHash;
+	const double PresentationEnd =
+		ABTSM11ResolveFailurePresentationEndTime(
+			Preset,
+			CollisionResult,
+			CollisionPlan,
+			BirdClearanceCM);
+	TestTrue(
+		TEXT("Body collision presentation stops before the analytic center"),
+		PresentationEnd > 0.0 && PresentationEnd < 1.0);
+	FVector3d SafePosition;
+	FVector3d SafeVelocity;
+	TestTrue(
+		TEXT("The visual body-clearance stop remains sampleable"),
+		CollisionPlan.Sample(
+			PresentationEnd,
+			SafePosition,
+			SafeVelocity));
+	TestTrue(
+		TEXT("Visual stop preserves body radius plus bird clearance"),
+		FMath::IsNearlyEqual(
+			(SafePosition - Primary.CenterCM).Length(),
+			SafeRadius,
+			1.0e-4));
+	TestEqual(
+		TEXT("Presentation stop does not change playback identity"),
+		CollisionPlan.PlanHash,
+		OriginalPlanHash);
+	TestTrue(
+		TEXT("Presentation stop does not mutate authoritative points"),
+		CollisionPlan.Points.Num() == OriginalPoints.Num()
+			&& CollisionPlan.Points[0].PositionCM.Equals(
+				OriginalPoints[0].PositionCM,
+				1.0e-9)
+			&& CollisionPlan.Points[1].PositionCM.Equals(
+				OriginalPoints[1].PositionCM,
+				1.0e-9));
+
+	FVector2d ClipStart(-2.0, 0.0);
+	FVector2d ClipEnd(2.0, 0.0);
+	TestTrue(
+		TEXT("A crossing diagram primitive is clipped to the circle"),
+		ABTSM11ClipDiagramSegmentToUnitCircle(
+			ClipStart,
+			ClipEnd));
+	TestTrue(
+		TEXT("Clipped primitive endpoints stay inside the circular panel"),
+		ClipStart.Equals(FVector2d(-1.0, 0.0), 1.0e-9)
+			&& ClipEnd.Equals(FVector2d(1.0, 0.0), 1.0e-9));
+	FVector2d OutsideStart(2.0, -0.5);
+	FVector2d OutsideEnd(2.0, 0.5);
+	TestFalse(
+		TEXT("A fully exterior planet/glyph segment is rejected"),
+		ABTSM11ClipDiagramSegmentToUnitCircle(
+			OutsideStart,
+			OutsideEnd));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11CRuntimeContractRoutingTest,
 	"ABTS.M11C.Runtime.ContractRoutingAndM9Isolation",
 	EAutomationTestFlags::EditorContext

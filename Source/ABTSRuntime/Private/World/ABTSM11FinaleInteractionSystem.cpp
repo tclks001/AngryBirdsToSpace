@@ -3,6 +3,7 @@
 #include "World/ABTSM11FinaleInteractionSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -54,6 +55,29 @@ namespace
 			SafeUp = FVector::RightVector;
 		}
 		return FRotationMatrix::MakeFromXZ(SafeForward, SafeUp).Rotator();
+	}
+
+	FQuat MakeM11PouchRotation(
+		const FVector& LaunchDirection,
+		const FVector& PreferredRight)
+	{
+		const FVector PouchForwardZ = LaunchDirection.GetSafeNormal();
+		FVector PouchSideY = FVector::VectorPlaneProject(
+			PreferredRight,
+			PouchForwardZ).GetSafeNormal();
+		if (PouchSideY.IsNearlyZero())
+		{
+			const FVector FallbackAxis =
+				FMath::Abs(PouchForwardZ.Z) < 0.9f
+				? FVector::UpVector
+				: FVector::ForwardVector;
+			PouchSideY = FVector::CrossProduct(
+				PouchForwardZ,
+				FallbackAxis).GetSafeNormal();
+		}
+		return FRotationMatrix::MakeFromYZ(
+			PouchSideY,
+			PouchForwardZ).ToQuat();
 	}
 }
 
@@ -145,6 +169,7 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	AABTSM51SlingshotCord& Cord,
 	APlayerController& Controller)
 {
+	(void)Controller;
 	if (InteractionState != EABTSM11FinaleInteractionState::Ready
 		|| !IsValid(FinaleSystem)
 		|| !IsValid(Party)
@@ -196,7 +221,9 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	}
 
 	InteractionState = EABTSM11FinaleInteractionState::Aiming;
+	FailureTimeline.Reset();
 	PlaybackElapsedSeconds = 0.0;
+	PlaybackPresentationEndTimeSeconds = 0.0;
 	++AimRevision;
 	bPreviewDirty = true;
 	PreviewSubmitAccumulatorSeconds = PreviewSubmitIntervalSeconds;
@@ -215,6 +242,7 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 void AABTSM11FinaleInteractionSystem::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	DrainCompletedSolves();
 	PreviewSubmitAccumulatorSeconds += FMath::Max(0.0f, DeltaSeconds);
 	switch (InteractionState)
 	{
@@ -225,9 +253,14 @@ void AABTSM11FinaleInteractionSystem::Tick(const float DeltaSeconds)
 	case EABTSM11FinaleInteractionState::Launched:
 		UpdatePlayback(DeltaSeconds);
 		break;
+	case EABTSM11FinaleInteractionState::Failed:
+	case EABTSM11FinaleInteractionState::Recovering:
+		UpdateFailurePresentation(DeltaSeconds);
+		break;
 	default:
 		break;
 	}
+	FlushTargetCapture();
 }
 
 void AABTSM11FinaleInteractionSystem::ApplyAimAxis(
@@ -285,7 +318,17 @@ void AABTSM11FinaleInteractionSystem::CancelStabilizerOrResetAttempt()
 	}
 	if (InteractionState == EABTSM11FinaleInteractionState::Failed)
 	{
-		RestoreAttemptToWorld(true);
+		RestoreAttemptToWorld(false);
+		FailureTimeline.Reset();
+		RuntimeFailure.Reset();
+		InteractionState = EABTSM11FinaleInteractionState::Ready;
+		return;
+	}
+	if (InteractionState == EABTSM11FinaleInteractionState::Recovering)
+	{
+		FailureTimeline.Reset();
+		RuntimeFailure.Reset();
+		InteractionState = EABTSM11FinaleInteractionState::Ready;
 	}
 }
 
@@ -296,6 +339,8 @@ void AABTSM11FinaleInteractionSystem::ExitFinale()
 		return;
 	}
 	RestoreAttemptToWorld(false);
+	FailureTimeline.Reset();
+	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Ready;
 }
 
@@ -306,7 +351,11 @@ bool AABTSM11FinaleInteractionSystem::IsFinaleActive() const
 			== EABTSM11FinaleInteractionState::ReleasePending
 		|| InteractionState == EABTSM11FinaleInteractionState::Launched
 		|| InteractionState == EABTSM11FinaleInteractionState::TargetHit
-		|| InteractionState == EABTSM11FinaleInteractionState::Failed;
+		|| ((InteractionState == EABTSM11FinaleInteractionState::Failed
+				|| InteractionState
+					== EABTSM11FinaleInteractionState::Recovering)
+			&& (FailureTimeline.IsActive()
+				|| bAttemptBirdInPouch));
 }
 
 bool AABTSM11FinaleInteractionSystem::IsAiming() const
@@ -428,7 +477,7 @@ void AABTSM11FinaleInteractionSystem::UpdateAiming(
 			CurrentClassification);
 		if (PreviewSelection.Target != PreviousTarget)
 		{
-			UpdateTargetCapture();
+			MarkTargetCaptureDirty();
 		}
 	}
 	UpdatePouchPresentation();
@@ -445,8 +494,12 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		FailInteraction(TEXT("PlaybackDependencyLost"));
 		return;
 	}
+	const double PresentationEndTime = FMath::Clamp(
+		PlaybackPresentationEndTimeSeconds,
+		ReleasedPlaybackPlan.Points[0].TimeSeconds,
+		ReleasedPlaybackPlan.DurationSeconds);
 	PlaybackElapsedSeconds = FMath::Min(
-		ReleasedPlaybackPlan.DurationSeconds,
+		PresentationEndTime,
 		PlaybackElapsedSeconds
 			+ FMath::Max(0.0f, DeltaSeconds) * PlaybackTimeScale);
 	FVector3d LocalPosition;
@@ -472,8 +525,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	if (PlaybackElapsedSeconds
-		>= ReleasedPlaybackPlan.DurationSeconds - 1.0e-9)
+	if (PlaybackElapsedSeconds >= PresentationEndTime - 1.0e-9)
 	{
 		if (ReleasedPlaybackPlan.bPhysicalTargetHit)
 		{
@@ -488,13 +540,42 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		}
 		else
 		{
-			InteractionState =
-				EABTSM11FinaleInteractionState::Failed;
-			RuntimeFailure = ABTSM11FailureReasonLabel(
+			BeginAttemptFailure(ABTSM11FailureReasonLabel(
 				ABTSM11ClassifyFailure(
 					LatestQualifiedResult,
-					CurrentClassification));
+					CurrentClassification)));
 		}
+	}
+}
+
+void AABTSM11FinaleInteractionSystem::UpdateFailurePresentation(
+	const float DeltaSeconds)
+{
+	bool bShouldRestoreWorld = false;
+	FailureTimeline.Advance(
+		FMath::Max(0.0f, DeltaSeconds),
+		bShouldRestoreWorld);
+	if (bShouldRestoreWorld)
+	{
+		RestoreAttemptToWorld(false);
+		InteractionState =
+			EABTSM11FinaleInteractionState::Recovering;
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-C][Failure] RestoredAtBlack Reason=%s"),
+			*RuntimeFailure);
+	}
+	if (FailureTimeline.IsComplete())
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-C][Failure] RecoveryComplete Reason=%s"),
+			*RuntimeFailure);
+		FailureTimeline.Reset();
+		RuntimeFailure.Reset();
+		InteractionState = EABTSM11FinaleInteractionState::Ready;
 	}
 }
 
@@ -514,29 +595,53 @@ void AABTSM11FinaleInteractionSystem::UpdatePouchPresentation()
 		FinaleSystem->GetFinaleFrame();
 	const FABTSM11FinaleLayoutPreset& Preset =
 		FinaleSystem->GetLayoutPreset();
+	const FABTSM11FinaleLaunchInput& Input =
+		InteractionState
+			== EABTSM11FinaleInteractionState::ReleasePending
+		? FrozenReleaseInput
+		: Stabilizer.GetControlledInput();
+	const FVector3d PresentationLocalPosition =
+		ABTSM11ComputeAimPouchLocalPosition(
+			Preset.LaunchModel,
+			Input,
+			MinimumVisualPullDistanceCM,
+			MaximumVisualPullDistanceCM,
+			MaximumVisualPitchDropCM);
 	const FVector WorldPosition = Frame.TransformLocalPosition(
-		FVector(Preset.LaunchModel.PouchLocalPositionCM));
+		FVector(PresentationLocalPosition));
 	const FVector LocalDirection = FVector(
-		Preset.LaunchModel.MapDirection(
-			Stabilizer.GetControlledInput()));
+		Preset.LaunchModel.MapDirection(Input));
 	const FVector WorldDirection =
 		Frame.WorldTransform.TransformVectorNoScale(LocalDirection);
-	const FQuat WorldRotation = MakeFlightRotation(
+	const FQuat PouchRotation = MakeM11PouchRotation(
+		WorldDirection,
+		Frame.GetRight());
+	const FQuat BirdRotation = MakeFlightRotation(
 		WorldDirection,
 		Frame.GetUp()).Quaternion();
 	ActiveCord->UpdatePulledPouchVisual(
 		WorldPosition,
-		WorldRotation);
+		PouchRotation);
 	AttemptBird->SetActorLocationAndRotation(
 		WorldPosition,
-		WorldRotation,
+		BirdRotation,
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
 }
 
-void AABTSM11FinaleInteractionSystem::UpdateTargetCapture()
+void AABTSM11FinaleInteractionSystem::MarkTargetCaptureDirty()
 {
+	bTargetCaptureDirty = true;
+}
+
+void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
+{
+	check(IsInGameThread());
+	if (!bTargetCaptureDirty)
+	{
+		return;
+	}
 	if (!IsValid(TargetPreviewCapture)
 		|| !IsValid(TargetPreviewRenderTarget)
 		|| !IsValid(FinaleSystem))
@@ -549,6 +654,7 @@ void AABTSM11FinaleInteractionSystem::UpdateTargetCapture()
 	{
 		return;
 	}
+	bTargetCaptureDirty = false;
 	const FABTSM110FinaleLocalFrame& Frame =
 		FinaleSystem->GetFinaleFrame();
 	const FVector TargetWorld = Frame.TransformLocalPosition(
@@ -590,14 +696,17 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 {
 	if (IsValid(AttemptBird) && bAttemptBirdInPouch)
 	{
-		AttemptBird->FinishSlingshotReturn();
+		// Collision must remain disabled until the bird has left any analytic
+		// body endpoint and is back at its pre-finale world transform.
+		AttemptBird->BeginSlingshotReturn();
 		AttemptBird->SetActorTransform(
 			AttemptBirdOriginalTransform,
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
-		bAttemptBirdInPouch = false;
+		AttemptBird->FinishSlingshotReturn();
 	}
+	bAttemptBirdInPouch = false;
 	if (IsValid(ActiveCord))
 	{
 		ActiveCord->ResetPouchVisualToRest();
@@ -631,14 +740,52 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	Stabilizer.Reset(Stabilizer.GetControlledInput());
 	ReleasedPlaybackPlan.Reset();
 	PlaybackElapsedSeconds = 0.0;
+	PlaybackPresentationEndTimeSeconds = 0.0;
 	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Aiming;
 	UpdatePouchPresentation();
 }
 
+void AABTSM11FinaleInteractionSystem::BeginAttemptFailure(
+	const FString& Reason)
+{
+	RuntimeFailure = Reason;
+	FABTSM11FailurePresentationConfig Config;
+	Config.ReadableHoldSeconds = FailureReadableHoldSeconds;
+	Config.FadeToBlackSeconds = FailureFadeToBlackSeconds;
+	Config.BlackHoldSeconds = FailureBlackHoldSeconds;
+	Config.FadeFromBlackSeconds = FailureFadeFromBlackSeconds;
+	if (!FailureTimeline.Begin(Config))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M11-C][Failure] InvalidPresentationConfig Reason=%s"),
+			*Reason);
+		RestoreAttemptToWorld(false);
+		InteractionState = EABTSM11FinaleInteractionState::Ready;
+		return;
+	}
+	InteractionState = EABTSM11FinaleInteractionState::Failed;
+	UE_LOG(
+		LogABTSRuntime,
+		Warning,
+		TEXT("[ABTS][M11-C][Failure] Begin Reason=%s Hold=%.2f FadeIn=%.2f Black=%.2f FadeOut=%.2f"),
+		*Reason,
+		Config.ReadableHoldSeconds,
+		Config.FadeToBlackSeconds,
+		Config.BlackHoldSeconds,
+		Config.FadeFromBlackSeconds);
+}
+
 void AABTSM11FinaleInteractionSystem::FailInteraction(
 	const FString& Reason)
 {
+	if (bAttemptBirdInPouch)
+	{
+		BeginAttemptFailure(Reason);
+		return;
+	}
 	RuntimeFailure = Reason;
 	InteractionState = EABTSM11FinaleInteractionState::Failed;
 	UE_LOG(

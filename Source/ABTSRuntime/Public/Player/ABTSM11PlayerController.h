@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Player/ABTSM6PlayerController.h"
+#include "World/ABTSM11FinaleInteractionTypes.h"
 #include "ABTSM11PlayerController.generated.h"
 
 class AABTSM11FinaleInteractionSystem;
@@ -20,6 +21,7 @@ class ABTSRUNTIME_API AABTSM11PlayerController
 public:
 	virtual void SetupInputComponent() override;
 	virtual void PlayerTick(float DeltaTime) override;
+	virtual void FlushPressedKeys() override;
 	virtual void InteractWithSlingshotCord(
 		AABTSM51SlingshotCord* Cord) override;
 
@@ -30,9 +32,16 @@ private:
 	void M11Pitch(float Value);
 	void M11Power(float Value);
 	void M11Cancel();
+	void SetM11FinaleInputMode(bool bActive);
+	void ApplyM11PointerMode(bool bActive);
 	AABTSM11FinaleInteractionSystem* FindM11Interaction() const;
 	AABTSM6SlingshotSystem* FindOrdinarySlingshotSystem();
 
 	TWeakObjectPtr<AABTSM6SlingshotSystem> OrdinarySlingshotSystem;
+	FABTSM11PrimaryReleaseGate PrimaryReleaseGate;
 	bool bWasM11FinaleActive = false;
+	bool bM11PointerCaptureNeedsRefresh = false;
+	bool bM11SavedPointerEventFlags = false;
+	bool bSavedClickEvents = true;
+	bool bSavedMouseOverEvents = true;
 };

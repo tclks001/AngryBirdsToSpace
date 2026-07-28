@@ -21,57 +21,6 @@ namespace
 			static_cast<float>(-Normalized.Y) * Radius);
 	}
 
-	bool ClipSegmentToUnitCircle(
-		FVector2d& InOutStart,
-		FVector2d& InOutEnd)
-	{
-		const FVector2d Direction = InOutEnd - InOutStart;
-		const double A = Direction.SquaredLength();
-		if (A <= UE_DOUBLE_SMALL_NUMBER)
-		{
-			return InOutStart.SquaredLength() <= 1.0;
-		}
-		const double B = 2.0 * InOutStart.Dot(Direction);
-		const double C = InOutStart.SquaredLength() - 1.0;
-		const double Discriminant = B * B - 4.0 * A * C;
-		double MinimumAlpha = 0.0;
-		double MaximumAlpha = 1.0;
-		if (C > 0.0)
-		{
-			if (Discriminant < 0.0)
-			{
-				return false;
-			}
-			const double Root = FMath::Sqrt(Discriminant);
-			const double T0 = (-B - Root) / (2.0 * A);
-			const double T1 = (-B + Root) / (2.0 * A);
-			MinimumAlpha = FMath::Max(MinimumAlpha, FMath::Min(T0, T1));
-			MaximumAlpha = FMath::Min(MaximumAlpha, FMath::Max(T0, T1));
-			if (MaximumAlpha < MinimumAlpha)
-			{
-				return false;
-			}
-		}
-		else if (InOutEnd.SquaredLength() > 1.0)
-		{
-			if (Discriminant < 0.0)
-			{
-				return false;
-			}
-			const double Root = FMath::Sqrt(Discriminant);
-			MaximumAlpha = FMath::Clamp(
-				FMath::Max(
-					(-B - Root) / (2.0 * A),
-					(-B + Root) / (2.0 * A)),
-				0.0,
-				1.0);
-		}
-		const FVector2d OriginalStart = InOutStart;
-		InOutStart = OriginalStart + Direction * MinimumAlpha;
-		InOutEnd = OriginalStart + Direction * MaximumAlpha;
-		return true;
-	}
-
 	FLinearColor SegmentColor(
 		const EABTSM11PlaybackSegmentKind Kind)
 	{
@@ -100,14 +49,20 @@ namespace
 
 void AABTSM11FinaleHUD::DrawHUD()
 {
-	if (AABTSM11FinaleInteractionSystem* System =
+	AABTSM11FinaleInteractionSystem* System =
 		FindInteractionSystem();
-		System != nullptr && System->IsFinaleActive())
+	if (System != nullptr && System->IsFinaleActive())
 	{
 		DrawFinaleLayer(*System);
 	}
 	// Inventory, party and modal UI remain the top layer.
 	Super::DrawHUD();
+	// The deterministic failure fade is the final compositing layer so no
+	// inherited inventory or party widget can remain visible through black.
+	if (System != nullptr && System->IsFinaleActive())
+	{
+		DrawFailureOverlay(*System);
+	}
 }
 
 AABTSM11FinaleInteractionSystem*
@@ -171,14 +126,12 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 	}
 
 	const FABTSM11DiagramBody& Primary = Snapshot.Bodies[0];
-	const FVector2D PrimaryCenter = ToScreen(
-		Center,
-		Radius,
-		Primary.Center);
 	const float ActualPrimaryRadius =
 		static_cast<float>(Primary.VisualRadius) * Radius;
 	const float DisplayPrimaryRadius =
 		FMath::Max(14.0f, ActualPrimaryRadius);
+	const double DisplayPrimaryNormalizedRadius =
+		DisplayPrimaryRadius / FMath::Max(Radius, 1.0f);
 	const float PrimaryScale = ActualPrimaryRadius > KINDA_SMALL_NUMBER
 		? DisplayPrimaryRadius / ActualPrimaryRadius
 		: 1.0f;
@@ -198,9 +151,11 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 			0.8f,
 			Grid.bHiddenHemisphere);
 	}
-	DrawCircleOutline(
-		PrimaryCenter,
-		DisplayPrimaryRadius,
+	DrawDiagramCircleOutline(
+		Center,
+		Radius,
+		Primary.Center,
+		DisplayPrimaryNormalizedRadius,
 		FLinearColor(0.35f, 0.72f, 1.0f, 0.9f),
 		1.5f);
 
@@ -210,17 +165,13 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 	{
 		const FABTSM11DiagramBody& Body =
 			Snapshot.Bodies[AssistIndex];
-		const FVector2D BodyCenter = ToScreen(
-			Center,
-			Radius,
-			Body.Center);
-		const float InfluenceRadius =
-			static_cast<float>(Body.InfluenceRadius) * Radius;
-		if (InfluenceRadius > 2.0f)
+		if (Body.InfluenceRadius * Radius > 2.0f)
 		{
-			DrawCircleOutline(
-				BodyCenter,
-				InfluenceRadius,
+			DrawDiagramCircleOutline(
+				Center,
+				Radius,
+				Body.Center,
+				Body.InfluenceRadius,
 				FLinearColor(
 					Body.Color.R,
 					Body.Color.G,
@@ -230,17 +181,21 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		}
 		DrawPlanetGlyph(
 			AssistIndex,
-			BodyCenter,
+			Center,
+			Radius,
+			Body.Center,
 			FMath::Max(
-				8.0f,
-				static_cast<float>(Body.VisualRadius) * Radius),
+				8.0 / FMath::Max<double>(Radius, 1.0),
+				Body.VisualRadius),
 			Body.Color);
 	}
 	DrawUFOGlyph(
-		ToScreen(Center, Radius, Snapshot.UFOCenter),
+		Center,
+		Radius,
+		Snapshot.UFOCenter,
 		FMath::Max(
-			9.0f,
-			static_cast<float>(Snapshot.UFORadius) * Radius),
+			9.0 / FMath::Max<double>(Radius, 1.0),
+			Snapshot.UFORadius),
 		FLinearColor(0.45f, 1.0f, 0.85f, 1.0f));
 
 	for (int32 Index = 1;
@@ -284,6 +239,27 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 			0.68f,
 			false);
 	}
+}
+
+void AABTSM11FinaleHUD::DrawFailureOverlay(
+	AABTSM11FinaleInteractionSystem& System)
+{
+	if (Canvas == nullptr)
+	{
+		return;
+	}
+	const float Alpha = static_cast<float>(
+		FMath::Clamp(System.GetFailureBlackoutAlpha(), 0.0, 1.0));
+	if (Alpha <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	DrawRect(
+		FLinearColor(0.0f, 0.0f, 0.0f, Alpha),
+		0.0f,
+		0.0f,
+		Canvas->SizeX,
+		Canvas->SizeY);
 }
 
 void AABTSM11FinaleHUD::DrawTargetPreview(
@@ -470,7 +446,7 @@ void AABTSM11FinaleHUD::DrawDiagramSegment(
 {
 	FVector2d Start = NormalizedStart;
 	FVector2d End = NormalizedEnd;
-	if (!ClipSegmentToUnitCircle(Start, End))
+	if (!ABTSM11ClipDiagramSegmentToUnitCircle(Start, End))
 	{
 		return;
 	}
@@ -505,6 +481,38 @@ void AABTSM11FinaleHUD::DrawDiagramSegment(
 	}
 }
 
+void AABTSM11FinaleHUD::DrawDiagramCircleOutline(
+	const FVector2D& PanelCenter,
+	const float PanelRadius,
+	const FVector2d& NormalizedCenter,
+	const double NormalizedRadius,
+	const FLinearColor& Color,
+	const float Thickness,
+	const int32 SegmentCount)
+{
+	const int32 SafeSegments = FMath::Max(8, SegmentCount);
+	FVector2d Previous = NormalizedCenter
+		+ FVector2d(NormalizedRadius, 0.0);
+	for (int32 Index = 1; Index <= SafeSegments; ++Index)
+	{
+		const double Angle = 2.0 * UE_DOUBLE_PI
+			* static_cast<double>(Index)
+			/ static_cast<double>(SafeSegments);
+		const FVector2d Current = NormalizedCenter + FVector2d(
+			FMath::Cos(Angle) * NormalizedRadius,
+			FMath::Sin(Angle) * NormalizedRadius);
+		DrawDiagramSegment(
+			PanelCenter,
+			PanelRadius,
+			Previous,
+			Current,
+			Color,
+			Thickness,
+			false);
+		Previous = Current;
+	}
+}
+
 void AABTSM11FinaleHUD::DrawCircleOutline(
 	const FVector2D& Center,
 	const float Radius,
@@ -535,16 +543,30 @@ void AABTSM11FinaleHUD::DrawCircleOutline(
 
 void AABTSM11FinaleHUD::DrawPlanetGlyph(
 	const int32 AssistIndex,
-	const FVector2D& Center,
-	const float Radius,
+	const FVector2D& PanelCenter,
+	const float PanelRadius,
+	const FVector2d& NormalizedCenter,
+	const double NormalizedRadius,
 	const FLinearColor& Color)
 {
-	DrawCircleOutline(Center, Radius, Color, 1.5f, 28);
+	DrawDiagramCircleOutline(
+		PanelCenter,
+		PanelRadius,
+		NormalizedCenter,
+		NormalizedRadius,
+		Color,
+		1.5f,
+		28);
 	if (AssistIndex == 1)
 	{
-		DrawCircleOutline(
-			Center + FVector2D(-Radius * 0.25f, -Radius * 0.18f),
-			Radius * 0.18f,
+		DrawDiagramCircleOutline(
+			PanelCenter,
+			PanelRadius,
+			NormalizedCenter
+				+ FVector2d(
+					-NormalizedRadius * 0.25,
+					NormalizedRadius * 0.18),
+			NormalizedRadius * 0.18,
 			Color,
 			0.8f,
 			12);
@@ -553,56 +575,86 @@ void AABTSM11FinaleHUD::DrawPlanetGlyph(
 	{
 		for (int32 Band = -1; Band <= 1; ++Band)
 		{
-			const float Y = Center.Y + Band * Radius * 0.34f;
-			DrawLine(
-				Center.X - Radius * 0.82f,
-				Y,
-				Center.X + Radius * 0.82f,
-				Y,
+			const double Y = NormalizedCenter.Y
+				+ Band * NormalizedRadius * 0.34;
+			DrawDiagramSegment(
+				PanelCenter,
+				PanelRadius,
+				FVector2d(
+					NormalizedCenter.X
+						- NormalizedRadius * 0.82,
+					Y),
+				FVector2d(
+					NormalizedCenter.X
+						+ NormalizedRadius * 0.82,
+					Y),
 				Color,
-				0.8f);
+				0.8f,
+				false);
 		}
 	}
 	else
 	{
-		DrawLine(
-			Center.X - Radius * 1.55f,
-			Center.Y + Radius * 0.42f,
-			Center.X + Radius * 1.55f,
-			Center.Y - Radius * 0.42f,
+		DrawDiagramSegment(
+			PanelCenter,
+			PanelRadius,
+			NormalizedCenter + FVector2d(
+				-NormalizedRadius * 1.55,
+				-NormalizedRadius * 0.42),
+			NormalizedCenter + FVector2d(
+				NormalizedRadius * 1.55,
+				NormalizedRadius * 0.42),
 			Color,
-			1.2f);
-		DrawLine(
-			Center.X - Radius * 1.35f,
-			Center.Y + Radius * 0.62f,
-			Center.X + Radius * 1.35f,
-			Center.Y - Radius * 0.62f,
+			1.2f,
+			false);
+		DrawDiagramSegment(
+			PanelCenter,
+			PanelRadius,
+			NormalizedCenter + FVector2d(
+				-NormalizedRadius * 1.35,
+				-NormalizedRadius * 0.62),
+			NormalizedCenter + FVector2d(
+				NormalizedRadius * 1.35,
+				NormalizedRadius * 0.62),
 			Color,
-			0.8f);
+			0.8f,
+			false);
 	}
 }
 
 void AABTSM11FinaleHUD::DrawUFOGlyph(
-	const FVector2D& Center,
-	const float Radius,
+	const FVector2D& PanelCenter,
+	const float PanelRadius,
+	const FVector2d& NormalizedCenter,
+	const double NormalizedRadius,
 	const FLinearColor& Color)
 {
-	DrawCircleOutline(
-		Center,
-		Radius,
+	DrawDiagramCircleOutline(
+		PanelCenter,
+		PanelRadius,
+		NormalizedCenter,
+		NormalizedRadius,
 		Color,
 		1.4f,
 		24);
-	DrawLine(
-		Center.X - Radius * 1.65f,
-		Center.Y,
-		Center.X + Radius * 1.65f,
-		Center.Y,
+	DrawDiagramSegment(
+		PanelCenter,
+		PanelRadius,
+		NormalizedCenter + FVector2d(
+			-NormalizedRadius * 1.65,
+			0.0),
+		NormalizedCenter + FVector2d(
+			NormalizedRadius * 1.65,
+			0.0),
 		Color,
-		1.5f);
-	DrawCircleOutline(
-		Center + FVector2D(0.0f, -Radius * 0.28f),
-		Radius * 0.52f,
+		1.5f,
+		false);
+	DrawDiagramCircleOutline(
+		PanelCenter,
+		PanelRadius,
+		NormalizedCenter
+			+ FVector2d(0.0, NormalizedRadius * 0.28),
+		NormalizedRadius * 0.52,
 		Color,
 		0.9f,
 		18);

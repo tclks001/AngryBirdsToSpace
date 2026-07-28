@@ -26,6 +26,8 @@ private:
 		float Radius);
 	void DrawTargetPreview(
 		AABTSM11FinaleInteractionSystem& System);
+	void DrawFailureOverlay(
+		AABTSM11FinaleInteractionSystem& System);
 	void DrawStatus(
 		AABTSM11FinaleInteractionSystem& System,
 		const FVector2D& DiagramCenter,
@@ -38,6 +40,14 @@ private:
 		const FLinearColor& Color,
 		float Thickness,
 		bool bDashed);
+	void DrawDiagramCircleOutline(
+		const FVector2D& PanelCenter,
+		float PanelRadius,
+		const FVector2d& NormalizedCenter,
+		double NormalizedRadius,
+		const FLinearColor& Color,
+		float Thickness,
+		int32 SegmentCount = 48);
 	void DrawCircleOutline(
 		const FVector2D& Center,
 		float Radius,
@@ -46,11 +56,15 @@ private:
 		int32 SegmentCount = 48);
 	void DrawPlanetGlyph(
 		int32 AssistIndex,
-		const FVector2D& Center,
-		float Radius,
+		const FVector2D& PanelCenter,
+		float PanelRadius,
+		const FVector2d& NormalizedCenter,
+		double NormalizedRadius,
 		const FLinearColor& Color);
 	void DrawUFOGlyph(
-		const FVector2D& Center,
-		float Radius,
+		const FVector2D& PanelCenter,
+		float PanelRadius,
+		const FVector2d& NormalizedCenter,
+		double NormalizedRadius,
 		const FLinearColor& Color);
 };

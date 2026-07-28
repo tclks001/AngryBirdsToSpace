@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "Async/Future.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
@@ -91,6 +92,10 @@ public:
 		return TargetPreviewRenderTarget;
 	}
 	double GetPlaybackElapsedSeconds() const { return PlaybackElapsedSeconds; }
+	double GetFailureBlackoutAlpha() const
+	{
+		return FailureTimeline.GetBlackoutAlpha();
+	}
 
 	static bool ValidateInteractionContract(
 		const AABTSM11FinaleSystem& InFinaleSystem,
@@ -103,13 +108,17 @@ private:
 		TSharedPtr<FABTSM11PreviewSolvePayload> Payload);
 	void HandleNominalSolveCompleted(
 		TSharedPtr<FABTSM11NominalSolvePayload> Payload);
+	void DrainCompletedSolves();
 	void RebuildPublishedPreview();
 	bool FinalizePendingRelease();
 	void UpdateAiming(float DeltaSeconds);
 	void UpdatePlayback(float DeltaSeconds);
+	void UpdateFailurePresentation(float DeltaSeconds);
 	void UpdatePouchPresentation();
-	void UpdateTargetCapture();
+	void MarkTargetCaptureDirty();
+	void FlushTargetCapture();
 	void RestoreAttemptToWorld(bool bKeepFinaleMode);
+	void BeginAttemptFailure(const FString& Reason);
 	void FailInteraction(const FString& Reason);
 	bool DoesInputMatchLatestSolve() const;
 	AActor* ResolvePreviewTargetActor(
@@ -156,6 +165,18 @@ private:
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	double InitialPower = 0.90;
 
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
+		meta = (ClampMin = "0.0", ClampMax = "500.0", Units = "cm"))
+	double MinimumVisualPullDistanceCM = 60.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
+		meta = (ClampMin = "0.0", ClampMax = "500.0", Units = "cm"))
+	double MaximumVisualPullDistanceCM = 180.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
+		meta = (ClampMin = "0.0", ClampMax = "200.0", Units = "cm"))
+	double MaximumVisualPitchDropCM = 70.0;
+
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Prediction",
 		meta = (ClampMin = "0.02", ClampMax = "1.0", Units = "s"))
 	double PreviewSubmitIntervalSeconds = 0.08;
@@ -163,6 +184,26 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Playback",
 		meta = (ClampMin = "0.1", ClampMax = "100.0"))
 	double PlaybackTimeScale = 18.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Failure",
+		meta = (ClampMin = "0.0", ClampMax = "6.0", Units = "s"))
+	double FailureReadableHoldSeconds = 1.25;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Failure",
+		meta = (ClampMin = "0.05", ClampMax = "2.0", Units = "s"))
+	double FailureFadeToBlackSeconds = 0.60;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Failure",
+		meta = (ClampMin = "0.0", ClampMax = "2.0", Units = "s"))
+	double FailureBlackHoldSeconds = 0.40;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Failure",
+		meta = (ClampMin = "0.05", ClampMax = "2.0", Units = "s"))
+	double FailureFadeFromBlackSeconds = 0.45;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Failure",
+		meta = (ClampMin = "1.0", ClampMax = "12.0", Units = "s"))
+	double MaximumFailureFlightDisplaySeconds = 6.0;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Capture",
 		meta = (ClampMin = "64", ClampMax = "1024"))
@@ -177,6 +218,7 @@ private:
 	FString RuntimeFailure;
 	FABTSM11PrefixStabilizer Stabilizer;
 	FABTSM11PreviewTargetSelector TargetSelector;
+	FABTSM11FailurePresentationTimeline FailureTimeline;
 	FABTSM11PreviewSelection PreviewSelection;
 	FABTSM11PrefixClassification CurrentClassification;
 	FABTSM11TrajectoryResult LatestQualifiedResult;
@@ -190,12 +232,16 @@ private:
 	FTransform AttemptBirdOriginalTransform = FTransform::Identity;
 	double PreviewSubmitAccumulatorSeconds = 0.0;
 	double PlaybackElapsedSeconds = 0.0;
+	double PlaybackPresentationEndTimeSeconds = 0.0;
 	int64 AimRevision = 0;
 	int64 LatestSolvedRevision = INDEX_NONE;
+	TFuture<TSharedPtr<FABTSM11PreviewSolvePayload>> PreviewSolveFuture;
+	TFuture<TSharedPtr<FABTSM11NominalSolvePayload>> NominalSolveFuture;
 	bool bPreviewDirty = false;
 	bool bPreviewSolveInFlight = false;
 	bool bNominalSolveInFlight = false;
 	bool bNominalPhysicalReady = false;
 	bool bLatestPhysicalResultAvailable = false;
 	bool bAttemptBirdInPouch = false;
+	bool bTargetCaptureDirty = false;
 };
