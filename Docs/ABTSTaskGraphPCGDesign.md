@@ -1,6 +1,6 @@
 # ABTS：Task Graph 驱动的球面 PCG 最终核心设计
 
-> 状态：V3 核心管线已实现，已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。弹弓攻击解、资源经济和局部 Room 原型仍在对应玩法里程碑接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
+> 状态：V3 核心管线与 M3 首周长路线/道路外建筑兼容方案已实现，已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。弹弓攻击解、资源经济和局部 Room 原型仍在对应玩法里程碑接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，首周与月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
 >
 > 目标：先生成可通关、可分支、可被能力门验证的 Gameplay 图，再将它嵌入 `CellTopo`；地形、水网、道路、资源、建筑与弹弓攻击解共同服务该图。连续球面只渲染结果。
 
@@ -47,7 +47,7 @@ WorldSeed
 - Task Graph 描述“为什么去那里”；Spatial Graph 描述“区域如何相连”；道路和河流描述“怎样走、为何受阻”。三者不能合并成一个 `bRoad` 数组。
 - 逻辑高度先于连续网格。不得通过渲染网格最低点反推河流或可建造性。
 - 每次重建从全新结果对象开始，不复用旧 `bRoad`、`RoadDistance`、河段、锚点或验证缓存。
-- 固定 `WorldSeed + GeneratorVersion + ConfigHash` 必须生成完全一致的逻辑结果。
+- 固定 `WorldSeed + GeneratorVersion + LayoutPolicyVersion + ConfigHash` 必须生成完全一致的逻辑结果。
 
 ## 3. 最终数据模型
 
@@ -165,7 +165,7 @@ Mission Graph 构造流程：
 禁止让所有阶段共享并顺序消费一个 `FRandomStream`，否则早期多抽一次随机数会改变整张地图。每个阶段使用独立派生 Seed：
 
 ```text
-StageSeed = Hash(WorldSeed, GeneratorVersion, StageTag, AttemptIndex)
+StageSeed = Hash(WorldSeed, GeneratorVersion, LayoutPolicyVersion, StageTag, AttemptIndex)
 ItemSeed  = Hash(StageSeed, StableTaskId/CellId/EdgeKey, LocalIndex)
 ```
 
@@ -499,3 +499,17 @@ FinalScore =
 - Space 槽对和 `FABTSM110FinaleLocalFrame` 由接受的 `LaunchSite`/`SatelliteWindow` 结果确定；
 - M7 不再把 `LaunchSite` 当作建筑任务；其平整施工台改供终局槽使用；
 - 完整字段、配方、M9/M11 引力隔离和验收见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
+
+### 17.3 M3 首周空间节奏修订（2026-07-28）
+
+本修订保持稳定枚举、`GeneratorVersion=3` 和世界生成合同不变，具体实现与月度后续见 [M3R PCG 地图生成改进方案第 12 节](M3PCGMapImprovementPlan.md#12-首周兼容小修方案)。
+
+- 新增 `LayoutPolicyVersion=1`、`ConfigHash` 与 `LayoutHash`，在不破坏 M11 冻结版本身份的前提下区分首周布局策略及其输入/结果；`ConfigHash` 覆盖布局配置、Planet 几何上下文与量化后的有序 `CellTopo`；
+- 主线采用可调 120° 总跨度和首周冻结节奏，接受结果必须满足 `MainRouteLengthCM>=18000`；
+- `RoadPortalCellId` 与 `BuildingAnchorCellId` 成为两个显式 CellTopo 身份；
+- BuildingPad 改为道路前 `Reserve`、高度场压平预留 Anchor、道路后 `Certify`，不得在水文/道路结果出来后偷偷换点；
+- 普通三栋建筑的 NoRoad Ring 是 RoadPlanner 硬禁止区，默认最小主路偏移分别为 3/4/5 Cell；最终还必须按实际平台、混合带和道路宽度通过连续几何相交认证，几何候选边预筛阈值由实际尺寸动态推导；
+- LaunchSite 保持道路端点与终局施工 Anchor 的双重身份，不套用普通建筑禁入规则，但其高度压平护环必须完整归属于 LaunchSite Task；
+- `ProgressDistanceCM/FlowS` 按 Start→Launch 有序主路线段的球面弧长计算；道路外 Cell 继承最近主路投影的纵向进度；
+- Validator 以 CellTopo 高度包络和 M4 相机代理验证开局视距：B1 可见、B2/B3 隐藏；
+- 新增 `ABTS.M3.WeekOne` Seed 合同、独立弧长/BFS/视距/路线唯一性复算以及配置、几何、拓扑 Hash 敏感性测试，并继续通过 WorldGeneration 和 M11.0 103 Seed 分离回归。

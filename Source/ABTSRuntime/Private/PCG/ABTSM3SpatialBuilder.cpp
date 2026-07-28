@@ -62,6 +62,7 @@ EABTSM3TerrainType TerrainForTask(const EABTSM3TaskType Type)
 bool FSpatialBuilder::PlaceTaskSeeds(
 	const int32 WorldSeed,
 	const int32 AttemptIndex,
+	const float MainRouteAngularSpanDegrees,
 	const float MinSatelliteLaunchAngularSeparationDegrees,
 	const TArray<FABTSM2Cell>& Cells,
 	TArray<FABTSM3TaskNode>& Tasks) const
@@ -74,16 +75,27 @@ bool FSpatialBuilder::PlaceTaskSeeds(
 	const FVector TangentY = FVector::CrossProduct(Start, TangentX).GetSafeNormal();
 	const float Bend = Stream.FRandRange(-0.32f, 0.32f);
 
-	const float MainAngles[] = {0.0f, 0.22f, 0.42f, 0.64f, 0.86f, 1.10f, 1.36f};
+	const float MainRouteSpanRadians = FMath::DegreesToRadians(
+		FMath::Clamp(MainRouteAngularSpanDegrees, 1.0f, 170.0f));
+	static constexpr float MainRouteProgress[] = {
+		0.0f,
+		0.0952381f,
+		0.3714286f,
+		0.5476190f,
+		0.6571429f,
+		0.8476190f,
+		1.0f
+	};
 	TSet<int32> Used;
 	for (int32 Index = 0; Index < 7; ++Index)
 	{
-		const float Angle = MainAngles[Index];
+		const float Angle = MainRouteSpanRadians * MainRouteProgress[Index];
 		const float Side = FMath::Sin(Angle * 2.1f + Bend) * 0.25f;
 		const FVector Desired = (Start * FMath::Cos(Angle) + TangentX * FMath::Sin(Angle) + TangentY * Side).GetSafeNormal();
 		Tasks[Index].SeedCellId = FindNearestCell(Cells, Desired);
 		if (Used.Contains(Tasks[Index].SeedCellId)) return false;
 		Used.Add(Tasks[Index].SeedCellId);
+		Tasks[Index].RoadPortalCellId = Tasks[Index].SeedCellId;
 	}
 
 	const FVector BranchOrigin = Cells[Tasks[2].SeedCellId].UnitCenter;
@@ -93,6 +105,7 @@ bool FSpatialBuilder::PlaceTaskSeeds(
 	Tasks[7].SeedCellId = FindNearestCell(Cells, ScoutDirection);
 	if (Used.Contains(Tasks[7].SeedCellId)) return false;
 	Used.Add(Tasks[7].SeedCellId);
+	Tasks[7].RoadPortalCellId = Tasks[7].SeedCellId;
 	Tasks[8].SeedCellId = FindNearestSeparatedCell(
 		Cells,
 		SatelliteDirection,
@@ -103,6 +116,7 @@ bool FSpatialBuilder::PlaceTaskSeeds(
 		FMath::Min(179.0f, MinSatelliteLaunchAngularSeparationDegrees + 5.0f),
 		Used);
 	if (!Cells.IsValidIndex(Tasks[8].SeedCellId)) return false;
+	Tasks[8].RoadPortalCellId = Tasks[8].SeedCellId;
 	return true;
 }
 
