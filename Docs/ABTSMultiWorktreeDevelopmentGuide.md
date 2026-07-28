@@ -6,18 +6,21 @@
 
 ## 1. 目标与拓扑
 
-本项目采用“一个集成工作树 + 三个功能工作树”的固定拓扑：
+本项目采用“一个集成工作树 + 三个功能工作树”的固定职责拓扑。功能工作树的物理目录可以由 Codex 托管，目录名不参与职责判定：
 
 ```text
 C:\workspace\AngryBirdsToSpace       原始仓库；唯一集成工作树
 ├─ master / integration-candidate    只做基线、合并、联合验收
 │
-├─ C:\workspace\AngryBirdsToSpace-M3   feature/m3-pcg-map
-├─ C:\workspace\AngryBirdsToSpace-M7   feature/m7-buildings
-└─ C:\workspace\AngryBirdsToSpace-M11  feature/m11-finale
+├─ %CODEX_HOME%\worktrees\<opaque-id>\AngryBirdsToSpace   feature/m3-pcg-map
+├─ %CODEX_HOME%\worktrees\<opaque-id>\AngryBirdsToSpace   feature/m7-buildings
+└─ %CODEX_HOME%\worktrees\<opaque-id>\AngryBirdsToSpace   feature/m11-finale
 ```
 
-只新增上述三个功能工作树，不再新增第四个集成工作树。原始仓库始终承担集成职责。
+Codex 默认把托管工作树放在 `%CODEX_HOME%\worktrees`；当前 Windows 安装对应
+`C:\Users\mingyangwu\.codex-official\worktrees`。其中的 `<opaque-id>` 由 Codex 分配，不得根据目录 ID 猜测 M3/M7/M11 身份。身份只由 `git branch --show-current` 与上表中的专属分支决定。若以后在 Codex 设置中修改 Worktree root，本规范仍然有效。
+
+只保留上述三个功能职责，不再新增第四个集成工作树。原始仓库始终承担集成职责。Codex 托管工作树可能随会话归档或清理而被回收；阶段成果必须及时形成分支提交并推送，不能把未提交工作长期只留在托管目录。长期会话应固定/保留，或改用 Codex permanent worktree。
 
 工作树隔离的是工作目录、索引、当前分支以及各自的 `Binaries/`、`Intermediate/`、`Saved/`；它们仍共享同一个 Git 对象库和引用数据库。因此：
 
@@ -41,9 +44,19 @@ C:\workspace\AngryBirdsToSpace       原始仓库；唯一集成工作树
 
 该 base 至少必须通过 Development Editor 全链接、`ABTS.Contracts.WorldGeneration`、M7 Routing/DAG 回归、`ABTS.M110`、`ABTS.M11A`、`ABTS.M11B.Unit` 与 `ABTS.M11B.Runtime`。如果求解器、冻结布局或认证身份发生变化，还必须重跑 M11-B 两项慢速认证；若未变化，可引用此前已经批准且 Hash 未变的慢测证据。最终交接必须列出本次实际过滤器、成功测试数和唯一日志。
 
-Git 提交无法在自身内容中记录自己的最终 SHA，因此 base-commit 的精确 SHA 由完成本任务时的交接消息给出。创建工作树前必须把该 SHA 填入 `$BaseCommit`，不要用会继续移动的 `HEAD`、`master` 或远端分支名代替。
+Git 提交无法在自身内容中记录自己的最终 SHA，因此 base-commit 的精确 SHA 由完成本任务时的交接消息给出。创建工作树时必须在 Codex UI 中选择包含该 SHA 的起始分支，并在创建后用 `git rev-parse HEAD` 核对；不要只凭会继续移动的分支名推定基线正确。
 
-在原始仓库的 PowerShell 中执行：
+使用 Codex 的“在新工作树中继续”时，Codex 默认在 detached HEAD 上创建托管工作树。创建后，在对应会话使用“Create branch here”绑定尚不存在的专属分支；若分支已经存在，则不要重复创建，改在该工作树终端执行 `git switch <已有专属分支>`。Git 不允许同一分支同时被两个工作树检出。
+
+当前三个职责与分支固定为：
+
+| 职责 | 专属分支 |
+| --- | --- |
+| M3 | `feature/m3-pcg-map` |
+| M7 | `feature/m7-buildings` |
+| M11 | `feature/m11-finale` |
+
+需要自行创建 permanent worktree 时，才在原始仓库的 PowerShell 中执行：
 
 ```powershell
 $IntegrationRoot = 'C:\workspace\AngryBirdsToSpace'
@@ -71,7 +84,7 @@ git -C $IntegrationRoot worktree add `
 git -C $IntegrationRoot worktree list
 ```
 
-创建前，`git status --short` 必须没有输出。如果某个目标目录、分支或工作树已经存在，先停止并查明归属，不得用删除目录、`worktree prune` 或强制重建来绕过。
+创建前，`git status --short` 必须没有输出。如果某个目标目录、分支或工作树已经存在，先停止并用 `git worktree list --porcelain` 查明归属。只有在绝对路径已经不存在且条目标记为 `prunable` 时，才允许由集成工作树执行 `git worktree prune --verbose` 清理失效元数据；不得删除仍存在的工作树目录、强制让同一分支被两个工作树检出或用 `--ignore-other-worktrees` 绕过保护。
 
 ## 3. 稳定消费契约
 
@@ -243,6 +256,7 @@ M11 不得修改 M3 世界坐标或生成规则来适配终局，不得扫描 M9
 - `Source/ABTSRuntime/Private/World/ABTSM110FinaleTypes.cpp`
 - `Source/ABTSRuntime/Private/World/ABTSM110AutomationTests.cpp`
 - `.uproject`、`Config/**`、`*.Build.cs`、`*.Target.cs`
+- `AGENTS.md`
 - `Docs/ABTSProjectWorkflow.md`
 - `Docs/ABTSMultiWorktreeDevelopmentGuide.md`
 - `Docs/AngryBirdsToSpaceGameDesign.md`
@@ -289,7 +303,7 @@ M7 负责建筑 Actor 自身的注册、验证与状态输出；M6 StartupPhysic
 
 ## 6. 每个会话的启动检查
 
-每个 Codex/人工会话开始时先执行：
+每个 Codex/人工会话开始时，必须先完整阅读根目录 `AGENTS.md` 和本规范，再执行：
 
 ```powershell
 git rev-parse --show-toplevel
@@ -306,6 +320,11 @@ git worktree list
 - 是否触及稳定契约、共享热点或二进制红区。
 
 如果顶层目录或分支与预期不符，立即停止。不要在工作树内用 `git switch` 切换到别的功能分支，也不要让会话“顺便”修改另一个工作树。
+
+Codex 托管目录中的数字 ID 是透明实现细节；会话不得把
+`C:\Users\mingyangwu\.codex-official\worktrees\<opaque-id>` 写入代码、配置、资产引用或交接契约。构建和测试脚本在运行时通过 `git rev-parse --show-toplevel` 获取当前工作树绝对路径。
+
+正在运行的 Codex 会话不会因为另一个工作树提交了规范就自动重新阅读。共享规范更新合并后，用户或集成者必须在每个会话明确要求其重新读取 `AGENTS.md` 和本规范，然后才能继续工作。
 
 Windows 当前启用 `core.autocrlf=true` 和 `core.ignorecase=true`。因此：
 
@@ -358,6 +377,18 @@ git merge --no-edit master
 
 若本地 `master` 尚未包含远端最新集成提交，应先由原始集成工作树更新 `master`。功能工作树不得替集成工作树移动 `master`。
 
+### 同步共享规范与集成所有文件
+
+`AGENTS.md`、本规范、稳定契约、共享默认绑定或共同资产只能在集成工作树修改。同步步骤固定为：
+
+1. 相关功能会话完成当前命令、编译或测试，形成显式 checkpoint 提交；不使用共享 `stash`。
+2. 集成工作树在干净 `master` 上形成职责单一的共享提交，并记录精确 SHA。
+3. 功能工作树先用 `git log --oneline HEAD..master` 审阅将要进入本分支的全部集成提交，确认可接收后执行 `git merge --no-edit master`。若用 `git merge <共享提交 SHA>` 固定同步终点，仍会纳入该 SHA 的全部未合并祖先，不能把它理解为只复制一个补丁。
+4. 合并后运行 `git merge-base --is-ancestor <共享提交 SHA> HEAD` 核实共享提交已经进入当前分支。
+5. 当前 Codex 会话重新读取 `AGENTS.md` 和本规范，再继续原任务。
+
+因为所有 worktree 共享同一个本地 Git 对象库与 `master` 引用，不使用 `git pull master` 从集成目录“拉取”。已推送或已交接的功能分支用 merge 接收共享提交，不通过 rebase 改写历史。仅修改 Markdown/`AGENTS.md` 时不要求关闭 UE 或重新编译；若共享提交包含 C++、Config、Blueprint、地图、默认资产绑定或资产路径变化，则按受影响门禁重新构建，并在 fresh Editor 中验证。
+
 ## 8. 独立验收
 
 ### 8.1 通用编译
@@ -366,7 +397,7 @@ git merge --no-edit master
 
 ```powershell
 $EngineRoot = 'C:\Program Files\Epic Games\UE_5.8'
-$ProjectRoot = '<当前工作树绝对路径>'
+$ProjectRoot = (git rev-parse --show-toplevel).Trim()
 
 & "$EngineRoot\Engine\Build\BatchFiles\Build.bat" `
   AngryBirdsToSpaceEditor Win64 Development `
@@ -387,7 +418,7 @@ $RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $Log = "$ProjectRoot\Saved\Logs\<阶段>-$RunId-FreshAutomation.log"
 
 & $EditorCmd $Project `
-  -unattended -nop4 -NullRHI `
+  -unattended -nop4 -NullRHI -NoSound -NoMessaging `
   "-ExecCmds=Automation RunTests <Filter>;Quit" `
   "-TestExit=Automation Test Queue Empty" `
   "-AbsLog=$Log"
@@ -409,7 +440,34 @@ $PassedCount = (Select-String -LiteralPath $Log `
 
 UE 5.8 的 Live Coding 互斥锁按共享的 `UnrealEditor.exe` 路径判断，另一个项目或另一个工作树的 Editor 也可能造成误拦截。只有在读取进程命令行并确认所有活动 Editor 都未加载“当前工作树”的项目/DLL 后，才可对当前构建追加 `-NoHotReloadFromIDE` 绕过这项过宽检查；若当前工作树自己的 Editor 正在运行，则禁止绕过，必须正常关闭它。交接中应记录使用过该例外。
 
-### 8.2 分工作树门禁
+### 8.2 多工作树编译与运行调度
+
+每个工作树拥有独立的 `Binaries/`、`Intermediate/` 和 `Saved/`，因此使用正确的 `.uproject` 绝对路径时，项目 DLL、日志和自动化报告不会互相覆盖。但三个工作树仍共享同一套 UE 5.8 引擎及系统资源，包括 UBT/UBA 协调、Live Coding 状态、全局/Zen DDC、Shader 编译器、CPU、内存、GPU、音频设备和可能的消息/调试端口。
+
+统一执行以下调度规则：
+
+- 三个工作树一律关闭 Live Coding，不使用 Hot Reload。修改 C++ 后关闭当前工作树自己的 Editor，完整编译，再以 fresh Editor 启动。
+- 编译可以由多个会话发起，但必须带 `-WaitMutex`；UBT/UBA 可能把全链接阶段排队。不得把“等待互斥量”当作失败，也不得通过结束其他会话的进程抢锁。
+- 重型构建、Cook、全量 Shader 编译和 M11 慢速认证默认串行。
+- 轻量 `-NullRHI` 自动化最多两个进程并行。每个进程必须使用自己的 `.uproject`、`Saved/Logs` 和带时间戳的 `-AbsLog`，并使用 `-NoSound -NoMessaging`；零匹配或仅进程返回 0 不算通过。
+- 不在其他工作树构建或测试期间清空共享 DDC/Zen、Shader Cache 或引擎级缓存。共享缓存正常并发读取通常安全，但资源竞争导致的超时必须在低负载下复测，不能直接归类为产品缺陷。
+- 三个图形化 Editor 可以同时打开各自工程，但不得同时保存同一共享资产。正式可见 PIE、D3D12、Chaos 沉降/hitch soak 与截图验收串行进行；验收时其他 Editor 至少不得处于 PIE、Shader 编译或重型资产加载状态。
+- M7 建筑稳定性和定时门槛对帧时敏感。三个 PIE 同时运行所得的 timeout、沉降或稳定性失败只可作为诊断线索，不能作为正式拒收证据。
+- 进程、DLL 或端口冲突时，先读取进程命令行和项目绝对路径确认归属；只处理当前任务启动且属于当前工作树的进程。
+- 最终联合构建、完整自动化与可见 PIE 只在原始集成工作树的候选分支上串行执行。
+
+推荐调度顺序：
+
+```text
+M3 / M7 / M11 各自编码并形成 checkpoint
+  → 各自关闭本工作树 Editor
+  → Development Editor 构建（允许同时请求，由 -WaitMutex 协调）
+  → 轻量 NullRHI 自动化（最多两个并行）
+  → M3 PIE → M7 PIE → M11 PIE（正式验收串行）
+  → 集成候选联合构建、自动化与 PIE（串行）
+```
+
+### 8.3 分工作树门禁
 
 | 工作树 | 自动化门禁 | 视觉/运行时门禁 |
 | --- | --- | --- |
