@@ -196,6 +196,8 @@ struct FABTSM73DAGSelectedSupport
 	FBox2D FeasibleColumnRegion;
 	EABTSM73DAGSupportPattern SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
 	float RealizedColumnWidthCM = 0.0f;
+	/** Exact centers accepted by the load solver. The compiler must consume these rather than re-deriving geometry. */
+	TArray<FVector2D> RealizedColumnCenters;
 	float Cost = 0.0f;
 };
 

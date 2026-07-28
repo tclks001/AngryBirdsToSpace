@@ -2,7 +2,7 @@
 
 > 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。后续阶段：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。
 
-> 状态：C++ 已实现，Editor 编译、DAG 自动化与 Legacy A/B/B2 回归均通过；等待 M7.1 和球面场景的手工视觉/物理验收。
+> 状态：C++ 已实现并由 DAG2.3 接入球面 TaskGraph 生产链；Editor 编译、DAG/M7 自动化、固定世界基线与最终二进制三次 fresh D3D12 实时 60 FPS 通过。现行集成验收见 [M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG 总体调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-B2 Legacy 对照](M73B2StructuralWeaknessAndFailureValidationDesign.md)
 
@@ -26,10 +26,10 @@ Selected Logical Support
 | `SupportPattern` | 柱数 | 几何 | 用途与未来弱点 |
 | --- | ---: | --- | --- |
 | `TwoColumnLine` | 2 | 在可行区域较长轴两端排成线 | 窄桥、接缝、故意脆弱的单向支撑；不能承担通用宽楼板 |
-| `ThreeColumnTripod` | 3 | 两根构成底边、第三根位于另一侧，形成三角形 | 默认普通楼板；拆掉任意关键柱都可能显著缩小支撑凸包 |
+| `ThreeColumnTripod` | 3 | 两根构成底边、第三根位于另一侧，形成接触质心居中的三角形 | 默认普通楼板；拆掉任意关键柱都可能显著缩小支撑凸包 |
 | `FourColumnFootprint` | 4 | 可行区域四角形成矩形 | 宽重载平台、强调稳固的承载层；未来可作为“非弱点强化” |
 
-三柱不是在双柱直线上再加一根，而是必须跨两个局部轴展开。只有这样，上方楼板的质心才由三角形凸包承载。
+三柱不是在双柱直线上再加一根，而是必须跨两个局部轴展开。只有这样，上方楼板的质心才由三角形凸包承载。三根等截面柱还必须满足接触质心与承载区域中心重合：长轴 X 使用 `(-a,-b/2)、(+a,-b/2)、(0,+b)`，长轴 Y 使用转置点位。旧 `(-a,-b)、(+a,-b)、(0,+b)` 会把质心偏到 `-b/3`，与载荷求解器的三柱均分假设冲突。
 
 ## 3. 几何约束与真实校验
 
@@ -39,7 +39,7 @@ Selected Logical Support
 Inset = ColumnWidthCM / 2 + ColumnClearanceCM
 ```
 
-二柱要求一条轴能容纳两根，三柱和四柱要求 X、Y 两个方向都能容纳两根。若区域不足，DAG-2 拒绝该候选支撑，而不会让柱相交或悄悄退化成其他模式。
+二柱要求一条轴能容纳两根。三柱和四柱除边界内缩外，还要逐对检查轴对齐方柱：任意一对至少沿 X 或 Y 保留 `ColumnWidthCM + ColumnClearanceCM` 的中心距，不能只用旧 `PairAxis` 粗判后允许斜对方柱相交。若最终按接触面积反推出的柱宽使当前模式放不下，且已开启窄支撑回退，则求解器显式记录从 Tripod/FourColumn 到 TwoColumn、必要时 SingleColumn 的降级，并在每次降级后重算整组柱宽；没有合法回退才拒绝候选。
 
 静态验证不再把所有接触拼成 AABB。它会收集每个 Plate–Column 接触矩形的四角，建立真实二维凸包，再验证上方节点的局部质心是否位于该凸包内。这样三角形、四角形和线支撑的差异会真正影响生成是否通过。
 
@@ -60,7 +60,7 @@ bAllowAdaptiveColumnWidth = true
 MinAdaptiveColumnWidthCM = 24
 ```
 
-这是一组首轮视觉起点，不是质量参数。对于已经存档的 Actor，原有 `DAGLayoutSettings` 会保留旧的 `88 / 58` 数值，必须在 Details 中手动改成新值。
+这是一组首轮视觉起点，不是质量参数。TaskGraph 的铁质 Furnace 是生产例外：默认和运行时解析边界均要求 `MinSupportContactAreaRatio>=0.06`，旧 Blueprint CDO 中显式保存的 4% DAG 值也会升级；Workshop/Target 和独立测试 Actor 仍以 4% 为普通默认。对于已经存档的 Actor，原有 `DAGLayoutSettings` 会保留旧的 `88 / 58` 数值，必须在 Details 中手动改成新值。
 
 ## 5. 编辑器操作
 
@@ -92,7 +92,8 @@ Expansion Step Budget = 0
 
 - 三种 Pattern 都能编译、每条 `DAGPhysicalSupportMapping` 的柱数分别为 2/3/4；
 - 同 Seed/参数的柱位置和 Contact DAG 可复现；
-- 三柱模式的三个中心不共线，楼板质心位于真实接触凸包内；
+- 三柱模式的三个中心不共线，等面积接触质心与输入承载区域中心误差 `<0.01cm`，楼板质心位于真实接触凸包内，方柱逐对满足 AABB 净空；
+- 自动化必须覆盖过窄 Tripod 拒绝、临界可行区域接受、最终柱宽导致的单接口降级，以及多接口先后失配时的单调收敛；最终总接触比仍不得低于配置值；
 - 柱宽 56cm、板厚 40cm 的默认三柱建筑在 M7.1 中无初始穿透、无可见倾覆；
 - `ABTS.M73DAG.SupportPatternsAndHullValidation` 成功。
 
@@ -114,7 +115,7 @@ Expansion Step Budget = 0
 
 | `COMOutsideSupportHull` | 楼板质心落在实际接触凸包之外 | 改三柱/四柱，增加可行交集，或调整 Plate 尺寸；不要回退到 AABB 判定 |
 | --- | --- | --- |
-| `ContactAreaTooSmall` | 细柱总接触面积低于 DAG 专用承压比例 | 默认保持 `0.04`；提高柱宽或柱数。支撑凸包通过不能替代最低承压面积，但无需沿用 Legacy 的 12% |
+| `ContactAreaTooSmall` | 细柱总接触面积低于 DAG 专用承压比例 | 普通默认保持 `0.04`，TaskGraph Furnace 保持 `0.06`；提高柱宽或柱数。支撑凸包通过不能替代最低承压面积，但无需沿用 Legacy 的 12% |
 | 三柱仍看似一条线 | `TwoColumnLine` 被选中，或可行区域过窄而被拒绝 | 选择 `ThreeColumnTripod`；检查 X/Y Scope 是否同时足够 |
 | 旧地图仍是粗柱厚板 | Actor 实例序列化保留了 DAG-2.0 旧数值 | 手动设置 `56 / 40` 并 Rebuild Preview |
 
@@ -133,6 +134,9 @@ ABTS.M73DAG.RecursiveExpansionDeterminism        Success
 ABTS.M73DAG.ScopeLayoutAndModuleCompilation      Success
 ABTS.M73DAG.SparseSupportAudit                   Success
 ABTS.M73DAG.SupportPatternsAndHullValidation     Success
+ABTS.M73DAG.AdaptivePlateAndColumnGeometry       Success
+ABTS.M73DAG.AssociativeNestingAndParallelFallback Success
+ABTS.M73DAG.StructuralRankAndPhysicalContinuity  Success
 
 ABTS.M73A.DefaultStructuresAreStaticallyStable  Success
 ABTS.M73B.WeakPointPlanner                       Success

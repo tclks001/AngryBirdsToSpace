@@ -3,6 +3,7 @@
 #include "Building/ABTSM73DAGLayoutSolver.h"
 
 #include "Building/ABTSM73DAGLoadSupportSolver.h"
+#include "Building/ABTSM73DAGSupportGeometry.h"
 #include "Building/ABTSM73DAGTypes.h"
 
 namespace
@@ -40,22 +41,13 @@ namespace
 	bool CanFitSupportPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
 		const EABTSM73DAGSupportPattern Pattern, const float ColumnWidthCM)
 	{
-		if (!Region.bIsValid) return false;
-		const FVector2D Size = Region.GetSize();
-		const float SingleAxis = ColumnWidthCM + Settings.ColumnClearanceCM * 2.0f;
-		const float PairAxis = ColumnWidthCM * 2.0f + Settings.ColumnClearanceCM * 3.0f;
-		switch (Pattern)
-		{
-		case EABTSM73DAGSupportPattern::SingleColumnInterface:
-			return Size.X >= SingleAxis && Size.Y >= SingleAxis;
-		case EABTSM73DAGSupportPattern::TwoColumnLine:
-			return FMath::Min(Size.X, Size.Y) >= SingleAxis && FMath::Max(Size.X, Size.Y) >= PairAxis;
-		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
-		case EABTSM73DAGSupportPattern::FourColumnFootprint:
-			return Size.X >= PairAxis && Size.Y >= PairAxis;
-		default:
-			return false;
-		}
+		TArray<FVector2D> Centers;
+		return FABTSM73DAGSupportGeometry::MakeColumnCenters(
+			Region,
+			Settings,
+			Pattern,
+			ColumnWidthCM,
+			Centers);
 	}
 
 	bool ResolveSupportPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,

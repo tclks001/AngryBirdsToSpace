@@ -27,5 +27,6 @@ void AABTSM6GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		System->ConfigureDebugSlingshots(bSpawnDebugSlingshotsAtStart, SpawnCellId);
 		UGameplayStatics::FinishSpawningActor(System, FTransform::Identity);
 	}
+	RuntimeSlingshotSystem = System;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6] Entry ready=%d StartCell=%d"), System ? 1 : 0, SpawnCellId);
 }

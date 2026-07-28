@@ -1,6 +1,6 @@
 # M7.3-B2：结构弱点与失效验证实现设计
 
-> 状态：代码与独立 fresh-process 自动化测试 `ABTS.M73B2.StructuralWeaknessFailure` 已通过；M7.1 实际弹弓击打与倒塌观感仍待用户视觉验收。
+> 状态：Legacy 顶部冠段代码与独立自动化已通过，现仅作历史对照；TaskGraph 生产已由 [M7.3-DAG2.3](M73DAG23CumulativeLoadAndJointSupportDesign.md) 取代，不再以本稿作为球面验收或回退路线。
 >
 > 父级：[M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。前置：[M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-DAG 递归主体建筑新路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 

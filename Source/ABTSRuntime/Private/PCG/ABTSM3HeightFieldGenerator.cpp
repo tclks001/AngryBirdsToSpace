@@ -23,6 +23,33 @@ TPair<float, float> WildernessBand(const EABTSM3TerrainType Terrain)
 	default: return {0.06f, 0.25f};
 	}
 }
+
+void FlattenTaskFootprint(
+	const int32 CenterCellId,
+	const int32 RingCount,
+	const TArray<FABTSM2Cell>& Cells,
+	TArray<FABTSM3CellState>& CellStates)
+{
+	if (!Cells.IsValidIndex(CenterCellId) || !CellStates.IsValidIndex(CenterCellId)) return;
+	const float AnchorHeight = CellStates[CenterCellId].LogicalHeight01;
+	TSet<int32> Visited;
+	TArray<TPair<int32, int32>> Queue;
+	Visited.Add(CenterCellId);
+	Queue.Add({CenterCellId, 0});
+	for (int32 Head = 0; Head < Queue.Num(); ++Head)
+	{
+		const int32 CellId = Queue[Head].Key;
+		const int32 Depth = Queue[Head].Value;
+		CellStates[CellId].LogicalHeight01 = AnchorHeight;
+		if (Depth >= RingCount) continue;
+		for (const int32 NeighborId : Cells[CellId].NeighborCellIds)
+		{
+			if (!Cells.IsValidIndex(NeighborId) || Visited.Contains(NeighborId)) continue;
+			Visited.Add(NeighborId);
+			Queue.Add({NeighborId, Depth + 1});
+		}
+	}
+}
 }
 
 void FHeightFieldGenerator::Generate(
@@ -31,6 +58,7 @@ void FHeightFieldGenerator::Generate(
 	const TArray<FABTSM2Cell>& Cells,
 	const TArray<FABTSM3TaskNode>& Tasks,
 	const float MaxBuildSlopeDegrees,
+	const int32 BuildingPadClearanceRingCells,
 	TArray<FABTSM3CellState>& CellStates) const
 {
 	FRandomStream Stream(MakeStageSeed(WorldSeed, TEXT("Height"), AttemptIndex));
@@ -64,17 +92,17 @@ void FHeightFieldGenerator::Generate(
 		State.Moisture01 = FMath::Clamp(0.52f - State.LogicalHeight01 * 0.35f + 0.20f * FMath::Sin(Cells[CellId].UnitCenter.Y * 11.0f), 0.0f, 1.0f);
 	}
 
-	// Preserve authored gameplay pads as flat logical anchors.
+	// Preserve authored gameplay pads as flat logical anchors. The extra guard
+	// ring ensures cells on the configured clearance boundary also pass their
+	// neighbour-based slope test instead of relying on an accidental flat field.
+	const int32 FlatFootprintRings =
+		FMath::Clamp(BuildingPadClearanceRingCells, 1, 4) + 1;
 	for (const FABTSM3TaskNode& Task : Tasks)
 	{
 		const FTaskSpec* Spec = FindSpec(Task.Type);
 		if (!Spec || !Spec->bBuilding || !Cells.IsValidIndex(Task.SeedCellId)) continue;
-		const float AnchorHeight = CellStates[Task.SeedCellId].LogicalHeight01;
-		for (const int32 Neighbor : Cells[Task.SeedCellId].NeighborCellIds)
-		{
-			CellStates[Neighbor].LogicalHeight01 = FMath::Lerp(CellStates[Neighbor].LogicalHeight01, AnchorHeight, 0.82f);
-		}
 		CellStates[Task.SeedCellId].bBuildingAnchor = true;
+		FlattenTaskFootprint(Task.SeedCellId, FlatFootprintRings, Cells, CellStates);
 	}
 
 	for (int32 Iteration = 0; Iteration < 3; ++Iteration)
@@ -99,8 +127,7 @@ void FHeightFieldGenerator::Generate(
 	for (const FABTSM3TaskNode& Task : Tasks)
 	{
 		if (!Cells.IsValidIndex(Task.SeedCellId) || !CellStates[Task.SeedCellId].bBuildingAnchor) continue;
-		const float AnchorHeight = CellStates[Task.SeedCellId].LogicalHeight01;
-		for (const int32 Neighbor : Cells[Task.SeedCellId].NeighborCellIds) CellStates[Neighbor].LogicalHeight01 = AnchorHeight;
+		FlattenTaskFootprint(Task.SeedCellId, FlatFootprintRings, Cells, CellStates);
 	}
 
 	constexpr float ApproxCellArcRadians = 0.034f;

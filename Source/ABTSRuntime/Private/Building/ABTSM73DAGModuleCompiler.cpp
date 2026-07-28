@@ -27,71 +27,6 @@ namespace
 		return Count;
 	}
 
-	bool MakeCompilerColumnCenters(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
-		const EABTSM73DAGSupportPattern Pattern, const float ColumnWidthCM,
-		TArray<FVector2D>& OutCenters)
-	{
-		OutCenters.Reset();
-		const float Half = ColumnWidthCM * 0.5f + Settings.ColumnClearanceCM;
-		const FVector2D SafeMin = Region.Min + FVector2D(Half, Half);
-		const FVector2D SafeMax = Region.Max - FVector2D(Half, Half);
-		if (SafeMax.X < SafeMin.X || SafeMax.Y < SafeMin.Y) return false;
-		const FVector2D Center = (SafeMin + SafeMax) * 0.5f;
-		const FVector2D SafeSpan = SafeMax - SafeMin;
-		// SafeMin/SafeMax already include half a column plus clearance. Use the
-		// complete safe span so thin columns produce the largest valid support hull.
-		const float OffsetX = SafeSpan.X * 0.5f;
-		const float OffsetY = SafeSpan.Y * 0.5f;
-		switch (Pattern)
-		{
-		case EABTSM73DAGSupportPattern::SingleColumnInterface:
-			OutCenters.Add(Center);
-			return true;
-		case EABTSM73DAGSupportPattern::TwoColumnLine:
-		{
-			const bool bAlongX = SafeSpan.X >= SafeSpan.Y;
-			if ((bAlongX ? OffsetX : OffsetY) <= KINDA_SMALL_NUMBER) return false;
-			if (bAlongX)
-			{
-				OutCenters.Add(Center + FVector2D(-OffsetX, 0.0f));
-				OutCenters.Add(Center + FVector2D(OffsetX, 0.0f));
-			}
-			else
-			{
-				OutCenters.Add(Center + FVector2D(0.0f, -OffsetY));
-				OutCenters.Add(Center + FVector2D(0.0f, OffsetY));
-			}
-			return true;
-		}
-		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
-		{
-			if (OffsetX <= KINDA_SMALL_NUMBER || OffsetY <= KINDA_SMALL_NUMBER) return false;
-			const bool bBaseAlongX = SafeSpan.X >= SafeSpan.Y;
-			if (bBaseAlongX)
-			{
-				OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY));
-				OutCenters.Add(Center + FVector2D(OffsetX, -OffsetY));
-				OutCenters.Add(Center + FVector2D(0.0f, OffsetY));
-			}
-			else
-			{
-				OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY));
-				OutCenters.Add(Center + FVector2D(-OffsetX, OffsetY));
-				OutCenters.Add(Center + FVector2D(OffsetX, 0.0f));
-			}
-			return true;
-		}
-		case EABTSM73DAGSupportPattern::FourColumnFootprint:
-			if (OffsetX <= KINDA_SMALL_NUMBER || OffsetY <= KINDA_SMALL_NUMBER) return false;
-			OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY));
-			OutCenters.Add(Center + FVector2D(OffsetX, -OffsetY));
-			OutCenters.Add(Center + FVector2D(-OffsetX, OffsetY));
-			OutCenters.Add(Center + FVector2D(OffsetX, OffsetY));
-			return true;
-		default:
-			return false;
-		}
-	}
 }
 
 void FABTSM73DAGModuleCompiler::AddBrick(
@@ -158,13 +93,14 @@ bool FABTSM73DAGModuleCompiler::Compile(
 			OutError = FString::Printf(TEXT("DAGColumnTooShort:%d:%d:%.2f"), Support.SupportMacroNodeId, Support.LoadMacroNodeId, Height);
 			return false;
 		}
-		TArray<FVector2D> Centers;
 		const float RealizedColumnWidthCM = Support.RealizedColumnWidthCM > 0.0f
 			? Support.RealizedColumnWidthCM : LayoutSettings.ColumnWidthCM;
-		if (!MakeCompilerColumnCenters(Support.FeasibleColumnRegion, LayoutSettings, Support.SupportPattern,
-			RealizedColumnWidthCM, Centers))
+		if (Support.RealizedColumnCenters.IsEmpty())
 		{
-			OutError = FString::Printf(TEXT("DAGColumnRegionInvalid:%d:%d"), Support.SupportMacroNodeId, Support.LoadMacroNodeId);
+			OutError = FString::Printf(
+				TEXT("DAGColumnCentersMissing:%d:%d"),
+				Support.SupportMacroNodeId,
+				Support.LoadMacroNodeId);
 			return false;
 		}
 		FABTSM73DAGPhysicalSupportMapping& Mapping = OutData.DAGPhysicalSupportMappings.AddDefaulted_GetRef();
@@ -174,7 +110,7 @@ bool FABTSM73DAGModuleCompiler::Compile(
 		Mapping.LoadPlateNodeId = *LoadPlateId;
 		Mapping.SupportPattern = Support.SupportPattern;
 		Mapping.RealizedColumnWidthCM = RealizedColumnWidthCM;
-		for (const FVector2D& CenterXY : Centers)
+		for (const FVector2D& CenterXY : Support.RealizedColumnCenters)
 		{
 			AddBrick(OutData, INDEX_NONE, FVector(CenterXY.X, CenterXY.Y, (BottomZ + TopZ) * 0.5f),
 				FVector(RealizedColumnWidthCM, RealizedColumnWidthCM, Height),

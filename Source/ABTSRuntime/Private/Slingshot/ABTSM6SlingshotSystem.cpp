@@ -99,6 +99,7 @@ void AABTSM6SlingshotSystem::BeginPlay()
 {
 	Super::BeginPlay();
 	bStartupPhysicsWarmupComplete = !bEnableStartupPhysicsWarmup;
+	bStartupPhysicsWarmupFailed = false;
 	bStartupPhysicsWarmupStarted = false;
 	bStartupPhysicsWarmupWaitingLogged = false;
 	StartupPhysicsWarmupEligibleTimeSeconds = GetWorld()
@@ -186,7 +187,10 @@ bool AABTSM6SlingshotSystem::ResolveDependencies()
 void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!IsStartupPhysicsWarmupComplete()) UpdateStartupPhysicsWarmup(DeltaSeconds);
+	if (!IsStartupPhysicsWarmupComplete() && !bStartupPhysicsWarmupFailed)
+	{
+		UpdateStartupPhysicsWarmup(DeltaSeconds);
+	}
 	if (bSpawnDebugSlingshotsAtStart && !bDebugSlingshotsSpawned) SpawnDebugSlingshots();
 	if (LaunchState == EABTSM6LaunchState::Ready || LaunchState == EABTSM6LaunchState::Pulling)
 	{
@@ -294,6 +298,10 @@ bool AABTSM6SlingshotSystem::IsBirdAllowed(const AABTSM25BirdCharacter& Bird, co
 
 bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 {
+	// Building validation is a world-validity gate, not an optional part of the
+	// HISM warmup. Keep it active when warmup is disabled and for actors that
+	// may have appeared after the one-shot startup pass.
+	if (!AreRuntimeBuildingsReadyForLaunch()) return false;
 	if (!IsStartupPhysicsWarmupComplete())
 	{
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][StartupPhysics] Launch blocked: world Chaos settling is still in progress."));

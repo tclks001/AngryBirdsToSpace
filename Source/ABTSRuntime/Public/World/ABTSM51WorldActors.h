@@ -42,9 +42,15 @@ class ABTSRUNTIME_API AABTSM51SlingshotDirtHole : public AActor
 public:
 	AABTSM51SlingshotDirtHole();
 	void InitializeHole(int32 InCellId);
+	void InitializeFinaleSpaceSlot(int32 InCellId, int32 InPairId, EABTSSlingshotSlotSide InSide);
 	int32 GetCellId() const { return CellId; }
 	bool IsOccupied() const { return OccupiedStake.IsValid(); }
 	void SetOccupiedStake(AActor* Stake) { OccupiedStake = Stake; }
+	AActor* GetOccupiedStake() const { return OccupiedStake.Get(); }
+	EABTSSlingshotSlotKind GetSlotKind() const { return SlotKind; }
+	EABTSSlingshotSlotSide GetSlotSide() const { return SlotSide; }
+	int32 GetSlotPairId() const { return SlotPairId; }
+	bool IsFinaleSpaceSlot() const { return SlotKind == EABTSSlingshotSlotKind::FinaleSpace; }
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
@@ -53,6 +59,15 @@ private:
 
 	int32 CellId = INDEX_NONE;
 	TWeakObjectPtr<AActor> OccupiedStake;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
+	EABTSSlingshotSlotKind SlotKind = EABTSSlingshotSlotKind::Standard;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
+	EABTSSlingshotSlotSide SlotSide = EABTSSlingshotSlotSide::None;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
+	int32 SlotPairId = INDEX_NONE;
 };
 
 UCLASS()
@@ -68,6 +83,10 @@ public:
 	EABTSItemId GetStakeItem() const { return StakeItem; }
 	int32 GetCellId() const { return CellId; }
 	const FVector& GetUnitDirection() const { return UnitDirection; }
+	void SetInstalledSlotIdentity(EABTSSlingshotSlotKind InSlotKind, int32 InSlotPairId, EABTSSlingshotSlotSide InSlotSide);
+	EABTSSlingshotSlotKind GetInstalledSlotKind() const { return InstalledSlotKind; }
+	EABTSSlingshotSlotSide GetInstalledSlotSide() const { return InstalledSlotSide; }
+	int32 GetInstalledSlotPairId() const { return InstalledSlotPairId; }
 	FVector GetVisualTopWorldLocation() const;
 	bool HasCord() const { return bHasCord; }
 	void SetHasCord(bool bValue) { bHasCord = bValue; }
@@ -86,6 +105,15 @@ private:
 	FVector UnitDirection = FVector::UpVector;
 	float VisualHeightCM = 220.0f;
 	bool bHasCord = false;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
+	EABTSSlingshotSlotKind InstalledSlotKind = EABTSSlingshotSlotKind::Standard;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
+	EABTSSlingshotSlotSide InstalledSlotSide = EABTSSlingshotSlotSide::None;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
+	int32 InstalledSlotPairId = INDEX_NONE;
 };
 
 UCLASS()
@@ -114,6 +142,8 @@ public:
 	FVector GetEndpointB() const { return EndpointB; }
 	EABTSItemId GetStakeItem() const;
 	EABTSSlingshotTier GetSlingshotTier() const { return SlingshotTier; }
+	bool IsFinaleSpaceSlingshot() const;
+	int32 GetFinaleSlotPairId() const;
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:

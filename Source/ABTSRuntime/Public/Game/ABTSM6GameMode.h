@@ -19,6 +19,7 @@ public:
 
 protected:
 	virtual void OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, int32 SpawnCellId) override;
+	AABTSM6SlingshotSystem* GetRuntimeSlingshotSystem() const { return RuntimeSlingshotSystem.Get(); }
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6")
@@ -27,4 +28,6 @@ private:
 	/** Test-only: creates complete simple/reinforced slingshots around the TaskGraph start Cell. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Testing")
 	bool bSpawnDebugSlingshotsAtStart = false;
+
+	TWeakObjectPtr<AABTSM6SlingshotSystem> RuntimeSlingshotSystem;
 };

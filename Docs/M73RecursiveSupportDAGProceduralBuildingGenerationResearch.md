@@ -2,7 +2,7 @@
 
 > 文档性质：M7.3 新路线的独立调研与算法设计；本轮不修改 C++、地图或资产。
 >
-> 状态：调研与方案完成；纯数据语法阶段已落地，见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)；Scope、稀疏支撑、模块编译与真实接触审计已落地，见 [M73DAG2SpatialLayoutAndModuleCompilationDesign.md](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。建筑外观语义 WFC 与承载 DAG 拟合的后续调研见 [M73WFCBuildingEnvelopeAndDAGFittingResearch.md](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
+> 状态：DAG-1、DAG-2 与 DAG2.3 已落地，DAG2.3 已接管球面 TaskGraph 普通建筑生产链；现行入口见 [M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。建筑外观语义 WFC、承载 DAG 拟合与 DAG-3 内部弱点仍属后续阶段，见 [M73WFCBuildingEnvelopeAndDAGFittingResearch.md](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 >
 > 父级：[M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md)。子阶段：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 
@@ -614,7 +614,7 @@ BuildingSeed + GeneratorVersion + Preset
 - `MaterialSystem::SpawnBrickModule`：现有 M6/M7 Chaos、损伤和破坏链路；
 - 零穿透预检与 M7.1 平面实验台。
 
-### 11.2 Legacy 保留
+### 11.2 Legacy 退役边界
 
 - `AddFourColumnStorey` 固定楼层；
 - 三轮廓硬编码 `switch`；
@@ -622,16 +622,16 @@ BuildingSeed + GeneratorVersion + Preset
 - 单 Carrier 加两个 Payload 的失效边界；
 - `AffectedNodeIds.Num()==3` 的 B2 断言。
 
-这些内容不删除，用于旧地图兼容、视觉对照和回归测试。
+这些内容暂不删除，用于旧资产反序列化诊断、视觉对照和历史测试；它们不再拥有 TaskGraph Profile，不参与生产回退，也不接受后续玩法修复。
 
-### 11.3 建议兼容开关
+### 11.3 现行兼容开关
 
 ```text
 GenerationAlgorithm = LegacyLayeredAB2 | RecursiveSupportDAG
 GeneratorVersion
 ```
 
-已有 Actor 默认继续使用 Legacy，避免序列化实例突然变化；新测试 Actor 显式选择 `RecursiveSupportDAG`。新 DAG 最终仍编译到 `FABTSM73StructureData`，尽量减少 M6/M7 运行时链路改动。
+历史/手工放置 Actor 仍可加载 Legacy 枚举值；TaskGraph 新默认 Profile 使用 `RecursiveSupportDAG`。M7 TaskGraph Resolver 会把旧 Blueprint CDO 的 Legacy Profile 升级到对应 DAG2.3 Profile；DAG Reject 必须显式失败，禁止回退 Legacy。新 DAG 最终仍编译到 `FABTSM73StructureData`，继续复用 GroundAdapter、M6/M7 Runtime Module 与 IdleValidation。
 
 ### 11.4 模块拆分建议
 
@@ -859,7 +859,7 @@ ABTS.M73DAG.NoveltyBatch
 - 弱点攻击效果显著大于若干普通位置攻击；
 - 木/石/铁/玻璃矩阵使用真实 Profile，不靠降低硬门槛兼容；
 - M7.1 与球面模式的局部结构拓扑一致；
-- 旧 `ABTS.M73A/B/B2` 继续验证 Legacy 路线。
+- 三个 TaskGraph 普通 Profile 全部为 `Algorithm=1`，旧 CDO 不复活 Legacy，DAG Reject 不存在 fallback。
 
 人工验收不能只看红色弱点高亮。至少观察：
 
@@ -884,7 +884,7 @@ ABTS.M73DAG.NoveltyBatch
 | 球面适配污染语法 | 平面通过、球面拓扑变形 | DAG 只输出局部结构；曲率由 GroundAdapter/Pad/Foundation 处理 |
 | 刚体数和验证时间超预算 | 大量候选卡顿 | 宏节点不等于刚体；三级漏斗；只对高分候选运行 Chaos |
 
-若新路线尚未完成几何编译，继续保留 Legacy 生成用于 M7.1/M6 联调；不要半迁移后让旧地图失去可用建筑。
+现行几何编译与 DAG2.3 已接管 TaskGraph。若某 DAG/Profile 不可解，应显式拒绝并修正 DAG 几何、预算或语义包络；禁止为保持地图有建筑而回退 Legacy。
 
 ## 17. 最终建议
 

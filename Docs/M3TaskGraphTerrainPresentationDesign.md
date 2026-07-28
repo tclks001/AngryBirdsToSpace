@@ -1,10 +1,10 @@
 # M3：TaskGraph 地形表现与 HISM 摆放设计
 
-> 状态：C++ 已实现；需要按本文在编辑器创建 M3 地图、M3 Planet Blueprint 和材质资产。
+> 状态：C++ 与生产资产已实现。M3 当前只产出地形、TaskGraph、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
 >
 > 逻辑 PCG 上游：[`ABTSTaskGraphPCGDesign.md`](ABTSTaskGraphPCGDesign.md)。本文不定义玩法锁、可达性、河流最低点、道路寻路或桥梁状态；它们只由 TaskGraph/CellTopo 生成并通过接口提供给表现层。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [M5.2 碰撞与 CPU SDF 物理采样](M52CollisionAndMovementDesign.md) · [开发排错](DevelopmentTroubleshooting.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [M7 TaskGraph DAG2.3 建筑集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M5.2 碰撞与 CPU SDF 物理采样](M52CollisionAndMovementDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [开发排错](DevelopmentTroubleshooting.md)
 
 ## 1. M3 目标与边界
 
@@ -17,7 +17,8 @@ TaskGraph / CellTopo（逻辑唯一来源）
     -> ProceduralMesh：径向顶点推拉、四通道 UV 材质上下文
     -> M3 SDF Material：纯色与平滑边界
     -> HISM：树、岩石；仅视觉
-    -> BuildingSpawnSites：供 M4 建筑生成消费
+    -> BuildingSpawnSites：供 M7 TaskGraph DAG2.3 建筑生成消费
+    -> FABTSM110FinaleLocalFrame：供终局局部预设消费
 ```
 
 `CellTopo` 和 `FABTSM3CellState` 才是道路、水体、建筑位和地形类别的逻辑来源。材质像素、连续网格三角形、`SurfaceQuery`、HISM InstanceId 与碰撞结果都不得反写 Gameplay。
@@ -45,6 +46,7 @@ M3 只读取以下逻辑结果：
 | `bWater` | TaskGraph 指定的水体颜色与轻微视觉下凹 |
 | `bBuildingAnchor` | 生成 `FABTSM3BuildingSpawnSite`，不生成建筑 |
 | `UnitCenter` / `NeighborCellIds` | 构造地形区域边界线段和稳定散布方向 |
+| `LaunchSite` / `SatelliteWindow` | M11.0 构造唯一终局槽对的表面位置、稳定切线轴和局部坐标系；不在表现层重选 Task |
 
 M3 不需要也不会读取“最低连续顶点”“材质水色”“HISM 命中”来决定水体或道路。
 
@@ -54,9 +56,13 @@ M3 不需要也不会读取“最低连续顶点”“材质水色”“HISM 命
 
 相机轨道与极区姿态继续使用标准球面的径向 Up，不使用坡面法线重写相机控制。
 
+M11.0 起，`AABTSM3Planet::GetFinaleLaunchFrame()` 输出 `FABTSM110FinaleLocalFrame`。其中世界位置由 `QuerySurface` 提供，Task/Cell/槽对身份仍来自 PCG；表现层不能依据网格顶点或屏幕方向重新选择槽轴。完整合同见 [M11.0 第 6 节](M110PreFinaleClosureDesign.md#6-终局局部坐标系)。
+
 ## 3. 低频高度与边界距离 SDF
 
 每个 Cell 的低频高度来自 TaskGraph 的地形解释；Plain 接近零、Forest 为低丘、Highland/Mountain 更高、TaskGraph 指定 Water 轻微下凹。没有任何 fBm 或随机高频位移。`HeightBlendWidthCM` 只控制这些几何高度在地形边界的平滑半径；`TerrainBlendWidthCM`（材质参数名 `M3_BlendWidthCM`）只控制颜色 SDF 的平滑半径。两者故意独立，调整道路/地形颜色过渡不会改变角色接地高度或坡度。
+
+M11.0/V3 起，逻辑高度场对每个建筑/施工任务主动压平 `BuildingPadClearanceRingCells + 1` 圈：配置的前 `N` 圈用于最终施工面认证，额外一圈只保护边界 Cell 的邻接坡度计算。水文、`bBuildable`、唯一 Anchor 和最终可达性仍由后续 Planner/Validator 决定，表现层不得因看见平面而自行放行。
 
 对相邻且地形类型不同的 Cell 边 `(A,B)`，使用两侧共同邻居构成的两个 dual corner 得到边界端点 `E0`、`E1`。对表面像素方向 `P`，距离使用线段投影：
 
@@ -72,7 +78,9 @@ d = |P - Q| * PlanetRadiusCM
 
 这与“只算像素到最近 Cell 中心距离”不同：同一地形的相邻 Cell 不再产生六边形/五边形棋盘接缝；真正参与 SDF 的是**不同地形区域围成的线段边界**。
 
-## 4. 编辑器：创建 M3 地图与 Planet
+## 4. 历史独立验证：创建 M3 地图与 Planet
+
+以下步骤只用于从 M2.5 复现早期 M3 地形验证场景。当前生产入口沿用项目工作流指定的地图与 M7+ GameMode；不要用本节复制地图或切回 `ABTSM3GameMode` 来替换生产入口。
 
 1. 关闭 PIE，编译 `AngryBirdsToSpaceEditor Win64 Development`，重新打开 Editor。
 2. 复制 `/Game/Maps/L_ABTS_M2_5` 为 `/Game/Maps/L_ABTS_M3`。
@@ -82,7 +90,7 @@ d = |P - Q| * PlanetRadiusCM
 6. 先不要给 `TerrainMaterial` 赋值，运行一次 PIE 确认 Output Log 出现 `[ABTS][M3] Ready=1`。此时可先用 Vertex Color 调试材质查看 C++ 计算的纯色结果。
 7. 在 `BP_ABTSM3Planet` 的 `ForestHISM` 与 `RockHISM` 上分别指定低面数树/岩石；务必保持 **Collision Enabled = No Collision**。也可通过 Actor 的 `Forest Instance Mesh`、`Rock Instance Mesh` 指定同一资产，Actor 字段优先于组件字段。两处均未配置时，代码自动以 Engine Basic Shape 的 Cone/Cube 作为可见验收占位，不会生成“有组件但无网格”的空 HISM。
 
-建筑尚未生成。运行时 `GetBuildingSpawnSites()` 输出工作台、目标建筑、熔炉与发射场的预留 Transform，M4 模块化建筑只能从这些接口消费位置。
+建筑尚未生成。运行时 `GetBuildingSpawnSites()` 输出工作台、目标建筑、熔炉与发射场的预留 Transform；M7 只能从这些接口消费位置，并由自己的 DAG2.3 Profile Resolver 决定结构。M3 不调用或维护任何建筑生成器。
 
 ### 4.1 玩家初始道路出生点
 
@@ -228,7 +236,7 @@ HISM 使用的每个材质还必须在材质 Details 的 **Usage** 中启用 **U
 
 地表几何高度不能直接使用最近 Cell 的常量高度，否则 Cell 边界会形成六边形台阶，极小距离的法线差分会把台阶解释成近乎竖直的坡面。`FABTSM3TerrainVisualField` 在包含查询方向的 CellTopo 三角形内对三个逻辑高度做重心插值，使半径场跨三角形连续；数值边界采用一环逆距离插值兜底。顶点法线用 `SurfaceNormalSmoothingDistanceCM` 指定的世界空间中心差分半径，默认 `160cm`，并平均正交与对角两组梯度，消除方向偏置和六边形阴影斑纹。日志 `[ABTS][M3][SurfaceNormals]` 中 `ExtremeOver80` 应为 0 或接近 0。
 
-M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` 是唯一建筑预留接口，包含 `CellId`、TaskType、WorldTransform 与坡度；M4 才在这些位置生成模块与刚体。
+M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` 是唯一建筑预留接口，包含 `CellId`、TaskType、WorldTransform 与坡度；M7 TaskGraph/DAG2.3 才在这些位置生成模块与刚体。
 
 ## 7. 验收
 
@@ -241,6 +249,7 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 7. HISM 开关不改变 `QuerySurface`、CellId、道路、水体或建筑施工位；关闭 HISM 后连续地表仍完整。
 8. `GetBuildingSpawnSites()` 返回施工位，但场景中没有模块化建筑或建筑刚体。
 9. 每次进入 PIE，玩家最终位于 Start Task 的道路 Cell，朝向下一个主线 Task；移动前 Output Log 出现一次 `[ABTS][M3][Spawn] Player placed at Start road`。改变 `WorldSeed` 后出生点随 TaskGraph 改变，而不是停留在地图 `PlayerStart`。
+10. M11.0 后 `LaunchSite` 仍可返回平整施工位，但 M7 不在其上生成建筑；`GetFinaleLaunchFrame()` 必须返回正交、右手、槽中点为原点的唯一终局局部坐标系。
 
 ## 8. 排错
 

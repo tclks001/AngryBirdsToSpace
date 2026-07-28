@@ -1,6 +1,6 @@
 # ABTS：Task Graph 驱动的球面 PCG 最终核心设计
 
-> 状态：V2 核心管线已实现，弹弓攻击解、资源经济和局部 Room 原型将在对应玩法里程碑接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)。
+> 状态：V3 核心管线已实现，已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。弹弓攻击解、资源经济和局部 Room 原型仍在对应玩法里程碑接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
 >
 > 目标：先生成可通关、可分支、可被能力门验证的 Gameplay 图，再将它嵌入 `CellTopo`；地形、水网、道路、资源、建筑与弹弓攻击解共同服务该图。连续球面只渲染结果。
 
@@ -124,10 +124,11 @@ Room 是 Task 内的连通 Cell Cluster，至少包含：`RoomId`、`Archetype`�
 - `StartCamp`：出生 Cell、主路出口、树枝/石料保底槽；
 - `WorkbenchPad`：中心与至少一个平缓相邻建筑 Cell；
 - `SlingshotPair`：两桩中心、槽轴、允许等级、攻击扇区；
-- `TargetBuildingPad`：地基 Footprint、弱点朝向、道路外距离；
+- `TargetBuildingPad`：地基 Footprint、合法攻击正面、道路外距离；内部弱点朝向留给未来 DAG-3；
 - `BridgeGate`：两岸 Cell、河边、道路入口/出口和阻断状态；
 - `FurnaceLaunchPair`：相邻联动 Cell；
 - `SatelliteWindow`：发射槽、卫星方向和轨迹约束。
+- `FinaleSpacePair`：`LaunchSite` 的唯一 Space-only 槽对、稳定槽轴、平整净空和终局局部坐标系。
 
 ## 4. 比赛版 Mission Graph
 
@@ -144,19 +145,20 @@ Start -> Workshop -> SlingshotRange -> TargetBuilding -> BridgeGate -> FurnaceRu
 | Start | 无 | 基础树枝/石料 | 平缓出生点、可见主路、资源保底 |
 | Workshop | 无 | `BuildWorkbench` | 至少两个相邻平缓 Cell，邻接联动接口 |
 | SlingshotRange | `BuildWorkbench` | `SimpleSlingshotReady` | 简易弹弓槽、教学目标、可验证短程弹道 |
-| TargetBuilding | `SimpleSlingshotReady` | `TargetDestroyed + HaveWood` | 道路外目标、遮挡与弱点、材料货仓 |
+| TargetBuilding | `SimpleSlingshotReady` | `TargetDestroyed + HaveWood` | 道路外目标、遮挡与攻击正面、材料货仓 |
 | BridgeGate | `HaveWood` | `BridgeBuilt` | 水系割集、唯一合法主线 Crossing |
 | FurnaceRuins | `TargetDestroyed`，若启用主线桥锁再加 `BridgeBuilt` | `ReinforcedSlingshotReady` | 熔炉/工作台相邻条件、平缓遗址 |
 | Scout | 简易或强化弹弓 | 探索标记 | 非关键支线，不持有唯一主线 Key |
-| SatelliteWindow | `ReinforcedSlingshotReady` | `SatelliteShotSolved + HaveCrystalCore` | 强化弹弓轨迹可解、普通弹弓不可替代 |
-| LaunchSite | `HaveCrystalCore` | 通关 | 与熔炉同区或相邻、终局施工位 |
+| SatelliteWindow | `ReinforcedSlingshotReady` | `SatelliteShotSolved + HaveCrystalCore` | 强化弹弓轨迹可解、普通弹弓不可替代；与 LaunchSite 达到终局隔离角距 |
+| LaunchSite | `HaveCrystalCore` | 通关 | 与熔炉同区或相邻、无建筑平整施工台、唯一 Space-only 槽对 |
 
 Mission Graph 构造流程：
 
 1. 实例化必需主线节点和 Key/Lock。
 2. 从允许挂接点抽取 1 个 Scout/Satellite 支线模板。
 3. 在桥后或卫星后增加至多 1 条 `LateShortcut`，其 RequiredKey 必须晚于 BridgeGate，不能提前绕锁。
-4. 执行抽象状态搜索；若 Mission Graph 本身无法按阶段解锁，物理布局开始前就拒绝。
+4. M11.0 联合验证 `SatelliteWindow` 与 `LaunchSite` 的球面最小角距；默认不得小于 `55°`。
+5. 执行抽象状态搜索；若 Mission Graph 本身无法按阶段解锁，物理布局开始前就拒绝。
 
 ## 5. 确定性随机与尝试协议
 
@@ -169,7 +171,9 @@ ItemSeed  = Hash(StageSeed, StableTaskId/CellId/EdgeKey, LocalIndex)
 
 建议 StageTag：`Mission`、`TaskSeeds`、`Regions`、`Height`、`Hydrology`、`Roads`、`SetPieces`、`Resources`、`Decor`。逻辑结果记录 `GeneratorVersion`，算法升级后旧 Seed 仍可辨识。
 
-完整尝试最多 8 次。一次尝试内优先做局部候选回退；只有结构性失败才进入下一个 Attempt。8 次失败后使用同一 WorldSeed 派生的已验证保底布局，不返回半张地图。
+M11.0 起完整尝试最多 16 次。一次尝试内优先做局部候选回退；只有结构性失败才进入下一个 Attempt。新版同时验证建筑平台和卫星—终局隔离，扩大的固定预算仍由 `AttemptIndex` 确定性派生，不改变同一配置的可复现性；全部失败时必须拒绝生成，绝不返回半张地图。
+
+`BuildingPadClearanceRingCells=N` 的高度场预处理必须主动压平 `N+1` 圈：前 `N` 圈是认证施工面，额外一圈只作为邻接坡度计算护环。水文仍可否决被河网穿过的候选，最终 BuildingPad Planner/Validator 仍是权威门槛；不得把“压平过”直接当作验收通过。
 
 ## 6. 阶段 A：构建 CellTopo 分析缓存
 
@@ -213,6 +217,7 @@ ScoreSeeds =
 ```
 
 5. 从前 K 个布局中用派生随机流选择，避免永远输出唯一最优但保持质量下限。
+6. M11.0 还要求 `SatelliteWindow` Seed 相对 `LaunchSite` 达到 `MinSatelliteLaunchAngularSeparationDegrees`；若无候选则拒绝当前 Attempt，不在生成后搬动任务。
 
 ### 7.3 支线与回环
 
@@ -308,20 +313,22 @@ Cost(CellA -> CellB) =
 
 ### 12.1 放置顺序
 
-按照约束最强优先：BridgeGate → SatelliteWindow → Slingshot/Target Pair → Furnace/Launch Pair → Workshop → Start Resources → 普通资源与装饰。每类先枚举候选，再评分，不在失败后随便找最近 Cell。
+按照约束最强优先：BridgeGate → SatelliteWindow/LaunchSite 隔离 → FinaleSpacePair → Slingshot/Target Pair → Furnace/Launch Pair → Workshop → Start Resources → 普通资源与装饰。每类先枚举候选，再评分，不在失败后随便找最近 Cell。
+
+`FinaleSpacePair` 只占用 `LaunchSite` 的认证平整施工台，输出唯一 `SlotPairId`、左右槽位置和 `Forward/Right/Up` 局部坐标系。它不是 M7 建筑，也不能和普通 `SlingshotRange` 槽混计。
 
 ### 12.2 建筑和相邻联动
 
 - 建筑仅能锚定在逻辑坡度合格的 CellTopo 中心点；Footprint 需要的相邻 Cell 也必须合法。
 - Workbench/Furnace 联动使用 `NeighborCellIds` 或显式相邻边判断。
-- 建筑入口朝道路，目标弱点朝合法弹弓攻击扇区；这两个方向可能冲突，候选评分需要同时考虑。
+- 建筑入口朝道路，目标的合法攻击正面朝弹弓攻击扇区；未来 DAG-3 可在该正面内继续选择内部 Failure Frontier，但 PCG 当前不生成 `WeakPointId`。
 
 ### 12.3 弹弓—目标联合求解
 
 不能先随机放建筑，再期望玩家能打中。每个候选组合执行低成本弹道采样：
 
 1. 枚举弹弓槽 Anchor Pair、允许桩距与槽轴。
-2. 枚举目标建筑 Footprint、弱点位置和朝向模板。
+2. 枚举目标建筑 Footprint、攻击正面和朝向模板；不假定 DAG2.3 已有内部弱点。
 3. 采样若干拉伸量/发射角；沿预测轨迹查询球面逻辑高度、水障和预留碰撞体包围体。
 4. 简易弹弓至少有一条命中教学/主目标的解；强化弹弓至少有一条进入 SatelliteWindow 后命中高价值目标的解。
 5. 需要能力区分时验证反例：普通弹弓的速度域不存在卫星目标解。
@@ -352,7 +359,7 @@ PCG 只保存经验证的 Solution Witness：槽位、目标、参数范围、�
 | P2 | `TargetDestroyed + HaveWood` | BridgeSite 建造入口 | 未建桥时的桥后主线 |
 | P3 | `BridgeBuilt` | FurnaceRuins、强化施工 | 不得被其他 Ford 绕过桥锁 |
 | P4 | `ReinforcedSlingshotReady` | SatelliteWindow 强化轨迹 | 普通弹弓替代解 |
-| P5 | `HaveCrystalCore` | LaunchSite 与终局 | 无 |
+| P5 | `HaveCrystalCore` | LaunchSite、唯一 Space 槽对与终局 | 第二对 Space 槽、LaunchSite 建筑 |
 
 ### 13.2 验证项
 
@@ -363,6 +370,7 @@ PCG 只保存经验证的 Solution Witness：槽位、目标、参数范围、�
 - 水网 Downstream 无环，河段连续，深水不吞掉关键锚点。
 - 建筑、弹弓和联动 Cell 的逻辑坡度与邻接关系合法。
 - 简易/强化弹弓分别存在所需攻击解和能力区分反例。
+- `SatelliteWindow` 与 `LaunchSite` 满足配置的最小球面角距；`LaunchSite` 恰有一个合法 Space-only 槽对。
 - 每阶段资源下限满足，关键物资不会因唯一一次失败永久丢失。
 - 所有数组、CellId、TaskId、RoomId、EdgeKey 均合法；无旧结果残留。
 
@@ -371,7 +379,7 @@ PCG 只保存经验证的 Solution Witness：槽位、目标、参数范围、�
 1. 道路失败：换第 K 条路径、调整转角权重或换 BridgeSite Approach。
 2. 水障可绕：封闭最短绕行缺口或换割集，不整图加水。
 3. Set Piece 无候选：在所属 Room 内局部压平/换原型/扩 1 圈预算。
-4. 攻击解失败：旋转槽轴和弱点、换候选 Cell，再考虑局部降低遮挡。
+4. 攻击解失败：旋转槽轴和目标攻击正面、换候选 Cell，再考虑局部降低遮挡。
 5. 区域容量失败、Mission 锁失败或多处结构冲突：整次 Attempt 重试。
 
 所有修复有次数上限并写日志，避免无限循环和难以复现的隐式补丁。
@@ -439,10 +447,11 @@ FinalScore =
 
 - 固定 20 个 Golden Seeds，每个运行两次，逻辑结果 Hash 必须一致。
 - 连续更换 Seed 重建同一 Actor，结果必须等于 fresh Actor，不允许旧道路/河网残留。
-- 100 个 Seed 批量生成：100% 使用保底前成功或明确进入保底；不得崩溃、死循环、非法索引。
+- 100 个 Seed 批量生成：接受结果必须 100% 通过全部门槛；有限 Attempt 全部失败时必须明确拒绝，不得崩溃、死循环、非法索引或返回半张地图。未来只有在真正实现并同样通过 Validator 的保底模板后，才能把“进入保底”计为成功。
 - 每个 Seed 通过 P0–P5、桥锁反绕过、弹道 Witness、资源下限和水文无环验证。
 - 记录各阶段耗时。比赛版目标：Editor Development 下逻辑 PCG `P95 < 2s`，完整连续网格和 HISM 构建另计但总进入可玩状态控制在 20 秒内。
 - 固定展示 Seed 还需人工验收：从出生点能读到道路；河流明确切割路线；目标虽离路但可侦察；桥建造前后路线变化可见；普通/强化弹弓的攻击空间有明显区别。
+- M11.0 固定展示 Seed 还需人工验收：卫星练习区不贴近终局施工台；LaunchSite 平整无建筑，且只出现一对相邻太空槽。
 
 ## 16. 调研来源
 
@@ -481,3 +490,12 @@ FinalScore =
 当前代码已完成：显式九节点 Mission Graph 与九条 `TaskLink`、主线弯曲骨架与支线、带预算连通区域生长和 Wilderness、低频逻辑高度/湿度/坡度、平缓建筑锚点、汇流河边、球面闭合 BridgeGate 割集、显式 `CellEdgeState`、带地形/坡度/水障代价的道路、三类道路距离、桥前不可达/桥后可达验证、阶段派生 Seed、有限 Attempt、兼容 M3 的 `bRoad/bWater` 派生缓存及详细日志。
 
 尚未在本次 V2 中伪造的部分：Room 原型库、真实弹弓弹道 Witness、阶段资源库存求解和失败后的保底模板。这些系统需要 M5–M9 的真实配方、建筑 Footprint、弹弓参数和卫星引力接口；数据结构与模块边界已经预留，接入时不得退回通过渲染碰撞或 HISM 反推逻辑。
+
+### 17.2 M11.0 的 V3 现行修订（2026-07-27）
+
+- `GeneratorVersion` 提升为 3；
+- `FABTSM3PCGConfig.MinSatelliteLaunchAngularSeparationDegrees` 默认 `55°`；
+- `FABTSM3PCGSummary.SatelliteLaunchAngularSeparationDegrees` 记录实际角距；
+- Space 槽对和 `FABTSM110FinaleLocalFrame` 由接受的 `LaunchSite`/`SatelliteWindow` 结果确定；
+- M7 不再把 `LaunchSite` 当作建筑任务；其平整施工台改供终局槽使用；
+- 完整字段、配方、M9/M11 引力隔离和验收见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。

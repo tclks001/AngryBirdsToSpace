@@ -17,6 +17,7 @@ class AABTSM51SlingshotCord;
 class AABTSM6DestructibleProxy;
 class AABTSM6SlingshotCamera;
 class AABTSM7BuildingMaterialSystem;
+class AABTSM73StableBuildingActor;
 class AABTSM71PlaceableSlingshotActor;
 class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
@@ -29,6 +30,52 @@ struct FABTSM6StartupHISMWarmupQueue
 	TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> Component;
 	TArray<int32> CandidateIndicesDescending;
 	int32 NextCandidateOffset = 0;
+};
+
+/** Pure gate shared by startup completion and launch entry. */
+enum class EABTSM6BuildingValidationGate : uint8
+{
+	Ready,
+	Waiting,
+	Rejected
+};
+
+struct ABTSRUNTIME_API FABTSM6BuildingValidationGate
+{
+	static EABTSM6BuildingValidationGate Classify(
+		const int32 Pending,
+		const int32 Running,
+		const int32 Rejected,
+		const bool bContractActive = false,
+		const bool bContractSealed = true,
+		const bool bSetupRejected = false,
+		const int32 ExpectedRequired = 0,
+		const int32 RegisteredRequired = 0,
+		const int32 Accepted = 0,
+		const int32 NotRequired = 0)
+	{
+		if (Rejected > 0 || bSetupRejected || (bContractActive && NotRequired > 0))
+		{
+			return EABTSM6BuildingValidationGate::Rejected;
+		}
+		if (bContractActive)
+		{
+			if (!bContractSealed) return EABTSM6BuildingValidationGate::Waiting;
+			if (RegisteredRequired != ExpectedRequired)
+			{
+				return EABTSM6BuildingValidationGate::Rejected;
+			}
+			if (Pending > 0 || Running > 0) return EABTSM6BuildingValidationGate::Waiting;
+			return Accepted == ExpectedRequired
+				? EABTSM6BuildingValidationGate::Ready
+				: EABTSM6BuildingValidationGate::Rejected;
+		}
+		if (Pending > 0 || Running > 0)
+		{
+			return EABTSM6BuildingValidationGate::Waiting;
+		}
+		return EABTSM6BuildingValidationGate::Ready;
+	}
 };
 
 /** Fired once after a launched bird has returned and M6 is inactive again. */
@@ -54,6 +101,10 @@ public:
 	void HandleProxyImpact(AABTSM6DestructibleProxy& Proxy, const FHitResult& Hit, float NormalSpeedCMPerSec);
 	void ConfigureDebugSlingshots(bool bEnable, int32 InStartCellId);
 	void ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp);
+	/** M7 declares the required Actor set before spawning so absence cannot look like an empty valid stage. */
+	void BeginRequiredBuildingContract(int32 ExpectedRequiredBuildingCount);
+	void RegisterRequiredBuilding(AABTSM73StableBuildingActor& Building);
+	void SealRequiredBuildingContract(bool bSetupRejected);
 
 	EABTSM6LaunchState GetLaunchState() const { return LaunchState; }
 	bool IsLaunchModeActive() const { return LaunchState != EABTSM6LaunchState::Inactive; }
@@ -99,6 +150,7 @@ private:
 	bool HasPendingStartupHISMCandidates() const;
 	int32 RestoreStartupHISMProxies();
 	void FinishStartupPhysicsWarmup(const FABTSM6PhysicsActivitySummary& Summary);
+	bool AreRuntimeBuildingsReadyForLaunch() const;
 	void DetonateBlackBird(bool bManual);
 	void BeginSettlement();
 	void UpdatePhysicsSettlement(float DeltaSeconds);
@@ -280,5 +332,11 @@ private:
 	bool bStartupBuildingSettlementActive = false;
 	bool bStartupPhysicsWarmupStarted = false;
 	bool bStartupPhysicsWarmupComplete = false;
+	bool bStartupPhysicsWarmupFailed = false;
 	bool bStartupPhysicsWarmupWaitingLogged = false;
+	bool bRequiredBuildingContractActive = false;
+	bool bRequiredBuildingContractSealed = true;
+	bool bRequiredBuildingSetupRejected = false;
+	int32 ExpectedRequiredBuildingCount = 0;
+	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>> RequiredBuildingActors;
 };

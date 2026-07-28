@@ -78,9 +78,26 @@ bool AABTSM51WorldSystem::QueryCellTransform(const int32 CellId, const float Sur
 	return true;
 }
 
+bool AABTSM51WorldSystem::GetFinaleSpaceSlots(
+	AABTSM51SlingshotDirtHole*& OutLeft,
+	AABTSM51SlingshotDirtHole*& OutRight) const
+{
+	OutLeft = FinaleLeftSlot.Get();
+	OutRight = FinaleRightSlot.Get();
+	return OutLeft != nullptr
+		&& OutRight != nullptr
+		&& OutLeft != OutRight
+		&& OutLeft->IsFinaleSpaceSlot()
+		&& OutRight->IsFinaleSpaceSlot()
+		&& OutLeft->GetSlotSide() == EABTSSlingshotSlotSide::Left
+		&& OutRight->GetSlotSide() == EABTSSlingshotSlotSide::Right
+		&& OutLeft->GetSlotPairId() != INDEX_NONE
+		&& OutLeft->GetSlotPairId() == OutRight->GetSlotPairId();
+}
+
 void AABTSM51WorldSystem::SpawnSlingshotHoles()
 {
-	int32 HoleCount = 0;
+	int32 StandardHoleCount = 0;
 	for (const FABTSM3TaskNode& Task : Planet->GetGeneratedTasks())
 	{
 		if (Task.Type != EABTSM3TaskType::SlingshotRange || !Planet->LogicalCells.IsValidIndex(Task.SeedCellId)) continue;
@@ -105,11 +122,70 @@ void AABTSM51WorldSystem::SpawnSlingshotHoles()
 			{
 				Hole->InitializeHole(CellId);
 				OccupiedCells.Add(CellId);
-				++HoleCount;
+				++StandardHoleCount;
 			}
 		}
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][SlingshotSlots] Holes=%d"), HoleCount);
+
+	int32 FinaleHoleCount = 0;
+	const FABTSM110FinaleLocalFrame& FinaleFrame = Planet->GetFinaleLaunchFrame();
+	if (!FinaleFrame.IsUsable())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M11.0][FinaleSlots] Spawn rejected: M3 finale frame is not usable."));
+	}
+	else
+	{
+		const auto SpawnFinaleSlot = [this, &FinaleFrame, &FinaleHoleCount](
+			const FVector& WorldLocation,
+			const EABTSSlingshotSlotSide Side) -> AABTSM51SlingshotDirtHole*
+		{
+			const FTransform Transform(FinaleFrame.WorldTransform.GetRotation(), WorldLocation);
+			AABTSM51SlingshotDirtHole* Hole =
+				GetWorld()->SpawnActor<AABTSM51SlingshotDirtHole>(DirtHoleClass, Transform);
+			if (Hole == nullptr)
+			{
+				return nullptr;
+			}
+			Hole->InitializeFinaleSpaceSlot(FinaleFrame.AnchorCellId, FinaleFrame.SlotPairId, Side);
+			++FinaleHoleCount;
+			return Hole;
+		};
+		FinaleLeftSlot = SpawnFinaleSlot(
+			FinaleFrame.LeftSlotWorldLocation,
+			EABTSSlingshotSlotSide::Left);
+		FinaleRightSlot = SpawnFinaleSlot(
+			FinaleFrame.RightSlotWorldLocation,
+			EABTSSlingshotSlotSide::Right);
+		AABTSM51SlingshotDirtHole* LeftSlot = FinaleLeftSlot.Get();
+		AABTSM51SlingshotDirtHole* RightSlot = FinaleRightSlot.Get();
+		if (LeftSlot == nullptr || RightSlot == nullptr)
+		{
+			if (LeftSlot != nullptr)
+			{
+				LeftSlot->Destroy();
+			}
+			if (RightSlot != nullptr)
+			{
+				RightSlot->Destroy();
+			}
+			FinaleLeftSlot.Reset();
+			FinaleRightSlot.Reset();
+			FinaleHoleCount = 0;
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M11.0][FinaleSlots] Atomic pair spawn failed; no terminal slot was retained."));
+		}
+		else
+		{
+			OccupiedCells.Add(FinaleFrame.AnchorCellId);
+		}
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M11.0][SlingshotSlots] Standard=%d Finale=%d Pair=%d AnchorCell=%d"),
+		StandardHoleCount,
+		FinaleHoleCount,
+		FinaleFrame.SlotPairId,
+		FinaleFrame.AnchorCellId);
 }
 
 void AABTSM51WorldSystem::SpawnSdfPickups()
@@ -285,6 +361,12 @@ bool AABTSM51WorldSystem::PlaceHeldStakeAtAim(APlayerController& Controller)
 	UABTSInventoryComponent* Inventory = System ? System->GetInventory() : nullptr;
 	EABTSItemId Held;
 	if (Inventory == nullptr || !Inventory->GetHeldItem(Held) || !ABTSIsSlingshotStake(Held)) return false;
+	EABTSSlingshotTier HeldTier = EABTSSlingshotTier::Simple;
+	if (!ABTSTryResolveSlingshotPartTier(Held, HeldTier) || HeldTier == EABTSSlingshotTier::Space)
+	{
+		LogPlaceFailure(TEXT("SpaceStakeRequiresFinaleSlot"));
+		return false;
+	}
 	if (!Planet.IsValid()) { LogPlaceFailure(TEXT("NoPlanet")); return false; }
 	FVector Origin;
 	FVector Direction;
@@ -299,11 +381,7 @@ bool AABTSM51WorldSystem::PlaceHeldStakeAtAim(APlayerController& Controller)
 	const int32 CellId = SelectDeveloperStakeCell((AimPoint - PlanetCenter).GetSafeNormal());
 	if (CellId == INDEX_NONE) { LogPlaceFailure(TEXT("NoUnoccupiedCell")); return false; }
 	FTransform Transform;
-	const EABTSSlingshotTier Tier = Held == EABTSItemId::Branch
-		? EABTSSlingshotTier::Twig
-		: (Held == EABTSItemId::ReinforcedStake
-			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
-	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(Tier);
+	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(HeldTier);
 	if (!QueryCellTransform(CellId, Preset.StakeHeightCM * 0.5f, Transform)) { LogPlaceFailure(TEXT("SurfaceQuery")); return false; }
 	if (Controller.GetPawn() == nullptr || FVector::Distance(Controller.GetPawn()->GetActorLocation(), Transform.GetLocation()) > PlacementReachCM)
 	{
@@ -326,29 +404,36 @@ bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)
 	UABTSInventoryComponent* Inventory = System ? System->GetInventory() : nullptr;
 	EABTSItemId Held;
 	if (Inventory == nullptr || !Inventory->GetHeldItem(Held) || !ABTSIsSlingshotStake(Held) || Hole.IsOccupied()) return false;
-	const FVector Up = (Hole.GetActorLocation() - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+	EABTSSlingshotTier HeldTier = EABTSSlingshotTier::Simple;
+	if (!ABTSTryResolveSlingshotPartTier(Held, HeldTier))
+	{
+		LogPlaceFailure(TEXT("UnknownStakeTier"));
+		return false;
+	}
+	const bool bSpaceStake = HeldTier == EABTSSlingshotTier::Space;
+	if (Hole.IsFinaleSpaceSlot() != bSpaceStake)
+	{
+		LogPlaceFailure(Hole.IsFinaleSpaceSlot()
+			? TEXT("FinaleSlotRequiresSpaceStake")
+			: TEXT("SpaceStakeRequiresFinaleSlot"));
+		return false;
+	}
+	const FVector Up = Hole.IsFinaleSpaceSlot() && Planet->GetFinaleLaunchFrame().IsUsable()
+		? Planet->GetFinaleLaunchFrame().GetUp()
+		: (Hole.GetActorLocation() - Planet->GetPlanetCenterWorld()).GetSafeNormal();
 	FVector Forward = FVector::VectorPlaneProject(Hole.GetActorForwardVector(), Up).GetSafeNormal();
 	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
-	const EABTSSlingshotTier Tier = Held == EABTSItemId::Branch
-		? EABTSSlingshotTier::Twig
-		: (Held == EABTSItemId::ReinforcedStake
-			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
-	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(Tier);
+	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(HeldTier);
 	const FTransform Transform(FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat(),
 		Hole.GetActorLocation() + Up * (Preset.StakeHeightCM * 0.5f));
 	AABTSM51SlingshotStake* Stake = GetWorld()->SpawnActor<AABTSM51SlingshotStake>(StakeClass, Transform);
 	if (Stake == nullptr) return false;
 	Stake->InitializeStake(Held, Hole.GetCellId(), Up);
+	Stake->SetInstalledSlotIdentity(Hole.GetSlotKind(), Hole.GetSlotPairId(), Hole.GetSlotSide());
 	Hole.SetOccupiedStake(Stake);
 	Inventory->RemoveItem(Held, 1);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][Stake] Installed=%s Cell=%d"), *ABTSGetItemFallbackLabel(Held), Hole.GetCellId());
 	return true;
-}
-
-EABTSItemId AABTSM51WorldSystem::ResolveStakeForCord(const EABTSItemId CordItem) const
-{
-	if (CordItem == EABTSItemId::PlantFiber) return EABTSItemId::Branch;
-	return CordItem == EABTSItemId::ReinforcedCord ? EABTSItemId::ReinforcedStake : EABTSItemId::SimpleStake;
 }
 
 bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
@@ -357,7 +442,18 @@ bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
 	UABTSInventoryComponent* Inventory = System ? System->GetInventory() : nullptr;
 	EABTSItemId Held;
 	if (Inventory == nullptr || !Inventory->GetHeldItem(Held) || !ABTSIsSlingshotCord(Held)) return false;
-	if (Stake.HasCord() || Stake.GetStakeItem() != ResolveStakeForCord(Held)) { LogPlaceFailure(TEXT("StakeTypeOrOccupied")); return false; }
+	EABTSSlingshotTier ResolvedTier = EABTSSlingshotTier::Simple;
+	if (Stake.HasCord() || !ABTSAreSlingshotPartsCompatible(Stake.GetStakeItem(), Held, ResolvedTier))
+	{
+		LogPlaceFailure(TEXT("StakeTypeOrOccupied"));
+		return false;
+	}
+	const bool bFinaleStake = Stake.GetInstalledSlotKind() == EABTSSlingshotSlotKind::FinaleSpace;
+	if ((ResolvedTier == EABTSSlingshotTier::Space) != bFinaleStake)
+	{
+		LogPlaceFailure(bFinaleStake ? TEXT("FinaleStakeRequiresSpaceCord") : TEXT("SpaceCordRequiresFinaleStake"));
+		return false;
+	}
 	if (!PendingCordStake.IsValid())
 	{
 		PendingCordStake = &Stake;
@@ -366,6 +462,22 @@ bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
 	}
 	AABTSM51SlingshotStake* First = PendingCordStake.Get();
 	if (First == &Stake) { PendingCordStake.Reset(); return false; }
+	if (ResolvedTier == EABTSSlingshotTier::Space)
+	{
+		const bool bSameFinalePair =
+			First->GetInstalledSlotKind() == EABTSSlingshotSlotKind::FinaleSpace
+			&& First->GetInstalledSlotPairId() != INDEX_NONE
+			&& First->GetInstalledSlotPairId() == Stake.GetInstalledSlotPairId()
+			&& First->GetInstalledSlotSide() != Stake.GetInstalledSlotSide()
+			&& First->GetInstalledSlotSide() != EABTSSlingshotSlotSide::None
+			&& Stake.GetInstalledSlotSide() != EABTSSlingshotSlotSide::None;
+		if (!bSameFinalePair)
+		{
+			PendingCordStake = &Stake;
+			LogPlaceFailure(TEXT("SpaceCordRequiresSameFinalePair"));
+			return false;
+		}
+	}
 	const float AngleRadians = FMath::Acos(FMath::Clamp(
 		FVector::DotProduct(First->GetUnitDirection(), Stake.GetUnitDirection()), -1.0f, 1.0f));
 	if (AngleRadians > MaxStakeArcRadians || First->GetStakeItem() != Stake.GetStakeItem())
@@ -378,11 +490,16 @@ bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
 	const FVector EndpointB = Stake.GetVisualTopWorldLocation();
 	AABTSM51SlingshotCord* Cord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(CordClass, FTransform::Identity);
 	if (Cord == nullptr) return false;
-	Cord->InitializeCord(First, &Stake, EndpointA, EndpointB);
+	Cord->InitializeCordWithTier(First, &Stake, EndpointA, EndpointB, ResolvedTier);
 	First->SetHasCord(true);
 	Stake.SetHasCord(true);
 	PendingCordStake.Reset();
 	Inventory->RemoveItem(Held, 1);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][Cord] Complete ArcRadians=%.5f Item=%s"), AngleRadians, *ABTSGetItemFallbackLabel(Held));
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M5.1][Cord] Complete ArcRadians=%.5f Item=%s Tier=%d FinalePair=%d"),
+		AngleRadians,
+		*ABTSGetItemFallbackLabel(Held),
+		static_cast<int32>(ResolvedTier),
+		Cord->GetFinaleSlotPairId());
 	return true;
 }

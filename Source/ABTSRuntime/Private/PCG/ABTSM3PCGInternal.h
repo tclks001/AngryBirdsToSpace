@@ -9,7 +9,7 @@ struct FABTSM2Cell;
 
 namespace ABTSM3PCG
 {
-constexpr int32 GeneratorVersion = 2;
+constexpr int32 GeneratorVersion = 3;
 
 struct FTaskSpec
 {
@@ -39,14 +39,17 @@ public:
 class FSpatialBuilder
 {
 public:
-	bool PlaceTaskSeeds(int32 WorldSeed, int32 AttemptIndex, const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks) const;
+	bool PlaceTaskSeeds(int32 WorldSeed, int32 AttemptIndex, float MinSatelliteLaunchAngularSeparationDegrees,
+		const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks) const;
 	bool GrowTaskRegions(int32 WorldSeed, int32 AttemptIndex, int32 TargetCells, const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks, TArray<FABTSM3CellState>& CellStates) const;
 };
 
 class FHeightFieldGenerator
 {
 public:
-	void Generate(int32 WorldSeed, int32 AttemptIndex, const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks, float MaxBuildSlopeDegrees, TArray<FABTSM3CellState>& CellStates) const;
+	void Generate(int32 WorldSeed, int32 AttemptIndex, const TArray<FABTSM2Cell>& Cells,
+		const TArray<FABTSM3TaskNode>& Tasks, float MaxBuildSlopeDegrees,
+		int32 BuildingPadClearanceRingCells, TArray<FABTSM3CellState>& CellStates) const;
 };
 
 class FHydrologyGenerator
@@ -77,6 +80,7 @@ class FWorldValidator
 public:
 	bool Validate(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks, const TArray<FABTSM3TaskLink>& Links,
 		const TArray<FABTSM3CellState>& CellStates, const TArray<FABTSM3CellEdgeState>& EdgeStates,
-		const FABTSM3CellEdgeKey& BridgeEdge, FABTSM3PCGSummary& Summary, FString& OutFailure) const;
+		const FABTSM3CellEdgeKey& BridgeEdge, float MinSatelliteLaunchAngularSeparationDegrees,
+		FABTSM3PCGSummary& Summary, FString& OutFailure) const;
 };
 }

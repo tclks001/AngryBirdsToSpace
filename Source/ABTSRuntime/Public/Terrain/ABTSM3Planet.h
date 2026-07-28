@@ -6,6 +6,7 @@
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
+#include "World/ABTSM110FinaleTypes.h"
 #include "ABTSM3Planet.generated.h"
 
 class UHierarchicalInstancedStaticMeshComponent;
@@ -74,6 +75,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Building")
 	const TArray<FABTSM3BuildingSpawnSite>& GetBuildingSpawnSites() const { return BuildingSpawnSites; }
 
+	/** Deterministic terminal frame authored by M3 and consumed by M11 local-layout presets. */
+	const FABTSM110FinaleLocalFrame& GetFinaleLaunchFrame() const { return FinaleLaunchFrame; }
+
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Surface")
 	bool QuerySurface(const FVector& UnitDirection, FVector& OutWorldPosition, FVector& OutWorldNormal, float& OutSurfaceRadius, int32& OutCellId) const;
 
@@ -100,6 +104,16 @@ public:
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
 	FABTSM3BuildingPadSettings BuildingPadSettings;
+
+	/** World-space spacing of the one terminal Space-slingshot slot pair. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
+		meta = (ClampMin = "100.0", ClampMax = "600.0", UIMin = "160.0", UIMax = "360.0", Units = "cm"))
+	float FinaleSpaceSlotSeparationCM = 210.0f;
+
+	/** Small lift that keeps the slot interaction mesh above the certified pad. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
+		meta = (ClampMin = "0.0", ClampMax = "40.0", UIMax = "12.0", Units = "cm"))
+	float FinaleSpaceSlotSurfaceOffsetCM = 4.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Terrain", meta = (ClampMin = "0.0"))
 	float MacroHeightScaleCM = 900.0f;
@@ -208,6 +222,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
 	TArray<FABTSM3BuildingSpawnSite> BuildingSpawnSites;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Frame")
+	FABTSM110FinaleLocalFrame FinaleLaunchFrame;
 
 private:
 	bool GenerateLogicalTerrain();

@@ -1,6 +1,6 @@
 # M7.3-A：稳定积木建筑实现设计
 
-> 状态：已完成编辑器、PIE 与物理验收；球面 TaskGraph 批量接入与连续地形施工台见后续 [M7TaskGraphSphericalBuildingIntegrationDesign.md](M7TaskGraphSphericalBuildingIntegrationDesign.md)。
+> 状态：本稿的 Legacy Actor/M7.1 基线已完成；`LegacyLayeredAB2` 已退出 TaskGraph 生产。球面现行路线见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，公共 GroundAdapter/Runtime/IdleValidation 仍由其复用。
 > 父级：[M7.3 程序化模块化建筑总体算法](M73ProceduralModularBuildingGenerationResearch.md)。
 > 平面测试场：[M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。
 > 下游：[M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md) 负责图选点与难度；[M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md) 负责 Legacy 顶部局部结构弱点；主体 Macro DAG 递归、内部 Failure Frontier 与真实接触图新路线见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)；项目阶段索引见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)。
@@ -245,11 +245,11 @@ ContactAreaCM2
 3. 隐藏模块渲染但保留真实碰撞，并设置覆盖最长验证时间的接触损伤 Grace，防止初始接触被当成破坏；
 4. 平面模式施加恒定 `-GravityUp`，球面模式施加朝向 Planet Center 的径向重力；
 5. 至少模拟 `IdleValidationSeconds=1.25s`。达到最短观察时间后，只有所有刚体同时满足线速度不超过 `4cm/s`、角速度不超过 `1.5deg/s`，才累计静稳时间；任一刚体重新越界就把静稳计时归零；
-6. 连续静稳达到 `IdleStableHoldSeconds=0.45s` 后通过收敛检查；若到 `IdleValidationMaxSeconds=6s` 仍未满足，则以 `TimedOut=1` 拒绝；
+6. 连续静稳达到 `IdleStableHoldSeconds=0.45s` 后通过收敛检查；若到 `IdleValidationMaxSeconds=6s` 仍未满足，则进入 `TimedOut=1` 的终态空间检查：漂移、沉降和旋转仍全部在门槛内时以 `BoundedTimeout=1` 冻结接受，任一空间指标越界才拒绝；
 7. 将相对预校验基线的位移分解为施工平面内漂移和沿重力轴的接触沉降，同时记录总位移、最大旋转、结束速度和 Awake 数量；
-8. 平面漂移与 `MaxIdleDisplacementCM` 比较，法向沉降与 `MaxIdleSettlementCM` 比较，旋转与 `MaxIdleRotationDegrees` 比较；速度静稳、未超时和三个几何门槛必须同时满足；
+8. 平面漂移与 `MaxIdleDisplacementCM` 比较，法向沉降与 `MaxIdleSettlementCM` 比较，旋转与 `MaxIdleRotationDegrees` 比较；正常收敛需要 quiet window 与三个几何门槛同时满足，超时仅允许三个几何门槛全部合格的有界残余振动；
 9. 在最终落座 Transform 上执行 `Freeze()` 并重新显示，不把模块传送回验证前位置；
-10. 不稳定时输出 Error 和带 `TimedOut` 的 `RejectReason`，随后统一调用 `RejectRuntimeStructure`；
+10. 空间指标越界时输出 Error 和带 `TimedOut` 的 `RejectReason`，随后统一调用 `RejectRuntimeStructure`；不得通过放宽 2° 旋转门槛掩盖支撑几何或变步长发散；
 11. `RejectRuntimeStructure` 销毁全部 Runtime Module，清空模块数组、Node→Module 映射和 Idle Transform 缓存，停止 Tick，并隐藏、禁用 `FoundationCap` 与 `FoundationFeet`。被拒绝的半成品不会留下隐形碰撞体，也不能继续参与 M6/M7 Gameplay；
 12. 后续显式重新初始化/重试时，正常装配路径会再次调用 `UpdateFoundationComponents`，恢复 Foundation 可见性、实例和 `QueryAndPhysics` 碰撞，然后再生成新模块并重新执行完整验证。
 
@@ -262,7 +262,7 @@ ContactAreaCM2
 [ABTS][M7.3-A][IdleValidation]
 ```
 
-`IdlePenetrationValidation` 应先报告模块数、穿透对、修复数和最大深度；`Repairs` 也必须为 0，不能只检查 `LargeErrors`。预检拒绝时直接输出 `PenetrationRejected=1`，不会继续出现正常的 quiet-window 结果。预检通过后，`IdleValidation` 会额外报告 `Stable`、`TimedOut`、`MaxLinearSpeed`、`MaxAngularSpeed` 与 `Awake`。`Awake` 仅用于诊断，当前收敛依据是实际线/角速度连续低于门槛，而不是要求 Chaos 已把所有刚体标记为 Sleep。
+`IdlePenetrationValidation` 应先报告模块数、穿透对、修复数和最大深度；`Repairs` 也必须为 0，不能只检查 `LargeErrors`。预检拒绝时直接输出 `PenetrationRejected=1`，不会继续出现正常的 quiet-window 结果。预检通过后，`IdleValidation` 会额外报告 `Stable`、`TimedOut`、`BoundedTimeout`（接受日志）、`MaxLinearSpeed`、`MaxAngularSpeed` 与 `Awake`。`Awake` 仅用于诊断，当前收敛依据是实际线/角速度连续低于门槛，而不是要求 Chaos 已把所有刚体标记为 Sleep。
 
 无论失败发生在穿透预检还是 quiet-window 结束阶段，最终语义都不是“保留建筑但标记红灯”，而是彻底撤销本次 Runtime Structure。`GenerationSummary.bAccepted=false` 后，模块与 Foundation 都不应再阻挡鸟、弹丸或其他物体。
 

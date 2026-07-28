@@ -13,6 +13,7 @@
 AABTSM9GameMode::AABTSM9GameMode()
 {
 	SatelliteClass = AABTSM9Satellite::StaticClass();
+	FinalAnchorTaskType = EABTSM3TaskType::SatelliteWindow;
 }
 
 void AABTSM9GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, const int32 SpawnCellId)
@@ -39,11 +40,36 @@ void AABTSM9GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		if (It->IsPlanetReady()) { PrimaryPlanet = *It; break; }
 	}
 	if (PrimaryPlanet == nullptr) return;
-	const FABTSM3TaskNode* FinalTask = PrimaryPlanet->GetGeneratedTasks().FindByPredicate(
-		[this](const FABTSM3TaskNode& Task) { return Task.Type == FinalAnchorTaskType; });
-	if (FinalTask == nullptr || !PrimaryPlanet->LogicalCells.IsValidIndex(FinalTask->SeedCellId))
+	if (FinalAnchorTaskType != EABTSM3TaskType::SatelliteWindow)
 	{
-		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M9] Satellite rejected: final Task type %d has no valid CellTopo seed."), static_cast<int32>(FinalAnchorTaskType));
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M11.0][SatellitePlacement] Ignoring legacy anchor override Type=%d; SatelliteWindow is authoritative."),
+			static_cast<int32>(FinalAnchorTaskType));
+	}
+	const FABTSM3TaskNode* SatelliteTask = PrimaryPlanet->GetGeneratedTasks().FindByPredicate(
+		[](const FABTSM3TaskNode& Task) { return Task.Type == EABTSM3TaskType::SatelliteWindow; });
+	const FABTSM110FinaleLocalFrame& FinaleFrame = PrimaryPlanet->GetFinaleLaunchFrame();
+	if (SatelliteTask == nullptr
+		|| !PrimaryPlanet->LogicalCells.IsValidIndex(SatelliteTask->SeedCellId)
+		|| !FinaleFrame.IsUsable())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M9] Satellite rejected: SatelliteWindow or finale frame is invalid."));
+		return;
+	}
+	const FVector SatelliteAnchorDirection =
+		PrimaryPlanet->LogicalCells[SatelliteTask->SeedCellId].UnitCenter.GetSafeNormal();
+	const float AngularSeparationDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+		FVector::DotProduct(FinaleFrame.GetUp(), SatelliteAnchorDirection),
+		-1.0f,
+		1.0f)));
+	if (AngularSeparationDegrees + KINDA_SMALL_NUMBER
+		< PrimaryPlanet->PCGConfig.MinSatelliteLaunchAngularSeparationDegrees)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M11.0][SatellitePlacement] Rejected: angular separation %.2f is below %.2f degrees."),
+			AngularSeparationDegrees,
+			PrimaryPlanet->PCGConfig.MinSatelliteLaunchAngularSeparationDegrees);
 		return;
 	}
 	const float PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
@@ -52,9 +78,39 @@ void AABTSM9GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	const float SurfaceGravityCMPerSec2 = 980.0f * FMath::Max(0.0f, SatelliteSurfaceGravityPrimaryRatio);
 	AABTSM9Satellite* Satellite = GetWorld()->SpawnActorDeferred<AABTSM9Satellite>(SatelliteClass, FTransform::Identity, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (Satellite == nullptr) return;
-	Satellite->ConfigureFromPrimaryPlanet(*PrimaryPlanet, FinalTask->SeedCellId, SatelliteRadiusCM, CenterClearanceCM, SurfaceGravityCMPerSec2);
+	Satellite->ConfigureFromPrimaryPlanet(*PrimaryPlanet, SatelliteTask->SeedCellId, SatelliteRadiusCM, CenterClearanceCM, SurfaceGravityCMPerSec2);
 	UGameplayStatics::FinishSpawningActor(Satellite, Satellite->GetActorTransform());
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M9] Satellite ready Task=%d Cell=%d Radius=%.1f Clearance=%.1f Gravity=%.1f LogicalSub=%d RenderSub=%d"),
-		FinalTask->TaskId, FinalTask->SeedCellId, SatelliteRadiusCM, CenterClearanceCM, SurfaceGravityCMPerSec2,
-		Satellite->LogicalSubdivision, Satellite->SurfaceSubdivision);
+	const FVector FinaleToSatellite = Satellite->GetPlanetCenterWorld() - FinaleFrame.GetOrigin();
+	const float FinaleDistanceRatio = FinaleToSatellite.Size() / FMath::Max(PrimaryRadiusCM, 1.0f);
+	const FVector TangentDirection =
+		FVector::VectorPlaneProject(FinaleToSatellite, FinaleFrame.GetUp()).GetSafeNormal();
+	const float LateralAlignmentDot =
+		FVector::DotProduct(TangentDirection, FinaleFrame.GetRight());
+	const bool bPlacementContractSatisfied =
+		FinaleDistanceRatio + KINDA_SMALL_NUMBER >= MinFinaleSatelliteDistancePrimaryRadiusRatio
+		&& LateralAlignmentDot + KINDA_SMALL_NUMBER >= MinFinaleSatelliteLateralAlignmentDot;
+	if (!bPlacementContractSatisfied)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M11.0][SatellitePlacement] Rejected after spawn: DistanceRatio=%.3f Required=%.3f LateralDot=%.4f Required=%.4f"),
+			FinaleDistanceRatio,
+			MinFinaleSatelliteDistancePrimaryRadiusRatio,
+			LateralAlignmentDot,
+			MinFinaleSatelliteLateralAlignmentDot);
+		Satellite->Destroy();
+		return;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M9] Satellite ready Task=%d Cell=%d Radius=%.1f Clearance=%.1f Gravity=%.1f LogicalSub=%d RenderSub=%d AngularSepDeg=%.2f FinaleDistanceRatio=%.3f LateralDot=%.4f FinaleGravitySource=%d"),
+		SatelliteTask->TaskId,
+		SatelliteTask->SeedCellId,
+		SatelliteRadiusCM,
+		CenterClearanceCM,
+		SurfaceGravityCMPerSec2,
+		Satellite->LogicalSubdivision,
+		Satellite->SurfaceSubdivision,
+		AngularSeparationDegrees,
+		FinaleDistanceRatio,
+		LateralAlignmentDot,
+		Satellite->IsM11FinaleGravitySource() ? 1 : 0);
 }

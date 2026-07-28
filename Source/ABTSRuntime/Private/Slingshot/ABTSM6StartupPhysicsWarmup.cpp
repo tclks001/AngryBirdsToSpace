@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
@@ -22,6 +23,87 @@ struct FABTSM6StartupHISMScanData
 	TSet<int32> SelectedCandidateIndices;
 };
 
+struct FABTSM73StartupValidationSummary
+{
+	int32 Pending = 0;
+	int32 Running = 0;
+	int32 Accepted = 0;
+	int32 Rejected = 0;
+	int32 NotRequired = 0;
+	bool bContractActive = false;
+	bool bContractSealed = true;
+	bool bSetupRejected = false;
+	int32 ExpectedRequired = 0;
+	int32 RegisteredRequired = 0;
+
+	EABTSM6BuildingValidationGate GetGate() const
+	{
+		return FABTSM6BuildingValidationGate::Classify(
+			Pending,
+			Running,
+			Rejected,
+			bContractActive,
+			bContractSealed,
+			bSetupRejected,
+			ExpectedRequired,
+			RegisteredRequired,
+			Accepted,
+			NotRequired);
+	}
+};
+
+FABTSM73StartupValidationSummary GetBuildingValidationSummary(
+	UWorld& World,
+	const bool bContractActive,
+	const bool bContractSealed,
+	const bool bSetupRejected,
+	const int32 ExpectedRequired,
+	const TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>>& RequiredBuildings)
+{
+	FABTSM73StartupValidationSummary Summary;
+	Summary.bContractActive = bContractActive;
+	Summary.bContractSealed = bContractSealed;
+	Summary.bSetupRejected = bSetupRejected;
+	Summary.ExpectedRequired = ExpectedRequired;
+	if (bContractActive)
+	{
+		// Once M7 opens the production contract, only its explicitly registered
+		// required actors define readiness. Unrelated M7.3 test actors must not
+		// block the world, and every registered actor must reach Accepted.
+		for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& Required : RequiredBuildings)
+		{
+			if (!Required.IsValid()) continue;
+			++Summary.RegisteredRequired;
+			switch (Required->GetIdleValidationState())
+			{
+			case EABTSM73IdleValidationState::Pending: ++Summary.Pending; break;
+			case EABTSM73IdleValidationState::Running: ++Summary.Running; break;
+			case EABTSM73IdleValidationState::Accepted: ++Summary.Accepted; break;
+			case EABTSM73IdleValidationState::Rejected: ++Summary.Rejected; break;
+			case EABTSM73IdleValidationState::NotRequired: ++Summary.NotRequired; break;
+			default: break;
+			}
+		}
+		return Summary;
+	}
+
+	// M6 and historical isolated tests do not open an M7 contract. Preserve
+	// their compatibility by observing any M7.3 actor that exists in the world.
+	for (TActorIterator<AABTSM73StableBuildingActor> It(&World); It; ++It)
+	{
+		switch (It->GetIdleValidationState())
+		{
+		case EABTSM73IdleValidationState::Pending: ++Summary.Pending; break;
+		case EABTSM73IdleValidationState::Running: ++Summary.Running; break;
+		case EABTSM73IdleValidationState::Accepted: ++Summary.Accepted; break;
+		case EABTSM73IdleValidationState::Rejected: ++Summary.Rejected; break;
+		case EABTSM73IdleValidationState::NotRequired: ++Summary.NotRequired; break;
+		default: break;
+		}
+	}
+	return Summary;
+}
+
 bool ABTSStartupBodiesOverlap(
 	UHierarchicalInstancedStaticMeshComponent& ComponentA,
 	const int32 InstanceA,
@@ -38,6 +120,103 @@ bool ABTSStartupBodiesOverlap(
 	return BodyA->OverlapTestForBody(
 		TransformA.GetLocation(), TransformA.GetRotation().GetNormalized(), BodyB, false);
 }
+}
+
+void AABTSM6SlingshotSystem::BeginRequiredBuildingContract(const int32 InExpectedRequiredBuildingCount)
+{
+	bRequiredBuildingContractActive = true;
+	bRequiredBuildingContractSealed = false;
+	bRequiredBuildingSetupRejected = false;
+	ExpectedRequiredBuildingCount = FMath::Max(0, InExpectedRequiredBuildingCount);
+	RequiredBuildingActors.Reset();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][StartupPhysics] BuildingContractBegin Expected=%d"),
+		ExpectedRequiredBuildingCount);
+}
+
+void AABTSM6SlingshotSystem::RegisterRequiredBuilding(AABTSM73StableBuildingActor& Building)
+{
+	if (!bRequiredBuildingContractActive || bRequiredBuildingContractSealed)
+	{
+		bRequiredBuildingSetupRejected = true;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][StartupPhysics] BuildingContractRegisterRejected Actor=%s Active=%d Sealed=%d"),
+			*Building.GetName(),
+			bRequiredBuildingContractActive ? 1 : 0,
+			bRequiredBuildingContractSealed ? 1 : 0);
+		return;
+	}
+	RequiredBuildingActors.AddUnique(&Building);
+}
+
+void AABTSM6SlingshotSystem::SealRequiredBuildingContract(const bool bInSetupRejected)
+{
+	if (!bRequiredBuildingContractActive)
+	{
+		bRequiredBuildingSetupRejected = true;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][StartupPhysics] BuildingContractSealRejected Reason=NotActive"));
+		return;
+	}
+	int32 RegisteredRequired = 0;
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& Required : RequiredBuildingActors)
+	{
+		if (Required.IsValid()) ++RegisteredRequired;
+	}
+	bRequiredBuildingContractSealed = true;
+	bRequiredBuildingSetupRejected = bInSetupRejected
+		|| RegisteredRequired != ExpectedRequiredBuildingCount;
+	if (bRequiredBuildingSetupRejected)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][StartupPhysics] BuildingContractSealed Expected=%d Registered=%d SetupRejected=1"),
+			ExpectedRequiredBuildingCount,
+			RegisteredRequired);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][StartupPhysics] BuildingContractSealed Expected=%d Registered=%d SetupRejected=0"),
+			ExpectedRequiredBuildingCount,
+			RegisteredRequired);
+	}
+}
+
+bool AABTSM6SlingshotSystem::AreRuntimeBuildingsReadyForLaunch() const
+{
+	if (GetWorld() == nullptr) return false;
+	const FABTSM73StartupValidationSummary Validation = GetBuildingValidationSummary(
+		*GetWorld(),
+		bRequiredBuildingContractActive,
+		bRequiredBuildingContractSealed,
+		bRequiredBuildingSetupRejected,
+		ExpectedRequiredBuildingCount,
+		RequiredBuildingActors);
+	if (Validation.GetGate() == EABTSM6BuildingValidationGate::Rejected)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][StartupPhysics] Launch blocked: generated building validation failed. Pending=%d Running=%d Accepted=%d Rejected=%d NotRequired=%d Contract=%d Sealed=%d SetupRejected=%d Expected=%d Registered=%d"),
+			Validation.Pending, Validation.Running, Validation.Accepted,
+			Validation.Rejected, Validation.NotRequired,
+			Validation.bContractActive ? 1 : 0,
+			Validation.bContractSealed ? 1 : 0,
+			Validation.bSetupRejected ? 1 : 0,
+			Validation.ExpectedRequired,
+			Validation.RegisteredRequired);
+		return false;
+	}
+	if (Validation.GetGate() == EABTSM6BuildingValidationGate::Waiting)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][StartupPhysics] Launch blocked: generated building validation is still in progress. Pending=%d Running=%d Accepted=%d Contract=%d Sealed=%d Expected=%d Registered=%d"),
+			Validation.Pending, Validation.Running, Validation.Accepted,
+			Validation.bContractActive ? 1 : 0,
+			Validation.bContractSealed ? 1 : 0,
+			Validation.ExpectedRequired,
+			Validation.RegisteredRequired);
+		return false;
+	}
+	return true;
 }
 
 void AABTSM6SlingshotSystem::UpdateStartupPhysicsWarmup(const float DeltaSeconds)
@@ -63,20 +242,47 @@ void AABTSM6SlingshotSystem::UpdateStartupPhysicsWarmup(const float DeltaSeconds
 	CollectDynamicPhysicsBodies(Bodies);
 	FABTSM6PhysicsActivitySummary Summary;
 	const EABTSM6PhysicsSettleResult Result = StartupPhysicsSettleMonitor.Update(DeltaSeconds, Now, Bodies, Summary);
+	const FABTSM73StartupValidationSummary BuildingValidation = GetBuildingValidationSummary(
+		*GetWorld(),
+		bRequiredBuildingContractActive,
+		bRequiredBuildingContractSealed,
+		bRequiredBuildingSetupRejected,
+		ExpectedRequiredBuildingCount,
+		RequiredBuildingActors);
 	if (Now >= NextStartupWarmupDiagnosticTimeSeconds)
 	{
 		NextStartupWarmupDiagnosticTimeSeconds = Now + 1.0f;
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][StartupPhysics] Phase=%s Batch=%d Bodies=%d Moving=%d Awake=%d MaxLinear=%.1f MaxAngular=%.1f Stable=%.2f Elapsed=%.2f Remaining=%d"),
+			TEXT("[ABTS][StartupPhysics] Phase=%s Batch=%d Bodies=%d Moving=%d Awake=%d MaxLinear=%.1f MaxAngular=%.1f Stable=%.2f Elapsed=%.2f Remaining=%d BuildingPending=%d BuildingRunning=%d BuildingAccepted=%d BuildingRejected=%d"),
 			bStartupBuildingSettlementActive ? TEXT("Buildings") : TEXT("HISM"),
 			StartupHISMWarmupBatchIndex, Summary.ActiveBodyCount, Summary.MovingBodyCount, Summary.AwakeBodyCount,
 			Summary.MaximumLinearSpeedCMPerSec, Summary.MaximumAngularSpeedDegPerSec,
 			Summary.StableElapsedSeconds, Summary.SettlementElapsedSeconds,
-			FMath::Max(0, StartupHISMWarmupTotalCandidates - StartupHISMWarmupPromotedTotal));
+			FMath::Max(0, StartupHISMWarmupTotalCandidates - StartupHISMWarmupPromotedTotal),
+			BuildingValidation.Pending, BuildingValidation.Running,
+			BuildingValidation.Accepted, BuildingValidation.Rejected);
 	}
 
 	if (bStartupBuildingSettlementActive)
 	{
+		// M7.3 owns the hidden settle, historical displacement checks and final
+		// Freeze for its modules. The coarser M6 monitor may observe "settled"
+		// earlier, but must never manufacture a quiet window by freezing them.
+		if (BuildingValidation.GetGate() == EABTSM6BuildingValidationGate::Waiting) return;
+		if (BuildingValidation.GetGate() == EABTSM6BuildingValidationGate::Rejected)
+		{
+			bStartupBuildingSettlementActive = false;
+			bStartupPhysicsWarmupFailed = true;
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][StartupPhysics] WorldReadyBlocked Reason=BuildingGateRejected Pending=%d Running=%d Accepted=%d Rejected=%d NotRequired=%d Contract=%d Sealed=%d SetupRejected=%d Expected=%d Registered=%d"),
+				BuildingValidation.Pending, BuildingValidation.Running,
+				BuildingValidation.Accepted, BuildingValidation.Rejected, BuildingValidation.NotRequired,
+				BuildingValidation.bContractActive ? 1 : 0,
+				BuildingValidation.bContractSealed ? 1 : 0,
+				BuildingValidation.bSetupRejected ? 1 : 0,
+				BuildingValidation.ExpectedRequired, BuildingValidation.RegisteredRequired);
+			return;
+		}
 		const bool bNoActiveBuildingBodies = Bodies.IsEmpty();
 		if (!bNoActiveBuildingBodies
 			&& Result != EABTSM6PhysicsSettleResult::Settled
@@ -95,8 +301,15 @@ void AABTSM6SlingshotSystem::UpdateStartupPhysicsWarmup(const float DeltaSeconds
 				TEXT("[ABTS][StartupPhysics] BuildingsSettled NoDynamicBodies=1 Elapsed=%.2f"),
 				Summary.SettlementElapsedSeconds);
 		}
-		FreezeDynamicProxies();
+		// Any remaining body here is not owned by a live M7.3 validator (for
+		// example the M7.1 material gallery), so the legacy global freeze remains
+		// valid for that residual set.
+		if (!bNoActiveBuildingBodies) FreezeDynamicProxies();
 		bStartupBuildingSettlementActive = false;
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][StartupPhysics] BuildingValidationTerminal Pending=%d Running=%d Accepted=%d Rejected=%d NotRequired=%d"),
+			BuildingValidation.Pending, BuildingValidation.Running,
+			BuildingValidation.Accepted, BuildingValidation.Rejected, BuildingValidation.NotRequired);
 		if (HasPendingStartupHISMCandidates() && StartNextStartupHISMWarmupBatch() > 0) return;
 		FinishStartupPhysicsWarmup(Summary);
 		return;
@@ -385,11 +598,62 @@ int32 AABTSM6SlingshotSystem::RestoreStartupHISMProxies()
 void AABTSM6SlingshotSystem::FinishStartupPhysicsWarmup(const FABTSM6PhysicsActivitySummary& Summary)
 {
 	if (bStartupPhysicsWarmupComplete) return;
+	if (GetWorld() != nullptr)
+	{
+		const FABTSM73StartupValidationSummary BuildingValidation = GetBuildingValidationSummary(
+			*GetWorld(),
+			bRequiredBuildingContractActive,
+			bRequiredBuildingContractSealed,
+			bRequiredBuildingSetupRejected,
+			ExpectedRequiredBuildingCount,
+			RequiredBuildingActors);
+		if (BuildingValidation.GetGate() == EABTSM6BuildingValidationGate::Rejected)
+		{
+			bStartupBuildingSettlementActive = false;
+			bStartupPhysicsWarmupFailed = true;
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][StartupPhysics] WorldReadyBlocked Reason=BuildingGateRejected Pending=%d Running=%d Accepted=%d Rejected=%d NotRequired=%d Contract=%d Sealed=%d SetupRejected=%d Expected=%d Registered=%d"),
+				BuildingValidation.Pending, BuildingValidation.Running,
+				BuildingValidation.Accepted, BuildingValidation.Rejected, BuildingValidation.NotRequired,
+				BuildingValidation.bContractActive ? 1 : 0,
+				BuildingValidation.bContractSealed ? 1 : 0,
+				BuildingValidation.bSetupRejected ? 1 : 0,
+				BuildingValidation.ExpectedRequired, BuildingValidation.RegisteredRequired);
+			return;
+		}
+		if (BuildingValidation.GetGate() == EABTSM6BuildingValidationGate::Waiting)
+		{
+			// This also covers a delayed/missing MaterialSystem with no HISM
+			// batches: enter an explicit wait phase and re-check every tick.
+			bStartupBuildingSettlementActive = true;
+			StartupPhysicsSettleMonitor.BeginSettlement(GetWorld()->GetTimeSeconds());
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][StartupPhysics] WorldReadyWaiting BuildingPending=%d BuildingRunning=%d BuildingAccepted=%d BuildingRejected=%d Contract=%d Sealed=%d Expected=%d Registered=%d"),
+				BuildingValidation.Pending, BuildingValidation.Running,
+				BuildingValidation.Accepted, BuildingValidation.Rejected,
+				BuildingValidation.bContractActive ? 1 : 0,
+				BuildingValidation.bContractSealed ? 1 : 0,
+				BuildingValidation.ExpectedRequired, BuildingValidation.RegisteredRequired);
+			return;
+		}
+	}
 	FreezeDynamicProxies();
 	bStartupPhysicsWarmupComplete = true;
+	const FABTSM73StartupValidationSummary BuildingValidation = GetWorld() != nullptr
+		? GetBuildingValidationSummary(
+			*GetWorld(),
+			bRequiredBuildingContractActive,
+			bRequiredBuildingContractSealed,
+			bRequiredBuildingSetupRejected,
+			ExpectedRequiredBuildingCount,
+			RequiredBuildingActors)
+		: FABTSM73StartupValidationSummary();
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][StartupPhysics] Complete WorldReady=1 LastBatchBodies=%d Stable=%.2f Elapsed=%.2f Candidates=%d Promoted=%d Batches=%d TimedOutBatches=%d StaticProxies=%d"),
+		TEXT("[ABTS][StartupPhysics] Complete WorldReady=1 LastBatchBodies=%d Stable=%.2f Elapsed=%.2f Candidates=%d Promoted=%d Batches=%d TimedOutBatches=%d StaticProxies=%d BuildingPending=%d BuildingRunning=%d BuildingAccepted=%d BuildingRejected=%d BuildingNotRequired=%d BuildingExpected=%d BuildingRegistered=%d"),
 		Summary.ActiveBodyCount, Summary.StableElapsedSeconds, Summary.SettlementElapsedSeconds,
 		StartupHISMWarmupTotalCandidates, StartupHISMWarmupPromotedTotal,
-		StartupHISMWarmupBatchIndex, StartupHISMWarmupTimedOutBatches, DynamicProxies.Num());
+		StartupHISMWarmupBatchIndex, StartupHISMWarmupTimedOutBatches, DynamicProxies.Num(),
+		BuildingValidation.Pending, BuildingValidation.Running,
+		BuildingValidation.Accepted, BuildingValidation.Rejected, BuildingValidation.NotRequired,
+		BuildingValidation.ExpectedRequired, BuildingValidation.RegisteredRequired);
 }

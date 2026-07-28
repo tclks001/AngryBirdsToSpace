@@ -16,7 +16,7 @@
 - 物品与世界交互：[M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/放置/装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md) · [M8 自动回收与桥梁](M8AutoRecoveryAndBridgesDesign.md)
 - 弹弓与物理破坏：[M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 弹弓视觉](M6SlingshotVisualPresentationDesign.md) · [物理碰撞破坏调研](PhysicsImpactDestructionResearch.md)
 - 建筑：[M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点（Legacy 对照）](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 新路线调研](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-1 纯数据语法实现](M73DAG1RecursiveGrammarImplementationDesign.md) · [M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [M7.3-DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [M7.3-DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [建筑语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)
-- 卫星、侦察与终局：[M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)
+- 卫星、侦察与终局：[M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)
 - 资产与工程参考：[Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md)
 
 ## 1. 概念与终局
@@ -36,14 +36,14 @@
 
 本作不复刻既有弹弓游戏。鸟名、轮廓、动作、音效、任务叙事和美术资产均使用原创设计；核心是“在球面环境中弹射同伴解决采集与建造问题”。
 
-最终发射必须同时是可解的轨道谜题和完整演出：玩家从全景轨迹图理解三次偏转与增能，发射后依次近掠三颗行星，镜头在全局轨迹和近距离速度感之间切换，最终命中 UFO；随后四鸟完成攻击并救出白色小鸟。M11 的物理取舍、确定性边界和实施门槛见 [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
+最终发射必须同时是可解的轨道谜题和完整演出：玩家从全景轨迹图理解三次偏转与增能，在完整 `Yaw × Pitch × Power` 输入域内找到唯一连通路径族；四鸟从同一太空弹珠袋沿预计算权威轨迹组成队列，依次近掠三颗行星并命中 UFO。终局不切换地图；三颗助推行星和 UFO 由 Task Graph 世界中的太空弹弓局部布局预设生成。入口收口见 [M11.0](M110PreFinaleClosureDesign.md)，物理取舍、稳定器和验收门槛见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 
 ## 2. 设计支柱
 
 | 支柱 | 玩家感受 | 实现约束 |
 | --- | --- | --- |
 | 弹射是主动作 | 弹弓是攻击建筑、投送鸟和读取弹道地形的工具。 | 每次组件升级都必须打开更远、更难或受引力影响的目标。 |
-| 物理有后果 | 柱、梁、绳索、活塞和炸药会在撞击后连锁反应。 | 高价值材料必须从建筑的可读弱点和结构坍塌中取得。 |
+| 物理有后果 | 柱、梁、绳索、活塞和炸药会在撞击后连锁反应。 | 高价值材料必须从可读承重构件和结构坍塌中取得；严格内部弱点由后续 DAG-3 补齐。 |
 | PCG 决定路线 | 主路、远路距离、河网、建筑、发射槽与卫星共同构成关卡。 | 固定 Seed 可复现；道路/水域/引力必须改变可攻击目标和最优弹道。 |
 | 低学习成本 | 玩家总能知道下一种稀缺资源和下一项建造。 | 仅三次核心升级，不做复杂科技树。 |
 | 终局有反差 | 地表阶段明亮亲和，离开时才显露宇宙。 | 普通探索不刻意强调太空视觉。 |
@@ -64,7 +64,7 @@
 
 ### 3.2 建造与配方
 
-初版只有工作台、熔炉、预生成弹弓槽和可制作的桩/弦组件。弹弓不是可自由摆放建筑：一对槽位插入弹弓桩并连接弹弓弦后才成为完整弹弓。熔炉用于加工强化桩、强化弹弦和太空弹弓部件；不引入燃料、电网、运输带或完整自动化工厂。
+初版只有工作台、熔炉、预生成弹弓槽和可制作的桩/弦组件。弹弓不是可自由摆放建筑：一对槽位插入弹弓桩并连接弹弓弦后才成为完整弹弓。熔炉用于加工强化桩/弦以及 `SpaceStake ×2 + SpaceCord ×1`；旧的一体式太空弹弓部件配方退役，不引入燃料、电网、运输带或完整自动化工厂。
 
 | 阶段 | 建造 | 建议材料 | 结果 |
 | --- | --- | --- | --- |
@@ -73,7 +73,7 @@
 | 2 | 简易弹弓 | 木桩 + 植物纤维弦 | 发射红鸟与黄鸟；桩距决定基础射程。 |
 | 3 | 熔炉 | 石料 + 木材 | 加工金属部件和强化组件。 |
 | 4 | 强化弹弓 | 金属桩 + 强化弹弦 | 发射黑鸟，并显示卫星引力走廊弹道。 |
-| 5 | 钢铁太空弹弓 | 熔炼部件 + 晶体核心 + 木材 | 解锁终局集体发射。 |
+| 5 | 钢铁太空弹弓 | 两根太空弹弓桩 + 一根太空弹弓弦 | 只能装入 LaunchSite 唯一专用槽，解锁终局集体发射。 |
 
 首轮试玩的目标通关时间为 10 至 15 分钟；具体数量在试玩后调整。
 
@@ -201,7 +201,7 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | 对象 | 默认表示 | 交互时变化 |
 | --- | --- | --- |
 | 草、装饰石、远景建筑 | HISM/静态网格，无碰撞或简易阻挡 | 不变。 |
-| 当前目标建筑 | 模块化静态/刚体混合，弱点可见 | 撞击时激活有限刚体和连锁装置。 |
+| 当前目标建筑 | DAG Plate/Column 以落座冻结态显示，主承重柱可读 | 撞击时激活有限刚体并进入材料损伤、坍塌和回收链。 |
 | 建筑材料货仓 | 建筑内部逻辑库存与可见容器 | 关键承重/触发条件满足后暴露并自动回收。 |
 | 小型视觉碎块 | Instanced/Actor 混合 | 计时清理；不决定材料库存。 |
 
@@ -249,28 +249,30 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | ---: | --- | --- |
 | M1 | 独立入口 | 新地图、GameMode、第三人称绯翼、基础 HUD 可启动；不加载旧回合 Gameplay。 |
 | M2 | 球面环境 | `CellTopo Sub=5` 与 `Continuous Surface Sub=7` 可生成、可碰撞、可行走。 |
-| M3 | 主路 PCG | 基于 CellTopo 生成主路、道路距离场、水网/桥址、弹弓槽和一座道路外目标建筑；生成日志验证目标位置与可攻击性。 |
+| M3 | 主路 PCG | 基于 CellTopo 生成主路、道路距离场、水网/桥址、弹弓槽，以及道路外目标建筑的 Anchor/施工台；建筑 Actor 由下游 M7 DAG2.3 生成。 |
 | M4 | 鸟群 | 四鸟可见；Tab/HUD 切换；蓝鸟树枝近射、红/黄简易弹弓、黑鸟强化弹弓的入口与限制明确。 |
 | M5 | 加工与组件 | 共享物品栏、背包/加工界面、红鸟加工权限、附近工作台/熔炉配方和制作数量流程已实现；正式站点放置、拾取与弹弓组件表现进入 M5.1。详见 [M5InventoryCraftingImplementationDesign.md](M5InventoryCraftingImplementationDesign.md)。 |
 | M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 弹弓槽和桩/弦两次点击装配。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
 | M6 | 弹弓、发射与碰撞 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。已连接弹弓进入瞄准/拉伸/万有引力预测/发射闭环；HISM 按命中提升动态代理并支持连锁破坏，黑鸟支持手动/延时爆炸，落地静默后物体冻结与队伍回归。玩法见 [M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)，双弦、弹珠袋和模型协议见 [M6SlingshotVisualPresentationDesign.md](M6SlingshotVisualPresentationDesign.md)。 |
-| M7 | 建筑生成与破坏 | 木/石/铁/玻璃砖、绳/链、炸药桶和弹簧活塞已具备参数化材料层；材质 Profile 驱动 Chaos 摩擦、弹性、密度、推动传递与累计损伤。进入发射阶段后建筑块统一参与平面/球面重力，下层支撑失效会使上层自然坠落，返回阶段冻结并保留最终姿态。详见 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md)；后续模块化建筑采用“结构语法 + 支撑图 + 稳定性预模拟 + 弱点攻击验证 + 搜索筛选”，调研与 M7.3 算法见 [M73ProceduralModularBuildingGenerationResearch.md](M73ProceduralModularBuildingGenerationResearch.md)。 |
+| M7 | 建筑生成与破坏 | 木/石/铁/玻璃材质 Profile 驱动 Chaos 摩擦、弹性、密度、推动传递与累计损伤。TaskGraph 三类普通建筑已由 M7 Resolver 接入 M7.3-DAG2.3；M3 只提供 Anchor/Pad。M7 显式登记必需 Actor 集合，每栋 Actor 独占 IdleValidation/Freeze；M6 只在数量相符、Setup 未拒绝且全部 Actor 通过时发布 WorldReady。详见 [M7 球面集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。 |
 | M7.1 | 平面物理测试台 | 独立平面 GameMode、可摆放 Floor/PlayerStart、树石 HISM、四材质砖、四档完整弹弓和模块化建筑锚点；支持编辑器实时变换、平面 Chaos 移动与恒向重力弹射。详见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。 |
 | M8 | 自动回收与桥梁 | M7 砖块在真实破坏时直接回收到共享背包；`CellTopo` 的 `bBlocksOnFoot` 水边生成空气墙，只有消耗桥梁组件并放置在 `BridgeSite` 边上才会打开通路。详见 [M8AutoRecoveryAndBridgesDesign.md](M8AutoRecoveryAndBridgesDesign.md)。 |
-| M7.3-A | 稳定积木建筑 | 三种确定性轮廓、平面/球面统一 Ground Adapter、Footprint 校验、平坦施工台、地基脚、支撑 DAG、静态校验和短时 Chaos 空载验证；可在 M7.1 放置并击打，也可在首个球面建筑 Anchor 生成。详见 [M73AStableBlockBuildingImplementationDesign.md](M73AStableBlockBuildingImplementationDesign.md)。 |
-| M7.3-B | 弱点与难度 | 对支撑 DAG 逐节点执行 Ground 可达性反事实探针，按真实材质密度计算失撑质量，以攻击方向暴露度和 M7 Profile 破坏成本选择弱点；支持非弱点有限强化、红色编辑器高亮、难度窗口与确定性自动化测试。详见 [M73BWeakPointAndDifficultyDesign.md](M73BWeakPointAndDifficultyDesign.md)。 |
-| M7.3-B2 | 结构弱点与失效验证 | 在最终支撑图建立前合成关键角、非对称双支撑和偏置接缝三种无装置弱点，以 Contact Hull、载荷 COM、`TipMargin` 和 `ReseatRisk` 同时保证完整时稳定、破坏后倾覆且不易原位承接。详见 [M73B2StructuralWeaknessAndFailureValidationDesign.md](M73B2StructuralWeaknessAndFailureValidationDesign.md)。 |
-| M7.3-DAG | 递归主体承载图 PCG | 新路线以轮廓 Macro DAG 为低频骨架，通过串联/并联规则递归细分，再编译为砖块并从真实碰撞反建 Contact DAG；弱点从主体中下部 Failure Frontier 推导，以主体受影响质量、旁路、倾覆/滑移和 Chaos 反事实验证，解决 B2 只让顶部冠段掉落的问题。旧 A/B/B2 保留为 Legacy 对照。详见 [M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。 |
-| M7.3-DAG-1 | 纯数据递归语法 | 已建立独塔、拱门、双塔桥基准表达式，Series/Parallel 与并联策略，路径级确定性递归、抽象/砖块预估预算终止、Macro 支撑 DAG、Ground/Top frontier、规范表达式/拓扑 Hash 和纯数据自动化测试；不接 Actor、砖块或 Chaos，不改变 Legacy 地图行为。详见 [M73DAG1RecursiveGrammarImplementationDesign.md](M73DAG1RecursiveGrammarImplementationDesign.md)。 |
-| M7.3-DAG-2 | 空间布局与模块编译 | 将 DAG-1 Macro 编译为递归 Scope 中不重叠的水平 Plate，并从可行投影候选中选择稀疏 Logical Support，降低为可审计的物理支撑；由最终碰撞盒反建 Realized Contact DAG 并审计缺失接触/非预期旁路。复用 M7.3-A 的预览、Ground Adapter 和 Chaos 装配；不执行 Legacy 顶冠弱点。代码与自动化通过，待 M7.1/球面手工验收。详见 [M73DAG2SpatialLayoutAndModuleCompilationDesign.md](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。 |
-| M7.3-DAG-2.1 | 支撑模式与轻量化 | 每条 Logical Support 可降低为两柱线、三柱三脚架或四柱角点支撑；接触区域以真实凸包校验而非 AABB，Pattern 与 Column Node 映射保留给 DAG-3 弱点搜索。默认三柱、56cm 柱、40cm 板，待 M7.1/球面视觉与 Chaos 验收。详见 [M73DAG21SupportPatternsDesign.md](M73DAG21SupportPatternsDesign.md)。 |
+| M7.3-A | Legacy 稳定建筑基础 | 固定层轮廓与旧 Ground/Idle 基线已完成；GroundAdapter、StructureData、Runtime Module 和 IdleValidation 继续被 DAG 复用。其 `LegacyLayeredAB2` 生成器已退出 TaskGraph 生产，仅保留历史诊断。详见 [M73A](M73AStableBlockBuildingImplementationDesign.md)。 |
+| M7.3-B/B2 | Legacy 弱点对照 | 旧图选点与顶部 Carrier/Payload 失效仍保留为历史自动化证据，但不参与现行 TaskGraph 生成或验收，也不能作为 DAG Reject 的回退。详见 [M73B](M73BWeakPointAndDifficultyDesign.md)与 [M73B2](M73B2StructuralWeaknessAndFailureValidationDesign.md)。 |
+| M7.3-DAG | 递归主体承载图 PCG | 现行路线以 Macro DAG 为骨架，通过 Series/Parallel 编译 Plate/Column 并从真实碰撞反建 Contact DAG。DAG2.3 已进入生产；内部 Failure Frontier/弱点仍属于 DAG-3。详见 [总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。 |
+| M7.3-DAG-1 | 纯数据递归语法 | 已建立独塔、拱门、双塔桥基准表达式、路径级确定性递归、预算终止、Macro 支撑 DAG 和拓扑 Hash；现由 DAG-2/2.3 编译后进入生产 Actor。详见 [DAG-1](M73DAG1RecursiveGrammarImplementationDesign.md)。 |
+| M7.3-DAG-2 | 空间布局与模块编译 | 将 DAG-1 Macro 降低为 Plate/Column 与 Realized Contact DAG，复用 GroundAdapter 和 Chaos 装配；已经由 DAG2.3 扩展并接管球面 TaskGraph。详见 [DAG-2](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。 |
+| M7.3-DAG-2.1 | 支撑模式与轻量化 | Logical Support 可降低为两柱线、三柱三脚架或四柱角点支撑，以真实凸包校验；现行生产默认三柱、56cm 柱、40cm 板。详见 [DAG2.1](M73DAG21SupportPatternsDesign.md)。 |
+| M7.3-DAG-2.2 | 自适应几何 | 对窄 Parallel 分支和宽板自适应 Plate/Column 尺寸与数量，避免用非法旁路伪造支撑；已成为生产编译链一部分。详见 [DAG2.2](M73DAG22AdaptiveGeometryDesign.md)。 |
+| M7.3-DAG-2.3 | 累计荷载与联合支撑 | 从高到低传播累计质量/一阶力矩，以联合柱脚凸包覆盖合力点。现行 Target 使用 Budget=0 TwinTowerBridge，确保 Parallel 联合支撑进入生产；自动化与两次球面冷启动通过，待可见击打验收。详见 [DAG2.3](M73DAG23CumulativeLoadAndJointSupportDesign.md)。 |
 | M8 | 自动回收与桥梁 | 发射鸟自动回收暴露材料；以回收木材建桥，水网和道路边状态正确更新。 |
-| M9 | 卫星与强化弹弓 | 生成一颗 `CellTopo Sub=2`、渲染 `Sub=4` 的纯灰卫星；以最终 `LaunchSite` 的 CellTopo Seed 锚定，局部逆平方引力叠加到鸟体与预览弹道。详见 [M9SatelliteGravityDesign.md](M9SatelliteGravityDesign.md)。 |
+| M9 | 卫星与强化弹弓 | 生成一颗 `CellTopo Sub=2`、渲染 `Sub=4` 的纯灰卫星；以 `SatelliteWindow` Seed 锚定，局部逆平方引力叠加到鸟体与预览弹道。M3 V3 保证它远离 LaunchSite 且与终局双桩轴近似共线；M11 数据端明确排除该卫星。详见 [M9SatelliteGravityDesign.md](M9SatelliteGravityDesign.md)。 |
 | M10 | 青翎侦察小地图 | 树枝与植物纤维在弹弓槽装配 Twig 弹弓，仅青翎可发射；完整发射结束后以最终落点固化球面侦察圆盘，显示 SDF 地形、道路、河网、树石、建筑和四鸟位置，并持续跟踪 Chaos 位移与破坏。详见 [M10ScoutMinimapDesign.md](M10ScoutMinimapDesign.md)。 |
 | M10.1 | 道路外目标与引力走廊 | 强化弹弓 Pulling 时以三层视图辅助超视距发射：保留弹弓近端主视图；侦察范围内的预测落点启用远端落点画中画；轨迹足够长或落点离开主视距时自动显示左下圆形轨道全景图。M10.1-A/B/C 初版均已完成 PIE 验收；C 已实现整条轨迹的最佳拟合平面、正交投影与凸包自适应取景，使弹弓固定在图左侧，并以理想主星的世界绝对经纬网、无经纬网卫星以及球后虚线/可见实线解释空间偏转。通用目标选择与走廊 M10.1-D 延期。详见 [M10.1 总设计](M101BeyondHorizonLaunchInterfaceDesign.md)与 [M10.1-C 实现详稿](M101COrbitalOverviewDiagramDesign.md)。 |
-| M11 | 三重引力弹弓终局 | 收集并装配太空弹弓后，在手工布置、位置固定的终局场景中通过三颗静止行星依次偏转、增能并命中 UFO，救出 `BP_Cute_Bird_0` 白色小鸟。首版推荐同一 World 的锁定终局层以保留库存与 Party；独立地图必须先有入口快照。算法预演已完成，推荐“中心天体束缚 + 自然偏转 + 虚拟公转动量 + B-plane 走廊 + 预演/实飞同源求解器”；当前待确认，尚未实施。详见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。 |
+| M11.0 | 终局前置收口 | LaunchSite 不生成玻璃建筑，只生成一对 Space-only 槽；拆分太空桩/弦配方；将 M9 卫星远置为强化练习；导出终局局部坐标系和只含主星+三助推行星的纯数据边界。代码、编译、自动化与固定 Seed 独立进程基线完成，待 PIE 视觉/交互验收。详见 [M11.0](M110PreFinaleClosureDesign.md)。 |
+| M11 | 三重引力弹弓终局 | 收集并装配两根太空桩和一根太空弦后，在同一 Task Graph World 中从局部布局预设生成三颗静止助推行星与 UFO。玩家开放 `Yaw × Pitch × Power`，通过前缀成功集稳定器找到唯一连通路径族；四鸟沿同一预计算轨迹编队飞行，命中后救出 `BP_Cute_Bird_0`。全输入域唯一性是正式验收门槛；M11 本体尚未实施。详见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。 |
 
-初版演示顺序：展示固定 Seed 生成的主路、河网、桥址、道路外建筑、弹弓槽与卫星；青翎从树枝槽近射侦察并标记目标；玩家收集保底树枝/石料，在工作台加工两桩与弹弦；组装简易弹弓并发射红鸟或黄鸟击中建筑弱点；建筑的模块与装置连锁坍塌，发射鸟自动回收材料；以木材修桥或加工强化部件；展示卫星引力走廊使强化发射偏转；完成钢铁太空弹弓；在固定终局场景中依次完成三次引力弹弓并命中 UFO，救出白色小鸟。
+初版演示顺序：展示固定 Seed 生成的主路、河网、桥址、道路外建筑、弹弓槽与卫星；青翎从树枝槽近射侦察并标记目标；玩家收集保底树枝/石料，在工作台加工两桩与弹弦；组装简易弹弓并发射红鸟或黄鸟击中 DAG 建筑的可读主承重柱；建筑模块连锁坍塌，发射鸟自动回收材料；以木材修桥或加工强化部件；在 `SatelliteWindow` 展示卫星引力偏转；加工两根太空桩和一根太空弦，在无建筑 LaunchSite 完成钢铁太空弹弓；由局部预设生成终局三行星并依次完成三次引力弹弓，命中 UFO、救出白色小鸟。
 
 中期不要求完成昼夜、天气、大规模 HISM 装饰。
 

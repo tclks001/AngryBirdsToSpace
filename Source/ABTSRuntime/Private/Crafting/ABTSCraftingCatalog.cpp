@@ -31,12 +31,46 @@ namespace
 		for (const FABTSCraftingIngredient& Value : Ingredients) Result.Ingredients.Add(Value);
 		return Result;
 	}
+
+	FABTSCraftingRecipe SpaceStakePairRecipe()
+	{
+		return Recipe(
+			TEXT("SpaceStakePair"),
+			TEXT("Space Slingshot Stakes (Pair)"),
+			EABTSItemId::SpaceStake,
+			2,
+			EABTSCraftingStationType::Furnace,
+			{ Ingredient(EABTSItemId::MetalParts, 6), Ingredient(EABTSItemId::Wood, 5) });
+	}
+
+	FABTSCraftingRecipe SpaceCordRecipe()
+	{
+		return Recipe(
+			TEXT("SpaceCord"),
+			TEXT("Space Slingshot Cord"),
+			EABTSItemId::SpaceCord,
+			1,
+			EABTSCraftingStationType::Furnace,
+			{ Ingredient(EABTSItemId::MetalParts, 2), Ingredient(EABTSItemId::CrystalCore, 1) });
+	}
+
+	bool IsRetiredSpaceSlingshotRecipe(const FABTSCraftingRecipe& Value)
+	{
+		return Value.RecipeId == FName(TEXT("SpaceSlingshotPart"))
+			|| Value.OutputItem == EABTSItemId::SpaceSlingshotPart;
+	}
 }
 
 UABTSCraftingCatalog::UABTSCraftingCatalog()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	BuildDefaultRecipes();
+}
+
+void UABTSCraftingCatalog::OnRegister()
+{
+	Super::OnRegister();
+	NormalizeSpaceSlingshotRecipes();
 }
 
 void UABTSCraftingCatalog::BuildDefaultRecipes()
@@ -57,14 +91,39 @@ void UABTSCraftingCatalog::BuildDefaultRecipes()
 			{ Ingredient(EABTSItemId::MetalParts, 4), Ingredient(EABTSItemId::Stone, 3) }),
 		Recipe(TEXT("ReinforcedCord"), TEXT("Reinforced Cord"), EABTSItemId::ReinforcedCord, 1, EABTSCraftingStationType::Furnace,
 			{ Ingredient(EABTSItemId::MetalParts, 2), Ingredient(EABTSItemId::PlantFiber, 4) }),
-		Recipe(TEXT("SpaceSlingshotPart"), TEXT("Space Slingshot Part"), EABTSItemId::SpaceSlingshotPart, 1, EABTSCraftingStationType::Furnace,
-			{ Ingredient(EABTSItemId::MetalParts, 8), Ingredient(EABTSItemId::CrystalCore, 1), Ingredient(EABTSItemId::Wood, 5) })
+		SpaceStakePairRecipe(),
+		SpaceCordRecipe()
 	};
+}
+
+void UABTSCraftingCatalog::NormalizeSpaceSlingshotRecipes()
+{
+	Recipes.RemoveAll([](const FABTSCraftingRecipe& Value)
+	{
+		return IsRetiredSpaceSlingshotRecipe(Value);
+	});
+	if (!Recipes.ContainsByPredicate([](const FABTSCraftingRecipe& Value)
+	{
+		return Value.OutputItem == EABTSItemId::SpaceStake;
+	}))
+	{
+		Recipes.Add(SpaceStakePairRecipe());
+	}
+	if (!Recipes.ContainsByPredicate([](const FABTSCraftingRecipe& Value)
+	{
+		return Value.OutputItem == EABTSItemId::SpaceCord;
+	}))
+	{
+		Recipes.Add(SpaceCordRecipe());
+	}
 }
 
 const FABTSCraftingRecipe* UABTSCraftingCatalog::FindRecipe(const FName RecipeId) const
 {
-	return Recipes.FindByPredicate([RecipeId](const FABTSCraftingRecipe& Value) { return Value.RecipeId == RecipeId; });
+	return Recipes.FindByPredicate([RecipeId](const FABTSCraftingRecipe& Value)
+	{
+		return Value.RecipeId == RecipeId && !IsRetiredSpaceSlingshotRecipe(Value);
+	});
 }
 
 FABTSCraftingEvaluation UABTSCraftingCatalog::Evaluate(

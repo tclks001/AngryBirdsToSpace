@@ -4,7 +4,7 @@
 >
 > 本阶段只实现共享库存、配方规则、附近站点检测、红鸟加工权限和 UI。地图物品刷新、拾取、工作台/熔炉放置、弹弓槽/桩/弦表现均属于 M5.1。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [UI 系统](UISystemDesign.md) · [M4 小队头像 HUD](M4BirdPartyImplementationDesign.md) · [M5.1 世界物品与装配](M51WorldItemsPlacementSlingshotDesign.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [UI 系统](UISystemDesign.md) · [M4 小队头像 HUD](M4BirdPartyImplementationDesign.md) · [M5.1 世界物品与装配](M51WorldItemsPlacementSlingshotDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)
 
 ## 1. 阶段验收目标
 
@@ -62,16 +62,19 @@ M5 初期曾由 `ABTSCraftingSystem` 注入以下测试库存；M5.1 已取消�
 | 熔炉组件 | 工作台 | 石料 8、木材 4 |
 | 强化弹弓桩 | 熔炉 | 金属部件 4、石料 3 |
 | 强化弹弓弦 | 熔炉 | 金属部件 2、植物纤维 4 |
-| 太空弹弓部件 | 熔炉 | 金属部件 8、晶体核心 1、木材 5 |
+| 太空弹弓桩（一次产出 2 根） | 熔炉 | 金属部件 6、木材 5 |
+| 太空弹弓弦 | 熔炉 | 金属部件 2、晶体核心 1 |
 
-配方为当前纵向切片测试值，后续可数据化调参；简易弹弓仍遵守核心约束，以树枝/石料体系为主，不要求先从目标建筑取得木材。
+配方为当前纵向切片测试值，后续可数据化调参；简易弹弓仍遵守核心约束，以树枝/石料体系为主，不要求先从目标建筑取得木材。`SpaceStakePair + SpaceCord` 合计仍消耗金属部件 8、木材 5、晶体核心 1，与退役的一体式太空弹弓部件总预算相同。
+
+旧 `EABTSItemId::SpaceSlingshotPart` 只保留隐藏枚举值以兼容历史序列化，不再进入默认物品目录和配方目录，`FindRecipe/Craft` 也不得继续接受旧配方。现行枚举、配方 ID 和世界装配合同见 [M11.0](M110PreFinaleClosureDesign.md#5-太空桩太空弦和配方迁移)。
 
 ## 5. 操作与视觉验收
 
 1. 启动 PIE，日志应出现：
 
 ```text
-[ABTS][M5][Inventory] Ready Stacks=0 Hotbar=8 Recipes=7 PrototypeSeed=0
+[ABTS][M5][Inventory] Ready Stacks=0 Hotbar=8 Recipes=8 PrototypeSeed=0
 [ABTS][M5] Entry ready=1 StartCell=...
 ```
 
@@ -79,7 +82,7 @@ M5 初期曾由 `ABTSCraftingSystem` 注入以下测试库存；M5.1 已取消�
 3. 点击快捷栏或按 K，界面打开，鸟和相机不再响应移动/Orbit 输入。
 4. 红鸟主控且靠近工作台时，工作台组件、简易桩、简易弦应排在可制作区域。
 5. 熔炉组件因木材不足进入缺材料区域。
-6. 开局工作台和熔炉都在范围内；强化组件与太空部件应只因材料不足而进入缺材料区域。M5.1 的正式站点放置后可通过远离熔炉验收缺站点区域。
+6. 开局工作台和熔炉都在范围内；强化组件、太空桩和太空弦应只因材料不足而进入缺材料区域。M5.1 的正式站点放置后可通过远离熔炉验收缺站点区域。
 7. Hover 熔炉组件应提示缺少木材；点击后该行短暂闪红。
 8. 点击简易弹弓桩，数量初始为 1；`++` 不得超过最大制作量，`--` 不得低于 0。
 9. 数量大于 0 时点击 CRAFT，材料减少、产物加入背包；若快捷栏有空位，产物填入最左侧空位。

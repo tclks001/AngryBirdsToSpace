@@ -14,3 +14,20 @@ enum class EABTSSlingshotTier : uint8
 	Reinforced UMETA(DisplayName = "Reinforced Slingshot"),
 	Space UMETA(DisplayName = "Space Slingshot")
 };
+
+/** Logical installation contract of a terrain slot, independent from its visual mesh. */
+UENUM(BlueprintType)
+enum class EABTSSlingshotSlotKind : uint8
+{
+	Standard UMETA(DisplayName = "Standard Slingshot Slot"),
+	FinaleSpace UMETA(DisplayName = "Finale Space Slingshot Slot")
+};
+
+/** Stable identity inside the unique terminal slot pair. */
+UENUM(BlueprintType)
+enum class EABTSSlingshotSlotSide : uint8
+{
+	None,
+	Left,
+	Right
+};

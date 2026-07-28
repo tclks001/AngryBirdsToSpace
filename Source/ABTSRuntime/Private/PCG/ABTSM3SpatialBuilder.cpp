@@ -24,6 +24,34 @@ int32 FindNearestCell(const TArray<FABTSM2Cell>& Cells, const FVector& Direction
 	return BestCell;
 }
 
+int32 FindNearestSeparatedCell(
+	const TArray<FABTSM2Cell>& Cells,
+	const FVector& DesiredDirection,
+	const FVector& SeparationOriginDirection,
+	const float MinimumSeparationDegrees,
+	const TSet<int32>& ExcludedCells)
+{
+	const float MaximumOriginDot = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(MinimumSeparationDegrees, 0.0f, 179.0f)));
+	int32 BestCell = INDEX_NONE;
+	float BestDesiredDot = -2.0f;
+	for (int32 CellId = 0; CellId < Cells.Num(); ++CellId)
+	{
+		if (ExcludedCells.Contains(CellId)
+			|| FVector::DotProduct(Cells[CellId].UnitCenter, SeparationOriginDirection) > MaximumOriginDot)
+		{
+			continue;
+		}
+		const float DesiredDot = FVector::DotProduct(Cells[CellId].UnitCenter, DesiredDirection);
+		if (DesiredDot > BestDesiredDot)
+		{
+			BestDesiredDot = DesiredDot;
+			BestCell = CellId;
+		}
+	}
+	return BestCell;
+}
+
 EABTSM3TerrainType TerrainForTask(const EABTSM3TaskType Type)
 {
 	for (const FTaskSpec& Spec : GetTaskSpecs()) if (Spec.Type == Type) return Spec.Terrain;
@@ -34,6 +62,7 @@ EABTSM3TerrainType TerrainForTask(const EABTSM3TaskType Type)
 bool FSpatialBuilder::PlaceTaskSeeds(
 	const int32 WorldSeed,
 	const int32 AttemptIndex,
+	const float MinSatelliteLaunchAngularSeparationDegrees,
 	const TArray<FABTSM2Cell>& Cells,
 	TArray<FABTSM3TaskNode>& Tasks) const
 {
@@ -62,8 +91,18 @@ bool FSpatialBuilder::PlaceTaskSeeds(
 	const FVector ScoutDirection = (BranchOrigin * 0.92f + BranchSide * 0.42f).GetSafeNormal();
 	const FVector SatelliteDirection = (ScoutDirection * 0.86f + BranchSide * 0.52f + TangentX * 0.12f).GetSafeNormal();
 	Tasks[7].SeedCellId = FindNearestCell(Cells, ScoutDirection);
-	Tasks[8].SeedCellId = FindNearestCell(Cells, SatelliteDirection);
-	if (Used.Contains(Tasks[7].SeedCellId) || Used.Contains(Tasks[8].SeedCellId) || Tasks[7].SeedCellId == Tasks[8].SeedCellId) return false;
+	if (Used.Contains(Tasks[7].SeedCellId)) return false;
+	Used.Add(Tasks[7].SeedCellId);
+	Tasks[8].SeedCellId = FindNearestSeparatedCell(
+		Cells,
+		SatelliteDirection,
+		Cells[Tasks[6].SeedCellId].UnitCenter,
+		// The LaunchSite pad may move from its Task seed to a nearby certified
+		// buildable Cell. Keep a small deterministic margin so the validator can
+		// still certify the final anchor against the public minimum.
+		FMath::Min(179.0f, MinSatelliteLaunchAngularSeparationDegrees + 5.0f),
+		Used);
+	if (!Cells.IsValidIndex(Tasks[8].SeedCellId)) return false;
 	return true;
 }
 

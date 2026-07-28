@@ -18,7 +18,17 @@ class UStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 
-/** Editor-placeable M7.3 stable building with deterministic weak-point planning. */
+/** Explicit ownership state used by M6 startup warmup when waiting for M7.3. */
+enum class EABTSM73IdleValidationState : uint8
+{
+	Pending,
+	Running,
+	Accepted,
+	Rejected,
+	NotRequired
+};
+
+/** Editor-placeable M7.3 building; TaskGraph production resolves through DAG2.3. */
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "M7.3 Stable Building Generator"))
 class ABTSRUNTIME_API AABTSM73StableBuildingActor : public AActor
 {
@@ -33,7 +43,7 @@ public:
 	/** M7.1 GameMode calls this after creating its shared M7 material system. */
 	void InitializeRuntimeBuilding(AABTSM7BuildingMaterialSystem* MaterialSystem);
 
-	/** Used by a future TaskGraph spawner; the anchor remains a CellTopo id. */
+	/** TaskGraph spawner keeps the authoritative terrain anchor as a CellTopo id. */
 	void ConfigureSphericalAnchor(AABTSM3Planet* Planet, int32 CellId, const FTransform& DesiredFacing);
 
 	/** Applies a TaskGraph-owned profile before FinishSpawning constructs the runtime building. */
@@ -48,6 +58,14 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M7.3-A")
 	const FABTSM73GenerationSummary& GetGenerationSummary() const { return GenerationSummary; }
+
+	EABTSM73IdleValidationState GetIdleValidationState() const { return IdleValidationState; }
+	bool IsIdleValidationTerminal() const
+	{
+		return IdleValidationState == EABTSM73IdleValidationState::Accepted
+			|| IdleValidationState == EABTSM73IdleValidationState::Rejected
+			|| IdleValidationState == EABTSM73IdleValidationState::NotRequired;
+	}
 
 	/** Live module centroid for one building-level M10 marker; false hides rejected or fully destroyed buildings. */
 	bool QueryScoutMapMarkerLocation(
@@ -135,6 +153,7 @@ private:
 	float IdleStableElapsed = 0.0f;
 	bool bRuntimeSpawned = false;
 	bool bIdleValidationRunning = false;
+	EABTSM73IdleValidationState IdleValidationState = EABTSM73IdleValidationState::Pending;
 	bool bRuntimePlanar = true;
 	FVector RuntimeGravityReference = FVector::UpVector;
 };

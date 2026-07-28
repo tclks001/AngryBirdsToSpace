@@ -25,9 +25,12 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9")
 	TSubclassOf<AABTSM9Satellite> SatelliteClass;
 
-	/** The default LaunchSite is the final main-path Task in the current TaskGraph. */
+	/**
+	 * Legacy property name retained for serialized Blueprint compatibility.
+	 * M11.0 requires SatelliteWindow; runtime ignores a stale LaunchSite override.
+	 */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M9|Placement")
-	EABTSM3TaskType FinalAnchorTaskType = EABTSM3TaskType::LaunchSite;
+	EABTSM3TaskType FinalAnchorTaskType = EABTSM3TaskType::SatelliteWindow;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M9|Placement", meta = (ClampMin = "0.02", ClampMax = "0.5"))
 	float SatelliteRadiusPrimaryRatio = 0.125f;
@@ -35,6 +38,16 @@ private:
 	/** Satellite centre's clearance above the primary terrain at the final Task seed. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M9|Placement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SatelliteCenterClearancePrimaryRadiusRatio = 0.125f;
+
+	/** Runtime distance guard between the M11 finale slots and the M9 practice satellite. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11.0|Finale Closure",
+		meta = (ClampMin = "0.25", ClampMax = "2.0", UIMin = "0.5", UIMax = "1.25"))
+	float MinFinaleSatelliteDistancePrimaryRadiusRatio = 0.80f;
+
+	/** Satellite tangent projection must remain on the finale slot-pair (+Y) axis. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11.0|Finale Closure",
+		meta = (ClampMin = "0.9", ClampMax = "1.0", UIMin = "0.95", UIMax = "1.0"))
+	float MinFinaleSatelliteLateralAlignmentDot = 0.98f;
 
 	/** Satellite acceleration at its own surface relative to primary surface gravity (980cm/s²). */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M9|Gravity", meta = (ClampMin = "0.0", ClampMax = "4.0"))

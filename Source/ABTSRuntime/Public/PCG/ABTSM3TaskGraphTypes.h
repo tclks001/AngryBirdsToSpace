@@ -234,7 +234,7 @@ struct FABTSM3PCGConfig
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG", meta = (ClampMin = "1", ClampMax = "16"))
-	int32 MaxAttempts = 8;
+	int32 MaxAttempts = 16;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG", meta = (ClampMin = "80", ClampMax = "800"))
 	int32 TaskTargetCells = 280;
@@ -254,6 +254,16 @@ struct FABTSM3PCGConfig
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings", meta = (ClampMin = "1", ClampMax = "4"))
 	int32 BuildingPadClearanceRingCells = 2;
+
+	/**
+	 * Keeps the reinforced-slingshot satellite lesson away from the terminal
+	 * LaunchSite. The terminal slingshot still uses the SatelliteWindow direction
+	 * as its deterministic lateral axis, but the satellite itself must not sit
+	 * inside the finale launch neighbourhood.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
+		meta = (ClampMin = "20.0", ClampMax = "120.0", UIMin = "35.0", UIMax = "90.0", Units = "deg"))
+	float MinSatelliteLaunchAngularSeparationDegrees = 55.0f;
 };
 
 /**
@@ -284,7 +294,7 @@ struct FABTSM3PCGSummary
 	GENERATED_BODY()
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
-	int32 GeneratorVersion = 2;
+	int32 GeneratorVersion = 3;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	int32 AttemptIndex = INDEX_NONE;
@@ -309,6 +319,9 @@ struct FABTSM3PCGSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	bool bMainPathReachableAfterBridge = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure")
+	float SatelliteLaunchAngularSeparationDegrees = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	bool bAccepted = false;

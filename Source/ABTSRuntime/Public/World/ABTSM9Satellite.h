@@ -30,6 +30,14 @@ public:
 	FVector GetGravityAccelerationAt(const FVector& WorldLocation) const;
 	int32 GetAnchorCellId() const { return AnchorCellId; }
 	float GetSurfaceGravityAccelerationCMPerSec2() const { return SurfaceGravityAccelerationCMPerSec2; }
+	/**
+	 * M9 gravity is a UE runtime practice source only. The M11 solver accepts a
+	 * fixed primary-plus-three-body POD scenario and must never enumerate this Actor.
+	 */
+	bool IsM11FinaleGravitySource() const { return false; }
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Gravity Boundary")
+	bool bM11FinaleGravitySource = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M9|Gravity")
 	bool bGravityEnabled = true;

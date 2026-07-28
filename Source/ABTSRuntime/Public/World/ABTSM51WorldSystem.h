@@ -32,6 +32,7 @@ public:
 	bool InstallHeldStake(AABTSM51SlingshotDirtHole& Hole);
 	bool SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake);
 	AABTSCraftingSystem* FindCraftingSystem() const;
+	bool GetFinaleSpaceSlots(AABTSM51SlingshotDirtHole*& OutLeft, AABTSM51SlingshotDirtHole*& OutRight) const;
 	void SetDeveloperAnyCellStakePlacementEnabled(bool bEnabled) { bAllowDeveloperAnyCellStakePlacement = bEnabled; }
 
 private:
@@ -43,7 +44,6 @@ private:
 	int32 SelectPlacementCell(const FVector& UnitDirection) const;
 	int32 SelectDeveloperStakeCell(const FVector& UnitDirection) const;
 	bool IsCellOccupied(int32 CellId) const;
-	EABTSItemId ResolveStakeForCord(EABTSItemId CordItem) const;
 	void LogPlaceFailure(const TCHAR* Reason) const;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Pickup", meta = (ClampMin = "50.0", UIMax = "500.0"))
@@ -95,5 +95,7 @@ private:
 	TArray<TWeakObjectPtr<AABTSM51PickupItem>> Pickups;
 	TSet<int32> OccupiedCells;
 	TWeakObjectPtr<AABTSM51SlingshotStake> PendingCordStake;
+	TWeakObjectPtr<AABTSM51SlingshotDirtHole> FinaleLeftSlot;
+	TWeakObjectPtr<AABTSM51SlingshotDirtHole> FinaleRightSlot;
 	bool bInitialized = false;
 };

@@ -4,12 +4,12 @@
 >
 > 本阶段只实现基础物品刷新/自动拾取、手持栏、工作台/熔炉放置、弹弓槽、桩与弦的装配规则。真实资产、建筑模块和弹射行为仍属于后续阶段。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [UI 系统](UISystemDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md) · [M6 弹弓发射](M6SlingshotLaunchAndImpactDesign.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [UI 系统](UISystemDesign.md) · [M5.2 碰撞与移动](M52CollisionAndMovementDesign.md) · [M6 弹弓发射](M6SlingshotLaunchAndImpactDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)
 
 ## 1. 逻辑源约束
 
-- TaskGraph 的 `SlingshotRange` Task 决定弹弓槽所在区域。
-- 每个该 Task 使用 Seed Cell 和一个同 Task 的直接邻居 Cell 生成一对 DirtHole。
+- TaskGraph 的 `SlingshotRange` Task 决定普通弹弓槽所在区域；每个该 Task 使用 Seed Cell 和一个同 Task 的直接邻居 Cell 生成一对普通 DirtHole。
+- M11.0 起，唯一 `LaunchSite` 另生成且只生成一对 Space-only 槽；左右槽共享同一个认证 AnchorCell 和 PairId，在同一平整、非水、未占用施工台内以 `210cm` 世界中心距相邻摆放，不能由普通 `SlingshotRange` 数量推导。
 - 平地放置只接受 CellTopo 中 `bBuildable && !bWater && 未占用` 的 Cell，落点固定为 Cell 中心。
 - 连续球面只把 Cell 方向转换为可见位置和法线，不负责决定合法性。
 - 弹弓桩相邻使用两个 Cell 单位方向的球面夹角，不使用欧氏世界距离。
@@ -66,13 +66,15 @@ Eligible = SignedDistance <= BoundaryJitter
 
 - 简易/强化弹弓桩只能点击空 DirtHole 安装，不能点击普通地面自由放置。
 - M10 起，手持一个树枝点击空 DirtHole 会直接安装 `Twig` 树枝桩；它与简易桩是不同配对类型，不需要先加工。
-- DirtHole 记录 CellId 和已安装桩。
+- M11.0 起，`EABTSItemId::SpaceStake`（太空弹弓桩）只能安装到 `LaunchSite` 的 Space-only 槽；普通桩点击 Space-only 槽、太空桩点击普通槽都必须拒绝且不扣库存。
+- DirtHole 记录 CellId、槽类型和已安装桩；槽类型是 Gameplay 数据，不能从颜色、Actor 名称或所在位置反推。
 - 桩安装成功后扣除一个对应物品。
 
 ### 5.2 弦
 
 - 简易弦只能连接两个简易桩，强化弦只能连接两个强化桩。
 - M10 起，植物纤维作为 `Twig` 弦材料，只能连接两个树枝桩；仍沿用“先选第一桩、再点第二桩”的两次点击规则。
+- M11.0 起，`EABTSItemId::SpaceCord`（太空弹弓弦）只能连接同一 Space-only 槽对中的两根 `SpaceStake`；成功后生成 `EABTSSlingshotTier::Space`。
 - 玩家手持弦点击第一根桩时只记录选择，不消耗物品。
 - 点击第二根同类、未连接桩后，计算：
 
@@ -88,7 +90,7 @@ ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
 
 1. 复制 `L_ABTS_M5` 为 `L_ABTS_M51`，或直接在当前测试地图中切换 GameMode。
 2. World Settings 的 `GameMode Override` 设置为 `ABTSM51GameMode`。
-3. 不要手工放置工作台、熔炉、DirtHole 或拾取物。
+3. 不要手工放置工作台、熔炉、普通 DirtHole、Space-only 槽或拾取物。
 4. 保存并重新打开编辑器，以刷新新增 C++ 类与输入映射。
 5. 当前占位表现：拾取物为小球、DirtHole 为扁圆柱、桩为细长圆柱、弦为细长方条、站点为方块。
 
@@ -101,11 +103,12 @@ ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
 ```text
 [ABTS][M5][Inventory] ... PrototypeSeed=0
 [ABTS][M5.1][SlingshotSlots] Holes=2
+[ABTS][M11.0][SlingshotSlots] Standard=... Finale=2 Pair=... AnchorCell=...
 [ABTS][M5.1][PickupPCG] Spawned=... PatchRadiusRad=...
 [ABTS][M5.1] World ready ...
 ```
 
-地图有多个 SlingshotRange Task 时 DirtHole 数量为每 Task 两个。
+地图有多个 `SlingshotRange` Task 时普通 DirtHole 数量为每 Task 两个；除此之外，全图仍只能有一对由唯一 `LaunchSite` 生成的 Space-only 槽。
 
 ### 7.2 拾取与手持
 
@@ -123,6 +126,8 @@ ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
 5. 手持弦依次点击同类相邻两桩后生成连接条并消耗一根弦。
 6. 类型不同或角距过大时不生成也不消耗。
 7. 站点和弹弓占位物不应卡住角色移动。
+8. 太空桩只能安装到 Space-only 槽；普通桩与太空桩交叉尝试均拒绝且不扣库存。
+9. 两根太空桩只能由一根太空弦连接，完成后弹弓档位为 `Space`，且不能生成第二套终局弹弓。
 
 ## 8. 资产接入接口
 
@@ -135,3 +140,5 @@ ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
 - `CraftingStationClass`
 
 所有正式模型必须检查 Pivot、局部 +Z/前向、Visibility 点击碰撞与 Pawn 响应。
+
+`LaunchSite` 槽对、太空桩/弦配方、局部坐标系及 M11 门控的完整现行合同见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。

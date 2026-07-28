@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Slingshot/ABTSSlingshotTypes.h"
 #include "ABTSInventoryTypes.generated.h"
 
 UENUM(BlueprintType)
@@ -20,9 +21,12 @@ enum class EABTSItemId : uint8
 	FurnaceKit UMETA(DisplayName = "熔炉组件"),
 	ReinforcedStake UMETA(DisplayName = "强化弹弓桩"),
 	ReinforcedCord UMETA(DisplayName = "强化弹弓弦"),
-	SpaceSlingshotPart UMETA(DisplayName = "太空弹弓部件"),
+	/** Retained only so existing serialized enum values remain readable. No recipe or assembly path consumes it. */
+	SpaceSlingshotPart UMETA(Hidden, DisplayName = "已弃用：太空弹弓部件"),
 	Glass UMETA(DisplayName = "玻璃"),
-	BridgeKit UMETA(DisplayName = "桥梁组件")
+	BridgeKit UMETA(DisplayName = "桥梁组件"),
+	SpaceStake UMETA(DisplayName = "太空弹弓桩"),
+	SpaceCord UMETA(DisplayName = "太空弹弓弦")
 };
 
 USTRUCT(BlueprintType)
@@ -59,4 +63,11 @@ ABTSRUNTIME_API bool ABTSIsPlaceableTool(EABTSItemId ItemId);
 ABTSRUNTIME_API bool ABTSIsBridgeKit(EABTSItemId ItemId);
 ABTSRUNTIME_API bool ABTSIsSlingshotStake(EABTSItemId ItemId);
 ABTSRUNTIME_API bool ABTSIsSlingshotCord(EABTSItemId ItemId);
+/** Resolves the gameplay tier shared by inventory stake/cord parts. Returns false for non-slingshot items. */
+ABTSRUNTIME_API bool ABTSTryResolveSlingshotPartTier(EABTSItemId ItemId, EABTSSlingshotTier& OutTier);
+/** Stable assembly contract: one recognized stake and one recognized cord must resolve to the same tier. */
+ABTSRUNTIME_API bool ABTSAreSlingshotPartsCompatible(
+	EABTSItemId StakeItem,
+	EABTSItemId CordItem,
+	EABTSSlingshotTier& OutTier);
 ABTSRUNTIME_API const TArray<EABTSItemId>& ABTSGetAllItemIds();

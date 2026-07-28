@@ -50,6 +50,7 @@ bool FWorldValidator::Validate(
 	const TArray<FABTSM3CellState>& CellStates,
 	const TArray<FABTSM3CellEdgeState>& EdgeStates,
 	const FABTSM3CellEdgeKey& BridgeEdge,
+	const float MinSatelliteLaunchAngularSeparationDegrees,
 	FABTSM3PCGSummary& Summary,
 	FString& OutFailure) const
 {
@@ -80,9 +81,36 @@ bool FWorldValidator::Validate(
 	const int32 TargetIndex = FindTaskIndexByType(Tasks, EABTSM3TaskType::TargetBuilding);
 	const int32 FurnaceIndex = FindTaskIndexByType(Tasks, EABTSM3TaskType::FurnaceRuins);
 	const int32 LaunchIndex = FindTaskIndexByType(Tasks, EABTSM3TaskType::LaunchSite);
-	if (StartIndex == INDEX_NONE || WorkshopIndex == INDEX_NONE || TargetIndex == INDEX_NONE || FurnaceIndex == INDEX_NONE || LaunchIndex == INDEX_NONE)
+	const int32 SatelliteWindowIndex = FindTaskIndexByType(Tasks, EABTSM3TaskType::SatelliteWindow);
+	if (StartIndex == INDEX_NONE || WorkshopIndex == INDEX_NONE || TargetIndex == INDEX_NONE || FurnaceIndex == INDEX_NONE
+		|| LaunchIndex == INDEX_NONE || SatelliteWindowIndex == INDEX_NONE)
 	{
 		OutFailure = TEXT("MissingRequiredTask");
+		return false;
+	}
+	int32 LaunchAnchorCellId = Tasks[LaunchIndex].SeedCellId;
+	for (int32 CellId = 0; CellId < CellStates.Num(); ++CellId)
+	{
+		if (CellStates[CellId].bBuildingAnchor
+			&& CellStates[CellId].TaskId == Tasks[LaunchIndex].TaskId)
+		{
+			LaunchAnchorCellId = CellId;
+			break;
+		}
+	}
+	Summary.SatelliteLaunchAngularSeparationDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+		FVector::DotProduct(
+			Cells[LaunchAnchorCellId].UnitCenter,
+			Cells[Tasks[SatelliteWindowIndex].SeedCellId].UnitCenter),
+		-1.0f,
+		1.0f)));
+	if (Summary.SatelliteLaunchAngularSeparationDegrees + KINDA_SMALL_NUMBER
+		< FMath::Clamp(MinSatelliteLaunchAngularSeparationDegrees, 0.0f, 179.0f))
+	{
+		OutFailure = FString::Printf(
+			TEXT("SatelliteLaunchSeparationTooSmall:Actual=%.2f:Required=%.2f"),
+			Summary.SatelliteLaunchAngularSeparationDegrees,
+			MinSatelliteLaunchAngularSeparationDegrees);
 		return false;
 	}
 	const int32 StartCell = Tasks[StartIndex].SeedCellId;

@@ -17,6 +17,7 @@ class ABTSRUNTIME_API UABTSCraftingCatalog : public UActorComponent
 
 public:
 	UABTSCraftingCatalog();
+	virtual void OnRegister() override;
 
 	const TArray<FABTSCraftingRecipe>& GetRecipes() const { return Recipes; }
 	const FABTSCraftingRecipe* FindRecipe(FName RecipeId) const;
@@ -36,6 +37,7 @@ public:
 
 private:
 	void BuildDefaultRecipes();
+	void NormalizeSpaceSlingshotRecipes();
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5|Crafting")
 	TArray<FABTSCraftingRecipe> Recipes;

@@ -3,6 +3,7 @@
 #include "Building/ABTSM73DAGLoadSupportSolver.h"
 
 #include "ABTSRuntime.h"
+#include "Building/ABTSM73DAGSupportGeometry.h"
 #include "Building/ABTSM73DAGTypes.h"
 
 namespace
@@ -33,58 +34,47 @@ namespace
 		}
 	}
 
-	bool CanFitPattern(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
-		const EABTSM73DAGSupportPattern Pattern, const float Width)
+	bool TryResolveNarrowerPattern(
+		FABTSM73DAGSelectedSupport& Support,
+		const FABTSM73DAGLayoutSettings& Settings,
+		const float ColumnWidthCM)
 	{
-		if (!Region.bIsValid) return false;
-		const FVector2D Size = Region.GetSize();
-		const float SingleAxis = Width + Settings.ColumnClearanceCM * 2.0f;
-		const float PairAxis = Width * 2.0f + Settings.ColumnClearanceCM * 3.0f;
-		switch (Pattern)
-		{
-		case EABTSM73DAGSupportPattern::SingleColumnInterface: return Size.X >= SingleAxis && Size.Y >= SingleAxis;
-		case EABTSM73DAGSupportPattern::TwoColumnLine: return FMath::Min(Size.X, Size.Y) >= SingleAxis && FMath::Max(Size.X, Size.Y) >= PairAxis;
-		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
-		case EABTSM73DAGSupportPattern::FourColumnFootprint: return Size.X >= PairAxis && Size.Y >= PairAxis;
-		default: return false;
-		}
-	}
+		if (!Settings.bAllowNarrowSupportFallback) return false;
 
-	bool MakeColumnCenters(const FBox2D& Region, const FABTSM73DAGLayoutSettings& Settings,
-		const EABTSM73DAGSupportPattern Pattern, const float Width, TArray<FVector2D>& OutCenters)
-	{
-		OutCenters.Reset();
-		if (!CanFitPattern(Region, Settings, Pattern, Width)) return false;
-		const float Half = Width * 0.5f + Settings.ColumnClearanceCM;
-		const FVector2D SafeMin = Region.Min + FVector2D(Half, Half);
-		const FVector2D SafeMax = Region.Max - FVector2D(Half, Half);
-		const FVector2D Center = (SafeMin + SafeMax) * 0.5f;
-		const FVector2D Span = SafeMax - SafeMin;
-		const float OffsetX = Span.X * 0.5f;
-		const float OffsetY = Span.Y * 0.5f;
-		switch (Pattern)
+		if (Support.SupportPattern != EABTSM73DAGSupportPattern::TwoColumnLine
+			&& Support.SupportPattern != EABTSM73DAGSupportPattern::SingleColumnInterface)
 		{
-		case EABTSM73DAGSupportPattern::SingleColumnInterface: OutCenters.Add(Center); return true;
-		case EABTSM73DAGSupportPattern::TwoColumnLine:
-			if (Span.X >= Span.Y) { OutCenters.Add(Center + FVector2D(-OffsetX, 0)); OutCenters.Add(Center + FVector2D(OffsetX, 0)); }
-			else { OutCenters.Add(Center + FVector2D(0, -OffsetY)); OutCenters.Add(Center + FVector2D(0, OffsetY)); }
-			return true;
-		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
-			if (Span.X >= Span.Y)
+			TArray<FVector2D> Centers;
+			if (FABTSM73DAGSupportGeometry::MakeColumnCenters(
+				Support.FeasibleColumnRegion,
+				Settings,
+				EABTSM73DAGSupportPattern::TwoColumnLine,
+				ColumnWidthCM,
+				Centers))
 			{
-				OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY)); OutCenters.Add(Center + FVector2D(OffsetX, -OffsetY)); OutCenters.Add(Center + FVector2D(0, OffsetY));
+				Support.SupportPattern = EABTSM73DAGSupportPattern::TwoColumnLine;
+				Support.RealizedColumnCenters = MoveTemp(Centers);
+				return true;
 			}
-			else
-			{
-				OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY)); OutCenters.Add(Center + FVector2D(-OffsetX, OffsetY)); OutCenters.Add(Center + FVector2D(OffsetX, 0));
-			}
-			return true;
-		case EABTSM73DAGSupportPattern::FourColumnFootprint:
-			OutCenters.Add(Center + FVector2D(-OffsetX, -OffsetY)); OutCenters.Add(Center + FVector2D(OffsetX, -OffsetY));
-			OutCenters.Add(Center + FVector2D(-OffsetX, OffsetY)); OutCenters.Add(Center + FVector2D(OffsetX, OffsetY));
-			return true;
-		default: return false;
 		}
+
+		if (Settings.bAllowAdaptiveColumnWidth
+			&& Support.SupportPattern != EABTSM73DAGSupportPattern::SingleColumnInterface)
+		{
+			TArray<FVector2D> Centers;
+			if (FABTSM73DAGSupportGeometry::MakeColumnCenters(
+				Support.FeasibleColumnRegion,
+				Settings,
+				EABTSM73DAGSupportPattern::SingleColumnInterface,
+				ColumnWidthCM,
+				Centers))
+			{
+				Support.SupportPattern = EABTSM73DAGSupportPattern::SingleColumnInterface;
+				Support.RealizedColumnCenters = MoveTemp(Centers);
+				return true;
+			}
+		}
+		return false;
 	}
 
 	float Cross2D(const FVector2D& Origin, const FVector2D& A, const FVector2D& B)
@@ -191,41 +181,74 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 		});
 
 		TArray<FABTSM73DAGSelectedSupport> BestSupports;
-		TArray<TArray<FVector2D>> BestCenters;
 		float BestMargin = -1.0f;
 		const int32 MaxCount = FMath::Min(Settings.MaxLogicalSupportsPerLoad, JointCandidates.Num());
 		const int32 CombinationCount = 1 << JointCandidates.Num();
 		for (int32 Mask = 1; Mask < CombinationCount; ++Mask)
 		{
 			if (FMath::CountBits(static_cast<uint32>(Mask)) > MaxCount) continue;
-			int32 TotalColumns = 0;
-			for (int32 Index = 0; Index < JointCandidates.Num(); ++Index) if ((Mask & (1 << Index)) != 0) TotalColumns += PatternColumnCount(JointCandidates[Index].SupportPattern);
-			// Leave deterministic headroom above the validator threshold; the
-			// contact graph is rebuilt from floats and exact 4% is not robust.
-			const float Width = FMath::Sqrt(1.05f * Settings.MinSupportContactAreaRatio
-				* Load->PlateDimensionsCM.X * Load->PlateDimensionsCM.Y / FMath::Max(1, TotalColumns));
-			if (Width > Settings.MaxAdaptiveColumnWidthCM + KINDA_SMALL_NUMBER) continue;
-			const float RealizedWidth = FMath::Max(Settings.MinAdaptiveColumnWidthCM, Width);
 			TArray<FABTSM73DAGSelectedSupport> TrialSupports;
-			TArray<TArray<FVector2D>> TrialCenters;
-			TArray<FVector2D> ContactCorners;
-			bool bFeasible = true;
 			for (int32 Index = 0; Index < JointCandidates.Num(); ++Index)
 			{
 				if ((Mask & (1 << Index)) == 0) continue;
-				FABTSM73DAGSelectedSupport Support = JointCandidates[Index];
-				Support.RealizedColumnWidthCM = RealizedWidth;
-				TArray<FVector2D>& Centers = TrialCenters.AddDefaulted_GetRef();
-				if (!MakeColumnCenters(Support.FeasibleColumnRegion, Settings, Support.SupportPattern, RealizedWidth, Centers)) { bFeasible = false; break; }
-				TrialSupports.Add(Support);
-				for (const FVector2D& Center : Centers)
-				{
-					const float Half = RealizedWidth * 0.5f;
-					ContactCorners.Add(Center + FVector2D(-Half, -Half)); ContactCorners.Add(Center + FVector2D(Half, -Half));
-					ContactCorners.Add(Center + FVector2D(-Half, Half)); ContactCorners.Add(Center + FVector2D(Half, Half));
-				}
+				TrialSupports.Add(JointCandidates[Index]);
 			}
-			if (!bFeasible || ContactCorners.Num() < 4) continue;
+
+			TArray<FVector2D> ContactCorners;
+			bool bResolvedGeometry = false;
+			// Each support can reduce at most twice:
+			// Four/Tripod -> TwoColumn -> SingleColumn. A reduction widens every
+			// remaining column, so different supports may fail on later passes.
+			const int32 MaxResolvePasses = TrialSupports.Num() * 2 + 1;
+			for (int32 ResolvePass = 0; ResolvePass < MaxResolvePasses; ++ResolvePass)
+			{
+				int32 TotalColumns = 0;
+				for (const FABTSM73DAGSelectedSupport& Support : TrialSupports)
+				{
+					TotalColumns += PatternColumnCount(Support.SupportPattern);
+				}
+				// Leave deterministic headroom above the validator threshold;
+				// the contact graph is rebuilt from floats and the exact configured
+				// contact-area ratio is not robust.
+				const float Width = FMath::Sqrt(1.05f * Settings.MinSupportContactAreaRatio
+					* Load->PlateDimensionsCM.X * Load->PlateDimensionsCM.Y / FMath::Max(1, TotalColumns));
+				if (Width > Settings.MaxAdaptiveColumnWidthCM + KINDA_SMALL_NUMBER) break;
+				const float RealizedWidth = FMath::Max(Settings.MinAdaptiveColumnWidthCM, Width);
+				ContactCorners.Reset();
+				bool bPatternChanged = false;
+				bool bPassFeasible = true;
+				for (FABTSM73DAGSelectedSupport& Support : TrialSupports)
+				{
+					Support.RealizedColumnWidthCM = RealizedWidth;
+					if (!FABTSM73DAGSupportGeometry::MakeColumnCenters(
+						Support.FeasibleColumnRegion,
+						Settings,
+						Support.SupportPattern,
+						RealizedWidth,
+						Support.RealizedColumnCenters))
+					{
+						if (!TryResolveNarrowerPattern(Support, Settings, RealizedWidth))
+						{
+							bPassFeasible = false;
+							break;
+						}
+						bPatternChanged = true;
+					}
+					for (const FVector2D& Center : Support.RealizedColumnCenters)
+					{
+						const float Half = RealizedWidth * 0.5f;
+						ContactCorners.Add(Center + FVector2D(-Half, -Half));
+						ContactCorners.Add(Center + FVector2D(Half, -Half));
+						ContactCorners.Add(Center + FVector2D(-Half, Half));
+						ContactCorners.Add(Center + FVector2D(Half, Half));
+					}
+				}
+				if (!bPassFeasible) break;
+				if (bPatternChanged) continue;
+				bResolvedGeometry = true;
+				break;
+			}
+			if (!bResolvedGeometry || ContactCorners.Num() < 4) continue;
 			const TArray<FVector2D> Hull = BuildHull(MoveTemp(ContactCorners));
 			if (!ContainsPoint(Resultant, Hull)) continue;
 			const float Margin = HullMargin(Resultant, Hull);
@@ -233,7 +256,6 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 			{
 				BestMargin = Margin;
 				BestSupports = MoveTemp(TrialSupports);
-				BestCenters = MoveTemp(TrialCenters);
 			}
 		}
 		if (BestSupports.IsEmpty())
@@ -254,8 +276,9 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 			const FABTSM73DAGSelectedSupport& Support = BestSupports[SupportIndex];
 			InOutLayout.SelectedSupports.Add(Support);
 			FLoadState& LowerState = States.FindOrAdd(Support.SupportMacroNodeId);
-			const float PerColumnMass = LoadState.Mass / FMath::Max(1, BestCenters[SupportIndex].Num() * BestSupports.Num());
-			for (const FVector2D& Center : BestCenters[SupportIndex])
+			const float PerColumnMass = LoadState.Mass
+				/ FMath::Max(1, Support.RealizedColumnCenters.Num() * BestSupports.Num());
+			for (const FVector2D& Center : Support.RealizedColumnCenters)
 			{
 				LowerState.Mass += PerColumnMass;
 				LowerState.FirstMoment += Center * PerColumnMass;

@@ -323,7 +323,7 @@ PredictedPathLengthCM
 - 同级 M10.1-A：继续负责侦察圆内轨迹和红色落点；
 - 同级 M10.1-B：继续负责侦察范围内真实落点画中画；
 - 下游 M10.1-D：可在本图上增加已侦察目标、影响事件和走廊，但不得改变 C 的投影、缩放和遮挡语义；
-- 下游 M11：复用本稿的拟合、构图、球体遮挡和裁剪语义，但由独立轨迹结果提供三颗固定行星、UFO 与助推事件，不依赖青翎侦察或主星落点；见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)；
+- 下游 M11：复用本稿的拟合、构图、球体遮挡和裁剪语义，但由独立轨迹结果提供三颗固定行星、UFO 与助推事件，不依赖青翎侦察或主星落点；终局槽/局部坐标系见 [M11.0 前置收口](M110PreFinaleClosureDesign.md)，轨道交互见 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)；
 - 未来失重区/旋风场：应向预测快照增加带稳定 ID 的影响事件，再投影到本图；不能由 HUD 根据轨迹弯曲形状猜测力源。
 
 返回父级：[M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)

@@ -1,10 +1,10 @@
 # M10.1：道路外目标标记与引力走廊发射界面设计
 
-> 状态：M10.1-A“强化弹弓小地图预测轨迹与落点”、M10.1-B“强化弹弓远端落点画中画”和 M10.1-C“星球尺度拟合截面轨道全景图”均已完成 PIE 验收；M10 初版至此全部验收。完整目标选择与通用引力走廊 M10.1-D 延期；M11 算法预演已完成，当前待确认推荐路线。
+> 状态：M10.1-A“强化弹弓小地图预测轨迹与落点”、M10.1-B“强化弹弓远端落点画中画”和 M10.1-C“星球尺度拟合截面轨道全景图”均已完成 PIE 验收；M10 初版至此全部验收。完整目标选择与通用引力走廊 M10.1-D 延期；M11 路线已确认，先完成 M11.0 终局前置收口。
 >
 > 文档定位：本稿只定义“已侦察道路外目标”的超视距选择、引力走廊计算、发射相机与 HUD 表现。它不改变 M10 的侦察来源，不替代 M6 的实际弹道和碰撞，不公开未侦察区域，也不把发射改成自动寻的。
 >
-> 导航：[项目工作流](ABTSProjectWorkflow.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [M10.1-C 轨道全景图详稿](M101COrbitalOverviewDiagramDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [UI 系统设计](UISystemDesign.md)
+> 导航：[项目工作流](ABTSProjectWorkflow.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [M10.1-C 轨道全景图详稿](M101COrbitalOverviewDiagramDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md) · [UI 系统设计](UISystemDesign.md)
 
 ## 1. 要解决的问题
 
@@ -558,7 +558,7 @@ M10.1-A 已使用 M6 的只读当前预测快照：`WorldPoints`、初始位置/
 
 ## 15. 首版实现边界与建议顺序
 
-M10.1-A 的强化弹弓小地图白色虚线和红色 `X`、M10.1-B 的真实远端落点画中画、M10.1-C 的左下圆形轨道全景均已完成 PIE 验收。C 已实现整轨迹拟合平面、凸包自适应取景、绝对经纬主星、无经纬卫星和球后虚线。目标切换和通用可行走廊仍属于 M10.1-D，当前延期；M11 的固定三行星终局将使用自己的顺序事件与 B-plane 走廊，不依赖 D。M11 边界见 [三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
+M10.1-A 的强化弹弓小地图白色虚线和红色 `X`、M10.1-B 的真实远端落点画中画、M10.1-C 的左下圆形轨道全景均已完成 PIE 验收。C 已实现整轨迹拟合平面、凸包自适应取景、绝对经纬主星、无经纬卫星和球后虚线。目标切换和通用可行走廊仍属于 M10.1-D，当前延期；M11 的固定三行星终局将使用自己的顺序事件与 B-plane 走廊，不依赖 D。终局槽与数据隔离见 [M11.0](M110PreFinaleClosureDesign.md)，轨道边界见 [三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 
 M10.1 初版交付顺序已完成：
 
@@ -567,4 +567,4 @@ M10.1 初版交付顺序已完成：
 3. M10.1-C 已验收：按 [轨道全景图详稿](M101COrbitalOverviewDiagramDesign.md)实现完整预测投影、构图和遮挡语义；
 4. M10.1-D 的建筑目标快照、Q/E 选择和通用走廊不继续排为默认下一步。
 
-默认下一阶段是先确认 [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)，再从无美术的 M11-A 同源确定性求解器开始。
+默认下一阶段是完成并验收 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)，再从无美术的 [M11-A 同源确定性求解器](M11GravityAssistAlgorithmPrevisualization.md#12-建议实施拆分)开始。

@@ -113,6 +113,24 @@ AABTSM51SlingshotDirtHole::AABTSM51SlingshotDirtHole()
 void AABTSM51SlingshotDirtHole::InitializeHole(const int32 InCellId)
 {
 	CellId = InCellId;
+	SlotKind = EABTSSlingshotSlotKind::Standard;
+	SlotSide = EABTSSlingshotSlotSide::None;
+	SlotPairId = INDEX_NONE;
+}
+
+void AABTSM51SlingshotDirtHole::InitializeFinaleSpaceSlot(
+	const int32 InCellId,
+	const int32 InPairId,
+	const EABTSSlingshotSlotSide InSide)
+{
+	CellId = InCellId;
+	SlotKind = EABTSSlingshotSlotKind::FinaleSpace;
+	SlotSide = InSide;
+	SlotPairId = InPairId;
+	Tags.AddUnique(FName(TEXT("ABTS.M11.FinalSpaceSlot")));
+	Tags.AddUnique(InSide == EABTSSlingshotSlotSide::Left
+		? FName(TEXT("ABTS.M11.FinalSpaceSlot.Left"))
+		: FName(TEXT("ABTS.M11.FinalSpaceSlot.Right")));
 }
 
 void AABTSM51SlingshotDirtHole::NotifyActorOnClicked(const FKey ButtonPressed)
@@ -148,12 +166,20 @@ void AABTSM51SlingshotStake::InitializeStake(
 	StakeItem = InStakeItem;
 	CellId = InCellId;
 	UnitDirection = InUnitDirection.GetSafeNormal();
-	const EABTSSlingshotTier Tier = StakeItem == EABTSItemId::Branch
-		? EABTSSlingshotTier::Twig
-		: (StakeItem == EABTSItemId::ReinforcedStake
-			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
+	EABTSSlingshotTier Tier = EABTSSlingshotTier::Simple;
+	ABTSTryResolveSlingshotPartTier(StakeItem, Tier);
 	const FABTSSlingshotVisualPreset Preset = ABTSMakeDefaultSlingshotVisualPreset(Tier);
 	ApplyVisualSlot(Preset.StakeVisual, Preset.StakeDiameterCM, Preset.StakeHeightCM);
+}
+
+void AABTSM51SlingshotStake::SetInstalledSlotIdentity(
+	const EABTSSlingshotSlotKind InSlotKind,
+	const int32 InSlotPairId,
+	const EABTSSlingshotSlotSide InSlotSide)
+{
+	InstalledSlotKind = InSlotKind;
+	InstalledSlotPairId = InSlotPairId;
+	InstalledSlotSide = InSlotSide;
 }
 
 FVector AABTSM51SlingshotStake::GetVisualTopWorldLocation() const
@@ -258,10 +284,8 @@ void AABTSM51SlingshotCord::InitializeCord(
 	const FVector& InEndpointB)
 {
 	const EABTSItemId StakeItem = InStakeA ? InStakeA->GetStakeItem() : EABTSItemId::SimpleStake;
-	const EABTSSlingshotTier InferredTier = StakeItem == EABTSItemId::Branch
-		? EABTSSlingshotTier::Twig
-		: (StakeItem == EABTSItemId::ReinforcedStake
-			? EABTSSlingshotTier::Reinforced : EABTSSlingshotTier::Simple);
+	EABTSSlingshotTier InferredTier = EABTSSlingshotTier::Simple;
+	ABTSTryResolveSlingshotPartTier(StakeItem, InferredTier);
 	InitializeCordWithTier(InStakeA, InStakeB, InEndpointA, InEndpointB, InferredTier);
 }
 
@@ -390,6 +414,32 @@ void AABTSM51SlingshotCord::UpdatePulledPouchVisual(const FVector& WorldLocation
 EABTSItemId AABTSM51SlingshotCord::GetStakeItem() const
 {
 	return StakeA.IsValid() ? StakeA->GetStakeItem() : EABTSItemId::SimpleStake;
+}
+
+bool AABTSM51SlingshotCord::IsFinaleSpaceSlingshot() const
+{
+	const AABTSM51SlingshotStake* First = StakeA.Get();
+	const AABTSM51SlingshotStake* Second = StakeB.Get();
+	if (SlingshotTier != EABTSSlingshotTier::Space || First == nullptr || Second == nullptr)
+	{
+		return false;
+	}
+	const int32 PairId = First->GetInstalledSlotPairId();
+	const bool bOppositeSides =
+		(First->GetInstalledSlotSide() == EABTSSlingshotSlotSide::Left
+			&& Second->GetInstalledSlotSide() == EABTSSlingshotSlotSide::Right)
+		|| (First->GetInstalledSlotSide() == EABTSSlingshotSlotSide::Right
+			&& Second->GetInstalledSlotSide() == EABTSSlingshotSlotSide::Left);
+	return PairId != INDEX_NONE
+		&& PairId == Second->GetInstalledSlotPairId()
+		&& First->GetInstalledSlotKind() == EABTSSlingshotSlotKind::FinaleSpace
+		&& Second->GetInstalledSlotKind() == EABTSSlingshotSlotKind::FinaleSpace
+		&& bOppositeSides;
+}
+
+int32 AABTSM51SlingshotCord::GetFinaleSlotPairId() const
+{
+	return IsFinaleSpaceSlingshot() ? StakeA->GetInstalledSlotPairId() : INDEX_NONE;
 }
 
 void AABTSM51SlingshotCord::NotifyActorOnClicked(const FKey ButtonPressed)

@@ -47,6 +47,30 @@ struct FABTSM7TaskGraphBuildingProfile
 	FABTSM73DifficultySettings DifficultySettings;
 };
 
+/**
+ * Pure profile router for the production TaskGraph -> M7.3-DAG2.3 path.
+ *
+ * Existing GameMode Blueprint assets may still serialize the retired Legacy
+ * profile array. ResolveRuntimeProfile upgrades only those legacy entries to
+ * the bounded DAG2.3 launch profiles while keeping an explicitly authored DAG
+ * profile editable.
+ */
+struct ABTSRUNTIME_API FABTSM7TaskGraphDAG23ProfileResolver
+{
+	static constexpr float FurnaceMinSupportContactAreaRatio = 0.06f;
+
+	static bool IsSupportedBuildingTask(EABTSM3TaskType TaskType);
+	static EABTSM73DAGPreset GetDefaultPreset(EABTSM3TaskType TaskType);
+	static FABTSM7TaskGraphBuildingProfile MakeDefaultProfile(
+		EABTSM3TaskType TaskType,
+		EABTSM7BuildingMaterial Material);
+	static bool ResolveRuntimeProfile(
+		EABTSM3TaskType TaskType,
+		const FABTSM7TaskGraphBuildingProfile& SourceProfile,
+		FABTSM7TaskGraphBuildingProfile& OutProfile,
+		bool& bOutMigratedLegacy);
+};
+
 /** M7 entry owns the material runtime and an optional M7.3-A first-anchor building test. */
 UCLASS(BlueprintType)
 class ABTSRUNTIME_API AABTSM7GameMode : public AABTSM6GameMode
@@ -62,7 +86,12 @@ protected:
 
 private:
 	const FABTSM7TaskGraphBuildingProfile* FindTaskGraphBuildingProfile(EABTSM3TaskType TaskType) const;
-	int32 SpawnTaskGraphBuildings(AABTSM3Planet& Planet, AABTSM7BuildingMaterialSystem& MaterialSystem);
+	int32 CountRequiredTaskGraphBuildings(const AABTSM3Planet& Planet) const;
+	int32 SpawnTaskGraphBuildings(
+		AABTSM3Planet& Planet,
+		AABTSM7BuildingMaterialSystem& MaterialSystem,
+		AABTSM6SlingshotSystem* SlingshotSystem,
+		bool& bOutSetupFailed);
 	void DrawTaskGraphPositionDebug();
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M7")

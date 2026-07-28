@@ -93,9 +93,28 @@ bool AABTSM3Planet::RebuildPlanet()
 	BuildBuildingSpawnSites();
 	TerrainVisualField->SetBuildingPads(BuildingSpawnSites);
 	BuildBuildingSpawnSites();
+	const bool bFinaleFrameReady = FinaleLaunchFrame.IsUsable();
+	if (bFinaleFrameReady)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M11.0][FinaleFrame] Ready Layout=%d Task=%d Cell=%d Pair=%d Separation=%.1f Forward=%s Right=%s Up=%s"),
+			FinaleLaunchFrame.LayoutVersion,
+			FinaleLaunchFrame.LaunchTaskId,
+			FinaleLaunchFrame.AnchorCellId,
+			FinaleLaunchFrame.SlotPairId,
+			FVector::Distance(FinaleLaunchFrame.LeftSlotWorldLocation, FinaleLaunchFrame.RightSlotWorldLocation),
+			*FinaleLaunchFrame.GetForward().ToCompactString(),
+			*FinaleLaunchFrame.GetRight().ToCompactString(),
+			*FinaleLaunchFrame.GetUp().ToCompactString());
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M11.0][FinaleFrame] Rejected after final terrain-pad resolution."));
+	}
 	BuildM3ContinuousSurface();
 	bool bMaterialReady = false;
-	bool bPresentationReady = true;
+	bool bPresentationReady = bFinaleFrameReady;
 	if (TerrainMaterial)
 	{
 		TerrainMaterialBridge = NewObject<UABTSM3TerrainMaterialBridge>(this);
@@ -484,6 +503,11 @@ void AABTSM3Planet::BuildDecorInstances()
 void AABTSM3Planet::BuildBuildingSpawnSites()
 {
 	BuildingSpawnSites.Reset();
+	FinaleLaunchFrame = FABTSM110FinaleLocalFrame();
+	const FABTSM3TaskNode* SatelliteWindowTask = GeneratedTasks.FindByPredicate([](const FABTSM3TaskNode& Task)
+	{
+		return Task.Type == EABTSM3TaskType::SatelliteWindow;
+	});
 	for (int32 CellId = 0; CellId < GeneratedCellStates.Num(); ++CellId)
 	{
 		if (!GeneratedCellStates[CellId].bBuildingAnchor) continue;
@@ -499,6 +523,21 @@ void AABTSM3Planet::BuildBuildingSpawnSites()
 		Site.TaskId = GeneratedCellStates[CellId].TaskId;
 		Site.TaskType = GeneratedTasks.IsValidIndex(Site.TaskId) ? GeneratedTasks[Site.TaskId].Type : EABTSM3TaskType::Unassigned;
 		Site.AnchorDirection = PadUp;
+		if (Site.TaskType == EABTSM3TaskType::LaunchSite
+			&& SatelliteWindowTask != nullptr
+			&& LogicalCells.IsValidIndex(SatelliteWindowTask->SeedCellId))
+		{
+			// The terminal pair's positive Y axis always points toward the
+			// SatelliteWindow in the LaunchSite tangent plane. This is derived
+			// solely from TaskGraph data and can never flip with player position.
+			FVector CanonicalRight = FVector::VectorPlaneProject(
+				LogicalCells[SatelliteWindowTask->SeedCellId].UnitCenter,
+				PadUp).GetSafeNormal();
+			if (!CanonicalRight.IsNearlyZero())
+			{
+				Forward = FVector::CrossProduct(CanonicalRight, PadUp).GetSafeNormal();
+			}
+		}
 		Site.TangentForward = Forward;
 		Site.TangentRight = FVector::CrossProduct(PadUp, Forward).GetSafeNormal();
 		Site.PadHalfExtentCM = BuildingPadSettings.HalfExtentCM;
@@ -508,5 +547,33 @@ void AABTSM3Planet::BuildBuildingSpawnSites()
 		Site.WorldTransform = FTransform(FRotationMatrix::MakeFromXZ(Forward, PadUp).ToQuat(),
 			GetPlanetCenterWorld() + Direction * Site.PadTargetRadiusCM);
 		Site.MaxSlopeDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(PadUp, SurfaceNormal), -1.0f, 1.0f)));
+
+		if (Site.TaskType == EABTSM3TaskType::LaunchSite)
+		{
+			const float SafeSeparationCM = FMath::Max(100.0f, FinaleSpaceSlotSeparationCM);
+			const FVector SlotOrigin = Site.WorldTransform.GetLocation()
+				+ PadUp * FMath::Max(0.0f, FinaleSpaceSlotSurfaceOffsetCM);
+			FinaleLaunchFrame.LayoutVersion = 1;
+			FinaleLaunchFrame.LaunchTaskId = Site.TaskId;
+			FinaleLaunchFrame.AnchorCellId = Site.CellId;
+			FinaleLaunchFrame.SlotPairId = static_cast<int32>(HashCombineFast(
+				GetTypeHash(WorldSeed),
+				HashCombineFast(
+					GetTypeHash(Site.TaskId),
+					HashCombineFast(GetTypeHash(Site.CellId), GetTypeHash(FinaleLaunchFrame.LayoutVersion))))
+				& MAX_int32);
+			FinaleLaunchFrame.WorldTransform = FTransform(
+				FRotationMatrix::MakeFromXZ(Site.TangentForward, PadUp).ToQuat(),
+				SlotOrigin);
+			FinaleLaunchFrame.LeftSlotWorldLocation =
+				SlotOrigin - Site.TangentRight * (SafeSeparationCM * 0.5f);
+			FinaleLaunchFrame.RightSlotWorldLocation =
+				SlotOrigin + Site.TangentRight * (SafeSeparationCM * 0.5f);
+			FinaleLaunchFrame.bValid = true;
+			if (!FinaleLaunchFrame.IsUsable())
+			{
+				FinaleLaunchFrame.bValid = false;
+			}
+		}
 	}
 }

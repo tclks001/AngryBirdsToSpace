@@ -3,6 +3,8 @@
 #include "ABTSRuntime.h"
 #include "Building/ABTSM73BuildingTypes.h"
 #include "Building/ABTSM73DAGBuildingPipeline.h"
+#include "Building/ABTSM73DAGLoadSupportSolver.h"
+#include "Building/ABTSM73DAGSupportGeometry.h"
 #include "Building/ABTSM73DAGTypes.h"
 #include "Building/ABTSM73StabilityValidator.h"
 #include "Building/ABTSM73StructureData.h"
@@ -134,6 +136,208 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FABTSM73DAGSupportPatternTest::RunTest(const FString& Parameters)
 {
+	FABTSM73DAGLayoutSettings CenteredTripodSettings;
+	for (const FBox2D& TooNarrowRegion : {
+		FBox2D(FVector2D(-60.5f, -60.5f), FVector2D(60.5f, 60.5f)),
+		FBox2D(FVector2D(-89.5f, -60.5f), FVector2D(89.5f, 60.5f)),
+		FBox2D(FVector2D(-60.5f, -89.5f), FVector2D(60.5f, 89.5f))})
+	{
+		TArray<FVector2D> RejectedCenters;
+		TestFalse(TEXT("Tripod rejects a region whose diagonal square columns would overlap"),
+			FABTSM73DAGSupportGeometry::MakeColumnCenters(
+				TooNarrowRegion,
+				CenteredTripodSettings,
+				EABTSM73DAGSupportPattern::ThreeColumnTripod,
+				CenteredTripodSettings.ColumnWidthCM,
+				RejectedCenters));
+		TestTrue(TEXT("Rejected tripod leaves no partial centers"), RejectedCenters.IsEmpty());
+	}
+	for (const FBox2D& MinimumClearRegion : {
+		FBox2D(FVector2D(-70.5f, -70.5f), FVector2D(70.5f, 70.5f)),
+		FBox2D(FVector2D(-90.5f, -60.5f), FVector2D(90.5f, 60.5f)),
+		FBox2D(FVector2D(-60.5f, -90.5f), FVector2D(60.5f, 90.5f))})
+	{
+		TArray<FVector2D> AcceptedCenters;
+		TestTrue(TEXT("Tripod accepts the boundary region once every square column has clearance"),
+			FABTSM73DAGSupportGeometry::MakeColumnCenters(
+				MinimumClearRegion,
+				CenteredTripodSettings,
+				EABTSM73DAGSupportPattern::ThreeColumnTripod,
+				CenteredTripodSettings.ColumnWidthCM,
+				AcceptedCenters));
+	}
+
+	// Candidate selection runs at the minimum adaptive width, while contact-area
+	// realization may make the final columns wider. Lock the final-width recovery:
+	// a 179x121 interface cannot hold this Tripod, but can hold a recalculated
+	// TwoColumn fallback without rejecting the graph.
+	FABTSM73DAGGenerationResult FallbackGraph;
+	FallbackGraph.bAccepted = true;
+	FABTSM73DAGMacroNode& GroundMacro = FallbackGraph.MacroNodes.AddDefaulted_GetRef();
+	GroundMacro.NodeId = 0;
+	FABTSM73DAGMacroNode& LoadMacro = FallbackGraph.MacroNodes.AddDefaulted_GetRef();
+	LoadMacro.NodeId = 1;
+	FABTSM73DAGSupportEdge& FallbackEdge = FallbackGraph.SupportEdges.AddDefaulted_GetRef();
+	FallbackEdge.SupportNodeId = GroundMacro.NodeId;
+	FallbackEdge.LoadNodeId = LoadMacro.NodeId;
+	FallbackGraph.GroundNodeIds.Add(GroundMacro.NodeId);
+
+	FABTSM73DAGSpatialLayout FallbackLayout;
+	FallbackLayout.bAccepted = true;
+	FABTSM73DAGMacroLayout& GroundLayout = FallbackLayout.MacroLayouts.AddDefaulted_GetRef();
+	GroundLayout.MacroNodeId = GroundMacro.NodeId;
+	GroundLayout.PlateCenter = FVector(0.0f, 0.0f, 20.0f);
+	GroundLayout.PlateDimensionsCM = FVector(200.0f, 150.0f, 40.0f);
+	GroundLayout.bGroundTerminal = true;
+	FABTSM73DAGMacroLayout& LoadLayout = FallbackLayout.MacroLayouts.AddDefaulted_GetRef();
+	LoadLayout.MacroNodeId = LoadMacro.NodeId;
+	LoadLayout.PlateCenter = FVector(0.0f, 0.0f, 180.0f);
+	LoadLayout.PlateDimensionsCM = FVector(560.0f, 400.0f, 40.0f);
+
+	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> FallbackCandidates;
+	FABTSM73DAGSelectedSupport& FallbackCandidate =
+		FallbackCandidates.FindOrAdd(LoadMacro.NodeId).AddDefaulted_GetRef();
+	FallbackCandidate.SupportMacroNodeId = GroundMacro.NodeId;
+	FallbackCandidate.LoadMacroNodeId = LoadMacro.NodeId;
+	FallbackCandidate.FeasibleColumnRegion =
+		FBox2D(FVector2D(-89.5f, -60.5f), FVector2D(89.5f, 60.5f));
+	FallbackCandidate.SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
+
+	FABTSM73DAGLayoutSettings FallbackSettings;
+	FallbackSettings.MaxLogicalSupportsPerLoad = 1;
+	FABTSM73DAGLoadSupportSolver LoadSupportSolver;
+	FString FallbackError;
+	TestTrue(
+		FString::Printf(TEXT("Final-width narrow support resolves a lower-column fallback: %s"), *FallbackError),
+		LoadSupportSolver.Solve(
+			FallbackGraph,
+			FallbackSettings,
+			FallbackCandidates,
+			FallbackLayout,
+			FallbackError));
+	TestEqual(TEXT("Final-width fallback records the realized two-column pattern"),
+		FallbackLayout.SelectedSupports.Num(), 1);
+	if (FallbackLayout.SelectedSupports.Num() == 1)
+	{
+		TestEqual(TEXT("Final-width fallback lowers Tripod to TwoColumn"),
+			FallbackLayout.SelectedSupports[0].SupportPattern,
+			EABTSM73DAGSupportPattern::TwoColumnLine);
+		TestEqual(TEXT("Final-width fallback realizes two authoritative centers"),
+			FallbackLayout.SelectedSupports[0].RealizedColumnCenters.Num(), 2);
+		const float ContactAreaRatio =
+			FallbackLayout.SelectedSupports[0].RealizedColumnCenters.Num()
+			* FMath::Square(FallbackLayout.SelectedSupports[0].RealizedColumnWidthCM)
+			/ (LoadLayout.PlateDimensionsCM.X * LoadLayout.PlateDimensionsCM.Y);
+		TestTrue(TEXT("Final-width fallback recalculates enough two-column contact area"),
+			ContactAreaRatio + KINDA_SMALL_NUMBER >= FallbackSettings.MinSupportContactAreaRatio);
+	}
+
+	// Two interfaces can fail in sequence as the shared contact-area width grows:
+	// A: Tripod -> Two -> Single, then B: Tripod -> Two. This needs a monotonic
+	// pass bound based on the whole support group, not a fixed three passes.
+	FABTSM73DAGGenerationResult CascadeGraph;
+	CascadeGraph.bAccepted = true;
+	for (int32 NodeId = 0; NodeId < 3; ++NodeId)
+	{
+		FABTSM73DAGMacroNode& Macro = CascadeGraph.MacroNodes.AddDefaulted_GetRef();
+		Macro.NodeId = NodeId;
+	}
+	for (int32 SupportId = 0; SupportId < 2; ++SupportId)
+	{
+		FABTSM73DAGSupportEdge& Edge = CascadeGraph.SupportEdges.AddDefaulted_GetRef();
+		Edge.SupportNodeId = SupportId;
+		Edge.LoadNodeId = 2;
+		CascadeGraph.GroundNodeIds.Add(SupportId);
+	}
+
+	FABTSM73DAGSpatialLayout CascadeLayout;
+	CascadeLayout.bAccepted = true;
+	for (int32 SupportId = 0; SupportId < 2; ++SupportId)
+	{
+		FABTSM73DAGMacroLayout& SupportLayout = CascadeLayout.MacroLayouts.AddDefaulted_GetRef();
+		SupportLayout.MacroNodeId = SupportId;
+		SupportLayout.PlateCenter = FVector(0.0f, 0.0f, 20.0f);
+		SupportLayout.PlateDimensionsCM = FVector(200.0f, 150.0f, 40.0f);
+		SupportLayout.bGroundTerminal = true;
+	}
+	FABTSM73DAGMacroLayout& CascadeLoad = CascadeLayout.MacroLayouts.AddDefaulted_GetRef();
+	CascadeLoad.MacroNodeId = 2;
+	CascadeLoad.PlateCenter = FVector(0.0f, 0.0f, 180.0f);
+	CascadeLoad.PlateDimensionsCM = FVector(600.0f, 595.2381f, 40.0f);
+
+	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> CascadeCandidates;
+	const FBox2D CascadeRegions[] = {
+		FBox2D(FVector2D(-57.0f, -50.0f), FVector2D(57.0f, 50.0f)),
+		FBox2D(FVector2D(-85.0f, -70.0f), FVector2D(85.0f, 70.0f))
+	};
+	for (int32 SupportId = 0; SupportId < 2; ++SupportId)
+	{
+		FABTSM73DAGSelectedSupport& Candidate =
+			CascadeCandidates.FindOrAdd(2).AddDefaulted_GetRef();
+		Candidate.SupportMacroNodeId = SupportId;
+		Candidate.LoadMacroNodeId = 2;
+		Candidate.FeasibleColumnRegion = CascadeRegions[SupportId];
+		Candidate.SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
+	}
+
+	FABTSM73DAGLayoutSettings CascadeSettings;
+	CascadeSettings.MaxLogicalSupportsPerLoad = 2;
+	FString CascadeError;
+	TestTrue(
+		FString::Printf(TEXT("Multi-support final-width fallback converges monotonically: %s"), *CascadeError),
+		LoadSupportSolver.Solve(
+			CascadeGraph,
+			CascadeSettings,
+			CascadeCandidates,
+			CascadeLayout,
+			CascadeError));
+	TestEqual(TEXT("Cascade retains the required two-interface support group"),
+		CascadeLayout.SelectedSupports.Num(), 2);
+	if (CascadeLayout.SelectedSupports.Num() == 2)
+	{
+		TestEqual(TEXT("Cascade first interface reaches SingleColumn"),
+			CascadeLayout.SelectedSupports[0].SupportPattern,
+			EABTSM73DAGSupportPattern::SingleColumnInterface);
+		TestEqual(TEXT("Cascade second interface reaches TwoColumn"),
+			CascadeLayout.SelectedSupports[1].SupportPattern,
+			EABTSM73DAGSupportPattern::TwoColumnLine);
+		int32 TotalCascadeColumns = 0;
+		for (const FABTSM73DAGSelectedSupport& Support : CascadeLayout.SelectedSupports)
+		{
+			TotalCascadeColumns += Support.RealizedColumnCenters.Num();
+		}
+		const float CascadeContactAreaRatio =
+			TotalCascadeColumns
+			* FMath::Square(CascadeLayout.SelectedSupports[0].RealizedColumnWidthCM)
+			/ (CascadeLoad.PlateDimensionsCM.X * CascadeLoad.PlateDimensionsCM.Y);
+		TestTrue(TEXT("Cascade recalculates the shared width after every pattern reduction"),
+			CascadeContactAreaRatio + KINDA_SMALL_NUMBER >= CascadeSettings.MinSupportContactAreaRatio);
+	}
+
+	for (const FBox2D& Region : {
+		FBox2D(FVector2D(-180.0f, -100.0f), FVector2D(180.0f, 100.0f)),
+		FBox2D(FVector2D(-100.0f, -180.0f), FVector2D(100.0f, 180.0f))})
+	{
+		TArray<FVector2D> TripodCenters;
+		TestTrue(TEXT("Shared tripod geometry fits the test region"),
+			FABTSM73DAGSupportGeometry::MakeColumnCenters(
+				Region,
+				CenteredTripodSettings,
+				EABTSM73DAGSupportPattern::ThreeColumnTripod,
+				CenteredTripodSettings.ColumnWidthCM,
+				TripodCenters));
+		TestEqual(TEXT("Shared tripod geometry emits three contacts"), TripodCenters.Num(), 3);
+		if (TripodCenters.Num() == 3)
+		{
+			const FVector2D ContactCentroid =
+				(TripodCenters[0] + TripodCenters[1] + TripodCenters[2]) / 3.0f;
+			const FVector2D RegionCenter = (Region.Min + Region.Max) * 0.5f;
+			TestTrue(
+				TEXT("Equal-area tripod contact centroid stays on the centered resultant"),
+				FVector2D::Distance(ContactCentroid, RegionCenter) < 0.01f);
+		}
+	}
+
 	FABTSM73GenerationSettings BuildingSettings;
 	BuildingSettings.GenerationAlgorithm = EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
 	BuildingSettings.bGenerateStructuralWeakness = false;
@@ -174,9 +378,12 @@ bool FABTSM73DAGSupportPatternTest::RunTest(const FString& Parameters)
 				{
 					for (int32 B = A + 1; B < Centers.Num(); ++B)
 					{
-						TestTrue(TEXT("Support columns preserve their requested clearance"),
-							FVector2D::Distance(Centers[A], Centers[B]) + KINDA_SMALL_NUMBER
-							>= LayoutSettings.ColumnWidthCM + LayoutSettings.ColumnClearanceCM);
+						const FVector2D Delta = (Centers[A] - Centers[B]).GetAbs();
+						const float RequiredAxisSeparation =
+							Mapping.RealizedColumnWidthCM + LayoutSettings.ColumnClearanceCM;
+						TestTrue(TEXT("Compiled square columns preserve their requested AABB clearance"),
+							Delta.X + KINDA_SMALL_NUMBER >= RequiredAxisSeparation
+							|| Delta.Y + KINDA_SMALL_NUMBER >= RequiredAxisSeparation);
 					}
 				}
 				if (Pattern == EABTSM73DAGSupportPattern::ThreeColumnTripod && Centers.Num() == 3)
@@ -185,6 +392,15 @@ bool FABTSM73DAGSupportPatternTest::RunTest(const FString& Parameters)
 						(Centers[1].X - Centers[0].X) * (Centers[2].Y - Centers[0].Y)
 						- (Centers[1].Y - Centers[0].Y) * (Centers[2].X - Centers[0].X));
 					TestTrue(TEXT("Tripod columns form a two-dimensional support triangle"), TwiceTriangleArea > 1.0f);
+					if (Data.Bricks.IsValidIndex(Mapping.LoadPlateNodeId))
+					{
+						const FVector2D CompiledCentroid =
+							(Centers[0] + Centers[1] + Centers[2]) / 3.0f;
+						const FVector2D LoadPlateCenter(Data.Bricks[Mapping.LoadPlateNodeId].LocalCenter);
+						TestTrue(
+							TEXT("Compiled tripod contact centroid stays on the centered load plate"),
+							FVector2D::Distance(CompiledCentroid, LoadPlateCenter) < 0.01f);
+					}
 				}
 			}
 		}

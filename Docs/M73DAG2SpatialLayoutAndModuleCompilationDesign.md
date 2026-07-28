@@ -1,6 +1,6 @@
 # M7.3-DAG-2：空间布局与模块编译设计
 
-> 状态：C++ 已实现、编译与 fresh-process 自动化已通过；支撑模式、轻量化尺寸与凸包校验已由 [M7.3-DAG-2.1](M73DAG21SupportPatternsDesign.md) 扩展。待在 M7.1 平面测试台和球面场景进行手工视觉/碰撞验收。
+> 状态：C++ 已实现；经 DAG2.1/2.2/2.3 扩展后已接管 TaskGraph 普通建筑生产路径。候选筛选与载荷求解共享唯一支撑几何，求解器保存最终柱中心，编译器只消费该结果；Tripod 接触质心偏置已修复。Editor 编译、自动化与最终二进制三次 fresh D3D12 实时 60 FPS 通过，待补可见 PIE 外观/击打验收。
 >
 > 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。前置：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md)。子阶段：[DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A Legacy 对照](M73AStableBlockBuildingImplementationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md)
 
@@ -19,13 +19,13 @@ Derivation Tree
 -> 既有 Ground Adapter / Preview / Runtime Chaos
 ```
 
-本阶段仅使用局部轴对齐的水平 Plate 与竖直 Column；不实现任意角度板、梁/悬臂、内部弱点、攻击 rollout、炸药桶或活塞。`M7.3-A/B/B2` 保持 Legacy 对照，不修改其生成行为。DAG-2 路径也暂时跳过旧 B/B2 的顶冠弱点规划，避免旧逻辑污染新主体。
+本阶段仅使用局部轴对齐的水平 Plate 与竖直 Column；不实现任意角度板、梁/悬臂、内部弱点、攻击 rollout、炸药桶或活塞。`M7.3-A/B/B2` 只保留历史对照，不再拥有 TaskGraph Profile。DAG-2 路径跳过旧 B/B2 顶冠规划；正式内部弱点只能由 DAG-3 从主体 Failure Frontier 推导。
 
 ## 2. Scope 布局
 
 每个递归表达式先拥有一个根 Scope：`TargetWidthCM × TargetDepthCM × TargetHeightCM`。递归下放时：
 
-- `Series` 沿局部 Z 依次切分，并扣除 `SeriesGapCM`；
+- `Series` 只表达先后承载关系，所有子项保留同一 XY Scope；最终结构层级与 Z 高度由已选 Support DAG 的最长路径统一求解。`SeriesGapCM` 现仅为旧序列化兼容保留字段，不参与运行时布局；
 - `Parallel` 默认沿局部 X 切分；`bAlternateParallelAxes` 为真时，按深度交替 X/Y；
 - 终端 Atom 获得不重叠 Scope，并编译为一块 Plate；
 - Plate 尺寸为 Scope 的 XY 投影乘 `PlateFootprintRatio`，厚度为 `PlateThicknessCM`，且任一平面尺度不得小于 `MinPlateExtentCM`。
@@ -49,6 +49,7 @@ DAG-1 的一层 `A+B` 到相邻层 `C+D` 可以产生多条合法候选边，但
 
 - 每个 Macro 降低为一个 `Plate` BrickNode；
 - 每条已选逻辑支撑的两/三/四柱模式、轻量化默认参数与凸包校验见 [M7.3-DAG-2.1](M73DAG21SupportPatternsDesign.md)；
+- Layout 候选筛选与载荷求解器必须调用同一个 `FABTSM73DAGSupportGeometry`；求解器把已经通过凸包、净空和接触面积检查的中心写入 `SelectedSupport.RealizedColumnCenters`，模块编译器只消费这组权威中心，缺失即拒绝。禁止在编译阶段再次推导点位，使“静态验收的凸包”与“Chaos 实际收到的接触柱”保持同源；
 - 所有节点写回现有 `FABTSM73StructureData.Bricks`，因此 Editor HISM Preview、M7 Runtime Module、Ground Adapter、M7.1 平面测试台、球面地基脚与 Chaos 生命周期均复用；
 - 编译后从最终轴对齐碰撞盒反建 `Realized Contact DAG`，并审计每条已选逻辑支撑必须实现为 `SupportPlate -> Column -> LoadPlate`。
 
@@ -59,11 +60,13 @@ DAG-1 的一层 `A+B` 到相邻层 `C+D` 可以产生多条合法候选边，但
 | 文件 | 职责 |
 | --- | --- |
 | `ABTSM73DAGLayoutSolver.*` | Scope 递归切分、Plate 位置/尺寸、候选几何筛选与稀疏边选择 |
+| `ABTSM73DAGSupportGeometry.*` | Layout/载荷求解共享的二/三/四柱中心与方柱 AABB 净空检查；保证 Tripod 等面积接触质心落在承载区域中心 |
 | `ABTSM73DAGModuleCompiler.*` | 将 Macro Plate 和已选支撑降低为 BrickNode |
 | `ABTSM73DAGContactGraphBuilder.*` | 从最终碰撞盒反建真实接触图并审计 |
 | `ABTSM73DAGBuildingPipeline.*` | 串联 DAG-1、Layout 与 Compiler |
 | `ABTSM73DAG2AutomationTests.cpp` | Scope/编译、稀疏支撑和确定性自动化 |
-| `AABTSM73StableBuildingActor` | 通过 `GenerationAlgorithm` 选择 Legacy 或 DAG 路线，复用预览与运行时装配 |
+| `AABTSM73StableBuildingActor` | 历史手工 Actor 可读取兼容枚举；TaskGraph Resolver 始终传入 DAG，Actor 复用预览与运行时装配 |
+| `FABTSM7TaskGraphDAG23ProfileResolver` | 三类生产 Profile、旧 Blueprint CDO 升级和禁止 Legacy fallback |
 
 ## 6. 编辑器操作
 
@@ -82,14 +85,19 @@ PreferredLogicalSupportsPerLoad=2, MaxLogicalSupportsPerLoad=2
 
 6. 点击 `Rebuild Preview` 或移动 Actor 触发构建。然后 PIE，确认静态预览、运行时模块和地基共同出现。
 
+TaskGraph 场景不需要手工执行第 3–5 步；M7 Resolver 自动提供已批准的 DAG Profile。Blueprint 中把 Profile 改回 Legacy 也只会触发兼容升级，不会恢复旧生产链。
+
 ## 7. 验收
 
 - 三个 Preset 均能生成 Plate + Column，不出现重叠、空预览或初始弹飞；
 - 相同 Seed、参数得到相同 Brick 数、Transform、稀疏支撑数和 Topology Hash；
+- Tripod 在长轴为 X/Y 的两种输入下均满足三柱等面积接触质心与区域中心误差 `<0.01cm`，且任意两根方柱至少沿一个轴保留 `ColumnClearanceCM`；
+- 极限区域必须稳定区分不可行/可行边界；最终接触面积反推使柱宽变大时，按配置从 Tripod/FourColumn 降为 TwoColumn、必要时 SingleColumn，并在每次降级后重算全组柱宽，不得把本可行的窄接口误报为 `DAGNoJointSupportHull`；
 - `PreferredLogicalSupportsPerLoad=1` 时，Arch 的两条候选不会退化为完整二分柱网；
 - 平面测试台可拖动、击打，球面模式仍通过原有 Ground Adapter；
 - 日志含 `Algorithm=1`、`DAGMacro`、`DAGSparse`、`DAGHash`；
-- 旧 M7.3-A/B/B2 保持可选且不被 DAG 参数影响。
+- TaskGraph 中不存在 Legacy 路由或 DAG Reject 后的 Legacy fallback；
+- 所有 M7.3 Actor 的 Idle terminal 必须先于 M6 `WorldReady=1`，避免启动预热提前冻结。
 
 本次自动化已通过：
 
@@ -112,7 +120,7 @@ Preset=1 Seed=731022 Macro=3 Sparse=1 Bricks=5 PhysicalEdges=4 Hash=1987612131
 | `DAGColumnTooShort` | 上下板净高度低于最小柱高 | 增大 `TargetHeightCM`、减少 Series 层数或降低 `MinColumnHeightCM` |
 | `DAGMissingRequiredContact` | 编译后的柱未真正接触任一板 | 检查 Plate 厚度、Column Clearance、缩放和碰撞网格 Pivot；不要只改 authored edge |
 | `DAGUnexpectedBypass` | 最终盒体产生了未授权横向/斜向接触 | 增大 Scope/Series Gap，缩小 Plate Footprint 或调整候选选择 |
-| `DAGPhysicalBrickBudgetExceeded:Actual:Budget` | DAG-1 估算通过，但 Plate/Column 实体数量超过 `GenerationSettings.MaxBrickCount` | 提高该预算，或降低扩展/每载荷支撑数；不会静默删除局部砖块 |
+| 提高 Budget 后实际 Plate/Column 数高于预期 | 当前 DAG-1 预算估算以 Macro 为主，尚未形成获批准的编译后物理砖数门槛 | 生产首版保持 Budget=0；启用 Budget=1 前补 post-compile hard guard 与 TaskGraph Seed sweep |
 
 ## 9. DAG-3 接口
 

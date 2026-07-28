@@ -239,7 +239,14 @@ bool AABTSM73StableBuildingActor::RebuildPreview()
 	FString Error;
 	const bool bAccepted = BuildResolvedStructure(true, Context, Data, Error);
 	FillGenerationSummary(Context, Data, bAccepted, Error);
-	if (!bAccepted) return false;
+	if (!bAccepted)
+	{
+		FoundationCap->SetVisibility(false, true);
+		FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		FoundationFeet->ClearInstances();
+		FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return false;
+	}
 	UpdateFoundationComponents(Context, Data);
 	if (bShowEditorPreview) UpdatePreviewComponents(Context, Data);
 	return true;
@@ -344,7 +351,11 @@ void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 	{
 		GetWorldTimerManager().SetTimer(MaterialSystemSearchTimer, this, &AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem, 0.1f, false);
 	}
-	else UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A] No MaterialSystem Actor=%s"), *GetName());
+	else
+	{
+		RejectRuntimeStructure(TEXT("NoMaterialSystem"));
+		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A] No MaterialSystem Actor=%s"), *GetName());
+	}
 }
 
 void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMaterialSystem* MaterialSystem)
@@ -356,6 +367,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	if (!BuildResolvedStructure(false, Context, Data, Error, MaterialSystem))
 	{
 		FillGenerationSummary(Context, Data, false, Error);
+		RejectRuntimeStructure(Error);
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A][Reject] Actor=%s Reason=%s"), *GetName(), *Error);
 		return;
 	}
@@ -393,10 +405,26 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		: (Context.Planet.IsValid() ? Context.Planet->GetPlanetCenterWorld() : FVector::ZeroVector);
 	FillGenerationSummary(Context, Data, bRuntimeSpawned,
 		bRuntimeSpawned ? FString() : FString(TEXT("RuntimeModuleSpawnFailed")));
-	if (bRuntimeSpawned && bRunIdleChaosValidation) BeginIdleValidation(Context);
+	if (!bRuntimeSpawned)
+	{
+		RejectRuntimeStructure(TEXT("RuntimeModuleSpawnFailed"));
+	}
+	if (bRuntimeSpawned && bRunIdleChaosValidation)
+	{
+		BeginIdleValidation(Context);
+	}
+	else
+	{
+		IdleValidationState = bRuntimeSpawned
+			? EABTSM73IdleValidationState::NotRequired
+			: EABTSM73IdleValidationState::Rejected;
+	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
-		*GetName(), GenerationSettings.BuildingSeed, static_cast<int32>(GenerationSettings.GenerationAlgorithm), static_cast<int32>(GenerationSettings.Silhouette), Context.bPlanar ? 1 : 0,
+		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
+		*GetName(), GenerationSettings.BuildingSeed, static_cast<int32>(GenerationSettings.GenerationAlgorithm), static_cast<int32>(GenerationSettings.Silhouette),
+		static_cast<int32>(DAGGenerationSettings.Preset),
+		GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::LegacyLayeredAB2 ? 1 : 0,
+		Context.bPlanar ? 1 : 0,
 		Data.Bricks.Num(), Data.SupportEdges.Num(), Data.GroundNodeIds.Num(), Data.DAGMacroNodeCount, Data.DAGSelectedSupportCount, Data.DAGTopologyHash, Data.FoundationFeet.Num(), Data.TerrainDeltaCM,
 		Data.CurvatureDropCM, Data.MaxSlopeDegrees, bRuntimeSpawned ? 1 : 0);
 	for (const FABTSM73WeakPointRecord& WeakPoint : Data.WeakPoints)
@@ -464,6 +492,7 @@ void AABTSM73StableBuildingActor::BeginIdleValidation(const FABTSM73GroundContex
 	IdleValidationElapsed = 0.0f;
 	IdleStableElapsed = 0.0f;
 	bIdleValidationRunning = true;
+	IdleValidationState = EABTSM73IdleValidationState::Running;
 	SetActorTickEnabled(true);
 }
 
@@ -573,6 +602,9 @@ void AABTSM73StableBuildingActor::FinishIdleValidation(const bool bTimedOut)
 	const bool bAcceptedAfterBoundedTimeout = bTimedOut && bSpatiallyStable;
 	const bool bAccepted = !bTimedOut ? bSpatiallyStable : bAcceptedAfterBoundedTimeout;
 	GenerationSummary.bAccepted = GenerationSummary.bAccepted && bAccepted;
+	IdleValidationState = bAccepted
+		? EABTSM73IdleValidationState::Accepted
+		: EABTSM73IdleValidationState::Rejected;
 	if (!bAccepted)
 	{
 		GenerationSummary.RejectReason = FString::Printf(
@@ -607,9 +639,12 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	RuntimeModules.Reset();
 	RuntimeModulesByNodeId.Reset();
 	IdleInitialTransforms.Reset();
+	RuntimeMaterialSystem.Reset();
 	bRuntimeSpawned = false;
 	bIdleValidationRunning = false;
+	IdleValidationState = EABTSM73IdleValidationState::Rejected;
 	SetActorTickEnabled(false);
+	ClearBrickPreviews();
 	FoundationCap->SetVisibility(false, true);
 	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FoundationFeet->ClearInstances();

@@ -49,12 +49,27 @@ bool FABTSM3TaskGraphGenerator::Generate(
 
 		bool bSuccess = Mission.Build(WorldSeed, Attempt, Config.TaskTargetCells, CandidateTasks, CandidateLinks);
 		UE_LOG(LogABTSRuntime, Verbose, TEXT("[ABTS][PCG][Stage] Attempt=%d Mission=%d TimeMS=%.2f"), Attempt, bSuccess ? 1 : 0, (FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
-		if (bSuccess) bSuccess = Spatial.PlaceTaskSeeds(WorldSeed, Attempt, Cells, CandidateTasks);
+		if (bSuccess)
+		{
+			bSuccess = Spatial.PlaceTaskSeeds(
+				WorldSeed,
+				Attempt,
+				Config.MinSatelliteLaunchAngularSeparationDegrees,
+				Cells,
+				CandidateTasks);
+		}
 		if (bSuccess) bSuccess = Spatial.GrowTaskRegions(WorldSeed, Attempt, Config.TaskTargetCells, Cells, CandidateTasks, CandidateCells);
 		UE_LOG(LogABTSRuntime, Verbose, TEXT("[ABTS][PCG][Stage] Attempt=%d Spatial=%d TimeMS=%.2f"), Attempt, bSuccess ? 1 : 0, (FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
 		if (bSuccess)
 		{
-			Height.Generate(WorldSeed, Attempt, Cells, CandidateTasks, Config.MaxBuildSlopeDegrees, CandidateCells);
+			Height.Generate(
+				WorldSeed,
+				Attempt,
+				Cells,
+				CandidateTasks,
+				Config.MaxBuildSlopeDegrees,
+				Config.BuildingPadClearanceRingCells,
+				CandidateCells);
 			UE_LOG(LogABTSRuntime, Verbose, TEXT("[ABTS][PCG][Stage] Attempt=%d Height=1 TimeMS=%.2f"), Attempt, (FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
 			bSuccess = Hydrology.Generate(WorldSeed, Attempt, Config.StreamFlowThreshold, Config.WaterBarrierHalfWidthCells,
 				Cells, CandidateTasks, CandidateCells, CandidateEdges, BridgeEdge);
@@ -72,7 +87,16 @@ bool FABTSM3TaskGraphGenerator::Generate(
 		}
 		if (bSuccess)
 		{
-			bSuccess = Validator.Validate(Cells, CandidateTasks, CandidateLinks, CandidateCells, CandidateEdges, BridgeEdge, CandidateSummary, Failure);
+			bSuccess = Validator.Validate(
+				Cells,
+				CandidateTasks,
+				CandidateLinks,
+				CandidateCells,
+				CandidateEdges,
+				BridgeEdge,
+				Config.MinSatelliteLaunchAngularSeparationDegrees,
+				CandidateSummary,
+				Failure);
 			UE_LOG(LogABTSRuntime, Verbose, TEXT("[ABTS][PCG][Stage] Attempt=%d Validate=%d TimeMS=%.2f"), Attempt, bSuccess ? 1 : 0, (FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
 		}
 		if (!bSuccess)
@@ -95,10 +119,11 @@ bool FABTSM3TaskGraphGenerator::Generate(
 		OutEdgeStates = MoveTemp(CandidateEdges);
 		OutSummary = CandidateSummary;
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][PCG][Accepted] Seed=%d Version=%d Attempt=%d Tasks=%d Links=%d Assigned=%d Wilderness=%d RiverEdges=%d RoadEdges=%d Bridge=(%d,%d) LockedBefore=%d ReachableAfter=%d"),
+			TEXT("[ABTS][PCG][Accepted] Seed=%d Version=%d Attempt=%d Tasks=%d Links=%d Assigned=%d Wilderness=%d RiverEdges=%d RoadEdges=%d Bridge=(%d,%d) LockedBefore=%d ReachableAfter=%d SatelliteLaunchSepDeg=%.2f"),
 			WorldSeed, GeneratorVersion, Attempt, OutTasks.Num(), OutTaskLinks.Num(), OutSummary.AssignedTaskCells,
 			Cells.Num() - OutSummary.AssignedTaskCells, OutSummary.RiverEdges, OutSummary.RoadEdges,
-			BridgeEdge.CellA, BridgeEdge.CellB, OutSummary.bBridgeLockedBeforeBuild ? 1 : 0, OutSummary.bMainPathReachableAfterBridge ? 1 : 0);
+			BridgeEdge.CellA, BridgeEdge.CellB, OutSummary.bBridgeLockedBeforeBuild ? 1 : 0, OutSummary.bMainPathReachableAfterBridge ? 1 : 0,
+			OutSummary.SatelliteLaunchAngularSeparationDegrees);
 		return true;
 	}
 

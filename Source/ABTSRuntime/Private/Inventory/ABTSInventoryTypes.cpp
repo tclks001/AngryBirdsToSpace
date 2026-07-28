@@ -21,6 +21,8 @@ FText ABTSGetItemDisplayName(const EABTSItemId ItemId)
 	case EABTSItemId::SpaceSlingshotPart: return FText::FromString(TEXT("太空弹弓部件"));
 	case EABTSItemId::Glass: return FText::FromString(TEXT("玻璃"));
 	case EABTSItemId::BridgeKit: return FText::FromString(TEXT("桥梁组件"));
+	case EABTSItemId::SpaceStake: return FText::FromString(TEXT("太空弹弓桩"));
+	case EABTSItemId::SpaceCord: return FText::FromString(TEXT("太空弹弓弦"));
 	default: return FText::FromString(TEXT("未知物品"));
 	}
 }
@@ -44,6 +46,8 @@ FString ABTSGetItemFallbackLabel(const EABTSItemId ItemId)
 	case EABTSItemId::SpaceSlingshotPart: return TEXT("Space Sling Part");
 	case EABTSItemId::Glass: return TEXT("Glass");
 	case EABTSItemId::BridgeKit: return TEXT("Bridge Kit");
+	case EABTSItemId::SpaceStake: return TEXT("Space Stake");
+	case EABTSItemId::SpaceCord: return TEXT("Space Cord");
 	default: return TEXT("Unknown Item");
 	}
 }
@@ -62,14 +66,59 @@ bool ABTSIsSlingshotStake(const EABTSItemId ItemId)
 {
 	return ItemId == EABTSItemId::Branch
 		|| ItemId == EABTSItemId::SimpleStake
-		|| ItemId == EABTSItemId::ReinforcedStake;
+		|| ItemId == EABTSItemId::ReinforcedStake
+		|| ItemId == EABTSItemId::SpaceStake;
 }
 
 bool ABTSIsSlingshotCord(const EABTSItemId ItemId)
 {
 	return ItemId == EABTSItemId::PlantFiber
 		|| ItemId == EABTSItemId::SimpleCord
-		|| ItemId == EABTSItemId::ReinforcedCord;
+		|| ItemId == EABTSItemId::ReinforcedCord
+		|| ItemId == EABTSItemId::SpaceCord;
+}
+
+bool ABTSTryResolveSlingshotPartTier(const EABTSItemId ItemId, EABTSSlingshotTier& OutTier)
+{
+	switch (ItemId)
+	{
+	case EABTSItemId::Branch:
+	case EABTSItemId::PlantFiber:
+		OutTier = EABTSSlingshotTier::Twig;
+		return true;
+	case EABTSItemId::SimpleStake:
+	case EABTSItemId::SimpleCord:
+		OutTier = EABTSSlingshotTier::Simple;
+		return true;
+	case EABTSItemId::ReinforcedStake:
+	case EABTSItemId::ReinforcedCord:
+		OutTier = EABTSSlingshotTier::Reinforced;
+		return true;
+	case EABTSItemId::SpaceStake:
+	case EABTSItemId::SpaceCord:
+		OutTier = EABTSSlingshotTier::Space;
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool ABTSAreSlingshotPartsCompatible(
+	const EABTSItemId StakeItem,
+	const EABTSItemId CordItem,
+	EABTSSlingshotTier& OutTier)
+{
+	if (!ABTSIsSlingshotStake(StakeItem) || !ABTSIsSlingshotCord(CordItem)) return false;
+	EABTSSlingshotTier StakeTier = EABTSSlingshotTier::Simple;
+	EABTSSlingshotTier CordTier = EABTSSlingshotTier::Simple;
+	if (!ABTSTryResolveSlingshotPartTier(StakeItem, StakeTier)
+		|| !ABTSTryResolveSlingshotPartTier(CordItem, CordTier)
+		|| StakeTier != CordTier)
+	{
+		return false;
+	}
+	OutTier = StakeTier;
+	return true;
 }
 
 const TArray<EABTSItemId>& ABTSGetAllItemIds()
@@ -87,9 +136,10 @@ const TArray<EABTSItemId>& ABTSGetAllItemIds()
 		EABTSItemId::FurnaceKit,
 		EABTSItemId::ReinforcedStake,
 		EABTSItemId::ReinforcedCord,
-		EABTSItemId::SpaceSlingshotPart,
 		EABTSItemId::Glass,
-		EABTSItemId::BridgeKit
+		EABTSItemId::BridgeKit,
+		EABTSItemId::SpaceStake,
+		EABTSItemId::SpaceCord
 	};
 	return Items;
 }
