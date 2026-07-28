@@ -4,7 +4,7 @@
 
 namespace
 {
-	bool IsFiniteVector(const FVector3d& Value)
+	bool IsM110FiniteVector(const FVector3d& Value)
 	{
 		return FMath::IsFinite(Value.X) && FMath::IsFinite(Value.Y) && FMath::IsFinite(Value.Z);
 	}
@@ -61,7 +61,7 @@ bool FABTSM110FinaleGravityBody::IsValid() const
 {
 	return Role >= EABTSM110FinaleGravityRole::Primary
 		&& Role < EABTSM110FinaleGravityRole::Count
-		&& IsFiniteVector(CenterCM)
+		&& IsM110FiniteVector(CenterCM)
 		&& FMath::IsFinite(GravitationalParameterCM3PerSec2)
 		&& GravitationalParameterCM3PerSec2 > 0.0
 		&& FMath::IsFinite(CollisionRadiusCM)

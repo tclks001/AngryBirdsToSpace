@@ -850,6 +850,135 @@ bool FABTSM11AVirtualMomentumAblationTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11ATargetQualificationTest,
+	"ABTS.M11A.TargetQualification",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11ATargetQualificationTest::RunTest(const FString& Parameters)
+{
+	const FABTSM11TrajectoryRequest DefaultRequest = MakeSweptRequest(false);
+	TestEqual(TEXT("Generic targets remain backward-compatible by default"),
+		DefaultRequest.Scenario.Target.RequiredQualifiedAssistCount, 0);
+
+	FABTSM11TrajectoryResult DefaultResult;
+	TestTrue(TEXT("Default target-qualification request solves"),
+		FABTSM11GravityAssistSolver::Solve(DefaultRequest, DefaultResult));
+	TestEqual(TEXT("A default target can be hit without a completed assist"),
+		DefaultResult.Termination,
+		EABTSM11TrajectoryTermination::TargetHit);
+	TestTrue(TEXT("Default TargetHit is also a geometric contact"),
+		DefaultResult.DidContactTarget());
+	TestEqual(TEXT("Default TargetHit records one geometric contact"),
+		DefaultResult.TargetContactCount, 1);
+
+	FABTSM11TrajectoryRequest GatedRequest = DefaultRequest;
+	GatedRequest.Scenario.ScenarioHash = 0x11a00du;
+	GatedRequest.Scenario.Target.RequiredQualifiedAssistCount = 1;
+	GatedRequest.Scenario.Target.HitRadiusCM = 100.0;
+	GatedRequest.Scenario.Target.GeometricContactRadiusCM = 10.0;
+	GatedRequest.InitialPositionCM = FVector3d(-200.0, 0.0, 0.0);
+	GatedRequest.Config.MaximumSimulationTimeSeconds = 2.0;
+	FABTSM11TrajectoryResult GatedResult;
+	TestTrue(TEXT("Qualified-assist-gated target request solves"),
+		FABTSM11GravityAssistSolver::Solve(GatedRequest, GatedResult));
+	TestEqual(TEXT("An unqualified target crossing is not a success"),
+		GatedResult.Termination,
+		EABTSM11TrajectoryTermination::Timeout);
+	TestNull(TEXT("No TargetHit event is emitted before the required assist"),
+		GatedResult.FindFirstEvent(EABTSM11TrajectoryEventType::TargetHit));
+	TestNotNull(TEXT("Unqualified swept crossing emits TargetContact"),
+		GatedResult.FindFirstEvent(EABTSM11TrajectoryEventType::TargetContact));
+	TestTrue(TEXT("Unqualified swept crossing is geometrically observable"),
+		GatedResult.DidContactTarget());
+	TestEqual(TEXT("Unqualified swept crossing is counted once"),
+		GatedResult.TargetContactCount, 1);
+
+	FABTSM11TrajectoryRequest QualifiedRequest = GatedRequest;
+	QualifiedRequest.Scenario.ScenarioHash = 0x11a00eu;
+	QualifiedRequest.InitialExpectedAssistIndex = 2;
+	FABTSM11TrajectoryResult QualifiedResult;
+	TestTrue(TEXT("Pre-qualified target request solves"),
+		FABTSM11GravityAssistSolver::Solve(
+			QualifiedRequest, QualifiedResult));
+	TestEqual(TEXT("Qualification activates the larger success envelope"),
+		QualifiedResult.Termination,
+		EABTSM11TrajectoryTermination::TargetHit);
+	TestNotNull(TEXT("Qualified success envelope emits TargetHit"),
+		QualifiedResult.FindFirstEvent(EABTSM11TrajectoryEventType::TargetHit));
+	TestNull(TEXT("Qualified success needs no physical-contact event"),
+		QualifiedResult.FindFirstEvent(
+			EABTSM11TrajectoryEventType::TargetContact));
+	TestEqual(TEXT("Outer success envelope does not fake physical contact"),
+		QualifiedResult.TargetContactCount, 0);
+
+	FABTSM11TrajectoryRequest NoObservationRequest = GatedRequest;
+	NoObservationRequest.Scenario.ScenarioHash = 0x11a00fu;
+	NoObservationRequest.Scenario.Target.CenterCM =
+		FVector3d(10000.0, 0.0, 0.0);
+	NoObservationRequest.Scenario.Target.HitRadiusCM = 10.0;
+	NoObservationRequest.Scenario.Target.GeometricContactRadiusCM = 0.0;
+	FABTSM11TrajectoryRequest ObservationRequest = NoObservationRequest;
+	ObservationRequest.Scenario.ScenarioHash = 0x11a011u;
+	ObservationRequest.Scenario.Target.GeometricContactRadiusCM = 10.0;
+	ObservationRequest.Scenario.Target
+		.bUseSeparateGeometricContactCenter = true;
+	ObservationRequest.Scenario.Target.GeometricContactCenterCM =
+		FVector3d::ZeroVector;
+	FABTSM11TrajectoryResult NoObservationResult;
+	FABTSM11TrajectoryResult ObservationResult;
+	TestTrue(TEXT("No-observation comparison request solves"),
+		FABTSM11GravityAssistSolver::Solve(
+			NoObservationRequest, NoObservationResult));
+	TestTrue(TEXT("Separated observation-only target request solves"),
+		FABTSM11GravityAssistSolver::Solve(
+			ObservationRequest, ObservationResult));
+	TestNotNull(TEXT("Separated physical center emits TargetContact"),
+		ObservationResult.FindFirstEvent(
+			EABTSM11TrajectoryEventType::TargetContact));
+	TestEqual(TEXT("Observation-only contact preserves termination"),
+		ObservationResult.Termination,
+		NoObservationResult.Termination);
+	if (!NoObservationResult.Points.IsEmpty()
+		&& !ObservationResult.Points.IsEmpty())
+	{
+		const FABTSM11TrajectoryPoint& WithoutObservation =
+			NoObservationResult.Points.Last();
+		const FABTSM11TrajectoryPoint& WithObservation =
+			ObservationResult.Points.Last();
+		TestEqual(TEXT("Observation-only contact preserves end time"),
+			WithObservation.TimeSeconds,
+			WithoutObservation.TimeSeconds);
+		TestTrue(TEXT("Observation-only contact preserves end position"),
+			WithObservation.PositionCM.Equals(
+				WithoutObservation.PositionCM, 1.0e-12));
+		TestTrue(TEXT("Observation-only contact preserves end velocity"),
+			WithObservation.VelocityCMPerSec.Equals(
+				WithoutObservation.VelocityCMPerSec, 1.0e-12));
+	}
+
+	FABTSM11TrajectoryRequest OtherGeometryRequest =
+		NoObservationRequest;
+	OtherGeometryRequest.Scenario.ScenarioHash =
+		ObservationRequest.Scenario.ScenarioHash;
+	OtherGeometryRequest.Scenario.Target.GeometricContactRadiusCM = 10.0;
+	OtherGeometryRequest.Scenario.Target
+		.bUseSeparateGeometricContactCenter = true;
+	OtherGeometryRequest.Scenario.Target.GeometricContactCenterCM =
+		FVector3d(5000.0, 5000.0, 0.0);
+	FABTSM11TrajectoryResult OtherGeometryResult;
+	TestTrue(TEXT("Geometry-only hash comparison request solves"),
+		FABTSM11GravityAssistSolver::Solve(
+			OtherGeometryRequest, OtherGeometryResult));
+	TestTrue(TEXT("Separated geometric center changes result identity"),
+		OtherGeometryResult.ValidationHash
+			!= NoObservationResult.ValidationHash);
+	TestTrue(TEXT("Two separated geometric centers change result identity"),
+		OtherGeometryResult.ValidationHash
+			!= ObservationResult.ValidationHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11ASweptEventsTest,
 	"ABTS.M11A.SweptAnalyticEvents",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

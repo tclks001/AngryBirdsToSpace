@@ -118,6 +118,38 @@ namespace ABTSM11GravityAssist
 		Hash.AddInt32(Request.Scenario.Target.TargetId);
 		Hash.AddVector(Request.Scenario.Target.CenterCM);
 		Hash.AddDouble(Request.Scenario.Target.HitRadiusCM);
+		const bool bUsesTargetExtension =
+			Request.Scenario.Target.GeometricContactRadiusCM != 0.0
+			|| Request.Scenario.Target.bUseSeparateGeometricContactCenter
+			|| Request.Scenario.Target.RequiredQualifiedAssistCount != 0
+			|| Request.Scenario.Target.MinimumQualifyingCorridorQuality != 0.0
+			|| Request.Scenario.Target
+				.MinimumQualifyingEnergyGainCM2PerSec2 != 0.0
+			|| Request.Scenario.Target.bRequireAllowedPassSide;
+		if (bUsesTargetExtension)
+		{
+			// Preserve the M11-A HashSchemaVersion 1 golden stream for a
+			// default target. M11-B opts into the extension with non-default
+			// qualification fields, whose bytes are then part of its identity.
+			Hash.AddInt32(
+				Request.Scenario.Target.RequiredQualifiedAssistCount);
+			Hash.AddDouble(
+				Request.Scenario.Target.GeometricContactRadiusCM);
+			Hash.AddByte(
+				Request.Scenario.Target
+					.bUseSeparateGeometricContactCenter
+				? 1u
+				: 0u);
+			Hash.AddVector(
+				Request.Scenario.Target.GeometricContactCenterCM);
+			Hash.AddDouble(
+				Request.Scenario.Target.MinimumQualifyingCorridorQuality);
+			Hash.AddDouble(
+				Request.Scenario.Target
+					.MinimumQualifyingEnergyGainCM2PerSec2);
+			Hash.AddByte(
+				Request.Scenario.Target.bRequireAllowedPassSide ? 1u : 0u);
+		}
 		Hash.AddVector(Request.InitialPositionCM);
 		Hash.AddVector(Request.InitialVelocityCMPerSec);
 		Hash.AddDouble(Request.InitialTimeSeconds);
@@ -125,6 +157,13 @@ namespace ABTSM11GravityAssist
 
 		Hash.AddByte(static_cast<uint8>(Result.Termination));
 		Hash.AddInt32(Result.CompletedAssistCount);
+		if (bUsesTargetExtension)
+		{
+			// M11-B hashes the independent target-contact channel. The
+			// default M11-A stream deliberately omits it, retaining the
+			// HashSchemaVersion 1 golden value byte-for-byte.
+			Hash.AddInt32(Result.TargetContactCount);
+		}
 		Hash.AddInt32(Result.Points.Num());
 		for (const FABTSM11TrajectoryPoint& Point : Result.Points)
 		{

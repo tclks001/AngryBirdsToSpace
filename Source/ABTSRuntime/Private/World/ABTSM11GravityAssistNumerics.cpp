@@ -27,7 +27,7 @@ namespace ABTSM11GravityAssist
 
 	namespace
 	{
-		double SmoothStep5(const double Value)
+		double NumericsSmoothStep5(const double Value)
 		{
 			const double X = FMath::Clamp(Value, 0.0, 1.0);
 			return X * X * X * (X * (X * 6.0 - 15.0) + 10.0);
@@ -51,7 +51,7 @@ namespace ABTSM11GravityAssist
 			{
 				return 1.0;
 			}
-			return SmoothStep5(
+			return NumericsSmoothStep5(
 				(Body.InfluenceRadiusCM - DistanceCM) / Body.InfluenceBlendWidthCM);
 		}
 
@@ -122,7 +122,8 @@ namespace ABTSM11GravityAssist
 	{
 		const FABTSM11SolverConfig& Config = Request.Config;
 		double MinimumAssistRadiusCM = TNumericLimits<double>::Max();
-		double MinimumCollisionRadiusCM = Request.Scenario.Target.HitRadiusCM;
+		double MinimumCollisionRadiusCM =
+			Request.Scenario.Target.GetGeometricContactRadiusCM();
 		for (const FABTSM11GravityBodySpec& Body : Request.Scenario.Bodies)
 		{
 			MinimumCollisionRadiusCM =

@@ -91,7 +91,8 @@ namespace ABTSM11GravityAssist
 	FHardHitResult FindHardHit(
 		const FABTSM11TrajectoryRequest& Request,
 		const FState& Start,
-		const FState& End)
+		const FState& End,
+		const int32 QualifiedAssistCount)
 	{
 		FHardHitResult Result;
 		for (int32 BodyIndex = 0;
@@ -114,21 +115,74 @@ namespace ABTSM11GravityAssist
 			}
 		}
 
-		double TargetAlpha = 1.0;
+		double TargetContactAlpha = 1.0;
 		if (FABTSM11GravityAssistSolver::SweptSphereFirstHit(
 			Start.PositionCM,
 			End.PositionCM,
-			Request.Scenario.Target.CenterCM,
-			Request.Scenario.Target.HitRadiusCM,
-			TargetAlpha)
+			Request.Scenario.Target.GetGeometricContactCenterCM(),
+			Request.Scenario.Target.GetGeometricContactRadiusCM(),
+			TargetContactAlpha))
+		{
+			Result.bHasTargetContact = true;
+			Result.TargetContactAlpha = TargetContactAlpha;
+		}
+		double QualifiedHitAlpha = 1.0;
+		if (QualifiedAssistCount
+				>= Request.Scenario.Target.RequiredQualifiedAssistCount
+			&& FABTSM11GravityAssistSolver::SweptSphereFirstHit(
+				Start.PositionCM,
+				End.PositionCM,
+				Request.Scenario.Target.CenterCM,
+				Request.Scenario.Target.HitRadiusCM,
+				QualifiedHitAlpha)
 			&& (Result.Type == EHardHit::None
-				|| TargetAlpha < Result.Alpha - Request.Config.RootAlphaTolerance))
+				|| QualifiedHitAlpha
+					< Result.Alpha - Request.Config.RootAlphaTolerance))
 		{
 			Result.Type = EHardHit::Target;
-			Result.Alpha = TargetAlpha;
+			Result.Alpha = QualifiedHitAlpha;
 			Result.BodyIndex = INDEX_NONE;
 		}
 		return Result;
+	}
+
+	bool AssistExitQualifiesTarget(
+		const FABTSM11TrajectoryRequest& Request,
+		const FABTSM11TrajectoryEvent& ExitEvent)
+	{
+		if (ExitEvent.AssistIndex < 1
+			|| ExitEvent.AssistIndex > FABTSM11GravityScenario::AssistCount
+			|| !Request.Config.IsGameplayAssistEnabled(
+				ExitEvent.AssistIndex)
+			|| ExitEvent.CorridorQuality
+				< Request.Scenario.Target.MinimumQualifyingCorridorQuality
+			|| ExitEvent.AppliedEnergyChangeCM2PerSec2
+				< Request.Scenario.Target
+					.MinimumQualifyingEnergyGainCM2PerSec2)
+		{
+			return false;
+		}
+		if (!Request.Scenario.Target.bRequireAllowedPassSide)
+		{
+			return true;
+		}
+		const FABTSM11GravityBodySpec& Body =
+			Request.Scenario.GetAssist(ExitEvent.AssistIndex);
+		switch (Body.AllowedPassSide)
+		{
+		case EABTSM11AllowedPassSide::PositiveT:
+			return ExitEvent.BPlaneTCM > 0.0;
+		case EABTSM11AllowedPassSide::NegativeT:
+			return ExitEvent.BPlaneTCM < 0.0;
+		case EABTSM11AllowedPassSide::PositiveR:
+			return ExitEvent.BPlaneRCM > 0.0;
+		case EABTSM11AllowedPassSide::NegativeR:
+			return ExitEvent.BPlaneRCM < 0.0;
+		case EABTSM11AllowedPassSide::Any:
+			return true;
+		default:
+			return false;
+		}
 	}
 
 	void FinalizeResult(
@@ -169,6 +223,13 @@ namespace ABTSM11GravityAssist
 		}
 		else
 		{
+			if (HardHit.bHasTargetContact
+				&& HardHit.TargetContactAlpha
+					<= HardHit.Alpha
+						+ Request.Config.RootAlphaTolerance)
+			{
+				++Result.TargetContactCount;
+			}
 			Result.Events.Add(MakeEvent(
 				EABTSM11TrajectoryEventType::TargetHit,
 				Request.Scenario.Target.TargetId,

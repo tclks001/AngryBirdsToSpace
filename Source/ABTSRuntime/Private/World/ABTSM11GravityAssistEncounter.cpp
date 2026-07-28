@@ -6,7 +6,7 @@ namespace ABTSM11GravityAssist
 {
 	namespace
 	{
-		double SmoothStep5(const double Value)
+		double EncounterSmoothStep5(const double Value)
 		{
 			const double X = FMath::Clamp(Value, 0.0, 1.0);
 			return X * X * X * (X * (X * 6.0 - 15.0) + 10.0);
@@ -49,7 +49,7 @@ namespace ABTSM11GravityAssist
 			const double Normalized =
 				(Assist.BPlaneOuterChiSquared - ChiSquared)
 				/ (Assist.BPlaneOuterChiSquared - 1.0);
-			return SmoothStep5(Normalized);
+			return EncounterSmoothStep5(Normalized);
 		}
 
 		bool FitHyperbolicAsymptoteDirection(
@@ -100,7 +100,7 @@ namespace ABTSM11GravityAssist
 			return OutDirection.SquaredLength() > UE_DOUBLE_SMALL_NUMBER;
 		}
 
-		double ClampToRemainingEnergy(
+		double ClampEncounterEnergyToRemaining(
 			const double ProposedEnergy,
 			const double RequestedEnergy,
 			const double AppliedEnergy)
@@ -259,7 +259,7 @@ namespace ABTSM11GravityAssist
 					const double ProposedEnergy =
 						Plan.RequestedEnergyChangeCM2PerSec2
 						* RawWeight / NormalizationSeconds;
-					const double EnergyStep = ClampToRemainingEnergy(
+					const double EnergyStep = ClampEncounterEnergyToRemaining(
 						ProposedEnergy,
 						Plan.RequestedEnergyChangeCM2PerSec2,
 						AppliedEnergy);
@@ -321,6 +321,7 @@ namespace ABTSM11GravityAssist
 	bool BuildNaturalEncounterPlan(
 		const FABTSM11TrajectoryRequest& Request,
 		const int32 AssistIndex,
+		const int32 QualifiedAssistCount,
 		const FState& EntryState,
 		FNaturalEncounterPlan& OutPlan)
 	{
@@ -424,7 +425,11 @@ namespace ABTSM11GravityAssist
 				: 2.0;
 			if (!bFoundClosest)
 			{
-				const FHardHitResult HardHit = FindHardHit(Request, State, Candidate);
+				const FHardHitResult HardHit = FindHardHit(
+					Request,
+					State,
+					Candidate,
+					QualifiedAssistCount);
 				if (HardHit.Type != EHardHit::None
 					&& HardHit.Alpha
 						<= ClosestAlpha + Config.RootAlphaTolerance)

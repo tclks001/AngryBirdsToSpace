@@ -61,6 +61,12 @@ namespace ABTSM11GravityAssist
 		EHardHit Type = EHardHit::None;
 		double Alpha = 1.0;
 		int32 BodyIndex = INDEX_NONE;
+		/**
+		 * Geometric target contact is reported independently of Type. Type is
+		 * Target only when the qualification gate is also satisfied.
+		 */
+		bool bHasTargetContact = false;
+		double TargetContactAlpha = 1.0;
 	};
 
 	struct FSphereRoots
@@ -140,7 +146,11 @@ namespace ABTSM11GravityAssist
 	FHardHitResult FindHardHit(
 		const FABTSM11TrajectoryRequest& Request,
 		const FState& Start,
-		const FState& End);
+		const FState& End,
+		int32 QualifiedAssistCount);
+	bool AssistExitQualifiesTarget(
+		const FABTSM11TrajectoryRequest& Request,
+		const FABTSM11TrajectoryEvent& ExitEvent);
 	void FinalizeResult(
 		const FABTSM11TrajectoryRequest& Request,
 		FABTSM11TrajectoryResult& Result,
@@ -176,6 +186,7 @@ namespace ABTSM11GravityAssist
 	bool BuildNaturalEncounterPlan(
 		const FABTSM11TrajectoryRequest& Request,
 		int32 AssistIndex,
+		int32 QualifiedAssistCount,
 		const FState& EntryState,
 		FNaturalEncounterPlan& OutPlan);
 

@@ -1,6 +1,6 @@
 # M11.0：终局前置收口设计
 
-> 状态：设计合同、C++、Editor 编译、自动化、固定 Seed 独立进程基线与用户 PIE 视觉/交互验收均已完成。下游纯数据积分已完成 [M11-A](M11AGravityAssistSolverDesign.md)。
+> 状态：设计合同、C++、Editor 编译、自动化、固定 Seed 独立进程基线与用户 PIE 视觉/交互验收均已完成。下游纯数据积分已完成 [M11-A](M11AGravityAssistSolverDesign.md)；[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) 的 C++、编译与全新进程自动认证也已完成，待用户 PIE。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
@@ -343,6 +343,6 @@ AssistPlanet3
 - M9：现行卫星锚定、远距练习和 M11 排除边界以本稿为准；
 - M10.1-C：投影工具保持只读，不需要知道 Space 槽或 M9 排除细节；
 - M11-A：已消费固定四体角色并完成纯数据积分，见 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)；
-- M11-B：继续消费本稿局部坐标系，执行局部布局搜索、认证预设和全输入域验证。
+- M11-B：继续消费本稿局部坐标系，执行局部布局搜索、认证预设和全输入域验证；当前实现、认证门槛和 M11-C 交接见 [M11-B 详稿](M11BFinaleLayoutCertificationDesign.md)。
 
-返回父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)
+返回父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 下游求解器：[M11-A](M11AGravityAssistSolverDesign.md) · 当前下游：[M11-B](M11BFinaleLayoutCertificationDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)

@@ -30,7 +30,9 @@ bool FABTSM11GravityAssistSolver::Solve(
 	State.PositionCM = Request.InitialPositionCM;
 	State.VelocityCMPerSec = Request.InitialVelocityCMPerSec;
 	int32 ExpectedAssistIndex = Request.InitialExpectedAssistIndex;
+	int32 QualifiedAssistCount = Request.InitialExpectedAssistIndex - 1;
 	OutResult.CompletedAssistCount = Request.InitialExpectedAssistIndex - 1;
+	bool bTargetContactInside = false;
 	TOptional<FActiveEncounter> ActiveEncounter;
 	OutResult.Points.Add(MakePoint(Primary, State));
 
@@ -88,7 +90,11 @@ bool FABTSM11GravityAssistSolver::Solve(
 			return true;
 		}
 
-		const FHardHitResult HardHit = FindHardHit(Request, State, Candidate);
+		const FHardHitResult HardHit = FindHardHit(
+			Request,
+			State,
+			Candidate,
+			QualifiedAssistCount);
 		double TransitionAlpha = 2.0;
 		int32 TransitionAssistIndex = 0;
 		FSphereRoots TransitionRoots;
@@ -279,6 +285,33 @@ bool FABTSM11GravityAssistSolver::Solve(
 			}
 		}
 
+		const bool bNonTerminalTargetContactBeforeBoundary =
+			!bTargetContactInside
+			&& HardHit.bHasTargetContact
+			&& HardHit.Type != EHardHit::Target
+			&& (HardHit.Type == EHardHit::None
+				|| HardHit.TargetContactAlpha
+					<= HardHit.Alpha + Request.Config.RootAlphaTolerance)
+			&& (Transition == ETransition::None
+				|| HardHit.TargetContactAlpha
+					<= TransitionAlpha + Request.Config.RootAlphaTolerance);
+		if (bNonTerminalTargetContactBeforeBoundary)
+		{
+			const FState ContactState = LerpState(
+				State, Candidate, HardHit.TargetContactAlpha);
+			OutResult.Points.Add(MakePoint(Primary, ContactState));
+			OutResult.Events.Add(MakeEvent(
+				EABTSM11TrajectoryEventType::TargetContact,
+				Request.Scenario.Target.TargetId,
+				0,
+				ContactState));
+			++OutResult.TargetContactCount;
+			bTargetContactInside = true;
+			// TargetContact is an observation-only event. Retain the exact
+			// crossing point in the result, but do not turn it into an
+			// integration boundary or discard the remainder of this step.
+		}
+
 		if (HardHit.Type != EHardHit::None
 			&& (Transition == ETransition::None
 				|| HardHit.Alpha
@@ -374,7 +407,11 @@ bool FABTSM11GravityAssistSolver::Solve(
 				{
 					FNaturalEncounterPlan Plan;
 					if (!BuildNaturalEncounterPlan(
-						Request, Encounter.AssistIndex, TransitionState, Plan))
+						Request,
+						Encounter.AssistIndex,
+						QualifiedAssistCount,
+						TransitionState,
+						Plan))
 					{
 						const bool bDeferredNaturalTerminal =
 							Plan.Failure
@@ -548,6 +585,13 @@ bool FABTSM11GravityAssistSolver::Solve(
 					ExitEvent.AppliedEnergyChangeCM2PerSec2 =
 						Encounter.AppliedEnergyChangeCM2PerSec2;
 					OutResult.Events.Add(ExitEvent);
+					if (QualifiedAssistCount
+							== Encounter.AssistIndex - 1
+						&& AssistExitQualifiesTarget(
+							Request, ExitEvent))
+					{
+						QualifiedAssistCount = Encounter.AssistIndex;
+					}
 					OutResult.CompletedAssistCount = FMath::Max(
 						OutResult.CompletedAssistCount, Encounter.AssistIndex);
 					ExpectedAssistIndex = Encounter.AssistIndex + 1;
@@ -556,6 +600,14 @@ bool FABTSM11GravityAssistSolver::Solve(
 			}
 
 			State = TransitionState;
+			bTargetContactInside =
+				(State.PositionCM
+					- Request.Scenario.Target
+						.GetGeometricContactCenterCM())
+					.SquaredLength()
+				<= FMath::Square(
+					Request.Scenario.Target
+						.GetGeometricContactRadiusCM());
 			OutResult.Points.Add(MakePoint(Primary, State));
 			continue;
 		}
@@ -638,6 +690,12 @@ bool FABTSM11GravityAssistSolver::Solve(
 		}
 
 		State = Candidate;
+		bTargetContactInside =
+			(State.PositionCM
+				- Request.Scenario.Target
+					.GetGeometricContactCenterCM()).SquaredLength()
+			<= FMath::Square(
+				Request.Scenario.Target.GetGeometricContactRadiusCM());
 		OutResult.Points.Add(MakePoint(Primary, State));
 	}
 

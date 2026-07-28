@@ -6,7 +6,7 @@
 >
 > 上游：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
 >
-> 下游：M11-B 终局局部布局搜索、认证预设与完整 `Yaw × Pitch × Power` 输入域验证。
+> 下游：[M11-B 终局局部布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md) 的 C++、编译与全新进程自动认证已完成，待用户 PIE。
 >
 > 交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
 
@@ -113,7 +113,7 @@ v'^2=v^2+2\Delta\epsilon
 
 ### 3.5 解析事件与优先级
 
-行星/主星碰撞和 UFO 命中使用线段—球二次根；即使一个子步两端都在球外也不能穿透。最近点使用固定次数二分求径向速度零点。版本 1 的同子步裁决为：
+行星/主星碰撞和目标使用线段—球二次根；即使一个子步两端都在球外也不能穿透。M11-B 以向后兼容扩展把目标拆为合格终端拦截包络与独立几何接触球：满足连续合格助推门时，进入外层包络产生终止性的 `TargetHit`；资格不足但 swept 穿过实际几何球时，追加非成功 `TargetContact`，并继续积分。默认资格字段为零、几何半径为零时，仍退化为 M11-A 原有的单球目标。最近点使用固定次数二分求径向速度零点。版本 1 的同子步裁决为：
 
 1. 最早解析根优先；
 2. 同一根上 `BodyCollision > TargetHit`；
@@ -121,14 +121,14 @@ v'^2=v^2+2\Delta\epsilon
 4. 最后处理越界与模拟时限；
 5. 时限处主星比能为负映射为 `SolarCaptured`，否则为 `Timeout`。
 
-输出事件基线为 `AssistEnter / ClosestApproach / AssistExit / BodyCollision / TargetHit / WrongOrder / OutOfBounds / SolarCaptured / Timeout`，并保留三类稳定求解失败。
+输出事件基线为 `AssistEnter / ClosestApproach / AssistExit / BodyCollision / TargetHit / TargetContact / WrongOrder / OutOfBounds / SolarCaptured / Timeout`，并保留三类稳定求解失败。`TargetContact` 追加在枚举末尾，未改变既有 M11-A 事件数值身份。
 
 ### 3.6 HashSchemaVersion 1
 
 Hash 使用固定字节序 FNV-1a 64 位折叠，不对结构体内存、Padding 或指针做 CRC。规范序列依次包含：
 
 - Hash/Solver 版本和全部数值配置；
-- 场景版本、ScenarioHash、所有玩法相关 Body/Target 字段；
+- 场景版本、ScenarioHash、所有玩法相关 Body/Target 字段；只有显式启用 qualified-target 扩展时，几何中心/半径、资格门和 `TargetContactCount` 才加入 v1 Hash 字节流，默认夹具 golden 不变；
 - 初态与期望助推序号；
 - 终止原因、完成助推数；
 - 按顺序的全部点和事件字段。
@@ -137,7 +137,7 @@ Hash 使用固定字节序 FNV-1a 64 位折叠，不对结构体内存、Padding
 
 ## 4. 自动化验收
 
-全新 `UnrealEditor-Cmd -NullRHI` 运行 `ABTS.M11A`，共 7 项：
+全新 `UnrealEditor-Cmd -NullRHI` 运行 `ABTS.M11A`，现共 8 项：
 
 | 测试 | 阻断性断言 |
 | --- | --- |
@@ -146,6 +146,7 @@ Hash 使用固定字节序 FNV-1a 64 位折叠，不对结构体内存、Padding
 | `CentralBindingAndConvergence` | 亚逃逸圆轨道为 `SolarCaptured`；`dt/2` 保持事件拓扑并降低位置/能量误差 |
 | `NaturalDeflection` | `U=0` 时有明显自然转角、不撞星、拟合渐近线转角贴合理想双曲线、完整 Influence 外到外自然能量守恒、玩法能量严格为 0 |
 | `VirtualMomentumAndAblation` | 非饱和正/负换能、`B=h/v∞`、错误侧归零、部分/外部走廊、最近点前轨迹不变且能量核在 25%/50%/75% 出站进度逐级分配、校准时限优先、①/②/③ 三个 Mask 位独立消融 |
+| `TargetQualification` | 默认单球目标向后兼容；未达资格时外层拦截不成功、实际几何穿越独立发出 `TargetContact`；预先合格时外层 `TargetHit` 不伪造几何接触 |
 | `SweptAnalyticEvents` | 大步跨过小 UFO/行星仍命中；验证较早根及同根 `Body > Target > WrongOrder`；请求时限在最近点前后均可压过更晚的克隆终止 |
 | `StableFailure` | 退化 B-plane、低 `vInfinity`、细分/自然克隆预算耗尽和只擦 Influence 未进 Reference 均稳定失败，重复结果与 Hash 一致 |
 
@@ -171,4 +172,8 @@ M11-B 应直接消费本阶段公开 Request/Result，不复制积分公式。�
 4. 对完整声明的 `Yaw × Pitch × Power` 输入域做唯一连通 `F4`、前缀嵌套、错序/旁路和三颗任一助推消融验证；
 5. 只把通过同一 SolverVersion/HashSchemaVersion 的预设交给 M11-C。
 
-返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 返回入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
+M11-B 的完整数据合同、全域门槛、Actor 权威边界、PIE 步骤及 M11-C 交接清单见 [M11-B 详稿](M11BFinaleLayoutCertificationDesign.md)。
+
+M11-B v1 将 16,000 cm `HitRadius` 用作三次 `Q>=0.95` 合格助推后的终端拦截包络，并把实际 UFO 放在更远端独立中心、半径 800 cm。该项目参数属于 M11-B 冻结预设，不改变本稿默认通用目标的单球语义。
+
+返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 上游：[M11.0](M110PreFinaleClosureDesign.md) · 下游：[M11-B](M11BFinaleLayoutCertificationDesign.md) · 返回入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。

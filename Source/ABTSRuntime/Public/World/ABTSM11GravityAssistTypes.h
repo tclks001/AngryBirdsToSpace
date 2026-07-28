@@ -21,7 +21,14 @@ enum class EABTSM11TrajectoryEventType : uint8
 	AssistInvalidHyperbola,
 	PlanetCaptured,
 	AssistInvalidBPlaneBasis,
-	AssistSolveFailed
+	AssistSolveFailed,
+	/**
+	 * A swept segment entered the target sphere without producing success.
+	 *
+	 * Qualified contact remains TargetHit. Appending this value preserves the
+	 * numeric identity of every M11-A event in hash schema version 1.
+	 */
+	TargetContact
 };
 
 /** The first terminal condition is authoritative and ends integration. */
@@ -96,14 +103,43 @@ struct ABTSRUNTIME_API FABTSM11GravityBodySpec
 	bool IsValid(FString* OutFailure = nullptr) const;
 };
 
-/** Immutable analytic target. Mesh bounds never alter this hit contract. */
+/**
+ * Immutable analytic target.
+ *
+ * CenterCM/HitRadiusCM are the qualified terminal-intercept envelope. The
+ * optional geometric center/radius identify the later physical UFO contact
+ * used by bypass certification and presentation. Mesh bounds alter neither.
+ */
 struct ABTSRUNTIME_API FABTSM11TargetSpec
 {
 	int32 TargetId = INDEX_NONE;
 	FVector3d CenterCM = FVector3d::ZeroVector;
+	/** Qualified gameplay success envelope. */
 	double HitRadiusCM = 0.0;
+	/**
+	 * Unqualified physical-contact sphere used by bypass certification.
+	 * Zero preserves M11-A behavior by falling back to HitRadiusCM.
+	 */
+	double GeometricContactRadiusCM = 0.0;
+	/**
+	 * M11-B may place the physical UFO farther down the certified coast than
+	 * the terminal-intercept envelope. False preserves generic M11-A behavior.
+	 */
+	bool bUseSeparateGeometricContactCenter = false;
+	FVector3d GeometricContactCenterCM = FVector3d::ZeroVector;
+	/**
+	 * TargetHit success is authoritative only after this many consecutive
+	 * qualifying assists. Geometric contact remains observable independently.
+	 * Zero preserves generic M11-A target behavior.
+	 */
+	int32 RequiredQualifiedAssistCount = 0;
+	double MinimumQualifyingCorridorQuality = 0.0;
+	double MinimumQualifyingEnergyGainCM2PerSec2 = 0.0;
+	bool bRequireAllowedPassSide = false;
 	FVector3d PresentationForward = FVector3d(1.0, 0.0, 0.0);
 
+	double GetGeometricContactRadiusCM() const;
+	FVector3d GetGeometricContactCenterCM() const;
 	bool IsValid(FString* OutFailure = nullptr) const;
 };
 
@@ -219,10 +255,13 @@ struct ABTSRUNTIME_API FABTSM11TrajectoryResult
 	TArray<FABTSM11TrajectoryEvent> Events;
 	EABTSM11TrajectoryTermination Termination = EABTSM11TrajectoryTermination::None;
 	int32 CompletedAssistCount = 0;
+	/** Number of swept entries into the analytic target sphere. */
+	int32 TargetContactCount = 0;
 	uint64 ValidationHash = 0;
 	FString Diagnostic;
 
 	bool DidHitTarget() const { return Termination == EABTSM11TrajectoryTermination::TargetHit; }
+	bool DidContactTarget() const { return TargetContactCount > 0; }
 	const FABTSM11TrajectoryEvent* FindFirstEvent(EABTSM11TrajectoryEventType Type) const;
 	const FABTSM11TrajectoryEvent* FindAssistEvent(EABTSM11TrajectoryEventType Type, int32 AssistIndex) const;
 };

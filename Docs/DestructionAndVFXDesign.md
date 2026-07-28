@@ -204,7 +204,34 @@ struct FABTSBreakPresentationEvent
 
 如果希望 UFO/桶爆炸更写实，可替换为免费的 [Realistic Niagara Explosions Pack](https://www.fab.com/listings/a48b3fa2-2ebf-42c2-8892-fa20a1eff289)。它偏写实，可能和本项目低模卡通风格不完全一致，因此不作为默认依赖。下载前请在 Fab 页面确认目标 UE 版本和当前许可证。
 
-### 8.3 不建议下载的资源
+### 8.3 本次 Niagara Examples 的首版迁移清单
+
+已检查临时项目 `C:\workspace\ExampleProjectPTG2\Content\NiagaraExamples`。首版只迁移下表列出的 **Niagara System**；不要手工挑选它们的 Emitter、材质、纹理或 Effect Type。应由 UE 的 **Asset Actions → Migrate** 自动带上依赖，避免丢失 `NE_*`、纹理、材质、Niagara Module Script 和 Effect Type。
+
+| 来源资产（临时项目） | 迁移后建议名称 | 用途 | 首版使用方式 |
+| --- | --- | --- | --- |
+| `FX_Explosions/NS_Explosion_Small` | `NS_ABTS_Explosion_Small` | 黑鸟、炸药桶、UFO 撞击的核心闪光/爆炸 | 三者共用；按事件设置不同 Scale 与 Tint。 |
+| `FX_Weapons/Impacts/NS_Impact_Concrete` | `NS_ABTS_Impact_Stone` | 石头、石砖与通用无火花接地粉尘 | 常规 Niagara 命中特效，不使用 Niagara Fluids；首版的纯粉尘首选。 |
+| `FX_Weapons/Impacts/NS_Impact_Wood` | `NS_ABTS_Impact_Wood` | 树与木砖的木屑/粉尘 | 常规 Niagara 命中特效；只在命中点播放。 |
+| `FX_Weapons/Impacts/NS_Impact_Metal` | `NS_ABTS_Impact_Metal` | 铁砖、桶和 UFO 的金属命中 | 可保留其短促亮点；若画面带火花，将它限定为金属事件。 |
+| `FX_Weapons/Impacts/NS_Impact_Glass` | `NS_ABTS_Impact_Glass` | 玻璃砖断裂 | 用于亮片/碎屑，不复用为普通粉尘。 |
+| `FX_Sparks/NS_Spark_Burst` | `NS_ABTS_Impact_Sparks` | 桶和 UFO 终局爆炸的附加火花 | 不用于木、石和普通砖块。 |
+| `FX_Explosions/NS_Explosion` | `NS_ABTS_Explosion_Large` | 仅炸药桶和 UFO 终局大爆炸 | 不用于普通砖块或黑鸟，避免视觉过重。 |
+| `FX_NDC/NS_NDC_Impacts` | 不迁移到运行时 | 学习/参考各种命中数据通道写法 | 不接入首版，避免引入 Niagara Data Channel 依赖。 |
+
+`Utilities/SpriteGeneration/SmokePuffLight/NS_SmokePuffLight`、`FX_Smoke/NS_Smoke_Plume` 与 `FX_Smoke/NS_Chimney_Smoke` 均不进入首版：它们使用/依赖 `ParticleSourceEmitter` 流体模板，而临时项目没有启用 Niagara Fluids，且该模板在原项目的 UE 5.8 编译已失败。`NS_Dirt_Explosion_Small`、`NS_Dirt_Explosion_Medium` 与 `NS_Dirt_Explosion` 也不作为纯粉尘，因为它们带火光/爆炸语义。`NS_FireworkBurst`、`NS_Fire`、`NS_Explosion_Medium` 和所有 Gallery/角色/地图资产同样不属于首版必需内容。白鸟抓取光束先只保留 `CaptureBeamOrigin` 挂点，待选择风格更贴近 UFO 的光束后再补一个专用 Niagara System。
+
+#### 迁移操作
+
+1. 打开临时项目 `ExampleProjectPTG2`，在 Content Browser 中按上表逐个选择需要的 `NS_*`；可多选。
+2. 右键 → **Asset Actions** → **Migrate**。
+3. 在 Asset Report 中不要取消勾选任何依赖。
+4. 目标目录选择本项目的 `C:\workspace\AngryBirdsToSpace\Content`。UE 会维持 `NiagaraExamples/...` 原目录结构。
+5. 在本项目中确认效果正常后，将这些资产**复制**到 `Content/ABTS/Destruction/Niagara` 并改为上表建议名；确认 C++ 设置资产已经指向新路径后，再由用户决定是否清理原始迁移目录。
+
+这种“两步迁移 + 复制”的方式虽然会短暂保留原目录，却能确保所有依赖引用有效，且避免手动复制 `.uasset` 导致引用断裂。
+
+### 8.4 不建议下载的资源
 
 - 不下载“可破坏环境整包”来替代当前 HISM / M6 / M7 逻辑；通常会引入自己的 Actor、伤害和存档体系。
 - 不下载黑鸟、桶、树、砖的整套 Chaos 破碎包；首版需要的是统一视觉反馈，不是每个对象的高成本实时断裂。
@@ -225,4 +252,3 @@ struct FABTSBreakPresentationEvent
 2. 接入黑鸟、炸药桶爆炸，验证它们不会改变原有冲量；
 3. 制作 `GC_ABTS_UFO_Broken` 和 `BP_ABTSUFOPresentation`，接入开局抓取与 M11 `TargetHit`；
 4. 若首版画面仍不够丰富，再增加四组低模预制碎片和距离预算。
-

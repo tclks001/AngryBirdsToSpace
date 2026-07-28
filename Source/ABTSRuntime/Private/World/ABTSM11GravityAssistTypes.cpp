@@ -4,7 +4,7 @@
 
 namespace
 {
-	bool IsFiniteVector(const FVector3d& Value)
+	bool IsM11GravitySpecFiniteVector(const FVector3d& Value)
 	{
 		return FMath::IsFinite(Value.X)
 			&& FMath::IsFinite(Value.Y)
@@ -51,7 +51,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 	{
 		return Reject(OutFailure, TEXT("InvalidBodyRole"));
 	}
-	if (!IsFiniteVector(CenterCM)
+	if (!IsM11GravitySpecFiniteVector(CenterCM)
 		|| !FMath::IsFinite(GravitationalParameterCM3PerSec2)
 		|| GravitationalParameterCM3PerSec2 <= 0.0)
 	{
@@ -92,9 +92,9 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 	{
 		return Reject(OutFailure, TEXT("InvalidAssistRadii"));
 	}
-	if (!IsFiniteVector(VirtualOrbitalVelocityCMPerSec)
-		|| !IsFiniteVector(BPlaneReferenceNormal)
-		|| !IsFiniteVector(BPlaneFallbackAxis)
+	if (!IsM11GravitySpecFiniteVector(VirtualOrbitalVelocityCMPerSec)
+		|| !IsM11GravitySpecFiniteVector(BPlaneReferenceNormal)
+		|| !IsM11GravitySpecFiniteVector(BPlaneFallbackAxis)
 		|| BPlaneReferenceNormal.SquaredLength() <= UE_DOUBLE_SMALL_NUMBER
 		|| BPlaneFallbackAxis.SquaredLength() <= UE_DOUBLE_SMALL_NUMBER)
 	{
@@ -125,16 +125,42 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 	return true;
 }
 
+double FABTSM11TargetSpec::GetGeometricContactRadiusCM() const
+{
+	return GeometricContactRadiusCM > 0.0
+		? GeometricContactRadiusCM
+		: HitRadiusCM;
+}
+
+FVector3d FABTSM11TargetSpec::GetGeometricContactCenterCM() const
+{
+	return bUseSeparateGeometricContactCenter
+		? GeometricContactCenterCM
+		: CenterCM;
+}
+
 bool FABTSM11TargetSpec::IsValid(FString* OutFailure) const
 {
 	if (TargetId == INDEX_NONE)
 	{
 		return Reject(OutFailure, TEXT("MissingTargetId"));
 	}
-	if (!IsFiniteVector(CenterCM)
+	if (!IsM11GravitySpecFiniteVector(CenterCM)
 		|| !FMath::IsFinite(HitRadiusCM)
 		|| HitRadiusCM <= 0.0
-		|| !IsFiniteVector(PresentationForward)
+		|| !FMath::IsFinite(GeometricContactRadiusCM)
+		|| GeometricContactRadiusCM < 0.0
+		|| GetGeometricContactRadiusCM() > HitRadiusCM
+		|| !IsM11GravitySpecFiniteVector(GeometricContactCenterCM)
+		|| RequiredQualifiedAssistCount < 0
+		|| RequiredQualifiedAssistCount
+			> FABTSM11GravityScenario::AssistCount
+		|| !FMath::IsFinite(MinimumQualifyingCorridorQuality)
+		|| MinimumQualifyingCorridorQuality < 0.0
+		|| MinimumQualifyingCorridorQuality > 1.0
+		|| !FMath::IsFinite(MinimumQualifyingEnergyGainCM2PerSec2)
+		|| MinimumQualifyingEnergyGainCM2PerSec2 < 0.0
+		|| !IsM11GravitySpecFiniteVector(PresentationForward)
 		|| PresentationForward.SquaredLength() <= UE_DOUBLE_SMALL_NUMBER)
 	{
 		return Reject(OutFailure, TEXT("InvalidTarget"));
@@ -213,9 +239,17 @@ bool FABTSM11GravityScenario::IsValid(FString* OutFailure) const
 		}
 	}
 	if ((Target.CenterCM - GetPrimary().CenterCM).Length() + Target.HitRadiusCM
-		>= GetPrimary().MaximumSimulationRadiusCM)
+			>= GetPrimary().MaximumSimulationRadiusCM)
 	{
 		return Reject(OutFailure, TEXT("TargetOutsidePrimarySimulationDomain"));
+	}
+	if ((Target.GetGeometricContactCenterCM() - GetPrimary().CenterCM).Length()
+			+ Target.GetGeometricContactRadiusCM()
+		>= GetPrimary().MaximumSimulationRadiusCM)
+	{
+		return Reject(
+			OutFailure,
+			TEXT("GeometricTargetOutsidePrimarySimulationDomain"));
 	}
 	return true;
 }
@@ -293,8 +327,8 @@ bool FABTSM11TrajectoryRequest::IsValid(FString* OutFailure) const
 	{
 		return false;
 	}
-	if (!IsFiniteVector(InitialPositionCM)
-		|| !IsFiniteVector(InitialVelocityCMPerSec)
+	if (!IsM11GravitySpecFiniteVector(InitialPositionCM)
+		|| !IsM11GravitySpecFiniteVector(InitialVelocityCMPerSec)
 		|| !FMath::IsFinite(InitialTimeSeconds)
 		|| InitialExpectedAssistIndex < 1
 		|| InitialExpectedAssistIndex > FABTSM11GravityScenario::AssistCount + 1)
@@ -323,6 +357,14 @@ bool FABTSM11TrajectoryRequest::IsValid(FString* OutFailure) const
 		<= Scenario.Target.HitRadiusCM)
 	{
 		return Reject(OutFailure, TEXT("InitialStateInsideTarget"));
+	}
+	if ((InitialPositionCM
+			- Scenario.Target.GetGeometricContactCenterCM()).Length()
+		<= Scenario.Target.GetGeometricContactRadiusCM())
+	{
+		return Reject(
+			OutFailure,
+			TEXT("InitialStateInsideGeometricTarget"));
 	}
 	return true;
 }

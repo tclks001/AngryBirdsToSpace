@@ -1,10 +1,10 @@
 # M11：终局三重引力弹弓算法预演
 
-> 状态：产品路线已确认；M11.0 已完成用户 PIE 验收；M11-A 纯数据求解器、Editor 编译与全新进程自动化已完成。M11-B 局部布局认证、M11-C 实飞/HUD 和 M11-D 终局演出尚未实施。
+> 状态：产品路线已确认；M11.0 已完成用户 PIE 验收；M11-A 纯数据求解器、Editor 编译与全新进程自动化已完成。M11-B C++、Development Editor 编译、冻结预设与全新进程自动认证均已完成，待用户 PIE；M11-C 实飞/HUD 和 M11-D 终局演出尚未开始。
 >
 > 父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md)。
 >
-> 导航：[项目工作流](ABTSProjectWorkflow.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
+> 导航：[项目工作流](ABTSProjectWorkflow.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
 
 ## 1. 预演结论
 
@@ -26,7 +26,7 @@ M11 应做成一段与程序生成地表连续、但轨道结果确定的终局�
 
 “四颗行星”在工程语义中指**既有地表主星 + 三颗新助推行星**，不是再生成四颗助推行星；UFO 是非引力目标。M9 练习卫星仍存在于同一 World，但不进入 M11 Body Specs，也不参与终局积分。
 
-本稿确定 M11 的算法方向、数据契约、玩家反馈与正式验收方法。上游收口见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)；已落地的唯一积分内核与自动化证据见 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)。
+本稿确定 M11 的算法方向、数据契约、玩家反馈与正式验收方法。上游收口见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)；已落地的唯一积分内核与自动化证据见 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)；当前布局搜索、认证预设、Actor 权威边界和 PIE 口径见 [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md)。
 
 ## 2. 终局关卡与叙事边界
 
@@ -94,7 +94,8 @@ M11 明确使用当前 Task Graph World，不执行 `OpenLevel`，也不加载�
           \  ② 中走廊：继续增能并接入下一段
            \____
                 \  ③ 窄走廊：最终定向
-                 \____________ UFO 命中球
+                 \____________ 合格终端拦截包络
+                                \__ 预计算 coast __ 800 cm 几何 UFO
 
 直接发射或漏过任意助推：仍处于中心天体束缚轨道，回落、超时或错过目标
 ```
@@ -184,7 +185,7 @@ M11 借用的是“分段作用圈、相对速度和能量交换”这套可解�
 - B-plane 目标中心、内外容差椭圆、允许飞越侧、参考法向与固定备用轴；
 - 最大正/负能量修正和调试颜色。
 
-UFO 目标至少包含稳定 ID、静态中心、球形命中半径和演出朝向。静态网格只负责表现，不提供权威半径或复杂碰撞。
+M11-B v1 将目标拆成三层：F3 的 `TargetApproach`、只有连续三次高质量助推才可触发的合格终端拦截包络，以及位于更远端的 800 cm 实际 UFO 几何接触球。几何 UFO 有独立中心并提供演出朝向；静态网格只负责表现，不提供权威半径或复杂碰撞。该拆分避免用大命中球掩盖“关闭某次助推仍擦到真实 UFO”的旁路。
 
 飞行状态为：
 
@@ -235,10 +236,11 @@ r_a=a(1+e)
 | --- | --- | --- |
 | 发射后、无助推 | 行星 ① | 行星 ② 与 UFO |
 | 完成 ① | 行星 ② | 行星 ③ 与 UFO |
-| 完成 ② | 行星 ③ | UFO |
-| 完成 ③ | UFO 命中球 | — |
+| 完成 ② | 行星 ③ | 合格终端拦截与几何 UFO |
+| 完成 ③，但任一次终端质量不足 | TargetApproach | 合格终端拦截与几何 UFO |
+| 完成 ③，且三次均达到终端资格 | 合格终端拦截包络 | — |
 
-关闭任意一次玩法助推后都不得命中 UFO；不能用“目标命中球特别大”掩盖能量阶梯失败。
+关闭任意一次玩法助推后都不得进入合格终端拦截，也不得接触独立几何 UFO；不能用“大目标球”或只统计 qualified hit 来掩盖能量阶梯失败。
 
 ### 5.3 固定行星负责自然偏转
 
@@ -461,12 +463,12 @@ v\Delta t\le c_vR_{\text{collision,min}},
 
 其中 \(c_v\)、\(c_g\)、\(\epsilon_{\text{pos}}\) 与最大细分深度属于冻结的求解器配置；`R_collision,min` 取当前可能事件中最小的非零解析碰撞尺度，不能只用更大的作用圈半径替代。
 
-- 作用圈进入/退出、参考球进入/退出、解析球碰撞、\((\mathbf r-\mathbf C_i)\cdot\mathbf v=0\) 最近点和 UFO 命中均在线段内求交；临近根时使用固定最大深度的确定性细分和固定迭代二分，不依赖渲染帧时间；达到细分或总步数上限而仍未满足合同必须稳定失败，不能静默采用未批准的大步或误报物理超时；
+- 作用圈进入/退出、参考球进入/退出、解析球碰撞、\((\mathbf r-\mathbf C_i)\cdot\mathbf v=0\) 最近点、合格终端拦截与独立 UFO 几何接触均在线段内求交；临近根时使用固定最大深度的确定性细分和固定迭代二分，不依赖渲染帧时间；达到细分或总步数上限而仍未满足合同必须稳定失败，不能静默采用未批准的大步或误报物理超时；
 - 使用双精度状态，太空段关闭空气阻力；
 - 预演与实际飞行逐子步调用同一内核，渲染点另行抽稀；
-- 实际飞行只重放/插值求解器的确定性状态；命中 UFO 后才可切到 Chaos 演出。
+- 实际飞行只重放/插值求解器的确定性状态。M11-B 额外冻结一条从原始 Pouch 状态开始、以 800 cm 几何 UFO 为终点的 nominal Physical Playback，证明完整演出路径无需从拦截球内部续算或位置瞬移；它不代表 F4 内任意输入都接触 800 cm 球。M11-C 必须单独冻结玩家 Release 与这条成功演出路径之间的位置/速度连续接管，不得隐藏吸向标准答案。接触几何 UFO 后才可切到局部 Chaos 演出。
 
-**碰撞权威只有一处：**轨道段的作用圈、行星碰撞、中心天体碰撞和 UFO 命中全部由求解器对不可变 Body Specs 中的解析球完成。Body/UFO Actor 的 Static Mesh 不阻挡轨道鸟，`USphereComponent` 仅作编辑器可视化或 Query-only 调试；Actor 不得再执行会停止、滑动或推出鸟体的 UE 阻挡 Sweep。所有 Gameplay 回调由求解器事件发出。若后续需要加入其他太空障碍，必须先把同一份解析几何写入求解器输入，使预演与实飞共同消费，不能只在 World 碰撞里补一个阻挡体。
+**碰撞权威只有一处：**轨道段的作用圈、行星碰撞、中心天体碰撞、合格终端拦截和几何 UFO 接触全部由求解器对不可变 Body Specs 中的解析球完成。Body/UFO Actor 的 Static Mesh 不阻挡轨道鸟，`USphereComponent` 仅作编辑器可视化或 Query-only 调试；Actor 不得再执行会停止、滑动或推出鸟体的 UE 阻挡 Sweep。所有 Gameplay 回调由求解器事件发出。若后续需要加入其他太空障碍，必须先把同一份解析几何写入求解器输入，使预演与实飞共同消费，不能只在 World 碰撞里补一个阻挡体。
 
 UE 官方也说明可变帧率会给物理步长带来稳定性问题，较小子步能提高稳定性但增加成本。[Unreal Engine Physics Sub-Stepping](https://dev.epicgames.com/documentation/en-us/unreal-engine/physics-sub-stepping-in-unreal-engine)
 
@@ -500,11 +502,11 @@ UE 官方也说明可变帧率会给物理步长带来稳定性问题，较小�
 1. 用最终 runtime solver 重放候选；
 2. 以 UFO 最近距离、三次 B-plane 偏差、碰撞、顺序、总时间和鲁棒性构造代价；
 3. 用固定 Seed 的差分进化/CMA-ES 或粗网格，再以 Powell/Nelder–Mead 做局部精化；
-4. 对候选周围做小扰动，并对完整 `Yaw × Pitch × Power` 输入域做连通分量扫描；
-5. 验证三个嵌套前缀成功集和最终成功集的连通性、最小宽度及包含关系；
+4. 对候选周围做小扰动，并对完整 `Yaw × Pitch × Power` 输入域做 `F4` 发现与连通分量扫描；
+5. 围绕已发现的 `F4` 族建立最终精化闭包，验证三个局部前缀成功内核的连通性、最小宽度及包含关系；
 6. 冻结局部预设版本、场景版本、物理参数、标准输入、扫描合同和验证 Hash。
 
-扫描报告必须同时冻结允许的 `Yaw × Pitch × Power` 全域、三轴网格步长、递归边界细化精度、最大飞行时长/圈数、输入到屏幕的映射、参考分辨率与 DPI。不能只在标准解附近抽样，也不能把功率固定后宣称全域唯一。有限采样不能数学证明连续域中“绝对唯一”；本项目的正式验收语义是：**在上述已声明的完整三维输入域和分辨精度下，只发现一个连通的 UFO 成功分量。**
+扫描报告必须同时冻结允许的 `Yaw × Pitch × Power` 全域、三轴网格步长、递归边界细化精度、最大飞行时长/圈数、输入到屏幕的映射、参考分辨率与 DPI。不能只在标准解附近抽样，也不能把功率固定后宣称全域唯一。有限采样不能数学证明连续域中“绝对唯一”；本项目 M11-B 的正式验收语义是：**在上述已声明的完整三维输入域和分辨精度下，只发现一个连通的 16k qualified-intercept `F4` 分量。** 独立 800 cm 物理 UFO 由冻结 nominal Physical Playback 和 M11-C 的连续演出交接负责，不是这一宽可玩族的命中半径。
 
 目标函数可采用：
 
@@ -534,11 +536,13 @@ w_H\frac{d_{\text{UFO,min}}^2}{R_{\text{hit}}^2}
 ```text
 F1 = 正确进入、掠过并离开行星 ①，出口仍可进入 ② 的输入集合
 F2 = F1 且正确完成行星 ②，出口仍可进入 ③ 的输入集合
-F3 = F2 且正确完成行星 ③，出口仍可进入 UFO 的输入集合
-F4 = F3 且最终命中 UFO 的输入集合
+F3 = F2 且正确完成行星 ③，出口仍可进入 TargetApproach 的输入集合
+F4 = F3 且满足三次终端资格并进入 16k qualified-intercept 包络的输入集合
 ```
 
-离线验收必须证明 `F4 ⊂ F3 ⊂ F2 ⊂ F1`，每个 `Fn` 在声明的采样合同下只有一个与最终解相连的主分量，并具有足够的角度和功率内宽。这里的“成功岛”不是单独评估每颗行星的擦边命中：如果一次 ① 掠过无法继续到达 ②，它不属于 `F1`。
+离线验收必须在完整声明域内只发现一个连通 `F4` 成功族，并在围绕该族的最终精化闭包内证明 `F4 ⊂ F3 ⊂ F2 ⊂ F1`；每个 `Fn` 只发布与最终解相连的局部主分量，并具有足够的角度和功率内宽。这里的“成功岛”不是单独评估每颗行星的擦边命中：如果一次 ① 掠过无法继续到达 ②，它不属于 `F1`。该报告不宣称证明远离 `F4` 族的全域 `F1/F2` 微拓扑。
+
+这里的 `F4` 是 M11-B 的可玩拦截合同，不等价于每个输入都穿过 800 cm 物理球；后者只对冻结 nominal 完整轨迹成立，并由 M11-C 显式验收可见连续接管。
 
 精确的成功集可能非凸、带细颈或随功率变化。运行时不直接把光标投影到任意非凸集合边界，而是由离线报告为每个 `Fn` 输出一个完全包含在该集合内部的鲁棒信赖域，例如分功率切片的椭圆/凸多边形及其内外滞回边界。任何无法给出最小宽度的布局都应被搜索器拒绝，不能依靠输入锁定掩盖像素级解。
 
@@ -683,7 +687,7 @@ Launched / AssistN / FinalApproach
 - 关闭复杂网格作为权威飞行碰撞；
 - 材质、LOD 和 Nanite 可独立调整，不改变 Body Spec；
 - 资产替换不得移动 Actor 或自动改写玩法半径；
-- UFO 提供独立命中球和白色小鸟/舱体挂点。
+- UFO 提供白色小鸟/舱体挂点；其可见 Actor 对齐 Preset 的独立几何接触中心，而不是较早的合格终端拦截中心。
 
 三颗行星的位置、玩法球、作用圈和虚拟公转速度存于版本化 `FABTSM11FinaleLayoutPreset` 或专用 DataAsset。位置必须是太空弹弓局部坐标，不得保存为关卡绝对世界 Transform。不能把这些数值烘焙进静态网格，也不能从网格 Bounds 每次自动推断。
 
@@ -699,15 +703,17 @@ Launched / AssistN / FinalApproach
 
 ### 11.2 关卡因果
 
-- [ ] 无助推时必然被中心天体束缚或无法到达 UFO。
-- [ ] 关闭 ①、②、③ 中任意一项都不能命中。
-- [ ] 只有 `①→②→③` 的批准飞越侧和顺序能形成成功轨迹。
-- [ ] 错误侧不获得同额正助推，过近会撞星，过远会自然衰减。
-- [ ] 行星 ① 只有在接近最大功率的连续区间内可达；低功率域不存在进入 ① 后接通终局的旁路。
-- [ ] **正式门槛：**验收记录写明完整 `Yaw × Pitch × Power` 输入域、三轴网格步长、递归边界精度和最大飞行时域；在该合同下只发现一个连通的 `F4` 成功分量。
-- [ ] `F4 ⊂ F3 ⊂ F2 ⊂ F1`，每个前缀主分量都有批准的最小角度/功率内宽和可供稳定器使用的内接信赖域。
-- [ ] 全域内不存在跳星、错序、多圈重入或重复收割同一助推的隐藏成功路径。
-- [ ] 先冻结最小角度/归一化输入容差和输入映射，再换算屏幕宽度；在冻结的参考分辨率与 DPI 下，推荐派生为约 `8–12 px`，并通过小扰动批量测试。
+- [x] 无助推时必然被中心天体束缚或无法到达合格终端拦截/几何 UFO。
+- [x] 关闭 ①、②、③ 中任意一项都不能进入 F4，且独立几何接触旁路为 0。
+- [x] 只有 `①→②→③` 的批准飞越侧和顺序能形成成功轨迹。
+- [x] 错误侧不获得同额正助推，过近会撞星，过远会自然衰减。
+- [x] 行星 ① 只有在接近最大功率的连续区间内可达；低功率域不存在进入 ① 后接通终局的旁路。
+- [x] **正式门槛：**验收记录冻结完整 `Yaw × Pitch × Power` 输入域、三轴网格步长、递归边界精度和最大飞行时域；在该合同下只发现一个连通的 `F4` 成功分量。
+- [x] 围绕唯一 `F4` 族的最终局部精化闭包满足 `F4 ⊂ F3 ⊂ F2 ⊂ F1`；每个局部前缀主分量都有批准的最小角度/功率内宽和可供稳定器使用的内接信赖域，不外推为全域 `F1/F2` 微拓扑证明。
+- [x] 全域内不存在跳星、错序、多圈重入或重复收割同一助推的隐藏成功路径。
+- [x] 先冻结最小角度/归一化输入容差和输入映射，再换算屏幕宽度；v1 F4 实心瞄准矩形为 `20×18 px`，覆盖 14 个连续 Power 切片。
+
+以上勾选表示 M11-B 的有限离散认证已通过，不是对连续实数输入域的数学唯一性证明；玩家操作、HUD 与实飞仍由 M11-C 验收。
 
 ### 11.3 玩家可读性
 
@@ -735,7 +741,7 @@ Launched / AssistN / FinalApproach
 | --- | --- | --- |
 | `M11.0` | LaunchSite 唯一 Space-only 槽、无玻璃建筑、Space 桩/弦配方、M9 练习卫星远置与 M11 引力隔离 | 三行星积分、终局 HUD、星空演出 |
 | [`M11-A`](M11AGravityAssistSolverDesign.md) | 无 World/Actor 的纯数据求解器与测试夹具；中心束缚、单颗自然偏转、虚拟动量换能、步长收敛、确定性与助推消融自动化 | 地图、实飞接管、美术、终局演出 |
-| `M11-B` | 局部布局离线搜索、认证预设、三颗 Body Actor、UFO 命中体、全 `Yaw × Pitch × Power` 唯一性与前缀集报告 | 完整 HUD 与剧情 |
+| [`M11-B`](M11BFinaleLayoutCertificationDesign.md) | 局部布局离线搜索、认证预设、三颗 Body Actor、合格终端拦截/独立几何 UFO、全 `Yaw × Pitch × Power` 的 F4 唯一性与局部前缀内核报告 | 完整 HUD、终端 coast 与剧情 |
 | `M11-C` | 抽取并复用轨道投影，加入简笔行星/UFO、逐目标接近预览、前缀稳定器；Space 实飞同源接管 | 标准答案、隐形吸附、Chaos 深空飞行 |
 | `M11-D` | 四鸟同袋/队列、星空环境切换、白鸟救援、失败黑屏复位与完整 PIE 验收 | 独立终局地图、运动行星、多人同步 |
 
@@ -750,9 +756,11 @@ M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用�
 5. **四鸟表现**：四鸟同时进入钢铁太空弹珠袋，深空段按一条预计算权威轨迹组成固定队列，不使用 Chaos。
 6. **轨迹界面**：复用 M10.1-C 投影语义，以极简平面线条表现三颗行星和 UFO，并按当前目标切换远端接近预览。
 7. **环境与重试**：同一 World 切换星空并关闭雾云；错误发射播放到失败可读后黑屏恢复到点击弹珠袋前。
-8. **验收门槛**：完整 `Yaw × Pitch × Power` 输入域唯一性、前缀集嵌套、助推消融和旁路排除均为阻断性验收项。
+8. **验收门槛**：完整 `Yaw × Pitch × Power` 输入域的 F4 唯一性、围绕该族的局部前缀集嵌套、助推消融和旁路排除均为阻断性验收项。
 
-当前 [M11.0 前置收口](M110PreFinaleClosureDesign.md) 与 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) 已完成；默认下一步进入 `M11-B` 的局部布局离线搜索、认证预设和全输入域唯一性报告。
+当前 [M11.0 前置收口](M110PreFinaleClosureDesign.md) 与 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) 已完成；[M11-B](M11BFinaleLayoutCertificationDesign.md) 的 C++、编译、冻结报告与全新进程自动认证也已完成。围绕全域发现出的唯一 `F4` 族，最终局部精化闭包得到 `F=(6244,1890,981,558)`、局部分量数 `(1,1,1,1)`、TargetHit `558`、几何接触旁路 `0`；F4 为 `20×18 px`、14 个连续 Power 切片。v1 通过增强行星③虚拟动量并要求终端 `Q>=0.95`，把宽前缀练习走廊和最终高质量拦截资格分开。完整 Hash 与扫描合同见 [M11-B 第 9.2 节](M11BFinaleLayoutCertificationDesign.md#92-v1-冻结认证报告)。
+
+默认下一步是 M11-B PIE 验收；该项通过前不转入 M11-C。当前 `Content/Maps/Test.umap` 未由本阶段 C++ 实现修改，PIE 必须让实际地图/GameMode Blueprint 接入 M11 GameMode/Finale System 生命周期。
 
 ## 14. 资料来源
 
@@ -771,4 +779,4 @@ M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用�
 11. [Kerbal Space Program 1.7：Room to Maneuver 官方更新说明](https://store.steampowered.com/news/posts/?appids=220200&enddate=1557151214)
 12. [Epic Games：Physics Sub-Stepping](https://dev.epicgames.com/documentation/en-us/unreal-engine/physics-sub-stepping-in-unreal-engine)
 
-返回父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md) · 前置子稿：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)
+返回父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md) · 前置子稿：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · 求解器子稿：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · 当前子稿：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)
