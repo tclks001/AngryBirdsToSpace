@@ -28,7 +28,7 @@ namespace
 		return FMath::IsFinite(Value) && Value > 0.0;
 	}
 
-	bool IsFiniteVector(const FVector3d& Value)
+	bool IsFiniteFinaleBoundaryVector(const FVector3d& Value)
 	{
 		return FMath::IsFinite(Value.X)
 			&& FMath::IsFinite(Value.Y)
@@ -294,7 +294,7 @@ bool AABTSM11FinaleSystem::ValidateRuntimeBoundary(
 		0.0,
 		0.0,
 		-InPreset.ReferencePrimaryRadiusCM);
-	if (!IsFiniteVector(Primary.CenterCM)
+	if (!IsFiniteFinaleBoundaryVector(Primary.CenterCM)
 		|| !Primary.CenterCM.Equals(
 			ExpectedPrimaryCenter,
 			InPreset.PrimaryCompatibilityToleranceCM)
