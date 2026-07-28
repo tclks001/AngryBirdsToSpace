@@ -5,11 +5,19 @@
 #include "ABTSRuntime.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "EngineUtils.h"
+#include "Party/ABTSBirdParty.h"
+#include "Player/ABTSM11PlayerController.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "UI/ABTSM11FinaleHUD.h"
+#include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
 
 AABTSM11GameMode::AABTSM11GameMode()
 {
+	PlayerControllerClass = AABTSM11PlayerController::StaticClass();
+	HUDClass = AABTSM11FinaleHUD::StaticClass();
+	FinaleInteractionSystemClass =
+		AABTSM11FinaleInteractionSystem::StaticClass();
 }
 
 void AABTSM11GameMode::OnInitialPlayerPlaced(
@@ -84,10 +92,52 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 		FinaleSystem->InitializeFromWorldContract(WorldContract);
 	if (bReady)
 	{
+		AABTSBirdParty* ReadyParty = nullptr;
+		int32 ReadyPartyCount = 0;
+		for (TActorIterator<AABTSBirdParty> It(GetWorld()); It; ++It)
+		{
+			if (!It->IsPartyReady())
+			{
+				continue;
+			}
+			++ReadyPartyCount;
+			if (ReadyParty == nullptr)
+			{
+				ReadyParty = *It;
+			}
+		}
+		if (ReadyPartyCount != 1
+			|| ReadyParty == nullptr
+			|| !FinaleInteractionSystemClass)
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Error,
+				TEXT("[ABTS][M11-C][GameMode] Expected one ready Party and an interaction class; Parties=%d Class=%d"),
+				ReadyPartyCount,
+				FinaleInteractionSystemClass ? 1 : 0);
+			return;
+		}
+		FinaleInteractionSystem =
+			GetWorld()->SpawnActor<AABTSM11FinaleInteractionSystem>(
+				FinaleInteractionSystemClass,
+				FTransform::Identity,
+				SpawnParameters);
+		if (!IsValid(FinaleInteractionSystem)
+			|| !FinaleInteractionSystem->Initialize(
+				*FinaleSystem,
+				*ReadyParty))
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Error,
+				TEXT("[ABTS][M11-C][GameMode] Interaction initialization failed."));
+			return;
+		}
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][M11-B][GameMode] Entry Ready=1 StartCell=%d"),
+			TEXT("[ABTS][M11-C][GameMode] Entry Ready=1 StartCell=%d"),
 			SpawnCellId);
 	}
 	else
