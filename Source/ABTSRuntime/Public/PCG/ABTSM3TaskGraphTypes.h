@@ -143,6 +143,10 @@ struct FABTSM3TaskLink
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	TArray<FABTSM3CellEdgeKey> CorridorEdges;
+
+	/** Physical arc length of this accepted CellTopo corridor on the base sphere. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	float CorridorLengthCM = 0.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -189,6 +193,22 @@ struct FABTSM3TaskNode
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	int32 SeedCellId = INDEX_NONE;
 
+	/** Road endpoint for this beat. Building tasks deliberately keep this separate from their footprint anchor. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	int32 RoadPortalCellId = INDEX_NONE;
+
+	/** Reserved and height-certified construction center, or INDEX_NONE for tasks without a construction pad. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	int32 BuildingAnchorCellId = INDEX_NONE;
+
+	/** Cumulative distance along the ordered Start-to-Launch main corridor. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	float RouteProgressDistanceCM = 0.0f;
+
+	/** Normalized Start-to-Launch progress. Branch tasks inherit the nearest main-corridor value. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	float FlowS = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	TArray<int32> CellIds;
 
@@ -226,6 +246,13 @@ struct FABTSM3CellState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	int32 ProgressDistance = MAX_int32;
 
+	/** Authoritative longitudinal progress in centimeters, projected from the nearest main-corridor Cell. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	float ProgressDistanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	float FlowS = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	bool bRoad = false;
 
@@ -234,6 +261,10 @@ struct FABTSM3CellState
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	bool bBuildingAnchor = false;
+
+	/** Hard road-planning exclusion reserved around ordinary destructible building footprints. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
+	bool bBuildingRoadExclusion = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|TaskGraph")
 	bool bBuildable = false;
@@ -258,6 +289,64 @@ struct FABTSM3PCGConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG", meta = (ClampMin = "1.0", ClampMax = "25.0"))
 	float MaxBuildSlopeDegrees = 8.0f;
+
+	/** First-week route policy span. The validator still gates the physical accepted corridor length. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One",
+		meta = (ClampMin = "90.0", ClampMax = "150.0", UIMin = "100.0", UIMax = "135.0", Units = "deg"))
+	float FirstWeekMainRouteAngularSpanDegrees = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One",
+		meta = (ClampMin = "12000.0", ClampMax = "30000.0", UIMin = "16000.0", UIMax = "24000.0", Units = "cm"))
+	float MinMainRouteLengthCM = 18000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One",
+		meta = (ClampMin = "2000.0", ClampMax = "9000.0", UIMin = "3000.0", UIMax = "6000.0", Units = "cm"))
+	float MinAdjacentBuildingProgressCM = 3500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One", meta = (ClampMin = "3", ClampMax = "8"))
+	int32 WorkshopMinMainRoadDistanceCells = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One", meta = (ClampMin = "3", ClampMax = "10"))
+	int32 TargetBuildingMinMainRoadDistanceCells = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One", meta = (ClampMin = "3", ClampMax = "12"))
+	int32 FurnaceMinMainRoadDistanceCells = 5;
+
+	/** Additional deterministic lateral cells searched beyond each building's minimum road setback. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One", meta = (ClampMin = "0", ClampMax = "6"))
+	int32 BuildingAnchorSearchSlackCells = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bRequireWeekOneVisibilityContract = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "0.0", ClampMax = "200.0", Units = "cm"))
+	float VisibilityCharacterCenterHeightCM = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "-100.0", ClampMax = "300.0", Units = "cm"))
+	float VisibilityLookAtHeightCM = 30.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "300.0", ClampMax = "2000.0", Units = "cm"))
+	float VisibilityDefaultOrbitDistanceCM = 850.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "300.0", ClampMax = "3000.0", Units = "cm"))
+	float VisibilityMaxOrbitDistanceCM = 1300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "20.0", ClampMax = "85.0", Units = "deg"))
+	float VisibilityElevationDegrees = 60.0f;
+
+	/** Conservative proxy height for the M7 building silhouette used by pure-data line-of-sight validation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "100.0", ClampMax = "1200.0", Units = "cm"))
+	float VisibilityTargetHeightCM = 520.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility",
+		meta = (ClampMin = "16", ClampMax = "128"))
+	int32 VisibilityTraceSamples = 48;
 
 	/**
 	 * Minimum CellTopo clearance around every task building anchor. The M7 sphere
@@ -307,6 +396,18 @@ struct FABTSM3PCGSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	int32 GeneratorVersion = 3;
 
+	/** Layout-policy identity within the stable GeneratorVersion=3 integration contract. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
+	int32 LayoutPolicyVersion = 1;
+
+	/** Diagnostic hash of every M3 policy, runtime-geometry and CellTopo input used by generation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
+	int64 ConfigHash = 0;
+
+	/** Diagnostic hash of the accepted Task/portal/anchor/corridor result. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
+	int64 LayoutHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	int32 AttemptIndex = INDEX_NONE;
 
@@ -333,6 +434,30 @@ struct FABTSM3PCGSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure")
 	float SatelliteLaunchAngularSeparationDegrees = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One")
+	float MainRouteLengthCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One")
+	float MinAdjacentBuildingProgressCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bWorkshopVisibleAtDefaultOrbit = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bWorkshopVisibleAtMaxOrbit = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bTargetBuildingVisibleAtDefaultOrbit = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bTargetBuildingVisibleAtMaxOrbit = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bFurnaceVisibleAtDefaultOrbit = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Week One|Visibility")
+	bool bFurnaceVisibleAtMaxOrbit = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	bool bAccepted = false;

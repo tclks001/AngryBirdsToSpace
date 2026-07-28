@@ -1,10 +1,10 @@
 # M3：TaskGraph 地形表现与 HISM 摆放设计
 
-> 状态：C++ 与生产资产已实现。M3 当前只产出地形、TaskGraph、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
+> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
 >
 > 逻辑 PCG 上游：[`ABTSTaskGraphPCGDesign.md`](ABTSTaskGraphPCGDesign.md)。本文不定义玩法锁、可达性、河流最低点、道路寻路或桥梁状态；它们只由 TaskGraph/CellTopo 生成并通过接口提供给表现层。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [M7 TaskGraph DAG2.3 建筑集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M5.2 碰撞与 CPU SDF 物理采样](M52CollisionAndMovementDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [开发排错](DevelopmentTroubleshooting.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M3R 首周/月度地图改进](M3PCGMapImprovementPlan.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [M7 TaskGraph DAG2.3 建筑集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M5.2 碰撞与 CPU SDF 物理采样](M52CollisionAndMovementDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [开发排错](DevelopmentTroubleshooting.md)
 
 ## 1. M3 目标与边界
 
@@ -12,7 +12,7 @@ M3 将 TaskGraph 的区域结果映射为连续球面地形：Plain、Forest、H
 
 ```text
 TaskGraph / CellTopo（逻辑唯一来源）
-    -> FABTSM3CellState：TaskId、TerrainType、Road/Water、BuildingAnchor
+    -> FABTSM3CellState：TaskId、TerrainType、Road/Water、FlowS、BuildingAnchor/NoRoad
     -> FABTSM3TerrainVisualField：低频高度、法线、边界线段 SDF
     -> ProceduralMesh：径向顶点推拉、四通道 UV 材质上下文
     -> M3 SDF Material：纯色与平滑边界
@@ -29,7 +29,7 @@ TaskGraph / CellTopo（逻辑唯一来源）
 
 | 模块 | 职责 | 禁止承担的职责 |
 | --- | --- | --- |
-| `FABTSM3TaskGraphGenerator` | 固定主线路径、Task 区域分配、道路距离、水体/施工台逻辑标签 | 网格顶点、材质、HISM 归属判定 |
+| `FABTSM3TaskGraphGenerator` | 首周可调主线节奏、Task 区域分配、道路/纵向进度、水体/施工台逻辑标签 | 网格顶点、材质、HISM 归属判定 |
 | `FABTSM3TerrainVisualField` | 从逻辑标签产生低频半径、连续法线、边界线段距离 | 可达性、资源、河流最低点搜索 |
 | `AABTSM3Planet` | 组装逻辑结果、重建 PMC、输出 `QuerySurface`、填充 HISM/施工位 | 建筑模块和物理破坏 |
 | `UABTSM3TerrainMaterialBridge` | 创建并注入临时 LUT/MID | 存储 Gameplay 状态 |
@@ -42,9 +42,10 @@ M3 只读取以下逻辑结果：
 | 字段 | M3 用途 |
 | --- | --- |
 | `TaskId` / `TerrainType` | 低频高度类别、纯色、HISM 密度 |
-| `bRoad` / `RoadDistance` | 清空路旁装饰并预留道路视觉通道 |
+| `bRoad` / `RoadDistance` / `MainRoadDistance` | 清空路旁装饰、预留道路视觉通道并记录施工台到主路的拓扑距离 |
+| `ProgressDistanceCM` / `FlowS` | 只读主线纵向节奏与调试信息；不从表现反推 |
 | `bWater` | TaskGraph 指定的水体颜色与轻微视觉下凹 |
-| `bBuildingAnchor` | 生成 `FABTSM3BuildingSpawnSite`，不生成建筑 |
+| `bBuildingAnchor` / `bBuildingRoadExclusion` | 生成 `FABTSM3BuildingSpawnSite`；NoRoad 只参与逻辑验收，不生成独立网格；最终还按实际平台/道路宽度认证连续几何净空 |
 | `UnitCenter` / `NeighborCellIds` | 构造地形区域边界线段和稳定散布方向 |
 | `LaunchSite` / `SatelliteWindow` | M11.0 构造唯一终局槽对的表面位置、稳定切线轴和局部坐标系；不在表现层重选 Task |
 
@@ -236,7 +237,7 @@ HISM 使用的每个材质还必须在材质 Details 的 **Usage** 中启用 **U
 
 地表几何高度不能直接使用最近 Cell 的常量高度，否则 Cell 边界会形成六边形台阶，极小距离的法线差分会把台阶解释成近乎竖直的坡面。`FABTSM3TerrainVisualField` 在包含查询方向的 CellTopo 三角形内对三个逻辑高度做重心插值，使半径场跨三角形连续；数值边界采用一环逆距离插值兜底。顶点法线用 `SurfaceNormalSmoothingDistanceCM` 指定的世界空间中心差分半径，默认 `160cm`，并平均正交与对角两组梯度，消除方向偏置和六边形阴影斑纹。日志 `[ABTS][M3][SurfaceNormals]` 中 `ExtremeOver80` 应为 0 或接近 0。
 
-M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` 是唯一建筑预留接口，包含 `CellId`、TaskType、WorldTransform 与坡度；M7 TaskGraph/DAG2.3 才在这些位置生成模块与刚体。
+M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` 是唯一建筑预留接口，包含 `CellId`、TaskType、WorldTransform 与坡度；M7 TaskGraph/DAG2.3 才在这些位置生成模块与刚体。普通建筑的 `WorldTransform.+X` 由 RoadPortal 指向 BuildingAnchor，使道路外移位后仍把 M7 的攻击正面朝向玩家抵达方向；LaunchSite 继续使用 SatelliteWindow 定义终局局部轴。
 
 ## 7. 验收
 
@@ -250,6 +251,8 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 8. `GetBuildingSpawnSites()` 返回施工位，但场景中没有模块化建筑或建筑刚体。
 9. 每次进入 PIE，玩家最终位于 Start Task 的道路 Cell，朝向下一个主线 Task；移动前 Output Log 出现一次 `[ABTS][M3][Spawn] Player placed at Start road`。改变 `WorldSeed` 后出生点随 TaskGraph 改变，而不是停留在地图 `PlayerStart`。
 10. M11.0 后 `LaunchSite` 仍可返回平整施工位，但 M7 不在其上生成建筑；`GetFinaleLaunchFrame()` 必须返回正交、右手、槽中点为原点的唯一终局局部坐标系。
+11. 首周展示 Seed 的普通三栋施工 Anchor 均不在道路上，`bBuildingRoadExclusion && bRoad` 的 Cell 数为 0，且日志均为 `GeometricRoadClearance=1`；该认证以实际平台、混合带、道路半宽和动态几何预筛为准。LaunchSite 仍位于道路端点，其高度压平护环必须完整归属于 LaunchSite Task。
+12. `[ABTS][PCG][Accepted]` 的 `Visibility` 为 `11/00/00`，表示 B1 在默认/最大 OrbitDistance 均可见，B2/B3 均隐藏；该值来自逻辑高度包络，不依赖 HISM 遮挡。
 
 ## 8. 排错
 

@@ -6,10 +6,12 @@
 #include "PCG/ABTSM3TaskGraphTypes.h"
 
 struct FABTSM2Cell;
+struct FABTSM3PCGGeometryContext;
 
 namespace ABTSM3PCG
 {
 constexpr int32 GeneratorVersion = 3;
+constexpr int32 LayoutPolicyVersion = 1;
 
 struct FTaskSpec
 {
@@ -39,7 +41,8 @@ public:
 class FSpatialBuilder
 {
 public:
-	bool PlaceTaskSeeds(int32 WorldSeed, int32 AttemptIndex, float MinSatelliteLaunchAngularSeparationDegrees,
+	bool PlaceTaskSeeds(int32 WorldSeed, int32 AttemptIndex, float MainRouteAngularSpanDegrees,
+		float MinSatelliteLaunchAngularSeparationDegrees,
 		const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks) const;
 	bool GrowTaskRegions(int32 WorldSeed, int32 AttemptIndex, int32 TargetCells, const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks, TArray<FABTSM3CellState>& CellStates) const;
 };
@@ -63,16 +66,22 @@ public:
 class FRoadPlanner
 {
 public:
-	bool Build(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks, TArray<FABTSM3TaskLink>& Links,
-		TArray<FABTSM3CellState>& CellStates, TArray<FABTSM3CellEdgeState>& EdgeStates, const FABTSM3CellEdgeKey& BridgeEdge) const;
+	bool Build(const TArray<FABTSM2Cell>& Cells, TArray<FABTSM3TaskNode>& Tasks, TArray<FABTSM3TaskLink>& Links,
+		TArray<FABTSM3CellState>& CellStates, TArray<FABTSM3CellEdgeState>& EdgeStates,
+		const FABTSM3CellEdgeKey& BridgeEdge, float PlanetRadiusCM) const;
 };
 
-/** Picks one CellTopo anchor per building task only after water/road generation can certify its full footprint. */
+/** Reserves road-separated construction footprints, then certifies the same immutable choices after water and roads. */
 class FBuildingPadPlanner
 {
 public:
-	bool Place(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks,
-		int32 ClearanceRingCells, TArray<FABTSM3CellState>& CellStates, FString& OutFailure) const;
+	bool Reserve(int32 WorldSeed, int32 AttemptIndex, const TArray<FABTSM2Cell>& Cells,
+		TArray<FABTSM3TaskNode>& Tasks, const FABTSM3PCGConfig& Config,
+		TArray<FABTSM3CellState>& CellStates, FString& OutFailure) const;
+	bool Certify(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks,
+		const TArray<FABTSM3CellEdgeState>& EdgeStates, const FABTSM3PCGConfig& Config,
+		const FABTSM3PCGGeometryContext& GeometryContext,
+		TArray<FABTSM3CellState>& CellStates, FString& OutFailure) const;
 };
 
 class FWorldValidator
@@ -80,7 +89,8 @@ class FWorldValidator
 public:
 	bool Validate(const TArray<FABTSM2Cell>& Cells, const TArray<FABTSM3TaskNode>& Tasks, const TArray<FABTSM3TaskLink>& Links,
 		const TArray<FABTSM3CellState>& CellStates, const TArray<FABTSM3CellEdgeState>& EdgeStates,
-		const FABTSM3CellEdgeKey& BridgeEdge, float MinSatelliteLaunchAngularSeparationDegrees,
+		const FABTSM3CellEdgeKey& BridgeEdge, const FABTSM3PCGConfig& Config,
+		const FABTSM3PCGGeometryContext& GeometryContext,
 		FABTSM3PCGSummary& Summary, FString& OutFailure) const;
 };
 }

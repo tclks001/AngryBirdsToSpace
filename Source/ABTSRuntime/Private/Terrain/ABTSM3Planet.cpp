@@ -152,7 +152,25 @@ bool AABTSM3Planet::RebuildPlanet()
 bool AABTSM3Planet::GenerateLogicalTerrain()
 {
 	FABTSM3TaskGraphGenerator Generator;
-	return Generator.Generate(WorldSeed, PCGConfig, LogicalCells, GeneratedTasks, GeneratedTaskLinks, GeneratedCellStates, GeneratedEdgeStates, PCGSummary);
+	FABTSM3PCGGeometryContext GeometryContext;
+	GeometryContext.PlanetRadiusCM = PlanetRadiusCM;
+	GeometryContext.TerrainHeightScaleCM =
+		bDisableTerrainHeightVariationExperiment ? 0.0f : MacroHeightScaleCM;
+	GeometryContext.BuildingPadHalfExtentCM = BuildingPadSettings.HalfExtentCM;
+	GeometryContext.BuildingPadEdgeBlendWidthCM =
+		BuildingPadSettings.EdgeBlendWidthCM;
+	GeometryContext.TrailHalfWidthCM = TrailVisualHalfWidthCM;
+	GeometryContext.MainRoadHalfWidthCM = MainRoadVisualHalfWidthCM;
+	return Generator.Generate(
+		WorldSeed,
+		PCGConfig,
+		LogicalCells,
+		GeneratedTasks,
+		GeneratedTaskLinks,
+		GeneratedCellStates,
+		GeneratedEdgeStates,
+		PCGSummary,
+		GeometryContext);
 }
 
 float AABTSM3Planet::GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const
@@ -521,9 +539,25 @@ void AABTSM3Planet::BuildBuildingSpawnSites()
 		FABTSM3BuildingSpawnSite& Site = BuildingSpawnSites.AddDefaulted_GetRef();
 		Site.CellId = CellId;
 		Site.TaskId = GeneratedCellStates[CellId].TaskId;
-		Site.TaskType = GeneratedTasks.IsValidIndex(Site.TaskId) ? GeneratedTasks[Site.TaskId].Type : EABTSM3TaskType::Unassigned;
+		const FABTSM3TaskNode* SiteTask = GeneratedTasks.FindByPredicate([TaskId = Site.TaskId](const FABTSM3TaskNode& Task)
+		{
+			return Task.TaskId == TaskId;
+		});
+		Site.TaskType = SiteTask != nullptr ? SiteTask->Type : EABTSM3TaskType::Unassigned;
 		Site.AnchorDirection = PadUp;
-		if (Site.TaskType == EABTSM3TaskType::LaunchSite
+		if (Site.TaskType != EABTSM3TaskType::LaunchSite
+			&& SiteTask != nullptr
+			&& LogicalCells.IsValidIndex(SiteTask->RoadPortalCellId))
+		{
+			// The ordinary building's +X attack direction points from its road
+			// arrival portal into the off-road target. M7 can therefore retain
+			// its local weak-point semantics after M3 separates road and pad.
+			const FVector RoadToBuilding = FVector::VectorPlaneProject(
+				Direction - LogicalCells[SiteTask->RoadPortalCellId].UnitCenter,
+				PadUp).GetSafeNormal();
+			if (!RoadToBuilding.IsNearlyZero()) Forward = RoadToBuilding;
+		}
+		else if (Site.TaskType == EABTSM3TaskType::LaunchSite
 			&& SatelliteWindowTask != nullptr
 			&& LogicalCells.IsValidIndex(SatelliteWindowTask->SeedCellId))
 		{

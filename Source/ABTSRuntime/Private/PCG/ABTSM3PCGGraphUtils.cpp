@@ -26,7 +26,8 @@ uint32 MakeStageSeed(const int32 WorldSeed, const TCHAR* StageTag, const int32 A
 {
 	uint32 Hash = HashCombineFast(GetTypeHash(WorldSeed), GetTypeHash(FString(StageTag)));
 	Hash = HashCombineFast(Hash, GetTypeHash(AttemptIndex));
-	return HashCombineFast(Hash, GetTypeHash(GeneratorVersion));
+	Hash = HashCombineFast(Hash, GetTypeHash(GeneratorVersion));
+	return HashCombineFast(Hash, GetTypeHash(LayoutPolicyVersion));
 }
 
 int32 FindTaskIndexById(const TArray<FABTSM3TaskNode>& Tasks, const int32 TaskId)

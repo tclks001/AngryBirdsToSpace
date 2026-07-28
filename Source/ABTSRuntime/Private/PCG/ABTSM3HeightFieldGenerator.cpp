@@ -100,9 +100,9 @@ void FHeightFieldGenerator::Generate(
 	for (const FABTSM3TaskNode& Task : Tasks)
 	{
 		const FTaskSpec* Spec = FindSpec(Task.Type);
-		if (!Spec || !Spec->bBuilding || !Cells.IsValidIndex(Task.SeedCellId)) continue;
-		CellStates[Task.SeedCellId].bBuildingAnchor = true;
-		FlattenTaskFootprint(Task.SeedCellId, FlatFootprintRings, Cells, CellStates);
+		if (!Spec || !Spec->bBuilding || !Cells.IsValidIndex(Task.BuildingAnchorCellId)) continue;
+		CellStates[Task.BuildingAnchorCellId].bBuildingAnchor = true;
+		FlattenTaskFootprint(Task.BuildingAnchorCellId, FlatFootprintRings, Cells, CellStates);
 	}
 
 	for (int32 Iteration = 0; Iteration < 3; ++Iteration)
@@ -126,8 +126,12 @@ void FHeightFieldGenerator::Generate(
 	// flat footprint later consumed by presentation and construction.
 	for (const FABTSM3TaskNode& Task : Tasks)
 	{
-		if (!Cells.IsValidIndex(Task.SeedCellId) || !CellStates[Task.SeedCellId].bBuildingAnchor) continue;
-		FlattenTaskFootprint(Task.SeedCellId, FlatFootprintRings, Cells, CellStates);
+		if (!Cells.IsValidIndex(Task.BuildingAnchorCellId)
+			|| !CellStates[Task.BuildingAnchorCellId].bBuildingAnchor)
+		{
+			continue;
+		}
+		FlattenTaskFootprint(Task.BuildingAnchorCellId, FlatFootprintRings, Cells, CellStates);
 	}
 
 	constexpr float ApproxCellArcRadians = 0.034f;

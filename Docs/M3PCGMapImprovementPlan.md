@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：设计与审计稿，尚未实施  
+> 状态：首周兼容方案已实现并通过自动化；月度重构仍待实施
 > 日期：2026-07-28  
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次交付：只新增本 Markdown；不修改 C++、蓝图、地图或资产
+> 本次实现：只修改 M3 所属 C++ 与本文列出的 M3 文档；不修改蓝图、地图、资产或集成工作流
 
 父文档：
 
@@ -31,17 +31,17 @@
 5. 默认采用清晰的线性流程。只有支线能提供独占奖励、替代解或真正的风险收益时才生成支线；
 6. M3 继续输出确定性的逻辑布局；M7 DAG2.3/后续 DAG2.4 生成建筑，UE PCG Graph 只消费布局属性做地貌与装饰表现。
 
-首周兼容版只解决核心玩法是否成立：保留现有九 Task、三栋普通建筑和 M7 `Expected=3`，延长路线，使 B1 可从开局看到、B2/B3 不可从开局看到，并让三栋建筑离开主路。
+首周兼容版只解决核心玩法是否成立：保留现有九 Task、三栋普通建筑和 M7 `Expected=3`，延长路线，使 B1 可从开局看到、B2/B3 不可从开局看到，并让三栋建筑离开主路。该兼容版现已落地；月度版仍按本文后半部分继续演进。
 
 月度版再引入独立的 Encounter 序列，生成至少六栋相隔较远、难度递增、视觉签名不同的道路外可攻击建筑。
 
 ---
 
-## 2. 当前实现基线
+## 2. 实施前基线（审计快照）
 
 ### 2.1 实际生成链路
 
-当前运行链路为：
+本轮首周修改前的运行链路为：
 
 ```text
 AABTSM2Planet::BeginPlay
@@ -74,7 +74,7 @@ AABTSM2Planet::BeginPlay
 - `BuildingPadClearanceRingCells=2`；
 - 卫星与终局发射区最小角距 55°。
 
-### 2.2 当前展示 Seed 的量化结果
+### 2.2 修改前展示 Seed 的量化结果
 
 展示 Seed `312503` 的 V3 fresh 日志：
 
@@ -107,7 +107,9 @@ BuildingPad Task=6 Seed=99   Anchor=99   Shifted=0
 
 ---
 
-## 3. 四个现象的根因分类
+## 3. 四个现象的实施前根因分类
+
+本节保留首周修改前的审计证据；已修复项及现行链路以第 12.4 节为准。
 
 | 现象 | 现行设计合同 | 当前实现 | 判定 |
 |---|---|---|---|
@@ -732,9 +734,8 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
 3. **拆开 RoadPortal 与 BuildingAnchor**
    - 道路仍连接 Task 的 `RoadPortalCellId`；
    - BuildingAnchor 在同一 Task 内侧向选择；
-   - B1 先用 1–2 Cell 偏路；
-   - B2 用 3–5 Cell；
-   - B3 用 4–7 Cell；
+   - 默认施工净空为 2-ring，因此建筑中心到主路的安全下限不能小于 3 Cell；
+   - B1/B2/B3 的默认最小偏路距离分别为 3/4/5 Cell，并各自允许再搜索 3 Cell；
    - Footprint 全圈禁路；
    - 预留/压平必须发生在道路前。
 
@@ -754,7 +755,64 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
    - M9/M11.0 的 103 Seed 分离测试不回退；
    - 桥前锁、桥后通、资源与发射流程不回退。
 
-### 12.3 首周是否调整 Wild
+### 12.3 已实现的首周链路（2026-07-28）
+
+首周实现保持 `GeneratorVersion=3`，以维持 M11 已冻结的兼容身份；新增 `LayoutPolicyVersion=1` 区分本轮布局策略，`ConfigHash` 覆盖策略、Planet 实际几何输入和量化后的有序 `CellTopo`，`LayoutHash` 标识接受后的 Task/Portal/Anchor/Corridor 结果。世界生成合同签名和稳定枚举不变。
+
+实际生成顺序已调整为：
+
+```text
+Mission
+  -> Spatial Seed / Region
+  -> BuildingPad Reserve
+       RoadPortal / BuildingAnchor / NoRoad Ring
+  -> Height（压平已预留 Anchor）
+  -> Hydrology
+  -> Road（硬避让普通建筑 NoRoad Ring）
+  -> BuildingPad Certify（不得重选）
+  -> World Validator（路线 / 间距 / 视距 / 跨阶段合同）
+```
+
+已实现：
+
+- `FirstWeekMainRouteAngularSpanDegrees=120°`，七个主线 Beat 使用可调总跨度和冻结的首周归一化节奏；
+- 每条 `TaskLink` 输出 `CorridorLengthCM`；
+- Task/Cell 输出权威 `ProgressDistanceCM` 和 `FlowS`，旧整数 `ProgressDistance` 只保留为最近主路线序投影；
+- 普通建筑的 `RoadPortalCellId` 与 `BuildingAnchorCellId` 分离，RoadPlanner 对 `bBuildingRoadExclusion` 做硬禁止；
+- Workshop/TargetBuilding/FurnaceRuins 默认最小主路距离为 3/4/5 Cell；
+- 候选 Anchor 的比较使用量化整数分数和 CellId 最终裁决，避免近似浮点比较破坏严格排序；
+- `BuildingPad Certify` 除离散 NoRoad Ring 外，还使用 Planet 实际半径、平台半尺寸、边缘混合带、道路半宽与 25 cm 安全余量，拒绝连续道路带与施工台扩展矩形相交的候选；候选边预筛角由这些实际尺寸和边角跨度动态推导，不使用固定角度；
+- LaunchSite 仍以 Seed 作为道路端点和唯一终局施工 Anchor，不生成普通道路禁入环，但在压平前必须证明 `SafeRings+1` 护环仍完整属于 LaunchSite Task；
+- 普通建筑的生成朝向由 RoadPortal 指向 BuildingAnchor，M7 继续消费既有 `BuildingSpawnSites`；
+- 纯数据视距验证使用当前 M4 默认/最大 OrbitDistance（850/1300 cm）、60° 仰角和 M7 建筑高度代理，要求 B1 两档均可见、B2/B3 两档均隐藏；
+- Validator 拒绝不连续或非相邻重复 Cell 造成的主路自重叠；
+- `[ABTS][PCG][Accepted]` 输出布局策略/配置/结果身份、主路厘米、相邻建筑最小沿路间距和 `11/00/00` 视距摘要。
+
+展示 Seed `312503` 的 fresh 自动化结果为：
+
+```text
+LayoutPolicy=1
+ConfigHash=2795535429
+LayoutHash=2577447183
+MainRouteCM=24583.4
+BuildingGapCM=7736.8
+Visibility=11/00/00
+SatelliteLaunchSepDeg=90.30
+```
+
+21 个首周测试 Seed 的主路约为 230–263 m，最小相邻建筑沿路间距为 71.9 m，全部超过 180 m / 35 m 硬门槛；上端略高于最初 200–240 m 调参目标窗，但不会影响本轮“B2/B3 出视距”的核心合同，后续可在真实 PIE 步行节奏验收后决定是否收窄总跨度。
+
+自动化门禁：
+
+- `ABTS.M3.WeekOne`：2/2；
+- `ABTS.Contracts.WorldGeneration`：2/2；
+- `ABTS.M110.TaskGraphFinaleSeparation`：1/1，覆盖原有 103 个布局 Seed。
+
+首周测试不直接复用 Summary 做自证：它独立重算每条 Corridor 球面弧长、多源 BFS 主路距离、主路线 Cell 唯一性，并对展示 Seed 暴力搜索最近 Cell 复算六项视距结果；确定性用例还分别扰动布局配置、连续几何输入和 `CellTopo` 元数据，证明 `ConfigHash` 会响应全部三类输入。Fresh-process 证据位于 `Saved/Logs/M3WeekOne-20260729-001224-FreshAutomation-NoMessaging.log`、`M3-WorldContracts-20260729-001305-FreshAutomation-NoMessaging.log`、`M3-M110Separation-20260729-001527-FreshAutomation-NoMessaging.log` 与 `M3-LABTSM3-20260729-001627-FreshRuntime-NoMessaging.log`。
+
+正式 PIE 中默认关闭 M7 位置标签属于 M7/集成所有权，本 M3 工作树没有越权修改；集成时仍需按多工作树交接清单完成该项人工验收。
+
+### 12.4 首周是否调整 Wild
 
 不建议把 `TaskTargetCells` 翻倍当成正式答案。将 280 临时提高到 560–600，理论上可把未分配比例降到约 49–52%，但会扩大 Task 区、改变水文与终局候选通过率，并没有解决 MissionOwnership 与 Biome 混用。
 
@@ -786,7 +844,8 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
 
 - 三栋建筑 Anchor 均不在 Road Cell；
 - 建筑 Footprint/NoRoad Ring 与道路重叠数为 0；
-- B1/B2/B3 的 `MainRoadDistanceCells` 分别落在 `1–2 / 3–5 / 4–7` 初始窗，若弹道验证要求收窄，以 Witness 为准；
+- 以 Planet 实际几何参数展开后的平台矩形与连续道路带重叠数为 0；
+- B1/B2/B3 的 `MainRoadDistanceCells` 分别不小于 `3 / 4 / 5`，并受各自最小值加 `BuildingAnchorSearchSlackCells` 的搜索上限约束；默认 2-ring Footprint 与道路零重叠；
 - 每栋均有当前弹弓档位的 Ballistic Witness；
 - RoadPortal、SlingshotPocket、TargetAnchor 三者不能是同一 Cell。
 
@@ -798,7 +857,7 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
 - LaunchSite 不生成普通建筑；
 - 卫星与 LaunchSite 保持 `>=55°`；
 - 现有 M11.0 103 Seed 自动化通过；
-- 相同 Seed + Version + ConfigHash 输出相同布局 Hash。
+- 相同 Seed + GeneratorVersion + LayoutPolicyVersion + ConfigHash 输出相同布局 Hash。
 
 ---
 
@@ -843,7 +902,7 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
 
 ### 15.1 确定性与搜索
 
-- 相同 Seed + GeneratorVersion + ConfigHash 的结果 Hash 完全一致；
+- 相同 Seed + GeneratorVersion + LayoutPolicyVersion + ConfigHash 的结果 Hash 完全一致；
 - 至少 1000 Seed 的纯数据 sweep 无崩溃、无非法索引、无无限回溯；
 - 输出每阶段尝试数、回溯数和 RejectReason；
 - 不再默认“Attempt 0 第一个硬通过结果即 Accepted”；
