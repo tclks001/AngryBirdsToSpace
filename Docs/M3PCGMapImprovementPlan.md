@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：首周兼容方案已实现并通过自动化；月度重构仍待实施
-> 日期：2026-07-28  
+> 状态：首周兼容方案已实现并通过自动化；月度重构已拆分为 M3R-1～M3R-7，仍待逐阶段实施
+> 日期：2026-07-29
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次实现：只修改 M3 所属 C++ 与本文列出的 M3 文档；不修改蓝图、地图、资产或集成工作流
+> 本次更新：明确月度阶段依赖、实现目标与退出验收；不修改代码、蓝图、地图、资产或集成工作流
 
 父文档：
 
@@ -13,6 +13,7 @@
 直接下游：
 
 - [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)
+- [M52CollisionAndMovementDesign.md](M52CollisionAndMovementDesign.md)
 - [M7TaskGraphSphericalBuildingIntegrationDesign.md](M7TaskGraphSphericalBuildingIntegrationDesign.md)
 - [M10ScoutMinimapDesign.md](M10ScoutMinimapDesign.md)
 - [M9SatelliteGravityDesign.md](M9SatelliteGravityDesign.md)
@@ -33,7 +34,7 @@
 
 首周兼容版只解决核心玩法是否成立：保留现有九 Task、三栋普通建筑和 M7 `Expected=3`，延长路线，使 B1 可从开局看到、B2/B3 不可从开局看到，并让三栋建筑离开主路。该兼容版现已落地；月度版仍按本文后半部分继续演进。
 
-月度版再引入独立的 Encounter 序列，生成至少六栋相隔较远、难度递增、视觉签名不同的道路外可攻击建筑。
+月度 MVP 再引入独立的 Encounter 序列，固定生成恰好六栋相隔较远、难度递增、视觉签名不同的道路外可攻击建筑。未来扩容必须另起版本，不让本期 B1～B6 验收在“至少六栋”口径下产生未定义的 B7+。
 
 ---
 
@@ -109,7 +110,7 @@ BuildingPad Task=6 Seed=99   Anchor=99   Shifted=0
 
 ## 3. 四个现象的实施前根因分类
 
-本节保留首周修改前的审计证据；已修复项及现行链路以第 12.4 节为准。
+本节保留首周修改前的审计证据；已修复项及现行链路以第 12.3 节为准。
 
 | 现象 | 现行设计合同 | 当前实现 | 判定 |
 |---|---|---|---|
@@ -131,7 +132,7 @@ BuildingPad Task=6 Seed=99   Anchor=99   Shifted=0
 
 `ABTSM3RoadPlanner.cpp:18-88` 的 Dijkstra 只考虑地貌、坡度、建筑 Anchor 和道路复用。它没有 incoming-edge 状态，无法计算转角；已有道路还有 `-0.35` 复用奖励，容易让多条 Link 过度重叠。
 
-更严重的是，当前 `ProgressDistance` 在 `ABTSM3RoadPlanner.cpp:170-174` 中是从 Start 对全部 Cell 邻接图做普通距离场，不是“沿已解锁主路的累计进度”。这不能承担难度、建筑顺序或节奏的权威标尺。
+更严重的是，当前 `ProgressDistance` 在 `ABTSM3RoadPlanner.cpp:170-174` 中是从 Start 对全部 Cell 邻接图做普通距离场，不是“沿接受后有序主路的静态累计进度”。这不能承担难度、建筑顺序或节奏的权威标尺。
 
 ### 3.2 “支线无意义”的具体原因
 
@@ -223,15 +224,20 @@ bDrawTaskGraphBuildingWorldLabels=true
 3. **`M3TaskGraphTerrainPresentationDesign.md`**
    - 继续保持只读表现职责；
    - 将旧的单一 `RoadDistance` 说明更新为 Main/Nearest/Progress/FlowS；
-   - 只消费 BiomeDistrict、PlayableEnvelope 和 Encounter 属性，不决定任务布局。
+   - 只消费 BiomeDistrict、PlayableEnvelope 和 Encounter 属性，不决定任务布局；
+   - 把旧稿的 HISM `NoCollision` 描述更新为当前生产基线 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，保留行走、可见性查询和 M6 动态代理碰撞。
 
-4. **`M7TaskGraphSphericalBuildingIntegrationDesign.md`**
+4. **`M52CollisionAndMovementDesign.md`**
+   - 把旧的树石 `QueryOnly + WorldStatic` 口径更新为 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`；
+   - 明确这里的“静态实例”只表示不模拟、不自主移动，不代表 UE Object Type 是 `WorldStatic`。
+
+5. **`M7TaskGraphSphericalBuildingIntegrationDesign.md`**
    - 首周继续冻结 `Expected=3`；
    - 月度版改为动态 Accepted Encounter 数量；
-   - 接入 DifficultyBand、VisualSignature、ProfileTags 和 AttackFace；
+   - 接入 DifficultyBand、VisualSignature、`ResolvedM7ProfileId`、`ProfileCatalogHash` 和 AttackFace；ProfileTags 仅作筛选诊断；
    - 加入六栋建筑的分批 IdleValidation、远端冻结和刚体预算。
 
-5. **`ABTSProjectWorkflow.md`**
+6. **`ABTSProjectWorkflow.md`**
    - 首周加入 B1/B2/B3 可见性、主路里程、Road/Footprint 零重叠验收；
    - 月度加入 1000 Seed、六建筑、难度/形态、PVS、Biome 和弹道门槛；
    - 保留 M11.0 的 Launch 无建筑、唯一 Space 槽对和卫星隔离回归。
@@ -338,7 +344,7 @@ UE PCG 点可携带 Transform、Bounds、Density、Seed 和自定义 Attribute�
 
 ```mermaid
 flowchart TD
-    A[WorldSeed + GeneratorVersion + ConfigHash] --> B[Mission / RouteBeat Plan]
+    A[WorldSeed + GeneratorVersion + LayoutPolicyVersion + ConfigHash] --> B[Mission / RouteBeat Plan]
     B --> C[Spherical Route Skeleton Candidates]
     C --> D[Encounter Reservation<br/>RoadPortal / Reveal / Slingshot / TargetEnvelope]
     D --> E[Biome District + Region + Height + Hydrology]
@@ -398,7 +404,7 @@ BuildingPurpose:
   FinaleSupport
 ```
 
-月度验收中的“至少六栋 PCG 建筑”专指六个 `DestructibleTarget`。Workbench/Furnace 等设施可以作为 Landmark/Facility，不计入六栋；LaunchSite 继续遵守 M11.0 的“无普通建筑”合同。
+月度 MVP 中的“六栋 PCG 建筑”专指恰好六个 `DestructibleTarget`。Workbench/Furnace 等设施可以作为 Landmark/Facility，不计入六栋；LaunchSite 继续遵守 M11.0 的“无普通建筑”合同。
 
 ---
 
@@ -414,9 +420,9 @@ BuildingPurpose:
 4. 拒绝近似回头、局部自交、过早接近旧路段和接近对跖点的不稳定候选；
 5. 为每个控制点建立允许道路穿行的 Corridor Mask；
 6. Height/Hydrology 完成后，在 Corridor 内使用带状态的 A*/Dijkstra 铺路；
-7. 收集最多三个硬约束通过的候选，再按归一化质量权重做确定性选择。
+7. 先保留最多三个通过路线硬门的 `RouteCandidate`；只有它们继续完成 Encounter/Biome/Height/Hydrology/Witness 后，才按完整世界质量做最终确定性选择。
 
-这不是把固定 `MainAngles` 数组加长，而是从“单一路径一次通过”改为“候选—约束—评分—局部回溯”。
+这不是把固定 `MainAngles` 数组加长，而是从“单一路径一次通过”改为“路线候选池—Encounter/Biome 联合约束—完整世界评分—局部回溯”。R-2 只能产生 `RouteCandidateHash`，不能在六个 Encounter 尚未证明可放置时提前发布最终 `LayoutHash`。
 
 ### 7.2 Road Solver 状态
 
@@ -448,31 +454,55 @@ StepCost
 - 道路复用奖励必须封顶，避免不同 Link 全挤在同一段；
 - Target Footprint 与 NoRoad Envelope 是硬禁止区，不是高代价软区。
 
-### 7.3 三种距离与新增 FlowS
+### 7.3 静态路线坐标、侧向距离与动态通行状态
 
 必须保留并正确区分：
 
-- `NearestRoadDistance`：到任意道路的拓扑距离；
-- `MainRoadDistance`：到主路的拓扑距离；
-- `ProgressDistanceCM`：从 Start 沿当前已解锁主路/交通图的累计代价；
-- `FlowS = ProgressDistanceCM / MainRouteTotalCM`：`[0,1]` 规范化主线进度。
+- `NearestRoadDistanceCells`：到任意道路的静态拓扑距离；
+- `MainRoadDistanceCells`：到主路的静态拓扑距离；
+- `ProgressDistanceCM`：沿接受后的 Start→Launch 有序主路，从 Start 到最近主路投影点的静态纵向里程；
+- `FlowS = ProgressDistanceCM / MainRouteTotalCM`：`[0,1]` 静态规范化主线进度；
+- `TraversalCost/ReachableState`：由坡度、桥、Key 和当前解锁状态产生的动态通行代价/可达状态，不参与 `FlowS`。
 
-主路上的 Cell 直接得到累计里程；主路外 Cell 由最近主路投影点的累计里程加侧向代价派生。不能再把从 Start 穿越任意地表 Cell 的 BFS 距离叫作 ProgressDistance。
+主路上的 Cell 直接得到累计里程；主路外 Cell 继承最近主路投影点的纵向里程，侧向距离只写入 `NearestRoadDistanceCells/MainRoadDistanceCells`，不得加进 `ProgressDistanceCM`。同一接受布局的 `FlowS` 不能随桥门或 Key 状态变化，也不能因为路外侧向距离超过 1。动态流程验证读取 `TraversalCost/ReachableState`，不能再把从 Start 穿越任意地表 Cell 的 BFS 距离叫作 ProgressDistance。
 
-### 7.4 月度初始参数窗
+### 7.4 `M3MonthlyAcceptanceProfileV1`：月度唯一数值源
 
-以下是以当前 100 m 半径球和 6.2–6.8 m/s 地面速度为基准的首轮调参窗，不是永远不变的物理常量：
+以下是以当前 100 m 半径球和 6.2–6.8 m/s 地面速度为基准的首轮调参窗，不是永远不变的物理常量。实现、阶段测试、日志和第 15 节必须读取同一份 `M3MonthlyAcceptanceProfileV1`；本文其他位置重复的数值只是便于阅读的展开，不能形成第二份默认值。
 
 | 指标 | 建议初始窗 |
 |---|---:|
+| Destructible Encounter 数 | 恰好 6 |
 | 主路累计长度 | 280–360 m |
 | 相邻建筑 Encounter 沿路间距 | 35–60 m |
 | 最大无有效转折连续路段 | 45–55 m |
 | 有效 Scenic Bend | 至少 3 个 |
 | 同时从 Start 直接可见的可攻击建筑 | 恰好 1 |
-| 路线自接近 | 非有意回环段不得小于 3–4 Cell |
+| `BendSampleSpacingCM` | 250 cm |
+| `BendWindowCM` | 1500 cm |
+| `MinBendAngleDegrees` | 18° |
+| `MinBendSeparationCM` | 2000 cm |
+| `StraightTurnThresholdDegrees` | 8° |
+| `MaxStraightCM` | 5500 cm |
+| `SelfApproachIgnoreAlongRouteCM` | 3000 cm |
+| `MinSelfApproachCells` | 4 Cell |
+| `AllowedSelfApproachPairIds` | 月度 MVP 必须为空 |
+| `RouteSolveP95MS / RouteSolveMaxMS` | 200 / 1000 ms·Seed⁻¹ |
+| `EncounterSpatialP95MS / EncounterSpatialMaxMS` | 750 / 2000 ms·Seed⁻¹ |
+| `MaxOptimizedPVSRaysPerWorld` | 1024 |
+| `MaxWitnessEvaluationsPerEncounter` | 8192 |
+| `WitnessWorldP95MS / WitnessWorldMaxMS` | 2000 / 5000 ms·World⁻¹ |
+| `FullM3GenerationP95MS / FullM3GenerationMaxMS` | 4000 / 8000 ms·World⁻¹ |
+| `WorldReadyP95Seconds / WorldReadyMaxSeconds` | 20 / 20 s |
+| `PerfCaptureSeconds` | Ready 后 120 s |
+| `FrameTimeP95Multiplier / FrameTimeP99Multiplier` | 1.10 / 1.50 × 目标帧预算 |
+| `MaxSingleHitchMS / AllowedSingleHitches` | 100 ms / 0 |
 
 280–360 m 对应约 41–58 秒纯步行；攻击、采集、侦察和桥梁玩法会显著扩展总关卡时长，而不会把时间主要浪费在跑图上。
+
+路线指标按唯一算法计算：先按 `BendSampleSpacingCM` 对球面主路线等弧长重采样；在每个样本中心把前后各半个 `BendWindowCM` 的路线切向平行移动到同一切平面，计算有符号夹角。绝对夹角达到 `MinBendAngleDegrees` 才是 Bend 候选；中心间距小于 `MinBendSeparationCM` 的候选合并并只保留绝对夹角最大者。最长直段是连续样本中每个 Bend Window 的绝对转角都小于 `StraightTurnThresholdDegrees` 的最长弧长，必须不超过 `MaxStraightCM`。
+
+自接近检查忽略沿路线里程差小于 `SelfApproachIgnoreAlongRouteCM` 的局部相邻段；其余任意两段的 CellTopo 最短距离小于 `MinSelfApproachCells` 即拒绝。月度 MVP 不设计有意回环，因此 `AllowedSelfApproachPairIds` 必须为空；未来若加入回环，必须使用稳定 PairId 白名单，不能用自由文本或运行时猜测豁免。
 
 ---
 
@@ -502,10 +532,11 @@ StartVisibilityPolicy
 RevealVisibilityPolicy
 FutureTargetVisibilityPolicy
 BallisticWitness
-NegativeWitnessForPreviousTier
+PriorTierInfeasibilityCertificate
 
 TerrainArchetype
-M7StructureProfile
+ResolvedM7ProfileId
+ProfileCatalogHash
 MaterialProfile
 VisualSignature
 ```
@@ -517,17 +548,25 @@ VisualSignature
 1. 在 Beat 的里程窗内选择 RoadArrival 候选；
 2. 在其侧向选择 Target Envelope、Reveal 和 Slingshot 候选；
 3. 预留建筑 Footprint 和 NoRoad Ring；
-4. 把 Footprint 作为 Height 的硬平整锚；
-5. Hydrology 必须尊重建筑、弹弓和必要攻击走廊。
+4. 由 Route/Pocket 生成 Playable Envelope 和 ActiveRole，再分配 BiomeDistrict 逻辑；
+5. 把 Footprint 作为 Height 的硬平整锚；
+6. Hydrology 必须尊重建筑、弹弓和必要攻击走廊。
 
-**道路后：Encounter Finalize**
+随后 Road Solver 在 Corridor 内铺路并硬避让 NoRoad Envelope。
+
+**道路后：Encounter Spatial Finalize（R-3）**
 
 1. 在预留 Target Envelope 内选最终 Anchor；
 2. 检查 Footprint 全圈可建、无水、无道路；
-3. 选择 M7 Profile 与攻击正面；
-4. 从 SlingshotPocket 调用 M6 预测器生成 Ballistic Witness；
-5. 检查侦察揭示、可见性、资源和能力门；
-6. 失败时先换局部 Pocket/Profile/朝向，再回滚当前路线候选。
+3. 使用只读 M7 ProfileDescriptor Bounds 检查实际包络、AttackFace 候选和 PVS；
+4. 失败时只在预留 Pocket 内局部回溯，再回滚当前路线候选。
+
+**玩法定稿：Encounter Gameplay Finalize（R-4）**
+
+1. 从当前 `ProfileCatalogHash` 对应的只读目录中冻结 `ResolvedM7ProfileId` 与攻击正面；后续阶段不得重新选型；
+2. 从 SlingshotPocket 调用 M6/M9 预测器生成 Ballistic Witness；
+3. 检查侦察揭示、资源、能力门和 PriorTierInfeasibilityCertificate；
+4. 对完整世界候选评分，最后才发布 CandidateId 与 LayoutHash。
 
 ### 8.3 道路外距离不是越大越好
 
@@ -540,22 +579,35 @@ VisualSignature
 - 建筑 Footprint 不与道路重叠；
 - 玩家不会因为不知道去哪里而迷路。
 
-建议随阶段逐步扩大侧向距离：
+默认 2-ring Footprint 下，Anchor 中心到主路的离散安全下限已经是 3 Cell。正式下限必须先按
+`Footprint 投影半径 + RoadHalfWidth + Pad/Road Blend + SafetyMargin`
+计算物理厘米，再向上换算为 Cell；下表只是在满足该几何下限后的初始搜索窗，不得用固定 Cell 值覆盖连续几何认证：
 
 | Encounter | 初始偏路窗 |
 |---|---:|
-| E1 教学 | 1–2 Cell |
-| E2 | 2–4 Cell |
-| E3 | 3–5 Cell |
-| E4 | 4–6 Cell |
+| E1 教学 | 3–4 Cell |
+| E2 | 3–5 Cell |
+| E3 | 4–6 Cell |
+| E4 | 4–7 Cell |
 | E5 | 5–7 Cell |
-| E6 | 6 Cell 以上，但仍需 Ballistic/Scout Witness |
+| E6 | 6–9 Cell，且必须由 Ballistic/Scout Witness 进一步收紧 |
 
 逻辑 Cell 的实际世界尺寸应在日志中输出，验收以厘米和 Cell 两种单位同时记录。
 
 ### 8.4 可见性矩阵
 
-生成期不要用 HISM 渲染结果反推逻辑。为每个观察点和 Target 的代理 Bounds 建立确定性 PVS：
+生成期不要用 HISM 渲染结果反推逻辑。PVS 不能只输出一个真假值，应冻结：
+
+```text
+VisibilityClass = Hidden | LandmarkOnly | AttackReadable
+ScoutDetectable = true | false
+EvaluationValid = true | false
+CameraSampleSetVersion
+```
+
+`AttackReadable` 要求 Target 中心和 AttackFace 采样满足配置的可读聚合规则；仅有顶部/轮廓样本可见时是 `LandmarkOnly`；没有任何样本可见才是 `Hidden`。求值缺输入、越界或数值失败必须是 `EvaluationValid=false` 并拒绝候选，不能把失败当作 Hidden。`ScoutDetectable` 由 M10 侦察覆盖规则单独判定，不与物理视线混成一个布尔值。
+
+为每个观察点和 Target 的代理 Bounds 建立确定性 PVS：
 
 1. 观察点使用默认相机高度/最远 OrbitDistance 的保守样本；
 2. Target 使用对应 M7 Profile 的顶部、中心和攻击面采样点；
@@ -563,17 +615,18 @@ VisualSignature
 4. 再沿视线采样 `CellTopo + TerrainVisualField` 高度包络；
 5. PIE 中用真实连续地表 Trace 做二次回归验证。
 
-至少输出以下矩阵：
+每个 Encounter 显式选择 `DirectVisual` 或 `ScoutRequired` Reveal Policy，并至少输出以下矩阵：
 
 ```text
-Start          -> B1 Visible
-Start          -> B2..B6 Hidden
-Reveal(Ei)     -> Bi Visible
-PreReveal(Ei)  -> Bi Hidden 或仅显示模糊地标
-Reveal(Ei)     -> B(i+2)..B6 Hidden
+Start          -> B1 AttackReadable
+Start          -> B2..B6 NotAttackReadable
+PreReveal(Ei)  -> Bi NotAttackReadable
+Reveal(Ei)     -> DirectVisual: AttackReadable
+                  ScoutRequired: ScoutDetectable
+Reveal(Ei)     -> B(i+2)..B6 NotAttackReadable
 ```
 
-仅使用球面角距不够。当前相机默认 OrbitDistance 约 8.5–13 m，建筑高约 4.8–5.2 m，高机位和高建筑会扩大地平线视距。
+`NotAttackReadable` 可以是 Hidden 或 LandmarkOnly，但必须保留具体枚举供引导调参；正式门不能再写成含糊的“可见或侦察确认”。仅使用球面角距不够。当前相机默认 OrbitDistance 约 8.5–13 m，建筑高约 4.8–5.2 m，高机位和高建筑会扩大地平线视距。优化 PVS 必须在展示 Seed 和边界 Seed 上与独立暴力最近 Cell/连续地表 Trace 参考一致。
 
 ### 8.5 弹道 Witness
 
@@ -590,7 +643,7 @@ TargetProxy / AttackFace
 SolverVersion / Hash
 ```
 
-若该 Encounter 用于能力升级，还应保存上一档能力的 Negative Witness，证明旧弹弓不能轻易绕过阶段。
+若该 Encounter 用于能力升级，还应保存上一档能力的 `PriorTierInfeasibilityCertificate`。单条失败轨迹不能证明“无解”；证书必须记录上一档完整输入域或经批准的自适应搜索覆盖、角度/功率分辨率、求解器版本及距成功岛的安全裕量。
 
 M3 只保存验证结果和输入，不复制一套与 M6 不同的弹道公式。
 
@@ -622,7 +675,7 @@ M3 只保存验证结果和输入，不复制一套与 M6 不同的弹道公式�
 M7 现有 Workshop/Target/Furnace 三 Profile、`Budget=0` 和固定 `Expected=3` 无法直接满足此目标。月度版需要：
 
 - `ExpectedBuildingCount = AcceptedDestructibleEncounterCount`；
-- M3 向 M7 传递 `DifficultyBand/VisualSignature/ProfileTags/AttackFace`；
+- M3 向 M7 传递 `DifficultyBand/VisualSignature/ResolvedM7ProfileId/ProfileCatalogHash/AttackFace`；`ProfileTags` 只保留为筛选诊断，不能授权 M7 重新选型；
 - 从 DAG2.4/WFC 研究中的已验证轮廓池选择，而不是在 M3 重写建筑算法；
 - 六栋物理建筑分批 IdleValidation，验收后冻结远端建筑，仅激活当前/相邻 Encounter，遵守活跃刚体预算。
 
@@ -669,6 +722,7 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
 - 所有 Cell 都有 `BiomeDistrictId`；
 - Task/Encounter Ownership 仍然稀疏；
 - 主路和 Encounter 周边形成连续的 Playable Envelope；
+- Playable Envelope 内另以 `ActiveRole` 标记 Route/Reveal/Slingshot/Target/Reward/Exit/Resource 等实际玩法职责；
 - 球面背侧可以是低成本 BackgroundBiome；
 - UI 不再把全部 `TaskId==None` 的 Cell 统一显示成 Wild。
 
@@ -677,13 +731,13 @@ UniqueReward 或 AlternativeAttackSolution 或 TrainingValue 至少一个成立
 | 指标 | 目标 |
 |---|---:|
 | BiomeDistrict 覆盖 | 100% Cell |
-| Playable Envelope 内有明确 Route/Room/Biome 职责 | ≥ 75% |
+| Playable Envelope 内有明确 ActiveRole 职责 | ≥ 75% |
 | Playable Envelope 内 DeepWild | ≤ 20% |
 | 全局 MissionOwnership | 不设强制高比例 |
 | 连续相同视觉节拍 | 建议 20–45 m，避免逐 Cell 碎片化 |
 | 六 Encounter 的主地貌主题 | 至少 4 类 |
 
-“全局 Wilderness 比例”继续记录，但不再单独决定通过/失败。真正要验收的是玩家可见、可达、可侦察区域是否有清晰的地貌职责与视觉节奏。
+BiomeDistrict 的 100% 普遍覆盖不得计入 ActiveRole 覆盖率分子，否则该指标会恒为 100%。`DeepWild` 指 Playable Envelope 内既无上述 ActiveRole、又不属于经过批准的留白/过渡带的 Cell。“全局 Wilderness 比例”继续记录，但不再单独决定通过/失败。真正要验收的是玩家可见、可达、可侦察区域是否有清晰的玩法职责与视觉节奏。
 
 ---
 
@@ -861,68 +915,324 @@ SatelliteLaunchSepDeg=90.30
 
 ---
 
-## 14. 月度实施路线
+## 14. 月度实施路线：按可验收阶段推进
 
-### Week 1：Schema 与质量度量
+月度路线不以“到了第几周”判断完成，而以阶段退出门判断完成。自然周只用于排期；任一阶段没有同时满足实现目标、自动化和对应运行时/PIE 验收，就保持在该阶段，不把未闭环内容带入正式默认路径。
 
-- 引入 `RouteBeatPlan/EncounterContract/BiomeDistrict`；
-- 修正 `ProgressDistance` 并增加 `FlowS`；
-- 建立视距矩阵和路线质量日志；
-- 建立 V3 基线与新版本 Hash；
-- 保留 V3 fallback 仅用于回归，不继续扩功能。
+建议状态统一为：
 
-### Week 2：球面路线与 Encounter Solver
+```text
+NotStarted
+  -> Implementing
+  -> M3LocalAccepted
+  -> IntegrationAccepted（仅跨工作树阶段需要）
+  -> Complete
+```
 
-- 4–8 条球面骨架候选；
-- Corridor Mask + 带 incoming-edge 的道路搜索；
-- Encounter Reservation/Finalize 两阶段；
-- RoadPortal、Reveal、Slingshot、Target 联合求解；
-- 完成六个 Encounter 的资源/能力顺序。
+其中 `M3LocalAccepted` 只表示 M3 所有权范围内已通过，不能替代共享契约、M7 实体建筑、M6/M9 真实预测接口或联合 PIE。所有建议新增的自动化过滤器都必须在 fresh `UnrealEditor-Cmd` 进程运行；零匹配、只有进程退出码 0、或复用旧日志都不算通过。
 
-### Week 3：六建筑与地貌表现
+### 14.1 阶段总览、依赖与四周映射
 
-- M3→M7 传递 Difficulty/Visual/Profile/AttackFace；
-- `Expected` 改为 Accepted Encounter 动态数量；
-- 至少四种轮廓族与六个不同 VisualSignature；
-- BiomeDistrict 100% 覆盖；
-- UE PCG Graph 或现有 HISM 消费逻辑属性做道路边缘和局部装饰；
-- 远端建筑分批物理验收与冻结。
+| 阶段 | 排期建议 | 当前状态与证据 | 核心交付 | 主要所有权 | 目标退出状态 |
+|---|---|---|---|---|---|
+| M3R-0 首周基线 | Week 1 开始前补齐 | **M3LocalAccepted**；第 12.3 节已有自动化/fresh runtime，AcceptanceManifest 与集成 Visible PIE 待补 | 长路线、三栋道路外建筑、首周视距与确定性身份 | M3 + Integration/M7 | Complete |
+| M3R-1 月度 Schema 与观测面 | Week 1 前半 | **NotStarted** | RouteBeat、Encounter、Biome、质量报告的数据骨架 | M3；共享字段只提交需求 | M3LocalAccepted |
+| M3R-2 多候选球面路线 | Week 1 后半 | **NotStarted** | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
+| M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **NotStarted** | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
+| M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **NotStarted** | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M6/M9 | IntegrationAccepted |
+| M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **NotStarted** | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3 | M3LocalAccepted |
+| M3R-6 六栋 M7 实体建筑集成 | Week 3 | **NotStarted** | vNext 建筑合同、动态数量、难度/视觉路由与物理批处理 | Integration + M7，M3 只生产数据 | IntegrationAccepted |
+| M3R-7 月度认证与调参冻结 | Week 4 | **NotStarted** | 1000 Seed、fresh runtime、联合 PIE、展示 Seed 与 fallback | Integration | Complete |
 
-### Week 4：自动化、PIE 与调参
+```mermaid
+flowchart LR
+    R0[M3R-0 首周基线] --> R1[M3R-1 Schema/观测]
+    R1 --> R2[M3R-2 路线]
+    R2 --> R3[M3R-3 Encounter 空间]
+    R3 --> R4[M3R-4 Witness/流程]
+    R3 --> R5[M3R-5 Biome/Envelope 表现]
+    R3 --> R6[M3R-6 六栋 M7 集成]
+    R4 --> R6
+    R5 --> R7[M3R-7 月度认证]
+    R6 --> R7
+```
 
-- 大规模 Seed sweep；
-- PVS/弹道/资源/桥门/分支状态验证；
-- 30/60/120 FPS fresh PIE；
-- 路线长度、步行时长、侦察揭示和六关难度调参；
-- 固化展示 Seed 和失败回退模板。
+R-3 必须在 Height/Hydrology/Road 之前确定 Playable Envelope 与 BiomeDistrict 逻辑；R-5 只实现消费这些结果的表现，可以提前做原型，但最终必须重新消费 R-3 的正式结果。R-6 不得因为共享合同尚未就绪而让 M7 直接读取 M3 原始数组。
+
+### 14.2 所有阶段共用的 Definition of Done
+
+每个阶段退出前必须同时完成：
+
+1. 新数据具有明确单位、有效域、默认值、失败策略和确定性排序最终裁决；
+2. 所有影响生成的输入进入配置身份，包括 Route/Encounter/Biome 模板目录、M7 ProfileDescriptor CatalogHash 和 M6/M9 SolverVersion；最终布局身份覆盖 Beat、Pocket、Biome、`ResolvedM7ProfileId` 和 Witness；
+3. Validator 有明确 `RejectReason`，失败不得静默换点、放宽硬门或回退到 Legacy 建筑链；
+4. 阶段 `AcceptanceManifest` 冻结 Seed 清单/Hash、过滤器、预期测试数和预期 Terminal 数；fresh process 必须精确匹配这些数量、全部 Success，并出现本次唯一 `TEST COMPLETE. EXIT CODE: 0`，零匹配、少跑、跳过失败 Seed 或只有进程退出码 0 均失败；
+5. 目标地图 fresh runtime 无 Fatal、Assert、Ensure、非法索引或 `WorldReadyBlocked`；
+6. 本文更新阶段状态、实际测试数、展示 Seed 指标和唯一日志；
+7. 只改本工作树所有文件。稳定契约、M6、M7、M9、共同地图和正式默认绑定一律形成集成交接项。
+
+仅编译通过只能证明 C++ 门完成；包含视距、地貌、道路引导、建筑形态或物理稳定性的阶段仍必须完成对应可见 PIE。
+
+### 14.3 M3R-0：冻结首周兼容基线
+
+**实现目标**
+
+- 把第 12～13 节已经实现的首周方案冻结为月度重构的对照组；
+- 保留 `GeneratorVersion=3 + LayoutPolicyVersion=1` 的重放能力，不再向该策略追加月度功能；
+- 固定展示 Seed、配置 Hash、布局 Hash、三栋站点顺序和 M11.0 分离结果；
+- 把该结果命名为 `CompatibilityOracle Gen3/Policy1`：仅供回归和开发期安全恢复，不是月度发布 fallback，也不计入 `MonthlyAccepted`。
+
+**退出验收**
+
+- 冻结 `M3R0AcceptanceManifest` 与 ManifestHash：精确列出 `ABTS.M3.WeekOne=2`、`ABTS.Contracts.WorldGeneration=2`、`ABTS.M110.TaskGraphFinaleSeparation=1`、fresh runtime 1 次和 Visible PIE 1 次；少一项、零匹配或 Hash 不符均失败；
+- 三个自动化过滤器分别为 2/2、2/2、1/1，其中 M11.0 用例覆盖既有 103 Seed；
+- `L_ABTS_M3` fresh runtime 报告 `Terminal=1, Passed=1, Failed=0`，并发布 `Accepted=1`、`Ready=1`，无 ABTS Error；
+- canonical `L_ABTS_M10` Visible PIE 报告 `Terminal=1, Passed=1, Failed=0`：B1 从 Start 可读，B2/B3 不可读且无坐标/永久标签泄露；沿路可找到 Reveal 点并依次揭示 B2/B3；三栋 M7 建筑通过 IdleValidation；
+- 展示 Seed 指标与第 12.3 节一致，重复生成得到相同 `ConfigHash/LayoutHash`。
+
+该阶段当前状态为 **M3LocalAccepted**：第 12.3 节的自动化与 fresh runtime 已有证据，但 ManifestHash 和上述集成 Visible PIE 尚未冻结，因此不能标为 Complete，也不能把缺口静默带入月度默认路径。补齐后，后续阶段仍只能在显式 Compatibility 模式重放它；月度默认路径失败时必须 fail closed，直到 R-7 完成恰有六关的 `MonthlyCertifiedWorldFallback` 三层认证。
+
+### 14.4 M3R-1：建立月度 Schema、版本身份与观测面
+
+**实现目标**
+
+- 引入纯数据 `RouteBeatPlan`、`EncounterContract`、`BiomeDistrict`、`PlayableEnvelope` 和 `WorldQualityReport`；
+- 明确 Mission Task、Route Beat、Encounter、Room/Pocket、Biome 的独立身份和引用方向；
+- 复用首周已完成的 `ProgressDistanceCM/FlowS`，补齐候选路线、Reveal、Witness、Biome 和质量评分字段；
+- 定义月度布局策略身份以及与 `CompatibilityOracle Gen3/Policy1` 的显式模式字段；在数值冻结前不复用旧策略版本号；
+- 在 Integration 明确批准生成器版本升级前继续保持 `GeneratorVersion=3`，月度算法只用新的 `LayoutPolicyVersion` 区分；
+- 提交只读 `M7ProfileDescriptor` 目录需求：`ProfileId/Bounds/AttackFaces/ProfileTags/CatalogHash`，供 R-3/R-4 在不实例化 Actor 的情况下做真实包络与 Witness；
+- 先建立日志和 Editor-only Debug 数据，不在本阶段改变正式地图外观或建筑数量；
+- 对需要进入 M3→M7/M6/M9 契约的字段只形成 vNext 需求表，不在 M3 分支直接修改共享合同。
+
+**退出验收**
+
+- 建议新增 `ABTS.M3.Monthly.Schema`：覆盖默认值、单位/有效域、稳定枚举、严格排序、配置 Hash 敏感性和布局 Hash 完整性；
+- 相同 Seed/配置重复构建完整新 Schema，所有有序数组、ID、Hash 和 RejectReason 一致；
+- 在 Compatibility 模式重放至少首周 21 Seed，Task、Link、Anchor、Corridor 与既有 `LayoutHash` 不变；
+- `L_ABTS_M3` fresh runtime 仍只生成首周三栋站点，新增 Schema 为空时不得改变旧合同导出；
+- 日志能单独输出 Route/Encounter/Biome/Quality 各层摘要，不再只输出一个总 `Accepted`；
+- 默认 Development Editor Unity 全链接通过。
+
+**阶段边界**
+
+本阶段不生成多候选路线、不扩为六栋、不调用 M6/M9，也不修改 M7 `Expected=3`。退出后状态为 **M3LocalAccepted**。
+
+### 14.5 M3R-2：实现多候选球面路线与道路求解
+
+**实现目标**
+
+- 每个 Seed 生成 4–8 条带有序 Beat 的球面路线骨架；
+- 为骨架建立 Corridor Mask，并实现可在 R-3 注入正式 Terrain/Water/NoRoad 状态的 `(CellId, IncomingEdgeId)` 道路求解器；
+- 实现转弯、自接近、回头、地形、水体、Encounter 预留和道路复用代价；
+- 收集最多三个路线硬门通过候选，输出稳定有序的 `RouteCandidatePool/RouteCandidateHash`，不在本阶段产生最终 `LayoutHash`；
+- 注入“全部候选失败”路径，验证只会产生确定性的 `MonthlyRouteFallback` 骨架；
+- 输出路线长度、弯道、最长直段、自接近、尝试数、回溯数、分数和 RejectReason。
+
+**退出验收**
+
+- 建议新增 `ABTS.M3.Monthly.Route`；
+- 对冻结的 200 Seed route-only manifest 及其 Hash，在中性地形/合成禁区 fixture 上报告 `Terminal=200, NormalAccepted=200, RouteFallback=0, Rejected=0`；每个 Seed 至少有一个正常候选，且无崩溃、非法索引、无限回溯或非相邻 Corridor；
+- 每个正常接受候选满足：主路 280–360 m、有效 Scenic Bend `>=3`、最大无有效转折连续段 `<=55 m`；
+- 按第 7.4 节唯一重采样/切向平行移动算法计算 Bend 与直段；非局部路线段满足 `MinSelfApproachCells=4`，月度 MVP 的 `AllowedSelfApproachPairIds` 为空，Start→Launch 主路线除 Link 接缝外没有重复 Cell；
+- `ProgressDistanceCM` 严格沿有序主路累积，`FlowS` 单调且 Launch 为 1；
+- 相同 Seed 的候选集合、排序、`RouteCandidateHash` 和 `MonthlyRouteFallback` 完全一致；
+- 独立故障注入 manifest 报告 `Terminal=1, Passed=1, Failed=0`：令所有正常候选失败时，日志明确记录 Reject 汇总和 `bUsedRouteFallback=1`；该骨架仍须进入 R-3/R-4，不得直接标为月度世界 Accepted；
+- 200 Seed sweep 的纯数据路线求解在冻结的同一验收机上满足 `RouteSolveP95MS<=200`、`RouteSolveMaxMS<=1000`；候选、节点扩展和回溯均不得超过配置硬上限；
+- 在 Editor-only 路线叠层中，展示 Seed 至少出现三处可辨识转折，不出现 Cell 级左右锯齿。
+
+**阶段边界**
+
+R-2 只证明路线候选池和 Road Solver 机制，不在正式 Height/Hydrology/Encounter 之前铺设最终道路；本阶段记录的长度和 `FlowS` 必须在 R-3 对实际道路重算。六 Encounter 的 Pocket 和可见性不在本阶段求解。`MonthlyRouteFallback` 只是中间输入，不等于 `CompatibilityOracle` 或最终六关 `MonthlyCertifiedWorldFallback`。退出后状态为 **M3LocalAccepted**。
+
+### 14.6 M3R-3：预留六个 Encounter 与地貌逻辑
+
+**实现目标**
+
+- 生成 E1～E6 六个有序 `DestructibleTarget` Encounter；
+- 在铺路前联合预留 `RoadArrivalPortal / ScoutRevealPocket / SlingshotPocket / TargetEnvelope / RewardPocket / ExitPortal`；
+- 由上述 ActiveRole 生成 Playable Envelope，再为 100% Cell 分配 BiomeDistrict 逻辑；两者都先于 Height/Hydrology/Road；
+- Height/Hydrology 尊重 Target Footprint、NoRoad Ring、弹弓平台和必要攻击走廊；
+- 对每个保留的路线候选注入正式 Terrain/Water/NoRoad 状态并调用 R-2 Road Solver，随后重算实际道路长度、转折、自接近和 `FlowS`；
+- 道路完成后只在预留 Envelope 内做 Spatial Finalize，不允许为通过验证偷偷换到其他 Task；
+- 建立 Start、PreReveal、Reveal 到六个 Target 代理 Bounds 的确定性 PVS；
+- 默认不生成可选支线，把 SatelliteWindow 改为主线训练 Beat；只有 `BranchUtilityContract` 通过才允许支线；
+- 月度六 Encounter 暂存于 M3 内部结果；共享 v1 建筑合同在 R-6 前继续导出首周兼容数据。
+
+**退出验收**
+
+- 建议新增 `ABTS.M3.Monthly.EncounterSpatial`；
+- 对冻结的 100 Seed EncounterSpatial manifest 及其 Hash 报告 `Terminal=100, Accepted=100, Rejected=0`；每个结果均恰有六个有序 Destructible Encounter，`FlowS` 严格递增；
+- 实际道路继续满足 `M3MonthlyAcceptanceProfileV1` 的 280–360 m、Scenic Bend `>=3`、最长直段 `<=55 m` 和自接近门；
+- 相邻 Encounter 沿路间距 35–60 m，E1～E6 的偏路距离落入第 8.3 节对应窗口；
+- 六个 Target Footprint/NoRoad Ring 与 Road Cell、连续道路带、水体和其他施工台重叠均为 0；
+- 每个 Encounter 的六类 Pocket/Portal 身份有效、互不误用，且归属于自己的 Playable Envelope；
+- 所有 PVS 条目均 `EvaluationValid=true`；Start 仅 B1 为 `AttackReadable`，PreReveal 的本关目标和 Reveal 处 E(i+2)+ 目标均 `NotAttackReadable`，本关 Reveal 严格满足自己的 `DirectVisual/ScoutRequired` Policy；
+- 展示 Seed及至少 10 个地平线/高差边界 Seed 的优化 PVS 与独立暴力最近 Cell/连续地表 Trace 参考一致；
+- 100 Seed 中“正式 Terrain/Water/NoRoad 注入 + 道路重算 + Encounter Spatial + 优化 PVS”的总耗时满足 `EncounterSpatialP95MS<=750`、`EncounterSpatialMaxMS<=2000`；每个世界优化 PVS 射线数 `<=1024`，超限或超时只能 Reject，不能按 Hidden 通过；
+- LaunchSite 没有普通建筑，M9 卫星与 LaunchSite 仍满足 `>=55°`，桥前/桥后可达性不回退；
+- 可见 PIE 中道路和地标持续指向下一 Beat，关闭 Debug Layer 后玩家不需要读取世界坐标寻找入口。
+
+**阶段边界**
+
+本阶段必须消费带 `CatalogHash` 的只读 M7 ProfileDescriptor；若 Integration 尚未提供，只能以冻结 fixture 达到 M3LocalAccepted，不能宣称真实 M7 形态、弹道或 Chaos 已通过。退出后状态为 **M3LocalAccepted**。
+
+### 14.7 M3R-4：补齐 Ballistic Witness、能力门与流程闭环
+
+**实现目标**
+
+- Encounter Finalize 通过实际 M6 预测接口生成当前弹弓档位的 Positive Witness；
+- 对能力升级关生成上一档弹弓的 `PriorTierInfeasibilityCertificate`，记录搜索输入域、分辨率、覆盖与安全裕量；
+- Finalize 必须使用 R-1 的只读 M7 ProfileDescriptor Bounds/AttackFaces，`ProfileCatalogHash` 进入世界身份；
+- R-4 从该目录冻结每关的 `ResolvedM7ProfileId + ProfileCatalogHash`；`ProfileTags` 仅用于候选筛选与诊断，不能成为 R-6 重新选型的授权；
+- E5 使用 M9 引力查询验证卫星训练路径，但继续保证该卫星不进入 M11 终局四体数据；
+- 把 RequiredKeys、GrantedKeys、资源来源、Reward/Exit 和桥门状态纳入有向流程验证；
+- 支线仅在 `BranchUtilityContract` 成立时进入候选，否则确定性选择无支线模板；
+- Witness 保存输入、求解器版本、Hash、净空和命中代理；M3 不复制 M6/M9 的公式；
+- 只有 Route、六 Encounter、Biome 逻辑、PVS、Witness 和流程都通过的完整世界候选才能进入 Top 3，再按量化质量分和稳定 ID 选择最终 CandidateId 并生成 `LayoutHash`。
+
+**退出验收**
+
+- 建议新增 `ABTS.M3.Monthly.EncounterWitness`；冻结的 100 Seed Witness manifest 及其 Hash 必须报告 `Terminal=100, Accepted=100, Rejected=0`，共享接口部分在集成候选运行；
+- 六个 Encounter 均有可重复的 Positive Witness，命中自己的 TargetProxy/AttackFace，且轨迹不穿禁止体积；
+- 所有能力门 Encounter 的 `PriorTierInfeasibilityCertificate` 覆盖批准的上一档输入域；不需要能力门的 Encounter 明确标记 `NotRequired`；
+- 固定输入重复验证得到相同 Witness Hash、终止原因、落点和净空量化值；
+- 六关冻结的 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace` 重复求解完全一致；目录 Hash 不匹配或 ProfileId 不存在时必须 fail closed；
+- 每个 Encounter 的当前档与上一档搜索合计 `<=8192` 次轨迹求值；完整六关 Witness 阶段满足 `WitnessWorldP95MS<=2000`、`WitnessWorldMaxMS<=5000`，达到样本或时间上限必须输出明确 RejectReason，不能把未完成搜索当作无解证书；
+- E5 的成功 Witness 确实经过 M9 引力查询；M11 Finale Contract 仍只含主星和三颗终局行星；
+- 从 Start 到 Launch 的资源/Key 状态搜索无软锁，桥前不可绕过、桥后可达；
+- 若存在支线，其独占收益/替代解/训练价值、回接和能力门均通过第 10.2 节；否则支线数量为 0；
+- 相同 Seed 的完整候选 Top 3、最终 CandidateId、`LayoutHash` 和逻辑 `MonthlyWorldFallbackCandidate` 完全一致；
+- 可见 PIE 至少对 E1、一个能力门 Encounter 和 E5 各重放一次保存 Witness，预测轨迹与实际落点在冻结容差内。
+
+**阶段边界**
+
+M6/M9 是共享或其他阶段所有权。本阶段只有在集成工作树完成接口适配和联合验证后才能从 **M3LocalAccepted** 晋升为 **IntegrationAccepted**。
+
+### 14.8 M3R-5：实现 BiomeDistrict 与 Playable Envelope 表现
+
+**实现目标**
+
+- 消费 R-3 已冻结的 `BiomeDistrictId/PlayableEnvelope/ActiveRole`，不在表现阶段重选或改写逻辑身份；
+- 用最小面积和 20–45 m 视觉节拍表现 District，避免逐 Cell 碎片；
+- 至少四种主地貌主题参与六个 Encounter，球面背侧可使用低成本 BackgroundBiome；
+- UE PCG Graph 或现有 HISM 只消费逻辑属性生成装饰，不决定 Mission、道路、可见性或 Witness；
+- 调试层分别显示 Biome、Envelope、DeepWild 和职责覆盖，不再把 `TaskId==None` 全部显示为 Wild。
+
+**退出验收**
+
+- 建议新增 `ABTS.M3.Monthly.Biome`；冻结的 100 Seed Biome manifest 及其 Hash 必须报告 `Terminal=100, Accepted=100, Rejected=0`；
+- 100% Cell 有有效 BiomeDistrict；同 Seed 的 DistrictId、边界和统计 Hash 完全一致；
+- Playable Envelope 内具有 Route/Reveal/Slingshot/Target/Reward/Exit/Resource 等 `ActiveRole` 的 Cell 覆盖 `>=75%`，DeepWild `<=20%`；普遍存在的 BiomeDistrict 不得计入该覆盖率分子；
+- 六个 Encounter 至少使用四种主地貌主题，连续相同视觉节拍主要落在 20–45 m；
+- 无一 Cell 大小的孤立 District；大面积单一 Wild 和棋盘式碎片均不允许进入展示 Seed；
+- 开关 UE PCG/HISM 表现不改变 Task、Route、Encounter、`QuerySurface`、PVS、Witness 或布局 Hash；
+- 树石 HISM 保持当前生产基线 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，不得退回旧表现稿的 `NoCollision`，也不得让全图实例成为刚体；这里的“静态实例”只表示不模拟、不自主移动，不代表 UE Object Type 是 `WorldStatic`。Character Sweep、Visibility Query、M9 开发者穿行和 M6 动态代理撞击静态实例均须回归通过。实例数不超过既有每 Cell 配额；地表材质增量仍以 `<=2 ms @ 1080p` 为正式目标；
+- 同一验收机的 fresh Commandlet 中，Sub=7 逻辑生成、低频网格、碰撞与无材质资源重建保持 `<=8 s`，进程峰值物理内存不超过冻结基线 `2.25 GB` 的 115%；
+- `L_ABTS_M3` fresh runtime 发布 `Ready=1/MaterialReady=1`，可见 PIE 检查 Lit/Unlit 和地貌边界。
+
+**阶段边界**
+
+R-5 可以与 R-4 的集成等待并行，但最终必须对 R-3 正式六 Encounter 结果重跑，不得只在临时路线样本上验收。退出后状态为 **M3LocalAccepted**。
+
+### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
+
+**实现目标**
+
+- M3 提交 vNext 字段需求：有序六站点、EncounterId、DifficultyBand、VisualSignature、`ResolvedM7ProfileId`、`ProfileCatalogHash` 和 AttackFace；`ProfileTags` 只作为诊断字段；
+- Integration 维护向后兼容的稳定合同和双版本自动化，M3/M7 分别实现生产与消费；
+- M7 `ExpectedBuildingCount` 改为 Accepted Destructible Encounter 数；月度 MVP 该值必须恰好为 6，不再固定为首周的 3；
+- R-4 已从匹配 `ProfileCatalogHash` 的已验证目录冻结六个 `ResolvedM7ProfileId`；M7 只按精确 ID 实例化，不再按 Tag、难度或轮廓重选；冻结结果至少覆盖四种 Silhouette Family，且相邻组合不重复；
+- 建筑按距离分批生成和 IdleValidation，认证后冻结远端建筑，只激活当前/相邻 Encounter；
+- LaunchSite 仍只导出 `FinaleLaunchReserved`，M7 不生成普通建筑。
+
+**退出验收**
+
+- `ABTS.Contracts.WorldGeneration` 的 v1/vNext 双版本用例全部通过，未知版本和非法站点 fail closed；
+- M3 导出恰好六个有序 Destructible 站点和一个 Finale Reserved 站点，M7 保序消费；
+- M7 对每站输出的实例化 `ProfileId/CatalogHash/AttackFace` 必须与 M3 冻结值逐项相同；目录 Hash 不匹配、ID 缺失或被重选均 fail closed；
+- M7 Routing/DAG2.3 回归全部通过，不允许回到 M3 Legacy 建筑链；
+- 运行时日志满足 `BuildingContractSealed Expected=6 Registered=6 SetupRejected=0`；
+- 六栋分别输出 `IdleValidation ... Accepted=1`，且 `WorldReady=1` 晚于第六栋接受；
+- `DifficultyBand` 非递减且至少三次严格上升；至少四种轮廓族，六个 VisualSignature 不完全相同，相邻轮廓+主材质+弱点组合不同；
+- LaunchSite 普通建筑数为 0；站点 WorldTransform 的 +X 与 M3 AttackFace 一致；
+- 30/60/120 FPS 实时门中不出现 `BuildingGateRejected`；远端冻结后同时活跃刚体 `<=50`，单栋仍为 12–25 刚体和 1–3 个连锁装置。
+
+**阶段边界**
+
+该阶段不能在 M3 工作树单独宣告完成。共享合同由 Integration 修改，实体建筑与物理策略由 M7 修改；只有联合候选通过后状态才是 **IntegrationAccepted**。
+
+### 14.10 M3R-7：大规模认证、PIE 调参与发布冻结
+
+**实现目标**
+
+- 把 R-1～R-6 的 RejectReason、质量评分和运行时指标汇总进统一认证报告；
+- 对候选成功率、fallback 率、GenerationMS、路线节奏、PVS、Witness、Biome 和物理门做大样本调参；
+- 将一个通过六关逻辑与 M7 Profile/物理门的 `MonthlyWorldFallbackCandidate` 晋升为 `MonthlyCertifiedWorldFallback`，冻结其版本、配置、布局、Witness 与 Profile CatalogHash；
+- 删除正式配置中的位置剧透，只保留 Editor-only Debug Layer；
+- 完成 M3→M7→M9/M10→M11.0 的串行联合回归。
+
+**退出验收**
+
+- 建议新增 `ABTS.M3.Monthly.Certification.Data`，对固定 Data Seed 清单和 ManifestHash 执行恰好 1000 个纯数据案例，不得跳过失败 Seed；
+- 数据结果必须满足 `Terminal=1000, Accepted=1000, Rejected=0`，且逐 Seed 通过第 15 节标为 Data 的门槛；无崩溃、非法索引、无限回溯或非确定性；
+- 在 Manifest 冻结的同一验收机/构建/设置上，1000 Seed 的纯 M3 完整生成满足 `FullM3GenerationP95MS<=4000`、`FullM3GenerationMaxMS<=8000`；超时 Seed 计入 Rejected，不能切换到未认证路径后仍算正常候选；
+- 固定 20 Seed RuntimeManifest，在 20 次独立 fresh headless runtime 中逐一出现该 Seed 的 `Accepted/Ready/WorldReady` 终态和正常退出，报告 `Terminal=20, Passed=20, Failed=0`；从进入固定 Seed 到六栋建筑完成门禁并发布可控 `WorldReady`，`WorldReadyP95Seconds<=20` 且 `WorldReadyMaxSeconds<=20`，不得把远端建筑延迟到 Ready 后再补验证；
+- 固定 3 Seed PIEManifest：展示 Seed、正常候选最差质量 Seed、fallback/地平线边界 Seed；逐一完成人工清单并保存截图/日志，报告 `Terminal=3, Passed=3, Failed=0`；
+- 正常候选与 `MonthlyCertifiedWorldFallback` 分开统计；fallback 必须同样具有恰好六关，并在对应 Data/Runtime/PIE 层通过门槛；
+- 输出每阶段尝试/回溯/RejectReason 分布、候选接受率、fallback 率和生成耗时 P50/P95/Max，并逐项对照第 7.4 节的硬预算；
+- 正常配置的 1000 Seed sweep 中 `MonthlyCertifiedWorldFallback` 比例 `<=1%`；超过时视为候选生成质量失败，不得通过扩大 fallback 使用率掩盖；
+- Development Editor 全链接和强制 Unity 构建均成功；
+- fresh automation manifest 必须列出 Monthly Schema/Route/EncounterSpatial/EncounterWitness/Biome/Certification.Data、WorldGeneration、M7 DAG/稳定性、M11.0 各过滤器的精确预期测试数；逐项匹配且全部成功；
+- fresh `L_ABTS_M3` 和 canonical `L_ABTS_M10` 无生成或建筑门禁错误；
+- canonical `L_ABTS_M10` 完成 30/60/120 FPS D3D12 运行，并串行完成一次可见 PIE：道路引导、六次 Reveal、六次发射、奖励回收、卫星训练和终局入口均可完成；
+- 在 Manifest 冻结的 1080p 画质、机器和 D3D12 构建上，每档 FPS 都在 `WorldReady` 后采集 120 s：`FrameTimeP95 <= 1.10 × (1000/FPS) ms`、`FrameTimeP99 <= 1.50 × (1000/FPS) ms`，单帧 `>100 ms` 的 hitch 数必须为 0；统计必须排除启动/着色器预热，但不得排除游玩中的 Reveal、发射、建筑激活或冻结事件；
+- 正式 UI 不显示未侦察建筑坐标、Task 标签、NoRoad Ring 或 RejectReason；
+- 展示 Seed 的完整认证报告、截图、日志、版本 Hash 和已知限制写回本文。
+
+完成 R-7 后，月度路线才从“实现完成”升级为“月度正式验收完成”。第 15 节是 R-7 的最终硬门，任何早期阶段验收都不能替代它。
 
 ---
 
 ## 15. 月度正式验收门槛
 
+本节是 M3R-7 的整体验收集合；M3R-1～M3R-6 的阶段门用于缩小问题范围，不降低或替代以下要求。
+
+第 15 节是三层门槛的并集，不是“每个纯数据 Seed 都证明所有运行时体验”。最终报告必须按下表分别给出 Terminal/Passed/Failed，不能用一层结果代替另一层：
+
+| 验收层 | 固定清单 | 能证明什么 | 不能证明什么 |
+|---|---:|---|---|
+| Data | 1000 Seed + ManifestHash | 确定性、候选/回溯、路线、六 Encounter、PVS 分类、Witness 数据、Biome/ActiveRole、流程状态图 | Chaos 沉降、真实画面、HUD 泄露、实际操作感 |
+| Runtime | 20 Seed + ManifestHash | fresh 世界生成、合同路由、M6/M9 运行接口、M7 注册/IdleValidation/冻结、Ready 时序 | 玩家是否看懂道路、真实 Reveal 节奏和视觉差异 |
+| Visible PIE | 3 Seed + ManifestHash | 道路引导、侦察、六次发射/回收、建筑形态、Biome 画面、HUD 保密和帧率/卡顿 | 大样本确定性和低概率搜索失败 |
+
+以下条目中的逻辑数值默认属于 Data 门；明确提到 M7 Actor、IdleValidation、fresh 地图或真实预测接口的条目属于 Runtime 门；涉及“玩家可见/理解”、正式 UI、材质画面和实际操作的条目属于 Visible PIE 门。跨层条目必须分别留证。
+
 ### 15.1 确定性与搜索
 
-- 相同 Seed + GeneratorVersion + LayoutPolicyVersion + ConfigHash 的结果 Hash 完全一致；
-- 至少 1000 Seed 的纯数据 sweep 无崩溃、无非法索引、无无限回溯；
-- 输出每阶段尝试数、回溯数和 RejectReason；
-- 不再默认“Attempt 0 第一个硬通过结果即 Accepted”；
-- 失败时使用经过认证的线性 fallback，不回退到旧 M3 建筑生成链。
+- 相同 Seed + GeneratorVersion + LayoutPolicyVersion + ConfigHash + 各目录/求解器版本得到完全一致的完整 `LayoutHash`；
+- 固定 Seed 清单及其清单 Hash，纯数据 sweep 必须报告 `Terminal=1000, Accepted=1000, Rejected=0`，不得跳过或只统计成功案例；
+- 输出每阶段尝试数、回溯数、RejectReason、正常候选成功率、三类 fallback 身份和 GenerationMS P50/P95/Max；
+- 不再默认“Attempt 0 第一个硬通过结果即 Accepted”；最多三个完整世界候选进入最终确定性选择；
+- `CompatibilityOracle Gen3/Policy1` 不计入月度接受；`MonthlyRouteFallback` 必须继续完成六关求解；只有 `MonthlyCertifiedWorldFallback` 可以进入发布结果；
+- 正常配置 fallback 比例 `<=1%`，且 fallback 与普通结果一样通过第 15 节全部门槛；不回退到旧 M3 建筑生成链。
 
 ### 15.2 路线节奏
 
 - 主路累计长度 280–360 m；
-- 至少六个普通建筑 Encounter；
+- 恰好六个普通 Destructible Encounter；
 - 相邻 Encounter 沿路间距 35–60 m；
-- 有效 Scenic Bend 至少 3 个；
-- 最大无有效转折连续路段不超过 55 m；
-- 非有意回环不发生近距离自接近；
-- Start 同时直接可见的可攻击建筑恰好 1。
+- 使用第 7.4 节 `M3MonthlyAcceptanceProfileV1` 的唯一算法和参数计算路线指标：有效 Scenic Bend 至少 3 个，最大无有效转折连续路段不超过 55 m；
+- 月度 MVP 的 `AllowedSelfApproachPairIds` 为空；忽略沿路里程差小于 30 m 的局部相邻段后，其余路线段 CellTopo 距离不得小于 4 Cell；
+- Start 的 `AttackReadable` 可攻击建筑恰好 1。
 
 ### 15.3 可见性与引导
 
-- B2–B6 不得从 Start 完整可见；
-- 每个 Bi 在自己的 Reveal 点可见或可由青翎侦察确认；
-- 在 Ei 的 Reveal 点，不提前完整暴露 E(i+2) 以后的目标；
+- 所有 PVS 条目 `EvaluationValid=true`，并记录冻结的 `CameraSampleSetVersion`；
+- B1 从 Start 为 `AttackReadable`，B2–B6 从 Start 均为 `NotAttackReadable`；
+- 每个 Encounter 显式选择 Reveal Policy：`DirectVisual` 必须在 Reveal 点 `AttackReadable`，`ScoutRequired` 必须 `ScoutDetectable=true`；
+- 在 Ei 的 Reveal 点，E(i+2) 以后目标均为 `NotAttackReadable`；
+- 展示/边界 Seed 的优化 PVS 与独立暴力参考和连续地表 Trace 一致；
 - 道路/地标始终给出下一阶段方向，不要求玩家盲搜全球；
 - 正式 UI 不显示未侦察建筑坐标。
 
@@ -931,7 +1241,7 @@ SatelliteLaunchSepDeg=90.30
 - 六栋 Target Footprint 与道路重叠为 0；
 - 每栋均有合法 RoadArrival、Reveal、Slingshot、Target、Reward、Exit；
 - 每栋均有当前档位 Ballistic Witness；
-- 需要能力门的关卡具有上一档 Negative Witness；
+- 需要能力门的关卡具有覆盖批准输入域的上一档 `PriorTierInfeasibilityCertificate`；
 - 攻击轨迹不穿禁止体积，目标落点与材料回收不造成主线软锁；
 - 所有 Witness 都由实际 M6/M9 预测接口验证。
 
@@ -941,12 +1251,13 @@ SatelliteLaunchSepDeg=90.30
 - 至少四个 Silhouette Family；
 - 六栋 VisualSignature 均不完全相同；
 - 相邻建筑不得使用相同的轮廓 + 主材质 + 弱点组合；
+- M7 实例化的 `ProfileId/ProfileCatalogHash/AttackFace` 与 M3 冻结的 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace` 逐项一致；
 - 难度评分同时包含射程、遮挡、弹弓档位、攻击面、结构和风险，不能只看材料。
 
 ### 15.6 地貌
 
 - 100% Cell 拥有 BiomeDistrict；
-- Playable Envelope 内职责覆盖 `>=75%`；
+- Playable Envelope 内非 Biome 的 `ActiveRole` 职责覆盖 `>=75%`；
 - Playable Envelope 内 DeepWild `<=20%`；
 - 至少四种主地貌参与六个 Encounter；
 - 不出现大面积单一 Wild 视觉，也不出现逐 Cell 棋盘式碎片。
@@ -957,9 +1268,18 @@ SatelliteLaunchSepDeg=90.30
 - 卫星练习与终局区域保持 M11.0 分离，M11 数据端仍排除该卫星；
 - 桥前不可绕过，桥后主路可达；
 - 资源/配方顺序无软锁；
-- M7 `ExpectedBuildingCount` 等于 Accepted Destructible Encounter 数；
+- M7 `ExpectedBuildingCount` 等于 Accepted Destructible Encounter 数，月度 MVP 必须为 6；
 - 所有建筑完成分批 IdleValidation，远端冻结后活跃刚体预算符合主设计；
 - M10 侦察地图只揭示已覆盖范围。
+
+### 15.8 性能、Ready 与卡顿
+
+- 验收 Manifest 冻结机器、分辨率、画质、RHI、构建配置和是否预热；换机或换设置的结果不能混算；
+- 路线、EncounterSpatial、Witness、完整 M3 生成和 WorldReady 分别满足第 7.4 节的 P95/Max 硬预算，超时必须计为失败；
+- 优化 PVS 每世界不超过 1024 条射线；每 Encounter 的 Witness 搜索不超过 8192 次轨迹求值，未完成搜索不得伪装成 Hidden 或无解；
+- 20 Seed fresh runtime 从进入固定 Seed 到六栋建筑完成门禁并发布可控 `WorldReady`，满足 `WorldReadyP95Seconds<=20`、`WorldReadyMaxSeconds<=20`；
+- 30/60/120 FPS 各自在 Ready 后采集 120 s，满足 `P95<=1.10×`、`P99<=1.50×` 目标帧预算，且单帧 `>100 ms` 的 hitch 为 0；
+- 地表材质增量 `<=2 ms @ 1080p`；远端冻结后活跃刚体 `<=50`，不得以禁用碰撞、跳过建筑验证或减少 Encounter 数换取性能通过。
 
 ---
 
@@ -969,25 +1289,38 @@ SatelliteLaunchSepDeg=90.30
 
 ```text
 [ABTS][PCG][RouteCandidate]
-Seed Version Candidate MainLengthCM EndpointAngleDeg
-BendCount MaxStraightCM SelfApproachCM HardPass Score RejectReason
+Seed Version LayoutPolicy Candidate RouteCandidateHash MainLengthCM EndpointAngleDeg
+BendCount MaxStraightCM SelfApproachCM RouteSolveMS HardPass Score RejectReason
 
 [ABTS][PCG][Encounter]
 Id FlowS Role Difficulty RoadPortal Reveal Slingshot Target
-MainRoadDistanceCells StartVisible RevealVisible
-BallisticWitness NegativeWitness Profile VisualSignature
+MainRoadDistanceCells StartVisibilityClass RevealPolicy RevealVisibilityClass
+ScoutDetectable EvaluationValid CameraSampleSetVersion
+BallisticWitness PriorTierCertificate WitnessEvaluations WitnessMS
+ResolvedM7ProfileId ProfileCatalogHash VisualSignature
 
 [ABTS][PCG][Visibility]
-Observer Target IdealSphereBlocked TerrainBlocked Visible
+Observer Target CameraSampleSet EvaluationValid
+IdealSphereBlocked TerrainBlocked VisibilityClass ScoutDetectable PVSRays SpatialMS
 
 [ABTS][PCG][Biome]
-Districts PlayableCells ResponsibleCells DeepWildCells
-PlayableCoverage DeepWildRatio
+Districts PlayableCells ActiveRoleCells DeepWildCells
+ActiveRoleCoverage DeepWildRatio
 
 [ABTS][PCG][Accepted]
-Seed Version ConfigHash LayoutHash Candidate
-MainLengthCM Buildings Encounters StartVisibleTargets
-Backtracks GenerationMS
+Seed Version LayoutPolicy ConfigHash LayoutHash Candidate
+RouteCatalogHash EncounterCatalogHash BiomeCatalogHash
+ProfileCatalogHash M6SolverVersion M9SolverVersion
+MainLengthCM Buildings Encounters StartAttackReadableTargets
+UsedRouteFallback UsedWorldFallback Backtracks
+RouteSolveMS EncounterSpatialMS WitnessMS FullGenerationMS OptimizedPVSRays
+
+[ABTS][PCG][Certification]
+SeedManifestHash Terminal Accepted Rejected
+NormalAccepted RouteFallback WorldFallback
+RejectHistogram GenerationP50MS GenerationP95MS GenerationMaxMS
+WorldReadyP95Seconds WorldReadyMaxSeconds
+FrameTimeP95MS FrameTimeP99MS MaxSingleHitchMS
 ```
 
 Editor-only Debug Layer：
@@ -1017,7 +1350,7 @@ Editor-only Debug Layer：
 | 六栋物理预算过高 | WorldReady 慢、Idle 超时 | 分批验证、远端冻结、近邻激活，不降低稳定门槛 |
 | Biome 全覆盖导致碎片噪声 | 地貌像彩色棋盘 | District 有最小面积/长度，局部样式由原型而非逐 Cell 随机 |
 | 支线再次变成装饰 | 没有独占奖励或状态变化 | BranchUtility 不通过则不生成支线 |
-| 路线候选全部失败 | RejectReason 集中在同一约束 | 局部放宽软窗；硬门槛不放宽，使用认证 fallback |
+| 路线候选全部失败 | RejectReason 集中在同一约束 | 局部放宽软窗；硬门槛不放宽，先使用 `MonthlyRouteFallback` 继续六关求解；只有最终 `MonthlyCertifiedWorldFallback` 可发布 |
 | M11.0 回归 | Satellite/Launch 角距或 Space 槽合同失败 | 将天体方向与地面训练 Beat 拆开，保留 103 Seed 门禁 |
 
 ---
@@ -1041,7 +1374,7 @@ Editor-only Debug Layer：
 
 ## 19. 最终建议
 
-先做首周兼容修补，但把它当成可丢弃的 V4 Layout Policy，而不是继续扩展固定角度模板：
+先做首周兼容修补，但把它冻结为 `GeneratorVersion=3 / LayoutPolicyVersion=1` 的兼容策略，而不是继续扩展固定角度模板：
 
 1. 延长展示路线；
 2. 以真实相机 LoS 冻结“B1 可见、B2/B3 不可见”；
@@ -1050,4 +1383,4 @@ Editor-only Debug Layer：
 5. 关闭位置调试剧透；
 6. 用现有 M7/M9/M11.0 门槛回归。
 
-随后按月度架构引入 `RouteBeat + EncounterContract + FlowS + BiomeDistrict`。这能保留项目已有的确定性 CellTopo 基础，同时把 PCG 的价值从“随机铺一条路、分几块地”提升为“持续生成可通关、可侦察、可理解、可发射且节奏稳定的线性关卡”。
+随后按第 14 节的 M3R-1～M3R-7 依次引入 `RouteBeat + EncounterContract + FlowS + BiomeDistrict`，并在稳定合同之后才接入六栋 M7 实体建筑。这能保留项目已有的确定性 CellTopo 基础，同时把 PCG 的价值从“随机铺一条路、分几块地”提升为“持续生成可通关、可侦察、可理解、可发射且节奏稳定的线性关卡”。
