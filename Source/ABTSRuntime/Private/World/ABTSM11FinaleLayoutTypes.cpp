@@ -29,7 +29,7 @@ namespace
 		return false;
 	}
 
-	bool IsFiniteVector(const FVector3d& Value)
+	bool IsFiniteFinaleLayoutVector(const FVector3d& Value)
 	{
 		return FMath::IsFinite(Value.X)
 			&& FMath::IsFinite(Value.Y)
@@ -142,7 +142,7 @@ bool FABTSM11FinaleLaunchModel::IsValid(FString* OutFailure) const
 	{
 		return Reject(OutFailure, TEXT("UnsupportedLaunchModelVersion"));
 	}
-	if (!IsFiniteVector(PouchLocalPositionCM)
+	if (!IsFiniteFinaleLayoutVector(PouchLocalPositionCM)
 		|| !FMath::IsFinite(MinimumYawDegrees)
 		|| !FMath::IsFinite(MaximumYawDegrees)
 		|| !FMath::IsFinite(MinimumPitchDegrees)

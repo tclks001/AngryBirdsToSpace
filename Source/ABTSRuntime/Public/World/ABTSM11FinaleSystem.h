@@ -12,6 +12,7 @@ class AABTSM3Planet;
 class AABTSM11GravityBodyActor;
 class AABTSM11UFOActor;
 class UStaticMesh;
+struct FABTSFinaleWorldContract;
 
 UENUM(BlueprintType)
 enum class EABTSM11FinaleSystemState : uint8
@@ -41,8 +42,18 @@ public:
 
 	AABTSM11FinaleSystem();
 
-	/** Initializes the production boundary from the one accepted M3 planet. */
+	/**
+	 * Legacy compatibility entry for existing callers and error-code parity.
+	 * Production GameMode code uses InitializeFromWorldContract instead.
+	 */
 	bool InitializeFromPrimaryPlanet(const AABTSM3Planet& PrimaryPlanet);
+
+	/**
+	 * Preferred stable entry for parallel M11 development. It contains no M3
+	 * TaskGraph arrays, M9 satellite Actor or mutable world-generation state.
+	 */
+	bool InitializeFromWorldContract(
+		const FABTSFinaleWorldContract& WorldContract);
 
 	/**
 	 * Narrow data entry used by production and automation alike.

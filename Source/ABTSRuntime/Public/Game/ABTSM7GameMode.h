@@ -11,6 +11,7 @@
 class AABTSM7BuildingMaterialSystem;
 class AABTSM73StableBuildingActor;
 class AABTSM3Planet;
+struct FABTSBuildingGenerationContract;
 
 /** Runtime-only binding from a TaskGraph spawn site to its generated building. */
 struct FABTSM7TaskGraphBuildingDebugEntry
@@ -86,9 +87,11 @@ protected:
 
 private:
 	const FABTSM7TaskGraphBuildingProfile* FindTaskGraphBuildingProfile(EABTSM3TaskType TaskType) const;
-	int32 CountRequiredTaskGraphBuildings(const AABTSM3Planet& Planet) const;
+	int32 CountRequiredTaskGraphBuildings(
+		const FABTSBuildingGenerationContract& Contract) const;
 	int32 SpawnTaskGraphBuildings(
 		AABTSM3Planet& Planet,
+		const FABTSBuildingGenerationContract& Contract,
 		AABTSM7BuildingMaterialSystem& MaterialSystem,
 		AABTSM6SlingshotSystem* SlingshotSystem,
 		bool& bOutSetupFailed);

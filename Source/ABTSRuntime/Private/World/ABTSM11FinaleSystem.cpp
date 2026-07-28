@@ -3,6 +3,7 @@
 #include "World/ABTSM11FinaleSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Contracts/ABTSWorldGenerationContracts.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -115,6 +116,37 @@ bool AABTSM11FinaleSystem::InitializeFromPrimaryPlanet(
 		PrimaryPlanet.PCGSummary.GeneratorVersion,
 		PrimaryPlanet.GetPlanetRadiusCM(),
 		PrimaryPlanet.GetFinaleLaunchFrame());
+}
+
+bool AABTSM11FinaleSystem::InitializeFromWorldContract(
+	const FABTSFinaleWorldContract& WorldContract)
+{
+	// Preserve the accepted reinitialization contract: a second call rejects
+	// without destroying the already committed 3+1 presentation Actors.
+	if (State != EABTSM11FinaleSystemState::Uninitialized)
+	{
+		return InitializeFromRuntimeData(
+			WorldContract.Identity.GeneratorVersion,
+			WorldContract.PrimaryRadiusCM,
+			WorldContract.LaunchFrame);
+	}
+	if (WorldContract.Identity.ContractVersion
+		!= FABTSGeneratedWorldIdentity::CurrentContractVersion)
+	{
+		return FailInitialization(TEXT("PrimaryWorldContractInvalid"));
+	}
+	if (!WorldContract.Identity.bSourceWorldAccepted)
+	{
+		return FailInitialization(TEXT("PrimaryTaskGraphNotAccepted"));
+	}
+	if (WorldContract.Identity.GenerationAttempt < 0)
+	{
+		return FailInitialization(TEXT("PrimaryWorldContractInvalid"));
+	}
+	return InitializeFromRuntimeData(
+		WorldContract.Identity.GeneratorVersion,
+		WorldContract.PrimaryRadiusCM,
+		WorldContract.LaunchFrame);
 }
 
 bool AABTSM11FinaleSystem::InitializeFromRuntimeData(

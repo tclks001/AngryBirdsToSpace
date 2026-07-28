@@ -16,7 +16,7 @@ namespace
 		Mesh.SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
 
-	void ConfigureVisualOnlyMesh(UStaticMeshComponent& Mesh)
+	void ConfigureM51VisualOnlyMesh(UStaticMeshComponent& Mesh)
 	{
 		Mesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Mesh.SetGenerateOverlapEvents(false);
@@ -244,7 +244,7 @@ AABTSM51SlingshotCord::AABTSM51SlingshotCord()
 	SetRootComponent(Visual);
 	// The root is a legacy transform carrier only. It must never remain as an
 	// invisible click target after the two visible cord segments replace it.
-	ConfigureVisualOnlyMesh(*Visual);
+	ConfigureM51VisualOnlyMesh(*Visual);
 	CordSegmentA = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordSegmentA"));
 	CordSegmentB = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CordSegmentB"));
 	PouchVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PouchVisual"));
@@ -269,8 +269,8 @@ AABTSM51SlingshotCord::AABTSM51SlingshotCord()
 	}
 	if (CordMaterial.Succeeded()) { CordSegmentA->SetMaterial(0, CordMaterial.Object); CordSegmentB->SetMaterial(0, CordMaterial.Object); }
 	if (PouchMaterial.Succeeded()) PouchVisual->SetMaterial(0, PouchMaterial.Object);
-	ConfigureVisualOnlyMesh(*CordSegmentA);
-	ConfigureVisualOnlyMesh(*CordSegmentB);
+	ConfigureM51VisualOnlyMesh(*CordSegmentA);
+	ConfigureM51VisualOnlyMesh(*CordSegmentB);
 	// Launch mode is entered by clicking the visible pouch, not an invisible
 	// crossbar or either cord segment. The Actor click callback still identifies
 	// this AABTSM51SlingshotCord for the controller.

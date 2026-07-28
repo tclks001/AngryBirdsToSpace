@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM73StableBuildingActor.h"
+#include "Contracts/ABTSWorldGenerationContracts.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
@@ -20,6 +21,24 @@ namespace
 		const FVector Direction = (WorldLocation - PlanetCenter).GetSafeNormal();
 		OutLatitudeDegrees = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(Direction.Z, -1.0f, 1.0f)));
 		OutLongitudeDegrees = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
+	}
+
+	EABTSM3TaskType ResolveLegacyTaskType(
+		const FABTSGeneratedBuildingSite& Site)
+	{
+		switch (Site.Purpose)
+		{
+		case EABTSGeneratedBuildingPurpose::Workshop:
+			return EABTSM3TaskType::Workshop;
+		case EABTSGeneratedBuildingPurpose::DestructibleTarget:
+			return EABTSM3TaskType::TargetBuilding;
+		case EABTSGeneratedBuildingPurpose::FurnaceRuins:
+			return EABTSM3TaskType::FurnaceRuins;
+		case EABTSGeneratedBuildingPurpose::FinaleLaunchReserved:
+			return EABTSM3TaskType::LaunchSite;
+		default:
+			return EABTSM3TaskType::Unassigned;
+		}
 	}
 }
 
@@ -173,13 +192,15 @@ const FABTSM7TaskGraphBuildingProfile* AABTSM7GameMode::FindTaskGraphBuildingPro
 	});
 }
 
-int32 AABTSM7GameMode::CountRequiredTaskGraphBuildings(const AABTSM3Planet& Planet) const
+int32 AABTSM7GameMode::CountRequiredTaskGraphBuildings(
+	const FABTSBuildingGenerationContract& Contract) const
 {
 	const int32 Limit = FMath::Max(0, MaxTaskGraphBuildings);
 	int32 RequiredCount = 0;
-	for (const FABTSM3BuildingSpawnSite& Site : Planet.GetBuildingSpawnSites())
+	for (const FABTSGeneratedBuildingSite& Site : Contract.Sites)
 	{
-		if (!FABTSM7TaskGraphDAG23ProfileResolver::IsSupportedBuildingTask(Site.TaskType)) continue;
+		const EABTSM3TaskType TaskType = ResolveLegacyTaskType(Site);
+		if (!FABTSM7TaskGraphDAG23ProfileResolver::IsSupportedBuildingTask(TaskType)) continue;
 		if (RequiredCount >= Limit) break;
 		++RequiredCount;
 	}
@@ -188,13 +209,14 @@ int32 AABTSM7GameMode::CountRequiredTaskGraphBuildings(const AABTSM3Planet& Plan
 
 int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 	AABTSM3Planet& Planet,
+	const FABTSBuildingGenerationContract& Contract,
 	AABTSM7BuildingMaterialSystem& MaterialSystem,
 	AABTSM6SlingshotSystem* SlingshotSystem,
 	bool& bOutSetupFailed)
 {
 	bOutSetupFailed = false;
 	TaskGraphBuildingDebugEntries.Reset();
-	const int32 RequiredCount = CountRequiredTaskGraphBuildings(Planet);
+	const int32 RequiredCount = CountRequiredTaskGraphBuildings(Contract);
 	if (RequiredCount <= 0) return 0;
 	if (!StableBuildingClass)
 	{
@@ -206,12 +228,15 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 	}
 	int32 SpawnedCount = 0;
 	int32 AttemptedRequiredCount = 0;
-	for (const FABTSM3BuildingSpawnSite& Site : Planet.GetBuildingSpawnSites())
+	for (const FABTSGeneratedBuildingSite& Site : Contract.Sites)
 	{
+		const EABTSM3TaskType TaskType = ResolveLegacyTaskType(Site);
 		// M11.0 reserves the certified LaunchSite pad for the unique terminal
 		// Space-slingshot slot pair. Keep this guard even when a Blueprint CDO
 		// still serializes the retired Glass/TwinTower LaunchSite profile.
-		if (Site.TaskType == EABTSM3TaskType::LaunchSite)
+		if (Site.Purpose
+				== EABTSGeneratedBuildingPurpose::FinaleLaunchReserved
+			|| TaskType == EABTSM3TaskType::LaunchSite)
 		{
 			UE_LOG(LogABTSRuntime, Log,
 				TEXT("[ABTS][M11.0][LaunchSite] Certified pad retained; M7 building suppressed Task=%d Cell=%d"),
@@ -219,35 +244,33 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 				Site.CellId);
 			continue;
 		}
-		if (!FABTSM7TaskGraphDAG23ProfileResolver::IsSupportedBuildingTask(Site.TaskType)) continue;
+		if (!FABTSM7TaskGraphDAG23ProfileResolver::IsSupportedBuildingTask(TaskType)) continue;
 		if (AttemptedRequiredCount >= RequiredCount) break;
 		++AttemptedRequiredCount;
-		const FABTSM7TaskGraphBuildingProfile* Profile = FindTaskGraphBuildingProfile(Site.TaskType);
+		const FABTSM7TaskGraphBuildingProfile* Profile = FindTaskGraphBuildingProfile(TaskType);
 		if (Profile == nullptr)
 		{
 			bOutSetupFailed = true;
 			UE_LOG(LogABTSRuntime, Error,
 				TEXT("[ABTS][M7][TaskGraphBuilding] DAG23ProfileMissing Task=%d Type=%d Cell=%d"),
-				Site.TaskId, static_cast<int32>(Site.TaskType), Site.CellId);
+				Site.TaskId, static_cast<int32>(TaskType), Site.CellId);
 			continue;
 		}
 		FABTSM7TaskGraphBuildingProfile RuntimeProfile;
 		bool bMigratedLegacyProfile = false;
 		if (!FABTSM7TaskGraphDAG23ProfileResolver::ResolveRuntimeProfile(
-			Site.TaskType, *Profile, RuntimeProfile, bMigratedLegacyProfile))
+			TaskType, *Profile, RuntimeProfile, bMigratedLegacyProfile))
 		{
 			bOutSetupFailed = true;
 			UE_LOG(LogABTSRuntime, Error,
 				TEXT("[ABTS][M7][TaskGraphBuilding] DAG23ProfileRejected Task=%d Type=%d Cell=%d"),
-				Site.TaskId, static_cast<int32>(Site.TaskType), Site.CellId);
+				Site.TaskId, static_cast<int32>(TaskType), Site.CellId);
 			continue;
 		}
 
-		const uint32 SeedHash = HashCombineFast(
-			GetTypeHash(Planet.WorldSeed), HashCombineFast(GetTypeHash(Site.TaskId), GetTypeHash(Site.CellId)));
 		FABTSM73GenerationSettings GenerationSettings = RuntimeProfile.GenerationSettings;
-		GenerationSettings.BuildingSeed = static_cast<int32>(SeedHash & MAX_int32);
-		if (Planet.BuildingPadSettings.bEnableTerrainFlattening)
+		GenerationSettings.BuildingSeed = Site.DeterministicSeed;
+		if (Site.bTerrainPadApplied)
 		{
 			GenerationSettings.MaxSinglePlatformAngularSpanDegrees = FMath::Max(
 				GenerationSettings.MaxSinglePlatformAngularSpanDegrees,
@@ -283,12 +306,12 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 		FABTSM7TaskGraphBuildingDebugEntry& DebugEntry = TaskGraphBuildingDebugEntries.AddDefaulted_GetRef();
 		DebugEntry.Building = Building;
 		DebugEntry.TaskId = Site.TaskId;
-		DebugEntry.TaskType = Site.TaskType;
+		DebugEntry.TaskType = TaskType;
 		DebugEntry.CellId = Site.CellId;
 		++SpawnedCount;
 		UE_LOG(LogABTSRuntime, Log,
 			TEXT("[ABTS][M7][TaskGraphBuilding] Task=%d Type=%d Cell=%d Material=%d Seed=%d Pad=%d Algorithm=%d DAGPreset=%d DAGBudget=%d DAGDepth=%d DAGMinContact=%.3f MigratedLegacy=%d Spawned=%s"),
-			Site.TaskId, static_cast<int32>(Site.TaskType), Site.CellId,
+			Site.TaskId, static_cast<int32>(TaskType), Site.CellId,
 			static_cast<int32>(GenerationSettings.PrimaryMaterial), GenerationSettings.BuildingSeed,
 			Site.bTerrainPadApplied ? 1 : 0,
 			static_cast<int32>(GenerationSettings.GenerationAlgorithm),
@@ -357,14 +380,24 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	}
 	const bool bUseLegacySingleBuildingTest =
 		!bSpawnTaskGraphBuildings && bSpawnStableBuildingAtFirstAnchor;
-	const int32 ExpectedRequiredBuildingCount = bSpawnTaskGraphBuildings && Planet
-		? CountRequiredTaskGraphBuildings(*Planet)
+	const bool bNeedsBuildingContract =
+		(bSpawnTaskGraphBuildings && MaxTaskGraphBuildings > 0)
+		|| bUseLegacySingleBuildingTest;
+	FABTSBuildingGenerationContract BuildingContract;
+	const bool bBuildingContractReady =
+		Planet != nullptr
+		&& Planet->TryExportBuildingGenerationContract(BuildingContract);
+	const int32 ExpectedRequiredBuildingCount =
+		bSpawnTaskGraphBuildings && bBuildingContractReady
+		? CountRequiredTaskGraphBuildings(BuildingContract)
 		: bUseLegacySingleBuildingTest ? 1 : 0;
 	if (SlingshotSystem)
 	{
 		SlingshotSystem->BeginRequiredBuildingContract(ExpectedRequiredBuildingCount);
 	}
-	bool bBuildingSetupFailed = SlingshotSystem == nullptr || Planet == nullptr;
+	bool bBuildingSetupFailed = SlingshotSystem == nullptr
+		|| Planet == nullptr
+		|| (bNeedsBuildingContract && !bBuildingContractReady);
 	if (bSpawnTaskGraphBuildings && MaxTaskGraphBuildings > 0
 		&& ExpectedRequiredBuildingCount == 0)
 	{
@@ -385,11 +418,13 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	TaskGraphDebugPlayer = &Character;
 	TaskGraphDebugPlanet = Planet;
 	int32 TaskGraphBuildingCount = 0;
-	if (System && Planet && bSpawnTaskGraphBuildings)
+	if (System && Planet && bSpawnTaskGraphBuildings
+		&& bBuildingContractReady)
 	{
 		bool bTaskGraphSetupFailed = false;
 		TaskGraphBuildingCount = SpawnTaskGraphBuildings(
 			*Planet,
+			BuildingContract,
 			*System,
 			SlingshotSystem,
 			bTaskGraphSetupFailed);
@@ -399,9 +434,11 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	AABTSM73StableBuildingActor* StableBuilding = nullptr;
 	if (System && bUseLegacySingleBuildingTest && StableBuildingClass)
 	{
-		if (Planet && !Planet->GetBuildingSpawnSites().IsEmpty())
+		if (Planet && bBuildingContractReady
+			&& !BuildingContract.Sites.IsEmpty())
 		{
-			const FABTSM3BuildingSpawnSite& Site = Planet->GetBuildingSpawnSites()[0];
+			const FABTSGeneratedBuildingSite& Site =
+				BuildingContract.Sites[0];
 			StableBuilding = GetWorld()->SpawnActorDeferred<AABTSM73StableBuildingActor>(
 				StableBuildingClass, Site.WorldTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 			if (StableBuilding)

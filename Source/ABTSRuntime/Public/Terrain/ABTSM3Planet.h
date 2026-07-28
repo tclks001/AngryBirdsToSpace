@@ -13,6 +13,8 @@ class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UStaticMesh;
 class UABTSM3TerrainMaterialBridge;
+struct FABTSBuildingGenerationContract;
+struct FABTSFinaleWorldContract;
 
 USTRUCT(BlueprintType)
 struct FABTSM3SurfacePhysicsProfile
@@ -77,6 +79,20 @@ public:
 
 	/** Deterministic terminal frame authored by M3 and consumed by M11 local-layout presets. */
 	const FABTSM110FinaleLocalFrame& GetFinaleLaunchFrame() const { return FinaleLaunchFrame; }
+
+	/**
+	 * Preferred M7 boundary. Exports an immutable value snapshot instead of
+	 * granting the consumer access to M3 TaskGraph arrays or generation config.
+	 */
+	bool TryExportBuildingGenerationContract(
+		FABTSBuildingGenerationContract& OutContract) const;
+
+	/**
+	 * Preferred M11 boundary. Exports only accepted-world identity, primary
+	 * radius and the certified finale-local frame; M9 is absent by construction.
+	 */
+	bool TryExportFinaleWorldContract(
+		FABTSFinaleWorldContract& OutContract) const;
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Surface")
 	bool QuerySurface(const FVector& UnitDirection, FVector& OutWorldPosition, FVector& OutWorldNormal, float& OutSurfaceRadius, int32& OutCellId) const;

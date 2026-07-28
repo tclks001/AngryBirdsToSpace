@@ -19,7 +19,7 @@ namespace
 			&& FMath::IsFinite(Value.A);
 	}
 
-	bool Reject(FString* OutFailure, const TCHAR* Reason)
+	bool RejectGravityAssistType(FString* OutFailure, const TCHAR* Reason)
 	{
 		if (OutFailure != nullptr)
 		{
@@ -44,18 +44,18 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 {
 	if (BodyId == INDEX_NONE)
 	{
-		return Reject(OutFailure, TEXT("MissingBodyId"));
+		return RejectGravityAssistType(OutFailure, TEXT("MissingBodyId"));
 	}
 	if (Role < EABTSM110FinaleGravityRole::Primary
 		|| Role >= EABTSM110FinaleGravityRole::Count)
 	{
-		return Reject(OutFailure, TEXT("InvalidBodyRole"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidBodyRole"));
 	}
 	if (!IsM11GravitySpecFiniteVector(CenterCM)
 		|| !FMath::IsFinite(GravitationalParameterCM3PerSec2)
 		|| GravitationalParameterCM3PerSec2 <= 0.0)
 	{
-		return Reject(OutFailure, TEXT("InvalidBodyGravity"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidBodyGravity"));
 	}
 	if (!FMath::IsFinite(MinimumEvaluationRadiusCM)
 		|| !FMath::IsFinite(VisualRadiusCM)
@@ -65,7 +65,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 		|| CollisionRadiusCM <= 0.0
 		|| MinimumEvaluationRadiusCM > CollisionRadiusCM)
 	{
-		return Reject(OutFailure, TEXT("InvalidBodyRadii"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidBodyRadii"));
 	}
 
 	if (Role == EABTSM110FinaleGravityRole::Primary)
@@ -73,7 +73,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 		if (!FMath::IsFinite(MaximumSimulationRadiusCM)
 			|| MaximumSimulationRadiusCM <= CollisionRadiusCM)
 		{
-			return Reject(OutFailure, TEXT("InvalidPrimarySimulationRadius"));
+			return RejectGravityAssistType(OutFailure, TEXT("InvalidPrimarySimulationRadius"));
 		}
 		return true;
 	}
@@ -90,7 +90,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 			> InfluenceRadiusCM - InfluenceBlendWidthCM
 				+ FMath::Max(1.0e-6, InfluenceRadiusCM * 1.0e-12))
 	{
-		return Reject(OutFailure, TEXT("InvalidAssistRadii"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidAssistRadii"));
 	}
 	if (!IsM11GravitySpecFiniteVector(VirtualOrbitalVelocityCMPerSec)
 		|| !IsM11GravitySpecFiniteVector(BPlaneReferenceNormal)
@@ -98,7 +98,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 		|| BPlaneReferenceNormal.SquaredLength() <= UE_DOUBLE_SMALL_NUMBER
 		|| BPlaneFallbackAxis.SquaredLength() <= UE_DOUBLE_SMALL_NUMBER)
 	{
-		return Reject(OutFailure, TEXT("InvalidAssistVectors"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidAssistVectors"));
 	}
 	if (!FMath::IsFinite(BPlaneTargetTCM)
 		|| !FMath::IsFinite(BPlaneTargetRCM)
@@ -111,7 +111,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 		|| BPlaneSigmaRCM <= 0.0
 		|| BPlaneOuterChiSquared <= 1.0)
 	{
-		return Reject(OutFailure, TEXT("InvalidBPlaneCorridor"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidBPlaneCorridor"));
 	}
 	if (!FMath::IsFinite(MinimumEnergyChangeCM2PerSec2)
 		|| !FMath::IsFinite(MaximumEnergyChangeCM2PerSec2)
@@ -120,7 +120,7 @@ bool FABTSM11GravityBodySpec::IsValid(FString* OutFailure) const
 		|| MinimumEnergyChangeCM2PerSec2 > MaximumEnergyChangeCM2PerSec2
 		|| !IsFiniteColor(DebugColor))
 	{
-		return Reject(OutFailure, TEXT("InvalidAssistEnergyLimits"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidAssistEnergyLimits"));
 	}
 	return true;
 }
@@ -143,7 +143,7 @@ bool FABTSM11TargetSpec::IsValid(FString* OutFailure) const
 {
 	if (TargetId == INDEX_NONE)
 	{
-		return Reject(OutFailure, TEXT("MissingTargetId"));
+		return RejectGravityAssistType(OutFailure, TEXT("MissingTargetId"));
 	}
 	if (!IsM11GravitySpecFiniteVector(CenterCM)
 		|| !FMath::IsFinite(HitRadiusCM)
@@ -163,7 +163,7 @@ bool FABTSM11TargetSpec::IsValid(FString* OutFailure) const
 		|| !IsM11GravitySpecFiniteVector(PresentationForward)
 		|| PresentationForward.SquaredLength() <= UE_DOUBLE_SMALL_NUMBER)
 	{
-		return Reject(OutFailure, TEXT("InvalidTarget"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidTarget"));
 	}
 	return true;
 }
@@ -180,11 +180,11 @@ bool FABTSM11GravityScenario::IsValid(FString* OutFailure) const
 {
 	if (LayoutVersion <= 0)
 	{
-		return Reject(OutFailure, TEXT("InvalidLayoutVersion"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidLayoutVersion"));
 	}
 	if (ScenarioHash == 0)
 	{
-		return Reject(OutFailure, TEXT("MissingScenarioHash"));
+		return RejectGravityAssistType(OutFailure, TEXT("MissingScenarioHash"));
 	}
 	if (!Target.IsValid(OutFailure))
 	{
@@ -199,7 +199,7 @@ bool FABTSM11GravityScenario::IsValid(FString* OutFailure) const
 		const FABTSM11GravityBodySpec& Body = Bodies[BodyIndex];
 		if (Body.Role != static_cast<EABTSM110FinaleGravityRole>(BodyIndex))
 		{
-			return Reject(OutFailure, TEXT("GravityRoleOrder"));
+			return RejectGravityAssistType(OutFailure, TEXT("GravityRoleOrder"));
 		}
 		if (!Body.IsValid(OutFailure))
 		{
@@ -207,7 +207,7 @@ bool FABTSM11GravityScenario::IsValid(FString* OutFailure) const
 		}
 		if (StableIds.Contains(Body.BodyId))
 		{
-			return Reject(OutFailure, TEXT("DuplicateStableId"));
+			return RejectGravityAssistType(OutFailure, TEXT("DuplicateStableId"));
 		}
 		StableIds.Add(Body.BodyId);
 	}
@@ -220,12 +220,12 @@ bool FABTSM11GravityScenario::IsValid(FString* OutFailure) const
 		if (PrimarySeparationCM
 			<= Assist.InfluenceRadiusCM + GetPrimary().CollisionRadiusCM)
 		{
-			return Reject(OutFailure, TEXT("AssistInfluenceOverlapsPrimaryCollision"));
+			return RejectGravityAssistType(OutFailure, TEXT("AssistInfluenceOverlapsPrimaryCollision"));
 		}
 		if (PrimarySeparationCM + Assist.InfluenceRadiusCM
 			>= GetPrimary().MaximumSimulationRadiusCM)
 		{
-			return Reject(OutFailure, TEXT("AssistOutsidePrimarySimulationDomain"));
+			return RejectGravityAssistType(OutFailure, TEXT("AssistOutsidePrimarySimulationDomain"));
 		}
 		for (int32 SecondAssist = FirstAssist + 1; SecondAssist <= AssistCount; ++SecondAssist)
 		{
@@ -234,20 +234,20 @@ bool FABTSM11GravityScenario::IsValid(FString* OutFailure) const
 			if ((A.CenterCM - B.CenterCM).Length()
 				<= A.InfluenceRadiusCM + B.InfluenceRadiusCM)
 			{
-				return Reject(OutFailure, TEXT("OverlappingAssistInfluenceSpheres"));
+				return RejectGravityAssistType(OutFailure, TEXT("OverlappingAssistInfluenceSpheres"));
 			}
 		}
 	}
 	if ((Target.CenterCM - GetPrimary().CenterCM).Length() + Target.HitRadiusCM
 			>= GetPrimary().MaximumSimulationRadiusCM)
 	{
-		return Reject(OutFailure, TEXT("TargetOutsidePrimarySimulationDomain"));
+		return RejectGravityAssistType(OutFailure, TEXT("TargetOutsidePrimarySimulationDomain"));
 	}
 	if ((Target.GetGeometricContactCenterCM() - GetPrimary().CenterCM).Length()
 			+ Target.GetGeometricContactRadiusCM()
 		>= GetPrimary().MaximumSimulationRadiusCM)
 	{
-		return Reject(
+		return RejectGravityAssistType(
 			OutFailure,
 			TEXT("GeometricTargetOutsidePrimarySimulationDomain"));
 	}
@@ -265,7 +265,7 @@ bool FABTSM11SolverConfig::IsValid(FString* OutFailure) const
 {
 	if (SolverVersion != 1 || HashSchemaVersion != 1)
 	{
-		return Reject(OutFailure, TEXT("UnsupportedSolverOrHashVersion"));
+		return RejectGravityAssistType(OutFailure, TEXT("UnsupportedSolverOrHashVersion"));
 	}
 	if (!FMath::IsFinite(FixedTimeStepSeconds)
 		|| !FMath::IsFinite(MaximumSimulationTimeSeconds)
@@ -275,7 +275,7 @@ bool FABTSM11SolverConfig::IsValid(FString* OutFailure) const
 		|| MaximumSubdivisionDepth < 0
 		|| MaximumSubdivisionDepth > 20)
 	{
-		return Reject(OutFailure, TEXT("InvalidStepPolicy"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidStepPolicy"));
 	}
 	if (!FMath::IsFinite(AssistStepRadiusFraction)
 		|| !FMath::IsFinite(CollisionStepRadiusFraction)
@@ -286,7 +286,7 @@ bool FABTSM11SolverConfig::IsValid(FString* OutFailure) const
 		|| GravityTimescaleFraction <= 0.0
 		|| PositionErrorLimitCM <= 0.0)
 	{
-		return Reject(OutFailure, TEXT("InvalidSubdivisionPolicy"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidSubdivisionPolicy"));
 	}
 	if (RootBisectionIterations <= 0
 		|| RootBisectionIterations > 64
@@ -300,7 +300,7 @@ bool FABTSM11SolverConfig::IsValid(FString* OutFailure) const
 		|| !FMath::IsFinite(MaximumNaturalDeflectionErrorRadians)
 		|| MaximumNaturalDeflectionErrorRadians <= 0.0)
 	{
-		return Reject(OutFailure, TEXT("InvalidRootOrEncounterPolicy"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidRootOrEncounterPolicy"));
 	}
 	if (!FMath::IsFinite(EnergyQualityPower)
 		|| EnergyQualityPower <= 0.0
@@ -310,13 +310,13 @@ bool FABTSM11SolverConfig::IsValid(FString* OutFailure) const
 		|| ExitEnergyResidualToleranceCM2PerSec2 < 0.0
 		|| EnergyShootingIterationCount != 3)
 	{
-		return Reject(OutFailure, TEXT("InvalidEnergyPolicy"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidEnergyPolicy"));
 	}
 	if (!FMath::IsFinite(NaturalCloneMaximumTimeSeconds)
 		|| NaturalCloneMaximumTimeSeconds <= 0.0
 		|| NaturalCloneMaximumStepCount <= 0)
 	{
-		return Reject(OutFailure, TEXT("InvalidNaturalClonePolicy"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidNaturalClonePolicy"));
 	}
 	return true;
 }
@@ -333,36 +333,36 @@ bool FABTSM11TrajectoryRequest::IsValid(FString* OutFailure) const
 		|| InitialExpectedAssistIndex < 1
 		|| InitialExpectedAssistIndex > FABTSM11GravityScenario::AssistCount + 1)
 	{
-		return Reject(OutFailure, TEXT("InvalidInitialState"));
+		return RejectGravityAssistType(OutFailure, TEXT("InvalidInitialState"));
 	}
 	if ((InitialPositionCM - Scenario.GetPrimary().CenterCM).Length()
 		>= Scenario.GetPrimary().MaximumSimulationRadiusCM)
 	{
-		return Reject(OutFailure, TEXT("InitialStateOutsidePrimarySimulationDomain"));
+		return RejectGravityAssistType(OutFailure, TEXT("InitialStateOutsidePrimarySimulationDomain"));
 	}
 	for (const FABTSM11GravityBodySpec& Body : Scenario.Bodies)
 	{
 		if ((InitialPositionCM - Body.CenterCM).Length() <= Body.CollisionRadiusCM)
 		{
-			return Reject(OutFailure, TEXT("InitialStateInsideBodyCollision"));
+			return RejectGravityAssistType(OutFailure, TEXT("InitialStateInsideBodyCollision"));
 		}
 		if (Body.IsAssist()
 			&& (InitialPositionCM - Body.CenterCM).Length()
 				<= Body.InfluenceRadiusCM)
 		{
-			return Reject(OutFailure, TEXT("InitialStateInsideAssistInfluence"));
+			return RejectGravityAssistType(OutFailure, TEXT("InitialStateInsideAssistInfluence"));
 		}
 	}
 	if ((InitialPositionCM - Scenario.Target.CenterCM).Length()
 		<= Scenario.Target.HitRadiusCM)
 	{
-		return Reject(OutFailure, TEXT("InitialStateInsideTarget"));
+		return RejectGravityAssistType(OutFailure, TEXT("InitialStateInsideTarget"));
 	}
 	if ((InitialPositionCM
 			- Scenario.Target.GetGeometricContactCenterCM()).Length()
 		<= Scenario.Target.GetGeometricContactRadiusCM())
 	{
-		return Reject(
+		return RejectGravityAssistType(
 			OutFailure,
 			TEXT("InitialStateInsideGeometricTarget"));
 	}

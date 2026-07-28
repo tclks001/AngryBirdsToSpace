@@ -8,17 +8,28 @@
 UENUM(BlueprintType)
 enum class EABTSM3TaskType : uint8
 {
-	Unassigned,
-	Start,
-	Workshop,
-	SlingshotRange,
-	TargetBuilding,
-	BridgeGate,
-	FurnaceRuins,
-	LaunchSite,
-	Scout,
-	SatelliteWindow
+	// These values are serialized by existing M7 Blueprint profiles. Preserve
+	// value, order and meaning; future entries may only append at the tail.
+	Unassigned = 0,
+	Start = 1,
+	Workshop = 2,
+	SlingshotRange = 3,
+	TargetBuilding = 4,
+	BridgeGate = 5,
+	FurnaceRuins = 6,
+	LaunchSite = 7,
+	Scout = 8,
+	SatelliteWindow = 9
 };
+
+static_assert(
+	static_cast<uint8>(EABTSM3TaskType::Unassigned) == 0
+	&& static_cast<uint8>(EABTSM3TaskType::Workshop) == 2
+	&& static_cast<uint8>(EABTSM3TaskType::TargetBuilding) == 4
+	&& static_cast<uint8>(EABTSM3TaskType::FurnaceRuins) == 6
+	&& static_cast<uint8>(EABTSM3TaskType::LaunchSite) == 7
+	&& static_cast<uint8>(EABTSM3TaskType::SatelliteWindow) == 9,
+	"EABTSM3TaskType values are a serialized M3/M7 compatibility contract.");
 
 UENUM(BlueprintType)
 enum class EABTSM3TerrainType : uint8

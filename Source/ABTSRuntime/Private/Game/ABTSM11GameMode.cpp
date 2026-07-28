@@ -3,6 +3,7 @@
 #include "Game/ABTSM11GameMode.h"
 
 #include "ABTSRuntime.h"
+#include "Contracts/ABTSWorldGenerationContracts.h"
 #include "EngineUtils.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSM11FinaleSystem.h"
@@ -77,8 +78,10 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 		return;
 	}
 
+	FABTSFinaleWorldContract WorldContract;
+	PrimaryPlanet->TryExportFinaleWorldContract(WorldContract);
 	const bool bReady =
-		FinaleSystem->InitializeFromPrimaryPlanet(*PrimaryPlanet);
+		FinaleSystem->InitializeFromWorldContract(WorldContract);
 	if (bReady)
 	{
 		UE_LOG(

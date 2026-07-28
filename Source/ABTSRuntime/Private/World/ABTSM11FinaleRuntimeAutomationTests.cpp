@@ -5,6 +5,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Contracts/ABTSWorldGenerationContracts.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Game/ABTSM10GameMode.h"
@@ -30,6 +31,21 @@ namespace
 		Frame.RightSlotWorldLocation = Origin + Right * 105.0;
 		Frame.bValid = true;
 		return Frame;
+	}
+
+	FABTSFinaleWorldContract MakeM11BWorldContract(
+		const FABTSM110FinaleLocalFrame& Frame)
+	{
+		const FABTSM11FinaleLayoutPreset Preset =
+			FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
+		FABTSFinaleWorldContract Contract;
+		Contract.Identity.WorldSeed = 312503;
+		Contract.Identity.GeneratorVersion = 3;
+		Contract.Identity.GenerationAttempt = 0;
+		Contract.Identity.bSourceWorldAccepted = true;
+		Contract.PrimaryRadiusCM = Preset.ReferencePrimaryRadiusCM;
+		Contract.LaunchFrame = Frame;
+		return Contract;
 	}
 
 	bool RequestsHaveIdenticalLocalAuthority(
@@ -463,6 +479,154 @@ bool FABTSM11BRuntimeCompatibilityTest::RunTest(
 			WrongLaunchRadius.ReferencePrimaryRadiusCM,
 			Frame,
 			&Failure));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11BStableWorldContractTest,
+	"ABTS.M11B.Runtime.StableWorldContract",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11BStableWorldContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+
+	FScopedM11BAutomationWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	TestNotNull(TEXT("Transient stable-contract World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	const auto SpawnSystem = [&]()
+	{
+		return World->SpawnActor<AABTSM11FinaleSystem>(
+			AABTSM11FinaleSystem::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	};
+
+	const FABTSM110FinaleLocalFrame Frame =
+		MakeM11BRuntimeTestFrame();
+	const FABTSFinaleWorldContract Accepted =
+		MakeM11BWorldContract(Frame);
+	AABTSM11FinaleSystem* ReadySystem = SpawnSystem();
+	TestNotNull(TEXT("Stable-entry finale system spawns"), ReadySystem);
+	if (ReadySystem == nullptr)
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Stable world contract initializes the certified runtime"),
+		ReadySystem->InitializeFromWorldContract(Accepted));
+	TestEqual(
+		TEXT("Stable entry commits exactly three assist Actors"),
+		ReadySystem->GetSpawnedAssistActorCount(),
+		3);
+	TestTrue(
+		TEXT("Stable entry commits the non-gravitating UFO"),
+		ReadySystem->HasSpawnedUFOActor());
+	TestEqual(
+		TEXT("Stable entry keeps the frozen preset identity"),
+		ReadySystem->GetLayoutPreset().PresetHash,
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1().PresetHash);
+
+	FABTSFinaleWorldContract InvalidRepeat = Accepted;
+	InvalidRepeat.Identity.ContractVersion++;
+	TestFalse(
+		TEXT("Ready runtime rejects reinitialization"),
+		ReadySystem->InitializeFromWorldContract(InvalidRepeat));
+	TestTrue(
+		TEXT("Rejected reinitialization preserves Ready state"),
+		ReadySystem->IsLayoutReady());
+	TestEqual(
+		TEXT("Rejected reinitialization preserves three assist Actors"),
+		ReadySystem->GetSpawnedAssistActorCount(),
+		3);
+	TestTrue(
+		TEXT("Rejected reinitialization preserves the UFO"),
+		ReadySystem->HasSpawnedUFOActor());
+
+	const auto TestRejectedContract =
+		[&](
+			const TCHAR* Label,
+			const FABTSFinaleWorldContract& Contract,
+			const TCHAR* ExpectedFailure)
+	{
+		AABTSM11FinaleSystem* System = SpawnSystem();
+		TestNotNull(
+			*FString::Printf(TEXT("%s system spawns"), Label),
+			System);
+		if (System == nullptr)
+		{
+			return;
+		}
+		AddExpectedErrorPlain(
+			*FString::Printf(
+				TEXT("[ABTS][M11-B][FinaleSystem] Rejected Reason=%s"),
+				ExpectedFailure),
+			EAutomationExpectedErrorFlags::Contains,
+			1);
+		TestFalse(
+			*FString::Printf(TEXT("%s fails closed"), Label),
+			System->InitializeFromWorldContract(Contract));
+		TestEqual(
+			*FString::Printf(TEXT("%s keeps its detailed failure"), Label),
+			System->GetFailureReason(),
+			FString(ExpectedFailure));
+		TestEqual(
+			*FString::Printf(TEXT("%s commits no assist Actors"), Label),
+			System->GetSpawnedAssistActorCount(),
+			0);
+		TestFalse(
+			*FString::Printf(TEXT("%s commits no UFO"), Label),
+			System->HasSpawnedUFOActor());
+	};
+
+	FABTSFinaleWorldContract Unaccepted = Accepted;
+	Unaccepted.Identity.bSourceWorldAccepted = false;
+	Unaccepted.Identity.GenerationAttempt = INDEX_NONE;
+	TestRejectedContract(
+		TEXT("Unaccepted M3 world"),
+		Unaccepted,
+		TEXT("PrimaryTaskGraphNotAccepted"));
+
+	FABTSFinaleWorldContract WrongVersion = Accepted;
+	WrongVersion.Identity.ContractVersion++;
+	TestRejectedContract(
+		TEXT("Unknown contract version"),
+		WrongVersion,
+		TEXT("PrimaryWorldContractInvalid"));
+
+	FABTSFinaleWorldContract BadFrame = Accepted;
+	BadFrame.LaunchFrame.bValid = false;
+	TestRejectedContract(
+		TEXT("Invalid finale frame"),
+		BadFrame,
+		TEXT("InvalidFinaleFrame"));
+
+	FABTSFinaleWorldContract BadGenerator = Accepted;
+	BadGenerator.Identity.GeneratorVersion = 2;
+	TestRejectedContract(
+		TEXT("Incompatible generator"),
+		BadGenerator,
+		TEXT("IncompatibleGeneratorVersion"));
+
+	FABTSFinaleWorldContract BadRadius = Accepted;
+	const FABTSM11FinaleLayoutPreset Preset =
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
+	BadRadius.PrimaryRadiusCM +=
+		Preset.PrimaryCompatibilityToleranceCM + 1.0;
+	TestRejectedContract(
+		TEXT("Incompatible primary radius"),
+		BadRadius,
+		TEXT("IncompatiblePrimaryRadius"));
 	return true;
 }
 

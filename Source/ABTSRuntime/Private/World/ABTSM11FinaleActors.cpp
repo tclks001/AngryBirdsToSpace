@@ -11,7 +11,7 @@
 
 namespace
 {
-	void ConfigureVisualOnlyMesh(UStaticMeshComponent& Mesh)
+	void ConfigureM11FinaleVisualOnlyMesh(UStaticMeshComponent& Mesh)
 	{
 		Mesh.SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Mesh.SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -93,7 +93,7 @@ AABTSM11GravityBodyActor::AABTSM11GravityBodyActor()
 
 	VisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMesh"));
 	VisualMesh->SetupAttachment(SceneRoot);
-	ConfigureVisualOnlyMesh(*VisualMesh);
+	ConfigureM11FinaleVisualOnlyMesh(*VisualMesh);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
@@ -158,7 +158,7 @@ AABTSM11UFOActor::AABTSM11UFOActor()
 
 	VisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMesh"));
 	VisualMesh->SetupAttachment(SceneRoot);
-	ConfigureVisualOnlyMesh(*VisualMesh);
+	ConfigureM11FinaleVisualOnlyMesh(*VisualMesh);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
