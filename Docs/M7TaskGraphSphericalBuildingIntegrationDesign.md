@@ -1,14 +1,14 @@
 # M7 收口：TaskGraph 球面建筑集成
 
-> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。Furnace 的 Tripod 接触质心偏置已修复，并增加方柱净空与 6% 生产接触面积底线；UE 5.8 Editor 编译、`ABTS.M7` 14 项、`ABTS.M73` 13 项及最终二进制三次 fresh D3D12 实时 60 FPS 均通过。待在可见 PIE 中补做外观、实际击打与回收验收。
+> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A 纯数据内部 Failure Frontier 发现已接线但生产默认关闭，不改变 13/17/13 模块、材质与 `WeakPoints=0`；UE 5.8 强制 Unity Editor 编译、DAG3-A 6 项、旧 DAG2.3 9 项、M7 路由、世界生成契约、当前 `ABTS.M7` 前缀快照 20 项、fresh NullRHI 60 FPS 运行时 smoke 及既有三次 fresh D3D12 实时 60 FPS 证据均通过。待 DAG3-B/C、DAG-4 及可见 PIE 外观/击打/回收验收。
 >
-> 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。
+> 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。
 >
 > 下游修订：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)已将 `LaunchSite` 保留为无建筑的终局施工台和 Space-only 槽位区。
 >
 > 历史对照：[M7.3-A](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2](M73B2StructuralWeaknessAndFailureValidationDesign.md)。这些 Legacy 生成稿不再是 TaskGraph 生产路线。
 >
-> 边界：本稿负责 DAG2.3 的球面生产接入；不实现 DAG-3 内部弱点、WFC、Beam/Span、新建筑装置语法或任务完成逻辑，也不继续维护 `LegacyLayeredAB2` 的 TaskGraph 生成。
+> 边界：本稿负责 DAG2.3 的球面生产接入与 DAG3-A 的默认关闭接线；不启用 DAG-3 内部弱点，不实现 WFC、Beam/Span、新建筑装置语法或任务完成逻辑，也不继续维护 `LegacyLayeredAB2` 的 TaskGraph 生成。
 
 ## 1. 目标
 
@@ -67,7 +67,7 @@ Rfinal  = lerp(Rterrain, Rpad, PadBlend)
 - 新建 C++/Blueprint 默认 Profile 直接使用 DAG2.3；
 - 已保存的 M7/M9/M10 Blueprint CDO 若仍序列化 `Algorithm=0`，在生成边界升级为该 Task 的安全 DAG Profile，并记录 `MigratedLegacy=1`；不会重新调用旧生成器。
 
-显式编写的 `Algorithm=1` Profile 仍可修改 DAG Preset/Layout；Resolver 关闭尚未实现的 DAG-3 弱点预算，并只对铁质 Furnace 施加 `MinSupportContactAreaRatio>=0.06` 的生产安全底线。这个边界也覆盖旧 Blueprint CDO 已序列化的显式 DAG Profile，避免旧 4% 值绕过新原生默认值；除此以外不覆盖合法 DAG 参数。默认生产表为：
+显式编写的 `Algorithm=1` Profile 仍可修改 DAG Preset/Layout；Resolver 关闭 Legacy 弱点预算，新增 `DAGFailureFrontierSettings` 也默认 `bEnableAnalysis=false`，并只对铁质 Furnace 施加 `MinSupportContactAreaRatio>=0.06` 的生产安全底线。这个边界也覆盖旧 Blueprint CDO 已序列化的显式 DAG Profile，避免旧 4% 值绕过新原生默认值；除此以外不覆盖合法 DAG 参数。默认生产表为：
 
 | Task | 材料 | DAG Preset | Budget / MaxDepth | Layout `W×D×H cm` | 最小接触比 | `MaxBrickCount` |
 | --- | --- | --- | --- | --- | ---: | ---: |
@@ -83,12 +83,13 @@ M7 在创建建筑前向 M6 开启“必需建筑集合合同”：当前生产�
 
 ### 3.1 当前玩法边界
 
-DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰撞和 M8 回收，所以建筑仍可被鸟击打并发生物理坍塌。但 DAG-3 Failure Frontier 尚未实现：
+DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰撞和 M8 回收，所以建筑仍可被鸟击打并发生物理坍塌。DAG3-A 已能从编译后的物理接触 DAG 发现静态 Failure Frontier，但默认生产旁路且不改写结构：
 
 - `WeaknessPlanner=0`、`WeakPoints=0` 是当前 DAG 生产建筑的预期结果；
+- `DAG3Enabled=0 DAG3Candidates=0 DAG3Accepted=0 DAG3Hash=0` 是当前生产日志基线；
 - 旧 B/B2 顶冠弱材质、唯一弱点与难度分数不再属于生产合同；
 - 首版应把可读的主承重柱作为攻击提示，不能宣称已有“唯一弱点”；
-- 若后续恢复严格的弱点玩法，必须实现 DAG-3，不能把 TaskGraph 切回 Legacy。
+- 若后续恢复严格的弱点玩法，必须完成 DAG3-B/C 和 DAG-4，不能只打开 DAG3-A，也不能把 TaskGraph 切回 Legacy。
 
 ### 3.2 M11.0 的 LaunchSite 硬边界
 
@@ -114,7 +115,7 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 [ABTS][M7][TaskGraphBuilding] ... Algorithm=1 DAGPreset=... DAGBudget=... DAGMinContact=... MigratedLegacy=...
 [ABTS][M11.0][LaunchSite] Certified pad retained; M7 building suppressed Task=... Cell=...
 [ABTS][StartupPhysics] BuildingContractSealed Expected=3 Registered=3 SetupRejected=0
-[ABTS][M7.3-A][Generated] ... Algorithm=1 DAGMacro>0 DAGSparse>0 DAGHash!=0 ... Accepted=1
+[ABTS][M7.3-A][Generated] ... Algorithm=1 DAG3Enabled=0 DAG3Candidates=0 DAG3Accepted=0 DAG3Hash=0 DAGMacro>0 DAGSparse>0 DAGHash!=0 ... Accepted=1
 [ABTS][M7.3-A][IdleValidation] ... Accepted=1
 [ABTS][StartupPhysics] Complete ... BuildingAccepted=3 BuildingRejected=0 BuildingExpected=3 BuildingRegistered=3
 ```
@@ -131,6 +132,15 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 - 历史算法基线的两次独立 `UnrealEditor -game -NullRHI` 均为相同 Seed/Brick/Support/Hash、`Repairs=0 LargeErrors=0 RemainingSmall=0`、三栋 `IdleValidation Accepted=1`；两次都先封口 `Expected=3 Registered=3 SetupRejected=0`，`WorldReady=1` 最终报告 `BuildingAccepted=3 BuildingRejected=0 BuildingExpected=3 BuildingRegistered=3`，且没有 TaskGraph `Algorithm=0`；
 - 最终二进制另有三次不带 `-benchmark` 的 fresh D3D12 实时 60 FPS：三栋均 `TimedOut=0 Accepted=1`，Furnace `MaxRotation=0.08°/0.09°/0.08°`、`DAGMinContact=0.060`，门禁均为 `Accepted/Rejected/Expected/Registered=3/0/3/3`，且 `WorldReady=1`、无 `LogABTSRuntime: Error` 或 `WorldReadyBlocked`；
 - `-benchmark` 会令 UE 使用固定时间步，只能证明算法确定性，不能单独代替实时 PIE Chaos 验收；正式稳定性回归必须包含不带 `-benchmark` 的实时 30/60/120 FPS、新进程 D3D12 以及可见 PIE/hitch soak。
+
+2026-07-29 的 DAG3-A 增量基线：
+
+- `-ForceUnity -DisableAdaptiveUnity` 的 `AngryBirdsToSpaceEditor Win64 Development` 编译成功；
+- fresh NullRHI `ABTS.M73DAG3.` 6/6、旧 `ABTS.M73DAG.` 9/9、精确 `ABTS.M7.TaskGraphDAG23ProfileRouting` 1/1、`ABTS.Contracts.WorldGeneration` 2/2；
+- `ABTS.M7` 的 20/20 是本次二进制的前缀匹配快照，会随未来 `ABTS.M7*` 测试增加而变化，不能作为长期硬编码数量；
+- `ProductionPresetDiscovery` 证明三套 Profile 仍为 13/17/13 模块和原 DAG2.3 Hash，默认不运行 DAG3-A；同一数据只读 opt-in 后都能发现无旁路、跨多个宏节点的静态前沿；
+- fresh `-game -NullRHI -ExecCmds="t.MaxFPS 60"` 中三栋生成日志均为 `DAG3Enabled/Candidates/Accepted/Hash=0/0/0/0`、13/17/13 和原 DAG Hash；三栋 Idle 全部 `Accepted=1`，最终 `WorldReady=1` 且门禁 `3/0/3/3`；
+- 该增量没有改动生产几何或 Chaos，不新增“弱点击毁”可见 PIE 结论。
 
 ### 4.2 PIE 定位调试
 
@@ -155,4 +165,4 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 
 ## 6. 后续
 
-TaskGraph 生产生成器已经在 DAG2.3 收口。后续按顺序补 DAG-3 内部 Failure Frontier、Budget=1 Seed sweep/物理预算，再由 WFC 提供语义包络；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。
+TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A 也已建立内部 Failure Frontier 的纯数据发现与确定性门槛。后续按顺序完成 DAG3-B 三种几何改写、DAG3-C 显式生产候选、DAG-4 settled/Chaos 对照、Budget=1 Seed sweep/物理预算，再由 WFC 提供语义包络；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。

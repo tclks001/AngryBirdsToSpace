@@ -51,6 +51,7 @@ public:
 		const FABTSM73GenerationSettings& InGenerationSettings,
 		const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
 		const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+		const FABTSM73DAGFailureFrontierSettings& InDAGFailureFrontierSettings,
 		const FABTSM73DifficultySettings& InDifficultySettings);
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
@@ -122,6 +123,9 @@ private:
 	/** DAG-2 Scope split, sparse support and plate/column lowering settings. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-2|Layout")
 	FABTSM73DAGLayoutSettings DAGLayoutSettings;
+	/** DAG3-A pure-data frontier discovery. Production remains disabled until DAG3-B/DAG-4 gates pass. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-3|Failure Frontier")
+	FABTSM73DAGFailureFrontierSettings DAGFailureFrontierSettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")

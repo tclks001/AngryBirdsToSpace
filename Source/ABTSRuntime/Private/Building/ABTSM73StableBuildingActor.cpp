@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM73DAGBuildingPipeline.h"
+#include "Building/ABTSM73DAGFailureFrontierAnalyzer.h"
 #include "Building/ABTSM73GroundAdapter.h"
 #include "Building/ABTSM73StabilityValidator.h"
 #include "Building/ABTSM73StructureBuilder.h"
@@ -32,6 +33,46 @@ namespace
 	{
 		return FTransform(Context.AnchorTransform.GetRotation(),
 			Context.AnchorTransform.TransformPositionNoScale(LocalCenter), Dimensions / BasicCubeSizeCM);
+	}
+
+	FString JoinFrontierNodeIds(const TConstArrayView<int32> NodeIds)
+	{
+		FString Result;
+		for (int32 Index = 0; Index < NodeIds.Num(); ++Index)
+		{
+			if (Index > 0) Result += TEXT(",");
+			Result += FString::FromInt(NodeIds[Index]);
+		}
+		return Result;
+	}
+
+	FString BuildFrontierRejectSummary(
+		const FABTSM73DAGFailureFrontierAnalysis& Analysis)
+	{
+		TMap<FString, int32> Counts;
+		for (const FABTSM73DAGFailureFrontierCandidate& Candidate : Analysis.Candidates)
+		{
+			if (!Candidate.bAccepted)
+			{
+				++Counts.FindOrAdd(
+					Candidate.RejectReason.IsEmpty()
+						? FString(TEXT("Unspecified"))
+						: Candidate.RejectReason);
+			}
+		}
+		TArray<FString> Reasons;
+		Counts.GetKeys(Reasons);
+		Reasons.Sort();
+		FString Result;
+		for (int32 Index = 0; Index < Reasons.Num(); ++Index)
+		{
+			if (Index > 0) Result += TEXT("|");
+			Result += FString::Printf(
+				TEXT("%s=%d"),
+				*Reasons[Index],
+				Counts.FindChecked(Reasons[Index]));
+		}
+		return Result;
 	}
 }
 
@@ -121,6 +162,7 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	const FABTSM73GenerationSettings& InGenerationSettings,
 	const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
 	const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+	const FABTSM73DAGFailureFrontierSettings& InDAGFailureFrontierSettings,
 	const FABTSM73DifficultySettings& InDifficultySettings)
 {
 	if (bRuntimeSpawned)
@@ -132,6 +174,7 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	DAGGenerationSettings = InDAGGenerationSettings;
 	DAGGenerationSettings.BuildingSeed = GenerationSettings.BuildingSeed;
 	DAGLayoutSettings = InDAGLayoutSettings;
+	DAGFailureFrontierSettings = InDAGFailureFrontierSettings;
 	DifficultySettings = InDifficultySettings;
 }
 
@@ -174,6 +217,19 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 	TArray<FABTSM7MaterialProfile> MaterialProfiles;
 	if (MaterialProfileSource != nullptr) MaterialProfileSource->CopyMaterialProfiles(MaterialProfiles);
 	else MaterialProfiles = FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+	if (GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::RecursiveSupportDAG)
+	{
+		FABTSM73DAGFailureFrontierAnalyzer FailureFrontierAnalyzer;
+		if (!FailureFrontierAnalyzer.Analyze(
+			DAGFailureFrontierSettings,
+			MaterialProfiles,
+			OutData,
+			OutData.DAGFailureFrontierAnalysis,
+			OutError))
+		{
+			return false;
+		}
+	}
 	FVector LocalAttackDirection = OutContext.AnchorTransform.InverseTransformVectorNoScale(AttackDirection->GetForwardVector()).GetSafeNormal();
 	if (LocalAttackDirection.IsNearlyZero()) LocalAttackDirection = FVector::ForwardVector;
 	if (GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::LegacyLayeredAB2)
@@ -205,6 +261,26 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 	GenerationSummary.DAGMissingRequiredContactCount = Data.DAGMissingRequiredContactCount;
 	GenerationSummary.DAGUnexpectedBypassCount = Data.DAGUnexpectedBypassCount;
 	GenerationSummary.DAGTopologyHash = static_cast<int64>(Data.DAGTopologyHash);
+	GenerationSummary.bDAGFailureFrontierAnalysisEnabled = Data.DAGFailureFrontierAnalysis.bEnabled;
+	GenerationSummary.bDAGFailureFrontierAccepted = Data.DAGFailureFrontierAnalysis.bAccepted;
+	GenerationSummary.DAGFailureFrontierCandidateCount = Data.DAGFailureFrontierAnalysis.Candidates.Num();
+	GenerationSummary.DAGFailureFrontierAcceptedCandidateCount =
+		Data.DAGFailureFrontierAnalysis.AcceptedCandidateCount;
+	GenerationSummary.DAGFailureFrontierHash =
+		static_cast<int64>(Data.DAGFailureFrontierAnalysis.SelectedFrontierHash);
+	if (Data.DAGFailureFrontierAnalysis.Candidates.IsValidIndex(
+		Data.DAGFailureFrontierAnalysis.SelectedCandidateIndex))
+	{
+		const FABTSM73DAGFailureFrontierCandidate& Frontier =
+			Data.DAGFailureFrontierAnalysis.Candidates[
+				Data.DAGFailureFrontierAnalysis.SelectedCandidateIndex];
+		GenerationSummary.DAGAffectedMainBodyMassRatio =
+			Frontier.MainBodyAffectedMassRatio;
+		GenerationSummary.DAGAffectedHeightSpanNormalized =
+			Frontier.AffectedHeightSpanNormalized;
+		GenerationSummary.DAGFailureFrontierBypassEdgeCount =
+			Frontier.BypassSupportEdgeCount;
+	}
 	GenerationSummary.FoundationFootCount = Data.FoundationFeet.Num();
 	GenerationSummary.FootprintTerrainDeltaCM = Data.TerrainDeltaCM;
 	GenerationSummary.CurvatureDropCM = Data.CurvatureDropCM;
@@ -368,6 +444,16 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	{
 		FillGenerationSummary(Context, Data, false, Error);
 		RejectRuntimeStructure(Error);
+		if (Data.DAGFailureFrontierAnalysis.bEnabled)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7.3-DAG3][Reject] Actor=%s Candidates=%d Accepted=%d Reason=%s CandidateReasons=%s"),
+				*GetName(),
+				Data.DAGFailureFrontierAnalysis.Candidates.Num(),
+				Data.DAGFailureFrontierAnalysis.AcceptedCandidateCount,
+				*Data.DAGFailureFrontierAnalysis.RejectReason,
+				*BuildFrontierRejectSummary(Data.DAGFailureFrontierAnalysis));
+		}
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A][Reject] Actor=%s Reason=%s"), *GetName(), *Error);
 		return;
 	}
@@ -420,13 +506,36 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 			: EABTSM73IdleValidationState::Rejected;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
+		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d DAG3Enabled=%d DAG3Candidates=%d DAG3Accepted=%d DAG3Hash=%u Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
 		*GetName(), GenerationSettings.BuildingSeed, static_cast<int32>(GenerationSettings.GenerationAlgorithm), static_cast<int32>(GenerationSettings.Silhouette),
 		static_cast<int32>(DAGGenerationSettings.Preset),
 		GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::LegacyLayeredAB2 ? 1 : 0,
+		Data.DAGFailureFrontierAnalysis.bEnabled ? 1 : 0,
+		Data.DAGFailureFrontierAnalysis.Candidates.Num(),
+		Data.DAGFailureFrontierAnalysis.AcceptedCandidateCount,
+		Data.DAGFailureFrontierAnalysis.SelectedFrontierHash,
 		Context.bPlanar ? 1 : 0,
 		Data.Bricks.Num(), Data.SupportEdges.Num(), Data.GroundNodeIds.Num(), Data.DAGMacroNodeCount, Data.DAGSelectedSupportCount, Data.DAGTopologyHash, Data.FoundationFeet.Num(), Data.TerrainDeltaCM,
 		Data.CurvatureDropCM, Data.MaxSlopeDegrees, bRuntimeSpawned ? 1 : 0);
+	if (Data.DAGFailureFrontierAnalysis.Candidates.IsValidIndex(
+		Data.DAGFailureFrontierAnalysis.SelectedCandidateIndex))
+	{
+		const FABTSM73DAGFailureFrontierCandidate& Frontier =
+			Data.DAGFailureFrontierAnalysis.Candidates[
+				Data.DAGFailureFrontierAnalysis.SelectedCandidateIndex];
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-DAG3][Frontier] Actor=%s Kind=%d Nodes=%s Protected=%s MainBodyMass=%.4f Height=%.4f Span=%.4f Macros=%d Bypass=%d Hash=%u"),
+			*GetName(),
+			static_cast<int32>(Frontier.Kind),
+			*JoinFrontierNodeIds(Frontier.CandidateNodeIds),
+			*JoinFrontierNodeIds(Frontier.ProtectedRootNodeIds),
+			Frontier.MainBodyAffectedMassRatio,
+			Frontier.NormalizedHeight,
+			Frontier.AffectedHeightSpanNormalized,
+			Frontier.AffectedMacroNodeIds.Num(),
+			Frontier.BypassSupportEdgeCount,
+			Frontier.FrontierHash);
+	}
 	for (const FABTSM73WeakPointRecord& WeakPoint : Data.WeakPoints)
 	{
 		const TWeakObjectPtr<AABTSM7BuildingModule>* Module = RuntimeModulesByNodeId.Find(WeakPoint.NodeId);
