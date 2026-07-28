@@ -1,6 +1,6 @@
 # M11.0：终局前置收口设计
 
-> 状态：设计合同、C++、Editor 编译、4 项 M11.0 自动化、103 Seed 双生成验证及固定 Seed 独立进程基线已完成；普通 TaskGraph 建筑同时由 M7.3-DAG2.3 接管并通过两次冷启动空载验证。待可见 PIE 视觉/交互验收。M11 三行星轨道谜题本身仍见父稿。
+> 状态：设计合同、C++、Editor 编译、自动化、固定 Seed 独立进程基线与用户 PIE 视觉/交互验收均已完成。下游纯数据积分已完成 [M11-A](M11AGravityAssistSolverDesign.md)。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
@@ -305,18 +305,18 @@ AssistPlanet3
 - [x] 默认物品/配方目录显示“太空弹弓桩”和“太空弹弓弦”，不显示旧“太空弹弓部件”。
 - [x] `SpaceStakePair` 一次消耗 `MetalParts 6 + Wood 5` 并产出两根桩。
 - [x] `SpaceCord` 消耗 `MetalParts 2 + CrystalCore 1` 并产出一根弦。
-- [ ] 旧 `SpaceSlingshotPart` 配方无法查询和制作，历史枚举值仍可安全加载。
-- [ ] Space 组件不能安装到普通槽，普通组件不能安装到 Space-only 槽；失败不扣库存。
-- [ ] 两桩一弦完成后得到唯一 `Space` 档弹弓。
+- [x] 旧 `SpaceSlingshotPart` 配方无法查询和制作，历史枚举值仍可安全加载。
+- [x] Space 组件不能安装到普通槽，普通组件不能安装到 Space-only 槽；失败不扣库存。
+- [x] 两桩一弦完成后得到唯一 `Space` 档弹弓。
 
 ### 9.3 卫星与纯数据边界
 
-- [ ] M9 强化发射的预览与实际鸟仍受卫星引力影响。
+- [x] M9 强化发射的预览与实际鸟仍受卫星引力影响。
 - [x] M9 卫星实际锚定 `SatelliteWindow`；历史非 SatelliteWindow 覆盖不会把它放回 LaunchSite。
-- [ ] 终局太空槽附近不再出现贴脸卫星，常规 M6 轨迹不能把它当成终局近端目标。
+- [x] 终局太空槽附近不再出现贴脸卫星，常规 M6 轨迹不能把它当成终局近端目标。
 - [x] 卫星到 FinaleFrame 原点的距离不低于主星半径 `0.80`，与局部 Right 的切平面对齐点积不低于 `0.98`。
 - [x] `FABTSM110FinaleGravityScenario::BodyCount == 4`，角色顺序固定为主星、①、②、③。
-- [ ] M9 卫星存在、隐藏、移动测试 Transform 或改变 M9 引力参数，都不改变相同 M11 四体输入的加速度结果/Hash。
+- [x] M9 卫星存在、隐藏、移动测试 Transform 或改变 M9 引力参数，都不改变相同 M11 四体输入的加速度结果/Hash。
 - [x] 纯数据测试不创建 UWorld、Actor 或 Chaos 场景即可运行。
 
 ### 9.4 日志与性能
@@ -333,7 +333,7 @@ AssistPlanet3
 - `ABTS.M110.FinaleFrame`、`FourBodyContract`、`SpaceSlingshotItemContract`、`TaskGraphFinaleSeparation` 共 4 项自动化全部通过。
 - `TaskGraphFinaleSeparation` 对 `0–99 / 312503 / 20260727 / 8675309` 共 103 个 Seed 各生成两次；206 次结果全部接受，Task Seed、接受 Attempt 和卫星角距均确定性复现，角距范围为 `60.02°–77.80°`。
 - 默认地图以两个全新 `UnrealEditor -game` 进程加载：两次均得到 `Seed=312503 / Version=3 / Attempt=0 / LaunchCell=99 / Pair=1541153380 / Separation=210cm`；卫星 `AngularSepDeg=60.56 / FinaleDistanceRatio=2.057 / LateralDot=1.0000 / FinaleGravitySource=0`；三个 DAG2.3 建筑均完成 `Accepted=1`，随后才出现 `WorldReady=1 / BuildingExpected=3 / BuildingRegistered=3`。
-- 尚未勾选的项目仍需 PIE 中实际完成 DAG 建筑外观/击打/回收、配方制作、两桩一弦安装、强化弹弓卫星偏转和终局区域视觉验收。
+- 用户已在 PIE 中完成配方制作、两桩一弦安装、强化弹弓卫星偏转、终局区域及关联建筑表现验收；M11.0 于 2026-07-28 收口。
 
 ## 10. 上下游交接
 
@@ -342,6 +342,7 @@ AssistPlanet3
 - M7：现行普通建筑走 DAG2.3、`LaunchSite` 不生成建筑，以 [M7 球面集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) 为准；
 - M9：现行卫星锚定、远距练习和 M11 排除边界以本稿为准；
 - M10.1-C：投影工具保持只读，不需要知道 Space 槽或 M9 排除细节；
-- M11：只在本稿全部阻断项通过后，消费局部坐标系并开始布局搜索与四体积分。
+- M11-A：已消费固定四体角色并完成纯数据积分，见 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)；
+- M11-B：继续消费本稿局部坐标系，执行局部布局搜索、认证预设和全输入域验证。
 
 返回父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)

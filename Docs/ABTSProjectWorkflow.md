@@ -9,10 +9,10 @@
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
-- 当前阶段：M11 产品路线已确认；M11.0 数据合同已完成。普通 TaskGraph 建筑已从 Legacy 迁移到 M7.3-DAG2.3；Furnace 的 Tripod 接触质心偏置和旧 4% 接触余量已收口为权威居中柱位、方柱净空与 6% 生产底线。Editor 编译、`ABTS.M7` 14 项、`ABTS.M73` 13 项及最终二进制三次 fresh D3D12 实时 60 FPS 均通过；M11 本体尚未实施。
-- 默认下一步：在可见 PIE 中验收 DAG 建筑外观/实际击打/回收，并完成 M11.0 的配方装配、卫星练习和终局施工台验收；全部阻断项通过后进入无 World/Actor 的 `M11-A` 纯数据求解器与测试夹具。
+- 当前阶段：M11.0 已完成用户 PIE 验收；M11-A 无 World/Actor 的纯数据求解器、Editor 编译及全新进程 `ABTS.M11A` 自动化已完成。普通 TaskGraph 建筑继续以 M7.3-DAG2.3 为生产链路。
+- 默认下一步：进入 `M11-B`，用 M11.0 的终局局部坐标系和 M11-A 唯一积分器进行三行星/UFO 局部布局搜索、认证预设、三颗任一助推消融及完整 `Yaw × Pitch × Power` 输入域唯一性验证。
 
-当前阶段父级入口为：[主设计稿的 M11 终局阶段](AngryBirdsToSpaceGameDesign.md#1-概念与终局)；当前实施与交接详稿为：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)，下游设计为：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
+当前阶段父级入口为：[主设计稿的 M11 终局阶段](AngryBirdsToSpaceGameDesign.md#1-概念与终局)；已完成实施稿为：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)与 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)，下游总设计为：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 
 ## 2. 不可违反的项目约束
 
@@ -44,7 +44,7 @@
 | 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 材料/装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面 DAG2.3 生产集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG-2 编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG2.3 联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) |
 | 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) |
-| 终局轨道谜题 | [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) |
+| 终局轨道谜题 | [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) |
 | 资产与排错 | [Low Poly/AI 资产流程](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md) |
 
 ## 5. 当前验收与交接清单
@@ -60,7 +60,16 @@
 7. M9 卫星锚定 `SatelliteWindow`，相对终局 Frame 通过距离比例 `>=0.80` 和侧轴对齐点积 `>=0.98`；强化弹弓仍消费 M9 引力。
 8. `FABTSM110FinaleLocalFrame` 以槽中点为原点，X=Forward、Y=左→右/卫星切向、Z=径向 Up；正式布局不得硬编码世界坐标。
 9. `FABTSM110FinaleGravityScenario` 固定且只包含 Primary+Assist1+Assist2+Assist3；M9 卫星没有角色入口，M11 每帧不得扫描 World 或调用 M9 引力。
-10. 编译、4 项 M11.0 自动化、DAG/M7 自动化、103 Seed 双生成验证及固定 Seed 独立进程基线已通过；完成剩余可见 PIE 视觉/交互验收前不进入 M11-A。
+10. 编译、4 项 M11.0 自动化、DAG/M7 自动化、103 Seed 双生成验证、固定 Seed 独立进程基线与用户可见 PIE 视觉/交互验收均已通过。
+
+### M11-A 纯数据求解器交接
+
+1. `FABTSM11GravityScenario` 仍固定为主星、①、②、③和一个非引力 UFO；求解器无 World/Actor/Chaos/帧率/随机数入口。
+2. SolverVersion 1 使用双精度 velocity-Verlet、`1/120 s` 基础步长和固定最大二分细分；只有当前期望助推行星在平滑作用圈内施力，细分/步数预算耗尽稳定失败。
+3. 遭遇按 `InfluenceEnter → ReferenceEnter → Closest → ReferenceExit → InfluenceExit` 推进；只擦 Influence 而未进 Reference 不计为完成助推；自然克隆拟合双曲线渐近方向并冻结 B-plane/走廊，三次确定性归一化后仅沿当前速度方向换能。
+4. 当前行星直到 Influence 出口才失活，保证完整淡出外壳入/出对称；自然克隆不预先提交未来物理终止，碰撞、UFO、错序、作用圈、最近点和时限仍由权威轨迹按时间裁决，结果进入规范 64 位验证 Hash。
+5. `ABTS.M11A` 7/7 已在全新 `UnrealEditor-Cmd -NullRHI` 进程通过；包括完整外壳能量守恒、渐近线/理想转角、非饱和正负换能、出站分布核、走廊/飞越侧、三位 Mask、Hash golden/敏感性/`±0`、同根及时限优先级、步长收敛、高速穿透和稳定失败。
+6. M11-B 必须直接消费该 Request/Result API；测试夹具坐标、巨大走廊和裁剪值不是正式布局参数。
 
 ### M11 已冻结的下游门槛
 
@@ -70,7 +79,7 @@
 4. 完整 `Yaw × Pitch × Power` 输入域只允许一个连通 `F4` 成功分量，并通过前缀嵌套、助推消融和旁路排除；这是正式阻断性验收门槛。
 5. 同一 World 切换星空并关闭雾云；失败播放到原因可读后黑屏恢复到点击弹珠袋前。
 
-M11.0 的实现、参数和验收矩阵见：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。算法、HUD、稳定器与全输入域验收见：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。已验收上游表现见：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
+M11.0 的实现与验收见：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。唯一积分器、冻结数值合同和自动化证据见：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)。布局、HUD、稳定器与全输入域验收见：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。已验收上游表现见：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
 
 ## 6. 本文维护规则
 
