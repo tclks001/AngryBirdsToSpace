@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：首周兼容方案已实现并通过自动化；月度重构已拆分为 M3R-1～M3R-7，仍待逐阶段实施
+> 状态：M3R-0 已完成 M3 所有权范围内实现与验收，状态为 M3LocalAccepted（IntegrationPending）；canonical `L_ABTS_M10` Visible PIE 待集成工作树签发
 > 日期：2026-07-29
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：明确月度阶段依赖、实现目标与退出验收；不修改代码、蓝图、地图、资产或集成工作流
+> 本次更新：冻结 M3R-0 三组 Seed 清单与 CompatibilityOracle 黄金身份，补齐 21 Seed 独立复算、fresh runtime 终态探针和强制 Unity 证据
 
 父文档：
 
@@ -862,9 +862,28 @@ SatelliteLaunchSepDeg=90.30
 - `ABTS.Contracts.WorldGeneration`：2/2；
 - `ABTS.M110.TaskGraphFinaleSeparation`：1/1，覆盖原有 103 个布局 Seed。
 
-首周测试不直接复用 Summary 做自证：它独立重算每条 Corridor 球面弧长、多源 BFS 主路距离、主路线 Cell 唯一性，并对展示 Seed 暴力搜索最近 Cell 复算六项视距结果；确定性用例还分别扰动布局配置、连续几何输入和 `CellTopo` 元数据，证明 `ConfigHash` 会响应全部三类输入。Fresh-process 证据位于 `Saved/Logs/M3WeekOne-20260729-001224-FreshAutomation-NoMessaging.log`、`M3-WorldContracts-20260729-001305-FreshAutomation-NoMessaging.log`、`M3-M110Separation-20260729-001527-FreshAutomation-NoMessaging.log` 与 `M3-LABTSM3-20260729-001627-FreshRuntime-NoMessaging.log`。
+`M3R0AcceptanceManifest` 现已冻结为 `ManifestHash=F3CC08FCEB6D6FC8`、`WeekOneSeedManifestHash=3DE06FCA1D76EF0F`、`M110SeedManifestHash=D6D1C5BB00B49BB5`，并明确记录 WeekOne 21 Seed、Determinism 4 Seed、M11.0 既有 103 Seed、三个 automation 过滤器及其 `2/2/1` 预期、一次 `L_ABTS_M3` fresh runtime、一次 canonical `L_ABTS_M10` Visible PIE、展示 Seed 黄金指标和完整生成位点顺序：
+
+```text
+Launch(Task=6, Cell=7683)
+  -> B1(Task=1, Cell=8864)
+  -> B2(Task=3, Cell=9168)
+  -> B3(Task=5, Cell=9763)
+```
+
+首周测试不直接复用 Summary 做自证：它独立重算每条 Corridor 球面弧长、多源 BFS 主路距离、主路线 Cell 唯一性，并对全部 21 个冻结 Seed 暴力搜索最近 Cell、复算默认与最大 OrbitDistance 下的六项视距结果；确定性用例还分别扰动布局配置、连续几何输入和 `CellTopo` 元数据，证明 `ConfigHash` 会响应全部三类输入。`-ABTSM3R0Smoke` 是显式启用、默认不改变游戏退出行为的 fresh-runtime 探针，它在真实 `L_ABTS_M3` TaskGraph 完成后核对生成身份、指标、视距、位点顺序、终局局部框架和玩家初始放置，再输出唯一终态并按结果返回进程状态。
+
+2026-07-29 本轮 fresh-process 证据：
+
+- 强制 Unity Development Editor：`-ForceUnity -DisableAdaptiveUnity`，全链接成功；
+- `Saved/Logs/M3R0/WeekOne_FinalCert_20260729_045255.log`：精确发现 2 项，2 项 Success，`Terminal=21 Passed=21 Failed=0`；
+- `Saved/Logs/M3R0/WorldGeneration_FinalCert_20260729_045338.log`：精确发现 2 项，2 项 Success；
+- `Saved/Logs/M3R0/FinaleSeparation_FinalCert_20260729_045423.log`：精确发现 1 项，1 项 Success；
+- `Saved/Logs/M3R0/Runtime_FinalCert_20260729_045512.log`：进程退出码 0，`AcceptanceManifest SelfValid=1`，唯一 `RuntimeCertification Terminal=1 Passed=1 Failed=0`，真实 M3 `Ready=1/MaterialReady=1`，ABTS Error/Fatal/Assert/Ensure/`WorldReadyBlocked` 计数均为 0。
 
 正式 PIE 中默认关闭 M7 位置标签属于 M7/集成所有权，本 M3 工作树没有越权修改；集成时仍需按多工作树交接清单完成该项人工验收。
+
+`ABTS.M110.TaskGraphFinaleSeparation` 及其源码仍归 Integration 所有；M3 清单冻结的是本阶段要求的 103 Seed 预期与 Hash，当前共享测试源码使用同一 `0..99 + 312503 + 20260727 + 8675309` 集合并已 fresh 通过。后续若 Integration 调整该集合，必须同步更新共享测试的终态诊断与本清单版本，不能只保持过滤器仍为 1/1。
 
 ### 12.4 首周是否调整 Wild
 
@@ -935,7 +954,7 @@ NotStarted
 
 | 阶段 | 排期建议 | 当前状态与证据 | 核心交付 | 主要所有权 | 目标退出状态 |
 |---|---|---|---|---|---|
-| M3R-0 首周基线 | Week 1 开始前补齐 | **M3LocalAccepted**；第 12.3 节已有自动化/fresh runtime，AcceptanceManifest 与集成 Visible PIE 待补 | 长路线、三栋道路外建筑、首周视距与确定性身份 | M3 + Integration/M7 | Complete |
+| M3R-0 首周基线 | Week 1 开始前补齐 | **M3LocalAccepted（IntegrationPending）**；Manifest、强制 Unity、2/2/1 fresh automation 与 M3 runtime 已通过，集成 Visible PIE 待签发 | 长路线、三栋道路外建筑、首周视距与确定性身份 | M3 + Integration/M7 | Complete |
 | M3R-1 月度 Schema 与观测面 | Week 1 前半 | **NotStarted** | RouteBeat、Encounter、Biome、质量报告的数据骨架 | M3；共享字段只提交需求 | M3LocalAccepted |
 | M3R-2 多候选球面路线 | Week 1 后半 | **NotStarted** | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
 | M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **NotStarted** | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
@@ -990,7 +1009,15 @@ R-3 必须在 Height/Hydrology/Road 之前确定 Playable Envelope 与 BiomeDist
 - canonical `L_ABTS_M10` Visible PIE 报告 `Terminal=1, Passed=1, Failed=0`：B1 从 Start 可读，B2/B3 不可读且无坐标/永久标签泄露；沿路可找到 Reveal 点并依次揭示 B2/B3；三栋 M7 建筑通过 IdleValidation；
 - 展示 Seed 指标与第 12.3 节一致，重复生成得到相同 `ConfigHash/LayoutHash`。
 
-该阶段当前状态为 **M3LocalAccepted**：第 12.3 节的自动化与 fresh runtime 已有证据，但 ManifestHash 和上述集成 Visible PIE 尚未冻结，因此不能标为 Complete，也不能把缺口静默带入月度默认路径。补齐后，后续阶段仍只能在显式 Compatibility 模式重放它；月度默认路径失败时必须 fail closed，直到 R-7 完成恰有六关的 `MonthlyCertifiedWorldFallback` 三层认证。
+**2026-07-29 执行结果**
+
+- `M3R0AcceptanceManifest` 已落地并自校验，冻结 `ManifestHash=F3CC08FCEB6D6FC8`、`WeekOneSeedManifestHash=3DE06FCA1D76EF0F`、`M110SeedManifestHash=D6D1C5BB00B49BB5`、展示 Seed 身份、三组 Seed 清单、四个生成位点和五项验收入口；
+- `ABTS.M3.WeekOne`、`ABTS.Contracts.WorldGeneration`、`ABTS.M110.TaskGraphFinaleSeparation` 已在三个独立 fresh `UnrealEditor-Cmd` 进程中精确匹配 `2/2/1` 并全部 Success；
+- 21 个首周 Seed 已全部独立复算通过；展示 Seed 继续得到 `ConfigHash=2795535429`、`LayoutHash=2577447183`、`MainRouteCM=24583.4`、`BuildingGapCM=7736.8`、`Visibility=11/00/00`、`SatelliteLaunchSepDeg=90.30`；
+- `L_ABTS_M3 -ABTSM3R0Smoke` 已在独立命令行进程报告唯一 `Terminal=1 Passed=1 Failed=0`，退出码 0；
+- Development Editor 已用 `-ForceUnity -DisableAdaptiveUnity` 验证成功。
+
+因此 M3 所有权范围内的 R-0 实现与本地门已闭环，当前状态保持 **M3LocalAccepted（IntegrationPending）**。尚未完成的唯一阶段出口是集成工作树对 canonical `L_ABTS_M10` 的 Visible PIE：它需要关闭 M7 正式位置标签，确认 B1/B2/B3 的可读/隐藏与 Reveal 顺序，并取得三栋实体建筑 IdleValidation 证据。按照多工作树规范，本 M3 工作树不能修改 M7 默认值、共同地图或替集成候选签发该门，所以本阶段仍不能标为 **Complete**，R-1 也不得把这项缺口静默视为已通过。集成门补齐后，后续阶段仍只能在显式 Compatibility 模式重放该 Oracle；月度默认路径失败时必须 fail closed，直到 R-7 完成恰有六关的 `MonthlyCertifiedWorldFallback` 三层认证。
 
 ### 14.4 M3R-1：建立月度 Schema、版本身份与观测面
 
