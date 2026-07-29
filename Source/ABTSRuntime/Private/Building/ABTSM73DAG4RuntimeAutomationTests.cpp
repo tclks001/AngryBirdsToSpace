@@ -85,6 +85,8 @@ namespace
 			EABTSM73DAGFailurePattern::Auto;
 		EABTSM73DAGFailureMotion Motion =
 			EABTSM73DAGFailureMotion::None;
+		EABTSM7BuildingMaterial Material =
+			EABTSM7BuildingMaterial::Wood;
 	};
 
 	struct FDAG4FormalModuleSnapshot
@@ -116,6 +118,24 @@ namespace
 			return TEXT("Dual");
 		case EABTSM73DAGFailurePattern::InternalOffsetSeam:
 			return TEXT("Seam");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* GetMaterialName(
+		const EABTSM7BuildingMaterial Material)
+	{
+		switch (Material)
+		{
+		case EABTSM7BuildingMaterial::Wood:
+			return TEXT("Wood");
+		case EABTSM7BuildingMaterial::Stone:
+			return TEXT("Stone");
+		case EABTSM7BuildingMaterial::Iron:
+			return TEXT("Iron");
+		case EABTSM7BuildingMaterial::Glass:
+			return TEXT("Glass");
 		default:
 			return TEXT("Unknown");
 		}
@@ -211,6 +231,7 @@ namespace
 		UWorld& World,
 		const FTransform& Transform,
 		const EABTSM73DAGFailurePattern Pattern,
+		const EABTSM7BuildingMaterial Material,
 		FABTSM7TaskGraphBuildingProfile& OutResolvedProfile,
 		FString& OutError)
 	{
@@ -219,7 +240,7 @@ namespace
 		FABTSM7TaskGraphBuildingProfile AuthoredProfile =
 			FABTSM7TaskGraphDAG23ProfileResolver::MakeDefaultProfile(
 				EABTSM3TaskType::Workshop,
-				EABTSM7BuildingMaterial::Wood);
+				Material);
 		AuthoredProfile.GenerationSettings.BuildingSeed =
 			DAG4WorkshopSeed;
 		AuthoredProfile.DAGGenerationSettings.BuildingSeed =
@@ -380,15 +401,18 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 	const FDAG4PatternExpectation Expectations[] = {
 		{
 			EABTSM73DAGFailurePattern::InternalSingleSupport,
-			EABTSM73DAGFailureMotion::Drop
+			EABTSM73DAGFailureMotion::Drop,
+			EABTSM7BuildingMaterial::Wood
 		},
 		{
 			EABTSM73DAGFailurePattern::InternalAsymmetricDualSupport,
-			EABTSM73DAGFailureMotion::Tip
+			EABTSM73DAGFailureMotion::Tip,
+			EABTSM7BuildingMaterial::Wood
 		},
 		{
 			EABTSM73DAGFailurePattern::InternalOffsetSeam,
-			EABTSM73DAGFailureMotion::SlideThenTip
+			EABTSM73DAGFailureMotion::SlideThenTip,
+			EABTSM7BuildingMaterial::Wood
 		}
 	};
 	constexpr float FixedDeltaSeconds = 1.0f / 30.0f;
@@ -497,6 +521,7 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 			*World,
 			Transform,
 			Fixture.Expected.Pattern,
+			Fixture.Expected.Material,
 			Fixture.ResolvedProfile,
 			SpawnError);
 		if (Fixture.Building == nullptr)
@@ -574,6 +599,15 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 				Fixture.ResolvedProfile
 					.DAGFailurePatternSettings.Pattern),
 			static_cast<int32>(Fixture.Expected.Pattern));
+		TestEqual(
+			FString::Printf(
+				TEXT("%s profile preserves material %d"),
+				PatternName,
+				static_cast<int32>(Fixture.Expected.Material)),
+			static_cast<int32>(
+				Fixture.ResolvedProfile.GenerationSettings
+					.PrimaryMaterial),
+			static_cast<int32>(Fixture.Expected.Material));
 
 		TestTrue(
 			FString::Printf(
@@ -646,10 +680,11 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][M7.3-DAG4][RuntimeTest][Fixture] Actor=%s Pattern=%s Motion=%d Bricks=%d Weak=%d Affected=%d PlayabilityHash=%u"),
+			TEXT("[ABTS][M7.3-DAG4][RuntimeTest][Fixture] Actor=%s Pattern=%s Motion=%d Material=%d Bricks=%d Weak=%d Affected=%d PlayabilityHash=%u"),
 			*Fixture.Building->GetName(),
 			PatternName,
 			static_cast<int32>(PatternResult.ExpectedMotion),
+			static_cast<int32>(Fixture.Expected.Material),
 			Summary.BrickCount,
 			PatternResult.WeakNodeIds.Num(),
 			PatternResult.AffectedMainBodyNodeIds.Num(),
@@ -710,6 +745,15 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 					NodeId));
 				continue;
 			}
+			TestEqual(
+				FString::Printf(
+					TEXT("%s formal NodeId %d uses expected material %d"),
+					PatternName,
+					NodeId,
+					static_cast<int32>(Fixture.Expected.Material)),
+				static_cast<int32>(
+					Module->GetBuildingMaterial()),
+				static_cast<int32>(Fixture.Expected.Material));
 			FDAG4FormalModuleSnapshot& Snapshot =
 				Fixture.FormalSnapshots.Add(NodeId);
 			Snapshot.Module = Module;
@@ -1106,9 +1150,10 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][M7.3-DAG4][RuntimeTest][FixtureComplete] Actor=%s Pattern=%s State=%d Settled=%d Comparison=%d Accepted=%d Trials=%d Weak=%.3f Ordinary=%.3f Advantage=%.3f Hash=%lld Reason=%s"),
+			TEXT("[ABTS][M7.3-DAG4][RuntimeTest][FixtureComplete] Actor=%s Pattern=%s Material=%d State=%d Settled=%d Comparison=%d Accepted=%d Trials=%d Weak=%.3f Ordinary=%.3f Advantage=%.3f Hash=%lld Reason=%s"),
 			*Fixture.Building->GetName(),
 			PatternName,
+			static_cast<int32>(Fixture.Expected.Material),
 			static_cast<int32>(
 				Fixture.Building->GetIdleValidationState()),
 			DAG4.bSettledContactAccepted ? 1 : 0,
@@ -1145,6 +1190,291 @@ bool FABTSM73DAG4RuntimePatternMatrixWeakVsNonWeakTest::RunTest(
 		ProbeDropCM,
 		HasAnyErrors() ? 1 : 0);
 	WorldWrapper.ForwardErrorMessages(this);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG4RuntimeMaterialProfileMatrixTest,
+	"ABTS.M73DAG4.Runtime.MaterialProfileMatrix",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG4RuntimeMaterialProfileMatrixTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const EABTSM7BuildingMaterial Materials[] = {
+		EABTSM7BuildingMaterial::Wood,
+		EABTSM7BuildingMaterial::Stone,
+		EABTSM7BuildingMaterial::Iron,
+		EABTSM7BuildingMaterial::Glass
+	};
+	constexpr float FixedDeltaSeconds = 1.0f / 30.0f;
+	constexpr int32 MaximumTickCount = 900;
+	constexpr int32 CleanupTickCount = 2;
+
+	for (const EABTSM7BuildingMaterial Material : Materials)
+	{
+		const TCHAR* MaterialName = GetMaterialName(Material);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M7.3-DAG4][MaterialTest][Begin] Material=%s Seed=%d Pattern=Single FPS=30"),
+			MaterialName,
+			DAG4WorkshopSeed);
+
+		FABTSM73DAG4RuntimeTestWorld WorldWrapper;
+		if (!WorldWrapper.CreatePhysicsWorld())
+		{
+			WorldWrapper.ForwardErrorMessages(this);
+			return false;
+		}
+		UWorld* World = WorldWrapper.GetTestWorld();
+		if (!TestNotNull(
+				FString::Printf(
+					TEXT("%s material physics world"),
+					MaterialName),
+				World)
+			|| !TestNotNull(
+				FString::Printf(
+					TEXT("%s material physics scene"),
+					MaterialName),
+				World != nullptr ? World->GetPhysicsScene() : nullptr))
+		{
+			return false;
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AABTSM71PhysicsTestStage* Stage =
+			World->SpawnActorDeferred<AABTSM71PhysicsTestStage>(
+				AABTSM71PhysicsTestStage::StaticClass(),
+				FTransform::Identity,
+				nullptr,
+				nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (Stage != nullptr)
+		{
+			UGameplayStatics::FinishSpawningActor(
+				Stage,
+				FTransform::Identity);
+		}
+		AABTSM7BuildingMaterialSystem* MaterialSystem =
+			World->SpawnActor<AABTSM7BuildingMaterialSystem>(
+				AABTSM7BuildingMaterialSystem::StaticClass(),
+				FTransform::Identity,
+				SpawnParameters);
+		if (!TestNotNull(
+				FString::Printf(
+					TEXT("%s material test stage"),
+					MaterialName),
+				Stage)
+			|| !TestNotNull(
+				FString::Printf(
+					TEXT("%s material system"),
+					MaterialName),
+				MaterialSystem))
+		{
+			return false;
+		}
+
+		FABTSM7TaskGraphBuildingProfile ResolvedProfile;
+		FString SpawnError;
+		AABTSM73StableBuildingActor* Building =
+			SpawnDAG4Workshop(
+				*World,
+				FTransform::Identity,
+				EABTSM73DAGFailurePattern::InternalSingleSupport,
+				Material,
+				ResolvedProfile,
+				SpawnError);
+		if (!TestNotNull(
+				FString::Printf(
+					TEXT("%s DAG-4 Workshop: %s"),
+					MaterialName,
+					*SpawnError),
+				Building))
+		{
+			return false;
+		}
+		if (!WorldWrapper.BeginPlayInTestWorld())
+		{
+			WorldWrapper.ForwardErrorMessages(this);
+			return false;
+		}
+		Building->InitializeRuntimeBuilding(MaterialSystem);
+
+		const FABTSM73GenerationSummary& InitialSummary =
+			Building->GetGenerationSummary();
+		TestTrue(
+			FString::Printf(
+				TEXT("%s reaches the runtime DAG-4 gate: %s"),
+				MaterialName,
+				*InitialSummary.RejectReason),
+			InitialSummary.bAccepted);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s resolved profile preserves the requested material"),
+				MaterialName),
+			static_cast<int32>(
+				ResolvedProfile.GenerationSettings.PrimaryMaterial),
+			static_cast<int32>(Material));
+
+		int32 BoundFormalModuleCount = 0;
+		for (int32 NodeId = 0; NodeId < 512; ++NodeId)
+		{
+			AABTSM7BuildingModule* Module =
+				Building->FindRuntimeModuleForNodeForValidation(
+					NodeId);
+			if (Module == nullptr)
+			{
+				continue;
+			}
+			++BoundFormalModuleCount;
+			TestEqual(
+				FString::Printf(
+					TEXT("%s formal NodeId %d keeps its material"),
+					MaterialName,
+					NodeId),
+				static_cast<int32>(
+					Module->GetBuildingMaterial()),
+				static_cast<int32>(Material));
+		}
+		TestEqual(
+			FString::Printf(
+				TEXT("%s binds every formal module"),
+				MaterialName),
+			BoundFormalModuleCount,
+			InitialSummary.BrickCount);
+		const int32 InitialMaterialSystemModuleCount =
+			CountModulesOwnedBy(*World, MaterialSystem);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s MaterialSystem owns only the formal modules"),
+				MaterialName),
+			InitialMaterialSystemModuleCount,
+			InitialSummary.BrickCount);
+
+		int32 LastTickIndex = 0;
+		for (; LastTickIndex < MaximumTickCount; ++LastTickIndex)
+		{
+			if (!WorldWrapper.TickTestWorld(FixedDeltaSeconds))
+			{
+				WorldWrapper.ForwardErrorMessages(this);
+				return false;
+			}
+			if (Building->IsIdleValidationTerminal())
+			{
+				break;
+			}
+		}
+		TestTrue(
+			FString::Printf(
+				TEXT("%s reaches a terminal state within budget"),
+				MaterialName),
+			Building->IsIdleValidationTerminal());
+		for (int32 CleanupTick = 0;
+			CleanupTick < CleanupTickCount;
+			++CleanupTick)
+		{
+			if (!WorldWrapper.TickTestWorld(FixedDeltaSeconds))
+			{
+				WorldWrapper.ForwardErrorMessages(this);
+				return false;
+			}
+		}
+
+		const FABTSM73DAG4ValidationResult& DAG4 =
+			Building->GetDAG4ValidationResultForValidation();
+		TestEqual(
+			FString::Printf(
+				TEXT("%s completes as Accepted"),
+				MaterialName),
+			Building->GetIdleValidationState(),
+			EABTSM73IdleValidationState::Accepted);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s accepts its real-profile comparison: %s"),
+				MaterialName,
+				*DAG4.RejectReason),
+			DAG4.bAccepted
+				&& DAG4.bSettledContactAccepted
+				&& DAG4.bChaosComparisonAccepted);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s retains one weak plus exactly three ordinary trials"),
+				MaterialName),
+			DAG4.Trials.Num(),
+			4);
+		int32 WeakCount = 0;
+		int32 OrdinaryCount = 0;
+		for (const FABTSM73DAG4TrialMetrics& Trial : DAG4.Trials)
+		{
+			WeakCount += Trial.Kind
+				== EABTSM73DAG4TrialKind::WeakPoint
+					? 1
+					: 0;
+			OrdinaryCount += Trial.Kind
+				== EABTSM73DAG4TrialKind::Ordinary
+					? 1
+					: 0;
+			TestTrue(
+				FString::Printf(
+					TEXT("%s Probe=%d completes"),
+					MaterialName,
+					Trial.ProbeIndex),
+				Trial.bCompleted
+					&& Trial.RejectReason.IsEmpty());
+		}
+		TestEqual(
+			FString::Printf(
+				TEXT("%s has one weak trial"),
+				MaterialName),
+			WeakCount,
+			1);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s has three ordinary trials"),
+				MaterialName),
+			OrdinaryCount,
+			3);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s leaves MaterialSystem ownership unchanged"),
+				MaterialName),
+			CountModulesOwnedBy(*World, MaterialSystem),
+			InitialMaterialSystemModuleCount);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s leaves no shadow modules"),
+				MaterialName),
+			CountModulesOwnedBy(*World, Building),
+			0);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s leaves no shadow foundation"),
+				MaterialName),
+			CountShadowFoundationsOwnedBy(*World, Building),
+			0);
+
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M7.3-DAG4][MaterialTest][Complete] Material=%s State=%d Settled=%d Comparison=%d Trials=%d Weak=%.3f Ordinary=%.3f Advantage=%.3f Hash=%lld Tick=%d"),
+			MaterialName,
+			static_cast<int32>(
+				Building->GetIdleValidationState()),
+			DAG4.bSettledContactAccepted ? 1 : 0,
+			DAG4.bChaosComparisonAccepted ? 1 : 0,
+			DAG4.Trials.Num(),
+			DAG4.WeakResponseScore,
+			DAG4.MaxOrdinaryResponseScore,
+			DAG4.WeakResponseAdvantage,
+			DAG4.ValidationHash,
+			LastTickIndex);
+		WorldWrapper.ForwardErrorMessages(this);
+	}
 	return !HasAnyErrors();
 }
 
