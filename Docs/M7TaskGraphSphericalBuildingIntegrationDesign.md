@@ -1,6 +1,6 @@
 # M7 收口：TaskGraph 球面建筑集成
 
-> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A 纯数据内部 Failure Frontier 发现已接线但生产默认关闭，不改变 13/17/13 模块、材质与 `WeakPoints=0`；UE 5.8 强制 Unity Editor 编译、DAG3-A 6 项、旧 DAG2.3 9 项、M7 路由、世界生成契约、当前 `ABTS.M7` 前缀快照 20 项、fresh NullRHI 60 FPS 运行时 smoke 及既有三次 fresh D3D12 实时 60 FPS 证据均通过。待 DAG3-B/C、DAG-4 及可见 PIE 外观/击打/回收验收。
+> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A/B/C 已分别完成 Frontier、三种同材质几何改写和静态可玩候选认证；DAG3-B 可见 PIE 已验收，DAG3-C fresh 10/10、完整 DAG3 22/22、M7 37/37。生产 Profile 中 A/B/C 仍默认关闭，现有普通建筑合同不变。待 DAG-4 settled/Chaos、弱点击毁 PIE、Budget=1 物理预算及 WFC/Encounter 接入。
 >
 > 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。
 >
@@ -165,4 +165,4 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 
 ## 6. 后续
 
-TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A 也已建立内部 Failure Frontier 的纯数据发现与确定性门槛。后续按顺序完成 DAG3-B 三种几何改写、DAG3-C 显式生产候选、DAG-4 settled/Chaos 对照、Budget=1 Seed sweep/物理预算，再由 WFC 提供语义包络；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。
+TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A/B/C 也已建立 Frontier、三种改写和显式静态可玩候选。后续按顺序完成 DAG-4 settled/Chaos 对照与弱点击毁 PIE、Budget=1 Seed sweep/物理预算，再由 WFC/Encounter 提供语义包络和难度消费；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。

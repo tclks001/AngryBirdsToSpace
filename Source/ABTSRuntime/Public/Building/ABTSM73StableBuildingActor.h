@@ -56,6 +56,15 @@ public:
 		const FABTSM73DAGFailurePatternSettings& InDAGFailurePatternSettings,
 		const FABTSM73DifficultySettings& InDifficultySettings);
 
+	void ConfigureTaskGraphGeneration(
+		const FABTSM73GenerationSettings& InGenerationSettings,
+		const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
+		const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+		const FABTSM73DAGFailureFrontierSettings& InDAGFailureFrontierSettings,
+		const FABTSM73DAGFailurePatternSettings& InDAGFailurePatternSettings,
+		const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
+		const FABTSM73DifficultySettings& InDifficultySettings);
+
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
 	bool RebuildPreview();
 
@@ -66,6 +75,20 @@ public:
 	const FABTSM73DAGFailurePatternResult& GetDAGFailurePatternResultForValidation() const
 	{
 		return LastDAGFailurePatternResult;
+	}
+
+	const FABTSM73DAGFailurePlayabilityResult&
+		GetDAGFailurePlayabilityResultForValidation() const
+	{
+		return LastDAGFailurePlayabilityResult;
+	}
+
+	AABTSM7BuildingModule* FindRuntimeModuleForNodeForValidation(
+		int32 NodeId) const
+	{
+		const TWeakObjectPtr<AABTSM7BuildingModule>* Found =
+			RuntimeModulesByNodeId.Find(NodeId);
+		return Found != nullptr ? Found->Get() : nullptr;
 	}
 
 	int32 GetDAG3BWeakDebugInstanceCount() const;
@@ -156,6 +179,9 @@ private:
 	/** DAG3-B pure-geometry rewrite. Production remains disabled until DAG3-C/DAG-4 gates pass. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-3|Failure Pattern")
 	FABTSM73DAGFailurePatternSettings DAGFailurePatternSettings;
+	/** DAG3-C attack/motion/material certification. Explicit opt-in only. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-3|Playability")
+	FABTSM73DAGFailurePlayabilitySettings DAGFailurePlayabilitySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")
@@ -189,6 +215,7 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Result")
 	FABTSM73GenerationSummary GenerationSummary;
 	FABTSM73DAGFailurePatternResult LastDAGFailurePatternResult;
+	FABTSM73DAGFailurePlayabilityResult LastDAGFailurePlayabilityResult;
 
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;

@@ -134,7 +134,7 @@ M3 BuildingSpawnSite / Pad
 - 旧 Blueprint CDO 中的 Legacy Profile 在 M7 边界升级为安全 DAG2.3 Profile，不能静默复活旧链；
 - 当前 Target 使用 Budget=0 `TwinTowerBridge`，包含 Parallel 与联合支撑；Workshop/Furnace 使用 Budget=0 `SingleTower`；
 - DAG 失败必须带确定性 Reject，禁止回退 Legacy；
-- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A 已能只读发现内部 Failure Frontier；DAG3-B 已把物理前沿提升为 Macro Interface Intent，并从同一 Macro Graph 第二遍重跑本求解器、模块编译与真实接触审计，形成三种同材质结构改写，其 ForceUnity 构建、DAG3 11/11 与旧 DAG2.3/M7 路由/世界契约/B2/M10 smoke 回归已经完成。生产默认仍同时关闭分析与改写，`WeakPoints=0`；可见几何/PIE、DAG3-C 攻击/材质路由和 DAG-4 settled/Chaos 对照完成前，不能宣称正式内部弱点已上线。
+- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A/B 已完成内部 Frontier 与三种同材质第二遍事务改写，DAG3-B 可见 PIE 已验收；DAG3-C 已在独立显式开关下完成有界 generalized cut、攻击/运动净空和真实 Profile 弱点绑定，完整 DAG3 fresh 自动化为 22/22。生产默认仍关闭 A/B/C，故普通 DAG2.3 继续 `WeakPoints=0`；DAG-4 settled/Chaos 对照和弱点击毁 PIE 完成前，不能宣称正式内部弱点已上线。
 - 任一生成或 Idle `Rejected` 必须撤销模块与 Foundation 碰撞，并阻断 `WorldReady`/发射；Pending/Running 必须持续等待，不能由可选的 M6 HISM 暖机开关绕过。
 - M7 必须在生成前登记必需 Actor 数并在尝试完成后封口；合同激活后只检查注册集合，且每个必需 Actor 都必须显式 `Accepted`。MaterialSystem/Profile/Class/Actor 缺失、`Registered != Expected`、`Accepted != Expected` 或必需 Actor 为 `NotRequired` 均为 Reject，不能把零 Actor 或关闭 Idle 验证当成合法通过。
 
@@ -155,6 +155,7 @@ M3 BuildingSpawnSite / Pad
 - DAG3-A 的 2026-07-29 只读回归保持 13/17/13 模块与三套原 `DAGTopologyHash`；`ABTS.M73DAG3.` 6/6、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2 以及当前 `ABTS.M7` 前缀快照 20/20 在 fresh NullRHI 中通过。另一次限帧 60 的 fresh NullRHI game smoke 中三栋 Idle 全部接受并最终 `WorldReady=1`；该证据仍不替代后续弱点击毁 PIE。
 - DAG3-B 的 2026-07-29 最终证据为：加入 `Auto` 成功路径断言后的 `-ForceUnity -DisableAdaptiveUnity` 复编 14.72 秒成功；fresh NullRHI `ABTS.M73DAG3.` 11/11、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2、M73B2 2/2 Success；M10 45 秒 NullRHI 60 FPS smoke 中三栋保持 13/17/13 与原 Hash、DAG3-A/B 全关、零穿透、Idle 3/3 Accepted、最终门禁 3/0/3/3，且无 Error/Blocked 或 DAG3-B Pattern/Reject。该证据完成代码与兼容回归，但仍不替代可见几何/PIE。
 - 普通 Arch 动态稳定修补的 2026-07-29 最终证据为：`-ForceUnity -DisableAdaptiveUnity` 编译成功；fresh NullRHI `ABTS.M7` 26/26 Success，其中物理回归的三栋固定 30 FPS Arch 为 `Accepted=3 Rejected=0 Modules=99`、重力探针下降 `39.16 cm`；真实 `PlanarPhysicsTestMap` 在 NullRHI 和 D3D12 两套 fresh-process 30/60/120 FPS 中均为 Idle 3/3 Accepted、0 Rejected、最终 `WorldReady=1`。最苛刻 30 FPS 的最大平面漂移为 `2.59 cm`、最大转角 `0.65°`，且三栋仍保持 `Bricks=33 Supports=48 Ground=3 DAGMacro=9 DAGSparse=8 DAGHash=2113728967`。
+- DAG3-C 的 2026-07-29 最终证据为：`-ForceUnity -DisableAdaptiveUnity` 8 actions 编译成功；fresh NullRHI C 10/10、完整 DAG3 22/22、旧 DAG2.3 10/10、M7 37/37、世界生成契约 2/2 Success。C 默认关闭，完整三 Pattern 管线只由测试显式 opt-in；真实 Actor 测试验证 NodeId→Module 和实际 MaterialSystem Profile 的伤害路由，但实际移除 `W` 后的 Chaos 坍塌仍留给 DAG-4。
 
 仍需可见 PIE：
 

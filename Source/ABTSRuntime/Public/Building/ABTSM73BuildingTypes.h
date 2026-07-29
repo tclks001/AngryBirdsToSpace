@@ -376,6 +376,30 @@ struct FABTSM73GenerationSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
 	float DAGPatternReseatRisk = 1.0f;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	bool bDAGFailurePlayabilityEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	bool bDAGFailurePlayable = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	int64 DAGPlayabilityHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGAttackExposure = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGMinAttackClearanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGFreeDropDistanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGFreeTipAngleDegrees = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGFreeSlideDistanceCM = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;
 

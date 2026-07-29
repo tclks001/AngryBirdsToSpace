@@ -88,6 +88,11 @@ struct FABTSM73WeakPointRecord
 	float InitialSupportMarginCM = 0.0f;
 	float TipMarginCM = 0.0f;
 	float ReseatRisk = 1.0f;
+	EABTSM73DAGFailurePattern DAGFailurePattern =
+		EABTSM73DAGFailurePattern::Auto;
+	EABTSM73DAGFailureMotion DAGFailureMotion =
+		EABTSM73DAGFailureMotion::None;
+	FVector AcceptedAttackDirectionLocal = FVector::ZeroVector;
 };
 
 struct FABTSM73SupportEdge
@@ -163,6 +168,7 @@ struct FABTSM73StructureData
 	uint32 DAGTopologyHash = 0;
 	FABTSM73DAGFailureFrontierAnalysis DAGFailureFrontierAnalysis;
 	FABTSM73DAGFailurePatternResult DAGFailurePatternResult;
+	FABTSM73DAGFailurePlayabilityResult DAGFailurePlayabilityResult;
 };
 
 struct FABTSM73GroundContext

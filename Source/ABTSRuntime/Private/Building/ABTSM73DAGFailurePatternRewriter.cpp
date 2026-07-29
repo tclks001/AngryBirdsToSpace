@@ -57,6 +57,42 @@ namespace
 		}
 	}
 
+	bool MappingOwnsGeneralizedFrontier(
+		const FABTSM73DAGPhysicalSupportMapping& Mapping,
+		const FABTSM73DAGFailureFrontierCandidate& Frontier)
+	{
+		auto OwnsNode = [&Mapping](const int32 NodeId)
+		{
+			return NodeId == Mapping.SupportPlateNodeId
+				|| NodeId == Mapping.LoadPlateNodeId
+				|| Mapping.ColumnNodeIds.Contains(NodeId);
+		};
+		for (const int32 NodeId : Frontier.CandidateNodeIds)
+		{
+			if (!OwnsNode(NodeId))
+			{
+				return false;
+			}
+		}
+		for (const FABTSM73DAGFailureEdgeRef& Edge
+			: Frontier.CandidateEdges)
+		{
+			if (!OwnsNode(Edge.LowerNodeId)
+				|| !OwnsNode(Edge.UpperNodeId))
+			{
+				return false;
+			}
+		}
+		for (const int32 NodeId : Frontier.ProtectedRootNodeIds)
+		{
+			if (!OwnsNode(NodeId))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	double PatternNodeMass(
 		const FABTSM73BrickNode& Node,
 		const TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles)
@@ -324,7 +360,9 @@ bool FABTSM73DAGFailurePatternRewriter::MakeIntent(
 	const FABTSM73StructureData& BaselineData,
 	const EABTSM73DAGFailurePattern Pattern,
 	FABTSM73DAGFailureRewriteIntent& OutIntent,
-	FString& OutError) const
+	FString& OutError,
+	const FVector2D& PreferredFailureDirectionXY,
+	const bool bMirrorPreferredDirection) const
 {
 	OutIntent = FABTSM73DAGFailureRewriteIntent();
 	OutError.Reset();
@@ -365,6 +403,8 @@ bool FABTSM73DAGFailurePatternRewriter::MakeIntent(
 					&& Candidate.Kind == SourceFrontier.Kind
 					&& Candidate.CandidateNodeIds
 						== SourceFrontier.CandidateNodeIds
+					&& Candidate.CandidateEdges
+						== SourceFrontier.CandidateEdges
 					&& Candidate.ProtectedRootNodeIds
 						== SourceFrontier.ProtectedRootNodeIds
 					&& Candidate.ExpectedAffectedNodeIds
@@ -387,20 +427,40 @@ bool FABTSM73DAGFailurePatternRewriter::MakeIntent(
 		int32 Priority = MAX_int32;
 	};
 	TArray<FMappingChoice> Choices;
+	const bool bGeneralizedFrontier =
+		!SourceFrontier.CandidateEdges.IsEmpty();
 	for (const FABTSM73DAGPhysicalSupportMapping& Mapping
 		: BaselineData.DAGPhysicalSupportMappings)
 	{
-		int32 Priority = MAX_int32;
-		for (const int32 CandidateNodeId : SourceFrontier.CandidateNodeIds)
+		if (bGeneralizedFrontier
+			&& !MappingOwnsGeneralizedFrontier(
+				Mapping,
+				SourceFrontier))
 		{
-			if (Mapping.ColumnNodeIds.Contains(CandidateNodeId)) Priority = 0;
-			else if (Mapping.SupportPlateNodeId == CandidateNodeId)
+			continue;
+		}
+		int32 Priority = MAX_int32;
+		if (bGeneralizedFrontier)
+		{
+			Priority = 0;
+		}
+		else
+		{
+			for (const int32 CandidateNodeId
+				: SourceFrontier.CandidateNodeIds)
 			{
-				Priority = FMath::Min(Priority, 1);
-			}
-			else if (Mapping.LoadPlateNodeId == CandidateNodeId)
-			{
-				Priority = FMath::Min(Priority, 3);
+				if (Mapping.ColumnNodeIds.Contains(CandidateNodeId))
+				{
+					Priority = 0;
+				}
+				else if (Mapping.SupportPlateNodeId == CandidateNodeId)
+				{
+					Priority = FMath::Min(Priority, 1);
+				}
+				else if (Mapping.LoadPlateNodeId == CandidateNodeId)
+				{
+					Priority = FMath::Min(Priority, 3);
+				}
 			}
 		}
 		if (SourceFrontier.ProtectedRootNodeIds.Contains(Mapping.LoadPlateNodeId))
@@ -423,7 +483,9 @@ bool FABTSM73DAGFailurePatternRewriter::MakeIntent(
 	});
 	if (Choices.IsEmpty() || Choices[0].Mapping == nullptr)
 	{
-		OutError = TEXT("DAG3BFrontierMacroInterfaceMissing");
+		OutError = bGeneralizedFrontier
+			? TEXT("DAG3CGeneralizedCutNotRewritable")
+			: TEXT("DAG3BFrontierMacroInterfaceMissing");
 		return false;
 	}
 	if (Choices.Num() > 1
@@ -468,10 +530,26 @@ bool FABTSM73DAGFailurePatternRewriter::MakeIntent(
 	}
 	const FVector2D RegionSize = BaselineSupport->FeasibleColumnRegion.GetSize();
 	const bool bAlongX = RegionSize.X >= RegionSize.Y;
-	const uint32 DirectionBit = SourceFrontier.FrontierHash
-		^ static_cast<uint32>(Mapping.SupportMacroNodeId * 196613)
-		^ static_cast<uint32>(Mapping.LoadMacroNodeId * 3145739);
-	const float Sign = (DirectionBit & 1u) != 0 ? 1.0f : -1.0f;
+	float Sign = 0.0f;
+	const FVector2D PreferredDirection =
+		PreferredFailureDirectionXY.GetSafeNormal();
+	if (!PreferredDirection.IsNearlyZero())
+	{
+		const FVector2D PositiveAxis = bAlongX
+			? FVector2D(1.0f, 0.0f)
+			: FVector2D(0.0f, 1.0f);
+		Sign = FVector2D::DotProduct(
+			PreferredDirection,
+			PositiveAxis) >= 0.0f ? 1.0f : -1.0f;
+		if (bMirrorPreferredDirection) Sign *= -1.0f;
+	}
+	else
+	{
+		const uint32 DirectionBit = SourceFrontier.FrontierHash
+			^ static_cast<uint32>(Mapping.SupportMacroNodeId * 196613)
+			^ static_cast<uint32>(Mapping.LoadMacroNodeId * 3145739);
+		Sign = (DirectionBit & 1u) != 0 ? 1.0f : -1.0f;
+	}
 	OutIntent.ExpectedFailureDirectionXY = bAlongX
 		? FVector2D(Sign, 0.0f)
 		: FVector2D(0.0f, Sign);

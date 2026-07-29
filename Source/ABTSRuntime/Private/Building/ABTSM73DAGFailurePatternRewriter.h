@@ -35,7 +35,10 @@ public:
 		const FABTSM73StructureData& BaselineData,
 		EABTSM73DAGFailurePattern Pattern,
 		FABTSM73DAGFailureRewriteIntent& OutIntent,
-		FString& OutError) const;
+		FString& OutError,
+		const FVector2D& PreferredFailureDirectionXY =
+			FVector2D::ZeroVector,
+		bool bMirrorPreferredDirection = false) const;
 
 	/** Certifies the recompiled physical graph and writes its independent pattern identity. */
 	bool ValidateRealizedPattern(

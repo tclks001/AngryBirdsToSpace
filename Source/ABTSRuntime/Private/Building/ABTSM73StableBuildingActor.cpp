@@ -256,6 +256,25 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	const FABTSM73DAGFailurePatternSettings& InDAGFailurePatternSettings,
 	const FABTSM73DifficultySettings& InDifficultySettings)
 {
+	ConfigureTaskGraphGeneration(
+		InGenerationSettings,
+		InDAGGenerationSettings,
+		InDAGLayoutSettings,
+		InDAGFailureFrontierSettings,
+		InDAGFailurePatternSettings,
+		FABTSM73DAGFailurePlayabilitySettings(),
+		InDifficultySettings);
+}
+
+void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
+	const FABTSM73GenerationSettings& InGenerationSettings,
+	const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
+	const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+	const FABTSM73DAGFailureFrontierSettings& InDAGFailureFrontierSettings,
+	const FABTSM73DAGFailurePatternSettings& InDAGFailurePatternSettings,
+	const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
+	const FABTSM73DifficultySettings& InDifficultySettings)
+{
 	if (bRuntimeSpawned)
 	{
 		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M7][TaskGraphBuilding] Ignored late profile Actor=%s"), *GetName());
@@ -267,6 +286,7 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	DAGLayoutSettings = InDAGLayoutSettings;
 	DAGFailureFrontierSettings = InDAGFailureFrontierSettings;
 	DAGFailurePatternSettings = InDAGFailurePatternSettings;
+	DAGFailurePlayabilitySettings = InDAGFailurePlayabilitySettings;
 	DifficultySettings = InDifficultySettings;
 }
 
@@ -280,32 +300,6 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 	TArray<FABTSM7MaterialProfile> MaterialProfiles;
 	if (MaterialProfileSource != nullptr) MaterialProfileSource->CopyMaterialProfiles(MaterialProfiles);
 	else MaterialProfiles = FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
-	if (GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::RecursiveSupportDAG)
-	{
-		FABTSM73DAGGenerationSettings ResolvedDAGSettings = DAGGenerationSettings;
-		ResolvedDAGSettings.BuildingSeed = GenerationSettings.BuildingSeed;
-		ResolvedDAGSettings.MaxEstimatedBrickCount = FMath::Min(
-			ResolvedDAGSettings.MaxEstimatedBrickCount, GenerationSettings.MaxBrickCount);
-		FABTSM73DAGBuildingPipeline Pipeline;
-		if (!Pipeline.BuildWithFailurePattern(
-			ResolvedDAGSettings,
-			DAGLayoutSettings,
-			GenerationSettings,
-			DAGFailureFrontierSettings,
-			DAGFailurePatternSettings,
-			DifficultySettings,
-			MaterialProfiles,
-			OutData,
-			OutError))
-		{
-			return false;
-		}
-	}
-	else
-	{
-		FABTSM73StructureBuilder Builder;
-		if (!Builder.Build(GenerationSettings, OutData, OutError)) return false;
-	}
 	FABTSM73GroundAdapter Ground;
 	if (!Ground.Resolve(*this, GroundMode, AnchorCellId, bSnapPlanarAnchorToTestStage, OutContext, OutError))
 	{
@@ -320,9 +314,41 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 		OutContext.AnchorTransform = FTransform(FRotationMatrix::MakeFromXZ(Forward, OutContext.GravityUp).ToQuat(), GetActorLocation());
 		OutError.Reset();
 	}
+	FVector LocalAttackDirection = OutContext.AnchorTransform.InverseTransformVectorNoScale(
+		AttackDirection->GetForwardVector()).GetSafeNormal();
+	if (LocalAttackDirection.IsNearlyZero())
+	{
+		LocalAttackDirection = FVector::ForwardVector;
+	}
+	if (GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::RecursiveSupportDAG)
+	{
+		FABTSM73DAGGenerationSettings ResolvedDAGSettings = DAGGenerationSettings;
+		ResolvedDAGSettings.BuildingSeed = GenerationSettings.BuildingSeed;
+		ResolvedDAGSettings.MaxEstimatedBrickCount = FMath::Min(
+			ResolvedDAGSettings.MaxEstimatedBrickCount, GenerationSettings.MaxBrickCount);
+		FABTSM73DAGBuildingPipeline Pipeline;
+		if (!Pipeline.BuildWithFailurePattern(
+			ResolvedDAGSettings,
+			DAGLayoutSettings,
+			GenerationSettings,
+			DAGFailureFrontierSettings,
+			DAGFailurePatternSettings,
+			DAGFailurePlayabilitySettings,
+			DifficultySettings,
+			MaterialProfiles,
+			LocalAttackDirection,
+			OutData,
+			OutError))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		FABTSM73StructureBuilder Builder;
+		if (!Builder.Build(GenerationSettings, OutData, OutError)) return false;
+	}
 	if (!Ground.AnalyzeFootprint(GenerationSettings, OutContext, OutData, OutError)) return false;
-	FVector LocalAttackDirection = OutContext.AnchorTransform.InverseTransformVectorNoScale(AttackDirection->GetForwardVector()).GetSafeNormal();
-	if (LocalAttackDirection.IsNearlyZero()) LocalAttackDirection = FVector::ForwardVector;
 	if (GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::LegacyLayeredAB2)
 	{
 		FABTSM73WeakPointPlanner WeakPointPlanner;
@@ -388,6 +414,22 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 		Data.DAGFailurePatternResult.PostFailureTipMarginCM;
 	GenerationSummary.DAGPatternReseatRisk =
 		Data.DAGFailurePatternResult.ReseatRisk;
+	GenerationSummary.bDAGFailurePlayabilityEnabled =
+		Data.DAGFailurePlayabilityResult.bEnabled;
+	GenerationSummary.bDAGFailurePlayable =
+		Data.DAGFailurePlayabilityResult.bPlayable;
+	GenerationSummary.DAGPlayabilityHash = static_cast<int64>(
+		Data.DAGFailurePlayabilityResult.PlayabilityHash);
+	GenerationSummary.DAGAttackExposure =
+		Data.DAGFailurePlayabilityResult.AttackExposure;
+	GenerationSummary.DAGMinAttackClearanceCM =
+		Data.DAGFailurePlayabilityResult.MinAttackClearanceCM;
+	GenerationSummary.DAGFreeDropDistanceCM =
+		Data.DAGFailurePlayabilityResult.FreeDropDistanceCM;
+	GenerationSummary.DAGFreeTipAngleDegrees =
+		Data.DAGFailurePlayabilityResult.FreeTipAngleDegrees;
+	GenerationSummary.DAGFreeSlideDistanceCM =
+		Data.DAGFailurePlayabilityResult.FreeSlideDistanceCM;
 	GenerationSummary.FoundationFootCount = Data.FoundationFeet.Num();
 	GenerationSummary.FootprintTerrainDeltaCM = Data.TerrainDeltaCM;
 	GenerationSummary.CurvatureDropCM = Data.CurvatureDropCM;
@@ -423,6 +465,7 @@ bool AABTSM73StableBuildingActor::RebuildPreview()
 	FString Error;
 	const bool bAccepted = BuildResolvedStructure(true, Context, Data, Error);
 	LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
+	LastDAGFailurePlayabilityResult = Data.DAGFailurePlayabilityResult;
 	FillGenerationSummary(Context, Data, bAccepted, Error);
 	if (!bAccepted)
 	{
@@ -844,6 +887,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	if (!BuildResolvedStructure(false, Context, Data, Error, MaterialSystem))
 	{
 		LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
+		LastDAGFailurePlayabilityResult = Data.DAGFailurePlayabilityResult;
 		FillGenerationSummary(Context, Data, false, Error);
 		RejectRuntimeStructure(Error);
 		if (Data.DAGFailureFrontierAnalysis.bEnabled)
@@ -865,10 +909,19 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 				Data.DAGFailurePatternResult.SourceFrontierHash,
 				*Data.DAGFailurePatternResult.RejectReason);
 		}
+		if (Data.DAGFailurePlayabilityResult.bEnabled)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7.3-DAG3C][Reject] Actor=%s PatternHash=%u Reason=%s"),
+				*GetName(),
+				Data.DAGFailurePatternResult.RealizedPatternHash,
+				*Data.DAGFailurePlayabilityResult.RejectReason);
+		}
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A][Reject] Actor=%s Reason=%s"), *GetName(), *Error);
 		return;
 	}
 	LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
+	LastDAGFailurePlayabilityResult = Data.DAGFailurePlayabilityResult;
 	RuntimeMaterialSystem = MaterialSystem;
 	UpdateFoundationComponents(Context, Data);
 	RuntimeModules.Reset();
@@ -925,7 +978,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 			: EABTSM73IdleValidationState::Rejected;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d DAG3Enabled=%d DAG3Candidates=%d DAG3Accepted=%d DAG3Hash=%u DAG3BEnabled=%d DAG3BApplied=%d DAG3BPattern=%d DAG3BHash=%u Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
+		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d DAG3Enabled=%d DAG3Candidates=%d DAG3Accepted=%d DAG3Hash=%u DAG3BEnabled=%d DAG3BApplied=%d DAG3BPattern=%d DAG3BHash=%u DAG3CEnabled=%d DAG3CPlayable=%d DAG3CHash=%u Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
 		*GetName(), GenerationSettings.BuildingSeed, static_cast<int32>(GenerationSettings.GenerationAlgorithm), static_cast<int32>(GenerationSettings.Silhouette),
 		static_cast<int32>(DAGGenerationSettings.Preset),
 		GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::LegacyLayeredAB2 ? 1 : 0,
@@ -937,6 +990,9 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		Data.DAGFailurePatternResult.bApplied ? 1 : 0,
 		static_cast<int32>(Data.DAGFailurePatternResult.Pattern),
 		Data.DAGFailurePatternResult.RealizedPatternHash,
+		Data.DAGFailurePlayabilityResult.bEnabled ? 1 : 0,
+		Data.DAGFailurePlayabilityResult.bPlayable ? 1 : 0,
+		Data.DAGFailurePlayabilityResult.PlayabilityHash,
 		Context.bPlanar ? 1 : 0,
 		Data.Bricks.Num(), Data.SupportEdges.Num(), Data.GroundNodeIds.Num(), Data.DAGMacroNodeCount, Data.DAGSelectedSupportCount, Data.DAGTopologyHash, Data.FoundationFeet.Num(), Data.TerrainDeltaCM,
 		Data.CurvatureDropCM, Data.MaxSlopeDegrees, bRuntimeSpawned ? 1 : 0);
@@ -980,6 +1036,28 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 			Pattern.ReseatRisk,
 			Pattern.OffsetSeamShiftCM,
 			Pattern.RewriteAttemptCount);
+	}
+	if (Data.DAGFailurePlayabilityResult.bPlayable)
+	{
+		const FABTSM73DAGFailurePlayabilityResult& Playability =
+			Data.DAGFailurePlayabilityResult;
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-DAG3C][Playable] Actor=%s Pattern=%d Motion=%d Material=%d Weak=%s Exposure=%.3f Clearance=%.2f Drop=%.2f Tip=%.2f Slide=%.2f Effort=%.3f Hits=%d Samples=%d/%d Hash=%u"),
+			*GetName(),
+			static_cast<int32>(Playability.Pattern),
+			static_cast<int32>(Playability.ExpectedMotion),
+			static_cast<int32>(Playability.Material),
+			*JoinFrontierNodeIds(Playability.WeakNodeIds),
+			Playability.AttackExposure,
+			Playability.MinAttackClearanceCM,
+			Playability.FreeDropDistanceCM,
+			Playability.FreeTipAngleDegrees,
+			Playability.FreeSlideDistanceCM,
+			Playability.LocalBreakEffort,
+			Playability.EstimatedHits,
+			Playability.AttackSampleCount,
+			Playability.MotionSweepSampleCount,
+			Playability.PlayabilityHash);
 	}
 	for (const FABTSM73WeakPointRecord& WeakPoint : Data.WeakPoints)
 	{

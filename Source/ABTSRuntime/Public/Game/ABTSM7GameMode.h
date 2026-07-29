@@ -50,6 +50,9 @@ struct FABTSM7TaskGraphBuildingProfile
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG")
 	FABTSM73DAGFailurePatternSettings DAGFailurePatternSettings;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG")
+	FABTSM73DAGFailurePlayabilitySettings DAGFailurePlayabilitySettings;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 };

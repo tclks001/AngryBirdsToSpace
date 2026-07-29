@@ -1,6 +1,6 @@
 # M7.3-DAG-3：内部 Failure Frontier
 
-> 状态：DAG3-A 纯数据“失效前沿发现”已落地并完成自动化基线；DAG3-B 三种同材质宏观接口的两遍事务改写、`PlanarPhysicsTestMap` 认证 Fixture、`W/P/Affected/Direction` 非碰撞诊断层、真实 Actor/Chaos 30 Hz 完整态门禁和可见 PIE 已于 2026-07-29 完成并由用户验收。生产 Profile 继续同时关闭分析与几何改写，因此现有 DAG2.3 的 13/17/13 模块、`DAGTopologyHash`、材质和 `WeakPoints=0` 合同均不得改变。下一步进入 DAG3-C 攻击可达性、材料与显式 Profile 路由；DAG-4 settled Contact、弱点移除和弱点/非弱点 Chaos 对照仍未完成，不能据此宣称内部弱点玩法已经上线。
+> 状态：DAG3-A 纯数据“失效前沿发现”已落地；DAG3-B 三种同材质宏观接口的两遍事务改写、认证 Fixture、非碰撞诊断、真实 Actor/Chaos 完整态门禁和可见 PIE 已于 2026-07-29 完成并由用户验收；DAG3-C 的有界 edge/small-cut、攻击可达性、静态运动净空、真实材质 Profile 与显式 opt-in 路由也已完成代码和 fresh 自动化。生产 Profile 继续关闭 A/B/C，因此现有 DAG2.3 默认合同不变。DAG3-C 的详细证据见 [攻击可达性、运动净空与候选路由](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md)；DAG-4 settled Contact、弱点移除和弱点/非弱点 Chaos 对照仍未完成，不能据此宣称内部弱点玩法已经上线。
 >
 > 父级：[递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。前置：[DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。生产边界：[M7 TaskGraph 球面建筑集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。后续：[语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 
@@ -19,7 +19,7 @@ DAG-3 的玩家目标不是把一块顶部砖涂成弱材质，而是在建筑�
 | --- | --- | --- |
 | DAG3-A | 从 DAG2.3 编译后的物理接触 DAG 发现、度量和稳定选择内部 Failure Frontier | 已实现 |
 | DAG3-B | 把物理前沿提升为稳定 Macro 接口 Intent，并以第二遍 DAG2.3 重求解实现 `InternalSingleSupport`、`InternalAsymmetricDualSupport`、`InternalOffsetSeam` | 已完成三 Fixture、非碰撞诊断、30 Hz Actor/Chaos 与可见 PIE 验收 |
-| DAG3-C | 加入扫掠空间、攻击可达性、材质与 Profile 路由，并以显式 opt-in 接入生产候选 | 未实现 |
+| DAG3-C | 加入扫掠空间、攻击可达性、材质与 Profile 路由，并以显式 opt-in 接入生产候选 | 代码与 fresh 自动化完成，默认关闭 |
 | DAG-4 | Idle 后重建 settled Contact DAG，并执行弱点/非弱点 Chaos 对照 | 未实现 |
 
 DAG3-A 明确不做以下事情：
@@ -621,7 +621,7 @@ DAG3-B 可见收口必须把“同一纯数据 Fixture 三种结果”交付为�
 
 ### 9.3 DAG3-C、DAG-4 与生产启用
 
-后续不得仅把 `bEnableAnalysis` 或 `bEnableGeometryRewrite` 打开便宣布 DAG-3 完成。生产候选至少还要满足：
+DAG3-C 已完成静态候选认证和显式 opt-in 通道，但不得仅把 A/B/C 开关打开便宣布 DAG-3 完成。生产默认启用至少还要满足：
 
 1. 三种内部改写都在编译后真实接触 DAG 中保留选定 Frontier；
 2. 完整态继续通过零穿透、静态稳定与 IdleValidation；
@@ -642,11 +642,15 @@ DAG3-C 的“显式 opt-in 生产候选”不等于切换 TaskGraph 默认值。
 - `Source/ABTSRuntime/Public/Building/ABTSM73DAGTypes.h`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAGFailureFrontierAnalyzer.h/.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAGFailurePatternRewriter.h/.cpp`
+- `Source/ABTSRuntime/Private/Building/ABTSM73DAGFailurePlayabilityPlanner.h/.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAGBuildingPipeline.h/.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAGLayoutSolver.h/.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAGLoadSupportSolver.h/.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAGModuleCompiler.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73DAG3AutomationTests.cpp`
+- `Source/ABTSRuntime/Private/Building/ABTSM73DAG3CPlayabilityAutomationTests.cpp`
+- `Source/ABTSRuntime/Private/Building/ABTSM73DAG3CRuntimeAutomationTests.cpp`
+- `Source/ABTSRuntime/Private/Building/ABTSM73DAGGeneralizedCutAutomationTests.cpp`
 - `Source/ABTSRuntime/Private/Building/ABTSM73StructureData.h`
 - `Source/ABTSRuntime/Public/Building/ABTSM73BuildingTypes.h`
 - `Source/ABTSRuntime/Public/Building/ABTSM73StableBuildingActor.h`
