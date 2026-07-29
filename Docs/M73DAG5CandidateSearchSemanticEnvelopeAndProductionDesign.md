@@ -199,6 +199,21 @@ StructureData.Bricks.Num() <= EffectiveCompiledBrickLimit
 7. 搜索次数不超过 `MaxCandidateAttempts`；
 8. 不存在 Legacy fallback，也不通过降低最低复杂度伪装成功。
 
+深递归成功率必须按“逻辑 Seed 是否找到候选”统计，不能按候选尝试次数扩大分母。
+固定 Seed 压力矩阵使用与 DAG5-A 相同的完整候选门比较 `K=1` 和 DAG5-A 默认候选预算
+`K=8`：
+
+- 每个批准的可行深递归 Profile 使用 128 个固定 Seed；
+- `K=8` 的绝对接受率至少为 95%；
+- 相对 `K=1`，至少消除 80% 的失败；
+- `K=1` 已接受的 Seed 在更大预算下不得回归，且仍须在 attempt `0` 发布相同几何；
+- 重复运行的候选轨迹、选中 Seed、几何、`SearchHash` 和 cohort hash 必须一致。
+
+容量预检失败和确定性 Scope 无解必须作为独立负例，不计入可行 Profile 的接受率。当前
+`ExpansionStepBudget <= 32` 时，TwinTowerBridge 的最低深度 3 需要 35 次展开，属于
+全局容量无解；纯 Parallel 的 160 cm Scope 也属于逐候选 Scope 无解。两者都必须保持
+0% 接受，不能靠降低最低深度、放宽 Scope 或切回 Legacy 伪造成功。
+
 本阶段不要求把 A 默认打开到 TaskGraph 生产 Profile。编辑器 Actor 可显式启用以调试；
 正式 Profile 切换属于 DAG5-D/E。
 
@@ -218,7 +233,7 @@ DAG5-A 已落实：
   尝试次数、选中 Seed、实砖上限与 Hash；
 - `bEnableFeasibilitySearch=false` 保持旧 one-shot DAG2.3 路径及生产 Profile 不变。
 
-最终源码状态证据：
+首次落地源码证据：
 
 - `Saved/Logs/DAG5A-20260729-223025-ForceUnity-Build.log`：
   `-ForceUnity -DisableAdaptiveUnity`，4 actions，`Result: Succeeded`；
@@ -229,6 +244,37 @@ DAG5-A 已落实：
   `TaskGraphDAG23ProfileRouting`；
 - `Saved/Logs/DAG5A-20260729-223333-WorldContracts-FreshAutomation.log`：
   `ABTS.Contracts.WorldGeneration` 2/2 Success。
+
+深递归固定 Seed 补充证据：
+
+| Profile | 深度 | `K=1` | `K=8` | `K=8` 救回 | 结论 |
+|---|---:|---:|---:|---:|---|
+| F-Single-D2 | 2 | 121/128（94.53%） | 128/128（100%） | 7/7 | 通过 |
+| F-Arch-D2 | 2 | 87/128（67.97%） | 128/128（100%） | 41/41 | 通过 |
+| F-Twin-D2 | 2 | 40/128（31.25%） | 126/128（98.44%） | 86/88 | 通过 |
+| F-Arch-D3 | 3 | 35/128（27.34%） | 122/128（95.31%） | 87/93 | 通过 |
+
+四个可行 Profile 的默认 `K=8` 合计为 `504/512 = 98.44%`；所有 `K=1` 已接受
+Seed 均保持 attempt `0` 几何一致，回归数为 0。`K=1` 还逐 Seed 与独立执行的
+`BuildWithFailurePattern + 实砖预算 + StaticStability` oracle 对照，576 个逻辑
+Seed 的接受状态全部一致，接受时几何一致；因此不是搜索入口与自身做循环证明。
+每个 Profile 的每档 K 各复跑 8 个 Seed，Attempt Trace、选中结果、`SearchHash`
+和几何 mismatch 均为 0。Twin-D3 容量无解和 Single-D2 纯 Parallel Scope 无解
+两个 32-Seed 对照组均为 0%，前者在尝试前拒绝，后者每个候选均以
+`DAG5AParallelScopeTooNarrow` 拒绝。拒绝候选还实际覆盖
+`DAGNoJointSupportHull`、`DAGNoLoadSupportCandidates`、`DAGUnexpectedBypass`、
+`DAG5ABrickBudgetExceeded` 和静态稳定性拒绝，因此不是只测语法展开成功。
+
+- `Saved/Logs/DAG5A-DeepSweep-Final-20260729-231623-ForceUnity-Build.log`：
+  `-ForceUnity -DisableAdaptiveUnity`，4 actions，`Result: Succeeded`；
+- `Saved/Logs/DAG5A-DeepSweep-FinalA-20260729-231655-FreshAutomation.log` 与
+  `Saved/Logs/DAG5A-DeepSweep-FinalB-20260729-231754-FreshAutomation.log`：
+  两个独立 fresh NullRHI 进程均 Success，17 条统计/摘要完全一致，cohort mismatch
+  为 0；
+- `Saved/Logs/DAG5A-DeepSweep-Final-FullDAG5A-20260729-231850-FreshAutomation.log`：
+  `ABTS.M73DAG.DAG5A.` 12/12 Success；
+- `Saved/Logs/DAG5A-DeepSweep-Final-M7Regression-20260729-231936-FreshAutomation.log`：
+  完整 `ABTS.M7` 55/55 Success。
 
 DAG5-A 是默认关闭的纯数据调度/预算阶段，不新增可见建筑轮廓，因此本阶段无需单独
 PIE 视觉验收；轮廓可见性从 DAG5-B 开始验收。

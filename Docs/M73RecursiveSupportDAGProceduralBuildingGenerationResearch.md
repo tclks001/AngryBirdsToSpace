@@ -834,8 +834,9 @@ A-(B+C)
 [M7.3-DAG-5：候选搜索、语义轮廓与生产认证](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)。
 
 - [x] **DAG5-A**：单 Profile 的容量预检、确定性有界候选尝试和编译后实砖硬预算已完成；
-  `ABTS.M73DAG.DAG5A.` fresh 11/11、完整 `ABTS.M7` 54/54、世界生成合同 2/2
-  Success，生产继续默认关闭；
+  深递归固定 Seed 矩阵在默认 `K=8` 下为 `504/512 = 98.44%`，fresh
+  `ABTS.M73DAG.DAG5A.` 12/12、完整 `ABTS.M7` 55/55、世界生成合同 2/2
+  Success；容量/Scope 无解负例仍 fail closed，生产继续默认关闭；
 - **DAG5-B**：以 Shape Grammar 生成宏观体量、以局部语义 WFC 细化邻接，输出
   `SemanticEnvelope` 并接入现有 DAG2.3/ModuleCompiler，使建筑具有真实轮廓复杂性；
 - **DAG5-C**：建立 Novelty Archive，按包络、Support DAG 与弱点签名联合挑选六栋不重复建筑；
