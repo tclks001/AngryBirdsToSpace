@@ -422,6 +422,27 @@ struct FABTSM73GenerationSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
 	float DAG4WeakResponseAdvantage = 0.0f;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	bool bDAG5AEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	bool bDAG5AAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5AAttemptCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5ASelectedAttemptIndex = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5ASelectedCandidateSeed = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5ACompiledBrickLimit = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int64 DAG5ASearchHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;
 

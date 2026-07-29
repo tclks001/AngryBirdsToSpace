@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Building/ABTSM73BuildingTypes.h"
+#include "Building/ABTSM73DAG5Types.h"
 #include "GameFramework/Actor.h"
 #include "ABTSM73StableBuildingActor.generated.h"
 
@@ -106,6 +107,11 @@ public:
 	const FABTSM73DAG4ValidationResult& GetDAG4ValidationResultForValidation() const
 	{
 		return LastDAG4ValidationResult;
+	}
+
+	const FABTSM73DAG5AResult& GetDAG5AResultForValidation() const
+	{
+		return LastDAG5AResult;
 	}
 
 	AABTSM7BuildingModule* FindRuntimeModuleForNodeForValidation(
@@ -227,6 +233,9 @@ private:
 	/** DAG-4 settled contact and reversible weak/ordinary Chaos comparison. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-4|Validation")
 	FABTSM73DAG4ValidationSettings DAG4ValidationSettings;
+	/** DAG5-A bounded feasibility search. Default off preserves the one-shot DAG2.3 path. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-5A|Search")
+	FABTSM73DAG5ASettings DAG5ASettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")
@@ -262,6 +271,8 @@ private:
 	FABTSM73DAGFailurePatternResult LastDAGFailurePatternResult;
 	FABTSM73DAGFailurePlayabilityResult LastDAGFailurePlayabilityResult;
 	FABTSM73DAG4ValidationResult LastDAG4ValidationResult;
+	UPROPERTY(VisibleAnywhere, Transient, Category = "ABTS|M7.3-DAG-5A|Result")
+	FABTSM73DAG5AResult LastDAG5AResult;
 
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;

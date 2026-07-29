@@ -1,6 +1,6 @@
 # M7.3-DAG-4：Settled Contact 与攻击对照
 
-> 状态：阶段已于 2026-07-29 完成。代码、fresh 自动化、三 Pattern/四材料真实 Chaos 对照与用户可见机械响应均已验收；提交 `8a1aab8` 还将弱点/失效模式诊断覆盖层改为仅在编辑器视口可见、PIE/游戏隐藏。生产 Profile 中 DAG3-A/B/C/DAG-4 仍默认关闭；建筑外形与弱点布局多样性不再阻塞本阶段，等待 [DAG-5](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md#m73-dag-5候选搜索装置与-taskgraph) 候选池和 [语义 WFC](M73WFCBuildingEnvelopeAndDAGFittingResearch.md) 提供真正不同的建筑骨架后联合调整。父级设计见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)，总路线见 [递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
+> 状态：阶段已于 2026-07-29 完成。代码、fresh 自动化、三 Pattern/四材料真实 Chaos 对照与用户可见机械响应均已验收；提交 `8a1aab8` 还将弱点/失效模式诊断覆盖层改为仅在编辑器视口可见、PIE/游戏隐藏。生产 Profile 中 DAG3-A/B/C/DAG-4 仍默认关闭；建筑外形与弱点布局多样性不再阻塞本阶段，等待 [DAG5-B/C](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) 提供真正不同的建筑骨架与六栋联合选择，并在 DAG5-E 逐栋重新执行本阶段认证。父级设计见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)，总路线见 [递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 
 ## 1. 目标与阶段边界
 

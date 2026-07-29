@@ -7,12 +7,124 @@
 #include "Building/ABTSM73DAGFailureFrontierTypes.h"
 #include "Building/ABTSM73DAGFailurePatternRewriter.h"
 #include "Building/ABTSM73DAGFailurePlayabilityPlanner.h"
+#include "Building/ABTSM73DAG5CandidateSearch.h"
+#include "Building/ABTSM73DAG5Types.h"
 #include "Building/ABTSM73DAGGrammarExpander.h"
 #include "Building/ABTSM73DAGLayoutSolver.h"
 #include "Building/ABTSM73DAGModuleCompiler.h"
 #include "Building/ABTSM73DAGTypes.h"
 #include "Building/ABTSM73StabilityValidator.h"
 #include "Building/ABTSM73StructureData.h"
+#include "Misc/Crc.h"
+#include "UObject/Class.h"
+
+namespace
+{
+	void AppendDAG5AStructIdentity(
+		FString& InOutCanonical,
+		const TCHAR* Label,
+		const UScriptStruct* ScriptStruct,
+		const void* Value)
+	{
+		FString Exported;
+		ScriptStruct->ExportText(
+			Exported,
+			Value,
+			nullptr,
+			nullptr,
+			PPF_None,
+			nullptr);
+		InOutCanonical += FString::Printf(
+			TEXT("|%s=%s"),
+			Label,
+			*Exported);
+	}
+
+	void FinalizeDAG5ACompleteChainHash(
+		const FABTSM73DAG5ASettings& SearchSettings,
+		const FABTSM73DAGGenerationSettings& DAGSettings,
+		const FABTSM73DAGLayoutSettings& LayoutSettings,
+		const FABTSM73GenerationSettings& BuildingSettings,
+		const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+		const FABTSM73DAGFailurePatternSettings& PatternSettings,
+		const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+		const FABTSM73DifficultySettings& DifficultySettings,
+		const TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+		const FVector& LocalAttackDirection,
+		const FABTSM73StructureData& Data,
+		FABTSM73DAG5AResult& InOutResult)
+	{
+		FString Canonical = FString::Printf(
+			TEXT("SchedulerGeometryHash=%lld")
+			TEXT("|SelectedFrontierHash=%u")
+			TEXT("|RealizedPatternHash=%u")
+			TEXT("|PlayabilityHash=%u"),
+			InOutResult.SearchHash,
+			Data.DAGFailureFrontierAnalysis.SelectedFrontierHash,
+			Data.DAGFailurePatternResult.RealizedPatternHash,
+			Data.DAGFailurePlayabilityResult.PlayabilityHash);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Search"),
+			FABTSM73DAG5ASettings::StaticStruct(),
+			&SearchSettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("DAG"),
+			FABTSM73DAGGenerationSettings::StaticStruct(),
+			&DAGSettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Layout"),
+			FABTSM73DAGLayoutSettings::StaticStruct(),
+			&LayoutSettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Building"),
+			FABTSM73GenerationSettings::StaticStruct(),
+			&BuildingSettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Frontier"),
+			FABTSM73DAGFailureFrontierSettings::StaticStruct(),
+			&FrontierSettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Pattern"),
+			FABTSM73DAGFailurePatternSettings::StaticStruct(),
+			&PatternSettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Playability"),
+			FABTSM73DAGFailurePlayabilitySettings::StaticStruct(),
+			&PlayabilitySettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Difficulty"),
+			FABTSM73DifficultySettings::StaticStruct(),
+			&DifficultySettings);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Attack"),
+			TBaseStructure<FVector>::Get(),
+			&LocalAttackDirection);
+		for (int32 ProfileIndex = 0;
+			ProfileIndex < MaterialProfiles.Num();
+			++ProfileIndex)
+		{
+			const FString Label = FString::Printf(
+				TEXT("Material[%d]"),
+				ProfileIndex);
+			AppendDAG5AStructIdentity(
+				Canonical,
+				*Label,
+				FABTSM7MaterialProfile::StaticStruct(),
+				&MaterialProfiles[ProfileIndex]);
+		}
+		InOutResult.SearchHash = static_cast<int64>(
+			FCrc::StrCrc32(*Canonical));
+	}
+}
 
 bool FABTSM73DAGBuildingPipeline::Build(
 	const FABTSM73DAGGenerationSettings& DAGSettings,
@@ -382,4 +494,88 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 	}
 	OutData = MoveTemp(BaselineData);
 	return false;
+}
+
+bool FABTSM73DAGBuildingPipeline::BuildWithFeasibilitySearch(
+	const FABTSM73DAG5ASettings& SearchSettings,
+	const FABTSM73DAGGenerationSettings& DAGSettings,
+	const FABTSM73DAGLayoutSettings& LayoutSettings,
+	const FABTSM73GenerationSettings& BuildingSettings,
+	const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+	const FABTSM73DAGFailurePatternSettings& PatternSettings,
+	const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+	const FABTSM73DifficultySettings& DifficultySettings,
+	const TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+	const FVector& LocalAttackDirection,
+	FABTSM73DAG5AResult& OutSearchResult,
+	FABTSM73StructureData& OutData,
+	FString& OutError) const
+{
+	if (!SearchSettings.bEnableFeasibilitySearch)
+	{
+		OutSearchResult = FABTSM73DAG5AResult();
+		return BuildWithFailurePattern(
+			DAGSettings,
+			LayoutSettings,
+			BuildingSettings,
+			FrontierSettings,
+			PatternSettings,
+			PlayabilitySettings,
+			DifficultySettings,
+			MaterialProfiles,
+			LocalAttackDirection,
+			OutData,
+			OutError);
+	}
+	FABTSM73DAG5CandidateSearch Search;
+	FABTSM73DAGGenerationSettings SelectedDAGSettings;
+	const bool bBuilt = Search.Build(
+		SearchSettings,
+		DAGSettings,
+		LayoutSettings,
+		BuildingSettings,
+		[this,
+			&LayoutSettings,
+			&BuildingSettings,
+			&FrontierSettings,
+			&PatternSettings,
+			&PlayabilitySettings,
+			&DifficultySettings,
+			MaterialProfiles,
+			LocalAttackDirection](
+				const FABTSM73DAGGenerationSettings& CandidateSettings,
+				FABTSM73StructureData& CandidateData,
+				FString& CandidateError)
+		{
+			return BuildWithFailurePattern(
+				CandidateSettings,
+				LayoutSettings,
+				BuildingSettings,
+				FrontierSettings,
+				PatternSettings,
+				PlayabilitySettings,
+				DifficultySettings,
+				MaterialProfiles,
+				LocalAttackDirection,
+				CandidateData,
+				CandidateError);
+		},
+		SelectedDAGSettings,
+		OutData,
+		OutSearchResult,
+		OutError);
+	FinalizeDAG5ACompleteChainHash(
+		SearchSettings,
+		DAGSettings,
+		LayoutSettings,
+		BuildingSettings,
+		FrontierSettings,
+		PatternSettings,
+		PlayabilitySettings,
+		DifficultySettings,
+		MaterialProfiles,
+		LocalAttackDirection,
+		OutData,
+		OutSearchResult);
+	return bBuilt;
 }

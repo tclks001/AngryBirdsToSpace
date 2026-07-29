@@ -322,6 +322,7 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 	FString& OutError,
 	const AABTSM7BuildingMaterialSystem* MaterialProfileSource)
 {
+	LastDAG5AResult = FABTSM73DAG5AResult();
 	TArray<FABTSM7MaterialProfile> MaterialProfiles;
 	if (MaterialProfileSource != nullptr) MaterialProfileSource->CopyMaterialProfiles(MaterialProfiles);
 	else MaterialProfiles = FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
@@ -352,18 +353,34 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 		ResolvedDAGSettings.MaxEstimatedBrickCount = FMath::Min(
 			ResolvedDAGSettings.MaxEstimatedBrickCount, GenerationSettings.MaxBrickCount);
 		FABTSM73DAGBuildingPipeline Pipeline;
-		if (!Pipeline.BuildWithFailurePattern(
-			ResolvedDAGSettings,
-			DAGLayoutSettings,
-			GenerationSettings,
-			DAGFailureFrontierSettings,
-			DAGFailurePatternSettings,
-			DAGFailurePlayabilitySettings,
-			DifficultySettings,
-			MaterialProfiles,
-			LocalAttackDirection,
-			OutData,
-			OutError))
+		const bool bBuilt = DAG5ASettings.bEnableFeasibilitySearch
+			? Pipeline.BuildWithFeasibilitySearch(
+				DAG5ASettings,
+				ResolvedDAGSettings,
+				DAGLayoutSettings,
+				GenerationSettings,
+				DAGFailureFrontierSettings,
+				DAGFailurePatternSettings,
+				DAGFailurePlayabilitySettings,
+				DifficultySettings,
+				MaterialProfiles,
+				LocalAttackDirection,
+				LastDAG5AResult,
+				OutData,
+				OutError)
+			: Pipeline.BuildWithFailurePattern(
+				ResolvedDAGSettings,
+				DAGLayoutSettings,
+				GenerationSettings,
+				DAGFailureFrontierSettings,
+				DAGFailurePatternSettings,
+				DAGFailurePlayabilitySettings,
+				DifficultySettings,
+				MaterialProfiles,
+				LocalAttackDirection,
+				OutData,
+				OutError);
+		if (!bBuilt)
 		{
 			return false;
 		}
@@ -469,6 +486,17 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 		LastDAG4ValidationResult.MaxOrdinaryResponseScore;
 	GenerationSummary.DAG4WeakResponseAdvantage =
 		LastDAG4ValidationResult.WeakResponseAdvantage;
+	GenerationSummary.bDAG5AEnabled = LastDAG5AResult.bEnabled;
+	GenerationSummary.bDAG5AAccepted = LastDAG5AResult.bAccepted;
+	GenerationSummary.DAG5AAttemptCount = LastDAG5AResult.AttemptCount;
+	GenerationSummary.DAG5ASelectedAttemptIndex =
+		LastDAG5AResult.SelectedAttemptIndex;
+	GenerationSummary.DAG5ASelectedCandidateSeed =
+		LastDAG5AResult.SelectedCandidateSeed;
+	GenerationSummary.DAG5ACompiledBrickLimit =
+		LastDAG5AResult.EffectiveCompiledBrickLimit;
+	GenerationSummary.DAG5ASearchHash =
+		LastDAG5AResult.SearchHash;
 	GenerationSummary.FoundationFootCount = Data.FoundationFeet.Num();
 	GenerationSummary.FootprintTerrainDeltaCM = Data.TerrainDeltaCM;
 	GenerationSummary.CurvatureDropCM = Data.CurvatureDropCM;
@@ -962,6 +990,20 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 				Data.DAGFailurePatternResult.RealizedPatternHash,
 				*Data.DAGFailurePlayabilityResult.RejectReason);
 		}
+		if (LastDAG5AResult.bEnabled
+			&& !LastDAG5AResult.bAccepted)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7.3-DAG5A][Reject] Actor=%s InputSeed=%d Attempts=%d ScopeRejected=%d Compiled=%d Limit=%d Hash=%lld Reason=%s"),
+				*GetName(),
+				LastDAG5AResult.InputSeed,
+				LastDAG5AResult.AttemptCount,
+				LastDAG5AResult.ScopePreflightRejectCount,
+				LastDAG5AResult.CompiledCandidateCount,
+				LastDAG5AResult.EffectiveCompiledBrickLimit,
+				LastDAG5AResult.SearchHash,
+				*LastDAG5AResult.RejectReason);
+		}
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A][Reject] Actor=%s Reason=%s"), *GetName(), *Error);
 		return;
 	}
@@ -1080,6 +1122,19 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		Context.bPlanar ? 1 : 0,
 		Data.Bricks.Num(), Data.SupportEdges.Num(), Data.GroundNodeIds.Num(), Data.DAGMacroNodeCount, Data.DAGSelectedSupportCount, Data.DAGTopologyHash, Data.FoundationFeet.Num(), Data.TerrainDeltaCM,
 		Data.CurvatureDropCM, Data.MaxSlopeDegrees, bRuntimeSpawned ? 1 : 0);
+	if (LastDAG5AResult.bEnabled)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-DAG5A][Accepted] Actor=%s InputSeed=%d CandidateSeed=%d Attempt=%d/%d Bricks=%d Limit=%d Hash=%lld"),
+			*GetName(),
+			LastDAG5AResult.InputSeed,
+			LastDAG5AResult.SelectedCandidateSeed,
+			LastDAG5AResult.SelectedAttemptIndex,
+			LastDAG5AResult.AttemptCount,
+			LastDAG5AResult.CompiledBrickCount,
+			LastDAG5AResult.EffectiveCompiledBrickLimit,
+			LastDAG5AResult.SearchHash);
+	}
 	if (Data.DAGFailureFrontierAnalysis.Candidates.IsValidIndex(
 		Data.DAGFailureFrontierAnalysis.SelectedCandidateIndex))
 	{

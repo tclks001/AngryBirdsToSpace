@@ -8,6 +8,8 @@ struct FABTSM7MaterialProfile;
 struct FABTSM73DAGFailureFrontierSettings;
 struct FABTSM73DAGFailurePatternSettings;
 struct FABTSM73DAGFailurePlayabilitySettings;
+struct FABTSM73DAG5AResult;
+struct FABTSM73DAG5ASettings;
 struct FABTSM73DAGGenerationSettings;
 struct FABTSM73DAGLayoutSettings;
 struct FABTSM73DifficultySettings;
@@ -47,6 +49,26 @@ public:
 		const FABTSM73DifficultySettings& DifficultySettings,
 		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
 		const FVector& LocalAttackDirection,
+		FABTSM73StructureData& OutData,
+		FString& OutError) const;
+
+	/**
+	 * DAG5-A opt-in bounded search around the complete currently enabled
+	 * pure-data candidate chain. Existing overloads remain the exact one-shot
+	 * compatibility path.
+	 */
+	bool BuildWithFeasibilitySearch(
+		const FABTSM73DAG5ASettings& SearchSettings,
+		const FABTSM73DAGGenerationSettings& DAGSettings,
+		const FABTSM73DAGLayoutSettings& LayoutSettings,
+		const FABTSM73GenerationSettings& BuildingSettings,
+		const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+		const FABTSM73DAGFailurePatternSettings& PatternSettings,
+		const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+		const FABTSM73DifficultySettings& DifficultySettings,
+		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+		const FVector& LocalAttackDirection,
+		FABTSM73DAG5AResult& OutSearchResult,
 		FABTSM73StructureData& OutData,
 		FString& OutError) const;
 };

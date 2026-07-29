@@ -1,9 +1,12 @@
 # M7.3 调研：3D WFC 建筑外观体块与承载 DAG 拟合
 
-> 状态：调研结论，尚未实现。
+> 状态：调研结论，尚未实现；正式工程边界已由
+> [DAG5-B](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)
+> 接管。
 >
 > 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md)。上游：[M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。
-> 下游建议：M7.3-DAG2.4 不规则体块包络与积木排布；M7.3-WFC-1 语义体块蓝图。
+> 下游：[M7.3-DAG-5 候选搜索、语义轮廓与生产认证](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)，
+> 其中 DAG5-B 负责 Shape Grammar、局部 WFC、SemanticEnvelope 与现有砖块编译链的正式接入。
 
 ## 1. 结论
 
@@ -184,7 +187,7 @@ Z=1:  Foundation Foundation Foundation
 
 | 当前对象 | WFC 阶段后的变化 |
 |---|---|
-| `FABTSM73DAGGenerationSettings.Preset` | 从唯一轮廓定义降为 WFC 风格族、主题与强制锚点；保留旧 Preset 作回退。 |
+| `FABTSM73DAGGenerationSettings.Preset` | 从唯一轮廓定义降为兼容模式或 Shape/WFC 风格族的初始主题；DAG5-B 启用时不得把旧 Preset 当作失败回退。 |
 | `FABTSM73DAGGenerationResult` | 增加来自 Semantic Envelope 的 Macro Node、允许端口、MustVoid 约束和节点语义。 |
 | `FABTSM73DAGMacroLayout.AllowedScope` | 不再只是递归均分矩形；由相连语义格的并集、局部偏移和占据掩码导出。 |
 | `FABTSM73DAGLoadSupportSolver` | 候选 Support Edge 必须同时满足 Port 对齐、可放柱区域和 MustVoid 排除；累计荷载/联合凸包逻辑保持。 |
@@ -205,7 +208,7 @@ Z=1:  Foundation Foundation Foundation
 
 | 风险 | 原因 | 控制 |
 |---|---|---|
-| WFC 无解或回溯过久 | 3D 局部规则、门窗和承载端口互相矛盾 | 低分辨率局部格、最大传播/回溯步数、确定性 Seed、超限时回退到当前 DAG Preset。 |
+| WFC 无解或回溯过久 | 3D 局部规则、门窗和承载端口互相矛盾 | 低分辨率局部格、最大传播/回溯步数和确定性 Seed；拒绝当前候选，由 DAG5-A 更换 Shape/WFC 推导。只有 DAG5 总开关关闭时才保留旧 DAG2.3 兼容链。 |
 | 外观好但没有物理解 | WFC 的局部规则不了解质量与接触凸包 | WFC 后必须执行 DAG 合成；无可行 DAG 的 WFC 输出丢弃或局部修复。 |
 | 物理好但又变成长方体 | DAG Compiler 忽略语义占据/空洞 | MustOccupy / MustVoid 成为编译硬约束；Plate 支持分段与偏置。 |
 | 门窗过多破坏稳定性 | 空洞切断传力路径 | 门窗周边强制 Frame / BeamZone；限制同层空洞比例。 |
@@ -228,7 +231,8 @@ Z=1:  Foundation Foundation Foundation
 - 至少生成明显不同的退台塔、偏置桥、门洞墙、单侧高塔四种轮廓，且均只用长方体 Brick。
 - `MustVoid` 中无 Brick；`MustOccupy` 至少有对应 Deck / Column / Foundation。
 - 所有实际承重关系通过 DAG2.3、Contact DAG 与静态验证；不将 WFC 邻接当成承重事实。
-- 对每个 WFC 成功候选执行有限 Chaos 验证；失败候选可解释地回退或重抽样。
+- 对每个 WFC 成功候选执行有限 Chaos 验证；失败候选可解释地拒绝并由 DAG5-A
+  重抽样，不得静默退化为旧矩形 Preset。
 
 ## 12. 公开资料与访问时间
 
