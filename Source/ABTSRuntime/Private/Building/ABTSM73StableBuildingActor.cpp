@@ -154,6 +154,9 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	WeakPointPreview->SetupAttachment(Root);
 	WeakPointPreview->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	WeakPointPreview->SetGenerateOverlapEvents(false);
+	WeakPointPreview->SetCanEverAffectNavigation(false);
+	WeakPointPreview->SetCastShadow(false);
+	WeakPointPreview->SetHiddenInGame(true);
 	for (UHierarchicalInstancedStaticMeshComponent* DiagnosticPreview : {
 		DAGFailureWeakPreview.Get(),
 		DAGFailurePivotPreview.Get(),
@@ -165,7 +168,7 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 		DiagnosticPreview->SetGenerateOverlapEvents(false);
 		DiagnosticPreview->SetCanEverAffectNavigation(false);
 		DiagnosticPreview->SetCastShadow(false);
-		DiagnosticPreview->SetHiddenInGame(false);
+		DiagnosticPreview->SetHiddenInGame(true);
 		DiagnosticPreview->SetVisibility(false, true);
 	}
 	DAGFailurePatternLabel->SetupAttachment(Root);
@@ -173,7 +176,7 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	DAGFailurePatternLabel->SetGenerateOverlapEvents(false);
 	DAGFailurePatternLabel->SetCanEverAffectNavigation(false);
 	DAGFailurePatternLabel->SetCastShadow(false);
-	DAGFailurePatternLabel->SetHiddenInGame(false);
+	DAGFailurePatternLabel->SetHiddenInGame(true);
 	DAGFailurePatternLabel->SetHorizontalAlignment(EHTA_Center);
 	DAGFailurePatternLabel->SetVerticalAlignment(EVRTA_TextCenter);
 	DAGFailurePatternLabel->SetWorldSize(26.0f);

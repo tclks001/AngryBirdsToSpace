@@ -5,6 +5,7 @@
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "ABTSM7PenetrationValidator.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -626,6 +627,32 @@ bool FABTSM73DAG3BPatternMatrixPlanarIdleTest::RunTest(
 				static_cast<int32>(Expected.Pattern)),
 			Building->GetDAG3BDirectionDebugInstanceCount(),
 			3);
+		for (const FName DiagnosticComponentName : {
+			FName(TEXT("WeakPointPreview")),
+			FName(TEXT("DAGFailureWeakPreview")),
+			FName(TEXT("DAGFailurePivotPreview")),
+			FName(TEXT("DAGFailureAffectedPreview")),
+			FName(TEXT("DAGFailureDirectionPreview")),
+			FName(TEXT("DAGFailurePatternLabel"))})
+		{
+			const USceneComponent* DiagnosticComponent = Cast<USceneComponent>(
+				Building->GetDefaultSubobjectByName(DiagnosticComponentName));
+			TestNotNull(
+				FString::Printf(
+					TEXT("Pattern %d retains editor diagnostic component %s"),
+					static_cast<int32>(Expected.Pattern),
+					*DiagnosticComponentName.ToString()),
+				DiagnosticComponent);
+			if (DiagnosticComponent != nullptr)
+			{
+				TestTrue(
+					FString::Printf(
+						TEXT("Pattern %d hides editor diagnostic component %s in game"),
+						static_cast<int32>(Expected.Pattern),
+						*DiagnosticComponentName.ToString()),
+					DiagnosticComponent->bHiddenInGame);
+			}
+		}
 		TestEqual(
 			FString::Printf(TEXT("Pattern %d starts the dynamic idle gate"),
 				static_cast<int32>(Expected.Pattern)),
