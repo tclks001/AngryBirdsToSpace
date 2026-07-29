@@ -1,6 +1,6 @@
 # M7.3-DAG-3：内部 Failure Frontier
 
-> 状态：DAG3-A 纯数据“失效前沿发现”已落地；DAG3-B 三种同材质宏观接口的两遍事务改写、认证 Fixture、非碰撞诊断、真实 Actor/Chaos 完整态门禁和可见 PIE 已于 2026-07-29 完成并由用户验收；DAG3-C 的有界 edge/small-cut、攻击可达性、静态运动净空、真实材质 Profile 与显式 opt-in 路由也已完成代码和 fresh 自动化。生产 Profile 继续关闭 A/B/C，因此现有 DAG2.3 默认合同不变。DAG3-C 的详细证据见 [攻击可达性、运动净空与候选路由](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md)；DAG-4 settled Contact、弱点移除和弱点/非弱点 Chaos 对照仍未完成，不能据此宣称内部弱点玩法已经上线。
+> 状态：DAG3-A 纯数据“失效前沿发现”已落地；DAG3-B 三种同材质宏观接口的两遍事务改写、认证 Fixture、非碰撞诊断、真实 Actor/Chaos 完整态门禁和可见 PIE 已于 2026-07-29 完成并由用户验收；DAG3-C 的有界 edge/small-cut、攻击可达性、静态运动净空、真实材质 Profile 与显式 opt-in 路由也已完成代码和 fresh 自动化；[DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成代码、三 Pattern/四材料真实 Chaos 自动化与完整回归。生产 Profile 继续关闭 A/B/C/DAG-4，因此现有 DAG2.3 默认合同不变；DAG-4 用户可见弱点击毁 PIE 尚未验收，不能据此宣称内部弱点玩法已经上线。
 >
 > 父级：[递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。前置：[DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。生产边界：[M7 TaskGraph 球面建筑集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。后续：[语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 
@@ -20,7 +20,7 @@ DAG-3 的玩家目标不是把一块顶部砖涂成弱材质，而是在建筑�
 | DAG3-A | 从 DAG2.3 编译后的物理接触 DAG 发现、度量和稳定选择内部 Failure Frontier | 已实现 |
 | DAG3-B | 把物理前沿提升为稳定 Macro 接口 Intent，并以第二遍 DAG2.3 重求解实现 `InternalSingleSupport`、`InternalAsymmetricDualSupport`、`InternalOffsetSeam` | 已完成三 Fixture、非碰撞诊断、30 Hz Actor/Chaos 与可见 PIE 验收 |
 | DAG3-C | 加入扫掠空间、攻击可达性、材质与 Profile 路由，并以显式 opt-in 接入生产候选 | 代码与 fresh 自动化完成，默认关闭 |
-| DAG-4 | Idle 后重建 settled Contact DAG，并执行弱点/非弱点 Chaos 对照 | 未实现 |
+| [DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) | Idle 后重建 settled Contact DAG，并执行弱点/非弱点 Chaos 对照 | 代码与 fresh 自动化完成，默认关闭，用户可见 PIE 待验收 |
 
 DAG3-A 明确不做以下事情：
 
@@ -634,7 +634,7 @@ DAG3-C 已完成静态候选认证和显式 opt-in 通道，但不得仅把 A/B/
 9. 可见 PIE 中弱点位置、坍塌方向和留白能被玩家理解；
 10. 在 WFC/Encounter 接入前，不能用三套相同外壳冒充六栋视觉不重复建筑。
 
-DAG3-C 的“显式 opt-in 生产候选”不等于切换 TaskGraph 默认值。只有 DAG-4 settled Contact、弱点/多个普通点 Chaos 对照，以及串行正式可见 PIE 都通过后，才能另行评审生产默认启用。
+DAG3-C 的“显式 opt-in 生产候选”不等于切换 TaskGraph 默认值。[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成 settled Contact、一个弱点/恰好三个普通点 Chaos 对照和四材料自动认证，但这些仍只由测试 Profile 显式 opt-in。只有第 9 项串行正式可见 PIE 也通过后，才能另行评审生产默认启用。
 
 ## 10. 实现文件
 

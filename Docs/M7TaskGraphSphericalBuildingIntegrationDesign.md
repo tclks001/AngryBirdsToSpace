@@ -1,8 +1,8 @@
 # M7 收口：TaskGraph 球面建筑集成
 
-> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A/B/C 已分别完成 Frontier、三种同材质几何改写和静态可玩候选认证；DAG3-B 可见 PIE 已验收，DAG3-C fresh 10/10、完整 DAG3 22/22、M7 37/37。生产 Profile 中 A/B/C 仍默认关闭，现有普通建筑合同不变。待 DAG-4 settled/Chaos、弱点击毁 PIE、Budget=1 物理预算及 WFC/Encounter 接入。
+> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A/B/C 已分别完成 Frontier、三种同材质几何改写和静态可玩候选认证；[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成 settled Contact、三 Pattern/四材料真实 Chaos 自动认证，fresh DAG-4 6/6、完整 DAG3 22/22、M7 43/43。生产 Profile 中 A/B/C/DAG-4 仍默认关闭，现有普通建筑合同不变。待 DAG-4 用户可见弱点击毁 PIE、Budget=1 物理预算及 WFC/Encounter 接入。
 >
-> 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。
+> 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md) · [DAG3-C 攻击可达与候选路由](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md)。
 >
 > 下游修订：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)已将 `LaunchSite` 保留为无建筑的终局施工台和 Space-only 槽位区。
 >
@@ -89,7 +89,7 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 - `DAG3Enabled=0 DAG3Candidates=0 DAG3Accepted=0 DAG3Hash=0` 是当前生产日志基线；
 - 旧 B/B2 顶冠弱材质、唯一弱点与难度分数不再属于生产合同；
 - 首版应把可读的主承重柱作为攻击提示，不能宣称已有“唯一弱点”；
-- 若后续恢复严格的弱点玩法，必须完成 DAG3-B/C 和 DAG-4，不能只打开 DAG3-A，也不能把 TaskGraph 切回 Legacy。
+- 若后续恢复严格的弱点玩法，必须使用已经完成代码/自动认证的 DAG3-B/C/DAG-4 全链，并先完成 DAG-4 用户可见 PIE；不能只打开 DAG3-A，也不能把 TaskGraph 切回 Legacy。
 
 ### 3.2 M11.0 的 LaunchSite 硬边界
 
@@ -142,6 +142,13 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 - fresh `-game -NullRHI -ExecCmds="t.MaxFPS 60"` 中三栋生成日志均为 `DAG3Enabled/Candidates/Accepted/Hash=0/0/0/0`、13/17/13 和原 DAG Hash；三栋 Idle 全部 `Accepted=1`，最终 `WorldReady=1` 且门禁 `3/0/3/3`；
 - 该增量没有改动生产几何或 Chaos，不新增“弱点击毁”可见 PIE 结论。
 
+2026-07-29 的 DAG-4 动态候选认证：
+
+- 详细合同与逐项证据见 [DAG-4 第 15 节](M73DAG4SettledContactAndAttackRolloutDesign.md#15-2026-07-29-实现与证据)；
+- 强制 Unity 编译成功；fresh `ABTS.M73DAG4.` 6/6、完整 `ABTS.M73DAG3.` 22/22、旧 `ABTS.M73DAG.` 10/10、`ABTS.M7` 43/43、世界生成契约 2/2 Success；
+- Single/Dual/Seam 均从同一 settled 快照执行 `1 Weak + 3 Ordinary`，正式模块未被 Shadow 试验改写；木、石、铁、玻璃分别以真实 MaterialSystem Profile 独立通过；
+- 三套 TaskGraph 生产 Profile 仍为 A/B/C/DAG-4 全关闭。本证据不替代显式测试 Profile 下的用户可见弱点击毁 PIE，也不授权修改生产默认。
+
 ### 4.2 PIE 定位调试
 
 `AABTSM7GameMode` 在 `ABTS | M7 | Debug` 默认开启 `Show Task Graph Position Debug`。PIE 时屏幕左上会持续显示玩家和已生成 TaskGraph 建筑的经纬度（纬度为 `-90°~+90°`，经度为 `-180°~+180°`），建筑条目同时带有 Task/Cell 标识。场景中每栋建筑上方还会显示同一组 `B序号 / Task / Lat / Lon` 标签，可将屏幕列表和现场目标对应。
@@ -165,4 +172,4 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 
 ## 6. 后续
 
-TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A/B/C 也已建立 Frontier、三种改写和显式静态可玩候选。后续按顺序完成 DAG-4 settled/Chaos 对照与弱点击毁 PIE、Budget=1 Seed sweep/物理预算，再由 WFC/Encounter 提供语义包络和难度消费；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。
+TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A/B/C 与 DAG-4 也已建立 Frontier、三种改写、静态可玩候选和 settled/Chaos 动态认证。后续先完成 DAG-4 显式测试 Profile 的用户可见弱点击毁 PIE及生产启用评审，再进行 Budget=1 Seed sweep/物理预算，并由 WFC/Encounter 提供语义包络和难度消费；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。
