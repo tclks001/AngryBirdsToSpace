@@ -2,9 +2,9 @@
 
 > 文档性质：M7.3 新路线的独立调研与算法设计；本轮不修改 C++、地图或资产。
 >
-> 状态：DAG-1、DAG-2 与 DAG2.3 已落地，DAG2.3 已接管球面 TaskGraph 普通建筑生产链；现行入口见 [M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。建筑外观语义 WFC、承载 DAG 拟合与 DAG-3 内部弱点仍属后续阶段，见 [M73WFCBuildingEnvelopeAndDAGFittingResearch.md](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
+> 状态：DAG-1、DAG-2 与 DAG2.3 已落地，DAG2.3 已接管球面 TaskGraph 普通建筑生产链；DAG3-A 已实现生产默认关闭的纯数据内部 Failure Frontier 发现，见 [DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。三种几何改写、生产启用、DAG-4 Chaos 对照及建筑外观语义 WFC 仍属后续阶段。
 >
-> 父级：[M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md)。子阶段：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
+> 父级：[M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md)。子阶段：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md) · [语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 
 ## 1. 结论先行
 
@@ -808,11 +808,14 @@ A-(B+C)
 
 ### M7.3-DAG-3：内部 Failure Frontier
 
-- 枚举内部 dominator、node/edge cut 和小型 cut set；
-- 实现三种内部弱点结构改写；
-- 泛化 B2 Validator；
-- 加入主体质量、跨度、扫掠空间和旁路门槛；
-- 新路线不再使用“三节点顶部闭包”验收。
+首个实现切片与正式边界见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。
+
+- [x] DAG3-A：以虚拟 GroundRoot 枚举内部 node dominator 与联合支撑接口 cut set；
+- [x] DAG3-A：加入主体质量、主体高度跨度、宏节点数、候选预算和旁路门槛；
+- [x] DAG3-A：输出独立、可复现的 `FrontierHash`，并保持生产默认关闭；
+- [ ] DAG3-B：实现三种内部弱点结构改写；
+- [ ] DAG3-C：补任意 edge/small-cut、扫掠空间、攻击可达性与显式生产 opt-in；
+- [ ] 泛化 B2 Validator，并在 DAG-4 用 settled Contact/Chaos 对照取代“三节点顶部闭包”验收。
 
 ### M7.3-DAG-4：Settled Contact 与攻击对照
 
@@ -888,14 +891,15 @@ ABTS.M73DAG.NoveltyBatch
 
 ## 17. 最终建议
 
-下一步不应继续调整当前 B2 顶冠的尺寸、材料或支撑位置。这些调整只能改变顶部局部坍塌，无法让它成为主体的承载瓶颈。
+不应继续调整当前 B2 顶冠的尺寸、材料或支撑位置。这些调整只能改变顶部局部坍塌，无法让它成为主体的承载瓶颈。
 
-推荐首先落实 `M7.3-DAG-1`：只做纯数据表达式、递归规则、类型化支撑策略、规范拓扑 Hash 和预算终止。确认 `A-B-C-D`、`A-(B+C)`、`(A+B)-C-(D+E)` 能稳定生成不同 DAG 后，再进入几何编译。这样可把最难的三类问题拆开：
+DAG-1、DAG-2、DAG2.3 与 DAG3-A 已把图语法、几何编译和纯数据前沿发现拆开验证。下一步应围绕已选中的 `FrontierHash` 实现 DAG3-B 三种内部改写，再进入 DAG3-C 生产候选与 DAG-4 settled/Chaos 对照：
 
 ```text
-先验证图语法是否正确
--> 再验证图能否编译成无穿透稳定砖块
--> 最后验证内部弱点是否真的触发主体级联
+已完成：图语法与物理接触 DAG
+-> 已完成：静态 Failure Frontier 发现
+-> 下一步：把前沿改写成无穿透、完整态稳定的几何
+-> 最后：验证实际攻击是否触发主体级联
 ```
 
 本项目最终有价值的 PCG 核心应当是：生成器不仅知道每块砖在哪里，还知道它属于哪个宏观结构、承担哪条载荷路径、为什么是普通支撑或弱点、击毁后哪部分主体会以什么方向垮塌，以及真实 Chaos 是否兑现了这个设计意图。

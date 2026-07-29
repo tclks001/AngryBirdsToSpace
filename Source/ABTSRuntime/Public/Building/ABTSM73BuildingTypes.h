@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Building/ABTSM73DAGFailureFrontierTypes.h"
 #include "Building/ABTSM73DAGTypes.h"
 #include "Building/ABTSM7BuildingTypes.h"
 #include "ABTSM73BuildingTypes.generated.h"
@@ -314,6 +315,30 @@ struct FABTSM73GenerationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-2")
 	int64 DAGTopologyHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	bool bDAGFailureFrontierAnalysisEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	bool bDAGFailureFrontierAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	int32 DAGFailureFrontierCandidateCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	int32 DAGFailureFrontierAcceptedCandidateCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	int64 DAGFailureFrontierHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	float DAGAffectedMainBodyMassRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	float DAGAffectedHeightSpanNormalized = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
+	int32 DAGFailureFrontierBypassEdgeCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;

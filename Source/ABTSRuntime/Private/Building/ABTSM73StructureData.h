@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Building/ABTSM73BuildingTypes.h"
+#include "Building/ABTSM73DAGFailureFrontierTypes.h"
 
 enum class EABTSM73BrickSemanticRole : uint8
 {
@@ -34,6 +35,8 @@ struct FABTSM73BrickNode
 	float UnsupportedMassRatio = 0.0f;
 	float AttackExposure = 0.0f;
 	int32 EstimatedHits = 0;
+	/** DAG-3 mass/span gates count only authored load-bearing body, never helper payload. */
+	bool bFailureFrontierMainBody = true;
 	bool bWeakPoint = false;
 	bool bReinforcedCriticalNode = false;
 };
@@ -156,6 +159,7 @@ struct FABTSM73StructureData
 	int32 DAGUnexpectedBypassCount = 0;
 	float DAGMinSupportContactAreaRatio = 0.0f;
 	uint32 DAGTopologyHash = 0;
+	FABTSM73DAGFailureFrontierAnalysis DAGFailureFrontierAnalysis;
 };
 
 struct FABTSM73GroundContext

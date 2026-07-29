@@ -291,6 +291,7 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 			GenerationSettings,
 			DAGGenerationSettings,
 			RuntimeProfile.DAGLayoutSettings,
+			RuntimeProfile.DAGFailureFrontierSettings,
 			RuntimeProfile.DifficultySettings);
 		Building->ConfigureSphericalAnchor(&Planet, Site.CellId, Site.WorldTransform);
 		if (SlingshotSystem)

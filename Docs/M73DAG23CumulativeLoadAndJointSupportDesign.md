@@ -2,7 +2,7 @@
 
 > 状态：DAG2.3 已成为球面 TaskGraph 普通建筑的生产求解器；Editor 编译、DAG/M7 自动化、固定世界基线及最终二进制三次 fresh D3D12 实时 60 FPS 通过。Legacy 仅保留历史代码/序列化诊断，不参与生产回退或阻断性验收。
 >
-> 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。生产集成：[M7 TaskGraph 球面建筑](M7TaskGraphSphericalBuildingIntegrationDesign.md)。平面验证：[M7.1 测试台](M71PlanarPhysicsTestStageDesign.md)。前置：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md)。后续研究：[建筑语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
+> 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。生产集成：[M7 TaskGraph 球面建筑](M7TaskGraphSphericalBuildingIntegrationDesign.md)。平面验证：[M7.1 测试台](M71PlanarPhysicsTestStageDesign.md)。前置：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md)。直接下游：[DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。后续研究：[建筑语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 
 ## 目标
 
@@ -106,7 +106,7 @@ M3 BuildingSpawnSite / Pad
 - 旧 Blueprint CDO 中的 Legacy Profile 在 M7 边界升级为安全 DAG2.3 Profile，不能静默复活旧链；
 - 当前 Target 使用 Budget=0 `TwinTowerBridge`，包含 Parallel 与联合支撑；Workshop/Furnace 使用 Budget=0 `SingleTower`；
 - DAG 失败必须带确定性 Reject，禁止回退 Legacy；
-- DAG2.3 不执行 B/B2 WeakPointPlanner。模块仍可击打/破坏，但正式内部弱点需由 DAG-3 实现。
+- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A 已能只读发现内部 Failure Frontier，但生产默认关闭且不改几何/材质；模块仍可击打/破坏，正式内部弱点仍需完成 DAG3-B/C 与 DAG-4。
 - 任一生成或 Idle `Rejected` 必须撤销模块与 Foundation 碰撞，并阻断 `WorldReady`/发射；Pending/Running 必须持续等待，不能由可选的 M6 HISM 暖机开关绕过。
 - M7 必须在生成前登记必需 Actor 数并在尝试完成后封口；合同激活后只检查注册集合，且每个必需 Actor 都必须显式 `Accepted`。MaterialSystem/Profile/Class/Actor 缺失、`Registered != Expected`、`Accepted != Expected` 或必需 Actor 为 `NotRequired` 均为 Reject，不能把零 Actor 或关闭 Idle 验证当成合法通过。
 
@@ -124,6 +124,7 @@ M3 BuildingSpawnSite / Pad
 - 当前固定世界两次冷启动的三栋建筑均为 `Algorithm=1`、`DAGMacro>0`、`DAGSparse>0`、`DAGHash!=0`，零穿透且逐栋 Idle 通过；
 - 两次均为 `Expected=3 Registered=3 SetupRejected=0`；`WorldReady=1` 晚于三栋 Idle terminal，最终 `BuildingAccepted=3 BuildingRejected=0`，无 TaskGraph `Algorithm=0`。
 - 最终二进制三次不带 `-benchmark` 的 fresh D3D12 实时 60 FPS 均为三栋 `TimedOut=0 Accepted=1`；Furnace 旋转 `0.08°/0.09°/0.08°`、`DAGMinContact=0.060`，门禁 `3/0/3/3`，且 `WorldReady=1`、无 ABTS Error/Blocked。
+- DAG3-A 的 2026-07-29 只读回归保持 13/17/13 模块与三套原 `DAGTopologyHash`；`ABTS.M73DAG3.` 6/6、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2 以及当前 `ABTS.M7` 前缀快照 20/20 在 fresh NullRHI 中通过。另一次限帧 60 的 fresh NullRHI game smoke 中三栋 Idle 全部接受并最终 `WorldReady=1`；该证据仍不替代后续弱点击毁 PIE。
 
 仍需可见 PIE：
 
