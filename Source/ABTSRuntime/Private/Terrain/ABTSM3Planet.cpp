@@ -80,6 +80,7 @@ AABTSM3Planet::AABTSM3Planet()
 
 bool AABTSM3Planet::RebuildPlanet()
 {
+	bM3PresentationReady = false;
 	if (!AABTSM2Planet::RebuildPlanet() || !GenerateLogicalTerrain()) return false;
 	const float ResolvedHeightScaleCM = bDisableTerrainHeightVariationExperiment ? 0.0f : MacroHeightScaleCM;
 	const float ResolvedWaterDepthCM = bDisableTerrainHeightVariationExperiment ? 0.0f : TaskWaterDepthCM;
@@ -146,7 +147,8 @@ bool AABTSM3Planet::RebuildPlanet()
 		bPresentationReady ? 1 : 0, WorldSeed, PCGSummary.GeneratorVersion, PCGSummary.AttemptIndex, GeneratedTasks.Num(), GeneratedTaskLinks.Num(),
 		GeneratedCellStates.Num(), GeneratedEdgeStates.Num(), RoadCells, WaterCells, BuildingSpawnSites.Num(), ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), TerrainMaterial ? 1 : 0, bMaterialReady ? 1 : 0,
 		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM);
-	return bPresentationReady;
+	bM3PresentationReady = bPresentationReady;
+	return bM3PresentationReady;
 }
 
 bool AABTSM3Planet::GenerateLogicalTerrain()

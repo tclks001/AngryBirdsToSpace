@@ -2,7 +2,9 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "ABTSRuntime.h"
 #include "Misc/AutomationTest.h"
+#include "PCG/ABTSM3R0AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "Planet/ABTSM2Planet.h"
 
@@ -535,13 +537,23 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 
 	const TArray<FABTSM2Cell> Cells = BuildM3WeekOneLogicalCells();
 	const FABTSM3PCGConfig Config;
-	TArray<int32> Seeds;
-	Seeds.Reserve(21);
-	Seeds.Add(312503);
-	for (int32 Seed = 0; Seed < 20; ++Seed)
+	FString ManifestFailure;
+	TestTrue(
+		TEXT("M3R-0 frozen acceptance manifest self-validates"),
+		FABTSM3R0AcceptanceManifest::Validate(ManifestFailure));
+	if (!ManifestFailure.IsEmpty())
 	{
-		Seeds.Add(Seed);
+		AddError(FString::Printf(
+			TEXT("M3R-0 acceptance manifest failure: %s ComputedSeedHash=%016llX ComputedManifestHash=%016llX"),
+			*ManifestFailure,
+			static_cast<unsigned long long>(
+				FABTSM3R0AcceptanceManifest::ComputeWeekOneSeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R0AcceptanceManifest::ComputeManifestHash())));
 	}
+	const TConstArrayView<int32> Seeds =
+		FABTSM3R0AcceptanceManifest::GetWeekOneSeeds();
+	int32 GeneratedSeedCount = 0;
 
 	for (const int32 Seed : Seeds)
 	{
@@ -554,6 +566,7 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 		{
 			continue;
 		}
+		++GeneratedSeedCount;
 
 		TestTrue(
 			*FString::Printf(TEXT("Seed %d summary is accepted"), Seed),
@@ -724,6 +737,11 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 				*FString::Printf(TEXT("Seed %d %s satisfies its main-road setback"), Seed, Expected.Label),
 				ReferenceMainRouteHopDistances[AnchorCellId]
 					>= Expected.MinimumMainRoadDistanceCells);
+			TestTrue(
+				*FString::Printf(TEXT("Seed %d %s remains inside its configured setback search window"), Seed, Expected.Label),
+				ReferenceMainRouteHopDistances[AnchorCellId]
+					<= Expected.MinimumMainRoadDistanceCells
+						+ FMath::Clamp(Config.BuildingAnchorSearchSlackCells, 0, 6));
 			TestEqual(
 				*FString::Printf(
 					TEXT("Seed %d %s records the independently reconstructed main-road distance"),
@@ -747,8 +765,10 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 		int32 SatelliteAnchorCount = 0;
 		int32 RoadExclusionCellCount = 0;
 		int32 RoadExclusionOverlapCount = 0;
-		for (const FABTSM3CellState& State : World.CellStates)
+		TArray<FABTSM3R0ExpectedBuildingSite> ActualBuildingSites;
+		for (int32 CellId = 0; CellId < World.CellStates.Num(); ++CellId)
 		{
+			const FABTSM3CellState& State = World.CellStates[CellId];
 			if (State.bBuildingRoadExclusion)
 			{
 				++RoadExclusionCellCount;
@@ -758,6 +778,7 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 			{
 				continue;
 			}
+			ActualBuildingSites.Add({State.TaskId, CellId});
 
 			const FABTSM3TaskNode* const AnchorTask =
 				FindTaskById(World.Tasks, State.TaskId);
@@ -799,6 +820,32 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 			*FString::Printf(TEXT("Seed %d SatelliteWindow task has no anchor identity"), Seed),
 			Satellite->BuildingAnchorCellId,
 			INDEX_NONE);
+		if (Seed == FABTSM3R0AcceptanceManifest::DisplaySeed)
+		{
+			const TConstArrayView<FABTSM3R0ExpectedBuildingSite> ExpectedSites =
+				FABTSM3R0AcceptanceManifest::GetDisplayBuildingSites();
+			TestEqual(
+				TEXT("Compatibility oracle freezes the complete building-site count"),
+				ActualBuildingSites.Num(),
+				ExpectedSites.Num());
+			for (int32 SiteIndex = 0;
+				SiteIndex < FMath::Min(ActualBuildingSites.Num(), ExpectedSites.Num());
+				++SiteIndex)
+			{
+				TestEqual(
+					*FString::Printf(
+						TEXT("Compatibility oracle freezes BuildingSite[%d] TaskId"),
+						SiteIndex),
+					ActualBuildingSites[SiteIndex].TaskId,
+					ExpectedSites[SiteIndex].TaskId);
+				TestEqual(
+					*FString::Printf(
+						TEXT("Compatibility oracle freezes BuildingSite[%d] CellId"),
+						SiteIndex),
+					ActualBuildingSites[SiteIndex].CellId,
+					ExpectedSites[SiteIndex].CellId);
+			}
+		}
 
 		TestTrue(
 			*FString::Printf(TEXT("Seed %d B1 is visible at the default orbit"), Seed),
@@ -818,91 +865,137 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 		TestFalse(
 			*FString::Printf(TEXT("Seed %d B3 is hidden at the maximum orbit"), Seed),
 			World.Summary.bFurnaceVisibleAtMaxOrbit);
-		if (Seed == 312503)
+		if (Seed == FABTSM3R0AcceptanceManifest::DisplaySeed)
 		{
-			const bool bReferenceWorkshopDefault = EvaluateReferenceStartVisibility(
-				Cells,
-				World.CellStates,
-				*Start,
-				*Workshop,
-				World.Links,
-				Config,
-				Config.VisibilityDefaultOrbitDistanceCM);
-			const bool bReferenceWorkshopMax = EvaluateReferenceStartVisibility(
-				Cells,
-				World.CellStates,
-				*Start,
-				*Workshop,
-				World.Links,
-				Config,
-				Config.VisibilityMaxOrbitDistanceCM);
-			const bool bReferenceTargetDefault = EvaluateReferenceStartVisibility(
-				Cells,
-				World.CellStates,
-				*Start,
-				*Target,
-				World.Links,
-				Config,
-				Config.VisibilityDefaultOrbitDistanceCM);
-			const bool bReferenceTargetMax = EvaluateReferenceStartVisibility(
-				Cells,
-				World.CellStates,
-				*Start,
-				*Target,
-				World.Links,
-				Config,
-				Config.VisibilityMaxOrbitDistanceCM);
-			const bool bReferenceFurnaceDefault = EvaluateReferenceStartVisibility(
-				Cells,
-				World.CellStates,
-				*Start,
-				*Furnace,
-				World.Links,
-				Config,
-				Config.VisibilityDefaultOrbitDistanceCM);
-			const bool bReferenceFurnaceMax = EvaluateReferenceStartVisibility(
-				Cells,
-				World.CellStates,
-				*Start,
-				*Furnace,
-				World.Links,
-				Config,
-				Config.VisibilityMaxOrbitDistanceCM);
-
 			TestEqual(
-				TEXT("Display seed B1 default visibility matches the brute-force reference"),
-				World.Summary.bWorkshopVisibleAtDefaultOrbit,
-				bReferenceWorkshopDefault);
+				TEXT("Compatibility oracle display ConfigHash remains frozen"),
+				World.Summary.ConfigHash,
+				FABTSM3R0AcceptanceManifest::DisplayConfigHash);
 			TestEqual(
-				TEXT("Display seed B1 maximum visibility matches the brute-force reference"),
-				World.Summary.bWorkshopVisibleAtMaxOrbit,
-				bReferenceWorkshopMax);
-			TestEqual(
-				TEXT("Display seed B2 default visibility matches the brute-force reference"),
-				World.Summary.bTargetBuildingVisibleAtDefaultOrbit,
-				bReferenceTargetDefault);
-			TestEqual(
-				TEXT("Display seed B2 maximum visibility matches the brute-force reference"),
-				World.Summary.bTargetBuildingVisibleAtMaxOrbit,
-				bReferenceTargetMax);
-			TestEqual(
-				TEXT("Display seed B3 default visibility matches the brute-force reference"),
-				World.Summary.bFurnaceVisibleAtDefaultOrbit,
-				bReferenceFurnaceDefault);
-			TestEqual(
-				TEXT("Display seed B3 maximum visibility matches the brute-force reference"),
-				World.Summary.bFurnaceVisibleAtMaxOrbit,
-				bReferenceFurnaceMax);
+				TEXT("Compatibility oracle display LayoutHash remains frozen"),
+				World.Summary.LayoutHash,
+				FABTSM3R0AcceptanceManifest::DisplayLayoutHash);
 			TestTrue(
-				TEXT("Display seed brute-force reference keeps B1 visible at both orbit distances"),
-				bReferenceWorkshopDefault && bReferenceWorkshopMax);
+				TEXT("Compatibility oracle display route length remains frozen"),
+				FMath::IsNearlyEqual(
+					World.Summary.MainRouteLengthCM,
+					FABTSM3R0AcceptanceManifest::DisplayMainRouteLengthCM,
+					1.0f));
 			TestTrue(
-				TEXT("Display seed brute-force reference keeps B2/B3 hidden at both orbit distances"),
-				!bReferenceTargetDefault
-					&& !bReferenceTargetMax
-					&& !bReferenceFurnaceDefault
-					&& !bReferenceFurnaceMax);
+				TEXT("Compatibility oracle display building gap remains frozen"),
+				FMath::IsNearlyEqual(
+					World.Summary.MinAdjacentBuildingProgressCM,
+					FABTSM3R0AcceptanceManifest::DisplayBuildingGapCM,
+					1.0f));
+			TestTrue(
+				TEXT("Compatibility oracle display satellite/finale separation remains frozen"),
+				FMath::IsNearlyEqual(
+					World.Summary.SatelliteLaunchAngularSeparationDegrees,
+					FABTSM3R0AcceptanceManifest::DisplaySatelliteLaunchSeparationDegrees,
+					0.01f));
+			TestEqual(
+				TEXT("Compatibility oracle display visibility mask remains frozen"),
+				static_cast<int32>(FABTSM3R0AcceptanceManifest::PackVisibility(
+					World.Summary.bWorkshopVisibleAtDefaultOrbit,
+					World.Summary.bWorkshopVisibleAtMaxOrbit,
+					World.Summary.bTargetBuildingVisibleAtDefaultOrbit,
+					World.Summary.bTargetBuildingVisibleAtMaxOrbit,
+					World.Summary.bFurnaceVisibleAtDefaultOrbit,
+					World.Summary.bFurnaceVisibleAtMaxOrbit)),
+				static_cast<int32>(
+					FABTSM3R0AcceptanceManifest::DisplayVisibilityMask));
+			TestEqual(
+				TEXT("Compatibility oracle display task count remains frozen"),
+				World.Tasks.Num(),
+				9);
+			TestEqual(
+				TEXT("Compatibility oracle display link count remains frozen"),
+				World.Links.Num(),
+				9);
 		}
+
+		const bool bReferenceWorkshopDefault = EvaluateReferenceStartVisibility(
+			Cells,
+			World.CellStates,
+			*Start,
+			*Workshop,
+			World.Links,
+			Config,
+			Config.VisibilityDefaultOrbitDistanceCM);
+		const bool bReferenceWorkshopMax = EvaluateReferenceStartVisibility(
+			Cells,
+			World.CellStates,
+			*Start,
+			*Workshop,
+			World.Links,
+			Config,
+			Config.VisibilityMaxOrbitDistanceCM);
+		const bool bReferenceTargetDefault = EvaluateReferenceStartVisibility(
+			Cells,
+			World.CellStates,
+			*Start,
+			*Target,
+			World.Links,
+			Config,
+			Config.VisibilityDefaultOrbitDistanceCM);
+		const bool bReferenceTargetMax = EvaluateReferenceStartVisibility(
+			Cells,
+			World.CellStates,
+			*Start,
+			*Target,
+			World.Links,
+			Config,
+			Config.VisibilityMaxOrbitDistanceCM);
+		const bool bReferenceFurnaceDefault = EvaluateReferenceStartVisibility(
+			Cells,
+			World.CellStates,
+			*Start,
+			*Furnace,
+			World.Links,
+			Config,
+			Config.VisibilityDefaultOrbitDistanceCM);
+		const bool bReferenceFurnaceMax = EvaluateReferenceStartVisibility(
+			Cells,
+			World.CellStates,
+			*Start,
+			*Furnace,
+			World.Links,
+			Config,
+			Config.VisibilityMaxOrbitDistanceCM);
+
+		TestEqual(
+			*FString::Printf(TEXT("Seed %d B1 default visibility matches the brute-force reference"), Seed),
+			World.Summary.bWorkshopVisibleAtDefaultOrbit,
+			bReferenceWorkshopDefault);
+		TestEqual(
+			*FString::Printf(TEXT("Seed %d B1 maximum visibility matches the brute-force reference"), Seed),
+			World.Summary.bWorkshopVisibleAtMaxOrbit,
+			bReferenceWorkshopMax);
+		TestEqual(
+			*FString::Printf(TEXT("Seed %d B2 default visibility matches the brute-force reference"), Seed),
+			World.Summary.bTargetBuildingVisibleAtDefaultOrbit,
+			bReferenceTargetDefault);
+		TestEqual(
+			*FString::Printf(TEXT("Seed %d B2 maximum visibility matches the brute-force reference"), Seed),
+			World.Summary.bTargetBuildingVisibleAtMaxOrbit,
+			bReferenceTargetMax);
+		TestEqual(
+			*FString::Printf(TEXT("Seed %d B3 default visibility matches the brute-force reference"), Seed),
+			World.Summary.bFurnaceVisibleAtDefaultOrbit,
+			bReferenceFurnaceDefault);
+		TestEqual(
+			*FString::Printf(TEXT("Seed %d B3 maximum visibility matches the brute-force reference"), Seed),
+			World.Summary.bFurnaceVisibleAtMaxOrbit,
+			bReferenceFurnaceMax);
+		TestTrue(
+			*FString::Printf(TEXT("Seed %d brute-force reference keeps B1 visible at both orbit distances"), Seed),
+			bReferenceWorkshopDefault && bReferenceWorkshopMax);
+		TestTrue(
+			*FString::Printf(TEXT("Seed %d brute-force reference keeps B2/B3 hidden at both orbit distances"), Seed),
+			!bReferenceTargetDefault
+				&& !bReferenceTargetMax
+				&& !bReferenceFurnaceDefault
+				&& !bReferenceFurnaceMax);
 
 		TestTrue(
 			*FString::Printf(TEXT("Seed %d satisfies the M11.0 satellite/finale separation"), Seed),
@@ -931,6 +1024,19 @@ bool FABTSM3WeekOneSeedContractsTest::RunTest(const FString& Parameters)
 					1.0e-3f));
 		}
 	}
+	TestEqual(
+		TEXT("M3R-0 WeekOne manifest processes every frozen seed"),
+		GeneratedSeedCount,
+		Seeds.Num());
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R0][SeedCertification] ManifestHash=%016llX SeedManifestHash=%016llX Terminal=%d Passed=%d Failed=%d"),
+		static_cast<unsigned long long>(
+			FABTSM3R0AcceptanceManifest::ComputeManifestHash()),
+		static_cast<unsigned long long>(
+			FABTSM3R0AcceptanceManifest::ComputeWeekOneSeedManifestHash()),
+		Seeds.Num(),
+		HasAnyErrors() ? 0 : Seeds.Num(),
+		HasAnyErrors() ? Seeds.Num() : 0);
 	return true;
 }
 
@@ -945,7 +1051,8 @@ bool FABTSM3WeekOneDeterminismTest::RunTest(const FString& Parameters)
 
 	const TArray<FABTSM2Cell> Cells = BuildM3WeekOneLogicalCells();
 	const FABTSM3PCGConfig Config;
-	const int32 Seeds[] = {0, 7, 19, 312503};
+	const TConstArrayView<int32> Seeds =
+		FABTSM3R0AcceptanceManifest::GetDeterminismSeeds();
 	for (const int32 Seed : Seeds)
 	{
 		FABTSM3WeekOneGeneratedWorld First;

@@ -24,7 +24,12 @@ protected:
 
 private:
 	void TryPlacePlayerAtInitialRoad();
+	void TryCompleteM3R0Smoke();
+	void FinishM3R0Smoke(bool bPassed, const FString& Failure);
 
 	FTimerHandle InitialRoadSpawnTimer;
+	FTimerHandle M3R0SmokeTimer;
 	int32 InitialRoadSpawnAttempts = 0;
+	double M3R0SmokeStartSeconds = 0.0;
+	bool bInitialPlayerPlaced = false;
 };

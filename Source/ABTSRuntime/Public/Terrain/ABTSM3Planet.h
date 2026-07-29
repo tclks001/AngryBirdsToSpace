@@ -73,6 +73,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellEdgeState>& GetGeneratedEdgeStates() const { return GeneratedEdgeStates; }
 
+	/** True only when the complete M3 logical, terrain and material presentation rebuild succeeded. */
+	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
+	bool IsM3PresentationReady() const { return bM3PresentationReady; }
+
 	/** Reserved interface for M4 modular building generation. M3 only returns validated spawn sites. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Building")
 	const TArray<FABTSM3BuildingSpawnSite>& GetBuildingSpawnSites() const { return BuildingSpawnSites; }
@@ -250,6 +254,7 @@ private:
 	int32 FindNearestCell(const FVector& UnitDirection) const;
 
 	TUniquePtr<FABTSM3TerrainVisualField> TerrainVisualField;
+	bool bM3PresentationReady = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UABTSM3TerrainMaterialBridge> TerrainMaterialBridge;
