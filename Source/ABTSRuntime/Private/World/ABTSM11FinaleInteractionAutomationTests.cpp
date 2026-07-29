@@ -5,11 +5,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Async/ParallelFor.h"
+#include "Camera/ABTSM6SlingshotCamera.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Engine/World.h"
 #include "Game/ABTSM11GameMode.h"
 #include "Player/ABTSM11PlayerController.h"
+#include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "UI/ABTSM11FinaleHUD.h"
+#include "UObject/UObjectGlobals.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
@@ -706,6 +709,81 @@ bool FABTSM11CPIERegressionContractsTest::RunTest(
 		ABTSM11ClipDiagramSegmentToUnitCircle(
 			OutsideStart,
 			OutsideEnd));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CCameraClassParityTest,
+	"ABTS.M11C.Runtime.CameraClassParity",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CCameraClassParityTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FScopedM11CAutomationWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	TestNotNull(TEXT("Transient camera parity World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	UClass* BlueprintCameraClass = LoadClass<AABTSM6SlingshotCamera>(
+		nullptr,
+		TEXT("/Game/Blueprints/BP_ABTSM6SlingshotCamera.BP_ABTSM6SlingshotCamera_C"));
+	TestNotNull(
+		TEXT("Configured M6 Blueprint camera class loads"),
+		BlueprintCameraClass);
+	TestTrue(
+		TEXT("Regression fixture is a Blueprint subclass, not the native fallback"),
+		BlueprintCameraClass != nullptr
+			&& BlueprintCameraClass
+				!= AABTSM6SlingshotCamera::StaticClass());
+	if (BlueprintCameraClass == nullptr)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM6SlingshotSystem* RuntimeSlingshotSystem =
+		World->SpawnActor<AABTSM6SlingshotSystem>(
+			AABTSM6SlingshotSystem::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(
+		TEXT("M6 runtime source system spawns"),
+		RuntimeSlingshotSystem);
+	if (RuntimeSlingshotSystem == nullptr)
+	{
+		return false;
+	}
+	SpawnParameters.Owner = RuntimeSlingshotSystem;
+	AABTSM6SlingshotCamera* SourceCamera =
+		World->SpawnActor<AABTSM6SlingshotCamera>(
+			BlueprintCameraClass,
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(
+		TEXT("Configured M6 Blueprint camera source spawns"),
+		SourceCamera);
+
+	int32 MatchingCameraCount = 0;
+	const TSubclassOf<AABTSM6SlingshotCamera> ResolvedClass =
+		AABTSM11GameMode::ResolveRuntimeSlingshotCameraClass(
+			*World,
+			*RuntimeSlingshotSystem,
+			&MatchingCameraCount);
+	TestEqual(
+		TEXT("Exactly one M6-owned camera is selected"),
+		MatchingCameraCount,
+		1);
+	TestTrue(
+		TEXT("M11 resolves the exact configured Blueprint camera class"),
+		ResolvedClass.Get() == BlueprintCameraClass);
 	return true;
 }
 

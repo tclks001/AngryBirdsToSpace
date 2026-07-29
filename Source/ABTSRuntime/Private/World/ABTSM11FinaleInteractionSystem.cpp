@@ -103,19 +103,26 @@ AABTSM11FinaleInteractionSystem::AABTSM11FinaleInteractionSystem()
 
 bool AABTSM11FinaleInteractionSystem::Initialize(
 	AABTSM11FinaleSystem& InFinaleSystem,
-	AABTSBirdParty& InParty)
+	AABTSBirdParty& InParty,
+	TSubclassOf<AABTSM6SlingshotCamera> InAimCameraClass)
 {
 	FString Failure;
 	if (!ValidateInteractionContract(InFinaleSystem, &Failure)
-		|| !InParty.IsPartyReady())
+		|| !InParty.IsPartyReady()
+		|| !InAimCameraClass)
 	{
-		FailInteraction(Failure.IsEmpty()
-			? TEXT("PartyNotReady")
-			: Failure);
+		if (Failure.IsEmpty())
+		{
+			Failure = !InParty.IsPartyReady()
+				? TEXT("PartyNotReady")
+				: TEXT("AimCameraClassMissing");
+		}
+		FailInteraction(Failure);
 		return false;
 	}
 	FinaleSystem = &InFinaleSystem;
 	Party = &InParty;
+	AimCameraClass = InAimCameraClass;
 	if (!EnsureAimCamera())
 	{
 		FailInteraction(TEXT("AimCameraSpawnFailed"));
@@ -707,11 +714,42 @@ bool AABTSM11FinaleInteractionSystem::EnsureAimCamera()
 	SpawnParameters.Owner = this;
 	SpawnParameters.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	if (!AimCameraClass)
+	{
+		return false;
+	}
 	AimCamera = World->SpawnActor<AABTSM6SlingshotCamera>(
-		AABTSM6SlingshotCamera::StaticClass(),
+		AimCameraClass,
 		FTransform::Identity,
 		SpawnParameters);
-	return IsValid(AimCamera);
+	const bool bClassParity = IsValid(AimCamera)
+		&& AimCamera->GetClass() == AimCameraClass.Get();
+	if (bClassParity)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-C][CameraClassParity] SourceClass=%s SpawnedClass=%s Match=1"),
+			*GetNameSafe(AimCameraClass.Get()),
+			*GetNameSafe(AimCamera->GetClass()));
+	}
+	else
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M11-C][CameraClassParity] SourceClass=%s SpawnedClass=%s Match=0"),
+			*GetNameSafe(AimCameraClass.Get()),
+			*GetNameSafe(IsValid(AimCamera)
+				? AimCamera->GetClass()
+				: nullptr));
+	}
+	if (!bClassParity && IsValid(AimCamera))
+	{
+		AimCamera->Destroy();
+		AimCamera = nullptr;
+	}
+	return bClassParity;
 }
 
 bool AABTSM11FinaleInteractionSystem::BuildAimFrame(

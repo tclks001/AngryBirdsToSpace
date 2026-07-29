@@ -39,7 +39,8 @@ public:
 
 	bool Initialize(
 		AABTSM11FinaleSystem& InFinaleSystem,
-		AABTSBirdParty& InParty);
+		AABTSBirdParty& InParty,
+		TSubclassOf<AABTSM6SlingshotCamera> InAimCameraClass);
 	bool TryEnterFinale(
 		AABTSM51SlingshotCord& Cord,
 		APlayerController& Controller);
@@ -180,6 +181,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM6SlingshotCamera> AimCamera;
+
+	UPROPERTY(Transient)
+	TSubclassOf<AABTSM6SlingshotCamera> AimCameraClass;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
 		meta = (ClampMin = "0.0", ClampMax = "60.0"))

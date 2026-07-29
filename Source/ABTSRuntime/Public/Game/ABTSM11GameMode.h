@@ -8,6 +8,9 @@
 
 class AABTSM11FinaleSystem;
 class AABTSM11FinaleInteractionSystem;
+class AABTSM6SlingshotCamera;
+class AABTSM6SlingshotSystem;
+class UWorld;
 
 /**
  * M11 entry point. M10 remains intact; this subclass adds the M11-B layout
@@ -29,6 +32,16 @@ public:
 	{
 		return FinaleInteractionSystem;
 	}
+	/**
+	 * Resolves the exact camera subclass spawned by the unique M6 runtime
+	 * system. M11 clones that class so both launch modes consume the same
+	 * Blueprint defaults without sharing one mutable camera Actor.
+	 */
+	static TSubclassOf<AABTSM6SlingshotCamera>
+		ResolveRuntimeSlingshotCameraClass(
+			UWorld& World,
+			const AABTSM6SlingshotSystem& SlingshotSystem,
+			int32* OutMatchingCameraCount = nullptr);
 
 protected:
 	virtual void OnInitialPlayerPlaced(
