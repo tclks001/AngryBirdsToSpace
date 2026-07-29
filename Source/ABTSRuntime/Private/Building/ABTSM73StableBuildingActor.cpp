@@ -17,6 +17,7 @@
 #include "Components/ArrowComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -33,6 +34,48 @@ namespace
 	{
 		return FTransform(Context.AnchorTransform.GetRotation(),
 			Context.AnchorTransform.TransformPositionNoScale(LocalCenter), Dimensions / BasicCubeSizeCM);
+	}
+
+	FTransform WorldOrientedBoxTransform(
+		const FABTSM73GroundContext& Context,
+		const FVector& LocalCenter,
+		const FVector& LocalXAxis,
+		const FVector& Dimensions)
+	{
+		FVector SafeXAxis = LocalXAxis.GetSafeNormal();
+		if (SafeXAxis.IsNearlyZero()) SafeXAxis = FVector::ForwardVector;
+		const FQuat LocalRotation = FRotationMatrix::MakeFromX(SafeXAxis).ToQuat();
+		return FTransform(
+			Context.AnchorTransform.GetRotation() * LocalRotation,
+			Context.AnchorTransform.TransformPositionNoScale(LocalCenter),
+			Dimensions / BasicCubeSizeCM);
+	}
+
+	const FABTSM73BrickNode* FindDiagnosticNode(
+		const FABTSM73StructureData& Data,
+		const int32 NodeId)
+	{
+		return Data.Bricks.FindByPredicate([NodeId](
+			const FABTSM73BrickNode& Node)
+		{
+			return Node.NodeId == NodeId;
+		});
+	}
+
+	UMaterialInstanceDynamic* MakeDiagnosticMaterial(
+		UObject* Outer,
+		UMaterialInterface* BaseMaterial,
+		const FLinearColor& Color)
+	{
+		if (Outer == nullptr || BaseMaterial == nullptr) return nullptr;
+		UMaterialInstanceDynamic* MID =
+			UMaterialInstanceDynamic::Create(BaseMaterial, Outer);
+		if (MID != nullptr)
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), Color);
+			MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		}
+		return MID;
 	}
 
 	FString JoinFrontierNodeIds(const TConstArrayView<int32> NodeIds)
@@ -90,6 +133,16 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	IronPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("IronPreview"));
 	GlassPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("GlassPreview"));
 	WeakPointPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("WeakPointPreview"));
+	DAGFailureWeakPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("DAGFailureWeakPreview"));
+	DAGFailurePivotPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("DAGFailurePivotPreview"));
+	DAGFailureAffectedPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("DAGFailureAffectedPreview"));
+	DAGFailureDirectionPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("DAGFailureDirectionPreview"));
+	DAGFailurePatternLabel = CreateDefaultSubobject<UTextRenderComponent>(
+		TEXT("DAGFailurePatternLabel"));
 	FoundationCap = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FoundationCap"));
 	FoundationFeet = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("FoundationFeet"));
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
@@ -101,6 +154,31 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	WeakPointPreview->SetupAttachment(Root);
 	WeakPointPreview->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	WeakPointPreview->SetGenerateOverlapEvents(false);
+	for (UHierarchicalInstancedStaticMeshComponent* DiagnosticPreview : {
+		DAGFailureWeakPreview.Get(),
+		DAGFailurePivotPreview.Get(),
+		DAGFailureAffectedPreview.Get(),
+		DAGFailureDirectionPreview.Get()})
+	{
+		DiagnosticPreview->SetupAttachment(Root);
+		DiagnosticPreview->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		DiagnosticPreview->SetGenerateOverlapEvents(false);
+		DiagnosticPreview->SetCanEverAffectNavigation(false);
+		DiagnosticPreview->SetCastShadow(false);
+		DiagnosticPreview->SetHiddenInGame(false);
+		DiagnosticPreview->SetVisibility(false, true);
+	}
+	DAGFailurePatternLabel->SetupAttachment(Root);
+	DAGFailurePatternLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DAGFailurePatternLabel->SetGenerateOverlapEvents(false);
+	DAGFailurePatternLabel->SetCanEverAffectNavigation(false);
+	DAGFailurePatternLabel->SetCastShadow(false);
+	DAGFailurePatternLabel->SetHiddenInGame(false);
+	DAGFailurePatternLabel->SetHorizontalAlignment(EHTA_Center);
+	DAGFailurePatternLabel->SetVerticalAlignment(EVRTA_TextCenter);
+	DAGFailurePatternLabel->SetWorldSize(26.0f);
+	DAGFailurePatternLabel->SetTextRenderColor(FColor(255, 214, 32));
+	DAGFailurePatternLabel->SetVisibility(false, true);
 	FoundationCap->SetupAttachment(Root);
 	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
 	FoundationCap->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
@@ -127,8 +205,20 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 		FoundationFeet->SetStaticMesh(Cube.Object);
 		for (UHierarchicalInstancedStaticMeshComponent* Preview : {WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()}) Preview->SetStaticMesh(Cube.Object);
 		WeakPointPreview->SetStaticMesh(Cube.Object);
+		for (UHierarchicalInstancedStaticMeshComponent* DiagnosticPreview : {
+			DAGFailureWeakPreview.Get(),
+			DAGFailurePivotPreview.Get(),
+			DAGFailureAffectedPreview.Get(),
+			DAGFailureDirectionPreview.Get()})
+		{
+			DiagnosticPreview->SetStaticMesh(Cube.Object);
+		}
 	}
-	if (BasicShapeMaterial.Succeeded()) WeakPointDebugMaterial = BasicShapeMaterial.Object;
+	if (BasicShapeMaterial.Succeeded())
+	{
+		WeakPointDebugMaterial = BasicShapeMaterial.Object;
+		DAGFailureDebugMaterial = BasicShapeMaterial.Object;
+	}
 	if (WoodMaterial.Succeeded()) WoodPreview->SetMaterial(0, WoodMaterial.Object);
 	if (StoneMaterial.Succeeded()) StonePreview->SetMaterial(0, StoneMaterial.Object);
 	if (SteelMaterial.Succeeded()) IronPreview->SetMaterial(0, SteelMaterial.Object);
@@ -325,12 +415,14 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 bool AABTSM73StableBuildingActor::RebuildPreview()
 {
 	ClearBrickPreviews();
+	ClearDAGFailurePatternDiagnostics();
 	FoundationFeet->ClearInstances();
 	FoundationCap->SetVisibility(false, true);
 	FABTSM73GroundContext Context;
 	FABTSM73StructureData Data;
 	FString Error;
 	const bool bAccepted = BuildResolvedStructure(true, Context, Data, Error);
+	LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
 	FillGenerationSummary(Context, Data, bAccepted, Error);
 	if (!bAccepted)
 	{
@@ -341,14 +433,65 @@ bool AABTSM73StableBuildingActor::RebuildPreview()
 		return false;
 	}
 	UpdateFoundationComponents(Context, Data);
-	if (bShowEditorPreview) UpdatePreviewComponents(Context, Data);
+	if (bShowEditorPreview)
+	{
+		UpdatePreviewComponents(Context, Data);
+		UpdateDAGFailurePatternDiagnostics(Context, Data);
+	}
 	return true;
+}
+
+int32 AABTSM73StableBuildingActor::GetDAG3BWeakDebugInstanceCount() const
+{
+	return DAGFailureWeakPreview != nullptr
+		? DAGFailureWeakPreview->GetInstanceCount()
+		: 0;
+}
+
+int32 AABTSM73StableBuildingActor::GetDAG3BPivotDebugInstanceCount() const
+{
+	return DAGFailurePivotPreview != nullptr
+		? DAGFailurePivotPreview->GetInstanceCount()
+		: 0;
+}
+
+int32 AABTSM73StableBuildingActor::GetDAG3BAffectedDebugInstanceCount() const
+{
+	return DAGFailureAffectedPreview != nullptr
+		? DAGFailureAffectedPreview->GetInstanceCount()
+		: 0;
+}
+
+int32 AABTSM73StableBuildingActor::GetDAG3BDirectionDebugInstanceCount() const
+{
+	return DAGFailureDirectionPreview != nullptr
+		? DAGFailureDirectionPreview->GetInstanceCount()
+		: 0;
 }
 
 void AABTSM73StableBuildingActor::ClearBrickPreviews()
 {
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()}) Preview->ClearInstances();
 	WeakPointPreview->ClearInstances();
+}
+
+void AABTSM73StableBuildingActor::ClearDAGFailurePatternDiagnostics()
+{
+	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+		DAGFailureWeakPreview.Get(),
+		DAGFailurePivotPreview.Get(),
+		DAGFailureAffectedPreview.Get(),
+		DAGFailureDirectionPreview.Get()})
+	{
+		if (Preview == nullptr) continue;
+		Preview->ClearInstances();
+		Preview->SetVisibility(false, true);
+	}
+	if (DAGFailurePatternLabel != nullptr)
+	{
+		DAGFailurePatternLabel->SetText(FText::GetEmpty());
+		DAGFailurePatternLabel->SetVisibility(false, true);
+	}
 }
 
 UHierarchicalInstancedStaticMeshComponent* AABTSM73StableBuildingActor::GetPreviewForMaterial(const EABTSM7BuildingMaterial Material) const
@@ -402,6 +545,247 @@ void AABTSM73StableBuildingActor::UpdatePreviewComponents(
 		const FVector Center = Node->LocalCenter + FVector(0.0f, 0.0f, Data.FoundationCapTopCM);
 		WeakPointPreview->AddInstance(WorldBoxTransform(Context, Center, Node->DimensionsCM * DebugScale), true);
 	}
+}
+
+void AABTSM73StableBuildingActor::UpdateDAGFailurePatternDiagnostics(
+	const FABTSM73GroundContext& Context,
+	const FABTSM73StructureData& Data)
+{
+	ClearDAGFailurePatternDiagnostics();
+	const FABTSM73DAGFailurePatternResult& Pattern =
+		Data.DAGFailurePatternResult;
+	if (!bShowDAGFailurePatternDiagnostics
+		|| !DAGFailurePatternSettings.bEnableGeometryRewrite
+		|| !Pattern.bEnabled
+		|| !Pattern.bApplied
+		|| DAGFailureDebugMaterial == nullptr
+		|| BrickMesh == nullptr)
+	{
+		return;
+	}
+
+	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+		DAGFailureWeakPreview.Get(),
+		DAGFailurePivotPreview.Get(),
+		DAGFailureAffectedPreview.Get(),
+		DAGFailureDirectionPreview.Get()})
+	{
+		if (Preview != nullptr) Preview->SetStaticMesh(BrickMesh);
+	}
+
+	const FLinearColor WeakColor =
+		Pattern.Pattern == EABTSM73DAGFailurePattern::InternalOffsetSeam
+		? FLinearColor(1.0f, 0.02f, 0.55f, 1.0f)
+		: FLinearColor(1.0f, 0.025f, 0.015f, 1.0f);
+	DAGFailureWeakDebugMID = MakeDiagnosticMaterial(
+		this,
+		DAGFailureDebugMaterial,
+		WeakColor);
+	DAGFailurePivotDebugMID = MakeDiagnosticMaterial(
+		this,
+		DAGFailureDebugMaterial,
+		FLinearColor(0.0f, 0.85f, 1.0f, 1.0f));
+	DAGFailureAffectedDebugMID = MakeDiagnosticMaterial(
+		this,
+		DAGFailureDebugMaterial,
+		FLinearColor(0.035f, 0.12f, 0.75f, 1.0f));
+	DAGFailureDirectionDebugMID = MakeDiagnosticMaterial(
+		this,
+		DAGFailureDebugMaterial,
+		FLinearColor(1.0f, 0.82f, 0.0f, 1.0f));
+	if (DAGFailureWeakDebugMID != nullptr)
+	{
+		DAGFailureWeakPreview->SetMaterial(0, DAGFailureWeakDebugMID);
+	}
+	if (DAGFailurePivotDebugMID != nullptr)
+	{
+		DAGFailurePivotPreview->SetMaterial(0, DAGFailurePivotDebugMID);
+	}
+	if (DAGFailureAffectedDebugMID != nullptr)
+	{
+		DAGFailureAffectedPreview->SetMaterial(0, DAGFailureAffectedDebugMID);
+	}
+	if (DAGFailureDirectionDebugMID != nullptr)
+	{
+		DAGFailureDirectionPreview->SetMaterial(0, DAGFailureDirectionDebugMID);
+	}
+
+	FVector AffectedBoundsMin(BIG_NUMBER);
+	FVector AffectedBoundsMax(-BIG_NUMBER);
+	for (const int32 NodeId : Pattern.AffectedMainBodyNodeIds)
+	{
+		const FABTSM73BrickNode* Node = FindDiagnosticNode(Data, NodeId);
+		if (Node == nullptr) continue;
+		const FVector Center = Node->LocalCenter
+			+ FVector(0.0f, 0.0f, Data.FoundationCapTopCM);
+		const FVector Extent = Node->DimensionsCM * 0.5f;
+		AffectedBoundsMin = AffectedBoundsMin.ComponentMin(Center - Extent);
+		AffectedBoundsMax = AffectedBoundsMax.ComponentMax(Center + Extent);
+		DAGFailureAffectedPreview->AddInstance(
+			WorldBoxTransform(
+				Context,
+				Center,
+				Node->DimensionsCM * 1.015f),
+			true);
+	}
+
+	FVector InterfaceCenter = FVector::ZeroVector;
+	float InterfaceTopCM = -BIG_NUMBER;
+	int32 InterfaceNodeCount = 0;
+	auto AddSupportDiagnostic = [
+		&Context,
+		&Data,
+		&InterfaceCenter,
+		&InterfaceTopCM,
+		&InterfaceNodeCount](
+			UHierarchicalInstancedStaticMeshComponent* Preview,
+			const TConstArrayView<int32> NodeIds,
+			const float Scale)
+	{
+		for (const int32 NodeId : NodeIds)
+		{
+			const FABTSM73BrickNode* Node = FindDiagnosticNode(Data, NodeId);
+			if (Node == nullptr) continue;
+			const FVector Center = Node->LocalCenter
+				+ FVector(0.0f, 0.0f, Data.FoundationCapTopCM);
+			Preview->AddInstance(
+				WorldBoxTransform(
+					Context,
+					Center,
+					Node->DimensionsCM * Scale),
+				true);
+			InterfaceCenter += Center;
+			InterfaceTopCM = FMath::Max(
+				InterfaceTopCM,
+				Center.Z + Node->DimensionsCM.Z * 0.5f);
+			++InterfaceNodeCount;
+		}
+	};
+	AddSupportDiagnostic(
+		DAGFailureWeakPreview,
+		Pattern.WeakNodeIds,
+		Pattern.Pattern == EABTSM73DAGFailurePattern::InternalOffsetSeam
+			? 1.11f
+			: 1.085f);
+	AddSupportDiagnostic(
+		DAGFailurePivotPreview,
+		Pattern.RemainingSupportNodeIds,
+		1.06f);
+
+	const bool bHasAffectedBounds =
+		AffectedBoundsMin.X <= AffectedBoundsMax.X
+		&& AffectedBoundsMin.Y <= AffectedBoundsMax.Y
+		&& AffectedBoundsMin.Z <= AffectedBoundsMax.Z;
+	FVector FailureDirection =
+		Pattern.ExpectedMotion == EABTSM73DAGFailureMotion::Drop
+		? FVector::DownVector
+		: Pattern.ExpectedFailureDirectionLocal.GetSafeNormal();
+	if (InterfaceNodeCount > 0
+		&& bHasAffectedBounds
+		&& !FailureDirection.IsNearlyZero())
+	{
+		InterfaceCenter /= static_cast<float>(InterfaceNodeCount);
+		const FVector AffectedCenter =
+			(AffectedBoundsMin + AffectedBoundsMax) * 0.5f;
+		FVector DirectionOrigin = AffectedCenter;
+		DirectionOrigin.Z = AffectedBoundsMax.Z + 54.0f;
+		if (Pattern.ExpectedMotion == EABTSM73DAGFailureMotion::Drop)
+		{
+			DirectionOrigin.Y = AffectedBoundsMin.Y - 54.0f;
+		}
+		constexpr float DirectionLengthCM = 118.0f;
+		constexpr float DirectionThicknessCM = 13.0f;
+		const FVector DirectionCenter =
+			DirectionOrigin + FailureDirection * (DirectionLengthCM * 0.5f);
+		DAGFailureDirectionPreview->AddInstance(
+			WorldOrientedBoxTransform(
+				Context,
+				DirectionCenter,
+				FailureDirection,
+				FVector(
+					DirectionLengthCM,
+					DirectionThicknessCM,
+					DirectionThicknessCM)),
+			true);
+		const FVector DirectionTip =
+			DirectionOrigin + FailureDirection * DirectionLengthCM;
+		const FVector HeadWingAxis =
+			FMath::Abs(FVector::DotProduct(
+				FailureDirection,
+				FVector::UpVector)) > 0.85f
+			? FVector::RightVector
+			: FVector::UpVector;
+		constexpr float HeadLengthCM = 38.0f;
+		for (const float Sign : {-1.0f, 1.0f})
+		{
+			const FVector HeadDirection =
+				(-FailureDirection + HeadWingAxis * Sign * 0.72f).GetSafeNormal();
+			DAGFailureDirectionPreview->AddInstance(
+				WorldOrientedBoxTransform(
+					Context,
+					DirectionTip + HeadDirection * (HeadLengthCM * 0.5f),
+					HeadDirection,
+					FVector(
+						HeadLengthCM,
+						DirectionThicknessCM,
+						DirectionThicknessCM)),
+				true);
+		}
+	}
+
+	if (DAGFailurePatternLabel != nullptr && bHasAffectedBounds)
+	{
+		FString LabelText;
+		switch (Pattern.Pattern)
+		{
+		case EABTSM73DAGFailurePattern::InternalSingleSupport:
+			LabelText = TEXT("SINGLE / DROP\nW RED | P NONE");
+			break;
+		case EABTSM73DAGFailurePattern::InternalAsymmetricDualSupport:
+			LabelText = TEXT("DUAL / TIP\nW RED | P CYAN");
+			break;
+		case EABTSM73DAGFailurePattern::InternalOffsetSeam:
+			LabelText = TEXT("SEAM / SLIDE+TIP\nW MAGENTA | P CYAN");
+			break;
+		default:
+			LabelText = TEXT("DAG3-B");
+			break;
+		}
+		const FVector LabelLocalCenter(
+			(AffectedBoundsMin.X + AffectedBoundsMax.X) * 0.5f,
+			(AffectedBoundsMin.Y + AffectedBoundsMax.Y) * 0.5f,
+			AffectedBoundsMax.Z + 150.0f);
+		FVector LabelForward = FVector::VectorPlaneProject(
+			FVector::ForwardVector,
+			Context.GravityUp).GetSafeNormal();
+		if (LabelForward.IsNearlyZero())
+		{
+			LabelForward = FVector::VectorPlaneProject(
+				FVector::RightVector,
+				Context.GravityUp).GetSafeNormal();
+		}
+		DAGFailurePatternLabel->SetText(FText::FromString(LabelText));
+		DAGFailurePatternLabel->SetWorldLocation(
+			Context.AnchorTransform.TransformPositionNoScale(LabelLocalCenter));
+		DAGFailurePatternLabel->SetWorldRotation(
+			FRotationMatrix::MakeFromXZ(
+				LabelForward,
+				Context.GravityUp).ToQuat());
+		DAGFailurePatternLabel->SetVisibility(true, true);
+	}
+
+	DAGFailureWeakPreview->SetVisibility(
+		DAGFailureWeakPreview->GetInstanceCount() > 0,
+		true);
+	DAGFailurePivotPreview->SetVisibility(
+		DAGFailurePivotPreview->GetInstanceCount() > 0,
+		true);
+	DAGFailureAffectedPreview->SetVisibility(
+		DAGFailureAffectedPreview->GetInstanceCount() > 0,
+		true);
+	DAGFailureDirectionPreview->SetVisibility(
+		DAGFailureDirectionPreview->GetInstanceCount() > 0,
+		true);
 }
 
 void AABTSM73StableBuildingActor::UpdateFoundationComponents(
@@ -459,6 +843,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	FString Error;
 	if (!BuildResolvedStructure(false, Context, Data, Error, MaterialSystem))
 	{
+		LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
 		FillGenerationSummary(Context, Data, false, Error);
 		RejectRuntimeStructure(Error);
 		if (Data.DAGFailureFrontierAnalysis.bEnabled)
@@ -483,6 +868,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A][Reject] Actor=%s Reason=%s"), *GetName(), *Error);
 		return;
 	}
+	LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
 	RuntimeMaterialSystem = MaterialSystem;
 	UpdateFoundationComponents(Context, Data);
 	RuntimeModules.Reset();
@@ -514,6 +900,10 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		RuntimeModulesByNodeId.Reset();
 	}
 	ClearBrickPreviews();
+	if (bRuntimeSpawned)
+	{
+		UpdateDAGFailurePatternDiagnostics(Context, Data);
+	}
 	bRuntimePlanar = Context.bPlanar;
 	RuntimeGravityReference = Context.bPlanar
 		? Context.GravityUp
@@ -809,6 +1199,7 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	IdleValidationState = EABTSM73IdleValidationState::Rejected;
 	SetActorTickEnabled(false);
 	ClearBrickPreviews();
+	ClearDAGFailurePatternDiagnostics();
 	FoundationCap->SetVisibility(false, true);
 	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FoundationFeet->ClearInstances();

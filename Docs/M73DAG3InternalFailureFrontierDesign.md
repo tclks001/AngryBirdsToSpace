@@ -1,6 +1,6 @@
 # M7.3-DAG-3：内部 Failure Frontier
 
-> 状态：DAG3-A 纯数据“失效前沿发现”已落地并完成自动化基线；DAG3-B 三种纯数据、同材质的宏观接口两遍事务改写已经完成代码、DAG3 全前缀 11/11 及 DAG2.3/M7 路由/世界契约/B2/M10 smoke 回归，当前阶段待可见几何/PIE 验收。生产 Profile 继续同时关闭分析与几何改写，因此现有 DAG2.3 的 13/17/13 模块、`DAGTopologyHash`、材质和 `WeakPoints=0` 合同均不得改变。DAG3-C 攻击可达性/材质/Profile 路由、DAG-4 settled/Chaos 对照及正式可见 PIE 仍未完成，不能据此宣称内部弱点玩法已经上线。
+> 状态：DAG3-A 纯数据“失效前沿发现”已落地并完成自动化基线；DAG3-B 三种同材质宏观接口的两遍事务改写、`PlanarPhysicsTestMap` 认证 Fixture、`W/P/Affected/Direction` 非碰撞诊断层、真实 Actor/Chaos 30 Hz 完整态门禁和可见 PIE 已于 2026-07-29 完成并由用户验收。生产 Profile 继续同时关闭分析与几何改写，因此现有 DAG2.3 的 13/17/13 模块、`DAGTopologyHash`、材质和 `WeakPoints=0` 合同均不得改变。下一步进入 DAG3-C 攻击可达性、材料与显式 Profile 路由；DAG-4 settled Contact、弱点移除和弱点/非弱点 Chaos 对照仍未完成，不能据此宣称内部弱点玩法已经上线。
 >
 > 父级：[递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。前置：[DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。生产边界：[M7 TaskGraph 球面建筑集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。后续：[语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 
@@ -18,7 +18,7 @@ DAG-3 的玩家目标不是把一块顶部砖涂成弱材质，而是在建筑�
 | 子阶段 | 内容 | 当前状态 |
 | --- | --- | --- |
 | DAG3-A | 从 DAG2.3 编译后的物理接触 DAG 发现、度量和稳定选择内部 Failure Frontier | 已实现 |
-| DAG3-B | 把物理前沿提升为稳定 Macro 接口 Intent，并以第二遍 DAG2.3 重求解实现 `InternalSingleSupport`、`InternalAsymmetricDualSupport`、`InternalOffsetSeam` | 代码与自动化/兼容回归完成，待可见几何/PIE |
+| DAG3-B | 把物理前沿提升为稳定 Macro 接口 Intent，并以第二遍 DAG2.3 重求解实现 `InternalSingleSupport`、`InternalAsymmetricDualSupport`、`InternalOffsetSeam` | 已完成三 Fixture、非碰撞诊断、30 Hz Actor/Chaos 与可见 PIE 验收 |
 | DAG3-C | 加入扫掠空间、攻击可达性、材质与 Profile 路由，并以显式 opt-in 接入生产候选 | 未实现 |
 | DAG-4 | Idle 后重建 settled Contact DAG，并执行弱点/非弱点 Chaos 对照 | 未实现 |
 
@@ -39,6 +39,15 @@ DAG3-B 的本轮边界同样明确：
 - 不执行攻击扫掠、地形/建筑遮挡射界、真实鸟击打或弱点/非弱点 Chaos 对照；
 - 不修改 TaskGraph 生产 Profile 默认值，不允许 DAG Reject 回退 Legacy；
 - 不以纯数据 Tip/Slide 代理替代 DAG-4 settled Contact、实际自由位移、二次碰撞和可见 PIE。
+
+本轮可见收口仍属于 DAG3-B 完整态验收，新增内容只允许：
+
+- 在 M7 专属 `PlanarPhysicsTestMap` 放置三个显式 opt-in 的认证 Fixture，分别请求 Single、Dual 与 Seam；不得借此打开 TaskGraph 生产默认；
+- 以不参与 Query、Physics、Navigation、Damage 或材料选择的诊断组件显示 `W`、`P`、受影响主体闭包和预期方向；诊断层不是弱点 Actor，也不得写入 `WeakPoints`；
+- 在真实物理 World 中以 30 Hz 推进三个完整态 Actor，证明不是“未创建 PhysicsScene”或“刚体未激活”造成的假绿灯；
+- 在可见 PIE 中检查三种完整态承载路径、Offset 和预测方向是否可读，并核对 Preview 被运行时模块替换后身份不漂移。
+
+本轮明确不移除 `W`，不施加代表性鸟击，不认证实际 `Drop/Tip/SlideThenTip`，不重建 settled Contact DAG，也不比较弱点与普通位置收益；这些仍分别属于 DAG3-C 与 DAG-4。
 
 ## 2. 输入与唯一数据链
 
@@ -340,6 +349,65 @@ Bricks=13/17/13
 
 DAG3-B 仍不写 `WeakPoints`。成功候选另以 `[ABTS][M7.3-DAG3B][Pattern]` 记录 `SourceHash/RealizedHash`、Macro 接口、`Weak/Pivot`、完整态/失效态 Margin、`Reseat`、`Offset` 与尝试次数；拒绝候选记录 `[ABTS][M7.3-DAG3B][Reject]`。这些 Pattern/Weak Node 字段只表示“纯数据改写意图与静态反事实已建立”，不是 DAG3-C 已完成材料/攻击路由，也不是实际弱点击毁已通过。
 
+### 7.1 可见验收 Fixture
+
+`PlanarPhysicsTestMap` 的三栋建筑必须使用与
+`ABTS.M73DAG3.Rewrite.PatternGeometryMatrix` 相同的认证输入域：
+
+```text
+Base Profile = MakeDefaultProfile(Workshop, Wood)
+GenerationSettings.BuildingSeed = 1034266606
+DAGGenerationSettings.BuildingSeed = 1034266606
+bEnableAnalysis = true
+bEnableGeometryRewrite = true
+Pattern = InternalSingleSupport
+        | InternalAsymmetricDualSupport
+        | InternalOffsetSeam
+```
+
+三个 Fixture 只允许 `Pattern` 和场景 Transform 不同。它们不能继续使用普通
+`Arch + Seed 7301 + ExpansionStepBudget 6 + MaxExpansionDepth 3`
+压力配置；后者属于独立 DAG2.3 动态稳定回归，不能证明 DAG3-B 已执行。
+
+编辑器 Preview 与 PIE 运行时必须从同一输入重新构建，而不是把编辑器中已烘焙的
+HISM 当作运行时结果。每栋的 `GenerationSummary` 和日志至少要证明：
+
+- DAG3-A 已启用并选中非零 `SourceFrontierHash`；
+- DAG3-B 已启用、已应用，Resolved Pattern 与该 Fixture 的显式请求一致；
+- `RealizedPatternHash` 非零，且三个 Fixture 两两不同；
+- Single 为一个 `W`、零个 `P`，Dual/Seam 均为一个 `W`、一个 `P`；
+- `ExpectedFailureDirectionLocal` 非零；Seam 的 Offset 不低于
+  `MinOffsetSeamShiftCM`；
+- `WeakPoints=0`、原材料不变，生产 Profile 默认仍关闭。
+
+### 7.2 非碰撞诊断层
+
+DAG3-B 同材质且不写 `WeakPoints`，不能复用 Legacy
+`WeakPointPreview` 作为可见验收。测试 Fixture 需要独立诊断层：
+
+| 诊断角色 | 数据源 | 可见语义 |
+| --- | --- | --- |
+| `W` | `DAGFailurePatternResult.WeakNodeIds` | 未来攻击移除集合；Single/Dual 为弱支撑，Seam 为弱键 |
+| `P` | `DAGFailurePatternResult.RemainingSupportNodeIds` | Dual/Seam 允许保留的强侧枢轴或偏心承托 |
+| `Affected` | `DAGFailurePatternResult.AffectedMainBodyNodeIds` | 反事实预期受影响的主体闭包，不包括仅用于抬高指标的 Helper |
+| `Direction` | `DAGFailurePatternResult.ExpectedFailureDirectionLocal` | `Drop`、`Tip` 或 `SlideThenTip` 的确定性预测方向 |
+
+角色颜色、图例和方向标识在 Editor Preview 与 PIE 中必须一致，并满足：
+
+- 所有诊断组件 `CollisionEnabled=NoCollision`，不产生 Overlap，不影响导航；
+- 诊断组件不得改变砖块 Transform、尺寸、材质、质量、接触或求解迭代；
+- 关闭诊断显示时，生成数据、Pattern Hash、模块数和 Idle 结果保持不变；
+- PIE 清理普通材质 Preview 时，不得误删仍用于人工验收的 DAG3-B 诊断层；
+- 诊断层只解释完整态的静态意图，不能用预测箭头冒充实际 Chaos 运动结果。
+
+三种 Fixture 的最低视觉读形如下：
+
+| Fixture | 必须可读的完整态差异 | 诊断语义 |
+| --- | --- | --- |
+| Single | 中部唯一承重接口，无强侧枢轴 | 一个 `W`、无 `P`，`Drop` 方向 |
+| Dual | 弱侧与强侧枢轴分离，主体重心相对枢轴具有倾覆方向 | 一个 `W`、一个 `P`，`Tip` 方向 |
+| Seam | 中腰存在非零闭包错位，弱键与偏心承托分离 | 一个 `W`、一个 `P`，`SlideThenTip` 方向 |
+
 ## 8. 自动化验收
 
 DAG3-A 新增六项纯数据自动化：
@@ -387,6 +455,106 @@ ABTS.M73DAG3.Rewrite.BudgetDisabledAndAtomicFailure
 
 本节只记录已经落地的测试 API 名称和实际覆盖面。DAG3-A 的倒序输入测试继续证明来源 Frontier 身份不依赖输入数组顺序；本轮 `DeterminismAndIdentity` 只声明它实际覆盖的完整重复构建，不把未执行的 DAG3-B 数组变换写成已验收。
 
+### 8.1 真实 Actor/Chaos 30 Hz 门禁
+
+本轮可见收口的精确 Automation Path 冻结为：
+
+```text
+ABTS.M73DAG3.Chaos.PatternMatrixPlanarIdle
+```
+
+该测试必须创建 `CreatePhysicsScene=true` 且
+`ShouldSimulatePhysics=true` 的临时 Game World，不能使用默认关闭物理的轻量
+Test World。测试首先推进一个自由落体探针，证明 Chaos 确实在运行；探针未产生
+足够向下位移或速度时必须失败，不能继续把三栋静止 Actor 计为成功。
+
+随后测试从与可见地图相同的认证 Factory/Profile 同时创建 Single、Dual、Seam
+三个 `AABTSM73StableBuildingActor`，并以 `1/30 s` 固定步长推进，至少断言：
+
+1. 三个 Actor 均为 DAG3-A enabled、DAG3-B enabled/applied；
+2. Resolved Pattern 与请求一一对应，三个 `RealizedPatternHash` 非零且两两不同；
+3. 三者的 `W/P/Affected/Direction` 数量与语义符合 7.2 节；
+4. 运行时模块完整生成、实际启用物理并应用 M7.3 per-body Chaos 迭代配置；
+5. 穿透预检没有 Repair、Large Error 或 Remaining Small Penetration；
+6. 最多在现行 Idle 超时预算内得到 `Accepted=3`、`Rejected=0`；
+7. 终态模块仍完整存在，测试没有通过销毁失败 Actor 或跳过 Idle 形成假绿灯；
+8. 诊断组件无 Query/Physics/Overlap，且不增加受模拟刚体数。
+
+这项门禁只证明三个**完整态**改写在 30 Hz 下可稳定落座。测试不得主动移除
+`W`，不得把静态 Counterfactual 指标解释成实际 Drop/Tip/Slide 结果。
+
+### 8.2 待执行命令与证据模板
+
+> 当前状态：待执行。以下内容是回填模板，不是通过记录。只有本次提交对应的
+> fresh 日志、标准 Automation 完成标记、唯一 Success 计数和可见 PIE 截图全部
+> 齐备后，才可把本节状态改为“通过”。
+
+强制 Unity 编译：
+
+```powershell
+$ProjectRoot = (git rev-parse --show-toplevel).Trim()
+$EngineRoot = 'C:\Program Files\Epic Games\UE_5.8'
+
+& "$EngineRoot\Engine\Build\BatchFiles\Build.bat" `
+  AngryBirdsToSpaceEditor Win64 Development `
+  "-Project=$ProjectRoot\AngryBirdsToSpace.uproject" `
+  -WaitMutex -NoHotReload -ForceUnity -DisableAdaptiveUnity
+```
+
+30 Hz Actor/Chaos 精确过滤器：
+
+```powershell
+$RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$Project = "$ProjectRoot\AngryBirdsToSpace.uproject"
+$Log = "$ProjectRoot\Saved\Logs\DAG3B-PatternChaos30Hz-$RunId.log"
+
+& "$EngineRoot\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" $Project `
+  -unattended -nop4 -NullRHI -NoSound -NoMessaging `
+  "-ExecCmds=Automation RunTests ABTS.M73DAG3.Chaos.PatternMatrixPlanarIdle;Quit" `
+  "-TestExit=Automation Test Queue Empty" `
+  "-AbsLog=$Log"
+```
+
+自动化回填项：
+
+| 证据 | 预期 | 实际结果 |
+| --- | --- | --- |
+| Exact commit | 与地图、诊断层和测试代码一致 | 由本阶段交接消息记录，不在提交内容中自引用 SHA |
+| ForceUnity / DisableAdaptiveUnity | Editor Development 全链接成功 | 2026-07-29，4 actions，17.55 秒，`Result: Succeeded` |
+| 精确 Automation Path | `1/1 Success` 且有 `**** TEST COMPLETE. EXIT CODE: 0 ****` | `1/1 Success`，终止码 0 |
+| Gravity probe | 明确产生向下位移与速度 | 30 Hz 下下降 `39.16 cm`，并具有向下速度 |
+| Pattern Actor | Single/Dual/Seam 各一；enabled/applied；Hash 两两不同 | 3/3 applied；Realized Hash `159078272 / 709171792 / 4176113681` |
+| 真实模块与穿透 | 模块数符合生成结果；Repair/Large/RemainingSmall 均为零 | `11/12/12`，共 35 个真实模拟刚体；逐体 32/8 solver；穿透与修补均为 0 |
+| 30 Hz Idle | `Accepted=3 Rejected=0` | `Accepted=3 Rejected=0` |
+| Negative scan | 无 DAG3-B Reject、Idle Reject、Automation Error 或崩溃 | 通过 |
+| Fresh log | 本次唯一相对日志路径和通过计数 | `Saved/Logs/DAG3B-FinalExact-20260729-164222.log`，`1/1` |
+
+可见 PIE 必须在 fresh Editor 中打开
+`/Game/Maps/PlanarPhysicsTestMap`，关闭 Live Coding 后执行。验收者至少保存一张
+Editor Preview 和一张 PIE 同视角截图，并逐栋回填：
+
+| Fixture | Editor Preview | PIE 运行时 | Pattern/Hash | Idle | 读形结论 |
+| --- | --- | --- | --- | --- | --- |
+| Single | 通过 | 通过 | `InternalSingleSupport / 159078272` | Accepted | 唯一红色 `W`、无 `P`，黄色 Drop 方向可读 |
+| Dual | 通过 | 通过 | `InternalAsymmetricDualSupport / 709171792` | Accepted | 红色 `W` 与青色 `P` 分侧，Tip 方向可读 |
+| Seam | 通过 | 通过 | `InternalOffsetSeam / 4176113681` | Accepted | 主体存在非零 Offset，洋红 `W`、青色 `P` 与 SlideThenTip 方向可读 |
+
+用户于 2026-07-29 在 `PlanarPhysicsTestMap` 完成可见 PIE 验收：三栋结构完整且
+Idle 稳定；Single 的单支撑、Dual 的正上方双支撑、Seam 的斜上方偏置均可辨认。
+三者保持同一认证外壳以隔离 Failure Pattern，不把本 Fixture 矩阵冒充后续 WFC
+的六栋视觉不重复建筑。
+
+可见 PIE 的正式通过条件：
+
+- 三栋在 Editor 中已经是不同的认证改写，不是三个普通 Arch；
+- 进入 PIE 后普通材质 Preview 被真实模块替换，但 Fixture Pattern、Hash、几何和诊断角色不漂移；
+- 诊断层无遮挡地解释 `W/P/Affected/Direction`，同时不产生碰撞、推挤或额外刚体；
+- 三栋完整态不弹飞、不自倒、不因 Idle Reject 消失；
+- 日志中三栋均有 `[ABTS][M7.3-DAG3B][Pattern]` 和
+  `IdleValidation ... Accepted=1`，且没有 `DAG3B Reject` 或
+  `BuildingGateRejected`；
+- 验收结论只写“DAG3-B 完整态视觉可读且稳定”，不得写“实际弱点击毁已通过”。
+
 2026-07-29 的 DAG3-B 代码切片证据：
 
 - `AngryBirdsToSpaceEditor Win64 Development -ForceUnity -DisableAdaptiveUnity`：加入最终 `Auto` 成功路径断言后复编 14.72 秒成功；
@@ -430,9 +598,28 @@ DAG3-B 自身至少要证明：
 9. 整栋材料未改变、`WeakPoints=0`，生产 Profile 仍关闭；
 10. 旧 `ABTS.M73DAG.`、M7 Profile Routing 和世界契约回归继续通过。
 
-纯数据自动化可以完成这些断言；若本轮未执行可见 Pattern 预览，则阶段状态必须写成“代码/自动化完成，待可见几何验收”，不能宣称玩家已经能读懂三种结构。
+纯数据自动化可以完成这些断言；若本轮未执行 8.1 与 8.2 的真实
+Actor/Chaos 和可见 Pattern 预览，则阶段状态必须写成“代码/纯数据自动化完成，
+待可见几何验收”，不能宣称玩家已经能读懂三种结构。
 
-### 9.2 DAG3-C、DAG-4 与生产启用
+### 9.2 DAG3-B 可见收口
+
+DAG3-B 可见收口必须把“同一纯数据 Fixture 三种结果”交付为可复验的 Editor/PIE
+场景，而不是只在截图中摆放三栋外观相近的普通 Arch：
+
+1. `PlanarPhysicsTestMap` 的三个 Fixture 与 Rewrite 自动化共享认证输入域，只显式改变 Pattern；
+2. Editor Preview 和 PIE 运行时均分别解析为 Single、Dual、Seam，且身份与几何一致；
+3. `W/P/Affected/Direction` 诊断层使用 Pattern Result 的权威节点集合和方向，不从位置或材质反推；
+4. 诊断层不参与碰撞、物理、导航、伤害或材料路由，开关诊断不改变生成 Hash 与 Idle；
+5. `ABTS.M73DAG3.Chaos.PatternMatrixPlanarIdle` 以真实 30 Hz Chaos 证明三栋完整态 3/3 Accepted；
+6. 可见 PIE 能辨认 Single 的唯一支撑、Dual 的弱/强分侧、Seam 的非零错位，以及各自预测方向；
+7. 生产 TaskGraph Profile 保持 DAG3-A/B disabled，现行 13/17/13 普通建筑合同不变；
+8. 证据必须回填本次 commit、ForceUnity 构建、fresh Automation 日志、精确通过计数和 Preview/PIE 截图。
+
+以上八项全部完成后，DAG3-B 只能标记为“完整态几何、诊断与 Idle 可见验收通过”。
+它仍不能标记为“内部弱点玩法上线”。
+
+### 9.3 DAG3-C、DAG-4 与生产启用
 
 后续不得仅把 `bEnableAnalysis` 或 `bEnableGeometryRewrite` 打开便宣布 DAG-3 完成。生产候选至少还要满足：
 

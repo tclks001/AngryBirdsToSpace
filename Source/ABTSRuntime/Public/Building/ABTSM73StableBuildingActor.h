@@ -15,6 +15,7 @@ class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UTextRenderComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 
@@ -61,6 +62,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M7.3-A")
 	const FABTSM73GenerationSummary& GetGenerationSummary() const { return GenerationSummary; }
 
+	/** Read-only DAG3-B result retained from the latest editor/runtime build attempt. */
+	const FABTSM73DAGFailurePatternResult& GetDAGFailurePatternResultForValidation() const
+	{
+		return LastDAGFailurePatternResult;
+	}
+
+	int32 GetDAG3BWeakDebugInstanceCount() const;
+	int32 GetDAG3BPivotDebugInstanceCount() const;
+	int32 GetDAG3BAffectedDebugInstanceCount() const;
+	int32 GetDAG3BDirectionDebugInstanceCount() const;
+
 	EABTSM73IdleValidationState GetIdleValidationState() const { return IdleValidationState; }
 	bool IsIdleValidationTerminal() const
 	{
@@ -82,8 +94,12 @@ private:
 	void FillGenerationSummary(const FABTSM73GroundContext& Context, const FABTSM73StructureData& Data,
 		bool bAccepted, const FString& Error);
 	void UpdatePreviewComponents(const FABTSM73GroundContext& Context, const FABTSM73StructureData& Data);
+	void UpdateDAGFailurePatternDiagnostics(
+		const FABTSM73GroundContext& Context,
+		const FABTSM73StructureData& Data);
 	void UpdateFoundationComponents(const FABTSM73GroundContext& Context, const FABTSM73StructureData& Data);
 	void ClearBrickPreviews();
+	void ClearDAGFailurePatternDiagnostics();
 	void TryFindRuntimeMaterialSystem();
 	void BeginIdleValidation(const FABTSM73GroundContext& Context);
 	void FinishIdleValidation(bool bTimedOut);
@@ -104,6 +120,16 @@ private:
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassPreview;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-B|Preview")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WeakPointPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DAGFailureWeakPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DAGFailurePivotPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DAGFailureAffectedPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DAGFailureDirectionPreview;
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	TObjectPtr<UTextRenderComponent> DAGFailurePatternLabel;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Foundation")
 	TObjectPtr<UStaticMeshComponent> FoundationCap;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Foundation")
@@ -146,9 +172,23 @@ private:
 	TObjectPtr<UMaterialInterface> WeakPointDebugMaterial;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> WeakPointDebugMID;
+	/** Non-physical overlays for inspecting an explicitly applied DAG3-B candidate. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	bool bShowDAGFailurePatternDiagnostics = true;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG3B|Diagnostics")
+	TObjectPtr<UMaterialInterface> DAGFailureDebugMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DAGFailureWeakDebugMID;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DAGFailurePivotDebugMID;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DAGFailureAffectedDebugMID;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DAGFailureDirectionDebugMID;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Result")
 	FABTSM73GenerationSummary GenerationSummary;
+	FABTSM73DAGFailurePatternResult LastDAGFailurePatternResult;
 
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;
