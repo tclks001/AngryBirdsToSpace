@@ -16,6 +16,7 @@
 #include "PCG/ABTSM3R0AcceptanceManifest.h"
 #include "PCG/ABTSM3R1AcceptanceManifest.h"
 #include "PCG/ABTSM3R2AcceptanceManifest.h"
+#include "PCG/ABTSM3R3AcceptanceManifest.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UI/ABTSM1HUD.h"
@@ -128,6 +129,47 @@ void AABTSM3GameMode::BeginPlay()
 				FABTSM3R2AcceptanceManifest::
 					ComputeAcceptanceProfileHash()));
 	}
+	ManifestFailure.Reset();
+	if (FABTSM3R3AcceptanceManifest::Validate(ManifestFailure))
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3R3][AcceptanceManifest] SelfValid=1 SpatialSchema=%d CompatibilityOracle=Gen3/Policy1 MonthlyPolicy=%d ManifestHash=%016llX SweepSeedManifestHash=%016llX ReferenceSeedManifestHash=%016llX FixtureCatalogHash=%016llX Entries=%d ExpectedSpatialCases=8 ExpectedFailureCases=2 ExpectedRuntimeCases=1 DisplaySeed=%d"),
+			FABTSM3R3AcceptanceManifest::SpatialSchemaVersion,
+			FABTSM3R3AcceptanceManifest::
+				MonthlyLayoutPolicyVersion,
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeSweepSeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeReferenceSeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3MonthlyEncounterBuilder::
+					ComputeFixtureProfileCatalogHash()),
+			FABTSM3R3AcceptanceManifest::GetEntries().Num(),
+			FABTSM3R3AcceptanceManifest::DisplaySeed);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R3][AcceptanceManifest] SelfValid=0 Failure=%s ComputedManifestHash=%016llX ComputedSweepSeedManifestHash=%016llX ComputedReferenceSeedManifestHash=%016llX ComputedFixtureCatalogHash=%016llX"),
+			*ManifestFailure,
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeSweepSeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeReferenceSeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3MonthlyEncounterBuilder::
+					ComputeFixtureProfileCatalogHash()));
+	}
 	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM3R0Smoke")))
 	{
 		M3R0SmokeStartSeconds = FPlatformTime::Seconds();
@@ -157,6 +199,17 @@ void AABTSM3GameMode::BeginPlay()
 			M3R2SmokeTimer,
 			this,
 			&AABTSM3GameMode::TryCompleteM3R2Smoke,
+			0.25f,
+			true,
+			0.25f);
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM3R3Smoke")))
+	{
+		M3R3SmokeStartSeconds = FPlatformTime::Seconds();
+		GetWorldTimerManager().SetTimer(
+			M3R3SmokeTimer,
+			this,
+			&AABTSM3GameMode::TryCompleteM3R3Smoke,
 			0.25f,
 			true,
 			0.25f);
@@ -738,6 +791,242 @@ void AABTSM3GameMode::FinishM3R2Smoke(
 		false,
 		bPassed ? 0 : 1,
 		TEXT("AABTSM3GameMode::FinishM3R2Smoke"));
+}
+
+void AABTSM3GameMode::TryCompleteM3R3Smoke()
+{
+	constexpr double MaxWaitSeconds = 20.0;
+	const double ElapsedSeconds =
+		FPlatformTime::Seconds() - M3R3SmokeStartSeconds;
+
+	AABTSM3Planet* Planet = nullptr;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		if (It->IsM3PresentationReady())
+		{
+			Planet = *It;
+			break;
+		}
+	}
+	if (ElapsedSeconds > MaxWaitSeconds)
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("CertificationExceeded20Seconds"));
+		return;
+	}
+	if ((Planet == nullptr || !bInitialPlayerPlaced)
+		&& ElapsedSeconds < MaxWaitSeconds)
+	{
+		return;
+	}
+	if (Planet == nullptr)
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("PlanetNotReadyWithin20Seconds"));
+		return;
+	}
+	if (!bInitialPlayerPlaced)
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("InitialPlayerNotPlacedWithin20Seconds"));
+		return;
+	}
+
+	FString Failure;
+	if (!FABTSM3R3AcceptanceManifest::Validate(Failure))
+	{
+		FinishM3R3Smoke(
+			false,
+			FString::Printf(TEXT("Manifest:%s"), *Failure));
+		return;
+	}
+	const FABTSM3PCGSummary& Summary = Planet->PCGSummary;
+	const FABTSM3R1CompatibilityOracle& DisplayOracle =
+		FABTSM3R1AcceptanceManifest::
+			GetCompatibilityOracles()[0];
+	const uint64 CompatibilitySnapshot =
+		FABTSM3R1AcceptanceManifest::
+			ComputeCompatibilitySnapshotHash(
+				Planet->GetGeneratedTasks(),
+				Planet->GetGeneratedTaskLinks(),
+				Planet->GetGeneratedCellStates(),
+				Planet->GetGeneratedEdgeStates(),
+				Summary);
+	if (Planet->WorldSeed
+			!= FABTSM3R3AcceptanceManifest::DisplaySeed
+		|| !Summary.bAccepted
+		|| Summary.GeneratorVersion
+			!= FABTSM3R3AcceptanceManifest::GeneratorVersion
+		|| Summary.LayoutPolicyVersion
+			!= FABTSM3R1AcceptanceManifest::
+				CompatibilityLayoutPolicyVersion
+		|| CompatibilitySnapshot != DisplayOracle.SnapshotHash
+		|| Planet->GetMonthlyWorldSchema()
+			.Quality.bMonthlyWorldAccepted)
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("CompatibilityBoundaryMismatch"));
+		return;
+	}
+	const TArray<FABTSM3BuildingSpawnSite>& CompatibilitySites =
+		Planet->GetBuildingSpawnSites();
+	const TConstArrayView<FABTSM3R0ExpectedBuildingSite>
+		ExpectedCompatibilitySites =
+			FABTSM3R0AcceptanceManifest::
+				GetDisplayBuildingSites();
+	if (CompatibilitySites.Num()
+			!= ExpectedCompatibilitySites.Num())
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("CompatibilityBuildingSiteCountMismatch"));
+		return;
+	}
+	for (int32 SiteIndex = 0;
+		SiteIndex < ExpectedCompatibilitySites.Num();
+		++SiteIndex)
+	{
+		if (CompatibilitySites[SiteIndex].TaskId
+				!= ExpectedCompatibilitySites[SiteIndex].TaskId
+			|| CompatibilitySites[SiteIndex].CellId
+				!= ExpectedCompatibilitySites[SiteIndex].CellId)
+		{
+			FinishM3R3Smoke(
+				false,
+				FString::Printf(
+					TEXT("CompatibilityBuildingSiteMismatch:%d"),
+					SiteIndex));
+			return;
+		}
+	}
+	if (!Planet->ValidateMonthlyRoutePool(Failure)
+		|| static_cast<uint64>(
+				Planet->GetMonthlyRoutePool().
+					RouteCandidatePoolHash)
+			!= FABTSM3R2AcceptanceManifest::
+				FrozenDisplayPoolHash)
+	{
+		FinishM3R3Smoke(
+			false,
+			FString::Printf(TEXT("RoutePool:%s"), *Failure));
+		return;
+	}
+	if (!Planet->ValidateMonthlySpatialResult(Failure))
+	{
+		FinishM3R3Smoke(
+			false,
+			FString::Printf(TEXT("Spatial:%s"), *Failure));
+		return;
+	}
+	const FABTSM3MonthlySpatialResult& Result =
+		Planet->GetMonthlySpatialResult();
+	if (!Result.bSpatialResultValid
+		|| Result.bMonthlyWorldAccepted
+		|| Result.RejectReason
+			!= EABTSM3MonthlySpatialRejectReason::None
+		|| Result.SchemaVersion
+			!= FABTSM3R3AcceptanceManifest::SpatialSchemaVersion
+		|| Result.GeneratorVersion
+			!= FABTSM3R3AcceptanceManifest::GeneratorVersion
+		|| Result.LayoutPolicyVersion
+			!= FABTSM3R3AcceptanceManifest::
+				MonthlyLayoutPolicyVersion
+		|| Result.AttemptedRouteCandidateCount
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayAttemptedRouteCandidates
+		|| Result.SpatialHardPassCount
+			!= FABTSM3R3AcceptanceManifest::
+				DisplaySpatialHardPassCount
+		|| Result.RetainedCandidates.Num()
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayRetainedCandidates
+		|| static_cast<uint64>(Result.SpatialResultHash)
+			!= FABTSM3R3AcceptanceManifest::
+				FrozenDisplayResultHash
+		|| FABTSM3MonthlyEncounterBuilder::
+				ComputeResultSnapshotHash(Result)
+			!= FABTSM3R3AcceptanceManifest::
+				FrozenDisplaySnapshotHash)
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("SpatialResultIdentityMismatch"));
+		return;
+	}
+	const FABTSM3MonthlySpatialCandidate& Best =
+		Result.RetainedCandidates[0];
+	if (static_cast<uint64>(Best.SpatialCandidateHash)
+			!= FABTSM3R3AcceptanceManifest::
+				FrozenDisplayCandidateHash
+		|| Best.RecomputedRoute.Metrics.RouteLengthCM
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayRecomputedRouteLengthCM
+		|| Best.Encounters.Num()
+			!= FABTSM3R3AcceptanceManifest::DisplayEncounterCount
+		|| Best.Pockets.Num()
+			!= FABTSM3R3AcceptanceManifest::DisplayPocketCount
+		|| Best.BiomeDistricts.Num()
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayBiomeDistrictCount
+		|| Best.PlayableCellCount
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayPlayableCellCount
+		|| Best.ApprovedTransitionCellCount
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayApprovedTransitionCellCount
+		|| Best.ActiveRoleCoveragePermille
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayActiveCoveragePermille
+		|| Best.DeepWildPermille
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayDeepWildPermille
+		|| Best.OptimizedPVSRays
+			!= FABTSM3R3AcceptanceManifest::
+				DisplayOptimizedPVSRays)
+	{
+		FinishM3R3Smoke(
+			false,
+			TEXT("SpatialCandidateMetricsMismatch"));
+		return;
+	}
+	FinishM3R3Smoke(true, FString());
+}
+
+void AABTSM3GameMode::FinishM3R3Smoke(
+	const bool bPassed,
+	const FString& Failure)
+{
+	GetWorldTimerManager().ClearTimer(M3R3SmokeTimer);
+	const double ElapsedSeconds = FMath::Max(
+		0.0,
+		FPlatformTime::Seconds() - M3R3SmokeStartSeconds);
+	if (bPassed)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3R3][RuntimeCertification] ManifestHash=%016llX Terminal=1 Passed=1 Failed=0 ElapsedSeconds=%.3f"),
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeManifestHash()),
+			ElapsedSeconds);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R3][RuntimeCertification] ManifestHash=%016llX Terminal=1 Passed=0 Failed=1 Failure=%s ElapsedSeconds=%.3f"),
+			static_cast<unsigned long long>(
+				FABTSM3R3AcceptanceManifest::
+					ComputeManifestHash()),
+			*Failure,
+			ElapsedSeconds);
+	}
+	FPlatformMisc::RequestExitWithStatus(
+		false,
+		bPassed ? 0 : 1,
+		TEXT("AABTSM3GameMode::FinishM3R3Smoke"));
 }
 
 void AABTSM3GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, const int32 SpawnCellId)

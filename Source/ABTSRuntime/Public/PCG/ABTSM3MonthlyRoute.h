@@ -518,12 +518,31 @@ public:
 		EABTSM3MonthlyRouteRejectReason& OutReason,
 		FString& OutFailure);
 
+	/**
+	 * R-3 strict seam: regenerate exactly one previously retained skeleton under
+	 * its own formal Terrain/Water/NoRoad context. Unlike Build(), this never
+	 * creates a neutral-context fallback or reorders the candidate pool.
+	 */
+	static bool RebuildCandidateStrict(
+		int32 WorldSeed,
+		const FABTSM3MonthlyRouteConfig& Config,
+		const TArray<FABTSM2Cell>& Cells,
+		float PlanetRadiusCM,
+		const FABTSM3MonthlyRoadContext& Context,
+		const FABTSM3MonthlyRouteCandidate& SourceCandidate,
+		FABTSM3MonthlyRouteCandidate& OutCandidate,
+		EABTSM3MonthlyRouteRejectReason& OutReason,
+		FString& OutFailure);
+
 	static uint64 ComputeConfigHash(
 		const FABTSM3MonthlyRouteConfig& Config,
 		float PlanetRadiusCM,
 		uint64 TopologyHash);
 
 	static uint64 ComputeTopologyHash(const TArray<FABTSM2Cell>& Cells);
+
+	static uint64 ComputeRoadContextHash(
+		const FABTSM3MonthlyRoadContext& Context);
 
 	static uint64 ComputeCandidateHash(
 		const FABTSM3MonthlyRouteCandidate& Candidate);

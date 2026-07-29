@@ -152,9 +152,16 @@ bool AABTSM3Planet::RebuildPlanet()
 		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM);
 	bM3PresentationReady = bPresentationReady;
 #if WITH_EDITOR
-	if (bM3PresentationReady && bDrawMonthlyRouteDebugOverlay)
+	if (bM3PresentationReady)
 	{
-		DrawMonthlyRouteDebugOverlay();
+		if (bDrawMonthlyRouteDebugOverlay)
+		{
+			DrawMonthlyRouteDebugOverlay();
+		}
+		if (bDrawMonthlySpatialDebugOverlay)
+		{
+			DrawMonthlySpatialDebugOverlay();
+		}
 	}
 #endif
 	return bM3PresentationReady;
@@ -186,9 +193,11 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 	{
 		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
 		MonthlyRoutePool = FABTSM3MonthlyRoutePool();
+		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
 		MonthlyRouteDebugData = FABTSM3MonthlyRouteDebugData();
+		MonthlySpatialDebugData = FABTSM3MonthlySpatialDebugData();
 #endif
 		return false;
 	}
@@ -240,6 +249,31 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlyRoutePool,
 		MonthlyRouteDebugData);
 #endif
+	FString SpatialFailure;
+	const FABTSM3MonthlySpatialFaultInjection NoSpatialFaults;
+	if (!FABTSM3MonthlyEncounterBuilder::Build(
+			WorldSeed,
+			MonthlyEncounterSpatialConfig,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlyRoutePool,
+			NoSpatialFaults,
+			MonthlySpatialResult,
+			SpatialFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R3][EncounterSpatial] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlyEncounterBuilder::GetRejectReasonName(
+				MonthlySpatialResult.RejectReason),
+			*SpatialFailure);
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlyEncounterBuilder::BuildDebugData(
+		MonthlySpatialResult,
+		MonthlySpatialDebugData);
+#endif
 	return true;
 }
 
@@ -262,6 +296,32 @@ bool AABTSM3Planet::ValidateMonthlyRoutePool(
 	OutFailure = FString::Printf(
 		TEXT("%s:%s"),
 		FABTSM3MonthlyRouteBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlySpatialResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlySpatialRejectReason RejectReason =
+		EABTSM3MonthlySpatialRejectReason::None;
+	if (FABTSM3MonthlyEncounterBuilder::Validate(
+			MonthlyEncounterSpatialConfig,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlyRoutePool,
+			FABTSM3MonthlySpatialFaultInjection(),
+			MonthlySpatialResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyEncounterBuilder::GetRejectReasonName(
 			RejectReason),
 		*OutFailure);
 	return false;
@@ -319,6 +379,64 @@ void AABTSM3Planet::DrawMonthlyRouteDebugOverlay() const
 			0,
 			3.0f);
 	}
+}
+
+void AABTSM3Planet::DrawMonthlySpatialDebugOverlay() const
+{
+	if (GetWorld() == nullptr
+		|| MonthlySpatialResult.RetainedCandidates.IsEmpty())
+	{
+		return;
+	}
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 210.0f;
+	const auto DrawCellSet = [this, &Center, Radius](
+		const TArray<int32>& CellIds,
+		const FColor Color,
+		const float SphereRadius)
+	{
+		for (const int32 CellId : CellIds)
+		{
+			if (!LogicalCells.IsValidIndex(CellId))
+			{
+				continue;
+			}
+			DrawDebugSphere(
+				GetWorld(),
+				Center + LogicalCells[CellId].UnitCenter * Radius,
+				SphereRadius,
+				6,
+				Color,
+				false,
+				30.0f,
+				0,
+				2.0f);
+		}
+	};
+	DrawCellSet(
+		MonthlySpatialDebugData.PlayableEnvelopeCellIds,
+		FColor(40, 80, 200),
+		12.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.NoRoadCellIds,
+		FColor::Red,
+		18.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.RoadArrivalCellIds,
+		FColor::White,
+		42.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.RevealCellIds,
+		FColor::Cyan,
+		42.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.SlingshotCellIds,
+		FColor::Yellow,
+		42.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.TargetAnchorCellIds,
+		FColor::Red,
+		58.0f);
 }
 #endif
 

@@ -1892,6 +1892,12 @@ uint64 FABTSM3MonthlyRouteBuilder::ComputeTopologyHash(
 	return Hash.Get();
 }
 
+uint64 FABTSM3MonthlyRouteBuilder::ComputeRoadContextHash(
+	const FABTSM3MonthlyRoadContext& Context)
+{
+	return ABTSM3R2RoutePrivate::ComputeContextHash(Context);
+}
+
 uint64 FABTSM3MonthlyRouteBuilder::ComputeConfigHash(
 	const FABTSM3MonthlyRouteConfig& Config,
 	const float PlanetRadiusCM,
@@ -2487,6 +2493,104 @@ bool FABTSM3MonthlyRouteBuilder::Validate(
 			EABTSM3MonthlyRouteRejectReason::HashMismatch;
 		OutFailure = TEXT("PoolHash");
 		return false;
+	}
+	return true;
+}
+
+bool FABTSM3MonthlyRouteBuilder::RebuildCandidateStrict(
+	const int32 WorldSeed,
+	const FABTSM3MonthlyRouteConfig& Config,
+	const TArray<FABTSM2Cell>& Cells,
+	const float PlanetRadiusCM,
+	const FABTSM3MonthlyRoadContext& Context,
+	const FABTSM3MonthlyRouteCandidate& SourceCandidate,
+	FABTSM3MonthlyRouteCandidate& OutCandidate,
+	EABTSM3MonthlyRouteRejectReason& OutReason,
+	FString& OutFailure)
+{
+	using namespace ABTSM3R2RoutePrivate;
+	OutCandidate = FABTSM3MonthlyRouteCandidate();
+	OutReason = EABTSM3MonthlyRouteRejectReason::None;
+	OutFailure.Reset();
+	if (!ValidateConfig(Config, OutFailure)
+		|| !FMath::IsFinite(PlanetRadiusCM)
+		|| PlanetRadiusCM <= 0.0f)
+	{
+		OutReason = EABTSM3MonthlyRouteRejectReason::InvalidConfig;
+		return false;
+	}
+	if (!ValidateTopology(Cells, OutFailure))
+	{
+		OutReason = EABTSM3MonthlyRouteRejectReason::InvalidTopology;
+		return false;
+	}
+	if (!ValidateRoadContext(Context, Cells.Num(), OutFailure))
+	{
+		OutReason = EABTSM3MonthlyRouteRejectReason::InvalidContext;
+		return false;
+	}
+	if (!SourceCandidate.bHardPass
+		|| SourceCandidate.RejectReason
+			!= EABTSM3MonthlyRouteRejectReason::None
+		|| SourceCandidate.CandidateId < 0
+		|| SourceCandidate.ControlCellIds.Num()
+			!= Config.SkeletonControlPointCount
+		|| static_cast<uint64>(SourceCandidate.CandidateHash)
+			!= ComputeCandidateHash(SourceCandidate))
+	{
+		OutReason = EABTSM3MonthlyRouteRejectReason::HashMismatch;
+		OutFailure = TEXT("StrictSourceCandidate");
+		return false;
+	}
+
+	const bool bBuilt = BuildCandidate(
+		WorldSeed,
+		SourceCandidate.CandidateId,
+		SourceCandidate.Origin,
+		Config,
+		Cells,
+		PlanetRadiusCM,
+		Context,
+		OutCandidate);
+	if (OutCandidate.ControlCellIds
+		!= SourceCandidate.ControlCellIds)
+	{
+		OutCandidate.bHardPass = false;
+		OutCandidate.RejectReason =
+			EABTSM3MonthlyRouteRejectReason::HashMismatch;
+		OutCandidate.CandidateHash = static_cast<int64>(
+			ComputeCandidateHash(OutCandidate));
+		OutReason = EABTSM3MonthlyRouteRejectReason::HashMismatch;
+		OutFailure = TEXT("StrictSkeletonIdentity");
+		return false;
+	}
+	if (!bBuilt)
+	{
+		OutReason = OutCandidate.RejectReason;
+		OutFailure = FString::Printf(
+			TEXT("StrictRoad:%s"),
+			GetRejectReasonName(OutReason));
+		return false;
+	}
+	OutCandidate.Backtracks = SourceCandidate.Backtracks;
+	OutCandidate.CandidateHash = static_cast<int64>(
+		ComputeCandidateHash(OutCandidate));
+	for (const int32 CellId : OutCandidate.OrderedRoadCellIds)
+	{
+		if (!IsCellTraversable(Context, CellId))
+		{
+			OutCandidate.bHardPass = false;
+			OutCandidate.RejectReason =
+				EABTSM3MonthlyRouteRejectReason::HardBlocked;
+			OutCandidate.CandidateHash = static_cast<int64>(
+				ComputeCandidateHash(OutCandidate));
+			OutReason =
+				EABTSM3MonthlyRouteRejectReason::HardBlocked;
+			OutFailure = FString::Printf(
+				TEXT("StrictContextCell:%d"),
+				CellId);
+			return false;
+		}
 	}
 	return true;
 }

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PCG/ABTSM3MonthlyEncounter.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
 #include "PCG/ABTSM3MonthlySchema.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
@@ -90,6 +91,18 @@ public:
 	/** Revalidates the R-2 pool against this planet's private CellTopo. */
 	bool ValidateMonthlyRoutePool(FString& OutFailure) const;
 
+	/**
+	 * R-3 spatial candidate pool. It is an M3-private observation layer and
+	 * never replaces the compatibility TaskGraph or v1 building exports.
+	 */
+	const FABTSM3MonthlySpatialResult& GetMonthlySpatialResult() const
+	{
+		return MonthlySpatialResult;
+	}
+
+	/** Revalidates the R-3 result against the R-2 source pool and CellTopo. */
+	bool ValidateMonthlySpatialResult(FString& OutFailure) const;
+
 	/** True only when the complete M3 logical, terrain and material presentation rebuild succeeded. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	bool IsM3PresentationReady() const { return bM3PresentationReady; }
@@ -143,6 +156,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Route")
 	FABTSM3MonthlyRouteConfig MonthlyRouteConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
+	FABTSM3MonthlyEncounterSpatialConfig MonthlyEncounterSpatialConfig;
 
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
@@ -271,6 +287,10 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Route")
 	FABTSM3MonthlyRoutePool MonthlyRoutePool;
 
+	/** R-3 six-Encounter spatial result; it is not exported through compatibility contracts. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
+	FABTSM3MonthlySpatialResult MonthlySpatialResult;
+
 #if WITH_EDITORONLY_DATA
 	/** Index-only debug snapshot. R-1 does not draw or alter the production map. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Schema|Debug")
@@ -279,9 +299,16 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Route|Debug")
 	FABTSM3MonthlyRouteDebugData MonthlyRouteDebugData;
 
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Debug")
+	FABTSM3MonthlySpatialDebugData MonthlySpatialDebugData;
+
 	/** Draws the best R-2 route as a temporary Editor/PIE line overlay without changing terrain. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Route|Debug")
 	bool bDrawMonthlyRouteDebugOverlay = false;
+
+	/** Draws R-3 reservations/envelope only; it never changes production terrain. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Debug")
+	bool bDrawMonthlySpatialDebugOverlay = false;
 #endif
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
@@ -298,6 +325,7 @@ private:
 	int32 FindNearestCell(const FVector& UnitDirection) const;
 #if WITH_EDITOR
 	void DrawMonthlyRouteDebugOverlay() const;
+	void DrawMonthlySpatialDebugOverlay() const;
 #endif
 
 	TUniquePtr<FABTSM3TerrainVisualField> TerrainVisualField;
