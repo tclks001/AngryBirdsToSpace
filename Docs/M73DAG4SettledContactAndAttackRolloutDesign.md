@@ -1,6 +1,6 @@
 # M7.3-DAG-4：Settled Contact 与攻击对照
 
-> 状态：代码与 fresh 自动化已于 2026-07-29 完成；生产 Profile 中 DAG3-A/B/C/DAG-4 仍默认关闭，等待用户可见 PIE。父级设计见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)，总路线见 [递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。前置阶段 [DAG3-C](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) 只认证静态候选和真实材料伤害路由；本稿首次验证移除弱点后的实际 Chaos 主体响应。
+> 状态：阶段已于 2026-07-29 完成。代码、fresh 自动化、三 Pattern/四材料真实 Chaos 对照与用户可见机械响应均已验收；提交 `8a1aab8` 还将弱点/失效模式诊断覆盖层改为仅在编辑器视口可见、PIE/游戏隐藏。生产 Profile 中 DAG3-A/B/C/DAG-4 仍默认关闭；建筑外形与弱点布局多样性不再阻塞本阶段，等待 [DAG-5](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md#m73-dag-5候选搜索装置与-taskgraph) 候选池和 [语义 WFC](M73WFCBuildingEnvelopeAndDAGFittingResearch.md) 提供真正不同的建筑骨架后联合调整。父级设计见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)，总路线见 [递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 
 ## 1. 目标与阶段边界
 
@@ -118,7 +118,7 @@ DAG1/2/2.3
 
 ### 6.2 为什么首版使用“等成本移除”
 
-当前 DAG3-C 保证整栋同材质，弱点与普通砖拥有相同 Profile 和单砖破坏成本。DAG-4 首版比较的是“支付相同破坏成本后，结构得到多少进展”，而不是比较鼠标误差或鸟体碰撞点。真实鸟击、推进冲量和可见操作仍留在 PIE 验收；候选认证不得靠给弱点额外冲量制造优势。
+当前 DAG3-C 保证整栋同材质，弱点与普通砖拥有相同 Profile 和单砖破坏成本。DAG-4 首版比较的是“支付相同破坏成本后，结构得到多少进展”，而不是比较鼠标误差或鸟体碰撞点。真实鸟击、推进冲量和可见操作由第 13 节 PIE 验收补充；候选认证不得靠给弱点额外冲量制造优势。
 
 ## 7. 动态指标
 
@@ -238,9 +238,9 @@ Actor=... Stage=... Reason=...
 `UnrealEditor-Cmd -NullRHI` 日志与精确 Success 计数。编译继续强制
 `-ForceUnity -DisableAdaptiveUnity`。若 UE 5.8 的全局 Live Coding mutex 被其他工作树 Editor 占用，只能在审计所有 Editor 进程、确认没有进程加载本工作树项目或 DLL 后，按多工作树规范记录并使用已批准的 `-NoHotReloadFromIDE` 例外。
 
-## 13. 人工 PIE 验收
+## 13. 人工 PIE 验收（已完成）
 
-自动化通过后，仍需在 M7 专属 `PlanarPhysicsTestMap` 串行可见验收：
+自动化通过后，用户已在 M7 专属 `PlanarPhysicsTestMap` 串行完成可见验收：
 
 > 只对显式测试 Profile 打开 DAG3-A/B/C/DAG-4；不得借人工验收修改三套生产 Profile 的默认关闭状态。
 
@@ -249,11 +249,14 @@ Actor=... Stage=... Reason=...
 3. 重启 PIE，用同一 Seed、鸟、拉力分别击打三个普通点和真实 `W`；
 4. 普通点有局部物理反馈，但结构进展明显低；
 5. `W` 被真实伤害链破坏后，中上部产生 Drop、Tip 或 SlideThenTip；
-6. 方向与诊断箭头、轮廓留白一致，允许 Chaos 细节不同；
+6. 实际坍塌方向与编辑器中的诊断箭头、轮廓留白一致，允许 Chaos 细节不同；
 7. 上部不在原位重新稳定落座，也不只掉最高一小段；
 8. 没有 `BuildingGateRejected`、验证残留隐藏模块或正式建筑瞬移。
 
-自动化只能声明“DAG-4 代码与动态候选门槛通过”；在用户完成以上 PIE 前，不声明正式弱点玩法已可见验收。
+本次 PIE 证明 Single/Dual/Seam 的 Drop/Tip/SlideThenTip 机械语义可见、完整态与稳定性无误。验收同时暴露两项表现结论：
+
+- 原诊断 HISM/TextRender 附着在生成器 Root 上，建筑坍塌后会留在初始世界位置；`8a1aab8` 已统一设置 `HiddenInGame=true`，编辑器仍可读，PIE/游戏不再渲染，并由 `PatternMatrixPlanarIdle` 防回归；
+- 三 Pattern 当前共享“下部主体—狭窄失效接口—上部主体”的近似外壳。DAG-4 只认证弱点相对普通点的真实机械收益，不以当前 Fixture 冒充最终建筑/弱点多样性；六栋视觉去重、弱点高度/侧向/构件类型分布和最终生产启用转交 DAG-5/WFC。
 
 ## 14. 实际实现文件
 
@@ -277,7 +280,8 @@ Actor=... Stage=... Reason=...
 源码提交：
 
 - `ec55143`：settled OBB Contact DAG、Frontier/COM/Hull/Tip/Reseat 复验、确定性普通点规划、Shadow Island、真实 Chaos 指标归约、原子接受/拒绝、默认关闭路由与纯数据/运行时测试；
-- `9bb8fd2`：补齐木、石、铁、玻璃四种真实 MaterialSystem Profile 的独立运行时矩阵；该提交是本轮源码认证 tip。
+- `9bb8fd2`：补齐木、石、铁、玻璃四种真实 MaterialSystem Profile 的独立运行时矩阵；
+- `8a1aab8`：弱点、支点、受影响主体、方向箭头和 Pattern 标签保留编辑器诊断，但统一在 PIE/游戏隐藏；同时增加 Game World 属性回归。该提交是 DAG-4 阶段源码 tip。
 
 动态认证反向暴露并修正了两个生成期缺口：
 
@@ -300,4 +304,11 @@ fresh `UnrealEditor-Cmd -NullRHI`：
 - `ABTS.M7`：43/43 Success，包含 DAG-4 六项、M73B/B2 与 TaskGraph 路由，日志 `Saved/Logs/M7-Final2-20260729-200910.log`；
 - `ABTS.Contracts.WorldGeneration`：2/2 Success，日志 `Saved/Logs/WorldContract-Final-20260729-195804.log`。
 
-自动化结论仅为“DAG-4 代码与动态候选门槛通过”。A/B/C/DAG-4 生产默认仍关闭；第 13 节的用户可见弱点击毁 PIE 尚未执行，因此不能声明正式弱点玩法已经上线。
+诊断显示修复后的增量证据：
+
+- 强制 Unity Development Editor 全链接成功（5 actions），未使用 Hot Reload；
+- `ABTS.M73DAG3.Chaos.PatternMatrixPlanarIdle`：1/1 Success，日志 `Saved/Logs/DAG3B-DiagnosticVisibility-20260729-212103-FreshAutomation.log`；
+- `ABTS.M73DAG4.`：6/6 Success，日志 `Saved/Logs/DAG4-DiagnosticVisibility-20260729-212150-FreshAutomation.log`；
+- `ABTS.M7`：43/43 Success，日志 `Saved/Logs/M7-DiagnosticVisibility-20260729-212237-FreshAutomation.log`。
+
+DAG-4 至此完成。它证明当前 Fixture 的动态弱点合同，不授权把三套相似外壳用于最终六栋生产建筑；A/B/C/DAG-4 生产默认继续关闭，等 DAG-5/WFC 同时提供语义包络、候选 Novelty 和弱点布局差异后，再用本阶段验证器逐栋重认证。

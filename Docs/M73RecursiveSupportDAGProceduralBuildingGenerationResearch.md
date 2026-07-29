@@ -2,7 +2,7 @@
 
 > 文档性质：M7.3 新路线的独立调研、算法设计与阶段状态索引；具体 C++ 落地与验收合同由各 DAG 子阶段设计稿约束。
 >
-> 状态：DAG-1、DAG-2 与 DAG2.3 已落地并接管球面 TaskGraph 普通建筑生产链；DAG3-A/B 已完成内部 Failure Frontier 与三种同材质事务改写，DAG3-B 可见 PIE 已由用户验收；DAG3-C 已完成静态可玩候选认证；[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成 settled Contact、一个弱点/恰好三个普通点真实 Chaos 对照和木/石/铁/玻璃矩阵，fresh DAG-4 6/6、完整 DAG3 22/22、M7 43/43。生产 Profile 中 A/B/C/DAG-4 仍默认关闭；当前后续为 DAG-4 用户可见弱点击毁 PIE、建筑外观语义 WFC 与 Encounter 消费。
+> 状态：DAG-1、DAG-2 与 DAG2.3 已落地并接管球面 TaskGraph 普通建筑生产链；DAG3-A/B/C 已完成内部 Failure Frontier、三种同材质改写和静态可玩候选认证；[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成 settled Contact、一个弱点/恰好三个普通点真实 Chaos 对照、木/石/铁/玻璃矩阵与用户可见机械响应，诊断覆盖层也已改为 PIE/游戏隐藏。生产 Profile 中 A/B/C/DAG-4 仍默认关闭；当前进入 DAG-5 候选搜索与语义 WFC，先生成真正不同的建筑骨架，再联合调整建筑和弱点多样性。
 >
 > 父级：[M7.3 原总体算法](M73ProceduralModularBuildingGenerationResearch.md)。子阶段：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) · [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md) · [DAG-2.2 自适应几何](M73DAG22AdaptiveGeometryDesign.md) · [DAG-2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md) · [DAG3-C 攻击可达与候选路由](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md) · [语义 WFC 与 DAG 拟合调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 顶部结构弱点](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)
 
@@ -817,7 +817,7 @@ A-(B+C)
 - [x] DAG3-B 身份/兼容合同：保留 `SourceFrontierHash` 作为来源证明，使用独立 `RealizedPatternHash` 标识最终 Pattern，继续保持 `DAGTopologyHash`、生产默认与 `WeakPoints=0`；
 - [x] DAG3-B 可见验收：三种 Pattern 的支撑路径、偏移、完整性与稳定性已由用户在 PIE 验收；
 - [x] DAG3-C：补有界 edge/small-cut、扫掠空间、攻击可达性、真实 Profile 弱点绑定与显式生产 opt-in；fresh C 10/10、完整 DAG3 22/22；
-- [x] [DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md)：以 settled Contact/Chaos 对照取代“三节点顶部闭包”验收；代码与 fresh 自动化完成，生产默认关闭，用户可见 PIE 待验收。
+- [x] [DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md)：以 settled Contact/Chaos 对照取代“三节点顶部闭包”验收；代码、fresh 自动化、用户可见机械响应与 PIE 诊断隐藏均已完成。生产默认继续关闭，等待 DAG-5/WFC 的最终候选。
 
 ### M7.3-DAG-4：Settled Contact 与攻击对照
 
@@ -825,11 +825,14 @@ A-(B+C)
 - [x] 从同一 settled 快照执行 `1 Weak + 3 Ordinary` 独立 Shadow Island Chaos rollout；
 - [x] 记录位移、旋转、传播深度、坍塌质量、方向与二次撞击，并执行绝对/相对响应门槛；
 - [x] 三 Pattern 与木/石/铁/玻璃固定 Seed 自动认证完成；
-- [ ] 用户可见弱点击毁 PIE 与生产默认启用评审。
+- [x] 用户可见 PIE 验证 Drop/Tip/SlideThenTip 机械语义；弱点/失效模式覆盖层仅在编辑器视口显示；
+- [x] 阶段边界冻结：当前相似外壳不作为最终多样性验收，生产默认启用评审转交 DAG-5/WFC。
 
 ### M7.3-DAG-5：候选搜索、装置与 TaskGraph
 
 - 候选池、回溯、变异和 Novelty Archive；
+- 先由语义 WFC 提供退台、偏置、门窗、悬挑、桥跨、空腔等不同建筑骨架，再在骨架内部搜索 Failure Frontier；
+- 建筑包络 Novelty、Support DAG 签名和 `W/P/Affected/Direction` 弱点签名联合去重，禁止六栋都退化为“上下两块、中间细腰”；
 - 再接绳、链、炸药桶和弹簧活塞；
 - 接入 TaskGraph 难度、道路距离、弹弓射界与坍塌安全区；
 - 在正式球面 CellTopo Anchor 上批量生成。
@@ -896,7 +899,7 @@ ABTS.M73DAG.NoveltyBatch
 
 不应继续调整当前 B2 顶冠的尺寸、材料或支撑位置。这些调整只能改变顶部局部坍塌，无法让它成为主体的承载瓶颈。
 
-DAG-1、DAG-2、DAG2.3 与 DAG3-A 已把图语法、几何编译和纯数据前沿发现拆开验证。DAG3-B 两遍事务重求解及可见 PIE、DAG3-C 静态可玩候选认证与运行时伤害路由、DAG-4 settled/Chaos 动态候选认证均已完成；当前等待 DAG-4 用户可见弱点击毁 PIE：
+DAG-1、DAG-2、DAG2.3 与 DAG3-A 已把图语法、几何编译和纯数据前沿发现拆开验证。DAG3-B 两遍事务重求解、DAG3-C 静态可玩候选认证与运行时伤害路由、DAG-4 settled/Chaos 动态候选认证和用户可见机械响应均已完成；当前进入 DAG-5/WFC 的建筑骨架与联合多样性阶段：
 
 ```text
 已完成：图语法与物理接触 DAG
@@ -905,7 +908,8 @@ DAG-1、DAG-2、DAG2.3 与 DAG3-A 已把图语法、几何编译和纯数据前�
 -> 已完成：可见几何/PIE 读形
 -> 已完成：攻击可达性、静态运动净空、真实材料与显式生产候选
 -> 已完成：以 settled Contact/Chaos 验证实际攻击是否触发主体级联
--> 当前：显式测试 Profile 的用户可见弱点击毁 PIE
+-> 已完成：显式测试 Profile 的用户可见机械响应；诊断覆盖层仅编辑器可见
+-> 当前：语义 WFC 建筑骨架、候选 Novelty 与建筑/弱点联合多样性
 ```
 
 本项目最终有价值的 PCG 核心应当是：生成器不仅知道每块砖在哪里，还知道它属于哪个宏观结构、承担哪条载荷路径、为什么是普通支撑或弱点、击毁后哪部分主体会以什么方向垮塌，以及真实 Chaos 是否兑现了这个设计意图。

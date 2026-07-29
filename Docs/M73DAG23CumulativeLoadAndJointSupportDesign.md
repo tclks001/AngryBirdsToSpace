@@ -134,7 +134,7 @@ M3 BuildingSpawnSite / Pad
 - 旧 Blueprint CDO 中的 Legacy Profile 在 M7 边界升级为安全 DAG2.3 Profile，不能静默复活旧链；
 - 当前 Target 使用 Budget=0 `TwinTowerBridge`，包含 Parallel 与联合支撑；Workshop/Furnace 使用 Budget=0 `SingleTower`；
 - DAG 失败必须带确定性 Reject，禁止回退 Legacy；
-- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A/B 已完成内部 Frontier 与三种同材质第二遍事务改写，DAG3-B 可见 PIE 已验收；DAG3-C 已完成静态可玩候选；[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已在独立显式开关下完成 settled Contact、`1 Weak + 3 Ordinary` 与四材料真实 Chaos 自动认证。生产默认仍关闭 A/B/C/DAG-4，故普通 DAG2.3 继续 `WeakPoints=0`；DAG-4 用户可见弱点击毁 PIE 完成前，不能宣称正式内部弱点已上线。
+- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A/B/C 与 [DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成内部 Frontier、三种同材质事务改写、静态可玩候选、settled Contact、`1 Weak + 3 Ordinary`、四材料真实 Chaos 和当前 Fixture 的用户可见机械响应。生产默认仍关闭 A/B/C/DAG-4，故普通 DAG2.3 继续 `WeakPoints=0`；最终六栋建筑和弱点布局多样性等待 DAG-5/WFC。
 - 任一生成或 Idle `Rejected` 必须撤销模块与 Foundation 碰撞，并阻断 `WorldReady`/发射；Pending/Running 必须持续等待，不能由可选的 M6 HISM 暖机开关绕过。
 - M7 必须在生成前登记必需 Actor 数并在尝试完成后封口；合同激活后只检查注册集合，且每个必需 Actor 都必须显式 `Accepted`。MaterialSystem/Profile/Class/Actor 缺失、`Registered != Expected`、`Accepted != Expected` 或必需 Actor 为 `NotRequired` 均为 Reject，不能把零 Actor 或关闭 Idle 验证当成合法通过。
 
@@ -156,7 +156,7 @@ M3 BuildingSpawnSite / Pad
 - DAG3-B 的 2026-07-29 最终证据为：加入 `Auto` 成功路径断言后的 `-ForceUnity -DisableAdaptiveUnity` 复编 14.72 秒成功；fresh NullRHI `ABTS.M73DAG3.` 11/11、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2、M73B2 2/2 Success；M10 45 秒 NullRHI 60 FPS smoke 中三栋保持 13/17/13 与原 Hash、DAG3-A/B 全关、零穿透、Idle 3/3 Accepted、最终门禁 3/0/3/3，且无 Error/Blocked 或 DAG3-B Pattern/Reject。该证据完成代码与兼容回归，但仍不替代可见几何/PIE。
 - 普通 Arch 动态稳定修补的 2026-07-29 最终证据为：`-ForceUnity -DisableAdaptiveUnity` 编译成功；fresh NullRHI `ABTS.M7` 26/26 Success，其中物理回归的三栋固定 30 FPS Arch 为 `Accepted=3 Rejected=0 Modules=99`、重力探针下降 `39.16 cm`；真实 `PlanarPhysicsTestMap` 在 NullRHI 和 D3D12 两套 fresh-process 30/60/120 FPS 中均为 Idle 3/3 Accepted、0 Rejected、最终 `WorldReady=1`。最苛刻 30 FPS 的最大平面漂移为 `2.59 cm`、最大转角 `0.65°`，且三栋仍保持 `Bricks=33 Supports=48 Ground=3 DAGMacro=9 DAGSparse=8 DAGHash=2113728967`。
 - DAG3-C 的 2026-07-29 最终证据为：`-ForceUnity -DisableAdaptiveUnity` 8 actions 编译成功；fresh NullRHI C 10/10、完整 DAG3 22/22、旧 DAG2.3 10/10、M7 37/37、世界生成契约 2/2 Success。C 默认关闭，完整三 Pattern 管线只由测试显式 opt-in。
-- DAG-4 的 2026-07-29 自动认证证据为：源码 tip `9bb8fd2`；强制 Unity 编译成功；fresh NullRHI DAG-4 6/6、完整 DAG3 22/22、旧 DAG2.3 10/10、M7 43/43、世界生成契约 2/2 Success。三 Pattern 均为 settled/Comparison Accepted 且各执行 4 Trials，四材料使用真实 Profile；A/B/C/DAG-4 生产默认仍关闭，可见 PIE 待验收。完整指标与日志见 [DAG-4 第 15 节](M73DAG4SettledContactAndAttackRolloutDesign.md#15-2026-07-29-实现与证据)。
+- DAG-4 的 2026-07-29 最终证据为：阶段源码 tip `8a1aab8`；强制 Unity 编译成功；fresh NullRHI DAG-4 6/6、完整 DAG3 22/22、旧 DAG2.3 10/10、M7 43/43、世界生成契约 2/2 Success。三 Pattern 均为 settled/Comparison Accepted 且各执行 4 Trials，四材料使用真实 Profile；用户可见机械响应已验收，弱点/失效模式覆盖层已改为 PIE/游戏隐藏并通过增量 M7 43/43。A/B/C/DAG-4 生产默认仍关闭，等待 DAG-5/WFC 联合多样性。完整指标与日志见 [DAG-4 第 15 节](M73DAG4SettledContactAndAttackRolloutDesign.md#15-2026-07-29-实现与证据)。
 
 仍需可见 PIE：
 

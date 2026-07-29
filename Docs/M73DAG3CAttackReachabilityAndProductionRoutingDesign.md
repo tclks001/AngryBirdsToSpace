@@ -1,6 +1,6 @@
 # M7.3-DAG3-C：攻击可达性、运动净空与候选路由
 
-> 状态：DAG3-C 代码与自动化已于 2026-07-29 完成；下游 [DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md) 也已完成代码与 fresh 自动认证。生产 A/B/C/DAG-4 仍默认关闭，等待 DAG-4 用户可见 PIE。父级设计见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)，总路线见 [递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
+> 状态：DAG3-C 已完成；下游 [DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md) 也已完成代码、fresh 自动认证和当前 Fixture 的用户可见机械响应。生产 A/B/C/DAG-4 仍默认关闭，等待 DAG-5/WFC 提供不同建筑骨架并联合认证建筑/弱点多样性。父级设计见 [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)，总路线见 [递归承载 DAG 生成总稿](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 
 ## 1. 目标与边界
 
@@ -174,4 +174,4 @@ ABTS.Contracts.WorldGeneration
 - `ABTS.M7`：37/37 Success，其中 `ABTS.M73B.` 1/1、`ABTS.M73B2.` 2/2、TaskGraph DAG2.3 Profile Routing 1/1，日志 `Saved/Logs/DAG3C-Final-M7-20260729-175052-985-FreshAutomation.log`；
 - `ABTS.Contracts.WorldGeneration`：2/2 Success，日志 `Saved/Logs/DAG3C-Final-WorldContracts-20260729-175052-996-FreshAutomation.log`。
 
-这些证据完成 DAG3-C 的纯数据、完整生成管线和真实运行时伤害路由门槛。[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已补齐移除 `W` 后的真实 Chaos 动态候选认证，但用户可见弱点击毁 PIE 仍未通过；生产默认因此继续关闭。
+这些证据完成 DAG3-C 的纯数据、完整生成管线和真实运行时伤害路由门槛。[DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已补齐移除 `W` 后的真实 Chaos 动态认证和用户可见机械响应；生产默认继续关闭的剩余原因是 DAG-5/WFC 尚未提供最终六栋建筑与弱点布局的联合多样性，而不是 DAG-4 机械门槛未完成。
