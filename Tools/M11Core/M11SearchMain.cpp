@@ -16,6 +16,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -31,6 +32,7 @@ namespace
 	struct Options
 	{
 		bool SelfTest = false;
+		bool DescribeContract = false;
 		bool Merge = false;
 		bool Json = false;
 		bool Resume = false;
@@ -74,6 +76,10 @@ namespace
 		if (Command == "--self-test")
 		{
 			OutOptions.SelfTest = true;
+		}
+		else if (Command == "--describe-contract")
+		{
+			OutOptions.DescribeContract = true;
 		}
 		else if (Command == "merge")
 		{
@@ -159,7 +165,7 @@ namespace
 				return false;
 			}
 		}
-		if (OutOptions.SelfTest)
+		if (OutOptions.SelfTest || OutOptions.DescribeContract)
 		{
 			return true;
 		}
@@ -242,6 +248,20 @@ namespace
 		return Result.str();
 	}
 
+	std::uint64_t HashCanonicalJson(const std::string_view Json)
+	{
+		// Standard FNV-1a/64. The manifest records both this schema and the
+		// canonical JSON bytes, so an auditor does not need project code to
+		// verify the contract identity.
+		std::uint64_t Hash = 14695981039346656037ull;
+		for (const unsigned char Byte : Json)
+		{
+			Hash ^= static_cast<std::uint64_t>(Byte);
+			Hash *= 1099511628211ull;
+		}
+		return Hash;
+	}
+
 	std::uint64_t HashFile(const fs::path& Path)
 	{
 		std::ifstream Stream(Path, std::ios::binary);
@@ -316,11 +336,77 @@ namespace
 		return Result.str();
 	}
 
-	std::string EvaluationJsonLine(const CandidateRecord& Candidate)
+	void WriteInputSetJson(
+		std::ostream& Stream,
+		const InputSetMetrics& Set,
+		const std::size_t SetIndex)
 	{
+		Stream << "{\"set\":\"S" << (SetIndex + 1) << "\""
+			<< ",\"fullDomainCount\":" << Set.FullDomainCount
+			<< ",\"fullDomainRetentionRatio\":"
+			<< Set.FullDomainRetentionRatio
+			<< ",\"screenAimCount\":" << Set.ScreenAimCount
+			<< ",\"screenAimRetentionRatio\":"
+			<< Set.ScreenAimRetentionRatio
+			<< ",\"screenAimRetentionCompliant\":"
+			<< (Set.ScreenAimRetentionCompliant ? "true" : "false")
+			<< ",\"conditionalProbeCount\":"
+			<< Set.ConditionalProbeCount
+			<< ",\"conditionalParentCount\":"
+			<< Set.ConditionalParentCount
+			<< ",\"conditionalMemberCount\":"
+			<< Set.ConditionalMemberCount
+			<< ",\"conditionalRetentionRatio\":"
+			<< Set.ConditionalRetentionRatio
+			<< ",\"screenAimHullEvidencePointCount\":"
+			<< Set.ScreenAimHullEvidencePointCount
+			<< ",\"screenAimHullAreaSquareDegrees\":"
+			<< Set.ScreenAimHullAreaSquareDegrees
+			<< ",\"screenAimHullYawSpanDegrees\":"
+			<< Set.ScreenAimHullYawSpanDegrees
+			<< ",\"screenAimHullPitchSpanDegrees\":"
+			<< Set.ScreenAimHullPitchSpanDegrees
+			<< ",\"screenAimHullNormalizedArea\":"
+			<< Set.ScreenAimHullNormalizedArea
+			<< ",\"screenAimHullCompactness\":"
+			<< Set.ScreenAimHullCompactness
+			<< ",\"screenAimHullContainsNominal\":"
+			<< (Set.ScreenAimHullContainsNominal ? "true" : "false")
+			<< ",\"screenAimHullCompliant\":"
+			<< (Set.ScreenAimHullCompliant ? "true" : "false")
+			<< ",\"screenAimHullYawPitch\":[";
+		for (std::size_t PointIndex = 0;
+			PointIndex < Set.ScreenAimHullYawPitch.size();
+			++PointIndex)
+		{
+			if (PointIndex > 0)
+			{
+				Stream << ',';
+			}
+			Stream << '['
+				<< Set.ScreenAimHullYawPitch[PointIndex].YawDegrees << ','
+				<< Set.ScreenAimHullYawPitch[PointIndex].PitchDegrees << ']';
+		}
+		Stream << "]}";
+	}
+
+	std::string BuildSearchContractJson(
+		const CandidateSearchContract& Contract);
+	std::string BuildSamplingSemanticsJson(
+		const CandidateSearchContract& Contract);
+
+	std::string EvaluationJsonLine(
+		const CandidateRecord& Candidate,
+		const CandidateSearchContract& Contract)
+	{
+		const std::string ContractJson = BuildSearchContractJson(Contract);
 		std::ostringstream Result;
 		Result << std::setprecision(17)
-			<< "{\"schema\":\"abts.m11b21.evaluation.v1\""
+			<< "{\"schema\":\"abts.m11b21.evaluation.v3\""
+			<< ",\"searchSourceHashSha256\":\""
+			<< ABTS::M11Core::ToolIdentity::SearchSourceHashSha256 << "\""
+			<< ",\"contractHash\":\""
+			<< Hex64(HashCanonicalJson(ContractJson)) << "\""
 			<< ",\"globalWorkIndex\":" << Candidate.GlobalWorkIndex
 			<< ",\"status\":\"" << ToString(Candidate.Status) << "\""
 			<< ",\"candidateSourceHash\":\""
@@ -353,6 +439,10 @@ namespace
 		Result << ']'
 			<< ",\"minimumTargetDistanceCM\":"
 			<< Candidate.Metrics.MinimumTargetDistanceCM
+			<< ",\"minimumReadableDeflectionRadians\":"
+			<< Candidate.Metrics.MinimumReadableDeflectionRadians
+			<< ",\"alternatingLateralTurnCount\":"
+			<< Candidate.Metrics.AlternatingLateralTurnCount
 			<< ",\"robustSurvivors\":"
 			<< Candidate.Metrics.RobustSurvivorCount
 			<< ",\"lowPowerCompletedAssistCount\":"
@@ -381,6 +471,30 @@ namespace
 			Result << Candidate.Metrics.Assists[Index]
 				.ActualDeflectionRadians;
 		}
+		Result << "],\"assistSignedLateralTurns\":[";
+		for (std::size_t Index = 0;
+			Index < Candidate.Metrics.Assists.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Result << ',';
+			}
+			Result << Candidate.Metrics.Assists[Index]
+				.SignedLateralTurnRadians;
+		}
+		Result << "],\"assistTurnAxisProjection\":[";
+		for (std::size_t Index = 0;
+			Index < Candidate.Metrics.Assists.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Result << ',';
+			}
+			Result << Candidate.Metrics.Assists[Index]
+				.LateralTurnAxisProjection;
+		}
 		Result << "],\"assistEnergy\":[";
 		for (std::size_t Index = 0;
 			Index < Candidate.Metrics.Assists.size();
@@ -406,6 +520,38 @@ namespace
 				.CollisionClearanceCM;
 		}
 		Result << ']'
+			<< ",\"fullDomainSampleCount\":"
+			<< Candidate.Metrics.FullDomainSampleCount
+			<< ",\"screenAimSampleCount\":"
+			<< Candidate.Metrics.ScreenAimSampleCount
+			<< ",\"solveFailures\":{\"fullDomain\":"
+			<< Candidate.Metrics.FullDomainSolveFailureCount
+			<< ",\"screenAim\":"
+			<< Candidate.Metrics.ScreenAimSolveFailureCount
+			<< ",\"conditional\":"
+			<< Candidate.Metrics.ConditionalSolveFailureCount << '}'
+			<< ",\"inputSets\":[";
+		for (std::size_t Index = 0;
+			Index < Candidate.Metrics.InputSets.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Result << ',';
+			}
+			WriteInputSetJson(
+				Result, Candidate.Metrics.InputSets[Index], Index);
+		}
+		Result << ']'
+			<< ",\"softScores\":{\"prefixRetention\":"
+			<< Candidate.Metrics.PrefixRetentionScore
+			<< ",\"prefixHull\":" << Candidate.Metrics.PrefixHullScore
+			<< ",\"deflectionReadability\":"
+			<< Candidate.Metrics.DeflectionReadabilityScore
+			<< ",\"alternation\":"
+			<< Candidate.Metrics.AlternationScore
+			<< ",\"pacing\":" << Candidate.Metrics.PacingScore
+			<< ",\"total\":" << Candidate.Metrics.SoftScore << '}'
 			<< ",\"rejection\":\""
 			<< EscapeJson(Candidate.Rejection) << "\"}\n";
 		return Result.str();
@@ -595,12 +741,14 @@ namespace
 
 	std::string BuildCheckpointJson(
 		const Options& OptionsValue,
+		const CandidateSearchContract& Contract,
 		const Checkpoint& Value)
 	{
+		const std::string ContractJson = BuildSearchContractJson(Contract);
 		std::ostringstream Result;
 		Result << std::setprecision(17)
 			<< "{\n"
-			<< "  \"schema\":\"abts.m11b21.checkpoint.v1\",\n"
+			<< "  \"schema\":\"abts.m11b21.checkpoint.v3\",\n"
 			<< "  \"toolBuildVersion\":\""
 			<< ABTS::M11Core::ToolIdentity::ToolBuildVersion << "\",\n"
 			<< "  \"productionCoreSourceHashSha256\":\""
@@ -609,6 +757,8 @@ namespace
 			<< "  \"searchSourceHashSha256\":\""
 			<< ABTS::M11Core::ToolIdentity::
 				SearchSourceHashSha256 << "\",\n"
+			<< "  \"contractHash\":\""
+			<< Hex64(HashCanonicalJson(ContractJson)) << "\",\n"
 			<< "  \"workItems\":" << OptionsValue.WorkItems << ",\n"
 			<< "  \"shardIndex\":" << OptionsValue.ShardIndex << ",\n"
 			<< "  \"shardCount\":" << OptionsValue.ShardCount << ",\n"
@@ -628,6 +778,7 @@ namespace
 	bool ReadCheckpoint(
 		const fs::path& Path,
 		const Options& OptionsValue,
+		const CandidateSearchContract& Contract,
 		Checkpoint& OutValue,
 		std::string& OutFailure)
 	{
@@ -646,6 +797,7 @@ namespace
 			Json, "productionCoreSourceHashSha256");
 		const auto Search = ExtractJsonString(
 			Json, "searchSourceHashSha256");
+		const auto ContractHash = ExtractJsonString(Json, "contractHash");
 		const auto WorkItems = ExtractJsonUnsigned(Json, "workItems");
 		const auto ShardIndex = ExtractJsonUnsigned(Json, "shardIndex");
 		const auto ShardCount = ExtractJsonUnsigned(Json, "shardCount");
@@ -658,11 +810,14 @@ namespace
 		const auto EvaluationHash =
 			ExtractJsonString(Json, "evaluationHash");
 		const auto Elapsed = ExtractJsonDouble(Json, "elapsedSeconds");
-		if (!Schema || !Tool || !Core || !Search || !WorkItems
+		const std::string ExpectedContractHash = Hex64(
+			HashCanonicalJson(BuildSearchContractJson(Contract)));
+		if (!Schema || !Tool || !Core || !Search || !ContractHash
+			|| !WorkItems
 			|| !ShardIndex || !ShardCount || !Seed || !Next
 			|| !StateBytes || !StateHash || !EvaluationBytes
 			|| !EvaluationHash || !Elapsed
-			|| *Schema != "abts.m11b21.checkpoint.v1"
+			|| *Schema != "abts.m11b21.checkpoint.v3"
 			|| *Tool
 				!= ABTS::M11Core::ToolIdentity::ToolBuildVersion
 			|| *Core
@@ -671,6 +826,7 @@ namespace
 			|| *Search
 				!= ABTS::M11Core::ToolIdentity::
 					SearchSourceHashSha256
+			|| *ContractHash != ExpectedContractHash
 			|| *WorkItems != OptionsValue.WorkItems
 			|| *ShardIndex != OptionsValue.ShardIndex
 			|| *ShardCount != OptionsValue.ShardCount
@@ -698,6 +854,184 @@ namespace
 		Stream << "{\"yawDegrees\":" << Value.YawDegrees
 			<< ",\"pitchDegrees\":" << Value.PitchDegrees
 			<< ",\"power\":" << Value.Power << '}';
+	}
+
+	std::string BuildSearchContractJson(
+		const CandidateSearchContract& Contract)
+	{
+		std::ostringstream Stream;
+		Stream.imbue(std::locale::classic());
+		Stream << std::setprecision(17)
+			<< "{\"contractVersion\":" << Contract.ContractVersion
+			<< ",\"algorithmVersion\":" << Contract.AlgorithmVersion
+			<< ",\"searchSeed\":" << Contract.SearchSeed
+			<< ",\"localTimeSampleCount\":"
+			<< Contract.LocalTimeSampleCount
+			<< ",\"localImpactSampleCount\":"
+			<< Contract.LocalImpactSampleCount
+			<< ",\"localRadialSampleCount\":"
+			<< Contract.LocalRadialSampleCount
+			<< ",\"localMomentumDirectionSampleCount\":"
+			<< Contract.LocalMomentumDirectionSampleCount
+			<< ",\"targetTimeSampleCount\":"
+			<< Contract.TargetTimeSampleCount
+			<< ",\"robustPreselectionWidth\":"
+			<< Contract.RobustPreselectionWidth
+			<< ",\"minimumRobustSurvivorCount\":"
+			<< Contract.MinimumRobustSurvivorCount
+			<< ",\"maximumTotalFlightTimeSeconds\":"
+			<< Contract.MaximumTotalFlightTimeSeconds
+			<< ",\"maximumCoastSeconds\":"
+			<< Contract.MaximumCoastSeconds
+			<< ",\"minimumInfluenceDurationSeconds\":"
+			<< Contract.MinimumInfluenceDurationSeconds
+			<< ",\"maximumInfluenceDurationSeconds\":"
+			<< Contract.MaximumInfluenceDurationSeconds
+			<< ",\"minimumDeflectionRadians\":"
+			<< Contract.MinimumDeflectionRadians
+			<< ",\"minimumEnergyGainCM2PerSec2\":"
+			<< Contract.MinimumEnergyGainCM2PerSec2
+			<< ",\"minimumCorridorQuality\":"
+			<< Contract.MinimumCorridorQuality
+			<< ",\"minimumLayoutTurnRadians\":"
+			<< Contract.MinimumLayoutTurnRadians
+			<< ",\"minimumLateralTurnAxisProjection\":"
+			<< Contract.MinimumLateralTurnAxisProjection
+			<< ",\"minimumBodyClearanceCM\":"
+			<< Contract.MinimumBodyClearanceCM
+			<< ",\"lowPowerProbe\":" << Contract.LowPowerProbe
+			<< ",\"robustYawStepDegrees\":"
+			<< Contract.RobustYawStepDegrees
+			<< ",\"robustPitchStepDegrees\":"
+			<< Contract.RobustPitchStepDegrees
+			<< ",\"robustPowerStep\":" << Contract.RobustPowerStep
+			<< ",\"monteCarloSeed\":" << Contract.MonteCarloSeed
+			<< ",\"monteCarloSampleCount\":"
+			<< Contract.MonteCarloSampleCount
+			<< ",\"screenAimSeed\":" << Contract.ScreenAimSeed
+			<< ",\"screenAimSampleCount\":"
+			<< Contract.ScreenAimSampleCount
+			<< ",\"minimumPrefixRetentionRatio\":"
+			<< Contract.MinimumPrefixRetentionRatio
+			<< ",\"maximumPrefixRetentionRatio\":"
+			<< Contract.MaximumPrefixRetentionRatio
+			<< ",\"fullScoreMinimumPrefixRetentionRatio\":"
+			<< Contract.FullScoreMinimumPrefixRetentionRatio
+			<< ",\"fullScoreMaximumPrefixRetentionRatio\":"
+			<< Contract.FullScoreMaximumPrefixRetentionRatio
+			<< ",\"conditionalProbeSamplesPerSet\":"
+			<< Contract.ConditionalProbeSamplesPerSet
+			<< ",\"conditionalYawHalfExtentDegrees\":"
+			<< Contract.ConditionalYawHalfExtentDegrees
+			<< ",\"conditionalPitchHalfExtentDegrees\":"
+			<< Contract.ConditionalPitchHalfExtentDegrees
+			<< ",\"conditionalPowerHalfExtent\":"
+			<< Contract.ConditionalPowerHalfExtent
+			<< ",\"minimumHullEvidenceCount\":"
+			<< Contract.MinimumHullEvidenceCount
+			<< ",\"minimumHullAreaSquareDegrees\":"
+			<< Contract.MinimumHullAreaSquareDegrees
+			<< ",\"minimumHullYawSpanDegrees\":"
+			<< Contract.MinimumHullYawSpanDegrees
+			<< ",\"minimumHullPitchSpanDegrees\":"
+			<< Contract.MinimumHullPitchSpanDegrees
+			<< ",\"firstEncounterMinimumSeconds\":"
+			<< Contract.FirstEncounterMinimumSeconds
+			<< ",\"firstEncounterMaximumSeconds\":"
+			<< Contract.FirstEncounterMaximumSeconds
+			<< ",\"interEncounterCoastMinimumSeconds\":"
+			<< Contract.InterEncounterCoastMinimumSeconds
+			<< ",\"interEncounterCoastMaximumSeconds\":"
+			<< Contract.InterEncounterCoastMaximumSeconds
+			<< ",\"targetCoastMinimumSeconds\":"
+			<< Contract.TargetCoastMinimumSeconds
+			<< ",\"targetCoastMaximumSeconds\":"
+			<< Contract.TargetCoastMaximumSeconds
+			<< ",\"minimumTargetHitRadiusCM\":"
+			<< Contract.MinimumTargetHitRadiusCM
+			<< ",\"maximumTargetHitRadiusCM\":"
+			<< Contract.MaximumTargetHitRadiusCM
+			<< ",\"targetCoverageMarginCM\":"
+			<< Contract.TargetCoverageMarginCM
+			<< ",\"minimumInfluenceRadiusCM\":"
+			<< Contract.MinimumInfluenceRadiusCM
+			<< ",\"maximumInfluenceRadiusCM\":"
+			<< Contract.MaximumInfluenceRadiusCM
+			<< ",\"minimumVirtualMomentumSpeedCMPerSec\":"
+			<< Contract.MinimumVirtualMomentumSpeedCMPerSec
+			<< ",\"maximumVirtualMomentumSpeedCMPerSec\":"
+			<< Contract.MaximumVirtualMomentumSpeedCMPerSec
+			<< ",\"minimumGravityScale\":"
+			<< Contract.MinimumGravityScale
+			<< ",\"maximumGravityScale\":"
+			<< Contract.MaximumGravityScale
+			<< ",\"minimumAlternatingLateralTurnCount\":"
+			<< Contract.MinimumAlternatingLateralTurnCount
+			<< ",\"requestedCandidateCount\":"
+			<< Contract.RequestedCandidateCount
+			<< ",\"minimumDiversityDistanceCM\":"
+			<< Contract.MinimumDiversityDistanceCM << '}';
+		return Stream.str();
+	}
+
+	std::string BuildSamplingSemanticsJson(
+		const CandidateSearchContract& Contract)
+	{
+		std::ostringstream Stream;
+		Stream.imbue(std::locale::classic());
+		Stream << std::setprecision(17)
+			<< "{\"screenAim\":{\"sampleCount\":"
+			<< Contract.ScreenAimSampleCount
+			<< ",\"seed\":" << Contract.ScreenAimSeed
+			<< ",\"sequence\":\"fixed-seed-halton\""
+			<< ",\"dimensions\":[\"yaw\",\"pitch\"]"
+			<< ",\"power\":\"nominalInputPower\""
+			<< ",\"authority\":\"candidate-ux-prefix-retention-and-hull\""
+			<< ",\"acceptanceRatioRange\":["
+			<< Contract.MinimumPrefixRetentionRatio << ','
+			<< Contract.MaximumPrefixRetentionRatio << ']'
+			<< ",\"fullScoreRatioRange\":["
+			<< Contract.FullScoreMinimumPrefixRetentionRatio << ','
+			<< Contract.FullScoreMaximumPrefixRetentionRatio << "]}"
+			<< ",\"fullLaunchDomain\":{\"sampleCount\":"
+			<< Contract.MonteCarloSampleCount
+			<< ",\"seed\":" << Contract.MonteCarloSeed
+			<< ",\"sequence\":\"fixed-seed-halton\""
+			<< ",\"dimensions\":[\"yaw\",\"pitch\",\"power\"]"
+			<< ",\"authority\":\"candidate-diagnostic-only\"}"
+			<< ",\"conditional\":{\"samplesPerSet\":"
+			<< Contract.ConditionalProbeSamplesPerSet
+			<< ",\"authority\":\"local-evidence-only\""
+			<< ",\"mergedIntoUnbiasedSets\":false}"
+			<< ",\"exhaustiveCertification\":false}";
+		return Stream.str();
+	}
+
+	std::string BuildContractDescriptorJson(
+		const CandidateSearchContract& Contract)
+	{
+		const std::string ContractJson = BuildSearchContractJson(Contract);
+		std::ostringstream Stream;
+		Stream << "{\"schema\":\"abts.m11b21.contract_descriptor.v1\""
+			<< ",\"authority\":\"ABTSM11SearchCLI\""
+			<< ",\"contractHash\":\""
+			<< Hex64(HashCanonicalJson(ContractJson)) << "\""
+			<< ",\"contractHashSchema\":"
+			<< "\"fnv1a64-canonical-contract-json-utf8-v1\""
+			<< ",\"searchSourceHashSha256\":\""
+			<< ABTS::M11Core::ToolIdentity::SearchSourceHashSha256
+			<< "\",\"samplingSemantics\":"
+			<< BuildSamplingSemanticsJson(Contract)
+			<< ",\"searchContract\":" << ContractJson << '}';
+		return Stream.str();
+	}
+
+	void WriteColorJson(
+		std::ostream& Stream,
+		const Color4f& Value)
+	{
+		Stream << '[' << Value.R << ',' << Value.G << ','
+			<< Value.B << ',' << Value.A << ']';
 	}
 
 	void WriteBodyJson(std::ostream& Stream, const GravityBodySpec& Body)
@@ -736,17 +1070,177 @@ namespace
 			<< ",\"minimumEnergyChangeCM2PerSec2\":"
 			<< Body.MinimumEnergyChangeCM2PerSec2
 			<< ",\"maximumEnergyChangeCM2PerSec2\":"
-			<< Body.MaximumEnergyChangeCM2PerSec2 << '}';
+			<< Body.MaximumEnergyChangeCM2PerSec2
+			<< ",\"debugColor\":";
+		WriteColorJson(Stream, Body.DebugColor);
+		Stream << '}';
 	}
 
+	void WriteLaunchModelJson(
+		std::ostream& Stream,
+		const LaunchModel& Launch)
+	{
+		Stream << "{\"version\":" << Launch.Version
+			<< ",\"pouchLocalPositionCM\":";
+		WriteVectorJson(Stream, Launch.PouchLocalPositionCM);
+		Stream << ",\"minimumYawDegrees\":" << Launch.MinimumYawDegrees
+			<< ",\"maximumYawDegrees\":" << Launch.MaximumYawDegrees
+			<< ",\"minimumPitchDegrees\":"
+			<< Launch.MinimumPitchDegrees
+			<< ",\"maximumPitchDegrees\":"
+			<< Launch.MaximumPitchDegrees
+			<< ",\"minimumPower\":" << Launch.MinimumPower
+			<< ",\"maximumPower\":" << Launch.MaximumPower
+			<< ",\"minimumLaunchSpeedCMPerSec\":"
+			<< Launch.MinimumLaunchSpeedCMPerSec
+			<< ",\"maximumLaunchSpeedCMPerSec\":"
+			<< Launch.MaximumLaunchSpeedCMPerSec
+			<< ",\"maximumSimulationTimeSeconds\":"
+			<< Launch.MaximumSimulationTimeSeconds << '}';
+	}
+
+	void WriteTargetJson(std::ostream& Stream, const TargetSpec& Target)
+	{
+		Stream << "{\"targetId\":" << Target.TargetId
+			<< ",\"centerCM\":";
+		WriteVectorJson(Stream, Target.CenterCM);
+		Stream << ",\"hitRadiusCM\":" << Target.HitRadiusCM
+			<< ",\"geometricContactRadiusCM\":"
+			<< Target.GeometricContactRadiusCM
+			<< ",\"useSeparateGeometricContactCenter\":"
+			<< (Target.UseSeparateGeometricContactCenter
+				? "true" : "false")
+			<< ",\"geometricContactCenterCM\":";
+		WriteVectorJson(Stream, Target.GeometricContactCenterCM);
+		Stream << ",\"requiredQualifiedAssistCount\":"
+			<< Target.RequiredQualifiedAssistCount
+			<< ",\"minimumQualifyingCorridorQuality\":"
+			<< Target.MinimumQualifyingCorridorQuality
+			<< ",\"minimumQualifyingEnergyGainCM2PerSec2\":"
+			<< Target.MinimumQualifyingEnergyGainCM2PerSec2
+			<< ",\"requireAllowedPassSide\":"
+			<< (Target.RequireAllowedPassSide ? "true" : "false")
+			<< ",\"presentationForward\":";
+		WriteVectorJson(Stream, Target.PresentationForward);
+		Stream << '}';
+	}
+
+	void WriteScenarioJson(
+		std::ostream& Stream,
+		const GravityScenario& Scenario)
+	{
+		Stream << "{\"layoutVersion\":" << Scenario.LayoutVersion
+			<< ",\"scenarioHash\":" << Scenario.ScenarioHash
+			<< ",\"bodies\":[";
+		for (std::size_t Index = 0;
+			Index < Scenario.Bodies.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Stream << ',';
+			}
+			WriteBodyJson(Stream, Scenario.Bodies[Index]);
+		}
+		Stream << "],\"target\":";
+		WriteTargetJson(Stream, Scenario.Target);
+		Stream << '}';
+	}
+
+	void WriteSolverJson(
+		std::ostream& Stream,
+		const SolverConfig& Solver)
+	{
+		Stream << "{\"solverVersion\":" << Solver.SolverVersion
+			<< ",\"hashSchemaVersion\":" << Solver.HashSchemaVersion
+			<< ",\"fixedTimeStepSeconds\":"
+			<< Solver.FixedTimeStepSeconds
+			<< ",\"maximumSimulationTimeSeconds\":"
+			<< Solver.MaximumSimulationTimeSeconds
+			<< ",\"maximumStepCount\":" << Solver.MaximumStepCount
+			<< ",\"maximumSubdivisionDepth\":"
+			<< Solver.MaximumSubdivisionDepth
+			<< ",\"maximumCoastStepExpansionDepth\":"
+			<< Solver.MaximumCoastStepExpansionDepth
+			<< ",\"assistStepRadiusFraction\":"
+			<< Solver.AssistStepRadiusFraction
+			<< ",\"collisionStepRadiusFraction\":"
+			<< Solver.CollisionStepRadiusFraction
+			<< ",\"gravityTimescaleFraction\":"
+			<< Solver.GravityTimescaleFraction
+			<< ",\"positionErrorLimitCM\":"
+			<< Solver.PositionErrorLimitCM
+			<< ",\"rootBisectionIterations\":"
+			<< Solver.RootBisectionIterations
+			<< ",\"rootAlphaTolerance\":"
+			<< Solver.RootAlphaTolerance
+			<< ",\"bPlaneBasisMinimumLength\":"
+			<< Solver.BPlaneBasisMinimumLength
+			<< ",\"minimumVInfinityCMPerSec\":"
+			<< Solver.MinimumVInfinityCMPerSec
+			<< ",\"maximumNaturalDeflectionErrorRadians\":"
+			<< Solver.MaximumNaturalDeflectionErrorRadians
+			<< ",\"energyQualityPower\":"
+			<< Solver.EnergyQualityPower
+			<< ",\"energyRootEpsilonCM2PerSec2\":"
+			<< Solver.EnergyRootEpsilonCM2PerSec2
+			<< ",\"exitEnergyResidualToleranceCM2PerSec2\":"
+			<< Solver.ExitEnergyResidualToleranceCM2PerSec2
+			<< ",\"energyShootingIterationCount\":"
+			<< Solver.EnergyShootingIterationCount
+			<< ",\"naturalCloneMaximumTimeSeconds\":"
+			<< Solver.NaturalCloneMaximumTimeSeconds
+			<< ",\"naturalCloneMaximumStepCount\":"
+			<< Solver.NaturalCloneMaximumStepCount
+			<< ",\"enabledAssistMask\":"
+			<< static_cast<unsigned int>(Solver.EnabledAssistMask) << '}';
+	}
+
+	void WriteLayoutJson(
+		std::ostream& Stream,
+		const CandidateLayout& Layout)
+	{
+		Stream << "{\"layoutVersion\":" << Layout.LayoutVersion
+			<< ",\"launch\":";
+		WriteLaunchModelJson(Stream, Layout.Launch);
+		Stream << ",\"nominalInput\":";
+		WriteInputJson(Stream, Layout.NominalInput);
+		Stream << ",\"scenario\":";
+		WriteScenarioJson(Stream, Layout.Scenario);
+		Stream << ",\"solver\":";
+		WriteSolverJson(Stream, Layout.Solver);
+		Stream << '}';
+	}
+
+	struct CandidateManifestContext
+	{
+		std::string_view SelectionScope;
+		std::uint64_t WorkItems = 0;
+		std::uint32_t ShardIndex = 0;
+		std::uint32_t ShardCount = 1;
+		std::size_t SelectionRank = 0;
+		std::size_t SelectedCount = 0;
+		std::uint64_t EvaluationAggregateHash = 0;
+		std::uint64_t CandidateAggregateHash = 0;
+	};
+
 	std::string BuildCandidateManifestJson(
-		const CandidateRecord& Candidate)
+		const CandidateRecord& Candidate,
+		const CandidateSearchContract& Contract,
+		const CandidateManifestContext& Context)
 	{
 		std::ostringstream Stream;
+		Stream.imbue(std::locale::classic());
 		Stream << std::setprecision(17)
 			<< "{\n"
-			<< "  \"schema\":\"abts.m11b21.candidate.v1\",\n"
+			<< "  \"schema\":\"abts.m11b21.candidate.v3\",\n"
 			<< "  \"status\":\"Candidate\",\n"
+			<< "  \"searchContractVersion\":"
+			<< SearchContractVersion << ",\n"
+			<< "  \"searchAlgorithmVersion\":"
+			<< SearchAlgorithmVersion << ",\n"
+			<< "  \"candidateManifestVersion\":"
+			<< CandidateManifestVersion << ",\n"
 			<< "  \"candidateId\":\"m11b21-"
 			<< Hex64(Candidate.CandidateSourceHash).substr(2)
 			<< "\",\n"
@@ -760,85 +1254,52 @@ namespace
 			<< Hex64(Candidate.NominalResultHash) << "\",\n"
 			<< "  \"scoreHash\":\"" << Hex64(Candidate.ScoreHash)
 			<< "\",\n"
-			<< "  \"productionCoreSourceHashSha256\":\""
+			<< "  \"toolIdentity\":{\"toolBuildVersion\":\""
+			<< ABTS::M11Core::ToolIdentity::ToolBuildVersion
+			<< "\",\"sourceHashSchema\":\""
+			<< ABTS::M11Core::ToolIdentity::SourceHashSchema
+			<< "\",\"sourceHashSchemaVersion\":"
+			<< ABTS::M11Core::ToolIdentity::SourceHashSchemaVersion
+			<< ",\"productionCoreSourceHashSha256\":\""
 			<< ABTS::M11Core::ToolIdentity::
-				ProductionCoreSourceHashSha256 << "\",\n"
-			<< "  \"searchSourceHashSha256\":\""
+				ProductionCoreSourceHashSha256
+			<< "\",\"productionCoreSourceFileCount\":"
+			<< ABTS::M11Core::ToolIdentity::
+				ProductionCoreSourceFileCount
+			<< ",\"searchSourceHashSha256\":\""
 			<< ABTS::M11Core::ToolIdentity::SearchSourceHashSha256
-			<< "\",\n"
-			<< "  \"compilerIdentity\":\""
-			<< ABTS::M11Core::ToolIdentity::CompilerIdentity << "\",\n"
-			<< "  \"certificationHash\":\"0x0000000000000000\",\n"
-			<< "  \"certifiedBundleHash\":\"0x0000000000000000\",\n"
-			<< "  \"launch\":{\"version\":"
-			<< Candidate.Layout.Launch.Version
-			<< ",\"pouchLocalPositionCM\":";
-		WriteVectorJson(
-			Stream, Candidate.Layout.Launch.PouchLocalPositionCM);
-		Stream << ",\"yawRangeDegrees\":["
-			<< Candidate.Layout.Launch.MinimumYawDegrees << ','
-			<< Candidate.Layout.Launch.MaximumYawDegrees << ']'
-			<< ",\"pitchRangeDegrees\":["
-			<< Candidate.Layout.Launch.MinimumPitchDegrees << ','
-			<< Candidate.Layout.Launch.MaximumPitchDegrees << ']'
-			<< ",\"powerRange\":["
-			<< Candidate.Layout.Launch.MinimumPower << ','
-			<< Candidate.Layout.Launch.MaximumPower << ']'
-			<< ",\"speedRangeCMPerSec\":["
-			<< Candidate.Layout.Launch.MinimumLaunchSpeedCMPerSec << ','
-			<< Candidate.Layout.Launch.MaximumLaunchSpeedCMPerSec << ']'
-			<< ",\"maximumSimulationTimeSeconds\":"
-			<< Candidate.Layout.Launch.MaximumSimulationTimeSeconds
-			<< "},\n  \"nominalInput\":";
-		WriteInputJson(Stream, Candidate.Layout.NominalInput);
-		Stream << ",\n  \"scenario\":{\"layoutVersion\":"
-			<< Candidate.Layout.Scenario.LayoutVersion
-			<< ",\"scenarioHash\":"
-			<< Candidate.Layout.Scenario.ScenarioHash
-			<< ",\"bodies\":[";
-		for (std::size_t Index = 0;
-			Index < Candidate.Layout.Scenario.Bodies.size();
-			++Index)
-		{
-			if (Index > 0)
-			{
-				Stream << ',';
-			}
-			WriteBodyJson(
-				Stream, Candidate.Layout.Scenario.Bodies[Index]);
-		}
-		const TargetSpec& Target = Candidate.Layout.Scenario.Target;
-		Stream << "],\"target\":{\"targetId\":" << Target.TargetId
-			<< ",\"centerCM\":";
-		WriteVectorJson(Stream, Target.CenterCM);
-		Stream << ",\"hitRadiusCM\":" << Target.HitRadiusCM
-			<< ",\"geometricContactRadiusCM\":"
-			<< Target.GeometricContactRadiusCM
-			<< ",\"requiredQualifiedAssistCount\":"
-			<< Target.RequiredQualifiedAssistCount
-			<< ",\"minimumQualifyingCorridorQuality\":"
-			<< Target.MinimumQualifyingCorridorQuality
-			<< ",\"minimumQualifyingEnergyGainCM2PerSec2\":"
-			<< Target.MinimumQualifyingEnergyGainCM2PerSec2
-			<< ",\"requireAllowedPassSide\":"
-			<< (Target.RequireAllowedPassSide ? "true" : "false")
-			<< ",\"presentationForward\":";
-		WriteVectorJson(Stream, Target.PresentationForward);
-		Stream << "}},\n  \"solver\":{\"solverVersion\":"
-			<< Candidate.Layout.Solver.SolverVersion
-			<< ",\"hashSchemaVersion\":"
-			<< Candidate.Layout.Solver.HashSchemaVersion
-			<< ",\"fixedTimeStepSeconds\":"
-			<< Candidate.Layout.Solver.FixedTimeStepSeconds
-			<< ",\"maximumSimulationTimeSeconds\":"
-			<< Candidate.Layout.Solver.MaximumSimulationTimeSeconds
-			<< ",\"maximumStepCount\":"
-			<< Candidate.Layout.Solver.MaximumStepCount
-			<< ",\"maximumSubdivisionDepth\":"
-			<< Candidate.Layout.Solver.MaximumSubdivisionDepth
-			<< ",\"maximumCoastStepExpansionDepth\":"
-			<< Candidate.Layout.Solver.MaximumCoastStepExpansionDepth
-			<< "},\n  \"metrics\":{\"totalFlightTimeSeconds\":"
+			<< "\",\"searchSourceFileCount\":"
+			<< ABTS::M11Core::ToolIdentity::SearchSourceFileCount
+			<< ",\"compilerIdentity\":\""
+			<< ABTS::M11Core::ToolIdentity::CompilerIdentity
+			<< "\",\"architecture\":\""
+			<< ABTS::M11Core::ToolIdentity::Architecture
+			<< "\",\"cxxStandard\":\""
+			<< ABTS::M11Core::ToolIdentity::CxxStandard
+			<< "\",\"floatingPointMode\":\""
+			<< ABTS::M11Core::ToolIdentity::FloatingPointMode
+			<< "\",\"numericalCompileContract\":\""
+			<< ABTS::M11Core::ToolIdentity::NumericalCompileContract
+			<< "\"},\n"
+			<< "  \"contractDescriptor\":"
+			<< BuildContractDescriptorJson(Contract) << ",\n"
+			<< "  \"selection\":{\"scope\":\""
+			<< Context.SelectionScope
+			<< "\",\"workItems\":" << Context.WorkItems
+			<< ",\"shardIndex\":" << Context.ShardIndex
+			<< ",\"shardCount\":" << Context.ShardCount
+			<< ",\"rank\":" << Context.SelectionRank
+			<< ",\"selectedCount\":" << Context.SelectedCount
+			<< ",\"evaluationAggregateHash\":\""
+			<< Hex64(Context.EvaluationAggregateHash)
+			<< "\",\"candidateAggregateHash\":\""
+			<< Hex64(Context.CandidateAggregateHash) << "\"},\n"
+			<< "  \"certification\":{\"status\":\"not-certified\""
+			<< ",\"certificationHash\":\"0x0000000000000000\""
+			<< ",\"certifiedBundleHash\":\"0x0000000000000000\"},\n"
+			<< "  \"layout\":";
+		WriteLayoutJson(Stream, Candidate.Layout);
+		Stream << ",\n  \"metrics\":{\"totalFlightTimeSeconds\":"
 			<< Candidate.Metrics.TotalFlightTimeSeconds
 			<< ",\"finalCoastSeconds\":"
 			<< Candidate.Metrics.FinalCoastSeconds
@@ -860,6 +1321,10 @@ namespace
 			Stream << Candidate.Metrics.LayoutTurnsRadians[Index];
 		}
 		Stream << ']'
+			<< ",\"minimumReadableDeflectionRadians\":"
+			<< Candidate.Metrics.MinimumReadableDeflectionRadians
+			<< ",\"alternatingLateralTurnCount\":"
+			<< Candidate.Metrics.AlternatingLateralTurnCount
 			<< ",\"robustSurvivorCount\":"
 			<< Candidate.Metrics.RobustSurvivorCount
 			<< ",\"lowPowerCompletedAssistCount\":"
@@ -888,13 +1353,55 @@ namespace
 				<< Assist.ActualDeflectionRadians
 				<< ",\"naturalDeflectionRadians\":"
 				<< Assist.NaturalDeflectionRadians
+				<< ",\"entrySpeedCMPerSec\":"
+				<< Assist.EntrySpeedCMPerSec
+				<< ",\"exitSpeedCMPerSec\":"
+				<< Assist.ExitSpeedCMPerSec
+				<< ",\"signedLateralTurnRadians\":"
+				<< Assist.SignedLateralTurnRadians
+				<< ",\"lateralTurnAxisProjection\":"
+				<< Assist.LateralTurnAxisProjection
 				<< ",\"corridorQuality\":" << Assist.CorridorQuality
 				<< ",\"appliedEnergyGainCM2PerSec2\":"
 				<< Assist.AppliedEnergyGainCM2PerSec2
 				<< ",\"collisionClearanceCM\":"
 				<< Assist.CollisionClearanceCM << '}';
 		}
-		Stream << "],\"ablations\":[";
+		Stream << "],\"candidateDomainAnalysis\":{"
+			<< "\"samplingSemantics\":"
+			<< BuildSamplingSemanticsJson(Contract)
+			<< ",\"sampleCounts\":{\"fullLaunchDomain\":"
+			<< Candidate.Metrics.FullDomainSampleCount
+			<< ",\"screenAim\":"
+			<< Candidate.Metrics.ScreenAimSampleCount
+			<< "},\"solveFailureCounts\":{\"fullLaunchDomain\":"
+			<< Candidate.Metrics.FullDomainSolveFailureCount
+			<< ",\"screenAim\":"
+			<< Candidate.Metrics.ScreenAimSolveFailureCount
+			<< ",\"conditional\":"
+			<< Candidate.Metrics.ConditionalSolveFailureCount
+			<< "},\"inputSets\":[";
+		for (std::size_t Index = 0;
+			Index < Candidate.Metrics.InputSets.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Stream << ',';
+			}
+			WriteInputSetJson(
+				Stream, Candidate.Metrics.InputSets[Index], Index);
+		}
+		Stream << "]},\"softScores\":{\"prefixRetention\":"
+			<< Candidate.Metrics.PrefixRetentionScore
+			<< ",\"prefixHull\":" << Candidate.Metrics.PrefixHullScore
+			<< ",\"deflectionReadability\":"
+			<< Candidate.Metrics.DeflectionReadabilityScore
+			<< ",\"alternation\":"
+			<< Candidate.Metrics.AlternationScore
+			<< ",\"pacing\":" << Candidate.Metrics.PacingScore
+			<< ",\"total\":" << Candidate.Metrics.SoftScore
+			<< "},\"ablations\":[";
 		for (std::size_t Index = 0;
 			Index < Candidate.Metrics.AblationMasks.size();
 			++Index)
@@ -937,6 +1444,21 @@ namespace
 		return Result.str();
 	}
 
+	int RunDescribeContract(const Options& OptionsValue)
+	{
+		CandidateSearchContract Contract =
+			CandidateSearchContract::MakeV2_1();
+		Contract.SearchSeed = OptionsValue.Seed;
+		std::string Failure;
+		if (!Contract.IsValid(&Failure))
+		{
+			std::cerr << "DescribeContractInvalid:" << Failure << '\n';
+			return 1;
+		}
+		std::cout << BuildContractDescriptorJson(Contract) << '\n';
+		return 0;
+	}
+
 	int RunSelfTest(const bool Json)
 	{
 		CandidateSearchContract Contract =
@@ -944,15 +1466,102 @@ namespace
 		std::string Failure;
 		CandidateRecord First;
 		CandidateRecord Second;
+		constexpr std::uint64_t DeterministicCandidateWorkIndex = 772ull;
 		const bool FirstCompleted =
 			CandidateSearch::EvaluateWorkItem(
-				Contract, 0, First, &Failure);
+				Contract,
+				DeterministicCandidateWorkIndex,
+				First,
+				&Failure);
 		const bool SecondCompleted =
 			CandidateSearch::EvaluateWorkItem(
-				Contract, 0, Second, &Failure);
+				Contract,
+				DeterministicCandidateWorkIndex,
+				Second,
+				&Failure);
+		const std::string ContractJson =
+			BuildSearchContractJson(Contract);
+		const std::string ContractDescriptor =
+			BuildContractDescriptorJson(Contract);
+		const bool ProvenanceValid =
+			Contract.MonteCarloSampleCount == 5000
+			&& Contract.ScreenAimSampleCount == 5000
+			&& HashCanonicalJson(ContractJson) != 0
+			&& ContractDescriptor.find("\"screenAim\"")
+				!= std::string::npos
+			&& ContractDescriptor.find("\"fullLaunchDomain\"")
+				!= std::string::npos
+			&& ContractDescriptor.find("\"searchContract\"")
+				!= std::string::npos
+			&& ContractDescriptor.find(
+				"\"minimumLateralTurnAxisProjection\":0.25")
+				!= std::string::npos
+			&& ContractDescriptor.find("\"searchSourceHashSha256\"")
+				!= std::string::npos;
+		bool InputDomainMetricsValid =
+			First.Metrics.FullDomainSampleCount
+				== Contract.MonteCarloSampleCount
+			&& First.Metrics.ScreenAimSampleCount
+				== Contract.ScreenAimSampleCount
+			&& First.Metrics.FullDomainSolveFailureCount == 0
+			&& First.Metrics.ScreenAimSolveFailureCount == 0
+			&& First.Metrics.ConditionalSolveFailureCount == 0;
+		std::int32_t FullParentCount =
+			First.Metrics.FullDomainSampleCount;
+		std::int32_t ScreenParentCount =
+			First.Metrics.ScreenAimSampleCount;
+		for (std::size_t Index = 0;
+			Index < First.Metrics.InputSets.size();
+			++Index)
+		{
+			const InputSetMetrics& Set =
+				First.Metrics.InputSets[Index];
+			InputDomainMetricsValid = InputDomainMetricsValid
+				&& Set.FullDomainCount >= 0
+				&& Set.FullDomainCount <= FullParentCount
+				&& Set.ScreenAimCount >= 0
+				&& Set.ScreenAimCount <= ScreenParentCount
+				&& Set.ConditionalMemberCount
+					<= Set.ConditionalParentCount
+				&& Set.ConditionalParentCount
+					<= Set.ConditionalProbeCount
+				&& std::isfinite(
+					Set.ScreenAimHullAreaSquareDegrees)
+				&& std::isfinite(
+					Set.ScreenAimHullCompactness);
+			if (Index < 3)
+			{
+				const double ExpectedScreenRatio =
+					ScreenParentCount > 0
+						? static_cast<double>(Set.ScreenAimCount)
+							/ static_cast<double>(ScreenParentCount)
+						: 0.0;
+				InputDomainMetricsValid =
+					InputDomainMetricsValid
+					&& Set.ScreenAimRetentionCompliant
+					&& Set.ScreenAimRetentionRatio
+						== ExpectedScreenRatio
+					&& Set.ScreenAimRetentionRatio
+						>= Contract.MinimumPrefixRetentionRatio
+					&& Set.ScreenAimRetentionRatio
+						<= Contract.MaximumPrefixRetentionRatio
+					&& Set.ScreenAimHullCompliant
+					&& Set.ScreenAimHullContainsNominal
+					&& Set.ScreenAimHullEvidencePointCount
+						== Set.ScreenAimCount
+					&& Set.ScreenAimHullEvidencePointCount
+						>= Contract.MinimumHullEvidenceCount;
+			}
+			FullParentCount = Set.FullDomainCount;
+			ScreenParentCount = Set.ScreenAimCount;
+		}
 		const bool Passed = Contract.IsValid()
+			&& ProvenanceValid
 			&& FirstCompleted
 			&& SecondCompleted
+			&& First.Status == EvaluationStatus::Accepted
+			&& Second.Status == EvaluationStatus::Accepted
+			&& InputDomainMetricsValid
 			&& First.Status == Second.Status
 			&& First.CandidateSourceHash
 				== Second.CandidateSourceHash
@@ -964,8 +1573,11 @@ namespace
 		if (Json)
 		{
 			std::cout
-				<< "{\"schema\":\"abts.m11b21.self_test.v1\""
+				<< "{\"schema\":\"abts.m11b21.self_test.v3\""
 				<< ",\"passed\":" << (Passed ? "true" : "false")
+				<< ",\"contractDescriptor\":" << ContractDescriptor
+				<< ",\"workIndex\":"
+				<< DeterministicCandidateWorkIndex
 				<< ",\"status\":\"" << ToString(First.Status) << "\""
 				<< ",\"candidateSourceHash\":\""
 				<< Hex64(First.CandidateSourceHash) << "\""
@@ -982,6 +1594,21 @@ namespace
 				<< First.Metrics.MaximumCoastSeconds
 				<< ",\"minimumLayoutTurnRadians\":"
 				<< First.Metrics.MinimumLayoutTurnRadians
+				<< ",\"softScore\":" << First.Metrics.SoftScore
+				<< ",\"inputSets\":[";
+			for (std::size_t Index = 0;
+				Index < First.Metrics.InputSets.size();
+				++Index)
+			{
+				if (Index > 0)
+				{
+					std::cout << ',';
+				}
+				WriteInputSetJson(
+					std::cout, First.Metrics.InputSets[Index], Index);
+			}
+			std::cout
+				<< ']'
 				<< ",\"assistDurations\":["
 				<< First.Metrics.Assists[0].InfluenceDurationSeconds
 				<< ',' << First.Metrics.Assists[1].InfluenceDurationSeconds
@@ -1064,6 +1691,7 @@ namespace
 			if (!ReadCheckpoint(
 					CheckpointPath,
 					OptionsValue,
+					Contract,
 					Current,
 					Failure)
 				|| !fs::exists(StatePath)
@@ -1134,7 +1762,7 @@ namespace
 				for (const CandidateRecord& Record : Result.Evaluations)
 				{
 					State << EvaluationStateLine(Record);
-					Evaluation << EvaluationJsonLine(Record);
+					Evaluation << EvaluationJsonLine(Record, Contract);
 					Records.push_back(Record);
 				}
 				State.flush();
@@ -1155,7 +1783,7 @@ namespace
 			Current.EvaluationHash = HashFile(EvaluationPath);
 			if (!WriteTextAtomically(
 				CheckpointPath,
-				BuildCheckpointJson(OptionsValue, Current),
+				BuildCheckpointJson(OptionsValue, Contract, Current),
 				Failure))
 			{
 				std::cerr << "CheckpointWriteFailed:" << Failure << '\n';
@@ -1201,6 +1829,10 @@ namespace
 		const std::vector<CandidateRecord> Top =
 			CandidateSearch::SelectTopCandidates(
 				Contract, Records, OptionsValue.TopK);
+		const std::uint64_t EvaluationAggregate =
+			ComputeEvaluationAggregateHash(Records);
+		const std::uint64_t CandidateAggregate =
+			ComputeEvaluationAggregateHash(Top);
 		for (std::size_t Index = 0; Index < Top.size(); ++Index)
 		{
 			const fs::path Manifest =
@@ -1211,17 +1843,24 @@ namespace
 					+ ".json");
 			if (!WriteTextAtomically(
 				Manifest,
-				BuildCandidateManifestJson(Top[Index]),
+				BuildCandidateManifestJson(
+					Top[Index],
+					Contract,
+					CandidateManifestContext{
+						"shard",
+						OptionsValue.WorkItems,
+						OptionsValue.ShardIndex,
+						OptionsValue.ShardCount,
+						Index + 1,
+						Top.size(),
+						EvaluationAggregate,
+						CandidateAggregate}),
 				Failure))
 			{
 				std::cerr << "ManifestWriteFailed:" << Failure << '\n';
 				return 1;
 			}
 		}
-		const std::uint64_t EvaluationAggregate =
-			ComputeEvaluationAggregateHash(Records);
-		const std::uint64_t CandidateAggregate =
-			ComputeEvaluationAggregateHash(Top);
 		std::uint64_t SolverInvocations = 0;
 		std::uint64_t AcceptedCount = 0;
 		for (const CandidateRecord& Record : Records)
@@ -1237,7 +1876,7 @@ namespace
 		std::ostringstream Summary;
 		Summary << std::setprecision(17)
 			<< "{\n"
-			<< "  \"schema\":\"abts.m11b21.shard_summary.v1\",\n"
+			<< "  \"schema\":\"abts.m11b21.shard_summary.v3\",\n"
 			<< "  \"passed\":true,\n"
 			<< "  \"diagnostic\":\""
 			<< (Top.empty()
@@ -1260,6 +1899,8 @@ namespace
 			<< Hex64(EvaluationAggregate) << "\",\n"
 			<< "  \"candidateAggregateHash\":\""
 			<< Hex64(CandidateAggregate) << "\",\n"
+			<< "  \"contractDescriptor\":"
+			<< BuildContractDescriptorJson(Contract) << ",\n"
 			<< "  \"productionCoreSourceHashSha256\":\""
 			<< ABTS::M11Core::ToolIdentity::
 				ProductionCoreSourceHashSha256 << "\",\n"
@@ -1357,6 +1998,7 @@ namespace
 				|| !ReadCheckpoint(
 					CheckpointPath,
 					ShardOptions,
+					Contract,
 					ShardCheckpoint,
 					Failure)
 				|| ShardCheckpoint.NextLocalOffset != ExpectedCount
@@ -1457,6 +2099,10 @@ namespace
 				Contract,
 				Records,
 				OptionsValue.TopK);
+		const std::uint64_t EvaluationAggregate =
+			ComputeEvaluationAggregateHash(Records);
+		const std::uint64_t CandidateAggregate =
+			ComputeEvaluationAggregateHash(Top);
 		for (std::size_t Index = 0; Index < Top.size(); ++Index)
 		{
 			const fs::path Manifest =
@@ -1467,7 +2113,18 @@ namespace
 						+ ".json");
 			if (!WriteTextAtomically(
 					Manifest,
-					BuildCandidateManifestJson(Top[Index]),
+					BuildCandidateManifestJson(
+						Top[Index],
+						Contract,
+						CandidateManifestContext{
+							"global-merge",
+							OptionsValue.WorkItems,
+							0,
+							OptionsValue.ShardCount,
+							Index + 1,
+							Top.size(),
+							EvaluationAggregate,
+							CandidateAggregate}),
 					Failure))
 			{
 				std::cerr << "MergeManifestWriteFailed:"
@@ -1484,10 +2141,6 @@ namespace
 				std::max(0, Record.SolverInvocationCount));
 			AcceptedCount += Record.IsAccepted() ? 1u : 0u;
 		}
-		const std::uint64_t EvaluationAggregate =
-			ComputeEvaluationAggregateHash(Records);
-		const std::uint64_t CandidateAggregate =
-			ComputeEvaluationAggregateHash(Top);
 		const double Throughput = CumulativeShardSeconds > 0.0
 			? static_cast<double>(SolverInvocations)
 				/ CumulativeShardSeconds
@@ -1495,7 +2148,7 @@ namespace
 		std::ostringstream Summary;
 		Summary << std::setprecision(17)
 			<< "{\n"
-			<< "  \"schema\":\"abts.m11b21.merge_summary.v1\",\n"
+			<< "  \"schema\":\"abts.m11b21.merge_summary.v3\",\n"
 			<< "  \"passed\":true,\n"
 			<< "  \"diagnostic\":\""
 			<< (Top.empty()
@@ -1519,6 +2172,8 @@ namespace
 			<< Hex64(EvaluationAggregate) << "\",\n"
 			<< "  \"candidateAggregateHash\":\""
 			<< Hex64(CandidateAggregate) << "\",\n"
+			<< "  \"contractDescriptor\":"
+			<< BuildContractDescriptorJson(Contract) << ",\n"
 			<< "  \"productionCoreSourceHashSha256\":\""
 			<< ABTS::M11Core::ToolIdentity::
 				ProductionCoreSourceHashSha256 << "\",\n"
@@ -1548,6 +2203,8 @@ int main(const int ArgumentCount, char** Arguments)
 		std::cerr
 			<< "Usage:\n"
 			<< "  ABTSM11SearchCLI --self-test [--json]\n"
+			<< "  ABTSM11SearchCLI --describe-contract"
+			<< " [--seed N] [--json]\n"
 			<< "  ABTSM11SearchCLI search --output <absolute-dir>"
 			<< " --work-items N [--shard-index I --shard-count N]"
 			<< " [--threads N --top-k N --seed N]"
@@ -1560,7 +2217,9 @@ int main(const int ArgumentCount, char** Arguments)
 	}
 	return Parsed.SelfTest
 		? RunSelfTest(Parsed.Json)
-		: Parsed.Merge
-			? RunMerge(Parsed)
-			: RunSearch(Parsed);
+		: Parsed.DescribeContract
+			? RunDescribeContract(Parsed)
+			: Parsed.Merge
+				? RunMerge(Parsed)
+				: RunSearch(Parsed);
 }

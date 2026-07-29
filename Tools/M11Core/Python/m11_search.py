@@ -21,7 +21,7 @@ import time
 from typing import Any
 
 
-PLAN_SCHEMA = "abts.m11b21.orchestration_plan.v1"
+PLAN_SCHEMA = "abts.m11b21.orchestration_plan.v3"
 DEFAULT_SEED = 0x11B21001
 
 
@@ -51,7 +51,44 @@ def default_executable() -> Path:
     )
 
 
+def describe_contract(executable: Path, seed: int) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            str(executable),
+            "--describe-contract",
+            "--seed",
+            str(seed),
+            "--json",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "ContractDescriptorFailed:"
+            + (result.stderr.strip() or result.stdout.strip())
+        )
+    try:
+        descriptor = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("ContractDescriptorInvalidJson") from error
+    if (
+        descriptor.get("schema")
+        != "abts.m11b21.contract_descriptor.v1"
+        or descriptor.get("authority") != "ABTSM11SearchCLI"
+        or not descriptor.get("contractHash")
+        or not descriptor.get("searchSourceHashSha256")
+    ):
+        raise RuntimeError("ContractDescriptorIdentityInvalid")
+    return descriptor
+
+
 def canonical_plan(args: argparse.Namespace, executable: Path) -> dict[str, Any]:
+    descriptor = describe_contract(executable, args.seed)
     return {
         "schema": PLAN_SCHEMA,
         "executable": str(executable),
@@ -66,6 +103,22 @@ def canonical_plan(args: argparse.Namespace, executable: Path) -> dict[str, Any]
         "pythonVersion": sys.version.split()[0],
         "authority": "ABTSM11SearchCLI",
         "pythonRole": "process-orchestration-only",
+        "contractDescriptor": descriptor,
+        "candidateAnalysis": {
+            "screenAimSamples": 5000,
+            "screenAimDimensions": ["yaw", "pitch"],
+            "screenAimPower": "nominalInputPower",
+            "screenAimAuthority": "prefix-ratio-hull-and-ux-score",
+            "fullLaunchDomainSamples": 5000,
+            "fullLaunchDomainDimensions": ["yaw", "pitch", "power"],
+            "fullLaunchDomainAuthority": "diagnostic-only",
+            "sampling": "fixed-seed-halton-low-discrepancy",
+            "prefixSets": ["S1", "S2", "S3", "S4"],
+            "prefixRatioGateBeforeHull": True,
+            "conditionalEvidenceMergedIntoUnbiasedSets": False,
+            "ranking": "cpp-hard-ratio-and-hull-gates-then-soft-score",
+            "exhaustiveCertification": False,
+        },
     }
 
 
@@ -328,7 +381,7 @@ def command_status(args: argparse.Namespace) -> int:
             entry["state"] = "not-started"
         shards.append(entry)
     status = {
-        "schema": "abts.m11b21.orchestration_status.v1",
+        "schema": "abts.m11b21.orchestration_status.v3",
         "plan": plan,
         "shards": shards,
         "merged": (root / "merged" / "summary.json").is_file(),

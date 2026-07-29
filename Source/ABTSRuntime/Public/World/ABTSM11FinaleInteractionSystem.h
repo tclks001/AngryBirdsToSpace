@@ -9,6 +9,7 @@
 #include "ABTSM11FinaleInteractionSystem.generated.h"
 
 class AABTSBirdParty;
+class AABTSM11FinaleFlightCamera;
 class AABTSM11FinaleSystem;
 class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
@@ -88,6 +89,8 @@ public:
 		return ReleasedPlaybackPlan;
 	}
 	const FABTSM11TrajectoryResult* GetCurrentPrediction() const;
+	/** Exact current result used by the selected target's PIP. */
+	const FABTSM11TrajectoryResult* GetTargetPreviewPrediction() const;
 	UTextureRenderTarget2D* GetTargetPreviewRenderTarget() const
 	{
 		return TargetPreviewRenderTarget;
@@ -100,6 +103,10 @@ public:
 	AABTSM6SlingshotCamera* GetAimCamera() const
 	{
 		return AimCamera;
+	}
+	AABTSM11FinaleFlightCamera* GetFlightCamera() const
+	{
+		return FlightCamera;
 	}
 	const AABTSM11FinaleSystem* GetFinaleSystem() const
 	{
@@ -145,6 +152,8 @@ private:
 	void UpdateFailurePresentation(float DeltaSeconds);
 	void UpdatePouchPresentation();
 	bool EnsureAimCamera();
+	bool EnsureFlightCamera();
+	void RestoreAimCameraView();
 	bool BuildAimFrame(
 		const AABTSM51SlingshotCord& Cord,
 		const AABTSM25BirdCharacter& Bird);
@@ -181,6 +190,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM6SlingshotCamera> AimCamera;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM11FinaleFlightCamera> FlightCamera;
 
 	UPROPERTY(Transient)
 	TSubclassOf<AABTSM6SlingshotCamera> AimCameraClass;
@@ -243,6 +255,7 @@ private:
 	FABTSM11FinaleLaunchInput LatestSolvedInput;
 	FABTSM11FinaleLaunchInput FrozenReleaseInput;
 	FTransform AttemptBirdOriginalTransform = FTransform::Identity;
+	TWeakObjectPtr<APlayerController> ActiveFinaleController;
 	FVector AimSlingCenter = FVector::ZeroVector;
 	FVector AimSlingForward = FVector::ForwardVector;
 	FVector AimSlingRight = FVector::RightVector;
@@ -265,5 +278,6 @@ private:
 	bool bLatestPhysicalResultAvailable = false;
 	bool bAttemptBirdInPouch = false;
 	bool bTargetCaptureDirty = false;
+	bool bTargetCaptureInitialized = false;
 	bool bAimFrameValid = false;
 };

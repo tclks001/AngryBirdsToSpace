@@ -224,11 +224,30 @@ namespace ABTS::M11Search::TypesPrivate
 		Hash.AddDouble(Contract.MinimumEnergyGainCM2PerSec2);
 		Hash.AddDouble(Contract.MinimumCorridorQuality);
 		Hash.AddDouble(Contract.MinimumLayoutTurnRadians);
+		Hash.AddDouble(Contract.MinimumLateralTurnAxisProjection);
 		Hash.AddDouble(Contract.MinimumBodyClearanceCM);
 		Hash.AddDouble(Contract.LowPowerProbe);
 		Hash.AddDouble(Contract.RobustYawStepDegrees);
 		Hash.AddDouble(Contract.RobustPitchStepDegrees);
 		Hash.AddDouble(Contract.RobustPowerStep);
+		Hash.AddUInt64(Contract.MonteCarloSeed);
+		Hash.AddInt32(Contract.MonteCarloSampleCount);
+		Hash.AddUInt64(Contract.ScreenAimSeed);
+		Hash.AddInt32(Contract.ScreenAimSampleCount);
+		Hash.AddDouble(Contract.MinimumPrefixRetentionRatio);
+		Hash.AddDouble(Contract.MaximumPrefixRetentionRatio);
+		Hash.AddDouble(
+			Contract.FullScoreMinimumPrefixRetentionRatio);
+		Hash.AddDouble(
+			Contract.FullScoreMaximumPrefixRetentionRatio);
+		Hash.AddInt32(Contract.ConditionalProbeSamplesPerSet);
+		Hash.AddDouble(Contract.ConditionalYawHalfExtentDegrees);
+		Hash.AddDouble(Contract.ConditionalPitchHalfExtentDegrees);
+		Hash.AddDouble(Contract.ConditionalPowerHalfExtent);
+		Hash.AddInt32(Contract.MinimumHullEvidenceCount);
+		Hash.AddDouble(Contract.MinimumHullAreaSquareDegrees);
+		Hash.AddDouble(Contract.MinimumHullYawSpanDegrees);
+		Hash.AddDouble(Contract.MinimumHullPitchSpanDegrees);
 		Hash.AddDouble(Contract.FirstEncounterMinimumSeconds);
 		Hash.AddDouble(Contract.FirstEncounterMaximumSeconds);
 		Hash.AddDouble(Contract.InterEncounterCoastMinimumSeconds);
@@ -244,6 +263,7 @@ namespace ABTS::M11Search::TypesPrivate
 		Hash.AddDouble(Contract.MaximumVirtualMomentumSpeedCMPerSec);
 		Hash.AddDouble(Contract.MinimumGravityScale);
 		Hash.AddDouble(Contract.MaximumGravityScale);
+		Hash.AddInt32(Contract.MinimumAlternatingLateralTurnCount);
 		Hash.AddInt32(Contract.RequestedCandidateCount);
 		Hash.AddDouble(Contract.MinimumDiversityDistanceCM);
 	}
@@ -434,12 +454,23 @@ bool ABTS::M11Search::CandidateSearchContract::IsValid(
 		|| RobustPreselectionWidth > 128
 		|| MinimumRobustSurvivorCount < 1
 		|| MinimumRobustSurvivorCount > 7
+		|| MonteCarloSeed == 0
+		|| MonteCarloSampleCount != 5000
+		|| ScreenAimSeed == 0
+		|| ScreenAimSampleCount != 5000
+		|| ConditionalProbeSamplesPerSet < 0
+		|| ConditionalProbeSamplesPerSet > 4096
+		|| MinimumHullEvidenceCount < 3
+		|| MinimumHullEvidenceCount
+			> ScreenAimSampleCount
+		|| MinimumAlternatingLateralTurnCount < 0
+		|| MinimumAlternatingLateralTurnCount > 2
 		|| RequestedCandidateCount < 1
 		|| RequestedCandidateCount > 32)
 	{
 		return Reject(OutFailure, "InvalidSearchContractInteger");
 	}
-	const std::array<double, 29> Values{
+	const std::array<double, 40> Values{
 		MaximumTotalFlightTimeSeconds,
 		MaximumCoastSeconds,
 		MinimumInfluenceDurationSeconds,
@@ -448,11 +479,22 @@ bool ABTS::M11Search::CandidateSearchContract::IsValid(
 		MinimumEnergyGainCM2PerSec2,
 		MinimumCorridorQuality,
 		MinimumLayoutTurnRadians,
+		MinimumLateralTurnAxisProjection,
 		MinimumBodyClearanceCM,
 		LowPowerProbe,
 		RobustYawStepDegrees,
 		RobustPitchStepDegrees,
 		RobustPowerStep,
+		MinimumPrefixRetentionRatio,
+		MaximumPrefixRetentionRatio,
+		FullScoreMinimumPrefixRetentionRatio,
+		FullScoreMaximumPrefixRetentionRatio,
+		ConditionalYawHalfExtentDegrees,
+		ConditionalPitchHalfExtentDegrees,
+		ConditionalPowerHalfExtent,
+		MinimumHullAreaSquareDegrees,
+		MinimumHullYawSpanDegrees,
+		MinimumHullPitchSpanDegrees,
 		FirstEncounterMinimumSeconds,
 		FirstEncounterMaximumSeconds,
 		InterEncounterCoastMinimumSeconds,
@@ -487,12 +529,31 @@ bool ABTS::M11Search::CandidateSearchContract::IsValid(
 		|| MinimumCorridorQuality <= 0.0
 		|| MinimumCorridorQuality > 1.0
 		|| MinimumLayoutTurnRadians <= 0.0
+		|| MinimumLateralTurnAxisProjection <= 0.0
+		|| MinimumLateralTurnAxisProjection > 1.0
 		|| MinimumBodyClearanceCM < 0.0
 		|| LowPowerProbe <= 0.0
 		|| LowPowerProbe >= 1.0
 		|| RobustYawStepDegrees <= 0.0
 		|| RobustPitchStepDegrees <= 0.0
 		|| RobustPowerStep <= 0.0
+		|| MinimumPrefixRetentionRatio <= 0.0
+		|| MinimumPrefixRetentionRatio
+			>= FullScoreMinimumPrefixRetentionRatio
+		|| FullScoreMinimumPrefixRetentionRatio
+			>= FullScoreMaximumPrefixRetentionRatio
+		|| FullScoreMaximumPrefixRetentionRatio
+			>= MaximumPrefixRetentionRatio
+		|| MaximumPrefixRetentionRatio >= 1.0
+		|| ConditionalYawHalfExtentDegrees <= 0.0
+		|| ConditionalYawHalfExtentDegrees > 18.0
+		|| ConditionalPitchHalfExtentDegrees <= 0.0
+		|| ConditionalPitchHalfExtentDegrees > 30.0
+		|| ConditionalPowerHalfExtent <= 0.0
+		|| ConditionalPowerHalfExtent > 0.5
+		|| MinimumHullAreaSquareDegrees <= 0.0
+		|| MinimumHullYawSpanDegrees <= 0.0
+		|| MinimumHullPitchSpanDegrees <= 0.0
 		|| FirstEncounterMinimumSeconds <= 0.0
 		|| FirstEncounterMinimumSeconds
 			>= FirstEncounterMaximumSeconds
@@ -565,6 +626,8 @@ const char* ABTS::M11Search::ToString(const EvaluationStatus Status)
 		return "RobustnessRejected";
 	case EvaluationStatus::AblationRejected:
 		return "AblationRejected";
+	case EvaluationStatus::InputDomainDegenerate:
+		return "InputDomainDegenerate";
 	case EvaluationStatus::InternalError:
 		return "InternalError";
 	default:
@@ -616,8 +679,48 @@ std::uint64_t ABTS::M11Search::ComputeCandidateScoreHash(
 		Hash.AddDouble(Turn);
 	}
 	Hash.AddDouble(Candidate.Metrics.MinimumTargetDistanceCM);
+	Hash.AddDouble(Candidate.Metrics.MinimumReadableDeflectionRadians);
+	Hash.AddInt32(Candidate.Metrics.AlternatingLateralTurnCount);
 	Hash.AddInt32(Candidate.Metrics.RobustSurvivorCount);
 	Hash.AddInt32(Candidate.Metrics.LowPowerCompletedAssistCount);
+	Hash.AddInt32(Candidate.Metrics.FullDomainSampleCount);
+	Hash.AddInt32(Candidate.Metrics.ScreenAimSampleCount);
+	Hash.AddInt32(Candidate.Metrics.FullDomainSolveFailureCount);
+	Hash.AddInt32(Candidate.Metrics.ScreenAimSolveFailureCount);
+	Hash.AddInt32(Candidate.Metrics.ConditionalSolveFailureCount);
+	for (const InputSetMetrics& Set : Candidate.Metrics.InputSets)
+	{
+		Hash.AddInt32(Set.FullDomainCount);
+		Hash.AddDouble(Set.FullDomainRetentionRatio);
+		Hash.AddInt32(Set.ScreenAimCount);
+		Hash.AddDouble(Set.ScreenAimRetentionRatio);
+		Hash.AddBool(Set.ScreenAimRetentionCompliant);
+		Hash.AddInt32(Set.ConditionalProbeCount);
+		Hash.AddInt32(Set.ConditionalParentCount);
+		Hash.AddInt32(Set.ConditionalMemberCount);
+		Hash.AddDouble(Set.ConditionalRetentionRatio);
+		Hash.AddInt32(Set.ScreenAimHullEvidencePointCount);
+		Hash.AddUInt64(static_cast<std::uint64_t>(
+			Set.ScreenAimHullYawPitch.size()));
+		for (const YawPitchPoint& Point : Set.ScreenAimHullYawPitch)
+		{
+			Hash.AddDouble(Point.YawDegrees);
+			Hash.AddDouble(Point.PitchDegrees);
+		}
+		Hash.AddDouble(Set.ScreenAimHullAreaSquareDegrees);
+		Hash.AddDouble(Set.ScreenAimHullYawSpanDegrees);
+		Hash.AddDouble(Set.ScreenAimHullPitchSpanDegrees);
+		Hash.AddDouble(Set.ScreenAimHullNormalizedArea);
+		Hash.AddDouble(Set.ScreenAimHullCompactness);
+		Hash.AddBool(Set.ScreenAimHullContainsNominal);
+		Hash.AddBool(Set.ScreenAimHullCompliant);
+	}
+	Hash.AddDouble(Candidate.Metrics.PrefixRetentionScore);
+	Hash.AddDouble(Candidate.Metrics.PrefixHullScore);
+	Hash.AddDouble(Candidate.Metrics.DeflectionReadabilityScore);
+	Hash.AddDouble(Candidate.Metrics.AlternationScore);
+	Hash.AddDouble(Candidate.Metrics.PacingScore);
+	Hash.AddDouble(Candidate.Metrics.SoftScore);
 	for (const AssistMetrics& Assist : Candidate.Metrics.Assists)
 	{
 		Hash.AddDouble(Assist.EnterTimeSeconds);
@@ -632,6 +735,8 @@ std::uint64_t ABTS::M11Search::ComputeCandidateScoreHash(
 		Hash.AddDouble(Assist.CorridorQuality);
 		Hash.AddDouble(Assist.AppliedEnergyGainCM2PerSec2);
 		Hash.AddDouble(Assist.CollisionClearanceCM);
+		Hash.AddDouble(Assist.SignedLateralTurnRadians);
+		Hash.AddDouble(Assist.LateralTurnAxisProjection);
 	}
 	for (std::size_t Index = 0;
 		Index < Candidate.Metrics.AblationMasks.size();

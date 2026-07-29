@@ -3,7 +3,9 @@
 #include "World/ABTSM11FinaleInteractionSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Camera/ABTSM11FinaleFlightCamera.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
+#include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
@@ -12,6 +14,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
+#include "UI/ABTSM11FinalePresentation.h"
 #include "World/ABTSM11FinaleActors.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM51WorldActors.h"
@@ -94,7 +97,8 @@ AABTSM11FinaleInteractionSystem::AABTSM11FinaleInteractionSystem()
 	TargetPreviewCapture->SetupAttachment(SceneRoot);
 	TargetPreviewCapture->bCaptureEveryFrame = false;
 	TargetPreviewCapture->bCaptureOnMovement = false;
-	TargetPreviewCapture->FOVAngle = 42.0f;
+	TargetPreviewCapture->FOVAngle = static_cast<float>(
+		ABTSM11FinaleTargetPreviewFOVDegrees);
 	TargetPreviewCapture->PrimitiveRenderMode =
 		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	TargetPreviewCapture->CaptureSource =
@@ -126,6 +130,11 @@ bool AABTSM11FinaleInteractionSystem::Initialize(
 	if (!EnsureAimCamera())
 	{
 		FailInteraction(TEXT("AimCameraSpawnFailed"));
+		return false;
+	}
+	if (!EnsureFlightCamera())
+	{
+		FailInteraction(TEXT("FlightCameraSpawnFailed"));
 		return false;
 	}
 	TargetPreviewRenderTarget = NewObject<UTextureRenderTarget2D>(
@@ -189,6 +198,7 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 		|| !IsValid(FinaleSystem)
 		|| !IsValid(Party)
 		|| !EnsureAimCamera()
+		|| !EnsureFlightCamera()
 		|| !Cord.IsFinaleSpaceSlingshot()
 		|| Cord.GetFinaleSlotPairId()
 			!= FinaleSystem->GetFinaleFrame().SlotPairId)
@@ -210,6 +220,8 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 		AimSlingCenter,
 		AimSlingForward,
 		AimSlingUp);
+	FlightCamera->ResetAuthorityFollow();
+	ActiveFinaleController = &Controller;
 	Controller.SetViewTarget(AimCamera);
 
 	AttemptBird = Bird;
@@ -259,6 +271,16 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	++AimRevision;
 	bPreviewDirty = true;
 	TargetSelector.Reset();
+	LatestSolvedRevision = INDEX_NONE;
+	LatestQualifiedResult.Reset();
+	LatestSameInputPhysicalResult.Reset();
+	bLatestPhysicalResultAvailable = false;
+	CurrentClassification = FABTSM11PrefixClassification();
+	PreviewSelection = FABTSM11PreviewSelection();
+	PreviewPlaybackPlan.Reset();
+	DiagramSnapshot = FABTSM11OrbitalDiagramSnapshot();
+	bTargetCaptureDirty = false;
+	bTargetCaptureInitialized = false;
 	UpdatePouchPresentation();
 	FVector2D PouchScreen;
 	if (Controller.ProjectWorldLocationToScreen(
@@ -430,6 +452,18 @@ AABTSM11FinaleInteractionSystem::GetCurrentPrediction() const
 		: nullptr;
 }
 
+const FABTSM11TrajectoryResult*
+AABTSM11FinaleInteractionSystem::GetTargetPreviewPrediction() const
+{
+	if (PreviewSelection.Target == EABTSM11PreviewTarget::UFO
+		&& bLatestPhysicalResultAvailable
+		&& LatestSameInputPhysicalResult.ValidationHash != 0)
+	{
+		return &LatestSameInputPhysicalResult;
+	}
+	return GetCurrentPrediction();
+}
+
 bool AABTSM11FinaleInteractionSystem::ValidateInteractionContract(
 	const AABTSM11FinaleSystem& InFinaleSystem,
 	FString* OutFailure)
@@ -464,7 +498,9 @@ bool AABTSM11FinaleInteractionSystem::ValidateInteractionContract(
 		if (Candidate.PresetVersion != 1
 			|| Candidate.CompatibleGeneratorVersion != 3
 			|| Candidate.CompatibleFrameLayoutVersion != 1
-			|| Candidate.SearchAlgorithmVersion != 1
+			|| (Candidate.SearchAlgorithmVersion != 1
+				&& Candidate.SearchAlgorithmVersion != 2
+				&& Candidate.SearchAlgorithmVersion != 3)
 			|| Candidate.LaunchModel.LaunchModelVersion != 1
 			|| Candidate.SolverConfig.SolverVersion != 2
 			|| Candidate.SolverConfig.HashSchemaVersion != 2
@@ -507,6 +543,8 @@ bool AABTSM11FinaleInteractionSystem::ValidateInteractionContract(
 			!= Frozen.CompatibleGeneratorVersion
 		|| Candidate.CompatibleFrameLayoutVersion
 			!= Frozen.CompatibleFrameLayoutVersion
+		|| Candidate.SearchAlgorithmVersion
+			!= Frozen.SearchAlgorithmVersion
 		|| Candidate.LaunchModel.LaunchModelVersion
 			!= Frozen.LaunchModel.LaunchModelVersion
 		|| Candidate.SolverConfig.SolverVersion
@@ -575,7 +613,8 @@ void AABTSM11FinaleInteractionSystem::UpdateAiming(
 			FinaleSystem->GetLayoutPreset(),
 			TargetSelectionResult,
 			CurrentClassification);
-		if (PreviewSelection.Target != PreviousTarget)
+		if (!bTargetCaptureInitialized
+			|| PreviewSelection.Target != PreviousTarget)
 		{
 			MarkTargetCaptureDirty();
 		}
@@ -589,6 +628,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 {
 	if (!IsValid(FinaleSystem)
 		|| !IsValid(AttemptBird)
+		|| !EnsureFlightCamera()
 		|| ReleasedPlaybackPlan.Points.IsEmpty())
 	{
 		FailInteraction(TEXT("PlaybackDependencyLost"));
@@ -598,13 +638,15 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		PlaybackPresentationEndTimeSeconds,
 		ReleasedPlaybackPlan.Points[0].TimeSeconds,
 		ReleasedPlaybackPlan.DurationSeconds);
+	const double PresentationTimeScale =
+		FinaleSystem->IsEditorCandidateMode()
+			? 1.0
+			: FMath::Max(0.1, PlaybackTimeScale);
 	PlaybackElapsedSeconds = FMath::Min(
 		PresentationEndTime,
 		PlaybackElapsedSeconds
 			+ FMath::Max(0.0f, DeltaSeconds)
-				* (FinaleSystem->IsEditorCandidateMode()
-					? 1.0
-					: PlaybackTimeScale));
+				* PresentationTimeScale);
 	FVector3d LocalPosition;
 	FVector3d LocalVelocity;
 	if (!ReleasedPlaybackPlan.Sample(
@@ -622,12 +664,67 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 	const FVector WorldVelocity =
 		Frame.WorldTransform.TransformVectorNoScale(
 			FVector(LocalVelocity));
+	FVector CameraTangent = WorldVelocity;
+	if (CameraTangent.IsNearlyZero()
+		&& FlightCamera->IsAuthorityFollowActive())
+	{
+		CameraTangent = FlightCamera->GetLastAuthorityForward();
+	}
+	if (!FlightCamera->IsAuthorityFollowActive())
+	{
+		const FTransform InitialViewTransform =
+			IsValid(AimCamera)
+			? AimCamera->GetActorTransform()
+			: FTransform(
+				MakeFlightRotation(
+					CameraTangent,
+					Frame.GetUp()),
+				WorldPosition);
+		if (IsValid(AimCamera)
+			&& IsValid(AimCamera->GetCameraComponent())
+			&& IsValid(FlightCamera->GetCameraComponent()))
+		{
+			FlightCamera->GetCameraComponent()->SetFieldOfView(
+				AimCamera->GetCameraComponent()->FieldOfView);
+		}
+		if (!FlightCamera->BeginAuthorityFollow(
+			WorldPosition,
+			CameraTangent,
+			Frame.GetUp(),
+			InitialViewTransform))
+		{
+			FailInteraction(TEXT("FlightCameraFollowInitializationFailed"));
+			return;
+		}
+		if (APlayerController* Controller =
+			ActiveFinaleController.Get())
+		{
+			Controller->SetViewTarget(FlightCamera);
+		}
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-C][FlightCamera] FollowStarted Camera=%s Bird=%s"),
+			*GetNameSafe(FlightCamera),
+			*GetNameSafe(AttemptBird));
+	}
 	AttemptBird->SetActorLocationAndRotation(
 		WorldPosition,
 		MakeFlightRotation(WorldVelocity, Frame.GetUp()),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+	if (!FlightCamera->UpdateAuthoritySample(
+		WorldPosition,
+		CameraTangent,
+		Frame.GetUp(),
+		static_cast<float>(
+			FMath::Max(0.0, static_cast<double>(DeltaSeconds))
+				* PresentationTimeScale)))
+	{
+		FailInteraction(TEXT("FlightCameraAuthoritySampleRejected"));
+		return;
+	}
 	if (PlaybackElapsedSeconds >= PresentationEndTime - 1.0e-9)
 	{
 		if (ReleasedPlaybackPlan.bPhysicalTargetHit
@@ -750,6 +847,49 @@ bool AABTSM11FinaleInteractionSystem::EnsureAimCamera()
 		AimCamera = nullptr;
 	}
 	return bClassParity;
+}
+
+bool AABTSM11FinaleInteractionSystem::EnsureFlightCamera()
+{
+	if (IsValid(FlightCamera))
+	{
+		return true;
+	}
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	FlightCamera = World->SpawnActor<AABTSM11FinaleFlightCamera>(
+		AABTSM11FinaleFlightCamera::StaticClass(),
+		FTransform::Identity,
+		SpawnParameters);
+	return IsValid(FlightCamera);
+}
+
+void AABTSM11FinaleInteractionSystem::RestoreAimCameraView()
+{
+	if (IsValid(FlightCamera))
+	{
+		FlightCamera->ResetAuthorityFollow();
+	}
+	APlayerController* Controller = ActiveFinaleController.Get();
+	if (Controller != nullptr
+		&& IsValid(AimCamera)
+		&& (!IsValid(FlightCamera)
+			|| Controller->GetViewTarget() == FlightCamera))
+	{
+		Controller->SetViewTarget(AimCamera);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-C][FlightCamera] RestoredAim Camera=%s"),
+			*GetNameSafe(AimCamera));
+	}
 }
 
 bool AABTSM11FinaleInteractionSystem::BuildAimFrame(
@@ -1021,49 +1161,54 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 	{
 		return;
 	}
-	bTargetCaptureDirty = false;
 	const FABTSM110FinaleLocalFrame& Frame =
 		FinaleSystem->GetFinaleFrame();
-	const FVector TargetWorld = Frame.TransformLocalPosition(
-		FVector(PreviewSelection.TargetCenterCM));
-	FVector IncomingWorld =
+	FABTSM11TargetPipView PipView;
+	if (!ABTSM11BuildTargetPipView(
+		FinaleSystem->GetLayoutPreset(),
+		PreviewSelection,
+		TargetPreviewRenderTarget->SizeX,
+		TargetPreviewRenderTarget->SizeY,
+		PipView))
+	{
+		return;
+	}
+	const FVector CameraWorld = Frame.TransformLocalPosition(
+		FVector(PipView.CameraLocationCM));
+	const FVector ForwardWorld =
 		Frame.WorldTransform.TransformVectorNoScale(
-			FVector(PreviewSelection.IncomingDirection)).GetSafeNormal();
-	if (IncomingWorld.IsNearlyZero())
+			FVector(PipView.Forward)).GetSafeNormal();
+	const FVector UpWorld =
+		Frame.WorldTransform.TransformVectorNoScale(
+			FVector(PipView.Up)).GetSafeNormal();
+	if (ForwardWorld.IsNearlyZero() || UpWorld.IsNearlyZero())
 	{
-		IncomingWorld = Frame.GetForward();
+		return;
 	}
-	double VisualRadius = PreviewSelection.TargetRadiusCM;
-	const int32 AssistIndex =
-		static_cast<int32>(PreviewSelection.Target) + 1;
-	if (AssistIndex >= 1
-		&& AssistIndex <= FABTSM11GravityScenario::AssistCount)
-	{
-		VisualRadius = FinaleSystem->GetLayoutPreset()
-			.CanonicalScenario.GetAssist(AssistIndex).VisualRadiusCM;
-	}
-	const double CameraDistance = FMath::Max(
-		2500.0,
-		VisualRadius * 5.0);
-	const FVector CameraLocation =
-		TargetWorld - IncomingWorld * CameraDistance
-		+ Frame.GetUp() * (CameraDistance * 0.12);
 	TargetPreviewCapture->SetWorldLocationAndRotation(
-		CameraLocation,
-		MakeFlightRotation(
-			TargetWorld - CameraLocation,
-			Frame.GetUp()));
+		CameraWorld,
+		FRotationMatrix::MakeFromXZ(
+			ForwardWorld,
+			UpWorld).ToQuat());
+	TargetPreviewCapture->FOVAngle = static_cast<float>(
+		PipView.HorizontalFOVDegrees);
 	TargetPreviewCapture->ClearShowOnlyComponents();
 	TargetPreviewCapture->ShowOnlyActorComponents(TargetActor);
+	TargetPreviewCapture->bCameraCutThisFrame = true;
+	bTargetCaptureDirty = false;
+	bTargetCaptureInitialized = true;
 	TargetPreviewCapture->CaptureScene();
 }
 
 void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	const bool bKeepFinaleMode)
 {
+	RestoreAimCameraView();
 	++AimRevision;
 	LatestSolvedRevision = INDEX_NONE;
 	bPreviewDirty = false;
+	bTargetCaptureDirty = false;
+	bTargetCaptureInitialized = false;
 	if (IsValid(AttemptBird) && bAttemptBirdInPouch)
 	{
 		// Collision must remain disabled until the bird has left any analytic
@@ -1093,6 +1238,7 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	{
 		AttemptBird = nullptr;
 		ActiveCord = nullptr;
+		ActiveFinaleController.Reset();
 		bAimFrameValid = false;
 		return;
 	}
@@ -1206,6 +1352,13 @@ void AABTSM11FinaleInteractionSystem::EndPlay(
 	if (IsFinaleActive())
 	{
 		RestoreAttemptToWorld(false);
+	}
+	RestoreAimCameraView();
+	ActiveFinaleController.Reset();
+	if (IsValid(FlightCamera))
+	{
+		FlightCamera->Destroy();
+		FlightCamera = nullptr;
 	}
 	if (IsValid(AimCamera))
 	{

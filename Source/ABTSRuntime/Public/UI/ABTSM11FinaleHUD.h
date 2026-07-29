@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UI/ABTSM10ScoutMapHUD.h"
+#include "UI/ABTSM11FinalePresentation.h"
 #include "ABTSM11FinaleHUD.generated.h"
 
 class AABTSM11FinaleInteractionSystem;
@@ -25,6 +26,8 @@ private:
 		const FVector2D& Center,
 		float Radius);
 	void DrawTargetPreview(
+		AABTSM11FinaleInteractionSystem& System);
+	void DrawTargetWedge(
 		AABTSM11FinaleInteractionSystem& System);
 	void DrawFailureOverlay(
 		AABTSM11FinaleInteractionSystem& System);
@@ -67,4 +70,7 @@ private:
 		const FVector2d& NormalizedCenter,
 		double NormalizedRadius,
 		const FLinearColor& Color);
+
+	FABTSM11TargetPipTrajectory CachedPipTrajectory;
+	FABTSM11TargetWedgeTracker TargetWedgeTracker;
 };

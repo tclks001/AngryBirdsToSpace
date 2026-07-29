@@ -255,6 +255,7 @@ bool FABTSM11CTargetSelectorTest::RunTest(const FString& Parameters)
 	const FABTSM11FinaleLayoutPreset Preset =
 		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
 	FABTSM11TrajectoryResult Result;
+	Result.ValidationHash = 0x11c70001ull;
 	FABTSM11TrajectoryPoint& Point =
 		Result.Points.AddDefaulted_GetRef();
 	Point.PositionCM = Preset.LaunchModel.PouchLocalPositionCM;
@@ -266,6 +267,14 @@ bool FABTSM11CTargetSelectorTest::RunTest(const FString& Parameters)
 		0.0, Preset, Result, Classification);
 	TestEqual(TEXT("No valid assists previews planet 1"),
 		Selection.Target, EABTSM11PreviewTarget::Assist1);
+	const int32 InitialGeometryBuildCount =
+		Selector.GetGeometryBuildCount();
+	Selection = Selector.Update(
+		0.10, Preset, Result, Classification);
+	TestEqual(
+		TEXT("Stable target and Result hash reuse closest-point geometry"),
+		Selector.GetGeometryBuildCount(),
+		InitialGeometryBuildCount);
 	Classification.ValidAssistMask = 0x1u;
 	Selection = Selector.Update(0.19, Preset, Result, Classification);
 	TestEqual(TEXT("Advance target requires hysteresis"),
@@ -273,6 +282,10 @@ bool FABTSM11CTargetSelectorTest::RunTest(const FString& Parameters)
 	Selection = Selector.Update(0.02, Preset, Result, Classification);
 	TestEqual(TEXT("Valid assist 1 advances to planet 2"),
 		Selection.Target, EABTSM11PreviewTarget::Assist2);
+	TestEqual(
+		TEXT("A latched target change rebuilds geometry exactly once"),
+		Selector.GetGeometryBuildCount(),
+		InitialGeometryBuildCount + 1);
 	Classification.ValidAssistMask = 0x3u;
 	Selection = Selector.Update(0.21, Preset, Result, Classification);
 	TestEqual(TEXT("Valid assists 1 and 2 advance to planet 3"),
@@ -285,16 +298,36 @@ bool FABTSM11CTargetSelectorTest::RunTest(const FString& Parameters)
 	FABTSM11TrajectoryEvent& QualifiedHit =
 		Result.Events.AddDefaulted_GetRef();
 	QualifiedHit.Type = EABTSM11TrajectoryEventType::TargetHit;
+	const int32 BeforeQualifiedHashChange =
+		Selector.GetGeometryBuildCount();
+	++Result.ValidationHash;
 	Selection = Selector.Update(0.0, Preset, Result, Classification);
+	TestEqual(
+		TEXT("A new Result hash refreshes same-target geometry once"),
+		Selector.GetGeometryBuildCount(),
+		BeforeQualifiedHashChange + 1);
 	TestFalse(
 		TEXT("16k qualified TargetHit is not physical UFO entry"),
 		Selection.bEnteredTargetRegion);
 	FABTSM11TrajectoryEvent& PhysicalContact =
 		Result.Events.AddDefaulted_GetRef();
 	PhysicalContact.Type = EABTSM11TrajectoryEventType::TargetContact;
+	++Result.ValidationHash;
 	Selection = Selector.Update(0.0, Preset, Result, Classification);
 	TestTrue(TEXT("TargetContact is physical UFO entry"),
 		Selection.bEnteredTargetRegion);
+
+	FABTSM11TrajectoryResult UnhashedResult = Result;
+	UnhashedResult.ValidationHash = 0;
+	FABTSM11PreviewTargetSelector UnhashedSelector;
+	UnhashedSelector.Update(
+		0.0, Preset, UnhashedResult, Classification);
+	UnhashedSelector.Update(
+		0.0, Preset, UnhashedResult, Classification);
+	TestEqual(
+		TEXT("Unhashed synthetic results fail safe without caching"),
+		UnhashedSelector.GetGeometryBuildCount(),
+		2);
 	return true;
 }
 

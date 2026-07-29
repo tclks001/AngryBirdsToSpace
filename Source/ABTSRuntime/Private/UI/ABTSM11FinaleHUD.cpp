@@ -3,10 +3,12 @@
 #include "UI/ABTSM11FinaleHUD.h"
 
 #include "CanvasItem.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Game/ABTSM11GameMode.h"
+#include "GameFramework/PlayerController.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
 
@@ -46,6 +48,22 @@ namespace
 		default: return TEXT("UFO");
 		}
 	}
+
+	FLinearColor M11TargetColor(
+		const EABTSM11PreviewTarget Target)
+	{
+		switch (Target)
+		{
+		case EABTSM11PreviewTarget::Assist1:
+			return FLinearColor(1.0f, 0.34f, 0.20f, 1.0f);
+		case EABTSM11PreviewTarget::Assist2:
+			return FLinearColor(1.0f, 0.72f, 0.20f, 1.0f);
+		case EABTSM11PreviewTarget::Assist3:
+			return FLinearColor(0.70f, 0.50f, 1.0f, 1.0f);
+		default:
+			return FLinearColor(0.42f, 1.0f, 0.82f, 1.0f);
+		}
+	}
 }
 
 void AABTSM11FinaleHUD::DrawHUD()
@@ -55,6 +73,11 @@ void AABTSM11FinaleHUD::DrawHUD()
 	if (System != nullptr && System->IsFinaleActive())
 	{
 		DrawFinaleLayer(*System);
+	}
+	else
+	{
+		CachedPipTrajectory.Reset();
+		TargetWedgeTracker.Reset();
 	}
 	// Inventory, party and modal UI remain the top layer.
 	Super::DrawHUD();
@@ -90,7 +113,18 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 		Radius + 22.0f,
 		Canvas->SizeY - Radius - 110.0f);
 	DrawOrbitalDiagram(System, Center, Radius);
-	DrawTargetPreview(System);
+	if (System.IsAiming())
+	{
+		DrawTargetPreview(System);
+		DrawTargetWedge(System);
+	}
+	else
+	{
+		// The PIP and Wedge are aiming aids. Once the release gesture has
+		// completed, the authority flight camera owns spatial guidance.
+		CachedPipTrajectory.Reset();
+		TargetWedgeTracker.Reset();
+	}
 	DrawStatus(System, Center, Radius);
 }
 
@@ -287,11 +321,32 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 		System.GetTargetPreviewRenderTarget();
 	if (RenderTarget == nullptr || Canvas == nullptr)
 	{
+		CachedPipTrajectory.Reset();
 		return;
 	}
-	const FVector2D Size(
-		FMath::Min(420.0f, Canvas->SizeX * 0.34f),
-		FMath::Min(250.0f, Canvas->SizeY * 0.30f));
+	const FABTSM11TrajectoryResult* Prediction =
+		System.GetTargetPreviewPrediction();
+	const AABTSM11FinaleSystem* FinaleSystem =
+		System.GetFinaleSystem();
+	if (Prediction == nullptr || FinaleSystem == nullptr)
+	{
+		CachedPipTrajectory.Reset();
+		return;
+	}
+	const float RenderAspect =
+		static_cast<float>(FMath::Max(1, RenderTarget->SizeX))
+		/ static_cast<float>(FMath::Max(1, RenderTarget->SizeY));
+	float PreviewWidth =
+		FMath::Min(420.0f, Canvas->SizeX * 0.34f);
+	float PreviewHeight = PreviewWidth / RenderAspect;
+	const float MaximumHeight =
+		FMath::Min(250.0f, Canvas->SizeY * 0.30f);
+	if (PreviewHeight > MaximumHeight)
+	{
+		PreviewHeight = MaximumHeight;
+		PreviewWidth = PreviewHeight * RenderAspect;
+	}
+	const FVector2D Size(PreviewWidth, PreviewHeight);
 	const FVector2D Position(
 		(Canvas->SizeX - Size.X) * 0.5f,
 		24.0f);
@@ -302,6 +357,136 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 		FLinearColor::White);
 	Tile.BlendMode = SE_BLEND_Opaque;
 	Canvas->DrawItem(Tile);
+
+	FABTSM11TargetPipView PipView;
+	if (ABTSM11BuildTargetPipView(
+			FinaleSystem->GetLayoutPreset(),
+			System.GetPreviewSelection(),
+			RenderTarget->SizeX,
+			RenderTarget->SizeY,
+			PipView))
+	{
+		if (!CachedPipTrajectory.bValid
+			|| CachedPipTrajectory.SourceTrajectoryHash
+				!= Prediction->ValidationHash
+			|| CachedPipTrajectory.Target
+				!= System.GetPreviewSelection().Target)
+		{
+			ABTSM11BuildTargetPipTrajectory(
+				PipView,
+				System.GetPreviewSelection(),
+				*Prediction,
+				CachedPipTrajectory,
+				96);
+		}
+	}
+	else
+	{
+		CachedPipTrajectory.Reset();
+	}
+
+	const FLinearColor TargetColor =
+		M11TargetColor(System.GetPreviewSelection().Target);
+	if (CachedPipTrajectory.bValid)
+	{
+		for (int32 Index = 1;
+			Index < CachedPipTrajectory.Points.Num();
+			++Index)
+		{
+			const FABTSM11TargetPipTrajectoryPoint& A =
+				CachedPipTrajectory.Points[Index - 1];
+			const FABTSM11TargetPipTrajectoryPoint& B =
+				CachedPipTrajectory.Points[Index];
+			if (!A.bInFront || !B.bInFront)
+			{
+				continue;
+			}
+			FVector2D Start = A.UV;
+			FVector2D End = B.UV;
+			if (!ABTSM11ClipPipLineToRect(Start, End, 0.025f))
+			{
+				continue;
+			}
+			Start = Position + Start * Size;
+			End = Position + End * Size;
+			DrawLine(
+				Start.X,
+				Start.Y,
+				End.X,
+				End.Y,
+				FLinearColor(0.30f, 0.92f, 1.0f, 0.96f),
+				2.2f);
+		}
+
+		for (const FABTSM11TargetPipTrajectoryPoint& Point
+			: CachedPipTrajectory.Points)
+		{
+			if (!Point.bClosestApproach || !Point.bInFront)
+			{
+				continue;
+			}
+			FVector2D MarkerUV = Point.UV;
+			const bool bOutside =
+				MarkerUV.X < 0.045f
+				|| MarkerUV.X > 0.955f
+				|| MarkerUV.Y < 0.12f
+				|| MarkerUV.Y > 0.955f;
+			if (bOutside)
+			{
+				FVector2D RayStart(0.5f, 0.5f);
+				if (ABTSM11ClipPipLineToRect(
+					RayStart,
+					MarkerUV,
+					0.055f))
+				{
+					MarkerUV = FVector2D(
+						FMath::Clamp(
+							MarkerUV.X,
+							0.055f,
+							0.945f),
+						FMath::Clamp(
+							MarkerUV.Y,
+							0.12f,
+							0.945f));
+				}
+			}
+			const FVector2D Marker =
+				Position + MarkerUV * Size;
+			DrawCircleOutline(
+				Marker,
+				bOutside ? 5.0f : 6.5f,
+				System.GetPreviewSelection().bEnteredTargetRegion
+					? FLinearColor(0.38f, 1.0f, 0.58f, 1.0f)
+					: FLinearColor(1.0f, 0.62f, 0.18f, 1.0f),
+				1.8f,
+				18);
+			break;
+		}
+	}
+
+	const FVector2D TargetReticle =
+		Position + Size * 0.5f;
+	DrawCircleOutline(
+		TargetReticle,
+		10.0f,
+		TargetColor.CopyWithNewOpacity(0.92f),
+		1.4f,
+		24);
+	DrawLine(
+		TargetReticle.X - 15.0f,
+		TargetReticle.Y,
+		TargetReticle.X - 7.0f,
+		TargetReticle.Y,
+		TargetColor,
+		1.2f);
+	DrawLine(
+		TargetReticle.X + 7.0f,
+		TargetReticle.Y,
+		TargetReticle.X + 15.0f,
+		TargetReticle.Y,
+		TargetColor,
+		1.2f);
+
 	DrawRect(
 		FLinearColor(0.02f, 0.06f, 0.11f, 0.75f),
 		Position.X,
@@ -310,7 +495,7 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 		24.0f);
 	DrawText(
 		FString::Printf(
-			TEXT("APPROACH PREVIEW: %s%s"),
+			TEXT("CURRENT APPROACH: %s%s"),
 			TargetLabel(System.GetPreviewSelection().Target),
 			System.GetFinaleSystem() != nullptr
 				&& System.GetFinaleSystem()->IsEditorCandidateMode()
@@ -326,6 +511,14 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 		Position.Y + 5.0f,
 		GEngine->GetSmallFont(),
 		0.75f,
+		false);
+	DrawText(
+		TEXT("CYAN: CURRENT PREDICTION  /  RING: CLOSEST"),
+		FLinearColor(0.62f, 0.84f, 0.94f),
+		Position.X + 8.0f,
+		Position.Y + Size.Y - 18.0f,
+		GEngine->GetSmallFont(),
+		0.58f,
 		false);
 	for (int32 Edge = 0; Edge < 4; ++Edge)
 	{
@@ -355,6 +548,97 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 			FLinearColor(0.48f, 0.76f, 0.94f),
 			1.5f);
 	}
+}
+
+void AABTSM11FinaleHUD::DrawTargetWedge(
+	AABTSM11FinaleInteractionSystem& System)
+{
+	if (Canvas == nullptr)
+	{
+		return;
+	}
+	const AABTSM11FinaleSystem* FinaleSystem =
+		System.GetFinaleSystem();
+	APlayerController* Controller = GetOwningPlayerController();
+	APlayerCameraManager* CameraManager =
+		Controller != nullptr
+		? Controller->PlayerCameraManager
+		: nullptr;
+	if (FinaleSystem == nullptr
+		|| CameraManager == nullptr
+		|| System.GetTargetPreviewPrediction() == nullptr)
+	{
+		TargetWedgeTracker.Reset();
+		return;
+	}
+
+	const FABTSM110FinaleLocalFrame& Frame =
+		FinaleSystem->GetFinaleFrame();
+	const FVector TargetWorld = Frame.TransformLocalPosition(
+		FVector(System.GetPreviewSelection().TargetCenterCM));
+	const FRotator CameraRotation =
+		CameraManager->GetCameraRotation();
+	const FRotationMatrix CameraBasis(CameraRotation);
+	const FVector2D ViewportSize(Canvas->SizeX, Canvas->SizeY);
+	const FABTSM11TargetWedgeProjection Projection =
+		ABTSM11ProjectTargetForWedge(
+			FVector3d(TargetWorld),
+			FVector3d(CameraManager->GetCameraLocation()),
+			FVector3d(
+				CameraBasis.GetScaledAxis(EAxis::X)),
+			FVector3d(
+				CameraBasis.GetScaledAxis(EAxis::Y)),
+			FVector3d(
+				CameraBasis.GetScaledAxis(EAxis::Z)),
+			CameraManager->GetFOVAngle(),
+			ViewportSize);
+	const FABTSM11TargetWedgeOutput Wedge =
+		TargetWedgeTracker.Update(
+			GetWorld() != nullptr
+				? GetWorld()->GetDeltaSeconds()
+				: 0.0,
+			System.GetPreviewSelection().Target,
+			Projection,
+			ViewportSize);
+	if (!Wedge.bVisible)
+	{
+		return;
+	}
+
+	const FLinearColor Color = M11TargetColor(Wedge.Target);
+	const FVector2D Perpendicular(
+		-Wedge.Direction.Y,
+		Wedge.Direction.X);
+	const FVector2D Tip = Wedge.Anchor;
+	const FVector2D Base =
+		Tip - Wedge.Direction * 19.0f;
+	const FVector2D Left = Base + Perpendicular * 8.0f;
+	const FVector2D Right = Base - Perpendicular * 8.0f;
+	DrawLine(Tip.X, Tip.Y, Left.X, Left.Y, Color, 3.0f);
+	DrawLine(Tip.X, Tip.Y, Right.X, Right.Y, Color, 3.0f);
+	DrawLine(Left.X, Left.Y, Right.X, Right.Y, Color, 2.0f);
+	DrawCircleOutline(Base, 4.0f, Color, 1.4f, 16);
+
+	const FVector2D RawLabelPosition =
+		Base - Wedge.Direction * 16.0f
+			+ Perpendicular * 9.0f;
+	const FVector2D LabelPosition(
+		FMath::Clamp(
+			RawLabelPosition.X,
+			12.0f,
+			ViewportSize.X - 92.0f),
+		FMath::Clamp(
+			RawLabelPosition.Y,
+			12.0f,
+			ViewportSize.Y - 28.0f));
+	DrawText(
+		TargetLabel(Wedge.Target),
+		Color,
+		LabelPosition.X,
+		LabelPosition.Y,
+		GEngine->GetSmallFont(),
+		0.72f,
+		false);
 }
 
 void AABTSM11FinaleHUD::DrawStatus(

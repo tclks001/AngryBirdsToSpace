@@ -222,12 +222,19 @@ public:
 		const FABTSM11PrefixClassification& Classification);
 
 	EABTSM11PreviewTarget GetLatchedTarget() const { return LatchedTarget; }
+	int32 GetGeometryBuildCount() const { return GeometryBuildCount; }
 
 private:
 	EABTSM11PreviewTarget LatchedTarget = EABTSM11PreviewTarget::Assist1;
 	EABTSM11PreviewTarget PendingTarget = EABTSM11PreviewTarget::Assist1;
+	EABTSM11PreviewTarget CachedSelectionTarget =
+		EABTSM11PreviewTarget::Assist1;
+	FABTSM11PreviewSelection CachedSelection;
+	uint64 CachedResultHash = 0;
 	double PendingSeconds = 0.0;
+	int32 GeometryBuildCount = 0;
 	bool bInitialized = false;
+	bool bCachedSelectionValid = false;
 };
 
 struct ABTSRUNTIME_API FABTSM11PlaybackPoint

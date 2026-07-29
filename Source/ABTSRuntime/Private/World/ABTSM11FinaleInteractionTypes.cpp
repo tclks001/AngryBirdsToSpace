@@ -488,8 +488,13 @@ void FABTSM11PreviewTargetSelector::Reset()
 {
 	LatchedTarget = EABTSM11PreviewTarget::Assist1;
 	PendingTarget = LatchedTarget;
+	CachedSelectionTarget = LatchedTarget;
+	CachedSelection = FABTSM11PreviewSelection();
+	CachedResultHash = 0;
 	PendingSeconds = 0.0;
+	GeometryBuildCount = 0;
 	bInitialized = false;
+	bCachedSelectionValid = false;
 }
 
 FABTSM11PreviewSelection FABTSM11PreviewTargetSelector::Update(
@@ -529,7 +534,23 @@ FABTSM11PreviewSelection FABTSM11PreviewTargetSelector::Update(
 			PendingSeconds = 0.0;
 		}
 	}
-	return BuildSelection(LatchedTarget, Preset, Result);
+	const bool bCanReuseGeometry =
+		bCachedSelectionValid
+		&& Result.ValidationHash != 0
+		&& CachedResultHash == Result.ValidationHash
+		&& CachedSelectionTarget == LatchedTarget;
+	if (!bCanReuseGeometry)
+	{
+		CachedSelection = BuildSelection(
+			LatchedTarget,
+			Preset,
+			Result);
+		CachedSelectionTarget = LatchedTarget;
+		CachedResultHash = Result.ValidationHash;
+		bCachedSelectionValid = Result.ValidationHash != 0;
+		++GeometryBuildCount;
+	}
+	return CachedSelection;
 }
 
 bool FABTSM11FailurePresentationConfig::IsValid() const

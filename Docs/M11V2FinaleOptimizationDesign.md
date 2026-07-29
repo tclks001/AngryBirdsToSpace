@@ -1,6 +1,6 @@
 # M11 v2：终局引力弹弓优化总设计与阶段边界
 
-> 状态：**M11-A v2.1 与 M11-B v2.1 已实现并通过自动门禁，M11-C v2.1 已进入 Editor-only 候选体验实现与验收阶段**。标准 C++ 候选搜索已生成 4 个 Candidate Manifest，首选候选已通过 UE/CLI 同源逐字段快速重放；C v2.1 当前任务边界是候选加载、M6 输入同手感、latest-only 预演、候选身份 HUD、原始 1× 播放和失败恢复，正式验收门见第 7.4 节。在这些门槛全部通过前，C v2.1 仍是“实现中”，不得进入参数冻结。后续仍按 **M11-C v2.1 候选手感循环 → 参数冻结 → M11-B v2.2 完整认证 → M11-C v2.2 正式绑定** 推进。M11-B/C v1 继续作为生产基线，未经认证的 v2 Candidate 不得进入正式运行路径。
+> 状态：**M11-A v2.1 已完成；M11-B v2.1 Search Contract / Algorithm / Manifest v3 与 M11-C v2.1 表现/相机代码已实现；权威 4096-work 搜索与 merge、2 个候选的 Catalog 重冻、默认/强制 Unity 全链接及 `33/33` fresh-process 自动门均已完成**。B v2.1 使用相互独立的 ScreenAim 5000 与 FullLaunchDomain 5000 语料，加入逐级比例/凸包门和真实换侧偏转可读性；C v2.1 已补齐稳定的局部接近 PIP、单目标 Wedge、Release 后权威轨迹相机，以及避免逐帧重复扫描/捕获的发布缓存。正式验收门见第 7.4 节；当前只等待用户有渲染 PIE，两个结果仍只允许称为 `Candidate / NOT CERTIFIED`，不得进入参数冻结或生产绑定。后续仍按 **M11-C v2.1 候选手感循环 → 参数冻结 → M11-B v2.2 完整认证 → M11-C v2.2 正式绑定** 推进。M11-B/C v1 继续作为生产基线。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
@@ -86,7 +86,17 @@ v2.1 必须保持：
 
 B v2.1 使用标准 C++ `M11Core` 做全部精确轨迹求值。实际落地由标准 C++ `M11Search` 负责参数构造、分类、排名、Hash 与 Manifest，独立 C++ CLI 负责搜索/合并；Python 标准库脚本只负责不可变计划、进程分片、状态与恢复调度，不生成候选数值身份。
 
-本阶段先执行分层构造搜索和局部快速扫描，不执行耗时极大的完整输入域认证。候选必须先满足第 6 节的强助推、非共线、60 秒、coast、碰撞净空、顺序和初步消融硬门，再保留 **3–5 个**布局与空间构型明显不同的候选，避免一次 PIE 手感否决就重新进行全量搜索。
+本阶段先执行分层构造搜索和候选级统计，不执行耗时极大的完整输入域认证。候选必须先满足第 6 节的强助推、非共线、60 秒、coast、碰撞净空、顺序和初步消融硬门；目标保留 **3–5 个**布局与空间构型明显不同的候选，避免一次 PIE 手感否决就重新进行全量搜索。如果全局搜索只有更少结果通过全部硬门，则保留全部真实通过者并显式记录名额缺口，不得用失败项或重复布局填满配额。本轮 4096-work 搜索因此只保留实际通过的 2 个候选。
+
+候选通过产品硬门后，执行两套互不混用的固定种子 Halton 语料：
+
+- `ScreenAim 5000`：完整 Yaw/Pitch，Power 固定为 nominal；它是 S1–S3 候选比例硬门、独立二维凸包和 UX 评分的唯一权威；
+- `FullLaunchDomain 5000`：完整 `Yaw × Pitch × Power`，只诊断 Power 维度，不参与候选接受、凸包或排名；
+- 每集 512 个 Conditional 点只作局部解释，不并入任一无偏语料。
+
+`S1/S2/S3` 分别表示已取得前一、前二、前三颗行星合格助推的嵌套前缀集，`S4` 仅作为命中候选目标球的诊断集。这些撒点都不是逐像素穷举，也不是 v2.2 认证。
+
+`S1/S2/S3` 各自只用对应 ScreenAim 成员计算 Yaw-Pitch 凸包，不加入 FullDomain、Conditional 或人工 nominal anchor。每级 ScreenAim 保留率先通过 `[0.08, 0.55]` 硬门，再检查凸包；`[0.15, 0.40]` 为软评分满分平台。三次实际速度偏转、相对布局平面的侧向转轴投影、相邻助推左右交替次数和节奏余量共同奖励可读的“左—右—左/右—左—右”轨迹。
 
 每个候选必须输出不可变 Candidate Manifest：
 
@@ -98,7 +108,7 @@ B v2.1 使用标准 C++ `M11Core` 做全部精确轨迹求值。实际落地由�
 
 此时状态只能是 `Candidate`。不得生成正式 `CertificationHash`，不得命名为 `CertifiedBundle`，也不得覆盖 M11-B/C v1 的生产默认值。
 
-本阶段已按 `256` 个确定性全局工作项、`4 × 64` 分片完成一次候选构造，得到 `4` 个通过 60 秒、最长 coast、三次强偏转、局部鲁棒、低功率失败与逐星消融快速门的 Candidate；全局 `Candidate Aggregate=0xb03d33f10710f59a`。首选 `Work=166` 已在全新 UE 命令行进程中重建，并与标准 C++ Core 逐字段一致。完整合同、候选表、工具身份和证据见 [M11-B v2.1 子稿](M11B21CandidateSearchDesign.md)；这些结果仍不构成完整输入域唯一性认证。
+`SearchContractVersion=3 / SearchAlgorithmVersion=3 / CandidateManifestVersion=3` 已实现上述统计和评分语义。旧 v1/v2 搜索候选、排名、Score/Source Hash、Aggregate 和 Catalog 身份全部失效；最终候选表、命令和工具身份以 [M11-B v2.1 子稿](M11B21CandidateSearchDesign.md) 的合并记录为准。无论候选级撒点结果多好，这些输出仍只是 `Candidate`，不构成完整输入域唯一性认证。
 
 ### 3.3 候选进入 PIE 前的快速跨前端重放
 
@@ -120,9 +130,13 @@ C v2.1 增加显式开发候选模式，用于在 PIE 中完成：
 - 与普通 M6 弹弓一致的可见光标、按住—拖动—同次松开发射；
 - 拖动只控制袋位置与发射方向；Power 与 M6 一样由滚轮独立控制，每格步长为 `0.08`；
 - latest-only 预演、轨道 HUD、接近预览、失败恢复和 60 秒内确定性播放；
+- 接近 PIP 第一目标使用“发射袋→行星①”，之后使用“上一目标中心→当前目标中心”为固定视轴，以 Finale Local `+Z` 为恒定 up；同一目标内只叠加当前权威 prediction 的真实 closest 局部轨迹，不随鼠标微扰重新旋转、平移或缩放；
+- 主视图只显示选择器当前锁定目标的一个 Wedge；目标切换立即替换，空间/时间迟滞只控制同一目标的显示/隐藏；
+- Release 后由 M11-only 相机消费权威轨迹的 World Position/Velocity，沿切线跟随并平行运输 Up；恢复、复位和退出时先切回 Aim Camera；
+- 目标选择的昂贵轨迹几何只在 `ResultHash + LatchedTarget` 改变时重建，PIP 的 Scene Capture 只在首次有效结果或目标切换时捕获，当前轨迹由 HUD 叠加；
 - 对候选成功岛宽度、三次转向可读性、节奏、镜头和前缀成功集稳定器手感的人工验收。
 
-候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用生产 Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank 1`（可选 `1..4`）并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持生产 v1。
+候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中 N 不得超过当前 v3 Catalog 实际冻结的 `LastCandidateRank`，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。
 
 候选模式必须由 `WITH_EDITOR`、显式开发开关或等价 fail-closed 边界隔离；Shipping/正式 Standalone 不得加载 Candidate。v2.1 可使用局部快速扫描生成的临时 Trust Region 测试降敏和边界感，但它不能作为最终认证 Trust Region，也不能进入生产 Bundle。
 
@@ -320,10 +334,13 @@ B v2 显式选择 Solver/Hash 2/2，并搜索、冻结：
 - 更大的三颗行星作用圈、自然引力参数和虚拟动量预算；
 - 明显不同方向的三次近星飞越，使行星和 UFO 不再近似共线；
 - 每颗助推的最小实际速度转角、最小有效能量交换和碰撞净空；
+- 每颗助推相对轨迹拟合平面的有符号侧向转轴投影（绝对投影硬门 `>= 0.25`），以及相邻两次助推的左右交替次数；
 - 固定行星位置下唯一的 `① -> ② -> ③ -> UFO` 成功路径族；
 - 关闭任意一颗或全部玩法助推后都不存在 F4。
 
 行星参数必须由完整求解与消融证明其必要性，不能只凭轨道 HUD 看起来弯曲。
+
+B v2.1 的候选级可玩性探针分为两套：固定 nominal Power 的 `ScreenAim 5000` 决定 `S1/S0`、`S2/S1`、`S3/S2` 比例、各自独立凸包和 UX 评分；三维 `FullLaunchDomain 5000` 只诊断 Power 维度。每集 Conditional 512 也只作局部诊断。ScreenAim 比例先过 `[0.08,0.55]` 硬门，随后才检查凸包；这些结果仍不能证明连通分量唯一、旁路不存在或 Power 全域闭包，后者属于 B v2.2。
 
 ### 6.3 60 秒“激流勇进”节奏
 
@@ -385,6 +402,10 @@ A v2 负责降低单次求解成本，C v2 负责消除节流、重复求解和�
 
 - 轨道图继续遵循 M10.1-C 的拟合平面、发射点朝左、凸包 framing、球后虚线和圆形裁剪；
 - 三颗行星和 UFO 的所有图元必须留在圆形视口内；
+- PIP 始终把当前目标置于中心；第一目标以“发射袋→行星①”定义固定视轴，之后为“上一目标→当前目标”，并以 Finale Local `+Z` 定义恒定 screen up；目标不变时鼠标微扰只更新当前权威局部轨迹叠加，不改变相机 Transform 或 framing；
+- 主视图只显示一个当前目标 Wedge；目标切换立即替换，安全边距和迟滞只控制显示/隐藏，不显示 nominal 解或精确修正量；
+- Release 后隐藏瞄准用 PIP/Wedge，切换到只消费权威轨迹位置/速度的 M11 飞行相机，沿轨迹切线跟随并平行运输 Up；相机响应按实际播放倍率缩放，不读取 Chaos/Movement，也不反向改写轨迹；
+- `ResultHash + LatchedTarget` 是接近几何缓存键；相同结果/目标的每帧 HUD 不再扫描完整点列。Scene Capture 只在首次有效结果或目标切换时捕获目标 Actor，当前局部轨迹由 HUD 叠加，因此每次求解完成不会重新触发 Renderer；
 - v2.1 HUD 必须常驻显示 `EDITOR CANDIDATE / NOT CERTIFIED`，并显示候选 `Rank`、`GlobalWorkIndex`、Candidate Source、Nominal Request、Nominal Result 与 Score Hash；候选身份不得借用 `CertificationHash` 或 `CertifiedBundleHash`；
 - v2.1 可用明确标记的临时局部区域测试稳定器手感；v2.2 的正式前缀成功集稳定器只消费 B v2.2 冻结 Trust Regions，可降敏和限制在当前成功前缀，不得吸向 nominal 答案；
 - v2.1 播放 Candidate 只用于 Editor PIE 体验，HUD 必须标为 `RAW 1X CANDIDATE PLAYBACK / QUALIFIED ENDPOINT`；这里的终点是候选求解器的 qualified target radius，不是已认证的 800 cm UFO 物理接触，也不允许接入 Certified nominal tail 或终端转接。v2.2 播放直接消费 B v2.2 已认证的 `<=60 s` 原始轨迹。可按事件做镜头和轻量表现节奏，但不能用大倍率时间压缩掩盖 B 中过长的物理 coast，也不能改变事件或结局；
@@ -399,14 +420,14 @@ C v2.1 只有同时通过以下门槛，才可由用户选择候选并进入“�
 2. **Editor-only 失效闭合**：只有 Editor PIE 加显式候选开关可加载 Candidate；关闭开关、正式 Standalone 与非 Editor 构建继续走 v1 生产路径或 fail closed，不得静默回退到未认证候选。
 3. **身份可见且同源**：HUD 常驻显示 `EDITOR CANDIDATE / NOT CERTIFIED`、Rank、Global Work 和四类 Hash；日志、HUD、运行时布局与标准 C++ 重建出的同一候选逐字段一致。
 4. **M6 输入同手感**：可见光标按住并拖动袋控制方向；滚轮每格 `0.08` 独立控制 Power；同一次按下松开立即发射；预演 Request 与 Release Request 使用 HUD 所示同一组 Yaw/Pitch/Power。
-5. **latest-only 预演**：快速连续拖动时最多一个后台求解；HUD 明确区分 `IN FLIGHT`、`STALE` 与 `LATEST`，过期 generation 不发布；统计得到 stale publish 为零，并记录 solve/总延迟与 discard 数。
+5. **latest-only 预演与表现缓存**：快速连续拖动时最多一个后台求解；HUD 明确区分 `IN FLIGHT`、`STALE` 与 `LATEST`，过期 generation 不发布；统计得到 stale publish 为零，并记录 solve/总延迟与 discard 数。相同 `ResultHash + LatchedTarget` 不重复构建局部几何，Scene Capture 不随每次求解重捕获，只在首次有效结果或目标切换触发。
 6. **候选路径诚实播放**：F4 候选按求解器时间戳以原始 `1×` 轨迹播放到 qualified endpoint；不生成物理 UFO 接触、不拼接 Certified nominal tail、不进行终端转接，也不以表现层改写成功分类。
 7. **稳定器边界**：临时区域只降敏并保持已取得的候选前缀，不吸向 nominal；HUD 全程使用 Candidate/Temporary 措辞，R 可复位尝试。
-8. **PIE 表现回归**：袋从首次按住即随光标移动；三颗行星/UFO 图元不越出圆形轨道视口；失败轨迹在预定时限内进入完整黑屏并恢复到入场前状态；重复进入、发射、失败与复位不会从后台线程触发渲染时间上下文报错。
+8. **PIE 表现回归**：袋从首次按住即随光标移动；三颗行星/UFO 图元不越出圆形轨道视口；PIP 第一段固定 pouch→planet1、之后固定 previous-target→current-target 视轴和 local `+Z` up，局部当前轨迹可见且微调不乱晃；主视图始终最多一个 Wedge；Release 后瞄准引导隐藏，相机按播放倍率沿权威轨迹跟随并在恢复时归还 Aim Camera；失败轨迹在预定时限内进入完整黑屏并恢复到入场前状态；重复进入、发射、失败与复位不会从后台线程触发渲染时间上下文报错。
 
 自动门与 PIE 证据必须分别留档。自动化通过不能代替候选手感批准；用户批准也不能代替 Editor-only、身份和 stale publish 门。完成本节只允许冻结候选参数，仍不构成 B v2.2 全输入域唯一性认证。
 
-C v2.1 首轮实现保持 M11 专属边界：Candidate Catalog 从标准 C++ 工作项重建并核对冻结身份；Finale System/GameMode 只通过显式 Editor PIE 候选 Rank 进入未认证模式；Interaction System/PlayerController 承担 M6 同手感输入、绝对光标位移降敏、latest-only 求解、临时稳定器、任意活动阶段 R 复位与原始播放；轨道取景在完整轨迹之外仅纳入三颗助推行星和 UFO 的因果图元，仍不强制画出完整主星；HUD 只读这些已发布状态并明确展示候选身份。该轮不修改 M6、Config、共享工作流或 v1 生产默认值。
+C v2.1 首轮实现保持 M11 专属边界：Candidate Catalog 从标准 C++ 工作项重建并核对冻结身份；Finale System/GameMode 只通过显式 Editor PIE 候选 Rank 进入未认证模式；Interaction System/PlayerController 承担 M6 同手感输入、绝对光标位移降敏、latest-only 求解、临时稳定器、任意活动阶段 R 复位与原始播放；Presentation/HUD 使用稳定 PIP 局部当前轨迹与单目标 Wedge，飞行相机只消费 Release 的权威播放样本；目标选择几何和 Scene Capture 分别按结果/目标身份与首结果/目标切换缓存。轨道取景在完整轨迹之外仅纳入三颗助推行星和 UFO 的因果图元，仍不强制画出完整主星；HUD 只读这些已发布状态并明确展示候选身份。该轮不修改 M6、Config、共享工作流或 v1 生产默认值。
 
 ## 8. 版本与认证失效矩阵
 
@@ -414,6 +435,7 @@ C v2.1 首轮实现保持 M11 专属边界：Candidate Catalog 从标准 C++ 工
 | --- | --- | --- |
 | 新增 A v2，但保持 1/1 路径和 golden 不变 | 否 | B v2 显式选择 2/2 |
 | A v2.1 仅抽取标准 C++ 边界，所有语义与 Hash 保持一致 | 否 | 先通过 CLI/UE parity gate；既有 Candidate 仍须按 Source Hash 重新核对 |
+| Search Contract/Algorithm/Manifest `2→3` | production v1 不失效 | 全部旧 Candidate、Score/Source Hash、plan/checkpoint、Aggregate 和 Catalog 身份失效；重新搜索、merge 和冻结 |
 | 修改 v2 coast 深度、积分、事件或其他 HashSchema 2 配置 | 不影响 v1 | 所有 v2 Candidate/Certified Bundle 失效；回到 A 升版与 B v2.1 重搜 |
 | 修改生产行星位置、`Mu`、作用圈、虚拟动量或 B-plane | 不影响冻结 v1 文件本身 | 生成新 CandidateId，重走 B v2.1 → C v2.1；体验冻结后再做 v2.2 全认证 |
 | 修改 LaunchModel 的 Yaw/Pitch/Power 范围或映射 | 当前 v1 不自动切换 | 候选与认证域均失效；重跑完整三维域并更新 C 映射 |
@@ -487,9 +509,9 @@ v2.1 在开始 B v2.1 搜索前还必须通过：
 
 Python Binding、搜索编排器和 GPU Probe 不属于 A v2.1 数值正确性的阻断实现；但 B v2.1 若使用它们，必须先分别通过第 4 节对应门槛。
 
-## 11. 当前实测基线
+## 11. 2026-07-29 M11-A v2.1 归档基线
 
-本轮门禁执行结果：
+以下是 M11-A v2.1 当日归档门禁，不代表后文 Search v3 / M11-C v2.1 的当前门禁结果：
 
 | 门禁 | 结果 | 日志 |
 | --- | --- | --- |
@@ -519,6 +541,60 @@ Python Binding、搜索编排器和 GPU Probe 不属于 A v2.1 数值正确性�
 
 以上是算法夹具。三助推 canary 只证明 A v2 能正确且更快地承载真实 encounter/shooting 工作量，不把 v1 布局升级为 v2 生产预设，也不等于 C 已达到同帧反馈；后者仍依赖 B v2 的 60 秒紧凑路径和 C v2 的 latest-only 调度。
 
+### 11.1 Search v3 权威候选结果
+
+`Intermediate/M11B21V3ReadableGate_4096/merged/summary.json` 已完成并通过 merge：`4096/4096` work evaluated、`2` accepted、`2` selected，8 个分片累计 `4912.003924 s`，分片 solver 调用 `1,938,854`，merge replay 调用 `26,511`。统一身份如下：
+
+| 身份项 | 值 |
+| --- | --- |
+| Evaluation / Candidate Aggregate | `0xac04988c81e25849` / `0xbfeaae4610d4c406` |
+| Contract Hash | `0x1e9f208e738a6ef7` |
+| Search Source SHA-256 | `27269434b7dff48c26149179776589faa67f2c0ef428849a4833e49deb817738` |
+| Production Core Source SHA-256 | `970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0` |
+| 版本 | Search Contract `3` / Algorithm `3` / Candidate Manifest `3` |
+
+| Rank / work | Candidate Source | nominal Request | nominal Result | Score |
+| --- | --- | --- | --- | --- |
+| 1 / `2278` | `0xaaae0dd44f14f785` | `0x5ecc893f6eb7003d` | `0xb47d8314ebe69376` | `0xd6e03f2d9e0f3b8b` |
+| 2 / `772` | `0xe2c810b38f338e06` | `0x5c07be6f9371448e` | `0xe465b9c154c235a1` | `0xdd1613e3dbb4c1b0` |
+
+两候选的节奏与可读性证据为：
+
+| Rank | 总时长 | 最长 / 最终 coast | 三段实际偏转 | 有符号换侧 | 三段轴投影 | 三段 Influence 时长 |
+| ---: | ---: | ---: | --- | --- | --- | --- |
+| 1 | `31.268136 s` | `5.065894 / 1.967285 s` | `0.590804 / 0.306536 / 0.645047 rad` | `+ / - / +`，2 次 | `0.934093 / 0.992458 / 0.489981` | `7.923236 / 7.507412 / 3.909778 s` |
+| 2 | `31.223673 s` | `4.513232 / 2.050117 s` | `0.404215 / 0.552443 / 0.628360 rad` | `- / + / +`，1 次 | `0.974204 / 0.971059 / 0.976836` | `7.917075 / 4.107608 / 5.579378 s` |
+
+两者三段布局转角分别为 `0.377665 / 0.533365 / 0.385783 rad` 与 `0.348798 / 0.346212 / 0.386060 rad`，均通过 `0.30 rad` 布局门；最小可读实际偏转为 `0.304224 rad` 与 `0.393788 rad`。
+
+ScreenAim 固定 nominal Power 的 5000 点 UX 权威证据如下；每格为 `count / 嵌套比例 / hull area / yaw span × pitch span`，三层 Hull 均包含 nominal、证据数等于对应 count 且合规：
+
+| Rank | S1 | S2 | S3 |
+| ---: | --- | --- | --- |
+| 1 | `660 / 0.132000 / 331.607413 deg² / 16.040039° × 38.826398°` | `74 / 0.112121 / 66.516190 deg² / 8.156250° × 21.243713°` | `26 / 0.351351 / 19.657068 deg² / 6.093018° × 14.659351°` |
+| 2 | `544 / 0.108800 / 393.512510 deg² / 13.385742° × 48.212163°` | `96 / 0.176471 / 55.771759 deg² / 5.449219° × 21.444902°` | `8 / 0.083333 / 1.119872 deg² / 1.054688° × 4.983996°` |
+
+独立 FullLaunchDomain 5000 点只作 Power 维度诊断：Rank 1 的 `S1/S2/S3/S4` 计数为 `96/4/2/1`，嵌套比例为 `0.019200/0.041667/0.500000/0.500000`；Rank 2 为 `102/2/0/0`，比例为 `0.020400/0.019608/0/0`。每个候选的 ScreenAim 与 FullLaunchDomain 都精确执行 5000 次且分别为零 solve failure，Conditional 诊断同样为零 failure。
+
+上述结果只证明候选级节奏、可读性、前缀比例和宽几何合规。两个 manifest 均明确为 `not-certified`，`CertificationHash` 与 `CertifiedBundleHash` 均为零；它们不能替代 v2.2 的完整输入域唯一性、连通分量、边界细化、错序/迟到和消融认证。Rank 2 的 S3 比例 `0.083333` 接近硬下界，必须在有渲染 PIE 中重点判断是否过窄。完整候选统计见 [M11-B v2.1 子稿第 8 节](M11B21CandidateSearchDesign.md)。
+
+### 11.2 自动化与历史基线
+
+Search v2 候选结果已经被 v3 合同明确作废，仅保留为历史对照。当前 v3 Catalog、UBT 与 fresh-process 证据如下：
+
+| 门禁 | 本轮结果 | 证据 |
+| --- | ---: | --- |
+| 标准 C++ Release + CTest | `4/4` | `Tools/M11Core/BuildAndRunPortableConformance.ps1` |
+| 1024 组 Search v2 历史搜索 | 已失效 | 不得使用旧 Aggregate/Catalog |
+| Development Editor 默认全链接 | 通过 | UBT `Result: Succeeded` |
+| Development Editor 强制 Unity 全链接 | 通过 | `-ForceUnity -DisableAdaptiveUnity`，UBT `Result: Succeeded` |
+| `ABTS.M11B.V2_1` | `2/2` | `Saved/Logs/M11V3-20260730-002144-ABTS-M11B-V2_1.log` |
+| `ABTS.M11B.Unit / Runtime` | `8/8 + 4/4` | `Saved/Logs/M11V3-20260730-002705-ABTS-M11B-Unit.log`、`...-002746-ABTS-M11B-Runtime.log` |
+| `ABTS.M11C.Unit / Runtime / V2_1` | `8/8 + 2/2 + 2/2` | `Saved/Logs/M11V3-20260730-002336-ABTS-M11C-Unit.log`、`...-002625-ABTS-M11C-Runtime.log`、`...-002241-ABTS-M11C-V2_1.log` |
+| 上游快速回归 | `M11A.V2_1 1/1 + M110 4/4 + Contracts 2/2` | `Saved/Logs/M11V3-20260730-002829-ABTS-M11A-V2_1.log`、`...-002908-ABTS-M110.log`、`...-002950-ABTS-Contracts-WorldGeneration.log` |
+
+九组过滤器合计 `33/33` 成功，并分别具有唯一的 `TEST COMPLETE. EXIT CODE: 0`。本轮不改变 production `SolverVersion=1 / HashSchemaVersion=1` 路径，也不以 NullRHI 自动门替代用户有渲染 PIE 或 M11-B v2.2 完整输入域认证。
+
 ## 12. 多工作树交接
 
 M11 专属工作树继续不直接修改下列共享热点：
@@ -538,4 +614,4 @@ M11 专属工作树继续不直接修改下列共享热点：
 4. 用户批准候选并冻结后，由独立标准 C++ 工具执行 B v2.2 全输入域与消融慢认证；
 5. B v2.2 认证通过后才允许 C v2.2 在生产路径绑定 2/2 Certified Bundle。
 
-上游与返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · v1 基线：[M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)；M11-B v2.1 的实现与候选库见 [候选搜索子稿](M11B21CandidateSearchDesign.md)。当前工作点是 M11-C v2.1 Editor-only 候选体验实现与第 7.4 节验收；通过后才进入参数冻结与 M11-B v2.2。
+上游与返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · v1 基线：[M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)；M11-B v2.1 的实现与候选库见 [候选搜索子稿](M11B21CandidateSearchDesign.md)。当前工作点是 **Search v3 4096-work 与 merge/Manifest 已完成 → 新 Catalog 已冻结 → CLI/UE 快速重放与最终自动门已通过 → 等待 M11-C v2.1 用户有渲染 PIE**；通过后才进入参数冻结与 M11-B v2.2。

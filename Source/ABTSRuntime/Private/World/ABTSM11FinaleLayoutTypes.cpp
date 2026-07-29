@@ -522,7 +522,9 @@ bool FABTSM11FinaleLayoutPreset::IsValid(FString* OutFailure) const
 	if (PresetVersion != 1
 		|| CompatibleGeneratorVersion != 3
 		|| CompatibleFrameLayoutVersion != 1
-		|| SearchAlgorithmVersion != 1
+		|| (SearchAlgorithmVersion != 1
+			&& SearchAlgorithmVersion != 2
+			&& SearchAlgorithmVersion != 3)
 		|| PhysicalPlaybackContractVersion != 1)
 	{
 		return Reject(OutFailure, TEXT("UnsupportedFinalePresetVersion"));

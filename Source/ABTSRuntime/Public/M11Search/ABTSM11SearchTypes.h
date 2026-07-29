@@ -11,9 +11,9 @@
 
 namespace ABTS::M11Search
 {
-	inline constexpr std::int32_t SearchContractVersion = 1;
-	inline constexpr std::int32_t SearchAlgorithmVersion = 1;
-	inline constexpr std::int32_t CandidateManifestVersion = 1;
+	inline constexpr std::int32_t SearchContractVersion = 3;
+	inline constexpr std::int32_t SearchAlgorithmVersion = 3;
+	inline constexpr std::int32_t CandidateManifestVersion = 3;
 
 	struct LaunchInput
 	{
@@ -91,12 +91,39 @@ namespace ABTS::M11Search
 		double MinimumEnergyGainCM2PerSec2 = 50000.0;
 		double MinimumCorridorQuality = 0.05;
 		double MinimumLayoutTurnRadians = 0.30;
+		double MinimumLateralTurnAxisProjection = 0.25;
 		double MinimumBodyClearanceCM = 1200.0;
 		double LowPowerProbe = 0.90;
 
 		double RobustYawStepDegrees = 0.25;
 		double RobustPitchStepDegrees = 0.25;
 		double RobustPowerStep = 0.005;
+
+		/**
+		 * Candidate-only statistical estimate over the complete Launch
+		 * Yaw/Pitch/Power domain. This is not the exhaustive M11-B v2.2
+		 * certification grid.
+		 */
+		std::uint64_t MonteCarloSeed = 0x11b215000ull;
+		std::int32_t MonteCarloSampleCount = 5000;
+		/**
+		 * Candidate-only estimate of the mouse-addressable Yaw/Pitch plane
+		 * at NominalInput.Power. It intentionally does not sample Power.
+		 */
+		std::uint64_t ScreenAimSeed = 0x11b215002ull;
+		std::int32_t ScreenAimSampleCount = 5000;
+		double MinimumPrefixRetentionRatio = 0.08;
+		double MaximumPrefixRetentionRatio = 0.55;
+		double FullScoreMinimumPrefixRetentionRatio = 0.15;
+		double FullScoreMaximumPrefixRetentionRatio = 0.40;
+		std::int32_t ConditionalProbeSamplesPerSet = 512;
+		double ConditionalYawHalfExtentDegrees = 1.0;
+		double ConditionalPitchHalfExtentDegrees = 1.0;
+		double ConditionalPowerHalfExtent = 0.05;
+		std::int32_t MinimumHullEvidenceCount = 3;
+		double MinimumHullAreaSquareDegrees = 0.0001;
+		double MinimumHullYawSpanDegrees = 0.01;
+		double MinimumHullPitchSpanDegrees = 0.01;
 
 		double FirstEncounterMinimumSeconds = 7.0;
 		double FirstEncounterMaximumSeconds = 13.0;
@@ -114,6 +141,7 @@ namespace ABTS::M11Search
 		double MaximumVirtualMomentumSpeedCMPerSec = 5200.0;
 		double MinimumGravityScale = 0.70;
 		double MaximumGravityScale = 2.20;
+		std::int32_t MinimumAlternatingLateralTurnCount = 1;
 
 		std::int32_t RequestedCandidateCount = 5;
 		double MinimumDiversityDistanceCM = 3500.0;
@@ -137,7 +165,46 @@ namespace ABTS::M11Search
 		LowPowerGateRejected,
 		RobustnessRejected,
 		AblationRejected,
+		InputDomainDegenerate,
 		InternalError
+	};
+
+	struct YawPitchPoint
+	{
+		double YawDegrees = 0.0;
+		double PitchDegrees = 0.0;
+	};
+
+	struct InputSetMetrics
+	{
+		/** Unbiased count from the fixed 5000-point full Launch-domain set. */
+		std::int32_t FullDomainCount = 0;
+		/** |Sn| / |S(n-1)| from the same full-domain set. */
+		double FullDomainRetentionRatio = 0.0;
+		/**
+		 * Unbiased fixed-power count from the 5000-point screen Yaw/Pitch
+		 * set. S1-S3 candidate gates and UX scores use only this set.
+		 */
+		std::int32_t ScreenAimCount = 0;
+		double ScreenAimRetentionRatio = 0.0;
+		bool ScreenAimRetentionCompliant = false;
+		/**
+		 * Separately labelled local conditional evidence. It is never added
+		 * to either unbiased domain count, hull, or UX score.
+		 */
+		std::int32_t ConditionalProbeCount = 0;
+		std::int32_t ConditionalParentCount = 0;
+		std::int32_t ConditionalMemberCount = 0;
+		double ConditionalRetentionRatio = 0.0;
+		std::int32_t ScreenAimHullEvidencePointCount = 0;
+		std::vector<YawPitchPoint> ScreenAimHullYawPitch;
+		double ScreenAimHullAreaSquareDegrees = 0.0;
+		double ScreenAimHullYawSpanDegrees = 0.0;
+		double ScreenAimHullPitchSpanDegrees = 0.0;
+		double ScreenAimHullNormalizedArea = 0.0;
+		double ScreenAimHullCompactness = 0.0;
+		bool ScreenAimHullContainsNominal = false;
+		bool ScreenAimHullCompliant = false;
 	};
 
 	struct AssistMetrics
@@ -154,6 +221,10 @@ namespace ABTS::M11Search
 		double CorridorQuality = 0.0;
 		double AppliedEnergyGainCM2PerSec2 = 0.0;
 		double CollisionClearanceCM = 0.0;
+		/** Signed in the deterministic layout presentation plane. */
+		double SignedLateralTurnRadians = 0.0;
+		/** Absolute alignment of the turn axis to the presentation normal. */
+		double LateralTurnAxisProjection = 0.0;
 	};
 
 	struct CandidateMetrics
@@ -168,8 +239,23 @@ namespace ABTS::M11Search
 		double MinimumTargetDistanceCM = 0.0;
 		std::array<AssistMetrics, M11Core::GravityScenario::AssistCount>
 			Assists;
+		double MinimumReadableDeflectionRadians = 0.0;
+		std::int32_t AlternatingLateralTurnCount = 0;
 		std::int32_t RobustSurvivorCount = 0;
 		std::int32_t LowPowerCompletedAssistCount = 0;
+		std::int32_t FullDomainSampleCount = 0;
+		std::int32_t ScreenAimSampleCount = 0;
+		std::int32_t FullDomainSolveFailureCount = 0;
+		std::int32_t ScreenAimSolveFailureCount = 0;
+		std::int32_t ConditionalSolveFailureCount = 0;
+		/** S1, S2, S3, and optional S4/target-hit set metrics. */
+		std::array<InputSetMetrics, 4> InputSets;
+		double PrefixRetentionScore = 0.0;
+		double PrefixHullScore = 0.0;
+		double DeflectionReadabilityScore = 0.0;
+		double AlternationScore = 0.0;
+		double PacingScore = 0.0;
+		double SoftScore = 0.0;
 		std::array<bool, 4> AblationHitTarget{};
 		std::array<std::uint64_t, 4> AblationResultHashes{};
 		std::array<std::uint8_t, 4> AblationMasks{

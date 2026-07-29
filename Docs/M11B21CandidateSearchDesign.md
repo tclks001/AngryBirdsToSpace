@@ -1,236 +1,326 @@
-# M11-B v2.1：标准 C++ 候选布局搜索与快速同源重放
+# M11-B v2.1：标准 C++ 候选布局搜索、前缀成功集与快速同源重放
 
-> 状态：**已实现并通过自动验收**。标准 C++ 搜索器、独立 CLI、Python 标准库分片调度、断点恢复、C++ 权威合并、4 个 Candidate Manifest、UE 快速同源重放均已落地。下一阶段为 [M11-C v2.1 候选手感循环](M11CFinaleInteractionAndPlaybackDesign.md)；本阶段明确**没有**执行 M11-B v2.2 完整输入域认证。
+> 状态：**Search Contract / Algorithm / Candidate Manifest v3、权威 4096-work 搜索与全局 merge、Editor Catalog 重冻以及最终 UBT/fresh-process 自动门均已完成**。本轮从 4096 个 work 中接受并选出 2 个 Editor-only Candidate；当前只等待用户有渲染 PIE 手感验收。本阶段不执行 M11-B v2.2 完整输入域认证，不生成正式认证 Hash，也不改变 production v1。
 >
-> 父级：[M11 v2 终局引力弹弓优化总设计](M11V2FinaleOptimizationDesign.md) · [M11-B 终局布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md)。
+> 父级：[M11 v2 终局引力弹弓优化总设计](M11V2FinaleOptimizationDesign.md)
 >
-> 上游：[M11-A v2.1 标准 C++ 单一权威内核](M11AGravityAssistSolverDesign.md)。
+> 上游：[M11-A v2.1 标准 C++ 单一权威内核](M11AGravityAssistSolverDesign.md)
 >
-> 返回总预演：[M11 三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
+> 下游：[M11-C v2.1 终局交互与确定性播放](M11CFinaleInteractionAndPlaybackDesign.md)
+>
+> 正式认证：[M11-B 终局布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md)
 
-## 1. 本阶段交付边界
+## 1. 阶段目标与边界
 
-M11-B v2.1 只回答“哪些紧凑、强偏转、非共线的局部布局值得进入 PIE 体验”，不回答“完整输入域内是否只有一族解”。
+M11-B v2.1 回答的是：
 
-本阶段已经交付：
+> 哪些紧凑、强偏转、非共线、节奏不拖沓，并且具有逐级收窄成功区的局部布局，值得进入 M11-C v2.1 PIE 手感比较？
 
-- 与 Unreal 无关的 `ABTS::M11Search` 标准 C++ 搜索层；
-- 共同编译生产 `M11Core` 的 `ABTSM11SearchCLI`；
-- 确定性工作索引、分片、原子检查点、严格身份校验和断点恢复；
-- 仅负责编排进程的 Python 标准库脚本；
-- 由 C++ 重新求值、全局去重和排序后签发的 Candidate Manifest；
-- 在 UE 中重建候选并比较 Core/UE 全结果的快速同源回放门。
+它不回答：
 
-本阶段没有交付：
+> 完整 `Yaw × Pitch × Power` 输入域中是否只存在唯一一族解？
 
-- `Yaw × Pitch × Power` 全输入域扫描、半格发现、递归边界细化或唯一连通分量证明；
-- 正式 Trust Regions、`CertificationHash` 或 `CertifiedBundleHash`；
-- M11-C 鼠标手感、轨迹 HUD、前缀成功集稳定器或确定性播放；
-- Shipping/生产默认布局绑定；
-- Python、NumPy、CuPy 或 CUDA 版积分器。
+后一个问题仍由 M11-B v2.2 的完整认证负责。本阶段的 5000 点撒点、比例和凸包只能作为候选级统计证据，不能代替像素/半格边界细化、连通分量证明、旁路/错序/迟到排除和全消融证明。
 
-因此所有输出的状态只能是 `Candidate`。Manifest 中 `certificationHash` 与 `certifiedBundleHash` 均保持零值。
+本阶段交付：
 
-## 2. 权威结构
+- 不依赖 Unreal 的 `ABTS::M11Search` 标准 C++ 搜索层；
+- 与 production 共用相同 `M11Core` 求解器源文件的 `ABTSM11SearchCLI`；
+- 确定性全局 work index、分片、检查点、恢复、合并和 Top-K；
+- 三段真实偏转及左右换侧可读性度量；
+- 两套各 5000 点、职责严格分开的低差异输入语料；
+- S1、S2、S3 的比例硬门和各自独立的二维凸包硬门；
+- 完整自描述 Manifest、工具/源码身份和合并 Aggregate；
+- Python 仅负责 CLI 进程调度，不积分、不分类、不计算 Hash、不排名。
+
+所有输出均为 `Candidate / NOT CERTIFIED`，`CertificationHash`、`CertifiedBundleHash` 和临时 Trust Region Hash 均保持零。
+
+## 2. 权威结构与版本
 
 ```text
-M11Core（标准 C++，唯一积分/事件/Hash 权威）
-  └─ M11Search（标准 C++，候选构造、门禁、排名）
+M11Core（标准 C++ 唯一积分、事件与 Hash 权威）
+  └─ M11Search（构造、硬门、统计、软评分、排名）
       └─ ABTSM11SearchCLI
-          ├─ search：确定性分片、检查点、局部 Candidate
-          └─ merge：校验全部分片、重算 Accepted、全局排序并签发 Manifest
+          ├─ --describe-contract
+          ├─ search：分片、检查点、evaluation、Candidate
+          └─ merge：验证分片、重算 Accepted、全局排名
 
 Python/m11_search.py
-  ├─ 写入不可变 plan.json
-  ├─ 并行启动 CLI 分片
-  ├─ 调用 CLI merge
-  └─ 不计算轨迹、不分类、不排名、不生成权威 Hash
+  ├─ 冻结 orchestration_plan.v3
+  ├─ 并行启动 CLI
+  └─ 不实现任何物理或判定语义
 ```
 
-生产 Core 源码身份仍为：
+| 项 | 当前值 |
+| --- | --- |
+| `SearchContractVersion` | `3` |
+| `SearchAlgorithmVersion` | `3` |
+| `CandidateManifestVersion` | `3` |
+| `contract_descriptor` envelope | `abts.m11b21.contract_descriptor.v1` |
+| Production Core Source SHA-256 | `970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0` |
+
+Search v2→v3 会使旧 Candidate、Score/Source Hash、plan/checkpoint、Aggregate 和 Editor Candidate Catalog 身份全部失效，必须重新搜索和冻结；production v1 Solver/Bundle 不受影响。
+
+## 3. 构造阶段的偏转可读性
+
+### 3.1 交替侧向只是构造偏好，真实偏转才是最终证据
+
+每个 work item 由 Halton base 73 确定一个严格交替的首选过星侧：
 
 ```text
-970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0
++ / - / +
+或
+- / + / -
 ```
 
-本次冻结的搜索工具源码身份为：
+在 Assist2、Assist3 构造阶段，搜索器直接复用已有 nominal 求解结果，按与最终 `PopulateMetrics` 完全相同的表现平面法线和入/出速度叉积，计算：
 
-```text
-3016fde8c759d48d584cb7f5b8bd3de568b3ad7127115b15bb53e6d5b2b1d79d
-```
+- `SignedLateralTurnRadians[3]`；
+- `PartialAlternationCount`。
 
-搜索工具和 Python 脚本发生变化会改变 Search Source Hash，但不会伪装成生产 Core 算法变化。
+鲁棒门之后，Assist2 优先保留能形成第一次真实换侧的候选；Assist3 优先保留真实换侧次数最大的候选，能得到两次时淘汰零次/一次候选。该引导不增加任何 solve，也不会用“预设的过星侧标签”冒充真实偏转。
 
-## 3. v2.1 候选合同
+### 3.2 最终可读性门
 
-### 3.1 发射模型
+最终候选仍必须同时满足：
 
-候选搜索直接使用 M6 的线性功率语义：
+- 每颗行星真实速度偏转 `>= 0.30 rad`；
+- 每颗偏转轴在最终展示平面法线上的绝对投影 `>= 0.25`；低于该门槛的三维转弯即使数值角度足够，也因二维全景中不可读而拒绝；
+- 最少一次相邻真实侧向符号翻转；
+- 三颗行星布局最小转角 `>= 0.30 rad`；
+- 总时长 `<= 60 s`；
+- 最长无明显引力偏转 coast `<= 11 s`；
+- 每段行星影响时长在 `3–8 s`；
+- 四项行星消融均不能命中目标。
 
-| 项 | 值 |
+软评分继续奖励更大的可读偏转和两次换侧，因此两次换侧的 `-/+/-`、`+/-/+` 会优先于只换侧一次的候选。
+
+### 3.3 低功率门
+
+`Power=0.90` 的轨迹允许擦入扩大后的 Influence shell；扩大引力范围后，禁止任何 shell enter 会与目标体验矛盾。硬门拒绝的是：
+
+- 已取得合格 Assist1 前缀；或
+- 已命中目标。
+
+换言之，低功率可以被行星轻微影响，但不能真正“用上”第一颗行星形成合格助推。构造阶段与最终候选门共用同一个 `ShouldRejectLowPowerResult` 判定，避免两处语义漂移。
+
+## 4. 两套 5000 点输入语料
+
+Launch 域与 M6 线性功率语义一致：
+
+| 维度 | 范围 |
 | --- | --- |
 | Yaw | `[-18°, +18°]` |
 | Pitch | `[0°, 60°]` |
-| Power | `[0, 1]`，连续可调 |
-| 发射速度 | `lerp(900, 2300, Power) cm/s` |
-| nominal | `Yaw=0° / Pitch=30° / Power=1.0` |
-| 成功模拟时限 | `60 s` |
+| Power | `[0, 1]` |
+| 速度 | `lerp(900, 2300, Power) cm/s` |
+| nominal | `Yaw=0° / Pitch=30° / Power=1` |
 
-`Power=0.90` 只比最大功率速度低约 6%，所以快速门采用“不得完成三助推并命中”的可验证合同，不伪造“绝对碰不到第一颗行星”的错误结论。第一颗行星仍通过较远首遇时间和窄走廊，使低功率探针最多完成 1–2 次助推。
+### 4.1 ScreenAim 5000：候选手感权威
 
-### 3.2 产品硬门
+固定种子 Halton base 2/3 在完整 Yaw/Pitch 可行范围撒 5000 点，Power 固定为 `NominalInput.Power`。它是以下项目的唯一权威数据源：
 
-| 门 | v2.1 值 |
-| --- | --- |
-| 总飞行时间 | `<= 60 s` |
-| 最长无作用圈 coast | `<= 11 s` |
-| 单星 Influence 停留 | `[3, 8] s` |
-| 每次实际偏转 | `>= 0.30 rad` |
-| 每次正能量增益 | `>= 50,000 cm²/s²` |
-| 每次走廊质量 | `>= 0.05` |
-| 相邻布局折线最小转角 | `>= 0.30 rad` |
-| 行星碰撞净空 | `>= 1,200 cm` |
-| `Power=0.90` | 不得完成三助推或命中 |
-| nominal 邻域 | `Yaw/Pitch ±0.25°`、`Power -0.005`；实际最多 6 点，至少 4 点存活 |
-| 消融 | Mask `0x6 / 0x5 / 0x3 / 0x0` 均不得命中 |
+- `S1/S0`、`S2/S1`、`S3/S2` 的候选级成功点比例；
+- S1、S2、S3 的独立 Yaw-Pitch 凸包；
+- Prefix retention 与 Prefix hull 的 UX 评分。
 
-nominal 位于 Power 上边界，因此 `Power + 0.005` 合法地落在声明域外；这里是 6 点单侧快速鲁棒门，不冒充 M11-B v2.2 的三维闭包认证。
+这与玩家当前候选手感问题相匹配：先观察近最大功率下，鼠标二维可行域是否呈现合理的逐级收窄关系。
 
-搜索范围包括：
+### 4.2 FullLaunchDomain 5000：Power 维度诊断
 
-- Influence 半径 `8,000–17,000 cm`；
-- 三星基础 `Mu = 8e9 / 1.4e10 / 2.4e10 cm³/s²`，再乘 `0.7–2.2` 确定性比例；
-- 虚拟动量速度 `2,200–5,200 cm/s`；
-- 合格终端拦截半径 `4,500–12,000 cm`。
+另一套固定种子 Halton base 2/3/5 在完整 `Yaw × Pitch × Power` 域独立取 5000 点，只记录：
 
-最后一项是 v2.1 的**合格接近球**，不是 UFO 的 `800 cm` 几何接触球。物理 UFO 接管与最终完整认证仍分别属于 M11-C v2.1/v2.2 和 M11-B v2.2。
+- S1–S4 嵌套计数；
+- 逐级保留率；
+- Power 维度是否出现明显异常的快速诊断。
 
-## 4. 构造算法
+它不参与候选接受、二维凸包或 UX 排名。5000 个三维点无法证明完整输入域唯一性，因此不得把它写成 M11-B v2.2 认证。
 
-每个全局工作索引用固定 Seed 的 Halton 维度生成一组半径、`Mu` 比例、虚拟动量、影响参数和相遇节奏；线程完成顺序不进入身份。
+### 4.3 Conditional 512：局部诊断
 
-单个工作项按以下顺序构造：
+每个集合另有 512 个确定性局部探针，用于解释稀疏父集附近发生了什么。Conditional：
 
-1. 用 nominal 发射生成不含有效助推的初始弧；
-2. 在弧上按首遇时间放置行星①，枚举局部时间、B-plane 两轴偏置、飞越侧和虚拟动量方向；
-3. 用原始 encounter 反推出 B-plane 中心和允许侧，再以冻结合同重放；
-4. 对 nominal 邻域作逐级鲁棒筛选，只保留正能量、正确侧、足够偏转、停留时间和净空均合格的前缀；
-5. 沿行星①出口后的权威弧放置行星②，再沿行星②出口后的弧放置行星③；
-6. 阶段排名同时考虑既有布局转角和“上一行星→当前行星→当前出射方向”的预测转角，避免再次收敛成近直线；
-7. 在行星③出口后 `3–7 s` 的五个确定性时间切片构造合格目标球，以覆盖 nominal 和至少四个局部探针，并优先最大化完整折线最小转角；
-8. 执行完整 nominal 节奏门、低功率门、局部鲁棒门和四种消融门；
-9. C++ 按确定性质量顺序和 `3,500 cm` 布局差异门保留全局 Top-K。
+- 始终单独标记为 local evidence；
+- 不并入 ScreenAim 或 FullLaunchDomain；
+- 不改变比例、凸包、UX 分数或候选接受结果。
 
-该算法不使用另一套 patched-conic 近似积分器；所有构造尝试最终都由同一个 `M11Core::GravityAssistSolver::Solve` 精确求值。
+### 4.4 fail-closed
 
-## 5. CLI 与断点恢复
+两套权威样本都必须精确完成 5000 次 Build+Solve。任何一次失败都会立即拒绝该 work item，并记录域、样本序号和失败原因；不得把 4999 个成功样本报告成 5000。
 
-独立搜索：
+## 5. 前缀成功集比例与独立凸包
 
-```powershell
-& .\Intermediate\M11CoreStandalone\bin\ABTSM11SearchCLI.exe search `
-  --output <绝对目录> --work-items 256 `
-  --shard-index 0 --shard-count 1 --threads 8 `
-  --top-k 5 --seed 296882177 --checkpoint-every 8 --json
+集合严格嵌套：
+
+- S1：取得第一颗行星合格助推；
+- S2：依次取得第一、第二颗行星合格助推；
+- S3：依次取得三颗行星合格助推；
+- S4：S3 且命中候选目标，仅作诊断。
+
+S1、S2、S3 的 ScreenAim 逐级比例必须先通过硬门：
+
+```text
+0.08 <= |Sn| / |Sn-1| <= 0.55
 ```
 
-Python 标准库编排：
+`[0.15, 0.40]` 是 Prefix retention 软评分的满分平台；硬边界与满分平台之间线性衰减。这样既能拒绝“第一颗行星几乎占满全部鼠标范围”，也不会强迫每一级精确等于 `1/4`。
+
+比例门通过后，才分别对 S1、S2、S3 的 ScreenAim 成员构造凸包。凸包证据：
+
+- 只含对应的无偏 ScreenAim 命中点；
+- 不加入 nominal anchor；
+- 不加入 FullLaunchDomain 点；
+- 不加入 Conditional 点；
+- 不把多个成功集混成一个凸包。
+
+当前宽几何硬门为：
+
+| 项 | 门槛 |
+| --- | ---: |
+| 证据点 | `>= 3` |
+| Hull 顶点 | `>= 3` |
+| 面积 | `>= 0.0001 deg²` |
+| Yaw span | `>= 0.01°` |
+| Pitch span | `>= 0.01°` |
+
+这些门只排除点/线退化；成功岛连通性和唯一性仍留给 v2.2。
+
+## 6. 评分、选择与候选冻结
+
+产品硬门、低功率门、局部鲁棒门和四项消融门全部通过后，才执行双 5000 与 Conditional，避免把固定成本乘到每个构造 stage。
+
+软评分为 `0..100`：
+
+| 分量 | 权重 |
+| --- | ---: |
+| ScreenAim prefix retention | 30 |
+| ScreenAim independent hull | 20 |
+| 真实偏转可读性 | 25 |
+| 实际侧向交替 | 15 |
+| 60 秒内节奏 | 10 |
+
+全局 merge 先按软评分和确定性 tie-break 排名，再按 `MinimumDiversityDistanceCM` 去除近重复布局。只有 merge 后的全局候选能够进入 Editor Candidate Catalog。
+
+## 7. CLI、Python 与来源证明
 
 ```powershell
+& .\Intermediate\M11CoreStandalone\bin\ABTSM11SearchCLI.exe `
+  --describe-contract --json
+
 python .\Tools\M11Core\Python\m11_search.py run `
-  --output .\Intermediate\M11B21CandidateLibrary `
-  --work-items 256 --shards 4 --threads-per-shard 2 `
-  --top-k 5 --checkpoint-every 8
+  --output .\Intermediate\M11B21V3CandidateSearch `
+  --work-items 4096 --shards 8 --threads-per-shard 2 `
+  --top-k 8 --checkpoint-every 8
 ```
 
-恢复与状态：
+v3 输出包含：
 
-```powershell
-python .\Tools\M11Core\Python\m11_search.py status `
-  --output .\Intermediate\M11B21CandidateLibrary
+- canonical contract JSON 与 FNV-1a contract hash；
+- production Core/Search 源文件清单与 SHA-256；
+- 编译器、架构、C++ 标准、浮点和优化合同；
+- 完整 launch/layout/scenario/target/solver 参数；
+- `orchestration_plan.v3`；
+- `checkpoint/evaluation/shard_summary/merge_summary/candidate.v3`；
+- 两套 5000 sampling semantics、失败计数、选择范围和 Aggregate。
 
-python .\Tools\M11Core\Python\m11_search.py run `
-  --output .\Intermediate\M11B21CandidateLibrary `
-  --work-items 256 --shards 4 --threads-per-shard 2 `
-  --top-k 5 --checkpoint-every 8 --resume
-```
+Resume/merge 会校验可执行文件 SHA、Core/Search Source SHA、Seed、work 数、分片身份、JSONL 字节数和内容 Hash；任一不匹配均 fail closed。
 
-每个检查点冻结工具身份、Core/Search Source Hash、Seed、全局工作量、分片身份、下一局部索引、状态/JSONL 字节数与内容 Hash。恢复时任一项不匹配都会 fail closed。C++ `merge` 再次检查全部分片覆盖无重无漏，并重新求值所有 Accepted 记录后才输出全局 Manifest。
+## 8. 本轮搜索结果
 
-## 6. 256 项候选库结果
+> 本节只登记当前 v3 统一搜索结果。旧 v1/v2 work、排名、Aggregate 和 Catalog 身份已失效，不得用于当前 PIE。
 
-正式运行：
+权威产物为 `Intermediate/M11B21V3ReadableGate_4096/merged/summary.json` 与同目录 `candidates/*.json`。merge 已完整回放全部分片并得到：
 
-| 项 | 结果 |
+| 项 | 权威值 |
 | --- | --- |
-| 全局工作项 | `256` |
-| 分片 | `4 × 64` |
-| C++ 求解调用 | `127,203` |
-| 分片累计墙钟 | `232.080 s` |
-| Accepted | `4` |
-| 全局选中 | `4` |
-| Evaluation Aggregate | `0xbb3b73fe29426372` |
-| Candidate Aggregate | `0xb03d33f10710f59a` |
+| Summary schema / 状态 | `abts.m11b21.merge_summary.v3` / `passed=true` / `Completed` |
+| Work / Shard | `4096` work，`8` shards，`4096/4096` evaluated |
+| Accepted / Selected | `2 / 2`（请求上限为 `5`，没有用未通过硬门的结果补足名额） |
+| Solver 调用 | 分片 `1,938,854`；merge replay `26,511` |
+| 分片累计执行时间 | `4912.003924 s`；`394.717519` solver invocations / cumulative shard second |
+| Evaluation Aggregate | `0xac04988c81e25849` |
+| Candidate Aggregate | `0xbfeaae4610d4c406` |
+| Contract Hash | `0x1e9f208e738a6ef7` |
+| Search Source SHA-256 | `27269434b7dff48c26149179776589faa67f2c0ef428849a4833e49deb817738` |
+| Production Core Source SHA-256 | `970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0` |
+| 合同版本 | Search Contract `3` / Algorithm `3` / Candidate Manifest `3` |
 
-候选库：
+两个候选的四类冻结身份如下；四类身份分别是 Candidate Source、nominal Request、nominal Result 与 Score，任一不匹配都必须 fail closed：
 
-| 排名 / Work | Candidate / Request / Result / Score Hash | 总时长 / 最大 coast | 最小布局转角 | 三次停留时长 | 三次实际偏转 | 鲁棒 / 低功率完成数 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 / `166` | `bd7d63e871c524bf` / `a40f917f70db40ab` / `b2987a35306c3654` / `facaab57a03dd3be` | `36.117 / 6.841 s` | `0.4094 rad` | `7.93 / 5.91 / 5.73 s` | `0.606 / 0.500 / 0.532 rad` | `4 / 2` |
-| 2 / `210` | `8401b7607117ba97` / `9cef93a75d999a93` / `49e478a34b8705ce` / `34c6f06ffab4e709` | `36.389 / 6.081 s` | `0.3783 rad` | `7.95 / 7.21 / 5.39 s` | `1.271 / 0.451 / 0.443 rad` | `4 / 2` |
-| 3 / `121` | `5047bc74651ed692` / `936c0f47a596639a` / `995e8e1dfb10ee9f` / `f6011b6f5d72bf47` | `43.379 / 7.625 s` | `0.3805 rad` | `7.90 / 7.79 / 4.28 s` | `0.581 / 0.531 / 0.396 rad` | `4 / 1` |
-| 4 / `122` | `3139002725dbe64e` / `63697c0b2e7cf486` / `9e75a4833d4a8d1f` / `abdc3a6c77f425b5` | `35.278 / 7.493 s` | `0.3470 rad` | `7.68 / 4.26 / 4.56 s` | `0.307 / 1.169 / 0.484 rad` | `4 / 1` |
+| Rank | Work | CandidateId | Candidate Source | nominal Request | nominal Result | Score |
+| ---: | ---: | --- | --- | --- | --- | --- |
+| 1 | `2278` | `m11b21-aaae0dd44f14f785` | `0xaaae0dd44f14f785` | `0x5ecc893f6eb7003d` | `0xb47d8314ebe69376` | `0xd6e03f2d9e0f3b8b` |
+| 2 | `772` | `m11b21-e2c810b38f338e06` | `0xe2c810b38f338e06` | `0x5c07be6f9371448e` | `0xe465b9c154c235a1` | `0xdd1613e3dbb4c1b0` |
 
-完整 Manifest 位于：
+节奏与几何摘要：
 
-```text
-Intermediate/M11B21CandidateLibrary/merged/candidates/
-```
+| Rank | 总时长 | 最长 coast / 末段 coast | 总影响时长 | 三段布局转角 | 最小可读偏转 | 换侧次数 | Robust survivor |
+| ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
+| 1 | `31.268136 s` | `5.065894 / 1.967285 s` | `19.340426 s` | `0.377665 / 0.533365 / 0.385783 rad` | `0.304224 rad` | `2` | `4` |
+| 2 | `31.223673 s` | `4.513232 / 2.050117 s` | `17.604061 s` | `0.348798 / 0.346212 / 0.386060 rad` | `0.393788 rad` | `1` | `4` |
 
-四个 Manifest 的状态均为 `Candidate`，四种消融结果均为 `hitTarget=false`。
+三段真实速度偏转、在最终表现平面内的有符号换侧、偏转轴投影和 Influence 时长为：
 
-## 7. 自动验收
+| Rank / Assist | 实际偏转 | 有符号侧向偏转 | 轴投影绝对值 | Influence 时长 | 入圈前 coast |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 / A1 | `0.590804 rad`（`33.85°`） | `+0.590804 rad` | `0.934093` | `7.923236 s` | `4.333189 s` |
+| 1 / A2 | `0.306536 rad`（`17.56°`） | `-0.306536 rad` | `0.992458` | `7.507412 s` | `0.561342 s` |
+| 1 / A3 | `0.645047 rad`（`36.96°`） | `+0.645047 rad` | `0.489981` | `3.909778 s` | `5.065894 s` |
+| 2 / A1 | `0.404215 rad`（`23.16°`） | `-0.404215 rad` | `0.974204` | `7.917075 s` | `2.597333 s` |
+| 2 / A2 | `0.552443 rad`（`31.65°`） | `+0.552443 rad` | `0.971059` | `4.107608 s` | `4.458930 s` |
+| 2 / A3 | `0.628360 rad`（`36.00°`） | `+0.628360 rad` | `0.976836` | `5.579378 s` | `4.513232 s` |
 
-| 门 | 结果 |
-| --- | --- |
-| 标准 C++ Release 构建 | 通过，MSVC `14.44.35207`、C++20、`/fp:precise` |
-| CTest | `4/4`：Core conformance、Core 无 UE 依赖、Search 确定性、Search 无 UE 依赖 |
-| Python 四分片 + C++ merge smoke | 通过 |
-| Python 同计划 `--resume` | 通过，结果身份不变 |
-| Development Editor 默认链接 | 通过 |
-| Development Editor `-ForceUnity -DisableAdaptiveUnity` | 通过 |
-| `ABTS.M11B.V2_1.PortableCandidateReplay` | `1/1`，全新 `UnrealEditor-Cmd -NullRHI` |
-| `ABTS.M11A` 回归 | `15/15` |
-| `ABTS.M11B.Unit` 回归 | `8/8` |
-| `ABTS.M11B.Runtime` 回归 | `4/4` |
+因此 Rank 1 呈 `+ / - / +` 两次真实换侧，Rank 2 呈 `- / + / +` 一次真实换侧；两者每段轴投影均超过合同门槛 `0.25`，不是只在三维中转弯、投到轨道全景后消失的假可读解。
 
-UE 快速重放冻结候选 `Work=166`，在 UE 内重新执行候选构造，并确认：
+ScreenAim 权威样本均为独立的固定种子 5000 点 Yaw/Pitch 撒点，Power 固定 nominal。下表中的比例按嵌套前缀计算，即 `S1/S0`、`S2/S1`、`S3/S2`：
 
-```text
-Source  = 0xbd7d63e871c524bf
-Request = 0xa40f917f70db40ab
-Result  = 0xb2987a35306c3654
-Score   = 0xfacaab57a03dd3be
-```
+| Rank / Set | 命中数 | 前缀比例 | Hull 证据点 | Area | Yaw span | Pitch span | Normalized area / compactness | nominal / 合规 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 / S1 | `660` | `0.132000` | `660` | `331.607413 deg²` | `16.040039°` | `38.826398°` | `0.153521951 / 0.532466` | 包含 / 是 |
+| 1 / S2 | `74` | `0.112121` | `74` | `66.516190 deg²` | `8.156250°` | `21.243713°` | `0.030794533 / 0.383890` | 包含 / 是 |
+| 1 / S3 | `26` | `0.351351` | `26` | `19.657068 deg²` | `6.093018°` | `14.659351°` | `0.009100494 / 0.220075` | 包含 / 是 |
+| 2 / S1 | `544` | `0.108800` | `544` | `393.512510 deg²` | `13.385742°` | `48.212163°` | `0.182181718 / 0.609761` | 包含 / 是 |
+| 2 / S2 | `96` | `0.176471` | `96` | `55.771759 deg²` | `5.449219°` | `21.444902°` | `0.025820259 / 0.477261` | 包含 / 是 |
+| 2 / S3 | `8` | `0.083333` | `8` | `1.119872 deg²` | `1.054688°` | `4.983996°` | `0.000518459 / 0.213043` | 包含 / 是 |
 
-随后同一 Request 分别由标准 C++ Core 与 UE facade 求解，完整结果逐字段相等。证据日志：
+两候选的 S1–S3 比例均落在 `[0.08, 0.55]` 硬门内，且每一级 Hull 都只由该级 ScreenAim 成员构成、证据点数与成员数相等、包含 nominal 并通过宽几何门。Rank 2 的 S3 已接近 `0.08` 下界，因此尤其需要 PIE 检查是否过窄；这些统计不证明连通性或唯一性。
 
-```text
-Saved/Logs/M11B21_PortableCandidateReplay_Final_20260729.log
-Saved/Logs/M11B21_Regression_M11A_20260729.log
-Saved/Logs/M11B21_Regression_M11BUnit_20260729.log
-Saved/Logs/M11B21_Regression_M11BRuntime_20260729.log
-```
+FullLaunchDomain 是另一套固定种子 5000 点 `Yaw × Pitch × Power` 诊断语料，不参与接受、Hull 或排序：
 
-## 8. 交给 M11-C v2.1 的验收重点
+| Rank | S1 | S2 | S3 | S4 target | 嵌套比例 `S1/S0, S2/S1, S3/S2, S4/S3` |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | `96` | `4` | `2` | `1` | `0.019200, 0.041667, 0.500000, 0.500000` |
+| 2 | `102` | `2` | `0` | `0` | `0.020400, 0.019608, 0, 0` |
 
-建议先按排名体验 `166`，再比较 `210 / 121 / 122`：
+每个候选的 ScreenAim 5000 与 FullLaunchDomain 5000 都完整执行，二者 `solveFailureCount=0`；每集 512 点 Conditional 诊断也为 `solveFailureCount=0`。低功率探针记录的原始 `CompletedAssistCount` 分别为 `3` 和 `2`，但该字段只记录 encounter 完成数，不等于合格助推；两个候选均因“低功率未取得合格 Assist1 前缀且未命中目标”而通过正式低功率判定。
 
-- `166` 的三次偏转最均衡、非共线度最高，适合作为首选；
-- `210` 的第一次偏转最强，可验证“引力弹弓感”是否过猛；
-- `121` 总时长最长但低功率只完成一次助推，可用于比较功率门感受；
-- `122` 总时长最短，第二次偏转最强，可用于比较“激流勇进”节奏。
+这两个产物仍明确写入 `certification.status=not-certified`，`CertificationHash=0x0000000000000000`，`CertifiedBundleHash=0x0000000000000000`。4096-work 随机/低差异候选统计只足以决定“值得进入 Editor PIE 比较”，不能替代 M11-B v2.2 的完整输入域、连通分量、边界细化、错序/迟到排除与逐星消融认证。
 
-若 PIE 只暴露鼠标、映射、HUD 或异步延迟问题，留在 C v2.1 修复；若四个候选都被判定为近星停留过长、转角读不清、成功岛过窄或布局观感不佳，则返回本阶段修改搜索合同并重新生成 Candidate Source Hash。
+## 9. 自动化与验收门
 
-体验批准前不得运行 M11-B v2.2 慢认证；体验批准后必须冻结唯一候选及完整数值身份，再对完整 `Yaw × Pitch × Power` 域、旁路、晚到、错序、重复助推和全部消融执行正式认证。
+代码门：
+
+- 固定 MSVC 14.44、C++20、`/fp:precise` 的 portable Configure/Build/CTest；
+- `--self-test` 两次重放位级确定；
+- construction policy 覆盖 `+/-/+` 的 0/1/2 次部分换侧；
+- 两套样本各精确 5000、零 solve failure；
+- ScreenAim 与 FullDomain 分别保持 S1–S4 嵌套；
+- ScreenAim 比例硬门先于 hull；
+- hull evidence count 恒等于 ScreenAim member count；
+- FullDomain/Conditional 改变不得影响 UX 评分；
+- v3 Manifest、checkpoint 和 merge replay 身份闭合；
+- Candidate Catalog 对冻结 v3 身份重建并与 UE facade 同源重放。
+
+本轮代码门结果：
+
+| 门禁 | 结果 |
+|---|---:|
+| 标准 C++ clean Release + CTest | `4/4` |
+| Development Editor 默认 / 强制 Unity 全链接 | 均通过 |
+| `ABTS.M11B.V2_1 / Unit / Runtime` | `2/2 + 8/8 + 4/4` |
+| `ABTS.M11C.Unit / Runtime / V2_1` | `8/8 + 2/2 + 2/2` |
+| `ABTS.M11A.V2_1 / M110 / Contracts.WorldGeneration` | `1/1 + 4/4 + 2/2` |
+
+共 `33/33` 项 fresh-process 自动化成功，且每个过滤器都只有一个 `TEST COMPLETE. EXIT CODE: 0`。日志统一位于 `Saved/Logs/M11V3-20260730-*.log`。阶段完成前只剩用户按 M11-C v2.1 清单完成有渲染 PIE 手感验收。
+
+PIE 手感通过前不启动 M11-B v2.2 完整认证。任何候选参数调整都会使对应 source/result/score Hash 和 Catalog 身份失效，必须重新搜索、merge 和冻结。

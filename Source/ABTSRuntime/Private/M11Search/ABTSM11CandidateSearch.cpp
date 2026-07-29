@@ -18,6 +18,8 @@ namespace ABTS::M11Search::SearchPrivate
 
 	constexpr double Pi = 3.14159265358979323846264338327950288;
 
+	Vec3d ComputePresentationNormal(const CandidateLayout& Layout);
+
 	bool Reject(
 		std::string* OutFailure,
 		CandidateRecord* Candidate,
@@ -73,6 +75,21 @@ namespace ABTS::M11Search::SearchPrivate
 		return Result;
 	}
 
+	std::array<std::int8_t, GravityScenario::AssistCount>
+		MakePreferredPassSidePattern(
+			const CandidateSearchContract& Contract,
+			const std::uint64_t GlobalWorkIndex)
+	{
+		const std::uint64_t SampleIndex =
+			GlobalWorkIndex + 1ull + Contract.SearchSeed % 104729ull;
+		const std::int8_t FirstSign =
+			Halton(SampleIndex, 73) < 0.5 ? -1 : 1;
+		return {
+			FirstSign,
+			static_cast<std::int8_t>(-FirstSign),
+			FirstSign};
+	}
+
 	struct WorkParameters
 	{
 		double FirstEncounterSeconds = 9.0;
@@ -82,6 +99,8 @@ namespace ABTS::M11Search::SearchPrivate
 		std::array<double, GravityScenario::AssistCount> VirtualSpeedCMPerSec{};
 		std::array<double, GravityScenario::AssistCount> ImpactFraction{};
 		std::array<double, GravityScenario::AssistCount> RadialFraction{};
+		std::array<std::int8_t, GravityScenario::AssistCount>
+			PreferredPassSideSigns{-1, 1, -1};
 		double TargetRadiusCM = 4000.0;
 	};
 
@@ -92,6 +111,8 @@ namespace ABTS::M11Search::SearchPrivate
 		const std::uint64_t SampleIndex =
 			GlobalWorkIndex + 1ull + Contract.SearchSeed % 104729ull;
 		WorkParameters Result;
+		Result.PreferredPassSideSigns =
+			MakePreferredPassSidePattern(Contract, GlobalWorkIndex);
 		Result.FirstEncounterSeconds = SampleRange(
 			SampleIndex,
 			2,
@@ -316,6 +337,91 @@ namespace ABTS::M11Search::SearchPrivate
 			Vec3d::DotProduct(A, B), -1.0, 1.0));
 	}
 
+	struct LateralTurnMeasurement
+	{
+		double SignedRadians = 0.0;
+		double AxisProjection = 0.0;
+	};
+
+	LateralTurnMeasurement MeasureLateralTurn(
+		const Vec3d& EntryVelocity,
+		const Vec3d& ExitVelocity,
+		const Vec3d& PresentationNormal,
+		const double MinimumAxisProjection)
+	{
+		const Vec3d EntryDirection = EntryVelocity.GetSafeNormal();
+		const Vec3d ExitDirection = ExitVelocity.GetSafeNormal();
+		const Vec3d TurnAxis = Vec3d::CrossProduct(
+			EntryDirection, ExitDirection);
+		const double SignedProjection = Vec3d::DotProduct(
+			TurnAxis, PresentationNormal);
+		const double TurnAxisLength = TurnAxis.Length();
+		const double ActualDeflectionRadians = AngleBetween(
+			EntryDirection, ExitDirection);
+		LateralTurnMeasurement Measurement;
+		Measurement.AxisProjection =
+			TurnAxisLength > DoubleSmallNumber
+				? std::clamp(
+					std::abs(SignedProjection) / TurnAxisLength,
+					0.0,
+					1.0)
+				: 0.0;
+		if (Measurement.AxisProjection >= MinimumAxisProjection)
+		{
+			Measurement.SignedRadians =
+				SignedProjection < 0.0
+					? -ActualDeflectionRadians
+					: ActualDeflectionRadians;
+		}
+		return Measurement;
+	}
+
+	PartialAlternationMetrics MeasurePartialAlternation(
+		const CandidateLayout& Layout,
+		const CandidateSearchContract& Contract,
+		const TrajectoryResult& Result,
+		const std::int32_t LastAssistIndex)
+	{
+		PartialAlternationMetrics Metrics;
+		const std::int32_t CompletedLimit = std::clamp(
+			std::min(LastAssistIndex, Result.CompletedAssistCount),
+			0,
+			GravityScenario::AssistCount);
+		const Vec3d PresentationNormal =
+			ComputePresentationNormal(Layout);
+		for (std::int32_t AssistIndex = 1;
+			AssistIndex <= CompletedLimit;
+			++AssistIndex)
+		{
+			const TrajectoryEvent* Enter = Result.FindAssistEvent(
+				TrajectoryEventType::AssistEnter, AssistIndex);
+			const TrajectoryEvent* Exit = Result.FindAssistEvent(
+				TrajectoryEventType::AssistExit, AssistIndex);
+			if (Enter == nullptr || Exit == nullptr)
+			{
+				break;
+			}
+			const std::size_t Index =
+				static_cast<std::size_t>(AssistIndex - 1);
+			Metrics.SignedLateralTurnRadians[Index] =
+				MeasureLateralTurn(
+					Enter->VelocityCMPerSec,
+					Exit->VelocityCMPerSec,
+					PresentationNormal,
+					Contract.MinimumLateralTurnAxisProjection)
+					.SignedRadians;
+			++Metrics.CompletedAssistCount;
+			if (Index > 0
+				&& Metrics.SignedLateralTurnRadians[Index - 1]
+					* Metrics.SignedLateralTurnRadians[Index]
+					< 0.0)
+			{
+				++Metrics.PartialAlternationCount;
+			}
+		}
+		return Metrics;
+	}
+
 	double ComputePartialLayoutTurn(
 		const CandidateLayout& Layout,
 		const std::int32_t LastAssistIndex)
@@ -374,6 +480,19 @@ namespace ABTS::M11Search::SearchPrivate
 		return Exit.BPlaneRCM >= 0.0
 			? AllowedPassSide::PositiveR
 			: AllowedPassSide::NegativeR;
+	}
+
+	bool MatchesPreferredPassSide(
+		const AllowedPassSide Side,
+		const std::int8_t PreferredSign)
+	{
+		const bool Positive =
+			Side == AllowedPassSide::PositiveT
+			|| Side == AllowedPassSide::PositiveR;
+		const bool Negative =
+			Side == AllowedPassSide::NegativeT
+			|| Side == AllowedPassSide::NegativeR;
+		return PreferredSign > 0 ? Positive : Negative;
 	}
 
 	double ComputeAllowedSideMargin(
@@ -445,7 +564,12 @@ namespace ABTS::M11Search::SearchPrivate
 		double PartialLayoutTurnRadians = Pi;
 		double ForwardLayoutTurnRadians = Pi;
 		double ProjectedLayoutTurnRadians = Pi;
+		std::array<double, GravityScenario::AssistCount>
+			SignedLateralTurnRadians{};
+		std::int32_t PartialAlternationCount = 0;
 		std::int32_t RobustSurvivorCount = 0;
+		bool PassesProjectedLayoutTurnGate = false;
+		bool MatchesPreferredSide = false;
 		std::uint64_t TieBreak = 0;
 	};
 
@@ -499,6 +623,8 @@ namespace ABTS::M11Search::SearchPrivate
 		double MinimumQuality = std::numeric_limits<double>::max();
 		double MinimumEnergy = std::numeric_limits<double>::max();
 		double MinimumSide = std::numeric_limits<double>::max();
+		const Vec3d PresentationNormal =
+			ComputePresentationNormal(Layout);
 		for (std::int32_t CheckIndex = 1;
 			CheckIndex <= AssistIndex;
 			++CheckIndex)
@@ -519,6 +645,12 @@ namespace ABTS::M11Search::SearchPrivate
 			const double Deflection = AngleBetween(
 				Enter->VelocityCMPerSec,
 				Exit->VelocityCMPerSec);
+			const LateralTurnMeasurement LateralTurn =
+				MeasureLateralTurn(
+					Enter->VelocityCMPerSec,
+					Exit->VelocityCMPerSec,
+					PresentationNormal,
+					Contract.MinimumLateralTurnAxisProjection);
 			const double Clearance =
 				Exit->ClosestDistanceCM - Body.CollisionRadiusCM;
 			if (Exit->CorridorQuality < Contract.MinimumCorridorQuality
@@ -528,6 +660,8 @@ namespace ABTS::M11Search::SearchPrivate
 				|| Duration < Contract.MinimumInfluenceDurationSeconds
 				|| Duration > Contract.MaximumInfluenceDurationSeconds
 				|| Deflection < Contract.MinimumDeflectionRadians
+				|| LateralTurn.AxisProjection
+					< Contract.MinimumLateralTurnAxisProjection
 				|| Clearance < Contract.MinimumBodyClearanceCM)
 			{
 				return false;
@@ -591,6 +725,21 @@ namespace ABTS::M11Search::SearchPrivate
 		if (Left.RobustSurvivorCount != Right.RobustSurvivorCount)
 		{
 			return Left.RobustSurvivorCount > Right.RobustSurvivorCount;
+		}
+		if (Left.PassesProjectedLayoutTurnGate
+			!= Right.PassesProjectedLayoutTurnGate)
+		{
+			return Left.PassesProjectedLayoutTurnGate;
+		}
+		if (Left.PartialAlternationCount
+			!= Right.PartialAlternationCount)
+		{
+			return Left.PartialAlternationCount
+				> Right.PartialAlternationCount;
+		}
+		if (Left.MatchesPreferredSide != Right.MatchesPreferredSide)
+		{
+			return Left.MatchesPreferredSide;
 		}
 		if (Left.ProjectedLayoutTurnRadians
 			!= Right.ProjectedLayoutTurnRadians)
@@ -661,6 +810,9 @@ namespace ABTS::M11Search::SearchPrivate
 		std::int32_t ReplaySolveRejected = 0;
 		std::int32_t PrefixRejected = 0;
 		std::int32_t DeflectionRejected = 0;
+		std::int32_t LowPowerSolveRejected = 0;
+		std::int32_t LowPowerReachedAssistRejected = 0;
+		std::string FirstLowPowerSolveFailure;
 		double MaximumRejectedDeflection = 0.0;
 
 		for (std::int32_t TimeIndex = 0;
@@ -862,6 +1014,50 @@ namespace ABTS::M11Search::SearchPrivate
 								continue;
 							}
 
+							if (AssistIndex == 1)
+							{
+								LaunchInput LowPowerInput =
+									Layout.NominalInput;
+								LowPowerInput.Power =
+									Contract.LowPowerProbe;
+								TrajectoryRequest LowPowerRequest;
+								TrajectoryResult LowPowerResult;
+								std::string LowPowerFailure;
+								if (!BuildAndSolve(
+										Layout,
+										LowPowerInput,
+										0x7u,
+										LowPowerRequest,
+										LowPowerResult,
+										InOutSolveCount,
+										&LowPowerFailure))
+								{
+									++LowPowerSolveRejected;
+									if (FirstLowPowerSolveFailure.empty())
+									{
+										FirstLowPowerSolveFailure =
+											LowPowerFailure.empty()
+												? "Unspecified"
+												: LowPowerFailure;
+									}
+									continue;
+								}
+								const bool bQualifiedLowPowerAssist1 =
+									ResultPassesAssistPrefix(
+										Layout,
+										Contract,
+										LowPowerResult,
+										1);
+								if (CandidateSearch::
+										ShouldRejectLowPowerResult(
+											LowPowerResult,
+											bQualifiedLowPowerAssist1))
+								{
+									++LowPowerReachedAssistRejected;
+									continue;
+								}
+							}
+
 							StageCandidate Candidate;
 							Candidate.Layout = std::move(Layout);
 							Candidate.Result = std::move(Result);
@@ -894,6 +1090,29 @@ namespace ABTS::M11Search::SearchPrivate
 								std::min(
 									Candidate.PartialLayoutTurnRadians,
 									Candidate.ForwardLayoutTurnRadians);
+							Candidate.PassesProjectedLayoutTurnGate =
+								Candidate.ProjectedLayoutTurnRadians
+									>= Contract.MinimumLayoutTurnRadians;
+							const PartialAlternationMetrics
+								PartialAlternation =
+									MeasurePartialAlternation(
+										Candidate.Layout,
+										Contract,
+										Candidate.Result,
+										AssistIndex);
+							Candidate.SignedLateralTurnRadians =
+								PartialAlternation
+									.SignedLateralTurnRadians;
+							Candidate.PartialAlternationCount =
+								PartialAlternation
+									.PartialAlternationCount;
+							Candidate.MatchesPreferredSide =
+								MatchesPreferredPassSide(
+									Candidate.Layout.Scenario.GetAssist(
+										AssistIndex).AllowedPassSideValue,
+									Parameters.PreferredPassSideSigns[
+										static_cast<std::size_t>(
+											AssistIndex - 1)]);
 							Candidate.TieBreak =
 								(GlobalWorkIndex ^ CandidateOrdinal)
 								* 0x9e3779b97f4a7c15ull
@@ -913,8 +1132,16 @@ namespace ABTS::M11Search::SearchPrivate
 				+ ":PS=" + std::to_string(ReplaySolveRejected)
 				+ ":P=" + std::to_string(PrefixRejected)
 				+ ":D=" + std::to_string(DeflectionRejected)
+				+ ":LPS=" + std::to_string(LowPowerSolveRejected)
+				+ ":LPR="
+					+ std::to_string(LowPowerReachedAssistRejected)
 				+ ":MaxD=" + std::to_string(
 					MaximumRejectedDeflection);
+			if (!FirstLowPowerSolveFailure.empty())
+			{
+				OutDiagnostic += ":LPF="
+					+ FirstLowPowerSolveFailure;
+			}
 			return false;
 		}
 		std::sort(
@@ -946,8 +1173,62 @@ namespace ABTS::M11Search::SearchPrivate
 			Candidates.end());
 		if (Candidates.empty())
 		{
-			OutDiagnostic = "StageRobustnessRejected";
+			OutDiagnostic =
+				"StageRobustnessRejected:LPS="
+				+ std::to_string(LowPowerSolveRejected)
+				+ ":LPR="
+				+ std::to_string(LowPowerReachedAssistRejected);
+			if (!FirstLowPowerSolveFailure.empty())
+			{
+				OutDiagnostic += ":LPF="
+					+ FirstLowPowerSolveFailure;
+			}
 			return false;
+		}
+		if (AssistIndex >= 2)
+		{
+			const auto BestAlternation = std::max_element(
+				Candidates.begin(),
+				Candidates.end(),
+				[](const StageCandidate& Left,
+					const StageCandidate& Right)
+				{
+					return Left.PartialAlternationCount
+						< Right.PartialAlternationCount;
+				});
+			const std::int32_t MaximumPartialAlternationCount =
+				BestAlternation->PartialAlternationCount;
+			Candidates.erase(
+				std::remove_if(
+					Candidates.begin(),
+					Candidates.end(),
+					[MaximumPartialAlternationCount](
+						const StageCandidate& Candidate)
+					{
+						return Candidate.PartialAlternationCount
+							< MaximumPartialAlternationCount;
+					}),
+				Candidates.end());
+		}
+		const bool HasPreferredSideCandidate =
+			std::any_of(
+				Candidates.begin(),
+				Candidates.end(),
+				[](const StageCandidate& Candidate)
+				{
+					return Candidate.MatchesPreferredSide;
+				});
+		if (HasPreferredSideCandidate)
+		{
+			Candidates.erase(
+				std::remove_if(
+					Candidates.begin(),
+					Candidates.end(),
+					[](const StageCandidate& Candidate)
+					{
+						return !Candidate.MatchesPreferredSide;
+					}),
+				Candidates.end());
 		}
 		std::sort(
 			Candidates.begin(), Candidates.end(), StageRanksBefore);
@@ -1329,6 +1610,690 @@ namespace ABTS::M11Search::SearchPrivate
 		return true;
 	}
 
+	std::array<bool, 4> ClassifyInputSets(
+		const CandidateLayout& Layout,
+		const CandidateSearchContract& Contract,
+		const TrajectoryResult& Result)
+	{
+		std::array<bool, 4> Membership{};
+		Membership[0] = ResultPassesAssistPrefix(
+			Layout, Contract, Result, 1);
+		Membership[1] = Membership[0]
+			&& ResultPassesAssistPrefix(Layout, Contract, Result, 2);
+		Membership[2] = Membership[1]
+			&& ResultPassesAssistPrefix(Layout, Contract, Result, 3);
+		Membership[3] = Membership[2] && Result.DidHitTarget();
+		return Membership;
+	}
+
+	bool SameInput(const LaunchInput& Left, const LaunchInput& Right)
+	{
+		return Left.YawDegrees == Right.YawDegrees
+			&& Left.PitchDegrees == Right.PitchDegrees
+			&& Left.Power == Right.Power;
+	}
+
+	double InputDistanceSquared(
+		const CandidateLayout& Layout,
+		const LaunchInput& Input)
+	{
+		const double YawRange = Layout.Launch.MaximumYawDegrees
+			- Layout.Launch.MinimumYawDegrees;
+		const double PitchRange = Layout.Launch.MaximumPitchDegrees
+			- Layout.Launch.MinimumPitchDegrees;
+		const double PowerRange = Layout.Launch.MaximumPower
+			- Layout.Launch.MinimumPower;
+		const double DY = (Input.YawDegrees
+			- Layout.NominalInput.YawDegrees) / YawRange;
+		const double DP = (Input.PitchDegrees
+			- Layout.NominalInput.PitchDegrees) / PitchRange;
+		const double DW = (Input.Power
+			- Layout.NominalInput.Power) / PowerRange;
+		return DY * DY + DP * DP + DW * DW;
+	}
+
+	double Cross2D(
+		const YawPitchPoint& Origin,
+		const YawPitchPoint& A,
+		const YawPitchPoint& B)
+	{
+		return (A.YawDegrees - Origin.YawDegrees)
+				* (B.PitchDegrees - Origin.PitchDegrees)
+			- (A.PitchDegrees - Origin.PitchDegrees)
+				* (B.YawDegrees - Origin.YawDegrees);
+	}
+
+	std::vector<YawPitchPoint> BuildConvexHull(
+		std::vector<YawPitchPoint> Points)
+	{
+		std::sort(
+			Points.begin(),
+			Points.end(),
+			[](const YawPitchPoint& Left, const YawPitchPoint& Right)
+			{
+				return Left.YawDegrees < Right.YawDegrees
+					|| (Left.YawDegrees == Right.YawDegrees
+						&& Left.PitchDegrees < Right.PitchDegrees);
+			});
+		Points.erase(
+			std::unique(
+				Points.begin(),
+				Points.end(),
+				[](const YawPitchPoint& Left, const YawPitchPoint& Right)
+				{
+					return Left.YawDegrees == Right.YawDegrees
+						&& Left.PitchDegrees == Right.PitchDegrees;
+				}),
+			Points.end());
+		if (Points.size() <= 2)
+		{
+			return Points;
+		}
+		std::vector<YawPitchPoint> Hull;
+		Hull.reserve(Points.size() * 2);
+		for (const YawPitchPoint& Point : Points)
+		{
+			while (Hull.size() >= 2
+				&& Cross2D(
+					Hull[Hull.size() - 2],
+					Hull.back(),
+					Point) <= 0.0)
+			{
+				Hull.pop_back();
+			}
+			Hull.push_back(Point);
+		}
+		const std::size_t LowerSize = Hull.size();
+		for (auto Iterator = Points.rbegin() + 1;
+			Iterator != Points.rend();
+			++Iterator)
+		{
+			while (Hull.size() > LowerSize
+				&& Cross2D(
+					Hull[Hull.size() - 2],
+					Hull.back(),
+					*Iterator) <= 0.0)
+			{
+				Hull.pop_back();
+			}
+			Hull.push_back(*Iterator);
+		}
+		if (!Hull.empty())
+		{
+			Hull.pop_back();
+		}
+		return Hull;
+	}
+
+	double ConvexHullArea(const std::vector<YawPitchPoint>& Hull)
+	{
+		if (Hull.size() < 3)
+		{
+			return 0.0;
+		}
+		double TwiceArea = 0.0;
+		for (std::size_t Index = 0; Index < Hull.size(); ++Index)
+		{
+			const YawPitchPoint& A = Hull[Index];
+			const YawPitchPoint& B = Hull[(Index + 1) % Hull.size()];
+			TwiceArea += A.YawDegrees * B.PitchDegrees
+				- A.PitchDegrees * B.YawDegrees;
+		}
+		return std::abs(TwiceArea) * 0.5;
+	}
+
+	bool HullContains(
+		const std::vector<YawPitchPoint>& Hull,
+		const YawPitchPoint& Point)
+	{
+		if (Hull.size() < 3)
+		{
+			return false;
+		}
+		constexpr double Tolerance = 1.0e-12;
+		for (std::size_t Index = 0; Index < Hull.size(); ++Index)
+		{
+			if (Cross2D(
+				Hull[Index],
+				Hull[(Index + 1) % Hull.size()],
+				Point) < -Tolerance)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void PopulateHullMetrics(
+		const CandidateLayout& Layout,
+		const CandidateSearchContract& Contract,
+		const std::vector<YawPitchPoint>& Evidence,
+		InputSetMetrics& OutSet)
+	{
+		OutSet.ScreenAimHullEvidencePointCount =
+			static_cast<std::int32_t>(Evidence.size());
+		OutSet.ScreenAimHullYawPitch = BuildConvexHull(Evidence);
+		OutSet.ScreenAimHullAreaSquareDegrees =
+			ConvexHullArea(OutSet.ScreenAimHullYawPitch);
+		if (!Evidence.empty())
+		{
+			double MinimumYaw = Evidence.front().YawDegrees;
+			double MaximumYaw = MinimumYaw;
+			double MinimumPitch = Evidence.front().PitchDegrees;
+			double MaximumPitch = MinimumPitch;
+			for (const YawPitchPoint& Point : Evidence)
+			{
+				MinimumYaw = std::min(MinimumYaw, Point.YawDegrees);
+				MaximumYaw = std::max(MaximumYaw, Point.YawDegrees);
+				MinimumPitch = std::min(
+					MinimumPitch, Point.PitchDegrees);
+				MaximumPitch = std::max(
+					MaximumPitch, Point.PitchDegrees);
+			}
+			OutSet.ScreenAimHullYawSpanDegrees =
+				MaximumYaw - MinimumYaw;
+			OutSet.ScreenAimHullPitchSpanDegrees =
+				MaximumPitch - MinimumPitch;
+		}
+		const double LaunchArea =
+			(Layout.Launch.MaximumYawDegrees
+				- Layout.Launch.MinimumYawDegrees)
+			* (Layout.Launch.MaximumPitchDegrees
+				- Layout.Launch.MinimumPitchDegrees);
+		OutSet.ScreenAimHullNormalizedArea = LaunchArea > 0.0
+			? OutSet.ScreenAimHullAreaSquareDegrees / LaunchArea
+			: 0.0;
+		const double BoundingArea = OutSet.ScreenAimHullYawSpanDegrees
+			* OutSet.ScreenAimHullPitchSpanDegrees;
+		OutSet.ScreenAimHullCompactness = BoundingArea > 0.0
+			? std::clamp(
+				OutSet.ScreenAimHullAreaSquareDegrees / BoundingArea,
+				0.0,
+				1.0)
+			: 0.0;
+		OutSet.ScreenAimHullContainsNominal = HullContains(
+			OutSet.ScreenAimHullYawPitch,
+			YawPitchPoint{
+				Layout.NominalInput.YawDegrees,
+				Layout.NominalInput.PitchDegrees});
+		OutSet.ScreenAimHullCompliant =
+			OutSet.ScreenAimHullEvidencePointCount
+				>= Contract.MinimumHullEvidenceCount
+			&& OutSet.ScreenAimHullYawPitch.size() >= 3
+			&& OutSet.ScreenAimHullAreaSquareDegrees
+				>= Contract.MinimumHullAreaSquareDegrees
+			&& OutSet.ScreenAimHullYawSpanDegrees
+				>= Contract.MinimumHullYawSpanDegrees
+			&& OutSet.ScreenAimHullPitchSpanDegrees
+				>= Contract.MinimumHullPitchSpanDegrees;
+	}
+
+	double Ratio(
+		const std::int32_t Numerator,
+		const std::int32_t Denominator)
+	{
+		return Denominator > 0
+			? static_cast<double>(Numerator)
+				/ static_cast<double>(Denominator)
+			: 0.0;
+	}
+
+	double PrefixRetentionScore(
+		const CandidateSearchContract& Contract,
+		const double RatioValue)
+	{
+		if (RatioValue < Contract.MinimumPrefixRetentionRatio
+			|| RatioValue > Contract.MaximumPrefixRetentionRatio)
+		{
+			return 0.0;
+		}
+		if (RatioValue < Contract.FullScoreMinimumPrefixRetentionRatio)
+		{
+			return (RatioValue - Contract.MinimumPrefixRetentionRatio)
+				/ (Contract.FullScoreMinimumPrefixRetentionRatio
+					- Contract.MinimumPrefixRetentionRatio);
+		}
+		if (RatioValue > Contract.FullScoreMaximumPrefixRetentionRatio)
+		{
+			return (Contract.MaximumPrefixRetentionRatio - RatioValue)
+				/ (Contract.MaximumPrefixRetentionRatio
+					- Contract.FullScoreMaximumPrefixRetentionRatio);
+		}
+		return 1.0;
+	}
+
+	bool AnalyzeInputDomain(
+		const CandidateLayout& Layout,
+		const CandidateSearchContract& Contract,
+		CandidateMetrics& OutMetrics,
+		std::int32_t& InOutSolveCount,
+		std::string* OutFailure)
+	{
+		std::array<std::vector<LaunchInput>, 4>
+			FullDomainMemberInputs;
+		std::array<std::vector<YawPitchPoint>, 4>
+			ScreenAimHullEvidence;
+		OutMetrics.ScreenAimSampleCount =
+			Contract.ScreenAimSampleCount;
+
+		const auto RecordSolveFailure =
+			[OutFailure](
+				const char* Domain,
+				const std::int32_t SetIndex,
+				const std::int32_t SampleIndex,
+				const std::string& Detail,
+				std::int32_t& InOutFailureCount)
+			{
+				++InOutFailureCount;
+				if (OutFailure != nullptr)
+				{
+					*OutFailure = Domain;
+					if (SetIndex >= 0)
+					{
+						*OutFailure += "[S"
+							+ std::to_string(SetIndex + 1) + "]";
+					}
+					*OutFailure += "[Sample="
+						+ std::to_string(SampleIndex) + "]";
+					*OutFailure += ":"
+						+ (Detail.empty()
+							? "UnspecifiedBuildAndSolveFailure"
+							: Detail);
+				}
+				return false;
+			};
+
+		const std::uint64_t ScreenAimOffset =
+			Contract.ScreenAimSeed % 1000003ull;
+		for (std::int32_t Index = 0;
+			Index < Contract.ScreenAimSampleCount;
+			++Index)
+		{
+			const std::uint64_t SampleIndex =
+				ScreenAimOffset
+				+ static_cast<std::uint64_t>(Index) + 1ull;
+			const LaunchInput Input{
+				M11Core::Lerp(
+					Layout.Launch.MinimumYawDegrees,
+					Layout.Launch.MaximumYawDegrees,
+					Halton(SampleIndex, 2)),
+				M11Core::Lerp(
+					Layout.Launch.MinimumPitchDegrees,
+					Layout.Launch.MaximumPitchDegrees,
+					Halton(SampleIndex, 3)),
+				Layout.NominalInput.Power};
+			TrajectoryRequest Request;
+			TrajectoryResult Result;
+			std::string SolveFailure;
+			if (!BuildAndSolve(
+				Layout,
+				Input,
+				0x7u,
+				Request,
+				Result,
+				InOutSolveCount,
+				&SolveFailure))
+			{
+				return RecordSolveFailure(
+					"ScreenAimBuildAndSolveFailed",
+					-1,
+					Index,
+					SolveFailure,
+					OutMetrics.ScreenAimSolveFailureCount);
+			}
+			const std::array<bool, 4> Membership =
+				ClassifyInputSets(Layout, Contract, Result);
+			for (std::size_t SetIndex = 0;
+				SetIndex < Membership.size();
+				++SetIndex)
+			{
+				if (Membership[SetIndex])
+				{
+					++OutMetrics.InputSets[SetIndex].ScreenAimCount;
+					ScreenAimHullEvidence[SetIndex].push_back(
+						YawPitchPoint{
+							Input.YawDegrees,
+							Input.PitchDegrees});
+				}
+			}
+		}
+
+		for (std::size_t SetIndex = 0;
+			SetIndex < OutMetrics.InputSets.size();
+			++SetIndex)
+		{
+			InputSetMetrics& Set = OutMetrics.InputSets[SetIndex];
+			const std::int32_t ParentScreenAimCount = SetIndex == 0
+				? Contract.ScreenAimSampleCount
+				: OutMetrics.InputSets[SetIndex - 1].ScreenAimCount;
+			Set.ScreenAimRetentionRatio =
+				Ratio(Set.ScreenAimCount, ParentScreenAimCount);
+			Set.ScreenAimRetentionCompliant = SetIndex < 3
+				&& Set.ScreenAimRetentionRatio
+					>= Contract.MinimumPrefixRetentionRatio
+				&& Set.ScreenAimRetentionRatio
+					<= Contract.MaximumPrefixRetentionRatio;
+		}
+
+		// The gameplay-sized prefix ratios are the first hard input-domain
+		// gate. Hull shape is intentionally not considered until they pass.
+		for (std::size_t SetIndex = 0; SetIndex < 3; ++SetIndex)
+		{
+			const InputSetMetrics& Set = OutMetrics.InputSets[SetIndex];
+			if (!Set.ScreenAimRetentionCompliant)
+			{
+				if (OutFailure != nullptr)
+				{
+					*OutFailure = "S"
+						+ std::to_string(SetIndex + 1)
+						+ "ScreenAimRetentionOutsideRange:"
+						+ std::to_string(Set.ScreenAimRetentionRatio);
+				}
+				return false;
+			}
+		}
+
+		for (std::size_t SetIndex = 0;
+			SetIndex < OutMetrics.InputSets.size();
+			++SetIndex)
+		{
+			PopulateHullMetrics(
+				Layout,
+				Contract,
+				ScreenAimHullEvidence[SetIndex],
+				OutMetrics.InputSets[SetIndex]);
+		}
+
+		for (std::size_t SetIndex = 0; SetIndex < 3; ++SetIndex)
+		{
+			if (!OutMetrics.InputSets[SetIndex]
+					.ScreenAimHullCompliant)
+			{
+				if (OutFailure != nullptr)
+				{
+					*OutFailure = "S"
+						+ std::to_string(SetIndex + 1)
+						+ "ScreenAimHullDegenerate";
+				}
+				return false;
+			}
+		}
+
+		OutMetrics.FullDomainSampleCount =
+			Contract.MonteCarloSampleCount;
+		const std::uint64_t FullDomainOffset =
+			Contract.MonteCarloSeed % 1000003ull;
+		for (std::int32_t Index = 0;
+			Index < Contract.MonteCarloSampleCount;
+			++Index)
+		{
+			const std::uint64_t SampleIndex =
+				FullDomainOffset
+				+ static_cast<std::uint64_t>(Index) + 1ull;
+			const LaunchInput Input{
+				M11Core::Lerp(
+					Layout.Launch.MinimumYawDegrees,
+					Layout.Launch.MaximumYawDegrees,
+					Halton(SampleIndex, 2)),
+				M11Core::Lerp(
+					Layout.Launch.MinimumPitchDegrees,
+					Layout.Launch.MaximumPitchDegrees,
+					Halton(SampleIndex, 3)),
+				M11Core::Lerp(
+					Layout.Launch.MinimumPower,
+					Layout.Launch.MaximumPower,
+					Halton(SampleIndex, 5))};
+			TrajectoryRequest Request;
+			TrajectoryResult Result;
+			std::string SolveFailure;
+			if (!BuildAndSolve(
+				Layout,
+				Input,
+				0x7u,
+				Request,
+				Result,
+				InOutSolveCount,
+				&SolveFailure))
+			{
+				return RecordSolveFailure(
+					"FullDomainBuildAndSolveFailed",
+					-1,
+					Index,
+					SolveFailure,
+					OutMetrics.FullDomainSolveFailureCount);
+			}
+			const std::array<bool, 4> Membership =
+				ClassifyInputSets(Layout, Contract, Result);
+			for (std::size_t SetIndex = 0;
+				SetIndex < Membership.size();
+				++SetIndex)
+			{
+				if (Membership[SetIndex])
+				{
+					++OutMetrics.InputSets[SetIndex].FullDomainCount;
+					FullDomainMemberInputs[SetIndex].push_back(Input);
+				}
+			}
+		}
+
+		for (std::size_t SetIndex = 0;
+			SetIndex < OutMetrics.InputSets.size();
+			++SetIndex)
+		{
+			const std::int32_t ParentFullDomainCount = SetIndex == 0
+				? Contract.MonteCarloSampleCount
+				: OutMetrics.InputSets[SetIndex - 1].FullDomainCount;
+			OutMetrics.InputSets[SetIndex].FullDomainRetentionRatio =
+				Ratio(
+					OutMetrics.InputSets[SetIndex].FullDomainCount,
+					ParentFullDomainCount);
+		}
+
+		for (std::size_t SetIndex = 0;
+			SetIndex < OutMetrics.InputSets.size();
+			++SetIndex)
+		{
+			InputSetMetrics& Set = OutMetrics.InputSets[SetIndex];
+			Set.ConditionalProbeCount =
+				Contract.ConditionalProbeSamplesPerSet;
+			std::vector<LaunchInput> Seeds;
+			if (SetIndex == 0)
+			{
+				Seeds.push_back(Layout.NominalInput);
+			}
+			else
+			{
+				Seeds = FullDomainMemberInputs[SetIndex - 1];
+				std::sort(
+					Seeds.begin(),
+					Seeds.end(),
+					[&Layout](
+						const LaunchInput& Left,
+						const LaunchInput& Right)
+					{
+						const double LeftDistance =
+							InputDistanceSquared(Layout, Left);
+						const double RightDistance =
+							InputDistanceSquared(Layout, Right);
+						if (LeftDistance != RightDistance)
+						{
+							return LeftDistance < RightDistance;
+						}
+						if (Left.YawDegrees != Right.YawDegrees)
+						{
+							return Left.YawDegrees < Right.YawDegrees;
+						}
+						if (Left.PitchDegrees != Right.PitchDegrees)
+						{
+							return Left.PitchDegrees
+								< Right.PitchDegrees;
+						}
+						return Left.Power < Right.Power;
+					});
+				Seeds.erase(
+					std::unique(Seeds.begin(), Seeds.end(), SameInput),
+					Seeds.end());
+				if (Seeds.size() > 16)
+				{
+					Seeds.resize(16);
+				}
+			}
+			if (Seeds.empty())
+			{
+				Seeds.push_back(Layout.NominalInput);
+			}
+			const double Scale =
+				1.0 / static_cast<double>(SetIndex + 1);
+			const std::uint64_t ConditionalOffset =
+				FullDomainOffset
+				+ 100003ull
+					* static_cast<std::uint64_t>(SetIndex + 1);
+			for (std::int32_t ProbeIndex = 0;
+				ProbeIndex < Contract.ConditionalProbeSamplesPerSet;
+				++ProbeIndex)
+			{
+				const LaunchInput& Seed = Seeds[
+					static_cast<std::size_t>(ProbeIndex)
+						% Seeds.size()];
+				const std::uint64_t SampleIndex =
+					ConditionalOffset
+					+ static_cast<std::uint64_t>(ProbeIndex) + 1ull;
+				const auto SignedHalton =
+					[SampleIndex](const std::uint32_t Base)
+					{
+						return 2.0 * Halton(SampleIndex, Base) - 1.0;
+					};
+				LaunchInput Input{
+					std::clamp(
+						Seed.YawDegrees
+							+ SignedHalton(7)
+								* Contract
+									.ConditionalYawHalfExtentDegrees
+								* Scale,
+						Layout.Launch.MinimumYawDegrees,
+						Layout.Launch.MaximumYawDegrees),
+					std::clamp(
+						Seed.PitchDegrees
+							+ SignedHalton(11)
+								* Contract
+									.ConditionalPitchHalfExtentDegrees
+								* Scale,
+						Layout.Launch.MinimumPitchDegrees,
+						Layout.Launch.MaximumPitchDegrees),
+					std::clamp(
+						Seed.Power
+							+ SignedHalton(13)
+								* Contract.ConditionalPowerHalfExtent
+								* Scale,
+						Layout.Launch.MinimumPower,
+						Layout.Launch.MaximumPower)};
+				TrajectoryRequest Request;
+				TrajectoryResult Result;
+				std::string SolveFailure;
+				if (!BuildAndSolve(
+					Layout,
+					Input,
+					0x7u,
+					Request,
+					Result,
+					InOutSolveCount,
+					&SolveFailure))
+				{
+					return RecordSolveFailure(
+						"ConditionalBuildAndSolveFailed",
+						static_cast<std::int32_t>(SetIndex),
+						ProbeIndex,
+						SolveFailure,
+						OutMetrics.ConditionalSolveFailureCount);
+				}
+				const std::array<bool, 4> Membership =
+					ClassifyInputSets(Layout, Contract, Result);
+				const bool ParentMember =
+					SetIndex == 0 || Membership[SetIndex - 1];
+				if (ParentMember)
+				{
+					++Set.ConditionalParentCount;
+				}
+				if (ParentMember && Membership[SetIndex])
+				{
+					++Set.ConditionalMemberCount;
+				}
+			}
+			Set.ConditionalRetentionRatio = Ratio(
+				Set.ConditionalMemberCount,
+				Set.ConditionalParentCount);
+		}
+
+		double RetentionScore = 0.0;
+		for (std::size_t SetIndex = 0; SetIndex < 3; ++SetIndex)
+		{
+			const InputSetMetrics& Set =
+				OutMetrics.InputSets[SetIndex];
+			RetentionScore += PrefixRetentionScore(
+				Contract, Set.ScreenAimRetentionRatio);
+		}
+		OutMetrics.PrefixRetentionScore = RetentionScore / 3.0;
+
+		double HullScore = 0.0;
+		for (std::size_t SetIndex = 0; SetIndex < 3; ++SetIndex)
+		{
+			const InputSetMetrics& Set =
+				OutMetrics.InputSets[SetIndex];
+			const double AreaScore = std::clamp(
+				Set.ScreenAimHullAreaSquareDegrees / 0.05,
+				0.0,
+				1.0);
+			const double YawScore = std::clamp(
+				Set.ScreenAimHullYawSpanDegrees / 0.25,
+				0.0,
+				1.0);
+			const double PitchScore = std::clamp(
+				Set.ScreenAimHullPitchSpanDegrees / 0.25,
+				0.0,
+				1.0);
+			HullScore += 0.30 * AreaScore
+				+ 0.20 * YawScore
+				+ 0.20 * PitchScore
+				+ 0.15 * Set.ScreenAimHullCompactness
+				+ 0.15
+					* (Set.ScreenAimHullContainsNominal ? 1.0 : 0.0);
+		}
+		OutMetrics.PrefixHullScore = HullScore / 3.0;
+		if (OutFailure != nullptr)
+		{
+			OutFailure->clear();
+		}
+		return true;
+	}
+
+	Vec3d ComputePresentationNormal(const CandidateLayout& Layout)
+	{
+		const Vec3d First =
+			Layout.Scenario.GetAssist(1).CenterCM
+			- Layout.Launch.PouchLocalPositionCM;
+		const Vec3d Second =
+			Layout.Scenario.GetAssist(2).CenterCM
+			- Layout.Scenario.GetAssist(1).CenterCM;
+		Vec3d Normal = Vec3d::CrossProduct(First, Second).GetSafeNormal();
+		if (Normal.IsNearlyZero())
+		{
+			const Vec3d Third =
+				Layout.Scenario.GetAssist(3).CenterCM
+				- Layout.Scenario.GetAssist(2).CenterCM;
+			Normal =
+				Vec3d::CrossProduct(Second, Third).GetSafeNormal();
+		}
+		if (Normal.IsNearlyZero())
+		{
+			Normal = Vec3d(0.0, 0.0, 1.0);
+		}
+		if (Vec3d::DotProduct(Normal, Vec3d(0.0, 0.0, 1.0)) < 0.0)
+		{
+			Normal = -Normal;
+		}
+		return Normal;
+	}
+
 	bool PopulateMetrics(
 		const CandidateLayout& Layout,
 		const CandidateSearchContract& Contract,
@@ -1356,6 +2321,10 @@ namespace ABTS::M11Search::SearchPrivate
 		OutMetrics.LayoutTurnsRadians = ComputeLayoutTurns(Layout);
 		OutMetrics.MinimumTargetDistanceCM =
 			MinimumDistanceToTarget(Layout, Result);
+		const Vec3d PresentationNormal =
+			ComputePresentationNormal(Layout);
+		OutMetrics.MinimumReadableDeflectionRadians =
+			std::numeric_limits<double>::max();
 		for (std::int32_t AssistIndex = 1;
 			AssistIndex <= GravityScenario::AssistCount;
 			++AssistIndex)
@@ -1363,9 +2332,11 @@ namespace ABTS::M11Search::SearchPrivate
 			const std::size_t Index =
 				static_cast<std::size_t>(AssistIndex - 1);
 			const AssistPhaseDiagnostics& Phase = Pacing.Assists[Index];
+			const TrajectoryEvent* Enter = Result.FindAssistEvent(
+				TrajectoryEventType::AssistEnter, AssistIndex);
 			const TrajectoryEvent* Exit = Result.FindAssistEvent(
 				TrajectoryEventType::AssistExit, AssistIndex);
-			if (!Phase.Complete || Exit == nullptr)
+			if (!Phase.Complete || Enter == nullptr || Exit == nullptr)
 			{
 				if (OutFailure != nullptr)
 				{
@@ -1396,6 +2367,22 @@ namespace ABTS::M11Search::SearchPrivate
 				Exit->ClosestDistanceCM
 				- Layout.Scenario.GetAssist(AssistIndex)
 					.CollisionRadiusCM;
+			const LateralTurnMeasurement LateralTurn =
+				MeasureLateralTurn(
+					Phase.EntrySpeedCMPerSec > 0.0
+						? Enter->VelocityCMPerSec
+						: Vec3d(),
+					Exit->VelocityCMPerSec,
+					PresentationNormal,
+					Contract.MinimumLateralTurnAxisProjection);
+			Metrics.LateralTurnAxisProjection =
+				LateralTurn.AxisProjection;
+			Metrics.SignedLateralTurnRadians =
+				LateralTurn.SignedRadians;
+			OutMetrics.MinimumReadableDeflectionRadians = std::min(
+				OutMetrics.MinimumReadableDeflectionRadians,
+				Metrics.ActualDeflectionRadians
+					* Metrics.LateralTurnAxisProjection);
 			const auto RejectAssistMetric =
 				[OutFailure, AssistIndex](const char* Suffix)
 				{
@@ -1421,6 +2408,12 @@ namespace ABTS::M11Search::SearchPrivate
 			{
 				return RejectAssistMetric("DeflectionBelowMinimum");
 			}
+			if (Metrics.LateralTurnAxisProjection
+				< Contract.MinimumLateralTurnAxisProjection)
+			{
+				return RejectAssistMetric(
+					"LateralTurnAxisProjectionBelowMinimum");
+			}
 			if (Metrics.AppliedEnergyGainCM2PerSec2
 				< Contract.MinimumEnergyGainCM2PerSec2)
 			{
@@ -1436,6 +2429,27 @@ namespace ABTS::M11Search::SearchPrivate
 			{
 				return RejectAssistMetric("ClearanceBelowMinimum");
 			}
+		}
+		OutMetrics.AlternatingLateralTurnCount = 0;
+		for (std::size_t Index = 1;
+			Index < OutMetrics.Assists.size();
+			++Index)
+		{
+			if (OutMetrics.Assists[Index - 1].SignedLateralTurnRadians
+					* OutMetrics.Assists[Index].SignedLateralTurnRadians
+				< 0.0)
+			{
+				++OutMetrics.AlternatingLateralTurnCount;
+			}
+		}
+		if (OutMetrics.AlternatingLateralTurnCount
+			< Contract.MinimumAlternatingLateralTurnCount)
+		{
+			if (OutFailure != nullptr)
+			{
+				*OutFailure = "AlternatingLateralTurnCountBelowMinimum";
+			}
+			return false;
 		}
 		if (OutMetrics.TotalFlightTimeSeconds
 			> Contract.MaximumTotalFlightTimeSeconds)
@@ -1521,6 +2535,33 @@ namespace ABTS::M11Search::SearchPrivate
 			- Right.Layout.Scenario.Target.CenterCM).SquaredLength();
 		return std::sqrt(SumSquared / 4.0);
 	}
+}
+
+std::array<std::int8_t, 3>
+ABTS::M11Search::CandidateSearch::BuildPreferredPassSidePattern(
+	const CandidateSearchContract& Contract,
+	const std::uint64_t GlobalWorkIndex)
+{
+	return SearchPrivate::MakePreferredPassSidePattern(
+		Contract, GlobalWorkIndex);
+}
+
+bool ABTS::M11Search::CandidateSearch::ShouldRejectLowPowerResult(
+	const M11Core::TrajectoryResult& Result,
+	const bool bQualifiedAssist1)
+{
+	return bQualifiedAssist1 || Result.DidHitTarget();
+}
+
+ABTS::M11Search::PartialAlternationMetrics
+ABTS::M11Search::CandidateSearch::MeasurePartialAlternation(
+	const CandidateLayout& Layout,
+	const CandidateSearchContract& Contract,
+	const M11Core::TrajectoryResult& Result,
+	const std::int32_t LastAssistIndex)
+{
+	return SearchPrivate::MeasurePartialAlternation(
+		Layout, Contract, Result, LastAssistIndex);
 }
 
 bool ABTS::M11Search::CandidateSearch::EvaluateWorkItem(
@@ -1703,14 +2744,21 @@ bool ABTS::M11Search::CandidateSearch::EvaluateWorkItem(
 	}
 	OutCandidate.Metrics.LowPowerCompletedAssistCount =
 		LowPowerResult.CompletedAssistCount;
-	if (LowPowerResult.CompletedAssistCount >= 3
-		|| LowPowerResult.DidHitTarget())
+	const bool bQualifiedLowPowerAssist1 =
+		ResultPassesAssistPrefix(
+			Working,
+			Contract,
+			LowPowerResult,
+			1);
+	if (CandidateSearch::ShouldRejectLowPowerResult(
+			LowPowerResult,
+			bQualifiedLowPowerAssist1))
 	{
 		Reject(
 			nullptr,
 			&OutCandidate,
 			EvaluationStatus::LowPowerGateRejected,
-			"LowPowerCompletedFullAssistChain");
+			"LowPowerCompletedQualifiedAssist1PrefixOrHitTarget");
 		OutCandidate.ScoreHash =
 			ComputeCandidateScoreHash(OutCandidate);
 		return true;
@@ -1791,6 +2839,69 @@ bool ABTS::M11Search::CandidateSearch::EvaluateWorkItem(
 		}
 	}
 
+	if (!AnalyzeInputDomain(
+			Working,
+			Contract,
+			OutCandidate.Metrics,
+			OutCandidate.SolverInvocationCount,
+			&Failure))
+	{
+		Reject(
+			nullptr,
+			&OutCandidate,
+			EvaluationStatus::InputDomainDegenerate,
+			Failure.empty()
+				? "InputDomainPrefixSetDegenerate"
+				: Failure.c_str());
+		OutCandidate.ScoreHash =
+			ComputeCandidateScoreHash(OutCandidate);
+		return true;
+	}
+
+	double DeflectionScore = 0.0;
+	for (const AssistMetrics& Assist : OutCandidate.Metrics.Assists)
+	{
+		const double DeflectionHeadroom = std::clamp(
+			(Assist.ActualDeflectionRadians
+				- Contract.MinimumDeflectionRadians)
+				/ std::max(
+					0.1,
+					1.20 - Contract.MinimumDeflectionRadians),
+			0.0,
+			1.0);
+		DeflectionScore +=
+			0.65 * DeflectionHeadroom
+			+ 0.35 * Assist.LateralTurnAxisProjection;
+	}
+	OutCandidate.Metrics.DeflectionReadabilityScore =
+		DeflectionScore
+		/ static_cast<double>(OutCandidate.Metrics.Assists.size());
+	OutCandidate.Metrics.AlternationScore =
+		static_cast<double>(
+			OutCandidate.Metrics.AlternatingLateralTurnCount)
+		/ static_cast<double>(
+			OutCandidate.Metrics.Assists.size() - 1);
+	const double FlightHeadroom = std::clamp(
+		1.0
+			- OutCandidate.Metrics.TotalFlightTimeSeconds
+				/ Contract.MaximumTotalFlightTimeSeconds,
+		0.0,
+		1.0);
+	const double CoastHeadroom = std::clamp(
+		1.0
+			- OutCandidate.Metrics.MaximumCoastSeconds
+				/ Contract.MaximumCoastSeconds,
+		0.0,
+		1.0);
+	OutCandidate.Metrics.PacingScore =
+		0.5 * (FlightHeadroom + CoastHeadroom);
+	OutCandidate.Metrics.SoftScore =
+		30.0 * OutCandidate.Metrics.PrefixRetentionScore
+		+ 20.0 * OutCandidate.Metrics.PrefixHullScore
+		+ 25.0 * OutCandidate.Metrics.DeflectionReadabilityScore
+		+ 15.0 * OutCandidate.Metrics.AlternationScore
+		+ 10.0 * OutCandidate.Metrics.PacingScore;
+
 	OutCandidate.Status = EvaluationStatus::Accepted;
 	OutCandidate.Rejection.clear();
 	OutCandidate.ScoreHash =
@@ -1805,6 +2916,10 @@ bool ABTS::M11Search::CandidateSearch::CandidateRanksBefore(
 	if (Left.IsAccepted() != Right.IsAccepted())
 	{
 		return Left.IsAccepted();
+	}
+	if (Left.Metrics.SoftScore != Right.Metrics.SoftScore)
+	{
+		return Left.Metrics.SoftScore > Right.Metrics.SoftScore;
 	}
 	if (Left.Metrics.RobustSurvivorCount
 		!= Right.Metrics.RobustSurvivorCount)

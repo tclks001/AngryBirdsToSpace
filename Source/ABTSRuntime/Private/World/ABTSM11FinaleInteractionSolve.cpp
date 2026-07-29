@@ -398,7 +398,10 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 		PreviewPlaybackPlan.Points,
 		LatestQualifiedResult.ValidationHash,
 		DiagramSnapshot);
-	MarkTargetCaptureDirty();
+	if (!bTargetCaptureInitialized)
+	{
+		MarkTargetCaptureDirty();
+	}
 }
 
 bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()

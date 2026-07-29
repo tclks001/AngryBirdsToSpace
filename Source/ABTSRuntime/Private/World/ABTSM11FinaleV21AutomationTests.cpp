@@ -154,24 +154,28 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 	TestEqual(
 		TEXT("Candidate work index is frozen"),
 		Identity.GlobalWorkIndex,
-		166ull);
+		2278ull);
 	TestEqual(
 		TEXT("Candidate source hash is frozen"),
 		Identity.CandidateSourceHash,
-		0xbd7d63e871c524bfull);
+		0xaaae0dd44f14f785ull);
 	TestEqual(
 		TEXT("Candidate request hash is frozen"),
 		Identity.NominalRequestHash,
-		0xa40f917f70db40abull);
+		0x5ecc893f6eb7003dull);
 	TestEqual(
 		TEXT("Candidate result hash is frozen"),
 		Identity.NominalResultHash,
-		0xb2987a35306c3654ull);
+		0xb47d8314ebe69376ull);
 	TestEqual(
 		TEXT("Candidate score hash is frozen"),
 		Identity.ScoreHash,
-		0xfacaab57a03dd3beull);
+		0xd6e03f2d9e0f3b8bull);
 	TestTrue(TEXT("Candidate preset is structurally valid"), Preset.IsValid());
+	TestEqual(
+		TEXT("Candidate search algorithm is v3"),
+		Preset.SearchAlgorithmVersion,
+		3);
 	TestEqual(TEXT("Candidate solver version is v2"), Preset.SolverConfig.SolverVersion, 2);
 	TestEqual(
 		TEXT("Candidate hash schema is v2"),
@@ -306,7 +310,7 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 	TestFalse(
 		TEXT("Unknown Candidate rank fails closed"),
 		FABTSM11CandidateExperienceCatalog::BuildCandidate(
-			5,
+			FABTSM11CandidateExperienceCatalog::LastCandidateRank + 1,
 			RejectedPreset,
 			RejectedIdentity,
 			&Failure));
