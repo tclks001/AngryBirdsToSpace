@@ -275,6 +275,27 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
 	const FABTSM73DifficultySettings& InDifficultySettings)
 {
+	ConfigureTaskGraphGeneration(
+		InGenerationSettings,
+		InDAGGenerationSettings,
+		InDAGLayoutSettings,
+		InDAGFailureFrontierSettings,
+		InDAGFailurePatternSettings,
+		InDAGFailurePlayabilitySettings,
+		FABTSM73DAG4ValidationSettings(),
+		InDifficultySettings);
+}
+
+void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
+	const FABTSM73GenerationSettings& InGenerationSettings,
+	const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
+	const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+	const FABTSM73DAGFailureFrontierSettings& InDAGFailureFrontierSettings,
+	const FABTSM73DAGFailurePatternSettings& InDAGFailurePatternSettings,
+	const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
+	const FABTSM73DAG4ValidationSettings& InDAG4ValidationSettings,
+	const FABTSM73DifficultySettings& InDifficultySettings)
+{
 	if (bRuntimeSpawned)
 	{
 		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M7][TaskGraphBuilding] Ignored late profile Actor=%s"), *GetName());
@@ -287,6 +308,7 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	DAGFailureFrontierSettings = InDAGFailureFrontierSettings;
 	DAGFailurePatternSettings = InDAGFailurePatternSettings;
 	DAGFailurePlayabilitySettings = InDAGFailurePlayabilitySettings;
+	DAG4ValidationSettings = InDAG4ValidationSettings;
 	DifficultySettings = InDifficultySettings;
 }
 
@@ -430,6 +452,20 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 		Data.DAGFailurePlayabilityResult.FreeTipAngleDegrees;
 	GenerationSummary.DAGFreeSlideDistanceCM =
 		Data.DAGFailurePlayabilityResult.FreeSlideDistanceCM;
+	GenerationSummary.bDAG4ValidationEnabled =
+		LastDAG4ValidationResult.bEnabled;
+	GenerationSummary.bDAG4SettledContactAccepted =
+		LastDAG4ValidationResult.bSettledContactAccepted;
+	GenerationSummary.bDAG4ChaosComparisonAccepted =
+		LastDAG4ValidationResult.bChaosComparisonAccepted;
+	GenerationSummary.DAG4ValidationHash =
+		static_cast<int64>(LastDAG4ValidationResult.ValidationHash);
+	GenerationSummary.DAG4WeakResponseScore =
+		LastDAG4ValidationResult.WeakResponseScore;
+	GenerationSummary.DAG4MaxOrdinaryResponseScore =
+		LastDAG4ValidationResult.MaxOrdinaryResponseScore;
+	GenerationSummary.DAG4WeakResponseAdvantage =
+		LastDAG4ValidationResult.WeakResponseAdvantage;
 	GenerationSummary.FoundationFootCount = Data.FoundationFeet.Num();
 	GenerationSummary.FootprintTerrainDeltaCM = Data.TerrainDeltaCM;
 	GenerationSummary.CurvatureDropCM = Data.CurvatureDropCM;
@@ -458,6 +494,9 @@ bool AABTSM73StableBuildingActor::RebuildPreview()
 {
 	ClearBrickPreviews();
 	ClearDAGFailurePatternDiagnostics();
+	LastDAG4ValidationResult = FABTSM73DAG4ValidationResult();
+	LastDAG4ValidationResult.bEnabled =
+		DAG4ValidationSettings.bEnableSettledChaosValidation;
 	FoundationFeet->ClearInstances();
 	FoundationCap->SetVisibility(false, true);
 	FABTSM73GroundContext Context;
@@ -881,6 +920,9 @@ void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMaterialSystem* MaterialSystem)
 {
 	if (bRuntimeSpawned || MaterialSystem == nullptr) return;
+	LastDAG4ValidationResult = FABTSM73DAG4ValidationResult();
+	LastDAG4ValidationResult.bEnabled =
+		DAG4ValidationSettings.bEnableSettledChaosValidation;
 	FABTSM73GroundContext Context;
 	FABTSM73StructureData Data;
 	FString Error;
@@ -922,6 +964,27 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	}
 	LastDAGFailurePatternResult = Data.DAGFailurePatternResult;
 	LastDAGFailurePlayabilityResult = Data.DAGFailurePlayabilityResult;
+	if (DAG4ValidationSettings.bEnableSettledChaosValidation
+		&& (!Data.DAGFailureFrontierAnalysis.bAccepted
+			|| !Data.DAGFailurePatternResult.bApplied
+			|| !Data.DAGFailurePlayabilityResult.bPlayable))
+	{
+		const FString DAG4PrerequisiteError =
+			TEXT("DAG4PrerequisitesMissing");
+		LastDAG4ValidationResult.RejectReason =
+			DAG4PrerequisiteError;
+		FillGenerationSummary(
+			Context,
+			Data,
+			false,
+			DAG4PrerequisiteError);
+		RejectRuntimeStructure(DAG4PrerequisiteError);
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7.3-DAG4][Reject] Actor=%s Stage=Prerequisites Reason=%s"),
+			*GetName(),
+			*DAG4PrerequisiteError);
+		return;
+	}
 	RuntimeMaterialSystem = MaterialSystem;
 	UpdateFoundationComponents(Context, Data);
 	RuntimeModules.Reset();
@@ -956,6 +1019,9 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	if (bRuntimeSpawned)
 	{
 		UpdateDAGFailurePatternDiagnostics(Context, Data);
+		TArray<FABTSM7MaterialProfile> MaterialProfiles;
+		MaterialSystem->CopyMaterialProfiles(MaterialProfiles);
+		PrepareDAG4RuntimeState(Context, Data, MaterialProfiles);
 	}
 	bRuntimePlanar = Context.bPlanar;
 	RuntimeGravityReference = Context.bPlanar
@@ -967,7 +1033,21 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 	{
 		RejectRuntimeStructure(TEXT("RuntimeModuleSpawnFailed"));
 	}
-	if (bRuntimeSpawned && bRunIdleChaosValidation)
+	if (bRuntimeSpawned
+		&& DAG4ValidationSettings.bEnableSettledChaosValidation
+		&& !bRunIdleChaosValidation)
+	{
+		const FString DAG4IdleError =
+			TEXT("DAG4RequiresIdleValidation");
+		LastDAG4ValidationResult.RejectReason = DAG4IdleError;
+		FillGenerationSummary(Context, Data, false, DAG4IdleError);
+		RejectRuntimeStructure(DAG4IdleError);
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7.3-DAG4][Reject] Actor=%s Stage=Prerequisites Reason=%s"),
+			*GetName(),
+			*DAG4IdleError);
+	}
+	else if (bRuntimeSpawned && bRunIdleChaosValidation)
 	{
 		BeginIdleValidation(Context);
 	}
@@ -978,7 +1058,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 			: EABTSM73IdleValidationState::Rejected;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d DAG3Enabled=%d DAG3Candidates=%d DAG3Accepted=%d DAG3Hash=%u DAG3BEnabled=%d DAG3BApplied=%d DAG3BPattern=%d DAG3BHash=%u DAG3CEnabled=%d DAG3CPlayable=%d DAG3CHash=%u Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
+		TEXT("[ABTS][M7.3-A][Generated] Actor=%s Seed=%d Algorithm=%d Silhouette=%d DAGPreset=%d WeaknessPlanner=%d DAG3Enabled=%d DAG3Candidates=%d DAG3Accepted=%d DAG3Hash=%u DAG3BEnabled=%d DAG3BApplied=%d DAG3BPattern=%d DAG3BHash=%u DAG3CEnabled=%d DAG3CPlayable=%d DAG3CHash=%u DAG4Enabled=%d Planar=%d Bricks=%d Supports=%d Ground=%d DAGMacro=%d DAGSparse=%d DAGHash=%u Feet=%d TerrainDelta=%.2f Curvature=%.2f MaxSlope=%.2f Accepted=%d"),
 		*GetName(), GenerationSettings.BuildingSeed, static_cast<int32>(GenerationSettings.GenerationAlgorithm), static_cast<int32>(GenerationSettings.Silhouette),
 		static_cast<int32>(DAGGenerationSettings.Preset),
 		GenerationSettings.GenerationAlgorithm == EABTSM73GenerationAlgorithm::LegacyLayeredAB2 ? 1 : 0,
@@ -993,6 +1073,7 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		Data.DAGFailurePlayabilityResult.bEnabled ? 1 : 0,
 		Data.DAGFailurePlayabilityResult.bPlayable ? 1 : 0,
 		Data.DAGFailurePlayabilityResult.PlayabilityHash,
+		DAG4ValidationSettings.bEnableSettledChaosValidation ? 1 : 0,
 		Context.bPlanar ? 1 : 0,
 		Data.Bricks.Num(), Data.SupportEdges.Num(), Data.GroundNodeIds.Num(), Data.DAGMacroNodeCount, Data.DAGSelectedSupportCount, Data.DAGTopologyHash, Data.FoundationFeet.Num(), Data.TerrainDeltaCM,
 		Data.CurvatureDropCM, Data.MaxSlopeDegrees, bRuntimeSpawned ? 1 : 0);
@@ -1131,6 +1212,11 @@ void AABTSM73StableBuildingActor::BeginIdleValidation(const FABTSM73GroundContex
 void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bDAG4ValidationRunning)
+	{
+		TickDAG4Validation(DeltaSeconds);
+		return;
+	}
 	if (!bIdleValidationRunning) return;
 	IdleValidationElapsed += DeltaSeconds;
 	bool bAnyBodyMoving = false;
@@ -1208,7 +1294,9 @@ void AABTSM73StableBuildingActor::FinishIdleValidation(const bool bTimedOut)
 			if (Rotation > MaxRotation) { MaxRotation = Rotation; MaxRotationModule = Module; }
 		}
 		Module->Freeze();
-		Module->GetMeshComponent()->SetVisibility(true, true);
+		Module->GetMeshComponent()->SetVisibility(
+			!DAG4ValidationSettings.bEnableSettledChaosValidation,
+			true);
 	}
 	bIdleValidationRunning = false;
 	SetActorTickEnabled(false);
@@ -1234,6 +1322,32 @@ void AABTSM73StableBuildingActor::FinishIdleValidation(const bool bTimedOut)
 	const bool bAcceptedAfterBoundedTimeout = bTimedOut && bSpatiallyStable;
 	const bool bAccepted = !bTimedOut ? bSpatiallyStable : bAcceptedAfterBoundedTimeout;
 	GenerationSummary.bAccepted = GenerationSummary.bAccepted && bAccepted;
+	if (bAccepted
+		&& DAG4ValidationSettings.bEnableSettledChaosValidation)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::Running;
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s Seconds=%.2f Stable=%.2f TimedOut=%d BoundedTimeout=%d MaxMove=%.2f MaxDrift=%.2f MaxSettlement=%.2f MaxRotation=%.2f SpatialAccepted=1 DAG4Pending=1 Accepted=0"),
+			*GetName(),
+			IdleValidationElapsed,
+			IdleStableElapsed,
+			bTimedOut ? 1 : 0,
+			bAcceptedAfterBoundedTimeout ? 1 : 0,
+			MaxMove,
+			MaxPlanarDrift,
+			MaxSettlement,
+			MaxRotation);
+		if (!BeginDAG4ValidationAfterIdle()
+			&& IdleValidationState != EABTSM73IdleValidationState::Rejected)
+		{
+			const FString Reason =
+				LastDAG4ValidationResult.RejectReason.IsEmpty()
+				? FString(TEXT("DAG4InitializationFailed"))
+				: LastDAG4ValidationResult.RejectReason;
+			RejectRuntimeStructure(Reason);
+		}
+		return;
+	}
 	IdleValidationState = bAccepted
 		? EABTSM73IdleValidationState::Accepted
 		: EABTSM73IdleValidationState::Rejected;
@@ -1245,6 +1359,13 @@ void AABTSM73StableBuildingActor::FinishIdleValidation(const bool bTimedOut)
 	}
 	if (bAccepted)
 	{
+		for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
+		{
+			if (AABTSM7BuildingModule* Module = Weak.Get())
+			{
+				Module->GetMeshComponent()->SetVisibility(true, true);
+			}
+		}
 		UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M7.3-A][IdleValidation] Actor=%s Seconds=%.2f Stable=%.2f TimedOut=%d BoundedTimeout=%d MaxMove=%.2f MoveDelta=%s MoveModule=%s MaxDrift=%.2f DriftDelta=%s DriftModule=%s MaxSettlement=%.2f SettlementModule=%s MaxRotation=%.2f RotationModule=%s MaxLinearSpeed=%.2f MaxAngularSpeed=%.2f Awake=%d Accepted=1"),
 			*GetName(), IdleValidationElapsed, IdleStableElapsed, bTimedOut ? 1 : 0, bAcceptedAfterBoundedTimeout ? 1 : 0, MaxMove, *MaxMoveDelta.ToCompactString(), *DescribeModule(MaxMoveModule), MaxPlanarDrift,
@@ -1264,6 +1385,7 @@ void AABTSM73StableBuildingActor::FinishIdleValidation(const bool bTimedOut)
 
 void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 {
+	CancelDAG4Validation();
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
 	{
 		if (AABTSM7BuildingModule* Module = Weak.Get()) Module->Destroy();
@@ -1274,6 +1396,7 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	RuntimeMaterialSystem.Reset();
 	bRuntimeSpawned = false;
 	bIdleValidationRunning = false;
+	bDAG4ValidationRunning = false;
 	IdleValidationState = EABTSM73IdleValidationState::Rejected;
 	SetActorTickEnabled(false);
 	ClearBrickPreviews();

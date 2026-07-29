@@ -137,6 +137,224 @@ namespace
 		OutCorners.Add(Center + FVector2D(Half, Half));
 	}
 
+	bool MakeResultantCenteredColumnCenters(
+		const FBox2D& Region,
+		const FABTSM73DAGLayoutSettings& Settings,
+		const EABTSM73DAGSupportPattern Pattern,
+		const float ColumnWidthCM,
+		const FVector2D& Resultant,
+		TArray<FVector2D>& OutCenters)
+	{
+		if (!Region.bIsValid)
+		{
+			return false;
+		}
+
+		const float RequiredSeparation =
+			ColumnWidthCM + Settings.ColumnClearanceCM;
+		TArray<FVector2D> LocalOffsets;
+		switch (Pattern)
+		{
+		case EABTSM73DAGSupportPattern::SingleColumnInterface:
+			LocalOffsets.Add(FVector2D::ZeroVector);
+			break;
+		case EABTSM73DAGSupportPattern::TwoColumnLine:
+			if (Region.GetSize().X >= Region.GetSize().Y)
+			{
+				LocalOffsets.Add(FVector2D(
+					-RequiredSeparation * 0.5f,
+					0.0f));
+				LocalOffsets.Add(FVector2D(
+					RequiredSeparation * 0.5f,
+					0.0f));
+			}
+			else
+			{
+				LocalOffsets.Add(FVector2D(
+					0.0f,
+					-RequiredSeparation * 0.5f));
+				LocalOffsets.Add(FVector2D(
+					0.0f,
+					RequiredSeparation * 0.5f));
+			}
+			break;
+		case EABTSM73DAGSupportPattern::ThreeColumnTripod:
+			if (Region.GetSize().X >= Region.GetSize().Y)
+			{
+				LocalOffsets.Add(FVector2D(
+					-RequiredSeparation * 0.5f,
+					-RequiredSeparation / 3.0f));
+				LocalOffsets.Add(FVector2D(
+					RequiredSeparation * 0.5f,
+					-RequiredSeparation / 3.0f));
+				LocalOffsets.Add(FVector2D(
+					0.0f,
+					RequiredSeparation * 2.0f / 3.0f));
+			}
+			else
+			{
+				LocalOffsets.Add(FVector2D(
+					-RequiredSeparation / 3.0f,
+					-RequiredSeparation * 0.5f));
+				LocalOffsets.Add(FVector2D(
+					-RequiredSeparation / 3.0f,
+					RequiredSeparation * 0.5f));
+				LocalOffsets.Add(FVector2D(
+					RequiredSeparation * 2.0f / 3.0f,
+					0.0f));
+			}
+			break;
+		case EABTSM73DAGSupportPattern::FourColumnFootprint:
+			LocalOffsets.Add(FVector2D(
+				-RequiredSeparation * 0.5f,
+				-RequiredSeparation * 0.5f));
+			LocalOffsets.Add(FVector2D(
+				RequiredSeparation * 0.5f,
+				-RequiredSeparation * 0.5f));
+			LocalOffsets.Add(FVector2D(
+				-RequiredSeparation * 0.5f,
+				RequiredSeparation * 0.5f));
+			LocalOffsets.Add(FVector2D(
+				RequiredSeparation * 0.5f,
+				RequiredSeparation * 0.5f));
+			break;
+		default:
+			return false;
+		}
+
+		FVector2D MinOffset(TNumericLimits<float>::Max());
+		FVector2D MaxOffset(-TNumericLimits<float>::Max());
+		for (const FVector2D& Offset : LocalOffsets)
+		{
+			MinOffset.X = FMath::Min(MinOffset.X, Offset.X);
+			MinOffset.Y = FMath::Min(MinOffset.Y, Offset.Y);
+			MaxOffset.X = FMath::Max(MaxOffset.X, Offset.X);
+			MaxOffset.Y = FMath::Max(MaxOffset.Y, Offset.Y);
+		}
+
+		const float SafeInset =
+			ColumnWidthCM * 0.5f + Settings.ColumnClearanceCM;
+		const FVector2D AnchorMin =
+			Region.Min + FVector2D(SafeInset) - MinOffset;
+		const FVector2D AnchorMax =
+			Region.Max - FVector2D(SafeInset) - MaxOffset;
+		if (AnchorMax.X + KINDA_SMALL_NUMBER < AnchorMin.X
+			|| AnchorMax.Y + KINDA_SMALL_NUMBER < AnchorMin.Y)
+		{
+			return false;
+		}
+
+		const FVector2D Anchor(
+			FMath::Clamp(Resultant.X, AnchorMin.X, AnchorMax.X),
+			FMath::Clamp(Resultant.Y, AnchorMin.Y, AnchorMax.Y));
+		OutCenters.Reset(LocalOffsets.Num());
+		for (const FVector2D& Offset : LocalOffsets)
+		{
+			OutCenters.Add(Anchor + Offset);
+		}
+		return true;
+	}
+
+	bool ComputeMinimumSingleColumnRemovalMargin(
+		const FVector2D& Resultant,
+		const TArray<FABTSM73DAGSelectedSupport>& Supports,
+		float& OutMargin)
+	{
+		int32 TotalColumnCount = 0;
+		for (const FABTSM73DAGSelectedSupport& Support : Supports)
+		{
+			TotalColumnCount += Support.RealizedColumnCenters.Num();
+		}
+		if (TotalColumnCount <= 1)
+		{
+			return false;
+		}
+
+		OutMargin = TNumericLimits<float>::Max();
+		for (int32 RemovedSupportIndex = 0;
+			RemovedSupportIndex < Supports.Num();
+			++RemovedSupportIndex)
+		{
+			const FABTSM73DAGSelectedSupport& RemovedSupport =
+				Supports[RemovedSupportIndex];
+			for (int32 RemovedColumnIndex = 0;
+				RemovedColumnIndex
+					< RemovedSupport.RealizedColumnCenters.Num();
+				++RemovedColumnIndex)
+			{
+				TArray<FVector2D> RemainingCorners;
+				for (int32 SupportIndex = 0;
+					SupportIndex < Supports.Num();
+					++SupportIndex)
+				{
+					const FABTSM73DAGSelectedSupport& Support =
+						Supports[SupportIndex];
+					for (int32 ColumnIndex = 0;
+						ColumnIndex
+							< Support.RealizedColumnCenters.Num();
+						++ColumnIndex)
+					{
+						if (SupportIndex == RemovedSupportIndex
+							&& ColumnIndex == RemovedColumnIndex)
+						{
+							continue;
+						}
+						AddSquareCorners(
+							Support.RealizedColumnCenters[ColumnIndex],
+							Support.RealizedColumnWidthCM,
+							RemainingCorners);
+					}
+				}
+				const TArray<FVector2D> RemainingHull =
+					BuildHull(MoveTemp(RemainingCorners));
+				if (!ContainsPoint(Resultant, RemainingHull))
+				{
+					return false;
+				}
+				OutMargin = FMath::Min(
+					OutMargin,
+					HullMargin(Resultant, RemainingHull));
+			}
+		}
+		return FMath::IsFinite(OutMargin);
+	}
+
+	bool HasColumnClearanceAcrossSupports(
+		const TArray<FABTSM73DAGSelectedSupport>& Supports,
+		const float ColumnClearanceCM)
+	{
+		TArray<FVector2D> Centers;
+		TArray<float> Widths;
+		for (const FABTSM73DAGSelectedSupport& Support : Supports)
+		{
+			for (const FVector2D& Center
+				: Support.RealizedColumnCenters)
+			{
+				Centers.Add(Center);
+				Widths.Add(Support.RealizedColumnWidthCM);
+			}
+		}
+		for (int32 A = 0; A < Centers.Num(); ++A)
+		{
+			for (int32 B = A + 1; B < Centers.Num(); ++B)
+			{
+				const FVector2D Delta =
+					(Centers[A] - Centers[B]).GetAbs();
+				const float RequiredAxisSeparation =
+					(Widths[A] + Widths[B]) * 0.5f
+					+ ColumnClearanceCM;
+				if (Delta.X + KINDA_SMALL_NUMBER
+						< RequiredAxisSeparation
+					&& Delta.Y + KINDA_SMALL_NUMBER
+						< RequiredAxisSeparation)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
 	bool MakeFailureRewriteSupport(
 		const FABTSM73DAGFailureRewriteIntent& Intent,
 		const FABTSM73DAGLayoutSettings& Settings,
@@ -222,39 +440,54 @@ namespace
 			+ 2.0f;
 		const float AxisCenterMin = bAlongX ? CenterMin.X : CenterMin.Y;
 		const float AxisCenterMax = bAlongX ? CenterMax.X : CenterMax.Y;
-		const float GroupMin = AxisCenterMin + Separation * 0.5f;
-		const float GroupMax = AxisCenterMax - Separation * 0.5f;
-		if (GroupMax < GroupMin)
+		const float ResultantAxis = bAlongX ? Resultant.X : Resultant.Y;
+		const float ResultantCross = bAlongX ? Resultant.Y : Resultant.X;
+		const float LoadCross = bAlongX ? LoadCenter.Y : LoadCenter.X;
+		const FVector2D Axis = bAlongX
+			? FVector2D(FMath::Sign(Direction.X), 0.0f)
+			: FVector2D(0.0f, FMath::Sign(Direction.Y));
+		const float AxisSign = bAlongX ? Axis.X : Axis.Y;
+		const float WeakAxisMin = AxisSign > 0.0f
+			? AxisCenterMin + Separation
+			: AxisCenterMin;
+		const float WeakAxisMax = AxisSign > 0.0f
+			? AxisCenterMax
+			: AxisCenterMax - Separation;
+		if (WeakAxisMax < WeakAxisMin)
 		{
 			OutError = TEXT("DAG3BDualSupportSpanUnavailable");
 			return false;
 		}
-		const float ResultantAxis = bAlongX ? Resultant.X : Resultant.Y;
-		const float ResultantCross = bAlongX ? Resultant.Y : Resultant.X;
-		const float LoadCross = bAlongX ? LoadCenter.Y : LoadCenter.X;
-		const float GroupAxis = FMath::Clamp(ResultantAxis, GroupMin, GroupMax);
-		const float GroupCross = FMath::Clamp(
+		const float WeakAxis = FMath::Clamp(
+			ResultantAxis,
+			WeakAxisMin,
+			WeakAxisMax);
+		const float SharedCross = FMath::Clamp(
 			(ResultantCross + LoadCross) * 0.5f,
 			bAlongX ? CenterMin.Y : CenterMin.X,
 			bAlongX ? CenterMax.Y : CenterMax.X);
-		const FVector2D Axis = bAlongX
-			? FVector2D(FMath::Sign(Direction.X), 0.0f)
-			: FVector2D(0.0f, FMath::Sign(Direction.Y));
-		const FVector2D GroupCenter = bAlongX
-			? FVector2D(GroupAxis, GroupCross)
-			: FVector2D(GroupCross, GroupAxis);
-		const FVector2D WeakCenter = GroupCenter + Axis * (Separation * 0.5f);
-		const FVector2D PivotCenter = GroupCenter - Axis * (Separation * 0.5f);
+		const FVector2D WeakCenter = bAlongX
+			? FVector2D(WeakAxis, SharedCross)
+			: FVector2D(SharedCross, WeakAxis);
+		const FVector2D PivotCenter =
+			WeakCenter - Axis * Separation;
 		TArray<FVector2D> FullCorners;
 		AddSquareCorners(WeakCenter, Width, FullCorners);
 		AddSquareCorners(PivotCenter, Width, FullCorners);
 		const TArray<FVector2D> FullHull = BuildHull(FullCorners);
+		const float WeakControlMargin = FMath::Min(
+			Half - FMath::Abs(Resultant.X - WeakCenter.X),
+			Half - FMath::Abs(Resultant.Y - WeakCenter.Y));
 		if (!ContainsPoint(Resultant, FullHull)
 			|| !ContainsPoint(LoadCenter, FullHull)
 			|| HullMargin(Resultant, FullHull) + KINDA_SMALL_NUMBER
+				< Intent.MinInitialSupportMarginCM
+			|| WeakControlMargin + KINDA_SMALL_NUMBER
 				< Intent.MinInitialSupportMarginCM)
 		{
-			OutError = TEXT("DAG3BDualSupportContainmentFailed");
+			OutError = FString::Printf(
+				TEXT("DAG3BDualSupportContainmentFailed:WeakMargin=%.3f"),
+				WeakControlMargin);
 			return false;
 		}
 		const float PostFailureTipMargin =
@@ -336,6 +569,18 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 		const bool bRewriteLoad = RewriteIntent != nullptr
 			&& RewriteIntent->bEnabled
 			&& RewriteIntent->LoadMacroNodeId == LoadId;
+		const bool bRequireOrdinaryColumnRedundancy =
+			RewriteIntent != nullptr
+			&& RewriteIntent->bEnabled
+			&& RewriteIntent->Pattern
+				== EABTSM73DAGFailurePattern::InternalSingleSupport
+			&& !bRewriteLoad;
+		// DAG-4 showed that Single's intended one-column W was not unique:
+		// removing one column from a wide ordinary tripod could drop 76% of
+		// the main body. Dual/Seam already retain P as their mandatory
+		// structural control, and their ordinary response is certified by the
+		// dynamic comparison. Keep this stronger N-1 repair scoped to Single
+		// so it does not erase the authored Tip/Seam response.
 		if (bRewriteLoad)
 		{
 			const FABTSM73DAGSelectedSupport* RewriteCandidate =
@@ -400,14 +645,37 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 				for (FABTSM73DAGSelectedSupport& Support : TrialSupports)
 				{
 					Support.RealizedColumnWidthCM = RealizedWidth;
-					if (!FABTSM73DAGSupportGeometry::MakeColumnCenters(
-						Support.FeasibleColumnRegion,
-						Settings,
-						Support.SupportPattern,
-						RealizedWidth,
-						Support.RealizedColumnCenters))
+					const bool bMadeCenters =
+						bRequireOrdinaryColumnRedundancy
+						? MakeResultantCenteredColumnCenters(
+								Support.FeasibleColumnRegion,
+								Settings,
+								Support.SupportPattern,
+								RealizedWidth,
+								Resultant,
+								Support.RealizedColumnCenters)
+						: FABTSM73DAGSupportGeometry::
+							MakeColumnCenters(
+								Support.FeasibleColumnRegion,
+								Settings,
+								Support.SupportPattern,
+								RealizedWidth,
+								Support.RealizedColumnCenters);
+					if (!bMadeCenters)
 					{
 						if (!TryResolveNarrowerPattern(Support, Settings, RealizedWidth))
+						{
+							bPassFeasible = false;
+							break;
+						}
+						if (bRequireOrdinaryColumnRedundancy
+							&& !MakeResultantCenteredColumnCenters(
+								Support.FeasibleColumnRegion,
+								Settings,
+								Support.SupportPattern,
+								RealizedWidth,
+								Resultant,
+								Support.RealizedColumnCenters))
 						{
 							bPassFeasible = false;
 							break;
@@ -432,6 +700,23 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 			const TArray<FVector2D> Hull = BuildHull(MoveTemp(ContactCorners));
 			if (!ContainsPoint(Resultant, Hull)) continue;
 			const float Margin = HullMargin(Resultant, Hull);
+			if (bRequireOrdinaryColumnRedundancy)
+			{
+				float SingleRemovalMargin = 0.0f;
+				if (!HasColumnClearanceAcrossSupports(
+					TrialSupports,
+					Settings.ColumnClearanceCM)
+					|| !ComputeMinimumSingleColumnRemovalMargin(
+					Resultant,
+					TrialSupports,
+					SingleRemovalMargin)
+					|| SingleRemovalMargin
+						+ KINDA_SMALL_NUMBER
+							< RewriteIntent->MinInitialSupportMarginCM)
+				{
+					continue;
+				}
+			}
 			if (Margin > BestMargin + KINDA_SMALL_NUMBER)
 			{
 				BestMargin = Margin;

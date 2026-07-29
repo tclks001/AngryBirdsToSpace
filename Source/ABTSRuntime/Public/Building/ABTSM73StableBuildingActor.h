@@ -18,6 +18,14 @@ class UStaticMeshComponent;
 class UTextRenderComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class UPrimitiveComponent;
+struct FABTSM73GroundContext;
+struct FABTSM73StructureData;
+struct FABTSM73DAG4RuntimeState;
+struct FABTSM73DAG4RuntimeStateDeleter
+{
+	void operator()(FABTSM73DAG4RuntimeState* State) const;
+};
 
 /** Explicit ownership state used by M6 startup warmup when waiting for M7.3. */
 enum class EABTSM73IdleValidationState : uint8
@@ -37,8 +45,10 @@ class ABTSRUNTIME_API AABTSM73StableBuildingActor : public AActor
 
 public:
 	AABTSM73StableBuildingActor();
+	virtual ~AABTSM73StableBuildingActor() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** M7.1 GameMode calls this after creating its shared M7 material system. */
@@ -65,6 +75,16 @@ public:
 		const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
 		const FABTSM73DifficultySettings& InDifficultySettings);
 
+	void ConfigureTaskGraphGeneration(
+		const FABTSM73GenerationSettings& InGenerationSettings,
+		const FABTSM73DAGGenerationSettings& InDAGGenerationSettings,
+		const FABTSM73DAGLayoutSettings& InDAGLayoutSettings,
+		const FABTSM73DAGFailureFrontierSettings& InDAGFailureFrontierSettings,
+		const FABTSM73DAGFailurePatternSettings& InDAGFailurePatternSettings,
+		const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
+		const FABTSM73DAG4ValidationSettings& InDAG4ValidationSettings,
+		const FABTSM73DifficultySettings& InDifficultySettings);
+
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
 	bool RebuildPreview();
 
@@ -81,6 +101,11 @@ public:
 		GetDAGFailurePlayabilityResultForValidation() const
 	{
 		return LastDAGFailurePlayabilityResult;
+	}
+
+	const FABTSM73DAG4ValidationResult& GetDAG4ValidationResultForValidation() const
+	{
+		return LastDAG4ValidationResult;
 	}
 
 	AABTSM7BuildingModule* FindRuntimeModuleForNodeForValidation(
@@ -126,6 +151,23 @@ private:
 	void TryFindRuntimeMaterialSystem();
 	void BeginIdleValidation(const FABTSM73GroundContext& Context);
 	void FinishIdleValidation(bool bTimedOut);
+	void PrepareDAG4RuntimeState(
+		const FABTSM73GroundContext& Context,
+		const FABTSM73StructureData& Data,
+		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles);
+	bool BeginDAG4ValidationAfterIdle();
+	void TickDAG4Validation(float DeltaSeconds);
+	bool SpawnDAG4ShadowTrial(FString& OutError);
+	void CleanupDAG4ShadowTrial();
+	void CancelDAG4Validation();
+	void CompleteAcceptedIdleValidation();
+	UFUNCTION()
+	void HandleDAG4ModuleHit(
+		UPrimitiveComponent* HitComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComponent,
+		FVector NormalImpulse,
+		const FHitResult& Hit);
 	void RejectRuntimeStructure(const FString& Reason);
 	UHierarchicalInstancedStaticMeshComponent* GetPreviewForMaterial(EABTSM7BuildingMaterial Material) const;
 
@@ -182,6 +224,9 @@ private:
 	/** DAG3-C attack/motion/material certification. Explicit opt-in only. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-3|Playability")
 	FABTSM73DAGFailurePlayabilitySettings DAGFailurePlayabilitySettings;
+	/** DAG-4 settled contact and reversible weak/ordinary Chaos comparison. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-4|Validation")
+	FABTSM73DAG4ValidationSettings DAG4ValidationSettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")
@@ -216,6 +261,7 @@ private:
 	FABTSM73GenerationSummary GenerationSummary;
 	FABTSM73DAGFailurePatternResult LastDAGFailurePatternResult;
 	FABTSM73DAGFailurePlayabilityResult LastDAGFailurePlayabilityResult;
+	FABTSM73DAG4ValidationResult LastDAG4ValidationResult;
 
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;
@@ -228,7 +274,11 @@ private:
 	float IdleStableElapsed = 0.0f;
 	bool bRuntimeSpawned = false;
 	bool bIdleValidationRunning = false;
+	bool bDAG4ValidationRunning = false;
 	EABTSM73IdleValidationState IdleValidationState = EABTSM73IdleValidationState::Pending;
 	bool bRuntimePlanar = true;
 	FVector RuntimeGravityReference = FVector::UpVector;
+	TUniquePtr<
+		FABTSM73DAG4RuntimeState,
+		FABTSM73DAG4RuntimeStateDeleter> DAG4RuntimeState;
 };

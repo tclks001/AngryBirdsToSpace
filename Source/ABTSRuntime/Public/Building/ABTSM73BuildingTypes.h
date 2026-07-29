@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Building/ABTSM73DAG4Types.h"
 #include "Building/ABTSM73DAGFailureFrontierTypes.h"
 #include "Building/ABTSM73DAGTypes.h"
 #include "Building/ABTSM7BuildingTypes.h"
@@ -399,6 +400,27 @@ struct FABTSM73GenerationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
 	float DAGFreeSlideDistanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	bool bDAG4ValidationEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	bool bDAG4SettledContactAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	bool bDAG4ChaosComparisonAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	int64 DAG4ValidationHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	float DAG4WeakResponseScore = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	float DAG4MaxOrdinaryResponseScore = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	float DAG4WeakResponseAdvantage = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;
