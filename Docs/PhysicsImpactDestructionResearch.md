@@ -8,14 +8,14 @@
 
 ## 1. 调研范围与可核查资料
 
-本稿参考了公开产品页、技术文档和开发者文章。产品宣传页用于确认游戏的核心交互承诺，技术资料用于提取可迁移的实现原则。
+本稿参考了公开产品页、技术文档和开发者文章。产品宣传页用于确认游戏的核心交互承诺，技术资料用于提取可迁移的实现原则。《Teardown》技术来源已于 2026-07-29 重新核验并替换失效链接。
 
 | 案例 | 可核查来源 | 对本项目的启示 |
 | --- | --- | --- |
 | 《Angry Birds》系列 | [Rovio Angry Birds 官网](https://www.angrybirds.com/)、[Game Developer：Rovio Angry Birds postmortem](https://www.gamedeveloper.com/design/postmortem-rovio-s-i-angry-birds-i-) | 弹道是可读的；不同鸟和材料有明确克制关系；玩家爽感来自一次命中后连续倒塌，而不是每个物体都立即碎掉。 |
 | 《Boom Blox》 | [EA 产品资料](https://www.ea.com/games/boom-blox)、[Wikipedia 条目](https://en.wikipedia.org/wiki/Boom_Blox) | 物体会被推动、倾倒和连锁触发；“没有完全破坏也能产生进展”非常重要。 |
 | 《Red Faction: Guerrilla》 | [Game Developer 技术栏目](https://www.gamedeveloper.com/programming/the-technology-of-i-red-faction-guerrilla-i-)、[GDC Vault 检索](https://www.gdcvault.com/search.php#&keyword=Red+Faction+Guerrilla) | 破坏不是单个物体的二元开关，还与承重、连接和局部损伤有关；局部断裂会诱发整体坍塌。 |
-| 《Teardown》 | [Steam 产品页](https://store.steampowered.com/app/1167630/Teardown/)、[80.lv 环境破坏拆解](https://80.lv/articles/teardown-breaking-down-the-fully-destructible-environments/)、[Game Developer 技术栏目](https://www.gamedeveloper.com/programming/how-teardown-made-a-fully-destructible-environment) | 远处物体不必全部即时碎裂；局部切除、碎片/大块转刚体和可利用的缺口共同形成反馈。 |
+| 《Teardown》 | [Steam 产品页](https://store.steampowered.com/app/1167630/Teardown/)、[Game Developer：体素与破坏技术拆解](https://www.gamedeveloper.com/design/how-beautiful-voxels-laid-the-way-for-i-teardown-s-i-heist-y-framework)、[Dennis Gustafsson：Teardown quicksave 技术博客](https://blog.voxagon.se/2020/11/18/teardown-quicksave.html)、[Game Developer：完全可破坏世界的玩法设计访谈](https://www.gamedeveloper.com/design/combining-bombastic-heists-with-a-fully-destructible-voxel-world-in-i-teardown-i-) | 世界由大量可独立变化的小型体素 Volume 构成，CPU 负责体素碰撞并维护动态物理状态；破坏被用于制造缺口和规划捷径，而不是只作为爆炸特效。 |
 | 《Besiege》 | [Steam 产品页](https://store.steampowered.com/app/346010/Besiege/)、[Besiege 官网](https://besiege.en.softonic.com/) | 连接件、机械部件和整体姿态共同决定破坏；先断连接再让结构失稳，比所有部件同时消失更有过程感。 |
 | UE Chaos Destruction | [Chaos Destruction](https://dev.epicgames.com/documentation/en-us/unreal-engine/chaos-destruction)、[Fields Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/fields-overview) | Chaos 适合做刚体、Geometry Collection、Field 和应力/损伤传播，但必须由 gameplay 层控制何时激活和何时破坏。 |
 | UE 官方物理 | [Physics-Based Character Movement](https://dev.epicgames.com/documentation/en-us/unreal-engine/physics-based-character-movement)、[Physics Materials](https://dev.epicgames.com/documentation/en-us/unreal-engine/physical-materials-reference) | 碰撞响应、摩擦、恢复系数和冲量应分开调；不能用一个 Break 阈值同时承担所有手感。 |
