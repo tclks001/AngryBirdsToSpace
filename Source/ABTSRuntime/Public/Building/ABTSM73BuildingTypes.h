@@ -162,6 +162,17 @@ struct FABTSM73GenerationSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.01", ClampMax = "1.0"))
 	float MinContactAreaRatio = 0.12f;
 
+	/**
+	 * Per-body Chaos contact iterations for generated-building stacks.
+	 * The project defaults (8/2) are not sufficient for tall DAG2.3 arches at
+	 * a 30 Hz physics step; this remains local to M7.3 runtime modules.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "1", ClampMax = "255", UIMax = "64"))
+	int32 ChaosPositionSolverIterationCount = 32;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "1", ClampMax = "255", UIMax = "64"))
+	int32 ChaosVelocitySolverIterationCount = 8;
+
 	/** Minimum hidden Chaos observation before a quiet window may complete. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.1", UIMax = "5.0"))
 	float IdleValidationSeconds = 1.25f;

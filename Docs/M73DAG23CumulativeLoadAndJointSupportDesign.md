@@ -1,6 +1,6 @@
 # M7.3-DAG2.3：累计荷载与联合支撑求解
 
-> 状态：DAG2.3 已成为球面 TaskGraph 普通建筑的生产求解器；Editor 编译、DAG/M7 自动化、固定世界基线及最终二进制三次 fresh D3D12 实时 60 FPS 通过。Legacy 仅保留历史代码/序列化诊断，不参与生产回退或阻断性验收。
+> 状态：DAG2.3 已成为球面 TaskGraph 普通建筑的生产求解器；Editor 编译、DAG/M7 自动化、固定世界基线，以及普通 Arch 压力配置的 fresh NullRHI/D3D12 实时 30/60/120 FPS 门禁均已通过。Legacy 仅保留历史代码/序列化诊断，不参与生产回退或阻断性验收。
 >
 > 父级：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md)。生产集成：[M7 TaskGraph 球面建筑](M7TaskGraphSphericalBuildingIntegrationDesign.md)。平面验证：[M7.1 测试台](M71PlanarPhysicsTestStageDesign.md)。前置：[M7.3-DAG2.2 自适应楼板与支撑几何](M73DAG22AdaptiveGeometryDesign.md)。直接下游：[DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。后续研究：[建筑语义 WFC 与 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 
@@ -73,6 +73,34 @@ Furnace 生产 Profile 另有 `MinSupportContactAreaRatio=0.06` 的安全底线�
 
 当前 First Moment 传播仍是中心载荷的等权近似。将来若引入偏心质量、爆炸冲量或装置力，必须改为满足 `Σw=1` 且 `Σ(w×Contact)=ResultantXY` 的非负重心权重；不得再次假设任意三点都能等权承载偏心合力。
 
+## 普通 Arch 的 Chaos 动态稳定质量
+
+普通 `Arch + Seed 7301 + ExpansionStepBudget 6 + MaxExpansionDepth 3` 是独立于 TaskGraph 三套 Budget=0 生产 Profile 的 DAG2.3 压力配置：它生成 9 个 Macro、8 组稀疏支撑、33 个刚体模块和 48 条物理支撑边。该配置的静态接触、穿透和凸包审计均通过，但在 Chaos 项目默认每刚体 `Position=8 / Velocity=2` 求解迭代下存在明显的固定步长敏感性：
+
+- 不限帧时整体漂移小于 1 cm；
+- 60 FPS 时整栋近似刚体平移约 4.2 cm；
+- 30 FPS 时平移约 36–38 cm，并伴随持续接触速度；
+- 位移主要是所有楼层一致侧滑，并非某一层失去支撑或建筑倾覆。
+
+全局诊断将 Chaos 迭代提高到 16/4 后，30 FPS 漂移降至约 6–7 cm；提高到 32/8 后三栋均在原有 4 cm 位移、2° 转角门槛内通过。这证明缺口来自多层同时接触在低频步长下的求解精度，而不是 DAG 几何应被静态验证接受却真实不稳定。
+
+正式修补采用建筑局部的 per-body 覆盖：
+
+```text
+FABTSM73GenerationSettings
+  ChaosPositionSolverIterationCount = 32
+  ChaosVelocitySolverIterationCount = 8
+
+AABTSM73StableBuildingActor
+  -> SpawnBrickModule
+  -> ConfigureChaosSolverIterations
+  -> SetOverrideIterationCounts(true)
+```
+
+该配置只应用于 M7.3 生成建筑模块，不修改全局 Chaos CVar，也不改变绳索、机关或普通提升砖块；建筑通过 Idle 后会 Freeze，因此静态阶段不持续支付迭代成本，受击重新激活时仍保持同一求解质量。DAG 几何、拓扑 Hash、穿透审计，以及 `IdleValidation` 的速度、位移、沉降、转角和超时阈值全部保持不变。
+
+正式回归 `ABTS.M73DAG.Chaos.Arch7301PlanarIdle` 必须创建显式 `CreatePhysicsScene=true / ShouldSimulatePhysics=true` 的临时 Game World。测试先让自由落体 Cube 在八个 30 Hz 步长内下降超过 10 cm 且保持向下速度，以排除“测试 World 未推进物理、静止建筑假通过”；之后同时生成三栋上述 Arch，核对 99 个模块的 32/8 BodyInstance 覆盖、固定拓扑签名，并要求最多 210 帧内 3/3 `Accepted`、0 `Rejected`、99 个模块仍存在。
+
 ## 跨层联合支撑脊柱
 
 递归 Parallel 后，左右可行接口可能处于不同的预估 DAG 层级。若联合组合是覆盖合力点的唯一方案，DAG2.3 允许保留两侧接口；最终 Z 层级由选中的物理 Support DAG 重新求解。
@@ -126,6 +154,7 @@ M3 BuildingSpawnSite / Pad
 - 最终二进制三次不带 `-benchmark` 的 fresh D3D12 实时 60 FPS 均为三栋 `TimedOut=0 Accepted=1`；Furnace 旋转 `0.08°/0.09°/0.08°`、`DAGMinContact=0.060`，门禁 `3/0/3/3`，且 `WorldReady=1`、无 ABTS Error/Blocked。
 - DAG3-A 的 2026-07-29 只读回归保持 13/17/13 模块与三套原 `DAGTopologyHash`；`ABTS.M73DAG3.` 6/6、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2 以及当前 `ABTS.M7` 前缀快照 20/20 在 fresh NullRHI 中通过。另一次限帧 60 的 fresh NullRHI game smoke 中三栋 Idle 全部接受并最终 `WorldReady=1`；该证据仍不替代后续弱点击毁 PIE。
 - DAG3-B 的 2026-07-29 最终证据为：加入 `Auto` 成功路径断言后的 `-ForceUnity -DisableAdaptiveUnity` 复编 14.72 秒成功；fresh NullRHI `ABTS.M73DAG3.` 11/11、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2、M73B2 2/2 Success；M10 45 秒 NullRHI 60 FPS smoke 中三栋保持 13/17/13 与原 Hash、DAG3-A/B 全关、零穿透、Idle 3/3 Accepted、最终门禁 3/0/3/3，且无 Error/Blocked 或 DAG3-B Pattern/Reject。该证据完成代码与兼容回归，但仍不替代可见几何/PIE。
+- 普通 Arch 动态稳定修补的 2026-07-29 最终证据为：`-ForceUnity -DisableAdaptiveUnity` 编译成功；fresh NullRHI `ABTS.M7` 26/26 Success，其中物理回归的三栋固定 30 FPS Arch 为 `Accepted=3 Rejected=0 Modules=99`、重力探针下降 `39.16 cm`；真实 `PlanarPhysicsTestMap` 在 NullRHI 和 D3D12 两套 fresh-process 30/60/120 FPS 中均为 Idle 3/3 Accepted、0 Rejected、最终 `WorldReady=1`。最苛刻 30 FPS 的最大平面漂移为 `2.59 cm`、最大转角 `0.65°`，且三栋仍保持 `Bricks=33 Supports=48 Ground=3 DAGMacro=9 DAGSparse=8 DAGHash=2113728967`。
 
 仍需可见 PIE：
 

@@ -496,6 +496,9 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		const FTransform WorldTransform(Context.AnchorTransform.GetRotation(), Context.AnchorTransform.TransformPositionNoScale(LocalCenter));
 		if (AABTSM7BuildingModule* Module = MaterialSystem->SpawnBrickModule(Spec, WorldTransform))
 		{
+			Module->ConfigureChaosSolverIterations(
+				GenerationSettings.ChaosPositionSolverIterationCount,
+				GenerationSettings.ChaosVelocitySolverIterationCount);
 			RuntimeModules.Add(Module);
 			RuntimeModulesByNodeId.Add(Node.NodeId, Module);
 		}
