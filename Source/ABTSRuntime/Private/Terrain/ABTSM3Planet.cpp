@@ -163,7 +163,7 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		BuildingPadSettings.EdgeBlendWidthCM;
 	GeometryContext.TrailHalfWidthCM = TrailVisualHalfWidthCM;
 	GeometryContext.MainRoadHalfWidthCM = MainRoadVisualHalfWidthCM;
-	return Generator.Generate(
+	const bool bGenerated = Generator.Generate(
 		WorldSeed,
 		PCGConfig,
 		LogicalCells,
@@ -173,6 +173,40 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		GeneratedEdgeStates,
 		PCGSummary,
 		GeometryContext);
+	if (!bGenerated)
+	{
+		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
+#if WITH_EDITORONLY_DATA
+		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
+#endif
+		return false;
+	}
+
+	FString SchemaFailure;
+	if (!FABTSM3MonthlySchemaBuilder::Build(
+			WorldSeed,
+			MonthlySchemaConfig,
+			GeneratedTasks,
+			GeneratedTaskLinks,
+			GeneratedCellStates,
+			PCGSummary,
+			MonthlyWorldSchema,
+			SchemaFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R1][Schema] Build failed. Seed=%d Mode=%s Failure=%s"),
+			WorldSeed,
+			FABTSM3MonthlySchemaBuilder::GetGenerationModeName(
+				MonthlySchemaConfig.Mode),
+			*SchemaFailure);
+		return false;
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlySchemaBuilder::BuildDebugData(
+		MonthlyWorldSchema,
+		MonthlySchemaDebugData);
+#endif
+	return true;
 }
 
 float AABTSM3Planet::GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const

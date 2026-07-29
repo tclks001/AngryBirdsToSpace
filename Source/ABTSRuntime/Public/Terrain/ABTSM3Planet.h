@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PCG/ABTSM3MonthlySchema.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
@@ -73,6 +74,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellEdgeState>& GetGeneratedEdgeStates() const { return GeneratedEdgeStates; }
 
+	/** Internal read-only R-1 observation; it is never exported through the v1 M7/M11 contracts. */
+	const FABTSM3MonthlyWorldSchema& GetMonthlyWorldSchema() const
+	{
+		return MonthlyWorldSchema;
+	}
+
 	/** True only when the complete M3 logical, terrain and material presentation rebuild succeeded. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	bool IsM3PresentationReady() const { return bM3PresentationReady; }
@@ -120,6 +127,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	FABTSM3PCGConfig PCGConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Schema")
+	FABTSM3MonthlySchemaConfig MonthlySchemaConfig;
 
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
@@ -239,6 +249,16 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	FABTSM3PCGSummary PCGSummary;
+
+	/** R-1 observation only. Compatibility TaskGraph identity remains in PCGSummary. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Schema")
+	FABTSM3MonthlyWorldSchema MonthlyWorldSchema;
+
+#if WITH_EDITORONLY_DATA
+	/** Index-only debug snapshot. R-1 does not draw or alter the production map. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Schema|Debug")
+	FABTSM3MonthlySchemaDebugData MonthlySchemaDebugData;
+#endif
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
 	TArray<FABTSM3BuildingSpawnSite> BuildingSpawnSites;

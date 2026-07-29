@@ -1,6 +1,6 @@
 # M3：TaskGraph 地形表现与 HISM 摆放设计
 
-> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
+> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果和 M3R-1 只读月度 Schema 观测层。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
 >
 > 逻辑 PCG 上游：[`ABTSTaskGraphPCGDesign.md`](ABTSTaskGraphPCGDesign.md)。本文不定义玩法锁、可达性、河流最低点、道路寻路或桥梁状态；它们只由 TaskGraph/CellTopo 生成并通过接口提供给表现层。
 >
@@ -51,7 +51,11 @@ M3 只读取以下逻辑结果：
 
 M3 不需要也不会读取“最低连续顶点”“材质水色”“HISM 命中”来决定水体或道路。
 
-### 2.2 `QuerySurface` 接口
+### 2.2 M3R-1 Schema 观测层
+
+`AABTSM3Planet` 在接受旧 Gen3/Policy1 结果后，额外暴露只读 `MonthlyWorldSchema` 和 Editor-only `MonthlySchemaDebugData`，供检查 Route/Encounter/Biome/Quality 的身份、引用和覆盖统计。R-1 表现层不消费这些数据来生成或修改 PMC、SDF、HISM、道路、河流或 `BuildingSpawnSites`；关闭 `bBuildObservation` 只会得到空观测 Schema，不会改变旧 TaskGraph 和共享导出。实现边界、版本身份及验收见 [M3R-1 月度 Schema 与观测面](M3PCGMapImprovementPlan.md#144-m3r-1建立月度-schema版本身份与观测面)。
+
+### 2.3 `QuerySurface` 接口
 
 `AABTSM3Planet::QuerySurface(UnitDirection)` 输出世界位置、高度感知法线、表面半径及最近 `CellId`。M2.5 径向移动已改为通过 `GetSurfaceRadiusAtDirection` 接地，因此角色仍沿球心径向保持重力方向，同时脚底遵循 M3 低频表面。
 

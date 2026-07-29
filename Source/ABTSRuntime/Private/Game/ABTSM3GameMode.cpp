@@ -14,6 +14,7 @@
 #include "Player/ABTSM1PlayerController.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "PCG/ABTSM3R0AcceptanceManifest.h"
+#include "PCG/ABTSM3R1AcceptanceManifest.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UI/ABTSM1HUD.h"
@@ -56,6 +57,38 @@ void AABTSM3GameMode::BeginPlay()
 			static_cast<unsigned long long>(
 				FABTSM3R0AcceptanceManifest::ComputeM110SeedManifestHash()));
 	}
+	ManifestFailure.Reset();
+	if (FABTSM3R1AcceptanceManifest::Validate(ManifestFailure))
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3R1][AcceptanceManifest] SelfValid=1 Schema=%d CompatibilityOracle=Gen3/Policy1 MonthlyPolicy=%d ManifestHash=%016llX SeedManifestHash=%016llX OracleHash=%016llX Entries=%d ExpectedSchemaCases=8 ExpectedWeekOneCases=2 ExpectedContractCases=2 ExpectedM110Cases=1 ExpectedRuntimeCases=1 DisplaySeed=%d"),
+			FABTSM3R1AcceptanceManifest::MonthlySchemaVersion,
+			FABTSM3R1AcceptanceManifest::MonthlyLayoutPolicyVersion,
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::ComputeManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::
+					ComputeCompatibilitySeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::
+					ComputeCompatibilityOracleHash()),
+			FABTSM3R1AcceptanceManifest::GetEntries().Num(),
+			FABTSM3R1AcceptanceManifest::DisplaySeed);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R1][AcceptanceManifest] SelfValid=0 Failure=%s ComputedManifestHash=%016llX ComputedSeedManifestHash=%016llX ComputedOracleHash=%016llX"),
+			*ManifestFailure,
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::ComputeManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::
+					ComputeCompatibilitySeedManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::
+					ComputeCompatibilityOracleHash()));
+	}
 	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM3R0Smoke")))
 	{
 		M3R0SmokeStartSeconds = FPlatformTime::Seconds();
@@ -63,6 +96,17 @@ void AABTSM3GameMode::BeginPlay()
 			M3R0SmokeTimer,
 			this,
 			&AABTSM3GameMode::TryCompleteM3R0Smoke,
+			0.25f,
+			true,
+			0.25f);
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM3R1Smoke")))
+	{
+		M3R1SmokeStartSeconds = FPlatformTime::Seconds();
+		GetWorldTimerManager().SetTimer(
+			M3R1SmokeTimer,
+			this,
+			&AABTSM3GameMode::TryCompleteM3R1Smoke,
 			0.25f,
 			true,
 			0.25f);
@@ -271,6 +315,184 @@ void AABTSM3GameMode::FinishM3R0Smoke(
 		false,
 		bPassed ? 0 : 1,
 		TEXT("AABTSM3GameMode::FinishM3R0Smoke"));
+}
+
+void AABTSM3GameMode::TryCompleteM3R1Smoke()
+{
+	constexpr double MaxWaitSeconds = 20.0;
+	const double ElapsedSeconds =
+		FPlatformTime::Seconds() - M3R1SmokeStartSeconds;
+
+	AABTSM3Planet* Planet = nullptr;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		if (It->IsM3PresentationReady())
+		{
+			Planet = *It;
+			break;
+		}
+	}
+	if (ElapsedSeconds > MaxWaitSeconds)
+	{
+		FinishM3R1Smoke(false, TEXT("CertificationExceeded20Seconds"));
+		return;
+	}
+	if ((Planet == nullptr || !bInitialPlayerPlaced)
+		&& ElapsedSeconds < MaxWaitSeconds)
+	{
+		return;
+	}
+	if (Planet == nullptr)
+	{
+		FinishM3R1Smoke(false, TEXT("PlanetNotReadyWithin20Seconds"));
+		return;
+	}
+	if (!bInitialPlayerPlaced)
+	{
+		FinishM3R1Smoke(
+			false,
+			TEXT("InitialPlayerNotPlacedWithin20Seconds"));
+		return;
+	}
+
+	FString ManifestFailure;
+	if (!FABTSM3R1AcceptanceManifest::Validate(ManifestFailure))
+	{
+		FinishM3R1Smoke(
+			false,
+			FString::Printf(TEXT("Manifest:%s"), *ManifestFailure));
+		return;
+	}
+
+	const FABTSM3PCGSummary& Summary = Planet->PCGSummary;
+	const TConstArrayView<FABTSM3R1CompatibilityOracle> Oracles =
+		FABTSM3R1AcceptanceManifest::GetCompatibilityOracles();
+	const FABTSM3R1CompatibilityOracle& DisplayOracle = Oracles[0];
+	if (Planet->WorldSeed != DisplayOracle.Seed
+		|| !Summary.bAccepted
+		|| Summary.GeneratorVersion
+			!= FABTSM3R1AcceptanceManifest::GeneratorVersion
+		|| Summary.LayoutPolicyVersion
+			!= FABTSM3R1AcceptanceManifest::
+				CompatibilityLayoutPolicyVersion
+		|| Summary.ConfigHash != DisplayOracle.ConfigHash
+		|| Summary.LayoutHash != DisplayOracle.LayoutHash
+		|| Summary.AttemptIndex != DisplayOracle.AttemptIndex)
+	{
+		FinishM3R1Smoke(
+			false,
+			TEXT("CompatibilityOracleIdentityMismatch"));
+		return;
+	}
+
+	const FABTSM3MonthlyWorldSchema& Schema =
+		Planet->GetMonthlyWorldSchema();
+	EABTSM3SchemaRejectReason ValidationReason =
+		EABTSM3SchemaRejectReason::None;
+	FString SchemaFailure;
+	if (!FABTSM3MonthlySchemaBuilder::Validate(
+			Schema,
+			ValidationReason,
+			SchemaFailure))
+	{
+		FinishM3R1Smoke(
+			false,
+			FString::Printf(
+				TEXT("Schema:%s:%s"),
+				FABTSM3MonthlySchemaBuilder::GetRejectReasonName(
+					ValidationReason),
+				*SchemaFailure));
+		return;
+	}
+	if (Schema.Identity.Mode
+			!= EABTSM3GenerationMode::CompatibilityOracle
+		|| Schema.Identity.LayoutPolicyVersion
+			!= FABTSM3R1AcceptanceManifest::
+				CompatibilityLayoutPolicyVersion
+		|| static_cast<uint64>(Schema.Identity.SchemaConfigHash)
+			!= FABTSM3R1AcceptanceManifest::
+				FrozenDisplaySchemaConfigHash
+		|| static_cast<uint64>(Schema.Identity.SchemaLayoutHash)
+			!= FABTSM3R1AcceptanceManifest::
+				FrozenDisplaySchemaLayoutHash
+		|| !Schema.Quality.bSchemaValid
+		|| Schema.Quality.bMonthlyWorldAccepted
+		|| Schema.Quality.RejectReason
+			!= EABTSM3SchemaRejectReason::NotEvaluated)
+	{
+		FinishM3R1Smoke(false, TEXT("SchemaIdentityMismatch"));
+		return;
+	}
+	if (Schema.RouteBeats.Num()
+			!= FABTSM3R1AcceptanceManifest::DisplayRouteBeatCount
+		|| Schema.Encounters.Num()
+			!= FABTSM3R1AcceptanceManifest::DisplayEncounterCount
+		|| Schema.Pockets.Num()
+			!= FABTSM3R1AcceptanceManifest::DisplayPocketCount
+		|| Schema.BiomeDistricts.Num()
+			!= FABTSM3R1AcceptanceManifest::DisplayBiomeDistrictCount
+		|| Schema.PlayableEnvelopes.Num()
+			!= FABTSM3R1AcceptanceManifest::
+				DisplayPlayableEnvelopeCount)
+	{
+		FinishM3R1Smoke(false, TEXT("SchemaLayerCountMismatch"));
+		return;
+	}
+
+	const TArray<FABTSM3BuildingSpawnSite>& Sites =
+		Planet->GetBuildingSpawnSites();
+	const TConstArrayView<FABTSM3R0ExpectedBuildingSite> ExpectedSites =
+		FABTSM3R0AcceptanceManifest::GetDisplayBuildingSites();
+	if (Sites.Num() != ExpectedSites.Num())
+	{
+		FinishM3R1Smoke(false, TEXT("BuildingSiteCountMismatch"));
+		return;
+	}
+	for (int32 SiteIndex = 0; SiteIndex < ExpectedSites.Num(); ++SiteIndex)
+	{
+		if (Sites[SiteIndex].TaskId != ExpectedSites[SiteIndex].TaskId
+			|| Sites[SiteIndex].CellId != ExpectedSites[SiteIndex].CellId)
+		{
+			FinishM3R1Smoke(
+				false,
+				FString::Printf(
+					TEXT("BuildingSiteMismatch:%d"),
+					SiteIndex));
+			return;
+		}
+	}
+	FinishM3R1Smoke(true, FString());
+}
+
+void AABTSM3GameMode::FinishM3R1Smoke(
+	const bool bPassed,
+	const FString& Failure)
+{
+	GetWorldTimerManager().ClearTimer(M3R1SmokeTimer);
+	const double ElapsedSeconds = FMath::Max(
+		0.0,
+		FPlatformTime::Seconds() - M3R1SmokeStartSeconds);
+	if (bPassed)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3R1][RuntimeCertification] ManifestHash=%016llX Terminal=1 Passed=1 Failed=0 ElapsedSeconds=%.3f"),
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::ComputeManifestHash()),
+			ElapsedSeconds);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R1][RuntimeCertification] ManifestHash=%016llX Terminal=1 Passed=0 Failed=1 Failure=%s ElapsedSeconds=%.3f"),
+			static_cast<unsigned long long>(
+				FABTSM3R1AcceptanceManifest::ComputeManifestHash()),
+			*Failure,
+			ElapsedSeconds);
+	}
+	FPlatformMisc::RequestExitWithStatus(
+		false,
+		bPassed ? 0 : 1,
+		TEXT("AABTSM3GameMode::FinishM3R1Smoke"));
 }
 
 void AABTSM3GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, const int32 SpawnCellId)
