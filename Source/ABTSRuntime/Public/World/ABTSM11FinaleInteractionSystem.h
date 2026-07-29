@@ -12,6 +12,7 @@ class AABTSBirdParty;
 class AABTSM11FinaleSystem;
 class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
+class AABTSM6SlingshotCamera;
 class APlayerController;
 class USceneCaptureComponent2D;
 class USceneComponent;
@@ -42,10 +43,9 @@ public:
 	bool TryEnterFinale(
 		AABTSM51SlingshotCord& Cord,
 		APlayerController& Controller);
-	void ApplyAimAxis(
-		double YawAxisDelta,
-		double PitchAxisDelta,
-		double PowerAxisDelta);
+	bool BeginAimFromCursor(APlayerController& Controller);
+	bool UpdateAimFromCursor(APlayerController& Controller);
+	void AdjustAimPower(double WheelSteps);
 	void RequestRelease();
 	void CancelStabilizerOrResetAttempt();
 	void ExitFinale();
@@ -96,6 +96,34 @@ public:
 	{
 		return FailureTimeline.GetBlackoutAlpha();
 	}
+	AABTSM6SlingshotCamera* GetAimCamera() const
+	{
+		return AimCamera;
+	}
+	const AABTSM11FinaleSystem* GetFinaleSystem() const
+	{
+		return FinaleSystem;
+	}
+	double GetLastPreviewLatencyMilliseconds() const
+	{
+		return LastPreviewLatencyMilliseconds;
+	}
+	double GetLastPreviewSolveMilliseconds() const
+	{
+		return LastPreviewSolveMilliseconds;
+	}
+	uint64 GetDiscardedPreviewSolveCount() const
+	{
+		return DiscardedPreviewSolveCount;
+	}
+	bool IsPreviewSolveInFlight() const
+	{
+		return bPreviewSolveInFlight;
+	}
+	bool IsPreviewDirty() const
+	{
+		return bPreviewDirty;
+	}
 
 	static bool ValidateInteractionContract(
 		const AABTSM11FinaleSystem& InFinaleSystem,
@@ -115,6 +143,11 @@ private:
 	void UpdatePlayback(float DeltaSeconds);
 	void UpdateFailurePresentation(float DeltaSeconds);
 	void UpdatePouchPresentation();
+	bool EnsureAimCamera();
+	bool BuildAimFrame(
+		const AABTSM51SlingshotCord& Cord,
+		const AABTSM25BirdCharacter& Bird);
+	bool ApplyAbsoluteCursorAim(APlayerController& Controller);
 	void MarkTargetCaptureDirty();
 	void FlushTargetCapture();
 	void RestoreAttemptToWorld(bool bKeepFinaleMode);
@@ -145,17 +178,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM51SlingshotCord> ActiveCord;
 
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
-		meta = (ClampMin = "0.001", ClampMax = "2.0"))
-	double YawDegreesPerAxisUnit = 0.18;
-
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
-		meta = (ClampMin = "0.001", ClampMax = "2.0"))
-	double PitchDegreesPerAxisUnit = 0.18;
-
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
-		meta = (ClampMin = "0.001", ClampMax = "0.2"))
-	double PowerPerWheelUnit = 0.0125;
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM6SlingshotCamera> AimCamera;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
 		meta = (ClampMin = "0.0", ClampMax = "60.0"))
@@ -164,22 +188,6 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	double InitialPower = 0.90;
-
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
-		meta = (ClampMin = "0.0", ClampMax = "500.0", Units = "cm"))
-	double MinimumVisualPullDistanceCM = 60.0;
-
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
-		meta = (ClampMin = "0.0", ClampMax = "500.0", Units = "cm"))
-	double MaximumVisualPullDistanceCM = 180.0;
-
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Input",
-		meta = (ClampMin = "0.0", ClampMax = "200.0", Units = "cm"))
-	double MaximumVisualPitchDropCM = 70.0;
-
-	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Prediction",
-		meta = (ClampMin = "0.02", ClampMax = "1.0", Units = "s"))
-	double PreviewSubmitIntervalSeconds = 0.08;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Playback",
 		meta = (ClampMin = "0.1", ClampMax = "100.0"))
@@ -227,12 +235,21 @@ private:
 	FABTSM11PlaybackPlan PreviewPlaybackPlan;
 	FABTSM11PlaybackPlan ReleasedPlaybackPlan;
 	FABTSM11OrbitalDiagramSnapshot DiagramSnapshot;
+	FABTSM11FinaleLaunchInput InitialAimInput;
 	FABTSM11FinaleLaunchInput LatestSolvedInput;
 	FABTSM11FinaleLaunchInput FrozenReleaseInput;
 	FTransform AttemptBirdOriginalTransform = FTransform::Identity;
-	double PreviewSubmitAccumulatorSeconds = 0.0;
+	FVector AimSlingCenter = FVector::ZeroVector;
+	FVector AimSlingForward = FVector::ForwardVector;
+	FVector AimSlingRight = FVector::RightVector;
+	FVector AimSlingUp = FVector::UpVector;
+	FVector AimRestPouchLocation = FVector::ZeroVector;
+	FVector AimPouchLocation = FVector::ZeroVector;
+	double LastPreviewLatencyMilliseconds = 0.0;
+	double LastPreviewSolveMilliseconds = 0.0;
 	double PlaybackElapsedSeconds = 0.0;
 	double PlaybackPresentationEndTimeSeconds = 0.0;
+	uint64 DiscardedPreviewSolveCount = 0;
 	int64 AimRevision = 0;
 	int64 LatestSolvedRevision = INDEX_NONE;
 	TFuture<TSharedPtr<FABTSM11PreviewSolvePayload>> PreviewSolveFuture;
@@ -244,4 +261,5 @@ private:
 	bool bLatestPhysicalResultAvailable = false;
 	bool bAttemptBirdInPouch = false;
 	bool bTargetCaptureDirty = false;
+	bool bAimFrameValid = false;
 };

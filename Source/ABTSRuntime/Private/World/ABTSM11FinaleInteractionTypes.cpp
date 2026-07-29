@@ -113,10 +113,80 @@ namespace
 	}
 }
 
+bool ABTSM11IsResettableFinaleState(
+	const EABTSM11FinaleInteractionState State)
+{
+	switch (State)
+	{
+	case EABTSM11FinaleInteractionState::Aiming:
+	case EABTSM11FinaleInteractionState::ReleasePending:
+	case EABTSM11FinaleInteractionState::Launched:
+	case EABTSM11FinaleInteractionState::TargetHit:
+	case EABTSM11FinaleInteractionState::Failed:
+	case EABTSM11FinaleInteractionState::Recovering:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool ABTSM11MapLocalLaunchDirectionToInput(
+	const FABTSM11FinaleLaunchModel& LaunchModel,
+	const FVector3d& LocalLaunchDirection,
+	const double Power,
+	FABTSM11FinaleLaunchInput& OutInput)
+{
+	if (!LaunchModel.IsValid()
+		|| !FMath::IsFinite(LocalLaunchDirection.X)
+		|| !FMath::IsFinite(LocalLaunchDirection.Y)
+		|| !FMath::IsFinite(LocalLaunchDirection.Z)
+		|| !FMath::IsFinite(Power))
+	{
+		return false;
+	}
+	const FVector3d Direction = LocalLaunchDirection.GetSafeNormal();
+	if (Direction.IsNearlyZero())
+	{
+		return false;
+	}
+	OutInput.YawDegrees = FMath::Clamp(
+		FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X)),
+		LaunchModel.MinimumYawDegrees,
+		LaunchModel.MaximumYawDegrees);
+	OutInput.PitchDegrees = FMath::Clamp(
+		FMath::RadiansToDegrees(FMath::Atan2(
+			Direction.Z,
+			FMath::Sqrt(
+				FMath::Square(Direction.X)
+					+ FMath::Square(Direction.Y)))),
+		LaunchModel.MinimumPitchDegrees,
+		LaunchModel.MaximumPitchDegrees);
+	OutInput.Power = FMath::Clamp(
+		Power,
+		LaunchModel.MinimumPower,
+		LaunchModel.MaximumPower);
+	return LaunchModel.Contains(OutInput);
+}
+
+bool ABTSM11CanStartLatestOnlyPreview(
+	const bool bDirty,
+	const bool bSolveInFlight)
+{
+	return bDirty && !bSolveInFlight;
+}
+
+bool ABTSM11CanPublishLatestOnlyPreview(
+	const int64 SubmittedRevision,
+	const int64 CurrentRevision,
+	const bool bInputMatches)
+{
+	return SubmittedRevision == CurrentRevision && bInputMatches;
+}
+
 void FABTSM11PrimaryReleaseGate::Enter(const bool bEntryButtonDown)
 {
-	bWaitingForEntryRelease = bEntryButtonDown;
-	bLaunchArmed = false;
+	bWaitingForEntryRelease = false;
+	bLaunchArmed = bEntryButtonDown;
 }
 
 void FABTSM11PrimaryReleaseGate::Reset()
@@ -191,6 +261,7 @@ void FABTSM11PrefixStabilizer::Reset(
 	DesiredInput = Input;
 	ClampToLaunchDomain(DesiredInput);
 	ControlledInput = DesiredInput;
+	LastAbsoluteDirectionInput = DesiredInput;
 	StablePrefixLevel = 0;
 	NearPrefixLevel = 0;
 	CaptureSeconds = 0.0;
@@ -221,6 +292,44 @@ void FABTSM11PrefixStabilizer::ApplyInputDelta(
 	DesiredInput.PitchDegrees += PitchDeltaDegrees * Scale;
 	DesiredInput.Power += PowerDelta * Scale;
 	ClampToLaunchDomain(DesiredInput);
+	RefreshControlledInput();
+}
+
+void FABTSM11PrefixStabilizer::SetAbsoluteDirectionInput(
+	const FABTSM11FinaleLaunchInput& Input)
+{
+	if (!bInitialized)
+	{
+		return;
+	}
+	FABTSM11FinaleLaunchInput AbsoluteInput = Input;
+	ClampToLaunchDomain(AbsoluteInput);
+	const double Scale = GetSensitivityScale();
+	DesiredInput.YawDegrees +=
+		(AbsoluteInput.YawDegrees
+			- LastAbsoluteDirectionInput.YawDegrees) * Scale;
+	DesiredInput.PitchDegrees +=
+		(AbsoluteInput.PitchDegrees
+			- LastAbsoluteDirectionInput.PitchDegrees) * Scale;
+	LastAbsoluteDirectionInput.YawDegrees =
+		AbsoluteInput.YawDegrees;
+	LastAbsoluteDirectionInput.PitchDegrees =
+		AbsoluteInput.PitchDegrees;
+	ClampToLaunchDomain(DesiredInput);
+	RefreshControlledInput();
+}
+
+void FABTSM11PrefixStabilizer::SetDesiredPower(
+	const double Power)
+{
+	if (!bInitialized || !FMath::IsFinite(Power))
+	{
+		return;
+	}
+	DesiredInput.Power = Power;
+	LastAbsoluteDirectionInput.Power = Power;
+	ClampToLaunchDomain(DesiredInput);
+	ClampToLaunchDomain(LastAbsoluteDirectionInput);
 	RefreshControlledInput();
 }
 

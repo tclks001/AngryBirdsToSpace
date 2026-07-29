@@ -40,6 +40,10 @@ namespace
 			Hash,
 			&Plan.TransferContractVersion,
 			sizeof(Plan.TransferContractVersion));
+		HashBytes(
+			Hash,
+			&Plan.bCandidateQualifiedIntercept,
+			sizeof(Plan.bCandidateQualifiedIntercept));
 		for (const FABTSM11PlaybackPoint& Point : Plan.Points)
 		{
 			HashDouble(Hash, Point.TimeSeconds);
@@ -407,6 +411,7 @@ void FABTSM11PlaybackPlan::Reset()
 	TransferStartTimeSeconds = -1.0;
 	TransferEndTimeSeconds = -1.0;
 	bQualifiedF4 = false;
+	bCandidateQualifiedIntercept = false;
 	bPhysicalTargetHit = false;
 	bUsesVisibleTerminalTransfer = false;
 	Failure.Reset();
@@ -520,6 +525,38 @@ bool FABTSM11PlaybackPlan::Build(
 	TransferContractVersion = TransferContract.ContractVersion;
 	bPhysicalTargetHit = true;
 	bUsesVisibleTerminalTransfer = true;
+	DurationSeconds = Points.Last().TimeSeconds;
+	PlanHash = ComputePlanHash(*this);
+	return true;
+}
+
+bool FABTSM11PlaybackPlan::BuildCandidateQualified(
+	const FABTSM11FinaleLayoutPreset& Preset,
+	const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
+	const FABTSM11PrefixClassification& Classification)
+{
+	Reset();
+	const auto Reject = [this](FString Reason)
+	{
+		Failure = MoveTemp(Reason);
+		Points.Reset();
+		return false;
+	};
+	if (!Preset.IsValid()
+		|| ReleasedQualifiedResult.Points.Num() < 2
+		|| ReleasedQualifiedResult.ValidationHash == 0)
+	{
+		return Reject(TEXT("InvalidCandidateTrajectory"));
+	}
+
+	ReleasedTrajectoryHash = ReleasedQualifiedResult.ValidationHash;
+	bQualifiedF4 = Classification.IsF(4);
+	bCandidateQualifiedIntercept =
+		bQualifiedF4 && ReleasedQualifiedResult.DidHitTarget();
+	AppendResult(
+		ReleasedQualifiedResult,
+		EABTSM11PlaybackSegmentKind::PlayerAuthoritative,
+		Points);
 	DurationSeconds = Points.Last().TimeSeconds;
 	PlanHash = ComputePlanHash(*this);
 	return true;

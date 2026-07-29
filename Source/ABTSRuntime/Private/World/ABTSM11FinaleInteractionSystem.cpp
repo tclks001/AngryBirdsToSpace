@@ -3,10 +3,13 @@
 #include "World/ABTSM11FinaleInteractionSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM11FinaleActors.h"
@@ -113,6 +116,11 @@ bool AABTSM11FinaleInteractionSystem::Initialize(
 	}
 	FinaleSystem = &InFinaleSystem;
 	Party = &InParty;
+	if (!EnsureAimCamera())
+	{
+		FailInteraction(TEXT("AimCameraSpawnFailed"));
+		return false;
+	}
 	TargetPreviewRenderTarget = NewObject<UTextureRenderTarget2D>(
 		this,
 		TEXT("M11TargetPreviewRT"));
@@ -145,6 +153,7 @@ bool AABTSM11FinaleInteractionSystem::Initialize(
 		InitialPower,
 		LaunchModel.MinimumPower,
 		LaunchModel.MaximumPower);
+	InitialAimInput = InitialInput;
 	if (!Stabilizer.Initialize(
 		FinaleSystem->GetLayoutPreset(),
 		InitialInput))
@@ -169,10 +178,10 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	AABTSM51SlingshotCord& Cord,
 	APlayerController& Controller)
 {
-	(void)Controller;
 	if (InteractionState != EABTSM11FinaleInteractionState::Ready
 		|| !IsValid(FinaleSystem)
 		|| !IsValid(Party)
+		|| !EnsureAimCamera()
 		|| !Cord.IsFinaleSpaceSlingshot()
 		|| Cord.GetFinaleSlotPairId()
 			!= FinaleSystem->GetFinaleFrame().SlotPairId)
@@ -185,26 +194,42 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 		FailInteraction(TEXT("ControlledBirdMissing"));
 		return false;
 	}
+	if (!BuildAimFrame(Cord, *Bird))
+	{
+		FailInteraction(TEXT("InvalidFinaleAimFrame"));
+		return false;
+	}
+	AimCamera->SetAimFrame(
+		AimSlingCenter,
+		AimSlingForward,
+		AimSlingUp);
+	Controller.SetViewTarget(AimCamera);
 
 	AttemptBird = Bird;
 	ActiveCord = &Cord;
 	AttemptBirdOriginalTransform = Bird->GetActorTransform();
 	Party->SetSlingshotMode(true);
-	const FABTSM110FinaleLocalFrame& Frame =
-		FinaleSystem->GetFinaleFrame();
 	const FABTSM11FinaleLayoutPreset& Preset =
 		FinaleSystem->GetLayoutPreset();
-	const FVector PouchWorld = Frame.TransformLocalPosition(
-		FVector(Preset.LaunchModel.PouchLocalPositionCM));
+	Stabilizer.Reset(InitialAimInput);
 	const FVector LocalDirection = FVector(
 		Preset.LaunchModel.MapDirection(
 			Stabilizer.GetControlledInput()));
 	const FVector WorldDirection =
-		Frame.WorldTransform.TransformVectorNoScale(LocalDirection);
-	const FQuat PouchRotation = MakeFlightRotation(
+		FinaleSystem->GetFinaleFrame().WorldTransform
+			.TransformVectorNoScale(LocalDirection);
+	const FQuat PouchRotation = MakeM11PouchRotation(
 		WorldDirection,
-		Frame.GetUp()).Quaternion();
-	Bird->EnterSlingshotPouch(PouchWorld, PouchRotation);
+		AimSlingRight);
+	Bird->EnterSlingshotPouch(
+		AimRestPouchLocation
+			+ PouchRotation.RotateVector(
+				FVector(
+					0.0,
+					0.0,
+					FABTSM11M6InputParityProfile::
+						BirdInPouchOffsetCM)),
+		PouchRotation);
 	bAttemptBirdInPouch = true;
 
 	TInlineComponentArray<UActorComponent*> BirdComponents;
@@ -226,9 +251,17 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	PlaybackPresentationEndTimeSeconds = 0.0;
 	++AimRevision;
 	bPreviewDirty = true;
-	PreviewSubmitAccumulatorSeconds = PreviewSubmitIntervalSeconds;
 	TargetSelector.Reset();
 	UpdatePouchPresentation();
+	FVector2D PouchScreen;
+	if (Controller.ProjectWorldLocationToScreen(
+			AimPouchLocation,
+			PouchScreen))
+	{
+		Controller.SetMouseLocation(
+			FMath::RoundToInt(PouchScreen.X),
+			FMath::RoundToInt(PouchScreen.Y));
+	}
 	QueuePreviewSolveIfNeeded();
 	UE_LOG(
 		LogABTSRuntime,
@@ -243,7 +276,6 @@ void AABTSM11FinaleInteractionSystem::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	DrainCompletedSolves();
-	PreviewSubmitAccumulatorSeconds += FMath::Max(0.0f, DeltaSeconds);
 	switch (InteractionState)
 	{
 	case EABTSM11FinaleInteractionState::Aiming:
@@ -263,21 +295,53 @@ void AABTSM11FinaleInteractionSystem::Tick(const float DeltaSeconds)
 	FlushTargetCapture();
 }
 
-void AABTSM11FinaleInteractionSystem::ApplyAimAxis(
-	const double YawAxisDelta,
-	const double PitchAxisDelta,
-	const double PowerAxisDelta)
+bool AABTSM11FinaleInteractionSystem::BeginAimFromCursor(
+	APlayerController& Controller)
 {
-	if (InteractionState != EABTSM11FinaleInteractionState::Aiming)
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		|| !bAimFrameValid)
+	{
+		return false;
+	}
+	FVector2D PouchScreen;
+	float MouseX = 0.0f;
+	float MouseY = 0.0f;
+	if (!Controller.ProjectWorldLocationToScreen(
+			AimPouchLocation,
+			PouchScreen)
+		|| !Controller.GetMousePosition(MouseX, MouseY)
+		|| FVector2D::Distance(
+			PouchScreen,
+			FVector2D(MouseX, MouseY))
+			> FABTSM11M6InputParityProfile::PouchPickRadiusPixels)
+	{
+		return false;
+	}
+	return ApplyAbsoluteCursorAim(Controller);
+}
+
+bool AABTSM11FinaleInteractionSystem::UpdateAimFromCursor(
+	APlayerController& Controller)
+{
+	return InteractionState == EABTSM11FinaleInteractionState::Aiming
+		&& ApplyAbsoluteCursorAim(Controller);
+}
+
+void AABTSM11FinaleInteractionSystem::AdjustAimPower(
+	const double WheelSteps)
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		|| !FMath::IsFinite(WheelSteps))
 	{
 		return;
 	}
 	const FABTSM11FinaleLaunchInput Before =
 		Stabilizer.GetControlledInput();
-	Stabilizer.ApplyInputDelta(
-		YawAxisDelta * YawDegreesPerAxisUnit,
-		PitchAxisDelta * PitchDegreesPerAxisUnit,
-		PowerAxisDelta * PowerPerWheelUnit);
+	FABTSM11FinaleLaunchInput Desired =
+		Stabilizer.GetDesiredInput();
+	Desired.Power += WheelSteps
+		* FABTSM11M6InputParityProfile::PowerWheelStep;
+	Stabilizer.SetDesiredPower(Desired.Power);
 	if (!SameInteractionInput(
 			Before,
 			Stabilizer.GetControlledInput()))
@@ -299,33 +363,15 @@ void AABTSM11FinaleInteractionSystem::RequestRelease()
 	if (!FinalizePendingRelease())
 	{
 		bPreviewDirty = true;
-		PreviewSubmitAccumulatorSeconds = PreviewSubmitIntervalSeconds;
 		QueuePreviewSolveIfNeeded();
 	}
 }
 
 void AABTSM11FinaleInteractionSystem::CancelStabilizerOrResetAttempt()
 {
-	if (InteractionState == EABTSM11FinaleInteractionState::Aiming)
-	{
-		Stabilizer.CancelProtection();
-		return;
-	}
-	if (InteractionState == EABTSM11FinaleInteractionState::ReleasePending)
-	{
-		InteractionState = EABTSM11FinaleInteractionState::Aiming;
-		return;
-	}
-	if (InteractionState == EABTSM11FinaleInteractionState::Failed)
+	if (ABTSM11IsResettableFinaleState(InteractionState))
 	{
 		RestoreAttemptToWorld(false);
-		FailureTimeline.Reset();
-		RuntimeFailure.Reset();
-		InteractionState = EABTSM11FinaleInteractionState::Ready;
-		return;
-	}
-	if (InteractionState == EABTSM11FinaleInteractionState::Recovering)
-	{
 		FailureTimeline.Reset();
 		RuntimeFailure.Reset();
 		InteractionState = EABTSM11FinaleInteractionState::Ready;
@@ -396,12 +442,59 @@ bool AABTSM11FinaleInteractionSystem::ValidateInteractionContract(
 	}
 	const FABTSM11FinaleLayoutPreset& Candidate =
 		InFinaleSystem.GetLayoutPreset();
-	const FABTSM11FinaleLayoutPreset Frozen =
-		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
 	if (!Candidate.IsValid())
 	{
-		return Reject(TEXT("InvalidCertifiedPreset"));
+		return Reject(TEXT("InvalidFinalePreset"));
 	}
+	if (InFinaleSystem.IsEditorCandidateMode())
+	{
+		const FABTSM11CandidateExperienceIdentity& Identity =
+			InFinaleSystem.GetEditorCandidateIdentity();
+		if (!Identity.IsValid())
+		{
+			return Reject(TEXT("InvalidEditorCandidateIdentity"));
+		}
+		if (Candidate.PresetVersion != 1
+			|| Candidate.CompatibleGeneratorVersion != 3
+			|| Candidate.CompatibleFrameLayoutVersion != 1
+			|| Candidate.SearchAlgorithmVersion != 1
+			|| Candidate.LaunchModel.LaunchModelVersion != 1
+			|| Candidate.SolverConfig.SolverVersion != 2
+			|| Candidate.SolverConfig.HashSchemaVersion != 2
+			|| Candidate.LaunchModel.MaximumSimulationTimeSeconds
+				!= 60.0
+			|| Candidate.SolverConfig.MaximumSimulationTimeSeconds
+				!= 60.0)
+		{
+			return Reject(TEXT("UnsupportedEditorCandidateContract"));
+		}
+		if (Candidate.PresetSourceHash != 0
+			|| Candidate.PresetHash != 0
+			|| Candidate.ScanContractHash != 0
+			|| Candidate.CertificationHash != 0
+			|| Candidate.NominalTrajectoryHash != 0
+			|| Candidate.PhysicalPlaybackTrajectoryHash != 0
+			|| Candidate.CertifiedBundleHash != 0)
+		{
+			return Reject(TEXT("EditorCandidateClaimsFormalCertification"));
+		}
+		for (int32 Index = 0;
+			Index < Candidate.PrefixTrustRegions.Num();
+			++Index)
+		{
+			const FABTSM11PrefixTrustRegion& Region =
+				Candidate.PrefixTrustRegions[Index];
+			if (Region.PrefixLevel != Index + 1
+				|| Region.RegionHash != 0
+				|| !Region.IsValid(Candidate.LaunchModel))
+			{
+				return Reject(TEXT("InvalidTemporaryCandidateTrustRegion"));
+			}
+		}
+		return true;
+	}
+	const FABTSM11FinaleLayoutPreset Frozen =
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
 	if (Candidate.PresetVersion != Frozen.PresetVersion
 		|| Candidate.CompatibleGeneratorVersion
 			!= Frozen.CompatibleGeneratorVersion
@@ -501,7 +594,10 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 	PlaybackElapsedSeconds = FMath::Min(
 		PresentationEndTime,
 		PlaybackElapsedSeconds
-			+ FMath::Max(0.0f, DeltaSeconds) * PlaybackTimeScale);
+			+ FMath::Max(0.0f, DeltaSeconds)
+				* (FinaleSystem->IsEditorCandidateMode()
+					? 1.0
+					: PlaybackTimeScale));
 	FVector3d LocalPosition;
 	FVector3d LocalVelocity;
 	if (!ReleasedPlaybackPlan.Sample(
@@ -527,16 +623,33 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		ETeleportType::TeleportPhysics);
 	if (PlaybackElapsedSeconds >= PresentationEndTime - 1.0e-9)
 	{
-		if (ReleasedPlaybackPlan.bPhysicalTargetHit)
+		if (ReleasedPlaybackPlan.bPhysicalTargetHit
+			|| ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 		{
 			InteractionState =
 				EABTSM11FinaleInteractionState::TargetHit;
-			UE_LOG(
-				LogABTSRuntime,
-				Log,
-				TEXT("[ABTS][M11-C][Playback] PhysicalTargetHit Plan=0x%016llx Transfer=%d"),
-				ReleasedPlaybackPlan.PlanHash,
-				ReleasedPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0);
+			if (ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Log,
+					TEXT("[ABTS][M11-C-v2.1][Playback] CandidateQualified-UNCERTIFIED Plan=0x%016llx Rank=%d Work=%llu"),
+					ReleasedPlaybackPlan.PlanHash,
+					FinaleSystem->GetEditorCandidateIdentity().Rank,
+					static_cast<unsigned long long>(
+						FinaleSystem->GetEditorCandidateIdentity()
+							.GlobalWorkIndex));
+			}
+			else
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Log,
+					TEXT("[ABTS][M11-C][Playback] PhysicalTargetHit Plan=0x%016llx Transfer=%d"),
+					ReleasedPlaybackPlan.PlanHash,
+					ReleasedPlaybackPlan
+						.bUsesVisibleTerminalTransfer ? 1 : 0);
+			}
 		}
 		else
 		{
@@ -579,12 +692,195 @@ void AABTSM11FinaleInteractionSystem::UpdateFailurePresentation(
 	}
 }
 
+bool AABTSM11FinaleInteractionSystem::EnsureAimCamera()
+{
+	if (IsValid(AimCamera))
+	{
+		return true;
+	}
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AimCamera = World->SpawnActor<AABTSM6SlingshotCamera>(
+		AABTSM6SlingshotCamera::StaticClass(),
+		FTransform::Identity,
+		SpawnParameters);
+	return IsValid(AimCamera);
+}
+
+bool AABTSM11FinaleInteractionSystem::BuildAimFrame(
+	const AABTSM51SlingshotCord& Cord,
+	const AABTSM25BirdCharacter& Bird)
+{
+	if (!IsValid(FinaleSystem))
+	{
+		return false;
+	}
+	const FABTSM110FinaleLocalFrame& Frame =
+		FinaleSystem->GetFinaleFrame();
+	AimSlingCenter =
+		(Cord.GetEndpointA() + Cord.GetEndpointB()) * 0.5;
+	AimSlingUp = Frame.GetUp().GetSafeNormal();
+	AimSlingRight = FVector::VectorPlaneProject(
+		Cord.GetEndpointB() - Cord.GetEndpointA(),
+		AimSlingUp).GetSafeNormal();
+	if (AimSlingUp.IsNearlyZero() || AimSlingRight.IsNearlyZero())
+	{
+		bAimFrameValid = false;
+		return false;
+	}
+
+	// Match M6's one-time cord frame. The certified M11 local +X remains the
+	// final sign authority so cursor yaw maps to the same immutable solver
+	// domain even if the controlled bird approached from an unusual side.
+	AimSlingForward = FVector::CrossProduct(
+		AimSlingRight,
+		AimSlingUp).GetSafeNormal();
+	const FVector BirdSide = FVector::VectorPlaneProject(
+		AimSlingCenter - Bird.GetActorLocation(),
+		AimSlingUp).GetSafeNormal();
+	if (!BirdSide.IsNearlyZero()
+		&& FVector::DotProduct(AimSlingForward, BirdSide) < 0.0)
+	{
+		AimSlingForward *= -1.0;
+	}
+	const FVector CertifiedForward =
+		Frame.GetForward().GetSafeNormal();
+	if (!CertifiedForward.IsNearlyZero()
+		&& FVector::DotProduct(
+			AimSlingForward,
+			CertifiedForward) < 0.0)
+	{
+		AimSlingForward *= -1.0;
+	}
+	if (FVector::DotProduct(
+			FVector::CrossProduct(AimSlingUp, AimSlingForward),
+			AimSlingRight) < 0.0)
+	{
+		AimSlingRight *= -1.0;
+	}
+
+	AimRestPouchLocation =
+		Cord.GetRestPouchTransform().GetLocation();
+	AimPouchLocation = AimRestPouchLocation;
+	bAimFrameValid =
+		!AimSlingForward.IsNearlyZero()
+		&& FMath::IsFinite(AimRestPouchLocation.X)
+		&& FMath::IsFinite(AimRestPouchLocation.Y)
+		&& FMath::IsFinite(AimRestPouchLocation.Z);
+	return bAimFrameValid;
+}
+
+bool AABTSM11FinaleInteractionSystem::ApplyAbsoluteCursorAim(
+	APlayerController& Controller)
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		|| !bAimFrameValid
+		|| !IsValid(AimCamera)
+		|| !IsValid(FinaleSystem))
+	{
+		return false;
+	}
+	FVector RayOrigin;
+	FVector RayDirection;
+	if (!Controller.DeprojectMousePositionToWorld(
+			RayOrigin,
+			RayDirection))
+	{
+		return false;
+	}
+	const FVector PlaneNormal =
+		AimCamera->GetActorForwardVector().GetSafeNormal();
+	const double Denominator =
+		FVector::DotProduct(RayDirection, PlaneNormal);
+	if (FMath::Abs(Denominator) <= SMALL_NUMBER)
+	{
+		return false;
+	}
+	const FABTSM11FinaleLaunchModel& LaunchModel =
+		FinaleSystem->GetLayoutPreset().LaunchModel;
+	const FABTSM11FinaleLaunchInput& Controlled =
+		Stabilizer.GetControlledInput();
+	const double PowerAlpha = FMath::Clamp(
+		(Controlled.Power - LaunchModel.MinimumPower)
+			/ (LaunchModel.MaximumPower
+				- LaunchModel.MinimumPower),
+		0.0,
+		1.0);
+	const double PullDistance = FMath::Lerp(
+		FABTSM11M6InputParityProfile::MinimumPullDistanceCM,
+		FABTSM11M6InputParityProfile::MaximumPullDistanceCM,
+		PowerAlpha);
+	const FVector PulledPlaneCenter =
+		AimRestPouchLocation - AimSlingForward * PullDistance;
+	const double RayDistance = FVector::DotProduct(
+		PulledPlaneCenter - RayOrigin,
+		PlaneNormal) / Denominator;
+	if (RayDistance <= 0.0)
+	{
+		return false;
+	}
+	const FVector RawPouch =
+		RayOrigin + RayDirection * RayDistance;
+	const FVector AimPlaneOffset =
+		(RawPouch - PulledPlaneCenter).GetClampedToMaxSize(
+			FABTSM11M6InputParityProfile::MaximumAimPlaneOffsetCM);
+	const FVector CursorPouch =
+		PulledPlaneCenter + AimPlaneOffset;
+	const FVector WorldDirection =
+		(AimSlingCenter
+			+ AimSlingUp
+				* FABTSM11M6InputParityProfile::LaunchTargetLiftCM
+			- CursorPouch).GetSafeNormal();
+	if (WorldDirection.IsNearlyZero())
+	{
+		return false;
+	}
+	const FVector LocalDirection =
+		FinaleSystem->GetFinaleFrame().WorldTransform
+			.InverseTransformVectorNoScale(
+				WorldDirection).GetSafeNormal();
+	if (LocalDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	FABTSM11FinaleLaunchInput Desired;
+	if (!ABTSM11MapLocalLaunchDirectionToInput(
+		LaunchModel,
+		FVector3d(LocalDirection),
+		Stabilizer.GetDesiredInput().Power,
+		Desired))
+	{
+		return false;
+	}
+	const FABTSM11FinaleLaunchInput Before =
+		Stabilizer.GetControlledInput();
+	Stabilizer.SetAbsoluteDirectionInput(Desired);
+	if (!SameInteractionInput(
+			Before,
+			Stabilizer.GetControlledInput()))
+	{
+		++AimRevision;
+		bPreviewDirty = true;
+		UpdatePouchPresentation();
+	}
+	return true;
+}
+
 void AABTSM11FinaleInteractionSystem::UpdatePouchPresentation()
 {
 	if (!IsValid(FinaleSystem)
 		|| !IsValid(ActiveCord)
 		|| !IsValid(AttemptBird)
 		|| !bAttemptBirdInPouch
+		|| !bAimFrameValid
 		|| (InteractionState != EABTSM11FinaleInteractionState::Aiming
 			&& InteractionState
 				!= EABTSM11FinaleInteractionState::ReleasePending))
@@ -600,31 +896,64 @@ void AABTSM11FinaleInteractionSystem::UpdatePouchPresentation()
 			== EABTSM11FinaleInteractionState::ReleasePending
 		? FrozenReleaseInput
 		: Stabilizer.GetControlledInput();
-	const FVector3d PresentationLocalPosition =
-		ABTSM11ComputeAimPouchLocalPosition(
-			Preset.LaunchModel,
-			Input,
-			MinimumVisualPullDistanceCM,
-			MaximumVisualPullDistanceCM,
-			MaximumVisualPitchDropCM);
-	const FVector WorldPosition = Frame.TransformLocalPosition(
-		FVector(PresentationLocalPosition));
+	const double PullAlpha = FMath::Clamp(
+		(Input.Power - Preset.LaunchModel.MinimumPower)
+			/ (Preset.LaunchModel.MaximumPower
+				- Preset.LaunchModel.MinimumPower),
+		0.0,
+		1.0);
+	const double PullDistance = FMath::Lerp(
+		FABTSM11M6InputParityProfile::MinimumPullDistanceCM,
+		FABTSM11M6InputParityProfile::MaximumPullDistanceCM,
+		PullAlpha);
+	const FVector PulledPlaneCenter =
+		AimRestPouchLocation - AimSlingForward * PullDistance;
 	const FVector LocalDirection = FVector(
 		Preset.LaunchModel.MapDirection(Input));
 	const FVector WorldDirection =
 		Frame.WorldTransform.TransformVectorNoScale(LocalDirection);
+	const FVector Target =
+		AimSlingCenter
+			+ AimSlingUp
+				* FABTSM11M6InputParityProfile::LaunchTargetLiftCM;
+	FVector PresentationPosition = PulledPlaneCenter;
+	const FVector PlaneNormal = IsValid(AimCamera)
+		? AimCamera->GetActorForwardVector().GetSafeNormal()
+		: AimSlingForward;
+	const double DirectionDenominator =
+		FVector::DotProduct(WorldDirection, PlaneNormal);
+	if (FMath::Abs(DirectionDenominator) > SMALL_NUMBER)
+	{
+		const double Distance = FVector::DotProduct(
+			Target - PulledPlaneCenter,
+			PlaneNormal) / DirectionDenominator;
+		if (Distance > 0.0)
+		{
+			PresentationPosition =
+				Target - WorldDirection * Distance;
+		}
+	}
+	PresentationPosition = PulledPlaneCenter
+		+ (PresentationPosition - PulledPlaneCenter)
+			.GetClampedToMaxSize(
+				FABTSM11M6InputParityProfile::
+					MaximumAimPlaneOffsetCM);
+	AimPouchLocation = PresentationPosition;
 	const FQuat PouchRotation = MakeM11PouchRotation(
 		WorldDirection,
-		Frame.GetRight());
-	const FQuat BirdRotation = MakeFlightRotation(
-		WorldDirection,
-		Frame.GetUp()).Quaternion();
+		AimSlingRight);
 	ActiveCord->UpdatePulledPouchVisual(
-		WorldPosition,
+		AimPouchLocation,
 		PouchRotation);
 	AttemptBird->SetActorLocationAndRotation(
-		WorldPosition,
-		BirdRotation,
+		AimPouchLocation
+			+ PouchRotation.RotateVector(
+				FVector(
+					0.0,
+					0.0,
+					FABTSM11M6InputParityProfile::
+						BirdInPouchOffsetCM)),
+		PouchRotation,
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
@@ -694,6 +1023,9 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	const bool bKeepFinaleMode)
 {
+	++AimRevision;
+	LatestSolvedRevision = INDEX_NONE;
+	bPreviewDirty = false;
 	if (IsValid(AttemptBird) && bAttemptBirdInPouch)
 	{
 		// Collision must remain disabled until the bird has left any analytic
@@ -723,6 +1055,7 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	{
 		AttemptBird = nullptr;
 		ActiveCord = nullptr;
+		bAimFrameValid = false;
 		return;
 	}
 
@@ -835,6 +1168,11 @@ void AABTSM11FinaleInteractionSystem::EndPlay(
 	if (IsFinaleActive())
 	{
 		RestoreAttemptToWorld(false);
+	}
+	if (IsValid(AimCamera))
+	{
+		AimCamera->Destroy();
+		AimCamera = nullptr;
 	}
 	Super::EndPlay(EndPlayReason);
 }

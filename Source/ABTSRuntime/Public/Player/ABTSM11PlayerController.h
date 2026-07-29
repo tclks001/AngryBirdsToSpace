@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "Player/ABTSM6PlayerController.h"
-#include "World/ABTSM11FinaleInteractionTypes.h"
 #include "ABTSM11PlayerController.generated.h"
 
 class AABTSM11FinaleInteractionSystem;
@@ -28,20 +27,23 @@ public:
 private:
 	virtual void PrimaryWorldInteract() override;
 	void M11PrimaryReleased();
-	void M11Yaw(float Value);
-	void M11Pitch(float Value);
 	void M11Power(float Value);
 	void M11Cancel();
+	void M11OrbitPressed();
+	void M11OrbitReleased();
 	void SetM11FinaleInputMode(bool bActive);
-	void ApplyM11PointerMode(bool bActive);
+	void ApplyM11PointerMode(bool bFinaleActive);
 	AABTSM11FinaleInteractionSystem* FindM11Interaction() const;
 	AABTSM6SlingshotSystem* FindOrdinarySlingshotSystem();
 
 	TWeakObjectPtr<AABTSM6SlingshotSystem> OrdinarySlingshotSystem;
-	FABTSM11PrimaryReleaseGate PrimaryReleaseGate;
+	bool bM11PullReleaseArmed = false;
 	bool bWasM11FinaleActive = false;
-	bool bM11PointerCaptureNeedsRefresh = false;
 	bool bM11SavedPointerEventFlags = false;
 	bool bSavedClickEvents = true;
 	bool bSavedMouseOverEvents = true;
+	bool bM11OrbitCursorSaved = false;
+	bool bRestoreM11CursorAfterOrbitRelease = false;
+	float M11OrbitCursorX = 0.0f;
+	float M11OrbitCursorY = 0.0f;
 };

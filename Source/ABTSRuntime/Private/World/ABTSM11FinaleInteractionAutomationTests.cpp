@@ -183,6 +183,19 @@ bool FABTSM11CStabilizerTest::RunTest(const FString& Parameters)
 		TEXT("Near does not clamp"),
 		Stabilizer.GetStablePrefixLevel(),
 		0);
+	const FABTSM11FinaleLaunchInput BeforeNearCursor =
+		Stabilizer.GetDesiredInput();
+	FABTSM11FinaleLaunchInput MovedNearCursor =
+		BeforeNearCursor;
+	MovedNearCursor.YawDegrees += 1.0;
+	Stabilizer.SetAbsoluteDirectionInput(MovedNearCursor);
+	TestTrue(
+		TEXT("Absolute cursor deltas use the Near sensitivity scale"),
+		FMath::IsNearlyEqual(
+			Stabilizer.GetDesiredInput().YawDegrees
+				- BeforeNearCursor.YawDegrees,
+			0.45,
+			1.0e-12));
 
 	Stabilizer.Reset(Midpoint(F1));
 	Classification.HighestPrefixLevel = 1;
@@ -507,27 +520,18 @@ bool FABTSM11CPIERegressionContractsTest::RunTest(
 
 	FABTSM11PrimaryReleaseGate ReleaseGate;
 	ReleaseGate.Enter(true);
-	TestFalse(
-		TEXT("The click that enters finale cannot launch on release"),
-		ReleaseGate.OnPrimaryReleased(true));
-	ReleaseGate.OnPrimaryPressed(true);
 	TestTrue(
-		TEXT("A later intentional press/release launches"),
+		TEXT("The Space-pouch press that enters aim launches on its release"),
 		ReleaseGate.OnPrimaryReleased(true));
 	ReleaseGate.Enter(true);
-	ReleaseGate.UpdateEntryButtonState(false);
-	TestFalse(
-		TEXT("A delayed entry release stays consumed without a new press"),
-		ReleaseGate.OnPrimaryReleased(true));
-	ReleaseGate.OnPrimaryPressed(true);
-	TestTrue(
-		TEXT("Mouse recapture does not prevent a later launch gesture"),
-		ReleaseGate.OnPrimaryReleased(true));
-	ReleaseGate.Enter(false);
-	ReleaseGate.OnPrimaryPressed(true);
 	ReleaseGate.Reset();
 	TestFalse(
 		TEXT("Focus loss cancels an armed launch gesture"),
+		ReleaseGate.OnPrimaryReleased(true));
+	ReleaseGate.Enter(false);
+	ReleaseGate.OnPrimaryPressed(true);
+	TestTrue(
+		TEXT("A later pouch press/release remains valid"),
 		ReleaseGate.OnPrimaryReleased(true));
 
 	const FABTSM11FinaleLayoutPreset Preset =

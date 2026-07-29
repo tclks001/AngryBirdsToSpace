@@ -8,6 +8,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Game/ABTSM11GameMode.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
+#include "World/ABTSM11FinaleSystem.h"
 
 namespace
 {
@@ -239,6 +240,23 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 			0.68f,
 			false);
 	}
+	else
+	{
+		const AABTSM11FinaleSystem* FinaleSystem =
+			System.GetFinaleSystem();
+		if (FinaleSystem != nullptr
+			&& FinaleSystem->IsEditorCandidateMode())
+		{
+			DrawText(
+				TEXT("RAW 1X PLAYBACK / QUALIFIED ENDPOINT"),
+				FLinearColor(1.0f, 0.72f, 0.24f),
+				Center.X - Radius + 10.0f,
+				Center.Y + Radius - 22.0f,
+				GEngine->GetSmallFont(),
+				0.58f,
+				false);
+		}
+	}
 }
 
 void AABTSM11FinaleHUD::DrawFailureOverlay(
@@ -294,7 +312,13 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 		FString::Printf(
 			TEXT("APPROACH PREVIEW: %s%s"),
 			TargetLabel(System.GetPreviewSelection().Target),
-			System.GetPreviewSelection().bEnteredTargetRegion
+			System.GetFinaleSystem() != nullptr
+				&& System.GetFinaleSystem()->IsEditorCandidateMode()
+				&& System.GetClassification().IsF(4)
+				&& System.GetPreviewSelection().Target
+					== EABTSM11PreviewTarget::UFO
+				? TEXT(" / QUALIFIED ENDPOINT")
+				: System.GetPreviewSelection().bEnteredTargetRegion
 				? TEXT(" / ENTERED")
 				: TEXT(" / CLOSEST MISS")),
 		FLinearColor(0.78f, 0.92f, 1.0f),
@@ -342,12 +366,129 @@ void AABTSM11FinaleHUD::DrawStatus(
 		System.GetClassification();
 	const float X = DiagramCenter.X - DiagramRadius;
 	const float Y = DiagramCenter.Y - DiagramRadius - 48.0f;
-	const FString Chain = FString::Printf(
-		TEXT("SPACE  >  1%s  >  2%s  >  3%s  >  UFO%s"),
-		Classification.IsF(1) ? TEXT("[OK]") : TEXT(""),
-		Classification.IsF(2) ? TEXT("[OK]") : TEXT(""),
-		Classification.IsF(3) ? TEXT("[OK]") : TEXT(""),
-		Classification.IsF(4) ? TEXT("[LOCK]") : TEXT(""));
+	const AABTSM11FinaleSystem* FinaleSystem =
+		System.GetFinaleSystem();
+	const bool bEditorCandidate =
+		FinaleSystem != nullptr
+		&& FinaleSystem->IsEditorCandidateMode();
+	if (bEditorCandidate)
+	{
+		const FABTSM11CandidateExperienceIdentity& Identity =
+			FinaleSystem->GetEditorCandidateIdentity();
+		const float CandidateY = FMath::Max(20.0f, Y - 158.0f);
+		const float PanelWidth = FMath::Min(
+			440.0f,
+			Canvas->SizeX * 0.45f);
+		DrawRect(
+			FLinearColor(0.20f, 0.045f, 0.018f, 0.82f),
+			X - 6.0f,
+			CandidateY - 5.0f,
+			PanelWidth,
+			148.0f);
+		DrawText(
+			TEXT("EDITOR CANDIDATE / NOT CERTIFIED"),
+			FLinearColor(1.0f, 0.42f, 0.16f),
+			X,
+			CandidateY,
+			GEngine->GetSmallFont(),
+			0.80f,
+			false);
+		DrawText(
+			FString::Printf(
+				TEXT("RANK %d  /  GLOBAL WORK %llu"),
+				Identity.Rank,
+				static_cast<unsigned long long>(
+					Identity.GlobalWorkIndex)),
+			FLinearColor(1.0f, 0.78f, 0.34f),
+			X,
+			CandidateY + 18.0f,
+			GEngine->GetSmallFont(),
+			0.68f,
+			false);
+		DrawText(
+			FString::Printf(
+				TEXT("SOURCE  0x%016llX"),
+				static_cast<unsigned long long>(
+					Identity.CandidateSourceHash)),
+			FLinearColor(0.92f, 0.82f, 0.66f),
+			X,
+			CandidateY + 34.0f,
+			GEngine->GetSmallFont(),
+			0.62f,
+			false);
+		DrawText(
+			FString::Printf(
+				TEXT("REQUEST 0x%016llX"),
+				static_cast<unsigned long long>(
+					Identity.NominalRequestHash)),
+			FLinearColor(0.92f, 0.82f, 0.66f),
+			X,
+			CandidateY + 49.0f,
+			GEngine->GetSmallFont(),
+			0.62f,
+			false);
+		DrawText(
+			FString::Printf(
+				TEXT("RESULT  0x%016llX"),
+				static_cast<unsigned long long>(
+					Identity.NominalResultHash)),
+			FLinearColor(0.92f, 0.82f, 0.66f),
+			X,
+			CandidateY + 64.0f,
+			GEngine->GetSmallFont(),
+			0.62f,
+			false);
+		DrawText(
+			FString::Printf(
+				TEXT("SCORE   0x%016llX"),
+				static_cast<unsigned long long>(
+					Identity.ScoreHash)),
+			FLinearColor(0.92f, 0.82f, 0.66f),
+			X,
+			CandidateY + 79.0f,
+			GEngine->GetSmallFont(),
+			0.62f,
+			false);
+		DrawText(
+			TEXT("RAW 1X CANDIDATE PLAYBACK / QUALIFIED ENDPOINT"),
+			FLinearColor(1.0f, 0.66f, 0.18f),
+			X,
+			CandidateY + 96.0f,
+			GEngine->GetSmallFont(),
+			0.62f,
+			false);
+		DrawText(
+			TEXT("VISIBLE CURSOR DRAG = POUCH DIRECTION"),
+			FLinearColor(0.80f, 0.88f, 0.96f),
+			X,
+			CandidateY + 112.0f,
+			GEngine->GetSmallFont(),
+			0.58f,
+			false);
+		DrawText(
+			TEXT("WHEEL +/-0.08 = POWER | SAME RELEASE = LAUNCH | R = RESET"),
+			FLinearColor(0.80f, 0.88f, 0.96f),
+			X,
+			CandidateY + 128.0f,
+			GEngine->GetSmallFont(),
+			0.58f,
+			false);
+	}
+	const FString Chain = bEditorCandidate
+		? FString::Printf(
+			TEXT("SPACE  >  1%s  >  2%s  >  3%s  >  ENDPOINT%s"),
+			Classification.IsF(1) ? TEXT("[PASS]") : TEXT(""),
+			Classification.IsF(2) ? TEXT("[PASS]") : TEXT(""),
+			Classification.IsF(3) ? TEXT("[PASS]") : TEXT(""),
+			Classification.IsF(4)
+				? TEXT("[QUALIFIED]")
+				: TEXT(""))
+		: FString::Printf(
+			TEXT("SPACE  >  1%s  >  2%s  >  3%s  >  UFO%s"),
+			Classification.IsF(1) ? TEXT("[OK]") : TEXT(""),
+			Classification.IsF(2) ? TEXT("[OK]") : TEXT(""),
+			Classification.IsF(3) ? TEXT("[OK]") : TEXT(""),
+			Classification.IsF(4) ? TEXT("[LOCK]") : TEXT(""));
 	DrawText(
 		Chain,
 		FLinearColor(0.76f, 0.91f, 1.0f),
@@ -363,17 +504,25 @@ void AABTSM11FinaleHUD::DrawStatus(
 	FLinearColor StabilizerColor(0.72f, 0.78f, 0.84f);
 	if (Stabilizer.GetNearPrefixLevel() > 0)
 	{
-		StabilizerText = FString::Printf(
-			TEXT("PRECISION MODE: F%d"),
-			Stabilizer.GetNearPrefixLevel());
+		StabilizerText = bEditorCandidate
+			? FString::Printf(
+				TEXT("CANDIDATE PRECISION F%d / TEMPORARY"),
+				Stabilizer.GetNearPrefixLevel())
+			: FString::Printf(
+				TEXT("PRECISION MODE: F%d"),
+				Stabilizer.GetNearPrefixLevel());
 		StabilizerColor = FLinearColor(0.95f, 0.75f, 0.22f);
 	}
 	else if (Stabilizer.GetStablePrefixLevel() > 0)
 	{
-		StabilizerText = FString::Printf(
-			TEXT("CORRIDOR %d STABLE / %d OF 3"),
-			Stabilizer.GetStablePrefixLevel(),
-			Stabilizer.GetStablePrefixLevel());
+		StabilizerText = bEditorCandidate
+			? FString::Printf(
+				TEXT("CANDIDATE PREFIX F%d HELD / TEMPORARY"),
+				Stabilizer.GetStablePrefixLevel())
+			: FString::Printf(
+				TEXT("CORRIDOR %d STABLE / %d OF 3"),
+				Stabilizer.GetStablePrefixLevel(),
+				Stabilizer.GetStablePrefixLevel());
 		StabilizerColor = FLinearColor(0.32f, 1.0f, 0.58f);
 	}
 	DrawText(
@@ -383,6 +532,58 @@ void AABTSM11FinaleHUD::DrawStatus(
 		Y + 18.0f,
 		GEngine->GetSmallFont(),
 		0.75f,
+		false);
+
+	const double LastSolveMilliseconds =
+		System.GetLastPreviewSolveMilliseconds();
+	const double LastLatencyMilliseconds =
+		System.GetLastPreviewLatencyMilliseconds();
+	const bool bPreviewInFlight =
+		System.IsPreviewSolveInFlight();
+	const bool bPreviewDirty =
+		System.IsPreviewDirty();
+	FString PreviewState;
+	if (bPreviewInFlight)
+	{
+		if (LastLatencyMilliseconds <= 0.0)
+		{
+			PreviewState = TEXT("IN FLIGHT / NO PUBLISHED RESULT");
+		}
+		else if (bPreviewDirty)
+		{
+			PreviewState =
+				TEXT("IN FLIGHT / STALE / LATEST QUEUED");
+		}
+		else
+		{
+			PreviewState = TEXT("IN FLIGHT / STALE");
+		}
+	}
+	else if (bPreviewDirty)
+	{
+		PreviewState = TEXT("STALE / QUEUED");
+	}
+	else
+	{
+		PreviewState = LastLatencyMilliseconds > 0.0
+			? TEXT("LATEST")
+			: TEXT("WAITING FOR FIRST SOLVE");
+	}
+	DrawText(
+		FString::Printf(
+			TEXT("PREVIEW %.2f ms SOLVE / %.2f ms LATENCY / %s / DISCARDED %llu"),
+			LastSolveMilliseconds,
+			LastLatencyMilliseconds,
+			*PreviewState,
+			static_cast<unsigned long long>(
+				System.GetDiscardedPreviewSolveCount())),
+		PreviewState == TEXT("LATEST")
+			? FLinearColor(0.38f, 1.0f, 0.62f)
+			: FLinearColor(1.0f, 0.72f, 0.25f),
+		X,
+		Y + 36.0f,
+		GEngine->GetSmallFont(),
+		0.58f,
 		false);
 
 	const float BarWidth = DiagramRadius * 1.25f;
@@ -426,7 +627,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 			false);
 	}
 	DrawText(
-		TEXT("Mouse: aim  |  Wheel: power  |  Release: launch  |  R: cancel stabilizer"),
+		TEXT("Visible cursor drag: pouch direction  |  Wheel: power (down +0.08 / up -0.08)  |  Release same press: launch  |  R: reset"),
 		FLinearColor(0.66f, 0.72f, 0.80f),
 		X,
 		BarY + 34.0f,

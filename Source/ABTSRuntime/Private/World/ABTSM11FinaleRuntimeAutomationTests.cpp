@@ -245,6 +245,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FABTSM11BNativePresentationIsolationTest::RunTest(
 	const FString& Parameters)
 {
+#if WITH_EDITOR
 	TestFalse(
 		TEXT("Gravity-body presentation is not a Blueprint base"),
 		AABTSM11GravityBodyActor::StaticClass()
@@ -253,6 +254,7 @@ bool FABTSM11BNativePresentationIsolationTest::RunTest(
 		TEXT("UFO presentation is not a Blueprint base"),
 		AABTSM11UFOActor::StaticClass()
 			->GetBoolMetaDataHierarchical(TEXT("IsBlueprintBase")));
+#endif
 
 	FScopedM11BAutomationWorld ScopedWorld;
 	UWorld* World = ScopedWorld.Get();
@@ -651,6 +653,7 @@ bool FABTSM11BRuntimePresentationTest::RunTest(
 		TEXT("Runtime contract exposes exactly three assist presentations"),
 		AABTSM11FinaleSystem::ExpectedAssistPresentationCount,
 		3);
+#if WITH_EDITOR
 	TestFalse(
 		TEXT("Gravity-body presentation is not a Blueprint base"),
 		AABTSM11GravityBodyActor::StaticClass()
@@ -659,6 +662,7 @@ bool FABTSM11BRuntimePresentationTest::RunTest(
 		TEXT("UFO presentation is not a Blueprint base"),
 		AABTSM11UFOActor::StaticClass()
 			->GetBoolMetaDataHierarchical(TEXT("IsBlueprintBase")));
+#endif
 	TestEqual(
 		TEXT("M11 gravity data remains primary plus exactly three assists"),
 		FABTSM11GravityScenario::BodyCount,

@@ -61,10 +61,44 @@ enum class EABTSM11FailureReason : uint8
 	SolverFailure
 };
 
+ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
+	EABTSM11FinaleInteractionState State);
+
+/** Frozen M11 copy of the existing M6 pull presentation/input constants. */
+struct ABTSRUNTIME_API FABTSM11M6InputParityProfile
+{
+	static constexpr double MinimumPullDistanceCM = 120.0;
+	static constexpr double MaximumPullDistanceCM = 430.0;
+	static constexpr double PowerWheelStep = 0.08;
+	static constexpr double MaximumAimPlaneOffsetCM = 260.0;
+	static constexpr double LaunchTargetLiftCM = 65.0;
+	static constexpr double BirdInPouchOffsetCM = 20.0;
+	static constexpr double PouchPickRadiusPixels = 125.0;
+};
+
 /**
- * Separates the click that enters finale aim from the later click that
- * intentionally launches. This remains robust if PIE changes mouse capture
- * before the entry click's release event is delivered.
+ * Converts a finale-local launch direction to the frozen Yaw/Pitch domain
+ * while preserving the separately controlled Power value.
+ */
+ABTSRUNTIME_API bool ABTSM11MapLocalLaunchDirectionToInput(
+	const FABTSM11FinaleLaunchModel& LaunchModel,
+	const FVector3d& LocalLaunchDirection,
+	double Power,
+	FABTSM11FinaleLaunchInput& OutInput);
+
+ABTSRUNTIME_API bool ABTSM11CanStartLatestOnlyPreview(
+	bool bDirty,
+	bool bSolveInFlight);
+
+ABTSRUNTIME_API bool ABTSM11CanPublishLatestOnlyPreview(
+	int64 SubmittedRevision,
+	int64 CurrentRevision,
+	bool bInputMatches);
+
+/**
+ * Small input contract used by automation and input routers: the press that
+ * enters finale aim may arm that same drag gesture, while Reset/focus loss
+ * always disarms it before a synthetic release can launch.
  */
 class ABTSRUNTIME_API FABTSM11PrimaryReleaseGate final
 {
@@ -117,6 +151,15 @@ public:
 		double YawDeltaDegrees,
 		double PitchDeltaDegrees,
 		double PowerDelta);
+	/**
+	 * Applies the delta between successive absolute cursor-authored
+	 * directions. Near/stable sensitivity therefore remains frame-rate
+	 * independent without pulling the input toward any nominal answer.
+	 */
+	void SetAbsoluteDirectionInput(
+		const FABTSM11FinaleLaunchInput& Input);
+	/** Power remains the same independent 0.08-per-wheel channel as M6. */
+	void SetDesiredPower(double Power);
 	void Update(
 		double DeltaSeconds,
 		const FABTSM11PrefixClassification& Classification);
@@ -148,6 +191,7 @@ private:
 	FABTSM11PrefixStabilizerConfig Config;
 	FABTSM11FinaleLaunchInput DesiredInput;
 	FABTSM11FinaleLaunchInput ControlledInput;
+	FABTSM11FinaleLaunchInput LastAbsoluteDirectionInput;
 	int32 StablePrefixLevel = 0;
 	int32 NearPrefixLevel = 0;
 	double CaptureSeconds = 0.0;
@@ -228,6 +272,11 @@ struct ABTSRUNTIME_API FABTSM11PlaybackPlan
 	double TransferStartTimeSeconds = -1.0;
 	double TransferEndTimeSeconds = -1.0;
 	bool bQualifiedF4 = false;
+	/**
+	 * Editor-only v2.1 experience result. This is a qualified intercept at
+	 * the candidate target radius, never a certified 800 cm UFO contact.
+	 */
+	bool bCandidateQualifiedIntercept = false;
 	bool bPhysicalTargetHit = false;
 	bool bUsesVisibleTerminalTransfer = false;
 	FString Failure;
@@ -240,6 +289,10 @@ struct ABTSRUNTIME_API FABTSM11PlaybackPlan
 		const FABTSM11TrajectoryResult* SameInputPhysicalResult,
 		const FABTSM11TrajectoryResult* NominalPhysicalResult,
 		const FABTSM11TerminalTransferContract& TransferContract = {});
+	bool BuildCandidateQualified(
+		const FABTSM11FinaleLayoutPreset& Preset,
+		const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
+		const FABTSM11PrefixClassification& Classification);
 	bool Sample(
 		double TimeSeconds,
 		FVector3d& OutPositionCM,

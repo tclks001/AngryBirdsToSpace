@@ -120,6 +120,7 @@ namespace
 	bool BuildBasis(
 		TConstArrayView<FABTSM11PlaybackPoint> Points,
 		const FABTSM110FinaleLocalFrame& FinaleFrame,
+		const FABTSM11FinaleLayoutPreset& Preset,
 		FProjectionBasis& OutBasis)
 	{
 		if (Points.Num() < 2)
@@ -203,7 +204,7 @@ namespace
 		}
 		OutBasis.Y = OutBasis.Normal.Cross(OutBasis.X).GetSafeNormal();
 
-		auto ComputeBounds = [&Points, &OutBasis](
+		auto ComputeBounds = [&Points, &OutBasis, &Preset](
 			FVector2d& OutMinimum,
 			FVector2d& OutMaximum)
 		{
@@ -222,6 +223,48 @@ namespace
 				OutMaximum.X = FMath::Max(OutMaximum.X, Projected.X);
 				OutMaximum.Y = FMath::Max(OutMaximum.Y, Projected.Y);
 			}
+			const auto IncludeCircle =
+				[&OutMinimum, &OutMaximum](
+					const FVector2d& Center,
+					const double Radius)
+				{
+					const FVector2d Extent(
+						FMath::Max(0.0, Radius),
+						FMath::Max(0.0, Radius));
+					OutMinimum.X = FMath::Min(
+						OutMinimum.X,
+						Center.X - Extent.X);
+					OutMinimum.Y = FMath::Min(
+						OutMinimum.Y,
+						Center.Y - Extent.Y);
+					OutMaximum.X = FMath::Max(
+						OutMaximum.X,
+						Center.X + Extent.X);
+					OutMaximum.Y = FMath::Max(
+						OutMaximum.Y,
+						Center.Y + Extent.Y);
+				};
+			for (int32 BodyIndex = 1;
+				BodyIndex < FABTSM11GravityScenario::BodyCount;
+				++BodyIndex)
+			{
+				const FABTSM11GravityBodySpec& Body =
+					Preset.CanonicalScenario.Bodies[BodyIndex];
+				const double GlyphRadiusScale =
+					BodyIndex == FABTSM11GravityScenario::AssistCount
+						? 1.65
+						: 1.0;
+				IncludeCircle(
+					ProjectRaw(OutBasis, Body.CenterCM),
+					Body.VisualRadiusCM * GlyphRadiusScale);
+			}
+			const FABTSM11TargetSpec& Target =
+				Preset.CanonicalScenario.Target;
+			IncludeCircle(
+				ProjectRaw(
+					OutBasis,
+					Target.GetGeometricContactCenterCM()),
+				Target.GetGeometricContactRadiusCM() * 1.65);
 		};
 
 		FVector2d Minimum;
@@ -245,8 +288,35 @@ namespace
 				(ProjectRaw(OutBasis, Point.PositionCM)
 					- OutBasis.ContentCenter).Length());
 		}
-		// Keep all trajectory samples inside 86% of the circular panel.
-		OutBasis.FitRadius = FMath::Max(1.0, Radius / 0.86);
+		for (int32 BodyIndex = 1;
+			BodyIndex < FABTSM11GravityScenario::BodyCount;
+			++BodyIndex)
+		{
+			const FABTSM11GravityBodySpec& Body =
+				Preset.CanonicalScenario.Bodies[BodyIndex];
+			const double GlyphRadiusScale =
+				BodyIndex == FABTSM11GravityScenario::AssistCount
+					? 1.65
+					: 1.0;
+			Radius = FMath::Max(
+				Radius,
+				(ProjectRaw(OutBasis, Body.CenterCM)
+					- OutBasis.ContentCenter).Length()
+					+ Body.VisualRadiusCM * GlyphRadiusScale);
+		}
+		const FABTSM11TargetSpec& Target =
+			Preset.CanonicalScenario.Target;
+		Radius = FMath::Max(
+			Radius,
+			(ProjectRaw(
+					OutBasis,
+					Target.GetGeometricContactCenterCM())
+				- OutBasis.ContentCenter).Length()
+				+ Target.GetGeometricContactRadiusCM() * 1.65);
+		// Trajectory plus the three causal assist glyphs and UFO stay within
+		// 80% of the circle. The primary is intentionally excluded: the
+		// overview may show only the locally relevant part of its sphere.
+		OutBasis.FitRadius = FMath::Max(1.0, Radius / 0.80);
 		return true;
 	}
 
@@ -504,7 +574,7 @@ bool FABTSM11OrbitalDiagramBuilder::Build(
 	}
 
 	FProjectionBasis Basis;
-	if (!BuildBasis(PlaybackPoints, FinaleFrame, Basis))
+	if (!BuildBasis(PlaybackPoints, FinaleFrame, Preset, Basis))
 	{
 		return false;
 	}

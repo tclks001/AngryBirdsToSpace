@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Async/Async.h"
 #include "Components/CapsuleComponent.h"
+#include "HAL/PlatformTime.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
 #include "World/ABTSM11FinaleSystem.h"
@@ -30,6 +31,8 @@ struct FABTSM11PreviewSolvePayload
 	FABTSM11TrajectoryResult QualifiedResult;
 	FABTSM11PrefixClassification Classification;
 	FABTSM11TrajectoryResult SameInputPhysicalResult;
+	double SubmittedPlatformSeconds = 0.0;
+	double SolveDurationMilliseconds = 0.0;
 	bool bHasSameInputPhysicalResult = false;
 	bool bSolved = false;
 	FString Failure;
@@ -44,14 +47,13 @@ struct FABTSM11NominalSolvePayload
 
 void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 {
-	if (!bPreviewDirty
-		|| bPreviewSolveInFlight
+	if (!ABTSM11CanStartLatestOnlyPreview(
+			bPreviewDirty,
+			bPreviewSolveInFlight)
 		|| !IsValid(FinaleSystem)
 		|| (InteractionState != EABTSM11FinaleInteractionState::Aiming
 			&& InteractionState
-				!= EABTSM11FinaleInteractionState::ReleasePending)
-		|| PreviewSubmitAccumulatorSeconds
-			< PreviewSubmitIntervalSeconds)
+				!= EABTSM11FinaleInteractionState::ReleasePending))
 	{
 		return;
 	}
@@ -77,21 +79,28 @@ void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 	const FABTSM11FinaleLayoutPreset Preset =
 		FinaleSystem->GetLayoutPreset();
 	const int64 SubmittedRevision = AimRevision;
+	const double SubmittedPlatformSeconds = FPlatformTime::Seconds();
+	const bool bEditorCandidate =
+		FinaleSystem->IsEditorCandidateMode();
 	bPreviewDirty = false;
 	bPreviewSolveInFlight = true;
-	PreviewSubmitAccumulatorSeconds = 0.0;
 	PreviewSolveFuture = Async(
 		EAsyncExecution::ThreadPool,
 		[
 			Preset,
 			QualifiedRequest,
 			Input,
-			SubmittedRevision]()
+			SubmittedRevision,
+			SubmittedPlatformSeconds,
+			bEditorCandidate]()
 		{
+			const double SolveStartSeconds = FPlatformTime::Seconds();
 			TSharedPtr<FABTSM11PreviewSolvePayload> Payload =
 				MakeShared<FABTSM11PreviewSolvePayload>();
 			Payload->Revision = SubmittedRevision;
 			Payload->Input = Input;
+			Payload->SubmittedPlatformSeconds =
+				SubmittedPlatformSeconds;
 			Payload->bSolved =
 				FABTSM11GravityAssistSolver::Solve(
 					QualifiedRequest,
@@ -104,7 +113,8 @@ void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 						Preset,
 						Payload->QualifiedResult,
 						0x7u);
-				if (Payload->Classification.IsF(4))
+				if (!bEditorCandidate
+					&& Payload->Classification.IsF(4))
 				{
 					FABTSM11TrajectoryRequest PhysicalRequest;
 					if (Preset.BuildPhysicalPlaybackRequest(
@@ -121,6 +131,8 @@ void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 					}
 				}
 			}
+			Payload->SolveDurationMilliseconds =
+				(FPlatformTime::Seconds() - SolveStartSeconds) * 1000.0;
 			return Payload;
 		});
 }
@@ -129,7 +141,8 @@ void AABTSM11FinaleInteractionSystem::QueueNominalPhysicalSolve()
 {
 	if (bNominalSolveInFlight
 		|| bNominalPhysicalReady
-		|| !IsValid(FinaleSystem))
+		|| !IsValid(FinaleSystem)
+		|| FinaleSystem->IsEditorCandidateMode())
 	{
 		return;
 	}
@@ -218,19 +231,29 @@ void AABTSM11FinaleInteractionSystem::HandlePreviewSolveCompleted(
 		return;
 	}
 
-	const bool bStale = Payload->Revision != AimRevision
-		|| !SameSolvedInput(
-			Payload->Input,
-			InteractionState
-				== EABTSM11FinaleInteractionState::ReleasePending
-				? FrozenReleaseInput
-				: Stabilizer.GetControlledInput());
+	const bool bInputMatches = SameSolvedInput(
+		Payload->Input,
+		InteractionState
+			== EABTSM11FinaleInteractionState::ReleasePending
+			? FrozenReleaseInput
+			: Stabilizer.GetControlledInput());
+	const bool bStale = !ABTSM11CanPublishLatestOnlyPreview(
+		Payload->Revision,
+		AimRevision,
+		bInputMatches);
 	if (bStale)
 	{
+		++DiscardedPreviewSolveCount;
 		bPreviewDirty = true;
+		QueuePreviewSolveIfNeeded();
 		return;
 	}
 
+	LastPreviewSolveMilliseconds =
+		Payload->SolveDurationMilliseconds;
+	LastPreviewLatencyMilliseconds =
+		(FPlatformTime::Seconds()
+			- Payload->SubmittedPlatformSeconds) * 1000.0;
 	LatestSolvedRevision = Payload->Revision;
 	LatestSolvedInput = Payload->Input;
 	LatestQualifiedResult = MoveTemp(Payload->QualifiedResult);
@@ -269,7 +292,6 @@ void AABTSM11FinaleInteractionSystem::HandlePreviewSolveCompleted(
 	}
 	if (bPreviewDirty)
 	{
-		PreviewSubmitAccumulatorSeconds = PreviewSubmitIntervalSeconds;
 		QueuePreviewSolveIfNeeded();
 	}
 }
@@ -326,12 +348,18 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 			: nullptr;
 	const FABTSM11TrajectoryResult* Nominal =
 		bNominalPhysicalReady ? &NominalPhysicalResult : nullptr;
-	if (!PreviewPlaybackPlan.Build(
-		FinaleSystem->GetLayoutPreset(),
-		LatestQualifiedResult,
-		CurrentClassification,
-		Physical,
-		Nominal))
+	const bool bBuilt = FinaleSystem->IsEditorCandidateMode()
+		? PreviewPlaybackPlan.BuildCandidateQualified(
+			FinaleSystem->GetLayoutPreset(),
+			LatestQualifiedResult,
+			CurrentClassification)
+		: PreviewPlaybackPlan.Build(
+			FinaleSystem->GetLayoutPreset(),
+			LatestQualifiedResult,
+			CurrentClassification,
+			Physical,
+			Nominal);
+	if (!bBuilt)
 	{
 		const FString PlanFailure = PreviewPlaybackPlan.Failure;
 		if (InteractionState
@@ -386,7 +414,9 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	}
 	if (CurrentClassification.IsF(4)
 		&& (!PreviewPlaybackPlan.bQualifiedF4
-			|| !PreviewPlaybackPlan.bPhysicalTargetHit))
+			|| (FinaleSystem->IsEditorCandidateMode()
+				? !PreviewPlaybackPlan.bCandidateQualifiedIntercept
+				: !PreviewPlaybackPlan.bPhysicalTargetHit)))
 	{
 		return false;
 	}
@@ -411,18 +441,24 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 			+ 10.0;
 	}
 	PlaybackPresentationEndTimeSeconds =
-		ReleasedPlaybackPlan.bPhysicalTargetHit
+		(ReleasedPlaybackPlan.bPhysicalTargetHit
+			|| ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 		? ReleasedPlaybackPlan.DurationSeconds
 		: ABTSM11ResolveFailurePresentationEndTime(
 			FinaleSystem->GetLayoutPreset(),
 			LatestQualifiedResult,
 			ReleasedPlaybackPlan,
 			BirdClearanceCM);
-	if (!ReleasedPlaybackPlan.bPhysicalTargetHit)
+	if (!ReleasedPlaybackPlan.bPhysicalTargetHit
+		&& !ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 	{
+		const double EffectivePlaybackTimeScale =
+			FinaleSystem->IsEditorCandidateMode()
+				? 1.0
+				: FMath::Max(0.1, PlaybackTimeScale);
 		const double FailureDurationCap =
 			FMath::Max(1.0, MaximumFailureFlightDisplaySeconds)
-			* FMath::Max(0.1, PlaybackTimeScale);
+			* EffectivePlaybackTimeScale;
 		PlaybackPresentationEndTimeSeconds = FMath::Min(
 			PlaybackPresentationEndTimeSeconds,
 			ReleasedPlaybackPlan.Points[0].TimeSeconds
@@ -436,10 +472,11 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d Physical=%d Transfer=%d PresentationEnd=%.3f"),
+		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d CandidateQualified=%d Physical=%d Transfer=%d PresentationEnd=%.3f"),
 		ReleasedPlaybackPlan.ReleasedTrajectoryHash,
 		ReleasedPlaybackPlan.PlanHash,
 		ReleasedPlaybackPlan.bQualifiedF4 ? 1 : 0,
+		ReleasedPlaybackPlan.bCandidateQualifiedIntercept ? 1 : 0,
 		ReleasedPlaybackPlan.bPhysicalTargetHit ? 1 : 0,
 		ReleasedPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0,
 		PlaybackPresentationEndTimeSeconds);

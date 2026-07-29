@@ -4,13 +4,29 @@
 
 #include "ABTSRuntime.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM11PlayerController.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "UI/ABTSM11FinaleHUD.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
+
+#if WITH_EDITOR
+namespace
+{
+	TAutoConsoleVariable<int32> CVarABTSM11CandidateRank(
+		TEXT("abts.M11.CandidateRank"),
+		0,
+		TEXT("Editor-only M11-C v2.1 experience layout. ")
+		TEXT("0 keeps the production Certified v1 bundle; ")
+		TEXT("1..4 rebuild the corresponding frozen, UNCERTIFIED ")
+		TEXT("M11-B v2.1 Candidate. Stop and restart PIE after changing."),
+		ECVF_Default);
+}
+#endif
 
 AABTSM11GameMode::AABTSM11GameMode()
 {
@@ -88,8 +104,40 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 
 	FABTSFinaleWorldContract WorldContract;
 	PrimaryPlanet->TryExportFinaleWorldContract(WorldContract);
+#if WITH_EDITOR
+	const int32 CandidateRank =
+		CVarABTSM11CandidateRank.GetValueOnGameThread();
+	const bool bCandidateRequested = CandidateRank != 0;
+	const bool bIsPIEWorld =
+		GetWorld() != nullptr
+		&& GetWorld()->WorldType == EWorldType::PIE;
+	const bool bUseEditorCandidate =
+		bCandidateRequested && bIsPIEWorld;
+	if (bCandidateRequested && !bIsPIEWorld)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C-v2.1][GameMode] Candidate Rank=%d ignored outside PIE; production Certified v1 remains active."),
+			CandidateRank);
+	}
+	const bool bReady = bUseEditorCandidate
+		? FinaleSystem->InitializeFromEditorCandidateRank(
+			CandidateRank,
+			WorldContract)
+		: FinaleSystem->InitializeFromWorldContract(WorldContract);
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C-v2.1][GameMode] LayoutSelection=%s Rank=%d"),
+		bUseEditorCandidate
+			? TEXT("EditorCandidate-UNCERTIFIED")
+			: TEXT("ProductionCertifiedV1"),
+		CandidateRank);
+#else
 	const bool bReady =
 		FinaleSystem->InitializeFromWorldContract(WorldContract);
+#endif
 	if (bReady)
 	{
 		AABTSBirdParty* ReadyParty = nullptr;

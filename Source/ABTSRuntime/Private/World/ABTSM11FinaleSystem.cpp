@@ -89,6 +89,90 @@ namespace
 		}
 		return true;
 	}
+
+	bool ValidateFinaleWorldCompatibility(
+		const FABTSM11FinaleLayoutPreset& InPreset,
+		const int32 GeneratorVersion,
+		const double PrimaryRadiusCM,
+		const FABTSM110FinaleLocalFrame& InFinaleFrame,
+		FString* OutFailure)
+	{
+		if (GeneratorVersion != InPreset.CompatibleGeneratorVersion)
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("IncompatibleGeneratorVersion"));
+		}
+		if (!InFinaleFrame.IsUsable())
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("InvalidFinaleFrame"));
+		}
+		if (!InFinaleFrame.WorldTransform.GetScale3D().Equals(
+				FVector::OneVector,
+				1.0e-4))
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("ScaledFinaleFrame"));
+		}
+		if (InFinaleFrame.LayoutVersion
+			!= InPreset.CompatibleFrameLayoutVersion)
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("IncompatibleFrameLayoutVersion"));
+		}
+		if (!IsFinitePositive(PrimaryRadiusCM)
+			|| FMath::Abs(
+				PrimaryRadiusCM - InPreset.ReferencePrimaryRadiusCM)
+				> InPreset.PrimaryCompatibilityToleranceCM)
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("IncompatiblePrimaryRadius"));
+		}
+
+		const FABTSM11GravityBodySpec& Primary =
+			InPreset.CanonicalScenario.GetPrimary();
+		const FVector3d ExpectedPrimaryCenter(
+			0.0,
+			0.0,
+			-InPreset.ReferencePrimaryRadiusCM);
+		if (!IsFiniteFinaleBoundaryVector(Primary.CenterCM)
+			|| !Primary.CenterCM.Equals(
+				ExpectedPrimaryCenter,
+				InPreset.PrimaryCompatibilityToleranceCM)
+			|| FMath::Abs(
+				Primary.VisualRadiusCM
+					- InPreset.ReferencePrimaryRadiusCM)
+				> InPreset.PrimaryCompatibilityToleranceCM
+			|| FMath::Abs(
+				Primary.CollisionRadiusCM
+					- InPreset.ReferencePrimaryRadiusCM)
+				> InPreset.PrimaryCompatibilityToleranceCM)
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("IncompatibleCanonicalPrimary"));
+		}
+
+		const double CanonicalLaunchRadiusCM =
+			(InPreset.LaunchModel.PouchLocalPositionCM
+				- Primary.CenterCM).Length();
+		if (!IsFinitePositive(CanonicalLaunchRadiusCM)
+			|| FMath::Abs(
+				CanonicalLaunchRadiusCM
+					- InPreset.ReferenceLaunchRadiusCM)
+				> InPreset.PrimaryCompatibilityToleranceCM)
+		{
+			return RejectRuntimeBoundary(
+				OutFailure,
+				TEXT("IncompatibleLaunchRadius"));
+		}
+		return true;
+	}
 }
 
 AABTSM11FinaleSystem::AABTSM11FinaleSystem()
@@ -149,6 +233,83 @@ bool AABTSM11FinaleSystem::InitializeFromWorldContract(
 		WorldContract.LaunchFrame);
 }
 
+#if WITH_EDITOR
+
+bool AABTSM11FinaleSystem::InitializeFromEditorCandidateRank(
+	const int32 CandidateRank,
+	const FABTSFinaleWorldContract& WorldContract)
+{
+	if (State != EABTSM11FinaleSystemState::Uninitialized)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C-v2.1][Candidate] Reinitialization rejected State=%d."),
+			static_cast<int32>(State));
+		return false;
+	}
+	if (WorldContract.Identity.ContractVersion
+			!= FABTSGeneratedWorldIdentity::CurrentContractVersion
+		|| !WorldContract.Identity.bSourceWorldAccepted
+		|| WorldContract.Identity.GenerationAttempt < 0)
+	{
+		return FailInitialization(TEXT("PrimaryWorldContractInvalid"));
+	}
+
+	FABTSM11FinaleLayoutPreset CandidatePreset;
+	FABTSM11CandidateExperienceIdentity CandidateIdentity;
+	FString Failure;
+	if (!FABTSM11CandidateExperienceCatalog::BuildCandidate(
+			CandidateRank,
+			CandidatePreset,
+			CandidateIdentity,
+			&Failure))
+	{
+		return FailInitialization(
+			FString::Printf(
+				TEXT("EditorCandidateBuildRejected:%s"),
+				*Failure));
+	}
+
+	FString PresetFailure;
+	if (!CandidateIdentity.IsValid()
+		|| CandidateIdentity.Rank != CandidateRank
+		|| !CandidatePreset.IsValid(&PresetFailure)
+		|| CandidatePreset.PresetSourceHash != 0
+		|| CandidatePreset.PresetHash != 0
+		|| CandidatePreset.ScanContractHash != 0
+		|| CandidatePreset.CertificationHash != 0
+		|| CandidatePreset.NominalTrajectoryHash != 0
+		|| CandidatePreset.PhysicalPlaybackTrajectoryHash != 0
+		|| CandidatePreset.CertifiedBundleHash != 0)
+	{
+		return FailInitialization(
+			FString::Printf(
+				TEXT("EditorCandidateBoundaryRejected:%s"),
+				PresetFailure.IsEmpty()
+					? TEXT("NonCertifiedIdentityViolation")
+					: *PresetFailure));
+	}
+	if (!ValidateFinaleWorldCompatibility(
+			CandidatePreset,
+			WorldContract.Identity.GeneratorVersion,
+			WorldContract.PrimaryRadiusCM,
+			WorldContract.LaunchFrame,
+			&Failure))
+	{
+		return FailInitialization(Failure);
+	}
+
+	LayoutPreset = MoveTemp(CandidatePreset);
+	bEditorCandidateMode = true;
+	EditorCandidateIdentity = CandidateIdentity;
+	return CommitValidatedPreset(
+		WorldContract.Identity.GeneratorVersion,
+		WorldContract.LaunchFrame);
+}
+
+#endif
+
 bool AABTSM11FinaleSystem::InitializeFromRuntimeData(
 	const int32 GeneratorVersion,
 	const double PrimaryRadiusCM,
@@ -177,6 +338,9 @@ bool AABTSM11FinaleSystem::InitializeFromCertifiedPreset(
 		return false;
 	}
 
+	bEditorCandidateMode = false;
+	EditorCandidateIdentity =
+		FABTSM11CandidateExperienceIdentity();
 	LayoutPreset = InPreset;
 	FString Failure;
 	if (!ValidateRuntimeBoundary(
@@ -189,7 +353,17 @@ bool AABTSM11FinaleSystem::InitializeFromCertifiedPreset(
 		return FailInitialization(Failure);
 	}
 
+	return CommitValidatedPreset(
+		GeneratorVersion,
+		InFinaleFrame);
+}
+
+bool AABTSM11FinaleSystem::CommitValidatedPreset(
+	const int32 GeneratorVersion,
+	const FABTSM110FinaleLocalFrame& InFinaleFrame)
+{
 	FinaleFrame = InFinaleFrame;
+	FString Failure;
 	if (!SpawnPresentationActorsAtomically(&Failure))
 	{
 		return FailInitialization(Failure);
@@ -201,7 +375,7 @@ bool AABTSM11FinaleSystem::InitializeFromCertifiedPreset(
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-B][FinaleSystem] Ready Generator=%d FrameLayout=%d Pair=%d PresetHash=0x%016llx ScenarioHash=0x%08x BundleHash=0x%016llx Assists=%d UFO=%d"),
+		TEXT("[ABTS][M11-B][FinaleSystem] Ready Generator=%d FrameLayout=%d Pair=%d PresetHash=0x%016llx ScenarioHash=0x%08x BundleHash=0x%016llx Assists=%d UFO=%d Mode=%s%s%s"),
 		GeneratorVersion,
 		FinaleFrame.LayoutVersion,
 		FinaleFrame.SlotPairId,
@@ -209,7 +383,14 @@ bool AABTSM11FinaleSystem::InitializeFromCertifiedPreset(
 		LayoutPreset.CanonicalScenario.ScenarioHash,
 		static_cast<unsigned long long>(LayoutPreset.CertifiedBundleHash),
 		GetSpawnedAssistActorCount(),
-		HasSpawnedUFOActor() ? 1 : 0);
+		HasSpawnedUFOActor() ? 1 : 0,
+		bEditorCandidateMode
+			? TEXT("EditorCandidate-UNCERTIFIED")
+			: TEXT("CertifiedV1"),
+		bEditorCandidateMode ? TEXT(" ") : TEXT(""),
+		bEditorCandidateMode
+			? *EditorCandidateIdentity.ToLogString()
+			: TEXT(""));
 	return true;
 }
 
@@ -251,81 +432,12 @@ bool AABTSM11FinaleSystem::ValidateRuntimeBoundary(
 			OutFailure,
 			TEXT("CertifiedBundleManifestMismatch"));
 	}
-	if (GeneratorVersion != InPreset.CompatibleGeneratorVersion)
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("IncompatibleGeneratorVersion"));
-	}
-	if (!InFinaleFrame.IsUsable())
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("InvalidFinaleFrame"));
-	}
-	if (!InFinaleFrame.WorldTransform.GetScale3D().Equals(
-			FVector::OneVector,
-			1.0e-4))
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("ScaledFinaleFrame"));
-	}
-	if (InFinaleFrame.LayoutVersion
-		!= InPreset.CompatibleFrameLayoutVersion)
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("IncompatibleFrameLayoutVersion"));
-	}
-	if (!IsFinitePositive(PrimaryRadiusCM)
-		|| FMath::Abs(
-			PrimaryRadiusCM - InPreset.ReferencePrimaryRadiusCM)
-			> InPreset.PrimaryCompatibilityToleranceCM)
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("IncompatiblePrimaryRadius"));
-	}
-
-	const FABTSM11GravityBodySpec& Primary =
-		InPreset.CanonicalScenario.GetPrimary();
-	const FVector3d ExpectedPrimaryCenter(
-		0.0,
-		0.0,
-		-InPreset.ReferencePrimaryRadiusCM);
-	if (!IsFiniteFinaleBoundaryVector(Primary.CenterCM)
-		|| !Primary.CenterCM.Equals(
-			ExpectedPrimaryCenter,
-			InPreset.PrimaryCompatibilityToleranceCM)
-		|| FMath::Abs(
-			Primary.VisualRadiusCM
-				- InPreset.ReferencePrimaryRadiusCM)
-			> InPreset.PrimaryCompatibilityToleranceCM
-		|| FMath::Abs(
-			Primary.CollisionRadiusCM
-				- InPreset.ReferencePrimaryRadiusCM)
-			> InPreset.PrimaryCompatibilityToleranceCM)
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("IncompatibleCanonicalPrimary"));
-	}
-
-	const double CanonicalLaunchRadiusCM =
-		(InPreset.LaunchModel.PouchLocalPositionCM
-			- Primary.CenterCM).Length();
-	if (!IsFinitePositive(CanonicalLaunchRadiusCM)
-		|| FMath::Abs(
-			CanonicalLaunchRadiusCM
-				- InPreset.ReferenceLaunchRadiusCM)
-			> InPreset.PrimaryCompatibilityToleranceCM)
-	{
-		return RejectRuntimeBoundary(
-			OutFailure,
-			TEXT("IncompatibleLaunchRadius"));
-	}
-	return true;
+	return ValidateFinaleWorldCompatibility(
+		InPreset,
+		GeneratorVersion,
+		PrimaryRadiusCM,
+		InFinaleFrame,
+		OutFailure);
 }
 
 bool AABTSM11FinaleSystem::BuildRequest(
@@ -641,6 +753,9 @@ void AABTSM11FinaleSystem::DestroyPresentationActors()
 bool AABTSM11FinaleSystem::FailInitialization(const FString& Reason)
 {
 	DestroyPresentationActors();
+	bEditorCandidateMode = false;
+	EditorCandidateIdentity =
+		FABTSM11CandidateExperienceIdentity();
 	State = EABTSM11FinaleSystemState::Failed;
 	FailureReason = Reason.IsEmpty()
 		? TEXT("UnknownFinaleInitializationFailure")
