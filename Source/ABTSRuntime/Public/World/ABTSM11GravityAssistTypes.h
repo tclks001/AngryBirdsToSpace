@@ -175,6 +175,14 @@ struct ABTSRUNTIME_API FABTSM11SolverConfig
 	double MaximumSimulationTimeSeconds = 120.0;
 	int32 MaximumStepCount = 2000000;
 	int32 MaximumSubdivisionDepth = 6;
+	/**
+	 * Solver v2 may grow the fixed step by this many exact powers of two while
+	 * the trajectory is outside every assist influence sphere. Inside an
+	 * influence sphere the fixed step remains the largest permitted step.
+	 *
+	 * Version 1 requires zero and therefore preserves its byte-for-byte stream.
+	 */
+	int32 MaximumCoastStepExpansionDepth = 0;
 
 	double AssistStepRadiusFraction = 0.04;
 	double CollisionStepRadiusFraction = 0.25;
@@ -196,6 +204,9 @@ struct ABTSRUNTIME_API FABTSM11SolverConfig
 
 	/** Bit 0/1/2 controls only the gameplay energy exchange of assist 1/2/3. */
 	uint8 EnabledAssistMask = 0x7u;
+
+	/** Backward-compatible adaptive coast policy consumed later by M11-B v2. */
+	static FABTSM11SolverConfig MakeV2();
 
 	bool IsGameplayAssistEnabled(int32 AssistIndex) const;
 	bool IsValid(FString* OutFailure = nullptr) const;
@@ -246,6 +257,50 @@ struct ABTSRUNTIME_API FABTSM11TrajectoryEvent
 	double AppliedEnergyChangeCM2PerSec2 = 0.0;
 };
 
+/** One completed assist phase derived from authoritative solver events. */
+struct ABTSRUNTIME_API FABTSM11AssistPhaseDiagnostics
+{
+	bool bComplete = false;
+	double EnterTimeSeconds = 0.0;
+	double ClosestTimeSeconds = 0.0;
+	double ExitTimeSeconds = 0.0;
+	double CoastBeforeEnterSeconds = 0.0;
+	double InfluenceDurationSeconds = 0.0;
+	double ActualDeflectionRadians = 0.0;
+	double NaturalDeflectionRadians = 0.0;
+	double EntrySpeedCMPerSec = 0.0;
+	double ExitSpeedCMPerSec = 0.0;
+	double AppliedEnergyChangeCM2PerSec2 = 0.0;
+};
+
+/**
+ * Pure-data pacing and turn diagnostics for M11-B v2 search.
+ *
+ * These values are derived from hashed points/events and do not alter the
+ * trajectory identity. M11-A reports facts; M11-B owns pacing thresholds.
+ */
+struct ABTSRUNTIME_API FABTSM11TrajectoryPacingDiagnostics
+{
+	int32 DiagnosticsVersion = 1;
+	double StartTimeSeconds = 0.0;
+	double EndTimeSeconds = 0.0;
+	double TotalFlightTimeSeconds = 0.0;
+	int32 FirstObservedAssistIndex = 0;
+	int32 LastObservedAssistIndex = 0;
+	int32 ObservedAssistCount = 0;
+	TStaticArray<FABTSM11AssistPhaseDiagnostics, FABTSM11GravityScenario::AssistCount>
+		Assists;
+	bool bTargetHit = false;
+	double TargetHitTimeSeconds = 0.0;
+	double FinalCoastSeconds = 0.0;
+	double TotalCoastSeconds = 0.0;
+	double TotalInfluenceDurationSeconds = 0.0;
+	double MaximumCoastSeconds = 0.0;
+	double MaximumInfluenceDurationSeconds = 0.0;
+
+	FABTSM11TrajectoryPacingDiagnostics();
+};
+
 /** Complete authoritative trajectory; rendering may derive a decimated copy later. */
 struct ABTSRUNTIME_API FABTSM11TrajectoryResult
 {
@@ -264,4 +319,7 @@ struct ABTSRUNTIME_API FABTSM11TrajectoryResult
 	bool DidContactTarget() const { return TargetContactCount > 0; }
 	const FABTSM11TrajectoryEvent* FindFirstEvent(EABTSM11TrajectoryEventType Type) const;
 	const FABTSM11TrajectoryEvent* FindAssistEvent(EABTSM11TrajectoryEventType Type, int32 AssistIndex) const;
+	bool BuildPacingDiagnostics(
+		FABTSM11TrajectoryPacingDiagnostics& OutDiagnostics,
+		FString* OutFailure = nullptr) const;
 };

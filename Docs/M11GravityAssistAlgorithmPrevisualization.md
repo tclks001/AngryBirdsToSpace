@@ -1,5 +1,7 @@
 # M11：终局三重引力弹弓算法预演
 
+> v2 优化入口：[M11 v2 终局引力弹弓优化总设计与阶段边界](M11V2FinaleOptimizationDesign.md)。M11-A v2.1 与 [M11-B v2.1 标准 C++ 候选布局搜索](M11B21CandidateSearchDesign.md)已完成自动门禁，当前交给 M11-C v2.1 比较 4 个未认证候选；体验冻结后才进入 M11-B v2.2 完整输入域认证。
+
 > 状态：产品路线已确认；M11.0、M11-A 与 M11-B 均已完成，M11-B 已通过用户 PIE。[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)初版及本轮 PIE 回归修复的 C++、强制 Unity 全链接、全新进程自动化和完整 F4 接管闭包已通过，等待用户重新进行有渲染 PIE；M11-D 终局演出尚未开始。
 >
 > 父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md)。

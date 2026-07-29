@@ -2,6 +2,8 @@
 
 > 状态：M11.0 与 M11-A 已完成；M11-B C++、Development Editor 编译、全新进程 Unit/Runtime/ConstructiveSearch/FullInputDomain 自动认证和用户 PIE 均已完成，v1 预设与认证 Hash 已冻结；现已正式交接至 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)。
 >
+> v2 说明：本文以下数值和 Hash 仍是已验收的 v1 权威；M11-B v2.1 已生成 4 个未认证候选并完成快速同源重放，详见 [M11-B v2.1 候选搜索子稿](M11B21CandidateSearchDesign.md)。强助推、非共线、60 秒节奏和三维域重认证的总边界见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)；完整输入域认证仍留到体验冻结后的 M11-B v2.2。
+>
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
 > 总设计：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md)。
@@ -441,6 +443,12 @@ F3 \ F4 != ∅
 `BuildConstructiveSeed` 的正式自动化证明固定搜索合同能确定性地产生一个三助推 F4 候选，并在重复运行时给出相同 SearchOutput/NominalTrajectory Hash；它不是运行时搜索，也不要求其未经后续离线精化的中间 Preset Hash 等于最终 `MakeCertifiedV1()`。只有完成后续精化和第 8 节认证的候选才可硬编码为生产 v1。
 
 批准运行中的两次固定合同重放各执行 `2213` 次求解，并各淘汰 `383` 个几何非法候选和 `84` 个事件/走廊非法候选；两次都得到搜索阶段 `PresetHash=0x1d0d519420ef9bf4`、`TrajectoryHash=0x3cfb9fc14900b8ab`。这两个 Hash 只证明构造搜索输出可复现，不是第 9.2 节冻结的生产 Preset/nominal 身份。
+
+### 7.4 v2.1 标准 C++ 候选库
+
+v2.1 没有复用本节 v1 的生产预设或认证 Hash，而是共同编译 M11-A v2.1 标准 C++ Core，由标准 C++ `M11Search` 构造、精确求值、分类和排名；Python 只调度分片进程。一次冻结的 `256` 工作项搜索得到 `4` 个状态为 `Candidate` 的布局，其中首选 `Work=166` 的总时长为 `36.117 s`、最长 coast 为 `6.841 s`、三次实际偏转为 `0.606 / 0.500 / 0.532 rad`，并已通过 UE/CLI 逐字段快速同源重放。
+
+该候选库只供 M11-C v2.1 Editor-only 手感比较；其 `CertificationHash` 与 `CertifiedBundleHash` 均为零，不得覆盖本文 v1 生产默认值。搜索合同、四候选身份、断点恢复和自动验收证据见 [M11-B v2.1 标准 C++ 候选布局搜索与快速同源重放](M11B21CandidateSearchDesign.md)。体验批准并冻结唯一候选后，仍须按第 8 节语义执行 M11-B v2.2 完整三维域、连通性、旁路与消融认证。
 
 ## 8. 完整输入域认证
 

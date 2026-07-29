@@ -2,9 +2,11 @@
 
 > 状态：M11-B 已完成用户 PIE 验收；M11-C 初版与本轮 PIE 回归修复的 C++、强制完整 Unity 全链接、全新进程 Unit/Runtime、21,025 输入/558 F4 接管闭包及上游快速回归均已通过；等待用户按第 12 节重新完成有渲染 PIE。
 >
+> v2 说明：本文以下是当前 v1 交互与播放基线；[M11-B v2.1](M11B21CandidateSearchDesign.md) 已交付 4 个通过快速同源重放、但尚未完整认证的 Candidate，可进入 Editor-only M11-C v2.1 手感比较。M6 同手感、三维输入映射和 near-frame latest-only 预演边界见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)；正式生产切换仍必须等待 M11-B v2.2 Certified Bundle。
+>
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
-> 上游：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · [M11-A 纯数据引力弹弓求解器](M11AGravityAssistSolverDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
+> 上游：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) · [M11-A 纯数据引力弹弓求解器](M11AGravityAssistSolverDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
 >
 > 表现语义上游：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
 >

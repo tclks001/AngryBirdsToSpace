@@ -1,0 +1,44 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "m11-core-msvc-release",
+      "displayName": "M11 Core standalone MSVC Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../Intermediate/M11CoreStandalone/cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "m11-core-msvc-release",
+      "configurePreset": "m11-core-msvc-release",
+      "jobs": 0,
+      "targets": [
+        "ABTSM11CoreConformance",
+        "ABTSM11SearchCLI"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "m11-core-msvc-release",
+      "configurePreset": "m11-core-msvc-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}
