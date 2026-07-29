@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Building/ABTSM73DAGFailureFrontierTypes.h"
 #include "ABTSM73DAGTypes.generated.h"
 
 /** M7.3-DAG-1 seed topology. This is independent from the Legacy silhouette enum. */
@@ -52,6 +53,39 @@ enum class EABTSM73DAGSupportPattern : uint8
 	FourColumnFootprint,
 	/** Internal lowering only: multiple narrow logical edges jointly form the load's 2/3/4-point support hull. */
 	SingleColumnInterface UMETA(Hidden)
+};
+
+/** DAG3-B meaning assigned to each authoritative realized column center. */
+enum class EABTSM73DAGRealizedColumnRole : uint8
+{
+	Ordinary,
+	FailureWeak,
+	FailureStrongPivot,
+	FailureSeamKey
+};
+
+/**
+ * Stable macro-interface transaction produced from a DAG3-A physical frontier.
+ *
+ * Baseline physical NodeIds are deliberately not used as rewrite addresses:
+ * layout and module compilation are rerun, so only macro identities survive
+ * the transaction.
+ */
+struct FABTSM73DAGFailureRewriteIntent
+{
+	bool bEnabled = false;
+	EABTSM73DAGFailurePattern Pattern = EABTSM73DAGFailurePattern::Auto;
+	uint32 SourceFrontierHash = 0;
+	int32 SupportMacroNodeId = INDEX_NONE;
+	int32 LoadMacroNodeId = INDEX_NONE;
+	TArray<int32> AffectedMacroNodeIds;
+	FVector2D ExpectedFailureDirectionXY = FVector2D::ZeroVector;
+	float OffsetSeamShiftCM = 0.0f;
+	float BaselineInterfaceOffsetAlongDirectionCM = 0.0f;
+	float ContactAreaSafetyFactor = 1.10f;
+	float MinInitialSupportMarginCM = 2.0f;
+	float MinPostFailureTipMarginCM = 8.0f;
+	float MaxReseatRisk = 0.35f;
 };
 
 /** Pure-data M7.3-DAG generation settings. No Actor or World access is allowed here. */
@@ -198,6 +232,8 @@ struct FABTSM73DAGSelectedSupport
 	float RealizedColumnWidthCM = 0.0f;
 	/** Exact centers accepted by the load solver. The compiler must consume these rather than re-deriving geometry. */
 	TArray<FVector2D> RealizedColumnCenters;
+	/** One role for each RealizedColumnCenter. Empty means the unchanged DAG2.3 ordinary path. */
+	TArray<EABTSM73DAGRealizedColumnRole> RealizedColumnRoles;
 	float Cost = 0.0f;
 };
 

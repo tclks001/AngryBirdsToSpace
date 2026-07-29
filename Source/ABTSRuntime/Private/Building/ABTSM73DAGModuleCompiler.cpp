@@ -103,6 +103,15 @@ bool FABTSM73DAGModuleCompiler::Compile(
 				Support.LoadMacroNodeId);
 			return false;
 		}
+		if (!Support.RealizedColumnRoles.IsEmpty()
+			&& Support.RealizedColumnRoles.Num() != Support.RealizedColumnCenters.Num())
+		{
+			OutError = FString::Printf(
+				TEXT("DAGColumnRoleCountMismatch:%d:%d"),
+				Support.SupportMacroNodeId,
+				Support.LoadMacroNodeId);
+			return false;
+		}
 		FABTSM73DAGPhysicalSupportMapping& Mapping = OutData.DAGPhysicalSupportMappings.AddDefaulted_GetRef();
 		Mapping.SupportMacroNodeId = Support.SupportMacroNodeId;
 		Mapping.LoadMacroNodeId = Support.LoadMacroNodeId;
@@ -110,12 +119,25 @@ bool FABTSM73DAGModuleCompiler::Compile(
 		Mapping.LoadPlateNodeId = *LoadPlateId;
 		Mapping.SupportPattern = Support.SupportPattern;
 		Mapping.RealizedColumnWidthCM = RealizedColumnWidthCM;
-		for (const FVector2D& CenterXY : Support.RealizedColumnCenters)
+		for (int32 CenterIndex = 0;
+			CenterIndex < Support.RealizedColumnCenters.Num();
+			++CenterIndex)
 		{
+			const FVector2D& CenterXY = Support.RealizedColumnCenters[CenterIndex];
+			const EABTSM73DAGRealizedColumnRole ColumnRole =
+				Support.RealizedColumnRoles.IsValidIndex(CenterIndex)
+				? Support.RealizedColumnRoles[CenterIndex]
+				: EABTSM73DAGRealizedColumnRole::Ordinary;
+			const EABTSM73BrickSemanticRole BrickRole =
+				ColumnRole == EABTSM73DAGRealizedColumnRole::FailureWeak
+					|| ColumnRole == EABTSM73DAGRealizedColumnRole::FailureSeamKey
+				? EABTSM73BrickSemanticRole::WeakSupport
+				: EABTSM73BrickSemanticRole::Column;
 			AddBrick(OutData, INDEX_NONE, FVector(CenterXY.X, CenterXY.Y, (BottomZ + TopZ) * 0.5f),
 				FVector(RealizedColumnWidthCM, RealizedColumnWidthCM, Height),
-				EABTSM73BrickSemanticRole::Column, LoadLayout->StructuralLevel, BuildingSettings.PrimaryMaterial);
+				BrickRole, LoadLayout->StructuralLevel, BuildingSettings.PrimaryMaterial);
 			Mapping.ColumnNodeIds.Add(OutData.Bricks.Last().NodeId);
+			Mapping.ColumnRoles.Add(ColumnRole);
 		}
 	}
 	OutData.DAGMacroNodeCount = Graph.MacroNodes.Num();

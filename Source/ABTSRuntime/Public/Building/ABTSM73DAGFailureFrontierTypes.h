@@ -13,6 +13,26 @@ enum class EABTSM73DAGFailureCandidateKind : uint8
 	SupportInterfaceCutSet
 };
 
+/** Geometry/topology rewrite materialized around one accepted DAG3-A interface. */
+UENUM(BlueprintType)
+enum class EABTSM73DAGFailurePattern : uint8
+{
+	Auto,
+	InternalSingleSupport,
+	InternalAsymmetricDualSupport,
+	InternalOffsetSeam
+};
+
+/** Static failure motion expected from the rewritten interface. */
+UENUM(BlueprintType)
+enum class EABTSM73DAGFailureMotion : uint8
+{
+	None,
+	Drop,
+	Tip,
+	SlideThenTip
+};
+
 /**
  * DAG3-A pure-data frontier discovery settings.
  *
@@ -61,6 +81,39 @@ struct FABTSM73DAGFailureFrontierSettings
 	int32 MaxBypassSupportEdgeCount = 0;
 };
 
+/**
+ * DAG3-B transaction settings.
+ *
+ * Production stays disabled until DAG3-C attack/material routing and DAG-4
+ * settled/Chaos counterfactuals are complete.
+ */
+USTRUCT(BlueprintType)
+struct FABTSM73DAGFailurePatternSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-3B|Activation")
+	bool bEnableGeometryRewrite = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-3B|Pattern")
+	EABTSM73DAGFailurePattern Pattern = EABTSM73DAGFailurePattern::Auto;
+
+	/** Hard bound over (frontier, pattern) transactions. Exhaustion rejects the candidate. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-3B|Budget", meta = (ClampMin = "1", ClampMax = "128"))
+	int32 MaxRewriteAttemptCount = 48;
+
+	/** Required column area is multiplied by this value before fitting rewritten supports. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-3B|Contact", meta = (ClampMin = "1.01", ClampMax = "2.0"))
+	float ContactAreaSafetyFactor = 1.10f;
+
+	/** OffsetSeam translates the complete affected closure by this fraction of the interface long axis. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-3B|Offset Seam", meta = (ClampMin = "0.05", ClampMax = "0.35"))
+	float OffsetSeamShiftRatio = 0.18f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DAG-3B|Offset Seam", meta = (ClampMin = "0.0", UIMax = "160.0"))
+	float MinOffsetSeamShiftCM = 36.0f;
+};
+
 /** One deterministic DAG3-A candidate and its static counterfactual metrics. */
 struct FABTSM73DAGFailureFrontierCandidate
 {
@@ -89,5 +142,32 @@ struct FABTSM73DAGFailureFrontierAnalysis
 	int32 SelectedCandidateIndex = INDEX_NONE;
 	uint32 SelectedFrontierHash = 0;
 	TArray<FABTSM73DAGFailureFrontierCandidate> Candidates;
+	FString RejectReason;
+};
+
+/** Complete DAG3-B transaction result. Geometry is stored in FABTSM73StructureData. */
+struct FABTSM73DAGFailurePatternResult
+{
+	bool bEnabled = false;
+	bool bApplied = false;
+	EABTSM73DAGFailurePattern Pattern = EABTSM73DAGFailurePattern::Auto;
+	EABTSM73DAGFailureMotion ExpectedMotion = EABTSM73DAGFailureMotion::None;
+	uint32 SourceFrontierHash = 0;
+	uint32 RealizedPatternHash = 0;
+	int32 SupportMacroNodeId = INDEX_NONE;
+	int32 LoadMacroNodeId = INDEX_NONE;
+	int32 SupportPlateNodeId = INDEX_NONE;
+	int32 LoadPlateNodeId = INDEX_NONE;
+	int32 RewriteAttemptCount = 0;
+	int32 RemovedColumnCount = 0;
+	TArray<int32> WeakNodeIds;
+	TArray<int32> RemainingSupportNodeIds;
+	TArray<int32> AffectedMainBodyNodeIds;
+	FVector ExpectedFailureDirectionLocal = FVector::ZeroVector;
+	float InitialSupportMarginCM = 0.0f;
+	float PostFailureTipMarginCM = 0.0f;
+	float ReseatRisk = 1.0f;
+	float OffsetSeamShiftCM = 0.0f;
+	int32 BypassSupportEdgeCount = 0;
 	FString RejectReason;
 };

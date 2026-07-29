@@ -127,12 +127,163 @@ namespace
 		}
 		return Margin;
 	}
+
+	void AddSquareCorners(const FVector2D& Center, const float Width, TArray<FVector2D>& OutCorners)
+	{
+		const float Half = Width * 0.5f;
+		OutCorners.Add(Center + FVector2D(-Half, -Half));
+		OutCorners.Add(Center + FVector2D(Half, -Half));
+		OutCorners.Add(Center + FVector2D(-Half, Half));
+		OutCorners.Add(Center + FVector2D(Half, Half));
+	}
+
+	bool MakeFailureRewriteSupport(
+		const FABTSM73DAGFailureRewriteIntent& Intent,
+		const FABTSM73DAGLayoutSettings& Settings,
+		const FABTSM73DAGMacroLayout& Load,
+		const FVector2D& Resultant,
+		const FABTSM73DAGSelectedSupport& Candidate,
+		FABTSM73DAGSelectedSupport& OutSupport,
+		FString& OutError)
+	{
+		OutSupport = Candidate;
+		OutSupport.RealizedColumnCenters.Reset();
+		OutSupport.RealizedColumnRoles.Reset();
+		const bool bSingle =
+			Intent.Pattern == EABTSM73DAGFailurePattern::InternalSingleSupport;
+		const int32 ColumnCount = bSingle ? 1 : 2;
+		const FVector2D LoadCenter(Load.PlateCenter.X, Load.PlateCenter.Y);
+		const FVector2D Direction = Intent.ExpectedFailureDirectionXY.GetSafeNormal();
+		const bool bAlongX = FMath::Abs(Direction.X) >= FMath::Abs(Direction.Y);
+		const float RequiredAreaWidth = FMath::Sqrt(
+			Intent.ContactAreaSafetyFactor
+			* Settings.MinSupportContactAreaRatio
+			* Load.PlateDimensionsCM.X
+			* Load.PlateDimensionsCM.Y
+			/ static_cast<float>(ColumnCount));
+		const float CrossDelta = bAlongX
+			? FMath::Abs(LoadCenter.Y - Resultant.Y)
+			: FMath::Abs(LoadCenter.X - Resultant.X);
+		const float SingleDelta = FMath::Max(
+			FMath::Abs(LoadCenter.X - Resultant.X),
+			FMath::Abs(LoadCenter.Y - Resultant.Y));
+		const float RequiredContainmentWidth = bSingle
+			? SingleDelta + Intent.MinInitialSupportMarginCM * 2.0f
+			: CrossDelta + Intent.MinInitialSupportMarginCM * 2.0f;
+		const float Width = FMath::Max3(
+			Settings.MinAdaptiveColumnWidthCM,
+			RequiredAreaWidth,
+			RequiredContainmentWidth);
+		if (!FMath::IsFinite(Width)
+			|| Width > Settings.MaxAdaptiveColumnWidthCM + KINDA_SMALL_NUMBER)
+		{
+			OutError = FString::Printf(TEXT("DAG3BColumnWidthUnavailable:%.3f"), Width);
+			return false;
+		}
+
+		const float Half = Width * 0.5f;
+		const float Clearance = Settings.ColumnClearanceCM;
+		const FVector2D CenterMin =
+			Candidate.FeasibleColumnRegion.Min + FVector2D(Half + Clearance);
+		const FVector2D CenterMax =
+			Candidate.FeasibleColumnRegion.Max - FVector2D(Half + Clearance);
+		if (CenterMax.X < CenterMin.X || CenterMax.Y < CenterMin.Y)
+		{
+			OutError = TEXT("DAG3BRewriteInterfaceTooNarrow");
+			return false;
+		}
+
+		OutSupport.RealizedColumnWidthCM = Width;
+		if (bSingle)
+		{
+			OutSupport.SupportPattern = EABTSM73DAGSupportPattern::SingleColumnInterface;
+			const FVector2D DesiredCenter = (Resultant + LoadCenter) * 0.5f;
+			const FVector2D Center(
+				FMath::Clamp(DesiredCenter.X, CenterMin.X, CenterMax.X),
+				FMath::Clamp(DesiredCenter.Y, CenterMin.Y, CenterMax.Y));
+			const float ResultantMargin = FMath::Min(
+				Half - FMath::Abs(Resultant.X - Center.X),
+				Half - FMath::Abs(Resultant.Y - Center.Y));
+			if (ResultantMargin + KINDA_SMALL_NUMBER < Intent.MinInitialSupportMarginCM
+				|| FMath::Abs(LoadCenter.X - Center.X) > Half + KINDA_SMALL_NUMBER
+				|| FMath::Abs(LoadCenter.Y - Center.Y) > Half + KINDA_SMALL_NUMBER)
+			{
+				OutError = TEXT("DAG3BSingleSupportContainmentFailed");
+				return false;
+			}
+			OutSupport.RealizedColumnCenters.Add(Center);
+			OutSupport.RealizedColumnRoles.Add(EABTSM73DAGRealizedColumnRole::FailureWeak);
+			return true;
+		}
+
+		OutSupport.SupportPattern = EABTSM73DAGSupportPattern::TwoColumnLine;
+		const float Separation = Width
+			+ Intent.MinPostFailureTipMarginCM * 2.0f
+			+ 2.0f;
+		const float AxisCenterMin = bAlongX ? CenterMin.X : CenterMin.Y;
+		const float AxisCenterMax = bAlongX ? CenterMax.X : CenterMax.Y;
+		const float GroupMin = AxisCenterMin + Separation * 0.5f;
+		const float GroupMax = AxisCenterMax - Separation * 0.5f;
+		if (GroupMax < GroupMin)
+		{
+			OutError = TEXT("DAG3BDualSupportSpanUnavailable");
+			return false;
+		}
+		const float ResultantAxis = bAlongX ? Resultant.X : Resultant.Y;
+		const float ResultantCross = bAlongX ? Resultant.Y : Resultant.X;
+		const float LoadCross = bAlongX ? LoadCenter.Y : LoadCenter.X;
+		const float GroupAxis = FMath::Clamp(ResultantAxis, GroupMin, GroupMax);
+		const float GroupCross = FMath::Clamp(
+			(ResultantCross + LoadCross) * 0.5f,
+			bAlongX ? CenterMin.Y : CenterMin.X,
+			bAlongX ? CenterMax.Y : CenterMax.X);
+		const FVector2D Axis = bAlongX
+			? FVector2D(FMath::Sign(Direction.X), 0.0f)
+			: FVector2D(0.0f, FMath::Sign(Direction.Y));
+		const FVector2D GroupCenter = bAlongX
+			? FVector2D(GroupAxis, GroupCross)
+			: FVector2D(GroupCross, GroupAxis);
+		const FVector2D WeakCenter = GroupCenter + Axis * (Separation * 0.5f);
+		const FVector2D PivotCenter = GroupCenter - Axis * (Separation * 0.5f);
+		TArray<FVector2D> FullCorners;
+		AddSquareCorners(WeakCenter, Width, FullCorners);
+		AddSquareCorners(PivotCenter, Width, FullCorners);
+		const TArray<FVector2D> FullHull = BuildHull(FullCorners);
+		if (!ContainsPoint(Resultant, FullHull)
+			|| !ContainsPoint(LoadCenter, FullHull)
+			|| HullMargin(Resultant, FullHull) + KINDA_SMALL_NUMBER
+				< Intent.MinInitialSupportMarginCM)
+		{
+			OutError = TEXT("DAG3BDualSupportContainmentFailed");
+			return false;
+		}
+		const float PostFailureTipMargin =
+			FVector2D::DotProduct(Resultant - PivotCenter, Axis) - Half;
+		if (PostFailureTipMargin + KINDA_SMALL_NUMBER
+			< Intent.MinPostFailureTipMarginCM)
+		{
+			OutError = FString::Printf(
+				TEXT("DAG3BDualSupportTipMarginTooSmall:%.3f"),
+				PostFailureTipMargin);
+			return false;
+		}
+		OutSupport.RealizedColumnCenters.Add(WeakCenter);
+		OutSupport.RealizedColumnRoles.Add(
+			Intent.Pattern == EABTSM73DAGFailurePattern::InternalOffsetSeam
+				? EABTSM73DAGRealizedColumnRole::FailureSeamKey
+				: EABTSM73DAGRealizedColumnRole::FailureWeak);
+		OutSupport.RealizedColumnCenters.Add(PivotCenter);
+		OutSupport.RealizedColumnRoles.Add(
+			EABTSM73DAGRealizedColumnRole::FailureStrongPivot);
+		return true;
+	}
 }
 
 bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Graph,
 	const FABTSM73DAGLayoutSettings& Settings,
 	const TMap<int32, TArray<FABTSM73DAGSelectedSupport>>& CandidatesByLoad,
-	FABTSM73DAGSpatialLayout& InOutLayout, FString& OutError) const
+	FABTSM73DAGSpatialLayout& InOutLayout, FString& OutError,
+	const FABTSM73DAGFailureRewriteIntent* RewriteIntent) const
 {
 	TMap<int32, int32> LevelByMacro;
 	for (const FABTSM73DAGMacroNode& Macro : Graph.MacroNodes) LevelByMacro.Add(Macro.NodeId, 0);
@@ -182,9 +333,38 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 
 		TArray<FABTSM73DAGSelectedSupport> BestSupports;
 		float BestMargin = -1.0f;
+		const bool bRewriteLoad = RewriteIntent != nullptr
+			&& RewriteIntent->bEnabled
+			&& RewriteIntent->LoadMacroNodeId == LoadId;
+		if (bRewriteLoad)
+		{
+			const FABTSM73DAGSelectedSupport* RewriteCandidate =
+				JointCandidates.FindByPredicate([RewriteIntent](
+					const FABTSM73DAGSelectedSupport& Candidate)
+				{
+					return Candidate.SupportMacroNodeId
+						== RewriteIntent->SupportMacroNodeId;
+				});
+			FABTSM73DAGSelectedSupport RewrittenSupport;
+			if (RewriteCandidate == nullptr
+				|| !MakeFailureRewriteSupport(
+					*RewriteIntent,
+					Settings,
+					*Load,
+					Resultant,
+					RewriteCandidate != nullptr ? *RewriteCandidate
+						: FABTSM73DAGSelectedSupport(),
+					RewrittenSupport,
+					OutError))
+			{
+				if (OutError.IsEmpty()) OutError = TEXT("DAG3BRewriteCandidateMissing");
+				return false;
+			}
+			BestSupports.Add(MoveTemp(RewrittenSupport));
+		}
 		const int32 MaxCount = FMath::Min(Settings.MaxLogicalSupportsPerLoad, JointCandidates.Num());
 		const int32 CombinationCount = 1 << JointCandidates.Num();
-		for (int32 Mask = 1; Mask < CombinationCount; ++Mask)
+		for (int32 Mask = 1; !bRewriteLoad && Mask < CombinationCount; ++Mask)
 		{
 			if (FMath::CountBits(static_cast<uint32>(Mask)) > MaxCount) continue;
 			TArray<FABTSM73DAGSelectedSupport> TrialSupports;
@@ -276,6 +456,16 @@ bool FABTSM73DAGLoadSupportSolver::Solve(const FABTSM73DAGGenerationResult& Grap
 			const FABTSM73DAGSelectedSupport& Support = BestSupports[SupportIndex];
 			InOutLayout.SelectedSupports.Add(Support);
 			FLoadState& LowerState = States.FindOrAdd(Support.SupportMacroNodeId);
+			if (bRewriteLoad)
+			{
+				// DAG3-B owns exactly one rewritten logical interface. Its contact
+				// hull may realize the same resultant through non-central pressure,
+				// so preserve the complete accumulated force and first moment
+				// rather than replacing them with an equal-per-column proxy.
+				LowerState.Mass += LoadState.Mass;
+				LowerState.FirstMoment += LoadState.FirstMoment;
+				continue;
+			}
 			const float PerColumnMass = LoadState.Mass
 				/ FMath::Max(1, Support.RealizedColumnCenters.Num() * BestSupports.Num());
 			for (const FVector2D& Center : Support.RealizedColumnCenters)

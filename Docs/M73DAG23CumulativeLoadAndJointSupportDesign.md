@@ -106,7 +106,7 @@ M3 BuildingSpawnSite / Pad
 - 旧 Blueprint CDO 中的 Legacy Profile 在 M7 边界升级为安全 DAG2.3 Profile，不能静默复活旧链；
 - 当前 Target 使用 Budget=0 `TwinTowerBridge`，包含 Parallel 与联合支撑；Workshop/Furnace 使用 Budget=0 `SingleTower`；
 - DAG 失败必须带确定性 Reject，禁止回退 Legacy；
-- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A 已能只读发现内部 Failure Frontier，但生产默认关闭且不改几何/材质；模块仍可击打/破坏，正式内部弱点仍需完成 DAG3-B/C 与 DAG-4。
+- DAG2.3 不执行 B/B2 WeakPointPlanner。DAG3-A 已能只读发现内部 Failure Frontier；DAG3-B 已把物理前沿提升为 Macro Interface Intent，并从同一 Macro Graph 第二遍重跑本求解器、模块编译与真实接触审计，形成三种同材质结构改写，其 ForceUnity 构建、DAG3 11/11 与旧 DAG2.3/M7 路由/世界契约/B2/M10 smoke 回归已经完成。生产默认仍同时关闭分析与改写，`WeakPoints=0`；可见几何/PIE、DAG3-C 攻击/材质路由和 DAG-4 settled/Chaos 对照完成前，不能宣称正式内部弱点已上线。
 - 任一生成或 Idle `Rejected` 必须撤销模块与 Foundation 碰撞，并阻断 `WorldReady`/发射；Pending/Running 必须持续等待，不能由可选的 M6 HISM 暖机开关绕过。
 - M7 必须在生成前登记必需 Actor 数并在尝试完成后封口；合同激活后只检查注册集合，且每个必需 Actor 都必须显式 `Accepted`。MaterialSystem/Profile/Class/Actor 缺失、`Registered != Expected`、`Accepted != Expected` 或必需 Actor 为 `NotRequired` 均为 Reject，不能把零 Actor 或关闭 Idle 验证当成合法通过。
 
@@ -125,6 +125,7 @@ M3 BuildingSpawnSite / Pad
 - 两次均为 `Expected=3 Registered=3 SetupRejected=0`；`WorldReady=1` 晚于三栋 Idle terminal，最终 `BuildingAccepted=3 BuildingRejected=0`，无 TaskGraph `Algorithm=0`。
 - 最终二进制三次不带 `-benchmark` 的 fresh D3D12 实时 60 FPS 均为三栋 `TimedOut=0 Accepted=1`；Furnace 旋转 `0.08°/0.09°/0.08°`、`DAGMinContact=0.060`，门禁 `3/0/3/3`，且 `WorldReady=1`、无 ABTS Error/Blocked。
 - DAG3-A 的 2026-07-29 只读回归保持 13/17/13 模块与三套原 `DAGTopologyHash`；`ABTS.M73DAG3.` 6/6、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2 以及当前 `ABTS.M7` 前缀快照 20/20 在 fresh NullRHI 中通过。另一次限帧 60 的 fresh NullRHI game smoke 中三栋 Idle 全部接受并最终 `WorldReady=1`；该证据仍不替代后续弱点击毁 PIE。
+- DAG3-B 的 2026-07-29 最终证据为：加入 `Auto` 成功路径断言后的 `-ForceUnity -DisableAdaptiveUnity` 复编 14.72 秒成功；fresh NullRHI `ABTS.M73DAG3.` 11/11、旧 `ABTS.M73DAG.` 9/9、M7 路由 1/1、世界生成契约 2/2、M73B2 2/2 Success；M10 45 秒 NullRHI 60 FPS smoke 中三栋保持 13/17/13 与原 Hash、DAG3-A/B 全关、零穿透、Idle 3/3 Accepted、最终门禁 3/0/3/3，且无 Error/Blocked 或 DAG3-B Pattern/Reject。该证据完成代码与兼容回归，但仍不替代可见几何/PIE。
 
 仍需可见 PIE：
 

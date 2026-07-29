@@ -340,6 +340,31 @@ struct FABTSM73GenerationSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
 	int32 DAGFailureFrontierBypassEdgeCount = 0;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	bool bDAGFailurePatternEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	bool bDAGFailurePatternApplied = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	EABTSM73DAGFailurePattern DAGFailurePattern =
+		EABTSM73DAGFailurePattern::Auto;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	int64 DAGRealizedPatternHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	int32 DAGRewriteAttemptCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	float DAGPatternInitialSupportMarginCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	float DAGPatternPostFailureTipMarginCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	float DAGPatternReseatRisk = 1.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;
 
