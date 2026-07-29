@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：M3R-0 已完成视觉验收并合并；M3R-1 已完成 M3 所有权范围内实现与自动验收，状态为 M3LocalAccepted
+> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2 已完成 M3 所有权范围内实现与自动验收，状态为 M3LocalAccepted
 > 日期：2026-07-29
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：落地 M3R-1 月度 Schema、独立版本身份、四层观测日志、21 Seed 兼容性 Oracle 与 fresh runtime 终态探针
+> 本次更新：落地 M3R-2 多候选球面路线、状态化道路求解、确定性路线 fallback、200 Seed 冻结认证与 fresh runtime 终态探针
 
 父文档：
 
@@ -956,7 +956,7 @@ NotStarted
 |---|---|---|---|---|---|
 | M3R-0 首周基线 | Week 1 开始前补齐 | **Complete**；Manifest、强制 Unity、2/2/1 fresh automation、M3 runtime 与 canonical Visible PIE 均已通过并合并 | 长路线、三栋道路外建筑、首周视距与确定性身份 | M3 + Integration/M7 | Complete |
 | M3R-1 月度 Schema 与观测面 | Week 1 前半 | **M3LocalAccepted**；Schema 8/8、兼容 21/21、旧合同 2/2/1、fresh runtime 与强制 Unity 均通过 | RouteBeat、Encounter、Biome、质量报告的数据骨架 | M3；共享字段只提交需求 | M3LocalAccepted |
-| M3R-2 多候选球面路线 | Week 1 后半 | **NotStarted** | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
+| M3R-2 多候选球面路线 | Week 1 后半 | **M3LocalAccepted**；RouteCore 7/7、Failure 1/1、200 Seed 200/200、旧回归与 fresh runtime 均通过；Editor-only 叠层保留人工可视抽查 | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
 | M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **NotStarted** | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
 | M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **NotStarted** | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M6/M9 | IntegrationAccepted |
 | M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **NotStarted** | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3 | M3LocalAccepted |
@@ -1103,6 +1103,31 @@ R-1 尚未获准修改共享合同，故 `M7ProfileCatalogHash/M6SolverVersion/M
 **阶段边界**
 
 R-2 只证明路线候选池和 Road Solver 机制，不在正式 Height/Hydrology/Encounter 之前铺设最终道路；本阶段记录的长度和 `FlowS` 必须在 R-3 对实际道路重算。六 Encounter 的 Pocket 和可见性不在本阶段求解。`MonthlyRouteFallback` 只是中间输入，不等于 `CompatibilityOracle` 或最终六关 `MonthlyCertifiedWorldFallback`。退出后状态为 **M3LocalAccepted**。
+
+**2026-07-29 执行结果**
+
+- 新增独立 `FABTSM3MonthlyRouteBuilder`、`FABTSM3MonthlyRoutePool` 和 `FABTSM3MonthlyRoadContext`。它们在 R-1 Schema 成功后以并行只读观测方式运行，不修改旧 `FABTSM3PCGConfig`、TaskGraph、旧 RoadPlanner、共享合同或首周四站点导出；
+- 每个 Seed 固定尝试 8 个带 17 个控制点的球面骨架，建立 2 Cell 核心/4 Cell 允许走廊，并以 `(CellId, IncomingEdgeId)` 为状态执行确定性整数代价搜索。代价域已经覆盖走廊肩部、急转/U-turn、正式水体接口、Encounter 软预留、Terrain/Slope 和道路复用；R-3 可通过逐 Cell Context 注入正式场；
+- Road Context 在 Build 与 Validate 两端绑定同一个 64-bit Hash：非法数组长度、负 Terrain/Slope 代价、Hard Block 或非法水体起终点均 fail closed；正常候选的完整路线必须属于严格升序 Corridor 且每个 Cell 对当前 Context 合法。复用奖励在逐段搜索前按剩余候选预算归一，实际使用量进入候选指标和 Hash，不能先用超额奖励选路再只修正最终分数；
+- 所有接受候选用同一 `M3MonthlyAcceptanceProfileV1` 计算 280–360 m、Scenic Bend、最长直段、非局部自接近、严格累积 `ProgressDistanceCM` 与量化 `FlowQ/FlowS`。候选按硬门、量化分数、稳定 CandidateId 排序，最多保留 3 个；本阶段只冻结 `RouteCandidatePoolHash`，绝不发布月度 `LayoutHash`；
+- 正常候选全部失败时，求解器只产生一个确定性的 `MonthlyRouteFallback` 中间骨架，并保持 `bMonthlyWorldAccepted=0`。故障注入冻结为 `FallbackHash=3E10F21BCB5E5700`、`PoolHash=A03845A65FEF0689`、`SnapshotHash=672BF5A0C3E91875`；
+- `M3R2AcceptanceManifest v1` 冻结 `ManifestHash=3D33F37F4AD7A0E9`、200 Seed 清单 Hash `588930CEC3A71BF2`、验收参数 Hash `773EDEACA8B32025` 和全 Seed Oracle Hash `059A0EE7C1C288FE`；
+- 展示 Seed `312503` 得到 `Attempted=8`、`NormalHardPass=8`、`Retained=3`，最佳路线长 `33537 cm`、12 个有效弯道、最长直段 `3500 cm`、最小非局部自接近 7 Cell；冻结 `PoolHash=E747FE054DD218F4`、`SnapshotHash=C5FCCEA6089DBAC0`；
+- `ABTS.M3.Monthly.RouteCore` 在 fresh 进程精确 7/7 Success；200 Seed 报告 `Terminal=200 NormalAccepted=200 RouteFallback=0 Rejected=0`，同机预热后 `P95MS=104.062`、`MaxMS=145.613`，最大扩展 1468、最大松弛 8709、回溯 0，均低于硬预算；
+- `ABTS.M3.Monthly.RouteFailure` 在独立 fresh 进程精确 1/1 Success。旧 `ABTS.M3.Monthly.Schema`、`ABTS.M3.WeekOne`、`ABTS.Contracts.WorldGeneration`、`ABTS.M110.TaskGraphFinaleSeparation` 分别为 8/8、2/2、2/2、1/1，兼容快照 21/21 未变化；
+- fresh `L_ABTS_M3 -ABTSM3R2Smoke` 验证 Manifest、完整旧 Compatibility 快照、R-1 Schema、R-2 Pool、展示指标和旧四站点，输出唯一 `RuntimeCertification ... Terminal=1 Passed=1 Failed=0`；没有 `LogABTSRuntime: Error`、Fatal、Assert、Ensure 或 `WorldReadyBlocked`；
+- `AABTSM3Planet` 提供默认关闭的 Editor-only 路线叠层：青色路线、黄色骨架控制点，只读取独立 Debug Snapshot，不修改 PMC、SDF、HISM 或正式道路。R-2 数据/运行时门已通过；该调试叠层仍应在后续可见 PIE 中做人工可读性抽查，不能替代 R-3 重新求解后的最终道路验收；
+- Development Editor 已用 `-ForceUnity -DisableAdaptiveUnity` 完成全链接，新增实现使用命名命名空间，未重现跨 Unity TU 的同名函数冲突。
+
+本次 fresh 证据日志：
+
+- `Saved/Logs/M3R2-RouteCore-PostReview-Final-FreshAutomation.log`
+- `Saved/Logs/M3R2-RouteFailure-PostReview-Final-FreshAutomation.log`
+- `Saved/Logs/M3R2PostReviewFinal-Schema-20260729-180533221-FreshAutomation.log`
+- `Saved/Logs/M3R2PostReviewFinal-WeekOne-20260729-180639394-FreshAutomation.log`
+- `Saved/Logs/PostReviewFinal-Contracts-20260729-180543-649-FreshAutomation.log`
+- `Saved/Logs/PostReviewFinal-M110Separation-20260729-180635-062-FreshAutomation.log`
+- `Saved/Logs/M3R2-Runtime-PostReview-Final-FreshRuntime.log`
 
 ### 14.6 M3R-3：预留六个 Encounter 与地貌逻辑
 

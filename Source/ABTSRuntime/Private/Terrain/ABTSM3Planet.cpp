@@ -12,6 +12,9 @@
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSCollisionChannels.h"
+#if WITH_EDITOR
+#include "DrawDebugHelpers.h"
+#endif
 
 namespace
 {
@@ -148,6 +151,12 @@ bool AABTSM3Planet::RebuildPlanet()
 		GeneratedCellStates.Num(), GeneratedEdgeStates.Num(), RoadCells, WaterCells, BuildingSpawnSites.Num(), ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), TerrainMaterial ? 1 : 0, bMaterialReady ? 1 : 0,
 		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM);
 	bM3PresentationReady = bPresentationReady;
+#if WITH_EDITOR
+	if (bM3PresentationReady && bDrawMonthlyRouteDebugOverlay)
+	{
+		DrawMonthlyRouteDebugOverlay();
+	}
+#endif
 	return bM3PresentationReady;
 }
 
@@ -176,8 +185,10 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 	if (!bGenerated)
 	{
 		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
+		MonthlyRoutePool = FABTSM3MonthlyRoutePool();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
+		MonthlyRouteDebugData = FABTSM3MonthlyRouteDebugData();
 #endif
 		return false;
 	}
@@ -206,8 +217,110 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlyWorldSchema,
 		MonthlySchemaDebugData);
 #endif
+	FABTSM3MonthlyRoadContext NeutralRouteContext;
+	FString RouteFailure;
+	if (!FABTSM3MonthlyRouteBuilder::Build(
+			WorldSeed,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			NeutralRouteContext,
+			MonthlyRoutePool,
+			RouteFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R2][Route] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlyRouteBuilder::GetRejectReasonName(
+				MonthlyRoutePool.RejectReason),
+			*RouteFailure);
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlyRouteBuilder::BuildDebugData(
+		MonthlyRoutePool,
+		MonthlyRouteDebugData);
+#endif
 	return true;
 }
+
+bool AABTSM3Planet::ValidateMonthlyRoutePool(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlyRouteRejectReason RejectReason =
+		EABTSM3MonthlyRouteRejectReason::None;
+	if (FABTSM3MonthlyRouteBuilder::Validate(
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			FABTSM3MonthlyRoadContext(),
+			MonthlyRoutePool,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyRouteBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+#if WITH_EDITOR
+void AABTSM3Planet::DrawMonthlyRouteDebugOverlay() const
+{
+	if (GetWorld() == nullptr
+		|| MonthlyRouteDebugData.BestRouteCellIds.Num() < 2)
+	{
+		return;
+	}
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 180.0f;
+	for (int32 Index = 1;
+		Index < MonthlyRouteDebugData.BestRouteCellIds.Num();
+		++Index)
+	{
+		const int32 CellA =
+			MonthlyRouteDebugData.BestRouteCellIds[Index - 1];
+		const int32 CellB =
+			MonthlyRouteDebugData.BestRouteCellIds[Index];
+		if (!LogicalCells.IsValidIndex(CellA)
+			|| !LogicalCells.IsValidIndex(CellB))
+		{
+			continue;
+		}
+		DrawDebugLine(
+			GetWorld(),
+			Center + LogicalCells[CellA].UnitCenter * Radius,
+			Center + LogicalCells[CellB].UnitCenter * Radius,
+			FColor::Cyan,
+			false,
+			30.0f,
+			0,
+			8.0f);
+	}
+	for (const int32 ControlCellId :
+		MonthlyRouteDebugData.BestControlCellIds)
+	{
+		if (!LogicalCells.IsValidIndex(ControlCellId))
+		{
+			continue;
+		}
+		DrawDebugSphere(
+			GetWorld(),
+			Center
+				+ LogicalCells[ControlCellId].UnitCenter * Radius,
+			45.0f,
+			8,
+			FColor::Yellow,
+			false,
+			30.0f,
+			0,
+			3.0f);
+	}
+}
+#endif
 
 float AABTSM3Planet::GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const
 {
