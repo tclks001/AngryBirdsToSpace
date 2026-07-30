@@ -1,6 +1,6 @@
 # M6：弹弓发射、弹道与碰撞破坏
 
-> 状态：首版 C++ 发射闭环已实现；M5.1→M6 的厘米长度、三维障碍与失败原子装配门已通过 fresh 自动化，发射手感和月度槽场仍分别等待对应 PIE。
+> 状态：首版 C++ 发射闭环已实现；M5.1→M6 的厘米长度、三维障碍与失败原子装配门已通过 fresh 自动化和兼容世界 PIE。月度六关槽场仍等待 R4/R6 唯一 Candidate 后单独验收。
 >
 > 物理碰撞爽感、阈值悖论和后续损伤/结构升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 >
