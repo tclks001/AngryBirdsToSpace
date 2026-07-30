@@ -579,6 +579,140 @@ bool ABTS::M11Search::CandidateSearchContract::IsValid(
 	return true;
 }
 
+ABTS::M11Search::ParticleBeamSearchContract
+ABTS::M11Search::ParticleBeamSearchContract::MakeV4()
+{
+	return ParticleBeamSearchContract();
+}
+
+bool ABTS::M11Search::ParticleBeamSearchContract::IsValid(
+	std::string* OutFailure) const
+{
+	using namespace TypesPrivate;
+	std::string EvaluationFailure;
+	if (ContractVersion != ParticleBeamContractVersion
+		|| AlgorithmVersion != ParticleBeamAlgorithmVersion
+		|| ConstructionSeed == 0
+		|| ExplorationSeed == 0
+		|| HoldoutSeed == 0
+		|| ExplorationSeed == HoldoutSeed
+		|| !EvaluationContract.IsValid(&EvaluationFailure)
+		|| RootParameterCount < 2
+		|| RootParameterCount > 128
+		|| ExplorationSampleCount < 32
+		|| ExplorationSampleCount > 4096
+		|| GeometryTimeSampleCount < 1
+		|| GeometryTimeSampleCount > 9
+		|| GeometryRadiusSampleCount < 1
+		|| GeometryRadiusSampleCount > 9
+		|| GeometryImpactSampleCount < 1
+		|| GeometryImpactSampleCount > 9
+		|| GeometryRadialSampleCount < 1
+		|| GeometryRadialSampleCount > 9
+		|| GeometryMomentumSampleCount < 1
+		|| GeometryMomentumSampleCount > 9
+		|| NominalProposalBudget < 1
+		|| NominalProposalBudget > 512
+		|| CoarseProposalBudget < 1
+		|| CoarseProposalBudget > NominalProposalBudget
+		|| RefinementProposalBudget < 1
+		|| RefinementProposalBudget > CoarseProposalBudget
+		|| CoarseParticleLimit < 4
+		|| CoarseParticleLimit > ExplorationSampleCount + 1
+		|| BeamWidth < 1
+		|| BeamWidth > RefinementProposalBudget
+		|| HoldoutSampleCount < 32
+		|| HoldoutSampleCount > 4096
+		|| MaximumFinalAuditCandidates < 1
+		|| MaximumFinalAuditCandidates > BeamWidth
+		|| RobustGuardSurvivorCount < 0
+		|| RobustGuardSurvivorCount > 2
+		|| EvaluationContract.MinimumRobustSurvivorCount
+				+ RobustGuardSurvivorCount
+			> 6
+		|| TargetRefinementTimeSampleCount < 2
+		|| TargetRefinementTimeSampleCount > 17)
+	{
+		return Reject(
+			OutFailure,
+			EvaluationFailure.empty()
+				? "InvalidParticleBeamContractIntegerOrIdentity"
+				: ("InvalidParticleBeamEvaluationContract:"
+					+ EvaluationFailure).c_str());
+	}
+	const std::array<double, 18> Values{
+		TargetPrefixRetentionRatio,
+		ExplorationMinimumRetentionRatio,
+		ExplorationMaximumRetentionRatio,
+		PreferredMinimumRetentionRatio,
+		PreferredMaximumRetentionRatio,
+		MinimumBeamDiversityDistanceCM,
+		FinalTargetTurnGuardRadians,
+		TargetRefinementMaximumCoastSeconds,
+		ConstructionInterEncounterCoastMinimumSeconds,
+		ConstructionInterEncounterCoastMaximumSeconds,
+		IdealMinimumDeflectionRadians,
+		IdealMaximumDeflectionRadians,
+		IdealMinimumAxisProjection,
+		IdealMinimumInfluenceSeconds,
+		IdealMaximumInfluenceSeconds,
+		IdealMaximumCoastSeconds,
+		IdealMaximumFlightSeconds,
+		EvaluationContract.MaximumTotalFlightTimeSeconds};
+	if (!std::all_of(
+			Values.begin(),
+			Values.end(),
+			[](const double Value) { return std::isfinite(Value); }))
+	{
+		return Reject(OutFailure, "NonFiniteParticleBeamContract");
+	}
+	if (ExplorationMinimumRetentionRatio <= 0.0
+		|| ExplorationMinimumRetentionRatio
+			>= PreferredMinimumRetentionRatio
+		|| PreferredMinimumRetentionRatio
+			> TargetPrefixRetentionRatio
+		|| TargetPrefixRetentionRatio
+			> PreferredMaximumRetentionRatio
+		|| PreferredMaximumRetentionRatio
+			>= ExplorationMaximumRetentionRatio
+		|| ExplorationMaximumRetentionRatio >= 1.0
+		|| MinimumBeamDiversityDistanceCM < 0.0
+		|| FinalTargetTurnGuardRadians < 0.0
+		|| FinalTargetTurnGuardRadians > 0.5
+		|| TargetRefinementMaximumCoastSeconds
+			< EvaluationContract.TargetCoastMaximumSeconds
+		|| TargetRefinementMaximumCoastSeconds
+			> EvaluationContract.MaximumCoastSeconds
+		|| ConstructionInterEncounterCoastMinimumSeconds <= 0.0
+		|| ConstructionInterEncounterCoastMinimumSeconds
+			>= ConstructionInterEncounterCoastMaximumSeconds
+		|| ConstructionInterEncounterCoastMaximumSeconds
+			> EvaluationContract.MaximumCoastSeconds
+		|| IdealMinimumDeflectionRadians
+			< EvaluationContract.MinimumDeflectionRadians
+		|| IdealMinimumDeflectionRadians
+			>= IdealMaximumDeflectionRadians
+		|| IdealMinimumAxisProjection
+			< EvaluationContract.MinimumLateralTurnAxisProjection
+		|| IdealMinimumAxisProjection > 1.0
+		|| IdealMinimumInfluenceSeconds
+			< EvaluationContract.MinimumInfluenceDurationSeconds
+		|| IdealMinimumInfluenceSeconds
+			>= IdealMaximumInfluenceSeconds
+		|| IdealMaximumInfluenceSeconds
+			> EvaluationContract.MaximumInfluenceDurationSeconds
+		|| IdealMaximumCoastSeconds <= 0.0
+		|| IdealMaximumCoastSeconds
+			> EvaluationContract.MaximumCoastSeconds
+		|| IdealMaximumFlightSeconds <= 0.0
+		|| IdealMaximumFlightSeconds
+			> EvaluationContract.MaximumTotalFlightTimeSeconds)
+	{
+		return Reject(OutFailure, "InvalidParticleBeamContractRange");
+	}
+	return true;
+}
+
 bool ABTS::M11Search::BatchRequest::IsValid(
 	std::string* OutFailure) const
 {
@@ -653,6 +787,16 @@ std::uint64_t ABTS::M11Search::ComputeCandidateSourceHash(
 	}
 	AddTarget(Hash, Layout.Scenario.Target);
 	AddSolver(Hash, Layout.Solver);
+	AddContract(Hash, Contract);
+	return Hash.Get();
+}
+
+std::uint64_t ABTS::M11Search::ComputeCandidateSearchContractHash(
+	const CandidateSearchContract& Contract)
+{
+	using namespace TypesPrivate;
+	CanonicalHash Hash;
+	Hash.AddUInt32(0x11b21004u);
 	AddContract(Hash, Contract);
 	return Hash.Get();
 }

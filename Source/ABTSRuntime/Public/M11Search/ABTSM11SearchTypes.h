@@ -14,6 +14,9 @@ namespace ABTS::M11Search
 	inline constexpr std::int32_t SearchContractVersion = 3;
 	inline constexpr std::int32_t SearchAlgorithmVersion = 3;
 	inline constexpr std::int32_t CandidateManifestVersion = 3;
+	inline constexpr std::int32_t ParticleBeamContractVersion = 1;
+	inline constexpr std::int32_t ParticleBeamAlgorithmVersion = 4;
+	inline constexpr std::int32_t ParticleBeamManifestVersion = 1;
 
 	struct LaunchInput
 	{
@@ -307,7 +310,123 @@ namespace ABTS::M11Search
 		std::string Diagnostic;
 	};
 
+	/**
+	 * Additive Search v4 constructor contract. The nested evaluation
+	 * contract remains the frozen Search v3 acceptance authority; these
+	 * fields only govern how provisional layouts are constructed.
+	 */
+	struct ParticleBeamSearchContract
+	{
+		std::int32_t ContractVersion = ParticleBeamContractVersion;
+		std::int32_t AlgorithmVersion = ParticleBeamAlgorithmVersion;
+		std::uint64_t ConstructionSeed = 0x11b24001ull;
+		std::uint64_t ExplorationSeed = 0x11b245001ull;
+		std::uint64_t HoldoutSeed = 0x11b245002ull;
+		CandidateSearchContract EvaluationContract =
+			CandidateSearchContract::MakeV2_1();
+
+		std::int32_t RootParameterCount = 16;
+		std::int32_t ExplorationSampleCount = 256;
+		std::int32_t GeometryTimeSampleCount = 5;
+		std::int32_t GeometryRadiusSampleCount = 4;
+		std::int32_t GeometryImpactSampleCount = 4;
+		std::int32_t GeometryRadialSampleCount = 3;
+		std::int32_t GeometryMomentumSampleCount = 7;
+		std::int32_t NominalProposalBudget = 96;
+		std::int32_t CoarseProposalBudget = 48;
+		std::int32_t RefinementProposalBudget = 12;
+		std::int32_t CoarseParticleLimit = 48;
+		std::int32_t BeamWidth = 6;
+		std::int32_t HoldoutSampleCount = 512;
+		std::int32_t MaximumFinalAuditCandidates = 6;
+		std::int32_t RobustGuardSurvivorCount = 1;
+		std::int32_t TargetRefinementTimeSampleCount = 9;
+
+		double TargetPrefixRetentionRatio = 0.25;
+		double ExplorationMinimumRetentionRatio = 0.05;
+		double ExplorationMaximumRetentionRatio = 0.60;
+		double PreferredMinimumRetentionRatio = 0.15;
+		double PreferredMaximumRetentionRatio = 0.40;
+		double MinimumBeamDiversityDistanceCM = 1800.0;
+		double FinalTargetTurnGuardRadians = 0.03;
+		double TargetRefinementMaximumCoastSeconds = 11.0;
+		double ConstructionInterEncounterCoastMinimumSeconds = 2.5;
+		double ConstructionInterEncounterCoastMaximumSeconds = 5.5;
+		double IdealMinimumDeflectionRadians = 0.45;
+		double IdealMaximumDeflectionRadians = 0.85;
+		double IdealMinimumAxisProjection = 0.60;
+		double IdealMinimumInfluenceSeconds = 4.0;
+		double IdealMaximumInfluenceSeconds = 6.5;
+		double IdealMaximumCoastSeconds = 5.5;
+		double IdealMaximumFlightSeconds = 42.0;
+
+		[[nodiscard]] static ParticleBeamSearchContract MakeV4();
+		[[nodiscard]] bool IsValid(
+			std::string* OutFailure = nullptr) const;
+	};
+
+	struct ParticleBeamStageMetrics
+	{
+		std::int32_t AssistIndex = 0;
+		std::int32_t ParentParticleCount = 0;
+		std::int32_t MemberParticleCount = 0;
+		double RetentionRatio = 0.0;
+		double HullAreaSquareDegrees = 0.0;
+		double HullYawSpanDegrees = 0.0;
+		double HullPitchSpanDegrees = 0.0;
+		double HullCompactness = 0.0;
+		double ActualDeflectionRadians = 0.0;
+		double SignedLateralTurnRadians = 0.0;
+		double InfluenceDurationSeconds = 0.0;
+		double CoastBeforeEnterSeconds = 0.0;
+		/** Local 3x3x3 release neighborhood that preserves this prefix. */
+		std::int32_t RobustPrefixSurvivorCount = 0;
+		double StageScore = 0.0;
+	};
+
+	struct ParticleBeamConstructionMetrics
+	{
+		std::uint64_t InitialParticleSolveCount = 0;
+		std::array<std::uint64_t, M11Core::GravityScenario::AssistCount>
+			GeometryProposalCounts{};
+		std::array<std::uint64_t, M11Core::GravityScenario::AssistCount>
+			NominalProposalSolveCounts{};
+		std::array<std::uint64_t, M11Core::GravityScenario::AssistCount>
+			CoarseParticleSolveCounts{};
+		std::array<std::uint64_t, M11Core::GravityScenario::AssistCount>
+			RefinementParticleSolveCounts{};
+		std::array<std::int32_t, M11Core::GravityScenario::AssistCount>
+			BeamSurvivorCounts{};
+		std::uint64_t HoldoutSolveCount = 0;
+		std::uint64_t FinalAuditSolveCount = 0;
+	};
+
+	struct ParticleBeamCandidateRecord
+	{
+		CandidateRecord Candidate;
+		std::uint64_t ConstructionHash = 0;
+		double ConstructionScore = 0.0;
+		std::array<ParticleBeamStageMetrics,
+			M11Core::GravityScenario::AssistCount> Stages{};
+		std::int32_t HoldoutSampleCount = 0;
+		std::array<InputSetMetrics, 4> HoldoutInputSets{};
+	};
+
+	struct ParticleBeamSearchResult
+	{
+		std::vector<ParticleBeamCandidateRecord> Evaluations;
+		std::vector<ParticleBeamCandidateRecord> TopCandidates;
+		ParticleBeamConstructionMetrics Construction;
+		std::uint64_t ContractHash = 0;
+		std::uint64_t ConstructionAggregateHash = 0;
+		std::uint64_t CandidateAggregateHash = 0;
+		double WallClockSeconds = 0.0;
+		std::string Diagnostic;
+	};
+
 	[[nodiscard]] const char* ToString(EvaluationStatus Status);
+	[[nodiscard]] std::uint64_t ComputeCandidateSearchContractHash(
+		const CandidateSearchContract& Contract);
 	[[nodiscard]] std::uint64_t ComputeCandidateSourceHash(
 		const CandidateLayout& Layout,
 		const CandidateSearchContract& Contract);

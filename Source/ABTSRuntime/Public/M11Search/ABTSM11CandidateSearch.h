@@ -75,4 +75,23 @@ namespace ABTS::M11Search
 				const std::vector<CandidateRecord>& Evaluations,
 				std::uint32_t RequestedCount);
 	};
+
+	/**
+	 * Search v4 experimental constructor. It builds a single global
+	 * conditional particle beam and only sends the surviving leaves through
+	 * the unchanged Search v3 final acceptance audit.
+	 */
+	class ParticleBeamSearch final
+	{
+	public:
+		[[nodiscard]] static std::uint64_t ComputeContractHash(
+			const ParticleBeamSearchContract& Contract);
+
+		[[nodiscard]] static bool Run(
+			const ParticleBeamSearchContract& Contract,
+			std::uint32_t ThreadCount,
+			std::uint32_t RequestedCandidateCount,
+			ParticleBeamSearchResult& OutResult,
+			std::string* OutFailure = nullptr);
+	};
 }

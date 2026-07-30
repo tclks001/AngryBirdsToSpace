@@ -33,9 +33,25 @@ namespace
 	{
 		bool SelfTest = false;
 		bool DescribeContract = false;
+		bool ParticleBeamSelfTest = false;
+		bool DescribeParticleBeamContract = false;
+		bool ParticleBeamSearch = false;
 		bool Merge = false;
 		bool Json = false;
 		bool Resume = false;
+		bool OutputSpecified = false;
+		bool InputRootSpecified = false;
+		bool WorkItemsSpecified = false;
+		bool ShardIndexSpecified = false;
+		bool ShardCountSpecified = false;
+		bool ThreadsSpecified = false;
+		bool TopKSpecified = false;
+		bool SeedSpecified = false;
+		bool CheckpointEverySpecified = false;
+		bool ParticleRootCountSpecified = false;
+		bool ParticleBeamWidthSpecified = false;
+		bool ParticleExplorationSamplesSpecified = false;
+		bool ParticleHoldoutSamplesSpecified = false;
 		fs::path InputRoot;
 		fs::path OutputDirectory;
 		std::uint64_t WorkItems = 0;
@@ -45,6 +61,10 @@ namespace
 		std::uint32_t TopK = 5;
 		std::uint64_t Seed = 0x11b21001ull;
 		std::uint64_t CheckpointEvery = 4;
+		std::uint32_t ParticleRootCount = 0;
+		std::uint32_t ParticleBeamWidth = 0;
+		std::uint32_t ParticleExplorationSamples = 0;
+		std::uint32_t ParticleHoldoutSamples = 0;
 	};
 
 	bool ParseUnsigned(
@@ -77,9 +97,21 @@ namespace
 		{
 			OutOptions.SelfTest = true;
 		}
+		else if (Command == "--particle-beam-self-test")
+		{
+			OutOptions.ParticleBeamSelfTest = true;
+		}
 		else if (Command == "--describe-contract")
 		{
 			OutOptions.DescribeContract = true;
+		}
+		else if (Command == "--describe-particle-beam-contract")
+		{
+			OutOptions.DescribeParticleBeamContract = true;
+		}
+		else if (Command == "particle-beam-search")
+		{
+			OutOptions.ParticleBeamSearch = true;
 		}
 		else if (Command == "merge")
 		{
@@ -113,10 +145,12 @@ namespace
 			if (Argument == "--output")
 			{
 				OutOptions.OutputDirectory = fs::path(Value);
+				OutOptions.OutputSpecified = true;
 			}
 			else if (Argument == "--input-root")
 			{
 				OutOptions.InputRoot = fs::path(Value);
+				OutOptions.InputRootSpecified = true;
 			}
 			else if (!ParseUnsigned(Value, Parsed))
 			{
@@ -126,38 +160,77 @@ namespace
 			else if (Argument == "--work-items")
 			{
 				OutOptions.WorkItems = Parsed;
+				OutOptions.WorkItemsSpecified = true;
 			}
 			else if (Argument == "--shard-index"
 				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
 			{
 				OutOptions.ShardIndex =
 					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ShardIndexSpecified = true;
 			}
 			else if (Argument == "--shard-count"
 				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
 			{
 				OutOptions.ShardCount =
 					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ShardCountSpecified = true;
 			}
 			else if (Argument == "--threads"
 				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
 			{
 				OutOptions.Threads =
 					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ThreadsSpecified = true;
 			}
 			else if (Argument == "--top-k"
 				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
 			{
 				OutOptions.TopK =
 					static_cast<std::uint32_t>(Parsed);
+				OutOptions.TopKSpecified = true;
 			}
 			else if (Argument == "--seed")
 			{
 				OutOptions.Seed = Parsed;
+				OutOptions.SeedSpecified = true;
 			}
 			else if (Argument == "--checkpoint-every")
 			{
 				OutOptions.CheckpointEvery = Parsed;
+				OutOptions.CheckpointEverySpecified = true;
+			}
+			else if (Argument == "--roots"
+				&& Parsed > 0
+				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
+			{
+				OutOptions.ParticleRootCount =
+					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ParticleRootCountSpecified = true;
+			}
+			else if (Argument == "--beam-width"
+				&& Parsed > 0
+				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
+			{
+				OutOptions.ParticleBeamWidth =
+					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ParticleBeamWidthSpecified = true;
+			}
+			else if (Argument == "--exploration-samples"
+				&& Parsed > 0
+				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
+			{
+				OutOptions.ParticleExplorationSamples =
+					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ParticleExplorationSamplesSpecified = true;
+			}
+			else if (Argument == "--holdout-samples"
+				&& Parsed > 0
+				&& Parsed <= std::numeric_limits<std::uint32_t>::max())
+			{
+				OutOptions.ParticleHoldoutSamples =
+					static_cast<std::uint32_t>(Parsed);
+				OutOptions.ParticleHoldoutSamplesSpecified = true;
 			}
 			else
 			{
@@ -165,8 +238,72 @@ namespace
 				return false;
 			}
 		}
-		if (OutOptions.SelfTest || OutOptions.DescribeContract)
+		const bool HasParticleOverrides =
+			OutOptions.ParticleRootCountSpecified
+			|| OutOptions.ParticleBeamWidthSpecified
+			|| OutOptions.ParticleExplorationSamplesSpecified
+			|| OutOptions.ParticleHoldoutSamplesSpecified;
+		const bool HasSearchIoOrExecutionOptions =
+			OutOptions.OutputSpecified
+			|| OutOptions.InputRootSpecified
+			|| OutOptions.WorkItemsSpecified
+			|| OutOptions.ShardIndexSpecified
+			|| OutOptions.ShardCountSpecified
+			|| OutOptions.ThreadsSpecified
+			|| OutOptions.TopKSpecified
+			|| OutOptions.CheckpointEverySpecified
+			|| OutOptions.Resume;
+		if (OutOptions.SelfTest || OutOptions.ParticleBeamSelfTest)
 		{
+			if (HasSearchIoOrExecutionOptions
+				|| OutOptions.SeedSpecified
+				|| HasParticleOverrides)
+			{
+				OutFailure = "OptionNotApplicableToSelfTest";
+				return false;
+			}
+			return true;
+		}
+		if (OutOptions.DescribeContract)
+		{
+			if (HasSearchIoOrExecutionOptions || HasParticleOverrides)
+			{
+				OutFailure = "OptionNotApplicableToContractDescription";
+				return false;
+			}
+			return true;
+		}
+		if (OutOptions.DescribeParticleBeamContract)
+		{
+			if (HasSearchIoOrExecutionOptions)
+			{
+				OutFailure =
+					"OptionNotApplicableToParticleContractDescription";
+				return false;
+			}
+			return true;
+		}
+		if (OutOptions.ParticleBeamSearch)
+		{
+			if (OutOptions.InputRootSpecified
+				|| OutOptions.WorkItemsSpecified
+				|| OutOptions.ShardIndexSpecified
+				|| OutOptions.ShardCountSpecified
+				|| OutOptions.CheckpointEverySpecified
+				|| OutOptions.Resume)
+			{
+				OutFailure = "OptionNotApplicableToParticleBeamSearch";
+				return false;
+			}
+			if (OutOptions.OutputDirectory.empty()
+				|| !OutOptions.OutputDirectory.is_absolute()
+				|| OutOptions.Threads == 0
+				|| OutOptions.TopK == 0)
+			{
+				OutFailure =
+					"ParticleBeamSearchRequiresAbsoluteOutputAndPositiveCounts";
+				return false;
+			}
 			return true;
 		}
 		if (OutOptions.OutputDirectory.empty()
@@ -179,12 +316,26 @@ namespace
 		}
 		if (OutOptions.Merge)
 		{
+			if (OutOptions.ShardIndexSpecified
+				|| OutOptions.ThreadsSpecified
+				|| OutOptions.CheckpointEverySpecified
+				|| OutOptions.Resume
+				|| HasParticleOverrides)
+			{
+				OutFailure = "OptionNotApplicableToMerge";
+				return false;
+			}
 			if (OutOptions.InputRoot.empty()
 				|| !OutOptions.InputRoot.is_absolute())
 			{
 				OutFailure = "MergeRequiresAbsoluteInputRoot";
 				return false;
 			}
+		}
+		else if (OutOptions.InputRootSpecified || HasParticleOverrides)
+		{
+			OutFailure = "OptionNotApplicableToSearch";
+			return false;
 		}
 		else if (OutOptions.CheckpointEvery == 0)
 		{
@@ -1026,6 +1177,154 @@ namespace
 		return Stream.str();
 	}
 
+	std::string BuildParticleBeamContractJson(
+		const ParticleBeamSearchContract& Contract)
+	{
+		std::ostringstream Stream;
+		Stream.imbue(std::locale::classic());
+		Stream << std::setprecision(17)
+			<< "{\"contractVersion\":" << Contract.ContractVersion
+			<< ",\"algorithmVersion\":" << Contract.AlgorithmVersion
+			<< ",\"constructionSeed\":" << Contract.ConstructionSeed
+			<< ",\"explorationSeed\":" << Contract.ExplorationSeed
+			<< ",\"holdoutSeed\":" << Contract.HoldoutSeed
+			<< ",\"rootParameterCount\":"
+			<< Contract.RootParameterCount
+			<< ",\"explorationSampleCount\":"
+			<< Contract.ExplorationSampleCount
+			<< ",\"geometryTimeSampleCount\":"
+			<< Contract.GeometryTimeSampleCount
+			<< ",\"geometryRadiusSampleCount\":"
+			<< Contract.GeometryRadiusSampleCount
+			<< ",\"geometryImpactSampleCount\":"
+			<< Contract.GeometryImpactSampleCount
+			<< ",\"geometryRadialSampleCount\":"
+			<< Contract.GeometryRadialSampleCount
+			<< ",\"geometryMomentumSampleCount\":"
+			<< Contract.GeometryMomentumSampleCount
+			<< ",\"nominalProposalBudget\":"
+			<< Contract.NominalProposalBudget
+			<< ",\"coarseProposalBudget\":"
+			<< Contract.CoarseProposalBudget
+			<< ",\"refinementProposalBudget\":"
+			<< Contract.RefinementProposalBudget
+			<< ",\"coarseParticleLimit\":"
+			<< Contract.CoarseParticleLimit
+			<< ",\"beamWidth\":" << Contract.BeamWidth
+			<< ",\"holdoutSampleCount\":"
+			<< Contract.HoldoutSampleCount
+			<< ",\"maximumFinalAuditCandidates\":"
+			<< Contract.MaximumFinalAuditCandidates
+			<< ",\"robustGuardSurvivorCount\":"
+			<< Contract.RobustGuardSurvivorCount
+			<< ",\"targetRefinementTimeSampleCount\":"
+			<< Contract.TargetRefinementTimeSampleCount
+			<< ",\"targetPrefixRetentionRatio\":"
+			<< Contract.TargetPrefixRetentionRatio
+			<< ",\"explorationRetentionRange\":["
+			<< Contract.ExplorationMinimumRetentionRatio << ','
+			<< Contract.ExplorationMaximumRetentionRatio << ']'
+			<< ",\"preferredRetentionRange\":["
+			<< Contract.PreferredMinimumRetentionRatio << ','
+			<< Contract.PreferredMaximumRetentionRatio << ']'
+			<< ",\"minimumBeamDiversityDistanceCM\":"
+			<< Contract.MinimumBeamDiversityDistanceCM
+			<< ",\"finalTargetTurnGuardRadians\":"
+			<< Contract.FinalTargetTurnGuardRadians
+			<< ",\"targetRefinementMaximumCoastSeconds\":"
+			<< Contract.TargetRefinementMaximumCoastSeconds
+			<< ",\"constructionInterEncounterCoastRangeSeconds\":["
+			<< Contract.ConstructionInterEncounterCoastMinimumSeconds
+			<< ','
+			<< Contract.ConstructionInterEncounterCoastMaximumSeconds
+			<< ']'
+			<< ",\"idealDeflectionRangeRadians\":["
+			<< Contract.IdealMinimumDeflectionRadians << ','
+			<< Contract.IdealMaximumDeflectionRadians << ']'
+			<< ",\"idealMinimumAxisProjection\":"
+			<< Contract.IdealMinimumAxisProjection
+			<< ",\"idealInfluenceRangeSeconds\":["
+			<< Contract.IdealMinimumInfluenceSeconds << ','
+			<< Contract.IdealMaximumInfluenceSeconds << ']'
+			<< ",\"idealMaximumCoastSeconds\":"
+			<< Contract.IdealMaximumCoastSeconds
+			<< ",\"idealMaximumFlightSeconds\":"
+			<< Contract.IdealMaximumFlightSeconds
+			<< ",\"evaluationContract\":"
+			<< BuildSearchContractJson(
+				Contract.EvaluationContract)
+			<< '}';
+		return Stream.str();
+	}
+
+	std::string BuildParticleBeamContractDescriptorJson(
+		const ParticleBeamSearchContract& Contract)
+	{
+		const std::string ContractJson =
+			BuildParticleBeamContractJson(Contract);
+		std::ostringstream Stream;
+		Stream << "{\"schema\":"
+			<< "\"abts.m11b21.particle_beam.contract_descriptor.v1\""
+			<< ",\"authority\":\"ABTSM11SearchCLI\""
+			<< ",\"algorithm\":\"conditional-particle-beam-v4\""
+			<< ",\"contractHash\":\""
+			<< Hex64(
+				ParticleBeamSearch::ComputeContractHash(Contract))
+			<< "\",\"contractHashSchema\":"
+			<< "\"fnv1a64-binary-particle-contract-with-v3-contract-hash-v1\""
+			<< ",\"contractHashSchemaVersion\":1"
+			<< ",\"contractHashEncoding\":{"
+			<< "\"algorithm\":\"FNV-1a-64\""
+			<< ",\"offsetBasis\":\"0xcbf29ce484222325\""
+			<< ",\"prime\":\"0x00000100000001b3\""
+			<< ",\"byteOrder\":\"little-endian\""
+			<< ",\"domainTag\":\"0x0000000011b24001\""
+			<< ",\"int32Encoding\":\"uint32-bit-pattern-zero-extended-to-uint64\""
+			<< ",\"doubleEncoding\":\"IEEE-754-binary64-bit-pattern\""
+			<< ",\"evaluationContractEncoding\":\"uint64-evaluationContractHash\""
+			<< ",\"fieldOrder\":["
+			<< "\"domainTag\",\"contractVersion\",\"algorithmVersion\","
+			<< "\"constructionSeed\",\"explorationSeed\",\"holdoutSeed\","
+			<< "\"evaluationContractHash\",\"rootParameterCount\","
+			<< "\"explorationSampleCount\",\"geometryTimeSampleCount\","
+			<< "\"geometryRadiusSampleCount\",\"geometryImpactSampleCount\","
+			<< "\"geometryRadialSampleCount\",\"geometryMomentumSampleCount\","
+			<< "\"nominalProposalBudget\",\"coarseProposalBudget\","
+			<< "\"refinementProposalBudget\",\"coarseParticleLimit\","
+			<< "\"beamWidth\",\"holdoutSampleCount\","
+			<< "\"maximumFinalAuditCandidates\","
+			<< "\"robustGuardSurvivorCount\","
+			<< "\"targetRefinementTimeSampleCount\","
+			<< "\"targetPrefixRetentionRatio\","
+			<< "\"explorationMinimumRetentionRatio\","
+			<< "\"explorationMaximumRetentionRatio\","
+			<< "\"preferredMinimumRetentionRatio\","
+			<< "\"preferredMaximumRetentionRatio\","
+			<< "\"minimumBeamDiversityDistanceCM\","
+			<< "\"finalTargetTurnGuardRadians\","
+			<< "\"targetRefinementMaximumCoastSeconds\","
+			<< "\"constructionInterEncounterCoastMinimumSeconds\","
+			<< "\"constructionInterEncounterCoastMaximumSeconds\","
+			<< "\"idealMinimumDeflectionRadians\","
+			<< "\"idealMaximumDeflectionRadians\","
+			<< "\"idealMinimumAxisProjection\","
+			<< "\"idealMinimumInfluenceSeconds\","
+			<< "\"idealMaximumInfluenceSeconds\","
+			<< "\"idealMaximumCoastSeconds\","
+			<< "\"idealMaximumFlightSeconds\"]}"
+			<< ",\"evaluationContractHash\":\""
+			<< Hex64(ComputeCandidateSearchContractHash(
+				Contract.EvaluationContract))
+			<< "\",\"searchSourceHashSha256\":\""
+			<< ABTS::M11Core::ToolIdentity::SearchSourceHashSha256
+			<< "\",\"productionCoreSourceHashSha256\":\""
+			<< ABTS::M11Core::ToolIdentity::
+				ProductionCoreSourceHashSha256
+			<< "\",\"constructionContract\":" << ContractJson
+			<< '}';
+		return Stream.str();
+	}
+
 	void WriteColorJson(
 		std::ostream& Stream,
 		const Color4f& Value)
@@ -1425,6 +1724,112 @@ namespace
 		return Stream.str();
 	}
 
+	std::string BuildParticleBeamCandidateManifestJson(
+		const ParticleBeamCandidateRecord& Candidate,
+		const ParticleBeamSearchContract& Contract,
+		const std::size_t Rank,
+		const std::size_t SelectedCount,
+		const ParticleBeamSearchResult& SearchResult)
+	{
+		std::string EvaluatedCandidate = BuildCandidateManifestJson(
+			Candidate.Candidate,
+			Contract.EvaluationContract,
+			CandidateManifestContext{
+				"particle-beam-v4",
+				static_cast<std::uint64_t>(
+					Contract.RootParameterCount),
+				0,
+				1,
+				Rank,
+				SelectedCount,
+				SearchResult.ConstructionAggregateHash,
+				SearchResult.CandidateAggregateHash});
+		while (!EvaluatedCandidate.empty()
+			&& (EvaluatedCandidate.back() == '\n'
+				|| EvaluatedCandidate.back() == '\r'))
+		{
+			EvaluatedCandidate.pop_back();
+		}
+		std::ostringstream Stream;
+		Stream.imbue(std::locale::classic());
+		Stream << std::setprecision(17)
+			<< "{\n"
+			<< "  \"schema\":"
+			<< "\"abts.m11b21.particle_beam_candidate.v1\",\n"
+			<< "  \"status\":\"Candidate / NOT CERTIFIED\",\n"
+			<< "  \"particleBeamContractVersion\":"
+			<< ParticleBeamContractVersion << ",\n"
+			<< "  \"particleBeamAlgorithmVersion\":"
+			<< ParticleBeamAlgorithmVersion << ",\n"
+			<< "  \"particleBeamManifestVersion\":"
+			<< ParticleBeamManifestVersion << ",\n"
+			<< "  \"constructionContractHash\":\""
+			<< Hex64(SearchResult.ContractHash) << "\",\n"
+			<< "  \"constructionHash\":\""
+			<< Hex64(Candidate.ConstructionHash) << "\",\n"
+			<< "  \"rank\":" << Rank << ",\n"
+			<< "  \"constructionScore\":"
+			<< Candidate.ConstructionScore << ",\n"
+			<< "  \"constructionStages\":[";
+		for (std::size_t Index = 0;
+			Index < Candidate.Stages.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Stream << ',';
+			}
+			const ParticleBeamStageMetrics& Stage =
+				Candidate.Stages[Index];
+			Stream << "{\"assistIndex\":" << Stage.AssistIndex
+				<< ",\"parentParticleCount\":"
+				<< Stage.ParentParticleCount
+				<< ",\"memberParticleCount\":"
+				<< Stage.MemberParticleCount
+				<< ",\"retentionRatio\":" << Stage.RetentionRatio
+				<< ",\"hullAreaSquareDegrees\":"
+				<< Stage.HullAreaSquareDegrees
+				<< ",\"hullYawSpanDegrees\":"
+				<< Stage.HullYawSpanDegrees
+				<< ",\"hullPitchSpanDegrees\":"
+				<< Stage.HullPitchSpanDegrees
+				<< ",\"hullCompactness\":"
+				<< Stage.HullCompactness
+				<< ",\"actualDeflectionRadians\":"
+				<< Stage.ActualDeflectionRadians
+				<< ",\"signedLateralTurnRadians\":"
+				<< Stage.SignedLateralTurnRadians
+				<< ",\"influenceDurationSeconds\":"
+				<< Stage.InfluenceDurationSeconds
+				<< ",\"coastBeforeEnterSeconds\":"
+				<< Stage.CoastBeforeEnterSeconds
+				<< ",\"robustPrefixSurvivorCount\":"
+				<< Stage.RobustPrefixSurvivorCount
+				<< ",\"stageScore\":" << Stage.StageScore << '}';
+		}
+		Stream << "],\n  \"independentHoldout\":{\"sampleCount\":"
+			<< Candidate.HoldoutSampleCount
+			<< ",\"inputSets\":[";
+		for (std::size_t Index = 0;
+			Index < Candidate.HoldoutInputSets.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Stream << ',';
+			}
+			WriteInputSetJson(
+				Stream,
+				Candidate.HoldoutInputSets[Index],
+				Index);
+		}
+		Stream << "]},\n  \"constructionContract\":"
+			<< BuildParticleBeamContractJson(Contract)
+			<< ",\n  \"evaluatedCandidate\":"
+			<< EvaluatedCandidate << "\n}\n";
+		return Stream.str();
+	}
+
 	std::uint64_t ShardWorkItemCount(const Options& OptionsValue)
 	{
 		if (OptionsValue.ShardIndex >= OptionsValue.WorkItems)
@@ -1456,6 +1861,477 @@ namespace
 			return 1;
 		}
 		std::cout << BuildContractDescriptorJson(Contract) << '\n';
+		return 0;
+	}
+
+	ParticleBeamSearchContract MakeParticleBeamContract(
+		const Options& OptionsValue)
+	{
+		ParticleBeamSearchContract Contract =
+			ParticleBeamSearchContract::MakeV4();
+		Contract.ConstructionSeed = OptionsValue.Seed;
+		Contract.ExplorationSeed =
+			OptionsValue.Seed ^ 0x11b245001ull;
+		Contract.HoldoutSeed =
+			OptionsValue.Seed ^ 0x11b245002ull;
+		if (Contract.ExplorationSeed == 0)
+		{
+			Contract.ExplorationSeed = 0x11b245001ull;
+		}
+		if (Contract.HoldoutSeed == 0
+			|| Contract.HoldoutSeed == Contract.ExplorationSeed)
+		{
+			Contract.HoldoutSeed = 0x11b245002ull;
+		}
+		if (OptionsValue.ParticleRootCount > 0)
+		{
+			Contract.RootParameterCount = static_cast<std::int32_t>(
+				OptionsValue.ParticleRootCount);
+		}
+		if (OptionsValue.ParticleBeamWidth > 0)
+		{
+			Contract.BeamWidth = static_cast<std::int32_t>(
+				OptionsValue.ParticleBeamWidth);
+			Contract.RefinementProposalBudget = std::max(
+				Contract.RefinementProposalBudget,
+				Contract.BeamWidth);
+			Contract.MaximumFinalAuditCandidates = std::min(
+				Contract.MaximumFinalAuditCandidates,
+				Contract.BeamWidth);
+		}
+		if (OptionsValue.ParticleExplorationSamples > 0)
+		{
+			Contract.ExplorationSampleCount =
+				static_cast<std::int32_t>(
+					OptionsValue.ParticleExplorationSamples);
+			Contract.CoarseParticleLimit = std::min(
+				Contract.CoarseParticleLimit,
+				Contract.ExplorationSampleCount + 1);
+		}
+		if (OptionsValue.ParticleHoldoutSamples > 0)
+		{
+			Contract.HoldoutSampleCount =
+				static_cast<std::int32_t>(
+					OptionsValue.ParticleHoldoutSamples);
+		}
+		return Contract;
+	}
+
+	int RunDescribeParticleBeamContract(
+		const Options& OptionsValue)
+	{
+		const ParticleBeamSearchContract Contract =
+			MakeParticleBeamContract(OptionsValue);
+		std::string Failure;
+		if (!Contract.IsValid(&Failure))
+		{
+			std::cerr << "DescribeParticleBeamContractInvalid:"
+				<< Failure << '\n';
+			return 1;
+		}
+		std::cout
+			<< BuildParticleBeamContractDescriptorJson(Contract)
+			<< '\n';
+		return 0;
+	}
+
+	int RunParticleBeamSelfTest(const bool Json)
+	{
+		ParticleBeamSearchContract Contract =
+			ParticleBeamSearchContract::MakeV4();
+		Contract.ConstructionSeed = 296883217ull;
+		Contract.ExplorationSeed =
+			Contract.ConstructionSeed ^ 0x11b245001ull;
+		Contract.HoldoutSeed =
+			Contract.ConstructionSeed ^ 0x11b245002ull;
+		Contract.RootParameterCount = 64;
+		Contract.ExplorationSampleCount = 1024;
+		Contract.BeamWidth = 12;
+		Contract.HoldoutSampleCount = 512;
+		std::string Failure;
+		const std::uint64_t FirstHash =
+			ParticleBeamSearch::ComputeContractHash(Contract);
+		const std::uint64_t SecondHash =
+			ParticleBeamSearch::ComputeContractHash(Contract);
+		ParticleBeamSearchResult Result;
+		const bool Ran = ParticleBeamSearch::Run(
+			Contract,
+			8,
+			2,
+			Result,
+			&Failure);
+		std::uint64_t SolverInvocationCount =
+			Result.Construction.InitialParticleSolveCount
+			+ Result.Construction.HoldoutSolveCount
+			+ Result.Construction.FinalAuditSolveCount;
+		for (std::size_t Index = 0;
+			Index < Result.Construction.GeometryProposalCounts.size();
+			++Index)
+		{
+			SolverInvocationCount +=
+				Result.Construction.NominalProposalSolveCounts[Index]
+				+ Result.Construction.CoarseParticleSolveCounts[Index]
+				+ Result.Construction.RefinementParticleSolveCounts[Index];
+		}
+		const std::size_t AcceptedCount = static_cast<std::size_t>(
+			std::count_if(
+				Result.Evaluations.begin(),
+				Result.Evaluations.end(),
+				[](const ParticleBeamCandidateRecord& Candidate)
+				{
+					return Candidate.Candidate.IsAccepted();
+				}));
+		const bool Passed = Contract.IsValid()
+			&& FirstHash != 0
+			&& FirstHash == SecondHash
+			&& Ran
+			&& Result.ContractHash == FirstHash
+			&& Result.Diagnostic == "Completed"
+			&& Result.Evaluations.size() == 5
+			&& AcceptedCount == 5
+			&& Result.TopCandidates.size() == 2
+			&& Result.TopCandidates[0].Candidate.CandidateSourceHash
+				== 0xed74ffaf0de8028full
+			&& Result.TopCandidates[1].Candidate.CandidateSourceHash
+				== 0xf22ad256fd791e07ull
+			&& Result.ConstructionAggregateHash != 0
+			&& Result.CandidateAggregateHash != 0
+			&& SolverInvocationCount == 83097
+			&& Result.Construction.HoldoutSolveCount > 0
+			&& Result.Construction.FinalAuditSolveCount > 0
+			&& std::all_of(
+				Result.Construction.BeamSurvivorCounts.begin(),
+				Result.Construction.BeamSurvivorCounts.end(),
+				[&](const std::int32_t SurvivorCount)
+				{
+					return SurvivorCount > 0
+						&& SurvivorCount <= Contract.BeamWidth;
+				});
+		if (Json)
+		{
+			std::cout << "{\"schema\":"
+				<< "\"abts.m11b21.particle_beam.self_test.v1\""
+				<< ",\"passed\":" << (Passed ? "true" : "false")
+				<< ",\"contractHash\":\"" << Hex64(FirstHash)
+				<< "\",\"diagnostic\":\""
+				<< EscapeJson(Result.Diagnostic)
+				<< "\",\"failure\":\"" << EscapeJson(Failure)
+				<< "\",\"solverInvocations\":"
+				<< SolverInvocationCount
+				<< ",\"acceptedCount\":" << AcceptedCount
+				<< ",\"selectedCount\":"
+				<< Result.TopCandidates.size()
+				<< ",\"constructionAggregateHash\":\""
+				<< Hex64(Result.ConstructionAggregateHash)
+				<< "\",\"candidateAggregateHash\":\""
+				<< Hex64(Result.CandidateAggregateHash)
+				<< "\",\"wallClockSeconds\":"
+				<< Result.WallClockSeconds << "}\n";
+		}
+		else
+		{
+			std::cout
+				<< "[ABTS][M11-B-v2.1][ParticleBeamSelfTest] Passed="
+				<< (Passed ? 1 : 0)
+				<< " Contract=" << Hex64(FirstHash)
+				<< " Diagnostic=" << Result.Diagnostic << '\n';
+		}
+		return Passed ? 0 : 1;
+	}
+
+	std::uint64_t SumParticleConstructionSolves(
+		const ParticleBeamConstructionMetrics& Metrics)
+	{
+		std::uint64_t Total = Metrics.InitialParticleSolveCount
+			+ Metrics.HoldoutSolveCount
+			+ Metrics.FinalAuditSolveCount;
+		for (std::size_t Index = 0;
+			Index < Metrics.GeometryProposalCounts.size();
+			++Index)
+		{
+			Total += Metrics.NominalProposalSolveCounts[Index]
+				+ Metrics.CoarseParticleSolveCounts[Index]
+				+ Metrics.RefinementParticleSolveCounts[Index];
+		}
+		return Total;
+	}
+
+	int RunParticleBeamSearch(const Options& OptionsValue)
+	{
+		const ParticleBeamSearchContract Contract =
+			MakeParticleBeamContract(OptionsValue);
+		std::string Failure;
+		if (!Contract.IsValid(&Failure)
+			|| OptionsValue.TopK
+				> static_cast<std::uint32_t>(
+					Contract.MaximumFinalAuditCandidates))
+		{
+			std::cerr << "ParticleBeamContractInvalid:"
+				<< (Failure.empty()
+					? "TopKExceedsFinalAuditBudget"
+					: Failure)
+				<< '\n';
+			return 1;
+		}
+		std::error_code Error;
+		if (fs::exists(OptionsValue.OutputDirectory, Error))
+		{
+			if (Error
+				|| !fs::is_directory(
+					OptionsValue.OutputDirectory, Error)
+				|| Error
+				|| !fs::is_empty(
+					OptionsValue.OutputDirectory, Error)
+				|| Error)
+			{
+				std::cerr
+					<< "ParticleBeamOutputMustBeEmpty\n";
+				return 1;
+			}
+		}
+		else
+		{
+			fs::create_directories(
+				OptionsValue.OutputDirectory, Error);
+			if (Error)
+			{
+				std::cerr
+					<< "ParticleBeamOutputUnavailable\n";
+				return 1;
+			}
+		}
+		const fs::path CandidateDirectory =
+			OptionsValue.OutputDirectory / "candidates";
+		fs::create_directories(CandidateDirectory, Error);
+		if (Error)
+		{
+			std::cerr
+				<< "ParticleBeamCandidateDirectoryUnavailable\n";
+			return 1;
+		}
+		ParticleBeamSearchResult Result;
+		if (!ParticleBeamSearch::Run(
+			Contract,
+			OptionsValue.Threads,
+			OptionsValue.TopK,
+			Result,
+			&Failure))
+		{
+			std::cerr << "ParticleBeamSearchFailed:"
+				<< Failure << '\n';
+			return 1;
+		}
+		struct SelectedManifestRecord
+		{
+			std::string RelativePath;
+			std::uint64_t ExactRecordHash = 0;
+			std::size_t ByteCount = 0;
+		};
+		std::vector<SelectedManifestRecord> SelectedManifests;
+		SelectedManifests.reserve(Result.TopCandidates.size());
+		for (std::size_t Index = 0;
+			Index < Result.TopCandidates.size();
+			++Index)
+		{
+			const std::string FileName = "candidate_rank_"
+				+ std::to_string(Index + 1) + "_"
+				+ Hex64(Result.TopCandidates[Index]
+					.Candidate.CandidateSourceHash).substr(2)
+				+ ".json";
+			const fs::path RelativeManifest =
+				fs::path("candidates") / FileName;
+			const fs::path Manifest =
+				OptionsValue.OutputDirectory / RelativeManifest;
+			const std::string ManifestJson =
+				BuildParticleBeamCandidateManifestJson(
+					Result.TopCandidates[Index],
+					Contract,
+					Index + 1,
+					Result.TopCandidates.size(),
+					Result);
+			if (!WriteTextAtomically(
+				Manifest,
+				ManifestJson,
+				Failure))
+			{
+				std::cerr
+					<< "ParticleBeamManifestWriteFailed:"
+					<< Failure << '\n';
+				return 1;
+			}
+			SelectedManifests.push_back(
+				SelectedManifestRecord{
+					RelativeManifest.generic_string(),
+					HashCanonicalJson(ManifestJson),
+					ManifestJson.size()});
+		}
+		std::uint64_t AcceptedCount = 0;
+		for (const ParticleBeamCandidateRecord& Evaluation :
+			Result.Evaluations)
+		{
+			AcceptedCount +=
+				Evaluation.Candidate.IsAccepted() ? 1u : 0u;
+		}
+		const std::uint64_t SolverInvocations =
+			SumParticleConstructionSolves(Result.Construction);
+		const double AcceptedPerMillion =
+			SolverInvocations > 0
+			? static_cast<double>(AcceptedCount) * 1000000.0
+				/ static_cast<double>(SolverInvocations)
+			: 0.0;
+		std::ostringstream Summary;
+		Summary.imbue(std::locale::classic());
+		Summary << std::setprecision(17)
+			<< "{\n"
+			<< "  \"schema\":"
+			<< "\"abts.m11b21.particle_beam_summary.v1\",\n"
+			<< "  \"passed\":true,\n"
+			<< "  \"diagnostic\":\""
+			<< EscapeJson(Result.Diagnostic) << "\",\n"
+			<< "  \"contractHash\":\""
+			<< Hex64(Result.ContractHash) << "\",\n"
+			<< "  \"constructionAggregateHash\":\""
+			<< Hex64(Result.ConstructionAggregateHash) << "\",\n"
+			<< "  \"candidateAggregateHash\":\""
+			<< Hex64(Result.CandidateAggregateHash) << "\",\n"
+			<< "  \"auditedCount\":"
+			<< Result.Evaluations.size() << ",\n"
+			<< "  \"acceptedCount\":" << AcceptedCount << ",\n"
+			<< "  \"selectedCandidateCount\":"
+			<< Result.TopCandidates.size() << ",\n"
+			<< "  \"selectedTopCandidatesSchemaVersion\":1,\n"
+			<< "  \"selectedTopCandidatesAuthority\":"
+			<< "\"ordered-final-selection\",\n"
+			<< "  \"selectedManifestRecordHashSchema\":"
+			<< "\"fnv1a64-exact-manifest-bytes-v1\",\n"
+			<< "  \"selectedTopCandidates\":[";
+		for (std::size_t Index = 0;
+			Index < Result.TopCandidates.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Summary << ',';
+			}
+			const ParticleBeamCandidateRecord& Selected =
+				Result.TopCandidates[Index];
+			const SelectedManifestRecord& Manifest =
+				SelectedManifests[Index];
+			Summary << "{\"rank\":" << (Index + 1)
+				<< ",\"candidateSourceHash\":\""
+				<< Hex64(
+					Selected.Candidate.CandidateSourceHash)
+				<< "\",\"nominalRequestHash\":\""
+				<< Hex64(Selected.Candidate.NominalRequestHash)
+				<< "\",\"nominalResultHash\":\""
+				<< Hex64(Selected.Candidate.NominalResultHash)
+				<< "\",\"scoreHash\":\""
+				<< Hex64(Selected.Candidate.ScoreHash)
+				<< "\",\"constructionHash\":\""
+				<< Hex64(Selected.ConstructionHash)
+				<< "\",\"manifestRelativePath\":\""
+				<< EscapeJson(Manifest.RelativePath)
+				<< "\",\"manifestByteCount\":"
+				<< Manifest.ByteCount
+				<< ",\"manifestRecordHash\":\""
+				<< Hex64(Manifest.ExactRecordHash)
+				<< "\"}";
+		}
+		Summary << "],\n"
+			<< "  \"solverInvocationCount\":"
+			<< SolverInvocations << ",\n"
+			<< "  \"acceptedPerMillionSolverInvocations\":"
+			<< AcceptedPerMillion << ",\n"
+			<< "  \"wallClockSeconds\":"
+			<< Result.WallClockSeconds << ",\n"
+			<< "  \"constructionMetrics\":{\"initialParticleSolves\":"
+			<< Result.Construction.InitialParticleSolveCount
+			<< ",\"geometryProposalCounts\":["
+			<< Result.Construction.GeometryProposalCounts[0] << ','
+			<< Result.Construction.GeometryProposalCounts[1] << ','
+			<< Result.Construction.GeometryProposalCounts[2]
+			<< "],\"nominalProposalSolveCounts\":["
+			<< Result.Construction.NominalProposalSolveCounts[0] << ','
+			<< Result.Construction.NominalProposalSolveCounts[1] << ','
+			<< Result.Construction.NominalProposalSolveCounts[2]
+			<< "],\"coarseParticleSolveCounts\":["
+			<< Result.Construction.CoarseParticleSolveCounts[0] << ','
+			<< Result.Construction.CoarseParticleSolveCounts[1] << ','
+			<< Result.Construction.CoarseParticleSolveCounts[2]
+			<< "],\"refinementParticleSolveCounts\":["
+			<< Result.Construction.RefinementParticleSolveCounts[0]
+			<< ','
+			<< Result.Construction.RefinementParticleSolveCounts[1]
+			<< ','
+			<< Result.Construction.RefinementParticleSolveCounts[2]
+			<< "],\"beamSurvivorCounts\":["
+			<< Result.Construction.BeamSurvivorCounts[0] << ','
+			<< Result.Construction.BeamSurvivorCounts[1] << ','
+			<< Result.Construction.BeamSurvivorCounts[2]
+			<< "],\"holdoutSolveCount\":"
+			<< Result.Construction.HoldoutSolveCount
+			<< ",\"finalAuditSolveCount\":"
+			<< Result.Construction.FinalAuditSolveCount << "},\n"
+			<< "  \"v3Baseline\":{\"workItems\":4096"
+			<< ",\"solverInvocationCount\":1938854"
+			<< ",\"acceptedCount\":2"
+			<< ",\"acceptedPerMillionSolverInvocations\":"
+			<< (2.0 * 1000000.0 / 1938854.0) << "},\n"
+			<< "  \"toolIdentity\":{\"productionCoreSourceHashSha256\":\""
+			<< ABTS::M11Core::ToolIdentity::
+				ProductionCoreSourceHashSha256
+			<< "\",\"searchSourceHashSha256\":\""
+			<< ABTS::M11Core::ToolIdentity::SearchSourceHashSha256
+			<< "\"},\n"
+			<< "  \"contractDescriptor\":"
+			<< BuildParticleBeamContractDescriptorJson(Contract)
+			<< ",\n  \"evaluations\":[";
+		for (std::size_t Index = 0;
+			Index < Result.Evaluations.size();
+			++Index)
+		{
+			if (Index > 0)
+			{
+				Summary << ',';
+			}
+			const ParticleBeamCandidateRecord& Evaluation =
+				Result.Evaluations[Index];
+			Summary << "{\"constructionHash\":\""
+				<< Hex64(Evaluation.ConstructionHash)
+				<< "\",\"status\":\""
+				<< ToString(Evaluation.Candidate.Status)
+				<< "\",\"candidateSourceHash\":\""
+				<< Hex64(
+					Evaluation.Candidate.CandidateSourceHash)
+				<< "\",\"scoreHash\":\""
+				<< Hex64(Evaluation.Candidate.ScoreHash)
+				<< "\",\"solverInvocations\":"
+				<< Evaluation.Candidate.SolverInvocationCount
+				<< ",\"robustSurvivorCount\":"
+				<< Evaluation.Candidate.Metrics.RobustSurvivorCount
+				<< ",\"totalFlightTimeSeconds\":"
+				<< Evaluation.Candidate.Metrics.TotalFlightTimeSeconds
+				<< ",\"minimumLayoutTurnRadians\":"
+				<< Evaluation.Candidate.Metrics
+					.MinimumLayoutTurnRadians
+				<< ",\"rejection\":\""
+				<< EscapeJson(Evaluation.Candidate.Rejection)
+				<< "\"}";
+		}
+		Summary << "]\n}\n";
+		const fs::path SummaryPath =
+			OptionsValue.OutputDirectory / "summary.json";
+		if (!WriteTextAtomically(
+			SummaryPath,
+			Summary.str(),
+			Failure))
+		{
+			std::cerr
+				<< "ParticleBeamSummaryWriteFailed:"
+				<< Failure << '\n';
+			return 1;
+		}
+		std::cout << Summary.str();
 		return 0;
 	}
 
@@ -2205,6 +3081,16 @@ int main(const int ArgumentCount, char** Arguments)
 			<< "  ABTSM11SearchCLI --self-test [--json]\n"
 			<< "  ABTSM11SearchCLI --describe-contract"
 			<< " [--seed N] [--json]\n"
+			<< "  ABTSM11SearchCLI --particle-beam-self-test"
+			<< " [--json]\n"
+			<< "  ABTSM11SearchCLI --describe-particle-beam-contract"
+			<< " [--seed N --roots N --beam-width N"
+			<< " --exploration-samples N --holdout-samples N] [--json]\n"
+			<< "  ABTSM11SearchCLI particle-beam-search"
+			<< " --output <absolute-dir>"
+			<< " [--threads N --top-k N --seed N --roots N"
+			<< " --beam-width N --exploration-samples N"
+			<< " --holdout-samples N --json]\n"
 			<< "  ABTSM11SearchCLI search --output <absolute-dir>"
 			<< " --work-items N [--shard-index I --shard-count N]"
 			<< " [--threads N --top-k N --seed N]"
@@ -2215,11 +3101,27 @@ int main(const int ArgumentCount, char** Arguments)
 			<< "Error: " << Failure << '\n';
 		return 2;
 	}
-	return Parsed.SelfTest
-		? RunSelfTest(Parsed.Json)
-		: Parsed.DescribeContract
-			? RunDescribeContract(Parsed)
-			: Parsed.Merge
-				? RunMerge(Parsed)
-				: RunSearch(Parsed);
+	if (Parsed.SelfTest)
+	{
+		return RunSelfTest(Parsed.Json);
+	}
+	if (Parsed.ParticleBeamSelfTest)
+	{
+		return RunParticleBeamSelfTest(Parsed.Json);
+	}
+	if (Parsed.DescribeContract)
+	{
+		return RunDescribeContract(Parsed);
+	}
+	if (Parsed.DescribeParticleBeamContract)
+	{
+		return RunDescribeParticleBeamContract(Parsed);
+	}
+	if (Parsed.ParticleBeamSearch)
+	{
+		return RunParticleBeamSearch(Parsed);
+	}
+	return Parsed.Merge
+		? RunMerge(Parsed)
+		: RunSearch(Parsed);
 }

@@ -1,12 +1,12 @@
 # M11 v2：终局引力弹弓优化总设计与阶段边界
 
-> 状态：**M11-A v2.1 已完成；M11-B v2.1 Search Contract / Algorithm / Manifest v3 与 M11-C v2.1 表现/相机代码已实现；权威 4096-work 搜索与 merge、2 个候选的 Catalog 重冻、默认/强制 Unity 全链接及 `33/33` fresh-process 自动门均已完成**。B v2.1 使用相互独立的 ScreenAim 5000 与 FullLaunchDomain 5000 语料，加入逐级比例/凸包门和真实换侧偏转可读性；C v2.1 已补齐稳定的局部接近 PIP、单目标 Wedge、Release 后权威轨迹相机，以及避免逐帧重复扫描/捕获的发布缓存。正式验收门见第 7.4 节；当前只等待用户有渲染 PIE，两个结果仍只允许称为 `Candidate / NOT CERTIFIED`，不得进入参数冻结或生产绑定。后续仍按 **M11-C v2.1 候选手感循环 → 参数冻结 → M11-B v2.2 完整认证 → M11-C v2.2 正式绑定** 推进。M11-B/C v1 继续作为生产基线。
+> 状态：**M11-A v2.1 已完成；M11-B v2.1 Search v3、M11-C v2.1 表现/相机代码及当前 v3 Candidate Catalog 均已实现；其上新增的 Additive Search v4 条件粒子束构造器已完成 4 个正式种子搜索（3 个成功、1 个正常无解退出）**。v4 把成功运行的接受吞吐提高到 v3 4096-work 基线的约 `38.63–58.33×`，得到 4 个不重复的已选布局，但没有覆盖当前 v3 Rank 1/2、没有写入 Catalog，也没有通过有渲染 PIE。所有新旧结果仍只能称为 `Candidate / NOT CERTIFIED`，不得进入参数冻结或 production 绑定。后续仍按 **M11-C v2.1 候选手感循环 → 参数冻结 → M11-B v2.2 完整认证 → M11-C v2.2 正式绑定** 推进。M11-B/C v1 继续作为生产基线。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
 > v1 基线：[M11-A 求解器](M11AGravityAssistSolverDesign.md) · [M11-B 布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · [M11-C 交互与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)。
 >
-> v2.1 子稿：[M11-B v2.1 标准 C++ 候选布局搜索与快速同源重放](M11B21CandidateSearchDesign.md)。
+> v2.1 子稿：[M11-B v2.1 标准 C++ 候选布局搜索与快速同源重放](M11B21CandidateSearchDesign.md) · [Additive Search v4 条件粒子束逐星构造器](M11B21ConditionalParticleBeamSearchDesign.md)。
 >
 > 交互参照：[M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 弹弓视觉表现](M6SlingshotVisualPresentationDesign.md)；HUD 语义参照：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
 >
@@ -584,16 +584,32 @@ Search v2 候选结果已经被 v3 合同明确作废，仅保留为历史对照
 
 | 门禁 | 本轮结果 | 证据 |
 | --- | ---: | --- |
-| 标准 C++ Release + CTest | `4/4` | `Tools/M11Core/BuildAndRunPortableConformance.ps1` |
+| 标准 C++ Release + CTest | `5/5` | `Tools/M11Core/BuildAndRunPortableConformance.ps1` |
 | 1024 组 Search v2 历史搜索 | 已失效 | 不得使用旧 Aggregate/Catalog |
 | Development Editor 默认全链接 | 通过 | UBT `Result: Succeeded` |
 | Development Editor 强制 Unity 全链接 | 通过 | `-ForceUnity -DisableAdaptiveUnity`，UBT `Result: Succeeded` |
-| `ABTS.M11B.V2_1` | `2/2` | `Saved/Logs/M11V3-20260730-002144-ABTS-M11B-V2_1.log` |
+| `ABTS.M11B.V2_1`（v3 收口归档） | `2/2` | `Saved/Logs/M11V3-20260730-002144-ABTS-M11B-V2_1.log` |
+| Additive Search v4 增量门 | Portable `5/5` + fresh `ABTS.M11B.V2_1 5/5` | `BuildAndRunPortableConformance.ps1`、`Saved/Logs/M11B21-V4-Final63b-20260730-191819-FreshAutomation.log` |
 | `ABTS.M11B.Unit / Runtime` | `8/8 + 4/4` | `Saved/Logs/M11V3-20260730-002705-ABTS-M11B-Unit.log`、`...-002746-ABTS-M11B-Runtime.log` |
 | `ABTS.M11C.Unit / Runtime / V2_1` | `8/8 + 2/2 + 2/2` | `Saved/Logs/M11V3-20260730-002336-ABTS-M11C-Unit.log`、`...-002625-ABTS-M11C-Runtime.log`、`...-002241-ABTS-M11C-V2_1.log` |
 | 上游快速回归 | `M11A.V2_1 1/1 + M110 4/4 + Contracts 2/2` | `Saved/Logs/M11V3-20260730-002829-ABTS-M11A-V2_1.log`、`...-002908-ABTS-M110.log`、`...-002950-ABTS-Contracts-WorldGeneration.log` |
 
-九组过滤器合计 `33/33` 成功，并分别具有唯一的 `TEST COMPLETE. EXIT CODE: 0`。本轮不改变 production `SolverVersion=1 / HashSchemaVersion=1` 路径，也不以 NullRHI 自动门替代用户有渲染 PIE 或 M11-B v2.2 完整输入域认证。
+v3 收口时九组过滤器合计 `33/33` 成功，并分别具有唯一的 `TEST COMPLETE. EXIT CODE: 0`；Additive Search v4 另在当前源码上通过 Portable `5/5`（含已注册整链 particle fixture）与 fresh `ABTS.M11B.V2_1 5/5`，其中 UE 成功夹具还完成 `1 / 4` 线程整链一致性对照。未在本次增量提交中重跑的 v3/M11-C/上游行仅作为归档证据。本轮不改变 production `SolverVersion=1 / HashSchemaVersion=1` 路径，也不以 NullRHI 自动门替代用户有渲染 PIE 或 M11-B v2.2 完整输入域认证。
+
+### 11.3 Additive Search v4 条件粒子束结果
+
+Search v4 作为 v3 旁路构造器存在：先沿同一父前缀的实际存活输入逐星放置行星、做 coarse/refinement Beam 与独立 Holdout，最后把极少量布局交还给冻结 v3 的 ScreenAim 5000、FullLaunchDomain 5000、Conditional、robust、低功率和全消融审计。它不改变当前 v3 Candidate Source，也不自动更新 Editor Candidate Catalog。
+
+| Seed | Solver calls | Accepted / Selected | Accepted / M solve | 相对 v3 |
+| ---: | ---: | ---: | ---: | ---: |
+| `296882177` | `10,270` | `0 / 0` | `0` | `0×` |
+| `296883201` | `50,186` | `2 / 2` | `39.8518` | `38.63×` |
+| `296883202` | `47,925` | `2 / 2` | `41.7319` | `40.46×` |
+| `296883217` | `83,097` | `5 / 2` | `60.1706` | `58.33×` |
+
+Seed `177` 在 Stage 3 正常无解退出；Seed `201/202` 重复找到 Candidate Source `0xcdc6e41075d99493` 与 `0x80d274a67e1e9944`；Seed `217` 的两个多样化结果为 `0xed74ffaf0de8028f` 与 `0xf22ad256fd791e07`。后两者总时长分别为 `27.843 / 30.086 s`，三次实际偏转分别约为 `36.44° / 34.38° / 65.62°` 与 `36.44° / 34.38° / 60.19°`，都发生两次真实换侧。
+
+数值代理支持优先把 `0xed74ffaf0de8028f` 纳入下一轮 Editor-only PIE 比较，但它的 ScreenAim S1/S2/S3 比例为 `0.145400 / 0.254470 / 0.156757`，尚未达到每级约 `1/4` 的理想面积；完整三维 5000 点诊断也只有 `78 / 21 / 1 / 1` 个 S1/S2/S3/S4 成员。它仍是 `Candidate / NOT CERTIFIED`。算法、Holdout、Hull 和全部候选分析见 [Additive Search v4 子稿](M11B21ConditionalParticleBeamSearchDesign.md)。
 
 ## 12. 多工作树交接
 
@@ -614,4 +630,4 @@ M11 专属工作树继续不直接修改下列共享热点：
 4. 用户批准候选并冻结后，由独立标准 C++ 工具执行 B v2.2 全输入域与消融慢认证；
 5. B v2.2 认证通过后才允许 C v2.2 在生产路径绑定 2/2 Certified Bundle。
 
-上游与返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · v1 基线：[M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)；M11-B v2.1 的实现与候选库见 [候选搜索子稿](M11B21CandidateSearchDesign.md)。当前工作点是 **Search v3 4096-work 与 merge/Manifest 已完成 → 新 Catalog 已冻结 → CLI/UE 快速重放与最终自动门已通过 → 等待 M11-C v2.1 用户有渲染 PIE**；通过后才进入参数冻结与 M11-B v2.2。
+上游与返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · v1 基线：[M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)；M11-B v2.1 的 v3 基线见 [候选搜索子稿](M11B21CandidateSearchDesign.md)，新构造器见 [Additive Search v4 子稿](M11B21ConditionalParticleBeamSearchDesign.md)。当前工作点是 **保留 v3 Catalog → v4 新候选已生成但未绑定 → 选择少量候选更新 Editor-only 比较池 → M11-C v2.1 用户有渲染 PIE → 参数冻结 → M11-B v2.2**。

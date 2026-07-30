@@ -450,6 +450,14 @@ if(BUILD_TESTING)
 		LABELS "M11Search;Portable;Determinism"
 		TIMEOUT 600)
 
+	add_test(NAME M11Search.ParticleBeamSuccessfulFixture
+		COMMAND ABTSM11SearchCLI --particle-beam-self-test)
+	set_tests_properties(M11Search.ParticleBeamSuccessfulFixture PROPERTIES
+		PASS_REGULAR_EXPRESSION
+			"\\[ABTS\\]\\[M11-B-v2.1\\]\\[ParticleBeamSelfTest\\] Passed=1"
+		LABELS "M11Search;Portable;Determinism"
+		TIMEOUT 600)
+
 	add_test(NAME M11Search.NoUnrealEditorDependencies
 		COMMAND "${POWERSHELL_EXECUTABLE}"
 			-NoLogo
