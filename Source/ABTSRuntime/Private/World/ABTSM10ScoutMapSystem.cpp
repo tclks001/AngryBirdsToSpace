@@ -26,6 +26,12 @@ void AABTSM10ScoutMapSystem::Configure(const FABTSM10ScoutMapSettings& InSetting
 	Settings = InSettings;
 }
 
+bool AABTSM10ScoutMapSystem::RevealForSlingshotCalibration(
+	const FVector& CalibrationOriginWorld)
+{
+	return RevealAtLanding(CalibrationOriginWorld);
+}
+
 void AABTSM10ScoutMapSystem::BeginPlay()
 {
 	Super::BeginPlay();

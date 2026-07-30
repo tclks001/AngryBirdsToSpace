@@ -213,6 +213,8 @@ public:
 	AABTSM71PlaceableSlingshotActor();
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
+	/** Read-only runtime cord consumer used by isolated M6 calibration. */
+	AABTSM51SlingshotCord* GetRuntimeCord() const { return RuntimeCord.Get(); }
 
 protected:
 	void SetSlingshotTier(EABTSSlingshotTier InTier) { SlingshotTier = InTier; }

@@ -32,6 +32,8 @@ public:
 
 	/** Must be called before FinishSpawningActor so BeginPlay binds with final settings. */
 	void Configure(const FABTSM10ScoutMapSettings& InSettings);
+	/** Isolated calibration entry; normal gameplay still reveals only after a completed Twig launch. */
+	bool RevealForSlingshotCalibration(const FVector& CalibrationOriginWorld);
 
 	bool IsScoutMapRevealed() const { return bScoutMapRevealed; }
 	UTexture2D* GetTerrainTexture() const { return TerrainTexture; }

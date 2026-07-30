@@ -26,17 +26,57 @@ void AABTSM9Satellite::ConfigureFromPrimaryPlanet(
 	const float InSurfaceGravityAccelerationCMPerSec2)
 {
 	if (!PrimaryPlanet.LogicalCells.IsValidIndex(InAnchorCellId)) return;
-	const FVector Direction = PrimaryPlanet.LogicalCells[InAnchorCellId].UnitCenter;
+	ConfigureFromPrimaryDirection(
+		PrimaryPlanet,
+		PrimaryPlanet.LogicalCells[InAnchorCellId].UnitCenter,
+		InRadiusCM,
+		InCenterClearanceCM,
+		InSurfaceGravityAccelerationCMPerSec2);
+}
+
+bool AABTSM9Satellite::ConfigureFromPrimaryDirection(
+	AABTSM3Planet& PrimaryPlanet,
+	const FVector& InAnchorUnitDirection,
+	const float InRadiusCM,
+	const float InCenterClearanceCM,
+	const float InSurfaceGravityAccelerationCMPerSec2)
+{
+	const FVector Direction = InAnchorUnitDirection.GetSafeNormal();
+	if (Direction.IsNearlyZero()) return false;
 	FVector SurfacePosition;
 	FVector SurfaceNormal;
 	float SurfaceRadius = 0.0f;
 	int32 ResolvedCell = INDEX_NONE;
-	if (!PrimaryPlanet.QuerySurface(Direction, SurfacePosition, SurfaceNormal, SurfaceRadius, ResolvedCell)) return;
-	AnchorCellId = InAnchorCellId;
+	if (!PrimaryPlanet.QuerySurface(
+		Direction,
+		SurfacePosition,
+		SurfaceNormal,
+		SurfaceRadius,
+		ResolvedCell))
+	{
+		return false;
+	}
+	AnchorCellId = ResolvedCell;
 	CenterClearanceCM = FMath::Max(0.0f, InCenterClearanceCM);
 	PlanetRadiusCM = FMath::Max(100.0f, InRadiusCM);
 	SurfaceGravityAccelerationCMPerSec2 = FMath::Max(0.0f, InSurfaceGravityAccelerationCMPerSec2);
-	SetActorLocation(SurfacePosition + SurfaceNormal.GetSafeNormal() * CenterClearanceCM, false, nullptr, ETeleportType::TeleportPhysics);
+	ConfiguredCenterWorld =
+		SurfacePosition + SurfaceNormal.GetSafeNormal() * CenterClearanceCM;
+	bHasConfiguredCenter = true;
+	SetActorLocation(
+		ConfiguredCenterWorld,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	return true;
+}
+
+bool AABTSM9Satellite::IsAtConfiguredCenter(const float ToleranceCM) const
+{
+	return bHasConfiguredCenter
+		&& GetActorLocation().Equals(
+			ConfiguredCenterWorld,
+			FMath::Max(0.0f, ToleranceCM));
 }
 
 void AABTSM9Satellite::BeginPlay()

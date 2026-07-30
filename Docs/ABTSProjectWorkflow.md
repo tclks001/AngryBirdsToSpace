@@ -12,9 +12,9 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、两个 Editor-only 候选和交互表现已进入 `master`。两个布局仍是 `Candidate / NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：Integration 补 M6/M9 只读预测与 M7 Profile 目录边界，M7 并行推进 DAG5-B/C，M3 可推进 R-5；随后由 M3R-4 选出唯一 Candidate，再接通 R-3.1 月度实体槽与 R-6 六栋世界。M7 DAG5-D/E 和 M11-D 仍按第 5 节门槛交接。
+- 默认下一步：Integration 已落地隔离 M6/M9 标定候选，并在同一候选上通过 fresh 4/4 自动化、标定 runtime smoke、生产 M9 deferred-transform 回归及 M11 隔离回归；完成可见 PIE 手感验收后才能冻结 V0。M7 并行推进 DAG5-B/C，M3 可推进 R-5；冻结的可移植 Launch/Preset 身份、Integration 批准的生产只读适配器与 M7 目录齐备后，由 M3R-4 选出唯一 Candidate，再接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
-当前入口：[M3R 月度地图](M3PCGMapImprovementPlan.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
+当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
 ## 2. 不可违反的项目约束
 
@@ -44,7 +44,7 @@
 | PCG 与表现 | [M3R 月度地图改进](M3PCGMapImprovementPlan.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M3 地形表现/HISM](M3TaskGraphTerrainPresentationDesign.md) |
 | 鸟群、镜头与 UI | [M4 鸟群实现](M4BirdPartyImplementationDesign.md) · [M4 球面镜头](M4MultiCharacterOrbitCameraDesign.md) · [UI 系统](UISystemDesign.md) |
 | 物品、放置与通行 | [M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/弹弓装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞/移动](M52CollisionAndMovementDesign.md) · [M8 自动回收/桥梁](M8AutoRecoveryAndBridgesDesign.md) |
-| 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
+| 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [M6/M9 弹弓与卫星标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 球面生产集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG3-C 可玩候选](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 动态认证](M73DAG4SettledContactAndAttackRolloutDesign.md) · [DAG-5 六栋路线](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) |
 | 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) |
 | 终局轨道谜题 | [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md) · [M11-A/Core](M11AGravityAssistSolverDesign.md) · [M11-B v1 认证](M11BFinaleLayoutCertificationDesign.md) · [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) · [M11-C 交互与实飞](M11CFinaleInteractionAndPlaybackDesign.md) |
@@ -63,7 +63,7 @@
 | 需求 | 已完成生产者 | 尚缺消费者/前置 | 当前阻断门 |
 | --- | --- | --- | --- |
 | M3R-3.1 普通槽场 | M3 已生成候选槽场；Integration 已实现最小快照消费接缝、DirtHole 批回滚、M6 三维净空与失败原子状态，装配 2/2、槽 Actor 1/1，兼容世界 PIE 已通过 | M3R-4/R-6 产出唯一 Candidate、最终 `LayoutHash` 和正式导出；Integration 再绑定生产入口 | 未接受唯一月度 Candidate 前不得读取 `RetainedCandidates[0]`；月度实体槽与六关联合 Visible PIE 未通过前保持 `IntegrationPending` |
-| M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间 | Integration 提供 M6/M9 只读预测适配器；M7 提供已认证 ProfileDescriptor 目录 | 当前 M3 中 Solver/Catalog 身份仍是占位输入，不能宣称真实弹道、卫星或建筑包络可解 |
+| M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间；Integration 已落地 M6/M9 标定候选、可移植 Launch/Preset 身份与确定性预筛入口，4/4、runtime smoke、生产 M9 与 M11 隔离回归已通过 | Integration 完成标定可见 PIE 后冻结 V0，并提供只读生产 M6/M9 适配器；M7 提供已认证 ProfileDescriptor 目录 | 标定积分器不是生产 Witness 权威；只有 Launch/Preset 身份可跨 Seed，`GravitySnapshotHash` 仅为场景实例证据。V0、生产适配器或 M7 目录任一未就绪时，M3 仍为 `IntegrationPending` |
 | M3R-6 六栋实体建筑 | M3 已有六站点逻辑；M7 已完成 DAG5-A 搜索骨架 | M7 先完成 DAG5-B/C；Integration 建立向后兼容 vNext 建筑合同；随后 M7 完成 DAG5-D/E | 当前 v1 合同没有精确 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace`，生产仍固定三栋 DAG2.3，不能提前改 `Expected=6` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
 | M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成 | 先冻结一个候选并做 B v2.2/C v2.2；M11-D 的 Party、环境和共享资产由 Integration 接线 | 未认证候选不得进入生产；M11-D 不得越权修改共享鸟群、天空/雾云或默认资产 |
@@ -72,7 +72,7 @@
 
 1. Integration 的通用 M5.1/M6 槽与连弦规则已完成；实体月度槽仍只能消费 R-4/R-6 最终冻结并由 M3 正式导出的最小快照。
 2. M7 完成 DAG5-B/C 并产出稳定 ProfileDescriptor Catalog；Integration 再定义兼容 v1 的只读目录与建筑 vNext 合同。
-3. M3 合并新 `master` 后完成 R-4，使用真实 M6/M9 和 M7 目录选定唯一 Candidate、Profile 与 AttackFace；不得复制求解器或让 M7 重新选型。
+3. M3 合并新 `master` 后完成 R-4，通过 Integration 批准的只读生产适配器消费实际 M6 pouch/速度档与 M9 查询，并结合 M7 目录选定唯一 Candidate、Profile 与 AttackFace；不得把标定预筛模型当作生产实飞权威、复制求解器或让 M7 重新选型。
 4. M7 合并该基线后完成 DAG5-D/E；联合候选必须验证恰好六栋、逐栋动态认证、分批加载、WorldReady 时序与性能预算。
 5. M3R-7 只在槽场、Witness、六栋建筑和 Biome 均通过同一世界的自动化与 Visible PIE 后冻结发布身份。
 6. M11 v2.2 可与上述路线独立推进；一旦进入 M11-D 共享 Party/环境/资产接线，必须回到 Integration 串行集成。

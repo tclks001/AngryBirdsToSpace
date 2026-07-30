@@ -49,6 +49,7 @@ void AABTSM6SlingshotSystem::ClearCurrentTrajectoryPreview()
 	LastTrajectoryPreviewStart = FVector::ZeroVector;
 	LastTrajectoryPreviewVelocity = FVector::ZeroVector;
 	LastTrajectoryPreviewTier = EABTSSlingshotTier::Simple;
+	LastTrajectoryPreviewGravityHash = 0;
 }
 
 void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
@@ -65,8 +66,14 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 	const FVector Start = LaunchedBird->GetActorLocation();
 	const FVector InitialVelocity = ComputeLaunchVelocity();
 	const EABTSSlingshotTier Tier = ActiveCord->GetSlingshotTier();
+	const uint64 GravityHash = bPlanarTestMode
+		? 0
+		: ABTSM9Gravity::GetSatelliteGravitySnapshotHash(
+			GetWorld(),
+			Planet->GetPlanetCenterWorld());
 	if (bCurrentTrajectoryPreviewValid
 		&& LastTrajectoryPreviewTier == Tier
+		&& LastTrajectoryPreviewGravityHash == GravityHash
 		&& Start.Equals(LastTrajectoryPreviewStart, 0.01f)
 		&& InitialVelocity.Equals(LastTrajectoryPreviewVelocity, 0.01f))
 	{
@@ -115,7 +122,7 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 			? FVector::ZeroVector
 			: ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Position);
 		const FVector Acceleration = PrimaryGravity + SatelliteGravity
-			- Velocity * FMath::Max(0.0f, FlightAirDragPerSecond);
+			- Velocity * FMath::Max(0.0f, GetResolvedFlightAirDragPerSecond());
 		Velocity += Acceleration * StepSeconds;
 		const FVector NextPosition = Position + Velocity * StepSeconds;
 		Candidate.PredictedPathLengthCM += FVector::Distance(Position, NextPosition);
@@ -172,5 +179,6 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 	LastTrajectoryPreviewStart = Start;
 	LastTrajectoryPreviewVelocity = InitialVelocity;
 	LastTrajectoryPreviewTier = Tier;
+	LastTrajectoryPreviewGravityHash = GravityHash;
 	bCurrentTrajectoryPreviewValid = true;
 }

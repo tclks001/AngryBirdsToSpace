@@ -19,12 +19,33 @@ public:
 	AABTSM6SlingshotCamera();
 	virtual void Tick(float DeltaSeconds) override;
 	void SetAimFrame(const FVector& InCenter, const FVector& InForward, const FVector& InUp);
+	/** Calibration-only framing override; normal M6 defaults remain unchanged. */
+	void ConfigureCalibrationAimFraming(
+		float InDistanceCM,
+		float InPitchDegrees,
+		float InTargetForwardDistanceCM,
+		float InTargetHeightCM);
+	/** Returns the exact plane/basis consumed by UpdateAimFromCursor. */
+	bool BuildAimInputPlaneBasis(
+		const FVector& InCenter,
+		const FVector& InForward,
+		const FVector& InUp,
+		FVector& OutPlaneNormal,
+		FVector& OutInPlaneAxis,
+		FVector& OutOutOfPlaneAxis) const;
 	void FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet);
 	void FollowBirdPlanar(AABTSM25BirdCharacter* InBird, const FVector& InPlanarUp);
 
 private:
 	void UpdateAim(float DeltaSeconds);
 	void UpdateFollow(float DeltaSeconds);
+	bool BuildAimView(
+		const FVector& InCenter,
+		const FVector& InForward,
+		const FVector& InUp,
+		FVector& OutLocation,
+		FVector& OutLook,
+		FVector& OutScreenUp) const;
 
 	TWeakObjectPtr<AABTSM25BirdCharacter> Bird;
 	TWeakObjectPtr<AABTSM2Planet> Planet;

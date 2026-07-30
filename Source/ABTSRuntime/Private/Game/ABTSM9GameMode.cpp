@@ -79,7 +79,19 @@ void AABTSM9GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	AABTSM9Satellite* Satellite = GetWorld()->SpawnActorDeferred<AABTSM9Satellite>(SatelliteClass, FTransform::Identity, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (Satellite == nullptr) return;
 	Satellite->ConfigureFromPrimaryPlanet(*PrimaryPlanet, SatelliteTask->SeedCellId, SatelliteRadiusCM, CenterClearanceCM, SurfaceGravityCMPerSec2);
-	UGameplayStatics::FinishSpawningActor(Satellite, Satellite->GetActorTransform());
+	// ConfigureFromPrimaryPlanet moves the deferred native root. Finish with the
+	// original spawn transform so UE does not compose the configured translation
+	// a second time.
+	UGameplayStatics::FinishSpawningActor(Satellite, FTransform::Identity);
+	if (!Satellite->IsAtConfiguredCenter())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M9] Satellite rejected: deferred finish changed center. Actual=%s Expected=%s"),
+			*Satellite->GetActorLocation().ToCompactString(),
+			*Satellite->GetConfiguredCenterWorld().ToCompactString());
+		Satellite->Destroy();
+		return;
+	}
 	const FVector FinaleToSatellite = Satellite->GetPlanetCenterWorld() - FinaleFrame.GetOrigin();
 	const float FinaleDistanceRatio = FinaleToSatellite.Size() / FMath::Max(PrimaryRadiusCM, 1.0f);
 	const FVector TangentDirection =

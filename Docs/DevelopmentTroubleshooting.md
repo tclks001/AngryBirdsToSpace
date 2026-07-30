@@ -4,7 +4,7 @@
 >
 > 用途：沉淀本项目已经遇到或已经被设计约束覆盖的问题。新增问题时，记录“现象—根因—修复—防回归验证”，不要只保留最后一次临时改动。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-2 空间布局](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [M6/M9 标定模式](M6M9SlingshotSatelliteCalibrationDesign.md) · [M9 卫星](M9SatelliteGravityDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-2 空间布局](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md)
 
 ## 1. 使用规则
 
@@ -172,3 +172,9 @@
 | 现象 | 根因 | 修复 | 防回归验证 |
 | --- | --- | --- | --- |
 | PIE 中画中画边框和 `LANDING PREVIEW` 标题正常出现，日志也有 `Camera spawned` / `Activated`，但内部始终呈深色黑屏 | SceneCapture 与 RenderTarget 实际已经创建并捕获；问题发生在 HUD 合成。UE 5.8 的 `SCS_FinalColorLDR` 只保证 RGB，默认桌面 Tonemapper 在未启用 Alpha 传播时把输出 Alpha 保持为 0。`UCanvas::K2_DrawTexture` 默认使用 `BLEND_Translucent`，因此有效 RGB 被零 Alpha 完全滤掉，只剩画框底色 | 绘制远端 RenderTarget 时显式传入 `BLEND_Opaque`，直接消费捕获的 RGB；不为单个 HUD 画中画全局开启 `r.PostProcessing.PropagateAlpha` | Editor Development 编译成功；PIE 重复 M10.1-B 流程时画框内能看到落点地形和浅色末段轨迹，松开左键或落点离开侦察圆后当帧隐藏；日志不出现新的 Renderer/Material Error |
+
+## 12. M9 卫星与标定入口
+
+| 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| 卫星视觉存在，但强化弹弓不调高功率就完全够不到；标定日志中 `SatelliteRadiusFromPrimary` 接近预期值的两倍 | 卫星以 `FTransform::Identity` deferred spawn，`ConfigureFromPrimaryPlanet/Direction` 又在 Finish 前移动原生 Root；随后把已经移动后的 `GetActorTransform()` 传给 `FinishSpawningActor`。UE 5.8 会相对缓存的原始 deferred Transform 重算模板并再次组合这段平移，导致卫星中心位移近似翻倍 | Finish 时传回原始 `FTransform::Identity`；卫星保存 `ConfiguredCenterWorld`，Finish 后用 `IsAtConfiguredCenter()` fail closed，避免生命周期调整再次静默改变位置。隔离标定预设不写回生产 M9 默认值 | 按[标定详稿第 7.3 节](M6M9SlingshotSatelliteCalibrationDesign.md#73-生产-m9-deferred-transform-回归)单列运行生产回归：标定载体中主星半径约 `10000cm`、半径/离地比例均为 `0.125` 时，卫星球心距主星约 `11480cm` 而非 `22960cm`；生产 M9 必须唯一 ready、`Radius=1250.0 Clearance=1250.0 Gravity=245.0 FinaleGravitySource=0`，且无 center/rejected/error。标定侧还须以真实 M6 pouch 和相机 `Look/ScreenUp/ScreenRight` 投影平面的离散可达 Pull × 规则 `AimPlaneOffsetCM` 网格证明 Reinforced 存在成功岛、Simple 和认证功率带外均为 0 命中；当前 fresh 自动化/runtime 与可见 PIE 证据未补齐前不得写成已通过 |

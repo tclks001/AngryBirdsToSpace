@@ -25,6 +25,16 @@ public:
 		float InRadiusCM,
 		float InCenterClearanceCM,
 		float InSurfaceGravityAccelerationCMPerSec2);
+	/** Calibration-only direction entry; production placement continues to use the TaskGraph Cell wrapper above. */
+	bool ConfigureFromPrimaryDirection(
+		AABTSM3Planet& PrimaryPlanet,
+		const FVector& InAnchorUnitDirection,
+		float InRadiusCM,
+		float InCenterClearanceCM,
+		float InSurfaceGravityAccelerationCMPerSec2);
+	/** Guards deferred-spawn callers against applying the configured transform twice. */
+	bool IsAtConfiguredCenter(float ToleranceCM = 1.0f) const;
+	FVector GetConfiguredCenterWorld() const { return ConfiguredCenterWorld; }
 
 	/** Inverse-square acceleration toward the satellite centre, with the configured value measured at its surface. */
 	FVector GetGravityAccelerationAt(const FVector& WorldLocation) const;
@@ -52,6 +62,9 @@ public:
 	float CenterClearanceCM = 1250.0f;
 
 private:
+	FVector ConfiguredCenterWorld = FVector::ZeroVector;
+	bool bHasConfiguredCenter = false;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> GrayMaterial;
 };

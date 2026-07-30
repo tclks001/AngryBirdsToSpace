@@ -54,6 +54,7 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 	PouchVisualMesh->SetVisibility(false);
 	ProxyClass = AABTSM6DestructibleProxy::StaticClass();
 	CameraClass = AABTSM6SlingshotCamera::StaticClass();
+	DebugTwigSlingshotClass = AABTSM71TwigSlingshotActor::StaticClass();
 	DebugSimpleSlingshotClass = AABTSM71SimpleSlingshotActor::StaticClass();
 	DebugReinforcedSlingshotClass = AABTSM71ReinforcedSlingshotActor::StaticClass();
 
@@ -208,6 +209,19 @@ void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 	else if (LaunchState == EABTSM6LaunchState::Flying || LaunchState == EABTSM6LaunchState::Settling)
 	{
 		FlightElapsedSeconds += DeltaSeconds;
+		UpdateActiveLaunchTelemetry();
+		if (bCalibrationModeEnabled
+			&& LaunchState == EABTSM6LaunchState::Flying
+			&& FlightElapsedSeconds >= FMath::Max(2.0f, CalibrationMaximumFlightSeconds))
+		{
+			NotifyCalibrationTargetEvent(TEXT("Timeout"), false);
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Calibration][Launch] ForcedReturn Seq=%d Flight=%.2f"),
+				ActiveLaunchCalibrationTelemetry.Sequence,
+				FlightElapsedSeconds);
+			BeginReturn();
+			return;
+		}
 		if (BlackFuseRemainingSeconds >= 0.0f && !bBlackDetonated)
 		{
 			BlackFuseRemainingSeconds -= DeltaSeconds;
@@ -337,7 +351,7 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 		PC->SetLaunchModeInputBlocked(true);
 		if (SlingshotCamera) PC->SetViewTarget(SlingshotCamera);
 	}
-	PullAlpha = 0.55f;
+	PullAlpha = GetResolvedInitialPullAlpha();
 	AimPlaneOffset = FVector::ZeroVector;
 	LaunchState = EABTSM6LaunchState::Ready;
 	if (SlingshotCamera) SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
@@ -413,25 +427,37 @@ void AABTSM6SlingshotSystem::UpdateAimFromCursor(APlayerController& Controller)
 	const float Denominator = FVector::DotProduct(RayDirection, PlaneNormal);
 	if (FMath::Abs(Denominator) <= SMALL_NUMBER) return;
 	const float PullDistance = LaunchState == EABTSM6LaunchState::Pulling
-		? FMath::Lerp(MinPullDistanceCM, MaxPullDistanceCM, PullAlpha)
+		? FMath::Lerp(
+			GetResolvedMinimumPullDistanceCM(),
+			GetResolvedMaximumPullDistanceCM(),
+			PullAlpha)
 		: 0.0f;
 	const FVector PulledPlaneCenter = RestPouchLocation - SlingForward * PullDistance;
 	const float Distance = FVector::DotProduct(PulledPlaneCenter - RayOrigin, PlaneNormal) / Denominator;
 	if (Distance <= 0.0f) return;
-	AimPlaneOffset = (RayOrigin + RayDirection * Distance - PulledPlaneCenter).GetClampedToMaxSize(MaxAimPlaneOffsetCM);
+	AimPlaneOffset =
+		((RayOrigin + RayDirection * Distance - PulledPlaneCenter)
+			* GetResolvedAimSensitivityScale())
+		.GetClampedToMaxSize(GetResolvedMaximumAimPlaneOffsetCM());
 }
 
 void AABTSM6SlingshotSystem::AdjustPullPower(const float MouseWheelValue)
 {
 	if (LaunchState != EABTSM6LaunchState::Ready && LaunchState != EABTSM6LaunchState::Pulling) return;
 	// UE wheel axis is positive upward. Design contract: wheel down increases power.
-	PullAlpha = FMath::Clamp(PullAlpha - MouseWheelValue * PullPowerWheelStep, 0.0f, 1.0f);
+	PullAlpha = FMath::Clamp(
+		PullAlpha - MouseWheelValue * GetResolvedPullPowerWheelStep(),
+		0.0f,
+		1.0f);
 }
 
 void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 {
 	if (!LaunchedBird.IsValid()) return;
-	const float PullDistance = FMath::Lerp(MinPullDistanceCM, MaxPullDistanceCM, PullAlpha);
+	const float PullDistance = FMath::Lerp(
+		GetResolvedMinimumPullDistanceCM(),
+		GetResolvedMaximumPullDistanceCM(),
+		PullAlpha);
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
 	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
 	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
@@ -465,12 +491,6 @@ FVector AABTSM6SlingshotSystem::GetBirdInPouchLocation(const FQuat& PouchRotatio
 	return PouchLocation + PouchRotation.RotateVector(FVector(0.0f, 0.0f, BirdInPouchOffsetCM));
 }
 
-FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const
-{
-	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
-	return Direction * FMath::Lerp(MinLaunchSpeedCMPerSec, MaxLaunchSpeedCMPerSec, PullAlpha);
-}
-
 void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !bCurrentTrajectoryPreviewValid) return;
@@ -497,9 +517,39 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 	// Ready/Pulling are aiming-only states. Scene objects must remain static
 	// until the bird actually leaves the pouch.
 	LaunchState = EABTSM6LaunchState::Flying;
-	LaunchedBird->LaunchFromSlingshot(Velocity, FlightAirDragPerSecond);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Launch] Bird=%d Speed=%.1f Pull=%.2f"), ABTSBirdIdToIndex(LaunchedBird->GetBirdId()), Velocity.Size(), PullAlpha);
-	BeginLaunchGravityPhase();
+	LaunchedBird->LaunchFromSlingshot(Velocity, GetResolvedFlightAirDragPerSecond());
+	if (bCalibrationModeEnabled && ActiveCord.IsValid())
+	{
+		ActiveLaunchCalibrationTelemetry = FABTSM6LaunchCalibrationTelemetry();
+		ActiveLaunchCalibrationTelemetry.Sequence = ++CalibrationLaunchSequence;
+		ActiveLaunchCalibrationTelemetry.Tier = ActiveCord->GetSlingshotTier();
+		ActiveLaunchCalibrationTelemetry.LaunchProfileHash =
+			CalibrationLaunchProfileHash;
+		ActiveLaunchCalibrationTelemetry.PullAlpha = PullAlpha;
+		ActiveLaunchCalibrationTelemetry.AimPlaneOffsetCM = AimPlaneOffset;
+		ActiveLaunchCalibrationTelemetry.InitialWorldLocation =
+			LaunchedBird->GetActorLocation();
+		ActiveLaunchCalibrationTelemetry.InitialWorldVelocity = Velocity;
+		ActiveLaunchCalibrationTelemetry.InitialSpeedCMPerSec = Velocity.Size();
+		LastCalibrationTelemetrySampleWorld =
+			ActiveLaunchCalibrationTelemetry.InitialWorldLocation;
+		bActiveLaunchCalibrationTelemetry = true;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][Launch] Bird=%d Tier=%d Speed=%.1f Pull=%.2f Aim=(%.1f,%.1f,%.1f) LaunchProfileHash=%llu Calibration=%d"),
+		ABTSBirdIdToIndex(LaunchedBird->GetBirdId()),
+		ActiveCord.IsValid() ? static_cast<int32>(ActiveCord->GetSlingshotTier()) : -1,
+		Velocity.Size(),
+		PullAlpha,
+		AimPlaneOffset.X,
+		AimPlaneOffset.Y,
+		AimPlaneOffset.Z,
+		bCalibrationModeEnabled ? CalibrationLaunchProfileHash : 0,
+		bCalibrationModeEnabled ? 1 : 0);
+	if (!bCalibrationModeEnabled)
+	{
+		BeginLaunchGravityPhase();
+	}
 	FlightElapsedSeconds = 0.0f;
 	BlackFuseRemainingSeconds = -1.0f;
 	bBlackDetonated = false;

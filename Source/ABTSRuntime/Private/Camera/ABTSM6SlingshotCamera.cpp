@@ -23,6 +23,90 @@ void AABTSM6SlingshotCamera::SetAimFrame(const FVector& InCenter, const FVector&
 	UpdateAim(0.0f);
 }
 
+void AABTSM6SlingshotCamera::ConfigureCalibrationAimFraming(
+	const float InDistanceCM,
+	const float InPitchDegrees,
+	const float InTargetForwardDistanceCM,
+	const float InTargetHeightCM)
+{
+	AimDistanceCM = FMath::Max(100.0f, InDistanceCM);
+	AimPitchDegrees = FMath::Clamp(InPitchDegrees, -10.0f, 75.0f);
+	AimTargetForwardDistanceCM =
+		FMath::Max(0.0f, InTargetForwardDistanceCM);
+	AimTargetHeightCM = InTargetHeightCM;
+}
+
+bool AABTSM6SlingshotCamera::BuildAimView(
+	const FVector& InCenter,
+	const FVector& InForward,
+	const FVector& InUp,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp) const
+{
+	const FVector SafeUp = InUp.GetSafeNormal();
+	const FVector SafeForward =
+		FVector::VectorPlaneProject(
+			InForward,
+			SafeUp).GetSafeNormal();
+	if (SafeUp.IsNearlyZero() || SafeForward.IsNearlyZero())
+	{
+		return false;
+	}
+	const float PitchRadians = FMath::DegreesToRadians(AimPitchDegrees);
+	const FVector BackAndUp =
+		(-SafeForward * FMath::Cos(PitchRadians)
+			+ SafeUp * FMath::Sin(PitchRadians)).GetSafeNormal();
+	OutLocation = InCenter + BackAndUp * AimDistanceCM;
+	const FVector Target =
+		InCenter
+		+ SafeForward * AimTargetForwardDistanceCM
+		+ SafeUp * AimTargetHeightCM;
+	OutLook = (Target - OutLocation).GetSafeNormal();
+	OutScreenUp =
+		FVector::VectorPlaneProject(SafeUp, OutLook).GetSafeNormal();
+	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
+}
+
+bool AABTSM6SlingshotCamera::BuildAimInputPlaneBasis(
+	const FVector& InCenter,
+	const FVector& InForward,
+	const FVector& InUp,
+	FVector& OutPlaneNormal,
+	FVector& OutInPlaneAxis,
+	FVector& OutOutOfPlaneAxis) const
+{
+	OutPlaneNormal = FVector::ZeroVector;
+	OutInPlaneAxis = FVector::ZeroVector;
+	OutOutOfPlaneAxis = FVector::ZeroVector;
+	FVector CameraLocation;
+	if (!BuildAimView(
+		InCenter,
+		InForward,
+		InUp,
+		CameraLocation,
+		OutPlaneNormal,
+		OutInPlaneAxis))
+	{
+		return false;
+	}
+	OutOutOfPlaneAxis =
+		FVector::CrossProduct(
+			OutInPlaneAxis,
+			OutPlaneNormal).GetSafeNormal();
+	const FVector PreferredRight =
+		FVector::CrossProduct(
+			InUp.GetSafeNormal(),
+			InForward.GetSafeNormal()).GetSafeNormal();
+	if (FVector::DotProduct(
+		OutOutOfPlaneAxis,
+		PreferredRight) < 0.0f)
+	{
+		OutOutOfPlaneAxis *= -1.0f;
+	}
+	return !OutOutOfPlaneAxis.IsNearlyZero();
+}
+
 void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet)
 {
 	Bird = InBird;
@@ -51,12 +135,19 @@ void AABTSM6SlingshotCamera::UpdateAim(const float DeltaSeconds)
 {
 	// Use only the cord frame captured on launch-mode entry. Pulling the pouch
 	// must not rotate or translate the camera around the slingshot.
-	const float PitchRadians = FMath::DegreesToRadians(AimPitchDegrees);
-	const FVector BackAndUp = (-AimForward * FMath::Cos(PitchRadians) + AimUp * FMath::Sin(PitchRadians)).GetSafeNormal();
-	const FVector DesiredLocation = AimCenter + BackAndUp * AimDistanceCM;
-	const FVector Target = AimCenter + AimForward * AimTargetForwardDistanceCM + AimUp * AimTargetHeightCM;
-	const FVector Look = (Target - DesiredLocation).GetSafeNormal();
-	const FVector ScreenUp = FVector::VectorPlaneProject(AimUp, Look).GetSafeNormal();
+	FVector DesiredLocation;
+	FVector Look;
+	FVector ScreenUp;
+	if (!BuildAimView(
+		AimCenter,
+		AimForward,
+		AimUp,
+		DesiredLocation,
+		Look,
+		ScreenUp))
+	{
+		return;
+	}
 	const FQuat Rotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
 	SetActorLocationAndRotation(DeltaSeconds > 0.0f ? FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, AimCameraBlendSpeed) : DesiredLocation, Rotation);
 }

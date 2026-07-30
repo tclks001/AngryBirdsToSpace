@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "GameFramework/Actor.h"
 #include "Inventory/ABTSInventoryTypes.h"
 #include "Slingshot/ABTSM6PhysicsSettleMonitor.h"
@@ -80,6 +81,10 @@ struct ABTSRUNTIME_API FABTSM6BuildingValidationGate
 
 /** Fired once after a launched bird has returned and M6 is inactive again. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FABTSM6LaunchCompletedNative, EABTSBirdId, const FVector&);
+/** Calibration-only real-launch record. The normal M10 completion delegate remains unchanged. */
+DECLARE_MULTICAST_DELEGATE_OneParam(
+	FABTSM6CalibrationLaunchRecordedNative,
+	const FABTSM6LaunchCalibrationTelemetry&);
 
 /** M6 launch, trajectory, impact promotion, explosion and return coordinator. */
 UCLASS(BlueprintType)
@@ -100,6 +105,25 @@ public:
 	bool TryManualBlackDetonation(AActor* ClickedActor);
 	void HandleProxyImpact(AABTSM6DestructibleProxy& Proxy, const FHitResult& Hit, float NormalSpeedCMPerSec);
 	void ConfigureDebugSlingshots(bool bEnable, int32 InStartCellId);
+	/**
+	 * Enables the isolated calibration path. Normal M6, M7, M9, M10 and Space launches
+	 * continue using their existing values unless this explicit call succeeds.
+	 */
+	bool ConfigureCalibrationLaunchProfiles(const FABTSM6LaunchProfileCatalog& InCatalog);
+	/** Spawns exactly one Twig, Simple and Reinforced calibration slingshot. */
+	int32 SpawnCalibrationSlingshots(int32 InStartCellId, const FVector& TowardWorldLocation);
+	/** Actual spawned Reinforced pouch frame used by both player input and certification. */
+	bool CopyReinforcedCalibrationLaunchFrame(
+		FABTSM6CalibrationLaunchFrame& OutLaunchFrame) const;
+	bool CopyCalibrationCatalog(
+		FABTSM6LaunchProfileCatalog& OutCatalog,
+		uint64& OutLaunchProfileHash) const;
+	void BuildCalibrationReachEnvelopes(TArray<FABTSM6ReachEnvelope>& OutEnvelopes) const;
+	/** PostPhysics sample consumed by the calibration rig's swept target test. */
+	bool CopyActiveCalibrationLaunchSample(
+		FABTSM6LaunchCalibrationTelemetry& OutTelemetry,
+		FVector& OutBirdWorldLocation) const;
+	void NotifyCalibrationTargetEvent(FName TargetId, bool bSatelliteBodyFirst);
 	void ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp);
 	/** M7 declares the required Actor set before spawning so absence cannot look like an empty valid stage. */
 	void BeginRequiredBuildingContract(int32 ExpectedRequiredBuildingCount);
@@ -112,6 +136,10 @@ public:
 	bool IsStartupPhysicsWarmupComplete() const { return !bEnableStartupPhysicsWarmup || bStartupPhysicsWarmupComplete; }
 	/** The location is the final settled landing point captured before return flight begins. */
 	FABTSM6LaunchCompletedNative& OnLaunchCompleted() { return LaunchCompletedNative; }
+	FABTSM6CalibrationLaunchRecordedNative& OnCalibrationLaunchRecorded()
+	{
+		return CalibrationLaunchRecordedNative;
+	}
 	/** Stable source for M10; callers must not cache HISM indices or proxy pointers across refreshes. */
 	void GatherLiveDestructibleProxies(TArray<AABTSM6DestructibleProxy*>& OutProxies) const;
 	/** Copies the same prediction currently drawn by M6. Valid only while the pouch is being pulled. */
@@ -131,6 +159,16 @@ private:
 	void ClearCurrentTrajectoryPreview();
 	void DrawPredictedTrajectory() const;
 	FVector ComputeLaunchVelocity() const;
+	const FABTSM6LaunchProfile* GetActiveCalibrationLaunchProfile() const;
+	float GetResolvedFlightAirDragPerSecond() const;
+	float GetResolvedMinimumPullDistanceCM() const;
+	float GetResolvedMaximumPullDistanceCM() const;
+	float GetResolvedInitialPullAlpha() const;
+	float GetResolvedPullPowerWheelStep() const;
+	float GetResolvedAimSensitivityScale() const;
+	float GetResolvedMaximumAimPlaneOffsetCM() const;
+	void UpdateActiveLaunchTelemetry();
+	void FinalizeActiveLaunchTelemetry(const FVector& LandingWorldLocation);
 	void HandleBirdImpact(const FHitResult& Hit, float NormalSpeedCMPerSec, const FVector& IncomingVelocity);
 	EABTSM6ImpactMaterial ResolveMaterial(const UPrimitiveComponent* Component) const;
 	const FABTSM6BirdImpactProfile& GetBirdProfile(EABTSBirdId BirdId) const;
@@ -162,6 +200,14 @@ private:
 	void FreezeDynamicProxies();
 	void SpawnDebugSlingshots();
 	bool SpawnDebugSlingshotPair(const FVector& CenterDirection, const FVector& LaunchDirection, EABTSItemId StakeItem);
+	AABTSM71PlaceableSlingshotActor* SpawnCalibrationSlingshot(
+		const FVector& CenterDirection,
+		const FVector& LaunchDirection,
+		EABTSSlingshotTier Tier);
+	bool CaptureCalibrationLaunchFrame(
+		const AABTSM71PlaceableSlingshotActor& Slingshot,
+		const FVector& PreferredForward,
+		FABTSM6CalibrationLaunchFrame& OutLaunchFrame) const;
 	bool QueryDebugSurfaceTransform(const FVector& UnitDirection, const FVector& Forward, float HeightOffsetCM, FTransform& OutTransform) const;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Classes")
@@ -295,6 +341,7 @@ private:
 	FVector LastTrajectoryPreviewVelocity = FVector::ZeroVector;
 	EABTSSlingshotTier LastTrajectoryPreviewTier = EABTSSlingshotTier::Simple;
 	bool bCurrentTrajectoryPreviewValid = false;
+	uint64 LastTrajectoryPreviewGravityHash = 0;
 	FVector ReturnStartLocation = FVector::ZeroVector;
 	FVector ReturnTargetLocation = FVector::ZeroVector;
 	float PullAlpha = 0.55f;
@@ -303,12 +350,28 @@ private:
 	float BlackFuseRemainingSeconds = -1.0f;
 	bool bBlackDetonated = false;
 	FABTSM6LaunchCompletedNative LaunchCompletedNative;
+	FABTSM6CalibrationLaunchRecordedNative CalibrationLaunchRecordedNative;
+	FABTSM6LaunchCalibrationTelemetry ActiveLaunchCalibrationTelemetry;
+	FVector LastCalibrationTelemetrySampleWorld = FVector::ZeroVector;
+	bool bActiveLaunchCalibrationTelemetry = false;
+	int32 CalibrationLaunchSequence = 0;
 	FVector PendingCompletedLandingLocation = FVector::ZeroVector;
 	EABTSBirdId PendingCompletedBirdId = EABTSBirdId::Red;
 	bool bHasPendingLaunchCompletion = false;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug")
 	bool bSpawnDebugSlingshotsAtStart = false;
+	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Calibration")
+	bool bCalibrationModeEnabled = false;
+	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Calibration")
+	FABTSM6LaunchProfileCatalog CalibrationLaunchProfileCatalog;
+	uint64 CalibrationLaunchProfileHash = 0;
+	FABTSM6CalibrationLaunchFrame ReinforcedCalibrationLaunchFrame;
+	bool bHasReinforcedCalibrationLaunchFrame = false;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Calibration", meta = (ClampMin = "2.0", ClampMax = "60.0", Units = "s"))
+	float CalibrationMaximumFlightSeconds = 35.0f;
 	/** Reuses the M7.1 complete-slingshot classes, including their VisualSlot scale, rotation and pivot rules. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
+	TSubclassOf<AABTSM71PlaceableSlingshotActor> DebugTwigSlingshotClass;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
 	TSubclassOf<AABTSM71PlaceableSlingshotActor> DebugSimpleSlingshotClass;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
@@ -317,6 +380,7 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
 	FVector DebugSlingshotActorScale = FVector::OneVector;
 	bool bDebugSlingshotsSpawned = false;
+	bool bCalibrationSlingshotsSpawned = false;
 	int32 DebugStartCellId = INDEX_NONE;
 	FABTSM6PhysicsSettleMonitor PhysicsSettleMonitor;
 	float NextSettleDiagnosticTimeSeconds = 0.0f;

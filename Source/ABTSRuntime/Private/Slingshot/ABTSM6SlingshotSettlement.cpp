@@ -17,6 +17,11 @@
 void AABTSM6SlingshotSystem::BeginSettlement()
 {
 	if (LaunchState != EABTSM6LaunchState::Flying || !LaunchedBird.IsValid()) return;
+	if (bActiveLaunchCalibrationTelemetry
+		&& ActiveLaunchCalibrationTelemetry.FlightTimeSeconds <= 0.0f)
+	{
+		ActiveLaunchCalibrationTelemetry.FlightTimeSeconds = FlightElapsedSeconds;
+	}
 	const float Now = GetWorld()->GetTimeSeconds();
 	LaunchState = EABTSM6LaunchState::Settling;
 	PhysicsSettleMonitor.BeginSettlement(Now);
@@ -108,6 +113,7 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	PendingCompletedBirdId = LaunchedBird->GetBirdId();
 	PendingCompletedLandingLocation = LaunchedBird->GetActorLocation();
 	bHasPendingLaunchCompletion = true;
+	FinalizeActiveLaunchTelemetry(PendingCompletedLandingLocation);
 	FreezeDynamicProxies();
 	LaunchedBird->BeginSlingshotReturn();
 	ReturnStartLocation = LaunchedBird->GetActorLocation();
@@ -157,6 +163,10 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	const bool bShouldBroadcastCompletion = bHasPendingLaunchCompletion;
 	const EABTSBirdId CompletedBirdId = PendingCompletedBirdId;
 	const FVector CompletedLandingLocation = PendingCompletedLandingLocation;
+	const bool bShouldBroadcastCalibration =
+		bActiveLaunchCalibrationTelemetry && bCalibrationModeEnabled;
+	const FABTSM6LaunchCalibrationTelemetry CompletedCalibrationTelemetry =
+		ActiveLaunchCalibrationTelemetry;
 	SetPouchVisualActive(false);
 	if (LaunchedBird.IsValid())
 	{
@@ -175,9 +185,29 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	ActiveCord.Reset();
 	LaunchedBird.Reset();
 	bHasPendingLaunchCompletion = false;
+	bActiveLaunchCalibrationTelemetry = false;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Complete StaticProxies=%d"), DynamicProxies.Num());
 	if (bShouldBroadcastCompletion)
 	{
 		LaunchCompletedNative.Broadcast(CompletedBirdId, CompletedLandingLocation);
+	}
+	if (bShouldBroadcastCalibration)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][Calibration][Launch] Seq=%d Tier=%d Pull=%.3f Speed=%.1f Arc=%.1f Apex=%.1f Path=%.1f Flight=%.2f Target=%s Hit=%d SatelliteBodyFirst=%d LaunchProfileHash=%llu"),
+			CompletedCalibrationTelemetry.Sequence,
+			static_cast<int32>(CompletedCalibrationTelemetry.Tier),
+			CompletedCalibrationTelemetry.PullAlpha,
+			CompletedCalibrationTelemetry.InitialSpeedCMPerSec,
+			CompletedCalibrationTelemetry.ActualLandingArcLengthCM,
+			CompletedCalibrationTelemetry.ApexAltitudeAbovePrimaryCM,
+			CompletedCalibrationTelemetry.ActualPathLengthCM,
+			CompletedCalibrationTelemetry.FlightTimeSeconds,
+			*CompletedCalibrationTelemetry.HitTargetId.ToString(),
+			CompletedCalibrationTelemetry.bHitTarget ? 1 : 0,
+			CompletedCalibrationTelemetry.bHitSatelliteBodyFirst ? 1 : 0,
+			CompletedCalibrationTelemetry.LaunchProfileHash);
+		CalibrationLaunchRecordedNative.Broadcast(
+			CompletedCalibrationTelemetry);
 	}
 }

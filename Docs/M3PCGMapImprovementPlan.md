@@ -3,12 +3,16 @@
 > 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 的通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此阶段保持 IntegrationPending
 > 日期：2026-07-30
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；未读取未决候选，也未提前生成月度实体槽
+> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 标定候选已提供可移植 Launch/Preset 身份与射程包络，但尚待可见 PIE 冻结，且不等同于生产权威 Witness Provider；未读取未决候选，也未提前生成月度实体槽
 
 父文档：
 
 - [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)
 - [ABTSTaskGraphPCGDesign.md](ABTSTaskGraphPCGDesign.md)
+
+R-4.1 直接前置：
+
+- [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)
 
 直接下游：
 
@@ -1285,6 +1289,21 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 - `Saved/Logs/M3R31-Final-Runtime-FreshRuntime.log`
 
 ### 14.7 M3R-4：补齐 Ballistic Witness、能力门与流程闭环
+
+#### 14.7.1 R-4.1 的 M6/M9 标定前置
+
+旧地图只作为 M6/M9 标定载体，不能把旧建筑坐标或旧 `SatelliteWindow` 世界位置写回月度布局。R-4.1 开工前必须从 [M6/M9 标定模式](M6M9SlingshotSatelliteCalibrationDesign.md) 取得已经完成可见 PIE 冻结的：
+
+```text
+LaunchProfileVersion + LaunchProfileHash
+ComfortableReachEnvelope + MaximumReachEnvelope
+SatellitePracticePresetVersion + SatellitePracticePresetHash
+TargetProxy / AttackFace 语义
+```
+
+`LaunchProfileHash` 与 `SatellitePracticePresetHash` 是可跨地图/Seed 消费的身份；前者不仅覆盖 Pull/速度曲线，还覆盖真实鼠标投影构图 `AimCameraDistance=1150cm`、`AimCameraPitch=18°`、`AimTargetForwardDistance=900cm`、`AimTargetHeight=245cm`，因此任何相机构图变化都会使旧 Witness 失效。标定 runtime 的 `GravitySnapshotHash` 包含实际卫星相对世界向量和连续地表解析结果，只能作为单个 Witness 的 baseline scene-instance 证据，不能填入全局 `M9SolverVersion`、Catalog 或布局策略身份。Seed、地形、整体朝向或已签名相机构图变化时必须重新解析快照并重算 Witness。
+
+标定固定步长积分器只负责候选参数的确定性认证与预筛，不是生产 M6/M9 权威 Provider。R-4.1 仍须等待 Integration 提供只读生产适配器，并以真实 Reinforced cord/pouch frame、相机 `Look/ScreenUp/ScreenRight` 投影平面、玩家可进入 Pull 档和 M9 查询生成最终 Witness；M3 不复制 Pull 曲线、pouch/相机几何、主星/卫星引力或阻力公式。标定 V0 可见 PIE、生产适配器和 M7 ProfileDescriptor Catalog 任一未就绪时，R-4 只能保持 `M3LocalAccepted/IntegrationPending`，不能发布唯一 Candidate。
 
 **实现目标**
 
