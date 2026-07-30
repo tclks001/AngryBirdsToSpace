@@ -1,6 +1,8 @@
 # M11-B：终局局部布局搜索与全输入域认证
 
-> 状态：M11.0 与 M11-A 已完成；M11-B C++、Development Editor 编译以及全新进程 Unit/Runtime/ConstructiveSearch/FullInputDomain 自动认证均已完成，v1 预设与认证 Hash 已冻结；待用户 PIE 验收。M11-C 尚未开始。
+> 状态：M11.0 与 M11-A 已完成；M11-B C++、Development Editor 编译、全新进程 Unit/Runtime/ConstructiveSearch/FullInputDomain 自动认证和用户 PIE 均已完成，v1 预设与认证 Hash 已冻结；现已正式交接至 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)。
+>
+> v2 说明：本文以下数值和 Hash 仍是已验收的 v1 权威；M11-B v2.1 已生成 4 个未认证候选并完成快速同源重放，详见 [M11-B v2.1 候选搜索子稿](M11B21CandidateSearchDesign.md)。强助推、非共线、60 秒节奏和三维域重认证的总边界见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)；完整输入域认证仍留到体验冻结后的 M11-B v2.2。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
@@ -8,7 +10,7 @@
 >
 > 上游：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11-A 纯数据引力弹弓求解器](M11AGravityAssistSolverDesign.md)。
 >
-> 下游：M11-C 轨道 HUD、逐目标预览、前缀成功集稳定器与 Space 实飞接管；只有本稿的自动认证和 PIE 均通过后才正式交接。
+> 下游：[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)；本稿的自动认证和用户 PIE 已通过，交接门已解除。
 >
 > 交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
 
@@ -442,6 +444,12 @@ F3 \ F4 != ∅
 
 批准运行中的两次固定合同重放各执行 `2213` 次求解，并各淘汰 `383` 个几何非法候选和 `84` 个事件/走廊非法候选；两次都得到搜索阶段 `PresetHash=0x1d0d519420ef9bf4`、`TrajectoryHash=0x3cfb9fc14900b8ab`。这两个 Hash 只证明构造搜索输出可复现，不是第 9.2 节冻结的生产 Preset/nominal 身份。
 
+### 7.4 v2.1 标准 C++ 候选库
+
+v2.1 没有复用本节 v1 的生产预设或认证 Hash，而是共同编译 M11-A v2.1 标准 C++ Core，由标准 C++ `M11Search` 构造、精确求值、分类和排名；Python 只调度分片进程。一次冻结的 `256` 工作项搜索得到 `4` 个状态为 `Candidate` 的布局，其中首选 `Work=166` 的总时长为 `36.117 s`、最长 coast 为 `6.841 s`、三次实际偏转为 `0.606 / 0.500 / 0.532 rad`，并已通过 UE/CLI 逐字段快速同源重放。
+
+该候选库只供 M11-C v2.1 Editor-only 手感比较；其 `CertificationHash` 与 `CertifiedBundleHash` 均为零，不得覆盖本文 v1 生产默认值。搜索合同、四候选身份、断点恢复和自动验收证据见 [M11-B v2.1 标准 C++ 候选布局搜索与快速同源重放](M11B21CandidateSearchDesign.md)。体验批准并冻结唯一候选后，仍须按第 8 节语义执行 M11-B v2.2 完整三维域、连通性、旁路与消融认证。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`
@@ -790,13 +798,13 @@ M11-B 的 PIE 只验收布局实例化和权威边界，不提前验收 M11-C �
 - [x] Full Certification 在本次运行中实际重算并生成匹配的报告 Hash。
 - [x] M11-A 相关自动化回归通过。
 - [x] M11.0 相关自动化回归通过。
-- [ ] PIE 中完成位置、可见性、作用圈、非阻挡、M9 排除和重入确定性验收。
+- [x] PIE 中完成位置、可见性、作用圈、非阻挡、M9 排除和重入确定性验收。
 
-截至本稿本次回填，唯一未勾选的阶段门槛是用户 PIE；在该项完成前，默认下一步仍为 M11-B PIE 验收，不进入 M11-C。
+用户已完成 M11-B PIE 验收。本稿全部阶段门槛均已关闭；当前下游实现、自动化和 PIE 口径见 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)。
 
 ## 15. M11-C 交接清单
 
-M11-C 可以提前依照以下接口边界开发，但在 M11-B 的冻结认证报告与 PIE 验收完成前，不得把项目当前阶段或默认下一步改为 M11-C：
+M11-B 的冻结认证报告与用户 PIE 均已完成；M11-C 依照以下接口边界正式开发：
 
 1. 只消费 M11-B 的已认证 `AABTSM11FinaleSystem`、`FABTSM11FinaleLayoutPreset` 和由其构造的 M11-A Request/Result；不在运行时重新搜索布局，也不扫描 World 猜测重力体。
 2. 进入终局瞄准前必须校验 Frame、Generator、Layout、Solver、HashSchema、ScanContract、Preset Source/Preset、Scenario、Certification、Nominal、Physical Playback 合同版本/轨迹、Certified Bundle 和三层 Trust Region 身份；任一未知版本、零 Hash 或不匹配均 fail-closed，不降级到未认证预设。
@@ -811,7 +819,7 @@ M11-C 可以提前依照以下接口边界开发，但在 M11-B 的冻结认证�
 11. M11-C 自动化至少回归：同输入预演/Release Hash 一致、不同渲染帧率轨迹一致、Trust Region 边界重放、稳定器取消/重置、逐目标预览无抖动，以及 M9 存在/隐藏/移动/改参数均不影响终局结果。
 12. HUD 和调试模式都不得向玩家显示标准轨迹、标准 `Yaw/Pitch/Power`、精确修正量或不可见答案吸附；认证标准输入只用于离线 golden/自动化。
 
-正式交接顺序固定为：冻结认证预设与报告 → 全新进程自动认证及 M11-A/M11.0 回归通过 → 完成本稿第 12 节 PIE → 更新项目工作流状态 → 开始 M11-C。
+正式交接顺序已完成：冻结认证预设与报告 → 全新进程自动认证及 M11-A/M11.0 回归通过 → 完成本稿第 12 节用户 PIE → 集成工作流状态更新 → 开始 M11-C。M11 专属工作树中的当前落实见 [M11-C 设计稿](M11CFinaleInteractionAndPlaybackDesign.md)；共享工作流由集成所有者更新。
 
 ## 16. 排错表
 
@@ -831,4 +839,4 @@ M11-C 可以提前依照以下接口边界开发，但在 M11-B 的冻结认证�
 | 相同 Seed 报告 Hash 不同 | 并行归并顺序、浮点环境或未规范序列化不稳定 | 按规范网格索引排序、固定迭代与 HashSchema |
 | 运行时反复执行全域扫描 | 把离线认证误接进 PCG/PIE 激活 | 运行时只做版本、Frame、Primary、净空和 Hash 兼容检查 |
 
-返回总设计：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md) · 返回父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 上游收口：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · 上游实现：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · HUD 投影上游：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · 返回入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
+返回总设计：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md) · 返回父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 上游收口：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · 上游实现：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · 下游实现：[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md) · HUD 投影上游：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · 返回入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。

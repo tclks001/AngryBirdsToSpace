@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "World/ABTSM110FinaleTypes.h"
+#include "World/ABTSM11CandidateExperienceCatalog.h"
 #include "World/ABTSM11FinaleLayoutTypes.h"
 #include "ABTSM11FinaleSystem.generated.h"
 
@@ -54,6 +55,17 @@ public:
 	 */
 	bool InitializeFromWorldContract(
 		const FABTSFinaleWorldContract& WorldContract);
+
+#if WITH_EDITOR
+	/**
+	 * Editor-PIE experience entry for a frozen M11-B v2.1 Candidate rank.
+	 * It rebuilds the standard C++ work item and fails closed on any frozen
+	 * identity mismatch. It is absent from non-Editor targets.
+	 */
+	bool InitializeFromEditorCandidateRank(
+		int32 CandidateRank,
+		const FABTSFinaleWorldContract& WorldContract);
+#endif
 
 	/**
 	 * Narrow data entry used by production and automation alike.
@@ -110,6 +122,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M11-B|Finale")
 	bool HasSpawnedUFOActor() const;
 
+	UFUNCTION(BlueprintPure, Category = "ABTS|M11-C|Candidate")
+	bool IsEditorCandidateMode() const
+	{
+		return bEditorCandidateMode;
+	}
+
+	const FABTSM11CandidateExperienceIdentity&
+		GetEditorCandidateIdentity() const
+	{
+		return EditorCandidateIdentity;
+	}
+
 	const FABTSM11FinaleLayoutPreset& GetLayoutPreset() const
 	{
 		return LayoutPreset;
@@ -138,6 +162,9 @@ private:
 		const FABTSM11FinaleLayoutPreset& InPreset,
 		int32 GeneratorVersion,
 		double PrimaryRadiusCM,
+		const FABTSM110FinaleLocalFrame& InFinaleFrame);
+	bool CommitValidatedPreset(
+		int32 GeneratorVersion,
 		const FABTSM110FinaleLocalFrame& InFinaleFrame);
 	bool SpawnPresentationActorsAtomically(FString* OutFailure);
 	void DrawCertificationDebugInPIE() const;
@@ -205,4 +232,11 @@ private:
 
 	/** Plain immutable solver data; intentionally not derived from UPROPERTY Actors. */
 	FABTSM11FinaleLayoutPreset LayoutPreset;
+
+	/**
+	 * Always false/empty in non-Editor targets and for the production v1
+	 * Certified Bundle. Candidate identity never aliases certification hashes.
+	 */
+	bool bEditorCandidateMode = false;
+	FABTSM11CandidateExperienceIdentity EditorCandidateIdentity;
 };

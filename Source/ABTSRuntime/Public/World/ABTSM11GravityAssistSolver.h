@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
 #include "World/ABTSM11GravityAssistTypes.h"
 
 /**

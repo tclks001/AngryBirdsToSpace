@@ -121,6 +121,10 @@ namespace ABTSM11FinaleLayoutHashPrivate
 		Hash.AddDouble(Config.MaximumSimulationTimeSeconds);
 		Hash.AddInt32(Config.MaximumStepCount);
 		Hash.AddInt32(Config.MaximumSubdivisionDepth);
+		if (Config.HashSchemaVersion >= 2)
+		{
+			Hash.AddInt32(Config.MaximumCoastStepExpansionDepth);
+		}
 		Hash.AddDouble(Config.AssistStepRadiusFraction);
 		Hash.AddDouble(Config.CollisionStepRadiusFraction);
 		Hash.AddDouble(Config.GravityTimescaleFraction);

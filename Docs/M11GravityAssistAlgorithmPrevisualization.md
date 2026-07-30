@@ -1,10 +1,12 @@
 # M11：终局三重引力弹弓算法预演
 
-> 状态：产品路线已确认；M11.0 已完成用户 PIE 验收；M11-A 纯数据求解器、Editor 编译与全新进程自动化已完成。M11-B C++、Development Editor 编译、冻结预设与全新进程自动认证均已完成，待用户 PIE；M11-C 实飞/HUD 和 M11-D 终局演出尚未开始。
+> v2 优化入口：[M11 v2 终局引力弹弓优化总设计与阶段边界](M11V2FinaleOptimizationDesign.md)。M11-A v2.1 与 [M11-B v2.1 标准 C++ 候选布局搜索](M11B21CandidateSearchDesign.md)已完成自动门禁，当前交给 M11-C v2.1 比较 4 个未认证候选；体验冻结后才进入 M11-B v2.2 完整输入域认证。
+
+> 状态：产品路线已确认；M11.0、M11-A 与 M11-B 均已完成，M11-B 已通过用户 PIE。[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)初版及本轮 PIE 回归修复的 C++、强制 Unity 全链接、全新进程自动化和完整 F4 接管闭包已通过，等待用户重新进行有渲染 PIE；M11-D 终局演出尚未开始。
 >
 > 父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md)。
 >
-> 导航：[项目工作流](ABTSProjectWorkflow.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
+> 导航：[项目工作流](ABTSProjectWorkflow.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · [M11-C 轨道交互与实飞](M11CFinaleInteractionAndPlaybackDesign.md) · [M6 弹弓发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md)
 
 ## 1. 预演结论
 
@@ -26,7 +28,7 @@ M11 应做成一段与程序生成地表连续、但轨道结果确定的终局�
 
 “四颗行星”在工程语义中指**既有地表主星 + 三颗新助推行星**，不是再生成四颗助推行星；UFO 是非引力目标。M9 练习卫星仍存在于同一 World，但不进入 M11 Body Specs，也不参与终局积分。
 
-本稿确定 M11 的算法方向、数据契约、玩家反馈与正式验收方法。上游收口见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)；已落地的唯一积分内核与自动化证据见 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)；当前布局搜索、认证预设、Actor 权威边界和 PIE 口径见 [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md)。
+本稿确定 M11 的算法方向、数据契约、玩家反馈与正式验收方法。上游收口见 [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)；已落地的唯一积分内核与自动化证据见 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)；冻结布局、认证预设和 Actor 权威边界见 [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md)；当前玩家操作、HUD、稳定器、Release 与实飞接管见 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)。
 
 ## 2. 终局关卡与叙事边界
 
@@ -677,6 +679,8 @@ Launched / AssistN / FinalApproach
 
 玩家可以在尚未瞄准 UFO 时提前发射。失败演出播放到第一个不可恢复原因已清晰可见：撞击播到撞击，错过行星播到明显分离，长时间束缚轨道可时间加速；建议把常规失败反馈控制在约 `3–6s`，再用约 `0.5–0.8s` 淡出至黑。黑屏期间恢复 Party、弹弓、镜头、环境和输入状态，不能重新生成 World 或清空库存。第一次正确飞行播放全部近掠演出；重试可缩短非关键镜头。
 
+M11-C 已先为当前受控鸟实现这一合同的最小安全闭环：按真实 Hermite 轨迹和鸟体净空裁剪体碰撞终点、限制非碰撞 miss 的展示时长、全黑帧内恢复鸟/弹弓/输入，并保证碰撞只在传送回原位后恢复。M11-D 应在同一恢复点扩展四鸟 Party、星空/雾云、镜头和剧情状态，不能另建失败物理或第二套复位状态机。
+
 ## 10. 资产交接契约
 
 用户后续提供三颗行星与 UFO 静态网格时，每个资产只需满足表现契约：
@@ -742,8 +746,8 @@ Launched / AssistN / FinalApproach
 | `M11.0` | LaunchSite 唯一 Space-only 槽、无玻璃建筑、Space 桩/弦配方、M9 练习卫星远置与 M11 引力隔离 | 三行星积分、终局 HUD、星空演出 |
 | [`M11-A`](M11AGravityAssistSolverDesign.md) | 无 World/Actor 的纯数据求解器与测试夹具；中心束缚、单颗自然偏转、虚拟动量换能、步长收敛、确定性与助推消融自动化 | 地图、实飞接管、美术、终局演出 |
 | [`M11-B`](M11BFinaleLayoutCertificationDesign.md) | 局部布局离线搜索、认证预设、三颗 Body Actor、合格终端拦截/独立几何 UFO、全 `Yaw × Pitch × Power` 的 F4 唯一性与局部前缀内核报告 | 完整 HUD、终端 coast 与剧情 |
-| `M11-C` | 抽取并复用轨道投影，加入简笔行星/UFO、逐目标接近预览、前缀稳定器；Space 实飞同源接管 | 标准答案、隐形吸附、Chaos 深空飞行 |
-| `M11-D` | 四鸟同袋/队列、星空环境切换、白鸟救援、失败黑屏复位与完整 PIE 验收 | 独立终局地图、运动行星、多人同步 |
+| [`M11-C`](M11CFinaleInteractionAndPlaybackDesign.md) | 冻结并复现轨道投影语义，加入简笔行星/UFO、逐目标接近预览、前缀稳定器；Space 实飞同源接管；F4 后显式 C2 TerminalTransfer 闭合到 800 cm UFO；当前受控鸟的有界失败黑屏与安全恢复 | 标准答案、隐形吸附、Chaos 深空飞行 |
+| `M11-D` | 四鸟同袋/队列、星空环境切换、白鸟救援、完整 Party/环境/剧情失败快照扩展与终局 PIE 验收 | 独立终局地图、运动行星、多人同步 |
 
 M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用已知、固定的三行星和 UFO 场景，建立自己的顺序事件与走廊数据，不把尚未完成的通用目标系统设为前置依赖。
 
@@ -758,9 +762,9 @@ M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用�
 7. **环境与重试**：同一 World 切换星空并关闭雾云；错误发射播放到失败可读后黑屏恢复到点击弹珠袋前。
 8. **验收门槛**：完整 `Yaw × Pitch × Power` 输入域的 F4 唯一性、围绕该族的局部前缀集嵌套、助推消融和旁路排除均为阻断性验收项。
 
-当前 [M11.0 前置收口](M110PreFinaleClosureDesign.md) 与 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) 已完成；[M11-B](M11BFinaleLayoutCertificationDesign.md) 的 C++、编译、冻结报告与全新进程自动认证也已完成。围绕全域发现出的唯一 `F4` 族，最终局部精化闭包得到 `F=(6244,1890,981,558)`、局部分量数 `(1,1,1,1)`、TargetHit `558`、几何接触旁路 `0`；F4 为 `20×18 px`、14 个连续 Power 切片。v1 通过增强行星③虚拟动量并要求终端 `Q>=0.95`，把宽前缀练习走廊和最终高质量拦截资格分开。完整 Hash 与扫描合同见 [M11-B 第 9.2 节](M11BFinaleLayoutCertificationDesign.md#92-v1-冻结认证报告)。
+当前 [M11.0 前置收口](M110PreFinaleClosureDesign.md)、[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) 与 [M11-B](M11BFinaleLayoutCertificationDesign.md) 均已完成，M11-B 也已通过用户 PIE。围绕全域发现出的唯一 `F4` 族，最终局部精化闭包得到 `F=(6244,1890,981,558)`、局部分量数 `(1,1,1,1)`、TargetHit `558`、几何接触旁路 `0`；F4 为 `20×18 px`、14 个连续 Power 切片。v1 通过增强行星③虚拟动量并要求终端 `Q>=0.95`，把宽前缀练习走廊和最终高质量拦截资格分开。完整 Hash 与扫描合同见 [M11-B 第 9.2 节](M11BFinaleLayoutCertificationDesign.md#92-v1-冻结认证报告)。
 
-默认下一步是 M11-B PIE 验收；该项通过前不转入 M11-C。当前 `Content/Maps/Test.umap` 未由本阶段 C++ 实现修改，PIE 必须让实际地图/GameMode Blueprint 接入 M11 GameMode/Finale System 生命周期。
+当前默认工作是按 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md) 第 12 节重新完成有渲染 PIE，重点复验 Game Thread Scene Capture、进入手势、拉弓跟随、圆形 HUD 裁剪和失败黑屏恢复。M11 专属工作树不修改 `Content/Maps/Test.umap`；集成后的实际验收地图/GameMode Blueprint 必须继续接入 M11 GameMode/Finale System 生命周期。
 
 ## 14. 资料来源
 
@@ -779,4 +783,4 @@ M10.1-D 的通用道路外目标选择与走廊系统继续延期。M11 使用�
 11. [Kerbal Space Program 1.7：Room to Maneuver 官方更新说明](https://store.steampowered.com/news/posts/?appids=220200&enddate=1557151214)
 12. [Epic Games：Physics Sub-Stepping](https://dev.epicgames.com/documentation/en-us/unreal-engine/physics-sub-stepping-in-unreal-engine)
 
-返回父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md) · 前置子稿：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · 求解器子稿：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · 当前子稿：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)
+返回父级：[AngryBirdsToSpace 游戏设计稿](AngryBirdsToSpaceGameDesign.md) · 前置子稿：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · 求解器子稿：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · 布局认证子稿：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) · 当前子稿：[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md) · 返回交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)

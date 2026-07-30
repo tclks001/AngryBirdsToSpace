@@ -1,12 +1,12 @@
 # M11-A：纯数据引力弹弓求解器实施与验收
 
-> 状态：C++ 实现、Editor 编译与 `ABTS.M11A` 全新进程自动化已完成；本阶段不需要 PIE 视觉验收。
+> 状态：Solver/Hash 1/1、M11-A v2 数值优化和 **M11-A v2.1 标准 C++ 可移植单一权威内核**均已完成自动验收；当前生产 M11-B/C 仍保持 v1，下一入口为 M11-B v2.1 候选构造。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
 > 上游：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
 >
-> 下游：[M11-B 终局局部布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md) 的 C++、编译与全新进程自动认证已完成，待用户 PIE。
+> 下游：[M11-B 终局局部布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md) 的 v1 已验收；v2.1 将使用本稿完成的标准 C++ Core 搜索候选。
 >
 > 交接入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
 
@@ -137,7 +137,7 @@ Hash 使用固定字节序 FNV-1a 64 位折叠，不对结构体内存、Padding
 
 ## 4. 自动化验收
 
-全新 `UnrealEditor-Cmd -NullRHI` 运行 `ABTS.M11A`，现共 8 项：
+SolverVersion 1 基线在全新 `UnrealEditor-Cmd -NullRHI` 中共 8 项；连同第 6、7 节的 v2/v2.1 门，当前 `ABTS.M11A` 总计 15 项：
 
 | 测试 | 阻断性断言 |
 | --- | --- |
@@ -176,4 +176,48 @@ M11-B 的完整数据合同、全域门槛、Actor 权威边界、PIE 步骤及 
 
 M11-B v1 将 16,000 cm `HitRadius` 用作三次 `Q>=0.95` 合格助推后的终端拦截包络，并把实际 UFO 放在更远端独立中心、半径 800 cm。该项目参数属于 M11-B 冻结预设，不改变本稿默认通用目标的单球语义。
 
-返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 上游：[M11.0](M110PreFinaleClosureDesign.md) · 下游：[M11-B](M11BFinaleLayoutCertificationDesign.md) · 返回入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
+## 6. M11-A v2 兼容扩展
+
+M11-A v2 不修改上述 SolverVersion 1 数值合同，而是新增显式 `SolverVersion=2 / HashSchemaVersion=2`：
+
+- v1 只允许 `MaximumCoastStepExpansionDepth=0`，冻结 golden `0xd78e8f7153cca7f1` 不变；
+- v2 在全部助推作用圈外按二进制幂扩大 coast 步长，进入任意作用圈后回到基础步长和既有细分；
+- 大步先用 Verlet 二次弧精确弓高认证全部事件球的边界拓扑，无法证明安全时回退到基础步长，再使用相同 swept 解析球根、固定根迭代和事件优先级；
+- 新 coast policy 只进入 HashSchema 2 的 Result/Preset Source Hash；
+- Result 可派生每段 coast、作用圈停留、实际速度转角、自然转角、能量与总时长，A 不设置产品阈值；
+- 新增 6 项 v2 自动化，使 `ABTS.M11A` 总数由 8 项增至 14 项；其中跨阶段三助推 canary 只做真实 workload 回归，不把 v1 布局解释成 v2 生产预设。
+
+最终 120 秒远场夹具由 14,401 点降至 901 点，减少约 `15.98×`；强助推夹具在大作用圈和大虚拟动量下仍保持确定性事件、碰撞净空和明显转角；真实三助推 workload canary 冻结为 34,852 点、`558.161570478 s` 和 Hash `0xf3c40a0ab6e0faa1`。完整阶段边界、实现细节、B/C v2 待办和门禁见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)。
+
+## 7. M11-A v2.1 标准 C++ 单一权威收口
+
+v2.1 只重构编译与调用边界，不修改 Solver/Hash 1/1 或 2/2 的有效输入数值语义：
+
+```text
+Public/Private/M11Core（标准 C++ 唯一算法与 Hash）
+  ├─ Tools/M11Core/ABTSM11CoreConformance（无 UE 的 Release 重放）
+  └─ ABTSM11GravityAssistCoreAdapter（UE 显式转换）
+       └─ 既有 FABTSM11* Solver/Types 兼容 Facade
+```
+
+旧 `Private/World/ABTSM11GravityAssistEncounter/Hash/Numerics/SolveSupport` 与内部 Solver 实现已退役；World Solver 只调用 Core，不再维护第二份算法。Core 不包含 Unreal Header、反射宏、`FVector/TArray/FString/FMath`、UObject、随机数或可变全局。标准 C++ 向量除法刻意采用“先求一次倒数、再逐分量相乘”的表达顺序，以保持 UE `FVector3d` 原有位级语义；迁移后的 v1 golden 仍为 `0xd78e8f7153cca7f1`。
+
+独立工具固定 MSVC 14.44、x64、C++20、`/fp:precise`，并输出可复现命令、编译合同、生产 Core Source Hash 与独立的 Conformance/Tool Source Hash。配置门会拒绝未分类的新 Core `.h/.cpp`；测试同时扫描最终 DLL imports 和 Core 源码 include，禁止悄然引入 UE/ABTSRuntime 依赖。
+
+共享 parity corpus 固定 11 类输入：v1 natural flyby、v2 strong assist、三助推 nominal、目标边界、天体碰撞、错序、三颗逐一消融、晚到与宏步回退。每例冻结 Request Identity、Result Hash、Termination、点数、事件数和助推数，并验证串行重复、CPU 并行和 UE Adapter 逐字段精确一致。另有全字段非默认 Request/Result/Pacing 与全部枚举双向转换哨兵；NaN 和非法高位 Assist Mask 必须 fail closed，且清空点列、事件、Hash 与计数。
+
+最终门禁：
+
+| 门禁 | 结果 |
+| --- | --- |
+| 标准 C++ clean Release / CTest | `2/2` |
+| standalone 共享 corpus | `11/11`；Aggregate `0x4c7af90ade0a28e7` |
+| Development Editor 默认 / 强制 Unity 全链接 | 均通过 |
+| fresh `ABTS.M11A` | `15/15`，含 `V2_1.PortableCoreParity` |
+| M11-B Unit / Runtime | `8/8`、`4/4` |
+| M11-C Unit / Runtime | `5/5`、`1/1` |
+| `ABTS.M110` / `ABTS.Contracts.WorldGeneration` | `4/4`、`2/2` |
+
+生产 Core Source Hash 为 `970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0`；最终 Conformance/Tool Source Hash 为 `7d9f2a2e941429830ea9cd1eb181df89783de635ed997b7429dce36d1826e1b2`。详细日志和后续实施顺序见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)。v1 生产 Bundle 与身份未变化，且 v2 尚未进入 B v2.2，因此本次不重跑约七小时级 v1 全域慢认证。
+
+返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · 优化总设计：[M11 v2](M11V2FinaleOptimizationDesign.md) · 上游：[M11.0](M110PreFinaleClosureDesign.md) · 下游：[M11-B](M11BFinaleLayoutCertificationDesign.md) · 返回入口：[ABTS 项目工作流](ABTSProjectWorkflow.md)。
