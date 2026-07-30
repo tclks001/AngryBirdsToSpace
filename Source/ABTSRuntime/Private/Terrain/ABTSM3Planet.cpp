@@ -1062,6 +1062,101 @@ void AABTSM3Planet::
 		}
 	}
 }
+
+bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
+	const float LifeTimeSeconds,
+	int32& OutTargetFootprintCellCount,
+	int32& OutAttackCorridorCellCount) const
+{
+	OutTargetFootprintCellCount = 0;
+	OutAttackCorridorCellCount = 0;
+	if (GetWorld() == nullptr
+		|| !MonthlyPresentationResult.bPresentationValid)
+	{
+		return false;
+	}
+	const FABTSM3MonthlyCandidatePresentation* Candidate =
+		FABTSM3MonthlyPresentationBuilder::
+			FindCandidatePresentation(
+				MonthlyPresentationResult,
+				MonthlyPresentationDebugData
+					.SourceRouteCandidateId);
+	if (Candidate == nullptr)
+	{
+		return false;
+	}
+
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 360.0f;
+	const float DrawLifeTime =
+		FMath::Clamp(LifeTimeSeconds, 0.05f, 5.0f);
+	for (const FABTSM3MonthlyPresentationCell& Cell :
+		Candidate->Cells)
+	{
+		if (!LogicalCells.IsValidIndex(Cell.CellId))
+		{
+			continue;
+		}
+		const FVector Position =
+			Center
+			+ LogicalCells[Cell.CellId].UnitCenter
+				* Radius;
+		if (Cell.bTargetFootprint)
+		{
+			++OutTargetFootprintCellCount;
+			DrawDebugSphere(
+				GetWorld(),
+				Position,
+				26.0f,
+				6,
+				FColor(255, 45, 45),
+				false,
+				DrawLifeTime,
+				0,
+				3.0f);
+		}
+		if (!Cell.bAttackCorridor)
+		{
+			continue;
+		}
+		++OutAttackCorridorCellCount;
+		DrawDebugPoint(
+			GetWorld(),
+			Position,
+			18.0f,
+			FColor(255, 165, 0),
+			false,
+			DrawLifeTime,
+			0);
+		for (const int32 NeighborId :
+			LogicalCells[Cell.CellId].NeighborCellIds)
+		{
+			if (NeighborId <= Cell.CellId
+				|| !Candidate->Cells.IsValidIndex(
+					NeighborId)
+				|| !LogicalCells.IsValidIndex(
+					NeighborId)
+				|| !Candidate->Cells[NeighborId]
+					.bAttackCorridor)
+			{
+				continue;
+			}
+			DrawDebugLine(
+				GetWorld(),
+				Position,
+				Center
+					+ LogicalCells[NeighborId].UnitCenter
+						* Radius,
+				FColor(255, 165, 0),
+				false,
+				DrawLifeTime,
+				0,
+				5.0f);
+		}
+	}
+	return OutTargetFootprintCellCount > 0
+		&& OutAttackCorridorCellCount > 0;
+}
 #endif
 
 float AABTSM3Planet::GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const

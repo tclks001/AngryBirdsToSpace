@@ -1690,6 +1690,16 @@ void FABTSM3MonthlyPresentationBuilder::BuildDebugData(
 			OutDebugData.DecorationProtectedCellIds.Add(
 				Cell.CellId);
 		}
+		if (Cell.bTargetFootprint)
+		{
+			OutDebugData.TargetFootprintCellIds.Add(
+				Cell.CellId);
+		}
+		if (Cell.bAttackCorridor)
+		{
+			OutDebugData.AttackCorridorCellIds.Add(
+				Cell.CellId);
+		}
 	}
 }
 

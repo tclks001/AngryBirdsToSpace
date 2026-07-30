@@ -69,7 +69,7 @@ R-2 Pool 不替换首周 `GeneratedCellStates`、`GeneratedEdgeStates`、`PCGSum
 
 树石散布既在源 Cell 上检查保护标记，也在偏移后的最终落点重新解析 Cell 并复查。道路、ActiveRole、Target Footprint、NoRoad、攻击走廊和水体禁止装饰侵入。完整实现状态、100 Seed 证据与待集成门禁见 [M3R-5](M3PCGMapImprovementPlan.md#148-m3r-5实现-biomedistrict-与-playable-envelope-表现)。
 
-显式预览时，材质桥按 `VisualBeatId/AccentVariantId/ThemeVariantId` 对 Cell LUT 做低幅明暗调制；HISM 用相同字段调整树石疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell、全部实际树石实例均经过 Beat 消费路径，因而 20–45 m 节拍不是只存在于数据快照。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。
+显式预览时，材质桥按 `VisualBeatId/AccentVariantId/ThemeVariantId` 对 Cell LUT 做低幅明暗调制；HISM 用相同字段调整树石疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell、全部实际树石实例均经过 Beat 消费路径，因而 20–45 m 节拍不是只存在于数据快照。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
 
 ### 2.5 `QuerySurface` 接口
 
@@ -278,6 +278,7 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 13. R-5 固定展示运行时必须报告 `PreviewAuthority=1/MonthlyAccepted=0`；切换或关闭预览后 R-3 Route/Spatial 身份、`QuerySurface`、PVS、Witness 和兼容世界 Hash 均不改变。
 14. R-5 100 Seed 必须 `100/100` 接受全部 300 个候选表现计划；当前冻结证据为 ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、主题下限 `4`、逻辑 singleton `2` 与后续小碎片 `2 Cell` 仅视觉合并、最终显示 singleton `0`、最小显示连通块 `3 Cell`、全局显示邻接边界率上限 `21‰`，Oracle=`6751B93DA5E4C778`、Manifest=`9E5A2FE0E563A7C4`。
 15. 树石实例不得落入道路、ActiveRole、Target Footprint、NoRoad、攻击走廊或水体；组件必须保持 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`。真实 M6/M9/Character/Visibility 联合碰撞仍在 IntegrationPending 清单中。
+16. 使用精确预览 Candidate 进入 PIE 后，`F7` 必须能在不重建地图的情况下显示/隐藏逻辑区域；红色 Target Footprint 与橙色 Attack Corridor 的 Cell 集合必须逐项等于 R-3 源标记，关闭后叠层在一个刷新周期内消失。
 
 ## 8. 排错
 

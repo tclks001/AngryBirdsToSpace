@@ -413,6 +413,14 @@ struct ABTSRUNTIME_API FABTSM3MonthlyPresentationDebugData
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
 	TArray<int32> DecorationProtectedCellIds;
+
+	/** Exact target-footprint cells used by the F7 developer overlay. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	TArray<int32> TargetFootprintCellIds;
+
+	/** Exact attack-corridor cells used by the F7 developer overlay. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	TArray<int32> AttackCorridorCellIds;
 };
 
 class ABTSRUNTIME_API FABTSM3MonthlyPresentationBuilder

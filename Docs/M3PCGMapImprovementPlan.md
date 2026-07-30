@@ -1356,7 +1356,7 @@ Visible PIE，才能整体晋升为 **IntegrationAccepted**。
 - `DisplayBiomeArchetype` 与冻结的逻辑 `BiomeArchetype/BiomeDistrictId` 分离。表现层按 20–45 m 视觉 Beat 编排主题；小于 3 Cell 的显示连通块只在显示副本中确定性合并到邻区多数主题，源 District 身份与全部 R-3 Hash 保持不变。100 Seed 中共发现 2 个逻辑 singleton，第一轮视觉合并后又修复 2 个 Cell 的小碎片；最终显示 singleton 为 0、最小显示连通块为 3 Cell；
 - 材质桥和 HISM 只消费显式预览副本；生产默认不把任一候选宣布为世界权威。材质 LUT 用 Beat/Theme 变体形成低幅明暗节拍，树石 HISM 用同一 Beat 变体形成疏密和尺度变化，故 20–45 m Visual Beat 不再只是 DTO/Hash。固定展示运行时会逐项证明全部材质 Cell 和全部实际 HISM 实例均经过该消费路径，并报告 `PreviewAuthority=1`、`MonthlyAccepted=0`；关闭预览时继续使用兼容世界。权威 `GeneratedCellStates/GeneratedEdgeStates/TerrainVisualField`、`QuerySurface`、旧 TaskGraph 与稳定合同不因预览开关改变；
 - 装饰实例在写入前和散点落点重解析后两次检查保护区：道路、ActiveRole、Target Footprint、NoRoad、攻击走廊与水体均禁止树石侵入。树石 HISM 每次重建重申 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，只作为静态碰撞表现，不成为任务、PVS、Witness、道路或布局身份的数据源。
-- Editor 调试叠层可独立开关 Biome、Envelope 边界、Visual Beat 边界和 ActiveRole/DeepWild 覆盖；调试开关不进入表现配置或候选身份。
+- Editor 调试叠层可独立开关 Biome、Envelope 边界、Visual Beat 边界和 ActiveRole/DeepWild 覆盖；调试开关不进入表现配置或候选身份。PIE 使用精确预览 Candidate 时可按 `F7` 切换逻辑区域快捷叠层：红色球点表示 Target Footprint，橙色点线表示 Attack Corridor；再次按 `F7` 关闭。该快捷键只存在于 Editor 构建，不修改 Input.ini、玩家输入映射或候选 Hash。也可用 `-ABTSM3R5LogicRegions` 在启动时默认开启；若没有同时提供 `-ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4`，叠层会明确显示不可用而不会隐式选择候选。
 
 **本地自动验收证据**
 
@@ -1586,6 +1586,7 @@ Editor-only Debug Layer：
 - Start PVS 绿色/灰色连线；
 - Ballistic Witness 轨迹；
 - Playable Envelope 与 BiomeDistrict 边界；
+- `F7`：Target Footprint 红色球点、Attack Corridor 橙色点线；
 - RejectReason 叠层。
 
 正式 PIE 默认全部关闭，仅保留玩家应见的 M10 侦察/轨迹 UI。

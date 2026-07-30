@@ -67,6 +67,18 @@ public:
 	virtual float GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const override;
 	virtual FVector GetSurfaceNormalAtDirection(const FVector& UnitDirection) const override;
 
+#if WITH_EDITOR
+	/**
+	 * Draws the exact R-5 target footprints and attack corridors for the
+	 * explicitly selected preview candidate. Returns false when no exact
+	 * preview candidate is available.
+	 */
+	bool DrawMonthlyLogicRegionDebugOverlay(
+		float LifeTimeSeconds,
+		int32& OutTargetFootprintCellCount,
+		int32& OutAttackCorridorCellCount) const;
+#endif
+
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellState>& GetGeneratedCellStates() const { return GeneratedCellStates; }
 

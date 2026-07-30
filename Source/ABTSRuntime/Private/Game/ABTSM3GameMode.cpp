@@ -5,12 +5,14 @@
 #include "ABTSRuntime.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformMemory.h"
 #include "HAL/PlatformTime.h"
+#include "InputCoreTypes.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Player/ABTSM1PlayerController.h"
@@ -96,11 +98,27 @@ AABTSM3GameMode::AABTSM3GameMode()
 	DefaultPawnClass = AABTSM25BirdCharacter::StaticClass();
 	PlayerControllerClass = AABTSM1PlayerController::StaticClass();
 	HUDClass = AABTSM1HUD::StaticClass();
+#if WITH_EDITOR
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
+#endif
 }
 
 void AABTSM3GameMode::BeginPlay()
 {
 	Super::BeginPlay();
+#if WITH_EDITOR
+	bMonthlyLogicRegionDebugEnabled = FParse::Param(
+		FCommandLine::Get(),
+		TEXT("ABTSM3R5LogicRegions"));
+	bMonthlyLogicRegionDebugReadyLogged = false;
+	MonthlyLogicRegionDebugRefreshRemaining = 0.0f;
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M3R5][LogicRegionDebug] Shortcut=F7 StartupEnabled=%d TargetColor=Red AttackCorridorColor=Orange PreviewCandidateRequired=1"),
+		bMonthlyLogicRegionDebugEnabled ? 1 : 0);
+#endif
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3] TaskGraph terrain presentation entry ready."));
 	FString ManifestFailure;
 	if (FABTSM3R0AcceptanceManifest::Validate(ManifestFailure))
@@ -438,6 +456,118 @@ void AABTSM3GameMode::BeginPlay()
 	}
 	TryPlacePlayerAtInitialRoad();
 }
+
+#if WITH_EDITOR
+void AABTSM3GameMode::Tick(const float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	APlayerController* PlayerController =
+		GetWorld() != nullptr
+		? GetWorld()->GetFirstPlayerController()
+		: nullptr;
+	if (PlayerController != nullptr
+		&& PlayerController->WasInputKeyJustPressed(
+			EKeys::F7))
+	{
+		ToggleMonthlyLogicRegionDebug();
+	}
+	if (bMonthlyLogicRegionDebugEnabled)
+	{
+		RefreshMonthlyLogicRegionDebug(DeltaSeconds);
+	}
+}
+
+void AABTSM3GameMode::ToggleMonthlyLogicRegionDebug()
+{
+	bMonthlyLogicRegionDebugEnabled =
+		!bMonthlyLogicRegionDebugEnabled;
+	bMonthlyLogicRegionDebugReadyLogged = false;
+	MonthlyLogicRegionDebugRefreshRemaining = 0.0f;
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M3R5][LogicRegionDebug] Enabled=%d Shortcut=F7"),
+		bMonthlyLogicRegionDebugEnabled ? 1 : 0);
+	if (!bMonthlyLogicRegionDebugEnabled
+		&& GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			0x4D335235,
+			2.0f,
+			FColor::Silver,
+			TEXT("M3R5 Logic Regions OFF (F7)"));
+	}
+}
+
+void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
+	const float DeltaSeconds)
+{
+	MonthlyLogicRegionDebugRefreshRemaining -=
+		FMath::Max(0.0f, DeltaSeconds);
+	if (MonthlyLogicRegionDebugRefreshRemaining > 0.0f)
+	{
+		return;
+	}
+	constexpr float RefreshIntervalSeconds = 0.20f;
+	constexpr float DrawLifeTimeSeconds = 0.35f;
+	MonthlyLogicRegionDebugRefreshRemaining =
+		RefreshIntervalSeconds;
+
+	int32 TargetCellCount = 0;
+	int32 AttackCorridorCellCount = 0;
+	bool bDrewAnyPlanet = false;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld());
+		It;
+		++It)
+	{
+		int32 PlanetTargetCellCount = 0;
+		int32 PlanetAttackCorridorCellCount = 0;
+		if (It->DrawMonthlyLogicRegionDebugOverlay(
+				DrawLifeTimeSeconds,
+				PlanetTargetCellCount,
+				PlanetAttackCorridorCellCount))
+		{
+			bDrewAnyPlanet = true;
+			TargetCellCount += PlanetTargetCellCount;
+			AttackCorridorCellCount +=
+				PlanetAttackCorridorCellCount;
+		}
+	}
+	if (GEngine == nullptr)
+	{
+		return;
+	}
+	if (bDrewAnyPlanet)
+	{
+		if (!bMonthlyLogicRegionDebugReadyLogged)
+		{
+			bMonthlyLogicRegionDebugReadyLogged = true;
+			UE_LOG(
+				LogABTSRuntime,
+				Log,
+				TEXT("[ABTS][M3R5][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d"),
+				TargetCellCount,
+				AttackCorridorCellCount);
+		}
+		GEngine->AddOnScreenDebugMessage(
+			0x4D335235,
+			DrawLifeTimeSeconds + 0.1f,
+			FColor::Yellow,
+			FString::Printf(
+				TEXT("M3R5 Logic Regions ON (F7)  RED=Target Footprint [%d]  ORANGE=Attack Corridor [%d]"),
+				TargetCellCount,
+				AttackCorridorCellCount));
+	}
+	else
+	{
+		GEngine->AddOnScreenDebugMessage(
+			0x4D335235,
+			DrawLifeTimeSeconds + 0.1f,
+			FColor::Red,
+			TEXT("M3R5 Logic Regions unavailable: launch with -ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4"));
+	}
+}
+#endif
 
 void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 {

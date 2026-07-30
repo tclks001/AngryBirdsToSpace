@@ -698,6 +698,55 @@ bool FABTSM3MonthlyPresentationCoreTest::RunTest(
 
 	const FABTSM3MonthlyCandidatePresentation& Preview =
 		First.CandidatePresentations[0];
+	FABTSM3MonthlyPresentationDebugData DebugData;
+	FABTSM3MonthlyPresentationBuilder::BuildDebugData(
+		First,
+		Preview.SourceRouteCandidateId,
+		DebugData);
+	TArray<int32> ExpectedTargetFootprintCellIds;
+	TArray<int32> ExpectedAttackCorridorCellIds;
+	for (const FABTSM3MonthlyPresentationCell& Cell :
+		Preview.Cells)
+	{
+		if (Cell.bTargetFootprint)
+		{
+			ExpectedTargetFootprintCellIds.Add(Cell.CellId);
+		}
+		if (Cell.bAttackCorridor)
+		{
+			ExpectedAttackCorridorCellIds.Add(Cell.CellId);
+		}
+	}
+	TestTrue(
+		TEXT("F7 target-footprint debug cells are exact"),
+		!ExpectedTargetFootprintCellIds.IsEmpty()
+			&& DebugData.TargetFootprintCellIds
+				== ExpectedTargetFootprintCellIds);
+	TestTrue(
+		TEXT("F7 attack-corridor debug cells are exact"),
+		!ExpectedAttackCorridorCellIds.IsEmpty()
+			&& DebugData.AttackCorridorCellIds
+				== ExpectedAttackCorridorCellIds);
+	for (const int32 CellId :
+		DebugData.TargetFootprintCellIds)
+	{
+		TestTrue(
+			FString::Printf(
+				TEXT("Target cell remains decor protected %d"),
+				CellId),
+			DebugData.DecorationProtectedCellIds.Contains(
+				CellId));
+	}
+	for (const int32 CellId :
+		DebugData.AttackCorridorCellIds)
+	{
+		TestTrue(
+			FString::Printf(
+				TEXT("Attack corridor remains decor protected %d"),
+				CellId),
+			DebugData.DecorationProtectedCellIds.Contains(
+				CellId));
+	}
 	FString ManifestFailure;
 	TestTrue(
 		TEXT("R5 acceptance manifest self-valid"),
@@ -718,7 +767,7 @@ bool FABTSM3MonthlyPresentationCoreTest::RunTest(
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M3R5][DisplayProbe] Seed=%d ConfigHash=%016llX SourceSpatial=%016llX ResultHash=%016llX PreviewSourceCandidate=%d PreviewSourceSpatialCandidate=%016llX PreviewHash=%016llX CandidatePlans=%d Cells=%d Districts=%d Envelopes=%d Themes=%d Beats=%d BeatMinCM=%d BeatMaxCM=%d ActiveCoveragePermille=%d DeepWildPermille=%d MergedLogicalSingletons=%d MergedSmallFragments=%d SingletonComponents=%d MinVisualComponentCells=%d VisualBoundaryPermille=%d ProtectedCells=%d PlannedInstances=%d MonthlyAccepted=0"),
+		TEXT("[ABTS][M3R5][DisplayProbe] Seed=%d ConfigHash=%016llX SourceSpatial=%016llX ResultHash=%016llX PreviewSourceCandidate=%d PreviewSourceSpatialCandidate=%016llX PreviewHash=%016llX CandidatePlans=%d Cells=%d Districts=%d Envelopes=%d Themes=%d Beats=%d BeatMinCM=%d BeatMaxCM=%d ActiveCoveragePermille=%d DeepWildPermille=%d MergedLogicalSingletons=%d MergedSmallFragments=%d SingletonComponents=%d MinVisualComponentCells=%d VisualBoundaryPermille=%d ProtectedCells=%d TargetFootprintCells=%d AttackCorridorCells=%d PlannedInstances=%d MonthlyAccepted=0"),
 		DisplaySeed,
 		static_cast<unsigned long long>(
 			FABTSM3MonthlyPresentationBuilder::
@@ -748,6 +797,8 @@ bool FABTSM3MonthlyPresentationCoreTest::RunTest(
 		Preview.MinVisualBiomeComponentCellCount,
 		Preview.VisualBiomeBoundaryPermille,
 		Preview.DecorationProtectedCellCount,
+		DebugData.TargetFootprintCellIds.Num(),
+		DebugData.AttackCorridorCellIds.Num(),
 		Preview.PlannedDecorationInstanceCount);
 	UE_LOG(
 		LogABTSRuntime,
