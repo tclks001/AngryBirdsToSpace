@@ -9,10 +9,10 @@
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
-- M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 仍是 `IntegrationPending`：普通槽场还没有 M5.1 实体槽和 M6 连弦消费端，也不能从未决候选数组直接生成玩家世界。
+- M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、两个 Editor-only 候选和交互表现已进入 `master`。两个布局仍是 `Candidate / NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：集成工作树先补 M3R-3.1 的 M5.1/M6 通用消费端；M7 可并行推进 DAG5-B/C，M3 可并行推进不依赖共享接口的 R-5；M3R-4/R-6、M7 DAG5-D/E 和 M11-D 必须按第 5 节的跨工作树门槛交接。
+- 默认下一步：Integration 补 M6/M9 只读预测与 M7 Profile 目录边界，M7 并行推进 DAG5-B/C，M3 可推进 R-5；随后由 M3R-4 选出唯一 Candidate，再接通 R-3.1 月度实体槽与 R-6 六栋世界。M7 DAG5-D/E 和 M11-D 仍按第 5 节门槛交接。
 
 当前入口：[M3R 月度地图](M3PCGMapImprovementPlan.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
@@ -62,7 +62,7 @@
 
 | 需求 | 已完成生产者 | 尚缺消费者/前置 | 当前阻断门 |
 | --- | --- | --- | --- |
-| M3R-3.1 普通槽场 | M3 已生成确定性槽场、Slot Cell 与最大弦长 | Integration 实现 M5.1 DirtHole 快照消费、M6 三维连弦净空和失败原子回滚 | 未接受唯一月度 Candidate 前不得读取 `RetainedCandidates[0]`；实体槽/连弦自动化与 Visible PIE 未通过前保持 `IntegrationPending` |
+| M3R-3.1 普通槽场 | M3 已生成候选槽场；Integration 已实现最小快照消费接缝、DirtHole 批回滚、M6 三维净空与失败原子状态，装配 2/2、槽 Actor 1/1 | M3R-4/R-6 产出唯一 Candidate、最终 `LayoutHash` 和正式导出；Integration 再绑定生产入口 | 未接受唯一月度 Candidate 前不得读取 `RetainedCandidates[0]`；实体月度槽与 Visible PIE 未通过前保持 `IntegrationPending` |
 | M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间 | Integration 提供 M6/M9 只读预测适配器；M7 提供已认证 ProfileDescriptor 目录 | 当前 M3 中 Solver/Catalog 身份仍是占位输入，不能宣称真实弹道、卫星或建筑包络可解 |
 | M3R-6 六栋实体建筑 | M3 已有六站点逻辑；M7 已完成 DAG5-A 搜索骨架 | M7 先完成 DAG5-B/C；Integration 建立向后兼容 vNext 建筑合同；随后 M7 完成 DAG5-D/E | 当前 v1 合同没有精确 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace`，生产仍固定三栋 DAG2.3，不能提前改 `Expected=6` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
@@ -70,7 +70,7 @@
 
 ### 5.3 固定交接顺序
 
-1. Integration 可先实现通用 M5.1/M6 槽与连弦规则，但实体月度槽只能消费 R-4/R-6 最终冻结的最小快照。
+1. Integration 的通用 M5.1/M6 槽与连弦规则已完成；实体月度槽仍只能消费 R-4/R-6 最终冻结并由 M3 正式导出的最小快照。
 2. M7 完成 DAG5-B/C 并产出稳定 ProfileDescriptor Catalog；Integration 再定义兼容 v1 的只读目录与建筑 vNext 合同。
 3. M3 合并新 `master` 后完成 R-4，使用真实 M6/M9 和 M7 目录选定唯一 Candidate、Profile 与 AttackFace；不得复制求解器或让 M7 重新选型。
 4. M7 合并该基线后完成 DAG5-D/E；联合候选必须验证恰好六栋、逐栋动态认证、分批加载、WorldReady 时序与性能预算。

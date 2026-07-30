@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 普通弹弓槽场已达到 M3LocalAccepted（IntegrationPending）
+> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 的通用 M5.1/M6 消费端已完成自动验收，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此阶段保持 IntegrationPending
 > 日期：2026-07-30
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：M3R-3.1 已在不改变 M3R-3 冻结身份的前提下，加入可调普通 Encounter 槽场、道路附加槽场、统一最大弦长数据与集成工作树交接门
+> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；未读取未决候选，也未提前生成月度实体槽
 
 父文档：
 
@@ -971,7 +971,7 @@ NotStarted
 | M3R-1 月度 Schema 与观测面 | Week 1 前半 | **M3LocalAccepted**；Schema 8/8、兼容 21/21、旧合同 2/2/1、fresh runtime 与强制 Unity 均通过 | RouteBeat、Encounter、Biome、质量报告的数据骨架 | M3；共享字段只提交需求 | M3LocalAccepted |
 | M3R-2 多候选球面路线 | Week 1 后半 | **M3LocalAccepted**；RouteCore 7/7、Failure 1/1、200 Seed 200/200、旧回归与 fresh runtime 均通过；Editor-only 叠层保留人工可视抽查 | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
 | M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **M3LocalAccepted（IntegrationPending）**；Spatial 8/8、Failure 2/2、100 Seed 100/100、PVS 11/11、旧回归与 fresh runtime 均通过 | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
-| M3R-3.1 普通弹弓槽场 | Week 2 前半补充 | **M3LocalAccepted（IntegrationPending）**；SlotField 7/7、Failure 2/2、100 Seed 100/100、fresh runtime 与强制 Unity 均通过 | Encounter 紧凑散点槽场、道路附加槽场、最大弦长权威参数与未来最小 DTO 的集成交接规范 | M3；实体槽与弹弓弦几何门由 Integration 接入 | IntegrationAccepted |
+| M3R-3.1 普通弹弓槽场 | Week 2 前半补充 | **IntegrationPending**；M3 的 SlotField 7/7、Failure 2/2、100 Seed 100/100 已通过；Integration 的装配 2/2、槽 Actor 1/1 与强制 Unity 已通过，尚缺唯一 Candidate 导出和联合 PIE | Encounter 紧凑散点槽场、道路附加槽场、最小只读 DTO 消费端、最大弦长与三维装配门 | M3 + Integration；最终实体槽等待 R4/R6 | IntegrationAccepted |
 | M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **NotStarted** | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M6/M9 | IntegrationAccepted |
 | M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **NotStarted** | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3 | M3LocalAccepted |
 | M3R-6 六栋 M7 实体建筑集成 | Week 3 | **NotStarted** | vNext 建筑合同、动态数量、难度/视觉路由与物理批处理 | Integration + M7，M3 只生产数据 | IntegrationAccepted |
@@ -1160,7 +1160,7 @@ R-2 只证明路线候选池和 Road Solver 机制，不在正式 Height/Hydrolo
 - 默认不生成可选支线，把 SatelliteWindow 改为主线训练 Beat；只有 `BranchUtilityContract` 通过才允许支线；
 - 月度六 Encounter 暂存于 M3 内部结果；共享 v1 建筑合同在 R-6 前继续导出首周兼容数据，旧四站点顺序、数量和合同投影不得变化。
 
-**当前实现状态（M3LocalAccepted，IntegrationPending）**
+**当前实现状态（通用消费端已实现，月度实体仍 IntegrationPending）**
 
 - 月度路径继续使用 `GeneratorVersion=3 + LayoutPolicyVersion=2` 的 M3 内部结果。每个 R-2 保留候选各自生成六个有序 Encounter、42 条内部空间角色、六个 Playable Envelope 和七个 BiomeDistrict，不跨候选复用预留结果；
 - 铺路前冻结的可玩预留集合由初始 Encounter Envelope 与 R-2 Corridor 的 Playable Padding 并集组成。Target Footprint、NoRoad Ring、Hydrology、必要攻击走廊和 RoadContext 都在 strict same-candidate rebuild 前确定；最终 Envelope 与侧向攻击通路必须是该冻结集合的子集；
@@ -1228,6 +1228,9 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 - 结果执行完整重建与 whole-struct compare；非法范围、容量不足、字段重叠、槽位落入道路/水体/Target Footprint、丢失连通性和重签篡改都会 fail closed；
 - 当前结果刻意不提供给共享运行时直接生成实体的 Getter：R-3 的 `RetainedCandidates` 仍是等待 R-4 Witness 决选的备选方案，`RetainedCandidates[0]` 不能被误当成已经接受的玩家世界。R-4 选出最终 Candidate 后，Integration 应冻结只含
   `LayoutHash / CandidateHash / SlotGroups / MaxCordLengthCM` 的最小只读 DTO；共享代码不得读取 R-3/R-3.1 原始候选数组；
+- Integration 已新增 consumer-owned `FABTSM51OrdinarySlingshotSlotSnapshot` 和 pre-BeginPlay 显式配置接缝；结构校验覆盖非零布局/候选身份、`100..4000cm`、每组至少两槽、全局 Cell 唯一和 CellTopo 越界。当前生产入口不配置它，继续走兼容 TaskGraph；一次无效月度配置会保持零普通槽并禁止静默回退；
+- R4/R6 接正式导出时必须把当前普通 `SpawnActor` 改为 deferred spawn，在 `FinishSpawning` 前配置快照；同时用活动月度世界的已接受身份核对 `LayoutHash/CandidateHash`。本轮只具备非零身份和拓扑结构门，不能把该接缝误报为已完成生产绑定；
+- Integration 已新增 `FABTSM6CordConnectionRules`，普通连接不读 Field/Encounter/SlotGroup，只校验顶部端点厘米长度、第三桩中心线/胶囊、既有弦端点线段、有限值和退化段；M11.0 Space Pair 身份仍独立；
 - Editor 的 R-3 空间调试层可显示 Encounter 槽、道路附加槽与实际 Anchor；发布默认关闭，不进入世界身份；
 - `M3R31AcceptanceManifest` 冻结依赖的 R-3 Manifest `4F1A236CDF81B80D`，并冻结
   `DisplayResult=8DF4352B7868EB58`、`DisplayBestCandidate=CD79141DA5C277C0`、`SweepOracle=D45E9C69B73431F1`、
@@ -1238,25 +1241,32 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 
 以下文件属于共享热点，本 M3 功能工作树不得直接修改；M3LocalAccepted 不代表这些行为已经在玩家运行时生效：
 
-1. R-4/R-6 先选出并接受唯一月度世界 Candidate，再由集成工作树建立带 `LayoutHash + CandidateHash` 的最小槽场快照并为其中每个 Slot Cell 生成普通 DirtHole。月度模式下身份缺失或不匹配必须 fail closed，不得静默换成旧槽对；当前首周三建筑兼容世界继续使用自身 TaskGraph 适配器。终局 Space 槽仍严格生成唯一一对；
-2. `TryConnectCord` 在扣除材料、生成 Cord Actor 或写入任一 `HasCord` 之前完成全部重校验：
+1. **部分完成**：最小槽场快照、全量 Cell 计划校验、普通 DirtHole 批量回滚和显式消费接缝已实现；R-4/R-6 仍须先选出并接受唯一月度世界 Candidate，再补 M3 导出与生产入口自动配置。身份缺失或不匹配必须 fail closed，不得静默换成旧槽对；当前首周三建筑兼容世界继续使用自身 TaskGraph 适配器。终局 Space 槽仍严格生成唯一一对；
+2. **已完成**：`TryConnectCord` 在扣除材料、生成 Cord Actor 或写入任一 `HasCord` 之前完成全部重校验：
    - 两桩顶部端点间世界空间长度 `<= MaxCordLengthCM`；
    - 候选线段与其他已插入弹弓桩的中心线/胶囊保持“桩半径 + 弦半径 + Clearance”净空，候选两端桩除外；
    - 候选线段与所有既有弹弓弦线段保持“两倍弦半径 + Clearance”净空；交叉、接触和过近均拒绝；
    - 使用显式三维线段距离（例如 `FMath::SegmentDistToSegmentSafe`），不得依赖当前 `NoCollision` Cord 的 LineTrace；近失配、高度不同、有限值和退化段均需有确定性结果；
-3. 失败不消耗背包材料、不生成 Actor、不设置 `HasCord`；只有 Actor 生成和材料扣除都成功后，才原子化提交两端状态；
-4. 普通槽位不检查 `FieldId`、EncounterId 或预生成配对；任何两根普通桩只要通过最大长度、阻挡和既有资源状态即可连接。
+3. **已完成**：失败不消耗背包材料、不保留 Actor、不设置 `HasCord`；只有 Actor 生成和材料扣除都成功后，才提交两端状态；
+4. **已完成**：普通槽位不检查 `FieldId`、EncounterId 或预生成配对；任何两根普通桩只要通过最大长度、阻挡和既有资源状态即可连接。
 
 **自动与 PIE 验收**
 
 - M3 本地：`ABTS.M3.Monthly.SlotField` 精确 7/7、`ABTS.M3.Monthly.SlotFieldFailure` 精确 2/2；冻结 100 Seed 为
   `Terminal=100, Accepted=100, Rejected=0`，Oracle `D45E9C69B73431F1`，默认每候选 8 场/56 槽，零附加和上下界参数均有覆盖；
-- 共享集成：新增纯几何测试覆盖清空、恰好等于上限、超长、被第三桩阻挡、与既有弦交叉、近失配、高度差、非有限值和退化段；新增运行时测试核对失败前后库存、Actor 数和两端 `HasCord` 完全不变；
+- 共享集成：`ABTS.M51.SlingshotAssembly.Geometry` 与 `.Runtime` 已在 fresh NullRHI 中精确 2/2 通过；覆盖清空、恰好等于上限、超长、第三桩、既有弦、近失配、高度差、非有限/退化，以及普通/Space 成功与失败前后库存、有效 Actor 数和两端 `HasCord`；`ABTS.M51.OrdinarySlots.Runtime` 精确 1/1，覆盖接受快照的实际 Actor 数、终局双槽隔离、幂等初始化与无效 Cell 全批回滚；
 - 回归：旧兼容站点、M6 普通桩任意插入、M11.0 终局唯一槽对及终局材料规则必须保持不变；
 - M3 本地可视抽查：Editor 调试叠层显示展示 Seed 中六个逻辑 Encounter 各有 7 槽的紧凑散点场、道路另有 2 场，且不改变当前兼容世界实体；
 - R-6/R-7 联合 Visible PIE：六个实体建筑各有 7 槽的紧凑散点场、道路另有 2 场；玩家能任意选桩，近距离无遮挡可连，超长、穿过第三桩和穿过既有弦均有明确拒绝且不扣材料；终局仍只有一对 Space 槽；
-- 只有共享几何/运行时自动化和上述 Visible PIE 均通过，阶段才能从 **M3LocalAccepted（IntegrationPending）** 晋升为
+- 只有 R-4/R-6 最终快照导出、共享几何/运行时自动化和上述 Visible PIE 均通过，阶段才能从 **IntegrationPending** 晋升为
   **IntegrationAccepted**。
+
+**Integration 本轮证据**
+
+- 强制 Unity：`Saved/Logs/M51-M6-20260730-154030-Final2-ForceUnity-Build.log`，`Result: Succeeded`；
+- fresh M5.1/M6：`Saved/Logs/M51-M6-20260730-154051-Final2-FreshAutomation.log`，装配 2/2、槽 Actor 1/1，`TEST COMPLETE. EXIT CODE: 0`；
+- M3R-3.1 回归：`Saved/Logs/M51-M6-20260730-154146-M3R31-SlotField-Regression.log`，精确 9/9；`Saved/Logs/M51-M6-20260730-154415-M3R31-FreshRuntime.log`，`RuntimeCertification Passed=1`；
+- M11.0 隔离回归：`Saved/Logs/M51-M6-20260730-154250-M110-FinaleSeparation-Regression.log`，精确 1/1。
 
 **M3 本地证据**
 

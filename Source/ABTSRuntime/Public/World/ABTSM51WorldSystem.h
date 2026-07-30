@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Inventory/ABTSInventoryTypes.h"
+#include "World/ABTSM51OrdinarySlingshotSlotSnapshot.h"
 #include "ABTSM51WorldSystem.generated.h"
 
 class AABTSCraftingStation;
@@ -14,6 +15,7 @@ class AABTSM51PickupItem;
 class AABTSM51SlingshotCord;
 class AABTSM51SlingshotDirtHole;
 class AABTSM51SlingshotStake;
+class UABTSInventoryComponent;
 
 /** CellTopo-driven M5.1 pickup, placement and slingshot assembly owner. */
 UCLASS()
@@ -35,11 +37,30 @@ public:
 	bool GetFinaleSpaceSlots(AABTSM51SlingshotDirtHole*& OutLeft, AABTSM51SlingshotDirtHole*& OutRight) const;
 	void SetDeveloperAnyCellStakePlacementEnabled(bool bEnabled) { bAllowDeveloperAnyCellStakePlacement = bEnabled; }
 
+	/**
+	 * Pre-BeginPlay injection point for the future M3R-4/R-6 accepted layout.
+	 *
+	 * Current production entry intentionally does not call this because R3.1
+	 * still owns multiple unaccepted candidates. A failed request is retained as
+	 * fail-closed state and never silently falls back to compatibility slots.
+	 */
+	bool ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
+		const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot);
+
+	/** Active ordinary connection limit, or zero after a rejected snapshot request. */
+	int32 GetActiveOrdinaryMaxCordLengthCM() const;
+
 private:
 	bool InitializeWorldContent();
-	void SpawnSlingshotHoles();
+	bool SpawnSlingshotHoles();
 	void SpawnSdfPickups();
 	void CollectNearbyPickups();
+	bool TryConnectCord(
+		AABTSM51SlingshotStake& First,
+		AABTSM51SlingshotStake& Second,
+		EABTSItemId HeldCord,
+		EABTSSlingshotTier Tier,
+		UABTSInventoryComponent& Inventory);
 	bool QueryCellTransform(int32 CellId, float SurfaceOffsetCM, FTransform& OutTransform) const;
 	int32 SelectPlacementCell(const FVector& UnitDirection) const;
 	int32 SelectDeveloperStakeCell(const FVector& UnitDirection) const;
@@ -68,10 +89,25 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Placement", meta = (ClampMin = "0.1", ClampMax = "15.0"))
 	float MaxPlacementSnapDegrees = 3.5f;
 
-	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Slingshot", meta = (ClampMin = "0.001", ClampMax = "0.5"))
+	/**
+	 * Retained only for serialized Blueprint compatibility. Ordinary assembly
+	 * now uses CompatibilityMaxCordLengthCM or the accepted snapshot value.
+	 */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Slingshot",
+		meta = (DeprecatedProperty, DeprecationMessage = "Use MaxCordLengthCM in the accepted slot snapshot."))
 	float MaxStakeArcRadians = 0.12f;
 
-	/** Allows stake placement at any unoccupied CellTopo center, including water and non-buildable cells. Cords still use MaxStakeArcRadians. */
+	/** Distance fallback for the current TaskGraph compatibility world. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Slingshot",
+		meta = (ClampMin = "100", ClampMax = "4000", Units = "cm"))
+	int32 CompatibilityMaxCordLengthCM = 1200;
+
+	/** Additional separation required from third stakes and existing cords. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Slingshot",
+		meta = (ClampMin = "0.0", ClampMax = "100.0", Units = "cm"))
+	float CordConnectionClearanceCM = 8.0f;
+
+	/** Allows stake placement at any unoccupied CellTopo center, including water and non-buildable cells. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Debug")
 	bool bAllowDeveloperAnyCellStakePlacement = false;
 
@@ -93,9 +129,15 @@ private:
 	TWeakObjectPtr<AABTSM3Planet> Planet;
 	mutable TWeakObjectPtr<AABTSCraftingSystem> CraftingSystem;
 	TArray<TWeakObjectPtr<AABTSM51PickupItem>> Pickups;
+	TArray<TWeakObjectPtr<AABTSM51SlingshotDirtHole>> OrdinarySlots;
 	TSet<int32> OccupiedCells;
 	TWeakObjectPtr<AABTSM51SlingshotStake> PendingCordStake;
 	TWeakObjectPtr<AABTSM51SlingshotDirtHole> FinaleLeftSlot;
 	TWeakObjectPtr<AABTSM51SlingshotDirtHole> FinaleRightSlot;
+	FABTSM51OrdinarySlingshotSlotSnapshot OrdinarySlotSnapshot;
+	bool bOrdinarySlotSnapshotRequested = false;
+	bool bOrdinarySlotSnapshotValid = false;
+	bool bSlingshotHolesSpawned = false;
+	bool bInitializationRejected = false;
 	bool bInitialized = false;
 };

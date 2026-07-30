@@ -1,6 +1,6 @@
 # M6：弹弓发射、弹道与碰撞破坏
 
-> 状态：首版 C++ 闭环已实现，使用现有 M5.1 弹弓桩/弦、M4 鸟群与 M5.2 HISM 碰撞；等待 PIE 手感和视觉验收。
+> 状态：首版 C++ 发射闭环已实现；M5.1→M6 的厘米长度、三维障碍与失败原子装配门已通过 fresh 自动化，发射手感和月度槽场仍分别等待对应 PIE。
 >
 > 物理碰撞爽感、阈值悖论和后续损伤/结构升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 >
@@ -33,6 +33,20 @@ Inactive
 - 青鸟 TwigScout、红鸟和黄鸟可使用简易弹弓；
 - `Twig` 树枝弹弓只接受 `TwigScout` 能力（默认且正式配置为青翎），完整发射结束事件会保留回飞前的最终落点供 [M10 侦察小地图](M10ScoutMinimapDesign.md) 使用；
 - 当前验证由 `AABTSM51SlingshotCord` 保存两根桩引用与端点，不依赖渲染 Mesh 猜测类型。
+
+### 3.1 进入 M6 前的装配几何门
+
+M6 只接受已由 M5.1 完整提交的 Cord Actor。普通 Twig/Simple/Reinforced 弦在提交前使用
+`FABTSM6CordConnectionRules` 对两桩顶部端点执行纯数据三维验证：
+
+- 世界空间长度不超过当前兼容值或已接受月度槽快照中的 `MaxCordLengthCM`；
+- 与除两端外所有已插桩中心线保持“桩半径 + 候选弦半径 + Clearance”以上净空；
+- 与所有既有弦端点线段保持“候选弦半径 + 既有弦半径 + Clearance”以上净空；
+- 非有限值、退化段、交叉、接触和净空边界均 fail closed；计算使用显式线段距离，不读取碰撞或渲染结果。
+
+普通槽的 Field、Encounter 和槽组身份不构成配对权限。Space 档仍额外要求 M11.0 唯一 Finale Pair 的同
+`PairId` 左右两侧；普通月度参数不能改变该 Pair 的身份。只有几何、Actor 生成与材料扣除均成功后才提交两端
+`HasCord`，失败不得给 M6 留下半成品弹弓。
 
 ## 4. 瞄准、拉力与弹道
 

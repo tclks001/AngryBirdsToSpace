@@ -188,6 +188,12 @@ FVector AABTSM51SlingshotStake::GetVisualTopWorldLocation() const
 	return GetActorLocation() + Up * (VisualHeightCM * 0.5f);
 }
 
+FVector AABTSM51SlingshotStake::GetVisualBottomWorldLocation() const
+{
+	const FVector Up = UnitDirection.IsNearlyZero() ? GetActorUpVector().GetSafeNormal() : UnitDirection;
+	return GetActorLocation() - Up * (VisualHeightCM * 0.5f);
+}
+
 void AABTSM51SlingshotStake::ConfigureVisualDimensions(
 	const float DiameterCM,
 	const float HeightCM,
@@ -196,6 +202,7 @@ void AABTSM51SlingshotStake::ConfigureVisualDimensions(
 	const float SafeDiameterCM = FMath::Max(1.0f, DiameterCM);
 	const float SafeHeightCM = FMath::Max(1.0f, HeightCM);
 	VisualHeightCM = SafeHeightCM;
+	StakeObstructionRadiusCM = SafeDiameterCM * 0.5f;
 	const FVector BaseWorld = GetActorLocation() - GetActorUpVector() * (SafeHeightCM * 0.5f);
 	Visual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
 		Visual->GetStaticMesh(),
@@ -217,6 +224,9 @@ void AABTSM51SlingshotStake::ApplyVisualSlot(
 	const float SafeDiameterCM = FMath::Max(1.0f, DiameterCM);
 	const float SafeHeightCM = FMath::Max(1.0f, HeightCM);
 	VisualHeightCM = SafeHeightCM;
+	StakeObstructionRadiusCM = SafeDiameterCM * 0.5f * FMath::Max(
+		FMath::Abs(VisualSlot.LocalScale.X),
+		FMath::Abs(VisualSlot.LocalScale.Y));
 	const FVector BaseWorld = GetActorLocation() - GetActorUpVector() * (SafeHeightCM * 0.5f);
 	Visual->SetWorldTransform(ABTSMakeSlingshotVisualTransform(
 		Visual->GetStaticMesh(),
@@ -316,6 +326,8 @@ void AABTSM51SlingshotCord::ConfigureVisualThickness(const float ThicknessCM, UM
 {
 	const FVector CurrentScale = Visual->GetRelativeScale3D();
 	const float ThicknessScale = FMath::Max(1.0f, ThicknessCM) / 100.0f;
+	CordThicknessCM = FMath::Max(0.1f, ThicknessCM);
+	CordObstructionRadiusCM = CordThicknessCM * 0.5f;
 	Visual->SetRelativeScale3D(FVector(CurrentScale.X, ThicknessScale, ThicknessScale));
 	if (Material) Visual->SetMaterial(0, Material);
 }
@@ -328,6 +340,10 @@ void AABTSM51SlingshotCord::ApplyVisualSlot(const FABTSSlingshotVisualSlot& Visu
 	SetActorLocation(BaseTransform.TransformPosition(VisualSlot.LocalOffsetCM), false, nullptr, ETeleportType::TeleportPhysics);
 	SetActorRotation((BaseTransform.GetRotation() * VisualSlot.LocalRotation.Quaternion()).Rotator(), ETeleportType::TeleportPhysics);
 	const FVector CurrentScale = Visual->GetRelativeScale3D();
+	CordThicknessCM = FMath::Max(0.1f, ThicknessCM);
+	CordObstructionRadiusCM = CordThicknessCM * 0.5f * FMath::Max(
+		FMath::Abs(VisualSlot.LocalScale.X),
+		FMath::Abs(VisualSlot.LocalScale.Y));
 	Visual->SetRelativeScale3D(FVector(
 		CurrentScale.X * VisualSlot.LocalScale.X,
 		FMath::Max(1.0f, ThicknessCM) / 100.0f * VisualSlot.LocalScale.Y,
@@ -345,6 +361,9 @@ void AABTSM51SlingshotCord::ConfigureTwoCordVisuals(
 	PouchVisualSlot = PouchSlot;
 	ConnectionLayout = Layout;
 	CordThicknessCM = FMath::Max(0.1f, ThicknessCM);
+	CordObstructionRadiusCM = CordThicknessCM * 0.5f * FMath::Max(
+		FMath::Abs(CordSlot.LocalScale.X),
+		FMath::Abs(CordSlot.LocalScale.Y));
 	PouchSizeCM = FVector(
 		FMath::Max(1.0f, FMath::Abs(InPouchSizeCM.X)),
 		FMath::Max(1.0f, FMath::Abs(InPouchSizeCM.Y)),
