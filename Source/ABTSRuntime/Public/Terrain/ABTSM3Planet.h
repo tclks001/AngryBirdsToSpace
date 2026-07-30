@@ -7,6 +7,7 @@
 #include "PCG/ABTSM3MonthlyRoute.h"
 #include "PCG/ABTSM3MonthlySchema.h"
 #include "PCG/ABTSM3MonthlySlingshotField.h"
+#include "PCG/ABTSM3MonthlyWitness.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
@@ -118,6 +119,23 @@ public:
 	bool ValidateMonthlySlingshotFieldResult(
 		FString& OutFailure) const;
 
+	/**
+	 * R-4 gameplay-finalize observation. Fixture authority may prove the local
+	 * algorithm, but only an Integration authority can certify external inputs.
+	 */
+	const FABTSM3MonthlyWitnessResult& GetMonthlyWitnessResult() const
+	{
+		return MonthlyWitnessResult;
+	}
+
+	/** Structural revalidation; it never replays an external provider. */
+	bool ValidateMonthlyWitnessResult(FString& OutFailure) const;
+
+	/** Explicit Integration seam. No fixture provider is created by runtime. */
+	bool FinalizeMonthlyGameplay(
+		const IABTSM3MonthlyWitnessServices& Services,
+		FString& OutFailure);
+
 	/** True only when the complete M3 logical, terrain and material presentation rebuild succeeded. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	bool IsM3PresentationReady() const { return bM3PresentationReady; }
@@ -177,6 +195,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldConfig MonthlySlingshotFieldConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
+	FABTSM3MonthlyWitnessConfig MonthlyWitnessConfig;
 
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
@@ -312,6 +333,10 @@ public:
 	/** R-3.1 ordinary slot-field alternatives; finale Space slots remain a separate exact pair. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldResult MonthlySlingshotFieldResult;
+
+	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
+	FABTSM3MonthlyWitnessResult MonthlyWitnessResult;
 
 #if WITH_EDITORONLY_DATA
 	/** Index-only debug snapshot. R-1 does not draw or alter the production map. */

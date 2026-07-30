@@ -86,6 +86,7 @@ bool AABTSM3Planet::RebuildPlanet()
 	bM3PresentationReady = false;
 	MonthlySlingshotFieldResult =
 		FABTSM3MonthlySlingshotFieldResult();
+	MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 	MonthlySlingshotFieldDebugData =
 		FABTSM3MonthlySlingshotFieldDebugData();
@@ -202,6 +203,7 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
 		MonthlySlingshotFieldResult =
 			FABTSM3MonthlySlingshotFieldResult();
+		MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
 		MonthlyRouteDebugData = FABTSM3MonthlyRouteDebugData();
@@ -312,6 +314,23 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySlingshotFieldResult,
 		MonthlySlingshotFieldDebugData);
 #endif
+	FString WitnessFailure;
+	if (!FABTSM3MonthlyWitnessBuilder::Build(
+			WorldSeed,
+			MonthlyWitnessConfig,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			nullptr,
+			MonthlyWitnessResult,
+			WitnessFailure))
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M3R4][Witness] Pending. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlyWitnessBuilder::GetRejectReasonName(
+				MonthlyWitnessResult.RejectReason),
+			*WitnessFailure);
+	}
 	return true;
 }
 
@@ -387,6 +406,43 @@ bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
 			GetRejectReasonName(RejectReason),
 		*OutFailure);
 	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlyWitnessResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlyWitnessRejectReason RejectReason =
+		EABTSM3MonthlyWitnessRejectReason::None;
+	if (FABTSM3MonthlyWitnessBuilder::Validate(
+			MonthlyWitnessConfig,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			MonthlyWitnessResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyWitnessBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::FinalizeMonthlyGameplay(
+	const IABTSM3MonthlyWitnessServices& Services,
+	FString& OutFailure)
+{
+	return FABTSM3MonthlyWitnessBuilder::Build(
+		WorldSeed,
+		MonthlyWitnessConfig,
+		MonthlySpatialResult,
+		MonthlySlingshotFieldResult,
+		&Services,
+		MonthlyWitnessResult,
+		OutFailure);
 }
 
 #if WITH_EDITOR

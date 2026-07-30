@@ -748,6 +748,10 @@ public:
 	static TConstArrayView<FABTSM3MonthlyProfileDescriptorFixture>
 		GetFixtureProfileCatalog();
 
+	/** Recomputes the stable payload hash persisted by each R-3 encounter. */
+	static uint64 ComputeEncounterHash(
+		const FABTSM3MonthlySpatialEncounter& Encounter);
+
 	static uint64 ComputeCandidateHash(
 		const FABTSM3MonthlySpatialCandidate& Candidate);
 

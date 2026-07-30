@@ -1,14 +1,18 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 普通弹弓槽场已达到 M3LocalAccepted，并已合并 `master`，当前仍为 IntegrationPending
+> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`、仍为 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）
 > 日期：2026-07-30
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：M3R-3.1 已在不改变 M3R-3 冻结身份的前提下，加入可调普通 Encounter 槽场、道路附加槽场、统一最大弦长数据与集成工作树交接门；M3 生产端已随 `master ae9e8f0` 完成合并，等待未来 M5.1/M6 消费端与 M3R-6 完成后统一集成验收
+> 本次更新：保持 M3R-3.1 为“已合并 master、待集成验收”；新增 M3R-4 FixtureAuthority 终结层、正式输入域 Witness/能力证书、M9 消融、流程闭包与冻结 Manifest。未来待集成工作树完成 M5.1/M6 真实消费和 M7/M9/流程适配、本工作树完成 M3R-6 后统一集成验收
 
 父文档：
 
 - [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)
 - [ABTSTaskGraphPCGDesign.md](ABTSTaskGraphPCGDesign.md)
+
+阶段子文档：
+
+- [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)
 
 直接下游：
 
@@ -972,7 +976,7 @@ NotStarted
 | M3R-2 多候选球面路线 | Week 1 后半 | **M3LocalAccepted**；RouteCore 7/7、Failure 1/1、200 Seed 200/200、旧回归与 fresh runtime 均通过；Editor-only 叠层保留人工可视抽查 | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
 | M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **M3LocalAccepted（MergedToMaster，IntegrationPending）**；Spatial 8/8、Failure 2/2、100 Seed 100/100、PVS 11/11、旧回归与 fresh runtime 均通过 | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
 | M3R-3.1 普通弹弓槽场 | Week 2 前半补充 | **M3LocalAccepted（MergedToMaster，IntegrationPending）**；SlotField 7/7、Failure 2/2、100 Seed 100/100、fresh runtime 与强制 Unity 均通过；M3 生产端已进入 `master ae9e8f0` | Encounter 紧凑散点槽场、道路附加槽场、最大弦长权威参数与未来最小 DTO 的集成交接规范 | M3；实体槽与弹弓弦几何门由 Integration 接入 | IntegrationAccepted |
-| M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **NotStarted** | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M6/M9 | IntegrationAccepted |
+| M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **M3LocalAccepted（FixtureAuthority，IntegrationPending）**；Core 8/8、Failure 8/8、100 Seed 100/100、父级回归、fresh runtime 与强制 Unity 均通过；真实 M5.1/M6/M7/M9/流程和 R6 仍待联合验收 | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M5.1/M6/M7/M9 | IntegrationAccepted |
 | M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **NotStarted** | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3 | M3LocalAccepted |
 | M3R-6 六栋 M7 实体建筑集成 | Week 3 | **NotStarted** | vNext 建筑合同、动态数量、难度/视觉路由与物理批处理 | Integration + M7，M3 只生产数据 | IntegrationAccepted |
 | M3R-7 月度认证与调参冻结 | Week 4 | **NotStarted** | 1000 Seed、fresh runtime、联合 PIE、展示 Seed 与 fallback | Integration | Complete |
@@ -1287,6 +1291,23 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 - Witness 保存输入、求解器版本、Hash、净空和命中代理；M3 不复制 M6/M9 的公式；
 - 只有 Route、六 Encounter、Biome 逻辑、PVS、Witness 和流程都通过的完整世界候选才能进入 Top 3，再按量化质量分和稳定 ID 选择最终 CandidateId 并生成 `LayoutHash`。
 
+**当前实现状态（M3LocalAccepted，FixtureAuthority，IntegrationPending）**
+
+- 已新增独立 `Encounter Gameplay Finalize` 结果与依赖注入服务边界，按 R3 稳定 `EncounterId`、独立 `EncounterOrder`、R3/R3.1 三重 Hash 精确连接全部候选；只保留完整硬通过 Top 3，并发布独立 `GameplayLayoutHash`，不改写父层身份或兼容 `PCGSummary.LayoutHash`；
+- 正式默认域覆盖全部可达无序槽对、双侧、7 个 Pull、5 个 Aim 点和冻结 Bird 全集；E4/E5 的 Simple 能力证书完整覆盖 4410 个输入，BirdCatalogHash 进入身份与证书，E5 用同一输入关闭 M9 做完整因果消融；
+- 轨迹以目标球面首次接触点计算撞击位置/速度，终止原因、首样本时间、几何接触和 Provider 回显均 fail closed；资源流程保存 15 步有符号 ItemDelta、RequiredStation 与逐步 LedgerHash，验证候选绑定桥门、Furnace 可用性及太空桩/弦真实终局配方；
+- Fixture Authority 已证明六关 Positive Witness、Black 能力门、抽象资源/奖励/桥门/Exit 与零支线闭环，但 Workbench/Simple/Bridge/Reinforced 仍是合成流程步骤，不等同真实 M5 制作目录。R4 v1 因而只接受未认证 Fixture，显式拒绝合成快照冒充 Integration，并保持 `bExternalInputsCertified=false`、`bMonthlyWorldAccepted=false`；生产默认无真实适配器时为 `NotEvaluated`；
+- `M3R4AcceptanceManifest` 冻结 `Manifest=AEBA4E7F337A4D8F`、100 Seed 清单
+  `5610DCBA0A03D9CB`、展示身份
+  `Config=E7831808F41259DA / Result=624FB903F80BA71B / Candidate=2C9798D1B1BE3B14 / GameplayLayout=29811734A4360BC6`
+  与 100 Seed Oracle `89F9BD7DD7026670`；
+- `ABTS.M3.Monthly.EncounterWitness.0` fresh 精确 8/8，100 Seed 为
+  `Terminal=100 Accepted=100 P95MS=363.757 MaxMS=401.359`；失败注入精确 8/8；
+  R3.1、R3、R2、Schema、WeekOne、共享合同、M11.0 分离回归全部通过；
+- fresh `L_ABTS_M3 -ABTSM3R4Smoke` 报告
+  `Terminal=1 Passed=1 Failed=0 M3LocalAccepted=1 FixtureAuthority=1 IntegrationPending=1`，同时证明默认世界未发布真实 Witness。完整证据与日志索引见
+  [M3R-4 子设计稿](M3R4BallisticWitnessAndFlowClosureDesign.md#10-2026-07-30-本地实现与验收结果)。
+
 **退出验收**
 
 - 建议新增 `ABTS.M3.Monthly.EncounterWitness`；冻结的 100 Seed Witness manifest 及其 Hash 必须报告 `Terminal=100, Accepted=100, Rejected=0`，共享接口部分在集成候选运行；
@@ -1303,7 +1324,10 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 
 **阶段边界**
 
-M6/M9 是共享或其他阶段所有权。本阶段只有在集成工作树完成接口适配和联合验证后才能从 **M3LocalAccepted** 晋升为 **IntegrationAccepted**。
+M5.1/M6/M7/M9、真实 M5 制作目录与流程消费、共享合同属于集成或其他阶段所有权。当前只达到
+**M3LocalAccepted（FixtureAuthority，IntegrationPending）**；必须等待集成工作树完成
+M5.1/M6 的真实消费及 M7/M9/候选桥门/奖励流程适配、本工作树完成 R6，再通过共享自动化与
+Visible PIE，才能整体晋升为 **IntegrationAccepted**。
 
 ### 14.8 M3R-5：实现 BiomeDistrict 与 Playable Envelope 表现
 
