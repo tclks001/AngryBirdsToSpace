@@ -1,6 +1,6 @@
 # M5.1：世界物品、手持放置与弹弓装配
 
-> 状态：C++ 机制已实现，使用 Engine 基础形体作为资产回退，等待编辑器视觉与操作验收。
+> 状态：兼容 TaskGraph 槽、M11.0 Space 槽及通用月度槽快照消费端已实现；M6 三维连弦与失败原子状态已通过自动化和兼容世界 PIE。R3.1 月度实体槽仍等待 R4/R6 选出唯一 Candidate 后再做六关联合 PIE。
 >
 > 本阶段只实现基础物品刷新/自动拾取、手持栏、工作台/熔炉放置、弹弓槽、桩与弦的装配规则。真实资产、建筑模块和弹射行为仍属于后续阶段。
 >
@@ -8,11 +8,14 @@
 
 ## 1. 逻辑源约束
 
-- TaskGraph 的 `SlingshotRange` Task 决定普通弹弓槽所在区域；每个该 Task 使用 Seed Cell 和一个同 Task 的直接邻居 Cell 生成一对普通 DirtHole。
+- 当前首周兼容世界继续由 TaskGraph 的 `SlingshotRange` Task 决定普通弹弓槽所在区域；每个该 Task 使用 Seed Cell 和一个同 Task 的直接邻居 Cell 生成一对普通 DirtHole。
+- 月度世界只允许消费 `FABTSM51OrdinarySlingshotSlotSnapshot`：它仅包含 `LayoutHash / CandidateHash / SlotGroups / MaxCordLengthCM`，不包含 M3 原始候选数组、Encounter/Field 配对权限或 UObject 引用。快照必须在 WorldSystem `BeginPlay` 前显式配置并整体通过校验；身份缺失、组内槽不足、Cell 重复或越界时生成计划为空，且不得静默回退 TaskGraph。
+- 当前 R3.1 的三个 `RetainedCandidates` 都未被月度世界接受，生产入口不会构造上述快照，也不得读取 `[0]`。R4/R6 冻结唯一 Candidate 和最终 `LayoutHash` 后，再补 M3 导出与生产入口自动配置。
+- 正式绑定时 WorldSystem 必须 deferred spawn，并在 `FinishSpawning` 前注入快照；生产者还必须把快照 `LayoutHash/CandidateHash` 与活动月度世界的已接受身份逐项核对。本轮非零身份/结构校验不替代该生产一致性门。
 - M11.0 起，唯一 `LaunchSite` 另生成且只生成一对 Space-only 槽；左右槽共享同一个认证 AnchorCell 和 PairId，在同一平整、非水、未占用施工台内以 `210cm` 世界中心距相邻摆放，不能由普通 `SlingshotRange` 数量推导。
 - 平地放置只接受 CellTopo 中 `bBuildable && !bWater && 未占用` 的 Cell，落点固定为 Cell 中心。
 - 连续球面只把 Cell 方向转换为可见位置和法线，不负责决定合法性。
-- 弹弓桩相邻使用两个 Cell 单位方向的球面夹角，不使用欧氏世界距离。
+- 普通弦只使用两桩顶部端点的世界空间厘米距离门；兼容世界默认 `1200cm`，月度世界使用快照的 `MaxCordLengthCM`。Field/Encounter/槽组身份不限制两根普通桩能否连接。
 - 资源 SDF 只在 CellTopo 中心采样并决定生成概率，世界 Mesh 不持有资源状态。
 
 ## 2. 手持栏
@@ -76,14 +79,20 @@ Eligible = SignedDistance <= BoundaryJitter
 - M10 起，植物纤维作为 `Twig` 弦材料，只能连接两个树枝桩；仍沿用“先选第一桩、再点第二桩”的两次点击规则。
 - M11.0 起，`EABTSItemId::SpaceCord`（太空弹弓弦）只能连接同一 Space-only 槽对中的两根 `SpaceStake`；成功后生成 `EABTSSlingshotTier::Space`。
 - 玩家手持弦点击第一根桩时只记录选择，不消耗物品。
-- 点击第二根同类、未连接桩后，计算：
+- 点击第二根同类、未连接桩后，先构造无副作用的三维连接查询：
 
 ```text
-ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
+Candidate = Segment(StakeA.VisualTop, StakeB.VisualTop)
+LengthCM <= ActiveMaxCordLengthCM
+Distance(Candidate, ThirdStakeCenterLine)
+  > CandidateCordRadius + ThirdStakeRadius + Clearance
+Distance(Candidate, ExistingCordSegment)
+  > CandidateCordRadius + ExistingCordRadius + Clearance
 ```
 
-- `ArcRadians <= MaxStakeArcRadians` 时生成弦并扣除一个物品；默认阈值 `0.12 rad`。
-- 不满足类型/弧度条件时不消耗，第二次点击的桩成为新的首选桩。
+- 所有向量、长度和半径必须是有限值，候选弦与既有弦不得退化；交叉、接触或恰好落在净空边界上均拒绝。实现使用 `FMath::SegmentDistToSegmentSafe`，不依赖 NoCollision 表现 Mesh 的 LineTrace。
+- 类型、长度或障碍检查均在生成 Actor、扣库存和写入 `HasCord` 前完成。只有 Cord Actor 生成且 `RemoveItem` 成功后才一次提交两端状态；任一步失败均保持库存、有效 Cord 数及两端 `HasCord` 不变。
+- 不满足条件时，第二次点击的合法桩成为新的首选桩；槽组、FieldId 与 EncounterId 不参与配对判断。
 - 两根已经连接的桩不能再次连接。
 
 ## 6. 编辑器步骤
@@ -102,13 +111,13 @@ ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
 
 ```text
 [ABTS][M5][Inventory] ... PrototypeSeed=0
-[ABTS][M5.1][SlingshotSlots] Holes=2
+[ABTS][M5.1][OrdinarySlots] Source=CompatibilityTaskGraph Accepted=1 Holes=... MaxCordLengthCM=1200 ...
 [ABTS][M11.0][SlingshotSlots] Standard=... Finale=2 Pair=... AnchorCell=...
 [ABTS][M5.1][PickupPCG] Spawned=... PatchRadiusRad=...
 [ABTS][M5.1] World ready ...
 ```
 
-地图有多个 `SlingshotRange` Task 时普通 DirtHole 数量为每 Task 两个；除此之外，全图仍只能有一对由唯一 `LaunchSite` 生成的 Space-only 槽。
+兼容地图有多个 `SlingshotRange` Task 时普通 DirtHole 数量为每 Task 两个。未来月度模式的 `Source=AcceptedSnapshot` 必须为快照中的每个 Slot Cell 精确生成一个 DirtHole，任何一项失败都回滚本批普通槽；无论普通槽来源为何，全图仍只能有一对由唯一 `LaunchSite` 生成的 Space-only 槽。
 
 ### 7.2 拾取与手持
 
@@ -123,11 +132,27 @@ ArcRadians = acos(dot(StakeA.UnitDirection, StakeB.UnitDirection))
 2. 水域、陡坡或已占用 Cell 不允许放置，且不扣物品。
 3. 普通地面点击不能放置弹弓桩。
 4. 点击 DirtHole 可安装手持同类桩。
-5. 手持弦依次点击同类相邻两桩后生成连接条并消耗一根弦。
-6. 类型不同或角距过大时不生成也不消耗。
+5. 手持弦依次点击同类两桩；世界距离不超过活动上限且不穿过第三桩/既有弦时，生成连接并消耗一根弦。
+6. 类型不同、超长、相交、接触、近失配或无效几何时不生成也不消耗，失败前后两端 `HasCord` 不变。
 7. 站点和弹弓占位物不应卡住角色移动。
 8. 太空桩只能安装到 Space-only 槽；普通桩与太空桩交叉尝试均拒绝且不扣库存。
 9. 两根太空桩只能由一根太空弦连接，完成后弹弓档位为 `Space`，且不能生成第二套终局弹弓。
+
+### 7.4 自动化门
+
+必须在 fresh `UnrealEditor-Cmd -NullRHI` 进程中精确通过：
+
+- `ABTS.M51.SlingshotAssembly.Geometry`：最大长度边界、超长、第三桩、既有弦、近失配、高度差、NaN/Inf 和退化段；
+- `ABTS.M51.SlingshotAssembly.Runtime`：快照结构/Cell 计划、普通成功、超长/第三桩/既有弦失败原子状态，以及 M11.0 Space Pair 回归；
+- `ABTS.M51.OrdinarySlots.Runtime`：接受快照的实际 DirtHole 数、最大弦长发布、初始化幂等、终局双槽隔离，以及无效 Cell 的普通槽全批回滚。
+
+这三个测试通过只证明通用消费端和装配规则；R3.1 月度实体槽仍需等待唯一 Candidate 导出后做 M3R-6/R-7 Visible PIE。
+
+### 7.5 集成 PIE 结论
+
+2026-07-30，用户已在集成工作树完成本轮 M5.1/M6 兼容世界可见 PIE，结论通过。
+
+该结论验收的是通用消费端和兼容世界，不代表 R3.1 月度实体槽已经生成；后者仍须等待 R4/R6 唯一 Candidate 导出并完成六关联合 PIE。
 
 ## 8. 资产接入接口
 

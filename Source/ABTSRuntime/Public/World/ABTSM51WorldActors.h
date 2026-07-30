@@ -88,6 +88,8 @@ public:
 	EABTSSlingshotSlotSide GetInstalledSlotSide() const { return InstalledSlotSide; }
 	int32 GetInstalledSlotPairId() const { return InstalledSlotPairId; }
 	FVector GetVisualTopWorldLocation() const;
+	FVector GetVisualBottomWorldLocation() const;
+	float GetStakeObstructionRadiusCM() const { return StakeObstructionRadiusCM; }
 	bool HasCord() const { return bHasCord; }
 	void SetHasCord(bool bValue) { bHasCord = bValue; }
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
@@ -104,6 +106,7 @@ private:
 	int32 CellId = INDEX_NONE;
 	FVector UnitDirection = FVector::UpVector;
 	float VisualHeightCM = 220.0f;
+	float StakeObstructionRadiusCM = 14.0f;
 	bool bHasCord = false;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11.0|Finale Slot")
@@ -140,6 +143,7 @@ public:
 	FTransform GetRestPouchTransform() const;
 	FVector GetEndpointA() const { return EndpointA; }
 	FVector GetEndpointB() const { return EndpointB; }
+	float GetCordObstructionRadiusCM() const { return CordObstructionRadiusCM; }
 	EABTSItemId GetStakeItem() const;
 	EABTSSlingshotTier GetSlingshotTier() const { return SlingshotTier; }
 	bool IsFinaleSpaceSlingshot() const;
@@ -165,6 +169,7 @@ private:
 	FABTSSlingshotVisualSlot CordVisualSlot;
 	FABTSSlingshotConnectionLayout ConnectionLayout;
 	float CordThicknessCM = 3.5f;
+	float CordObstructionRadiusCM = 1.75f;
 	FVector PouchSizeCM = FVector(42.0f, 60.0f, 12.0f);
 	TObjectPtr<UStaticMesh> DefaultCordCylinderMesh;
 	TObjectPtr<UStaticMesh> DefaultPouchSphereMesh;

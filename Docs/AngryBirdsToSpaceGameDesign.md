@@ -249,11 +249,11 @@ PlacementRandom = Hash(WorldSeed, CellId, ResourceType, LocalIndex)
 | ---: | --- | --- |
 | M1 | 独立入口 | 新地图、GameMode、第三人称绯翼、基础 HUD 可启动；不加载旧回合 Gameplay。 |
 | M2 | 球面环境 | `CellTopo Sub=5` 与 `Continuous Surface Sub=7` 可生成、可碰撞、可行走。 |
-| M3 | 主路与月度 Encounter PCG | R-0 已验收；R-1/2/3/3.1 的路线候选、六 Encounter 逻辑和普通槽场已进入集成基线。R-3.1 仍等待 M5.1/M6 实体槽与连弦消费；R-4/R-6 还依赖真实 M6/M9 预测、M7 Profile Catalog 和 vNext 建筑合同。详见 [M3R 路线](M3PCGMapImprovementPlan.md)。 |
+| M3 | 主路与月度 Encounter PCG | R-0 已验收；R-1/2/3/3.1 的路线候选、六 Encounter 逻辑和普通槽场已进入集成基线。R-3.1 的通用 M5.1/M6 消费规则已通过自动化和兼容世界 PIE，但月度实体槽仍等待 R-4/R-6 唯一 Candidate；R-4/R-6 还依赖真实 M6/M9 预测、M7 Profile Catalog 和 vNext 建筑合同。详见 [M3R 路线](M3PCGMapImprovementPlan.md)。 |
 | M4 | 鸟群 | 四鸟可见；Tab/HUD 切换；蓝鸟树枝近射、红/黄简易弹弓、黑鸟强化弹弓的入口与限制明确。 |
 | M5 | 加工与组件 | 共享物品栏、背包/加工界面、红鸟加工权限、附近工作台/熔炉配方和制作数量流程已实现；正式站点放置、拾取与弹弓组件表现进入 M5.1。详见 [M5InventoryCraftingImplementationDesign.md](M5InventoryCraftingImplementationDesign.md)。 |
-| M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 弹弓槽和桩/弦两次点击装配。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
-| M6 | 弹弓、发射与碰撞 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。已连接弹弓进入瞄准/拉伸/万有引力预测/发射闭环；HISM 按命中提升动态代理并支持连锁破坏，黑鸟支持手动/延时爆炸，落地静默后物体冻结与队伍回归。玩法见 [M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)，双弦、弹珠袋和模型协议见 [M6SlingshotVisualPresentationDesign.md](M6SlingshotVisualPresentationDesign.md)。 |
+| M5.1 | 世界物品与放置 | CellTopo/SDF 基础物品刷新与自动拾取、独立手持栏、工作台/熔炉平地放置、TaskGraph 兼容槽、已接受月度槽快照消费接缝及桩/弦两次点击装配；普通弦使用世界厘米长度和三维障碍门，失败不留下库存/Actor/端点半状态；通用消费端与兼容世界 PIE 已验收。详见 [M51WorldItemsPlacementSlingshotDesign.md](M51WorldItemsPlacementSlingshotDesign.md)。 |
+| M6 | 弹弓、发射与碰撞 | 两桩+弹弦组成简易弹弓；槽位朝向/间距影响预览弹道和初速。已连接弹弓进入瞄准/拉伸/万有引力预测/发射闭环；HISM 按命中提升动态代理并支持连锁破坏，黑鸟支持手动/延时爆炸，落地静默后物体冻结与队伍回归；本轮新增的厘米长度、三维净空和失败原子门已通过兼容世界 PIE。玩法见 [M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)，双弦、弹珠袋和模型协议见 [M6SlingshotVisualPresentationDesign.md](M6SlingshotVisualPresentationDesign.md)。 |
 | M7 | 建筑生成与破坏 | 木/石/铁/玻璃材质 Profile 驱动 Chaos 摩擦、弹性、密度、推动传递与累计损伤。TaskGraph 三类普通建筑已由 M7 Resolver 接入 M7.3-DAG2.3；M3 只提供 Anchor/Pad。M7 显式登记必需 Actor 集合，每栋 Actor 独占 IdleValidation/Freeze；M6 只在数量相符、Setup 未拒绝且全部 Actor 通过时发布 WorldReady。详见 [M7 球面集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)。 |
 | M7.1 | 平面物理测试台 | 独立平面 GameMode、可摆放 Floor/PlayerStart、树石 HISM、四材质砖、四档完整弹弓和模块化建筑锚点；支持编辑器实时变换、平面 Chaos 移动与恒向重力弹射。详见 [M71PlanarPhysicsTestStageDesign.md](M71PlanarPhysicsTestStageDesign.md)。 |
 | M8 | 自动回收与桥梁 | M7 砖块在真实破坏时直接回收到共享背包；`CellTopo` 的 `bBlocksOnFoot` 水边生成空气墙，只有消耗桥梁组件并放置在 `BridgeSite` 边上才会打开通路。详见 [M8AutoRecoveryAndBridgesDesign.md](M8AutoRecoveryAndBridgesDesign.md)。 |
