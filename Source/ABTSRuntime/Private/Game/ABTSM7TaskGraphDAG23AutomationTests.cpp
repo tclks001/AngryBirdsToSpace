@@ -68,6 +68,8 @@ bool FABTSM7TaskGraphDAG23ProfileRoutingTest::RunTest(const FString& Parameters)
 			EABTSM73GenerationAlgorithm::RecursiveSupportDAG);
 		TestFalse(TEXT("Retired B/B2 weakness flag is disabled"),
 			Resolved.GenerationSettings.bGenerateStructuralWeakness);
+		TestFalse(TEXT("Legacy migration never enables DAG3-C"),
+			Resolved.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting);
 		TestEqual(TEXT("Task maps to its authored DAG preset"),
 			Resolved.DAGGenerationSettings.Preset, TestCase.Preset);
 		TestEqual(TEXT("Initial production profile has zero expansion budget"),
@@ -188,6 +190,36 @@ bool FABTSM7TaskGraphDAG23ProfileRoutingTest::RunTest(const FString& Parameters)
 		PreservedDAG.DAGGenerationSettings.Preset, EABTSM73DAGPreset::Arch);
 	TestTrue(TEXT("Explicit DAG layout remains editable"),
 		FMath::IsNearlyEqual(PreservedDAG.DAGLayoutSettings.TargetHeightCM, 333.0f));
+	TestFalse(TEXT("Default authored DAG profile keeps DAG3-C disabled"),
+		PreservedDAG.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting);
+
+	FABTSM7TaskGraphBuildingProfile AuthoredDAG3C = AuthoredDAG;
+	AuthoredDAG3C.DAGFailureFrontierSettings.bEnableAnalysis = true;
+	AuthoredDAG3C.DAGFailureFrontierSettings.bEnableGeneralizedSmallCutSearch = true;
+	AuthoredDAG3C.DAGFailurePatternSettings.bEnableGeometryRewrite = true;
+	AuthoredDAG3C.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting = true;
+	FABTSM7TaskGraphBuildingProfile PreservedDAG3C;
+	bool bMigratedDAG3C = true;
+	TestTrue(TEXT("Explicit DAG3-C opt-in survives routing"),
+		FABTSM7TaskGraphDAG23ProfileResolver::ResolveRuntimeProfile(
+			EABTSM3TaskType::Workshop,
+			AuthoredDAG3C,
+			PreservedDAG3C,
+			bMigratedDAG3C));
+	TestFalse(TEXT("Explicit DAG3-C opt-in is not migrated"), bMigratedDAG3C);
+	TestTrue(TEXT("Explicit DAG3-C opt-in is preserved"),
+		PreservedDAG3C.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting);
+
+	FABTSM7TaskGraphBuildingProfile InvalidDAG3C = AuthoredDAG3C;
+	InvalidDAG3C.DAGFailurePatternSettings.bEnableGeometryRewrite = false;
+	FABTSM7TaskGraphBuildingProfile RejectedDAG3C;
+	bool bRejectedDAG3CMigration = false;
+	TestFalse(TEXT("DAG3-C without DAG3-B fails closed"),
+		FABTSM7TaskGraphDAG23ProfileResolver::ResolveRuntimeProfile(
+			EABTSM3TaskType::Workshop,
+			InvalidDAG3C,
+			RejectedDAG3C,
+			bRejectedDAG3CMigration));
 
 	FABTSM7TaskGraphBuildingProfile SerializedFurnaceDAG =
 		FABTSM7TaskGraphDAG23ProfileResolver::MakeDefaultProfile(

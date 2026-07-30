@@ -132,10 +132,26 @@ bool FABTSM7TaskGraphDAG23ProfileResolver::ResolveRuntimeProfile(
 		== EABTSM73GenerationAlgorithm::RecursiveSupportDAG)
 	{
 		OutProfile = SourceProfile;
-		// DAG-3 failure-frontier planning is not implemented yet. Do not expose
-		// the retired B/B2 structural-weakness switch as if DAG2.3 consumed it.
+		// DAG3-B exists only as an explicit pure-data candidate path. Do not
+		// expose the retired B/B2 switch as if it enabled DAG3-C gameplay,
+		// material routing or production weak points.
 		OutProfile.GenerationSettings.bGenerateStructuralWeakness = false;
 		OutProfile.DAGGenerationSettings.ReservedWeaknessBrickCount = 0;
+		if (OutProfile.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting
+			&& (!OutProfile.DAGFailureFrontierSettings.bEnableAnalysis
+				|| !OutProfile.DAGFailureFrontierSettings.bEnableGeneralizedSmallCutSearch
+				|| !OutProfile.DAGFailurePatternSettings.bEnableGeometryRewrite))
+		{
+			return false;
+		}
+		if (OutProfile.DAG4ValidationSettings.bEnableSettledChaosValidation
+			&& (!OutProfile.DAGFailureFrontierSettings.bEnableAnalysis
+				|| !OutProfile.DAGFailureFrontierSettings.bEnableGeneralizedSmallCutSearch
+				|| !OutProfile.DAGFailurePatternSettings.bEnableGeometryRewrite
+				|| !OutProfile.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting))
+		{
+			return false;
+		}
 		// Existing Blueprint CDOs may already contain an explicitly authored DAG
 		// profile with the old 4% value. Preserve authored topology and scale, but
 		// apply the production iron-building contact floor at this runtime boundary.
@@ -292,6 +308,9 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 			DAGGenerationSettings,
 			RuntimeProfile.DAGLayoutSettings,
 			RuntimeProfile.DAGFailureFrontierSettings,
+			RuntimeProfile.DAGFailurePatternSettings,
+			RuntimeProfile.DAGFailurePlayabilitySettings,
+			RuntimeProfile.DAG4ValidationSettings,
 			RuntimeProfile.DifficultySettings);
 		Building->ConfigureSphericalAnchor(&Planet, Site.CellId, Site.WorldTransform);
 		if (SlingshotSystem)
@@ -311,7 +330,7 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 		DebugEntry.CellId = Site.CellId;
 		++SpawnedCount;
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M7][TaskGraphBuilding] Task=%d Type=%d Cell=%d Material=%d Seed=%d Pad=%d Algorithm=%d DAGPreset=%d DAGBudget=%d DAGDepth=%d DAGMinContact=%.3f MigratedLegacy=%d Spawned=%s"),
+			TEXT("[ABTS][M7][TaskGraphBuilding] Task=%d Type=%d Cell=%d Material=%d Seed=%d Pad=%d Algorithm=%d DAGPreset=%d DAGBudget=%d DAGDepth=%d DAGMinContact=%.3f DAG3Enabled=%d DAG3BEnabled=%d DAG3CEnabled=%d DAG4Enabled=%d MigratedLegacy=%d Spawned=%s"),
 			Site.TaskId, static_cast<int32>(TaskType), Site.CellId,
 			static_cast<int32>(GenerationSettings.PrimaryMaterial), GenerationSettings.BuildingSeed,
 			Site.bTerrainPadApplied ? 1 : 0,
@@ -320,6 +339,10 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 			DAGGenerationSettings.ExpansionStepBudget,
 			DAGGenerationSettings.MaxExpansionDepth,
 			RuntimeProfile.DAGLayoutSettings.MinSupportContactAreaRatio,
+			RuntimeProfile.DAGFailureFrontierSettings.bEnableAnalysis ? 1 : 0,
+			RuntimeProfile.DAGFailurePatternSettings.bEnableGeometryRewrite ? 1 : 0,
+			RuntimeProfile.DAGFailurePlayabilitySettings.bEnablePlayabilityRouting ? 1 : 0,
+			RuntimeProfile.DAG4ValidationSettings.bEnableSettledChaosValidation ? 1 : 0,
 			bMigratedLegacyProfile ? 1 : 0,
 			*Building->GetName());
 	}

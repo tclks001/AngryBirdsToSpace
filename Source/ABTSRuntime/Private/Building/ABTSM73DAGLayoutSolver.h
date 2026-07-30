@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 
 struct FABTSM73DAGGenerationResult;
+struct FABTSM73DAGFailureRewriteIntent;
 struct FABTSM73DAGLayoutSettings;
 struct FABTSM73DAGSpatialLayout;
 
@@ -13,7 +14,8 @@ class FABTSM73DAGLayoutSolver
 {
 public:
 	bool Solve(const FABTSM73DAGGenerationResult& Graph, const FABTSM73DAGLayoutSettings& Settings,
-		FABTSM73DAGSpatialLayout& OutLayout, FString& OutError) const;
+		FABTSM73DAGSpatialLayout& OutLayout, FString& OutError,
+		const FABTSM73DAGFailureRewriteIntent* RewriteIntent = nullptr) const;
 
 private:
 	bool AssignExpressionScope(int32 ExpressionNodeId, const FBox& Scope,
@@ -25,5 +27,5 @@ private:
 		FString& OutError) const;
 	bool SelectSparseSupports(const FABTSM73DAGGenerationResult& Graph,
 		const FABTSM73DAGLayoutSettings& Settings, FABTSM73DAGSpatialLayout& InOutLayout,
-		FString& OutError) const;
+		FString& OutError, const FABTSM73DAGFailureRewriteIntent* RewriteIntent) const;
 };

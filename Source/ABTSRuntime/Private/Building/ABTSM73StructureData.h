@@ -88,6 +88,11 @@ struct FABTSM73WeakPointRecord
 	float InitialSupportMarginCM = 0.0f;
 	float TipMarginCM = 0.0f;
 	float ReseatRisk = 1.0f;
+	EABTSM73DAGFailurePattern DAGFailurePattern =
+		EABTSM73DAGFailurePattern::Auto;
+	EABTSM73DAGFailureMotion DAGFailureMotion =
+		EABTSM73DAGFailureMotion::None;
+	FVector AcceptedAttackDirectionLocal = FVector::ZeroVector;
 };
 
 struct FABTSM73SupportEdge
@@ -107,6 +112,8 @@ struct FABTSM73DAGPhysicalSupportMapping
 	EABTSM73DAGSupportPattern SupportPattern = EABTSM73DAGSupportPattern::ThreeColumnTripod;
 	float RealizedColumnWidthCM = 0.0f;
 	TArray<int32> ColumnNodeIds;
+	/** Stable one-to-one meaning for ColumnNodeIds. Ordinary when DAG3-B is disabled. */
+	TArray<EABTSM73DAGRealizedColumnRole> ColumnRoles;
 };
 
 struct FABTSM73GroundSample
@@ -160,6 +167,8 @@ struct FABTSM73StructureData
 	float DAGMinSupportContactAreaRatio = 0.0f;
 	uint32 DAGTopologyHash = 0;
 	FABTSM73DAGFailureFrontierAnalysis DAGFailureFrontierAnalysis;
+	FABTSM73DAGFailurePatternResult DAGFailurePatternResult;
+	FABTSM73DAGFailurePlayabilityResult DAGFailurePlayabilityResult;
 };
 
 struct FABTSM73GroundContext

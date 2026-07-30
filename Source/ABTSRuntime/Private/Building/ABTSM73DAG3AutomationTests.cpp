@@ -8,6 +8,7 @@
 #include "Building/ABTSM73DAGContactGraphBuilder.h"
 #include "Building/ABTSM73DAGFailureFrontierAnalyzer.h"
 #include "Building/ABTSM73DAGFailureFrontierTypes.h"
+#include "Building/ABTSM73StabilityValidator.h"
 #include "Building/ABTSM73StructureData.h"
 #include "Game/ABTSM7GameMode.h"
 #include "Misc/AutomationTest.h"
@@ -255,6 +256,302 @@ namespace
 			&& A.BypassSupportEdgeCount == B.BypassSupportEdgeCount
 			&& A.FrontierHash == B.FrontierHash
 			&& A.RejectReason == B.RejectReason;
+	}
+
+	struct FRewritePatternCase
+	{
+		const TCHAR* Name;
+		EABTSM73DAGFailurePattern Pattern;
+		EABTSM73DAGFailureMotion ExpectedMotion;
+		EABTSM73DAGRealizedColumnRole ExpectedWeakRole;
+		int32 ExpectedColumnCount;
+	};
+
+	const FRewritePatternCase RewritePatternCases[] = {
+		{
+			TEXT("InternalSingleSupport"),
+			EABTSM73DAGFailurePattern::InternalSingleSupport,
+			EABTSM73DAGFailureMotion::Drop,
+			EABTSM73DAGRealizedColumnRole::FailureWeak,
+			1
+		},
+		{
+			TEXT("InternalAsymmetricDualSupport"),
+			EABTSM73DAGFailurePattern::InternalAsymmetricDualSupport,
+			EABTSM73DAGFailureMotion::Tip,
+			EABTSM73DAGRealizedColumnRole::FailureWeak,
+			2
+		},
+		{
+			TEXT("InternalOffsetSeam"),
+			EABTSM73DAGFailurePattern::InternalOffsetSeam,
+			EABTSM73DAGFailureMotion::SlideThenTip,
+			EABTSM73DAGRealizedColumnRole::FailureSeamKey,
+			2
+		}
+	};
+
+	FABTSM7TaskGraphBuildingProfile MakeRewriteTestProfile()
+	{
+		FABTSM7TaskGraphBuildingProfile Profile =
+			FABTSM7TaskGraphDAG23ProfileResolver::MakeDefaultProfile(
+				EABTSM3TaskType::Workshop,
+				EABTSM7BuildingMaterial::Wood);
+		Profile.GenerationSettings.BuildingSeed = 1034266606;
+		Profile.DAGGenerationSettings.BuildingSeed = 1034266606;
+		return Profile;
+	}
+
+	bool BuildRewriteProfile(
+		const FABTSM7TaskGraphBuildingProfile& Profile,
+		FABTSM73StructureData& OutData,
+		FString& OutError)
+	{
+		const TArray<FABTSM7MaterialProfile> MaterialProfiles =
+			FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+		FABTSM73DAGBuildingPipeline Pipeline;
+		return Pipeline.BuildWithFailurePattern(
+			Profile.DAGGenerationSettings,
+			Profile.DAGLayoutSettings,
+			Profile.GenerationSettings,
+			Profile.DAGFailureFrontierSettings,
+			Profile.DAGFailurePatternSettings,
+			Profile.DifficultySettings,
+			MaterialProfiles,
+			OutData,
+			OutError);
+	}
+
+	bool BuildRewritePattern(
+		const EABTSM73DAGFailurePattern Pattern,
+		FABTSM73StructureData& OutData,
+		FString& OutError,
+		FABTSM7TaskGraphBuildingProfile* OutProfile = nullptr)
+	{
+		FABTSM7TaskGraphBuildingProfile Profile = MakeRewriteTestProfile();
+		Profile.DAGFailureFrontierSettings.bEnableAnalysis = true;
+		Profile.DAGFailurePatternSettings.bEnableGeometryRewrite = true;
+		Profile.DAGFailurePatternSettings.Pattern = Pattern;
+		if (OutProfile != nullptr) *OutProfile = Profile;
+		return BuildRewriteProfile(Profile, OutData, OutError);
+	}
+
+	const FABTSM73BrickNode* FindRewriteNode(
+		const FABTSM73StructureData& Data,
+		const int32 NodeId)
+	{
+		if (Data.Bricks.IsValidIndex(NodeId)
+			&& Data.Bricks[NodeId].NodeId == NodeId)
+		{
+			return &Data.Bricks[NodeId];
+		}
+		return Data.Bricks.FindByPredicate([NodeId](
+			const FABTSM73BrickNode& Node)
+		{
+			return Node.NodeId == NodeId;
+		});
+	}
+
+	const FABTSM73DAGPhysicalSupportMapping* FindRewriteMapping(
+		const FABTSM73StructureData& Data,
+		const FABTSM73DAGFailurePatternResult& Result)
+	{
+		return Data.DAGPhysicalSupportMappings.FindByPredicate([&Result](
+			const FABTSM73DAGPhysicalSupportMapping& Mapping)
+		{
+			return Mapping.SupportMacroNodeId == Result.SupportMacroNodeId
+				&& Mapping.LoadMacroNodeId == Result.LoadMacroNodeId;
+		});
+	}
+
+	bool HasRewriteSupportEdge(
+		const FABTSM73StructureData& Data,
+		const int32 LowerNodeId,
+		const int32 UpperNodeId)
+	{
+		return Data.SupportEdges.ContainsByPredicate(
+			[LowerNodeId, UpperNodeId](const FABTSM73SupportEdge& Edge)
+			{
+				return Edge.LowerNodeId == LowerNodeId
+					&& Edge.UpperNodeId == UpperNodeId;
+			});
+	}
+
+	bool HasRewriteGroundPathWithout(
+		const FABTSM73StructureData& Data,
+		const int32 TargetNodeId,
+		const TArray<int32>& RemovedNodeIds)
+	{
+		TSet<int32> Removed;
+		for (const int32 NodeId : RemovedNodeIds) Removed.Add(NodeId);
+		if (Removed.Contains(TargetNodeId)) return false;
+		TSet<int32> Reachable;
+		TArray<int32> Queue;
+		for (const int32 GroundNodeId : Data.GroundNodeIds)
+		{
+			if (Removed.Contains(GroundNodeId)
+				|| Reachable.Contains(GroundNodeId))
+			{
+				continue;
+			}
+			Reachable.Add(GroundNodeId);
+			Queue.Add(GroundNodeId);
+		}
+		for (int32 Head = 0; Head < Queue.Num(); ++Head)
+		{
+			for (const FABTSM73SupportEdge& Edge : Data.SupportEdges)
+			{
+				if (Edge.LowerNodeId != Queue[Head]
+					|| Removed.Contains(Edge.UpperNodeId)
+					|| Reachable.Contains(Edge.UpperNodeId))
+				{
+					continue;
+				}
+				Reachable.Add(Edge.UpperNodeId);
+				Queue.Add(Edge.UpperNodeId);
+			}
+		}
+		return Reachable.Contains(TargetNodeId);
+	}
+
+	bool EqualRewriteBrick(
+		const FABTSM73BrickNode& A,
+		const FABTSM73BrickNode& B)
+	{
+		return A.NodeId == B.NodeId
+			&& A.MacroNodeId == B.MacroNodeId
+			&& A.Material == B.Material
+			&& A.OriginalMaterial == B.OriginalMaterial
+			&& A.LocalCenter == B.LocalCenter
+			&& A.DimensionsCM == B.DimensionsCM
+			&& A.SemanticRole == B.SemanticRole
+			&& A.StoreyIndex == B.StoreyIndex
+			&& A.BayIndex == B.BayIndex
+			&& A.WeakPointRole == B.WeakPointRole
+			&& A.WeakPointScore == B.WeakPointScore
+			&& A.UnsupportedMassRatio == B.UnsupportedMassRatio
+			&& A.AttackExposure == B.AttackExposure
+			&& A.EstimatedHits == B.EstimatedHits
+			&& A.bFailureFrontierMainBody == B.bFailureFrontierMainBody
+			&& A.bWeakPoint == B.bWeakPoint
+			&& A.bReinforcedCriticalNode == B.bReinforcedCriticalNode;
+	}
+
+	bool EqualRewriteGeometry(
+		const FABTSM73StructureData& A,
+		const FABTSM73StructureData& B)
+	{
+		if (A.Bricks.Num() != B.Bricks.Num()
+			|| A.SupportEdges.Num() != B.SupportEdges.Num()
+			|| A.DAGPhysicalSupportMappings.Num()
+				!= B.DAGPhysicalSupportMappings.Num()
+			|| A.GroundNodeIds != B.GroundNodeIds
+			|| A.DAGMacroNodeCount != B.DAGMacroNodeCount
+			|| A.DAGSelectedSupportCount != B.DAGSelectedSupportCount
+			|| A.DAGMissingRequiredContactCount
+				!= B.DAGMissingRequiredContactCount
+			|| A.DAGUnexpectedBypassCount != B.DAGUnexpectedBypassCount
+			|| A.DAGMinSupportContactAreaRatio
+				!= B.DAGMinSupportContactAreaRatio
+			|| A.DAGTopologyHash != B.DAGTopologyHash)
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Bricks.Num(); ++Index)
+		{
+			if (!EqualRewriteBrick(A.Bricks[Index], B.Bricks[Index]))
+			{
+				return false;
+			}
+		}
+		for (int32 Index = 0; Index < A.SupportEdges.Num(); ++Index)
+		{
+			const FABTSM73SupportEdge& EdgeA = A.SupportEdges[Index];
+			const FABTSM73SupportEdge& EdgeB = B.SupportEdges[Index];
+			if (EdgeA.LowerNodeId != EdgeB.LowerNodeId
+				|| EdgeA.UpperNodeId != EdgeB.UpperNodeId
+				|| EdgeA.ContactAreaCM2 != EdgeB.ContactAreaCM2)
+			{
+				return false;
+			}
+		}
+		for (int32 Index = 0;
+			Index < A.DAGPhysicalSupportMappings.Num();
+			++Index)
+		{
+			const FABTSM73DAGPhysicalSupportMapping& MappingA =
+				A.DAGPhysicalSupportMappings[Index];
+			const FABTSM73DAGPhysicalSupportMapping& MappingB =
+				B.DAGPhysicalSupportMappings[Index];
+			if (MappingA.SupportMacroNodeId != MappingB.SupportMacroNodeId
+				|| MappingA.LoadMacroNodeId != MappingB.LoadMacroNodeId
+				|| MappingA.SupportPlateNodeId != MappingB.SupportPlateNodeId
+				|| MappingA.LoadPlateNodeId != MappingB.LoadPlateNodeId
+				|| MappingA.SupportPattern != MappingB.SupportPattern
+				|| MappingA.RealizedColumnWidthCM
+					!= MappingB.RealizedColumnWidthCM
+				|| MappingA.ColumnNodeIds != MappingB.ColumnNodeIds
+				|| MappingA.ColumnRoles != MappingB.ColumnRoles)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool EqualRewritePatternResult(
+		const FABTSM73DAGFailurePatternResult& A,
+		const FABTSM73DAGFailurePatternResult& B)
+	{
+		return A.bEnabled == B.bEnabled
+			&& A.bApplied == B.bApplied
+			&& A.Pattern == B.Pattern
+			&& A.ExpectedMotion == B.ExpectedMotion
+			&& A.SourceFrontierHash == B.SourceFrontierHash
+			&& A.RealizedPatternHash == B.RealizedPatternHash
+			&& A.SupportMacroNodeId == B.SupportMacroNodeId
+			&& A.LoadMacroNodeId == B.LoadMacroNodeId
+			&& A.SupportPlateNodeId == B.SupportPlateNodeId
+			&& A.LoadPlateNodeId == B.LoadPlateNodeId
+			&& A.RewriteAttemptCount == B.RewriteAttemptCount
+			&& A.RemovedColumnCount == B.RemovedColumnCount
+			&& A.WeakNodeIds == B.WeakNodeIds
+			&& A.RemainingSupportNodeIds == B.RemainingSupportNodeIds
+			&& A.AffectedMainBodyNodeIds == B.AffectedMainBodyNodeIds
+			&& A.ExpectedFailureDirectionLocal
+				== B.ExpectedFailureDirectionLocal
+			&& A.InitialSupportMarginCM == B.InitialSupportMarginCM
+			&& A.PostFailureTipMarginCM == B.PostFailureTipMarginCM
+			&& A.ReseatRisk == B.ReseatRisk
+			&& A.OffsetSeamShiftCM == B.OffsetSeamShiftCM
+			&& A.BypassSupportEdgeCount == B.BypassSupportEdgeCount
+			&& A.RejectReason == B.RejectReason;
+	}
+
+	bool EqualRewriteAnalysis(
+		const FABTSM73DAGFailureFrontierAnalysis& A,
+		const FABTSM73DAGFailureFrontierAnalysis& B)
+	{
+		if (A.bEnabled != B.bEnabled
+			|| A.bAccepted != B.bAccepted
+			|| A.AcceptedCandidateCount != B.AcceptedCandidateCount
+			|| A.SelectedCandidateIndex != B.SelectedCandidateIndex
+			|| A.SelectedFrontierHash != B.SelectedFrontierHash
+			|| A.RejectReason != B.RejectReason
+			|| A.Candidates.Num() != B.Candidates.Num())
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Candidates.Num(); ++Index)
+		{
+			if (!EqualFrontierCandidate(
+				A.Candidates[Index],
+				B.Candidates[Index]))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 }
 
@@ -853,6 +1150,807 @@ bool FABTSM73DAG3ProductionPresetDiscoveryTest::RunTest(const FString& Parameter
 			RepeatedAnalysis.SelectedFrontierHash,
 			Analysis.SelectedFrontierHash);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG3RewritePatternGeometryMatrixTest,
+	"ABTS.M73DAG3.Rewrite.PatternGeometryMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG3RewritePatternGeometryMatrixTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM7TaskGraphBuildingProfile BaselineProfile =
+		MakeRewriteTestProfile();
+	FABTSM73DAGBuildingPipeline Pipeline;
+	FABTSM73StructureData BaselineData;
+	FString Error;
+	if (!Pipeline.Build(
+		BaselineProfile.DAGGenerationSettings,
+		BaselineProfile.DAGLayoutSettings,
+		BaselineProfile.GenerationSettings,
+		BaselineData,
+		Error))
+	{
+		AddError(FString::Printf(
+			TEXT("DAG3-B matrix baseline failed: %s"),
+			*Error));
+		return false;
+	}
+
+	TArray<FABTSM73StructureData> RealizedStructures;
+	TSet<uint32> RealizedHashes;
+	for (const FRewritePatternCase& TestCase : RewritePatternCases)
+	{
+		FABTSM73StructureData Data;
+		FABTSM7TaskGraphBuildingProfile Profile;
+		Error.Reset();
+		if (!BuildRewritePattern(
+			TestCase.Pattern,
+			Data,
+			Error,
+			&Profile))
+		{
+			AddError(FString::Printf(
+				TEXT("%s rejected production fixture: %s"),
+				TestCase.Name,
+				*Error));
+			continue;
+		}
+		const FABTSM73DAGFailurePatternResult& Result =
+			Data.DAGFailurePatternResult;
+		TestTrue(
+			FString::Printf(TEXT("%s rewrite is enabled"), TestCase.Name),
+			Result.bEnabled);
+		TestTrue(
+			FString::Printf(TEXT("%s rewrite is applied"), TestCase.Name),
+			Result.bApplied);
+		TestEqual(
+			FString::Printf(TEXT("%s preserves explicit pattern"), TestCase.Name),
+			static_cast<int32>(Result.Pattern),
+			static_cast<int32>(TestCase.Pattern));
+		TestEqual(
+			FString::Printf(TEXT("%s realizes expected motion"), TestCase.Name),
+			static_cast<int32>(Result.ExpectedMotion),
+			static_cast<int32>(TestCase.ExpectedMotion));
+		TestTrue(
+			FString::Printf(TEXT("%s has a source frontier identity"), TestCase.Name),
+			Result.SourceFrontierHash != 0);
+		TestTrue(
+			FString::Printf(TEXT("%s has a realized geometry identity"), TestCase.Name),
+			Result.RealizedPatternHash != 0);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s separates source and realized hash domains"),
+				TestCase.Name),
+			Result.SourceFrontierHash != Result.RealizedPatternHash);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s preserves DAG topology identity"),
+				TestCase.Name),
+			Data.DAGTopologyHash,
+			BaselineData.DAGTopologyHash);
+		TestEqual(
+			FString::Printf(TEXT("%s removes one authored column"), TestCase.Name),
+			Result.RemovedColumnCount,
+			1);
+		TestEqual(
+			FString::Printf(TEXT("%s has one weak support"), TestCase.Name),
+			Result.WeakNodeIds.Num(),
+			1);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s has the expected remaining support count"),
+				TestCase.Name),
+			Result.RemainingSupportNodeIds.Num(),
+			TestCase.ExpectedColumnCount - 1);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s exposes a non-zero failure direction"),
+				TestCase.Name),
+			!Result.ExpectedFailureDirectionLocal.IsNearlyZero());
+		TestTrue(
+			FString::Printf(
+				TEXT("%s affects authored main-body nodes"),
+				TestCase.Name),
+			!Result.AffectedMainBodyNodeIds.IsEmpty());
+
+		const FABTSM73DAGPhysicalSupportMapping* Mapping =
+			FindRewriteMapping(Data, Result);
+		TestNotNull(
+			FString::Printf(
+				TEXT("%s keeps the rewritten macro interface addressable"),
+				TestCase.Name),
+			Mapping);
+		if (Mapping != nullptr)
+		{
+			TestEqual(
+				FString::Printf(
+					TEXT("%s realizes the expected column count"),
+					TestCase.Name),
+				Mapping->ColumnNodeIds.Num(),
+				TestCase.ExpectedColumnCount);
+			TestEqual(
+				FString::Printf(
+					TEXT("%s keeps column roles one-to-one"),
+					TestCase.Name),
+				Mapping->ColumnRoles.Num(),
+				Mapping->ColumnNodeIds.Num());
+			TestTrue(
+				FString::Printf(
+					TEXT("%s materializes its weak column role"),
+					TestCase.Name),
+				Mapping->ColumnRoles.Contains(TestCase.ExpectedWeakRole));
+			const bool bExpectPivot = TestCase.ExpectedColumnCount == 2;
+			TestEqual(
+				FString::Printf(
+					TEXT("%s materializes only the required pivot"),
+					TestCase.Name),
+				Mapping->ColumnRoles.Contains(
+					EABTSM73DAGRealizedColumnRole::FailureStrongPivot),
+				bExpectPivot);
+		}
+		if (Result.WeakNodeIds.Num() == 1)
+		{
+			const FABTSM73BrickNode* WeakNode =
+				FindRewriteNode(Data, Result.WeakNodeIds[0]);
+			TestNotNull(
+				FString::Printf(TEXT("%s weak node exists"), TestCase.Name),
+				WeakNode);
+			if (WeakNode != nullptr)
+			{
+				TestEqual(
+					FString::Printf(
+						TEXT("%s weak role lowers to WeakSupport geometry"),
+						TestCase.Name),
+					static_cast<int32>(WeakNode->SemanticRole),
+					static_cast<int32>(
+						EABTSM73BrickSemanticRole::WeakSupport));
+			}
+		}
+		for (const int32 PivotNodeId : Result.RemainingSupportNodeIds)
+		{
+			const FABTSM73BrickNode* PivotNode =
+				FindRewriteNode(Data, PivotNodeId);
+			TestNotNull(
+				FString::Printf(TEXT("%s pivot node exists"), TestCase.Name),
+				PivotNode);
+			if (PivotNode != nullptr)
+			{
+				TestEqual(
+					FString::Printf(
+						TEXT("%s pivot remains ordinary Column geometry"),
+						TestCase.Name),
+					static_cast<int32>(PivotNode->SemanticRole),
+					static_cast<int32>(EABTSM73BrickSemanticRole::Column));
+			}
+		}
+		if (TestCase.Pattern
+			== EABTSM73DAGFailurePattern::InternalOffsetSeam)
+		{
+			TestTrue(
+				TEXT("Offset seam realizes the configured minimum shift"),
+				Result.OffsetSeamShiftCM + KINDA_SMALL_NUMBER
+					>= Profile.DAGFailurePatternSettings.MinOffsetSeamShiftCM);
+		}
+		else
+		{
+			TestTrue(
+				FString::Printf(
+					TEXT("%s does not report an offset-seam shift"),
+					TestCase.Name),
+				FMath::IsNearlyZero(Result.OffsetSeamShiftCM));
+		}
+		TestFalse(
+			FString::Printf(
+				TEXT("%s changes baseline physical geometry"),
+				TestCase.Name),
+			EqualRewriteGeometry(BaselineData, Data));
+		RealizedHashes.Add(Result.RealizedPatternHash);
+		RealizedStructures.Add(MoveTemp(Data));
+	}
+
+	TestEqual(
+		TEXT("All explicit patterns have distinct realized identities"),
+		RealizedHashes.Num(),
+		static_cast<int32>(UE_ARRAY_COUNT(RewritePatternCases)));
+	if (RealizedStructures.Num() == UE_ARRAY_COUNT(RewritePatternCases))
+	{
+		for (int32 Left = 0; Left < RealizedStructures.Num(); ++Left)
+		{
+			for (int32 Right = Left + 1;
+				Right < RealizedStructures.Num();
+				++Right)
+			{
+				TestFalse(
+					TEXT("Explicit patterns realize pairwise-distinct geometry"),
+					EqualRewriteGeometry(
+						RealizedStructures[Left],
+						RealizedStructures[Right]));
+			}
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG3RewriteRealizedContactAndIntactStabilityTest,
+	"ABTS.M73DAG3.Rewrite.RealizedContactAndIntactStability",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG3RewriteRealizedContactAndIntactStabilityTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM73StabilityValidator StabilityValidator;
+	for (const FRewritePatternCase& TestCase : RewritePatternCases)
+	{
+		FABTSM73StructureData Data;
+		FABTSM7TaskGraphBuildingProfile Profile;
+		FString Error;
+		if (!BuildRewritePattern(
+			TestCase.Pattern,
+			Data,
+			Error,
+			&Profile))
+		{
+			AddError(FString::Printf(
+				TEXT("%s contact/stability fixture rejected: %s"),
+				TestCase.Name,
+				*Error));
+			continue;
+		}
+		TestEqual(
+			FString::Printf(
+				TEXT("%s has every required realized contact"),
+				TestCase.Name),
+			Data.DAGMissingRequiredContactCount,
+			0);
+		TestEqual(
+			FString::Printf(
+				TEXT("%s has no unexpected support bypass"),
+				TestCase.Name),
+			Data.DAGUnexpectedBypassCount,
+			0);
+		TestTrue(
+			FString::Printf(TEXT("%s has ground nodes"), TestCase.Name),
+			!Data.GroundNodeIds.IsEmpty());
+		TestTrue(
+			FString::Printf(TEXT("%s has support contacts"), TestCase.Name),
+			!Data.SupportEdges.IsEmpty());
+		TestEqual(
+			FString::Printf(
+				TEXT("%s retains the production contact-area gate"),
+				TestCase.Name),
+			Data.DAGMinSupportContactAreaRatio,
+			Profile.DAGLayoutSettings.MinSupportContactAreaRatio);
+		Error.Reset();
+		TestTrue(
+			FString::Printf(
+				TEXT("%s remains intact-stable: %s"),
+				TestCase.Name,
+				*Error),
+			StabilityValidator.Validate(
+				Profile.GenerationSettings,
+				Data,
+				Error));
+
+		for (int32 NodeIndex = 0;
+			NodeIndex < Data.Bricks.Num();
+			++NodeIndex)
+		{
+			const FABTSM73BrickNode& Node = Data.Bricks[NodeIndex];
+			TestEqual(
+				FString::Printf(
+					TEXT("%s keeps NodeId equal to storage index"),
+					TestCase.Name),
+				Node.NodeId,
+				NodeIndex);
+			TestEqual(
+				FString::Printf(
+					TEXT("%s keeps one authored material"),
+					TestCase.Name),
+				static_cast<int32>(Node.Material),
+				static_cast<int32>(
+					Profile.GenerationSettings.PrimaryMaterial));
+			TestEqual(
+				FString::Printf(
+					TEXT("%s does not route a weak material"),
+					TestCase.Name),
+				static_cast<int32>(Node.OriginalMaterial),
+				static_cast<int32>(Node.Material));
+			TestFalse(
+				FString::Printf(
+					TEXT("%s does not create legacy weak-point flags"),
+					TestCase.Name),
+				Node.bWeakPoint);
+		}
+		TestTrue(
+			FString::Printf(
+				TEXT("%s creates no legacy WeakPoints"),
+				TestCase.Name),
+			Data.WeakPoints.IsEmpty());
+		TestTrue(
+			FString::Printf(
+				TEXT("%s creates no legacy weakness intents"),
+				TestCase.Name),
+			Data.StructuralWeaknessIntents.IsEmpty());
+		TestTrue(
+			FString::Printf(
+				TEXT("%s creates no legacy failure probes"),
+				TestCase.Name),
+			Data.FailureProbeResults.IsEmpty());
+
+		for (const FABTSM73DAGPhysicalSupportMapping& Mapping
+			: Data.DAGPhysicalSupportMappings)
+		{
+			TestEqual(
+				FString::Printf(
+					TEXT("%s mapping keeps role cardinality"),
+					TestCase.Name),
+				Mapping.ColumnRoles.Num(),
+				Mapping.ColumnNodeIds.Num());
+			for (const int32 ColumnNodeId : Mapping.ColumnNodeIds)
+			{
+				TestNotNull(
+					FString::Printf(
+						TEXT("%s mapping column exists"),
+						TestCase.Name),
+					FindRewriteNode(Data, ColumnNodeId));
+				TestTrue(
+					FString::Printf(
+						TEXT("%s realizes support-plate to column contact"),
+						TestCase.Name),
+					HasRewriteSupportEdge(
+						Data,
+						Mapping.SupportPlateNodeId,
+						ColumnNodeId));
+				TestTrue(
+					FString::Printf(
+						TEXT("%s realizes column to load-plate contact"),
+						TestCase.Name),
+					HasRewriteSupportEdge(
+						Data,
+						ColumnNodeId,
+						Mapping.LoadPlateNodeId));
+			}
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG3RewriteCounterfactualSemanticsTest,
+	"ABTS.M73DAG3.Rewrite.CounterfactualSemantics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG3RewriteCounterfactualSemanticsTest::RunTest(
+	const FString& Parameters)
+{
+	for (const FRewritePatternCase& TestCase : RewritePatternCases)
+	{
+		FABTSM73StructureData Data;
+		FABTSM7TaskGraphBuildingProfile Profile;
+		FString Error;
+		if (!BuildRewritePattern(
+			TestCase.Pattern,
+			Data,
+			Error,
+			&Profile))
+		{
+			AddError(FString::Printf(
+				TEXT("%s counterfactual fixture rejected: %s"),
+				TestCase.Name,
+				*Error));
+			continue;
+		}
+		const FABTSM73DAGFailurePatternResult& Result =
+			Data.DAGFailurePatternResult;
+		TestEqual(
+			FString::Printf(
+				TEXT("%s realizes a complete physical frontier"),
+				TestCase.Name),
+			Result.BypassSupportEdgeCount,
+			0);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s satisfies the intact support margin"),
+				TestCase.Name),
+			Result.InitialSupportMarginCM + KINDA_SMALL_NUMBER
+				>= Profile.DifficultySettings.MinInitialSupportMarginCM);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s reports a finite reseat risk"),
+				TestCase.Name),
+			FMath::IsFinite(Result.ReseatRisk)
+				&& Result.ReseatRisk >= 0.0f
+				&& Result.ReseatRisk <= 1.0f);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s reports an affected main body"),
+				TestCase.Name),
+			!Result.AffectedMainBodyNodeIds.IsEmpty());
+
+		TArray<int32> FullRemoved = Result.WeakNodeIds;
+		FullRemoved.Append(Result.RemainingSupportNodeIds);
+		TestFalse(
+			FString::Printf(
+				TEXT("%s full interface removal cuts the load from Ground"),
+				TestCase.Name),
+			HasRewriteGroundPathWithout(
+				Data,
+				Result.LoadPlateNodeId,
+				FullRemoved));
+
+		if (TestCase.Pattern
+			== EABTSM73DAGFailurePattern::InternalSingleSupport)
+		{
+			TestTrue(
+				TEXT("Single support has no retained pivot"),
+				Result.RemainingSupportNodeIds.IsEmpty());
+			TestFalse(
+				TEXT("Removing the single weak support disconnects the load"),
+				HasRewriteGroundPathWithout(
+					Data,
+					Result.LoadPlateNodeId,
+					Result.WeakNodeIds));
+			TestTrue(
+				TEXT("Drop pattern has no post-failure tip margin"),
+				FMath::IsNearlyZero(Result.PostFailureTipMarginCM));
+		}
+		else
+		{
+			TestEqual(
+				FString::Printf(
+					TEXT("%s retains exactly one strong pivot"),
+					TestCase.Name),
+				Result.RemainingSupportNodeIds.Num(),
+				1);
+			TestTrue(
+				FString::Printf(
+					TEXT("%s retains a Ground path after weak-only removal"),
+					TestCase.Name),
+				HasRewriteGroundPathWithout(
+					Data,
+					Result.LoadPlateNodeId,
+					Result.WeakNodeIds));
+			TestTrue(
+				FString::Printf(
+					TEXT("%s exceeds the post-failure tip margin"),
+					TestCase.Name),
+				Result.PostFailureTipMarginCM + KINDA_SMALL_NUMBER
+					>= Profile.DifficultySettings.MinTipMarginCM);
+			TestTrue(
+				FString::Printf(
+					TEXT("%s stays below the reseat-risk gate"),
+					TestCase.Name),
+				Result.ReseatRisk
+					<= Profile.DifficultySettings.MaxReseatRisk);
+		}
+
+		TestEqual(
+			FString::Printf(
+				TEXT("%s reports its required motion"),
+				TestCase.Name),
+			static_cast<int32>(Result.ExpectedMotion),
+			static_cast<int32>(TestCase.ExpectedMotion));
+		if (TestCase.Pattern
+			== EABTSM73DAGFailurePattern::InternalOffsetSeam)
+		{
+			TestTrue(
+				TEXT("Offset seam realizes a physical closure shift"),
+				Result.OffsetSeamShiftCM + KINDA_SMALL_NUMBER
+					>= Profile.DAGFailurePatternSettings.MinOffsetSeamShiftCM);
+		}
+		else
+		{
+			TestTrue(
+				FString::Printf(
+					TEXT("%s has no seam shift"),
+					TestCase.Name),
+				FMath::IsNearlyZero(Result.OffsetSeamShiftCM));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG3RewriteDeterminismAndIdentityTest,
+	"ABTS.M73DAG3.Rewrite.DeterminismAndIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG3RewriteDeterminismAndIdentityTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM7TaskGraphBuildingProfile BaselineProfile =
+		MakeRewriteTestProfile();
+	FABTSM73DAGBuildingPipeline Pipeline;
+	FABTSM73StructureData BaselineData;
+	FString Error;
+	if (!Pipeline.Build(
+		BaselineProfile.DAGGenerationSettings,
+		BaselineProfile.DAGLayoutSettings,
+		BaselineProfile.GenerationSettings,
+		BaselineData,
+		Error))
+	{
+		AddError(FString::Printf(
+			TEXT("DAG3-B determinism baseline failed: %s"),
+			*Error));
+		return false;
+	}
+
+	TSet<uint32> RealizedHashes;
+	for (const FRewritePatternCase& TestCase : RewritePatternCases)
+	{
+		FABTSM73StructureData First;
+		FABTSM73StructureData Second;
+		FString FirstError;
+		FString SecondError;
+		const bool bFirstBuilt = BuildRewritePattern(
+			TestCase.Pattern,
+			First,
+			FirstError);
+		const bool bSecondBuilt = BuildRewritePattern(
+			TestCase.Pattern,
+			Second,
+			SecondError);
+		if (!bFirstBuilt || !bSecondBuilt)
+		{
+			AddError(FString::Printf(
+				TEXT("%s deterministic replay rejected: first=%s second=%s"),
+				TestCase.Name,
+				*FirstError,
+				*SecondError));
+			continue;
+		}
+		TestTrue(
+			FString::Printf(
+				TEXT("%s repeats exact physical geometry"),
+				TestCase.Name),
+			EqualRewriteGeometry(First, Second));
+		TestTrue(
+			FString::Printf(
+				TEXT("%s repeats exact result identity and metrics"),
+				TestCase.Name),
+			EqualRewritePatternResult(
+				First.DAGFailurePatternResult,
+				Second.DAGFailurePatternResult));
+		TestTrue(
+			FString::Printf(
+				TEXT("%s repeats exact realized frontier analysis"),
+				TestCase.Name),
+			EqualRewriteAnalysis(
+				First.DAGFailureFrontierAnalysis,
+				Second.DAGFailureFrontierAnalysis));
+		TestEqual(
+			FString::Printf(
+				TEXT("%s leaves the DAG identity unchanged"),
+				TestCase.Name),
+			First.DAGTopologyHash,
+			BaselineData.DAGTopologyHash);
+		TestTrue(
+			FString::Printf(
+				TEXT("%s keeps source and realized identities separate"),
+				TestCase.Name),
+			First.DAGFailurePatternResult.SourceFrontierHash != 0
+				&& First.DAGFailurePatternResult.RealizedPatternHash != 0
+				&& First.DAGFailurePatternResult.SourceFrontierHash
+					!= First.DAGFailurePatternResult.RealizedPatternHash);
+		for (int32 NodeIndex = 0;
+			NodeIndex < First.Bricks.Num();
+			++NodeIndex)
+		{
+			TestEqual(
+				FString::Printf(
+					TEXT("%s keeps deterministic contiguous NodeIds"),
+					TestCase.Name),
+				First.Bricks[NodeIndex].NodeId,
+				NodeIndex);
+		}
+		RealizedHashes.Add(
+			First.DAGFailurePatternResult.RealizedPatternHash);
+	}
+	TestEqual(
+		TEXT("The three pattern identities do not alias"),
+		RealizedHashes.Num(),
+		static_cast<int32>(UE_ARRAY_COUNT(RewritePatternCases)));
+
+	FABTSM73StructureData FirstAuto;
+	FABTSM73StructureData SecondAuto;
+	FString FirstAutoError;
+	FString SecondAutoError;
+	const bool bFirstAutoBuilt = BuildRewritePattern(
+		EABTSM73DAGFailurePattern::Auto,
+		FirstAuto,
+		FirstAutoError);
+	const bool bSecondAutoBuilt = BuildRewritePattern(
+		EABTSM73DAGFailurePattern::Auto,
+		SecondAuto,
+		SecondAutoError);
+	if (!bFirstAutoBuilt || !bSecondAutoBuilt)
+	{
+		AddError(FString::Printf(
+			TEXT("Auto deterministic replay rejected: first=%s second=%s"),
+			*FirstAutoError,
+			*SecondAutoError));
+	}
+	else
+	{
+		TestTrue(
+			TEXT("Auto resolves and applies one concrete pattern"),
+			FirstAuto.DAGFailurePatternResult.bApplied
+				&& FirstAuto.DAGFailurePatternResult.Pattern
+					!= EABTSM73DAGFailurePattern::Auto);
+		TestTrue(
+			TEXT("Auto repeats exact physical geometry"),
+			EqualRewriteGeometry(FirstAuto, SecondAuto));
+		TestTrue(
+			TEXT("Auto repeats exact result identity and metrics"),
+			EqualRewritePatternResult(
+				FirstAuto.DAGFailurePatternResult,
+				SecondAuto.DAGFailurePatternResult));
+		TestTrue(
+			TEXT("Auto repeats exact realized frontier analysis"),
+			EqualRewriteAnalysis(
+				FirstAuto.DAGFailureFrontierAnalysis,
+				SecondAuto.DAGFailureFrontierAnalysis));
+		TestTrue(
+			TEXT("Auto resolves to one of the certified explicit identities"),
+			RealizedHashes.Contains(
+				FirstAuto.DAGFailurePatternResult.RealizedPatternHash));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG3RewriteBudgetDisabledAndAtomicFailureTest,
+	"ABTS.M73DAG3.Rewrite.BudgetDisabledAndAtomicFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG3RewriteBudgetDisabledAndAtomicFailureTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM7TaskGraphBuildingProfile Profile = MakeRewriteTestProfile();
+	FABTSM73DAGBuildingPipeline Pipeline;
+	FABTSM73StructureData BaselineData;
+	FString Error;
+	if (!Pipeline.Build(
+		Profile.DAGGenerationSettings,
+		Profile.DAGLayoutSettings,
+		Profile.GenerationSettings,
+		BaselineData,
+		Error))
+	{
+		AddError(FString::Printf(
+			TEXT("DAG3-B atomicity baseline failed: %s"),
+			*Error));
+		return false;
+	}
+	TestFalse(
+		TEXT("Production profile keeps DAG3-A disabled"),
+		Profile.DAGFailureFrontierSettings.bEnableAnalysis);
+	TestFalse(
+		TEXT("Production profile keeps DAG3-B disabled"),
+		Profile.DAGFailurePatternSettings.bEnableGeometryRewrite);
+
+	FABTSM73StructureData DisabledData;
+	Error.Reset();
+	TestTrue(
+		FString::Printf(
+			TEXT("Disabled DAG3-B takes the baseline path: %s"),
+			*Error),
+		BuildRewriteProfile(Profile, DisabledData, Error));
+	TestTrue(
+		TEXT("Disabled DAG3-B is an exact physical no-op"),
+		EqualRewriteGeometry(BaselineData, DisabledData));
+	TestFalse(
+		TEXT("Disabled DAG3-B does not mark a transaction enabled"),
+		DisabledData.DAGFailurePatternResult.bEnabled);
+	TestFalse(
+		TEXT("Disabled DAG3-B does not mark a transaction applied"),
+		DisabledData.DAGFailurePatternResult.bApplied);
+	TestEqual(
+		TEXT("Disabled DAG3-B has no realized identity"),
+		DisabledData.DAGFailurePatternResult.RealizedPatternHash,
+		0u);
+
+	FABTSM7TaskGraphBuildingProfile MissingFrontierProfile = Profile;
+	MissingFrontierProfile.DAGFailurePatternSettings.bEnableGeometryRewrite =
+		true;
+	MissingFrontierProfile.DAGFailurePatternSettings.Pattern =
+		EABTSM73DAGFailurePattern::InternalSingleSupport;
+	FABTSM73StructureData MissingFrontierData;
+	Error.Reset();
+	TestFalse(
+		TEXT("Enabled rewrite rejects a disabled frontier"),
+		BuildRewriteProfile(
+			MissingFrontierProfile,
+			MissingFrontierData,
+			Error));
+	TestEqual(
+		TEXT("Disabled-frontier rejection is exact"),
+		Error,
+		FString(TEXT("DAG3BRequiresAcceptedFrontier")));
+	TestTrue(
+		TEXT("Disabled-frontier rejection preserves baseline geometry"),
+		EqualRewriteGeometry(BaselineData, MissingFrontierData));
+	TestTrue(
+		TEXT("Disabled-frontier rejection records enabled intent"),
+		MissingFrontierData.DAGFailurePatternResult.bEnabled);
+	TestFalse(
+		TEXT("Disabled-frontier rejection applies nothing"),
+		MissingFrontierData.DAGFailurePatternResult.bApplied);
+
+	FABTSM7TaskGraphBuildingProfile InvalidBudgetProfile = Profile;
+	InvalidBudgetProfile.DAGFailureFrontierSettings.bEnableAnalysis = true;
+	InvalidBudgetProfile.DAGFailurePatternSettings.bEnableGeometryRewrite = true;
+	InvalidBudgetProfile.DAGFailurePatternSettings.Pattern =
+		EABTSM73DAGFailurePattern::InternalSingleSupport;
+	InvalidBudgetProfile.DAGFailurePatternSettings.MaxRewriteAttemptCount = 0;
+	FABTSM73StructureData InvalidBudgetData;
+	Error.Reset();
+	TestFalse(
+		TEXT("Zero rewrite budget is rejected"),
+		BuildRewriteProfile(
+			InvalidBudgetProfile,
+			InvalidBudgetData,
+			Error));
+	TestEqual(
+		TEXT("Zero rewrite budget rejection is exact"),
+		Error,
+		FString(TEXT("DAG3BRewriteAttemptBudgetInvalid")));
+	TestTrue(
+		TEXT("Zero rewrite budget preserves baseline geometry"),
+		EqualRewriteGeometry(BaselineData, InvalidBudgetData));
+	TestFalse(
+		TEXT("Zero rewrite budget never applies a pattern"),
+		InvalidBudgetData.DAGFailurePatternResult.bApplied);
+	TestEqual(
+		TEXT("Zero rewrite budget has no realized identity"),
+		InvalidBudgetData.DAGFailurePatternResult.RealizedPatternHash,
+		0u);
+
+	FABTSM7TaskGraphBuildingProfile ExhaustedBudgetProfile = Profile;
+	ExhaustedBudgetProfile.DAGFailureFrontierSettings.bEnableAnalysis = true;
+	ExhaustedBudgetProfile.DAGFailurePatternSettings.bEnableGeometryRewrite =
+		true;
+	ExhaustedBudgetProfile.DAGFailurePatternSettings.Pattern =
+		EABTSM73DAGFailurePattern::Auto;
+	ExhaustedBudgetProfile.DAGFailurePatternSettings.MaxRewriteAttemptCount = 1;
+	ExhaustedBudgetProfile.DifficultySettings.MinInitialSupportMarginCM =
+		1000000.0f;
+	FABTSM73StructureData ExhaustedBudgetData;
+	Error.Reset();
+	TestFalse(
+		TEXT("One-attempt budget rejects an intentionally impossible window"),
+		BuildRewriteProfile(
+			ExhaustedBudgetProfile,
+			ExhaustedBudgetData,
+			Error));
+	TestEqual(
+		TEXT("Attempt exhaustion reports its exact bound"),
+		Error,
+		FString(
+			TEXT("DAG3BNoAcceptedPattern:"
+				"DAG3BRewriteAttemptBudgetExceeded:1:1")));
+	TestTrue(
+		TEXT("Attempt exhaustion preserves baseline geometry atomically"),
+		EqualRewriteGeometry(BaselineData, ExhaustedBudgetData));
+	TestTrue(
+		TEXT("Attempt exhaustion records enabled intent"),
+		ExhaustedBudgetData.DAGFailurePatternResult.bEnabled);
+	TestFalse(
+		TEXT("Attempt exhaustion commits no rewrite"),
+		ExhaustedBudgetData.DAGFailurePatternResult.bApplied);
+	TestEqual(
+		TEXT("Attempt exhaustion records the consumed attempt"),
+		ExhaustedBudgetData.DAGFailurePatternResult.RewriteAttemptCount,
+		1);
+	TestEqual(
+		TEXT("Attempt exhaustion has no realized identity"),
+		ExhaustedBudgetData.DAGFailurePatternResult.RealizedPatternHash,
+		0u);
 	return true;
 }
 

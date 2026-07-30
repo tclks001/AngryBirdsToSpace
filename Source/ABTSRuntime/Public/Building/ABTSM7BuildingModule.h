@@ -24,6 +24,8 @@ public:
 	void ConfigureBrick(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7BuildingMaterial InMaterial, const FTransform& WorldTransform);
 	void ConfigureCylinder(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7ModuleKind InKind, EABTSM7BuildingMaterial InMaterial, float LengthCM, float DiameterCM, const FTransform& WorldTransform, const FVector& AdditionalLocalScale = FVector::OneVector);
 	void ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile);
+	/** Applies a per-body Chaos quality override for multi-contact generated-building stacks. */
+	void ConfigureChaosSolverIterations(int32 PositionIterations, int32 VelocityIterations);
 	/** Ignores contact damage briefly after a static body enters Chaos. */
 	void SetContactDamageGraceSeconds(float Seconds) { ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds); }
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);

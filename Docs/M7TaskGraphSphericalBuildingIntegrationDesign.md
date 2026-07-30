@@ -1,10 +1,12 @@
 # M7 收口：TaskGraph 球面建筑集成
 
-> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A 纯数据内部 Failure Frontier 发现已接线但生产默认关闭，不改变 13/17/13 模块、材质与 `WeakPoints=0`；UE 5.8 强制 Unity Editor 编译、DAG3-A 6 项、旧 DAG2.3 9 项、M7 路由、世界生成契约、当前 `ABTS.M7` 前缀快照 20 项、fresh NullRHI 60 FPS 运行时 smoke 及既有三次 fresh D3D12 实时 60 FPS 证据均通过。待 DAG3-B/C、DAG-4 及可见 PIE 外观/击打/回收验收。
+> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A/B/C 与 [DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成 Frontier、三种同材质几何改写、静态候选、settled Contact、三 Pattern/四材料真实 Chaos 和当前 Fixture 的用户可见机械响应。[DAG5-A](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md#3-dag5-a可行域预检与确定性有界回溯) 已完成单 Profile 有界搜索和编译后实砖硬预算。生产 Profile 中 A/B/C/DAG-4/DAG5-A 仍默认关闭，现有普通建筑合同不变；后续由 DAG5-B～E 补齐复杂轮廓、六栋联合选择、Encounter 接入与最终动态认证。
 >
-> 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md)。
+> 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md) · [DAG3-C 攻击可达与候选路由](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md)。
 >
-> 下游修订：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)已将 `LaunchSite` 保留为无建筑的终局施工台和 Space-only 槽位区。
+> 下游修订：[M7.3-DAG-5 候选搜索、语义轮廓与生产认证](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)
+> 的 DAG5-D/E 负责未来显式生产接入；[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)
+> 已将 `LaunchSite` 保留为无建筑的终局施工台和 Space-only 槽位区。
 >
 > 历史对照：[M7.3-A](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2](M73B2StructuralWeaknessAndFailureValidationDesign.md)。这些 Legacy 生成稿不再是 TaskGraph 生产路线。
 >
@@ -89,7 +91,7 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 - `DAG3Enabled=0 DAG3Candidates=0 DAG3Accepted=0 DAG3Hash=0` 是当前生产日志基线；
 - 旧 B/B2 顶冠弱材质、唯一弱点与难度分数不再属于生产合同；
 - 首版应把可读的主承重柱作为攻击提示，不能宣称已有“唯一弱点”；
-- 若后续恢复严格的弱点玩法，必须完成 DAG3-B/C 和 DAG-4，不能只打开 DAG3-A，也不能把 TaskGraph 切回 Legacy。
+- 若后续恢复严格的弱点玩法，必须使用已经完成认证的 DAG3-B/C/DAG-4 全链，并让 DAG-5/WFC 的每个最终候选重新通过该全链；不能只打开 DAG3-A，也不能把 TaskGraph 切回 Legacy。
 
 ### 3.2 M11.0 的 LaunchSite 硬边界
 
@@ -142,6 +144,13 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 - fresh `-game -NullRHI -ExecCmds="t.MaxFPS 60"` 中三栋生成日志均为 `DAG3Enabled/Candidates/Accepted/Hash=0/0/0/0`、13/17/13 和原 DAG Hash；三栋 Idle 全部 `Accepted=1`，最终 `WorldReady=1` 且门禁 `3/0/3/3`；
 - 该增量没有改动生产几何或 Chaos，不新增“弱点击毁”可见 PIE 结论。
 
+2026-07-29 的 DAG-4 动态候选认证：
+
+- 详细合同与逐项证据见 [DAG-4 第 15 节](M73DAG4SettledContactAndAttackRolloutDesign.md#15-2026-07-29-实现与证据)；
+- 强制 Unity 编译成功；fresh `ABTS.M73DAG4.` 6/6、完整 `ABTS.M73DAG3.` 22/22、旧 `ABTS.M73DAG.` 10/10、`ABTS.M7` 43/43、世界生成契约 2/2 Success；
+- Single/Dual/Seam 均从同一 settled 快照执行 `1 Weak + 3 Ordinary`，正式模块未被 Shadow 试验改写；木、石、铁、玻璃分别以真实 MaterialSystem Profile 独立通过；
+- 当前 Fixture 的用户可见机械响应已验收，弱点/失效模式诊断覆盖层已改为 PIE/游戏隐藏；三套 TaskGraph 生产 Profile 仍为 A/B/C/DAG-4 全关闭。本证据不替代 DAG-5/WFC 的最终六栋联合多样性，也不授权修改生产默认。
+
 ### 4.2 PIE 定位调试
 
 `AABTSM7GameMode` 在 `ABTS | M7 | Debug` 默认开启 `Show Task Graph Position Debug`。PIE 时屏幕左上会持续显示玩家和已生成 TaskGraph 建筑的经纬度（纬度为 `-90°~+90°`，经度为 `-180°~+180°`），建筑条目同时带有 Task/Cell 标识。场景中每栋建筑上方还会显示同一组 `B序号 / Task / Lat / Lon` 标签，可将屏幕列表和现场目标对应。
@@ -165,4 +174,4 @@ DAG2.3 会复用 M7 Runtime Module、材料损伤、激活、击碎、二次碰�
 
 ## 6. 后续
 
-TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A 也已建立内部 Failure Frontier 的纯数据发现与确定性门槛。后续按顺序完成 DAG3-B 三种几何改写、DAG3-C 显式生产候选、DAG-4 settled/Chaos 对照、Budget=1 Seed sweep/物理预算，再由 WFC 提供语义包络；这些阶段都复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`，不得恢复 Legacy fallback。
+TaskGraph 生产生成器已经在 DAG2.3 收口，DAG3-A/B/C 与 DAG-4 也已完成 Frontier、三种改写、静态候选、settled/Chaos 动态认证和当前 Fixture 的用户可见机械响应。DAG5-A 已完成单 Profile 有界搜索和物理实砖预算，但保持默认关闭。后续严格按 [DAG5-B～E](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) 推进：生成 Shape Grammar/WFC 语义包络、执行候选 Novelty 与六栋联合选择，最后由 DAG5-D 显式消费 Encounter、由 DAG5-E 逐栋重跑 DAG-4。最终候选继续复用 `CellTopo Anchor -> Pad -> DAG Profile -> Runtime Building`；DAG5-E 完成前不修改当前生产默认，也不得恢复 Legacy fallback。

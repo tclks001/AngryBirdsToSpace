@@ -13,7 +13,22 @@ namespace
 	{
 		EABTSM73DAGFailureCandidateKind Kind = EABTSM73DAGFailureCandidateKind::DirectedNodeCut;
 		TArray<int32> CandidateNodeIds;
+		TArray<FABTSM73DAGFailureEdgeRef> CandidateEdges;
 		TArray<int32> ProtectedRootNodeIds;
+	};
+
+	struct FResidualEdge
+	{
+		int32 To = INDEX_NONE;
+		int32 ReverseIndex = INDEX_NONE;
+		int32 Capacity = 0;
+	};
+
+	enum class EBoundedCutSearchResult : uint8
+	{
+		NoBoundedCut,
+		Found,
+		BudgetExceeded
 	};
 
 	bool IsFiniteFrontierVector(const FVector& Value)
@@ -60,6 +75,24 @@ namespace
 		}
 	}
 
+	void SortUniqueEdges(TArray<FABTSM73DAGFailureEdgeRef>& Edges)
+	{
+		Edges.Sort([](
+			const FABTSM73DAGFailureEdgeRef& A,
+			const FABTSM73DAGFailureEdgeRef& B)
+		{
+			if (A.LowerNodeId != B.LowerNodeId)
+			{
+				return A.LowerNodeId < B.LowerNodeId;
+			}
+			return A.UpperNodeId < B.UpperNodeId;
+		});
+		for (int32 Index = Edges.Num() - 1; Index > 0; --Index)
+		{
+			if (Edges[Index] == Edges[Index - 1]) Edges.RemoveAt(Index);
+		}
+	}
+
 	FString JoinNodeIds(const TArray<int32>& NodeIds)
 	{
 		FString Result;
@@ -71,8 +104,31 @@ namespace
 		return Result;
 	}
 
+	FString JoinEdges(const TArray<FABTSM73DAGFailureEdgeRef>& Edges)
+	{
+		FString Result;
+		for (int32 Index = 0; Index < Edges.Num(); ++Index)
+		{
+			if (Index > 0) Result += TEXT(",");
+			Result += FString::Printf(
+				TEXT("%d>%d"),
+				Edges[Index].LowerNodeId,
+				Edges[Index].UpperNodeId);
+		}
+		return Result;
+	}
+
 	FString SeedKey(const FFrontierSeed& Seed)
 	{
+		if (!Seed.CandidateEdges.IsEmpty())
+		{
+			return FString::Printf(
+				TEXT("%d|%s|%s|%s"),
+				static_cast<int32>(Seed.Kind),
+				*JoinNodeIds(Seed.CandidateNodeIds),
+				*JoinEdges(Seed.CandidateEdges),
+				*JoinNodeIds(Seed.ProtectedRootNodeIds));
+		}
 		return FString::Printf(
 			TEXT("%d|%s|%s"),
 			static_cast<int32>(Seed.Kind),
@@ -134,8 +190,287 @@ namespace
 		}
 	}
 
+	void AddResidualEdge(
+		TArray<TArray<FResidualEdge>>& Graph,
+		const int32 From,
+		const int32 To,
+		const int32 Capacity)
+	{
+		const int32 ForwardIndex = Graph[From].Num();
+		const int32 ReverseIndex = Graph[To].Num();
+		FResidualEdge& Forward = Graph[From].AddDefaulted_GetRef();
+		Forward.To = To;
+		Forward.ReverseIndex = ReverseIndex;
+		Forward.Capacity = Capacity;
+		FResidualEdge& Reverse = Graph[To].AddDefaulted_GetRef();
+		Reverse.To = From;
+		Reverse.ReverseIndex = ForwardIndex;
+		Reverse.Capacity = 0;
+	}
+
+	bool ConsumeFlowOperation(
+		const int32 MaxFlowOperationCount,
+		int32& InOutFlowOperationCount)
+	{
+		++InOutFlowOperationCount;
+		return InOutFlowOperationCount <= MaxFlowOperationCount;
+	}
+
+	EBoundedCutSearchResult FindBoundedVertexCut(
+		const FABTSM73DAGFailureFrontierSettings& Settings,
+		const TArray<int32>& SortedNodeIds,
+		const TArray<FABTSM73DAGFailureEdgeRef>& SortedEdges,
+		const TSet<int32>& GroundNodeIds,
+		const int32 ProtectedRootNodeId,
+		int32& InOutFlowOperationCount,
+		TArray<int32>& OutCutNodeIds)
+	{
+		OutCutNodeIds.Reset();
+		TMap<int32, int32> NodeOrdinals;
+		for (int32 Index = 0; Index < SortedNodeIds.Num(); ++Index)
+		{
+			NodeOrdinals.Add(SortedNodeIds[Index], Index);
+		}
+		const int32* RootOrdinal = NodeOrdinals.Find(ProtectedRootNodeId);
+		if (RootOrdinal == nullptr || GroundNodeIds.Contains(ProtectedRootNodeId))
+		{
+			return EBoundedCutSearchResult::NoBoundedCut;
+		}
+
+		const int32 SourceIndex = SortedNodeIds.Num() * 2;
+		const int32 SinkIndex = SourceIndex + 1;
+		TArray<TArray<FResidualEdge>> ResidualGraph;
+		ResidualGraph.SetNum(SinkIndex + 1);
+		const int32 InfiniteCapacity = Settings.MaxCutSetSize + 1;
+		for (int32 Ordinal = 0; Ordinal < SortedNodeIds.Num(); ++Ordinal)
+		{
+			const int32 NodeId = SortedNodeIds[Ordinal];
+			const bool bUncuttable =
+				GroundNodeIds.Contains(NodeId)
+				|| NodeId == ProtectedRootNodeId;
+			AddResidualEdge(
+				ResidualGraph,
+				Ordinal * 2,
+				Ordinal * 2 + 1,
+				bUncuttable ? InfiniteCapacity : 1);
+		}
+		for (const FABTSM73DAGFailureEdgeRef& Edge : SortedEdges)
+		{
+			const int32* LowerOrdinal = NodeOrdinals.Find(Edge.LowerNodeId);
+			const int32* UpperOrdinal = NodeOrdinals.Find(Edge.UpperNodeId);
+			if (LowerOrdinal == nullptr || UpperOrdinal == nullptr)
+			{
+				return EBoundedCutSearchResult::NoBoundedCut;
+			}
+			AddResidualEdge(
+				ResidualGraph,
+				*LowerOrdinal * 2 + 1,
+				*UpperOrdinal * 2,
+				InfiniteCapacity);
+		}
+		TArray<int32> SortedGroundNodeIds = GroundNodeIds.Array();
+		SortedGroundNodeIds.Sort();
+		for (const int32 GroundNodeId : SortedGroundNodeIds)
+		{
+			const int32* GroundOrdinal = NodeOrdinals.Find(GroundNodeId);
+			if (GroundOrdinal == nullptr)
+			{
+				return EBoundedCutSearchResult::NoBoundedCut;
+			}
+			AddResidualEdge(
+				ResidualGraph,
+				SourceIndex,
+				*GroundOrdinal * 2,
+				InfiniteCapacity);
+		}
+		AddResidualEdge(
+			ResidualGraph,
+			*RootOrdinal * 2 + 1,
+			SinkIndex,
+			InfiniteCapacity);
+
+		int32 TotalFlow = 0;
+		for (;;)
+		{
+			TArray<int32> ParentNodes;
+			TArray<int32> ParentEdges;
+			ParentNodes.Init(INDEX_NONE, ResidualGraph.Num());
+			ParentEdges.Init(INDEX_NONE, ResidualGraph.Num());
+			TArray<int32> Queue;
+			ParentNodes[SourceIndex] = SourceIndex;
+			Queue.Add(SourceIndex);
+			for (int32 Head = 0;
+				Head < Queue.Num() && ParentNodes[SinkIndex] == INDEX_NONE;
+				++Head)
+			{
+				const int32 From = Queue[Head];
+				for (int32 EdgeIndex = 0;
+					EdgeIndex < ResidualGraph[From].Num();
+					++EdgeIndex)
+				{
+					if (!ConsumeFlowOperation(
+						Settings.MaxFlowOperationCount,
+						InOutFlowOperationCount))
+					{
+						return EBoundedCutSearchResult::BudgetExceeded;
+					}
+					const FResidualEdge& Edge =
+						ResidualGraph[From][EdgeIndex];
+					if (Edge.Capacity <= 0
+						|| ParentNodes[Edge.To] != INDEX_NONE)
+					{
+						continue;
+					}
+					ParentNodes[Edge.To] = From;
+					ParentEdges[Edge.To] = EdgeIndex;
+					Queue.Add(Edge.To);
+					if (Edge.To == SinkIndex) break;
+				}
+			}
+			if (ParentNodes[SinkIndex] == INDEX_NONE) break;
+
+			int32 Augment = InfiniteCapacity;
+			for (int32 NodeIndex = SinkIndex;
+				NodeIndex != SourceIndex;
+				NodeIndex = ParentNodes[NodeIndex])
+			{
+				if (!ConsumeFlowOperation(
+					Settings.MaxFlowOperationCount,
+					InOutFlowOperationCount))
+				{
+					return EBoundedCutSearchResult::BudgetExceeded;
+				}
+				const int32 ParentNode = ParentNodes[NodeIndex];
+				const int32 ParentEdge = ParentEdges[NodeIndex];
+				Augment = FMath::Min(
+					Augment,
+					ResidualGraph[ParentNode][ParentEdge].Capacity);
+			}
+			for (int32 NodeIndex = SinkIndex;
+				NodeIndex != SourceIndex;
+				NodeIndex = ParentNodes[NodeIndex])
+			{
+				if (!ConsumeFlowOperation(
+					Settings.MaxFlowOperationCount,
+					InOutFlowOperationCount))
+				{
+					return EBoundedCutSearchResult::BudgetExceeded;
+				}
+				const int32 ParentNode = ParentNodes[NodeIndex];
+				const int32 ParentEdge = ParentEdges[NodeIndex];
+				FResidualEdge& Edge =
+					ResidualGraph[ParentNode][ParentEdge];
+				const int32 ReverseIndex = Edge.ReverseIndex;
+				Edge.Capacity -= Augment;
+				ResidualGraph[NodeIndex][ReverseIndex].Capacity += Augment;
+			}
+			TotalFlow += Augment;
+			if (TotalFlow > Settings.MaxCutSetSize)
+			{
+				return EBoundedCutSearchResult::NoBoundedCut;
+			}
+		}
+		if (TotalFlow <= 0)
+		{
+			return EBoundedCutSearchResult::NoBoundedCut;
+		}
+
+		TBitArray<> ResidualReachable(false, ResidualGraph.Num());
+		TArray<int32> ReachabilityQueue;
+		ResidualReachable[SourceIndex] = true;
+		ReachabilityQueue.Add(SourceIndex);
+		for (int32 Head = 0; Head < ReachabilityQueue.Num(); ++Head)
+		{
+			const int32 From = ReachabilityQueue[Head];
+			for (const FResidualEdge& Edge : ResidualGraph[From])
+			{
+				if (!ConsumeFlowOperation(
+					Settings.MaxFlowOperationCount,
+					InOutFlowOperationCount))
+				{
+					return EBoundedCutSearchResult::BudgetExceeded;
+				}
+				if (Edge.Capacity <= 0 || ResidualReachable[Edge.To]) continue;
+				ResidualReachable[Edge.To] = true;
+				ReachabilityQueue.Add(Edge.To);
+			}
+		}
+		for (int32 Ordinal = 0; Ordinal < SortedNodeIds.Num(); ++Ordinal)
+		{
+			const int32 NodeId = SortedNodeIds[Ordinal];
+			if (GroundNodeIds.Contains(NodeId)
+				|| NodeId == ProtectedRootNodeId)
+			{
+				continue;
+			}
+			if (ResidualReachable[Ordinal * 2]
+				&& !ResidualReachable[Ordinal * 2 + 1])
+			{
+				OutCutNodeIds.Add(NodeId);
+			}
+		}
+		SortUnique(OutCutNodeIds);
+		if (OutCutNodeIds.Num() != TotalFlow
+			|| OutCutNodeIds.IsEmpty()
+			|| OutCutNodeIds.Num() > Settings.MaxCutSetSize)
+		{
+			OutCutNodeIds.Reset();
+			return EBoundedCutSearchResult::NoBoundedCut;
+		}
+		return EBoundedCutSearchResult::Found;
+	}
+
+	void BuildPhysicalCutBoundary(
+		const FABTSM73StructureData& Data,
+		const TMap<int32, TArray<int32>>& Children,
+		const TArray<int32>& CutNodeIds,
+		TArray<FABTSM73DAGFailureEdgeRef>& OutEdges,
+		TArray<int32>& OutProtectedRootNodeIds)
+	{
+		TSet<int32> RemovedNodes;
+		for (const int32 CutNodeId : CutNodeIds)
+		{
+			RemovedNodes.Add(CutNodeId);
+		}
+		TSet<int32> Reachable;
+		GatherReachableFromGround(Data, Children, RemovedNodes, Reachable);
+		for (const FABTSM73SupportEdge& Edge : Data.SupportEdges)
+		{
+			if (!RemovedNodes.Contains(Edge.LowerNodeId)
+				|| RemovedNodes.Contains(Edge.UpperNodeId)
+				|| Reachable.Contains(Edge.UpperNodeId))
+			{
+				continue;
+			}
+			FABTSM73DAGFailureEdgeRef& EdgeRef =
+				OutEdges.AddDefaulted_GetRef();
+			EdgeRef.LowerNodeId = Edge.LowerNodeId;
+			EdgeRef.UpperNodeId = Edge.UpperNodeId;
+			OutProtectedRootNodeIds.Add(Edge.UpperNodeId);
+		}
+		SortUniqueEdges(OutEdges);
+		SortUnique(OutProtectedRootNodeIds);
+	}
+
 	uint32 BuildCandidateHash(const FABTSM73DAGFailureFrontierCandidate& Candidate)
 	{
+		if (!Candidate.CandidateEdges.IsEmpty())
+		{
+			const FString Identity = FString::Printf(
+				TEXT("DAG3C|K=%d|C=%s|E=%s|R=%s|A=%s|M=%s|H=%d|Mass=%d|Span=%d|Bypass=%d"),
+				static_cast<int32>(Candidate.Kind),
+				*JoinNodeIds(Candidate.CandidateNodeIds),
+				*JoinEdges(Candidate.CandidateEdges),
+				*JoinNodeIds(Candidate.ProtectedRootNodeIds),
+				*JoinNodeIds(Candidate.AffectedMainBodyNodeIds),
+				*JoinNodeIds(Candidate.AffectedMacroNodeIds),
+				FMath::RoundToInt(Candidate.NormalizedHeight * 10000.0f),
+				FMath::RoundToInt(Candidate.MainBodyAffectedMassRatio * 10000.0f),
+				FMath::RoundToInt(Candidate.AffectedHeightSpanNormalized * 10000.0f),
+				Candidate.BypassSupportEdgeCount);
+			const uint32 Hash = FCrc::StrCrc32(*Identity);
+			return Hash != 0 ? Hash : 1u;
+		}
 		const FString Identity = FString::Printf(
 			TEXT("DAG3A|K=%d|C=%s|R=%s|A=%s|M=%s|H=%d|Mass=%d|Span=%d|Bypass=%d"),
 			static_cast<int32>(Candidate.Kind),
@@ -168,6 +503,9 @@ bool FABTSM73DAGFailureFrontierAnalyzer::Analyze(
 	}
 	if (Settings.MaxCutSetSize < 1 || Settings.MaxCutSetSize > 4
 		|| Settings.MaxCandidateCount < 1 || Settings.MaxCandidateCount > 256
+		|| (Settings.bEnableGeneralizedSmallCutSearch
+			&& (Settings.MaxFlowOperationCount < 64
+				|| Settings.MaxFlowOperationCount > 65536))
 		|| !FMath::IsFinite(Settings.MinNormalizedHeight)
 		|| !FMath::IsFinite(Settings.MaxNormalizedHeight)
 		|| !FMath::IsFinite(Settings.MinMainBodyAffectedMassRatio)
@@ -262,6 +600,7 @@ bool FABTSM73DAGFailureFrontierAnalyzer::Analyze(
 	{
 		++IncomingEdgeCounts.FindChecked(Edge.UpperNodeId);
 	}
+	const TMap<int32, int32> StableIncomingEdgeCounts = IncomingEdgeCounts;
 	TArray<int32> TopologyQueue;
 	for (const TPair<int32, int32>& Pair : IncomingEdgeCounts)
 	{
@@ -379,9 +718,184 @@ bool FABTSM73DAGFailureFrontierAnalyzer::Analyze(
 		Seed.CandidateNodeIds = Pair.Value;
 		Seed.ProtectedRootNodeIds.Add(Pair.Key);
 	}
+	if (Settings.bEnableGeneralizedSmallCutSearch)
+	{
+		for (FFrontierSeed& Seed : Seeds)
+		{
+			SortUnique(Seed.CandidateNodeIds);
+			SortUniqueEdges(Seed.CandidateEdges);
+			SortUnique(Seed.ProtectedRootNodeIds);
+		}
+		Seeds.Sort([](const FFrontierSeed& A, const FFrontierSeed& B)
+		{
+			return SeedKey(A) < SeedKey(B);
+		});
+		for (int32 Index = Seeds.Num() - 1; Index > 0; --Index)
+		{
+			if (SeedKey(Seeds[Index]) == SeedKey(Seeds[Index - 1]))
+			{
+				Seeds.RemoveAt(Index);
+			}
+		}
+		if (Seeds.Num() > Settings.MaxCandidateCount)
+		{
+			OutError = FString::Printf(
+				TEXT("DAG3CandidateBudgetExceeded:%d:%d"),
+				Seeds.Num(),
+				Settings.MaxCandidateCount);
+			OutAnalysis.RejectReason = OutError;
+			return false;
+		}
+		auto TryAddGeneralizedSeed = [&Seeds, &Settings](
+			FFrontierSeed&& NewSeed)
+		{
+			SortUnique(NewSeed.CandidateNodeIds);
+			SortUniqueEdges(NewSeed.CandidateEdges);
+			SortUnique(NewSeed.ProtectedRootNodeIds);
+			const FString NewKey = SeedKey(NewSeed);
+			if (Seeds.ContainsByPredicate([&NewKey](const FFrontierSeed& Seed)
+				{
+					return SeedKey(Seed) == NewKey;
+				}))
+			{
+				return true;
+			}
+			if (Seeds.Num() >= Settings.MaxCandidateCount)
+			{
+				return false;
+			}
+			Seeds.Add(MoveTemp(NewSeed));
+			return true;
+		};
+
+		TArray<int32> SortedNodeIds;
+		SortedNodeIds.Reserve(Data.Bricks.Num());
+		for (const FABTSM73BrickNode& Node : Data.Bricks)
+		{
+			SortedNodeIds.Add(Node.NodeId);
+		}
+		SortedNodeIds.Sort();
+		TArray<FABTSM73DAGFailureEdgeRef> SortedEdges;
+		SortedEdges.Reserve(Data.SupportEdges.Num());
+		for (const FABTSM73SupportEdge& Edge : Data.SupportEdges)
+		{
+			FABTSM73DAGFailureEdgeRef& EdgeRef =
+				SortedEdges.AddDefaulted_GetRef();
+			EdgeRef.LowerNodeId = Edge.LowerNodeId;
+			EdgeRef.UpperNodeId = Edge.UpperNodeId;
+		}
+		SortUniqueEdges(SortedEdges);
+		TSet<int32> GroundNodeSet;
+		for (const int32 GroundNodeId : Data.GroundNodeIds)
+		{
+			GroundNodeSet.Add(GroundNodeId);
+		}
+
+		// A single edge is only physically realizable as its Lower brick when
+		// that brick exclusively carries an Upper node with no alternate input.
+		TSet<int32> DirectEdgeProtectedRootNodeIds;
+		for (const FABTSM73DAGFailureEdgeRef& Edge : SortedEdges)
+		{
+			const TArray<int32>* LowerChildren =
+				Children.Find(Edge.LowerNodeId);
+			const int32* UpperIncomingCount =
+				StableIncomingEdgeCounts.Find(Edge.UpperNodeId);
+			if (GroundNodeSet.Contains(Edge.LowerNodeId)
+				|| GroundNodeSet.Contains(Edge.UpperNodeId)
+				|| LowerChildren == nullptr
+				|| LowerChildren->Num() != 1
+				|| (*LowerChildren)[0] != Edge.UpperNodeId
+				|| UpperIncomingCount == nullptr
+				|| *UpperIncomingCount != 1)
+			{
+				continue;
+			}
+			FFrontierSeed Seed;
+			Seed.Kind =
+				EABTSM73DAGFailureCandidateKind::DirectedEdgeCut;
+			Seed.CandidateNodeIds.Add(Edge.LowerNodeId);
+			Seed.CandidateEdges.Add(Edge);
+			Seed.ProtectedRootNodeIds.Add(Edge.UpperNodeId);
+			DirectEdgeProtectedRootNodeIds.Add(Edge.UpperNodeId);
+			if (!TryAddGeneralizedSeed(MoveTemp(Seed)))
+			{
+				OutError = FString::Printf(
+					TEXT("DAG3CandidateBudgetExceeded:%d:%d"),
+					Seeds.Num() + 1,
+					Settings.MaxCandidateCount);
+				OutAnalysis.RejectReason = OutError;
+				return false;
+			}
+		}
+
+		TArray<int32> ProtectedRootNodeIds;
+		for (const int32 NodeId : SortedNodeIds)
+		{
+			const int32* IncomingCount =
+				StableIncomingEdgeCounts.Find(NodeId);
+			if (!GroundNodeSet.Contains(NodeId)
+				&& IncomingCount != nullptr
+				&& (*IncomingCount > 1
+					|| (*IncomingCount == 1
+						&& !DirectEdgeProtectedRootNodeIds.Contains(NodeId))))
+			{
+				ProtectedRootNodeIds.Add(NodeId);
+			}
+		}
+		int32 FlowOperationCount = 0;
+		for (const int32 ProtectedRootNodeId : ProtectedRootNodeIds)
+		{
+			TArray<int32> CutNodeIds;
+			const EBoundedCutSearchResult CutResult =
+				FindBoundedVertexCut(
+					Settings,
+					SortedNodeIds,
+					SortedEdges,
+					GroundNodeSet,
+					ProtectedRootNodeId,
+					FlowOperationCount,
+					CutNodeIds);
+			if (CutResult == EBoundedCutSearchResult::BudgetExceeded)
+			{
+				OutError = FString::Printf(
+					TEXT("DAG3GeneralizedCutFlowBudgetExceeded:%d:%d"),
+					FlowOperationCount,
+					Settings.MaxFlowOperationCount);
+				OutAnalysis.RejectReason = OutError;
+				return false;
+			}
+			if (CutResult != EBoundedCutSearchResult::Found) continue;
+
+			FFrontierSeed Seed;
+			Seed.Kind =
+				EABTSM73DAGFailureCandidateKind::BoundedSmallNodeCut;
+			Seed.CandidateNodeIds = MoveTemp(CutNodeIds);
+			BuildPhysicalCutBoundary(
+				Data,
+				Children,
+				Seed.CandidateNodeIds,
+				Seed.CandidateEdges,
+				Seed.ProtectedRootNodeIds);
+			if (Seed.CandidateEdges.IsEmpty()
+				|| Seed.ProtectedRootNodeIds.IsEmpty())
+			{
+				continue;
+			}
+			if (!TryAddGeneralizedSeed(MoveTemp(Seed)))
+			{
+				OutError = FString::Printf(
+					TEXT("DAG3CandidateBudgetExceeded:%d:%d"),
+					Seeds.Num() + 1,
+					Settings.MaxCandidateCount);
+				OutAnalysis.RejectReason = OutError;
+				return false;
+			}
+		}
+	}
 	for (FFrontierSeed& Seed : Seeds)
 	{
 		SortUnique(Seed.CandidateNodeIds);
+		SortUniqueEdges(Seed.CandidateEdges);
 		SortUnique(Seed.ProtectedRootNodeIds);
 	}
 	Seeds.Sort([](const FFrontierSeed& A, const FFrontierSeed& B)
@@ -461,6 +975,7 @@ bool FABTSM73DAGFailureFrontierAnalyzer::Analyze(
 			OutAnalysis.Candidates.AddDefaulted_GetRef();
 		Candidate.Kind = Seed.Kind;
 		Candidate.CandidateNodeIds = Seed.CandidateNodeIds;
+		Candidate.CandidateEdges = Seed.CandidateEdges;
 		Candidate.ProtectedRootNodeIds = Seed.ProtectedRootNodeIds;
 
 		TSet<int32> RemovedNodes;

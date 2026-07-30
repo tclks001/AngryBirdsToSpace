@@ -32,6 +32,7 @@ AABTSM71PhysicsTestStage::AABTSM71PhysicsTestStage()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	Root->SetMobility(EComponentMobility::Static);
 	SetRootComponent(Root);
 	Floor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Floor"));
 	Floor->SetupAttachment(Root);

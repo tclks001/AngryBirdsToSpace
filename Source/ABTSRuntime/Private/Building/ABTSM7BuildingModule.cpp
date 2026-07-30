@@ -5,6 +5,7 @@
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "World/ABTSCollisionChannels.h"
 
 AABTSM7BuildingModule::AABTSM7BuildingModule()
@@ -54,6 +55,23 @@ void AABTSM7BuildingModule::ConfigureImpactPhysics(const FABTSM7MaterialProfile&
 	ImpactPhysicalMaterial->bOverrideRestitutionCombineMode = true;
 	ImpactPhysicalMaterial->RestitutionCombineMode = EFrictionCombineMode::Average;
 	Visual->SetPhysMaterialOverride(ImpactPhysicalMaterial);
+}
+
+void AABTSM7BuildingModule::ConfigureChaosSolverIterations(
+	const int32 PositionIterations,
+	const int32 VelocityIterations)
+{
+	// DAG2.3 can produce tall stacks with several simultaneous load-bearing
+	// contacts. At 30 Hz the project-wide 8/2 Chaos defaults accumulate enough
+	// lateral contact error to translate an otherwise upright Arch as a unit.
+	// This per-body override is called only for M7.3 generated-building modules,
+	// preserving the strict idle gate without changing unrelated world physics.
+	FBodyInstance& BodyInstance = Visual->BodyInstance;
+	BodyInstance.SetPositionSolverIterationCount(
+		static_cast<uint8>(FMath::Clamp(PositionIterations, 1, 255)));
+	BodyInstance.SetVelocitySolverIterationCount(
+		static_cast<uint8>(FMath::Clamp(VelocityIterations, 1, 255)));
+	BodyInstance.SetOverrideIterationCounts(true);
 }
 
 bool AABTSM7BuildingModule::ApplyImpactDamage(const float DamageGain)

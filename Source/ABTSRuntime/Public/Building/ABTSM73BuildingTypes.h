@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Building/ABTSM73DAG4Types.h"
 #include "Building/ABTSM73DAGFailureFrontierTypes.h"
 #include "Building/ABTSM73DAGTypes.h"
 #include "Building/ABTSM7BuildingTypes.h"
@@ -161,6 +162,17 @@ struct FABTSM73GenerationSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.01", ClampMax = "1.0"))
 	float MinContactAreaRatio = 0.12f;
+
+	/**
+	 * Per-body Chaos contact iterations for generated-building stacks.
+	 * The project defaults (8/2) are not sufficient for tall DAG2.3 arches at
+	 * a 30 Hz physics step; this remains local to M7.3 runtime modules.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "1", ClampMax = "255", UIMax = "64"))
+	int32 ChaosPositionSolverIterationCount = 32;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "1", ClampMax = "255", UIMax = "64"))
+	int32 ChaosVelocitySolverIterationCount = 8;
 
 	/** Minimum hidden Chaos observation before a quiet window may complete. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation", meta = (ClampMin = "0.1", UIMax = "5.0"))
@@ -339,6 +351,97 @@ struct FABTSM73GenerationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3")
 	int32 DAGFailureFrontierBypassEdgeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	bool bDAGFailurePatternEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	bool bDAGFailurePatternApplied = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	EABTSM73DAGFailurePattern DAGFailurePattern =
+		EABTSM73DAGFailurePattern::Auto;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	int64 DAGRealizedPatternHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	int32 DAGRewriteAttemptCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	float DAGPatternInitialSupportMarginCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	float DAGPatternPostFailureTipMarginCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3B")
+	float DAGPatternReseatRisk = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	bool bDAGFailurePlayabilityEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	bool bDAGFailurePlayable = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	int64 DAGPlayabilityHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGAttackExposure = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGMinAttackClearanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGFreeDropDistanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGFreeTipAngleDegrees = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-3C")
+	float DAGFreeSlideDistanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	bool bDAG4ValidationEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	bool bDAG4SettledContactAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	bool bDAG4ChaosComparisonAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	int64 DAG4ValidationHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	float DAG4WeakResponseScore = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	float DAG4MaxOrdinaryResponseScore = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-4")
+	float DAG4WeakResponseAdvantage = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	bool bDAG5AEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	bool bDAG5AAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5AAttemptCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5ASelectedAttemptIndex = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5ASelectedCandidateSeed = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int32 DAG5ACompiledBrickLimit = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
+	int64 DAG5ASearchHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;

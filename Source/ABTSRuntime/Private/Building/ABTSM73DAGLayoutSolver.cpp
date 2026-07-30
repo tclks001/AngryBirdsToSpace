@@ -144,7 +144,8 @@ bool FABTSM73DAGLayoutSolver::Solve(
 	const FABTSM73DAGGenerationResult& Graph,
 	const FABTSM73DAGLayoutSettings& Settings,
 	FABTSM73DAGSpatialLayout& OutLayout,
-	FString& OutError) const
+	FString& OutError,
+	const FABTSM73DAGFailureRewriteIntent* RewriteIntent) const
 {
 	OutLayout = FABTSM73DAGSpatialLayout();
 	OutError.Reset();
@@ -182,7 +183,43 @@ bool FABTSM73DAGLayoutSolver::Solve(
 		OutLayout.RejectReason = OutError;
 		return false;
 	}
-	if (!SelectSparseSupports(Graph, Settings, OutLayout, OutError))
+	if (RewriteIntent != nullptr && RewriteIntent->bEnabled)
+	{
+		if (RewriteIntent->SupportMacroNodeId == INDEX_NONE
+			|| RewriteIntent->LoadMacroNodeId == INDEX_NONE
+			|| RewriteIntent->AffectedMacroNodeIds.IsEmpty()
+			|| !RewriteIntent->AffectedMacroNodeIds.Contains(RewriteIntent->LoadMacroNodeId)
+			|| RewriteIntent->AffectedMacroNodeIds.Contains(RewriteIntent->SupportMacroNodeId)
+			|| RewriteIntent->ExpectedFailureDirectionXY.IsNearlyZero())
+		{
+			OutError = TEXT("DAG3BRewriteIntentInvalid");
+			OutLayout.RejectReason = OutError;
+			return false;
+		}
+		if (RewriteIntent->Pattern == EABTSM73DAGFailurePattern::InternalOffsetSeam)
+		{
+			const FVector2D DeltaXY =
+				RewriteIntent->ExpectedFailureDirectionXY.GetSafeNormal()
+				* RewriteIntent->OffsetSeamShiftCM;
+			if (DeltaXY.IsNearlyZero())
+			{
+				OutError = TEXT("DAG3BOffsetSeamShiftInvalid");
+				OutLayout.RejectReason = OutError;
+				return false;
+			}
+			for (FABTSM73DAGMacroLayout& MacroLayout : OutLayout.MacroLayouts)
+			{
+				if (!RewriteIntent->AffectedMacroNodeIds.Contains(MacroLayout.MacroNodeId)) continue;
+				MacroLayout.PlateCenter.X += DeltaXY.X;
+				MacroLayout.PlateCenter.Y += DeltaXY.Y;
+				MacroLayout.AllowedScope.Min.X += DeltaXY.X;
+				MacroLayout.AllowedScope.Min.Y += DeltaXY.Y;
+				MacroLayout.AllowedScope.Max.X += DeltaXY.X;
+				MacroLayout.AllowedScope.Max.Y += DeltaXY.Y;
+			}
+		}
+	}
+	if (!SelectSparseSupports(Graph, Settings, OutLayout, OutError, RewriteIntent))
 	{
 		OutLayout.RejectReason = OutError;
 		return false;
@@ -358,11 +395,26 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	const FABTSM73DAGGenerationResult& Graph,
 	const FABTSM73DAGLayoutSettings& Settings,
 	FABTSM73DAGSpatialLayout& InOutLayout,
-	FString& OutError) const
+	FString& OutError,
+	const FABTSM73DAGFailureRewriteIntent* RewriteIntent) const
 {
 	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> CandidatesByLoad;
 	for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
 	{
+		if (RewriteIntent != nullptr && RewriteIntent->bEnabled)
+		{
+			if (Edge.LoadNodeId == RewriteIntent->LoadMacroNodeId
+				&& Edge.SupportNodeId != RewriteIntent->SupportMacroNodeId)
+			{
+				continue;
+			}
+			if (Edge.LoadNodeId != RewriteIntent->LoadMacroNodeId
+				&& RewriteIntent->AffectedMacroNodeIds.Contains(Edge.LoadNodeId)
+				&& !RewriteIntent->AffectedMacroNodeIds.Contains(Edge.SupportNodeId))
+			{
+				continue;
+			}
+		}
 		const FABTSM73DAGMacroLayout* Support = FindLayout(InOutLayout, Edge.SupportNodeId);
 		const FABTSM73DAGMacroLayout* Load = FindLayout(InOutLayout, Edge.LoadNodeId);
 		if (Support == nullptr || Load == nullptr)
@@ -378,7 +430,19 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		}
 		EABTSM73DAGSupportPattern ResolvedPattern = Settings.SupportPattern;
 		float ResolvedColumnWidthCM = Settings.ColumnWidthCM;
-		if (!ResolveSupportPattern(Intersection, Settings, ResolvedPattern, ResolvedColumnWidthCM))
+		const bool bRewriteInterface = RewriteIntent != nullptr
+			&& RewriteIntent->bEnabled
+			&& Edge.SupportNodeId == RewriteIntent->SupportMacroNodeId
+			&& Edge.LoadNodeId == RewriteIntent->LoadMacroNodeId;
+		if (bRewriteInterface)
+		{
+			ResolvedPattern =
+				RewriteIntent->Pattern == EABTSM73DAGFailurePattern::InternalSingleSupport
+				? EABTSM73DAGSupportPattern::SingleColumnInterface
+				: EABTSM73DAGSupportPattern::TwoColumnLine;
+			ResolvedColumnWidthCM = Settings.MinAdaptiveColumnWidthCM;
+		}
+		else if (!ResolveSupportPattern(Intersection, Settings, ResolvedPattern, ResolvedColumnWidthCM))
 		{
 			++InOutLayout.RejectedCandidateEdgeCount;
 			continue;
@@ -394,5 +458,5 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	}
 
 	FABTSM73DAGLoadSupportSolver LoadSupportSolver;
-	return LoadSupportSolver.Solve(Graph, Settings, CandidatesByLoad, InOutLayout, OutError);
+	return LoadSupportSolver.Solve(Graph, Settings, CandidatesByLoad, InOutLayout, OutError, RewriteIntent);
 }
