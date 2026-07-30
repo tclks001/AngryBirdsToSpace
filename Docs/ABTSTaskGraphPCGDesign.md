@@ -1,6 +1,6 @@
 # ABTS：Task Graph 驱动的球面 PCG 最终核心设计
 
-> 状态：V3 核心管线与 M3 首周长路线/道路外建筑兼容方案已实现，已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。弹弓攻击解、资源经济和局部 Room 原型仍在对应玩法里程碑接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，首周与月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
+> 状态：V3 核心管线、M3R-0 首周长路线/道路外建筑兼容方案、M3R-1 月度 Schema 观测层和 M3R-2 多候选球面路线池已实现；已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。六 Encounter、弹弓攻击解、资源经济和局部 Room 原型仍在对应后续阶段接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，首周与月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
 >
 > 目标：先生成可通关、可分支、可被能力门验证的 Gameplay 图，再将它嵌入 `CellTopo`；地形、水网、道路、资源、建筑与弹弓攻击解共同服务该图。连续球面只渲染结果。
 
@@ -422,6 +422,8 @@ FinalScore =
 | `FABTSBallisticValidator` | 简化弹道、净空和能力区分 |
 | `FABTSWorldValidator` | 多阶段可达性、资源、拓扑与诊断 |
 | `FABTSWorldPCGOrchestrator` | Stage Seed、Attempt、局部修复和保底 |
+| `FABTSM3MonthlySchemaBuilder` | 将已接受世界只读投影为月度 Schema，验证引用/排序并计算独立 64-bit 身份；不得改写 TaskGraph 或共享导出 |
+| `FABTSM3MonthlyRouteBuilder` | 构造月度球面路线候选、Corridor 与 `(CellId, IncomingEdgeId)` 道路搜索，计算独立候选池身份；R-2 不发布世界 `LayoutHash` |
 
 避免重新把全部阶段塞回 `FABTSM3TaskGraphGenerator.cpp`。各模块输入输出使用普通结构体，便于自动测试；`AABTSM3Planet` 只编排并把最终结果交给表现层。
 
@@ -441,11 +443,16 @@ FinalScore =
 [ABTS][PCG][Validate] Phase=%d Reachable=%d Required=%d Forbidden=%d Result=%d
 [ABTS][PCG][Repair] Stage=%s Action=%s Count=%d
 [ABTS][PCG][Reject] Stage=%s Code=%s Cell=%d Edge=(%d,%d)
+[ABTS][PCG][Route] Stage=M3R1 ...
+[ABTS][PCG][Encounter] Stage=M3R1 ...
+[ABTS][PCG][Biome] Stage=M3R1 ...
+[ABTS][PCG][Quality] Stage=M3R1 ...
+[ABTS][PCG][MonthlyRoute] Stage=M3R2 ...
 ```
 
 ### 15.3 自动验收
 
-- 固定 20 个 Golden Seeds，每个运行两次，逻辑结果 Hash 必须一致。
+- 固定 Seed 数量与顺序由阶段 Manifest 冻结；M3R-1 使用 21 个 Compatibility Seeds，M3R-2 使用 200 个 route-only Seeds，M3R-7 另用 1000 Seed 认证清单。每个确定性用例至少运行两次，逻辑结果 Hash 必须一致。
 - 连续更换 Seed 重建同一 Actor，结果必须等于 fresh Actor，不允许旧道路/河网残留。
 - 100 个 Seed 批量生成：接受结果必须 100% 通过全部门槛；有限 Attempt 全部失败时必须明确拒绝，不得崩溃、死循环、非法索引或返回半张地图。未来只有在真正实现并同样通过 Validator 的保底模板后，才能把“进入保底”计为成功。
 - 每个 Seed 通过 P0–P5、桥锁反绕过、弹道 Witness、资源下限和水文无环验证。
@@ -513,3 +520,26 @@ FinalScore =
 - `ProgressDistanceCM/FlowS` 按 Start→Launch 有序主路线段的球面弧长计算；道路外 Cell 继承最近主路投影的纵向进度；
 - Validator 以 CellTopo 高度包络和 M4 相机代理验证开局视距：B1 可见、B2/B3 隐藏；
 - 新增 `ABTS.M3.WeekOne` Seed 合同、独立弧长/BFS/视距/路线唯一性复算以及配置、几何、拓扑 Hash 敏感性测试，并继续通过 WorldGeneration 和 M11.0 103 Seed 分离回归。
+
+### 17.4 M3R-1 月度 Schema 观测层（2026-07-29）
+
+本修订只建立后续月度求解器的数据语言和观测面，完整实现与证据见 [M3R PCG 地图生成改进方案第 14.4 节](M3PCGMapImprovementPlan.md#144-m3r-1建立月度-schema版本身份与观测面)。
+
+- Mission Task、Route Beat、Encounter、Pocket 和 Biome 使用独立稳定 ID；关联关系通过显式引用保存，不从数组下标或其他 ID 猜测；
+- `RouteBeatPlan`、`EncounterContract`、`BiomeDistrict`、`PlayableEnvelope`、`WorldQualityReport` 组成 `FABTSM3MonthlyWorldSchema`；M3R-1 只观察已经接受的 Gen3/Policy1 世界；
+- `CompatibilityOracle` 保持 `GeneratorVersion=3 + LayoutPolicyVersion=1` 权威；`MonthlyDevelopment` 仅预留 `LayoutPolicyVersion=2` 身份，在 R-1 不得发布 `MonthlyAccepted`；
+- `SourceConfigHash/SourceLayoutHash` 保留旧世界身份，独立 64-bit `SchemaConfigHash/SchemaLayoutHash` 覆盖目录/求解器版本和有序 Schema 内容，不替换旧 32-bit Hash；
+- Compatibility Oracle 对 21 个冻结 Seed 逐一保存覆盖 Task、Link、Cell、Edge 与 Summary 全字段的 canonical 64-bit 快照，避免旧 32-bit `LayoutHash` 未覆盖字段发生漂移却漏检；
+- `AABTSM3Planet` 暴露只读 Schema 与 Editor-only Debug 索引，并分别输出 Route、Encounter、Biome、Quality 摘要；R-1 不改变正式外观、道路、三栋建筑站点、M7 `Expected=3` 或共享世界生成合同；
+- 只读 M7 ProfileDescriptor、M6/M9 SolverVersion 仍是 Integration-owned vNext 需求。R-1 允许其身份为 0 并保持未解析；R-3/R-4 消费正式目录/求解器时必须在缺失或 Hash 不匹配时 fail closed。
+
+### 17.5 M3R-2 多候选球面路线池（2026-07-29）
+
+本修订落实月度路线的独立候选阶段，完整数值、冻结身份、证据和阶段边界见 [M3R PCG 地图生成改进方案第 14.5 节](M3PCGMapImprovementPlan.md#145-m3r-2实现多候选球面路线与道路求解)。
+
+- 每个 Seed 固定尝试 8 个带有序控制点的球面骨架；骨架先转为核心/允许 Corridor，再由以 `(CellId, IncomingEdgeId)` 为状态的确定性整数代价搜索连接；
+- Road Context 按 Cell 预留 Terrain、Slope、Water、合法水体穿越、Encounter 软预留、Hard Block 和 Reuse Bias。R-2 使用中性 Context，R-3 必须注入正式状态并重新计算路线指标；
+- 唯一 `M3MonthlyAcceptanceProfileV1` 定义路线长度、切向平行移动 Bend、最长直段和非局部 CellTopo 自接近门；路线 Progress 严格累积，`FlowQ` 量化后单调从 0 到 1；
+- 正常候选硬门通过后按量化分数和稳定 ID 排序，最多保留 3 个。候选、尝试报告、配置、拓扑和 Context 都进入独立 64-bit Hash；相同输入深度重放必须完全一致；
+- 正常候选全部失败只产生确定性 `MonthlyRouteFallback` 中间骨架。R-2 的 `bMonthlyWorldAccepted` 恒为 false，不能把 fallback、Compatibility Oracle 或路线候选池冒充完整月度世界；
+- R-2 通过 200 Seed route-only、独立全失败注入、21 Seed Compatibility 快照、旧 Schema/首周/共享合同/M11.0 和 fresh `L_ABTS_M3` 运行时门；首周 Gen3/Policy1 世界及四站点输出保持不变。

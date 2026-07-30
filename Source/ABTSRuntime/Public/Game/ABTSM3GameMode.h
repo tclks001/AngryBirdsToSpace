@@ -26,10 +26,26 @@ private:
 	void TryPlacePlayerAtInitialRoad();
 	void TryCompleteM3R0Smoke();
 	void FinishM3R0Smoke(bool bPassed, const FString& Failure);
+	void TryCompleteM3R1Smoke();
+	void FinishM3R1Smoke(bool bPassed, const FString& Failure);
+	void TryCompleteM3R2Smoke();
+	void FinishM3R2Smoke(bool bPassed, const FString& Failure);
+	void TryCompleteM3R3Smoke();
+	void FinishM3R3Smoke(bool bPassed, const FString& Failure);
+	void TryCompleteM3R31Smoke();
+	void FinishM3R31Smoke(bool bPassed, const FString& Failure);
 
 	FTimerHandle InitialRoadSpawnTimer;
 	FTimerHandle M3R0SmokeTimer;
+	FTimerHandle M3R1SmokeTimer;
+	FTimerHandle M3R2SmokeTimer;
+	FTimerHandle M3R3SmokeTimer;
+	FTimerHandle M3R31SmokeTimer;
 	int32 InitialRoadSpawnAttempts = 0;
 	double M3R0SmokeStartSeconds = 0.0;
+	double M3R1SmokeStartSeconds = 0.0;
+	double M3R2SmokeStartSeconds = 0.0;
+	double M3R3SmokeStartSeconds = 0.0;
+	double M3R31SmokeStartSeconds = 0.0;
 	bool bInitialPlayerPlaced = false;
 };

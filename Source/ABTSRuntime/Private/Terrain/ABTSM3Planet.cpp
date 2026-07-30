@@ -12,6 +12,9 @@
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSCollisionChannels.h"
+#if WITH_EDITOR
+#include "DrawDebugHelpers.h"
+#endif
 
 namespace
 {
@@ -81,6 +84,12 @@ AABTSM3Planet::AABTSM3Planet()
 bool AABTSM3Planet::RebuildPlanet()
 {
 	bM3PresentationReady = false;
+	MonthlySlingshotFieldResult =
+		FABTSM3MonthlySlingshotFieldResult();
+#if WITH_EDITORONLY_DATA
+	MonthlySlingshotFieldDebugData =
+		FABTSM3MonthlySlingshotFieldDebugData();
+#endif
 	if (!AABTSM2Planet::RebuildPlanet() || !GenerateLogicalTerrain()) return false;
 	const float ResolvedHeightScaleCM = bDisableTerrainHeightVariationExperiment ? 0.0f : MacroHeightScaleCM;
 	const float ResolvedWaterDepthCM = bDisableTerrainHeightVariationExperiment ? 0.0f : TaskWaterDepthCM;
@@ -148,6 +157,19 @@ bool AABTSM3Planet::RebuildPlanet()
 		GeneratedCellStates.Num(), GeneratedEdgeStates.Num(), RoadCells, WaterCells, BuildingSpawnSites.Num(), ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), TerrainMaterial ? 1 : 0, bMaterialReady ? 1 : 0,
 		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM);
 	bM3PresentationReady = bPresentationReady;
+#if WITH_EDITOR
+	if (bM3PresentationReady)
+	{
+		if (bDrawMonthlyRouteDebugOverlay)
+		{
+			DrawMonthlyRouteDebugOverlay();
+		}
+		if (bDrawMonthlySpatialDebugOverlay)
+		{
+			DrawMonthlySpatialDebugOverlay();
+		}
+	}
+#endif
 	return bM3PresentationReady;
 }
 
@@ -163,7 +185,7 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		BuildingPadSettings.EdgeBlendWidthCM;
 	GeometryContext.TrailHalfWidthCM = TrailVisualHalfWidthCM;
 	GeometryContext.MainRoadHalfWidthCM = MainRoadVisualHalfWidthCM;
-	return Generator.Generate(
+	const bool bGenerated = Generator.Generate(
 		WorldSeed,
 		PCGConfig,
 		LogicalCells,
@@ -173,7 +195,324 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		GeneratedEdgeStates,
 		PCGSummary,
 		GeometryContext);
+	if (!bGenerated)
+	{
+		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
+		MonthlyRoutePool = FABTSM3MonthlyRoutePool();
+		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
+		MonthlySlingshotFieldResult =
+			FABTSM3MonthlySlingshotFieldResult();
+#if WITH_EDITORONLY_DATA
+		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
+		MonthlyRouteDebugData = FABTSM3MonthlyRouteDebugData();
+		MonthlySpatialDebugData = FABTSM3MonthlySpatialDebugData();
+		MonthlySlingshotFieldDebugData =
+			FABTSM3MonthlySlingshotFieldDebugData();
+#endif
+		return false;
+	}
+
+	FString SchemaFailure;
+	if (!FABTSM3MonthlySchemaBuilder::Build(
+			WorldSeed,
+			MonthlySchemaConfig,
+			GeneratedTasks,
+			GeneratedTaskLinks,
+			GeneratedCellStates,
+			PCGSummary,
+			MonthlyWorldSchema,
+			SchemaFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R1][Schema] Build failed. Seed=%d Mode=%s Failure=%s"),
+			WorldSeed,
+			FABTSM3MonthlySchemaBuilder::GetGenerationModeName(
+				MonthlySchemaConfig.Mode),
+			*SchemaFailure);
+		return false;
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlySchemaBuilder::BuildDebugData(
+		MonthlyWorldSchema,
+		MonthlySchemaDebugData);
+#endif
+	FABTSM3MonthlyRoadContext NeutralRouteContext;
+	FString RouteFailure;
+	if (!FABTSM3MonthlyRouteBuilder::Build(
+			WorldSeed,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			NeutralRouteContext,
+			MonthlyRoutePool,
+			RouteFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R2][Route] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlyRouteBuilder::GetRejectReasonName(
+				MonthlyRoutePool.RejectReason),
+			*RouteFailure);
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlyRouteBuilder::BuildDebugData(
+		MonthlyRoutePool,
+		MonthlyRouteDebugData);
+#endif
+	FString SpatialFailure;
+	const FABTSM3MonthlySpatialFaultInjection NoSpatialFaults;
+	const bool bSpatialBuilt =
+		FABTSM3MonthlyEncounterBuilder::Build(
+			WorldSeed,
+			MonthlyEncounterSpatialConfig,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlyRoutePool,
+			NoSpatialFaults,
+			MonthlySpatialResult,
+			SpatialFailure);
+	if (!bSpatialBuilt)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R3][EncounterSpatial] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlyEncounterBuilder::GetRejectReasonName(
+				MonthlySpatialResult.RejectReason),
+			*SpatialFailure);
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlyEncounterBuilder::BuildDebugData(
+		MonthlySpatialResult,
+		MonthlySpatialDebugData);
+#endif
+	MonthlySlingshotFieldResult =
+		FABTSM3MonthlySlingshotFieldResult();
+	FString SlingshotFieldFailure;
+	if (bSpatialBuilt
+		&& !FABTSM3MonthlySlingshotFieldBuilder::Build(
+			WorldSeed,
+			MonthlySlingshotFieldConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			SlingshotFieldFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R3.1][SlingshotFields] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlySlingshotFieldBuilder::
+				GetRejectReasonName(
+					MonthlySlingshotFieldResult.RejectReason),
+			*SlingshotFieldFailure);
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlySlingshotFieldBuilder::BuildDebugData(
+		MonthlySlingshotFieldResult,
+		MonthlySlingshotFieldDebugData);
+#endif
+	return true;
 }
+
+bool AABTSM3Planet::ValidateMonthlyRoutePool(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlyRouteRejectReason RejectReason =
+		EABTSM3MonthlyRouteRejectReason::None;
+	if (FABTSM3MonthlyRouteBuilder::Validate(
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			FABTSM3MonthlyRoadContext(),
+			MonthlyRoutePool,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyRouteBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlySpatialResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlySpatialRejectReason RejectReason =
+		EABTSM3MonthlySpatialRejectReason::None;
+	if (FABTSM3MonthlyEncounterBuilder::Validate(
+			MonthlyEncounterSpatialConfig,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlyRoutePool,
+			FABTSM3MonthlySpatialFaultInjection(),
+			MonthlySpatialResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyEncounterBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlySlingshotFieldRejectReason RejectReason =
+		EABTSM3MonthlySlingshotFieldRejectReason::None;
+	if (FABTSM3MonthlySlingshotFieldBuilder::Validate(
+			MonthlySlingshotFieldConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlySlingshotFieldBuilder::
+			GetRejectReasonName(RejectReason),
+		*OutFailure);
+	return false;
+}
+
+#if WITH_EDITOR
+void AABTSM3Planet::DrawMonthlyRouteDebugOverlay() const
+{
+	if (GetWorld() == nullptr
+		|| MonthlyRouteDebugData.BestRouteCellIds.Num() < 2)
+	{
+		return;
+	}
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 180.0f;
+	for (int32 Index = 1;
+		Index < MonthlyRouteDebugData.BestRouteCellIds.Num();
+		++Index)
+	{
+		const int32 CellA =
+			MonthlyRouteDebugData.BestRouteCellIds[Index - 1];
+		const int32 CellB =
+			MonthlyRouteDebugData.BestRouteCellIds[Index];
+		if (!LogicalCells.IsValidIndex(CellA)
+			|| !LogicalCells.IsValidIndex(CellB))
+		{
+			continue;
+		}
+		DrawDebugLine(
+			GetWorld(),
+			Center + LogicalCells[CellA].UnitCenter * Radius,
+			Center + LogicalCells[CellB].UnitCenter * Radius,
+			FColor::Cyan,
+			false,
+			30.0f,
+			0,
+			8.0f);
+	}
+	for (const int32 ControlCellId :
+		MonthlyRouteDebugData.BestControlCellIds)
+	{
+		if (!LogicalCells.IsValidIndex(ControlCellId))
+		{
+			continue;
+		}
+		DrawDebugSphere(
+			GetWorld(),
+			Center
+				+ LogicalCells[ControlCellId].UnitCenter * Radius,
+			45.0f,
+			8,
+			FColor::Yellow,
+			false,
+			30.0f,
+			0,
+			3.0f);
+	}
+}
+
+void AABTSM3Planet::DrawMonthlySpatialDebugOverlay() const
+{
+	if (GetWorld() == nullptr
+		|| MonthlySpatialResult.RetainedCandidates.IsEmpty())
+	{
+		return;
+	}
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 210.0f;
+	const auto DrawCellSet = [this, &Center, Radius](
+		const TArray<int32>& CellIds,
+		const FColor Color,
+		const float SphereRadius)
+	{
+		for (const int32 CellId : CellIds)
+		{
+			if (!LogicalCells.IsValidIndex(CellId))
+			{
+				continue;
+			}
+			DrawDebugSphere(
+				GetWorld(),
+				Center + LogicalCells[CellId].UnitCenter * Radius,
+				SphereRadius,
+				6,
+				Color,
+				false,
+				30.0f,
+				0,
+				2.0f);
+		}
+	};
+	DrawCellSet(
+		MonthlySpatialDebugData.PlayableEnvelopeCellIds,
+		FColor(40, 80, 200),
+		12.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.NoRoadCellIds,
+		FColor::Red,
+		18.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.RoadArrivalCellIds,
+		FColor::White,
+		42.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.RevealCellIds,
+		FColor::Cyan,
+		42.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.SlingshotCellIds,
+		FColor::Yellow,
+		42.0f);
+	DrawCellSet(
+		MonthlySlingshotFieldDebugData.EncounterSlotCellIds,
+		FColor(255, 170, 0),
+		24.0f);
+	DrawCellSet(
+		MonthlySlingshotFieldDebugData.RoadSlotCellIds,
+		FColor(160, 60, 255),
+		24.0f);
+	DrawCellSet(
+		MonthlySlingshotFieldDebugData.FieldAnchorCellIds,
+		FColor::Green,
+		34.0f);
+	DrawCellSet(
+		MonthlySpatialDebugData.TargetAnchorCellIds,
+		FColor::Red,
+		58.0f);
+}
+#endif
 
 float AABTSM3Planet::GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const
 {
