@@ -9,10 +9,11 @@
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
-- 当前阶段：M11.0、M11-A、M11-B 的实现、自动化与用户 PIE 验收均已完成。普通 TaskGraph 建筑继续以 M7.3-DAG2.3 为生产链路；M3/M7/M11 后续并行迭代统一遵守[多工作树协作与集成规范](ABTSMultiWorktreeDevelopmentGuide.md)。
-- 默认下一步：以稳定世界生成消费契约和多工作树规范所在提交为共同 base-commit，从原始集成仓库新建 M3、M7、M11 三个功能工作树，分别迭代并独立验收，最后回到原始仓库完成联合集成。
+- 当前阶段：M11 v1 的 M11.0/A/B/C 已形成可运行生产基线；M11-A v2.1 单一标准 C++ Core、M11-B v2.1 权威搜索与两个 Editor-only 候选、M11-C v2.1 交互/PIP/轨迹相机已完成实现、功能工作树验收和集成强制 Unity 编译。两个 v2.1 布局仍是 `Candidate / NOT CERTIFIED`，不能替换 v1 生产默认值。
+- 并行进度：M3R-0 已进入集成基线，M7 DAG3-A 已进入生产代码；普通 TaskGraph 建筑仍由 M7.3-DAG2.3 生成，后续 M3/M7/M11 并行迭代统一遵守[多工作树协作与集成规范](ABTSMultiWorktreeDevelopmentGuide.md)。
+- 默认下一步：从两个 v2.1 候选中明确冻结唯一体验方案，再执行 M11-B v2.2 完整输入域认证和 M11-C v2.2 正式绑定；之后进入 M11-D 四鸟、环境切换、UFO 破坏与救援演出。
 
-当前阶段父级入口为：[主设计稿的 M11 终局阶段](AngryBirdsToSpaceGameDesign.md#1-概念与终局)；已完成实施稿为：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)与 [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)；当前实施稿为：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md)；总设计为：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
+当前入口：[M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md) → [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) → [M11-C 交互与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)。v1 基线与总路线见：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 
 ## 2. 不可违反的项目约束
 
@@ -28,7 +29,7 @@
 1. 先阅读本文、[主设计稿](AngryBirdsToSpaceGameDesign.md)和当前阶段详稿；随后读取真实 `.h/.cpp`，不以旧摘要猜测字段或生命周期。
 2. 明确本次只实现的范围、暂不实现内容、编辑器接口和验收标准；新阶段写独立详稿，并在主设计稿/本文中只补链接与状态。
 3. 按 `Game / Terrain / Party / Player / Slingshot / Building / World / UI` 的现有职责边界实现；保留用户已有改动与历史对照路径。
-4. 完成后先编译 `AngryBirdsToSpaceEditor Win64 Development`，再进行 PIE 视觉/交互验收；仅“编译成功”不等于视觉验收通过。
+4. 完成后先编译 `AngryBirdsToSpaceEditor Win64 Development`，再进行 PIE 视觉/交互验收；任何含源代码的功能合并都要在集成工作树重新编译，若交接指定集成自动化，则在编译成功后执行并核验结果。仅“编译成功”不等于视觉验收通过。
 5. 有问题时先以本次运行日志、截图或 Standalone 结果定位；修复后把可复现的问题沉淀到[开发排错记录](DevelopmentTroubleshooting.md)，而不是把排错过程堆入本文。
 6. 阶段验收后只更新本文的“当前状态/默认下一步”和对应链接；不要把设计细节复制进本文。
 
@@ -45,51 +46,29 @@
 | 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 材料/装置](M7BuildingMaterialsAndDevicesDesign.md) · [M7 球面 DAG2.3 生产集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG-2 编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [DAG2.3 联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) |
 | 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) |
-| 终局轨道谜题 | [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md) · [M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md) |
+| 终局轨道谜题 | [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md) · [M11-A/Core](M11AGravityAssistSolverDesign.md) · [M11-B v1 认证](M11BFinaleLayoutCertificationDesign.md) · [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) · [M11-C 交互与实飞](M11CFinaleInteractionAndPlaybackDesign.md) |
 | 资产与排错 | [Low Poly/AI 资产流程](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md) |
 
-## 5. 当前验收与交接清单
+## 5. 当前验收与交接
 
-### M11.0 前置收口交接
+### 已验收生产基线
 
-1. M3 GeneratorVersion=3、默认最多 16 个确定性 Attempt；`SatelliteWindow` 与最终认证 `LaunchSite` Anchor 的球面角距必须达到配置值，默认 `55°`，结果写入 PCG Summary。
-2. M3 只生成 BuildingSpawnSite/Pad；三个普通建筑由 M7 Resolver 强制进入 `RecursiveSupportDAG`。日志必须 `Algorithm=1`、`DAGMacro>0`、`DAGSparse>0`、`DAGHash!=0`，Furnace 必须另有 `DAGMinContact=0.060`，不得回退 Legacy。
-3. 旧 Blueprint CDO 的 `Algorithm=0` Profile 必须在 M7 边界升级；`LaunchSite` 保留平整/净空施工台，但默认 Profile 和运行时循环都拒绝该 Task 的建筑。
-4. 同一次 PIE 中必须先有 `BuildingContractSealed Expected=3 Registered=3 SetupRejected=0`；三栋普通建筑零穿透、逐栋 `IdleValidation Accepted=1`，且全部通过先于 `WorldReady=1`。StartupPhysics 不能提前冻结验证中的模块；任一 Actor Reject/NotRequired、Setup Reject、必需数量不符或 `Accepted != Expected` 都必须阻止 WorldReady/发射，且门禁不受 HISM Startup Warmup 开关影响。合同激活时只核验逐引用注册的必需集合，不让无关测试 Actor 干扰生产验收。`-benchmark` 固定时间步只能作为算法回归，不能替代实时 PIE；建筑物理门还需不带 `-benchmark` 的实时 30/60/120 FPS、D3D12 fresh game 与可见 PIE/hitch soak。
-5. 全图只有一对 Space-only 槽：共享认证 AnchorCell/SlotPairId，Side 为 Left/Right，首版世界中心距 `210cm`。
-6. 现行终局配方为 `SpaceStakePair -> SpaceStake ×2`（金属 6、木材 5）和 `SpaceCord`（金属 2、晶体 1）；旧 `SpaceSlingshotPart` 只保留隐藏枚举兼容值。
-7. M9 卫星锚定 `SatelliteWindow`，相对终局 Frame 通过距离比例 `>=0.80` 和侧轴对齐点积 `>=0.98`；强化弹弓仍消费 M9 引力。
-8. `FABTSM110FinaleLocalFrame` 以槽中点为原点，X=Forward、Y=左→右/卫星切向、Z=径向 Up；正式布局不得硬编码世界坐标。
-9. `FABTSM110FinaleGravityScenario` 固定且只包含 Primary+Assist1+Assist2+Assist3；M9 卫星没有角色入口，M11 每帧不得扫描 World 或调用 M9 引力。
-10. 编译、4 项 M11.0 自动化、DAG/M7 自动化、103 Seed 双生成验证、固定 Seed 独立进程基线与用户可见 PIE 视觉/交互验收均已通过。
+- M11.0 已冻结终局局部 Frame、唯一 Space 槽、M9 隔离和四体边界；详见 [M11.0](M110PreFinaleClosureDesign.md)。
+- M11-A v1 求解器、M11-B v1 唯一成功族认证及 M11-C v1 交互/确定性播放均已进入生产基线；数值、Hash、自动化和操作细节只查对应阶段详稿。
+- 终局轨迹只由同源 M11 Core 驱动；表现 Actor、HUD、Chaos 和 M9 均不得成为第二轨迹权威。
 
-### M11-A 纯数据求解器交接
+### 当前 v2.1 状态
 
-1. `FABTSM11GravityScenario` 仍固定为主星、①、②、③和一个非引力 UFO；求解器无 World/Actor/Chaos/帧率/随机数入口。
-2. SolverVersion 1 使用双精度 velocity-Verlet、`1/120 s` 基础步长和固定最大二分细分；只有当前期望助推行星在平滑作用圈内施力，细分/步数预算耗尽稳定失败。
-3. 遭遇按 `InfluenceEnter → ReferenceEnter → Closest → ReferenceExit → InfluenceExit` 推进；只擦 Influence 而未进 Reference 不计为完成助推；自然克隆拟合双曲线渐近方向并冻结 B-plane/走廊，三次确定性归一化后仅沿当前速度方向换能。
-4. 当前行星直到 Influence 出口才失活，保证完整淡出外壳入/出对称；自然克隆不预先提交未来物理终止，碰撞、UFO、错序、作用圈、最近点和时限仍由权威轨迹按时间裁决，结果进入规范 64 位验证 Hash。
-5. `ABTS.M11A` 8/8 已在全新 `UnrealEditor-Cmd -NullRHI` 进程通过；包括完整外壳能量守恒、渐近线/理想转角、非饱和正负换能、出站分布核、走廊/飞越侧、三位 Mask、qualified-target/独立 TargetContact、Hash golden/敏感性/`±0`、同根及时限优先级、步长收敛、高速穿透和稳定失败。
-6. M11-B 必须直接消费该 Request/Result API；测试夹具坐标、巨大走廊和裁剪值不是正式布局参数。
+- M11-A v2.1 已收口为 UE/CLI 共用的标准 C++ Core。
+- M11-B v2.1 已完成 4096-work 权威搜索，保留两个 Editor-only 候选；它们尚未经过 v2.2 完整域认证。
+- M11-C v2.1 已接入候选比较、发射手感、轨道 HUD/PIP、发布缓存和 Release 后轨迹相机；本轮代码已完成工作树验收并通过集成强制 Unity 编译。
 
-### M11-B 当前实施与验收入口
+### 下一阻断门槛
 
-1. 当前 C++、Development Editor 编译与全新进程 Unit/Runtime/ConstructiveSearch/FullInputDomain 自动认证均已完成；正式参数、信赖域与各级 Hash 已冻结，只以最终代码和 [M11-B 认证报告](M11BFinaleLayoutCertificationDesign.md#92-v1-冻结认证报告)为准。
-2. M11-B 必须完成完整 `Yaw × Pitch × Power` 基础域与半格偏移 `F4` 发现、最终精度自适应闭包、唯一 `F4`、局部前缀嵌套、三颗任一助推消融、旁路排除和信赖域重放；有限采样唯一性结论必须始终绑定冻结 Scan Contract。
-3. 围绕完整域发现出的唯一 `F4` 族，最终局部精化闭包结果为 `F=(6244,1890,981,558)`、局部分量数 `(1,1,1,1)`、Hit `558`、Bypass `0`；F4 实心瞄准矩形为 `20×18 px`，覆盖 14 个连续 Power 切片。该结论是冻结有限离散扫描合同下的工程证明，不是连续实数域的数学证明，也不宣称全域 `F1/F2` 微拓扑唯一。消融的高精度阶段只复核完整掩码已发现族周边，完整域层面仍以 base + half-cell 发现合同为准。
-4. 运行时只能从认证预设和 Finale Frame 一次性编译固定四体 Scenario，并恰好实例化三颗表现行星和一个非引力 UFO；终端 `HitRadius=16000 cm` 是合格拦截包络，实际 UFO 使用更远端独立中心与 `800 cm` 几何接触球。行星③增强虚拟动量及终端 `Q>=0.95` 均属于冻结身份；不得搜索 World、接入 M9 或让 Mesh/World 碰撞成为轨迹权威。
-5. 全新进程自动认证、M11-A/M11.0 回归以及用户按 [M11-B 详稿](M11BFinaleLayoutCertificationDesign.md#12-pie-验收)完成的位置、可见性、非阻挡、M9 排除、重复进入和 fail-closed PIE 验收均已通过。Editor PIE 初始化成功后会一次性 persistent 绘制三颗 Influence、24k Approach、16k qualified intercept 与 800 cm physical UFO 诊断线框；它们不是 Actor/碰撞/求解权威，Commandlet/packaged 不绘制。
-6. M11-C 只消费认证 Preset/Result/Trust Regions 及 M11-B 冻结的 nominal Physical Playback；后者从原始 Pouch 状态用同一求解器抵达 800 cm 几何 UFO，不是从合格拦截球内部续算，也不代表任意 F4 输入都会物理接触。M11-C 必须单独冻结玩家 Release 到成功演出的连续接管，不得瞬移、隐藏吸向标准答案或改用 Chaos。完整交接清单见 [M11-B 第 15 节](M11BFinaleLayoutCertificationDesign.md#15-m11-c-交接清单)。第 5 项现已完成，M11-C 后续只在 M11 工作树中按该清单展开。
-
-### M11 已冻结的下游门槛
-
-1. 开放完整 `Yaw × Pitch × Power`；行星 ① 的距离形成接近最大功率的连续门槛。
-2. 三颗助推行星/UFO 使用相对太空弹弓的局部布局预设，不使用手工地图或绝对坐标。
-3. 使用可见、可退出的前缀成功集稳定器，不使用隐藏硬吸附；四鸟同袋并沿一条预计算轨迹编队。
-4. 完整 `Yaw × Pitch × Power` 输入域只允许一个连通 `F4` 成功分量；围绕该族的局部前缀嵌套、助推消融和旁路排除也必须通过，这是正式阻断性验收门槛。
-5. 同一 World 切换星空并关闭雾云；失败播放到原因可读后黑屏恢复到点击弹珠袋前。
-
-M11.0 的实现与验收见：[M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。唯一积分器、冻结数值合同和自动化证据见：[M11-A 纯数据求解器](M11AGravityAssistSolverDesign.md)。当前布局、认证、Actor 边界、PIE 与 M11-C 交接见：[M11-B 局部布局与全输入域认证](M11BFinaleLayoutCertificationDesign.md)。HUD、稳定器、实飞与完整终局路线见：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md)。已验收上游表现见：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
+1. 明确记录唯一获选候选及全部冻结体验参数。
+2. M11-B v2.2 对该候选执行完整 `Yaw × Pitch × Power`、唯一 F4、旁路和助推消融认证。
+3. M11-C v2.2 只绑定通过认证的 Bundle，并完成正式 PIE/Standalone；未认证候选不得进入生产默认值。
+4. M11-D 再实现四鸟编队、星空/雾云切换、UFO 破坏、白鸟救援和完整成败演出。
 
 ## 6. 本文维护规则
 
