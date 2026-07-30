@@ -94,6 +94,22 @@ struct FABTSM10ScoutMapSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview")
 	bool bShowReinforcedLandingPreview = true;
 
+	/**
+	 * Calibration-only extension: when M6 publishes an explicit M9 satellite/E5
+	 * context, reuse the landing capture for the satellite's far hemisphere.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Satellite E5")
+	bool bShowSatelliteE5LandingPreview = true;
+
+	/**
+	 * The E5 preview appears when the reinforced path comes this many satellite
+	 * radii from the target. This intentionally precedes an exact hit so the
+	 * player can steer into the gravity-assisted route.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Satellite E5",
+		meta = (ClampMin = "1.0", ClampMax = "8.0"))
+	float SatelliteE5PreviewPathProximityRadiusMultiplier = 4.5f;
+
 	/** Width of the screen-top landing picture-in-picture, in pixels. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing Preview|Layout", meta = (ClampMin = "180.0", ClampMax = "1200.0"))
 	float LandingViewScreenWidthPx = 420.0f;

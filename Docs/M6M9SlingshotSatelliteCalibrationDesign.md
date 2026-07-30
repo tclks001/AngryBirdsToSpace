@@ -1,6 +1,6 @@
 # M6/M9：弹弓与卫星标定模式
 
-> 状态：Integration 候选实现已落地；2026-07-30 已在当前候选上通过强制 Unity 编译、fresh 4/4 自动化、标定 runtime smoke、生产 M9 回归及 M11 隔离回归。可见 PIE 手感验收尚未完成。只有可见 PIE 通过后，本文 V0 参数才可作为 M3R-4.1 与 M7 卫星攻击面的冻结输入。
+> 状态：`integration/m9-satellite-e5-20260730` 候选实现已落地；2026-07-30 已通过强制 Unity 编译、fresh 6/6 自动化、标定 runtime smoke、生产 M9 回归及 M11 隔离回归。卫星碰撞一致预测、背面 E5 画中画和卫星相对镜头仍待可见 PIE。只有可见 PIE 通过后，本文 V0 候选才可作为 M3R-4.1 与 M7 卫星攻击面的冻结输入；这里的 V0 是候选阶段名，序列化 `PracticePreset.Version` 已升为 2。
 >
 > 父级：[M6 发射、弹道与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M3R 月度地图改进](M3PCGMapImprovementPlan.md)
 >
@@ -14,7 +14,8 @@
 - 60%–85% 功率下的舒适射程、100% 功率附近的极限射程及档位差；
 - 拉弓距离、滚轮功率步长、瞄准灵敏度和最大瞄准平面偏移；
 - 卫星半径、球心离主星表面距离、表面引力比例；
-- 卫星背面代理目标的局部角度、高度、方位角和有效命中半径；
+- 卫星背面代理目标的局部角度、方位角、立方体半边长和表面间隙；
+- 当前 Party 实际弹射碰撞半径的运行时快照；
 - 强化档卫星练习的离散连通成功岛、区间外反例和可见 PIE 中的连续操作手感。
 
 本阶段明确不冻结：
@@ -82,33 +83,35 @@
 
 目录解析必须恰好得到 Twig、Simple、Reinforced 各一项；缺项、重复、非有限值、不可进入的初始功率和反向速度域均 fail closed。实际 Camera Blueprint 的构图值同样必须合法，否则标定入口 fail closed。运行时不得用 Catalog 反写 Camera Actor。Space 档不进入此目录，继续服从 M11 的同源固定步长求解器。
 
-### 3.2 SatellitePracticePreset V0
+### 3.2 SatellitePracticePreset V0（序列化 Version 2）
 
 `BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 `PracticePreset` 是卫星局部布局和背面目标的唯一人工调参入口。原生构造函数只提供新建蓝图时的安全候选值；运行时不再接受几何 CVar 或命令行覆盖，避免 Editor 中显示的值与实际生成值不一致。
 
 | 字段 | 当前候选 | 含义 |
 | --- | ---: | --- |
+| `Version` | 2 | E5 表面立方体几何；旧球靶 Version 1 身份作废 |
 | `SatelliteRadiusPrimaryRatio` | 0.125 | 卫星半径/主星基础半径 |
-| `SatelliteCenterClearancePrimaryRatio` | 0.125 | 卫星球心离主星连续表面的距离/主星基础半径 |
+| `SatelliteCenterClearancePrimaryRatio` | 0.5 | 卫星球心离主星连续表面的距离/主星基础半径 |
 | `SatelliteAnchorArcDegrees` | 30° | 出生点到卫星锚方向的主星表面弧角 |
-| `SatelliteSurfaceGravityPrimaryRatio` | 0.45 | 卫星/主星表面重力比 |
+| `SatelliteSurfaceGravityPrimaryRatio` | 2.0 | 卫星/主星表面重力比 |
 | `TargetBody` | `PracticeSatellite` | 目标所属天体身份 |
-| `BacksideAngleDeg` | 170° | 从“卫星面向 Reinforced RestPouch 方向”量取的背面角；已按 Camera Blueprint 的真实投影平面重标定 |
-| `TargetLocalAzimuthDeg` | 20° | 绕面向发射点轴的局部方位；与 170° 背面角共同形成相邻 Pull 成功岛 |
-| `TargetAltitudeAboveSurfaceCM` | 560 cm | 目标中心高于卫星理想球面的距离 |
-| `TargetProxyRadiusCM` | 420 cm | 未来 M7 AttackFace 的暂定有效命中半径 |
+| `BacksideAngleDeg` | 178° | 从“卫星面向 Reinforced RestPouch 方向”量取的背面角 |
+| `TargetLocalAzimuthDeg` | 20° | 绕面向发射点轴的局部方位 |
+| `TargetProxyRadiusCM` | 420 cm | 兼容字段名；Version 2 语义为 E5 立方体半边长 |
+| `TargetSatelliteClearanceCM` | 20 cm | E5 底面与卫星理想球面的间隙 |
+| `PullMinimum/Maximum` | 0.75 / 1.0 | 当前蓝图候选的离散认证功率域 |
 
-目标位置由卫星局部正交基构造并附着到卫星 Actor。目标中心必须满足：
+E5 由卫星局部正交基构造并附着到卫星 Actor，局部 `+Z` 始终指向卫星外侧：
 
 ```text
-Altitude >= TargetProxyRadius
-          + 2 * BirdCollisionRadius
-          + TargetSatelliteClearance
+TargetCenter = SatelliteCenter
+             + Outward
+             * (SatelliteRadius + CubeHalfExtent + SurfaceGap)
 ```
 
-不满足时拒绝生成，不能用“目标先与卫星重叠”制造假命中。
+因此 E5 底面位于 `SatelliteRadius + SurfaceGap`，不会漂浮到旧球靶高度，也不会嵌入卫星理想球面。`TargetBody` 不是仅供显示的标签：非 `PracticeSatellite` 值必须拒绝，不能把拼写错误静默解析到主星或任意 Actor。
 
-V0 的净空代入值为 `560 >= 420 + 2×55 + 20 = 550 cm`。`TargetBody` 不是仅供显示的标签：非 `PracticeSatellite` 值必须拒绝，不能把拼写错误静默解析到主星或任意 Actor。
+`BirdCollisionRadiusCM` 不再是蓝图可编辑参数。Rig 从当前四鸟的实际弹射碰撞体读取最大半径并在构建场景后写入快照；当前 Chaos 球权威值为 `42 cm`。该值参与 E5 OBB、主星/卫星扩张球扫掠和 `SatellitePracticePresetHash`。原生 factory 仍只提供新建蓝图的安全回退（净空比 `0.125`、引力比 `0.45`、认证上限 `0.95`）；它不覆盖上表的当前蓝图候选。
 
 ### 3.3 三种身份及可移植边界
 
@@ -116,7 +119,7 @@ V0 的净空代入值为 `560 >= 420 + 2×55 + 20 = 550 cm`。`TargetBody` 不�
 - `BaselineGravitySnapshotHash`（代码访问名仍为 `GravitySnapshotHash`）：本次运行场景中主星尺度/表面重力、卫星相对球心的世界向量、尺度、表面重力、初始启用状态与阻力；
 - `SatellitePracticePresetHash`：局部布局、目标参数和扫掠域。
 
-`LaunchProfileHash` 与 `SatellitePracticePresetHash` 使用量化数值和稳定字符串字节，不使用 Actor 指针、`FName` 进程索引、CellId 或绝对世界原点，是可跨地图/Seed 携带的候选身份。`GravitySnapshotHash` 只保证同一场景实例的平移不变；它包含实际卫星相对世界向量与连续地表解析结果，会随 Seed、地形或整体朝向变化，因此只是 baseline scene-instance 证据，**不得**作为 M3 跨 Seed 的稳定目录身份。
+`LaunchProfileHash` 与 `SatellitePracticePresetHash` 使用量化数值和稳定字符串字节，不使用 Actor 指针、`FName` 进程索引、CellId 或绝对世界原点，是可跨地图/Seed 携带的候选身份。Preset Hash 必须在解析实际鸟碰撞半径之后计算，且只在相同碰撞契约下可移植；Version 1 球靶的旧 Hash 已作废。`GravitySnapshotHash` 只保证同一场景实例的平移不变；它包含实际卫星相对世界向量与连续地表解析结果，会随 Seed、地形或整体朝向变化，因此只是 baseline scene-instance 证据，**不得**作为 M3 跨 Seed 的稳定目录身份。
 
 `abts.Calibration.SatelliteGravity` 在运行中切换实际卫星引力，并在 HUD 单独显示当前 `ON/OFF`；它不改写 baseline hash。看到 `Gravity=OFF` 与原 baseline hash 同时存在是预期行为，不表示 OFF 状态被签入该 Hash。M3/M7 保存可移植版本/哈希时只使用 `LaunchProfileHash` 与 `SatellitePracticePresetHash`；场景 Witness 若保存 `GravitySnapshotHash`，必须明确它是该 Witness 的实例快照并在重算时重新生成。
 
@@ -128,7 +131,11 @@ V0 的净空代入值为 `560 >= 420 + 2×55 + 20 = 550 cm`。`TargetBody` 不�
 - 每档一枚舒适射程代理和一枚极限射程代理，共六枚；
 - 一枚附着于卫星局部坐标的背面目标代理。
 
-代理均为无物理阻挡的 Query-only 球体。实际命中由 Rig 在 `TG_PostPhysics` 对鸟的上一帧→本帧位置执行扫掠，卫星理想球体和 TargetProxy 比较最早交点。M6 从 `Flying/Settling` 切到 `Returning` 的首帧还暴露一次以最终落点为端点的 pending completion sample，Rig 只消费一次最后线段扫掠后立即结束该序列，避免状态切换恰好跨越代理时漏判；它不得在后续 Returning 帧重复计数。该流程既不由代理碰撞改变真实轨迹，也不因高速跨越或回收切帧丢失命中。
+六枚射程代理仍是无物理阻挡的 Query-only 球体；E5 则是附着在卫星表面的阻挡 `Engine Cube`。实际 Chaos blocking contact 是首要命中证据，Rig 在 `TG_PostPhysics` 对鸟的上一帧→本帧位置执行精确 sphere-vs-OBB 扫掠作为高速穿越与同帧 E5/卫星体仲裁回退；卫星体使用实际鸟半径扩张后的理想球。Chaos 的 E5/body 回调只记录同帧候选，Rig 必须在同一段上统一比较 `TargetAlpha` 与 `SatelliteAlpha` 后双向定案，因此 E5-first 也能被更早的卫星体改判，body-first 也能被更早的 E5 改判；首个已定案帧之后不得被反弹或持续接触重写。M6 从 `Flying/Settling` 切到 `Returning` 的首帧仍只暴露一次 pending completion sample。
+
+M6 只读预测快照现在携带完整路径、最近卫星净空以及 `PrimarySurface / SatelliteBody / SatelliteE5` 终点类型。每个积分步必须先求 E5 OBB、所有卫星扩张球和主星表面的候选交点，再以全局最小 Alpha 截断；不能因代码检查顺序固定偏向卫星。标定 Rig 显式把练习卫星、E5 Actor、OBB 半边长以及认证用的 `0.04 s × 30 s` 积分域注册给 M6/M10，使标定 HUD 预览、成功岛认证与实际超时使用同一时间域；普通 M6/M9 未注册该 context 时继续使用既有预测预算。Pulling 轨迹进入卫星/E5 邻域时，E5 画中画优先于普通主星落点预览，复用同一 SceneCapture/RenderTarget，只显示卫星、E5 和局部轨迹，并使用无光照 `SCS_BaseColor` 指引视图避免背面全黑；它不等于修改了世界真实背面照明。
+
+同一 M6 相机在实飞时按 `PrimaryFollow → SatelliteApproach → SatelliteOrbit → E5Approach → E5Impact` 过渡，以稳定轨道侧视法线避免近月翻转；Orbit 与 E5Approach 分别使用不同的进入/退出阈值，避免鸟在边界附近时来回刷阶段。E5 命中保持 `1.2 s` 后确定性回收，回收期间锁回主星 frame，直到下一次发射；这些表现仅在显式标定 context 中启用。
 
 HUD 显示：
 
@@ -172,13 +179,13 @@ abts.Calibration.SatelliteGravity 1
 
 确定性认证模型读取真实 Reinforced cord/pouch frame，以 `(Pull, AimInPlaneOffsetCM, AimOutOfPlaneOffsetCM)` 组成批准的离散全域：
 
-- Pull：从 `InitialPullAlpha=0.55` 按 `WheelStep=0.04` 枚举所有玩家可进入档位；其中认证带为 75%–95%，即 `0.75/0.79/0.83/0.87/0.91/0.95`；
+- Pull：从 `InitialPullAlpha=0.55` 按 `WheelStep=0.04` 枚举所有玩家可进入档位；当前蓝图认证带为 75%–100%，即 `0.75/0.79/0.83/0.87/0.91/0.95/0.99/1.00`；
 - InPlane：`-260..260 cm`，41 点，沿实际相机鼠标投影平面的 `CameraScreenUp`（LaunchFrame 的 `AimInPlaneAxisWorld`）；
 - OutOfPlane：`-80..80 cm`，5 点，沿实际相机鼠标投影平面的 `CameraScreenRight`（LaunchFrame 的 `AimOutOfPlaneAxisWorld`）；
 - `length(AimPlaneOffset) > 260 cm` 的圆盘外组合跳过，不计作已采样输入；
-- 固定步长：0.04 s；最长 30 s。
+- 固定步长：0.04 s；最长 30 s；该两项同时配置 M6 标定预览和实际标定发射超时，不允许另留一套 0.075 s/12 s 的屏幕轨迹域。
 
-LaunchFrame 同时保存真实相机的 `CameraLook` 为 `AimPlaneNormalWorld`，并保存与之正交的 ScreenUp/ScreenRight；从 Camera Blueprint 采样的四项构图快照进入解析后 Catalog 和 `LaunchProfileHash`。每个样本用与 M6 `UpdatePouchAndPreview/ComputeLaunchVelocity` 相同的鼠标投影平面、pouch 位置、发射方向和鸟偏移构造初始状态，再用同一局部两体快照分别积分“卫星引力开/关”。每步对 TargetProxy、卫星扩张球和主星扩张球求最早线段交点。只有同时满足下列条件的样本进入成功集：
+LaunchFrame 同时保存真实相机的 `CameraLook` 为 `AimPlaneNormalWorld`，并保存与之正交的 ScreenUp/ScreenRight；从 Camera Blueprint 采样的四项构图快照进入解析后 Catalog 和 `LaunchProfileHash`。每个样本用与 M6 `UpdatePouchAndPreview/ComputeLaunchVelocity` 相同的鼠标投影平面、pouch 位置、发射方向和鸟偏移构造初始状态，再用同一局部两体快照分别积分“卫星引力开/关”。每步用实际鸟半径对 E5 OBB 做精确圆角扫掠，并对卫星扩张球和主星扩张球求最早线段交点；最近目标净空同样按整段精确求值，不再用四点采样估计。只有同时满足下列条件的样本进入成功集：
 
 1. 引力开启时先命中 TargetProxy；
 2. 没有先撞卫星或主星；
@@ -190,7 +197,7 @@ LaunchFrame 同时保存真实相机的 `CameraLook` 为 `AimPlaneNormalWorld`�
 - 最大分量不少于三个样本；
 - 最大分量同时跨越相邻 InPlane Aim 和相邻可进入 Pull 档；
 - Simple 满功率在同一瞄准域命中数为零；
-- Reinforced 在所有玩家可进入、但位于 75%–95% 认证带之外的 Pull 档命中数为零；
+- Reinforced 在所有玩家可进入、但位于当前 75%–100% 认证带之外的 Pull 档命中数为零；
 - 重复计算的结果哈希和计数严格一致。
 
 这里的“全域”仅指上述离散 Pull × 规则 Aim 网格，不能表述为数学上的连续输入域。离散连通岛是自动化结构门；玩家在格点之间是否仍有自然容错，必须由第 8 节 Visible PIE 决定。该门不允许忽略卫星球体碰撞，也不能用一个孤立格点冒充可操作成功岛。
@@ -215,14 +222,16 @@ $Log = "$ProjectRoot\Saved\Logs\M6M9-Calibration-FreshAutomation.log"
 
 ```text
 ABTS.Calibration.ProfileCatalog
+ABTS.Calibration.SatellitePreviewGeometry
 ABTS.Calibration.StableHashes
-ABTS.Calibration.TargetGeometry
 ABTS.Calibration.SuccessIsland
+ABTS.Calibration.SweptCollision
+ABTS.Calibration.TargetGeometry
 ```
 
-其中 `ProfileCatalog` 必须覆盖 `PullPowerWheelStep=0.005` 的 fail-closed 反例；四项 Aim 相机构图均进入哈希输入，`StableHashes` 以相机 Pitch 变异证明该类输入会改变 `LaunchProfileHash`，不能只验证速度曲线。
+其中 `ProfileCatalog` 覆盖 `PullPowerWheelStep=0.005` 的 fail-closed 反例；四项 Aim 相机构图均进入哈希输入；`StableHashes` 验证相机构图与实际鸟碰撞半径会改变身份；`TargetGeometry` 覆盖贴地立方体局部 frame、平移不变与错误配置拒绝；`SweptCollision` 覆盖精确球/OBB 圆角、零长度/变换不变及 60 cm 净空门；`SatellitePreviewGeometry` 覆盖从完整弯曲路径选择最近画中画线段。
 
-门槛是 4/4 Success、唯一 `TEST COMPLETE. EXIT CODE: 0`、进程退出码 0，且没有 Fatal、assert、ensure 或 `LogABTSRuntime: Error`。零匹配、少于四项、只看进程退出码或复用旧日志均失败。
+门槛是精确 6/6 Success、唯一 `TEST COMPLETE. EXIT CODE: 0`、进程退出码 0，且没有本项目 Fatal、assert、ensure 或 `LogABTSRuntime: Error`。零匹配、少于六项、只看进程退出码或复用旧日志均失败。
 
 ### 7.2 fresh 旧地图认证
 
@@ -242,7 +251,8 @@ $Log = "$ProjectRoot\Saved\Logs\M6M9-Calibration-FreshRuntime.log"
 
 它同时验证：
 
-- 三套弹弓和七枚代理均生成；
+- 三套弹弓、六枚 Query-only 射程球和一枚阻挡 E5 立方体均生成；
+- `[ABTS][Calibration][E5]` 显示 `Shape=Cube HalfExtent=420 SurfaceGap=20`，`[Ready]` 显示实际 `BirdCollisionRadius=42`；
 - 真实 Reinforced cord/pouch frame 与相机 `Look/ScreenUp/ScreenRight` 鼠标投影平面已捕获；
 - 三档射程包络有效；
 - 成功岛通过、Simple 满功率反例成立、Reinforced 认证功率带外命中为零；
@@ -250,7 +260,7 @@ $Log = "$ProjectRoot\Saved\Logs\M6M9-Calibration-FreshRuntime.log"
 - baseline 引力开启且 M10 ScoutMap 已显式揭示；
 - 世界中 `AABTSM73StableBuildingActor` 数量为零。
 
-通过日志的 `Reason` 必须同时含 `Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`。缺任一字段、出现多个终态或进程退出码非零均失败。
+通过日志的 `Reason` 必须同时含 `Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`。缺任一字段、出现多个终态或进程退出码非零均失败。该 smoke 不执行真实鼠标发射、SceneCapture 像素检查或相机演出，不能替代第 8 节。
 
 ### 7.3 生产 M9 deferred transform 回归
 
@@ -281,21 +291,22 @@ if (-not $M9.WaitForExit(60000)) {
 }
 ```
 
-生产回归要求恰好一条 `[ABTS][M9] Satellite ready`，默认值仍为 `Radius=1250.0 Clearance=1250.0 Gravity=245.0`，并有 `FinaleGravitySource=0`；不得出现 `deferred finish changed center`、`Satellite rejected`、Fatal、assert 或 ensure。`IsAtConfiguredCenter()` 是生产世界位置门；标定预设的 `GravityRatio=0.45` 不能泄漏成生产 M9 的 `0.25`。
+生产回归要求恰好一条 `[ABTS][M9] Satellite ready`，默认值仍为 `Radius=1250.0 Clearance=1250.0 Gravity=245.0`，并有 `FinaleGravitySource=0`；不得出现 `deferred finish changed center`、`Satellite rejected`、Fatal、assert 或 ensure。`IsAtConfiguredCenter()` 是生产世界位置门；隔离标定蓝图的布局/引力参数不能泄漏到生产 M9 的 `0.25` 表面引力比。
 
 ### 7.4 当前候选自动化留证
 
-2026-07-30 在 `integration/m6-m9-calibration-20260730` 当前候选上重跑并通过：
+2026-07-30 在 `integration/m9-satellite-e5-20260730` 当前候选上重跑并通过：
 
 - 强制 Unity：`-ForceUnity -DisableAdaptiveUnity -NoHotReload -NoHotReloadFromIDE`，`Result: Succeeded`；
-- `ABTS.Calibration.*`：精确 4/4 Success，`TEST COMPLETE. EXIT CODE: 0`；
+- `ABTS.Calibration.*`：精确 6/6 Success，`TEST COMPLETE. EXIT CODE: 0`；
 - 标定 runtime：唯一 `Terminal=1 Passed=1 Failed=0`，组合原因为 `Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`；
 - 蓝图相机构图：`BP_ABTSM6SlingshotCamera_C`，`Distance=1500 cm`、`Pitch=-3°`、`TargetForward=900 cm`、`TargetHeight=245 cm`；
-- 实际 Reinforced 成功岛：`Pull=[0.83,0.95]`、`LargestIsland=12`、Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `71.3 cm`；
+- 实际 Reinforced 成功岛：`Hits=12`、`Pull=[0.79,0.87]`、`AimInPlane=[-195,-169] cm`、`LargestIsland=5`，Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `2373.3 cm`，`SimpleHits=0 OutsidePullHits=0`；
+- 标定场景解析值：`SatelliteRadius=1250 cm`、`Clearance=5000 cm`、`SurfaceGravity=1960 cm/s²`，E5 半边长 `420 cm`、表面间隙 `20 cm`；
 - 生产 M9 fresh runtime：唯一 `ABTSM9GameMode`、唯一 `Satellite ready`、零 rejected/transform error；
 - `ABTS.M110.TaskGraphFinaleSeparation` 与 `ABTS.M11C.Runtime.ContractRoutingAndM9Isolation`：各 1/1 Success。
 
-本次 runtime 的两个可移植候选身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=1278846752820581340`；`BaselineGravitySnapshotHash=7451995348163015522` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证，不等于第 8 节可见 PIE 已通过，也不把 V0 提前标记为冻结。
+本次 runtime 的候选身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=4556705819126274791`、`SweepResultHash=2476487998726195302`；`BaselineGravitySnapshotHash=5302779937323207981` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证，不等于第 8 节可见 PIE 已通过，也不把 V0 提前标记为冻结。
 
 ## 8. 可见 PIE 验收
 
@@ -306,9 +317,13 @@ if (-not $M9.WaitForExit(60000)) {
 - [ ] 强化档存在玩家可重复找到的连续背面目标成功岛；
 - [ ] 同一输入关闭卫星引力后明显飞偏；
 - [ ] Simple 满功率不能完成卫星背面目标；
-- [ ] 成功轨迹不先撞卫星；
+- [ ] E5 立方体位于远离主星的卫星半球，底面贴近理想球面且不漂浮、不嵌入；
+- [ ] 预测终点为 E5 时，实际 `42 cm` 鸟不会先撞卫星；预测为 `SatelliteBody` 时，实飞确实先撞卫星；
+- [ ] 卫星背面画中画在背光面仍清晰，只显示卫星、E5 与局部轨迹；切回普通主星落点预览后无残留 ShowOnly/BaseColor 状态；
+- [ ] `PrimaryFollow → SatelliteApproach → SatelliteOrbit → E5Approach → E5Impact` 无翻转或跳切；命中保持约 `1.2 s` 后回收，失败回收也恢复主星 frame；
 - [ ] M10.1 轨道全景图能清晰展示卫星造成的偏转；
-- [ ] 正确解集中在约 75%–95%，不要求强制满功率；
+- [ ] 自动化岛集中在约 79%–87%，连续鼠标输入下仍有自然容错；满功率属于认证域但不是唯一正确解；
+- [ ] 普通 M6/M9 与既有 M10.1-B 主星落点画中画行为无回归；
 - [ ] 日志中的真实发射遥测字段完整且没有 Fatal、assert 或 ensure。
 
 可见 PIE 通过后，把实测两个可移植 Hash、该场景的 baseline `GravitySnapshotHash`、射程包络和成功岛手感结论写入本节验收记录，再将状态改为“V0 已冻结”。自动化或 runtime smoke 通过不能提前勾选本节。
@@ -331,4 +346,4 @@ TargetProxy / AttackFace
 
 本文的固定步长二体积分器是标定认证与 M3R-4.1 前置预筛模型，不是生产 M6/M9 的权威实飞 Provider。M3R-4 在宣称生产 Witness 前，仍须由 Integration 提供经批准的只读生产适配器，并用实际 M6/M9 预览/实飞做重放误差门；M3 不复制速度曲线、pouch 几何或引力公式。
 
-M7 后续只需让实际卫星建筑的认证 AttackFace 落入已通过的 TargetProxy 区域；结构生成、弱点稳定性和视觉轮廓由 M7 自己认证，但不得反向改变已冻结的 M6/M9 参数。若实体攻击面必须改变代理尺寸，视为跨阶段契约变更，回到 Integration 重新跑完整离散认证网格与可见 PIE。
+M7 后续只需让实际卫星建筑的认证 AttackFace 消费已通过的卫星局部 surface frame 与 OBB 半边长；结构生成、弱点稳定性和视觉轮廓由 M7 自己认证，但不得反向改变已冻结的 M6/M9 参数。若实体攻击面必须改变代理几何，视为跨阶段契约变更，回到 Integration 重新跑完整离散认证网格与可见 PIE。

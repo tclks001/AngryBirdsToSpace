@@ -1,6 +1,6 @@
 # M9：卫星与局部引力
 
-> 状态：生产 M9 基线已实现；本轮 deferred transform 修复已通过 fresh 生产回归，独立 M6/M9 标定候选已通过自动化/runtime 门，V0 尚待可见 PIE 手感验收。
+> 状态：生产 M9 基线已实现；deferred transform 修复已通过 fresh 生产回归。独立 M6/M9 候选的碰撞一致预测、背面 E5 画中画与卫星相对镜头已落地，并通过 6/6 自动化/runtime 门；真实 Chaos 发射和可视表现仍待 PIE 验收。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6/M9 标定模式](M6M9SlingshotSatelliteCalibrationDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
 
@@ -62,7 +62,10 @@ aSatellite  = normalize(ToSatellite) * SurfaceGravity * (SatelliteRadius / d)^2
 
 - Chaos 刚体鸟：每个物理 Tick 叠加卫星加速度；
 - 旧力悬挂移动：作为额外力保留，用于对照模式和发射飞行；
-- M6 浅色虚线预测弹道：使用与运行时同一 `ABTSM9Gravity::GetSatelliteAcceleration` 查询。
+- M6 浅色虚线预测弹道：使用与运行时同一 `ABTSM9Gravity::GetSatelliteAcceleration` 查询；
+- M6 预测枚举当前 M9 卫星球快照，并在每个积分步统一比较主星、所有卫星扩张球与显式 E5 OBB 的最早交点；以实际鸟碰撞半径在 `PrimarySurface / SatelliteBody / SatelliteE5` 的真实最早终点截断，不再画出穿月路径或受检查顺序影响。
+
+引力查询公式仍是生产共享权威；预测器的固定步长与 Chaos 物理步进并不相同，因此不能宣称二者逐帧数值完全重合。隔离标定 context 会把认证的 0.04 s/30 s 输入域同步给 M6 预览与实际超时，但普通生产 M9 仍使用既有 M6 预算。验收目标是终点碰撞分类、偏转方向和玩家可读路径一致。
 
 本期暂不向 M7 建筑块、HISM 动态代理或静态场景物体叠加卫星引力，以免改变已验收的建筑结算与回收时机；后续若扩展为完整双天体物理，必须让它们同样消费这个只读查询，而不能各自复制公式。
 
@@ -79,6 +82,7 @@ aSatellite  = normalize(ToSatellite) * SurfaceGravity * (SatelliteRadius / d)^2
 
 5. 观察 `SatelliteWindow` 上方有一颗纯灰色小球，且它远离 `LaunchSite` 终局施工台；卫星自身应无道路、水体、SDF 色块、树石 HISM、建筑或拾取物。
 6. 在其附近进入 M6 拉弓，浅色虚线末段应向卫星偏折；发射鸟的实际轨迹应与预览同方向偏折。离卫星远时偏折快速减弱。
+7. 预览判定 `SatelliteBody` 时不得继续穿过卫星，实飞应在相同一侧发生碰撞。隔离标定 context 中还要验证近月镜头转入卫星相对 frame，且 E5 背面画中画在背光面可读。
 
 ## 5. 排错
 
@@ -87,6 +91,9 @@ aSatellite  = normalize(ToSatellite) * SurfaceGravity * (SatelliteRadius / d)^2
 | 没有卫星 | 检查 GameMode 是 M9；确认 PCG `SatelliteWindow` 与有效 FinaleFrame 均存在，并查看 `[M9] Satellite ready` / rejected 日志。 |
 | 卫星仍贴近终局 | 检查 M3 GeneratorVersion、`SatelliteWindow ↔ LaunchSite` 实测角距以及 M9 的 `FinaleDistanceRatio/AlignmentDot` 拒绝日志；不要用历史 `FinalAnchorTaskType` 覆盖。 |
 | 有卫星但弹道不偏折 | 检查 `Satellite Surface Gravity Primary Ratio` 是否为零，以及 M6 是否在正式球面模式而非 M7.1 平面测试台。 |
+| 预测路径穿过卫星或比实飞晚碰撞 | 核对 M6 预览使用的实际鸟碰撞半径和 `TerminalType=SatelliteBody`；不要重新用可视 Bounds 猜半径。 |
+| E5 画中画全黑或主体错误 | 仅隔离标定 context 启用；核对显式 PracticeTarget 注册、Scout reveal、ShowOnly 主体和 BaseColor 捕获模式。 |
+| 近月镜头不切换或翻转 | 仅隔离标定 context 启用；核对 M6 Camera 的 Satellite phase、进入/退出滞回与目标 context。 |
 | 卫星表面出现彩色地形/资源 | 这不属于 M9；确认生成的是 `AABTSM9Satellite`，而不是误放置的 `AABTSM3Planet`。 |
 
 ## 6. M9 开发调试选项
@@ -111,10 +118,10 @@ M11 数据端固定为 `Primary + AssistPlanet1 + AssistPlanet2 + AssistPlanet3`
 
 ## 8. 强化弹弓练习标定
 
-生产 `SatelliteWindow` 不承担参数试验。卫星尺度、离地、局部背面目标和表面引力先在不生成 M7/PCG 建筑的隔离 GameMode 中认证；旧 M9 地图只作为主星、角色、相机与 M6/M9 运行环境载体。标定候选的卫星表面引力比为 `0.45`，生产 M9 默认值仍是 `0.25`，任何标定 CVar、命令行覆盖或预设都不得写回生产默认值。
+生产 `SatelliteWindow` 不承担参数试验。卫星尺度、离地、局部背面 E5 立方体和表面引力先在不生成 M7/PCG 建筑的隔离 GameMode 中认证；旧 M9 地图只作为主星、角色、相机与 M6/M9 运行环境载体。隔离蓝图候选参数不得写回生产默认值 `0.25`，具体可调值只记录在标定详稿，避免本生产总稿随调参漂移。
 
 M3/M7 只能跨地图/Seed 消费可移植的 `LaunchProfileHash`、射程包络与 `SatellitePracticePresetHash`。`GravitySnapshotHash` 含本次场景解析出的卫星相对向量，只是 baseline scene-instance 证据；它不是稳定 Catalog 身份。标定固定步长积分器只用于确定性认证和 M3R-4.1 预筛，也不替代生产 `ABTSM9Gravity::GetSatelliteAcceleration` 与实际 M6 预览/实飞链路。
 
 本轮还包含一项与标定入口分离的生产修复：`AABTSM9GameMode` deferred spawn 在 Finish 前已配置卫星原生 Root，`FinishSpawningActor` 必须继续使用原始 `FTransform::Identity`，随后由 `IsAtConfiguredCenter()` fail closed，避免同一平移被组合两次。隔离标定 smoke 不能替代该回归；必须另跑 [标定详稿第 7.3 节](M6M9SlingshotSatelliteCalibrationDesign.md#73-生产-m9-deferred-transform-回归) 的生产 M9 门，并核对默认 `Radius=1250.0 Clearance=1250.0 Gravity=245.0`、`FinaleGravitySource=0` 以及唯一 ready 日志。故障特征亦收录于[开发排错记录](DevelopmentTroubleshooting.md#12-m9-卫星与标定入口)。
 
-完整入口、离散玩家可达 Pull × `AimPlaneOffsetCM` 网格、成功岛反例和验收命令见 [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)。fresh 4/4 自动化、标定 runtime smoke 与生产 M9 回归已在同一候选上留证；当前候选仍不得写成 V0 已冻结，可见 PIE 明确待验收。
+完整入口、离散玩家可达 Pull × `AimPlaneOffsetCM` 网格、表面 E5 立方体、碰撞一致预测、背面画中画、卫星相对镜头和验收命令见 [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)。fresh 6/6 自动化、标定 runtime smoke 与生产 M9 回归已在同一候选上留证；当前候选仍不得写成 V0 已冻结，可见 PIE 明确待验收。

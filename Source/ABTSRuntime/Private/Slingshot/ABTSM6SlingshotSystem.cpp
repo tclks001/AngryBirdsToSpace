@@ -211,8 +211,29 @@ void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 		FlightElapsedSeconds += DeltaSeconds;
 		UpdateActiveLaunchTelemetry();
 		if (bCalibrationModeEnabled
+			&& CalibrationSuccessReturnRemainingSeconds >= 0.0f)
+		{
+			CalibrationSuccessReturnRemainingSeconds -=
+				FMath::Max(0.0f, DeltaSeconds);
+			if (CalibrationSuccessReturnRemainingSeconds <= 0.0f)
+			{
+				UE_LOG(LogABTSRuntime, Log,
+					TEXT("[ABTS][Calibration][Launch] E5ImpactHoldComplete Seq=%d Hold=%.2f"),
+					ActiveLaunchCalibrationTelemetry.Sequence,
+					FMath::Max(
+						0.1f,
+						CalibrationE5ImpactHoldSeconds));
+				BeginReturn();
+				return;
+			}
+		}
+		if (bCalibrationModeEnabled
 			&& LaunchState == EABTSM6LaunchState::Flying
-			&& FlightElapsedSeconds >= FMath::Max(2.0f, CalibrationMaximumFlightSeconds))
+			&& FlightElapsedSeconds >= FMath::Max(
+				2.0f,
+				SatellitePracticePredictionMaximumFlightSeconds > 0.0f
+					? SatellitePracticePredictionMaximumFlightSeconds
+					: CalibrationMaximumFlightSeconds))
 		{
 			NotifyCalibrationTargetEvent(TEXT("Timeout"), false);
 			UE_LOG(LogABTSRuntime, Warning,
@@ -533,8 +554,12 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 		ActiveLaunchCalibrationTelemetry.InitialSpeedCMPerSec = Velocity.Size();
 		LastCalibrationTelemetrySampleWorld =
 			ActiveLaunchCalibrationTelemetry.InitialWorldLocation;
+		CalibrationSatelliteBodyHitFrame = MAX_uint64;
+		CalibrationSatelliteE5HitFrame = MAX_uint64;
+		CalibrationSatelliteDecisionFrame = MAX_uint64;
 		bActiveLaunchCalibrationTelemetry = true;
 	}
+	CalibrationSuccessReturnRemainingSeconds = -1.0f;
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M6][Launch] Bird=%d Tier=%d Speed=%.1f Pull=%.2f Aim=(%.1f,%.1f,%.1f) LaunchProfileHash=%llu Calibration=%d"),
 		ABTSBirdIdToIndex(LaunchedBird->GetBirdId()),
@@ -744,6 +769,24 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
+	// A real Chaos blocking contact is the strongest calibration evidence.
+	// The rig's swept centre-segment test remains a CCD/fallback path, while
+	// NotifyCalibrationTargetEvent de-duplicates both sources.
+	if (bCalibrationModeEnabled)
+	{
+		if (Hit.GetActor() == SatellitePracticeTarget.Get())
+		{
+			NotifyCalibrationTargetEvent(
+				TEXT("Satellite.Backside"),
+				false);
+		}
+		else if (Hit.GetActor() == SatellitePracticeBody.Get())
+		{
+			NotifyCalibrationTargetEvent(
+				TEXT("Satellite.Body"),
+				true);
+		}
+	}
 	if (NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec) MarkPhysicsActivity();
 	const EABTSM6ImpactMaterial Material = ResolveMaterial(Hit.GetComponent());
 	const FABTSM6BirdImpactProfile& BirdProfile = GetBirdProfile(LaunchedBird->GetBirdId());

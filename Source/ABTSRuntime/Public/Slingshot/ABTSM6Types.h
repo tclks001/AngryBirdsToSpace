@@ -29,6 +29,15 @@ enum class EABTSM6ImpactMaterial : uint8
 	Building
 };
 
+UENUM(BlueprintType)
+enum class EABTSM6TrajectoryTerminalType : uint8
+{
+	None,
+	PrimarySurface,
+	SatelliteBody,
+	SatelliteE5
+};
+
 /** Immutable copy of one M6 aim prediction, consumed by M10 without re-integrating physics in the HUD. */
 USTRUCT(BlueprintType)
 struct FABTSM6TrajectoryPreview
@@ -65,6 +74,30 @@ struct FABTSM6TrajectoryPreview
 
 	UPROPERTY(BlueprintReadOnly)
 	float PredictedPathLengthCM = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly)
+	EABTSM6TrajectoryTerminalType TerminalType =
+		EABTSM6TrajectoryTerminalType::None;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector TerminalWorldLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector TerminalWorldVelocity = FVector::ZeroVector;
+
+	/** True once the complete prediction enters the M9 satellite presentation range. */
+	UPROPERTY(BlueprintReadOnly)
+	bool bHasSatelliteEncounter = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	FVector EncounterSatelliteCenterWorld = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly)
+	float EncounterSatelliteRadiusCM = 0.0f;
+
+	/** Bird-surface clearance, already accounting for the actual launch collision body. */
+	UPROPERTY(BlueprintReadOnly)
+	float ClosestSatelliteClearanceCM = BIG_NUMBER;
 };
 
 USTRUCT(BlueprintType)

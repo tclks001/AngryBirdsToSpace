@@ -54,6 +54,11 @@ private:
 		const FVector& WorldLocation,
 		float RadiusCM,
 		const FLinearColor& Color);
+	AABTSCalibrationTargetProxy* SpawnCubeTarget(
+		FName TargetId,
+		const FTransform& WorldTransform,
+		float HalfExtentCM,
+		const FLinearColor& Color);
 	void RunSweep();
 	void UpdateActualLaunchTargetSweep();
 	void HandleLaunchRecorded(const FABTSM6LaunchCalibrationTelemetry& Telemetry);

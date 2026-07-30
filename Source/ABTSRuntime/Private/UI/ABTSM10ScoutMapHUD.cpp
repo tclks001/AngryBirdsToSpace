@@ -80,7 +80,11 @@ void AABTSM10ScoutMapHUD::DrawLandingPreview(AABTSM10ScoutMapSystem& System)
 	Canvas->K2_DrawBox(ImageOrigin, ImageSize, 1.0f, FLinearColor(0.05f, 0.08f, 0.14f, 0.95f));
 	if (GEngine)
 	{
-		DrawText(TEXT("LANDING PREVIEW"), FLinearColor(0.89f, 0.95f, 1.0f),
+		const FString PreviewLabel =
+			System.IsSatelliteLandingPreviewActive()
+				? TEXT("SATELLITE E5 PREVIEW")
+				: TEXT("LANDING PREVIEW");
+		DrawText(PreviewLabel, FLinearColor(0.89f, 0.95f, 1.0f),
 			OuterOrigin.X + 10.0f, OuterOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.82f, false);
 	}
 }

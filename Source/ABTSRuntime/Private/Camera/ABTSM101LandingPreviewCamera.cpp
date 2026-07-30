@@ -88,7 +88,10 @@ void AABTSM101LandingPreviewCamera::UpdatePreview(
 
 	EnsureRenderTarget();
 	if (RenderTarget == nullptr || SceneCapture == nullptr || TrajectoryPointInstances == nullptr) return;
-	if (!bPreviewActive)
+	const bool bSubjectChanged =
+		PreviewSubject != EABTSM101PreviewSubject::PrimaryLanding;
+	SetPreviewSubject(EABTSM101PreviewSubject::PrimaryLanding);
+	if (!bPreviewActive || bSubjectChanged)
 	{
 		bPreviewActive = true;
 		CaptureAccumulatorSeconds = 0.0f;
@@ -109,16 +112,143 @@ void AABTSM101LandingPreviewCamera::UpdatePreview(
 	RefreshCapture(Preview, Planet);
 }
 
+void AABTSM101LandingPreviewCamera::UpdateSatellitePreview(
+	const FABTSM6TrajectoryPreview& Preview,
+	AActor& Satellite,
+	AActor& E5Target,
+	const float SatelliteRadiusCM,
+	const FVector& TargetHalfExtentCM,
+	const float DeltaSeconds)
+{
+	int32 ClosestSegmentStartIndex = INDEX_NONE;
+	FVector ClosestPoint;
+	FVector IncidenceDirection;
+	float ClosestDistanceCM = BIG_NUMBER;
+	if (!FindClosestTrajectorySegmentToPoint(
+		Preview,
+		E5Target.GetActorLocation(),
+		ClosestSegmentStartIndex,
+		ClosestPoint,
+		IncidenceDirection,
+		ClosestDistanceCM))
+	{
+		DeactivatePreview();
+		return;
+	}
+	EnsureRenderTarget();
+	if (RenderTarget == nullptr
+		|| SceneCapture == nullptr
+		|| TrajectoryPointInstances == nullptr)
+	{
+		return;
+	}
+	const bool bSubjectChanged =
+		PreviewSubject != EABTSM101PreviewSubject::SatelliteE5;
+	SetPreviewSubject(EABTSM101PreviewSubject::SatelliteE5);
+	if (!bPreviewActive || bSubjectChanged)
+	{
+		bPreviewActive = true;
+		CaptureAccumulatorSeconds = 0.0f;
+		RefreshSatelliteCapture(
+			Preview,
+			Satellite,
+			E5Target,
+			SatelliteRadiusCM,
+			TargetHalfExtentCM,
+			ClosestSegmentStartIndex,
+			ClosestPoint,
+			IncidenceDirection);
+		return;
+	}
+	CaptureAccumulatorSeconds += FMath::Max(0.0f, DeltaSeconds);
+	const float CaptureInterval =
+		1.0f
+		/ FMath::Clamp(
+			Settings.LandingViewCaptureHz,
+			1.0f,
+			60.0f);
+	if (CaptureAccumulatorSeconds < CaptureInterval) return;
+	CaptureAccumulatorSeconds = FMath::Fmod(
+		CaptureAccumulatorSeconds,
+		CaptureInterval);
+	RefreshSatelliteCapture(
+		Preview,
+		Satellite,
+		E5Target,
+		SatelliteRadiusCM,
+		TargetHalfExtentCM,
+		ClosestSegmentStartIndex,
+		ClosestPoint,
+		IncidenceDirection);
+}
+
 void AABTSM101LandingPreviewCamera::DeactivatePreview()
 {
-	if (!bPreviewActive) return;
+	if (!bPreviewActive
+		&& PreviewSubject == EABTSM101PreviewSubject::None)
+	{
+		return;
+	}
 	bPreviewActive = false;
+	SetPreviewSubject(EABTSM101PreviewSubject::None);
 	CaptureAccumulatorSeconds = 0.0f;
 	if (TrajectoryPointInstances)
 	{
 		TrajectoryPointInstances->ClearInstances();
 	}
+	if (SceneCapture)
+	{
+		SceneCapture->ClearShowOnlyComponents();
+	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M10.1][LandingPreview] Hidden"));
+}
+
+void AABTSM101LandingPreviewCamera::SetPreviewSubject(
+	const EABTSM101PreviewSubject NewSubject)
+{
+	if (PreviewSubject == NewSubject) return;
+	const EABTSM101PreviewSubject PreviousSubject = PreviewSubject;
+	PreviewSubject = NewSubject;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M10.1][LandingPreview] Subject=%s Previous=%s"),
+		*UEnum::GetValueAsString(NewSubject),
+		*UEnum::GetValueAsString(PreviousSubject));
+}
+
+bool AABTSM101LandingPreviewCamera::FindClosestTrajectorySegmentToPoint(
+	const FABTSM6TrajectoryPreview& Preview,
+	const FVector& Point,
+	int32& OutSegmentStartIndex,
+	FVector& OutClosestPoint,
+	FVector& OutTangent,
+	float& OutDistanceCM)
+{
+	OutSegmentStartIndex = INDEX_NONE;
+	OutClosestPoint = FVector::ZeroVector;
+	OutTangent = FVector::ZeroVector;
+	OutDistanceCM = BIG_NUMBER;
+	for (int32 Index = 0; Index + 1 < Preview.WorldPoints.Num(); ++Index)
+	{
+		const FVector Start = Preview.WorldPoints[Index];
+		const FVector Segment = Preview.WorldPoints[Index + 1] - Start;
+		const double LengthSquared = Segment.SizeSquared();
+		if (LengthSquared <= UE_DOUBLE_SMALL_NUMBER) continue;
+		const double Alpha = FMath::Clamp(
+			FVector::DotProduct(Point - Start, Segment)
+				/ LengthSquared,
+			0.0,
+			1.0);
+		const FVector Closest = Start + Segment * Alpha;
+		const float DistanceCM = FVector::Distance(Point, Closest);
+		if (DistanceCM >= OutDistanceCM) continue;
+		OutSegmentStartIndex = Index;
+		OutClosestPoint = Closest;
+		OutTangent = Segment.GetSafeNormal();
+		OutDistanceCM = DistanceCM;
+	}
+	return OutSegmentStartIndex != INDEX_NONE
+		&& !OutTangent.IsNearlyZero()
+		&& FMath::IsFinite(OutDistanceCM);
 }
 
 void AABTSM101LandingPreviewCamera::EnsureRenderTarget()
@@ -167,6 +297,13 @@ void AABTSM101LandingPreviewCamera::RefreshCapture(
 	const AABTSM3Planet& Planet)
 {
 	if (SceneCapture == nullptr) return;
+	// Restore the unchanged M10.1-B world capture after a calibration E5
+	// preview used this same component's isolated ShowOnly/BaseColor mode.
+	SceneCapture->PrimitiveRenderMode =
+		ESceneCapturePrimitiveRenderMode::PRM_RenderScenePrimitives;
+	SceneCapture->CaptureSource =
+		ESceneCaptureSource::SCS_FinalColorLDR;
+	SceneCapture->ClearShowOnlyComponents();
 	const FVector Landing = Preview.PrimarySurfaceLandingWorld;
 	// Gameplay's stable surface frame is radial.  Do not use the rendered terrain
 	// normal here: the M3 blend can vary locally and would introduce visual roll
@@ -189,6 +326,95 @@ void AABTSM101LandingPreviewCamera::RefreshCapture(
 	SceneCapture->SetWorldLocationAndRotation(CameraLocation, Rotation);
 	SceneCapture->FOVAngle = FMath::Clamp(Settings.LandingViewFieldOfViewDegrees, 10.0f, 120.0f);
 	RebuildTrajectoryPoints(Preview);
+	SceneCapture->bCameraCutThisFrame = true;
+	SceneCapture->CaptureScene();
+}
+
+void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
+	const FABTSM6TrajectoryPreview& Preview,
+	AActor& Satellite,
+	AActor& E5Target,
+	const float SatelliteRadiusCM,
+	const FVector& TargetHalfExtentCM,
+	const int32 ClosestSegmentStartIndex,
+	const FVector& ClosestPoint,
+	const FVector& IncidenceDirection)
+{
+	if (SceneCapture == nullptr || TrajectoryPointInstances == nullptr) return;
+	const FVector SatelliteCenter = Satellite.GetActorLocation();
+	FVector TargetOutward =
+		(E5Target.GetActorLocation() - SatelliteCenter).GetSafeNormal();
+	if (TargetOutward.IsNearlyZero())
+	{
+		TargetOutward = FVector::UpVector;
+	}
+	FVector TangentialApproach =
+		FVector::VectorPlaneProject(
+			IncidenceDirection,
+			TargetOutward).GetSafeNormal();
+	if (TangentialApproach.IsNearlyZero())
+	{
+		TangentialApproach =
+			FVector::VectorPlaneProject(
+				FVector::ForwardVector,
+				TargetOutward).GetSafeNormal();
+	}
+	if (TangentialApproach.IsNearlyZero())
+	{
+		TangentialApproach =
+			FVector::VectorPlaneProject(
+				FVector::RightVector,
+				TargetOutward).GetSafeNormal();
+	}
+	const float TargetDiameterCM =
+		FMath::Max(
+			2.0f,
+			static_cast<float>(
+				TargetHalfExtentCM.GetAbs().GetMax() * 2.0));
+	const float Distance = FMath::Max3(
+		FMath::Clamp(
+			Settings.LandingViewCameraDistanceCM,
+			100.0f,
+			100000.0f),
+		FMath::Max(1.0f, SatelliteRadiusCM) * 1.75f,
+		TargetDiameterCM * 4.0f);
+	const FVector Focus =
+		FMath::Lerp(
+			E5Target.GetActorLocation(),
+			ClosestPoint,
+			0.20f);
+	// View the far-side target from outside its local hemisphere, with a small
+	// tangent offset that keeps the curved approach leg readable.
+	const FVector CameraLocation =
+		E5Target.GetActorLocation()
+		+ TargetOutward * Distance
+		- TangentialApproach * Distance * 0.30f;
+	const FVector Look = (Focus - CameraLocation).GetSafeNormal();
+	if (Look.IsNearlyZero()) return;
+	const FVector ScreenUp =
+		ResolveStableScreenUp(TargetOutward, Look);
+
+	SceneCapture->PrimitiveRenderMode =
+		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	// BaseColor is deliberate: the E5 hemisphere may face away from the world
+	// directional light, but this guidance view must remain readable.
+	SceneCapture->CaptureSource =
+		ESceneCaptureSource::SCS_BaseColor;
+	SceneCapture->ClearShowOnlyComponents();
+	SceneCapture->ShowOnlyActorComponents(&Satellite);
+	SceneCapture->ShowOnlyActorComponents(&E5Target);
+	SceneCapture->ShowOnlyComponent(TrajectoryPointInstances);
+	SceneCapture->SetWorldLocationAndRotation(
+		CameraLocation,
+		FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat());
+	SceneCapture->FOVAngle =
+		FMath::Clamp(
+			Settings.LandingViewFieldOfViewDegrees,
+			10.0f,
+			120.0f);
+	RebuildTrajectoryPointsAround(
+		Preview,
+		ClosestSegmentStartIndex);
 	SceneCapture->bCameraCutThisFrame = true;
 	SceneCapture->CaptureScene();
 }
@@ -232,4 +458,77 @@ void AABTSM101LandingPreviewCamera::RebuildTrajectoryPoints(const FABTSM6Traject
 		Instances.Emplace(FQuat::Identity, Preview.PrimarySurfaceLandingWorld, FVector(Scale));
 	}
 	TrajectoryPointInstances->AddInstances(Instances, false, true, false);
+}
+
+void AABTSM101LandingPreviewCamera::RebuildTrajectoryPointsAround(
+	const FABTSM6TrajectoryPreview& Preview,
+	const int32 CenterSegmentStartIndex)
+{
+	if (TrajectoryPointInstances == nullptr
+		|| TrajectoryPointInstances->GetStaticMesh() == nullptr)
+	{
+		return;
+	}
+	TrajectoryPointInstances->ClearInstances();
+	if (Preview.WorldPoints.IsEmpty()) return;
+	const int32 Stride =
+		FMath::Clamp(
+			Settings.LandingViewTrajectoryStride,
+			1,
+			16);
+	const int32 MaximumPointCount =
+		FMath::Clamp(
+			Settings.LandingViewTrajectoryPointCount,
+			8,
+			128);
+	const int32 CenterIndex =
+		FMath::Clamp(
+			CenterSegmentStartIndex,
+			0,
+			Preview.WorldPoints.Num() - 1);
+	const int32 HalfWindowSamples =
+		FMath::Max(
+			1,
+			MaximumPointCount / 2) * Stride;
+	const int32 FirstIndex =
+		FMath::Max(
+			0,
+			CenterIndex - HalfWindowSamples);
+	const int32 LastIndex =
+		FMath::Min(
+			Preview.WorldPoints.Num() - 1,
+			FirstIndex
+				+ MaximumPointCount * Stride);
+	const float Scale =
+		FMath::Clamp(
+			Settings.LandingViewTrajectoryPointSizeCM,
+			1.0f,
+			100.0f)
+		/ BasicShapeSphereDiameterCM;
+	TArray<FTransform> Instances;
+	Instances.Reserve(MaximumPointCount + 2);
+	for (int32 Index = FirstIndex;
+		Index <= LastIndex;
+		Index += Stride)
+	{
+		Instances.Emplace(
+			FQuat::Identity,
+			Preview.WorldPoints[Index],
+			FVector(Scale));
+	}
+	if (Instances.IsEmpty()
+		|| !Instances.Last().GetLocation().Equals(
+			Preview.WorldPoints[LastIndex],
+			1.0f))
+	{
+		Instances.Emplace(
+			FQuat::Identity,
+			Preview.WorldPoints[LastIndex],
+			FVector(Scale));
+	}
+	TrajectoryPointInstances->AddInstances(
+		Instances,
+		false,
+		true,
+		false);
 }

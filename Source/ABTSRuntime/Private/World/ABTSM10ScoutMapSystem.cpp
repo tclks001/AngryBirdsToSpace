@@ -12,6 +12,7 @@
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "World/ABTSM9Satellite.h"
 
 AABTSM10ScoutMapSystem::AABTSM10ScoutMapSystem()
 {
@@ -84,6 +85,12 @@ bool AABTSM10ScoutMapSystem::IsLandingPreviewActive() const
 	return LandingPreviewCamera != nullptr && LandingPreviewCamera->IsPreviewActive();
 }
 
+bool AABTSM10ScoutMapSystem::IsSatelliteLandingPreviewActive() const
+{
+	return LandingPreviewCamera != nullptr
+		&& LandingPreviewCamera->IsSatellitePreviewActive();
+}
+
 UTextureRenderTarget2D* AABTSM10ScoutMapSystem::GetLandingPreviewRenderTarget() const
 {
 	return LandingPreviewCamera ? LandingPreviewCamera->GetRenderTarget() : nullptr;
@@ -136,14 +143,52 @@ void AABTSM10ScoutMapSystem::EnsureLandingPreviewCamera()
 
 void AABTSM10ScoutMapSystem::UpdateLandingPreview(const float DeltaSeconds)
 {
-	if (!Settings.bShowReinforcedLandingPreview || !bScoutMapRevealed || !Planet.IsValid())
+	if (!bScoutMapRevealed || !Planet.IsValid())
 	{
 		if (LandingPreviewCamera) LandingPreviewCamera->DeactivatePreview();
 		return;
 	}
 
 	FABTSM6TrajectoryPreview Preview;
-	if (!TryGetQualifiedReinforcedLandingPreview(Preview))
+	if (!CopyCurrentTrajectoryPreview(Preview))
+	{
+		if (LandingPreviewCamera) LandingPreviewCamera->DeactivatePreview();
+		return;
+	}
+
+	AABTSM9Satellite* Satellite = nullptr;
+	AActor* E5Target = nullptr;
+	FVector TargetHalfExtentCM = FVector::ZeroVector;
+	if (Settings.bShowSatelliteE5LandingPreview
+		&& TryGetQualifiedSatelliteE5Preview(
+			Preview,
+			Satellite,
+			E5Target,
+			TargetHalfExtentCM))
+	{
+		EnsureLandingPreviewCamera();
+		if (LandingPreviewCamera)
+		{
+			LandingPreviewCamera->UpdateSatellitePreview(
+				Preview,
+				*Satellite,
+				*E5Target,
+				Satellite->GetPlanetRadiusCM(),
+				TargetHalfExtentCM,
+				DeltaSeconds);
+		}
+		return;
+	}
+
+	FVector2D LandingMapPosition;
+	const bool bQualifiedPrimaryLanding =
+		Settings.bShowReinforcedLandingPreview
+		&& Preview.SlingshotTier == EABTSSlingshotTier::Reinforced
+		&& Preview.bHasPrimarySurfaceLanding
+		&& ProjectWorldLocation(
+			Preview.PrimarySurfaceLandingWorld,
+			LandingMapPosition);
+	if (!bQualifiedPrimaryLanding)
 	{
 		if (LandingPreviewCamera) LandingPreviewCamera->DeactivatePreview();
 		return;
@@ -154,6 +199,53 @@ void AABTSM10ScoutMapSystem::UpdateLandingPreview(const float DeltaSeconds)
 	{
 		LandingPreviewCamera->UpdatePreview(Preview, *Planet.Get(), DeltaSeconds);
 	}
+}
+
+bool AABTSM10ScoutMapSystem::TryGetQualifiedSatelliteE5Preview(
+	const FABTSM6TrajectoryPreview& Preview,
+	AABTSM9Satellite*& OutSatellite,
+	AActor*& OutTarget,
+	FVector& OutTargetHalfExtentCM) const
+{
+	OutSatellite = nullptr;
+	OutTarget = nullptr;
+	OutTargetHalfExtentCM = FVector::ZeroVector;
+	if (Preview.SlingshotTier != EABTSSlingshotTier::Reinforced
+		|| !Preview.bHasSatelliteEncounter
+		|| Preview.WorldPoints.Num() < 2
+		|| !SlingshotSystem.IsValid()
+		|| !SlingshotSystem->CopySatellitePracticeTarget(
+			OutSatellite,
+			OutTarget,
+			OutTargetHalfExtentCM)
+		|| OutSatellite == nullptr
+		|| OutTarget == nullptr)
+	{
+		return false;
+	}
+	int32 ClosestSegmentStartIndex = INDEX_NONE;
+	FVector ClosestPoint;
+	FVector Tangent;
+	float ClosestDistanceCM = BIG_NUMBER;
+	if (!AABTSM101LandingPreviewCamera::FindClosestTrajectorySegmentToPoint(
+		Preview,
+		OutTarget->GetActorLocation(),
+		ClosestSegmentStartIndex,
+		ClosestPoint,
+		Tangent,
+		ClosestDistanceCM))
+	{
+		return false;
+	}
+	const float ActivationDistanceCM =
+		FMath::Max(
+			1.0f,
+			OutSatellite->GetPlanetRadiusCM())
+		* FMath::Clamp(
+			Settings.SatelliteE5PreviewPathProximityRadiusMultiplier,
+			1.0f,
+			8.0f);
+	return ClosestDistanceCM <= ActivationDistanceCM;
 }
 
 bool AABTSM10ScoutMapSystem::ResolveDependencies()

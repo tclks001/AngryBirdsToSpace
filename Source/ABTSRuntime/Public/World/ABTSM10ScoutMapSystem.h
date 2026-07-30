@@ -13,6 +13,7 @@ class AABTSM3Planet;
 class AABTSM6SlingshotSystem;
 class AABTSM6DestructibleProxy;
 class AABTSM101LandingPreviewCamera;
+class AABTSM9Satellite;
 class UHierarchicalInstancedStaticMeshComponent;
 class UTexture2D;
 class UTextureRenderTarget2D;
@@ -47,6 +48,8 @@ public:
 	bool TryGetQualifiedReinforcedLandingPreview(FABTSM6TrajectoryPreview& OutPreview) const;
 	/** True only while the scoped M10.1-B SceneCapture is currently eligible and visible. */
 	bool IsLandingPreviewActive() const;
+	/** Distinguishes the calibration-only far-side E5 label from the normal landing label. */
+	bool IsSatelliteLandingPreviewActive() const;
 	/** Runtime-only render target consumed by the M10 HUD; nullptr while no capture was initialized. */
 	UTextureRenderTarget2D* GetLandingPreviewRenderTarget() const;
 	/** True while M10.1-C has a long reinforced prediction and a valid fitted-plane snapshot. */
@@ -70,6 +73,11 @@ private:
 	bool IsInsideEnvironmentBroadphase(const FVector& WorldLocation) const;
 	void UpdateLandingPreview(float DeltaSeconds);
 	void EnsureLandingPreviewCamera();
+	bool TryGetQualifiedSatelliteE5Preview(
+		const FABTSM6TrajectoryPreview& Preview,
+		AABTSM9Satellite*& OutSatellite,
+		AActor*& OutTarget,
+		FVector& OutTargetHalfExtentCM) const;
 	void UpdateOrbitalOverview();
 	bool BuildOrbitalOverviewSnapshot(const FABTSM6TrajectoryPreview& Preview);
 	void ClearOrbitalOverview(bool bLogTransition);

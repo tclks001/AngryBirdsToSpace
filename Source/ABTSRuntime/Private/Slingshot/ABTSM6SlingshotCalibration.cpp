@@ -4,10 +4,13 @@
 
 #include "ABTSRuntime.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
+#include "EngineGlobals.h"
+#include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
+#include "World/ABTSM9Satellite.h"
 
 bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 	const FABTSM6LaunchProfileCatalog& InCatalog)
@@ -75,11 +78,28 @@ bool AABTSM6SlingshotSystem::CopyCalibrationCatalog(
 	return true;
 }
 
+bool AABTSM6SlingshotSystem::CopyCalibrationBirdCollisionRadius(
+	float& OutRadiusCM) const
+{
+	OutRadiusCM = 0.0f;
+	if (!bCalibrationModeEnabled || !Party.IsValid()) return false;
+	for (AABTSM25BirdCharacter* Bird : Party->GetPartyMembers())
+	{
+		if (Bird == nullptr) continue;
+		OutRadiusCM = FMath::Max(
+			OutRadiusCM,
+			Bird->GetSlingshotTrajectoryCollisionRadiusCM());
+	}
+	return FMath::IsFinite(OutRadiusCM) && OutRadiusCM > 0.0f;
+}
+
 void AABTSM6SlingshotSystem::BuildCalibrationReachEnvelopes(
 	TArray<FABTSM6ReachEnvelope>& OutEnvelopes) const
 {
 	OutEnvelopes.Reset();
 	if (!bCalibrationModeEnabled || !Planet.IsValid()) return;
+	float BirdCollisionRadiusCM = 0.0f;
+	if (!CopyCalibrationBirdCollisionRadius(BirdCollisionRadiusCM)) return;
 	for (const FABTSM6LaunchProfile& Profile : CalibrationLaunchProfileCatalog.Profiles)
 	{
 		OutEnvelopes.Add(
@@ -87,16 +107,84 @@ void AABTSM6SlingshotSystem::BuildCalibrationReachEnvelopes(
 				Profile,
 				Planet->GetPlanetRadiusCM(),
 				980.0f,
-				CalibrationLaunchProfileCatalog.FlightAirDragPerSecond));
+				CalibrationLaunchProfileCatalog.FlightAirDragPerSecond,
+				BirdCollisionRadiusCM));
 	}
+}
+
+void AABTSM6SlingshotSystem::ConfigureSatellitePracticeTarget(
+	AABTSM9Satellite& InSatellite,
+	AActor& InTargetActor,
+	const FVector& InTargetHalfExtentCM,
+	const float InPredictionStepSeconds,
+	const float InPredictionMaximumFlightSeconds)
+{
+	SatellitePracticeBody = &InSatellite;
+	SatellitePracticeTarget = &InTargetActor;
+	SatellitePracticeTargetHalfExtentCM =
+		InTargetHalfExtentCM.GetAbs().ComponentMax(FVector(1.0f));
+	SatellitePracticePredictionStepSeconds =
+		FMath::Clamp(InPredictionStepSeconds, 0.01f, 0.2f);
+	SatellitePracticePredictionMaximumFlightSeconds =
+		FMath::Clamp(InPredictionMaximumFlightSeconds, 2.0f, 60.0f);
+	ClearCurrentTrajectoryPreview();
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->ConfigureSatelliteFlightPresentation(
+			&InSatellite,
+			&InTargetActor);
+	}
+}
+
+void AABTSM6SlingshotSystem::ClearSatellitePracticeTarget(
+	const AActor* ExpectedTargetActor)
+{
+	if (ExpectedTargetActor != nullptr
+		&& SatellitePracticeTarget.Get() != ExpectedTargetActor)
+	{
+		return;
+	}
+	SatellitePracticeBody.Reset();
+	SatellitePracticeTarget.Reset();
+	SatellitePracticeTargetHalfExtentCM = FVector::ZeroVector;
+	SatellitePracticePredictionStepSeconds = 0.0f;
+	SatellitePracticePredictionMaximumFlightSeconds = 0.0f;
+	ClearCurrentTrajectoryPreview();
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->ClearSatelliteFlightPresentation();
+	}
+}
+
+bool AABTSM6SlingshotSystem::CopySatellitePracticeTarget(
+	AABTSM9Satellite*& OutSatellite,
+	AActor*& OutTargetActor,
+	FVector& OutTargetHalfExtentCM) const
+{
+	OutSatellite = SatellitePracticeBody.Get();
+	OutTargetActor = SatellitePracticeTarget.Get();
+	OutTargetHalfExtentCM = SatellitePracticeTargetHalfExtentCM;
+	return OutSatellite != nullptr
+		&& OutTargetActor != nullptr
+		&& OutTargetHalfExtentCM.GetMin() > 0.0f;
 }
 
 bool AABTSM6SlingshotSystem::CopyActiveCalibrationLaunchSample(
 	FABTSM6LaunchCalibrationTelemetry& OutTelemetry,
-	FVector& OutBirdWorldLocation) const
+	FVector& OutBirdWorldLocation,
+	bool* OutHasCurrentSatelliteBodyEvidence,
+	bool* OutHasCurrentSatelliteE5Evidence) const
 {
 	OutTelemetry = FABTSM6LaunchCalibrationTelemetry();
 	OutBirdWorldLocation = FVector::ZeroVector;
+	if (OutHasCurrentSatelliteBodyEvidence)
+	{
+		*OutHasCurrentSatelliteBodyEvidence = false;
+	}
+	if (OutHasCurrentSatelliteE5Evidence)
+	{
+		*OutHasCurrentSatelliteE5Evidence = false;
+	}
 	if (!bActiveLaunchCalibrationTelemetry
 		|| !LaunchedBird.IsValid()
 		|| (LaunchState != EABTSM6LaunchState::Flying
@@ -108,6 +196,16 @@ bool AABTSM6SlingshotSystem::CopyActiveCalibrationLaunchSample(
 		return false;
 	}
 	OutTelemetry = ActiveLaunchCalibrationTelemetry;
+	if (OutHasCurrentSatelliteBodyEvidence)
+	{
+		*OutHasCurrentSatelliteBodyEvidence =
+			CalibrationSatelliteBodyHitFrame == GFrameCounter;
+	}
+	if (OutHasCurrentSatelliteE5Evidence)
+	{
+		*OutHasCurrentSatelliteE5Evidence =
+			CalibrationSatelliteE5HitFrame == GFrameCounter;
+	}
 	OutBirdWorldLocation =
 		LaunchState == EABTSM6LaunchState::Returning
 			? PendingCompletedLandingLocation
@@ -117,34 +215,101 @@ bool AABTSM6SlingshotSystem::CopyActiveCalibrationLaunchSample(
 
 void AABTSM6SlingshotSystem::NotifyCalibrationTargetEvent(
 	const FName TargetId,
-	const bool bSatelliteBodyFirst)
+	const bool bSatelliteBodyFirst,
+	const bool bFinalizeSameFrameSatelliteEvidence)
 {
 	if (!bActiveLaunchCalibrationTelemetry)
 	{
 		return;
 	}
+	const bool bNewSatelliteBody =
+		bSatelliteBodyFirst && TargetId == TEXT("Satellite.Body");
+	const bool bNewE5Authority =
+		!bSatelliteBodyFirst
+		&& TargetId == TEXT("Satellite.Backside");
 	const bool bNewSatelliteAuthority =
-		bSatelliteBodyFirst || TargetId == TEXT("Satellite.Backside");
-	const bool bExistingSatelliteAuthority =
-		ActiveLaunchCalibrationTelemetry.bHitSatelliteBodyFirst
-		|| ActiveLaunchCalibrationTelemetry.HitTargetId
-			== TEXT("Satellite.Backside");
-	if (bExistingSatelliteAuthority
-		|| (!bNewSatelliteAuthority
-			&& ActiveLaunchCalibrationTelemetry.HitTargetId != NAME_None))
+		bNewSatelliteBody || bNewE5Authority;
+	if (bNewSatelliteAuthority
+		&& CalibrationSatelliteDecisionFrame != MAX_uint64)
 	{
 		return;
+	}
+	if (bNewSatelliteBody)
+	{
+		CalibrationSatelliteBodyHitFrame = GFrameCounter;
+	}
+	else if (bNewE5Authority)
+	{
+		CalibrationSatelliteE5HitFrame = GFrameCounter;
+	}
+	const bool bExistingE5Authority =
+		ActiveLaunchCalibrationTelemetry.HitTargetId
+		== TEXT("Satellite.Backside");
+	const bool bExistingSatelliteBodyAuthority =
+		ActiveLaunchCalibrationTelemetry.bHitSatelliteBodyFirst;
+	const bool bExistingSatelliteAuthority =
+		bExistingE5Authority || bExistingSatelliteBodyAuthority;
+	const bool bOpposingEvidenceIsCurrent =
+		(bNewE5Authority
+			&& bExistingSatelliteBodyAuthority
+			&& CalibrationSatelliteBodyHitFrame == GFrameCounter)
+		|| (bNewSatelliteBody
+			&& bExistingE5Authority
+			&& CalibrationSatelliteE5HitFrame == GFrameCounter);
+	if (bNewSatelliteAuthority)
+	{
+		if (!bExistingSatelliteAuthority
+			&& ActiveLaunchCalibrationTelemetry.HitTargetId != NAME_None)
+		{
+			return;
+		}
+		if (bExistingSatelliteAuthority
+			&& !bFinalizeSameFrameSatelliteEvidence)
+		{
+			// Chaos contact order is not authority. Keep the first contact only as
+			// provisional telemetry; the Rig will resolve both shapes by sweep.
+			return;
+		}
+		if (bExistingSatelliteAuthority
+			&& bFinalizeSameFrameSatelliteEvidence
+			&& bExistingE5Authority != bNewE5Authority
+			&& !bOpposingEvidenceIsCurrent)
+		{
+			return;
+		}
+	}
+	else if (ActiveLaunchCalibrationTelemetry.HitTargetId != NAME_None)
+	{
+		return;
+	}
+	if (bNewSatelliteAuthority && bFinalizeSameFrameSatelliteEvidence)
+	{
+		CalibrationSatelliteDecisionFrame = GFrameCounter;
 	}
 	ActiveLaunchCalibrationTelemetry.HitTargetId = TargetId;
 	ActiveLaunchCalibrationTelemetry.bHitSatelliteBodyFirst = bSatelliteBodyFirst;
 	ActiveLaunchCalibrationTelemetry.bHitTarget = !bSatelliteBodyFirst
 		&& TargetId != TEXT("Timeout");
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][Calibration][TargetEvent] Seq=%d Target=%s Hit=%d SatelliteBodyFirst=%d"),
+		TEXT("[ABTS][Calibration][TargetEvent] Seq=%d Target=%s Hit=%d SatelliteBodyFirst=%d Finalized=%d"),
 		ActiveLaunchCalibrationTelemetry.Sequence,
 		*TargetId.ToString(),
 		ActiveLaunchCalibrationTelemetry.bHitTarget ? 1 : 0,
-		bSatelliteBodyFirst ? 1 : 0);
+		bSatelliteBodyFirst ? 1 : 0,
+		bFinalizeSameFrameSatelliteEvidence ? 1 : 0);
+	if (!bSatelliteBodyFirst
+		&& TargetId == TEXT("Satellite.Backside")
+		&& bFinalizeSameFrameSatelliteEvidence)
+	{
+		if (SlingshotCamera)
+		{
+			SlingshotCamera->NotifySatelliteE5Hit();
+		}
+		CalibrationSuccessReturnRemainingSeconds =
+			FMath::Max(
+				0.1f,
+				CalibrationE5ImpactHoldSeconds);
+	}
 }
 
 AABTSM71PlaceableSlingshotActor*

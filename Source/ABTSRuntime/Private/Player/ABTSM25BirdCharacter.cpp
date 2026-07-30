@@ -359,6 +359,50 @@ FVector AABTSM25BirdCharacter::GetSlingshotVelocity() const
 	return ForceMovement->GetVelocity();
 }
 
+float AABTSM25BirdCharacter::GetSlingshotTrajectoryCollisionRadiusCM() const
+{
+	const bool bMovementModeAlreadyUsesChaos =
+		MovementMode == EABTSBirdMovementMode::ChaosRigidBody;
+	bool bUsesChaosCollision = bMovementModeAlreadyUsesChaos;
+	// The calibration Rig can be spawned from the initial player's BeginPlay
+	// callback before that player's ConfigureMovementMode returns. Resolve the
+	// already-authored level selector in that narrow startup window instead of
+	// briefly reporting the inactive capsule half-height.
+	if (!bUsesChaosCollision && GetWorld() != nullptr)
+	{
+		TActorIterator<AABTSMovementModeSelector> It(GetWorld());
+		if (It)
+		{
+			bUsesChaosCollision =
+				It->MovementMode
+					== EABTSBirdMovementMode::ChaosRigidBody;
+		}
+	}
+	if (bUsesChaosCollision && ChaosPhysicsSphere != nullptr)
+	{
+		if (!bMovementModeAlreadyUsesChaos
+			&& GetCapsuleComponent() != nullptr)
+		{
+			// Super::BeginPlay may assemble the calibration Rig before this
+			// actor's ConfigureMovementMode has captured SavedChaosCapsuleRadius.
+			// In that window the still-authoritative capsule has the authored
+			// world-space radius; do not leak the native 42 cm initializer.
+			return FMath::Max(
+				1.0f,
+				GetCapsuleComponent()->GetScaledCapsuleRadius());
+		}
+		// ConfigureChaosPhysicsBody scales the Engine sphere from this captured
+		// capsule radius. Component Bounds may include attached visual/capsule
+		// children and therefore is not the Chaos collision shape authority.
+		return FMath::Max(1.0f, SavedChaosCapsuleRadius);
+	}
+	// Preserve the established ForceSuspension preview contract: radial terrain
+	// clearance uses the capsule's scaled radius, not its half height.
+	return GetCapsuleComponent()
+		? FMath::Max(1.0f, GetCapsuleComponent()->GetScaledCapsuleRadius())
+		: 1.0f;
+}
+
 bool AABTSM25BirdCharacter::IsSlingshotFlightActive() const
 {
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody) return ChaosMovement->IsBallisticFlight();

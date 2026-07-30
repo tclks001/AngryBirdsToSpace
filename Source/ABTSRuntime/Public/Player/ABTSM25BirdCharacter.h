@@ -80,6 +80,8 @@ public:
 	void FinishSlingshotReturn();
 	void SetSlingshotVelocity(const FVector& InVelocity);
 	FVector GetSlingshotVelocity() const;
+	/** Conservative radius consumed by every slingshot predictor and swept target test. */
+	float GetSlingshotTrajectoryCollisionRadiusCM() const;
 	bool IsSlingshotFlightActive() const;
 	UABTSRadialForceMovementComponent* GetForceMovementComponent() const { return ForceMovement; }
 	UABTSChaosBirdMovementComponent* GetChaosMovementComponent() const { return ChaosMovement; }

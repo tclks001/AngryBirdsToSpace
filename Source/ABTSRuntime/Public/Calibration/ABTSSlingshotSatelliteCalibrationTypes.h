@@ -200,7 +200,7 @@ struct ABTSRUNTIME_API FABTSSatellitePracticePreset
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-	int32 Version = 1;
+	int32 Version = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Satellite", meta = (ClampMin = "0.02", ClampMax = "0.5"))
 	float SatelliteRadiusPrimaryRatio = 0.125f;
@@ -230,15 +230,17 @@ struct ABTSRUNTIME_API FABTSSatellitePracticePreset
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "-180.0", ClampMax = "180.0", Units = "deg"))
 	float TargetLocalAzimuthDeg = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "0.0", Units = "cm"))
-	float TargetAltitudeAboveSurfaceCM = 560.0f;
-
+	/** Half extent of the temporary E5 cube resting on the satellite surface. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "20.0", Units = "cm"))
 	float TargetProxyRadiusCM = 420.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "10.0", Units = "cm"))
-	float BirdCollisionRadiusCM = 55.0f;
+	/**
+	 * Runtime snapshot resolved from the actual party collision bodies. It is
+	 * intentionally not a second Blueprint-authored collision source.
+	 */
+	float BirdCollisionRadiusCM = 42.0f;
 
+	/** Small gap between the E5 cube and the ideal satellite sphere. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "0.0", Units = "cm"))
 	float TargetSatelliteClearanceCM = 20.0f;
 
@@ -432,6 +434,8 @@ struct ABTSRUNTIME_API FABTSCalibrationScenario
 	FVector LaunchWorldLocation = FVector::ZeroVector;
 	FABTSM6CalibrationLaunchFrame LaunchFrame;
 	FVector TargetWorldLocation = FVector::ZeroVector;
+	FTransform TargetWorldTransform = FTransform::Identity;
+	FVector TargetHalfExtentCM = FVector(420.0f);
 	float TargetProxyRadiusCM = 420.0f;
 	FABTSCalibrationGravitySnapshot Gravity;
 };
@@ -469,7 +473,8 @@ struct ABTSRUNTIME_API FABTSSlingshotSatelliteCalibrationModel
 		const FABTSM6LaunchProfile& Profile,
 		float PrimaryRadiusCM,
 		float PrimarySurfaceGravityCMPerSec2,
-		float FlightAirDragPerSecond);
+		float FlightAirDragPerSecond,
+		float BirdCollisionRadiusCM);
 
 	static uint64 ComputeSatellitePracticePresetHash(const FABTSSatellitePracticePreset& Preset);
 	static uint64 ComputeGravitySnapshotHash(const FABTSCalibrationGravitySnapshot& Snapshot);
@@ -478,6 +483,13 @@ struct ABTSRUNTIME_API FABTSSlingshotSatelliteCalibrationModel
 		const FABTSCalibrationGravitySnapshot& Snapshot,
 		const FABTSSatellitePracticePreset& Preset,
 		FVector& OutTargetWorldLocation,
+		FString* OutFailureReason = nullptr);
+	/** Builds the surface-resting E5 cube frame; local +Z is satellite outward. */
+	static bool BuildSatelliteTargetWorldTransform(
+		const FVector& LaunchWorldLocation,
+		const FABTSCalibrationGravitySnapshot& Snapshot,
+		const FABTSSatellitePracticePreset& Preset,
+		FTransform& OutTargetWorldTransform,
 		FString* OutFailureReason = nullptr);
 	static FABTSCalibrationTrajectoryResult IntegrateTrajectory(
 		const FABTSCalibrationScenario& Scenario,

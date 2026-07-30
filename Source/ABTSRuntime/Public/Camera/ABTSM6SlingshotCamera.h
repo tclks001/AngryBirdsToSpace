@@ -8,6 +8,17 @@
 
 class AABTSM25BirdCharacter;
 class AABTSM2Planet;
+class AABTSM9Satellite;
+
+UENUM(BlueprintType)
+enum class EABTSM9SatelliteFlightCameraPhase : uint8
+{
+	PrimaryFollow,
+	SatelliteApproach,
+	SatelliteOrbit,
+	E5Approach,
+	E5Impact
+};
 
 /** Roll-locked aim and projectile-follow camera used only during one M6 launch. */
 UCLASS()
@@ -35,10 +46,25 @@ public:
 		FVector& OutOutOfPlaneAxis) const;
 	void FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet);
 	void FollowBirdPlanar(AABTSM25BirdCharacter* InBird, const FVector& InPlanarUp);
+	void ConfigureSatelliteFlightPresentation(
+		AABTSM9Satellite* InSatellite,
+		AActor* InE5Target);
+	void ClearSatelliteFlightPresentation();
+	void NotifySatelliteE5Hit();
+	void BeginReturnToPrimaryFrame();
+	EABTSM9SatelliteFlightCameraPhase GetSatelliteFlightPhase() const
+	{
+		return SatelliteFlightPhase;
+	}
 
 private:
 	void UpdateAim(float DeltaSeconds);
 	void UpdateFollow(float DeltaSeconds);
+	bool UpdateSatelliteFollow(
+		AABTSM25BirdCharacter& TargetBird,
+		float DeltaSeconds);
+	void SetSatelliteFlightPhase(
+		EABTSM9SatelliteFlightCameraPhase NewPhase);
 	bool BuildAimView(
 		const FVector& InCenter,
 		const FVector& InForward,
@@ -55,6 +81,14 @@ private:
 	FVector PlanarFollowUp = FVector::UpVector;
 	bool bPlanarFollow = false;
 	bool bFollowBird = false;
+	TWeakObjectPtr<AABTSM9Satellite> Satellite;
+	TWeakObjectPtr<AActor> E5Target;
+	EABTSM9SatelliteFlightCameraPhase SatelliteFlightPhase =
+		EABTSM9SatelliteFlightCameraPhase::PrimaryFollow;
+	FVector SatelliteOrbitViewNormal = FVector::ZeroVector;
+	bool bSatelliteE5Hit = false;
+	/** Return flight must remain in the primary frame until the next launch. */
+	bool bForcePrimaryFrameUntilNextFollow = false;
 
 	/** Distance from the fixed slingshot-frame focus to the launch camera. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim", meta = (ClampMin = "100.0", UIMin = "300.0", UIMax = "3000.0"))
@@ -76,5 +110,36 @@ private:
 	float FlightHeightCM = 310.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")
 	float FollowSpeed = 7.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "2.0", ClampMax = "10.0"))
+	float SatelliteApproachEnterRadiusMultiplier = 4.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "2.0", ClampMax = "12.0"))
+	float SatelliteApproachExitRadiusMultiplier = 4.8f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "1.1", ClampMax = "5.0"))
+	float SatelliteOrbitEnterRadiusMultiplier = 2.3f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "1.1", ClampMax = "6.0"))
+	float SatelliteOrbitExitRadiusMultiplier = 2.7f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "100.0", ClampMax = "10000.0", Units = "cm"))
+	float SatelliteSideViewDistanceCM = 2600.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "0.0", ClampMax = "3000.0", Units = "cm"))
+	float SatelliteSideViewHeightCM = 260.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "100.0", ClampMax = "10000.0", Units = "cm"))
+	float SatelliteE5ApproachDistanceCM = 1900.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "100.0", ClampMax = "12000.0", Units = "cm"))
+	float SatelliteE5ApproachExitDistanceCM = 2300.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SatelliteFocusBias = 0.42f;
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "0.1", ClampMax = "20.0"))
+	float SatelliteFollowBlendSpeed = 3.5f;
 };
 

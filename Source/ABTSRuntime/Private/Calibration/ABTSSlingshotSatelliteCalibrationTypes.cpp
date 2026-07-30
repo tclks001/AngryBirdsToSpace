@@ -3,6 +3,7 @@
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 
 #include "Algo/Sort.h"
+#include "Physics/ABTSSweptCollision.h"
 
 namespace ABTSSlingshotCalibrationPrivate
 {
@@ -50,64 +51,11 @@ namespace ABTSSlingshotCalibrationPrivate
 			&& FMath::IsFinite(Profile.ComfortablePullMaximum);
 	}
 
-	bool SegmentSphereFirstAlpha(
-		const FVector& SegmentStart,
-		const FVector& SegmentEnd,
-		const FVector& SphereCenter,
-		const float SphereRadius,
-		float& OutAlpha)
-	{
-		const FVector Segment = SegmentEnd - SegmentStart;
-		const FVector Offset = SegmentStart - SphereCenter;
-		const double A = Segment.SizeSquared();
-		if (A <= UE_DOUBLE_SMALL_NUMBER)
-		{
-			if (Offset.SizeSquared() <= FMath::Square(static_cast<double>(SphereRadius)))
-			{
-				OutAlpha = 0.0f;
-				return true;
-			}
-			return false;
-		}
-		const double B = 2.0 * FVector::DotProduct(Offset, Segment);
-		const double C = Offset.SizeSquared() - FMath::Square(static_cast<double>(SphereRadius));
-		const double Discriminant = B * B - 4.0 * A * C;
-		if (Discriminant < 0.0) return false;
-		const double Root = FMath::Sqrt(Discriminant);
-		const double Alpha0 = (-B - Root) / (2.0 * A);
-		const double Alpha1 = (-B + Root) / (2.0 * A);
-		const double Alpha = Alpha0 >= 0.0 && Alpha0 <= 1.0
-			? Alpha0
-			: Alpha1 >= 0.0 && Alpha1 <= 1.0 ? Alpha1 : -1.0;
-		if (Alpha < 0.0) return false;
-		OutAlpha = static_cast<float>(Alpha);
-		return true;
-	}
-
 	float SampleRange(const float Minimum, const float Maximum, const int32 Index, const int32 Count)
 	{
 		return Count <= 1
 			? (Minimum + Maximum) * 0.5f
 			: FMath::Lerp(Minimum, Maximum, static_cast<float>(Index) / static_cast<float>(Count - 1));
-	}
-
-	float PointSegmentDistance(
-		const FVector& Point,
-		const FVector& SegmentStart,
-		const FVector& SegmentEnd)
-	{
-		const FVector Segment = SegmentEnd - SegmentStart;
-		const double SegmentSizeSquared = Segment.SizeSquared();
-		if (SegmentSizeSquared <= UE_DOUBLE_SMALL_NUMBER)
-		{
-			return FVector::Distance(Point, SegmentStart);
-		}
-		const double Alpha = FMath::Clamp(
-			FVector::DotProduct(Point - SegmentStart, Segment)
-				/ SegmentSizeSquared,
-			0.0,
-			1.0);
-		return FVector::Distance(Point, SegmentStart + Segment * Alpha);
 	}
 
 	bool IsValidLaunchFrame(const FABTSM6CalibrationLaunchFrame& Frame)
@@ -386,7 +334,8 @@ FABTSM6ReachEnvelope FABTSSlingshotSatelliteCalibrationModel::EstimateReachEnvel
 	const FABTSM6LaunchProfile& Profile,
 	const float PrimaryRadiusCM,
 	const float PrimarySurfaceGravityCMPerSec2,
-	const float FlightAirDragPerSecond)
+	const float FlightAirDragPerSecond,
+	const float BirdCollisionRadiusCM)
 {
 	FABTSM6ReachEnvelope Envelope;
 	Envelope.Tier = Profile.Tier;
@@ -395,7 +344,7 @@ FABTSM6ReachEnvelope FABTSSlingshotSatelliteCalibrationModel::EstimateReachEnvel
 	const float Mu = SurfaceGravity * FMath::Square(RadiusCM);
 	const float StepSeconds = 0.04f;
 	const int32 MaximumSteps = FMath::CeilToInt(20.0f / StepSeconds);
-	const float BirdRadiusCM = 55.0f;
+	const float BirdRadiusCM = FMath::Max(1.0f, BirdCollisionRadiusCM);
 	const FVector Start(RadiusCM + 250.0f, 0.0f, 0.0f);
 	const auto MeasureMaximumReach = [&](const float PullAlpha)
 	{
@@ -452,7 +401,6 @@ uint64 FABTSSlingshotSatelliteCalibrationModel::ComputeSatellitePracticePresetHa
 	AppendStringHash(Hash, Preset.TargetBody.ToString());
 	AppendHash(Hash, Quantize(Preset.BacksideAngleDeg));
 	AppendHash(Hash, Quantize(Preset.TargetLocalAzimuthDeg));
-	AppendHash(Hash, Quantize(Preset.TargetAltitudeAboveSurfaceCM));
 	AppendHash(Hash, Quantize(Preset.TargetProxyRadiusCM));
 	AppendHash(Hash, Quantize(Preset.BirdCollisionRadiusCM));
 	AppendHash(Hash, Quantize(Preset.TargetSatelliteClearanceCM));
@@ -498,28 +446,47 @@ bool FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldLocation(
 	FVector& OutTargetWorldLocation,
 	FString* OutFailureReason)
 {
+	FTransform TargetTransform;
+	if (!BuildSatelliteTargetWorldTransform(
+		LaunchWorldLocation,
+		Snapshot,
+		Preset,
+		TargetTransform,
+		OutFailureReason))
+	{
+		return false;
+	}
+	OutTargetWorldLocation = TargetTransform.GetLocation();
+	return true;
+}
+
+bool FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
+	const FVector& LaunchWorldLocation,
+	const FABTSCalibrationGravitySnapshot& Snapshot,
+	const FABTSSatellitePracticePreset& Preset,
+	FTransform& OutTargetWorldTransform,
+	FString* OutFailureReason)
+{
 	const auto Fail = [OutFailureReason](const TCHAR* Reason)
 	{
 		if (OutFailureReason) *OutFailureReason = Reason;
 		return false;
 	};
-	const float RequiredAltitude = Preset.TargetProxyRadiusCM
-		+ Preset.BirdCollisionRadiusCM * 2.0f
-		+ Preset.TargetSatelliteClearanceCM;
 	if (Preset.TargetBody != TEXT("PracticeSatellite"))
 	{
 		return Fail(TEXT("TargetBody does not resolve to the practice satellite."));
 	}
 	if (!FMath::IsFinite(Preset.BacksideAngleDeg)
 		|| !FMath::IsFinite(Preset.TargetLocalAzimuthDeg)
-		|| !FMath::IsFinite(Preset.TargetAltitudeAboveSurfaceCM)
 		|| !FMath::IsFinite(Preset.TargetProxyRadiusCM)
+		|| !FMath::IsFinite(Preset.TargetSatelliteClearanceCM)
 		|| Preset.BacksideAngleDeg <= 90.0f
 		|| Preset.BacksideAngleDeg >= 180.0f
-		|| Preset.TargetAltitudeAboveSurfaceCM + KINDA_SMALL_NUMBER < RequiredAltitude
+		|| Preset.TargetProxyRadiusCM <= 0.0f
+		|| Preset.TargetSatelliteClearanceCM < 0.0f
 		|| Snapshot.SatelliteRadiusCM <= 0.0f)
 	{
-		return Fail(TEXT("Backside target is not outside the bird-expanded satellite body."));
+		return Fail(TEXT("Backside E5 surface frame is invalid."));
 	}
 	const FVector FacingLaunch =
 		(LaunchWorldLocation - Snapshot.SatelliteCenterWorld).GetSafeNormal();
@@ -541,8 +508,32 @@ bool FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldLocation(
 	const FVector TargetDirection =
 		(FacingLaunch * FMath::Cos(BacksideRadians)
 			+ AzimuthTangent * FMath::Sin(BacksideRadians)).GetSafeNormal();
-	OutTargetWorldLocation = Snapshot.SatelliteCenterWorld
-		+ TargetDirection * (Snapshot.SatelliteRadiusCM + Preset.TargetAltitudeAboveSurfaceCM);
+	FVector TargetForward =
+		FVector::VectorPlaneProject(
+			FacingLaunch,
+			TargetDirection).GetSafeNormal();
+	if (TargetForward.IsNearlyZero())
+	{
+		TargetForward =
+			FVector::VectorPlaneProject(
+				ReferenceUp,
+				TargetDirection).GetSafeNormal();
+	}
+	if (TargetForward.IsNearlyZero())
+	{
+		return Fail(TEXT("Backside E5 tangent frame is degenerate."));
+	}
+	const FVector TargetCenter =
+		Snapshot.SatelliteCenterWorld
+		+ TargetDirection
+			* (Snapshot.SatelliteRadiusCM
+				+ Preset.TargetProxyRadiusCM
+				+ Preset.TargetSatelliteClearanceCM);
+	OutTargetWorldTransform = FTransform(
+		FRotationMatrix::MakeFromXZ(
+			TargetForward,
+			TargetDirection).ToQuat(),
+		TargetCenter);
 	if (OutFailureReason) OutFailureReason->Reset();
 	return true;
 }
@@ -562,7 +553,12 @@ FABTSCalibrationTrajectoryResult FABTSSlingshotSatelliteCalibrationModel::Integr
 		1,
 		FMath::CeilToInt(FMath::Clamp(Preset.MaximumFlightSeconds, 2.0f, 60.0f) / StepSeconds));
 	const float BirdRadiusCM = FMath::Max(1.0f, Preset.BirdCollisionRadiusCM);
-	const float TargetRadiusCM = FMath::Max(1.0f, Scenario.TargetProxyRadiusCM + BirdRadiusCM);
+	FTransform TargetTransform = Scenario.TargetWorldTransform;
+	TargetTransform.SetLocation(Scenario.TargetWorldLocation);
+	TargetTransform.SetScale3D(FVector::OneVector);
+	const FVector TargetHalfExtentCM =
+		Scenario.TargetHalfExtentCM.GetAbs().ComponentMax(
+			FVector(FMath::Max(1.0f, Scenario.TargetProxyRadiusCM)));
 	const float SatelliteBodyRadiusCM =
 		FMath::Max(1.0f, Scenario.Gravity.SatelliteRadiusCM + BirdRadiusCM);
 	const float PrimaryBodyRadiusCM =
@@ -572,7 +568,11 @@ FABTSCalibrationTrajectoryResult FABTSSlingshotSatelliteCalibrationModel::Integr
 	const float SatelliteMu = FMath::Max(0.0f, Scenario.Gravity.SatelliteSurfaceGravityCMPerSec2)
 		* FMath::Square(FMath::Max(1.0f, Scenario.Gravity.SatelliteRadiusCM));
 	Result.ClosestTargetClearanceCM =
-		FVector::Distance(Position, Scenario.TargetWorldLocation) - TargetRadiusCM;
+		ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+			Position,
+			TargetTransform,
+			TargetHalfExtentCM,
+			BirdRadiusCM);
 
 	for (int32 StepIndex = 0; StepIndex < MaximumSteps; ++StepIndex)
 	{
@@ -599,20 +599,29 @@ FABTSCalibrationTrajectoryResult FABTSSlingshotSatelliteCalibrationModel::Integr
 				- Scenario.Gravity.PrimaryRadiusCM);
 		Result.ClosestTargetClearanceCM = FMath::Min(
 			Result.ClosestTargetClearanceCM,
-			PointSegmentDistance(
-				Scenario.TargetWorldLocation,
-				Position,
-				NextPosition) - TargetRadiusCM);
+			ABTSSweptCollision::
+				SegmentExpandedOrientedBoxMinimumClearance(
+					Position,
+					NextPosition,
+					TargetTransform,
+					TargetHalfExtentCM,
+					BirdRadiusCM));
 
 		float TargetAlpha = BIG_NUMBER;
 		float SatelliteAlpha = BIG_NUMBER;
 		float PrimaryAlpha = BIG_NUMBER;
-		const bool bTargetHit = SegmentSphereFirstAlpha(
-			Position, NextPosition, Scenario.TargetWorldLocation, TargetRadiusCM, TargetAlpha);
-		const bool bSatelliteHit = SegmentSphereFirstAlpha(
+		const bool bTargetHit =
+			ABTSSweptCollision::SegmentExpandedOrientedBoxFirstAlpha(
+				Position,
+				NextPosition,
+				TargetTransform,
+				TargetHalfExtentCM,
+				BirdRadiusCM,
+				TargetAlpha);
+		const bool bSatelliteHit = ABTSSweptCollision::SegmentSphereFirstAlpha(
 			Position, NextPosition, Scenario.Gravity.SatelliteCenterWorld,
 			SatelliteBodyRadiusCM, SatelliteAlpha);
-		const bool bPrimaryHit = SegmentSphereFirstAlpha(
+		const bool bPrimaryHit = ABTSSweptCollision::SegmentSphereFirstAlpha(
 			Position, NextPosition, Scenario.Gravity.PrimaryCenterWorld,
 			PrimaryBodyRadiusCM, PrimaryAlpha);
 		const float FirstAlpha = FMath::Min3(

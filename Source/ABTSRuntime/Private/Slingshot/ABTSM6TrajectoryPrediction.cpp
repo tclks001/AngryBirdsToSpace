@@ -4,10 +4,12 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Physics/ABTSSweptCollision.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "World/ABTSM9Satellite.h"
 
 namespace
 {
@@ -25,6 +27,27 @@ namespace
 		return CenterOffset.Size()
 			- Planet.GetSurfaceRadiusAtDirection(CenterOffset.GetSafeNormal())
 			- BirdCollisionRadiusCM;
+	}
+
+	float PointSegmentDistance(
+		const FVector& Point,
+		const FVector& SegmentStart,
+		const FVector& SegmentEnd)
+	{
+		const FVector Segment = SegmentEnd - SegmentStart;
+		const double LengthSquared = Segment.SizeSquared();
+		if (LengthSquared <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return FVector::Distance(Point, SegmentStart);
+		}
+		const double Alpha = FMath::Clamp(
+			FVector::DotProduct(Point - SegmentStart, Segment)
+				/ LengthSquared,
+			0.0,
+			1.0);
+		return FVector::Distance(
+			Point,
+			SegmentStart + Segment * Alpha);
 	}
 }
 
@@ -84,28 +107,54 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 	Candidate.SlingshotTier = Tier;
 	Candidate.InitialWorldLocation = Start;
 	Candidate.InitialWorldVelocity = InitialVelocity;
+	AABTSM9Satellite* PracticeSatellite = nullptr;
+	AActor* PracticeTarget = nullptr;
+	FVector PracticeTargetHalfExtentCM = FVector::ZeroVector;
+	const bool bHasPracticeTarget =
+		CopySatellitePracticeTarget(
+			PracticeSatellite,
+			PracticeTarget,
+			PracticeTargetHalfExtentCM);
 	const int32 VisualSteps = FMath::Clamp(TrajectorySampleCount, 8, 128);
 	const bool bNeedsDistantLanding = !bPlanarTestMode && Tier == EABTSSlingshotTier::Reinforced;
-	const int32 SimulationSteps = bNeedsDistantLanding
-		? FMath::Max(VisualSteps, FMath::Clamp(ReinforcedLandingPredictionSampleCount, 54, 512))
-		: VisualSteps;
+	const float StepSeconds = bHasPracticeTarget
+		? FMath::Clamp(SatellitePracticePredictionStepSeconds, 0.01f, 0.2f)
+		: FMath::Clamp(TrajectoryStepSeconds, 0.01f, 0.25f);
+	const int32 SimulationSteps = bHasPracticeTarget
+		? FMath::Max(
+			VisualSteps,
+			FMath::CeilToInt(
+				FMath::Clamp(
+					SatellitePracticePredictionMaximumFlightSeconds,
+					2.0f,
+					60.0f)
+				/ StepSeconds))
+		: (bNeedsDistantLanding
+			? FMath::Max(
+				VisualSteps,
+				FMath::Clamp(
+					ReinforcedLandingPredictionSampleCount,
+					54,
+					512))
+			: VisualSteps);
 	Candidate.WorldPoints.Reserve(SimulationSteps + 1);
 	Candidate.WorldPoints.Add(Start);
 
 	FVector Position = Start;
 	FVector Velocity = InitialVelocity;
-	const float StepSeconds = FMath::Clamp(TrajectoryStepSeconds, 0.01f, 0.25f);
 	const FVector Center = bPlanarTestMode ? FVector::ZeroVector : Planet->GetPlanetCenterWorld();
 	const float Mu = bPlanarTestMode
 		? 0.0f
 		: PrimarySurfaceGravityCMPerSec2 * FMath::Square(Planet->GetPlanetRadiusCM());
-	const UPrimitiveComponent* BirdPhysicsBody = LaunchedBird->GetChaosPhysicsBody();
-	const float BirdCollisionRadiusCM = LaunchedBird->GetSelectedMovementMode() == EABTSBirdMovementMode::ChaosRigidBody
-		&& BirdPhysicsBody != nullptr
-		? BirdPhysicsBody->Bounds.SphereRadius
-		: (LaunchedBird->GetCapsuleComponent()
-			? LaunchedBird->GetCapsuleComponent()->GetScaledCapsuleRadius()
-			: 0.0f);
+	const float BirdCollisionRadiusCM =
+		LaunchedBird->GetSlingshotTrajectoryCollisionRadiusCM();
+	TArray<FABTSM9SatelliteBodySnapshot> SatelliteBodies;
+	if (!bPlanarTestMode)
+	{
+		ABTSM9Gravity::GatherSatelliteBodySnapshots(
+			GetWorld(),
+			SatelliteBodies);
+	}
 	float PreviousClearanceCM = bPlanarTestMode
 		? BIG_NUMBER
 		: QueryBirdClearance(*Planet, Position, BirdCollisionRadiusCM);
@@ -125,34 +174,162 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 			- Velocity * FMath::Max(0.0f, GetResolvedFlightAirDragPerSecond());
 		Velocity += Acceleration * StepSeconds;
 		const FVector NextPosition = Position + Velocity * StepSeconds;
-		Candidate.PredictedPathLengthCM += FVector::Distance(Position, NextPosition);
 
+		float SatelliteBodyAlpha = BIG_NUMBER;
+		int32 HitSatelliteIndex = INDEX_NONE;
+		const bool bSatelliteBodyHit =
+			ABTSM9Gravity::FindFirstSatelliteBodyHit(
+				SatelliteBodies,
+				Position,
+				NextPosition,
+				BirdCollisionRadiusCM,
+				SatelliteBodyAlpha,
+				HitSatelliteIndex);
+		float SatelliteTargetAlpha = BIG_NUMBER;
+		const bool bSatelliteTargetHit =
+			bHasPracticeTarget
+			&& PracticeSatellite != nullptr
+			&& PracticeTarget != nullptr
+			&& ABTSSweptCollision::SegmentExpandedOrientedBoxFirstAlpha(
+				Position,
+				NextPosition,
+				PracticeTarget->GetActorTransform(),
+				PracticeTargetHalfExtentCM,
+				BirdCollisionRadiusCM,
+				SatelliteTargetAlpha);
+		float PrimaryAlpha = BIG_NUMBER;
+		FVector PrimaryImpactLocation = FVector::ZeroVector;
+		float NextClearanceCM = BIG_NUMBER;
+		bool bPrimaryHit = false;
 		if (!bPlanarTestMode)
 		{
-			const float NextClearanceCM = QueryBirdClearance(*Planet, NextPosition, BirdCollisionRadiusCM);
-			if (!bDepartedSurface && NextClearanceCM >= DepartureClearanceCM)
+			NextClearanceCM =
+				QueryBirdClearance(
+					*Planet,
+					NextPosition,
+					BirdCollisionRadiusCM);
+			if (bDepartedSurface
+				&& PreviousClearanceCM > 0.0f
+				&& NextClearanceCM <= 0.0f)
 			{
-				bDepartedSurface = true;
-			}
-			if (bDepartedSurface && PreviousClearanceCM > 0.0f && NextClearanceCM <= 0.0f)
-			{
-				FVector OutsidePoint = Position;
-				FVector InsidePoint = NextPosition;
-				for (int32 Iteration = 0; Iteration < LandingBisectionIterations; ++Iteration)
+				float OutsideAlpha = 0.0f;
+				float InsideAlpha = 1.0f;
+				for (int32 Iteration = 0;
+					Iteration < LandingBisectionIterations;
+					++Iteration)
 				{
-					const FVector MidPoint = (OutsidePoint + InsidePoint) * 0.5f;
-					if (QueryBirdClearance(*Planet, MidPoint, BirdCollisionRadiusCM) > 0.0f)
+					const float MidAlpha =
+						(OutsideAlpha + InsideAlpha) * 0.5f;
+					const FVector MidPoint =
+						FMath::Lerp(
+							Position,
+							NextPosition,
+							MidAlpha);
+					if (QueryBirdClearance(
+						*Planet,
+						MidPoint,
+						BirdCollisionRadiusCM) > 0.0f)
 					{
-						OutsidePoint = MidPoint;
+						OutsideAlpha = MidAlpha;
 					}
 					else
 					{
-						InsidePoint = MidPoint;
+						InsideAlpha = MidAlpha;
 					}
 				}
+				PrimaryAlpha = InsideAlpha;
+				PrimaryImpactLocation =
+					FMath::Lerp(
+						Position,
+						NextPosition,
+						PrimaryAlpha);
+				bPrimaryHit = true;
+			}
+		}
 
-				Candidate.WorldPoints.Add(InsidePoint);
-				const FVector LandingDirection = (InsidePoint - Center).GetSafeNormal();
+		const float FirstAlpha = FMath::Min3(
+			bSatelliteTargetHit ? SatelliteTargetAlpha : BIG_NUMBER,
+			bSatelliteBodyHit ? SatelliteBodyAlpha : BIG_NUMBER,
+			bPrimaryHit ? PrimaryAlpha : BIG_NUMBER);
+		const bool bHasTerminalHit = FirstAlpha < BIG_NUMBER;
+		const bool bTargetWins =
+			bSatelliteTargetHit
+			&& SatelliteTargetAlpha <= FirstAlpha + KINDA_SMALL_NUMBER;
+		const bool bSatelliteBodyWins =
+			!bTargetWins
+			&& bSatelliteBodyHit
+			&& SatelliteBodyAlpha <= FirstAlpha + KINDA_SMALL_NUMBER;
+		const FVector SegmentEnd = bHasTerminalHit
+			? FMath::Lerp(Position, NextPosition, FirstAlpha)
+			: NextPosition;
+		Candidate.PredictedPathLengthCM +=
+			FVector::Distance(Position, SegmentEnd);
+
+		for (int32 SatelliteIndex = 0;
+			SatelliteIndex < SatelliteBodies.Num();
+			++SatelliteIndex)
+		{
+			const FABTSM9SatelliteBodySnapshot& Body =
+				SatelliteBodies[SatelliteIndex];
+			const float ClearanceCM =
+				PointSegmentDistance(
+					Body.CenterWorld,
+					Position,
+					SegmentEnd)
+				- Body.RadiusCM
+				- BirdCollisionRadiusCM;
+			if (ClearanceCM >= Candidate.ClosestSatelliteClearanceCM)
+			{
+				continue;
+			}
+			Candidate.ClosestSatelliteClearanceCM = ClearanceCM;
+			Candidate.EncounterSatelliteCenterWorld = Body.CenterWorld;
+			Candidate.EncounterSatelliteRadiusCM = Body.RadiusCM;
+		}
+		if (Candidate.EncounterSatelliteRadiusCM > 0.0f
+			&& Candidate.ClosestSatelliteClearanceCM
+				<= Candidate.EncounterSatelliteRadiusCM * 2.0f)
+		{
+			Candidate.bHasSatelliteEncounter = true;
+		}
+
+		if (bHasTerminalHit)
+		{
+			Candidate.WorldPoints.Add(SegmentEnd);
+			Candidate.TerminalWorldLocation = SegmentEnd;
+			Candidate.TerminalWorldVelocity = Velocity;
+			if (bTargetWins)
+			{
+				Candidate.TerminalType =
+					EABTSM6TrajectoryTerminalType::SatelliteE5;
+				if (PracticeSatellite != nullptr)
+				{
+					Candidate.EncounterSatelliteCenterWorld =
+						PracticeSatellite->GetPlanetCenterWorld();
+					Candidate.EncounterSatelliteRadiusCM =
+						PracticeSatellite->GetPlanetRadiusCM();
+				}
+				Candidate.bHasSatelliteEncounter = true;
+			}
+			else if (bSatelliteBodyWins)
+			{
+				Candidate.TerminalType =
+					EABTSM6TrajectoryTerminalType::SatelliteBody;
+				if (SatelliteBodies.IsValidIndex(HitSatelliteIndex))
+				{
+					Candidate.EncounterSatelliteCenterWorld =
+						SatelliteBodies[HitSatelliteIndex].CenterWorld;
+					Candidate.EncounterSatelliteRadiusCM =
+						SatelliteBodies[HitSatelliteIndex].RadiusCM;
+				}
+				Candidate.bHasSatelliteEncounter = true;
+			}
+			else
+			{
+				Candidate.TerminalType =
+					EABTSM6TrajectoryTerminalType::PrimarySurface;
+				const FVector LandingDirection =
+					(PrimaryImpactLocation - Center).GetSafeNormal();
 				FVector SurfacePosition;
 				FVector SurfaceNormal;
 				float SurfaceRadiusCM = 0.0f;
@@ -164,9 +341,20 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 					Candidate.PrimarySurfaceLandingWorld = SurfacePosition;
 					Candidate.PrimarySurfaceLandingVelocity = Velocity;
 					Candidate.LandingCellId = SurfaceCellId;
-					Candidate.LandingTimeSeconds = static_cast<float>(StepIndex + 1) * StepSeconds;
+					Candidate.LandingTimeSeconds =
+						(static_cast<float>(StepIndex) + FirstAlpha)
+						* StepSeconds;
 				}
-				break;
+			}
+			break;
+		}
+
+		if (!bPlanarTestMode)
+		{
+			if (!bDepartedSurface
+				&& NextClearanceCM >= DepartureClearanceCM)
+			{
+				bDepartedSurface = true;
 			}
 			PreviousClearanceCM = NextClearanceCM;
 		}

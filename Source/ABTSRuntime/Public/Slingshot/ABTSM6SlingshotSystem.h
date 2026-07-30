@@ -20,6 +20,7 @@ class AABTSM6SlingshotCamera;
 class AABTSM7BuildingMaterialSystem;
 class AABTSM73StableBuildingActor;
 class AABTSM71PlaceableSlingshotActor;
+class AABTSM9Satellite;
 class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
 class UStaticMeshComponent;
@@ -118,12 +119,31 @@ public:
 	bool CopyCalibrationCatalog(
 		FABTSM6LaunchProfileCatalog& OutCatalog,
 		uint64& OutLaunchProfileHash) const;
+	/** Maximum actual collision radius among the currently spawned party. */
+	bool CopyCalibrationBirdCollisionRadius(float& OutRadiusCM) const;
 	void BuildCalibrationReachEnvelopes(TArray<FABTSM6ReachEnvelope>& OutEnvelopes) const;
 	/** PostPhysics sample consumed by the calibration rig's swept target test. */
 	bool CopyActiveCalibrationLaunchSample(
 		FABTSM6LaunchCalibrationTelemetry& OutTelemetry,
-		FVector& OutBirdWorldLocation) const;
-	void NotifyCalibrationTargetEvent(FName TargetId, bool bSatelliteBodyFirst);
+		FVector& OutBirdWorldLocation,
+		bool* OutHasCurrentSatelliteBodyEvidence = nullptr,
+		bool* OutHasCurrentSatelliteE5Evidence = nullptr) const;
+	void NotifyCalibrationTargetEvent(
+		FName TargetId,
+		bool bSatelliteBodyFirst,
+		bool bFinalizeSameFrameSatelliteEvidence = false);
+	/** Narrow M9 calibration presentation context; normal M6/M9 remains unchanged. */
+	void ConfigureSatellitePracticeTarget(
+		AABTSM9Satellite& InSatellite,
+		AActor& InTargetActor,
+		const FVector& InTargetHalfExtentCM,
+		float InPredictionStepSeconds,
+		float InPredictionMaximumFlightSeconds);
+	void ClearSatellitePracticeTarget(const AActor* ExpectedTargetActor);
+	bool CopySatellitePracticeTarget(
+		AABTSM9Satellite*& OutSatellite,
+		AActor*& OutTargetActor,
+		FVector& OutTargetHalfExtentCM) const;
 	void ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp);
 	/** M7 declares the required Actor set before spawning so absence cannot look like an empty valid stage. */
 	void BeginRequiredBuildingContract(int32 ExpectedRequiredBuildingCount);
@@ -354,6 +374,10 @@ private:
 	FABTSM6LaunchCalibrationTelemetry ActiveLaunchCalibrationTelemetry;
 	FVector LastCalibrationTelemetrySampleWorld = FVector::ZeroVector;
 	bool bActiveLaunchCalibrationTelemetry = false;
+	/** Frame identities for matching unordered Chaos contacts to one PostPhysics swept segment. */
+	uint64 CalibrationSatelliteBodyHitFrame = MAX_uint64;
+	uint64 CalibrationSatelliteE5HitFrame = MAX_uint64;
+	uint64 CalibrationSatelliteDecisionFrame = MAX_uint64;
 	int32 CalibrationLaunchSequence = 0;
 	FVector PendingCompletedLandingLocation = FVector::ZeroVector;
 	EABTSBirdId PendingCompletedBirdId = EABTSBirdId::Red;
@@ -367,8 +391,18 @@ private:
 	uint64 CalibrationLaunchProfileHash = 0;
 	FABTSM6CalibrationLaunchFrame ReinforcedCalibrationLaunchFrame;
 	bool bHasReinforcedCalibrationLaunchFrame = false;
+	TWeakObjectPtr<AABTSM9Satellite> SatellitePracticeBody;
+	TWeakObjectPtr<AActor> SatellitePracticeTarget;
+	FVector SatellitePracticeTargetHalfExtentCM = FVector::ZeroVector;
+	/** Runtime copy of the same integration domain used by the calibration certification sweep. */
+	float SatellitePracticePredictionStepSeconds = 0.0f;
+	float SatellitePracticePredictionMaximumFlightSeconds = 0.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Calibration", meta = (ClampMin = "2.0", ClampMax = "60.0", Units = "s"))
 	float CalibrationMaximumFlightSeconds = 35.0f;
+	/** Brief E5 impact-camera hold before deterministic calibration return. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Calibration", meta = (ClampMin = "0.1", ClampMax = "5.0", Units = "s"))
+	float CalibrationE5ImpactHoldSeconds = 1.2f;
+	float CalibrationSuccessReturnRemainingSeconds = -1.0f;
 	/** Reuses the M7.1 complete-slingshot classes, including their VisualSlot scale, rotation and pivot rules. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug|Slingshot Visual")
 	TSubclassOf<AABTSM71PlaceableSlingshotActor> DebugTwigSlingshotClass;

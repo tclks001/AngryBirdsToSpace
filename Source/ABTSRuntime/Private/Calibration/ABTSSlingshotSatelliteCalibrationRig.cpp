@@ -6,6 +6,7 @@
 #include "Calibration/ABTSCalibrationTargetProxy.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Physics/ABTSSweptCollision.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSM9Satellite.h"
@@ -17,32 +18,6 @@ namespace ABTSSlingshotCalibrationRigPrivate
 		-1,
 		TEXT("-1 uses the practice preset, 0 disables M9 gravity, 1 enables it."),
 		ECVF_Cheat);
-
-	bool SegmentSphereFirstAlpha(
-		const FVector& Start,
-		const FVector& End,
-		const FVector& Center,
-		const float Radius,
-		float& OutAlpha)
-	{
-		const FVector Segment = End - Start;
-		const FVector Offset = Start - Center;
-		const double A = Segment.SizeSquared();
-		if (A <= UE_DOUBLE_SMALL_NUMBER) return false;
-		const double B = 2.0 * FVector::DotProduct(Offset, Segment);
-		const double C = Offset.SizeSquared() - FMath::Square(static_cast<double>(Radius));
-		const double Discriminant = B * B - 4.0 * A * C;
-		if (Discriminant < 0.0) return false;
-		const double Root = FMath::Sqrt(Discriminant);
-		const double Alpha0 = (-B - Root) / (2.0 * A);
-		const double Alpha1 = (-B + Root) / (2.0 * A);
-		const double Alpha = Alpha0 >= 0.0 && Alpha0 <= 1.0
-			? Alpha0
-			: Alpha1 >= 0.0 && Alpha1 <= 1.0 ? Alpha1 : -1.0;
-		if (Alpha < 0.0) return false;
-		OutAlpha = static_cast<float>(Alpha);
-		return true;
-	}
 
 	FLinearColor TierColor(const EABTSSlingshotTier Tier, const bool bMaximum)
 	{
@@ -120,6 +95,15 @@ void AABTSSlingshotSatelliteCalibrationRig::BeginPlay()
 			TEXT("[ABTS][Calibration][Rig] Rejected: unresolved dependencies, target body, launch catalog or Reinforced frame."));
 		return;
 	}
+	float ResolvedBirdCollisionRadiusCM = 0.0f;
+	if (!SlingshotSystem->CopyCalibrationBirdCollisionRadius(
+		ResolvedBirdCollisionRadiusCM))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][Calibration][Rig] Rejected: actual bird collision radius is unavailable."));
+		return;
+	}
+	Preset.BirdCollisionRadiusCM = ResolvedBirdCollisionRadiusCM;
 	AddTickPrerequisiteActor(SlingshotSystem.Get());
 	SlingshotSystem->BuildCalibrationReachEnvelopes(ReachEnvelopes);
 	SlingshotSystem->OnCalibrationLaunchRecorded().AddUObject(
@@ -155,9 +139,10 @@ void AABTSSlingshotSatelliteCalibrationRig::BeginPlay()
 		&& GravitySnapshotHash != 0
 		&& SatellitePracticePresetHash != 0;
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][Calibration][Ready] Ready=%d ReinforcedFrame=1 Targets=%d LaunchProfileHash=%llu BaselineGravitySnapshotHash=%llu SatellitePracticePresetHash=%llu SweepPassed=%d"),
+		TEXT("[ABTS][Calibration][Ready] Ready=%d ReinforcedFrame=1 Targets=%d BirdCollisionRadius=%.1f LaunchProfileHash=%llu BaselineGravitySnapshotHash=%llu SatellitePracticePresetHash=%llu SweepPassed=%d"),
 		bReady ? 1 : 0,
 		TargetProxies.Num(),
+		Preset.BirdCollisionRadiusCM,
 		LaunchProfileHash,
 		GravitySnapshotHash,
 		SatellitePracticePresetHash,
@@ -182,8 +167,24 @@ void AABTSSlingshotSatelliteCalibrationRig::EndPlay(
 	if (SlingshotSystem.IsValid())
 	{
 		SlingshotSystem->OnCalibrationLaunchRecorded().RemoveAll(this);
+		// The Rig is the unique owner of this narrow presentation context. Clear
+		// unconditionally so teardown order cannot leave a stale weak target.
+		SlingshotSystem->ClearSatellitePracticeTarget(nullptr);
 		RemoveTickPrerequisiteActor(SlingshotSystem.Get());
 	}
+	if (Satellite.IsValid())
+	{
+		Satellite->bGravityEnabled = GravitySnapshot.bSatelliteGravityEnabled;
+	}
+	for (AABTSCalibrationTargetProxy* Proxy : TargetProxies)
+	{
+		if (IsValid(Proxy) && !Proxy->IsActorBeingDestroyed())
+		{
+			Proxy->Destroy();
+		}
+	}
+	TargetProxies.Reset();
+	SatelliteTargetProxy = nullptr;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -212,6 +213,28 @@ AABTSSlingshotSatelliteCalibrationRig::SpawnTarget(
 	UGameplayStatics::FinishSpawningActor(
 		Proxy,
 		FTransform(FQuat::Identity, WorldLocation));
+	TargetProxies.Add(Proxy);
+	return Proxy;
+}
+
+AABTSCalibrationTargetProxy*
+AABTSSlingshotSatelliteCalibrationRig::SpawnCubeTarget(
+	const FName TargetId,
+	const FTransform& WorldTransform,
+	const float HalfExtentCM,
+	const FLinearColor& Color)
+{
+	if (GetWorld() == nullptr) return nullptr;
+	AABTSCalibrationTargetProxy* Proxy =
+		GetWorld()->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
+			AABTSCalibrationTargetProxy::StaticClass(),
+			WorldTransform,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Proxy == nullptr) return nullptr;
+	Proxy->ConfigureCube(TargetId, HalfExtentCM, Color);
+	UGameplayStatics::FinishSpawningActor(Proxy, WorldTransform);
 	TargetProxies.Add(Proxy);
 	return Proxy;
 }
@@ -271,13 +294,13 @@ bool AABTSSlingshotSatelliteCalibrationRig::SpawnReachTargets()
 
 bool AABTSSlingshotSatelliteCalibrationRig::SpawnSatelliteTarget()
 {
-	FVector TargetWorldLocation;
+	FTransform TargetWorldTransform;
 	FString FailureReason;
-	if (!FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldLocation(
+	if (!FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
 		ReinforcedLaunchFrame.RestPouchWorldLocation,
 		GravitySnapshot,
 		Preset,
-		TargetWorldLocation,
+		TargetWorldTransform,
 		&FailureReason))
 	{
 		UE_LOG(LogABTSRuntime, Error,
@@ -285,15 +308,26 @@ bool AABTSSlingshotSatelliteCalibrationRig::SpawnSatelliteTarget()
 			*FailureReason);
 		return false;
 	}
-	SatelliteTargetProxy = SpawnTarget(
+	SatelliteTargetProxy = SpawnCubeTarget(
 		TEXT("Satellite.Backside"),
-		TargetWorldLocation,
+		TargetWorldTransform,
 		Preset.TargetProxyRadiusCM,
 		FLinearColor(1.0f, 0.12f, 0.72f, 1.0f));
 	if (SatelliteTargetProxy == nullptr) return false;
 	SatelliteTargetProxy->AttachToActor(
 		Satellite.Get(),
 		FAttachmentTransformRules::KeepWorldTransform);
+	SlingshotSystem->ConfigureSatellitePracticeTarget(
+		*Satellite.Get(),
+		*SatelliteTargetProxy,
+		SatelliteTargetProxy->GetTargetHalfExtentCM(),
+		Preset.IntegrationStepSeconds,
+		Preset.MaximumFlightSeconds);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Calibration][E5] Spawned=1 Shape=Cube Center=%s HalfExtent=%.1f SurfaceGap=%.1f"),
+		*TargetWorldTransform.GetLocation().ToCompactString(),
+		Preset.TargetProxyRadiusCM,
+		Preset.TargetSatelliteClearanceCM);
 	return true;
 }
 
@@ -305,6 +339,10 @@ void AABTSSlingshotSatelliteCalibrationRig::RunSweep()
 		ReinforcedLaunchFrame.RestPouchWorldLocation;
 	Scenario.LaunchFrame = ReinforcedLaunchFrame;
 	Scenario.TargetWorldLocation = SatelliteTargetProxy->GetActorLocation();
+	Scenario.TargetWorldTransform = SatelliteTargetProxy->GetActorTransform();
+	Scenario.TargetWorldTransform.SetScale3D(FVector::OneVector);
+	Scenario.TargetHalfExtentCM =
+		SatelliteTargetProxy->GetTargetHalfExtentCM();
 	Scenario.TargetProxyRadiusCM = SatelliteTargetProxy->GetTargetRadiusCM();
 	Scenario.Gravity = GravitySnapshot;
 	SweepSummary =
@@ -354,8 +392,13 @@ void AABTSSlingshotSatelliteCalibrationRig::UpdateActualLaunchTargetSweep()
 	if (!SlingshotSystem.IsValid() || !Satellite.IsValid()) return;
 	FABTSM6LaunchCalibrationTelemetry Telemetry;
 	FVector BirdWorldLocation;
+	bool bHasCurrentSatelliteBodyEvidence = false;
+	bool bHasCurrentSatelliteE5Evidence = false;
 	if (!SlingshotSystem->CopyActiveCalibrationLaunchSample(
-		Telemetry, BirdWorldLocation))
+		Telemetry,
+		BirdWorldLocation,
+		&bHasCurrentSatelliteBodyEvidence,
+		&bHasCurrentSatelliteE5Evidence))
 	{
 		bHasPreviousActiveBirdLocation = false;
 		ActiveSweepSequence = 0;
@@ -369,9 +412,16 @@ void AABTSSlingshotSatelliteCalibrationRig::UpdateActualLaunchTargetSweep()
 		return;
 	}
 	if (!bHasPreviousActiveBirdLocation
-		|| Telemetry.HitTargetId == TEXT("Satellite.Backside")
-		|| Telemetry.bHitSatelliteBodyFirst)
+		|| (Telemetry.bHitSatelliteBodyFirst
+			&& !bHasCurrentSatelliteBodyEvidence)
+		|| (Telemetry.HitTargetId == TEXT("Satellite.Backside")
+			&& !bHasCurrentSatelliteE5Evidence))
 	{
+		if (Telemetry.HitTargetId == TEXT("Satellite.Backside")
+			&& SatelliteTargetProxy != nullptr)
+		{
+			SatelliteTargetProxy->MarkHit();
+		}
 		PreviousActiveBirdLocation = BirdWorldLocation;
 		bHasPreviousActiveBirdLocation = true;
 		return;
@@ -383,7 +433,7 @@ void AABTSSlingshotSatelliteCalibrationRig::UpdateActualLaunchTargetSweep()
 	{
 		if (Proxy == nullptr || Proxy == SatelliteTargetProxy) continue;
 		float TargetAlpha = BIG_NUMBER;
-		if (ABTSSlingshotCalibrationRigPrivate::SegmentSphereFirstAlpha(
+		if (ABTSSweptCollision::SegmentSphereFirstAlpha(
 			PreviousActiveBirdLocation,
 			BirdWorldLocation,
 			Proxy->GetActorLocation(),
@@ -398,33 +448,56 @@ void AABTSSlingshotSatelliteCalibrationRig::UpdateActualLaunchTargetSweep()
 	float SatelliteTargetAlpha = BIG_NUMBER;
 	const bool bSatelliteTargetHit =
 		SatelliteTargetProxy != nullptr
-		&& ABTSSlingshotCalibrationRigPrivate::SegmentSphereFirstAlpha(
+		&& ABTSSweptCollision::SegmentExpandedOrientedBoxFirstAlpha(
 			PreviousActiveBirdLocation,
 			BirdWorldLocation,
-			SatelliteTargetProxy->GetActorLocation(),
-			SatelliteTargetProxy->GetTargetRadiusCM()
-				+ Preset.BirdCollisionRadiusCM,
+			SatelliteTargetProxy->GetActorTransform(),
+			SatelliteTargetProxy->GetTargetHalfExtentCM(),
+			Preset.BirdCollisionRadiusCM,
 			SatelliteTargetAlpha);
 	float SatelliteAlpha = BIG_NUMBER;
 	const bool bSatelliteBodyHit =
-		ABTSSlingshotCalibrationRigPrivate::SegmentSphereFirstAlpha(
+		ABTSSweptCollision::SegmentSphereFirstAlpha(
 			PreviousActiveBirdLocation,
 			BirdWorldLocation,
 			Satellite->GetPlanetCenterWorld(),
 			Satellite->GetPlanetRadiusCM() + Preset.BirdCollisionRadiusCM,
 			SatelliteAlpha);
-	if (bSatelliteBodyHit
-		&& (!bSatelliteTargetHit
-			|| SatelliteAlpha <= SatelliteTargetAlpha))
+	const bool bSatelliteTargetWins =
+		bSatelliteTargetHit
+		&& (!bSatelliteBodyHit
+			|| SatelliteTargetAlpha
+				<= SatelliteAlpha + KINDA_SMALL_NUMBER);
+	if (bSatelliteBodyHit && !bSatelliteTargetWins)
 	{
 		SlingshotSystem->NotifyCalibrationTargetEvent(
-			TEXT("Satellite.Body"), true);
+			TEXT("Satellite.Body"), true, true);
 	}
-	else if (bSatelliteTargetHit)
+	else if (bSatelliteTargetWins)
 	{
 		SatelliteTargetProxy->MarkHit();
 		SlingshotSystem->NotifyCalibrationTargetEvent(
-			SatelliteTargetProxy->GetTargetId(), false);
+			SatelliteTargetProxy->GetTargetId(),
+			false,
+			true);
+	}
+	else if (bHasCurrentSatelliteE5Evidence)
+	{
+		// A Chaos solver may stop the body within contact tolerance just before
+		// the analytical expanded boundary. Preserve the real blocking contact
+		// as a deterministic fallback after the exact sweep had first refusal.
+		SatelliteTargetProxy->MarkHit();
+		SlingshotSystem->NotifyCalibrationTargetEvent(
+			SatelliteTargetProxy->GetTargetId(),
+			false,
+			true);
+	}
+	else if (bHasCurrentSatelliteBodyEvidence)
+	{
+		SlingshotSystem->NotifyCalibrationTargetEvent(
+			TEXT("Satellite.Body"),
+			true,
+			true);
 	}
 	else if (EarliestRangeTarget)
 	{

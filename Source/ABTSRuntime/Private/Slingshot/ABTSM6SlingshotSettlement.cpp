@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
@@ -115,6 +116,10 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	bHasPendingLaunchCompletion = true;
 	FinalizeActiveLaunchTelemetry(PendingCompletedLandingLocation);
 	FreezeDynamicProxies();
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->BeginReturnToPrimaryFrame();
+	}
 	LaunchedBird->BeginSlingshotReturn();
 	ReturnStartLocation = LaunchedBird->GetActorLocation();
 	const FVector ApproxTarget = SlingCenter - SlingForward * 230.0f;
@@ -186,6 +191,10 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	LaunchedBird.Reset();
 	bHasPendingLaunchCompletion = false;
 	bActiveLaunchCalibrationTelemetry = false;
+	CalibrationSatelliteBodyHitFrame = MAX_uint64;
+	CalibrationSatelliteE5HitFrame = MAX_uint64;
+	CalibrationSatelliteDecisionFrame = MAX_uint64;
+	CalibrationSuccessReturnRemainingSeconds = -1.0f;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Complete StaticProxies=%d"), DynamicProxies.Num());
 	if (bShouldBroadcastCompletion)
 	{

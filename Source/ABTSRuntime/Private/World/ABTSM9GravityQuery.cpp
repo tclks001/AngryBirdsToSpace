@@ -3,6 +3,7 @@
 #include "World/ABTSM9GravityQuery.h"
 
 #include "EngineUtils.h"
+#include "Physics/ABTSSweptCollision.h"
 #include "World/ABTSM9Satellite.h"
 
 namespace ABTSM9GravityQueryPrivate
@@ -43,6 +44,56 @@ FVector ABTSM9Gravity::GetSatelliteAcceleration(const UWorld* World, const FVect
 		Acceleration += It->GetGravityAccelerationAt(WorldLocation);
 	}
 	return Acceleration;
+}
+
+void ABTSM9Gravity::GatherSatelliteBodySnapshots(
+	const UWorld* World,
+	TArray<FABTSM9SatelliteBodySnapshot>& OutSnapshots)
+{
+	OutSnapshots.Reset();
+	if (World == nullptr) return;
+	for (TActorIterator<AABTSM9Satellite> It(World); It; ++It)
+	{
+		FABTSM9SatelliteBodySnapshot& Snapshot =
+			OutSnapshots.AddDefaulted_GetRef();
+		Snapshot.CenterWorld = It->GetPlanetCenterWorld();
+		Snapshot.RadiusCM = FMath::Max(1.0f, It->GetPlanetRadiusCM());
+	}
+}
+
+bool ABTSM9Gravity::FindFirstSatelliteBodyHit(
+	const TArray<FABTSM9SatelliteBodySnapshot>& Snapshots,
+	const FVector& Start,
+	const FVector& End,
+	const float BirdCollisionRadiusCM,
+	float& OutAlpha,
+	int32& OutSnapshotIndex)
+{
+	OutAlpha = BIG_NUMBER;
+	OutSnapshotIndex = INDEX_NONE;
+	for (int32 SnapshotIndex = 0;
+		SnapshotIndex < Snapshots.Num();
+		++SnapshotIndex)
+	{
+		const FABTSM9SatelliteBodySnapshot& Snapshot =
+			Snapshots[SnapshotIndex];
+		float CandidateAlpha = BIG_NUMBER;
+		if (Snapshot.RadiusCM <= 0.0f
+			|| !ABTSSweptCollision::SegmentSphereFirstAlpha(
+				Start,
+				End,
+				Snapshot.CenterWorld,
+				Snapshot.RadiusCM
+					+ FMath::Max(0.0f, BirdCollisionRadiusCM),
+				CandidateAlpha)
+			|| CandidateAlpha >= OutAlpha)
+		{
+			continue;
+		}
+		OutAlpha = CandidateAlpha;
+		OutSnapshotIndex = SnapshotIndex;
+	}
+	return OutSnapshotIndex != INDEX_NONE;
 }
 
 uint64 ABTSM9Gravity::GetSatelliteGravitySnapshotHash(

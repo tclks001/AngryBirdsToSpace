@@ -34,9 +34,17 @@ AABTSCalibrationTargetProxy::AABTSCalibrationTargetProxy()
 	Label->SetTextRenderColor(FColor::White);
 	Label->SetRelativeLocation(FVector(0.0f, 0.0f, 150.0f));
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshFinder(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereMesh.Succeeded()) VisualMesh->SetStaticMesh(SphereMesh.Object);
+	SphereStaticMesh = SphereMeshFinder.Succeeded()
+		? SphereMeshFinder.Object
+		: nullptr;
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshFinder(
+		TEXT("/Engine/BasicShapes/Cube.Cube"));
+	CubeStaticMesh = CubeMeshFinder.Succeeded()
+		? CubeMeshFinder.Object
+		: nullptr;
+	if (SphereStaticMesh) VisualMesh->SetStaticMesh(SphereStaticMesh);
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ShapeMaterial(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	BaseMaterial = ShapeMaterial.Succeeded()
@@ -52,6 +60,19 @@ void AABTSCalibrationTargetProxy::Configure(
 	TargetId = InTargetId;
 	TargetRadiusCM = FMath::Max(10.0f, InRadiusCM);
 	TargetColor = InColor;
+	bCubeTarget = false;
+	RefreshPresentation();
+}
+
+void AABTSCalibrationTargetProxy::ConfigureCube(
+	const FName InTargetId,
+	const float InHalfExtentCM,
+	const FLinearColor& InColor)
+{
+	TargetId = InTargetId;
+	TargetRadiusCM = FMath::Max(10.0f, InHalfExtentCM);
+	TargetColor = InColor;
+	bCubeTarget = true;
 	RefreshPresentation();
 }
 
@@ -72,10 +93,33 @@ void AABTSCalibrationTargetProxy::MarkHit()
 void AABTSCalibrationTargetProxy::RefreshPresentation()
 {
 	if (QuerySphere == nullptr || VisualMesh == nullptr || Label == nullptr) return;
-	QuerySphere->SetSphereRadius(TargetRadiusCM, true);
-	// Engine basic sphere has a 50 cm radius.
-	VisualMesh->SetRelativeScale3D(
-		FVector(FMath::Max(TargetRadiusCM / 50.0f, 0.01f)));
+	if (bCubeTarget)
+	{
+		QuerySphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		QuerySphere->SetGenerateOverlapEvents(false);
+		VisualMesh->SetStaticMesh(CubeStaticMesh);
+		// Engine basic cube has a 100 cm side length.
+		VisualMesh->SetRelativeScale3D(
+			FVector(FMath::Max(TargetRadiusCM * 2.0f / 100.0f, 0.01f)));
+		VisualMesh->SetCollisionObjectType(ECC_WorldDynamic);
+		VisualMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+		VisualMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		VisualMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+	else
+	{
+		QuerySphere->SetSphereRadius(TargetRadiusCM, true);
+		QuerySphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		QuerySphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+		QuerySphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+		QuerySphere->SetGenerateOverlapEvents(true);
+		VisualMesh->SetStaticMesh(SphereStaticMesh);
+		// Engine basic sphere has a 50 cm radius.
+		VisualMesh->SetRelativeScale3D(
+			FVector(FMath::Max(TargetRadiusCM / 50.0f, 0.01f)));
+		VisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		VisualMesh->SetGenerateOverlapEvents(false);
+	}
 	UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(
 		BaseMaterial
 			? BaseMaterial.Get()

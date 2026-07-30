@@ -4,7 +4,10 @@
 
 #include "Algo/Reverse.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Misc/AutomationTest.h"
+#include "Physics/ABTSSweptCollision.h"
+#include "Slingshot/ABTSM6Types.h"
 
 namespace ABTSSlingshotCalibrationTests
 {
@@ -113,12 +116,20 @@ namespace ABTSSlingshotCalibrationTests
 			Catalog.FlightAirDragPerSecond;
 		OutScenario.Gravity.bSatelliteGravityEnabled = true;
 		OutScenario.TargetProxyRadiusCM = Preset.TargetProxyRadiusCM;
-		return FABTSSlingshotSatelliteCalibrationModel::
-			BuildSatelliteTargetWorldLocation(
+		OutScenario.TargetHalfExtentCM =
+			FVector(Preset.TargetProxyRadiusCM);
+		if (!FABTSSlingshotSatelliteCalibrationModel::
+			BuildSatelliteTargetWorldTransform(
 				OutScenario.LaunchFrame.RestPouchWorldLocation,
 				OutScenario.Gravity,
 				Preset,
-				OutScenario.TargetWorldLocation);
+				OutScenario.TargetWorldTransform))
+		{
+			return false;
+		}
+		OutScenario.TargetWorldLocation =
+			OutScenario.TargetWorldTransform.GetLocation();
+		return true;
 	}
 }
 
@@ -192,7 +203,8 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 				Profile,
 				10000.0f,
 				980.0f,
-				Resolved.FlightAirDragPerSecond);
+				Resolved.FlightAirDragPerSecond,
+				42.0f);
 		TestTrue(
 			FString::Printf(TEXT("Tier %d comfortable reach is positive"), Index),
 			Envelope.ComfortableReachCM > 0.0f);
@@ -300,6 +312,15 @@ bool FABTSSlingshotCalibrationStableHashesTest::RunTest(
 	Preset =
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeCandidatePracticePresetV0();
+	Preset.BirdCollisionRadiusCM += 1.0f;
+	TestNotEqual(
+		TEXT("Resolved bird collision geometry changes the preset hash"),
+		FABTSSlingshotSatelliteCalibrationModel::
+			ComputeSatellitePracticePresetHash(Preset),
+		PresetHash);
+	Preset =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeCandidatePracticePresetV0();
 	Preset.RangeTargetProxyRadiusCM += 1.0f;
 	TestNotEqual(
 		TEXT("Range-target geometry changes the preset hash"),
@@ -367,13 +388,29 @@ bool FABTSSlingshotCalibrationTargetGeometryTest::RunTest(
 		(Scenario.TargetWorldLocation
 			- Scenario.Gravity.SatelliteCenterWorld).GetSafeNormal();
 	TestTrue(
-		TEXT("Target is at the configured satellite-local radius"),
+		TEXT("E5 cube centre rests one half extent above the satellite"),
 		FMath::IsNearlyEqual(
 			FVector::Distance(
 				Scenario.TargetWorldLocation,
 				Scenario.Gravity.SatelliteCenterWorld),
 			Scenario.Gravity.SatelliteRadiusCM
-				+ Preset.TargetAltitudeAboveSurfaceCM,
+				+ Preset.TargetProxyRadiusCM
+				+ Preset.TargetSatelliteClearanceCM,
+			0.01f));
+	TestTrue(
+		TEXT("E5 local up follows satellite outward"),
+		Scenario.TargetWorldTransform.GetUnitAxis(EAxis::Z).Equals(
+			TargetDirection,
+			1.0e-4f));
+	TestTrue(
+		TEXT("E5 lower face rests at the configured surface gap"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(
+				Scenario.TargetWorldLocation,
+				Scenario.Gravity.SatelliteCenterWorld)
+				- Preset.TargetProxyRadiusCM,
+			Scenario.Gravity.SatelliteRadiusCM
+				+ Preset.TargetSatelliteClearanceCM,
 			0.01f));
 	TestTrue(
 		TEXT("Target backside angle is satellite-local"),
@@ -384,13 +421,6 @@ bool FABTSSlingshotCalibrationTargetGeometryTest::RunTest(
 	TestTrue(
 		TEXT("Backside target is actually behind the satellite"),
 		FVector::DotProduct(FacingLaunch, TargetDirection) < 0.0f);
-	TestTrue(
-		TEXT("Expanded target remains clear of the expanded satellite"),
-		Preset.TargetAltitudeAboveSurfaceCM
-			- Preset.TargetProxyRadiusCM
-			- Preset.BirdCollisionRadiusCM * 2.0f
-			>= Preset.TargetSatelliteClearanceCM);
-
 	const FABTSM6LaunchProfile* Reinforced =
 		FABTSSlingshotSatelliteCalibrationModel::FindProfile(
 			Catalog,
@@ -439,30 +469,41 @@ bool FABTSSlingshotCalibrationTargetGeometryTest::RunTest(
 	FABTSCalibrationGravitySnapshot Translated = Scenario.Gravity;
 	Translated.PrimaryCenterWorld += Translation;
 	Translated.SatelliteCenterWorld += Translation;
-	FVector TranslatedTarget;
+	FTransform TranslatedTargetTransform;
 	TestTrue(
 		TEXT("Translated target builds"),
 		FABTSSlingshotSatelliteCalibrationModel::
-			BuildSatelliteTargetWorldLocation(
+			BuildSatelliteTargetWorldTransform(
 				Scenario.LaunchWorldLocation + Translation,
 				Translated,
 				Preset,
-				TranslatedTarget));
+				TranslatedTargetTransform));
 	TestTrue(
 		TEXT("Target construction is translation invariant"),
-		TranslatedTarget.Equals(
+		TranslatedTargetTransform.GetLocation().Equals(
 			Scenario.TargetWorldLocation + Translation,
 			0.01f));
+	TestTrue(
+		TEXT("Target frame rotation is translation invariant"),
+		TranslatedTargetTransform.GetRotation().Equals(
+			Scenario.TargetWorldTransform.GetRotation(),
+			1.0e-5f));
 
 	FABTSSatellitePracticePreset Invalid = Preset;
-	Invalid.TargetAltitudeAboveSurfaceCM =
-		Invalid.TargetProxyRadiusCM
-		+ Invalid.BirdCollisionRadiusCM * 2.0f
-		+ Invalid.TargetSatelliteClearanceCM
-		- 1.0f;
+	Invalid.TargetProxyRadiusCM = 0.0f;
 	FVector RejectedTarget;
 	TestFalse(
-		TEXT("A target overlapping the satellite fails closed"),
+		TEXT("A non-positive E5 half extent fails closed"),
+		FABTSSlingshotSatelliteCalibrationModel::
+			BuildSatelliteTargetWorldLocation(
+				Scenario.LaunchWorldLocation,
+				Scenario.Gravity,
+				Invalid,
+				RejectedTarget));
+	Invalid = Preset;
+	Invalid.TargetSatelliteClearanceCM = -1.0f;
+	TestFalse(
+		TEXT("A negative E5 surface gap fails closed"),
 		FABTSSlingshotSatelliteCalibrationModel::
 			BuildSatelliteTargetWorldLocation(
 				Scenario.LaunchWorldLocation,
@@ -479,6 +520,257 @@ bool FABTSSlingshotCalibrationTargetGeometryTest::RunTest(
 				Scenario.Gravity,
 				Invalid,
 				RejectedTarget));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSSlingshotCalibrationSweptCollisionTest,
+	"ABTS.Calibration.SweptCollision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSSlingshotCalibrationSweptCollisionTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FVector Start(300.0f, 0.0f, 0.0f);
+	const FVector End(-300.0f, 0.0f, 0.0f);
+	float SatelliteAlpha = BIG_NUMBER;
+	TestTrue(
+		TEXT("Bird-centre segment hits the bird-expanded satellite"),
+		ABTSSweptCollision::SegmentSphereFirstAlpha(
+			Start,
+			End,
+			FVector::ZeroVector,
+			100.0f + 42.0f,
+			SatelliteAlpha));
+	TestTrue(
+		TEXT("Expanded satellite first-contact alpha is deterministic"),
+		FMath::IsNearlyEqual(
+			SatelliteAlpha,
+			158.0f / 600.0f,
+			1.0e-5f));
+
+	const FTransform TargetTransform(
+		FQuat::Identity,
+		FVector(180.0f, 0.0f, 0.0f));
+	float TargetAlpha = BIG_NUMBER;
+	TestTrue(
+		TEXT("Bird-centre segment hits the expanded E5 OBB"),
+		ABTSSweptCollision::SegmentExpandedOrientedBoxFirstAlpha(
+			Start,
+			End,
+			TargetTransform,
+			FVector(20.0f),
+			42.0f,
+			TargetAlpha));
+	TestTrue(
+		TEXT("Protruding E5 is encountered before the satellite body"),
+		TargetAlpha < SatelliteAlpha);
+	TestTrue(
+		TEXT("Expanded E5 clearance is positive before contact"),
+		ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+			Start,
+			TargetTransform,
+			FVector(20.0f),
+			42.0f) > 0.0f);
+	TestTrue(
+		TEXT("Expanded E5 clearance is zero at first contact"),
+		FMath::IsNearlyZero(
+			ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+				FMath::Lerp(Start, End, TargetAlpha),
+				TargetTransform,
+				FVector(20.0f),
+				42.0f),
+			1.0e-4f));
+	float CornerAlpha = BIG_NUMBER;
+	TestFalse(
+		TEXT("A rounded-corner miss is not promoted to an E5 hit"),
+		ABTSSweptCollision::SegmentExpandedOrientedBoxFirstAlpha(
+			FVector(50.0f, 50.0f, 100.0f),
+			FVector(50.0f, 50.0f, -100.0f),
+			FTransform::Identity,
+			FVector(20.0f),
+			42.0f,
+			CornerAlpha));
+	TestTrue(
+		TEXT("Rounded-corner miss retains positive exact clearance"),
+		ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+			FVector(50.0f, 50.0f, 0.0f),
+			FTransform::Identity,
+			FVector(20.0f),
+			42.0f) > 0.0f);
+	TestTrue(
+		TEXT("A sphere centre inside E5 has negative clearance"),
+		ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+			FVector::ZeroVector,
+			FTransform::Identity,
+			FVector(20.0f),
+			42.0f) < 0.0f);
+	float ClosestAlpha = BIG_NUMBER;
+	const float ParallelFaceClearance =
+		ABTSSweptCollision::
+			SegmentExpandedOrientedBoxMinimumClearance(
+				FVector(-100.0f, 70.0f, 0.0f),
+				FVector(100.0f, 70.0f, 0.0f),
+				FTransform::Identity,
+				FVector(20.0f),
+				42.0f,
+				&ClosestAlpha);
+	TestTrue(
+		TEXT("Exact segment clearance resolves a face-parallel miss"),
+		FMath::IsNearlyEqual(
+			ParallelFaceClearance,
+			8.0f,
+			1.0e-4f));
+	TestTrue(
+		TEXT("Exact segment clearance reports the earliest equal minimum"),
+		FMath::IsNearlyEqual(
+			ClosestAlpha,
+			0.4f,
+			1.0e-4f));
+	const float CornerClearance =
+		ABTSSweptCollision::
+			SegmentExpandedOrientedBoxMinimumClearance(
+				FVector(50.0f, 50.0f, 100.0f),
+				FVector(50.0f, 50.0f, -100.0f),
+				FTransform::Identity,
+				FVector(20.0f),
+				42.0f);
+	TestTrue(
+		TEXT("Exact segment clearance preserves rounded OBB corners"),
+		FMath::IsNearlyEqual(
+			CornerClearance,
+			FMath::Sqrt(1800.0f) - 42.0f,
+			1.0e-4f));
+	const float ZeroLengthClearance =
+		ABTSSweptCollision::
+			SegmentExpandedOrientedBoxMinimumClearance(
+				FVector(50.0f, 50.0f, 0.0f),
+				FVector(50.0f, 50.0f, 0.0f),
+				FTransform::Identity,
+				FVector(20.0f),
+				42.0f);
+	TestTrue(
+		TEXT("Zero-length segment clearance equals point clearance"),
+		FMath::IsNearlyEqual(
+			ZeroLengthClearance,
+			ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+				FVector(50.0f, 50.0f, 0.0f),
+				FTransform::Identity,
+				FVector(20.0f),
+				42.0f),
+			1.0e-4f));
+	const FTransform TransformedBox(
+		FQuat(FVector::UpVector, FMath::DegreesToRadians(37.0f)),
+		FVector(320.0f, -170.0f, 85.0f));
+	float TransformedClosestAlpha = BIG_NUMBER;
+	const float TransformedClearance =
+		ABTSSweptCollision::
+			SegmentExpandedOrientedBoxMinimumClearance(
+				TransformedBox.TransformPosition(
+					FVector(-100.0f, 70.0f, 0.0f)),
+				TransformedBox.TransformPosition(
+					FVector(100.0f, 70.0f, 0.0f)),
+				TransformedBox,
+				FVector(20.0f),
+				42.0f,
+				&TransformedClosestAlpha);
+	TestTrue(
+		TEXT("Segment clearance is rotation and translation invariant"),
+		FMath::IsNearlyEqual(
+			TransformedClearance,
+			ParallelFaceClearance,
+			1.0e-4f)
+		&& FMath::IsNearlyEqual(
+			TransformedClosestAlpha,
+			ClosestAlpha,
+			1.0e-4f));
+	const float BelowMissGate =
+		ABTSSweptCollision::
+			SegmentExpandedOrientedBoxMinimumClearance(
+				FVector(-100.0f, 121.9f, 0.0f),
+				FVector(100.0f, 121.9f, 0.0f),
+				FTransform::Identity,
+				FVector(20.0f),
+				42.0f);
+	const float AboveMissGate =
+		ABTSSweptCollision::
+			SegmentExpandedOrientedBoxMinimumClearance(
+				FVector(-100.0f, 122.1f, 0.0f),
+				FVector(100.0f, 122.1f, 0.0f),
+				FTransform::Identity,
+				FVector(20.0f),
+				42.0f);
+	TestTrue(
+		TEXT("Exact clearance preserves both sides of the 60 cm miss gate"),
+		BelowMissGate < 60.0f
+		&& AboveMissGate > 60.0f);
+
+	float LargerBirdAlpha = BIG_NUMBER;
+	TestTrue(
+		TEXT("A different collision radius produces a valid contact"),
+		ABTSSweptCollision::SegmentSphereFirstAlpha(
+			Start,
+			End,
+			FVector::ZeroVector,
+			100.0f + 55.0f,
+			LargerBirdAlpha));
+	TestTrue(
+		TEXT("The real collision radius participates in contact time"),
+		LargerBirdAlpha < SatelliteAlpha);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSSlingshotCalibrationSatellitePreviewGeometryTest,
+	"ABTS.Calibration.SatellitePreviewGeometry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSSlingshotCalibrationSatellitePreviewGeometryTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSM6TrajectoryPreview Preview;
+	Preview.WorldPoints =
+	{
+		FVector(0.0f, 0.0f, 0.0f),
+		FVector(100.0f, 0.0f, 0.0f),
+		FVector(200.0f, 100.0f, 0.0f)
+	};
+	int32 SegmentStart = INDEX_NONE;
+	FVector ClosestPoint;
+	FVector Tangent;
+	float DistanceCM = BIG_NUMBER;
+	TestTrue(
+		TEXT("The E5 preview can select a segment from the full M6 path"),
+		AABTSM101LandingPreviewCamera::
+			FindClosestTrajectorySegmentToPoint(
+				Preview,
+				FVector(160.0f, 40.0f, 0.0f),
+				SegmentStart,
+				ClosestPoint,
+				Tangent,
+				DistanceCM));
+	TestEqual(
+		TEXT("The closest curved-path leg is selected"),
+		SegmentStart,
+		1);
+	TestTrue(
+		TEXT("Closest point lies on the selected leg"),
+		ClosestPoint.Equals(
+			FVector(150.0f, 50.0f, 0.0f),
+			1.0e-4f));
+	TestTrue(
+		TEXT("Selected incidence direction follows the leg"),
+		Tangent.Equals(
+			FVector(1.0f, 1.0f, 0.0f).GetSafeNormal(),
+			1.0e-4f));
+	TestTrue(
+		TEXT("Closest distance is finite and expected"),
+		FMath::IsNearlyEqual(
+			DistanceCM,
+			FMath::Sqrt(200.0f),
+			1.0e-4f));
 	return true;
 }
 
