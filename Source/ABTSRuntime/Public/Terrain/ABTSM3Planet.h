@@ -6,6 +6,7 @@
 #include "PCG/ABTSM3MonthlyEncounter.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
 #include "PCG/ABTSM3MonthlySchema.h"
+#include "PCG/ABTSM3MonthlySlingshotField.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
@@ -103,6 +104,20 @@ public:
 	/** Revalidates the R-3 result against the R-2 source pool and CellTopo. */
 	bool ValidateMonthlySpatialResult(FString& OutFailure) const;
 
+	/**
+	 * R-3.1 ordinary slingshot slot fields. Field identity is diagnostic only:
+	 * callers must not treat it as an allowed-pair restriction.
+	 */
+	const FABTSM3MonthlySlingshotFieldResult&
+		GetMonthlySlingshotFieldResult() const
+	{
+		return MonthlySlingshotFieldResult;
+	}
+
+	/** Rebuilds and whole-struct compares the R-3.1 result. */
+	bool ValidateMonthlySlingshotFieldResult(
+		FString& OutFailure) const;
+
 	/** True only when the complete M3 logical, terrain and material presentation rebuild succeeded. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	bool IsM3PresentationReady() const { return bM3PresentationReady; }
@@ -159,6 +174,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	FABTSM3MonthlyEncounterSpatialConfig MonthlyEncounterSpatialConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
+	FABTSM3MonthlySlingshotFieldConfig MonthlySlingshotFieldConfig;
 
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
@@ -291,6 +309,10 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	FABTSM3MonthlySpatialResult MonthlySpatialResult;
 
+	/** R-3.1 ordinary slot-field alternatives; finale Space slots remain a separate exact pair. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
+	FABTSM3MonthlySlingshotFieldResult MonthlySlingshotFieldResult;
+
 #if WITH_EDITORONLY_DATA
 	/** Index-only debug snapshot. R-1 does not draw or alter the production map. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Schema|Debug")
@@ -301,6 +323,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Debug")
 	FABTSM3MonthlySpatialDebugData MonthlySpatialDebugData;
+
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field|Debug")
+	FABTSM3MonthlySlingshotFieldDebugData MonthlySlingshotFieldDebugData;
 
 	/** Draws the best R-2 route as a temporary Editor/PIE line overlay without changing terrain. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Route|Debug")

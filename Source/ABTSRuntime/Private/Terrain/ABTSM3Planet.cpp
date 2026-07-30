@@ -84,6 +84,12 @@ AABTSM3Planet::AABTSM3Planet()
 bool AABTSM3Planet::RebuildPlanet()
 {
 	bM3PresentationReady = false;
+	MonthlySlingshotFieldResult =
+		FABTSM3MonthlySlingshotFieldResult();
+#if WITH_EDITORONLY_DATA
+	MonthlySlingshotFieldDebugData =
+		FABTSM3MonthlySlingshotFieldDebugData();
+#endif
 	if (!AABTSM2Planet::RebuildPlanet() || !GenerateLogicalTerrain()) return false;
 	const float ResolvedHeightScaleCM = bDisableTerrainHeightVariationExperiment ? 0.0f : MacroHeightScaleCM;
 	const float ResolvedWaterDepthCM = bDisableTerrainHeightVariationExperiment ? 0.0f : TaskWaterDepthCM;
@@ -194,10 +200,14 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
 		MonthlyRoutePool = FABTSM3MonthlyRoutePool();
 		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
+		MonthlySlingshotFieldResult =
+			FABTSM3MonthlySlingshotFieldResult();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
 		MonthlyRouteDebugData = FABTSM3MonthlyRouteDebugData();
 		MonthlySpatialDebugData = FABTSM3MonthlySpatialDebugData();
+		MonthlySlingshotFieldDebugData =
+			FABTSM3MonthlySlingshotFieldDebugData();
 #endif
 		return false;
 	}
@@ -251,7 +261,8 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 #endif
 	FString SpatialFailure;
 	const FABTSM3MonthlySpatialFaultInjection NoSpatialFaults;
-	if (!FABTSM3MonthlyEncounterBuilder::Build(
+	const bool bSpatialBuilt =
+		FABTSM3MonthlyEncounterBuilder::Build(
 			WorldSeed,
 			MonthlyEncounterSpatialConfig,
 			MonthlyRouteConfig,
@@ -260,7 +271,8 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 			MonthlyRoutePool,
 			NoSpatialFaults,
 			MonthlySpatialResult,
-			SpatialFailure))
+			SpatialFailure);
+	if (!bSpatialBuilt)
 	{
 		UE_LOG(LogABTSRuntime, Error,
 			TEXT("[ABTS][M3R3][EncounterSpatial] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
@@ -273,6 +285,32 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 	FABTSM3MonthlyEncounterBuilder::BuildDebugData(
 		MonthlySpatialResult,
 		MonthlySpatialDebugData);
+#endif
+	MonthlySlingshotFieldResult =
+		FABTSM3MonthlySlingshotFieldResult();
+	FString SlingshotFieldFailure;
+	if (bSpatialBuilt
+		&& !FABTSM3MonthlySlingshotFieldBuilder::Build(
+			WorldSeed,
+			MonthlySlingshotFieldConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			SlingshotFieldFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R3.1][SlingshotFields] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlySlingshotFieldBuilder::
+				GetRejectReasonName(
+					MonthlySlingshotFieldResult.RejectReason),
+			*SlingshotFieldFailure);
+	}
+#if WITH_EDITORONLY_DATA
+	FABTSM3MonthlySlingshotFieldBuilder::BuildDebugData(
+		MonthlySlingshotFieldResult,
+		MonthlySlingshotFieldDebugData);
 #endif
 	return true;
 }
@@ -323,6 +361,30 @@ bool AABTSM3Planet::ValidateMonthlySpatialResult(
 		TEXT("%s:%s"),
 		FABTSM3MonthlyEncounterBuilder::GetRejectReasonName(
 			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlySlingshotFieldRejectReason RejectReason =
+		EABTSM3MonthlySlingshotFieldRejectReason::None;
+	if (FABTSM3MonthlySlingshotFieldBuilder::Validate(
+			MonthlySlingshotFieldConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlySlingshotFieldBuilder::
+			GetRejectReasonName(RejectReason),
 		*OutFailure);
 	return false;
 }
@@ -433,6 +495,18 @@ void AABTSM3Planet::DrawMonthlySpatialDebugOverlay() const
 		MonthlySpatialDebugData.SlingshotCellIds,
 		FColor::Yellow,
 		42.0f);
+	DrawCellSet(
+		MonthlySlingshotFieldDebugData.EncounterSlotCellIds,
+		FColor(255, 170, 0),
+		24.0f);
+	DrawCellSet(
+		MonthlySlingshotFieldDebugData.RoadSlotCellIds,
+		FColor(160, 60, 255),
+		24.0f);
+	DrawCellSet(
+		MonthlySlingshotFieldDebugData.FieldAnchorCellIds,
+		FColor::Green,
+		34.0f);
 	DrawCellSet(
 		MonthlySpatialDebugData.TargetAnchorCellIds,
 		FColor::Red,
