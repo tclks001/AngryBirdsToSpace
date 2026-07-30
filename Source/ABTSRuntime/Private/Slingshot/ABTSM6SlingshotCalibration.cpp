@@ -12,10 +12,28 @@
 bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 	const FABTSM6LaunchProfileCatalog& InCatalog)
 {
+	if (SlingshotCamera == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][Calibration][ProfileCatalog] Rejected Reason=Slingshot camera is unavailable."));
+		return false;
+	}
+	FABTSM6LaunchProfileCatalog CatalogWithCameraSnapshot = InCatalog;
+	if (!SlingshotCamera->CopyAimFraming(
+		CatalogWithCameraSnapshot.AimCameraDistanceCM,
+		CatalogWithCameraSnapshot.AimCameraPitchDegrees,
+		CatalogWithCameraSnapshot.AimTargetForwardDistanceCM,
+		CatalogWithCameraSnapshot.AimTargetHeightCM))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][Calibration][ProfileCatalog] Rejected Reason=Authored Slingshot camera framing is invalid. CameraClass=%s"),
+			*GetNameSafe(SlingshotCamera->GetClass()));
+		return false;
+	}
 	FABTSM6LaunchProfileCatalog ResolvedCatalog;
 	FString FailureReason;
 	if (!FABTSSlingshotSatelliteCalibrationModel::ResolveCatalog(
-		InCatalog, ResolvedCatalog, &FailureReason))
+		CatalogWithCameraSnapshot, ResolvedCatalog, &FailureReason))
 	{
 		UE_LOG(LogABTSRuntime, Error,
 			TEXT("[ABTS][Calibration][ProfileCatalog] Rejected Reason=%s"),
@@ -26,19 +44,6 @@ bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 	CalibrationLaunchProfileHash =
 		FABTSSlingshotSatelliteCalibrationModel::ComputeLaunchProfileHash(
 			CalibrationLaunchProfileCatalog);
-	if (SlingshotCamera == nullptr)
-	{
-		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][Calibration][ProfileCatalog] Rejected Reason=Slingshot camera is unavailable."));
-		CalibrationLaunchProfileCatalog = FABTSM6LaunchProfileCatalog();
-		CalibrationLaunchProfileHash = 0;
-		return false;
-	}
-	SlingshotCamera->ConfigureCalibrationAimFraming(
-		CalibrationLaunchProfileCatalog.AimCameraDistanceCM,
-		CalibrationLaunchProfileCatalog.AimCameraPitchDegrees,
-		CalibrationLaunchProfileCatalog.AimTargetForwardDistanceCM,
-		CalibrationLaunchProfileCatalog.AimTargetHeightCM);
 	bCalibrationModeEnabled = true;
 	// The isolated calibration GameMode never creates required buildings. Avoid
 	// promoting unrelated old-map HISM instances or waiting on their warmup.
@@ -46,9 +51,14 @@ bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 	bStartupPhysicsWarmupComplete = true;
 	bStartupPhysicsWarmupFailed = false;
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][Calibration][ProfileCatalog] Ready Version=%d Profiles=%d LaunchProfileHash=%llu"),
+		TEXT("[ABTS][Calibration][ProfileCatalog] Ready Version=%d Profiles=%d CameraClass=%s CameraDistance=%.1f CameraPitch=%.2f TargetForward=%.1f TargetHeight=%.1f LaunchProfileHash=%llu"),
 		CalibrationLaunchProfileCatalog.Version,
 		CalibrationLaunchProfileCatalog.Profiles.Num(),
+		*GetNameSafe(SlingshotCamera->GetClass()),
+		CalibrationLaunchProfileCatalog.AimCameraDistanceCM,
+		CalibrationLaunchProfileCatalog.AimCameraPitchDegrees,
+		CalibrationLaunchProfileCatalog.AimTargetForwardDistanceCM,
+		CalibrationLaunchProfileCatalog.AimTargetHeightCM,
 		CalibrationLaunchProfileHash);
 	return true;
 }

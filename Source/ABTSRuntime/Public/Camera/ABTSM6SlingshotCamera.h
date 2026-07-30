@@ -19,12 +19,12 @@ public:
 	AABTSM6SlingshotCamera();
 	virtual void Tick(float DeltaSeconds) override;
 	void SetAimFrame(const FVector& InCenter, const FVector& InForward, const FVector& InUp);
-	/** Calibration-only framing override; normal M6 defaults remain unchanged. */
-	void ConfigureCalibrationAimFraming(
-		float InDistanceCM,
-		float InPitchDegrees,
-		float InTargetForwardDistanceCM,
-		float InTargetHeightCM);
+	/** Copies the authored camera-class defaults used by player input and calibration certification. */
+	bool CopyAimFraming(
+		float& OutDistanceCM,
+		float& OutPitchDegrees,
+		float& OutTargetForwardDistanceCM,
+		float& OutTargetHeightCM) const;
 	/** Returns the exact plane/basis consumed by UpdateAimFromCursor. */
 	bool BuildAimInputPlaneBasis(
 		const FVector& InCenter,

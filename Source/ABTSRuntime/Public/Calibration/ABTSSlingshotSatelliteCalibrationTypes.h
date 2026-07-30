@@ -67,17 +67,17 @@ struct ABTSRUNTIME_API FABTSM6LaunchProfileCatalog
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float FlightAirDragPerSecond = 0.08f;
 
-	/** Calibration camera framing is input feel: it owns the real mouse projection plane. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim Camera", meta = (ClampMin = "100.0", Units = "cm"))
+	/**
+	 * Runtime snapshots copied from the spawned SlingshotCamera Blueprint.
+	 * They stay in the hash so certification uses the real mouse projection
+	 * plane, but are deliberately not a second authored parameter source.
+	 */
 	float AimCameraDistanceCM = 1150.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim Camera", meta = (ClampMin = "-10.0", ClampMax = "75.0", Units = "deg"))
 	float AimCameraPitchDegrees = 18.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim Camera", meta = (ClampMin = "0.0", Units = "cm"))
 	float AimTargetForwardDistanceCM = 900.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim Camera", meta = (Units = "cm"))
 	float AimTargetHeightCM = 245.0f;
 };
 

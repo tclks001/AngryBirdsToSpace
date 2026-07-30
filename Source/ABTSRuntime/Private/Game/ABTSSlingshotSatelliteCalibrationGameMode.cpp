@@ -6,7 +6,6 @@
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationRig.h"
 #include "EngineUtils.h"
-#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
@@ -17,68 +16,6 @@
 #include "UI/ABTSSlingshotSatelliteCalibrationHUD.h"
 #include "World/ABTSM10ScoutMapSystem.h"
 #include "World/ABTSM9Satellite.h"
-
-namespace ABTSCalibrationGameModePrivate
-{
-	TAutoConsoleVariable<float> CVarSatelliteRadiusRatio(
-		TEXT("abts.Calibration.SatelliteRadiusRatio"),
-		-1.0f,
-		TEXT("Practice satellite radius / primary radius; -1 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarSatelliteArcDegrees(
-		TEXT("abts.Calibration.SatelliteArcDegrees"),
-		-1.0f,
-		TEXT("Practice launch-to-satellite surface arc in degrees; -1 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarSatelliteClearanceRatio(
-		TEXT("abts.Calibration.SatelliteClearanceRatio"),
-		-1.0f,
-		TEXT("Practice satellite centre clearance / primary radius; -1 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarSatelliteGravityRatio(
-		TEXT("abts.Calibration.SatelliteGravityRatio"),
-		-1.0f,
-		TEXT("Practice satellite surface gravity / primary gravity; -1 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarBacksideAngleDegrees(
-		TEXT("abts.Calibration.BacksideAngleDegrees"),
-		-1.0f,
-		TEXT("Satellite target angle from its launch-facing direction; -1 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarTargetAzimuthDegrees(
-		TEXT("abts.Calibration.TargetAzimuthDegrees"),
-		-1000.0f,
-		TEXT("Satellite target local azimuth; -1000 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarTargetAltitudeCM(
-		TEXT("abts.Calibration.TargetAltitudeCM"),
-		-1.0f,
-		TEXT("Satellite target altitude above its ideal surface; -1 uses the preset."),
-		ECVF_Cheat);
-	TAutoConsoleVariable<float> CVarTargetRadiusCM(
-		TEXT("abts.Calibration.TargetRadiusCM"),
-		-1.0f,
-		TEXT("Satellite TargetProxy radius; -1 uses the preset."),
-		ECVF_Cheat);
-
-	float ResolvePositiveOverride(
-		const TAutoConsoleVariable<float>& Variable,
-		const float PresetValue)
-	{
-		const float Value = Variable.GetValueOnGameThread();
-		return Value >= 0.0f ? Value : PresetValue;
-	}
-
-	void ApplyCommandLineOverride(const TCHAR* Key, float& InOutValue)
-	{
-		float ParsedValue = 0.0f;
-		if (FParse::Value(FCommandLine::Get(), Key, ParsedValue)
-			&& FMath::IsFinite(ParsedValue))
-		{
-			InOutValue = ParsedValue;
-		}
-	}
-}
 
 AABTSSlingshotSatelliteCalibrationGameMode::
 AABTSSlingshotSatelliteCalibrationGameMode()
@@ -95,62 +32,6 @@ AABTSSlingshotSatelliteCalibrationGameMode()
 	ScoutMapSettings.bShowOrbitalOverview = true;
 	ScoutMapSettings.OrbitalDiagramMinPathLengthCM = 1000.0f;
 	ScoutMapSettings.OrbitalDiagramPathLengthHysteresisCM = 250.0f;
-}
-
-FABTSSatellitePracticePreset
-AABTSSlingshotSatelliteCalibrationGameMode::ResolvePracticePreset() const
-{
-	using namespace ABTSCalibrationGameModePrivate;
-	FABTSSatellitePracticePreset Resolved = PracticePreset;
-	Resolved.SatelliteRadiusPrimaryRatio = ResolvePositiveOverride(
-		CVarSatelliteRadiusRatio, Resolved.SatelliteRadiusPrimaryRatio);
-	Resolved.SatelliteAnchorArcDegrees = ResolvePositiveOverride(
-		CVarSatelliteArcDegrees, Resolved.SatelliteAnchorArcDegrees);
-	Resolved.SatelliteCenterClearancePrimaryRatio = ResolvePositiveOverride(
-		CVarSatelliteClearanceRatio,
-		Resolved.SatelliteCenterClearancePrimaryRatio);
-	Resolved.SatelliteSurfaceGravityPrimaryRatio = ResolvePositiveOverride(
-		CVarSatelliteGravityRatio,
-		Resolved.SatelliteSurfaceGravityPrimaryRatio);
-	Resolved.BacksideAngleDeg = ResolvePositiveOverride(
-		CVarBacksideAngleDegrees, Resolved.BacksideAngleDeg);
-	const float AzimuthOverride = CVarTargetAzimuthDegrees.GetValueOnGameThread();
-	if (AzimuthOverride > -999.0f)
-	{
-		Resolved.TargetLocalAzimuthDeg = AzimuthOverride;
-	}
-	Resolved.TargetAltitudeAboveSurfaceCM = ResolvePositiveOverride(
-		CVarTargetAltitudeCM,
-		Resolved.TargetAltitudeAboveSurfaceCM);
-	Resolved.TargetProxyRadiusCM = ResolvePositiveOverride(
-		CVarTargetRadiusCM,
-		Resolved.TargetProxyRadiusCM);
-
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationSatelliteRadiusRatio="),
-		Resolved.SatelliteRadiusPrimaryRatio);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationSatelliteArcDegrees="),
-		Resolved.SatelliteAnchorArcDegrees);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationSatelliteClearanceRatio="),
-		Resolved.SatelliteCenterClearancePrimaryRatio);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationSatelliteGravityRatio="),
-		Resolved.SatelliteSurfaceGravityPrimaryRatio);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationBacksideAngleDegrees="),
-		Resolved.BacksideAngleDeg);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationTargetAzimuthDegrees="),
-		Resolved.TargetLocalAzimuthDeg);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationTargetAltitudeCM="),
-		Resolved.TargetAltitudeAboveSurfaceCM);
-	ApplyCommandLineOverride(
-		TEXT("ABTSCalibrationTargetRadiusCM="),
-		Resolved.TargetProxyRadiusCM);
-	return Resolved;
 }
 
 void AABTSSlingshotSatelliteCalibrationGameMode::OnInitialPlayerPlaced(
@@ -201,8 +82,7 @@ void AABTSSlingshotSatelliteCalibrationGameMode::OnInitialPlayerPlaced(
 		return;
 	}
 
-	const FABTSSatellitePracticePreset ResolvedPreset =
-		ResolvePracticePreset();
+	const FABTSSatellitePracticePreset ResolvedPreset = PracticePreset;
 	const FVector StartDirection =
 		PrimaryPlanet->LogicalCells[SpawnCellId].UnitCenter.GetSafeNormal();
 	FVector LocalForward = FVector::VectorPlaneProject(

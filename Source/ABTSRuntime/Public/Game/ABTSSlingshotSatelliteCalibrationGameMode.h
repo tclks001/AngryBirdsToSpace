@@ -32,7 +32,6 @@ protected:
 		int32 SpawnCellId) override;
 
 private:
-	FABTSSatellitePracticePreset ResolvePracticePreset() const;
 	void TryCompleteCalibrationSmoke();
 	void FinishCalibrationSmoke(bool bPassed, const FString& Reason);
 

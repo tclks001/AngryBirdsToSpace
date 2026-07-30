@@ -12,7 +12,7 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、两个 Editor-only 候选和交互表现已进入 `master`。两个布局仍是 `Candidate / NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：Integration 已落地隔离 M6/M9 标定候选，并在同一候选上通过 fresh 4/4 自动化、标定 runtime smoke、生产 M9 deferred-transform 回归及 M11 隔离回归；完成可见 PIE 手感验收后才能冻结 V0。M7 并行推进 DAG5-B/C，M3 可推进 R-5；冻结的可移植 Launch/Preset 身份、Integration 批准的生产只读适配器与 M7 目录齐备后，由 M3R-4 选出唯一 Candidate，再接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 默认下一步：Integration 已落地隔离 M6/M9 标定候选；标定 GameMode 蓝图现为三档曲线和卫星预设的唯一人工参数源，Slingshot Camera 蓝图现为相机构图的唯一人工参数源，几何 CVar/命令行与 Catalog→Camera 反写已废弃。蓝图入口的 fresh 4/4、runtime smoke、生产 M9 与 M11 隔离回归已通过；完成可见 PIE 手感验收后才能冻结 V0。M7 并行推进 DAG5-B/C，M3 可推进 R-5；冻结的可移植 Launch/Preset 身份、Integration 批准的生产只读适配器与 M7 目录齐备后，由 M3R-4 选出唯一 Candidate，再接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 

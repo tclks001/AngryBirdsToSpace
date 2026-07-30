@@ -23,17 +23,24 @@ void AABTSM6SlingshotCamera::SetAimFrame(const FVector& InCenter, const FVector&
 	UpdateAim(0.0f);
 }
 
-void AABTSM6SlingshotCamera::ConfigureCalibrationAimFraming(
-	const float InDistanceCM,
-	const float InPitchDegrees,
-	const float InTargetForwardDistanceCM,
-	const float InTargetHeightCM)
+bool AABTSM6SlingshotCamera::CopyAimFraming(
+	float& OutDistanceCM,
+	float& OutPitchDegrees,
+	float& OutTargetForwardDistanceCM,
+	float& OutTargetHeightCM) const
 {
-	AimDistanceCM = FMath::Max(100.0f, InDistanceCM);
-	AimPitchDegrees = FMath::Clamp(InPitchDegrees, -10.0f, 75.0f);
-	AimTargetForwardDistanceCM =
-		FMath::Max(0.0f, InTargetForwardDistanceCM);
-	AimTargetHeightCM = InTargetHeightCM;
+	OutDistanceCM = AimDistanceCM;
+	OutPitchDegrees = AimPitchDegrees;
+	OutTargetForwardDistanceCM = AimTargetForwardDistanceCM;
+	OutTargetHeightCM = AimTargetHeightCM;
+	return FMath::IsFinite(OutDistanceCM)
+		&& FMath::IsFinite(OutPitchDegrees)
+		&& FMath::IsFinite(OutTargetForwardDistanceCM)
+		&& FMath::IsFinite(OutTargetHeightCM)
+		&& OutDistanceCM >= 100.0f
+		&& OutPitchDegrees >= -10.0f
+		&& OutPitchDegrees <= 75.0f
+		&& OutTargetForwardDistanceCM >= 0.0f;
 }
 
 bool AABTSM6SlingshotCamera::BuildAimView(

@@ -28,7 +28,7 @@
 标定模式不新增正式地图，复用旧 `L_ABTS_M9`：
 
 ```text
-/Game/Maps/L_ABTS_M9?game=/Script/ABTSRuntime.ABTSSlingshotSatelliteCalibrationGameMode
+/Game/Maps/L_ABTS_M9?game=/Game/Blueprints/BP_ABTSSlingshotSatelliteCalibrationGameMode.BP_ABTSSlingshotSatelliteCalibrationGameMode_C
 ```
 
 `AABTSSlingshotSatelliteCalibrationGameMode` 直接继承 `AABTSM6GameMode`，再显式组合一颗练习卫星、标定 Rig 和 M10 侦察/轨道表现。它不继承 M7→M8→M9 的生产 GameMode 链，因此：
@@ -57,7 +57,7 @@
 - `AimSensitivityScale`、`MaximumAimPlaneOffsetCM`；
 - `ComfortablePullMinimum/Maximum`。
 
-目录还记录并签入 `LaunchProfileHash` 的共享真实瞄准构图：
+`BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 `LaunchProfileCatalog` 是三档曲线、拉距、滚轮、Aim 手感和共享阻力的唯一人工调参入口。相机构图不再作为该目录中的第二套可编辑参数；运行时从 `BP_ABTSM6SlingshotCamera` 的实际实例读取以下四项快照，放入解析后目录并签入 `LaunchProfileHash`：
 
 - `AimCameraDistanceCM`；
 - `AimCameraPitchDegrees`；
@@ -77,12 +77,14 @@
 - `MinimumPullDistanceCM=120`、`MaximumPullDistanceCM=430`；
 - `InitialPullAlpha=0.55`、`PullPowerWheelStep=0.04`，因此认证功率点必须来自玩家用滚轮实际可进入的档位；滚轮步长的合法下限是 `0.01`（完整合法范围 `0.01..1.0`），小于该值必须 fail closed，不能借近似连续的超小步长扩大成功岛；
 - `AimSensitivityScale=1.0`、`MaximumAimPlaneOffsetCM=260`；
-- `AimCameraDistanceCM=1150 cm`、`AimCameraPitchDegrees=18°`、`AimTargetForwardDistanceCM=900 cm`、`AimTargetHeightCM=245 cm`；
+- 相机构图以 `BP_ABTSM6SlingshotCamera` 的 Class Defaults 为准；原生类的 1150 cm、18°、900 cm、245 cm 只是在该蓝图未覆盖时使用的回退值；
 - `FlightAirDragPerSecond=0.08`。
 
-目录解析必须恰好得到 Twig、Simple、Reinforced 各一项；缺项、重复、非有限值、不可进入的初始功率和反向速度域均 fail closed。Space 档不进入此目录，继续服从 M11 的同源固定步长求解器。
+目录解析必须恰好得到 Twig、Simple、Reinforced 各一项；缺项、重复、非有限值、不可进入的初始功率和反向速度域均 fail closed。实际 Camera Blueprint 的构图值同样必须合法，否则标定入口 fail closed。运行时不得用 Catalog 反写 Camera Actor。Space 档不进入此目录，继续服从 M11 的同源固定步长求解器。
 
 ### 3.2 SatellitePracticePreset V0
+
+`BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 `PracticePreset` 是卫星局部布局和背面目标的唯一人工调参入口。原生构造函数只提供新建蓝图时的安全候选值；运行时不再接受几何 CVar 或命令行覆盖，避免 Editor 中显示的值与实际生成值不一致。
 
 | 字段 | 当前候选 | 含义 |
 | --- | ---: | --- |
@@ -91,8 +93,8 @@
 | `SatelliteAnchorArcDegrees` | 30° | 出生点到卫星锚方向的主星表面弧角 |
 | `SatelliteSurfaceGravityPrimaryRatio` | 0.45 | 卫星/主星表面重力比 |
 | `TargetBody` | `PracticeSatellite` | 目标所属天体身份 |
-| `BacksideAngleDeg` | 178° | 从“卫星面向 Reinforced RestPouch 方向”量取的背面角 |
-| `TargetLocalAzimuthDeg` | 0° | 绕面向发射点轴的局部方位 |
+| `BacksideAngleDeg` | 170° | 从“卫星面向 Reinforced RestPouch 方向”量取的背面角；已按 Camera Blueprint 的真实投影平面重标定 |
+| `TargetLocalAzimuthDeg` | 20° | 绕面向发射点轴的局部方位；与 170° 背面角共同形成相邻 Pull 成功岛 |
 | `TargetAltitudeAboveSurfaceCM` | 560 cm | 目标中心高于卫星理想球面的距离 |
 | `TargetProxyRadiusCM` | 420 cm | 未来 M7 AttackFace 的暂定有效命中半径 |
 
@@ -162,33 +164,9 @@ abts.Calibration.SatelliteGravity 1
 
 调整顺序固定为：卫星半径 → 离地距离 → 背面目标局部角度/尺寸 → 卫星表面引力。禁止先增大卫星引力来掩盖强化弹弓本身射程不足。
 
-下列几何/比例 CVar 只在进入标定模式、玩家首次放置时读取；修改后必须重新进入/重载关卡，现有卫星、目标和 Hash 不会热更新。除 `TargetAzimuthDegrees` 外，`-1` 表示使用预设：
+在 `BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 Class Defaults 中修改 `PracticePreset`，保存并重新进入 PIE；现有卫星、目标和 Hash 不热更新。三档发射参数在同一蓝图的 `LaunchProfileCatalog.Profiles` 中修改；相机距离、俯仰与观察点只在 `BP_ABTSM6SlingshotCamera` 中修改。运行日志的 `[ABTS][Calibration][ProfileCatalog] Ready` 必须显示实际 `CameraClass` 和最终四项构图值。
 
-```text
-abts.Calibration.SatelliteRadiusRatio
-abts.Calibration.SatelliteArcDegrees
-abts.Calibration.SatelliteClearanceRatio
-abts.Calibration.SatelliteGravityRatio
-abts.Calibration.BacksideAngleDegrees
-abts.Calibration.TargetAzimuthDegrees
-abts.Calibration.TargetAltitudeCM
-abts.Calibration.TargetRadiusCM
-```
-
-`abts.Calibration.TargetAzimuthDegrees` 的恢复哨兵是 `-1000`，因为 `-1°` 本身是合法方位角。fresh 进程接受以下启动覆盖：
-
-```text
--ABTSCalibrationSatelliteRadiusRatio=
--ABTSCalibrationSatelliteArcDegrees=
--ABTSCalibrationSatelliteClearanceRatio=
--ABTSCalibrationSatelliteGravityRatio=
--ABTSCalibrationBacksideAngleDegrees=
--ABTSCalibrationTargetAzimuthDegrees=
--ABTSCalibrationTargetAltitudeCM=
--ABTSCalibrationTargetRadiusCM=
-```
-
-覆盖值只影响标定 GameMode，不写配置、不改生产默认值。只有 `abts.Calibration.SatelliteGravity -1/0/1` 是 live 开关：`-1` 恢复本次 baseline、`0` 关闭、`1` 开启。
+只有 `abts.Calibration.SatelliteGravity -1/0/1` 保留为诊断用 live 开关：`-1` 恢复本次 baseline、`0` 关闭、`1` 开启。它只做同一布局的引力 A/B 对照，不是布局参数源。
 
 ## 6. 成功岛与反例
 
@@ -200,7 +178,7 @@ abts.Calibration.TargetRadiusCM
 - `length(AimPlaneOffset) > 260 cm` 的圆盘外组合跳过，不计作已采样输入；
 - 固定步长：0.04 s；最长 30 s。
 
-LaunchFrame 同时保存真实相机的 `CameraLook` 为 `AimPlaneNormalWorld`，并保存与之正交的 ScreenUp/ScreenRight；四项相机构图值属于 Catalog 和 `LaunchProfileHash`。每个样本用与 M6 `UpdatePouchAndPreview/ComputeLaunchVelocity` 相同的鼠标投影平面、pouch 位置、发射方向和鸟偏移构造初始状态，再用同一局部两体快照分别积分“卫星引力开/关”。每步对 TargetProxy、卫星扩张球和主星扩张球求最早线段交点。只有同时满足下列条件的样本进入成功集：
+LaunchFrame 同时保存真实相机的 `CameraLook` 为 `AimPlaneNormalWorld`，并保存与之正交的 ScreenUp/ScreenRight；从 Camera Blueprint 采样的四项构图快照进入解析后 Catalog 和 `LaunchProfileHash`。每个样本用与 M6 `UpdatePouchAndPreview/ComputeLaunchVelocity` 相同的鼠标投影平面、pouch 位置、发射方向和鸟偏移构造初始状态，再用同一局部两体快照分别积分“卫星引力开/关”。每步对 TargetProxy、卫星扩张球和主星扩张球求最早线段交点。只有同时满足下列条件的样本进入成功集：
 
 1. 引力开启时先命中 TargetProxy；
 2. 没有先撞卫星或主星；
@@ -251,7 +229,7 @@ ABTS.Calibration.SuccessIsland
 ```powershell
 $Log = "$ProjectRoot\Saved\Logs\M6M9-Calibration-FreshRuntime.log"
 & $EditorCmd $Project `
-  "/Game/Maps/L_ABTS_M9?game=/Script/ABTSRuntime.ABTSSlingshotSatelliteCalibrationGameMode" `
+  "/Game/Maps/L_ABTS_M9?game=/Game/Blueprints/BP_ABTSSlingshotSatelliteCalibrationGameMode.BP_ABTSSlingshotSatelliteCalibrationGameMode_C" `
   -game -NullRHI -unattended -nop4 -nosplash -NoSound -NoMessaging `
   -ABTSCalibrationSmoke "-abslog=$Log"
 ```
@@ -293,7 +271,7 @@ $Log = "$ProjectRoot\Saved\Logs\M6M9-M110-Separation-Regression.log"
 $Log = "$ProjectRoot\Saved\Logs\M6M9-ProductionM9-FreshRuntime.log"
 $M9 = Start-Process $EditorCmd -WindowStyle Hidden -PassThru -ArgumentList @(
   $Project,
-  "/Game/Maps/L_ABTS_M9",
+  "/Game/Maps/L_ABTS_M9?game=/Script/ABTSRuntime.ABTSM9GameMode",
   "-game", "-NullRHI", "-unattended", "-nop4", "-nosplash",
   "-NoSound", "-NoMessaging", "-ExecCmds=t.MaxFPS 60",
   "-abslog=$Log"
@@ -312,11 +290,12 @@ if (-not $M9.WaitForExit(60000)) {
 - 强制 Unity：`-ForceUnity -DisableAdaptiveUnity -NoHotReload -NoHotReloadFromIDE`，`Result: Succeeded`；
 - `ABTS.Calibration.*`：精确 4/4 Success，`TEST COMPLETE. EXIT CODE: 0`；
 - 标定 runtime：唯一 `Terminal=1 Passed=1 Failed=0`，组合原因为 `Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`；
-- 实际 Reinforced 成功岛：`Pull=[0.83,0.87]`、`LargestIsland=7`、Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `67.3 cm`；
+- 蓝图相机构图：`BP_ABTSM6SlingshotCamera_C`，`Distance=1500 cm`、`Pitch=-3°`、`TargetForward=900 cm`、`TargetHeight=245 cm`；
+- 实际 Reinforced 成功岛：`Pull=[0.83,0.95]`、`LargestIsland=12`、Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `71.3 cm`；
 - 生产 M9 fresh runtime：唯一 `ABTSM9GameMode`、唯一 `Satellite ready`、零 rejected/transform error；
 - `ABTS.M110.TaskGraphFinaleSeparation` 与 `ABTS.M11C.Runtime.ContractRoutingAndM9Isolation`：各 1/1 Success。
 
-本次 runtime 的两个可移植候选身份为 `LaunchProfileHash=15372304660363286286`、`SatellitePracticePresetHash=15587129294635678955`；`BaselineGravitySnapshotHash=7451995348163015522` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证，不等于第 8 节可见 PIE 已通过，也不把 V0 提前标记为冻结。
+本次 runtime 的两个可移植候选身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=1278846752820581340`；`BaselineGravitySnapshotHash=7451995348163015522` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证，不等于第 8 节可见 PIE 已通过，也不把 V0 提前标记为冻结。
 
 ## 8. 可见 PIE 验收
 
