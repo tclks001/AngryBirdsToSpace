@@ -7,8 +7,10 @@
 #include "Building/ABTSM73StructureData.h"
 
 struct FABTSM73DAGGenerationResult;
+struct FABTSM73DAG5BResult;
 struct FABTSM73DAGLayoutSettings;
 struct FABTSM73DAGSpatialLayout;
+struct FABTSM73SemanticEnvelope;
 struct FABTSM73GenerationSettings;
 struct FABTSM73StructureData;
 
@@ -19,6 +21,17 @@ public:
 	bool Compile(const FABTSM73GenerationSettings& BuildingSettings,
 		const FABTSM73DAGGenerationResult& Graph, const FABTSM73DAGLayoutSettings& LayoutSettings,
 		const FABTSM73DAGSpatialLayout& Layout, FABTSM73StructureData& OutData, FString& OutError) const;
+
+	/** DAG5-B atomic compile plus independent SemanticEnvelope audit. */
+	bool CompileSemantic(
+		const FABTSM73GenerationSettings& BuildingSettings,
+		const FABTSM73DAGGenerationResult& Graph,
+		const FABTSM73DAGLayoutSettings& LayoutSettings,
+		const FABTSM73DAGSpatialLayout& Layout,
+		const FABTSM73SemanticEnvelope& Envelope,
+		FABTSM73DAG5BResult& InOutResult,
+		FABTSM73StructureData& OutData,
+		FString& OutError) const;
 
 private:
 	static void AddBrick(FABTSM73StructureData& Data, int32 MacroNodeId, const FVector& Center,

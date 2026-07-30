@@ -114,6 +114,11 @@ public:
 		return LastDAG5AResult;
 	}
 
+	const FABTSM73DAG5BResult& GetDAG5BResultForValidation() const
+	{
+		return LastDAG5BResult;
+	}
+
 	AABTSM7BuildingModule* FindRuntimeModuleForNodeForValidation(
 		int32 NodeId) const
 	{
@@ -236,6 +241,9 @@ private:
 	/** DAG5-A bounded feasibility search. Default off preserves the one-shot DAG2.3 path. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-5A|Search")
 	FABTSM73DAG5ASettings DAG5ASettings;
+	/** DAG5-B Shape Grammar + local semantic WFC. Explicit opt-in. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-DAG-5B|Envelope")
+	FABTSM73DAG5BSettings DAG5BSettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-B|Difficulty")
 	FABTSM73DifficultySettings DifficultySettings;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Validation")
@@ -273,6 +281,7 @@ private:
 	FABTSM73DAG4ValidationResult LastDAG4ValidationResult;
 	UPROPERTY(VisibleAnywhere, Transient, Category = "ABTS|M7.3-DAG-5A|Result")
 	FABTSM73DAG5AResult LastDAG5AResult;
+	FABTSM73DAG5BResult LastDAG5BResult;
 
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;

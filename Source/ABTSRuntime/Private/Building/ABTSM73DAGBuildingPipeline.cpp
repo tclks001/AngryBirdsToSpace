@@ -8,6 +8,7 @@
 #include "Building/ABTSM73DAGFailurePatternRewriter.h"
 #include "Building/ABTSM73DAGFailurePlayabilityPlanner.h"
 #include "Building/ABTSM73DAG5CandidateSearch.h"
+#include "Building/ABTSM73DAG5BSemanticEnvelope.h"
 #include "Building/ABTSM73DAG5Types.h"
 #include "Building/ABTSM73DAGGrammarExpander.h"
 #include "Building/ABTSM73DAGLayoutSolver.h"
@@ -124,6 +125,32 @@ namespace
 		InOutResult.SearchHash = static_cast<int64>(
 			FCrc::StrCrc32(*Canonical));
 	}
+
+	void FinalizeDAG5BCompleteChainHash(
+		const FABTSM73DAG5BSettings& Settings,
+		const FABTSM73DAG5BResult& SemanticResult,
+		FABTSM73DAG5AResult& InOutSearchResult)
+	{
+		FString Canonical = FString::Printf(
+			TEXT("DAG5A=%lld|Accepted=%d|Family=%d|Features=%u")
+			TEXT("|Shape=%u|WFC=%u|Envelope=%u|Audit=%u|Result=%u"),
+			InOutSearchResult.SearchHash,
+			SemanticResult.bAccepted ? 1 : 0,
+			static_cast<int32>(SemanticResult.ShapeFamily),
+			static_cast<uint32>(SemanticResult.FeatureMask),
+			SemanticResult.ShapeHash,
+			SemanticResult.WFCHash,
+			SemanticResult.EnvelopeHash,
+			SemanticResult.Audit.AuditHash,
+			SemanticResult.ResultHash);
+		AppendDAG5AStructIdentity(
+			Canonical,
+			TEXT("Semantic"),
+			FABTSM73DAG5BSettings::StaticStruct(),
+			&Settings);
+		InOutSearchResult.SearchHash = static_cast<int64>(
+			FCrc::StrCrc32(*Canonical));
+	}
 }
 
 bool FABTSM73DAGBuildingPipeline::Build(
@@ -181,32 +208,161 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 	FABTSM73StructureData& OutData,
 	FString& OutError) const
 {
+	FABTSM73DAG5BSettings DisabledSemanticSettings;
+	FABTSM73DAG5BResult DisabledSemanticResult;
+	return BuildWithFailurePattern(
+		DisabledSemanticSettings,
+		DAGSettings,
+		LayoutSettings,
+		BuildingSettings,
+		FrontierSettings,
+		PatternSettings,
+		PlayabilitySettings,
+		DifficultySettings,
+		MaterialProfiles,
+		LocalAttackDirection,
+		DisabledSemanticResult,
+		OutData,
+		OutError);
+}
+
+bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
+	const FABTSM73DAG5BSettings& SemanticSettings,
+	const FABTSM73DAGGenerationSettings& DAGSettings,
+	const FABTSM73DAGLayoutSettings& LayoutSettings,
+	const FABTSM73GenerationSettings& BuildingSettings,
+	const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+	const FABTSM73DAGFailurePatternSettings& PatternSettings,
+	const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+	const FABTSM73DifficultySettings& DifficultySettings,
+	const TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+	const FVector& LocalAttackDirection,
+	FABTSM73DAG5BResult& OutSemanticResult,
+	FABTSM73StructureData& OutData,
+	FString& OutError) const
+{
 	OutData = FABTSM73StructureData();
+	OutSemanticResult = FABTSM73DAG5BResult();
+	OutSemanticResult.bEnabled =
+		SemanticSettings.bEnableSemanticEnvelope;
 	OutError.Reset();
-	FABTSM73DAGGrammarExpander Expander;
+	const bool bSemantic =
+		SemanticSettings.bEnableSemanticEnvelope;
 	FABTSM73DAGGenerationResult Graph;
-	if (!Expander.Generate(DAGSettings, Graph, OutError)) return false;
+	FABTSM73DAGSpatialLayout SemanticInitialLayout;
+	FABTSM73SemanticEnvelope RawSemanticEnvelope;
+	FABTSM73DAG5BSemanticEnvelopeBuilder SemanticBuilder;
+	if (bSemantic)
+	{
+		if (!SemanticBuilder.Build(
+			SemanticSettings,
+			DAGSettings,
+			LayoutSettings,
+			Graph,
+			SemanticInitialLayout,
+			RawSemanticEnvelope,
+			OutSemanticResult,
+			OutError))
+		{
+			return false;
+		}
+		const int32 EstimatedLimit = FMath::Min(
+			DAGSettings.MaxEstimatedBrickCount,
+			BuildingSettings.MaxBrickCount);
+		if (EstimatedLimit < 1
+			|| Graph.EstimatedBrickCount > EstimatedLimit)
+		{
+			OutError = FString::Printf(
+				TEXT("DAG5BEstimatedBrickBudgetExceeded:Estimated=%d:Limit=%d"),
+				Graph.EstimatedBrickCount,
+				EstimatedLimit);
+			OutSemanticResult.RejectReason = OutError;
+			return false;
+		}
+	}
+	else
+	{
+		FABTSM73DAGGrammarExpander Expander;
+		if (!Expander.Generate(DAGSettings, Graph, OutError))
+		{
+			return false;
+		}
+	}
 
 	FABTSM73DAGLayoutSolver LayoutSolver;
 	FABTSM73DAGSpatialLayout BaselineLayout;
-	if (!LayoutSolver.Solve(
-		Graph,
-		LayoutSettings,
-		BaselineLayout,
-		OutError))
+	const bool bBaselineLayoutSolved = bSemantic
+		? LayoutSolver.SolveSemantic(
+			Graph,
+			LayoutSettings,
+			SemanticInitialLayout,
+			RawSemanticEnvelope,
+			BaselineLayout,
+			OutError)
+		: LayoutSolver.Solve(
+			Graph,
+			LayoutSettings,
+			BaselineLayout,
+			OutError);
+	if (!bBaselineLayoutSolved)
 	{
+		if (bSemantic)
+		{
+			OutSemanticResult.RejectReason = OutError;
+		}
 		return false;
 	}
 	FABTSM73DAGModuleCompiler Compiler;
 	FABTSM73StructureData BaselineData;
-	if (!Compiler.Compile(
-		BuildingSettings,
-		Graph,
-		LayoutSettings,
-		BaselineLayout,
-		BaselineData,
-		OutError))
+	FABTSM73SemanticEnvelope BaselineSemanticEnvelope =
+		RawSemanticEnvelope;
+	if (bSemantic
+		&& !SemanticBuilder.BindPhysicalContract(
+			BaselineLayout,
+			BaselineSemanticEnvelope,
+			OutError))
 	{
+		OutSemanticResult.RejectReason = OutError;
+		return false;
+	}
+	if (bSemantic)
+	{
+		OutSemanticResult.FeatureMask =
+			BaselineSemanticEnvelope.FeatureMask;
+		OutSemanticResult.EnvelopeHash =
+			BaselineSemanticEnvelope.EnvelopeHash;
+	}
+	const bool bBaselineCompiled = bSemantic
+		? Compiler.CompileSemantic(
+			BuildingSettings,
+			Graph,
+			LayoutSettings,
+			BaselineLayout,
+			BaselineSemanticEnvelope,
+			OutSemanticResult,
+			BaselineData,
+			OutError)
+		: Compiler.Compile(
+			BuildingSettings,
+			Graph,
+			LayoutSettings,
+			BaselineLayout,
+			BaselineData,
+			OutError);
+	if (!bBaselineCompiled) return false;
+	if (bSemantic
+		&& (BaselineData.Bricks.Num()
+				> BuildingSettings.MaxBrickCount
+			|| BaselineData.Bricks.Num()
+				> DAGSettings.MaxEstimatedBrickCount))
+	{
+		OutError = FString::Printf(
+			TEXT("DAG5BBrickBudgetExceeded:Actual=%d:BuildingLimit=%d:DAGLimit=%d"),
+			BaselineData.Bricks.Num(),
+			BuildingSettings.MaxBrickCount,
+			DAGSettings.MaxEstimatedBrickCount);
+		OutSemanticResult.bAccepted = false;
+		OutSemanticResult.RejectReason = OutError;
 		return false;
 	}
 
@@ -215,6 +371,26 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 	BaselineData.DAGFailurePatternResult.Pattern = PatternSettings.Pattern;
 	BaselineData.DAGFailurePlayabilityResult.bEnabled =
 		PlayabilitySettings.bEnablePlayabilityRouting;
+	auto PublishDownstreamFailure =
+		[&bSemantic,
+			&OutData,
+			&OutSemanticResult,
+			&OutError](FABTSM73StructureData& FailureData)
+		{
+			if (bSemantic)
+			{
+				// DAG5-B is a transactional candidate source. A downstream
+				// DAG3 gate may inspect BaselineData for diagnostics, but a
+				// false return must never publish that partial structure.
+				OutData = FABTSM73StructureData();
+				OutSemanticResult.bAccepted = false;
+				OutSemanticResult.RejectReason = OutError;
+				return;
+			}
+			// Preserve the established diagnostic contract byte-for-byte when
+			// DAG5-B is disabled.
+			OutData = MoveTemp(FailureData);
+		};
 	if (PlayabilitySettings.bEnablePlayabilityRouting
 		&& (!FrontierSettings.bEnableAnalysis
 			|| !FrontierSettings.bEnableGeneralizedSmallCutSearch
@@ -222,7 +398,7 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 	{
 		OutError = TEXT("DAG3CRequiresAnalysisRewriteAndGeneralizedCut");
 		BaselineData.DAGFailurePlayabilityResult.RejectReason = OutError;
-		OutData = MoveTemp(BaselineData);
+		PublishDownstreamFailure(BaselineData);
 		return false;
 	}
 	const FVector SafeAttackDirection = LocalAttackDirection.GetSafeNormal();
@@ -232,7 +408,7 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 	{
 		OutError = TEXT("DAG3CAttackDirectionInvalid");
 		BaselineData.DAGFailurePlayabilityResult.RejectReason = OutError;
-		OutData = MoveTemp(BaselineData);
+		PublishDownstreamFailure(BaselineData);
 		return false;
 	}
 	FABTSM73DAGFailureFrontierAnalyzer FrontierAnalyzer;
@@ -251,7 +427,7 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 		{
 			BaselineData.DAGFailurePlayabilityResult.RejectReason = OutError;
 		}
-		OutData = MoveTemp(BaselineData);
+		PublishDownstreamFailure(BaselineData);
 		return false;
 	}
 	if (!PatternSettings.bEnableGeometryRewrite)
@@ -264,14 +440,14 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 	{
 		OutError = TEXT("DAG3BRequiresAcceptedFrontier");
 		BaselineData.DAGFailurePatternResult.RejectReason = OutError;
-		OutData = MoveTemp(BaselineData);
+		PublishDownstreamFailure(BaselineData);
 		return false;
 	}
 	if (PatternSettings.MaxRewriteAttemptCount < 1)
 	{
 		OutError = TEXT("DAG3BRewriteAttemptBudgetInvalid");
 		BaselineData.DAGFailurePatternResult.RejectReason = OutError;
-		OutData = MoveTemp(BaselineData);
+		PublishDownstreamFailure(BaselineData);
 		return false;
 	}
 
@@ -353,25 +529,80 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 				continue;
 			}
 			FABTSM73DAGSpatialLayout TrialLayout;
-			if (!LayoutSolver.Solve(
-				Graph,
-				LayoutSettings,
-				TrialLayout,
-				TransactionError,
-				&Intent))
+			const bool bTrialLayoutSolved = bSemantic
+				? LayoutSolver.SolveSemantic(
+					Graph,
+					LayoutSettings,
+					SemanticInitialLayout,
+					RawSemanticEnvelope,
+					TrialLayout,
+					TransactionError,
+					&Intent)
+				: LayoutSolver.Solve(
+					Graph,
+					LayoutSettings,
+					TrialLayout,
+					TransactionError,
+					&Intent);
+			if (!bTrialLayoutSolved)
 			{
 				LastReject = MoveTemp(TransactionError);
 				continue;
 			}
 			FABTSM73StructureData TrialData;
-			if (!Compiler.Compile(
-				BuildingSettings,
-				Graph,
-				LayoutSettings,
-				TrialLayout,
-				TrialData,
-				TransactionError))
+			FABTSM73SemanticEnvelope TrialSemanticEnvelope =
+				RawSemanticEnvelope;
+			FABTSM73DAG5BResult TrialSemanticResult =
+				OutSemanticResult;
+			if (bSemantic
+				&& !SemanticBuilder.BindPhysicalContract(
+					TrialLayout,
+					TrialSemanticEnvelope,
+					TransactionError))
 			{
+				LastReject = MoveTemp(TransactionError);
+				continue;
+			}
+			if (bSemantic)
+			{
+				TrialSemanticResult.FeatureMask =
+					TrialSemanticEnvelope.FeatureMask;
+				TrialSemanticResult.EnvelopeHash =
+					TrialSemanticEnvelope.EnvelopeHash;
+			}
+			const bool bTrialCompiled = bSemantic
+				? Compiler.CompileSemantic(
+					BuildingSettings,
+					Graph,
+					LayoutSettings,
+					TrialLayout,
+					TrialSemanticEnvelope,
+					TrialSemanticResult,
+					TrialData,
+					TransactionError)
+				: Compiler.Compile(
+					BuildingSettings,
+					Graph,
+					LayoutSettings,
+					TrialLayout,
+					TrialData,
+					TransactionError);
+			if (!bTrialCompiled)
+			{
+				LastReject = MoveTemp(TransactionError);
+				continue;
+			}
+			if (bSemantic
+				&& (TrialData.Bricks.Num()
+						> BuildingSettings.MaxBrickCount
+					|| TrialData.Bricks.Num()
+						> DAGSettings.MaxEstimatedBrickCount))
+			{
+				TransactionError = FString::Printf(
+					TEXT("DAG5BBrickBudgetExceeded:Actual=%d:BuildingLimit=%d:DAGLimit=%d"),
+					TrialData.Bricks.Num(),
+					BuildingSettings.MaxBrickCount,
+					DAGSettings.MaxEstimatedBrickCount);
 				LastReject = MoveTemp(TransactionError);
 				continue;
 			}
@@ -465,6 +696,10 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 				TrialData.DAGFailurePlayabilityResult =
 					MoveTemp(PlayabilityResult);
 			}
+			if (bSemantic)
+			{
+				OutSemanticResult = TrialSemanticResult;
+			}
 			OutData = MoveTemp(TrialData);
 			return true;
 			}
@@ -492,7 +727,7 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFailurePattern(
 			TEXT("DAG3BNoAcceptedPattern:%s"),
 			*LastReject);
 	}
-	OutData = MoveTemp(BaselineData);
+	PublishDownstreamFailure(BaselineData);
 	return false;
 }
 
@@ -576,6 +811,139 @@ bool FABTSM73DAGBuildingPipeline::BuildWithFeasibilitySearch(
 		MaterialProfiles,
 		LocalAttackDirection,
 		OutData,
+		OutSearchResult);
+	return bBuilt;
+}
+
+bool FABTSM73DAGBuildingPipeline::BuildWithFeasibilitySearch(
+	const FABTSM73DAG5ASettings& SearchSettings,
+	const FABTSM73DAG5BSettings& SemanticSettings,
+	const FABTSM73DAGGenerationSettings& DAGSettings,
+	const FABTSM73DAGLayoutSettings& LayoutSettings,
+	const FABTSM73GenerationSettings& BuildingSettings,
+	const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+	const FABTSM73DAGFailurePatternSettings& PatternSettings,
+	const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+	const FABTSM73DifficultySettings& DifficultySettings,
+	const TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+	const FVector& LocalAttackDirection,
+	FABTSM73DAG5AResult& OutSearchResult,
+	FABTSM73DAG5BResult& OutSemanticResult,
+	FABTSM73StructureData& OutData,
+	FString& OutError) const
+{
+	OutSemanticResult = FABTSM73DAG5BResult();
+	if (!SemanticSettings.bEnableSemanticEnvelope)
+	{
+		return BuildWithFeasibilitySearch(
+			SearchSettings,
+			DAGSettings,
+			LayoutSettings,
+			BuildingSettings,
+			FrontierSettings,
+			PatternSettings,
+			PlayabilitySettings,
+			DifficultySettings,
+			MaterialProfiles,
+			LocalAttackDirection,
+			OutSearchResult,
+			OutData,
+			OutError);
+	}
+	OutSemanticResult.bEnabled = true;
+	if (!SearchSettings.bEnableFeasibilitySearch)
+	{
+		OutSearchResult = FABTSM73DAG5AResult();
+		return BuildWithFailurePattern(
+			SemanticSettings,
+			DAGSettings,
+			LayoutSettings,
+			BuildingSettings,
+			FrontierSettings,
+			PatternSettings,
+			PlayabilitySettings,
+			DifficultySettings,
+			MaterialProfiles,
+			LocalAttackDirection,
+			OutSemanticResult,
+			OutData,
+			OutError);
+	}
+
+	FABTSM73DAG5CandidateSearch Search;
+	FABTSM73DAGGenerationSettings SelectedDAGSettings;
+	const bool bBuilt = Search.Build(
+		SearchSettings,
+		DAGSettings,
+		LayoutSettings,
+		BuildingSettings,
+		[this,
+			&SemanticSettings,
+			&LayoutSettings,
+			&BuildingSettings,
+			&FrontierSettings,
+			&PatternSettings,
+			&PlayabilitySettings,
+			&DifficultySettings,
+			MaterialProfiles,
+			LocalAttackDirection,
+			&OutSemanticResult](
+				const FABTSM73DAGGenerationSettings& CandidateSettings,
+				FABTSM73StructureData& CandidateData,
+				FString& CandidateError)
+		{
+			FABTSM73DAG5BResult CandidateSemanticResult;
+			const bool bCandidateBuilt = BuildWithFailurePattern(
+				SemanticSettings,
+				CandidateSettings,
+				LayoutSettings,
+				BuildingSettings,
+				FrontierSettings,
+				PatternSettings,
+				PlayabilitySettings,
+				DifficultySettings,
+				MaterialProfiles,
+				LocalAttackDirection,
+				CandidateSemanticResult,
+				CandidateData,
+				CandidateError);
+			OutSemanticResult = CandidateSemanticResult;
+			return bCandidateBuilt;
+		},
+		SelectedDAGSettings,
+		OutData,
+		OutSearchResult,
+		OutError,
+		false);
+	if (bBuilt)
+	{
+		OutSemanticResult = OutData.DAG5BResult;
+	}
+	else
+	{
+		// Candidate callbacks use a scratch semantic result. A candidate may
+		// complete B and then be rejected by A's compiled-brick budget, so do
+		// not publish that unselected candidate as an accepted stage result.
+		OutSemanticResult = FABTSM73DAG5BResult();
+		OutSemanticResult.bEnabled = true;
+		OutSemanticResult.RejectReason = OutError;
+	}
+	FinalizeDAG5ACompleteChainHash(
+		SearchSettings,
+		DAGSettings,
+		LayoutSettings,
+		BuildingSettings,
+		FrontierSettings,
+		PatternSettings,
+		PlayabilitySettings,
+		DifficultySettings,
+		MaterialProfiles,
+		LocalAttackDirection,
+		OutData,
+		OutSearchResult);
+	FinalizeDAG5BCompleteChainHash(
+		SemanticSettings,
+		OutSemanticResult,
 		OutSearchResult);
 	return bBuilt;
 }

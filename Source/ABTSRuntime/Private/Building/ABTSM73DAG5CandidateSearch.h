@@ -28,5 +28,6 @@ public:
 		FABTSM73DAGGenerationSettings& OutSelectedDAGSettings,
 		FABTSM73StructureData& OutData,
 		FABTSM73DAG5AResult& OutResult,
-		FString& OutError) const;
+		FString& OutError,
+		bool bRunLegacyDAGPreflight = true) const;
 };

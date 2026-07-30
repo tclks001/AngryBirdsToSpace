@@ -10,6 +10,8 @@ struct FABTSM73DAGFailurePatternSettings;
 struct FABTSM73DAGFailurePlayabilitySettings;
 struct FABTSM73DAG5AResult;
 struct FABTSM73DAG5ASettings;
+struct FABTSM73DAG5BResult;
+struct FABTSM73DAG5BSettings;
 struct FABTSM73DAGGenerationSettings;
 struct FABTSM73DAGLayoutSettings;
 struct FABTSM73DifficultySettings;
@@ -35,6 +37,25 @@ public:
 		const FABTSM73DAGFailurePatternSettings& PatternSettings,
 		const FABTSM73DifficultySettings& DifficultySettings,
 		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+		FABTSM73StructureData& OutData,
+		FString& OutError) const;
+
+	/**
+	 * DAG5-B opt-in semantic source. The old overload remains the exact legacy
+	 * DAG/DAG5-A path and delegates here only with B disabled.
+	 */
+	bool BuildWithFailurePattern(
+		const FABTSM73DAG5BSettings& SemanticSettings,
+		const FABTSM73DAGGenerationSettings& DAGSettings,
+		const FABTSM73DAGLayoutSettings& LayoutSettings,
+		const FABTSM73GenerationSettings& BuildingSettings,
+		const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+		const FABTSM73DAGFailurePatternSettings& PatternSettings,
+		const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+		const FABTSM73DifficultySettings& DifficultySettings,
+		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+		const FVector& LocalAttackDirection,
+		FABTSM73DAG5BResult& OutSemanticResult,
 		FABTSM73StructureData& OutData,
 		FString& OutError) const;
 
@@ -69,6 +90,24 @@ public:
 		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
 		const FVector& LocalAttackDirection,
 		FABTSM73DAG5AResult& OutSearchResult,
+		FABTSM73StructureData& OutData,
+		FString& OutError) const;
+
+	/** DAG5-A bounded search with DAG5-B as the candidate source. */
+	bool BuildWithFeasibilitySearch(
+		const FABTSM73DAG5ASettings& SearchSettings,
+		const FABTSM73DAG5BSettings& SemanticSettings,
+		const FABTSM73DAGGenerationSettings& DAGSettings,
+		const FABTSM73DAGLayoutSettings& LayoutSettings,
+		const FABTSM73GenerationSettings& BuildingSettings,
+		const FABTSM73DAGFailureFrontierSettings& FrontierSettings,
+		const FABTSM73DAGFailurePatternSettings& PatternSettings,
+		const FABTSM73DAGFailurePlayabilitySettings& PlayabilitySettings,
+		const FABTSM73DifficultySettings& DifficultySettings,
+		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+		const FVector& LocalAttackDirection,
+		FABTSM73DAG5AResult& OutSearchResult,
+		FABTSM73DAG5BResult& OutSemanticResult,
 		FABTSM73StructureData& OutData,
 		FString& OutError) const;
 };
