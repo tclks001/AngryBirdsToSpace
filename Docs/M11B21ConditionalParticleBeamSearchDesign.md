@@ -1,6 +1,6 @@
 # M11-B v2.1：条件粒子束逐星构造器（Additive Search v4）
 
-> 状态：**Additive Search v4 构造器已实现，并完成 4 个正式种子的标准 C++ 搜索取样（3 个成功、1 个在第三阶段正常无解退出）**。v4 只新增候选构造路径；最终接受仍调用冻结的 Search v3 候选审计。本稿中的所有结果均为 `Candidate / NOT CERTIFIED`，没有写入 Editor Candidate Catalog，也没有替换当前 v3 Rank 1/2，更没有进入 production 绑定。
+> 状态：**Additive Search v4 构造器已实现，并完成 4 个正式种子的标准 C++ 搜索取样（3 个成功、1 个在第三阶段正常无解退出）**。v4 只新增候选构造路径；最终接受仍调用冻结的 Search v3 候选审计。4 个入选布局现已追加到 Editor-only Candidate Catalog 的 Rank 3–6，供 M11-C v2.1 PIE 手感比较；它们仍全部是 `Candidate / NOT CERTIFIED`，没有替换当前 v3 Rank 1/2，也没有进入 production 绑定。
 >
 > 父级：[M11-B v2.1 标准 C++ 候选布局搜索](M11B21CandidateSearchDesign.md) · [M11 v2 终局优化总设计](M11V2FinaleOptimizationDesign.md)
 >
@@ -266,7 +266,7 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
 
 仍有四项明确限制：
 
-- v4 候选没有写入 Editor Candidate Catalog；当前 Catalog 与 PIE 基线仍是 v3 Rank 1/2；
+- v4 候选已作为 Editor-only Rank 3–6 写入 Candidate Catalog；Rank 1/2 仍保留为 v3 基线，Rank 0 仍是 production Certified v1；
 - 没有完成 M11-C v2.1 有渲染 PIE，故“手感”只通过数值代理；
 - 5000 点 Monte Carlo 与凸包不证明唯一连通分量，也不证明 Hull 内部处处成功；
 - 没有执行 M11-B v2.2 的完整 `Yaw × Pitch × Power` 认证、边界细化、错序/迟到排除与全消融唯一性证明。
@@ -282,6 +282,24 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
   → M11-B v2.2 完整输入域认证
   → M11-C v2.2 正式绑定
 ```
+
+### 8.1 Editor PIE 候选选择
+
+停止 PIE 后在编辑器输出日志命令框设置 Rank，再重新启动 PIE：
+
+| 命令 | 布局 |
+| --- | --- |
+| `abts.M11.CandidateRank 0` | production Certified v1 |
+| `abts.M11.CandidateRank 1` | v3 基线 `0xaaae0dd44f14f785` |
+| `abts.M11.CandidateRank 2` | v3 基线 `0xe2c810b38f338e06` |
+| `abts.M11.CandidateRank 3` | v4 `0xed74ffaf0de8028f` |
+| `abts.M11.CandidateRank 4` | v4 `0xf22ad256fd791e07` |
+| `abts.M11.CandidateRank 5` | v4 `0xcdc6e41075d99493` |
+| `abts.M11.CandidateRank 6` | v4 `0x80d274a67e1e9944` |
+
+Rank 3–6 冻结完整布局与 Candidate 身份，PIE 启动时只做结构和
+Candidate Source Hash 校验，不重新执行粒子束搜索。修改 Rank 后必须停止并重启
+PIE，因为 GameMode 只在终局系统初始化时读取该 CVar。
 
 ## 9. 本轮可复现与自动化证据
 

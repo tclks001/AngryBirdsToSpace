@@ -325,4 +325,106 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CV21FrozenV4CandidateCatalogTest,
+	"ABTS.M11C.V2_1.FrozenV4CandidateCatalog",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+
+	struct FFrozenExpectation
+	{
+		int32 Rank;
+		uint64 SourceHash;
+		uint64 ResultHash;
+	};
+	constexpr FFrozenExpectation Expectations[] = {
+		{3, 0xed74ffaf0de8028full, 0x791c9a64b195b0d4ull},
+		{4, 0xf22ad256fd791e07ull, 0xbf710eb5c1e114c1ull},
+		{5, 0xcdc6e41075d99493ull, 0xa7695a10b44f8281ull},
+		{6, 0x80d274a67e1e9944ull, 0x9de084d9f77c9ee7ull},
+	};
+
+	for (const FFrozenExpectation& Expected : Expectations)
+	{
+		FABTSM11FinaleLayoutPreset Preset;
+		FABTSM11CandidateExperienceIdentity Identity;
+		FString Failure;
+		const bool bBuilt =
+			FABTSM11CandidateExperienceCatalog::BuildCandidate(
+				Expected.Rank,
+				Preset,
+				Identity,
+				&Failure);
+		TestTrue(
+			*FString::Printf(
+				TEXT("Frozen v4 Candidate rank %d builds"),
+				Expected.Rank),
+			bBuilt);
+		if (!bBuilt)
+		{
+			AddError(FString::Printf(
+				TEXT("Frozen v4 Candidate rank %d rejected: %s"),
+				Expected.Rank,
+				*Failure));
+			continue;
+		}
+
+		TestEqual(
+			*FString::Printf(
+				TEXT("Rank %d retains its source identity"),
+				Expected.Rank),
+			Identity.CandidateSourceHash,
+			Expected.SourceHash);
+		FABTSM11TrajectoryRequest Request;
+		const bool bRequestBuilt = Preset.BuildRequest(
+			Preset.NominalInput,
+			0x7u,
+			Request,
+			&Failure);
+		TestTrue(
+			*FString::Printf(
+				TEXT("Rank %d nominal request builds"),
+				Expected.Rank),
+			bRequestBuilt);
+		if (!bRequestBuilt)
+		{
+			continue;
+		}
+		FABTSM11TrajectoryResult Result;
+		const bool bSolved = FABTSM11GravityAssistSolver::Solve(
+			Request,
+			Result,
+			&Failure);
+		TestTrue(
+			*FString::Printf(
+				TEXT("Rank %d nominal trajectory solves"),
+				Expected.Rank),
+			bSolved);
+		if (!bSolved)
+		{
+			continue;
+		}
+		TestEqual(
+			*FString::Printf(
+				TEXT("Rank %d nominal result identity is frozen"),
+				Expected.Rank),
+			Result.ValidationHash,
+			Expected.ResultHash);
+		TestTrue(
+			*FString::Printf(
+				TEXT("Rank %d nominal input reaches F4"),
+				Expected.Rank),
+			FABTSM11PrefixClassifier::Classify(
+				Preset,
+				Result,
+				0x7u).IsF(4));
+	}
+	return !HasAnyErrors();
+}
+
 #endif

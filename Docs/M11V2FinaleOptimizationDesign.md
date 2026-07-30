@@ -136,7 +136,7 @@ C v2.1 增加显式开发候选模式，用于在 PIE 中完成：
 - 目标选择的昂贵轨迹几何只在 `ResultHash + LatchedTarget` 改变时重建，PIP 的 Scene Capture 只在首次有效结果或目标切换时捕获，当前轨迹由 HUD 叠加；
 - 对候选成功岛宽度、三次转向可读性、节奏、镜头和前缀成功集稳定器手感的人工验收。
 
-候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中 N 不得超过当前 v3 Catalog 实际冻结的 `LastCandidateRank`，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。
+候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中当前 Rank 1–2 是保留的 v3 基线、Rank 3–6 是 v4 手感候选，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。
 
 候选模式必须由 `WITH_EDITOR`、显式开发开关或等价 fail-closed 边界隔离；Shipping/正式 Standalone 不得加载 Candidate。v2.1 可使用局部快速扫描生成的临时 Trust Region 测试降敏和边界感，但它不能作为最终认证 Trust Region，也不能进入生产 Bundle。
 
