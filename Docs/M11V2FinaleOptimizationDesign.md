@@ -611,6 +611,19 @@ Seed `177` 在 Stage 3 正常无解退出；Seed `201/202` 重复找到 Candidat
 
 数值代理支持优先把 `0xed74ffaf0de8028f` 纳入下一轮 Editor-only PIE 比较，但它的 ScreenAim S1/S2/S3 比例为 `0.145400 / 0.254470 / 0.156757`，尚未达到每级约 `1/4` 的理想面积；完整三维 5000 点诊断也只有 `78 / 21 / 1 / 1` 个 S1/S2/S3/S4 成员。它仍是 `Candidate / NOT CERTIFIED`。算法、Holdout、Hull 和全部候选分析见 [Additive Search v4 子稿](M11B21ConditionalParticleBeamSearchDesign.md)。
 
+### 11.4 Rank 3 v2.2 认证早停
+
+`Rank 3 / CandidateSourceHash=0xed74ffaf0de8028f` 已按用户 PIE 选择冻结为唯一
+v2.2 输入。独立标准 C++ 认证工具已经落地规范化三维索引、分片/恢复/合并和
+六邻域统计。`2° × 3° × 0.025` 的 `16,359` 点稀疏扫描得到
+`F4=4 / Components=2`；`1° × 1.5° × 0.0125` 的 `122,877` 点半步扫描得到
+`F4=27 / Components=9`。两轮均满足 `F4 ⊂ F3 ⊂ F2 ⊂ F1`，且半步 F4 只出现
+在 Power 索引 `71..80/80`，但唯一六邻域 F4 门失败。
+
+本轮因此停在 B v2.2 发现阶段，没有生成 Trust Region、CertificationHash 或
+CertifiedBundle，也没有进入 C v2.2。详细证据和后续约束见
+[M11-B 设计稿第 7.5 节](M11BFinaleLayoutCertificationDesign.md)。
+
 ## 12. 多工作树交接
 
 M11 专属工作树继续不直接修改下列共享热点：

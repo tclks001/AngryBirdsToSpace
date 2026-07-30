@@ -5460,6 +5460,44 @@ bool ABTS::M11Search::CandidateSearch::ReplayCandidate(
 		Request, OutResult, OutFailure);
 }
 
+bool ABTS::M11Search::CandidateSearch::EvaluateInput(
+	const CandidateLayout& Layout,
+	const CandidateSearchContract& Contract,
+	const LaunchInput& Input,
+	const std::uint8_t EnabledAssistMask,
+	InputEvaluation& OutEvaluation,
+	std::string* OutFailure)
+{
+	OutEvaluation = InputEvaluation();
+	OutEvaluation.Input = Input;
+	OutEvaluation.EnabledAssistMask = EnabledAssistMask;
+	M11Core::TrajectoryRequest Request;
+	M11Core::TrajectoryResult Result;
+	std::int32_t SolveCount = 0;
+	if (!SearchPrivate::BuildAndSolve(
+			Layout,
+			Input,
+			EnabledAssistMask,
+			Request,
+			Result,
+			SolveCount,
+			OutFailure))
+	{
+		return false;
+	}
+	OutEvaluation.PrefixMembership =
+		SearchPrivate::ClassifyInputSets(Layout, Contract, Result);
+	OutEvaluation.Termination = Result.Termination;
+	OutEvaluation.CompletedAssistCount = Result.CompletedAssistCount;
+	OutEvaluation.TargetContactCount = Result.TargetContactCount;
+	OutEvaluation.ResultHash = Result.ValidationHash;
+	if (OutFailure != nullptr)
+	{
+		OutFailure->clear();
+	}
+	return true;
+}
+
 std::uint64_t
 ABTS::M11Search::ParticleBeamSearch::ComputeContractHash(
 	const ParticleBeamSearchContract& Contract)

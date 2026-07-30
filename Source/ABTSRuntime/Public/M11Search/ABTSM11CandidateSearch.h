@@ -65,6 +65,14 @@ namespace ABTS::M11Search
 			M11Core::TrajectoryResult& OutResult,
 			std::string* OutFailure = nullptr);
 
+		[[nodiscard]] static bool EvaluateInput(
+			const CandidateLayout& Layout,
+			const CandidateSearchContract& Contract,
+			const LaunchInput& Input,
+			std::uint8_t EnabledAssistMask,
+			InputEvaluation& OutEvaluation,
+			std::string* OutFailure = nullptr);
+
 		[[nodiscard]] static bool CandidateRanksBefore(
 			const CandidateRecord& Left,
 			const CandidateRecord& Right);

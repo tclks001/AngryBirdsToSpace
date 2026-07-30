@@ -66,7 +66,7 @@
 | M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间 | Integration 提供 M6/M9 只读预测适配器；M7 提供已认证 ProfileDescriptor 目录 | 当前 M3 中 Solver/Catalog 身份仍是占位输入，不能宣称真实弹道、卫星或建筑包络可解 |
 | M3R-6 六栋实体建筑 | M3 已有六站点逻辑；M7 已完成 DAG5-A 搜索骨架 | M7 先完成 DAG5-B/C；Integration 建立向后兼容 vNext 建筑合同；随后 M7 完成 DAG5-D/E | 当前 v1 合同没有精确 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace`，生产仍固定三栋 DAG2.3，不能提前改 `Expected=6` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
-| M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成 | 先冻结一个候选并做 B v2.2/C v2.2；M11-D 的 Party、环境和共享资产由 Integration 接线 | 未认证候选不得进入生产；M11-D 不得越权修改共享鸟群、天空/雾云或默认资产 |
+| M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成；Rank 3 已冻结并完成 v2.2 稀疏/半步预认证，但因 F4 六邻域多分量早停 | 返回 B v2.1 修复成功族连通性或以局部递归消除采样断带，重新通过 B v2.2 后再做 C v2.2；M11-D 的 Party、环境和共享资产由 Integration 接线 | Rank 3 仍是 Candidate/NOT CERTIFIED；未认证候选不得进入生产；M11-D 不得越权修改共享鸟群、天空/雾云或默认资产 |
 
 ### 5.3 固定交接顺序
 

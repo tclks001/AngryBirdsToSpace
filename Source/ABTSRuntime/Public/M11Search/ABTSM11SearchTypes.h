@@ -284,6 +284,19 @@ namespace ABTS::M11Search
 		}
 	};
 
+	/** Portable per-input authority used by v2.2 certification tooling. */
+	struct InputEvaluation
+	{
+		LaunchInput Input;
+		std::uint8_t EnabledAssistMask = 0x7u;
+		std::array<bool, 4> PrefixMembership{};
+		M11Core::TrajectoryTermination Termination =
+			M11Core::TrajectoryTermination::InvalidInput;
+		std::int32_t CompletedAssistCount = 0;
+		std::int32_t TargetContactCount = 0;
+		std::uint64_t ResultHash = 0;
+	};
+
 	struct BatchRequest
 	{
 		std::uint64_t GlobalWorkItemCount = 1;

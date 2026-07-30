@@ -603,7 +603,7 @@ CandidateLayout MakeFrozenV4LayoutRank6()
 }
 
 bool BuildFrozenV4Layout(
-	const int32 CandidateRank,
+	const std::int32_t CandidateRank,
 	CandidateLayout& OutLayout)
 {
 	switch (CandidateRank)

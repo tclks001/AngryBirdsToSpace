@@ -5,6 +5,7 @@
 #if WITH_EDITOR
 
 #include "M11Search/ABTSM11CandidateSearch.h"
+#include "M11Search/ABTSM11FrozenCandidateLayouts.h"
 #include "World/ABTSM11GravityAssistCoreAdapter.h"
 
 #include <array>
@@ -95,8 +96,6 @@ namespace
 		}
 		return nullptr;
 	}
-
-#include "ABTSM11FrozenV4CandidateData.inl"
 
 	FABTSM11FinaleLaunchInput FromSearchInput(const LaunchInput& Input)
 	{
@@ -293,7 +292,9 @@ bool FABTSM11CandidateExperienceCatalog::BuildCandidate(
 	if (CandidateRank >= 3)
 	{
 		std::string LayoutFailure;
-		if (!BuildFrozenV4Layout(CandidateRank, Candidate.Layout)
+		if (!ABTS::M11Search::BuildFrozenV4CandidateLayout(
+				CandidateRank,
+				Candidate.Layout)
 			|| !Candidate.Layout.IsValid(&LayoutFailure)
 			|| ComputeCandidateSourceHash(Candidate.Layout, Contract)
 				!= Frozen->CandidateSourceHash)

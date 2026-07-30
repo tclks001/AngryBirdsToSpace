@@ -99,7 +99,8 @@ endif()
 
 set(ABTS_M11_SEARCH_SOURCES
 	"${ABTS_M11_SEARCH_SOURCE_ROOT}/ABTSM11SearchTypes.cpp"
-	"${ABTS_M11_SEARCH_SOURCE_ROOT}/ABTSM11CandidateSearch.cpp")
+	"${ABTS_M11_SEARCH_SOURCE_ROOT}/ABTSM11CandidateSearch.cpp"
+	"${ABTS_M11_SEARCH_SOURCE_ROOT}/ABTSM11FrozenCandidateLayouts.cpp")
 file(GLOB ABTS_M11_ALL_SEARCH_SOURCES CONFIGURE_DEPENDS
 	"${ABTS_M11_SEARCH_SOURCE_ROOT}/*.cpp")
 set(ABTS_M11_CLASSIFIED_SEARCH_SOURCES ${ABTS_M11_SEARCH_SOURCES})
@@ -114,7 +115,8 @@ if(NOT ABTS_M11_ALL_SEARCH_SOURCES STREQUAL
 endif()
 set(ABTS_M11_SEARCH_HEADERS
 	"${ABTS_M11_SEARCH_PUBLIC_ROOT}/ABTSM11SearchTypes.h"
-	"${ABTS_M11_SEARCH_PUBLIC_ROOT}/ABTSM11CandidateSearch.h")
+	"${ABTS_M11_SEARCH_PUBLIC_ROOT}/ABTSM11CandidateSearch.h"
+	"${ABTS_M11_SEARCH_PUBLIC_ROOT}/ABTSM11FrozenCandidateLayouts.h")
 file(GLOB ABTS_M11_ALL_SEARCH_HEADERS CONFIGURE_DEPENDS
 	"${ABTS_M11_SEARCH_PUBLIC_ROOT}/*.h")
 set(ABTS_M11_CLASSIFIED_SEARCH_HEADERS ${ABTS_M11_SEARCH_HEADERS})
@@ -157,7 +159,10 @@ set(ABTS_M11_CONFORMANCE_TOOL_IDENTITY_FILES
 set(ABTS_M11_SEARCH_TOOL_IDENTITY_FILES
 	${ABTS_M11_SEARCH_HEADERS}
 	${ABTS_M11_SEARCH_SOURCES}
+	"${ABTS_M11_SEARCH_SOURCE_ROOT}/ABTSM11FrozenV4CandidateData.inl"
 	"${CMAKE_CURRENT_LIST_DIR}/M11SearchMain.cpp"
+	"${CMAKE_CURRENT_LIST_DIR}/M11V22CertificationMain.cpp"
+	"${CMAKE_CURRENT_LIST_DIR}/GenerateFrozenCandidateCatalogData.mjs"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakePresets.json")
@@ -337,6 +342,11 @@ add_executable(ABTSM11SearchCLI
 	${ABTS_M11_SEARCH_SOURCES}
 	"${CMAKE_CURRENT_LIST_DIR}/M11SearchMain.cpp")
 
+add_executable(ABTSM11V22CertificationCLI
+	${ABTS_M11_PRODUCTION_CORE_SOURCES}
+	${ABTS_M11_SEARCH_SOURCES}
+	"${CMAKE_CURRENT_LIST_DIR}/M11V22CertificationMain.cpp")
+
 target_include_directories(ABTSM11SearchCLI PRIVATE
 	"${ABTS_M11_GENERATED_INCLUDE_DIRECTORY}"
 	"${ABTS_RUNTIME_PUBLIC_ROOT}"
@@ -365,6 +375,37 @@ target_compile_options(ABTSM11SearchCLI PRIVATE
 	/GR-
 	/Zp8)
 target_link_options(ABTSM11SearchCLI PRIVATE
+	/INCREMENTAL:NO
+	/OPT:REF
+	/OPT:ICF)
+
+target_include_directories(ABTSM11V22CertificationCLI PRIVATE
+	"${ABTS_M11_GENERATED_INCLUDE_DIRECTORY}"
+	"${ABTS_RUNTIME_PUBLIC_ROOT}"
+	"${ABTS_RUNTIME_PRIVATE_ROOT}")
+target_compile_features(ABTSM11V22CertificationCLI PRIVATE cxx_std_20)
+set_target_properties(ABTSM11V22CertificationCLI PROPERTIES
+	CXX_EXTENSIONS OFF
+	MSVC_RUNTIME_LIBRARY "MultiThreadedDLL"
+	RUNTIME_OUTPUT_DIRECTORY
+		"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/bin")
+target_compile_definitions(ABTSM11V22CertificationCLI PRIVATE
+	WIN32_LEAN_AND_MEAN
+	NOMINMAX)
+target_compile_options(ABTSM11V22CertificationCLI PRIVATE
+	/permissive-
+	/Zc:__cplusplus
+	/Zc:preprocessor
+	/Zc:inline
+	/utf-8
+	/fp:precise
+	/Ox
+	/Ot
+	/Oi
+	/Ob2
+	/GR-
+	/Zp8)
+target_link_options(ABTSM11V22CertificationCLI PRIVATE
 	/INCREMENTAL:NO
 	/OPT:REF
 	/OPT:ICF)
@@ -470,6 +511,19 @@ if(BUILD_TESTING)
 	set_tests_properties(M11Search.NoUnrealEditorDependencies PROPERTIES
 		PASS_REGULAR_EXPRESSION "\"passed\":true"
 		LABELS "M11Search;Portable;Dependencies")
+
+	add_test(NAME M11V22.NoUnrealEditorDependencies
+		COMMAND "${POWERSHELL_EXECUTABLE}"
+			-NoLogo
+			-NoProfile
+			-ExecutionPolicy Bypass
+			-File
+			"${CMAKE_CURRENT_LIST_DIR}/TestNoUnrealDependencies.ps1"
+			-Executable
+			"$<TARGET_FILE:ABTSM11V22CertificationCLI>")
+	set_tests_properties(M11V22.NoUnrealEditorDependencies PROPERTIES
+		PASS_REGULAR_EXPRESSION "\"passed\":true"
+		LABELS "M11V22;Portable;Dependencies")
 endif()
 
 message(STATUS
