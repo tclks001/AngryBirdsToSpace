@@ -2,7 +2,9 @@
 
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 
+#include "ABTSRuntime.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
 #include "ProceduralMeshComponent.h"
@@ -11,7 +13,7 @@
 #include "Terrain/ABTSM3TerrainFeatureVisualBuilder.h"
 #include "Engine/Texture2D.h"
 
-namespace
+namespace ABTSM3TerrainMaterialBridgePrivate
 {
 	constexpr int32 BoundarySlotsPerCell = 32;
 	constexpr int32 BoundaryTexelsPerSlot = 2;
@@ -71,9 +73,38 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 	const TArray<FABTSM2Cell>& Cells,
 	const TArray<FABTSM3CellState>& CellStates,
 	const TArray<FABTSM3CellEdgeState>& EdgeStates,
-	const FABTSM3TerrainVisualField& VisualField)
+	const FABTSM3TerrainVisualField& VisualField,
+	const FABTSM3MonthlyCandidatePresentation*
+		MonthlyPresentation)
 {
+	using namespace ABTSM3TerrainMaterialBridgePrivate;
+
 	if (Surface == nullptr || SourceMaterial == nullptr || Cells.IsEmpty() || Cells.Num() != CellStates.Num()) return false;
+	bMonthlyPresentationRhythmApplied = false;
+	MonthlyPresentationRhythmCellCount = 0;
+	TMap<int32, int32> AccentByVisualBeatId;
+	if (MonthlyPresentation != nullptr)
+	{
+		if (MonthlyPresentation->Cells.Num() != Cells.Num()
+			|| MonthlyPresentation->VisualBeats.IsEmpty())
+		{
+			return false;
+		}
+		for (const FABTSM3MonthlyVisualBeat& Beat :
+			MonthlyPresentation->VisualBeats)
+		{
+			if (Beat.VisualBeatId == INDEX_NONE
+				|| AccentByVisualBeatId.Contains(
+					Beat.VisualBeatId))
+			{
+				return false;
+			}
+			AccentByVisualBeatId.Add(
+				Beat.VisualBeatId,
+				Beat.AccentVariantId);
+		}
+		bMonthlyPresentationRhythmApplied = true;
+	}
 	TArray<FLinearColor> DirectionPixels;
 	TArray<FLinearColor> VisualPixels;
 	DirectionPixels.Reserve(Cells.Num());
@@ -82,7 +113,43 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 	{
 		const FVector Direction = Cells[CellId].UnitCenter;
 		DirectionPixels.Emplace(Direction.X, Direction.Y, Direction.Z, 1.0f);
-		const FLinearColor Color = VisualField.GetDebugLandColor(Direction);
+		FLinearColor Color =
+			VisualField.GetDebugLandColor(Direction);
+		if (bMonthlyPresentationRhythmApplied)
+		{
+			const FABTSM3MonthlyPresentationCell&
+				PresentationCell =
+					MonthlyPresentation->Cells[CellId];
+			const int32* AccentVariant =
+				AccentByVisualBeatId.Find(
+					PresentationCell.VisualBeatId);
+			if (PresentationCell.CellId != CellId
+				|| AccentVariant == nullptr)
+			{
+				return false;
+			}
+			const float BeatBrightness =
+				(*AccentVariant & 1) != 0
+				? 1.10f
+				: 0.90f;
+			const float ThemeBrightness =
+				(PresentationCell.ThemeVariantId & 1) != 0
+				? 1.04f
+				: 0.96f;
+			Color.R = FMath::Clamp(
+				Color.R * BeatBrightness * ThemeBrightness,
+				0.0f,
+				1.0f);
+			Color.G = FMath::Clamp(
+				Color.G * BeatBrightness * ThemeBrightness,
+				0.0f,
+				1.0f);
+			Color.B = FMath::Clamp(
+				Color.B * BeatBrightness * ThemeBrightness,
+				0.0f,
+				1.0f);
+			++MonthlyPresentationRhythmCellCount;
+		}
 		// Road and river masks are independent segment SDFs. Cell flags remain
 		// gameplay caches and must not fill whole Voronoi cells in the material.
 		VisualPixels.Emplace(Color.R, Color.G, Color.B, 0.0f);
@@ -183,5 +250,13 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 	UE_LOG(LogTemp, Log, TEXT("[ABTS][M3][LinearSDF] RoadSegments=%d TerrainFeatures=%d RoadTextureWidth=%d TerrainTextureWidth=%d DroppedRoadRefs=%d PrunedTerrainRefs=%d TerrainRings=3 TerrainSlots=32"),
 		RoadSegments.Num(), TerrainFeatures.Num(), RoadTextureWidth, BoundaryTextureWidth,
 		DroppedRoadReferences, PrunedTerrainReferences);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5][MaterialRhythm] Applied=%d Cells=%d Beats=%d PreviewAuthority=%d MonthlyAccepted=0"),
+		bMonthlyPresentationRhythmApplied ? 1 : 0,
+		MonthlyPresentationRhythmCellCount,
+		MonthlyPresentation != nullptr
+			? MonthlyPresentation->VisualBeats.Num()
+			: 0,
+		MonthlyPresentation != nullptr ? 1 : 0);
 	return true;
 }

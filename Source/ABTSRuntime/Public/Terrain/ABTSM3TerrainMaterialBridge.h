@@ -13,6 +13,7 @@ class UTexture2D;
 struct FABTSM2Cell;
 struct FABTSM3CellState;
 struct FABTSM3CellEdgeState;
+struct FABTSM3MonthlyCandidatePresentation;
 class FABTSM3TerrainVisualField;
 
 /** Owns transient GPU lookup textures used by the hand-authored M3 SDF material. */
@@ -38,7 +39,19 @@ public:
 		const TArray<FABTSM2Cell>& Cells,
 		const TArray<FABTSM3CellState>& CellStates,
 		const TArray<FABTSM3CellEdgeState>& EdgeStates,
-		const FABTSM3TerrainVisualField& VisualField);
+		const FABTSM3TerrainVisualField& VisualField,
+		const FABTSM3MonthlyCandidatePresentation*
+			MonthlyPresentation = nullptr);
+
+	bool IsMonthlyPresentationRhythmApplied() const
+	{
+		return bMonthlyPresentationRhythmApplied;
+	}
+
+	int32 GetMonthlyPresentationRhythmCellCount() const
+	{
+		return MonthlyPresentationRhythmCellCount;
+	}
 
 private:
 	static UTexture2D* CreateFloatTexture(UObject* Outer, int32 Width, int32 Height, const TArray<FLinearColor>& Pixels, const TCHAR* Name);
@@ -60,4 +73,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TerrainMID;
+
+	bool bMonthlyPresentationRhythmApplied = false;
+	int32 MonthlyPresentationRhythmCellCount = 0;
 };

@@ -4,10 +4,12 @@
 
 #include "ABTSRuntime.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/PlatformMisc.h"
+#include "HAL/PlatformMemory.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -19,9 +21,75 @@
 #include "PCG/ABTSM3R31AcceptanceManifest.h"
 #include "PCG/ABTSM3R3AcceptanceManifest.h"
 #include "PCG/ABTSM3R4AcceptanceManifest.h"
+#include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UI/ABTSM1HUD.h"
+#include "World/ABTSCollisionChannels.h"
+
+namespace ABTSM3R5GameModePrivate
+{
+class FSurfaceHash64
+{
+public:
+	void Add(const uint64 Input)
+	{
+		for (int32 ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+		{
+			Value ^= static_cast<uint8>(
+				(Input >> (ByteIndex * 8)) & 0xffull);
+			Value *= 1099511628211ull;
+		}
+	}
+
+	uint64 Get() const
+	{
+		return Value;
+	}
+
+private:
+	uint64 Value = 14695981039346656037ull;
+};
+
+uint64 ComputeSurfaceQueryHash(const AABTSM3Planet& Planet)
+{
+	static const FVector Directions[] = {
+		FVector::ForwardVector,
+		-FVector::ForwardVector,
+		FVector::RightVector,
+		-FVector::RightVector,
+		FVector::UpVector,
+		-FVector::UpVector,
+		FVector(1.0, 1.0, 1.0).GetSafeNormal(),
+		FVector(-1.0, 1.0, -1.0).GetSafeNormal()
+	};
+	FSurfaceHash64 Hash;
+	for (const FVector& Direction : Directions)
+	{
+		FVector WorldPosition = FVector::ZeroVector;
+		FVector WorldNormal = FVector::ZeroVector;
+		float Radius = 0.0f;
+		int32 CellId = INDEX_NONE;
+		const bool bHit = Planet.QuerySurface(
+			Direction,
+			WorldPosition,
+			WorldNormal,
+			Radius,
+			CellId);
+		Hash.Add(bHit ? 1ull : 0ull);
+		Hash.Add(static_cast<uint32>(CellId));
+		Hash.Add(static_cast<uint32>(
+			FMath::RoundToInt(Radius * 100.0f)));
+		Hash.Add(static_cast<uint32>(
+			FMath::RoundToInt(WorldNormal.X * 1000000.0)));
+		Hash.Add(static_cast<uint32>(
+			FMath::RoundToInt(WorldNormal.Y * 1000000.0)));
+		Hash.Add(static_cast<uint32>(
+			FMath::RoundToInt(WorldNormal.Z * 1000000.0)));
+	}
+	return Hash.Get();
+}
+}
 
 AABTSM3GameMode::AABTSM3GameMode()
 {
@@ -244,6 +312,47 @@ void AABTSM3GameMode::BeginPlay()
 				FABTSM3R4AcceptanceManifest::
 					ComputeSweepSeedManifestHash()));
 	}
+	ManifestFailure.Reset();
+	if (FABTSM3R5AcceptanceManifest::Validate(
+			ManifestFailure))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M3R5][AcceptanceManifest] SelfValid=1 Schema=%d Planner=%d MonthlyPolicy=%d ManifestHash=%016llX RequiredR3=%016llX SeedManifest=%016llX Entries=%d ExpectedBiomeTests=1 ExpectedFailureTests=1 ExpectedSweepTests=1 ExpectedSweepSeeds=100 ExpectedRuntimeCases=1 M3LocalAccepted=1 PreviewAuthority=1 IntegrationPending=1 MonthlyAccepted=0 DisplaySeed=%d PreviewCandidate=%d"),
+			FABTSM3R5AcceptanceManifest::
+				PresentationSchemaVersion,
+			FABTSM3R5AcceptanceManifest::PlannerVersion,
+			FABTSM3R5AcceptanceManifest::
+				MonthlyLayoutPolicyVersion,
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					ComputeManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					RequiredR3ManifestHash),
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					ComputeSweepSeedManifestHash()),
+			FABTSM3R5AcceptanceManifest::GetEntries().Num(),
+			FABTSM3R5AcceptanceManifest::DisplaySeed,
+			FABTSM3R5AcceptanceManifest::
+				DisplayPreviewSourceCandidateId);
+	}
+	else
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M3R5][AcceptanceManifest] SelfValid=0 Failure=%s ComputedManifestHash=%016llX ComputedSeedManifestHash=%016llX M3LocalAccepted=0 PreviewAuthority=0 IntegrationPending=1 MonthlyAccepted=0"),
+			*ManifestFailure,
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					ComputeManifestHash()),
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					ComputeSweepSeedManifestHash()));
+	}
 	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM3R0Smoke")))
 	{
 		M3R0SmokeStartSeconds = FPlatformTime::Seconds();
@@ -310,6 +419,19 @@ void AABTSM3GameMode::BeginPlay()
 			M3R4SmokeTimer,
 			this,
 			&AABTSM3GameMode::TryCompleteM3R4Smoke,
+			0.25f,
+			true,
+			0.25f);
+	}
+	if (FParse::Param(
+			FCommandLine::Get(),
+			TEXT("ABTSM3R5Smoke")))
+	{
+		M3R5SmokeStartSeconds = FPlatformTime::Seconds();
+		GetWorldTimerManager().SetTimer(
+			M3R5SmokeTimer,
+			this,
+			&AABTSM3GameMode::TryCompleteM3R5Smoke,
 			0.25f,
 			true,
 			0.25f);
@@ -1547,6 +1669,497 @@ void AABTSM3GameMode::FinishM3R4Smoke(
 		false,
 		bPassed ? 0 : 1,
 		TEXT("AABTSM3GameMode::FinishM3R4Smoke"));
+}
+
+void AABTSM3GameMode::TryCompleteM3R5Smoke()
+{
+	constexpr double MaxWaitSeconds = 20.0;
+	constexpr double MaxPeakPhysicalMB =
+		static_cast<double>(
+			FABTSM3R5AcceptanceManifest::
+				BaselinePeakPhysicalMB)
+		* FABTSM3R5AcceptanceManifest::
+			MaxPeakPhysicalPermille
+		/ 1000.0;
+	const double ElapsedSeconds =
+		FPlatformTime::Seconds() - M3R5SmokeStartSeconds;
+	AABTSM3Planet* Planet = nullptr;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		if (It->IsM3PresentationReady())
+		{
+			Planet = *It;
+			break;
+		}
+	}
+	if (ElapsedSeconds > MaxWaitSeconds)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("CertificationExceeded20Seconds"));
+		return;
+	}
+	if ((Planet == nullptr || !bInitialPlayerPlaced)
+		&& ElapsedSeconds < MaxWaitSeconds)
+	{
+		return;
+	}
+	if (Planet == nullptr || !bInitialPlayerPlaced)
+	{
+		FinishM3R5Smoke(
+			false,
+			Planet == nullptr
+				? TEXT("PlanetNotReadyWithin20Seconds")
+				: TEXT("InitialPlayerNotPlacedWithin20Seconds"));
+		return;
+	}
+
+	FString Failure;
+	if (!FABTSM3R5AcceptanceManifest::Validate(Failure))
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("R5AcceptanceManifest:%s"),
+				*Failure));
+		return;
+	}
+	const FABTSM3PCGSummary& Summary = Planet->PCGSummary;
+	const FABTSM3R1CompatibilityOracle& DisplayOracle =
+		FABTSM3R1AcceptanceManifest::
+			GetCompatibilityOracles()[0];
+	const uint64 CompatibilitySnapshot =
+		FABTSM3R1AcceptanceManifest::
+			ComputeCompatibilitySnapshotHash(
+				Planet->GetGeneratedTasks(),
+				Planet->GetGeneratedTaskLinks(),
+				Planet->GetGeneratedCellStates(),
+				Planet->GetGeneratedEdgeStates(),
+				Summary);
+	if (Planet->WorldSeed
+			!= FABTSM3R5AcceptanceManifest::DisplaySeed
+		|| Planet->SurfaceSubdivision
+			!= FABTSM3R5AcceptanceManifest::
+				RequiredSurfaceSubdivision
+		|| !Summary.bAccepted
+		|| CompatibilitySnapshot
+			!= DisplayOracle.SnapshotHash
+		|| Planet->GetMonthlyWorldSchema()
+			.Quality.bMonthlyWorldAccepted
+		|| !Planet->GetFinaleLaunchFrame().IsUsable()
+		|| Planet->GetBuildingSpawnSites().Num()
+			!= FABTSM3R0AcceptanceManifest::
+				GetDisplayBuildingSites().Num())
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("CompatibilityBoundaryMismatch"));
+		return;
+	}
+	if (!Planet->ValidateMonthlySpatialResult(Failure))
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("R3SpatialValidation:%s"),
+				*Failure));
+		return;
+	}
+	const FABTSM3MonthlySpatialResult& SpatialResult =
+		Planet->GetMonthlySpatialResult();
+	if (static_cast<uint64>(
+			SpatialResult.SpatialResultHash)
+			!= FABTSM3R5AcceptanceManifest::
+				FrozenDisplaySourceSpatialHash
+		|| SpatialResult.bMonthlyWorldAccepted)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("R3SpatialIdentityMismatch"));
+		return;
+	}
+	if (!Planet->ValidateMonthlyPresentationResult(
+			Failure))
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("R5PresentationValidation:%s"),
+				*Failure));
+		return;
+	}
+	const FABTSM3MonthlyPresentationResult&
+		PresentationResult =
+			Planet->GetMonthlyPresentationResult();
+	const FABTSM3MonthlyCandidatePresentation* Preview =
+		FABTSM3MonthlyPresentationBuilder::
+			FindCandidatePresentation(
+				PresentationResult,
+				FABTSM3R5AcceptanceManifest::
+					DisplayPreviewSourceCandidateId);
+	if (static_cast<uint64>(
+			PresentationResult.PresentationConfigHash)
+			!= FABTSM3R5AcceptanceManifest::
+				FrozenDisplayConfigHash
+		|| static_cast<uint64>(
+			PresentationResult.PresentationResultHash)
+			!= FABTSM3R5AcceptanceManifest::
+				FrozenDisplayResultHash
+		|| !PresentationResult.bPresentationValid
+		|| PresentationResult.bMonthlyWorldAccepted
+		|| PresentationResult.CandidatePresentations.Num()
+			!= SpatialResult.RetainedCandidates.Num()
+		|| Preview == nullptr
+		|| static_cast<uint64>(
+			Preview->CandidatePresentationHash)
+			!= FABTSM3R5AcceptanceManifest::
+				FrozenDisplayPreviewCandidateHash)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("R5PresentationIdentityMismatch"));
+		return;
+	}
+	if (Preview->MinVisualBiomeComponentCellCount
+			< FABTSM3R5AcceptanceManifest::
+				MinVisualBiomeComponentCells
+		|| Preview->VisualBiomeBoundaryPermille
+			> FABTSM3R5AcceptanceManifest::
+				MaxVisualBiomeBoundaryPermille)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("VisualFragmentationBudgetMismatch"));
+		return;
+	}
+	if (!Planet->IsMonthlyPresentationPreviewActive()
+		|| Planet->
+				GetMonthlyPresentationPreviewCandidateId()
+			!= FABTSM3R5AcceptanceManifest::
+				DisplayPreviewSourceCandidateId
+		|| static_cast<uint64>(
+			Planet->
+				GetMonthlyPresentationPreviewCandidateHash())
+			!= FABTSM3R5AcceptanceManifest::
+				FrozenDisplayPreviewCandidateHash)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("ExplicitPreviewAuthorityMissing"));
+		return;
+	}
+	if (Planet->ForestHISM == nullptr
+		|| Planet->RockHISM == nullptr
+		|| Planet->ForestHISM->GetCollisionEnabled()
+			!= ECollisionEnabled::QueryAndPhysics
+		|| Planet->RockHISM->GetCollisionEnabled()
+			!= ECollisionEnabled::QueryAndPhysics
+		|| Planet->ForestHISM->GetCollisionObjectType()
+			!= ABTSDeveloperObstacleChannel
+		|| Planet->RockHISM->GetCollisionObjectType()
+			!= ABTSDeveloperObstacleChannel
+		|| Planet->ForestHISM->IsSimulatingPhysics()
+		|| Planet->RockHISM->IsSimulatingPhysics())
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("HISMCollisionContractMismatch"));
+		return;
+	}
+	const int32 ForestInstances =
+		Planet->ForestHISM->GetInstanceCount();
+	const int32 RockInstances =
+		Planet->RockHISM->GetInstanceCount();
+	if (ForestInstances < 0
+		|| RockInstances < 0
+		|| ForestInstances + RockInstances
+			> Preview->PlannedDecorationInstanceCount)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("HISMInstanceBudgetMismatch"));
+		return;
+	}
+	if (!Planet->IsMonthlyMaterialRhythmApplied()
+		|| Planet->GetMonthlyMaterialRhythmCellCount()
+			!= Preview->Cells.Num())
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("MaterialVisualRhythmNotConsumed"));
+		return;
+	}
+	if (Planet->GetMonthlyDecorAccent0InstanceCount() <= 0
+		|| Planet->GetMonthlyDecorAccent1InstanceCount()
+			<= 0
+		|| Planet->GetMonthlyDecorAccent0InstanceCount()
+				+ Planet->
+					GetMonthlyDecorAccent1InstanceCount()
+			!= ForestInstances + RockInstances)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("HISMVisualRhythmNotConsumed"));
+		return;
+	}
+	if (Planet->GetLastMonthlyPresentationBuildDurationMS()
+		> FABTSM3R5AcceptanceManifest::
+			PlannerMaxBudgetMS)
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("PresentationPlannerExceeded%dMS"),
+				FABTSM3R5AcceptanceManifest::
+					PlannerMaxBudgetMS));
+		return;
+	}
+	if (Planet->GetLastM3RebuildDurationMS()
+		> FABTSM3R5AcceptanceManifest::
+			FullRebuildBudgetMS)
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("RebuildExceeded%dMS"),
+				FABTSM3R5AcceptanceManifest::
+					FullRebuildBudgetMS));
+		return;
+	}
+	if (!Planet->ValidateMonthlySlingshotFieldResult(
+			Failure)
+		|| !Planet->ValidateMonthlyWitnessResult(Failure))
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("DownstreamObservation:%s"),
+				*Failure));
+		return;
+	}
+	const FABTSM3MonthlyWitnessResult& WitnessResult =
+		Planet->GetMonthlyWitnessResult();
+	if (WitnessResult.bMonthlyWorldAccepted
+		|| WitnessResult.SelectedCandidateId != INDEX_NONE
+		|| WitnessResult.GameplayLayoutHash != 0)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("R4PendingBoundaryMismatch"));
+		return;
+	}
+	const uint64 SurfaceQueryHashA =
+		ABTSM3R5GameModePrivate::
+			ComputeSurfaceQueryHash(*Planet);
+	const uint64 SurfaceQueryHashB =
+		ABTSM3R5GameModePrivate::
+			ComputeSurfaceQueryHash(*Planet);
+	if (SurfaceQueryHashA == 0
+		|| SurfaceQueryHashA != SurfaceQueryHashB)
+	{
+		FinishM3R5Smoke(
+			false,
+			TEXT("QuerySurfaceNondeterministic"));
+		return;
+	}
+	const FPlatformMemoryStats MemoryStats =
+		FPlatformMemory::GetStats();
+	const double PeakPhysicalMB =
+		static_cast<double>(MemoryStats.PeakUsedPhysical)
+		/ (1024.0 * 1024.0);
+	if (PeakPhysicalMB > MaxPeakPhysicalMB)
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("PeakPhysicalMB:%.1f"),
+				PeakPhysicalMB));
+		return;
+	}
+	FinishM3R5Smoke(true, FString());
+}
+
+void AABTSM3GameMode::FinishM3R5Smoke(
+	const bool bPassed,
+	const FString& Failure)
+{
+	GetWorldTimerManager().ClearTimer(M3R5SmokeTimer);
+	const double ElapsedSeconds = FMath::Max(
+		0.0,
+		FPlatformTime::Seconds() - M3R5SmokeStartSeconds);
+	const AABTSM3Planet* Planet = nullptr;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		Planet = *It;
+		break;
+	}
+	const FABTSM3MonthlyPresentationResult* Result =
+		Planet != nullptr
+		? &Planet->GetMonthlyPresentationResult()
+		: nullptr;
+	const FABTSM3MonthlyCandidatePresentation* Preview =
+		Result != nullptr
+		? FABTSM3MonthlyPresentationBuilder::
+			FindCandidatePresentation(
+				*Result,
+				FABTSM3R5AcceptanceManifest::
+					DisplayPreviewSourceCandidateId)
+		: nullptr;
+	const int32 ForestInstances =
+		Planet != nullptr && Planet->ForestHISM != nullptr
+		? Planet->ForestHISM->GetInstanceCount()
+		: 0;
+	const int32 RockInstances =
+		Planet != nullptr && Planet->RockHISM != nullptr
+		? Planet->RockHISM->GetInstanceCount()
+		: 0;
+	const FPlatformMemoryStats MemoryStats =
+		FPlatformMemory::GetStats();
+	const double PeakPhysicalMB =
+		static_cast<double>(MemoryStats.PeakUsedPhysical)
+		/ (1024.0 * 1024.0);
+	const uint64 SurfaceQueryHash =
+		Planet != nullptr
+		? ABTSM3R5GameModePrivate::
+			ComputeSurfaceQueryHash(*Planet)
+		: 0;
+	if (bPassed)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M3R5][RuntimeCertification] ManifestHash=%016llX Entries=%d Terminal=1 Passed=1 Failed=0 M3LocalAccepted=1 PreviewAuthority=1 IntegrationPending=1 MonthlyWorldAccepted=0 SourceR3Frozen=1 SourceCandidates=%d PreviewCandidateId=%d SourceSpatialHash=%016llX PresentationConfigHash=%016llX PresentationResultHash=%016llX PreviewCandidateHash=%016llX Districts=%d CoveredCells=%d TotalCells=%d ActiveCoveragePermille=%d DeepWildPermille=%d EncounterThemes=%d VisualBeats=%d BeatMinCM=%d BeatMaxCM=%d MergedLogicalSingletons=%d MergedSmallFragments=%d SingletonComponents=%d MinVisualComponentCells=%d VisualBoundaryPermille=%d ProtectedCells=%d PlannedInstanceQuota=%d MaterialRhythmApplied=1 RhythmCells=%d ForestInstances=%d RockInstances=%d Accent0Instances=%d Accent1Instances=%d ForestCollision=QueryAndPhysics RockCollision=QueryAndPhysics ObstacleChannel=%d ForestSimulatePhysics=0 RockSimulatePhysics=0 QuerySurfaceHash=%016llX PlannerMS=%.3f RebuildMS=%.3f PeakPhysicalMB=%.1f ElapsedSeconds=%.3f"),
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					ComputeManifestHash()),
+			FABTSM3R5AcceptanceManifest::GetEntries().Num(),
+			Result != nullptr
+				? Result->CandidatePresentations.Num()
+				: 0,
+			Planet != nullptr
+				? Planet->
+					GetMonthlyPresentationPreviewCandidateId()
+				: INDEX_NONE,
+			static_cast<unsigned long long>(
+				Result != nullptr
+					? Result->SourceSpatialResultHash
+					: 0),
+			static_cast<unsigned long long>(
+				Result != nullptr
+					? Result->PresentationConfigHash
+					: 0),
+			static_cast<unsigned long long>(
+				Result != nullptr
+					? Result->PresentationResultHash
+					: 0),
+			static_cast<unsigned long long>(
+				Preview != nullptr
+					? Preview->CandidatePresentationHash
+					: 0),
+			Preview != nullptr
+				? Preview->DistrictStyles.Num()
+				: 0,
+			Preview != nullptr
+				? Preview->PlayableCellCount
+				: 0,
+			Preview != nullptr ? Preview->Cells.Num() : 0,
+			Preview != nullptr
+				? Preview->ActiveRoleCoveragePermille
+				: 0,
+			Preview != nullptr
+				? Preview->DeepWildPermille
+				: 0,
+			Preview != nullptr
+				? Preview->BiomeArchetypeCount
+				: 0,
+			Preview != nullptr
+				? Preview->VisualBeats.Num()
+				: 0,
+			Preview != nullptr
+				? Preview->MinVisualBeatLengthCM
+				: 0,
+			Preview != nullptr
+				? Preview->MaxVisualBeatLengthCM
+				: 0,
+			Preview != nullptr
+				? Preview->MergedLogicalSingletonCellCount
+				: 0,
+			Preview != nullptr
+				? Preview->
+					MergedSmallVisualFragmentCellCount
+				: 0,
+			Preview != nullptr
+				? Preview->SingleCellBiomeComponentCount
+				: 0,
+			Preview != nullptr
+				? Preview->
+					MinVisualBiomeComponentCellCount
+				: 0,
+			Preview != nullptr
+				? Preview->VisualBiomeBoundaryPermille
+				: 0,
+			Preview != nullptr
+				? Preview->DecorationProtectedCellCount
+				: 0,
+			Preview != nullptr
+				? Preview->PlannedDecorationInstanceCount
+				: 0,
+			Planet != nullptr
+				? Planet->
+					GetMonthlyMaterialRhythmCellCount()
+				: 0,
+			ForestInstances,
+			RockInstances,
+			Planet != nullptr
+				? Planet->
+					GetMonthlyDecorAccent0InstanceCount()
+				: 0,
+			Planet != nullptr
+				? Planet->
+					GetMonthlyDecorAccent1InstanceCount()
+				: 0,
+			static_cast<int32>(ABTSDeveloperObstacleChannel),
+			static_cast<unsigned long long>(
+				SurfaceQueryHash),
+			Planet != nullptr
+				? Planet->
+					GetLastMonthlyPresentationBuildDurationMS()
+				: 0.0,
+			Planet != nullptr
+				? Planet->GetLastM3RebuildDurationMS()
+				: 0.0,
+			PeakPhysicalMB,
+			ElapsedSeconds);
+	}
+	else
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M3R5][RuntimeCertification] ManifestHash=%016llX Entries=%d Terminal=1 Passed=0 Failed=1 M3LocalAccepted=0 PreviewAuthority=%d IntegrationPending=1 MonthlyWorldAccepted=0 Failure=%s PlannerMS=%.3f RebuildMS=%.3f PeakPhysicalMB=%.1f ElapsedSeconds=%.3f"),
+			static_cast<unsigned long long>(
+				FABTSM3R5AcceptanceManifest::
+					ComputeManifestHash()),
+			FABTSM3R5AcceptanceManifest::GetEntries().Num(),
+			Planet != nullptr
+				&& Planet->
+					IsMonthlyPresentationPreviewActive()
+				? 1 : 0,
+			*Failure,
+			Planet != nullptr
+				? Planet->
+					GetLastMonthlyPresentationBuildDurationMS()
+				: 0.0,
+			Planet != nullptr
+				? Planet->GetLastM3RebuildDurationMS()
+				: 0.0,
+			PeakPhysicalMB,
+			ElapsedSeconds);
+	}
+	FPlatformMisc::RequestExitWithStatus(
+		false,
+		bPassed ? 0 : 1,
+		TEXT("AABTSM3GameMode::FinishM3R5Smoke"));
 }
 
 void AABTSM3GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, const int32 SpawnCellId)

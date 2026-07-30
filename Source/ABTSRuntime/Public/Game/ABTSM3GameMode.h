@@ -36,6 +36,8 @@ private:
 	void FinishM3R31Smoke(bool bPassed, const FString& Failure);
 	void TryCompleteM3R4Smoke();
 	void FinishM3R4Smoke(bool bPassed, const FString& Failure);
+	void TryCompleteM3R5Smoke();
+	void FinishM3R5Smoke(bool bPassed, const FString& Failure);
 
 	FTimerHandle InitialRoadSpawnTimer;
 	FTimerHandle M3R0SmokeTimer;
@@ -44,6 +46,7 @@ private:
 	FTimerHandle M3R3SmokeTimer;
 	FTimerHandle M3R31SmokeTimer;
 	FTimerHandle M3R4SmokeTimer;
+	FTimerHandle M3R5SmokeTimer;
 	int32 InitialRoadSpawnAttempts = 0;
 	double M3R0SmokeStartSeconds = 0.0;
 	double M3R1SmokeStartSeconds = 0.0;
@@ -51,5 +54,6 @@ private:
 	double M3R3SmokeStartSeconds = 0.0;
 	double M3R31SmokeStartSeconds = 0.0;
 	double M3R4SmokeStartSeconds = 0.0;
+	double M3R5SmokeStartSeconds = 0.0;
 	bool bInitialPlayerPlaced = false;
 };
