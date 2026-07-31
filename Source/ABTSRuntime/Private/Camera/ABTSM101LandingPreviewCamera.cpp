@@ -11,6 +11,7 @@
 #include "Slingshot/ABTSM6Types.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSM9Satellite.h"
 
 namespace
 {
@@ -114,27 +115,18 @@ void AABTSM101LandingPreviewCamera::UpdatePreview(
 
 void AABTSM101LandingPreviewCamera::UpdateSatellitePreview(
 	const FABTSM6TrajectoryPreview& Preview,
-	AActor& Satellite,
+	AABTSM9Satellite& Satellite,
 	AActor& E5Target,
-	const float SatelliteRadiusCM,
-	const FVector& TargetHalfExtentCM,
 	const float DeltaSeconds)
 {
-	int32 ClosestSegmentStartIndex = INDEX_NONE;
-	FVector ClosestPoint;
-	FVector IncidenceDirection;
-	float ClosestDistanceCM = BIG_NUMBER;
-	if (!FindClosestTrajectorySegmentToPoint(
-		Preview,
-		E5Target.GetActorLocation(),
-		ClosestSegmentStartIndex,
-		ClosestPoint,
-		IncidenceDirection,
-		ClosestDistanceCM))
+	if (!IsSatelliteLandingTerminal(Preview)
+		|| Preview.WorldPoints.Num() < 2)
 	{
 		DeactivatePreview();
 		return;
 	}
+	const int32 TerminalSegmentStartIndex =
+		FMath::Max(0, Preview.WorldPoints.Num() - 2);
 	EnsureRenderTarget();
 	if (RenderTarget == nullptr
 		|| SceneCapture == nullptr
@@ -143,21 +135,26 @@ void AABTSM101LandingPreviewCamera::UpdateSatellitePreview(
 		return;
 	}
 	const bool bSubjectChanged =
-		PreviewSubject != EABTSM101PreviewSubject::SatelliteE5;
-	SetPreviewSubject(EABTSM101PreviewSubject::SatelliteE5);
+		PreviewSubject != EABTSM101PreviewSubject::SatelliteLanding;
+	SetPreviewSubject(EABTSM101PreviewSubject::SatelliteLanding);
 	if (!bPreviewActive || bSubjectChanged)
 	{
 		bPreviewActive = true;
 		CaptureAccumulatorSeconds = 0.0f;
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M10.1][SatelliteLandingPreview] Activated Terminal=%s Distance=%.1f Pitch=%.1f FOV=%.1f CaptureHz=%.1f"),
+			*UEnum::GetValueAsString(Preview.TerminalType),
+			Settings.LandingViewCameraDistanceCM,
+			Settings.SatelliteLandingViewPitchDegrees,
+			Settings.LandingViewFieldOfViewDegrees,
+			Settings.LandingViewCaptureHz);
 		RefreshSatelliteCapture(
 			Preview,
 			Satellite,
 			E5Target,
-			SatelliteRadiusCM,
-			TargetHalfExtentCM,
-			ClosestSegmentStartIndex,
-			ClosestPoint,
-			IncidenceDirection);
+			TerminalSegmentStartIndex);
 		return;
 	}
 	CaptureAccumulatorSeconds += FMath::Max(0.0f, DeltaSeconds);
@@ -175,11 +172,7 @@ void AABTSM101LandingPreviewCamera::UpdateSatellitePreview(
 		Preview,
 		Satellite,
 		E5Target,
-		SatelliteRadiusCM,
-		TargetHalfExtentCM,
-		ClosestSegmentStartIndex,
-		ClosestPoint,
-		IncidenceDirection);
+		TerminalSegmentStartIndex);
 }
 
 void AABTSM101LandingPreviewCamera::DeactivatePreview()
@@ -215,40 +208,89 @@ void AABTSM101LandingPreviewCamera::SetPreviewSubject(
 		*UEnum::GetValueAsString(PreviousSubject));
 }
 
-bool AABTSM101LandingPreviewCamera::FindClosestTrajectorySegmentToPoint(
-	const FABTSM6TrajectoryPreview& Preview,
-	const FVector& Point,
-	int32& OutSegmentStartIndex,
-	FVector& OutClosestPoint,
-	FVector& OutTangent,
-	float& OutDistanceCM)
+bool AABTSM101LandingPreviewCamera::IsSatelliteLandingTerminal(
+	const FABTSM6TrajectoryPreview& Preview)
 {
-	OutSegmentStartIndex = INDEX_NONE;
-	OutClosestPoint = FVector::ZeroVector;
-	OutTangent = FVector::ZeroVector;
-	OutDistanceCM = BIG_NUMBER;
-	for (int32 Index = 0; Index + 1 < Preview.WorldPoints.Num(); ++Index)
+	return Preview.TerminalType
+			== EABTSM6TrajectoryTerminalType::SatelliteBody
+		|| Preview.TerminalType
+			== EABTSM6TrajectoryTerminalType::SatelliteE5;
+}
+
+bool AABTSM101LandingPreviewCamera::BuildSatelliteLandingViewFrame(
+	const FABTSM6TrajectoryPreview& Preview,
+	const FVector& SatelliteCenterWorld,
+	const float CameraDistanceCM,
+	const float PitchDegrees,
+	FVector& OutLandingWorld,
+	FVector& OutCameraWorld,
+	FVector& OutLookDirection,
+	FVector& OutScreenUp)
+{
+	OutLandingWorld = FVector::ZeroVector;
+	OutCameraWorld = FVector::ZeroVector;
+	OutLookDirection = FVector::ZeroVector;
+	OutScreenUp = FVector::ZeroVector;
+	if (!IsSatelliteLandingTerminal(Preview)
+		|| Preview.TerminalWorldLocation.ContainsNaN()
+		|| SatelliteCenterWorld.ContainsNaN()
+		|| !FMath::IsFinite(CameraDistanceCM)
+		|| CameraDistanceCM <= 0.0f
+		|| !FMath::IsFinite(PitchDegrees))
 	{
-		const FVector Start = Preview.WorldPoints[Index];
-		const FVector Segment = Preview.WorldPoints[Index + 1] - Start;
-		const double LengthSquared = Segment.SizeSquared();
-		if (LengthSquared <= UE_DOUBLE_SMALL_NUMBER) continue;
-		const double Alpha = FMath::Clamp(
-			FVector::DotProduct(Point - Start, Segment)
-				/ LengthSquared,
-			0.0,
-			1.0);
-		const FVector Closest = Start + Segment * Alpha;
-		const float DistanceCM = FVector::Distance(Point, Closest);
-		if (DistanceCM >= OutDistanceCM) continue;
-		OutSegmentStartIndex = Index;
-		OutClosestPoint = Closest;
-		OutTangent = Segment.GetSafeNormal();
-		OutDistanceCM = DistanceCM;
+		return false;
 	}
-	return OutSegmentStartIndex != INDEX_NONE
-		&& !OutTangent.IsNearlyZero()
-		&& FMath::IsFinite(OutDistanceCM);
+	const FVector LandingUp =
+		(Preview.TerminalWorldLocation - SatelliteCenterWorld).GetSafeNormal();
+	if (LandingUp.IsNearlyZero()) return false;
+
+	FVector TangentialApproach =
+		FVector::VectorPlaneProject(
+			Preview.TerminalWorldVelocity,
+			LandingUp).GetSafeNormal();
+	for (int32 Index = Preview.WorldPoints.Num() - 1;
+		TangentialApproach.IsNearlyZero() && Index > 0;
+		--Index)
+	{
+		TangentialApproach =
+			FVector::VectorPlaneProject(
+				Preview.WorldPoints[Index]
+					- Preview.WorldPoints[Index - 1],
+				LandingUp).GetSafeNormal();
+	}
+	if (TangentialApproach.IsNearlyZero())
+	{
+		TangentialApproach =
+			FVector::VectorPlaneProject(
+				FVector::ForwardVector,
+				LandingUp).GetSafeNormal();
+	}
+	if (TangentialApproach.IsNearlyZero())
+	{
+		TangentialApproach =
+			FVector::VectorPlaneProject(
+				FVector::RightVector,
+				LandingUp).GetSafeNormal();
+	}
+	if (TangentialApproach.IsNearlyZero()) return false;
+
+	const float PitchRadians =
+		FMath::DegreesToRadians(
+			FMath::Clamp(PitchDegrees, 5.0f, 85.0f));
+	const FVector Look =
+		(TangentialApproach * FMath::Cos(PitchRadians)
+			- LandingUp * FMath::Sin(PitchRadians)).GetSafeNormal();
+	if (Look.IsNearlyZero()) return false;
+
+	OutLandingWorld = Preview.TerminalWorldLocation;
+	OutCameraWorld =
+		OutLandingWorld
+		- Look * FMath::Clamp(CameraDistanceCM, 100.0f, 100000.0f);
+	OutLookDirection = Look;
+	OutScreenUp = ResolveStableScreenUp(LandingUp, Look);
+	return !OutCameraWorld.ContainsNaN()
+		&& !OutLookDirection.ContainsNaN()
+		&& !OutScreenUp.ContainsNaN();
 }
 
 void AABTSM101LandingPreviewCamera::EnsureRenderTarget()
@@ -332,67 +374,27 @@ void AABTSM101LandingPreviewCamera::RefreshCapture(
 
 void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	const FABTSM6TrajectoryPreview& Preview,
-	AActor& Satellite,
+	AABTSM9Satellite& Satellite,
 	AActor& E5Target,
-	const float SatelliteRadiusCM,
-	const FVector& TargetHalfExtentCM,
-	const int32 ClosestSegmentStartIndex,
-	const FVector& ClosestPoint,
-	const FVector& IncidenceDirection)
+	const int32 TerminalSegmentStartIndex)
 {
 	if (SceneCapture == nullptr || TrajectoryPointInstances == nullptr) return;
-	const FVector SatelliteCenter = Satellite.GetActorLocation();
-	FVector TargetOutward =
-		(E5Target.GetActorLocation() - SatelliteCenter).GetSafeNormal();
-	if (TargetOutward.IsNearlyZero())
+	FVector LandingWorld;
+	FVector CameraLocation;
+	FVector Look;
+	FVector ScreenUp;
+	if (!BuildSatelliteLandingViewFrame(
+		Preview,
+		Satellite.GetPlanetCenterWorld(),
+		Settings.LandingViewCameraDistanceCM,
+		Settings.SatelliteLandingViewPitchDegrees,
+		LandingWorld,
+		CameraLocation,
+		Look,
+		ScreenUp))
 	{
-		TargetOutward = FVector::UpVector;
+		return;
 	}
-	FVector TangentialApproach =
-		FVector::VectorPlaneProject(
-			IncidenceDirection,
-			TargetOutward).GetSafeNormal();
-	if (TangentialApproach.IsNearlyZero())
-	{
-		TangentialApproach =
-			FVector::VectorPlaneProject(
-				FVector::ForwardVector,
-				TargetOutward).GetSafeNormal();
-	}
-	if (TangentialApproach.IsNearlyZero())
-	{
-		TangentialApproach =
-			FVector::VectorPlaneProject(
-				FVector::RightVector,
-				TargetOutward).GetSafeNormal();
-	}
-	const float TargetDiameterCM =
-		FMath::Max(
-			2.0f,
-			static_cast<float>(
-				TargetHalfExtentCM.GetAbs().GetMax() * 2.0));
-	const float Distance = FMath::Max3(
-		FMath::Clamp(
-			Settings.LandingViewCameraDistanceCM,
-			100.0f,
-			100000.0f),
-		FMath::Max(1.0f, SatelliteRadiusCM) * 1.75f,
-		TargetDiameterCM * 4.0f);
-	const FVector Focus =
-		FMath::Lerp(
-			E5Target.GetActorLocation(),
-			ClosestPoint,
-			0.20f);
-	// View the far-side target from outside its local hemisphere, with a small
-	// tangent offset that keeps the curved approach leg readable.
-	const FVector CameraLocation =
-		E5Target.GetActorLocation()
-		+ TargetOutward * Distance
-		- TangentialApproach * Distance * 0.30f;
-	const FVector Look = (Focus - CameraLocation).GetSafeNormal();
-	if (Look.IsNearlyZero()) return;
-	const FVector ScreenUp =
-		ResolveStableScreenUp(TargetOutward, Look);
 
 	SceneCapture->PrimitiveRenderMode =
 		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
@@ -402,7 +404,11 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 		ESceneCaptureSource::SCS_BaseColor;
 	SceneCapture->ClearShowOnlyComponents();
 	SceneCapture->ShowOnlyActorComponents(&Satellite);
-	SceneCapture->ShowOnlyActorComponents(&E5Target);
+	if (Preview.TerminalType
+		== EABTSM6TrajectoryTerminalType::SatelliteE5)
+	{
+		SceneCapture->ShowOnlyActorComponents(&E5Target);
+	}
 	SceneCapture->ShowOnlyComponent(TrajectoryPointInstances);
 	SceneCapture->SetWorldLocationAndRotation(
 		CameraLocation,
@@ -414,7 +420,7 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 			120.0f);
 	RebuildTrajectoryPointsAround(
 		Preview,
-		ClosestSegmentStartIndex);
+		TerminalSegmentStartIndex);
 	SceneCapture->bCameraCutThisFrame = true;
 	SceneCapture->CaptureScene();
 }

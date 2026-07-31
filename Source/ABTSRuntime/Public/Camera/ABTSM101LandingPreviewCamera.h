@@ -8,6 +8,7 @@
 #include "ABTSM101LandingPreviewCamera.generated.h"
 
 class AABTSM3Planet;
+class AABTSM9Satellite;
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -21,7 +22,7 @@ enum class EABTSM101PreviewSubject : uint8
 {
 	None,
 	PrimaryLanding,
-	SatelliteE5
+	SatelliteLanding
 };
 
 /**
@@ -44,27 +45,30 @@ public:
 		const FABTSM6TrajectoryPreview& Preview,
 		const AABTSM3Planet& Planet,
 		float DeltaSeconds);
-	/** Reuses the same capture/RT for the isolated M9 backside E5 subject. */
+	/** Reuses the same capture/RT for an authoritative M9 lunar terminal. */
 	void UpdateSatellitePreview(
 		const FABTSM6TrajectoryPreview& Preview,
-		AActor& Satellite,
+		AABTSM9Satellite& Satellite,
 		AActor& E5Target,
-		float SatelliteRadiusCM,
-		const FVector& TargetHalfExtentCM,
 		float DeltaSeconds);
 	void DeactivatePreview();
-	static bool FindClosestTrajectorySegmentToPoint(
+	static bool IsSatelliteLandingTerminal(
+		const FABTSM6TrajectoryPreview& Preview);
+	/** Pure geometry seam used by runtime capture and automation. */
+	static bool BuildSatelliteLandingViewFrame(
 		const FABTSM6TrajectoryPreview& Preview,
-		const FVector& Point,
-		int32& OutSegmentStartIndex,
-		FVector& OutClosestPoint,
-		FVector& OutTangent,
-		float& OutDistanceCM);
+		const FVector& SatelliteCenterWorld,
+		float CameraDistanceCM,
+		float PitchDegrees,
+		FVector& OutLandingWorld,
+		FVector& OutCameraWorld,
+		FVector& OutLookDirection,
+		FVector& OutScreenUp);
 
 	bool IsPreviewActive() const { return bPreviewActive; }
 	bool IsSatellitePreviewActive() const
 	{
-		return PreviewSubject == EABTSM101PreviewSubject::SatelliteE5;
+		return PreviewSubject == EABTSM101PreviewSubject::SatelliteLanding;
 	}
 	EABTSM101PreviewSubject GetPreviewSubject() const { return PreviewSubject; }
 	UTextureRenderTarget2D* GetRenderTarget() const { return RenderTarget; }
@@ -74,13 +78,9 @@ private:
 	void RefreshCapture(const FABTSM6TrajectoryPreview& Preview, const AABTSM3Planet& Planet);
 	void RefreshSatelliteCapture(
 		const FABTSM6TrajectoryPreview& Preview,
-		AActor& Satellite,
+		AABTSM9Satellite& Satellite,
 		AActor& E5Target,
-		float SatelliteRadiusCM,
-		const FVector& TargetHalfExtentCM,
-		int32 ClosestSegmentStartIndex,
-		const FVector& ClosestPoint,
-		const FVector& IncidenceDirection);
+		int32 TerminalSegmentStartIndex);
 	FVector ResolveIncidenceDirection(const FABTSM6TrajectoryPreview& Preview, const FVector& LandingUp) const;
 	void RebuildTrajectoryPoints(const FABTSM6TrajectoryPreview& Preview);
 	void RebuildTrajectoryPointsAround(

@@ -133,7 +133,9 @@ TargetCenter = SatelliteCenter
 
 六枚射程代理仍是无物理阻挡的 Query-only 球体；E5 则是附着在卫星表面的阻挡 `Engine Cube`。实际 Chaos blocking contact 是首要命中证据，Rig 在 `TG_PostPhysics` 对鸟的上一帧→本帧位置执行精确 sphere-vs-OBB 扫掠作为高速穿越与同帧 E5/卫星体仲裁回退；卫星体使用实际鸟半径扩张后的理想球。Chaos 的 E5/body 回调只记录同帧候选，Rig 必须在同一段上统一比较 `TargetAlpha` 与 `SatelliteAlpha` 后双向定案，因此 E5-first 也能被更早的卫星体改判，body-first 也能被更早的 E5 改判；首个已定案帧之后不得被反弹或持续接触重写。M6 从 `Flying/Settling` 切到 `Returning` 的首帧仍只暴露一次 pending completion sample。
 
-M6 只读预测快照现在携带完整路径、最近卫星净空以及 `PrimarySurface / SatelliteBody / SatelliteE5` 终点类型。每个积分步必须先求 E5 OBB、所有卫星扩张球和主星表面的候选交点，再以全局最小 Alpha 截断；不能因代码检查顺序固定偏向卫星。标定 Rig 显式把练习卫星、E5 Actor、OBB 半边长以及认证用的 `0.04 s × 30 s` 积分域注册给 M6/M10，使标定 HUD 预览、成功岛认证与实际超时使用同一时间域；普通 M6/M9 未注册该 context 时继续使用既有预测预算。Pulling 轨迹进入卫星/E5 邻域时，E5 画中画优先于普通主星落点预览，复用同一 SceneCapture/RenderTarget，只显示卫星、E5 和局部轨迹，并使用无光照 `SCS_BaseColor` 指引视图避免背面全黑；它不等于修改了世界真实背面照明。
+M6 只读预测快照现在携带完整路径、最近卫星净空以及 `PrimarySurface / SatelliteBody / SatelliteE5` 终点类型。每个积分步必须先求 E5 OBB、所有卫星扩张球和主星表面的候选交点，再以全局最小 Alpha 截断；不能因代码检查顺序固定偏向卫星。标定 Rig 显式把练习卫星、E5 Actor、OBB 半边长以及认证用的 `0.04 s × 30 s` 积分域注册给 M6/M10，使标定 HUD 预览、成功岛认证与实际超时使用同一时间域；普通 M6/M9 未注册该 context 时继续使用既有预测预算。
+
+月面画中画只接受当前练习卫星的 `SatelliteBody` 或 `SatelliteE5` 权威终点；仅进入引力邻域、绕月飞走或落回主星都不得开启。镜头以 `TerminalWorldLocation` 为着陆焦点，距离直接复用地面画中画的 `LandingViewCameraDistanceCM`，不再按卫星半径或 E5 尺寸额外拉远；`SatelliteLandingViewPitchDegrees` 控制相对月面切平面的固定俯视角，默认 `45°`，屏幕 Up 始终由着陆点的卫星径向约束。捕获复用同一 SceneCapture/RenderTarget，只显示卫星、命中 E5（若适用）和末端局部轨迹，并使用无光照 `SCS_BaseColor` 指引视图避免背面全黑；它不等于修改了世界真实背面照明。
 
 同一 M6 相机在实飞时按 `PrimaryFollow → SatelliteApproach → SatelliteOrbit → E5Approach → E5Impact` 过渡，以稳定轨道侧视法线避免近月翻转；Orbit 与 E5Approach 分别使用不同的进入/退出阈值，避免鸟在边界附近时来回刷阶段。E5 命中保持 `1.2 s` 后确定性回收，回收期间锁回主星 frame，直到下一次发射；这些表现仅在显式标定 context 中启用。
 
@@ -229,7 +231,7 @@ ABTS.Calibration.SweptCollision
 ABTS.Calibration.TargetGeometry
 ```
 
-其中 `ProfileCatalog` 覆盖 `PullPowerWheelStep=0.005` 的 fail-closed 反例；四项 Aim 相机构图均进入哈希输入；`StableHashes` 验证相机构图与实际鸟碰撞半径会改变身份；`TargetGeometry` 覆盖贴地立方体局部 frame、平移不变与错误配置拒绝；`SweptCollision` 覆盖精确球/OBB 圆角、零长度/变换不变及 60 cm 净空门；`SatellitePreviewGeometry` 覆盖从完整弯曲路径选择最近画中画线段。
+其中 `ProfileCatalog` 覆盖 `PullPowerWheelStep=0.005` 的 fail-closed 反例；四项 Aim 相机构图均进入哈希输入；`StableHashes` 验证相机构图与实际鸟碰撞半径会改变身份；`TargetGeometry` 覆盖贴地立方体局部 frame、平移不变与错误配置拒绝；`SweptCollision` 覆盖精确球/OBB 圆角、零长度/变换不变及 60 cm 净空门；`SatellitePreviewGeometry` 覆盖非月面终点拒绝、`SatelliteBody/SatelliteE5` 接受、共享相机距离、默认 `45°` 俯视以及径向 Up 约束。
 
 门槛是精确 6/6 Success、唯一 `TEST COMPLETE. EXIT CODE: 0`、进程退出码 0，且没有本项目 Fatal、assert、ensure 或 `LogABTSRuntime: Error`。零匹配、少于六项、只看进程退出码或复用旧日志均失败。
 

@@ -82,7 +82,7 @@ void AABTSM10ScoutMapHUD::DrawLandingPreview(AABTSM10ScoutMapSystem& System)
 	{
 		const FString PreviewLabel =
 			System.IsSatelliteLandingPreviewActive()
-				? TEXT("SATELLITE E5 PREVIEW")
+				? TEXT("SATELLITE LANDING PREVIEW")
 				: TEXT("LANDING PREVIEW");
 		DrawText(PreviewLabel, FLinearColor(0.89f, 0.95f, 1.0f),
 			OuterOrigin.X + 10.0f, OuterOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.82f, false);

@@ -731,46 +731,81 @@ bool FABTSSlingshotCalibrationSatellitePreviewGeometryTest::RunTest(
 {
 	(void)Parameters;
 	FABTSM6TrajectoryPreview Preview;
+	TestFalse(
+		TEXT("A non-terminal satellite encounter cannot open lunar preview"),
+		AABTSM101LandingPreviewCamera::
+			IsSatelliteLandingTerminal(Preview));
+	Preview.TerminalType =
+		EABTSM6TrajectoryTerminalType::PrimarySurface;
+	TestFalse(
+		TEXT("A primary-surface landing cannot open lunar preview"),
+		AABTSM101LandingPreviewCamera::
+			IsSatelliteLandingTerminal(Preview));
+
+	Preview.TerminalType =
+		EABTSM6TrajectoryTerminalType::SatelliteBody;
+	Preview.TerminalWorldLocation =
+		FVector(1000.0f, 0.0f, 0.0f);
+	Preview.TerminalWorldVelocity =
+		FVector(-100.0f, 400.0f, 0.0f);
 	Preview.WorldPoints =
 	{
-		FVector(0.0f, 0.0f, 0.0f),
-		FVector(100.0f, 0.0f, 0.0f),
-		FVector(200.0f, 100.0f, 0.0f)
+		FVector(1300.0f, -800.0f, 0.0f),
+		FVector(1120.0f, -400.0f, 0.0f),
+		Preview.TerminalWorldLocation
 	};
-	int32 SegmentStart = INDEX_NONE;
-	FVector ClosestPoint;
-	FVector Tangent;
-	float DistanceCM = BIG_NUMBER;
 	TestTrue(
-		TEXT("The E5 preview can select a segment from the full M6 path"),
+		TEXT("A satellite-body terminal opens lunar preview"),
 		AABTSM101LandingPreviewCamera::
-			FindClosestTrajectorySegmentToPoint(
+			IsSatelliteLandingTerminal(Preview));
+
+	FVector LandingWorld;
+	FVector CameraWorld;
+	FVector LookDirection;
+	FVector ScreenUp;
+	TestTrue(
+		TEXT("A fixed-pitch lunar landing frame can be built"),
+		AABTSM101LandingPreviewCamera::
+			BuildSatelliteLandingViewFrame(
 				Preview,
-				FVector(160.0f, 40.0f, 0.0f),
-				SegmentStart,
-				ClosestPoint,
-				Tangent,
-				DistanceCM));
-	TestEqual(
-		TEXT("The closest curved-path leg is selected"),
-		SegmentStart,
-		1);
+				FVector::ZeroVector,
+				1200.0f,
+				45.0f,
+				LandingWorld,
+				CameraWorld,
+				LookDirection,
+				ScreenUp));
 	TestTrue(
-		TEXT("Closest point lies on the selected leg"),
-		ClosestPoint.Equals(
-			FVector(150.0f, 50.0f, 0.0f),
+		TEXT("Lunar framing targets the authoritative terminal"),
+		LandingWorld.Equals(
+			Preview.TerminalWorldLocation,
 			1.0e-4f));
 	TestTrue(
-		TEXT("Selected incidence direction follows the leg"),
-		Tangent.Equals(
-			FVector(1.0f, 1.0f, 0.0f).GetSafeNormal(),
-			1.0e-4f));
-	TestTrue(
-		TEXT("Closest distance is finite and expected"),
+		TEXT("Lunar and primary landing previews share camera distance"),
 		FMath::IsNearlyEqual(
-			DistanceCM,
-			FMath::Sqrt(200.0f),
+			FVector::Distance(CameraWorld, LandingWorld),
+			1200.0f,
 			1.0e-4f));
+	const FVector RadialUp = LandingWorld.GetSafeNormal();
+	TestTrue(
+		TEXT("The default lunar view looks down by 45 degrees"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(LookDirection, -RadialUp),
+			FMath::Sin(FMath::DegreesToRadians(45.0f)),
+			1.0e-4f));
+	TestTrue(
+		TEXT("Satellite radial Up constrains screen Up"),
+		FMath::IsNearlyZero(
+			FVector::DotProduct(LookDirection, ScreenUp),
+			1.0e-4f)
+		&& FVector::DotProduct(ScreenUp, RadialUp) > 0.0f);
+
+	Preview.TerminalType =
+		EABTSM6TrajectoryTerminalType::SatelliteE5;
+	TestTrue(
+		TEXT("A surface E5 terminal also counts as lunar landing"),
+		AABTSM101LandingPreviewCamera::
+			IsSatelliteLandingTerminal(Preview));
 	return true;
 }
 

@@ -82,7 +82,7 @@ aSatellite  = normalize(ToSatellite) * SurfaceGravity * (SatelliteRadius / d)^2
 
 5. 观察 `SatelliteWindow` 上方有一颗纯灰色小球，且它远离 `LaunchSite` 终局施工台；卫星自身应无道路、水体、SDF 色块、树石 HISM、建筑或拾取物。
 6. 在其附近进入 M6 拉弓，浅色虚线末段应向卫星偏折；发射鸟的实际轨迹应与预览同方向偏折。离卫星远时偏折快速减弱。
-7. 预览判定 `SatelliteBody` 时不得继续穿过卫星，实飞应在相同一侧发生碰撞。隔离标定 context 中还要验证近月镜头转入卫星相对 frame，且 E5 背面画中画在背光面可读。
+7. 预览判定 `SatelliteBody` 时不得继续穿过卫星，实飞应在相同一侧发生碰撞。隔离标定 context 中，月面画中画只能由当前卫星的 `SatelliteBody/SatelliteE5` 终点开启；它应使用与地面相同的相机距离、默认 `45°` 固定俯视和卫星径向 Up，且在背光面保持可读。非月面终点必须关闭月面画中画。
 
 ## 5. 排错
 
@@ -92,7 +92,7 @@ aSatellite  = normalize(ToSatellite) * SurfaceGravity * (SatelliteRadius / d)^2
 | 卫星仍贴近终局 | 检查 M3 GeneratorVersion、`SatelliteWindow ↔ LaunchSite` 实测角距以及 M9 的 `FinaleDistanceRatio/AlignmentDot` 拒绝日志；不要用历史 `FinalAnchorTaskType` 覆盖。 |
 | 有卫星但弹道不偏折 | 检查 `Satellite Surface Gravity Primary Ratio` 是否为零，以及 M6 是否在正式球面模式而非 M7.1 平面测试台。 |
 | 预测路径穿过卫星或比实飞晚碰撞 | 核对 M6 预览使用的实际鸟碰撞半径和 `TerminalType=SatelliteBody`；不要重新用可视 Bounds 猜半径。 |
-| E5 画中画全黑或主体错误 | 仅隔离标定 context 启用；核对显式 PracticeTarget 注册、Scout reveal、ShowOnly 主体和 BaseColor 捕获模式。 |
+| 月面画中画全黑、显示整颗卫星或错误开启 | 仅隔离标定 context 启用；先核对终点必须为当前卫星的 `SatelliteBody/SatelliteE5`，再检查 `LandingViewCameraDistanceCM`、`SatelliteLandingViewPitchDegrees`、径向 Up、ShowOnly 主体和 BaseColor 捕获模式。 |
 | 近月镜头不切换或翻转 | 仅隔离标定 context 启用；核对 M6 Camera 的 Satellite phase、进入/退出滞回与目标 context。 |
 | 卫星表面出现彩色地形/资源 | 这不属于 M9；确认生成的是 `AABTSM9Satellite`，而不是误放置的 `AABTSM3Planet`。 |
 

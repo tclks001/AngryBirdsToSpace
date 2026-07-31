@@ -158,13 +158,11 @@ void AABTSM10ScoutMapSystem::UpdateLandingPreview(const float DeltaSeconds)
 
 	AABTSM9Satellite* Satellite = nullptr;
 	AActor* E5Target = nullptr;
-	FVector TargetHalfExtentCM = FVector::ZeroVector;
 	if (Settings.bShowSatelliteE5LandingPreview
-		&& TryGetQualifiedSatelliteE5Preview(
+		&& TryGetQualifiedSatelliteLandingPreview(
 			Preview,
 			Satellite,
-			E5Target,
-			TargetHalfExtentCM))
+			E5Target))
 	{
 		EnsureLandingPreviewCamera();
 		if (LandingPreviewCamera)
@@ -173,8 +171,6 @@ void AABTSM10ScoutMapSystem::UpdateLandingPreview(const float DeltaSeconds)
 				Preview,
 				*Satellite,
 				*E5Target,
-				Satellite->GetPlanetRadiusCM(),
-				TargetHalfExtentCM,
 				DeltaSeconds);
 		}
 		return;
@@ -201,51 +197,43 @@ void AABTSM10ScoutMapSystem::UpdateLandingPreview(const float DeltaSeconds)
 	}
 }
 
-bool AABTSM10ScoutMapSystem::TryGetQualifiedSatelliteE5Preview(
+bool AABTSM10ScoutMapSystem::TryGetQualifiedSatelliteLandingPreview(
 	const FABTSM6TrajectoryPreview& Preview,
 	AABTSM9Satellite*& OutSatellite,
-	AActor*& OutTarget,
-	FVector& OutTargetHalfExtentCM) const
+	AActor*& OutTarget) const
 {
 	OutSatellite = nullptr;
 	OutTarget = nullptr;
-	OutTargetHalfExtentCM = FVector::ZeroVector;
+	FVector TargetHalfExtentCM = FVector::ZeroVector;
 	if (Preview.SlingshotTier != EABTSSlingshotTier::Reinforced
-		|| !Preview.bHasSatelliteEncounter
+		|| !AABTSM101LandingPreviewCamera::
+			IsSatelliteLandingTerminal(Preview)
 		|| Preview.WorldPoints.Num() < 2
 		|| !SlingshotSystem.IsValid()
 		|| !SlingshotSystem->CopySatellitePracticeTarget(
 			OutSatellite,
 			OutTarget,
-			OutTargetHalfExtentCM)
+			TargetHalfExtentCM)
 		|| OutSatellite == nullptr
 		|| OutTarget == nullptr)
 	{
 		return false;
 	}
-	int32 ClosestSegmentStartIndex = INDEX_NONE;
-	FVector ClosestPoint;
-	FVector Tangent;
-	float ClosestDistanceCM = BIG_NUMBER;
-	if (!AABTSM101LandingPreviewCamera::FindClosestTrajectorySegmentToPoint(
-		Preview,
-		OutTarget->GetActorLocation(),
-		ClosestSegmentStartIndex,
-		ClosestPoint,
-		Tangent,
-		ClosestDistanceCM))
-	{
-		return false;
-	}
-	const float ActivationDistanceCM =
+	const float SatelliteRadiusCM =
 		FMath::Max(
 			1.0f,
-			OutSatellite->GetPlanetRadiusCM())
-		* FMath::Clamp(
-			Settings.SatelliteE5PreviewPathProximityRadiusMultiplier,
-			1.0f,
-			8.0f);
-	return ClosestDistanceCM <= ActivationDistanceCM;
+			OutSatellite->GetPlanetRadiusCM());
+	const float CenterToleranceCM =
+		FMath::Max(1.0f, SatelliteRadiusCM * 0.01f);
+	return Preview.bHasSatelliteEncounter
+		&& FVector::Distance(
+			Preview.EncounterSatelliteCenterWorld,
+			OutSatellite->GetPlanetCenterWorld())
+			<= CenterToleranceCM
+		&& FMath::IsNearlyEqual(
+			Preview.EncounterSatelliteRadiusCM,
+			SatelliteRadiusCM,
+			CenterToleranceCM);
 }
 
 bool AABTSM10ScoutMapSystem::ResolveDependencies()
