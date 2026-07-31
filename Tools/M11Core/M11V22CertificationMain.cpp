@@ -47,6 +47,9 @@ namespace
 		double MaxPitch = std::numeric_limits<double>::quiet_NaN();
 		double MinPower = std::numeric_limits<double>::quiet_NaN();
 		double MaxPower = std::numeric_limits<double>::quiet_NaN();
+		double TargetOffsetXCM = 0.0;
+		double TargetOffsetYCM = 0.0;
+		double TargetOffsetZCM = 0.0;
 		std::uint32_t CheckpointEvery = 256;
 		bool Resume = false;
 	};
@@ -204,6 +207,18 @@ namespace
 			{
 				Out.MaxPower = Number;
 			}
+			else if (Key == "--target-offset-x" && ParseDouble(Value, Number))
+			{
+				Out.TargetOffsetXCM = Number;
+			}
+			else if (Key == "--target-offset-y" && ParseDouble(Value, Number))
+			{
+				Out.TargetOffsetYCM = Number;
+			}
+			else if (Key == "--target-offset-z" && ParseDouble(Value, Number))
+			{
+				Out.TargetOffsetZCM = Number;
+			}
 			else
 			{
 				Failure = "InvalidOption:" + Key;
@@ -224,7 +239,29 @@ namespace
 			Failure = "MergeRequiresAbsoluteInputRoot";
 			return false;
 		}
+		const double TargetOffsetSquared =
+			Out.TargetOffsetXCM * Out.TargetOffsetXCM
+			+ Out.TargetOffsetYCM * Out.TargetOffsetYCM
+			+ Out.TargetOffsetZCM * Out.TargetOffsetZCM;
+		if (!std::isfinite(TargetOffsetSquared)
+			|| TargetOffsetSquared > 10000.0 * 10000.0)
+		{
+			Failure = "TargetOffsetOutsideDiagnosticLimit";
+			return false;
+		}
 		return true;
+	}
+
+	void ApplyTargetOffset(
+		const Options& OptionsValue,
+		CandidateLayout& Layout)
+	{
+		const ABTS::M11Core::Vec3d Offset{
+			OptionsValue.TargetOffsetXCM,
+			OptionsValue.TargetOffsetYCM,
+			OptionsValue.TargetOffsetZCM};
+		Layout.Scenario.Target.CenterCM += Offset;
+		Layout.Scenario.Target.GeometricContactCenterCM += Offset;
 	}
 
 	bool MakeGrid(
@@ -336,6 +373,7 @@ namespace
 		const fs::path& Path,
 		const Options& OptionsValue,
 		const FrozenCandidateIdentity& Identity,
+		const std::uint64_t VariantSourceHash,
 		const Grid& GridValue,
 		const std::vector<Sample>& Samples,
 		const bool Complete,
@@ -363,6 +401,11 @@ namespace
 			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
 			<< "  \"candidateSourceHash\":\""
 			<< Hex64(Identity.CandidateSourceHash) << "\",\n"
+			<< "  \"variantSourceHash\":\""
+			<< Hex64(VariantSourceHash) << "\",\n"
+			<< "  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
+			<< ',' << OptionsValue.TargetOffsetYCM << ','
+			<< OptionsValue.TargetOffsetZCM << "],\n"
 			<< "  \"shardIndex\":" << OptionsValue.ShardIndex << ",\n"
 			<< "  \"shardCount\":" << OptionsValue.ShardCount << ",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
@@ -451,12 +494,18 @@ namespace
 		return Hash;
 	}
 
-	std::array<std::uint64_t, 4> CountComponents(
+	struct ComponentSummary
+	{
+		std::array<std::uint64_t, 4> Count{};
+		std::array<std::uint64_t, 4> LargestSize{};
+	};
+
+	ComponentSummary CountComponents(
 		const Grid& GridValue,
 		const std::vector<Sample>& Samples)
 	{
-		std::array<std::uint64_t, 4> Counts{};
-		for (std::size_t Level = 0; Level < Counts.size(); ++Level)
+		ComponentSummary Summary;
+		for (std::size_t Level = 0; Level < Summary.Count.size(); ++Level)
 		{
 			std::vector<std::uint8_t> Visited(Samples.size(), 0);
 			for (std::size_t Start = 0; Start < Samples.size(); ++Start)
@@ -466,13 +515,15 @@ namespace
 				{
 					continue;
 				}
-				++Counts[Level];
+				++Summary.Count[Level];
+				std::uint64_t ComponentSize = 0;
 				std::vector<std::uint64_t> Open{Samples[Start].GlobalIndex};
 				Visited[Start] = 1;
 				while (!Open.empty())
 				{
 					const std::uint64_t Index = Open.back();
 					Open.pop_back();
+					++ComponentSize;
 					Sample Decoded;
 					DecodeIndex(GridValue, Index, Decoded);
 					const std::array<std::int32_t, 6> DY{-1, 1, 0, 0, 0, 0};
@@ -504,9 +555,11 @@ namespace
 						}
 					}
 				}
+				Summary.LargestSize[Level] = std::max(
+					Summary.LargestSize[Level], ComponentSize);
 			}
 		}
-		return Counts;
+		return Summary;
 	}
 
 	int RunMerge(const Options& OptionsValue)
@@ -519,6 +572,17 @@ namespace
 			std::cerr << "CandidateRankUnavailable\n";
 			return 1;
 		}
+		const CandidateSearchContract Contract =
+			CandidateSearchContract::MakeV2_1();
+		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
+			!= Identity.CandidateSourceHash)
+		{
+			std::cerr << "CandidateSourceIdentityMismatch\n";
+			return 1;
+		}
+		ApplyTargetOffset(OptionsValue, Layout);
+		const std::uint64_t VariantSourceHash =
+			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
 		Grid GridValue;
 		std::string Failure;
 		if (!MakeGrid(Layout, OptionsValue, GridValue, Failure))
@@ -593,7 +657,8 @@ namespace
 				}
 			}
 		}
-		const auto Components = CountComponents(GridValue, Samples);
+		const ComponentSummary Components =
+			CountComponents(GridValue, Samples);
 		std::error_code Error;
 		fs::create_directories(OptionsValue.Output, Error);
 		if (Error)
@@ -613,8 +678,40 @@ namespace
 				<< Value.CompletedAssistCount << ' ' << Value.TargetContactCount
 				<< ' ' << Hex64(Value.ResultHash) << '\n';
 		}
-		const bool Passed = PrefixCounts[3] > 0
-			&& Components[3] == 1 && NestingViolations == 0;
+		bool NominalF4 = false;
+		const auto ExactIndex = [](const double Value, const double Minimum,
+			const double Step, const std::int32_t Count, std::int32_t& OutIndex)
+		{
+			const double Coordinate = (Value - Minimum) / Step;
+			const double Rounded = std::round(Coordinate);
+			if (std::abs(Coordinate - Rounded) > 1.0e-9
+				|| Rounded < 0.0 || Rounded >= Count)
+			{
+				return false;
+			}
+			OutIndex = static_cast<std::int32_t>(Rounded);
+			return true;
+		};
+		std::int32_t NominalYaw = 0;
+		std::int32_t NominalPitch = 0;
+		std::int32_t NominalPower = 0;
+		if (ExactIndex(Layout.NominalInput.YawDegrees, GridValue.MinYaw,
+				GridValue.YawStep, GridValue.YawCount, NominalYaw)
+			&& ExactIndex(Layout.NominalInput.PitchDegrees, GridValue.MinPitch,
+				GridValue.PitchStep, GridValue.PitchCount, NominalPitch)
+			&& ExactIndex(Layout.NominalInput.Power, GridValue.MinPower,
+				GridValue.PowerStep, GridValue.PowerCount, NominalPower))
+		{
+			const std::uint64_t NominalIndex =
+				(static_cast<std::uint64_t>(NominalYaw)
+					* GridValue.PitchCount
+					+ static_cast<std::uint64_t>(NominalPitch))
+					* GridValue.PowerCount
+				+ static_cast<std::uint64_t>(NominalPower);
+			NominalF4 = (Samples[NominalIndex].PrefixMask & 8u) != 0;
+		}
+		const bool Passed = PrefixCounts[3] > 0 && NominalF4
+			&& Components.Count[3] == 1 && NestingViolations == 0;
 		std::ofstream Summary(
 			OptionsValue.Output / "summary.json",
 			std::ios::binary | std::ios::trunc);
@@ -623,7 +720,11 @@ namespace
 			<< "  \"passed\":" << (Passed ? "true" : "false") << ",\n"
 			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
 			<< "  \"candidateSourceHash\":\"" << Hex64(Identity.CandidateSourceHash)
-			<< "\",\n  \"aggregateSampleHash\":\""
+			<< "\",\n  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
+			<< "\",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
+			<< ',' << OptionsValue.TargetOffsetYCM << ','
+			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"aggregateSampleHash\":\""
 			<< Hex64(AggregateSampleHash(Samples)) << "\",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
 			<< ",\"pitchCount\":" << GridValue.PitchCount
@@ -641,8 +742,14 @@ namespace
 			<< "  \"prefixCounts\":[" << PrefixCounts[0] << ','
 			<< PrefixCounts[1] << ',' << PrefixCounts[2] << ','
 			<< PrefixCounts[3] << "],\n  \"componentCounts\":["
-			<< Components[0] << ',' << Components[1] << ','
-			<< Components[2] << ',' << Components[3] << "],\n"
+			<< Components.Count[0] << ',' << Components.Count[1] << ','
+			<< Components.Count[2] << ',' << Components.Count[3] << "],\n"
+			<< "  \"largestComponentSizes\":["
+			<< Components.LargestSize[0] << ','
+			<< Components.LargestSize[1] << ','
+			<< Components.LargestSize[2] << ','
+			<< Components.LargestSize[3] << "],\n"
+			<< "  \"nominalF4\":" << (NominalF4 ? "true" : "false") << ",\n"
 			<< "  \"minimumPowerIndices\":[" << MinimumPowerIndex[0] << ','
 			<< MinimumPowerIndex[1] << ',' << MinimumPowerIndex[2] << ','
 			<< MinimumPowerIndex[3] << "],\n  \"maximumPowerIndices\":["
@@ -652,8 +759,9 @@ namespace
 		std::cout << "[ABTS][M11-B-v2.2][Merge] Passed=" << Passed
 			<< " Prefix=" << PrefixCounts[0] << ',' << PrefixCounts[1] << ','
 			<< PrefixCounts[2] << ',' << PrefixCounts[3] << " Components="
-			<< Components[0] << ',' << Components[1] << ',' << Components[2]
-			<< ',' << Components[3] << '\n';
+			<< Components.Count[0] << ',' << Components.Count[1] << ','
+			<< Components.Count[2] << ',' << Components.Count[3]
+			<< " NominalF4=" << NominalF4 << '\n';
 		return Passed ? 0 : 2;
 	}
 
@@ -677,6 +785,9 @@ namespace
 			std::cerr << "CandidateSourceIdentityMismatch\n";
 			return 1;
 		}
+		ApplyTargetOffset(OptionsValue, Layout);
+		const std::uint64_t VariantSourceHash =
+			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
 		Grid GridValue;
 		std::string Failure;
 		if (!MakeGrid(Layout, OptionsValue, GridValue, Failure))
@@ -813,6 +924,7 @@ namespace
 				OptionsValue.Output / "summary.json",
 				OptionsValue,
 				Identity,
+				VariantSourceHash,
 				GridValue,
 				All,
 				NextGlobal >= Total,

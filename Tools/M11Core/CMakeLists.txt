@@ -164,6 +164,7 @@ set(ABTS_M11_SEARCH_TOOL_IDENTITY_FILES
 	"${CMAKE_CURRENT_LIST_DIR}/M11V22CertificationMain.cpp"
 	"${CMAKE_CURRENT_LIST_DIR}/GenerateFrozenCandidateCatalogData.mjs"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_target_offset_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakePresets.json")
 
