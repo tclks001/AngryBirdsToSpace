@@ -323,6 +323,7 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 	const AABTSM7BuildingMaterialSystem* MaterialProfileSource)
 {
 	LastDAG5AResult = FABTSM73DAG5AResult();
+	LastDAG5BResult = FABTSM73DAG5BResult();
 	TArray<FABTSM7MaterialProfile> MaterialProfiles;
 	if (MaterialProfileSource != nullptr) MaterialProfileSource->CopyMaterialProfiles(MaterialProfiles);
 	else MaterialProfiles = FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
@@ -353,33 +354,71 @@ bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 		ResolvedDAGSettings.MaxEstimatedBrickCount = FMath::Min(
 			ResolvedDAGSettings.MaxEstimatedBrickCount, GenerationSettings.MaxBrickCount);
 		FABTSM73DAGBuildingPipeline Pipeline;
-		const bool bBuilt = DAG5ASettings.bEnableFeasibilitySearch
-			? Pipeline.BuildWithFeasibilitySearch(
-				DAG5ASettings,
-				ResolvedDAGSettings,
-				DAGLayoutSettings,
-				GenerationSettings,
-				DAGFailureFrontierSettings,
-				DAGFailurePatternSettings,
-				DAGFailurePlayabilitySettings,
-				DifficultySettings,
-				MaterialProfiles,
-				LocalAttackDirection,
-				LastDAG5AResult,
-				OutData,
-				OutError)
-			: Pipeline.BuildWithFailurePattern(
-				ResolvedDAGSettings,
-				DAGLayoutSettings,
-				GenerationSettings,
-				DAGFailureFrontierSettings,
-				DAGFailurePatternSettings,
-				DAGFailurePlayabilitySettings,
-				DifficultySettings,
-				MaterialProfiles,
-				LocalAttackDirection,
-				OutData,
-				OutError);
+		bool bBuilt = false;
+		if (DAG5BSettings.bEnableSemanticEnvelope)
+		{
+			bBuilt = DAG5ASettings.bEnableFeasibilitySearch
+				? Pipeline.BuildWithFeasibilitySearch(
+					DAG5ASettings,
+					DAG5BSettings,
+					ResolvedDAGSettings,
+					DAGLayoutSettings,
+					GenerationSettings,
+					DAGFailureFrontierSettings,
+					DAGFailurePatternSettings,
+					DAGFailurePlayabilitySettings,
+					DifficultySettings,
+					MaterialProfiles,
+					LocalAttackDirection,
+					LastDAG5AResult,
+					LastDAG5BResult,
+					OutData,
+					OutError)
+				: Pipeline.BuildWithFailurePattern(
+					DAG5BSettings,
+					ResolvedDAGSettings,
+					DAGLayoutSettings,
+					GenerationSettings,
+					DAGFailureFrontierSettings,
+					DAGFailurePatternSettings,
+					DAGFailurePlayabilitySettings,
+					DifficultySettings,
+					MaterialProfiles,
+					LocalAttackDirection,
+					LastDAG5BResult,
+					OutData,
+					OutError);
+		}
+		else
+		{
+			bBuilt = DAG5ASettings.bEnableFeasibilitySearch
+				? Pipeline.BuildWithFeasibilitySearch(
+					DAG5ASettings,
+					ResolvedDAGSettings,
+					DAGLayoutSettings,
+					GenerationSettings,
+					DAGFailureFrontierSettings,
+					DAGFailurePatternSettings,
+					DAGFailurePlayabilitySettings,
+					DifficultySettings,
+					MaterialProfiles,
+					LocalAttackDirection,
+					LastDAG5AResult,
+					OutData,
+					OutError)
+				: Pipeline.BuildWithFailurePattern(
+					ResolvedDAGSettings,
+					DAGLayoutSettings,
+					GenerationSettings,
+					DAGFailureFrontierSettings,
+					DAGFailurePatternSettings,
+					DAGFailurePlayabilitySettings,
+					DifficultySettings,
+					MaterialProfiles,
+					LocalAttackDirection,
+					OutData,
+					OutError);
+		}
 		if (!bBuilt)
 		{
 			return false;
@@ -497,6 +536,17 @@ void AABTSM73StableBuildingActor::FillGenerationSummary(
 		LastDAG5AResult.EffectiveCompiledBrickLimit;
 	GenerationSummary.DAG5ASearchHash =
 		LastDAG5AResult.SearchHash;
+	GenerationSummary.bDAG5BEnabled = LastDAG5BResult.bEnabled;
+	GenerationSummary.bDAG5BAccepted = LastDAG5BResult.bAccepted;
+	GenerationSummary.DAG5BShapeFamily =
+		static_cast<int32>(LastDAG5BResult.ShapeFamily);
+	GenerationSummary.DAG5BFeatureMask =
+		static_cast<int64>(
+			static_cast<uint32>(LastDAG5BResult.FeatureMask));
+	GenerationSummary.DAG5BEnvelopeHash =
+		static_cast<int64>(LastDAG5BResult.EnvelopeHash);
+	GenerationSummary.DAG5BAuditHash =
+		static_cast<int64>(LastDAG5BResult.Audit.AuditHash);
 	GenerationSummary.FoundationFootCount = Data.FoundationFeet.Num();
 	GenerationSummary.FootprintTerrainDeltaCM = Data.TerrainDeltaCM;
 	GenerationSummary.CurvatureDropCM = Data.CurvatureDropCM;
@@ -1004,6 +1054,20 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 				LastDAG5AResult.SearchHash,
 				*LastDAG5AResult.RejectReason);
 		}
+		if (LastDAG5BResult.bEnabled
+			&& !LastDAG5BResult.bAccepted)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7.3-DAG5B][Reject] Actor=%s Family=%d Shape=%u WFC=%u Envelope=%u Operations=%d Backtracks=%d Reason=%s"),
+				*GetName(),
+				static_cast<int32>(LastDAG5BResult.ShapeFamily),
+				LastDAG5BResult.ShapeHash,
+				LastDAG5BResult.WFCHash,
+				LastDAG5BResult.EnvelopeHash,
+				LastDAG5BResult.PropagationOperationCount,
+				LastDAG5BResult.BacktrackStepCount,
+				*LastDAG5BResult.RejectReason);
+		}
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M7.3-A][Reject] Actor=%s Reason=%s"), *GetName(), *Error);
 		return;
 	}
@@ -1134,6 +1198,24 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 			LastDAG5AResult.CompiledBrickCount,
 			LastDAG5AResult.EffectiveCompiledBrickLimit,
 			LastDAG5AResult.SearchHash);
+	}
+	if (LastDAG5BResult.bEnabled)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-DAG5B][Accepted] Actor=%s Family=%d Features=%u Shape=%u WFC=%u Envelope=%u Audit=%u Operations=%d Backtracks=%d NonAnchors=%d MustOccupy=%d MustVoid=%d Result=%u"),
+			*GetName(),
+			static_cast<int32>(LastDAG5BResult.ShapeFamily),
+			static_cast<uint32>(LastDAG5BResult.FeatureMask),
+			LastDAG5BResult.ShapeHash,
+			LastDAG5BResult.WFCHash,
+			LastDAG5BResult.EnvelopeHash,
+			LastDAG5BResult.Audit.AuditHash,
+			LastDAG5BResult.PropagationOperationCount,
+			LastDAG5BResult.BacktrackStepCount,
+			LastDAG5BResult.CollapsedNonAnchorCellCount,
+			LastDAG5BResult.Audit.MustOccupyCount,
+			LastDAG5BResult.Audit.MustVoidCount,
+			LastDAG5BResult.ResultHash);
 	}
 	if (Data.DAGFailureFrontierAnalysis.Candidates.IsValidIndex(
 		Data.DAGFailureFrontierAnalysis.SelectedCandidateIndex))

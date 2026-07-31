@@ -196,12 +196,15 @@ namespace
 		const FABTSM73DAGGenerationSettings& DAGSettings,
 		const FABTSM73DAGLayoutSettings& LayoutSettings,
 		const FABTSM73GenerationSettings& BuildingSettings,
+		const bool bRunLegacyDAGPreflight,
 		FABTSM73DAG5AResult& OutResult,
 		FString& OutError)
 	{
 		const bool bFiniteGeometryInputs =
-			FMath::IsFinite(DAGSettings.SeriesRuleWeight)
-			&& FMath::IsFinite(DAGSettings.ParallelRuleWeight)
+			(!bRunLegacyDAGPreflight
+				|| (FMath::IsFinite(DAGSettings.SeriesRuleWeight)
+					&& FMath::IsFinite(
+						DAGSettings.ParallelRuleWeight)))
 			&& FMath::IsFinite(LayoutSettings.TargetWidthCM)
 			&& FMath::IsFinite(LayoutSettings.TargetDepthCM)
 			&& FMath::IsFinite(LayoutSettings.TargetHeightCM)
@@ -237,21 +240,23 @@ namespace
 			return false;
 		}
 		if (DAGSettings.GeneratorVersion < 1
-			|| DAGSettings.MinExpansionDepth < 0
-			|| DAGSettings.MaxExpansionDepth < DAGSettings.MinExpansionDepth
-			|| DAGSettings.MaxExpansionDepth > 6
-			|| DAGSettings.ExpansionStepBudget < 0
-			|| DAGSettings.ExpansionStepBudget > 32
-			|| DAGSettings.MaxAbstractNodeCount < 1
-			|| DAGSettings.MaxAbstractNodeCount > 256
 			|| DAGSettings.MaxEstimatedBrickCount < 1
 			|| DAGSettings.MaxEstimatedBrickCount > 256
 			|| DAGSettings.ReservedWeaknessBrickCount < 0
 			|| DAGSettings.ReservedWeaknessBrickCount > 64
-			|| DAGSettings.SeriesRuleWeight < 0.0f
-			|| DAGSettings.SeriesRuleWeight > 1.0f
-			|| DAGSettings.ParallelRuleWeight < 0.0f
-			|| DAGSettings.ParallelRuleWeight > 1.0f
+			|| (bRunLegacyDAGPreflight
+				&& (DAGSettings.MinExpansionDepth < 0
+					|| DAGSettings.MaxExpansionDepth
+						< DAGSettings.MinExpansionDepth
+					|| DAGSettings.MaxExpansionDepth > 6
+					|| DAGSettings.ExpansionStepBudget < 0
+					|| DAGSettings.ExpansionStepBudget > 32
+					|| DAGSettings.MaxAbstractNodeCount < 1
+					|| DAGSettings.MaxAbstractNodeCount > 256
+					|| DAGSettings.SeriesRuleWeight < 0.0f
+					|| DAGSettings.SeriesRuleWeight > 1.0f
+					|| DAGSettings.ParallelRuleWeight < 0.0f
+					|| DAGSettings.ParallelRuleWeight > 1.0f))
 			|| BuildingSettings.MaxBrickCount < 1
 			|| BuildingSettings.MaxBrickCount > 100)
 		{
@@ -271,6 +276,22 @@ namespace
 		}
 		if (!SearchSettings.bEnableCapacityPreflight)
 		{
+			return true;
+		}
+		if (!bRunLegacyDAGPreflight)
+		{
+			if (LayoutSettings.TargetWidthCM
+					< LayoutSettings.MinAdaptivePlateExtentCM * 2.0f
+				|| LayoutSettings.TargetDepthCM
+					< LayoutSettings.MinAdaptivePlateExtentCM
+				|| LayoutSettings.TargetHeightCM
+					<= LayoutSettings.PlateThicknessCM
+				|| LayoutSettings.PreferredLogicalSupportsPerLoad < 1
+				|| LayoutSettings.MaxLogicalSupportsPerLoad < 1)
+			{
+				OutError = TEXT("DAG5BSemanticCapacityInvalid");
+				return false;
+			}
 			return true;
 		}
 
@@ -370,6 +391,8 @@ namespace
 			|| RejectCode == TEXT("RuleWeightNegative")
 			|| RejectCode == TEXT("NoEnabledExpansionRule")
 			|| RejectCode == TEXT("DAGLayoutSettingsInvalid")
+			|| RejectCode == TEXT("DAG5BSettingsInvalid")
+			|| RejectCode == TEXT("DAG5BShapeFamilyInvalid")
 			|| RejectCode == TEXT("DAG3CRequiresAnalysisRewriteAndGeneralizedCut")
 			|| RejectCode == TEXT("DAG3CAttackDirectionInvalid")
 			|| RejectCode == TEXT("DAG3BRewriteAttemptBudgetInvalid");
@@ -483,7 +506,8 @@ bool FABTSM73DAG5CandidateSearch::Build(
 	FABTSM73DAGGenerationSettings& OutSelectedDAGSettings,
 	FABTSM73StructureData& OutData,
 	FABTSM73DAG5AResult& OutResult,
-	FString& OutError) const
+	FString& OutError,
+	const bool bRunLegacyDAGPreflight) const
 {
 	OutSelectedDAGSettings = BaseDAGSettings;
 	OutData = FABTSM73StructureData();
@@ -510,6 +534,7 @@ bool FABTSM73DAG5CandidateSearch::Build(
 		BaseDAGSettings,
 		LayoutSettings,
 		BuildingSettings,
+		bRunLegacyDAGPreflight,
 		OutResult,
 		OutError))
 	{
@@ -546,42 +571,48 @@ bool FABTSM73DAG5CandidateSearch::Build(
 		Attempt.CandidateSeed = CandidateSettings.BuildingSeed;
 		++OutResult.AttemptCount;
 
-		FABTSM73DAGGrammarExpander Expander;
-		FABTSM73DAGGenerationResult Graph;
 		FString CandidateError;
-		if (!Expander.Generate(CandidateSettings, Graph, CandidateError))
+		if (bRunLegacyDAGPreflight)
 		{
-			RejectAttempt(
-				Attempt,
-				EABTSM73DAG5ARejectStage::Grammar,
-				CandidateError);
-			LastRejectCode = Attempt.RejectCode;
-			if (IsFatalCandidateError(Attempt.RejectCode))
-			{
-				break;
-			}
-			continue;
-		}
-		Attempt.TopologyHash = static_cast<int64>(
-			Graph.CanonicalTopologyHash);
-		if (SearchSettings.bEnableCapacityPreflight
-			&& !CheckScopeCapacityRecursive(
-				Graph.RootExpressionNodeId,
-				FVector(
-					LayoutSettings.TargetWidthCM,
-					LayoutSettings.TargetDepthCM,
-					LayoutSettings.TargetHeightCM),
+			FABTSM73DAGGrammarExpander Expander;
+			FABTSM73DAGGenerationResult Graph;
+			if (!Expander.Generate(
+				CandidateSettings,
 				Graph,
-				LayoutSettings,
 				CandidateError))
-		{
-			RejectAttempt(
-				Attempt,
-				EABTSM73DAG5ARejectStage::ScopeCapacity,
-				CandidateError);
-			++OutResult.ScopePreflightRejectCount;
-			LastRejectCode = Attempt.RejectCode;
-			continue;
+			{
+				RejectAttempt(
+					Attempt,
+					EABTSM73DAG5ARejectStage::Grammar,
+					CandidateError);
+				LastRejectCode = Attempt.RejectCode;
+				if (IsFatalCandidateError(Attempt.RejectCode))
+				{
+					break;
+				}
+				continue;
+			}
+			Attempt.TopologyHash = static_cast<int64>(
+				Graph.CanonicalTopologyHash);
+			if (SearchSettings.bEnableCapacityPreflight
+				&& !CheckScopeCapacityRecursive(
+					Graph.RootExpressionNodeId,
+					FVector(
+						LayoutSettings.TargetWidthCM,
+						LayoutSettings.TargetDepthCM,
+						LayoutSettings.TargetHeightCM),
+					Graph,
+					LayoutSettings,
+					CandidateError))
+			{
+				RejectAttempt(
+					Attempt,
+					EABTSM73DAG5ARejectStage::ScopeCapacity,
+					CandidateError);
+				++OutResult.ScopePreflightRejectCount;
+				LastRejectCode = Attempt.RejectCode;
+				continue;
+			}
 		}
 
 		FABTSM73StructureData CandidateData;
@@ -602,6 +633,11 @@ bool FABTSM73DAG5CandidateSearch::Build(
 			continue;
 		}
 		++OutResult.CompiledCandidateCount;
+		if (!bRunLegacyDAGPreflight)
+		{
+			Attempt.TopologyHash = static_cast<int64>(
+				CandidateData.DAGTopologyHash);
+		}
 		Attempt.CompiledBrickCount = CandidateData.Bricks.Num();
 		if (Attempt.CompiledBrickCount
 			> OutResult.EffectiveCompiledBrickLimit)

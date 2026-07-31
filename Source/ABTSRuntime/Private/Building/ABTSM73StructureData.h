@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Building/ABTSM73BuildingTypes.h"
+#include "Building/ABTSM73DAG5Types.h"
 #include "Building/ABTSM73DAGFailureFrontierTypes.h"
 
 enum class EABTSM73BrickSemanticRole : uint8
@@ -116,6 +117,29 @@ struct FABTSM73DAGPhysicalSupportMapping
 	TArray<EABTSM73DAGRealizedColumnRole> ColumnRoles;
 };
 
+/** Auditable lowering from one WFC semantic support region to physical bricks. */
+enum class EABTSM73DAG5BSemanticMappingKind : uint8
+{
+	SupportPort,
+	ShapeMacro
+};
+
+struct FABTSM73DAG5BSemanticBrickMapping
+{
+	EABTSM73DAG5BSemanticMappingKind Kind =
+		EABTSM73DAG5BSemanticMappingKind::SupportPort;
+	int32 SupportMacroNodeId = INDEX_NONE;
+	int32 LoadMacroNodeId = INDEX_NONE;
+	int32 TargetMacroNodeId = INDEX_NONE;
+	EABTSM73DAG5BSemanticCell SourceSemantic =
+		EABTSM73DAG5BSemanticCell::Void;
+	FIntVector SourceCellMin = FIntVector::ZeroValue;
+	FIntVector SourceCellMax = FIntVector::ZeroValue;
+	uint32 SourceCellHash = 0;
+	TArray<int32> BrickNodeIds;
+	uint32 MappingHash = 0;
+};
+
 struct FABTSM73GroundSample
 {
 	FVector2D LocalXY = FVector2D::ZeroVector;
@@ -139,6 +163,7 @@ struct FABTSM73StructureData
 	TArray<FABTSM73BrickNode> Bricks;
 	TArray<FABTSM73SupportEdge> SupportEdges;
 	TArray<FABTSM73DAGPhysicalSupportMapping> DAGPhysicalSupportMappings;
+	TArray<FABTSM73DAG5BSemanticBrickMapping> DAG5BSemanticBrickMappings;
 	TArray<int32> GroundNodeIds;
 	TArray<FABTSM73StructuralWeaknessIntent> StructuralWeaknessIntents;
 	TArray<FABTSM73FailureProbeResult> FailureProbeResults;
@@ -166,6 +191,8 @@ struct FABTSM73StructureData
 	int32 DAGUnexpectedBypassCount = 0;
 	float DAGMinSupportContactAreaRatio = 0.0f;
 	uint32 DAGTopologyHash = 0;
+	FABTSM73SemanticEnvelope DAG5BSemanticEnvelope;
+	FABTSM73DAG5BResult DAG5BResult;
 	FABTSM73DAGFailureFrontierAnalysis DAGFailureFrontierAnalysis;
 	FABTSM73DAGFailurePatternResult DAGFailurePatternResult;
 	FABTSM73DAGFailurePlayabilityResult DAGFailurePlayabilityResult;

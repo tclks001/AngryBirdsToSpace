@@ -443,6 +443,24 @@ struct FABTSM73GenerationSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5A")
 	int64 DAG5ASearchHash = 0;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5B")
+	bool bDAG5BEnabled = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5B")
+	bool bDAG5BAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5B")
+	int32 DAG5BShapeFamily = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5B")
+	int64 DAG5BFeatureMask = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5B")
+	int64 DAG5BEnvelopeHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DAG-5B")
+	int64 DAG5BAuditHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 FoundationFootCount = 0;
 

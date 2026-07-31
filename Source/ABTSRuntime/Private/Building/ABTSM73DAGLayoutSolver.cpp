@@ -3,6 +3,8 @@
 #include "Building/ABTSM73DAGLayoutSolver.h"
 
 #include "Building/ABTSM73DAGLoadSupportSolver.h"
+#include "Building/ABTSM73DAG5BSemanticEnvelope.h"
+#include "Building/ABTSM73DAG5Types.h"
 #include "Building/ABTSM73DAGSupportGeometry.h"
 #include "Building/ABTSM73DAGTypes.h"
 
@@ -233,6 +235,195 @@ bool FABTSM73DAGLayoutSolver::Solve(
 	return true;
 }
 
+bool FABTSM73DAGLayoutSolver::SolveSemantic(
+	const FABTSM73DAGGenerationResult& Graph,
+	const FABTSM73DAGLayoutSettings& Settings,
+	const FABTSM73DAGSpatialLayout& InitialLayout,
+	const FABTSM73SemanticEnvelope& Envelope,
+	FABTSM73DAGSpatialLayout& OutLayout,
+	FString& OutError,
+	const FABTSM73DAGFailureRewriteIntent* RewriteIntent) const
+{
+	OutLayout = FABTSM73DAGSpatialLayout();
+	OutError.Reset();
+	if (!Graph.bAccepted
+		|| !Envelope.bAccepted
+		|| Graph.MacroNodes.IsEmpty()
+		|| Graph.SupportEdges.IsEmpty()
+		|| Graph.GroundNodeIds.IsEmpty()
+		|| Graph.TopLoadNodeIds.IsEmpty())
+	{
+		OutError = TEXT("DAG5BSemanticGraphNotAccepted");
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
+	FABTSM73DAG5BSemanticEnvelopeBuilder ContractBuilder;
+	if (!ContractBuilder.ValidateEnvelopeIdentity(
+		Envelope,
+		OutError))
+	{
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
+	if (InitialLayout.MacroLayouts.Num() != Graph.MacroNodes.Num()
+		|| Settings.TargetWidthCM
+			< Settings.MinAdaptivePlateExtentCM
+		|| Settings.TargetDepthCM
+			< Settings.MinAdaptivePlateExtentCM
+		|| Settings.TargetHeightCM <= Settings.PlateThicknessCM
+		|| Settings.PreferredLogicalSupportsPerLoad < 1
+		|| Settings.MaxLogicalSupportsPerLoad < 1)
+	{
+		OutError = TEXT("DAG5BSemanticLayoutSettingsInvalid");
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
+
+	TSet<int32> MacroIds;
+	for (const FABTSM73DAGMacroNode& Macro : Graph.MacroNodes)
+	{
+		if (Macro.NodeId == INDEX_NONE || MacroIds.Contains(Macro.NodeId))
+		{
+			OutError = TEXT("DAG5BSemanticMacroIdentityInvalid");
+			OutLayout.RejectReason = OutError;
+			return false;
+		}
+		MacroIds.Add(Macro.NodeId);
+	}
+	OutLayout.MacroLayouts = InitialLayout.MacroLayouts;
+	for (FABTSM73DAGMacroLayout& MacroLayout : OutLayout.MacroLayouts)
+	{
+		const FABTSM73DAG5BMacroConstraint* Constraint = nullptr;
+		int32 ConstraintCount = 0;
+		for (const FABTSM73DAG5BMacroConstraint& Candidate :
+			Envelope.MacroConstraints)
+		{
+			if (Candidate.MacroNodeId == MacroLayout.MacroNodeId)
+			{
+				Constraint = &Candidate;
+				++ConstraintCount;
+			}
+		}
+		if (!MacroIds.Contains(MacroLayout.MacroNodeId)
+			|| ConstraintCount != 1
+			|| Constraint == nullptr
+			|| !MacroLayout.AllowedScope.IsValid
+			|| MacroLayout.PlateDimensionsCM.X
+				< Settings.MinAdaptivePlateExtentCM
+			|| MacroLayout.PlateDimensionsCM.Y
+				< Settings.MinAdaptivePlateExtentCM
+			|| MacroLayout.PlateDimensionsCM.Z <= 0.0f)
+		{
+			OutError = FString::Printf(
+				TEXT("DAG5BSemanticMacroLayoutInvalid:%d"),
+				MacroLayout.MacroNodeId);
+			OutLayout.RejectReason = OutError;
+			return false;
+		}
+		const FVector2D ConstraintDimensions(
+			Constraint->FootprintScale.X * Settings.TargetWidthCM,
+			Constraint->FootprintScale.Y * Settings.TargetDepthCM);
+		if (!FVector2D(
+				MacroLayout.PlateCenter.X,
+				MacroLayout.PlateCenter.Y).Equals(
+					Constraint->OffsetCM,
+					KINDA_SMALL_NUMBER)
+			|| !FVector2D(
+				MacroLayout.PlateDimensionsCM.X,
+				MacroLayout.PlateDimensionsCM.Y).Equals(
+					ConstraintDimensions,
+					KINDA_SMALL_NUMBER))
+		{
+			OutError = FString::Printf(
+				TEXT("DAG5BSemanticMacroConstraintDrift:%d"),
+				MacroLayout.MacroNodeId);
+			OutLayout.RejectReason = OutError;
+			return false;
+		}
+		// SemanticEnvelope is the stable authority. InitialLayout only carries
+		// plate thickness, ground identity and the construction scope.
+		MacroLayout.PlateCenter.X = Constraint->OffsetCM.X;
+		MacroLayout.PlateCenter.Y = Constraint->OffsetCM.Y;
+		MacroLayout.PlateDimensionsCM.X = ConstraintDimensions.X;
+		MacroLayout.PlateDimensionsCM.Y = ConstraintDimensions.Y;
+		MacroLayout.StructuralLevel = INDEX_NONE;
+	}
+	if (Envelope.MacroConstraints.Num() != OutLayout.MacroLayouts.Num()
+		|| Envelope.ShapeScopes.Num() != OutLayout.MacroLayouts.Num())
+	{
+		OutError = TEXT("DAG5BSemanticEnvelopeMacroCardinality");
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
+
+	if (RewriteIntent != nullptr && RewriteIntent->bEnabled)
+	{
+		if (RewriteIntent->SupportMacroNodeId == INDEX_NONE
+			|| RewriteIntent->LoadMacroNodeId == INDEX_NONE
+			|| RewriteIntent->AffectedMacroNodeIds.IsEmpty()
+			|| !RewriteIntent->AffectedMacroNodeIds.Contains(
+				RewriteIntent->LoadMacroNodeId)
+			|| RewriteIntent->AffectedMacroNodeIds.Contains(
+				RewriteIntent->SupportMacroNodeId)
+			|| RewriteIntent->ExpectedFailureDirectionXY.IsNearlyZero())
+		{
+			OutError = TEXT("DAG3BRewriteIntentInvalid");
+			OutLayout.RejectReason = OutError;
+			return false;
+		}
+		if (RewriteIntent->Pattern
+			== EABTSM73DAGFailurePattern::InternalOffsetSeam)
+		{
+			const FVector2D DeltaXY =
+				RewriteIntent->ExpectedFailureDirectionXY.GetSafeNormal()
+				* RewriteIntent->OffsetSeamShiftCM;
+			if (DeltaXY.IsNearlyZero())
+			{
+				OutError = TEXT("DAG3BOffsetSeamShiftInvalid");
+				OutLayout.RejectReason = OutError;
+				return false;
+			}
+			for (FABTSM73DAGMacroLayout& MacroLayout :
+				OutLayout.MacroLayouts)
+			{
+				if (!RewriteIntent->AffectedMacroNodeIds.Contains(
+					MacroLayout.MacroNodeId))
+				{
+					continue;
+				}
+				MacroLayout.PlateCenter.X += DeltaXY.X;
+				MacroLayout.PlateCenter.Y += DeltaXY.Y;
+				MacroLayout.AllowedScope.Min.X += DeltaXY.X;
+				MacroLayout.AllowedScope.Min.Y += DeltaXY.Y;
+				MacroLayout.AllowedScope.Max.X += DeltaXY.X;
+				MacroLayout.AllowedScope.Max.Y += DeltaXY.Y;
+			}
+		}
+	}
+	if (!SelectSparseSupports(
+		Graph,
+		Settings,
+		OutLayout,
+		OutError,
+		RewriteIntent,
+		&Envelope))
+	{
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
+	if (!AssignStructuralLevels(
+		Graph,
+		Settings,
+		OutLayout,
+		OutError))
+	{
+		OutLayout.RejectReason = OutError;
+		return false;
+	}
+	OutLayout.bAccepted = true;
+	return true;
+}
+
 bool FABTSM73DAGLayoutSolver::AssignExpressionScope(
 	const int32 ExpressionNodeId,
 	const FBox& Scope,
@@ -396,7 +587,8 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 	const FABTSM73DAGLayoutSettings& Settings,
 	FABTSM73DAGSpatialLayout& InOutLayout,
 	FString& OutError,
-	const FABTSM73DAGFailureRewriteIntent* RewriteIntent) const
+	const FABTSM73DAGFailureRewriteIntent* RewriteIntent,
+	const FABTSM73SemanticEnvelope* SemanticEnvelope) const
 {
 	TMap<int32, TArray<FABTSM73DAGSelectedSupport>> CandidatesByLoad;
 	for (const FABTSM73DAGSupportEdge& Edge : Graph.SupportEdges)
@@ -427,6 +619,49 @@ bool FABTSM73DAGLayoutSolver::SelectSparseSupports(
 		{
 			++InOutLayout.RejectedCandidateEdgeCount;
 			continue;
+		}
+		if (SemanticEnvelope != nullptr)
+		{
+			const FABTSM73DAG5BSupportPortConstraint* Port =
+				SemanticEnvelope->SupportPorts.FindByPredicate(
+					[&Edge](
+						const FABTSM73DAG5BSupportPortConstraint&
+							Candidate)
+					{
+						return Candidate.SupportMacroNodeId
+								== Edge.SupportNodeId
+							&& Candidate.LoadMacroNodeId
+								== Edge.LoadNodeId;
+					});
+			if (Port == nullptr)
+			{
+				OutError = FString::Printf(
+					TEXT("DAG5BSupportPortMissing:%d:%d"),
+					Edge.SupportNodeId,
+					Edge.LoadNodeId);
+				return false;
+			}
+			FABTSM73DAG5BSemanticEnvelopeBuilder ContractBuilder;
+			if (!ContractBuilder.ValidateSupportPortProvenance(
+				*SemanticEnvelope,
+				*Port,
+				OutError))
+			{
+				return false;
+			}
+			FBox2D PortIntersection(EForceInit::ForceInit);
+			if (!IntersectBoxes2D(
+				Intersection,
+				Port->AllowedColumnRegion,
+				PortIntersection))
+			{
+				OutError = FString::Printf(
+					TEXT("DAG5BSupportPortNoOverlap:%d:%d"),
+					Edge.SupportNodeId,
+					Edge.LoadNodeId);
+				return false;
+			}
+			Intersection = PortIntersection;
 		}
 		EABTSM73DAGSupportPattern ResolvedPattern = Settings.SupportPattern;
 		float ResolvedColumnWidthCM = Settings.ColumnWidthCM;

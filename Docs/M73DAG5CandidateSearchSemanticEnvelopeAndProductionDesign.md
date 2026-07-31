@@ -2,8 +2,8 @@
 
 > 文档性质：M7.3-DAG-5 的独立工程设计与验收合同。
 >
-> 状态：DAG5-A 已完成代码、强制 Unity 编译与 fresh 自动化验收，保持显式 opt-in；
-> DAG5-B～E 已冻结边界，尚未实现。下一阶段为 DAG5-B。
+> 状态：DAG5-A、DAG5-B 已完成代码、强制 Unity 编译与 fresh 自动化验收，均保持显式 opt-in；
+> DAG5-B 的四类轮廓仍待人工 Editor 读形验收；验收后进入 DAG5-C。DAG5-C～E 尚未实现。
 >
 > 父级：[M7.3-DAG 递归承载图总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 >
@@ -307,6 +307,10 @@ Shape Grammar 与 WFC 都操作建筑语义，但职责不同：
 
 Shape 推导输出带稳定路径的 Volume Scope，而不是 Brick Actor。
 
+实现顺序必须是 Shape 先生成 Macro Graph、Macro Constraint 与实际高度范围的
+`ShapeScope`，再把 Scope 栅格化成 WFC 可解掩码。WFC 只能在 Shape 允许的单元中传播，
+因此 Shape 不是与 WFC 平行运行的标签生成器，而是 WFC 的空间前提。
+
 ### 4.3 局部语义 WFC 职责
 
 在建议的 `5~9 × 3~5 × 4~8` 有界格中，对 Shape Scope 内的局部单元求解：
@@ -324,6 +328,10 @@ Shape 推导输出带稳定路径的 Volume Scope，而不是 Brick Actor。
 
 WFC 只处理邻接、边界、主题权重和硬锚点。矛盾时在有限传播/回溯预算内失败，
 由 DAG5-A 更换 Shape/WFC 候选；不得偷偷返回旧矩形塔。
+
+WFC 必须先落定 `MustVoid`，再从真实的 WFC 单元切片与相邻 Macro 重叠区求
+Support Port。Port 是允许柱网通过的局部截面，不是从支撑层延伸到载荷层的整条走廊；
+最终柱体的完整 AABB 仍必须逐一避开所有 `MustVoid`。
 
 ### 4.4 稳定中间接口
 
@@ -361,7 +369,7 @@ DAG5-B 不是先生成漂亮模型再强行拟合承重树。正确链路是：
 4. Contact DAG 从最终碰撞几何重建真实承重关系；
 5. MustVoid 被占用、MustOccupy 未覆盖或出现意外旁路时拒绝候选。
 
-编译词汇至少补齐：
+初版物理编译词汇至少补齐：
 
 - 分段/偏置 Deck；
 - 门窗 Frame；
@@ -373,6 +381,11 @@ DAG5-B 不是先生成漂亮模型再强行拟合承重树。正确链路是：
 初版仍可全部使用长方体砖。复杂性来自占据、空洞、偏移和组合，而不是更换材质或
 只给完整方板继续递归。
 
+DAG5-B 初版不额外生成不可破坏的外观壳。Shape 的 Macro Plate 通过硬 WFC 语义锚点
+映射到真实 Brick，WFC 的局部变化通过 Support Port 改变 DAG2.3 实际柱网；
+`Frame`、`WallPier` 等语义当前用于邻接、开洞与端口合同，门洞周边仍由既有
+Plate/Column 物理砖组成，不把“任意立面装饰生成”冒充本阶段完成。
+
 ### 4.6 DAG5-B 验收门槛
 
 - 同一输入复现相同 Shape Derivation、WFC Collapse、Envelope、DAG 和 Brick；
@@ -383,6 +396,55 @@ DAG5-B 不是先生成漂亮模型再强行拟合承重树。正确链路是：
 - 所有承重事实均通过 DAG2.3 与 Contact DAG；
 - 复杂轮廓接入现有 Runtime Module，不另建不可破坏展示壳；
 - B 无解时拒绝当前候选，由 A 换候选；禁止旧 Preset fallback。
+
+### 4.7 落地状态与验收证据（2026-07-30）
+
+DAG5-B 已落实：
+
+- `FABTSM73DAG5BSettings` 默认 `bEnableSemanticEnvelope=false`，支持
+  `SetbackTower`、`OffsetBridge`、`ThroughOpeningWall`、
+  `OneSidedHighTower` 四类显式轮廓及确定性的 `Auto` 选择；
+- 纯数据链路为
+  `Shape Macro Graph/Scope -> Shape-mask WFC -> MustVoid -> Support Port
+  -> DAG2.3 Layout -> ModuleCompiler -> Contact/Envelope Audit`；
+- WFC 使用传播操作数与回溯步数双预算；已冻结
+  `ThroughOpeningWall + Seed=720022` 的真实三步回溯样例，预算为 2 时原子拒绝；
+- `SemanticEnvelope` 保存 Shape/WFC Trace、Macro Scope、WFC Cell、Port/Socket
+  来源与版本化 canonical `EnvelopeHash`；Layout、Compiler 与 Auditor 都会重算身份，
+  防止修改 Cell、Scope 或 Port 后继续消费旧 Hash；
+- Support Port 保存 WFC 来源单元范围、语义与 Hash。Layout 只允许完整柱截面落入 Port，
+  Compiler 绑定真实 Brick，Auditor 重算相同 Port 并检查完整柱体、`MustVoid`、
+  `MustOccupy`、自身 Macro Scope 及 ShapeMacro 空间重叠；
+- DAG5-A 与 DAG5-B 联用时，B 无解只会在 A 的有界尝试内换 Seed；若所有候选失败则
+  fail closed，不会回退旧 Preset。未启用 B 时保留既有冻结几何与结果；
+- Editor 暴露 `DAG5BSettings`；GenerationSummary 暴露 Enabled/Accepted、Family、
+  Feature 与 Envelope/Audit Hash；`[ABTS][M7.3-DAG5B]` 日志另暴露 Shape/WFC Hash、
+  传播、回溯和审计摘要，完整 `LastDAG5BResult` 保存在 C++ 运行时供验证读取。
+
+自动化证据：
+
+- `Saved/Logs/DAG5B-20260730-192835-ReleaseCandidateA.log` 与
+  `Saved/Logs/DAG5B-20260730-192925-ReleaseCandidateB.log`：
+  两个独立进程的 `ABTS.M73DAG.DAG5B.` 均为 11/11 Success；
+- 专项覆盖四类最终 Brick 轮廓、完整链确定性、WFC 因果变体、真实回溯预算、
+  Envelope/Port/Scope/Cell 故障注入、B 及下游 DAG3 失败原子性、
+  A 在 B 失败后的有界继续尝试、无 fallback 与关闭兼容；
+- `Saved/Logs/M7-20260730-193015-DAG5BReleaseCandidate.log`：
+  完整 `ABTS.M7` 66/66 Success；
+- `Saved/Logs/DAG5B-20260730-193107-ReleaseCandidateForceUnity.log`：
+  `-ForceUnity -DisableAdaptiveUnity` 编辑器目标验证通过。
+
+人工验收尚未完成，不得把自动化通过写成用户已确认视觉效果。建议在物理测试场仅开启
+`DAG5BSettings.bEnableSemanticEnvelope`，分别固定四个 `ShapeFamily`，确认最终真实砖呈现：
+
+1. 逐层退台且质心移动的退台塔；
+2. 两个分离塔体、跨接桥和偏置顶冠；
+3. 中央贯穿门洞、门楣及不对称屋顶；
+4. 高低两侧分裂并带单侧悬挑。
+
+同时确认 PIE 中无不可破坏展示壳、无 `MustVoid` 穿砖、建筑完整且能进入既有物理链。
+本阶段不验收六栋联合去重、Encounter/TaskGraph 接入、建筑与弱点联合多样性或生产默认；
+这些分别属于 DAG5-C、D、E。
 
 ## 5. DAG5-C：候选池与六栋联合去重
 
@@ -452,7 +514,7 @@ ValidationHash 的 Certification Manifest。
 | 阶段 | 核心职责 | 主要产物 | 退出门槛 |
 |---|---|---|---|
 | DAG5-A（已完成） | 单 Profile 可行域预检、确定性候选尝试、实砖硬预算 | Capacity Report、Attempt Trace、原子 `StructureData` | 可行域不因一次坏推导消失；不可行输入 fail closed；默认关闭兼容 |
-| DAG5-B | Shape Grammar 宏观轮廓 + 局部语义 WFC + Brick 接入 | Shape Derivation、SemanticEnvelope、复杂轮廓 Brick Assembly | 四类明显轮廓；MustVoid/MustOccupy 与真实承重全通过 |
+| DAG5-B（代码与自动化已完成，人工读形待验收） | Shape Grammar 宏观轮廓 + 局部语义 WFC + Brick 接入 | Shape Derivation、SemanticEnvelope、复杂轮廓 Brick Assembly | 四类明显轮廓；MustVoid/MustOccupy 与真实承重全通过 |
 | DAG5-C | 跨候选 Novelty 与六栋联合选择 | Six-Building Manifest、联合签名 | 恰好六栋、签名唯一、至少四类轮廓、逐栋 DAG3-C |
 | DAG5-D | Encounter/视觉元数据/装置/TaskGraph opt-in | Profile Catalog、Encounter Binding、Device Plan | 元数据实际消费；装置无旁路；生产仍显式启用 |
 | DAG5-E | 建筑与弱点联合调优、DAG4 重认证、生产切换 | Certification Manifest | 六栋逐栋动态认证、PIE、性能和确定性全通过 |
