@@ -15,6 +15,7 @@
 >
 > 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 > 相关研究：[3D WFC 建筑外观体块与承载 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
+> 梁式结构演进：[长条形积木建筑生成调研](M73BeamBlockStructuralGenerationResearch.md)。
 > 复用链路：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) ·
 > [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) ·
 > [DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) ·
