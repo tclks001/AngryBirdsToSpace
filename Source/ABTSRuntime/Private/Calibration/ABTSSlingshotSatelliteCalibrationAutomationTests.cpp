@@ -145,6 +145,11 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 	const FABTSM6LaunchProfileCatalog Candidate =
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeFrozenLaunchProfileCatalogV0();
+	const FABTSM6LaunchProfile DefaultSimpleProfile;
+	TestEqual(
+		TEXT("New launch profiles default to the Simple wheel step"),
+		DefaultSimpleProfile.PullPowerWheelStep,
+		0.02f);
 	FABTSM6LaunchProfileCatalog Resolved;
 	FString FailureReason;
 	TestTrue(
@@ -161,6 +166,7 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 	const float ExpectedMinimumSpeeds[] = { 700.0f, 900.0f, 1050.0f };
 	const float ExpectedMaximumSpeeds[] = { 1700.0f, 2300.0f, 3300.0f };
 	const float ExpectedPowerExponents[] = { 1.15f, 1.08f, 1.0f };
+	const float ExpectedWheelSteps[] = { 0.04f, 0.02f, 0.01f };
 	float PreviousComfortableReach = 0.0f;
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Expected); ++Index)
 	{
@@ -203,7 +209,7 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 		TestEqual(
 			FString::Printf(TEXT("Tier %d frozen wheel step"), Index),
 			Profile.PullPowerWheelStep,
-			0.04f);
+			ExpectedWheelSteps[Index]);
 		TestTrue(
 			FString::Printf(
 				TEXT("Tier %d initial pull is player-enterable"),
@@ -272,7 +278,7 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 		TEXT("Frozen launch catalog has the accepted portable identity"),
 		FABTSSlingshotSatelliteCalibrationModel::ComputeLaunchProfileHash(
 			Candidate),
-		2920060455991611804ull);
+		14031317829084174406ull);
 
 	const FABTSSatellitePracticePreset FrozenPreset =
 		FABTSSlingshotSatelliteCalibrationModel::

@@ -147,7 +147,8 @@ FABTSSlingshotSatelliteCalibrationModel::MakeFrozenLaunchProfileCatalogV0()
 		const EABTSSlingshotTier Tier,
 		const float MinimumSpeed,
 		const float MaximumSpeed,
-		const float PowerExponent)
+		const float PowerExponent,
+		const float PullPowerWheelStep)
 	{
 		FABTSM6LaunchProfile& Profile = Catalog.Profiles.AddDefaulted_GetRef();
 		Profile.Tier = Tier;
@@ -157,15 +158,15 @@ FABTSSlingshotSatelliteCalibrationModel::MakeFrozenLaunchProfileCatalogV0()
 		Profile.MinimumPullDistanceCM = 120.0f;
 		Profile.MaximumPullDistanceCM = 430.0f;
 		Profile.InitialPullAlpha = 0.55f;
-		Profile.PullPowerWheelStep = 0.04f;
+		Profile.PullPowerWheelStep = PullPowerWheelStep;
 		Profile.AimSensitivityScale = 1.0f;
 		Profile.MaximumAimPlaneOffsetCM = 260.0f;
 		Profile.ComfortablePullMinimum = 0.60f;
 		Profile.ComfortablePullMaximum = 0.85f;
 	};
-	AddProfile(EABTSSlingshotTier::Twig, 700.0f, 1700.0f, 1.15f);
-	AddProfile(EABTSSlingshotTier::Simple, 900.0f, 2300.0f, 1.08f);
-	AddProfile(EABTSSlingshotTier::Reinforced, 1050.0f, 3300.0f, 1.00f);
+	AddProfile(EABTSSlingshotTier::Twig, 700.0f, 1700.0f, 1.15f, 0.04f);
+	AddProfile(EABTSSlingshotTier::Simple, 900.0f, 2300.0f, 1.08f, 0.02f);
+	AddProfile(EABTSSlingshotTier::Reinforced, 1050.0f, 3300.0f, 1.00f, 0.01f);
 	return Catalog;
 }
 

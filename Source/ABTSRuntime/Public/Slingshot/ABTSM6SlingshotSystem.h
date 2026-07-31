@@ -244,7 +244,7 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Launch", meta = (ClampMin = "10.0"))
 	float MaxPullDistanceCM = 430.0f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Launch", meta = (ClampMin = "0.01", ClampMax = "2.0"))
-	float PullPowerWheelStep = 0.08f;
+	float PullPowerWheelStep = 0.02f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Launch", meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float FlightAirDragPerSecond = 0.08f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Launch", meta = (ClampMin = "20.0"))

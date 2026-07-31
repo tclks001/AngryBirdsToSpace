@@ -67,16 +67,16 @@ V0 冻结后，`MakeFrozenLaunchProfileCatalogV0()` 是三档曲线、拉距、�
 
 V0 冻结值：
 
-| Tier | 初速度范围 | 指数 | 舒适功率 |
-| --- | ---: | ---: | ---: |
-| Twig | 700–1700 cm/s | 1.15 | 60%–85% |
-| Simple | 900–2300 cm/s | 1.08 | 60%–85% |
-| Reinforced | 1050–3300 cm/s | 1.00 | 60%–85% |
+| Tier | 初速度范围 | 指数 | 滚轮步长 | 舒适功率 |
+| --- | ---: | ---: | ---: | ---: |
+| Twig | 700–1700 cm/s | 1.15 | 0.04 | 60%–85% |
+| Simple | 900–2300 cm/s | 1.08 | 0.02 | 60%–85% |
+| Reinforced | 1050–3300 cm/s | 1.00 | 0.01 | 60%–85% |
 
 三档共享：
 
 - `MinimumPullDistanceCM=120`、`MaximumPullDistanceCM=430`；
-- `InitialPullAlpha=0.55`、`PullPowerWheelStep=0.04`，因此认证功率点必须来自玩家用滚轮实际可进入的档位；滚轮步长的合法下限是 `0.01`（完整合法范围 `0.01..1.0`），小于该值必须 fail closed，不能借近似连续的超小步长扩大成功岛；
+- `InitialPullAlpha=0.55`；`PullPowerWheelStep` 按上表分档，因此认证功率点必须来自对应弹弓玩家可进入的档位；滚轮步长的合法下限是 `0.01`（完整合法范围 `0.01..1.0`），小于该值必须 fail closed，不能借近似连续的超小步长扩大成功岛；
 - `AimSensitivityScale=1.0`、`MaximumAimPlaneOffsetCM=260`；
 - 相机构图以 `BP_ABTSM6SlingshotCamera` 的 Class Defaults 为准；本次签名快照为 `1500 cm`、`-3°`、`900 cm`、`245 cm`；
 - `FlightAirDragPerSecond=0.08`。
@@ -181,7 +181,7 @@ V0 已冻结；后续若要试验 V1，可在新建的标定 GameMode 子蓝图 
 
 确定性认证模型读取真实 Reinforced cord/pouch frame，以 `(Pull, AimInPlaneOffsetCM, AimOutOfPlaneOffsetCM)` 组成批准的离散全域：
 
-- Pull：从 `InitialPullAlpha=0.55` 按 `WheelStep=0.04` 枚举所有玩家可进入档位；当前蓝图认证带为 75%–100%，即 `0.75/0.79/0.83/0.87/0.91/0.95/0.99/1.00`；
+- Pull：按当前 Tier 的 `PullPowerWheelStep` 从 `InitialPullAlpha=0.55` 枚举所有玩家可进入档位；Reinforced 的 V0 步长为 `0.01`，认证带 `0.75..1.00` 因而包含 26 个离散功率点；
 - InPlane：`-260..260 cm`，41 点，沿实际相机鼠标投影平面的 `CameraScreenUp`（LaunchFrame 的 `AimInPlaneAxisWorld`）；
 - OutOfPlane：`-80..80 cm`，5 点，沿实际相机鼠标投影平面的 `CameraScreenRight`（LaunchFrame 的 `AimOutOfPlaneAxisWorld`）；
 - `length(AimPlaneOffset) > 260 cm` 的圆盘外组合跳过，不计作已采样输入；
@@ -303,18 +303,18 @@ if (-not $M9.WaitForExit(60000)) {
 - `ABTS.Calibration.*`：精确 6/6 Success，`TEST COMPLETE. EXIT CODE: 0`；
 - 标定 runtime：唯一 `Terminal=1 Passed=1 Failed=0`，组合原因为 `Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`；
 - 蓝图相机构图：`BP_ABTSM6SlingshotCamera_C`，`Distance=1500 cm`、`Pitch=-3°`、`TargetForward=900 cm`、`TargetHeight=245 cm`；
-- 最终 Reinforced 成功岛：`Hits=15`、`Pull=[0.83,1.00]`、`AimInPlane=[-221,-182] cm`、`LargestIsland=9`，Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `2483.6 cm`，`SimpleHits=0 OutsidePullHits=0`；
+- 最终 Reinforced 成功岛：`Hits=53`、`Pull=[0.82,1.00]`、`AimInPlane=[-221,-182] cm`、`LargestIsland=47`，Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `2483.6 cm`，`SimpleHits=0 OutsidePullHits=0`；
 - 标定场景解析值：`SatelliteRadius=1250 cm`、`Clearance=5500 cm`、`SurfaceGravity=1960 cm/s²`，E5 半边长 `420 cm`、表面间隙 `20 cm`；
 - 生产 M9 fresh runtime：唯一 `ABTSM9GameMode`、唯一 `Satellite ready`、零 rejected/transform error；
 - `ABTS.M110.TaskGraphFinaleSeparation` 与 `ABTS.M11C.Runtime.ContractRoutingAndM9Isolation`：各 1/1 Success。
 
-冻结的可移植身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=11534008174155323086`；最终标定场景记录 `SweepResultHash=14461769049079992071`。`BaselineGravitySnapshotHash=6868080659462091281` 只记录该场景实例，不作为跨 Seed 身份。2026-07-31 可见 PIE 已确认当前弹弓/卫星参数手感可接受，因此参数 V0 正式冻结；月面画中画也已通过。卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，不阻塞本次数据合同冻结。
+冻结的可移植身份为 `LaunchProfileHash=14031317829084174406`、`SatellitePracticePresetHash=11534008174155323086`；最终标定场景记录 `SweepResultHash=7927975607052306339`。`BaselineGravitySnapshotHash=6868080659462091281` 只记录该场景实例，不作为跨 Seed 身份。2026-07-31 可见 PIE 已确认当前弹弓/卫星参数手感可接受，因此参数 V0 正式冻结；月面画中画也已通过。卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，不阻塞本次数据合同冻结。
 
 ## 8. 可见 PIE 验收
 
 自动化不能代替手感与可读性。使用第 2 节 URL 启动可见 PIE 后逐项确认：
 
-- [x] 三档能力与弹道差异不看 HUD 数字也可辨认；共享的初始 Pull、`0.04` 滚轮步长和真实相机屏幕平面 Aim 操作不会造成突跳、轴向错位或不可进入档位（2026-07-31 参数手感通过）；
+- [x] 三档能力与弹道差异不看 HUD 数字也可辨认；共享的初始 Pull、分档 `0.04/0.02/0.01` 滚轮步长和真实相机屏幕平面 Aim 操作不会造成突跳、轴向错位或不可进入档位（2026-07-31 参数手感通过）；
 - [x] HUD 舒适和极限射程与真实落点相符（2026-07-31 参数手感通过）；
 - [x] 强化档存在玩家可重复找到的连续背面目标成功岛（2026-07-31 参数手感通过）；
 - [x] 同一输入关闭卫星引力后明显飞偏（自动化因果消融与可见 PIE 通过）；
@@ -324,7 +324,7 @@ if (-not $M9.WaitForExit(60000)) {
 - [x] 卫星背面画中画在背光面仍清晰，只显示卫星、E5 与局部轨迹；切回普通主星落点预览后无残留 ShowOnly/BaseColor 状态（2026-07-31 PIE 通过）；
 - [ ] 卫星实飞主镜头的可读性、普通借力路径的轻量转向和 E5 演出构图转入[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)；当前状态机只保留为候选，不作为冻结门槛的已通过项；
 - [ ] M10.1 轨道全景图能清晰展示卫星造成的偏转；
-- [x] 最终自动化岛覆盖约 83%–100%，连续鼠标输入下具有自然容错；满功率属于认证域但不是唯一正确解（2026-07-31 参数手感通过）；
+- [x] 最终自动化岛覆盖约 82%–100%，连续鼠标输入下具有自然容错；满功率属于认证域但不是唯一正确解（2026-07-31 参数手感通过）；
 - [ ] 普通 M6/M9 与既有 M10.1-B 主星落点画中画行为无回归；
 - [ ] 日志中的真实发射遥测字段完整且没有 Fatal、assert 或 ensure。
 

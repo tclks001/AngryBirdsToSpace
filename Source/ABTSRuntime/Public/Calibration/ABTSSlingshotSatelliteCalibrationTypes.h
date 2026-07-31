@@ -36,7 +36,7 @@ struct ABTSRUNTIME_API FABTSM6LaunchProfile
 	float InitialPullAlpha = 0.55f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pull", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float PullPowerWheelStep = 0.04f;
+	float PullPowerWheelStep = 0.02f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim", meta = (ClampMin = "0.1", ClampMax = "4.0"))
 	float AimSensitivityScale = 1.0f;
