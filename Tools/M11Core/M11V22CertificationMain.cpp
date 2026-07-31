@@ -50,6 +50,13 @@ namespace
 		double TargetOffsetXCM = 0.0;
 		double TargetOffsetYCM = 0.0;
 		double TargetOffsetZCM = 0.0;
+		double Assist3OffsetXCM = 0.0;
+		double Assist3OffsetYCM = 0.0;
+		double Assist3OffsetZCM = 0.0;
+		double TargetHitRadiusCM =
+			std::numeric_limits<double>::quiet_NaN();
+		double ArrivalConeDegrees = 180.0;
+		double ArrivalFaceConeDegrees = 180.0;
 		std::uint32_t CheckpointEvery = 256;
 		bool Resume = false;
 	};
@@ -219,6 +226,31 @@ namespace
 			{
 				Out.TargetOffsetZCM = Number;
 			}
+			else if (Key == "--target-hit-radius" && ParseDouble(Value, Number))
+			{
+				Out.TargetHitRadiusCM = Number;
+			}
+			else if (Key == "--assist3-offset-x" && ParseDouble(Value, Number))
+			{
+				Out.Assist3OffsetXCM = Number;
+			}
+			else if (Key == "--assist3-offset-y" && ParseDouble(Value, Number))
+			{
+				Out.Assist3OffsetYCM = Number;
+			}
+			else if (Key == "--assist3-offset-z" && ParseDouble(Value, Number))
+			{
+				Out.Assist3OffsetZCM = Number;
+			}
+			else if (Key == "--arrival-cone-degrees" && ParseDouble(Value, Number))
+			{
+				Out.ArrivalConeDegrees = Number;
+			}
+			else if (Key == "--arrival-face-cone-degrees"
+				&& ParseDouble(Value, Number))
+			{
+				Out.ArrivalFaceConeDegrees = Number;
+			}
 			else
 			{
 				Failure = "InvalidOption:" + Key;
@@ -249,10 +281,39 @@ namespace
 			Failure = "TargetOffsetOutsideDiagnosticLimit";
 			return false;
 		}
+		const double Assist3OffsetSquared =
+			Out.Assist3OffsetXCM * Out.Assist3OffsetXCM
+			+ Out.Assist3OffsetYCM * Out.Assist3OffsetYCM
+			+ Out.Assist3OffsetZCM * Out.Assist3OffsetZCM;
+		if (!std::isfinite(Assist3OffsetSquared)
+			|| Assist3OffsetSquared > 10000.0 * 10000.0)
+		{
+			Failure = "Assist3OffsetOutsideDiagnosticLimit";
+			return false;
+		}
+		if (std::isfinite(Out.TargetHitRadiusCM)
+			&& (Out.TargetHitRadiusCM < 4500.0
+				|| Out.TargetHitRadiusCM > 12000.0))
+		{
+			Failure = "TargetHitRadiusOutsideSearchContract";
+			return false;
+		}
+		if (!(Out.ArrivalConeDegrees > 0.0)
+			|| Out.ArrivalConeDegrees > 180.0)
+		{
+			Failure = "ArrivalConeOutsideDiagnosticLimit";
+			return false;
+		}
+		if (!(Out.ArrivalFaceConeDegrees > 0.0)
+			|| Out.ArrivalFaceConeDegrees > 180.0)
+		{
+			Failure = "ArrivalFaceConeOutsideDiagnosticLimit";
+			return false;
+		}
 		return true;
 	}
 
-	void ApplyTargetOffset(
+	void ApplyDiagnosticOffsets(
 		const Options& OptionsValue,
 		CandidateLayout& Layout)
 	{
@@ -262,6 +323,15 @@ namespace
 			OptionsValue.TargetOffsetZCM};
 		Layout.Scenario.Target.CenterCM += Offset;
 		Layout.Scenario.Target.GeometricContactCenterCM += Offset;
+		Layout.Scenario.Bodies[3].CenterCM += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist3OffsetXCM,
+			OptionsValue.Assist3OffsetYCM,
+			OptionsValue.Assist3OffsetZCM};
+		if (std::isfinite(OptionsValue.TargetHitRadiusCM))
+		{
+			Layout.Scenario.Target.HitRadiusCM =
+				OptionsValue.TargetHitRadiusCM;
+		}
 	}
 
 	bool MakeGrid(
@@ -374,6 +444,7 @@ namespace
 		const Options& OptionsValue,
 		const FrozenCandidateIdentity& Identity,
 		const std::uint64_t VariantSourceHash,
+		const double TargetHitRadiusCM,
 		const Grid& GridValue,
 		const std::vector<Sample>& Samples,
 		const bool Complete,
@@ -406,6 +477,15 @@ namespace
 			<< "  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"assist3OffsetCM\":[" << OptionsValue.Assist3OffsetXCM
+			<< ',' << OptionsValue.Assist3OffsetYCM << ','
+			<< OptionsValue.Assist3OffsetZCM << "],\n"
+			<< "  \"targetHitRadiusCM\":"
+			<< TargetHitRadiusCM << ",\n"
+			<< "  \"arrivalConeDegrees\":"
+			<< OptionsValue.ArrivalConeDegrees << ",\n"
+			<< "  \"arrivalFaceConeDegrees\":"
+			<< OptionsValue.ArrivalFaceConeDegrees << ",\n"
 			<< "  \"shardIndex\":" << OptionsValue.ShardIndex << ",\n"
 			<< "  \"shardCount\":" << OptionsValue.ShardCount << ",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
@@ -580,7 +660,7 @@ namespace
 			std::cerr << "CandidateSourceIdentityMismatch\n";
 			return 1;
 		}
-		ApplyTargetOffset(OptionsValue, Layout);
+		ApplyDiagnosticOffsets(OptionsValue, Layout);
 		const std::uint64_t VariantSourceHash =
 			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
 		Grid GridValue;
@@ -724,6 +804,16 @@ namespace
 			<< "\",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"assist3OffsetCM\":["
+			<< OptionsValue.Assist3OffsetXCM << ','
+			<< OptionsValue.Assist3OffsetYCM << ','
+			<< OptionsValue.Assist3OffsetZCM << "],\n"
+			<< "  \"targetHitRadiusCM\":"
+			<< Layout.Scenario.Target.HitRadiusCM << ",\n"
+			<< "  \"arrivalConeDegrees\":"
+			<< OptionsValue.ArrivalConeDegrees << ",\n"
+			<< "  \"arrivalFaceConeDegrees\":"
+			<< OptionsValue.ArrivalFaceConeDegrees << ",\n"
 			<< "  \"aggregateSampleHash\":\""
 			<< Hex64(AggregateSampleHash(Samples)) << "\",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
@@ -785,9 +875,44 @@ namespace
 			std::cerr << "CandidateSourceIdentityMismatch\n";
 			return 1;
 		}
-		ApplyTargetOffset(OptionsValue, Layout);
+		ApplyDiagnosticOffsets(OptionsValue, Layout);
 		const std::uint64_t VariantSourceHash =
 			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
+		ABTS::M11Core::Vec3d NominalArrivalDirection;
+		ABTS::M11Core::Vec3d NominalArrivalFaceNormal;
+		double MinimumArrivalAlignment = -1.0;
+		double MinimumArrivalFaceAlignment = -1.0;
+		if (OptionsValue.ArrivalConeDegrees < 180.0
+			|| OptionsValue.ArrivalFaceConeDegrees < 180.0)
+		{
+			InputEvaluation NominalEvaluation;
+			std::string NominalFailure;
+			if (!CandidateSearch::EvaluateInput(
+					Layout,
+					Contract,
+					Layout.NominalInput,
+					0x7u,
+					NominalEvaluation,
+					&NominalFailure)
+				|| !NominalEvaluation.PrefixMembership[3]
+				|| !NominalEvaluation.HasTargetHitVelocity)
+			{
+				std::cerr << "NominalArrivalDirectionUnavailable:"
+					<< NominalFailure << '\n';
+				return 1;
+			}
+			NominalArrivalDirection =
+				NominalEvaluation.TargetHitVelocityCMPerSec.GetSafeNormal();
+			NominalArrivalFaceNormal =
+				(NominalEvaluation.TargetHitPositionCM
+					- Layout.Scenario.Target.CenterCM).GetSafeNormal();
+			MinimumArrivalAlignment = std::cos(
+				OptionsValue.ArrivalConeDegrees
+					* 3.14159265358979323846 / 180.0);
+			MinimumArrivalFaceAlignment = std::cos(
+				OptionsValue.ArrivalFaceConeDegrees
+					* 3.14159265358979323846 / 180.0);
+		}
 		Grid GridValue;
 		std::string Failure;
 		if (!MakeGrid(Layout, OptionsValue, GridValue, Failure))
@@ -877,6 +1002,33 @@ namespace
 						{
 							continue;
 						}
+						if (Evaluation.PrefixMembership[3]
+							&& OptionsValue.ArrivalConeDegrees < 180.0)
+						{
+							const ABTS::M11Core::Vec3d ArrivalDirection =
+								Evaluation.TargetHitVelocityCMPerSec
+									.GetSafeNormal();
+							Evaluation.PrefixMembership[3] =
+								Evaluation.HasTargetHitVelocity
+								&& ABTS::M11Core::Vec3d::DotProduct(
+									ArrivalDirection,
+									NominalArrivalDirection)
+									>= MinimumArrivalAlignment;
+						}
+						if (Evaluation.PrefixMembership[3]
+							&& OptionsValue.ArrivalFaceConeDegrees < 180.0)
+						{
+							const ABTS::M11Core::Vec3d ArrivalFaceNormal =
+								(Evaluation.TargetHitPositionCM
+									- Layout.Scenario.Target.CenterCM)
+									.GetSafeNormal();
+							Evaluation.PrefixMembership[3] =
+								Evaluation.HasTargetHitVelocity
+								&& ABTS::M11Core::Vec3d::DotProduct(
+									ArrivalFaceNormal,
+									NominalArrivalFaceNormal)
+									>= MinimumArrivalFaceAlignment;
+						}
 						for (std::size_t Level = 0; Level < 4; ++Level)
 						{
 							if (Evaluation.PrefixMembership[Level])
@@ -925,6 +1077,7 @@ namespace
 				OptionsValue,
 				Identity,
 				VariantSourceHash,
+				Layout.Scenario.Target.HitRadiusCM,
 				GridValue,
 				All,
 				NextGlobal >= Total,

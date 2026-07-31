@@ -5490,6 +5490,14 @@ bool ABTS::M11Search::CandidateSearch::EvaluateInput(
 	OutEvaluation.Termination = Result.Termination;
 	OutEvaluation.CompletedAssistCount = Result.CompletedAssistCount;
 	OutEvaluation.TargetContactCount = Result.TargetContactCount;
+	if (const M11Core::TrajectoryEvent* TargetHit = Result.FindFirstEvent(
+			M11Core::TrajectoryEventType::TargetHit))
+	{
+		OutEvaluation.HasTargetHitVelocity = true;
+		OutEvaluation.TargetHitPositionCM = TargetHit->PositionCM;
+		OutEvaluation.TargetHitVelocityCMPerSec =
+			TargetHit->VelocityCMPerSec;
+	}
 	OutEvaluation.ResultHash = Result.ValidationHash;
 	if (OutFailure != nullptr)
 	{

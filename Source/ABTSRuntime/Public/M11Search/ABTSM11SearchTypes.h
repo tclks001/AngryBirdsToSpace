@@ -294,6 +294,9 @@ namespace ABTS::M11Search
 			M11Core::TrajectoryTermination::InvalidInput;
 		std::int32_t CompletedAssistCount = 0;
 		std::int32_t TargetContactCount = 0;
+		bool HasTargetHitVelocity = false;
+		M11Core::Vec3d TargetHitPositionCM;
+		M11Core::Vec3d TargetHitVelocityCMPerSec;
 		std::uint64_t ResultHash = 0;
 	};
 
