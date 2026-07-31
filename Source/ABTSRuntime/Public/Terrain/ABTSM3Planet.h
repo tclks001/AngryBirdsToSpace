@@ -4,9 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "PCG/ABTSM3MonthlyEncounter.h"
+#include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
 #include "PCG/ABTSM3MonthlySchema.h"
 #include "PCG/ABTSM3MonthlySlingshotField.h"
+#include "PCG/ABTSM3MonthlyWitness.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
@@ -65,6 +67,18 @@ public:
 	virtual float GetSurfaceRadiusAtDirection(const FVector& UnitDirection) const override;
 	virtual FVector GetSurfaceNormalAtDirection(const FVector& UnitDirection) const override;
 
+#if WITH_EDITOR
+	/**
+	 * Draws the exact R-5 target footprints and attack corridors for the
+	 * explicitly selected preview candidate. Returns false when no exact
+	 * preview candidate is available.
+	 */
+	bool DrawMonthlyLogicRegionDebugOverlay(
+		float LifeTimeSeconds,
+		int32& OutTargetFootprintCellCount,
+		int32& OutAttackCorridorCellCount) const;
+#endif
+
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellState>& GetGeneratedCellStates() const { return GeneratedCellStates; }
 
@@ -105,6 +119,36 @@ public:
 	bool ValidateMonthlySpatialResult(FString& OutFailure) const;
 
 	/**
+	 * R-5 candidate-bound visual plans. They preserve every R-3 candidate and
+	 * never imply a selected or accepted monthly world.
+	 */
+	const FABTSM3MonthlyPresentationResult&
+		GetMonthlyPresentationResult() const
+	{
+		return MonthlyPresentationResult;
+	}
+
+	/** Rebuilds and whole-struct compares the R-5 result. */
+	bool ValidateMonthlyPresentationResult(
+		FString& OutFailure) const;
+
+	/** True only for an explicitly requested candidate preview. */
+	bool IsMonthlyPresentationPreviewActive() const
+	{
+		return bMonthlyPresentationPreviewActive;
+	}
+
+	int32 GetMonthlyPresentationPreviewCandidateId() const
+	{
+		return ActiveMonthlyPresentationPreviewCandidateId;
+	}
+
+	int64 GetMonthlyPresentationPreviewCandidateHash() const
+	{
+		return ActiveMonthlyPresentationPreviewCandidateHash;
+	}
+
+	/**
 	 * R-3.1 ordinary slingshot slot fields. Field identity is diagnostic only:
 	 * callers must not treat it as an allowed-pair restriction.
 	 */
@@ -118,9 +162,57 @@ public:
 	bool ValidateMonthlySlingshotFieldResult(
 		FString& OutFailure) const;
 
+	/**
+	 * R-4 gameplay-finalize observation. Fixture authority may prove the local
+	 * algorithm, but only an Integration authority can certify external inputs.
+	 */
+	const FABTSM3MonthlyWitnessResult& GetMonthlyWitnessResult() const
+	{
+		return MonthlyWitnessResult;
+	}
+
+	/** Structural revalidation; it never replays an external provider. */
+	bool ValidateMonthlyWitnessResult(FString& OutFailure) const;
+
+	/** Explicit Integration seam. No fixture provider is created by runtime. */
+	bool FinalizeMonthlyGameplay(
+		const IABTSM3MonthlyWitnessServices& Services,
+		FString& OutFailure);
+
 	/** True only when the complete M3 logical, terrain and material presentation rebuild succeeded. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	bool IsM3PresentationReady() const { return bM3PresentationReady; }
+
+	double GetLastM3RebuildDurationMS() const
+	{
+		return LastM3RebuildDurationMS;
+	}
+
+	/** R-5 builder cost only; excludes R2/R3 source generation and surface/HISM presentation. */
+	double GetLastMonthlyPresentationBuildDurationMS() const
+	{
+		return LastMonthlyPresentationBuildDurationMS;
+	}
+
+	bool IsMonthlyMaterialRhythmApplied() const
+	{
+		return bMonthlyMaterialRhythmApplied;
+	}
+
+	int32 GetMonthlyMaterialRhythmCellCount() const
+	{
+		return MonthlyMaterialRhythmCellCount;
+	}
+
+	int32 GetMonthlyDecorAccent0InstanceCount() const
+	{
+		return MonthlyDecorAccent0InstanceCount;
+	}
+
+	int32 GetMonthlyDecorAccent1InstanceCount() const
+	{
+		return MonthlyDecorAccent1InstanceCount;
+	}
 
 	/** Reserved interface for M4 modular building generation. M3 only returns validated spawn sites. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Building")
@@ -175,8 +267,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	FABTSM3MonthlyEncounterSpatialConfig MonthlyEncounterSpatialConfig;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation")
+	FABTSM3MonthlyPresentationConfig MonthlyPresentationConfig;
+
+	/**
+	 * Explicit preview authority only. R-5 does not select a candidate, so this
+	 * remains off unless an editor user or -ABTSM3R5Preview requests it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Preview")
+	bool bEnableMonthlyPresentationPreview = false;
+
+	/** Exact R-3 SourceRouteCandidateId required by the preview. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Preview")
+	int32 MonthlyPresentationPreviewCandidateId = INDEX_NONE;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldConfig MonthlySlingshotFieldConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
+	FABTSM3MonthlyWitnessConfig MonthlyWitnessConfig;
 
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
@@ -309,9 +418,17 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	FABTSM3MonthlySpatialResult MonthlySpatialResult;
 
+	/** R-5 read-only presentation plans for every retained R-3 candidate. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation")
+	FABTSM3MonthlyPresentationResult MonthlyPresentationResult;
+
 	/** R-3.1 ordinary slot-field alternatives; finale Space slots remain a separate exact pair. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldResult MonthlySlingshotFieldResult;
+
+	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
+	FABTSM3MonthlyWitnessResult MonthlyWitnessResult;
 
 #if WITH_EDITORONLY_DATA
 	/** Index-only debug snapshot. R-1 does not draw or alter the production map. */
@@ -324,6 +441,9 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Debug")
 	FABTSM3MonthlySpatialDebugData MonthlySpatialDebugData;
 
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	FABTSM3MonthlyPresentationDebugData MonthlyPresentationDebugData;
+
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field|Debug")
 	FABTSM3MonthlySlingshotFieldDebugData MonthlySlingshotFieldDebugData;
 
@@ -334,6 +454,22 @@ public:
 	/** Draws R-3 reservations/envelope only; it never changes production terrain. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Debug")
 	bool bDrawMonthlySpatialDebugOverlay = false;
+
+	/** Draws the explicitly bound R-5 candidate's biome/role audit points. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	bool bDrawMonthlyPresentationDebugOverlay = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	bool bDrawMonthlyPresentationBiomeLayer = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	bool bDrawMonthlyPresentationEnvelopeLayer = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	bool bDrawMonthlyPresentationVisualBeatLayer = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation|Debug")
+	bool bDrawMonthlyPresentationCoverageLayer = true;
 #endif
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Building")
@@ -345,16 +481,38 @@ public:
 private:
 	bool GenerateLogicalTerrain();
 	void BuildM3ContinuousSurface();
-	void BuildDecorInstances();
+	void BuildDecorInstances(
+		const TArray<FABTSM3CellState>*
+			PresentationCellStates = nullptr,
+		const FABTSM3MonthlyCandidatePresentation*
+			PresentationCandidate = nullptr);
 	void BuildBuildingSpawnSites();
+	bool TryBuildMonthlyPresentationPreviewData(
+		TArray<FABTSM3CellState>& OutCellStates,
+		TArray<FABTSM3CellEdgeState>& OutEdgeStates,
+		const FABTSM3MonthlyCandidatePresentation*&
+			OutCandidate);
+	int32 ResolveMonthlyPresentationPreviewCandidateId(
+		bool& bOutRequested) const;
 	int32 FindNearestCell(const FVector& UnitDirection) const;
 #if WITH_EDITOR
 	void DrawMonthlyRouteDebugOverlay() const;
 	void DrawMonthlySpatialDebugOverlay() const;
+	void DrawMonthlyPresentationDebugOverlay() const;
 #endif
 
 	TUniquePtr<FABTSM3TerrainVisualField> TerrainVisualField;
 	bool bM3PresentationReady = false;
+	double LastM3RebuildDurationMS = 0.0;
+	double LastMonthlyPresentationBuildDurationMS = 0.0;
+	bool bMonthlyMaterialRhythmApplied = false;
+	int32 MonthlyMaterialRhythmCellCount = 0;
+	int32 MonthlyDecorAccent0InstanceCount = 0;
+	int32 MonthlyDecorAccent1InstanceCount = 0;
+	bool bMonthlyPresentationPreviewActive = false;
+	int32 ActiveMonthlyPresentationPreviewCandidateId =
+		INDEX_NONE;
+	int64 ActiveMonthlyPresentationPreviewCandidateHash = 0;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UABTSM3TerrainMaterialBridge> TerrainMaterialBridge;

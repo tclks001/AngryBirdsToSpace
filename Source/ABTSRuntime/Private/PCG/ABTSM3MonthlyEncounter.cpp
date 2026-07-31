@@ -4973,6 +4973,13 @@ uint64 FABTSM3MonthlyEncounterBuilder::
 	return ABTSM3R3EncounterPrivate::ComputeCatalogHash();
 }
 
+uint64 FABTSM3MonthlyEncounterBuilder::ComputeEncounterHash(
+	const FABTSM3MonthlySpatialEncounter& Encounter)
+{
+	return ABTSM3R3EncounterPrivate::ComputeEncounterHash(
+		Encounter);
+}
+
 uint64 FABTSM3MonthlyEncounterBuilder::ComputeFaultInjectionHash(
 	const FABTSM3MonthlySpatialFaultInjection& FaultInjection)
 {

@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 的通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此阶段保持 IntegrationPending
+> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层已达到 M3LocalAccepted（IntegrationPending）
 > 日期：2026-07-30
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 标定候选已提供可移植 Launch/Preset 身份与射程包络，但尚待可见 PIE 冻结，且不等同于生产权威 Witness Provider；未读取未决候选，也未提前生成月度实体槽
+> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 标定候选已提供可移植 Launch/Preset 身份与射程包络，月面画中画已通过可见 PIE，但完整 V0 尚未冻结且不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不改签 R-3 身份或发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
 
 父文档：
 
@@ -13,6 +13,10 @@
 R-4.1 直接前置：
 
 - [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)
+
+阶段子文档：
+
+- [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)
 
 直接下游：
 
@@ -974,10 +978,10 @@ NotStarted
 | M3R-0 首周基线 | Week 1 开始前补齐 | **Complete**；Manifest、强制 Unity、2/2/1 fresh automation、M3 runtime 与 canonical Visible PIE 均已通过并合并 | 长路线、三栋道路外建筑、首周视距与确定性身份 | M3 + Integration/M7 | Complete |
 | M3R-1 月度 Schema 与观测面 | Week 1 前半 | **M3LocalAccepted**；Schema 8/8、兼容 21/21、旧合同 2/2/1、fresh runtime 与强制 Unity 均通过 | RouteBeat、Encounter、Biome、质量报告的数据骨架 | M3；共享字段只提交需求 | M3LocalAccepted |
 | M3R-2 多候选球面路线 | Week 1 后半 | **M3LocalAccepted**；RouteCore 7/7、Failure 1/1、200 Seed 200/200、旧回归与 fresh runtime 均通过；Editor-only 叠层保留人工可视抽查 | 候选骨架池、状态化道路搜索与月度路线 fallback | M3 | M3LocalAccepted |
-| M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **M3LocalAccepted（IntegrationPending）**；Spatial 8/8、Failure 2/2、100 Seed 100/100、PVS 11/11、旧回归与 fresh runtime 均通过 | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
-| M3R-3.1 普通弹弓槽场 | Week 2 前半补充 | **IntegrationPending**；M3 的 SlotField 7/7、Failure 2/2、100 Seed 100/100 已通过；Integration 的装配 2/2、槽 Actor 1/1、强制 Unity 与兼容世界 PIE 已通过，尚缺唯一 Candidate 导出和月度六关联合 PIE | Encounter 紧凑散点槽场、道路附加槽场、最小只读 DTO 消费端、最大弦长与三维装配门 | M3 + Integration；最终实体槽等待 R4/R6 | IntegrationAccepted |
-| M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **NotStarted** | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M6/M9 | IntegrationAccepted |
-| M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **NotStarted** | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3 | M3LocalAccepted |
+| M3R-3 六 Encounter/地貌逻辑预留 | Week 2 前半 | **M3LocalAccepted（MergedToMaster，IntegrationPending）**；Spatial 8/8、Failure 2/2、100 Seed 100/100、PVS 11/11、旧回归与 fresh runtime 均通过 | 六个逻辑遭遇空间、Playable Envelope 与 Biome 逻辑 | M3 | M3LocalAccepted |
+| M3R-3.1 普通弹弓槽场 | Week 2 前半补充 | **IntegrationPending**；M3 的 SlotField 7/7、Failure 2/2、100 Seed 100/100 已通过且生产端已进入 `master ae9e8f0`；Integration 的装配 2/2、槽 Actor 1/1、强制 Unity 与兼容世界 PIE 已通过，尚缺唯一 Candidate 导出和月度六关联合 PIE | Encounter 紧凑散点槽场、道路附加槽场、最小只读 DTO 消费端、最大弦长与三维装配门 | M3 + Integration；最终实体槽等待 R4/R6 | IntegrationAccepted |
+| M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **M3LocalAccepted（FixtureAuthority，IntegrationPending）**；Core 8/8、Failure 8/8、100 Seed 100/100、父级回归、fresh runtime 与强制 Unity 均通过；真实 M5.1/M6/M7/M9/流程和 R6 仍待联合验收 | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M5.1/M6/M7/M9 | IntegrationAccepted |
+| M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **M3LocalAccepted（IntegrationPending）**；Biome Core/Failure、100 Seed 100/100、300 plans、冻结 Oracle、显式 preview runtime 和完整 Subdivision 7 `<=8 s` 均已通过；可见 PIE、M6/M9/Character/Visibility 碰撞回归仍待 | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3；碰撞联合回归在 Integration | IntegrationAccepted |
 | M3R-6 六栋 M7 实体建筑集成 | Week 3 | **NotStarted** | vNext 建筑合同、动态数量、难度/视觉路由与物理批处理 | Integration + M7，M3 只生产数据 | IntegrationAccepted |
 | M3R-7 月度认证与调参冻结 | Week 4 | **NotStarted** | 1000 Seed、fresh runtime、联合 PIE、展示 Seed 与 fallback | Integration | Complete |
 
@@ -1164,7 +1168,7 @@ R-2 只证明路线候选池和 Road Solver 机制，不在正式 Height/Hydrolo
 - 默认不生成可选支线，把 SatelliteWindow 改为主线训练 Beat；只有 `BranchUtilityContract` 通过才允许支线；
 - 月度六 Encounter 暂存于 M3 内部结果；共享 v1 建筑合同在 R-6 前继续导出首周兼容数据，旧四站点顺序、数量和合同投影不得变化。
 
-**当前实现状态（通用消费端已实现，月度实体仍 IntegrationPending）**
+**当前实现状态（M3LocalAccepted，MergedToMaster，IntegrationPending）**
 
 - 月度路径继续使用 `GeneratorVersion=3 + LayoutPolicyVersion=2` 的 M3 内部结果。每个 R-2 保留候选各自生成六个有序 Encounter、42 条内部空间角色、六个 Playable Envelope 和七个 BiomeDistrict，不跨候选复用预留结果；
 - 铺路前冻结的可玩预留集合由初始 Encounter Envelope 与 R-2 Corridor 的 Playable Padding 并集组成。Target Footprint、NoRoad Ring、Hydrology、必要攻击走廊和 RoadContext 都在 strict same-candidate rebuild 前确定；最终 Envelope 与侧向攻击通路必须是该冻结集合的子集；
@@ -1223,9 +1227,10 @@ R-2 只证明路线候选池和 Road Solver 机制，不在正式 Height/Hydrolo
 `SourcePocketAnchorCellId` 用于追溯，另选严格位于 Target Footprint 外、非道路、非水体的 `AnchorCellId` 与槽位集合。Encounter 必需槽场可使用攻击走廊和
 NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad 与攻击走廊。所有槽位在同一候选内全局唯一。
 
-**当前实现状态（M3LocalAccepted，IntegrationPending）**
+**当前实现状态（M3LocalAccepted，MergedToMaster，IntegrationPending）**
 
 - 新增独立 `M3R-3.1` 结果层，仅消费 R-3 已接受的三个保留候选；它不修改 R-3 配置、候选顺序、布局 Hash、兼容世界或稳定 v1 合同；
+- M3 生产端已合并至 `master ae9e8f0`，合并后强制 Unity 与基础合同回归通过；该状态只表示 M3 结果已进入集成基线，不表示玩家世界已经消费这些槽场；
 - 默认每个候选生成 `6 + 2 = 8` 个普通槽场、每场 7 个槽位，共 56 个普通槽位；六个 Encounter 槽场按 Encounter 身份稳定排序，道路附加槽场按 `FlowQ` 稳定排序；
 - 每个槽场保存稳定 `FieldId`、种类、Encounter 所有者、源 Pocket Anchor、实际槽 Anchor、道路进度和有序 Slot Cell；字段身份只用于确定性、诊断和生成来源，不表示连接权限；
 - `DistanceReachablePairCount` 仅是按 `MaxCordLengthCM` 计算的诊断计数，不保存任何边；同场或跨场普通弹弓桩都应由运行时使用同一距离、阻挡和资源规则判断；
@@ -1262,8 +1267,7 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 - 回归：旧兼容站点、M6 普通桩任意插入、M11.0 终局唯一槽对及终局材料规则必须保持不变；
 - M3 本地可视抽查：Editor 调试叠层显示展示 Seed 中六个逻辑 Encounter 各有 7 槽的紧凑散点场、道路另有 2 场，且不改变当前兼容世界实体；
 - R-6/R-7 联合 Visible PIE：六个实体建筑各有 7 槽的紧凑散点场、道路另有 2 场；玩家能任意选桩，近距离无遮挡可连，超长、穿过第三桩和穿过既有弦均有明确拒绝且不扣材料；终局仍只有一对 Space 槽；
-- 只有 R-4/R-6 最终快照导出、共享几何/运行时自动化和上述 Visible PIE 均通过，阶段才能从 **IntegrationPending** 晋升为
-  **IntegrationAccepted**。
+- 当前保持 **IntegrationPending**。Integration 已完成 M5.1 槽场快照消费接缝、M6 最大弦长/第三桩/既有弦净空与失败原子回滚；只有 R-4/R-6 最终快照导出、共享几何/运行时自动化和上述 Visible PIE 均通过，阶段才能晋升为 **IntegrationAccepted**。
 
 **Integration 本轮证据**
 
@@ -1317,6 +1321,23 @@ TargetProxy / AttackFace 语义
 - Witness 保存输入、求解器版本、Hash、净空和命中代理；M3 不复制 M6/M9 的公式；
 - 只有 Route、六 Encounter、Biome 逻辑、PVS、Witness 和流程都通过的完整世界候选才能进入 Top 3，再按量化质量分和稳定 ID 选择最终 CandidateId 并生成 `LayoutHash`。
 
+**当前实现状态（M3LocalAccepted，FixtureAuthority，IntegrationPending）**
+
+- 已新增独立 `Encounter Gameplay Finalize` 结果与依赖注入服务边界，按 R3 稳定 `EncounterId`、独立 `EncounterOrder`、R3/R3.1 三重 Hash 精确连接全部候选；只保留完整硬通过 Top 3，并发布独立 `GameplayLayoutHash`，不改写父层身份或兼容 `PCGSummary.LayoutHash`；
+- 正式默认域覆盖全部可达无序槽对、双侧、7 个 Pull、5 个 Aim 点和冻结 Bird 全集；E4/E5 的 Simple 能力证书完整覆盖 4410 个输入，BirdCatalogHash 进入身份与证书，E5 用同一输入关闭 M9 做完整因果消融；
+- 轨迹以目标球面首次接触点计算撞击位置/速度，终止原因、首样本时间、几何接触和 Provider 回显均 fail closed；资源流程保存 15 步有符号 ItemDelta、RequiredStation 与逐步 LedgerHash，验证候选绑定桥门、Furnace 可用性及太空桩/弦真实终局配方；
+- Fixture Authority 已证明六关 Positive Witness、Black 能力门、抽象资源/奖励/桥门/Exit 与零支线闭环，但 Workbench/Simple/Bridge/Reinforced 仍是合成流程步骤，不等同真实 M5 制作目录。R4 v1 因而只接受未认证 Fixture，显式拒绝合成快照冒充 Integration，并保持 `bExternalInputsCertified=false`、`bMonthlyWorldAccepted=false`；生产默认无真实适配器时为 `NotEvaluated`；
+- `M3R4AcceptanceManifest` 冻结 `Manifest=AEBA4E7F337A4D8F`、100 Seed 清单
+  `5610DCBA0A03D9CB`、展示身份
+  `Config=E7831808F41259DA / Result=624FB903F80BA71B / Candidate=2C9798D1B1BE3B14 / GameplayLayout=29811734A4360BC6`
+  与 100 Seed Oracle `89F9BD7DD7026670`；
+- `ABTS.M3.Monthly.EncounterWitness.0` fresh 精确 8/8，100 Seed 为
+  `Terminal=100 Accepted=100 P95MS=363.757 MaxMS=401.359`；失败注入精确 8/8；
+  R3.1、R3、R2、Schema、WeekOne、共享合同、M11.0 分离回归全部通过；
+- fresh `L_ABTS_M3 -ABTSM3R4Smoke` 报告
+  `Terminal=1 Passed=1 Failed=0 M3LocalAccepted=1 FixtureAuthority=1 IntegrationPending=1`，同时证明默认世界未发布真实 Witness。完整证据与日志索引见
+  [M3R-4 子设计稿](M3R4BallisticWitnessAndFlowClosureDesign.md#10-2026-07-30-本地实现与验收结果)。
+
 **退出验收**
 
 - 建议新增 `ABTS.M3.Monthly.EncounterWitness`；冻结的 100 Seed Witness manifest 及其 Hash 必须报告 `Terminal=100, Accepted=100, Rejected=0`，共享接口部分在集成候选运行；
@@ -1333,7 +1354,10 @@ TargetProxy / AttackFace 语义
 
 **阶段边界**
 
-M6/M9 是共享或其他阶段所有权。本阶段只有在集成工作树完成接口适配和联合验证后才能从 **M3LocalAccepted** 晋升为 **IntegrationAccepted**。
+M5.1/M6/M7/M9、真实 M5 制作目录与流程消费、共享合同属于集成或其他阶段所有权。当前只达到
+**M3LocalAccepted（FixtureAuthority，IntegrationPending）**；必须等待集成工作树完成
+M5.1/M6 的真实消费及 M7/M9/候选桥门/奖励流程适配、本工作树完成 R6，再通过共享自动化与
+Visible PIE，才能整体晋升为 **IntegrationAccepted**。
 
 ### 14.8 M3R-5：实现 BiomeDistrict 与 Playable Envelope 表现
 
@@ -1344,6 +1368,21 @@ M6/M9 是共享或其他阶段所有权。本阶段只有在集成工作树完�
 - 至少四种主地貌主题参与六个 Encounter，球面背侧可使用低成本 BackgroundBiome；
 - UE PCG Graph 或现有 HISM 只消费逻辑属性生成装饰，不决定 Mission、道路、可见性或 Witness；
 - 调试层分别显示 Biome、Envelope、DeepWild 和职责覆盖，不再把 `TaskId==None` 全部显示为 Wild。
+
+**当前实现状态（M3LocalAccepted，IntegrationPending）**
+
+- 新增独立的候选绑定 `MonthlyPresentation` 结果层。构造前先完整验证 R-3 `EncounterSpatial`，随后为三个保留候选逐一生成表现快照；它不选择、重排或淘汰候选，也不改写 Source RouteId、RouteCandidateHash、SpatialCandidateHash、`BiomeDistrictId`、Envelope 或 ActiveRole。每个 Cell 保存完整且稳定排序的 Envelope 成员关系，不以单一 PrimaryEnvelope 代替重叠成员；
+- `DisplayBiomeArchetype` 与冻结的逻辑 `BiomeArchetype/BiomeDistrictId` 分离。表现层按 20–45 m 视觉 Beat 编排主题；小于 3 Cell 的显示连通块只在显示副本中确定性合并到邻区多数主题，源 District 身份与全部 R-3 Hash 保持不变。100 Seed 中共发现 2 个逻辑 singleton，第一轮视觉合并后又修复 2 个 Cell 的小碎片；最终显示 singleton 为 0、最小显示连通块为 3 Cell；
+- 材质桥和 HISM 只消费显式预览副本；生产默认不把任一候选宣布为世界权威。材质 LUT 用 Beat/Theme 变体形成低幅明暗节拍，树石 HISM 用同一 Beat 变体形成疏密和尺度变化，故 20–45 m Visual Beat 不再只是 DTO/Hash。固定展示运行时会逐项证明全部材质 Cell 和全部实际 HISM 实例均经过该消费路径，并报告 `PreviewAuthority=1`、`MonthlyAccepted=0`；关闭预览时继续使用兼容世界。权威 `GeneratedCellStates/GeneratedEdgeStates/TerrainVisualField`、`QuerySurface`、旧 TaskGraph 与稳定合同不因预览开关改变；
+- 装饰实例在写入前和散点落点重解析后两次检查保护区：道路、ActiveRole、Target Footprint、NoRoad、攻击走廊与水体均禁止树石侵入。树石 HISM 每次重建重申 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，只作为静态碰撞表现，不成为任务、PVS、Witness、道路或布局身份的数据源。
+- Editor 调试叠层可独立开关 Biome、Envelope 边界、Visual Beat 边界和 ActiveRole/DeepWild 覆盖；调试开关不进入表现配置或候选身份。PIE 使用精确预览 Candidate 时可按 `F7` 切换逻辑区域快捷叠层：红色球点表示 Target Footprint，橙色点线表示 Attack Corridor；再次按 `F7` 关闭。该快捷键只存在于 Editor 构建，不修改 Input.ini、玩家输入映射或候选 Hash。也可用 `-ABTSM3R5LogicRegions` 在启动时默认开启；若没有同时提供 `-ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4`，叠层会明确显示不可用而不会隐式选择候选。
+
+**本地自动验收证据**
+
+- `M3R5AcceptanceManifest` 冻结为 `ManifestHash=9E5A2FE0E563A7C4`，展示 Config/Result/Preview Hash 分别为 `9BB9CF98FB4127F9/EC87F999625CBE44/9BE1F04A45277AEF`；`ABTS.M3.Monthly.Biome.0`、`ABTS.M3.Monthly.BiomeFailure` 与 `ABTS.M3.Monthly.Biome.Sweep100` 各自冻结为 1 个 UE Automation Test，Sweep 内部再完整遍历 100 Seed；
+- 100 Seed 为 `Terminal=100, Accepted=100, Rejected=0`，共验证 300 个候选表现计划，冻结 Oracle 为 `6751B93DA5E4C778`。最差统计为 ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、六 Encounter 主地貌主题下限 `4`、最小显示连通块 `3 Cell`、全局显示邻接边界率 `21‰`；逻辑 singleton 共 2 个、小碎片修复共 2 Cell、最终显示 singleton 为 0，受保护区域实例违规为 0；
+- 候选表现构造耗时最终基线 `P95=127.860 ms`、`Max=139.359 ms`，满足冻结的 `P95<=250 ms / Max<=1000 ms` 算法预算；同一输入深度重放一致，日志开关与显式预览开关不改变 R-3 身份。
+- `SurfaceSubdivision=7` 完整显式预览 runtime 通过等价的唯一顶点地表采样缓存，将重复的三角形顶点高度/法线/颜色查询合并为每个 icosphere 顶点一次采样；没有降低 Subdivision、关闭碰撞或跳过材质/HISM。最终 fresh 实测 `PlannerMS=130.092`、`RebuildMS=6057.156`、`PeakPhysicalMB=2221.3`，满足冻结的 `1000 ms / 8000 ms / 2.25GB×115%` 门槛。
 
 **退出验收**
 
@@ -1359,7 +1398,12 @@ M6/M9 是共享或其他阶段所有权。本阶段只有在集成工作树完�
 
 **阶段边界**
 
-R-5 可以与 R-4 的集成等待并行，但最终必须对 R-3 正式六 Encounter 结果重跑，不得只在临时路线样本上验收。退出后状态为 **M3LocalAccepted**。
+R-5 已对 R-3 正式六 Encounter 的全部保留候选完成 100 Seed 重跑，而不是在临时路线样本上验收，因此候选表现算法退出状态为 **M3LocalAccepted（IntegrationPending）**。这不等于完整表现阶段已经 IntegrationAccepted：
+
+- 完整 `SurfaceSubdivision=7` 性能门已在比“无材质资源重建”更严格的 MaterialReady + HISM 显式预览 runtime 中通过：唯一顶点采样缓存把旧的约 `16.6 s` 降至 `6.057 s`，且峰值物理内存 `2221.3 MB` 未越界。该门仍冻结在 R-5 Manifest 和 runtime 中，后续不得通过降低 Subdivision 或放宽常量静默绕过；
+- 固定展示 Seed 的可见 PIE 必须显式使用 `-ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4`，再检查 Lit/Unlit、20–45 m 地貌节拍、关闭 Debug Layer 后的引导连续性和保护区无装饰穿插；不带精确 Candidate 的兼容画面不能作为 R-5 视觉证据；
+- 当前 `VisualBiomeBoundaryPermille` 是整球邻接边的粗筛指标；若可见 PIE 仍在 Playable Envelope 内观察到局部碎片，R-7 的 1000 Seed 调参门应补充 Envelope-only 边界率，而不是放宽 R-5 已冻结的最小连通块与全局边界常量；
+- `QueryAndPhysics` 树石与真实 M6 动态代理、M9 开发者穿行/练习场及 Character/Visibility 的集成碰撞回归仍须在集成工作树完成。上述可见 PIE 与跨系统回归通过后，R-5 才能晋升为 **IntegrationAccepted**。
 
 ### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
 
@@ -1561,6 +1605,7 @@ Editor-only Debug Layer：
 - Start PVS 绿色/灰色连线；
 - Ballistic Witness 轨迹；
 - Playable Envelope 与 BiomeDistrict 边界；
+- `F7`：Target Footprint 红色球点、Attack Corridor 橙色点线；
 - RejectReason 叠层。
 
 正式 PIE 默认全部关闭，仅保留玩家应见的 M10 侦察/轨迹 UI。

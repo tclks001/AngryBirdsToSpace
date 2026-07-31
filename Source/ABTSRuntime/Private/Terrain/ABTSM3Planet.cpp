@@ -5,7 +5,11 @@
 #include "ABTSRuntime.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "HAL/PlatformTime.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+#include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
@@ -83,9 +87,23 @@ AABTSM3Planet::AABTSM3Planet()
 
 bool AABTSM3Planet::RebuildPlanet()
 {
+	const double RebuildStartSeconds =
+		FPlatformTime::Seconds();
+	LastM3RebuildDurationMS = 0.0;
+	LastMonthlyPresentationBuildDurationMS = 0.0;
+	bMonthlyMaterialRhythmApplied = false;
+	MonthlyMaterialRhythmCellCount = 0;
+	MonthlyDecorAccent0InstanceCount = 0;
+	MonthlyDecorAccent1InstanceCount = 0;
 	bM3PresentationReady = false;
+	bMonthlyPresentationPreviewActive = false;
+	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
+	ActiveMonthlyPresentationPreviewCandidateHash = 0;
+	MonthlyPresentationResult =
+		FABTSM3MonthlyPresentationResult();
 	MonthlySlingshotFieldResult =
 		FABTSM3MonthlySlingshotFieldResult();
+	MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 	MonthlySlingshotFieldDebugData =
 		FABTSM3MonthlySlingshotFieldDebugData();
@@ -123,6 +141,34 @@ bool AABTSM3Planet::RebuildPlanet()
 			TEXT("[ABTS][M11.0][FinaleFrame] Rejected after final terrain-pad resolution."));
 	}
 	BuildM3ContinuousSurface();
+	TArray<FABTSM3CellState> PresentationCellStates;
+	TArray<FABTSM3CellEdgeState> PresentationEdgeStates;
+	const FABTSM3MonthlyCandidatePresentation*
+		PresentationCandidate = nullptr;
+	const bool bPreviewDataReady =
+		TryBuildMonthlyPresentationPreviewData(
+			PresentationCellStates,
+			PresentationEdgeStates,
+			PresentationCandidate);
+	FABTSM3TerrainVisualField PresentationVisualField;
+	if (bPreviewDataReady)
+	{
+		PresentationVisualField.Initialize(
+			PlanetRadiusCM,
+			ResolvedHeightScaleCM,
+			ResolvedWaterDepthCM,
+			HeightBlendWidthCM,
+			TerrainBlendWidthCM,
+			SurfaceNormalSmoothingDistanceCM,
+			LogicalCells,
+			PresentationCellStates,
+			PresentationEdgeStates,
+			TrailVisualHalfWidthCM,
+			MainRoadVisualHalfWidthCM,
+			StreamVisualHalfWidthCM,
+			ShallowRiverVisualHalfWidthCM,
+			DeepRiverVisualHalfWidthCM);
+	}
 	bool bMaterialReady = false;
 	bool bPresentationReady = bFinaleFrameReady;
 	if (TerrainMaterial)
@@ -131,14 +177,37 @@ bool AABTSM3Planet::RebuildPlanet()
 		bMaterialReady = TerrainMaterialBridge->Initialize(ContinuousSurface, TerrainMaterial, GetPlanetCenterWorld(), PlanetRadiusCM, TerrainBlendWidthCM,
 			RoadColor, TrailVisualHalfWidthCM, MainRoadVisualHalfWidthCM,
 			RiverColor, StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM,
-			LogicalCells, GeneratedCellStates, GeneratedEdgeStates, *TerrainVisualField);
+			LogicalCells,
+			bPreviewDataReady
+				? PresentationCellStates
+				: GeneratedCellStates,
+			bPreviewDataReady
+				? PresentationEdgeStates
+				: GeneratedEdgeStates,
+			bPreviewDataReady
+				? PresentationVisualField
+				: *TerrainVisualField,
+			bPreviewDataReady
+				? PresentationCandidate
+				: nullptr);
+		bMonthlyMaterialRhythmApplied =
+			bMaterialReady
+			&& TerrainMaterialBridge->
+				IsMonthlyPresentationRhythmApplied();
+		MonthlyMaterialRhythmCellCount =
+			bMaterialReady
+			? TerrainMaterialBridge->
+				GetMonthlyPresentationRhythmCellCount()
+			: 0;
 		if (!bMaterialReady)
 		{
 			bPresentationReady = false;
 			UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][M3] Terrain material bridge failed. Check M3 LUT parameter names and texture types."));
 		}
 	}
-	BuildDecorInstances();
+	BuildDecorInstances(
+		bPreviewDataReady ? &PresentationCellStates : nullptr,
+		bPreviewDataReady ? PresentationCandidate : nullptr);
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M5.2][Collision] ForestHISM=%s RockHISM=%s StaticPhysics=1 DestroyableOutsideLaunch=0 PhysicsBlend=%.1f"),
 		*UEnum::GetValueAsString(ForestHISM->GetCollisionEnabled()),
@@ -152,11 +221,18 @@ bool AABTSM3Planet::RebuildPlanet()
 		RoadCells += State.bRoad ? 1 : 0;
 		WaterCells += State.bWater ? 1 : 0;
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3] Ready=%d Seed=%d Version=%d Attempt=%d Tasks=%d Links=%d Cells=%d Edges=%d RoadCells=%d WaterCells=%d Buildings=%d ForestInstances=%d RockInstances=%d MaterialAssigned=%d MaterialReady=%d FlatHeightExperiment=%d EffectiveHeightScale=%.1f EffectiveWaterDepth=%.1f"),
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3] Ready=%d Seed=%d Version=%d Attempt=%d Tasks=%d Links=%d Cells=%d Edges=%d RoadCells=%d WaterCells=%d Buildings=%d ForestInstances=%d RockInstances=%d MaterialAssigned=%d MaterialReady=%d FlatHeightExperiment=%d EffectiveHeightScale=%.1f EffectiveWaterDepth=%.1f M3R5PreviewAuthority=%d M3R5PreviewCandidate=%d M3R5PreviewHash=%016llX"),
 		bPresentationReady ? 1 : 0, WorldSeed, PCGSummary.GeneratorVersion, PCGSummary.AttemptIndex, GeneratedTasks.Num(), GeneratedTaskLinks.Num(),
 		GeneratedCellStates.Num(), GeneratedEdgeStates.Num(), RoadCells, WaterCells, BuildingSpawnSites.Num(), ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), TerrainMaterial ? 1 : 0, bMaterialReady ? 1 : 0,
-		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM);
+		bDisableTerrainHeightVariationExperiment ? 1 : 0, ResolvedHeightScaleCM, ResolvedWaterDepthCM,
+		bMonthlyPresentationPreviewActive ? 1 : 0,
+		ActiveMonthlyPresentationPreviewCandidateId,
+		static_cast<unsigned long long>(
+			ActiveMonthlyPresentationPreviewCandidateHash));
 	bM3PresentationReady = bPresentationReady;
+	LastM3RebuildDurationMS =
+		(FPlatformTime::Seconds() - RebuildStartSeconds)
+		* 1000.0;
 #if WITH_EDITOR
 	if (bM3PresentationReady)
 	{
@@ -168,8 +244,24 @@ bool AABTSM3Planet::RebuildPlanet()
 		{
 			DrawMonthlySpatialDebugOverlay();
 		}
+		if (bDrawMonthlyPresentationDebugOverlay)
+		{
+			DrawMonthlyPresentationDebugOverlay();
+		}
 	}
 #endif
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5][RebuildBudget] DurationMS=%.3f BudgetMS=%d Passed=%d SurfaceSubdivision=%d PreviewAuthority=%d"),
+		LastM3RebuildDurationMS,
+		FABTSM3R5AcceptanceManifest::
+			FullRebuildBudgetMS,
+		LastM3RebuildDurationMS
+			<= FABTSM3R5AcceptanceManifest::
+				FullRebuildBudgetMS
+			? 1
+			: 0,
+		SurfaceSubdivision,
+		bMonthlyPresentationPreviewActive ? 1 : 0);
 	return bM3PresentationReady;
 }
 
@@ -200,12 +292,17 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
 		MonthlyRoutePool = FABTSM3MonthlyRoutePool();
 		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
+		MonthlyPresentationResult =
+			FABTSM3MonthlyPresentationResult();
 		MonthlySlingshotFieldResult =
 			FABTSM3MonthlySlingshotFieldResult();
+		MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
 		MonthlyRouteDebugData = FABTSM3MonthlyRouteDebugData();
 		MonthlySpatialDebugData = FABTSM3MonthlySpatialDebugData();
+		MonthlyPresentationDebugData =
+			FABTSM3MonthlyPresentationDebugData();
 		MonthlySlingshotFieldDebugData =
 			FABTSM3MonthlySlingshotFieldDebugData();
 #endif
@@ -286,6 +383,65 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySpatialResult,
 		MonthlySpatialDebugData);
 #endif
+	MonthlyPresentationResult =
+		FABTSM3MonthlyPresentationResult();
+	FString PresentationFailure;
+	if (bSpatialBuilt)
+	{
+		const double PresentationBuildStartSeconds =
+			FPlatformTime::Seconds();
+		const bool bPresentationBuilt =
+			FABTSM3MonthlyPresentationBuilder::Build(
+				WorldSeed,
+				MonthlyPresentationConfig,
+				MonthlyEncounterSpatialConfig,
+				MonthlyRouteConfig,
+				LogicalCells,
+				PlanetRadiusCM,
+				MonthlyRoutePool,
+				MonthlySpatialResult,
+				FABTSM3MonthlyPresentationFaultInjection(),
+				MonthlyPresentationResult,
+				PresentationFailure);
+		LastMonthlyPresentationBuildDurationMS =
+			(FPlatformTime::Seconds()
+				- PresentationBuildStartSeconds)
+			* 1000.0;
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3R5][PlannerBudget] DurationMS=%.3f BudgetMS=%d Passed=%d CandidatePlans=%d PreviewAuthority=0 MonthlyAccepted=0"),
+			LastMonthlyPresentationBuildDurationMS,
+			FABTSM3R5AcceptanceManifest::
+				PlannerMaxBudgetMS,
+			LastMonthlyPresentationBuildDurationMS
+				<= FABTSM3R5AcceptanceManifest::
+					PlannerMaxBudgetMS
+				? 1
+				: 0,
+			MonthlyPresentationResult
+				.CandidatePresentations.Num());
+		if (!bPresentationBuilt)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3R5][BiomePresentation] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1 MonthlyAccepted=0"),
+			WorldSeed,
+			FABTSM3MonthlyPresentationBuilder::
+				GetRejectReasonName(
+					MonthlyPresentationResult.RejectReason),
+			*PresentationFailure);
+		}
+	}
+#if WITH_EDITORONLY_DATA
+	bool bPresentationPreviewRequested = false;
+	const int32 PresentationDebugCandidateId =
+		ResolveMonthlyPresentationPreviewCandidateId(
+			bPresentationPreviewRequested);
+	FABTSM3MonthlyPresentationBuilder::BuildDebugData(
+		MonthlyPresentationResult,
+		bPresentationPreviewRequested
+			? PresentationDebugCandidateId
+			: INDEX_NONE,
+		MonthlyPresentationDebugData);
+#endif
 	MonthlySlingshotFieldResult =
 		FABTSM3MonthlySlingshotFieldResult();
 	FString SlingshotFieldFailure;
@@ -312,6 +468,23 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySlingshotFieldResult,
 		MonthlySlingshotFieldDebugData);
 #endif
+	FString WitnessFailure;
+	if (!FABTSM3MonthlyWitnessBuilder::Build(
+			WorldSeed,
+			MonthlyWitnessConfig,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			nullptr,
+			MonthlyWitnessResult,
+			WitnessFailure))
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M3R4][Witness] Pending. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+			WorldSeed,
+			FABTSM3MonthlyWitnessBuilder::GetRejectReasonName(
+				MonthlyWitnessResult.RejectReason),
+			*WitnessFailure);
+	}
 	return true;
 }
 
@@ -365,6 +538,215 @@ bool AABTSM3Planet::ValidateMonthlySpatialResult(
 	return false;
 }
 
+bool AABTSM3Planet::ValidateMonthlyPresentationResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlyPresentationRejectReason RejectReason =
+		EABTSM3MonthlyPresentationRejectReason::None;
+	if (FABTSM3MonthlyPresentationBuilder::Validate(
+			MonthlyPresentationConfig,
+			MonthlyEncounterSpatialConfig,
+			MonthlyRouteConfig,
+			LogicalCells,
+			PlanetRadiusCM,
+			MonthlyRoutePool,
+			MonthlySpatialResult,
+			FABTSM3MonthlyPresentationFaultInjection(),
+			MonthlyPresentationResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyPresentationBuilder::
+			GetRejectReasonName(RejectReason),
+		*OutFailure);
+	return false;
+}
+
+int32 AABTSM3Planet::
+	ResolveMonthlyPresentationPreviewCandidateId(
+		bool& bOutRequested) const
+{
+	bOutRequested = bEnableMonthlyPresentationPreview
+		|| FParse::Param(
+			FCommandLine::Get(),
+			TEXT("ABTSM3R5Preview"));
+	int32 CandidateId =
+		MonthlyPresentationPreviewCandidateId;
+	int32 CommandLineCandidateId = INDEX_NONE;
+	if (FParse::Value(
+			FCommandLine::Get(),
+			TEXT("ABTSM3R5PreviewCandidate="),
+			CommandLineCandidateId))
+	{
+		bOutRequested = true;
+		CandidateId = CommandLineCandidateId;
+	}
+	return CandidateId;
+}
+
+bool AABTSM3Planet::TryBuildMonthlyPresentationPreviewData(
+	TArray<FABTSM3CellState>& OutCellStates,
+	TArray<FABTSM3CellEdgeState>& OutEdgeStates,
+	const FABTSM3MonthlyCandidatePresentation*&
+		OutCandidate)
+{
+	OutCellStates.Reset();
+	OutEdgeStates.Reset();
+	OutCandidate = nullptr;
+	bMonthlyPresentationPreviewActive = false;
+	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
+	ActiveMonthlyPresentationPreviewCandidateHash = 0;
+
+	bool bPreviewRequested = false;
+	const int32 CandidateId =
+		ResolveMonthlyPresentationPreviewCandidateId(
+			bPreviewRequested);
+	if (!bPreviewRequested)
+	{
+		return false;
+	}
+	if (CandidateId == INDEX_NONE)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5][Preview] Rejected Reason=ExplicitCandidateRequired MonthlyAccepted=0 CompatibilityWorldPreserved=1"));
+		return false;
+	}
+	if (!MonthlyPresentationResult.bPresentationValid
+		|| MonthlyPresentationResult.bMonthlyWorldAccepted)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=PresentationResultInvalid MonthlyAccepted=0 CompatibilityWorldPreserved=1"),
+			CandidateId);
+		return false;
+	}
+	const FABTSM3MonthlyCandidatePresentation* Presentation =
+		FABTSM3MonthlyPresentationBuilder::
+			FindCandidatePresentation(
+				MonthlyPresentationResult,
+				CandidateId);
+	const FABTSM3MonthlySpatialCandidate* Spatial =
+		MonthlySpatialResult.RetainedCandidates
+			.FindByPredicate(
+				[CandidateId](
+					const FABTSM3MonthlySpatialCandidate&
+						Candidate)
+				{
+					return Candidate.SourceRouteCandidateId
+						== CandidateId;
+				});
+	if (Presentation == nullptr
+		|| Spatial == nullptr
+		|| Presentation->SourceSpatialCandidateHash
+			!= Spatial->SpatialCandidateHash
+		|| Presentation->SourceRecomputedRouteCandidateHash
+			!= Spatial->RecomputedRoute.CandidateHash
+		|| Presentation->Cells.Num()
+			!= GeneratedCellStates.Num())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=CandidateJoinMismatch MonthlyAccepted=0 CompatibilityWorldPreserved=1"),
+			CandidateId);
+		return false;
+	}
+
+	OutCellStates = GeneratedCellStates;
+	for (const FABTSM3MonthlyPresentationCell& Cell :
+		Presentation->Cells)
+	{
+		if (!OutCellStates.IsValidIndex(Cell.CellId))
+		{
+			OutCellStates.Reset();
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=CellIdentity Cell=%d MonthlyAccepted=0 CompatibilityWorldPreserved=1"),
+				CandidateId,
+				Cell.CellId);
+			return false;
+		}
+		FABTSM3CellState& State =
+			OutCellStates[Cell.CellId];
+		State.TerrainType = Cell.VisualTerrainType;
+		State.bWater = Cell.bWater;
+		State.bRoad =
+			(Cell.ActiveRoleMask
+				& static_cast<int32>(
+					EABTSM3ActiveRole::Route))
+			!= 0;
+	}
+
+	OutEdgeStates = GeneratedEdgeStates;
+	TMap<FABTSM3CellEdgeKey, int32> EdgeIndexByKey;
+	EdgeIndexByKey.Reserve(OutEdgeStates.Num());
+	for (int32 EdgeIndex = 0;
+		EdgeIndex < OutEdgeStates.Num();
+		++EdgeIndex)
+	{
+		OutEdgeStates[EdgeIndex].Transport =
+			EABTSM3TransportType::None;
+		EdgeIndexByKey.Add(
+			OutEdgeStates[EdgeIndex].Key,
+			EdgeIndex);
+	}
+	for (int32 Order = 1;
+		Order < Spatial->RecomputedRoute
+			.OrderedRoadCellIds.Num();
+		++Order)
+	{
+		const FABTSM3CellEdgeKey Key(
+			Spatial->RecomputedRoute
+				.OrderedRoadCellIds[Order - 1],
+			Spatial->RecomputedRoute
+				.OrderedRoadCellIds[Order]);
+		const int32* EdgeIndex =
+			EdgeIndexByKey.Find(Key);
+		if (EdgeIndex == nullptr)
+		{
+			FABTSM3CellEdgeState& Added =
+				OutEdgeStates.AddDefaulted_GetRef();
+			Added.Key = Key;
+			Added.Transport =
+				EABTSM3TransportType::MainRoad;
+			EdgeIndexByKey.Add(
+				Key,
+				OutEdgeStates.Num() - 1);
+			continue;
+		}
+		if (!OutEdgeStates.IsValidIndex(*EdgeIndex))
+		{
+			OutCellStates.Reset();
+			OutEdgeStates.Reset();
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=RouteEdgeIndex Edge=(%d,%d) MonthlyAccepted=0 CompatibilityWorldPreserved=1"),
+				CandidateId,
+				Key.CellA,
+				Key.CellB);
+			return false;
+		}
+		OutEdgeStates[*EdgeIndex].Transport =
+			EABTSM3TransportType::MainRoad;
+	}
+
+	OutCandidate = Presentation;
+	bMonthlyPresentationPreviewActive = true;
+	ActiveMonthlyPresentationPreviewCandidateId =
+		CandidateId;
+	ActiveMonthlyPresentationPreviewCandidateHash =
+		Presentation->CandidatePresentationHash;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5][Preview] PreviewAuthority=1 MonthlyAccepted=0 Candidate=%d SourceSpatialCandidate=%016llX PresentationCandidate=%016llX Cells=%d RoadCells=%d"),
+		CandidateId,
+		static_cast<unsigned long long>(
+			Presentation->SourceSpatialCandidateHash),
+		static_cast<unsigned long long>(
+			Presentation->CandidatePresentationHash),
+		Presentation->Cells.Num(),
+		Spatial->RecomputedRoute.OrderedRoadCellIds.Num());
+	return true;
+}
+
 bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
 	FString& OutFailure) const
 {
@@ -387,6 +769,43 @@ bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
 			GetRejectReasonName(RejectReason),
 		*OutFailure);
 	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlyWitnessResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlyWitnessRejectReason RejectReason =
+		EABTSM3MonthlyWitnessRejectReason::None;
+	if (FABTSM3MonthlyWitnessBuilder::Validate(
+			MonthlyWitnessConfig,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			MonthlyWitnessResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyWitnessBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::FinalizeMonthlyGameplay(
+	const IABTSM3MonthlyWitnessServices& Services,
+	FString& OutFailure)
+{
+	return FABTSM3MonthlyWitnessBuilder::Build(
+		WorldSeed,
+		MonthlyWitnessConfig,
+		MonthlySpatialResult,
+		MonthlySlingshotFieldResult,
+		&Services,
+		MonthlyWitnessResult,
+		OutFailure);
 }
 
 #if WITH_EDITOR
@@ -511,6 +930,232 @@ void AABTSM3Planet::DrawMonthlySpatialDebugOverlay() const
 		MonthlySpatialDebugData.TargetAnchorCellIds,
 		FColor::Red,
 		58.0f);
+}
+
+void AABTSM3Planet::
+	DrawMonthlyPresentationDebugOverlay() const
+{
+	if (GetWorld() == nullptr
+		|| !MonthlyPresentationResult.bPresentationValid)
+	{
+		return;
+	}
+	const FABTSM3MonthlyCandidatePresentation* Candidate =
+		FABTSM3MonthlyPresentationBuilder::
+			FindCandidatePresentation(
+				MonthlyPresentationResult,
+				MonthlyPresentationDebugData
+					.SourceRouteCandidateId);
+	if (Candidate == nullptr)
+	{
+		return;
+	}
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 250.0f;
+	for (const FABTSM3MonthlyPresentationCell& Cell :
+		Candidate->Cells)
+	{
+		if (!LogicalCells.IsValidIndex(Cell.CellId))
+		{
+			continue;
+		}
+		FColor Color = FColor(60, 60, 60);
+		switch (Cell.DisplayBiomeArchetype)
+		{
+		case EABTSM3BiomeArchetype::Forest:
+			Color = FColor(30, 150, 50);
+			break;
+		case EABTSM3BiomeArchetype::Highland:
+			Color = FColor(180, 120, 50);
+			break;
+		case EABTSM3BiomeArchetype::Mountain:
+			Color = FColor(160, 160, 170);
+			break;
+		case EABTSM3BiomeArchetype::Water:
+			Color = FColor(30, 100, 220);
+			break;
+		case EABTSM3BiomeArchetype::Plain:
+			Color = FColor(90, 190, 80);
+			break;
+		case EABTSM3BiomeArchetype::Background:
+		default:
+			break;
+		}
+		if (bDrawMonthlyPresentationBiomeLayer)
+		{
+			DrawDebugPoint(
+				GetWorld(),
+				Center
+					+ LogicalCells[Cell.CellId].UnitCenter
+						* Radius,
+				Cell.bPlayable ? 9.0f : 4.0f,
+				Color,
+				false,
+				30.0f,
+				0);
+		}
+		if (bDrawMonthlyPresentationCoverageLayer
+			&& (Cell.bDeepWild
+				|| Cell.ActiveRoleMask != 0))
+		{
+			DrawDebugPoint(
+				GetWorld(),
+				Center
+					+ LogicalCells[Cell.CellId].UnitCenter
+						* (Radius + 30.0f),
+				Cell.bDeepWild ? 13.0f : 10.0f,
+				Cell.bDeepWild
+					? FColor::Magenta
+					: FColor::Cyan,
+				false,
+				30.0f,
+				0);
+		}
+		for (const int32 NeighborId :
+			LogicalCells[Cell.CellId].NeighborCellIds)
+		{
+			if (NeighborId <= Cell.CellId
+				|| !Candidate->Cells.IsValidIndex(
+					NeighborId)
+				|| !LogicalCells.IsValidIndex(NeighborId))
+			{
+				continue;
+			}
+			const FABTSM3MonthlyPresentationCell&
+				Neighbor = Candidate->Cells[NeighborId];
+			const FVector StartDirection =
+				LogicalCells[Cell.CellId].UnitCenter;
+			const FVector EndDirection =
+				LogicalCells[NeighborId].UnitCenter;
+			if (bDrawMonthlyPresentationEnvelopeLayer
+				&& Cell.EnvelopeIds
+					!= Neighbor.EnvelopeIds)
+			{
+				DrawDebugLine(
+					GetWorld(),
+					Center + StartDirection
+						* (Radius + 55.0f),
+					Center + EndDirection
+						* (Radius + 55.0f),
+					FColor::Yellow,
+					false,
+					30.0f,
+					0,
+					2.0f);
+			}
+			if (bDrawMonthlyPresentationVisualBeatLayer
+				&& Cell.VisualBeatId
+					!= Neighbor.VisualBeatId)
+			{
+				DrawDebugLine(
+					GetWorld(),
+					Center + StartDirection
+						* (Radius + 80.0f),
+					Center + EndDirection
+						* (Radius + 80.0f),
+					FColor(210, 90, 255),
+					false,
+					30.0f,
+					0,
+					2.0f);
+			}
+		}
+	}
+}
+
+bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
+	const float LifeTimeSeconds,
+	int32& OutTargetFootprintCellCount,
+	int32& OutAttackCorridorCellCount) const
+{
+	OutTargetFootprintCellCount = 0;
+	OutAttackCorridorCellCount = 0;
+	if (GetWorld() == nullptr
+		|| !MonthlyPresentationResult.bPresentationValid)
+	{
+		return false;
+	}
+	const FABTSM3MonthlyCandidatePresentation* Candidate =
+		FABTSM3MonthlyPresentationBuilder::
+			FindCandidatePresentation(
+				MonthlyPresentationResult,
+				MonthlyPresentationDebugData
+					.SourceRouteCandidateId);
+	if (Candidate == nullptr)
+	{
+		return false;
+	}
+
+	const FVector Center = GetPlanetCenterWorld();
+	const float Radius = PlanetRadiusCM + 360.0f;
+	const float DrawLifeTime =
+		FMath::Clamp(LifeTimeSeconds, 0.05f, 5.0f);
+	for (const FABTSM3MonthlyPresentationCell& Cell :
+		Candidate->Cells)
+	{
+		if (!LogicalCells.IsValidIndex(Cell.CellId))
+		{
+			continue;
+		}
+		const FVector Position =
+			Center
+			+ LogicalCells[Cell.CellId].UnitCenter
+				* Radius;
+		if (Cell.bTargetFootprint)
+		{
+			++OutTargetFootprintCellCount;
+			DrawDebugSphere(
+				GetWorld(),
+				Position,
+				26.0f,
+				6,
+				FColor(255, 45, 45),
+				false,
+				DrawLifeTime,
+				0,
+				3.0f);
+		}
+		if (!Cell.bAttackCorridor)
+		{
+			continue;
+		}
+		++OutAttackCorridorCellCount;
+		DrawDebugPoint(
+			GetWorld(),
+			Position,
+			18.0f,
+			FColor(255, 165, 0),
+			false,
+			DrawLifeTime,
+			0);
+		for (const int32 NeighborId :
+			LogicalCells[Cell.CellId].NeighborCellIds)
+		{
+			if (NeighborId <= Cell.CellId
+				|| !Candidate->Cells.IsValidIndex(
+					NeighborId)
+				|| !LogicalCells.IsValidIndex(
+					NeighborId)
+				|| !Candidate->Cells[NeighborId]
+					.bAttackCorridor)
+			{
+				continue;
+			}
+			DrawDebugLine(
+				GetWorld(),
+				Position,
+				Center
+					+ LogicalCells[NeighborId].UnitCenter
+						* Radius,
+				FColor(255, 165, 0),
+				false,
+				DrawLifeTime,
+				0,
+				5.0f);
+		}
+	}
+	return OutTargetFootprintCellCount > 0
+		&& OutAttackCorridorCellCount > 0;
 }
 #endif
 
@@ -692,6 +1337,51 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 {
 	FUnitSphereMesh Mesh;
 	BuildUnitIcosphere(SurfaceSubdivision, Mesh);
+	TArray<int32> CachedCellIds;
+	TArray<FVector> CachedSurfaceVertices;
+	TArray<FVector> CachedSurfaceNormals;
+	TArray<FLinearColor> CachedSurfaceColors;
+	CachedCellIds.SetNumUninitialized(Mesh.Vertices.Num());
+	CachedSurfaceVertices.SetNumUninitialized(
+		Mesh.Vertices.Num());
+	CachedSurfaceNormals.SetNumUninitialized(
+		Mesh.Vertices.Num());
+	CachedSurfaceColors.SetNumUninitialized(
+		Mesh.Vertices.Num());
+	float MaxSurfaceNormalTiltDegrees = 0.0f;
+	int32 ExtremeSurfaceNormalCount = 0;
+
+	// Surface subdivision 7 shares each icosphere vertex across several
+	// triangles, while the material requires triangle-local UV candidates.
+	// Cache the expensive surface-field samples once per unique vertex, then
+	// duplicate only the already-resolved values into the PMC vertex stream.
+	for (int32 VertexIndex = 0;
+		VertexIndex < Mesh.Vertices.Num();
+		++VertexIndex)
+	{
+		const FVector Unit =
+			Mesh.Vertices[VertexIndex].GetSafeNormal();
+		CachedCellIds[VertexIndex] = FindNearestCell(Unit);
+		CachedSurfaceVertices[VertexIndex] =
+			Unit * TerrainVisualField->GetSurfaceRadius(Unit);
+		const FVector SurfaceNormal =
+			TerrainVisualField->GetSurfaceNormal(Unit);
+		CachedSurfaceNormals[VertexIndex] = SurfaceNormal;
+		CachedSurfaceColors[VertexIndex] =
+			TerrainVisualField->GetDebugTerrainColor(Unit);
+		const float NormalTiltDegrees =
+			FMath::RadiansToDegrees(FMath::Acos(
+				FMath::Clamp(
+					FVector::DotProduct(Unit, SurfaceNormal),
+					-1.0f,
+					1.0f)));
+		MaxSurfaceNormalTiltDegrees = FMath::Max(
+			MaxSurfaceNormalTiltDegrees,
+			NormalTiltDegrees);
+		ExtremeSurfaceNormalCount +=
+			NormalTiltDegrees > 80.0f ? 1 : 0;
+	}
+
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
 	TArray<FVector> Normals;
@@ -702,15 +1392,13 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 	Triangles.Reserve(Mesh.Triangles.Num() * 3);
 	Normals.Reserve(Mesh.Triangles.Num() * 3);
 	Colors.Reserve(Mesh.Triangles.Num() * 3);
-	float MaxSurfaceNormalTiltDegrees = 0.0f;
-	int32 ExtremeSurfaceNormalCount = 0;
 
 	for (const FIntVector& Triangle : Mesh.Triangles)
 	{
 		const int32 CandidateCellIds[3] = {
-			FindNearestCell(Mesh.Vertices[Triangle.X]),
-			FindNearestCell(Mesh.Vertices[Triangle.Y]),
-			FindNearestCell(Mesh.Vertices[Triangle.Z])};
+			CachedCellIds[Triangle.X],
+			CachedCellIds[Triangle.Y],
+			CachedCellIds[Triangle.Z]};
 		const auto EncodeCellId = [](const int32 CellId)
 		{
 			return FVector2D(static_cast<float>(CellId >> 8), static_cast<float>(CellId & 0xff));
@@ -720,22 +1408,20 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 		const FVector2D EncodedC = EncodeCellId(CandidateCellIds[2]);
 		for (int32 Corner = 0; Corner < 3; ++Corner)
 		{
-			const FVector Unit = Mesh.Vertices[Triangle[Corner]].GetSafeNormal();
-			const int32 CellId = FindNearestCell(Unit);
+			const int32 SourceVertexIndex = Triangle[Corner];
 			const int32 BaseIndex = Vertices.Num();
-			Vertices.Add(Unit * TerrainVisualField->GetSurfaceRadius(Unit));
-			const FVector SurfaceNormal = TerrainVisualField->GetSurfaceNormal(Unit);
-			Normals.Add(SurfaceNormal);
-			const float NormalTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Unit, SurfaceNormal), -1.0f, 1.0f)));
-			MaxSurfaceNormalTiltDegrees = FMath::Max(MaxSurfaceNormalTiltDegrees, NormalTiltDegrees);
-			ExtremeSurfaceNormalCount += NormalTiltDegrees > 80.0f ? 1 : 0;
+			Vertices.Add(
+				CachedSurfaceVertices[SourceVertexIndex]);
+			Normals.Add(
+				CachedSurfaceNormals[SourceVertexIndex]);
 			// UV0/1/2 are constant per triangle: three material candidate CellIds.
 			// UV3 is one-hot so the material can reconstruct barycentric role if needed.
 			UV0.Add(EncodedA);
 			UV1.Add(EncodedB);
 			UV2.Add(EncodedC);
 			UV3.Emplace(Corner == 0 ? 1.0f : 0.0f, Corner == 1 ? 1.0f : 0.0f);
-			Colors.Add(TerrainVisualField->GetDebugTerrainColor(Unit));
+			Colors.Add(
+				CachedSurfaceColors[SourceVertexIndex]);
 			Triangles.Add(BaseIndex);
 		}
 	}
@@ -745,19 +1431,33 @@ void AABTSM3Planet::BuildM3ContinuousSurface()
 	// Rebuild Chaos state after installing the runtime-generated M3 section.
 	ContinuousSurface->RecreatePhysicsState();
 	if (TerrainMaterial) ContinuousSurface->SetMaterial(0, TerrainMaterial);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][SurfaceNormals] SmoothingDistance=%.1f MaxTilt=%.2f ExtremeOver80=%d Vertices=%d"),
-		SurfaceNormalSmoothingDistanceCM, MaxSurfaceNormalTiltDegrees, ExtremeSurfaceNormalCount, Normals.Num());
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][SurfaceNormals] SmoothingDistance=%.1f MaxTilt=%.2f ExtremeOver80=%d UniqueSamples=%d Vertices=%d"),
+		SurfaceNormalSmoothingDistanceCM, MaxSurfaceNormalTiltDegrees, ExtremeSurfaceNormalCount, CachedSurfaceNormals.Num(), Normals.Num());
 }
 
-void AABTSM3Planet::BuildDecorInstances()
+void AABTSM3Planet::BuildDecorInstances(
+	const TArray<FABTSM3CellState>*
+		PresentationCellStates,
+	const FABTSM3MonthlyCandidatePresentation*
+		PresentationCandidate)
 {
 	// Blueprint children created before the debug obstacle channel existed can
 	// serialize their old WorldStatic component type. Reapply the runtime
 	// contract whenever the instances are rebuilt.
+	ForestHISM->SetCollisionEnabled(
+		ECollisionEnabled::QueryAndPhysics);
+	RockHISM->SetCollisionEnabled(
+		ECollisionEnabled::QueryAndPhysics);
 	ForestHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	RockHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	ForestHISM->SetCollisionResponseToAllChannels(ECR_Block);
+	RockHISM->SetCollisionResponseToAllChannels(ECR_Block);
+	ForestHISM->SetSimulatePhysics(false);
+	RockHISM->SetSimulatePhysics(false);
 	ForestHISM->ClearInstances();
 	RockHISM->ClearInstances();
+	MonthlyDecorAccent0InstanceCount = 0;
+	MonthlyDecorAccent1InstanceCount = 0;
 
 	// An artist may configure either the Actor properties or the HISM component
 	// templates in BP_ABTSM3Planet.  A null Actor property must not erase a mesh
@@ -799,11 +1499,35 @@ void AABTSM3Planet::BuildDecorInstances()
 	int32 EligibleRockCells = 0;
 	float MaxForestSurfaceTiltDegrees = 0.0f;
 	float MaxForestAppliedTiltDegrees = 0.0f;
+	int32 ProtectedCellCount = 0;
+	int32 PlannedInstanceBudget = 0;
+	const TArray<FABTSM3CellState>& EffectiveCellStates =
+		PresentationCellStates != nullptr
+		? *PresentationCellStates
+		: GeneratedCellStates;
 
 	for (int32 CellId = 0; CellId < LogicalCells.Num(); ++CellId)
 	{
-		if (!GeneratedCellStates.IsValidIndex(CellId)) continue;
-		const FABTSM3CellState& State = GeneratedCellStates[CellId];
+		if (!EffectiveCellStates.IsValidIndex(CellId)) continue;
+		const FABTSM3CellState& State =
+			EffectiveCellStates[CellId];
+		const FABTSM3MonthlyPresentationCell*
+			PresentationCell =
+				PresentationCandidate != nullptr
+					&& PresentationCandidate->Cells
+						.IsValidIndex(CellId)
+				? &PresentationCandidate->Cells[CellId]
+				: nullptr;
+		if (PresentationCell != nullptr
+			&& (PresentationCell->CellId != CellId
+				|| PresentationCell
+					->bDecorationProtected))
+		{
+			ProtectedCellCount +=
+				PresentationCell->bDecorationProtected
+				? 1 : 0;
+			continue;
+		}
 		UHierarchicalInstancedStaticMeshComponent* TargetHISM = nullptr;
 		if (State.bRoad || State.bBuildingAnchor || State.bWater) continue;
 		if (State.TerrainType == EABTSM3TerrainType::Forest && ResolvedForestMesh)
@@ -817,13 +1541,88 @@ void AABTSM3Planet::BuildDecorInstances()
 			++EligibleRockCells;
 		}
 		if (TargetHISM == nullptr) continue;
+		int32 CellInstanceCount = InstancesPerCell;
+		if (PresentationCell != nullptr)
+		{
+			const int32 RequiredDecorationMask =
+				TargetHISM == ForestHISM
+				? static_cast<int32>(
+					EABTSM3MonthlyDecorationKind::Forest)
+				: static_cast<int32>(
+					EABTSM3MonthlyDecorationKind::Rock);
+			if ((PresentationCell->DecorationKindMask
+					& RequiredDecorationMask)
+				== 0)
+			{
+				continue;
+			}
+			CellInstanceCount = FMath::Min(
+				CellInstanceCount,
+				PresentationCell
+					->MaxDecorationInstances);
+			PlannedInstanceBudget += CellInstanceCount;
+		}
+		if (CellInstanceCount <= 0) continue;
 
-		FRandomStream Stream(HashCombineFast(GetTypeHash(WorldSeed), GetTypeHash(CellId)));
+		int32 AccentVariantId = 0;
+		if (PresentationCell != nullptr)
+		{
+			const FABTSM3MonthlyVisualBeat* Beat =
+				PresentationCandidate->VisualBeats
+					.FindByPredicate(
+						[PresentationCell](
+							const FABTSM3MonthlyVisualBeat&
+								Item)
+						{
+							return Item.VisualBeatId
+								== PresentationCell->
+									VisualBeatId;
+						});
+			if (Beat == nullptr)
+			{
+				continue;
+			}
+			AccentVariantId = Beat->AccentVariantId;
+			if ((AccentVariantId & 1) == 0
+				&& CellInstanceCount > 1)
+			{
+				--CellInstanceCount;
+			}
+		}
+		const uint32 VisualVariantSeed =
+			PresentationCell != nullptr
+			? HashCombineFast(
+				GetTypeHash(
+					PresentationCell->ThemeVariantId),
+				GetTypeHash(AccentVariantId))
+			: 0u;
+		FRandomStream Stream(HashCombineFast(
+			HashCombineFast(
+				GetTypeHash(WorldSeed),
+				GetTypeHash(CellId)),
+			VisualVariantSeed));
 		const FVector Center = LogicalCells[CellId].UnitCenter;
-		for (int32 Slot = 0; Slot < InstancesPerCell; ++Slot)
+		for (int32 Slot = 0;
+			Slot < CellInstanceCount;
+			++Slot)
 		{
 			const int32 NeighborId = LogicalCells[CellId].NeighborCellIds[Stream.RandRange(0, LogicalCells[CellId].NeighborCellIds.Num() - 1)];
 			const FVector Direction = FMath::Lerp(Center, LogicalCells[NeighborId].UnitCenter, Stream.FRandRange(0.0f, 0.42f)).GetSafeNormal();
+			if (PresentationCandidate != nullptr)
+			{
+				const int32 ResolvedCellId =
+					FindNearestCell(Direction);
+				if (ResolvedCellId != CellId
+					|| !PresentationCandidate->Cells
+						.IsValidIndex(
+							ResolvedCellId)
+					|| PresentationCandidate->Cells[
+						ResolvedCellId]
+						.bDecorationProtected)
+				{
+					continue;
+				}
+			}
 			if (TerrainVisualField->IsInsideBuildingPad(Direction)) continue;
 			const float Radius = TerrainVisualField->GetSurfaceRadius(Direction) - 8.0f;
 			const FVector RadialUp = Direction;
@@ -847,16 +1646,51 @@ void AABTSM3Planet::BuildDecorInstances()
 			if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
 			if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
 			const FQuat Rotation = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
-			const float Scale = Stream.FRandRange(0.75f, 1.25f);
+			const float BeatScale =
+				PresentationCell != nullptr
+				&& (AccentVariantId & 1) != 0
+				? 1.12f
+				: (PresentationCell != nullptr
+					? 0.88f
+					: 1.0f);
+			const float ThemeScale =
+				PresentationCell != nullptr
+				&& (PresentationCell->ThemeVariantId & 1)
+					!= 0
+				? 1.05f
+				: (PresentationCell != nullptr
+					? 0.95f
+					: 1.0f);
+			const float Scale =
+				Stream.FRandRange(0.75f, 1.25f)
+				* BeatScale
+				* ThemeScale;
 			TargetHISM->AddInstance(FTransform(Rotation, Direction * Radius, FVector(Scale)), false);
+			if (PresentationCell != nullptr)
+			{
+				if ((AccentVariantId & 1) != 0)
+				{
+					++MonthlyDecorAccent1InstanceCount;
+				}
+				else
+				{
+					++MonthlyDecorAccent0InstanceCount;
+				}
+			}
 		}
 	}
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3][HISM] ForestMesh=%s RockMesh=%s ForestMaterialsValid=%d RockMaterialsValid=%d EligibleForestCells=%d EligibleRockCells=%d ForestInstances=%d RockInstances=%d ForestNormalBlend=%.2f MaxSurfaceTilt=%.2f MaxAppliedTilt=%.2f"),
+		TEXT("[ABTS][M3][HISM] ForestMesh=%s RockMesh=%s ForestMaterialsValid=%d RockMaterialsValid=%d EligibleForestCells=%d EligibleRockCells=%d ForestInstances=%d RockInstances=%d ForestNormalBlend=%.2f MaxSurfaceTilt=%.2f MaxAppliedTilt=%.2f M3R5PreviewAuthority=%d ProtectedCells=%d PlannedInstanceBudget=%d Accent0Instances=%d Accent1Instances=%d Collision=QueryAndPhysics ObstacleChannel=%d SimulatePhysics=0"),
 		*GetNameSafe(ResolvedForestMesh), *GetNameSafe(ResolvedRockMesh), bForestMaterialsValid ? 1 : 0, bRockMaterialsValid ? 1 : 0, EligibleForestCells, EligibleRockCells,
 		ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), FMath::Clamp(ForestSurfaceNormalBlend, 0.0f, 1.0f),
-		MaxForestSurfaceTiltDegrees, MaxForestAppliedTiltDegrees);
+		MaxForestSurfaceTiltDegrees, MaxForestAppliedTiltDegrees,
+		PresentationCandidate != nullptr ? 1 : 0,
+		ProtectedCellCount,
+		PlannedInstanceBudget,
+		MonthlyDecorAccent0InstanceCount,
+		MonthlyDecorAccent1InstanceCount,
+		static_cast<int32>(ABTSDeveloperObstacleChannel));
 }
 
 void AABTSM3Planet::BuildBuildingSpawnSites()

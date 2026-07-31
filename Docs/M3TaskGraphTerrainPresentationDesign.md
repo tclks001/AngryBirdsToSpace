@@ -1,6 +1,6 @@
 # M3：TaskGraph 地形表现与 HISM 摆放设计
 
-> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果、M3R-1 只读月度 Schema 观测层和 M3R-2 只读路线候选池。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
+> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果、M3R-1 只读月度 Schema、M3R-2 路线候选池、M3R-3 六 Encounter 空间候选和 M3R-5 候选绑定表现层。R-5 当前为 M3LocalAccepted（IntegrationPending），只在显式预览中消费候选，`MonthlyAccepted` 仍为 false。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
 >
 > 逻辑 PCG 上游：[`ABTSTaskGraphPCGDesign.md`](ABTSTaskGraphPCGDesign.md)。本文不定义玩法锁、可达性、河流最低点、道路寻路或桥梁状态；它们只由 TaskGraph/CellTopo 生成并通过接口提供给表现层。
 >
@@ -8,7 +8,7 @@
 
 ## 1. M3 目标与边界
 
-M3 将 TaskGraph 的区域结果映射为连续球面地形：Plain、Forest、Highland、Mountain 与 TaskGraph 指定的 Water 区域形成低频径向高度；不叠加 fBm、侵蚀噪声、体素噪声或独立高度图。连续表面使用 SDF 纯色材质平滑交界，树与岩石使用无碰撞 HISM，建筑只输出施工台位置，不生成模块化建筑。
+M3 将 TaskGraph 的区域结果映射为连续球面地形：Plain、Forest、Highland、Mountain 与 TaskGraph 指定的 Water 区域形成低频径向高度；不叠加 fBm、侵蚀噪声、体素噪声或独立高度图。连续表面使用 SDF 纯色材质平滑交界；树与岩石使用不模拟刚体、但参与静态查询/物理阻挡的 HISM；建筑只输出施工台位置，不生成模块化建筑。
 
 ```text
 TaskGraph / CellTopo（逻辑唯一来源）
@@ -16,7 +16,7 @@ TaskGraph / CellTopo（逻辑唯一来源）
     -> FABTSM3TerrainVisualField：低频高度、法线、边界线段 SDF
     -> ProceduralMesh：径向顶点推拉、四通道 UV 材质上下文
     -> M3 SDF Material：纯色与平滑边界
-    -> HISM：树、岩石；仅视觉
+    -> HISM：树、岩石；表现与静态阻挡，不是 Gameplay 身份源
     -> BuildingSpawnSites：供 M7 TaskGraph DAG2.3 建筑生成消费
     -> FABTSM110FinaleLocalFrame：供终局局部预设消费
 ```
@@ -33,7 +33,7 @@ TaskGraph / CellTopo（逻辑唯一来源）
 | `FABTSM3TerrainVisualField` | 从逻辑标签产生低频半径、连续法线、边界线段距离 | 可达性、资源、河流最低点搜索 |
 | `AABTSM3Planet` | 组装逻辑结果、重建 PMC、输出 `QuerySurface`、填充 HISM/施工位 | 建筑模块和物理破坏 |
 | `UABTSM3TerrainMaterialBridge` | 创建并注入临时 LUT/MID | 存储 Gameplay 状态 |
-| `ForestHISM` / `RockHISM` | 稳定装饰实例 | 碰撞、点击、地面高度、建筑逻辑 |
+| `ForestHISM` / `RockHISM` | 稳定装饰实例与静态阻挡；`QueryAndPhysics`、`ABTSDeveloperObstacleChannel`、不模拟 | Gameplay 身份、地面高度、任务/道路/PVS/Witness 决策 |
 
 ### 2.1 对 TaskGraph 的输入约定
 
@@ -61,7 +61,17 @@ M3 不需要也不会读取“最低连续顶点”“材质水色”“HISM 命
 
 R-2 Pool 不替换首周 `GeneratedCellStates`、`GeneratedEdgeStates`、`PCGSummary` 或地表材质中的道路。`bMonthlyWorldAccepted` 在本阶段恒为 false，`MonthlyRouteFallback` 也只是继续交给 R-3/R-4 的中间骨架。Editor-only `bDrawMonthlyRouteDebugOverlay` 默认关闭；开启后以青线显示最佳路线、黄点显示控制点，30 秒后自动消失，不创建正式组件或资产。完整算法、冻结 Hash 与验收见 [M3R-2 多候选球面路线](M3PCGMapImprovementPlan.md#145-m3r-2实现多候选球面路线与道路求解)。
 
-### 2.4 `QuerySurface` 接口
+### 2.4 M3R-5 候选绑定表现层
+
+`AABTSM3Planet` 在 R-3 完整验证通过后，为每个保留候选生成独立 `MonthlyPresentation` 快照。该层完整保存 R-3 Source Route/Spatial 身份、每个 Cell 的全部 Envelope 成员关系、ActiveRole 与冻结 `BiomeDistrictId`；它不选最终候选，也不改写 R-3 数据。`DisplayBiomeArchetype` 是单独的显示字段：一 Cell 逻辑 District 孤岛可以确定性并入邻区显示主题，但源 DistrictId、统计与 Hash 不变。
+
+生产默认不消费任一月度表现候选。只有显式预览开关或命令行 `-ABTSM3R5PreviewCandidate=<SourceCandidateId>` 才把对应快照复制给材质桥和 HISM；固定展示运行时因此明确报告 `PreviewAuthority=1`、`MonthlyAccepted=0`。关闭预览后继续显示兼容世界，权威 `GeneratedCellStates/GeneratedEdgeStates/TerrainVisualField` 始终不变，所以 `QuerySurface`、旧 TaskGraph、PVS、Witness 与稳定合同不受表现开关影响。
+
+树石散布既在源 Cell 上检查保护标记，也在偏移后的最终落点重新解析 Cell 并复查。道路、ActiveRole、Target Footprint、NoRoad、攻击走廊和水体禁止装饰侵入。完整实现状态、100 Seed 证据与待集成门禁见 [M3R-5](M3PCGMapImprovementPlan.md#148-m3r-5实现-biomedistrict-与-playable-envelope-表现)。
+
+显式预览时，材质桥按 `VisualBeatId/AccentVariantId/ThemeVariantId` 对 Cell LUT 做低幅明暗调制；HISM 用相同字段调整树石疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell、全部实际树石实例均经过 Beat 消费路径，因而 20–45 m 节拍不是只存在于数据快照。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
+
+### 2.5 `QuerySurface` 接口
 
 `AABTSM3Planet::QuerySurface(UnitDirection)` 输出世界位置、高度感知法线、表面半径及最近 `CellId`。M2.5 径向移动已改为通过 `GetSurfaceRadiusAtDirection` 接地，因此角色仍沿球心径向保持重力方向，同时脚底遵循 M3 低频表面。
 
@@ -99,7 +109,7 @@ d = |P - Q| * PlanetRadiusCM
 4. 保持 `LogicalSubdivision=5`、`SurfaceSubdivision=7`、`PlanetRadiusCM=10000`。首轮保持 `MacroHeightScaleCM=900`、`TaskWaterDepthCM=80`、`HeightBlendWidthCM=160`、`TerrainBlendWidthCM=240`、`RoadColor=(0.22,0.12,0.045,1)`、`WorldSeed=312503`。
 5. 在 **World Settings > GameMode Override** 选择原生 `ABTSM3GameMode`。它继续使用 M2.5 径向角色与跳跃。
 6. 先不要给 `TerrainMaterial` 赋值，运行一次 PIE 确认 Output Log 出现 `[ABTS][M3] Ready=1`。此时可先用 Vertex Color 调试材质查看 C++ 计算的纯色结果。
-7. 在 `BP_ABTSM3Planet` 的 `ForestHISM` 与 `RockHISM` 上分别指定低面数树/岩石；务必保持 **Collision Enabled = No Collision**。也可通过 Actor 的 `Forest Instance Mesh`、`Rock Instance Mesh` 指定同一资产，Actor 字段优先于组件字段。两处均未配置时，代码自动以 Engine Basic Shape 的 Cone/Cube 作为可见验收占位，不会生成“有组件但无网格”的空 HISM。
+7. 在 `BP_ABTSM3Planet` 的 `ForestHISM` 与 `RockHISM` 上分别指定低面数树/岩石。不要把组件改回历史 `NoCollision`；重建代码会统一重申 **Collision Enabled = Query And Physics**、Object Type=`ABTSDeveloperObstacleChannel`、`SimulatePhysics=false`。也可通过 Actor 的 `Forest Instance Mesh`、`Rock Instance Mesh` 指定同一资产，Actor 字段优先于组件字段。两处均未配置时，代码自动以 Engine Basic Shape 的 Cone/Cube 作为可见验收占位，不会生成“有组件但无网格”的空 HISM。
 
 建筑尚未生成。运行时 `GetBuildingSpawnSites()` 输出工作台、目标建筑、熔炉与发射场的预留 Transform；M7 只能从这些接口消费位置，并由自己的 DAG2.3 Profile Resolver 决定结构。M3 不调用或维护任何建筑生成器。
 
@@ -237,7 +247,9 @@ return lerp(baseTerrainColor, RoadColor.rgb, saturate(roadMask));
 
 ## 6. HISM 规则
 
-`ForestHISM` 仅在 Forest Cell 内放树，`RockHISM` 仅在 Mountain Cell 内放岩石。每个实例由 `Hash(WorldSeed, CellId, Slot)` 得到稳定方向、旋转和缩放；其位置通过同一 `TerrainVisualField` 查询表面半径与法线。道路、水体、施工台 Cell 不放装饰；道路本身由 SDF 纯色显示，不新增道路 HISM；所有 HISM 为 `NoCollision`。
+`ForestHISM` 仅在 Forest Cell 内放树，`RockHISM` 仅在 Mountain Cell 内放岩石。每个实例由 `Hash(WorldSeed, CellId, Slot)` 得到稳定方向、旋转和缩放；其位置通过同一 `TerrainVisualField` 查询表面半径与法线。道路、水体、施工台 Cell 不放装饰；R-5 显式预览还保护 ActiveRole、Target Footprint、NoRoad 和攻击走廊，并在散点偏移后的最终 Cell 再验证一次，防止实例越界侵入保护区。道路本身由 SDF 纯色显示，不新增道路 HISM。
+
+每次重建都对两类 HISM 重新应用生产碰撞合同：`QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`。Character Sweep、Visibility Query 和 M6 动态代理应能撞到静态实例，M9 开发者穿行按专用 Object Channel 识别；实例本身不成为 Chaos 刚体，也不反向参与 Mission、道路、PVS、Witness、地面高度或布局 Hash。这里的“静态装饰”指不模拟、不自主移动，不等于把 Object Type 改成 `WorldStatic`。
 
 网格解析顺序为：Actor 的 `Forest/Rock Instance Mesh` → 对应 HISM 组件的 `Static Mesh` → Engine Cone/Cube 验收占位。重建不得用空 Actor 字段覆盖组件已经配置的网格。日志 `[ABTS][M3][HISM]` 会同时报告最终网格、符合摆放条件的 Cell 数和实际实例数；若 Cell 数大于 0 而实例数为 0，优先检查网格解析与 `InstancesPerCell`。
 
@@ -263,6 +275,10 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 10. M11.0 后 `LaunchSite` 仍可返回平整施工位，但 M7 不在其上生成建筑；`GetFinaleLaunchFrame()` 必须返回正交、右手、槽中点为原点的唯一终局局部坐标系。
 11. 首周展示 Seed 的普通三栋施工 Anchor 均不在道路上，`bBuildingRoadExclusion && bRoad` 的 Cell 数为 0，且日志均为 `GeometricRoadClearance=1`；该认证以实际平台、混合带、道路半宽和动态几何预筛为准。LaunchSite 仍位于道路端点，其高度压平护环必须完整归属于 LaunchSite Task。
 12. `[ABTS][PCG][Accepted]` 的 `Visibility` 为 `11/00/00`，表示 B1 在默认/最大 OrbitDistance 均可见，B2/B3 均隐藏；该值来自逻辑高度包络，不依赖 HISM 遮挡。
+13. R-5 固定展示运行时必须报告 `PreviewAuthority=1/MonthlyAccepted=0`；切换或关闭预览后 R-3 Route/Spatial 身份、`QuerySurface`、PVS、Witness 和兼容世界 Hash 均不改变。
+14. R-5 100 Seed 必须 `100/100` 接受全部 300 个候选表现计划；当前冻结证据为 ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、主题下限 `4`、逻辑 singleton `2` 与后续小碎片 `2 Cell` 仅视觉合并、最终显示 singleton `0`、最小显示连通块 `3 Cell`、全局显示邻接边界率上限 `21‰`，Oracle=`6751B93DA5E4C778`、Manifest=`9E5A2FE0E563A7C4`。
+15. 树石实例不得落入道路、ActiveRole、Target Footprint、NoRoad、攻击走廊或水体；组件必须保持 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`。真实 M6/M9/Character/Visibility 联合碰撞仍在 IntegrationPending 清单中。
+16. 使用精确预览 Candidate 进入 PIE 后，`F7` 必须能在不重建地图的情况下显示/隐藏逻辑区域；红色 Target Footprint 与橙色 Attack Corridor 的 Cell 集合必须逐项等于 R-3 源标记，关闭后叠层在一个刷新周期内消失。
 
 ## 8. 排错
 
@@ -284,8 +300,8 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 - `SurfaceSubdivision=7` 固定为 `327,680` 个三角形。为了给每个三角形保存三候选 CellId，材质属性顶点展开为约 `983,040` 个；几何位置语义仍连续，但显存开销高于 M2 共享顶点版本。
 - 三张浮点 LUT 在 `10,242` Cells 下约占：Direction `0.16MB`、Visual `0.16MB`、Boundary `1.97MB`，合计约 `2.3MB`（不含 RHI 对齐）。
 - 当前 Custom 节点每像素最多采样 3 次方向 LUT、1 次自身颜色 LUT、12 次边界端点 LUT和 1 次邻区颜色 LUT。M3 以正确性为先；进入性能优化阶段后可按可见区域、边界 Cell 压缩或预计算最近边段减少采样。
-- Fresh Commandlet 中，`Sub=7` 的逻辑生成、低频网格、碰撞与无材质资源重建约在 8 秒内完成，进程峰值物理内存约 `2.25GB`（含完整 Editor-Cmd 启动成本）。比赛版本不应在正常游玩中频繁全量重建。
-- HISM 每种装饰默认不超过 `InstancesPerCell * 匹配地形 Cell 数`，并统一 `NoCollision`。首轮 GPU 验收目标为地表材质增量小于约 `2ms @ 1080p`；若超过预算，先降低边界采样次数或用较低 `SurfaceSubdivision` 做材质调试，不能删除 CellTopo 逻辑。
+- R-5 候选表现构造的 100 Seed 最终基线为 `P95=127.860 ms`、`Max=139.359 ms`，满足冻结的 `250/1000 ms` 门。连续表面改为按唯一 icosphere 顶点缓存高度、法线与颜色采样，再把结果复制到三角形局部 UV 顶点；几何、材质和碰撞结果不变。`SurfaceSubdivision=7` 的 MaterialReady + HISM 显式预览 fresh runtime 实测 `RebuildMS=6057.156`、`PeakPhysicalMB=2221.3`，正式通过 `<=8 s` 与 `2.25GB * 115%` 门。
+- HISM 每种装饰默认不超过 `InstancesPerCell * 匹配地形 Cell 数`，并统一 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`。首轮 GPU 验收目标为地表材质增量小于约 `2ms @ 1080p`；若超过预算，先降低边界采样次数或用较低 `SurfaceSubdivision` 做材质调试，不能删除 CellTopo 逻辑、禁用生产碰撞合同或让实例侵入保护走廊。
 ### 河流边线 SDF（修复六边形拼接）
 
 水体的逻辑标记仍来自 `FABTSM3CellEdgeState::Water`，但表现层不得把 `bWater` 当作整块 Cell 的填充区域。`UABTSM3TerrainMaterialBridge` 为每条水边生成 `M3_RiverSegmentLUT`，每个局部槽的第一像素存起点方向与半宽，第二像素存终点方向与水体类型。

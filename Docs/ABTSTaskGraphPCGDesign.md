@@ -1,6 +1,6 @@
 # ABTS：Task Graph 驱动的球面 PCG 最终核心设计
 
-> 状态：V3 核心管线、M3R-0 首周长路线/道路外建筑兼容方案、M3R-1 月度 Schema 观测层和 M3R-2 多候选球面路线池已实现；已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。六 Encounter、弹弓攻击解、资源经济和局部 Room 原型仍在对应后续阶段接入同一结果与验证接口。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，首周与月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
+> 状态：V3 核心管线、M3R-0 首周兼容方案、M3R-1 Schema、M3R-2 多候选路线、M3R-3 六 Encounter 空间候选与 M3R-3.1 普通弹弓槽场数据层已实现；已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。M3R-4 独立终结层已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定 Biome/Envelope 表现层也已达到 M3LocalAccepted（IntegrationPending），不改写 R-3 身份且不发布 MonthlyAccepted，完整 Subdivision 7 本地性能门已通过。真实 M5.1/M6/M9/M7/桥门与流程权威、R-5 可见 PIE/集成碰撞回归仍待集成，R6 完成后再整体验收；局部 Room 原型留在后续阶段。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，R4 细化见 [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
 >
 > 目标：先生成可通关、可分支、可被能力门验证的 Gameplay 图，再将它嵌入 `CellTopo`；地形、水网、道路、资源、建筑与弹弓攻击解共同服务该图。连续球面只渲染结果。
 
@@ -311,6 +311,10 @@ Cost(CellA -> CellB) =
 
 ## 12. 阶段 G：Set Piece、攻击解与资源经济
 
+M3R-4 的不可变候选连接、服务边界、完整输入域与验收状态详见 [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)。
+
+现行 R4 v1 是 M3-local FixtureAuthority 终结器：只读连接 R3/R3.1 候选，生产默认保持 `NotEvaluated`，并显式拒绝合成流程快照冒充 Integration。真实 M5.1 制作目录、M6 轨迹、M7 Profile、M9 重力和候选桥门/奖励适配仍是 IntegrationPending；本工作树完成 R6 后才进行整体联合验收。
+
 ### 12.1 放置顺序
 
 按照约束最强优先：BridgeGate → SatelliteWindow/LaunchSite 隔离 → FinaleSpacePair → Slingshot/Target Pair → Furnace/Launch Pair → Workshop → Start Resources → 普通资源与装饰。每类先枚举候选，再评分，不在失败后随便找最近 Cell。
@@ -329,9 +333,9 @@ Cost(CellA -> CellB) =
 
 1. 枚举弹弓槽 Anchor Pair、允许桩距与槽轴。
 2. 枚举目标建筑 Footprint、攻击正面和朝向模板；不假定 DAG2.3 已有内部弱点。
-3. 采样若干拉伸量/发射角；沿预测轨迹查询球面逻辑高度、水障和预留碰撞体包围体。
+3. 采样若干拉伸量/发射角；沿预测轨迹查询球面逻辑高度、水障和预留碰撞体包围体。目标命中必须由连续线段与球面首次交点确定，撞击速度也在首次进入点插值；段末速度和最近球心点都不能代替首次接触。
 4. 简易弹弓至少有一条命中教学/主目标的解；强化弹弓至少有一条进入 SatelliteWindow 后命中高价值目标的解。
-5. 需要能力区分时验证反例：普通弹弓的速度域不存在卫星目标解。
+5. 需要能力区分时验证上一档完整批准输入域的反例，输入域同时包含档位可用鸟种、目标效果、槽对、发射侧、拉伸量与瞄准平面采样。R4 v1 冻结 `Simple={Red,Blue,Yellow}`、`Reinforced={Red,Blue,Yellow,Black}` 并把 BirdCatalogHash 写入身份/证书；缺鸟、多鸟或重复鸟均 fail closed。当前 Simple/Reinforced 共用速度范围，不能伪造“仅因速度不足而无解”；应由 Black 专属目标效果证明当前能力门，或等待 M6 提供真实档位化发射曲线。
 
 PCG 只保存经验证的 Solution Witness：槽位、目标、参数范围、最小净空。运行时仍允许玩家找到其他解。
 
@@ -343,6 +347,8 @@ PCG 只保存经验证的 Solution Witness：槽位、目标、参数范围、�
 - 桥前目标货仓提供建桥所需木材；禁止把唯一木材放到桥后；
 - 强化/终局材料只在对应能力可达后出现，但失败/落水不得永久锁死；
 - 离主路更远、地形风险更高的可选资源价值更高；主线唯一 Key 不放在随机 HISM 上。
+
+R4 Fixture 当前只证明抽象 Key/奖励/桥门流程机以及 M11.0 太空桩、太空弦的终局配方；Workbench、Simple、Bridge、Reinforced 的免费合成步骤不是当前 M5 制作目录的替代。真实配方、Workbench/Furnace 时序和资源来源必须由 Integration 适配后重新闭环，未完成前 `bExternalInputsCertified` 恒为 false。
 
 ## 13. 阶段 H：多状态验证、修复与重试
 
@@ -424,6 +430,7 @@ FinalScore =
 | `FABTSWorldPCGOrchestrator` | Stage Seed、Attempt、局部修复和保底 |
 | `FABTSM3MonthlySchemaBuilder` | 将已接受世界只读投影为月度 Schema，验证引用/排序并计算独立 64-bit 身份；不得改写 TaskGraph 或共享导出 |
 | `FABTSM3MonthlyRouteBuilder` | 构造月度球面路线候选、Corridor 与 `(CellId, IncomingEdgeId)` 道路搜索，计算独立候选池身份；R-2 不发布世界 `LayoutHash` |
+| `FABTSM3MonthlyPresentationBuilder` | 对 R-3 每个保留候选构建只读 Biome/Envelope/Beat/装饰计划；逻辑 singleton 只允许显示主题合并，不选择候选、不改写源身份、不发布 MonthlyAccepted |
 
 避免重新把全部阶段塞回 `FABTSM3TaskGraphGenerator.cpp`。各模块输入输出使用普通结构体，便于自动测试；`AABTSM3Planet` 只编排并把最终结果交给表现层。
 
@@ -448,6 +455,8 @@ FinalScore =
 [ABTS][PCG][Biome] Stage=M3R1 ...
 [ABTS][PCG][Quality] Stage=M3R1 ...
 [ABTS][PCG][MonthlyRoute] Stage=M3R2 ...
+[ABTS][PCG][BiomePresentation] Stage=M3R5 ... MonthlyAccepted=0 PreviewAuthority=0 ...
+[ABTS][M3R5][Preview] PreviewAuthority=1 MonthlyAccepted=0 ...
 ```
 
 ### 15.3 自动验收
@@ -543,3 +552,13 @@ FinalScore =
 - 正常候选硬门通过后按量化分数和稳定 ID 排序，最多保留 3 个。候选、尝试报告、配置、拓扑和 Context 都进入独立 64-bit Hash；相同输入深度重放必须完全一致；
 - 正常候选全部失败只产生确定性 `MonthlyRouteFallback` 中间骨架。R-2 的 `bMonthlyWorldAccepted` 恒为 false，不能把 fallback、Compatibility Oracle 或路线候选池冒充完整月度世界；
 - R-2 通过 200 Seed route-only、独立全失败注入、21 Seed Compatibility 快照、旧 Schema/首周/共享合同/M11.0 和 fresh `L_ABTS_M3` 运行时门；首周 Gen3/Policy1 世界及四站点输出保持不变。
+
+### 17.6 M3R-5 候选绑定表现层（2026-07-30）
+
+本修订把 R-3 已冻结的 BiomeDistrict、Playable Envelope、ActiveRole 与路线节拍投影到材质/HISM 消费面，完整状态、数值和证据见 [M3R-5](M3PCGMapImprovementPlan.md#148-m3r-5实现-biomedistrict-与-playable-envelope-表现)，运行时边界见 [地形表现设计第 2.4 节](M3TaskGraphTerrainPresentationDesign.md#24-m3r-5-候选绑定表现层)。
+
+- 为每个 R-3 保留候选生成独立表现快照，不选最终 Candidate；Source Route/Spatial 身份、逻辑 DistrictId 与完整 Envelope 成员关系保持不变；
+- `DisplayBiomeArchetype` 只承担视觉平滑。小于 3 Cell 的显示连通块确定性合并；100 Seed 中 2 个逻辑 singleton 与后续 2 Cell 小碎片仅在显示副本修复，最终显示 singleton 为 0、最小显示连通块为 3 Cell，R-3 Hash 不变；
+- 显式固定展示运行时为 `PreviewAuthority=1/MonthlyAccepted=0`；默认生产仍使用兼容世界，`QuerySurface`、PVS、Witness 与稳定合同不受预览影响；
+- 100 Seed 为 `100/100`、300 个候选计划，ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、主题下限 `4`、全局显示邻接边界率上限 `21‰`，Oracle=`6751B93DA5E4C778`，Manifest=`9E5A2FE0E563A7C4`，构造耗时 `P95=127.860 ms/Max=139.359 ms`；
+- HISM 保持 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，并保护道路、ActiveRole、Target、NoRoad、攻击走廊与水体。完整 Subdivision 7 重建已以 `5.522 s` 通过本地 `<=8 s` 门；可见 PIE 和真实 M6/M9/Character/Visibility 碰撞回归仍为 IntegrationPending。
