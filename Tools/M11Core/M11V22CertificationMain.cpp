@@ -41,6 +41,12 @@ namespace
 		double YawStep = 2.0;
 		double PitchStep = 3.0;
 		double PowerStep = 0.025;
+		double MinYaw = std::numeric_limits<double>::quiet_NaN();
+		double MaxYaw = std::numeric_limits<double>::quiet_NaN();
+		double MinPitch = std::numeric_limits<double>::quiet_NaN();
+		double MaxPitch = std::numeric_limits<double>::quiet_NaN();
+		double MinPower = std::numeric_limits<double>::quiet_NaN();
+		double MaxPower = std::numeric_limits<double>::quiet_NaN();
 		std::uint32_t CheckpointEvery = 256;
 		bool Resume = false;
 	};
@@ -174,6 +180,30 @@ namespace
 			{
 				Out.PowerStep = Number;
 			}
+			else if (Key == "--min-yaw" && ParseDouble(Value, Number))
+			{
+				Out.MinYaw = Number;
+			}
+			else if (Key == "--max-yaw" && ParseDouble(Value, Number))
+			{
+				Out.MaxYaw = Number;
+			}
+			else if (Key == "--min-pitch" && ParseDouble(Value, Number))
+			{
+				Out.MinPitch = Number;
+			}
+			else if (Key == "--max-pitch" && ParseDouble(Value, Number))
+			{
+				Out.MaxPitch = Number;
+			}
+			else if (Key == "--min-power" && ParseDouble(Value, Number))
+			{
+				Out.MinPower = Number;
+			}
+			else if (Key == "--max-power" && ParseDouble(Value, Number))
+			{
+				Out.MaxPower = Number;
+			}
 			else
 			{
 				Failure = "InvalidOption:" + Key;
@@ -203,12 +233,31 @@ namespace
 		Grid& Out,
 		std::string& Failure)
 	{
-		Out.MinYaw = Layout.Launch.MinimumYawDegrees;
-		Out.MaxYaw = Layout.Launch.MaximumYawDegrees;
-		Out.MinPitch = Layout.Launch.MinimumPitchDegrees;
-		Out.MaxPitch = Layout.Launch.MaximumPitchDegrees;
-		Out.MinPower = Layout.Launch.MinimumPower;
-		Out.MaxPower = Layout.Launch.MaximumPower;
+		Out.MinYaw = std::isfinite(OptionsValue.MinYaw)
+			? OptionsValue.MinYaw : Layout.Launch.MinimumYawDegrees;
+		Out.MaxYaw = std::isfinite(OptionsValue.MaxYaw)
+			? OptionsValue.MaxYaw : Layout.Launch.MaximumYawDegrees;
+		Out.MinPitch = std::isfinite(OptionsValue.MinPitch)
+			? OptionsValue.MinPitch : Layout.Launch.MinimumPitchDegrees;
+		Out.MaxPitch = std::isfinite(OptionsValue.MaxPitch)
+			? OptionsValue.MaxPitch : Layout.Launch.MaximumPitchDegrees;
+		Out.MinPower = std::isfinite(OptionsValue.MinPower)
+			? OptionsValue.MinPower : Layout.Launch.MinimumPower;
+		Out.MaxPower = std::isfinite(OptionsValue.MaxPower)
+			? OptionsValue.MaxPower : Layout.Launch.MaximumPower;
+		if (Out.MinYaw < Layout.Launch.MinimumYawDegrees
+			|| Out.MaxYaw > Layout.Launch.MaximumYawDegrees
+			|| Out.MinPitch < Layout.Launch.MinimumPitchDegrees
+			|| Out.MaxPitch > Layout.Launch.MaximumPitchDegrees
+			|| Out.MinPower < Layout.Launch.MinimumPower
+			|| Out.MaxPower > Layout.Launch.MaximumPower
+			|| Out.MinYaw >= Out.MaxYaw
+			|| Out.MinPitch >= Out.MaxPitch
+			|| Out.MinPower >= Out.MaxPower)
+		{
+			Failure = "GridBoundsOutsideLaunchDomain";
+			return false;
+		}
 		Out.YawStep = OptionsValue.YawStep;
 		Out.PitchStep = OptionsValue.PitchStep;
 		Out.PowerStep = OptionsValue.PowerStep;
@@ -319,6 +368,12 @@ namespace
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
 			<< ",\"pitchCount\":" << GridValue.PitchCount
 			<< ",\"powerCount\":" << GridValue.PowerCount
+			<< ",\"minYaw\":" << GridValue.MinYaw
+			<< ",\"maxYaw\":" << GridValue.MaxYaw
+			<< ",\"minPitch\":" << GridValue.MinPitch
+			<< ",\"maxPitch\":" << GridValue.MaxPitch
+			<< ",\"minPower\":" << GridValue.MinPower
+			<< ",\"maxPower\":" << GridValue.MaxPower
 			<< ",\"yawStep\":" << GridValue.YawStep
 			<< ",\"pitchStep\":" << GridValue.PitchStep
 			<< ",\"powerStep\":" << GridValue.PowerStep << "},\n"
@@ -572,7 +627,16 @@ namespace
 			<< Hex64(AggregateSampleHash(Samples)) << "\",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
 			<< ",\"pitchCount\":" << GridValue.PitchCount
-			<< ",\"powerCount\":" << GridValue.PowerCount << "},\n"
+			<< ",\"powerCount\":" << GridValue.PowerCount
+			<< ",\"minYaw\":" << GridValue.MinYaw
+			<< ",\"maxYaw\":" << GridValue.MaxYaw
+			<< ",\"minPitch\":" << GridValue.MinPitch
+			<< ",\"maxPitch\":" << GridValue.MaxPitch
+			<< ",\"minPower\":" << GridValue.MinPower
+			<< ",\"maxPower\":" << GridValue.MaxPower
+			<< ",\"yawStep\":" << GridValue.YawStep
+			<< ",\"pitchStep\":" << GridValue.PitchStep
+			<< ",\"powerStep\":" << GridValue.PowerStep << "},\n"
 			<< "  \"sampleCount\":" << Samples.size() << ",\n"
 			<< "  \"prefixCounts\":[" << PrefixCounts[0] << ','
 			<< PrefixCounts[1] << ',' << PrefixCounts[2] << ','
