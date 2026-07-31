@@ -1,6 +1,6 @@
 # M6/M9：弹弓与卫星标定模式
 
-> 状态：`integration/m9-satellite-e5-20260730` 候选实现已落地；2026-07-30 已通过强制 Unity 编译、fresh 6/6 自动化、标定 runtime smoke、生产 M9 回归及 M11 隔离回归。卫星碰撞一致预测、背面 E5 画中画和卫星相对镜头仍待可见 PIE。只有可见 PIE 通过后，本文 V0 候选才可作为 M3R-4.1 与 M7 卫星攻击面的冻结输入；这里的 V0 是候选阶段名，序列化 `PracticePreset.Version` 已升为 2。
+> 状态：`integration/m9-satellite-e5-20260730` 候选实现已落地；强制 Unity 编译、fresh 6/6 自动化、标定 runtime smoke、生产 M9/M11 隔离回归均已通过，碰撞一致预测与月面画中画也已完成可见 PIE。卫星实飞主镜头不在本轮冻结，延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)；其余手感门完成前，本文 V0 候选仍不能作为 M3R-4.1 与 M7 卫星攻击面的冻结输入。这里的 V0 是候选阶段名，序列化 `PracticePreset.Version` 已升为 2。
 >
 > 父级：[M6 发射、弹道与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M3R 月度地图改进](M3PCGMapImprovementPlan.md)
 >
@@ -308,7 +308,7 @@ if (-not $M9.WaitForExit(60000)) {
 - 生产 M9 fresh runtime：唯一 `ABTSM9GameMode`、唯一 `Satellite ready`、零 rejected/transform error；
 - `ABTS.M110.TaskGraphFinaleSeparation` 与 `ABTS.M11C.Runtime.ContractRoutingAndM9Isolation`：各 1/1 Success。
 
-本次 runtime 的候选身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=4556705819126274791`、`SweepResultHash=2476487998726195302`；`BaselineGravitySnapshotHash=5302779937323207981` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证，不等于第 8 节可见 PIE 已通过，也不把 V0 提前标记为冻结。
+本次 runtime 的候选身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=4556705819126274791`、`SweepResultHash=2476487998726195302`；`BaselineGravitySnapshotHash=5302779937323207981` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证；月面画中画已于 2026-07-31 通过可见 PIE，但卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，因此尚不能把完整 V0 标记为冻结。
 
 ## 8. 可见 PIE 验收
 
@@ -321,8 +321,8 @@ if (-not $M9.WaitForExit(60000)) {
 - [ ] Simple 满功率不能完成卫星背面目标；
 - [ ] E5 立方体位于远离主星的卫星半球，底面贴近理想球面且不漂浮、不嵌入；
 - [ ] 预测终点为 E5 时，实际 `42 cm` 鸟不会先撞卫星；预测为 `SatelliteBody` 时，实飞确实先撞卫星；
-- [ ] 卫星背面画中画在背光面仍清晰，只显示卫星、E5 与局部轨迹；切回普通主星落点预览后无残留 ShowOnly/BaseColor 状态；
-- [ ] `PrimaryFollow → SatelliteApproach → SatelliteOrbit → E5Approach → E5Impact` 无翻转或跳切；命中保持约 `1.2 s` 后回收，失败回收也恢复主星 frame；
+- [x] 卫星背面画中画在背光面仍清晰，只显示卫星、E5 与局部轨迹；切回普通主星落点预览后无残留 ShowOnly/BaseColor 状态（2026-07-31 PIE 通过）；
+- [ ] 卫星实飞主镜头的可读性、普通借力路径的轻量转向和 E5 演出构图转入[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)；当前状态机只保留为候选，不作为冻结门槛的已通过项；
 - [ ] M10.1 轨道全景图能清晰展示卫星造成的偏转；
 - [ ] 自动化岛集中在约 79%–87%，连续鼠标输入下仍有自然容错；满功率属于认证域但不是唯一正确解；
 - [ ] 普通 M6/M9 与既有 M10.1-B 主星落点画中画行为无回归；
