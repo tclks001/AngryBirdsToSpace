@@ -25,7 +25,8 @@
       "jobs": 0,
       "targets": [
         "ABTSM11CoreConformance",
-        "ABTSM11SearchCLI"
+        "ABTSM11SearchCLI",
+        "ABTSM11V22CertificationCLI"
       ]
     }
   ],

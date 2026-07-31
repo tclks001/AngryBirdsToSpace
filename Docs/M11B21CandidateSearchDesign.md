@@ -1,6 +1,6 @@
 # M11-B v2.1：标准 C++ 候选布局搜索、前缀成功集与快速同源重放
 
-> 状态：**Search Contract / Algorithm / Candidate Manifest v3、权威 4096-work 搜索与全局 merge、Editor Catalog 重冻以及最终 UBT/fresh-process 自动门均已完成**。本轮从 4096 个 work 中接受并选出 2 个 Editor-only Candidate；当前只等待用户有渲染 PIE 手感验收。本阶段不执行 M11-B v2.2 完整输入域认证，不生成正式认证 Hash，也不改变 production v1。
+> 状态：**Search Contract / Algorithm / Candidate Manifest v3、权威 4096-work 搜索与全局 merge、Editor Catalog 重冻以及最终 UBT/fresh-process 自动门均已完成；其上另以不覆盖 v3 的 Additive Search v4 条件粒子束构造器完成 4 个正式种子搜索（3 个成功、1 个正常无解退出）**。当前 Editor Catalog 仍保留本稿 v3 Rank 1/2；v4 结果尚未绑定，只是新的 `Candidate / NOT CERTIFIED` 手感比较池。本阶段不执行 M11-B v2.2 完整输入域认证，不生成正式认证 Hash，也不改变 production v1。
 >
 > 父级：[M11 v2 终局引力弹弓优化总设计](M11V2FinaleOptimizationDesign.md)
 >
@@ -9,6 +9,8 @@
 > 下游：[M11-C v2.1 终局交互与确定性播放](M11CFinaleInteractionAndPlaybackDesign.md)
 >
 > 正式认证：[M11-B 终局布局搜索与全输入域认证](M11BFinaleLayoutCertificationDesign.md)
+>
+> 增量构造器：[Additive Search v4 条件粒子束逐星构造器](M11B21ConditionalParticleBeamSearchDesign.md)
 
 ## 1. 阶段目标与边界
 
@@ -296,6 +298,14 @@ FullLaunchDomain 是另一套固定种子 5000 点 `Yaw × Pitch × Power` 诊�
 
 这两个产物仍明确写入 `certification.status=not-certified`，`CertificationHash=0x0000000000000000`，`CertifiedBundleHash=0x0000000000000000`。4096-work 随机/低差异候选统计只足以决定“值得进入 Editor PIE 比较”，不能替代 M11-B v2.2 的完整输入域、连通分量、边界细化、错序/迟到排除与逐星消融认证。
 
+### 8.1 Additive Search v4 不覆盖本节 v3 结果
+
+为验证“沿父前缀逐星放置行星并逐级收窄”的效率，后续新增了条件粒子束构造器。它使用独立的 Particle Beam Contract/Algorithm/Manifest `1/4/1`，但最终仍调用本稿冻结的 Search v3 接受门。
+
+三个成功种子分别以 `47,925–83,097` 次 solve 得到 `2/2/5` 个 accepted candidate，接受吞吐为 v3 4096-work 基线的 `38.63× / 40.46× / 58.33×`；另一个种子在 Stage 3 正常无解退出，只消耗 `10,270` 次 solve。其中 Seed `296883217` 选出的强偏转候选把三次实际偏转提高到约 `36.44° / 34.38° / 65.62°`，总时长为 `27.843 s`；但仍未进入 Catalog，也没有做 PIE 或 v2.2 认证。
+
+v4 算法、四个种子的完整效率数据、4 个不重复候选的时长/偏转、ScreenAim 5000、Holdout 512、FullLaunchDomain 5000 与 Hull 分析见 [Additive Search v4 子稿](M11B21ConditionalParticleBeamSearchDesign.md)。在显式 Catalog 更新前，本节 v3 Rank 1/2 仍是当前 Editor-only PIE 基线。
+
 ## 9. 自动化与验收门
 
 代码门：
@@ -309,18 +319,21 @@ FullLaunchDomain 是另一套固定种子 5000 点 `Yaw × Pitch × Power` 诊�
 - hull evidence count 恒等于 ScreenAim member count；
 - FullDomain/Conditional 改变不得影响 UX 评分；
 - v3 Manifest、checkpoint 和 merge replay 身份闭合；
-- Candidate Catalog 对冻结 v3 身份重建并与 UE facade 同源重放。
+- Candidate Catalog 对冻结 v3 身份重建并与 UE facade 同源重放；
+- v4 Contract/Hash、非法参数 fail-closed、1/4 线程确定性及阶段 Solve 账本闭合。
 
 本轮代码门结果：
 
 | 门禁 | 结果 |
 |---|---:|
-| 标准 C++ clean Release + CTest | `4/4` |
-| Development Editor 默认 / 强制 Unity 全链接 | 均通过 |
-| `ABTS.M11B.V2_1 / Unit / Runtime` | `2/2 + 8/8 + 4/4` |
+| 标准 C++ clean Release + CTest | `5/5` |
+| Development Editor 默认全链接（当前 v4） | 通过 |
+| Development Editor 强制 Unity 全链接（v3 归档） | 通过 |
+| `ABTS.M11B.V2_1`（当前 v4） | `5/5` |
+| `ABTS.M11B.Unit / Runtime`（v3 归档） | `8/8 + 4/4` |
 | `ABTS.M11C.Unit / Runtime / V2_1` | `8/8 + 2/2 + 2/2` |
 | `ABTS.M11A.V2_1 / M110 / Contracts.WorldGeneration` | `1/1 + 4/4 + 2/2` |
 
-共 `33/33` 项 fresh-process 自动化成功，且每个过滤器都只有一个 `TEST COMPLETE. EXIT CODE: 0`。日志统一位于 `Saved/Logs/M11V3-20260730-*.log`。阶段完成前只剩用户按 M11-C v2.1 清单完成有渲染 PIE 手感验收。
+v3 收口归档共 `33/33` 项 fresh-process 自动化成功；当前 v4 增量另通过 fresh `ABTS.M11B.V2_1 5/5`，日志为 `Saved/Logs/M11B21-V4-Final63b-20260730-191819-FreshAutomation.log`。Portable clean Release + CTest 为 `5/5`，已注册的 particle-beam 成功夹具以 `Contract=0xaccb3830e7ed8d7e` 完成整条成功链；UE 夹具还完成 `1 / 4` 线程整链一致性对照。未在本次增量提交中重跑的 v3/M11-C/上游行不冒充当前源码的新鲜证据。阶段完成前仍需用户按 M11-C v2.1 清单完成有渲染 PIE 手感验收。
 
 PIE 手感通过前不启动 M11-B v2.2 完整认证。任何候选参数调整都会使对应 source/result/score Hash 和 Catalog 身份失效，必须重新搜索、merge 和冻结。

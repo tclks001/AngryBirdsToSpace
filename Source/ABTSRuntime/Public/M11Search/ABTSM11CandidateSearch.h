@@ -65,6 +65,14 @@ namespace ABTS::M11Search
 			M11Core::TrajectoryResult& OutResult,
 			std::string* OutFailure = nullptr);
 
+		[[nodiscard]] static bool EvaluateInput(
+			const CandidateLayout& Layout,
+			const CandidateSearchContract& Contract,
+			const LaunchInput& Input,
+			std::uint8_t EnabledAssistMask,
+			InputEvaluation& OutEvaluation,
+			std::string* OutFailure = nullptr);
+
 		[[nodiscard]] static bool CandidateRanksBefore(
 			const CandidateRecord& Left,
 			const CandidateRecord& Right);
@@ -74,5 +82,24 @@ namespace ABTS::M11Search
 				const CandidateSearchContract& Contract,
 				const std::vector<CandidateRecord>& Evaluations,
 				std::uint32_t RequestedCount);
+	};
+
+	/**
+	 * Search v4 experimental constructor. It builds a single global
+	 * conditional particle beam and only sends the surviving leaves through
+	 * the unchanged Search v3 final acceptance audit.
+	 */
+	class ParticleBeamSearch final
+	{
+	public:
+		[[nodiscard]] static std::uint64_t ComputeContractHash(
+			const ParticleBeamSearchContract& Contract);
+
+		[[nodiscard]] static bool Run(
+			const ParticleBeamSearchContract& Contract,
+			std::uint32_t ThreadCount,
+			std::uint32_t RequestedCandidateCount,
+			ParticleBeamSearchResult& OutResult,
+			std::string* OutFailure = nullptr);
 	};
 }

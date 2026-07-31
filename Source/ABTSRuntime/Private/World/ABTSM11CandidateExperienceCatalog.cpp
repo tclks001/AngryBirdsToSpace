@@ -5,6 +5,7 @@
 #if WITH_EDITOR
 
 #include "M11Search/ABTSM11CandidateSearch.h"
+#include "M11Search/ABTSM11FrozenCandidateLayouts.h"
 #include "World/ABTSM11GravityAssistCoreAdapter.h"
 
 #include <array>
@@ -29,7 +30,7 @@ namespace
 		uint64 ScoreHash;
 	};
 
-	constexpr std::array<FFrozenCandidateIdentity, 2> FrozenCandidates = {{
+	constexpr std::array<FFrozenCandidateIdentity, 6> FrozenCandidates = {{
 		{
 			1,
 			2278ull,
@@ -43,7 +44,35 @@ namespace
 			0xe2c810b38f338e06ull,
 			0x5c07be6f9371448eull,
 			0xe465b9c154c235a1ull,
-			0xdd1613e3dbb4c1b0ull}
+			0xdd1613e3dbb4c1b0ull},
+		{
+			3,
+			20ull,
+			0xed74ffaf0de8028full,
+			0x19a6a15736704d7bull,
+			0x791c9a64b195b0d4ull,
+			0x938f4825be418ebeull},
+		{
+			4,
+			20ull,
+			0xf22ad256fd791e07ull,
+			0xa8fdff5512fc4743ull,
+			0xbf710eb5c1e114c1ull,
+			0xfee62a58f2e1dfb7ull},
+		{
+			5,
+			30ull,
+			0xcdc6e41075d99493ull,
+			0xfb9a637bf71a38dfull,
+			0xa7695a10b44f8281ull,
+			0x4689059277f93880ull},
+		{
+			6,
+			30ull,
+			0x80d274a67e1e9944ull,
+			0x3e64212a606348f0ull,
+			0x9de084d9f77c9ee7ull,
+			0xf8b1ff45fa8f1adfull}
 	}};
 
 	bool Reject(FString* OutFailure, const FString& Reason)
@@ -260,49 +289,81 @@ bool FABTSM11CandidateExperienceCatalog::BuildCandidate(
 	const CandidateSearchContract Contract =
 		CandidateSearchContract::MakeV2_1();
 	CandidateRecord Candidate;
-	std::string SearchFailure;
-	if (!CandidateSearch::EvaluateWorkItem(
-			Contract,
-			Frozen->GlobalWorkIndex,
-			Candidate,
-			&SearchFailure))
+	if (CandidateRank >= 3)
 	{
-		return Reject(
-			OutFailure,
-			FString::Printf(
-				TEXT("CandidateRebuildFailed:%s"),
-				UTF8_TO_TCHAR(SearchFailure.c_str())));
-	}
-	if (!Candidate.IsAccepted()
-		|| Candidate.GlobalWorkIndex != Frozen->GlobalWorkIndex
-		|| Candidate.CandidateSourceHash
-			!= Frozen->CandidateSourceHash
-		|| Candidate.NominalRequestHash
-			!= Frozen->NominalRequestHash
-		|| Candidate.NominalResultHash
-			!= Frozen->NominalResultHash
-		|| Candidate.ScoreHash != Frozen->ScoreHash
-		|| ABTS::M11Search::ComputeCandidateScoreHash(Candidate)
-			!= Frozen->ScoreHash)
-	{
-		return Reject(
-			OutFailure,
-			FString::Printf(
-				TEXT("CandidateFrozenIdentityMismatch:")
-				TEXT("Rank=%d Work=%llu Source=0x%016llx ")
-				TEXT("Request=0x%016llx Result=0x%016llx ")
-				TEXT("Score=0x%016llx"),
+		std::string LayoutFailure;
+		if (!ABTS::M11Search::BuildFrozenV4CandidateLayout(
 				CandidateRank,
-				static_cast<unsigned long long>(
-					Candidate.GlobalWorkIndex),
-				static_cast<unsigned long long>(
-					Candidate.CandidateSourceHash),
-				static_cast<unsigned long long>(
-					Candidate.NominalRequestHash),
-				static_cast<unsigned long long>(
-					Candidate.NominalResultHash),
-				static_cast<unsigned long long>(
-					Candidate.ScoreHash)));
+				Candidate.Layout)
+			|| !Candidate.Layout.IsValid(&LayoutFailure)
+			|| ComputeCandidateSourceHash(Candidate.Layout, Contract)
+				!= Frozen->CandidateSourceHash)
+		{
+			return Reject(
+				OutFailure,
+				FString::Printf(
+					TEXT("FrozenV4CandidateLayoutRejected:")
+					TEXT("Rank=%d Source=0x%016llx Detail=%s"),
+					CandidateRank,
+					static_cast<unsigned long long>(
+						ComputeCandidateSourceHash(
+							Candidate.Layout,
+							Contract)),
+					UTF8_TO_TCHAR(LayoutFailure.c_str())));
+		}
+		Candidate.GlobalWorkIndex = Frozen->GlobalWorkIndex;
+		Candidate.Status = ABTS::M11Search::EvaluationStatus::Accepted;
+		Candidate.CandidateSourceHash = Frozen->CandidateSourceHash;
+		Candidate.NominalRequestHash = Frozen->NominalRequestHash;
+		Candidate.NominalResultHash = Frozen->NominalResultHash;
+		Candidate.ScoreHash = Frozen->ScoreHash;
+	}
+	else
+	{
+		std::string SearchFailure;
+		if (!CandidateSearch::EvaluateWorkItem(
+				Contract,
+				Frozen->GlobalWorkIndex,
+				Candidate,
+				&SearchFailure))
+		{
+			return Reject(
+				OutFailure,
+				FString::Printf(
+					TEXT("CandidateRebuildFailed:%s"),
+					UTF8_TO_TCHAR(SearchFailure.c_str())));
+		}
+		if (!Candidate.IsAccepted()
+			|| Candidate.GlobalWorkIndex != Frozen->GlobalWorkIndex
+			|| Candidate.CandidateSourceHash
+				!= Frozen->CandidateSourceHash
+			|| Candidate.NominalRequestHash
+				!= Frozen->NominalRequestHash
+			|| Candidate.NominalResultHash
+				!= Frozen->NominalResultHash
+			|| Candidate.ScoreHash != Frozen->ScoreHash
+			|| ABTS::M11Search::ComputeCandidateScoreHash(Candidate)
+				!= Frozen->ScoreHash)
+		{
+			return Reject(
+				OutFailure,
+				FString::Printf(
+					TEXT("CandidateFrozenIdentityMismatch:")
+					TEXT("Rank=%d Work=%llu Source=0x%016llx ")
+					TEXT("Request=0x%016llx Result=0x%016llx ")
+					TEXT("Score=0x%016llx"),
+					CandidateRank,
+					static_cast<unsigned long long>(
+						Candidate.GlobalWorkIndex),
+					static_cast<unsigned long long>(
+						Candidate.CandidateSourceHash),
+					static_cast<unsigned long long>(
+						Candidate.NominalRequestHash),
+					static_cast<unsigned long long>(
+						Candidate.NominalResultHash),
+					static_cast<unsigned long long>(
+						Candidate.ScoreHash)));
+		}
 	}
 
 	FABTSM11FinaleLayoutPreset Preset;

@@ -450,6 +450,31 @@ v2.1 没有复用本节 v1 的生产预设或认证 Hash，而是共同编译 M1
 
 该候选库只供 M11-C v2.1 Editor-only 手感比较；其 `CertificationHash` 与 `CertifiedBundleHash` 均为零，不得覆盖本文 v1 生产默认值。搜索合同、四候选身份、断点恢复和自动验收证据见 [M11-B v2.1 标准 C++ 候选布局搜索与快速同源重放](M11B21CandidateSearchDesign.md)。体验批准并冻结唯一候选后，仍须按第 8 节语义执行 M11-B v2.2 完整三维域、连通性、旁路与消融认证。
 
+### 7.5 Rank 3 的 v2.2 预认证结果（2026-07-30）
+
+用户批准 `abts.M11.CandidateRank 3` 的 PIE 手感后，v2.2 将
+`CandidateSourceHash=0xed74ffaf0de8028f` 冻结为本轮唯一认证输入。标准 C++
+`ABTSM11V22CertificationCLI` 直接编译生产 `M11Core + M11Search`，支持规范化全局
+索引、分片归属、检查点、断点恢复、确定性合并、覆盖去重、样本聚合 Hash、前缀嵌套
+检查和三维六邻域连通域统计；它不依赖 Unreal Editor。
+
+稀疏闭区间三维预认证使用
+`YawStep=2° / PitchStep=3° / PowerStep=0.025`，共 `16,359` 点，得到
+`F1/F2/F3/F4 = 279/73/8/4`、六邻域分量 `2/2/2/2`，
+`AggregateSampleHash=0xbb9a814baf62975c`。由于粗网格可能切断斜向窄桥，随即执行
+半步复核：`1° / 1.5° / 0.0125`，共 `122,877` 点，得到
+`2067/553/72/27`、分量 `2/3/9/9`，
+`AggregateSampleHash=0x4c3a8c30abd283bb`。两轮前缀嵌套违规均为 `0`；
+半步 F4 的 Power 索引范围为 `71..80/80`，没有低功率旁路，但存在九个离散
+六邻域 F4 分量。
+
+因此本轮在“唯一六邻域 F4”预认证门失败并按合同早停：没有运行正式边界递归、
+消融、错序、重复助推、多圈、晚到旁路、Trust Region、UE parity 或 Certified
+Bundle 冻结。Rank 3 仍是 `Candidate / NOT CERTIFIED`，不能进入 M11-C v2.2
+生产绑定。下一步必须回到 B v2.1 调整候选/成功分类的可玩宽度并重新搜索，或先以
+局部递归证明这些离散样本属于同一连续成功族；不得把六邻域改成 18/26 邻域来绕过
+门槛。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`
