@@ -2,8 +2,11 @@
 
 > 文档性质：M7.3-DAG-5 的独立工程设计与验收合同。
 >
-> 状态：DAG5-A、DAG5-B 已完成代码、强制 Unity 编译与 fresh 自动化验收，均保持显式 opt-in；
-> DAG5-B 的四类轮廓仍待人工 Editor 读形验收；验收后进入 DAG5-C。DAG5-C～E 尚未实现。
+> 状态：DAG5-A、DAG5-B 已完成代码、强制 Unity 编译、fresh 自动化与四类轮廓人工读形验收，
+> 均保持显式 opt-in。当前 DAG5-B 作为“语义包络进入真实物理砖”的原型基线保留；
+> Shape/WFC、初始 DAG、递归 Expansion、楼板拟合与弱点/支撑联合补全的后续串行架构见
+> [轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
+> DAG5-C～E 尚未实现。
 >
 > 父级：[M7.3-DAG 递归承载图总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 >
@@ -12,6 +15,7 @@
 > [DAG-4 Settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md)。
 >
 > 研究依据：[3D WFC 建筑外观体块与承载 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
+> 后续演进：[轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
 > 生产边界：[M7 TaskGraph 球面建筑接入](M7TaskGraphSphericalBuildingIntegrationDesign.md)。
 
 ## 1. 目标
@@ -434,8 +438,8 @@ DAG5-B 已落实：
 - `Saved/Logs/DAG5B-20260730-193107-ReleaseCandidateForceUnity.log`：
   `-ForceUnity -DisableAdaptiveUnity` 编辑器目标验证通过。
 
-人工验收尚未完成，不得把自动化通过写成用户已确认视觉效果。建议在物理测试场仅开启
-`DAG5BSettings.bEnableSemanticEnvelope`，分别固定四个 `ShapeFamily`，确认最终真实砖呈现：
+人工验收已在物理测试场完成。验收时仅开启
+`DAG5BSettings.bEnableSemanticEnvelope`，分别固定四个 `ShapeFamily`，确认了最终真实砖呈现：
 
 1. 逐层退台且质心移动的退台塔；
 2. 两个分离塔体、跨接桥和偏置顶冠；
@@ -443,8 +447,13 @@ DAG5-B 已落实：
 4. 高低两侧分裂并带单侧悬挑。
 
 同时确认 PIE 中无不可破坏展示壳、无 `MustVoid` 穿砖、建筑完整且能进入既有物理链。
+该验收证明当前语义包络原型成立，但不证明它已经串行接入 DAG-1 Expansion：
+当前语义路径直接生成最终 Macro Graph，和传统 `GrammarExpander` 仍是二选一。
+后续应按
+[轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)
+把 Shape/WFC 改为初始 DAG 的前端，再进行轮廓约束递归、楼板拟合和弱点/支撑联合补全。
 本阶段不验收六栋联合去重、Encounter/TaskGraph 接入、建筑与弱点联合多样性或生产默认；
-这些分别属于 DAG5-C、D、E。
+这些仍分别属于 DAG5-C、D、E。
 
 ## 5. DAG5-C：候选池与六栋联合去重
 
@@ -514,7 +523,7 @@ ValidationHash 的 Certification Manifest。
 | 阶段 | 核心职责 | 主要产物 | 退出门槛 |
 |---|---|---|---|
 | DAG5-A（已完成） | 单 Profile 可行域预检、确定性候选尝试、实砖硬预算 | Capacity Report、Attempt Trace、原子 `StructureData` | 可行域不因一次坏推导消失；不可行输入 fail closed；默认关闭兼容 |
-| DAG5-B（代码与自动化已完成，人工读形待验收） | Shape Grammar 宏观轮廓 + 局部语义 WFC + Brick 接入 | Shape Derivation、SemanticEnvelope、复杂轮廓 Brick Assembly | 四类明显轮廓；MustVoid/MustOccupy 与真实承重全通过 |
+| DAG5-B（原型基线已完成） | Shape Grammar 宏观轮廓 + 局部语义 WFC + Brick 接入 | Shape Derivation、SemanticEnvelope、复杂轮廓 Brick Assembly | 四类明显轮廓；MustVoid/MustOccupy 与真实承重全通过 |
 | DAG5-C | 跨候选 Novelty 与六栋联合选择 | Six-Building Manifest、联合签名 | 恰好六栋、签名唯一、至少四类轮廓、逐栋 DAG3-C |
 | DAG5-D | Encounter/视觉元数据/装置/TaskGraph opt-in | Profile Catalog、Encounter Binding、Device Plan | 元数据实际消费；装置无旁路；生产仍显式启用 |
 | DAG5-E | 建筑与弱点联合调优、DAG4 重认证、生产切换 | Certification Manifest | 六栋逐栋动态认证、PIE、性能和确定性全通过 |
@@ -536,3 +545,6 @@ ValidationHash 的 Certification Manifest。
 共享的 `Docs/ABTSProjectWorkflow.md`、`Docs/AngryBirdsToSpaceGameDesign.md`、
 `AGENTS.md` 和多工作树规范不在本工作树修改；需要加入全局索引时，
 由集成工作树在合并阶段补链。
+
+本文的后续架构参考见
+[M7.3 轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
