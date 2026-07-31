@@ -143,7 +143,8 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 {
 	(void)Parameters;
 	const FABTSM6LaunchProfileCatalog Candidate =
-		FABTSSlingshotSatelliteCalibrationModel::MakeCandidateCatalogV0();
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
 	FABTSM6LaunchProfileCatalog Resolved;
 	FString FailureReason;
 	TestTrue(
@@ -157,6 +158,9 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 		EABTSSlingshotTier::Simple,
 		EABTSSlingshotTier::Reinforced
 	};
+	const float ExpectedMinimumSpeeds[] = { 700.0f, 900.0f, 1050.0f };
+	const float ExpectedMaximumSpeeds[] = { 1700.0f, 2300.0f, 3300.0f };
+	const float ExpectedPowerExponents[] = { 1.15f, 1.08f, 1.0f };
 	float PreviousComfortableReach = 0.0f;
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Expected); ++Index)
 	{
@@ -176,6 +180,30 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 			FABTSSlingshotSatelliteCalibrationModel::EvaluateLaunchSpeed(
 				Profile, 1.0f),
 			Profile.MaximumSpeedCMPerSec);
+		TestEqual(
+			FString::Printf(TEXT("Tier %d frozen minimum speed"), Index),
+			Profile.MinimumSpeedCMPerSec,
+			ExpectedMinimumSpeeds[Index]);
+		TestEqual(
+			FString::Printf(TEXT("Tier %d frozen maximum speed"), Index),
+			Profile.MaximumSpeedCMPerSec,
+			ExpectedMaximumSpeeds[Index]);
+		TestEqual(
+			FString::Printf(TEXT("Tier %d frozen power exponent"), Index),
+			Profile.PowerExponent,
+			ExpectedPowerExponents[Index]);
+		TestEqual(
+			FString::Printf(TEXT("Tier %d frozen minimum pull distance"), Index),
+			Profile.MinimumPullDistanceCM,
+			120.0f);
+		TestEqual(
+			FString::Printf(TEXT("Tier %d frozen maximum pull distance"), Index),
+			Profile.MaximumPullDistanceCM,
+			430.0f);
+		TestEqual(
+			FString::Printf(TEXT("Tier %d frozen wheel step"), Index),
+			Profile.PullPowerWheelStep,
+			0.04f);
 		TestTrue(
 			FString::Printf(
 				TEXT("Tier %d initial pull is player-enterable"),
@@ -240,6 +268,36 @@ bool FABTSSlingshotCalibrationProfileCatalogTest::RunTest(
 		TEXT("A sub-contract wheel step fails closed"),
 		FABTSSlingshotSatelliteCalibrationModel::ResolveCatalog(
 			Invalid, Resolved, &FailureReason));
+	TestEqual(
+		TEXT("Frozen launch catalog has the accepted portable identity"),
+		FABTSSlingshotSatelliteCalibrationModel::ComputeLaunchProfileHash(
+			Candidate),
+		2920060455991611804ull);
+
+	const FABTSSatellitePracticePreset FrozenPreset =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenSatellitePracticePresetV0();
+	TestEqual(
+		TEXT("Frozen satellite clearance ratio"),
+		FrozenPreset.SatelliteCenterClearancePrimaryRatio,
+		0.55f);
+	TestEqual(
+		TEXT("Frozen satellite gravity ratio"),
+		FrozenPreset.SatelliteSurfaceGravityPrimaryRatio,
+		2.0f);
+	TestEqual(
+		TEXT("Frozen satellite target azimuth"),
+		FrozenPreset.TargetLocalAzimuthDeg,
+		20.0f);
+	TestEqual(
+		TEXT("Frozen satellite certified pull maximum"),
+		FrozenPreset.PullMaximum,
+		1.0f);
+	TestEqual(
+		TEXT("Frozen satellite preset has the accepted portable identity"),
+		FABTSSlingshotSatelliteCalibrationModel::
+			ComputeSatellitePracticePresetHash(FrozenPreset),
+		11534008174155323086ull);
 	return true;
 }
 

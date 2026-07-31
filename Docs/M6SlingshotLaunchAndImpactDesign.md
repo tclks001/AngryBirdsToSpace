@@ -162,8 +162,8 @@ M6 的 Twig/Simple/Reinforced 预演、Chaos 实飞和碰撞链路保持不变�
 
 Twig/Simple/Reinforced 的分档曲线、射程包络、真实发射遥测和卫星练习成功岛不在生产地图上凭建筑坐标调参。独立入口、参数身份、离散扫掠门和 PIE 清单见 [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)。
 
-标定配置只有在专用 GameMode 显式启用后生效；普通 M6 和 M11 Space 档保持原链路。候选目录统一从 `InitialPull=0.55`、`WheelStep=0.04` 开始，且滚轮步长低于 `0.01` 时 fail closed。目录还把真实鼠标投影构图 `AimCameraDistance=1150cm`、`AimCameraPitch=18°`、`AimTargetForwardDistance=900cm`、`AimTargetHeight=245cm` 签入 `LaunchProfileHash`。Rig 从实际生成的 Reinforced cord/pouch 捕获 `SlingCenter/Up/Forward/Right/RestPouch`，并从 M6 瞄准相机捕获 `CameraLook/ScreenUp/ScreenRight`；认证用真实屏幕平面基轴上的 `AimPlaneOffsetCM` 构造与玩家操作相同的初始位置和速度，不再把 `SlingUp/SlingRight` 笼统当作鼠标轴，也不使用理想发射点或任意角度输入。
+标定配置只有在专用 GameMode 显式启用后生效；普通 M6 和 M11 Space 档保持原链路。V0 目录统一从 `InitialPull=0.55`、`WheelStep=0.04` 开始，且滚轮步长低于 `0.01` 时 fail closed。目录还把真实鼠标投影构图 `AimCameraDistance=1500cm`、`AimCameraPitch=-3°`、`AimTargetForwardDistance=900cm`、`AimTargetHeight=245cm` 签入 `LaunchProfileHash`。Rig 从实际生成的 Reinforced cord/pouch 捕获 `SlingCenter/Up/Forward/Right/RestPouch`，并从 M6 瞄准相机捕获 `CameraLook/ScreenUp/ScreenRight`；认证用真实屏幕平面基轴上的 `AimPlaneOffsetCM` 构造与玩家操作相同的初始位置和速度，不再把 `SlingUp/SlingRight` 笼统当作鼠标轴，也不使用理想发射点或任意角度输入。
 
 真实发射命中遥测在 `Flying/Settling` 每帧执行 swept sample；切换到 `Returning` 的首帧额外暴露一次最终落点 pending sample，只补扫最后一段且不得重复消费，防止回收状态切换漏掉代理命中。
 
-该固定步长二体模型是参数认证与 M3R-4.1 预筛边界，不是生产 M6/M9 实飞的第二权威。候选自动化与 runtime smoke 通过后仍须完成可见 PIE 手感验收；在此之前不得把 V0 写成已冻结，也不得据此宣称月度 Ballistic Witness 已由生产链验证。
+该固定步长二体模型是参数认证与 M3R-4.1 预筛边界，不是生产 M6/M9 实飞的第二权威。Launch/Preset 参数 V0 已于 2026-07-31 完成可见 PIE 手感验收，并通过稳定原生 factory 交给 M3；这仍不等于月度 Ballistic Witness 已由生产链验证，R-4.1 必须继续消费经批准的只读生产适配器。

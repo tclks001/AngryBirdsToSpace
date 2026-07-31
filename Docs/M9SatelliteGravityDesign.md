@@ -1,6 +1,6 @@
 # M9：卫星与局部引力
 
-> 状态：生产 M9 基线已实现；deferred transform 修复已通过 fresh 生产回归。独立 M6/M9 候选的碰撞一致预测与月面着陆画中画已落地，画中画于 2026-07-31 通过可见 PIE；卫星实飞主镜头仍为候选并延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)。
+> 状态：生产 M9 基线已实现；deferred transform 修复已通过 fresh 生产回归。独立 M6/M9 标定模式的碰撞一致预测与月面着陆画中画已落地，画中画和参数手感于 2026-07-31 通过可见 PIE，Launch/Preset 参数已冻结为 V0；卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M2 球面基础](M2PlanetSurfaceDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [M6 发射与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6/M9 标定模式](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M10.1 超视距目标与引力走廊](M101BeyondHorizonLaunchInterfaceDesign.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md)。
 
@@ -118,10 +118,10 @@ M11 数据端固定为 `Primary + AssistPlanet1 + AssistPlanet2 + AssistPlanet3`
 
 ## 8. 强化弹弓练习标定
 
-生产 `SatelliteWindow` 不承担参数试验。卫星尺度、离地、局部背面 E5 立方体和表面引力先在不生成 M7/PCG 建筑的隔离 GameMode 中认证；旧 M9 地图只作为主星、角色、相机与 M6/M9 运行环境载体。隔离蓝图候选参数不得写回生产默认值 `0.25`，具体可调值只记录在标定详稿，避免本生产总稿随调参漂移。
+生产 `SatelliteWindow` 不承担参数试验。卫星尺度、离地、局部背面 E5 立方体和表面引力先在不生成 M7/PCG 建筑的隔离 GameMode 中认证；旧 M9 地图只作为主星、角色、相机与 M6/M9 运行环境载体。隔离标定 V0 已冻结为独立原生 factory，不能写回生产 M9 的默认表面引力比 `0.25`；具体数值与身份只记录在标定详稿，避免本生产总稿混淆两套用途。
 
 M3/M7 只能跨地图/Seed 消费可移植的 `LaunchProfileHash`、射程包络与 `SatellitePracticePresetHash`。`GravitySnapshotHash` 含本次场景解析出的卫星相对向量，只是 baseline scene-instance 证据；它不是稳定 Catalog 身份。标定固定步长积分器只用于确定性认证和 M3R-4.1 预筛，也不替代生产 `ABTSM9Gravity::GetSatelliteAcceleration` 与实际 M6 预览/实飞链路。
 
 本轮还包含一项与标定入口分离的生产修复：`AABTSM9GameMode` deferred spawn 在 Finish 前已配置卫星原生 Root，`FinishSpawningActor` 必须继续使用原始 `FTransform::Identity`，随后由 `IsAtConfiguredCenter()` fail closed，避免同一平移被组合两次。隔离标定 smoke 不能替代该回归；必须另跑 [标定详稿第 7.3 节](M6M9SlingshotSatelliteCalibrationDesign.md#73-生产-m9-deferred-transform-回归) 的生产 M9 门，并核对默认 `Radius=1250.0 Clearance=1250.0 Gravity=245.0`、`FinaleGravitySource=0` 以及唯一 ready 日志。故障特征亦收录于[开发排错记录](DevelopmentTroubleshooting.md#12-m9-卫星与标定入口)。
 
-完整入口、离散玩家可达 Pull × `AimPlaneOffsetCM` 网格、表面 E5 立方体、碰撞一致预测、月面画中画、卫星相对镜头和验收命令见 [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)。fresh 6/6 自动化、标定 runtime smoke 与生产 M9 回归已在同一候选上留证，月面画中画已通过可见 PIE；卫星实飞主镜头延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，其余手感门完成前候选仍不得写成 V0 已冻结。
+完整入口、离散玩家可达 Pull × `AimPlaneOffsetCM` 网格、表面 E5 立方体、碰撞一致预测、月面画中画、卫星相对镜头和验收命令见 [M6/M9 弹弓与卫星标定模式](M6M9SlingshotSatelliteCalibrationDesign.md)。fresh 6/6 自动化、标定 runtime smoke、生产 M9 回归及可见 PIE 已为参数 V0 留证；其可移植身份由原生 factory 提供给 M3。卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，不属于本次参数冻结。

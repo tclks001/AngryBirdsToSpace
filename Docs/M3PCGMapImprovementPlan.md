@@ -1,9 +1,9 @@
 # M3R PCG 地图生成改进方案
 
 > 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层已达到 M3LocalAccepted（IntegrationPending）
-> 日期：2026-07-30
+> 日期：2026-07-31
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 标定候选已提供可移植 Launch/Preset 身份与射程包络，月面画中画已通过可见 PIE，但完整 V0 尚未冻结且不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不改签 R-3 身份或发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
+> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 Launch/Preset 参数已完成可见 PIE 并冻结为可移植 V0，稳定原生 factory 可供 M3 预筛消费，但仍不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不改签 R-3 身份或发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、生产 M6/M9 只读适配器、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
 
 父文档：
 
@@ -1305,9 +1305,9 @@ SatellitePracticePresetVersion + SatellitePracticePresetHash
 TargetProxy / AttackFace 语义
 ```
 
-`LaunchProfileHash` 与 `SatellitePracticePresetHash` 是可跨地图/Seed 消费的身份；前者不仅覆盖 Pull/速度曲线，还覆盖真实鼠标投影构图 `AimCameraDistance=1150cm`、`AimCameraPitch=18°`、`AimTargetForwardDistance=900cm`、`AimTargetHeight=245cm`，因此任何相机构图变化都会使旧 Witness 失效。标定 runtime 的 `GravitySnapshotHash` 包含实际卫星相对世界向量和连续地表解析结果，只能作为单个 Witness 的 baseline scene-instance 证据，不能填入全局 `M9SolverVersion`、Catalog 或布局策略身份。Seed、地形、整体朝向或已签名相机构图变化时必须重新解析快照并重算 Witness。
+`LaunchProfileHash` 与 `SatellitePracticePresetHash` 是可跨地图/Seed 消费的身份；V0 分别冻结为 `2920060455991611804` 与 `11534008174155323086`。前者不仅覆盖 Pull/速度曲线，还覆盖真实鼠标投影构图 `AimCameraDistance=1500cm`、`AimCameraPitch=-3°`、`AimTargetForwardDistance=900cm`、`AimTargetHeight=245cm`，因此任何相机构图变化都会使旧 Witness 失效。标定 runtime 的 `GravitySnapshotHash` 包含实际卫星相对世界向量和连续地表解析结果，只能作为单个 Witness 的 baseline scene-instance 证据，不能填入全局 `M9SolverVersion`、Catalog 或布局策略身份。Seed、地形、整体朝向或已签名相机构图变化时必须重新解析快照并重算 Witness。
 
-标定固定步长积分器只负责候选参数的确定性认证与预筛，不是生产 M6/M9 权威 Provider。R-4.1 仍须等待 Integration 提供只读生产适配器，并以真实 Reinforced cord/pouch frame、相机 `Look/ScreenUp/ScreenRight` 投影平面、玩家可进入 Pull 档和 M9 查询生成最终 Witness；M3 不复制 Pull 曲线、pouch/相机几何、主星/卫星引力或阻力公式。标定 V0 可见 PIE、生产适配器和 M7 ProfileDescriptor Catalog 任一未就绪时，R-4 只能保持 `M3LocalAccepted/IntegrationPending`，不能发布唯一 Candidate。
+标定固定步长积分器只负责候选参数的确定性认证与预筛，不是生产 M6/M9 权威 Provider。M3 使用 Integration 所有的 `MakeFrozenLaunchProfileCatalogV0()` 与 `MakeFrozenSatellitePracticePresetV0()` 读取 V0，不加载标定蓝图、不复制 Pull 曲线或卫星字段常量。R-4.1 仍须等待 Integration 提供只读生产适配器，并以真实 Reinforced cord/pouch frame、相机 `Look/ScreenUp/ScreenRight` 投影平面、玩家可进入 Pull 档和 M9 查询生成最终 Witness；M3 不复制 pouch/相机几何、主星/卫星引力或阻力公式。生产适配器和 M7 ProfileDescriptor Catalog 任一未就绪时，R-4 仍保持 `M3LocalAccepted/IntegrationPending`，不能发布唯一 Candidate。
 
 **实现目标**
 

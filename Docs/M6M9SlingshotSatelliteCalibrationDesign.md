@@ -1,6 +1,6 @@
 # M6/M9：弹弓与卫星标定模式
 
-> 状态：`integration/m9-satellite-e5-20260730` 候选实现已落地；强制 Unity 编译、fresh 6/6 自动化、标定 runtime smoke、生产 M9/M11 隔离回归均已通过，碰撞一致预测与月面画中画也已完成可见 PIE。卫星实飞主镜头不在本轮冻结，延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)；其余手感门完成前，本文 V0 候选仍不能作为 M3R-4.1 与 M7 卫星攻击面的冻结输入。这里的 V0 是候选阶段名，序列化 `PracticePreset.Version` 已升为 2。
+> 状态：弹弓曲线与卫星练习参数已于 2026-07-31 完成可见 PIE 手感验收并冻结为 V0；强制 Unity 编译、fresh 6/6 自动化、标定 runtime smoke、生产 M9/M11 隔离回归、碰撞一致预测与月面画中画均已有通过证据。V0 已提供不依赖地图/蓝图加载的原生构造入口供 M3R-4.1 消费。卫星实飞主镜头不属于本次参数冻结，仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)。序列化 `PracticePreset.Version` 为 2。
 >
 > 父级：[M6 发射、弹道与碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M9 卫星与局部引力](M9SatelliteGravityDesign.md) · [M3R 月度地图改进](M3PCGMapImprovementPlan.md)
 >
@@ -58,14 +58,14 @@
 - `AimSensitivityScale`、`MaximumAimPlaneOffsetCM`；
 - `ComfortablePullMinimum/Maximum`。
 
-`BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 `LaunchProfileCatalog` 是三档曲线、拉距、滚轮、Aim 手感和共享阻力的唯一人工调参入口。相机构图不再作为该目录中的第二套可编辑参数；运行时从 `BP_ABTSM6SlingshotCamera` 的实际实例读取以下四项快照，放入解析后目录并签入 `LaunchProfileHash`：
+V0 冻结后，`MakeFrozenLaunchProfileCatalogV0()` 是三档曲线、拉距、滚轮、Aim 手感和共享阻力的稳定原生入口；`BP_ABTSSlingshotSatelliteCalibrationGameMode` 已重存为与父类默认值一致，供 Editor 查看及以后从相同默认值创建新蓝图。相机构图不作为该目录中的第二套可编辑参数；运行时仍从 `BP_ABTSM6SlingshotCamera` 的实际实例读取以下四项快照，放入解析后目录并签入 `LaunchProfileHash`：
 
 - `AimCameraDistanceCM`；
 - `AimCameraPitchDegrees`；
 - `AimTargetForwardDistanceCM`；
 - `AimTargetHeightCM`。
 
-当前候选值：
+V0 冻结值：
 
 | Tier | 初速度范围 | 指数 | 舒适功率 |
 | --- | ---: | ---: | ---: |
@@ -78,20 +78,20 @@
 - `MinimumPullDistanceCM=120`、`MaximumPullDistanceCM=430`；
 - `InitialPullAlpha=0.55`、`PullPowerWheelStep=0.04`，因此认证功率点必须来自玩家用滚轮实际可进入的档位；滚轮步长的合法下限是 `0.01`（完整合法范围 `0.01..1.0`），小于该值必须 fail closed，不能借近似连续的超小步长扩大成功岛；
 - `AimSensitivityScale=1.0`、`MaximumAimPlaneOffsetCM=260`；
-- 相机构图以 `BP_ABTSM6SlingshotCamera` 的 Class Defaults 为准；原生类的 1150 cm、18°、900 cm、245 cm 只是在该蓝图未覆盖时使用的回退值；
+- 相机构图以 `BP_ABTSM6SlingshotCamera` 的 Class Defaults 为准；本次签名快照为 `1500 cm`、`-3°`、`900 cm`、`245 cm`；
 - `FlightAirDragPerSecond=0.08`。
 
 目录解析必须恰好得到 Twig、Simple、Reinforced 各一项；缺项、重复、非有限值、不可进入的初始功率和反向速度域均 fail closed。实际 Camera Blueprint 的构图值同样必须合法，否则标定入口 fail closed。运行时不得用 Catalog 反写 Camera Actor。Space 档不进入此目录，继续服从 M11 的同源固定步长求解器。
 
 ### 3.2 SatellitePracticePreset V0（序列化 Version 2）
 
-`BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 `PracticePreset` 是卫星局部布局和背面目标的唯一人工调参入口。原生构造函数只提供新建蓝图时的安全候选值；运行时不再接受几何 CVar 或命令行覆盖，避免 Editor 中显示的值与实际生成值不一致。
+V0 冻结后，`MakeFrozenSatellitePracticePresetV0()` 是卫星局部布局和背面目标的稳定原生入口；标定 GameMode 蓝图已重存为与父类默认值一致。运行时不接受几何 CVar 或命令行覆盖，避免 Editor 中显示的值与实际生成值不一致。
 
-| 字段 | 当前候选 | 含义 |
+| 字段 | V0 冻结值 | 含义 |
 | --- | ---: | --- |
 | `Version` | 2 | E5 表面立方体几何；旧球靶 Version 1 身份作废 |
 | `SatelliteRadiusPrimaryRatio` | 0.125 | 卫星半径/主星基础半径 |
-| `SatelliteCenterClearancePrimaryRatio` | 0.5 | 卫星球心离主星连续表面的距离/主星基础半径 |
+| `SatelliteCenterClearancePrimaryRatio` | 0.55 | 卫星球心离主星连续表面的距离/主星基础半径 |
 | `SatelliteAnchorArcDegrees` | 30° | 出生点到卫星锚方向的主星表面弧角 |
 | `SatelliteSurfaceGravityPrimaryRatio` | 2.0 | 卫星/主星表面重力比 |
 | `TargetBody` | `PracticeSatellite` | 目标所属天体身份 |
@@ -99,7 +99,7 @@
 | `TargetLocalAzimuthDeg` | 20° | 绕面向发射点轴的局部方位 |
 | `TargetProxyRadiusCM` | 420 cm | 兼容字段名；Version 2 语义为 E5 立方体半边长 |
 | `TargetSatelliteClearanceCM` | 20 cm | E5 底面与卫星理想球面的间隙 |
-| `PullMinimum/Maximum` | 0.75 / 1.0 | 当前蓝图候选的离散认证功率域 |
+| `PullMinimum/Maximum` | 0.75 / 1.0 | V0 的离散认证功率域 |
 
 E5 由卫星局部正交基构造并附着到卫星 Actor，局部 `+Z` 始终指向卫星外侧：
 
@@ -111,7 +111,7 @@ TargetCenter = SatelliteCenter
 
 因此 E5 底面位于 `SatelliteRadius + SurfaceGap`，不会漂浮到旧球靶高度，也不会嵌入卫星理想球面。`TargetBody` 不是仅供显示的标签：非 `PracticeSatellite` 值必须拒绝，不能把拼写错误静默解析到主星或任意 Actor。
 
-`BirdCollisionRadiusCM` 不再是蓝图可编辑参数。Rig 从当前四鸟的实际弹射碰撞体读取最大半径并在构建场景后写入快照；当前 Chaos 球权威值为 `42 cm`。该值参与 E5 OBB、主星/卫星扩张球扫掠和 `SatellitePracticePresetHash`。原生 factory 仍只提供新建蓝图的安全回退（净空比 `0.125`、引力比 `0.45`、认证上限 `0.95`）；它不覆盖上表的当前蓝图候选。
+`BirdCollisionRadiusCM` 不再是蓝图可编辑参数。Rig 从当前四鸟的实际弹射碰撞体读取最大半径并在构建场景后写入快照；当前 Chaos 球权威值为 `42 cm`。该值参与 E5 OBB、主星/卫星扩张球扫掠和 `SatellitePracticePresetHash`。冻结 factory、标定蓝图 CDO 与上表参数逐字段一致；以后新建蓝图默认继承这组值，不再回退到旧的 `0.125 / 0.45 / 0.95` 组合。
 
 ### 3.3 三种身份及可移植边界
 
@@ -173,7 +173,7 @@ abts.Calibration.SatelliteGravity 1
 
 调整顺序固定为：卫星半径 → 离地距离 → 背面目标局部角度/尺寸 → 卫星表面引力。禁止先增大卫星引力来掩盖强化弹弓本身射程不足。
 
-在 `BP_ABTSSlingshotSatelliteCalibrationGameMode` 的 Class Defaults 中修改 `PracticePreset`，保存并重新进入 PIE；现有卫星、目标和 Hash 不热更新。三档发射参数在同一蓝图的 `LaunchProfileCatalog.Profiles` 中修改；相机距离、俯仰与观察点只在 `BP_ABTSM6SlingshotCamera` 中修改。运行日志的 `[ABTS][Calibration][ProfileCatalog] Ready` 必须显示实际 `CameraClass` 和最终四项构图值。
+V0 已冻结；后续若要试验 V1，可在新建的标定 GameMode 子蓝图 Class Defaults 中修改 `PracticePreset` 与 `LaunchProfileCatalog.Profiles`，保存并重新进入 PIE；现有卫星、目标和 Hash 不热更新。相机距离、俯仰与观察点只在 `BP_ABTSM6SlingshotCamera` 的派生试验蓝图中修改。运行日志的 `[ABTS][Calibration][ProfileCatalog] Ready` 必须显示实际 `CameraClass` 和最终四项构图值。试验值不得原地改签 V0，接受后必须新增 factory/version/hash。
 
 只有 `abts.Calibration.SatelliteGravity -1/0/1` 保留为诊断用 live 开关：`-1` 恢复本次 baseline、`0` 关闭、`1` 开启。它只做同一布局的引力 A/B 对照，不是布局参数源。
 
@@ -295,40 +295,40 @@ if (-not $M9.WaitForExit(60000)) {
 
 生产回归要求恰好一条 `[ABTS][M9] Satellite ready`，默认值仍为 `Radius=1250.0 Clearance=1250.0 Gravity=245.0`，并有 `FinaleGravitySource=0`；不得出现 `deferred finish changed center`、`Satellite rejected`、Fatal、assert 或 ensure。`IsAtConfiguredCenter()` 是生产世界位置门；隔离标定蓝图的布局/引力参数不能泄漏到生产 M9 的 `0.25` 表面引力比。
 
-### 7.4 当前候选自动化留证
+### 7.4 V0 冻结留证
 
-2026-07-30 在 `integration/m9-satellite-e5-20260730` 当前候选上重跑并通过：
+2026-07-30 至 2026-07-31 的候选与可见 PIE 留证为：
 
 - 强制 Unity：`-ForceUnity -DisableAdaptiveUnity -NoHotReload -NoHotReloadFromIDE`，`Result: Succeeded`；
 - `ABTS.Calibration.*`：精确 6/6 Success，`TEST COMPLETE. EXIT CODE: 0`；
 - 标定 runtime：唯一 `Terminal=1 Passed=1 Failed=0`，组合原因为 `Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`；
 - 蓝图相机构图：`BP_ABTSM6SlingshotCamera_C`，`Distance=1500 cm`、`Pitch=-3°`、`TargetForward=900 cm`、`TargetHeight=245 cm`；
-- 实际 Reinforced 成功岛：`Hits=12`、`Pull=[0.79,0.87]`、`AimInPlane=[-195,-169] cm`、`LargestIsland=5`，Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `2373.3 cm`，`SimpleHits=0 OutsidePullHits=0`；
-- 标定场景解析值：`SatelliteRadius=1250 cm`、`Clearance=5000 cm`、`SurfaceGravity=1960 cm/s²`，E5 半边长 `420 cm`、表面间隙 `20 cm`；
+- 最终 Reinforced 成功岛：`Hits=15`、`Pull=[0.83,1.00]`、`AimInPlane=[-221,-182] cm`、`LargestIsland=9`，Aim/Pull 邻接均成立；同输入关闭卫星引力后最小错失 `2483.6 cm`，`SimpleHits=0 OutsidePullHits=0`；
+- 标定场景解析值：`SatelliteRadius=1250 cm`、`Clearance=5500 cm`、`SurfaceGravity=1960 cm/s²`，E5 半边长 `420 cm`、表面间隙 `20 cm`；
 - 生产 M9 fresh runtime：唯一 `ABTSM9GameMode`、唯一 `Satellite ready`、零 rejected/transform error；
 - `ABTS.M110.TaskGraphFinaleSeparation` 与 `ABTS.M11C.Runtime.ContractRoutingAndM9Isolation`：各 1/1 Success。
 
-本次 runtime 的候选身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=4556705819126274791`、`SweepResultHash=2476487998726195302`；`BaselineGravitySnapshotHash=5302779937323207981` 只记录该场景实例，不作为跨 Seed 身份。上述数据是自动化留证；月面画中画已于 2026-07-31 通过可见 PIE，但卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，因此尚不能把完整 V0 标记为冻结。
+冻结的可移植身份为 `LaunchProfileHash=2920060455991611804`、`SatellitePracticePresetHash=11534008174155323086`；最终标定场景记录 `SweepResultHash=14461769049079992071`。`BaselineGravitySnapshotHash=6868080659462091281` 只记录该场景实例，不作为跨 Seed 身份。2026-07-31 可见 PIE 已确认当前弹弓/卫星参数手感可接受，因此参数 V0 正式冻结；月面画中画也已通过。卫星实飞主镜头仍延期到[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)，不阻塞本次数据合同冻结。
 
 ## 8. 可见 PIE 验收
 
 自动化不能代替手感与可读性。使用第 2 节 URL 启动可见 PIE 后逐项确认：
 
-- [ ] 三档能力与弹道差异不看 HUD 数字也可辨认；共享的初始 Pull、`0.04` 滚轮步长和真实相机屏幕平面 Aim 操作不会造成突跳、轴向错位或不可进入档位；
-- [ ] HUD 舒适和极限射程与真实落点相符；
-- [ ] 强化档存在玩家可重复找到的连续背面目标成功岛；
-- [ ] 同一输入关闭卫星引力后明显飞偏；
-- [ ] Simple 满功率不能完成卫星背面目标；
+- [x] 三档能力与弹道差异不看 HUD 数字也可辨认；共享的初始 Pull、`0.04` 滚轮步长和真实相机屏幕平面 Aim 操作不会造成突跳、轴向错位或不可进入档位（2026-07-31 参数手感通过）；
+- [x] HUD 舒适和极限射程与真实落点相符（2026-07-31 参数手感通过）；
+- [x] 强化档存在玩家可重复找到的连续背面目标成功岛（2026-07-31 参数手感通过）；
+- [x] 同一输入关闭卫星引力后明显飞偏（自动化因果消融与可见 PIE 通过）；
+- [x] Simple 满功率不能完成卫星背面目标（自动化与可见 PIE 通过）；
 - [ ] E5 立方体位于远离主星的卫星半球，底面贴近理想球面且不漂浮、不嵌入；
 - [ ] 预测终点为 E5 时，实际 `42 cm` 鸟不会先撞卫星；预测为 `SatelliteBody` 时，实飞确实先撞卫星；
 - [x] 卫星背面画中画在背光面仍清晰，只显示卫星、E5 与局部轨迹；切回普通主星落点预览后无残留 ShowOnly/BaseColor 状态（2026-07-31 PIE 通过）；
 - [ ] 卫星实飞主镜头的可读性、普通借力路径的轻量转向和 E5 演出构图转入[统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md)；当前状态机只保留为候选，不作为冻结门槛的已通过项；
 - [ ] M10.1 轨道全景图能清晰展示卫星造成的偏转；
-- [ ] 自动化岛集中在约 79%–87%，连续鼠标输入下仍有自然容错；满功率属于认证域但不是唯一正确解；
+- [x] 最终自动化岛覆盖约 83%–100%，连续鼠标输入下具有自然容错；满功率属于认证域但不是唯一正确解（2026-07-31 参数手感通过）；
 - [ ] 普通 M6/M9 与既有 M10.1-B 主星落点画中画行为无回归；
 - [ ] 日志中的真实发射遥测字段完整且没有 Fatal、assert 或 ensure。
 
-可见 PIE 通过后，把实测两个可移植 Hash、该场景的 baseline `GravitySnapshotHash`、射程包络和成功岛手感结论写入本节验收记录，再将状态改为“V0 已冻结”。自动化或 runtime smoke 通过不能提前勾选本节。
+本节中未勾选的视觉、轨道图与生产回归项仍按各自阶段继续验收；它们不改变已经冻结的 Launch/Preset 参数身份。以后修改任一签名字段都必须提升版本、产生新 Hash，并重新跑 6/6、runtime smoke 与相关可见 PIE，不能原地漂移 V0。
 
 ## 9. 下游交接
 
@@ -336,15 +336,17 @@ M3R-4.1 只消费：
 
 ```text
 SlingshotTier
+LaunchProfileVersion
 LaunchProfileHash
 ComfortableReachEnvelope
 MaximumReachEnvelope
 GravitySnapshotHash
+SatellitePracticePresetVersion
 SatellitePracticePresetHash
 TargetProxy / AttackFace
 ```
 
-其中只有 `LaunchProfileHash`、射程包络和 `SatellitePracticePresetHash` 是跨 Seed 输入；`GravitySnapshotHash` 是每个 Witness 解析场景后的实例证据，不能作为全局 Catalog 身份。R3 用射程包络粗筛站点。
+M3 通过 `MakeFrozenLaunchProfileCatalogV0()` 与 `MakeFrozenSatellitePracticePresetV0()` 获取稳定数据，不加载标定蓝图，也不复制字段常量。其中只有版本、`LaunchProfileHash`、射程包络和 `SatellitePracticePresetHash` 是跨 Seed 输入；`GravitySnapshotHash` 是每个 Witness 解析场景后的实例证据，不能作为全局 Catalog 身份。R3 用射程包络粗筛站点。
 
 本文的固定步长二体积分器是标定认证与 M3R-4.1 前置预筛模型，不是生产 M6/M9 的权威实飞 Provider。M3R-4 在宣称生产 Witness 前，仍须由 Integration 提供经批准的只读生产适配器，并用实际 M6/M9 预览/实飞做重放误差门；M3 不复制速度曲线、pouch 几何或引力公式。
 
