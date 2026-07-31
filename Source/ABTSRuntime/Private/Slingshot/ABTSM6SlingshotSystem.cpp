@@ -23,6 +23,7 @@
 #include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "World/ABTSM9Satellite.h"
 
 namespace
 {
