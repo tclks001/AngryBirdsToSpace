@@ -299,6 +299,9 @@ bool FABTSM3R3EncounterSpatialDefaultsAndDisplayTest::RunTest(
 	TestEqual(TEXT("Six calibrated slingshot tiers"),
 		Config.EncounterSlingshotTiers.Num(),
 		ExpectedEncounterCount);
+	TestEqual(TEXT("Six progressive comfortable-reach windows"),
+		Config.EncounterComfortableReachWindowsPermille.Num(),
+		ExpectedEncounterCount);
 	for (int32 EncounterIndex = 0;
 		EncounterIndex < ExpectedEncounterCount;
 		++EncounterIndex)
@@ -313,6 +316,26 @@ bool FABTSM3R3EncounterSpatialDefaultsAndDisplayTest::RunTest(
 				EncounterIndex),
 			Config.EncounterSlingshotTiers[EncounterIndex],
 			ExpectedTier);
+		if (EncounterIndex > 0
+			&& Config.EncounterSlingshotTiers[EncounterIndex]
+				== Config.EncounterSlingshotTiers[
+					EncounterIndex - 1])
+		{
+			TestTrue(
+				FString::Printf(
+					TEXT("Encounter %d advances both same-tier reach bounds"),
+					EncounterIndex),
+				Config.EncounterComfortableReachWindowsPermille[
+					EncounterIndex].X
+					> Config.
+						EncounterComfortableReachWindowsPermille[
+							EncounterIndex - 1].X
+				&& Config.EncounterComfortableReachWindowsPermille[
+					EncounterIndex].Y
+					> Config.
+						EncounterComfortableReachWindowsPermille[
+							EncounterIndex - 1].Y);
+		}
 	}
 	TestEqual(TEXT("Minimum encounter progress gap"),
 		Config.MinAdjacentEncounterProgressCM,
@@ -653,6 +676,9 @@ bool FABTSM3R3EncounterSpatialReservationTest::RunTest(
 	TSet<int32> SeenPocketIds;
 	TSet<int32> SeenTargetNoRoadCells;
 	int32 PreviousProgressCM = INDEX_NONE;
+	int32 PreviousLaunchDistanceCM = INDEX_NONE;
+	EABTSSlingshotTier PreviousLaunchTier =
+		EABTSSlingshotTier::Twig;
 	for (int32 Order = 0;
 		Order < Candidate.Encounters.Num();
 		++Order)
@@ -688,6 +714,47 @@ bool FABTSM3R3EncounterSpatialReservationTest::RunTest(
 					>= Config.TargetRoadDistanceWindowsCells[Order].X
 				&& Encounter.MainRoadDistanceCells
 					<= Config.TargetRoadDistanceWindowsCells[Order].Y);
+		const EABTSSlingshotTier CurrentTier =
+			Config.EncounterSlingshotTiers[Order];
+		const FABTSM6ReachEnvelope* ReachEnvelope =
+			Result.FrozenCalibrationBatch.ReachEnvelopes.
+				FindByPredicate(
+					[CurrentTier](
+						const FABTSM6ReachEnvelope& Envelope)
+					{
+						return Envelope.Tier == CurrentTier;
+					});
+		TestNotNull(TEXT("Encounter tier has frozen reach envelope"),
+			ReachEnvelope);
+		if (ReachEnvelope != nullptr)
+		{
+			const FIntPoint ReachWindow =
+				Config.EncounterComfortableReachWindowsPermille[
+					Order];
+			const int32 MinimumReachCM = FMath::RoundToInt(
+				ReachEnvelope->ComfortableReachCM
+					* ReachWindow.X / 1000.0f);
+			const int32 MaximumReachCM = FMath::RoundToInt(
+				ReachEnvelope->ComfortableReachCM
+					* ReachWindow.Y / 1000.0f);
+			TestTrue(TEXT("Generated launch distance uses calibrated reach window"),
+				Encounter.LaunchToTargetDistanceCM
+					>= MinimumReachCM - 500
+				&& Encounter.LaunchToTargetDistanceCM
+						<= MaximumReachCM + 500);
+		}
+		TestTrue(TEXT("Attack corridor contains the direct launch arc"),
+			Encounter.AttackCorridorLengthCM
+				>= Encounter.LaunchToTargetDistanceCM);
+		if (Order > 0 && CurrentTier == PreviousLaunchTier)
+		{
+			TestTrue(TEXT("Same-tier encounter launch distance increases"),
+				Encounter.LaunchToTargetDistanceCM
+					> PreviousLaunchDistanceCM);
+		}
+		PreviousLaunchTier = CurrentTier;
+		PreviousLaunchDistanceCM =
+			Encounter.LaunchToTargetDistanceCM;
 		TestTrue(TEXT("Target footprint is explicit"),
 			!Encounter.TargetFootprintCellIds.IsEmpty());
 		TestTrue(TEXT("Target no-road set is explicit"),
@@ -1782,9 +1849,11 @@ bool FABTSM3R3EncounterSpatialSweep100Test::RunTest(
 	int32 RouteFallback = 0;
 	int32 MaxRays = 0;
 	int32 MaxBacktracks = 0;
+	int32 ProcessedSeeds = 0;
 	uint64 OracleHash = 14695981039346656037ull;
 	for (const int32 Seed : Seeds)
 	{
+		++ProcessedSeeds;
 		FABTSM3MonthlyRoutePool RoutePool;
 		if (!BuildRoutePool(
 				Seed,
@@ -1812,8 +1881,18 @@ bool FABTSM3R3EncounterSpatialSweep100Test::RunTest(
 				FaultInjection,
 				Result,
 				Failure);
-		DurationsMS.Add(
-			(FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+		const double DurationMS =
+			(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+		DurationsMS.Add(DurationMS);
+		if (ProcessedSeeds % 10 == 0)
+		{
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M3R3][SpatialSweepProgress] Processed=%d/%d Seed=%d LatestMS=%.3f"),
+				ProcessedSeeds,
+				Seeds.Num(),
+				Seed,
+				DurationMS);
+		}
 		if (!bBuilt
 			|| !Result.bSpatialResultValid
 			|| Result.RetainedCandidates.IsEmpty()

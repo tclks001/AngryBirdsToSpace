@@ -5,6 +5,10 @@
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
 > 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 Launch/Preset 参数已完成可见 PIE 并冻结为可移植 V0，R-3 已通过稳定原生 factory 构造并签名校准批次，用三档射程包络做空间预筛，但仍不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、生产 M6/M9 只读适配器、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
 
+> 2026-07-31 射程布局修正：R-3 不再只用冻结 `MaximumReachCM` 做末端拒绝，而是为 E1–E6 配置逐关递增的 `ComfortableReachCM` 利用率窗口，并让目标初选、侧路真实道路到达点和 strict rebuild 后的最终弹弓位置共同求解该窗口。Simple 阶段 E1/E2/E3 的窗口依次为 `10–30% / 25–50% / 45–65%`，Reinforced 阶段 E4/E5/E6 为 `20–40% / 35–55% / 50–70%`；窗口允许少量重叠以适应离散球面拓扑，但最终厘米距离在同一弹弓阶段必须严格递增。最终结果显式保存 `LaunchToTargetDistanceCM` 与 `AttackCorridorLengthCM` 并进入 Candidate Hash，长走廊的全部单元会在道路重建前预留。E1 保持视距内直接可读，E2–E6 统一由侦察揭示。显示种子 `312503` 的全新进程实测发射距离为 `986 / 1805 / 2631 / 3143 / 4697 / 6382 cm`，走廊长度为 `1907 / 2697 / 3594 / 4388 / 5926 / 8295 cm`；100 Seed 门为 `Accepted=100, Rejected=0, P95=190.731 ms, Max=294.622 ms`。
+>
+> 当前 PIE 边界仍需明确：R-5 的 `F7` 红色 Target Footprint 与橙色 Attack Corridor 已消费上述新布局；玩家世界中的 M7 实体建筑仍由兼容 TaskGraph 生成，只有 R-6/Integration 将唯一月度 Candidate 导出并实例化后，实体建筑才会移动到这些目标范围。因此在 R-6 前，应以逻辑区域叠层和 `[ABTS][PCG][EncounterReach]` 厘米日志验收本次修正，不能把旧实体建筑位置误报为 R-3 参数未生效。
+
 父文档：
 
 - [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)

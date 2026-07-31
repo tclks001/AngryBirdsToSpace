@@ -239,6 +239,8 @@ bool ValidateConfig(
 		|| Config.RevealPolicies.Num() != Count
 		|| Config.EncounterBiomeArchetypes.Num() != Count
 		|| Config.EncounterSlingshotTiers.Num() != Count
+		|| Config.EncounterComfortableReachWindowsPermille.Num()
+			!= Count
 		|| Config.MinAdjacentEncounterProgressCM <= 0
 		|| Config.MaxAdjacentEncounterProgressCM
 			< Config.MinAdjacentEncounterProgressCM
@@ -331,6 +333,8 @@ bool ValidateConfig(
 		const int32 FlowQ = Config.EncounterFlowQ[Index];
 		const FIntPoint Window =
 			Config.TargetRoadDistanceWindowsCells[Index];
+		const FIntPoint ReachWindow =
+			Config.EncounterComfortableReachWindowsPermille[Index];
 		const int32 Difficulty = Config.DifficultyBands[Index];
 		if (FlowQ <= 0
 			|| FlowQ >= FlowQuantization
@@ -338,6 +342,20 @@ bool ValidateConfig(
 				&& FlowQ <= PreviousFlow)
 			|| Window.X < 3
 			|| Window.Y < Window.X
+			|| ReachWindow.X < 1
+			|| ReachWindow.Y <= ReachWindow.X
+			|| ReachWindow.Y > 1000
+			|| (Index > 0
+				&& Config.EncounterSlingshotTiers[Index]
+					== Config.EncounterSlingshotTiers[Index - 1]
+				&& (ReachWindow.X
+						<= Config.
+							EncounterComfortableReachWindowsPermille[
+								Index - 1].X
+					|| ReachWindow.Y
+						<= Config.
+							EncounterComfortableReachWindowsPermille[
+								Index - 1].Y))
 			|| Difficulty < 0
 			|| (PreviousDifficulty != INDEX_NONE
 				&& Difficulty < PreviousDifficulty)
@@ -494,6 +512,28 @@ float SurfaceArcDistanceCM(
 			Cells[CellB].UnitCenter),
 		-1.0,
 		1.0)) * PlanetRadiusCM;
+}
+
+float SurfacePathLengthCM(
+	const TArray<FABTSM2Cell>& Cells,
+	const TArray<int32>& Path,
+	const float PlanetRadiusCM)
+{
+	float LengthCM = 0.0f;
+	for (int32 Index = 1; Index < Path.Num(); ++Index)
+	{
+		const float SegmentLengthCM = SurfaceArcDistanceCM(
+			Cells,
+			Path[Index - 1],
+			Path[Index],
+			PlanetRadiusCM);
+		if (!FMath::IsFinite(SegmentLengthCM))
+		{
+			return TNumericLimits<float>::Max();
+		}
+		LengthCM += SegmentLengthCM;
+	}
+	return LengthCM;
 }
 
 int32 FindSemanticPreRevealRouteIndex(
@@ -674,12 +714,16 @@ TArray<int32> BuildPathToRoad(
 bool BuildFinalPathToPlannedRoute(
 	const FABTSM3MonthlyEncounterSpatialConfig& Config,
 	const TArray<FABTSM2Cell>& Cells,
+	const float PlanetRadiusCM,
 	const FABTSM3MonthlySpatialCandidate& Candidate,
 	const FABTSM3MonthlySpatialEncounter& Encounter,
 	const TBitArray<>& ReservedCells,
 	const TArray<int32>& RouteIndexByCell,
 	const int32 DesiredProgressCM,
 	const int32 PreviousProgressCM,
+	const int32 MinimumLaunchDistanceCM,
+	const int32 PreferredLaunchDistanceCM,
+	const int32 MaximumLaunchDistanceCM,
 	TArray<int32>& OutPath,
 	int32& OutArrivalRouteIndex)
 {
@@ -750,6 +794,22 @@ bool BuildFinalPathToPlannedRoute(
 		{
 			continue;
 		}
+		const int32 RevealCellId = ParentCell[RouteCellId];
+		const int32 SlingshotCellId =
+			ParentCell.IsValidIndex(RevealCellId)
+			? ParentCell[RevealCellId]
+			: INDEX_NONE;
+		const float LaunchDistanceCM = SurfaceArcDistanceCM(
+			Cells,
+			TargetCellId,
+			SlingshotCellId,
+			PlanetRadiusCM);
+		if (!FMath::IsFinite(LaunchDistanceCM)
+			|| LaunchDistanceCM < MinimumLaunchDistanceCM
+			|| LaunchDistanceCM > MaximumLaunchDistanceCM)
+		{
+			continue;
+		}
 		const int32 ProgressCM =
 			Candidate.RecomputedRoute.ProgressDistanceCM[
 				RouteIndex];
@@ -769,11 +829,13 @@ bool BuildFinalPathToPlannedRoute(
 				continue;
 			}
 		}
-		const int64 Score =
-			static_cast<int64>(PlannedDeviationCM)
-				* 100000
-			+ static_cast<int64>(PathDistance[RouteCellId])
-				* 100
+		const int64 ReachDifferenceCM = FMath::Abs(
+			static_cast<int64>(FMath::RoundToInt(
+				LaunchDistanceCM))
+			- PreferredLaunchDistanceCM);
+		const int64 Score = ReachDifferenceCM * 1000000
+			+ static_cast<int64>(PlannedDeviationCM) * 1000
+			+ static_cast<int64>(PathDistance[RouteCellId]) * 100
 			+ RouteIndex;
 		if (Score < BestScore)
 		{
@@ -883,6 +945,73 @@ const FABTSM6ReachEnvelope* FindReachEnvelope(
 		});
 }
 
+bool ResolveCalibratedLaunchDistanceWindow(
+	const FABTSM3MonthlyEncounterSpatialConfig& Config,
+	const FABTSM3FrozenCalibrationBatch& Batch,
+	const int32 EncounterOrder,
+	int32& OutMinimumCM,
+	int32& OutPreferredCM,
+	int32& OutMaximumCM,
+	FString& OutFailure)
+{
+	OutMinimumCM = 0;
+	OutPreferredCM = 0;
+	OutMaximumCM = 0;
+	if (!Config.EncounterSlingshotTiers.IsValidIndex(
+			EncounterOrder)
+		|| !Config.EncounterComfortableReachWindowsPermille.
+			IsValidIndex(EncounterOrder))
+	{
+		OutFailure = FString::Printf(
+			TEXT("CalibrationEncounterOrder:%d"),
+			EncounterOrder);
+		return false;
+	}
+	const FABTSM6ReachEnvelope* Envelope = FindReachEnvelope(
+		Batch,
+		Config.EncounterSlingshotTiers[EncounterOrder]);
+	const FIntPoint Utilization =
+		Config.EncounterComfortableReachWindowsPermille[
+			EncounterOrder];
+	if (Envelope == nullptr
+		|| !FMath::IsFinite(Envelope->ComfortableReachCM)
+		|| !FMath::IsFinite(Envelope->MaximumReachCM)
+		|| Envelope->ComfortableReachCM <= 0.0f
+		|| Envelope->MaximumReachCM
+			< Envelope->ComfortableReachCM
+		|| Utilization.X < 1
+		|| Utilization.Y <= Utilization.X
+		|| Utilization.Y > 1000)
+	{
+		OutFailure = FString::Printf(
+			TEXT("CalibrationReachWindow:%d"),
+			EncounterOrder);
+		return false;
+	}
+	OutMinimumCM = FMath::RoundToInt(
+		Envelope->ComfortableReachCM
+			* static_cast<float>(Utilization.X)
+			/ 1000.0f);
+	OutMaximumCM = FMath::RoundToInt(
+		Envelope->ComfortableReachCM
+			* static_cast<float>(Utilization.Y)
+			/ 1000.0f);
+	OutPreferredCM = (OutMinimumCM + OutMaximumCM) / 2;
+	if (OutMinimumCM <= 0
+		|| OutMaximumCM <= OutMinimumCM
+		|| OutMaximumCM
+			> FMath::CeilToInt(Envelope->MaximumReachCM))
+	{
+		OutFailure = FString::Printf(
+			TEXT("CalibrationReachDomain:%d:%d:%d"),
+			EncounterOrder,
+			OutMinimumCM,
+			OutMaximumCM);
+		return false;
+	}
+	return true;
+}
+
 bool ValidateFrozenCalibrationReach(
 	const FABTSM3MonthlyEncounterSpatialConfig& Config,
 	const TArray<FABTSM2Cell>& Cells,
@@ -897,6 +1026,9 @@ bool ValidateFrozenCalibrationReach(
 		OutFailure = TEXT("CalibrationEncounterCount");
 		return false;
 	}
+	int32 PreviousLaunchDistanceCM = INDEX_NONE;
+	EABTSSlingshotTier PreviousTier =
+		EABTSSlingshotTier::Twig;
 	for (int32 Order = 0;
 		Order < Candidate.Encounters.Num();
 		++Order)
@@ -908,12 +1040,18 @@ bool ValidateFrozenCalibrationReach(
 		const FABTSM3PocketContract* Slingshot = FindPocket(
 			Candidate.Pockets,
 			Encounter.Contract.SlingshotPocketId);
-		if (!Config.EncounterSlingshotTiers.IsValidIndex(
-				EncounterOrder))
+		int32 MinimumLaunchDistanceCM = 0;
+		int32 PreferredLaunchDistanceCM = 0;
+		int32 MaximumLaunchDistanceCM = 0;
+		if (!ResolveCalibratedLaunchDistanceWindow(
+				Config,
+				Batch,
+				EncounterOrder,
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM,
+				OutFailure))
 		{
-			OutFailure = FString::Printf(
-				TEXT("CalibrationEncounterOrder:%d"),
-				EncounterOrder);
 			return false;
 		}
 		const FABTSM6ReachEnvelope* Envelope = FindReachEnvelope(
@@ -942,18 +1080,48 @@ bool ValidateFrozenCalibrationReach(
 				Cells,
 				Slingshot->AnchorCellId,
 				PlanetRadiusCM));
+		const int32 QuantizedLaunchDistanceCM =
+			FMath::RoundToInt(LaunchToTargetArcCM);
 		if (!FMath::IsFinite(LaunchToTargetArcCM)
+			|| QuantizedLaunchDistanceCM
+				!= Encounter.LaunchToTargetDistanceCM
+			|| Encounter.AttackCorridorLengthCM
+				< Encounter.LaunchToTargetDistanceCM
+			|| LaunchToTargetArcCM
+				< MinimumLaunchDistanceCM
+					- QuantizationToleranceCM
+			|| LaunchToTargetArcCM
+				> MaximumLaunchDistanceCM
+					+ QuantizationToleranceCM
 			|| LaunchToTargetArcCM
 				> Envelope->MaximumReachCM
 					+ QuantizationToleranceCM)
 		{
 			OutFailure = FString::Printf(
-				TEXT("CalibrationReach:%d:%.1f:%.1f"),
+				TEXT("CalibrationReach:%d:%.1f:%d:%d:%d"),
 				Order,
 				LaunchToTargetArcCM,
-				Envelope->MaximumReachCM);
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM);
 			return false;
 		}
+		const EABTSSlingshotTier CurrentTier =
+			Config.EncounterSlingshotTiers[EncounterOrder];
+		if (Order > 0
+			&& CurrentTier == PreviousTier
+			&& QuantizedLaunchDistanceCM
+				<= PreviousLaunchDistanceCM)
+		{
+			OutFailure = FString::Printf(
+				TEXT("CalibrationProgression:%d:%d:%d"),
+				Order,
+				PreviousLaunchDistanceCM,
+				QuantizedLaunchDistanceCM);
+			return false;
+		}
+		PreviousTier = CurrentTier;
+		PreviousLaunchDistanceCM = QuantizedLaunchDistanceCM;
 	}
 	return true;
 }
@@ -1094,6 +1262,7 @@ bool ReserveEncounters(
 	const float PlanetRadiusCM,
 	const FABTSM3MonthlyRouteCandidate& SourceRoute,
 	const uint64 ProfileCatalogHash,
+	const FABTSM3FrozenCalibrationBatch& CalibrationBatch,
 	FABTSM3MonthlySpatialCandidate& OutCandidate,
 	EABTSM3MonthlySpatialRejectReason& OutReason,
 	FString& OutFailure)
@@ -1171,6 +1340,22 @@ bool ReserveEncounters(
 			Catalog[Order];
 		const FIntPoint Window =
 			Config.TargetRoadDistanceWindowsCells[Order];
+		int32 MinimumLaunchDistanceCM = 0;
+		int32 PreferredLaunchDistanceCM = 0;
+		int32 MaximumLaunchDistanceCM = 0;
+		if (!ResolveCalibratedLaunchDistanceWindow(
+				Config,
+				CalibrationBatch,
+				Order,
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM,
+				OutFailure))
+		{
+			OutReason =
+				EABTSM3MonthlySpatialRejectReason::InvalidConfig;
+			return false;
+		}
 
 		int32 BestCellId = INDEX_NONE;
 		int32 BestRequiredClearanceCells = 0;
@@ -1179,31 +1364,88 @@ bool ReserveEncounters(
 		TArray<int32> BestEnvelope;
 		TArray<int32> BestFootprint;
 		TArray<int32> BestNoRoad;
+		TArray<int32> BestSidePath;
 		for (int32 CellId = 0;
 			CellId < Cells.Num()
 				&& EvaluatedCandidates
 					< Config.MaxAnchorCandidatesPerEncounter;
 			++CellId)
 		{
-			if (!NearestRouteIndex.IsValidIndex(CellId)
-				|| !SourceRoute.ProgressDistanceCM.IsValidIndex(
-					NearestRouteIndex[CellId]))
+			if (!RoadDistance.IsValidIndex(CellId))
 			{
 				continue;
 			}
-			const int32 ProgressDifference = FMath::Abs(
+			const float CellArcCM = AverageNeighborArcCM(
+				Cells,
+				CellId,
+				PlanetRadiusCM);
+			if (CellArcCM <= 1.0f)
+			{
+				continue;
+			}
+			const float HorizontalExtent = FMath::Max(
+				Descriptor.BoundsExtentCM.X,
+				Descriptor.BoundsExtentCM.Y);
+			const int32 ContinuousClearanceCells = FMath::CeilToInt(
+				(HorizontalExtent
+					+ Config.RoadHalfWidthCM
+					+ Config.PadRoadBlendWidthCM
+					+ Config.FootprintSafetyMarginCM)
+				/ CellArcCM);
+			const int32 MinDistance = FMath::Max(
+				Window.X,
+				ContinuousClearanceCells);
+			if (RoadDistance[CellId] < MinDistance
+				|| RoadDistance[CellId] > Window.Y)
+			{
+				continue;
+			}
+			TArray<int32> CandidateSidePath = BuildPathToRoad(
+				Cells,
+				RoadDistance,
+				CellId);
+			if (CandidateSidePath.Num() < 4)
+			{
+				continue;
+			}
+			const int32 CandidateSlingshotCellId =
+				CandidateSidePath[
+					CandidateSidePath.Num() - 3];
+			const float LaunchToTargetArcCM =
+				SurfaceArcDistanceCM(
+					Cells,
+					CandidateSlingshotCellId,
+					CellId,
+					PlanetRadiusCM);
+			if (!FMath::IsFinite(LaunchToTargetArcCM)
+				|| LaunchToTargetArcCM
+					< MinimumLaunchDistanceCM
+				|| LaunchToTargetArcCM
+					> MaximumLaunchDistanceCM)
+			{
+				continue;
+			}
+			const int32 CandidateRoadArrivalCellId =
+				CandidateSidePath.Last();
+			const int32 CandidateArrivalRouteIndex =
+				NearestRouteIndex.IsValidIndex(
+					CandidateRoadArrivalCellId)
+				? NearestRouteIndex[CandidateRoadArrivalCellId]
+				: INDEX_NONE;
+			if (!SourceRoute.ProgressDistanceCM.IsValidIndex(
+					CandidateArrivalRouteIndex))
+			{
+				continue;
+			}
+			const int32 CandidateArrivalProgressCM =
 				SourceRoute.ProgressDistanceCM[
-					NearestRouteIndex[CellId]]
-				- DesiredProgressCM);
+					CandidateArrivalRouteIndex];
+			const int32 ProgressDifference = FMath::Abs(
+				CandidateArrivalProgressCM - DesiredProgressCM);
 			if (ProgressDifference > 1800)
 			{
 				continue;
 			}
-			const int32 CandidateArrivalRouteIndex =
-				NearestRouteIndex[CellId];
-			const int32 CandidateArrivalProgressCM =
-				SourceRoute.ProgressDistanceCM[
-					CandidateArrivalRouteIndex];
 			const float StartToTargetArcCM =
 				SurfaceArcDistanceCM(
 					Cells,
@@ -1235,31 +1477,6 @@ bool ReserveEncounters(
 			{
 				continue;
 			}
-			const float CellArcCM = AverageNeighborArcCM(
-				Cells,
-				CellId,
-				PlanetRadiusCM);
-			if (CellArcCM <= 1.0f)
-			{
-				continue;
-			}
-			const float HorizontalExtent = FMath::Max(
-				Descriptor.BoundsExtentCM.X,
-				Descriptor.BoundsExtentCM.Y);
-			const int32 ContinuousClearanceCells = FMath::CeilToInt(
-				(HorizontalExtent
-					+ Config.RoadHalfWidthCM
-					+ Config.PadRoadBlendWidthCM
-					+ Config.FootprintSafetyMarginCM)
-				/ CellArcCM);
-			const int32 MinDistance = FMath::Max(
-				Window.X,
-				ContinuousClearanceCells);
-			if (RoadDistance[CellId] < MinDistance
-				|| RoadDistance[CellId] > Window.Y)
-			{
-				continue;
-			}
 			++EvaluatedCandidates;
 			const int32 PreferredDistance =
 				MinDistance
@@ -1283,12 +1500,17 @@ bool ReserveEncounters(
 						ReservationVariant + 1)
 						* 0xbf58476d1ce4e5b9ull)
 				& 0xffffull);
+			const int64 ReachDifferenceCM = FMath::Abs(
+				static_cast<int64>(
+					FMath::RoundToInt(LaunchToTargetArcCM))
+				- PreferredLaunchDistanceCM);
 			const int64 Score =
-				static_cast<int64>(ProgressDifference) * 1000
+				ReachDifferenceCM * 1000000
+				+ static_cast<int64>(ProgressDifference) * 1000
 				+ static_cast<int64>(
 					FMath::Abs(
 						RoadDistance[CellId]
-						- PreferredDistance)) * 100000
+						- PreferredDistance)) * 100
 				+ Tie;
 			if (Score >= BestScore)
 			{
@@ -1334,6 +1556,7 @@ bool ReserveEncounters(
 			BestEnvelope = MoveTemp(EnvelopeCells);
 			BestFootprint = MoveTemp(FootprintCells);
 			BestNoRoad = MoveTemp(NoRoadCells);
+			BestSidePath = MoveTemp(CandidateSidePath);
 		}
 		if (BestCellId == INDEX_NONE)
 		{
@@ -1354,10 +1577,7 @@ bool ReserveEncounters(
 			OutCandidate.Cells[CellId].bTargetFootprint = true;
 		}
 
-		const TArray<int32> SidePath = BuildPathToRoad(
-			Cells,
-			RoadDistance,
-			BestCellId);
+		const TArray<int32>& SidePath = BestSidePath;
 		if (SidePath.Num() < 4)
 		{
 			OutReason =
@@ -1587,6 +1807,17 @@ bool ReserveEncounters(
 			RoadDistance[BestCellId];
 		Encounter.RequiredRoadClearanceCells =
 			BestRequiredClearanceCells;
+		Encounter.LaunchToTargetDistanceCM = FMath::RoundToInt(
+			SurfaceArcDistanceCM(
+				Cells,
+				SlingshotCellId,
+				BestCellId,
+				PlanetRadiusCM));
+		Encounter.AttackCorridorLengthCM = FMath::RoundToInt(
+			SurfacePathLengthCM(
+				Cells,
+				SidePath,
+				PlanetRadiusCM));
 		Encounter.TargetFootprintCellIds = BestFootprint;
 		Encounter.TargetNoRoadCellIds = BestNoRoad;
 		Encounter.ResolvedFixtureProfileId =
@@ -1866,6 +2097,16 @@ bool BuildEnvelopesAndBiomes(
 			Envelope.Cells)
 		{
 			ReservedPlayableCells.Add(Role.CellId);
+		}
+	}
+	// Long calibrated side paths can extend beyond the endpoint pocket rings.
+	// Preserve the entire pre-road attack corridor so the strict road rebuild
+	// can reconnect the same target without silently collapsing the distance.
+	for (const FABTSM3MonthlySpatialCell& Cell : Candidate.Cells)
+	{
+		if (Cell.bAttackCorridor)
+		{
+			ReservedPlayableCells.Add(Cell.CellId);
 		}
 	}
 	TArray<int32> ReservedStrictCorridorCells;
@@ -2239,6 +2480,7 @@ bool UpdateFinalRouteFields(
 	const FABTSM3MonthlyEncounterSpatialConfig& Config,
 	const TArray<FABTSM2Cell>& Cells,
 	const float PlanetRadiusCM,
+	const FABTSM3FrozenCalibrationBatch& CalibrationBatch,
 	FABTSM3MonthlySpatialCandidate& Candidate,
 	FString& OutFailure)
 {
@@ -2293,6 +2535,9 @@ bool UpdateFinalRouteFields(
 	}
 
 	int32 PreviousProgressCM = INDEX_NONE;
+	int32 PreviousLaunchDistanceCM = INDEX_NONE;
+	EABTSSlingshotTier PreviousLaunchTier =
+		EABTSSlingshotTier::Twig;
 	TBitArray<> ReservedCells(false, Cells.Num());
 	for (const int32 CellId :
 		Candidate.PreRoadReservedPlayableCellIds)
@@ -2360,15 +2605,48 @@ bool UpdateFinalRouteFields(
 			/ FlowQuantization);
 		TArray<int32> FinalSidePath;
 		int32 ArrivalRouteIndex = INDEX_NONE;
+		int32 MinimumLaunchDistanceCM = 0;
+		int32 PreferredLaunchDistanceCM = 0;
+		int32 MaximumLaunchDistanceCM = 0;
+		if (!ResolveCalibratedLaunchDistanceWindow(
+				Config,
+				CalibrationBatch,
+				Order,
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM,
+				OutFailure))
+		{
+			return false;
+		}
+		const EABTSSlingshotTier CurrentLaunchTier =
+			Config.EncounterSlingshotTiers[Order];
+		if (Order > 0 && CurrentLaunchTier == PreviousLaunchTier)
+		{
+			MinimumLaunchDistanceCM = FMath::Max(
+				MinimumLaunchDistanceCM,
+				PreviousLaunchDistanceCM + 1);
+			if (MinimumLaunchDistanceCM > MaximumLaunchDistanceCM)
+			{
+				OutFailure = FString::Printf(
+					TEXT("FinalReachProgression:%d"),
+					Order);
+				return false;
+			}
+		}
 		if (!BuildFinalPathToPlannedRoute(
 				Config,
 				Cells,
+				PlanetRadiusCM,
 				Candidate,
 				Encounter,
 				ReservedCells,
 				RouteIndexByCell,
 				DesiredProgressCM,
 				PreviousProgressCM,
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM,
 				FinalSidePath,
 				ArrivalRouteIndex))
 		{
@@ -2553,6 +2831,20 @@ bool UpdateFinalRouteFields(
 				PreRevealRouteIndex];
 		Encounter.MainRoadDistanceCells =
 			RoadDistance[TargetCellId];
+		Encounter.LaunchToTargetDistanceCM = FMath::RoundToInt(
+			SurfaceArcDistanceCM(
+				Cells,
+				SlingshotCellId,
+				TargetCellId,
+				PlanetRadiusCM));
+		Encounter.AttackCorridorLengthCM = FMath::RoundToInt(
+			SurfacePathLengthCM(
+				Cells,
+				FinalSidePath,
+				PlanetRadiusCM));
+		PreviousLaunchTier = CurrentLaunchTier;
+		PreviousLaunchDistanceCM =
+			Encounter.LaunchToTargetDistanceCM;
 		Encounter.Contract.ProgressDistanceCM =
 			static_cast<float>(ProgressCM);
 		Encounter.FlowQ = static_cast<int32>(
@@ -3679,7 +3971,7 @@ uint64 ComputeEncounterHash(
 	const FABTSM3MonthlySpatialEncounter& Encounter)
 {
 	FCanonicalHash64 Hash;
-	Hash.AddInt32(2);
+	Hash.AddInt32(3);
 	const FABTSM3EncounterContract& Contract = Encounter.Contract;
 	Hash.AddInt32(Contract.EncounterId);
 	Hash.AddInt32(Contract.OrderIndex);
@@ -3720,6 +4012,8 @@ uint64 ComputeEncounterHash(
 	Hash.AddInt32(Encounter.TargetAnchorCellId);
 	Hash.AddInt32(Encounter.MainRoadDistanceCells);
 	Hash.AddInt32(Encounter.RequiredRoadClearanceCells);
+	Hash.AddInt32(Encounter.LaunchToTargetDistanceCM);
+	Hash.AddInt32(Encounter.AttackCorridorLengthCM);
 	Hash.AddIntArray(Encounter.TargetFootprintCellIds);
 	Hash.AddIntArray(Encounter.TargetNoRoadCellIds);
 	Hash.AddName(Encounter.ResolvedFixtureProfileId);
@@ -3786,6 +4080,7 @@ bool BuildSpatialCandidateAttempt(
 			PlanetRadiusCM,
 			SourceRoute,
 			ProfileCatalogHash,
+			CalibrationBatch,
 			OutCandidate,
 			OutReason,
 			OutFailure))
@@ -3832,6 +4127,7 @@ bool BuildSpatialCandidateAttempt(
 			Config,
 			Cells,
 			PlanetRadiusCM,
+			CalibrationBatch,
 			OutCandidate,
 			OutFailure))
 	{
@@ -4634,15 +4930,42 @@ bool ValidateCandidate(
 			/ FlowQuantization);
 		TArray<int32> ExpectedSidePath;
 		int32 ExpectedArrivalRouteIndex = INDEX_NONE;
+		int32 MinimumLaunchDistanceCM = 0;
+		int32 PreferredLaunchDistanceCM = 0;
+		int32 MaximumLaunchDistanceCM = 0;
+		if (!ResolveCalibratedLaunchDistanceWindow(
+				Config,
+				CalibrationBatch,
+				Order,
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM,
+				OutFailure))
+		{
+			return false;
+		}
+		if (Order > 0
+			&& Config.EncounterSlingshotTiers[Order]
+				== Config.EncounterSlingshotTiers[Order - 1])
+		{
+			MinimumLaunchDistanceCM = FMath::Max(
+				MinimumLaunchDistanceCM,
+				Candidate.Encounters[Order - 1].
+					LaunchToTargetDistanceCM + 1);
+		}
 		if (!BuildFinalPathToPlannedRoute(
 				Config,
 				Cells,
+				PlanetRadiusCM,
 				Candidate,
 				Encounter,
 				ReservedCells,
 				RouteIndexByCell,
 				DesiredProgressCM,
 				PriorProgressCM,
+				MinimumLaunchDistanceCM,
+				PreferredLaunchDistanceCM,
+				MaximumLaunchDistanceCM,
 				ExpectedSidePath,
 				ExpectedArrivalRouteIndex))
 		{
@@ -5050,21 +5373,21 @@ FABTSM3MonthlyEncounterSpatialConfig::
 		770000
 	};
 	TargetRoadDistanceWindowsCells = {
-		FIntPoint(3, 4),
-		FIntPoint(3, 5),
-		FIntPoint(4, 6),
-		FIntPoint(4, 7),
-		FIntPoint(5, 7),
-		FIntPoint(6, 9)
+		FIntPoint(3, 8),
+		FIntPoint(5, 10),
+		FIntPoint(7, 12),
+		FIntPoint(8, 14),
+		FIntPoint(11, 17),
+		FIntPoint(14, 20)
 	};
 	DifficultyBands = { 0, 1, 1, 2, 2, 3 };
 	RevealPolicies = {
 		EABTSM3MonthlyRevealPolicy::DirectVisual,
 		EABTSM3MonthlyRevealPolicy::ScoutRequired,
-		EABTSM3MonthlyRevealPolicy::DirectVisual,
 		EABTSM3MonthlyRevealPolicy::ScoutRequired,
 		EABTSM3MonthlyRevealPolicy::ScoutRequired,
-		EABTSM3MonthlyRevealPolicy::DirectVisual
+		EABTSM3MonthlyRevealPolicy::ScoutRequired,
+		EABTSM3MonthlyRevealPolicy::ScoutRequired
 	};
 	EncounterBiomeArchetypes = {
 		EABTSM3BiomeArchetype::Plain,
@@ -5081,6 +5404,14 @@ FABTSM3MonthlyEncounterSpatialConfig::
 		EABTSSlingshotTier::Reinforced,
 		EABTSSlingshotTier::Reinforced,
 		EABTSSlingshotTier::Reinforced
+	};
+	EncounterComfortableReachWindowsPermille = {
+		FIntPoint(100, 300),
+		FIntPoint(250, 500),
+		FIntPoint(450, 650),
+		FIntPoint(200, 400),
+		FIntPoint(350, 550),
+		FIntPoint(500, 700)
 	};
 }
 
@@ -5270,6 +5601,14 @@ uint64 FABTSM3MonthlyEncounterBuilder::ComputeConfigHash(
 		Config.EncounterSlingshotTiers)
 	{
 		Hash.AddInt32(static_cast<int32>(Tier));
+	}
+	Hash.AddInt32(
+		Config.EncounterComfortableReachWindowsPermille.Num());
+	for (const FIntPoint Window :
+		Config.EncounterComfortableReachWindowsPermille)
+	{
+		Hash.AddInt32(Window.X);
+		Hash.AddInt32(Window.Y);
 	}
 	Hash.AddInt32(Config.MinAdjacentEncounterProgressCM);
 	Hash.AddInt32(Config.MaxAdjacentEncounterProgressCM);
@@ -5744,7 +6083,11 @@ bool FABTSM3MonthlyEncounterBuilder::Build(
 		OutResult.RejectReason =
 			EABTSM3MonthlySpatialRejectReason::
 				AllRouteCandidatesFailed;
-		OutFailure = TEXT("AllRouteCandidatesFailed");
+		OutFailure = OutResult.AttemptReports.IsEmpty()
+			? TEXT("AllRouteCandidatesFailed")
+			: FString::Printf(
+				TEXT("AllRouteCandidatesFailed:%s"),
+				*OutResult.AttemptReports[0].FailureCode.ToString());
 		OutResult.SpatialResultHash = static_cast<int64>(
 			ComputeResultHash(OutResult));
 		return false;
@@ -6402,6 +6745,25 @@ void FABTSM3MonthlyEncounterBuilder::LogSummary(
 			static_cast<uint64>(Result.SpatialResultHash)),
 		static_cast<unsigned long long>(
 			ComputeResultSnapshotHash(Result)));
+	FString LaunchDistances;
+	FString CorridorLengths;
+	for (int32 Order = 0; Order < Best.Encounters.Num(); ++Order)
+	{
+		if (Order > 0)
+		{
+			LaunchDistances += TEXT(",");
+			CorridorLengths += TEXT(",");
+		}
+		LaunchDistances += FString::FromInt(
+			Best.Encounters[Order].LaunchToTargetDistanceCM);
+		CorridorLengths += FString::FromInt(
+			Best.Encounters[Order].AttackCorridorLengthCM);
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][PCG][EncounterReach] Stage=M3R3 Seed=%d LaunchToTargetCM=[%s] AttackCorridorCM=[%s] Progression=Simple:E1-E3,Reinforced:E4-E6"),
+		Result.WorldSeed,
+		*LaunchDistances,
+		*CorridorLengths);
 }
 
 const TCHAR* FABTSM3MonthlyEncounterBuilder::GetRejectReasonName(

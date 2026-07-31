@@ -162,6 +162,14 @@ struct ABTSRUNTIME_API FABTSM3MonthlyEncounterSpatialConfig
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Catalog")
 	TArray<EABTSSlingshotTier> EncounterSlingshotTiers;
 
+	/**
+	 * E1..E6 usable fractions of the tier's frozen comfortable reach.
+	 * X/Y are inclusive permille bounds. Target placement solves against the
+	 * midpoint instead of merely checking the absolute maximum reach.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Catalog")
+	TArray<FIntPoint> EncounterComfortableReachWindowsPermille;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Spacing",
 		meta = (ClampMin = "1", Units = "cm"))
 	int32 MinAdjacentEncounterProgressCM = 3500;
@@ -230,7 +238,7 @@ struct ABTSRUNTIME_API FABTSM3MonthlyEncounterSpatialConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Reservation",
 		meta = (ClampMin = "0", ClampMax = "512"))
-	int32 MaxSpatialBacktracksPerCandidate = 64;
+	int32 MaxSpatialBacktracksPerCandidate = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Road Context",
 		meta = (ClampMin = "0"))
@@ -505,6 +513,16 @@ struct ABTSRUNTIME_API FABTSM3MonthlySpatialEncounter
 	/** Continuous road-band/building-bounds clearance, quantized to topology cells. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	int32 RequiredRoadClearanceCells = 0;
+
+	/** Final direct surface arc from the generated slingshot pocket to target. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter",
+		meta = (Units = "cm"))
+	int32 LaunchToTargetDistanceCM = 0;
+
+	/** Final target-to-road side path used by the attack-corridor overlay. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter",
+		meta = (Units = "cm"))
+	int32 AttackCorridorLengthCM = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	TArray<int32> TargetFootprintCellIds;
