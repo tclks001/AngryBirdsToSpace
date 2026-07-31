@@ -52,6 +52,7 @@ namespace ABTSM73BeamATests
 		if (A.Bays.Num() != B.Bays.Num()
 			|| A.Joints.Num() != B.Joints.Num()
 			|| A.Members.Num() != B.Members.Num()
+			|| A.BearingContacts.Num() != B.BearingContacts.Num()
 			|| A.Assemblies.Num() != B.Assemblies.Num())
 		{
 			return false;
@@ -91,7 +92,27 @@ namespace ABTSM73BeamATests
 				|| Left.JointA != Right.JointA
 				|| Left.JointB != Right.JointB
 				|| Left.Axis != Right.Axis
-				|| Left.Role != Right.Role)
+				|| Left.Role != Right.Role
+				|| !FMath::IsNearlyEqual(Left.LengthCM, Right.LengthCM, 0.001f))
+			{
+				return false;
+			}
+		}
+		for (int32 Index = 0; Index < A.BearingContacts.Num(); ++Index)
+		{
+			const FABTSM73BeamABearingContact& Left =
+				A.BearingContacts[Index];
+			const FABTSM73BeamABearingContact& Right =
+				B.BearingContacts[Index];
+			if (Left.ContactId != Right.ContactId
+				|| Left.LowerMemberId != Right.LowerMemberId
+				|| Left.UpperMemberId != Right.UpperMemberId
+				|| Left.Type != Right.Type
+				|| !Left.LocalPosition.Equals(Right.LocalPosition, 0.001)
+				|| !FMath::IsNearlyEqual(
+					Left.ContactAreaCM2,
+					Right.ContactAreaCM2,
+					0.001f))
 			{
 				return false;
 			}
@@ -194,8 +215,11 @@ bool FABTSM73BeamAArchetypeCoverageTest::RunTest(
 		TestTrue(TEXT("Has X members"), Result.Summary.XMemberCount > 0);
 		TestTrue(TEXT("Has Y members"), Result.Summary.YMemberCount > 0);
 		TestTrue(TEXT("Has Z members"), Result.Summary.ZMemberCount > 0);
-		TestTrue(TEXT("Has roof/diagonal members"),
-			Result.Summary.DiagonalMemberCount > 0);
+		TestEqual(TEXT("Has no diagonal members"),
+			Result.Summary.DiagonalMemberCount,
+			0);
+		TestTrue(TEXT("Has physical bearing contacts"),
+			Result.Summary.BearingContactCount > 0);
 	}
 	return true;
 }
@@ -264,6 +288,78 @@ bool FABTSM73BeamAReferentialIntegrityTest::RunTest(
 				Result.Members.IsValidIndex(MemberId));
 		}
 	}
+	for (int32 Index = 0; Index < Result.BearingContacts.Num(); ++Index)
+	{
+		const FABTSM73BeamABearingContact& Contact =
+			Result.BearingContacts[Index];
+		TestEqual(TEXT("Contact identity matches array index"),
+			Contact.ContactId, Index);
+		TestTrue(TEXT("Contact lower member is valid"),
+			Result.Members.IsValidIndex(Contact.LowerMemberId));
+		TestTrue(TEXT("Contact upper member is valid"),
+			Result.Members.IsValidIndex(Contact.UpperMemberId));
+		TestTrue(TEXT("Contact has positive area"),
+			Contact.ContactAreaCM2 > 0.0f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamAStackedBlockSemanticsTest,
+	"ABTS.M73DAG.BeamA.StackedBlockSemantics",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamAStackedBlockSemanticsTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamATests;
+	const FABTSM73BeamAPreviewSettings Settings = MakeSettings();
+	FABTSM73BeamAGenerationResult Result;
+	FString Error;
+	TestTrue(TEXT("Generation succeeds"), Generate(
+		Settings, Result, Error));
+	int32 CrossBearings = 0;
+	int32 PostOnBeam = 0;
+	int32 BeamOnPost = 0;
+	TSet<int32> QuantizedLengths;
+	for (const FABTSM73BeamAMember& Member : Result.Members)
+	{
+		TestTrue(TEXT("Every block keeps the minimum fixed section length"),
+			Member.LengthCM >= Settings.BlockCrossSectionCM);
+		TestTrue(TEXT("Only XYZ axes are emitted"),
+			Member.Axis == EABTSM73BeamAFrameAxis::X
+			|| Member.Axis == EABTSM73BeamAFrameAxis::Y
+			|| Member.Axis == EABTSM73BeamAFrameAxis::Z);
+		QuantizedLengths.Add(FMath::RoundToInt(Member.LengthCM));
+	}
+	for (const FABTSM73BeamABearingContact& Contact :
+		Result.BearingContacts)
+	{
+		switch (Contact.Type)
+		{
+		case EABTSM73BeamABearingType::CrossBearing:
+			++CrossBearings;
+			break;
+		case EABTSM73BeamABearingType::PostOnBeam:
+			++PostOnBeam;
+			break;
+		case EABTSM73BeamABearingType::BeamOnPost:
+			++BeamOnPost;
+			break;
+		case EABTSM73BeamABearingType::ParallelBearing:
+		default:
+			break;
+		}
+	}
+	TestTrue(TEXT("X/Y blocks cross-support each other"), CrossBearings > 0);
+	TestTrue(TEXT("Posts stand on beams"), PostOnBeam > 0);
+	TestTrue(TEXT("Upper beams stand on posts"), BeamOnPost > 0);
+	TestTrue(TEXT("Topology contains variable block lengths"),
+		QuantizedLengths.Num() >= 3);
+	TestEqual(TEXT("No diagonal output"),
+		Result.Summary.DiagonalMemberCount,
+		0);
 	return true;
 }
 
@@ -289,6 +385,8 @@ bool FABTSM73BeamABudgetFailureTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("No partial bays"), Result.Bays.Num(), 0);
 	TestEqual(TEXT("No partial joints"), Result.Joints.Num(), 0);
 	TestEqual(TEXT("No partial members"), Result.Members.Num(), 0);
+	TestEqual(TEXT("No partial bearing contacts"),
+		Result.BearingContacts.Num(), 0);
 	TestEqual(TEXT("No partial assemblies"), Result.Assemblies.Num(), 0);
 	return true;
 }

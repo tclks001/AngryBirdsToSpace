@@ -15,6 +15,10 @@
 > [DAG-4 动态认证](M73DAG4SettledContactAndAttackRolloutDesign.md)。
 >
 > 总导航：[M7 建筑系统文档导航、模块清单与执行路线](M7BuildingDevelopmentRoadmap.md)。
+>
+> Beam-A v2 决策：首版“共同端点杆系方框”只保留为历史验证；当前结构 IR 改用固定截面、
+> 可变长度的 XYZ 长条积木和 Member-to-Member Bearing Contact。屋顶首版不使用斜杆，而以
+> X/Y 交替、逐层收分的水平积木拟合 Prism/Pyramid。
 
 ## 1. 结论摘要
 

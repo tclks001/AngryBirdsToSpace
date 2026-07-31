@@ -1,4 +1,4 @@
-# M7.3-Beam-A：结构 Bay、梁装配 IR 与编辑器预览
+# M7.3-Beam-A v2：分层积木、承托接触 IR 与编辑器预览
 
 > 父级：[长条形积木建筑生成调研与演进方案](M73BeamBlockStructuralGenerationResearch.md)。
 >
@@ -6,140 +6,187 @@
 >
 > 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 >
-> 状态：代码、强制 Unity 编译和自动化已完成；等待用户编辑器读形验收。
+> 状态：v2 C++、ForceUnity 编译、6 项专项自动化和 78 项完整 M7 回归已完成；等待用户编辑器读形验收。
 
-## 1. 阶段目标
+## 1. v2 修订原因
 
-Beam-A 建立从“语义轮廓”到“结构数据”的第一条确定性桥梁：
+Beam-A v1 证明了语义 Volume 可以稳定转换成 Bay、Joint、Member 和 Assembly，但它把连接理解成
+“多根中心线在同一个端点汇合”，并为每个 Bay 绘制完整方框。结果更像脚手架或钢结构线框，
+没有长条积木上下搭放的重量感。
+
+v2 将权威结构语义改成：
 
 ```text
-DAG5-B v2 semantic Volume
-  -> bounded Bay decomposition
-  -> Joint + Member + Assembly
-  -> editor-only colored beam preview
+固定方形截面、可变长度的 X/Y/Z 长条积木
+  + 上下表面的 Bearing Contact
+  + 明确的堆放高度和施工顺序
 ```
 
-本阶段回答三个问题：
+Member 的端点只描述自身长度；不同 Member 是否连通由真实上下表面接触决定，不再要求中心线
+端点重合。
 
-1. 复杂 Volume 是否可以拆成尺寸受控、带邻接关系的 Structural Bay；
-2. 是否可以用统一 `Joint / Member / Assembly` 表示 X/Y/Z 三向梁、立柱和屋顶斜杆；
-3. 同 Seed、同参数是否得到完全相同的结构图，预算不足时是否原子拒绝。
+## 2. 阶段边界
 
-## 2. 明确边界
+Beam-A v2 实现：
 
-Beam-A 实现：
+- 消费 DAG5-B v2 的 Volume、Role、Primitive 和局部包围盒；
+- 沿较长水平轴有界切分 Structural Bay；
+- 所有积木只允许 X、Y、Z 三种方向；
+- 所有积木使用同一个 `BlockCrossSectionCM × BlockCrossSectionCM` 截面，长度按 Bay/轮廓变化；
+- 高体量采用“主梁 → 正交次梁 → 立柱 → 上主梁 → 正交压梁”的堆放顺序；
+- 低矮体量自适应退化为 X/Y 交替的水平积木层，不因放不下完整门架而拒绝；
+- Prism/Pyramid 屋顶使用逐层收分、X/Y 交替的水平积木层拟合；
+- 从实际 AABB 上下表面重合和 XY 接触面积提取 `BearingContact`；
+- 提供确定性 Hash、预算拒绝和 Editor-only 彩色实体长条预览。
 
-- 消费已接受的 DAG5-B v2 Volume、Role、Primitive 和局部包围盒；
-- 沿较长水平轴按 `TargetBaySpanCM` 有界切分 Bay；
-- 建立 Bay 邻接图；
-- 为盒体 Bay 生成柱—梁框架，为 Prism/Pyramid 屋顶生成檩边、屋脊和斜椽；
-- 将 Bridge Role 保持为桥式框架，不把桥体误当成屋顶；
-- 合并同位置 Joint、去重同端点 Member；
-- 生成 `BayGraphHash` 和 `BeamGraphHash`；
-- 提供无碰撞、无物理、PIE 隐藏的编辑器程序化网格预览。
+Beam-A v2 暂不实现：
 
-Beam-A 不实现：
+- 斜杆、斜屋架、旋转 Brick；
+- Bay 内 Motif WFC 和多种结构家族选择；
+- 最终离散长度目录、材质、碰撞、Chaos 或弱点；
+- 从 Bearing Graph 提取权威 Load DAG；
+- TaskGraph 生产切换。
 
-- Bay 内 Motif WFC 或“哪一种门架更合适”的结构选择；
-- 梁图递归扩展、跨度优化、冗余选择和弱点设计；
-- Load DAG、累计荷载、重心、支撑域或真实接触图；
-- 最终离散长度木条、真实 Brick Actor、碰撞或 Chaos；
-- TaskGraph 生产默认切换。
-
-这些边界分别由 Beam-B、Beam-C 和 Beam-D 接管。
+这些目标分别属于 Beam-B、Beam-C 和 Beam-D。
 
 ## 3. 数据合同
 
 ### 3.1 Bay
 
-`FABTSM73BeamABay` 保存 `BayId`、`SourceVolumeId`、局部包围盒、首选主梁轴和相邻 Bay。
-Bay 是结构求解的有限域，不是最终积木。
+`FABTSM73BeamABay` 保存来源 Volume、局部边界、首选主梁方向和 Bay 邻接。它限定结构求解范围，
+不是一块最终积木。
 
-### 3.2 Joint
+### 3.2 Member
 
-`FABTSM73BeamAJoint` 保存稳定 ID、局部坐标和语义角色。位置在合并容差内相同的节点必须共享
-Joint ID，以便后续 Assembly 之间真正连通。
+`FABTSM73BeamAMember` 保存两个自身端点、`X/Y/Z` 方向、角色和 `LengthCM`。截面来自全局
+`BlockCrossSectionCM`，因此同一预览中只有长度变化，另外两条边保持不变。
 
-### 3.3 Member
+允许的角色为：
 
-`FABTSM73BeamAMember` 只引用两个 Joint，并记录 X/Y/Z/Diagonal 轴向和 Post、PrimaryBeam、
-SecondaryBeam、RoofRafter、RoofRidge 语义。Member 仍是结构候选，不等于一块最终物理木条。
+- `PrimaryBeam`：一层中的下部主承梁；
+- `SecondaryBeam`：搭在主梁上方的正交次梁；
+- `Post`：底面落在次梁上、顶面承托上层梁的竖向积木；
+- `RoofCourse`：逐层收分的水平屋顶积木。
 
-### 3.4 Assembly
+### 3.3 Bearing Contact
 
-`FABTSM73BeamAAssembly` 把一个 Bay 内的 Joint/Member 组织成 Post-and-Lintel、CrossBeam、
-RoofFrame 或 BridgeFrame。Beam-B 将在此边界内扩展结构 Motif，而不是在无限体素空间运行 WFC。
+`FABTSM73BeamABearingContact` 是 v2 新权威连接：
+
+| 类型 | 语义 |
+| --- | --- |
+| `CrossBearing` | X 梁和 Y 梁上下交叉搭放 |
+| `PostOnBeam` | Z 柱底面站在水平梁上 |
+| `BeamOnPost` | 水平梁底面搭在柱头上 |
+| `ParallelBearing` | 同向积木上下叠放 |
+
+每项记录 Lower/Upper Member、接触中心和接触面积。Bearing Graph 是几何装配图；后续 Load DAG
+仍需结合重力、支撑路径和累计荷载重新提取。
+
+### 3.4 Joint 与 Assembly
+
+Joint 退回“Member 自身端点和调试定位”职责，默认不显示。Assembly 将一个 Bay 内的积木组织为
+`StackedFrameBay` 或 `LayeredRoofBay`；Member 之间的支撑关系不再由 Joint 冒充。
 
 ## 4. 生成算法
 
-1. 先运行 `FABTSM73DAG5BShapeGrammarV2`；轮廓未接受则不创建任何 Beam 数据。
-2. 每个 Volume 选择 X/Y 中较长轴，以 `ceil(span / TargetBaySpanCM)` 切成 1～`MaxBaysPerVolume` 个 Bay。
-3. 通过面接触和正交方向重叠建立无向 Bay 邻接。
-4. Box/Bridge Bay 建立四角柱和顶部 X/Y 梁；屋顶 Bay 建立底框及 Pyramid 斜椽或 Prism 屋脊。
-5. 按位置量化键合并 Joint，按无向端点对去重 Member。
-6. 超出 Bay/Joint/Member 任一预算时清空所有中间结果并返回稳定拒绝原因。
-7. 对规范序列计算 CRC 身份，供确定性回归测试和后续候选档案使用。
+### 4.1 普通高体量
+
+```text
+Z0  两根 Primary（例如 X）
+Z1  两根 Secondary（Y），搭在 Primary 上
+Z2  四根 Post，落在 X/Y 交叉承托点
+Z3  两根上层 Primary，搭在柱头
+Z4  两根上层 Secondary，再次正交压住 Primary
+```
+
+每个相邻高度相差一个固定截面厚度，保证上下表面恰好接触而不穿透。
+
+### 4.2 低矮体量
+
+当高度不足以容纳完整上下门架时，生成 2～N 层 X/Y 交替的水平积木。该退化仍拥有
+`CrossBearing`，而不是退回实心 Plate、方框或失败。
+
+### 4.3 Prism/Pyramid 屋顶
+
+屋顶不生成斜杆。每层使用 1、3 或 5 根同向水平积木，相邻层交替 X/Y；随高度增加：
+
+- `Pyramid` 同时缩短 X、Y 可用范围；
+- `TriangularPrismX` 只沿 X 收分；
+- `TriangularPrismY` 只沿 Y 收分。
+
+中心积木保证相邻正交层至少存在一个真实承托交点，外侧积木负责拟合阶梯状轮廓。
+
+### 4.4 接触提取与预算
+
+生成全部 Member 后，以固定截面构造 AABB，按量化 Z 平面匹配 Lower 顶面与 Upper 底面，再计算
+XY 重叠面积。超过 `MaxBearingPairChecks` 或 `MaxBearingContactCount` 时原子拒绝，不返回部分图。
 
 ## 5. 编辑器预览
 
 Actor：`M7.3 Beam-A Structural IR Preview`。
 
-颜色约定：
-
 | 颜色 | 含义 |
 | --- | --- |
-| 红 | X 向构件 |
-| 绿 | Y 向构件 |
-| 蓝 | Z 向立柱 |
-| 金 | 屋顶、斜向构件 |
-| 白 | Joint，可用 `bShowJoints` 隐藏 |
+| 红 | X 向积木 |
+| 绿 | Y 向积木 |
+| 蓝 | Z 向积木 |
+| 白 | Member 端点 Joint；默认隐藏，仅供诊断 |
 
-预览 Actor 永久关闭碰撞、Overlap 和导航影响，并在 PIE/游戏中隐藏。它只用于确认结构数据是否
-覆盖轮廓以及三维梁向是否可读，不得把预览网格当作物理建筑。
+预览积木的截面直接使用 `BlockCrossSectionCM`，不再使用独立表现厚度。预览永久无碰撞、无
+Overlap、无导航影响，并在 PIE/游戏中隐藏。
 
-可调参数：
+主要参数：
 
-- `Silhouette.*`：直接控制上游 v2 轮廓；
-- `TargetBaySpanCM`：越小，单个 Volume 被拆成越多 Bay；
-- `MaxBaysPerVolume / MaxBayCount / MaxJointCount / MaxMemberCount`：硬预算；
-- `JointMergeToleranceCM`：共享接点的几何合并容差；
-- `MemberThicknessCM / JointSizeCM`：只影响预览外观，不改变 IR。
+- `Silhouette.*`：上游轮廓、Seed、GrammarDepth 和 Archetype；
+- `TargetBaySpanCM`：控制长体量的 Bay 数；
+- `BlockCrossSectionCM`：全部长条积木的固定截面；
+- `MaxRoofCourseCount`：屋顶最多堆放层数；
+- `RoofBlocksPerCourse`：宽度允许时每层的奇数根水平积木；
+- Bearing/Member/Joint/Bay 预算：有界生成硬门槛；
+- `bShowJoints`：默认关闭，开启后只显示 Member 端点，不代表实体连接件。
 
 ## 6. 自动化验收合同
 
-自动化过滤器：`ABTS.M73DAG.BeamA.`。
+过滤器：`ABTS.M73DAG.BeamA.`，共 6 项。
 
-必须覆盖：
+- `Determinism`：同输入的 Bay、Member、Bearing、Assembly 和 Hash 完全相同；
+- `ArchetypeCoverage`：四类轮廓均接受，拥有 X/Y/Z、Bearing，且 Diagonal 恒为 0；
+- `ReferentialIntegrity`：全部端点、Member、Bearing、Assembly 引用有效；
+- `StackedBlockSemantics`：必须同时出现 CrossBearing、PostOnBeam、BeamOnPost 和至少三种长度；
+- `BudgetFailure`：预算不足稳定拒绝且不泄漏部分 Bearing 图；
+- `InvalidSettings`：非法截面或生成参数 fail closed。
 
-- `Determinism`：同输入所有 IR 记录和图 Hash 相同，Seed 变化改变身份；
-- `ArchetypeCoverage`：四类 v2 Archetype 均能生成 Bay/Assembly，且包含 X/Y/Z/Diagonal；
-- `ReferentialIntegrity`：所有 ID、端点、Assembly 引用有效，Bay 邻接对称，Member 非零长；
-- `BudgetFailure`：预算不足稳定拒绝且不泄漏部分图；
-- `InvalidSettings`：非法参数 fail closed。
+## 7. 用户编辑器验收
 
-## 7. 人工验收
+无需进入 PIE，在空白编辑器地图或平面测试场拖入 Preview Actor：
 
-在平面物理测试场或任意空白编辑器地图拖入预览 Actor；不必进入 PIE。
+1. `bShowJoints=false` 时不应再出现白色脚手架接口；
+2. 红色 X 积木与绿色 Y 积木应位于不同高度，清楚显示谁搭在谁上；
+3. 蓝色柱底应落在水平梁上，柱头上方应承托另一层水平梁；
+4. 所有积木只有 XYZ 三种方向，不应出现任何斜杆；
+5. Prism/Pyramid 屋顶应呈阶梯式逐层收分，而不是三角斜杆；
+6. 调整 `BlockCrossSectionCM` 时所有积木的两条短边同步变化，长度仍随轮廓独立变化；
+7. Details 中 Accepted 为真、BearingContactCount 大于 0、DiagonalMemberCount 等于 0；
+8. 进入 PIE 后预览不可见，也不参与启动物理 Gate。
 
-预期：
+本阶段仍不要求预览在 Chaos 中站立。它验证的是“搭放拓扑和承托接触”，真实积木、摩擦、
+沉降和破坏认证属于 Beam-D。
 
-1. 不再显示实心体量，而是三维彩色梁骨架；
-2. X/Y/Z 三向结构可从颜色区分，屋顶有金色斜杆；
-3. 调小 `TargetBaySpanCM` 时长体量会出现更多连续 Bay，而建筑总轮廓保持不变；
-4. 改变 `Archetype / GrammarDepth / Seed` 时，轮廓复杂度变化会传递到 Bay 数和骨架拓扑；
-5. Details 中 `Last Preview Summary` 为 Accepted，图 Hash 非零；
-6. 进入 PIE 后该预览不可见，且不会产生碰撞、重力或启动物理 Gate 记录。
+## 8. 自动化证据
 
-这项验收不要求骨架当前能够站立，也不要求出现多种弱点；那是 Beam-B～D 的正式目标。
+### v1 历史基线
 
-## 8. 自动化证据（2026-07-31）
+- `Saved/Logs/BeamA-20260731-175340-ForceUnity-Build.log`：ForceUnity 编译成功；
+- `Saved/Logs/BeamA-20260731-175141-FreshAutomation.log`：v1 专项 5/5；
+- `Saved/Logs/M7-20260731-175253-BeamA-FullRegression.log`：v1 完整 M7 77/77。
 
-- `Saved/Logs/BeamA-20260731-175340-ForceUnity-Build.log`：
-  `Development Editor -ForceUnity -DisableAdaptiveUnity -NoHotReload`，`Result: Succeeded`；
-- `Saved/Logs/BeamA-20260731-175141-FreshAutomation.log`：
-  fresh NullRHI 找到 5 项 Beam-A 测试，5/5 Success；
-- `Saved/Logs/M7-20260731-175253-BeamA-FullRegression.log`：
-  fresh NullRHI 精确找到 77 项 `ABTS.M7` 测试，77/77 Success。
+### v2 当前证据
 
-首次专项运行曾由 `ArchetypeCoverage` 发现屋顶斜椽按最大分量被误分类成 X/Y；最终实现已改为
-“同时跨越两个以上坐标轴即为 Diagonal”，修正后专项与完整回归均通过。
+- `Saved/Logs/BeamAv2-20260731-184128-ForceUnity-Build.log`：
+  ForceUnity Development Editor 全链接，`Result: Succeeded`；
+- `Saved/Logs/BeamAv2-20260731-183628-FreshAutomation.log`：精确找到 6 项，6/6 Success；
+- `Saved/Logs/M7-20260731-183900-BeamAv2-FullRegression.log`：
+  精确找到 78 项 `ABTS.M7` 测试，78/78 Success。
+
+首轮 v2 专项曾发现低矮 Volume 放不下完整门架而被错误拒绝；最终逻辑改为合法的 X/Y 交替
+水平层退化，再次专项验证通过。

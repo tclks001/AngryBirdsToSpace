@@ -115,11 +115,6 @@ namespace ABTSM73BeamAPreview
 
 	int32 SectionForMember(const FABTSM73BeamAMember& Member)
 	{
-		if (Member.Role == EABTSM73BeamAMemberRole::RoofRafter
-			|| Member.Role == EABTSM73BeamAMemberRole::RoofRidge)
-		{
-			return 3;
-		}
 		switch (Member.Axis)
 		{
 		case EABTSM73BeamAFrameAxis::X:
@@ -130,7 +125,7 @@ namespace ABTSM73BeamAPreview
 			return 2;
 		case EABTSM73BeamAFrameAxis::Diagonal:
 		default:
-			return 3;
+			return 0;
 		}
 	}
 
@@ -242,7 +237,7 @@ void AABTSM73BeamAPreviewActor::RegeneratePreview()
 	}
 
 	TArray<FMeshBuffers> Sections;
-	Sections.SetNum(5);
+	Sections.SetNum(4);
 	for (const FABTSM73BeamAMember& Member : Result.Members)
 	{
 		if (!Result.Joints.IsValidIndex(Member.JointA)
@@ -254,14 +249,14 @@ void AABTSM73BeamAPreviewActor::RegeneratePreview()
 			Sections[SectionForMember(Member)],
 			Result.Joints[Member.JointA].LocalPosition,
 			Result.Joints[Member.JointB].LocalPosition,
-			MemberThicknessCM);
+			PreviewSettings.BlockCrossSectionCM);
 	}
 	if (bShowJoints)
 	{
 		for (const FABTSM73BeamAJoint& Joint : Result.Joints)
 		{
 			AppendJointCube(
-				Sections[4],
+				Sections[3],
 				Joint.LocalPosition,
 				JointSizeCM);
 		}
@@ -293,7 +288,6 @@ void AABTSM73BeamAPreviewActor::RegeneratePreview()
 		XMemberColor,
 		YMemberColor,
 		ZMemberColor,
-		RoofMemberColor,
 		JointColor};
 	for (int32 SectionIndex = 0;
 		SectionIndex < Colors.Num();
@@ -316,7 +310,7 @@ void AABTSM73BeamAPreviewActor::RegeneratePreview()
 		Display,
 		TEXT("[ABTS][M7.3-Beam-A][PreviewGenerated]")
 		TEXT(" Actor=%s Volumes=%d Bays=%d Joints=%d Members=%d")
-		TEXT(" Assemblies=%d X=%d Y=%d Z=%d Diagonal=%d")
+		TEXT(" Assemblies=%d Bearings=%d X=%d Y=%d Z=%d Diagonal=%d")
 		TEXT(" BayHash=%lld BeamHash=%lld"),
 		*GetName(),
 		LastPreviewSummary.SourceVolumeCount,
@@ -324,6 +318,7 @@ void AABTSM73BeamAPreviewActor::RegeneratePreview()
 		LastPreviewSummary.JointCount,
 		LastPreviewSummary.MemberCount,
 		LastPreviewSummary.AssemblyCount,
+		LastPreviewSummary.BearingContactCount,
 		LastPreviewSummary.XMemberCount,
 		LastPreviewSummary.YMemberCount,
 		LastPreviewSummary.ZMemberCount,

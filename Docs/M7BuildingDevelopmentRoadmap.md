@@ -86,13 +86,13 @@ Graph 是无向/混合方向的几何装配图；Load DAG 是之后按重力和�
 | 阶段 | 目标 | 当前状态 |
 | --- | --- | --- |
 | Beam 调研 | 明确轮廓复杂度与结构复杂度分层，以及 Assembly Graph / Load DAG 双图 | [调研完成](M73BeamBlockStructuralGenerationResearch.md) |
-| Beam-A | 将 v2 Volume 编译为 Bay，再生成 Joint/Member/Assembly IR 和编辑器线框 | 自动化完成，待[用户编辑器读形验收](M73BeamAStructuralIRPreviewDesign.md#7-人工验收) |
+| Beam-A v2 | 将 Volume 编译为 Bay，再生成固定截面、可变长度的 XYZ 积木及 Bearing Contact | 专项与完整回归完成，待[用户编辑器读形验收](M73BeamAStructuralIRPreviewDesign.md#7-用户编辑器验收) |
 | Beam-B | 在有限 Bay 内用 Motif WFC 选择门架、交叉梁、桥、悬挑等结构家族 | 未开始 |
 | Beam-C | 对图做预算内展开，选择离散构件，并提取/验证 Load DAG | 未开始 |
 | Beam-D | 编译真实 Brick，联合弱点、真实接触、Chaos、TaskGraph 与六栋建筑候选 | 未开始 |
 
-Beam-A 的完成不表示建筑已经物理可站立。它只证明：复杂语义轮廓能够稳定、确定地转换为
-三维梁式结构数据，并且轮廓参数变化会产生可观察的 Bay/梁骨架变化。
+Beam-A v2 的完成不表示建筑已经物理可站立。它证明复杂语义轮廓能够稳定转换为有明确上下
+顺序的 XYZ 长条积木与 Bearing Contact，并且不再依赖方框中心线端点拼接。
 
 ## 4. 当前执行链
 

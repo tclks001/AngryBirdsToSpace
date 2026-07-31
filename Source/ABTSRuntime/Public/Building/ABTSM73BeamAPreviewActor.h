@@ -51,17 +51,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-A|Presentation",
-		meta = (ClampMin = "2.0", ClampMax = "100.0", Units = "cm"))
-	float MemberThicknessCM = 24.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite,
-		Category = "ABTS|M7.3-Beam-A|Presentation",
 		meta = (ClampMin = "2.0", ClampMax = "150.0", Units = "cm"))
 	float JointSizeCM = 32.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-A|Presentation")
-	bool bShowJoints = true;
+	bool bShowJoints = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-A|Presentation")
@@ -74,10 +69,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-A|Presentation")
 	FLinearColor ZMemberColor = FLinearColor(0.08f, 0.34f, 0.95f, 1.0f);
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite,
-		Category = "ABTS|M7.3-Beam-A|Presentation")
-	FLinearColor RoofMemberColor = FLinearColor(0.95f, 0.65f, 0.08f, 1.0f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-A|Presentation")

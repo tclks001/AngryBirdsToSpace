@@ -12,6 +12,7 @@ struct FABTSM73BeamAGenerationResult
 	TArray<FABTSM73BeamABay> Bays;
 	TArray<FABTSM73BeamAJoint> Joints;
 	TArray<FABTSM73BeamAMember> Members;
+	TArray<FABTSM73BeamABearingContact> BearingContacts;
 	TArray<FABTSM73BeamAAssembly> Assemblies;
 };
 

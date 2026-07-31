@@ -31,8 +31,7 @@ enum class EABTSM73BeamAMemberRole : uint8
 	Post,
 	PrimaryBeam,
 	SecondaryBeam,
-	RoofRafter,
-	RoofRidge
+	RoofCourse
 };
 
 UENUM(BlueprintType)
@@ -41,7 +40,19 @@ enum class EABTSM73BeamAAssemblyType : uint8
 	PostAndLintelBay,
 	CrossBeamBay,
 	RoofFrameBay,
-	BridgeFrameBay
+	BridgeFrameBay,
+	StackedFrameBay,
+	LayeredRoofBay
+};
+
+/** Physical support semantics between two block surfaces. */
+UENUM(BlueprintType)
+enum class EABTSM73BeamABearingType : uint8
+{
+	CrossBearing,
+	PostOnBeam,
+	BeamOnPost,
+	ParallelBearing
 };
 
 USTRUCT(BlueprintType)
@@ -55,6 +66,21 @@ struct FABTSM73BeamAPreviewSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay",
 		meta = (ClampMin = "120.0", ClampMax = "3000.0", Units = "cm"))
 	float TargetBaySpanCM = 480.0f;
+
+	/** All preview blocks have this fixed square cross-section. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",
+		meta = (ClampMin = "12.0", ClampMax = "120.0", Units = "cm"))
+	float BlockCrossSectionCM = 36.0f;
+
+	/** Maximum horizontal courses used to approximate one roof volume. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|Roof",
+		meta = (ClampMin = "2", ClampMax = "64"))
+	int32 MaxRoofCourseCount = 32;
+
+	/** Parallel blocks in one roof course before narrow-footprint clamping. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|Roof",
+		meta = (ClampMin = "1", ClampMax = "5"))
+	int32 RoofBlocksPerCourse = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay",
 		meta = (ClampMin = "1", ClampMax = "16"))
@@ -71,6 +97,14 @@ struct FABTSM73BeamAPreviewSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay|Budget",
 		meta = (ClampMin = "32", ClampMax = "65536"))
 	int32 MaxMemberCount = 16384;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay|Budget",
+		meta = (ClampMin = "32", ClampMax = "65536"))
+	int32 MaxBearingContactCount = 16384;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay|Budget",
+		meta = (ClampMin = "128", ClampMax = "1048576"))
+	int32 MaxBearingPairChecks = 262144;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay",
 		meta = (ClampMin = "0.1", ClampMax = "10.0", Units = "cm"))
@@ -132,6 +166,33 @@ struct FABTSM73BeamAMember
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
 	EABTSM73BeamAMemberRole Role = EABTSM73BeamAMemberRole::PrimaryBeam;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	float LengthCM = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM73BeamABearingContact
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int32 ContactId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	int32 LowerMemberId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	int32 UpperMemberId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamABearingType Type = EABTSM73BeamABearingType::CrossBearing;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	FVector LocalPosition = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	float ContactAreaCM2 = 0.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -178,6 +239,9 @@ struct FABTSM73BeamAPreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 AssemblyCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 BearingContactCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 XMemberCount = 0;
