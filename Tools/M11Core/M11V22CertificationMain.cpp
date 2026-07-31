@@ -53,7 +53,15 @@ namespace
 		double Assist3OffsetXCM = 0.0;
 		double Assist3OffsetYCM = 0.0;
 		double Assist3OffsetZCM = 0.0;
+		double Assist3BPlaneTargetTDeltaCM = 0.0;
+		double Assist3BPlaneTargetRDeltaCM = 0.0;
+		double Assist3BPlaneSigmaScale = 1.0;
+		double Assist3VelocityDeltaXCMPerSec = 0.0;
+		double Assist3VelocityDeltaYCMPerSec = 0.0;
+		double Assist3VelocityDeltaZCMPerSec = 0.0;
 		double TargetHitRadiusCM =
+			std::numeric_limits<double>::quiet_NaN();
+		double TargetMinimumCorridorQuality =
 			std::numeric_limits<double>::quiet_NaN();
 		double ArrivalConeDegrees = 180.0;
 		double ArrivalFaceConeDegrees = 180.0;
@@ -230,6 +238,11 @@ namespace
 			{
 				Out.TargetHitRadiusCM = Number;
 			}
+			else if (Key == "--target-min-corridor-quality"
+				&& ParseDouble(Value, Number))
+			{
+				Out.TargetMinimumCorridorQuality = Number;
+			}
 			else if (Key == "--assist3-offset-x" && ParseDouble(Value, Number))
 			{
 				Out.Assist3OffsetXCM = Number;
@@ -241,6 +254,36 @@ namespace
 			else if (Key == "--assist3-offset-z" && ParseDouble(Value, Number))
 			{
 				Out.Assist3OffsetZCM = Number;
+			}
+			else if (Key == "--assist3-bplane-t-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3BPlaneTargetTDeltaCM = Number;
+			}
+			else if (Key == "--assist3-bplane-r-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3BPlaneTargetRDeltaCM = Number;
+			}
+			else if (Key == "--assist3-bplane-sigma-scale"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3BPlaneSigmaScale = Number;
+			}
+			else if (Key == "--assist3-velocity-delta-x"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3VelocityDeltaXCMPerSec = Number;
+			}
+			else if (Key == "--assist3-velocity-delta-y"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3VelocityDeltaYCMPerSec = Number;
+			}
+			else if (Key == "--assist3-velocity-delta-z"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3VelocityDeltaZCMPerSec = Number;
 			}
 			else if (Key == "--arrival-cone-degrees" && ParseDouble(Value, Number))
 			{
@@ -276,7 +319,7 @@ namespace
 			+ Out.TargetOffsetYCM * Out.TargetOffsetYCM
 			+ Out.TargetOffsetZCM * Out.TargetOffsetZCM;
 		if (!std::isfinite(TargetOffsetSquared)
-			|| TargetOffsetSquared > 10000.0 * 10000.0)
+			|| TargetOffsetSquared > 30000.0 * 30000.0)
 		{
 			Failure = "TargetOffsetOutsideDiagnosticLimit";
 			return false;
@@ -291,11 +334,44 @@ namespace
 			Failure = "Assist3OffsetOutsideDiagnosticLimit";
 			return false;
 		}
+		const double BPlaneDeltaSquared =
+			Out.Assist3BPlaneTargetTDeltaCM
+				* Out.Assist3BPlaneTargetTDeltaCM
+			+ Out.Assist3BPlaneTargetRDeltaCM
+				* Out.Assist3BPlaneTargetRDeltaCM;
+		if (!std::isfinite(BPlaneDeltaSquared)
+			|| BPlaneDeltaSquared > 5000.0 * 5000.0
+			|| Out.Assist3BPlaneSigmaScale < 0.65
+			|| Out.Assist3BPlaneSigmaScale > 1.50)
+		{
+			Failure = "Assist3BPlaneOverrideOutsideDiagnosticLimit";
+			return false;
+		}
+		const double VelocityDeltaSquared =
+			Out.Assist3VelocityDeltaXCMPerSec
+				* Out.Assist3VelocityDeltaXCMPerSec
+			+ Out.Assist3VelocityDeltaYCMPerSec
+				* Out.Assist3VelocityDeltaYCMPerSec
+			+ Out.Assist3VelocityDeltaZCMPerSec
+				* Out.Assist3VelocityDeltaZCMPerSec;
+		if (!std::isfinite(VelocityDeltaSquared)
+			|| VelocityDeltaSquared > 2500.0 * 2500.0)
+		{
+			Failure = "Assist3VelocityOverrideOutsideDiagnosticLimit";
+			return false;
+		}
 		if (std::isfinite(Out.TargetHitRadiusCM)
 			&& (Out.TargetHitRadiusCM < 4500.0
 				|| Out.TargetHitRadiusCM > 12000.0))
 		{
 			Failure = "TargetHitRadiusOutsideSearchContract";
+			return false;
+		}
+		if (std::isfinite(Out.TargetMinimumCorridorQuality)
+			&& (Out.TargetMinimumCorridorQuality < 0.05
+				|| Out.TargetMinimumCorridorQuality > 1.0))
+		{
+			Failure = "TargetCorridorQualityOutsideDiagnosticLimit";
 			return false;
 		}
 		if (!(Out.ArrivalConeDegrees > 0.0)
@@ -327,10 +403,27 @@ namespace
 			OptionsValue.Assist3OffsetXCM,
 			OptionsValue.Assist3OffsetYCM,
 			OptionsValue.Assist3OffsetZCM};
+		ABTS::M11Core::GravityBodySpec& Assist3 =
+			Layout.Scenario.Bodies[3];
+		Assist3.BPlaneTargetTCM +=
+			OptionsValue.Assist3BPlaneTargetTDeltaCM;
+		Assist3.BPlaneTargetRCM +=
+			OptionsValue.Assist3BPlaneTargetRDeltaCM;
+		Assist3.BPlaneSigmaTCM *= OptionsValue.Assist3BPlaneSigmaScale;
+		Assist3.BPlaneSigmaRCM *= OptionsValue.Assist3BPlaneSigmaScale;
+		Assist3.VirtualOrbitalVelocityCMPerSec += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist3VelocityDeltaXCMPerSec,
+			OptionsValue.Assist3VelocityDeltaYCMPerSec,
+			OptionsValue.Assist3VelocityDeltaZCMPerSec};
 		if (std::isfinite(OptionsValue.TargetHitRadiusCM))
 		{
 			Layout.Scenario.Target.HitRadiusCM =
 				OptionsValue.TargetHitRadiusCM;
+		}
+		if (std::isfinite(OptionsValue.TargetMinimumCorridorQuality))
+		{
+			Layout.Scenario.Target.MinimumQualifyingCorridorQuality =
+				OptionsValue.TargetMinimumCorridorQuality;
 		}
 	}
 
@@ -445,6 +538,7 @@ namespace
 		const FrozenCandidateIdentity& Identity,
 		const std::uint64_t VariantSourceHash,
 		const double TargetHitRadiusCM,
+		const double TargetMinimumCorridorQuality,
 		const Grid& GridValue,
 		const std::vector<Sample>& Samples,
 		const bool Complete,
@@ -480,8 +574,20 @@ namespace
 			<< "  \"assist3OffsetCM\":[" << OptionsValue.Assist3OffsetXCM
 			<< ',' << OptionsValue.Assist3OffsetYCM << ','
 			<< OptionsValue.Assist3OffsetZCM << "],\n"
+			<< "  \"assist3BPlaneDeltaCM\":["
+			<< OptionsValue.Assist3BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist3BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist3BPlaneSigmaScale\":"
+			<< OptionsValue.Assist3BPlaneSigmaScale << ",\n"
+			<< "  \"assist3VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist3VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaZCMPerSec << "],\n"
 			<< "  \"targetHitRadiusCM\":"
 			<< TargetHitRadiusCM << ",\n"
+			<< "  \"targetMinimumCorridorQuality\":"
+			<< TargetMinimumCorridorQuality
+			<< ",\n"
 			<< "  \"arrivalConeDegrees\":"
 			<< OptionsValue.ArrivalConeDegrees << ",\n"
 			<< "  \"arrivalFaceConeDegrees\":"
@@ -808,8 +914,20 @@ namespace
 			<< OptionsValue.Assist3OffsetXCM << ','
 			<< OptionsValue.Assist3OffsetYCM << ','
 			<< OptionsValue.Assist3OffsetZCM << "],\n"
+			<< "  \"assist3BPlaneDeltaCM\":["
+			<< OptionsValue.Assist3BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist3BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist3BPlaneSigmaScale\":"
+			<< OptionsValue.Assist3BPlaneSigmaScale << ",\n"
+			<< "  \"assist3VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist3VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaZCMPerSec << "],\n"
 			<< "  \"targetHitRadiusCM\":"
 			<< Layout.Scenario.Target.HitRadiusCM << ",\n"
+			<< "  \"targetMinimumCorridorQuality\":"
+			<< Layout.Scenario.Target.MinimumQualifyingCorridorQuality
+			<< ",\n"
 			<< "  \"arrivalConeDegrees\":"
 			<< OptionsValue.ArrivalConeDegrees << ",\n"
 			<< "  \"arrivalFaceConeDegrees\":"
@@ -1078,6 +1196,7 @@ namespace
 				Identity,
 				VariantSourceHash,
 				Layout.Scenario.Target.HitRadiusCM,
+				Layout.Scenario.Target.MinimumQualifyingCorridorQuality,
 				GridValue,
 				All,
 				NextGlobal >= Total,
