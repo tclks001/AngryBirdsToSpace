@@ -238,6 +238,7 @@ bool ValidateConfig(
 		|| Config.DifficultyBands.Num() != Count
 		|| Config.RevealPolicies.Num() != Count
 		|| Config.EncounterBiomeArchetypes.Num() != Count
+		|| Config.EncounterSlingshotTiers.Num() != Count
 		|| Config.MinAdjacentEncounterProgressCM <= 0
 		|| Config.MaxAdjacentEncounterProgressCM
 			< Config.MinAdjacentEncounterProgressCM
@@ -343,7 +344,11 @@ bool ValidateConfig(
 			|| !IsValidRevealPolicy(Config.RevealPolicies[Index])
 			|| !IsValidBiome(Config.EncounterBiomeArchetypes[Index])
 			|| Config.EncounterBiomeArchetypes[Index]
-				== EABTSM3BiomeArchetype::Background)
+				== EABTSM3BiomeArchetype::Background
+			|| (Config.EncounterSlingshotTiers[Index]
+					!= EABTSSlingshotTier::Simple
+				&& Config.EncounterSlingshotTiers[Index]
+					!= EABTSSlingshotTier::Reinforced))
 		{
 			OutFailure = FString::Printf(
 				TEXT("SpatialCatalog:%d"),
@@ -864,7 +869,93 @@ const FABTSM3PocketContract* FindPocket(
 		[Id](const FABTSM3PocketContract& Pocket)
 		{
 			return Pocket.PocketId == Id;
+	});
+}
+
+const FABTSM6ReachEnvelope* FindReachEnvelope(
+	const FABTSM3FrozenCalibrationBatch& Batch,
+	const EABTSSlingshotTier Tier)
+{
+	return Batch.ReachEnvelopes.FindByPredicate(
+		[Tier](const FABTSM6ReachEnvelope& Envelope)
+		{
+			return Envelope.Tier == Tier;
 		});
+}
+
+bool ValidateFrozenCalibrationReach(
+	const FABTSM3MonthlyEncounterSpatialConfig& Config,
+	const TArray<FABTSM2Cell>& Cells,
+	const float PlanetRadiusCM,
+	const FABTSM3FrozenCalibrationBatch& Batch,
+	const FABTSM3MonthlySpatialCandidate& Candidate,
+	FString& OutFailure)
+{
+	if (Candidate.Encounters.Num()
+			!= Config.EncounterSlingshotTiers.Num())
+	{
+		OutFailure = TEXT("CalibrationEncounterCount");
+		return false;
+	}
+	for (int32 Order = 0;
+		Order < Candidate.Encounters.Num();
+		++Order)
+	{
+		const FABTSM3MonthlySpatialEncounter& Encounter =
+			Candidate.Encounters[Order];
+		const int32 EncounterOrder =
+			Encounter.Contract.OrderIndex;
+		const FABTSM3PocketContract* Slingshot = FindPocket(
+			Candidate.Pockets,
+			Encounter.Contract.SlingshotPocketId);
+		if (!Config.EncounterSlingshotTiers.IsValidIndex(
+				EncounterOrder))
+		{
+			OutFailure = FString::Printf(
+				TEXT("CalibrationEncounterOrder:%d"),
+				EncounterOrder);
+			return false;
+		}
+		const FABTSM6ReachEnvelope* Envelope = FindReachEnvelope(
+			Batch,
+			Config.EncounterSlingshotTiers[EncounterOrder]);
+		if (Slingshot == nullptr
+			|| !Cells.IsValidIndex(Slingshot->AnchorCellId)
+			|| !Cells.IsValidIndex(Encounter.TargetAnchorCellId)
+			|| Envelope == nullptr
+			|| !FMath::IsFinite(Envelope->MaximumReachCM)
+			|| Envelope->MaximumReachCM <= 0.0f)
+		{
+			OutFailure = FString::Printf(
+				TEXT("CalibrationReachIdentity:%d"),
+				Order);
+			return false;
+		}
+		const float LaunchToTargetArcCM = SurfaceArcDistanceCM(
+			Cells,
+			Slingshot->AnchorCellId,
+			Encounter.TargetAnchorCellId,
+			PlanetRadiusCM);
+		const float QuantizationToleranceCM = FMath::Max(
+			1.0f,
+			AverageNeighborArcCM(
+				Cells,
+				Slingshot->AnchorCellId,
+				PlanetRadiusCM));
+		if (!FMath::IsFinite(LaunchToTargetArcCM)
+			|| LaunchToTargetArcCM
+				> Envelope->MaximumReachCM
+					+ QuantizationToleranceCM)
+		{
+			OutFailure = FString::Printf(
+				TEXT("CalibrationReach:%d:%.1f:%.1f"),
+				Order,
+				LaunchToTargetArcCM,
+				Envelope->MaximumReachCM);
+			return false;
+		}
+	}
+	return true;
 }
 
 int32 PocketRoleMask(const EABTSM3PocketRole Role)
@@ -3649,6 +3740,7 @@ bool BuildSpatialCandidateAttempt(
 	const FABTSM3MonthlyRouteCandidate& SourceRoute,
 	const FABTSM3MonthlySpatialFaultInjection& FaultInjection,
 	const uint64 ProfileCatalogHash,
+	const FABTSM3FrozenCalibrationBatch& CalibrationBatch,
 	FABTSM3MonthlySpatialCandidate& OutCandidate,
 	EABTSM3MonthlySpatialRejectReason& OutReason,
 	FString& OutFailure)
@@ -3777,6 +3869,18 @@ bool BuildSpatialCandidateAttempt(
 		}
 		return false;
 	}
+	if (!ValidateFrozenCalibrationReach(
+			Config,
+			Cells,
+			PlanetRadiusCM,
+			CalibrationBatch,
+			OutCandidate,
+			OutFailure))
+	{
+		OutReason =
+			EABTSM3MonthlySpatialRejectReason::ReservationFailed;
+		return false;
+	}
 	ComputeCoverage(OutCandidate);
 	if (OutCandidate.ActiveRoleCoveragePermille
 			< Config.MinActiveRoleCoveragePermille
@@ -3849,6 +3953,7 @@ bool BuildSpatialCandidate(
 	const FABTSM3MonthlyRouteCandidate& SourceRoute,
 	const FABTSM3MonthlySpatialFaultInjection& FaultInjection,
 	const uint64 ProfileCatalogHash,
+	const FABTSM3FrozenCalibrationBatch& CalibrationBatch,
 	FABTSM3MonthlySpatialCandidate& OutCandidate,
 	EABTSM3MonthlySpatialRejectReason& OutReason,
 	FString& OutFailure)
@@ -3876,6 +3981,7 @@ bool BuildSpatialCandidate(
 				SourceRoute,
 				FaultInjection,
 				ProfileCatalogHash,
+				CalibrationBatch,
 				Candidate,
 				Reason,
 				Failure))
@@ -4123,6 +4229,7 @@ bool ValidateCandidate(
 	const FABTSM3MonthlySpatialFaultInjection& FaultInjection,
 	const FABTSM3MonthlySpatialCandidate& Candidate,
 	const uint64 ProfileCatalogHash,
+	const FABTSM3FrozenCalibrationBatch& CalibrationBatch,
 	const bool bRecomputeDerivedArtifacts,
 	FString& OutFailure)
 {
@@ -4169,6 +4276,16 @@ bool ValidateCandidate(
 			!= ComputeReservationHash(Candidate))
 	{
 		OutFailure = TEXT("CandidateIdentity");
+		return false;
+	}
+	if (!ValidateFrozenCalibrationReach(
+			Config,
+			Cells,
+			PlanetRadiusCM,
+			CalibrationBatch,
+			Candidate,
+			OutFailure))
+	{
 		return false;
 	}
 	TSet<int32> PreRoadReservedPlayableCells;
@@ -4957,6 +5074,14 @@ FABTSM3MonthlyEncounterSpatialConfig::
 		EABTSM3BiomeArchetype::Forest,
 		EABTSM3BiomeArchetype::Highland
 	};
+	EncounterSlingshotTiers = {
+		EABTSSlingshotTier::Simple,
+		EABTSSlingshotTier::Simple,
+		EABTSSlingshotTier::Simple,
+		EABTSSlingshotTier::Reinforced,
+		EABTSSlingshotTier::Reinforced,
+		EABTSSlingshotTier::Reinforced
+	};
 }
 
 TConstArrayView<FABTSM3MonthlyProfileDescriptorFixture>
@@ -4971,6 +5096,112 @@ uint64 FABTSM3MonthlyEncounterBuilder::
 	ComputeFixtureProfileCatalogHash()
 {
 	return ABTSM3R3EncounterPrivate::ComputeCatalogHash();
+}
+
+bool FABTSM3MonthlyEncounterBuilder::BuildFrozenCalibrationBatchV0(
+	const float PlanetRadiusCM,
+	FABTSM3FrozenCalibrationBatch& OutBatch,
+	FString& OutFailure)
+{
+	OutBatch = FABTSM3FrozenCalibrationBatch();
+	OutFailure.Reset();
+	if (!FMath::IsFinite(PlanetRadiusCM)
+		|| PlanetRadiusCM <= 0.0f)
+	{
+		OutFailure = TEXT("CalibrationPlanetRadius");
+		return false;
+	}
+	const FABTSM6LaunchProfileCatalog SourceCatalog =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
+	FABTSM6LaunchProfileCatalog ResolvedCatalog;
+	if (!FABTSSlingshotSatelliteCalibrationModel::ResolveCatalog(
+			SourceCatalog,
+			ResolvedCatalog,
+			&OutFailure))
+	{
+		OutFailure = FString::Printf(
+			TEXT("CalibrationLaunchCatalog:%s"),
+			*OutFailure);
+		return false;
+	}
+	const FABTSSatellitePracticePreset Preset =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenSatellitePracticePresetV0();
+	if (Preset.Version <= 0
+		|| Preset.TargetBody != TEXT("PracticeSatellite")
+		|| !FMath::IsFinite(Preset.BirdCollisionRadiusCM)
+		|| Preset.BirdCollisionRadiusCM <= 0.0f)
+	{
+		OutFailure = TEXT("CalibrationSatellitePreset");
+		return false;
+	}
+	OutBatch.SchemaVersion = FrozenCalibrationSchemaVersion;
+	OutBatch.LaunchProfileVersion = ResolvedCatalog.Version;
+	OutBatch.LaunchProfileHash = static_cast<int64>(
+		FABTSSlingshotSatelliteCalibrationModel::
+			ComputeLaunchProfileHash(ResolvedCatalog));
+	OutBatch.SatellitePracticePresetVersion = Preset.Version;
+	OutBatch.SatellitePracticePresetHash = static_cast<int64>(
+		FABTSSlingshotSatelliteCalibrationModel::
+			ComputeSatellitePracticePresetHash(Preset));
+	for (const FABTSM6LaunchProfile& Profile :
+		ResolvedCatalog.Profiles)
+	{
+		OutBatch.ReachEnvelopes.Add(
+			FABTSSlingshotSatelliteCalibrationModel::
+				EstimateReachEnvelope(
+					Profile,
+					PlanetRadiusCM,
+					980.0f,
+					ResolvedCatalog.FlightAirDragPerSecond,
+					Preset.BirdCollisionRadiusCM));
+	}
+	if (OutBatch.ReachEnvelopes.Num() != 3
+		|| OutBatch.LaunchProfileHash == 0
+		|| OutBatch.SatellitePracticePresetHash == 0)
+	{
+		OutFailure = TEXT("CalibrationBatchDomain");
+		return false;
+	}
+	OutBatch.BatchHash = static_cast<int64>(
+		ComputeFrozenCalibrationBatchHash(OutBatch));
+	if (OutBatch.BatchHash == 0)
+	{
+		OutFailure = TEXT("CalibrationBatchHash");
+		return false;
+	}
+	return true;
+}
+
+uint64 FABTSM3MonthlyEncounterBuilder::
+	ComputeFrozenCalibrationBatchHash(
+		const FABTSM3FrozenCalibrationBatch& Batch)
+{
+	using namespace ABTSM3R3EncounterPrivate;
+	FCanonicalHash64 Hash;
+	Hash.AddInt32(Batch.SchemaVersion);
+	Hash.AddInt32(Batch.LaunchProfileVersion);
+	Hash.AddInt64(Batch.LaunchProfileHash);
+	Hash.AddInt32(Batch.SatellitePracticePresetVersion);
+	Hash.AddInt64(Batch.SatellitePracticePresetHash);
+	Hash.AddInt32(Batch.ReachEnvelopes.Num());
+	for (const FABTSM6ReachEnvelope& Envelope :
+		Batch.ReachEnvelopes)
+	{
+		Hash.AddInt32(static_cast<int32>(Envelope.Tier));
+		Hash.AddInt32(FMath::RoundToInt(
+			Envelope.ComfortableReachCM * 10.0f));
+		Hash.AddInt32(FMath::RoundToInt(
+			Envelope.MaximumReachCM * 10.0f));
+		Hash.AddInt32(FMath::RoundToInt(
+			Envelope.ComfortableReachPrimaryRadiusRatio
+				* 1000000.0f));
+		Hash.AddInt32(FMath::RoundToInt(
+			Envelope.MaximumReachPrimaryRadiusRatio
+				* 1000000.0f));
+	}
+	return Hash.Get();
 }
 
 uint64 FABTSM3MonthlyEncounterBuilder::ComputeEncounterHash(
@@ -5034,6 +5265,12 @@ uint64 FABTSM3MonthlyEncounterBuilder::ComputeConfigHash(
 	{
 		Hash.AddInt32(static_cast<int32>(Biome));
 	}
+	Hash.AddInt32(Config.EncounterSlingshotTiers.Num());
+	for (const EABTSSlingshotTier Tier :
+		Config.EncounterSlingshotTiers)
+	{
+		Hash.AddInt32(static_cast<int32>(Tier));
+	}
 	Hash.AddInt32(Config.MinAdjacentEncounterProgressCM);
 	Hash.AddInt32(Config.MaxAdjacentEncounterProgressCM);
 	Hash.AddInt32(Config.MaxPlannedProgressDeviationCM);
@@ -5081,6 +5318,14 @@ uint64 FABTSM3MonthlyEncounterBuilder::ComputeConfigHash(
 	Hash.AddInt32(Config.CameraSampleSetVersion);
 	Hash.AddInt32(Config.SpatialScoreVersion);
 	Hash.AddUInt64(ComputeFixtureProfileCatalogHash());
+	FABTSM3FrozenCalibrationBatch CalibrationBatch;
+	FString CalibrationFailure;
+	Hash.AddUInt64(BuildFrozenCalibrationBatchV0(
+			PlanetRadiusCM,
+			CalibrationBatch,
+			CalibrationFailure)
+		? static_cast<uint64>(CalibrationBatch.BatchHash)
+		: 0ull);
 	return Hash.Get();
 }
 
@@ -5233,6 +5478,19 @@ uint64 FABTSM3MonthlyEncounterBuilder::ComputeResultHash(
 	Hash.AddInt64(Result.SourceRoutePoolHash);
 	Hash.AddInt64(Result.SpatialConfigHash);
 	Hash.AddInt64(Result.ProfileCatalogHash);
+	Hash.AddInt32(
+		Result.FrozenCalibrationBatch.SchemaVersion);
+	Hash.AddInt32(
+		Result.FrozenCalibrationBatch.LaunchProfileVersion);
+	Hash.AddInt64(
+		Result.FrozenCalibrationBatch.LaunchProfileHash);
+	Hash.AddInt32(
+		Result.FrozenCalibrationBatch.
+			SatellitePracticePresetVersion);
+	Hash.AddInt64(
+		Result.FrozenCalibrationBatch.
+			SatellitePracticePresetHash);
+	Hash.AddInt64(Result.FrozenCalibrationBatch.BatchHash);
 	Hash.AddInt64(Result.FaultInjectionHash);
 	Hash.AddBool(Result.bSpatialResultValid);
 	Hash.AddBool(Result.bMonthlyWorldAccepted);
@@ -5330,6 +5588,20 @@ bool FABTSM3MonthlyEncounterBuilder::Build(
 			EABTSM3MonthlySpatialRejectReason::InvalidConfig;
 		return false;
 	}
+	if (!BuildFrozenCalibrationBatchV0(
+			PlanetRadiusCM,
+			OutResult.FrozenCalibrationBatch,
+			OutFailure))
+	{
+		OutResult.RejectReason =
+			EABTSM3MonthlySpatialRejectReason::InvalidConfig;
+		OutFailure = FString::Printf(
+			TEXT("FrozenCalibration:%s"),
+			*OutFailure);
+		OutResult.SpatialResultHash = static_cast<int64>(
+			ComputeResultHash(OutResult));
+		return false;
+	}
 	const uint64 TopologyHash =
 		FABTSM3MonthlyRouteBuilder::ComputeTopologyHash(Cells);
 	OutResult.TopologyHash = static_cast<int64>(TopologyHash);
@@ -5409,6 +5681,7 @@ bool FABTSM3MonthlyEncounterBuilder::Build(
 			FaultInjection,
 			static_cast<uint64>(
 				OutResult.ProfileCatalogHash),
+			OutResult.FrozenCalibrationBatch,
 			Candidate,
 			CandidateReason,
 			CandidateFailure);
@@ -5567,6 +5840,7 @@ bool FABTSM3MonthlyEncounterBuilder::Build(
 				OutResult.RetainedCandidates[Index],
 				static_cast<uint64>(
 					OutResult.ProfileCatalogHash),
+				OutResult.FrozenCalibrationBatch,
 				false,
 				OutFailure))
 		{
@@ -5643,6 +5917,20 @@ bool FABTSM3MonthlyEncounterBuilder::Validate(
 	}
 	const uint64 TopologyHash =
 		FABTSM3MonthlyRouteBuilder::ComputeTopologyHash(Cells);
+	FABTSM3FrozenCalibrationBatch ExpectedCalibrationBatch;
+	FString CalibrationFailure;
+	if (!BuildFrozenCalibrationBatchV0(
+			PlanetRadiusCM,
+			ExpectedCalibrationBatch,
+			CalibrationFailure))
+	{
+		OutReason =
+			EABTSM3MonthlySpatialRejectReason::InvalidConfig;
+		OutFailure = FString::Printf(
+			TEXT("FrozenCalibration:%s"),
+			*CalibrationFailure);
+		return false;
+	}
 	if (Result.SchemaVersion != SpatialSchemaVersion
 		|| Result.GeneratorVersion != GeneratorVersion
 		|| Result.LayoutPolicyVersion
@@ -5661,6 +5949,15 @@ bool FABTSM3MonthlyEncounterBuilder::Validate(
 				TopologyHash)
 		|| static_cast<uint64>(Result.ProfileCatalogHash)
 			!= ComputeFixtureProfileCatalogHash()
+		|| !FABTSM3FrozenCalibrationBatch::StaticStruct()
+			->CompareScriptStruct(
+				&ExpectedCalibrationBatch,
+				&Result.FrozenCalibrationBatch,
+				PPF_None)
+		|| static_cast<uint64>(
+				Result.FrozenCalibrationBatch.BatchHash)
+			!= ComputeFrozenCalibrationBatchHash(
+				Result.FrozenCalibrationBatch)
 		|| static_cast<uint64>(Result.FaultInjectionHash)
 			!= ComputeFaultInjectionHash(FaultInjection))
 	{
@@ -5730,6 +6027,7 @@ bool FABTSM3MonthlyEncounterBuilder::Validate(
 			Source,
 			FaultInjection,
 			static_cast<uint64>(Result.ProfileCatalogHash),
+			Result.FrozenCalibrationBatch,
 			ExpectedCandidate,
 			ExpectedReason,
 			ExpectedFailure);
@@ -5838,6 +6136,7 @@ bool FABTSM3MonthlyEncounterBuilder::Validate(
 				FaultInjection,
 				Result.RetainedCandidates[Index],
 				static_cast<uint64>(Result.ProfileCatalogHash),
+				Result.FrozenCalibrationBatch,
 				false,
 				OutFailure))
 		{
@@ -6035,13 +6334,24 @@ void FABTSM3MonthlyEncounterBuilder::LogSummary(
 	if (Result.RetainedCandidates.IsEmpty())
 	{
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][PCG][EncounterSpatial] Stage=M3R3 Seed=%d Valid=%d MonthlyAccepted=0 Attempts=%d HardPass=%d Retained=0 UsedRouteFallback=%d Reason=%s ResultHash=%016llX SnapshotHash=%016llX"),
+			TEXT("[ABTS][PCG][EncounterSpatial] Stage=M3R3 Seed=%d Valid=%d MonthlyAccepted=0 Attempts=%d HardPass=%d Retained=0 UsedRouteFallback=%d Reason=%s CalibrationBatch=%016llX LaunchProfile=%016llX SatellitePreset=%016llX ResultHash=%016llX SnapshotHash=%016llX"),
 			Result.WorldSeed,
 			Result.bSpatialResultValid ? 1 : 0,
 			Result.AttemptedRouteCandidateCount,
 			Result.SpatialHardPassCount,
 			Result.bUsedRouteFallback ? 1 : 0,
 			GetRejectReasonName(Result.RejectReason),
+			static_cast<unsigned long long>(
+				static_cast<uint64>(
+					Result.FrozenCalibrationBatch.BatchHash)),
+			static_cast<unsigned long long>(
+				static_cast<uint64>(
+					Result.FrozenCalibrationBatch.
+						LaunchProfileHash)),
+			static_cast<unsigned long long>(
+				static_cast<uint64>(
+					Result.FrozenCalibrationBatch.
+						SatellitePracticePresetHash)),
 			static_cast<unsigned long long>(
 				static_cast<uint64>(Result.SpatialResultHash)),
 			static_cast<unsigned long long>(
@@ -6051,7 +6361,7 @@ void FABTSM3MonthlyEncounterBuilder::LogSummary(
 	const FABTSM3MonthlySpatialCandidate& Best =
 		Result.RetainedCandidates[0];
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][PCG][EncounterSpatial] Stage=M3R3 Seed=%d Valid=%d MonthlyAccepted=0 Attempts=%d HardPass=%d Retained=%d SourceCandidate=%d SourceHash=%016llX ReservationHash=%016llX ContextHash=%016llX RecomputedHash=%016llX CandidateHash=%016llX RouteCM=%d Encounters=%d Pockets=%d Biomes=%d Playable=%d ActiveCoveragePermille=%d DeepWildPermille=%d PVSRays=%d ResultHash=%016llX SnapshotHash=%016llX"),
+		TEXT("[ABTS][PCG][EncounterSpatial] Stage=M3R3 Seed=%d Valid=%d MonthlyAccepted=0 Attempts=%d HardPass=%d Retained=%d SourceCandidate=%d SourceHash=%016llX ReservationHash=%016llX ContextHash=%016llX RecomputedHash=%016llX CandidateHash=%016llX RouteCM=%d Encounters=%d Pockets=%d Biomes=%d Playable=%d ActiveCoveragePermille=%d DeepWildPermille=%d PVSRays=%d CalibrationBatch=%016llX LaunchProfile=%016llX SatellitePreset=%016llX ResultHash=%016llX SnapshotHash=%016llX"),
 		Result.WorldSeed,
 		Result.bSpatialResultValid ? 1 : 0,
 		Result.AttemptedRouteCandidateCount,
@@ -6077,6 +6387,17 @@ void FABTSM3MonthlyEncounterBuilder::LogSummary(
 		Best.ActiveRoleCoveragePermille,
 		Best.DeepWildPermille,
 		Best.OptimizedPVSRays,
+		static_cast<unsigned long long>(
+			static_cast<uint64>(
+				Result.FrozenCalibrationBatch.BatchHash)),
+		static_cast<unsigned long long>(
+			static_cast<uint64>(
+				Result.FrozenCalibrationBatch.
+					LaunchProfileHash)),
+		static_cast<unsigned long long>(
+			static_cast<uint64>(
+				Result.FrozenCalibrationBatch.
+					SatellitePracticePresetHash)),
 		static_cast<unsigned long long>(
 			static_cast<uint64>(Result.SpatialResultHash)),
 		static_cast<unsigned long long>(

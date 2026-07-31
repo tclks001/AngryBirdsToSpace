@@ -52,31 +52,31 @@ public:
 	static constexpr uint64 FrozenFixtureProfileCatalogHash =
 		0x0052B1916220B715ull;
 	static constexpr uint64 FrozenSweepOracleHash =
-		0x8DFE449450CF2AEEull;
+		0x5DC44BDCD8629A5Aull;
 	static constexpr uint64 FrozenReferencePVSOracleHash =
 		0xEC0C3B3409FD3C31ull;
 	static constexpr uint64 FrozenReferenceBoundaryOracleHash =
 		0x8CAF504E02890A5Full;
 	static constexpr uint64 FrozenDisplayResultHash =
-		0x550F7B095B788C49ull;
+		0x836665565E758FA2ull;
 	static constexpr uint64 FrozenDisplaySnapshotHash =
-		0x91909BF5BDBCDCBEull;
+		0x565A25C59422AAD4ull;
 	static constexpr uint64 FrozenDisplayCandidateHash =
 		0x3B1E2304F4FA5407ull;
 	static constexpr uint64 FrozenBlockedRoadResultHash =
-		0x543E119972F9F269ull;
+		0x0C1375C33A50AE92ull;
 	static constexpr uint64 FrozenBlockedRoadSnapshotHash =
-		0x8AD7E205F0B18BC7ull;
+		0x59941DDDEE9F89ACull;
 	static constexpr uint64 FrozenInvalidPVSResultHash =
-		0x1F9501BCEF63D5AFull;
+		0x58AFC8CBDF08D746ull;
 	static constexpr uint64 FrozenInvalidPVSSnapshotHash =
-		0x804CAEDA26587EB0ull;
+		0xA1587D595164EC49ull;
 	static constexpr uint64 FrozenRayBudgetResultHash =
-		0x693C20751EC2FD07ull;
+		0xC724490C19957C7Cull;
 	static constexpr uint64 FrozenRayBudgetSnapshotHash =
-		0x531D1404D5B5B9F5ull;
+		0xA85F7526E39503BFull;
 	static constexpr uint64 FrozenManifestHash =
-		0x4F1A236CDF81B80Dull;
+		0xE71AA286BB4B273Aull;
 
 	static constexpr int32 DisplayAttemptedRouteCandidates = 3;
 	static constexpr int32 DisplaySpatialHardPassCount = 3;

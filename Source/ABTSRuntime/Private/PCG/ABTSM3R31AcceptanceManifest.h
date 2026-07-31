@@ -44,21 +44,21 @@ public:
 	static constexpr int32 DisplayFieldsPerCandidate = 8;
 	static constexpr int32 DisplaySlotsPerCandidate = 56;
 	static constexpr uint64 RequiredR3ManifestHash =
-		0x4F1A236CDF81B80Dull;
+		0xE71AA286BB4B273Aull;
 	static constexpr uint64 FrozenSweepSeedManifestHash =
 		0x5610DCBA0A03D9CBull;
 	static constexpr uint64 FrozenDisplayConfigHash =
 		0xD08CCF16744A2B7Bull;
 	static constexpr uint64 FrozenDisplayResultHash =
-		0x8DF4352B7868EB58ull;
+		0xE17A5F2FF30221E6ull;
 	static constexpr uint64 FrozenDisplayCandidateHash =
 		0xCD79141DA5C277C0ull;
 	static constexpr uint64 FrozenSweepOracleHash =
-		0xD45E9C69B73431F1ull;
+		0x8071E747415A20F2ull;
 
 	// Calibrated from BuildCanonicalPayload after all identities above freeze.
 	static constexpr uint64 FrozenManifestHash =
-		0x1AFC3DD667595128ull;
+		0xA7783FACECF3FE4Aull;
 
 	static TConstArrayView<int32> GetSweepSeeds();
 	static TConstArrayView<FABTSM3R31AcceptanceEntry> GetEntries();

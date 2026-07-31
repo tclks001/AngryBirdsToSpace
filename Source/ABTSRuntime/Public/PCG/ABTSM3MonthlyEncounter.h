@@ -2,12 +2,46 @@
 
 #pragma once
 
+#include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "CoreMinimal.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
 #include "PCG/ABTSM3MonthlySchema.h"
 #include "ABTSM3MonthlyEncounter.generated.h"
 
 struct FABTSM2Cell;
+
+/**
+ * M3-local, map-independent snapshot built exclusively from Integration's
+ * frozen M6/M9 V0 factories. R-3 signs it and uses the reach envelopes only
+ * as a conservative placement prefilter; it is not a production trajectory
+ * provider or a scene-instance gravity snapshot.
+ */
+USTRUCT(BlueprintType)
+struct ABTSRUNTIME_API FABTSM3FrozenCalibrationBatch
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	int32 SchemaVersion = 1;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	int32 LaunchProfileVersion = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	int64 LaunchProfileHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	int32 SatellitePracticePresetVersion = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	int64 SatellitePracticePresetHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	TArray<FABTSM6ReachEnvelope> ReachEnvelopes;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Calibration")
+	int64 BatchHash = 0;
+};
 
 UENUM(BlueprintType)
 enum class EABTSM3MonthlyRevealPolicy : uint8
@@ -123,6 +157,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlyEncounterSpatialConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Catalog")
 	TArray<EABTSM3BiomeArchetype> EncounterBiomeArchetypes;
+
+	/** E1..E6 launch capability used by the frozen-V0 reach prefilter. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Catalog")
+	TArray<EABTSSlingshotTier> EncounterSlingshotTiers;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter|Spacing",
 		meta = (ClampMin = "1", Units = "cm"))
@@ -644,6 +682,9 @@ struct ABTSRUNTIME_API FABTSM3MonthlySpatialResult
 	int64 ProfileCatalogHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
+	FABTSM3FrozenCalibrationBatch FrozenCalibrationBatch;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	int64 FaultInjectionHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
@@ -707,6 +748,7 @@ public:
 	static constexpr int32 GeneratorVersion = 3;
 	static constexpr int32 MonthlyLayoutPolicyVersion = 2;
 	static constexpr int32 SpatialSchemaVersion = 1;
+	static constexpr int32 FrozenCalibrationSchemaVersion = 1;
 	static constexpr int32 RequiredObserverCount = 13;
 	static constexpr int32 RequiredVisibilityEntryCount = 78;
 	static constexpr int32 RequiredPocketCount = 42;
@@ -744,6 +786,14 @@ public:
 		const FABTSM3MonthlySpatialFaultInjection& FaultInjection);
 
 	static uint64 ComputeFixtureProfileCatalogHash();
+
+	static bool BuildFrozenCalibrationBatchV0(
+		float PlanetRadiusCM,
+		FABTSM3FrozenCalibrationBatch& OutBatch,
+		FString& OutFailure);
+
+	static uint64 ComputeFrozenCalibrationBatchHash(
+		const FABTSM3FrozenCalibrationBatch& Batch);
 
 	static TConstArrayView<FABTSM3MonthlyProfileDescriptorFixture>
 		GetFixtureProfileCatalog();

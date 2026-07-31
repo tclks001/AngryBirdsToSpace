@@ -61,21 +61,21 @@ public:
 	static constexpr int32 MaxVisualBiomeBoundaryPermille = 250;
 
 	static constexpr uint64 RequiredR3ManifestHash =
-		0x4F1A236CDF81B80Dull;
+		0xE71AA286BB4B273Aull;
 	static constexpr uint64 FrozenSweepSeedManifestHash =
 		0x5610DCBA0A03D9CBull;
 	static constexpr uint64 FrozenDisplayConfigHash =
 		0x9BB9CF98FB4127F9ull;
 	static constexpr uint64 FrozenDisplaySourceSpatialHash =
-		0x550F7B095B788C49ull;
+		0x836665565E758FA2ull;
 	static constexpr uint64 FrozenDisplayResultHash =
-		0xEC87F999625CBE44ull;
+		0xC38283DF9504A92Full;
 	static constexpr uint64 FrozenDisplayPreviewCandidateHash =
 		0x9BE1F04A45277AEFull;
 	static constexpr uint64 FrozenSweepOracleHash =
-		0x6751B93DA5E4C778ull;
+		0x33DEB2FB047DE412ull;
 	static constexpr uint64 FrozenManifestHash =
-		0x9E5A2FE0E563A7C4ull;
+		0x0A8A186B4B2C359Aull;
 
 	static TConstArrayView<int32> GetSweepSeeds();
 	static TConstArrayView<FABTSM3R5AcceptanceEntry> GetEntries();

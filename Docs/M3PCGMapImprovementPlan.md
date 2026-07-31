@@ -3,7 +3,7 @@
 > 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层已达到 M3LocalAccepted（IntegrationPending）
 > 日期：2026-07-31
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
-> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 Launch/Preset 参数已完成可见 PIE 并冻结为可移植 V0，稳定原生 factory 可供 M3 预筛消费，但仍不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不改签 R-3 身份或发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、生产 M6/M9 只读适配器、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
+> 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 Launch/Preset 参数已完成可见 PIE 并冻结为可移植 V0，R-3 已通过稳定原生 factory 构造并签名校准批次，用三档射程包络做空间预筛，但仍不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、生产 M6/M9 只读适配器、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
 
 父文档：
 
@@ -1175,8 +1175,9 @@ R-2 只证明路线候选池和 Road Solver 机制，不在正式 Height/Hydrolo
 - strict rebuild 后，RoadArrival 不再按“几何最近道路段”盲目吸附，而是在冻结预留集合内确定性连接到自己的计划 `FlowS` 道路段，并以 `MaxPlannedProgressDeviationCM=1200`（12 m）作为不可越过的显式偏差上限。这避免道路自接近/回头时 E(i) 错接到其他流程段，同时仍用真实最近道路距离验收建筑偏路窗口，并保持相邻 Encounter 实际进度间距为 35–60 m；
 - 小半径 Cell 扩张改为稀疏 BFS 并按 CellId 恢复规范顺序；构造阶段执行完整结构/语义门，公开 `Validate` 仍逐 Source 重建成功与失败 Attempt 并做 whole-struct compare。配置校验完整镜像可序列化 Clamp 域，关闭空间观测时也要求 Attempt/HardPass/Fallback 元数据保持规范零值；性能优化没有减少回溯上限、PVS 射线、失败注入或重签篡改门；
 - PVS 固定生成 Start、六个 PreReveal、六个 Reveal 到六个目标的 78 条关系；每条关系使用两组 M4 相机样本和三条目标射线，共 468 条优化射线。生产路径采用邻接 Voronoi 连续区间 Trace，参考路径独立扫描全部 Cell 构造连续上包络；展示 Seed 加十个边界 Seed 达到 `Passed=11/11, BoundaryPassed=10/10`；
-- 展示 Seed `312503` 冻结为 `Attempts=3, HardPass=3, Retained=3, Route=335.37 m, Encounters=6, Pockets=42, Biomes=7, Playable=728, ApprovedTransition=119, ActiveRoleCoverage=836‰, DeepWild=0‰, PVSRays=468`。冻结身份为 `Result=550F7B095B788C49`、`Snapshot=91909BF5BDBCDCBE`、`BestCandidate=3B1E2304F4FA5407`；
-- `M3R3AcceptanceManifest` 已冻结 `ManifestHash=4F1A236CDF81B80D`、100 Seed Oracle `8DFE449450CF2AEE`、参考 PVS Oracle `EC0C3B3409FD3C31`、边界 Oracle `8CAF504E02890A5F` 和三组失败结果身份。100 Seed fresh 扫描为 `Terminal=100, Accepted=100, Rejected=0, RouteFallback=0, P95=126.258 ms, Max=186.367 ms, MaxRays=468, MaxBacktracks=1`；
+- R-3 现在直接调用 Integration 的 `MakeFrozenLaunchProfileCatalogV0()` 与 `MakeFrozenSatellitePracticePresetV0()`，在实际主星半径上一次性构造 `FABTSM3FrozenCalibrationBatch`。批次同时保存两个版本/Hash 和 Twig、Simple、Reinforced 三档理想球面射程包络；当前展示批次身份为 `A17651D7EF0235C2`，其 `LaunchProfile=C2B94139752AD846`、`SatellitePreset=A011075318FAD6CE`。E1–E3 使用 Simple、E4–E6 使用 Reinforced，候选的弹弓槽到目标球面弧长超过该档 `MaximumReachCM` 时在空间阶段 fail closed。它只是一致的粗筛输入，不加载 Blueprint、不复制 Pull/卫星字段常量、不使用场景实例 `GravitySnapshotHash`，也不替代 R-4 的真实轨迹 Witness；
+- 展示 Seed `312503` 冻结为 `Attempts=3, HardPass=3, Retained=3, Route=335.37 m, Encounters=6, Pockets=42, Biomes=7, Playable=728, ApprovedTransition=119, ActiveRoleCoverage=836‰, DeepWild=0‰, PVSRays=468`。冻结身份为 `Result=836665565E758FA2`、`Snapshot=565A25C59422AAD4`、`BestCandidate=3B1E2304F4FA5407`；
+- `M3R3AcceptanceManifest` 已冻结 `ManifestHash=E71AA286BB4B273A`、100 Seed Oracle `5DC44BDCD8629A5A`、参考 PVS Oracle `EC0C3B3409FD3C31`、边界 Oracle `8CAF504E02890A5F` 和三组失败结果身份。100 Seed fresh 扫描为 `Terminal=100, Accepted=100, Rejected=0, RouteFallback=0, P95=77.011 ms, Max=96.937 ms, MaxRays=468, MaxBacktracks=1`；
 - 当前 Profile Bounds/Catalog 只使用冻结的非零 M3 fixture `0052B1916220B715`，为空间算法提供确定性尺寸输入；它不是 Integration/M7 的已认证 Profile Catalog，也不能证明 M7 真实形态、AttackFace、Chaos 或弹道；
 - `CompatibilityOracle Gen3/Policy1`、旧四站点及稳定 v1 合同继续原样输出。fresh runtime 逐项核对旧四站点的有序 TaskId/CellId，并报告 `Terminal=1, Passed=1, Failed=0`；月度结果仍仅为内部观测，`bMonthlyWorldAccepted=false`，不得进入发布 fallback 或替代既有跨阶段合同。
 
@@ -1241,10 +1242,10 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 - R4/R6 接正式导出时必须把当前普通 `SpawnActor` 改为 deferred spawn，在 `FinishSpawning` 前配置快照；同时用活动月度世界的已接受身份核对 `LayoutHash/CandidateHash`。本轮只具备非零身份和拓扑结构门，不能把该接缝误报为已完成生产绑定；
 - Integration 已新增 `FABTSM6CordConnectionRules`，普通连接不读 Field/Encounter/SlotGroup，只校验顶部端点厘米长度、第三桩中心线/胶囊、既有弦端点线段、有限值和退化段；M11.0 Space Pair 身份仍独立；
 - Editor 的 R-3 空间调试层可显示 Encounter 槽、道路附加槽与实际 Anchor；发布默认关闭，不进入世界身份；
-- `M3R31AcceptanceManifest` 冻结依赖的 R-3 Manifest `4F1A236CDF81B80D`，并冻结
-  `DisplayResult=8DF4352B7868EB58`、`DisplayBestCandidate=CD79141DA5C277C0`、`SweepOracle=D45E9C69B73431F1`、
-  `Manifest=1AFC3DD667595128`。展示 Seed 不改变既有 R-3
-  `Result=550F7B095B788C49`、`Snapshot=91909BF5BDBCDCBE`、`BestCandidate=3B1E2304F4FA5407`。
+- `M3R31AcceptanceManifest` 冻结依赖的 R-3 Manifest `E71AA286BB4B273A`，并冻结
+  `DisplayResult=E17A5F2FF30221E6`、`DisplayBestCandidate=CD79141DA5C277C0`、`SweepOracle=8071E747415A20F2`、
+  `Manifest=A7783FACECF3FE4A`。展示 Seed 的 R-3 身份为
+  `Result=836665565E758FA2`、`Snapshot=565A25C59422AAD4`、`BestCandidate=3B1E2304F4FA5407`；R-3.1 不另行读取或解释标定参数，只通过已经签名的 R-3 来源身份继承这批冻结数据。
 
 **集成工作树接入清单**
 
@@ -1262,7 +1263,7 @@ NoRoad 预留区中的非道路单元；道路附加槽场则额外避开 NoRoad
 **自动与 PIE 验收**
 
 - M3 本地：`ABTS.M3.Monthly.SlotField` 精确 7/7、`ABTS.M3.Monthly.SlotFieldFailure` 精确 2/2；冻结 100 Seed 为
-  `Terminal=100, Accepted=100, Rejected=0`，Oracle `D45E9C69B73431F1`，默认每候选 8 场/56 槽，零附加和上下界参数均有覆盖；
+  `Terminal=100, Accepted=100, Rejected=0`，Oracle `8071E747415A20F2`，默认每候选 8 场/56 槽，零附加和上下界参数均有覆盖；
 - 共享集成：`ABTS.M51.SlingshotAssembly.Geometry` 与 `.Runtime` 已在 fresh NullRHI 中精确 2/2 通过；覆盖清空、恰好等于上限、超长、第三桩、既有弦、近失配、高度差、非有限/退化，以及普通/Space 成功与失败前后库存、有效 Actor 数和两端 `HasCord`；`ABTS.M51.OrdinarySlots.Runtime` 精确 1/1，覆盖接受快照的实际 Actor 数、终局双槽隔离、幂等初始化与无效 Cell 全批回滚；
 - 回归：旧兼容站点、M6 普通桩任意插入、M11.0 终局唯一槽对及终局材料规则必须保持不变；
 - M3 本地可视抽查：Editor 调试叠层显示展示 Seed 中六个逻辑 Encounter 各有 7 槽的紧凑散点场、道路另有 2 场，且不改变当前兼容世界实体；
@@ -1327,10 +1328,10 @@ TargetProxy / AttackFace 语义
 - 正式默认域覆盖全部可达无序槽对、双侧、7 个 Pull、5 个 Aim 点和冻结 Bird 全集；E4/E5 的 Simple 能力证书完整覆盖 4410 个输入，BirdCatalogHash 进入身份与证书，E5 用同一输入关闭 M9 做完整因果消融；
 - 轨迹以目标球面首次接触点计算撞击位置/速度，终止原因、首样本时间、几何接触和 Provider 回显均 fail closed；资源流程保存 15 步有符号 ItemDelta、RequiredStation 与逐步 LedgerHash，验证候选绑定桥门、Furnace 可用性及太空桩/弦真实终局配方；
 - Fixture Authority 已证明六关 Positive Witness、Black 能力门、抽象资源/奖励/桥门/Exit 与零支线闭环，但 Workbench/Simple/Bridge/Reinforced 仍是合成流程步骤，不等同真实 M5 制作目录。R4 v1 因而只接受未认证 Fixture，显式拒绝合成快照冒充 Integration，并保持 `bExternalInputsCertified=false`、`bMonthlyWorldAccepted=false`；生产默认无真实适配器时为 `NotEvaluated`；
-- `M3R4AcceptanceManifest` 冻结 `Manifest=AEBA4E7F337A4D8F`、100 Seed 清单
+- `M3R4AcceptanceManifest` 冻结 `Manifest=735D1CEB18102607`、100 Seed 清单
   `5610DCBA0A03D9CB`、展示身份
-  `Config=E7831808F41259DA / Result=624FB903F80BA71B / Candidate=2C9798D1B1BE3B14 / GameplayLayout=29811734A4360BC6`
-  与 100 Seed Oracle `89F9BD7DD7026670`；
+  `Config=E7831808F41259DA / Result=3F148C763A8AB08E / Candidate=2C9798D1B1BE3B14 / GameplayLayout=919D8B8777E98DC5`
+  与 100 Seed Oracle `73E737B64B33E3BF`。这些变化来自父级 R-3/R-3.1 的冻结校准身份级联；R-4 的 Fixture 轨迹服务、候选几何和阶段权限没有被冒充为生产 M6/M9 权威；
 - `ABTS.M3.Monthly.EncounterWitness.0` fresh 精确 8/8，100 Seed 为
   `Terminal=100 Accepted=100 P95MS=363.757 MaxMS=401.359`；失败注入精确 8/8；
   R3.1、R3、R2、Schema、WeekOne、共享合同、M11.0 分离回归全部通过；
@@ -1379,8 +1380,8 @@ Visible PIE，才能整体晋升为 **IntegrationAccepted**。
 
 **本地自动验收证据**
 
-- `M3R5AcceptanceManifest` 冻结为 `ManifestHash=9E5A2FE0E563A7C4`，展示 Config/Result/Preview Hash 分别为 `9BB9CF98FB4127F9/EC87F999625CBE44/9BE1F04A45277AEF`；`ABTS.M3.Monthly.Biome.0`、`ABTS.M3.Monthly.BiomeFailure` 与 `ABTS.M3.Monthly.Biome.Sweep100` 各自冻结为 1 个 UE Automation Test，Sweep 内部再完整遍历 100 Seed；
-- 100 Seed 为 `Terminal=100, Accepted=100, Rejected=0`，共验证 300 个候选表现计划，冻结 Oracle 为 `6751B93DA5E4C778`。最差统计为 ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、六 Encounter 主地貌主题下限 `4`、最小显示连通块 `3 Cell`、全局显示邻接边界率 `21‰`；逻辑 singleton 共 2 个、小碎片修复共 2 Cell、最终显示 singleton 为 0，受保护区域实例违规为 0；
+- `M3R5AcceptanceManifest` 冻结为 `ManifestHash=0A8A186B4B2C359A`，展示 SourceSpatial/Config/Result/Preview Hash 分别为 `836665565E758FA2/9BB9CF98FB4127F9/C38283DF9504A92F/9BE1F04A45277AEF`；`ABTS.M3.Monthly.Biome.0`、`ABTS.M3.Monthly.BiomeFailure` 与 `ABTS.M3.Monthly.Biome.Sweep100` 各自冻结为 1 个 UE Automation Test，Sweep 内部再完整遍历 100 Seed。R-5 不重新构造射程，而是通过已验证的 `SourceSpatialResultHash` 消费同一冻结校准批次；
+- 100 Seed 为 `Terminal=100, Accepted=100, Rejected=0`，共验证 300 个候选表现计划，冻结 Oracle 为 `33DEB2FB047DE412`。最差统计为 ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、六 Encounter 主地貌主题下限 `4`、最小显示连通块 `3 Cell`、全局显示邻接边界率 `21‰`；逻辑 singleton 共 2 个、小碎片修复共 2 Cell、最终显示 singleton 为 0，受保护区域实例违规为 0；
 - 候选表现构造耗时最终基线 `P95=127.860 ms`、`Max=139.359 ms`，满足冻结的 `P95<=250 ms / Max<=1000 ms` 算法预算；同一输入深度重放一致，日志开关与显式预览开关不改变 R-3 身份。
 - `SurfaceSubdivision=7` 完整显式预览 runtime 通过等价的唯一顶点地表采样缓存，将重复的三角形顶点高度/法线/颜色查询合并为每个 icosphere 顶点一次采样；没有降低 Subdivision、关闭碰撞或跳过材质/HISM。最终 fresh 实测 `PlannerMS=130.092`、`RebuildMS=6057.156`、`PeakPhysicalMB=2221.3`，满足冻结的 `1000 ms / 8000 ms / 2.25GB×115%` 门槛。
 
