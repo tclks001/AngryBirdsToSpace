@@ -16,6 +16,7 @@
 >
 > 研究依据：[3D WFC 建筑外观体块与承载 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 > 后续演进：[轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
+> 轮廓原型：[DAG5-B v2 复杂建筑轮廓预览](M73DAG5Bv2ComplexSilhouettePreviewDesign.md)。
 > 生产边界：[M7 TaskGraph 球面建筑接入](M7TaskGraphSphericalBuildingIntegrationDesign.md)。
 
 ## 1. 目标
@@ -548,3 +549,5 @@ ValidationHash 的 Certification Manifest。
 
 本文的后续架构参考见
 [M7.3 轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
+其中 Shape Grammar、体量邻接 WFC 与 Box/Prism/Pyramid 编辑器轮廓预览的首个实现见
+[DAG5-B v2 复杂建筑轮廓预览](M73DAG5Bv2ComplexSilhouettePreviewDesign.md)。

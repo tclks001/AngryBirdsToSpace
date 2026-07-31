@@ -9,6 +9,10 @@
 > 已完成可复现的候选搜索、四类语义包络、局部 WFC、Support Port 和真实 Brick 接入；
 > 它作为语义包络原型与回归基线保留，但不再被视为最终建筑生成架构。
 >
+> 轮廓前端：[DAG5-B v2 复杂建筑轮廓预览](M73DAG5Bv2ComplexSilhouettePreviewDesign.md)
+> 已实现递归 Shape Grammar、体量邻接 WFC 与 Box/Prism/Pyramid 编辑器程序化预览；
+> 当前待用户视觉验收，尚未进入 Seed DAG、Expansion 或物理建筑链。
+>
 > 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 > 相关研究：[3D WFC 建筑外观体块与承载 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 > 复用链路：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) ·
@@ -576,6 +580,10 @@ FABTSM73EnvelopeDAGContactAuditor
 当前 DAG5-B 四类 Fixture 保留为 `SemanticEnvelopePrototype` golden，证明轮廓、
 WFC、Port 和真实 Brick 合同未回归。新链路使用独立显式开关，在完成认证前不替换
 TaskGraph 生产默认。
+
+DAG5-B v2 已先行实现本文链路的“Shape Grammar + WFC + 多形体轮廓预览”部分。
+它输出编辑器可见的语义体量，不生成物理建筑。后续串行接口切片应消费这份体量结果，
+而不是重新创建另一套轮廓生成器。
 
 建议按以下可回归切片演进：
 
