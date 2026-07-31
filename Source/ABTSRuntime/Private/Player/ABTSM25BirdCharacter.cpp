@@ -3,9 +3,6 @@
 #include "Player/ABTSM25BirdCharacter.h"
 
 #include "ABTSRuntime.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimSequence.h"
-#include "Animation/AnimSingleNodeInstance.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -19,6 +16,7 @@
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSRadialSurfaceSuspensionComponent.h"
 #include "Planet/ABTSM2SphericalSurfaceComponent.h"
+#include "Presentation/ABTSBirdAnimationPresentationComponent.h"
 #include "Player/ABTSM4PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSCollisionChannels.h"
@@ -37,15 +35,6 @@ AABTSM25BirdCharacter::AABTSM25BirdCharacter()
 	ChaosPhysicsSphere->SetGenerateOverlapEvents(false);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ChaosSphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (ChaosSphereMesh.Succeeded()) ChaosPhysicsSphere->SetStaticMesh(ChaosSphereMesh.Object);
-
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleAnimation(TEXT("/Game/CuteBird/Animations/Cutebird_IdleA.Cutebird_IdleA"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> MoveAnimation(TEXT("/Game/CuteBird/Animations/Cutebird_Move.Cutebird_Move"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> JumpAnimation(TEXT("/Game/CuteBird/Animations/Cutebird_Jump.Cutebird_Jump"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> FlyAnimation(TEXT("/Game/CuteBird/Animations/Cutebird_Fly.Cutebird_Fly"));
-	CuteBirdIdleAnimation = IdleAnimation.Object;
-	CuteBirdMoveAnimation = MoveAnimation.Object;
-	CuteBirdJumpAnimation = JumpAnimation.Object;
-	CuteBirdFlyAnimation = FlyAnimation.Object;
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RedColor(TEXT("/Game/CuteBird/Materials/CuteBirdColor_Materials/M_CuteBird_12.M_CuteBird_12"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RedFace(TEXT("/Game/CuteBird/Materials/Face_Materials/M_Dino_face_23.M_Dino_face_23"));
@@ -71,16 +60,21 @@ void AABTSM25BirdCharacter::BeginPlay()
 	GetCharacterMovement()->DisableMovement();
 	GetSphericalSurface()->SetProjectToBaseSurface(false);
 	ConfigureMovementMode();
-	bWasAnimationGrounded = IsRadiallyGrounded();
+	BirdAnimationPresentation = NewObject<UABTSBirdAnimationPresentationComponent>(this, TEXT("BirdAnimationPresentation"));
+	if (BirdAnimationPresentation)
+	{
+		BirdAnimationPresentation->RegisterComponent();
+		BirdAnimationPresentation->InitializePresentation(GetBirdVisual(), IsRadiallyGrounded());
+	}
 	ApplyCuteBirdMaterials();
-	UpdateCuteBirdAnimation(0.0f);
+	UpdateBirdAnimationPresentation(0.0f);
 }
 
 void AABTSM25BirdCharacter::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody) UpdateChaosVisualFrame();
-	UpdateCuteBirdAnimation(DeltaSeconds);
+	UpdateBirdAnimationPresentation(DeltaSeconds);
 	if (ControlDiagnosticRemainingSeconds <= 0.0f) return;
 	ControlDiagnosticRemainingSeconds = FMath::Max(0.0f, ControlDiagnosticRemainingSeconds - DeltaSeconds);
 	ControlDiagnosticLogAccumulator += DeltaSeconds;
@@ -606,21 +600,6 @@ FVector AABTSM25BirdCharacter::GetPresentationVelocity() const
 	return ChaosMovement->GetVelocity();
 }
 
-void AABTSM25BirdCharacter::PlayCuteBirdAnimation(UAnimSequence* Animation, const bool bLooping, const float PlayRate)
-{
-	USkeletalMeshComponent* Visual = GetBirdVisual();
-	if (Visual == nullptr || Animation == nullptr) return;
-	if (ActiveCuteBirdAnimation != Animation)
-	{
-		Visual->PlayAnimation(Animation, bLooping);
-		ActiveCuteBirdAnimation = Animation;
-	}
-	if (UAnimSingleNodeInstance* SingleNode = Visual->GetSingleNodeInstance())
-	{
-		SingleNode->SetPlayRate(PlayRate);
-	}
-}
-
 void AABTSM25BirdCharacter::ApplyCuteBirdMaterials()
 {
 	USkeletalMeshComponent* Visual = GetBirdVisual();
@@ -630,51 +609,26 @@ void AABTSM25BirdCharacter::ApplyCuteBirdMaterials()
 	if (CuteBirdFaceMaterials[MaterialIndex] != nullptr) Visual->SetMaterial(1, CuteBirdFaceMaterials[MaterialIndex]);
 }
 
-void AABTSM25BirdCharacter::UpdateCuteBirdAnimation(const float DeltaSeconds)
+void AABTSM25BirdCharacter::UpdateBirdAnimationPresentation(const float DeltaSeconds)
 {
-	USkeletalMeshComponent* Visual = GetBirdVisual();
-	if (Visual == nullptr || Visual->GetSkeletalMeshAsset() == nullptr) return;
+	if (!BirdAnimationPresentation) return;
+	const FVector Velocity = GetPresentationVelocity();
+	const FVector Up = bPlanarChaosMode
+		? ChaosMovement->GetMovementUpAt(GetActorLocation())
+		: GetSphericalSurface()->GetRadialUp();
+	FABTSBirdAnimationSnapshot Snapshot;
+	Snapshot.bGrounded = IsRadiallyGrounded();
+	Snapshot.bForceFlight = IsSlingshotFlightActive();
+	Snapshot.TangentialSpeedCMPerSecond = FVector::VectorPlaneProject(Velocity, Up).Size();
+	BirdAnimationPresentation->UpdatePresentation(Snapshot, DeltaSeconds);
+}
 
-	const bool bGrounded = IsRadiallyGrounded();
-	const bool bStartedJump = bWasAnimationGrounded && !bGrounded;
-	if (bStartedJump)
+void AABTSM25BirdCharacter::RequestBirdPresentationAction(const EABTSBirdPresentationAction Action)
+{
+	if (BirdAnimationPresentation)
 	{
-		CuteBirdAnimationState = EABTSCuteBirdAnimationState::Jump;
-		JumpAnimationElapsedSeconds = 0.0f;
+		BirdAnimationPresentation->RequestAction(Action);
 	}
-	else if (!bGrounded && CuteBirdAnimationState == EABTSCuteBirdAnimationState::Jump)
-	{
-		JumpAnimationElapsedSeconds += DeltaSeconds;
-		const float JumpDuration = CuteBirdJumpAnimation ? CuteBirdJumpAnimation->GetPlayLength() : 0.0f;
-		if (JumpAnimationElapsedSeconds >= JumpDuration) CuteBirdAnimationState = EABTSCuteBirdAnimationState::Fly;
-	}
-	else if (!bGrounded)
-	{
-		CuteBirdAnimationState = EABTSCuteBirdAnimationState::Fly;
-	}
-	else
-	{
-		CuteBirdAnimationState = GetPresentationVelocity().SizeSquared() > FMath::Square(10.0f)
-			? EABTSCuteBirdAnimationState::Move
-			: EABTSCuteBirdAnimationState::Idle;
-	}
-
-	switch (CuteBirdAnimationState)
-	{
-	case EABTSCuteBirdAnimationState::Move:
-		PlayCuteBirdAnimation(CuteBirdMoveAnimation, true, FMath::Clamp(GetPresentationVelocity().Size() / 300.0f, 0.7f, 1.6f));
-		break;
-	case EABTSCuteBirdAnimationState::Jump:
-		PlayCuteBirdAnimation(CuteBirdJumpAnimation, false);
-		break;
-	case EABTSCuteBirdAnimationState::Fly:
-		PlayCuteBirdAnimation(CuteBirdFlyAnimation, true);
-		break;
-	default:
-		PlayCuteBirdAnimation(CuteBirdIdleAnimation, true);
-		break;
-	}
-	bWasAnimationGrounded = bGrounded;
 }
 
 void AABTSM25BirdCharacter::UpdateChaosVisualFrame()

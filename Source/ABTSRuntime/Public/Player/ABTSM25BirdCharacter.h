@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Party/ABTSBirdTypes.h"
 #include "Player/ABTSM2BirdCharacter.h"
+#include "Presentation/ABTSBirdAnimationPresentationComponent.h"
 #include "ABTSM25BirdCharacter.generated.h"
 
 class UABTSM25RadialMovementComponent;
@@ -12,16 +13,7 @@ class UABTSRadialForceMovementComponent;
 class UABTSRadialSurfaceSuspensionComponent;
 class UABTSChaosBirdMovementComponent;
 class UPrimitiveComponent;
-class UAnimSequence;
 class UMaterialInterface;
-
-enum class EABTSCuteBirdAnimationState : uint8
-{
-	Idle,
-	Move,
-	Jump,
-	Fly
-};
 
 /** Editor-selectable player movement implementation. */
 UENUM(BlueprintType)
@@ -92,6 +84,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|Movement")
 	EABTSBirdMovementMode GetSelectedMovementMode() const { return MovementMode; }
 
+	/** Requests a pose-only one-shot. The animation cannot change movement, collision or Gameplay state. */
+	UFUNCTION(BlueprintCallable, Category = "ABTS|Bird|Presentation")
+	void RequestBirdPresentationAction(EABTSBirdPresentationAction Action);
+
 private:
 	void ConfigureMovementMode();
 	void ApplyMoveInput(const FVector& Direction, float Scale);
@@ -107,10 +103,9 @@ private:
 	bool IsClearMotionBeforePlayerJumpExperimentEnabled() const;
 	void ApplyClearMotionBeforeJumpExperiment();
 	void UpdateChaosVisualFrame();
-	void UpdateCuteBirdAnimation(float DeltaSeconds);
+	void UpdateBirdAnimationPresentation(float DeltaSeconds);
 	void ApplyCuteBirdMaterials();
 	FVector GetPresentationVelocity() const;
-	void PlayCuteBirdAnimation(UAnimSequence* Animation, bool bLooping, float PlayRate = 1.0f);
 	void ConfigureChaosPhysicsBody(bool bEnable);
 	void SetLocomotionCollisionEnabled(ECollisionEnabled::Type CollisionEnabled);
 	void LogControlDiagnosticSnapshot();
@@ -152,14 +147,10 @@ private:
 	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
 	bool bPlanarChaosMode = false;
 	bool bDeveloperWalkEnabled = false;
-	bool bWasAnimationGrounded = true;
-	float JumpAnimationElapsedSeconds = 0.0f;
-	EABTSCuteBirdAnimationState CuteBirdAnimationState = EABTSCuteBirdAnimationState::Idle;
-	UPROPERTY(Transient) TObjectPtr<UAnimSequence> CuteBirdIdleAnimation;
-	UPROPERTY(Transient) TObjectPtr<UAnimSequence> CuteBirdMoveAnimation;
-	UPROPERTY(Transient) TObjectPtr<UAnimSequence> CuteBirdJumpAnimation;
-	UPROPERTY(Transient) TObjectPtr<UAnimSequence> CuteBirdFlyAnimation;
-	UPROPERTY(Transient) TObjectPtr<UAnimSequence> ActiveCuteBirdAnimation;
+	/** Runtime-only helper avoids adding another serialized native Blueprint subobject. */
+	UPROPERTY(Transient)
+	TObjectPtr<UABTSBirdAnimationPresentationComponent> BirdAnimationPresentation;
+
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> CuteBirdColorMaterials[4];
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> CuteBirdFaceMaterials[4];
 };
