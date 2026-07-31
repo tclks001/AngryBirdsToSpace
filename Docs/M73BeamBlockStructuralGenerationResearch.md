@@ -1,6 +1,8 @@
 # M7.3：长条形积木建筑生成调研与演进方案
 
-> 文档性质：DAG5-B v2 之后的结构编译层调研稿，不代表当前生产链已经实现。
+> 文档性质：DAG5-B v2 之后的结构编译层调研稿；方案已被采纳，当前由
+> [M7.3-Beam-A 结构 IR 与编辑器预览](M73BeamAStructuralIRPreviewDesign.md) 开始分阶段实现，
+> 尚未接管 TaskGraph 生产链。
 >
 > 研究问题：如何用固定截面、离散长度的长条积木生成三维轻型建筑，同时兼容现有
 > Shape Grammar + WFC 语义轮廓、Expanded DAG、弱点规划、真实 Brick 和 Chaos 验证。
@@ -11,6 +13,8 @@
 > 下游复用：[DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) ·
 > [DAG3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md) ·
 > [DAG-4 动态认证](M73DAG4SettledContactAndAttackRolloutDesign.md)。
+>
+> 总导航：[M7 建筑系统文档导航、模块清单与执行路线](M7BuildingDevelopmentRoadmap.md)。
 
 ## 1. 结论摘要
 

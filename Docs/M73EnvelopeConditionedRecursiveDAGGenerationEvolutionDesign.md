@@ -2,6 +2,11 @@
 
 > 文档性质：M7 后续建筑生成演进的参考设计，不表示本文链路已经实现或已经通过生产验收。
 >
+> 执行状态：Shape Grammar / WFC 语义轮廓前端继续复用；本文原定的 Plate 拉伸、整板楼层拟合
+> 和基于 Plate 的后续递归目前**暂不进行**。当前实现路线改为
+> [长条梁式结构](M73BeamBlockStructuralGenerationResearch.md)，并从
+> [Beam-A](M73BeamAStructuralIRPreviewDesign.md) 建立 Bay / Joint / Member / Assembly IR。
+>
 > 设计决定：采用用户提出的“Shape Grammar / WFC 生成外轮廓和初始 DAG，
 > Expansion 生成完整细分 DAG，楼板拟合轮廓，最后联合补柱与弱点”的串行架构。
 >
@@ -16,6 +21,7 @@
 > 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 > 相关研究：[3D WFC 建筑外观体块与承载 DAG 拟合](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)。
 > 梁式结构演进：[长条形积木建筑生成调研](M73BeamBlockStructuralGenerationResearch.md)。
+> 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 > 复用链路：[DAG-1 递归语法](M73DAG1RecursiveGrammarImplementationDesign.md) ·
 > [DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) ·
 > [DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) ·

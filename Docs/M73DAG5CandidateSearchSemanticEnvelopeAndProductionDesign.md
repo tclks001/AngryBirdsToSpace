@@ -6,7 +6,8 @@
 > 均保持显式 opt-in。当前 DAG5-B 作为“语义包络进入真实物理砖”的原型基线保留；
 > Shape/WFC、初始 DAG、递归 Expansion、楼板拟合与弱点/支撑联合补全的后续串行架构见
 > [轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
-> DAG5-C～E 尚未实现。
+> DAG5-C～E 尚未实现，且在梁式结构闭环之前**暂不进行**；其候选认证、Encounter 接入和生产
+> 切换目标将在 [Beam-C/D](M73BeamBlockStructuralGenerationResearch.md) 完成后重新映射。
 >
 > 父级：[M7.3-DAG 递归承载图总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md)。
 >
@@ -18,6 +19,7 @@
 > 后续演进：[轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
 > 轮廓原型：[DAG5-B v2 复杂建筑轮廓预览](M73DAG5Bv2ComplexSilhouettePreviewDesign.md)。
 > 生产边界：[M7 TaskGraph 球面建筑接入](M7TaskGraphSphericalBuildingIntegrationDesign.md)。
+> 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 
 ## 1. 目标
 

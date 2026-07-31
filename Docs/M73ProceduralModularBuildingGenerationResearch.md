@@ -1,6 +1,7 @@
 # M7.3：程序化模块化建筑生成调研与算法设计
 
-> 文档性质：M7.3 前置调研与生成算法设计。  
+> 文档性质：M7.3 前置调研与生成算法设计；当前作为**历史方案与工程经验参考**，不再作为
+> 新实现入口。现行状态和文档关系以 [M7 建筑系统文档导航](M7BuildingDevelopmentRoadmap.md) 为准。
 > 本文负责“如何生成稳定、多样、可读且有明确弱点的积木建筑”；现有材料碰撞、累计损伤、爆炸与冲击实现仍以 [M7BuildingMaterialsAndDevicesDesign.md](M7BuildingMaterialsAndDevicesDesign.md) 为准。  
 > 本阶段不在本文中实现 C++，也不改变 `CellTopo` 作为正式球面世界逻辑源的约束。
 >

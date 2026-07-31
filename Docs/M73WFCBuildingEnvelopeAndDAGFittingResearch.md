@@ -1,12 +1,14 @@
 # M7.3 调研：3D WFC 建筑外观体块与承载 DAG 拟合
 
-> 状态：调研结论，尚未实现；正式工程边界已由
-> [DAG5-B](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)
-> 接管。
+> 状态：调研结论已被后续工程吸收，本文**不再作为独立实现阶段**。语义轮廓 WFC 已由
+> [DAG5-B v1](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) 和
+> [DAG5-B v2](M73DAG5Bv2ComplexSilhouettePreviewDesign.md) 验证；结构 Motif WFC 将由
+> [Beam 路线](M73BeamBlockStructuralGenerationResearch.md) 的 Beam-B 接管。
 >
 > 父级：[M7.3-DAG 递归承载图总体设计](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3 总体算法](M73ProceduralModularBuildingGenerationResearch.md)。上游：[M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)。
 > 下游：[M7.3-DAG-5 候选搜索、语义轮廓与生产认证](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)，
 > 其中 DAG5-B 负责 Shape Grammar、局部 WFC、SemanticEnvelope 与现有砖块编译链的正式接入。
+> 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 
 ## 1. 结论
 

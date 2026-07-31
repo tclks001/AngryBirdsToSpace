@@ -1,6 +1,7 @@
 # M7 收口：TaskGraph 球面建筑集成
 
-> 状态：TaskGraph 球面建筑生产路径已迁移至 M7.3-DAG2.3。DAG3-A/B/C 与 [DAG-4](M73DAG4SettledContactAndAttackRolloutDesign.md) 已完成 Frontier、三种同材质几何改写、静态候选、settled Contact、三 Pattern/四材料真实 Chaos 和当前 Fixture 的用户可见机械响应。[DAG5-A](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md#3-dag5-a可行域预检与确定性有界回溯) 已完成单 Profile 有界搜索和编译后实砖硬预算。生产 Profile 中 A/B/C/DAG-4/DAG5-A 仍默认关闭，现有普通建筑合同不变；后续由 DAG5-B～E 补齐复杂轮廓、六栋联合选择、Encounter 接入与最终动态认证。
+> 状态：TaskGraph 球面普通建筑生产路径仍由 M7.3-DAG2.3 承担。DAG3-A/B/C、DAG-4、DAG5-A/B v1 已实现但保持默认关闭；DAG5-B v2 已完成复杂语义轮廓预览，当前由 Beam-A～D 继续结构化，完成真实 Brick/Load DAG/Chaos 闭环前不切换生产默认值。
+> M7 全部阶段、暂缓方案和 Beam 演进关系见 [M7 建筑系统文档导航](M7BuildingDevelopmentRoadmap.md)。
 >
 > 上游：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M7 材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。生成器阶段：[M7.3-DAG-2 空间布局与模块编译](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG2.3 累计荷载与联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [M7.3-DAG-3 内部 Failure Frontier](M73DAG3InternalFailureFrontierDesign.md) · [DAG3-C 攻击可达与候选路由](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 settled Contact 与攻击对照](M73DAG4SettledContactAndAttackRolloutDesign.md)。
 >

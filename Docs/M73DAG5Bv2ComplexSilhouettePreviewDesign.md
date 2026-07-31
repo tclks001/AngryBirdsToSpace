@@ -2,12 +2,14 @@
 
 > 阶段性质：Shape Grammar + WFC 的轮廓原型。
 >
-> 状态：C++、程序化网格与纯数据自动化已实现；待用户在 Editor 中完成视觉验收。
+> 状态：C++、程序化网格、纯数据自动化和用户 Editor 读形已完成；屋顶 Primitive 已约束为
+> 终端体量。本原型现作为 [M7.3-Beam-A](M73BeamAStructuralIRPreviewDesign.md) 的正式上游。
 >
 > 本阶段只生成可见轮廓，不生成完整建筑、承重 DAG、Brick、碰撞、弱点或 Chaos。
 >
 > 父级：[轮廓约束递归 DAG 建筑生成演进设计](M73EnvelopeConditionedRecursiveDAGGenerationEvolutionDesign.md)。
 > 前代基线：[DAG5-A/B 候选搜索与语义轮廓](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)。
+> 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 
 ## 1. 目标与边界
 
