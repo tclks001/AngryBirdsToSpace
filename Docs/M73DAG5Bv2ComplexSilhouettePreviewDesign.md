@@ -158,9 +158,11 @@ Foundation / Body / Annex / Bridge / Crown
 | `TriangularPrismY` | Y-Z 三角截面、沿 X 延伸的棱柱 |
 | `Pyramid` | 四边底座和顶部单顶点棱锥 |
 
-桥梁只允许 Box 或沿主跨度方向的 Prism；棱锥不能作为垂直相邻节点的下部支撑体；
-棱柱下方如果还有上部体量，则上部必须是收束用棱锥。虽然本阶段不做物理验证，这些局部
-约束可以避免明显不合理的 WFC 组合。
+棱柱和棱锥都属于终端屋顶体量，上方不能再承载其他体量。垂直 WFC 相邻关系只允许
+`Box` 作为下部节点；任何 `HasAbove` 体量的初始 Domain 都会被硬约束为 `Box`。
+桥梁只有在自身没有上部体量时，才允许选择沿主跨度方向的 Prism。求解完成后还会再次
+检查该不变量，并以 `DAG5BV2RoofPrimitiveHasUpperVolume` fail closed，避免未来修改
+Domain 或传播规则时重新产生“棱柱上放棱锥”等明显不稳定的组合。
 
 ### 4.3 传播与回溯
 
@@ -357,12 +359,13 @@ ABTS.M73DAG.DAG5Bv2.
 
 本次证据：
 
-- `Saved/Logs/DAG5Bv2-20260731-142830-ForceUnity-Build.log`：
-  `-ForceUnity -DisableAdaptiveUnity` Development Editor，4 actions，Succeeded；
-- `Saved/Logs/DAG5Bv2-20260731-142900-FreshAutomation.log`：
-  fresh NullRHI，找到 5 项，5/5 Success，completion marker 为 0。
-- `Saved/Logs/DAG5Bv2-20260731-142945-M7Regression.log`：
-  完整 `ABTS.M7`，找到 71 项，71/71 Success，completion marker 为 0。
+- `Saved/Logs/DAG5Bv2RoofRule-20260731-155608-ForceUnity-Build.log`：
+  `-ForceUnity -DisableAdaptiveUnity` Development Editor，Succeeded；
+- `Saved/Logs/DAG5Bv2RoofRule-20260731-155416-FreshAutomation.log`：
+  fresh NullRHI，找到 6 项，6/6 Success；其中
+  `RoofPrimitiveTerminal` 覆盖四种 Archetype、每种 8 个 Seed。
+- `Saved/Logs/DAG5Bv2RoofRule-20260731-155524-M7Regression.log`：
+  完整 `ABTS.M7`，找到 72 项，72/72 Success。
 
 自动化只证明数据链、预算和确定性，不代替用户的 Editor 视觉验收。
 

@@ -749,16 +749,9 @@ namespace ABTSM73DAG5BV2
 	{
 		if (Type == EAdjacency::Vertical)
 		{
-			if (A == PyramidMask)
-			{
-				return false;
-			}
-			if ((A == PrismXMask || A == PrismYMask)
-				&& B != PyramidMask)
-			{
-				return false;
-			}
-			return true;
+			// Prism and pyramid volumes are terminal roof shapes. Only a box
+			// can be the lower endpoint of a vertical adjacency.
+			return A == BoxMask;
 		}
 		if (A == BoxMask || B == BoxMask
 			|| A == PyramidMask || B == PyramidMask)
@@ -1144,15 +1137,15 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 	{
 		const FABTSM73DAG5BV2Volume& Volume =
 			OutResult.Volumes[Index];
-		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Bridge)
+		if (HasAbove[Index])
+		{
+			Domains[Index] = BoxMask;
+		}
+		else if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Bridge)
 		{
 			const FVector Size = Volume.LocalBounds.GetSize();
 			Domains[Index] = BoxMask
 				| (Size.X >= Size.Y ? PrismXMask : PrismYMask);
-		}
-		else if (HasAbove[Index])
-		{
-			Domains[Index] = BoxMask | PrismXMask | PrismYMask;
 		}
 	}
 	if (Settings.bRequirePrimitiveVariety
@@ -1184,6 +1177,13 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 	{
 		FABTSM73DAG5BV2Volume& Volume = OutResult.Volumes[Index];
 		Volume.Primitive = MaskToPrimitive(Domains[Index]);
+		if (HasAbove[Index]
+			&& Volume.Primitive != EABTSM73DAG5BV2Primitive::Box)
+		{
+			OutError = TEXT("DAG5BV2RoofPrimitiveHasUpperVolume");
+			OutResult.Summary.RejectReason = OutError;
+			return false;
+		}
 		switch (Volume.Primitive)
 		{
 		case EABTSM73DAG5BV2Primitive::TriangularPrismX:

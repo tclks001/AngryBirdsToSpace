@@ -42,6 +42,47 @@ namespace ABTSM73DAG5BV2Tests
 			&& A.Primitive == B.Primitive
 			&& A.DerivationPath == B.DerivationPath;
 	}
+
+	float OverlapLength(
+		const double AMin,
+		const double AMax,
+		const double BMin,
+		const double BMax)
+	{
+		return FMath::Max(
+			0.0,
+			FMath::Min(AMax, BMax) - FMath::Max(AMin, BMin));
+	}
+
+	bool HasDirectUpperVolume(
+		const int32 LowerIndex,
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes)
+	{
+		const FBox& Lower = Volumes[LowerIndex].LocalBounds;
+		for (int32 UpperIndex = 0; UpperIndex < Volumes.Num(); ++UpperIndex)
+		{
+			if (UpperIndex == LowerIndex)
+			{
+				continue;
+			}
+			const FBox& Upper = Volumes[UpperIndex].LocalBounds;
+			if (FMath::Abs(Lower.Max.Z - Upper.Min.Z) <= 1.0
+				&& OverlapLength(
+					Lower.Min.X,
+					Lower.Max.X,
+					Upper.Min.X,
+					Upper.Max.X) > 1.0
+				&& OverlapLength(
+					Lower.Min.Y,
+					Lower.Max.Y,
+					Upper.Min.Y,
+					Upper.Max.Y) > 1.0)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -233,6 +274,73 @@ bool FABTSM73DAG5BV2BoundsAndBudgetTest::RunTest(
 				TEXT("Volume %d max inside target"),
 				Volume.VolumeId),
 			Target.IsInsideOrOn(Volume.LocalBounds.Max));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG5BV2RoofPrimitiveTerminalTest,
+	"ABTS.M73DAG.DAG5Bv2.RoofPrimitiveTerminal",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG5BV2RoofPrimitiveTerminalTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73DAG5BV2Tests;
+	for (int32 ArchetypeValue =
+			static_cast<int32>(
+				EABTSM73DAG5BV2Archetype::TerracedCitadel);
+			ArchetypeValue <= static_cast<int32>(
+				EABTSM73DAG5BV2Archetype::SpiredCampus);
+			++ArchetypeValue)
+	{
+		for (int32 SeedOffset = 0; SeedOffset < 8; ++SeedOffset)
+		{
+			FABTSM73DAG5BV2PreviewSettings Settings = MakeSettings();
+			Settings.Archetype =
+				static_cast<EABTSM73DAG5BV2Archetype>(ArchetypeValue);
+			Settings.BuildingSeed =
+				910000 + ArchetypeValue * 1000 + SeedOffset * 37;
+			FABTSM73DAG5BV2GenerationResult Result;
+			FString Error;
+			const bool bGenerated = Generate(Settings, Result, Error);
+			TestTrue(
+				FString::Printf(
+					TEXT("Archetype %d seed %d succeeds: %s"),
+					ArchetypeValue,
+					Settings.BuildingSeed,
+					*Error),
+				bGenerated);
+			if (!bGenerated)
+			{
+				continue;
+			}
+			for (int32 Index = 0; Index < Result.Volumes.Num(); ++Index)
+			{
+				const FABTSM73DAG5BV2Volume& Volume =
+					Result.Volumes[Index];
+				const bool bRoofPrimitive =
+					Volume.Primitive
+						== EABTSM73DAG5BV2Primitive::TriangularPrismX
+					|| Volume.Primitive
+						== EABTSM73DAG5BV2Primitive::TriangularPrismY
+					|| Volume.Primitive
+						== EABTSM73DAG5BV2Primitive::Pyramid;
+				if (bRoofPrimitive)
+				{
+					TestFalse(
+						FString::Printf(
+							TEXT(
+								"Archetype %d seed %d roof volume %d "
+								"is terminal"),
+							ArchetypeValue,
+							Settings.BuildingSeed,
+							Volume.VolumeId),
+						HasDirectUpperVolume(Index, Result.Volumes));
+				}
+			}
+		}
 	}
 	return true;
 }
