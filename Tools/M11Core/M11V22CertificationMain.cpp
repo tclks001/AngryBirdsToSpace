@@ -383,7 +383,7 @@ namespace
 		}
 		if (!std::isfinite(Out.ConstellationDistanceCM)
 			|| Out.ConstellationDistanceCM < 0.0
-			|| Out.ConstellationDistanceCM > 30000.0)
+			|| Out.ConstellationDistanceCM > 120000.0)
 		{
 			Failure = "ConstellationDistanceOutsideDiagnosticLimit";
 			return false;
