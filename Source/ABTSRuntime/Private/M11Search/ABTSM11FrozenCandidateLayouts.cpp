@@ -83,7 +83,41 @@ namespace ABTS::M11Search
 			Layout.Scenario.Target.GeometricContactCenterCM += Offset;
 		}
 
-		constexpr std::array<FrozenCandidateIdentity, 7> Identities = {{
+		void ApplyRank8Radial5900ConstrainedAngularCandidate1(
+			CandidateLayout& Layout)
+		{
+			constexpr double RadialDeltaCM = 5900.0;
+			for (std::size_t BodyIndex = 1;
+				BodyIndex < Layout.Scenario.Bodies.size(); ++BodyIndex)
+			{
+				M11Core::Vec3d& Center =
+					Layout.Scenario.Bodies[BodyIndex].CenterCM;
+				const M11Core::Vec3d Direction =
+					(Center - Layout.Launch.PouchLocalPositionCM)
+						.GetSafeNormal();
+				Center += Direction * RadialDeltaCM;
+			}
+			const M11Core::Vec3d TargetDirection =
+				(Layout.Scenario.Target.CenterCM
+					- Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+			const M11Core::Vec3d TargetRadialOffset =
+				TargetDirection * RadialDeltaCM;
+			Layout.Scenario.Target.CenterCM += TargetRadialOffset;
+			Layout.Scenario.Target.GeometricContactCenterCM +=
+				TargetRadialOffset;
+
+			Layout.Scenario.Bodies[2].CenterCM +=
+				M11Core::Vec3d(283.688, -687.363, -735.963);
+			Layout.Scenario.Bodies[3].CenterCM +=
+				M11Core::Vec3d(-212.291, 1193.330, -181.954);
+			const M11Core::Vec3d TargetOffset(
+				-2258.116, 1200.834, 1315.387);
+			Layout.Scenario.Target.CenterCM += TargetOffset;
+			Layout.Scenario.Target.GeometricContactCenterCM += TargetOffset;
+			Layout.NominalInput = LaunchInput{-1.25, 30.375, 1.0};
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 8> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -105,6 +139,11 @@ namespace ABTS::M11Search
 			// unchanged; the score field carries its refined-grid evidence hash.
 			{9, 22ull, 0x166f0aa067d54328ull, 0x11e775a2b20e0b64ull,
 				0x22675cdfb00406d5ull, 0xa9bd918ee812d572ull},
+			// Rank 8 with a 5900 cm per-body radial shift and constrained
+			// downstream angular repair. The score field carries the local
+			// three-dimensional closure evidence hash; it is not certified.
+			{10, 23ull, 0x2b06db2cf348d75full, 0xa1d91650dc3d3f36ull,
+				0x99012cedf3d01c06ull, 0x22c3f67f46d49e70ull},
 		}};
 	}
 
@@ -119,7 +158,7 @@ namespace ABTS::M11Search
 			*OutIdentity = FrozenCandidateIdentity();
 		}
 		const std::int32_t SourceRank =
-			Rank == 7 || Rank == 8 || Rank == 9 ? 3 : Rank;
+			Rank == 7 || Rank == 8 || Rank == 9 || Rank == 10 ? 3 : Rank;
 		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
@@ -136,6 +175,11 @@ namespace ABTS::M11Search
 		{
 			ApplyRank3F3ExpansionCandidate21(OutLayout);
 			TranslateConstellationAwayFromPouch(OutLayout, 100.0);
+		}
+		else if (Rank == 10)
+		{
+			ApplyRank3F3ExpansionCandidate21(OutLayout);
+			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);
 		}
 		for (const FrozenCandidateIdentity& Identity : Identities)
 		{

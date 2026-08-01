@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -78,6 +79,9 @@ namespace
 			std::numeric_limits<double>::quiet_NaN();
 		double ArrivalConeDegrees = 180.0;
 		double ArrivalFaceConeDegrees = 180.0;
+		double NominalYawDegrees = std::numeric_limits<double>::quiet_NaN();
+		double NominalPitchDegrees = std::numeric_limits<double>::quiet_NaN();
+		double NominalPower = std::numeric_limits<double>::quiet_NaN();
 		std::uint32_t CheckpointEvery = 256;
 		std::uint32_t ScreenAimSampleCount = 5000;
 		bool Resume = false;
@@ -384,6 +388,18 @@ namespace
 			{
 				Out.ArrivalFaceConeDegrees = Number;
 			}
+			else if (Key == "--nominal-yaw" && ParseDouble(Value, Number))
+			{
+				Out.NominalYawDegrees = Number;
+			}
+			else if (Key == "--nominal-pitch" && ParseDouble(Value, Number))
+			{
+				Out.NominalPitchDegrees = Number;
+			}
+			else if (Key == "--nominal-power" && ParseDouble(Value, Number))
+			{
+				Out.NominalPower = Number;
+			}
 			else
 			{
 				Failure = "InvalidOption:" + Key;
@@ -603,6 +619,18 @@ namespace
 		{
 			Layout.Scenario.Target.MinimumQualifyingCorridorQuality =
 				OptionsValue.TargetMinimumCorridorQuality;
+		}
+		if (std::isfinite(OptionsValue.NominalYawDegrees))
+		{
+			Layout.NominalInput.YawDegrees = OptionsValue.NominalYawDegrees;
+		}
+		if (std::isfinite(OptionsValue.NominalPitchDegrees))
+		{
+			Layout.NominalInput.PitchDegrees = OptionsValue.NominalPitchDegrees;
+		}
+		if (std::isfinite(OptionsValue.NominalPower))
+		{
+			Layout.NominalInput.Power = OptionsValue.NominalPower;
 		}
 	}
 
@@ -1499,6 +1527,34 @@ namespace
 		return Result;
 	}
 
+	std::uint64_t ComputeDiagnosticRequestHash(
+		const std::uint64_t CandidateSourceHash,
+		const ABTS::M11Core::TrajectoryRequest& Request)
+	{
+		std::uint64_t Hash =
+			CandidateSourceHash ^ 0xcbf29ce484222325ull;
+		const auto Add64 = [&Hash](const std::uint64_t Value)
+		{
+			for (std::int32_t ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+			{
+				Hash ^= static_cast<std::uint8_t>(
+					Value >> (ByteIndex * 8));
+				Hash *= 1099511628211ull;
+			}
+		};
+		Add64(std::bit_cast<std::uint64_t>(Request.InitialPositionCM.X));
+		Add64(std::bit_cast<std::uint64_t>(Request.InitialPositionCM.Y));
+		Add64(std::bit_cast<std::uint64_t>(Request.InitialPositionCM.Z));
+		Add64(std::bit_cast<std::uint64_t>(
+			Request.InitialVelocityCMPerSec.X));
+		Add64(std::bit_cast<std::uint64_t>(
+			Request.InitialVelocityCMPerSec.Y));
+		Add64(std::bit_cast<std::uint64_t>(
+			Request.InitialVelocityCMPerSec.Z));
+		Add64(Request.Config.EnabledAssistMask);
+		return Hash;
+	}
+
 	int RunScreenAim(const Options& OptionsValue)
 	{
 		CandidateLayout Layout;
@@ -1520,6 +1576,21 @@ namespace
 		ApplyDiagnosticOffsets(OptionsValue, Layout);
 		const std::uint64_t VariantSourceHash =
 			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
+		ABTS::M11Core::TrajectoryRequest NominalRequest;
+		CandidateRecord NominalReplay;
+		NominalReplay.Layout = Layout;
+		ABTS::M11Core::TrajectoryResult NominalResult;
+		std::string NominalFailure;
+		if (!Layout.BuildRequest(
+				Layout.NominalInput, 0x7u, NominalRequest, &NominalFailure)
+			|| !CandidateSearch::ReplayCandidate(
+				NominalReplay, 0x7u, NominalResult, &NominalFailure))
+		{
+			std::cerr << "NominalIdentityUnavailable:" << NominalFailure << '\n';
+			return 1;
+		}
+		const std::uint64_t NominalRequestHash =
+			ComputeDiagnosticRequestHash(VariantSourceHash, NominalRequest);
 		std::error_code Error;
 		fs::create_directories(OptionsValue.Output, Error);
 		if (Error)
@@ -1589,6 +1660,10 @@ namespace
 			<< "{\n  \"schema\":\"abts.m11b.v2_2.screen_aim.v1\",\n"
 			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
 			<< "  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
+			<< "\",\n  \"nominalRequestHash\":\""
+			<< Hex64(NominalRequestHash)
+			<< "\",\n  \"nominalResultHash\":\""
+			<< Hex64(NominalResult.ValidationHash)
 			<< "\",\n  \"sampleCount\":"
 			<< OptionsValue.ScreenAimSampleCount << ",\n"
 			<< "  \"seed\":" << Contract.ScreenAimSeed << ",\n"

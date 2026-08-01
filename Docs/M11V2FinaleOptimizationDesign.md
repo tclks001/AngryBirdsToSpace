@@ -136,7 +136,7 @@ C v2.1 增加显式开发候选模式，用于在 PIE 中完成：
 - 目标选择的昂贵轨迹几何只在 `ResultHash + LatchedTarget` 改变时重建，PIP 的 Scene Capture 只在首次有效结果或目标切换时捕获，当前轨迹由 HUD 叠加；
 - 对候选成功岛宽度、三次转向可读性、节奏、镜头和前缀成功集稳定器手感的人工验收。
 
-候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中当前 Rank 1–2 是保留的 v3 基线、Rank 3–6 是 v4 手感候选、Rank 7 是由 Rank 3 派生的上游映射候选 353、Rank 8 是候选 353 的 F3 扩大与严格 F4 单岛微调、Rank 9 则保持 Rank 8 四天体相对位置不变并把整个星群沿弹弓至行星①方向远移 100 cm，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。Rank 7 仅供研究：其名义轨迹在 Assist3 Exit 前已经 TargetHit，不满足正式运行时 F4 事件顺序；Rank 8/9 同样保持 Candidate / NOT CERTIFIED，不替换 production Rank 0。
+候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中当前 Rank 1–2 是保留的 v3 基线、Rank 3–6 是 v4 手感候选、Rank 7 是由 Rank 3 派生的上游映射候选 353、Rank 8 是候选 353 的 F3 扩大与严格 F4 单岛微调、Rank 9 保持 Rank 8 四天体相对位置不变并把整个星群沿弹弓至行星①方向远移 100 cm、Rank 10 则把四天体分别径向外移 5900 cm 并以不超过约 1.3° 的下游角向修复恢复四级单岛收缩，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。Rank 7 仅供研究：其名义轨迹在 Assist3 Exit 前已经 TargetHit，不满足正式运行时 F4 事件顺序；Rank 8–10 同样保持 Candidate / NOT CERTIFIED，不替换 production Rank 0。
 
 候选模式必须由 `WITH_EDITOR`、显式开发开关或等价 fail-closed 边界隔离；Shipping/正式 Standalone 不得加载 Candidate。v2.1 可使用局部快速扫描生成的临时 Trust Region 测试降敏和边界感，但它不能作为最终认证 Trust Region，也不能进入生产 Bundle。
 
@@ -719,9 +719,9 @@ Bundle Hash、未加入 PIE Rank 或生产绑定。参数与后续完整认证�
 `21997 → 11375 → 5149 → 2569`，四层均为单一完整分量，Hash 为
 `0x22c3f67f46d49e70`。这证明最大功率结果没有隐藏成 Power 维碎片；但最低前缀 Power
 仍落在扫描下界 0.875，符合本轮“放宽 F1 Power 限制”的前提。原 Rank 8 nominal
-输入不再属于 F4，因此该结果只冻结为研究候选，不加入 Rank/PIE：后续若用户认可
-手感，必须先选择新的 nominal 输入，再执行完整输入域、消融、旁路和 Trust Region
-认证。
+输入不再属于 F4，因此 Rank 10 改用已验证的代表输入
+`Yaw=-1.25° / Pitch=30.375° / Power=1`，并作为 Editor-only 研究候选加入 PIE
+列表末尾。它仍未执行完整输入域、消融、旁路和 Trust Region 认证。
 
 按正式 ScreenAim 口径在完整 `Yaw[-18°,18°] × Pitch[0°,60°]` 上执行满功率
 5000 点固定种子 Halton 采样，得到 `392 → 115 → 27 → 15`，条件比例为

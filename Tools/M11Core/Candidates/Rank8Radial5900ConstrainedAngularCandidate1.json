@@ -3,7 +3,7 @@
   "status": "candidate_not_certified",
   "baseCandidateRank": 8,
   "baseCandidateSourceHash": "0x617687274ed0c29a",
-  "variantSourceHash": "0x0252795f250eea18",
+  "variantSourceHash": "0x2b06db2cf348d75f",
   "searchStage": "rank8_radial_5900_constrained_angular_repair",
   "searchCandidateIndex": 1,
   "celestialRadialDeltaCM": [5900.0, 5900.0, 5900.0, 5900.0],
@@ -11,6 +11,14 @@
   "assist3OffsetCM": [-212.291, 1193.330, -181.954],
   "targetOffsetCM": [-2258.116, 1200.834, 1315.387],
   "angularDeviationDegrees": [0.0, 1.249, 0.717, 1.259],
+  "catalogBinding": {
+    "candidateRank": 10,
+    "globalWorkIndex": 23,
+    "nominalInput": {"yawDegrees": -1.25, "pitchDegrees": 30.375, "power": 1.0},
+    "nominalRequestHash": "0xa1d91650dc3d3f36",
+    "nominalResultHash": "0x99012cedf3d01c06",
+    "scoreEvidenceHash": "0x22c3f67f46d49e70"
+  },
   "screenAimEvidence": {
     "sampling": "fixed-seed-halton-yaw-pitch-at-maximum-power",
     "seed": 4750135298,
@@ -55,7 +63,7 @@
   },
   "notes": [
     "F1 Power 0.88 threshold is intentionally relaxed for this research candidate.",
-    "The frozen Rank 8 nominal input is outside F4; binding requires selecting and freezing a new nominal input.",
+    "Rank 10 freezes the verified representative F4 input as its Editor-only nominal input.",
     "No full-domain certification, ablation audit, trust region, or PIE binding has been performed."
   ],
   "certificationHash": "0x0000000000000000",
