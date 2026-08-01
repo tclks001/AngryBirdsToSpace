@@ -1,6 +1,6 @@
 # M11-B v2.1：条件粒子束逐星构造器（Additive Search v4）
 
-> 状态：**Additive Search v4 构造器已实现，并完成 4 个正式种子的标准 C++ 搜索取样（3 个成功、1 个在第三阶段正常无解退出）**。v4 只新增候选构造路径；最终接受仍调用冻结的 Search v3 候选审计。4 个原始入选布局位于 Editor-only Candidate Catalog 的 Rank 3–6；Rank 3 上游映射候选 353 追加为 Rank 7，供 M11-C v2.1 PIE 手感比较。它们仍全部是 `Candidate / NOT CERTIFIED`，没有替换当前 v3 Rank 1/2，也没有进入 production 绑定。
+> 状态：**Additive Search v4 构造器已实现，并完成 4 个正式种子的标准 C++ 搜索取样（3 个成功、1 个在第三阶段正常无解退出）**。v4 只新增候选构造路径；最终接受仍调用冻结的 Search v3 候选审计。4 个原始入选布局位于 Editor-only Candidate Catalog 的 Rank 3–6；Rank 3 上游映射候选 353 追加为 Rank 7，其 F3 扩大与严格 F4 单岛微调追加为 Rank 8，供 M11-C v2.1 PIE 手感比较。它们仍全部是 `Candidate / NOT CERTIFIED`，没有替换当前 v3 Rank 1/2，也没有进入 production 绑定。
 >
 > 父级：[M11-B v2.1 标准 C++ 候选布局搜索](M11B21CandidateSearchDesign.md) · [M11 v2 终局优化总设计](M11V2FinaleOptimizationDesign.md)
 >
@@ -266,7 +266,7 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
 
 仍有四项明确限制：
 
-- v4 原始候选已作为 Editor-only Rank 3–6 写入 Candidate Catalog，候选 353 追加为 Rank 7；Rank 1/2 仍保留为 v3 基线，Rank 0 仍是 production Certified v1；
+- v4 原始候选已作为 Editor-only Rank 3–6 写入 Candidate Catalog，候选 353 追加为 Rank 7，F3 扩大微调追加为 Rank 8；Rank 1/2 仍保留为 v3 基线，Rank 0 仍是 production Certified v1；
 - 没有完成 M11-C v2.1 有渲染 PIE，故“手感”只通过数值代理；
 - 5000 点 Monte Carlo 与凸包不证明唯一连通分量，也不证明 Hull 内部处处成功；
 - 没有执行 M11-B v2.2 的完整 `Yaw × Pitch × Power` 认证、边界细化、错序/迟到排除与全消融唯一性证明。
@@ -297,6 +297,7 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
 | `abts.M11.CandidateRank 5` | v4 `0xcdc6e41075d99493` |
 | `abts.M11.CandidateRank 6` | v4 `0x80d274a67e1e9944` |
 | `abts.M11.CandidateRank 7` | Rank 3 上游映射候选 353 `0xb3e0f00ca35d499a`；Core 临时分类下 half-cell F4 单连通岛，但名义轨迹为 TargetHit 早于 Assist3 Exit，仅供 PIE 研究 |
+| `abts.M11.CandidateRank 8` | 候选 353 的 F3 扩大微调 `0x617687274ed0c29a`；严格 half-cell 为 `27713→20976→1538→480`，F4 单连通，仍未完成完整认证 |
 
 Rank 3–7 冻结完整布局与 Candidate 身份，PIE 启动时只做结构和
 Candidate Source Hash 校验，不重新执行粒子束搜索。修改 Rank 后必须停止并重启

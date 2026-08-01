@@ -30,7 +30,7 @@ namespace
 		uint64 ScoreHash;
 	};
 
-	constexpr std::array<FFrozenCandidateIdentity, 7> FrozenCandidates = {{
+	constexpr std::array<FFrozenCandidateIdentity, 8> FrozenCandidates = {{
 		{
 			1,
 			2278ull,
@@ -79,7 +79,14 @@ namespace
 			0xb3e0f00ca35d499aull,
 			0x48ffe272661916b2ull,
 			0xe7c6c093e3cc9533ull,
-			0x0baef62a673e8e55ull}
+			0x0baef62a673e8e55ull},
+		{
+			8,
+			21ull,
+			0x617687274ed0c29aull,
+			0xa2a41077916aadb2ull,
+			0xaac8ba98079011fdull,
+			0xb77f6d2f3f954005ull}
 	}};
 
 	bool Reject(FString* OutFailure, const FString& Reason)

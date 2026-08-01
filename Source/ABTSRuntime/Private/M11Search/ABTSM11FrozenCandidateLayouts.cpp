@@ -37,7 +37,36 @@ namespace ABTS::M11Search
 				M11Core::Vec3d(-955.286, 1384.235, -1302.886);
 		}
 
-		constexpr std::array<FrozenCandidateIdentity, 5> Identities = {{
+		void ApplyRank3F3ExpansionCandidate21(CandidateLayout& Layout)
+		{
+			Layout.Scenario.Target.CenterCM +=
+				M11Core::Vec3d(2375.775, 2202.028, -8743.864);
+			Layout.Scenario.Target.GeometricContactCenterCM +=
+				M11Core::Vec3d(2375.775, 2202.028, -8743.864);
+			Layout.Scenario.Target.HitRadiusCM = 6000.0;
+
+			M11Core::GravityBodySpec& Assist2 = Layout.Scenario.Bodies[2];
+			Assist2.CenterCM +=
+				M11Core::Vec3d(-1344.726, 1739.712, -1105.200);
+			Assist2.BPlaneTargetTCM += -48.730;
+			Assist2.BPlaneTargetRCM += -1327.573;
+			Assist2.BPlaneSigmaTCM *= 0.857348;
+			Assist2.BPlaneSigmaRCM *= 0.857348;
+			Assist2.VirtualOrbitalVelocityCMPerSec +=
+				M11Core::Vec3d(80.096, -225.197, 77.338);
+
+			M11Core::GravityBodySpec& Assist3 = Layout.Scenario.Bodies[3];
+			Assist3.CenterCM +=
+				M11Core::Vec3d(2117.187, -1860.906, -88.000);
+			Assist3.BPlaneTargetTCM += 86.735;
+			Assist3.BPlaneTargetRCM += 2102.742;
+			Assist3.BPlaneSigmaTCM *= 1.133051;
+			Assist3.BPlaneSigmaRCM *= 1.133051;
+			Assist3.VirtualOrbitalVelocityCMPerSec +=
+				M11Core::Vec3d(-881.321, 1399.806, -1318.121);
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 6> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -50,6 +79,10 @@ namespace ABTS::M11Search
 			// half-cell aggregate evidence hash; it is not a certified score.
 			{7, 353ull, 0xb3e0f00ca35d499aull, 0x48ffe272661916b2ull,
 				0xe7c6c093e3cc9533ull, 0x0baef62a673e8e55ull},
+			// Candidate 353 F3-expansion research successor. The score field
+			// carries its strict half-cell aggregate evidence hash.
+			{8, 21ull, 0x617687274ed0c29aull, 0xa2a41077916aadb2ull,
+				0xaac8ba98079011fdull, 0xb77f6d2f3f954005ull},
 		}};
 	}
 
@@ -63,7 +96,7 @@ namespace ABTS::M11Search
 		{
 			*OutIdentity = FrozenCandidateIdentity();
 		}
-		const std::int32_t SourceRank = Rank == 7 ? 3 : Rank;
+		const std::int32_t SourceRank = Rank == 7 || Rank == 8 ? 3 : Rank;
 		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
@@ -71,6 +104,10 @@ namespace ABTS::M11Search
 		if (Rank == 7)
 		{
 			ApplyRank3UpstreamCandidate353(OutLayout);
+		}
+		else if (Rank == 8)
+		{
+			ApplyRank3F3ExpansionCandidate21(OutLayout);
 		}
 		for (const FrozenCandidateIdentity& Identity : Identities)
 		{

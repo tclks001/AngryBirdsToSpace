@@ -660,6 +660,11 @@ CLI 将 F4 收紧为 `Assist3 Exit` 之后发生 `TargetHit`，避免把第三�
 F4。F3 仍含一个 1536 点主分量和两个边界样本，因此该结果仍是研究候选，不能
 写入 Certified Bundle，也不替换 Rank 0。
 
+该研究候选以 Editor-only `abts.M11.CandidateRank 8` 追加到列表末尾。Rank 7
+继续保留候选 353 原始体验，便于同一 PIE 环境直接比较；Rank 8 的冻结身份为
+`Source=0x617687274ed0c29a`、`NominalResult=0xaac8ba98079011fd`。它仍显示
+`Candidate / NOT CERTIFIED`，不得被运行时默认选择。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`
