@@ -51,6 +51,7 @@ namespace
 		double TargetOffsetYCM = 0.0;
 		double TargetOffsetZCM = 0.0;
 		double ConstellationDistanceCM = 0.0;
+		std::array<double, 4> CelestialRadialDeltaCM{};
 		double Assist3OffsetXCM = 0.0;
 		double Assist3OffsetYCM = 0.0;
 		double Assist3OffsetZCM = 0.0;
@@ -249,6 +250,26 @@ namespace
 			{
 				Out.ConstellationDistanceCM = Number;
 			}
+			else if (Key == "--assist1-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[0] = Number;
+			}
+			else if (Key == "--assist2-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[1] = Number;
+			}
+			else if (Key == "--assist3-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[2] = Number;
+			}
+			else if (Key == "--target-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[3] = Number;
+			}
 			else if (Key == "--target-hit-radius" && ParseDouble(Value, Number))
 			{
 				Out.TargetHitRadiusCM = Number;
@@ -388,6 +409,16 @@ namespace
 			Failure = "ConstellationDistanceOutsideDiagnosticLimit";
 			return false;
 		}
+		for (const double RadialDeltaCM : Out.CelestialRadialDeltaCM)
+		{
+			if (!std::isfinite(RadialDeltaCM)
+				|| RadialDeltaCM < -120000.0
+				|| RadialDeltaCM > 120000.0)
+			{
+				Failure = "CelestialRadialDeltaOutsideDiagnosticLimit";
+				return false;
+			}
+		}
 		const double Assist3OffsetSquared =
 			Out.Assist3OffsetXCM * Out.Assist3OffsetXCM
 			+ Out.Assist3OffsetYCM * Out.Assist3OffsetYCM
@@ -497,6 +528,22 @@ namespace
 		}
 		Layout.Scenario.Target.CenterCM += ConstellationOffset;
 		Layout.Scenario.Target.GeometricContactCenterCM += ConstellationOffset;
+		for (std::size_t AssistIndex = 0; AssistIndex < 3; ++AssistIndex)
+		{
+			ABTS::M11Core::Vec3d& Center =
+				Layout.Scenario.Bodies[AssistIndex + 1].CenterCM;
+			const ABTS::M11Core::Vec3d Direction =
+				(Center - Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+			Center += Direction
+				* OptionsValue.CelestialRadialDeltaCM[AssistIndex];
+		}
+		const ABTS::M11Core::Vec3d TargetDirection =
+			(Layout.Scenario.Target.CenterCM
+				- Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+		const ABTS::M11Core::Vec3d TargetRadialOffset = TargetDirection
+			* OptionsValue.CelestialRadialDeltaCM[3];
+		Layout.Scenario.Target.CenterCM += TargetRadialOffset;
+		Layout.Scenario.Target.GeometricContactCenterCM += TargetRadialOffset;
 		const ABTS::M11Core::Vec3d Offset{
 			OptionsValue.TargetOffsetXCM,
 			OptionsValue.TargetOffsetYCM,
@@ -690,6 +737,11 @@ namespace
 			<< Hex64(VariantSourceHash) << "\",\n"
 			<< "  \"constellationDistanceCM\":"
 			<< OptionsValue.ConstellationDistanceCM << ",\n"
+			<< "  \"celestialRadialDeltaCM\":["
+			<< OptionsValue.CelestialRadialDeltaCM[0] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[1] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[2] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[3] << "],\n"
 			<< "  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
@@ -1043,6 +1095,11 @@ namespace
 			<< "\",\n  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
 			<< "\",\n  \"constellationDistanceCM\":"
 			<< OptionsValue.ConstellationDistanceCM
+			<< ",\n  \"celestialRadialDeltaCM\":["
+			<< OptionsValue.CelestialRadialDeltaCM[0] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[1] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[2] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[3] << ']'
 			<< ",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
