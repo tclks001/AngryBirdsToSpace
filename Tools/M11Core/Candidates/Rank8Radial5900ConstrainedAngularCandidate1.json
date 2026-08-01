@@ -1,0 +1,51 @@
+{
+  "schema": "abts.m11b.v2_2.research_candidate.v1",
+  "status": "candidate_not_certified",
+  "baseCandidateRank": 8,
+  "baseCandidateSourceHash": "0x617687274ed0c29a",
+  "variantSourceHash": "0x0252795f250eea18",
+  "searchStage": "rank8_radial_5900_constrained_angular_repair",
+  "searchCandidateIndex": 1,
+  "celestialRadialDeltaCM": [5900.0, 5900.0, 5900.0, 5900.0],
+  "assist2OffsetCM": [283.688, -687.363, -735.963],
+  "assist3OffsetCM": [-212.291, 1193.330, -181.954],
+  "targetOffsetCM": [-2258.116, 1200.834, 1315.387],
+  "angularDeviationDegrees": [0.0, 1.249, 0.717, 1.259],
+  "maximumPowerClosureEvidence": {
+    "grid": {
+      "yaw": [-4.0, 2.0, 0.25],
+      "pitch": [19.5, 34.5, 0.375],
+      "power": [1.0, 1.0, 0.1]
+    },
+    "sampleCount": 1025,
+    "prefixCounts": [481, 249, 124, 62],
+    "conditionalRatios": [0.469268, 0.517672, 0.497992, 0.5],
+    "componentCounts": [1, 1, 1, 1],
+    "representativeF4Input": [-1.25, 30.375, 1.0],
+    "representativeFlightTimeSeconds": 33.659822,
+    "representativeAssistDurationsSeconds": [6.636815, 6.405628, 5.908180],
+    "representativeAssistDeflectionsRadians": [0.421203, 0.568261, 1.160843]
+  },
+  "threeDimensionalClosureEvidence": {
+    "grid": {
+      "yaw": [-4.0, 2.0, 0.25],
+      "pitch": [19.5, 34.5, 0.375],
+      "power": [0.875, 1.0, 0.003125]
+    },
+    "sampleCount": 42025,
+    "prefixCounts": [21997, 11375, 5149, 2569],
+    "componentCounts": [1, 1, 1, 1],
+    "largestComponentSizes": [21997, 11375, 5149, 2569],
+    "minimumPowerIndices": [0, 0, 0, 0],
+    "nominalF4": false,
+    "nestingViolations": 0,
+    "aggregateSampleHash": "0x22c3f67f46d49e70"
+  },
+  "notes": [
+    "F1 Power 0.88 threshold is intentionally relaxed for this research candidate.",
+    "The frozen Rank 8 nominal input is outside F4; binding requires selecting and freezing a new nominal input.",
+    "No full-domain certification, ablation audit, trust region, or PIE binding has been performed."
+  ],
+  "certificationHash": "0x0000000000000000",
+  "certifiedBundleHash": "0x0000000000000000"
+}

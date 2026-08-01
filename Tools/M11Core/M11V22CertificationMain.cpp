@@ -23,6 +23,7 @@ namespace
 {
 	namespace fs = std::filesystem;
 	using ABTS::M11Search::CandidateLayout;
+	using ABTS::M11Search::CandidateRecord;
 	using ABTS::M11Search::CandidateSearch;
 	using ABTS::M11Search::CandidateSearchContract;
 	using ABTS::M11Search::FrozenCandidateIdentity;
@@ -1082,6 +1083,45 @@ namespace
 				+ static_cast<std::uint64_t>(NominalPower);
 			NominalF4 = (Samples[NominalIndex].PrefixMask & 8u) != 0;
 		}
+		bool HasRepresentativeF4 = false;
+		LaunchInput RepresentativeInput;
+		double RepresentativeDistance =
+			std::numeric_limits<double>::infinity();
+		for (const Sample& Value : Samples)
+		{
+			if ((Value.PrefixMask & 8u) == 0)
+			{
+				continue;
+			}
+			const LaunchInput Input = InputFor(GridValue, Value);
+			const double YawDelta = Input.YawDegrees
+				- Layout.NominalInput.YawDegrees;
+			const double PitchDelta = Input.PitchDegrees
+				- Layout.NominalInput.PitchDegrees;
+			const double PowerDelta = (Input.Power
+				- Layout.NominalInput.Power) * 20.0;
+			const double Distance = YawDelta * YawDelta
+				+ PitchDelta * PitchDelta + PowerDelta * PowerDelta;
+			if (Distance < RepresentativeDistance)
+			{
+				RepresentativeDistance = Distance;
+				RepresentativeInput = Input;
+				HasRepresentativeF4 = true;
+			}
+		}
+		ABTS::M11Core::TrajectoryPacingDiagnostics RepresentativePacing;
+		if (HasRepresentativeF4)
+		{
+			CandidateRecord Replay;
+			Replay.Layout = Layout;
+			Replay.Layout.NominalInput = RepresentativeInput;
+			ABTS::M11Core::TrajectoryResult Result;
+			std::string ReplayFailure;
+			HasRepresentativeF4 = CandidateSearch::ReplayCandidate(
+				Replay, 0x7u, Result, &ReplayFailure)
+				&& Result.BuildPacingDiagnostics(
+					RepresentativePacing, &ReplayFailure);
+		}
 		const bool Passed = PrefixCounts[3] > 0 && NominalF4
 			&& Components.Count[3] == 1 && NestingViolations == 0;
 		std::ofstream Summary(
@@ -1164,6 +1204,22 @@ namespace
 			<< Components.LargestSize[2] << ','
 			<< Components.LargestSize[3] << "],\n"
 			<< "  \"nominalF4\":" << (NominalF4 ? "true" : "false") << ",\n"
+			<< "  \"representativeF4Available\":"
+			<< (HasRepresentativeF4 ? "true" : "false") << ",\n"
+			<< "  \"representativeF4Input\":["
+			<< RepresentativeInput.YawDegrees << ','
+			<< RepresentativeInput.PitchDegrees << ','
+			<< RepresentativeInput.Power << "],\n"
+			<< "  \"representativeFlightTimeSeconds\":"
+			<< RepresentativePacing.TotalFlightTimeSeconds << ",\n"
+			<< "  \"representativeAssistDurationsSeconds\":["
+			<< RepresentativePacing.Assists[0].InfluenceDurationSeconds << ','
+			<< RepresentativePacing.Assists[1].InfluenceDurationSeconds << ','
+			<< RepresentativePacing.Assists[2].InfluenceDurationSeconds << "],\n"
+			<< "  \"representativeAssistDeflectionsRadians\":["
+			<< RepresentativePacing.Assists[0].ActualDeflectionRadians << ','
+			<< RepresentativePacing.Assists[1].ActualDeflectionRadians << ','
+			<< RepresentativePacing.Assists[2].ActualDeflectionRadians << "],\n"
 			<< "  \"minimumPowerIndices\":[" << MinimumPowerIndex[0] << ','
 			<< MinimumPowerIndex[1] << ',' << MinimumPowerIndex[2] << ','
 			<< MinimumPowerIndex[3] << "],\n  \"maximumPowerIndices\":["
