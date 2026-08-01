@@ -118,6 +118,12 @@ def run_candidate(
     bp = candidate["bPlaneDeltaCM"]
     velocity = candidate["velocityDeltaCMPerSec"]
     target = candidate["targetOffsetCM"]
+    a2 = candidate.get("assist2OffsetCM", [0.0, 0.0, 0.0])
+    bp2 = candidate.get("assist2BPlaneDeltaCM", [0.0, 0.0])
+    sigma2 = candidate.get("assist2BPlaneSigmaScale", 1.0)
+    velocity2 = candidate.get(
+        "assist2VelocityDeltaCMPerSec", [0.0, 0.0, 0.0]
+    )
     common = [
         "--rank", "3", "--threads", str(threads),
         "--shard-index", "0", "--shard-count", "1",
@@ -129,6 +135,15 @@ def run_candidate(
         "--target-offset-y", str(target[1]),
         "--target-offset-z", str(target[2]),
         "--target-hit-radius", "12000",
+        "--assist2-offset-x", str(a2[0]),
+        "--assist2-offset-y", str(a2[1]),
+        "--assist2-offset-z", str(a2[2]),
+        "--assist2-bplane-t-delta", str(bp2[0]),
+        "--assist2-bplane-r-delta", str(bp2[1]),
+        "--assist2-bplane-sigma-scale", str(sigma2),
+        "--assist2-velocity-delta-x", str(velocity2[0]),
+        "--assist2-velocity-delta-y", str(velocity2[1]),
+        "--assist2-velocity-delta-z", str(velocity2[2]),
         "--assist3-offset-x", str(a3[0]),
         "--assist3-offset-y", str(a3[1]),
         "--assist3-offset-z", str(a3[2]),

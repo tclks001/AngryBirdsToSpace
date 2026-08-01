@@ -600,6 +600,47 @@ TargetHitRadiusCM = 12000
 行星③之前的上游映射或引入新的、可证明连续的末段控制变量，而不是在当前局部
 参数盆地继续缩小步长。
 
+### 7.9 行星②上游映射搜索与单岛候选 353（2026-08-01）
+
+在 7.8 末段候选 131 的行星③/UFO 参数保持不变时，本轮进一步开放行星②的
+局部中心、B-plane T/R、Sigma 和虚拟动量共 9 个维度。固定 Halton 全域 384 组
+搜索产生三个 5733 点 F4 单岛候选；围绕其中最宽的候选 80 再搜索 512 组，产生
+四个新的 5733 点单岛候选。
+
+跨尺度复核结果如下：
+
+| 候选 | 5733 点 | 42025 点 F4 | 半步结论 |
+| --- | --- | --- | --- |
+| 全域 80 | `203 / Components=1` | `1601 / Components=8 / Fragments=8` | 粗层假单岛 |
+| 全域 86 | `188 / 1` | `1543 / 4 / 11` | 粗层假单岛 |
+| 全域 142 | `102 / 1` | `782 / 3 / 8` | 粗层假单岛 |
+| 局部 39 | `173 / 1` | `1327 / 4 / 4` | 改善但未通过 |
+| **局部 353** | `129 / 1` | **`1004 / 1 / 0`** | **跨尺度单岛** |
+
+候选 353 的半步扫描还满足：`F1/F2/F3/F4=27713/20976/1491/1004`、
+F1/F2 单连通、名义输入在 F4、NestingViolations=0。F3 全域有 6 个分量，但其中
+只有一个分量进入唯一 F4；正式认证仍需在主成功族周围完成前缀信赖域闭包，并审计
+其余 F3 分量不能通过边界精化重新进入第二个 F4 岛。
+
+同一 42025 点扫描分别以 12 线程和 6 线程、独立输出目录运行，两次均
+`Passed=true`，AggregateSampleHash 均为 `0x0baef62a673e8e55`。候选身份为：
+
+```text
+BaseCandidateSourceHash = 0xed74ffaf0de8028f
+VariantSourceHash = 0xb3e0f00ca35d499a
+Assist2OffsetCM = (-1344.726, 1739.712, -1105.200)
+Assist2BPlaneDeltaCM = (-48.730, -1327.573)
+Assist2BPlaneSigmaScale = 0.857348
+Assist2VelocityDeltaCMPerSec = (80.096, -225.197, 77.338)
+```
+
+完整下游参数和证据冻结在
+`Tools/M11Core/Candidates/Rank3UpstreamCandidate353.json`。该文件明确保持
+`candidate_not_certified`，CertificationHash/CertifiedBundleHash 为零；它不会自动
+进入 Frozen Catalog、PIE Rank 或生产绑定。下一步应暂停继续搜索，将候选 353
+提升为唯一 B v2.2 完整认证输入，执行 base/half-cell、边界递归精化、消融/旁路、
+信赖域和 UE parity。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`

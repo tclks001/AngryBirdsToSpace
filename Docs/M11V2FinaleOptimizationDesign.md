@@ -654,6 +654,12 @@ F4 碎片从 22 压到 3；最佳研究候选的 42025 点复核仍为
 Hash 和搜索轨迹见
 [M11-B 设计稿 7.8](M11BFinaleLayoutCertificationDesign.md#78-rank-3-行星至-ufo-末段重映射搜索2026-07-31)。
 
+2026-08-01 开放行星②上游映射后，局部候选 353 首次在 5733 点与 42025 点
+两级网格均保持 F4 严格单岛；半步结果为 `F4=1004 / Components=1 / Fragments=0`，
+且不同线程数重放 Hash 一致。它已成为唯一待认证输入，但仍未生成 Certification/
+Bundle Hash、未加入 PIE Rank 或生产绑定。参数与后续完整认证边界见
+[M11-B 设计稿 7.9](M11BFinaleLayoutCertificationDesign.md#79-行星②上游映射搜索与单岛候选-3532026-08-01)。
+
 ## 12. 多工作树交接
 
 M11 专属工作树继续不直接修改下列共享热点：

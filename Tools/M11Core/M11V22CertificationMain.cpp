@@ -59,6 +59,15 @@ namespace
 		double Assist3VelocityDeltaXCMPerSec = 0.0;
 		double Assist3VelocityDeltaYCMPerSec = 0.0;
 		double Assist3VelocityDeltaZCMPerSec = 0.0;
+		double Assist2OffsetXCM = 0.0;
+		double Assist2OffsetYCM = 0.0;
+		double Assist2OffsetZCM = 0.0;
+		double Assist2BPlaneTargetTDeltaCM = 0.0;
+		double Assist2BPlaneTargetRDeltaCM = 0.0;
+		double Assist2BPlaneSigmaScale = 1.0;
+		double Assist2VelocityDeltaXCMPerSec = 0.0;
+		double Assist2VelocityDeltaYCMPerSec = 0.0;
+		double Assist2VelocityDeltaZCMPerSec = 0.0;
 		double TargetHitRadiusCM =
 			std::numeric_limits<double>::quiet_NaN();
 		double TargetMinimumCorridorQuality =
@@ -285,6 +294,48 @@ namespace
 			{
 				Out.Assist3VelocityDeltaZCMPerSec = Number;
 			}
+			else if (Key == "--assist2-offset-x" && ParseDouble(Value, Number))
+			{
+				Out.Assist2OffsetXCM = Number;
+			}
+			else if (Key == "--assist2-offset-y" && ParseDouble(Value, Number))
+			{
+				Out.Assist2OffsetYCM = Number;
+			}
+			else if (Key == "--assist2-offset-z" && ParseDouble(Value, Number))
+			{
+				Out.Assist2OffsetZCM = Number;
+			}
+			else if (Key == "--assist2-bplane-t-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2BPlaneTargetTDeltaCM = Number;
+			}
+			else if (Key == "--assist2-bplane-r-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2BPlaneTargetRDeltaCM = Number;
+			}
+			else if (Key == "--assist2-bplane-sigma-scale"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2BPlaneSigmaScale = Number;
+			}
+			else if (Key == "--assist2-velocity-delta-x"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2VelocityDeltaXCMPerSec = Number;
+			}
+			else if (Key == "--assist2-velocity-delta-y"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2VelocityDeltaYCMPerSec = Number;
+			}
+			else if (Key == "--assist2-velocity-delta-z"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2VelocityDeltaZCMPerSec = Number;
+			}
 			else if (Key == "--arrival-cone-degrees" && ParseDouble(Value, Number))
 			{
 				Out.ArrivalConeDegrees = Number;
@@ -360,6 +411,34 @@ namespace
 			Failure = "Assist3VelocityOverrideOutsideDiagnosticLimit";
 			return false;
 		}
+		const double Assist2OffsetSquared =
+			Out.Assist2OffsetXCM * Out.Assist2OffsetXCM
+			+ Out.Assist2OffsetYCM * Out.Assist2OffsetYCM
+			+ Out.Assist2OffsetZCM * Out.Assist2OffsetZCM;
+		const double Assist2BPlaneDeltaSquared =
+			Out.Assist2BPlaneTargetTDeltaCM
+				* Out.Assist2BPlaneTargetTDeltaCM
+			+ Out.Assist2BPlaneTargetRDeltaCM
+				* Out.Assist2BPlaneTargetRDeltaCM;
+		const double Assist2VelocityDeltaSquared =
+			Out.Assist2VelocityDeltaXCMPerSec
+				* Out.Assist2VelocityDeltaXCMPerSec
+			+ Out.Assist2VelocityDeltaYCMPerSec
+				* Out.Assist2VelocityDeltaYCMPerSec
+			+ Out.Assist2VelocityDeltaZCMPerSec
+				* Out.Assist2VelocityDeltaZCMPerSec;
+		if (!std::isfinite(Assist2OffsetSquared)
+			|| Assist2OffsetSquared > 10000.0 * 10000.0
+			|| !std::isfinite(Assist2BPlaneDeltaSquared)
+			|| Assist2BPlaneDeltaSquared > 5000.0 * 5000.0
+			|| Out.Assist2BPlaneSigmaScale < 0.65
+			|| Out.Assist2BPlaneSigmaScale > 1.50
+			|| !std::isfinite(Assist2VelocityDeltaSquared)
+			|| Assist2VelocityDeltaSquared > 2500.0 * 2500.0)
+		{
+			Failure = "Assist2OverrideOutsideDiagnosticLimit";
+			return false;
+		}
 		if (std::isfinite(Out.TargetHitRadiusCM)
 			&& (Out.TargetHitRadiusCM < 4500.0
 				|| Out.TargetHitRadiusCM > 12000.0))
@@ -415,6 +494,22 @@ namespace
 			OptionsValue.Assist3VelocityDeltaXCMPerSec,
 			OptionsValue.Assist3VelocityDeltaYCMPerSec,
 			OptionsValue.Assist3VelocityDeltaZCMPerSec};
+		ABTS::M11Core::GravityBodySpec& Assist2 =
+			Layout.Scenario.Bodies[2];
+		Assist2.CenterCM += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist2OffsetXCM,
+			OptionsValue.Assist2OffsetYCM,
+			OptionsValue.Assist2OffsetZCM};
+		Assist2.BPlaneTargetTCM +=
+			OptionsValue.Assist2BPlaneTargetTDeltaCM;
+		Assist2.BPlaneTargetRCM +=
+			OptionsValue.Assist2BPlaneTargetRDeltaCM;
+		Assist2.BPlaneSigmaTCM *= OptionsValue.Assist2BPlaneSigmaScale;
+		Assist2.BPlaneSigmaRCM *= OptionsValue.Assist2BPlaneSigmaScale;
+		Assist2.VirtualOrbitalVelocityCMPerSec += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist2VelocityDeltaXCMPerSec,
+			OptionsValue.Assist2VelocityDeltaYCMPerSec,
+			OptionsValue.Assist2VelocityDeltaZCMPerSec};
 		if (std::isfinite(OptionsValue.TargetHitRadiusCM))
 		{
 			Layout.Scenario.Target.HitRadiusCM =
@@ -571,6 +666,18 @@ namespace
 			<< "  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"assist2OffsetCM\":[" << OptionsValue.Assist2OffsetXCM
+			<< ',' << OptionsValue.Assist2OffsetYCM << ','
+			<< OptionsValue.Assist2OffsetZCM << "],\n"
+			<< "  \"assist2BPlaneDeltaCM\":["
+			<< OptionsValue.Assist2BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist2BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist2BPlaneSigmaScale\":"
+			<< OptionsValue.Assist2BPlaneSigmaScale << ",\n"
+			<< "  \"assist2VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist2VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaZCMPerSec << "],\n"
 			<< "  \"assist3OffsetCM\":[" << OptionsValue.Assist3OffsetXCM
 			<< ',' << OptionsValue.Assist3OffsetYCM << ','
 			<< OptionsValue.Assist3OffsetZCM << "],\n"
@@ -910,6 +1017,19 @@ namespace
 			<< "\",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"assist2OffsetCM\":["
+			<< OptionsValue.Assist2OffsetXCM << ','
+			<< OptionsValue.Assist2OffsetYCM << ','
+			<< OptionsValue.Assist2OffsetZCM << "],\n"
+			<< "  \"assist2BPlaneDeltaCM\":["
+			<< OptionsValue.Assist2BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist2BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist2BPlaneSigmaScale\":"
+			<< OptionsValue.Assist2BPlaneSigmaScale << ",\n"
+			<< "  \"assist2VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist2VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaZCMPerSec << "],\n"
 			<< "  \"assist3OffsetCM\":["
 			<< OptionsValue.Assist3OffsetXCM << ','
 			<< OptionsValue.Assist3OffsetYCM << ','
