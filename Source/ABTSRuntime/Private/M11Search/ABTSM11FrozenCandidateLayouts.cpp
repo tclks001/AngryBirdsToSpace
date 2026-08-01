@@ -66,7 +66,24 @@ namespace ABTS::M11Search
 				M11Core::Vec3d(-881.321, 1399.806, -1318.121);
 		}
 
-		constexpr std::array<FrozenCandidateIdentity, 6> Identities = {{
+		void TranslateConstellationAwayFromPouch(
+			CandidateLayout& Layout,
+			const double DistanceCM)
+		{
+			const M11Core::Vec3d Direction =
+				(Layout.Scenario.Bodies[1].CenterCM
+					- Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+			const M11Core::Vec3d Offset = Direction * DistanceCM;
+			for (std::size_t BodyIndex = 1;
+				BodyIndex < Layout.Scenario.Bodies.size(); ++BodyIndex)
+			{
+				Layout.Scenario.Bodies[BodyIndex].CenterCM += Offset;
+			}
+			Layout.Scenario.Target.CenterCM += Offset;
+			Layout.Scenario.Target.GeometricContactCenterCM += Offset;
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 7> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -83,6 +100,11 @@ namespace ABTS::M11Search
 			// carries its strict half-cell aggregate evidence hash.
 			{8, 21ull, 0x617687274ed0c29aull, 0xa2a41077916aadb2ull,
 				0xaac8ba98079011fdull, 0xb77f6d2f3f954005ull},
+			// Rank 8 with the entire three-assist/UFO constellation moved
+			// 100 cm farther from the pouch. Relative celestial geometry is
+			// unchanged; the score field carries its refined-grid evidence hash.
+			{9, 22ull, 0x166f0aa067d54328ull, 0x11e775a2b20e0b64ull,
+				0x22675cdfb00406d5ull, 0xa9bd918ee812d572ull},
 		}};
 	}
 
@@ -96,7 +118,8 @@ namespace ABTS::M11Search
 		{
 			*OutIdentity = FrozenCandidateIdentity();
 		}
-		const std::int32_t SourceRank = Rank == 7 || Rank == 8 ? 3 : Rank;
+		const std::int32_t SourceRank =
+			Rank == 7 || Rank == 8 || Rank == 9 ? 3 : Rank;
 		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
@@ -108,6 +131,11 @@ namespace ABTS::M11Search
 		else if (Rank == 8)
 		{
 			ApplyRank3F3ExpansionCandidate21(OutLayout);
+		}
+		else if (Rank == 9)
+		{
+			ApplyRank3F3ExpansionCandidate21(OutLayout);
+			TranslateConstellationAwayFromPouch(OutLayout, 100.0);
 		}
 		for (const FrozenCandidateIdentity& Identity : Identities)
 		{

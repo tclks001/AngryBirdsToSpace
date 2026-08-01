@@ -50,6 +50,7 @@ namespace
 		double TargetOffsetXCM = 0.0;
 		double TargetOffsetYCM = 0.0;
 		double TargetOffsetZCM = 0.0;
+		double ConstellationDistanceCM = 0.0;
 		double Assist3OffsetXCM = 0.0;
 		double Assist3OffsetYCM = 0.0;
 		double Assist3OffsetZCM = 0.0;
@@ -243,6 +244,11 @@ namespace
 			{
 				Out.TargetOffsetZCM = Number;
 			}
+			else if (Key == "--constellation-distance"
+				&& ParseDouble(Value, Number))
+			{
+				Out.ConstellationDistanceCM = Number;
+			}
 			else if (Key == "--target-hit-radius" && ParseDouble(Value, Number))
 			{
 				Out.TargetHitRadiusCM = Number;
@@ -375,6 +381,13 @@ namespace
 			Failure = "TargetOffsetOutsideDiagnosticLimit";
 			return false;
 		}
+		if (!std::isfinite(Out.ConstellationDistanceCM)
+			|| Out.ConstellationDistanceCM < 0.0
+			|| Out.ConstellationDistanceCM > 30000.0)
+		{
+			Failure = "ConstellationDistanceOutsideDiagnosticLimit";
+			return false;
+		}
 		const double Assist3OffsetSquared =
 			Out.Assist3OffsetXCM * Out.Assist3OffsetXCM
 			+ Out.Assist3OffsetYCM * Out.Assist3OffsetYCM
@@ -472,6 +485,18 @@ namespace
 		const Options& OptionsValue,
 		CandidateLayout& Layout)
 	{
+		const ABTS::M11Core::Vec3d ConstellationDirection =
+			(Layout.Scenario.Bodies[1].CenterCM
+				- Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+		const ABTS::M11Core::Vec3d ConstellationOffset =
+			ConstellationDirection * OptionsValue.ConstellationDistanceCM;
+		for (std::size_t BodyIndex = 1;
+			BodyIndex < Layout.Scenario.Bodies.size(); ++BodyIndex)
+		{
+			Layout.Scenario.Bodies[BodyIndex].CenterCM += ConstellationOffset;
+		}
+		Layout.Scenario.Target.CenterCM += ConstellationOffset;
+		Layout.Scenario.Target.GeometricContactCenterCM += ConstellationOffset;
 		const ABTS::M11Core::Vec3d Offset{
 			OptionsValue.TargetOffsetXCM,
 			OptionsValue.TargetOffsetYCM,
@@ -663,6 +688,8 @@ namespace
 			<< Hex64(Identity.CandidateSourceHash) << "\",\n"
 			<< "  \"variantSourceHash\":\""
 			<< Hex64(VariantSourceHash) << "\",\n"
+			<< "  \"constellationDistanceCM\":"
+			<< OptionsValue.ConstellationDistanceCM << ",\n"
 			<< "  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
@@ -1014,7 +1041,9 @@ namespace
 			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
 			<< "  \"candidateSourceHash\":\"" << Hex64(Identity.CandidateSourceHash)
 			<< "\",\n  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
-			<< "\",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
+			<< "\",\n  \"constellationDistanceCM\":"
+			<< OptionsValue.ConstellationDistanceCM
+			<< ",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
 			<< ',' << OptionsValue.TargetOffsetYCM << ','
 			<< OptionsValue.TargetOffsetZCM << "],\n"
 			<< "  \"assist2OffsetCM\":["

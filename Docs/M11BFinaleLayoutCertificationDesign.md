@@ -694,6 +694,28 @@ F4 单岛。
 CertificationHash、CertifiedBundle 或 UE parity。Rank 8 保留为已通过 PIE 的
 手感基线和后续布局修复输入，但继续保持 `Candidate / NOT CERTIFIED`。
 
+### Rank 8 刚性星群远移候选（Rank 9，2026-08-01）
+
+为在不改变三颗助推行星与 UFO 相对位置的前提下略微提高第一行星 Power 门槛，
+认证 CLI 新增 `--constellation-distance` 诊断轴。它以弹弓袋指向行星①的单位向量
+为方向，把行星①②③、Target Center 与独立 Geometric Contact Center 作为一个
+刚体整体平移；B-plane、虚拟动量、球半径和四者相对坐标完全不变。
+
+对 `0..10000 cm` 的初筛表明，大平移会使成功岛在输入域内移动并产生终端碎片，
+不能仅凭距离单调增大就冻结。最终选择最小的 `+100 cm`：超细 Power 扫描使用
+完整 `1° / 1.5°` 角度域及 `Power=[0.74,0.76] / Step=0.000625`，F1 下界由
+Rank 8 的 `0.745000` 提高到 `0.746250`。该提升很小但可重复测得，符合“略微
+加大距离、略微提高门槛”的约束。
+
+同一候选在 42025 点精细闭包得到
+`F1/F2/F3/F4=28040/21163/1564/498`、分量数 `1/1/2/1`，名义输入仍位于唯一
+F4，嵌套违规为 0，`AggregateSampleHash=0xa9bd918ee812d572`。它以 Editor-only
+`abts.M11.CandidateRank 9` 追加到列表末尾，冻结身份为
+`Source=0x166f0aa067d54328 / Request=0x11e775a2b20e0b64 /
+Result=0x22675cdfb00406d5`。Rank 8 原样保留用于 PIE 对照；Rank 9 仍是
+`Candidate / NOT CERTIFIED`，尚未解除第 8.3 节近最大功率正式门槛，也没有生成
+CertificationHash 或 CertifiedBundle。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`
