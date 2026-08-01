@@ -132,6 +132,97 @@ namespace ABTSM73BeamATests
 		}
 		return true;
 	}
+
+	FBox MemberBounds(
+		const FABTSM73BeamAMember& Member,
+		const FABTSM73BeamAGenerationResult& Result,
+		const double CrossSection)
+	{
+		const FVector Center = (
+			Result.Joints[Member.JointA].LocalPosition
+			+ Result.Joints[Member.JointB].LocalPosition) * 0.5;
+		FVector Extent(
+			CrossSection * 0.5,
+			CrossSection * 0.5,
+			CrossSection * 0.5);
+		if (Member.Axis != EABTSM73BeamAFrameAxis::Diagonal)
+		{
+			Extent[static_cast<int32>(Member.Axis)] = Member.LengthCM * 0.5;
+		}
+		return FBox(Center - Extent, Center + Extent);
+	}
+
+	bool HasPositiveVolumePenetration(
+		const FABTSM73BeamAGenerationResult& Result,
+		const FABTSM73BeamAPreviewSettings& Settings)
+	{
+		TArray<FBox> Bounds;
+		Bounds.Reserve(Result.Members.Num());
+		for (const FABTSM73BeamAMember& Member : Result.Members)
+		{
+			Bounds.Add(MemberBounds(
+				Member, Result, Settings.BlockCrossSectionCM));
+		}
+		const double Tolerance = Settings.JointMergeToleranceCM;
+		for (int32 Left = 0; Left < Bounds.Num(); ++Left)
+		{
+			for (int32 Right = Left + 1; Right < Bounds.Num(); ++Right)
+			{
+				if (FMath::Min(Bounds[Left].Max.X, Bounds[Right].Max.X)
+						- FMath::Max(Bounds[Left].Min.X, Bounds[Right].Min.X)
+						> Tolerance
+					&& FMath::Min(Bounds[Left].Max.Y, Bounds[Right].Max.Y)
+						- FMath::Max(Bounds[Left].Min.Y, Bounds[Right].Min.Y)
+						> Tolerance
+					&& FMath::Min(Bounds[Left].Max.Z, Bounds[Right].Max.Z)
+						- FMath::Max(Bounds[Left].Min.Z, Bounds[Right].Min.Z)
+						> Tolerance)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool EveryMemberReachesGround(
+		const FABTSM73BeamAGenerationResult& Result,
+		const FABTSM73BeamAPreviewSettings& Settings)
+	{
+		TArray<bool> Reachable;
+		Reachable.Init(false, Result.Members.Num());
+		TArray<int32> Queue;
+		for (const FABTSM73BeamAMember& Member : Result.Members)
+		{
+			if (MemberBounds(Member, Result, Settings.BlockCrossSectionCM)
+				.Min.Z <= Settings.JointMergeToleranceCM)
+			{
+				Reachable[Member.MemberId] = true;
+				Queue.Add(Member.MemberId);
+			}
+		}
+		for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+		{
+			for (const FABTSM73BeamABearingContact& Contact :
+				Result.BearingContacts)
+			{
+				if (Contact.LowerMemberId == Queue[QueueIndex]
+					&& !Reachable[Contact.UpperMemberId])
+				{
+					Reachable[Contact.UpperMemberId] = true;
+					Queue.Add(Contact.UpperMemberId);
+				}
+			}
+		}
+		for (const bool bReachable : Reachable)
+		{
+			if (!bReachable)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -220,6 +311,48 @@ bool FABTSM73BeamAArchetypeCoverageTest::RunTest(
 			0);
 		TestTrue(TEXT("Has physical bearing contacts"),
 			Result.Summary.BearingContactCount > 0);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamAGlobalAssemblyClosureTest,
+	"ABTS.M73DAG.BeamA.GlobalAssemblyClosure",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamAGlobalAssemblyClosureTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamATests;
+	for (int32 Value = static_cast<int32>(
+			EABTSM73DAG5BV2Archetype::TerracedCitadel);
+		Value <= static_cast<int32>(
+			EABTSM73DAG5BV2Archetype::SpiredCampus);
+		++Value)
+	{
+		FABTSM73BeamAPreviewSettings Settings = MakeSettings();
+		Settings.Silhouette.Archetype =
+			static_cast<EABTSM73DAG5BV2Archetype>(Value);
+		Settings.Silhouette.BuildingSeed = 940000 + Value * 211;
+		FABTSM73BeamAGenerationResult Result;
+		FString Error;
+		const bool bGenerated = Generate(Settings, Result, Error);
+		TestTrue(
+			FString::Printf(TEXT("Archetype %d closes: %s"), Value, *Error),
+			bGenerated);
+		if (!bGenerated)
+		{
+			continue;
+		}
+		TestEqual(TEXT("Summary reports no penetration"),
+			Result.Summary.RemainingPenetrationCount, 0);
+		TestEqual(TEXT("Summary reports no unsupported member"),
+			Result.Summary.UnsupportedMemberCount, 0);
+		TestFalse(TEXT("Independent AABB audit finds no penetration"),
+			HasPositiveVolumePenetration(Result, Settings));
+		TestTrue(TEXT("Independent bearing audit reaches every member"),
+			EveryMemberReachesGround(Result, Settings));
 	}
 	return true;
 }
@@ -360,6 +493,322 @@ bool FABTSM73BeamAStackedBlockSemanticsTest::RunTest(
 	TestEqual(TEXT("No diagonal output"),
 		Result.Summary.DiagonalMemberCount,
 		0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamAParallelCourseSpacingTest,
+	"ABTS.M73DAG.BeamA.ParallelCourseSpacing",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamAParallelCourseSpacingTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamATests;
+	FABTSM73BeamAPreviewSettings Settings = MakeSettings();
+	Settings.MaxParallelBlocksPerCourse = 5;
+	Settings.MinimumParallelBlockGapCM = 18.0f;
+	Settings.TwoBlockMergeGapCM = 4.0f;
+	FABTSM73BeamAGenerationResult Result;
+	FString Error;
+	TestTrue(TEXT("Generation succeeds"), Generate(Settings, Result, Error));
+	const double MinimumCenterSpacing =
+		Settings.BlockCrossSectionCM + Settings.TwoBlockMergeGapCM;
+	bool bSawReducedSingleBlockCourse = false;
+	bool bSawMultipleBlockCourse = false;
+	for (const FABTSM73BeamAAssembly& Assembly : Result.Assemblies)
+	{
+		TMap<FString, int32> CourseCounts;
+		for (int32 LeftIndex = 0;
+			LeftIndex < Assembly.MemberIds.Num();
+			++LeftIndex)
+		{
+			const FABTSM73BeamAMember& Left =
+				Result.Members[Assembly.MemberIds[LeftIndex]];
+			if (Left.Axis == EABTSM73BeamAFrameAxis::Z)
+			{
+				continue;
+			}
+			const FVector LeftA = Result.Joints[Left.JointA].LocalPosition;
+			const FVector LeftB = Result.Joints[Left.JointB].LocalPosition;
+			const FVector LeftCenter = (LeftA + LeftB) * 0.5;
+			const FString CourseKey = FString::Printf(
+				TEXT("%d:%d:%lld:%lld"),
+				static_cast<int32>(Left.Axis),
+				static_cast<int32>(Left.Role),
+				FMath::RoundToInt64(LeftCenter.Z * 10.0),
+				FMath::RoundToInt64(Left.LengthCM * 10.0));
+			++CourseCounts.FindOrAdd(CourseKey);
+			for (int32 RightIndex = LeftIndex + 1;
+				RightIndex < Assembly.MemberIds.Num();
+				++RightIndex)
+			{
+				const FABTSM73BeamAMember& Right =
+					Result.Members[Assembly.MemberIds[RightIndex]];
+				if (Right.Axis != Left.Axis || Right.Role != Left.Role)
+				{
+					continue;
+				}
+				const FVector RightA =
+					Result.Joints[Right.JointA].LocalPosition;
+				const FVector RightB =
+					Result.Joints[Right.JointB].LocalPosition;
+				const FVector RightCenter = (RightA + RightB) * 0.5;
+				if (!FMath::IsNearlyEqual(LeftCenter.Z, RightCenter.Z, 0.01)
+					|| !FMath::IsNearlyEqual(Left.LengthCM, Right.LengthCM, 0.01f))
+				{
+					continue;
+				}
+				const double Separation =
+					Left.Axis == EABTSM73BeamAFrameAxis::X
+						? FMath::Abs(LeftCenter.Y - RightCenter.Y)
+						: FMath::Abs(LeftCenter.X - RightCenter.X);
+				TestTrue(
+					TEXT("Parallel blocks retain the final-pair merge gap"),
+					Separation + 0.01 >= MinimumCenterSpacing);
+			}
+		}
+		for (const TPair<FString, int32>& Course : CourseCounts)
+		{
+			TestTrue(
+				TEXT("A course does not exceed the configured parallel cap"),
+				Course.Value <= Settings.MaxParallelBlocksPerCourse);
+			bSawReducedSingleBlockCourse |= Course.Value == 1;
+			bSawMultipleBlockCourse |= Course.Value >= 2;
+		}
+	}
+	TestTrue(TEXT("Wide courses retain multiple parallel blocks"),
+		bSawMultipleBlockCourse);
+	TestTrue(TEXT("Narrow courses automatically reduce to one block"),
+		bSawReducedSingleBlockCourse);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamAAdjacentBayBoundarySpacingTest,
+	"ABTS.M73DAG.BeamA.AdjacentBayBoundarySpacing",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamAAdjacentBayBoundarySpacingTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamATests;
+	FABTSM73BeamAPreviewSettings Settings = MakeSettings();
+	Settings.TargetBaySpanCM = 1000.0f;
+	Settings.MaxParallelBlocksPerCourse = 2;
+	Settings.MinimumParallelBlockGapCM = 12.0f;
+	FABTSM73DAG5BV2GenerationResult Silhouette;
+	Silhouette.Summary.bAccepted = true;
+	for (int32 VolumeIndex = 0; VolumeIndex < 2; ++VolumeIndex)
+	{
+		FABTSM73DAG5BV2Volume& Volume =
+			Silhouette.Volumes.AddDefaulted_GetRef();
+		Volume.VolumeId = VolumeIndex;
+		Volume.Role = EABTSM73DAG5BV2VolumeRole::Body;
+		Volume.Primitive = EABTSM73DAG5BV2Primitive::Box;
+		const double MinimumY = VolumeIndex == 0 ? -240.0 : 0.0;
+		const double MaximumY = VolumeIndex == 0 ? 0.0 : 240.0;
+		Volume.LocalBounds = FBox(
+			FVector(-300.0, MinimumY, 0.0),
+			FVector(300.0, MaximumY, 360.0 + VolumeIndex * 120.0));
+	}
+	FABTSM73BeamAGenerator Generator;
+	FABTSM73BeamAGenerationResult Result;
+	FString Error;
+	TestTrue(TEXT("Adjacent-volume generation succeeds"),
+		Generator.Generate(Settings, Silhouette, Result, Error));
+	TestEqual(TEXT("Two semantic segments remain two bays"),
+		Result.Bays.Num(), 2);
+	TestTrue(TEXT("The two bays are adjacent"),
+		Result.Bays.Num() == 2
+		&& Result.Bays[0].AdjacentBayIds.Contains(1)
+		&& Result.Bays[1].AdjacentBayIds.Contains(0));
+
+	TArray<double> BottomPrimaryY;
+	TArray<FVector> LowerSecondaryCenters;
+	TArray<FVector> UpperPrimaryCenters;
+	TArray<FVector> PostCenters;
+	TSet<int32> QuantizedPostLengths;
+	for (const FABTSM73BeamAMember& Member : Result.Members)
+	{
+		const FVector A = Result.Joints[Member.JointA].LocalPosition;
+		const FVector B = Result.Joints[Member.JointB].LocalPosition;
+		const FVector Center = (A + B) * 0.5;
+		if (Member.Axis == EABTSM73BeamAFrameAxis::Y
+			&& Member.Role == EABTSM73BeamAMemberRole::SecondaryBeam
+			&& FMath::IsNearlyEqual(
+				Center.Z,
+				Settings.BlockCrossSectionCM * 1.5,
+				0.01))
+		{
+			LowerSecondaryCenters.Add(Center);
+		}
+		if (Member.Axis == EABTSM73BeamAFrameAxis::X
+			&& Member.Role == EABTSM73BeamAMemberRole::PrimaryBeam
+			&& Center.Z > Settings.BlockCrossSectionCM * 2.0)
+		{
+			UpperPrimaryCenters.Add(Center);
+		}
+		if (Member.Axis == EABTSM73BeamAFrameAxis::Z)
+		{
+			PostCenters.Add(Center);
+			QuantizedPostLengths.Add(FMath::RoundToInt(Member.LengthCM));
+		}
+		if (Member.Axis != EABTSM73BeamAFrameAxis::X
+			|| Member.Role != EABTSM73BeamAMemberRole::PrimaryBeam)
+		{
+			continue;
+		}
+		if (FMath::IsNearlyEqual(
+			Center.Z,
+			Settings.BlockCrossSectionCM * 0.5,
+			0.01))
+		{
+			BottomPrimaryY.Add(Center.Y);
+		}
+	}
+	BottomPrimaryY.Sort();
+	TestEqual(TEXT("Each side retains two blocks"),
+		BottomPrimaryY.Num(), 4);
+	if (BottomPrimaryY.Num() == 4)
+	{
+		const double LeftInternalGap =
+			BottomPrimaryY[1] - BottomPrimaryY[0]
+			- Settings.BlockCrossSectionCM;
+		const double SharedBoundaryGap =
+			BottomPrimaryY[2] - BottomPrimaryY[1]
+			- Settings.BlockCrossSectionCM;
+		const double RightInternalGap =
+			BottomPrimaryY[3] - BottomPrimaryY[2]
+			- Settings.BlockCrossSectionCM;
+		TestTrue(TEXT("The solved gap respects the configured minimum"),
+			SharedBoundaryGap + 0.01
+				>= Settings.MinimumParallelBlockGapCM);
+		TestTrue(TEXT("The shared gap matches the left internal gap"),
+			FMath::IsNearlyEqual(
+				SharedBoundaryGap,
+				LeftInternalGap,
+				0.01));
+		TestTrue(TEXT("The shared gap matches the right internal gap"),
+			FMath::IsNearlyEqual(
+				SharedBoundaryGap,
+				RightInternalGap,
+				0.01));
+	}
+	TestTrue(TEXT("X-Y support intersections produce posts"),
+		PostCenters.Num() > 0);
+	TestTrue(TEXT("Different course elevations produce variable post lengths"),
+		QuantizedPostLengths.Num() >= 2);
+	for (const FVector& PostCenter : PostCenters)
+	{
+		const bool bMatchesLowerLane = LowerSecondaryCenters.ContainsByPredicate(
+			[&PostCenter](const FVector& BeamCenter)
+			{
+				return FMath::IsNearlyEqual(
+					BeamCenter.X, PostCenter.X, 0.01);
+			});
+		const bool bMatchesUpperLane = UpperPrimaryCenters.ContainsByPredicate(
+			[&PostCenter](const FVector& BeamCenter)
+			{
+				return FMath::IsNearlyEqual(
+					BeamCenter.Y, PostCenter.Y, 0.01);
+			});
+		TestTrue(TEXT("Every post consumes a generated lower Y lane"),
+			bMatchesLowerLane);
+		TestTrue(TEXT("Every post consumes a generated upper X lane"),
+			bMatchesUpperLane);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamAParallelZSupportPlacementTest,
+	"ABTS.M73DAG.BeamA.ParallelZSupportPlacement",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamAParallelZSupportPlacementTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM73BeamAPreviewSettings Settings;
+	Settings.BlockCrossSectionCM = 36.0f;
+	Settings.MinimumParallelBlockGapCM = 18.0f;
+	Settings.TwoBlockMergeGapCM = 4.0f;
+	Settings.MaxParallelBlocksPerCourse = 4;
+	Settings.JointMergeToleranceCM = 0.5f;
+	TArray<double> AlignedOffsets;
+	TestTrue(TEXT("Aligned parallel lanes produce Z-support stations"),
+		ABTSM73BeamA::BuildAlignedParallelSupportOffsets(
+			42.0,
+			42.25,
+			0.0,
+			420.0,
+			Settings,
+			AlignedOffsets));
+	TestEqual(TEXT("Aligned support count respects the shared cap"),
+		AlignedOffsets.Num(), Settings.MaxParallelBlocksPerCourse);
+	for (int32 Index = 1; Index < AlignedOffsets.Num(); ++Index)
+	{
+		const double ClearGap = AlignedOffsets[Index]
+			- AlignedOffsets[Index - 1]
+			- Settings.BlockCrossSectionCM;
+		TestTrue(TEXT("Aligned supports retain the minimum clear gap"),
+			ClearGap + 0.01 >= Settings.MinimumParallelBlockGapCM);
+	}
+
+	TArray<double> MisalignedOffsets;
+	TestFalse(TEXT("Misaligned parallel lanes do not force Z supports"),
+		ABTSM73BeamA::BuildAlignedParallelSupportOffsets(
+			42.0,
+			43.0,
+			0.0,
+			420.0,
+			Settings,
+			MisalignedOffsets));
+	TestTrue(TEXT("Misaligned lanes emit no support stations"),
+		MisalignedOffsets.IsEmpty());
+
+	Settings.MaxParallelBlocksPerCourse = 2;
+	TArray<double> RetainedPairOffsets;
+	TestTrue(TEXT("A final pair is retained above the merge threshold"),
+		ABTSM73BeamA::BuildAlignedParallelSupportOffsets(
+			42.0,
+			42.25,
+			0.0,
+			82.0,
+			Settings,
+			RetainedPairOffsets));
+	TestEqual(TEXT("The pair survives below the normal multi-block gap"),
+		RetainedPairOffsets.Num(), 2);
+	if (RetainedPairOffsets.Num() == 2)
+	{
+		const double ClearGap = RetainedPairOffsets[1]
+			- RetainedPairOffsets[0]
+			- Settings.BlockCrossSectionCM;
+		TestTrue(TEXT("Retained pair may use less than the normal gap"),
+			ClearGap < Settings.MinimumParallelBlockGapCM);
+		TestTrue(TEXT("Retained pair still satisfies the merge gap"),
+			ClearGap + 0.01 >= Settings.TwoBlockMergeGapCM);
+	}
+
+	TArray<double> CollapsedPairOffsets;
+	TestTrue(TEXT("A sub-threshold final pair produces a centered station"),
+		ABTSM73BeamA::BuildAlignedParallelSupportOffsets(
+			42.0,
+			42.25,
+			0.0,
+			74.0,
+			Settings,
+			CollapsedPairOffsets));
+	TestEqual(TEXT("The sub-threshold pair collapses to one block"),
+		CollapsedPairOffsets.Num(), 1);
+	if (CollapsedPairOffsets.Num() == 1)
+	{
+		TestTrue(TEXT("Collapsed block remains centered"),
+			FMath::IsNearlyEqual(CollapsedPairOffsets[0], 37.0, 0.01));
+	}
 	return true;
 }
 

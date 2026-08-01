@@ -6,7 +6,7 @@
 >
 > 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 >
-> 状态：v2 C++、ForceUnity 编译、6 项专项自动化和 78 项完整 M7 回归已完成；等待用户编辑器读形验收。
+> 状态：v2.1 全局装配收口已完成并通过用户编辑器读形验收；10 项 Beam-A 专项自动化通过。
 
 ## 1. v2 修订原因
 
@@ -121,6 +121,29 @@ Z4  两根上层 Secondary，再次正交压住 Primary
 生成全部 Member 后，以固定截面构造 AABB，按量化 Z 平面匹配 Lower 顶面与 Upper 底面，再计算
 XY 重叠面积。超过 `MaxBearingPairChecks` 或 `MaxBearingContactCount` 时原子拒绝，不返回部分图。
 
+### 4.5 v2.1 全局装配收口
+
+单个 Bay 的合法性不能保证多个 Volume/Bay 拼合后仍然合法，因此所有局部装配完成后必须再经过一次
+全局几何闭合，最终 Member 图才可被接受：
+
+1. Bridge 的结构范围裁切到相邻主体承托面，避免桥体与主体各自重复铺满同一空间；
+2. 同轴且实体截面重叠的 Member 合并为一根，并合并其 Assembly 所有权；
+3. X/Y 横条发生正体积相交时，将后生成的整组 course 抬升到下一合法堆叠层；
+4. Z 柱穿过新增水平层时，在水平积木上下表面处分段，禁止柱体贯穿梁体；
+5. 小于一根积木最短长度的承托缝隙通过抬升上层 course 扩为合法间距；
+6. 对仍不可从地面到达的装配岛，优先连接最近的已承重水平层，找不到时补至地面；
+7. 只有补柱后成员数和不可达数均不再改善时，才允许裁掉“所属 Assembly 已有其他接地成员”的孤立冗余片；
+   整个 Assembly 不可达时不得裁剪绕过，必须 fail closed；
+8. 最终重新提取 Bearing Graph，并以“无正体积穿插、所有 Member 均可沿 Bearing 有向边追溯到地面”为硬门槛。
+
+收口统计暴露为 `SplitPostMemberCount`、`MergedMemberCount`、`ShiftedCourseCount`、
+`GlobalSupportMemberCount`、`PrunedUnsupportedMemberCount`、`RemainingPenetrationCount` 和
+`UnsupportedMemberCount`。Accepted 结果的最后两项必须恒为 0。
+
+主要拒绝原因包括：`BeamAHorizontalCourseSeparationFailed`、`BeamAGlobalSupportBudgetExceeded`、
+`BeamAUnsupportedMembers`、`BeamAMemberPenetration` 和 `BeamAGlobalAssemblyPassBudgetExceeded`。
+这些检查仍属于确定性几何装配，不使用 Chaos，也不替代 Beam-D 的动态稳定认证。
+
 ## 5. 编辑器预览
 
 Actor：`M7.3 Beam-A Structural IR Preview`。
@@ -147,7 +170,7 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 
 ## 6. 自动化验收合同
 
-过滤器：`ABTS.M73DAG.BeamA.`，共 6 项。
+过滤器：`ABTS.M73DAG.BeamA.`，当前共 10 项。
 
 - `Determinism`：同输入的 Bay、Member、Bearing、Assembly 和 Hash 完全相同；
 - `ArchetypeCoverage`：四类轮廓均接受，拥有 X/Y/Z、Bearing，且 Diagonal 恒为 0；
@@ -155,6 +178,11 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 - `StackedBlockSemantics`：必须同时出现 CrossBearing、PostOnBeam、BeamOnPost 和至少三种长度；
 - `BudgetFailure`：预算不足稳定拒绝且不泄漏部分 Bearing 图；
 - `InvalidSettings`：非法截面或生成参数 fail closed。
+- `GlobalAssemblyClosure`：独立重算四类建筑的 Member AABB 与地面可达图，要求无正体积穿插且
+  每一根 Member 都能沿 Bearing 链追溯到地面；
+- `ParallelCourseSpacing`：平行积木满足数量、最小间隙和两根合一阈值；
+- `AdjacentBayBoundarySpacing`：相邻 Bay 公共边界按实际 course 间距退让；
+- `ParallelZSupportPlacement`：Z 柱直接消费水平积木位置，并覆盖 X-Y、X-X/Y-Y 对齐承托。
 
 ## 7. 用户编辑器验收
 
@@ -167,6 +195,7 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 5. Prism/Pyramid 屋顶应呈阶梯式逐层收分，而不是三角斜杆；
 6. 调整 `BlockCrossSectionCM` 时所有积木的两条短边同步变化，长度仍随轮廓独立变化；
 7. Details 中 Accepted 为真、BearingContactCount 大于 0、DiagonalMemberCount 等于 0；
+   `RemainingPenetrationCount` 与 `UnsupportedMemberCount` 均为 0；
 8. 进入 PIE 后预览不可见，也不参与启动物理 Gate。
 
 本阶段仍不要求预览在 Chaos 中站立。它验证的是“搭放拓扑和承托接触”，真实积木、摩擦、
@@ -190,3 +219,15 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 
 首轮 v2 专项曾发现低矮 Volume 放不下完整门架而被错误拒绝；最终逻辑改为合法的 X/Y 交替
 水平层退化，再次专项验证通过。
+
+### v2.1 全局装配收口证据
+
+- 2026-08-01 Development Editor 完整链接：`Result: Succeeded`；构建时检测到的 Unreal Editor
+  均属于其他工作树，使用 `-NoHotReload -NoHotReloadFromIDE`，未终止或复用其他工作树进程；
+- `Saved/Logs/BeamA-GlobalClosure-Guarded-20260801-172128.log`：精确找到 10 项
+  `ABTS.M73DAG.BeamA` 自动化，10/10 Success；
+- `Saved/Logs/M7-GlobalClosure-Guarded-20260801-172227.log`：精确找到 82 项
+  `ABTS.M7` 自动化，82/82 Success；
+- `GlobalAssemblyClosure` 对四类轮廓独立重算 AABB 穿插和 Bearing 地面可达性，全部通过。
+- 2026-08-01 用户编辑器读形验收确认：预览中已无明显悬空、横穿或大块组件重叠，Beam-A v2.1
+  阶段关闭；后续结构家族差异转入 Beam-B。

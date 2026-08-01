@@ -16,6 +16,18 @@ struct FABTSM73BeamAGenerationResult
 	TArray<FABTSM73BeamAAssembly> Assemblies;
 };
 
+namespace ABTSM73BeamA
+{
+	/** Resolve Z-support stations for two aligned parallel beam lanes. */
+	bool BuildAlignedParallelSupportOffsets(
+		double LowerLane,
+		double UpperLane,
+		double OverlapMinimum,
+		double OverlapMaximum,
+		const FABTSM73BeamAPreviewSettings& Settings,
+		TArray<double>& OutOffsets);
+}
+
 /** Pure-data Beam-A compiler from accepted DAG5-B v2 silhouette volumes. */
 class FABTSM73BeamAGenerator
 {

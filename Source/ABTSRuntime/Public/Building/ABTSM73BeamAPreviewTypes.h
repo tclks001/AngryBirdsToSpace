@@ -72,12 +72,27 @@ struct FABTSM73BeamAPreviewSettings
 		meta = (ClampMin = "12.0", ClampMax = "120.0", Units = "cm"))
 	float BlockCrossSectionCM = 36.0f;
 
+	/** Maximum number of equally spaced parallel blocks in one course. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",
+		meta = (ClampMin = "2", ClampMax = "16"))
+	int32 MaxParallelBlocksPerCourse = 3;
+
+	/** Minimum clear side gap retained between parallel blocks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",
+		meta = (ClampMin = "1.0", ClampMax = "240.0", Units = "cm"))
+	float MinimumParallelBlockGapCM = 12.0f;
+
+	/** Clear side gap below which the final parallel pair collapses to one centered block. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",
+		meta = (ClampMin = "0.0", ClampMax = "240.0", Units = "cm"))
+	float TwoBlockMergeGapCM = 4.0f;
+
 	/** Maximum horizontal courses used to approximate one roof volume. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|Roof",
 		meta = (ClampMin = "2", ClampMax = "64"))
 	int32 MaxRoofCourseCount = 32;
 
-	/** Parallel blocks in one roof course before narrow-footprint clamping. */
+	/** Legacy roof-specific cap retained for serialized preview compatibility. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|Roof",
 		meta = (ClampMin = "1", ClampMax = "5"))
 	int32 RoofBlocksPerCourse = 3;
@@ -242,6 +257,34 @@ struct FABTSM73BeamAPreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 BearingContactCount = 0;
+
+	/** Posts split around global horizontal courses during assembly closure. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 SplitPostMemberCount = 0;
+
+	/** Collinear overlapping members folded into a single physical block. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 MergedMemberCount = 0;
+
+	/** Horizontal courses lifted onto the next legal stacking layer. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ShiftedCourseCount = 0;
+
+	/** Repair posts inserted between disconnected supported assemblies. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 GlobalSupportMemberCount = 0;
+
+	/** Isolated redundant members removed only after support repair stalls. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 PrunedUnsupportedMemberCount = 0;
+
+	/** Must be zero for an accepted preview. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 RemainingPenetrationCount = 0;
+
+	/** Must be zero for an accepted preview. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 UnsupportedMemberCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 XMemberCount = 0;
