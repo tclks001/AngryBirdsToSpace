@@ -12,6 +12,7 @@
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "World/ABTSM9Satellite.h"
 
@@ -311,6 +312,21 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsE5CollisionEnabled());
 	TestTrue(TEXT("M6 consumes the exact E5 snapshot"),
 		Runtime->IsM6TargetBound());
+	TestTrue(TEXT("A real reinforced slingshot consumes the candidate launch frame"),
+		Runtime->IsPracticeSlingshotReady());
+	AABTSM51SlingshotCord* PracticeCord = Runtime->GetRuntimePracticeCord();
+	TestNotNull(TEXT("Candidate practice slingshot exposes its runtime cord"),
+		PracticeCord);
+	if (PracticeCord != nullptr)
+	{
+		TestEqual(TEXT("Candidate practice cord is reinforced"),
+			PracticeCord->GetSlingshotTier(),
+			EABTSSlingshotTier::Reinforced);
+		TestTrue(TEXT("Physical rest pouch matches the persisted candidate launch location"),
+			PracticeCord->GetRestPouchTransform().GetLocation().Equals(
+				Candidate.LaunchWorldLocation,
+				1.0f));
+	}
 
 	const FABTSM3MonthlySatelliteRuntimeSnapshot Snapshot =
 		Runtime->GetRuntimeSnapshot();

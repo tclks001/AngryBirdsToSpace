@@ -11,8 +11,11 @@
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "ProceduralMeshComponent.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "TestStage/ABTSM71TestStageActors.h"
+#include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "World/ABTSM9Satellite.h"
 
@@ -157,13 +160,18 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		ClearOwnedRuntime();
 		return false;
 	}
+	if (!SpawnPracticeSlingshot())
+	{
+		ClearOwnedRuntime();
+		return false;
+	}
 	bRuntimeActorsSpawned = true;
 	BindM6Target();
 	ApplyGravityOverride(true);
 	RefreshReadyState();
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d LaunchProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d PracticeSlingshot=%d PracticePouch=%s LaunchProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
 		bRuntimeReady ? 1 : 0,
 		RuntimeSnapshot.SourceRouteCandidateId,
 		SupersededSatellites.Num(),
@@ -175,6 +183,10 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		bSatelliteCollisionEnabled ? 1 : 0,
 		bE5CollisionEnabled ? 1 : 0,
 		bM6TargetBound ? 1 : 0,
+		bPracticeSlingshotReady ? 1 : 0,
+		GetRuntimePracticeCord()
+			? *GetRuntimePracticeCord()->GetRestPouchTransform().GetLocation().ToCompactString()
+			: TEXT("None"),
 		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.LaunchProfileHash)),
 		static_cast<unsigned long long>(
@@ -364,6 +376,97 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	return RuntimeSnapshot.bValid;
 }
 
+bool AABTSM3MonthlySatellitePracticeRuntime::SpawnPracticeSlingshot()
+{
+	bPracticeSlingshotReady = false;
+	if (GetWorld() == nullptr)
+	{
+		return false;
+	}
+
+	const FVector LaunchUp = CandidateSnapshot.LaunchUpWorld.GetSafeNormal();
+	const FVector LaunchForward = FVector::VectorPlaneProject(
+		CandidateSnapshot.LaunchForwardWorld,
+		LaunchUp).GetSafeNormal();
+	if (LaunchUp.IsNearlyZero() || LaunchForward.IsNearlyZero())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=InvalidLaunchFrame"));
+		return false;
+	}
+
+	// The monthly preview's reference height deliberately matches the native
+	// reinforced device: 220 cm stake endpoint plus a -30 cm rest-pouch offset.
+	// Spawning the device root at this exact pair midpoint makes M6 consume the
+	// same pouch frame that placed the frozen satellite/E5 snapshot.
+	const FABTSM3MonthlySatellitePreviewConfig PreviewDefaults;
+	const FVector PairMidpoint = CandidateSnapshot.LaunchWorldLocation
+		- LaunchUp * PreviewDefaults.ReferencePouchHeightCM;
+	const FQuat Rotation = FRotationMatrix::MakeFromXZ(
+		LaunchForward,
+		LaunchUp).ToQuat();
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	RuntimePracticeSlingshot =
+		GetWorld()->SpawnActor<AABTSM71ReinforcedSlingshotActor>(
+			AABTSM71ReinforcedSlingshotActor::StaticClass(),
+			FTransform(Rotation, PairMidpoint),
+			SpawnParameters);
+	// Minimal automation worlds do not route normal World BeginPlay. The actor's
+	// native BeginPlay is the authority that creates its runtime stakes/cord, so
+	// dispatch it only for that unbegun-world case. A real PIE actor has already
+	// begun play when SpawnActor returns and never enters this branch.
+	if (IsValid(RuntimePracticeSlingshot)
+		&& !RuntimePracticeSlingshot->HasActorBegunPlay())
+	{
+		RuntimePracticeSlingshot->DispatchBeginPlay();
+	}
+	AABTSM51SlingshotCord* Cord = GetRuntimePracticeCord();
+	if (!IsValid(RuntimePracticeSlingshot) || Cord == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=SpawnOrCord"));
+		return false;
+	}
+
+	const FVector ActualPouch = Cord->GetRestPouchTransform().GetLocation();
+	const FVector ActualRight = FVector::VectorPlaneProject(
+		Cord->GetEndpointB() - Cord->GetEndpointA(),
+		LaunchUp).GetSafeNormal();
+	const FVector ActualForward = FVector::CrossProduct(
+		ActualRight,
+		LaunchUp).GetSafeNormal();
+	const float PouchErrorCM = FVector::Distance(
+		ActualPouch,
+		CandidateSnapshot.LaunchWorldLocation);
+	const float ForwardDot = FVector::DotProduct(
+		ActualForward,
+		LaunchForward);
+	bPracticeSlingshotReady =
+		Cord->GetSlingshotTier() == EABTSSlingshotTier::Reinforced
+		&& PouchErrorCM <= 1.0f
+		&& ForwardDot >= 0.999f;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5.1][RuntimePractice][Slingshot] Ready=%d Root=%s Pouch=%s CandidatePouch=%s PouchError=%.3f ForwardDot=%.5f Tier=%d"),
+		bPracticeSlingshotReady ? 1 : 0,
+		*PairMidpoint.ToCompactString(),
+		*ActualPouch.ToCompactString(),
+		*CandidateSnapshot.LaunchWorldLocation.ToCompactString(),
+		PouchErrorCM,
+		ForwardDot,
+		static_cast<int32>(Cord->GetSlingshotTier()));
+	if (!bPracticeSlingshotReady)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=FrameMismatch PouchError=%.3f ForwardDot=%.5f"),
+			PouchErrorCM,
+			ForwardDot);
+	}
+	return bPracticeSlingshotReady;
+}
+
 bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 {
 	if (!IsValid(RuntimeSatellite) || !IsValid(RuntimeE5Target)
@@ -465,13 +568,13 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& IsValid(RuntimeE5Target)
 		&& bSatelliteCollisionEnabled
 		&& bE5CollisionEnabled
-		&& bM6TargetBound;
+		&& bM6TargetBound
+		&& bPracticeSlingshotReady;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	(void)DeltaSeconds;
 	if (!bRuntimeActorsSpawned)
 	{
 		ActivateSnapshot();
@@ -479,7 +582,53 @@ void AABTSM3MonthlySatellitePracticeRuntime::Tick(const float DeltaSeconds)
 	}
 	BindM6Target();
 	ApplyGravityOverride(false);
+	LogGravityEvidence(DeltaSeconds);
 	RefreshReadyState();
+}
+
+void AABTSM3MonthlySatellitePracticeRuntime::LogGravityEvidence(
+	const float DeltaSeconds)
+{
+	GravityEvidenceLogRemainingSeconds = FMath::Max(
+		0.0f,
+		GravityEvidenceLogRemainingSeconds - FMath::Max(0.0f, DeltaSeconds));
+	if (GravityEvidenceLogRemainingSeconds > 0.0f
+		|| !IsValid(RuntimeSatellite))
+	{
+		return;
+	}
+	GravityEvidenceLogRemainingSeconds = 1.0f;
+
+	for (TActorIterator<AABTSM25BirdCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsSlingshotFlightActive())
+		{
+			continue;
+		}
+		const FVector Location = It->GetActorLocation();
+		const FVector SatelliteAcceleration =
+			ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Location);
+		const float SurfaceClearanceCM = FVector::Distance(
+			Location,
+			RuntimeSatellite->GetPlanetCenterWorld())
+			- RuntimeSatellite->GetPlanetRadiusCM();
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3R5.1][RuntimePractice][FlightGravity] Bird=%s Enabled=%d Acceleration=%.3f SurfaceClearance=%.1f Location=%s"),
+			*GetNameSafe(*It),
+			RuntimeSatellite->bGravityEnabled ? 1 : 0,
+			SatelliteAcceleration.Size(),
+			SurfaceClearanceCM,
+			*Location.ToCompactString());
+		break;
+	}
+}
+
+AABTSM51SlingshotCord*
+AABTSM3MonthlySatellitePracticeRuntime::GetRuntimePracticeCord() const
+{
+	return IsValid(RuntimePracticeSlingshot)
+		? RuntimePracticeSlingshot->GetRuntimeCord()
+		: nullptr;
 }
 
 bool AABTSM3MonthlySatellitePracticeRuntime::IsSatelliteGravityEnabled() const
@@ -502,6 +651,26 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 		RuntimeE5Target->Destroy();
 	}
 	RuntimeE5Target = nullptr;
+	if (IsValid(RuntimePracticeSlingshot))
+	{
+		TArray<AActor*> OwnedSlingshotActors;
+		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+		{
+			if (It->GetOwner() == RuntimePracticeSlingshot.Get())
+			{
+				OwnedSlingshotActors.Add(*It);
+			}
+		}
+		for (AActor* OwnedActor : OwnedSlingshotActors)
+		{
+			if (IsValid(OwnedActor) && !OwnedActor->IsActorBeingDestroyed())
+			{
+				OwnedActor->Destroy();
+			}
+		}
+		RuntimePracticeSlingshot->Destroy();
+	}
+	RuntimePracticeSlingshot = nullptr;
 	if (IsValid(RuntimeSatellite)
 		&& !RuntimeSatellite->IsActorBeingDestroyed())
 	{
@@ -513,6 +682,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 	bSatelliteCollisionEnabled = false;
 	bE5CollisionEnabled = false;
 	bM6TargetBound = false;
+	bPracticeSlingshotReady = false;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::EndPlay(

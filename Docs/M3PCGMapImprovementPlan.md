@@ -9,7 +9,7 @@
 >
 > 当前 PIE 边界仍需明确：R-5 的 `F7` 红色 Target Footprint 与橙色 Attack Corridor 已消费上述新布局；玩家世界中的 M7 实体建筑仍由兼容 TaskGraph 生成，只有 R-6/Integration 将唯一月度 Candidate 导出并实例化后，实体建筑才会移动到这些目标范围。因此在 R-6 前，应以逻辑区域叠层和 `[ABTS][PCG][EncounterReach]` 厘米日志验收本次修正，不能把旧实体建筑位置误报为 R-3 参数未生效。
 >
-> 2026-08-01 卫星预览补齐：R-5.1 已把冻结 `SatellitePracticePreset` 按精确 R-3/R-3.1 Candidate 投影为 M9 练习卫星与 E5 背面目标 Transform。`F7` 增加蓝色卫星、洋红 E5 代理、黄色参考桩对和青色空间关系线。显式精确预览现在还会把该 Candidate 持久化为会话快照，替换兼容 TaskGraph 的旧 M9 Actor，并生成真实卫星碰撞、洋红 E5 碰撞代理和 M6 PracticeTarget；`abts.Calibration.SatelliteGravity=-1/0/1` 分别使用冻结默认值/关闭/开启卫星重力。该诊断桥不生成 M7 建筑、不改变 R-5 Biome 或 `MonthlyAccepted`，也不会在非显式预览中运行。细节与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
+> 2026-08-01 卫星预览补齐：R-5.1 已把冻结 `SatellitePracticePreset` 按精确 R-3/R-3.1 Candidate 投影为 M9 练习卫星与 E5 背面目标 Transform。`F7` 增加蓝色卫星、洋红 E5 代理、黄色参考桩对和青色空间关系线。显式精确预览现在还会把该 Candidate 持久化为会话快照，替换兼容 TaskGraph 的旧 M9 Actor，并生成真实卫星碰撞、洋红 E5 碰撞代理、M6 PracticeTarget，以及 Pouch/Forward/Up 与候选发射帧精确一致的真实强化弹弓；后者修复了旧 TaskGraph 调试弹弓与冻结卫星布局错位、只能得到不可读远场引力的问题。`abts.Calibration.SatelliteGravity=-1/0/1` 分别使用冻结默认值/关闭/开启卫星重力；独立 PIE/Standalone 必须在运行游戏进程的控制台中设置，Editor 进程的 CVar 不会跨进程传播。该诊断桥不生成 M7 建筑、不改变 R-5 Biome 或 `MonthlyAccepted`，也不会在非显式预览中运行。细节与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
 
 父文档：
 

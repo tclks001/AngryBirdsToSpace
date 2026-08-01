@@ -9,7 +9,9 @@
 
 class AABTSCalibrationTargetProxy;
 class AABTSM3Planet;
+class AABTSM51SlingshotCord;
 class AABTSM6SlingshotSystem;
+class AABTSM71PlaceableSlingshotActor;
 class AABTSM9Satellite;
 
 /**
@@ -99,15 +101,19 @@ public:
 	bool IsSatelliteCollisionEnabled() const { return bSatelliteCollisionEnabled; }
 	bool IsE5CollisionEnabled() const { return bE5CollisionEnabled; }
 	bool IsM6TargetBound() const { return bM6TargetBound; }
+	bool IsPracticeSlingshotReady() const { return bPracticeSlingshotReady; }
 	bool IsSatelliteGravityEnabled() const;
 	int32 GetSatelliteGravityOverride() const { return LastGravityOverride; }
 	AABTSM9Satellite* GetRuntimeSatellite() const { return RuntimeSatellite.Get(); }
 	AABTSCalibrationTargetProxy* GetRuntimeE5Target() const { return RuntimeE5Target.Get(); }
+	AABTSM51SlingshotCord* GetRuntimePracticeCord() const;
 
 private:
 	bool SpawnSnapshotActors();
+	bool SpawnPracticeSlingshot();
 	bool BindM6Target();
 	void ApplyGravityOverride(bool bForceLog);
+	void LogGravityEvidence(float DeltaSeconds);
 	void ClearOwnedRuntime();
 	void RefreshReadyState();
 
@@ -127,6 +133,9 @@ private:
 	TObjectPtr<AABTSCalibrationTargetProxy> RuntimeE5Target;
 
 	UPROPERTY(Transient)
+	TObjectPtr<AABTSM71PlaceableSlingshotActor> RuntimePracticeSlingshot;
+
+	UPROPERTY(Transient)
 	TObjectPtr<AABTSM6SlingshotSystem> BoundSlingshotSystem;
 
 	int64 SourcePreviewResultHash = 0;
@@ -137,4 +146,6 @@ private:
 	bool bSatelliteCollisionEnabled = false;
 	bool bE5CollisionEnabled = false;
 	bool bM6TargetBound = false;
+	bool bPracticeSlingshotReady = false;
+	float GravityEvidenceLogRemainingSeconds = 0.0f;
 };
