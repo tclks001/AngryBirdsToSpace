@@ -5497,6 +5497,13 @@ bool ABTS::M11Search::CandidateSearch::EvaluateInput(
 		OutEvaluation.TargetHitPositionCM = TargetHit->PositionCM;
 		OutEvaluation.TargetHitVelocityCMPerSec =
 			TargetHit->VelocityCMPerSec;
+		if (const M11Core::TrajectoryEvent* Assist3Exit =
+			Result.FindAssistEvent(
+				M11Core::TrajectoryEventType::AssistExit, 3))
+		{
+			OutEvaluation.HasOrderedTerminalHit =
+				TargetHit->TimeSeconds > Assist3Exit->TimeSeconds;
+		}
 	}
 	OutEvaluation.ResultHash = Result.ValidationHash;
 	if (OutFailure != nullptr)

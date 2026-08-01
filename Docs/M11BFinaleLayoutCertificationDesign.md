@@ -649,6 +649,17 @@ PIE 手感复核，它以 Editor-only `abts.M11.CandidateRank 7` 追加到控制
 不得宣称 runtime-qualified F4，也不得直接成为完整认证输入；后续搜索必须先把
 终端事件顺序加入 Core F4 权威判定，再寻找或修复候选。
 
+### 候选 353 的 F3 扩大微调（Candidate 21）
+
+研究清单位于 `Tools/M11Core/Candidates/Rank3F3ExpansionCandidate21.json`。本轮认证
+CLI 将 F4 收紧为 `Assist3 Exit` 之后发生 `TargetHit`，避免把第三行星作用区内的
+提前接触误计为终局成功。以候选 353 为上游基线，局部调整 Assist3 出口映射，
+并将 UFO 命中半径从 12000 cm 收紧为 6000 cm 后，half-cell 结果为
+`27713 → 20976 → 1538 → 480`，其中 `F3/F2=7.33%`，高于候选 353 的
+`1491/20976=7.11%`；F4 的 480 个样本构成唯一六邻域分量，名义输入也满足严格
+F4。F3 仍含一个 1536 点主分量和两个边界样本，因此该结果仍是研究候选，不能
+写入 Certified Bundle，也不替换 Rank 0。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`

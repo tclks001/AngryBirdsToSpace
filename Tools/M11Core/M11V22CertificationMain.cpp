@@ -1241,6 +1241,11 @@ namespace
 							continue;
 						}
 						if (Evaluation.PrefixMembership[3]
+							&& !Evaluation.HasOrderedTerminalHit)
+						{
+							Evaluation.PrefixMembership[3] = false;
+						}
+						if (Evaluation.PrefixMembership[3]
 							&& OptionsValue.ArrivalConeDegrees < 180.0)
 						{
 							const ABTS::M11Core::Vec3d ArrivalDirection =
