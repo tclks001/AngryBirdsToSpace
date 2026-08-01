@@ -23,6 +23,143 @@ namespace ABTSM3MonthlySatellitePracticeRuntimePrivate
 {
 constexpr TCHAR SatelliteGravityCVarName[] =
 	TEXT("abts.Calibration.SatelliteGravity");
+constexpr float MaximumSatelliteFacingErrorDegrees = 5.0f;
+
+struct FFacingAlignedSatellitePlacement
+{
+	FVector AnchorDirection = FVector::ZeroVector;
+	FVector SurfaceWorld = FVector::ZeroVector;
+	FVector SurfaceNormal = FVector::ZeroVector;
+	FVector CenterWorld = FVector::ZeroVector;
+	int32 AnchorCellId = INDEX_NONE;
+	float FacingErrorDegrees = 180.0f;
+	float CorrectionAzimuthDegrees = 0.0f;
+};
+
+bool ResolveFacingAlignedSatellitePlacement(
+	AABTSM3Planet& Planet,
+	const FTransform& LaunchTransform,
+	const FABTSSatellitePracticePreset& Preset,
+	FFacingAlignedSatellitePlacement& OutPlacement)
+{
+	const FVector LaunchWorld = LaunchTransform.GetLocation();
+	const FVector LaunchForward = LaunchTransform.GetUnitAxis(EAxis::X).GetSafeNormal();
+	const FVector LaunchUp = LaunchTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+	const FVector LaunchRadial =
+		(LaunchWorld - Planet.GetPlanetCenterWorld()).GetSafeNormal();
+	FVector ArcTangent = FVector::VectorPlaneProject(
+		LaunchForward,
+		LaunchRadial).GetSafeNormal();
+	if (LaunchForward.IsNearlyZero()
+		|| LaunchUp.IsNearlyZero()
+		|| LaunchRadial.IsNearlyZero()
+		|| ArcTangent.IsNearlyZero())
+	{
+		return false;
+	}
+	ArcTangent = ArcTangent.RotateAngleAxis(
+		Preset.SatelliteAnchorAzimuthDegrees,
+		LaunchRadial).GetSafeNormal();
+	const float ArcRadians = FMath::DegreesToRadians(
+		Preset.SatelliteAnchorArcDegrees);
+	const float CenterClearanceCM = Planet.GetPlanetRadiusCM()
+		* Preset.SatelliteCenterClearancePrimaryRatio;
+
+	const auto Evaluate = [&](
+		const float CorrectionAzimuthDegrees,
+		FFacingAlignedSatellitePlacement& OutCandidate)
+	{
+		const FVector CorrectedTangent = ArcTangent.RotateAngleAxis(
+			CorrectionAzimuthDegrees,
+			LaunchRadial).GetSafeNormal();
+		const FVector AnchorDirection =
+			(LaunchRadial * FMath::Cos(ArcRadians)
+				+ CorrectedTangent * FMath::Sin(ArcRadians)).GetSafeNormal();
+		FVector SurfaceWorld = FVector::ZeroVector;
+		FVector SurfaceNormal = FVector::ZeroVector;
+		float SurfaceRadiusCM = 0.0f;
+		int32 SurfaceCellId = INDEX_NONE;
+		if (AnchorDirection.IsNearlyZero()
+			|| !Planet.QuerySurface(
+				AnchorDirection,
+				SurfaceWorld,
+				SurfaceNormal,
+				SurfaceRadiusCM,
+				SurfaceCellId)
+			|| !SurfaceNormal.Normalize())
+		{
+			return false;
+		}
+		const FVector CenterWorld =
+			SurfaceWorld + SurfaceNormal * CenterClearanceCM;
+		const FVector SightTangent = FVector::VectorPlaneProject(
+			CenterWorld - LaunchWorld,
+			LaunchUp).GetSafeNormal();
+		if (SightTangent.IsNearlyZero())
+		{
+			return false;
+		}
+		OutCandidate.AnchorDirection = AnchorDirection;
+		OutCandidate.SurfaceWorld = SurfaceWorld;
+		OutCandidate.SurfaceNormal = SurfaceNormal;
+		OutCandidate.CenterWorld = CenterWorld;
+		OutCandidate.AnchorCellId = SurfaceCellId;
+		OutCandidate.FacingErrorDegrees = FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(SightTangent, LaunchForward),
+				-1.0f,
+				1.0f)));
+		OutCandidate.CorrectionAzimuthDegrees = CorrectionAzimuthDegrees;
+		return FMath::IsFinite(OutCandidate.FacingErrorDegrees);
+	};
+	const auto TryCandidate = [&OutPlacement, &Evaluate](
+		const float CorrectionAzimuthDegrees,
+		bool& bInOutFound)
+	{
+		FFacingAlignedSatellitePlacement Candidate;
+		if (!Evaluate(CorrectionAzimuthDegrees, Candidate))
+		{
+			return;
+		}
+		const bool bBetter = !bInOutFound
+			|| Candidate.FacingErrorDegrees
+				< OutPlacement.FacingErrorDegrees - 0.0001f
+			|| (FMath::IsNearlyEqual(
+					Candidate.FacingErrorDegrees,
+					OutPlacement.FacingErrorDegrees,
+					0.0001f)
+				&& FMath::Abs(Candidate.CorrectionAzimuthDegrees)
+					< FMath::Abs(OutPlacement.CorrectionAzimuthDegrees));
+		if (bBetter)
+		{
+			OutPlacement = Candidate;
+			bInOutFound = true;
+		}
+	};
+
+	bool bFound = false;
+	for (int32 Step = -45; Step <= 45; ++Step)
+	{
+		TryCandidate(static_cast<float>(Step) * 2.0f, bFound);
+	}
+	if (!bFound)
+	{
+		return false;
+	}
+	const float CoarseBest = OutPlacement.CorrectionAzimuthDegrees;
+	for (int32 Step = -20; Step <= 20; ++Step)
+	{
+		TryCandidate(CoarseBest + static_cast<float>(Step) * 0.1f, bFound);
+	}
+	const float FineBest = OutPlacement.CorrectionAzimuthDegrees;
+	for (int32 Step = -20; Step <= 20; ++Step)
+	{
+		TryCandidate(FineBest + static_cast<float>(Step) * 0.005f, bFound);
+	}
+	return bFound
+		&& OutPlacement.FacingErrorDegrees
+			<= MaximumSatelliteFacingErrorDegrees;
+}
 
 uint64 AddHashValue(uint64 Hash, const uint64 Value)
 {
@@ -231,33 +368,20 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	const FABTSSatellitePracticePreset FrozenPreset =
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeFrozenSatellitePracticePresetV0();
-	const FVector LaunchUp = RuntimeSnapshot.PracticeLaunchWorldTransform
-		.GetUnitAxis(EAxis::Z).GetSafeNormal();
-	const FVector LaunchForward = RuntimeSnapshot.PracticeLaunchWorldTransform
-		.GetUnitAxis(EAxis::X).GetSafeNormal();
-	const float ArcRadians = FMath::DegreesToRadians(
-		FrozenPreset.SatelliteAnchorArcDegrees);
-	const FVector SatelliteAnchorDirection =
-		(LaunchUp * FMath::Cos(ArcRadians)
-			+ LaunchForward * FMath::Sin(ArcRadians)).GetSafeNormal();
-	FVector SurfaceWorld = FVector::ZeroVector;
-	FVector SurfaceNormal = FVector::ZeroVector;
-	float SurfaceRadiusCM = 0.0f;
-	int32 SurfaceCellId = INDEX_NONE;
-	if (!PrimaryPlanet->QuerySurface(
-			SatelliteAnchorDirection,
-			SurfaceWorld,
-			SurfaceNormal,
-			SurfaceRadiusCM,
-			SurfaceCellId)
-		|| !SurfaceNormal.Normalize())
+	ABTSM3MonthlySatellitePracticeRuntimePrivate::
+		FFacingAlignedSatellitePlacement SatellitePlacement;
+	if (!ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			ResolveFacingAlignedSatellitePlacement(
+				*PrimaryPlanet,
+				RuntimeSnapshot.PracticeLaunchWorldTransform,
+				FrozenPreset,
+				SatellitePlacement))
 	{
-		return RejectSpawn(TEXT("SatelliteSurfaceQuery"));
+		return RejectSpawn(TEXT("SatelliteFacingAlignment"));
 	}
 	const float CenterClearanceCM = PrimaryPlanet->GetPlanetRadiusCM()
 		* FrozenPreset.SatelliteCenterClearancePrimaryRatio;
-	const FVector ExpectedSatelliteCenter =
-		SurfaceWorld + SurfaceNormal * CenterClearanceCM;
+	const FVector ExpectedSatelliteCenter = SatellitePlacement.CenterWorld;
 
 	RuntimeSatellite =
 		GetWorld()->SpawnActorDeferred<AABTSM9Satellite>(
@@ -269,7 +393,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	if (RuntimeSatellite == nullptr
 		|| !RuntimeSatellite->ConfigureFromPrimaryDirection(
 			*PrimaryPlanet,
-			SatelliteAnchorDirection,
+			SatellitePlacement.AnchorDirection,
 			CandidateSnapshot.SatelliteRadiusCM,
 			CenterClearanceCM,
 			CandidateSnapshot.SatelliteSurfaceGravityCMPerSec2))
@@ -297,7 +421,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	}
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M3R5.1][RuntimePractice] RealCellSatelliteApplied AnchorCell=%d CandidateAnchorCell=%d DeltaFromPreview=%.2f"),
-		SurfaceCellId,
+		SatellitePlacement.AnchorCellId,
 		CandidateSnapshot.SatelliteAnchorCellId,
 		FVector::Distance(
 			RuntimeSatellite->GetActorLocation(),
@@ -385,7 +509,11 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		CandidateSnapshot.SatellitePracticePresetVersion;
 	RuntimeSnapshot.SatellitePracticePresetHash =
 		CandidateSnapshot.SatellitePracticePresetHash;
-	RuntimeSnapshot.SatelliteAnchorCellId = SurfaceCellId;
+	RuntimeSnapshot.SatelliteAnchorCellId = SatellitePlacement.AnchorCellId;
+	RuntimeSnapshot.SatelliteFacingErrorDegrees =
+		SatellitePlacement.FacingErrorDegrees;
+	RuntimeSnapshot.SatelliteFacingCorrectionAzimuthDegrees =
+		SatellitePlacement.CorrectionAzimuthDegrees;
 	RuntimeSnapshot.SatelliteWorldTransform =
 		RuntimeSatellite->GetActorTransform();
 	RuntimeSnapshot.SatelliteRadiusCM =
@@ -413,6 +541,13 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	{
 		return RejectSpawn(TEXT("E5PawnCollision"));
 	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5.1][RuntimePractice][Facing] ErrorDegrees=%.3f MaximumDegrees=%.3f CorrectionAzimuthDegrees=%.3f AnchorCell=%d"),
+		RuntimeSnapshot.SatelliteFacingErrorDegrees,
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			MaximumSatelliteFacingErrorDegrees,
+		RuntimeSnapshot.SatelliteFacingCorrectionAzimuthDegrees,
+		RuntimeSnapshot.SatelliteAnchorCellId);
 	return RuntimeSnapshot.bValid;
 }
 

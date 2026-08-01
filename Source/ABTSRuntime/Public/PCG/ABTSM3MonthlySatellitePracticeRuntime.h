@@ -65,6 +65,14 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int32 SatelliteAnchorCellId = INDEX_NONE;
 
+	/** Tangent-plane angle between the physical pouch forward and satellite sightline. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "deg"))
+	float SatelliteFacingErrorDegrees = 180.0f;
+
+	/** Deterministic correction around the frozen satellite arc ring. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "deg"))
+	float SatelliteFacingCorrectionAzimuthDegrees = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	FTransform SatelliteWorldTransform = FTransform::Identity;
 

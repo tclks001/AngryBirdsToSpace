@@ -1329,6 +1329,7 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 			FTransform DrawE5Transform = SatellitePreview->E5TargetWorldTransform;
 			FVector DrawE5HalfExtentCM = SatellitePreview->E5TargetHalfExtentCM;
 			FVector DrawLaunchWorld = SatellitePreview->LaunchWorldLocation;
+			float DrawFacingErrorDegrees = -1.0f;
 			for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(GetWorld()); It; ++It)
 			{
 				const FABTSM3MonthlySatelliteRuntimeSnapshot& Runtime =
@@ -1346,6 +1347,7 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				DrawSatelliteRadiusCM = Runtime.SatelliteRadiusCM;
 				DrawE5Transform = Runtime.E5WorldTransform;
 				DrawE5HalfExtentCM = Runtime.E5HalfExtentCM;
+				DrawFacingErrorDegrees = Runtime.SatelliteFacingErrorDegrees;
 				break;
 			}
 			const FVector DrawSatelliteOutward =
@@ -1390,6 +1392,22 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				DrawLifeTime,
 				0,
 				6.0f);
+			if (DrawFacingErrorDegrees >= 0.0f)
+			{
+				DrawDebugString(
+					GetWorld(),
+					DrawLaunchWorld,
+					FString::Printf(
+						TEXT("SAT FACING %.2f deg"),
+						DrawFacingErrorDegrees),
+					nullptr,
+					DrawFacingErrorDegrees <= 5.0f
+						? FColor::Green
+						: FColor::Red,
+					DrawLifeTime,
+					false,
+					1.1f);
+			}
 			DrawDebugBox(
 				GetWorld(),
 				DrawE5Transform.GetLocation(),

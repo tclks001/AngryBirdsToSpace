@@ -76,8 +76,10 @@ Candidate 中的桩对中点只适合无 Actor 的规划预览，不能作为曲
 1. 用 `ReferenceSlotACellId/ReferenceSlotBCellId` 读取两个 `LogicalCells[].UnitCenter`，分别调用当前 Planet 的 `QuerySurface`；
 2. 每根强化桩的可视底面落在各自返回的 `WorldLocation`，桩轴使用该次查询的真实地表法线；不得把两个地表点的空间中点当作共同地面；
 3. 用两根实际桩顶生成正式 M5.1 强化弦，弦的 `GetRestPouchTransform()` 成为本会话唯一发射局部帧；
-4. 冻结 Preset 的卫星弧距从实际 Pouch 的 `Forward/Up` 重新求锚点方向，再次查询真实主星地表 Cell；卫星中心和 E5 背面代理均从该解析结果生成；
-5. 任一 Cell 无效、地表查询失败、桩底误差超过 `1 cm`、卫星锚点失败或碰撞/M6 绑定失败时，整套诊断布局 fail closed。
+4. 冻结 Preset 的卫星弧距从实际 Pouch 的 `Forward` 与 Pouch 相对主星中心的真实径向重新求锚点方向，再次查询真实主星地表 Cell；卫星中心和 E5 背面代理均从该解析结果生成；
+5. 卫星弧距以 Pouch 相对主星中心的真实径向为基准，而不是把局部坡面法线误作主星径向；在冻结的 30° 弧环上确定性搜索方位修正；
+6. 把卫星中心视线投影到实际 Pouch 的 `Forward/Right` 平面后，与 Pouch `Forward` 的夹角必须 `<=5°`；
+7. 任一 Cell 无效、地表查询失败、桩底误差超过 `1 cm`、朝向误差超过 `5°`、卫星锚点失败或碰撞/M6 绑定失败时，整套诊断布局 fail closed。
 
 运行时使用正式 `AABTSM51SlingshotStake/AABTSM51SlingshotCord`，不再依赖 M7 TestStage 的固定间距整套弹弓 Actor。这样既消除了曲面中点下沉，也保证后续 M6 读取的就是画面中的真实弦袋。
 
@@ -87,7 +89,7 @@ Candidate 中的桩对中点只适合无 Actor 的规划预览，不能作为曲
 - fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确发现并通过 `3/3`：候选绑定/确定性核心、失败闭合、真实 Cell 桩底、运行时快照/碰撞/M6 绑定/重力切换。
 - 展示 Seed `312503` 生成 3 个候选，`SourceSpatial=16A44AF72C58261E`、`SourceFields=E7EA3FB5463E395B`、`Result=5CEF57BB1A3C245F`。
 - 每个候选均验证冻结 Preset 身份、非零卫星半径、E5 背面关系、目标盒球面贴合、Candidate/Result Hash 重算和重复重建 whole-struct 一致。
-- 2026-08-01 真实 Cell 修复的展示 Seed 证据为：强化桩 `CellA=2646/ResolvedA=2646`、`CellB=2647/ResolvedB=2647`，两个桩底误差均为 `0.000 cm`；实际弦袋相对旧中点估计移动 `262.25 cm`，对应卫星重新解析到锚点 Cell `3772`。强制 Unity 全链接通过，fresh NullRHI 专项 `3/3`、完整 `ABTS.M3` `59/59` 通过。
+- 2026-08-01 真实 Cell 与朝向修复的展示 Seed 证据为：强化桩 `CellA=2646/ResolvedA=2646`、`CellB=2647/ResolvedB=2647`，两个桩底误差均为 `0.000 cm`；实际弦袋相对旧中点估计移动 `262.25 cm`。卫星弧环施加 `-7.435°` 确定性方位修正后解析到锚点 Cell `4218`，独立计算的 Pouch Forward—卫星投影视线误差为 `0.002°`。强制 Unity 全链接、fresh NullRHI 专项 `3/3`、世界生成合同 `2/2` 和 `L_ABTS_M10` fresh runtime 均通过；F7 在弦袋处显示 `SAT FACING <角度> deg` 作为可见验收证据。完整 `ABTS.M3` 首轮为 `58/59`，唯一失败是无调用关系的 Biome 100 Seed 性能门 `P95=250.469 ms` 比门槛高 `0.469 ms`；同一筛选器独立 fresh 重跑以 `P95=236.763 ms`、相同 Oracle Hash 通过。
 
 ## 6. 集成交接清单
 

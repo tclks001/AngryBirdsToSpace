@@ -373,6 +373,26 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 			Snapshot.SatelliteWorldTransform.Equals(
 				Runtime->GetRuntimeSatellite()->GetActorTransform(),
 				0.1f));
+		const FVector LaunchForward = Snapshot.PracticeLaunchWorldTransform
+			.GetUnitAxis(EAxis::X).GetSafeNormal();
+		const FVector LaunchUp = Snapshot.PracticeLaunchWorldTransform
+			.GetUnitAxis(EAxis::Z).GetSafeNormal();
+		const FVector SatelliteSightTangent = FVector::VectorPlaneProject(
+			Snapshot.SatelliteWorldTransform.GetLocation()
+				- Snapshot.PracticeLaunchWorldTransform.GetLocation(),
+			LaunchUp).GetSafeNormal();
+		const float IndependentFacingErrorDegrees = FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(LaunchForward, SatelliteSightTangent),
+				-1.0f,
+				1.0f)));
+		TestTrue(TEXT("Physical reinforced slingshot faces the satellite within five degrees"),
+			IndependentFacingErrorDegrees <= 5.0f);
+		TestTrue(TEXT("Persisted satellite facing error matches the independent oracle"),
+			FMath::IsNearlyEqual(
+				Snapshot.SatelliteFacingErrorDegrees,
+				IndependentFacingErrorDegrees,
+				0.01f));
 	}
 	if (Runtime->GetRuntimeE5Target() != nullptr)
 	{
