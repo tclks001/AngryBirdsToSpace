@@ -13,8 +13,8 @@
 #include "ProceduralMeshComponent.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "Terrain/ABTSM3Planet.h"
-#include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "World/ABTSM9Satellite.h"
@@ -37,12 +37,33 @@ uint64 AddHashValue(uint64 Hash, const uint64 Value)
 uint64 ComputeRuntimeLayoutSnapshotHash(
 	const int64 PreviewResultHash,
 	const int64 CandidateHash,
-	const uint64 GravitySnapshotHash)
+	const uint64 GravitySnapshotHash,
+	const FTransform& PracticeLaunchWorldTransform,
+	const int32 PracticeStakeACellId,
+	const int32 PracticeStakeBCellId)
 {
 	uint64 Hash = 14695981039346656037ull;
 	Hash = AddHashValue(Hash, static_cast<uint64>(PreviewResultHash));
 	Hash = AddHashValue(Hash, static_cast<uint64>(CandidateHash));
 	Hash = AddHashValue(Hash, GravitySnapshotHash);
+	Hash = AddHashValue(Hash, static_cast<uint32>(PracticeStakeACellId));
+	Hash = AddHashValue(Hash, static_cast<uint32>(PracticeStakeBCellId));
+	const FVector Location = PracticeLaunchWorldTransform.GetLocation();
+	FQuat Rotation = PracticeLaunchWorldTransform.GetRotation().GetNormalized();
+	if (Rotation.W < 0.0)
+	{
+		Rotation.X = -Rotation.X;
+		Rotation.Y = -Rotation.Y;
+		Rotation.Z = -Rotation.Z;
+		Rotation.W = -Rotation.W;
+	}
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Location.X * 10.0)));
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Location.Y * 10.0)));
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Location.Z * 10.0)));
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Rotation.X * 100000.0)));
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Rotation.Y * 100000.0)));
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Rotation.Z * 100000.0)));
+	Hash = AddHashValue(Hash, static_cast<uint64>(FMath::RoundToInt64(Rotation.W * 100000.0)));
 	return Hash;
 }
 
@@ -155,12 +176,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		Satellite->Destroy();
 	}
 
-	if (!SpawnSnapshotActors())
+	if (!SpawnPracticeSlingshot())
 	{
 		ClearOwnedRuntime();
 		return false;
 	}
-	if (!SpawnPracticeSlingshot())
+	if (!SpawnSnapshotActors())
 	{
 		ClearOwnedRuntime();
 		return false;
@@ -207,12 +228,24 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 			Reason);
 		return false;
 	};
+	const FABTSSatellitePracticePreset FrozenPreset =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenSatellitePracticePresetV0();
+	const FVector LaunchUp = RuntimeSnapshot.PracticeLaunchWorldTransform
+		.GetUnitAxis(EAxis::Z).GetSafeNormal();
+	const FVector LaunchForward = RuntimeSnapshot.PracticeLaunchWorldTransform
+		.GetUnitAxis(EAxis::X).GetSafeNormal();
+	const float ArcRadians = FMath::DegreesToRadians(
+		FrozenPreset.SatelliteAnchorArcDegrees);
+	const FVector SatelliteAnchorDirection =
+		(LaunchUp * FMath::Cos(ArcRadians)
+			+ LaunchForward * FMath::Sin(ArcRadians)).GetSafeNormal();
 	FVector SurfaceWorld = FVector::ZeroVector;
 	FVector SurfaceNormal = FVector::ZeroVector;
 	float SurfaceRadiusCM = 0.0f;
 	int32 SurfaceCellId = INDEX_NONE;
 	if (!PrimaryPlanet->QuerySurface(
-			CandidateSnapshot.SatelliteAnchorDirection,
+			SatelliteAnchorDirection,
 			SurfaceWorld,
 			SurfaceNormal,
 			SurfaceRadiusCM,
@@ -221,13 +254,10 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	{
 		return RejectSpawn(TEXT("SatelliteSurfaceQuery"));
 	}
-	const float CenterClearanceCM = FVector::DotProduct(
-		CandidateSnapshot.SatelliteCenterWorld - SurfaceWorld,
-		SurfaceNormal);
-	if (CenterClearanceCM < 0.0f)
-	{
-		return RejectSpawn(TEXT("NegativeSatelliteClearance"));
-	}
+	const float CenterClearanceCM = PrimaryPlanet->GetPlanetRadiusCM()
+		* FrozenPreset.SatelliteCenterClearancePrimaryRatio;
+	const FVector ExpectedSatelliteCenter =
+		SurfaceWorld + SurfaceNormal * CenterClearanceCM;
 
 	RuntimeSatellite =
 		GetWorld()->SpawnActorDeferred<AABTSM9Satellite>(
@@ -239,23 +269,13 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	if (RuntimeSatellite == nullptr
 		|| !RuntimeSatellite->ConfigureFromPrimaryDirection(
 			*PrimaryPlanet,
-			CandidateSnapshot.SatelliteAnchorDirection,
+			SatelliteAnchorDirection,
 			CandidateSnapshot.SatelliteRadiusCM,
 			CenterClearanceCM,
 			CandidateSnapshot.SatelliteSurfaceGravityCMPerSec2))
 	{
 		return RejectSpawn(TEXT("SatelliteSpawnOrConfigure"));
 	}
-	const FVector DirectionConfiguredCenter =
-		RuntimeSatellite->GetConfiguredCenterWorld();
-	// The continuous sphere is intentionally Static after FinishSpawning. Apply
-	// the persisted candidate translation while the Actor is still deferred so
-	// its collision body is born at the F7 snapshot instead of being moved later.
-	RuntimeSatellite->SetActorLocation(
-		CandidateSnapshot.SatelliteCenterWorld,
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics);
 	RuntimeSatellite->bGravityEnabled = true;
 	UGameplayStatics::FinishSpawningActor(
 		RuntimeSatellite,
@@ -266,20 +286,21 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		return RejectSpawn(TEXT("SatelliteRebuild"));
 	}
 	if (!RuntimeSatellite->GetActorLocation().Equals(
-			CandidateSnapshot.SatelliteCenterWorld,
+			ExpectedSatelliteCenter,
 			1.0f))
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=SatelliteCenterMismatch Actual=%s DirectionConfigured=%s Candidate=%s"),
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=SatelliteCenterMismatch Actual=%s Expected=%s"),
 			*RuntimeSatellite->GetActorLocation().ToCompactString(),
-			*DirectionConfiguredCenter.ToCompactString(),
-			*CandidateSnapshot.SatelliteCenterWorld.ToCompactString());
+			*ExpectedSatelliteCenter.ToCompactString());
 		return false;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice] SnapshotCenterApplied DeltaFromM9Query=%.2f"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice] RealCellSatelliteApplied AnchorCell=%d CandidateAnchorCell=%d DeltaFromPreview=%.2f"),
+		SurfaceCellId,
+		CandidateSnapshot.SatelliteAnchorCellId,
 		FVector::Distance(
-			DirectionConfiguredCenter,
+			RuntimeSatellite->GetActorLocation(),
 			CandidateSnapshot.SatelliteCenterWorld));
 	RuntimeSatellite->SetActorEnableCollision(true);
 	if (RuntimeSatellite->ContinuousSurface)
@@ -291,10 +312,39 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		RuntimeSatellite->ContinuousSurface->RecreatePhysicsState();
 	}
 
+	FABTSCalibrationGravitySnapshot GravitySnapshot;
+	const FABTSM6LaunchProfileCatalog FrozenCatalog =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
+	GravitySnapshot.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
+	GravitySnapshot.PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
+	GravitySnapshot.PrimarySurfaceGravityCMPerSec2 = 980.0f;
+	GravitySnapshot.SatelliteCenterWorld = RuntimeSatellite->GetPlanetCenterWorld();
+	GravitySnapshot.SatelliteRadiusCM = RuntimeSatellite->GetPlanetRadiusCM();
+	GravitySnapshot.SatelliteSurfaceGravityCMPerSec2 =
+		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
+	GravitySnapshot.FlightAirDragPerSecond =
+		FrozenCatalog.FlightAirDragPerSecond;
+	GravitySnapshot.bSatelliteGravityEnabled = true;
+	FTransform ResolvedE5Transform = FTransform::Identity;
+	FString TargetFailure;
+	if (!FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
+			RuntimeSnapshot.PracticeLaunchWorldTransform.GetLocation(),
+			GravitySnapshot,
+			FrozenPreset,
+			ResolvedE5Transform,
+			&TargetFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=E5Transform Detail=%s"),
+			*TargetFailure);
+		return false;
+	}
+
 	RuntimeE5Target =
 		GetWorld()->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
 			AABTSCalibrationTargetProxy::StaticClass(),
-			CandidateSnapshot.E5TargetWorldTransform,
+			ResolvedE5Transform,
 			this,
 			nullptr,
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
@@ -308,7 +358,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		FLinearColor(1.0f, 0.12f, 0.72f, 1.0f));
 	UGameplayStatics::FinishSpawningActor(
 		RuntimeE5Target,
-		CandidateSnapshot.E5TargetWorldTransform);
+		ResolvedE5Transform);
 	RuntimeE5Target->SetActorEnableCollision(true);
 	RuntimeE5Target->AttachToActor(
 		RuntimeSatellite,
@@ -321,20 +371,6 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		ABTSM3MonthlySatellitePracticeRuntimePrivate::
 			HasPawnBlockingCollision(*RuntimeE5Target);
 
-	const FABTSM6LaunchProfileCatalog FrozenCatalog =
-		FABTSSlingshotSatelliteCalibrationModel::
-			MakeFrozenLaunchProfileCatalogV0();
-	FABTSCalibrationGravitySnapshot GravitySnapshot;
-	GravitySnapshot.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
-	GravitySnapshot.PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
-	GravitySnapshot.PrimarySurfaceGravityCMPerSec2 = 980.0f;
-	GravitySnapshot.SatelliteCenterWorld = RuntimeSatellite->GetPlanetCenterWorld();
-	GravitySnapshot.SatelliteRadiusCM = RuntimeSatellite->GetPlanetRadiusCM();
-	GravitySnapshot.SatelliteSurfaceGravityCMPerSec2 =
-		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
-	GravitySnapshot.FlightAirDragPerSecond =
-		FrozenCatalog.FlightAirDragPerSecond;
-	GravitySnapshot.bSatelliteGravityEnabled = true;
 	const uint64 BaselineGravitySnapshotHash =
 		FABTSSlingshotSatelliteCalibrationModel::ComputeGravitySnapshotHash(
 			GravitySnapshot);
@@ -349,6 +385,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		CandidateSnapshot.SatellitePracticePresetVersion;
 	RuntimeSnapshot.SatellitePracticePresetHash =
 		CandidateSnapshot.SatellitePracticePresetHash;
+	RuntimeSnapshot.SatelliteAnchorCellId = SurfaceCellId;
 	RuntimeSnapshot.SatelliteWorldTransform =
 		RuntimeSatellite->GetActorTransform();
 	RuntimeSnapshot.SatelliteRadiusCM =
@@ -364,7 +401,10 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 			ComputeRuntimeLayoutSnapshotHash(
 				SourcePreviewResultHash,
 				CandidateSnapshot.CandidateHash,
-				BaselineGravitySnapshotHash));
+				BaselineGravitySnapshotHash,
+				RuntimeSnapshot.PracticeLaunchWorldTransform,
+				RuntimeSnapshot.PracticeStakeACellId,
+				RuntimeSnapshot.PracticeStakeBCellId));
 	if (!bSatelliteCollisionEnabled)
 	{
 		return RejectSpawn(TEXT("SatellitePawnCollision"));
@@ -384,84 +424,183 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnPracticeSlingshot()
 		return false;
 	}
 
-	const FVector LaunchUp = CandidateSnapshot.LaunchUpWorld.GetSafeNormal();
-	const FVector LaunchForward = FVector::VectorPlaneProject(
-		CandidateSnapshot.LaunchForwardWorld,
-		LaunchUp).GetSafeNormal();
-	if (LaunchUp.IsNearlyZero() || LaunchForward.IsNearlyZero())
+	if (!PrimaryPlanet->LogicalCells.IsValidIndex(
+			CandidateSnapshot.ReferenceSlotACellId)
+		|| !PrimaryPlanet->LogicalCells.IsValidIndex(
+			CandidateSnapshot.ReferenceSlotBCellId))
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=InvalidLaunchFrame"));
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=InvalidReferenceCells A=%d B=%d"),
+			CandidateSnapshot.ReferenceSlotACellId,
+			CandidateSnapshot.ReferenceSlotBCellId);
 		return false;
 	}
 
-	// The monthly preview's reference height deliberately matches the native
-	// reinforced device: 220 cm stake endpoint plus a -30 cm rest-pouch offset.
-	// Spawning the device root at this exact pair midpoint makes M6 consume the
-	// same pouch frame that placed the frozen satellite/E5 snapshot.
-	const FABTSM3MonthlySatellitePreviewConfig PreviewDefaults;
-	const FVector PairMidpoint = CandidateSnapshot.LaunchWorldLocation
-		- LaunchUp * PreviewDefaults.ReferencePouchHeightCM;
-	const FQuat Rotation = FRotationMatrix::MakeFromXZ(
-		LaunchForward,
-		LaunchUp).ToQuat();
+	struct FResolvedStakeSurface
+	{
+		FVector World = FVector::ZeroVector;
+		FVector Normal = FVector::UpVector;
+		int32 CellId = INDEX_NONE;
+	};
+	const auto ResolveStakeSurface = [this](
+		const int32 RequestedCellId,
+		FResolvedStakeSurface& OutSurface)
+	{
+		float RadiusCM = 0.0f;
+		return PrimaryPlanet->QuerySurface(
+			PrimaryPlanet->LogicalCells[RequestedCellId].UnitCenter,
+			OutSurface.World,
+			OutSurface.Normal,
+			RadiusCM,
+			OutSurface.CellId)
+			&& OutSurface.Normal.Normalize();
+	};
+	FResolvedStakeSurface SurfaceA;
+	FResolvedStakeSurface SurfaceB;
+	if (!ResolveStakeSurface(CandidateSnapshot.ReferenceSlotACellId, SurfaceA)
+		|| !ResolveStakeSurface(CandidateSnapshot.ReferenceSlotBCellId, SurfaceB)
+		|| SurfaceA.CellId != CandidateSnapshot.ReferenceSlotACellId
+		|| SurfaceB.CellId != CandidateSnapshot.ReferenceSlotBCellId)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=StakeSurfaceCellMismatch RequestedA=%d ResolvedA=%d RequestedB=%d ResolvedB=%d"),
+			CandidateSnapshot.ReferenceSlotACellId,
+			SurfaceA.CellId,
+			CandidateSnapshot.ReferenceSlotBCellId,
+			SurfaceB.CellId);
+		return false;
+	}
+
+	const FABTSSlingshotVisualPreset VisualPreset =
+		ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Reinforced);
+	const auto SpawnGroundedStake = [this, &VisualPreset](
+		const int32 RequestedCellId,
+		const FResolvedStakeSurface& Surface)
+	{
+		FVector Forward = FVector::VectorPlaneProject(
+			CandidateSnapshot.LaunchForwardWorld,
+			Surface.Normal).GetSafeNormal();
+		if (Forward.IsNearlyZero())
+		{
+			Forward = FVector::VectorPlaneProject(
+				FVector::ForwardVector,
+				Surface.Normal).GetSafeNormal();
+		}
+		const FTransform StakeTransform(
+			FRotationMatrix::MakeFromXZ(Forward, Surface.Normal).ToQuat(),
+			Surface.World + Surface.Normal * (VisualPreset.StakeHeightCM * 0.5f));
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.Owner = this;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AABTSM51SlingshotStake* Stake =
+			GetWorld()->SpawnActor<AABTSM51SlingshotStake>(
+				AABTSM51SlingshotStake::StaticClass(),
+				StakeTransform,
+				SpawnParameters);
+		if (Stake != nullptr)
+		{
+			Stake->InitializeStake(
+				EABTSItemId::ReinforcedStake,
+				RequestedCellId,
+				Surface.Normal);
+		}
+		return Stake;
+	};
+	RuntimePracticeStakeA = SpawnGroundedStake(
+		CandidateSnapshot.ReferenceSlotACellId,
+		SurfaceA);
+	RuntimePracticeStakeB = SpawnGroundedStake(
+		CandidateSnapshot.ReferenceSlotBCellId,
+		SurfaceB);
+	if (!IsValid(RuntimePracticeStakeA) || !IsValid(RuntimePracticeStakeB))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=StakeSpawn"));
+		return false;
+	}
+
+	AABTSM51SlingshotStake* CordStakeA = RuntimePracticeStakeA.Get();
+	AABTSM51SlingshotStake* CordStakeB = RuntimePracticeStakeB.Get();
+	FVector EndpointA = CordStakeA->GetVisualTopWorldLocation();
+	FVector EndpointB = CordStakeB->GetVisualTopWorldLocation();
+	FVector AverageUp = (SurfaceA.Normal + SurfaceB.Normal).GetSafeNormal();
+	const FVector InitialRight = (EndpointB - EndpointA).GetSafeNormal();
+	const FVector InitialForward = FVector::CrossProduct(
+		InitialRight,
+		FVector::VectorPlaneProject(AverageUp, InitialRight).GetSafeNormal()).GetSafeNormal();
+	if (FVector::DotProduct(InitialForward, CandidateSnapshot.LaunchForwardWorld) < 0.0f)
+	{
+		Swap(CordStakeA, CordStakeB);
+		Swap(EndpointA, EndpointB);
+	}
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.Owner = this;
 	SpawnParameters.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	RuntimePracticeSlingshot =
-		GetWorld()->SpawnActor<AABTSM71ReinforcedSlingshotActor>(
-			AABTSM71ReinforcedSlingshotActor::StaticClass(),
-			FTransform(Rotation, PairMidpoint),
-			SpawnParameters);
-	// Minimal automation worlds do not route normal World BeginPlay. The actor's
-	// native BeginPlay is the authority that creates its runtime stakes/cord, so
-	// dispatch it only for that unbegun-world case. A real PIE actor has already
-	// begun play when SpawnActor returns and never enters this branch.
-	if (IsValid(RuntimePracticeSlingshot)
-		&& !RuntimePracticeSlingshot->HasActorBegunPlay())
-	{
-		RuntimePracticeSlingshot->DispatchBeginPlay();
-	}
-	AABTSM51SlingshotCord* Cord = GetRuntimePracticeCord();
-	if (!IsValid(RuntimePracticeSlingshot) || Cord == nullptr)
+	RuntimePracticeCord = GetWorld()->SpawnActor<AABTSM51SlingshotCord>(
+		AABTSM51SlingshotCord::StaticClass(),
+		FTransform::Identity,
+		SpawnParameters);
+	if (!IsValid(RuntimePracticeCord))
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=SpawnOrCord"));
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=CordSpawn"));
 		return false;
 	}
+	RuntimePracticeCord->InitializeCordWithTier(
+		CordStakeA,
+		CordStakeB,
+		EndpointA,
+		EndpointB,
+		EABTSSlingshotTier::Reinforced);
+	CordStakeA->SetHasCord(true);
+	CordStakeB->SetHasCord(true);
 
-	const FVector ActualPouch = Cord->GetRestPouchTransform().GetLocation();
-	const FVector ActualRight = FVector::VectorPlaneProject(
-		Cord->GetEndpointB() - Cord->GetEndpointA(),
-		LaunchUp).GetSafeNormal();
-	const FVector ActualForward = FVector::CrossProduct(
-		ActualRight,
-		LaunchUp).GetSafeNormal();
-	const float PouchErrorCM = FVector::Distance(
-		ActualPouch,
-		CandidateSnapshot.LaunchWorldLocation);
+	const FTransform ActualLaunchTransform =
+		RuntimePracticeCord->GetRestPouchTransform();
+	const FVector ActualPouch = ActualLaunchTransform.GetLocation();
+	const FVector ActualForward = ActualLaunchTransform.GetUnitAxis(EAxis::X);
 	const float ForwardDot = FVector::DotProduct(
 		ActualForward,
-		LaunchForward);
+		CandidateSnapshot.LaunchForwardWorld);
+	const float StakeAGroundErrorCM = FVector::Distance(
+		RuntimePracticeStakeA->GetVisualBottomWorldLocation(),
+		SurfaceA.World);
+	const float StakeBGroundErrorCM = FVector::Distance(
+		RuntimePracticeStakeB->GetVisualBottomWorldLocation(),
+		SurfaceB.World);
 	bPracticeSlingshotReady =
-		Cord->GetSlingshotTier() == EABTSSlingshotTier::Reinforced
-		&& PouchErrorCM <= 1.0f
-		&& ForwardDot >= 0.999f;
+		RuntimePracticeCord->GetSlingshotTier() == EABTSSlingshotTier::Reinforced
+		&& StakeAGroundErrorCM <= 1.0f
+		&& StakeBGroundErrorCM <= 1.0f
+		&& ForwardDot >= 0.0f;
+	RuntimeSnapshot.PracticeStakeACellId =
+		CandidateSnapshot.ReferenceSlotACellId;
+	RuntimeSnapshot.PracticeStakeBCellId =
+		CandidateSnapshot.ReferenceSlotBCellId;
+	RuntimeSnapshot.PracticeStakeASurfaceWorld = SurfaceA.World;
+	RuntimeSnapshot.PracticeStakeBSurfaceWorld = SurfaceB.World;
+	RuntimeSnapshot.PracticeLaunchWorldTransform = ActualLaunchTransform;
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice][Slingshot] Ready=%d Root=%s Pouch=%s CandidatePouch=%s PouchError=%.3f ForwardDot=%.5f Tier=%d"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice][Slingshot] Ready=%d CellA=%d ResolvedA=%d GroundA=%.3f CellB=%d ResolvedB=%d GroundB=%.3f Pouch=%s CandidatePouchDelta=%.2f ForwardDot=%.5f Tier=%d"),
 		bPracticeSlingshotReady ? 1 : 0,
-		*PairMidpoint.ToCompactString(),
+		CandidateSnapshot.ReferenceSlotACellId,
+		SurfaceA.CellId,
+		StakeAGroundErrorCM,
+		CandidateSnapshot.ReferenceSlotBCellId,
+		SurfaceB.CellId,
+		StakeBGroundErrorCM,
 		*ActualPouch.ToCompactString(),
-		*CandidateSnapshot.LaunchWorldLocation.ToCompactString(),
-		PouchErrorCM,
+		FVector::Distance(ActualPouch, CandidateSnapshot.LaunchWorldLocation),
 		ForwardDot,
-		static_cast<int32>(Cord->GetSlingshotTier()));
+		static_cast<int32>(RuntimePracticeCord->GetSlingshotTier()));
 	if (!bPracticeSlingshotReady)
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=FrameMismatch PouchError=%.3f ForwardDot=%.5f"),
-			PouchErrorCM,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=GroundOrFrameMismatch GroundA=%.3f GroundB=%.3f ForwardDot=%.5f"),
+			StakeAGroundErrorCM,
+			StakeBGroundErrorCM,
 			ForwardDot);
 	}
 	return bPracticeSlingshotReady;
@@ -626,9 +765,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::LogGravityEvidence(
 AABTSM51SlingshotCord*
 AABTSM3MonthlySatellitePracticeRuntime::GetRuntimePracticeCord() const
 {
-	return IsValid(RuntimePracticeSlingshot)
-		? RuntimePracticeSlingshot->GetRuntimeCord()
-		: nullptr;
+	return RuntimePracticeCord.Get();
 }
 
 bool AABTSM3MonthlySatellitePracticeRuntime::IsSatelliteGravityEnabled() const
@@ -651,26 +788,24 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 		RuntimeE5Target->Destroy();
 	}
 	RuntimeE5Target = nullptr;
-	if (IsValid(RuntimePracticeSlingshot))
+	if (IsValid(RuntimePracticeCord)
+		&& !RuntimePracticeCord->IsActorBeingDestroyed())
 	{
-		TArray<AActor*> OwnedSlingshotActors;
-		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
-		{
-			if (It->GetOwner() == RuntimePracticeSlingshot.Get())
-			{
-				OwnedSlingshotActors.Add(*It);
-			}
-		}
-		for (AActor* OwnedActor : OwnedSlingshotActors)
-		{
-			if (IsValid(OwnedActor) && !OwnedActor->IsActorBeingDestroyed())
-			{
-				OwnedActor->Destroy();
-			}
-		}
-		RuntimePracticeSlingshot->Destroy();
+		RuntimePracticeCord->Destroy();
 	}
-	RuntimePracticeSlingshot = nullptr;
+	RuntimePracticeCord = nullptr;
+	if (IsValid(RuntimePracticeStakeA)
+		&& !RuntimePracticeStakeA->IsActorBeingDestroyed())
+	{
+		RuntimePracticeStakeA->Destroy();
+	}
+	RuntimePracticeStakeA = nullptr;
+	if (IsValid(RuntimePracticeStakeB)
+		&& !RuntimePracticeStakeB->IsActorBeingDestroyed())
+	{
+		RuntimePracticeStakeB->Destroy();
+	}
+	RuntimePracticeStakeB = nullptr;
 	if (IsValid(RuntimeSatellite)
 		&& !RuntimeSatellite->IsActorBeingDestroyed())
 	{

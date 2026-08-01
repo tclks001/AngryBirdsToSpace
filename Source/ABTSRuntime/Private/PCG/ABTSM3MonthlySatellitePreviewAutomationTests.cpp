@@ -312,20 +312,22 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsE5CollisionEnabled());
 	TestTrue(TEXT("M6 consumes the exact E5 snapshot"),
 		Runtime->IsM6TargetBound());
-	TestTrue(TEXT("A real reinforced slingshot consumes the candidate launch frame"),
+	TestTrue(TEXT("A real reinforced slingshot is grounded from the candidate cells"),
 		Runtime->IsPracticeSlingshotReady());
+	AABTSM51SlingshotStake* PracticeStakeA =
+		Runtime->GetRuntimePracticeStakeA();
+	AABTSM51SlingshotStake* PracticeStakeB =
+		Runtime->GetRuntimePracticeStakeB();
+	TestNotNull(TEXT("First reinforced stake exists"), PracticeStakeA);
+	TestNotNull(TEXT("Second reinforced stake exists"), PracticeStakeB);
 	AABTSM51SlingshotCord* PracticeCord = Runtime->GetRuntimePracticeCord();
-	TestNotNull(TEXT("Candidate practice slingshot exposes its runtime cord"),
+	TestNotNull(TEXT("Cell-grounded practice slingshot exposes its runtime cord"),
 		PracticeCord);
 	if (PracticeCord != nullptr)
 	{
-		TestEqual(TEXT("Candidate practice cord is reinforced"),
+		TestEqual(TEXT("Cell-grounded practice cord is reinforced"),
 			PracticeCord->GetSlingshotTier(),
 			EABTSSlingshotTier::Reinforced);
-		TestTrue(TEXT("Physical rest pouch matches the persisted candidate launch location"),
-			PracticeCord->GetRestPouchTransform().GetLocation().Equals(
-				Candidate.LaunchWorldLocation,
-				1.0f));
 	}
 
 	const FABTSM3MonthlySatelliteRuntimeSnapshot Snapshot =
@@ -334,14 +336,51 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	TestEqual(TEXT("Session snapshot retains the candidate identity"),
 		Snapshot.SourceCandidateHash,
 		Candidate.CandidateHash);
-	TestTrue(TEXT("Spawned satellite uses the exact preview center"),
-		Snapshot.SatelliteWorldTransform.GetLocation().Equals(
-			Candidate.SatelliteCenterWorld,
-			1.0f));
-	TestTrue(TEXT("Spawned E5 uses the exact preview transform"),
-		Snapshot.E5WorldTransform.Equals(
-			Candidate.E5TargetWorldTransform,
-			0.1f));
+	TestEqual(TEXT("Runtime keeps the first selected terrain cell"),
+		Snapshot.PracticeStakeACellId,
+		Candidate.ReferenceSlotACellId);
+	TestEqual(TEXT("Runtime keeps the second selected terrain cell"),
+		Snapshot.PracticeStakeBCellId,
+		Candidate.ReferenceSlotBCellId);
+	if (PracticeStakeA != nullptr)
+	{
+		TestTrue(TEXT("First reinforced stake bottom is on its queried surface"),
+			PracticeStakeA->GetVisualBottomWorldLocation().Equals(
+				Snapshot.PracticeStakeASurfaceWorld,
+				1.0f));
+	}
+	if (PracticeStakeB != nullptr)
+	{
+		TestTrue(TEXT("Second reinforced stake bottom is on its queried surface"),
+			PracticeStakeB->GetVisualBottomWorldLocation().Equals(
+				Snapshot.PracticeStakeBSurfaceWorld,
+				1.0f));
+	}
+	if (PracticeCord != nullptr)
+	{
+		TestTrue(TEXT("Runtime snapshot stores the physical rest pouch frame"),
+			Snapshot.PracticeLaunchWorldTransform.Equals(
+				PracticeCord->GetRestPouchTransform(),
+				0.1f));
+	}
+	TestNotNull(TEXT("Cell-grounded layout spawns the corresponding satellite"),
+		Runtime->GetRuntimeSatellite());
+	TestNotNull(TEXT("Cell-grounded layout spawns the corresponding E5 target"),
+		Runtime->GetRuntimeE5Target());
+	if (Runtime->GetRuntimeSatellite() != nullptr)
+	{
+		TestTrue(TEXT("Snapshot center matches the corresponding runtime satellite"),
+			Snapshot.SatelliteWorldTransform.Equals(
+				Runtime->GetRuntimeSatellite()->GetActorTransform(),
+				0.1f));
+	}
+	if (Runtime->GetRuntimeE5Target() != nullptr)
+	{
+		TestTrue(TEXT("Snapshot transform matches the corresponding runtime E5 target"),
+			Snapshot.E5WorldTransform.Equals(
+				Runtime->GetRuntimeE5Target()->GetActorTransform(),
+				0.1f));
+	}
 	TestNotEqual(TEXT("Baseline gravity snapshot hash is persisted"),
 		Snapshot.BaselineGravitySnapshotHash,
 		static_cast<int64>(0));
@@ -350,8 +389,8 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		static_cast<int64>(0));
 	TestFalse(TEXT("Override 0 disables the real satellite gravity source"),
 		Runtime->IsSatelliteGravityEnabled());
-	const FVector Probe = Candidate.SatelliteCenterWorld
-		+ FVector::UpVector * (Candidate.SatelliteRadiusCM * 2.0f);
+	const FVector Probe = Snapshot.SatelliteWorldTransform.GetLocation()
+		+ FVector::UpVector * (Snapshot.SatelliteRadiusCM * 2.0f);
 	TestTrue(TEXT("Gravity query is zero while the shared cvar is off"),
 		ABTSM9Gravity::GetSatelliteAcceleration(World, Probe).IsNearlyZero());
 

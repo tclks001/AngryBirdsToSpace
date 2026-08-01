@@ -9,6 +9,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
@@ -18,6 +19,7 @@
 #include "World/ABTSCollisionChannels.h"
 #if WITH_EDITOR
 #include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 #endif
 
 namespace
@@ -1322,10 +1324,36 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				LogicalCells[SatellitePreview->ReferenceSlotBCellId].UnitCenter,
 				SlotB))
 		{
+			FVector DrawSatelliteCenter = SatellitePreview->SatelliteCenterWorld;
+			float DrawSatelliteRadiusCM = SatellitePreview->SatelliteRadiusCM;
+			FTransform DrawE5Transform = SatellitePreview->E5TargetWorldTransform;
+			FVector DrawE5HalfExtentCM = SatellitePreview->E5TargetHalfExtentCM;
+			FVector DrawLaunchWorld = SatellitePreview->LaunchWorldLocation;
+			for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(GetWorld()); It; ++It)
+			{
+				const FABTSM3MonthlySatelliteRuntimeSnapshot& Runtime =
+					It->GetRuntimeSnapshot();
+				if (!It->IsRuntimeReady()
+					|| !Runtime.bValid
+					|| Runtime.SourceRouteCandidateId != CandidateId)
+				{
+					continue;
+				}
+				SlotA.WorldLocation = Runtime.PracticeStakeASurfaceWorld;
+				SlotB.WorldLocation = Runtime.PracticeStakeBSurfaceWorld;
+				DrawLaunchWorld = Runtime.PracticeLaunchWorldTransform.GetLocation();
+				DrawSatelliteCenter = Runtime.SatelliteWorldTransform.GetLocation();
+				DrawSatelliteRadiusCM = Runtime.SatelliteRadiusCM;
+				DrawE5Transform = Runtime.E5WorldTransform;
+				DrawE5HalfExtentCM = Runtime.E5HalfExtentCM;
+				break;
+			}
+			const FVector DrawSatelliteOutward =
+				(DrawSatelliteCenter - Center).GetSafeNormal();
 			DrawDebugSphere(
 				GetWorld(),
-				SatellitePreview->SatelliteCenterWorld,
-				SatellitePreview->SatelliteRadiusCM,
+				DrawSatelliteCenter,
+				DrawSatelliteRadiusCM,
 				24,
 				FColor(125, 175, 220),
 				false,
@@ -1347,7 +1375,7 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				FColor::Yellow, false, DrawLifeTime, 0, 5.0f);
 			DrawDebugPoint(
 				GetWorld(),
-				SatellitePreview->LaunchWorldLocation,
+				DrawLaunchWorld,
 				28.0f,
 				FColor::Green,
 				false,
@@ -1355,8 +1383,8 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				0);
 			DrawDebugLine(
 				GetWorld(),
-				SatellitePreview->LaunchWorldLocation,
-				SatellitePreview->SatelliteCenterWorld,
+				DrawLaunchWorld,
+				DrawSatelliteCenter,
 				FColor(80, 220, 255),
 				false,
 				DrawLifeTime,
@@ -1364,9 +1392,9 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				6.0f);
 			DrawDebugBox(
 				GetWorld(),
-				SatellitePreview->E5TargetWorldTransform.GetLocation(),
-				SatellitePreview->E5TargetHalfExtentCM,
-				SatellitePreview->E5TargetWorldTransform.GetRotation(),
+				DrawE5Transform.GetLocation(),
+				DrawE5HalfExtentCM,
+				DrawE5Transform.GetRotation(),
 				FColor::Magenta,
 				false,
 				DrawLifeTime,
@@ -1374,8 +1402,8 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				8.0f);
 			DrawDebugLine(
 				GetWorld(),
-				SatellitePreview->SatelliteCenterWorld,
-				SatellitePreview->E5TargetWorldTransform.GetLocation(),
+				DrawSatelliteCenter,
+				DrawE5Transform.GetLocation(),
 				FColor::Magenta,
 				false,
 				DrawLifeTime,
@@ -1383,9 +1411,9 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				5.0f);
 			DrawDebugString(
 				GetWorld(),
-				SatellitePreview->SatelliteCenterWorld
-					+ SatellitePreview->SatelliteAnchorDirection
-						* (SatellitePreview->SatelliteRadiusCM + 300.0f),
+				DrawSatelliteCenter
+					+ DrawSatelliteOutward
+						* (DrawSatelliteRadiusCM + 300.0f),
 				TEXT("M9 PRACTICE SATELLITE"),
 				nullptr,
 				FColor(125, 175, 220),
@@ -1394,7 +1422,7 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				1.2f);
 			DrawDebugString(
 				GetWorld(),
-				SatellitePreview->E5TargetWorldTransform.GetLocation(),
+				DrawE5Transform.GetLocation(),
 				TEXT("E5 BACKSIDE TARGET PROXY"),
 				nullptr,
 				FColor::Magenta,

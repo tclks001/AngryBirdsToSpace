@@ -9,7 +9,7 @@
 
 本阶段让 R-5 固定候选预览能够回答两个空间问题：M9 练习卫星相对 E5 强化弹弓槽场生成在哪里，以及 E5 建筑的代理目标是否确实位于卫星背面。它用于月度地图尚未发布唯一 Candidate 时的开发可视检查。
 
-本阶段的数据结果不生成真实 M9/M7 Actor，不执行 M6/M9 弹道认证，也不选择最终月度 Candidate；`bMonthlyWorldAccepted` 永远为 false。为支持冻结参数的手感复测，显式精确预览另设一个非生产诊断桥：它在会话中持久化当前 Candidate 的卫星/E5 快照，替换兼容 TaskGraph 生成的旧 M9 实例，开启真实卫星与 E5 代理碰撞，并绑定 M6 PracticeTarget。该桥不进入普通启动路径，不构成 R-4 Witness 或 R-6 实体发布。
+本阶段的数据结果不生成真实 M9/M7 Actor，不执行 M6/M9 弹道认证，也不选择最终月度 Candidate；`bMonthlyWorldAccepted` 永远为 false。为支持冻结参数的手感复测，显式精确预览另设一个非生产诊断桥：它在会话中持久化当前 Candidate 身份，以参考槽的真实地表 Cell 生成强化桩和弦，再从物理弦袋帧解析对应的卫星/E5 布局；它替换兼容 TaskGraph 生成的旧 M9 实例，开启真实卫星与 E5 代理碰撞，并绑定 M6 PracticeTarget。该桥不进入普通启动路径，不构成 R-4 Witness 或 R-6 实体发布。
 
 ## 2. 输入权威和候选绑定
 
@@ -51,7 +51,7 @@ E5 目标 Transform 由共享 `BuildSatelliteTargetWorldTransform()` 计算。�
 - 青线：参考发射点到卫星中心的空间关系；
 - 红色/橙色：既有目标范围和攻击走廊；E5 原主星 Target Footprint 在该叠层中隐藏，避免同时显示两个 E5 目标。
 
-F7 快捷叠层本身不创建组件或 Actor，不修改输入映射，也不进入确定性身份。显式精确预览的运行时诊断桥会同时生成与线框同 Transform 的真实灰色卫星和标有 `Satellite.Backside.E5` 的洋红碰撞盒；无精确候选、候选 Join 失败、冻结参数不匹配或目标不在背面时均 fail closed。
+F7 快捷叠层本身不创建组件或 Actor，不修改输入映射，也不进入确定性身份。显式精确预览的运行时诊断桥激活后，叠层优先读取运行时快照，因此黄色桩位、绿色弦袋点、蓝色卫星和洋红 E5 盒与真实 Actor 一致；诊断桥未激活时才显示只读 Candidate 估计。无精确候选、候选 Join 失败、冻结参数不匹配或目标不在背面时均 fail closed。
 
 推荐启动参数：
 
@@ -67,15 +67,27 @@ abts.Calibration.SatelliteGravity 0   // 关闭卫星重力，保留碰撞与布
 abts.Calibration.SatelliteGravity 1   // 开启卫星重力
 ```
 
-重力开关只改变真实 M9 Actor 的 `bGravityEnabled`，不改变会话布局快照 Hash。运行时快照持久化 `SourcePreviewResultHash`、`CandidateHash`、Launch/Preset 身份、卫星/E5 Transform、`BaselineGravitySnapshotHash` 与组合 `RuntimeLayoutSnapshotHash`；M6 轨迹预演和实际飞行都继续调用共享 M9 引力查询，不在 M3 复制积分公式。
+重力开关只改变真实 M9 Actor 的 `bGravityEnabled`，不改变会话布局快照 Hash。运行时快照持久化 `SourcePreviewResultHash`、`CandidateHash`、Launch/Preset 身份、两个强化桩 Cell 与精确地表点、实际 Pouch Transform、重新解析的卫星锚点 Cell、卫星/E5 Transform、`BaselineGravitySnapshotHash` 与组合 `RuntimeLayoutSnapshotHash`；M6 轨迹预演和实际飞行都继续调用共享 M9 引力查询，不在 M3 复制积分公式。
+
+### 4.1 真实 Cell 落地规则
+
+Candidate 中的桩对中点只适合无 Actor 的规划预览，不能作为曲面地形上的 Actor 根点。运行时必须按以下顺序解析：
+
+1. 用 `ReferenceSlotACellId/ReferenceSlotBCellId` 读取两个 `LogicalCells[].UnitCenter`，分别调用当前 Planet 的 `QuerySurface`；
+2. 每根强化桩的可视底面落在各自返回的 `WorldLocation`，桩轴使用该次查询的真实地表法线；不得把两个地表点的空间中点当作共同地面；
+3. 用两根实际桩顶生成正式 M5.1 强化弦，弦的 `GetRestPouchTransform()` 成为本会话唯一发射局部帧；
+4. 冻结 Preset 的卫星弧距从实际 Pouch 的 `Forward/Up` 重新求锚点方向，再次查询真实主星地表 Cell；卫星中心和 E5 背面代理均从该解析结果生成；
+5. 任一 Cell 无效、地表查询失败、桩底误差超过 `1 cm`、卫星锚点失败或碰撞/M6 绑定失败时，整套诊断布局 fail closed。
+
+运行时使用正式 `AABTSM51SlingshotStake/AABTSM51SlingshotCord`，不再依赖 M7 TestStage 的固定间距整套弹弓 Actor。这样既消除了曲面中点下沉，也保证后续 M6 读取的就是画面中的真实弦袋。
 
 ## 5. 自动验收与当前证据
 
 - 强制 Unity/禁用 Adaptive Unity 的 Development Editor 全链接通过；新实现的私有辅助符号全部显式命名空间限定，避免 Unity 合并单元歧义。
-- fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确发现并通过 `3/3`：候选绑定/确定性核心、失败闭合、运行时快照/碰撞/M6 绑定/重力切换。
+- fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确发现并通过 `3/3`：候选绑定/确定性核心、失败闭合、真实 Cell 桩底、运行时快照/碰撞/M6 绑定/重力切换。
 - 展示 Seed `312503` 生成 3 个候选，`SourceSpatial=16A44AF72C58261E`、`SourceFields=E7EA3FB5463E395B`、`Result=5CEF57BB1A3C245F`。
 - 每个候选均验证冻结 Preset 身份、非零卫星半径、E5 背面关系、目标盒球面贴合、Candidate/Result Hash 重算和重复重建 whole-struct 一致。
-- `L_ABTS_M10` fresh runtime 验证兼容旧卫星替换 `1/1`，最终 `Ready=1`、`SatelliteCollision=1`、`E5Collision=1`、`M6Target=1`；Candidate 4 的 `BaselineGravitySnapshotHash=C34E0F43E4CA5F8F`、`RuntimeLayoutSnapshotHash=E2A595253686730D`。
+- 2026-08-01 真实 Cell 修复的展示 Seed 证据为：强化桩 `CellA=2646/ResolvedA=2646`、`CellB=2647/ResolvedB=2647`，两个桩底误差均为 `0.000 cm`；实际弦袋相对旧中点估计移动 `262.25 cm`，对应卫星重新解析到锚点 Cell `3772`。强制 Unity 全链接通过，fresh NullRHI 专项 `3/3`、完整 `ABTS.M3` `59/59` 通过。
 
 ## 6. 集成交接清单
 

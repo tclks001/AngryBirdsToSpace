@@ -10,8 +10,8 @@
 class AABTSCalibrationTargetProxy;
 class AABTSM3Planet;
 class AABTSM51SlingshotCord;
+class AABTSM51SlingshotStake;
 class AABTSM6SlingshotSystem;
-class AABTSM71PlaceableSlingshotActor;
 class AABTSM9Satellite;
 
 /**
@@ -44,6 +44,26 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int64 SatellitePracticePresetHash = 0;
+
+	/** Actual terrain cells occupied by the two reinforced practice stakes. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int32 PracticeStakeACellId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int32 PracticeStakeBCellId = INDEX_NONE;
+
+	/** Physical rest pouch frame rebuilt from the two independently grounded stakes. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	FTransform PracticeLaunchWorldTransform = FTransform::Identity;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	FVector PracticeStakeASurfaceWorld = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	FVector PracticeStakeBSurfaceWorld = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int32 SatelliteAnchorCellId = INDEX_NONE;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	FTransform SatelliteWorldTransform = FTransform::Identity;
@@ -107,6 +127,8 @@ public:
 	AABTSM9Satellite* GetRuntimeSatellite() const { return RuntimeSatellite.Get(); }
 	AABTSCalibrationTargetProxy* GetRuntimeE5Target() const { return RuntimeE5Target.Get(); }
 	AABTSM51SlingshotCord* GetRuntimePracticeCord() const;
+	AABTSM51SlingshotStake* GetRuntimePracticeStakeA() const { return RuntimePracticeStakeA.Get(); }
+	AABTSM51SlingshotStake* GetRuntimePracticeStakeB() const { return RuntimePracticeStakeB.Get(); }
 
 private:
 	bool SpawnSnapshotActors();
@@ -133,7 +155,13 @@ private:
 	TObjectPtr<AABTSCalibrationTargetProxy> RuntimeE5Target;
 
 	UPROPERTY(Transient)
-	TObjectPtr<AABTSM71PlaceableSlingshotActor> RuntimePracticeSlingshot;
+	TObjectPtr<AABTSM51SlingshotStake> RuntimePracticeStakeA;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM51SlingshotStake> RuntimePracticeStakeB;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM51SlingshotCord> RuntimePracticeCord;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM6SlingshotSystem> BoundSlingshotSystem;
