@@ -5,12 +5,57 @@
 #include "Algo/Reverse.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "Camera/ABTSM101LandingPreviewCamera.h"
+#include "Camera/ABTSM6SlingshotCamera.h"
+#include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Physics/ABTSSweptCollision.h"
+#include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Slingshot/ABTSM6Types.h"
 
 namespace ABTSSlingshotCalibrationTests
 {
+	class FScopedLaunchProfileWorld
+	{
+	public:
+		FScopedLaunchProfileWorld()
+		{
+			const UWorld::InitializationValues Values =
+				UWorld::InitializationValues()
+					.InitializeScenes(false)
+					.AllowAudioPlayback(false)
+					.RequiresHitProxies(false)
+					.CreatePhysicsScene(false)
+					.CreateNavigation(false)
+					.CreateAISystem(false)
+					.ShouldSimulatePhysics(false)
+					.EnableTraceCollision(false)
+					.SetTransactional(false)
+					.CreateFXSystem(false);
+			World = UWorld::CreateWorld(
+				EWorldType::Game,
+				false,
+				TEXT("ABTSM6LaunchProfileAutomationWorld"),
+				nullptr,
+				true,
+				ERHIFeatureLevel::Num,
+				&Values);
+		}
+
+		~FScopedLaunchProfileWorld()
+		{
+			if (World != nullptr)
+			{
+				World->DestroyWorld(false);
+				World->RemoveFromRoot();
+			}
+		}
+
+		UWorld* Get() const { return World; }
+
+	private:
+		UWorld* World = nullptr;
+	};
+
 	/**
 	 * Deterministic POD fixture captured from the old-map calibration carrier.
 	 * These two terrain deltas belong to test evidence, not to the portable
@@ -131,6 +176,106 @@ namespace ABTSSlingshotCalibrationTests
 			OutScenario.TargetWorldTransform.GetLocation();
 		return true;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6ProductionLaunchProfileConsumptionTest,
+	"ABTS.M6.LaunchProfiles.ProductionCatalog",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6ProductionLaunchProfileConsumptionTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	ABTSSlingshotCalibrationTests::FScopedLaunchProfileWorld TestWorld;
+	if (!TestNotNull(TEXT("Production profile test world exists"), TestWorld.Get()))
+	{
+		return false;
+	}
+	AABTSM6SlingshotSystem* System =
+		TestWorld.Get()->SpawnActor<AABTSM6SlingshotSystem>();
+	if (!TestNotNull(TEXT("M6 system spawns"), System))
+	{
+		return false;
+	}
+
+	FABTSM6LaunchProfileCatalog CopiedCatalog;
+	uint64 CopiedHash = 0;
+	TestFalse(
+		TEXT("Unconfigured production system has no catalog"),
+		System->CopyLaunchProfileCatalog(CopiedCatalog, CopiedHash));
+	const FABTSM6LaunchProfileCatalog FrozenCatalog =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
+	float NativeCameraDistanceCM = 0.0f;
+	float NativeCameraPitchDegrees = 0.0f;
+	float NativeTargetForwardDistanceCM = 0.0f;
+	float NativeTargetHeightCM = 0.0f;
+	const AABTSM6SlingshotCamera* NativeCameraDefaults =
+		GetDefault<AABTSM6SlingshotCamera>();
+	TestTrue(
+		TEXT("Native camera defaults expose valid frozen framing"),
+		NativeCameraDefaults != nullptr
+			&& NativeCameraDefaults->CopyAimFraming(
+				NativeCameraDistanceCM,
+				NativeCameraPitchDegrees,
+				NativeTargetForwardDistanceCM,
+				NativeTargetHeightCM));
+	TestEqual(
+		TEXT("Native camera distance matches frozen production catalog"),
+		NativeCameraDistanceCM,
+		FrozenCatalog.AimCameraDistanceCM);
+	TestEqual(
+		TEXT("Native camera pitch matches frozen production catalog"),
+		NativeCameraPitchDegrees,
+		FrozenCatalog.AimCameraPitchDegrees);
+	TestEqual(
+		TEXT("Native camera target forward matches frozen production catalog"),
+		NativeTargetForwardDistanceCM,
+		FrozenCatalog.AimTargetForwardDistanceCM);
+	TestEqual(
+		TEXT("Native camera target height matches frozen production catalog"),
+		NativeTargetHeightCM,
+		FrozenCatalog.AimTargetHeightCM);
+	TestTrue(
+		TEXT("Frozen catalog configures production M6"),
+		System->ConfigureLaunchProfiles(FrozenCatalog));
+	TestTrue(
+		TEXT("Production catalog is exposed read-only"),
+		System->CopyLaunchProfileCatalog(CopiedCatalog, CopiedHash));
+	TestEqual(
+		TEXT("Production catalog keeps the frozen identity"),
+		CopiedHash,
+		static_cast<uint64>(14031317829084174406ull));
+	TestFalse(
+		TEXT("Production configuration does not enable calibration mode"),
+		System->CopyCalibrationCatalog(CopiedCatalog, CopiedHash));
+
+	TestTrue(
+		TEXT("Production catalog remains available after calibration-only copy is rejected"),
+		System->CopyLaunchProfileCatalog(CopiedCatalog, CopiedHash));
+	const FABTSM6LaunchProfile* Reinforced =
+		FABTSSlingshotSatelliteCalibrationModel::FindProfile(
+			CopiedCatalog,
+			EABTSSlingshotTier::Reinforced);
+	if (TestNotNull(TEXT("Reinforced production profile exists"), Reinforced))
+	{
+		TestEqual(
+			TEXT("Reinforced production maximum is frozen at 3300 cm/s"),
+			Reinforced->MaximumSpeedCMPerSec,
+			3300.0f);
+		TestEqual(
+			TEXT("Reinforced production wheel step is frozen at 0.01"),
+			Reinforced->PullPowerWheelStep,
+			0.01f);
+	}
+	TestNull(
+		TEXT("Space remains outside the normal production catalog"),
+		FABTSSlingshotSatelliteCalibrationModel::FindProfile(
+			CopiedCatalog,
+			EABTSSlingshotTier::Space));
+
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

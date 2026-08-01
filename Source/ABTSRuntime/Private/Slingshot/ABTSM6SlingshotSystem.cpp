@@ -23,6 +23,7 @@
 #include "TestStage/ABTSM71TestStageActors.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "World/ABTSM9Satellite.h"
 
 namespace
 {
@@ -158,8 +159,28 @@ void AABTSM6SlingshotSystem::BeginPlay()
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	SlingshotCamera = GetWorld()->SpawnActor<AABTSM6SlingshotCamera>(CameraClass, FTransform::Identity, Params);
+	FABTSM6LaunchProfileCatalog ProductionCatalog =
+		FABTSSlingshotSatelliteCalibrationModel::MakeFrozenLaunchProfileCatalogV0();
+	if (SlingshotCamera == nullptr
+		|| !SlingshotCamera->CopyAimFraming(
+			ProductionCatalog.AimCameraDistanceCM,
+			ProductionCatalog.AimCameraPitchDegrees,
+			ProductionCatalog.AimTargetForwardDistanceCM,
+			ProductionCatalog.AimTargetHeightCM)
+		|| !ConfigureLaunchProfiles(ProductionCatalog))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M6][ProfileCatalog] Production initialization failed; normal-tier launch entry will fail closed."));
+	}
 	SpawnDebugSlingshots();
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6] System ready Camera=%d BirdProfiles=%d MaterialProfiles=%d"), SlingshotCamera ? 1 : 0, BirdImpactProfiles.Num(), MaterialImpactProfiles.Num());
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6] System ready Camera=%d BirdProfiles=%d MaterialProfiles=%d LaunchProfiles=%d LaunchProfileHash=%llu Calibration=%d"),
+		SlingshotCamera ? 1 : 0,
+		BirdImpactProfiles.Num(),
+		MaterialImpactProfiles.Num(),
+		bLaunchProfileCatalogEnabled ? 1 : 0,
+		bLaunchProfileCatalogEnabled ? CalibrationLaunchProfileHash : 0,
+		bCalibrationModeEnabled ? 1 : 0);
 }
 
 void AABTSM6SlingshotSystem::ConfigureDebugSlingshots(const bool bEnable, const int32 InStartCellId)
@@ -343,6 +364,15 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 		return false;
 	}
 	if (LaunchState != EABTSM6LaunchState::Inactive || !ResolveDependencies()) return false;
+	const EABTSSlingshotTier Tier = Cord.GetSlingshotTier();
+	if (Tier != EABTSSlingshotTier::Space && FindLaunchProfile(Tier) == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M6][Enter] Rejected Reason=LaunchProfileUnavailable Tier=%d LaunchProfileHash=%llu"),
+			static_cast<int32>(Tier),
+			bLaunchProfileCatalogEnabled ? CalibrationLaunchProfileHash : 0);
+		return false;
+	}
 	AABTSM25BirdCharacter* Bird = Party->GetControlledBird();
 	if (Bird == nullptr || !IsBirdAllowed(*Bird, Cord))
 	{
@@ -569,7 +599,7 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 		AimPlaneOffset.X,
 		AimPlaneOffset.Y,
 		AimPlaneOffset.Z,
-		bCalibrationModeEnabled ? CalibrationLaunchProfileHash : 0,
+		GetActiveLaunchProfile() != nullptr ? CalibrationLaunchProfileHash : 0,
 		bCalibrationModeEnabled ? 1 : 0);
 	if (!bCalibrationModeEnabled)
 	{

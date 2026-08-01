@@ -1,6 +1,6 @@
 # 开局与终局自动演出导演稿
 
-> 状态：导演与编排设计，尚未实现。  
+> 状态：开局 42 秒纯 C++ 隔离预演首版已实现于 `integration/candidate-opening-preview-v1-20260731`，Development Editor 完整编译、时间轴 NullRHI 自动化和 8 倍速隔离运行生命周期均已通过；未接入任何地图、M3 出生流程或 M11 UFO Actor，尚待用户可见画面验收。终局仍为导演设计。
 > 目标：把“白鸟被掳—四鸟启程—三重引力弹弓—救回白鸟”的叙事转换为可由 UE 运行时自动编排的镜头、角色与事件数据；不把程序生成世界绑定到手工绝对世界坐标。  
 > 上游： [主设计稿](AngryBirdsToSpaceGameDesign.md) · [M4 多角色 Orbit Camera](M4MultiCharacterOrbitCameraDesign.md) · [CuteBird 迁移与动画](CuteBirdMigrationAndAnimationDesign.md) · [M11.0 终局前置收口](M110PreFinaleClosureDesign.md) · [M11 三重引力弹弓预演](M11GravityAssistAlgorithmPrevisualization.md)
 
@@ -89,6 +89,20 @@ FacingBird(t)   = normalize(-sin(PhaseBird) * Forward + cos(PhaseBird) * Right)
 
 `Phase0` 依次为 `-90°、-18°、54°、126°、198°`，鸟间最小间距不小于 `180 cm`。地表有轻微起伏时，只替换每个切向位置的 `SurfacePosition/SurfaceNormal`；圆环相位、镜头节奏和白鸟被抓的时刻不改变。
 
+### 4.3 首版纯 C++ 隔离预演实现
+
+首版不创建 Level Sequence、DataAsset、Blueprint 或地图实例，代码落点为：
+
+- `FABTSOpeningCinematicEvaluator`：世界无关的 42 秒确定性时间轴，输出五鸟、UFO 与七段镜头的局部 Pose；
+- `AABTSOpeningCinematicPreview`：持有五个无碰撞 Skeletal Mesh、静态 UFO、抓取光束、预演地台和 Camera Component；
+- `ABTS.OpeningPreview [TimeScale]`：在当前 PIE/Game World 的玩家上方临时生成预演，默认实时播放，可用 `4` 等参数加速；
+- `ABTS.OpeningPreview.Stop`：提前结束并以 1 秒 Blend 恢复开始前的 ViewTarget；
+- `ABTS.Presentation.Opening.Timeline`：NullRHI 自动化，验证时间段、环形间距、抓取高度、UFO/光束和交接队形。
+
+预演 Actor 只写自身组件 Transform。它不查找、不隐藏、不冻结真实 Party，也不修改输入、HUD、Chaos、地图、GameMode 或出生点。五鸟共享 `UABTSBirdAnimationPresentationComponent`：Idle/Move/Fly 仍由代码默认资产播放；白鸟使用 `M_CuteBird_0` 与 `M_Dino_face_1`。UFO 首版只读取 `/Game/StaticMesh/UFO/SM_UFO_Intact` 作为静态外观，不引用或修改 M11 的 `BP_UFOPresentation`、Geometry Collection、命中与终局逻辑。
+
+隔离预演的局部原点由命令在当前 Pawn 沿其 Up 方向上移 `2500 cm` 得到，Forward/Up 由 Pawn 当前朝向建立；没有 Pawn 时回退到玩家视角和世界 Up。预演自带无碰撞圆形地台，因此无需修改测试地图。42 秒结束后只恢复 ViewTarget 并销毁预演 Actor，不把任何状态交接到正式 Gameplay。
+
 ## 5. 终局演出：约 78 秒
 
 终局从玩家成功发射、M11 返回 `TargetHit` 的同一权威事件开始。前三颗行星的近掠仍是可玩的实际飞行；下表只规定成功路径上的镜头接管、表现编队和收束。失败路径沿用 M11 的“第一不可恢复失败 → 黑屏快照恢复”，不播放救援段。
@@ -143,9 +157,9 @@ M11 Failed
 | `UFOImpact` | UFO 命中前完整外壳、终局瞄准输入 | 破碎表现、白鸟表现 Actor | 命中只触发一次，白鸟只释放一次。 |
 | `Complete` | 终局飞行控制、残骸交互 | 结束 UI / 主菜单流程 | 不生成第二个 Party 成员或可控制白鸟。 |
 
-## 8. 首版数据资产建议
+## 8. 后续正式接入的数据资产建议
 
-首版不要求立刻制作 Level Sequence。建立一个可版本化的 `UDataAsset`（建议名 `ABTSCinematicDirectionPreset`）即可承载下列数据，并让 C++ 演出管理器解释它：
+当前隔离预演按用户要求全部使用 C++ 内置默认值，不制作 DataAsset。正式接入 M3 OpeningFrame、可替换 UFO Actor 和存档导演版本时，再建立可版本化的 `UDataAsset`（建议名 `ABTSCinematicDirectionPreset`）承载下列数据，并让 C++ 演出管理器解释它：
 
 - `OpeningFrame` 的圆环半径、角速度、五鸟初相位、UFO 入口/离场关键点、各镜头本地偏移/FOV/时长；
 - `FinaleFrame` 的地表起飞镜头偏移、四鸟袋体和深空编队偏移、每个 M11 事件对应镜头策略；
@@ -165,10 +179,9 @@ M11 Failed
 
 ## 10. 当前缺口与后续实现顺序
 
-当前工程已有四鸟 Party、玩家 Orbit Camera、终局局部坐标帧、Space Slot Pair 和 M11 数据侧重力/事件基础；尚缺白鸟表现生命周期、UFO 表现/破碎 Actor、演出相机管理器、演出状态机及终局实体布局。因此建议实施顺序为：
+当前工程已有四鸟 Party、玩家 Orbit Camera、终局局部坐标帧、Space Slot Pair 和 M11 数据侧重力/事件基础；开局隔离预演已补齐白鸟临时表现生命周期、静态 UFO 代理、演出相机和时间轴，但尚未接入正式 Party/OpeningFrame，也没有修改 M11 UFO 表现/破碎 Actor。后续建议顺序为：
 
-1. 先建立 `OpeningFrame`、`FinaleLocalFrame` 驱动的演出数据与纯表现 Actor 约束；
-2. 实现开局短版，再扩展为五鸟转圈和镜头组；
+1. M3 合并后提供正式 `OpeningFrame`，Integration 将当前局部时间轴绑定到出生锚点并实现输入/HUD/Party 的可逆交接；
+2. M11 合并后以可替换类接入正式 UFO 表现，保留当前静态代理作为资源失败回退；
 3. 接入 M11 的 `Launched / Assist1–3 / TargetHit` 权威事件，只做镜头和表现队形；
 4. 最后接入 UFO 破碎、白鸟释放和五鸟团聚，并完成 PIE / Standalone 的完整交接验证。
-

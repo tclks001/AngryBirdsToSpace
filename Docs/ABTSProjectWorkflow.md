@@ -12,7 +12,7 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、两个 Editor-only 候选和交互表现已进入 `master`。两个布局仍是 `Candidate / NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；标定蓝图已与父类默认值同步，几何 CVar/命令行与 Catalog→Camera 反写保持废弃。绕月主镜头转入统一视觉优化，不阻塞参数合同。M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 再提供生产 M6/M9 只读适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；普通 M6 已按 Twig/Simple/Reinforced 消费同一目录并公开只读身份，原生相机构图默认值与冻结 Hash 对齐，Space 仍由 M11 单独管理。绕月主镜头转入统一视觉优化，不阻塞参数合同。M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
@@ -63,7 +63,7 @@
 | 需求 | 已完成生产者 | 尚缺消费者/前置 | 当前阻断门 |
 | --- | --- | --- | --- |
 | M3R-3.1 普通槽场 | M3 已生成候选槽场；Integration 已实现最小快照消费接缝、DirtHole 批回滚、M6 三维净空与失败原子状态，装配 2/2、槽 Actor 1/1，兼容世界 PIE 已通过 | M3R-4/R-6 产出唯一 Candidate、最终 `LayoutHash` 和正式导出；Integration 再绑定生产入口 | 未接受唯一月度 Candidate 前不得读取 `RetainedCandidates[0]`；月度实体槽与六关联合 Visible PIE 未通过前保持 `IntegrationPending` |
-| M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间；Integration 已冻结 M6/M9 Launch/Preset V0，并提供稳定原生构造入口与确定性预筛，6/6、runtime smoke、生产 M9/M11 隔离回归及参数 PIE 已通过 | Integration 提供只读生产 M6/M9 适配器；M7 提供已认证 ProfileDescriptor 目录 | 标定积分器不是生产 Witness 权威；只有 Launch/Preset 身份可跨 Seed，`GravitySnapshotHash` 仅为场景实例证据。生产适配器或 M7 目录任一未就绪时，M3 仍为 `IntegrationPending` |
+| M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间；Integration 已冻结 M6/M9 Launch/Preset V0，普通 M6 三档实飞已消费同一目录并公开非零 `LaunchProfileHash`，生产消费 1/1 与标定 6/6 已通过 | Integration 继续提供实际 pouch/camera frame 与 M9 引力查询适配器；M7 提供已认证 ProfileDescriptor 目录 | 标定积分器不是生产 Witness 权威；只有 Launch/Preset 身份可跨 Seed，`GravitySnapshotHash` 仅为场景实例证据。实际 frame/M9 适配器或 M7 目录任一未就绪时，M3 仍为 `IntegrationPending` |
 | M3R-6 六栋实体建筑 | M3 已有六站点逻辑；M7 已完成 DAG5-A 搜索骨架 | M7 先完成 DAG5-B/C；Integration 建立向后兼容 vNext 建筑合同；随后 M7 完成 DAG5-D/E | 当前 v1 合同没有精确 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace`，生产仍固定三栋 DAG2.3，不能提前改 `Expected=6` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
 | M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成；Rank 3 已冻结并完成 v2.2 稀疏/半步预认证，但因 F4 六邻域多分量早停 | 返回 B v2.1 修复成功族连通性或以局部递归消除采样断带，重新通过 B v2.2 后再做 C v2.2；M11-D 的 Party、环境和共享资产由 Integration 接线 | Rank 3 仍是 Candidate/NOT CERTIFIED；未认证候选不得进入生产；M11-D 不得越权修改共享鸟群、天空/雾云或默认资产 |
@@ -72,7 +72,7 @@
 
 1. Integration 的通用 M5.1/M6 槽与连弦规则已完成；实体月度槽仍只能消费 R-4/R-6 最终冻结并由 M3 正式导出的最小快照。
 2. M7 完成 DAG5-B/C 并产出稳定 ProfileDescriptor Catalog；Integration 再定义兼容 v1 的只读目录与建筑 vNext 合同。
-3. M3 合并新 `master` 后完成 R-4，通过 Integration 批准的只读生产适配器消费实际 M6 pouch/速度档与 M9 查询，并结合 M7 目录选定唯一 Candidate、Profile 与 AttackFace；不得把标定预筛模型当作生产实飞权威、复制求解器或让 M7 重新选型。
+3. M3 合并新 `master` 后完成 R-4；速度档与目录身份直接消费已接通的普通 M6 只读接口，实际 pouch/camera frame 与 M9 查询等待 Integration 后续适配器，再结合 M7 目录选定唯一 Candidate、Profile 与 AttackFace；不得把标定预筛模型当作生产实飞权威、复制求解器或让 M7 重新选型。
 4. M7 合并该基线后完成 DAG5-D/E；联合候选必须验证恰好六栋、逐栋动态认证、分批加载、WorldReady 时序与性能预算。
 5. M3R-7 只在槽场、Witness、六栋建筑和 Biome 均通过同一世界的自动化与 Visible PIE 后冻结发布身份。
 6. M11 v2.2 可与上述路线独立推进；一旦进入 M11-D 共享 Party/环境/资产接线，必须回到 Integration 串行集成。

@@ -107,9 +107,15 @@ public:
 	void HandleProxyImpact(AABTSM6DestructibleProxy& Proxy, const FHitResult& Hit, float NormalSpeedCMPerSec);
 	void ConfigureDebugSlingshots(bool bEnable, int32 InStartCellId);
 	/**
-	 * Enables the isolated calibration path. Normal M6, M7, M9, M10 and Space launches
-	 * continue using their existing values unless this explicit call succeeds.
+	 * Installs the resolved normal-tier launch catalog used by production M6 and
+	 * trajectory prediction. Space remains on M11's separate legacy contract.
 	 */
+	bool ConfigureLaunchProfiles(const FABTSM6LaunchProfileCatalog& InCatalog);
+	/** Read-only production adapter for M3 witness identity and runtime diagnostics. */
+	bool CopyLaunchProfileCatalog(
+		FABTSM6LaunchProfileCatalog& OutCatalog,
+		uint64& OutLaunchProfileHash) const;
+	/** Enables calibration-only telemetry and presentation on top of the production catalog. */
 	bool ConfigureCalibrationLaunchProfiles(const FABTSM6LaunchProfileCatalog& InCatalog);
 	/** Spawns exactly one Twig, Simple and Reinforced calibration slingshot. */
 	int32 SpawnCalibrationSlingshots(int32 InStartCellId, const FVector& TowardWorldLocation);
@@ -179,7 +185,8 @@ private:
 	void ClearCurrentTrajectoryPreview();
 	void DrawPredictedTrajectory() const;
 	FVector ComputeLaunchVelocity() const;
-	const FABTSM6LaunchProfile* GetActiveCalibrationLaunchProfile() const;
+	const FABTSM6LaunchProfile* FindLaunchProfile(EABTSSlingshotTier Tier) const;
+	const FABTSM6LaunchProfile* GetActiveLaunchProfile() const;
 	float GetResolvedFlightAirDragPerSecond() const;
 	float GetResolvedMinimumPullDistanceCM() const;
 	float GetResolvedMaximumPullDistanceCM() const;
@@ -386,7 +393,9 @@ private:
 	bool bSpawnDebugSlingshotsAtStart = false;
 	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Calibration")
 	bool bCalibrationModeEnabled = false;
-	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Calibration")
+	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Launch Profiles")
+	bool bLaunchProfileCatalogEnabled = false;
+	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Launch Profiles")
 	FABTSM6LaunchProfileCatalog CalibrationLaunchProfileCatalog;
 	uint64 CalibrationLaunchProfileHash = 0;
 	FABTSM6CalibrationLaunchFrame ReinforcedCalibrationLaunchFrame;
