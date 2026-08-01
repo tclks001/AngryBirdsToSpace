@@ -84,6 +84,9 @@ namespace
 		double NominalPower = std::numeric_limits<double>::quiet_NaN();
 		std::uint32_t CheckpointEvery = 256;
 		std::uint32_t ScreenAimSampleCount = 5000;
+		std::uint8_t EnabledAssistMask = 0x7u;
+		bool ExpectNoF4 = false;
+		bool RequireNominalF4 = true;
 		bool Resume = false;
 	};
 
@@ -171,6 +174,16 @@ namespace
 				Out.Resume = true;
 				continue;
 			}
+			if (Key == "--expect-no-f4")
+			{
+				Out.ExpectNoF4 = true;
+				continue;
+			}
+			if (Key == "--allow-off-grid-nominal")
+			{
+				Out.RequireNominalF4 = false;
+				continue;
+			}
 			if (Index + 1 >= Argc)
 			{
 				Failure = "MissingValue:" + Key;
@@ -212,6 +225,10 @@ namespace
 				&& ParseUnsigned(Value, Unsigned))
 			{
 				Out.ScreenAimSampleCount = static_cast<std::uint32_t>(Unsigned);
+			}
+			else if (Key == "--assist-mask" && ParseUnsigned(Value, Unsigned))
+			{
+				Out.EnabledAssistMask = static_cast<std::uint8_t>(Unsigned);
 			}
 			else if (Key == "--yaw-step" && ParseDouble(Value, Number))
 			{
@@ -409,7 +426,8 @@ namespace
 		if (Out.Output.empty() || !Out.Output.is_absolute()
 			|| Out.Threads == 0 || Out.ShardCount == 0
 			|| Out.ShardIndex >= Out.ShardCount
-			|| Out.CheckpointEvery == 0 || Out.ScreenAimSampleCount == 0)
+			|| Out.CheckpointEvery == 0 || Out.ScreenAimSampleCount == 0
+			|| Out.EnabledAssistMask > 0x7u)
 		{
 			Failure = "InvalidExecutionContract";
 			return false;
@@ -814,6 +832,9 @@ namespace
 			<< "  \"targetMinimumCorridorQuality\":"
 			<< TargetMinimumCorridorQuality
 			<< ",\n"
+			<< "  \"enabledAssistMask\":"
+			<< static_cast<unsigned int>(OptionsValue.EnabledAssistMask)
+			<< ",\n"
 			<< "  \"arrivalConeDegrees\":"
 			<< OptionsValue.ArrivalConeDegrees << ",\n"
 			<< "  \"arrivalFaceConeDegrees\":"
@@ -1039,6 +1060,10 @@ namespace
 		}
 		std::array<std::uint64_t, 4> PrefixCounts{};
 		std::uint64_t NestingViolations = 0;
+		std::uint64_t TargetHitCount = 0;
+		std::uint64_t EarlyTargetHitCount = 0;
+		std::uint64_t GeometricContactCount = 0;
+		std::uint64_t BypassTargetHitCount = 0;
 		std::array<std::int32_t, 4> MinimumPowerIndex{
 			GridValue.PowerCount, GridValue.PowerCount,
 			GridValue.PowerCount, GridValue.PowerCount};
@@ -1057,6 +1082,16 @@ namespace
 			{
 				++NestingViolations;
 			}
+			const bool IsF4 = (Value.PrefixMask & 8u) != 0;
+			const bool HasTargetHit = Value.Termination
+				== static_cast<std::uint8_t>(
+					ABTS::M11Core::TrajectoryTermination::TargetHit);
+			const bool HasGeometricContact = Value.TargetContactCount > 0;
+			TargetHitCount += HasTargetHit ? 1u : 0u;
+			EarlyTargetHitCount += (HasTargetHit && !IsF4) ? 1u : 0u;
+			GeometricContactCount += HasGeometricContact ? 1u : 0u;
+			BypassTargetHitCount +=
+				(HasGeometricContact && !IsF4) ? 1u : 0u;
 			for (std::size_t Level = 0; Level < 4; ++Level)
 			{
 				if ((Value.PrefixMask & (1u << Level)) != 0)
@@ -1157,12 +1192,18 @@ namespace
 			ABTS::M11Core::TrajectoryResult Result;
 			std::string ReplayFailure;
 			HasRepresentativeF4 = CandidateSearch::ReplayCandidate(
-				Replay, 0x7u, Result, &ReplayFailure)
+				Replay, OptionsValue.EnabledAssistMask, Result, &ReplayFailure)
 				&& Result.BuildPacingDiagnostics(
 					RepresentativePacing, &ReplayFailure);
 		}
-		const bool Passed = PrefixCounts[3] > 0 && NominalF4
-			&& Components.Count[3] == 1 && NestingViolations == 0;
+		const bool Passed = OptionsValue.ExpectNoF4
+			? PrefixCounts[3] == 0 && TargetHitCount == 0
+				&& GeometricContactCount == 0 && BypassTargetHitCount == 0
+				&& NestingViolations == 0
+			: PrefixCounts[3] > 0
+				&& (!OptionsValue.RequireNominalF4 || NominalF4)
+				&& Components.Count[3] == 1 && NestingViolations == 0
+				&& EarlyTargetHitCount == 0 && BypassTargetHitCount == 0;
 		std::ofstream Summary(
 			OptionsValue.Output / "summary.json",
 			std::ios::binary | std::ios::trunc);
@@ -1213,6 +1254,12 @@ namespace
 			<< "  \"targetMinimumCorridorQuality\":"
 			<< Layout.Scenario.Target.MinimumQualifyingCorridorQuality
 			<< ",\n"
+			<< "  \"enabledAssistMask\":"
+			<< static_cast<unsigned int>(OptionsValue.EnabledAssistMask)
+			<< ",\n  \"expectNoF4\":"
+			<< (OptionsValue.ExpectNoF4 ? "true" : "false") << ",\n"
+			<< "  \"requireNominalF4\":"
+			<< (OptionsValue.RequireNominalF4 ? "true" : "false") << ",\n"
 			<< "  \"arrivalConeDegrees\":"
 			<< OptionsValue.ArrivalConeDegrees << ",\n"
 			<< "  \"arrivalFaceConeDegrees\":"
@@ -1264,6 +1311,10 @@ namespace
 			<< MinimumPowerIndex[3] << "],\n  \"maximumPowerIndices\":["
 			<< MaximumPowerIndex[0] << ',' << MaximumPowerIndex[1] << ','
 			<< MaximumPowerIndex[2] << ',' << MaximumPowerIndex[3] << "],\n"
+			<< "  \"targetHitCount\":" << TargetHitCount << ",\n"
+			<< "  \"earlyTargetHitCount\":" << EarlyTargetHitCount << ",\n"
+			<< "  \"geometricContactCount\":" << GeometricContactCount << ",\n"
+			<< "  \"bypassTargetHitCount\":" << BypassTargetHitCount << ",\n"
 			<< "  \"nestingViolations\":" << NestingViolations << "\n}\n";
 		std::cout << "[ABTS][M11-B-v2.2][Merge] Passed=" << Passed
 			<< " Prefix=" << PrefixCounts[0] << ',' << PrefixCounts[1] << ','
@@ -1415,7 +1466,7 @@ namespace
 								Layout,
 								Contract,
 								InputFor(GridValue, Value),
-								0x7u,
+								OptionsValue.EnabledAssistMask,
 								Evaluation,
 								&Failures[Local]))
 						{
@@ -1582,9 +1633,15 @@ namespace
 		ABTS::M11Core::TrajectoryResult NominalResult;
 		std::string NominalFailure;
 		if (!Layout.BuildRequest(
-				Layout.NominalInput, 0x7u, NominalRequest, &NominalFailure)
+				Layout.NominalInput,
+				OptionsValue.EnabledAssistMask,
+				NominalRequest,
+				&NominalFailure)
 			|| !CandidateSearch::ReplayCandidate(
-				NominalReplay, 0x7u, NominalResult, &NominalFailure))
+				NominalReplay,
+				OptionsValue.EnabledAssistMask,
+				NominalResult,
+				&NominalFailure))
 		{
 			std::cerr << "NominalIdentityUnavailable:" << NominalFailure << '\n';
 			return 1;
@@ -1627,7 +1684,12 @@ namespace
 			InputEvaluation Evaluation;
 			std::string Failure;
 			if (!CandidateSearch::EvaluateInput(
-					Layout, Contract, Input, 0x7u, Evaluation, &Failure))
+					Layout,
+					Contract,
+					Input,
+					OptionsValue.EnabledAssistMask,
+					Evaluation,
+					&Failure))
 			{
 				std::cerr << "ScreenAimSolveFailed:" << Index << ':'
 					<< Failure << '\n';

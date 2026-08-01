@@ -755,6 +755,42 @@ Result=0x99012cedf3d01c06 / ScoreEvidence=0x22c3f67f46d49e70`。Rank 10 仍是
 `Candidate / NOT CERTIFIED`；其加入只用于 PIE 手感对比，不代表完成完整输入域、
 消融、旁路或 Trust Region 认证。
 
+### Rank 10 v2.2 正式认证早停（2026-08-01）
+
+PIE 手感验收后，以冻结的 `Source=0x2b06db2cf348d75f` 开始 v2.2 数值认证。
+标准 C++ Certification CLI 新增 `--assist-mask`、`--expect-no-f4` 和
+`--allow-off-grid-nominal`，合并报告显式区分合格 `TargetHit`、发生在 Assist3 Exit
+之前的 `EarlyTargetHit`、独立 800 cm `GeometricContact` 与由后者形成的
+`BypassTargetHit`。这只补齐认证审计面，不修改求解器、布局或 Prefix 分类语义。
+
+完整声明域 base 网格为 `Yaw=2° / Pitch=3° / Power=0.025`，共 16359 点：
+`F=132/57/9/8`、分量数 `2/2/1/1`、最低 Power 索引 `32/32/36/36`，但
+`TargetHit=10 / EarlyTargetHit=2 / GeometricContact=0 / Bypass=0`。三轴各偏移半格
+的 14400 点网格得到 `F=119/47/11/4`、分量数 `1/1/2/3`，并出现
+`TargetHit=7 / EarlyTargetHit=3`。因此 base 上的 F4 单岛不能覆盖 half-cell
+发现合同。
+
+围绕全部已发现种子建立
+`Yaw=[-4°,2°] / 0.25°`、`Pitch=[27°,39°] / 0.375°`、
+`Power=[0.775,1] / 0.003125` 的 60225 点精细闭包，结果为
+`F=24220/12874/6418/2836`、分量数 `1/1/1/3`、
+`TargetHit=3693 / EarlyTargetHit=857 / GeometricContact=0 / Bypass=0`，
+`AggregateSampleHash=0x48f9f349972c8f68`。F4 的三个分量和大面积 EarlyTargetHit
+在提高分辨率后仍然存在，不是粗网格斜向连接造成的单点假象。
+
+第一颗行星临界 Power 另作全角域夹逼：粗精化在 `Power=[0.65,0.775] /
+0.00625` 首次于 `0.7625` 发现 F1；再以 `Power=0.00078125` 覆盖临界区间和完整
+候选角域，`0.76171875` 及以下无 F1，`0.7625` 有两个 F1 样本。因此本有限采样
+合同给出的临界区间为 `(0.76171875, 0.7625]`。这满足“低功率失败”的放宽观察，
+但不满足 F4 单连通和 `Assist3 Exit → TargetHit` 正式门。
+
+本轮据此按正式阻断门早停：不再执行五组完整消融、错序/多圈、Trust Region 和
+更深递归闭包，也不生成 CertificationHash 或 CertifiedBundle。原因不是发现真实
+800 cm UFO 几何旁路，而是合格拦截球在部分三助推轨迹尚未退出行星③作用区时提前
+终止，以及 half-cell/精细闭包内存在三个 F4 分量。Rank 10 继续保留为
+`Candidate / NOT CERTIFIED`，后续修复必须移动终端拦截中心/布局或重新搜索候选，
+不能通过放宽连通性或删除时序门通过认证。
+
 ## 8. 完整输入域认证
 
 ### 8.1 `FABTSM11LayoutScanContract`
