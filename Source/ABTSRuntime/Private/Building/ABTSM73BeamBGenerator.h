@@ -2,9 +2,9 @@
 
 #pragma once
 
+#include "Building/ABTSM73BeamAGenerator.h"
 #include "Building/ABTSM73BeamBPreviewTypes.h"
 
-struct FABTSM73BeamAGenerationResult;
 struct FABTSM73DAG5BV2GenerationResult;
 
 struct FABTSM73BeamBGenerationResult
@@ -13,6 +13,7 @@ struct FABTSM73BeamBGenerationResult
 	TArray<FABTSM73BeamBPlacement> Placements;
 	TArray<FABTSM73BeamBPlannedMember> PlannedMembers;
 	TArray<FABTSM73BeamBGrammarStep> GrammarSteps;
+	FABTSM73BeamAGenerationResult ClosedAssembly;
 };
 
 /** Pure-data Beam-B Motif WFC and bounded graph-grammar planner. */

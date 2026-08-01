@@ -1970,6 +1970,17 @@ namespace ABTSM73BeamA
 		}
 		return Text;
 	}
+
+	bool CloseGeneratedAssembly(
+		const FABTSM73BeamAPreviewSettings& Settings,
+		FABTSM73BeamAGenerationResult& InOutResult,
+		FString& OutError)
+	{
+		FBuildContext Context;
+		Context.Settings = &Settings;
+		Context.Result = &InOutResult;
+		return CloseGlobalAssembly(Context, OutError);
+	}
 }
 
 bool FABTSM73BeamAGenerator::Generate(
@@ -2164,7 +2175,7 @@ bool FABTSM73BeamAGenerator::Generate(
 	}
 
 	FString BearingError;
-	if (!CloseGlobalAssembly(Context, BearingError))
+	if (!CloseGeneratedAssembly(Settings, OutResult, BearingError))
 	{
 		return Reject(BearingError);
 	}

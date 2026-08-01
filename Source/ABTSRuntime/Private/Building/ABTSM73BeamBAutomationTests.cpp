@@ -54,6 +54,92 @@ namespace ABTSM73BeamBTests
 		Settings.GrammarDepth = 2;
 		return Settings;
 	}
+
+	FBox MemberBounds(
+		const FABTSM73BeamAMember& Member,
+		const FABTSM73BeamAGenerationResult& Result,
+		const double CrossSection)
+	{
+		if (!Result.Joints.IsValidIndex(Member.JointA)
+			|| !Result.Joints.IsValidIndex(Member.JointB))
+		{
+			return FBox(EForceInit::ForceInit);
+		}
+		const FVector Center =
+			(Result.Joints[Member.JointA].LocalPosition
+				+ Result.Joints[Member.JointB].LocalPosition) * 0.5;
+		FVector Extent(CrossSection * 0.5);
+		const int32 AxisIndex = static_cast<int32>(Member.Axis);
+		if (AxisIndex >= 0 && AxisIndex <= 2)
+		{
+			Extent[AxisIndex] = Member.LengthCM * 0.5;
+		}
+		return FBox(Center - Extent, Center + Extent);
+	}
+
+	bool HasPositiveVolumePenetration(
+		const FABTSM73BeamAGenerationResult& Result,
+		const FABTSM73BeamBPreviewSettings& Settings)
+	{
+		TArray<FBox> Bounds;
+		for (const FABTSM73BeamAMember& Member : Result.Members)
+		{
+			Bounds.Add(MemberBounds(Member, Result,
+				Settings.BeamA.BlockCrossSectionCM));
+		}
+		const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+		for (int32 A = 0; A < Bounds.Num(); ++A)
+		{
+			for (int32 B = A + 1; B < Bounds.Num(); ++B)
+			{
+				if (FMath::Min(Bounds[A].Max.X, Bounds[B].Max.X)
+						- FMath::Max(Bounds[A].Min.X, Bounds[B].Min.X) > Tolerance
+					&& FMath::Min(Bounds[A].Max.Y, Bounds[B].Max.Y)
+						- FMath::Max(Bounds[A].Min.Y, Bounds[B].Min.Y) > Tolerance
+					&& FMath::Min(Bounds[A].Max.Z, Bounds[B].Max.Z)
+						- FMath::Max(Bounds[A].Min.Z, Bounds[B].Min.Z) > Tolerance)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool EveryMemberReachesGround(
+		const FABTSM73BeamAGenerationResult& Result,
+		const FABTSM73BeamBPreviewSettings& Settings)
+	{
+		TArray<bool> Reachable;
+		Reachable.Init(false, Result.Members.Num());
+		TArray<int32> Queue;
+		for (const FABTSM73BeamAMember& Member : Result.Members)
+		{
+			if (MemberBounds(Member, Result,
+				Settings.BeamA.BlockCrossSectionCM).Min.Z
+				<= Settings.BeamA.JointMergeToleranceCM)
+			{
+				Reachable[Member.MemberId] = true;
+				Queue.Add(Member.MemberId);
+			}
+		}
+		for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+		{
+			const int32 LowerId = Queue[QueueIndex];
+			for (const FABTSM73BeamABearingContact& Contact :
+				Result.BearingContacts)
+			{
+				if (Contact.LowerMemberId == LowerId
+					&& Reachable.IsValidIndex(Contact.UpperMemberId)
+					&& !Reachable[Contact.UpperMemberId])
+				{
+					Reachable[Contact.UpperMemberId] = true;
+					Queue.Add(Contact.UpperMemberId);
+				}
+			}
+		}
+		return !Reachable.Contains(false);
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -80,6 +166,84 @@ bool FABTSM73BeamBDeterminismTest::RunTest(const FString& Parameters)
 		A.Placements.Num(), B.Placements.Num());
 	TestEqual(TEXT("Member count is deterministic"),
 		A.PlannedMembers.Num(), B.PlannedMembers.Num());
+	TestEqual(TEXT("Closed member count is deterministic"),
+		A.ClosedAssembly.Members.Num(), B.ClosedAssembly.Members.Num());
+	TestEqual(TEXT("Closed bearing count is deterministic"),
+		A.ClosedAssembly.BearingContacts.Num(),
+		B.ClosedAssembly.BearingContacts.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBGlobalAssemblyClosureTest,
+	"ABTS.M73DAG.BeamB.GlobalAssemblyClosure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBGlobalAssemblyClosureTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	for (int32 Value = static_cast<int32>(
+		EABTSM73DAG5BV2Archetype::TerracedCitadel);
+		Value <= static_cast<int32>(
+			EABTSM73DAG5BV2Archetype::SpiredCampus); ++Value)
+	{
+		FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(
+			940000 + Value * 211);
+		Settings.BeamA.Silhouette.Archetype =
+			static_cast<EABTSM73DAG5BV2Archetype>(Value);
+		FABTSM73BeamBGenerationResult Result;
+		FString Error;
+		const bool bGenerated = Generate(Settings, Result, Error);
+		TestTrue(FString::Printf(TEXT("Archetype %d closes: %s"),
+			Value, *Error), bGenerated);
+		if (!bGenerated)
+		{
+			continue;
+		}
+		TestEqual(TEXT("Summary reports no penetration"),
+			Result.Summary.RemainingPenetrationCount, 0);
+		TestEqual(TEXT("Summary reports no unsupported member"),
+			Result.Summary.UnsupportedMemberCount, 0);
+		TestFalse(TEXT("Independent AABB audit finds no penetration"),
+			HasPositiveVolumePenetration(Result.ClosedAssembly, Settings));
+		TestTrue(TEXT("Independent bearing audit reaches every member"),
+			EveryMemberReachesGround(Result.ClosedAssembly, Settings));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBNoDiagonalTest,
+	"ABTS.M73DAG.BeamB.NoDiagonalMembers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBNoDiagonalTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(735201);
+	Settings.bAllowBracedBay = true;
+	FABTSM73BeamBGenerationResult Result;
+	FString Error;
+	TestTrue(TEXT("Generation succeeds even with legacy flag enabled"),
+		Generate(Settings, Result, Error));
+	TestEqual(TEXT("Summary has no diagonal members"),
+		Result.Summary.DiagonalMemberCount, 0);
+	for (const FABTSM73BeamBPlacement& Placement : Result.Placements)
+	{
+		TestNotEqual(TEXT("Braced motif is outside active WFC domain"),
+			Placement.Motif, EABTSM73BeamBMotif::BracedBay);
+	}
+	for (const FABTSM73BeamBPlannedMember& Member : Result.PlannedMembers)
+	{
+		TestNotEqual(TEXT("Plan contains no diagonal"), Member.Axis,
+			EABTSM73BeamAFrameAxis::Diagonal);
+	}
+	for (const FABTSM73BeamAMember& Member : Result.ClosedAssembly.Members)
+	{
+		TestNotEqual(TEXT("Closed assembly contains no diagonal"), Member.Axis,
+			EABTSM73BeamAFrameAxis::Diagonal);
+	}
 	return true;
 }
 

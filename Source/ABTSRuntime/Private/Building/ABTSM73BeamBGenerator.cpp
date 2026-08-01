@@ -2,6 +2,7 @@
 
 #include "Building/ABTSM73BeamBGenerator.h"
 
+#include "ABTSRuntime.h"
 #include "Building/ABTSM73BeamAGenerator.h"
 #include "Building/ABTSM73DAG5BShapeGrammarV2.h"
 #include "Misc/Crc.h"
@@ -143,11 +144,9 @@ namespace ABTSM73BeamB
 		{
 			OutDomain.Add(EABTSM73BeamBMotif::CantileverBay);
 		}
-		if (Settings.bAllowBracedBay
-			&& Size.Z >= Settings.BeamA.BlockCrossSectionCM * 5.0)
-		{
-			OutDomain.Add(EABTSM73BeamBMotif::BracedBay);
-		}
+		// BracedBay remains a reserved semantic value, but Beam-B deliberately
+		// keeps it out of the domain until a visible, non-penetrating brace seat
+		// and an explicit physical connection contract exist.
 	}
 
 	uint32 ChoiceHash(
@@ -173,14 +172,24 @@ namespace ABTSM73BeamB
 			const FVector& Start,
 			const FVector& End)
 		{
+			if (Axis == EABTSM73BeamAFrameAxis::Diagonal)
+			{
+				*Error = TEXT("BeamBDiagonalMembersDisabled");
+				return false;
+			}
 			if (Result.PlannedMembers.Num()
 				>= Settings.MaxPlannedMemberCount)
 			{
 				*Error = TEXT("BeamBPlannedMemberBudgetExceeded");
 				return false;
 			}
-			if ((End - Start).SizeSquared() < 1.0)
+			const double Length = (End - Start).Size();
+			if (Length + Settings.BeamA.JointMergeToleranceCM
+				< Settings.BeamA.BlockCrossSectionCM)
 			{
+				// A motif may collapse a decorative branch in a narrow Bay.
+				// Such a branch cannot become a physical block, so omit it
+				// before compiling the motif into the Beam-A structural IR.
 				return true;
 			}
 			FABTSM73BeamBPlannedMember& Member =
@@ -356,17 +365,6 @@ namespace ABTSM73BeamB
 					return false;
 				}
 			}
-			if (Placement.Motif == EABTSM73BeamBMotif::BracedBay)
-			{
-				if (!B.Add(Placement.BayId, Placement.Motif,
-					EABTSM73BeamAFrameAxis::Diagonal,
-					C.P(C.U0, VM, PostBottom), C.P(C.U1, VM, PostTop))
-					|| !B.AddStep(Placement.BayId,
-						EABTSM73BeamBGrammarRule::TriangulateBay, 1))
-				{
-					return false;
-				}
-			}
 			break;
 
 		case EABTSM73BeamBMotif::CrossBeam:
@@ -510,6 +508,156 @@ namespace ABTSM73BeamB
 		return Placement.PlannedMemberCount > 0;
 	}
 
+	bool CompileAndCloseAssembly(
+		const FABTSM73BeamBPreviewSettings& Settings,
+		const FABTSM73BeamAGenerationResult& BeamA,
+		FABTSM73BeamBGenerationResult& InOutResult,
+		FString& OutError)
+	{
+		FABTSM73BeamAGenerationResult& Closed = InOutResult.ClosedAssembly;
+		Closed = BeamA;
+		Closed.Joints.Reset();
+		Closed.Members.Reset();
+		Closed.BearingContacts.Reset();
+		FABTSM73BeamAPreviewSummary FreshSummary;
+		FreshSummary.SourceVolumeCount = BeamA.Summary.SourceVolumeCount;
+		FreshSummary.BayCount = BeamA.Bays.Num();
+		FreshSummary.AssemblyCount = BeamA.Assemblies.Num();
+		Closed.Summary = FreshSummary;
+
+		TMap<int32, int32> AssemblyByBay;
+		for (FABTSM73BeamAAssembly& Assembly : Closed.Assemblies)
+		{
+			Assembly.JointIds.Reset();
+			Assembly.MemberIds.Reset();
+			AssemblyByBay.Add(Assembly.BayId, Assembly.AssemblyId);
+		}
+		TMap<int32, EABTSM73BeamAFrameAxis> OrientationByBay;
+		for (const FABTSM73BeamBPlacement& Placement : InOutResult.Placements)
+		{
+			OrientationByBay.Add(Placement.BayId, Placement.Orientation);
+		}
+
+		for (const FABTSM73BeamBPlannedMember& Planned :
+			InOutResult.PlannedMembers)
+		{
+			if (Planned.Axis == EABTSM73BeamAFrameAxis::Diagonal)
+			{
+				OutError = TEXT("BeamBDiagonalMembersDisabled");
+				return false;
+			}
+			const int32* AssemblyId = AssemblyByBay.Find(Planned.BayId);
+			if (AssemblyId == nullptr
+				|| !Closed.Assemblies.IsValidIndex(*AssemblyId))
+			{
+				OutError = TEXT("BeamBAssemblyIdentityMissing");
+				return false;
+			}
+			const float Length = static_cast<float>(
+				(Planned.LocalEnd - Planned.LocalStart).Size());
+			if (!FMath::IsFinite(Length)
+				|| Length + Settings.BeamA.JointMergeToleranceCM
+					< Settings.BeamA.BlockCrossSectionCM)
+			{
+				OutError = TEXT("BeamBCompiledMemberTooShort");
+				return false;
+			}
+			if (Closed.Joints.Num() + 2 > Settings.BeamA.MaxJointCount
+				|| Closed.Members.Num() >= Settings.BeamA.MaxMemberCount)
+			{
+				OutError = TEXT("BeamBBeamAIRBudgetExceeded");
+				return false;
+			}
+
+			const int32 JointA = Closed.Joints.Num();
+			FABTSM73BeamAJoint& A = Closed.Joints.AddDefaulted_GetRef();
+			A.JointId = JointA;
+			A.LocalPosition = Planned.LocalStart;
+			A.Role = Planned.Axis == EABTSM73BeamAFrameAxis::Z
+				&& Planned.LocalStart.Z <= Settings.BeamA.JointMergeToleranceCM
+					? EABTSM73BeamAJointRole::GroundFoot
+					: EABTSM73BeamAJointRole::BeamEnd;
+			const int32 JointB = Closed.Joints.Num();
+			FABTSM73BeamAJoint& B = Closed.Joints.AddDefaulted_GetRef();
+			B.JointId = JointB;
+			B.LocalPosition = Planned.LocalEnd;
+			B.Role = Planned.Axis == EABTSM73BeamAFrameAxis::Z
+				? EABTSM73BeamAJointRole::ColumnHead
+				: EABTSM73BeamAJointRole::BeamEnd;
+
+			FABTSM73BeamAMember& Member =
+				Closed.Members.AddDefaulted_GetRef();
+			Member.MemberId = Closed.Members.Num() - 1;
+			Member.JointA = JointA;
+			Member.JointB = JointB;
+			Member.Axis = Planned.Axis;
+			const EABTSM73BeamAFrameAxis* Orientation =
+				OrientationByBay.Find(Planned.BayId);
+			Member.Role = Planned.Axis == EABTSM73BeamAFrameAxis::Z
+				? EABTSM73BeamAMemberRole::Post
+				: Orientation != nullptr && Planned.Axis == *Orientation
+					? EABTSM73BeamAMemberRole::PrimaryBeam
+					: EABTSM73BeamAMemberRole::SecondaryBeam;
+			Member.LengthCM = Length;
+			FABTSM73BeamAAssembly& Assembly = Closed.Assemblies[*AssemblyId];
+			Assembly.JointIds.Add(JointA);
+			Assembly.JointIds.Add(JointB);
+			Assembly.MemberIds.Add(Member.MemberId);
+		}
+
+		if (!ABTSM73BeamA::CloseGeneratedAssembly(
+			Settings.BeamA, Closed, OutError))
+		{
+			return false;
+		}
+		Closed.Summary.JointCount = Closed.Joints.Num();
+		Closed.Summary.MemberCount = Closed.Members.Num();
+		Closed.Summary.BearingContactCount = Closed.BearingContacts.Num();
+		Closed.Summary.XMemberCount = 0;
+		Closed.Summary.YMemberCount = 0;
+		Closed.Summary.ZMemberCount = 0;
+		Closed.Summary.DiagonalMemberCount = 0;
+		for (const FABTSM73BeamAMember& Member : Closed.Members)
+		{
+			switch (Member.Axis)
+			{
+			case EABTSM73BeamAFrameAxis::X:
+				++Closed.Summary.XMemberCount;
+				break;
+			case EABTSM73BeamAFrameAxis::Y:
+				++Closed.Summary.YMemberCount;
+				break;
+			case EABTSM73BeamAFrameAxis::Z:
+				++Closed.Summary.ZMemberCount;
+				break;
+			case EABTSM73BeamAFrameAxis::Diagonal:
+			default:
+				++Closed.Summary.DiagonalMemberCount;
+				break;
+			}
+		}
+		Closed.Summary.bAccepted =
+			Closed.Summary.RemainingPenetrationCount == 0
+			&& Closed.Summary.UnsupportedMemberCount == 0
+			&& Closed.Summary.DiagonalMemberCount == 0;
+		if (!Closed.Summary.bAccepted)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamBClosedAssemblyRejected:Penetration=%d:")
+				TEXT("Unsupported=%d:Diagonal=%d"),
+				Closed.Summary.RemainingPenetrationCount,
+				Closed.Summary.UnsupportedMemberCount,
+				Closed.Summary.DiagonalMemberCount);
+			UE_LOG(
+				LogABTSRuntime,
+				Warning,
+				TEXT("[ABTS][M7.3-Beam-B][ClosureRejected] %s"),
+				*OutError);
+			return false;
+		}
+		return true;
+	}
+
 	FString CanonicalPlacements(
 		const TArray<FABTSM73BeamBPlacement>& Placements)
 	{
@@ -537,6 +685,35 @@ namespace ABTSM73BeamB
 				M.PlannedMemberId, M.BayId, static_cast<int32>(M.Motif),
 				static_cast<int32>(M.Axis), M.LocalStart.X, M.LocalStart.Y,
 				M.LocalStart.Z, M.LocalEnd.X, M.LocalEnd.Y, M.LocalEnd.Z);
+		}
+		return Text;
+	}
+
+	FString CanonicalClosedAssembly(
+		const FABTSM73BeamAGenerationResult& Closed)
+	{
+		FString Text;
+		for (const FABTSM73BeamAMember& Member : Closed.Members)
+		{
+			if (!Closed.Joints.IsValidIndex(Member.JointA)
+				|| !Closed.Joints.IsValidIndex(Member.JointB))
+			{
+				continue;
+			}
+			const FVector& A = Closed.Joints[Member.JointA].LocalPosition;
+			const FVector& B = Closed.Joints[Member.JointB].LocalPosition;
+			Text += FString::Printf(
+				TEXT("M%d:%d:%.2f,%.2f,%.2f:%.2f,%.2f,%.2f|"),
+				Member.MemberId, static_cast<int32>(Member.Axis),
+				A.X, A.Y, A.Z, B.X, B.Y, B.Z);
+		}
+		for (const FABTSM73BeamABearingContact& Contact :
+			Closed.BearingContacts)
+		{
+			Text += FString::Printf(TEXT("C%d:%d>%d:%d:%.2f|"),
+				Contact.ContactId, Contact.LowerMemberId,
+				Contact.UpperMemberId, static_cast<int32>(Contact.Type),
+				Contact.ContactAreaCM2);
 		}
 		return Text;
 	}
@@ -789,20 +966,54 @@ bool FABTSM73BeamBGenerator::Generate(
 	{
 		return Reject(TEXT("BeamBMotifVarietyUnavailable"));
 	}
+	FString ClosureError;
+	if (!CompileAndCloseAssembly(
+		Settings, BeamA, OutResult, ClosureError))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M7.3-Beam-B][ClosureFailed] %s"),
+			*ClosureError);
+		return Reject(FString::Printf(
+			TEXT("BeamBClosure:%s"), *ClosureError));
+	}
 
 	OutResult.Summary.BayCount = BeamA.Bays.Num();
 	OutResult.Summary.PlacementCount = OutResult.Placements.Num();
 	OutResult.Summary.DistinctMotifCount = UsedMotifs.Num();
 	OutResult.Summary.GrammarStepCount = OutResult.GrammarSteps.Num();
 	OutResult.Summary.PlannedMemberCount = OutResult.PlannedMembers.Num();
+	OutResult.Summary.ClosedMemberCount =
+		OutResult.ClosedAssembly.Members.Num();
+	OutResult.Summary.ClosedBearingContactCount =
+		OutResult.ClosedAssembly.BearingContacts.Num();
+	OutResult.Summary.ClosureSplitPostMemberCount =
+		OutResult.ClosedAssembly.Summary.SplitPostMemberCount;
+	OutResult.Summary.ClosureMergedMemberCount =
+		OutResult.ClosedAssembly.Summary.MergedMemberCount;
+	OutResult.Summary.ClosureShiftedCourseCount =
+		OutResult.ClosedAssembly.Summary.ShiftedCourseCount;
+	OutResult.Summary.ClosureSupportMemberCount =
+		OutResult.ClosedAssembly.Summary.GlobalSupportMemberCount;
+	OutResult.Summary.ClosurePrunedMemberCount =
+		OutResult.ClosedAssembly.Summary.PrunedUnsupportedMemberCount;
+	OutResult.Summary.RemainingPenetrationCount =
+		OutResult.ClosedAssembly.Summary.RemainingPenetrationCount;
+	OutResult.Summary.UnsupportedMemberCount =
+		OutResult.ClosedAssembly.Summary.UnsupportedMemberCount;
+	OutResult.Summary.DiagonalMemberCount =
+		OutResult.ClosedAssembly.Summary.DiagonalMemberCount;
 	const FString PlacementText = CanonicalPlacements(OutResult.Placements);
 	const FString GrammarText = CanonicalGrammar(OutResult);
+	const FString ClosedText = CanonicalClosedAssembly(
+		OutResult.ClosedAssembly);
 	OutResult.Summary.MotifWFCHash = static_cast<int64>(
 		FCrc::StrCrc32(*PlacementText));
 	OutResult.Summary.GraphGrammarHash = static_cast<int64>(
 		FCrc::StrCrc32(*GrammarText));
 	OutResult.Summary.ResultHash = static_cast<int64>(FCrc::StrCrc32(
-		*(PlacementText + GrammarText)));
+		*(PlacementText + GrammarText + ClosedText)));
 	OutResult.Summary.bAccepted = true;
 	return true;
 }

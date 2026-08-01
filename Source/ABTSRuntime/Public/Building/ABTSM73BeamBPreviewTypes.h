@@ -50,7 +50,7 @@ struct FABTSM73BeamBPreviewSettings
 	bool bAllowCantilever = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
-	bool bAllowBracedBay = true;
+	bool bAllowBracedBay = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC|Budget",
 		meta = (ClampMin = "32", ClampMax = "262144"))
@@ -164,6 +164,40 @@ struct FABTSM73BeamBPreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 PlannedMemberCount = 0;
+
+	/** Member count after compiling to Beam-A IR and running global closure. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosedMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosedBearingContactCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosureSplitPostMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosureMergedMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosureShiftedCourseCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosureSupportMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
+	int32 ClosurePrunedMemberCount = 0;
+
+	/** Must be zero for every accepted Beam-B result. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 RemainingPenetrationCount = 0;
+
+	/** Must be zero for every accepted Beam-B result. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 UnsupportedMemberCount = 0;
+
+	/** Beam-B currently permits XYZ members only. Must remain zero. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 DiagonalMemberCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 PortViolationCount = 0;

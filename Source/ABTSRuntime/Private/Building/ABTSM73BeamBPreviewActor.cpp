@@ -196,11 +196,43 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 
 	TArray<FMeshBuffers> Sections;
 	Sections.SetNum(8);
-	for (const FABTSM73BeamBPlannedMember& Member : Result.PlannedMembers)
+	TMap<int32, EABTSM73BeamBMotif> MotifByBay;
+	for (const FABTSM73BeamBPlacement& Placement : Result.Placements)
 	{
+		MotifByBay.Add(Placement.BayId, Placement.Motif);
+	}
+	TArray<int32> SectionByMember;
+	SectionByMember.Init(0, Result.ClosedAssembly.Members.Num());
+	for (const FABTSM73BeamAAssembly& Assembly :
+		Result.ClosedAssembly.Assemblies)
+	{
+		const EABTSM73BeamBMotif* Motif = MotifByBay.Find(Assembly.BayId);
+		if (Motif == nullptr)
+		{
+			continue;
+		}
 		const int32 Section = FMath::Clamp(
-			static_cast<int32>(Member.Motif), 0, Sections.Num() - 1);
-		AppendBox(Sections[Section], Member.LocalStart, Member.LocalEnd,
+			static_cast<int32>(*Motif), 0, Sections.Num() - 1);
+		for (const int32 MemberId : Assembly.MemberIds)
+		{
+			if (SectionByMember.IsValidIndex(MemberId))
+			{
+				SectionByMember[MemberId] = Section;
+			}
+		}
+	}
+	for (const FABTSM73BeamAMember& Member : Result.ClosedAssembly.Members)
+	{
+		if (!Result.ClosedAssembly.Joints.IsValidIndex(Member.JointA)
+			|| !Result.ClosedAssembly.Joints.IsValidIndex(Member.JointB))
+		{
+			continue;
+		}
+		const int32 Section = SectionByMember.IsValidIndex(Member.MemberId)
+			? SectionByMember[Member.MemberId] : 0;
+		AppendBox(Sections[Section],
+			Result.ClosedAssembly.Joints[Member.JointA].LocalPosition,
+			Result.ClosedAssembly.Joints[Member.JointB].LocalPosition,
 			PreviewSettings.BeamA.BlockCrossSectionCM);
 	}
 	for (int32 Index = 0; Index < Sections.Num(); ++Index)
@@ -227,14 +259,21 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 	LastPreviewSummary = Result.Summary;
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7.3-Beam-B][PreviewGenerated]")
-		TEXT(" Actor=%s Bays=%d Motifs=%d WFC=%d Steps=%d Members=%d")
-		TEXT(" PortViolations=%d BoundsViolations=%d Hash=%lld"),
+		TEXT(" Actor=%s Bays=%d Motifs=%d WFC=%d Steps=%d")
+		TEXT(" Planned=%d Closed=%d Bearings=%d")
+		TEXT(" PortViolations=%d BoundsViolations=%d")
+		TEXT(" Penetrations=%d Unsupported=%d Diagonal=%d Hash=%lld"),
 		*GetName(), LastPreviewSummary.BayCount,
 		LastPreviewSummary.DistinctMotifCount,
 		LastPreviewSummary.WFCPropagationOperationCount,
 		LastPreviewSummary.GrammarStepCount,
 		LastPreviewSummary.PlannedMemberCount,
+		LastPreviewSummary.ClosedMemberCount,
+		LastPreviewSummary.ClosedBearingContactCount,
 		LastPreviewSummary.PortViolationCount,
 		LastPreviewSummary.OutOfBoundsMemberCount,
+		LastPreviewSummary.RemainingPenetrationCount,
+		LastPreviewSummary.UnsupportedMemberCount,
+		LastPreviewSummary.DiagonalMemberCount,
 		LastPreviewSummary.ResultHash);
 }

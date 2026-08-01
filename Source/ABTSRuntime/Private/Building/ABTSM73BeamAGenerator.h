@@ -26,6 +26,17 @@ namespace ABTSM73BeamA
 		double OverlapMaximum,
 		const FABTSM73BeamAPreviewSettings& Settings,
 		TArray<double>& OutOffsets);
+
+	/**
+	 * Rebuild and close an already populated Beam-A-compatible assembly.
+	 * Beam-B uses this exact entry point after compiling Motif plans back to
+	 * Joint/Member/Assembly IR, so both stages share one penetration and
+	 * ground-reachability contract.
+	 */
+	bool CloseGeneratedAssembly(
+		const FABTSM73BeamAPreviewSettings& Settings,
+		FABTSM73BeamAGenerationResult& InOutResult,
+		FString& OutError);
 }
 
 /** Pure-data Beam-A compiler from accepted DAG5-B v2 silhouette volumes. */

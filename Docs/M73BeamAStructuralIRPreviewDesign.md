@@ -144,6 +144,10 @@ XY 重叠面积。超过 `MaxBearingPairChecks` 或 `MaxBearingContactCount` 时
 `BeamAUnsupportedMembers`、`BeamAMemberPenetration` 和 `BeamAGlobalAssemblyPassBudgetExceeded`。
 这些检查仍属于确定性几何装配，不使用 Chaos，也不替代 Beam-D 的动态稳定认证。
 
+该收口通过内部复用入口 `ABTSM73BeamA::CloseGeneratedAssembly` 暴露给下游。Beam-B 将 Motif
+计划构件编译回同一套 `Joint / Member / Assembly` IR 后调用此入口，因此 Beam-A 基线与 Beam-B
+结构家族不存在两套不同的穿透或地面可达判定。
+
 ## 5. 编辑器预览
 
 Actor：`M7.3 Beam-A Structural IR Preview`。
