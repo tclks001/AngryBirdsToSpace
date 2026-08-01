@@ -3,10 +3,17 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
+#include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
+#include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "World/ABTSM9GravityQuery.h"
+#include "World/ABTSM9Satellite.h"
 
 namespace ABTSM3R51SatellitePreviewTests
 {
@@ -35,12 +42,22 @@ public:
 			true,
 			ERHIFeatureLevel::Num,
 			&Values);
+		if (World != nullptr && GEngine != nullptr)
+		{
+			WorldContext = &GEngine->CreateNewWorldContext(EWorldType::Game);
+			WorldContext->SetCurrentWorld(World);
+		}
 	}
 
 	~FScopedTestWorld()
 	{
 		if (World != nullptr)
 		{
+			if (GEngine != nullptr && WorldContext != nullptr)
+			{
+				GEngine->DestroyWorldContext(World);
+				WorldContext = nullptr;
+			}
 			World->DestroyWorld(false);
 			World->RemoveFromRoot();
 		}
@@ -50,6 +67,7 @@ public:
 
 private:
 	UWorld* World = nullptr;
+	FWorldContext* WorldContext = nullptr;
 };
 
 AABTSM3Planet* SpawnPreviewPlanet(
@@ -205,6 +223,148 @@ bool FABTSM3R51SatellitePreviewFailureClosureTest::RunTest(
 			->CompareScriptStruct(&Result, &Tampered, PPF_None));
 	TestFalse(TEXT("Observation remains non-authoritative after tamper"),
 		Tampered.bMonthlyWorldAccepted);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM3R51SatelliteRuntimePracticeTest,
+	"ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace ABTSM3R51SatellitePreviewTests;
+	FScopedTestWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	if (World == nullptr)
+	{
+		AddError(TEXT("Transient test World was not created"));
+		return false;
+	}
+	AABTSM3Planet* Planet = SpawnPreviewPlanet(*this, *World);
+	if (Planet == nullptr || !Planet->RebuildPlanet())
+	{
+		AddError(TEXT("Runtime practice fixture failed to rebuild"));
+		return false;
+	}
+	const FABTSM3MonthlySatellitePreviewResult& Preview =
+		Planet->GetMonthlySatellitePreviewResult();
+	if (!Preview.bPreviewResultValid
+		|| Preview.RetainedCandidates.IsEmpty())
+	{
+		AddError(TEXT("Runtime practice fixture has no preview candidate"));
+		return false;
+	}
+	const FABTSM3MonthlySatellitePreviewCandidate Candidate =
+		Preview.RetainedCandidates[0];
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM6SlingshotSystem* SlingshotSystem =
+		World->SpawnActor<AABTSM6SlingshotSystem>(
+			AABTSM6SlingshotSystem::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(TEXT("M6 target consumer spawns"), SlingshotSystem);
+	if (SlingshotSystem == nullptr)
+	{
+		return false;
+	}
+
+	IConsoleVariable* GravityCVar = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("abts.Calibration.SatelliteGravity"));
+	TestNotNull(TEXT("Shared calibration gravity cvar is registered"), GravityCVar);
+	if (GravityCVar == nullptr)
+	{
+		return false;
+	}
+	const int32 OriginalGravityOverride = GravityCVar->GetInt();
+	GravityCVar->Set(0, ECVF_SetByCode);
+
+	AABTSM3MonthlySatellitePracticeRuntime* Runtime =
+		World->SpawnActorDeferred<AABTSM3MonthlySatellitePracticeRuntime>(
+			AABTSM3MonthlySatellitePracticeRuntime::StaticClass(),
+			FTransform::Identity,
+			nullptr,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	const bool bConfigured = Runtime != nullptr
+		&& Runtime->Configure(*Planet, Candidate, Preview.ResultHash);
+	TestTrue(TEXT("Runtime accepts the canonical frozen candidate"), bConfigured);
+	if (!bConfigured)
+	{
+		GravityCVar->Set(OriginalGravityOverride, ECVF_SetByCode);
+		return false;
+	}
+	UGameplayStatics::FinishSpawningActor(Runtime, FTransform::Identity);
+	TestTrue(TEXT("Runtime activates satellite, E5 collision and M6 target"),
+		Runtime->ActivateSnapshot());
+	TestTrue(TEXT("Runtime readiness closes all gameplay dependencies"),
+		Runtime->IsRuntimeReady());
+	TestTrue(TEXT("Satellite collision blocks the bird"),
+		Runtime->IsSatelliteCollisionEnabled());
+	TestTrue(TEXT("E5 cube collision blocks the bird"),
+		Runtime->IsE5CollisionEnabled());
+	TestTrue(TEXT("M6 consumes the exact E5 snapshot"),
+		Runtime->IsM6TargetBound());
+
+	const FABTSM3MonthlySatelliteRuntimeSnapshot Snapshot =
+		Runtime->GetRuntimeSnapshot();
+	TestTrue(TEXT("Session layout snapshot is valid"), Snapshot.bValid);
+	TestEqual(TEXT("Session snapshot retains the candidate identity"),
+		Snapshot.SourceCandidateHash,
+		Candidate.CandidateHash);
+	TestTrue(TEXT("Spawned satellite uses the exact preview center"),
+		Snapshot.SatelliteWorldTransform.GetLocation().Equals(
+			Candidate.SatelliteCenterWorld,
+			1.0f));
+	TestTrue(TEXT("Spawned E5 uses the exact preview transform"),
+		Snapshot.E5WorldTransform.Equals(
+			Candidate.E5TargetWorldTransform,
+			0.1f));
+	TestNotEqual(TEXT("Baseline gravity snapshot hash is persisted"),
+		Snapshot.BaselineGravitySnapshotHash,
+		static_cast<int64>(0));
+	TestNotEqual(TEXT("Joined runtime layout hash is persisted"),
+		Snapshot.RuntimeLayoutSnapshotHash,
+		static_cast<int64>(0));
+	TestFalse(TEXT("Override 0 disables the real satellite gravity source"),
+		Runtime->IsSatelliteGravityEnabled());
+	const FVector Probe = Candidate.SatelliteCenterWorld
+		+ FVector::UpVector * (Candidate.SatelliteRadiusCM * 2.0f);
+	TestTrue(TEXT("Gravity query is zero while the shared cvar is off"),
+		ABTSM9Gravity::GetSatelliteAcceleration(World, Probe).IsNearlyZero());
+
+	GravityCVar->Set(1, ECVF_SetByCode);
+	Runtime->Tick(0.1f);
+	TestTrue(TEXT("Override 1 enables the real satellite gravity source"),
+		Runtime->IsSatelliteGravityEnabled());
+	TestFalse(TEXT("Gravity query uses the spawned frozen satellite when enabled"),
+		ABTSM9Gravity::GetSatelliteAcceleration(World, Probe).IsNearlyZero());
+	TestEqual(TEXT("Gravity toggle never mutates the layout snapshot"),
+		Runtime->GetRuntimeSnapshot().RuntimeLayoutSnapshotHash,
+		Snapshot.RuntimeLayoutSnapshotHash);
+
+	AABTSM9Satellite* BoundSatellite = nullptr;
+	AActor* BoundTarget = nullptr;
+	FVector BoundHalfExtent = FVector::ZeroVector;
+	TestTrue(TEXT("M6 exposes the configured satellite practice target"),
+		SlingshotSystem->CopySatellitePracticeTarget(
+			BoundSatellite,
+			BoundTarget,
+			BoundHalfExtent));
+	TestTrue(TEXT("M6 satellite is the runtime snapshot actor"),
+		BoundSatellite == Runtime->GetRuntimeSatellite());
+	TestTrue(TEXT("M6 E5 target is the runtime snapshot actor"),
+		BoundTarget == Runtime->GetRuntimeE5Target());
+	TestTrue(TEXT("M6 target extent is the frozen E5 extent"),
+		BoundHalfExtent.Equals(Candidate.E5TargetHalfExtentCM, 0.1f));
+
+	GravityCVar->Set(OriginalGravityOverride, ECVF_SetByCode);
 	return true;
 }
 

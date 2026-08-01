@@ -13,6 +13,7 @@
 #include "HAL/PlatformMemory.h"
 #include "HAL/PlatformTime.h"
 #include "InputCoreTypes.h"
+#include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Player/ABTSM1PlayerController.h"
@@ -24,6 +25,8 @@
 #include "PCG/ABTSM3R3AcceptanceManifest.h"
 #include "PCG/ABTSM3R4AcceptanceManifest.h"
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
+#include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
+#include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UI/ABTSM1HUD.h"
@@ -609,6 +612,7 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 			PlayerController->SetControlRotation(SpawnTransform.Rotator());
 			bInitialPlayerPlaced = true;
 			OnInitialPlayerPlaced(*Character, SpawnTransform, SpawnCellId);
+			TryActivateMonthlySatellitePractice(*Planet);
 			GetWorldTimerManager().ClearTimer(InitialRoadSpawnTimer);
 			UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][Spawn] Player placed at Start road. Cell=%d Location=(%.1f,%.1f,%.1f) Attempts=%d"),
 				SpawnCellId,
@@ -631,6 +635,52 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 			Planet ? 1 : 0,
 			Character ? 1 : 0);
 	}
+}
+
+void AABTSM3GameMode::TryActivateMonthlySatellitePractice(
+	AABTSM3Planet& Planet)
+{
+	if (!Planet.IsMonthlyPresentationPreviewActive()
+		|| GetWorld() == nullptr)
+	{
+		return;
+	}
+	const FABTSM3MonthlySatellitePreviewResult& PreviewResult =
+		Planet.GetMonthlySatellitePreviewResult();
+	const FABTSM3MonthlySatellitePreviewCandidate* Candidate =
+		FABTSM3MonthlySatellitePreviewBuilder::FindCandidate(
+			PreviewResult,
+			Planet.GetMonthlyPresentationPreviewCandidateId());
+	if (!PreviewResult.bPreviewResultValid || Candidate == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] Rejected: exact active preview candidate is unavailable."));
+		return;
+	}
+
+	AABTSM3MonthlySatellitePracticeRuntime* Runtime =
+		GetWorld()->SpawnActorDeferred<
+			AABTSM3MonthlySatellitePracticeRuntime>(
+			AABTSM3MonthlySatellitePracticeRuntime::StaticClass(),
+			FTransform::Identity,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Runtime == nullptr
+		|| !Runtime->Configure(
+			Planet,
+			*Candidate,
+			PreviewResult.ResultHash))
+	{
+		if (Runtime)
+		{
+			Runtime->Destroy();
+		}
+		return;
+	}
+	UGameplayStatics::FinishSpawningActor(Runtime, FTransform::Identity);
+	Runtime->ActivateSnapshot();
+	MonthlySatellitePracticeRuntime = Runtime;
 }
 
 void AABTSM3GameMode::TryCompleteM3R0Smoke()

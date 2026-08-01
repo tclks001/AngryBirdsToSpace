@@ -26,6 +26,7 @@ protected:
 
 
 private:
+	void TryActivateMonthlySatellitePractice(class AABTSM3Planet& Planet);
 	void TryPlacePlayerAtInitialRoad();
 	void TryCompleteM3R0Smoke();
 	void FinishM3R0Smoke(bool bPassed, const FString& Failure);
@@ -63,6 +64,8 @@ private:
 	double M3R4SmokeStartSeconds = 0.0;
 	double M3R5SmokeStartSeconds = 0.0;
 	bool bInitialPlayerPlaced = false;
+	TWeakObjectPtr<class AABTSM3MonthlySatellitePracticeRuntime>
+		MonthlySatellitePracticeRuntime;
 #if WITH_EDITOR
 	bool bMonthlyLogicRegionDebugEnabled = false;
 	bool bMonthlyLogicRegionDebugReadyLogged = false;

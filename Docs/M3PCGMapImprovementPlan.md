@@ -9,7 +9,7 @@
 >
 > 当前 PIE 边界仍需明确：R-5 的 `F7` 红色 Target Footprint 与橙色 Attack Corridor 已消费上述新布局；玩家世界中的 M7 实体建筑仍由兼容 TaskGraph 生成，只有 R-6/Integration 将唯一月度 Candidate 导出并实例化后，实体建筑才会移动到这些目标范围。因此在 R-6 前，应以逻辑区域叠层和 `[ABTS][PCG][EncounterReach]` 厘米日志验收本次修正，不能把旧实体建筑位置误报为 R-3 参数未生效。
 >
-> 2026-08-01 卫星预览补齐：R-5.1 已把冻结 `SatellitePracticePreset` 按精确 R-3/R-3.1 Candidate 投影为 M9 练习卫星与 E5 背面目标 Transform。`F7` 增加蓝色卫星、洋红 E5 代理、黄色参考桩对和青色空间关系线；不生成真实 M9/M7 Actor，不改变 R-5 Biome、兼容世界或 `MonthlyAccepted`。细节与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
+> 2026-08-01 卫星预览补齐：R-5.1 已把冻结 `SatellitePracticePreset` 按精确 R-3/R-3.1 Candidate 投影为 M9 练习卫星与 E5 背面目标 Transform。`F7` 增加蓝色卫星、洋红 E5 代理、黄色参考桩对和青色空间关系线。显式精确预览现在还会把该 Candidate 持久化为会话快照，替换兼容 TaskGraph 的旧 M9 Actor，并生成真实卫星碰撞、洋红 E5 碰撞代理和 M6 PracticeTarget；`abts.Calibration.SatelliteGravity=-1/0/1` 分别使用冻结默认值/关闭/开启卫星重力。该诊断桥不生成 M7 建筑、不改变 R-5 Biome 或 `MonthlyAccepted`，也不会在非显式预览中运行。细节与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
 
 父文档：
 
@@ -1416,9 +1416,9 @@ R-5 已对 R-3 正式六 Encounter 的全部保留候选完成 100 Seed 重跑�
 
 R-5.1 在不等待 R-4 生产 Provider 的前提下，为每个保留候选生成只读卫星练习布局：它严格 Join R-3 Spatial Candidate、R-3.1 E5 槽场和 R-3 冻结校准批次，以连续地形表面和 E5 槽场参考桩对建立发射局部坐标，再调用共享标定函数生成卫星中心与 E5 背面目标 Transform。参考桩对仅用于坐标和诊断，不形成 AllowedPair；玩家的自由连接语义保持不变。
 
-本阶段 Result/Candidate Hash 包含 Source Spatial/Field、LaunchProfile、SatellitePreset、E5 Encounter/Field、参考槽、卫星与目标 Transform。结果恒为 `MonthlyAccepted=0`，不会改写 R-5 Biome Hash、兼容 TaskGraph、M7/M9 Actor 或稳定共享合同。F7 叠层以蓝色线框球、洋红目标盒、黄色参考桩和青色关系线显示该布局，并隐藏旧主星上的 E5 Target Footprint 以避免双重目标；其他五关的红色目标范围与全部橙色攻击走廊保持可见。
+本阶段 Result/Candidate Hash 包含 Source Spatial/Field、LaunchProfile、SatellitePreset、E5 Encounter/Field、参考槽、卫星与目标 Transform。结果恒为 `MonthlyAccepted=0`，不会改写 R-5 Biome Hash、M7 生成或稳定共享合同。F7 叠层以蓝色线框球、洋红目标盒、黄色参考桩和青色关系线显示该布局，并隐藏旧主星上的 E5 Target Footprint 以避免双重目标；其他五关的红色目标范围与全部橙色攻击走廊保持可见。仅当精确 Candidate 预览显式启用时，`AABTSM3MonthlySatellitePracticeRuntime` 才会持久化 `SourcePreviewResultHash + CandidateHash + BaselineGravitySnapshotHash`，用相同 Transform 替换旧 M9 卫星，开启卫星/E5 对 Pawn 的碰撞，并将 E5 代理绑定给 M6；重力开关不改变布局快照 Hash。
 
-强制 Unity Development Editor 全链接和 fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确 `2/2` 已通过；展示 Seed 的 3 个候选结果为 `Result=5CEF57BB1A3C245F`。完整算法、F7 图例、失败闭合和 R-6/Integration 交接见 [M3R-5.1 卫星预览设计](M3R51SatellitePreviewDesign.md)。可见 PIE 与真实 M6/M9/M7 Witness 仍为 IntegrationPending。
+强制 Unity Development Editor 全链接和 fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确 `3/3` 已通过；第三项覆盖快照持久化、卫星/E5 碰撞、M6 绑定、重力开关和 Hash 不变性。`L_ABTS_M10` fresh runtime 还验证了旧 M9 实例 `1/1` 被替换、`Ready=1`、`SatelliteCollision=1`、`E5Collision=1`、`M6Target=1`。展示 Seed 的 3 个候选结果为 `Result=5CEF57BB1A3C245F`；Candidate 4 的 runtime 快照为 `BaselineGravitySnapshotHash=C34E0F43E4CA5F8F`、`RuntimeLayoutSnapshotHash=E2A595253686730D`。完整算法、F7 图例、失败闭合和 R-6/Integration 交接见 [M3R-5.1 卫星预览设计](M3R51SatellitePreviewDesign.md)。可见 D3D12 PIE、真实发射手感复测与 M7 Witness 仍为 IntegrationPending。
 
 ### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
 
