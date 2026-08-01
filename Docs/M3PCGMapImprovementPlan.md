@@ -1,6 +1,6 @@
 # M3R PCG 地图生成改进方案
 
-> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层已达到 M3LocalAccepted（IntegrationPending）
+> 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层及 R-5.1 卫星/E5 候选预览已达到 M3LocalAccepted（IntegrationPending）
 > 日期：2026-07-31
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
 > 本次更新：Integration 已实现最小槽快照消费接缝、厘米长度/三维障碍门和失败原子状态；M6/M9 Launch/Preset 参数已完成可见 PIE 并冻结为可移植 V0，R-3 已通过稳定原生 factory 构造并签名校准批次，用三档射程包络做空间预筛，但仍不等同于生产权威 Witness Provider。M3 已实现 R-4 FixtureAuthority 终结层及 R-5 候选绑定表现层；R-5 只在显式预览中消费 R-3 候选，不发布月度世界，完整 Subdivision 7 本地重建性能门已通过。后续仍需 R-5 可见 PIE、生产 M6/M9 只读适配器、M6/M9/Character/Visibility 碰撞回归及 R-6 后的统一集成验收；当前不读取未决候选，也不提前生成月度实体槽
@@ -8,6 +8,8 @@
 > 2026-07-31 射程布局修正：R-3 不再只用冻结 `MaximumReachCM` 做末端拒绝，而是为 E1–E6 配置逐关递增的 `ComfortableReachCM` 利用率窗口，并让目标初选、侧路真实道路到达点和 strict rebuild 后的最终弹弓位置共同求解该窗口。Simple 阶段 E1/E2/E3 的窗口依次为 `10–30% / 25–50% / 45–65%`，Reinforced 阶段 E4/E5/E6 为 `20–40% / 35–55% / 50–70%`；窗口允许少量重叠以适应离散球面拓扑，但最终厘米距离在同一弹弓阶段必须严格递增。最终结果显式保存 `LaunchToTargetDistanceCM` 与 `AttackCorridorLengthCM` 并进入 Candidate Hash，长走廊的全部单元会在道路重建前预留。E1 保持视距内直接可读，E2–E6 统一由侦察揭示。显示种子 `312503` 的全新进程实测发射距离为 `986 / 1805 / 2631 / 3143 / 4697 / 6382 cm`，走廊长度为 `1907 / 2697 / 3594 / 4388 / 5926 / 8295 cm`；100 Seed 门为 `Accepted=100, Rejected=0, P95=190.731 ms, Max=294.622 ms`。
 >
 > 当前 PIE 边界仍需明确：R-5 的 `F7` 红色 Target Footprint 与橙色 Attack Corridor 已消费上述新布局；玩家世界中的 M7 实体建筑仍由兼容 TaskGraph 生成，只有 R-6/Integration 将唯一月度 Candidate 导出并实例化后，实体建筑才会移动到这些目标范围。因此在 R-6 前，应以逻辑区域叠层和 `[ABTS][PCG][EncounterReach]` 厘米日志验收本次修正，不能把旧实体建筑位置误报为 R-3 参数未生效。
+>
+> 2026-08-01 卫星预览补齐：R-5.1 已把冻结 `SatellitePracticePreset` 按精确 R-3/R-3.1 Candidate 投影为 M9 练习卫星与 E5 背面目标 Transform。`F7` 增加蓝色卫星、洋红 E5 代理、黄色参考桩对和青色空间关系线；不生成真实 M9/M7 Actor，不改变 R-5 Biome、兼容世界或 `MonthlyAccepted`。细节与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
 
 父文档：
 
@@ -1409,6 +1411,14 @@ R-5 已对 R-3 正式六 Encounter 的全部保留候选完成 100 Seed 重跑�
 - 固定展示 Seed 的可见 PIE 必须显式使用 `-ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4`，再检查 Lit/Unlit、20–45 m 地貌节拍、关闭 Debug Layer 后的引导连续性和保护区无装饰穿插；不带精确 Candidate 的兼容画面不能作为 R-5 视觉证据；
 - 当前 `VisualBiomeBoundaryPermille` 是整球邻接边的粗筛指标；若可见 PIE 仍在 Playable Envelope 内观察到局部碎片，R-7 的 1000 Seed 调参门应补充 Envelope-only 边界率，而不是放宽 R-5 已冻结的最小连通块与全局边界常量；
 - `QueryAndPhysics` 树石与真实 M6 动态代理、M9 开发者穿行/练习场及 Character/Visibility 的集成碰撞回归仍须在集成工作树完成。上述可见 PIE 与跨系统回归通过后，R-5 才能晋升为 **IntegrationAccepted**。
+
+### 14.8.1 M3R-5.1：卫星练习区与 E5 背面目标预览
+
+R-5.1 在不等待 R-4 生产 Provider 的前提下，为每个保留候选生成只读卫星练习布局：它严格 Join R-3 Spatial Candidate、R-3.1 E5 槽场和 R-3 冻结校准批次，以连续地形表面和 E5 槽场参考桩对建立发射局部坐标，再调用共享标定函数生成卫星中心与 E5 背面目标 Transform。参考桩对仅用于坐标和诊断，不形成 AllowedPair；玩家的自由连接语义保持不变。
+
+本阶段 Result/Candidate Hash 包含 Source Spatial/Field、LaunchProfile、SatellitePreset、E5 Encounter/Field、参考槽、卫星与目标 Transform。结果恒为 `MonthlyAccepted=0`，不会改写 R-5 Biome Hash、兼容 TaskGraph、M7/M9 Actor 或稳定共享合同。F7 叠层以蓝色线框球、洋红目标盒、黄色参考桩和青色关系线显示该布局，并隐藏旧主星上的 E5 Target Footprint 以避免双重目标；其他五关的红色目标范围与全部橙色攻击走廊保持可见。
+
+强制 Unity Development Editor 全链接和 fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确 `2/2` 已通过；展示 Seed 的 3 个候选结果为 `Result=5CEF57BB1A3C245F`。完整算法、F7 图例、失败闭合和 R-6/Integration 交接见 [M3R-5.1 卫星预览设计](M3R51SatellitePreviewDesign.md)。可见 PIE 与真实 M6/M9/M7 Witness 仍为 IntegrationPending。
 
 ### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
 

@@ -515,6 +515,7 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 
 	int32 TargetCellCount = 0;
 	int32 AttackCorridorCellCount = 0;
+	int32 SatelliteE5PreviewCount = 0;
 	bool bDrewAnyPlanet = false;
 	for (TActorIterator<AABTSM3Planet> It(GetWorld());
 		It;
@@ -522,15 +523,19 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 	{
 		int32 PlanetTargetCellCount = 0;
 		int32 PlanetAttackCorridorCellCount = 0;
+		bool bPlanetSatelliteE5PreviewDrawn = false;
 		if (It->DrawMonthlyLogicRegionDebugOverlay(
 				DrawLifeTimeSeconds,
 				PlanetTargetCellCount,
-				PlanetAttackCorridorCellCount))
+				PlanetAttackCorridorCellCount,
+				bPlanetSatelliteE5PreviewDrawn))
 		{
 			bDrewAnyPlanet = true;
 			TargetCellCount += PlanetTargetCellCount;
 			AttackCorridorCellCount +=
 				PlanetAttackCorridorCellCount;
+			SatelliteE5PreviewCount +=
+				bPlanetSatelliteE5PreviewDrawn ? 1 : 0;
 		}
 	}
 	if (GEngine == nullptr)
@@ -545,18 +550,20 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 			UE_LOG(
 				LogABTSRuntime,
 				Log,
-				TEXT("[ABTS][M3R5][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d"),
+				TEXT("[ABTS][M3R5.1][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d SatelliteE5Previews=%d"),
 				TargetCellCount,
-				AttackCorridorCellCount);
+				AttackCorridorCellCount,
+				SatelliteE5PreviewCount);
 		}
 		GEngine->AddOnScreenDebugMessage(
 			0x4D335235,
 			DrawLifeTimeSeconds + 0.1f,
 			FColor::Yellow,
 			FString::Printf(
-				TEXT("M3R5 Logic Regions ON (F7)  RED=Target Footprint [%d]  ORANGE=Attack Corridor [%d]"),
+				TEXT("M3R5.1 Logic Regions ON (F7)  RED=Target [%d]  ORANGE=Corridor [%d]  BLUE/MAGENTA=Satellite/E5 [%d]"),
 				TargetCellCount,
-				AttackCorridorCellCount));
+				AttackCorridorCellCount,
+				SatelliteE5PreviewCount));
 	}
 	else
 	{

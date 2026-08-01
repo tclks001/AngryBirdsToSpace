@@ -6,6 +6,7 @@
 #include "PCG/ABTSM3MonthlyEncounter.h"
 #include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
+#include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "PCG/ABTSM3MonthlySchema.h"
 #include "PCG/ABTSM3MonthlySlingshotField.h"
 #include "PCG/ABTSM3MonthlyWitness.h"
@@ -76,7 +77,8 @@ public:
 	bool DrawMonthlyLogicRegionDebugOverlay(
 		float LifeTimeSeconds,
 		int32& OutTargetFootprintCellCount,
-		int32& OutAttackCorridorCellCount) const;
+		int32& OutAttackCorridorCellCount,
+		bool& bOutSatelliteE5PreviewDrawn) const;
 #endif
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
@@ -160,6 +162,17 @@ public:
 
 	/** Rebuilds and whole-struct compares the R-3.1 result. */
 	bool ValidateMonthlySlingshotFieldResult(
+		FString& OutFailure) const;
+
+	/** Candidate-bound frozen satellite/E5 preview. It never spawns gameplay Actors. */
+	const FABTSM3MonthlySatellitePreviewResult&
+		GetMonthlySatellitePreviewResult() const
+	{
+		return MonthlySatellitePreviewResult;
+	}
+
+	/** Rebuilds and whole-struct compares the R-5.1 preview result. */
+	bool ValidateMonthlySatellitePreviewResult(
 		FString& OutFailure) const;
 
 	/**
@@ -283,6 +296,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldConfig MonthlySlingshotFieldConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	FABTSM3MonthlySatellitePreviewConfig MonthlySatellitePreviewConfig;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
 	FABTSM3MonthlyWitnessConfig MonthlyWitnessConfig;
@@ -425,6 +441,10 @@ public:
 	/** R-3.1 ordinary slot-field alternatives; finale Space slots remain a separate exact pair. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldResult MonthlySlingshotFieldResult;
+
+	/** R-5.1 exact alternatives; no M9/M7 Actor and no monthly-world authority. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	FABTSM3MonthlySatellitePreviewResult MonthlySatellitePreviewResult;
 
 	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
