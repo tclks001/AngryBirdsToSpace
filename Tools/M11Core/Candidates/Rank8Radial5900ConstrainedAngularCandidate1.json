@@ -11,6 +11,18 @@
   "assist3OffsetCM": [-212.291, 1193.330, -181.954],
   "targetOffsetCM": [-2258.116, 1200.834, 1315.387],
   "angularDeviationDegrees": [0.0, 1.249, 0.717, 1.259],
+  "screenAimEvidence": {
+    "sampling": "fixed-seed-halton-yaw-pitch-at-maximum-power",
+    "seed": 4750135298,
+    "sampleCount": 5000,
+    "yawRangeDegrees": [-18.0, 18.0],
+    "pitchRangeDegrees": [0.0, 60.0],
+    "prefixCounts": [392, 115, 27, 15],
+    "conditionalRatios": [0.0784, 0.293367, 0.234783, 0.555556],
+    "hullAreaSquareDegrees": [230.226984, 61.928798, 12.046923, 4.398590],
+    "hullYawSpanDegrees": [15.774170, 9.597656, 4.001221, 3.236572],
+    "hullPitchSpanDegrees": [23.740283, 14.473403, 9.839963, 7.523243]
+  },
   "maximumPowerClosureEvidence": {
     "grid": {
       "yaw": [-4.0, 2.0, 0.25],

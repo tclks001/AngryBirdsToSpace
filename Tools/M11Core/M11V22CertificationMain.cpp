@@ -33,6 +33,7 @@ namespace
 	struct Options
 	{
 		bool Merge = false;
+		bool ScreenAim = false;
 		std::int32_t Rank = 3;
 		fs::path Output;
 		fs::path InputRoot;
@@ -78,6 +79,7 @@ namespace
 		double ArrivalConeDegrees = 180.0;
 		double ArrivalFaceConeDegrees = 180.0;
 		std::uint32_t CheckpointEvery = 256;
+		std::uint32_t ScreenAimSampleCount = 5000;
 		bool Resume = false;
 	};
 
@@ -148,6 +150,10 @@ namespace
 		{
 			Out.Merge = true;
 		}
+		else if (Command == "screen-aim")
+		{
+			Out.ScreenAim = true;
+		}
 		else if (Command != "preflight")
 		{
 			Failure = "UnknownCommand";
@@ -197,6 +203,11 @@ namespace
 				&& ParseUnsigned(Value, Unsigned))
 			{
 				Out.CheckpointEvery = static_cast<std::uint32_t>(Unsigned);
+			}
+			else if (Key == "--screen-aim-samples"
+				&& ParseUnsigned(Value, Unsigned))
+			{
+				Out.ScreenAimSampleCount = static_cast<std::uint32_t>(Unsigned);
 			}
 			else if (Key == "--yaw-step" && ParseDouble(Value, Number))
 			{
@@ -382,7 +393,7 @@ namespace
 		if (Out.Output.empty() || !Out.Output.is_absolute()
 			|| Out.Threads == 0 || Out.ShardCount == 0
 			|| Out.ShardIndex >= Out.ShardCount
-			|| Out.CheckpointEvery == 0)
+			|| Out.CheckpointEvery == 0 || Out.ScreenAimSampleCount == 0)
 		{
 			Failure = "InvalidExecutionContract";
 			return false;
@@ -1474,6 +1485,128 @@ namespace
 		}
 		return 0;
 	}
+
+	double Halton(std::uint64_t Index, const std::uint32_t Base)
+	{
+		double Result = 0.0;
+		double Fraction = 1.0;
+		while (Index > 0)
+		{
+			Fraction /= static_cast<double>(Base);
+			Result += Fraction * static_cast<double>(Index % Base);
+			Index /= Base;
+		}
+		return Result;
+	}
+
+	int RunScreenAim(const Options& OptionsValue)
+	{
+		CandidateLayout Layout;
+		FrozenCandidateIdentity Identity;
+		if (!ABTS::M11Search::BuildFrozenV4CandidateLayout(
+				OptionsValue.Rank, Layout, &Identity))
+		{
+			std::cerr << "CandidateRankUnavailable\n";
+			return 1;
+		}
+		const CandidateSearchContract Contract =
+			CandidateSearchContract::MakeV2_1();
+		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
+			!= Identity.CandidateSourceHash)
+		{
+			std::cerr << "CandidateSourceIdentityMismatch\n";
+			return 1;
+		}
+		ApplyDiagnosticOffsets(OptionsValue, Layout);
+		const std::uint64_t VariantSourceHash =
+			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
+		std::error_code Error;
+		fs::create_directories(OptionsValue.Output, Error);
+		if (Error)
+		{
+			std::cerr << "OutputCreateFailed\n";
+			return 1;
+		}
+		std::ofstream Samples(
+			OptionsValue.Output / "screen_aim_samples.tsv",
+			std::ios::trunc);
+		if (!Samples)
+		{
+			std::cerr << "SampleOutputOpenFailed\n";
+			return 1;
+		}
+		Samples << "index yaw pitch power prefix hash\n";
+		std::array<std::uint64_t, 4> Counts{};
+		const std::uint64_t Offset = Contract.ScreenAimSeed % 1000003ull;
+		for (std::uint32_t Index = 0;
+			Index < OptionsValue.ScreenAimSampleCount;
+			++Index)
+		{
+			const std::uint64_t SampleIndex = Offset + Index + 1ull;
+			const LaunchInput Input{
+				ABTS::M11Core::Lerp(
+					Layout.Launch.MinimumYawDegrees,
+					Layout.Launch.MaximumYawDegrees,
+					Halton(SampleIndex, 2)),
+				ABTS::M11Core::Lerp(
+					Layout.Launch.MinimumPitchDegrees,
+					Layout.Launch.MaximumPitchDegrees,
+					Halton(SampleIndex, 3)),
+				Layout.Launch.MaximumPower};
+			InputEvaluation Evaluation;
+			std::string Failure;
+			if (!CandidateSearch::EvaluateInput(
+					Layout, Contract, Input, 0x7u, Evaluation, &Failure))
+			{
+				std::cerr << "ScreenAimSolveFailed:" << Index << ':'
+					<< Failure << '\n';
+				return 1;
+			}
+			if (Evaluation.PrefixMembership[3]
+				&& !Evaluation.HasOrderedTerminalHit)
+			{
+				Evaluation.PrefixMembership[3] = false;
+			}
+			std::uint8_t PrefixMask = 0;
+			for (std::size_t Level = 0; Level < Counts.size(); ++Level)
+			{
+				if (Evaluation.PrefixMembership[Level])
+				{
+					PrefixMask |= static_cast<std::uint8_t>(1u << Level);
+					++Counts[Level];
+				}
+			}
+			Samples << Index << ' ' << std::setprecision(17)
+				<< Input.YawDegrees << ' ' << Input.PitchDegrees << ' '
+				<< Input.Power << ' '
+				<< static_cast<unsigned int>(PrefixMask) << ' '
+				<< Hex64(Evaluation.ResultHash) << '\n';
+		}
+		std::ofstream Summary(
+			OptionsValue.Output / "screen_aim_summary.json",
+			std::ios::binary | std::ios::trunc);
+		Summary << std::setprecision(17)
+			<< "{\n  \"schema\":\"abts.m11b.v2_2.screen_aim.v1\",\n"
+			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
+			<< "  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
+			<< "\",\n  \"sampleCount\":"
+			<< OptionsValue.ScreenAimSampleCount << ",\n"
+			<< "  \"seed\":" << Contract.ScreenAimSeed << ",\n"
+			<< "  \"power\":" << Layout.Launch.MaximumPower << ",\n"
+			<< "  \"yawRangeDegrees\":["
+			<< Layout.Launch.MinimumYawDegrees << ','
+			<< Layout.Launch.MaximumYawDegrees << "],\n"
+			<< "  \"pitchRangeDegrees\":["
+			<< Layout.Launch.MinimumPitchDegrees << ','
+			<< Layout.Launch.MaximumPitchDegrees << "],\n"
+			<< "  \"prefixCounts\":[" << Counts[0] << ',' << Counts[1]
+			<< ',' << Counts[2] << ',' << Counts[3] << "]\n}\n";
+		std::cout << "[ABTS][M11-B-v2.2][ScreenAim] Samples="
+			<< OptionsValue.ScreenAimSampleCount << " Prefix="
+			<< Counts[0] << ',' << Counts[1] << ',' << Counts[2] << ','
+			<< Counts[3] << '\n';
+		return 0;
+	}
 }
 
 int main(const int Argc, char** Argv)
@@ -1488,6 +1621,10 @@ int main(const int Argc, char** Argv)
 	if (OptionsValue.Merge)
 	{
 		return RunMerge(OptionsValue);
+	}
+	if (OptionsValue.ScreenAim)
+	{
+		return RunScreenAim(OptionsValue);
 	}
 	return RunPreflight(OptionsValue);
 }

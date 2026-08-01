@@ -723,6 +723,13 @@ Bundle Hash、未加入 PIE Rank 或生产绑定。参数与后续完整认证�
 手感，必须先选择新的 nominal 输入，再执行完整输入域、消融、旁路和 Trust Region
 认证。
 
+按正式 ScreenAim 口径在完整 `Yaw[-18°,18°] × Pitch[0°,60°]` 上执行满功率
+5000 点固定种子 Halton 采样，得到 `392 → 115 → 27 → 15`，条件比例为
+`7.84% / Domain → 29.34% / F1 → 23.48% / F2 → 55.56% / F3`。对应凸包面积为
+`230.23 → 61.93 → 12.05 → 4.40 deg²`。这组比例与前述 1025 点数据并不矛盾：
+1025 点闭包只覆盖玩家成功岛附近的局部 `Yaw[-4°,2°] × Pitch[19.5°,34.5°]`，
+而 ScreenAim 分母是完整可操作角域。
+
 候选记录见
 `Tools/M11Core/Candidates/Rank8Radial5900ConstrainedAngularCandidate1.json`，搜索入口为
 `Tools/M11Core/Python/m11_v22_constrained_angular_search.py`。
