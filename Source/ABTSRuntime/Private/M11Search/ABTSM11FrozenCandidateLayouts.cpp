@@ -8,7 +8,36 @@ namespace ABTS::M11Search
 	{
 #include "ABTSM11FrozenV4CandidateData.inl"
 
-		constexpr std::array<FrozenCandidateIdentity, 4> Identities = {{
+		void ApplyRank3UpstreamCandidate353(CandidateLayout& Layout)
+		{
+			Layout.Scenario.Target.CenterCM +=
+				M11Core::Vec3d(2045.340, 2022.718, -8885.799);
+			Layout.Scenario.Target.GeometricContactCenterCM +=
+				M11Core::Vec3d(2045.340, 2022.718, -8885.799);
+			Layout.Scenario.Target.HitRadiusCM = 12000.0;
+
+			M11Core::GravityBodySpec& Assist2 = Layout.Scenario.Bodies[2];
+			Assist2.CenterCM +=
+				M11Core::Vec3d(-1344.726, 1739.712, -1105.200);
+			Assist2.BPlaneTargetTCM += -48.730;
+			Assist2.BPlaneTargetRCM += -1327.573;
+			Assist2.BPlaneSigmaTCM *= 0.857348;
+			Assist2.BPlaneSigmaRCM *= 0.857348;
+			Assist2.VirtualOrbitalVelocityCMPerSec +=
+				M11Core::Vec3d(80.096, -225.197, 77.338);
+
+			M11Core::GravityBodySpec& Assist3 = Layout.Scenario.Bodies[3];
+			Assist3.CenterCM +=
+				M11Core::Vec3d(1864.062, -1883.951, -345.280);
+			Assist3.BPlaneTargetTCM += 731.050;
+			Assist3.BPlaneTargetRCM += 1622.652;
+			Assist3.BPlaneSigmaTCM *= 1.193424;
+			Assist3.BPlaneSigmaRCM *= 1.193424;
+			Assist3.VirtualOrbitalVelocityCMPerSec +=
+				M11Core::Vec3d(-955.286, 1384.235, -1302.886);
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 5> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -17,6 +46,10 @@ namespace ABTS::M11Search
 				0xa7695a10b44f8281ull, 0x4689059277f93880ull},
 			{6, 30ull, 0x80d274a67e1e9944ull, 0x3e64212a606348f0ull,
 				0x9de084d9f77c9ee7ull, 0xf8b1ff45fa8f1adfull},
+			// Derived research Candidate 353. The final field freezes its
+			// half-cell aggregate evidence hash; it is not a certified score.
+			{7, 353ull, 0xb3e0f00ca35d499aull, 0x48ffe272661916b2ull,
+				0xe7c6c093e3cc9533ull, 0x0baef62a673e8e55ull},
 		}};
 	}
 
@@ -30,9 +63,14 @@ namespace ABTS::M11Search
 		{
 			*OutIdentity = FrozenCandidateIdentity();
 		}
-		if (!BuildFrozenV4Layout(Rank, OutLayout))
+		const std::int32_t SourceRank = Rank == 7 ? 3 : Rank;
+		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
+		}
+		if (Rank == 7)
+		{
+			ApplyRank3UpstreamCandidate353(OutLayout);
 		}
 		for (const FrozenCandidateIdentity& Identity : Identities)
 		{

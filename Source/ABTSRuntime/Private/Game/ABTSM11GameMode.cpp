@@ -24,7 +24,7 @@ namespace
 		0,
 		TEXT("Editor-only M11-C v2.1 experience layout. ")
 		TEXT("0 keeps the production Certified v1 bundle; ")
-		TEXT("1..6 load the corresponding frozen, UNCERTIFIED ")
+		TEXT("1..7 load the corresponding frozen, UNCERTIFIED ")
 		TEXT("M11-B v2.1 Candidate. Stop and restart PIE after changing."),
 		ECVF_Default);
 }

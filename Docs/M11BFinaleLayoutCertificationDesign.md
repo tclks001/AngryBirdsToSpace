@@ -636,10 +636,18 @@ Assist2VelocityDeltaCMPerSec = (80.096, -225.197, 77.338)
 
 完整下游参数和证据冻结在
 `Tools/M11Core/Candidates/Rank3UpstreamCandidate353.json`。该文件明确保持
-`candidate_not_certified`，CertificationHash/CertifiedBundleHash 为零；它不会自动
-进入 Frozen Catalog、PIE Rank 或生产绑定。下一步应暂停继续搜索，将候选 353
+`candidate_not_certified`，CertificationHash/CertifiedBundleHash 为零。为进行最终
+PIE 手感复核，它以 Editor-only `abts.M11.CandidateRank 7` 追加到控制台列表末尾，
+但不会进入生产绑定。下一步应暂停继续搜索，将候选 353
 提升为唯一 B v2.2 完整认证输入，执行 base/half-cell、边界递归精化、消融/旁路、
 信赖域和 UE parity。
+
+接入 UE Frozen Catalog 后的 parity 进一步发现：候选 353 名义轨迹的
+`TargetHit` 发生在 `Assist3 Exit` 之前。前述单岛来自 Core 预认证阶段临时使用的
+“完成三次助推且曾命中”分类，而正式 UE 前缀语义要求
+`Assist3 Exit → TargetApproach → TargetHit`。因此 Rank 7 只用于观察轨迹和手感，
+不得宣称 runtime-qualified F4，也不得直接成为完整认证输入；后续搜索必须先把
+终端事件顺序加入 Core F4 权威判定，再寻找或修复候选。
 
 ## 8. 完整输入域认证
 

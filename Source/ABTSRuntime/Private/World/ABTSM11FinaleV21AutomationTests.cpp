@@ -341,12 +341,14 @@ bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
 		int32 Rank;
 		uint64 SourceHash;
 		uint64 ResultHash;
+		bool bRequiresRuntimeF4 = true;
 	};
 	constexpr FFrozenExpectation Expectations[] = {
 		{3, 0xed74ffaf0de8028full, 0x791c9a64b195b0d4ull},
 		{4, 0xf22ad256fd791e07ull, 0xbf710eb5c1e114c1ull},
 		{5, 0xcdc6e41075d99493ull, 0xa7695a10b44f8281ull},
 		{6, 0x80d274a67e1e9944ull, 0x9de084d9f77c9ee7ull},
+		{7, 0xb3e0f00ca35d499aull, 0xe7c6c093e3cc9533ull, false},
 	};
 
 	for (const FFrozenExpectation& Expected : Expectations)
@@ -415,14 +417,29 @@ bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
 				Expected.Rank),
 			Result.ValidationHash,
 			Expected.ResultHash);
-		TestTrue(
-			*FString::Printf(
-				TEXT("Rank %d nominal input reaches F4"),
-				Expected.Rank),
+		const FABTSM11PrefixClassification Classification =
 			FABTSM11PrefixClassifier::Classify(
 				Preset,
 				Result,
-				0x7u).IsF(4));
+				0x7u);
+		if (Expected.bRequiresRuntimeF4)
+		{
+			TestTrue(
+				*FString::Printf(
+					TEXT("Rank %d nominal input reaches F4"),
+					Expected.Rank),
+				Classification.IsF(4));
+		}
+		else
+		{
+			TestTrue(
+				TEXT("Rank 7 retains its diagnostic terminal hit"),
+				Result.DidHitTarget()
+					&& Result.CompletedAssistCount == 3);
+			TestFalse(
+				TEXT("Rank 7 does not claim runtime-qualified F4"),
+				Classification.IsF(4));
+		}
 	}
 	return !HasAnyErrors();
 }
