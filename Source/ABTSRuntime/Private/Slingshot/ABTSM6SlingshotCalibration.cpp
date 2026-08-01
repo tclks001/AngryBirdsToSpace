@@ -12,6 +12,46 @@
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9Satellite.h"
 
+bool AABTSM6SlingshotSystem::ConfigureLaunchProfiles(
+	const FABTSM6LaunchProfileCatalog& InCatalog)
+{
+	bLaunchProfileCatalogEnabled = false;
+	CalibrationLaunchProfileCatalog = FABTSM6LaunchProfileCatalog();
+	CalibrationLaunchProfileHash = 0;
+	FABTSM6LaunchProfileCatalog ResolvedCatalog;
+	FString FailureReason;
+	if (!FABTSSlingshotSatelliteCalibrationModel::ResolveCatalog(
+		InCatalog, ResolvedCatalog, &FailureReason))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M6][ProfileCatalog] Rejected Reason=%s"),
+			*FailureReason);
+		return false;
+	}
+	CalibrationLaunchProfileCatalog = MoveTemp(ResolvedCatalog);
+	CalibrationLaunchProfileHash =
+		FABTSSlingshotSatelliteCalibrationModel::ComputeLaunchProfileHash(
+			CalibrationLaunchProfileCatalog);
+	if (CalibrationLaunchProfileHash == 0)
+	{
+		CalibrationLaunchProfileCatalog = FABTSM6LaunchProfileCatalog();
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M6][ProfileCatalog] Rejected Reason=Resolved catalog hash is zero."));
+		return false;
+	}
+	bLaunchProfileCatalogEnabled = true;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][ProfileCatalog] Ready Version=%d Profiles=%d CameraDistance=%.1f CameraPitch=%.2f TargetForward=%.1f TargetHeight=%.1f LaunchProfileHash=%llu"),
+		CalibrationLaunchProfileCatalog.Version,
+		CalibrationLaunchProfileCatalog.Profiles.Num(),
+		CalibrationLaunchProfileCatalog.AimCameraDistanceCM,
+		CalibrationLaunchProfileCatalog.AimCameraPitchDegrees,
+		CalibrationLaunchProfileCatalog.AimTargetForwardDistanceCM,
+		CalibrationLaunchProfileCatalog.AimTargetHeightCM,
+		CalibrationLaunchProfileHash);
+	return true;
+}
+
 bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 	const FABTSM6LaunchProfileCatalog& InCatalog)
 {
@@ -33,20 +73,7 @@ bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 			*GetNameSafe(SlingshotCamera->GetClass()));
 		return false;
 	}
-	FABTSM6LaunchProfileCatalog ResolvedCatalog;
-	FString FailureReason;
-	if (!FABTSSlingshotSatelliteCalibrationModel::ResolveCatalog(
-		CatalogWithCameraSnapshot, ResolvedCatalog, &FailureReason))
-	{
-		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][Calibration][ProfileCatalog] Rejected Reason=%s"),
-			*FailureReason);
-		return false;
-	}
-	CalibrationLaunchProfileCatalog = MoveTemp(ResolvedCatalog);
-	CalibrationLaunchProfileHash =
-		FABTSSlingshotSatelliteCalibrationModel::ComputeLaunchProfileHash(
-			CalibrationLaunchProfileCatalog);
+	if (!ConfigureLaunchProfiles(CatalogWithCameraSnapshot)) return false;
 	bCalibrationModeEnabled = true;
 	// The isolated calibration GameMode never creates required buildings. Avoid
 	// promoting unrelated old-map HISM instances or waiting on their warmup.
@@ -66,16 +93,32 @@ bool AABTSM6SlingshotSystem::ConfigureCalibrationLaunchProfiles(
 	return true;
 }
 
-bool AABTSM6SlingshotSystem::CopyCalibrationCatalog(
+bool AABTSM6SlingshotSystem::CopyLaunchProfileCatalog(
 	FABTSM6LaunchProfileCatalog& OutCatalog,
 	uint64& OutLaunchProfileHash) const
 {
 	OutCatalog = FABTSM6LaunchProfileCatalog();
 	OutLaunchProfileHash = 0;
-	if (!bCalibrationModeEnabled || CalibrationLaunchProfileHash == 0) return false;
+	if (!bLaunchProfileCatalogEnabled || CalibrationLaunchProfileHash == 0)
+	{
+		return false;
+	}
 	OutCatalog = CalibrationLaunchProfileCatalog;
 	OutLaunchProfileHash = CalibrationLaunchProfileHash;
 	return true;
+}
+
+bool AABTSM6SlingshotSystem::CopyCalibrationCatalog(
+	FABTSM6LaunchProfileCatalog& OutCatalog,
+	uint64& OutLaunchProfileHash) const
+{
+	if (!bCalibrationModeEnabled)
+	{
+		OutCatalog = FABTSM6LaunchProfileCatalog();
+		OutLaunchProfileHash = 0;
+		return false;
+	}
+	return CopyLaunchProfileCatalog(OutCatalog, OutLaunchProfileHash);
 }
 
 bool AABTSM6SlingshotSystem::CopyCalibrationBirdCollisionRadius(
@@ -504,26 +547,35 @@ bool AABTSM6SlingshotSystem::CopyReinforcedCalibrationLaunchFrame(
 	return true;
 }
 
-const FABTSM6LaunchProfile*
-AABTSM6SlingshotSystem::GetActiveCalibrationLaunchProfile() const
+const FABTSM6LaunchProfile* AABTSM6SlingshotSystem::FindLaunchProfile(
+	const EABTSSlingshotTier Tier) const
 {
-	if (!bCalibrationModeEnabled || !ActiveCord.IsValid()) return nullptr;
-	const EABTSSlingshotTier Tier = ActiveCord->GetSlingshotTier();
-	if (Tier == EABTSSlingshotTier::Space) return nullptr;
+	if (!bLaunchProfileCatalogEnabled || Tier == EABTSSlingshotTier::Space)
+	{
+		return nullptr;
+	}
 	return FABTSSlingshotSatelliteCalibrationModel::FindProfile(
 		CalibrationLaunchProfileCatalog, Tier);
 }
 
+const FABTSM6LaunchProfile*
+AABTSM6SlingshotSystem::GetActiveLaunchProfile() const
+{
+	return ActiveCord.IsValid()
+		? FindLaunchProfile(ActiveCord->GetSlingshotTier())
+		: nullptr;
+}
+
 float AABTSM6SlingshotSystem::GetResolvedFlightAirDragPerSecond() const
 {
-	return GetActiveCalibrationLaunchProfile()
+	return GetActiveLaunchProfile()
 		? CalibrationLaunchProfileCatalog.FlightAirDragPerSecond
 		: FlightAirDragPerSecond;
 }
 
 float AABTSM6SlingshotSystem::GetResolvedMinimumPullDistanceCM() const
 {
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return Profile->MinimumPullDistanceCM;
 	}
@@ -532,7 +584,7 @@ float AABTSM6SlingshotSystem::GetResolvedMinimumPullDistanceCM() const
 
 float AABTSM6SlingshotSystem::GetResolvedMaximumPullDistanceCM() const
 {
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return Profile->MaximumPullDistanceCM;
 	}
@@ -541,7 +593,7 @@ float AABTSM6SlingshotSystem::GetResolvedMaximumPullDistanceCM() const
 
 float AABTSM6SlingshotSystem::GetResolvedInitialPullAlpha() const
 {
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return FMath::Clamp(Profile->InitialPullAlpha, 0.0f, 1.0f);
 	}
@@ -550,7 +602,7 @@ float AABTSM6SlingshotSystem::GetResolvedInitialPullAlpha() const
 
 float AABTSM6SlingshotSystem::GetResolvedPullPowerWheelStep() const
 {
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return Profile->PullPowerWheelStep;
 	}
@@ -559,7 +611,7 @@ float AABTSM6SlingshotSystem::GetResolvedPullPowerWheelStep() const
 
 float AABTSM6SlingshotSystem::GetResolvedAimSensitivityScale() const
 {
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return Profile->AimSensitivityScale;
 	}
@@ -568,7 +620,7 @@ float AABTSM6SlingshotSystem::GetResolvedAimSensitivityScale() const
 
 float AABTSM6SlingshotSystem::GetResolvedMaximumAimPlaneOffsetCM() const
 {
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return Profile->MaximumAimPlaneOffsetCM;
 	}
@@ -579,7 +631,7 @@ FVector AABTSM6SlingshotSystem::ComputeLaunchVelocity() const
 {
 	const FVector Direction =
 		(SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
-	if (const FABTSM6LaunchProfile* Profile = GetActiveCalibrationLaunchProfile())
+	if (const FABTSM6LaunchProfile* Profile = GetActiveLaunchProfile())
 	{
 		return Direction
 			* FABTSSlingshotSatelliteCalibrationModel::EvaluateLaunchSpeed(

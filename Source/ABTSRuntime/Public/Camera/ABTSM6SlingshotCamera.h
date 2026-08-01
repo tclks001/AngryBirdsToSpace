@@ -92,10 +92,10 @@ private:
 
 	/** Distance from the fixed slingshot-frame focus to the launch camera. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim", meta = (ClampMin = "100.0", UIMin = "300.0", UIMax = "3000.0"))
-	float AimDistanceCM = 1150.0f;
+	float AimDistanceCM = 1500.0f;
 	/** Fixed upward viewing pitch relative to the slingshot tangent plane. Does not follow pouch/aim direction. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim", meta = (ClampMin = "-10.0", ClampMax = "75.0", UIMin = "0.0", UIMax = "45.0"))
-	float AimPitchDegrees = 18.0f;
+	float AimPitchDegrees = -3.0f;
 	/** Fixed forward offset of the look target, measured along the slingshot launch normal. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim", meta = (ClampMin = "0.0", UIMin = "100.0", UIMax = "3000.0"))
 	float AimTargetForwardDistanceCM = 900.0f;
