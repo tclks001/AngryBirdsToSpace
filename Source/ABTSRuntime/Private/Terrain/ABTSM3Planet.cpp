@@ -54,8 +54,8 @@ public:
 		{
 			return false;
 		}
-		OutSample.WorldLocation =
-			Planet.GetSurfaceWorldLocation(Direction);
+		OutSample.WorldLocation = Planet.GetPlanetCenterWorld()
+			+ Direction * Planet.GetSurfaceRadiusAtDirection(Direction);
 		OutSample.WorldNormal =
 			Planet.GetSurfaceNormalAtDirection(Direction);
 		OutSample.NearestCellId = INDEX_NONE;
@@ -1330,12 +1330,14 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 			FVector DrawE5HalfExtentCM = SatellitePreview->E5TargetHalfExtentCM;
 			FVector DrawLaunchWorld = SatellitePreview->LaunchWorldLocation;
 			float DrawFacingErrorDegrees = -1.0f;
+			bool bDrawTrajectoryCertified = false;
+			int32 DrawGravityDependentHits = 0;
+			int32 DrawSuccessIslandSamples = 0;
 			for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(GetWorld()); It; ++It)
 			{
 				const FABTSM3MonthlySatelliteRuntimeSnapshot& Runtime =
 					It->GetRuntimeSnapshot();
-				if (!It->IsRuntimeReady()
-					|| !Runtime.bValid
+				if (!Runtime.bValid
 					|| Runtime.SourceRouteCandidateId != CandidateId)
 				{
 					continue;
@@ -1348,6 +1350,9 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				DrawE5Transform = Runtime.E5WorldTransform;
 				DrawE5HalfExtentCM = Runtime.E5HalfExtentCM;
 				DrawFacingErrorDegrees = Runtime.SatelliteFacingErrorDegrees;
+				bDrawTrajectoryCertified = Runtime.bTrajectoryCertified;
+				DrawGravityDependentHits = Runtime.GravityDependentHits;
+				DrawSuccessIslandSamples = Runtime.LargestSuccessIslandSamples;
 				break;
 			}
 			const FVector DrawSatelliteOutward =
@@ -1404,6 +1409,20 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 					DrawFacingErrorDegrees <= 5.0f
 						? FColor::Green
 						: FColor::Red,
+					DrawLifeTime,
+					false,
+					1.1f);
+				DrawDebugString(
+					GetWorld(),
+					DrawLaunchWorld
+						+ (DrawLaunchWorld - Center).GetSafeNormal() * 140.0f,
+					FString::Printf(
+						TEXT("SAT TRAJECTORY %s DEP=%d ISLAND=%d"),
+						bDrawTrajectoryCertified ? TEXT("PASS") : TEXT("FAIL"),
+						DrawGravityDependentHits,
+						DrawSuccessIslandSamples),
+					nullptr,
+					bDrawTrajectoryCertified ? FColor::Green : FColor::Red,
 					DrawLifeTime,
 					false,
 					1.1f);

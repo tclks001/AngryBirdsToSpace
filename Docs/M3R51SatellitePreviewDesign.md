@@ -89,7 +89,20 @@ Candidate 中的桩对中点只适合无 Actor 的规划预览，不能作为曲
 - fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确发现并通过 `3/3`：候选绑定/确定性核心、失败闭合、真实 Cell 桩底、运行时快照/碰撞/M6 绑定/重力切换。
 - 展示 Seed `312503` 生成 3 个候选，`SourceSpatial=16A44AF72C58261E`、`SourceFields=E7EA3FB5463E395B`、`Result=5CEF57BB1A3C245F`。
 - 每个候选均验证冻结 Preset 身份、非零卫星半径、E5 背面关系、目标盒球面贴合、Candidate/Result Hash 重算和重复重建 whole-struct 一致。
-- 2026-08-01 真实 Cell 与朝向修复的展示 Seed 证据为：强化桩 `CellA=2646/ResolvedA=2646`、`CellB=2647/ResolvedB=2647`，两个桩底误差均为 `0.000 cm`；实际弦袋相对旧中点估计移动 `262.25 cm`。卫星弧环施加 `-7.435°` 确定性方位修正后解析到锚点 Cell `4218`，独立计算的 Pouch Forward—卫星投影视线误差为 `0.002°`。强制 Unity 全链接、fresh NullRHI 专项 `3/3`、世界生成合同 `2/2` 和 `L_ABTS_M10` fresh runtime 均通过；F7 在弦袋处显示 `SAT FACING <角度> deg` 作为可见验收证据。完整 `ABTS.M3` 首轮为 `58/59`，唯一失败是无调用关系的 Biome 100 Seed 性能门 `P95=250.469 ms` 比门槛高 `0.469 ms`；同一筛选器独立 fresh 重跑以 `P95=236.763 ms`、相同 Oracle Hash 通过。
+- 2026-08-01 生产档位闭环后的展示 Seed 证据为：强化桩 `CellA=2646/ResolvedA=2646`、`CellB=2634/ResolvedB=2634`，两个桩底误差均为 `0.000 cm`；Candidate 与运行时弦袋、卫星中心偏差均为 `0.00 cm`。冻结 30° 弧环施加 `-9.200°` 的真实地形法线补偿后解析到锚点 Cell `3378`，M6 发射帧朝向误差为 `0.007°`。强制 Unity 全链接与 fresh NullRHI 专项 `3/3` 通过；F7 在弦袋处显示 `SAT FACING` 与 `SAT TRAJECTORY` 作为可见验收证据。此前 `2646/2647`、`-7.435°`、Cell `4218` 是候选端仍使用理想球面位置时的旧诊断值，不再作为当前验收基线。
+
+### 5.1 生产 M6 档位接通后的卫星闭环修复（2026-08-01）
+
+集成工作树提交 `ac185d7` 使普通玩法的 M6 正式读取冻结 Launch Profile；强化弹弓最大速度由旧兼容值 `2300 cm/s` 恢复为冻结值 `3300 cm/s`。M3R-5.1 在此基础上补齐了其余断链：
+
+- `FPlanetMonthlySatellitePreviewSurface` 不再调用基类理想球面的 `GetSurfaceWorldLocation()`，而是使用 `GetSurfaceRadiusAtDirection()` 取得 TerrainVisualField 的真实半径；候选端与运行时 `QuerySurface()` 因而使用同一地表，展示 Seed 的 `CandidatePouchDelta` 与 `DeltaFromPreview` 均由数百厘米归零为 `0.00 cm`；
+- 参考槽对按真实强化桩高度、两端弦锚和 `GetRestPouchTransform()` 的同构几何建立 M6 Sling Frame，不再以“道路目标切线 + 固定 190 cm”伪造发射帧；候选版本晋升为 `GeneratorVersion=4 / LayoutPolicyVersion=3`；
+- 冻结 30° 卫星弧环只允许 `±15°` 的确定性地形法线补偿，并把补偿角、朝向误差、真实锚点和卫星中心纳入 Candidate Hash；运行时只重放该补偿，禁止重新进行 `±90°` 搜索后把卫星搬离候选；
+- M3 必须从活跃生产 `AABTSM6SlingshotSystem` 回读 Launch Profile Catalog，生产 Hash 与 Candidate `LaunchProfileHash` 不相同即 fail closed；
+- 运行时用生产强化档位、实际弦端点、实际 M6 相机投影平面、真实主星/卫星参数和 E5 OBB 重算成功集。M3 练习门要求至少 3 个相连样本、跨相邻瞄准点、存在 gravity-on hit 且对应 gravity-off miss `>=60 cm`、简易弹弓不可解、认证功率带外不可解。理想球冻结认证仍额外要求跨相邻功率刻度，其结果以 `FullFrozenCarrierPassed` 单独记录，不冒充真实地形练习门；
+- F7 除 `SAT FACING` 外新增 `SAT TRAJECTORY PASS/FAIL DEP=<n> ISLAND=<n>`，直接显示引力依赖命中数与成功岛大小。
+
+fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确 `3/3` 通过。展示 Seed 的生产档位 Hash 为 `C2B94139752AD846`，真实强化发射找到 `GravityOnHits=14`、`GravityDependentHits=14`、`LargestSuccessIslandSamples=3`，关闭卫星引力后的最小偏离为 `2756.2 cm`；最佳样本为 `Aim=(-169,0) cm / Pull=0.860`。`L_ABTS_M10 -game -ABTSM3R5Smoke` 的独立 Standalone 进程也以 `RuntimeCertification Terminal=1 Passed=1 Failed=0` 正常退出，并记录 `ProductionProfile=1 TrajectoryCertified=1`。这组证据证明控制台从 `0` 切到 `1` 不只是改变布尔值，而是存在只在卫星引力开启时可达 E5 的实际轨迹。
 
 ## 6. 集成交接清单
 

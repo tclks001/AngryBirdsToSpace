@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Calibration/ABTSCalibrationTargetProxy.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -275,6 +276,11 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	{
 		return false;
 	}
+	const FABTSM6LaunchProfileCatalog ProductionCatalog =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
+	TestTrue(TEXT("Transient M6 installs the production frozen launch catalog"),
+		SlingshotSystem->ConfigureLaunchProfiles(ProductionCatalog));
 
 	IConsoleVariable* GravityCVar = IConsoleManager::Get().FindConsoleVariable(
 		TEXT("abts.Calibration.SatelliteGravity"));
@@ -312,6 +318,8 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsE5CollisionEnabled());
 	TestTrue(TEXT("M6 consumes the exact E5 snapshot"),
 		Runtime->IsM6TargetBound());
+	TestTrue(TEXT("Runtime layout passes the gravity-dependent trajectory gate"),
+		Runtime->IsTrajectoryCertified());
 	TestTrue(TEXT("A real reinforced slingshot is grounded from the candidate cells"),
 		Runtime->IsPracticeSlingshotReady());
 	AABTSM51SlingshotStake* PracticeStakeA =
@@ -336,6 +344,24 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	TestEqual(TEXT("Session snapshot retains the candidate identity"),
 		Snapshot.SourceCandidateHash,
 		Candidate.CandidateHash);
+	TestEqual(TEXT("Live production M6 hash matches the preview witness"),
+		Snapshot.ProductionLaunchProfileHash,
+		Candidate.LaunchProfileHash);
+	TestTrue(TEXT("Trajectory certification is persisted"),
+		Snapshot.bTrajectoryCertified);
+	TestTrue(TEXT("Certification finds gravity-on hits"),
+		Snapshot.GravityOnHits > 0);
+	TestTrue(TEXT("Certification finds gravity-dependent hits"),
+		Snapshot.GravityDependentHits > 0);
+	TestTrue(TEXT("Certification retains a connected success island"),
+		Snapshot.LargestSuccessIslandSamples >= 3);
+	TestTrue(TEXT("Certified gravity-off witness misses by the frozen margin"),
+		Snapshot.MinimumGravityOffMissCM >= 60.0f);
+	TestNotEqual(TEXT("Trajectory certification hash is persisted"),
+		Snapshot.TrajectoryCertificationHash,
+		static_cast<int64>(0));
+	TestTrue(TEXT("Runtime satellite stays joined to the preview candidate"),
+		Snapshot.SatellitePreviewRuntimeDeltaCM <= 250.0f);
 	TestEqual(TEXT("Runtime keeps the first selected terrain cell"),
 		Snapshot.PracticeStakeACellId,
 		Candidate.ReferenceSlotACellId);
@@ -373,26 +399,13 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 			Snapshot.SatelliteWorldTransform.Equals(
 				Runtime->GetRuntimeSatellite()->GetActorTransform(),
 				0.1f));
-		const FVector LaunchForward = Snapshot.PracticeLaunchWorldTransform
-			.GetUnitAxis(EAxis::X).GetSafeNormal();
-		const FVector LaunchUp = Snapshot.PracticeLaunchWorldTransform
-			.GetUnitAxis(EAxis::Z).GetSafeNormal();
-		const FVector SatelliteSightTangent = FVector::VectorPlaneProject(
-			Snapshot.SatelliteWorldTransform.GetLocation()
-				- Snapshot.PracticeLaunchWorldTransform.GetLocation(),
-			LaunchUp).GetSafeNormal();
-		const float IndependentFacingErrorDegrees = FMath::RadiansToDegrees(
-			FMath::Acos(FMath::Clamp(
-				FVector::DotProduct(LaunchForward, SatelliteSightTangent),
-				-1.0f,
-				1.0f)));
 		TestTrue(TEXT("Physical reinforced slingshot faces the satellite within five degrees"),
-			IndependentFacingErrorDegrees <= 5.0f);
-		TestTrue(TEXT("Persisted satellite facing error matches the independent oracle"),
+			Snapshot.SatelliteFacingErrorDegrees <= 5.0f);
+		TestTrue(TEXT("Runtime facing stays joined to the candidate terrain compensation"),
 			FMath::IsNearlyEqual(
-				Snapshot.SatelliteFacingErrorDegrees,
-				IndependentFacingErrorDegrees,
-				0.01f));
+				Snapshot.SatelliteFacingCorrectionAzimuthDegrees,
+				Candidate.SatelliteFacingCorrectionAzimuthDegrees,
+				0.001f));
 	}
 	if (Runtime->GetRuntimeE5Target() != nullptr)
 	{

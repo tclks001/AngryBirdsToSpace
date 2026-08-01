@@ -10,6 +10,7 @@
 > 当前 PIE 边界仍需明确：R-5 的 `F7` 红色 Target Footprint 与橙色 Attack Corridor 已消费上述新布局；玩家世界中的 M7 实体建筑仍由兼容 TaskGraph 生成，只有 R-6/Integration 将唯一月度 Candidate 导出并实例化后，实体建筑才会移动到这些目标范围。因此在 R-6 前，应以逻辑区域叠层和 `[ABTS][PCG][EncounterReach]` 厘米日志验收本次修正，不能把旧实体建筑位置误报为 R-3 参数未生效。
 >
 > 2026-08-01 卫星预览补齐：R-5.1 已把冻结 `SatellitePracticePreset` 按精确 R-3/R-3.1 Candidate 投影为 M9 练习卫星与 E5 背面目标 Transform。`F7` 增加蓝色卫星、洋红 E5 代理、黄色参考桩对和青色空间关系线。显式精确预览会持久化 Candidate 身份，并让两根正式 M5.1 强化桩分别落在参考槽的真实地表 Cell 上；实际桩顶生成的强化弦及 Pouch Transform 成为发射帧权威，卫星锚点、卫星和 E5 随之重新解析。它替换兼容 TaskGraph 的旧 M9 Actor，并生成真实卫星碰撞、洋红 E5 碰撞代理和 M6 PracticeTarget，修复了曲面中点导致弹弓埋地以及旧调试弹弓与冻结卫星布局错位的问题。`abts.Calibration.SatelliteGravity=-1/0/1` 分别使用冻结默认值/关闭/开启卫星重力；独立 PIE/Standalone 必须在运行游戏进程的控制台中设置，Editor 进程的 CVar 不会跨进程传播。该诊断桥不生成 M7 建筑、不改变 R-5 Biome 或 `MonthlyAccepted`，也不会在非显式预览中运行。细节与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
+> 2026-08-01 生产档位闭环补充：合并 `ac185d7` 后，M3R-5.1 已从生产 M6 回读冻结档位 Hash（强化最大速度 `3300 cm/s`），并修复候选端误用理想球面位置的问题。候选/运行时弦袋和卫星中心差均为 `0.00 cm`；运行时正式重算出 `14` 个 gravity-on 命中、`14` 个 gravity-dependent 命中、成功岛 `3` 个样本，gravity-off 最小偏离 `2756.2 cm`。生产档位 Hash、真实弦袋帧、成功岛结果和 F7 的 `SAT TRAJECTORY` 证据共同进入 fail-closed 验收链，细节见 [M3R-5.1 设计第 5.1 节](M3R51SatellitePreviewDesign.md#51-生产-m6-档位接通后的卫星闭环修复2026-08-01)。
 
 父文档：
 
@@ -1418,7 +1419,9 @@ R-5.1 在不等待 R-4 生产 Provider 的前提下，为每个保留候选生�
 
 本阶段 Result/Candidate Hash 包含 Source Spatial/Field、LaunchProfile、SatellitePreset、E5 Encounter/Field、参考槽、卫星与目标 Transform。结果恒为 `MonthlyAccepted=0`，不会改写 R-5 Biome Hash、M7 生成或稳定共享合同。F7 叠层以蓝色线框球、洋红目标盒、黄色参考桩和青色空间关系线显示该布局，并隐藏旧主星上的 E5 Target Footprint 以避免双重目标；其他五关的红色目标范围与全部橙色攻击走廊保持可见。仅当精确 Candidate 预览显式启用时，`AABTSM3MonthlySatellitePracticeRuntime` 才会持久化 Candidate 身份；运行时以两个参考槽的真实 `LogicalCell + QuerySurface` 分别落地正式 M5.1 强化桩，用实际桩顶生成强化弦，再以 Pouch 相对主星中心的真实径向重建冻结弧环，并在弧环上确定性调整卫星方位。卫星视线投影与 Pouch Forward 的夹角必须 `<=5°`，否则整套布局 fail closed。F7 在该桥激活后优先显示运行时快照，重力开关不改变布局快照 Hash。
 
-强制 Unity Development Editor 全链接、fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确 `3/3` 和世界生成合同 `2/2` 已通过；卫星专项覆盖快照持久化、真实 Cell 桩底、卫星朝向 `<=5°`、卫星/E5 碰撞、M6 绑定、重力开关和 Hash 不变性。展示 Seed 中强化桩 `2646/2647` 均解析回原 Cell，桩底误差均为 `0.000 cm`；实际弦袋相对旧中点估计移动 `262.25 cm`。冻结 30° 弧环的确定性方位修正为 `-7.435°`，对应卫星锚点为运行时 Cell `4218`，独立朝向误差为 `0.002°`；`L_ABTS_M10` fresh runtime 同值通过并保持卫星重力、碰撞与 M6 绑定。完整 `ABTS.M3` 首轮 `58/59` 的唯一失败为无调用关系的 Biome 100 Seed 性能门 `P95=250.469 ms`，超门槛 `0.469 ms`；同筛选器独立 fresh 重跑以 `P95=236.763 ms` 和相同 Oracle Hash 通过。完整算法、F7 图例、失败闭合和 R-6/Integration 交接见 [M3R-5.1 卫星预览设计](M3R51SatellitePreviewDesign.md)。可见 D3D12 PIE、真实发射手感复测与 M7 Witness 仍为 IntegrationPending。
+强制 Unity Development Editor 全链接与 fresh NullRHI `ABTS.M3.Monthly.SatellitePreview` 精确 `3/3` 已通过；卫星专项覆盖快照持久化、真实 Cell 桩底、卫星朝向 `<=5°`、卫星/E5 碰撞、生产 M6 档位绑定、重力开关、轨迹成功集和 Hash 不变性。展示 Seed 中强化桩 `2646/2634` 均解析回原 Cell，桩底误差均为 `0.000 cm`；Candidate 与运行时弦袋、卫星中心偏差均为 `0.00 cm`。冻结 30° 弧环的确定性地形补偿为 `-9.200°`，对应卫星锚点为 Cell `3378`，M6 发射帧朝向误差为 `0.007°`。此前 `2646/2647`、`-7.435°`、Cell `4218` 是候选端误用理想球面位置时的旧诊断值，不再作为当前验收基线。完整算法、F7 图例、失败闭合和 R-6/Integration 交接见 [M3R-5.1 卫星预览设计](M3R51SatellitePreviewDesign.md)。可见 D3D12 PIE、真实发射手感复测与 M7 Witness 仍为 IntegrationPending。
+
+生产 M6 冻结档位接通后的补充验收把候选表面统一为 TerrainVisualField 真实半径，并以真实强化桩/弦端点生成 M6 发射帧；旧记录中的弦袋/卫星预览偏移已经归零。fresh 专项仍为 `3/3`，生产 Hash=`C2B94139752AD846`，`GravityOnHits=14`、`GravityDependentHits=14`、`Island=3`、`GravityOffMinimumMiss=2756.2 cm`，且 Simple/认证功率带外命中均为 `0`。F7 新增 `SAT TRAJECTORY PASS/FAIL`；候选版本为 `GeneratorVersion=4 / LayoutPolicyVersion=3`。理想球冻结门的“跨相邻功率刻度”结果继续单列，不用来否定真实地形上已经跨相邻瞄准点、并可由 0.01 功率刻度输入的练习成功集。
 
 ### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
 

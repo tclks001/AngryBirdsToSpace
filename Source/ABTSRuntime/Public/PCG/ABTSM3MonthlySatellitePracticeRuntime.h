@@ -39,6 +39,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int64 LaunchProfileHash = 0;
 
+	/** Hash copied back from the live production M6 adapter after BeginPlay. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int64 ProductionLaunchProfileHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int32 SatellitePracticePresetVersion = 0;
 
@@ -73,6 +77,9 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "deg"))
 	float SatelliteFacingCorrectionAzimuthDegrees = 0.0f;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm"))
+	float SatellitePreviewRuntimeDeltaCM = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	FTransform SatelliteWorldTransform = FTransform::Identity;
 
@@ -91,6 +98,34 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	/** Hash of the frozen primary/satellite/drag inputs with satellite gravity enabled. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int64 BaselineGravitySnapshotHash = 0;
+
+	/** Formal gate: a connected gravity-on success island exists and gravity-off misses it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	bool bTrajectoryCertified = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 GravityOnHits = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 GravityDependentHits = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 LargestSuccessIslandSamples = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	float BestAimInPlaneCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	float BestAimOutOfPlaneCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	float BestPullAlpha = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory", meta = (Units = "cm"))
+	float MinimumGravityOffMissCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int64 TrajectoryCertificationHash = 0;
 
 	/** Candidate, preview result and baseline gravity joined into one session layout identity. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
@@ -129,6 +164,7 @@ public:
 	bool IsSatelliteCollisionEnabled() const { return bSatelliteCollisionEnabled; }
 	bool IsE5CollisionEnabled() const { return bE5CollisionEnabled; }
 	bool IsM6TargetBound() const { return bM6TargetBound; }
+	bool IsTrajectoryCertified() const { return bTrajectoryCertified; }
 	bool IsPracticeSlingshotReady() const { return bPracticeSlingshotReady; }
 	bool IsSatelliteGravityEnabled() const;
 	int32 GetSatelliteGravityOverride() const { return LastGravityOverride; }
@@ -142,6 +178,7 @@ private:
 	bool SpawnSnapshotActors();
 	bool SpawnPracticeSlingshot();
 	bool BindM6Target();
+	bool CertifyTrajectoryLayout();
 	void ApplyGravityOverride(bool bForceLog);
 	void LogGravityEvidence(float DeltaSeconds);
 	void ClearOwnedRuntime();
@@ -182,6 +219,9 @@ private:
 	bool bSatelliteCollisionEnabled = false;
 	bool bE5CollisionEnabled = false;
 	bool bM6TargetBound = false;
+	bool bProductionLaunchProfileBound = false;
+	bool bTrajectoryCertified = false;
+	bool bTrajectoryCertificationAttempted = false;
 	bool bPracticeSlingshotReady = false;
 	float GravityEvidenceLogRemainingSeconds = 0.0f;
 };

@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 
 namespace ABTSM3R51SatellitePreviewPrivate
 {
@@ -141,15 +142,110 @@ bool ResolveSurfaceCell(
 		&& OutSample.WorldNormal.Normalize();
 }
 
+struct FReferenceSlingshotFrame
+{
+	FABTSM3MonthlySatelliteSurfaceSample SlotA;
+	FABTSM3MonthlySatelliteSurfaceSample SlotB;
+	int32 SlotACellId = INDEX_NONE;
+	int32 SlotBCellId = INDEX_NONE;
+	FVector SlingCenterWorld = FVector::ZeroVector;
+	FVector RestPouchWorld = FVector::ZeroVector;
+	FVector SlingUpWorld = FVector::UpVector;
+	FVector SlingForwardWorld = FVector::ForwardVector;
+	FVector SlingRightWorld = FVector::RightVector;
+	float PreferredFacingErrorDegrees = 180.0f;
+};
+
+bool BuildReferenceSlingshotFrame(
+	const FVector& PrimaryCenter,
+	const FVector& PreferredWorldDirection,
+	const FABTSM3MonthlySatelliteSurfaceSample& InA,
+	const FABTSM3MonthlySatelliteSurfaceSample& InB,
+	const int32 InACellId,
+	const int32 InBCellId,
+	const FABTSSlingshotVisualPreset& VisualPreset,
+	FReferenceSlingshotFrame& OutFrame)
+{
+	FVector EndpointA = InA.WorldLocation
+		+ InA.WorldNormal * VisualPreset.StakeHeightCM;
+	FVector EndpointB = InB.WorldLocation
+		+ InB.WorldNormal * VisualPreset.StakeHeightCM;
+	FVector SlingCenter = (EndpointA + EndpointB) * 0.5f;
+	FVector SlingUp = (SlingCenter - PrimaryCenter).GetSafeNormal();
+	FVector SlingRight = FVector::VectorPlaneProject(
+		EndpointB - EndpointA,
+		SlingUp).GetSafeNormal();
+	FVector SlingForward = FVector::CrossProduct(
+		SlingRight,
+		SlingUp).GetSafeNormal();
+	const FVector PreferredForward = FVector::VectorPlaneProject(
+		PreferredWorldDirection,
+		SlingUp).GetSafeNormal();
+	if (SlingUp.IsNearlyZero()
+		|| SlingRight.IsNearlyZero()
+		|| SlingForward.IsNearlyZero()
+		|| PreferredForward.IsNearlyZero())
+	{
+		return false;
+	}
+	FABTSM3MonthlySatelliteSurfaceSample SlotA = InA;
+	FABTSM3MonthlySatelliteSurfaceSample SlotB = InB;
+	int32 SlotACellId = InACellId;
+	int32 SlotBCellId = InBCellId;
+	if (FVector::DotProduct(SlingForward, PreferredForward) < 0.0f)
+	{
+		Swap(EndpointA, EndpointB);
+		Swap(SlotA, SlotB);
+		Swap(SlotACellId, SlotBCellId);
+		SlingRight *= -1.0f;
+		SlingForward *= -1.0f;
+	}
+	const FVector VisualRight = (EndpointB - EndpointA).GetSafeNormal();
+	FVector VisualUp = (SlotA.WorldNormal + SlotB.WorldNormal).GetSafeNormal();
+	VisualUp = FVector::VectorPlaneProject(VisualUp, VisualRight).GetSafeNormal();
+	const FVector VisualForward = FVector::CrossProduct(
+		VisualRight,
+		VisualUp).GetSafeNormal();
+	if (VisualRight.IsNearlyZero()
+		|| VisualUp.IsNearlyZero()
+		|| VisualForward.IsNearlyZero())
+	{
+		return false;
+	}
+	const FQuat LayoutRotation = FRotationMatrix::MakeFromXY(
+		VisualForward,
+		VisualRight).ToQuat();
+	const FVector StakeAnchorA = EndpointA + LayoutRotation.RotateVector(
+		VisualPreset.ConnectionLayout.StakeAConnectionOffsetCM);
+	const FVector StakeAnchorB = EndpointB + LayoutRotation.RotateVector(
+		VisualPreset.ConnectionLayout.StakeBConnectionOffsetCM);
+	OutFrame.SlotA = SlotA;
+	OutFrame.SlotB = SlotB;
+	OutFrame.SlotACellId = SlotACellId;
+	OutFrame.SlotBCellId = SlotBCellId;
+	OutFrame.SlingCenterWorld = SlingCenter;
+	OutFrame.RestPouchWorld = (StakeAnchorA + StakeAnchorB) * 0.5f
+		+ LayoutRotation.RotateVector(
+			VisualPreset.ConnectionLayout.RestPouchOffsetCM);
+	OutFrame.SlingUpWorld = SlingUp;
+	OutFrame.SlingForwardWorld = SlingForward;
+	OutFrame.SlingRightWorld = SlingRight;
+	OutFrame.PreferredFacingErrorDegrees = FMath::RadiansToDegrees(
+		FMath::Acos(FMath::Clamp(
+			FVector::DotProduct(SlingForward, PreferredForward),
+			-1.0f,
+			1.0f)));
+	return IsFiniteVector(OutFrame.RestPouchWorld)
+		&& FMath::IsFinite(OutFrame.PreferredFacingErrorDegrees);
+}
+
 bool ChooseReferencePair(
 	const TArray<FABTSM2Cell>& Cells,
 	const FABTSM3MonthlySlingshotField& Field,
 	const int32 MaxCordLengthCM,
 	const IABTSM3MonthlySatellitePreviewSurface& Surface,
-	FABTSM3MonthlySatelliteSurfaceSample& OutA,
-	FABTSM3MonthlySatelliteSurfaceSample& OutB,
-	int32& OutACellId,
-	int32& OutBCellId)
+	const FVector& PreferredTargetWorld,
+	FReferenceSlingshotFrame& OutFrame)
 {
 	FABTSM3MonthlySatelliteSurfaceSample Pocket;
 	if (!ResolveSurfaceCell(
@@ -162,6 +258,9 @@ bool ChooseReferencePair(
 	}
 
 	bool bFound = false;
+	const FABTSSlingshotVisualPreset VisualPreset =
+		ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Reinforced);
+	int64 BestFacingErrorMicroDegrees = MAX_int64;
 	int64 BestMidpointDistanceMM = MAX_int64;
 	int64 BestNegativeSpanMM = MAX_int64;
 	for (int32 AIndex = 0; AIndex < Field.SlotCellIds.Num(); ++AIndex)
@@ -185,57 +284,143 @@ bool ChooseReferencePair(
 				continue;
 			}
 			const FVector Midpoint = (A.WorldLocation + B.WorldLocation) * 0.5;
+			FReferenceSlingshotFrame Frame;
+			if (!BuildReferenceSlingshotFrame(
+					Surface.GetPrimaryCenterWorld(),
+					PreferredTargetWorld - Midpoint,
+					A,
+					B,
+					Field.SlotCellIds[AIndex],
+					Field.SlotCellIds[BIndex],
+					VisualPreset,
+					Frame))
+			{
+				continue;
+			}
+			const int64 FacingErrorMicroDegrees = FMath::RoundToInt64(
+				Frame.PreferredFacingErrorDegrees * 1000000.0);
 			const int64 MidpointDistanceMM = FMath::RoundToInt64(
 				FVector::Distance(Midpoint, Pocket.WorldLocation) * 10.0);
 			const int64 NegativeSpanMM = -FMath::RoundToInt64(SpanCM * 10.0);
-			const int32 ACellId = FMath::Min(Field.SlotCellIds[AIndex], Field.SlotCellIds[BIndex]);
-			const int32 BCellId = FMath::Max(Field.SlotCellIds[AIndex], Field.SlotCellIds[BIndex]);
+			const int32 ACellId = FMath::Min(Frame.SlotACellId, Frame.SlotBCellId);
+			const int32 BCellId = FMath::Max(Frame.SlotACellId, Frame.SlotBCellId);
 			const bool bBetter = !bFound
-				|| MidpointDistanceMM < BestMidpointDistanceMM
-				|| (MidpointDistanceMM == BestMidpointDistanceMM
+				|| FacingErrorMicroDegrees < BestFacingErrorMicroDegrees
+				|| (FacingErrorMicroDegrees == BestFacingErrorMicroDegrees
+					&& MidpointDistanceMM < BestMidpointDistanceMM)
+				|| (FacingErrorMicroDegrees == BestFacingErrorMicroDegrees
+					&& MidpointDistanceMM == BestMidpointDistanceMM
 					&& NegativeSpanMM < BestNegativeSpanMM)
-				|| (MidpointDistanceMM == BestMidpointDistanceMM
+				|| (FacingErrorMicroDegrees == BestFacingErrorMicroDegrees
+					&& MidpointDistanceMM == BestMidpointDistanceMM
 					&& NegativeSpanMM == BestNegativeSpanMM
-					&& (ACellId < OutACellId
-						|| (ACellId == OutACellId && BCellId < OutBCellId)));
+					&& (ACellId < FMath::Min(OutFrame.SlotACellId, OutFrame.SlotBCellId)
+						|| (ACellId == FMath::Min(OutFrame.SlotACellId, OutFrame.SlotBCellId)
+							&& BCellId < FMath::Max(OutFrame.SlotACellId, OutFrame.SlotBCellId))));
 			if (!bBetter)
 			{
 				continue;
 			}
 			bFound = true;
+			BestFacingErrorMicroDegrees = FacingErrorMicroDegrees;
 			BestMidpointDistanceMM = MidpointDistanceMM;
 			BestNegativeSpanMM = NegativeSpanMM;
-			OutACellId = ACellId;
-			OutBCellId = BCellId;
-			if (Field.SlotCellIds[AIndex] == ACellId)
-			{
-				OutA = A;
-				OutB = B;
-			}
-			else
-			{
-				OutA = B;
-				OutB = A;
-			}
+			OutFrame = Frame;
 		}
 	}
 	return bFound;
 }
 
-FVector MakeStableTangent(
-	const FVector& Up,
-	const FVector& Preferred)
+bool ResolveFacingAlignedSatelliteAnchor(
+	const IABTSM3MonthlySatellitePreviewSurface& Surface,
+	const FVector& LaunchWorld,
+	const FVector& LaunchUp,
+	const FVector& LaunchForward,
+	const FABTSSatellitePracticePreset& Preset,
+	FVector& OutAnchorDirection,
+	FABTSM3MonthlySatelliteSurfaceSample& OutAnchor,
+	float& OutFacingErrorDegrees,
+	float& OutCorrectionAzimuthDegrees)
 {
-	FVector Forward = FVector::VectorPlaneProject(Preferred, Up);
-	if (!Forward.Normalize())
+	constexpr float MaximumCorrectionDegrees = 15.0f;
+	constexpr float MaximumFacingErrorDegrees = 5.0f;
+	const float ArcRadians = FMath::DegreesToRadians(
+		Preset.SatelliteAnchorArcDegrees);
+	const float CenterClearanceCM = Surface.GetPrimaryRadiusCM()
+		* Preset.SatelliteCenterClearancePrimaryRatio;
+	FVector ArcTangent = FVector::VectorPlaneProject(
+		LaunchForward,
+		LaunchUp).GetSafeNormal();
+	ArcTangent = ArcTangent.RotateAngleAxis(
+		Preset.SatelliteAnchorAzimuthDegrees,
+		LaunchUp).GetSafeNormal();
+	if (ArcTangent.IsNearlyZero())
 	{
-		const FVector Axis = FMath::Abs(Up.Z) < 0.9
-			? FVector::UpVector
-			: FVector::ForwardVector;
-		Forward = FVector::CrossProduct(Axis, Up);
-		Forward.Normalize();
+		return false;
 	}
-	return Forward;
+	bool bFound = false;
+	const auto Evaluate = [&](const float CorrectionDegrees)
+	{
+		const FVector CorrectedTangent = ArcTangent.RotateAngleAxis(
+			CorrectionDegrees,
+			LaunchUp).GetSafeNormal();
+		const FVector AnchorDirection =
+			(LaunchUp * FMath::Cos(ArcRadians)
+				+ CorrectedTangent * FMath::Sin(ArcRadians)).GetSafeNormal();
+		FABTSM3MonthlySatelliteSurfaceSample Anchor;
+		if (!Surface.QuerySurface(AnchorDirection, Anchor)
+			|| !IsFiniteVector(Anchor.WorldLocation)
+			|| !IsFiniteVector(Anchor.WorldNormal)
+			|| !Anchor.WorldNormal.Normalize())
+		{
+			return;
+		}
+		const FVector SatelliteCenter = Anchor.WorldLocation
+			+ Anchor.WorldNormal * CenterClearanceCM;
+		const FVector SightTangent = FVector::VectorPlaneProject(
+			SatelliteCenter - LaunchWorld,
+			LaunchUp).GetSafeNormal();
+		if (SightTangent.IsNearlyZero())
+		{
+			return;
+		}
+		const float FacingErrorDegrees = FMath::RadiansToDegrees(
+			FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(SightTangent, LaunchForward),
+				-1.0f,
+				1.0f)));
+		const bool bBetter = !bFound
+			|| FacingErrorDegrees < OutFacingErrorDegrees - 0.0001f
+			|| (FMath::IsNearlyEqual(
+					FacingErrorDegrees,
+					OutFacingErrorDegrees,
+					0.0001f)
+				&& FMath::Abs(CorrectionDegrees)
+					< FMath::Abs(OutCorrectionAzimuthDegrees));
+		if (bBetter)
+		{
+			bFound = true;
+			OutAnchorDirection = AnchorDirection;
+			OutAnchor = Anchor;
+			OutFacingErrorDegrees = FacingErrorDegrees;
+			OutCorrectionAzimuthDegrees = CorrectionDegrees;
+		}
+	};
+	OutFacingErrorDegrees = 180.0f;
+	OutCorrectionAzimuthDegrees = 0.0f;
+	for (int32 Step = -30; Step <= 30; ++Step)
+	{
+		Evaluate(static_cast<float>(Step) * 0.5f);
+	}
+	const float CoarseBest = OutCorrectionAzimuthDegrees;
+	for (int32 Step = -25; Step <= 25; ++Step)
+	{
+		Evaluate(FMath::Clamp(
+			CoarseBest + static_cast<float>(Step) * 0.02f,
+			-MaximumCorrectionDegrees,
+			MaximumCorrectionDegrees));
+	}
+	return bFound && OutFacingErrorDegrees <= MaximumFacingErrorDegrees;
 }
 }
 
@@ -349,33 +534,6 @@ bool FABTSM3MonthlySatellitePreviewBuilder::Build(
 				TEXT("E5Field"), OutFailure);
 		}
 
-		FABTSM3MonthlySatelliteSurfaceSample SlotA;
-		FABTSM3MonthlySatelliteSurfaceSample SlotB;
-		int32 SlotACellId = INDEX_NONE;
-		int32 SlotBCellId = INDEX_NONE;
-		if (!ABTSM3R51SatellitePreviewPrivate::ChooseReferencePair(
-				Cells,
-				*PracticeField,
-				SlingshotFieldResult.MaxCordLengthCM,
-				Surface,
-				SlotA,
-				SlotB,
-				SlotACellId,
-				SlotBCellId))
-		{
-			return ABTSM3R51SatellitePreviewPrivate::Reject(OutResult, EABTSM3MonthlySatellitePreviewRejectReason::ReferencePairMissing,
-				TEXT("E5DistanceValidReferencePair"), OutFailure);
-		}
-
-		const FVector PrimaryCenter = Surface.GetPrimaryCenterWorld();
-		const float PrimaryRadius = Surface.GetPrimaryRadiusCM();
-		const FVector PairMidpoint = (SlotA.WorldLocation + SlotB.WorldLocation) * 0.5;
-		FVector LaunchUp = PairMidpoint - PrimaryCenter;
-		if (!LaunchUp.Normalize())
-		{
-			return ABTSM3R51SatellitePreviewPrivate::Reject(OutResult, EABTSM3MonthlySatellitePreviewRejectReason::SurfaceQueryFailed,
-				TEXT("LaunchUp"), OutFailure);
-		}
 		FABTSM3MonthlySatelliteSurfaceSample TargetAnchor;
 		if (!ABTSM3R51SatellitePreviewPrivate::ResolveSurfaceCell(
 				Cells,
@@ -386,29 +544,45 @@ bool FABTSM3MonthlySatellitePreviewBuilder::Build(
 			return ABTSM3R51SatellitePreviewPrivate::Reject(OutResult, EABTSM3MonthlySatellitePreviewRejectReason::SurfaceQueryFailed,
 				TEXT("E5TargetAnchor"), OutFailure);
 		}
-		FVector LaunchForward = ABTSM3R51SatellitePreviewPrivate::MakeStableTangent(
-			LaunchUp,
-			TargetAnchor.WorldLocation - PairMidpoint);
-		LaunchForward = LaunchForward.RotateAngleAxis(
-			FrozenPreset.SatelliteAnchorAzimuthDegrees,
-			LaunchUp);
-		LaunchForward.Normalize();
+		ABTSM3R51SatellitePreviewPrivate::FReferenceSlingshotFrame ReferenceFrame;
+		if (!ABTSM3R51SatellitePreviewPrivate::ChooseReferencePair(
+				Cells,
+				*PracticeField,
+				SlingshotFieldResult.MaxCordLengthCM,
+				Surface,
+				TargetAnchor.WorldLocation,
+				ReferenceFrame))
+		{
+			return ABTSM3R51SatellitePreviewPrivate::Reject(OutResult, EABTSM3MonthlySatellitePreviewRejectReason::ReferencePairMissing,
+				TEXT("E5DistanceValidReferencePair"), OutFailure);
+		}
+
+		const FVector PrimaryCenter = Surface.GetPrimaryCenterWorld();
+		const float PrimaryRadius = Surface.GetPrimaryRadiusCM();
+		const FVector LaunchUp = ReferenceFrame.SlingUpWorld;
+		FVector LaunchForward = ReferenceFrame.SlingForwardWorld;
 		FVector LaunchRight = FVector::CrossProduct(LaunchUp, LaunchForward);
 		LaunchRight.Normalize();
 		LaunchForward = FVector::CrossProduct(LaunchRight, LaunchUp).GetSafeNormal();
 
-		const float ArcRadians = FMath::DegreesToRadians(FrozenPreset.SatelliteAnchorArcDegrees);
-		const FVector SatelliteAnchorDirection =
-			(LaunchUp * FMath::Cos(ArcRadians)
-				+ LaunchForward * FMath::Sin(ArcRadians)).GetSafeNormal();
+		FVector SatelliteAnchorDirection = FVector::ZeroVector;
 		FABTSM3MonthlySatelliteSurfaceSample SatelliteAnchor;
-		if (!Surface.QuerySurface(SatelliteAnchorDirection, SatelliteAnchor)
-			|| !ABTSM3R51SatellitePreviewPrivate::IsFiniteVector(SatelliteAnchor.WorldLocation)
-			|| !ABTSM3R51SatellitePreviewPrivate::IsFiniteVector(SatelliteAnchor.WorldNormal)
-			|| !SatelliteAnchor.WorldNormal.Normalize())
+		float SatelliteFacingErrorDegrees = 180.0f;
+		float SatelliteFacingCorrectionDegrees = 0.0f;
+		if (!ABTSM3R51SatellitePreviewPrivate::
+				ResolveFacingAlignedSatelliteAnchor(
+					Surface,
+					ReferenceFrame.RestPouchWorld,
+					LaunchUp,
+					LaunchForward,
+					FrozenPreset,
+					SatelliteAnchorDirection,
+					SatelliteAnchor,
+					SatelliteFacingErrorDegrees,
+					SatelliteFacingCorrectionDegrees))
 		{
 			return ABTSM3R51SatellitePreviewPrivate::Reject(OutResult, EABTSM3MonthlySatellitePreviewRejectReason::SurfaceQueryFailed,
-				TEXT("SatelliteAnchor"), OutFailure);
+				TEXT("SatelliteFacingAlignedAnchor"), OutFailure);
 		}
 
 		FABTSM3MonthlySatellitePreviewCandidate& Candidate =
@@ -418,18 +592,21 @@ bool FABTSM3MonthlySatellitePreviewBuilder::Build(
 		Candidate.SourceSlingshotFieldCandidateHash = FieldCandidate->CandidateHash;
 		Candidate.PracticeEncounterId = PracticeEncounter->Contract.EncounterId;
 		Candidate.PracticeFieldHash = PracticeField->FieldHash;
-		Candidate.ReferenceSlotACellId = SlotACellId;
-		Candidate.ReferenceSlotBCellId = SlotBCellId;
+		Candidate.ReferenceSlotACellId = ReferenceFrame.SlotACellId;
+		Candidate.ReferenceSlotBCellId = ReferenceFrame.SlotBCellId;
 		Candidate.LaunchProfileHash = LaunchProfileHash;
 		Candidate.SatellitePracticePresetVersion = FrozenPreset.Version;
 		Candidate.SatellitePracticePresetHash = PresetHash;
 		Candidate.LaunchUpWorld = LaunchUp;
 		Candidate.LaunchForwardWorld = LaunchForward;
 		Candidate.LaunchRightWorld = LaunchRight;
-		Candidate.LaunchWorldLocation = PairMidpoint
-			+ LaunchUp * Config.ReferencePouchHeightCM;
+		Candidate.LaunchWorldLocation = ReferenceFrame.RestPouchWorld;
 		Candidate.SatelliteAnchorDirection = SatelliteAnchorDirection;
 		Candidate.SatelliteAnchorCellId = SatelliteAnchor.NearestCellId;
+		Candidate.SatelliteFacingCorrectionAzimuthDegrees =
+			SatelliteFacingCorrectionDegrees;
+		Candidate.SatelliteFacingErrorDegrees =
+			SatelliteFacingErrorDegrees;
 		Candidate.SatelliteRadiusCM =
 			PrimaryRadius * FrozenPreset.SatelliteRadiusPrimaryRatio;
 		Candidate.SatelliteSurfaceGravityCMPerSec2 =
@@ -578,6 +755,8 @@ uint64 FABTSM3MonthlySatellitePreviewBuilder::ComputeCandidateHash(
 	Hash.AddVector(Candidate.LaunchRightWorld);
 	Hash.AddVector(Candidate.SatelliteAnchorDirection);
 	Hash.AddInt32(Candidate.SatelliteAnchorCellId);
+	Hash.AddFloat(Candidate.SatelliteFacingCorrectionAzimuthDegrees);
+	Hash.AddFloat(Candidate.SatelliteFacingErrorDegrees);
 	Hash.AddVector(Candidate.SatelliteCenterWorld);
 	Hash.AddFloat(Candidate.SatelliteRadiusCM);
 	Hash.AddFloat(Candidate.SatelliteSurfaceGravityCMPerSec2);

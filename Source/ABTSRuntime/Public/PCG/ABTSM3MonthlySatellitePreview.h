@@ -51,7 +51,7 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewConfig
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview", meta = (Units = "cm/s^2"))
 	float PrimarySurfaceGravityCMPerSec2 = 980.0f;
 
-	/** Bird/pouch lift above the selected reference pair midpoint. */
+	/** Legacy identity input retained for serialized compatibility; the real reinforced pouch geometry is authoritative. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview", meta = (ClampMin = "0.0", ClampMax = "1000.0", Units = "cm"))
 	float ReferencePouchHeightCM = 190.0f;
 
@@ -133,6 +133,13 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewCandidate
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	int32 SatelliteAnchorCellId = INDEX_NONE;
 
+	/** Small deterministic terrain-normal compensation applied on the frozen 30 degree arc ring. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview", meta = (Units = "deg"))
+	float SatelliteFacingCorrectionAzimuthDegrees = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview", meta = (Units = "deg"))
+	float SatelliteFacingErrorDegrees = 180.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	FVector SatelliteCenterWorld = FVector::ZeroVector;
 
@@ -165,10 +172,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewResult
 	int32 SchemaVersion = 1;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
-	int32 GeneratorVersion = 3;
+	int32 GeneratorVersion = 4;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
-	int32 LayoutPolicyVersion = 2;
+	int32 LayoutPolicyVersion = 3;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	int32 WorldSeed = 0;
@@ -207,8 +214,8 @@ class ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewBuilder
 {
 public:
 	static constexpr int32 SchemaVersion = 1;
-	static constexpr int32 GeneratorVersion = 3;
-	static constexpr int32 MonthlyLayoutPolicyVersion = 2;
+	static constexpr int32 GeneratorVersion = 4;
+	static constexpr int32 MonthlyLayoutPolicyVersion = 3;
 
 	static bool Build(
 		int32 WorldSeed,

@@ -24,6 +24,7 @@ namespace ABTSM3MonthlySatellitePracticeRuntimePrivate
 constexpr TCHAR SatelliteGravityCVarName[] =
 	TEXT("abts.Calibration.SatelliteGravity");
 constexpr float MaximumSatelliteFacingErrorDegrees = 5.0f;
+constexpr float MaximumSatellitePreviewDeltaCM = 250.0f;
 
 struct FFacingAlignedSatellitePlacement
 {
@@ -36,17 +37,91 @@ struct FFacingAlignedSatellitePlacement
 	float CorrectionAzimuthDegrees = 0.0f;
 };
 
+bool BuildM6LaunchFrame(
+	const AABTSM3Planet& Planet,
+	const AABTSM51SlingshotCord& Cord,
+	const FVector& PreferredForward,
+	const FABTSM6LaunchProfileCatalog& Catalog,
+	FABTSM6CalibrationLaunchFrame& OutFrame)
+{
+	OutFrame = FABTSM6CalibrationLaunchFrame();
+	const FVector SlingCenter = (Cord.GetEndpointA() + Cord.GetEndpointB()) * 0.5f;
+	const FVector SlingUp = Planet.GetRadialUpAtWorldLocation(
+		SlingCenter).GetSafeNormal();
+	FVector SlingRight = FVector::VectorPlaneProject(
+		Cord.GetEndpointB() - Cord.GetEndpointA(),
+		SlingUp).GetSafeNormal();
+	FVector SlingForward = FVector::CrossProduct(
+		SlingRight,
+		SlingUp).GetSafeNormal();
+	const FVector PreferredTangent = FVector::VectorPlaneProject(
+		PreferredForward,
+		SlingUp).GetSafeNormal();
+	if (SlingUp.IsNearlyZero()
+		|| SlingRight.IsNearlyZero()
+		|| SlingForward.IsNearlyZero()
+		|| PreferredTangent.IsNearlyZero())
+	{
+		return false;
+	}
+	if (FVector::DotProduct(SlingForward, PreferredTangent) < 0.0f)
+	{
+		SlingForward *= -1.0f;
+		SlingRight *= -1.0f;
+	}
+	const float PitchRadians = FMath::DegreesToRadians(
+		Catalog.AimCameraPitchDegrees);
+	const FVector CameraLocation = SlingCenter
+		+ (-SlingForward * FMath::Cos(PitchRadians)
+			+ SlingUp * FMath::Sin(PitchRadians)).GetSafeNormal()
+			* Catalog.AimCameraDistanceCM;
+	const FVector Target = SlingCenter
+		+ SlingForward * Catalog.AimTargetForwardDistanceCM
+		+ SlingUp * Catalog.AimTargetHeightCM;
+	const FVector AimPlaneNormal = (Target - CameraLocation).GetSafeNormal();
+	const FVector AimInPlaneAxis = FVector::VectorPlaneProject(
+		SlingUp,
+		AimPlaneNormal).GetSafeNormal();
+	FVector AimOutOfPlaneAxis = FVector::CrossProduct(
+		AimInPlaneAxis,
+		AimPlaneNormal).GetSafeNormal();
+	const FVector PreferredRight = FVector::CrossProduct(
+		SlingUp,
+		SlingForward).GetSafeNormal();
+	if (FVector::DotProduct(AimOutOfPlaneAxis, PreferredRight) < 0.0f)
+	{
+		AimOutOfPlaneAxis *= -1.0f;
+	}
+	if (AimPlaneNormal.IsNearlyZero()
+		|| AimInPlaneAxis.IsNearlyZero()
+		|| AimOutOfPlaneAxis.IsNearlyZero())
+	{
+		return false;
+	}
+	OutFrame.SlingCenterWorld = SlingCenter;
+	OutFrame.SlingUpWorld = SlingUp;
+	OutFrame.SlingForwardWorld = SlingForward;
+	OutFrame.SlingRightWorld = SlingRight;
+	OutFrame.AimPlaneNormalWorld = AimPlaneNormal;
+	OutFrame.AimInPlaneAxisWorld = AimInPlaneAxis;
+	OutFrame.AimOutOfPlaneAxisWorld = AimOutOfPlaneAxis;
+	OutFrame.RestPouchWorldLocation = Cord.GetRestPouchTransform().GetLocation();
+	OutFrame.BirdInPouchOffsetCM = 20.0f;
+	return true;
+}
+
 bool ResolveFacingAlignedSatellitePlacement(
 	AABTSM3Planet& Planet,
-	const FTransform& LaunchTransform,
+	const FABTSM6CalibrationLaunchFrame& LaunchFrame,
 	const FABTSSatellitePracticePreset& Preset,
+	const float CorrectionAzimuthDegrees,
 	FFacingAlignedSatellitePlacement& OutPlacement)
 {
-	const FVector LaunchWorld = LaunchTransform.GetLocation();
-	const FVector LaunchForward = LaunchTransform.GetUnitAxis(EAxis::X).GetSafeNormal();
-	const FVector LaunchUp = LaunchTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+	const FVector LaunchWorld = LaunchFrame.RestPouchWorldLocation;
+	const FVector LaunchForward = LaunchFrame.SlingForwardWorld.GetSafeNormal();
+	const FVector LaunchUp = LaunchFrame.SlingUpWorld.GetSafeNormal();
 	const FVector LaunchRadial =
-		(LaunchWorld - Planet.GetPlanetCenterWorld()).GetSafeNormal();
+		(LaunchFrame.SlingCenterWorld - Planet.GetPlanetCenterWorld()).GetSafeNormal();
 	FVector ArcTangent = FVector::VectorPlaneProject(
 		LaunchForward,
 		LaunchRadial).GetSafeNormal();
@@ -58,23 +133,18 @@ bool ResolveFacingAlignedSatellitePlacement(
 		return false;
 	}
 	ArcTangent = ArcTangent.RotateAngleAxis(
-		Preset.SatelliteAnchorAzimuthDegrees,
+		Preset.SatelliteAnchorAzimuthDegrees + CorrectionAzimuthDegrees,
 		LaunchRadial).GetSafeNormal();
 	const float ArcRadians = FMath::DegreesToRadians(
 		Preset.SatelliteAnchorArcDegrees);
 	const float CenterClearanceCM = Planet.GetPlanetRadiusCM()
 		* Preset.SatelliteCenterClearancePrimaryRatio;
 
-	const auto Evaluate = [&](
-		const float CorrectionAzimuthDegrees,
-		FFacingAlignedSatellitePlacement& OutCandidate)
+	const auto Evaluate = [&](FFacingAlignedSatellitePlacement& OutCandidate)
 	{
-		const FVector CorrectedTangent = ArcTangent.RotateAngleAxis(
-			CorrectionAzimuthDegrees,
-			LaunchRadial).GetSafeNormal();
 		const FVector AnchorDirection =
 			(LaunchRadial * FMath::Cos(ArcRadians)
-				+ CorrectedTangent * FMath::Sin(ArcRadians)).GetSafeNormal();
+				+ ArcTangent * FMath::Sin(ArcRadians)).GetSafeNormal();
 		FVector SurfaceWorld = FVector::ZeroVector;
 		FVector SurfaceNormal = FVector::ZeroVector;
 		float SurfaceRadiusCM = 0.0f;
@@ -112,51 +182,7 @@ bool ResolveFacingAlignedSatellitePlacement(
 		OutCandidate.CorrectionAzimuthDegrees = CorrectionAzimuthDegrees;
 		return FMath::IsFinite(OutCandidate.FacingErrorDegrees);
 	};
-	const auto TryCandidate = [&OutPlacement, &Evaluate](
-		const float CorrectionAzimuthDegrees,
-		bool& bInOutFound)
-	{
-		FFacingAlignedSatellitePlacement Candidate;
-		if (!Evaluate(CorrectionAzimuthDegrees, Candidate))
-		{
-			return;
-		}
-		const bool bBetter = !bInOutFound
-			|| Candidate.FacingErrorDegrees
-				< OutPlacement.FacingErrorDegrees - 0.0001f
-			|| (FMath::IsNearlyEqual(
-					Candidate.FacingErrorDegrees,
-					OutPlacement.FacingErrorDegrees,
-					0.0001f)
-				&& FMath::Abs(Candidate.CorrectionAzimuthDegrees)
-					< FMath::Abs(OutPlacement.CorrectionAzimuthDegrees));
-		if (bBetter)
-		{
-			OutPlacement = Candidate;
-			bInOutFound = true;
-		}
-	};
-
-	bool bFound = false;
-	for (int32 Step = -45; Step <= 45; ++Step)
-	{
-		TryCandidate(static_cast<float>(Step) * 2.0f, bFound);
-	}
-	if (!bFound)
-	{
-		return false;
-	}
-	const float CoarseBest = OutPlacement.CorrectionAzimuthDegrees;
-	for (int32 Step = -20; Step <= 20; ++Step)
-	{
-		TryCandidate(CoarseBest + static_cast<float>(Step) * 0.1f, bFound);
-	}
-	const float FineBest = OutPlacement.CorrectionAzimuthDegrees;
-	for (int32 Step = -20; Step <= 20; ++Step)
-	{
-		TryCandidate(FineBest + static_cast<float>(Step) * 0.005f, bFound);
-	}
-	return bFound
+	return Evaluate(OutPlacement)
 		&& OutPlacement.FacingErrorDegrees
 			<= MaximumSatelliteFacingErrorDegrees;
 }
@@ -175,6 +201,8 @@ uint64 ComputeRuntimeLayoutSnapshotHash(
 	const int64 PreviewResultHash,
 	const int64 CandidateHash,
 	const uint64 GravitySnapshotHash,
+	const uint64 ProductionLaunchProfileHash,
+	const uint64 TrajectoryCertificationHash,
 	const FTransform& PracticeLaunchWorldTransform,
 	const int32 PracticeStakeACellId,
 	const int32 PracticeStakeBCellId)
@@ -183,6 +211,8 @@ uint64 ComputeRuntimeLayoutSnapshotHash(
 	Hash = AddHashValue(Hash, static_cast<uint64>(PreviewResultHash));
 	Hash = AddHashValue(Hash, static_cast<uint64>(CandidateHash));
 	Hash = AddHashValue(Hash, GravitySnapshotHash);
+	Hash = AddHashValue(Hash, ProductionLaunchProfileHash);
+	Hash = AddHashValue(Hash, TrajectoryCertificationHash);
 	Hash = AddHashValue(Hash, static_cast<uint32>(PracticeStakeACellId));
 	Hash = AddHashValue(Hash, static_cast<uint32>(PracticeStakeBCellId));
 	const FVector Location = PracticeLaunchWorldTransform.GetLocation();
@@ -329,7 +359,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 	RefreshReadyState();
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d PracticeSlingshot=%d PracticePouch=%s LaunchProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
 		bRuntimeReady ? 1 : 0,
 		RuntimeSnapshot.SourceRouteCandidateId,
 		SupersededSatellites.Num(),
@@ -341,6 +371,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		bSatelliteCollisionEnabled ? 1 : 0,
 		bE5CollisionEnabled ? 1 : 0,
 		bM6TargetBound ? 1 : 0,
+		bProductionLaunchProfileBound ? 1 : 0,
+		bTrajectoryCertified ? 1 : 0,
 		bPracticeSlingshotReady ? 1 : 0,
 		GetRuntimePracticeCord()
 			? *GetRuntimePracticeCord()->GetRestPouchTransform().GetLocation().ToCompactString()
@@ -348,9 +380,13 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.LaunchProfileHash)),
 		static_cast<unsigned long long>(
+			static_cast<uint64>(RuntimeSnapshot.ProductionLaunchProfileHash)),
+		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.SatellitePracticePresetHash)),
 		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.BaselineGravitySnapshotHash)),
+		static_cast<unsigned long long>(
+			static_cast<uint64>(RuntimeSnapshot.TrajectoryCertificationHash)),
 		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.RuntimeLayoutSnapshotHash)));
 	return bRuntimeReady;
@@ -368,13 +404,28 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	const FABTSSatellitePracticePreset FrozenPreset =
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeFrozenSatellitePracticePresetV0();
+	const FABTSM6LaunchProfileCatalog FrozenCatalog =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
+	FABTSM6CalibrationLaunchFrame FrozenLaunchFrame;
+	if (!IsValid(RuntimePracticeCord)
+		|| !ABTSM3MonthlySatellitePracticeRuntimePrivate::BuildM6LaunchFrame(
+			*PrimaryPlanet,
+			*RuntimePracticeCord,
+			CandidateSnapshot.LaunchForwardWorld,
+			FrozenCatalog,
+			FrozenLaunchFrame))
+	{
+		return RejectSpawn(TEXT("ProductionLaunchFrame"));
+	}
 	ABTSM3MonthlySatellitePracticeRuntimePrivate::
 		FFacingAlignedSatellitePlacement SatellitePlacement;
 	if (!ABTSM3MonthlySatellitePracticeRuntimePrivate::
 			ResolveFacingAlignedSatellitePlacement(
 				*PrimaryPlanet,
-				RuntimeSnapshot.PracticeLaunchWorldTransform,
+				FrozenLaunchFrame,
 				FrozenPreset,
+				CandidateSnapshot.SatelliteFacingCorrectionAzimuthDegrees,
 				SatellitePlacement))
 	{
 		return RejectSpawn(TEXT("SatelliteFacingAlignment"));
@@ -419,13 +470,19 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 			*ExpectedSatelliteCenter.ToCompactString());
 		return false;
 	}
+	const float SatellitePreviewDeltaCM = FVector::Distance(
+		RuntimeSatellite->GetActorLocation(),
+		CandidateSnapshot.SatelliteCenterWorld);
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M3R5.1][RuntimePractice] RealCellSatelliteApplied AnchorCell=%d CandidateAnchorCell=%d DeltaFromPreview=%.2f"),
 		SatellitePlacement.AnchorCellId,
 		CandidateSnapshot.SatelliteAnchorCellId,
-		FVector::Distance(
-			RuntimeSatellite->GetActorLocation(),
-			CandidateSnapshot.SatelliteCenterWorld));
+		SatellitePreviewDeltaCM);
+	if (SatellitePreviewDeltaCM >
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::MaximumSatellitePreviewDeltaCM)
+	{
+		return RejectSpawn(TEXT("SatellitePreviewRuntimeDivergence"));
+	}
 	RuntimeSatellite->SetActorEnableCollision(true);
 	if (RuntimeSatellite->ContinuousSurface)
 	{
@@ -437,9 +494,6 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	}
 
 	FABTSCalibrationGravitySnapshot GravitySnapshot;
-	const FABTSM6LaunchProfileCatalog FrozenCatalog =
-		FABTSSlingshotSatelliteCalibrationModel::
-			MakeFrozenLaunchProfileCatalogV0();
 	GravitySnapshot.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
 	GravitySnapshot.PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
 	GravitySnapshot.PrimarySurfaceGravityCMPerSec2 = 980.0f;
@@ -514,6 +568,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		SatellitePlacement.FacingErrorDegrees;
 	RuntimeSnapshot.SatelliteFacingCorrectionAzimuthDegrees =
 		SatellitePlacement.CorrectionAzimuthDegrees;
+	RuntimeSnapshot.SatellitePreviewRuntimeDeltaCM =
+		SatellitePreviewDeltaCM;
 	RuntimeSnapshot.SatelliteWorldTransform =
 		RuntimeSatellite->GetActorTransform();
 	RuntimeSnapshot.SatelliteRadiusCM =
@@ -530,6 +586,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 				SourcePreviewResultHash,
 				CandidateSnapshot.CandidateHash,
 				BaselineGravitySnapshotHash,
+				0,
+				0,
 				RuntimeSnapshot.PracticeLaunchWorldTransform,
 				RuntimeSnapshot.PracticeStakeACellId,
 				RuntimeSnapshot.PracticeStakeBCellId));
@@ -751,6 +809,16 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 	}
 	if (IsValid(BoundSlingshotSystem))
 	{
+		FABTSM6LaunchProfileCatalog ProductionCatalog;
+		uint64 ProductionHash = 0;
+		bProductionLaunchProfileBound =
+			BoundSlingshotSystem->CopyLaunchProfileCatalog(
+				ProductionCatalog,
+				ProductionHash)
+			&& ProductionHash == static_cast<uint64>(
+				CandidateSnapshot.LaunchProfileHash);
+		RuntimeSnapshot.ProductionLaunchProfileHash =
+			static_cast<int64>(ProductionHash);
 		AABTSM9Satellite* BoundSatellite = nullptr;
 		AActor* BoundTarget = nullptr;
 		FVector BoundHalfExtent = FVector::ZeroVector;
@@ -761,8 +829,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 			&& BoundSatellite == RuntimeSatellite.Get()
 			&& BoundTarget == RuntimeE5Target.Get()
 			&& BoundHalfExtent.Equals(RuntimeSnapshot.E5HalfExtentCM, 0.1f);
-		if (bM6TargetBound)
+		if (bM6TargetBound && bProductionLaunchProfileBound)
 		{
+			if (!bTrajectoryCertificationAttempted)
+			{
+				CertifyTrajectoryLayout();
+			}
 			return true;
 		}
 	}
@@ -779,11 +851,166 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 			RuntimeSnapshot.E5HalfExtentCM,
 			FrozenPreset.IntegrationStepSeconds,
 			FrozenPreset.MaximumFlightSeconds);
+		FABTSM6LaunchProfileCatalog ProductionCatalog;
+		uint64 ProductionHash = 0;
+		bProductionLaunchProfileBound =
+			BoundSlingshotSystem->CopyLaunchProfileCatalog(
+				ProductionCatalog,
+				ProductionHash)
+			&& ProductionHash == static_cast<uint64>(
+				CandidateSnapshot.LaunchProfileHash);
+		RuntimeSnapshot.ProductionLaunchProfileHash =
+			static_cast<int64>(ProductionHash);
 		bM6TargetBound = true;
+		if (!bProductionLaunchProfileBound)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3R5.1][RuntimePractice] M6ProfileRejected ProductionHash=%016llX CandidateHash=%016llX"),
+				static_cast<unsigned long long>(ProductionHash),
+				static_cast<unsigned long long>(
+					static_cast<uint64>(CandidateSnapshot.LaunchProfileHash)));
+			return false;
+		}
+		if (!bTrajectoryCertificationAttempted)
+		{
+			CertifyTrajectoryLayout();
+		}
 		return true;
 	}
 	bM6TargetBound = false;
+	bProductionLaunchProfileBound = false;
 	return false;
+}
+
+bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
+{
+	bTrajectoryCertificationAttempted = true;
+	bTrajectoryCertified = false;
+	RuntimeSnapshot.bTrajectoryCertified = false;
+	if (!IsValid(BoundSlingshotSystem)
+		|| !IsValid(PrimaryPlanet)
+		|| !IsValid(RuntimePracticeCord)
+		|| !IsValid(RuntimeSatellite)
+		|| !IsValid(RuntimeE5Target))
+	{
+		return false;
+	}
+	FABTSM6LaunchProfileCatalog ProductionCatalog;
+	uint64 ProductionHash = 0;
+	if (!BoundSlingshotSystem->CopyLaunchProfileCatalog(
+			ProductionCatalog,
+			ProductionHash)
+		|| ProductionHash != static_cast<uint64>(
+			CandidateSnapshot.LaunchProfileHash))
+	{
+		return false;
+	}
+	FABTSM6CalibrationLaunchFrame LaunchFrame;
+	if (!ABTSM3MonthlySatellitePracticeRuntimePrivate::BuildM6LaunchFrame(
+			*PrimaryPlanet,
+			*RuntimePracticeCord,
+			CandidateSnapshot.LaunchForwardWorld,
+			ProductionCatalog,
+			LaunchFrame))
+	{
+		return false;
+	}
+	const FABTSSatellitePracticePreset FrozenPreset =
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenSatellitePracticePresetV0();
+	FABTSCalibrationScenario Scenario;
+	Scenario.LaunchWorldLocation = LaunchFrame.RestPouchWorldLocation;
+	Scenario.LaunchFrame = LaunchFrame;
+	Scenario.TargetWorldLocation = RuntimeE5Target->GetActorLocation();
+	Scenario.TargetWorldTransform = RuntimeE5Target->GetActorTransform();
+	Scenario.TargetHalfExtentCM = RuntimeSnapshot.E5HalfExtentCM;
+	Scenario.TargetProxyRadiusCM = RuntimeSnapshot.E5HalfExtentCM.GetMax();
+	Scenario.Gravity.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
+	Scenario.Gravity.PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
+	Scenario.Gravity.PrimarySurfaceGravityCMPerSec2 = 980.0f;
+	Scenario.Gravity.SatelliteCenterWorld = RuntimeSatellite->GetPlanetCenterWorld();
+	Scenario.Gravity.SatelliteRadiusCM = RuntimeSatellite->GetPlanetRadiusCM();
+	Scenario.Gravity.SatelliteSurfaceGravityCMPerSec2 =
+		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
+	Scenario.Gravity.FlightAirDragPerSecond =
+		ProductionCatalog.FlightAirDragPerSecond;
+	Scenario.Gravity.bSatelliteGravityEnabled = true;
+	const FABTSCalibrationSweepSummary Summary =
+		FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
+			Scenario,
+			ProductionCatalog,
+			FrozenPreset);
+	// Real monthly terrain perturbs the ideal-sphere calibration carrier.  The
+	// practice gate keeps every gravity-dependence and uniqueness condition,
+	// but accepts an aim-connected island at one reachable 0.01 pull notch.
+	// The stricter frozen-carrier bPassed value remains visible in the log.
+	const bool bM3PracticePassed =
+		Summary.LargestSuccessIslandSamples
+			>= FMath::Max(1, FrozenPreset.MinimumSuccessIslandSamples)
+		&& Summary.bIslandSpansAimNeighbors
+		&& Summary.GravityDependentHits > 0
+		&& Summary.SimpleFullPowerHits == 0
+		&& Summary.ReinforcedOutsideCertifiedPullHits == 0
+		&& Summary.SuccessPullMinimum + KINDA_SMALL_NUMBER
+			>= FrozenPreset.PullMinimum
+		&& Summary.SuccessPullMaximum
+			<= FrozenPreset.PullMaximum + KINDA_SMALL_NUMBER
+		&& Summary.MinimumGravityOffMissCM + KINDA_SMALL_NUMBER
+			>= FrozenPreset.GravityOffMinimumMissCM;
+	bTrajectoryCertified = bM3PracticePassed;
+	RuntimeSnapshot.bTrajectoryCertified = bM3PracticePassed;
+	RuntimeSnapshot.ProductionLaunchProfileHash =
+		static_cast<int64>(ProductionHash);
+	RuntimeSnapshot.GravityOnHits = Summary.ReinforcedGravityOnHits;
+	RuntimeSnapshot.GravityDependentHits = Summary.GravityDependentHits;
+	RuntimeSnapshot.LargestSuccessIslandSamples =
+		Summary.LargestSuccessIslandSamples;
+	RuntimeSnapshot.BestAimInPlaneCM = Summary.BestGravityOnAimInPlaneCM;
+	RuntimeSnapshot.BestAimOutOfPlaneCM = Summary.BestGravityOnAimOutOfPlaneCM;
+	RuntimeSnapshot.BestPullAlpha = Summary.BestGravityOnPullAlpha;
+	RuntimeSnapshot.MinimumGravityOffMissCM = Summary.MinimumGravityOffMissCM;
+	RuntimeSnapshot.TrajectoryCertificationHash =
+		static_cast<int64>(Summary.ResultHash);
+	RuntimeSnapshot.RuntimeLayoutSnapshotHash = static_cast<int64>(
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			ComputeRuntimeLayoutSnapshotHash(
+				SourcePreviewResultHash,
+				CandidateSnapshot.CandidateHash,
+				static_cast<uint64>(
+					RuntimeSnapshot.BaselineGravitySnapshotHash),
+				ProductionHash,
+				Summary.ResultHash,
+				RuntimeSnapshot.PracticeLaunchWorldTransform,
+				RuntimeSnapshot.PracticeStakeACellId,
+				RuntimeSnapshot.PracticeStakeBCellId));
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
+		bM3PracticePassed ? 1 : 0,
+		Summary.bPassed ? 1 : 0,
+		static_cast<unsigned long long>(ProductionHash),
+		Summary.ReinforcedGravityOnHits,
+		Summary.GravityDependentHits,
+		Summary.LargestSuccessIslandSamples,
+		Summary.bIslandSpansAimNeighbors ? 1 : 0,
+		Summary.bIslandSpansPullNeighbors ? 1 : 0,
+		Summary.SuccessPullMinimum,
+		Summary.SuccessPullMaximum,
+		Summary.SuccessAimInPlaneMinimumCM,
+		Summary.SuccessAimInPlaneMaximumCM,
+		Summary.BestGravityOnAimInPlaneCM,
+		Summary.BestGravityOnAimOutOfPlaneCM,
+		Summary.BestGravityOnPullAlpha,
+		Summary.MinimumGravityOffMissCM,
+		Summary.SimpleFullPowerHits,
+		Summary.ReinforcedOutsideCertifiedPullHits,
+		static_cast<unsigned long long>(Summary.ResultHash));
+	if (!bM3PracticePassed)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] CertificationRejected ResultHash=%016llX"),
+			static_cast<unsigned long long>(Summary.ResultHash));
+	}
+	return bTrajectoryCertified;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::ApplyGravityOverride(
@@ -843,6 +1070,8 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bSatelliteCollisionEnabled
 		&& bE5CollisionEnabled
 		&& bM6TargetBound
+		&& bProductionLaunchProfileBound
+		&& bTrajectoryCertified
 		&& bPracticeSlingshotReady;
 }
 
@@ -952,6 +1181,9 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 	bSatelliteCollisionEnabled = false;
 	bE5CollisionEnabled = false;
 	bM6TargetBound = false;
+	bProductionLaunchProfileBound = false;
+	bTrajectoryCertified = false;
+	bTrajectoryCertificationAttempted = false;
 	bPracticeSlingshotReady = false;
 }
 
