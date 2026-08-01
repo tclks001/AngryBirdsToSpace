@@ -262,7 +262,8 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		TEXT(" Actor=%s Bays=%d Motifs=%d WFC=%d Steps=%d")
 		TEXT(" Planned=%d Closed=%d Bearings=%d")
 		TEXT(" PortViolations=%d BoundsViolations=%d")
-		TEXT(" Penetrations=%d Unsupported=%d Diagonal=%d Hash=%lld"),
+		TEXT(" Penetrations=%d Unsupported=%d Diagonal=%d Semantic=%d")
+		TEXT(" Hash=%lld"),
 		*GetName(), LastPreviewSummary.BayCount,
 		LastPreviewSummary.DistinctMotifCount,
 		LastPreviewSummary.WFCPropagationOperationCount,
@@ -275,5 +276,6 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		LastPreviewSummary.RemainingPenetrationCount,
 		LastPreviewSummary.UnsupportedMemberCount,
 		LastPreviewSummary.DiagonalMemberCount,
+		LastPreviewSummary.SemanticEnvelopeViolationCount,
 		LastPreviewSummary.ResultHash);
 }

@@ -111,6 +111,11 @@ struct FABTSM73BeamBPlannedMember
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
 	EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
 
+	/** Structural role preserved when importing Beam-A semantic roof members. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamAMemberRole Role =
+		EABTSM73BeamAMemberRole::PrimaryBeam;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
 	FVector LocalStart = FVector::ZeroVector;
 
@@ -198,6 +203,10 @@ struct FABTSM73BeamBPreviewSummary
 	/** Beam-B currently permits XYZ members only. Must remain zero. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 DiagonalMemberCount = 0;
+
+	/** Planned semantic roof courses outside or not tapering within their Shape Grammar envelope. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 SemanticEnvelopeViolationCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 PortViolationCount = 0;

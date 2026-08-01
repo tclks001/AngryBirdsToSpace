@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Building/ABTSM73BeamAPreviewTypes.h"
+#include "Building/ABTSM73DAG5BShapePreviewTypes.h"
 
 struct FABTSM73DAG5BV2GenerationResult;
 
@@ -16,8 +17,34 @@ struct FABTSM73BeamAGenerationResult
 	TArray<FABTSM73BeamAAssembly> Assemblies;
 };
 
+struct FABTSM73BeamASemanticRoofMember
+{
+	FVector LocalStart = FVector::ZeroVector;
+	FVector LocalEnd = FVector::ZeroVector;
+	EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+	EABTSM73BeamAMemberRole Role = EABTSM73BeamAMemberRole::RoofCourse;
+};
+
 namespace ABTSM73BeamA
 {
+	/**
+	 * Beam-A's authoritative horizontal course envelope for a semantic roof.
+	 * Alpha is the zero-based course index divided by the total course count.
+	 */
+	FBox SemanticRoofCourseBounds(
+		const FBox& Bounds,
+		EABTSM73DAG5BV2Primitive Primitive,
+		double Alpha,
+		double CrossSectionCM);
+
+	/** Compile the pre-closure layered roof members used by Beam-A. */
+	bool BuildSemanticRoofMembers(
+		const FABTSM73BeamAPreviewSettings& Settings,
+		const FABTSM73BeamAGenerationResult& Topology,
+		const FABTSM73BeamABay& Bay,
+		EABTSM73DAG5BV2Primitive Primitive,
+		TArray<FABTSM73BeamASemanticRoofMember>& OutMembers);
+
 	/** Resolve Z-support stations for two aligned parallel beam lanes. */
 	bool BuildAlignedParallelSupportOffsets(
 		double LowerLane,

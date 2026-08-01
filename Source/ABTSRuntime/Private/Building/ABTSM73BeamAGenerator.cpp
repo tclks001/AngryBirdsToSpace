@@ -610,6 +610,40 @@ namespace ABTSM73BeamA
 			UpperBearingMembers);
 	}
 
+	FBox SemanticRoofCourseBounds(
+		const FBox& Bounds,
+		const EABTSM73DAG5BV2Primitive Primitive,
+		const double Alpha,
+		const double CrossSectionCM)
+	{
+		FBox CourseBounds = Bounds;
+		const FVector Size = Bounds.GetSize();
+		const FVector Center = Bounds.GetCenter();
+		const double ClampedAlpha = FMath::Clamp(Alpha, 0.0, 1.0);
+		const double MinHalfSpan = CrossSectionCM * 0.55;
+		if (Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+			|| Primitive
+				== EABTSM73DAG5BV2Primitive::TriangularPrismX)
+		{
+			const double HalfX = FMath::Max(
+				MinHalfSpan,
+				Size.X * 0.5 * (1.0 - ClampedAlpha));
+			CourseBounds.Min.X = Center.X - HalfX;
+			CourseBounds.Max.X = Center.X + HalfX;
+		}
+		if (Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+			|| Primitive
+				== EABTSM73DAG5BV2Primitive::TriangularPrismY)
+		{
+			const double HalfY = FMath::Max(
+				MinHalfSpan,
+				Size.Y * 0.5 * (1.0 - ClampedAlpha));
+			CourseBounds.Min.Y = Center.Y - HalfY;
+			CourseBounds.Max.Y = Center.Y + HalfY;
+		}
+		return CourseBounds;
+	}
+
 	bool AddLayeredRoof(
 		FBuildContext& Context,
 		const FABTSM73BeamABay& Bay,
@@ -634,29 +668,8 @@ namespace ABTSM73BeamA
 		{
 			const double Alpha =
 				static_cast<double>(CourseIndex) / RequiredCourseCount;
-			FBox CourseBounds = Bounds;
-			const double MinHalfSpan = CrossSection * 0.55;
-			const FVector Center = Bounds.GetCenter();
-			if (Primitive == EABTSM73DAG5BV2Primitive::Pyramid
-				|| Primitive
-					== EABTSM73DAG5BV2Primitive::TriangularPrismX)
-			{
-				const double HalfX = FMath::Max(
-					MinHalfSpan,
-					Size.X * 0.5 * (1.0 - Alpha));
-				CourseBounds.Min.X = Center.X - HalfX;
-				CourseBounds.Max.X = Center.X + HalfX;
-			}
-			if (Primitive == EABTSM73DAG5BV2Primitive::Pyramid
-				|| Primitive
-					== EABTSM73DAG5BV2Primitive::TriangularPrismY)
-			{
-				const double HalfY = FMath::Max(
-					MinHalfSpan,
-					Size.Y * 0.5 * (1.0 - Alpha));
-				CourseBounds.Min.Y = Center.Y - HalfY;
-				CourseBounds.Max.Y = Center.Y + HalfY;
-			}
+			const FBox CourseBounds = SemanticRoofCourseBounds(
+				Bounds, Primitive, Alpha, CrossSection);
 			const EABTSM73BeamAFrameAxis Axis =
 				CourseIndex % 2 == 0
 					? Bay.PreferredAxis
@@ -675,6 +688,49 @@ namespace ABTSM73BeamA
 			}
 		}
 		return true;
+	}
+
+	bool BuildSemanticRoofMembers(
+		const FABTSM73BeamAPreviewSettings& Settings,
+		const FABTSM73BeamAGenerationResult& Topology,
+		const FABTSM73BeamABay& Bay,
+		const EABTSM73DAG5BV2Primitive Primitive,
+		TArray<FABTSM73BeamASemanticRoofMember>& OutMembers)
+	{
+		OutMembers.Reset();
+		FABTSM73BeamAGenerationResult Scratch;
+		Scratch.Bays = Topology.Bays;
+		FABTSM73BeamAAssembly& Assembly =
+			Scratch.Assemblies.AddDefaulted_GetRef();
+		Assembly.AssemblyId = 0;
+		Assembly.BayId = Bay.BayId;
+		Assembly.Type = EABTSM73BeamAAssemblyType::LayeredRoofBay;
+		FBuildContext Context;
+		Context.Settings = &Settings;
+		Context.Result = &Scratch;
+		if (!AddLayeredRoof(Context, Bay, Primitive, Assembly))
+		{
+			return false;
+		}
+		OutMembers.Reserve(Scratch.Members.Num());
+		for (const FABTSM73BeamAMember& Member : Scratch.Members)
+		{
+			if (!Scratch.Joints.IsValidIndex(Member.JointA)
+				|| !Scratch.Joints.IsValidIndex(Member.JointB))
+			{
+				OutMembers.Reset();
+				return false;
+			}
+			FABTSM73BeamASemanticRoofMember& OutMember =
+				OutMembers.AddDefaulted_GetRef();
+			OutMember.LocalStart =
+				Scratch.Joints[Member.JointA].LocalPosition;
+			OutMember.LocalEnd =
+				Scratch.Joints[Member.JointB].LocalPosition;
+			OutMember.Axis = Member.Axis;
+			OutMember.Role = Member.Role;
+		}
+		return !OutMembers.IsEmpty();
 	}
 
 	FBox MemberBounds(
@@ -1201,11 +1257,23 @@ namespace ABTSM73BeamA
 			{
 				return false;
 			}
+			// Split/merge passes deliberately use JointMergeToleranceCM when
+			// deciding whether a residual segment can still hold one block.
+			// Keep the rebuild contract identical: a segment that is only a
+			// tolerance short is materialized as one cross-section block instead
+			// of making the entire accepted assembly fail during reconstruction.
+			const float RebuiltLength =
+				Spec.LengthCM < Context.Settings->BlockCrossSectionCM
+					&& Spec.LengthCM
+						+ Context.Settings->JointMergeToleranceCM
+						>= Context.Settings->BlockCrossSectionCM
+					? Context.Settings->BlockCrossSectionCM
+					: Spec.LengthCM;
 			const int32 MemberId = AddMember(
 				Context,
 				Context.Result->Assemblies[AssemblyIds[0]],
 				Spec.Center,
-				Spec.LengthCM,
+				RebuiltLength,
 				Spec.Axis,
 				Spec.Role);
 			if (MemberId == INDEX_NONE)
@@ -1442,20 +1510,72 @@ namespace ABTSM73BeamA
 				}
 			}
 		}
-		for (int32 MemberId = Specs.Num() - 1; MemberId >= 0; --MemberId)
+		TArray<TArray<int32>> UnsupportedNeighbors;
+		UnsupportedNeighbors.SetNum(Specs.Num());
+		for (const FABTSM73BeamABearingContact& Contact :
+			Context.Result->BearingContacts)
 		{
-			if (!Reachable.IsValidIndex(MemberId) || Reachable[MemberId])
+			if (!Reachable.IsValidIndex(Contact.LowerMemberId)
+				|| !Reachable.IsValidIndex(Contact.UpperMemberId)
+				|| Reachable[Contact.LowerMemberId]
+				|| Reachable[Contact.UpperMemberId])
 			{
 				continue;
 			}
-			bool bEveryOwnerRemainsSupported =
-				!Specs[MemberId].AssemblyIds.IsEmpty();
-			for (const int32 AssemblyId : Specs[MemberId].AssemblyIds)
+			UnsupportedNeighbors[Contact.LowerMemberId].AddUnique(
+				Contact.UpperMemberId);
+			UnsupportedNeighbors[Contact.UpperMemberId].AddUnique(
+				Contact.LowerMemberId);
+		}
+		TArray<bool> Visited;
+		Visited.Init(false, Specs.Num());
+		TArray<bool> RemoveMember;
+		RemoveMember.Init(false, Specs.Num());
+		for (int32 SeedMemberId = 0;
+			SeedMemberId < Specs.Num(); ++SeedMemberId)
+		{
+			if (Visited[SeedMemberId]
+				|| !Reachable.IsValidIndex(SeedMemberId)
+				|| Reachable[SeedMemberId])
 			{
-				if (!AssemblyHasReachableMember.IsValidIndex(AssemblyId)
-					|| !AssemblyHasReachableMember[AssemblyId])
+				continue;
+			}
+			TArray<int32> Component;
+			TArray<int32> Pending;
+			Pending.Add(SeedMemberId);
+			Visited[SeedMemberId] = true;
+			while (!Pending.IsEmpty())
+			{
+				const int32 MemberId = Pending.Pop(EAllowShrinking::No);
+				Component.Add(MemberId);
+				for (const int32 NeighborId : UnsupportedNeighbors[MemberId])
+				{
+					if (!Visited[NeighborId])
+					{
+						Visited[NeighborId] = true;
+						Pending.Add(NeighborId);
+					}
+				}
+			}
+			bool bEveryOwnerRemainsSupported = !Component.IsEmpty();
+			for (const int32 MemberId : Component)
+			{
+				if (Specs[MemberId].AssemblyIds.IsEmpty())
 				{
 					bEveryOwnerRemainsSupported = false;
+					break;
+				}
+				for (const int32 AssemblyId : Specs[MemberId].AssemblyIds)
+				{
+					if (!AssemblyHasReachableMember.IsValidIndex(AssemblyId)
+						|| !AssemblyHasReachableMember[AssemblyId])
+					{
+						bEveryOwnerRemainsSupported = false;
+						break;
+					}
+				}
+				if (!bEveryOwnerRemainsSupported)
+				{
 					break;
 				}
 			}
@@ -1463,25 +1583,14 @@ namespace ABTSM73BeamA
 			{
 				continue;
 			}
-			bool bTouchesUnsupportedMember = false;
-			for (const FABTSM73BeamABearingContact& Contact :
-				Context.Result->BearingContacts)
+			for (const int32 MemberId : Component)
 			{
-				const int32 OtherMemberId =
-					Contact.LowerMemberId == MemberId
-						? Contact.UpperMemberId
-						: Contact.UpperMemberId == MemberId
-							? Contact.LowerMemberId
-							: INDEX_NONE;
-				if (OtherMemberId != INDEX_NONE
-					&& Reachable.IsValidIndex(OtherMemberId)
-					&& !Reachable[OtherMemberId])
-				{
-					bTouchesUnsupportedMember = true;
-					break;
-				}
+				RemoveMember[MemberId] = true;
 			}
-			if (bTouchesUnsupportedMember)
+		}
+		for (int32 MemberId = Specs.Num() - 1; MemberId >= 0; --MemberId)
+		{
+			if (!RemoveMember[MemberId])
 			{
 				continue;
 			}

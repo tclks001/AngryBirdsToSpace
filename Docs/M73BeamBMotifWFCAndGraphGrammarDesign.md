@@ -6,7 +6,7 @@
 >
 > 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 >
-> 状态：Beam-B 全局装配收口与自动化已完成，等待用户编辑器读形验收；不接管 TaskGraph 生产建筑。
+> 状态：Beam-B 全局装配收口、Beam-A 语义轮廓拟合与自动化已完成，等待用户编辑器读形验收；不接管 TaskGraph 生产建筑。
 
 ## 1. 目标与边界
 
@@ -20,6 +20,8 @@ Beam-A 已解决“语义 Volume 如何变成可搭放的 XYZ 长条积木和 Be
   `TransferFrame`、`CantileverBay`、`BridgeBay`；`BracedBay` 保留为枚举兼容项，但不进入 WFC 生成域；
 - 用 Port 约束相邻 Bay 的 X/Y 连续性，Bridge 只允许出现在上游 Bridge Volume；
 - 用图语法深度增加横梁、交替木垛、转换支点或悬挑根部等拓扑；
+- Box Bay 使用 Beam-B Motif；Prism/Pyramid Bay 直接复用 Beam-A 的逐层收分屋顶编译器，
+  不再用矩形 TwoLayerCrib 覆盖上游 Shape Grammar 语义；
 - 所有计划构件保持在来源 Bay/Volume 允许域内，跨 Bay 只通过相容 Port 表达；
 - 将 Motif 计划构件编译为 Beam-A `Joint / Member / Assembly` IR，并复用 Beam-A 的全局装配收口；
 - 最终预览只绘制收口后的闭合成员集合，要求无正体积穿透、无悬空承重分量、无斜撑；
@@ -41,7 +43,7 @@ DAG5-B v2 semantic volumes
   -> Beam-B domain construction
   -> deterministic Motif WFC collapse + port propagation
   -> bounded graph grammar expansion
-  -> planned structural members
+  -> Box Bay motif members + Beam-A semantic roof courses
   -> compile to Beam-A Joint / Member / Assembly IR
   -> shared Beam-A global assembly closure
   -> closed structural members for editor preview
@@ -52,6 +54,11 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 方向。长度小于积木截面且无法实体化的局部装饰短段在编译前被省略；其余构件进入 Beam-A IR，
 由同一套全局收口执行共线合并、立柱切分、水平层分离、支承修补、孤立片段裁剪、Bearing
 重建和最终穿透检查。Beam-C 只消费闭合结果，不再重新猜测 Beam-B 的空间装配关系。
+
+非 Box Bay 使用共享的 `ABTSM73BeamA::BuildSemanticRoofMembers` 生成规划层 `RoofCourse`。
+闭合编译不复制一套近似屋顶，而是从已验收的 Beam-A Assembly 中保留该语义体及其沿 Bearing
+向下的完整支撑祖先，再与 Box Bay 的 Beam-B Motif 构件一起交给
+`ABTSM73BeamA::CloseGeneratedAssembly`。这样轮廓来源和结构闭合各有唯一权威实现。
 
 ## 3. Motif 与 Port
 
@@ -106,6 +113,8 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - `InvalidSettings`：非法深度、预算或截面稳定 fail closed；
 - `GlobalAssemblyClosure`：多组 Archetype 的闭合成员独立 AABB 检查无正体积穿透，且每个成员均可沿 Bearing 链到达地面；
 - `NoDiagonalMembers`：即使旧资产把 `bAllowBracedBay` 设为真，也不得选择 BracedBay 或生成计划/闭合斜撑。
+- `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
+  在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
 
 ## 7. 用户编辑器验收
 
@@ -115,11 +124,13 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 2. `GrammarDepth` 从 1 提高到 3～4 时，门架联系层、木垛层或平行梁数量应增加；
 3. Bridge 体量必须显示双长梁/横向端梁，不得坍缩为普通塔楼母题；
 4. Cantilever 只应出现在外缘/Annex 候选；当前任何设置下都不应出现斜杆；
-5. 不应再看到整组悬空、相互横穿或大块正体积重叠；允许端面接触与上下承托接触；
-6. Details 中 Accepted 为真，PortViolationCount、OutOfBoundsMemberCount、
+5. 上游 Prism 应由逐层缩短一个水平轴的梁层读出坡屋顶；Pyramid 应同时沿 X/Y 收分，
+   不得再显示为等宽矩形木垛或平顶框；
+6. 不应再看到整组悬空、相互横穿或大块正体积重叠；允许端面接触与上下承托接触；
+7. Details 中 Accepted 为真，PortViolationCount、OutOfBoundsMemberCount、
    RemainingPenetrationCount、UnsupportedMemberCount、DiagonalMemberCount 均为 0，
-   ClosedMemberCount 与 ClosedBearingContactCount 大于 0；
-7. 进入 PIE 后预览不可见且不参与物理 Gate。
+   SemanticEnvelopeViolationCount 为 0，ClosedMemberCount 与 ClosedBearingContactCount 大于 0；
+8. 进入 PIE 后预览不可见且不参与物理 Gate。
 
 本阶段验收“结构复杂度、局部拼接语义以及静态全局装配闭合”。真实 Brick/Chaos 动态稳定性、
 可玩弱点和权威 Load DAG 仍不在 Beam-B 宣称范围内。
@@ -132,6 +143,10 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
   `ABTS.M73DAG.BeamB`，8/8 Success；
 - `Saved/Logs/BeamB-Closure-20260801-201749-M7FreshAutomation.log`：精确找到 90 项
   `ABTS.M7`，90/90 Success；
+- `Saved/Logs/BeamB-Semantic-Full-20260801-2210.log`：精确找到 9 项
+  `ABTS.M73DAG.BeamB`，9/9 Success，包含语义屋顶包络/收分矩阵；
+- `Saved/Logs/BeamB-Semantic-M7-20260801-2215.log`：精确找到 91 项
+  `ABTS.M7`，91/91 Success；
 - 种子/Archetype 矩阵覆盖至少六类 Motif，Bridge Volume 强制映射为 BridgeBay；
 - 深度 1 与深度 4 保持相同 Motif WFC Hash，同时增加规则步骤和计划构件数量；
 - Beam-B 与 Beam-A 调用同一个 `CloseGeneratedAssembly`，不存在第二套收口判定；当前生成域中斜撑数量恒为 0。

@@ -140,6 +140,46 @@ namespace ABTSM73BeamBTests
 		}
 		return !Reachable.Contains(false);
 	}
+
+	const FABTSM73DAG5BV2Volume* FindVolumeForBay(
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const FABTSM73BeamABay& Bay)
+	{
+		return Silhouette.Volumes.FindByPredicate(
+			[&Bay](const FABTSM73DAG5BV2Volume& Volume)
+			{
+				return Volume.VolumeId == Bay.SourceVolumeId;
+			});
+	}
+
+	FBox IndependentRoofEnvelope(
+		const FBox& Bounds,
+		const EABTSM73DAG5BV2Primitive Primitive,
+		const double Alpha,
+		const double CrossSection)
+	{
+		FBox Envelope = Bounds;
+		const FVector Center = Bounds.GetCenter();
+		const FVector Size = Bounds.GetSize();
+		const double MinimumHalfSpan = CrossSection * 0.55;
+		if (Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+			|| Primitive == EABTSM73DAG5BV2Primitive::TriangularPrismX)
+		{
+			const double HalfSpan = FMath::Max(MinimumHalfSpan,
+				Size.X * 0.5 * (1.0 - FMath::Clamp(Alpha, 0.0, 1.0)));
+			Envelope.Min.X = Center.X - HalfSpan;
+			Envelope.Max.X = Center.X + HalfSpan;
+		}
+		if (Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+			|| Primitive == EABTSM73DAG5BV2Primitive::TriangularPrismY)
+		{
+			const double HalfSpan = FMath::Max(MinimumHalfSpan,
+				Size.Y * 0.5 * (1.0 - FMath::Clamp(Alpha, 0.0, 1.0)));
+			Envelope.Min.Y = Center.Y - HalfSpan;
+			Envelope.Max.Y = Center.Y + HalfSpan;
+		}
+		return Envelope;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -422,6 +462,144 @@ bool FABTSM73BeamBInvalidSettingsTest::RunTest(const FString& Parameters)
 		Settings, Silhouette, BeamA, Result, Error));
 	TestEqual(TEXT("Invalid reason is stable"), Error,
 		FString(TEXT("BeamBInvalidSettings")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBSemanticRoofFittingTest,
+	"ABTS.M73DAG.BeamB.SemanticRoofFitting",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBSemanticRoofFittingTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	int32 NonBoxBayCount = 0;
+	int32 RoofCourseCount = 0;
+	int32 IndependentViolationCount = 0;
+	int32 VisiblyTaperedBayCount = 0;
+	for (int32 Value = static_cast<int32>(
+		EABTSM73DAG5BV2Archetype::TerracedCitadel);
+		Value <= static_cast<int32>(
+			EABTSM73DAG5BV2Archetype::SpiredCampus); ++Value)
+	{
+		FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(
+			940000 + Value * 211);
+		Settings.BeamA.Silhouette.Archetype =
+			static_cast<EABTSM73DAG5BV2Archetype>(Value);
+		FABTSM73DAG5BV2GenerationResult Silhouette;
+		FABTSM73BeamAGenerationResult BeamA;
+		FABTSM73BeamBGenerationResult Result;
+		FString Error;
+		if (!GenerateUpstream(Settings, Silhouette, BeamA, Error))
+		{
+			AddError(FString::Printf(TEXT("Upstream failed: %s"), *Error));
+			return false;
+		}
+		FABTSM73BeamBGenerator Generator;
+		if (!Generator.Generate(Settings, Silhouette, BeamA, Result, Error))
+		{
+			AddError(FString::Printf(TEXT("Beam-B failed: %s"), *Error));
+			return false;
+		}
+		TestEqual(TEXT("Runtime semantic envelope audit accepts"),
+			Result.Summary.SemanticEnvelopeViolationCount, 0);
+		const double CrossSection = Settings.BeamA.BlockCrossSectionCM;
+		const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+		TestEqual(TEXT("Closed assembly has no unsupported members"),
+			Result.ClosedAssembly.Summary.UnsupportedMemberCount, 0);
+		TestEqual(TEXT("Closed assembly has no penetrations"),
+			Result.ClosedAssembly.Summary.RemainingPenetrationCount, 0);
+		for (const FABTSM73BeamABay& Bay : Result.ClosedAssembly.Bays)
+		{
+			const FABTSM73DAG5BV2Volume* Volume =
+				FindVolumeForBay(Silhouette, Bay);
+			if (Volume == nullptr
+				|| Volume->Primitive == EABTSM73DAG5BV2Primitive::Box)
+			{
+				continue;
+			}
+			++NonBoxBayCount;
+			const int32 CourseCount = FMath::Max(2, FMath::FloorToInt(
+				Bay.LocalBounds.GetSize().Z / CrossSection));
+			double LowestZ = TNumericLimits<double>::Max();
+			double HighestZ = TNumericLimits<double>::Lowest();
+			FBox LowestBounds(EForceInit::ForceInit);
+			FBox HighestBounds(EForceInit::ForceInit);
+			TArray<TPair<double, FBox>> CourseMembers;
+			for (const FABTSM73BeamBPlannedMember& Member :
+				Result.PlannedMembers)
+			{
+				if (Member.BayId != Bay.BayId
+					|| Member.Role != EABTSM73BeamAMemberRole::RoofCourse)
+				{
+					continue;
+				}
+				++RoofCourseCount;
+				const FVector Center =
+					(Member.LocalStart + Member.LocalEnd) * 0.5;
+				FVector Extent(CrossSection * 0.5);
+				Extent[static_cast<int32>(Member.Axis)] =
+					(Member.LocalEnd - Member.LocalStart).Size() * 0.5;
+				const FBox Actual(Center - Extent, Center + Extent);
+				const double CenterZ = Actual.GetCenter().Z;
+				CourseMembers.Emplace(CenterZ, Actual);
+				LowestZ = FMath::Min(LowestZ, CenterZ);
+				HighestZ = FMath::Max(HighestZ, CenterZ);
+				const int32 CourseIndex = FMath::Clamp(FMath::RoundToInt(
+					(CenterZ - Bay.LocalBounds.Min.Z - CrossSection * 0.5)
+					/ CrossSection), 0, CourseCount - 1);
+				const FBox Expected = IndependentRoofEnvelope(
+					Bay.LocalBounds, Volume->Primitive,
+					static_cast<double>(CourseIndex) / CourseCount,
+					CrossSection).ExpandBy(Tolerance);
+				if (Actual.Min.X < Expected.Min.X
+					|| Actual.Max.X > Expected.Max.X
+					|| Actual.Min.Y < Expected.Min.Y
+					|| Actual.Max.Y > Expected.Max.Y)
+				{
+					++IndependentViolationCount;
+				}
+			}
+			for (const TPair<double, FBox>& CourseMember : CourseMembers)
+			{
+				if (FMath::IsNearlyEqual(CourseMember.Key, LowestZ, Tolerance))
+				{
+					LowestBounds += CourseMember.Value;
+				}
+				if (FMath::IsNearlyEqual(CourseMember.Key, HighestZ, Tolerance))
+				{
+					HighestBounds += CourseMember.Value;
+				}
+			}
+			if (LowestBounds.IsValid && HighestBounds.IsValid
+				&& HighestZ > LowestZ + Tolerance)
+			{
+				const bool bTapersX =
+					Volume->Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+					|| Volume->Primitive
+						== EABTSM73DAG5BV2Primitive::TriangularPrismX;
+				const bool bTapersY =
+					Volume->Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+					|| Volume->Primitive
+						== EABTSM73DAG5BV2Primitive::TriangularPrismY;
+				if ((!bTapersX || HighestBounds.GetSize().X
+						< LowestBounds.GetSize().X - Tolerance)
+					&& (!bTapersY || HighestBounds.GetSize().Y
+						< LowestBounds.GetSize().Y - Tolerance))
+				{
+					++VisiblyTaperedBayCount;
+				}
+			}
+		}
+	}
+	TestTrue(TEXT("Matrix contains semantic non-box Bays"), NonBoxBayCount > 0);
+	TestTrue(TEXT("Planned assembly preserves RoofCourse roles"),
+		RoofCourseCount > 0);
+	TestEqual(TEXT("Independent envelope audit finds no violations"),
+		IndependentViolationCount, 0);
+	TestTrue(TEXT("At least one closed roof visibly tapers"),
+		VisiblyTaperedBayCount > 0);
 	return true;
 }
 

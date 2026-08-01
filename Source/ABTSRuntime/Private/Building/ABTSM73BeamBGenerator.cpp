@@ -120,8 +120,10 @@ namespace ABTSM73BeamB
 		}
 		if (Volume.Primitive != EABTSM73DAG5BV2Primitive::Box)
 		{
+			// Non-box Bays retain Beam-A's authoritative layered roof assembly.
+			// TwoLayerCrib is the matching semantic Motif; rectangular portal
+			// variants would erase the prism/pyramid silhouette.
 			OutDomain.Add(EABTSM73BeamBMotif::TwoLayerCrib);
-			OutDomain.Add(EABTSM73BeamBMotif::PostAndLintel);
 			return;
 		}
 
@@ -169,6 +171,7 @@ namespace ABTSM73BeamB
 			const int32 BayId,
 			const EABTSM73BeamBMotif Motif,
 			const EABTSM73BeamAFrameAxis Axis,
+			const EABTSM73BeamAMemberRole Role,
 			const FVector& Start,
 			const FVector& End)
 		{
@@ -198,6 +201,7 @@ namespace ABTSM73BeamB
 			Member.BayId = BayId;
 			Member.Motif = Motif;
 			Member.Axis = Axis;
+			Member.Role = Role;
 			Member.LocalStart = Start;
 			Member.LocalEnd = End;
 			return true;
@@ -283,6 +287,7 @@ namespace ABTSM73BeamB
 		const double U1)
 	{
 		return B.Add(P.BayId, P.Motif, C.PrimaryAxis,
+			EABTSM73BeamAMemberRole::PrimaryBeam,
 			C.P(U0, V, Z), C.P(U1, V, Z));
 	}
 
@@ -294,6 +299,7 @@ namespace ABTSM73BeamB
 		const double Z)
 	{
 		return B.Add(P.BayId, P.Motif, C.CrossAxis(),
+			EABTSM73BeamAMemberRole::SecondaryBeam,
 			C.P(U, C.V0, Z), C.P(U, C.V1, Z));
 	}
 
@@ -307,6 +313,7 @@ namespace ABTSM73BeamB
 		const double Z1)
 	{
 		return B.Add(P.BayId, P.Motif, EABTSM73BeamAFrameAxis::Z,
+			EABTSM73BeamAMemberRole::Post,
 			C.P(U, V, Z0), C.P(U, V, Z1));
 	}
 
@@ -508,17 +515,162 @@ namespace ABTSM73BeamB
 		return Placement.PlannedMemberCount > 0;
 	}
 
+	bool ImportSemanticRoofAssembly(
+		FGeometryBuilder& B,
+		const FABTSM73BeamAGenerationResult& BeamA,
+		const FABTSM73BeamABay& Bay,
+		const EABTSM73DAG5BV2Primitive Primitive,
+		FABTSM73BeamBPlacement& Placement)
+	{
+		TArray<FABTSM73BeamASemanticRoofMember> SourceMembers;
+		if (!ABTSM73BeamA::BuildSemanticRoofMembers(
+			B.Settings.BeamA, BeamA, Bay, Primitive, SourceMembers))
+		{
+			*B.Error = TEXT("BeamBSemanticRoofCompileFailed");
+			return false;
+		}
+		const int32 First = B.Result.PlannedMembers.Num();
+		for (const FABTSM73BeamASemanticRoofMember& Member : SourceMembers)
+		{
+			if (!B.Add(
+				Bay.BayId,
+				Placement.Motif,
+				Member.Axis,
+				Member.Role,
+				Member.LocalStart,
+				Member.LocalEnd))
+			{
+				return false;
+			}
+		}
+		Placement.FirstPlannedMemberIndex = First;
+		Placement.PlannedMemberCount =
+			B.Result.PlannedMembers.Num() - First;
+		return Placement.PlannedMemberCount > 0;
+	}
+
+	FBox ClosedMemberBounds(
+		const FABTSM73BeamAMember& Member,
+		const FABTSM73BeamAGenerationResult& Result,
+		const double CrossSectionCM)
+	{
+		if (!Result.Joints.IsValidIndex(Member.JointA)
+			|| !Result.Joints.IsValidIndex(Member.JointB))
+		{
+			return FBox(EForceInit::ForceInit);
+		}
+		const FVector A = Result.Joints[Member.JointA].LocalPosition;
+		const FVector B = Result.Joints[Member.JointB].LocalPosition;
+		const FVector Center = (A + B) * 0.5;
+		FVector Extent(CrossSectionCM * 0.5);
+		const int32 AxisIndex = static_cast<int32>(Member.Axis);
+		if (AxisIndex >= 0 && AxisIndex <= 2)
+		{
+			Extent[AxisIndex] = Member.LengthCM * 0.5;
+		}
+		return FBox(Center - Extent, Center + Extent);
+	}
+
+	int32 AuditSemanticRoofEnvelopes(
+		const FABTSM73BeamBPreviewSettings& Settings,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const FABTSM73BeamBGenerationResult& BeamB)
+	{
+		int32 ViolationCount = 0;
+		const double CrossSection = Settings.BeamA.BlockCrossSectionCM;
+		const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+		for (const FABTSM73BeamABay& Bay : BeamB.ClosedAssembly.Bays)
+		{
+			const FABTSM73DAG5BV2Volume* Volume =
+				FindVolume(Silhouette, Bay.SourceVolumeId);
+			if (Volume == nullptr
+				|| Volume->Primitive == EABTSM73DAG5BV2Primitive::Box)
+			{
+				continue;
+			}
+			double LowestZ = TNumericLimits<double>::Max();
+			double HighestZ = TNumericLimits<double>::Lowest();
+			TArray<TPair<double, FBox>> Courses;
+			const int32 CourseCount = FMath::Max(2, FMath::FloorToInt(
+				Bay.LocalBounds.GetSize().Z / CrossSection));
+			for (const FABTSM73BeamBPlannedMember& Member :
+				BeamB.PlannedMembers)
+			{
+				if (Member.BayId != Bay.BayId
+					|| Member.Role != EABTSM73BeamAMemberRole::RoofCourse)
+				{
+					continue;
+				}
+				const FVector Center =
+					(Member.LocalStart + Member.LocalEnd) * 0.5;
+				FVector Extent(CrossSection * 0.5);
+				Extent[static_cast<int32>(Member.Axis)] =
+					(Member.LocalEnd - Member.LocalStart).Size() * 0.5;
+				const FBox Actual(Center - Extent, Center + Extent);
+				const double CenterZ = Actual.GetCenter().Z;
+				LowestZ = FMath::Min(LowestZ, CenterZ);
+				HighestZ = FMath::Max(HighestZ, CenterZ);
+				Courses.Emplace(CenterZ, Actual);
+				const int32 CourseIndex = FMath::Clamp(FMath::RoundToInt(
+					(CenterZ - Bay.LocalBounds.Min.Z - CrossSection * 0.5)
+					/ CrossSection), 0, CourseCount - 1);
+				const FBox Expected = ABTSM73BeamA::SemanticRoofCourseBounds(
+					Bay.LocalBounds, Volume->Primitive,
+					static_cast<double>(CourseIndex) / CourseCount,
+					CrossSection).ExpandBy(Tolerance);
+				if (Actual.Min.X < Expected.Min.X
+					|| Actual.Max.X > Expected.Max.X
+					|| Actual.Min.Y < Expected.Min.Y
+					|| Actual.Max.Y > Expected.Max.Y)
+				{
+					++ViolationCount;
+				}
+			}
+			FBox LowestBounds(EForceInit::ForceInit);
+			FBox HighestBounds(EForceInit::ForceInit);
+			for (const TPair<double, FBox>& Course : Courses)
+			{
+				if (FMath::IsNearlyEqual(Course.Key, LowestZ, Tolerance))
+				{
+					LowestBounds += Course.Value;
+				}
+				if (FMath::IsNearlyEqual(Course.Key, HighestZ, Tolerance))
+				{
+					HighestBounds += Course.Value;
+				}
+			}
+			const bool bTapersX =
+				Volume->Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+				|| Volume->Primitive
+					== EABTSM73DAG5BV2Primitive::TriangularPrismX;
+			const bool bTapersY =
+				Volume->Primitive == EABTSM73DAG5BV2Primitive::Pyramid
+				|| Volume->Primitive
+					== EABTSM73DAG5BV2Primitive::TriangularPrismY;
+			if (!LowestBounds.IsValid || !HighestBounds.IsValid
+				|| HighestZ <= LowestZ + Tolerance
+				|| (bTapersX && HighestBounds.GetSize().X
+					>= LowestBounds.GetSize().X - Tolerance)
+				|| (bTapersY && HighestBounds.GetSize().Y
+					>= LowestBounds.GetSize().Y - Tolerance))
+			{
+				++ViolationCount;
+			}
+		}
+		return ViolationCount;
+	}
+
 	bool CompileAndCloseAssembly(
 		const FABTSM73BeamBPreviewSettings& Settings,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
 		const FABTSM73BeamAGenerationResult& BeamA,
 		FABTSM73BeamBGenerationResult& InOutResult,
 		FString& OutError)
 	{
 		FABTSM73BeamAGenerationResult& Closed = InOutResult.ClosedAssembly;
-		Closed = BeamA;
-		Closed.Joints.Reset();
-		Closed.Members.Reset();
-		Closed.BearingContacts.Reset();
+		Closed = FABTSM73BeamAGenerationResult();
+		Closed.Bays = BeamA.Bays;
+		Closed.Assemblies = BeamA.Assemblies;
 		FABTSM73BeamAPreviewSummary FreshSummary;
 		FreshSummary.SourceVolumeCount = BeamA.Summary.SourceVolumeCount;
 		FreshSummary.BayCount = BeamA.Bays.Num();
@@ -532,12 +684,93 @@ namespace ABTSM73BeamB
 			Assembly.MemberIds.Reset();
 			AssemblyByBay.Add(Assembly.BayId, Assembly.AssemblyId);
 		}
-		TMap<int32, EABTSM73BeamAFrameAxis> OrientationByBay;
-		for (const FABTSM73BeamBPlacement& Placement : InOutResult.Placements)
+		TSet<int32> KeptSemanticMembers;
+		for (const FABTSM73BeamAAssembly& Assembly : BeamA.Assemblies)
 		{
-			OrientationByBay.Add(Placement.BayId, Placement.Orientation);
+			if (!BeamA.Bays.IsValidIndex(Assembly.BayId))
+			{
+				continue;
+			}
+			const FABTSM73DAG5BV2Volume* Volume = FindVolume(
+				Silhouette, BeamA.Bays[Assembly.BayId].SourceVolumeId);
+			if (Volume != nullptr
+				&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box)
+			{
+				for (const int32 MemberId : Assembly.MemberIds)
+				{
+					KeptSemanticMembers.Add(MemberId);
+				}
+			}
 		}
-
+		bool bAddedAncestor = true;
+		while (bAddedAncestor)
+		{
+			bAddedAncestor = false;
+			for (const FABTSM73BeamABearingContact& Contact :
+				BeamA.BearingContacts)
+			{
+				if (KeptSemanticMembers.Contains(Contact.UpperMemberId)
+					&& !KeptSemanticMembers.Contains(Contact.LowerMemberId))
+				{
+					KeptSemanticMembers.Add(Contact.LowerMemberId);
+					bAddedAncestor = true;
+				}
+			}
+		}
+		TMap<int32, TArray<int32>> OwnersByMember;
+		for (const FABTSM73BeamAAssembly& Assembly : BeamA.Assemblies)
+		{
+			for (const int32 MemberId : Assembly.MemberIds)
+			{
+				if (KeptSemanticMembers.Contains(MemberId))
+				{
+					OwnersByMember.FindOrAdd(MemberId).AddUnique(
+						Assembly.AssemblyId);
+				}
+			}
+		}
+		TArray<int32> KeptMemberIds = KeptSemanticMembers.Array();
+		KeptMemberIds.Sort();
+		for (const int32 SourceMemberId : KeptMemberIds)
+		{
+			if (!BeamA.Members.IsValidIndex(SourceMemberId)
+				|| !OwnersByMember.Contains(SourceMemberId))
+			{
+				continue;
+			}
+			const FABTSM73BeamAMember& Source = BeamA.Members[SourceMemberId];
+			if (!BeamA.Joints.IsValidIndex(Source.JointA)
+				|| !BeamA.Joints.IsValidIndex(Source.JointB))
+			{
+				OutError = TEXT("BeamBSemanticSourceJointMissing");
+				return false;
+			}
+			const int32 JointA = Closed.Joints.Num();
+			FABTSM73BeamAJoint A = BeamA.Joints[Source.JointA];
+			A.JointId = JointA;
+			Closed.Joints.Add(A);
+			const int32 JointB = Closed.Joints.Num();
+			FABTSM73BeamAJoint B = BeamA.Joints[Source.JointB];
+			B.JointId = JointB;
+			Closed.Joints.Add(B);
+			FABTSM73BeamAMember Member = Source;
+			Member.MemberId = Closed.Members.Num();
+			Member.JointA = JointA;
+			Member.JointB = JointB;
+			Closed.Members.Add(Member);
+			for (const int32 OwnerId : OwnersByMember.FindChecked(SourceMemberId))
+			{
+				if (!Closed.Assemblies.IsValidIndex(OwnerId))
+				{
+					OutError = TEXT("BeamBSemanticAssemblyIdentityMissing");
+					return false;
+				}
+				FABTSM73BeamAAssembly& Owner = Closed.Assemblies[OwnerId];
+				Owner.JointIds.AddUnique(JointA);
+				Owner.JointIds.AddUnique(JointB);
+				Owner.MemberIds.AddUnique(Member.MemberId);
+			}
+		}
 		for (const FABTSM73BeamBPlannedMember& Planned :
 			InOutResult.PlannedMembers)
 		{
@@ -552,6 +785,18 @@ namespace ABTSM73BeamB
 			{
 				OutError = TEXT("BeamBAssemblyIdentityMissing");
 				return false;
+			}
+			if (!Closed.Bays.IsValidIndex(Planned.BayId))
+			{
+				OutError = TEXT("BeamBInvalidBayIdentity");
+				return false;
+			}
+			const FABTSM73DAG5BV2Volume* Volume = FindVolume(
+				Silhouette, Closed.Bays[Planned.BayId].SourceVolumeId);
+			if (Volume != nullptr
+				&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box)
+			{
+				continue;
 			}
 			const float Length = static_cast<float>(
 				(Planned.LocalEnd - Planned.LocalStart).Size());
@@ -591,13 +836,7 @@ namespace ABTSM73BeamB
 			Member.JointA = JointA;
 			Member.JointB = JointB;
 			Member.Axis = Planned.Axis;
-			const EABTSM73BeamAFrameAxis* Orientation =
-				OrientationByBay.Find(Planned.BayId);
-			Member.Role = Planned.Axis == EABTSM73BeamAFrameAxis::Z
-				? EABTSM73BeamAMemberRole::Post
-				: Orientation != nullptr && Planned.Axis == *Orientation
-					? EABTSM73BeamAMemberRole::PrimaryBeam
-					: EABTSM73BeamAMemberRole::SecondaryBeam;
+			Member.Role = Planned.Role;
 			Member.LengthCM = Length;
 			FABTSM73BeamAAssembly& Assembly = Closed.Assemblies[*AssemblyId];
 			Assembly.JointIds.Add(JointA);
@@ -655,6 +894,15 @@ namespace ABTSM73BeamB
 				*OutError);
 			return false;
 		}
+		InOutResult.Summary.SemanticEnvelopeViolationCount =
+			AuditSemanticRoofEnvelopes(Settings, Silhouette, InOutResult);
+		if (InOutResult.Summary.SemanticEnvelopeViolationCount > 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamBSemanticEnvelopeViolation:Count=%d"),
+				InOutResult.Summary.SemanticEnvelopeViolationCount);
+			return false;
+		}
 		return true;
 	}
 
@@ -681,9 +929,10 @@ namespace ABTSM73BeamB
 		}
 		for (const FABTSM73BeamBPlannedMember& M : Result.PlannedMembers)
 		{
-			Text += FString::Printf(TEXT("M%d:%d:%d:%d:%.2f,%.2f,%.2f:%.2f,%.2f,%.2f|"),
+			Text += FString::Printf(TEXT("M%d:%d:%d:%d:R%d:%.2f,%.2f,%.2f:%.2f,%.2f,%.2f|"),
 				M.PlannedMemberId, M.BayId, static_cast<int32>(M.Motif),
-				static_cast<int32>(M.Axis), M.LocalStart.X, M.LocalStart.Y,
+				static_cast<int32>(M.Axis), static_cast<int32>(M.Role),
+				M.LocalStart.X, M.LocalStart.Y,
 				M.LocalStart.Z, M.LocalEnd.X, M.LocalEnd.Y, M.LocalEnd.Z);
 		}
 		return Text;
@@ -703,8 +952,9 @@ namespace ABTSM73BeamB
 			const FVector& A = Closed.Joints[Member.JointA].LocalPosition;
 			const FVector& B = Closed.Joints[Member.JointB].LocalPosition;
 			Text += FString::Printf(
-				TEXT("M%d:%d:%.2f,%.2f,%.2f:%.2f,%.2f,%.2f|"),
+				TEXT("M%d:%d:R%d:%.2f,%.2f,%.2f:%.2f,%.2f,%.2f|"),
 				Member.MemberId, static_cast<int32>(Member.Axis),
+				static_cast<int32>(Member.Role),
 				A.X, A.Y, A.Z, B.X, B.Y, B.Z);
 		}
 		for (const FABTSM73BeamABearingContact& Contact :
@@ -911,8 +1161,23 @@ bool FABTSM73BeamBGenerator::Generate(
 	FGeometryBuilder Builder{Settings, OutResult, &GeometryError};
 	for (FABTSM73BeamBPlacement& Placement : OutResult.Placements)
 	{
-		if (!BeamA.Bays.IsValidIndex(Placement.BayId)
-			|| !BuildMotif(Builder, BeamA.Bays[Placement.BayId], Placement))
+		if (!BeamA.Bays.IsValidIndex(Placement.BayId))
+		{
+			return Reject(TEXT("BeamBInvalidBayIdentity"));
+		}
+		const FABTSM73BeamABay& Bay = BeamA.Bays[Placement.BayId];
+		const FABTSM73DAG5BV2Volume* Volume =
+			FindVolume(Silhouette, Bay.SourceVolumeId);
+		if (Volume == nullptr)
+		{
+			return Reject(TEXT("BeamBSourceVolumeMissing"));
+		}
+		const bool bExpanded =
+			Volume->Primitive == EABTSM73DAG5BV2Primitive::Box
+				? BuildMotif(Builder, Bay, Placement)
+				: ImportSemanticRoofAssembly(
+					Builder, BeamA, Bay, Volume->Primitive, Placement);
+		if (!bExpanded)
 		{
 			return Reject(GeometryError.IsEmpty()
 				? TEXT("BeamBMotifExpansionFailed") : GeometryError);
@@ -945,7 +1210,19 @@ bool FABTSM73BeamBGenerator::Generate(
 			++OutResult.Summary.OutOfBoundsMemberCount;
 			continue;
 		}
-		const FBox Expanded = BeamA.Bays[Member.BayId].LocalBounds
+		const FABTSM73BeamABay& Bay = BeamA.Bays[Member.BayId];
+		const FABTSM73DAG5BV2Volume* Volume =
+			FindVolume(Silhouette, Bay.SourceVolumeId);
+		if (Volume != nullptr
+			&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box
+			&& Member.Role != EABTSM73BeamAMemberRole::RoofCourse)
+		{
+			// Beam-A global closure may assign a roof Assembly a supporting post
+			// that intentionally reaches into the supporting Bay below. Only the
+			// imported roof courses themselves belong to the semantic envelope.
+			continue;
+		}
+		const FBox Expanded = Bay.LocalBounds
 			.ExpandBy(BoundsTolerance);
 		if (!Expanded.IsInsideOrOn(Member.LocalStart)
 			|| !Expanded.IsInsideOrOn(Member.LocalEnd))
@@ -968,7 +1245,7 @@ bool FABTSM73BeamBGenerator::Generate(
 	}
 	FString ClosureError;
 	if (!CompileAndCloseAssembly(
-		Settings, BeamA, OutResult, ClosureError))
+		Settings, Silhouette, BeamA, OutResult, ClosureError))
 	{
 		UE_LOG(
 			LogABTSRuntime,
