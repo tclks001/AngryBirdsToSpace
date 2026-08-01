@@ -1,0 +1,185 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Building/ABTSM73BeamAPreviewTypes.h"
+#include "ABTSM73BeamBPreviewTypes.generated.h"
+
+UENUM(BlueprintType)
+enum class EABTSM73BeamBMotif : uint8
+{
+	PostAndLintel,
+	PortalFrame,
+	CrossBeam,
+	TwoLayerCrib,
+	TransferFrame,
+	CantileverBay,
+	BracedBay,
+	BridgeBay
+};
+
+UENUM(BlueprintType)
+enum class EABTSM73BeamBGrammarRule : uint8
+{
+	BeamToGrillage,
+	AlternateCribLayer,
+	AddTransferTier,
+	AddCantileverRoot,
+	TriangulateBay,
+	RefinePortal
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM73BeamBPreviewSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Beam-A")
+	FABTSM73BeamAPreviewSettings BeamA;
+
+	/** Number of bounded graph-grammar refinement rounds after WFC collapse. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif Grammar",
+		meta = (ClampMin = "1", ClampMax = "6"))
+	int32 GrammarDepth = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
+	bool bRequireMotifVariety = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
+	bool bAllowCantilever = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
+	bool bAllowBracedBay = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC|Budget",
+		meta = (ClampMin = "32", ClampMax = "262144"))
+	int32 MaxWFCPropagationOperations = 32768;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC|Budget",
+		meta = (ClampMin = "0", ClampMax = "8192"))
+	int32 MaxWFCBacktrackSteps = 512;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif Grammar|Budget",
+		meta = (ClampMin = "8", ClampMax = "32768"))
+	int32 MaxGrammarStepCount = 4096;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif Grammar|Budget",
+		meta = (ClampMin = "32", ClampMax = "65536"))
+	int32 MaxPlannedMemberCount = 16384;
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM73BeamBPlacement
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int32 BayId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamBMotif Motif = EABTSM73BeamBMotif::PostAndLintel;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamAFrameAxis Orientation = EABTSM73BeamAFrameAxis::X;
+
+	/** X-/X+/Y-/Y+/Lower/Upper bit mask used by local WFC propagation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	uint8 PortMask = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	int32 FirstPlannedMemberIndex = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	int32 PlannedMemberCount = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM73BeamBPlannedMember
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int32 PlannedMemberId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int32 BayId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamBMotif Motif = EABTSM73BeamBMotif::PostAndLintel;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	FVector LocalStart = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	FVector LocalEnd = FVector::ZeroVector;
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM73BeamBGrammarStep
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int32 StepId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	int32 BayId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	EABTSM73BeamBGrammarRule Rule = EABTSM73BeamBGrammarRule::RefinePortal;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Topology")
+	int32 AddedMemberCount = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FABTSM73BeamBPreviewSummary
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	bool bAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 BayCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 PlacementCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 DistinctMotifCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 WFCPropagationOperationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 WFCBacktrackStepCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 GrammarStepCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 PlannedMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 PortViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 OutOfBoundsMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int64 MotifWFCHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int64 GraphGrammarHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int64 ResultHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	FString RejectReason;
+};

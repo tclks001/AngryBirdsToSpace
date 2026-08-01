@@ -3,7 +3,7 @@
 > 文档性质：M7 功能工作树的导航与阶段状态权威页。具体算法、参数和验收合同仍以链接的子设计稿为准。
 >
 > 当前路线：以已验收的 DAG5-B v2 语义轮廓为上游，转入长条梁式结构编译；当前阶段为
-> [M7.3-Beam-A](M73BeamAStructuralIRPreviewDesign.md)。
+> [M7.3-Beam-B](M73BeamBMotifWFCAndGraphGrammarDesign.md)。
 >
 > 生产现状：球面 TaskGraph 普通建筑仍使用已稳定的 DAG2.3 路径。Beam 路线在完成
 > Beam-D 真实 Brick/Load DAG/Chaos 闭环前不得替换生产默认值。
@@ -20,7 +20,7 @@ M7 材料、碰撞与破坏服务
    ├─ DAG5-B v2 Shape Grammar + WFC 语义轮廓（已验收的编辑器原型）
    └─ Beam 演进
       ├─ Beam-A：Bay / Joint / Member / Assembly IR 与线框预览
-      ├─ Beam-B：Bay 内 Motif WFC 与结构家族
+      ├─ Beam-B：Bay 内 Motif WFC 与结构家族（当前）
       ├─ Beam-C：受限扩展、构件选择与 Load DAG 提取
       └─ Beam-D：真实 Brick、弱点、Chaos 与生产候选认证
 ```
@@ -86,8 +86,8 @@ Graph 是无向/混合方向的几何装配图；Load DAG 是之后按重力和�
 | 阶段 | 目标 | 当前状态 |
 | --- | --- | --- |
 | Beam 调研 | 明确轮廓复杂度与结构复杂度分层，以及 Assembly Graph / Load DAG 双图 | [调研完成](M73BeamBlockStructuralGenerationResearch.md) |
-| Beam-A v2 | 将 Volume 编译为 Bay，再生成固定截面、可变长度的 XYZ 积木及 Bearing Contact | 专项与完整回归完成，待[用户编辑器读形验收](M73BeamAStructuralIRPreviewDesign.md#7-用户编辑器验收) |
-| Beam-B | 在有限 Bay 内用 Motif WFC 选择门架、交叉梁、桥、悬挑等结构家族 | 未开始 |
+| Beam-A v2 | 将 Volume 编译为 Bay，再生成固定截面、可变长度的 XYZ 积木及 Bearing Contact | [已完成并通过用户编辑器读形验收](M73BeamAStructuralIRPreviewDesign.md) |
+| Beam-B | 在有限 Bay 内用 Motif WFC 选择门架、交叉梁、桥、悬挑等结构家族 | [C++ 首版与自动化完成，待编辑器读形](M73BeamBMotifWFCAndGraphGrammarDesign.md) |
 | Beam-C | 对图做预算内展开，选择离散构件，并提取/验证 Load DAG | 未开始 |
 | Beam-D | 编译真实 Brick，联合弱点、真实接触、Chaos、TaskGraph 与六栋建筑候选 | 未开始 |
 
@@ -99,10 +99,10 @@ Beam-A v2 的完成不表示建筑已经物理可站立。它证明复杂语义�
 ```text
 DAG5-B v2 Shape Grammar + graph WFC
   -> semantic Volumes (implemented)
-  -> Beam-A Bay decomposition (current)
-  -> Joint / Member / Assembly structural IR (current)
-  -> editor-only colored frame preview (current)
-  -> Beam-B motif selection
+  -> Beam-A Bay decomposition (implemented)
+  -> Joint / Member / Assembly structural IR (implemented)
+  -> editor-only stacked-block preview (implemented)
+  -> Beam-B motif selection (current)
   -> Beam-C bounded expansion + Load DAG
   -> Beam-D Brick + weak point + Chaos + production routing
 ```
