@@ -546,9 +546,9 @@ namespace
 			|| Out.MaxPitch > Layout.Launch.MaximumPitchDegrees
 			|| Out.MinPower < Layout.Launch.MinimumPower
 			|| Out.MaxPower > Layout.Launch.MaximumPower
-			|| Out.MinYaw >= Out.MaxYaw
-			|| Out.MinPitch >= Out.MaxPitch
-			|| Out.MinPower >= Out.MaxPower)
+			|| Out.MinYaw > Out.MaxYaw
+			|| Out.MinPitch > Out.MaxPitch
+			|| Out.MinPower > Out.MaxPower)
 		{
 			Failure = "GridBoundsOutsideLaunchDomain";
 			return false;
