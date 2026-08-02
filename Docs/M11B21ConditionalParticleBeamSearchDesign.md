@@ -305,6 +305,11 @@ Rank 3–10 冻结完整布局与 Candidate 身份，PIE 启动时只做结构�
 Candidate Source Hash 校验，不重新执行粒子束搜索。修改 Rank 后必须停止并重启
 PIE，因为 GameMode 只在终局系统初始化时读取该 CVar。
 
+> 放大行星尺度后的逐星微调候选没有占用新的 Editor Rank。它以 CLI 诊断 Rank 11
+> 为数值基线，得到 Variant Source `0xad7ccfe862d78a3f`、ScreenAim
+> `5000→616→137→21→6` 和局部四层单连通结果；完整参数与候选边界见
+> [M11-B v2.2 认证稿的放大尺度逐星微调小节](M11BFinaleLayoutCertificationDesign.md#放大尺度逐星微调候选未绑定2026-08-02)。
+
 ## 9. 本轮可复现与自动化证据
 
 - Production Core / Search Source SHA-256：
