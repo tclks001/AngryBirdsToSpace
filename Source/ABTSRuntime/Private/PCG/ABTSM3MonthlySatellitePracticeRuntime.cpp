@@ -249,6 +249,53 @@ bool HasPawnBlockingCollision(const AActor& Actor)
 	}
 	return false;
 }
+
+int32 DisableVisibilityInteraction(AActor& Actor)
+{
+	int32 DisabledComponents = 0;
+	TInlineComponentArray<UPrimitiveComponent*> Components;
+	Actor.GetComponents(Components);
+	for (UPrimitiveComponent* Component : Components)
+	{
+		if (IsValid(Component)
+			&& Component->GetCollisionResponseToChannel(ECC_Visibility)
+				== ECR_Block)
+		{
+			Component->SetCollisionResponseToChannel(
+				ECC_Visibility,
+				ECR_Ignore);
+			++DisabledComponents;
+		}
+	}
+	return DisabledComponents;
+}
+
+bool HasExclusivePouchInteractionTarget(
+	const AABTSM51SlingshotCord& Cord,
+	int32& OutVisibilityTargets,
+	int32& OutPouchTargets)
+{
+	OutVisibilityTargets = 0;
+	OutPouchTargets = 0;
+	TInlineComponentArray<UPrimitiveComponent*> Components;
+	Cord.GetComponents(Components);
+	for (const UPrimitiveComponent* Component : Components)
+	{
+		if (!IsValid(Component)
+			|| Component->GetCollisionEnabled() == ECollisionEnabled::NoCollision
+			|| Component->GetCollisionResponseToChannel(ECC_Visibility)
+				!= ECR_Block)
+		{
+			continue;
+		}
+		++OutVisibilityTargets;
+		if (Component->GetFName() == FName(TEXT("PouchVisual")))
+		{
+			++OutPouchTargets;
+		}
+	}
+	return OutVisibilityTargets == 1 && OutPouchTargets == 1;
+}
 }
 
 AABTSM3MonthlySatellitePracticeRuntime::
@@ -359,7 +406,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 	RefreshReadyState();
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticeInteraction=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
 		bRuntimeReady ? 1 : 0,
 		RuntimeSnapshot.SourceRouteCandidateId,
 		SupersededSatellites.Num(),
@@ -374,6 +421,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		bProductionLaunchProfileBound ? 1 : 0,
 		bTrajectoryCertified ? 1 : 0,
 		bPracticeSlingshotReady ? 1 : 0,
+		bPracticePouchInteractionReady ? 1 : 0,
 		GetRuntimePracticeCord()
 			? *GetRuntimePracticeCord()->GetRestPouchTransform().GetLocation().ToCompactString()
 			: TEXT("None"),
@@ -749,6 +797,37 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnPracticeSlingshot()
 		EABTSSlingshotTier::Reinforced);
 	CordStakeA->SetHasCord(true);
 	CordStakeB->SetHasCord(true);
+	// This slingshot is delivered fully assembled. Its reinforced stake meshes
+	// can overlap the pouch in cursor space and otherwise intercept Visibility
+	// traces as an inert "select stake for held cord" interaction. Keep the
+	// installed stakes visible, but make the pouch the only click authority.
+	const int32 DisabledStakeTargets =
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			DisableVisibilityInteraction(*CordStakeA)
+		+ ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			DisableVisibilityInteraction(*CordStakeB);
+	int32 CordVisibilityTargets = 0;
+	int32 PouchVisibilityTargets = 0;
+	bPracticePouchInteractionReady =
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			HasExclusivePouchInteractionTarget(
+				*RuntimePracticeCord,
+				CordVisibilityTargets,
+				PouchVisibilityTargets);
+	UE_LOG(LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M3R5.1][RuntimePractice][Interaction] Ready=%d DisabledStakeTargets=%d CordVisibilityTargets=%d PouchVisibilityTargets=%d"),
+		bPracticePouchInteractionReady ? 1 : 0,
+		DisabledStakeTargets,
+		CordVisibilityTargets,
+		PouchVisibilityTargets);
+	if (!bPracticePouchInteractionReady)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SlingshotRejected Reason=PouchInteractionContract CordVisibilityTargets=%d PouchVisibilityTargets=%d"),
+			CordVisibilityTargets,
+			PouchVisibilityTargets);
+	}
 
 	const FTransform ActualLaunchTransform =
 		RuntimePracticeCord->GetRestPouchTransform();
@@ -796,7 +875,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnPracticeSlingshot()
 			StakeBGroundErrorCM,
 			ForwardDot);
 	}
-	return bPracticeSlingshotReady;
+	return bPracticeSlingshotReady && bPracticePouchInteractionReady;
 }
 
 bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
@@ -1072,7 +1151,8 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bM6TargetBound
 		&& bProductionLaunchProfileBound
 		&& bTrajectoryCertified
-		&& bPracticeSlingshotReady;
+		&& bPracticeSlingshotReady
+		&& bPracticePouchInteractionReady;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::Tick(const float DeltaSeconds)
@@ -1170,6 +1250,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 		RuntimePracticeStakeB->Destroy();
 	}
 	RuntimePracticeStakeB = nullptr;
+	bPracticePouchInteractionReady = false;
 	if (IsValid(RuntimeSatellite)
 		&& !RuntimeSatellite->IsActorBeingDestroyed())
 	{

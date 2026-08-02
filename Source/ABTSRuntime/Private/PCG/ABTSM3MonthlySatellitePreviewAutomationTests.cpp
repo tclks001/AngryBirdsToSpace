@@ -4,6 +4,7 @@
 
 #include "Calibration/ABTSCalibrationTargetProxy.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
@@ -322,6 +323,8 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsTrajectoryCertified());
 	TestTrue(TEXT("A real reinforced slingshot is grounded from the candidate cells"),
 		Runtime->IsPracticeSlingshotReady());
+	TestTrue(TEXT("The assembled practice slingshot exposes only its pouch to cursor interaction"),
+		Runtime->IsPracticePouchInteractionReady());
 	AABTSM51SlingshotStake* PracticeStakeA =
 		Runtime->GetRuntimePracticeStakeA();
 	AABTSM51SlingshotStake* PracticeStakeB =
@@ -336,6 +339,25 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		TestEqual(TEXT("Cell-grounded practice cord is reinforced"),
 			PracticeCord->GetSlingshotTier(),
 			EABTSSlingshotTier::Reinforced);
+	}
+	for (const AABTSM51SlingshotStake* PracticeStake :
+		{ PracticeStakeA, PracticeStakeB })
+	{
+		if (PracticeStake == nullptr)
+		{
+			continue;
+		}
+		TInlineComponentArray<UPrimitiveComponent*> StakeComponents;
+		PracticeStake->GetComponents(StakeComponents);
+		for (const UPrimitiveComponent* Component : StakeComponents)
+		{
+			if (Component != nullptr)
+			{
+				TestTrue(TEXT("Preassembled practice stakes cannot occlude the pouch click"),
+					Component->GetCollisionResponseToChannel(ECC_Visibility)
+						!= ECR_Block);
+			}
+		}
 	}
 
 	const FABTSM3MonthlySatelliteRuntimeSnapshot Snapshot =

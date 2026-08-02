@@ -166,6 +166,10 @@ public:
 	bool IsM6TargetBound() const { return bM6TargetBound; }
 	bool IsTrajectoryCertified() const { return bTrajectoryCertified; }
 	bool IsPracticeSlingshotReady() const { return bPracticeSlingshotReady; }
+	bool IsPracticePouchInteractionReady() const
+	{
+		return bPracticePouchInteractionReady;
+	}
 	bool IsSatelliteGravityEnabled() const;
 	int32 GetSatelliteGravityOverride() const { return LastGravityOverride; }
 	AABTSM9Satellite* GetRuntimeSatellite() const { return RuntimeSatellite.Get(); }
@@ -223,5 +227,6 @@ private:
 	bool bTrajectoryCertified = false;
 	bool bTrajectoryCertificationAttempted = false;
 	bool bPracticeSlingshotReady = false;
+	bool bPracticePouchInteractionReady = false;
 	float GravityEvidenceLogRemainingSeconds = 0.0f;
 };
