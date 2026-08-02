@@ -300,15 +300,16 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
 | `abts.M11.CandidateRank 8` | 候选 353 的 F3 扩大微调 `0x617687274ed0c29a`；严格 half-cell 为 `27713→20976→1538→480`，F4 单连通，仍未完成完整认证 |
 | `abts.M11.CandidateRank 9` | Rank 8 四天体刚性整体远移 100 cm 的 `0x166f0aa067d54328`；超细扫描把 F1 Power 下界从 `0.745000` 提至 `0.746250`，精细闭包 `28040→21163→1564→498` 且 F4 单连通，仍未完成完整认证 |
 | `abts.M11.CandidateRank 10` | Rank 8 四天体分别径向外移 5900 cm，并对行星②、行星③和 UFO 做不超过约 1.3° 的角向修复；Source `0x2b06db2cf348d75f`，满功率 ScreenAim `5000→392→115→27→15`，局部三维闭包四层单连通，仍未完成完整认证 |
+| `abts.M11.CandidateRank 11` | Rank 10 的 5500 cm 碰撞尺度逐星重构；Source `0xcb23499fc6f7c9d3`，满功率 ScreenAim `5000→616→137→21→6`，局部满功率 `1025→531→258→84→30` 且四层单连通，仍未完成完整认证 |
 
-Rank 3–10 冻结完整布局与 Candidate 身份，PIE 启动时只做结构和
+Rank 3–11 冻结完整布局与 Candidate 身份，PIE 启动时只做结构和
 Candidate Source Hash 校验，不重新执行粒子束搜索。修改 Rank 后必须停止并重启
 PIE，因为 GameMode 只在终局系统初始化时读取该 CVar。
 
-> 放大行星尺度后的逐星微调候选没有占用新的 Editor Rank。它以 CLI 诊断 Rank 11
-> 为数值基线，得到 Variant Source `0xad7ccfe862d78a3f`、ScreenAim
-> `5000→616→137→21→6` 和局部四层单连通结果；完整参数与候选边界见
-> [M11-B v2.2 认证稿的放大尺度逐星微调小节](M11BFinaleLayoutCertificationDesign.md#放大尺度逐星微调候选未绑定2026-08-02)。
+> 放大行星尺度后的逐星微调候选现占用 Editor Rank 11。其冻结 Source 为
+> `0xcb23499fc6f7c9d3`；直接等比放大但拓扑不合格的旧基线后移为只供 CLI 取证的
+> Rank 12，不进入 PIE。完整参数与候选边界见
+> [M11-B v2.2 认证稿的放大尺度逐星微调小节](M11BFinaleLayoutCertificationDesign.md#放大尺度逐星微调候选editor-only-rank-112026-08-02)。
 
 ## 9. 本轮可复现与自动化证据
 

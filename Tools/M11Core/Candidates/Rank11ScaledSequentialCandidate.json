@@ -1,9 +1,15 @@
 {
   "schema": "abts.m11b.v2_2.scaled_sequential_candidate.v1",
-  "status": "candidate_not_certified_not_pie_bound",
-  "baseDiagnosticRank": 11,
+  "status": "candidate_not_certified_editor_pie_bound",
+  "editorCandidateRank": 11,
+  "baseScaleExperimentDiagnosticRank": 12,
   "baseCandidateSourceHash": "0xf134ae0ff2c93467",
-  "variantSourceHash": "0xad7ccfe862d78a3f",
+  "preNominalVariantSourceHash": "0xad7ccfe862d78a3f",
+  "candidateSourceHash": "0xcb23499fc6f7c9d3",
+  "globalWorkIndex": 25,
+  "nominalRequestHash": "0x4f0e3c66a1a0a737",
+  "nominalResultHash": "0x505f3312ac8ae07f",
+  "scoreHash": "0xd71f1166493c07aa",
   "construction": {
     "method": "sequential_radial_then_target_then_assist3_target",
     "celestialRadialDeltaCM": [-8500.0, -8500.0, 4000.0, 4000.0],
@@ -26,6 +32,7 @@
     "conditionalRatios": [0.5180487804878049, 0.4858757062146893, 0.32558139534883723, 0.35714285714285715],
     "componentCounts": [1, 1, 1, 1],
     "largestComponentSizes": [531, 258, 84, 30],
+    "nominalF4": true,
     "representativeF4Input": [-1.75, 26.25, 1.0],
     "representativeFlightTimeSeconds": 30.68073174661566,
     "representativeAssistDurationsSeconds": [6.434019398876542, 5.989058311286557, 5.0716377868737474],
@@ -51,6 +58,6 @@
     "screenAimRatioGate": "passed_0.08_to_0.55",
     "maximumPowerLocalConnectivity": "passed_single_component_each_prefix",
     "fullInputDomainCertification": "not_run",
-    "editorPieBinding": "not_bound"
+    "editorPieBinding": "abts.M11.CandidateRank_11"
   }
 }

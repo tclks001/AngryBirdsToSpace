@@ -352,6 +352,7 @@ bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
 		{8, 0x617687274ed0c29aull, 0xaac8ba98079011fdull},
 		{9, 0x166f0aa067d54328ull, 0x22675cdfb00406d5ull},
 		{10, 0x2b06db2cf348d75full, 0x99012cedf3d01c06ull},
+		{11, 0xcb23499fc6f7c9d3ull, 0x505f3312ac8ae07full},
 	};
 
 	for (const FFrozenExpectation& Expected : Expectations)

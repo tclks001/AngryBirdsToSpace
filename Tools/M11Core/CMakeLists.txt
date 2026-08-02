@@ -532,14 +532,27 @@ if(BUILD_TESTING)
 	add_test(NAME M11V22.Rank10AssistScaleExperiment
 		COMMAND ABTSM11V22CertificationCLI
 			screen-aim
-			--rank 11
+			--rank 12
 			--output
-			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank11CTest"
+			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank12ScaleExperimentCTest"
 			--screen-aim-samples 5000)
 	set_tests_properties(M11V22.Rank10AssistScaleExperiment PROPERTIES
 		PASS_REGULAR_EXPRESSION
 			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=549,124,14,6"
 		LABELS "M11V22;Portable;Determinism;RejectedCandidateEvidence"
+		TIMEOUT 180)
+
+	add_test(NAME M11V22.Rank11ScaledSequentialCandidate
+		COMMAND ABTSM11V22CertificationCLI
+			screen-aim
+			--rank 11
+			--output
+			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank11CandidateCTest"
+			--screen-aim-samples 5000)
+	set_tests_properties(M11V22.Rank11ScaledSequentialCandidate PROPERTIES
+		PASS_REGULAR_EXPRESSION
+			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=616,137,21,6"
+		LABELS "M11V22;Portable;Determinism;EditorCandidateEvidence"
 		TIMEOUT 180)
 endif()
 

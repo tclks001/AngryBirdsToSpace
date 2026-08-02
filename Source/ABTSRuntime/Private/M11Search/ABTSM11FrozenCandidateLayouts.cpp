@@ -176,7 +176,37 @@ namespace ABTS::M11Search
 				ScaleSquared;
 		}
 
-		constexpr std::array<FrozenCandidateIdentity, 9> Identities = {{
+		void ApplyRank11ScaledSequentialCandidate(CandidateLayout& Layout)
+		{
+			constexpr std::array<double, 3> AssistRadialDeltaCM = {
+				-8500.0, -8500.0, 4000.0};
+			const M11Core::Vec3d Pouch = Layout.Launch.PouchLocalPositionCM;
+			for (std::size_t AssistIndex = 0;
+				AssistIndex < AssistRadialDeltaCM.size();
+				++AssistIndex)
+			{
+				M11Core::Vec3d& Center =
+					Layout.Scenario.Bodies[AssistIndex + 1].CenterCM;
+				Center += (Center - Pouch).GetSafeNormal()
+					* AssistRadialDeltaCM[AssistIndex];
+			}
+
+			M11Core::TargetSpec& Target = Layout.Scenario.Target;
+			const M11Core::Vec3d TargetRadialOffset =
+				(Target.CenterCM - Pouch).GetSafeNormal() * 4000.0;
+			Target.CenterCM += TargetRadialOffset;
+			Target.GeometricContactCenterCM += TargetRadialOffset;
+
+			Layout.Scenario.Bodies[3].CenterCM +=
+				M11Core::Vec3d(2250.0, 5000.0, -8280.0);
+			const M11Core::Vec3d TargetOffset(
+				2527.902, 5469.510, -14835.692);
+			Target.CenterCM += TargetOffset;
+			Target.GeometricContactCenterCM += TargetOffset;
+			Layout.NominalInput = LaunchInput{-1.75, 26.25, 1.0};
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 10> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -203,10 +233,14 @@ namespace ABTS::M11Search
 			// three-dimensional closure evidence hash; it is not certified.
 			{10, 23ull, 0x2b06db2cf348d75full, 0xa1d91650dc3d3f36ull,
 				0x99012cedf3d01c06ull, 0x22c3f67f46d49e70ull},
-			// Rejected Rank 10 dimensional-similarity experiment. It remains
-			// portable CLI evidence and is intentionally absent from the PIE
-			// CandidateExperience catalog.
-			{11, 24ull, 0xf134ae0ff2c93467ull, 0x219034b512c47aaeull,
+			// Enlarged Rank 10 successor repaired by sequential radial placement,
+			// then a constrained Assist-3/target refinement. The score field
+			// carries its maximum-power local aggregate evidence hash.
+			{11, 25ull, 0xcb23499fc6f7c9d3ull, 0x4f0e3c66a1a0a737ull,
+				0x505f3312ac8ae07full, 0xd71f1166493c07aaull},
+			// Rejected direct dimensional-similarity experiment retained as
+			// portable CLI evidence outside the PIE CandidateExperience catalog.
+			{12, 24ull, 0xf134ae0ff2c93467ull, 0x219034b512c47aaeull,
 				0x7d820ee8932d1fd9ull, 0x48d662cfd48c4f23ull},
 		}};
 	}
@@ -222,7 +256,7 @@ namespace ABTS::M11Search
 			*OutIdentity = FrozenCandidateIdentity();
 		}
 		const std::int32_t SourceRank =
-			Rank >= 7 && Rank <= 11 ? 3 : Rank;
+			Rank >= 7 && Rank <= 12 ? 3 : Rank;
 		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
@@ -246,6 +280,13 @@ namespace ABTS::M11Search
 			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);
 		}
 		else if (Rank == 11)
+		{
+			ApplyRank3F3ExpansionCandidate21(OutLayout);
+			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);
+			ApplyRank10AssistScaleExperiment(OutLayout);
+			ApplyRank11ScaledSequentialCandidate(OutLayout);
+		}
+		else if (Rank == 12)
 		{
 			ApplyRank3F3ExpansionCandidate21(OutLayout);
 			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);

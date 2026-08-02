@@ -818,10 +818,10 @@ Sigma `±12%`，完成 256 组初筛及 24 组精筛。最好参数为
 必须作为新的候选构造和 PIE 手感验收处理，不能再称为“不改变轨迹全貌”的 UFO
 微调。
 
-### Rank 10 助推行星尺度实验（拒绝的 CLI Rank 11，2026-08-02）
+### Rank 10 助推行星尺度实验（拒绝的 CLI Rank 12，2026-08-02）
 
 为验证三颗助推行星从解析碰撞半径 800 cm 放大到 5500 cm 后能否直接沿用 Rank 10，
-标准 C++ Core 保留了一份不进入 Editor PIE 列表的 Rank 11 诊断布局。其比例
+标准 C++ Core 保留了一份不进入 Editor PIE 列表的 Rank 12 诊断布局。其比例
 `s=5500/800=6.875`，三颗行星统一使用 `VisualRadius=5000 cm`、
 `CollisionRadius=5500 cm`。相对 Pouch 的助推体与合格目标位置、作用半径、B-plane
 距离和误差限乘 `s`；发射速度和虚拟轨道速度乘 `s`；能量门乘 `s²`；助推体引力
@@ -836,7 +836,7 @@ Sigma `±12%`，完成 256 组初筛及 24 组精筛。最好参数为
 
 便携 MSVC `/fp:precise` 结果如下：
 
-| 检查 | Rank 10 | 尺度实验 Rank 11 |
+| 检查 | Rank 10 | 尺度实验 Rank 12 |
 | --- | ---: | ---: |
 | 满功率 ScreenAim 5000 点 | `392→115→27→15` | `549→124→14→6` |
 | 局部满功率 1025 点 | `481→249→124→62` | `387→176→38→18` |
@@ -846,14 +846,14 @@ Sigma `±12%`，完成 256 组初筛及 24 组精筛。最好参数为
 | 代表飞行时间 | `33.659822 s` | `30.984373 s` |
 | 三次偏转 | `0.421203/0.568261/1.160843 rad` | `0.402749/0.487673/1.238021 rad` |
 
-Rank 11 身份证据为
+Rank 12 身份证据为
 `Source=0xf134ae0ff2c93467 / Request=0x219034b512c47aae /
 Result=0x7d820ee8932d1fd9 / LocalEvidence=0x48d662cfd48c4f23`。结论为拒绝：
 虽然仍存在少量 F4 点，但成功域比例、名义输入和拓扑均未保留，不能替换 Rank 10，
 也不进入 `abts.M11.CandidateRank` 可选序列。扩大实体尺度需要以本尺度作为新搜索
 基线，重新优化行星中心、主星残余影响、走廊和终端映射，而不是继续假设简单等比。
 
-### 放大尺度逐星微调候选（未绑定，2026-08-02）
+### 放大尺度逐星微调候选（Editor-only Rank 11，2026-08-02）
 
 在上述拒绝基线之上新增了标准 C++ 权威求值、Python 仅调度的逐星构造器。构造器
 不再同时随机四个天体：先依次冻结行星①、行星②、行星③和 UFO 的径向增量，使
@@ -865,6 +865,7 @@ Result=0x7d820ee8932d1fd9 / LocalEvidence=0x48d662cfd48c4f23`。结论为拒绝�
 `(-8500,-8500,+4000,+4000) cm`，行星③附加位移
 `(2250,5000,-8280) cm`，UFO 附加位移
 `(2527.902,5469.510,-14835.692) cm`。其布局 Variant Source Hash 为
+`0xcb23499fc6f7c9d3`；其搜索期、尚未把代表 F4 写回 nominal 的中间布局 Hash 为
 `0xad7ccfe862d78a3f`。最大功率局部网格
 `Yaw=[-4°,2°] / Pitch=[19.5°,34.5°] / 0.25°×0.375°` 共 1025 点，得到：
 
@@ -885,9 +886,18 @@ v2.1 冻结的 `[0.08,0.55]` 手感门内。四级 Hull 面积依次为
 ![放大尺度逐星微调候选的 5000 点 ScreenAim 凸包](AIReports/M11Rank11ScaledSequentialScreenAimHulls.png)
 
 该结果只通过“ScreenAim 比例 + 局部满功率单连通”候选门，身份冻结在
-`Tools/M11Core/Candidates/Rank11ScaledSequentialCandidate.json`；尚未执行全 Power
-闭包、半格/边界递归、旁路和消融认证，也未加入 Editor Rank 列表，状态仍为
-`Candidate / NOT CERTIFIED / NOT PIE BOUND`。
+`Tools/M11Core/Candidates/Rank11ScaledSequentialCandidate.json`，并以 Editor-only
+`abts.M11.CandidateRank 11` 加入 PIE 列表。Identity 为
+`Work=25 / Source=0xcb23499fc6f7c9d3 / Request=0x4f0e3c66a1a0a737 /
+Result=0x505f3312ac8ae07f / Score=0xd71f1166493c07aa`。它尚未执行全 Power
+闭包、半格/边界递归、旁路和消融认证，状态仍为
+`Candidate / NOT CERTIFIED / EDITOR PIE ONLY`。
+
+接线后的 pinned MSVC 便携套件为 `8/8`，其中 Rank 11 与保留的 Rank 12 取证
+各自执行独立 5000 点确定性重放；Development Editor 全链接成功。fresh
+`ABTS.M11C.V2_1` 为 `3/3`，覆盖 Catalog 最后一项 Rank 11 的 Source/Result、
+nominal F4 与未知 Rank fail-closed。日志为
+`Saved/Logs/M11Rank11PIEList-20260802-215012.log`。
 
 ## 8. 完整输入域认证
 
