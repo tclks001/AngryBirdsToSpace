@@ -1,6 +1,6 @@
 # ABTS：Task Graph 驱动的球面 PCG 最终核心设计
 
-> 状态：V3 核心管线、M3R-0 首周兼容方案、M3R-1 Schema、M3R-2 多候选路线、M3R-3 六 Encounter 空间候选与 M3R-3.1 普通弹弓槽场数据层已实现；已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。M3R-4 独立终结层已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定 Biome/Envelope 表现层也已达到 M3LocalAccepted（IntegrationPending），不改写 R-3 身份且不发布 MonthlyAccepted，完整 Subdivision 7 本地性能门已通过。真实 M5.1/M6/M9/M7/桥门与流程权威、R-5 可见 PIE/集成碰撞回归仍待集成，R6 完成后再整体验收；局部 Room 原型留在后续阶段。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，R4 细化见 [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
+> 状态：V3 核心管线、M3R-0 首周兼容方案、M3R-1 Schema、M3R-2 多候选路线、M3R-3 六 Encounter 空间候选与 M3R-3.1 普通弹弓槽场数据层已实现；已包含卫星练习区—终局发射区隔离和唯一 Space 槽对合同。M3R-4 独立终结层已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定 Biome/Envelope 表现层与 R-5.1 卫星/E5 候选预览也已达到 M3LocalAccepted（IntegrationPending），不改写 R-3 身份且不发布 MonthlyAccepted，完整 Subdivision 7 本地性能门已通过。真实 M5.1/M6/M9/M7/桥门与流程权威、R-5/R-5.1 可见 PIE/集成碰撞回归仍待集成，R6 完成后再整体验收；局部 Room 原型留在后续阶段。主设计见 [AngryBirdsToSpaceGameDesign.md](AngryBirdsToSpaceGameDesign.md)，月度地图改进见 [M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md)，R4 细化见 [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)，卫星预览见 [M3R-5.1](M3R51SatellitePreviewDesign.md)，表现层见 [M3TaskGraphTerrainPresentationDesign.md](M3TaskGraphTerrainPresentationDesign.md)，普通建筑下游见 [M7 TaskGraph DAG2.3 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md)，终局前置修订见 [M11.0](M110PreFinaleClosureDesign.md)。
 >
 > 目标：先生成可通关、可分支、可被能力门验证的 Gameplay 图，再将它嵌入 `CellTopo`；地形、水网、道路、资源、建筑与弹弓攻击解共同服务该图。连续球面只渲染结果。
 
@@ -562,3 +562,12 @@ FinalScore =
 - 显式固定展示运行时为 `PreviewAuthority=1/MonthlyAccepted=0`；默认生产仍使用兼容世界，`QuerySurface`、PVS、Witness 与稳定合同不受预览影响；
 - 100 Seed 为 `100/100`、300 个候选计划，ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、主题下限 `4`、全局显示邻接边界率上限 `21‰`，Oracle=`6751B93DA5E4C778`，Manifest=`9E5A2FE0E563A7C4`，构造耗时 `P95=127.860 ms/Max=139.359 ms`；
 - HISM 保持 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，并保护道路、ActiveRole、Target、NoRoad、攻击走廊与水体。完整 Subdivision 7 重建已以 `5.522 s` 通过本地 `<=8 s` 门；可见 PIE 和真实 M6/M9/Character/Visibility 碰撞回归仍为 IntegrationPending。
+
+### 17.7 M3R-5.1 卫星练习区预览（2026-08-01）
+
+本修订把冻结 SatellitePracticePreset 绑定到每个精确 R-3/R-3.1 候选的 E5 槽场，完整算法、身份和图例见 [M3R-5.1](M3R51SatellitePreviewDesign.md)。
+
+- 以 E5 槽场的距离合法参考桩对建立局部发射坐标，用连续地形表面生成卫星中心，再由共享标定函数生成 E5 背面目标 Transform；
+- 参考桩对只是确定性诊断，不是 AllowedPair；普通桩仍只受最大弦长、遮挡与资源规则约束；
+- F7 增加卫星、E5 代理、参考桩对与空间关系线，并隐藏旧主星 E5 Target Footprint；不生成 M9/M7 Actor，不修改 Biome/兼容世界 Hash；
+- 强制 Unity 全链接和 fresh `ABTS.M3.Monthly.SatellitePreview` 2/2 通过；生产 M6/M9/M7 Witness 与可见 PIE 仍为 IntegrationPending。

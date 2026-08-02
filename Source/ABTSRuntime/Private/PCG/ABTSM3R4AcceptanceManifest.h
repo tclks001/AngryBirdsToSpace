@@ -41,22 +41,22 @@ public:
 	static constexpr int32 DefaultPullSamples = 7;
 	static constexpr int32 DefaultAimAxisSamples = 3;
 	static constexpr uint64 RequiredR31ManifestHash =
-		0x1AFC3DD667595128ull;
+		0x6B06F2BA8D7A14ACull;
 	static constexpr uint64 FrozenSweepSeedManifestHash =
 		0x5610DCBA0A03D9CBull;
 
 	static constexpr uint64 FrozenDisplayConfigHash =
 		0xE7831808F41259DAull;
 	static constexpr uint64 FrozenDisplayResultHash =
-		0x624FB903F80BA71Bull;
+		0x60810B9F6F8E114Bull;
 	static constexpr uint64 FrozenDisplayCandidateHash =
-		0x2C9798D1B1BE3B14ull;
+		0x44C2006CC27CA226ull;
 	static constexpr uint64 FrozenDisplayGameplayLayoutHash =
-		0x29811734A4360BC6ull;
+		0x3860EB9D1E235916ull;
 	static constexpr uint64 FrozenSweepOracleHash =
-		0x89F9BD7DD7026670ull;
+		0x7DA88AF9D0F0F31Full;
 	static constexpr uint64 FrozenManifestHash =
-		0xAEBA4E7F337A4D8Full;
+		0x12673ED662F1D9EDull;
 
 	static TConstArrayView<int32> GetSweepSeeds();
 	static TConstArrayView<FABTSM3R4AcceptanceEntry> GetEntries();
