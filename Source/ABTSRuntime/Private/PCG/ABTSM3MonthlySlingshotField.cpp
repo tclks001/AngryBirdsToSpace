@@ -3,6 +3,7 @@
 #include "PCG/ABTSM3MonthlySlingshotField.h"
 
 #include "ABTSRuntime.h"
+#include "PCG/ABTSM3MonthlyFinaleAnchor.h"
 #include "Planet/ABTSM2Planet.h"
 
 namespace ABTSM3R31SlingshotFieldPrivate
@@ -228,6 +229,7 @@ bool IsEligibleSlotCell(
 	const int32 CellId,
 	const TSet<int32>& RoadCellIds,
 	const TSet<int32>& UsedCellIds,
+	const TSet<int32>* ExcludedFinaleClearanceCells,
 	const TSet<int32>* AllowedEnvelopeCells,
 	const bool bExcludeNoRoad,
 	const bool bExcludeAttackCorridor)
@@ -236,6 +238,8 @@ bool IsEligibleSlotCell(
 		|| Candidate.Cells[CellId].CellId != CellId
 		|| UsedCellIds.Contains(CellId)
 		|| RoadCellIds.Contains(CellId)
+		|| (ExcludedFinaleClearanceCells != nullptr
+			&& ExcludedFinaleClearanceCells->Contains(CellId))
 		|| (AllowedEnvelopeCells != nullptr
 			&& !AllowedEnvelopeCells->Contains(CellId)))
 	{
@@ -282,6 +286,7 @@ bool BuildFieldSlots(
 	const float PlanetRadiusCM,
 	const FABTSM3MonthlySpatialCandidate& Candidate,
 	const TSet<int32>& RoadCellIds,
+	const TSet<int32>* ExcludedFinaleClearanceCells,
 	const int32 SearchSeedCellId,
 	const int32 RequiredAnchorCellId,
 	const TSet<int32>* AllowedEnvelopeCells,
@@ -309,6 +314,7 @@ bool BuildFieldSlots(
 				CellId,
 				RoadCellIds,
 				InOutUsedCellIds,
+				ExcludedFinaleClearanceCells,
 				AllowedEnvelopeCells,
 				bExcludeNoRoad,
 				bExcludeAttackCorridor))
@@ -351,6 +357,7 @@ bool BuildFieldSlots(
 			AnchorCellId,
 			RoadCellIds,
 			InOutUsedCellIds,
+			ExcludedFinaleClearanceCells,
 			AllowedEnvelopeCells,
 			bExcludeNoRoad,
 			bExcludeAttackCorridor))
@@ -404,6 +411,7 @@ bool BuildFieldSlots(
 				CellId,
 				RoadCellIds,
 				InOutUsedCellIds,
+				ExcludedFinaleClearanceCells,
 				AllowedEnvelopeCells,
 				bExcludeNoRoad,
 				bExcludeAttackCorridor))
@@ -523,6 +531,7 @@ bool BuildCandidate(
 	const TArray<FABTSM2Cell>& Cells,
 	const float PlanetRadiusCM,
 	const FABTSM3MonthlySpatialCandidate& Source,
+	const FABTSM3MonthlyFinaleAnchorPlanCandidate* FinaleAnchorPlan,
 	FABTSM3MonthlySlingshotFieldCandidate& OutCandidate,
 	FString& OutFailure)
 {
@@ -531,6 +540,10 @@ bool BuildCandidate(
 		Source.SourceRouteCandidateId;
 	OutCandidate.SourceSpatialCandidateHash =
 		Source.SpatialCandidateHash;
+	OutCandidate.SourceFinaleAnchorPlanCandidateHash =
+		FinaleAnchorPlan != nullptr
+			? FinaleAnchorPlan->CandidateHash
+			: 0;
 	if (!Source.bHardPass
 		|| Source.RejectReason
 			!= EABTSM3MonthlySpatialRejectReason::None
@@ -552,6 +565,34 @@ bool BuildCandidate(
 	{
 		RoadCellIds.Add(CellId);
 	}
+	TSet<int32> ExcludedFinaleClearanceCells;
+	if (FinaleAnchorPlan != nullptr)
+	{
+		if (FinaleAnchorPlan->SourceRouteCandidateId
+				!= Source.SourceRouteCandidateId
+			|| FinaleAnchorPlan->SourceSpatialCandidateHash
+				!= Source.SpatialCandidateHash
+			|| static_cast<uint64>(FinaleAnchorPlan->CandidateHash)
+				!= FABTSM3MonthlyFinaleAnchorBuilder::
+					ComputeCandidateHash(*FinaleAnchorPlan)
+			|| FinaleAnchorPlan->ClearanceCellIds.IsEmpty())
+		{
+			OutFailure = TEXT("FinaleAnchorCandidateIdentity");
+			return false;
+		}
+		for (const int32 CellId : FinaleAnchorPlan->ClearanceCellIds)
+		{
+			if (!Cells.IsValidIndex(CellId))
+			{
+				OutFailure = TEXT("FinaleAnchorClearanceCell");
+				return false;
+			}
+			ExcludedFinaleClearanceCells.Add(CellId);
+		}
+	}
+	const TSet<int32>* FinaleClearance = FinaleAnchorPlan != nullptr
+		? &ExcludedFinaleClearanceCells
+		: nullptr;
 	TSet<int32> UsedCellIds;
 	TArray<const FABTSM3MonthlySpatialEncounter*> Encounters;
 	for (const FABTSM3MonthlySpatialEncounter& Encounter :
@@ -612,6 +653,7 @@ bool BuildCandidate(
 				PlanetRadiusCM,
 				Source,
 				RoadCellIds,
+				FinaleClearance,
 				SlingshotPocket->AnchorCellId,
 				INDEX_NONE,
 				&EncounterEnvelopeCells,
@@ -730,6 +772,7 @@ bool BuildCandidate(
 				PlanetRadiusCM,
 				Source,
 				RoadCellIds,
+				FinaleClearance,
 				Ranked.CellId,
 				INDEX_NONE,
 				nullptr,
@@ -879,6 +922,11 @@ uint64 FABTSM3MonthlySlingshotFieldBuilder::ComputeCandidateHash(
 	FCanonicalHash64 Hash;
 	Hash.AddInt32(Candidate.SourceRouteCandidateId);
 	Hash.AddInt64(Candidate.SourceSpatialCandidateHash);
+	if (Candidate.SourceFinaleAnchorPlanCandidateHash != 0)
+	{
+		Hash.AddInt32(52);
+		Hash.AddInt64(Candidate.SourceFinaleAnchorPlanCandidateHash);
+	}
 	Hash.AddInt32(Candidate.Fields.Num());
 	for (const FABTSM3MonthlySlingshotField& Field :
 		Candidate.Fields)
@@ -900,6 +948,11 @@ uint64 FABTSM3MonthlySlingshotFieldBuilder::ComputeResultHash(
 	Hash.AddInt32(Result.WorldSeed);
 	Hash.AddInt64(Result.TopologyHash);
 	Hash.AddInt64(Result.SourceSpatialResultHash);
+	if (Result.SourceFinaleAnchorPlanResultHash != 0)
+	{
+		Hash.AddInt32(52);
+		Hash.AddInt64(Result.SourceFinaleAnchorPlanResultHash);
+	}
 	Hash.AddInt64(Result.ConfigHash);
 	Hash.AddInt32(Result.MaxCordLengthCM);
 	Hash.AddInt32(Result.FieldsPerCandidate);
@@ -922,6 +975,27 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Build(
 	const TArray<FABTSM2Cell>& Cells,
 	const float PlanetRadiusCM,
 	const FABTSM3MonthlySpatialResult& SpatialResult,
+	FABTSM3MonthlySlingshotFieldResult& OutResult,
+	FString& OutFailure)
+{
+	return Build(
+		WorldSeed,
+		Config,
+		Cells,
+		PlanetRadiusCM,
+		SpatialResult,
+		FABTSM3MonthlyFinaleAnchorPlanResult(),
+		OutResult,
+		OutFailure);
+}
+
+bool FABTSM3MonthlySlingshotFieldBuilder::Build(
+	const int32 WorldSeed,
+	const FABTSM3MonthlySlingshotFieldConfig& Config,
+	const TArray<FABTSM2Cell>& Cells,
+	const float PlanetRadiusCM,
+	const FABTSM3MonthlySpatialResult& SpatialResult,
+	const FABTSM3MonthlyFinaleAnchorPlanResult& FinaleAnchorPlanResult,
 	FABTSM3MonthlySlingshotFieldResult& OutResult,
 	FString& OutFailure)
 {
@@ -958,6 +1032,12 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Build(
 	OutResult.TopologyHash = static_cast<int64>(TopologyHash);
 	OutResult.SourceSpatialResultHash =
 		SpatialResult.SpatialResultHash;
+	const bool bUseFinaleAnchorPlan =
+		FinaleAnchorPlanResult.ResultHash != 0;
+	OutResult.SourceFinaleAnchorPlanResultHash =
+		bUseFinaleAnchorPlan
+			? FinaleAnchorPlanResult.ResultHash
+			: 0;
 	OutResult.ConfigHash = static_cast<int64>(
 		ComputeConfigHash(Config, PlanetRadiusCM, TopologyHash));
 	if (SpatialResult.WorldSeed != WorldSeed
@@ -976,6 +1056,30 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Build(
 			EABTSM3MonthlySlingshotFieldRejectReason::
 				InvalidSpatialResult;
 		OutFailure = TEXT("SourceSpatialResult");
+		OutResult.ResultHash = static_cast<int64>(
+			ComputeResultHash(OutResult));
+		return false;
+	}
+	if (bUseFinaleAnchorPlan
+		&& (FinaleAnchorPlanResult.WorldSeed != WorldSeed
+			|| FinaleAnchorPlanResult.TopologyHash
+				!= OutResult.TopologyHash
+			|| FinaleAnchorPlanResult.SourceSpatialResultHash
+				!= SpatialResult.SpatialResultHash
+			|| !FinaleAnchorPlanResult.bPlanResultValid
+			|| FinaleAnchorPlanResult.bMonthlyWorldAccepted
+			|| FinaleAnchorPlanResult.RejectReason
+				!= EABTSM3MonthlyFinaleAnchorRejectReason::None
+			|| FinaleAnchorPlanResult.RetainedCandidates.Num()
+				!= SpatialResult.RetainedCandidates.Num()
+			|| static_cast<uint64>(FinaleAnchorPlanResult.ResultHash)
+				!= FABTSM3MonthlyFinaleAnchorBuilder::
+					ComputeResultHash(FinaleAnchorPlanResult)))
+	{
+		OutResult.RejectReason =
+			EABTSM3MonthlySlingshotFieldRejectReason::
+				InvalidFinaleAnchorPlanResult;
+		OutFailure = TEXT("SourceFinaleAnchorPlanResult");
 		OutResult.ResultHash = static_cast<int64>(
 			ComputeResultHash(OutResult));
 		return false;
@@ -1001,6 +1105,25 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Build(
 	for (const FABTSM3MonthlySpatialCandidate& SourceCandidate :
 		SpatialResult.RetainedCandidates)
 	{
+		const FABTSM3MonthlyFinaleAnchorPlanCandidate* FinalePlan =
+			bUseFinaleAnchorPlan
+				? FABTSM3MonthlyFinaleAnchorBuilder::FindCandidate(
+					FinaleAnchorPlanResult,
+					SourceCandidate.SourceRouteCandidateId)
+				: nullptr;
+		if (bUseFinaleAnchorPlan && FinalePlan == nullptr)
+		{
+			OutResult.RetainedCandidates.Reset();
+			OutResult.FieldsPerCandidate = 0;
+			OutResult.SlotsPerCandidate = 0;
+			OutResult.RejectReason =
+				EABTSM3MonthlySlingshotFieldRejectReason::
+					InvalidFinaleAnchorPlanResult;
+			OutFailure = TEXT("FinaleAnchorCandidateJoin");
+			OutResult.ResultHash = static_cast<int64>(
+				ComputeResultHash(OutResult));
+			return false;
+		}
 		FABTSM3MonthlySlingshotFieldCandidate Candidate;
 		if (!BuildCandidate(
 				WorldSeed,
@@ -1008,6 +1131,7 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Build(
 				Cells,
 				PlanetRadiusCM,
 				SourceCandidate,
+				FinalePlan,
 				Candidate,
 				OutFailure))
 		{
@@ -1059,6 +1183,27 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Validate(
 	EABTSM3MonthlySlingshotFieldRejectReason& OutReason,
 	FString& OutFailure)
 {
+	return Validate(
+		Config,
+		Cells,
+		PlanetRadiusCM,
+		SpatialResult,
+		FABTSM3MonthlyFinaleAnchorPlanResult(),
+		Result,
+		OutReason,
+		OutFailure);
+}
+
+bool FABTSM3MonthlySlingshotFieldBuilder::Validate(
+	const FABTSM3MonthlySlingshotFieldConfig& Config,
+	const TArray<FABTSM2Cell>& Cells,
+	const float PlanetRadiusCM,
+	const FABTSM3MonthlySpatialResult& SpatialResult,
+	const FABTSM3MonthlyFinaleAnchorPlanResult& FinaleAnchorPlanResult,
+	const FABTSM3MonthlySlingshotFieldResult& Result,
+	EABTSM3MonthlySlingshotFieldRejectReason& OutReason,
+	FString& OutFailure)
+{
 	OutReason =
 		EABTSM3MonthlySlingshotFieldRejectReason::None;
 	OutFailure.Reset();
@@ -1072,6 +1217,7 @@ bool FABTSM3MonthlySlingshotFieldBuilder::Validate(
 			Cells,
 			PlanetRadiusCM,
 			SpatialResult,
+			FinaleAnchorPlanResult,
 			Expected,
 			ExpectedFailure))
 	{
@@ -1124,7 +1270,7 @@ void FABTSM3MonthlySlingshotFieldBuilder::LogSummary(
 	const FABTSM3MonthlySlingshotFieldResult& Result)
 {
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][PCG][SlingshotFields] Stage=M3R3.1 Seed=%d Valid=%d MonthlyAccepted=0 Candidates=%d FieldsPerCandidate=%d SlotsPerCandidate=%d MaxCordLengthCM=%d SourceSpatial=%016llX Config=%016llX Result=%016llX"),
+		TEXT("[ABTS][PCG][SlingshotFields] Stage=M3R3.1 Seed=%d Valid=%d MonthlyAccepted=0 Candidates=%d FieldsPerCandidate=%d SlotsPerCandidate=%d MaxCordLengthCM=%d SourceSpatial=%016llX SourceFinale=%016llX Config=%016llX Result=%016llX"),
 		Result.WorldSeed,
 		Result.bSlingshotFieldResultValid ? 1 : 0,
 		Result.RetainedCandidates.Num(),
@@ -1134,6 +1280,9 @@ void FABTSM3MonthlySlingshotFieldBuilder::LogSummary(
 		static_cast<unsigned long long>(
 			static_cast<uint64>(
 				Result.SourceSpatialResultHash)),
+		static_cast<unsigned long long>(
+			static_cast<uint64>(
+				Result.SourceFinaleAnchorPlanResultHash)),
 		static_cast<unsigned long long>(
 			static_cast<uint64>(Result.ConfigHash)),
 		static_cast<unsigned long long>(
@@ -1162,6 +1311,9 @@ FABTSM3MonthlySlingshotFieldBuilder::GetRejectReasonName(
 		return TEXT("FieldGenerationFailed");
 	case EABTSM3MonthlySlingshotFieldRejectReason::HashMismatch:
 		return TEXT("HashMismatch");
+	case EABTSM3MonthlySlingshotFieldRejectReason::
+		InvalidFinaleAnchorPlanResult:
+		return TEXT("InvalidFinaleAnchorPlanResult");
 	default:
 		return TEXT("Unknown");
 	}
