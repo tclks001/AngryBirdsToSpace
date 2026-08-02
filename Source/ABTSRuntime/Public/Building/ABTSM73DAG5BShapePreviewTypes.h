@@ -34,7 +34,9 @@ enum class EABTSM73DAG5BV2VolumeRole : uint8
 	Body,
 	Annex,
 	Bridge,
-	Crown
+	Crown,
+	/** Intentionally elevated span with two resolved endpoint support volumes. */
+	SupportedSpan
 };
 
 /** Editor-facing parameters for the DAG5-B v2 silhouette-only prototype. */
@@ -169,6 +171,9 @@ struct FABTSM73DAG5BV2PreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 PyramidCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 SupportedSpanCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 WFCPropagationOperationCount = 0;

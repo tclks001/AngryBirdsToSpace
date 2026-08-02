@@ -82,6 +82,12 @@ namespace ABTSM73BeamA
 			: EABTSM73BeamAFrameAxis::X;
 	}
 
+	bool IsSupportedSpanRole(const EABTSM73DAG5BV2VolumeRole Role)
+	{
+		return Role == EABTSM73DAG5BV2VolumeRole::Bridge
+			|| Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan;
+	}
+
 	int32 AddMember(
 		FBuildContext& Context,
 		FABTSM73BeamAAssembly& Assembly,
@@ -1624,6 +1630,28 @@ namespace ABTSM73BeamA
 				Member, Context.Result->Joints, CrossSection));
 		}
 		TArray<FSupportProposal> Proposals;
+		auto IsReservedSupport = [&Context, Tolerance](
+			const FVector2D& Station,
+			const double BottomZ,
+			const double TopZ)
+		{
+			for (const FABTSM73BeamASupportVoid& SupportVoid :
+				Context.Result->ReservedSupportVoids)
+			{
+				const FBox& Void = SupportVoid.Bounds;
+				const double VerticalOverlap = FMath::Min(TopZ, Void.Max.Z)
+					- FMath::Max(BottomZ, Void.Min.Z);
+				if (VerticalOverlap > Tolerance
+					&& Station.X > Void.Min.X + Tolerance
+					&& Station.X < Void.Max.X - Tolerance
+					&& Station.Y > Void.Min.Y + Tolerance
+					&& Station.Y < Void.Max.Y - Tolerance)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
 		for (const FABTSM73BeamAAssembly& Assembly : Context.Result->Assemblies)
 		{
 			double LowestUnsupportedBottom = TNumericLimits<double>::Max();
@@ -1641,6 +1669,45 @@ namespace ABTSM73BeamA
 				continue;
 			}
 			TArray<FVector2D> ProposedStations;
+			auto AddProposal = [&](const FVector2D& Station,
+				const double BottomZ, const double TopZ)
+			{
+				if (ProposedStations.ContainsByPredicate(
+					[&Station, Tolerance](const FVector2D& Existing)
+					{
+						return Existing.Equals(Station, Tolerance);
+					}))
+				{
+					return;
+				}
+				FSupportProposal& Proposal = Proposals.AddDefaulted_GetRef();
+				Proposal.AssemblyId = Assembly.AssemblyId;
+				Proposal.Station = Station;
+				Proposal.BottomZ = BottomZ;
+				Proposal.TopZ = TopZ;
+				ProposedStations.Add(Station);
+			};
+			auto FindSpanVoid = [&Bounds, LowestUnsupportedBottom, Tolerance,
+				&Context](const int32 UpperId)
+				-> const FABTSM73BeamASupportVoid*
+			{
+				return Context.Result->ReservedSupportVoids.FindByPredicate(
+					[&Bounds, UpperId, LowestUnsupportedBottom, Tolerance](
+						const FABTSM73BeamASupportVoid& Candidate)
+					{
+						const FBox& Void = Candidate.Bounds;
+						return FMath::Abs(
+							Void.Max.Z - LowestUnsupportedBottom) <= Tolerance
+							&& OverlapLength(
+								Void.Min.X, Void.Max.X,
+								Bounds[UpperId].Min.X,
+								Bounds[UpperId].Max.X) > Tolerance
+							&& OverlapLength(
+								Void.Min.Y, Void.Max.Y,
+								Bounds[UpperId].Min.Y,
+								Bounds[UpperId].Max.Y) > Tolerance;
+					});
+			};
 			for (const int32 UpperId : Assembly.MemberIds)
 			{
 				if (!Reachable.IsValidIndex(UpperId)
@@ -1650,6 +1717,37 @@ namespace ABTSM73BeamA
 						LowestUnsupportedBottom,
 						Tolerance))
 				{
+					continue;
+				}
+				if (const FABTSM73BeamASupportVoid* SpanVoid =
+					FindSpanVoid(UpperId))
+				{
+					const FBox& Void = SpanVoid->Bounds;
+					const int32 Axis = SpanVoid->SpanAxisIndex;
+					const int32 Perpendicular = Axis == 0 ? 1 : 0;
+					FVector2D NegativeStation(
+						Bounds[UpperId].GetCenter().X,
+						Bounds[UpperId].GetCenter().Y);
+					FVector2D PositiveStation = NegativeStation;
+					NegativeStation[Axis] = Void.Min[Axis]
+						- CrossSection * 0.5;
+					PositiveStation[Axis] = Void.Max[Axis]
+						+ CrossSection * 0.5;
+					NegativeStation[Perpendicular] = FMath::Clamp(
+						NegativeStation[Perpendicular],
+						Void.Min[Perpendicular],
+						Void.Max[Perpendicular]);
+					PositiveStation[Perpendicular] =
+						NegativeStation[Perpendicular];
+					AddProposal(NegativeStation, 0.0,
+						LowestUnsupportedBottom);
+					AddProposal(PositiveStation, 0.0,
+						LowestUnsupportedBottom);
+					if (ProposedStations.Num()
+						>= Context.Settings->MaxParallelBlocksPerCourse)
+					{
+						break;
+					}
 					continue;
 				}
 				int32 BestLowerId = INDEX_NONE;
@@ -1703,26 +1801,18 @@ namespace ABTSM73BeamA
 							Bounds[UpperId].GetCenter().Y);
 					}
 				}
-				if (ProposedStations.ContainsByPredicate(
-						[&BestStation, Tolerance](const FVector2D& Existing)
-						{
-							return Existing.Equals(BestStation, Tolerance);
-						}))
-				{
-					continue;
-				}
 				const float Length = static_cast<float>(
 					LowestUnsupportedBottom - BestTop);
 				if (Length < CrossSection)
 				{
 					continue;
 				}
-				FSupportProposal& Proposal = Proposals.AddDefaulted_GetRef();
-				Proposal.AssemblyId = Assembly.AssemblyId;
-				Proposal.Station = BestStation;
-				Proposal.BottomZ = BestTop;
-				Proposal.TopZ = LowestUnsupportedBottom;
-				ProposedStations.Add(BestStation);
+				if (IsReservedSupport(
+					BestStation, BestTop, LowestUnsupportedBottom))
+				{
+					continue;
+				}
+				AddProposal(BestStation, BestTop, LowestUnsupportedBottom);
 				if (ProposedStations.Num()
 					>= Context.Settings->MaxParallelBlocksPerCourse)
 				{
@@ -1869,6 +1959,25 @@ namespace ABTSM73BeamA
 				}
 				if (PrunedMemberCount == 0)
 				{
+					for (const FABTSM73BeamAMember& Member : Context.Result->Members)
+					{
+						if (!Reachable.IsValidIndex(Member.MemberId)
+							|| Reachable[Member.MemberId])
+						{
+							continue;
+						}
+						const FBox Bounds = MemberBounds(Member,
+							Context.Result->Joints,
+							Context.Settings->BlockCrossSectionCM);
+						UE_LOG(LogABTSRuntime, Warning,
+							TEXT("[ABTS][M7.3-Beam-A][UnsupportedMember]")
+							TEXT(" Member=%d Axis=%d Center=%s MinZ=%.2f MaxZ=%.2f"),
+							Member.MemberId,
+							static_cast<int32>(Member.Axis),
+							*Bounds.GetCenter().ToCompactString(),
+							Bounds.Min.Z,
+							Bounds.Max.Z);
+					}
 					Context.Result->Summary.UnsupportedMemberCount =
 						UnsupportedCount;
 					OutError = TEXT("BeamAUnsupportedMembers");
@@ -1903,10 +2012,51 @@ namespace ABTSM73BeamA
 				AddedCount);
 			if (AddedCount == 0)
 			{
-				Context.Result->Summary.UnsupportedMemberCount =
-					UnsupportedCount;
-				OutError = TEXT("BeamAUnsupportedMembers");
-				return false;
+				int32 PrunedMemberCount = 0;
+				if (!PruneStalledUnsupportedFragments(
+					Context, Reachable, PrunedMemberCount))
+				{
+					OutError = TEXT("BeamAGlobalPruneRebuildFailed");
+					return false;
+				}
+				if (PrunedMemberCount == 0)
+				{
+					for (const FABTSM73BeamAMember& Member : Context.Result->Members)
+					{
+						if (!Reachable.IsValidIndex(Member.MemberId)
+							|| Reachable[Member.MemberId])
+						{
+							continue;
+						}
+						const FBox Bounds = MemberBounds(Member,
+							Context.Result->Joints,
+							Context.Settings->BlockCrossSectionCM);
+						UE_LOG(LogABTSRuntime, Warning,
+							TEXT("[ABTS][M7.3-Beam-A][UnsupportedMember]")
+							TEXT(" Member=%d Axis=%d Center=%s MinZ=%.2f MaxZ=%.2f"),
+							Member.MemberId,
+							static_cast<int32>(Member.Axis),
+							*Bounds.GetCenter().ToCompactString(),
+							Bounds.Min.Z,
+							Bounds.Max.Z);
+					}
+					Context.Result->Summary.UnsupportedMemberCount =
+						UnsupportedCount;
+					OutError = TEXT("BeamAUnsupportedMembers");
+					return false;
+				}
+				Context.Result->Summary.PrunedUnsupportedMemberCount +=
+					PrunedMemberCount;
+				UE_LOG(
+					LogABTSRuntime,
+					Display,
+					TEXT("[ABTS][M7.3-Beam-A][GlobalClosurePrune]")
+					TEXT(" Pass=%d Pruned=%d Reason=NoSupportProposal"),
+					Pass,
+					PrunedMemberCount);
+				PreviousUnsupportedCount = TNumericLimits<int32>::Max();
+				bSupportAttemptedLastPass = false;
+				continue;
 			}
 			PreviousUnsupportedCount = UnsupportedCount;
 			bSupportAttemptedLastPass = true;
@@ -1921,19 +2071,78 @@ namespace ABTSM73BeamA
 		const FABTSM73BeamAPreviewSettings& Settings)
 	{
 		FBox Result = Volume.LocalBounds;
-		if (Volume.Role != EABTSM73DAG5BV2VolumeRole::Bridge)
+		if (!IsSupportedSpanRole(Volume.Role))
 		{
 			return Result;
 		}
 		const FVector Size = Volume.LocalBounds.GetSize();
-		const int32 AxisIndex = Size.X >= Size.Y ? 0 : 1;
+		const int32 AxisIndex = Volume.SpanAxisIndex == 0
+			|| Volume.SpanAxisIndex == 1
+				? Volume.SpanAxisIndex
+				: Size.X >= Size.Y ? 0 : 1;
 		const int32 PerpendicularIndex = AxisIndex == 0 ? 1 : 0;
 		const double Center = Volume.LocalBounds.GetCenter()[AxisIndex];
 		const double Tolerance = Settings.JointMergeToleranceCM;
+		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+		{
+			if (Volume.SpanOpeningMaxCM - Volume.SpanOpeningMinCM
+				> Tolerance)
+			{
+				Result.Min[AxisIndex] = FMath::Max(
+					Result.Min[AxisIndex],
+					Volume.SpanOpeningMinCM
+						- Settings.BlockCrossSectionCM * 0.5);
+				Result.Max[AxisIndex] = FMath::Min(
+					Result.Max[AxisIndex],
+					Volume.SpanOpeningMaxCM
+						+ Settings.BlockCrossSectionCM * 0.5);
+				return Result;
+			}
+			const FABTSM73DAG5BV2Volume* NegativeSupport =
+				Silhouette.Volumes.FindByPredicate(
+					[&Volume](const FABTSM73DAG5BV2Volume& Candidate)
+					{
+						return Candidate.VolumeId
+							== Volume.NegativeSupportVolumeId;
+					});
+			const FABTSM73DAG5BV2Volume* PositiveSupport =
+				Silhouette.Volumes.FindByPredicate(
+					[&Volume](const FABTSM73DAG5BV2Volume& Candidate)
+					{
+						return Candidate.VolumeId
+							== Volume.PositiveSupportVolumeId;
+					});
+			if (NegativeSupport != nullptr && PositiveSupport != nullptr)
+			{
+				const double NegativeOverlap = OverlapLength(
+					Volume.LocalBounds.Min[AxisIndex],
+					Volume.LocalBounds.Max[AxisIndex],
+					NegativeSupport->LocalBounds.Min[AxisIndex],
+					NegativeSupport->LocalBounds.Max[AxisIndex]);
+				const double PositiveOverlap = OverlapLength(
+					Volume.LocalBounds.Min[AxisIndex],
+					Volume.LocalBounds.Max[AxisIndex],
+					PositiveSupport->LocalBounds.Min[AxisIndex],
+					PositiveSupport->LocalBounds.Max[AxisIndex]);
+				const double NegativeInset = FMath::Min(
+					Settings.BlockCrossSectionCM * 0.5, NegativeOverlap);
+				const double PositiveInset = FMath::Min(
+					Settings.BlockCrossSectionCM * 0.5, PositiveOverlap);
+				Result.Min[AxisIndex] = FMath::Max(
+					Result.Min[AxisIndex],
+					NegativeSupport->LocalBounds.Max[AxisIndex]
+						- NegativeInset);
+				Result.Max[AxisIndex] = FMath::Min(
+					Result.Max[AxisIndex],
+					PositiveSupport->LocalBounds.Min[AxisIndex]
+						+ PositiveInset);
+				return Result;
+			}
+		}
 		for (const FABTSM73DAG5BV2Volume& Candidate : Silhouette.Volumes)
 		{
 			if (Candidate.VolumeId == Volume.VolumeId
-				|| Candidate.Role == EABTSM73DAG5BV2VolumeRole::Bridge)
+				|| IsSupportedSpanRole(Candidate.Role))
 			{
 				continue;
 			}
@@ -2150,6 +2359,63 @@ bool FABTSM73BeamAGenerator::Generate(
 		{
 			return Reject(TEXT("BeamAInvalidStructuralBounds"));
 		}
+		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+		{
+			const int32 SpanAxis = Volume.SpanAxisIndex == 0
+				|| Volume.SpanAxisIndex == 1
+					? Volume.SpanAxisIndex
+					: StructuralBounds.GetSize().X
+						>= StructuralBounds.GetSize().Y ? 0 : 1;
+			FBox ReservedVoid = StructuralBounds;
+			if (Volume.SpanOpeningMaxCM - Volume.SpanOpeningMinCM
+				> Settings.JointMergeToleranceCM)
+			{
+				ReservedVoid.Min[SpanAxis] = Volume.SpanOpeningMinCM;
+				ReservedVoid.Max[SpanAxis] = Volume.SpanOpeningMaxCM;
+			}
+			const FABTSM73DAG5BV2Volume* NegativeSupport =
+				Silhouette.Volumes.FindByPredicate(
+					[&Volume](const FABTSM73DAG5BV2Volume& Candidate)
+					{
+						return Candidate.VolumeId
+							== Volume.NegativeSupportVolumeId;
+					});
+			const FABTSM73DAG5BV2Volume* PositiveSupport =
+				Silhouette.Volumes.FindByPredicate(
+					[&Volume](const FABTSM73DAG5BV2Volume& Candidate)
+					{
+						return Candidate.VolumeId
+							== Volume.PositiveSupportVolumeId;
+					});
+			if (Volume.SpanOpeningMaxCM - Volume.SpanOpeningMinCM
+				> Settings.JointMergeToleranceCM)
+			{
+				// The Shape Grammar's module-family envelope is authoritative.
+			}
+			else if (NegativeSupport != nullptr && PositiveSupport != nullptr)
+			{
+				ReservedVoid.Min[SpanAxis] =
+					NegativeSupport->LocalBounds.Max[SpanAxis];
+				ReservedVoid.Max[SpanAxis] =
+					PositiveSupport->LocalBounds.Min[SpanAxis];
+			}
+			else
+			{
+				ReservedVoid.Min[SpanAxis] += Settings.BlockCrossSectionCM;
+				ReservedVoid.Max[SpanAxis] -= Settings.BlockCrossSectionCM;
+			}
+			ReservedVoid.Min.Z = 0.0;
+			ReservedVoid.Max.Z = StructuralBounds.Min.Z;
+			if (ReservedVoid.IsValid
+				&& ReservedVoid.GetSize()[SpanAxis]
+					>= Settings.BlockCrossSectionCM)
+			{
+				FABTSM73BeamASupportVoid& SupportVoid =
+					OutResult.ReservedSupportVoids.AddDefaulted_GetRef();
+				SupportVoid.Bounds = ReservedVoid;
+				SupportVoid.SpanAxisIndex = SpanAxis;
+			}
+		}
 		const FVector Size = StructuralBounds.GetSize();
 		const int32 AxisIndex = Size.X >= Size.Y ? 0 : 1;
 		const float AxisSpan = static_cast<float>(Size[AxisIndex]);
@@ -2223,9 +2489,9 @@ bool FABTSM73BeamAGenerator::Generate(
 					return Candidate.VolumeId == BayB.SourceVolumeId;
 				});
 		const bool bBridgeA = VolumeA != nullptr
-			&& VolumeA->Role == EABTSM73DAG5BV2VolumeRole::Bridge;
+			&& IsSupportedSpanRole(VolumeA->Role);
 		const bool bBridgeB = VolumeB != nullptr
-			&& VolumeB->Role == EABTSM73DAG5BV2VolumeRole::Bridge;
+			&& IsSupportedSpanRole(VolumeB->Role);
 		if (bBridgeA != bBridgeB)
 		{
 			return !bBridgeA;
@@ -2254,7 +2520,7 @@ bool FABTSM73BeamAGenerator::Generate(
 		Assembly.AssemblyId = OutResult.Assemblies.Num() - 1;
 		Assembly.BayId = Bay.BayId;
 		const bool bLayeredRoof =
-			Volume->Role != EABTSM73DAG5BV2VolumeRole::Bridge
+			!IsSupportedSpanRole(Volume->Role)
 			&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box;
 		const bool bBuilt = bLayeredRoof
 			? AddLayeredRoof(

@@ -7,6 +7,12 @@
 
 struct FABTSM73DAG5BV2GenerationResult;
 
+struct FABTSM73BeamASupportVoid
+{
+	FBox Bounds = FBox(EForceInit::ForceInit);
+	int32 SpanAxisIndex = INDEX_NONE;
+};
+
 struct FABTSM73BeamAGenerationResult
 {
 	FABTSM73BeamAPreviewSummary Summary;
@@ -15,6 +21,8 @@ struct FABTSM73BeamAGenerationResult
 	TArray<FABTSM73BeamAMember> Members;
 	TArray<FABTSM73BeamABearingContact> BearingContacts;
 	TArray<FABTSM73BeamAAssembly> Assemblies;
+	/** Negative-space regions where global closure may not add Z supports. */
+	TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;
 };
 
 struct FABTSM73BeamASemanticRoofMember

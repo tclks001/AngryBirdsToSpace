@@ -71,6 +71,12 @@ namespace ABTSM73DAG5BV2
 		int32 BacktrackSteps = 0;
 	};
 
+	bool IsSpanRole(const EABTSM73DAG5BV2VolumeRole Role)
+	{
+		return Role == EABTSM73DAG5BV2VolumeRole::Bridge
+			|| Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan;
+	}
+
 	uint32 StableSeed(
 		const FABTSM73DAG5BV2PreviewSettings& Settings,
 		const FString& Path,
@@ -184,7 +190,7 @@ namespace ABTSM73DAG5BV2
 			Path,
 			Center,
 			Size,
-			EABTSM73DAG5BV2VolumeRole::Bridge));
+			EABTSM73DAG5BV2VolumeRole::SupportedSpan));
 	}
 
 	FInitialPlan BuildInitialPlan(
@@ -325,13 +331,12 @@ namespace ABTSM73DAG5BV2
 		Volume.GrammarDepth = Scope.Depth;
 		Volume.LocalBounds = Scope.Bounds;
 		Volume.Role = Scope.Role;
-		if (Scope.Bounds.Min.Z <= 1.0
-			&& Scope.Role != EABTSM73DAG5BV2VolumeRole::Bridge)
+		if (Scope.Bounds.Min.Z <= 1.0 && !IsSpanRole(Scope.Role))
 		{
 			Volume.Role = EABTSM73DAG5BV2VolumeRole::Foundation;
 		}
 		else if (Scope.Depth >= Context.Settings->MaxGrammarDepth - 1
-			&& Scope.Role != EABTSM73DAG5BV2VolumeRole::Bridge)
+			&& !IsSpanRole(Scope.Role))
 		{
 			Volume.Role = EABTSM73DAG5BV2VolumeRole::Crown;
 		}
@@ -605,7 +610,7 @@ namespace ABTSM73DAG5BV2
 				Bridge.Bounds.Min.X += WidthInset;
 				Bridge.Bounds.Max.X -= WidthInset;
 			}
-			Bridge.Role = EABTSM73DAG5BV2VolumeRole::Bridge;
+			Bridge.Role = EABTSM73DAG5BV2VolumeRole::SupportedSpan;
 			Bridge.Depth = Scope.Depth + 1;
 			Bridge.Path = Scope.Path + TEXT("/Bridge");
 			if (!EmitVolume(Bridge, Context))
@@ -625,6 +630,225 @@ namespace ABTSM73DAG5BV2
 		return FMath::Max(
 			0.0f,
 			FMath::Min(AMax, BMax) - FMath::Max(AMin, BMin));
+	}
+
+	FString SemanticRootPath(const FString& Path)
+	{
+		TArray<FString> Parts;
+		Path.ParseIntoArray(Parts, TEXT("/"), true);
+		return Parts.Num() >= 2
+			? Parts[0] + TEXT("/") + Parts[1]
+			: Path;
+	}
+
+	bool ResolveSupportedSpans(
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		TArray<FString>& Trace)
+	{
+		TArray<bool> Keep;
+		Keep.Init(true, Volumes.Num());
+		for (FABTSM73DAG5BV2Volume& Span : Volumes)
+		{
+			if (!IsSpanRole(Span.Role))
+			{
+				continue;
+			}
+			const FVector Size = Span.LocalBounds.GetSize();
+			const int32 Axis = Size.X >= Size.Y ? 0 : 1;
+			const int32 Perpendicular = Axis == 0 ? 1 : 0;
+			const double Center = Span.LocalBounds.GetCenter()[Axis];
+			const double MinimumOpening = FMath::Max(
+				1.0,
+				static_cast<double>(Settings.MinVolumeSpanCM) * 0.25);
+			int32 NegativeSupport = INDEX_NONE;
+			int32 PositiveSupport = INDEX_NONE;
+			double NegativeScore = -1.0;
+			double PositiveScore = -1.0;
+			for (const FABTSM73DAG5BV2Volume& Candidate : Volumes)
+			{
+				if (Candidate.VolumeId == Span.VolumeId
+					|| IsSpanRole(Candidate.Role))
+				{
+					continue;
+				}
+				const double PerpendicularOverlap = OverlapLength(
+					Span.LocalBounds.Min[Perpendicular],
+					Span.LocalBounds.Max[Perpendicular],
+					Candidate.LocalBounds.Min[Perpendicular],
+					Candidate.LocalBounds.Max[Perpendicular]);
+				const double VerticalOverlap = OverlapLength(
+					Span.LocalBounds.Min.Z, Span.LocalBounds.Max.Z,
+					Candidate.LocalBounds.Min.Z, Candidate.LocalBounds.Max.Z);
+				const double LongitudinalOverlap = OverlapLength(
+					Span.LocalBounds.Min[Axis], Span.LocalBounds.Max[Axis],
+					Candidate.LocalBounds.Min[Axis], Candidate.LocalBounds.Max[Axis]);
+				if (PerpendicularOverlap <= 1.0
+					|| VerticalOverlap <= 1.0
+					|| LongitudinalOverlap <= 1.0)
+				{
+					continue;
+				}
+				const double CandidateCenter =
+					Candidate.LocalBounds.GetCenter()[Axis];
+				const double Score = PerpendicularOverlap
+					* VerticalOverlap * LongitudinalOverlap;
+				if (CandidateCenter < Center
+					&& Candidate.LocalBounds.Max[Axis]
+						<= Center - MinimumOpening * 0.5
+					&& Score > NegativeScore)
+				{
+					NegativeScore = Score;
+					NegativeSupport = Candidate.VolumeId;
+				}
+				else if (CandidateCenter > Center
+					&& Candidate.LocalBounds.Min[Axis]
+						>= Center + MinimumOpening * 0.5
+					&& Score > PositiveScore)
+				{
+					PositiveScore = Score;
+					PositiveSupport = Candidate.VolumeId;
+				}
+			}
+			const FString NegativeRoot = NegativeSupport != INDEX_NONE
+				? SemanticRootPath(Volumes[NegativeSupport].DerivationPath)
+				: FString();
+			const FString PositiveRoot = PositiveSupport != INDEX_NONE
+				? SemanticRootPath(Volumes[PositiveSupport].DerivationPath)
+				: FString();
+			double OpeningMin = NegativeSupport != INDEX_NONE
+				? Volumes[NegativeSupport].LocalBounds.Max[Axis]
+				: 0.0;
+			double OpeningMax = PositiveSupport != INDEX_NONE
+				? Volumes[PositiveSupport].LocalBounds.Min[Axis]
+				: 0.0;
+			if (NegativeSupport != INDEX_NONE
+				&& PositiveSupport != INDEX_NONE
+				&& NegativeRoot != PositiveRoot)
+			{
+				for (const FABTSM73DAG5BV2Volume& Candidate : Volumes)
+				{
+					const FString CandidateRoot =
+						SemanticRootPath(Candidate.DerivationPath);
+					const double PerpendicularOverlap = OverlapLength(
+						Span.LocalBounds.Min[Perpendicular],
+						Span.LocalBounds.Max[Perpendicular],
+						Candidate.LocalBounds.Min[Perpendicular],
+						Candidate.LocalBounds.Max[Perpendicular]);
+					if (PerpendicularOverlap <= 1.0
+						|| Candidate.LocalBounds.Min.Z
+							>= Span.LocalBounds.Min.Z - 1.0)
+					{
+						continue;
+					}
+					if (CandidateRoot == NegativeRoot)
+					{
+						OpeningMin = FMath::Max(
+							OpeningMin, Candidate.LocalBounds.Max[Axis]);
+					}
+					else if (CandidateRoot == PositiveRoot)
+					{
+						OpeningMax = FMath::Min(
+							OpeningMax, Candidate.LocalBounds.Min[Axis]);
+					}
+				}
+			}
+			const bool bHasClearOpening =
+				NegativeSupport != INDEX_NONE
+				&& PositiveSupport != INDEX_NONE
+				&& NegativeRoot != PositiveRoot
+				&& OpeningMax - OpeningMin >= MinimumOpening;
+			bool bUndercroftIsEmpty = bHasClearOpening;
+			if (bUndercroftIsEmpty)
+			{
+				FBox Undercroft = Span.LocalBounds;
+				Undercroft.Min[Axis] = OpeningMin;
+				Undercroft.Max[Axis] = OpeningMax;
+				Undercroft.Min.Z = 0.0;
+				Undercroft.Max.Z = Span.LocalBounds.Min.Z;
+				for (const FABTSM73DAG5BV2Volume& Candidate : Volumes)
+				{
+					const FString CandidateRoot =
+						SemanticRootPath(Candidate.DerivationPath);
+					if (Candidate.VolumeId == Span.VolumeId
+						|| CandidateRoot == NegativeRoot
+						|| CandidateRoot == PositiveRoot)
+					{
+						continue;
+					}
+					const double XOverlap = OverlapLength(
+						Undercroft.Min.X, Undercroft.Max.X,
+						Candidate.LocalBounds.Min.X,
+						Candidate.LocalBounds.Max.X);
+					const double YOverlap = OverlapLength(
+						Undercroft.Min.Y, Undercroft.Max.Y,
+						Candidate.LocalBounds.Min.Y,
+						Candidate.LocalBounds.Max.Y);
+					const double ZOverlap = OverlapLength(
+						Undercroft.Min.Z, Undercroft.Max.Z,
+						Candidate.LocalBounds.Min.Z,
+						Candidate.LocalBounds.Max.Z);
+					if (XOverlap > 1.0 && YOverlap > 1.0 && ZOverlap > 1.0)
+					{
+						bUndercroftIsEmpty = false;
+						break;
+					}
+				}
+			}
+			if (NegativeSupport == INDEX_NONE
+				|| PositiveSupport == INDEX_NONE
+				|| NegativeSupport == PositiveSupport
+				|| !bHasClearOpening
+				|| !bUndercroftIsEmpty)
+			{
+				Keep[Span.VolumeId] = false;
+				Trace.Add(Span.DerivationPath
+					+ TEXT(" -> RejectSingleEndedSpan"));
+				continue;
+			}
+			Span.Role = EABTSM73DAG5BV2VolumeRole::SupportedSpan;
+			Span.NegativeSupportVolumeId = NegativeSupport;
+			Span.PositiveSupportVolumeId = PositiveSupport;
+			Span.SpanAxisIndex = Axis;
+			Span.SpanOpeningMinCM = OpeningMin;
+			Span.SpanOpeningMaxCM = OpeningMax;
+		}
+
+		TArray<int32> Remap;
+		Remap.Init(INDEX_NONE, Volumes.Num());
+		TArray<FABTSM73DAG5BV2Volume> Accepted;
+		Accepted.Reserve(Volumes.Num());
+		for (int32 OldId = 0; OldId < Volumes.Num(); ++OldId)
+		{
+			if (!Keep[OldId])
+			{
+				continue;
+			}
+			Remap[OldId] = Accepted.Num();
+			FABTSM73DAG5BV2Volume Volume = Volumes[OldId];
+			Volume.VolumeId = Accepted.Num();
+			Accepted.Add(MoveTemp(Volume));
+		}
+		for (FABTSM73DAG5BV2Volume& Volume : Accepted)
+		{
+			if (Volume.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				continue;
+			}
+			if (!Remap.IsValidIndex(Volume.NegativeSupportVolumeId)
+				|| !Remap.IsValidIndex(Volume.PositiveSupportVolumeId)
+				|| Remap[Volume.NegativeSupportVolumeId] == INDEX_NONE
+				|| Remap[Volume.PositiveSupportVolumeId] == INDEX_NONE)
+			{
+				return false;
+			}
+			Volume.NegativeSupportVolumeId =
+				Remap[Volume.NegativeSupportVolumeId];
+			Volume.PositiveSupportVolumeId =
+				Remap[Volume.PositiveSupportVolumeId];
+		}
+		Volumes = MoveTemp(Accepted);
+		return true;
 	}
 
 	void BuildAdjacency(
@@ -1036,6 +1260,16 @@ namespace ABTSM73DAG5BV2
 				Volume.LocalBounds.Max.X,
 				Volume.LocalBounds.Max.Y,
 				Volume.LocalBounds.Max.Z);
+			if (Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				Canonical += FString::Printf(
+					TEXT(",S=%d,%d,%d,%.3f,%.3f"),
+					Volume.NegativeSupportVolumeId,
+					Volume.PositiveSupportVolumeId,
+					Volume.SpanAxisIndex,
+					Volume.SpanOpeningMinCM,
+					Volume.SpanOpeningMaxCM);
+			}
 		}
 		return Canonical;
 	}
@@ -1112,6 +1346,13 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 			return false;
 		}
 	}
+	if (!ResolveSupportedSpans(
+		Settings, OutResult.Volumes, OutResult.GrammarTrace))
+	{
+		OutError = TEXT("DAG5BV2SupportedSpanResolutionFailed");
+		OutResult.Summary.RejectReason = OutError;
+		return false;
+	}
 
 	if (OutResult.Volumes.Num() < 3)
 	{
@@ -1141,11 +1382,9 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 		{
 			Domains[Index] = BoxMask;
 		}
-		else if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Bridge)
+		else if (IsSpanRole(Volume.Role))
 		{
-			const FVector Size = Volume.LocalBounds.GetSize();
-			Domains[Index] = BoxMask
-				| (Size.X >= Size.Y ? PrismXMask : PrismYMask);
+			Domains[Index] = BoxMask;
 		}
 	}
 	if (Settings.bRequirePrimitiveVariety
@@ -1177,6 +1416,10 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 	{
 		FABTSM73DAG5BV2Volume& Volume = OutResult.Volumes[Index];
 		Volume.Primitive = MaskToPrimitive(Domains[Index]);
+		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+		{
+			++OutResult.Summary.SupportedSpanCount;
+		}
 		if (HasAbove[Index]
 			&& Volume.Primitive != EABTSM73DAG5BV2Primitive::Box)
 		{

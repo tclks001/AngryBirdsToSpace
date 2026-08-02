@@ -263,6 +263,7 @@ bool FABTSM73BeamBNoDiagonalTest::RunTest(const FString& Parameters)
 	using namespace ABTSM73BeamBTests;
 	FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(735201);
 	Settings.bAllowBracedBay = true;
+	Settings.bAllowCantilever = true;
 	FABTSM73BeamBGenerationResult Result;
 	FString Error;
 	TestTrue(TEXT("Generation succeeds even with legacy flag enabled"),
@@ -273,6 +274,8 @@ bool FABTSM73BeamBNoDiagonalTest::RunTest(const FString& Parameters)
 	{
 		TestNotEqual(TEXT("Braced motif is outside active WFC domain"),
 			Placement.Motif, EABTSM73BeamBMotif::BracedBay);
+		TestNotEqual(TEXT("Cantilever motif is outside active WFC domain"),
+			Placement.Motif, EABTSM73BeamBMotif::CantileverBay);
 	}
 	for (const FABTSM73BeamBPlannedMember& Member : Result.PlannedMembers)
 	{
@@ -335,7 +338,8 @@ bool FABTSM73BeamBMotifCoverageTest::RunTest(const FString& Parameters)
 							return Candidate.VolumeId == Bay.SourceVolumeId;
 						});
 				if (Volume != nullptr
-					&& Volume->Role == EABTSM73DAG5BV2VolumeRole::Bridge)
+					&& Volume->Role
+						== EABTSM73DAG5BV2VolumeRole::SupportedSpan)
 				{
 					bSawBridgeVolume = true;
 					bBridgeForced &= Placement.Motif
@@ -345,8 +349,73 @@ bool FABTSM73BeamBMotifCoverageTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("Seed matrix covers at least six motif families"),
 		Seen.Num() >= 6);
-	TestTrue(TEXT("Matrix contains a bridge volume"), bSawBridgeVolume);
-	TestTrue(TEXT("Bridge volumes force BridgeBay"), bBridgeForced);
+	TestTrue(TEXT("Matrix contains a supported span volume"),
+		bSawBridgeVolume);
+	TestTrue(TEXT("Supported span volumes force BridgeBay"), bBridgeForced);
+	TestFalse(TEXT("CantileverBay is excluded from the active domain"),
+		Seen.Contains(EABTSM73BeamBMotif::CantileverBay));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBSupportedSpanVoidTest,
+	"ABTS.M73DAG.BeamB.SupportedSpanVoid",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBSupportedSpanVoidTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(940422);
+	Settings.BeamA.Silhouette.Archetype =
+		EABTSM73DAG5BV2Archetype::BridgedArcology;
+	Settings.bAllowCantilever = true;
+	FABTSM73BeamBGenerationResult Result;
+	FString Error;
+	if (!Generate(Settings, Result, Error))
+	{
+		AddError(FString::Printf(TEXT("Generation failed: %s"), *Error));
+		return false;
+	}
+	TestTrue(TEXT("Supported span reserves an undercroft"),
+		!Result.ClosedAssembly.ReservedSupportVoids.IsEmpty());
+	for (const FABTSM73BeamBPlacement& Placement : Result.Placements)
+	{
+		TestNotEqual(TEXT("Legacy cantilever is never selected"),
+			Placement.Motif, EABTSM73BeamBMotif::CantileverBay);
+	}
+
+	const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+	for (const FABTSM73BeamAMember& Member : Result.ClosedAssembly.Members)
+	{
+		if (Member.Axis != EABTSM73BeamAFrameAxis::Z)
+		{
+			continue;
+		}
+		const FBox Bounds = MemberBounds(Member, Result.ClosedAssembly,
+			Settings.BeamA.BlockCrossSectionCM);
+		const FVector Station = Bounds.GetCenter();
+		for (const FABTSM73BeamASupportVoid& SupportVoid :
+			Result.ClosedAssembly.ReservedSupportVoids)
+		{
+			const FBox& Void = SupportVoid.Bounds;
+			const bool bOverlapsHeight = Bounds.Max.Z > Void.Min.Z + Tolerance
+				&& Bounds.Min.Z < Void.Max.Z - Tolerance;
+			const bool bInsideFootprint = Station.X > Void.Min.X + Tolerance
+				&& Station.X < Void.Max.X - Tolerance
+				&& Station.Y > Void.Min.Y + Tolerance
+				&& Station.Y < Void.Max.Y - Tolerance;
+			if (bOverlapsHeight && bInsideFootprint)
+			{
+				AddError(FString::Printf(
+					TEXT("Z member %d at %s enters void %s..%s axis %d"),
+					Member.MemberId,
+					*Station.ToString(),
+					*Void.Min.ToCompactString(),
+					*Void.Max.ToCompactString(),
+					SupportVoid.SpanAxisIndex));
+			}
+		}
+	}
 	return true;
 }
 

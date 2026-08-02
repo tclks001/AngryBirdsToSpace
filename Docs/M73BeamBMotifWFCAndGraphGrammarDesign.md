@@ -16,10 +16,10 @@ Beam-A 已解决“语义 Volume 如何变成可搭放的 XYZ 长条积木和 Be
 本阶段实现：
 
 - 在 Beam-A Bay 图上运行第二级、确定性的 Motif WFC；
-- 当前母题包括 `PostAndLintel`、`PortalFrame`、`CrossBeam`、`TwoLayerCrib`、
-  `TransferFrame`、`CantileverBay`、`BridgeBay`；`BracedBay` 保留为枚举兼容项，但不进入 WFC 生成域；
-- 用 Port 约束相邻 Bay 的 X/Y 连续性，Bridge 只允许出现在上游 Bridge Volume；
-- 用图语法深度增加横梁、交替木垛、转换支点或悬挑根部等拓扑；
+- 当前生成母题包括 `PostAndLintel`、`PortalFrame`、`CrossBeam`、`TwoLayerCrib`、
+  `TransferFrame`、`BridgeBay`；`CantileverBay` 与 `BracedBay` 仅保留枚举/旧资产兼容，不进入 WFC 生成域；
+- 用 Port 约束相邻 Bay 的 X/Y 连续性；上游 `SupportedSpan` 强制选择 `BridgeBay`；
+- 用图语法深度增加横梁、交替木垛或转换支点等拓扑；
 - Box Bay 使用 Beam-B Motif；Prism/Pyramid Bay 直接复用 Beam-A 的逐层收分屋顶编译器，
   不再用矩形 TwoLayerCrib 覆盖上游 Shape Grammar 语义；
 - 所有计划构件保持在来源 Bay/Volume 允许域内，跨 Bay 只通过相容 Port 表达；
@@ -69,9 +69,9 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 | CrossBeam | 两向梁层与四角支柱 | 宽 Body/Foundation |
 | TwoLayerCrib | X/Y 交替堆放的木垛层 | Roof、Crown、矮 Bay |
 | TransferFrame | 下部少支点转为上部多支点 | 高 Body |
-| CantileverBay | 有明确根部和配重侧的悬挑 | Annex、外缘 Bay |
+| CantileverBay | 保留枚举；当前不进入生成域 | 单边悬挑已停用，不得靠补地长柱救活 |
 | BracedBay | 保留枚举；当前不进入生成域 | 等显式斜撑座与连接契约完成后再启用 |
-| BridgeBay | 双主梁、端横梁和跨 Chunk Port | Bridge Volume，强制 |
+| BridgeBay | 双主梁、端横梁和跨 Chunk Port | SupportedSpan，强制 |
 
 Port 使用 `X- / X+ / Y- / Y+ / Lower / Upper` 位掩码。WFC 只负责局部邻接相容；它不把
 Port 相容误当成结构已经稳定。相邻 Bay 的共享边界必须由两侧同时提供相向 Port。
@@ -83,7 +83,7 @@ Port 相容误当成结构已经稳定。相邻 Bay 的共享边界必须由两�
 - `BeamToGrillage`：在跨度允许时增加均匀平行梁；
 - `AlternateCribLayer`：增加一层与前层正交的木垛；
 - `AddTransferTier`：把少数下支点展开为更多上支点；
-- `AddCantileverRoot`：为悬挑增加根部和配重联系；
+- `AddCantileverRoot`：保留规则枚举；当前没有可进入该规则的 CantileverBay；
 - `TriangulateBay`：保留规则枚举但当前停用，不产生任何斜撑构件；
 - `RefinePortal`：为高门架增加中间联系层。
 
@@ -106,13 +106,14 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 过滤器：`ABTS.M73DAG.BeamB.`。
 
 - `Determinism`：同输入 Motif、Port、规则、构件和 Hash 完全一致；
-- `MotifCoverage`：固定种子矩阵覆盖首版结构家族，Bridge Volume 只能选择 BridgeBay；
+- `MotifCoverage`：固定种子矩阵覆盖当前结构家族，SupportedSpan 只能选择 BridgeBay，且生成域不含 CantileverBay；
 - `PortCompatibility`：所有相邻 Bay 的相向 Port 相容；
 - `GrammarDepthAddsTopology`：提高深度会增加规则或计划构件，不改变上游轮廓身份；
 - `BoundsAndBudget`：计划构件不越出所属 Bay，预算不足原子拒绝；
 - `InvalidSettings`：非法深度、预算或截面稳定 fail closed；
 - `GlobalAssemblyClosure`：多组 Archetype 的闭合成员独立 AABB 检查无正体积穿透，且每个成员均可沿 Bearing 链到达地面；
-- `NoDiagonalMembers`：即使旧资产把 `bAllowBracedBay` 设为真，也不得选择 BracedBay 或生成计划/闭合斜撑。
+- `NoDiagonalMembers`：即使旧资产把 `bAllowBracedBay`、`bAllowCantilever` 设为真，也不得选择 BracedBay、CantileverBay 或生成计划/闭合斜撑。
+- `SupportedSpanVoid`：有意架空跨越必须留下非空保留空间，闭合 Assembly 的 Z 柱不得进入其跨中下方。
 - `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
   在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
 
@@ -122,15 +123,16 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 
 1. 同一上游轮廓内应能看到至少两种颜色/结构母题，而不是全楼重复同一种方框；
 2. `GrammarDepth` 从 1 提高到 3～4 时，门架联系层、木垛层或平行梁数量应增加；
-3. Bridge 体量必须显示双长梁/横向端梁，不得坍缩为普通塔楼母题；
-4. Cantilever 只应出现在外缘/Annex 候选；当前任何设置下都不应出现斜杆；
+3. SupportedSpan 必须显示双长梁/横向端梁，且分别接到两端主体，不得坍缩为普通塔楼母题；
+4. 不得生成单边 Cantilever；旧 `bAllowCantilever` 开关不再恢复该形态，当前任何设置下也不应出现斜杆；
 5. 上游 Prism 应由逐层缩短一个水平轴的梁层读出坡屋顶；Pyramid 应同时沿 X/Y 收分，
    不得再显示为等宽矩形木垛或平顶框；
 6. 不应再看到整组悬空、相互横穿或大块正体积重叠；允许端面接触与上下承托接触；
 7. Details 中 Accepted 为真，PortViolationCount、OutOfBoundsMemberCount、
    RemainingPenetrationCount、UnsupportedMemberCount、DiagonalMemberCount 均为 0，
    SemanticEnvelopeViolationCount 为 0，ClosedMemberCount 与 ClosedBearingContactCount 大于 0；
-8. 进入 PIE 后预览不可见且不参与物理 Gate。
+8. SupportedSpan 下方必须保持为空，不得生成跨中落地长柱；跨度两端允许在主体侧形成门框式支承；
+9. 进入 PIE 后预览不可见且不参与物理 Gate。
 
 本阶段验收“结构复杂度、局部拼接语义以及静态全局装配闭合”。真实 Brick/Chaos 动态稳定性、
 可玩弱点和权威 Load DAG 仍不在 Beam-B 宣称范围内。
@@ -150,3 +152,8 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - 种子/Archetype 矩阵覆盖至少六类 Motif，Bridge Volume 强制映射为 BridgeBay；
 - 深度 1 与深度 4 保持相同 Motif WFC Hash，同时增加规则步骤和计划构件数量；
 - Beam-B 与 Beam-A 调用同一个 `CloseGeneratedAssembly`，不存在第二套收口判定；当前生成域中斜撑数量恒为 0。
+- `Saved/Logs/SupportedSpan-BeamB-20260802-1835.log`：精确找到 10 项
+  `ABTS.M73DAG.BeamB`，10/10 Success；新增 `SupportedSpanVoid` 覆盖双端支承、显式跨度轴和跨中禁柱；
+- `Saved/Logs/SupportedSpan-M7-20260802-1840.log`：精确找到 93 项 `ABTS.M7`，93/93 Success；
+- `Saved/Logs/SupportedSpan-ModuleFamily-Build-20260802-1830.log`：使用
+  `-ForceUnity -DisableAdaptiveUnity` 完整链接，`Result: Succeeded`。

@@ -88,7 +88,7 @@ Graph 是无向/混合方向的几何装配图；Load DAG 是之后按重力和�
 | --- | --- | --- |
 | Beam 调研 | 明确轮廓复杂度与结构复杂度分层，以及 Assembly Graph / Load DAG 双图 | [调研完成](M73BeamBlockStructuralGenerationResearch.md) |
 | Beam-A v2 | 将 Volume 编译为 Bay，再生成固定截面、可变长度的 XYZ 积木及 Bearing Contact | [已完成并通过用户编辑器读形验收](M73BeamAStructuralIRPreviewDesign.md) |
-| Beam-B | Box Bay 用 Motif WFC 选择结构家族，Prism/Pyramid Bay 复用 Beam-A 逐层收分语义屋顶，并统一装配收口 | [9 项专项与 91 项 M7 自动化完成，待编辑器读形](M73BeamBMotifWFCAndGraphGrammarDesign.md) |
+| Beam-B | Box Bay 用 Motif WFC 选择结构家族，Prism/Pyramid Bay 复用 Beam-A 逐层收分语义屋顶；SupportedSpan 保留双端承托门洞，禁用单边 Cantilever，并统一装配收口 | [10 项专项与 93 项 M7 自动化完成，待编辑器读形](M73BeamBMotifWFCAndGraphGrammarDesign.md) |
 | Beam-C | 对图做预算内展开，选择离散构件，并提取/验证 Load DAG | 未开始 |
 | Beam-D | 编译真实 Brick，联合弱点、真实接触、Chaos、TaskGraph 与六栋建筑候选 | 未开始 |
 

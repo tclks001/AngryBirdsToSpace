@@ -98,7 +98,7 @@ Blueprint 和地图实例的 Native Default Subobject 序列化。
 | `Setback` | 沿 Z 分层，同时缩小并偏移上部 Scope |
 | `SplitX` | 左右分区，中间留下空隙 |
 | `SplitY` | 前后分区，中间留下空隙 |
-| `Bridge` | 分区后按概率在中高层增加横跨体量 |
+| `Bridge` | 分区后按概率提出横跨候选；候选只有在跨度轴两端分别找到不同承托体时才转为 `SupportedSpan`，否则整项丢弃 |
 | `Terminal` | 停止展开并输出语义体量 |
 
 规则选择由稳定路径 Seed 决定：
@@ -146,8 +146,14 @@ PrimitiveDomain
 `Role` 包括：
 
 ```text
-Foundation / Body / Annex / Bridge / Crown
+Foundation / Body / Annex / Bridge / Crown / SupportedSpan
 ```
+
+`SupportedSpan` 是有意保留门洞/架空通道的结构语义，不等于任意悬挑。它额外记录跨度轴、负端承托体、
+正端承托体和模块族内侧面共同确定的净开口区间。两个端点必须属于不同的顶层语义模块族，而且分别
+位于跨度中心的两侧；缺少任一端、两端来自同一递归模块族、净开口不足，或开口下方还被第三方体量
+占用的候选都会在进入 WFC 前确定性删除。旧 `Bridge` 仅保留为序列化兼容角色，新生成结果使用
+`SupportedSpan`。
 
 ### 4.2 形体域
 

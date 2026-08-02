@@ -13,6 +13,14 @@ struct FABTSM73DAG5BV2Volume
 		EABTSM73DAG5BV2VolumeRole::Body;
 	EABTSM73DAG5BV2Primitive Primitive =
 		EABTSM73DAG5BV2Primitive::Box;
+	/** Opposed endpoint supports for SupportedSpan; invalid for other roles. */
+	int32 NegativeSupportVolumeId = INDEX_NONE;
+	int32 PositiveSupportVolumeId = INDEX_NONE;
+	/** 0 for X and 1 for Y; INDEX_NONE for non-span volumes. */
+	int32 SpanAxisIndex = INDEX_NONE;
+	/** Clear undercroft interval along SpanAxisIndex. */
+	double SpanOpeningMinCM = 0.0;
+	double SpanOpeningMaxCM = 0.0;
 	FString DerivationPath;
 };
 

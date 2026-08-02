@@ -46,8 +46,10 @@ struct FABTSM73BeamBPreviewSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
 	bool bRequireMotifVariety = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
-	bool bAllowCantilever = true;
+	/** Legacy serialized switch; CantileverBay is no longer generated. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC",
+		meta = (AdvancedDisplay))
+	bool bAllowCantilever = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motif WFC")
 	bool bAllowBracedBay = false;

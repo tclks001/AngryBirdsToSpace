@@ -40,6 +40,13 @@ namespace ABTSM73DAG5BV2Tests
 			&& A.LocalBounds.Max.Equals(B.LocalBounds.Max, 0.001)
 			&& A.Role == B.Role
 			&& A.Primitive == B.Primitive
+			&& A.NegativeSupportVolumeId == B.NegativeSupportVolumeId
+			&& A.PositiveSupportVolumeId == B.PositiveSupportVolumeId
+			&& A.SpanAxisIndex == B.SpanAxisIndex
+			&& FMath::IsNearlyEqual(
+				A.SpanOpeningMinCM, B.SpanOpeningMinCM, 0.001)
+			&& FMath::IsNearlyEqual(
+				A.SpanOpeningMaxCM, B.SpanOpeningMaxCM, 0.001)
 			&& A.DerivationPath == B.DerivationPath;
 	}
 
@@ -342,6 +349,78 @@ bool FABTSM73DAG5BV2RoofPrimitiveTerminalTest::RunTest(
 			}
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG5BV2SupportedSpanContractTest,
+	"ABTS.M73DAG.DAG5Bv2.SupportedSpanContract",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG5BV2SupportedSpanContractTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73DAG5BV2Tests;
+	int32 SpanCount = 0;
+	for (int32 ArchetypeValue = static_cast<int32>(
+		EABTSM73DAG5BV2Archetype::TerracedCitadel);
+		ArchetypeValue <= static_cast<int32>(
+			EABTSM73DAG5BV2Archetype::SpiredCampus); ++ArchetypeValue)
+	{
+		FABTSM73DAG5BV2PreviewSettings Settings = MakeSettings();
+		Settings.Archetype =
+			static_cast<EABTSM73DAG5BV2Archetype>(ArchetypeValue);
+		Settings.BuildingSeed = 950000 + ArchetypeValue * 307;
+		FABTSM73DAG5BV2GenerationResult Result;
+		FString Error;
+		if (!Generate(Settings, Result, Error))
+		{
+			AddError(FString::Printf(TEXT("Generation failed: %s"), *Error));
+			return false;
+		}
+		int32 ResultSpanCount = 0;
+		for (const FABTSM73DAG5BV2Volume& Span : Result.Volumes)
+		{
+			if (Span.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				continue;
+			}
+			++SpanCount;
+			++ResultSpanCount;
+			TestTrue(TEXT("Span is intentionally elevated"),
+				Span.LocalBounds.Min.Z > 1.0);
+			TestTrue(TEXT("Span axis is horizontal"),
+				Span.SpanAxisIndex == 0 || Span.SpanAxisIndex == 1);
+			TestTrue(TEXT("Negative support identity is valid"),
+				Result.Volumes.IsValidIndex(Span.NegativeSupportVolumeId));
+			TestTrue(TEXT("Positive support identity is valid"),
+				Result.Volumes.IsValidIndex(Span.PositiveSupportVolumeId));
+			TestNotEqual(TEXT("Endpoint supports are distinct"),
+				Span.NegativeSupportVolumeId,
+				Span.PositiveSupportVolumeId);
+			TestTrue(TEXT("Supported span has a non-empty clear opening"),
+				Span.SpanOpeningMaxCM > Span.SpanOpeningMinCM);
+			if (!Result.Volumes.IsValidIndex(Span.NegativeSupportVolumeId)
+				|| !Result.Volumes.IsValidIndex(Span.PositiveSupportVolumeId)
+				|| (Span.SpanAxisIndex != 0 && Span.SpanAxisIndex != 1))
+			{
+				continue;
+			}
+			const double Center =
+				Span.LocalBounds.GetCenter()[Span.SpanAxisIndex];
+			TestTrue(TEXT("Negative support is on the negative side"),
+				Result.Volumes[Span.NegativeSupportVolumeId]
+					.LocalBounds.GetCenter()[Span.SpanAxisIndex] < Center);
+			TestTrue(TEXT("Positive support is on the positive side"),
+				Result.Volumes[Span.PositiveSupportVolumeId]
+					.LocalBounds.GetCenter()[Span.SpanAxisIndex] > Center);
+		}
+		TestEqual(TEXT("Summary reports supported spans"),
+			Result.Summary.SupportedSpanCount, ResultSpanCount);
+	}
+	TestTrue(TEXT("Archetype matrix contains an intentional span"),
+		SpanCount > 0);
 	return true;
 }
 

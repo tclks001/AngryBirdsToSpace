@@ -317,7 +317,7 @@ void AABTSM73DAG5BShapePreviewActor::RegeneratePreview()
 		LogABTSRuntime,
 		Display,
 		TEXT("[ABTS][M7.3-DAG5Bv2][PreviewGenerated] Actor=%s Archetype=%d")
-		TEXT(" GrammarSteps=%d Volumes=%d Box=%d Prism=%d Pyramid=%d")
+		TEXT(" GrammarSteps=%d Volumes=%d Box=%d Prism=%d Pyramid=%d Span=%d")
 		TEXT(" Propagation=%d Backtracks=%d GrammarHash=%lld")
 		TEXT(" WFCHash=%lld ResultHash=%lld"),
 		*GetName(),
@@ -327,6 +327,7 @@ void AABTSM73DAG5BShapePreviewActor::RegeneratePreview()
 		LastPreviewSummary.BoxCount,
 		LastPreviewSummary.PrismCount,
 		LastPreviewSummary.PyramidCount,
+		LastPreviewSummary.SupportedSpanCount,
 		LastPreviewSummary.WFCPropagationOperationCount,
 		LastPreviewSummary.WFCBacktrackStepCount,
 		LastPreviewSummary.GrammarHash,

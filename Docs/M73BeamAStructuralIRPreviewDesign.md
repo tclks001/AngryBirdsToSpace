@@ -136,6 +136,12 @@ XY 重叠面积。超过 `MaxBearingPairChecks` 或 `MaxBearingContactCount` 时
    整个 Assembly 不可达时不得裁剪绕过，必须 fail closed；
 8. 最终重新提取 Bearing Graph，并以“无正体积穿插、所有 Member 均可沿 Bearing 有向边追溯到地面”为硬门槛。
 
+`SupportedSpan` 是上述“不可达就补柱”规则的显式例外，但不是降低稳定门槛。Beam-A 会把跨度中部、从
+地面到跨越体底面的空间写入 `ReservedSupportVoids`：全局收口不得在该范围内增加 Z 柱。跨越体只允许
+在跨度两端、保留空间外侧生成与相邻承托体对齐的端部支柱；因此最终 Bearing 图仍必须到地，但门洞
+中央保持为空。若两端承托不能形成闭合路径，则删除冗余候选或 fail closed，禁止退化为“一旁悬空，
+再用一根超长地柱救活”的形态。
+
 收口统计暴露为 `SplitPostMemberCount`、`MergedMemberCount`、`ShiftedCourseCount`、
 `GlobalSupportMemberCount`、`PrunedUnsupportedMemberCount`、`RemainingPenetrationCount` 和
 `UnsupportedMemberCount`。Accepted 结果的最后两项必须恒为 0。
@@ -188,6 +194,8 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 - `ParallelCourseSpacing`：平行积木满足数量、最小间隙和两根合一阈值；
 - `AdjacentBayBoundarySpacing`：相邻 Bay 公共边界按实际 course 间距退让；
 - `ParallelZSupportPlacement`：Z 柱直接消费水平积木位置，并覆盖 X-Y、X-X/Y-Y 对齐承托。
+- 跨阶段 `ABTS.M73DAG.DAG5Bv2.SupportedSpanContract`：跨越体必须有两个不同模块族的对向承托体
+  和非空净开口；Beam-B 的 `SupportedSpanVoid` 再验证保留空间内不得补入 Z 柱。
 
 ## 7. 用户编辑器验收
 
@@ -201,7 +209,8 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 6. 调整 `BlockCrossSectionCM` 时所有积木的两条短边同步变化，长度仍随轮廓独立变化；
 7. Details 中 Accepted 为真、BearingContactCount 大于 0、DiagonalMemberCount 等于 0；
    `RemainingPenetrationCount` 与 `UnsupportedMemberCount` 均为 0；
-8. 进入 PIE 后预览不可见，也不参与启动物理 Gate。
+8. `SupportedSpan` 下方应能读出完整门洞；两端与相邻主体相接，跨中不得出现补到地面的长柱；
+9. 进入 PIE 后预览不可见，也不参与启动物理 Gate。
 
 本阶段仍不要求预览在 Chaos 中站立。它验证的是“搭放拓扑和承托接触”，真实积木、摩擦、
 沉降和破坏认证属于 Beam-D。

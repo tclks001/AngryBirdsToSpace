@@ -16,6 +16,12 @@ namespace ABTSM73BeamB
 	constexpr uint8 PortLower = 1 << 4;
 	constexpr uint8 PortUpper = 1 << 5;
 
+	bool IsSupportedSpanRole(const EABTSM73DAG5BV2VolumeRole Role)
+	{
+		return Role == EABTSM73DAG5BV2VolumeRole::Bridge
+			|| Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan;
+	}
+
 	uint8 AxisPorts(const EABTSM73BeamAFrameAxis Axis)
 	{
 		return Axis == EABTSM73BeamAFrameAxis::Y
@@ -113,7 +119,7 @@ namespace ABTSM73BeamB
 		TArray<EABTSM73BeamBMotif>& OutDomain)
 	{
 		OutDomain.Reset();
-		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Bridge)
+		if (IsSupportedSpanRole(Volume.Role))
 		{
 			OutDomain.Add(EABTSM73BeamBMotif::BridgeBay);
 			return;
@@ -127,9 +133,6 @@ namespace ABTSM73BeamB
 			return;
 		}
 
-		const FVector Size = Bay.LocalBounds.GetSize();
-		const double PrimarySpan = Bay.PreferredAxis
-			== EABTSM73BeamAFrameAxis::Y ? Size.Y : Size.X;
 		OutDomain.Append({
 			EABTSM73BeamBMotif::PostAndLintel,
 			EABTSM73BeamBMotif::PortalFrame,
@@ -140,12 +143,8 @@ namespace ABTSM73BeamB
 		{
 			OutDomain.Add(EABTSM73BeamBMotif::TransferFrame);
 		}
-		if (Settings.bAllowCantilever
-			&& Volume.Role == EABTSM73DAG5BV2VolumeRole::Annex
-			&& PrimarySpan >= Settings.BeamA.BlockCrossSectionCM * 5.0)
-		{
-			OutDomain.Add(EABTSM73BeamBMotif::CantileverBay);
-		}
+		// CantileverBay remains a serialized enum value only. A side volume
+		// that needs an invented ground post is no longer a legal WFC family.
 		// BracedBay remains a reserved semantic value, but Beam-B deliberately
 		// keeps it out of the domain until a visible, non-penetrating brace seat
 		// and an explicit physical connection contract exist.
@@ -671,6 +670,7 @@ namespace ABTSM73BeamB
 		Closed = FABTSM73BeamAGenerationResult();
 		Closed.Bays = BeamA.Bays;
 		Closed.Assemblies = BeamA.Assemblies;
+		Closed.ReservedSupportVoids = BeamA.ReservedSupportVoids;
 		FABTSM73BeamAPreviewSummary FreshSummary;
 		FreshSummary.SourceVolumeCount = BeamA.Summary.SourceVolumeCount;
 		FreshSummary.BayCount = BeamA.Bays.Num();
