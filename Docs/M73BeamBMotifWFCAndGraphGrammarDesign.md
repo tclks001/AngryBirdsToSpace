@@ -19,6 +19,7 @@ Beam-A 已解决“语义 Volume 如何变成可搭放的 XYZ 长条积木和 Be
 - 当前生成母题包括 `PostAndLintel`、`PortalFrame`、`CrossBeam`、`TwoLayerCrib`、
   `TransferFrame`、`BridgeBay`；`CantileverBay` 与 `BracedBay` 仅保留枚举/旧资产兼容，不进入 WFC 生成域；
 - 用 Port 约束相邻 Bay 的 X/Y 连续性；上游 `SupportedSpan` 强制选择 `BridgeBay`；
+- `SupportedSpan` 的终端主梁延伸到权威净开口边界，并在两端生成归属指定承托模块的横向 `BridgeSeat`；
 - 用图语法深度增加横梁、交替木垛或转换支点等拓扑；
 - Box Bay 使用 Beam-B Motif；Prism/Pyramid Bay 直接复用 Beam-A 的逐层收分屋顶编译器，
   不再用矩形 TwoLayerCrib 覆盖上游 Shape Grammar 语义；
@@ -44,6 +45,7 @@ DAG5-B v2 semantic volumes
   -> deterministic Motif WFC collapse + port propagation
   -> bounded graph grammar expansion
   -> Box Bay motif members + Beam-A semantic roof courses
+  -> supported-span endpoint rail extension + support-module bridge seats
   -> compile to Beam-A Joint / Member / Assembly IR
   -> shared Beam-A global assembly closure
   -> closed structural members for editor preview
@@ -71,7 +73,7 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 | TransferFrame | 下部少支点转为上部多支点 | 高 Body |
 | CantileverBay | 保留枚举；当前不进入生成域 | 单边悬挑已停用，不得靠补地长柱救活 |
 | BracedBay | 保留枚举；当前不进入生成域 | 等显式斜撑座与连接契约完成后再启用 |
-| BridgeBay | 双主梁、端横梁和跨 Chunk Port | SupportedSpan，强制 |
+| BridgeBay | 双主梁、端横梁、跨 Chunk Port；终端主梁延伸到权威开口边界并落在桥托上 | SupportedSpan，强制 |
 
 Port 使用 `X- / X+ / Y- / Y+ / Lower / Upper` 位掩码。WFC 只负责局部邻接相容；它不把
 Port 相容误当成结构已经稳定。相邻 Bay 的共享边界必须由两侧同时提供相向 Port。
@@ -86,6 +88,7 @@ Port 相容误当成结构已经稳定。相邻 Bay 的共享边界必须由两�
 - `AddCantileverRoot`：保留规则枚举；当前没有可进入该规则的 CantileverBay；
 - `TriangulateBay`：保留规则枚举但当前停用，不产生任何斜撑构件；
 - `RefinePortal`：为高门架增加中间联系层。
+- `AddBridgeSeat`：在跨越体两端记录指定承托模块的横向桥托；全局收口可将桥托吸收到同模块既有承托梁，但不得丢失模块到桥体的局部 Bearing 路径。
 
 `GrammarDepth` 增加时必须增加 `GrammarStepCount` 或 `PlannedMemberCount`，不能只把同一个外盒
 切成更细但拓扑等价的片段。所有规则受 `MaxGrammarStepCount` 和 `MaxPlannedMemberCount` 硬预算控制，
@@ -114,6 +117,7 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - `GlobalAssemblyClosure`：多组 Archetype 的闭合成员独立 AABB 检查无正体积穿透，且每个成员均可沿 Bearing 链到达地面；
 - `NoDiagonalMembers`：即使旧资产把 `bAllowBracedBay`、`bAllowCantilever` 设为真，也不得选择 BracedBay、CantileverBay 或生成计划/闭合斜撑。
 - `SupportedSpanVoid`：有意架空跨越必须留下非空保留空间，闭合 Assembly 的 Z 柱不得进入其跨中下方。
+- `BridgeEndpointBearing`：每个 SupportedSpan 必须有两份桥托账本；桥托留在上游指定的语义模块内，闭合后两端均存在“指定模块 -> 桥体”的局部 Bearing 路径，且桥体 Assembly 不得靠落地长柱救援。
 - `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
   在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
 
@@ -123,7 +127,7 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 
 1. 同一上游轮廓内应能看到至少两种颜色/结构母题，而不是全楼重复同一种方框；
 2. `GrammarDepth` 从 1 提高到 3～4 时，门架联系层、木垛层或平行梁数量应增加；
-3. SupportedSpan 必须显示双长梁/横向端梁，且分别接到两端主体，不得坍缩为普通塔楼母题；
+3. SupportedSpan 必须显示双长梁/横向端梁；终端主梁应延伸至净开口边界并分别落在两端横向桥托上，不得留下可见端缝，也不得坍缩为普通塔楼母题；
 4. 不得生成单边 Cantilever；旧 `bAllowCantilever` 开关不再恢复该形态，当前任何设置下也不应出现斜杆；
 5. 上游 Prism 应由逐层缩短一个水平轴的梁层读出坡屋顶；Pyramid 应同时沿 X/Y 收分，
    不得再显示为等宽矩形木垛或平顶框；
@@ -131,7 +135,7 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 7. Details 中 Accepted 为真，PortViolationCount、OutOfBoundsMemberCount、
    RemainingPenetrationCount、UnsupportedMemberCount、DiagonalMemberCount 均为 0，
    SemanticEnvelopeViolationCount 为 0，ClosedMemberCount 与 ClosedBearingContactCount 大于 0；
-8. SupportedSpan 下方必须保持为空，不得生成跨中落地长柱；跨度两端允许在主体侧形成门框式支承；
+8. SupportedSpan 下方必须保持为空，不得生成跨中落地长柱；两端桥托应由上游指定的承托模块承担，允许收口后与该模块既有承托梁合并，但不允许桥体自身补到地面；
 9. 进入 PIE 后预览不可见且不参与物理 Gate。
 
 本阶段验收“结构复杂度、局部拼接语义以及静态全局装配闭合”。真实 Brick/Chaos 动态稳定性、
@@ -157,3 +161,9 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - `Saved/Logs/SupportedSpan-M7-20260802-1840.log`：精确找到 93 项 `ABTS.M7`，93/93 Success；
 - `Saved/Logs/SupportedSpan-ModuleFamily-Build-20260802-1830.log`：使用
   `-ForceUnity -DisableAdaptiveUnity` 完整链接，`Result: Succeeded`。
+- `Saved/Logs/BridgeSeat-BeamB-20260802-185754-FreshAutomation.log`：精确找到 11 项
+  `ABTS.M73DAG.BeamB`，11/11 Success；新增 `BridgeEndpointBearing` 覆盖桥托模块归属、终端主梁到权威开口边界的实体连接、局部 Bearing 链和桥体禁用落地救援柱。
+- `Saved/Logs/BridgeSeat-ForceUnity-20260802-190049.log`：使用 `-ForceUnity -DisableAdaptiveUnity`
+  完整链接，`Result: Succeeded`；检测到的可见 Editor 属于其他工作树，未终止、复用或控制。
+- `Saved/Logs/BridgeSeat-M7-20260802-190230-FullRegression.log`：精确找到 94 项
+  `ABTS.M7`，94/94 Success。

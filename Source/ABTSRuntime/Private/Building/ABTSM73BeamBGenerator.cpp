@@ -112,6 +112,76 @@ namespace ABTSM73BeamB
 			});
 	}
 
+	FString SemanticModulePath(const FString& Path)
+	{
+		TArray<FString> Parts;
+		Path.ParseIntoArray(Parts, TEXT("/"), true);
+		return Parts.Num() >= 2
+			? Parts[0] + TEXT("/") + Parts[1]
+			: Path;
+	}
+
+	const FABTSM73DAG5BV2Volume* ResolveEndpointSupportVolume(
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const int32 DeclaredSupportVolumeId,
+		const int32 SpanAxis,
+		const double BearingPlane,
+		const double PerpendicularMin,
+		const double PerpendicularMax,
+		const double SeatMinZ,
+		const double SeatMaxZ,
+		const bool bNegativeEndpoint)
+	{
+		const FABTSM73DAG5BV2Volume* Declared =
+			FindVolume(Silhouette, DeclaredSupportVolumeId);
+		if (Declared == nullptr)
+		{
+			return nullptr;
+		}
+		const FString ModulePath = SemanticModulePath(Declared->DerivationPath);
+		const int32 Perpendicular = SpanAxis == 0 ? 1 : 0;
+		const FABTSM73DAG5BV2Volume* Best = nullptr;
+		double BestAxisDistance = TNumericLimits<double>::Max();
+		double BestScore = TNumericLimits<double>::Max();
+		for (const FABTSM73DAG5BV2Volume& Candidate : Silhouette.Volumes)
+		{
+			if (Candidate.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan
+				|| SemanticModulePath(Candidate.DerivationPath) != ModulePath)
+			{
+				continue;
+			}
+			const double PerpendicularOverlap = FMath::Min(
+				PerpendicularMax, Candidate.LocalBounds.Max[Perpendicular])
+				- FMath::Max(
+					PerpendicularMin, Candidate.LocalBounds.Min[Perpendicular]);
+			if (PerpendicularOverlap <= 0.1)
+			{
+				continue;
+			}
+			const double AxisDistance = bNegativeEndpoint
+				? FMath::Abs(BearingPlane - Candidate.LocalBounds.Max[SpanAxis])
+				: FMath::Abs(Candidate.LocalBounds.Min[SpanAxis] - BearingPlane);
+			const double VerticalDistance = SeatMaxZ < Candidate.LocalBounds.Min.Z
+				? Candidate.LocalBounds.Min.Z - SeatMaxZ
+				: SeatMinZ > Candidate.LocalBounds.Max.Z
+					? SeatMinZ - Candidate.LocalBounds.Max.Z : 0.0;
+			const double Score = VerticalDistance
+				- PerpendicularOverlap * 0.01;
+			if (AxisDistance < BestAxisDistance - 0.1
+				|| (FMath::IsNearlyEqual(AxisDistance, BestAxisDistance, 0.1)
+					&& (Score < BestScore
+						|| (FMath::IsNearlyEqual(Score, BestScore)
+					&& (Best == nullptr || Candidate.VolumeId < Best->VolumeId)))
+					))
+			{
+				Best = &Candidate;
+				BestAxisDistance = AxisDistance;
+				BestScore = Score;
+			}
+		}
+		return Best;
+	}
+
 	void BuildDomain(
 		const FABTSM73BeamBPreviewSettings& Settings,
 		const FABTSM73BeamABay& Bay,
@@ -253,10 +323,11 @@ namespace ABTSM73BeamB
 
 	FBayCoordinates Coordinates(
 		const FABTSM73BeamABay& Bay,
-		const double Thickness)
+		const double Thickness,
+		const EABTSM73BeamAFrameAxis PrimaryAxis)
 	{
 		FBayCoordinates C;
-		C.PrimaryAxis = Bay.PreferredAxis;
+		C.PrimaryAxis = PrimaryAxis;
 		if (C.PrimaryAxis == EABTSM73BeamAFrameAxis::Y)
 		{
 			C.U0 = Bay.LocalBounds.Min.Y + Thickness * 0.5;
@@ -322,7 +393,7 @@ namespace ABTSM73BeamB
 		FABTSM73BeamBPlacement& Placement)
 	{
 		const double T = B.Settings.BeamA.BlockCrossSectionCM;
-		const FBayCoordinates C = Coordinates(Bay, T);
+		const FBayCoordinates C = Coordinates(Bay, T, Placement.Orientation);
 		if (C.U1 <= C.U0 || C.V1 <= C.V0 || C.Z1 <= C.Z0)
 		{
 			*B.Error = TEXT("BeamBBayTooSmallForMotif");
@@ -514,6 +585,278 @@ namespace ABTSM73BeamB
 		return Placement.PlannedMemberCount > 0;
 	}
 
+	FBox PlannedMemberBounds(
+		const FABTSM73BeamBPlannedMember& Member,
+		const double CrossSectionCM)
+	{
+		const FVector Center = (Member.LocalStart + Member.LocalEnd) * 0.5;
+		FVector Extent(CrossSectionCM * 0.5);
+		const int32 AxisIndex = static_cast<int32>(Member.Axis);
+		if (AxisIndex >= 0 && AxisIndex <= 2)
+		{
+			Extent[AxisIndex] =
+				(Member.LocalEnd - Member.LocalStart).Size() * 0.5;
+		}
+		return FBox(Center - Extent, Center + Extent);
+	}
+
+	const FABTSM73BeamABay* FindEndpointSupportBay(
+		const FABTSM73BeamAGenerationResult& BeamA,
+		const int32 SupportVolumeId,
+		const int32 SpanAxis,
+		const double BearingPlane,
+		const double PerpendicularCenter,
+		const double SeatCenterZ)
+	{
+		const int32 Perpendicular = SpanAxis == 0 ? 1 : 0;
+		const FABTSM73BeamABay* Best = nullptr;
+		double BestScore = TNumericLimits<double>::Max();
+		for (const FABTSM73BeamABay& Bay : BeamA.Bays)
+		{
+			if (Bay.SourceVolumeId != SupportVolumeId)
+			{
+				continue;
+			}
+			auto DistanceToInterval = [](const double Value,
+				const double Minimum, const double Maximum)
+			{
+				return Value < Minimum ? Minimum - Value
+					: Value > Maximum ? Value - Maximum : 0.0;
+			};
+			const double AxisDistance = DistanceToInterval(
+				BearingPlane, Bay.LocalBounds.Min[SpanAxis],
+				Bay.LocalBounds.Max[SpanAxis]);
+			const double PerpendicularDistance = DistanceToInterval(
+				PerpendicularCenter, Bay.LocalBounds.Min[Perpendicular],
+				Bay.LocalBounds.Max[Perpendicular]);
+			const double VerticalDistance = DistanceToInterval(
+				SeatCenterZ, Bay.LocalBounds.Min.Z, Bay.LocalBounds.Max.Z);
+			const double Score = AxisDistance * 16.0
+				+ PerpendicularDistance * 4.0 + VerticalDistance;
+			if (Score < BestScore
+				|| (FMath::IsNearlyEqual(Score, BestScore)
+					&& (Best == nullptr || Bay.BayId < Best->BayId)))
+			{
+				Best = &Bay;
+				BestScore = Score;
+			}
+		}
+		return Best;
+	}
+
+	bool AddBridgeEndpointSeat(
+		FGeometryBuilder& B,
+		const FABTSM73DAG5BV2Volume& Span,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const FABTSM73BeamAGenerationResult& BeamA,
+		const FABTSM73BeamABay& BridgeBay,
+		const int32 DeclaredSupportVolumeId,
+		const bool bNegativeEndpoint)
+	{
+		const int32 SpanAxis = Span.SpanAxisIndex;
+		if (SpanAxis != 0 && SpanAxis != 1)
+		{
+			*B.Error = TEXT("BeamBBridgeSeatInvalidSpanAxis");
+			return false;
+		}
+		const int32 Perpendicular = SpanAxis == 0 ? 1 : 0;
+		const double T = B.Settings.BeamA.BlockCrossSectionCM;
+		const double Tolerance = B.Settings.BeamA.JointMergeToleranceCM;
+		const double BearingPlane = bNegativeEndpoint
+			? Span.SpanOpeningMinCM : Span.SpanOpeningMaxCM;
+		double LowestRailCenterZ = TNumericLimits<double>::Max();
+		TArray<FABTSM73BeamBPlannedMember*> CandidateRails;
+		for (FABTSM73BeamBPlannedMember& Member :
+			B.Result.PlannedMembers)
+		{
+			if (Member.BayId != BridgeBay.BayId
+				|| Member.Motif != EABTSM73BeamBMotif::BridgeBay
+				|| Member.Role != EABTSM73BeamAMemberRole::PrimaryBeam
+				|| static_cast<int32>(Member.Axis) != SpanAxis)
+			{
+				continue;
+			}
+			const double CenterZ =
+				(Member.LocalStart.Z + Member.LocalEnd.Z) * 0.5;
+			LowestRailCenterZ = FMath::Min(LowestRailCenterZ, CenterZ);
+			CandidateRails.Add(&Member);
+		}
+		if (!FMath::IsFinite(LowestRailCenterZ))
+		{
+			*B.Error = TEXT("BeamBBridgeSeatRailsMissing");
+			return false;
+		}
+		double PerpendicularMin = TNumericLimits<double>::Max();
+		double PerpendicularMax = TNumericLimits<double>::Lowest();
+		for (FABTSM73BeamBPlannedMember* Rail : CandidateRails)
+		{
+			const double CenterZ =
+				(Rail->LocalStart.Z + Rail->LocalEnd.Z) * 0.5;
+			if (!FMath::IsNearlyEqual(
+				CenterZ, LowestRailCenterZ, Tolerance))
+			{
+				continue;
+			}
+			double& TerminalCoordinate = bNegativeEndpoint
+				? (Rail->LocalStart[SpanAxis] <= Rail->LocalEnd[SpanAxis]
+					? Rail->LocalStart[SpanAxis] : Rail->LocalEnd[SpanAxis])
+				: (Rail->LocalStart[SpanAxis] >= Rail->LocalEnd[SpanAxis]
+					? Rail->LocalStart[SpanAxis] : Rail->LocalEnd[SpanAxis]);
+			TerminalCoordinate = BearingPlane;
+			const double Station =
+				(Rail->LocalStart[Perpendicular]
+					+ Rail->LocalEnd[Perpendicular]) * 0.5;
+			PerpendicularMin = FMath::Min(PerpendicularMin, Station);
+			PerpendicularMax = FMath::Max(PerpendicularMax, Station);
+		}
+		if (!FMath::IsFinite(PerpendicularMin)
+			|| !FMath::IsFinite(PerpendicularMax))
+		{
+			*B.Error = TEXT("BeamBBridgeSeatRailCoverageInvalid");
+			return false;
+		}
+		if (PerpendicularMax - PerpendicularMin + Tolerance < T)
+		{
+			const double Center =
+				(PerpendicularMin + PerpendicularMax) * 0.5;
+			PerpendicularMin = Center - T * 0.5;
+			PerpendicularMax = Center + T * 0.5;
+		}
+
+		const double RailBottom = LowestRailCenterZ - T * 0.5;
+		const double SeatCenterZ = RailBottom - T * 0.5;
+		const FABTSM73DAG5BV2Volume* SupportVolume =
+			ResolveEndpointSupportVolume(
+				Silhouette,
+				DeclaredSupportVolumeId,
+				SpanAxis,
+				BearingPlane,
+				PerpendicularMin - T * 0.5,
+				PerpendicularMax + T * 0.5,
+				SeatCenterZ - T * 0.5,
+				SeatCenterZ + T * 0.5,
+				bNegativeEndpoint);
+		if (SupportVolume == nullptr)
+		{
+			*B.Error = TEXT("BeamBBridgeSeatSupportVolumeMissing");
+			return false;
+		}
+		const FABTSM73BeamABay* SupportBay = FindEndpointSupportBay(
+			BeamA, SupportVolume->VolumeId, SpanAxis, BearingPlane,
+			(PerpendicularMin + PerpendicularMax) * 0.5, SeatCenterZ);
+		if (SupportBay == nullptr
+			|| !B.Result.Placements.IsValidIndex(SupportBay->BayId))
+		{
+			*B.Error = TEXT("BeamBBridgeSeatSupportBayMissing");
+			return false;
+		}
+
+		FVector Start = FVector::ZeroVector;
+		FVector End = FVector::ZeroVector;
+		Start[SpanAxis] = BearingPlane;
+		End[SpanAxis] = BearingPlane;
+		Start[Perpendicular] = PerpendicularMin;
+		End[Perpendicular] = PerpendicularMax;
+		Start.Z = SeatCenterZ;
+		End.Z = SeatCenterZ;
+		const int32 PreviousMemberCount = B.Result.PlannedMembers.Num();
+		const FABTSM73BeamBPlacement& SupportPlacement =
+			B.Result.Placements[SupportBay->BayId];
+		if (!B.Add(
+			SupportBay->BayId,
+			SupportPlacement.Motif,
+			Perpendicular == 0
+				? EABTSM73BeamAFrameAxis::X
+				: EABTSM73BeamAFrameAxis::Y,
+			EABTSM73BeamAMemberRole::BridgeSeat,
+			Start,
+			End))
+		{
+			return false;
+		}
+		if (B.Result.PlannedMembers.Num() == PreviousMemberCount)
+		{
+			*B.Error = TEXT("BeamBBridgeSeatTooShort");
+			return false;
+		}
+		if (!B.AddStep(SupportBay->BayId,
+			EABTSM73BeamBGrammarRule::AddBridgeSeat, 1))
+		{
+			return false;
+		}
+		FABTSM73BeamBBridgeEndpoint& Endpoint =
+			B.Result.BridgeEndpoints.AddDefaulted_GetRef();
+		Endpoint.SpanVolumeId = Span.VolumeId;
+		Endpoint.DeclaredSupportVolumeId = DeclaredSupportVolumeId;
+		Endpoint.SupportVolumeId = SupportVolume->VolumeId;
+		Endpoint.BridgeBayId = BridgeBay.BayId;
+		Endpoint.SupportBayId = SupportBay->BayId;
+		Endpoint.SeatPlannedMemberId =
+			B.Result.PlannedMembers.Num() - 1;
+		Endpoint.BearingPlaneCM = BearingPlane;
+		Endpoint.bNegativeEndpoint = bNegativeEndpoint;
+		return true;
+	}
+
+	bool AddBridgeEndpointSeats(
+		FGeometryBuilder& B,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const FABTSM73BeamAGenerationResult& BeamA)
+	{
+		for (const FABTSM73DAG5BV2Volume& Span : Silhouette.Volumes)
+		{
+			if (Span.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				continue;
+			}
+			if (Span.SpanAxisIndex != 0 && Span.SpanAxisIndex != 1)
+			{
+				*B.Error = TEXT("BeamBBridgeSeatInvalidSpanAxis");
+				return false;
+			}
+			if (!FindVolume(Silhouette, Span.NegativeSupportVolumeId)
+				|| !FindVolume(Silhouette, Span.PositiveSupportVolumeId))
+			{
+				*B.Error = TEXT("BeamBBridgeSeatSupportVolumeMissing");
+				return false;
+			}
+			const FABTSM73BeamABay* NegativeBay = nullptr;
+			const FABTSM73BeamABay* PositiveBay = nullptr;
+			for (const FABTSM73BeamABay& Bay : BeamA.Bays)
+			{
+				if (Bay.SourceVolumeId != Span.VolumeId)
+				{
+					continue;
+				}
+				if (NegativeBay == nullptr
+					|| Bay.LocalBounds.Min[Span.SpanAxisIndex]
+						< NegativeBay->LocalBounds.Min[Span.SpanAxisIndex])
+				{
+					NegativeBay = &Bay;
+				}
+				if (PositiveBay == nullptr
+					|| Bay.LocalBounds.Max[Span.SpanAxisIndex]
+						> PositiveBay->LocalBounds.Max[Span.SpanAxisIndex])
+				{
+					PositiveBay = &Bay;
+				}
+			}
+			if (NegativeBay == nullptr || PositiveBay == nullptr
+				|| !AddBridgeEndpointSeat(B, Span, Silhouette, BeamA, *NegativeBay,
+					Span.NegativeSupportVolumeId, true)
+				|| !AddBridgeEndpointSeat(B, Span, Silhouette, BeamA, *PositiveBay,
+					Span.PositiveSupportVolumeId, false))
+			{
+				if (B.Error->IsEmpty())
+				{
+					*B.Error = TEXT("BeamBBridgeSeatEndpointExpansionFailed");
+				}
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool ImportSemanticRoofAssembly(
 		FGeometryBuilder& B,
 		const FABTSM73BeamAGenerationResult& BeamA,
@@ -659,6 +1002,271 @@ namespace ABTSM73BeamB
 		return ViolationCount;
 	}
 
+	void AuditBridgeEndpointBearings(
+		const FABTSM73BeamBPreviewSettings& Settings,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		FABTSM73BeamBGenerationResult& InOutResult)
+	{
+		const FABTSM73BeamAGenerationResult& Closed =
+			InOutResult.ClosedAssembly;
+		TMap<int32, TArray<int32>> OwnersByMember;
+		TMap<int32, TArray<int32>> AssembliesBySourceVolume;
+		for (const FABTSM73BeamAAssembly& Assembly : Closed.Assemblies)
+		{
+			if (Closed.Bays.IsValidIndex(Assembly.BayId))
+			{
+				AssembliesBySourceVolume.FindOrAdd(
+					Closed.Bays[Assembly.BayId].SourceVolumeId)
+					.AddUnique(Assembly.AssemblyId);
+			}
+			for (const int32 MemberId : Assembly.MemberIds)
+			{
+				OwnersByMember.FindOrAdd(MemberId).AddUnique(
+					Assembly.AssemblyId);
+			}
+		}
+
+		TArray<bool> Reachable;
+		Reachable.Init(false, Closed.Members.Num());
+		TArray<int32> Queue;
+		for (const FABTSM73BeamAMember& Member : Closed.Members)
+		{
+			if (ClosedMemberBounds(Member, Closed,
+				Settings.BeamA.BlockCrossSectionCM).Min.Z
+				<= Settings.BeamA.JointMergeToleranceCM)
+			{
+				Reachable[Member.MemberId] = true;
+				Queue.Add(Member.MemberId);
+			}
+		}
+		for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+		{
+			const int32 LowerId = Queue[QueueIndex];
+			for (const FABTSM73BeamABearingContact& Contact :
+				Closed.BearingContacts)
+			{
+				if (Contact.LowerMemberId == LowerId
+					&& Reachable.IsValidIndex(Contact.UpperMemberId)
+					&& !Reachable[Contact.UpperMemberId])
+				{
+					Reachable[Contact.UpperMemberId] = true;
+					Queue.Add(Contact.UpperMemberId);
+				}
+			}
+		}
+
+		const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+		for (const FABTSM73BeamBBridgeEndpoint& Endpoint :
+			InOutResult.BridgeEndpoints)
+		{
+			const TArray<int32>* SpanAssemblies =
+				AssembliesBySourceVolume.Find(Endpoint.SpanVolumeId);
+			const TArray<int32>* SupportAssemblies =
+				AssembliesBySourceVolume.Find(Endpoint.SupportVolumeId);
+			bool bEndpointAccepted = false;
+			int32 EndpointSeedCount = 0;
+			int32 EndpointVisitedCount = 0;
+			if (SpanAssemblies != nullptr && SupportAssemblies != nullptr)
+			{
+				const FABTSM73DAG5BV2Volume* Span =
+					FindVolume(Silhouette, Endpoint.SpanVolumeId);
+				const FABTSM73BeamABay* BridgeBay =
+					Closed.Bays.IsValidIndex(Endpoint.BridgeBayId)
+						? &Closed.Bays[Endpoint.BridgeBayId] : nullptr;
+				const double EndpointMinAxis = Span != nullptr
+					&& BridgeBay != nullptr
+					? FMath::Min(Endpoint.BearingPlaneCM,
+						BridgeBay->LocalBounds.Min[Span->SpanAxisIndex])
+						- Settings.BeamA.BlockCrossSectionCM - Tolerance
+					: 0.0;
+				const double EndpointMaxAxis = Span != nullptr
+					&& BridgeBay != nullptr
+					? FMath::Max(Endpoint.BearingPlaneCM,
+						BridgeBay->LocalBounds.Max[Span->SpanAxisIndex])
+						+ Settings.BeamA.BlockCrossSectionCM + Tolerance
+					: -1.0;
+				for (const FABTSM73BeamABearingContact& Contact :
+					Closed.BearingContacts)
+				{
+					if (!Closed.Members.IsValidIndex(Contact.LowerMemberId)
+						|| !Closed.Members.IsValidIndex(Contact.UpperMemberId)
+						|| !Reachable.IsValidIndex(Contact.LowerMemberId)
+						|| !Reachable[Contact.LowerMemberId]
+						|| Contact.ContactAreaCM2 <= Tolerance
+						|| Span == nullptr
+						|| BridgeBay == nullptr
+						|| Contact.LocalPosition[Span->SpanAxisIndex]
+							< EndpointMinAxis
+						|| Contact.LocalPosition[Span->SpanAxisIndex]
+							> EndpointMaxAxis)
+					{
+						continue;
+					}
+					const TArray<int32>* LowerOwners =
+						OwnersByMember.Find(Contact.LowerMemberId);
+					const TArray<int32>* UpperOwners =
+						OwnersByMember.Find(Contact.UpperMemberId);
+					const bool bOwnedBySupport = LowerOwners != nullptr
+						&& LowerOwners->ContainsByPredicate(
+							[SupportAssemblies](const int32 AssemblyId)
+							{
+								return SupportAssemblies->Contains(AssemblyId);
+							});
+					const bool bCarriesSpan = UpperOwners != nullptr
+						&& UpperOwners->ContainsByPredicate(
+							[SpanAssemblies](const int32 AssemblyId)
+							{
+								return SpanAssemblies->Contains(AssemblyId);
+							});
+					if (bOwnedBySupport && bCarriesSpan)
+					{
+						bEndpointAccepted = true;
+						break;
+					}
+				}
+				TArray<bool> EndpointReachable;
+				EndpointReachable.Init(false, Closed.Members.Num());
+				TArray<int32> EndpointQueue;
+				for (const FABTSM73BeamAMember& Member : Closed.Members)
+				{
+					const TArray<int32>* Owners =
+						OwnersByMember.Find(Member.MemberId);
+					const bool bOwnedBySupport = Owners != nullptr
+						&& Owners->ContainsByPredicate(
+							[SupportAssemblies](const int32 AssemblyId)
+							{
+								return SupportAssemblies->Contains(AssemblyId);
+							});
+					if (Member.Role != EABTSM73BeamAMemberRole::BridgeSeat
+						|| !bOwnedBySupport
+						|| !Reachable.IsValidIndex(Member.MemberId)
+						|| !Reachable[Member.MemberId]
+						|| Span == nullptr)
+					{
+						continue;
+					}
+					const FBox Bounds = ClosedMemberBounds(
+						Member, Closed, Settings.BeamA.BlockCrossSectionCM);
+					if (Endpoint.BearingPlaneCM
+						< Bounds.Min[Span->SpanAxisIndex]
+							- Settings.BeamA.BlockCrossSectionCM - Tolerance
+						|| Endpoint.BearingPlaneCM
+						> Bounds.Max[Span->SpanAxisIndex]
+							+ Settings.BeamA.BlockCrossSectionCM + Tolerance)
+					{
+						continue;
+					}
+					EndpointReachable[Member.MemberId] = true;
+					EndpointQueue.Add(Member.MemberId);
+					++EndpointSeedCount;
+				}
+				for (int32 QueueIndex = 0;
+					QueueIndex < EndpointQueue.Num() && !bEndpointAccepted;
+					++QueueIndex)
+				{
+					const int32 LowerId = EndpointQueue[QueueIndex];
+					++EndpointVisitedCount;
+					for (const FABTSM73BeamABearingContact& Contact :
+						Closed.BearingContacts)
+					{
+						if (Contact.LowerMemberId != LowerId
+							|| !Closed.Members.IsValidIndex(Contact.UpperMemberId)
+							|| Contact.ContactAreaCM2 <= Tolerance
+							|| Span == nullptr
+							|| BridgeBay == nullptr
+							|| Contact.LocalPosition[Span->SpanAxisIndex]
+								< EndpointMinAxis
+							|| Contact.LocalPosition[Span->SpanAxisIndex]
+								> EndpointMaxAxis)
+						{
+							continue;
+						}
+						const TArray<int32>* UpperOwners =
+							OwnersByMember.Find(Contact.UpperMemberId);
+						const bool bCarriesSpan = UpperOwners != nullptr
+							&& UpperOwners->ContainsByPredicate(
+								[SpanAssemblies](const int32 AssemblyId)
+								{
+									return SpanAssemblies->Contains(AssemblyId);
+								});
+						if (bCarriesSpan)
+						{
+							bEndpointAccepted = true;
+							break;
+						}
+						if (EndpointReachable.IsValidIndex(Contact.UpperMemberId)
+							&& !EndpointReachable[Contact.UpperMemberId])
+						{
+							EndpointReachable[Contact.UpperMemberId] = true;
+							EndpointQueue.Add(Contact.UpperMemberId);
+						}
+					}
+				}
+			}
+			if (bEndpointAccepted)
+			{
+				++InOutResult.Summary.BridgeEndpointBearingCount;
+			}
+			else
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Warning,
+					TEXT("[ABTS][M7.3-Beam-B][BridgeEndpointBearingMissing] Seed=%d Span=%d DeclaredSupport=%d SeatSupport=%d BridgeBay=%d Plane=%.2f Negative=%d Seeds=%d Visited=%d"),
+					Settings.BeamA.Silhouette.BuildingSeed,
+					Endpoint.SpanVolumeId,
+					Endpoint.DeclaredSupportVolumeId,
+					Endpoint.SupportVolumeId,
+					Endpoint.BridgeBayId,
+					Endpoint.BearingPlaneCM,
+					Endpoint.bNegativeEndpoint ? 1 : 0,
+					EndpointSeedCount,
+					EndpointVisitedCount);
+				++InOutResult.Summary.BridgeEndpointBearingViolationCount;
+			}
+		}
+
+		TSet<int32> AuditedSpanVolumes;
+		for (const FABTSM73BeamBBridgeEndpoint& Endpoint :
+			InOutResult.BridgeEndpoints)
+		{
+			if (AuditedSpanVolumes.Contains(Endpoint.SpanVolumeId))
+			{
+				continue;
+			}
+			AuditedSpanVolumes.Add(Endpoint.SpanVolumeId);
+			const TArray<int32>* SpanAssemblies =
+				AssembliesBySourceVolume.Find(Endpoint.SpanVolumeId);
+			if (SpanAssemblies == nullptr)
+			{
+				continue;
+			}
+			for (const int32 AssemblyId : *SpanAssemblies)
+			{
+				if (!Closed.Assemblies.IsValidIndex(AssemblyId))
+				{
+					continue;
+				}
+				for (const int32 MemberId :
+					Closed.Assemblies[AssemblyId].MemberIds)
+				{
+					if (!Closed.Members.IsValidIndex(MemberId)
+						|| Closed.Members[MemberId].Axis
+							!= EABTSM73BeamAFrameAxis::Z)
+					{
+						continue;
+					}
+					if (ClosedMemberBounds(Closed.Members[MemberId], Closed,
+						Settings.BeamA.BlockCrossSectionCM).Min.Z
+						<= Tolerance)
+					{
+						++InOutResult.Summary.BridgeGroundRescuePostCount;
+					}
+				}
+			}
+		}
+	}
+
 	bool CompileAndCloseAssembly(
 		const FABTSM73BeamBPreviewSettings& Settings,
 		const FABTSM73DAG5BV2GenerationResult& Silhouette,
@@ -794,7 +1402,8 @@ namespace ABTSM73BeamB
 			const FABTSM73DAG5BV2Volume* Volume = FindVolume(
 				Silhouette, Closed.Bays[Planned.BayId].SourceVolumeId);
 			if (Volume != nullptr
-				&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box)
+				&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box
+				&& Planned.Role != EABTSM73BeamAMemberRole::BridgeSeat)
 			{
 				continue;
 			}
@@ -901,6 +1510,21 @@ namespace ABTSM73BeamB
 			OutError = FString::Printf(
 				TEXT("BeamBSemanticEnvelopeViolation:Count=%d"),
 				InOutResult.Summary.SemanticEnvelopeViolationCount);
+			return false;
+		}
+		AuditBridgeEndpointBearings(Settings, Silhouette, InOutResult);
+		if (InOutResult.Summary.BridgeEndpointBearingViolationCount > 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamBBridgeEndpointBearingViolation:Count=%d"),
+				InOutResult.Summary.BridgeEndpointBearingViolationCount);
+			return false;
+		}
+		if (InOutResult.Summary.BridgeGroundRescuePostCount > 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamBBridgeGroundRescuePost:Count=%d"),
+				InOutResult.Summary.BridgeGroundRescuePostCount);
 			return false;
 		}
 		return true;
@@ -1117,6 +1741,18 @@ bool FABTSM73BeamBGenerator::Generate(
 			Placement.BayId = SelectedBayId;
 			Placement.Motif = Motif;
 			Placement.Orientation = BeamA.Bays[SelectedBayId].PreferredAxis;
+			if (const FABTSM73DAG5BV2Volume* Volume = FindVolume(
+				Silhouette, BeamA.Bays[SelectedBayId].SourceVolumeId);
+				Volume != nullptr
+					&& Volume->Role
+						== EABTSM73DAG5BV2VolumeRole::SupportedSpan
+					&& (Volume->SpanAxisIndex == 0
+						|| Volume->SpanAxisIndex == 1))
+			{
+				Placement.Orientation = Volume->SpanAxisIndex == 0
+					? EABTSM73BeamAFrameAxis::X
+					: EABTSM73BeamAFrameAxis::Y;
+			}
 			Placement.PortMask = PortsForMotif(Motif, Placement.Orientation);
 			bCollapsed[SelectedBayId] = true;
 			if (SolveWFC())
@@ -1183,6 +1819,11 @@ bool FABTSM73BeamBGenerator::Generate(
 				? TEXT("BeamBMotifExpansionFailed") : GeometryError);
 		}
 	}
+	if (!AddBridgeEndpointSeats(Builder, Silhouette, BeamA))
+	{
+		return Reject(GeometryError.IsEmpty()
+			? TEXT("BeamBBridgeSeatExpansionFailed") : GeometryError);
+	}
 
 	for (const FABTSM73BeamABay& Bay : BeamA.Bays)
 	{
@@ -1213,6 +1854,52 @@ bool FABTSM73BeamBGenerator::Generate(
 		const FABTSM73BeamABay& Bay = BeamA.Bays[Member.BayId];
 		const FABTSM73DAG5BV2Volume* Volume =
 			FindVolume(Silhouette, Bay.SourceVolumeId);
+		if (Member.Role == EABTSM73BeamAMemberRole::BridgeSeat)
+		{
+			const FABTSM73BeamBBridgeEndpoint* Endpoint =
+				OutResult.BridgeEndpoints.FindByPredicate(
+					[&Member](const FABTSM73BeamBBridgeEndpoint& Candidate)
+					{
+						return Candidate.SeatPlannedMemberId
+							== Member.PlannedMemberId;
+					});
+			const FABTSM73DAG5BV2Volume* SupportVolume = Endpoint != nullptr
+				? FindVolume(Silhouette, Endpoint->SupportVolumeId) : nullptr;
+			if (SupportVolume == nullptr)
+			{
+				++OutResult.Summary.OutOfBoundsMemberCount;
+				continue;
+			}
+			const FBox SeatBounds = PlannedMemberBounds(
+				Member, Settings.BeamA.BlockCrossSectionCM);
+			const FBox& SupportBounds = SupportVolume->LocalBounds;
+			const double XOverlap = FMath::Min(
+				SeatBounds.Max.X, SupportBounds.Max.X)
+				- FMath::Max(SeatBounds.Min.X, SupportBounds.Min.X);
+			const double YOverlap = FMath::Min(
+				SeatBounds.Max.Y, SupportBounds.Max.Y)
+				- FMath::Max(SeatBounds.Min.Y, SupportBounds.Min.Y);
+			if (XOverlap <= BoundsTolerance
+				|| YOverlap <= BoundsTolerance)
+			{
+				++OutResult.Summary.OutOfBoundsMemberCount;
+			}
+			continue;
+		}
+		if (Volume != nullptr
+			&& Volume->Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan
+			&& Member.Motif == EABTSM73BeamBMotif::BridgeBay
+			&& Member.Role == EABTSM73BeamAMemberRole::PrimaryBeam)
+		{
+			const FBox ExpandedSpan = Volume->LocalBounds
+				.ExpandBy(BoundsTolerance);
+			if (!ExpandedSpan.IsInsideOrOn(Member.LocalStart)
+				|| !ExpandedSpan.IsInsideOrOn(Member.LocalEnd))
+			{
+				++OutResult.Summary.OutOfBoundsMemberCount;
+			}
+			continue;
+		}
 		if (Volume != nullptr
 			&& Volume->Primitive != EABTSM73DAG5BV2Primitive::Box
 			&& Member.Role != EABTSM73BeamAMemberRole::RoofCourse)
@@ -1261,6 +1948,8 @@ bool FABTSM73BeamBGenerator::Generate(
 	OutResult.Summary.DistinctMotifCount = UsedMotifs.Num();
 	OutResult.Summary.GrammarStepCount = OutResult.GrammarSteps.Num();
 	OutResult.Summary.PlannedMemberCount = OutResult.PlannedMembers.Num();
+	OutResult.Summary.BridgeSeatMemberCount =
+		OutResult.BridgeEndpoints.Num();
 	OutResult.Summary.ClosedMemberCount =
 		OutResult.ClosedAssembly.Members.Num();
 	OutResult.Summary.ClosedBearingContactCount =

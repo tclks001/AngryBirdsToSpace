@@ -11,6 +11,8 @@ struct FABTSM73BeamASupportVoid
 {
 	FBox Bounds = FBox(EForceInit::ForceInit);
 	int32 SpanAxisIndex = INDEX_NONE;
+	/** Source volume whose Assembly may consume the two endpoint fallback stations. */
+	int32 SpanSourceVolumeId = INDEX_NONE;
 };
 
 struct FABTSM73BeamAGenerationResult

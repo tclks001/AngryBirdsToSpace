@@ -31,7 +31,9 @@ enum class EABTSM73BeamAMemberRole : uint8
 	Post,
 	PrimaryBeam,
 	SecondaryBeam,
-	RoofCourse
+	RoofCourse,
+	/** Horizontal bearing ledger owned by a designated span support module. */
+	BridgeSeat
 };
 
 UENUM(BlueprintType)

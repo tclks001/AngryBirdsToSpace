@@ -142,6 +142,11 @@ XY 重叠面积。超过 `MaxBearingPairChecks` 或 `MaxBearingContactCount` 时
 中央保持为空。若两端承托不能形成闭合路径，则删除冗余候选或 fail closed，禁止退化为“一旁悬空，
 再用一根超长地柱救活”的形态。
 
+Beam-B 的桥托收口复用同一规则：`ReservedSupportVoid` 额外记录来源跨越体，只有该跨越体可以消费
+端部回退支撑；归属于相邻承托模块的 `BridgeSeat` 仍走普通模块支撑链。共线合并会合并所有 Assembly
+所有权并保留桥托语义；若桥托被同模块既有承托梁吸收，验收以桥端局部“指定模块 -> 桥体”Bearing
+路径为准，而不是要求某个固定 MemberId 在收口前后不变。
+
 收口统计暴露为 `SplitPostMemberCount`、`MergedMemberCount`、`ShiftedCourseCount`、
 `GlobalSupportMemberCount`、`PrunedUnsupportedMemberCount`、`RemainingPenetrationCount` 和
 `UnsupportedMemberCount`。Accepted 结果的最后两项必须恒为 0。
@@ -196,6 +201,8 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 - `ParallelZSupportPlacement`：Z 柱直接消费水平积木位置，并覆盖 X-Y、X-X/Y-Y 对齐承托。
 - 跨阶段 `ABTS.M73DAG.DAG5Bv2.SupportedSpanContract`：跨越体必须有两个不同模块族的对向承托体
   和非空净开口；Beam-B 的 `SupportedSpanVoid` 再验证保留空间内不得补入 Z 柱。
+- Beam-B 的 `BridgeEndpointBearing`：端部桥托属于指定语义模块，终端主梁落到桥托上，桥体 Assembly
+  不得生成落地救援柱；全局收口后的等价共线合并通过局部 Bearing 链验收。
 
 ## 7. 用户编辑器验收
 
@@ -245,3 +252,6 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 - `GlobalAssemblyClosure` 对四类轮廓独立重算 AABB 穿插和 Bearing 地面可达性，全部通过。
 - 2026-08-01 用户编辑器读形验收确认：预览中已无明显悬空、横穿或大块组件重叠，Beam-A v2.1
   阶段关闭；后续结构家族差异转入 Beam-B。
+- `Saved/Logs/BridgeSeat-BeamA-20260802-190145-FreshAutomation.log`：桥托/跨越体收口改动后的
+  Beam-A 10/10 Success；`Saved/Logs/BridgeSeat-M7-20260802-190230-FullRegression.log`：完整 M7
+  94/94 Success。

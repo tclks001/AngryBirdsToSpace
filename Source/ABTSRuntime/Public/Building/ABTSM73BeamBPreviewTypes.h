@@ -27,7 +27,8 @@ enum class EABTSM73BeamBGrammarRule : uint8
 	AddTransferTier,
 	AddCantileverRoot,
 	TriangulateBay,
-	RefinePortal
+	RefinePortal,
+	AddBridgeSeat
 };
 
 USTRUCT(BlueprintType)
@@ -194,6 +195,14 @@ struct FABTSM73BeamBPreviewSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Closure")
 	int32 ClosurePrunedMemberCount = 0;
 
+	/** One physical support ledger is required at each supported-span endpoint. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
+	int32 BridgeSeatMemberCount = 0;
+
+	/** Endpoint bridge-seat bearings proven after global closure. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
+	int32 BridgeEndpointBearingCount = 0;
+
 	/** Must be zero for every accepted Beam-B result. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 RemainingPenetrationCount = 0;
@@ -215,6 +224,14 @@ struct FABTSM73BeamBPreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 OutOfBoundsMemberCount = 0;
+
+	/** Must remain zero: the bridge Assembly may not be rescued by its own ground post. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 BridgeGroundRescuePostCount = 0;
+
+	/** Must remain zero: every declared endpoint must bear on its designated support. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 BridgeEndpointBearingViolationCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
 	int64 MotifWFCHash = 0;

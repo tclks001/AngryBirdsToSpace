@@ -77,6 +77,15 @@ namespace ABTSM73BeamBTests
 		return FBox(Center - Extent, Center + Extent);
 	}
 
+	FString SemanticModulePath(const FString& Path)
+	{
+		TArray<FString> Parts;
+		Path.ParseIntoArray(Parts, TEXT("/"), true);
+		return Parts.Num() >= 2
+			? Parts[0] + TEXT("/") + Parts[1]
+			: Path;
+	}
+
 	bool HasPositiveVolumePenetration(
 		const FABTSM73BeamAGenerationResult& Result,
 		const FABTSM73BeamBPreviewSettings& Settings)
@@ -415,6 +424,249 @@ bool FABTSM73BeamBSupportedSpanVoidTest::RunTest(const FString& Parameters)
 					SupportVoid.SpanAxisIndex));
 			}
 		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBBridgeEndpointBearingTest,
+	"ABTS.M73DAG.BeamB.BridgeEndpointBearing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBBridgeEndpointBearingTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(940422);
+	Settings.BeamA.Silhouette.Archetype =
+		EABTSM73DAG5BV2Archetype::BridgedArcology;
+	FABTSM73DAG5BV2GenerationResult Silhouette;
+	FABTSM73BeamAGenerationResult BeamA;
+	FABTSM73BeamBGenerationResult Result;
+	FString Error;
+	if (!GenerateUpstream(Settings, Silhouette, BeamA, Error))
+	{
+		AddError(FString::Printf(TEXT("Upstream failed: %s"), *Error));
+		return false;
+	}
+	FABTSM73BeamBGenerator Generator;
+	if (!Generator.Generate(Settings, Silhouette, BeamA, Result, Error))
+	{
+		AddError(FString::Printf(TEXT("Beam-B failed: %s"), *Error));
+		return false;
+	}
+
+	int32 SupportedSpanCount = 0;
+	for (const FABTSM73DAG5BV2Volume& Volume : Silhouette.Volumes)
+	{
+		SupportedSpanCount += Volume.Role
+			== EABTSM73DAG5BV2VolumeRole::SupportedSpan ? 1 : 0;
+	}
+	TestTrue(TEXT("Fixture contains a supported span"), SupportedSpanCount > 0);
+	TestEqual(TEXT("Every supported span has two endpoint ledgers"),
+		Result.BridgeEndpoints.Num(), SupportedSpanCount * 2);
+	TestEqual(TEXT("Summary reports every planned bridge seat"),
+		Result.Summary.BridgeSeatMemberCount, Result.BridgeEndpoints.Num());
+	TestEqual(TEXT("Every endpoint has a closed bearing"),
+		Result.Summary.BridgeEndpointBearingCount,
+		Result.BridgeEndpoints.Num());
+	TestEqual(TEXT("No endpoint bearing contract is missing"),
+		Result.Summary.BridgeEndpointBearingViolationCount, 0);
+	TestEqual(TEXT("Bridge Assembly receives no ground rescue post"),
+		Result.Summary.BridgeGroundRescuePostCount, 0);
+
+	TMap<int32, TArray<int32>> AssembliesBySourceVolume;
+	TMap<int32, TArray<int32>> OwnersByMember;
+	for (const FABTSM73BeamAAssembly& Assembly :
+		Result.ClosedAssembly.Assemblies)
+	{
+		if (Result.ClosedAssembly.Bays.IsValidIndex(Assembly.BayId))
+		{
+			AssembliesBySourceVolume.FindOrAdd(
+				Result.ClosedAssembly.Bays[Assembly.BayId].SourceVolumeId)
+				.AddUnique(Assembly.AssemblyId);
+		}
+		for (const int32 MemberId : Assembly.MemberIds)
+		{
+			OwnersByMember.FindOrAdd(MemberId).AddUnique(Assembly.AssemblyId);
+		}
+	}
+	const double EndpointTolerance =
+		Settings.BeamA.JointMergeToleranceCM;
+	for (const FABTSM73BeamBBridgeEndpoint& Endpoint :
+		Result.BridgeEndpoints)
+	{
+		TestNotEqual(TEXT("Endpoint support differs from span"),
+			Endpoint.SupportVolumeId, Endpoint.SpanVolumeId);
+		const FABTSM73DAG5BV2Volume* DeclaredSupport =
+			Silhouette.Volumes.FindByPredicate(
+				[&Endpoint](const FABTSM73DAG5BV2Volume& Volume)
+				{
+					return Volume.VolumeId
+						== Endpoint.DeclaredSupportVolumeId;
+				});
+		const FABTSM73DAG5BV2Volume* SeatSupport =
+			Silhouette.Volumes.FindByPredicate(
+				[&Endpoint](const FABTSM73DAG5BV2Volume& Volume)
+				{
+					return Volume.VolumeId == Endpoint.SupportVolumeId;
+				});
+		TestTrue(TEXT("Declared endpoint support remains valid"),
+			DeclaredSupport != nullptr);
+		TestTrue(TEXT("Seat support Volume remains valid"),
+			SeatSupport != nullptr);
+		if (DeclaredSupport != nullptr && SeatSupport != nullptr)
+		{
+			TestEqual(TEXT("Bridge seat stays in the declared semantic module"),
+				SemanticModulePath(SeatSupport->DerivationPath),
+				SemanticModulePath(DeclaredSupport->DerivationPath));
+		}
+		TestTrue(TEXT("Seat member identity remains valid"),
+			Result.PlannedMembers.IsValidIndex(Endpoint.SeatPlannedMemberId));
+		if (Result.PlannedMembers.IsValidIndex(Endpoint.SeatPlannedMemberId))
+		{
+			TestEqual(TEXT("Endpoint plan uses BridgeSeat role"),
+				Result.PlannedMembers[Endpoint.SeatPlannedMemberId].Role,
+				EABTSM73BeamAMemberRole::BridgeSeat);
+			TestEqual(TEXT("BridgeSeat is owned by the selected support Bay"),
+				Result.PlannedMembers[Endpoint.SeatPlannedMemberId].BayId,
+				Endpoint.SupportBayId);
+		}
+		const TArray<int32>* SpanAssemblies =
+			AssembliesBySourceVolume.Find(Endpoint.SpanVolumeId);
+		const TArray<int32>* SupportAssemblies =
+			AssembliesBySourceVolume.Find(Endpoint.SupportVolumeId);
+		const FABTSM73DAG5BV2Volume* Span =
+			Silhouette.Volumes.FindByPredicate(
+				[&Endpoint](const FABTSM73DAG5BV2Volume& Volume)
+				{
+					return Volume.VolumeId == Endpoint.SpanVolumeId;
+				});
+		bool bFoundPhysicalBearing = false;
+		if (SpanAssemblies != nullptr && SupportAssemblies != nullptr
+			&& Span != nullptr)
+		{
+			const FABTSM73BeamABay* BridgeBay =
+				Result.ClosedAssembly.Bays.IsValidIndex(Endpoint.BridgeBayId)
+					? &Result.ClosedAssembly.Bays[Endpoint.BridgeBayId]
+					: nullptr;
+			const double EndpointMinAxis = BridgeBay != nullptr
+				? FMath::Min(Endpoint.BearingPlaneCM,
+					BridgeBay->LocalBounds.Min[Span->SpanAxisIndex])
+					- Settings.BeamA.BlockCrossSectionCM - EndpointTolerance
+				: 0.0;
+			const double EndpointMaxAxis = BridgeBay != nullptr
+				? FMath::Max(Endpoint.BearingPlaneCM,
+					BridgeBay->LocalBounds.Max[Span->SpanAxisIndex])
+					+ Settings.BeamA.BlockCrossSectionCM + EndpointTolerance
+				: -1.0;
+			for (const FABTSM73BeamABearingContact& Contact :
+				Result.ClosedAssembly.BearingContacts)
+			{
+				if (Contact.ContactAreaCM2 <= 0.0f
+					|| BridgeBay == nullptr
+					|| Contact.LocalPosition[Span->SpanAxisIndex]
+						< EndpointMinAxis
+					|| Contact.LocalPosition[Span->SpanAxisIndex]
+						> EndpointMaxAxis)
+				{
+					continue;
+				}
+				const TArray<int32>* LowerOwners =
+					OwnersByMember.Find(Contact.LowerMemberId);
+				const TArray<int32>* UpperOwners =
+					OwnersByMember.Find(Contact.UpperMemberId);
+				const bool bSupportOwner = LowerOwners != nullptr
+					&& LowerOwners->ContainsByPredicate(
+						[SupportAssemblies](const int32 AssemblyId)
+						{
+							return SupportAssemblies->Contains(AssemblyId);
+						});
+				const bool bSpanOwner = UpperOwners != nullptr
+					&& UpperOwners->ContainsByPredicate(
+						[SpanAssemblies](const int32 AssemblyId)
+						{
+							return SpanAssemblies->Contains(AssemblyId);
+						});
+				if (bSupportOwner && bSpanOwner)
+				{
+					bFoundPhysicalBearing = true;
+					break;
+				}
+			}
+			TArray<bool> EndpointReachable;
+			EndpointReachable.Init(false,
+				Result.ClosedAssembly.Members.Num());
+			TArray<int32> Queue;
+			for (const FABTSM73BeamAMember& Member :
+				Result.ClosedAssembly.Members)
+			{
+				const TArray<int32>* Owners =
+					OwnersByMember.Find(Member.MemberId);
+				const bool bSupportOwner = Owners != nullptr
+					&& Owners->ContainsByPredicate(
+						[SupportAssemblies](const int32 AssemblyId)
+						{
+							return SupportAssemblies->Contains(AssemblyId);
+						});
+				const FBox Bounds = MemberBounds(
+					Member, Result.ClosedAssembly,
+					Settings.BeamA.BlockCrossSectionCM);
+				if (Member.Role != EABTSM73BeamAMemberRole::BridgeSeat
+					|| !bSupportOwner
+					|| Endpoint.BearingPlaneCM
+						< Bounds.Min[Span->SpanAxisIndex]
+							- Settings.BeamA.BlockCrossSectionCM - EndpointTolerance
+					|| Endpoint.BearingPlaneCM
+						> Bounds.Max[Span->SpanAxisIndex]
+							+ Settings.BeamA.BlockCrossSectionCM + EndpointTolerance)
+				{
+					continue;
+				}
+				EndpointReachable[Member.MemberId] = true;
+				Queue.Add(Member.MemberId);
+			}
+			for (int32 QueueIndex = 0;
+				QueueIndex < Queue.Num() && !bFoundPhysicalBearing;
+				++QueueIndex)
+			{
+				for (const FABTSM73BeamABearingContact& Contact :
+					Result.ClosedAssembly.BearingContacts)
+				{
+					if (Contact.LowerMemberId != Queue[QueueIndex]
+						|| Contact.ContactAreaCM2 <= 0.0f
+						|| BridgeBay == nullptr
+						|| Contact.LocalPosition[Span->SpanAxisIndex]
+							< EndpointMinAxis
+						|| Contact.LocalPosition[Span->SpanAxisIndex]
+							> EndpointMaxAxis)
+					{
+						continue;
+					}
+					const TArray<int32>* UpperOwners =
+						OwnersByMember.Find(Contact.UpperMemberId);
+					const bool bSpanOwner = UpperOwners != nullptr
+						&& UpperOwners->ContainsByPredicate(
+							[SpanAssemblies](const int32 AssemblyId)
+							{
+								return SpanAssemblies->Contains(AssemblyId);
+							});
+					if (bSpanOwner)
+					{
+						bFoundPhysicalBearing = true;
+						break;
+					}
+					if (EndpointReachable.IsValidIndex(Contact.UpperMemberId)
+						&& !EndpointReachable[Contact.UpperMemberId])
+					{
+						EndpointReachable[Contact.UpperMemberId] = true;
+						Queue.Add(Contact.UpperMemberId);
+					}
+				}
+			}
+		}
+		TestTrue(TEXT("Bridge rail bears on its designated support ledger"),
+			bFoundPhysicalBearing);
 	}
 	return true;
 }

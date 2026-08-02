@@ -1034,6 +1034,15 @@ namespace ABTSM73BeamA
 						(UnionMin + UnionMax) * 0.5;
 					Specs[AIndex].LengthCM =
 						static_cast<float>(UnionMax - UnionMin);
+					if (Specs[BIndex].Role
+						== EABTSM73BeamAMemberRole::BridgeSeat)
+					{
+						// A support-module course may absorb its endpoint ledger.
+						// Preserve the stronger semantic role so Beam-B can still
+						// certify the closed bridge-to-seat bearing explicitly.
+						Specs[AIndex].Role =
+							EABTSM73BeamAMemberRole::BridgeSeat;
+					}
 					for (const int32 AssemblyId : Specs[BIndex].AssemblyIds)
 					{
 						Specs[AIndex].AssemblyIds.AddUnique(AssemblyId);
@@ -1688,15 +1697,24 @@ namespace ABTSM73BeamA
 				ProposedStations.Add(Station);
 			};
 			auto FindSpanVoid = [&Bounds, LowestUnsupportedBottom, Tolerance,
-				&Context](const int32 UpperId)
+				&Context, &Assembly](const int32 UpperId)
 				-> const FABTSM73BeamASupportVoid*
 			{
+				if (!Context.Result->Bays.IsValidIndex(Assembly.BayId))
+				{
+					return nullptr;
+				}
+				const int32 OwnerSourceVolumeId =
+					Context.Result->Bays[Assembly.BayId].SourceVolumeId;
 				return Context.Result->ReservedSupportVoids.FindByPredicate(
-					[&Bounds, UpperId, LowestUnsupportedBottom, Tolerance](
+					[&Bounds, UpperId, LowestUnsupportedBottom, Tolerance,
+						OwnerSourceVolumeId](
 						const FABTSM73BeamASupportVoid& Candidate)
 					{
 						const FBox& Void = Candidate.Bounds;
-						return FMath::Abs(
+						return Candidate.SpanSourceVolumeId
+								== OwnerSourceVolumeId
+							&& FMath::Abs(
 							Void.Max.Z - LowestUnsupportedBottom) <= Tolerance
 							&& OverlapLength(
 								Void.Min.X, Void.Max.X,
@@ -2414,10 +2432,15 @@ bool FABTSM73BeamAGenerator::Generate(
 					OutResult.ReservedSupportVoids.AddDefaulted_GetRef();
 				SupportVoid.Bounds = ReservedVoid;
 				SupportVoid.SpanAxisIndex = SpanAxis;
+				SupportVoid.SpanSourceVolumeId = Volume.VolumeId;
 			}
 		}
 		const FVector Size = StructuralBounds.GetSize();
-		const int32 AxisIndex = Size.X >= Size.Y ? 0 : 1;
+		const int32 AxisIndex =
+			Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan
+				&& (Volume.SpanAxisIndex == 0 || Volume.SpanAxisIndex == 1)
+				? Volume.SpanAxisIndex
+				: Size.X >= Size.Y ? 0 : 1;
 		const float AxisSpan = static_cast<float>(Size[AxisIndex]);
 		const int32 BayCount = FMath::Clamp(
 			FMath::CeilToInt(AxisSpan / Settings.TargetBaySpanCM),
