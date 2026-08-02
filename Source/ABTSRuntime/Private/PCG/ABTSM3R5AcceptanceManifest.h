@@ -39,8 +39,8 @@ public:
 	static constexpr int32 DisplaySeed = 312503;
 	static constexpr int32 DisplayPreviewSourceCandidateId = 4;
 	static constexpr int32 SweepSeedCount = 100;
-	static constexpr int32 SweepCandidatePlanCount = 300;
-	static constexpr int32 SweepMergedLogicalSingletonCount = 2;
+	static constexpr int32 SweepCandidatePlanCount = 268;
+	static constexpr int32 SweepMergedLogicalSingletonCount = 16;
 	static constexpr int32 SweepMergedSmallVisualFragmentCellCount = 2;
 
 	static constexpr int32 DefaultMinVisualBeatLengthCM = 2000;
@@ -61,21 +61,21 @@ public:
 	static constexpr int32 MaxVisualBiomeBoundaryPermille = 250;
 
 	static constexpr uint64 RequiredR3ManifestHash =
-		0x4F1A236CDF81B80Dull;
+		0xD5E9EAF889A08018ull;
 	static constexpr uint64 FrozenSweepSeedManifestHash =
 		0x5610DCBA0A03D9CBull;
 	static constexpr uint64 FrozenDisplayConfigHash =
 		0x9BB9CF98FB4127F9ull;
 	static constexpr uint64 FrozenDisplaySourceSpatialHash =
-		0x550F7B095B788C49ull;
+		0x16A44AF72C58261Eull;
 	static constexpr uint64 FrozenDisplayResultHash =
-		0xEC87F999625CBE44ull;
+		0xB0BC5838307168C0ull;
 	static constexpr uint64 FrozenDisplayPreviewCandidateHash =
-		0x9BE1F04A45277AEFull;
+		0xC765623CE43C9A3Full;
 	static constexpr uint64 FrozenSweepOracleHash =
-		0x6751B93DA5E4C778ull;
+		0x6397C495BE30D8BEull;
 	static constexpr uint64 FrozenManifestHash =
-		0x9E5A2FE0E563A7C4ull;
+		0x5C57202BF9769D19ull;
 
 	static TConstArrayView<int32> GetSweepSeeds();
 	static TConstArrayView<FABTSM3R5AcceptanceEntry> GetEntries();

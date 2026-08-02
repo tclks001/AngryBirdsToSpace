@@ -154,14 +154,15 @@ M3 所有权范围内已经落地：
 - 轨迹对终止枚举、首样本时间、几何接触和 Provider 回显 fail closed；撞击速度按首次进入球面的交点插值，已覆盖“进入球后才加速到门槛”的负例；
 - E5 保存同一发射输入关闭 M9 的完整消融轨迹；流程闭包使用真实 `EABTSItemId`，验证候选绑定桥门、制作站可用性、E1 目标、E5 卫星与晶核、E6 前置、太空桩/弦真实终局配方和零支线；其余 M5 配方仍明确待集成；
 - 只有完整硬通过候选进入 Top 3；结果发布独立 `GameplayLayoutHash`，不覆盖兼容 `PCGSummary.LayoutHash`；
+- 父级 R3 现在从 Integration 的两项 V0 冻结工厂构造并签名 `FABTSM3FrozenCalibrationBatch`，以档位射程包络先做保守空间粗筛；R4 只验证该批次已通过 R3/R3.1 的精确来源身份继续传入，仍由注入的轨迹服务产生 Fixture Witness。批次不是 `GravitySnapshotHash`，也没有把 Fixture Authority 晋升为生产 M6/M9 Authority；
 - `M3R4AcceptanceManifest` 冻结 21 个本地、父级、运行时及待集成验收入口。冻结身份为：
-  - `Manifest=AEBA4E7F337A4D8F`
+  - `Manifest=735D1CEB18102607`
   - `SeedManifest=5610DCBA0A03D9CB`
   - `DisplayConfig=E7831808F41259DA`
-  - `DisplayResult=624FB903F80BA71B`
+  - `DisplayResult=3F148C763A8AB08E`
   - `DisplayCandidate=2C9798D1B1BE3B14`
-  - `GameplayLayout=29811734A4360BC6`
-  - `SweepOracle=89F9BD7DD7026670`
+  - `GameplayLayout=919D8B8777E98DC5`
+  - `SweepOracle=73E737B64B33E3BF`
 
 自动验收结果：
 

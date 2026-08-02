@@ -133,35 +133,85 @@ namespace ABTSSlingshotCalibrationPrivate
 	}
 }
 
-FABTSM6LaunchProfileCatalog FABTSSlingshotSatelliteCalibrationModel::MakeCandidateCatalogV0()
+FABTSM6LaunchProfileCatalog
+FABTSSlingshotSatelliteCalibrationModel::MakeFrozenLaunchProfileCatalogV0()
 {
 	FABTSM6LaunchProfileCatalog Catalog;
 	Catalog.Version = 1;
 	Catalog.FlightAirDragPerSecond = 0.08f;
+	Catalog.AimCameraDistanceCM = 1500.0f;
+	Catalog.AimCameraPitchDegrees = -3.0f;
+	Catalog.AimTargetForwardDistanceCM = 900.0f;
+	Catalog.AimTargetHeightCM = 245.0f;
 	const auto AddProfile = [&Catalog](
 		const EABTSSlingshotTier Tier,
 		const float MinimumSpeed,
 		const float MaximumSpeed,
-		const float PowerExponent)
+		const float PowerExponent,
+		const float PullPowerWheelStep)
 	{
 		FABTSM6LaunchProfile& Profile = Catalog.Profiles.AddDefaulted_GetRef();
 		Profile.Tier = Tier;
 		Profile.MinimumSpeedCMPerSec = MinimumSpeed;
 		Profile.MaximumSpeedCMPerSec = MaximumSpeed;
 		Profile.PowerExponent = PowerExponent;
+		Profile.MinimumPullDistanceCM = 120.0f;
+		Profile.MaximumPullDistanceCM = 430.0f;
 		Profile.InitialPullAlpha = 0.55f;
-		Profile.PullPowerWheelStep = 0.04f;
+		Profile.PullPowerWheelStep = PullPowerWheelStep;
+		Profile.AimSensitivityScale = 1.0f;
+		Profile.MaximumAimPlaneOffsetCM = 260.0f;
+		Profile.ComfortablePullMinimum = 0.60f;
+		Profile.ComfortablePullMaximum = 0.85f;
 	};
-	AddProfile(EABTSSlingshotTier::Twig, 700.0f, 1700.0f, 1.15f);
-	AddProfile(EABTSSlingshotTier::Simple, 900.0f, 2300.0f, 1.08f);
-	AddProfile(EABTSSlingshotTier::Reinforced, 1050.0f, 3300.0f, 1.00f);
+	AddProfile(EABTSSlingshotTier::Twig, 700.0f, 1700.0f, 1.15f, 0.04f);
+	AddProfile(EABTSSlingshotTier::Simple, 900.0f, 2300.0f, 1.08f, 0.02f);
+	AddProfile(EABTSSlingshotTier::Reinforced, 1050.0f, 3300.0f, 1.00f, 0.01f);
 	return Catalog;
+}
+
+FABTSSatellitePracticePreset
+FABTSSlingshotSatelliteCalibrationModel::MakeFrozenSatellitePracticePresetV0()
+{
+	FABTSSatellitePracticePreset Preset;
+	Preset.Version = 2;
+	Preset.SatelliteRadiusPrimaryRatio = 0.125f;
+	Preset.SatelliteAnchorArcDegrees = 30.0f;
+	Preset.SatelliteAnchorAzimuthDegrees = 0.0f;
+	Preset.SatelliteCenterClearancePrimaryRatio = 0.55f;
+	Preset.SatelliteSurfaceGravityPrimaryRatio = 2.0f;
+	Preset.TargetBody = TEXT("PracticeSatellite");
+	Preset.BacksideAngleDeg = 178.0f;
+	Preset.TargetLocalAzimuthDeg = 20.0f;
+	Preset.TargetProxyRadiusCM = 420.0f;
+	Preset.BirdCollisionRadiusCM = 42.0f;
+	Preset.TargetSatelliteClearanceCM = 20.0f;
+	Preset.RangeTargetProxyRadiusCM = 150.0f;
+	Preset.AimInPlaneMinimumCM = -260.0f;
+	Preset.AimInPlaneMaximumCM = 260.0f;
+	Preset.AimInPlaneSampleCount = 41;
+	Preset.AimOutOfPlaneMinimumCM = -80.0f;
+	Preset.AimOutOfPlaneMaximumCM = 80.0f;
+	Preset.AimOutOfPlaneSampleCount = 5;
+	Preset.PullMinimum = 0.75f;
+	Preset.PullMaximum = 1.0f;
+	Preset.IntegrationStepSeconds = 0.04f;
+	Preset.MaximumFlightSeconds = 30.0f;
+	Preset.MinimumSuccessIslandSamples = 3;
+	Preset.GravityOffMinimumMissCM = 60.0f;
+	return Preset;
+}
+
+FABTSM6LaunchProfileCatalog
+FABTSSlingshotSatelliteCalibrationModel::MakeCandidateCatalogV0()
+{
+	return MakeFrozenLaunchProfileCatalogV0();
 }
 
 FABTSSatellitePracticePreset
 FABTSSlingshotSatelliteCalibrationModel::MakeCandidatePracticePresetV0()
 {
-	return FABTSSatellitePracticePreset();
+	return MakeFrozenSatellitePracticePresetV0();
 }
 
 bool FABTSSlingshotSatelliteCalibrationModel::ResolveCatalog(

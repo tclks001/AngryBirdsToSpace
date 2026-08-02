@@ -36,7 +36,7 @@ struct ABTSRUNTIME_API FABTSM6LaunchProfile
 	float InitialPullAlpha = 0.55f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pull", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float PullPowerWheelStep = 0.04f;
+	float PullPowerWheelStep = 0.02f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim", meta = (ClampMin = "0.1", ClampMax = "4.0"))
 	float AimSensitivityScale = 1.0f;
@@ -51,7 +51,7 @@ struct ABTSRUNTIME_API FABTSM6LaunchProfile
 	float ComfortablePullMaximum = 0.85f;
 };
 
-/** Versioned calibration-only catalog. Space intentionally remains on M11's legacy M6 contract. */
+/** Versioned production normal-tier catalog. Space intentionally remains on M11's legacy M6 contract. */
 USTRUCT(BlueprintType)
 struct ABTSRUNTIME_API FABTSM6LaunchProfileCatalog
 {
@@ -215,10 +215,10 @@ struct ABTSRUNTIME_API FABTSSatellitePracticePreset
 
 	/** Distance from the primary surface to the satellite centre. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Satellite", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float SatelliteCenterClearancePrimaryRatio = 0.125f;
+	float SatelliteCenterClearancePrimaryRatio = 0.55f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Satellite", meta = (ClampMin = "0.0", ClampMax = "4.0"))
-	float SatelliteSurfaceGravityPrimaryRatio = 0.45f;
+	float SatelliteSurfaceGravityPrimaryRatio = 2.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
 	FName TargetBody = TEXT("PracticeSatellite");
@@ -228,7 +228,7 @@ struct ABTSRUNTIME_API FABTSSatellitePracticePreset
 	float BacksideAngleDeg = 178.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "-180.0", ClampMax = "180.0", Units = "deg"))
-	float TargetLocalAzimuthDeg = 0.0f;
+	float TargetLocalAzimuthDeg = 20.0f;
 
 	/** Half extent of the temporary E5 cube resting on the satellite surface. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target", meta = (ClampMin = "20.0", Units = "cm"))
@@ -271,7 +271,7 @@ struct ABTSRUNTIME_API FABTSSatellitePracticePreset
 	float PullMinimum = 0.75f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sweep", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float PullMaximum = 0.95f;
+	float PullMaximum = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sweep", meta = (ClampMin = "0.01", ClampMax = "0.2", Units = "s"))
 	float IntegrationStepSeconds = 0.04f;
@@ -446,6 +446,15 @@ struct ABTSRUNTIME_API FABTSCalibrationScenario
  */
 struct ABTSRUNTIME_API FABTSSlingshotSatelliteCalibrationModel
 {
+	/**
+	 * Frozen, map-independent V0 defaults accepted by visible PIE. M3 may use
+	 * these constructors for reach/witness generation without loading the
+	 * calibration Blueprint. Runtime still verifies the resulting hashes.
+	 */
+	static FABTSM6LaunchProfileCatalog MakeFrozenLaunchProfileCatalogV0();
+	static FABTSSatellitePracticePreset MakeFrozenSatellitePracticePresetV0();
+
+	/** Compatibility names retained for existing calibration callers. */
 	static FABTSM6LaunchProfileCatalog MakeCandidateCatalogV0();
 	static FABTSSatellitePracticePreset MakeCandidatePracticePresetV0();
 	static bool ResolveCatalog(

@@ -52,31 +52,31 @@ public:
 	static constexpr uint64 FrozenFixtureProfileCatalogHash =
 		0x0052B1916220B715ull;
 	static constexpr uint64 FrozenSweepOracleHash =
-		0x8DFE449450CF2AEEull;
+		0xA5625BBBF4B16CB6ull;
 	static constexpr uint64 FrozenReferencePVSOracleHash =
-		0xEC0C3B3409FD3C31ull;
+		0xF5C27D592F6E0A62ull;
 	static constexpr uint64 FrozenReferenceBoundaryOracleHash =
-		0x8CAF504E02890A5Full;
+		0x114A4C8172CFEE2Full;
 	static constexpr uint64 FrozenDisplayResultHash =
-		0x550F7B095B788C49ull;
+		0x16A44AF72C58261Eull;
 	static constexpr uint64 FrozenDisplaySnapshotHash =
-		0x91909BF5BDBCDCBEull;
+		0x14EE4ECD0FB7B3D1ull;
 	static constexpr uint64 FrozenDisplayCandidateHash =
-		0x3B1E2304F4FA5407ull;
+		0x645E131BE34A5B3Eull;
 	static constexpr uint64 FrozenBlockedRoadResultHash =
-		0x543E119972F9F269ull;
+		0xE304EF2A07F9AE1Aull;
 	static constexpr uint64 FrozenBlockedRoadSnapshotHash =
-		0x8AD7E205F0B18BC7ull;
+		0xBCCD863372C1C049ull;
 	static constexpr uint64 FrozenInvalidPVSResultHash =
-		0x1F9501BCEF63D5AFull;
+		0x791633917546E20Eull;
 	static constexpr uint64 FrozenInvalidPVSSnapshotHash =
-		0x804CAEDA26587EB0ull;
+		0xC22841CE0783F607ull;
 	static constexpr uint64 FrozenRayBudgetResultHash =
-		0x693C20751EC2FD07ull;
+		0x085A78420F3DE440ull;
 	static constexpr uint64 FrozenRayBudgetSnapshotHash =
-		0x531D1404D5B5B9F5ull;
+		0xFEB1461B1CFBCD53ull;
 	static constexpr uint64 FrozenManifestHash =
-		0x4F1A236CDF81B80Dull;
+		0xD5E9EAF889A08018ull;
 
 	static constexpr int32 DisplayAttemptedRouteCandidates = 3;
 	static constexpr int32 DisplaySpatialHardPassCount = 3;
@@ -85,9 +85,9 @@ public:
 	static constexpr int32 DisplayEncounterCount = 6;
 	static constexpr int32 DisplayPocketCount = 42;
 	static constexpr int32 DisplayBiomeDistrictCount = 7;
-	static constexpr int32 DisplayPlayableCellCount = 728;
-	static constexpr int32 DisplayApprovedTransitionCellCount = 119;
-	static constexpr int32 DisplayActiveCoveragePermille = 836;
+	static constexpr int32 DisplayPlayableCellCount = 843;
+	static constexpr int32 DisplayApprovedTransitionCellCount = 198;
+	static constexpr int32 DisplayActiveCoveragePermille = 765;
 	static constexpr int32 DisplayDeepWildPermille = 0;
 	static constexpr int32 DisplayOptimizedPVSRays = 468;
 

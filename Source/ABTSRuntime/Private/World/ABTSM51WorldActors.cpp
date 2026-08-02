@@ -105,9 +105,29 @@ AABTSM51SlingshotDirtHole::AABTSM51SlingshotDirtHole()
 	ConfigureInteractionMesh(*Visual);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> DirtHole(TEXT("/Game/StaticMesh/SlingshotDirtHole/SM_SlingshotDitHole.SM_SlingshotDitHole"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DirtHoleMaterial(TEXT("/Game/StaticMesh/SlingshotDirtHole/MI_SlingshotDitHole.MI_SlingshotDitHole"));
-	if (DirtHole.Succeeded()) Visual->SetStaticMesh(DirtHole.Object);
-	if (DirtHoleMaterial.Succeeded()) Visual->SetMaterial(0, DirtHoleMaterial.Object);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SteelHole(TEXT("/Game/StaticMesh/SlingshotSteelHole/SM_SlingshotSteelHole.SM_SlingshotSteelHole"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SteelHoleMaterial(TEXT("/Game/StaticMesh/SlingshotSteelHole/M_SlingshotSteelHole.M_SlingshotSteelHole"));
+	StandardSlotMesh = DirtHole.Succeeded() ? DirtHole.Object : nullptr;
+	StandardSlotMaterial = DirtHoleMaterial.Succeeded()
+		? DirtHoleMaterial.Object
+		: nullptr;
+	FinaleSlotMesh = SteelHole.Succeeded() ? SteelHole.Object : nullptr;
+	FinaleSlotMaterial = SteelHoleMaterial.Succeeded()
+		? SteelHoleMaterial.Object
+		: nullptr;
+	ApplySlotVisual(EABTSSlingshotSlotKind::Standard);
 	Visual->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.06f));
+}
+
+void AABTSM51SlingshotDirtHole::ApplySlotVisual(
+	const EABTSSlingshotSlotKind InSlotKind)
+{
+	const bool bFinale =
+		InSlotKind == EABTSSlingshotSlotKind::FinaleSpace;
+	Visual->SetStaticMesh(bFinale ? FinaleSlotMesh : StandardSlotMesh);
+	Visual->SetMaterial(
+		0,
+		bFinale ? FinaleSlotMaterial : StandardSlotMaterial);
 }
 
 void AABTSM51SlingshotDirtHole::InitializeHole(const int32 InCellId)
@@ -116,6 +136,7 @@ void AABTSM51SlingshotDirtHole::InitializeHole(const int32 InCellId)
 	SlotKind = EABTSSlingshotSlotKind::Standard;
 	SlotSide = EABTSSlingshotSlotSide::None;
 	SlotPairId = INDEX_NONE;
+	ApplySlotVisual(SlotKind);
 }
 
 void AABTSM51SlingshotDirtHole::InitializeFinaleSpaceSlot(
@@ -127,6 +148,7 @@ void AABTSM51SlingshotDirtHole::InitializeFinaleSpaceSlot(
 	SlotKind = EABTSSlingshotSlotKind::FinaleSpace;
 	SlotSide = InSide;
 	SlotPairId = InPairId;
+	ApplySlotVisual(SlotKind);
 	Tags.AddUnique(FName(TEXT("ABTS.M11.FinalSpaceSlot")));
 	Tags.AddUnique(InSide == EABTSSlingshotSlotSide::Left
 		? FName(TEXT("ABTS.M11.FinalSpaceSlot.Left"))

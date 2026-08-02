@@ -13,6 +13,7 @@
 #include "HAL/PlatformMemory.h"
 #include "HAL/PlatformTime.h"
 #include "InputCoreTypes.h"
+#include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Player/ABTSM1PlayerController.h"
@@ -24,6 +25,8 @@
 #include "PCG/ABTSM3R3AcceptanceManifest.h"
 #include "PCG/ABTSM3R4AcceptanceManifest.h"
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
+#include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
+#include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UI/ABTSM1HUD.h"
@@ -515,6 +518,7 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 
 	int32 TargetCellCount = 0;
 	int32 AttackCorridorCellCount = 0;
+	int32 SatelliteE5PreviewCount = 0;
 	bool bDrewAnyPlanet = false;
 	for (TActorIterator<AABTSM3Planet> It(GetWorld());
 		It;
@@ -522,15 +526,19 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 	{
 		int32 PlanetTargetCellCount = 0;
 		int32 PlanetAttackCorridorCellCount = 0;
+		bool bPlanetSatelliteE5PreviewDrawn = false;
 		if (It->DrawMonthlyLogicRegionDebugOverlay(
 				DrawLifeTimeSeconds,
 				PlanetTargetCellCount,
-				PlanetAttackCorridorCellCount))
+				PlanetAttackCorridorCellCount,
+				bPlanetSatelliteE5PreviewDrawn))
 		{
 			bDrewAnyPlanet = true;
 			TargetCellCount += PlanetTargetCellCount;
 			AttackCorridorCellCount +=
 				PlanetAttackCorridorCellCount;
+			SatelliteE5PreviewCount +=
+				bPlanetSatelliteE5PreviewDrawn ? 1 : 0;
 		}
 	}
 	if (GEngine == nullptr)
@@ -545,18 +553,20 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 			UE_LOG(
 				LogABTSRuntime,
 				Log,
-				TEXT("[ABTS][M3R5][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d"),
+				TEXT("[ABTS][M3R5.1][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d SatelliteE5Previews=%d"),
 				TargetCellCount,
-				AttackCorridorCellCount);
+				AttackCorridorCellCount,
+				SatelliteE5PreviewCount);
 		}
 		GEngine->AddOnScreenDebugMessage(
 			0x4D335235,
 			DrawLifeTimeSeconds + 0.1f,
 			FColor::Yellow,
 			FString::Printf(
-				TEXT("M3R5 Logic Regions ON (F7)  RED=Target Footprint [%d]  ORANGE=Attack Corridor [%d]"),
+				TEXT("M3R5.1 Logic Regions ON (F7)  RED=Target [%d]  ORANGE=Corridor [%d]  BLUE/MAGENTA=Satellite/E5 [%d]"),
 				TargetCellCount,
-				AttackCorridorCellCount));
+				AttackCorridorCellCount,
+				SatelliteE5PreviewCount));
 	}
 	else
 	{
@@ -602,6 +612,7 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 			PlayerController->SetControlRotation(SpawnTransform.Rotator());
 			bInitialPlayerPlaced = true;
 			OnInitialPlayerPlaced(*Character, SpawnTransform, SpawnCellId);
+			TryActivateMonthlySatellitePractice(*Planet);
 			GetWorldTimerManager().ClearTimer(InitialRoadSpawnTimer);
 			UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][Spawn] Player placed at Start road. Cell=%d Location=(%.1f,%.1f,%.1f) Attempts=%d"),
 				SpawnCellId,
@@ -624,6 +635,52 @@ void AABTSM3GameMode::TryPlacePlayerAtInitialRoad()
 			Planet ? 1 : 0,
 			Character ? 1 : 0);
 	}
+}
+
+void AABTSM3GameMode::TryActivateMonthlySatellitePractice(
+	AABTSM3Planet& Planet)
+{
+	if (!Planet.IsMonthlyPresentationPreviewActive()
+		|| GetWorld() == nullptr)
+	{
+		return;
+	}
+	const FABTSM3MonthlySatellitePreviewResult& PreviewResult =
+		Planet.GetMonthlySatellitePreviewResult();
+	const FABTSM3MonthlySatellitePreviewCandidate* Candidate =
+		FABTSM3MonthlySatellitePreviewBuilder::FindCandidate(
+			PreviewResult,
+			Planet.GetMonthlyPresentationPreviewCandidateId());
+	if (!PreviewResult.bPreviewResultValid || Candidate == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] Rejected: exact active preview candidate is unavailable."));
+		return;
+	}
+
+	AABTSM3MonthlySatellitePracticeRuntime* Runtime =
+		GetWorld()->SpawnActorDeferred<
+			AABTSM3MonthlySatellitePracticeRuntime>(
+			AABTSM3MonthlySatellitePracticeRuntime::StaticClass(),
+			FTransform::Identity,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Runtime == nullptr
+		|| !Runtime->Configure(
+			Planet,
+			*Candidate,
+			PreviewResult.ResultHash))
+	{
+		if (Runtime)
+		{
+			Runtime->Destroy();
+		}
+		return;
+	}
+	UGameplayStatics::FinishSpawningActor(Runtime, FTransform::Identity);
+	Runtime->ActivateSnapshot();
+	MonthlySatellitePracticeRuntime = Runtime;
 }
 
 void AABTSM3GameMode::TryCompleteM3R0Smoke()

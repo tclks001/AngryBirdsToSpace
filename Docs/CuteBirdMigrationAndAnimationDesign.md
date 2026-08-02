@@ -1,6 +1,6 @@
 # CuteBird：UE 5.1 迁移、四鸟外观与动画接入设计
 
-> 状态：资产迁移验收已完成；首版代码端模型/动画框架已实现并通过 `AngryBirdsToSpaceEditor Win64 Development` 编译，待 fresh Editor/PIE 视觉验收。目标项目为 UE 5.8 的 `AngryBirdsToSpace`。
+> 状态：资产迁移验收已完成；首版共享 Presentation 动画框架、四鸟模型/材质/动画默认绑定已实现，并在 `integration/candidate-bird-presentation-v1-20260731` 通过 `AngryBirdsToSpaceEditor Win64 Development` 完整编译。本阶段按集成计划不执行 PIE，视觉验收留待最终集成。目标项目为 UE 5.8 的 `AngryBirdsToSpace`。
 >
 > 本文规定 CuteBird 资产如何安全迁移、四只鸟的外观映射、哪些动画进入本项目、每种动画服务哪个 Gameplay 状态，以及后续 Skeletal Mesh 表现层的接入边界。它不修改现有球面移动、Chaos、鸟群跟随、弹弓弹道或 CellTopo 逻辑。
 >
@@ -13,7 +13,7 @@ CuteBird 是 M4 之后四鸟的**纯表现资产包**。角色的真实位置、
 `BirdVisual` 已升级为 `USkeletalMeshComponent`。首版由 C++ 构造函数中的默认资源路径直接绑定模型、材质和动画；不创建 Animation Blueprint、不要求在编辑器为四只鸟逐项配置。
 
 1. **资产迁移层**：已验收通过。
-2. **表现接入层（后续实现）**：由代码端默认值接入 Skeletal Mesh 与动画；不改角色移动/碰撞根组件。
+2. **表现接入层（首版已实现）**：由代码端默认值接入 Skeletal Mesh 与动画；不改角色移动/碰撞根组件。
 
 不要将 `BP_Cute_Bird_*` 设为 GameMode 默认 Pawn，也不要直接 Possess 这些示例 Blueprint。它们只用于迁移外观依赖并作为颜色配置参考。
 
@@ -250,11 +250,22 @@ Skeletal Mesh 可见表现
 
 ### 6.1 当前状态
 
-`AABTSM1BirdCharacter` 创建同名 `USkeletalMeshComponent BirdVisual`，并在 CDO 中硬引用共享 `SM_Cute_Bird`。`AABTSM25BirdCharacter` 在其 CDO 中硬引用 IdleA、Move、Jump、Fly 和四鸟两槽材质，并在 Tick 中只读消费接地、速度与弹弓飞行状态。M4 的旧 `BirdMesh` Settings 字段不再参与运行时外观选择。
+`AABTSM1BirdCharacter` 创建同名 `USkeletalMeshComponent BirdVisual`，并在 CDO 中硬引用共享 `SM_Cute_Bird`。`AABTSM25BirdCharacter` 保留四鸟两槽材质默认绑定，并在 `BeginPlay` 创建不参与 Blueprint 序列化的运行时 `UABTSBirdAnimationPresentationComponent`。该组件在自身 CDO 中硬引用 IdleA、Move、Jump、Fly、Attack、Damage，只消费角色每帧提供的接地、切向速度与弹弓飞行快照。M4 的旧 `BirdMesh` Settings 字段不再参与运行时外观选择。
 
-### 6.2 后续改造范围
+数据方向固定为：
 
-后续单独实现 `M4.x CuteBird Skeletal Presentation` 时：
+```text
+Gameplay / Force / Chaos（真相源）
+    -> FABTSBirdAnimationSnapshot（只读快照）
+    -> UABTSBirdAnimationPresentationComponent
+    -> BirdVisual 的 AnimationSingleNode 姿态
+```
+
+`RequestBirdPresentationAction(Impact/Damage)` 只请求一次性姿态覆盖；组件没有速度、位置、碰撞、伤害、库存或鸟群状态的写入接口。运行时创建组件而不新增序列化 Native Default Subobject，是为了避免三个并行工作树中的派生 Bird Blueprint 发生无意义的二进制迁移。
+
+### 6.2 首版已落实的范围
+
+首版 `M4.x CuteBird Skeletal Presentation` 已按以下边界实现：
 
 1. 保留 Capsule、`ChaosPhysicsSphere`、Force/Chaos 移动组件、球面朝向计算和 Party 碰撞隔离原样。
 2. 以同名 Native Default Subobject 将 `BirdVisual` 的类型替换为 `USkeletalMeshComponent`，仍挂接到现有 Capsule。它固定 `Collision Enabled = No Collision`、`Generate Overlap Events = false`、`Simulate Physics = false`，不得创建 Physics Body 或参与查询/物理碰撞。Chaos 模式下模型脚底枢轴由代码锚定到碰撞球沿当前 Up 的支撑点；`Bird Visual Relative Location` 只是在该支撑点之上的表现微调，不改变刚体中心或半径。
@@ -276,7 +287,7 @@ Skeletal Mesh 可见表现
 | 撞击候选 | `/Game/CuteBird/Animations/Cutebird_Attack.Cutebird_Attack` | 仅在人工预览确认语义后，作为可选短暂表现，不驱动伤害或速度。 |
 | 受击/回收候选 | `/Game/CuteBird/Animations/Cutebird_Damage.Cutebird_Damage` | 仅作可选短暂表现，不改变回收、生命或物理状态。 |
 
-当前 `Content/CuteBird/Animations` 已验收到 `IdleA`、`IdleB`、`Move`、`Jump`、`Fly`、`Attack`、`Damage`、`No`、`Yes`、`DieA`、`DieB`。首版代码已硬引用 `IdleA`、`Move`、`Jump`、`Fly`；`IdleB` 与其余动作保留为后续表现扩展候选，`DieA/DieB` 不参与 ABTS 表现状态。
+当前 `Content/CuteBird/Animations` 已验收到 `IdleA`、`IdleB`、`Move`、`Jump`、`Fly`、`Attack`、`Damage`、`No`、`Yes`、`DieA`、`DieB`。首版组件已硬引用 `IdleA`、`Move`、`Jump`、`Fly`、`Attack`、`Damage`；其中 Attack/Damage 只通过显式表现请求播放，尚不自动接入 Gameplay 命中链路。`IdleB`、`No`、`Yes` 保留为后续演出扩展候选，`DieA/DieB` 不参与 ABTS 表现状态。
 
 四鸟材质预设同样为代码常量：Red→`BP_Cute_Bird_12`、Blue→`BP_Cute_Bird_3`、Yellow→`BP_Cute_Bird_10`、Black→`BP_Cute_Bird_16`。每个预设应列出 Skeletal Mesh 的所有 Material Slot 及其对应的已迁入 `M_CuteBird_*`/`M_Dino_face_*` 路径；这些精确 Slot 对照必须从已验收 Blueprint 的 Mesh Component 读取后写入代码常量，不能根据资产编号猜测脸部材质。材质解析失败时记录 BirdId、Slot 和路径，并回退为共享模型的原始材质；不得回退到碰撞组件。
 
@@ -299,7 +310,7 @@ Skeletal Mesh 可见表现
 4. 打开 `Attack`、`Damage`，决定它们是否语义适合撞击反馈；不适合则仅记录为未采用候选。
 5. 保存全部已经转换的资产，关闭并 fresh 重开 UE 5.8。
 
-### 7.2 后续代码端 Skeletal 表现验收
+### 7.2 最终集成时的 Skeletal 表现验收
 
 1. 在 `L_ABTS_M4` 中四鸟都显示正确颜色，不再显示占位球。
 2. 不按键时遵循第 6.3 节已确定的 Idle 回退策略；行走时播放 Move；跳跃时播放 Jump 后转 Fly；落地后回 Idle/Move。

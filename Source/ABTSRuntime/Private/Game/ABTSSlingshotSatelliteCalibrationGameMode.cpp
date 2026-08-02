@@ -25,10 +25,11 @@ AABTSSlingshotSatelliteCalibrationGameMode()
 	CalibrationRigClass = AABTSSlingshotSatelliteCalibrationRig::StaticClass();
 	ScoutMapSystemClass = AABTSM10ScoutMapSystem::StaticClass();
 	LaunchProfileCatalog =
-		FABTSSlingshotSatelliteCalibrationModel::MakeCandidateCatalogV0();
+		FABTSSlingshotSatelliteCalibrationModel::
+			MakeFrozenLaunchProfileCatalogV0();
 	PracticePreset =
 		FABTSSlingshotSatelliteCalibrationModel::
-			MakeCandidatePracticePresetV0();
+			MakeFrozenSatellitePracticePresetV0();
 	ScoutMapSettings.bShowOrbitalOverview = true;
 	ScoutMapSettings.OrbitalDiagramMinPathLengthCM = 1000.0f;
 	ScoutMapSettings.OrbitalDiagramPathLengthHysteresisCM = 250.0f;
