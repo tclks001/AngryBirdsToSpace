@@ -754,3 +754,7 @@ M11 专属工作树继续不直接修改下列共享热点：
 5. B v2.2 认证通过后才允许 C v2.2 在生产路径绑定 2/2 Certified Bundle。
 
 上游与返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · v1 基线：[M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)；M11-B v2.1 的 v3 基线见 [候选搜索子稿](M11B21CandidateSearchDesign.md)，新构造器见 [Additive Search v4 子稿](M11B21ConditionalParticleBeamSearchDesign.md)。当前工作点是 **保留 v3 Catalog → v4 新候选已生成但未绑定 → 选择少量候选更新 Editor-only 比较池 → M11-C v2.1 用户有渲染 PIE → 参数冻结 → M11-B v2.2**。
+
+### 12.1 M3R-5.2 道路末端预览帧交接
+
+M3R-5.2 合入 master 后，M11 对任意合法刚性终局局部帧的兼容实现、诊断和自动化门见 [M11 Preview Finale Frame Compatibility](M11PreviewFinaleFrameCompatibilityDesign.md)。该子稿当前状态为 **M11LocalAccepted / IntegrationPending**；共享 Preview/Test 适配器、M5.1 太空槽和 M3 地图联合 PIE 仍由原始集成工作树负责。

@@ -115,6 +115,11 @@ bool FABTSM11CV21InputParityAndLatestOnlyTest::RunTest(
 			TEXT("Uncertified Candidate playback requires explicit opt-in"),
 			CandidateRankVariable->GetInt(),
 			0);
+		TestEqual(
+			TEXT("GameMode and Integration preview read one Candidate authority"),
+			FABTSM11CandidateExperienceCatalog::
+				GetRequestedCandidateRank(),
+			CandidateRankVariable->GetInt());
 	}
 	return true;
 }

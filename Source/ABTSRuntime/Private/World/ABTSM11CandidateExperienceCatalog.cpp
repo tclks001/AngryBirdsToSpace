@@ -4,6 +4,7 @@
 
 #if WITH_EDITOR
 
+#include "HAL/IConsoleManager.h"
 #include "M11Search/ABTSM11CandidateSearch.h"
 #include "M11Search/ABTSM11FrozenCandidateLayouts.h"
 #include "World/ABTSM11GravityAssistCoreAdapter.h"
@@ -19,6 +20,15 @@ namespace
 	using ABTS::M11Search::CandidateSearchContract;
 	using ABTS::M11Search::LaunchInput;
 	using ABTS::M11Search::LaunchModel;
+
+	TAutoConsoleVariable<int32> CVarABTSM11CandidateRank(
+		TEXT("abts.M11.CandidateRank"),
+		0,
+		TEXT("Editor-only M11 Candidate layout selection. ")
+		TEXT("0 keeps the production Certified v1 bundle; ")
+		TEXT("1..11 load the corresponding frozen, UNCERTIFIED ")
+		TEXT("M11-B Candidate. Set before PIE and restart PIE after changing."),
+		ECVF_Default);
 
 	struct FFrozenCandidateIdentity
 	{
@@ -300,6 +310,11 @@ FString FABTSM11CandidateExperienceIdentity::ToLogString() const
 }
 
 #if WITH_EDITOR
+
+int32 FABTSM11CandidateExperienceCatalog::GetRequestedCandidateRank()
+{
+	return CVarABTSM11CandidateRank.GetValueOnGameThread();
+}
 
 bool FABTSM11CandidateExperienceCatalog::BuildCandidate(
 	const int32 CandidateRank,
