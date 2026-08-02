@@ -730,6 +730,7 @@ bool FABTSM73BeamBDefaultBridgedArcologyRailBearingTest::RunTest(
 	TestEqual(TEXT("Default fixture has no bridge ground rescue post"),
 		Result.Summary.BridgeGroundRescuePostCount, 0);
 	int32 ShortCorbelCount = 0;
+	int32 UpperPostCount = 0;
 	for (const FABTSM73BeamAMember& Member : Result.ClosedAssembly.Members)
 	{
 		if (Member.Role == EABTSM73BeamAMemberRole::BridgeSeat
@@ -737,9 +738,50 @@ bool FABTSM73BeamBDefaultBridgedArcologyRailBearingTest::RunTest(
 		{
 			++ShortCorbelCount;
 		}
+		if (Member.Role != EABTSM73BeamAMemberRole::BridgePost)
+		{
+			continue;
+		}
+		++UpperPostCount;
+		TestEqual(TEXT("Bridge upper support is a Z post"),
+			Member.Axis, EABTSM73BeamAFrameAxis::Z);
+		bool bRailBelow = false;
+		bool bModuleAbove = false;
+		for (const FABTSM73BeamABearingContact& Contact :
+			Result.ClosedAssembly.BearingContacts)
+		{
+			if (Contact.UpperMemberId == Member.MemberId
+				&& Result.ClosedAssembly.Members.IsValidIndex(
+					Contact.LowerMemberId)
+				&& (Result.ClosedAssembly.Members[Contact.LowerMemberId].Role
+						== EABTSM73BeamAMemberRole::BridgeRail
+					|| Result.ClosedAssembly.Members[Contact.LowerMemberId].Role
+						== EABTSM73BeamAMemberRole::BridgeSeat))
+			{
+				bRailBelow = true;
+			}
+			if (Contact.LowerMemberId == Member.MemberId
+				&& Result.ClosedAssembly.Members.IsValidIndex(
+					Contact.UpperMemberId))
+			{
+				const FABTSM73BeamAMember& Upper =
+					Result.ClosedAssembly.Members[Contact.UpperMemberId];
+				bModuleAbove = Upper.Axis != EABTSM73BeamAFrameAxis::Z
+					&& Upper.Role != EABTSM73BeamAMemberRole::BridgeRail
+					&& Upper.Role != EABTSM73BeamAMemberRole::BridgePost;
+			}
+		}
+		TestTrue(TEXT("Bridge upper post bears on a bridge rail or bearer"),
+			bRailBelow);
+		TestTrue(TEXT("Bridge upper post carries an endpoint module"),
+			bModuleAbove);
 	}
 	TestTrue(TEXT("Default fixture materializes local short bridge corbels"),
 		ShortCorbelCount > 0);
+	TestTrue(TEXT("Default fixture closes elevated endpoint gaps with a Z-post group"),
+		UpperPostCount >= 2);
+	TestEqual(TEXT("Bridge upper-post summary matches materialized posts"),
+		Result.Summary.BridgeUpperPostMemberCount, UpperPostCount);
 	return true;
 }
 

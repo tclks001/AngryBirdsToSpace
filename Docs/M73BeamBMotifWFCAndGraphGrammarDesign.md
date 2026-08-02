@@ -70,6 +70,13 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 也不得从地面补长柱。最终 Bearing 图必须显式包含“承托模块 -> 桥托 -> 短托块（可选） ->
 每根桥面纵梁”的路径。
 
+桥面纵梁与承托模块之间还必须闭合上向传力路径。若同一端部模块内存在位于纵梁上方、
+XY 投影与纵梁相交的悬空水平构件，则在每个有效纵梁站位选择最近的上方构件，并在二者
+实际重叠区域中心生成局部 `BridgePost`。该柱只跨越“纵梁上表面 -> 上部构件下表面”，
+不得落地、不得侵入跨中保留净空，也不得与第三方构件发生正体积重叠。Bearing 图对应增加
+“桥面纵梁 -> BridgePost -> 上部构件”的实体路径；若该通道已被既有实体占据，则保留原构件，
+不叠加重复修补柱。
+
 ## 3. Motif 与 Port
 
 | Motif | 结构读形 | 主要使用区域 |
@@ -127,7 +134,9 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - `SupportedSpanVoid`：有意架空跨越必须留下非空保留空间，闭合 Assembly 的 Z 柱不得进入其跨中下方。
 - `BridgeEndpointBearing`：每个 SupportedSpan 必须有两份桥托账本；桥托留在上游指定的语义模块内，闭合后两端均存在“指定模块 -> 桥体”的局部 Bearing 路径，且桥体 Assembly 不得靠落地长柱救援。
 - `DefaultBridgedArcologyRailBearing`：默认 `BridgedArcology` 固定种子下，不仅两个端点整体可达，
-  每根桥面纵梁的两个端点都必须直接落在地面可达的 `BridgeSeat`/短托块上；任一局部端缝均拒绝整次生成。
+  每根桥面纵梁的两个端点都必须直接落在地面可达的 `BridgeSeat`/短托块上；同时默认夹层必须
+  实体化至少一根 `BridgePost`，并逐根证明“纵梁 -> Z 柱 -> 端部模块水平构件”的上下 Bearing；
+  任一局部端缝均拒绝整次生成。
 - `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
   在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
 
@@ -137,7 +146,9 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 
 1. 同一上游轮廓内应能看到至少两种颜色/结构母题，而不是全楼重复同一种方框；
 2. `GrammarDepth` 从 1 提高到 3～4 时，门架联系层、木垛层或平行梁数量应增加；
-3. SupportedSpan 必须显示双长梁/横向端梁；终端主梁应延伸至净开口边界并分别落在两端横向桥托上，不得留下可见端缝，也不得坍缩为普通塔楼母题；
+3. SupportedSpan 必须显示双长梁/横向端梁；终端主梁应延伸至净开口边界并分别落在两端横向桥托上，
+   不得留下可见端缝，也不得坍缩为普通塔楼母题；若桥托或纵梁上方仍有端部模块，则各有效站位
+   必须显示连接横梁和悬空模块的短 Z 柱组，而不是再次生成落地长柱；
 4. 不得生成单边 Cantilever；旧 `bAllowCantilever` 开关不再恢复该形态，当前任何设置下也不应出现斜杆；
 5. 上游 Prism 应由逐层缩短一个水平轴的梁层读出坡屋顶；Pyramid 应同时沿 X/Y 收分，
    不得再显示为等宽矩形木垛或平顶框；
@@ -183,3 +194,13 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
   10/10 Success，确认桥梁语义身份保留未改变 Beam-A 通用闭合行为。
 - `Saved/Logs/BridgeRailClosure-M7-20260802-220523.log`：精确找到 95 项 `ABTS.M7`，
   95/95 Success，覆盖本阶段逐纵梁端点承托以及既有 M7 回归集合。
+- `Saved/Logs/BridgeUpperPosts-FinalBuild-20260802-230249.log`：使用
+  `-ForceUnity -DisableAdaptiveUnity` 强制 Unity 完整链接，`Result: Succeeded`。
+- `Saved/Logs/BridgeUpperPosts-GroupExact-20260802-230012.log`：默认 `BridgedArcology`
+  精确门禁 1/1 Success，要求至少两根 Z 柱组成柱组，并逐根验证
+  “桥面纵梁/水平桥托 -> BridgePost -> 上部水平构件”。
+- `Saved/Logs/BridgeUpperPosts-BeamBFinal-20260802-2301.log`：精确找到 12 项 Beam-B，
+  12/12 Success；此前 `BridgeUpperPosts-BeamA-20260802145300.log` 精确找到 10 项 Beam-A，
+  10/10 Success。
+- `Saved/Logs/BridgeUpperPosts-M7Final-20260802-2301.log`：精确找到 95 项 `ABTS.M7`，
+  95/95 Success；覆盖新增上向 Z 柱、无正体积穿透、Bearing 到地可达及既有 M7 回归集合。

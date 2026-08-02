@@ -261,7 +261,7 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		TEXT("[ABTS][M7.3-Beam-B][PreviewGenerated]")
 		TEXT(" Actor=%s Bays=%d Motifs=%d WFC=%d Steps=%d")
 		TEXT(" Planned=%d Closed=%d Bearings=%d")
-		TEXT(" BridgeSeats=%d BridgeBearings=%d RailBearings=%d")
+		TEXT(" BridgeSeats=%d BridgePosts=%d BridgeBearings=%d RailBearings=%d")
 		TEXT(" PortViolations=%d BoundsViolations=%d")
 		TEXT(" Penetrations=%d Unsupported=%d Diagonal=%d Semantic=%d")
 		TEXT(" BridgeBearingViolations=%d RailBearingViolations=%d")
@@ -275,6 +275,7 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		LastPreviewSummary.ClosedMemberCount,
 		LastPreviewSummary.ClosedBearingContactCount,
 		LastPreviewSummary.BridgeSeatMemberCount,
+		LastPreviewSummary.BridgeUpperPostMemberCount,
 		LastPreviewSummary.BridgeEndpointBearingCount,
 		LastPreviewSummary.BridgeRailEndpointBearingCount,
 		LastPreviewSummary.PortViolationCount,

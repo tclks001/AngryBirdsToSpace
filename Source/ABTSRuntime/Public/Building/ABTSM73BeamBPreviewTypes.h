@@ -207,6 +207,10 @@ struct FABTSM73BeamBPreviewSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
 	int32 BridgeRailEndpointBearingCount = 0;
 
+	/** Local Z posts that close the rail-to-elevated-module transfer path. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
+	int32 BridgeUpperPostMemberCount = 0;
+
 	/** Must be zero for every accepted Beam-B result. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 RemainingPenetrationCount = 0;

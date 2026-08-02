@@ -961,6 +961,10 @@ namespace ABTSM73BeamA
 	{
 		if (Role == EABTSM73BeamAMemberRole::BridgeSeat)
 		{
+			return 3;
+		}
+		if (Role == EABTSM73BeamAMemberRole::BridgePost)
+		{
 			return 2;
 		}
 		return Role == EABTSM73BeamAMemberRole::BridgeRail ? 1 : 0;
