@@ -48,6 +48,7 @@ DAG5-B v2 semantic volumes
   -> supported-span endpoint rail extension + support-module bridge seats
   -> compile to Beam-A Joint / Member / Assembly IR
   -> shared Beam-A global assembly closure
+  -> closed-IR bridge endpoint reconciliation (rail / bearer / short corbel)
   -> closed structural members for editor preview
   -> Beam-C Load DAG/static proxy (next)
 ```
@@ -61,6 +62,13 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 闭合编译不复制一套近似屋顶，而是从已验收的 Beam-A Assembly 中保留该语义体及其沿 Bearing
 向下的完整支撑祖先，再与 Box Bay 的 Beam-B Motif 构件一起交给
 `ABTSM73BeamA::CloseGeneratedAssembly`。这样轮廓来源和结构闭合各有唯一权威实现。
+
+全局闭合可能合法地合并或裁剪普通课程，但不能因此让桥面纵梁与承托模块之间留下端缝。
+因此闭合后的桥梁有一项局部、确定性的二次契约：逐根恢复 `BridgeRail` 的最终身份；被裁掉的
+语义纵梁按原 `SupportedSpan` 开口与轨道站位恢复；若承托模块与计划承重点在闭合后错开，
+只允许生成连接该模块的水平桥托和桥托至纵梁之间的短 Z 向托块。该过程不得生成跨中柱，
+也不得从地面补长柱。最终 Bearing 图必须显式包含“承托模块 -> 桥托 -> 短托块（可选） ->
+每根桥面纵梁”的路径。
 
 ## 3. Motif 与 Port
 
@@ -118,6 +126,8 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - `NoDiagonalMembers`：即使旧资产把 `bAllowBracedBay`、`bAllowCantilever` 设为真，也不得选择 BracedBay、CantileverBay 或生成计划/闭合斜撑。
 - `SupportedSpanVoid`：有意架空跨越必须留下非空保留空间，闭合 Assembly 的 Z 柱不得进入其跨中下方。
 - `BridgeEndpointBearing`：每个 SupportedSpan 必须有两份桥托账本；桥托留在上游指定的语义模块内，闭合后两端均存在“指定模块 -> 桥体”的局部 Bearing 路径，且桥体 Assembly 不得靠落地长柱救援。
+- `DefaultBridgedArcologyRailBearing`：默认 `BridgedArcology` 固定种子下，不仅两个端点整体可达，
+  每根桥面纵梁的两个端点都必须直接落在地面可达的 `BridgeSeat`/短托块上；任一局部端缝均拒绝整次生成。
 - `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
   在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
 
@@ -135,7 +145,7 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 7. Details 中 Accepted 为真，PortViolationCount、OutOfBoundsMemberCount、
    RemainingPenetrationCount、UnsupportedMemberCount、DiagonalMemberCount 均为 0，
    SemanticEnvelopeViolationCount 为 0，ClosedMemberCount 与 ClosedBearingContactCount 大于 0；
-8. SupportedSpan 下方必须保持为空，不得生成跨中落地长柱；两端桥托应由上游指定的承托模块承担，允许收口后与该模块既有承托梁合并，但不允许桥体自身补到地面；
+8. SupportedSpan 下方必须保持为空，不得生成跨中落地长柱；两端桥托应由上游指定的承托模块承担，允许收口后与该模块既有承托梁合并，也允许使用连接该模块的水平桥托与短 Z 向托块，但不允许桥体自身补到地面；每根平行桥面纵梁均不得留下局部端缝；
 9. 进入 PIE 后预览不可见且不参与物理 Gate。
 
 本阶段验收“结构复杂度、局部拼接语义以及静态全局装配闭合”。真实 Brick/Chaos 动态稳定性、
@@ -167,3 +177,9 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
   完整链接，`Result: Succeeded`；检测到的可见 Editor 属于其他工作树，未终止、复用或控制。
 - `Saved/Logs/BridgeSeat-M7-20260802-190230-FullRegression.log`：精确找到 94 项
   `ABTS.M7`，94/94 Success。
+- `Saved/Logs/BeamB-20260802-215248.log`：精确找到 12 项 `ABTS.M73DAG.BeamB`，
+  12/12 Success；新增默认 `BridgedArcology` 的逐纵梁端点承托门槛。
+- `Saved/Logs/BeamA-20260802-215608.log`：精确找到 10 项 `ABTS.M73DAG.BeamA`，
+  10/10 Success，确认桥梁语义身份保留未改变 Beam-A 通用闭合行为。
+- `Saved/Logs/BridgeRailClosure-M7-20260802-220523.log`：精确找到 95 项 `ABTS.M7`，
+  95/95 Success，覆盖本阶段逐纵梁端点承托以及既有 M7 回归集合。

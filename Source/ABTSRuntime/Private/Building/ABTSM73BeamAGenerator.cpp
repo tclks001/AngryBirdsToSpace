@@ -957,6 +957,15 @@ namespace ABTSM73BeamA
 		}
 	}
 
+	int32 BridgeRolePriority(const EABTSM73BeamAMemberRole Role)
+	{
+		if (Role == EABTSM73BeamAMemberRole::BridgeSeat)
+		{
+			return 2;
+		}
+		return Role == EABTSM73BeamAMemberRole::BridgeRail ? 1 : 0;
+	}
+
 	bool SameMemberLane(
 		const FMemberBuildSpec& A,
 		const FMemberBuildSpec& B,
@@ -1034,14 +1043,13 @@ namespace ABTSM73BeamA
 						(UnionMin + UnionMax) * 0.5;
 					Specs[AIndex].LengthCM =
 						static_cast<float>(UnionMax - UnionMin);
-					if (Specs[BIndex].Role
-						== EABTSM73BeamAMemberRole::BridgeSeat)
+					if (BridgeRolePriority(Specs[BIndex].Role)
+						> BridgeRolePriority(Specs[AIndex].Role))
 					{
-						// A support-module course may absorb its endpoint ledger.
-						// Preserve the stronger semantic role so Beam-B can still
-						// certify the closed bridge-to-seat bearing explicitly.
+						// Preserve bridge identity when a semantic rail or seat is
+						// absorbed into an existing support-module course.
 						Specs[AIndex].Role =
-							EABTSM73BeamAMemberRole::BridgeSeat;
+							Specs[BIndex].Role;
 					}
 					for (const int32 AssemblyId : Specs[BIndex].AssemblyIds)
 					{

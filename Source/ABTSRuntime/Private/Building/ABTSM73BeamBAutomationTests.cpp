@@ -465,11 +465,29 @@ bool FABTSM73BeamBBridgeEndpointBearingTest::RunTest(
 	TestTrue(TEXT("Fixture contains a supported span"), SupportedSpanCount > 0);
 	TestEqual(TEXT("Every supported span has two endpoint ledgers"),
 		Result.BridgeEndpoints.Num(), SupportedSpanCount * 2);
-	TestEqual(TEXT("Summary reports every planned bridge seat"),
-		Result.Summary.BridgeSeatMemberCount, Result.BridgeEndpoints.Num());
+	int32 ExpectedBridgeSeatCount = 0;
+	for (const FABTSM73BeamAMember& Member : Result.ClosedAssembly.Members)
+	{
+		ExpectedBridgeSeatCount += Member.Role
+			== EABTSM73BeamAMemberRole::BridgeSeat ? 1 : 0;
+	}
+	TestEqual(TEXT("Summary reports every closed bridge seat and corbel"),
+		Result.Summary.BridgeSeatMemberCount, ExpectedBridgeSeatCount);
 	TestEqual(TEXT("Every endpoint has a closed bearing"),
 		Result.Summary.BridgeEndpointBearingCount,
 		Result.BridgeEndpoints.Num());
+	int32 ExpectedRailEndpointCount = 0;
+	for (const FABTSM73BeamBBridgeEndpoint& Endpoint : Result.BridgeEndpoints)
+	{
+		TestTrue(TEXT("Every bridge endpoint declares its load rails"),
+			Endpoint.RailStationsCM.Num() >= 2);
+		ExpectedRailEndpointCount += Endpoint.RailStationsCM.Num();
+	}
+	TestEqual(TEXT("Every declared bridge rail endpoint bears on its seat"),
+		Result.Summary.BridgeRailEndpointBearingCount,
+		ExpectedRailEndpointCount);
+	TestEqual(TEXT("No bridge rail endpoint bearing is missing"),
+		Result.Summary.BridgeRailEndpointBearingViolationCount, 0);
 	TestEqual(TEXT("No endpoint bearing contract is missing"),
 		Result.Summary.BridgeEndpointBearingViolationCount, 0);
 	TestEqual(TEXT("Bridge Assembly receives no ground rescue post"),
@@ -668,6 +686,60 @@ bool FABTSM73BeamBBridgeEndpointBearingTest::RunTest(
 		TestTrue(TEXT("Bridge rail bears on its designated support ledger"),
 			bFoundPhysicalBearing);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBDefaultBridgedArcologyRailBearingTest,
+	"ABTS.M73DAG.BeamB.DefaultBridgedArcologyRailBearing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBDefaultBridgedArcologyRailBearingTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(735201);
+	FABTSM73BeamBGenerationResult Result;
+	FString Error;
+	if (!Generate(Settings, Result, Error))
+	{
+		AddError(FString::Printf(
+			TEXT("Default Bridged Arcology failed: %s"), *Error));
+		return false;
+	}
+
+	int32 ExpectedRailEndpointCount = 0;
+	for (const FABTSM73BeamBBridgeEndpoint& Endpoint : Result.BridgeEndpoints)
+	{
+		TestTrue(TEXT("Default endpoint declares paired load rails"),
+			Endpoint.RailStationsCM.Num() >= 2);
+		ExpectedRailEndpointCount += Endpoint.RailStationsCM.Num();
+	}
+	TestTrue(TEXT("Default fixture contains bridge endpoints"),
+		!Result.BridgeEndpoints.IsEmpty());
+	TestEqual(TEXT("Default fixture closes every bridge endpoint"),
+		Result.Summary.BridgeEndpointBearingCount,
+		Result.BridgeEndpoints.Num());
+	TestEqual(TEXT("Default fixture carries every load-rail endpoint"),
+		Result.Summary.BridgeRailEndpointBearingCount,
+		ExpectedRailEndpointCount);
+	TestEqual(TEXT("Default fixture has no rail-bearing violation"),
+		Result.Summary.BridgeRailEndpointBearingViolationCount, 0);
+	TestEqual(TEXT("Default fixture has no endpoint-bearing violation"),
+		Result.Summary.BridgeEndpointBearingViolationCount, 0);
+	TestEqual(TEXT("Default fixture has no bridge ground rescue post"),
+		Result.Summary.BridgeGroundRescuePostCount, 0);
+	int32 ShortCorbelCount = 0;
+	for (const FABTSM73BeamAMember& Member : Result.ClosedAssembly.Members)
+	{
+		if (Member.Role == EABTSM73BeamAMemberRole::BridgeSeat
+			&& Member.Axis == EABTSM73BeamAFrameAxis::Z)
+		{
+			++ShortCorbelCount;
+		}
+	}
+	TestTrue(TEXT("Default fixture materializes local short bridge corbels"),
+		ShortCorbelCount > 0);
 	return true;
 }
 

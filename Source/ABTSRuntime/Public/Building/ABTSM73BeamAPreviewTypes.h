@@ -33,7 +33,9 @@ enum class EABTSM73BeamAMemberRole : uint8
 	SecondaryBeam,
 	RoofCourse,
 	/** Horizontal bearing ledger owned by a designated span support module. */
-	BridgeSeat
+	BridgeSeat,
+	/** Longitudinal load rail of an intentional SupportedSpan bridge. */
+	BridgeRail
 };
 
 UENUM(BlueprintType)

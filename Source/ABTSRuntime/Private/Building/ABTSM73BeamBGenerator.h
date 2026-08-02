@@ -18,6 +18,9 @@ struct FABTSM73BeamBBridgeEndpoint
 	int32 SupportBayId = INDEX_NONE;
 	int32 SeatPlannedMemberId = INDEX_NONE;
 	double BearingPlaneCM = 0.0;
+	double RailCenterZCM = 0.0;
+	/** Perpendicular stations of every load rail that this endpoint must carry. */
+	TArray<double> RailStationsCM;
 	bool bNegativeEndpoint = false;
 };
 

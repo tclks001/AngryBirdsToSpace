@@ -203,6 +203,10 @@ struct FABTSM73BeamBPreviewSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
 	int32 BridgeEndpointBearingCount = 0;
 
+	/** Final bridge-rail endpoints that bear directly on their designated seat. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
+	int32 BridgeRailEndpointBearingCount = 0;
+
 	/** Must be zero for every accepted Beam-B result. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 RemainingPenetrationCount = 0;
@@ -232,6 +236,10 @@ struct FABTSM73BeamBPreviewSummary
 	/** Must remain zero: every declared endpoint must bear on its designated support. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 BridgeEndpointBearingViolationCount = 0;
+
+	/** Must remain zero: every expected load rail must bear on its endpoint seat. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 BridgeRailEndpointBearingViolationCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
 	int64 MotifWFCHash = 0;

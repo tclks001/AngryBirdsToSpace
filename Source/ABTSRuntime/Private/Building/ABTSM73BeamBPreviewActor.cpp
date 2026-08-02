@@ -261,10 +261,11 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		TEXT("[ABTS][M7.3-Beam-B][PreviewGenerated]")
 		TEXT(" Actor=%s Bays=%d Motifs=%d WFC=%d Steps=%d")
 		TEXT(" Planned=%d Closed=%d Bearings=%d")
-		TEXT(" BridgeSeats=%d BridgeBearings=%d")
+		TEXT(" BridgeSeats=%d BridgeBearings=%d RailBearings=%d")
 		TEXT(" PortViolations=%d BoundsViolations=%d")
 		TEXT(" Penetrations=%d Unsupported=%d Diagonal=%d Semantic=%d")
-		TEXT(" BridgeBearingViolations=%d BridgeGroundPosts=%d")
+		TEXT(" BridgeBearingViolations=%d RailBearingViolations=%d")
+		TEXT(" BridgeGroundPosts=%d")
 		TEXT(" Hash=%lld"),
 		*GetName(), LastPreviewSummary.BayCount,
 		LastPreviewSummary.DistinctMotifCount,
@@ -275,6 +276,7 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		LastPreviewSummary.ClosedBearingContactCount,
 		LastPreviewSummary.BridgeSeatMemberCount,
 		LastPreviewSummary.BridgeEndpointBearingCount,
+		LastPreviewSummary.BridgeRailEndpointBearingCount,
 		LastPreviewSummary.PortViolationCount,
 		LastPreviewSummary.OutOfBoundsMemberCount,
 		LastPreviewSummary.RemainingPenetrationCount,
@@ -282,6 +284,7 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		LastPreviewSummary.DiagonalMemberCount,
 		LastPreviewSummary.SemanticEnvelopeViolationCount,
 		LastPreviewSummary.BridgeEndpointBearingViolationCount,
+		LastPreviewSummary.BridgeRailEndpointBearingViolationCount,
 		LastPreviewSummary.BridgeGroundRescuePostCount,
 		LastPreviewSummary.ResultHash);
 }
