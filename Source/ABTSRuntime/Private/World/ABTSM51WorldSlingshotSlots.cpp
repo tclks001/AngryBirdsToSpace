@@ -9,6 +9,23 @@
 bool AABTSM51WorldSystem::ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
 	const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot)
 {
+	return ConfigureOrdinarySlingshotSlotSnapshot(
+		InSnapshot,
+		EABTSM51OrdinarySlingshotSlotSnapshotAuthority::AcceptedMonthly);
+}
+
+bool AABTSM51WorldSystem::ConfigurePreviewOrdinarySlingshotSlotSnapshot(
+	const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot)
+{
+	return ConfigureOrdinarySlingshotSlotSnapshot(
+		InSnapshot,
+		EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest);
+}
+
+bool AABTSM51WorldSystem::ConfigureOrdinarySlingshotSlotSnapshot(
+	const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot,
+	const EABTSM51OrdinarySlingshotSlotSnapshotAuthority InAuthority)
+{
 	if (HasActorBegunPlay() || bInitialized || bSlingshotHolesSpawned)
 	{
 		UE_LOG(LogABTSRuntime, Error,
@@ -17,7 +34,11 @@ bool AABTSM51WorldSystem::ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
 	}
 
 	bOrdinarySlotSnapshotRequested = true;
-	bOrdinarySlotSnapshotValid = InSnapshot.IsStructurallyUsable();
+	OrdinarySlotSnapshotAuthority = InAuthority;
+	bOrdinarySlotSnapshotValid =
+		InAuthority
+			!= EABTSM51OrdinarySlingshotSlotSnapshotAuthority::None
+		&& InSnapshot.IsStructurallyUsable();
 	OrdinarySlotSnapshot = bOrdinarySlotSnapshotValid
 		? InSnapshot
 		: FABTSM51OrdinarySlingshotSlotSnapshot();
@@ -81,11 +102,15 @@ bool AABTSM51WorldSystem::SpawnSlingshotHoles()
 		{
 			const TArray<FABTSM3CellState>& CellStates =
 				Planet->GetGeneratedCellStates();
+			const bool bValidateCurrentMonthlyCellState =
+				OrdinarySlotSnapshotAuthority
+					!= EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest;
 			for (const int32 CellId : StandardCellIds)
 			{
 				if (!CellStates.IsValidIndex(CellId)
-					|| CellStates[CellId].bWater
-					|| CellStates[CellId].bBuildingAnchor
+					|| (bValidateCurrentMonthlyCellState
+						&& (CellStates[CellId].bWater
+							|| CellStates[CellId].bBuildingAnchor))
 					|| (FinaleFrame.IsUsable()
 						&& CellId == FinaleFrame.AnchorCellId))
 				{
@@ -267,7 +292,10 @@ bool AABTSM51WorldSystem::SpawnSlingshotHoles()
 		FinaleFrame.AnchorCellId);
 	const TCHAR* OrdinarySourceName =
 		bOrdinarySlotSnapshotRequested
-			? TEXT("AcceptedSnapshot")
+			? OrdinarySlotSnapshotAuthority
+					== EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest
+				? TEXT("PreviewTestSnapshot")
+				: TEXT("AcceptedMonthlySnapshot")
 			: TEXT("CompatibilityTaskGraph");
 	const unsigned long long LayoutHash =
 		static_cast<unsigned long long>(

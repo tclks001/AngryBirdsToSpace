@@ -4,8 +4,16 @@
 
 #include "CoreMinimal.h"
 
+/** Runtime authority carried separately from the immutable slot payload. */
+enum class EABTSM51OrdinarySlingshotSlotSnapshotAuthority : uint8
+{
+	None = 0,
+	AcceptedMonthly = 1,
+	PreviewTest = 2
+};
+
 /**
- * One accepted ordinary slingshot slot group.
+ * One ordinary slingshot slot group.
  *
  * Group membership is presentation/spawn data only. It never grants or denies
  * permission to connect two ordinary stakes.
@@ -16,13 +24,13 @@ struct ABTSRUNTIME_API FABTSM51OrdinarySlingshotSlotGroup
 };
 
 /**
- * Minimal read-only M3 -> M5.1 hand-off for an accepted monthly layout.
+ * Minimal read-only M3 -> M5.1 hand-off for one explicitly identified layout.
  *
  * This consumer-owned value type deliberately contains no M3 candidate array,
  * encounter identity, field identity, allowed-pair edges, or UObject reference.
- * Until M3R-4/R-6 publishes one accepted candidate, production code must keep
- * using the compatibility TaskGraph adapter and must not manufacture this
- * snapshot from RetainedCandidates[0].
+ * AcceptedMonthly consumers must wait for M3R-4/R-6 to publish one accepted
+ * candidate. Preview/Test consumers may adapt an explicitly named candidate,
+ * but must never infer authority from RetainedCandidates[0].
  */
 struct ABTSRUNTIME_API FABTSM51OrdinarySlingshotSlotSnapshot
 {

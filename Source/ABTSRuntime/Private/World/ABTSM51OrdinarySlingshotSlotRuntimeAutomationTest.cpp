@@ -287,7 +287,7 @@ bool FABTSM51OrdinarySlingshotSlotRuntimeTest::RunTest(
 				ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
 					InvalidTopology));
 		AddExpectedErrorPlain(
-			TEXT("[ABTS][M5.1][OrdinarySlots] Source=AcceptedSnapshot Accepted=0"),
+			TEXT("[ABTS][M5.1][OrdinarySlots] Source=AcceptedMonthlySnapshot Accepted=0"),
 			EAutomationExpectedErrorFlags::Contains,
 			1);
 		AddExpectedErrorPlain(
