@@ -9,6 +9,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
@@ -18,10 +19,114 @@
 #include "World/ABTSCollisionChannels.h"
 #if WITH_EDITOR
 #include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 #endif
 
 namespace
 {
+class FPlanetMonthlyFinaleAnchorSurface final
+	: public IABTSM3MonthlyFinaleAnchorSurface
+{
+public:
+	FPlanetMonthlyFinaleAnchorSurface(
+		const AABTSM3Planet& InPlanet)
+		: Planet(InPlanet)
+	{
+	}
+
+	virtual FVector GetPrimaryCenterWorld() const override
+	{
+		return Planet.GetPlanetCenterWorld();
+	}
+
+	virtual float GetPrimaryRadiusCM() const override
+	{
+		return Planet.GetPlanetRadiusCM();
+	}
+
+	virtual bool QuerySurface(
+		const FVector& UnitDirection,
+		FABTSM3MonthlyFinaleSurfaceSample& OutSample) const override
+	{
+		const FVector Direction = UnitDirection.GetSafeNormal();
+		if (Direction.IsNearlyZero())
+		{
+			return false;
+		}
+		float SurfaceRadiusCM = 0.0f;
+		return Planet.QuerySurface(
+				Direction,
+				OutSample.WorldLocation,
+				OutSample.WorldNormal,
+				SurfaceRadiusCM,
+				OutSample.NearestCellId)
+			&& !OutSample.WorldLocation.ContainsNaN()
+			&& !OutSample.WorldNormal.ContainsNaN()
+			&& OutSample.WorldNormal.Normalize();
+	}
+
+private:
+	const AABTSM3Planet& Planet;
+};
+
+class FPlanetMonthlySatellitePreviewSurface final
+	: public IABTSM3MonthlySatellitePreviewSurface
+{
+public:
+	FPlanetMonthlySatellitePreviewSurface(
+		const AABTSM3Planet& InPlanet,
+		const TArray<FABTSM2Cell>& InCells)
+		: Planet(InPlanet), Cells(InCells)
+	{
+	}
+
+	virtual FVector GetPrimaryCenterWorld() const override
+	{
+		return Planet.GetPlanetCenterWorld();
+	}
+
+	virtual float GetPrimaryRadiusCM() const override
+	{
+		return Planet.GetPlanetRadiusCM();
+	}
+
+	virtual bool QuerySurface(
+		const FVector& UnitDirection,
+		FABTSM3MonthlySatelliteSurfaceSample& OutSample) const override
+	{
+		const FVector Direction = UnitDirection.GetSafeNormal();
+		if (Direction.IsNearlyZero() || Cells.IsEmpty())
+		{
+			return false;
+		}
+		OutSample.WorldLocation = Planet.GetPlanetCenterWorld()
+			+ Direction * Planet.GetSurfaceRadiusAtDirection(Direction);
+		OutSample.WorldNormal =
+			Planet.GetSurfaceNormalAtDirection(Direction);
+		OutSample.NearestCellId = INDEX_NONE;
+		double BestDot = -2.0;
+		for (int32 CellId = 0; CellId < Cells.Num(); ++CellId)
+		{
+			const double Dot = FVector::DotProduct(
+				Direction,
+				Cells[CellId].UnitCenter);
+			if (Dot > BestDot)
+			{
+				BestDot = Dot;
+				OutSample.NearestCellId = CellId;
+			}
+		}
+		return OutSample.NearestCellId != INDEX_NONE
+			&& !OutSample.WorldLocation.ContainsNaN()
+			&& !OutSample.WorldNormal.ContainsNaN()
+			&& OutSample.WorldNormal.Normalize();
+	}
+
+private:
+	const AABTSM3Planet& Planet;
+	const TArray<FABTSM2Cell>& Cells;
+};
+
 bool ValidateInstancedMeshMaterials(const TCHAR* Label, const UStaticMesh* Mesh)
 {
 	if (Mesh == nullptr) return false;
@@ -99,10 +204,16 @@ bool AABTSM3Planet::RebuildPlanet()
 	bMonthlyPresentationPreviewActive = false;
 	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
 	ActiveMonthlyPresentationPreviewCandidateHash = 0;
+	ActiveMonthlyFinaleAnchorPreview =
+		FABTSM3MonthlyFinaleAnchorPreview();
 	MonthlyPresentationResult =
 		FABTSM3MonthlyPresentationResult();
+	MonthlyFinaleAnchorPlanResult =
+		FABTSM3MonthlyFinaleAnchorPlanResult();
 	MonthlySlingshotFieldResult =
 		FABTSM3MonthlySlingshotFieldResult();
+	MonthlySatellitePreviewResult =
+		FABTSM3MonthlySatellitePreviewResult();
 	MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 	MonthlySlingshotFieldDebugData =
@@ -139,6 +250,27 @@ bool AABTSM3Planet::RebuildPlanet()
 	{
 		UE_LOG(LogABTSRuntime, Error,
 			TEXT("[ABTS][M11.0][FinaleFrame] Rejected after final terrain-pad resolution."));
+	}
+	FString SatellitePreviewFailure;
+	const FPlanetMonthlySatellitePreviewSurface SatelliteSurface(
+		*this,
+		LogicalCells);
+	if (!FABTSM3MonthlySatellitePreviewBuilder::Build(
+			WorldSeed,
+			MonthlySatellitePreviewConfig,
+			LogicalCells,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			SatelliteSurface,
+			MonthlySatellitePreviewResult,
+			SatellitePreviewFailure))
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M3R5.1][SatellitePreview] Pending Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1 MonthlyAccepted=0"),
+			WorldSeed,
+			FABTSM3MonthlySatellitePreviewBuilder::GetRejectReasonName(
+				MonthlySatellitePreviewResult.RejectReason),
+			*SatellitePreviewFailure);
 	}
 	BuildM3ContinuousSurface();
 	TArray<FABTSM3CellState> PresentationCellStates;
@@ -294,8 +426,12 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
 		MonthlyPresentationResult =
 			FABTSM3MonthlyPresentationResult();
+		MonthlyFinaleAnchorPlanResult =
+			FABTSM3MonthlyFinaleAnchorPlanResult();
 		MonthlySlingshotFieldResult =
 			FABTSM3MonthlySlingshotFieldResult();
+		MonthlySatellitePreviewResult =
+			FABTSM3MonthlySatellitePreviewResult();
 		MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
@@ -383,6 +519,28 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySpatialResult,
 		MonthlySpatialDebugData);
 #endif
+	MonthlyFinaleAnchorPlanResult =
+		FABTSM3MonthlyFinaleAnchorPlanResult();
+	FString FinaleAnchorFailure;
+	const FABTSM3MonthlyFinaleAnchorConfig ResolvedFinaleAnchorConfig =
+		MakeResolvedMonthlyFinaleAnchorConfig();
+	const bool bFinaleAnchorBuilt = bSpatialBuilt
+		&& FABTSM3MonthlyFinaleAnchorBuilder::Build(
+			WorldSeed,
+			ResolvedFinaleAnchorConfig,
+			LogicalCells,
+			MonthlySpatialResult,
+			MonthlyFinaleAnchorPlanResult,
+			FinaleAnchorFailure);
+	if (bSpatialBuilt && !bFinaleAnchorBuilt)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.2][FinaleAnchorPlan] Build failed. Seed=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1 MonthlyAccepted=0"),
+			WorldSeed,
+			FABTSM3MonthlyFinaleAnchorBuilder::GetRejectReasonName(
+				MonthlyFinaleAnchorPlanResult.RejectReason),
+			*FinaleAnchorFailure);
+	}
 	MonthlyPresentationResult =
 		FABTSM3MonthlyPresentationResult();
 	FString PresentationFailure;
@@ -446,12 +604,14 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		FABTSM3MonthlySlingshotFieldResult();
 	FString SlingshotFieldFailure;
 	if (bSpatialBuilt
+		&& bFinaleAnchorBuilt
 		&& !FABTSM3MonthlySlingshotFieldBuilder::Build(
 			WorldSeed,
 			MonthlySlingshotFieldConfig,
 			LogicalCells,
 			PlanetRadiusCM,
 			MonthlySpatialResult,
+			MonthlyFinaleAnchorPlanResult,
 			MonthlySlingshotFieldResult,
 			SlingshotFieldFailure))
 	{
@@ -538,6 +698,64 @@ bool AABTSM3Planet::ValidateMonthlySpatialResult(
 	return false;
 }
 
+FABTSM3MonthlyFinaleAnchorConfig
+AABTSM3Planet::MakeResolvedMonthlyFinaleAnchorConfig() const
+{
+	FABTSM3MonthlyFinaleAnchorConfig Resolved =
+		MonthlyFinaleAnchorConfig;
+	// M11.0's already serialized pair geometry remains the single Planet-side
+	// source while R-5.2 is only a Preview/Test producer.
+	Resolved.SlotSeparationCM = FinaleSpaceSlotSeparationCM;
+	Resolved.SurfaceOffsetCM = FinaleSpaceSlotSurfaceOffsetCM;
+	return Resolved;
+}
+
+bool AABTSM3Planet::ValidateMonthlyFinaleAnchorPlanResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlyFinaleAnchorRejectReason RejectReason =
+		EABTSM3MonthlyFinaleAnchorRejectReason::None;
+	if (FABTSM3MonthlyFinaleAnchorBuilder::Validate(
+			MakeResolvedMonthlyFinaleAnchorConfig(),
+			LogicalCells,
+			MonthlySpatialResult,
+			MonthlyFinaleAnchorPlanResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlyFinaleAnchorBuilder::GetRejectReasonName(
+			RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::TryBuildMonthlyFinaleAnchorPreview(
+	const int32 SourceRouteCandidateId,
+	FABTSM3MonthlyFinaleAnchorPreview& OutPreview,
+	FString& OutFailure) const
+{
+	if (TerrainVisualField == nullptr)
+	{
+		OutPreview = FABTSM3MonthlyFinaleAnchorPreview();
+		OutFailure = TEXT("ContinuousSurfaceUnavailable");
+		return false;
+	}
+	const FPlanetMonthlyFinaleAnchorSurface Surface(*this);
+	return FABTSM3MonthlyFinaleAnchorBuilder::BuildPreview(
+		SourceRouteCandidateId,
+		MakeResolvedMonthlyFinaleAnchorConfig(),
+		LogicalCells,
+		MonthlySpatialResult,
+		MonthlyFinaleAnchorPlanResult,
+		Surface,
+		OutPreview,
+		OutFailure);
+}
+
 bool AABTSM3Planet::ValidateMonthlyPresentationResult(
 	FString& OutFailure) const
 {
@@ -600,6 +818,8 @@ bool AABTSM3Planet::TryBuildMonthlyPresentationPreviewData(
 	bMonthlyPresentationPreviewActive = false;
 	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
 	ActiveMonthlyPresentationPreviewCandidateHash = 0;
+	ActiveMonthlyFinaleAnchorPreview =
+		FABTSM3MonthlyFinaleAnchorPreview();
 
 	bool bPreviewRequested = false;
 	const int32 CandidateId =
@@ -650,6 +870,19 @@ bool AABTSM3Planet::TryBuildMonthlyPresentationPreviewData(
 		UE_LOG(LogABTSRuntime, Error,
 			TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=CandidateJoinMismatch MonthlyAccepted=0 CompatibilityWorldPreserved=1"),
 			CandidateId);
+		return false;
+	}
+	FABTSM3MonthlyFinaleAnchorPreview FinaleAnchorPreview;
+	FString FinaleAnchorPreviewFailure;
+	if (!TryBuildMonthlyFinaleAnchorPreview(
+			CandidateId,
+			FinaleAnchorPreview,
+			FinaleAnchorPreviewFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.2][FinaleAnchorPreview] Rejected Candidate=%d Reason=%s MonthlyAccepted=0 CompatibilityWorldPreserved=1"),
+			CandidateId,
+			*FinaleAnchorPreviewFailure);
 		return false;
 	}
 
@@ -735,15 +968,42 @@ bool AABTSM3Planet::TryBuildMonthlyPresentationPreviewData(
 		CandidateId;
 	ActiveMonthlyPresentationPreviewCandidateHash =
 		Presentation->CandidatePresentationHash;
+	ActiveMonthlyFinaleAnchorPreview = FinaleAnchorPreview;
+	const FABTSM3MonthlySatellitePreviewCandidate* SatellitePreview =
+		FABTSM3MonthlySatellitePreviewBuilder::FindCandidate(
+			MonthlySatellitePreviewResult,
+			CandidateId);
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5][Preview] PreviewAuthority=1 MonthlyAccepted=0 Candidate=%d SourceSpatialCandidate=%016llX PresentationCandidate=%016llX Cells=%d RoadCells=%d"),
+		TEXT("[ABTS][M3R5][Preview] PreviewAuthority=1 MonthlyAccepted=0 Candidate=%d SourceSpatialCandidate=%016llX PresentationCandidate=%016llX SatellitePreviewCandidate=%016llX SatelliteE5=%d Cells=%d RoadCells=%d"),
 		CandidateId,
 		static_cast<unsigned long long>(
 			Presentation->SourceSpatialCandidateHash),
 		static_cast<unsigned long long>(
 			Presentation->CandidatePresentationHash),
+		static_cast<unsigned long long>(
+			SatellitePreview != nullptr
+				? static_cast<uint64>(SatellitePreview->CandidateHash)
+				: 0ull),
+		SatellitePreview != nullptr ? 1 : 0,
 		Presentation->Cells.Num(),
 		Spatial->RecomputedRoute.OrderedRoadCellIds.Num());
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3R5.2][FinaleAnchorPreview] PreviewAuthority=1 MonthlyAccepted=0 Candidate=%d TerminalCell=%d AnchorCell=%d LeftCell=%d RightCell=%d SeparationCM=%.2f SlopeDeg=%.2f Forward=%s Right=%s Up=%s Plan=%016llX Preview=%016llX"),
+		CandidateId,
+		FinaleAnchorPreview.RoadTerminalCellId,
+		FinaleAnchorPreview.AnchorCellId,
+		FinaleAnchorPreview.LeftSlotNearestCellId,
+		FinaleAnchorPreview.RightSlotNearestCellId,
+		FinaleAnchorPreview.ActualSlotSeparationCM,
+		FinaleAnchorPreview.MaxResolvedSurfaceSlopeDegrees,
+		*FinaleAnchorPreview.ForwardWorld.ToCompactString(),
+		*FinaleAnchorPreview.RightWorld.ToCompactString(),
+		*FinaleAnchorPreview.UpWorld.ToCompactString(),
+		static_cast<unsigned long long>(
+			static_cast<uint64>(
+				FinaleAnchorPreview.SourcePlanResultHash)),
+		static_cast<unsigned long long>(
+			static_cast<uint64>(FinaleAnchorPreview.PreviewHash)));
 	return true;
 }
 
@@ -757,6 +1017,7 @@ bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
 			LogicalCells,
 			PlanetRadiusCM,
 			MonthlySpatialResult,
+			MonthlyFinaleAnchorPlanResult,
 			MonthlySlingshotFieldResult,
 			RejectReason,
 			OutFailure))
@@ -766,6 +1027,34 @@ bool AABTSM3Planet::ValidateMonthlySlingshotFieldResult(
 	OutFailure = FString::Printf(
 		TEXT("%s:%s"),
 		FABTSM3MonthlySlingshotFieldBuilder::
+			GetRejectReasonName(RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::ValidateMonthlySatellitePreviewResult(
+	FString& OutFailure) const
+{
+	EABTSM3MonthlySatellitePreviewRejectReason RejectReason =
+		EABTSM3MonthlySatellitePreviewRejectReason::None;
+	const FPlanetMonthlySatellitePreviewSurface Surface(
+		*this,
+		LogicalCells);
+	if (FABTSM3MonthlySatellitePreviewBuilder::Validate(
+			MonthlySatellitePreviewConfig,
+			LogicalCells,
+			MonthlySpatialResult,
+			MonthlySlingshotFieldResult,
+			Surface,
+			MonthlySatellitePreviewResult,
+			RejectReason,
+			OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3MonthlySatellitePreviewBuilder::
 			GetRejectReasonName(RejectReason),
 		*OutFailure);
 	return false;
@@ -1066,10 +1355,12 @@ void AABTSM3Planet::
 bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 	const float LifeTimeSeconds,
 	int32& OutTargetFootprintCellCount,
-	int32& OutAttackCorridorCellCount) const
+	int32& OutAttackCorridorCellCount,
+	bool& bOutSatelliteE5PreviewDrawn) const
 {
 	OutTargetFootprintCellCount = 0;
 	OutAttackCorridorCellCount = 0;
+	bOutSatelliteE5PreviewDrawn = false;
 	if (GetWorld() == nullptr
 		|| !MonthlyPresentationResult.bPresentationValid)
 	{
@@ -1085,11 +1376,161 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 	{
 		return false;
 	}
+	const int32 CandidateId =
+		MonthlyPresentationDebugData.SourceRouteCandidateId;
+	const FABTSM3MonthlySatellitePreviewCandidate* SatellitePreview =
+		FABTSM3MonthlySatellitePreviewBuilder::FindCandidate(
+			MonthlySatellitePreviewResult,
+			CandidateId);
+	TSet<int32> LegacyE5TargetCells;
+	const FABTSM3MonthlySpatialCandidate* SpatialCandidate =
+		MonthlySpatialResult.RetainedCandidates.FindByPredicate(
+			[CandidateId](const FABTSM3MonthlySpatialCandidate& Value)
+			{
+				return Value.SourceRouteCandidateId == CandidateId;
+			});
+	if (SpatialCandidate != nullptr)
+	{
+		const FABTSM3MonthlySpatialEncounter* E5 =
+			SpatialCandidate->Encounters.FindByPredicate(
+				[](const FABTSM3MonthlySpatialEncounter& Encounter)
+				{
+					return Encounter.Contract.OrderIndex == 4;
+				});
+		if (E5 != nullptr)
+		{
+			LegacyE5TargetCells.Append(E5->TargetFootprintCellIds);
+		}
+	}
 
 	const FVector Center = GetPlanetCenterWorld();
 	const float Radius = PlanetRadiusCM + 360.0f;
 	const float DrawLifeTime =
 		FMath::Clamp(LifeTimeSeconds, 0.05f, 5.0f);
+	bool bFinaleAnchorPreviewDrawn = false;
+	const FABTSM3MonthlyFinaleAnchorPlanCandidate* FinalePlan =
+		FABTSM3MonthlyFinaleAnchorBuilder::FindCandidate(
+			MonthlyFinaleAnchorPlanResult,
+			CandidateId);
+	if (FinalePlan != nullptr
+		&& ActiveMonthlyFinaleAnchorPreview.bPreviewValid
+		&& ActiveMonthlyFinaleAnchorPreview.SourceRouteCandidateId
+			== CandidateId
+		&& ActiveMonthlyFinaleAnchorPreview.SourcePlanCandidateHash
+			== FinalePlan->CandidateHash)
+	{
+		for (const int32 ClearanceCellId : FinalePlan->ClearanceCellIds)
+		{
+			if (!LogicalCells.IsValidIndex(ClearanceCellId))
+			{
+				continue;
+			}
+			const FVector Direction =
+				LogicalCells[ClearanceCellId].UnitCenter.GetSafeNormal();
+			const FVector ClearanceWorld = Center
+				+ Direction
+					* (GetSurfaceRadiusAtDirection(Direction) + 75.0f);
+			DrawDebugPoint(
+				GetWorld(),
+				ClearanceWorld,
+				14.0f,
+				FColor(210, 90, 255),
+				false,
+				DrawLifeTime,
+				0);
+		}
+
+		const FABTSM3MonthlyFinaleAnchorPreview& FinalePreview =
+			ActiveMonthlyFinaleAnchorPreview;
+		const float AxisLengthCM = 360.0f;
+		DrawDebugSphere(
+			GetWorld(),
+			FinalePreview.AnchorSurfaceWorld,
+			55.0f,
+			10,
+			FColor::White,
+			false,
+			DrawLifeTime,
+			0,
+			6.0f);
+		DrawDebugSphere(
+			GetWorld(),
+			FinalePreview.LeftSlotWorldLocation,
+			75.0f,
+			10,
+			FColor::Cyan,
+			false,
+			DrawLifeTime,
+			0,
+			7.0f);
+		DrawDebugSphere(
+			GetWorld(),
+			FinalePreview.RightSlotWorldLocation,
+			75.0f,
+			10,
+			FColor::Cyan,
+			false,
+			DrawLifeTime,
+			0,
+			7.0f);
+		DrawDebugLine(
+			GetWorld(),
+			FinalePreview.LeftSlotWorldLocation,
+			FinalePreview.RightSlotWorldLocation,
+			FColor::Cyan,
+			false,
+			DrawLifeTime,
+			0,
+			7.0f);
+		DrawDebugDirectionalArrow(
+			GetWorld(),
+			FinalePreview.FrameOriginWorld,
+			FinalePreview.FrameOriginWorld
+				+ FinalePreview.ForwardWorld * AxisLengthCM,
+			45.0f,
+			FColor::Red,
+			false,
+			DrawLifeTime,
+			0,
+			6.0f);
+		DrawDebugDirectionalArrow(
+			GetWorld(),
+			FinalePreview.FrameOriginWorld,
+			FinalePreview.FrameOriginWorld
+				+ FinalePreview.RightWorld * AxisLengthCM,
+			45.0f,
+			FColor::Green,
+			false,
+			DrawLifeTime,
+			0,
+			6.0f);
+		DrawDebugDirectionalArrow(
+			GetWorld(),
+			FinalePreview.FrameOriginWorld,
+			FinalePreview.FrameOriginWorld
+				+ FinalePreview.UpWorld * AxisLengthCM,
+			45.0f,
+			FColor::Blue,
+			false,
+			DrawLifeTime,
+			0,
+			6.0f);
+		DrawDebugString(
+			GetWorld(),
+			FinalePreview.FrameOriginWorld
+				+ FinalePreview.UpWorld * 150.0f,
+			FString::Printf(
+				TEXT("M11 FINALE ANCHOR C=%d TERM=%d SEP=%.1f"),
+				FinalePreview.AnchorCellId,
+				FinalePreview.RoadTerminalCellId,
+				FinalePreview.ActualSlotSeparationCM),
+			nullptr,
+			FColor::Cyan,
+			DrawLifeTime,
+			false,
+			1.1f);
+		bFinaleAnchorPreviewDrawn = true;
+	}
 	for (const FABTSM3MonthlyPresentationCell& Cell :
 		Candidate->Cells)
 	{
@@ -1101,7 +1542,8 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 			Center
 			+ LogicalCells[Cell.CellId].UnitCenter
 				* Radius;
-		if (Cell.bTargetFootprint)
+		if (Cell.bTargetFootprint
+			&& !LegacyE5TargetCells.Contains(Cell.CellId))
 		{
 			++OutTargetFootprintCellCount;
 			DrawDebugSphere(
@@ -1154,8 +1596,174 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 				5.0f);
 		}
 	}
-	return OutTargetFootprintCellCount > 0
-		&& OutAttackCorridorCellCount > 0;
+	if (SatellitePreview != nullptr
+		&& SatellitePreview->bE5OnSatelliteBackside
+		&& LogicalCells.IsValidIndex(
+			SatellitePreview->ReferenceSlotACellId)
+		&& LogicalCells.IsValidIndex(
+			SatellitePreview->ReferenceSlotBCellId))
+	{
+		FABTSM3MonthlySatelliteSurfaceSample SlotA;
+		FABTSM3MonthlySatelliteSurfaceSample SlotB;
+		const FPlanetMonthlySatellitePreviewSurface Surface(
+			*this,
+			LogicalCells);
+		if (Surface.QuerySurface(
+				LogicalCells[SatellitePreview->ReferenceSlotACellId].UnitCenter,
+				SlotA)
+			&& Surface.QuerySurface(
+				LogicalCells[SatellitePreview->ReferenceSlotBCellId].UnitCenter,
+				SlotB))
+		{
+			FVector DrawSatelliteCenter = SatellitePreview->SatelliteCenterWorld;
+			float DrawSatelliteRadiusCM = SatellitePreview->SatelliteRadiusCM;
+			FTransform DrawE5Transform = SatellitePreview->E5TargetWorldTransform;
+			FVector DrawE5HalfExtentCM = SatellitePreview->E5TargetHalfExtentCM;
+			FVector DrawLaunchWorld = SatellitePreview->LaunchWorldLocation;
+			float DrawFacingErrorDegrees = -1.0f;
+			bool bDrawTrajectoryCertified = false;
+			int32 DrawGravityDependentHits = 0;
+			int32 DrawSuccessIslandSamples = 0;
+			for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(GetWorld()); It; ++It)
+			{
+				const FABTSM3MonthlySatelliteRuntimeSnapshot& Runtime =
+					It->GetRuntimeSnapshot();
+				if (!Runtime.bValid
+					|| Runtime.SourceRouteCandidateId != CandidateId)
+				{
+					continue;
+				}
+				SlotA.WorldLocation = Runtime.PracticeStakeASurfaceWorld;
+				SlotB.WorldLocation = Runtime.PracticeStakeBSurfaceWorld;
+				DrawLaunchWorld = Runtime.PracticeLaunchWorldTransform.GetLocation();
+				DrawSatelliteCenter = Runtime.SatelliteWorldTransform.GetLocation();
+				DrawSatelliteRadiusCM = Runtime.SatelliteRadiusCM;
+				DrawE5Transform = Runtime.E5WorldTransform;
+				DrawE5HalfExtentCM = Runtime.E5HalfExtentCM;
+				DrawFacingErrorDegrees = Runtime.SatelliteFacingErrorDegrees;
+				bDrawTrajectoryCertified = Runtime.bTrajectoryCertified;
+				DrawGravityDependentHits = Runtime.GravityDependentHits;
+				DrawSuccessIslandSamples = Runtime.LargestSuccessIslandSamples;
+				break;
+			}
+			const FVector DrawSatelliteOutward =
+				(DrawSatelliteCenter - Center).GetSafeNormal();
+			DrawDebugSphere(
+				GetWorld(),
+				DrawSatelliteCenter,
+				DrawSatelliteRadiusCM,
+				24,
+				FColor(125, 175, 220),
+				false,
+				DrawLifeTime,
+				0,
+				8.0f);
+			DrawDebugLine(
+				GetWorld(),
+				SlotA.WorldLocation + SlotA.WorldNormal * 70.0f,
+				SlotB.WorldLocation + SlotB.WorldNormal * 70.0f,
+				FColor::Yellow,
+				false,
+				DrawLifeTime,
+				0,
+				8.0f);
+			DrawDebugSphere(GetWorld(), SlotA.WorldLocation, 90.0f, 8,
+				FColor::Yellow, false, DrawLifeTime, 0, 5.0f);
+			DrawDebugSphere(GetWorld(), SlotB.WorldLocation, 90.0f, 8,
+				FColor::Yellow, false, DrawLifeTime, 0, 5.0f);
+			DrawDebugPoint(
+				GetWorld(),
+				DrawLaunchWorld,
+				28.0f,
+				FColor::Green,
+				false,
+				DrawLifeTime,
+				0);
+			DrawDebugLine(
+				GetWorld(),
+				DrawLaunchWorld,
+				DrawSatelliteCenter,
+				FColor(80, 220, 255),
+				false,
+				DrawLifeTime,
+				0,
+				6.0f);
+			if (DrawFacingErrorDegrees >= 0.0f)
+			{
+				DrawDebugString(
+					GetWorld(),
+					DrawLaunchWorld,
+					FString::Printf(
+						TEXT("SAT FACING %.2f deg"),
+						DrawFacingErrorDegrees),
+					nullptr,
+					DrawFacingErrorDegrees <= 5.0f
+						? FColor::Green
+						: FColor::Red,
+					DrawLifeTime,
+					false,
+					1.1f);
+				DrawDebugString(
+					GetWorld(),
+					DrawLaunchWorld
+						+ (DrawLaunchWorld - Center).GetSafeNormal() * 140.0f,
+					FString::Printf(
+						TEXT("SAT TRAJECTORY %s DEP=%d ISLAND=%d"),
+						bDrawTrajectoryCertified ? TEXT("PASS") : TEXT("FAIL"),
+						DrawGravityDependentHits,
+						DrawSuccessIslandSamples),
+					nullptr,
+					bDrawTrajectoryCertified ? FColor::Green : FColor::Red,
+					DrawLifeTime,
+					false,
+					1.1f);
+			}
+			DrawDebugBox(
+				GetWorld(),
+				DrawE5Transform.GetLocation(),
+				DrawE5HalfExtentCM,
+				DrawE5Transform.GetRotation(),
+				FColor::Magenta,
+				false,
+				DrawLifeTime,
+				0,
+				8.0f);
+			DrawDebugLine(
+				GetWorld(),
+				DrawSatelliteCenter,
+				DrawE5Transform.GetLocation(),
+				FColor::Magenta,
+				false,
+				DrawLifeTime,
+				0,
+				5.0f);
+			DrawDebugString(
+				GetWorld(),
+				DrawSatelliteCenter
+					+ DrawSatelliteOutward
+						* (DrawSatelliteRadiusCM + 300.0f),
+				TEXT("M9 PRACTICE SATELLITE"),
+				nullptr,
+				FColor(125, 175, 220),
+				DrawLifeTime,
+				false,
+				1.2f);
+			DrawDebugString(
+				GetWorld(),
+				DrawE5Transform.GetLocation(),
+				TEXT("E5 BACKSIDE TARGET PROXY"),
+				nullptr,
+				FColor::Magenta,
+				DrawLifeTime,
+				false,
+				1.2f);
+			bOutSatelliteE5PreviewDrawn = true;
+		}
+	}
+	return (OutTargetFootprintCellCount > 0
+		&& OutAttackCorridorCellCount > 0)
+		|| bOutSatelliteE5PreviewDrawn
+		|| bFinaleAnchorPreviewDrawn;
 }
 #endif
 

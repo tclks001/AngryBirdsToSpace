@@ -1,6 +1,6 @@
 # M3：TaskGraph 地形表现与 HISM 摆放设计
 
-> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果、M3R-1 只读月度 Schema、M3R-2 路线候选池、M3R-3 六 Encounter 空间候选和 M3R-5 候选绑定表现层。R-5 当前为 M3LocalAccepted（IntegrationPending），只在显式预览中消费候选，`MonthlyAccepted` 仍为 false。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
+> 状态：C++ 与生产资产已实现，并已接入 M3 首周长路线/道路外建筑结果、M3R-1 只读月度 Schema、M3R-2 路线候选池、M3R-3 六 Encounter 空间候选、M3R-5 候选绑定表现层及 R-5.1 卫星/E5 预览叠层。R-5/R-5.1 当前为 M3LocalAccepted（IntegrationPending），只在显式预览中消费候选，`MonthlyAccepted` 仍为 false。M3 当前只产出地形、TaskGraph、RoadPortal、建筑 Anchor/施工台；球面普通建筑由下游 M7 DAG2.3 消费。第 4 节保留为历史独立 M3 验证场景搭建说明，不是现行生产地图入口。
 >
 > 逻辑 PCG 上游：[`ABTSTaskGraphPCGDesign.md`](ABTSTaskGraphPCGDesign.md)。本文不定义玩法锁、可达性、河流最低点、道路寻路或桥梁状态；它们只由 TaskGraph/CellTopo 生成并通过接口提供给表现层。
 >
@@ -71,7 +71,13 @@ R-2 Pool 不替换首周 `GeneratedCellStates`、`GeneratedEdgeStates`、`PCGSum
 
 显式预览时，材质桥按 `VisualBeatId/AccentVariantId/ThemeVariantId` 对 Cell LUT 做低幅明暗调制；HISM 用相同字段调整树石疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell、全部实际树石实例均经过 Beat 消费路径，因而 20–45 m 节拍不是只存在于数据快照。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
 
-### 2.5 `QuerySurface` 接口
+### 2.5 M3R-5.1 卫星与 E5 预览叠层
+
+R-5.1 为每个精确 R-3/R-3.1 候选保存冻结参数生成的卫星中心、半径、E5 背面目标 Transform 和一个只用于建立局部坐标的参考桩对。所有数据都通过实际 `QuerySurface` 投影到当前地形；没有绝对世界坐标预设，也不把原主星 E5 Target Anchor 当作最终建筑位置。
+
+F7 叠层增加蓝色卫星线框球、洋红 E5 目标盒、黄色参考桩对、绿色鸟袋点和青色发射点—卫星关系线。为避免误读，F7 隐藏原主星 E5 的红色 Target Footprint；其余五关目标与全部攻击走廊不变。叠层只画瞬时 Debug Primitive，不创建卫星/建筑 Actor、不添加碰撞、不进入材质/HISM 或布局 Hash。没有精确 Candidate 或冻结校准 Hash 不匹配时 fail closed。完整数据身份与集成交接见 [M3R-5.1 设计](M3R51SatellitePreviewDesign.md)。
+
+### 2.6 `QuerySurface` 接口
 
 `AABTSM3Planet::QuerySurface(UnitDirection)` 输出世界位置、高度感知法线、表面半径及最近 `CellId`。M2.5 径向移动已改为通过 `GetSurfaceRadiusAtDirection` 接地，因此角色仍沿球心径向保持重力方向，同时脚底遵循 M3 低频表面。
 
