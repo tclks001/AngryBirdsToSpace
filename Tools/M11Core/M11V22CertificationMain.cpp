@@ -1010,7 +1010,10 @@ namespace
 		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
 			!= Identity.CandidateSourceHash)
 		{
-			std::cerr << "CandidateSourceIdentityMismatch\n";
+			std::cerr << "CandidateSourceIdentityMismatch:expected="
+				<< Hex64(Identity.CandidateSourceHash) << ":actual="
+				<< Hex64(ABTS::M11Search::ComputeCandidateSourceHash(
+					Layout, Contract)) << '\n';
 			return 1;
 		}
 		ApplyDiagnosticOffsets(OptionsValue, Layout);
@@ -1342,7 +1345,10 @@ namespace
 		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
 			!= Identity.CandidateSourceHash)
 		{
-			std::cerr << "CandidateSourceIdentityMismatch\n";
+			std::cerr << "CandidateSourceIdentityMismatch:expected="
+				<< Hex64(Identity.CandidateSourceHash) << ":actual="
+				<< Hex64(ABTS::M11Search::ComputeCandidateSourceHash(
+					Layout, Contract)) << '\n';
 			return 1;
 		}
 		ApplyDiagnosticOffsets(OptionsValue, Layout);
@@ -1621,7 +1627,10 @@ namespace
 		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
 			!= Identity.CandidateSourceHash)
 		{
-			std::cerr << "CandidateSourceIdentityMismatch\n";
+			std::cerr << "CandidateSourceIdentityMismatch:expected="
+				<< Hex64(Identity.CandidateSourceHash) << ":actual="
+				<< Hex64(ABTS::M11Search::ComputeCandidateSourceHash(
+					Layout, Contract)) << '\n';
 			return 1;
 		}
 		ApplyDiagnosticOffsets(OptionsValue, Layout);

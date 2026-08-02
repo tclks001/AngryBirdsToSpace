@@ -117,7 +117,66 @@ namespace ABTS::M11Search
 			Layout.NominalInput = LaunchInput{-1.25, 30.375, 1.0};
 		}
 
-		constexpr std::array<FrozenCandidateIdentity, 8> Identities = {{
+		void ApplyRank10AssistScaleExperiment(CandidateLayout& Layout)
+		{
+			// Preserve Rank 10's angular layout and nominal flight time while
+			// enlarging its 800 cm analytic assist bodies to 5500 cm.  For
+			// x' = pouch + s(x - pouch) with unchanged time, lengths scale by
+			// s, velocities by s, energy by s^2 and gravitational mu by s^3.
+			// The fixed integration time step deliberately remains unchanged.
+			constexpr double Scale = 5500.0 / 800.0;
+			constexpr double ScaleSquared = Scale * Scale;
+			constexpr double ScaleCubed = ScaleSquared * Scale;
+			constexpr double AssistVisualRadiusCM = 5000.0;
+			constexpr double AssistCollisionRadiusCM = 5500.0;
+			const M11Core::Vec3d Pouch = Layout.Launch.PouchLocalPositionCM;
+
+			Layout.Launch.MinimumLaunchSpeedCMPerSec *= Scale;
+			Layout.Launch.MaximumLaunchSpeedCMPerSec *= Scale;
+
+			for (std::size_t BodyIndex = 1;
+				BodyIndex < Layout.Scenario.Bodies.size(); ++BodyIndex)
+			{
+				M11Core::GravityBodySpec& Assist =
+					Layout.Scenario.Bodies[BodyIndex];
+				Assist.CenterCM = Pouch + (Assist.CenterCM - Pouch) * Scale;
+				Assist.GravitationalParameterCM3PerSec2 *= ScaleCubed;
+				Assist.MinimumEvaluationRadiusCM *= Scale;
+				Assist.VisualRadiusCM = AssistVisualRadiusCM;
+				Assist.CollisionRadiusCM = AssistCollisionRadiusCM;
+				Assist.InfluenceRadiusCM *= Scale;
+				Assist.AssistReferenceRadiusCM *= Scale;
+				Assist.InfluenceBlendWidthCM *= Scale;
+				Assist.VirtualOrbitalVelocityCMPerSec *= Scale;
+				Assist.BPlaneTargetTCM *= Scale;
+				Assist.BPlaneTargetRCM *= Scale;
+				Assist.BPlaneSigmaTCM *= Scale;
+				Assist.BPlaneSigmaRCM *= Scale;
+				Assist.MinimumEnergyChangeCM2PerSec2 *= ScaleSquared;
+				Assist.MaximumEnergyChangeCM2PerSec2 *= ScaleSquared;
+			}
+
+			M11Core::TargetSpec& Target = Layout.Scenario.Target;
+			Target.CenterCM = Pouch + (Target.CenterCM - Pouch) * Scale;
+			Target.GeometricContactCenterCM =
+				Pouch + (Target.GeometricContactCenterCM - Pouch) * Scale;
+			Target.HitRadiusCM *= Scale;
+			Target.MinimumQualifyingEnergyGainCM2PerSec2 *= ScaleSquared;
+
+			// The primary must retain the M3 world radius and launch-surface
+			// compatibility. Only its outer simulation guard grows to contain
+			// the enlarged deep-space layout. This is the one deliberate break
+			// from exact similarity and is validated numerically below.
+			Layout.Scenario.Bodies[0].MaximumSimulationRadiusCM *= Scale;
+			Layout.Solver.PositionErrorLimitCM *= Scale;
+			Layout.Solver.BPlaneBasisMinimumLength *= Scale;
+			Layout.Solver.MinimumVInfinityCMPerSec *= Scale;
+			Layout.Solver.EnergyRootEpsilonCM2PerSec2 *= ScaleSquared;
+			Layout.Solver.ExitEnergyResidualToleranceCM2PerSec2 *=
+				ScaleSquared;
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 9> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -144,6 +203,11 @@ namespace ABTS::M11Search
 			// three-dimensional closure evidence hash; it is not certified.
 			{10, 23ull, 0x2b06db2cf348d75full, 0xa1d91650dc3d3f36ull,
 				0x99012cedf3d01c06ull, 0x22c3f67f46d49e70ull},
+			// Rejected Rank 10 dimensional-similarity experiment. It remains
+			// portable CLI evidence and is intentionally absent from the PIE
+			// CandidateExperience catalog.
+			{11, 24ull, 0xf134ae0ff2c93467ull, 0x219034b512c47aaeull,
+				0x7d820ee8932d1fd9ull, 0x48d662cfd48c4f23ull},
 		}};
 	}
 
@@ -158,7 +222,7 @@ namespace ABTS::M11Search
 			*OutIdentity = FrozenCandidateIdentity();
 		}
 		const std::int32_t SourceRank =
-			Rank == 7 || Rank == 8 || Rank == 9 || Rank == 10 ? 3 : Rank;
+			Rank >= 7 && Rank <= 11 ? 3 : Rank;
 		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
@@ -180,6 +244,12 @@ namespace ABTS::M11Search
 		{
 			ApplyRank3F3ExpansionCandidate21(OutLayout);
 			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);
+		}
+		else if (Rank == 11)
+		{
+			ApplyRank3F3ExpansionCandidate21(OutLayout);
+			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);
+			ApplyRank10AssistScaleExperiment(OutLayout);
 		}
 		for (const FrozenCandidateIdentity& Identity : Identities)
 		{
