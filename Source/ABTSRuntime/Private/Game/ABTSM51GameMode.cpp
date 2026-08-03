@@ -32,6 +32,27 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 		ExplicitPreviewCandidateId);
 	const bool bPreviewRequested =
 		bEnableOrdinarySlingshotSlotPreview || bCommandLinePreview;
+	AABTSM3Planet* Planet = nullptr;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		if (It->IsPlanetReady())
+		{
+			Planet = *It;
+			break;
+		}
+	}
+	const FABTSM3MonthlyFinaleAnchorPreview* ActiveFinalePreview =
+		Planet != nullptr
+			&& Planet->GetActiveMonthlyFinaleAnchorPreview().bPreviewValid
+		? &Planet->GetActiveMonthlyFinaleAnchorPreview()
+		: nullptr;
+	if (!bPreviewRequested && ActiveFinalePreview != nullptr)
+	{
+		ExplicitPreviewCandidateId =
+			ActiveFinalePreview->SourceRouteCandidateId;
+	}
+	const bool bResolvedPreviewRequested =
+		bPreviewRequested || ActiveFinalePreview != nullptr;
 	AABTSM51WorldSystem* System =
 		GetWorld()->SpawnActorDeferred<AABTSM51WorldSystem>(
 			WorldSystemClass,
@@ -39,19 +60,11 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 			nullptr,
 			nullptr,
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	bool bPreviewConfigured = !bPreviewRequested;
+	bool bPreviewConfigured = !bResolvedPreviewRequested;
+	bool bFinalePreviewConfigured = !bResolvedPreviewRequested;
 	FString PreviewFailure;
-	if (System != nullptr && bPreviewRequested)
+	if (System != nullptr && bResolvedPreviewRequested)
 	{
-		AABTSM3Planet* Planet = nullptr;
-		for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
-		{
-			if (It->IsPlanetReady())
-			{
-				Planet = *It;
-				break;
-			}
-		}
 		FABTSM51OrdinarySlingshotSlotSnapshot Snapshot;
 		bPreviewConfigured = Planet != nullptr
 			&& FABTSM51OrdinarySlingshotSlotPreviewAdapter::
@@ -77,6 +90,52 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 				ExplicitPreviewCandidateId,
 				*PreviewFailure);
 		}
+
+		FABTSM3MonthlyFinaleAnchorPreview BuiltFinalePreview;
+		const FABTSM3MonthlyFinaleAnchorPreview* FinalePreview =
+			ActiveFinalePreview != nullptr
+				&& ActiveFinalePreview->SourceRouteCandidateId
+					== ExplicitPreviewCandidateId
+			? ActiveFinalePreview
+			: nullptr;
+		FString FinalePreviewFailure;
+		if (ActiveFinalePreview != nullptr
+			&& FinalePreview == nullptr)
+		{
+			FinalePreviewFailure = TEXT("ActiveCandidateMismatch");
+		}
+		if (FinalePreview == nullptr
+			&& FinalePreviewFailure.IsEmpty()
+			&& Planet != nullptr
+			&& Planet->TryBuildMonthlyFinaleAnchorPreview(
+				ExplicitPreviewCandidateId,
+				BuiltFinalePreview,
+				FinalePreviewFailure))
+		{
+			FinalePreview = &BuiltFinalePreview;
+		}
+		FABTSM51PreviewFinaleFrameContext FinaleContext;
+		bFinalePreviewConfigured = Planet != nullptr
+			&& FinalePreview != nullptr
+			&& FABTSM51PreviewFinaleFrameAdapter::Build(
+				*FinalePreview,
+				Planet->GetFinaleLaunchFrame(),
+				FinaleContext,
+				FinalePreviewFailure)
+			&& System->ConfigurePreviewFinaleFrame(FinaleContext);
+		if (!bFinalePreviewConfigured)
+		{
+			if (Planet == nullptr)
+			{
+				FinalePreviewFailure = TEXT("PlanetNotReady");
+			}
+			System->ConfigurePreviewFinaleFrame(
+				FABTSM51PreviewFinaleFrameContext());
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M5.1][PreviewFinaleFrame] Rejected Candidate=%d Reason=%s MonthlyAccepted=0"),
+				ExplicitPreviewCandidateId,
+				*FinalePreviewFailure);
+		}
 	}
 	if (System != nullptr)
 	{
@@ -85,11 +144,12 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 			FTransform::Identity);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M5.1] Entry ready=%d StartCell=%d PreviewTest=%d Candidate=%d Configured=%d MonthlyAccepted=0"),
+		TEXT("[ABTS][M5.1] Entry ready=%d StartCell=%d PreviewTest=%d Candidate=%d OrdinaryConfigured=%d FinaleConfigured=%d MonthlyAccepted=0"),
 		System ? 1 : 0,
 		SpawnCellId,
-		bPreviewRequested ? 1 : 0,
-		bPreviewRequested ? ExplicitPreviewCandidateId : INDEX_NONE,
-		bPreviewConfigured ? 1 : 0);
+		bResolvedPreviewRequested ? 1 : 0,
+		bResolvedPreviewRequested ? ExplicitPreviewCandidateId : INDEX_NONE,
+		bPreviewConfigured ? 1 : 0,
+		bFinalePreviewConfigured ? 1 : 0);
 }
 

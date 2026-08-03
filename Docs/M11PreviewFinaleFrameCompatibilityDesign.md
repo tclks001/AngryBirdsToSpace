@@ -2,7 +2,8 @@
 
 > 父级设计：[M11 v2 终局优化总设计](M11V2FinaleOptimizationDesign.md)
 > 上游只读产物：[M3 PCG 地图改善计划](M3PCGMapImprovementPlan.md) 中的 M3R-5.2 Monthly Finale Anchor Preview
-> 当前状态：**M11LocalAccepted / IntegrationPending**
+> 当前状态：**集成代码、自动化与 fresh `L_ABTS_M11` 已通过；Visible PIE Pending**
+> 共享接缝：[M3R-5.2 → M5.1 → M11 Preview/Test 终局帧集成](M3R52M11PreviewFinaleIntegrationDesign.md)
 
 ## 1. 目标
 
@@ -89,4 +90,4 @@ M11 合并回 master 后，由原始集成工作树完成：
 6. 记录 M3 Candidate/Preview Hash、M11 Frame Hash 与 CandidateRank；
 7. 在 M3 地图执行 fresh Editor 自动化与可见 PIE，确认太空槽、行星、UFO、轨迹和交互没有帧分裂。
 
-在上述共享适配器、M5.1 接入和联合 PIE 完成前，本任务只能标记为 `M11LocalAccepted / IntegrationPending`，不能标记 `IntegrationAccepted`。
+共享适配器、M5.1 和 `L_ABTS_M11` 已完成代码接入、自动化与 fresh NullRHI；在 Visible PIE 完成前仍保持 `IntegrationPending`，不能标记 `IntegrationAccepted`。

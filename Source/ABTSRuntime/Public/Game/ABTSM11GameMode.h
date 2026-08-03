@@ -44,12 +44,25 @@ public:
 			int32* OutMatchingCameraCount = nullptr);
 
 protected:
+	virtual void InitGame(
+		const FString& MapName,
+		const FString& Options,
+		FString& ErrorMessage) override;
 	virtual void OnInitialPlayerPlaced(
 		ACharacter& Character,
 		const FTransform& SpawnTransform,
 		int32 SpawnCellId) override;
 
 private:
+	/** Enables the M3R-5.2/M5.1/M11 shared Preview/Test frame on authored test maps. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11|Preview Test")
+	bool bEnableMonthlyFinalePreviewIntegration = false;
+
+	/** Exact M3 SourceRouteCandidateId; array order is never an authority. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11|Preview Test",
+		meta = (EditCondition = "bEnableMonthlyFinalePreviewIntegration"))
+	int32 MonthlyFinalePreviewCandidateId = INDEX_NONE;
+
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C")
 	TSubclassOf<AABTSM11FinaleInteractionSystem>
 		FinaleInteractionSystemClass;

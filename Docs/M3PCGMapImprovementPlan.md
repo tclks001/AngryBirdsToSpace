@@ -989,7 +989,7 @@ NotStarted
 | M3R-3.1 普通弹弓槽场 | Week 2 前半补充 | **IntegrationPending**；M3 的 SlotField 7/7、Failure 2/2、100 Seed 100/100 已通过且生产端已进入 `master ae9e8f0`；Integration 的装配 2/2、槽 Actor 1/1、强制 Unity 与兼容世界 PIE 已通过，尚缺唯一 Candidate 导出和月度六关联合 PIE | Encounter 紧凑散点槽场、道路附加槽场、最小只读 DTO 消费端、最大弦长与三维装配门 | M3 + Integration；最终实体槽等待 R4/R6 | IntegrationAccepted |
 | M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **M3LocalAccepted（FixtureAuthority，IntegrationPending）**；Core 8/8、Failure 8/8、100 Seed 100/100、父级回归、fresh runtime 与强制 Unity 均通过；真实 M5.1/M6/M7/M9/流程和 R6 仍待联合验收 | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M5.1/M6/M7/M9 | IntegrationAccepted |
 | M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **M3LocalAccepted（IntegrationPending）**；Biome Core/Failure、100 Seed 100/100、300 plans、冻结 Oracle、显式 preview runtime 和完整 Subdivision 7 `<=8 s` 均已通过；可见 PIE、M6/M9/Character/Visibility 碰撞回归仍待 | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3；碰撞联合回归在 Integration | IntegrationAccepted |
-| M3R-5.2 道路末端终局锚点提案 | Week 3 补充 | **M3LocalAccepted（IntegrationPending）**；确定性规划、真实连续地表帧、普通槽净空排除与 fresh 专项 3/3 已通过；M5.1/M11 实体预览和预冻结布局联合 PIE 仍待 | 为每个保留 Candidate 输出道路末端窗口、终局双槽局部帧和普通槽排除区 | M3；实体槽与 M11 消费在 Integration/M5.1/M11 | IntegrationAccepted |
+| M3R-5.2 道路末端终局锚点提案 | Week 3 补充 | **IntegrationPending（Visible PIE）**；M3 专项 3/3、共享接缝 2/2、M5.1 4/4、M11-B Runtime 5/5 和 fresh `L_ABTS_M11` 已通过；Candidate 4 的双槽与 M11 同帧，尚待可见联合 PIE | 为每个保留 Candidate 输出道路末端窗口、终局双槽局部帧和普通槽排除区 | M3；实体槽与 M11 消费在 Integration/M5.1/M11 | IntegrationAccepted |
 | M3R-6 六栋 M7 实体建筑集成 | Week 3 | **NotStarted** | vNext 建筑合同、动态数量、难度/视觉路由与物理批处理 | Integration + M7，M3 只生产数据 | IntegrationAccepted |
 | M3R-7 月度认证与调参冻结 | Week 4 | **NotStarted** | 1000 Seed、fresh runtime、联合 PIE、展示 Seed 与 fallback | Integration | Complete |
 
@@ -1438,7 +1438,7 @@ F7 在显式精确 Candidate 预览下增加洋红净空 Cell、白色锚点、�
 - Integration/M5.1 只能消费显式选中的同一 Candidate 预览，把两根太空槽 Actor 放到 `LeftSlotWorldLocation/RightSlotWorldLocation`；不得按旧 TaskGraph 末端或理想球半径二次选点；
 - M11 将其预冻结四行星布局相对于 `FrameOriginWorld + Forward/Right/Up` 解析，M3 不硬编码世界坐标，也不负责修改 M11 Solver；
 - 联合验收必须证明普通槽 Actor 不进入 `ClearanceCellIds`、太空槽恰有一对、位于道路末端真实地表、局部帧与 M11 预冻结布局使用同一 Hash 身份，并在可见 PIE 中完成道路末端位置/朝向抽查；
-- 上述实体消费、共享接缝和可见 PIE 未完成前，本阶段保持 **M3LocalAccepted（IntegrationPending）**，不能把测试预览确认为月度正式布局。
+- 实体消费和共享接缝已在 `L_ABTS_M11` 贯通，详见 [M3R-5.2 → M5.1 → M11 Preview/Test 集成](M3R52M11PreviewFinaleIntegrationDesign.md)；可见 PIE 未完成前仍保持 **IntegrationPending**，不能把测试预览确认为月度正式布局。
 
 ### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
 
