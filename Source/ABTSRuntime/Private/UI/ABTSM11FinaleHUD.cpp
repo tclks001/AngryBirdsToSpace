@@ -329,7 +329,7 @@ bool AABTSM11FinaleHUD::HandleFinalePointerMoved(
 	case EABTSM11FinaleHudCapture::RotateOverview:
 		return System.RotateHudOverview(
 			Delta.X * 0.25,
-			-Delta.Y * 0.25);
+			Delta.Y * 0.25);
 	case EABTSM11FinaleHudCapture::ScrubTrajectoryProbe:
 		return ABTSM11HitTestOverviewTrajectory(
 			System.GetHudOverviewProjection(),
