@@ -51,7 +51,7 @@ struct ABTSRUNTIME_API FABTSM6LaunchProfile
 	float ComfortablePullMaximum = 0.85f;
 };
 
-/** Versioned calibration-only catalog. Space intentionally remains on M11's legacy M6 contract. */
+/** Versioned production normal-tier catalog. Space intentionally remains on M11's legacy M6 contract. */
 USTRUCT(BlueprintType)
 struct ABTSRUNTIME_API FABTSM6LaunchProfileCatalog
 {

@@ -4,8 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "PCG/ABTSM3MonthlyEncounter.h"
+#include "PCG/ABTSM3MonthlyFinaleAnchor.h"
 #include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
+#include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "PCG/ABTSM3MonthlySchema.h"
 #include "PCG/ABTSM3MonthlySlingshotField.h"
 #include "PCG/ABTSM3MonthlyWitness.h"
@@ -69,14 +71,16 @@ public:
 
 #if WITH_EDITOR
 	/**
-	 * Draws the exact R-5 target footprints and attack corridors for the
+	 * Draws the exact R-5 target footprints, attack corridors, satellite
+	 * practice layout, and R-5.2 finale-anchor clearance/frame for the
 	 * explicitly selected preview candidate. Returns false when no exact
 	 * preview candidate is available.
 	 */
 	bool DrawMonthlyLogicRegionDebugOverlay(
 		float LifeTimeSeconds,
 		int32& OutTargetFootprintCellCount,
-		int32& OutAttackCorridorCellCount) const;
+		int32& OutAttackCorridorCellCount,
+		bool& bOutSatelliteE5PreviewDrawn) const;
 #endif
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
@@ -117,6 +121,29 @@ public:
 
 	/** Revalidates the R-3 result against the R-2 source pool and CellTopo. */
 	bool ValidateMonthlySpatialResult(FString& OutFailure) const;
+
+	/** R-5.2 topology plans reserve the terminal road apron before ordinary slots are selected. */
+	const FABTSM3MonthlyFinaleAnchorPlanResult&
+		GetMonthlyFinaleAnchorPlanResult() const
+	{
+		return MonthlyFinaleAnchorPlanResult;
+	}
+
+	/** Rebuilds and whole-struct compares the observation-only terminal plans. */
+	bool ValidateMonthlyFinaleAnchorPlanResult(
+		FString& OutFailure) const;
+
+	/** Resolves one explicit retained candidate against the final continuous surface. */
+	bool TryBuildMonthlyFinaleAnchorPreview(
+		int32 SourceRouteCandidateId,
+		FABTSM3MonthlyFinaleAnchorPreview& OutPreview,
+		FString& OutFailure) const;
+
+	const FABTSM3MonthlyFinaleAnchorPreview&
+		GetActiveMonthlyFinaleAnchorPreview() const
+	{
+		return ActiveMonthlyFinaleAnchorPreview;
+	}
 
 	/**
 	 * R-5 candidate-bound visual plans. They preserve every R-3 candidate and
@@ -160,6 +187,17 @@ public:
 
 	/** Rebuilds and whole-struct compares the R-3.1 result. */
 	bool ValidateMonthlySlingshotFieldResult(
+		FString& OutFailure) const;
+
+	/** Candidate-bound frozen satellite/E5 preview. It never spawns gameplay Actors. */
+	const FABTSM3MonthlySatellitePreviewResult&
+		GetMonthlySatellitePreviewResult() const
+	{
+		return MonthlySatellitePreviewResult;
+	}
+
+	/** Rebuilds and whole-struct compares the R-5.1 preview result. */
+	bool ValidateMonthlySatellitePreviewResult(
 		FString& OutFailure) const;
 
 	/**
@@ -270,6 +308,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation")
 	FABTSM3MonthlyPresentationConfig MonthlyPresentationConfig;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Finale Anchor")
+	FABTSM3MonthlyFinaleAnchorConfig MonthlyFinaleAnchorConfig;
+
 	/**
 	 * Explicit preview authority only. R-5 does not select a candidate, so this
 	 * remains off unless an editor user or -ABTSM3R5Preview requests it.
@@ -283,6 +324,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldConfig MonthlySlingshotFieldConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	FABTSM3MonthlySatellitePreviewConfig MonthlySatellitePreviewConfig;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
 	FABTSM3MonthlyWitnessConfig MonthlyWitnessConfig;
@@ -422,9 +466,17 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation")
 	FABTSM3MonthlyPresentationResult MonthlyPresentationResult;
 
+	/** R-5.2 terminal-apron plans; no compatibility frame or stable contract is mutated. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Finale Anchor")
+	FABTSM3MonthlyFinaleAnchorPlanResult MonthlyFinaleAnchorPlanResult;
+
 	/** R-3.1 ordinary slot-field alternatives; finale Space slots remain a separate exact pair. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	FABTSM3MonthlySlingshotFieldResult MonthlySlingshotFieldResult;
+
+	/** R-5.1 exact alternatives; no M9/M7 Actor and no monthly-world authority. */
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	FABTSM3MonthlySatellitePreviewResult MonthlySatellitePreviewResult;
 
 	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
@@ -494,6 +546,8 @@ private:
 			OutCandidate);
 	int32 ResolveMonthlyPresentationPreviewCandidateId(
 		bool& bOutRequested) const;
+	FABTSM3MonthlyFinaleAnchorConfig
+		MakeResolvedMonthlyFinaleAnchorConfig() const;
 	int32 FindNearestCell(const FVector& UnitDirection) const;
 #if WITH_EDITOR
 	void DrawMonthlyRouteDebugOverlay() const;
@@ -513,6 +567,8 @@ private:
 	int32 ActiveMonthlyPresentationPreviewCandidateId =
 		INDEX_NONE;
 	int64 ActiveMonthlyPresentationPreviewCandidateHash = 0;
+	FABTSM3MonthlyFinaleAnchorPreview
+		ActiveMonthlyFinaleAnchorPreview;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UABTSM3TerrainMaterialBridge> TerrainMaterialBridge;

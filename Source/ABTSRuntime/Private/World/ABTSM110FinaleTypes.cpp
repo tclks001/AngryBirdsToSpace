@@ -52,8 +52,23 @@ bool FABTSM110FinaleLocalFrame::IsUsable(const double Tolerance) const
 		return false;
 	}
 
+	// M3R-5.2 grounds the two slots independently on the continuous surface,
+	// so their chord may contain a bounded radial component. The finale frame
+	// still requires the chord's tangent-plane projection to be exactly local Y.
+	const FVector PlanarPair =
+		FVector::VectorPlaneProject(PairDelta, GetUp());
+	if (PlanarPair.IsNearlyZero(Tolerance))
+	{
+		return false;
+	}
 	const FVector PairDirection = PairDelta.GetSafeNormal();
-	return FMath::Abs(FVector::DotProduct(PairDirection, GetRight())) >= 1.0 - Tolerance
+	const FVector PlanarPairDirection = PlanarPair.GetSafeNormal();
+	constexpr double MaximumGroundedPairTiltSin = 0.7071067811865476;
+	return FMath::Abs(FVector::DotProduct(
+			PlanarPairDirection,
+			GetRight())) >= 1.0 - Tolerance
+		&& FMath::Abs(FVector::DotProduct(PairDirection, GetUp()))
+			<= MaximumGroundedPairTiltSin + Tolerance
 		&& GetOrigin().Equals((LeftSlotWorldLocation + RightSlotWorldLocation) * 0.5, Tolerance);
 }
 

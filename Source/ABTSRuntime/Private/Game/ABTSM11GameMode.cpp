@@ -7,7 +7,6 @@
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "HAL/IConsoleManager.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM11PlayerController.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
@@ -15,20 +14,7 @@
 #include "UI/ABTSM11FinaleHUD.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
-
-#if WITH_EDITOR
-namespace
-{
-	TAutoConsoleVariable<int32> CVarABTSM11CandidateRank(
-		TEXT("abts.M11.CandidateRank"),
-		0,
-		TEXT("Editor-only M11-C v2.1 experience layout. ")
-		TEXT("0 keeps the production Certified v1 bundle; ")
-		TEXT("1..6 load the corresponding frozen, UNCERTIFIED ")
-		TEXT("M11-B v2.1 Candidate. Stop and restart PIE after changing."),
-		ECVF_Default);
-}
-#endif
+#include "World/ABTSM51WorldSystem.h"
 
 TSubclassOf<AABTSM6SlingshotCamera>
 AABTSM11GameMode::ResolveRuntimeSlingshotCameraClass(
@@ -64,6 +50,49 @@ AABTSM11GameMode::AABTSM11GameMode()
 	HUDClass = AABTSM11FinaleHUD::StaticClass();
 	FinaleInteractionSystemClass =
 		AABTSM11FinaleInteractionSystem::StaticClass();
+}
+
+void AABTSM11GameMode::InitGame(
+	const FString& MapName,
+	const FString& Options,
+	FString& ErrorMessage)
+{
+	Super::InitGame(MapName, Options, ErrorMessage);
+	if (!bEnableMonthlyFinalePreviewIntegration
+		|| GetWorld() == nullptr)
+	{
+		return;
+	}
+
+	int32 ConfiguredPlanetCount = 0;
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		It->bEnableMonthlyPresentationPreview = true;
+		It->MonthlyPresentationPreviewCandidateId =
+			MonthlyFinalePreviewCandidateId;
+		++ConfiguredPlanetCount;
+	}
+	if (ConfiguredPlanetCount == 1
+		&& MonthlyFinalePreviewCandidateId >= 0)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Integration][PreviewFinaleFrame][PreBeginPlay] Enabled=1 Candidate=%d Planets=%d Map=%s MonthlyAccepted=0"),
+			MonthlyFinalePreviewCandidateId,
+			ConfiguredPlanetCount,
+			*MapName);
+	}
+	else
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][Integration][PreviewFinaleFrame][PreBeginPlay] Rejected Candidate=%d Planets=%d Map=%s MonthlyAccepted=0"),
+			MonthlyFinalePreviewCandidateId,
+			ConfiguredPlanetCount,
+			*MapName);
+	}
 }
 
 void AABTSM11GameMode::OnInitialPlayerPlaced(
@@ -161,9 +190,37 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 
 	FABTSFinaleWorldContract WorldContract;
 	PrimaryPlanet->TryExportFinaleWorldContract(WorldContract);
+	const FABTSM51PreviewFinaleFrameContext* PreviewFinaleContext = nullptr;
+	int32 WorldSystemCount = 0;
+	for (TActorIterator<AABTSM51WorldSystem> It(GetWorld()); It; ++It)
+	{
+		++WorldSystemCount;
+		if (PreviewFinaleContext == nullptr)
+		{
+			PreviewFinaleContext =
+				It->GetPreviewFinaleFrameContext();
+		}
+	}
+	if (bEnableMonthlyFinalePreviewIntegration)
+	{
+		if (WorldSystemCount != 1
+			|| PreviewFinaleContext == nullptr
+			|| !PreviewFinaleContext->IsUsable())
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Error,
+				TEXT("[ABTS][Integration][PreviewFinaleFrame] M11 initialization rejected. WorldSystems=%d Context=%d Candidate=%d"),
+				WorldSystemCount,
+				PreviewFinaleContext != nullptr ? 1 : 0,
+				MonthlyFinalePreviewCandidateId);
+			return;
+		}
+		WorldContract.LaunchFrame = PreviewFinaleContext->Frame;
+	}
 #if WITH_EDITOR
 	const int32 CandidateRank =
-		CVarABTSM11CandidateRank.GetValueOnGameThread();
+		FABTSM11CandidateExperienceCatalog::GetRequestedCandidateRank();
 	const bool bCandidateRequested = CandidateRank != 0;
 	const bool bIsPIEWorld =
 		GetWorld() != nullptr
@@ -191,6 +248,26 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 			? TEXT("EditorCandidate-UNCERTIFIED")
 			: TEXT("ProductionCertifiedV1"),
 		CandidateRank);
+	if (PreviewFinaleContext != nullptr)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Integration][PreviewFinaleFrame] Authority=PreviewTest Candidate=%d Spatial=%016llX Plan=%016llX Preview=%016llX Context=%016llX M11Frame=%016llX CandidateRank=%d MonthlyAccepted=0"),
+			PreviewFinaleContext->SourceRouteCandidateId,
+			static_cast<unsigned long long>(
+				static_cast<uint64>(PreviewFinaleContext->SourceSpatialCandidateHash)),
+			static_cast<unsigned long long>(
+				static_cast<uint64>(PreviewFinaleContext->SourcePlanResultHash)),
+			static_cast<unsigned long long>(
+				static_cast<uint64>(PreviewFinaleContext->SourcePreviewHash)),
+			static_cast<unsigned long long>(
+				static_cast<uint64>(PreviewFinaleContext->ContextHash)),
+			static_cast<unsigned long long>(
+				AABTSM11FinaleSystem::ComputeFinaleFrameDiagnosticHash(
+					WorldContract.LaunchFrame)),
+			CandidateRank);
+	}
 #else
 	const bool bReady =
 		FinaleSystem->InitializeFromWorldContract(WorldContract);

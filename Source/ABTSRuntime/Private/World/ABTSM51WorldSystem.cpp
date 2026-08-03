@@ -317,8 +317,11 @@ bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)
 			: TEXT("SpaceStakeRequiresFinaleSlot"));
 		return false;
 	}
-	const FVector Up = Hole.IsFinaleSpaceSlot() && Planet->GetFinaleLaunchFrame().IsUsable()
-		? Planet->GetFinaleLaunchFrame().GetUp()
+	const FABTSM110FinaleLocalFrame* ActiveFinaleFrame =
+		GetActiveFinaleFrame();
+	const FVector Up = Hole.IsFinaleSpaceSlot()
+		&& ActiveFinaleFrame != nullptr
+		? ActiveFinaleFrame->GetUp()
 		: (Hole.GetActorLocation() - Planet->GetPlanetCenterWorld()).GetSafeNormal();
 	FVector Forward = FVector::VectorPlaneProject(Hole.GetActorForwardVector(), Up).GetSafeNormal();
 	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();

@@ -17,7 +17,7 @@ namespace ABTS::M11Search
 	};
 
 	/**
-	 * Portable, Unreal-free layout source for the four Editor PIE v4
+	 * Portable, Unreal-free layout source for the Editor PIE v4-derived
 	 * candidates. These remain Candidate / NOT CERTIFIED until v2.2 closes.
 	 */
 	[[nodiscard]] bool BuildFrozenV4CandidateLayout(

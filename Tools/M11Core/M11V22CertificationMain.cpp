@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -23,6 +24,7 @@ namespace
 {
 	namespace fs = std::filesystem;
 	using ABTS::M11Search::CandidateLayout;
+	using ABTS::M11Search::CandidateRecord;
 	using ABTS::M11Search::CandidateSearch;
 	using ABTS::M11Search::CandidateSearchContract;
 	using ABTS::M11Search::FrozenCandidateIdentity;
@@ -32,6 +34,7 @@ namespace
 	struct Options
 	{
 		bool Merge = false;
+		bool ScreenAim = false;
 		std::int32_t Rank = 3;
 		fs::path Output;
 		fs::path InputRoot;
@@ -41,7 +44,49 @@ namespace
 		double YawStep = 2.0;
 		double PitchStep = 3.0;
 		double PowerStep = 0.025;
+		double MinYaw = std::numeric_limits<double>::quiet_NaN();
+		double MaxYaw = std::numeric_limits<double>::quiet_NaN();
+		double MinPitch = std::numeric_limits<double>::quiet_NaN();
+		double MaxPitch = std::numeric_limits<double>::quiet_NaN();
+		double MinPower = std::numeric_limits<double>::quiet_NaN();
+		double MaxPower = std::numeric_limits<double>::quiet_NaN();
+		double TargetOffsetXCM = 0.0;
+		double TargetOffsetYCM = 0.0;
+		double TargetOffsetZCM = 0.0;
+		double ConstellationDistanceCM = 0.0;
+		std::array<double, 4> CelestialRadialDeltaCM{};
+		double Assist3OffsetXCM = 0.0;
+		double Assist3OffsetYCM = 0.0;
+		double Assist3OffsetZCM = 0.0;
+		double Assist3BPlaneTargetTDeltaCM = 0.0;
+		double Assist3BPlaneTargetRDeltaCM = 0.0;
+		double Assist3BPlaneSigmaScale = 1.0;
+		double Assist3VelocityDeltaXCMPerSec = 0.0;
+		double Assist3VelocityDeltaYCMPerSec = 0.0;
+		double Assist3VelocityDeltaZCMPerSec = 0.0;
+		double Assist2OffsetXCM = 0.0;
+		double Assist2OffsetYCM = 0.0;
+		double Assist2OffsetZCM = 0.0;
+		double Assist2BPlaneTargetTDeltaCM = 0.0;
+		double Assist2BPlaneTargetRDeltaCM = 0.0;
+		double Assist2BPlaneSigmaScale = 1.0;
+		double Assist2VelocityDeltaXCMPerSec = 0.0;
+		double Assist2VelocityDeltaYCMPerSec = 0.0;
+		double Assist2VelocityDeltaZCMPerSec = 0.0;
+		double TargetHitRadiusCM =
+			std::numeric_limits<double>::quiet_NaN();
+		double TargetMinimumCorridorQuality =
+			std::numeric_limits<double>::quiet_NaN();
+		double ArrivalConeDegrees = 180.0;
+		double ArrivalFaceConeDegrees = 180.0;
+		double NominalYawDegrees = std::numeric_limits<double>::quiet_NaN();
+		double NominalPitchDegrees = std::numeric_limits<double>::quiet_NaN();
+		double NominalPower = std::numeric_limits<double>::quiet_NaN();
 		std::uint32_t CheckpointEvery = 256;
+		std::uint32_t ScreenAimSampleCount = 5000;
+		std::uint8_t EnabledAssistMask = 0x7u;
+		bool ExpectNoF4 = false;
+		bool RequireNominalF4 = true;
 		bool Resume = false;
 	};
 
@@ -112,6 +157,10 @@ namespace
 		{
 			Out.Merge = true;
 		}
+		else if (Command == "screen-aim")
+		{
+			Out.ScreenAim = true;
+		}
 		else if (Command != "preflight")
 		{
 			Failure = "UnknownCommand";
@@ -123,6 +172,16 @@ namespace
 			if (Key == "--resume")
 			{
 				Out.Resume = true;
+				continue;
+			}
+			if (Key == "--expect-no-f4")
+			{
+				Out.ExpectNoF4 = true;
+				continue;
+			}
+			if (Key == "--allow-off-grid-nominal")
+			{
+				Out.RequireNominalF4 = false;
 				continue;
 			}
 			if (Index + 1 >= Argc)
@@ -162,6 +221,15 @@ namespace
 			{
 				Out.CheckpointEvery = static_cast<std::uint32_t>(Unsigned);
 			}
+			else if (Key == "--screen-aim-samples"
+				&& ParseUnsigned(Value, Unsigned))
+			{
+				Out.ScreenAimSampleCount = static_cast<std::uint32_t>(Unsigned);
+			}
+			else if (Key == "--assist-mask" && ParseUnsigned(Value, Unsigned))
+			{
+				Out.EnabledAssistMask = static_cast<std::uint8_t>(Unsigned);
+			}
 			else if (Key == "--yaw-step" && ParseDouble(Value, Number))
 			{
 				Out.YawStep = Number;
@@ -174,6 +242,181 @@ namespace
 			{
 				Out.PowerStep = Number;
 			}
+			else if (Key == "--min-yaw" && ParseDouble(Value, Number))
+			{
+				Out.MinYaw = Number;
+			}
+			else if (Key == "--max-yaw" && ParseDouble(Value, Number))
+			{
+				Out.MaxYaw = Number;
+			}
+			else if (Key == "--min-pitch" && ParseDouble(Value, Number))
+			{
+				Out.MinPitch = Number;
+			}
+			else if (Key == "--max-pitch" && ParseDouble(Value, Number))
+			{
+				Out.MaxPitch = Number;
+			}
+			else if (Key == "--min-power" && ParseDouble(Value, Number))
+			{
+				Out.MinPower = Number;
+			}
+			else if (Key == "--max-power" && ParseDouble(Value, Number))
+			{
+				Out.MaxPower = Number;
+			}
+			else if (Key == "--target-offset-x" && ParseDouble(Value, Number))
+			{
+				Out.TargetOffsetXCM = Number;
+			}
+			else if (Key == "--target-offset-y" && ParseDouble(Value, Number))
+			{
+				Out.TargetOffsetYCM = Number;
+			}
+			else if (Key == "--target-offset-z" && ParseDouble(Value, Number))
+			{
+				Out.TargetOffsetZCM = Number;
+			}
+			else if (Key == "--constellation-distance"
+				&& ParseDouble(Value, Number))
+			{
+				Out.ConstellationDistanceCM = Number;
+			}
+			else if (Key == "--assist1-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[0] = Number;
+			}
+			else if (Key == "--assist2-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[1] = Number;
+			}
+			else if (Key == "--assist3-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[2] = Number;
+			}
+			else if (Key == "--target-radial-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.CelestialRadialDeltaCM[3] = Number;
+			}
+			else if (Key == "--target-hit-radius" && ParseDouble(Value, Number))
+			{
+				Out.TargetHitRadiusCM = Number;
+			}
+			else if (Key == "--target-min-corridor-quality"
+				&& ParseDouble(Value, Number))
+			{
+				Out.TargetMinimumCorridorQuality = Number;
+			}
+			else if (Key == "--assist3-offset-x" && ParseDouble(Value, Number))
+			{
+				Out.Assist3OffsetXCM = Number;
+			}
+			else if (Key == "--assist3-offset-y" && ParseDouble(Value, Number))
+			{
+				Out.Assist3OffsetYCM = Number;
+			}
+			else if (Key == "--assist3-offset-z" && ParseDouble(Value, Number))
+			{
+				Out.Assist3OffsetZCM = Number;
+			}
+			else if (Key == "--assist3-bplane-t-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3BPlaneTargetTDeltaCM = Number;
+			}
+			else if (Key == "--assist3-bplane-r-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3BPlaneTargetRDeltaCM = Number;
+			}
+			else if (Key == "--assist3-bplane-sigma-scale"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3BPlaneSigmaScale = Number;
+			}
+			else if (Key == "--assist3-velocity-delta-x"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3VelocityDeltaXCMPerSec = Number;
+			}
+			else if (Key == "--assist3-velocity-delta-y"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3VelocityDeltaYCMPerSec = Number;
+			}
+			else if (Key == "--assist3-velocity-delta-z"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist3VelocityDeltaZCMPerSec = Number;
+			}
+			else if (Key == "--assist2-offset-x" && ParseDouble(Value, Number))
+			{
+				Out.Assist2OffsetXCM = Number;
+			}
+			else if (Key == "--assist2-offset-y" && ParseDouble(Value, Number))
+			{
+				Out.Assist2OffsetYCM = Number;
+			}
+			else if (Key == "--assist2-offset-z" && ParseDouble(Value, Number))
+			{
+				Out.Assist2OffsetZCM = Number;
+			}
+			else if (Key == "--assist2-bplane-t-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2BPlaneTargetTDeltaCM = Number;
+			}
+			else if (Key == "--assist2-bplane-r-delta"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2BPlaneTargetRDeltaCM = Number;
+			}
+			else if (Key == "--assist2-bplane-sigma-scale"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2BPlaneSigmaScale = Number;
+			}
+			else if (Key == "--assist2-velocity-delta-x"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2VelocityDeltaXCMPerSec = Number;
+			}
+			else if (Key == "--assist2-velocity-delta-y"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2VelocityDeltaYCMPerSec = Number;
+			}
+			else if (Key == "--assist2-velocity-delta-z"
+				&& ParseDouble(Value, Number))
+			{
+				Out.Assist2VelocityDeltaZCMPerSec = Number;
+			}
+			else if (Key == "--arrival-cone-degrees" && ParseDouble(Value, Number))
+			{
+				Out.ArrivalConeDegrees = Number;
+			}
+			else if (Key == "--arrival-face-cone-degrees"
+				&& ParseDouble(Value, Number))
+			{
+				Out.ArrivalFaceConeDegrees = Number;
+			}
+			else if (Key == "--nominal-yaw" && ParseDouble(Value, Number))
+			{
+				Out.NominalYawDegrees = Number;
+			}
+			else if (Key == "--nominal-pitch" && ParseDouble(Value, Number))
+			{
+				Out.NominalPitchDegrees = Number;
+			}
+			else if (Key == "--nominal-power" && ParseDouble(Value, Number))
+			{
+				Out.NominalPower = Number;
+			}
 			else
 			{
 				Failure = "InvalidOption:" + Key;
@@ -183,7 +426,8 @@ namespace
 		if (Out.Output.empty() || !Out.Output.is_absolute()
 			|| Out.Threads == 0 || Out.ShardCount == 0
 			|| Out.ShardIndex >= Out.ShardCount
-			|| Out.CheckpointEvery == 0)
+			|| Out.CheckpointEvery == 0 || Out.ScreenAimSampleCount == 0
+			|| Out.EnabledAssistMask > 0x7u)
 		{
 			Failure = "InvalidExecutionContract";
 			return false;
@@ -194,7 +438,218 @@ namespace
 			Failure = "MergeRequiresAbsoluteInputRoot";
 			return false;
 		}
+		const double TargetOffsetSquared =
+			Out.TargetOffsetXCM * Out.TargetOffsetXCM
+			+ Out.TargetOffsetYCM * Out.TargetOffsetYCM
+			+ Out.TargetOffsetZCM * Out.TargetOffsetZCM;
+		if (!std::isfinite(TargetOffsetSquared)
+			|| TargetOffsetSquared > 30000.0 * 30000.0)
+		{
+			Failure = "TargetOffsetOutsideDiagnosticLimit";
+			return false;
+		}
+		if (!std::isfinite(Out.ConstellationDistanceCM)
+			|| Out.ConstellationDistanceCM < 0.0
+			|| Out.ConstellationDistanceCM > 120000.0)
+		{
+			Failure = "ConstellationDistanceOutsideDiagnosticLimit";
+			return false;
+		}
+		for (const double RadialDeltaCM : Out.CelestialRadialDeltaCM)
+		{
+			if (!std::isfinite(RadialDeltaCM)
+				|| RadialDeltaCM < -120000.0
+				|| RadialDeltaCM > 120000.0)
+			{
+				Failure = "CelestialRadialDeltaOutsideDiagnosticLimit";
+				return false;
+			}
+		}
+		const double Assist3OffsetSquared =
+			Out.Assist3OffsetXCM * Out.Assist3OffsetXCM
+			+ Out.Assist3OffsetYCM * Out.Assist3OffsetYCM
+			+ Out.Assist3OffsetZCM * Out.Assist3OffsetZCM;
+		if (!std::isfinite(Assist3OffsetSquared)
+			|| Assist3OffsetSquared > 10000.0 * 10000.0)
+		{
+			Failure = "Assist3OffsetOutsideDiagnosticLimit";
+			return false;
+		}
+		const double BPlaneDeltaSquared =
+			Out.Assist3BPlaneTargetTDeltaCM
+				* Out.Assist3BPlaneTargetTDeltaCM
+			+ Out.Assist3BPlaneTargetRDeltaCM
+				* Out.Assist3BPlaneTargetRDeltaCM;
+		if (!std::isfinite(BPlaneDeltaSquared)
+			|| BPlaneDeltaSquared > 5000.0 * 5000.0
+			|| Out.Assist3BPlaneSigmaScale < 0.65
+			|| Out.Assist3BPlaneSigmaScale > 1.50)
+		{
+			Failure = "Assist3BPlaneOverrideOutsideDiagnosticLimit";
+			return false;
+		}
+		const double VelocityDeltaSquared =
+			Out.Assist3VelocityDeltaXCMPerSec
+				* Out.Assist3VelocityDeltaXCMPerSec
+			+ Out.Assist3VelocityDeltaYCMPerSec
+				* Out.Assist3VelocityDeltaYCMPerSec
+			+ Out.Assist3VelocityDeltaZCMPerSec
+				* Out.Assist3VelocityDeltaZCMPerSec;
+		if (!std::isfinite(VelocityDeltaSquared)
+			|| VelocityDeltaSquared > 2500.0 * 2500.0)
+		{
+			Failure = "Assist3VelocityOverrideOutsideDiagnosticLimit";
+			return false;
+		}
+		const double Assist2OffsetSquared =
+			Out.Assist2OffsetXCM * Out.Assist2OffsetXCM
+			+ Out.Assist2OffsetYCM * Out.Assist2OffsetYCM
+			+ Out.Assist2OffsetZCM * Out.Assist2OffsetZCM;
+		const double Assist2BPlaneDeltaSquared =
+			Out.Assist2BPlaneTargetTDeltaCM
+				* Out.Assist2BPlaneTargetTDeltaCM
+			+ Out.Assist2BPlaneTargetRDeltaCM
+				* Out.Assist2BPlaneTargetRDeltaCM;
+		const double Assist2VelocityDeltaSquared =
+			Out.Assist2VelocityDeltaXCMPerSec
+				* Out.Assist2VelocityDeltaXCMPerSec
+			+ Out.Assist2VelocityDeltaYCMPerSec
+				* Out.Assist2VelocityDeltaYCMPerSec
+			+ Out.Assist2VelocityDeltaZCMPerSec
+				* Out.Assist2VelocityDeltaZCMPerSec;
+		if (!std::isfinite(Assist2OffsetSquared)
+			|| Assist2OffsetSquared > 10000.0 * 10000.0
+			|| !std::isfinite(Assist2BPlaneDeltaSquared)
+			|| Assist2BPlaneDeltaSquared > 5000.0 * 5000.0
+			|| Out.Assist2BPlaneSigmaScale < 0.65
+			|| Out.Assist2BPlaneSigmaScale > 1.50
+			|| !std::isfinite(Assist2VelocityDeltaSquared)
+			|| Assist2VelocityDeltaSquared > 2500.0 * 2500.0)
+		{
+			Failure = "Assist2OverrideOutsideDiagnosticLimit";
+			return false;
+		}
+		if (std::isfinite(Out.TargetHitRadiusCM)
+			&& (Out.TargetHitRadiusCM < 4500.0
+				|| Out.TargetHitRadiusCM > 12000.0))
+		{
+			Failure = "TargetHitRadiusOutsideSearchContract";
+			return false;
+		}
+		if (std::isfinite(Out.TargetMinimumCorridorQuality)
+			&& (Out.TargetMinimumCorridorQuality < 0.05
+				|| Out.TargetMinimumCorridorQuality > 1.0))
+		{
+			Failure = "TargetCorridorQualityOutsideDiagnosticLimit";
+			return false;
+		}
+		if (!(Out.ArrivalConeDegrees > 0.0)
+			|| Out.ArrivalConeDegrees > 180.0)
+		{
+			Failure = "ArrivalConeOutsideDiagnosticLimit";
+			return false;
+		}
+		if (!(Out.ArrivalFaceConeDegrees > 0.0)
+			|| Out.ArrivalFaceConeDegrees > 180.0)
+		{
+			Failure = "ArrivalFaceConeOutsideDiagnosticLimit";
+			return false;
+		}
 		return true;
+	}
+
+	void ApplyDiagnosticOffsets(
+		const Options& OptionsValue,
+		CandidateLayout& Layout)
+	{
+		const ABTS::M11Core::Vec3d ConstellationDirection =
+			(Layout.Scenario.Bodies[1].CenterCM
+				- Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+		const ABTS::M11Core::Vec3d ConstellationOffset =
+			ConstellationDirection * OptionsValue.ConstellationDistanceCM;
+		for (std::size_t BodyIndex = 1;
+			BodyIndex < Layout.Scenario.Bodies.size(); ++BodyIndex)
+		{
+			Layout.Scenario.Bodies[BodyIndex].CenterCM += ConstellationOffset;
+		}
+		Layout.Scenario.Target.CenterCM += ConstellationOffset;
+		Layout.Scenario.Target.GeometricContactCenterCM += ConstellationOffset;
+		for (std::size_t AssistIndex = 0; AssistIndex < 3; ++AssistIndex)
+		{
+			ABTS::M11Core::Vec3d& Center =
+				Layout.Scenario.Bodies[AssistIndex + 1].CenterCM;
+			const ABTS::M11Core::Vec3d Direction =
+				(Center - Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+			Center += Direction
+				* OptionsValue.CelestialRadialDeltaCM[AssistIndex];
+		}
+		const ABTS::M11Core::Vec3d TargetDirection =
+			(Layout.Scenario.Target.CenterCM
+				- Layout.Launch.PouchLocalPositionCM).GetSafeNormal();
+		const ABTS::M11Core::Vec3d TargetRadialOffset = TargetDirection
+			* OptionsValue.CelestialRadialDeltaCM[3];
+		Layout.Scenario.Target.CenterCM += TargetRadialOffset;
+		Layout.Scenario.Target.GeometricContactCenterCM += TargetRadialOffset;
+		const ABTS::M11Core::Vec3d Offset{
+			OptionsValue.TargetOffsetXCM,
+			OptionsValue.TargetOffsetYCM,
+			OptionsValue.TargetOffsetZCM};
+		Layout.Scenario.Target.CenterCM += Offset;
+		Layout.Scenario.Target.GeometricContactCenterCM += Offset;
+		Layout.Scenario.Bodies[3].CenterCM += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist3OffsetXCM,
+			OptionsValue.Assist3OffsetYCM,
+			OptionsValue.Assist3OffsetZCM};
+		ABTS::M11Core::GravityBodySpec& Assist3 =
+			Layout.Scenario.Bodies[3];
+		Assist3.BPlaneTargetTCM +=
+			OptionsValue.Assist3BPlaneTargetTDeltaCM;
+		Assist3.BPlaneTargetRCM +=
+			OptionsValue.Assist3BPlaneTargetRDeltaCM;
+		Assist3.BPlaneSigmaTCM *= OptionsValue.Assist3BPlaneSigmaScale;
+		Assist3.BPlaneSigmaRCM *= OptionsValue.Assist3BPlaneSigmaScale;
+		Assist3.VirtualOrbitalVelocityCMPerSec += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist3VelocityDeltaXCMPerSec,
+			OptionsValue.Assist3VelocityDeltaYCMPerSec,
+			OptionsValue.Assist3VelocityDeltaZCMPerSec};
+		ABTS::M11Core::GravityBodySpec& Assist2 =
+			Layout.Scenario.Bodies[2];
+		Assist2.CenterCM += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist2OffsetXCM,
+			OptionsValue.Assist2OffsetYCM,
+			OptionsValue.Assist2OffsetZCM};
+		Assist2.BPlaneTargetTCM +=
+			OptionsValue.Assist2BPlaneTargetTDeltaCM;
+		Assist2.BPlaneTargetRCM +=
+			OptionsValue.Assist2BPlaneTargetRDeltaCM;
+		Assist2.BPlaneSigmaTCM *= OptionsValue.Assist2BPlaneSigmaScale;
+		Assist2.BPlaneSigmaRCM *= OptionsValue.Assist2BPlaneSigmaScale;
+		Assist2.VirtualOrbitalVelocityCMPerSec += ABTS::M11Core::Vec3d{
+			OptionsValue.Assist2VelocityDeltaXCMPerSec,
+			OptionsValue.Assist2VelocityDeltaYCMPerSec,
+			OptionsValue.Assist2VelocityDeltaZCMPerSec};
+		if (std::isfinite(OptionsValue.TargetHitRadiusCM))
+		{
+			Layout.Scenario.Target.HitRadiusCM =
+				OptionsValue.TargetHitRadiusCM;
+		}
+		if (std::isfinite(OptionsValue.TargetMinimumCorridorQuality))
+		{
+			Layout.Scenario.Target.MinimumQualifyingCorridorQuality =
+				OptionsValue.TargetMinimumCorridorQuality;
+		}
+		if (std::isfinite(OptionsValue.NominalYawDegrees))
+		{
+			Layout.NominalInput.YawDegrees = OptionsValue.NominalYawDegrees;
+		}
+		if (std::isfinite(OptionsValue.NominalPitchDegrees))
+		{
+			Layout.NominalInput.PitchDegrees = OptionsValue.NominalPitchDegrees;
+		}
+		if (std::isfinite(OptionsValue.NominalPower))
+		{
+			Layout.NominalInput.Power = OptionsValue.NominalPower;
+		}
 	}
 
 	bool MakeGrid(
@@ -203,12 +658,31 @@ namespace
 		Grid& Out,
 		std::string& Failure)
 	{
-		Out.MinYaw = Layout.Launch.MinimumYawDegrees;
-		Out.MaxYaw = Layout.Launch.MaximumYawDegrees;
-		Out.MinPitch = Layout.Launch.MinimumPitchDegrees;
-		Out.MaxPitch = Layout.Launch.MaximumPitchDegrees;
-		Out.MinPower = Layout.Launch.MinimumPower;
-		Out.MaxPower = Layout.Launch.MaximumPower;
+		Out.MinYaw = std::isfinite(OptionsValue.MinYaw)
+			? OptionsValue.MinYaw : Layout.Launch.MinimumYawDegrees;
+		Out.MaxYaw = std::isfinite(OptionsValue.MaxYaw)
+			? OptionsValue.MaxYaw : Layout.Launch.MaximumYawDegrees;
+		Out.MinPitch = std::isfinite(OptionsValue.MinPitch)
+			? OptionsValue.MinPitch : Layout.Launch.MinimumPitchDegrees;
+		Out.MaxPitch = std::isfinite(OptionsValue.MaxPitch)
+			? OptionsValue.MaxPitch : Layout.Launch.MaximumPitchDegrees;
+		Out.MinPower = std::isfinite(OptionsValue.MinPower)
+			? OptionsValue.MinPower : Layout.Launch.MinimumPower;
+		Out.MaxPower = std::isfinite(OptionsValue.MaxPower)
+			? OptionsValue.MaxPower : Layout.Launch.MaximumPower;
+		if (Out.MinYaw < Layout.Launch.MinimumYawDegrees
+			|| Out.MaxYaw > Layout.Launch.MaximumYawDegrees
+			|| Out.MinPitch < Layout.Launch.MinimumPitchDegrees
+			|| Out.MaxPitch > Layout.Launch.MaximumPitchDegrees
+			|| Out.MinPower < Layout.Launch.MinimumPower
+			|| Out.MaxPower > Layout.Launch.MaximumPower
+			|| Out.MinYaw > Out.MaxYaw
+			|| Out.MinPitch > Out.MaxPitch
+			|| Out.MinPower > Out.MaxPower)
+		{
+			Failure = "GridBoundsOutsideLaunchDomain";
+			return false;
+		}
 		Out.YawStep = OptionsValue.YawStep;
 		Out.PitchStep = OptionsValue.PitchStep;
 		Out.PowerStep = OptionsValue.PowerStep;
@@ -287,6 +761,9 @@ namespace
 		const fs::path& Path,
 		const Options& OptionsValue,
 		const FrozenCandidateIdentity& Identity,
+		const std::uint64_t VariantSourceHash,
+		const double TargetHitRadiusCM,
+		const double TargetMinimumCorridorQuality,
 		const Grid& GridValue,
 		const std::vector<Sample>& Samples,
 		const bool Complete,
@@ -314,11 +791,65 @@ namespace
 			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
 			<< "  \"candidateSourceHash\":\""
 			<< Hex64(Identity.CandidateSourceHash) << "\",\n"
+			<< "  \"variantSourceHash\":\""
+			<< Hex64(VariantSourceHash) << "\",\n"
+			<< "  \"constellationDistanceCM\":"
+			<< OptionsValue.ConstellationDistanceCM << ",\n"
+			<< "  \"celestialRadialDeltaCM\":["
+			<< OptionsValue.CelestialRadialDeltaCM[0] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[1] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[2] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[3] << "],\n"
+			<< "  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
+			<< ',' << OptionsValue.TargetOffsetYCM << ','
+			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"assist2OffsetCM\":[" << OptionsValue.Assist2OffsetXCM
+			<< ',' << OptionsValue.Assist2OffsetYCM << ','
+			<< OptionsValue.Assist2OffsetZCM << "],\n"
+			<< "  \"assist2BPlaneDeltaCM\":["
+			<< OptionsValue.Assist2BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist2BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist2BPlaneSigmaScale\":"
+			<< OptionsValue.Assist2BPlaneSigmaScale << ",\n"
+			<< "  \"assist2VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist2VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaZCMPerSec << "],\n"
+			<< "  \"assist3OffsetCM\":[" << OptionsValue.Assist3OffsetXCM
+			<< ',' << OptionsValue.Assist3OffsetYCM << ','
+			<< OptionsValue.Assist3OffsetZCM << "],\n"
+			<< "  \"assist3BPlaneDeltaCM\":["
+			<< OptionsValue.Assist3BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist3BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist3BPlaneSigmaScale\":"
+			<< OptionsValue.Assist3BPlaneSigmaScale << ",\n"
+			<< "  \"assist3VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist3VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaZCMPerSec << "],\n"
+			<< "  \"targetHitRadiusCM\":"
+			<< TargetHitRadiusCM << ",\n"
+			<< "  \"targetMinimumCorridorQuality\":"
+			<< TargetMinimumCorridorQuality
+			<< ",\n"
+			<< "  \"enabledAssistMask\":"
+			<< static_cast<unsigned int>(OptionsValue.EnabledAssistMask)
+			<< ",\n"
+			<< "  \"arrivalConeDegrees\":"
+			<< OptionsValue.ArrivalConeDegrees << ",\n"
+			<< "  \"arrivalFaceConeDegrees\":"
+			<< OptionsValue.ArrivalFaceConeDegrees << ",\n"
 			<< "  \"shardIndex\":" << OptionsValue.ShardIndex << ",\n"
 			<< "  \"shardCount\":" << OptionsValue.ShardCount << ",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
 			<< ",\"pitchCount\":" << GridValue.PitchCount
 			<< ",\"powerCount\":" << GridValue.PowerCount
+			<< ",\"minYaw\":" << GridValue.MinYaw
+			<< ",\"maxYaw\":" << GridValue.MaxYaw
+			<< ",\"minPitch\":" << GridValue.MinPitch
+			<< ",\"maxPitch\":" << GridValue.MaxPitch
+			<< ",\"minPower\":" << GridValue.MinPower
+			<< ",\"maxPower\":" << GridValue.MaxPower
 			<< ",\"yawStep\":" << GridValue.YawStep
 			<< ",\"pitchStep\":" << GridValue.PitchStep
 			<< ",\"powerStep\":" << GridValue.PowerStep << "},\n"
@@ -396,12 +927,18 @@ namespace
 		return Hash;
 	}
 
-	std::array<std::uint64_t, 4> CountComponents(
+	struct ComponentSummary
+	{
+		std::array<std::uint64_t, 4> Count{};
+		std::array<std::uint64_t, 4> LargestSize{};
+	};
+
+	ComponentSummary CountComponents(
 		const Grid& GridValue,
 		const std::vector<Sample>& Samples)
 	{
-		std::array<std::uint64_t, 4> Counts{};
-		for (std::size_t Level = 0; Level < Counts.size(); ++Level)
+		ComponentSummary Summary;
+		for (std::size_t Level = 0; Level < Summary.Count.size(); ++Level)
 		{
 			std::vector<std::uint8_t> Visited(Samples.size(), 0);
 			for (std::size_t Start = 0; Start < Samples.size(); ++Start)
@@ -411,13 +948,15 @@ namespace
 				{
 					continue;
 				}
-				++Counts[Level];
+				++Summary.Count[Level];
+				std::uint64_t ComponentSize = 0;
 				std::vector<std::uint64_t> Open{Samples[Start].GlobalIndex};
 				Visited[Start] = 1;
 				while (!Open.empty())
 				{
 					const std::uint64_t Index = Open.back();
 					Open.pop_back();
+					++ComponentSize;
 					Sample Decoded;
 					DecodeIndex(GridValue, Index, Decoded);
 					const std::array<std::int32_t, 6> DY{-1, 1, 0, 0, 0, 0};
@@ -449,9 +988,11 @@ namespace
 						}
 					}
 				}
+				Summary.LargestSize[Level] = std::max(
+					Summary.LargestSize[Level], ComponentSize);
 			}
 		}
-		return Counts;
+		return Summary;
 	}
 
 	int RunMerge(const Options& OptionsValue)
@@ -464,6 +1005,20 @@ namespace
 			std::cerr << "CandidateRankUnavailable\n";
 			return 1;
 		}
+		const CandidateSearchContract Contract =
+			CandidateSearchContract::MakeV2_1();
+		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
+			!= Identity.CandidateSourceHash)
+		{
+			std::cerr << "CandidateSourceIdentityMismatch:expected="
+				<< Hex64(Identity.CandidateSourceHash) << ":actual="
+				<< Hex64(ABTS::M11Search::ComputeCandidateSourceHash(
+					Layout, Contract)) << '\n';
+			return 1;
+		}
+		ApplyDiagnosticOffsets(OptionsValue, Layout);
+		const std::uint64_t VariantSourceHash =
+			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
 		Grid GridValue;
 		std::string Failure;
 		if (!MakeGrid(Layout, OptionsValue, GridValue, Failure))
@@ -508,6 +1063,10 @@ namespace
 		}
 		std::array<std::uint64_t, 4> PrefixCounts{};
 		std::uint64_t NestingViolations = 0;
+		std::uint64_t TargetHitCount = 0;
+		std::uint64_t EarlyTargetHitCount = 0;
+		std::uint64_t GeometricContactCount = 0;
+		std::uint64_t BypassTargetHitCount = 0;
 		std::array<std::int32_t, 4> MinimumPowerIndex{
 			GridValue.PowerCount, GridValue.PowerCount,
 			GridValue.PowerCount, GridValue.PowerCount};
@@ -526,6 +1085,16 @@ namespace
 			{
 				++NestingViolations;
 			}
+			const bool IsF4 = (Value.PrefixMask & 8u) != 0;
+			const bool HasTargetHit = Value.Termination
+				== static_cast<std::uint8_t>(
+					ABTS::M11Core::TrajectoryTermination::TargetHit);
+			const bool HasGeometricContact = Value.TargetContactCount > 0;
+			TargetHitCount += HasTargetHit ? 1u : 0u;
+			EarlyTargetHitCount += (HasTargetHit && !IsF4) ? 1u : 0u;
+			GeometricContactCount += HasGeometricContact ? 1u : 0u;
+			BypassTargetHitCount +=
+				(HasGeometricContact && !IsF4) ? 1u : 0u;
 			for (std::size_t Level = 0; Level < 4; ++Level)
 			{
 				if ((Value.PrefixMask & (1u << Level)) != 0)
@@ -538,7 +1107,8 @@ namespace
 				}
 			}
 		}
-		const auto Components = CountComponents(GridValue, Samples);
+		const ComponentSummary Components =
+			CountComponents(GridValue, Samples);
 		std::error_code Error;
 		fs::create_directories(OptionsValue.Output, Error);
 		if (Error)
@@ -558,8 +1128,85 @@ namespace
 				<< Value.CompletedAssistCount << ' ' << Value.TargetContactCount
 				<< ' ' << Hex64(Value.ResultHash) << '\n';
 		}
-		const bool Passed = PrefixCounts[3] > 0
-			&& Components[3] == 1 && NestingViolations == 0;
+		bool NominalF4 = false;
+		const auto ExactIndex = [](const double Value, const double Minimum,
+			const double Step, const std::int32_t Count, std::int32_t& OutIndex)
+		{
+			const double Coordinate = (Value - Minimum) / Step;
+			const double Rounded = std::round(Coordinate);
+			if (std::abs(Coordinate - Rounded) > 1.0e-9
+				|| Rounded < 0.0 || Rounded >= Count)
+			{
+				return false;
+			}
+			OutIndex = static_cast<std::int32_t>(Rounded);
+			return true;
+		};
+		std::int32_t NominalYaw = 0;
+		std::int32_t NominalPitch = 0;
+		std::int32_t NominalPower = 0;
+		if (ExactIndex(Layout.NominalInput.YawDegrees, GridValue.MinYaw,
+				GridValue.YawStep, GridValue.YawCount, NominalYaw)
+			&& ExactIndex(Layout.NominalInput.PitchDegrees, GridValue.MinPitch,
+				GridValue.PitchStep, GridValue.PitchCount, NominalPitch)
+			&& ExactIndex(Layout.NominalInput.Power, GridValue.MinPower,
+				GridValue.PowerStep, GridValue.PowerCount, NominalPower))
+		{
+			const std::uint64_t NominalIndex =
+				(static_cast<std::uint64_t>(NominalYaw)
+					* GridValue.PitchCount
+					+ static_cast<std::uint64_t>(NominalPitch))
+					* GridValue.PowerCount
+				+ static_cast<std::uint64_t>(NominalPower);
+			NominalF4 = (Samples[NominalIndex].PrefixMask & 8u) != 0;
+		}
+		bool HasRepresentativeF4 = false;
+		LaunchInput RepresentativeInput;
+		double RepresentativeDistance =
+			std::numeric_limits<double>::infinity();
+		for (const Sample& Value : Samples)
+		{
+			if ((Value.PrefixMask & 8u) == 0)
+			{
+				continue;
+			}
+			const LaunchInput Input = InputFor(GridValue, Value);
+			const double YawDelta = Input.YawDegrees
+				- Layout.NominalInput.YawDegrees;
+			const double PitchDelta = Input.PitchDegrees
+				- Layout.NominalInput.PitchDegrees;
+			const double PowerDelta = (Input.Power
+				- Layout.NominalInput.Power) * 20.0;
+			const double Distance = YawDelta * YawDelta
+				+ PitchDelta * PitchDelta + PowerDelta * PowerDelta;
+			if (Distance < RepresentativeDistance)
+			{
+				RepresentativeDistance = Distance;
+				RepresentativeInput = Input;
+				HasRepresentativeF4 = true;
+			}
+		}
+		ABTS::M11Core::TrajectoryPacingDiagnostics RepresentativePacing;
+		if (HasRepresentativeF4)
+		{
+			CandidateRecord Replay;
+			Replay.Layout = Layout;
+			Replay.Layout.NominalInput = RepresentativeInput;
+			ABTS::M11Core::TrajectoryResult Result;
+			std::string ReplayFailure;
+			HasRepresentativeF4 = CandidateSearch::ReplayCandidate(
+				Replay, OptionsValue.EnabledAssistMask, Result, &ReplayFailure)
+				&& Result.BuildPacingDiagnostics(
+					RepresentativePacing, &ReplayFailure);
+		}
+		const bool Passed = OptionsValue.ExpectNoF4
+			? PrefixCounts[3] == 0 && TargetHitCount == 0
+				&& GeometricContactCount == 0 && BypassTargetHitCount == 0
+				&& NestingViolations == 0
+			: PrefixCounts[3] > 0
+				&& (!OptionsValue.RequireNominalF4 || NominalF4)
+				&& Components.Count[3] == 1 && NestingViolations == 0
+				&& EarlyTargetHitCount == 0 && BypassTargetHitCount == 0;
 		std::ofstream Summary(
 			OptionsValue.Output / "summary.json",
 			std::ios::binary | std::ios::trunc);
@@ -568,28 +1215,116 @@ namespace
 			<< "  \"passed\":" << (Passed ? "true" : "false") << ",\n"
 			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
 			<< "  \"candidateSourceHash\":\"" << Hex64(Identity.CandidateSourceHash)
-			<< "\",\n  \"aggregateSampleHash\":\""
+			<< "\",\n  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
+			<< "\",\n  \"constellationDistanceCM\":"
+			<< OptionsValue.ConstellationDistanceCM
+			<< ",\n  \"celestialRadialDeltaCM\":["
+			<< OptionsValue.CelestialRadialDeltaCM[0] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[1] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[2] << ','
+			<< OptionsValue.CelestialRadialDeltaCM[3] << ']'
+			<< ",\n  \"targetOffsetCM\":[" << OptionsValue.TargetOffsetXCM
+			<< ',' << OptionsValue.TargetOffsetYCM << ','
+			<< OptionsValue.TargetOffsetZCM << "],\n"
+			<< "  \"assist2OffsetCM\":["
+			<< OptionsValue.Assist2OffsetXCM << ','
+			<< OptionsValue.Assist2OffsetYCM << ','
+			<< OptionsValue.Assist2OffsetZCM << "],\n"
+			<< "  \"assist2BPlaneDeltaCM\":["
+			<< OptionsValue.Assist2BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist2BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist2BPlaneSigmaScale\":"
+			<< OptionsValue.Assist2BPlaneSigmaScale << ",\n"
+			<< "  \"assist2VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist2VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist2VelocityDeltaZCMPerSec << "],\n"
+			<< "  \"assist3OffsetCM\":["
+			<< OptionsValue.Assist3OffsetXCM << ','
+			<< OptionsValue.Assist3OffsetYCM << ','
+			<< OptionsValue.Assist3OffsetZCM << "],\n"
+			<< "  \"assist3BPlaneDeltaCM\":["
+			<< OptionsValue.Assist3BPlaneTargetTDeltaCM << ','
+			<< OptionsValue.Assist3BPlaneTargetRDeltaCM << "],\n"
+			<< "  \"assist3BPlaneSigmaScale\":"
+			<< OptionsValue.Assist3BPlaneSigmaScale << ",\n"
+			<< "  \"assist3VelocityDeltaCMPerSec\":["
+			<< OptionsValue.Assist3VelocityDeltaXCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaYCMPerSec << ','
+			<< OptionsValue.Assist3VelocityDeltaZCMPerSec << "],\n"
+			<< "  \"targetHitRadiusCM\":"
+			<< Layout.Scenario.Target.HitRadiusCM << ",\n"
+			<< "  \"targetMinimumCorridorQuality\":"
+			<< Layout.Scenario.Target.MinimumQualifyingCorridorQuality
+			<< ",\n"
+			<< "  \"enabledAssistMask\":"
+			<< static_cast<unsigned int>(OptionsValue.EnabledAssistMask)
+			<< ",\n  \"expectNoF4\":"
+			<< (OptionsValue.ExpectNoF4 ? "true" : "false") << ",\n"
+			<< "  \"requireNominalF4\":"
+			<< (OptionsValue.RequireNominalF4 ? "true" : "false") << ",\n"
+			<< "  \"arrivalConeDegrees\":"
+			<< OptionsValue.ArrivalConeDegrees << ",\n"
+			<< "  \"arrivalFaceConeDegrees\":"
+			<< OptionsValue.ArrivalFaceConeDegrees << ",\n"
+			<< "  \"aggregateSampleHash\":\""
 			<< Hex64(AggregateSampleHash(Samples)) << "\",\n"
 			<< "  \"grid\":{\"yawCount\":" << GridValue.YawCount
 			<< ",\"pitchCount\":" << GridValue.PitchCount
-			<< ",\"powerCount\":" << GridValue.PowerCount << "},\n"
+			<< ",\"powerCount\":" << GridValue.PowerCount
+			<< ",\"minYaw\":" << GridValue.MinYaw
+			<< ",\"maxYaw\":" << GridValue.MaxYaw
+			<< ",\"minPitch\":" << GridValue.MinPitch
+			<< ",\"maxPitch\":" << GridValue.MaxPitch
+			<< ",\"minPower\":" << GridValue.MinPower
+			<< ",\"maxPower\":" << GridValue.MaxPower
+			<< ",\"yawStep\":" << GridValue.YawStep
+			<< ",\"pitchStep\":" << GridValue.PitchStep
+			<< ",\"powerStep\":" << GridValue.PowerStep << "},\n"
 			<< "  \"sampleCount\":" << Samples.size() << ",\n"
 			<< "  \"prefixCounts\":[" << PrefixCounts[0] << ','
 			<< PrefixCounts[1] << ',' << PrefixCounts[2] << ','
 			<< PrefixCounts[3] << "],\n  \"componentCounts\":["
-			<< Components[0] << ',' << Components[1] << ','
-			<< Components[2] << ',' << Components[3] << "],\n"
+			<< Components.Count[0] << ',' << Components.Count[1] << ','
+			<< Components.Count[2] << ',' << Components.Count[3] << "],\n"
+			<< "  \"largestComponentSizes\":["
+			<< Components.LargestSize[0] << ','
+			<< Components.LargestSize[1] << ','
+			<< Components.LargestSize[2] << ','
+			<< Components.LargestSize[3] << "],\n"
+			<< "  \"nominalF4\":" << (NominalF4 ? "true" : "false") << ",\n"
+			<< "  \"representativeF4Available\":"
+			<< (HasRepresentativeF4 ? "true" : "false") << ",\n"
+			<< "  \"representativeF4Input\":["
+			<< RepresentativeInput.YawDegrees << ','
+			<< RepresentativeInput.PitchDegrees << ','
+			<< RepresentativeInput.Power << "],\n"
+			<< "  \"representativeFlightTimeSeconds\":"
+			<< RepresentativePacing.TotalFlightTimeSeconds << ",\n"
+			<< "  \"representativeAssistDurationsSeconds\":["
+			<< RepresentativePacing.Assists[0].InfluenceDurationSeconds << ','
+			<< RepresentativePacing.Assists[1].InfluenceDurationSeconds << ','
+			<< RepresentativePacing.Assists[2].InfluenceDurationSeconds << "],\n"
+			<< "  \"representativeAssistDeflectionsRadians\":["
+			<< RepresentativePacing.Assists[0].ActualDeflectionRadians << ','
+			<< RepresentativePacing.Assists[1].ActualDeflectionRadians << ','
+			<< RepresentativePacing.Assists[2].ActualDeflectionRadians << "],\n"
 			<< "  \"minimumPowerIndices\":[" << MinimumPowerIndex[0] << ','
 			<< MinimumPowerIndex[1] << ',' << MinimumPowerIndex[2] << ','
 			<< MinimumPowerIndex[3] << "],\n  \"maximumPowerIndices\":["
 			<< MaximumPowerIndex[0] << ',' << MaximumPowerIndex[1] << ','
 			<< MaximumPowerIndex[2] << ',' << MaximumPowerIndex[3] << "],\n"
+			<< "  \"targetHitCount\":" << TargetHitCount << ",\n"
+			<< "  \"earlyTargetHitCount\":" << EarlyTargetHitCount << ",\n"
+			<< "  \"geometricContactCount\":" << GeometricContactCount << ",\n"
+			<< "  \"bypassTargetHitCount\":" << BypassTargetHitCount << ",\n"
 			<< "  \"nestingViolations\":" << NestingViolations << "\n}\n";
 		std::cout << "[ABTS][M11-B-v2.2][Merge] Passed=" << Passed
 			<< " Prefix=" << PrefixCounts[0] << ',' << PrefixCounts[1] << ','
 			<< PrefixCounts[2] << ',' << PrefixCounts[3] << " Components="
-			<< Components[0] << ',' << Components[1] << ',' << Components[2]
-			<< ',' << Components[3] << '\n';
+			<< Components.Count[0] << ',' << Components.Count[1] << ','
+			<< Components.Count[2] << ',' << Components.Count[3]
+			<< " NominalF4=" << NominalF4 << '\n';
 		return Passed ? 0 : 2;
 	}
 
@@ -610,8 +1345,49 @@ namespace
 		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
 			!= Identity.CandidateSourceHash)
 		{
-			std::cerr << "CandidateSourceIdentityMismatch\n";
+			std::cerr << "CandidateSourceIdentityMismatch:expected="
+				<< Hex64(Identity.CandidateSourceHash) << ":actual="
+				<< Hex64(ABTS::M11Search::ComputeCandidateSourceHash(
+					Layout, Contract)) << '\n';
 			return 1;
+		}
+		ApplyDiagnosticOffsets(OptionsValue, Layout);
+		const std::uint64_t VariantSourceHash =
+			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
+		ABTS::M11Core::Vec3d NominalArrivalDirection;
+		ABTS::M11Core::Vec3d NominalArrivalFaceNormal;
+		double MinimumArrivalAlignment = -1.0;
+		double MinimumArrivalFaceAlignment = -1.0;
+		if (OptionsValue.ArrivalConeDegrees < 180.0
+			|| OptionsValue.ArrivalFaceConeDegrees < 180.0)
+		{
+			InputEvaluation NominalEvaluation;
+			std::string NominalFailure;
+			if (!CandidateSearch::EvaluateInput(
+					Layout,
+					Contract,
+					Layout.NominalInput,
+					0x7u,
+					NominalEvaluation,
+					&NominalFailure)
+				|| !NominalEvaluation.PrefixMembership[3]
+				|| !NominalEvaluation.HasTargetHitVelocity)
+			{
+				std::cerr << "NominalArrivalDirectionUnavailable:"
+					<< NominalFailure << '\n';
+				return 1;
+			}
+			NominalArrivalDirection =
+				NominalEvaluation.TargetHitVelocityCMPerSec.GetSafeNormal();
+			NominalArrivalFaceNormal =
+				(NominalEvaluation.TargetHitPositionCM
+					- Layout.Scenario.Target.CenterCM).GetSafeNormal();
+			MinimumArrivalAlignment = std::cos(
+				OptionsValue.ArrivalConeDegrees
+					* 3.14159265358979323846 / 180.0);
+			MinimumArrivalFaceAlignment = std::cos(
+				OptionsValue.ArrivalFaceConeDegrees
+					* 3.14159265358979323846 / 180.0);
 		}
 		Grid GridValue;
 		std::string Failure;
@@ -696,11 +1472,43 @@ namespace
 								Layout,
 								Contract,
 								InputFor(GridValue, Value),
-								0x7u,
+								OptionsValue.EnabledAssistMask,
 								Evaluation,
 								&Failures[Local]))
 						{
 							continue;
+						}
+						if (Evaluation.PrefixMembership[3]
+							&& !Evaluation.HasOrderedTerminalHit)
+						{
+							Evaluation.PrefixMembership[3] = false;
+						}
+						if (Evaluation.PrefixMembership[3]
+							&& OptionsValue.ArrivalConeDegrees < 180.0)
+						{
+							const ABTS::M11Core::Vec3d ArrivalDirection =
+								Evaluation.TargetHitVelocityCMPerSec
+									.GetSafeNormal();
+							Evaluation.PrefixMembership[3] =
+								Evaluation.HasTargetHitVelocity
+								&& ABTS::M11Core::Vec3d::DotProduct(
+									ArrivalDirection,
+									NominalArrivalDirection)
+									>= MinimumArrivalAlignment;
+						}
+						if (Evaluation.PrefixMembership[3]
+							&& OptionsValue.ArrivalFaceConeDegrees < 180.0)
+						{
+							const ABTS::M11Core::Vec3d ArrivalFaceNormal =
+								(Evaluation.TargetHitPositionCM
+									- Layout.Scenario.Target.CenterCM)
+									.GetSafeNormal();
+							Evaluation.PrefixMembership[3] =
+								Evaluation.HasTargetHitVelocity
+								&& ABTS::M11Core::Vec3d::DotProduct(
+									ArrivalFaceNormal,
+									NominalArrivalFaceNormal)
+									>= MinimumArrivalFaceAlignment;
 						}
 						for (std::size_t Level = 0; Level < 4; ++Level)
 						{
@@ -749,6 +1557,9 @@ namespace
 				OptionsValue.Output / "summary.json",
 				OptionsValue,
 				Identity,
+				VariantSourceHash,
+				Layout.Scenario.Target.HitRadiusCM,
+				Layout.Scenario.Target.MinimumQualifyingCorridorQuality,
 				GridValue,
 				All,
 				NextGlobal >= Total,
@@ -757,6 +1568,189 @@ namespace
 				<< OptionsValue.ShardIndex << '/' << OptionsValue.ShardCount
 				<< " Completed=" << All.size() << '\n';
 		}
+		return 0;
+	}
+
+	double Halton(std::uint64_t Index, const std::uint32_t Base)
+	{
+		double Result = 0.0;
+		double Fraction = 1.0;
+		while (Index > 0)
+		{
+			Fraction /= static_cast<double>(Base);
+			Result += Fraction * static_cast<double>(Index % Base);
+			Index /= Base;
+		}
+		return Result;
+	}
+
+	std::uint64_t ComputeDiagnosticRequestHash(
+		const std::uint64_t CandidateSourceHash,
+		const ABTS::M11Core::TrajectoryRequest& Request)
+	{
+		std::uint64_t Hash =
+			CandidateSourceHash ^ 0xcbf29ce484222325ull;
+		const auto Add64 = [&Hash](const std::uint64_t Value)
+		{
+			for (std::int32_t ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+			{
+				Hash ^= static_cast<std::uint8_t>(
+					Value >> (ByteIndex * 8));
+				Hash *= 1099511628211ull;
+			}
+		};
+		Add64(std::bit_cast<std::uint64_t>(Request.InitialPositionCM.X));
+		Add64(std::bit_cast<std::uint64_t>(Request.InitialPositionCM.Y));
+		Add64(std::bit_cast<std::uint64_t>(Request.InitialPositionCM.Z));
+		Add64(std::bit_cast<std::uint64_t>(
+			Request.InitialVelocityCMPerSec.X));
+		Add64(std::bit_cast<std::uint64_t>(
+			Request.InitialVelocityCMPerSec.Y));
+		Add64(std::bit_cast<std::uint64_t>(
+			Request.InitialVelocityCMPerSec.Z));
+		Add64(Request.Config.EnabledAssistMask);
+		return Hash;
+	}
+
+	int RunScreenAim(const Options& OptionsValue)
+	{
+		CandidateLayout Layout;
+		FrozenCandidateIdentity Identity;
+		if (!ABTS::M11Search::BuildFrozenV4CandidateLayout(
+				OptionsValue.Rank, Layout, &Identity))
+		{
+			std::cerr << "CandidateRankUnavailable\n";
+			return 1;
+		}
+		const CandidateSearchContract Contract =
+			CandidateSearchContract::MakeV2_1();
+		if (ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract)
+			!= Identity.CandidateSourceHash)
+		{
+			std::cerr << "CandidateSourceIdentityMismatch:expected="
+				<< Hex64(Identity.CandidateSourceHash) << ":actual="
+				<< Hex64(ABTS::M11Search::ComputeCandidateSourceHash(
+					Layout, Contract)) << '\n';
+			return 1;
+		}
+		ApplyDiagnosticOffsets(OptionsValue, Layout);
+		const std::uint64_t VariantSourceHash =
+			ABTS::M11Search::ComputeCandidateSourceHash(Layout, Contract);
+		ABTS::M11Core::TrajectoryRequest NominalRequest;
+		CandidateRecord NominalReplay;
+		NominalReplay.Layout = Layout;
+		ABTS::M11Core::TrajectoryResult NominalResult;
+		std::string NominalFailure;
+		if (!Layout.BuildRequest(
+				Layout.NominalInput,
+				OptionsValue.EnabledAssistMask,
+				NominalRequest,
+				&NominalFailure)
+			|| !CandidateSearch::ReplayCandidate(
+				NominalReplay,
+				OptionsValue.EnabledAssistMask,
+				NominalResult,
+				&NominalFailure))
+		{
+			std::cerr << "NominalIdentityUnavailable:" << NominalFailure << '\n';
+			return 1;
+		}
+		const std::uint64_t NominalRequestHash =
+			ComputeDiagnosticRequestHash(VariantSourceHash, NominalRequest);
+		std::error_code Error;
+		fs::create_directories(OptionsValue.Output, Error);
+		if (Error)
+		{
+			std::cerr << "OutputCreateFailed\n";
+			return 1;
+		}
+		std::ofstream Samples(
+			OptionsValue.Output / "screen_aim_samples.tsv",
+			std::ios::trunc);
+		if (!Samples)
+		{
+			std::cerr << "SampleOutputOpenFailed\n";
+			return 1;
+		}
+		Samples << "index yaw pitch power prefix hash\n";
+		std::array<std::uint64_t, 4> Counts{};
+		const std::uint64_t Offset = Contract.ScreenAimSeed % 1000003ull;
+		for (std::uint32_t Index = 0;
+			Index < OptionsValue.ScreenAimSampleCount;
+			++Index)
+		{
+			const std::uint64_t SampleIndex = Offset + Index + 1ull;
+			const LaunchInput Input{
+				ABTS::M11Core::Lerp(
+					Layout.Launch.MinimumYawDegrees,
+					Layout.Launch.MaximumYawDegrees,
+					Halton(SampleIndex, 2)),
+				ABTS::M11Core::Lerp(
+					Layout.Launch.MinimumPitchDegrees,
+					Layout.Launch.MaximumPitchDegrees,
+					Halton(SampleIndex, 3)),
+				Layout.Launch.MaximumPower};
+			InputEvaluation Evaluation;
+			std::string Failure;
+			if (!CandidateSearch::EvaluateInput(
+					Layout,
+					Contract,
+					Input,
+					OptionsValue.EnabledAssistMask,
+					Evaluation,
+					&Failure))
+			{
+				std::cerr << "ScreenAimSolveFailed:" << Index << ':'
+					<< Failure << '\n';
+				return 1;
+			}
+			if (Evaluation.PrefixMembership[3]
+				&& !Evaluation.HasOrderedTerminalHit)
+			{
+				Evaluation.PrefixMembership[3] = false;
+			}
+			std::uint8_t PrefixMask = 0;
+			for (std::size_t Level = 0; Level < Counts.size(); ++Level)
+			{
+				if (Evaluation.PrefixMembership[Level])
+				{
+					PrefixMask |= static_cast<std::uint8_t>(1u << Level);
+					++Counts[Level];
+				}
+			}
+			Samples << Index << ' ' << std::setprecision(17)
+				<< Input.YawDegrees << ' ' << Input.PitchDegrees << ' '
+				<< Input.Power << ' '
+				<< static_cast<unsigned int>(PrefixMask) << ' '
+				<< Hex64(Evaluation.ResultHash) << '\n';
+		}
+		std::ofstream Summary(
+			OptionsValue.Output / "screen_aim_summary.json",
+			std::ios::binary | std::ios::trunc);
+		Summary << std::setprecision(17)
+			<< "{\n  \"schema\":\"abts.m11b.v2_2.screen_aim.v1\",\n"
+			<< "  \"candidateRank\":" << Identity.Rank << ",\n"
+			<< "  \"variantSourceHash\":\"" << Hex64(VariantSourceHash)
+			<< "\",\n  \"nominalRequestHash\":\""
+			<< Hex64(NominalRequestHash)
+			<< "\",\n  \"nominalResultHash\":\""
+			<< Hex64(NominalResult.ValidationHash)
+			<< "\",\n  \"sampleCount\":"
+			<< OptionsValue.ScreenAimSampleCount << ",\n"
+			<< "  \"seed\":" << Contract.ScreenAimSeed << ",\n"
+			<< "  \"power\":" << Layout.Launch.MaximumPower << ",\n"
+			<< "  \"yawRangeDegrees\":["
+			<< Layout.Launch.MinimumYawDegrees << ','
+			<< Layout.Launch.MaximumYawDegrees << "],\n"
+			<< "  \"pitchRangeDegrees\":["
+			<< Layout.Launch.MinimumPitchDegrees << ','
+			<< Layout.Launch.MaximumPitchDegrees << "],\n"
+			<< "  \"prefixCounts\":[" << Counts[0] << ',' << Counts[1]
+			<< ',' << Counts[2] << ',' << Counts[3] << "]\n}\n";
+		std::cout << "[ABTS][M11-B-v2.2][ScreenAim] Samples="
+			<< OptionsValue.ScreenAimSampleCount << " Prefix="
+			<< Counts[0] << ',' << Counts[1] << ',' << Counts[2] << ','
+			<< Counts[3] << '\n';
 		return 0;
 	}
 }
@@ -773,6 +1767,10 @@ int main(const int Argc, char** Argv)
 	if (OptionsValue.Merge)
 	{
 		return RunMerge(OptionsValue);
+	}
+	if (OptionsValue.ScreenAim)
+	{
+		return RunScreenAim(OptionsValue);
 	}
 	return RunPreflight(OptionsValue);
 }

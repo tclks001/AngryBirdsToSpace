@@ -294,6 +294,11 @@ namespace ABTS::M11Search
 			M11Core::TrajectoryTermination::InvalidInput;
 		std::int32_t CompletedAssistCount = 0;
 		std::int32_t TargetContactCount = 0;
+		bool HasTargetHitVelocity = false;
+		/** True only when the first target hit occurs after Assist 3 has exited. */
+		bool HasOrderedTerminalHit = false;
+		M11Core::Vec3d TargetHitPositionCM;
+		M11Core::Vec3d TargetHitVelocityCMPerSec;
 		std::uint64_t ResultHash = 0;
 	};
 

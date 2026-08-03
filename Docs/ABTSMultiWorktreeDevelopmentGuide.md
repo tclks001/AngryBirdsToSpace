@@ -273,6 +273,11 @@ M11 不得修改 M3 世界坐标或生成规则来适配终局，不得扫描 M9
 - `Source/ABTSRuntime/Private/Slingshot/ABTSM6StartupPhysicsWarmup.cpp`
 - `Source/ABTSRuntime/Private/World/ABTSM51WorldActors.cpp`
 - `Source/ABTSRuntime/Private/World/ABTSM51WorldSystem.cpp`
+- `Source/ABTSRuntime/Private/World/ABTSM51WorldSlingshotSlots.cpp`
+- `Source/ABTSRuntime/Private/Game/ABTSM51GameMode.cpp`
+- `Source/ABTSRuntime/Public/World/ABTSM51PreviewFinaleFrame.h`
+- `Source/ABTSRuntime/Private/World/ABTSM51PreviewFinaleFrame.cpp`
+- `Source/ABTSRuntime/Private/World/ABTSM51PreviewFinaleFrameAutomationTests.cpp`
 - Crafting/Inventory 中的共享物品枚举、目录与配方
 
 `ABTSM110AutomationTests.cpp` 虽位于 `World/` 且包含 M3 的 103 Seed 测试，仍归集成工作树所有；M3/M11 都不能单方面修改。

@@ -80,6 +80,16 @@ bool FABTSM110FinaleFrameTest::RunTest(const FString& Parameters)
 	Frame.bValid = true;
 
 	TestTrue(TEXT("Canonical frame is usable"), Frame.IsUsable());
+	FABTSM110FinaleLocalFrame GroundedFrame = Frame;
+	GroundedFrame.LeftSlotWorldLocation.Z -= 25.0;
+	GroundedFrame.RightSlotWorldLocation.Z += 25.0;
+	TestTrue(TEXT("Independently grounded pair keeps a usable planar Y axis"),
+		GroundedFrame.IsUsable());
+	FABTSM110FinaleLocalFrame ExcessiveTiltFrame = Frame;
+	ExcessiveTiltFrame.LeftSlotWorldLocation = FVector(100.0, 190.0, 100.0);
+	ExcessiveTiltFrame.RightSlotWorldLocation = FVector(100.0, 210.0, 500.0);
+	TestFalse(TEXT("Excessively radial slot pair fails closed"),
+		ExcessiveTiltFrame.IsUsable());
 	const FVector Local(12.0, -30.0, 8.0);
 	TestTrue(TEXT("Local/world transform round-trips"),
 		Frame.InverseTransformPosition(Frame.TransformLocalPosition(Local)).Equals(Local, 1.0e-6));

@@ -12,6 +12,7 @@
 class UStaticMeshComponent;
 class USceneComponent;
 class UMaterialInterface;
+class UStaticMesh;
 
 UCLASS()
 class ABTSRUNTIME_API AABTSM51PickupItem : public AActor
@@ -54,8 +55,22 @@ public:
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
+	void ApplySlotVisual(EABTSSlingshotSlotKind InSlotKind);
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Visual;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> StandardSlotMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> StandardSlotMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> FinaleSlotMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> FinaleSlotMaterial;
 
 	int32 CellId = INDEX_NONE;
 	TWeakObjectPtr<AActor> OccupiedStake;

@@ -115,6 +115,11 @@ bool FABTSM11CV21InputParityAndLatestOnlyTest::RunTest(
 			TEXT("Uncertified Candidate playback requires explicit opt-in"),
 			CandidateRankVariable->GetInt(),
 			0);
+		TestEqual(
+			TEXT("GameMode and Integration preview read one Candidate authority"),
+			FABTSM11CandidateExperienceCatalog::
+				GetRequestedCandidateRank(),
+			CandidateRankVariable->GetInt());
 	}
 	return true;
 }
@@ -341,12 +346,18 @@ bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
 		int32 Rank;
 		uint64 SourceHash;
 		uint64 ResultHash;
+		bool bRequiresRuntimeF4 = true;
 	};
 	constexpr FFrozenExpectation Expectations[] = {
 		{3, 0xed74ffaf0de8028full, 0x791c9a64b195b0d4ull},
 		{4, 0xf22ad256fd791e07ull, 0xbf710eb5c1e114c1ull},
 		{5, 0xcdc6e41075d99493ull, 0xa7695a10b44f8281ull},
 		{6, 0x80d274a67e1e9944ull, 0x9de084d9f77c9ee7ull},
+		{7, 0xb3e0f00ca35d499aull, 0xe7c6c093e3cc9533ull, false},
+		{8, 0x617687274ed0c29aull, 0xaac8ba98079011fdull},
+		{9, 0x166f0aa067d54328ull, 0x22675cdfb00406d5ull},
+		{10, 0x2b06db2cf348d75full, 0x99012cedf3d01c06ull},
+		{11, 0xcb23499fc6f7c9d3ull, 0x505f3312ac8ae07full},
 	};
 
 	for (const FFrozenExpectation& Expected : Expectations)
@@ -415,14 +426,29 @@ bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
 				Expected.Rank),
 			Result.ValidationHash,
 			Expected.ResultHash);
-		TestTrue(
-			*FString::Printf(
-				TEXT("Rank %d nominal input reaches F4"),
-				Expected.Rank),
+		const FABTSM11PrefixClassification Classification =
 			FABTSM11PrefixClassifier::Classify(
 				Preset,
 				Result,
-				0x7u).IsF(4));
+				0x7u);
+		if (Expected.bRequiresRuntimeF4)
+		{
+			TestTrue(
+				*FString::Printf(
+					TEXT("Rank %d nominal input reaches F4"),
+					Expected.Rank),
+				Classification.IsF(4));
+		}
+		else
+		{
+			TestTrue(
+				TEXT("Rank 7 retains its diagnostic terminal hit"),
+				Result.DidHitTarget()
+					&& Result.CompletedAssistCount == 3);
+			TestFalse(
+				TEXT("Rank 7 does not claim runtime-qualified F4"),
+				Classification.IsF(4));
+		}
 	}
 	return !HasAnyErrors();
 }

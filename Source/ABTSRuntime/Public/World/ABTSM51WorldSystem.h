@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Inventory/ABTSInventoryTypes.h"
 #include "World/ABTSM51OrdinarySlingshotSlotSnapshot.h"
+#include "World/ABTSM51PreviewFinaleFrame.h"
 #include "ABTSM51WorldSystem.generated.h"
 
 class AABTSCraftingStation;
@@ -47,8 +48,28 @@ public:
 	bool ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
 		const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot);
 
+	/** Pre-BeginPlay injection for an explicitly selected Preview/Test candidate. */
+	bool ConfigurePreviewOrdinarySlingshotSlotSnapshot(
+		const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot);
+
+	/** Pre-BeginPlay injection of the M3R-5.2 Preview/Test finale frame. */
+	bool ConfigurePreviewFinaleFrame(
+		const FABTSM51PreviewFinaleFrameContext& InContext);
+
+	/** Null unless a valid Preview/Test frame was explicitly configured. */
+	const FABTSM51PreviewFinaleFrameContext*
+		GetPreviewFinaleFrameContext() const;
+
+	/** The exact frame used to spawn the finale pair, or null after rejection. */
+	const FABTSM110FinaleLocalFrame* GetActiveFinaleFrame() const;
+
 	/** Active ordinary connection limit, or zero after a rejected snapshot request. */
 	int32 GetActiveOrdinaryMaxCordLengthCM() const;
+	EABTSM51OrdinarySlingshotSlotSnapshotAuthority
+		GetOrdinarySlotSnapshotAuthority() const
+	{
+		return OrdinarySlotSnapshotAuthority;
+	}
 
 private:
 	bool InitializeWorldContent();
@@ -66,6 +87,10 @@ private:
 	int32 SelectDeveloperStakeCell(const FVector& UnitDirection) const;
 	bool IsCellOccupied(int32 CellId) const;
 	void LogPlaceFailure(const TCHAR* Reason) const;
+	bool ConfigureOrdinarySlingshotSlotSnapshot(
+		const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot,
+		EABTSM51OrdinarySlingshotSlotSnapshotAuthority InAuthority);
+	const FABTSM110FinaleLocalFrame* ResolveFinaleFrame() const;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Pickup", meta = (ClampMin = "50.0", UIMax = "500.0"))
 	float AutoPickupRadiusCM = 145.0f;
@@ -135,8 +160,14 @@ private:
 	TWeakObjectPtr<AABTSM51SlingshotDirtHole> FinaleLeftSlot;
 	TWeakObjectPtr<AABTSM51SlingshotDirtHole> FinaleRightSlot;
 	FABTSM51OrdinarySlingshotSlotSnapshot OrdinarySlotSnapshot;
+	EABTSM51OrdinarySlingshotSlotSnapshotAuthority
+		OrdinarySlotSnapshotAuthority =
+			EABTSM51OrdinarySlingshotSlotSnapshotAuthority::None;
 	bool bOrdinarySlotSnapshotRequested = false;
 	bool bOrdinarySlotSnapshotValid = false;
+	FABTSM51PreviewFinaleFrameContext PreviewFinaleFrameContext;
+	bool bPreviewFinaleFrameRequested = false;
+	bool bPreviewFinaleFrameValid = false;
 	bool bSlingshotHolesSpawned = false;
 	bool bInitializationRejected = false;
 	bool bInitialized = false;

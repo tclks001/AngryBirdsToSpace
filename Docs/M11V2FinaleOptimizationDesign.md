@@ -136,7 +136,7 @@ C v2.1 增加显式开发候选模式，用于在 PIE 中完成：
 - 目标选择的昂贵轨迹几何只在 `ResultHash + LatchedTarget` 改变时重建，PIP 的 Scene Capture 只在首次有效结果或目标切换时捕获，当前轨迹由 HUD 叠加；
 - 对候选成功岛宽度、三次转向可读性、节奏、镜头和前缀成功集稳定器手感的人工验收。
 
-候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中当前 Rank 1–2 是保留的 v3 基线、Rank 3–6 是 v4 手感候选，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。
+候选模式默认关闭：`abts.M11.CandidateRank=0` 始终使用 production Certified v1。体验候选前，必须在 Editor 控制台显式设置 `abts.M11.CandidateRank N`，其中当前 Rank 1–2 是保留的 v3 基线、Rank 3–6 是 v4 手感候选、Rank 7 是由 Rank 3 派生的上游映射候选 353、Rank 8 是候选 353 的 F3 扩大与严格 F4 单岛微调、Rank 9 保持 Rank 8 四天体相对位置不变并把整个星群沿弹弓至行星①方向远移 100 cm、Rank 10 则把四天体分别径向外移 5900 cm 并以不超过约 1.3° 的下游角向修复恢复四级单岛收缩，并重新启动 PIE；非 PIE Editor World、Standalone 和非 Editor 构建忽略该候选请求并保持 production v1。Rank 7 仅供研究：其名义轨迹在 Assist3 Exit 前已经 TargetHit，不满足正式运行时 F4 事件顺序；Rank 8–10 同样保持 Candidate / NOT CERTIFIED，不替换 production Rank 0。
 
 候选模式必须由 `WITH_EDITOR`、显式开发开关或等价 fail-closed 边界隔离；Shipping/正式 Standalone 不得加载 Candidate。v2.1 可使用局部快速扫描生成的临时 Trust Region 测试降敏和边界感，但它不能作为最终认证 Trust Region，也不能进入生产 Bundle。
 
@@ -624,6 +624,116 @@ v2.2 输入。独立标准 C++ 认证工具已经落地规范化三维索引、�
 CertifiedBundle，也没有进入 C v2.2。详细证据和后续约束见
 [M11-B 设计稿第 7.5 节](M11BFinaleLayoutCertificationDesign.md)。
 
+后续三层局部递归进一步确认：`0.5°/0.75°/0.00625` 层为
+`F4=209 / Components=22`，`0.25°/0.375°/0.003125` 层为
+`F4=1664 / Components=40`；针对离群锚点到主岛的
+`0.125°/0.1875°/0.0015625` 桥区扫描仍得到
+`F4=1565 / Components=32`。最后一层 F1/F2/F3 已全部连通，F4 最大分量为
+1421 点，其余 31 个分量不超过 7 点，说明 Rank 3 是“主成功岛 + 终端命中碎片”，
+而不是单纯被粗网格切断的一条连续成功带。Rank 3 继续保持未认证状态。
+
+只移动 UFO 的后续实验共检查 105 个不重复位置，覆盖全方向 ±2000 cm、改善方向
+至约 9000 cm 以及最优附近 500 cm 精扫。最佳
+`Offset=(2500,1000,-9000) cm` 把第一层主 F4 分量从 `55/209` 扩大到
+`266/325`，碎片点由 154 降至 59，但仍有 15 个六邻域分量。因此“仅微调 UFO
+位置”被否决：不生成派生候选，不进入更细认证。下一轮应回到 B v2.1 联合调整
+终端几何/方向资格，或重搜第三颗行星至 UFO 的末段映射。
+
+2026-07-31 的后续联合诊断进一步排除了三个低成本修补方向：缩小 UFO
+HitRadius、按名义到达速度/命中面裁剪，以及在约 30 m 范围内联合微调行星③与
+UFO。联合微调可把粗层 F4 碎片点从 59 降至 19，但半步 42025 点复核仍得到
+`F4 Components=32 / Largest=1000 / Total=1083`。因此该结果不生成新 Rank、不进入
+PIE 绑定，也不启动完整输入域认证；下一轮边界提升为“保留 Rank 3 前两次助推，
+重新构造第三次 B-plane/虚拟动量与 UFO 的末段映射”。详细参数和证据见
+[M11-B 设计稿 7.7](M11BFinaleLayoutCertificationDesign.md#77-rank-3-终端拓扑联合修复实验2026-07-31)。
+
+随后执行的行星③至 UFO 末段重映射共搜索 1408 个主样本，并逐轮把 5733 点
+F4 碎片从 22 压到 3；最佳研究候选的 42025 点复核仍为
+`F4=1373 / Largest=1352 / Components=12 / Fragments=21`。终端走廊质量阈值、
+命中半径和沿出口方向移动 UFO 均不能消除残余。该候选不绑定、不认证；完整参数、
+Hash 和搜索轨迹见
+[M11-B 设计稿 7.8](M11BFinaleLayoutCertificationDesign.md#78-rank-3-行星至-ufo-末段重映射搜索2026-07-31)。
+
+2026-08-01 开放行星②上游映射后，局部候选 353 首次在 5733 点与 42025 点
+两级网格均保持 F4 严格单岛；半步结果为 `F4=1004 / Components=1 / Fragments=0`，
+且不同线程数重放 Hash 一致。它已成为唯一待认证输入，但仍未生成 Certification/
+Bundle Hash、未加入 PIE Rank 或生产绑定。参数与后续完整认证边界见
+[M11-B 设计稿 7.9](M11BFinaleLayoutCertificationDesign.md#79-行星②上游映射搜索与单岛候选-3532026-08-01)。
+
+### 11.8 Rank 8 固定角度径向链实验（2026-08-01）
+
+为验证“保持三颗行星和 UFO 相对发射点的方向不变，只依次调整径向距离，并用
+二分把 `F1/Domain`、`F2/F1`、`F3/F2`、`F4/F3` 调到约 0.5”的方案，标准 C++
+认证 CLI 增加了四个只用于诊断的径向偏移参数。Python 只负责分发 CLI 和汇总
+结果，轨迹积分与前缀分类仍以标准 C++ Core 为唯一权威。
+
+直接独立外移行星① 1000 cm 会因现有相邻作用圈较紧而触发
+`OverlappingAssistInfluenceSpheres`。实验因此采用有序径向链增量：第一级增量同步
+外移其后全部天体，第二级增量同步外移行星②及其后天体，以此类推。该参数化保持
+每个天体相对 Pouch 的角度不变，并避免上游调距立刻破坏几何合法性。
+
+实测否定了“完整链严格平滑、可逐级独立二分”的假设：
+
+- 第一级同步外移时，最大功率 `F1/Domain` 从 0 cm 的约 0.99，下降到 5000 cm
+  的约 0.62、5900 cm 的约 0.50、10000 cm 的约 0.14；面积在该局部区间可二分。
+- 同一区间的全角域最低 F1 Power 没有上升到 0.88–0.95，反而约为 0.7625–0.775。
+  向内移动约 4000 cm 可把粗网格最低 Power 提到约 0.875，但此时
+  `F1/Domain=1.0`，与面积约 0.5 没有交集。
+- 固定第一级约 5900 cm 后，第二级需再外移约 7–8 km 才能把 `F2/F1` 从约
+  0.60 压到约 0.50；这同时令 F3 归零。随后沿原方向前后扫描行星③ 10 km，F3
+  仍不能恢复，因为行星②位置变化已经改变第二次助推的出射方向，径向移动无法补偿
+  横向错位。
+
+结论：单个前缀面积对本级径向距离可能存在可用的局部单调段，但 Power 下界和后续
+前缀拓扑不是该距离的独立单调函数。Rank 8 在“角度完全冻结、只改四段距离”的约束
+下不能同时满足 Power 门槛、四级约 0.5 收缩及非空单岛 F4。本实验不生成新 Rank，
+也不覆盖已通过 PIE 的 Rank 8。若继续追求这组手感指标，至少需要允许下游天体做小幅
+角向修正，或把行星①作用圈/Power 门槛纳入联合优化，而不是继续做纯距离二分。
+
+可重复扫描入口为
+`Tools/M11Core/Python/m11_v22_radial_chain_search.py`；中间证据位于不入库的
+`Intermediate/M11V22Certification/Rank8RadialChain/`。
+
+### 11.9 Rank 8 径向 5900 cm 后的受限角向修复（2026-08-01）
+
+在放宽 F1 Power 下界、固定四个天体径向增量均为 5900 cm 后，允许行星②、
+行星③和 UFO 在小球域内联合调整。搜索目标同时最小化四个最大功率条件比例相对
+0.5 的误差、位移惩罚和连通分量违规；标准 C++ Core 仍是积分与分类权威，Python
+只做确定性 CLI 调度。
+
+当前最佳研究候选参数为：
+
+- 行星②附加偏移 `(283.688, -687.363, -735.963) cm`；
+- 行星③附加偏移 `(-212.291, 1193.330, -181.954) cm`；
+- UFO 附加偏移 `(-2258.116, 1200.834, 1315.387) cm`；
+- 相对原 Rank 8 的角向偏差依次约为 `0° / 1.249° / 0.717° / 1.259°`。
+
+最大功率 1025 点网格得到 `481 → 249 → 124 → 62`，条件比例为
+`0.469 → 0.518 → 0.498 → 0.500`，F1–F4 均为单一六邻域分量。代表成功轨迹总时长
+约 33.66 秒，三段作用时长约 `6.64 / 6.41 / 5.91` 秒，偏转约
+`24.1° / 32.6° / 66.5°`。与 Rank 8 代表轨迹的
+`36.4° / 31.9° / 62.1°` 相比，第一段因整体外移而减弱，但第二、第三段及交叉偏转
+性质得到保留，天体角位置变化不超过约 1.3°。
+
+`Yaw × Pitch × Power` 的 42025 点局部三维闭包得到
+`21997 → 11375 → 5149 → 2569`，四层均为单一完整分量，Hash 为
+`0x22c3f67f46d49e70`。这证明最大功率结果没有隐藏成 Power 维碎片；但最低前缀 Power
+仍落在扫描下界 0.875，符合本轮“放宽 F1 Power 限制”的前提。原 Rank 8 nominal
+输入不再属于 F4，因此 Rank 10 改用已验证的代表输入
+`Yaw=-1.25° / Pitch=30.375° / Power=1`，并作为 Editor-only 研究候选加入 PIE
+列表末尾。它仍未执行完整输入域、消融、旁路和 Trust Region 认证。
+
+按正式 ScreenAim 口径在完整 `Yaw[-18°,18°] × Pitch[0°,60°]` 上执行满功率
+5000 点固定种子 Halton 采样，得到 `392 → 115 → 27 → 15`，条件比例为
+`7.84% / Domain → 29.34% / F1 → 23.48% / F2 → 55.56% / F3`。对应凸包面积为
+`230.23 → 61.93 → 12.05 → 4.40 deg²`。这组比例与前述 1025 点数据并不矛盾：
+1025 点闭包只覆盖玩家成功岛附近的局部 `Yaw[-4°,2°] × Pitch[19.5°,34.5°]`，
+而 ScreenAim 分母是完整可操作角域。
+
+候选记录见
+`Tools/M11Core/Candidates/Rank8Radial5900ConstrainedAngularCandidate1.json`，搜索入口为
+`Tools/M11Core/Python/m11_v22_constrained_angular_search.py`。
+
 ## 12. 多工作树交接
 
 M11 专属工作树继续不直接修改下列共享热点：
@@ -644,3 +754,7 @@ M11 专属工作树继续不直接修改下列共享热点：
 5. B v2.2 认证通过后才允许 C v2.2 在生产路径绑定 2/2 Certified Bundle。
 
 上游与返回父级：[M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · v1 基线：[M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)；M11-B v2.1 的 v3 基线见 [候选搜索子稿](M11B21CandidateSearchDesign.md)，新构造器见 [Additive Search v4 子稿](M11B21ConditionalParticleBeamSearchDesign.md)。当前工作点是 **保留 v3 Catalog → v4 新候选已生成但未绑定 → 选择少量候选更新 Editor-only 比较池 → M11-C v2.1 用户有渲染 PIE → 参数冻结 → M11-B v2.2**。
+
+### 12.1 M3R-5.2 道路末端预览帧交接
+
+M3R-5.2 合入 master 后，M11 对任意合法刚性终局局部帧的兼容实现、诊断和自动化门见 [M11 Preview Finale Frame Compatibility](M11PreviewFinaleFrameCompatibilityDesign.md)。该子稿当前状态为 **M11LocalAccepted / IntegrationPending**；共享 Preview/Test 适配器、M5.1 太空槽和 M3 地图联合 PIE 仍由原始集成工作树负责。

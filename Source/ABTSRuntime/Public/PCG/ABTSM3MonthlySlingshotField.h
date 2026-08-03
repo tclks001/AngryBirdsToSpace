@@ -7,6 +7,7 @@
 #include "ABTSM3MonthlySlingshotField.generated.h"
 
 struct FABTSM2Cell;
+struct FABTSM3MonthlyFinaleAnchorPlanResult;
 
 UENUM(BlueprintType)
 enum class EABTSM3MonthlySlingshotFieldKind : uint8
@@ -24,7 +25,8 @@ enum class EABTSM3MonthlySlingshotFieldRejectReason : uint8
 	InvalidTopology = 3,
 	InvalidSpatialResult = 4,
 	FieldGenerationFailed = 5,
-	HashMismatch = 6
+	HashMismatch = 6,
+	InvalidFinaleAnchorPlanResult = 7
 };
 
 /**
@@ -133,6 +135,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlySlingshotFieldCandidate
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	int64 SourceSpatialCandidateHash = 0;
 
+	/** Zero for legacy callers; otherwise the exact M3R-5.2 terminal-apron plan joined to this candidate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
+	int64 SourceFinaleAnchorPlanCandidateHash = 0;
+
 	/** EncounterRequired fields first in Encounter order, then RoadAuxiliary order. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	TArray<FABTSM3MonthlySlingshotField> Fields;
@@ -166,6 +172,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlySlingshotFieldResult
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	int64 SourceSpatialResultHash = 0;
+
+	/** Zero for legacy callers; non-zero means finale clearance was consumed during slot planning. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
+	int64 SourceFinaleAnchorPlanResultHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Slingshot Field")
 	int64 ConfigHash = 0;
@@ -234,11 +244,32 @@ public:
 		FABTSM3MonthlySlingshotFieldResult& OutResult,
 		FString& OutFailure);
 
+	/** M3R-5.2 overload that excludes each candidate's finale apron from ordinary slots. */
+	static bool Build(
+		int32 WorldSeed,
+		const FABTSM3MonthlySlingshotFieldConfig& Config,
+		const TArray<FABTSM2Cell>& Cells,
+		float PlanetRadiusCM,
+		const FABTSM3MonthlySpatialResult& SpatialResult,
+		const FABTSM3MonthlyFinaleAnchorPlanResult& FinaleAnchorPlanResult,
+		FABTSM3MonthlySlingshotFieldResult& OutResult,
+		FString& OutFailure);
+
 	static bool Validate(
 		const FABTSM3MonthlySlingshotFieldConfig& Config,
 		const TArray<FABTSM2Cell>& Cells,
 		float PlanetRadiusCM,
 		const FABTSM3MonthlySpatialResult& SpatialResult,
+		const FABTSM3MonthlySlingshotFieldResult& Result,
+		EABTSM3MonthlySlingshotFieldRejectReason& OutReason,
+		FString& OutFailure);
+
+	static bool Validate(
+		const FABTSM3MonthlySlingshotFieldConfig& Config,
+		const TArray<FABTSM2Cell>& Cells,
+		float PlanetRadiusCM,
+		const FABTSM3MonthlySpatialResult& SpatialResult,
+		const FABTSM3MonthlyFinaleAnchorPlanResult& FinaleAnchorPlanResult,
 		const FABTSM3MonthlySlingshotFieldResult& Result,
 		EABTSM3MonthlySlingshotFieldRejectReason& OutReason,
 		FString& OutFailure);

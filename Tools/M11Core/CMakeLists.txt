@@ -164,6 +164,10 @@ set(ABTS_M11_SEARCH_TOOL_IDENTITY_FILES
 	"${CMAKE_CURRENT_LIST_DIR}/M11V22CertificationMain.cpp"
 	"${CMAKE_CURRENT_LIST_DIR}/GenerateFrozenCandidateCatalogData.mjs"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_target_offset_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_terminal_mapping_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_upstream_mapping_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Candidates/Rank3UpstreamCandidate353.json"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakePresets.json")
 
@@ -524,6 +528,32 @@ if(BUILD_TESTING)
 	set_tests_properties(M11V22.NoUnrealEditorDependencies PROPERTIES
 		PASS_REGULAR_EXPRESSION "\"passed\":true"
 		LABELS "M11V22;Portable;Dependencies")
+
+	add_test(NAME M11V22.Rank10AssistScaleExperiment
+		COMMAND ABTSM11V22CertificationCLI
+			screen-aim
+			--rank 12
+			--output
+			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank12ScaleExperimentCTest"
+			--screen-aim-samples 5000)
+	set_tests_properties(M11V22.Rank10AssistScaleExperiment PROPERTIES
+		PASS_REGULAR_EXPRESSION
+			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=549,124,14,6"
+		LABELS "M11V22;Portable;Determinism;RejectedCandidateEvidence"
+		TIMEOUT 180)
+
+	add_test(NAME M11V22.Rank11ScaledSequentialCandidate
+		COMMAND ABTSM11V22CertificationCLI
+			screen-aim
+			--rank 11
+			--output
+			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank11CandidateCTest"
+			--screen-aim-samples 5000)
+	set_tests_properties(M11V22.Rank11ScaledSequentialCandidate PROPERTIES
+		PASS_REGULAR_EXPRESSION
+			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=616,137,21,6"
+		LABELS "M11V22;Portable;Determinism;EditorCandidateEvidence"
+		TIMEOUT 180)
 endif()
 
 message(STATUS

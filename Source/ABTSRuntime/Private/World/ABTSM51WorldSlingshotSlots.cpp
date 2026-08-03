@@ -9,6 +9,77 @@
 bool AABTSM51WorldSystem::ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
 	const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot)
 {
+	return ConfigureOrdinarySlingshotSlotSnapshot(
+		InSnapshot,
+		EABTSM51OrdinarySlingshotSlotSnapshotAuthority::AcceptedMonthly);
+}
+
+bool AABTSM51WorldSystem::ConfigurePreviewOrdinarySlingshotSlotSnapshot(
+	const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot)
+{
+	return ConfigureOrdinarySlingshotSlotSnapshot(
+		InSnapshot,
+		EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest);
+}
+
+bool AABTSM51WorldSystem::ConfigurePreviewFinaleFrame(
+	const FABTSM51PreviewFinaleFrameContext& InContext)
+{
+	if (HasActorBegunPlay() || bInitialized || bSlingshotHolesSpawned)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M5.1][PreviewFinaleFrame] Rejected: configuration must happen before BeginPlay."));
+		return false;
+	}
+
+	bPreviewFinaleFrameRequested = true;
+	bPreviewFinaleFrameValid = InContext.IsUsable();
+	PreviewFinaleFrameContext = bPreviewFinaleFrameValid
+		? InContext
+		: FABTSM51PreviewFinaleFrameContext();
+	if (!bPreviewFinaleFrameValid)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M5.1][PreviewFinaleFrame] Rejected: invalid authority, identity, frame, or hash."));
+	}
+	return bPreviewFinaleFrameValid;
+}
+
+const FABTSM51PreviewFinaleFrameContext*
+AABTSM51WorldSystem::GetPreviewFinaleFrameContext() const
+{
+	return bPreviewFinaleFrameRequested && bPreviewFinaleFrameValid
+		? &PreviewFinaleFrameContext
+		: nullptr;
+}
+
+const FABTSM110FinaleLocalFrame*
+AABTSM51WorldSystem::ResolveFinaleFrame() const
+{
+	if (bPreviewFinaleFrameRequested)
+	{
+		return bPreviewFinaleFrameValid
+			? &PreviewFinaleFrameContext.Frame
+			: nullptr;
+	}
+	return Planet.IsValid()
+		? &Planet->GetFinaleLaunchFrame()
+		: nullptr;
+}
+
+const FABTSM110FinaleLocalFrame*
+AABTSM51WorldSystem::GetActiveFinaleFrame() const
+{
+	const FABTSM110FinaleLocalFrame* Frame = ResolveFinaleFrame();
+	return Frame != nullptr && Frame->IsUsable()
+		? Frame
+		: nullptr;
+}
+
+bool AABTSM51WorldSystem::ConfigureOrdinarySlingshotSlotSnapshot(
+	const FABTSM51OrdinarySlingshotSlotSnapshot& InSnapshot,
+	const EABTSM51OrdinarySlingshotSlotSnapshotAuthority InAuthority)
+{
 	if (HasActorBegunPlay() || bInitialized || bSlingshotHolesSpawned)
 	{
 		UE_LOG(LogABTSRuntime, Error,
@@ -17,7 +88,11 @@ bool AABTSM51WorldSystem::ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
 	}
 
 	bOrdinarySlotSnapshotRequested = true;
-	bOrdinarySlotSnapshotValid = InSnapshot.IsStructurallyUsable();
+	OrdinarySlotSnapshotAuthority = InAuthority;
+	bOrdinarySlotSnapshotValid =
+		InAuthority
+			!= EABTSM51OrdinarySlingshotSlotSnapshotAuthority::None
+		&& InSnapshot.IsStructurallyUsable();
 	OrdinarySlotSnapshot = bOrdinarySlotSnapshotValid
 		? InSnapshot
 		: FABTSM51OrdinarySlingshotSlotSnapshot();
@@ -67,8 +142,13 @@ bool AABTSM51WorldSystem::SpawnSlingshotHoles()
 		return true;
 	}
 
+	const FABTSM110FinaleLocalFrame* ResolvedFinaleFrame =
+		ResolveFinaleFrame();
+	const FABTSM110FinaleLocalFrame EmptyFinaleFrame;
 	const FABTSM110FinaleLocalFrame& FinaleFrame =
-		Planet->GetFinaleLaunchFrame();
+		ResolvedFinaleFrame != nullptr
+			? *ResolvedFinaleFrame
+			: EmptyFinaleFrame;
 	TArray<int32> StandardCellIds;
 	bool bOrdinaryPlanValid = true;
 	if (bOrdinarySlotSnapshotRequested)
@@ -81,11 +161,15 @@ bool AABTSM51WorldSystem::SpawnSlingshotHoles()
 		{
 			const TArray<FABTSM3CellState>& CellStates =
 				Planet->GetGeneratedCellStates();
+			const bool bValidateCurrentMonthlyCellState =
+				OrdinarySlotSnapshotAuthority
+					!= EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest;
 			for (const int32 CellId : StandardCellIds)
 			{
 				if (!CellStates.IsValidIndex(CellId)
-					|| CellStates[CellId].bWater
-					|| CellStates[CellId].bBuildingAnchor
+					|| (bValidateCurrentMonthlyCellState
+						&& (CellStates[CellId].bWater
+							|| CellStates[CellId].bBuildingAnchor))
 					|| (FinaleFrame.IsUsable()
 						&& CellId == FinaleFrame.AnchorCellId))
 				{
@@ -260,14 +344,33 @@ bool AABTSM51WorldSystem::SpawnSlingshotHoles()
 	}
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M11.0][SlingshotSlots] Standard=%d Finale=%d Pair=%d AnchorCell=%d"),
+		TEXT("[ABTS][M11.0][SlingshotSlots] Standard=%d Finale=%d Pair=%d AnchorCell=%d Authority=%s Candidate=%d PreviewHash=%016llX ContextHash=%016llX MonthlyAccepted=0"),
 		OrdinarySlots.Num(),
 		FinaleHoleCount,
 		FinaleFrame.SlotPairId,
-		FinaleFrame.AnchorCellId);
+		FinaleFrame.AnchorCellId,
+		bPreviewFinaleFrameRequested
+			? TEXT("PreviewTest")
+			: TEXT("CompatibilityProduction"),
+		bPreviewFinaleFrameValid
+			? PreviewFinaleFrameContext.SourceRouteCandidateId
+			: INDEX_NONE,
+		static_cast<unsigned long long>(
+			bPreviewFinaleFrameValid
+				? static_cast<uint64>(
+					PreviewFinaleFrameContext.SourcePreviewHash)
+				: 0ull),
+		static_cast<unsigned long long>(
+			bPreviewFinaleFrameValid
+				? static_cast<uint64>(
+					PreviewFinaleFrameContext.ContextHash)
+				: 0ull));
 	const TCHAR* OrdinarySourceName =
 		bOrdinarySlotSnapshotRequested
-			? TEXT("AcceptedSnapshot")
+			? OrdinarySlotSnapshotAuthority
+					== EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest
+				? TEXT("PreviewTestSnapshot")
+				: TEXT("AcceptedMonthlySnapshot")
 			: TEXT("CompatibilityTaskGraph");
 	const unsigned long long LayoutHash =
 		static_cast<unsigned long long>(
@@ -298,6 +401,25 @@ bool AABTSM51WorldSystem::SpawnSlingshotHoles()
 			LayoutHash,
 			CandidateHash);
 	}
-	bSlingshotHolesSpawned = bOrdinaryPlanValid;
-	return bOrdinaryPlanValid;
+	const bool bRequiredFinalePairReady =
+		!bPreviewFinaleFrameRequested || FinaleHoleCount == 2;
+	if (!bRequiredFinalePairReady)
+	{
+		for (const TWeakObjectPtr<AABTSM51SlingshotDirtHole>& Hole :
+			OrdinarySlots)
+		{
+			if (Hole.IsValid())
+			{
+				Hole->Destroy();
+			}
+		}
+		OrdinarySlots.Reset();
+		for (const int32 CellId : StandardCellIds)
+		{
+			OccupiedCells.Remove(CellId);
+		}
+	}
+	bSlingshotHolesSpawned =
+		bOrdinaryPlanValid && bRequiredFinalePairReady;
+	return bSlingshotHolesSpawned;
 }

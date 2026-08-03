@@ -1,0 +1,63 @@
+{
+  "schema": "abts.m11b.v2_2.scaled_sequential_candidate.v1",
+  "status": "candidate_not_certified_editor_pie_bound",
+  "editorCandidateRank": 11,
+  "baseScaleExperimentDiagnosticRank": 12,
+  "baseCandidateSourceHash": "0xf134ae0ff2c93467",
+  "preNominalVariantSourceHash": "0xad7ccfe862d78a3f",
+  "candidateSourceHash": "0xcb23499fc6f7c9d3",
+  "globalWorkIndex": 25,
+  "nominalRequestHash": "0x4f0e3c66a1a0a737",
+  "nominalResultHash": "0x505f3312ac8ae07f",
+  "scoreHash": "0xd71f1166493c07aa",
+  "construction": {
+    "method": "sequential_radial_then_target_then_assist3_target",
+    "celestialRadialDeltaCM": [-8500.0, -8500.0, 4000.0, 4000.0],
+    "assist3OffsetCM": [2250.0, 5000.0, -8280.0],
+    "targetOffsetCM": [2527.902, 5469.51, -14835.692]
+  },
+  "scaleContract": {
+    "assistVisualRadiusCM": 5000.0,
+    "assistCollisionRadiusCM": 5500.0,
+    "qualifiedInterceptRadiusCM": 41250.0
+  },
+  "maximumPowerLocalEvidence": {
+    "grid": {
+      "yaw": [-4.0, 2.0, 0.25],
+      "pitch": [19.5, 34.5, 0.375],
+      "power": [1.0, 1.0, 0.1]
+    },
+    "sampleCount": 1025,
+    "prefixCounts": [531, 258, 84, 30],
+    "conditionalRatios": [0.5180487804878049, 0.4858757062146893, 0.32558139534883723, 0.35714285714285715],
+    "componentCounts": [1, 1, 1, 1],
+    "largestComponentSizes": [531, 258, 84, 30],
+    "nominalF4": true,
+    "representativeF4Input": [-1.75, 26.25, 1.0],
+    "representativeFlightTimeSeconds": 30.68073174661566,
+    "representativeAssistDurationsSeconds": [6.434019398876542, 5.989058311286557, 5.0716377868737474],
+    "representativeAssistDeflectionsRadians": [0.40778929686613974, 0.5225925703275769, 1.3355000553515364],
+    "aggregateSampleHash": "0xd71f1166493c07aa"
+  },
+  "screenAimEvidence": {
+    "sampleCount": 5000,
+    "seed": 4750135298,
+    "power": 1.0,
+    "yawRangeDegrees": [-18.0, 18.0],
+    "pitchRangeDegrees": [0.0, 60.0],
+    "prefixCounts": [616, 137, 21, 6],
+    "conditionalRatios": [0.1232, 0.2224025974025974, 0.15328467153284672, 0.2857142857142857],
+    "hullAreaSquareDegrees": [356.2406529974709, 78.58214243612824, 10.393907000171488, 1.2911522633744816],
+    "hullYawSpanDegrees": [19.030517578125, 10.861083984375, 5.113037109375, 2.267578125],
+    "hullPitchSpanDegrees": [28.78829446730681, 17.009602194787373, 10.254534369760709, 3.5116598079561037],
+    "variantSourceHash": "0xcb23499fc6f7c9d3",
+    "nominalRequestHash": "0x4f0e3c66a1a0a737",
+    "nominalResultHash": "0x505f3312ac8ae07f"
+  },
+  "acceptance": {
+    "screenAimRatioGate": "passed_0.08_to_0.55",
+    "maximumPowerLocalConnectivity": "passed_single_component_each_prefix",
+    "fullInputDomainCertification": "not_run",
+    "editorPieBinding": "abts.M11.CandidateRank_11"
+  }
+}
