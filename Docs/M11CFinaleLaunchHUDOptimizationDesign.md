@@ -1,6 +1,6 @@
 # M11-C/HUD-1：终局发射控制台、轨迹探针与联动画中画
 
-> 状态：设计稿；尚未进入运行时代码实现与 PIE 验收。
+> 状态：HUD-1A 纯数据交互原型已实现并通过自动化；HUD-1B 运行时接线与 PIE 验收尚未开始。
 >
 > 父级：[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)。
 >
@@ -487,6 +487,17 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 - 3D SceneSnapshot、2D 投影和命中代理；
 - SemanticProbe、ContextBody、FrozenPipView；
 - 全部纯数据单元测试。
+
+实现落点：
+
+- 公共纯数据接口：`Source/ABTSRuntime/Public/UI/ABTSM11FinaleHUDData.h`；
+- 实现：`Source/ABTSRuntime/Private/UI/ABTSM11FinaleHUDData.cpp`；
+- 自动化：`Source/ABTSRuntime/Private/UI/ABTSM11FinaleHUDDataAutomationTests.cpp`；
+- 已实现 `Coarse / Fine / UltraFine = 1 / 0.1 / 0.01` 三档连续控制；
+- 轨道全览的 Attempt 级视图与每份求解结果的三维场景快照相互分离，调节 Aim 只替换轨迹，不重拟合天体投影；
+- 点击结果保存为 `SemanticLeg + PhaseWithinLeg + ContextBody`，新结果优先精确重映射，缺失行星遭遇时回退为 closest miss，尚未到达未来段时回退到轨迹终点；
+- PIP 的方向、Up、中心和尺度在创建 Probe 时冻结，只有显式 Rebase 才重建；
+- 七项 `ABTS.M11C.HUD.Unit.*` 测试已在新进程 NullRHI 下通过，Development Editor 普通全链接和 Forced Unity 全量重建均通过。
 
 ### HUD-1B：M11-C Runtime 接线
 
