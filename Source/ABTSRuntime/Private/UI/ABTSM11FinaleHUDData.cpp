@@ -575,6 +575,27 @@ bool FABTSM11FinaleHudCaptureState::TryBeginLaunch()
 		&& TryBegin(EABTSM11FinaleHudCapture::LaunchButton);
 }
 
+bool ABTSM11ShouldCommitFinaleHudLaunch(
+	const EABTSM11FinaleHudCapture Capture,
+	const bool bReleasedInsideLaunchButton,
+	const bool bIsAiming)
+{
+	return Capture == EABTSM11FinaleHudCapture::LaunchButton
+		&& bReleasedInsideLaunchButton
+		&& bIsAiming;
+}
+
+bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
+	const bool bHasFrozenProbe,
+	const bool bCaptureInitialized,
+	const bool bAutomaticTargetChanged,
+	const bool bExplicitProbeMutation)
+{
+	return bExplicitProbeMutation
+		|| (!bHasFrozenProbe
+			&& (!bCaptureInitialized || bAutomaticTargetChanged));
+}
+
 bool FABTSM11TrajectorySemanticSegment::IsValid(
 	const int32 PointCount) const
 {

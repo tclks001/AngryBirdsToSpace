@@ -398,9 +398,75 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 		PreviewPlaybackPlan.Points,
 		LatestQualifiedResult.ValidationHash,
 		DiagramSnapshot);
+	RebuildHudPublishedData();
 	if (!bTargetCaptureInitialized)
 	{
 		MarkTargetCaptureDirty();
+	}
+}
+
+void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
+{
+	check(IsInGameThread());
+	if (!IsValid(FinaleSystem)
+		|| !FABTSM11OrbitalSceneBuilder::Build(
+			FinaleSystem->GetLayoutPreset(),
+			LatestQualifiedResult,
+			HudOrbitalScene,
+			900))
+	{
+		HudOrbitalScene = FABTSM11OrbitalSceneSnapshot();
+		HudOverviewProjection = FABTSM11OverviewProjection();
+		HudProbeProjection = FABTSM11ProbeProjection();
+		return;
+	}
+
+	if (!HudOverviewView.bValid)
+	{
+		if (!HudOverviewView.InitializeFromDiagram(DiagramSnapshot))
+		{
+			double FitRadiusCM = 1.0;
+			for (const FABTSM11OrbitalSceneBody& Body
+				: HudOrbitalScene.Bodies)
+			{
+				FitRadiusCM = FMath::Max(
+					FitRadiusCM,
+					Body.CenterCM.Length() + Body.InfluenceRadiusCM);
+			}
+			FitRadiusCM = FMath::Max(
+				FitRadiusCM,
+				HudOrbitalScene.TargetCenterCM.Length()
+					+ HudOrbitalScene.TargetRadiusCM);
+			HudOverviewView.Initialize(
+				FVector3d::ZeroVector,
+				FVector3d::ForwardVector,
+				FVector3d::RightVector,
+				FitRadiusCM * 1.08,
+				FVector3d::UpVector);
+		}
+		InitialHudOverviewView = HudOverviewView;
+	}
+
+	if (!FABTSM11OverviewProjector::Build(
+		HudOrbitalScene,
+		HudOverviewView,
+		HudOverviewProjection))
+	{
+		HudOverviewProjection = FABTSM11OverviewProjection();
+		return;
+	}
+	++HudOverviewRevision;
+
+	if (HudTrajectoryProbe.bValid)
+	{
+		if (!FABTSM11TrajectoryProbeResolver::Resolve(
+			HudOrbitalScene,
+			HudTrajectoryProbe,
+			HudProbeProjection))
+		{
+			HudProbeProjection = FABTSM11ProbeProjection();
+		}
+		++HudProbeRevision;
 	}
 }
 

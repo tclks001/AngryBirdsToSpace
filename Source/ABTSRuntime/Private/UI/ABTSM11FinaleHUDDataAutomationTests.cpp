@@ -426,6 +426,50 @@ bool FABTSM11HudInputCaptureTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Focus-loss cancellation is observable"),
 		State.WasFocusLossCancellation());
 	TestTrue(TEXT("Launch becomes available after cancellation"), State.CanLaunch());
+	TestFalse(TEXT("Knob release never commits launch"),
+		ABTSM11ShouldCommitFinaleHudLaunch(
+			EABTSM11FinaleHudCapture::AdjustYaw,
+			true,
+			true));
+	TestFalse(TEXT("Launch press dragged outside cancels"),
+		ABTSM11ShouldCommitFinaleHudLaunch(
+			EABTSM11FinaleHudCapture::LaunchButton,
+			false,
+			true));
+	TestFalse(TEXT("Launch cannot commit after aiming ends"),
+		ABTSM11ShouldCommitFinaleHudLaunch(
+			EABTSM11FinaleHudCapture::LaunchButton,
+			true,
+			false));
+	TestTrue(TEXT("Only an aiming launch-button release commits"),
+		ABTSM11ShouldCommitFinaleHudLaunch(
+			EABTSM11FinaleHudCapture::LaunchButton,
+			true,
+			true));
+	TestFalse(TEXT("Aim-only updates never recapture a frozen probe"),
+		ABTSM11ShouldRefreshFinaleHudTargetCapture(
+			true,
+			true,
+			true,
+			false));
+	TestTrue(TEXT("Explicit probe mutation refreshes static capture once"),
+		ABTSM11ShouldRefreshFinaleHudTargetCapture(
+			true,
+			true,
+			false,
+			true));
+	TestTrue(TEXT("Automatic preview captures on first publication"),
+		ABTSM11ShouldRefreshFinaleHudTargetCapture(
+			false,
+			false,
+			false,
+			false));
+	TestTrue(TEXT("Automatic target changes refresh without a probe"),
+		ABTSM11ShouldRefreshFinaleHudTargetCapture(
+			false,
+			true,
+			true,
+			false));
 	return true;
 }
 

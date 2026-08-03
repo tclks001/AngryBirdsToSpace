@@ -78,6 +78,8 @@ void AABTSM11FinaleHUD::DrawHUD()
 	{
 		CachedPipTrajectory.Reset();
 		TargetWedgeTracker.Reset();
+		CancelFinaleHudCapture();
+		bHudLayoutValid = false;
 	}
 	// Inventory, party and modal UI remain the top layer.
 	Super::DrawHUD();
@@ -101,6 +103,312 @@ AABTSM11FinaleHUD::FindInteractionSystem() const
 		: nullptr;
 }
 
+void AABTSM11FinaleHUD::UpdateFinaleHudLayout(
+	const float Width,
+	const float Height)
+{
+	HudDiagramRadius = FMath::Min(170.0f, Height * 0.18f);
+	HudDiagramCenter = FVector2D(
+		HudDiagramRadius + 22.0f,
+		Height - HudDiagramRadius - 110.0f);
+	HudKnobRadius = FMath::Clamp(Height * 0.044f, 30.0f, 42.0f);
+	const float KnobY = Height - 180.0f;
+	const float KnobSpacing = HudKnobRadius * 2.75f;
+	const float KnobStartX = Width * 0.5f - KnobSpacing;
+	for (int32 Index = 0; Index < HudKnobCenters.Num(); ++Index)
+	{
+		HudKnobCenters[Index] = FVector2D(
+			KnobStartX + KnobSpacing * Index,
+			KnobY);
+	}
+	const auto Box = [](const float X, const float Y, const float W, const float H)
+	{
+		return FBox2D(FVector2D(X, Y), FVector2D(X + W, Y + H));
+	};
+	const float GearY = Height - 118.0f;
+	HudGearCoarse = Box(Width * 0.5f - 185.0f, GearY, 62.0f, 28.0f);
+	HudGearFine = Box(Width * 0.5f - 117.0f, GearY, 62.0f, 28.0f);
+	HudGearUltraFine = Box(Width * 0.5f - 49.0f, GearY, 62.0f, 28.0f);
+	HudLaunchButton = Box(Width * 0.5f + 38.0f, GearY - 4.0f, 148.0f, 36.0f);
+	const float ModeX = HudDiagramCenter.X + HudDiagramRadius + 12.0f;
+	const float ModeY = HudDiagramCenter.Y - HudDiagramRadius + 18.0f;
+	HudSelectButton = Box(ModeX, ModeY, 82.0f, 27.0f);
+	HudRotateButton = Box(ModeX, ModeY + 33.0f, 82.0f, 27.0f);
+	HudResetViewButton = Box(ModeX, ModeY + 66.0f, 82.0f, 27.0f);
+	HudRebasePipButton = Box(ModeX, ModeY + 99.0f, 82.0f, 27.0f);
+	HudFollowAutoButton = Box(ModeX, ModeY + 132.0f, 82.0f, 27.0f);
+	bHudLayoutValid = Width > 1.0f && Height > 1.0f;
+}
+
+bool AABTSM11FinaleHUD::IsInside(
+	const FVector2D& Point,
+	const FBox2D& Box) const
+{
+	return Box.bIsValid && Box.IsInside(Point);
+}
+
+bool AABTSM11FinaleHUD::IsInsideDiagram(
+	const FVector2D& Point) const
+{
+	return bHudLayoutValid
+		&& FVector2D::Distance(Point, HudDiagramCenter)
+			<= HudDiagramRadius;
+}
+
+int32 AABTSM11FinaleHUD::FindKnobAt(
+	const FVector2D& Point) const
+{
+	for (int32 Index = 0; Index < HudKnobCenters.Num(); ++Index)
+	{
+		if (FVector2D::Distance(Point, HudKnobCenters[Index])
+			<= HudKnobRadius + 8.0f)
+		{
+			return Index;
+		}
+	}
+	return INDEX_NONE;
+}
+
+bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	if (!System.IsAiming())
+	{
+		return false;
+	}
+	if (!bHudLayoutValid)
+	{
+		int32 Width = 0;
+		int32 Height = 0;
+		if (APlayerController* Controller = GetOwningPlayerController())
+		{
+			Controller->GetViewportSize(Width, Height);
+		}
+		UpdateFinaleHudLayout(
+			static_cast<float>(Width),
+			static_cast<float>(Height));
+	}
+	if (HudCapture.GetCapture() != EABTSM11FinaleHudCapture::None)
+	{
+		return true;
+	}
+
+	const int32 KnobIndex = FindKnobAt(MousePosition);
+	if (KnobIndex != INDEX_NONE)
+	{
+		const EABTSM11FinaleHudCapture Capture = KnobIndex == 0
+			? EABTSM11FinaleHudCapture::AdjustYaw
+			: KnobIndex == 1
+				? EABTSM11FinaleHudCapture::AdjustPitch
+				: EABTSM11FinaleHudCapture::AdjustPower;
+		LastCapturedPointer = MousePosition;
+		return HudCapture.TryBegin(Capture);
+	}
+	if (IsInside(MousePosition, HudGearCoarse))
+	{
+		HudSpeedGear = EABTSM11ControlSpeedGear::Coarse;
+		return true;
+	}
+	if (IsInside(MousePosition, HudGearFine))
+	{
+		HudSpeedGear = EABTSM11ControlSpeedGear::Fine;
+		return true;
+	}
+	if (IsInside(MousePosition, HudGearUltraFine))
+	{
+		HudSpeedGear = EABTSM11ControlSpeedGear::UltraFine;
+		return true;
+	}
+	if (IsInside(MousePosition, HudSelectButton))
+	{
+		OverviewMode = EABTSM11OverviewInteractionMode::Select;
+		return true;
+	}
+	if (IsInside(MousePosition, HudRotateButton))
+	{
+		OverviewMode = EABTSM11OverviewInteractionMode::Rotate;
+		return true;
+	}
+	if (IsInside(MousePosition, HudResetViewButton))
+	{
+		System.ResetHudOverview();
+		return true;
+	}
+	if (IsInside(MousePosition, HudRebasePipButton))
+	{
+		System.RebaseHudTrajectoryProbe();
+		return true;
+	}
+	if (IsInside(MousePosition, HudFollowAutoButton))
+	{
+		System.FollowAutomaticPreviewTarget();
+		return true;
+	}
+	if (IsInside(MousePosition, HudLaunchButton))
+	{
+		LastCapturedPointer = MousePosition;
+		return HudCapture.TryBeginLaunch();
+	}
+	if (IsInsideDiagram(MousePosition))
+	{
+		LastCapturedPointer = MousePosition;
+		if (OverviewMode == EABTSM11OverviewInteractionMode::Rotate)
+		{
+			return HudCapture.TryBegin(
+				EABTSM11FinaleHudCapture::RotateOverview);
+		}
+		PendingTrajectoryHit = FABTSM11TrajectoryHit();
+		if (!ABTSM11HitTestOverviewTrajectory(
+			System.GetHudOverviewProjection(),
+			FVector2D(
+				MousePosition.X,
+				HudDiagramCenter.Y * 2.0f - MousePosition.Y),
+			HudDiagramCenter,
+			HudDiagramRadius,
+			10.0,
+			PendingTrajectoryHit,
+			System.HasHudTrajectoryProbe()
+				? System.GetHudTrajectoryProbe().Leg
+				: EABTSM11TrajectorySemanticLeg::Invalid))
+		{
+			return true;
+		}
+		return HudCapture.TryBegin(
+			EABTSM11FinaleHudCapture::ScrubTrajectoryProbe);
+	}
+	return true;
+}
+
+bool AABTSM11FinaleHUD::HandleFinalePointerMoved(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	if (!System.IsAiming())
+	{
+		CancelFinaleHudCapture();
+		return false;
+	}
+	const FVector2D Delta = MousePosition - LastCapturedPointer;
+	LastCapturedPointer = MousePosition;
+	switch (HudCapture.GetCapture())
+	{
+	case EABTSM11FinaleHudCapture::AdjustYaw:
+		return System.ApplyHudControlDrag(
+			EABTSM11FinaleControlAxis::Yaw,
+			(Delta.X - Delta.Y) * 0.5,
+			HudSpeedGear);
+	case EABTSM11FinaleHudCapture::AdjustPitch:
+		return System.ApplyHudControlDrag(
+			EABTSM11FinaleControlAxis::Pitch,
+			(Delta.X - Delta.Y) * 0.5,
+			HudSpeedGear);
+	case EABTSM11FinaleHudCapture::AdjustPower:
+		return System.ApplyHudControlDrag(
+			EABTSM11FinaleControlAxis::Power,
+			(Delta.X - Delta.Y) * 0.5,
+			HudSpeedGear);
+	case EABTSM11FinaleHudCapture::RotateOverview:
+		return System.RotateHudOverview(
+			Delta.X * 0.25,
+			-Delta.Y * 0.25);
+	case EABTSM11FinaleHudCapture::ScrubTrajectoryProbe:
+		return ABTSM11HitTestOverviewTrajectory(
+			System.GetHudOverviewProjection(),
+			FVector2D(
+				MousePosition.X,
+				HudDiagramCenter.Y * 2.0f - MousePosition.Y),
+			HudDiagramCenter,
+			HudDiagramRadius,
+			12.0,
+			PendingTrajectoryHit,
+			PendingTrajectoryHit.Leg);
+	default:
+		return HudCapture.GetCapture()
+			!= EABTSM11FinaleHudCapture::None;
+	}
+}
+
+bool AABTSM11FinaleHUD::HandleFinalePrimaryReleased(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	const EABTSM11FinaleHudCapture Capture = HudCapture.GetCapture();
+	if (Capture == EABTSM11FinaleHudCapture::None)
+	{
+		return System.IsFinaleActive();
+	}
+	if (Capture == EABTSM11FinaleHudCapture::ScrubTrajectoryProbe
+		&& PendingTrajectoryHit.bValid)
+	{
+		System.SelectHudTrajectoryProbe(PendingTrajectoryHit);
+	}
+	else if (ABTSM11ShouldCommitFinaleHudLaunch(
+		Capture,
+		IsInside(MousePosition, HudLaunchButton),
+		System.IsAiming()))
+	{
+		System.RequestRelease();
+	}
+	HudCapture.End(Capture);
+	PendingTrajectoryHit = FABTSM11TrajectoryHit();
+	return true;
+}
+
+bool AABTSM11FinaleHUD::HandleFinalePrimaryDoubleClicked(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	if (!System.IsAiming())
+	{
+		return false;
+	}
+	const int32 KnobIndex = FindKnobAt(MousePosition);
+	if (KnobIndex != INDEX_NONE)
+	{
+		CancelFinaleHudCapture();
+		return System.ResetHudControlAxis(
+			static_cast<EABTSM11FinaleControlAxis>(KnobIndex));
+	}
+	if (IsInsideDiagram(MousePosition))
+	{
+		return System.ResetHudOverview();
+	}
+	return true;
+}
+
+bool AABTSM11FinaleHUD::HandleFinaleWheel(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition,
+	const double WheelSteps)
+{
+	if (!System.IsAiming() || FMath::IsNearlyZero(WheelSteps))
+	{
+		return false;
+	}
+	const int32 KnobIndex = FindKnobAt(MousePosition);
+	if (KnobIndex != INDEX_NONE)
+	{
+		return System.ApplyHudControlWheel(
+			static_cast<EABTSM11FinaleControlAxis>(KnobIndex),
+			WheelSteps,
+			HudSpeedGear);
+	}
+	if (IsInsideDiagram(MousePosition)
+		&& OverviewMode == EABTSM11OverviewInteractionMode::Rotate)
+	{
+		return System.ZoomHudOverview(
+			FMath::Pow(1.12, WheelSteps));
+	}
+	return true;
+}
+
+void AABTSM11FinaleHUD::CancelFinaleHudCapture()
+{
+	HudCapture.CancelForFocusLoss();
+	PendingTrajectoryHit = FABTSM11TrajectoryHit();
+}
+
 void AABTSM11FinaleHUD::DrawFinaleLayer(
 	AABTSM11FinaleInteractionSystem& System)
 {
@@ -108,15 +416,13 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 	{
 		return;
 	}
-	const float Radius = FMath::Min(170.0f, Canvas->SizeY * 0.18f);
-	const FVector2D Center(
-		Radius + 22.0f,
-		Canvas->SizeY - Radius - 110.0f);
-	DrawOrbitalDiagram(System, Center, Radius);
+	UpdateFinaleHudLayout(Canvas->SizeX, Canvas->SizeY);
+	DrawOrbitalDiagram(System, HudDiagramCenter, HudDiagramRadius);
 	if (System.IsAiming())
 	{
 		DrawTargetPreview(System);
 		DrawTargetWedge(System);
+		DrawFinaleControlConsole(System);
 	}
 	else
 	{
@@ -125,7 +431,7 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 		CachedPipTrajectory.Reset();
 		TargetWedgeTracker.Reset();
 	}
-	DrawStatus(System, Center, Radius);
+	DrawStatus(System, HudDiagramCenter, HudDiagramRadius);
 }
 
 void AABTSM11FinaleHUD::DrawOrbitalDiagram(
@@ -147,6 +453,176 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		Radius,
 		FLinearColor(0.50f, 0.78f, 0.92f, 0.9f),
 		2.0f);
+	const FABTSM11OverviewProjection& HudProjection =
+		System.GetHudOverviewProjection();
+	const FABTSM11OrbitalSceneSnapshot& HudScene =
+		System.GetHudOrbitalScene();
+	const FABTSM11OverviewViewState& HudView =
+		System.GetHudOverviewView();
+	if (HudProjection.bValid && HudScene.bValid && HudView.bValid)
+	{
+		const FABTSM11OverviewProjectedBody& Primary =
+			HudProjection.Bodies[0];
+		const float PrimaryRadius = FMath::Max(
+			14.0f,
+			static_cast<float>(Primary.VisualRadius) * Radius);
+		DrawCircleOutline(
+			ToScreen(Center, Radius, Primary.Center),
+			PrimaryRadius,
+			FLinearColor(0.35f, 0.72f, 1.0f, 0.9f),
+			1.5f);
+
+		// Absolute finale-local latitude/longitude grid. It is projected by
+		// the frozen overview view, so aim changes cannot move the sphere.
+		const FVector3d PrimaryCenter = HudScene.Bodies[0].CenterCM;
+		const double PrimaryRadiusCM = HudScene.Bodies[0].VisualRadiusCM;
+		for (int32 LatitudeIndex = -2; LatitudeIndex <= 2; ++LatitudeIndex)
+		{
+			const double Latitude = FMath::DegreesToRadians(
+				static_cast<double>(LatitudeIndex) * 30.0);
+			FVector3d Previous;
+			bool bHasPrevious = false;
+			for (int32 Step = 0; Step <= 48; ++Step)
+			{
+				const double Longitude = UE_TWO_PI
+					* static_cast<double>(Step) / 48.0;
+				const FVector3d Point = PrimaryCenter + PrimaryRadiusCM
+					* FVector3d(
+						FMath::Cos(Latitude) * FMath::Cos(Longitude),
+						FMath::Cos(Latitude) * FMath::Sin(Longitude),
+						FMath::Sin(Latitude));
+				if (bHasPrevious)
+				{
+					DrawDiagramSegment(
+						Center,
+						Radius,
+						HudView.Project(Previous),
+						HudView.Project(Point),
+						FLinearColor(0.28f, 0.58f, 0.88f, 0.55f),
+						0.7f,
+						HudView.ProjectDepth((Previous + Point) * 0.5)
+							< HudView.ProjectDepth(PrimaryCenter));
+				}
+				Previous = Point;
+				bHasPrevious = true;
+			}
+		}
+		for (int32 LongitudeIndex = 0; LongitudeIndex < 12; ++LongitudeIndex)
+		{
+			const double Longitude = UE_TWO_PI
+				* static_cast<double>(LongitudeIndex) / 12.0;
+			FVector3d Previous;
+			bool bHasPrevious = false;
+			for (int32 Step = 0; Step <= 32; ++Step)
+			{
+				const double Latitude = -UE_HALF_PI + UE_PI
+					* static_cast<double>(Step) / 32.0;
+				const FVector3d Point = PrimaryCenter + PrimaryRadiusCM
+					* FVector3d(
+						FMath::Cos(Latitude) * FMath::Cos(Longitude),
+						FMath::Cos(Latitude) * FMath::Sin(Longitude),
+						FMath::Sin(Latitude));
+				if (bHasPrevious)
+				{
+					DrawDiagramSegment(
+						Center,
+						Radius,
+						HudView.Project(Previous),
+						HudView.Project(Point),
+						FLinearColor(0.28f, 0.58f, 0.88f, 0.55f),
+						0.7f,
+						HudView.ProjectDepth((Previous + Point) * 0.5)
+							< HudView.ProjectDepth(PrimaryCenter));
+				}
+				Previous = Point;
+				bHasPrevious = true;
+			}
+		}
+
+		for (int32 AssistIndex = 1;
+			AssistIndex <= FABTSM11GravityScenario::AssistCount;
+			++AssistIndex)
+		{
+			const FABTSM11OverviewProjectedBody& Body =
+				HudProjection.Bodies[AssistIndex];
+			const FABTSM11OrbitalSceneBody& SceneBody =
+				HudScene.Bodies[AssistIndex];
+			const FLinearColor BodyColor = M11TargetColor(
+				static_cast<EABTSM11PreviewTarget>(AssistIndex - 1));
+			const double InfluenceRadius = SceneBody.InfluenceRadiusCM
+				* HudView.Zoom / HudView.ProjectionScaleCM;
+			DrawDiagramCircleOutline(
+				Center,
+				Radius,
+				Body.Center,
+				InfluenceRadius,
+				BodyColor.CopyWithNewOpacity(0.20f),
+				0.8f);
+			DrawPlanetGlyph(
+				AssistIndex,
+				Center,
+				Radius,
+				Body.Center,
+				FMath::Max(
+					8.0 / FMath::Max<double>(Radius, 1.0),
+					Body.VisualRadius),
+				BodyColor);
+		}
+		DrawUFOGlyph(
+			Center,
+			Radius,
+			HudProjection.TargetCenter,
+			FMath::Max(
+				9.0 / FMath::Max<double>(Radius, 1.0),
+				HudProjection.TargetRadius),
+			M11TargetColor(EABTSM11PreviewTarget::UFO));
+
+		for (const FABTSM11OverviewHitProxy& Proxy
+			: HudProjection.HitProxies)
+		{
+			DrawDiagramSegment(
+				Center,
+				Radius,
+				Proxy.Start,
+				Proxy.End,
+				FLinearColor(0.88f, 0.96f, 1.0f, 1.0f),
+				1.8f,
+				Proxy.bHiddenByBody);
+		}
+		if (System.HasHudTrajectoryProbe())
+		{
+			const FVector2D Reference = ToScreen(
+				Center,
+				Radius,
+				HudView.Project(
+					System.GetHudTrajectoryProbe().ReferenceLocalPosition));
+			DrawLine(Reference.X - 6.0f, Reference.Y, Reference.X + 6.0f, Reference.Y,
+				FLinearColor::White, 1.6f);
+			DrawLine(Reference.X, Reference.Y - 6.0f, Reference.X, Reference.Y + 6.0f,
+				FLinearColor::White, 1.6f);
+			if (System.GetHudProbeProjection().bValid)
+			{
+				const FVector2D Current = ToScreen(
+					Center,
+					Radius,
+					HudView.Project(
+						System.GetHudProbeProjection().PositionCM));
+				DrawCircleOutline(Current, 5.0f,
+					FLinearColor(0.25f, 1.0f, 0.82f), 1.8f, 16);
+			}
+		}
+		DrawText(
+			OverviewMode == EABTSM11OverviewInteractionMode::Select
+				? TEXT("ORBIT OVERVIEW / SELECT")
+				: TEXT("ORBIT OVERVIEW / ROTATE"),
+			FLinearColor(0.72f, 0.90f, 1.0f),
+			Center.X - Radius + 10.0f,
+			Center.Y - Radius + 8.0f,
+			GEngine->GetSmallFont(),
+			0.8f,
+			false);
+		return;
+	}
 	if (!Snapshot.bValid)
 	{
 		DrawText(
@@ -314,6 +790,167 @@ void AABTSM11FinaleHUD::DrawFailureOverlay(
 		Canvas->SizeY);
 }
 
+void AABTSM11FinaleHUD::DrawConsoleButton(
+	const FBox2D& Box,
+	const FString& Label,
+	const bool bActive,
+	const FLinearColor& Accent)
+{
+	if (!Box.bIsValid)
+	{
+		return;
+	}
+	const FVector2D Size = Box.Max - Box.Min;
+	DrawRect(
+		bActive
+			? Accent.CopyWithNewOpacity(0.72f)
+			: FLinearColor(0.025f, 0.055f, 0.09f, 0.88f),
+		Box.Min.X,
+		Box.Min.Y,
+		Size.X,
+		Size.Y);
+	for (int32 Edge = 0; Edge < 4; ++Edge)
+	{
+		const FVector2D A = Edge == 0 ? Box.Min
+			: Edge == 1 ? FVector2D(Box.Max.X, Box.Min.Y)
+			: Edge == 2 ? Box.Max
+			: FVector2D(Box.Min.X, Box.Max.Y);
+		const FVector2D B = Edge == 0 ? FVector2D(Box.Max.X, Box.Min.Y)
+			: Edge == 1 ? Box.Max
+			: Edge == 2 ? FVector2D(Box.Min.X, Box.Max.Y)
+			: Box.Min;
+		DrawLine(A.X, A.Y, B.X, B.Y, Accent, bActive ? 2.0f : 1.0f);
+	}
+	DrawText(
+		Label,
+		bActive ? FLinearColor::White : Accent,
+		Box.Min.X + 7.0f,
+		Box.Min.Y + 6.0f,
+		GEngine->GetSmallFont(),
+		0.68f,
+		false);
+}
+
+void AABTSM11FinaleHUD::DrawKnob(
+	const FVector2D& Center,
+	const float Radius,
+	const FString& Label,
+	const double ValueAlpha,
+	const FString& ValueText,
+	const bool bCaptured)
+{
+	FCanvasNGonItem Fill(
+		Center,
+		FVector2D(Radius, Radius),
+		40,
+		bCaptured
+			? FLinearColor(0.12f, 0.34f, 0.50f, 0.94f)
+			: FLinearColor(0.025f, 0.07f, 0.12f, 0.92f));
+	Fill.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(Fill);
+	DrawCircleOutline(
+		Center,
+		Radius,
+		bCaptured
+			? FLinearColor(0.35f, 1.0f, 0.84f)
+			: FLinearColor(0.48f, 0.78f, 0.96f),
+		bCaptured ? 2.4f : 1.5f,
+		40);
+	const double Angle = FMath::Lerp(
+		FMath::DegreesToRadians(-135.0),
+		FMath::DegreesToRadians(135.0),
+		FMath::Clamp(ValueAlpha, 0.0, 1.0));
+	const FVector2D Needle(
+		static_cast<float>(FMath::Cos(Angle)),
+		static_cast<float>(FMath::Sin(Angle)));
+	DrawLine(
+		Center.X,
+		Center.Y,
+		Center.X + Needle.X * Radius * 0.72f,
+		Center.Y + Needle.Y * Radius * 0.72f,
+		FLinearColor(1.0f, 0.74f, 0.22f),
+		2.8f);
+	DrawText(
+		Label,
+		FLinearColor(0.76f, 0.91f, 1.0f),
+		Center.X - Radius * 0.55f,
+		Center.Y - 8.0f,
+		GEngine->GetSmallFont(),
+		0.72f,
+		false);
+	DrawText(
+		ValueText,
+		FLinearColor::White,
+		Center.X - Radius * 0.62f,
+		Center.Y + 11.0f,
+		GEngine->GetSmallFont(),
+		0.62f,
+		false);
+}
+
+void AABTSM11FinaleHUD::DrawFinaleControlConsole(
+	AABTSM11FinaleInteractionSystem& System)
+{
+	if (Canvas == nullptr || System.GetFinaleSystem() == nullptr)
+	{
+		return;
+	}
+	const FABTSM11FinaleLaunchModel& Model =
+		System.GetFinaleSystem()->GetLayoutPreset().LaunchModel;
+	const FABTSM11FinaleLaunchInput& Input = System.GetCurrentInput();
+	const auto Alpha = [](const double Value, const double Minimum, const double Maximum)
+	{
+		return Maximum > Minimum
+			? FMath::Clamp((Value - Minimum) / (Maximum - Minimum), 0.0, 1.0)
+			: 0.0;
+	};
+	DrawKnob(
+		HudKnobCenters[0],
+		HudKnobRadius,
+		TEXT("YAW"),
+		Alpha(Input.YawDegrees, Model.MinimumYawDegrees, Model.MaximumYawDegrees),
+		FString::Printf(TEXT("%+.3f deg"), Input.YawDegrees),
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustYaw);
+	DrawKnob(
+		HudKnobCenters[1],
+		HudKnobRadius,
+		TEXT("PITCH"),
+		Alpha(Input.PitchDegrees, Model.MinimumPitchDegrees, Model.MaximumPitchDegrees),
+		FString::Printf(TEXT("%+.3f deg"), Input.PitchDegrees),
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustPitch);
+	DrawKnob(
+		HudKnobCenters[2],
+		HudKnobRadius,
+		TEXT("POWER"),
+		Alpha(Input.Power, Model.MinimumPower, Model.MaximumPower),
+		FString::Printf(TEXT("%.4f"), Input.Power),
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustPower);
+
+	const FLinearColor Accent(0.42f, 0.86f, 1.0f);
+	DrawConsoleButton(HudGearCoarse, TEXT("1x"),
+		HudSpeedGear == EABTSM11ControlSpeedGear::Coarse, Accent);
+	DrawConsoleButton(HudGearFine, TEXT("0.1x"),
+		HudSpeedGear == EABTSM11ControlSpeedGear::Fine, Accent);
+	DrawConsoleButton(HudGearUltraFine, TEXT("0.01x"),
+		HudSpeedGear == EABTSM11ControlSpeedGear::UltraFine, Accent);
+	DrawConsoleButton(
+		HudLaunchButton,
+		TEXT("LAUNCH"),
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::LaunchButton,
+		FLinearColor(1.0f, 0.48f, 0.16f));
+	DrawConsoleButton(HudSelectButton, TEXT("SELECT"),
+		OverviewMode == EABTSM11OverviewInteractionMode::Select, Accent);
+	DrawConsoleButton(HudRotateButton, TEXT("ROTATE"),
+		OverviewMode == EABTSM11OverviewInteractionMode::Rotate, Accent);
+	DrawConsoleButton(HudResetViewButton, TEXT("RESET VIEW"), false, Accent);
+	DrawConsoleButton(HudRebasePipButton, TEXT("REBASE"), false,
+		System.HasHudTrajectoryProbe()
+			? FLinearColor(0.42f, 1.0f, 0.72f)
+			: FLinearColor(0.35f, 0.42f, 0.48f));
+	DrawConsoleButton(HudFollowAutoButton, TEXT("AUTO PIP"),
+		!System.HasHudTrajectoryProbe(), Accent);
+}
+
 void AABTSM11FinaleHUD::DrawTargetPreview(
 	AABTSM11FinaleInteractionSystem& System)
 {
@@ -322,6 +959,11 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 	if (RenderTarget == nullptr || Canvas == nullptr)
 	{
 		CachedPipTrajectory.Reset();
+		return;
+	}
+	if (System.HasHudTrajectoryProbe())
+	{
+		DrawProbeTargetPreview(System, *RenderTarget);
 		return;
 	}
 	const FABTSM11TrajectoryResult* Prediction =
@@ -550,6 +1192,152 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 	}
 }
 
+void AABTSM11FinaleHUD::DrawProbeTargetPreview(
+	AABTSM11FinaleInteractionSystem& System,
+	UTextureRenderTarget2D& RenderTarget)
+{
+	if (Canvas == nullptr
+		|| !System.GetHudTrajectoryProbe().bValid
+		|| !System.GetHudTrajectoryProbe().FrozenPipView.bValid)
+	{
+		return;
+	}
+	const float RenderAspect =
+		static_cast<float>(FMath::Max(1, RenderTarget.SizeX))
+		/ static_cast<float>(FMath::Max(1, RenderTarget.SizeY));
+	float PreviewWidth = FMath::Min(480.0f, Canvas->SizeX * 0.38f);
+	float PreviewHeight = PreviewWidth / RenderAspect;
+	const float MaximumHeight = FMath::Min(280.0f, Canvas->SizeY * 0.33f);
+	if (PreviewHeight > MaximumHeight)
+	{
+		PreviewHeight = MaximumHeight;
+		PreviewWidth = PreviewHeight * RenderAspect;
+	}
+	const FVector2D Size(PreviewWidth, PreviewHeight);
+	const FVector2D Position((Canvas->SizeX - Size.X) * 0.5f, 24.0f);
+	FCanvasTileItem Tile(
+		Position,
+		RenderTarget.GetResource(),
+		Size,
+		FLinearColor::White);
+	Tile.BlendMode = SE_BLEND_Opaque;
+	Canvas->DrawItem(Tile);
+
+	const FABTSM11TrajectoryProbe& Probe =
+		System.GetHudTrajectoryProbe();
+	const FABTSM11FrozenPipView& View = Probe.FrozenPipView;
+	const auto ToUv = [&View, RenderAspect](const FVector3d& Point)
+	{
+		const FVector2d Projected = View.Project(Point);
+		return FVector2D(
+			static_cast<float>(0.5 + Projected.X * 0.5),
+			static_cast<float>(
+				0.5 - Projected.Y * 0.5 * RenderAspect));
+	};
+	const auto DrawSceneTrajectory = [this, &ToUv, &Position, &Size](
+		const FABTSM11OrbitalSceneSnapshot& Scene,
+		const FLinearColor& Color,
+		const float Thickness,
+		const bool bDashed)
+	{
+		for (int32 Index = 1; Index < Scene.Trajectory.Num(); ++Index)
+		{
+			if (bDashed && (Index & 1) == 0)
+			{
+				continue;
+			}
+			FVector2D Start = ToUv(Scene.Trajectory[Index - 1].PositionCM);
+			FVector2D End = ToUv(Scene.Trajectory[Index].PositionCM);
+			if (!ABTSM11ClipPipLineToRect(Start, End, 0.02f))
+			{
+				continue;
+			}
+			Start = Position + Start * Size;
+			End = Position + End * Size;
+			DrawLine(Start.X, Start.Y, End.X, End.Y, Color, Thickness);
+		}
+	};
+	DrawSceneTrajectory(
+		System.GetHudProbeReferenceScene(),
+		FLinearColor(0.68f, 0.72f, 0.78f, 0.72f),
+		1.2f,
+		true);
+	DrawSceneTrajectory(
+		System.GetHudOrbitalScene(),
+		FLinearColor(0.22f, 0.96f, 1.0f, 0.98f),
+		2.4f,
+		false);
+
+	const FVector2D ReferenceMarker =
+		Position + ToUv(Probe.ReferenceLocalPosition) * Size;
+	DrawLine(ReferenceMarker.X - 7.0f, ReferenceMarker.Y,
+		ReferenceMarker.X + 7.0f, ReferenceMarker.Y,
+		FLinearColor::White, 1.6f);
+	DrawLine(ReferenceMarker.X, ReferenceMarker.Y - 7.0f,
+		ReferenceMarker.X, ReferenceMarker.Y + 7.0f,
+		FLinearColor::White, 1.6f);
+	const FABTSM11ProbeProjection& Current =
+		System.GetHudProbeProjection();
+	if (Current.bValid)
+	{
+		const FVector2D CurrentMarker =
+			Position + ToUv(Current.PositionCM) * Size;
+		DrawCircleOutline(
+			CurrentMarker,
+			6.0f,
+			FLinearColor(0.28f, 1.0f, 0.64f),
+			2.0f,
+			16);
+	}
+
+	DrawRect(
+		FLinearColor(0.02f, 0.06f, 0.11f, 0.80f),
+		Position.X,
+		Position.Y,
+		Size.X,
+		26.0f);
+	const TCHAR* RemapLabel = Current.Status
+		== EABTSM11ProbeRemapStatus::ExactSemanticLeg
+		? TEXT("TRACKING SAME PHASE")
+		: Current.Status == EABTSM11ProbeRemapStatus::ClosestMissFallback
+			? TEXT("CLOSEST MISS")
+			: TEXT("TRAJECTORY ENDS BEFORE LEG");
+	DrawText(
+		FString::Printf(
+			TEXT("TRAJECTORY PROBE / LEG %d / %s"),
+			static_cast<int32>(Probe.Leg),
+			RemapLabel),
+		FLinearColor(0.78f, 0.94f, 1.0f),
+		Position.X + 8.0f,
+		Position.Y + 6.0f,
+		GEngine->GetSmallFont(),
+		0.72f,
+		false);
+	DrawText(
+		FString::Printf(
+			TEXT("GRAY: CLICK REFERENCE  /  CYAN: CURRENT  /  DIST %.0f cm"),
+			Current.ContextDistanceCM),
+		FLinearColor(0.68f, 0.84f, 0.92f),
+		Position.X + 8.0f,
+		Position.Y + Size.Y - 18.0f,
+		GEngine->GetSmallFont(),
+		0.58f,
+		false);
+	for (int32 Edge = 0; Edge < 4; ++Edge)
+	{
+		const FVector2D A = Edge == 0 ? Position
+			: Edge == 1 ? FVector2D(Position.X + Size.X, Position.Y)
+			: Edge == 2 ? Position + Size
+			: FVector2D(Position.X, Position.Y + Size.Y);
+		const FVector2D B = Edge == 0 ? FVector2D(Position.X + Size.X, Position.Y)
+			: Edge == 1 ? Position + Size
+			: Edge == 2 ? FVector2D(Position.X, Position.Y + Size.Y)
+			: Position;
+		DrawLine(A.X, A.Y, B.X, B.Y,
+			FLinearColor(0.48f, 0.82f, 0.98f), 1.5f);
+	}
+}
+
 void AABTSM11FinaleHUD::DrawTargetWedge(
 	AABTSM11FinaleInteractionSystem& System)
 {
@@ -574,8 +1362,31 @@ void AABTSM11FinaleHUD::DrawTargetWedge(
 
 	const FABTSM110FinaleLocalFrame& Frame =
 		FinaleSystem->GetFinaleFrame();
+	EABTSM11PreviewTarget WedgeTarget =
+		System.GetPreviewSelection().Target;
+	FVector3d WedgeTargetLocal =
+		System.GetPreviewSelection().TargetCenterCM;
+	if (System.HasHudTrajectoryProbe())
+	{
+		const FABTSM11TrajectoryProbe& Probe =
+			System.GetHudTrajectoryProbe();
+		if (Probe.bContextIsTarget)
+		{
+			WedgeTarget = EABTSM11PreviewTarget::UFO;
+			WedgeTargetLocal = System.GetHudOrbitalScene().TargetCenterCM;
+		}
+		else if (Probe.ContextBodyIndex >= 1
+			&& Probe.ContextBodyIndex
+				<= FABTSM11GravityScenario::AssistCount)
+		{
+			WedgeTarget = static_cast<EABTSM11PreviewTarget>(
+				Probe.ContextBodyIndex - 1);
+			WedgeTargetLocal = System.GetHudOrbitalScene()
+				.Bodies[Probe.ContextBodyIndex].CenterCM;
+		}
+	}
 	const FVector TargetWorld = Frame.TransformLocalPosition(
-		FVector(System.GetPreviewSelection().TargetCenterCM));
+		FVector(WedgeTargetLocal));
 	const FRotator CameraRotation =
 		CameraManager->GetCameraRotation();
 	const FRotationMatrix CameraBasis(CameraRotation);
@@ -597,7 +1408,7 @@ void AABTSM11FinaleHUD::DrawTargetWedge(
 			GetWorld() != nullptr
 				? GetWorld()->GetDeltaSeconds()
 				: 0.0,
-			System.GetPreviewSelection().Target,
+			WedgeTarget,
 			Projection,
 			ViewportSize);
 	if (!Wedge.bVisible)
@@ -742,7 +1553,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 			0.62f,
 			false);
 		DrawText(
-			TEXT("VISIBLE CURSOR DRAG = POUCH DIRECTION"),
+			TEXT("THREE KNOBS = YAW / PITCH / POWER"),
 			FLinearColor(0.80f, 0.88f, 0.96f),
 			X,
 			CandidateY + 112.0f,
@@ -750,7 +1561,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 			0.58f,
 			false);
 		DrawText(
-			TEXT("WHEEL +/-0.08 = POWER | SAME RELEASE = LAUNCH | R = RESET"),
+			TEXT("1x / 0.1x / 0.01x | EXPLICIT LAUNCH | R = RESET"),
 			FLinearColor(0.80f, 0.88f, 0.96f),
 			X,
 			CandidateY + 128.0f,
@@ -869,6 +1680,18 @@ void AABTSM11FinaleHUD::DrawStatus(
 		GEngine->GetSmallFont(),
 		0.58f,
 		false);
+	DrawText(
+		FString::Printf(
+			TEXT("HUD OVERVIEW %llu / PROBE %llu / STATIC CAPTURE %llu"),
+			static_cast<unsigned long long>(System.GetHudOverviewRevision()),
+			static_cast<unsigned long long>(System.GetHudProbeRevision()),
+			static_cast<unsigned long long>(System.GetTargetCaptureCount())),
+		FLinearColor(0.58f, 0.78f, 0.90f),
+		X,
+		Y + 52.0f,
+		GEngine->GetSmallFont(),
+		0.55f,
+		false);
 
 	const float BarWidth = DiagramRadius * 1.25f;
 	const float BarY = DiagramCenter.Y + DiagramRadius + 12.0f;
@@ -911,7 +1734,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 			false);
 	}
 	DrawText(
-		TEXT("Visible cursor drag: pouch direction  |  Wheel: power (down +0.08 / up -0.08)  |  Release same press: launch  |  R: reset"),
+		TEXT("Drag knob: adjust  |  Wheel over knob: trim  |  Select/Rotate orbit overview  |  LAUNCH only: release  |  R: reset"),
 		FLinearColor(0.66f, 0.72f, 0.80f),
 		X,
 		BarY + 34.0f,

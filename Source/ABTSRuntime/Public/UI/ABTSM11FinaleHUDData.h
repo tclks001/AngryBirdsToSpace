@@ -120,6 +120,19 @@ private:
 	bool bFocusLossCancellation = false;
 };
 
+/** Sole HUD-1B release gate: no knob/overview/probe MouseUp may launch. */
+ABTSRUNTIME_API bool ABTSM11ShouldCommitFinaleHudLaunch(
+	EABTSM11FinaleHudCapture Capture,
+	bool bReleasedInsideLaunchButton,
+	bool bIsAiming);
+
+/** Static capture refresh policy shared by runtime and regression tests. */
+ABTSRUNTIME_API bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
+	bool bHasFrozenProbe,
+	bool bCaptureInitialized,
+	bool bAutomaticTargetChanged,
+	bool bExplicitProbeMutation);
+
 struct ABTSRUNTIME_API FABTSM11OrbitalScenePoint
 {
 	double TimeSeconds = 0.0;
@@ -361,4 +374,3 @@ public:
 		const FABTSM11TrajectoryProbe& Probe,
 		FABTSM11ProbeProjection& OutProjection);
 };
-

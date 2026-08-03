@@ -27,6 +27,7 @@ public:
 private:
 	virtual void PrimaryWorldInteract() override;
 	void M11PrimaryReleased();
+	void M11PrimaryDoubleClicked();
 	void M11Power(float Value);
 	void M11Cancel();
 	void M11OrbitPressed();
@@ -37,7 +38,6 @@ private:
 	AABTSM6SlingshotSystem* FindOrdinarySlingshotSystem();
 
 	TWeakObjectPtr<AABTSM6SlingshotSystem> OrdinarySlingshotSystem;
-	bool bM11PullReleaseArmed = false;
 	bool bWasM11FinaleActive = false;
 	bool bM11SavedPointerEventFlags = false;
 	bool bSavedClickEvents = true;

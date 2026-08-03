@@ -1,6 +1,6 @@
 # M11-C/HUD-1：终局发射控制台、轨迹探针与联动画中画
 
-> 状态：HUD-1A 纯数据交互原型已实现并通过自动化；HUD-1B 运行时接线与 PIE 验收尚未开始。
+> 状态：HUD-1A 纯数据原型与 HUD-1B 运行时接线已实现并通过自动化；有渲染 PIE 手感验收与 HUD-1C 调优尚未开始。
 >
 > 父级：[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)。
 >
@@ -507,6 +507,18 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 - PIP 静态 Capture + 当前/参考轨迹叠加；
 - 独立 Launch；
 - fresh Runtime 自动化。
+
+实现状态：
+
+- `AABTSM11PlayerController` 已停止把太空弹弓入口点击/任意鼠标松开解释为 Release；入口仅开启控制台，只有 `LAUNCH` 捕获在按钮内松开时调用 `RequestRelease()`；
+- `AABTSM11FinaleHUD` 已接入三旋钮、三档倍率、Select/Rotate、Reset View、Rebase 和 Auto PIP，并以独占 `FinaleHudCapture` 路由按下、持续拖动、松开与焦点丢失；
+- 旋钮拖动和滚轮微调经 `FABTSM11FinaleControlPanelState` 映射后进入现有 Stabilizer，继续复用 latest-only 异步求解、Preview/Release 同输入 Hash 和前缀稳定器；
+- `AABTSM11FinaleInteractionSystem` 在首份发布结果上冻结 Attempt 级 `OverviewViewState`，后续 Aim 变化只替换轨迹场景并重投影；Rotate/Zoom 不递增 `AimRevision`、不启动 Solve；
+- Select 松开后创建 `TrajectoryProbe`，Scrub 过程中不反复 Scene Capture；后续新结果仅执行语义重映射和 HUD 轨迹叠加；
+- Probe PIP 使用冻结正交视框，灰色虚线显示点选时参考轨迹，青色实线显示 latest-only 当前轨迹；closest miss 和提前终止状态显式显示；
+- 静态 Scene Capture 只在首次自动目标、自动目标切换、新 Probe、Rebase 或返回 Auto PIP 时刷新；Aim-only 更新不刷新；
+- 全览天体、主星绝对经纬网、作用圈、UFO 和轨迹使用同一冻结三维投影；只有 Rotate 模式允许整体重投影；
+- 新增 `TargetCaptureCount / HudOverviewRevision / HudProbeRevision` 运行时诊断计数，供 HUD-1C PIE 性能与行为验收使用。
 
 ### HUD-1C：有渲染 PIE 调优
 
