@@ -1,0 +1,36 @@
+{
+  "schema": "abts.m11b.v2_2.research_candidate.v1",
+  "status": "candidate_not_certified",
+  "baseCandidateRank": 3,
+  "baseCandidateSourceHash": "0xed74ffaf0de8028f",
+  "variantSourceHash": "0xb3e0f00ca35d499a",
+  "searchStage": "assist2_upstream_mapping_local80",
+  "searchCandidateIndex": 353,
+  "targetOffsetCM": [2045.340, 2022.718, -8885.799],
+  "targetHitRadiusCM": 12000.0,
+  "assist2OffsetCM": [-1344.726, 1739.712, -1105.200],
+  "assist2BPlaneDeltaCM": [-48.730, -1327.573],
+  "assist2BPlaneSigmaScale": 0.857348,
+  "assist2VelocityDeltaCMPerSec": [80.096, -225.197, 77.338],
+  "assist3OffsetCM": [1864.062, -1883.951, -345.280],
+  "assist3BPlaneDeltaCM": [731.050, 1622.652],
+  "assist3BPlaneSigmaScale": 1.193424,
+  "assist3VelocityDeltaCMPerSec": [-955.286, 1384.235, -1302.886],
+  "halfCellEvidence": {
+    "grid": {
+      "yaw": [-4.0, 2.0, 0.25],
+      "pitch": [19.5, 34.5, 0.375],
+      "power": [0.875, 1.0, 0.003125]
+    },
+    "sampleCount": 42025,
+    "prefixCounts": [27713, 20976, 1491, 1004],
+    "componentCounts": [1, 1, 6, 1],
+    "largestComponentSizes": [27713, 20976, 1486, 1004],
+    "nominalF4": true,
+    "nestingViolations": 0,
+    "aggregateSampleHash": "0x0baef62a673e8e55",
+    "threadCountsReplayed": [6, 12]
+  },
+  "certificationHash": "0x0000000000000000",
+  "certifiedBundleHash": "0x0000000000000000"
+}

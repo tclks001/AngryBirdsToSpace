@@ -1,0 +1,38 @@
+{
+  "schema": "abts.m11b.v2_2.research_candidate.v1",
+  "status": "candidate_not_certified",
+  "baseCandidateRank": 3,
+  "baseCandidateSourceHash": "0xed74ffaf0de8028f",
+  "parentVariantSourceHash": "0xb3e0f00ca35d499a",
+  "variantSourceHash": "0x617687274ed0c29a",
+  "searchStage": "candidate353_f3_expansion_strict_ordering",
+  "searchCandidateIndex": 21,
+  "targetOffsetCM": [2375.775, 2202.028, -8743.864],
+  "targetHitRadiusCM": 6000.0,
+  "assist2OffsetCM": [-1344.726, 1739.712, -1105.200],
+  "assist2BPlaneDeltaCM": [-48.730, -1327.573],
+  "assist2BPlaneSigmaScale": 0.857348,
+  "assist2VelocityDeltaCMPerSec": [80.096, -225.197, 77.338],
+  "assist3OffsetCM": [2117.187, -1860.906, -88.000],
+  "assist3BPlaneDeltaCM": [86.735, 2102.742],
+  "assist3BPlaneSigmaScale": 1.133051,
+  "assist3VelocityDeltaCMPerSec": [-881.321, 1399.806, -1318.121],
+  "halfCellEvidence": {
+    "strictTerminalOrdering": "Assist3ExitBeforeTargetHit",
+    "grid": {
+      "yaw": [-4.0, 2.0, 0.25],
+      "pitch": [19.5, 34.5, 0.375],
+      "power": [0.875, 1.0, 0.003125]
+    },
+    "sampleCount": 42025,
+    "prefixCounts": [27713, 20976, 1538, 480],
+    "f3OverF2": 0.0733228442,
+    "componentCounts": [1, 1, 3, 1],
+    "largestComponentSizes": [27713, 20976, 1536, 480],
+    "nominalF4": true,
+    "nestingViolations": 0,
+    "aggregateSampleHash": "0xb77f6d2f3f954005"
+  },
+  "certificationHash": "0x0000000000000000",
+  "certifiedBundleHash": "0x0000000000000000"
+}

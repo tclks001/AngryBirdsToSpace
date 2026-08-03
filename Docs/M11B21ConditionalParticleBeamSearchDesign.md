@@ -1,6 +1,6 @@
 # M11-B v2.1：条件粒子束逐星构造器（Additive Search v4）
 
-> 状态：**Additive Search v4 构造器已实现，并完成 4 个正式种子的标准 C++ 搜索取样（3 个成功、1 个在第三阶段正常无解退出）**。v4 只新增候选构造路径；最终接受仍调用冻结的 Search v3 候选审计。4 个入选布局现已追加到 Editor-only Candidate Catalog 的 Rank 3–6，供 M11-C v2.1 PIE 手感比较；它们仍全部是 `Candidate / NOT CERTIFIED`，没有替换当前 v3 Rank 1/2，也没有进入 production 绑定。
+> 状态：**Additive Search v4 构造器已实现，并完成 4 个正式种子的标准 C++ 搜索取样（3 个成功、1 个在第三阶段正常无解退出）**。v4 只新增候选构造路径；最终接受仍调用冻结的 Search v3 候选审计。4 个原始入选布局位于 Editor-only Candidate Catalog 的 Rank 3–6；Rank 3 上游映射候选 353 追加为 Rank 7，其 F3 扩大与严格 F4 单岛微调追加为 Rank 8，供 M11-C v2.1 PIE 手感比较。它们仍全部是 `Candidate / NOT CERTIFIED`，没有替换当前 v3 Rank 1/2，也没有进入 production 绑定。
 >
 > 父级：[M11-B v2.1 标准 C++ 候选布局搜索](M11B21CandidateSearchDesign.md) · [M11 v2 终局优化总设计](M11V2FinaleOptimizationDesign.md)
 >
@@ -266,7 +266,7 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
 
 仍有四项明确限制：
 
-- v4 候选已作为 Editor-only Rank 3–6 写入 Candidate Catalog；Rank 1/2 仍保留为 v3 基线，Rank 0 仍是 production Certified v1；
+- v4 原始候选已作为 Editor-only Rank 3–6 写入 Candidate Catalog，候选 353 追加为 Rank 7，F3 扩大微调追加为 Rank 8；Rank 1/2 仍保留为 v3 基线，Rank 0 仍是 production Certified v1；
 - 没有完成 M11-C v2.1 有渲染 PIE，故“手感”只通过数值代理；
 - 5000 点 Monte Carlo 与凸包不证明唯一连通分量，也不证明 Hull 内部处处成功；
 - 没有执行 M11-B v2.2 的完整 `Yaw × Pitch × Power` 认证、边界细化、错序/迟到排除与全消融唯一性证明。
@@ -296,10 +296,20 @@ FullLaunchDomain 包含 Power，只是诊断语料，不参与 v2.1 接受。`21
 | `abts.M11.CandidateRank 4` | v4 `0xf22ad256fd791e07` |
 | `abts.M11.CandidateRank 5` | v4 `0xcdc6e41075d99493` |
 | `abts.M11.CandidateRank 6` | v4 `0x80d274a67e1e9944` |
+| `abts.M11.CandidateRank 7` | Rank 3 上游映射候选 353 `0xb3e0f00ca35d499a`；Core 临时分类下 half-cell F4 单连通岛，但名义轨迹为 TargetHit 早于 Assist3 Exit，仅供 PIE 研究 |
+| `abts.M11.CandidateRank 8` | 候选 353 的 F3 扩大微调 `0x617687274ed0c29a`；严格 half-cell 为 `27713→20976→1538→480`，F4 单连通，仍未完成完整认证 |
+| `abts.M11.CandidateRank 9` | Rank 8 四天体刚性整体远移 100 cm 的 `0x166f0aa067d54328`；超细扫描把 F1 Power 下界从 `0.745000` 提至 `0.746250`，精细闭包 `28040→21163→1564→498` 且 F4 单连通，仍未完成完整认证 |
+| `abts.M11.CandidateRank 10` | Rank 8 四天体分别径向外移 5900 cm，并对行星②、行星③和 UFO 做不超过约 1.3° 的角向修复；Source `0x2b06db2cf348d75f`，满功率 ScreenAim `5000→392→115→27→15`，局部三维闭包四层单连通，仍未完成完整认证 |
+| `abts.M11.CandidateRank 11` | Rank 10 的 5500 cm 碰撞尺度逐星重构；Source `0xcb23499fc6f7c9d3`，满功率 ScreenAim `5000→616→137→21→6`，局部满功率 `1025→531→258→84→30` 且四层单连通，仍未完成完整认证 |
 
-Rank 3–6 冻结完整布局与 Candidate 身份，PIE 启动时只做结构和
+Rank 3–11 冻结完整布局与 Candidate 身份，PIE 启动时只做结构和
 Candidate Source Hash 校验，不重新执行粒子束搜索。修改 Rank 后必须停止并重启
 PIE，因为 GameMode 只在终局系统初始化时读取该 CVar。
+
+> 放大行星尺度后的逐星微调候选现占用 Editor Rank 11。其冻结 Source 为
+> `0xcb23499fc6f7c9d3`；直接等比放大但拓扑不合格的旧基线后移为只供 CLI 取证的
+> Rank 12，不进入 PIE。完整参数与候选边界见
+> [M11-B v2.2 认证稿的放大尺度逐星微调小节](M11BFinaleLayoutCertificationDesign.md#放大尺度逐星微调候选editor-only-rank-112026-08-02)。
 
 ## 9. 本轮可复现与自动化证据
 

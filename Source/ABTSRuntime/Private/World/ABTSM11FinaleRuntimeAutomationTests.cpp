@@ -10,9 +10,13 @@
 #include "Engine/World.h"
 #include "Game/ABTSM10GameMode.h"
 #include "Game/ABTSM11GameMode.h"
+#include "Math/RotationMatrix.h"
 #include "Misc/AutomationTest.h"
 #include "World/ABTSM11FinaleActors.h"
+#include "World/ABTSM11FinaleInteractionTypes.h"
+#include "World/ABTSM11FinaleLayoutCertification.h"
 #include "World/ABTSM11FinaleSystem.h"
+#include "World/ABTSM11GravityAssistSolver.h"
 
 namespace
 {
@@ -46,6 +50,23 @@ namespace
 		Contract.PrimaryRadiusCM = Preset.ReferencePrimaryRadiusCM;
 		Contract.LaunchFrame = Frame;
 		return Contract;
+	}
+
+	FABTSM110FinaleLocalFrame MakeM11BPreviewTestFrame(
+		const FVector& Origin,
+		const FVector& Forward,
+		const FVector& Up,
+		const int32 IdentityOffset)
+	{
+		const FQuat Rotation = FRotationMatrix::MakeFromXZ(
+			Forward.GetSafeNormal(),
+			Up.GetSafeNormal()).ToQuat();
+		FABTSM110FinaleLocalFrame Frame =
+			MakeM11BRuntimeTestFrame(Origin, Rotation);
+		Frame.LaunchTaskId += IdentityOffset;
+		Frame.AnchorCellId += IdentityOffset;
+		Frame.SlotPairId += IdentityOffset;
+		return Frame;
 	}
 
 	bool RequestsHaveIdenticalLocalAuthority(
@@ -1002,5 +1023,365 @@ bool FABTSM11BRuntimePresentationTest::RunTest(
 		3);
 	return true;
 }
+
+#if WITH_EDITOR
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11BPreviewFinaleFrameCompatibilityTest,
+	"ABTS.M11B.Runtime.PreviewFinaleFrameCompatibility",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11BPreviewFinaleFrameCompatibilityTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+
+	const FABTSM11FinaleLayoutPreset CertifiedPreset =
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
+	const double PrimaryRadiusCM =
+		CertifiedPreset.ReferencePrimaryRadiusCM;
+	const TArray<FABTSM110FinaleLocalFrame> Frames = {
+		MakeM11BPreviewTestFrame(
+			FVector(0.0, 0.0, PrimaryRadiusCM),
+			FVector::ForwardVector,
+			FVector::UpVector,
+			0),
+		MakeM11BPreviewTestFrame(
+			FVector(PrimaryRadiusCM, 0.0, 0.0),
+			FVector::UpVector,
+			FVector::ForwardVector,
+			100),
+		MakeM11BPreviewTestFrame(
+			FVector(0.0, -PrimaryRadiusCM, 0.0),
+			FVector::ForwardVector,
+			-FVector::RightVector,
+			200)};
+
+	FScopedM11BAutomationWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	TestNotNull(TEXT("Preview-frame automation World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	TSet<uint64> FrameHashes;
+	FABTSM11TrajectoryRequest BaselineRequest;
+	FABTSM11TrajectoryResult BaselineResult;
+	FABTSM11PlaybackPlan BaselinePlan;
+	FABTSM11OrbitalDiagramSnapshot BaselineDiagram;
+	bool bHasBaseline = false;
+
+	for (int32 FrameIndex = 0; FrameIndex < Frames.Num(); ++FrameIndex)
+	{
+		const FABTSM110FinaleLocalFrame& Frame = Frames[FrameIndex];
+		const FString Prefix = FString::Printf(
+			TEXT("Frame%d"),
+			FrameIndex + 1);
+		TestTrue(
+			*FString::Printf(TEXT("%s is a legal rigid frame"), *Prefix),
+			Frame.IsUsable());
+		FString Failure;
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s accepts the Certified v1 local preset"),
+				*Prefix),
+			AABTSM11FinaleSystem::ValidateRuntimeBoundary(
+				CertifiedPreset,
+				3,
+				PrimaryRadiusCM,
+				Frame,
+				&Failure));
+		const uint64 FrameHash =
+			AABTSM11FinaleSystem::ComputeFinaleFrameDiagnosticHash(Frame);
+		TestTrue(
+			*FString::Printf(TEXT("%s has a non-zero frame hash"), *Prefix),
+			FrameHash != 0);
+		FrameHashes.Add(FrameHash);
+
+		AABTSM11FinaleSystem* System =
+			World->SpawnActor<AABTSM11FinaleSystem>(
+				AABTSM11FinaleSystem::StaticClass(),
+				FTransform::Identity,
+				SpawnParameters);
+		TestNotNull(
+			*FString::Printf(TEXT("%s candidate system spawns"), *Prefix),
+			System);
+		if (System == nullptr)
+		{
+			continue;
+		}
+		const FABTSFinaleWorldContract Contract =
+			MakeM11BWorldContract(Frame);
+		const bool bInitialized =
+			System->InitializeFromEditorCandidateRank(11, Contract);
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s initializes frozen Candidate Rank 11"),
+				*Prefix),
+			bInitialized);
+		if (!bInitialized)
+		{
+			continue;
+		}
+		TestTrue(
+			*FString::Printf(TEXT("%s remains Preview/Test"), *Prefix),
+			System->IsEditorCandidateMode());
+		TestEqual(
+			*FString::Printf(TEXT("%s retains Candidate Rank"), *Prefix),
+			System->GetEditorCandidateIdentity().Rank,
+			11);
+		TestEqual(
+			*FString::Printf(TEXT("%s commits the exact frame"), *Prefix),
+			AABTSM11FinaleSystem::ComputeFinaleFrameDiagnosticHash(
+				System->GetFinaleFrame()),
+			FrameHash);
+
+		const FABTSM11FinaleLayoutPreset& CandidatePreset =
+			System->GetLayoutPreset();
+		FABTSM11TrajectoryRequest Request;
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s builds its request only in finale-local space"),
+				*Prefix),
+			System->BuildRequest(
+				CandidatePreset.NominalInput,
+				0x7u,
+				Request,
+				&Failure));
+		FABTSM11TrajectoryResult Result;
+		TestTrue(
+			*FString::Printf(TEXT("%s solves the same local path"), *Prefix),
+			FABTSM11GravityAssistSolver::Solve(
+				Request,
+				Result,
+				&Failure));
+		const FABTSM11PrefixClassification Classification =
+			FABTSM11PrefixClassifier::Classify(
+				CandidatePreset,
+				Result,
+				0x7u);
+		TestTrue(
+			*FString::Printf(TEXT("%s nominal input remains F4"), *Prefix),
+			Classification.IsF(4));
+		FABTSM11PlaybackPlan Plan;
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s builds deterministic local playback"),
+				*Prefix),
+			Plan.BuildCandidateQualified(
+				CandidatePreset,
+				Result,
+				Classification));
+		FABTSM11OrbitalDiagramSnapshot Diagram;
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s builds the orbital diagram with the same frame"),
+				*Prefix),
+			FABTSM11OrbitalDiagramBuilder::Build(
+				CandidatePreset,
+				Frame,
+				Plan.Points,
+				Plan.ReleasedTrajectoryHash,
+				Diagram));
+
+		if (!bHasBaseline)
+		{
+			BaselineRequest = Request;
+			BaselineResult = Result;
+			BaselinePlan = Plan;
+			BaselineDiagram = Diagram;
+			bHasBaseline = true;
+		}
+		else
+		{
+			TestTrue(
+				*FString::Printf(
+					TEXT("%s request is frame-invariant"),
+					*Prefix),
+				RequestsHaveIdenticalLocalAuthority(
+					BaselineRequest,
+					Request));
+			TestEqual(
+				*FString::Printf(
+					TEXT("%s trajectory identity is frame-invariant"),
+					*Prefix),
+				Result.ValidationHash,
+				BaselineResult.ValidationHash);
+			TestEqual(
+				*FString::Printf(
+					TEXT("%s local point count is frame-invariant"),
+					*Prefix),
+				Result.Points.Num(),
+				BaselineResult.Points.Num());
+			const int32 ComparablePointCount = FMath::Min(
+				Result.Points.Num(),
+				BaselineResult.Points.Num());
+			bool bPointsMatch = true;
+			for (int32 PointIndex = 0;
+				PointIndex < ComparablePointCount;
+				++PointIndex)
+			{
+				const FABTSM11TrajectoryPoint& A =
+					BaselineResult.Points[PointIndex];
+				const FABTSM11TrajectoryPoint& B =
+					Result.Points[PointIndex];
+				bPointsMatch &= A.TimeSeconds == B.TimeSeconds
+					&& A.PositionCM == B.PositionCM
+					&& A.VelocityCMPerSec == B.VelocityCMPerSec;
+			}
+			TestTrue(
+				*FString::Printf(
+					TEXT("%s local trajectory matches pointwise"),
+					*Prefix),
+				bPointsMatch);
+			TestEqual(
+				*FString::Printf(
+					TEXT("%s playback identity is frame-invariant"),
+					*Prefix),
+				Plan.PlanHash,
+				BaselinePlan.PlanHash);
+			TestEqual(
+				*FString::Printf(
+					TEXT("%s diagram trajectory count is frame-invariant"),
+					*Prefix),
+				Diagram.Trajectory.Num(),
+				BaselineDiagram.Trajectory.Num());
+			bool bDiagramShapeMatches =
+				Diagram.Trajectory.Num()
+				== BaselineDiagram.Trajectory.Num();
+			for (int32 PointIndex = 1;
+				bDiagramShapeMatches
+					&& PointIndex < Diagram.Trajectory.Num();
+				++PointIndex)
+			{
+				const double SegmentLength = FVector2d::Distance(
+					Diagram.Trajectory[PointIndex - 1].Position,
+					Diagram.Trajectory[PointIndex].Position);
+				const double BaselineSegmentLength = FVector2d::Distance(
+					BaselineDiagram.Trajectory[PointIndex - 1].Position,
+					BaselineDiagram.Trajectory[PointIndex].Position);
+				bDiagramShapeMatches &= FMath::IsNearlyEqual(
+					SegmentLength,
+					BaselineSegmentLength,
+					1.0e-12);
+			}
+			TestTrue(
+				*FString::Printf(
+					TEXT("%s diagram path keeps its local geometry"),
+					*Prefix),
+				bDiagramShapeMatches);
+		}
+
+		for (int32 AssistIndex = 0;
+			AssistIndex < System->GetGravityBodyActors().Num();
+			++AssistIndex)
+		{
+			const AABTSM11GravityBodyActor* BodyActor =
+				System->GetGravityBodyActors()[AssistIndex];
+			const FVector3d ExpectedLocal = CandidatePreset
+				.CanonicalScenario.GetAssist(AssistIndex + 1).CenterCM;
+			const FVector3d ActualLocal(
+				Frame.InverseTransformPosition(
+					BodyActor->GetActorLocation()));
+			TestTrue(
+				*FString::Printf(
+					TEXT("%s Assist%d shares the finale frame"),
+					*Prefix,
+					AssistIndex + 1),
+				ActualLocal.Equals(ExpectedLocal, 0.01));
+		}
+		const FVector3d ExpectedUFOLocal = CandidatePreset
+			.CanonicalScenario.Target.GetGeometricContactCenterCM();
+		const FVector3d ActualUFOLocal(
+			Frame.InverseTransformPosition(
+				System->GetUFOActor()->GetActorLocation()));
+		TestTrue(
+			*FString::Printf(TEXT("%s UFO shares the finale frame"), *Prefix),
+			ActualUFOLocal.Equals(ExpectedUFOLocal, 0.01));
+
+		bool bPlaybackRoundTrips = true;
+		for (const FABTSM11PlaybackPoint& Point : Plan.Points)
+		{
+			const FVector LocalPosition(Point.PositionCM);
+			const FVector WorldPosition =
+				Frame.TransformLocalPosition(LocalPosition);
+			bPlaybackRoundTrips &= Frame.InverseTransformPosition(
+				WorldPosition).Equals(LocalPosition, 0.001);
+		}
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s playback world path round-trips pointwise"),
+				*Prefix),
+			bPlaybackRoundTrips);
+
+		const FVector3d LocalLaunchDirection = CandidatePreset.LaunchModel
+			.MapDirection(CandidatePreset.NominalInput);
+		const FVector WorldLaunchDirection = Frame.WorldTransform
+			.TransformVectorNoScale(FVector(LocalLaunchDirection))
+			.GetSafeNormal();
+		const FVector3d RoundTripLaunchDirection(
+			Frame.WorldTransform.InverseTransformVectorNoScale(
+				WorldLaunchDirection).GetSafeNormal());
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s launch direction shares the slot frame"),
+				*Prefix),
+			RoundTripLaunchDirection.Equals(LocalLaunchDirection, 1.0e-9));
+	}
+
+	TestEqual(
+		TEXT("Three distinct preview frames have distinct diagnostics"),
+		FrameHashes.Num(),
+		3);
+	FABTSM110FinaleLocalFrame ScaledFrame = Frames[0];
+	ScaledFrame.WorldTransform.SetScale3D(FVector(1.0, 1.0, 1.1));
+	FString Failure;
+	TestFalse(
+		TEXT("A non-unit preview frame fails closed"),
+		AABTSM11FinaleSystem::ValidateRuntimeBoundary(
+			CertifiedPreset,
+			3,
+			PrimaryRadiusCM,
+			ScaledFrame,
+			&Failure));
+	FABTSM110FinaleLocalFrame WrongVersionFrame = Frames[0];
+	WrongVersionFrame.LayoutVersion++;
+	TestFalse(
+		TEXT("An incompatible preview frame version fails closed"),
+		AABTSM11FinaleSystem::ValidateRuntimeBoundary(
+			CertifiedPreset,
+			3,
+			PrimaryRadiusCM,
+			WrongVersionFrame,
+			&Failure));
+	FABTSM110FinaleLocalFrame MisalignedPairFrame = Frames[0];
+	MisalignedPairFrame.RightSlotWorldLocation =
+		MisalignedPairFrame.GetOrigin()
+		+ MisalignedPairFrame.GetForward() * 105.0;
+	TestFalse(
+		TEXT("A frame whose slot pair contradicts its basis fails closed"),
+		AABTSM11FinaleSystem::ValidateRuntimeBoundary(
+			CertifiedPreset,
+			3,
+			PrimaryRadiusCM,
+			MisalignedPairFrame,
+			&Failure));
+
+	AddInfo(FString::Printf(
+		TEXT("[ABTS][M11][PreviewFrameCompatibility] Status=M11LocalAccepted ")
+		TEXT("Integration=Pending Frames=%d CandidateRank=11 ")
+		TEXT("Trajectory=0x%016llx Plan=0x%016llx"),
+		Frames.Num(),
+		static_cast<unsigned long long>(BaselineResult.ValidationHash),
+		static_cast<unsigned long long>(BaselinePlan.PlanHash)));
+	return !HasAnyErrors();
+}
+
+#endif
 
 #endif

@@ -4,6 +4,7 @@
 
 #if WITH_EDITOR
 
+#include "HAL/IConsoleManager.h"
 #include "M11Search/ABTSM11CandidateSearch.h"
 #include "M11Search/ABTSM11FrozenCandidateLayouts.h"
 #include "World/ABTSM11GravityAssistCoreAdapter.h"
@@ -20,6 +21,15 @@ namespace
 	using ABTS::M11Search::LaunchInput;
 	using ABTS::M11Search::LaunchModel;
 
+	TAutoConsoleVariable<int32> CVarABTSM11CandidateRank(
+		TEXT("abts.M11.CandidateRank"),
+		0,
+		TEXT("Editor-only M11 Candidate layout selection. ")
+		TEXT("0 keeps the production Certified v1 bundle; ")
+		TEXT("1..11 load the corresponding frozen, UNCERTIFIED ")
+		TEXT("M11-B Candidate. Set before PIE and restart PIE after changing."),
+		ECVF_Default);
+
 	struct FFrozenCandidateIdentity
 	{
 		int32 Rank;
@@ -30,7 +40,7 @@ namespace
 		uint64 ScoreHash;
 	};
 
-	constexpr std::array<FFrozenCandidateIdentity, 6> FrozenCandidates = {{
+	constexpr std::array<FFrozenCandidateIdentity, 11> FrozenCandidates = {{
 		{
 			1,
 			2278ull,
@@ -72,7 +82,42 @@ namespace
 			0x80d274a67e1e9944ull,
 			0x3e64212a606348f0ull,
 			0x9de084d9f77c9ee7ull,
-			0xf8b1ff45fa8f1adfull}
+			0xf8b1ff45fa8f1adfull},
+		{
+			7,
+			353ull,
+			0xb3e0f00ca35d499aull,
+			0x48ffe272661916b2ull,
+			0xe7c6c093e3cc9533ull,
+			0x0baef62a673e8e55ull},
+		{
+			8,
+			21ull,
+			0x617687274ed0c29aull,
+			0xa2a41077916aadb2ull,
+			0xaac8ba98079011fdull,
+			0xb77f6d2f3f954005ull},
+		{
+			9,
+			22ull,
+			0x166f0aa067d54328ull,
+			0x11e775a2b20e0b64ull,
+			0x22675cdfb00406d5ull,
+			0xa9bd918ee812d572ull},
+		{
+			10,
+			23ull,
+			0x2b06db2cf348d75full,
+			0xa1d91650dc3d3f36ull,
+			0x99012cedf3d01c06ull,
+			0x22c3f67f46d49e70ull},
+		{
+			11,
+			25ull,
+			0xcb23499fc6f7c9d3ull,
+			0x4f0e3c66a1a0a737ull,
+			0x505f3312ac8ae07full,
+			0xd71f1166493c07aaull}
 	}};
 
 	bool Reject(FString* OutFailure, const FString& Reason)
@@ -265,6 +310,11 @@ FString FABTSM11CandidateExperienceIdentity::ToLogString() const
 }
 
 #if WITH_EDITOR
+
+int32 FABTSM11CandidateExperienceCatalog::GetRequestedCandidateRank()
+{
+	return CVarABTSM11CandidateRank.GetValueOnGameThread();
+}
 
 bool FABTSM11CandidateExperienceCatalog::BuildCandidate(
 	const int32 CandidateRank,

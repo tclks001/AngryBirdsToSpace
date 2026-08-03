@@ -1,0 +1,38 @@
+{
+  "schema": "abts.m11b.v2_2.research_candidate.v1",
+  "status": "candidate_not_certified",
+  "baseCandidateRank": 8,
+  "baseCandidateSourceHash": "0x617687274ed0c29a",
+  "variantSourceHash": "0x166f0aa067d54328",
+  "searchStage": "rank8_rigid_constellation_distance_adjustment",
+  "searchCandidateIndex": 22,
+  "constellationDistanceCM": 100.0,
+  "translationDirection": "normalized_pouch_to_assist1",
+  "relativeCelestialPositionsChanged": false,
+  "nominalInput": {"yawDegrees": 0.0, "pitchDegrees": 30.0, "power": 1.0},
+  "nominalRequestHash": "0x11e775a2b20e0b64",
+  "nominalResultHash": "0x22675cdfb00406d5",
+  "powerThresholdEvidence": {
+    "angularGridDegrees": [1.0, 1.5],
+    "powerRange": [0.74, 0.76],
+    "powerStep": 0.000625,
+    "baseMinimumF1Power": 0.745,
+    "shiftedMinimumF1Power": 0.74625
+  },
+  "refinedClosureEvidence": {
+    "grid": {
+      "yaw": [-4.0, 2.0, 0.25],
+      "pitch": [19.5, 34.5, 0.375],
+      "power": [0.875, 1.0, 0.003125]
+    },
+    "sampleCount": 42025,
+    "prefixCounts": [28040, 21163, 1564, 498],
+    "componentCounts": [1, 1, 2, 1],
+    "largestComponentSizes": [28040, 21163, 1563, 498],
+    "nominalF4": true,
+    "nestingViolations": 0,
+    "aggregateSampleHash": "0xa9bd918ee812d572"
+  },
+  "certificationHash": "0x0000000000000000",
+  "certifiedBundleHash": "0x0000000000000000"
+}

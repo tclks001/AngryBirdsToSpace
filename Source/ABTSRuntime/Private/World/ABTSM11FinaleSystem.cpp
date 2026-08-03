@@ -12,6 +12,47 @@
 
 namespace
 {
+	class FFinaleFrameDiagnosticHash64
+	{
+	public:
+		void AddUInt64(const uint64 Value)
+		{
+			for (int32 Shift = 0; Shift < 64; Shift += 8)
+			{
+				Hash ^= static_cast<uint8>((Value >> Shift) & 0xffull);
+				Hash *= 1099511628211ull;
+			}
+		}
+
+		void AddInt32(const int32 Value)
+		{
+			AddUInt64(static_cast<uint32>(Value));
+		}
+
+		void AddBool(const bool bValue)
+		{
+			AddUInt64(bValue ? 1ull : 0ull);
+		}
+
+		void AddDouble(const double Value)
+		{
+			AddUInt64(static_cast<uint64>(
+				FMath::RoundToInt64(Value * 1000.0)));
+		}
+
+		void AddVector(const FVector& Value)
+		{
+			AddDouble(Value.X);
+			AddDouble(Value.Y);
+			AddDouble(Value.Z);
+		}
+
+		uint64 Get() const { return Hash; }
+
+	private:
+		uint64 Hash = 14695981039346656037ull;
+	};
+
 	bool RejectRuntimeBoundary(
 		FString* OutFailure,
 		const TCHAR* Reason)
@@ -233,6 +274,25 @@ bool AABTSM11FinaleSystem::InitializeFromWorldContract(
 		WorldContract.LaunchFrame);
 }
 
+uint64 AABTSM11FinaleSystem::ComputeFinaleFrameDiagnosticHash(
+	const FABTSM110FinaleLocalFrame& InFinaleFrame)
+{
+	FFinaleFrameDiagnosticHash64 Hash;
+	Hash.AddInt32(InFinaleFrame.LayoutVersion);
+	Hash.AddInt32(InFinaleFrame.LaunchTaskId);
+	Hash.AddInt32(InFinaleFrame.AnchorCellId);
+	Hash.AddInt32(InFinaleFrame.SlotPairId);
+	Hash.AddVector(InFinaleFrame.GetOrigin());
+	Hash.AddVector(InFinaleFrame.GetForward());
+	Hash.AddVector(InFinaleFrame.GetRight());
+	Hash.AddVector(InFinaleFrame.GetUp());
+	Hash.AddVector(InFinaleFrame.WorldTransform.GetScale3D());
+	Hash.AddVector(InFinaleFrame.LeftSlotWorldLocation);
+	Hash.AddVector(InFinaleFrame.RightSlotWorldLocation);
+	Hash.AddBool(InFinaleFrame.bValid);
+	return Hash.Get();
+}
+
 #if WITH_EDITOR
 
 bool AABTSM11FinaleSystem::InitializeFromEditorCandidateRank(
@@ -372,6 +432,31 @@ bool AABTSM11FinaleSystem::CommitValidatedPreset(
 	State = EABTSM11FinaleSystemState::Ready;
 	FailureReason.Reset();
 	DrawCertificationDebugInPIE();
+	const FVector LocalStart(
+		LayoutPreset.LaunchModel.PouchLocalPositionCM);
+	const FVector WorldStart =
+		FinaleFrame.TransformLocalPosition(LocalStart);
+	const int32 CandidateRank = bEditorCandidateMode
+		? EditorCandidateIdentity.Rank
+		: 0;
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11][FinaleFrame] Authority=%s CandidateRank=%d LayoutVersion=%d FrameHash=0x%016llx LaunchTask=%d Anchor=%d Pair=%d LocalStart=%s WorldStart=%s Origin=%s Forward=%s Right=%s Up=%s"),
+		bEditorCandidateMode ? TEXT("PreviewTest") : TEXT("Production"),
+		CandidateRank,
+		FinaleFrame.LayoutVersion,
+		static_cast<unsigned long long>(
+			ComputeFinaleFrameDiagnosticHash(FinaleFrame)),
+		FinaleFrame.LaunchTaskId,
+		FinaleFrame.AnchorCellId,
+		FinaleFrame.SlotPairId,
+		*LocalStart.ToCompactString(),
+		*WorldStart.ToCompactString(),
+		*FinaleFrame.GetOrigin().ToCompactString(),
+		*FinaleFrame.GetForward().ToCompactString(),
+		*FinaleFrame.GetRight().ToCompactString(),
+		*FinaleFrame.GetUp().ToCompactString());
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
