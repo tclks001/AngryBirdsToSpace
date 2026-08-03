@@ -1235,6 +1235,99 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 		!System.HasHudTrajectoryProbe(), Accent);
 }
 
+bool AABTSM11FinaleHUD::ResolveTargetPreviewLayout(
+	const UTextureRenderTarget2D& RenderTarget,
+	FVector2D& OutPosition,
+	FVector2D& OutSize) const
+{
+	OutPosition = FVector2D::ZeroVector;
+	OutSize = FVector2D::ZeroVector;
+	if (Canvas == nullptr || RenderTarget.SizeX <= 0 || RenderTarget.SizeY <= 0)
+	{
+		return false;
+	}
+
+	const float RenderAspect =
+		static_cast<float>(RenderTarget.SizeX)
+		/ static_cast<float>(RenderTarget.SizeY);
+	float PreviewWidth = FMath::Min(
+		PipMaximumWidthPixels,
+		Canvas->SizeX * PipViewportWidthFraction);
+	float PreviewHeight = PreviewWidth / RenderAspect;
+	const float MaximumHeight = FMath::Min(
+		PipMaximumHeightPixels,
+		Canvas->SizeY * PipViewportHeightFraction);
+	if (PreviewHeight > MaximumHeight)
+	{
+		PreviewHeight = MaximumHeight;
+		PreviewWidth = PreviewHeight * RenderAspect;
+	}
+	if (PreviewWidth <= 0.0f || PreviewHeight <= 0.0f)
+	{
+		return false;
+	}
+
+	OutSize = FVector2D(PreviewWidth, PreviewHeight);
+	OutPosition = FVector2D(
+		(Canvas->SizeX - OutSize.X) * 0.5f,
+		PipTopMarginPixels);
+	return true;
+}
+
+void AABTSM11FinaleHUD::DrawTargetPreviewFrame(
+	const FVector2D& Position,
+	const FVector2D& Size,
+	const FString& Title,
+	const FString& Subtitle)
+{
+	if (Canvas == nullptr)
+	{
+		return;
+	}
+
+	DrawRect(
+		FLinearColor(0.02f, 0.06f, 0.11f, 0.80f),
+		Position.X,
+		Position.Y,
+		Size.X,
+		26.0f);
+	DrawText(
+		Title,
+		FLinearColor(0.78f, 0.94f, 1.0f),
+		Position.X + 8.0f,
+		Position.Y + 6.0f,
+		GEngine->GetSmallFont(),
+		0.72f,
+		false);
+	DrawText(
+		Subtitle,
+		FLinearColor(0.68f, 0.84f, 0.92f),
+		Position.X + 8.0f,
+		Position.Y + Size.Y - 18.0f,
+		GEngine->GetSmallFont(),
+		0.58f,
+		false);
+	for (int32 Edge = 0; Edge < 4; ++Edge)
+	{
+		const FVector2D A = Edge == 0 ? Position
+			: Edge == 1 ? FVector2D(Position.X + Size.X, Position.Y)
+			: Edge == 2 ? Position + Size
+			: FVector2D(Position.X, Position.Y + Size.Y);
+		const FVector2D B = Edge == 0
+			? FVector2D(Position.X + Size.X, Position.Y)
+			: Edge == 1 ? Position + Size
+			: Edge == 2 ? FVector2D(Position.X, Position.Y + Size.Y)
+			: Position;
+		DrawLine(
+			A.X,
+			A.Y,
+			B.X,
+			B.Y,
+			FLinearColor(0.48f, 0.82f, 0.98f),
+			1.5f);
+	}
+}
+
 void AABTSM11FinaleHUD::DrawTargetPreview(
 	AABTSM11FinaleInteractionSystem& System)
 {
@@ -1262,20 +1355,13 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 	const float RenderAspect =
 		static_cast<float>(FMath::Max(1, RenderTarget->SizeX))
 		/ static_cast<float>(FMath::Max(1, RenderTarget->SizeY));
-	float PreviewWidth =
-		FMath::Min(420.0f, Canvas->SizeX * 0.34f);
-	float PreviewHeight = PreviewWidth / RenderAspect;
-	const float MaximumHeight =
-		FMath::Min(250.0f, Canvas->SizeY * 0.30f);
-	if (PreviewHeight > MaximumHeight)
+	FVector2D Position;
+	FVector2D Size;
+	if (!ResolveTargetPreviewLayout(*RenderTarget, Position, Size))
 	{
-		PreviewHeight = MaximumHeight;
-		PreviewWidth = PreviewHeight * RenderAspect;
+		CachedPipTrajectory.Reset();
+		return;
 	}
-	const FVector2D Size(PreviewWidth, PreviewHeight);
-	const FVector2D Position(
-		(Canvas->SizeX - Size.X) * 0.5f,
-		24.0f);
 	FCanvasTileItem Tile(
 		Position,
 		RenderTarget->GetResource(),
@@ -1406,13 +1492,9 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 		TargetColor,
 		1.2f);
 
-	DrawRect(
-		FLinearColor(0.02f, 0.06f, 0.11f, 0.75f),
-		Position.X,
-		Position.Y,
-		Size.X,
-		24.0f);
-	DrawText(
+	DrawTargetPreviewFrame(
+		Position,
+		Size,
 		FString::Printf(
 			TEXT("CURRENT APPROACH: %s%s"),
 			TargetLabel(System.GetPreviewSelection().Target),
@@ -1425,50 +1507,9 @@ void AABTSM11FinaleHUD::DrawTargetPreview(
 				: System.GetPreviewSelection().bEnteredTargetRegion
 				? TEXT(" / ENTERED")
 				: TEXT(" / CLOSEST MISS")),
-		FLinearColor(0.78f, 0.92f, 1.0f),
-		Position.X + 8.0f,
-		Position.Y + 5.0f,
-		GEngine->GetSmallFont(),
-		0.75f,
-		false);
-	DrawText(
 		FString::Printf(
 			TEXT("CYAN: CURRENT  /  RING: CLOSEST  /  DIST %.0f cm"),
-			System.GetPreviewSelection().ClosestDistanceCM),
-		FLinearColor(0.62f, 0.84f, 0.94f),
-		Position.X + 8.0f,
-		Position.Y + Size.Y - 18.0f,
-		GEngine->GetSmallFont(),
-		0.58f,
-		false);
-	for (int32 Edge = 0; Edge < 4; ++Edge)
-	{
-		const FVector2D A = Edge == 0
-			? Position
-			: Edge == 1
-				? FVector2D(Position.X + Size.X, Position.Y)
-				: Edge == 2
-					? FVector2D(
-						Position.X + Size.X,
-						Position.Y + Size.Y)
-					: FVector2D(Position.X, Position.Y + Size.Y);
-		const FVector2D B = Edge == 0
-			? FVector2D(Position.X + Size.X, Position.Y)
-			: Edge == 1
-				? FVector2D(
-					Position.X + Size.X,
-					Position.Y + Size.Y)
-				: Edge == 2
-					? FVector2D(Position.X, Position.Y + Size.Y)
-					: Position;
-		DrawLine(
-			A.X,
-			A.Y,
-			B.X,
-			B.Y,
-			FLinearColor(0.48f, 0.76f, 0.94f),
-			1.5f);
-	}
+			System.GetPreviewSelection().ClosestDistanceCM));
 }
 
 void AABTSM11FinaleHUD::DrawProbeTargetPreview(
@@ -1484,16 +1525,12 @@ void AABTSM11FinaleHUD::DrawProbeTargetPreview(
 	const float RenderAspect =
 		static_cast<float>(FMath::Max(1, RenderTarget.SizeX))
 		/ static_cast<float>(FMath::Max(1, RenderTarget.SizeY));
-	float PreviewWidth = FMath::Min(480.0f, Canvas->SizeX * 0.38f);
-	float PreviewHeight = PreviewWidth / RenderAspect;
-	const float MaximumHeight = FMath::Min(280.0f, Canvas->SizeY * 0.33f);
-	if (PreviewHeight > MaximumHeight)
+	FVector2D Position;
+	FVector2D Size;
+	if (!ResolveTargetPreviewLayout(RenderTarget, Position, Size))
 	{
-		PreviewHeight = MaximumHeight;
-		PreviewWidth = PreviewHeight * RenderAspect;
+		return;
 	}
-	const FVector2D Size(PreviewWidth, PreviewHeight);
-	const FVector2D Position((Canvas->SizeX - Size.X) * 0.5f, 24.0f);
 	FCanvasTileItem Tile(
 		Position,
 		RenderTarget.GetResource(),
@@ -1723,47 +1760,17 @@ void AABTSM11FinaleHUD::DrawProbeTargetPreview(
 		}
 	}
 
-	DrawRect(
-		FLinearColor(0.02f, 0.06f, 0.11f, 0.80f),
-		Position.X,
-		Position.Y,
-		Size.X,
-		26.0f);
-	DrawText(
+	DrawTargetPreviewFrame(
+		Position,
+		Size,
 		FString::Printf(
 			TEXT("%s  /  %s"),
 			SemanticLegLabel(Probe.Leg),
 			ProbeRemapLabel(Current.Status)),
-		FLinearColor(0.78f, 0.94f, 1.0f),
-		Position.X + 8.0f,
-		Position.Y + 6.0f,
-		GEngine->GetSmallFont(),
-		0.72f,
-		false);
-	DrawText(
 		FString::Printf(
 			TEXT("PHASE %.1f%%  /  GRAY REFERENCE  /  CYAN CURRENT  /  DIST %.0f cm"),
 			Probe.PhaseWithinLeg * 100.0,
-			Current.bValid ? Current.ContextDistanceCM : 0.0),
-		FLinearColor(0.68f, 0.84f, 0.92f),
-		Position.X + 8.0f,
-		Position.Y + Size.Y - 18.0f,
-		GEngine->GetSmallFont(),
-		0.58f,
-		false);
-	for (int32 Edge = 0; Edge < 4; ++Edge)
-	{
-		const FVector2D A = Edge == 0 ? Position
-			: Edge == 1 ? FVector2D(Position.X + Size.X, Position.Y)
-			: Edge == 2 ? Position + Size
-			: FVector2D(Position.X, Position.Y + Size.Y);
-		const FVector2D B = Edge == 0 ? FVector2D(Position.X + Size.X, Position.Y)
-			: Edge == 1 ? Position + Size
-			: Edge == 2 ? FVector2D(Position.X, Position.Y + Size.Y)
-			: Position;
-		DrawLine(A.X, A.Y, B.X, B.Y,
-			FLinearColor(0.48f, 0.82f, 0.98f), 1.5f);
-	}
+			Current.bValid ? Current.ContextDistanceCM : 0.0));
 }
 
 void AABTSM11FinaleHUD::DrawTargetWedge(

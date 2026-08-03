@@ -61,6 +61,15 @@ private:
 	void DrawProbeTargetPreview(
 		AABTSM11FinaleInteractionSystem& System,
 		UTextureRenderTarget2D& RenderTarget);
+	bool ResolveTargetPreviewLayout(
+		const UTextureRenderTarget2D& RenderTarget,
+		FVector2D& OutPosition,
+		FVector2D& OutSize) const;
+	void DrawTargetPreviewFrame(
+		const FVector2D& Position,
+		const FVector2D& Size,
+		const FString& Title,
+		const FString& Subtitle);
 	void DrawTargetWedge(
 		AABTSM11FinaleInteractionSystem& System);
 	void DrawFailureOverlay(
@@ -180,6 +189,26 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP",
 		meta = (ClampMin = "0.5", ClampMax = "6.0"))
 	float PipCurrentLineThickness = 2.6f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP|Layout",
+		meta = (ClampMin = "160.0", ClampMax = "960.0"))
+	float PipMaximumWidthPixels = 420.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP|Layout",
+		meta = (ClampMin = "0.1", ClampMax = "0.8"))
+	float PipViewportWidthFraction = 0.34f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP|Layout",
+		meta = (ClampMin = "90.0", ClampMax = "540.0"))
+	float PipMaximumHeightPixels = 250.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP|Layout",
+		meta = (ClampMin = "0.1", ClampMax = "0.8"))
+	float PipViewportHeightFraction = 0.30f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP|Layout",
+		meta = (ClampMin = "0.0", ClampMax = "240.0"))
+	float PipTopMarginPixels = 24.0f;
 
 	FABTSM11TargetPipTrajectory CachedPipTrajectory;
 	FABTSM11TargetWedgeTracker TargetWedgeTracker;

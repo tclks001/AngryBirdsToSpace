@@ -540,6 +540,7 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 - Probe PIP 标题改为可读的阶段名，冻结天体作用圈和视觉轮廓作为空间参照；灰色虚线是点击参考，青色实线是当前结果，菱形与速度切线显示同一语义相位的新位置；
 - 当前 Probe 或 Auto PIP 最近接点离开局部视框时，不再把标记画到画框外，而是在内缩边框绘制方向箭头；miss、提前终止和精确重映射使用不同状态文字与颜色；
 - Scene Capture 仍只在自动目标切换、新 Probe、Rebase 或返回 Auto PIP 时刷新，旋钮连续调参仅重投影 HUD 线条；低模资产以后绑定到既有 `AssistPlanetMeshes[0..2]`，两套 PIP 自动消费真实 Actor，不写回求解数据；
+- Auto PIP 与轨迹点选 Probe PIP 复用同一渲染目标，并通过同一个 HUD 布局与边框绘制入口确定尺寸、位置、标题栏和外框；两种模式只保留镜头语义与叠加信息的差异，切换时画框不再跳动；
 - 2026-08-03 Development Editor 全链接通过；fresh NullRHI `ABTS.M11C.HUD.Unit` 为 `8/8`，`ABTS.M11C.Unit` 为 `8/8`。自动化证明数据、闭包和离屏数学，不代替下方可见 PIE 清单。
 
 ### M11-D 保留内容
