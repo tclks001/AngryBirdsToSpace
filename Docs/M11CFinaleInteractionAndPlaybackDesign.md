@@ -1,6 +1,6 @@
 # M11-C：终局轨道交互、全景 HUD 与确定性实飞
 
-> 状态：M11-B v1 已完成用户 PIE 验收；M11-C v1 初版与既有 PIE 回归修复的 C++、强制完整 Unity 全链接、全新进程 Unit/Runtime、21,025 输入/558 F4 接管闭包及上游快速回归均已通过。M11-C v2.1 本轮已实现稳定 PIP 局部当前轨迹、单目标 Wedge、Release 后权威轨迹相机和表现缓存优化；Search v3 权威 4096-work merge、2 个 `Candidate / NOT CERTIFIED` 的 Catalog 重冻、默认/强制 Unity 全链接及 `33/33` fresh-process 自动门均已完成。当前只等待第 12 节用户有渲染 PIE；本文不宣称本轮 PIE 已验收。
+> 状态：M11-B v1 已完成用户 PIE 验收；M11-C v1 初版与既有 PIE 回归修复的 C++、强制完整 Unity 全链接、全新进程 Unit/Runtime、21,025 输入/558 F4 接管闭包及上游快速回归均已通过。M11-C v2.1 本轮已实现稳定 PIP 局部当前轨迹、单目标 Wedge、Release 后权威轨迹相机和表现缓存优化；HUD-1A/1B 已完成，HUD-1C 首轮调优代码及 fresh 自动门也已通过。Search v3 权威 4096-work merge、2 个 `Candidate / NOT CERTIFIED` 的 Catalog 重冻、默认/强制 Unity 全链接及 `33/33` fresh-process 自动门均已完成。当前仍等待第 12 节与 HUD-1C 清单的用户有渲染 PIE；本文不宣称本轮 PIE 已验收。
 >
 > v2 说明：本文以下保留 v1 生产合同，并在对应章节明确追加 v2.1 Editor-only 实现。M11-B v2.1 的 Search/Algorithm/Manifest v3 Candidate 仍未完成全输入域认证，只能进入 M11-C v2.1 手感比较；M6 同手感、三维输入映射和 near-frame latest-only 预演边界见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)。`Candidate / NOT CERTIFIED` 不得写入生产默认值，正式生产仍保持 v1，切换到 v2 必须等待 M11-B v2.2 Certified Bundle。
 >
@@ -124,8 +124,8 @@ M11-D 可以在 `TargetHit` 后接救援演出，并扩展 `Failed/Recovering` �
 
 - `IsFinaleSpaceSlingshot()==true` 时由 M11 拦截，M11 依赖无效也 fail-closed，绝不落入 M6 Chaos Release；
 - Twig/Simple/Reinforced 等普通弹弓继续走 M6 public 状态机；
-- 点击 Space 弹弓袋的同一次按下即进入拖拽；保持按下移动可见鼠标来拖动袋，匹配的同一次松开立即 Release，与普通 M6 弹弓一致；
-- M11 活跃时保持光标可见，使用 `GameAndUI` 与绝对屏幕位置映射袋的位置；仅临时关闭 Actor click/mouse-over 防止事件泄漏，滚轮独立调 Power，退出后恢复原控制和点击设置；
+- 点击 Space 弹弓袋只进入终局控制台，不再把同一次鼠标松开解释为 Release；`Yaw / Pitch / Power` 由三旋钮和 `1× / 0.1× / 0.01×` 调速控制，只有独立 `LAUNCH` 按钮提交；
+- M11 活跃时保持光标可见，使用 `GameAndUI` 路由 HUD Capture；Select 只选择语义轨迹探针，Move 只平移/旋转/缩放冻结全览，退出后恢复原控制和点击设置；
 - 袋和鸟的表现位置随 `Yaw/Pitch/Power` 移动，求解器 Pouch 初始位置始终保持冻结的 canonical 值；
 - M6 原绑定即使仍被调用，也因 Space 从未进入 M6 状态而无权发射。
 

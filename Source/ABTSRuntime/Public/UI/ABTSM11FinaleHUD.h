@@ -122,6 +122,64 @@ private:
 		double ValueAlpha,
 		const FString& ValueText,
 		bool bCaptured);
+	void DrawPipEdgeIndicator(
+		const FVector2D& Position,
+		const FVector2D& Size,
+		const FVector2d& PointUV,
+		const FLinearColor& Color,
+		const FString& Label);
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
+		meta = (ClampMin = "0.25", ClampMax = "4.0"))
+	double KnobDragSensitivity = 1.0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
+		meta = (ClampMin = "0.25", ClampMax = "4.0"))
+	double KnobWheelSensitivity = 1.0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
+		meta = (ClampMin = "0.02", ClampMax = "0.08"))
+	float KnobRadiusViewportHeightFraction = 0.044f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
+		meta = (ClampMin = "20.0", ClampMax = "80.0"))
+	float MinimumKnobRadiusPixels = 30.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
+		meta = (ClampMin = "20.0", ClampMax = "100.0"))
+	float MaximumKnobRadiusPixels = 42.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Selection",
+		meta = (ClampMin = "4.0", ClampMax = "40.0"))
+	double TrajectoryHitRadiusPixels = 12.0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Selection",
+		meta = (ClampMin = "4.0", ClampMax = "48.0"))
+	double TrajectoryScrubHitRadiusPixels = 16.0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Move",
+		meta = (ClampMin = "0.1", ClampMax = "4.0"))
+	double OverviewPanSensitivity = 1.0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Move",
+		meta = (ClampMin = "0.02", ClampMax = "1.0"))
+	double OverviewOrbitDegreesPerPixel = 0.22;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Move",
+		meta = (ClampMin = "1.01", ClampMax = "1.5"))
+	double OverviewZoomPerWheelStep = 1.12;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP",
+		meta = (ClampMin = "0.02", ClampMax = "0.20"))
+	double PipEdgeMarginUV = 0.065;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP",
+		meta = (ClampMin = "0.5", ClampMax = "5.0"))
+	float PipReferenceLineThickness = 1.3f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP",
+		meta = (ClampMin = "0.5", ClampMax = "6.0"))
+	float PipCurrentLineThickness = 2.6f;
 
 	FABTSM11TargetPipTrajectory CachedPipTrajectory;
 	FABTSM11TargetWedgeTracker TargetWedgeTracker;
@@ -132,6 +190,7 @@ private:
 		EABTSM11OverviewInteractionMode::Select;
 	FVector2D LastCapturedPointer = FVector2D::ZeroVector;
 	FABTSM11TrajectoryHit PendingTrajectoryHit;
+	FABTSM11TrajectoryHit HoveredTrajectoryHit;
 	FVector2D HudDiagramCenter = FVector2D::ZeroVector;
 	float HudDiagramRadius = 1.0f;
 	TStaticArray<FVector2D, 3> HudKnobCenters;

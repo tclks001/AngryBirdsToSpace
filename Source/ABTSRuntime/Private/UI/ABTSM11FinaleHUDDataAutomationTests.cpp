@@ -554,4 +554,38 @@ bool FABTSM11HudInputCaptureTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11HudPipEdgeIndicatorTest,
+	"ABTS.M11C.HUD.Unit.PipEdgeIndicator",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11HudPipEdgeIndicatorTest::RunTest(const FString& Parameters)
+{
+	FABTSM11PipEdgeIndicator Indicator;
+	TestTrue(TEXT("An in-frame point is a valid no-cue result"),
+		ABTSM11BuildPipEdgeIndicator(
+			FVector2d(0.25, 0.75), 0.05, Indicator));
+	TestFalse(TEXT("An in-frame point does not show an edge cue"),
+		Indicator.bVisible);
+
+	TestTrue(TEXT("A right-side point produces an edge cue"),
+		ABTSM11BuildPipEdgeIndicator(
+			FVector2d(1.40, 0.70), 0.08, Indicator));
+	TestTrue(TEXT("The right-side cue is visible"), Indicator.bVisible);
+	TestTrue(TEXT("The cue anchor stays on the inset frame"),
+		FMath::IsNearlyEqual(Indicator.AnchorUV.X, 0.92, 1.0e-9)
+			&& Indicator.AnchorUV.Y >= 0.08
+			&& Indicator.AnchorUV.Y <= 0.92);
+	TestTrue(TEXT("The cue points towards the off-screen sample"),
+		Indicator.DirectionUV.X > 0.0
+			&& Indicator.DirectionUV.Y > 0.0);
+	TestTrue(TEXT("The cue reports positive overshoot"),
+		Indicator.OvershootUV > 0.0);
+
+	TestFalse(TEXT("An invalid inset fails closed"),
+		ABTSM11BuildPipEdgeIndicator(
+			FVector2d(2.0, 0.5), 0.5, Indicator));
+	return true;
+}
+
 #endif

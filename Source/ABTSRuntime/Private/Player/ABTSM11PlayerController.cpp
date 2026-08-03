@@ -64,9 +64,7 @@ void AABTSM11PlayerController::PlayerTick(const float DeltaTime)
 	}
 	if (bActive
 		&& !bRestoreOrbitCursorThisFrame
-		&& Interaction->IsAiming()
-		&& (IsInputKeyDown(EKeys::LeftMouseButton)
-			|| IsInputKeyDown(EKeys::RightMouseButton)))
+		&& Interaction->IsAiming())
 	{
 		float MouseX = 0.0f;
 		float MouseY = 0.0f;

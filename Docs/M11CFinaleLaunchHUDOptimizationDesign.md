@@ -1,6 +1,6 @@
 # M11-C/HUD-1：终局发射控制台、轨迹探针与联动画中画
 
-> 状态：HUD-1A 纯数据原型与 HUD-1B 运行时接线已实现并通过自动化；有渲染 PIE 手感验收与 HUD-1C 调优尚未开始。
+> 状态：HUD-1A 纯数据原型、HUD-1B 运行时接线和 HUD-1C 首轮有渲染调优代码均已实现并通过自动化；HUD-1C 可见 PIE 手感验收尚待用户执行。三颗行星低模槽已经存在，但资产导入与绑定等待美术资源就绪后单独完成。
 >
 > 父级：[M11-C 终局轨道交互、全景 HUD 与确定性实飞](M11CFinaleInteractionAndPlaybackDesign.md)。
 >
@@ -440,6 +440,7 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 | `ABTS.M11C.HUD.Unit.FrozenPipView` | 新结果不改变 ViewForward/Up/Scale；退化法线不翻转 |
 | `ABTS.M11C.HUD.Unit.ProbeRemap` | pass→miss、提前终止、跨 prefix 回退和 Rebase |
 | `ABTS.M11C.HUD.Unit.InputCapture` | 各 Capture 互斥、松开不发射、Launch 唯一入口 |
+| `ABTS.M11C.HUD.Unit.PipEdgeIndicator` | 当前探针或最近接点离开冻结 PIP 后，方向标记稳定落在内缩边框且指向正确 |
 
 ### 10.2 Runtime 自动化
 
@@ -531,6 +532,15 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 - PIP 构图、参考线对比、标签和离屏提示；
 - 平移速度、轨迹球速度、Zoom 与局部轴自由旋转手感；
 - 性能和输入焦点回归。
+
+实现状态：
+
+- `AABTSM11FinaleHUD` 暴露旋钮半径、拖动/滚轮增益、Select 命中半径、Scrub 命中半径、Move 平移/旋转/缩放增益、PIP 边缘留白和参考/当前线宽；默认值保持 HUD-1B 已验收行为附近，不改输入合法域；
+- Select 模式加入悬停段反馈，显示命中的 `SemanticLeg`，拖动时使用更宽的独立命中半径；交叉段仍复用“距离、实线、当前语义段、较早 solver time”的确定性优先级；
+- Probe PIP 标题改为可读的阶段名，冻结天体作用圈和视觉轮廓作为空间参照；灰色虚线是点击参考，青色实线是当前结果，菱形与速度切线显示同一语义相位的新位置；
+- 当前 Probe 或 Auto PIP 最近接点离开局部视框时，不再把标记画到画框外，而是在内缩边框绘制方向箭头；miss、提前终止和精确重映射使用不同状态文字与颜色；
+- Scene Capture 仍只在自动目标切换、新 Probe、Rebase 或返回 Auto PIP 时刷新，旋钮连续调参仅重投影 HUD 线条；低模资产以后绑定到既有 `AssistPlanetMeshes[0..2]`，两套 PIP 自动消费真实 Actor，不写回求解数据；
+- 2026-08-03 Development Editor 全链接通过；fresh NullRHI `ABTS.M11C.HUD.Unit` 为 `8/8`，`ABTS.M11C.Unit` 为 `8/8`。自动化证明数据、闭包和离屏数学，不代替下方可见 PIE 清单。
 
 ### M11-D 保留内容
 

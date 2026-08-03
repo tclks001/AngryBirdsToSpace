@@ -360,6 +360,26 @@ struct ABTSRUNTIME_API FABTSM11ProbeProjection
 	bool bValid = false;
 };
 
+/**
+ * Stable edge cue for a point that has left a normalized PIP viewport.
+ *
+ * AnchorUV is clamped to the inset viewport rectangle. DirectionUV points
+ * from the viewport centre towards the off-screen point and is suitable for
+ * orienting an arrow head. OvershootUV is diagnostic only.
+ */
+struct ABTSRUNTIME_API FABTSM11PipEdgeIndicator
+{
+	FVector2d AnchorUV = FVector2d(0.5, 0.5);
+	FVector2d DirectionUV = FVector2d::ZeroVector;
+	double OvershootUV = 0.0;
+	bool bVisible = false;
+};
+
+ABTSRUNTIME_API bool ABTSM11BuildPipEdgeIndicator(
+	const FVector2d& PointUV,
+	double MarginUV,
+	FABTSM11PipEdgeIndicator& OutIndicator);
+
 class ABTSRUNTIME_API FABTSM11TrajectoryProbeBuilder final
 {
 public:

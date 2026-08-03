@@ -1498,3 +1498,63 @@ bool FABTSM11TrajectoryProbeResolver::Resolve(
 		&& FMath::IsFinite(OutProjection.ContextDistanceCM);
 	return OutProjection.bValid;
 }
+
+bool ABTSM11BuildPipEdgeIndicator(
+	const FVector2d& PointUV,
+	const double MarginUV,
+	FABTSM11PipEdgeIndicator& OutIndicator)
+{
+	OutIndicator = FABTSM11PipEdgeIndicator();
+	if (!FMath::IsFinite(PointUV.X)
+		|| !FMath::IsFinite(PointUV.Y)
+		|| !FMath::IsFinite(MarginUV)
+		|| MarginUV < 0.0
+		|| MarginUV >= 0.5)
+	{
+		return false;
+	}
+
+	const double Minimum = MarginUV;
+	const double Maximum = 1.0 - MarginUV;
+	if (PointUV.X >= Minimum && PointUV.X <= Maximum
+		&& PointUV.Y >= Minimum && PointUV.Y <= Maximum)
+	{
+		return true;
+	}
+
+	const FVector2d Center(0.5, 0.5);
+	const FVector2d Ray = PointUV - Center;
+	const double RayLength = Ray.Length();
+	if (RayLength <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	double Scale = TNumericLimits<double>::Max();
+	if (Ray.X > UE_DOUBLE_SMALL_NUMBER)
+	{
+		Scale = FMath::Min(Scale, (Maximum - Center.X) / Ray.X);
+	}
+	else if (Ray.X < -UE_DOUBLE_SMALL_NUMBER)
+	{
+		Scale = FMath::Min(Scale, (Minimum - Center.X) / Ray.X);
+	}
+	if (Ray.Y > UE_DOUBLE_SMALL_NUMBER)
+	{
+		Scale = FMath::Min(Scale, (Maximum - Center.Y) / Ray.Y);
+	}
+	else if (Ray.Y < -UE_DOUBLE_SMALL_NUMBER)
+	{
+		Scale = FMath::Min(Scale, (Minimum - Center.Y) / Ray.Y);
+	}
+	if (!FMath::IsFinite(Scale) || Scale < 0.0)
+	{
+		return false;
+	}
+
+	OutIndicator.AnchorUV = Center + Ray * Scale;
+	OutIndicator.DirectionUV = Ray / RayLength;
+	OutIndicator.OvershootUV = (PointUV - OutIndicator.AnchorUV).Length();
+	OutIndicator.bVisible = true;
+	return true;
+}
