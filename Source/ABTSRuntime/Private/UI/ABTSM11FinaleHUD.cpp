@@ -9,6 +9,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Game/ABTSM11GameMode.h"
 #include "GameFramework/PlayerController.h"
+#include "SceneView.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
 
@@ -144,17 +145,10 @@ void AABTSM11FinaleHUD::UpdateFinaleHudLayout(
 FVector2D AABTSM11FinaleHUD::ToHudCanvasPosition(
 	const FVector2D& ViewportPosition) const
 {
-	int32 ViewportWidth = 0;
-	int32 ViewportHeight = 0;
-	if (const APlayerController* Controller = GetOwningPlayerController())
-	{
-		Controller->GetViewportSize(ViewportWidth, ViewportHeight);
-	}
 	return ABTSM11MapViewportPointToHudCanvas(
 		ViewportPosition,
-		FVector2D(
-			static_cast<float>(ViewportWidth),
-			static_cast<float>(ViewportHeight)),
+		HudPlayerViewOrigin,
+		HudPlayerViewSize,
 		HudCanvasSize);
 }
 
@@ -203,6 +197,10 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 		{
 			Controller->GetViewportSize(Width, Height);
 		}
+		HudPlayerViewOrigin = FVector2D::ZeroVector;
+		HudPlayerViewSize = FVector2D(
+			static_cast<float>(Width),
+			static_cast<float>(Height));
 		UpdateFinaleHudLayout(
 			static_cast<float>(Width),
 			static_cast<float>(Height));
@@ -439,9 +437,22 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 	{
 		return;
 	}
-	// UCanvas draws in DPI-adjusted Clip space. SizeX/SizeY remain raw
-	// viewport pixels, so using them here shifts rendered controls away from
-	// hit boxes whenever the platform Canvas DPI is not 1.0.
+	// GameViewportClient translates the Canvas by UnscaledViewRect.Min before
+	// AHUD::DrawHUD. Mouse input remains relative to the full viewport, so the
+	// same player-view origin and extent must be retained for hit testing.
+	if (Canvas->SceneView != nullptr)
+	{
+		const FIntRect& PlayerViewRect =
+			Canvas->SceneView->UnscaledViewRect;
+		HudPlayerViewOrigin = FVector2D(PlayerViewRect.Min);
+		HudPlayerViewSize = FVector2D(PlayerViewRect.Size());
+	}
+	else
+	{
+		HudPlayerViewOrigin = FVector2D::ZeroVector;
+		HudPlayerViewSize = FVector2D(Canvas->SizeX, Canvas->SizeY);
+	}
+	// ClipX/ClipY are the logical Canvas extent after any Canvas DPI scale.
 	UpdateFinaleHudLayout(Canvas->ClipX, Canvas->ClipY);
 	DrawOrbitalDiagram(System, HudDiagramCenter, HudDiagramRadius);
 	if (System.IsAiming())

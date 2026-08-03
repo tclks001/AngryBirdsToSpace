@@ -133,10 +133,11 @@ ABTSRUNTIME_API bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
 	bool bAutomaticTargetChanged,
 	bool bExplicitProbeMutation);
 
-/** Maps raw viewport mouse pixels into the logical Canvas space used by AHUD. */
+/** Maps full-viewport pixels into the translated/scaled player HUD Canvas. */
 ABTSRUNTIME_API FVector2D ABTSM11MapViewportPointToHudCanvas(
 	const FVector2D& ViewportPoint,
-	const FVector2D& ViewportSize,
+	const FVector2D& PlayerViewOrigin,
+	const FVector2D& PlayerViewSize,
 	const FVector2D& HudCanvasSize);
 
 struct ABTSRUNTIME_API FABTSM11OrbitalScenePoint

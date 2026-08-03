@@ -139,6 +139,8 @@ private:
 	FBox2D HudResetViewButton;
 	FBox2D HudRebasePipButton;
 	FBox2D HudFollowAutoButton;
+	FVector2D HudPlayerViewOrigin = FVector2D::ZeroVector;
+	FVector2D HudPlayerViewSize = FVector2D::ZeroVector;
 	FVector2D HudCanvasSize = FVector2D::ZeroVector;
 	bool bHudLayoutValid = false;
 };

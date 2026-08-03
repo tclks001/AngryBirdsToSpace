@@ -598,19 +598,21 @@ bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
 
 FVector2D ABTSM11MapViewportPointToHudCanvas(
 	const FVector2D& ViewportPoint,
-	const FVector2D& ViewportSize,
+	const FVector2D& PlayerViewOrigin,
+	const FVector2D& PlayerViewSize,
 	const FVector2D& HudCanvasSize)
 {
-	if (ViewportSize.X <= KINDA_SMALL_NUMBER
-		|| ViewportSize.Y <= KINDA_SMALL_NUMBER
+	if (PlayerViewSize.X <= KINDA_SMALL_NUMBER
+		|| PlayerViewSize.Y <= KINDA_SMALL_NUMBER
 		|| HudCanvasSize.X <= KINDA_SMALL_NUMBER
 		|| HudCanvasSize.Y <= KINDA_SMALL_NUMBER)
 	{
 		return ViewportPoint;
 	}
+	const FVector2D PlayerViewPoint = ViewportPoint - PlayerViewOrigin;
 	return FVector2D(
-		ViewportPoint.X * HudCanvasSize.X / ViewportSize.X,
-		ViewportPoint.Y * HudCanvasSize.Y / ViewportSize.Y);
+		PlayerViewPoint.X * HudCanvasSize.X / PlayerViewSize.X,
+		PlayerViewPoint.Y * HudCanvasSize.Y / PlayerViewSize.Y);
 }
 
 bool FABTSM11TrajectorySemanticSegment::IsValid(
