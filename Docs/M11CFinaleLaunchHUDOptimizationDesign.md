@@ -62,7 +62,7 @@ HUD 只改变输入方式，不改变 M11-A 的积分语义、M11-B 的输入域
 | 模式 | 鼠标行为 | 是否改变发射输入 | 是否改变观察相机 |
 |---|---|---:|---:|
 | `Select` | 悬停/点击/沿轨迹拖动探针 | 否 | 否 |
-| `Rotate` | 虚拟轨迹球旋转，滚轮缩放 | 否 | 是 |
+| `Move` | 左键平移枢轴、右键绕枢轴旋转，滚轮缩放 | 否 | 是 |
 
 模式按钮必须显式高亮。任何时刻只有一个轨道图输入捕获者。
 
@@ -86,7 +86,7 @@ OverviewViewState
 - 不重新自适应缩放掩盖轨迹偏移；
 - 越出圆形视口的轨迹被裁剪，并用边缘方向标记提示去向。
 
-只有 `Rotate` 模式允许整体视角旋转，此时天体、轨迹、经纬网和探针一起重投影。`RESET VIEW` 恢复进入 Attempt 时由冻结布局和基准轨迹建立的默认视图。
+只有 `Move` 模式允许平移枢轴、整体视角旋转和缩放，此时天体、轨迹、经纬网和探针一起重投影。初始枢轴是“完整轨迹 + 三颗助推行星 + UFO”的三维包围球中心；主星不参与包围球，避免为了完整容纳主星而压缩终局路径。`RESET VIEW` 恢复进入 Attempt 时冻结的包围球中心、方向和缩放。Select 模式只读取当前投影，不使用选择结果拟合、吸附或修改枢轴。
 
 这条约束是轨迹变化可读性的前提。如果每次新解都重新居中或缩放，玩家的输入效果会被相机抵消。
 
@@ -313,22 +313,24 @@ ViewCenter 和尺度一次性包住：
 
 这相当于测量工具的重新置零，不能自动触发。
 
-## 6. 轨道全览 Rotate 模式
+## 6. 轨道全览 Move 模式
 
-Rotate 模式采用虚拟轨迹球：
+Move 模式采用显式三维枢轴与局部轨迹球：
 
-- 左键拖动：绕全览中心旋转；
+- 左键拖动：在当前屏幕 Right/Up 平面内平移枢轴，使内容跟随鼠标；
+- 右键拖动：绕投影在全览中心的枢轴旋转；
 - 滚轮：缩放；
 - 双击或 `RESET VIEW`：恢复 Attempt 默认视角；
-- 水平拖动绕当前屏幕 Up，垂直拖动绕当前屏幕 Right，不再约束世界空间稳定 Up；
+- 右键水平拖动绕当前屏幕 Up，垂直拖动绕当前屏幕 Right，不再约束世界空间稳定 Up；
 - 不提供独立滚转输入，但连续局部轴拖动组合后允许相对世界的滚转自然累积；
-- 旋转只修改 `OverviewViewState`，不递增 AimRevision，不启动求解器。
+- 平移、旋转和缩放只修改 `OverviewViewState`，不递增 AimRevision，不启动求解器；
+- 暂不解析屏幕中心射线的深度歧义，也不吸附轨迹点或天体；左键平移始终沿当前枢轴深度所在的观察平面工作。
 
 若已经存在 Probe：
 
 - 全览中的 Probe glyph 随整体视图重投影；
 - PIP 的 FrozenPipView 保持不变；
-- Rotate 不重新选择轨迹点，也不改变 ContextBody。
+- Move 不重新选择轨迹点，也不改变 ContextBody。
 
 这种分离允许玩家转动全览理解三维形态，同时让局部对比画面保持一个稳定测量基准。
 
@@ -341,6 +343,7 @@ FinaleHudCapture
   AdjustPitch
   AdjustPower
   ScrubTrajectoryProbe
+  PanOverview
   RotateOverview
   AdjustOverviewZoom
 ```
@@ -352,7 +355,7 @@ FinaleHudCapture
 3. 鼠标离开控件后仍由原 Capture 接收，直至松开或焦点丢失；
 4. 焦点丢失只取消操作，不回滚已生效输入，也不发射；
 5. `LAUNCH` 只在 `None` 或其自身按钮按下时生效；
-6. `RotateOverview` 和 Probe 操作永不调用 `ApplyAbsoluteCursorAim()`；
+6. `PanOverview`、`RotateOverview` 和 Probe 操作永不调用 `ApplyAbsoluteCursorAim()`；
 7. Release 后全部控制禁用，权威飞行相机接管。
 
 ## 8. 数据与代码边界建议
@@ -512,13 +515,13 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 实现状态：
 
 - `AABTSM11PlayerController` 已停止把太空弹弓入口点击/任意鼠标松开解释为 Release；入口仅开启控制台，只有 `LAUNCH` 捕获在按钮内松开时调用 `RequestRelease()`；
-- `AABTSM11FinaleHUD` 已接入三旋钮、三档倍率、Select/Rotate、Reset View、Rebase 和 Auto PIP，并以独占 `FinaleHudCapture` 路由按下、持续拖动、松开与焦点丢失；
+- `AABTSM11FinaleHUD` 已接入三旋钮、三档倍率、Select/Move、Reset View、Rebase 和 Auto PIP，并以独占 `FinaleHudCapture` 路由按下、持续拖动、松开与焦点丢失；Move 内左键平移、右键旋转，Select 不修改枢轴；
 - 旋钮拖动和滚轮微调经 `FABTSM11FinaleControlPanelState` 映射后进入现有 Stabilizer，继续复用 latest-only 异步求解、Preview/Release 同输入 Hash 和前缀稳定器；
-- `AABTSM11FinaleInteractionSystem` 在首份发布结果上冻结 Attempt 级 `OverviewViewState`，后续 Aim 变化只替换轨迹场景并重投影；Rotate/Zoom 不递增 `AimRevision`、不启动 Solve；
+- `AABTSM11FinaleInteractionSystem` 在首份发布结果上以轨迹、三颗助推行星和 UFO 的三维包围球中心冻结 Attempt 级 `OverviewViewState`，后续 Aim 变化只替换轨迹场景并重投影；Move/Zoom 不递增 `AimRevision`、不启动 Solve；
 - Select 松开后创建 `TrajectoryProbe`，Scrub 过程中不反复 Scene Capture；后续新结果仅执行语义重映射和 HUD 轨迹叠加；
 - Probe PIP 使用冻结正交视框，灰色虚线显示点选时参考轨迹，青色实线显示 latest-only 当前轨迹；closest miss 和提前终止状态显式显示；
 - 静态 Scene Capture 只在首次自动目标、自动目标切换、新 Probe、Rebase 或返回 Auto PIP 时刷新；Aim-only 更新不刷新；
-- 全览天体、主星绝对经纬网、作用圈、UFO 和轨迹使用同一冻结三维投影；只有 Rotate 模式允许整体重投影；
+- 全览天体、主星绝对经纬网、作用圈、UFO 和轨迹使用同一冻结三维投影；只有 Move 模式允许平移枢轴和整体重投影；
 - 新增 `TargetCaptureCount / HudOverviewRevision / HudProbeRevision` 运行时诊断计数，供 HUD-1C PIE 性能与行为验收使用。
 
 ### HUD-1C：有渲染 PIE 调优
@@ -526,7 +529,7 @@ Rotate 不允许触发 M11-A Solve。选择拖动过程中可实时移动 Probe�
 - 旋钮尺寸、拖动增益和倍率；
 - 命中半径、交叉段选择；
 - PIP 构图、参考线对比、标签和离屏提示；
-- 轨迹球速度、Zoom 与局部轴自由旋转手感；
+- 平移速度、轨迹球速度、Zoom 与局部轴自由旋转手感；
 - 性能和输入焦点回归。
 
 ### M11-D 保留内容

@@ -149,6 +149,35 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 			FVector3d::ForwardVector,
 			FVector3d::RightVector,
 			2000000.0));
+	FABTSM11OrbitalSceneSnapshot BoundsScene;
+	BoundsScene.bValid = true;
+	BoundsScene.Trajectory.SetNum(2);
+	BoundsScene.Trajectory[0].PositionCM = FVector3d(-10.0, -20.0, -30.0);
+	BoundsScene.Trajectory[1].PositionCM = FVector3d(30.0, 40.0, 50.0);
+	BoundsScene.Bodies[1].CenterCM = FVector3d(100.0, 0.0, 0.0);
+	BoundsScene.Bodies[1].VisualRadiusCM = 10.0;
+	BoundsScene.TargetCenterCM = FVector3d(0.0, 200.0, 0.0);
+	BoundsScene.TargetRadiusCM = 20.0;
+	FABTSM11OverviewViewState BoundsView;
+	TestTrue(TEXT("Overview initializes from the route bounding sphere"),
+		BoundsView.InitializeFromScene(
+			BoundsScene,
+			FVector3d::ForwardVector,
+			FVector3d::RightVector));
+	TestTrue(TEXT("Initial pivot is the three-dimensional bounds center"),
+		BoundsView.ProjectionCenterCM.Equals(
+			FVector3d(45.0, 100.0, 10.0),
+			1.0e-9));
+	const FVector3d PivotBeforePan = BoundsView.ProjectionCenterCM;
+	const double PanWorldScale = BoundsView.ProjectionScaleCM / BoundsView.Zoom;
+	TestTrue(TEXT("Move-mode normalized pan changes only the pivot"),
+		BoundsView.ApplyPanNormalized(FVector2d(0.10, 0.20)));
+	TestTrue(TEXT("Pan follows screen-space drag directions"),
+		BoundsView.ProjectionCenterCM.Equals(
+			PivotBeforePan
+				- FVector3d::ForwardVector * PanWorldScale * 0.10
+				+ FVector3d::RightVector * PanWorldScale * 0.20,
+			1.0e-8));
 	FABTSM11OverviewProjection A;
 	FABTSM11OverviewProjection B;
 	const FABTSM11OrbitalSceneSnapshot Shifted = ShiftTrajectory(
@@ -168,6 +197,7 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Only the trajectory moves under aim changes"),
 		NearlyEqual(A.Trajectory[0].Position, B.Trajectory[0].Position, 1.0e-9));
 	const FVector2d BodyBeforeRotate = A.Bodies[1].Center;
+	const FVector3d PivotBeforeRotate = View.ProjectionCenterCM;
 	const FVector3d InitialWorldUp = View.AxisY;
 	TestTrue(TEXT("Vertical drag orbits around current screen Right"),
 		View.ApplyOrbitRotation(0.0, 23.0));
@@ -180,6 +210,8 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 		View.AxisY.Equals(TiltedLocalUp, 1.0e-8));
 	TestTrue(TEXT("Composed local drags naturally accumulate world-relative roll"),
 		FMath::Abs(View.AxisX.Dot(InitialWorldUp)) > 1.0e-4);
+	TestTrue(TEXT("Orbit rotation preserves the explicit pivot"),
+		View.ProjectionCenterCM.Equals(PivotBeforeRotate, 1.0e-12));
 	TestTrue(TEXT("Free-orbit basis remains right handed and orthonormal"),
 		View.AxisX.Cross(View.AxisY).Equals(View.ViewForward, 1.0e-8)
 		&& FMath::Abs(View.AxisX.Dot(View.AxisY)) < 1.0e-8
@@ -455,13 +487,19 @@ bool FABTSM11HudInputCaptureTest::RunTest(const FString& Parameters)
 	FABTSM11FinaleHudCaptureState State;
 	TestTrue(TEXT("Yaw knob acquires exclusive capture"),
 		State.TryBegin(EABTSM11FinaleHudCapture::AdjustYaw));
-	TestFalse(TEXT("Overview cannot steal an active knob capture"),
+	TestFalse(TEXT("Overview rotation cannot steal an active knob capture"),
 		State.TryBegin(EABTSM11FinaleHudCapture::RotateOverview));
+	TestFalse(TEXT("Overview pan cannot steal an active knob capture"),
+		State.TryBegin(EABTSM11FinaleHudCapture::PanOverview));
 	TestFalse(TEXT("Launch is blocked during any edit capture"), State.CanLaunch());
 	TestFalse(TEXT("A mismatched release cannot clear capture"),
 		State.End(EABTSM11FinaleHudCapture::AdjustPitch));
 	TestTrue(TEXT("Matching release clears capture"),
 		State.End(EABTSM11FinaleHudCapture::AdjustYaw));
+	TestTrue(TEXT("Move-mode pan acquires the shared exclusive channel"),
+		State.TryBegin(EABTSM11FinaleHudCapture::PanOverview));
+	TestTrue(TEXT("Move-mode pan release clears capture"),
+		State.End(EABTSM11FinaleHudCapture::PanOverview));
 	TestTrue(TEXT("Launch acquires the same exclusive channel"), State.TryBeginLaunch());
 	State.CancelForFocusLoss();
 	TestEqual(TEXT("Focus loss releases all capture"),

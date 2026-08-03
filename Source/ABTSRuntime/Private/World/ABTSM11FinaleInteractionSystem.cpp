@@ -499,6 +499,22 @@ bool AABTSM11FinaleInteractionSystem::RotateHudOverview(
 	return true;
 }
 
+bool AABTSM11FinaleInteractionSystem::PanHudOverview(
+	const FVector2d& NormalizedScreenDelta)
+{
+	if (!IsAiming()
+		|| !HudOverviewView.ApplyPanNormalized(NormalizedScreenDelta)
+		|| !FABTSM11OverviewProjector::Build(
+			HudOrbitalScene,
+			HudOverviewView,
+			HudOverviewProjection))
+	{
+		return false;
+	}
+	++HudOverviewRevision;
+	return true;
+}
+
 bool AABTSM11FinaleInteractionSystem::ZoomHudOverview(
 	const double ZoomMultiplier)
 {

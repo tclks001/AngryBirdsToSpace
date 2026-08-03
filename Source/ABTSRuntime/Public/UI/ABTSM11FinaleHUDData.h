@@ -23,7 +23,7 @@ enum class EABTSM11ControlSpeedGear : uint8
 enum class EABTSM11OverviewInteractionMode : uint8
 {
 	Select = 0,
-	Rotate
+	Move
 };
 
 enum class EABTSM11FinaleHudCapture : uint8
@@ -33,6 +33,7 @@ enum class EABTSM11FinaleHudCapture : uint8
 	AdjustPitch,
 	AdjustPower,
 	ScrubTrajectoryProbe,
+	PanOverview,
 	RotateOverview,
 	AdjustOverviewZoom,
 	LaunchButton
@@ -194,7 +195,7 @@ struct ABTSRUNTIME_API FABTSM11TrajectorySemanticMap
 		TConstArrayView<FABTSM11OrbitalScenePoint> Points) const;
 };
 
-/** Immutable, unprojected current-result snapshot consumed by Select/Rotate. */
+/** Immutable, unprojected current-result snapshot consumed by Select/Move. */
 struct ABTSRUNTIME_API FABTSM11OrbitalSceneSnapshot
 {
 	TArray<FABTSM11OrbitalScenePoint> Trajectory;
@@ -241,7 +242,11 @@ struct ABTSRUNTIME_API FABTSM11OverviewViewState
 		const FVector3d& InAxisX,
 		const FVector3d& InAxisY,
 		double InProjectionScaleCM);
-	bool InitializeFromDiagram(const FABTSM11OrbitalDiagramSnapshot& Diagram);
+	bool InitializeFromScene(
+		const FABTSM11OrbitalSceneSnapshot& Scene,
+		const FVector3d& InAxisX,
+		const FVector3d& InAxisY);
+	bool ApplyPanNormalized(const FVector2d& ScreenDelta);
 	bool ApplyOrbitRotation(double YawDegrees, double PitchDegrees);
 	bool ApplyZoom(double ZoomMultiplier, double MinimumZoom = 0.25, double MaximumZoom = 4.0);
 	FVector2d Project(const FVector3d& PositionCM) const;

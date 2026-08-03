@@ -58,6 +58,7 @@ public:
 		double WheelSteps,
 		EABTSM11ControlSpeedGear Gear);
 	bool ResetHudControlAxis(EABTSM11FinaleControlAxis Axis);
+	bool PanHudOverview(const FVector2d& NormalizedScreenDelta);
 	bool RotateHudOverview(double YawDegrees, double PitchDegrees);
 	bool ZoomHudOverview(double ZoomMultiplier);
 	bool ResetHudOverview();

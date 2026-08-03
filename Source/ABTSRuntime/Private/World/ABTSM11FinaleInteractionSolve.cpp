@@ -423,25 +423,19 @@ void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
 
 	if (!HudOverviewView.bValid)
 	{
-		if (!HudOverviewView.InitializeFromDiagram(DiagramSnapshot))
+		const FVector3d InitialAxisX = DiagramSnapshot.bValid
+			? DiagramSnapshot.PlaneAxisX
+			: FVector3d::ForwardVector;
+		const FVector3d InitialAxisY = DiagramSnapshot.bValid
+			? DiagramSnapshot.PlaneAxisY
+			: FVector3d::RightVector;
+		if (!HudOverviewView.InitializeFromScene(
+			HudOrbitalScene,
+			InitialAxisX,
+			InitialAxisY))
 		{
-			double FitRadiusCM = 1.0;
-			for (const FABTSM11OrbitalSceneBody& Body
-				: HudOrbitalScene.Bodies)
-			{
-				FitRadiusCM = FMath::Max(
-					FitRadiusCM,
-					Body.CenterCM.Length() + Body.InfluenceRadiusCM);
-			}
-			FitRadiusCM = FMath::Max(
-				FitRadiusCM,
-				HudOrbitalScene.TargetCenterCM.Length()
-					+ HudOrbitalScene.TargetRadiusCM);
-			HudOverviewView.Initialize(
-				FVector3d::ZeroVector,
-				FVector3d::ForwardVector,
-				FVector3d::RightVector,
-				FitRadiusCM * 1.08);
+			HudOverviewProjection = FABTSM11OverviewProjection();
+			return;
 		}
 		InitialHudOverviewView = HudOverviewView;
 	}

@@ -990,15 +990,128 @@ bool FABTSM11OverviewViewState::Initialize(
 	return bValid;
 }
 
-bool FABTSM11OverviewViewState::InitializeFromDiagram(
-	const FABTSM11OrbitalDiagramSnapshot& Diagram)
+bool FABTSM11OverviewViewState::InitializeFromScene(
+	const FABTSM11OrbitalSceneSnapshot& Scene,
+	const FVector3d& InAxisX,
+	const FVector3d& InAxisY)
 {
-	return Diagram.bValid
-		&& Initialize(
-			Diagram.PlaneOriginCM,
-			Diagram.PlaneAxisX,
-			Diagram.PlaneAxisY,
-			Diagram.FitRadiusCM);
+	if (!Scene.bValid || Scene.Trajectory.Num() < 2)
+	{
+		return false;
+	}
+
+	FVector3d Minimum(
+		TNumericLimits<double>::Max(),
+		TNumericLimits<double>::Max(),
+		TNumericLimits<double>::Max());
+	FVector3d Maximum(
+		TNumericLimits<double>::Lowest(),
+		TNumericLimits<double>::Lowest(),
+		TNumericLimits<double>::Lowest());
+	const auto IncludeSphere = [&Minimum, &Maximum](
+		const FVector3d& Center,
+		const double Radius)
+	{
+		if (!IsFiniteFinaleHudVector(Center)
+			|| !FMath::IsFinite(Radius)
+			|| Radius < 0.0)
+		{
+			return false;
+		}
+		const FVector3d Extent(Radius, Radius, Radius);
+		Minimum.X = FMath::Min(Minimum.X, Center.X - Extent.X);
+		Minimum.Y = FMath::Min(Minimum.Y, Center.Y - Extent.Y);
+		Minimum.Z = FMath::Min(Minimum.Z, Center.Z - Extent.Z);
+		Maximum.X = FMath::Max(Maximum.X, Center.X + Extent.X);
+		Maximum.Y = FMath::Max(Maximum.Y, Center.Y + Extent.Y);
+		Maximum.Z = FMath::Max(Maximum.Z, Center.Z + Extent.Z);
+		return true;
+	};
+
+	for (const FABTSM11OrbitalScenePoint& Point : Scene.Trajectory)
+	{
+		if (!IncludeSphere(Point.PositionCM, 0.0))
+		{
+			return false;
+		}
+	}
+	// The primary is deliberately excluded. M10.1-C/M11 permit the overview
+	// to crop the main planet; the three causal assists and target define the
+	// terminal route volume that the player manipulates.
+	for (int32 BodyIndex = 1; BodyIndex < Scene.Bodies.Num(); ++BodyIndex)
+	{
+		const FABTSM11OrbitalSceneBody& Body = Scene.Bodies[BodyIndex];
+		if (!IncludeSphere(
+			Body.CenterCM,
+			FMath::Max(0.0, Body.VisualRadiusCM)))
+		{
+			return false;
+		}
+	}
+	if (!IncludeSphere(
+		Scene.TargetCenterCM,
+		FMath::Max(0.0, Scene.TargetRadiusCM)))
+	{
+		return false;
+	}
+
+	const FVector3d BoundingSphereCenter = (Minimum + Maximum) * 0.5;
+	double BoundingSphereRadius = 1.0;
+	for (const FABTSM11OrbitalScenePoint& Point : Scene.Trajectory)
+	{
+		BoundingSphereRadius = FMath::Max(
+			BoundingSphereRadius,
+			(Point.PositionCM - BoundingSphereCenter).Length());
+	}
+	for (int32 BodyIndex = 1; BodyIndex < Scene.Bodies.Num(); ++BodyIndex)
+	{
+		const FABTSM11OrbitalSceneBody& Body = Scene.Bodies[BodyIndex];
+		BoundingSphereRadius = FMath::Max(
+			BoundingSphereRadius,
+			(Body.CenterCM - BoundingSphereCenter).Length()
+				+ FMath::Max(0.0, Body.VisualRadiusCM));
+	}
+	BoundingSphereRadius = FMath::Max(
+		BoundingSphereRadius,
+		(Scene.TargetCenterCM - BoundingSphereCenter).Length()
+			+ FMath::Max(0.0, Scene.TargetRadiusCM));
+
+	// Keep the full route volume inside 80% of the circular overview.
+	return Initialize(
+		BoundingSphereCenter,
+		InAxisX,
+		InAxisY,
+		BoundingSphereRadius / 0.80);
+}
+
+bool FABTSM11OverviewViewState::ApplyPanNormalized(
+	const FVector2d& ScreenDelta)
+{
+	if (!bValid
+		|| !FMath::IsFinite(ScreenDelta.X)
+		|| !FMath::IsFinite(ScreenDelta.Y)
+		|| Zoom <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+	if (ScreenDelta.IsNearlyZero())
+	{
+		return false;
+	}
+
+	// Screen Y points down while projected AxisY points up. Move the pivot in
+	// the opposite projected direction so the visible content follows the
+	// left-button drag exactly.
+	const FVector3d WorldDelta =
+		AxisX * (-ScreenDelta.X * ProjectionScaleCM / Zoom)
+		+ AxisY * (ScreenDelta.Y * ProjectionScaleCM / Zoom);
+	const FVector3d Candidate = ProjectionCenterCM + WorldDelta;
+	if (!IsFiniteFinaleHudVector(Candidate))
+	{
+		return false;
+	}
+	ProjectionCenterCM = Candidate;
+	return true;
 }
 
 bool FABTSM11OverviewViewState::ApplyOrbitRotation(

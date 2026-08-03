@@ -25,6 +25,12 @@ public:
 	bool HandleFinalePrimaryReleased(
 		AABTSM11FinaleInteractionSystem& System,
 		const FVector2D& MousePosition);
+	bool HandleFinaleSecondaryPressed(
+		AABTSM11FinaleInteractionSystem& System,
+		const FVector2D& MousePosition);
+	bool HandleFinaleSecondaryReleased(
+		AABTSM11FinaleInteractionSystem& System,
+		const FVector2D& MousePosition);
 	bool HandleFinalePrimaryDoubleClicked(
 		AABTSM11FinaleInteractionSystem& System,
 		const FVector2D& MousePosition);
@@ -135,7 +141,7 @@ private:
 	FBox2D HudGearUltraFine;
 	FBox2D HudLaunchButton;
 	FBox2D HudSelectButton;
-	FBox2D HudRotateButton;
+	FBox2D HudMoveButton;
 	FBox2D HudResetViewButton;
 	FBox2D HudRebasePipButton;
 	FBox2D HudFollowAutoButton;

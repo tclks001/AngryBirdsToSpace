@@ -65,7 +65,8 @@ void AABTSM11PlayerController::PlayerTick(const float DeltaTime)
 	if (bActive
 		&& !bRestoreOrbitCursorThisFrame
 		&& Interaction->IsAiming()
-		&& IsInputKeyDown(EKeys::LeftMouseButton))
+		&& (IsInputKeyDown(EKeys::LeftMouseButton)
+			|| IsInputKeyDown(EKeys::RightMouseButton)))
 	{
 		float MouseX = 0.0f;
 		float MouseY = 0.0f;
@@ -280,6 +281,16 @@ void AABTSM11PlayerController::M11OrbitPressed()
 			M11OrbitCursorX,
 			M11OrbitCursorY);
 		bRestoreM11CursorAfterOrbitRelease = false;
+		if (bM11OrbitCursorSaved && Interaction->IsAiming())
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinaleSecondaryPressed(
+					*Interaction,
+					FVector2D(M11OrbitCursorX, M11OrbitCursorY));
+			}
+		}
 	}
 }
 
@@ -289,6 +300,18 @@ void AABTSM11PlayerController::M11OrbitReleased()
 		FindM11Interaction();
 		Interaction != nullptr && Interaction->IsFinaleActive())
 	{
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
+		if (GetMousePosition(MouseX, MouseY))
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinaleSecondaryReleased(
+					*Interaction,
+					FVector2D(MouseX, MouseY));
+			}
+		}
 		// M4's release handler restores its historical orbit cursor even when
 		// finale input blocked the matching press. Restore the M11 cursor
 		// after all input delegates have run, in PlayerTick.

@@ -135,7 +135,7 @@ void AABTSM11FinaleHUD::UpdateFinaleHudLayout(
 	const float ModeX = HudDiagramCenter.X + HudDiagramRadius + 12.0f;
 	const float ModeY = HudDiagramCenter.Y - HudDiagramRadius + 18.0f;
 	HudSelectButton = Box(ModeX, ModeY, 82.0f, 27.0f);
-	HudRotateButton = Box(ModeX, ModeY + 33.0f, 82.0f, 27.0f);
+	HudMoveButton = Box(ModeX, ModeY + 33.0f, 82.0f, 27.0f);
 	HudResetViewButton = Box(ModeX, ModeY + 66.0f, 82.0f, 27.0f);
 	HudRebasePipButton = Box(ModeX, ModeY + 99.0f, 82.0f, 27.0f);
 	HudFollowAutoButton = Box(ModeX, ModeY + 132.0f, 82.0f, 27.0f);
@@ -242,14 +242,17 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 		OverviewMode = EABTSM11OverviewInteractionMode::Select;
 		return true;
 	}
-	if (IsInside(HudPosition, HudRotateButton))
+	if (IsInside(HudPosition, HudMoveButton))
 	{
-		OverviewMode = EABTSM11OverviewInteractionMode::Rotate;
+		OverviewMode = EABTSM11OverviewInteractionMode::Move;
 		return true;
 	}
 	if (IsInside(HudPosition, HudResetViewButton))
 	{
-		System.ResetHudOverview();
+		if (OverviewMode == EABTSM11OverviewInteractionMode::Move)
+		{
+			System.ResetHudOverview();
+		}
 		return true;
 	}
 	if (IsInside(HudPosition, HudRebasePipButton))
@@ -270,10 +273,10 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 	if (IsInsideDiagram(HudPosition))
 	{
 		LastCapturedPointer = HudPosition;
-		if (OverviewMode == EABTSM11OverviewInteractionMode::Rotate)
+		if (OverviewMode == EABTSM11OverviewInteractionMode::Move)
 		{
 			return HudCapture.TryBegin(
-				EABTSM11FinaleHudCapture::RotateOverview);
+				EABTSM11FinaleHudCapture::PanOverview);
 		}
 		PendingTrajectoryHit = FABTSM11TrajectoryHit();
 		if (!ABTSM11HitTestOverviewTrajectory(
@@ -295,6 +298,43 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 			EABTSM11FinaleHudCapture::ScrubTrajectoryProbe);
 	}
 	return true;
+}
+
+bool AABTSM11FinaleHUD::HandleFinaleSecondaryPressed(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	if (!System.IsAiming()
+		|| OverviewMode != EABTSM11OverviewInteractionMode::Move)
+	{
+		return false;
+	}
+	if (!bHudLayoutValid)
+	{
+		int32 Width = 0;
+		int32 Height = 0;
+		if (APlayerController* Controller = GetOwningPlayerController())
+		{
+			Controller->GetViewportSize(Width, Height);
+		}
+		HudPlayerViewOrigin = FVector2D::ZeroVector;
+		HudPlayerViewSize = FVector2D(
+			static_cast<float>(Width),
+			static_cast<float>(Height));
+		UpdateFinaleHudLayout(
+			static_cast<float>(Width),
+			static_cast<float>(Height));
+	}
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
+	if (!IsInsideDiagram(HudPosition)
+		|| HudCapture.GetCapture()
+			!= EABTSM11FinaleHudCapture::None)
+	{
+		return false;
+	}
+	LastCapturedPointer = HudPosition;
+	return HudCapture.TryBegin(
+		EABTSM11FinaleHudCapture::RotateOverview);
 }
 
 bool AABTSM11FinaleHUD::HandleFinalePointerMoved(
@@ -326,6 +366,10 @@ bool AABTSM11FinaleHUD::HandleFinalePointerMoved(
 			EABTSM11FinaleControlAxis::Power,
 			(Delta.X - Delta.Y) * 0.5,
 			HudSpeedGear);
+	case EABTSM11FinaleHudCapture::PanOverview:
+		return System.PanHudOverview(FVector2d(
+			Delta.X / FMath::Max(HudDiagramRadius, 1.0f),
+			Delta.Y / FMath::Max(HudDiagramRadius, 1.0f)));
 	case EABTSM11FinaleHudCapture::RotateOverview:
 		return System.RotateHudOverview(
 			Delta.X * 0.25,
@@ -357,6 +401,12 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryReleased(
 	{
 		return System.IsFinaleActive();
 	}
+	// Right-button rotation owns its own release path. A coincident left-click
+	// must not terminate the secondary-button capture.
+	if (Capture == EABTSM11FinaleHudCapture::RotateOverview)
+	{
+		return true;
+	}
 	if (Capture == EABTSM11FinaleHudCapture::ScrubTrajectoryProbe
 		&& PendingTrajectoryHit.bValid)
 	{
@@ -371,6 +421,24 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryReleased(
 	}
 	HudCapture.End(Capture);
 	PendingTrajectoryHit = FABTSM11TrajectoryHit();
+	return true;
+}
+
+bool AABTSM11FinaleHUD::HandleFinaleSecondaryReleased(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	if (!System.IsFinaleActive())
+	{
+		CancelFinaleHudCapture();
+		return false;
+	}
+	if (HudCapture.GetCapture()
+		!= EABTSM11FinaleHudCapture::RotateOverview)
+	{
+		return false;
+	}
+	HudCapture.End(EABTSM11FinaleHudCapture::RotateOverview);
 	return true;
 }
 
@@ -390,7 +458,8 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryDoubleClicked(
 		return System.ResetHudControlAxis(
 			static_cast<EABTSM11FinaleControlAxis>(KnobIndex));
 	}
-	if (IsInsideDiagram(HudPosition))
+	if (IsInsideDiagram(HudPosition)
+		&& OverviewMode == EABTSM11OverviewInteractionMode::Move)
 	{
 		return System.ResetHudOverview();
 	}
@@ -416,7 +485,7 @@ bool AABTSM11FinaleHUD::HandleFinaleWheel(
 			HudSpeedGear);
 	}
 	if (IsInsideDiagram(HudPosition)
-		&& OverviewMode == EABTSM11OverviewInteractionMode::Rotate)
+		&& OverviewMode == EABTSM11OverviewInteractionMode::Move)
 	{
 		return System.ZoomHudOverview(
 			FMath::Pow(1.12, WheelSteps));
@@ -651,7 +720,7 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		DrawText(
 			OverviewMode == EABTSM11OverviewInteractionMode::Select
 				? TEXT("ORBIT OVERVIEW / SELECT")
-				: TEXT("ORBIT OVERVIEW / ROTATE"),
+				: TEXT("ORBIT OVERVIEW / MOVE"),
 			FLinearColor(0.72f, 0.90f, 1.0f),
 			Center.X - Radius + 10.0f,
 			Center.Y - Radius + 8.0f,
@@ -977,9 +1046,15 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 		FLinearColor(1.0f, 0.48f, 0.16f));
 	DrawConsoleButton(HudSelectButton, TEXT("SELECT"),
 		OverviewMode == EABTSM11OverviewInteractionMode::Select, Accent);
-	DrawConsoleButton(HudRotateButton, TEXT("ROTATE"),
-		OverviewMode == EABTSM11OverviewInteractionMode::Rotate, Accent);
-	DrawConsoleButton(HudResetViewButton, TEXT("RESET VIEW"), false, Accent);
+	DrawConsoleButton(HudMoveButton, TEXT("MOVE"),
+		OverviewMode == EABTSM11OverviewInteractionMode::Move, Accent);
+	DrawConsoleButton(
+		HudResetViewButton,
+		TEXT("RESET VIEW"),
+		false,
+		OverviewMode == EABTSM11OverviewInteractionMode::Move
+			? Accent
+			: FLinearColor(0.35f, 0.42f, 0.48f));
 	DrawConsoleButton(HudRebasePipButton, TEXT("REBASE"), false,
 		System.HasHudTrajectoryProbe()
 			? FLinearColor(0.42f, 1.0f, 0.72f)
@@ -1771,7 +1846,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 			false);
 	}
 	DrawText(
-		TEXT("Drag knob: adjust  |  Wheel over knob: trim  |  Select/Rotate orbit overview  |  LAUNCH only: release  |  R: reset"),
+		TEXT("Drag knob: adjust  |  Wheel over knob: trim  |  MOVE: LMB pan / RMB orbit  |  LAUNCH only: release  |  R: reset"),
 		FLinearColor(0.66f, 0.72f, 0.80f),
 		X,
 		BarY + 34.0f,
