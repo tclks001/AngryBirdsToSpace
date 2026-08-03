@@ -6,7 +6,7 @@
 >
 > 总导航：[M7 建筑系统文档导航与执行路线](M7BuildingDevelopmentRoadmap.md)。
 >
-> 状态：Beam-B 全局装配收口、Beam-A 语义轮廓拟合与自动化已完成，等待用户编辑器读形验收；不接管 TaskGraph 生产建筑。
+> 状态：Beam-B 全局装配收口、Beam-A 语义轮廓拟合、自动化与用户编辑器读形验收均已完成；后续见 [Beam-C Load DAG 与静态传力代理](M73BeamCLoadDAGAndStaticProxyDesign.md)，本阶段不接管 TaskGraph 生产建筑。
 
 ## 1. 目标与边界
 
