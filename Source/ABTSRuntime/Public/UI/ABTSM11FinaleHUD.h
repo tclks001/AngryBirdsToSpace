@@ -94,6 +94,19 @@ private:
 		const FLinearColor& Color,
 		float Thickness,
 		int32 SegmentCount = 48);
+	void DrawDiagramEdgeLabel(
+		const FVector2D& PanelCenter,
+		float PanelRadius,
+		const FString& Text,
+		const FLinearColor& Color,
+		float Scale,
+		bool bTop);
+	FVector2D ResolveDiagramTextPosition(
+		const FVector2D& PanelCenter,
+		float PanelRadius,
+		const FString& Text,
+		float Scale,
+		const FVector2D& PreferredPosition) const;
 	void DrawCircleOutline(
 		const FVector2D& Center,
 		float Radius,
@@ -177,6 +190,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Move",
 		meta = (ClampMin = "1.01", ClampMax = "1.5"))
 	double OverviewZoomPerWheelStep = 1.12;
+
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Overview",
+		meta = (ClampMin = "0.5", ClampMax = "8.0"))
+	float OverviewClipInsetPixels = 1.5f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|PIP",
 		meta = (ClampMin = "0.02", ClampMax = "0.20"))

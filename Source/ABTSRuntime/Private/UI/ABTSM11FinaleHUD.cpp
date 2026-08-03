@@ -641,11 +641,14 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		const float PrimaryRadius = FMath::Max(
 			14.0f,
 			static_cast<float>(Primary.VisualRadius) * Radius);
-		DrawCircleOutline(
-			ToScreen(Center, Radius, Primary.Center),
-			PrimaryRadius,
+		DrawDiagramCircleOutline(
+			Center,
+			Radius,
+			Primary.Center,
+			PrimaryRadius / FMath::Max(Radius, 1.0f),
 			FLinearColor(0.35f, 0.72f, 1.0f, 0.9f),
-			1.5f);
+			1.5f,
+			48);
 
 		// Absolute finale-local latitude/longitude grid. It is projected by
 		// the frozen overview view, so aim changes cannot move the sphere.
@@ -794,16 +797,27 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 				const FLinearColor HoverColor = ActiveHit.bHiddenByBody
 					? FLinearColor(0.62f, 0.72f, 0.82f, 0.92f)
 					: FLinearColor(1.0f, 0.86f, 0.32f, 1.0f);
-				DrawCircleOutline(Marker, 7.0f, HoverColor, 1.8f, 18);
-				DrawText(
-					SemanticLegLabel(ActiveHit.Leg),
+				DrawDiagramCircleOutline(
+					Center,
+					Radius,
+					HoverPoint->Position,
+					7.0 / FMath::Max<double>(Radius, 1.0),
 					HoverColor,
-					FMath::Clamp(Marker.X + 10.0f,
-						Center.X - Radius + 8.0f,
-						Center.X + Radius - 128.0f),
-					FMath::Clamp(Marker.Y - 18.0f,
-						Center.Y - Radius + 26.0f,
-						Center.Y + Radius - 22.0f),
+					1.8f,
+					18);
+				const FString HoverLabel = SemanticLegLabel(ActiveHit.Leg);
+				const FVector2D HoverLabelPosition =
+					ResolveDiagramTextPosition(
+						Center,
+						Radius,
+						HoverLabel,
+						0.58f,
+						Marker + FVector2D(10.0f, -18.0f));
+				DrawText(
+					HoverLabel,
+					HoverColor,
+					HoverLabelPosition.X,
+					HoverLabelPosition.Y,
 					GEngine->GetSmallFont(),
 					0.58f,
 					false);
@@ -811,36 +825,48 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		}
 		if (System.HasHudTrajectoryProbe())
 		{
-			const FVector2D Reference = ToScreen(
+			const FVector2d Reference = HudView.Project(
+				System.GetHudTrajectoryProbe().ReferenceLocalPosition);
+			const double ReferenceHalfSize =
+				6.0 / FMath::Max<double>(Radius, 1.0);
+			DrawDiagramSegment(
 				Center,
 				Radius,
-				HudView.Project(
-					System.GetHudTrajectoryProbe().ReferenceLocalPosition));
-			DrawLine(Reference.X - 6.0f, Reference.Y, Reference.X + 6.0f, Reference.Y,
-				FLinearColor::White, 1.6f);
-			DrawLine(Reference.X, Reference.Y - 6.0f, Reference.X, Reference.Y + 6.0f,
-				FLinearColor::White, 1.6f);
+				Reference - FVector2d(ReferenceHalfSize, 0.0),
+				Reference + FVector2d(ReferenceHalfSize, 0.0),
+				FLinearColor::White,
+				1.6f,
+				false);
+			DrawDiagramSegment(
+				Center,
+				Radius,
+				Reference - FVector2d(0.0, ReferenceHalfSize),
+				Reference + FVector2d(0.0, ReferenceHalfSize),
+				FLinearColor::White,
+				1.6f,
+				false);
 			if (System.GetHudProbeProjection().bValid)
 			{
-				const FVector2D Current = ToScreen(
+				DrawDiagramCircleOutline(
 					Center,
 					Radius,
 					HudView.Project(
-						System.GetHudProbeProjection().PositionCM));
-				DrawCircleOutline(Current, 5.0f,
-					FLinearColor(0.25f, 1.0f, 0.82f), 1.8f, 16);
+						System.GetHudProbeProjection().PositionCM),
+					5.0 / FMath::Max<double>(Radius, 1.0),
+					FLinearColor(0.25f, 1.0f, 0.82f),
+					1.8f,
+					16);
 			}
 		}
-		DrawText(
+		DrawDiagramEdgeLabel(
+			Center,
+			Radius,
 			OverviewMode == EABTSM11OverviewInteractionMode::Select
 				? TEXT("ORBIT OVERVIEW / SELECT")
 				: TEXT("ORBIT OVERVIEW / MOVE"),
 			FLinearColor(0.72f, 0.90f, 1.0f),
-			Center.X - Radius + 10.0f,
-			Center.Y - Radius + 8.0f,
-			GEngine->GetSmallFont(),
 			0.8f,
-			false);
+			true);
 		return;
 	}
 	if (!Snapshot.bValid)
@@ -950,23 +976,21 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 			A.bHiddenByBody || B.bHiddenByBody);
 	}
 
-	DrawText(
+	DrawDiagramEdgeLabel(
+		Center,
+		Radius,
 		TEXT("ORBIT OVERVIEW"),
 		FLinearColor(0.72f, 0.90f, 1.0f),
-		Center.X - Radius + 10.0f,
-		Center.Y - Radius + 8.0f,
-		GEngine->GetSmallFont(),
 		0.8f,
-		false);
+		true);
 	if (System.GetPreviewPlaybackPlan()
 		.bUsesVisibleTerminalTransfer)
 	{
-		DrawText(
+		DrawDiagramEdgeLabel(
+			Center,
+			Radius,
 			TEXT("AMBER: VISIBLE TERMINAL TRANSFER"),
 			FLinearColor(1.0f, 0.62f, 0.18f),
-			Center.X - Radius + 10.0f,
-			Center.Y + Radius - 22.0f,
-			GEngine->GetSmallFont(),
 			0.68f,
 			false);
 	}
@@ -977,12 +1001,11 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		if (FinaleSystem != nullptr
 			&& FinaleSystem->IsEditorCandidateMode())
 		{
-			DrawText(
+			DrawDiagramEdgeLabel(
+				Center,
+				Radius,
 				TEXT("RAW 1X PLAYBACK / QUALIFIED ENDPOINT"),
 				FLinearColor(1.0f, 0.72f, 0.24f),
-				Center.X - Radius + 10.0f,
-				Center.Y + Radius - 22.0f,
-				GEngine->GetSmallFont(),
 				0.58f,
 				false);
 		}
@@ -2189,10 +2212,21 @@ void AABTSM11FinaleHUD::DrawDiagramSegment(
 {
 	FVector2d Start = NormalizedStart;
 	FVector2d End = NormalizedEnd;
+	const double SafeNormalizedRadius = FMath::Clamp(
+		1.0 - FMath::Max(
+			static_cast<double>(OverviewClipInsetPixels),
+			static_cast<double>(Thickness) * 0.5 + 0.5)
+			/ FMath::Max<double>(Radius, 1.0),
+		0.01,
+		1.0);
+	Start /= SafeNormalizedRadius;
+	End /= SafeNormalizedRadius;
 	if (!ABTSM11ClipDiagramSegmentToUnitCircle(Start, End))
 	{
 		return;
 	}
+	Start *= SafeNormalizedRadius;
+	End *= SafeNormalizedRadius;
 	const FVector2D ScreenStart = ToScreen(Center, Radius, Start);
 	const FVector2D ScreenEnd = ToScreen(Center, Radius, End);
 	if (!bDashed)
@@ -2254,6 +2288,91 @@ void AABTSM11FinaleHUD::DrawDiagramCircleOutline(
 			false);
 		Previous = Current;
 	}
+}
+
+FVector2D AABTSM11FinaleHUD::ResolveDiagramTextPosition(
+	const FVector2D& PanelCenter,
+	const float PanelRadius,
+	const FString& Text,
+	const float Scale,
+	const FVector2D& PreferredPosition) const
+{
+	if (Canvas == nullptr || GEngine == nullptr || GEngine->GetSmallFont() == nullptr)
+	{
+		return PreferredPosition;
+	}
+	float TextWidth = 0.0f;
+	float TextHeight = 0.0f;
+	Canvas->StrLen(
+		GEngine->GetSmallFont(),
+		Text,
+		TextWidth,
+		TextHeight,
+		true);
+	const FVector2D HalfSize(
+		TextWidth * Scale * 0.5f,
+		TextHeight * Scale * 0.5f);
+	FVector2D TextCenter = PreferredPosition + HalfSize;
+	FVector2D Offset = TextCenter - PanelCenter;
+	const float MaximumCenterDistance = FMath::Max(
+		0.0f,
+		PanelRadius - OverviewClipInsetPixels - HalfSize.Size());
+	const float Distance = Offset.Size();
+	if (Distance > MaximumCenterDistance && Distance > KINDA_SMALL_NUMBER)
+	{
+		Offset *= MaximumCenterDistance / Distance;
+		TextCenter = PanelCenter + Offset;
+	}
+	return TextCenter - HalfSize;
+}
+
+void AABTSM11FinaleHUD::DrawDiagramEdgeLabel(
+	const FVector2D& PanelCenter,
+	const float PanelRadius,
+	const FString& Text,
+	const FLinearColor& Color,
+	const float Scale,
+	const bool bTop)
+{
+	if (Canvas == nullptr || GEngine == nullptr || GEngine->GetSmallFont() == nullptr)
+	{
+		return;
+	}
+	float TextWidth = 0.0f;
+	float TextHeight = 0.0f;
+	Canvas->StrLen(
+		GEngine->GetSmallFont(),
+		Text,
+		TextWidth,
+		TextHeight,
+		true);
+	const FVector2D ScaledSize(TextWidth * Scale, TextHeight * Scale);
+	const float HalfWidth = ScaledSize.X * 0.5f;
+	const float SafeRadius = FMath::Max(
+		1.0f,
+		PanelRadius - OverviewClipInsetPixels - 2.0f);
+	const float MaximumVerticalOffset = FMath::Max(
+		0.0f,
+		FMath::Sqrt(FMath::Max(
+			0.0f,
+			SafeRadius * SafeRadius - HalfWidth * HalfWidth))
+			- ScaledSize.Y * 0.5f);
+	const float VerticalOffset = FMath::Min(
+		SafeRadius * 0.78f,
+		MaximumVerticalOffset);
+	const FVector2D Position(
+		PanelCenter.X - HalfWidth,
+		PanelCenter.Y
+			+ (bTop ? -VerticalOffset : VerticalOffset)
+			- ScaledSize.Y * 0.5f);
+	DrawText(
+		Text,
+		Color,
+		Position.X,
+		Position.Y,
+		GEngine->GetSmallFont(),
+		Scale,
+		false);
 }
 
 void AABTSM11FinaleHUD::DrawCircleOutline(
