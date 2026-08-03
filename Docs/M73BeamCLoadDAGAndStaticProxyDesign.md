@@ -3,7 +3,8 @@
 > 父文档：[M7 建筑生成演进路线](M7BuildingDevelopmentRoadmap.md)
 > 上游：[M7.3-Beam-B Motif WFC 与结构图语法](M73BeamBMotifWFCAndGraphGrammarDesign.md)
 > 理论依据：[长条积木结构生成调研](M73BeamBlockStructuralGenerationResearch.md)
-> 状态：首版 C++、编辑器预览和自动化已完成，等待用户编辑器读形验收；不接管 TaskGraph 生产建筑。
+> 状态：首版 C++、自动化和用户编辑器读形验收已完成；不接管 TaskGraph 生产建筑。
+> 下一阶段：[M7.3-Beam-D0 Profile Catalog、Difficulty Curve 与 Settings Resolver](M73BeamD0GameplayProfileCatalogDesign.md)
 
 ## 1. 阶段目标
 
@@ -133,7 +134,7 @@ UpperMemberId -> LowerMemberId
    荷载守恒的 Load DAG；
 5. 强制 Unity 编译、Beam-C 专项和 M7 回归通过。
 
-人工编辑器验收只确认颜色和参数反馈可读，不宣称 Chaos 动态稳定。Beam-D 完成前生产建筑
+人工编辑器验收只确认颜色和参数反馈可读，不宣称 Chaos 动态稳定。Beam-D1/D2 与 Beam-E 完成前生产建筑
 不得切换到 Beam 链路。
 
 ## 9. 2026-08-03 首版实现证据

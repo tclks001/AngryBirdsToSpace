@@ -570,17 +570,31 @@ BeamWeaknessFrontierUnavailable
 - 加入跨距、悬挑、接触、侧移机构和环检测；
 - 禁止真实 Reciprocal Assembly。
 
-### Beam-D：Brick、Chaos 与弱点
+### Beam-D0：Profile Catalog、Difficulty Curve 与 Settings Resolver
+
+- 外部只保留 `GameplayProfileId + DifficultyTier`；
+- 在 M7 内一次性解析 Shape、Beam-A/B/C、材料角色和弱点意图；
+- Profile/Tier 可以改变玩法和内部生成策略，但不能改变项目级预算及验证硬门槛；
+- 详见 [Beam-D0 独立设计稿](M73BeamD0GameplayProfileCatalogDesign.md)。
+
+### Beam-D1：真实 Brick 与材料角色
 
 - 把 Member 编译为固定截面、离散长度的现有模块；
-- 复用 DAG3/DAG-4；
-- 验证 CrossBeam、Crib、Portal、Cantilever 至少四类不同失效模式。
+- 把 Catalog 的材料/装置意图映射为真实物理角色；
+- 保持 resolved Profile 身份，不在编译阶段重新随机选型。
 
-### Beam-E：六栋生产候选
+### Beam-D2：弱点、Chaos 与 Profile×Tier 认证
+
+- 基于 Beam-C Load DAG 复用 DAG3/DAG-4；
+- 联合真实接触、落稳、攻击对照与失效签名；
+- 认证完整 Profile×Tier 输入域，而不是只验证若干好看的种子。
+
+### Beam-E：Catalog 冻结与六栋生产接入
 
 - 接入 DAG5-A 候选搜索和 DAG5-C Novelty；
 - 六栋建筑同时消费轮廓、Beam Graph、Load DAG 与弱点签名；
 - 接入 Encounter 难度与视觉元数据；
+- Catalog 通过认证后冻结，并由集成工作树提供共享 vNext 合同；
 - 完成 Editor、PIE、30/60/120 FPS 和联合地图验收。
 
 ## 13. 正式验收建议
