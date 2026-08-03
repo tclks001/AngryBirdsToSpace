@@ -37,9 +37,16 @@ class ABTSRUNTIME_API FABTSM11CandidateExperienceCatalog final
 {
 public:
 	static constexpr int32 FirstCandidateRank = 1;
-	static constexpr int32 LastCandidateRank = 6;
+	static constexpr int32 LastCandidateRank = 11;
 
 #if WITH_EDITOR
+	/**
+	 * Single Editor selection authority shared by the M11 GameMode and the
+	 * future Integration-owned M3 finale-preview adapter. Rank 0 preserves the
+	 * production Certified v1 layout; positive ranks remain uncertified.
+	 */
+	static int32 GetRequestedCandidateRank();
+
 	static bool BuildCandidate(
 		int32 CandidateRank,
 		FABTSM11FinaleLayoutPreset& OutPreset,

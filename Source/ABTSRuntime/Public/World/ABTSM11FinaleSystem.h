@@ -88,6 +88,14 @@ public:
 		const FABTSM110FinaleLocalFrame& InFinaleFrame,
 		FString* OutFailure = nullptr);
 
+	/**
+	 * Diagnostic-only identity of a finale frame. It is intentionally absent
+	 * from solver, preset and certification hashes; rigid relocation must not
+	 * change any local trajectory identity.
+	 */
+	static uint64 ComputeFinaleFrameDiagnosticHash(
+		const FABTSM110FinaleLocalFrame& InFinaleFrame);
+
 	/** Builds an authoritative M11-A request entirely in finale-local space. */
 	bool BuildRequest(
 		const FABTSM11FinaleLaunchInput& Input,

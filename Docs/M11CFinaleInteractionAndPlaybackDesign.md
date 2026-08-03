@@ -89,6 +89,11 @@ Editor Candidate 是严格隔离的另一条显式入口：
 - Preset、Certification、Certified Bundle 和临时 Trust Region 的正式认证 Hash 必须全部为零；
 - Candidate 只播放自身的 qualified 轨迹，并以 `CandidateQualified-UNCERTIFIED` 结束，不借用 production nominal tail，也不声称到达 800 cm physical UFO。
 
+放大后的逐星微调布局以 Editor-only Rank 11 接入：进入 PIE 前在控制台执行
+`abts.M11.CandidateRank 11`，然后重新开始 PIE，使 GameMode 在初始化时读取新的
+冻结身份。Rank 11 保持 `Candidate / NOT CERTIFIED`，不会覆盖 Rank 0 的 production
+Certified v1。
+
 ## 4. 交互状态与输入路由
 
 ### 4.1 玩法状态

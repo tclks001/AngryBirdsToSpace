@@ -5490,6 +5490,21 @@ bool ABTS::M11Search::CandidateSearch::EvaluateInput(
 	OutEvaluation.Termination = Result.Termination;
 	OutEvaluation.CompletedAssistCount = Result.CompletedAssistCount;
 	OutEvaluation.TargetContactCount = Result.TargetContactCount;
+	if (const M11Core::TrajectoryEvent* TargetHit = Result.FindFirstEvent(
+			M11Core::TrajectoryEventType::TargetHit))
+	{
+		OutEvaluation.HasTargetHitVelocity = true;
+		OutEvaluation.TargetHitPositionCM = TargetHit->PositionCM;
+		OutEvaluation.TargetHitVelocityCMPerSec =
+			TargetHit->VelocityCMPerSec;
+		if (const M11Core::TrajectoryEvent* Assist3Exit =
+			Result.FindAssistEvent(
+				M11Core::TrajectoryEventType::AssistExit, 3))
+		{
+			OutEvaluation.HasOrderedTerminalHit =
+				TargetHit->TimeSeconds > Assist3Exit->TimeSeconds;
+		}
+	}
 	OutEvaluation.ResultHash = Result.ValidationHash;
 	if (OutFailure != nullptr)
 	{

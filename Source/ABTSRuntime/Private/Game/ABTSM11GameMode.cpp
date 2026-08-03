@@ -7,7 +7,6 @@
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "HAL/IConsoleManager.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM11PlayerController.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
@@ -15,20 +14,6 @@
 #include "UI/ABTSM11FinaleHUD.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
-
-#if WITH_EDITOR
-namespace
-{
-	TAutoConsoleVariable<int32> CVarABTSM11CandidateRank(
-		TEXT("abts.M11.CandidateRank"),
-		0,
-		TEXT("Editor-only M11-C v2.1 experience layout. ")
-		TEXT("0 keeps the production Certified v1 bundle; ")
-		TEXT("1..6 load the corresponding frozen, UNCERTIFIED ")
-		TEXT("M11-B v2.1 Candidate. Stop and restart PIE after changing."),
-		ECVF_Default);
-}
-#endif
 
 TSubclassOf<AABTSM6SlingshotCamera>
 AABTSM11GameMode::ResolveRuntimeSlingshotCameraClass(
@@ -163,7 +148,7 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 	PrimaryPlanet->TryExportFinaleWorldContract(WorldContract);
 #if WITH_EDITOR
 	const int32 CandidateRank =
-		CVarABTSM11CandidateRank.GetValueOnGameThread();
+		FABTSM11CandidateExperienceCatalog::GetRequestedCandidateRank();
 	const bool bCandidateRequested = CandidateRank != 0;
 	const bool bIsPIEWorld =
 		GetWorld() != nullptr
