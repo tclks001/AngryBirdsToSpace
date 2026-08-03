@@ -2,7 +2,7 @@
 
 > 上游：[M3R 月度地图改进](M3PCGMapImprovementPlan.md) · [M11 Preview Finale Frame Compatibility](M11PreviewFinaleFrameCompatibilityDesign.md)
 > 验收地图：`/Game/Maps/L_ABTS_M11`
-> 当前状态：**代码、自动化与 fresh NullRHI 已通过；Visible PIE Pending**
+> 当前状态：**IntegrationAccepted；代码、自动化、fresh NullRHI 与 Visible PIE 均已通过**
 
 ## 1. 目标与边界
 
@@ -56,4 +56,4 @@ M3 会把左右槽分别贴合连续起伏地表，因此槽对连线可以含�
 5. 日志必须同时出现 `Authority=PreviewTest Candidate=4`、`Finale=2 AnchorCell=847`、`Assists=3 UFO=1`，且不出现 `PreviewFinaleFrame Rejected`。
 6. 如需体验未认证布局，PIE 前设置 `abts.M11.CandidateRank 1..11`；Rank 0 仍使用 Certified v1 局部布局。无论 Rank，世界帧均为本接缝的 Preview/Test 帧。
 
-Visible PIE 通过前，本接缝不得标记为 `IntegrationAccepted`，也不得把候选 4 晋升为正式月度世界。
+Visible PIE 已通过，本接缝标记为 `IntegrationAccepted`。该结论仅接受 Preview/Test 消费链，不把候选 4 晋升为正式月度世界；`MonthlyAccepted` 仍保持为 false。
