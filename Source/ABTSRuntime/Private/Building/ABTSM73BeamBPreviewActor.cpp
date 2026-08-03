@@ -262,9 +262,11 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		TEXT(" Actor=%s Bays=%d Motifs=%d WFC=%d Steps=%d")
 		TEXT(" Planned=%d Closed=%d Bearings=%d")
 		TEXT(" BridgeSeats=%d BridgePosts=%d BridgeBearings=%d RailBearings=%d")
+		TEXT(" SuspendedTargets=%d SuspendedSupported=%d")
 		TEXT(" PortViolations=%d BoundsViolations=%d")
 		TEXT(" Penetrations=%d Unsupported=%d Diagonal=%d Semantic=%d")
 		TEXT(" BridgeBearingViolations=%d RailBearingViolations=%d")
+		TEXT(" SuspendedSupportViolations=%d")
 		TEXT(" BridgeGroundPosts=%d")
 		TEXT(" Hash=%lld"),
 		*GetName(), LastPreviewSummary.BayCount,
@@ -278,6 +280,8 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		LastPreviewSummary.BridgeUpperPostMemberCount,
 		LastPreviewSummary.BridgeEndpointBearingCount,
 		LastPreviewSummary.BridgeRailEndpointBearingCount,
+		LastPreviewSummary.BridgeSuspendedBeamTargetCount,
+		LastPreviewSummary.BridgeSuspendedBeamSupportedCount,
 		LastPreviewSummary.PortViolationCount,
 		LastPreviewSummary.OutOfBoundsMemberCount,
 		LastPreviewSummary.RemainingPenetrationCount,
@@ -286,6 +290,7 @@ void AABTSM73BeamBPreviewActor::RegeneratePreview()
 		LastPreviewSummary.SemanticEnvelopeViolationCount,
 		LastPreviewSummary.BridgeEndpointBearingViolationCount,
 		LastPreviewSummary.BridgeRailEndpointBearingViolationCount,
+		LastPreviewSummary.BridgeSuspendedBeamSupportViolationCount,
 		LastPreviewSummary.BridgeGroundRescuePostCount,
 		LastPreviewSummary.ResultHash);
 }

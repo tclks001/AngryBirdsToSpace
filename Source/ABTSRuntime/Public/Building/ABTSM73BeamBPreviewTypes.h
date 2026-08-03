@@ -211,6 +211,14 @@ struct FABTSM73BeamBPreviewSummary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
 	int32 BridgeUpperPostMemberCount = 0;
 
+	/** Suspended horizontal members on the nearest tier above bridge bearers. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
+	int32 BridgeSuspendedBeamTargetCount = 0;
+
+	/** Targets proven to have a local Z support or direct physical cross-bearing. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result|Bridge")
+	int32 BridgeSuspendedBeamSupportedCount = 0;
+
 	/** Must be zero for every accepted Beam-B result. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 RemainingPenetrationCount = 0;
@@ -244,6 +252,10 @@ struct FABTSM73BeamBPreviewSummary
 	/** Must remain zero: every expected load rail must bear on its endpoint seat. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 BridgeRailEndpointBearingViolationCount = 0;
+
+	/** Must remain zero: every audited beam has a valid local physical support. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 BridgeSuspendedBeamSupportViolationCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
 	int64 MotifWFCHash = 0;

@@ -2289,6 +2289,481 @@ namespace ABTSM73BeamB
 		return true;
 	}
 
+	bool InstallSuspendedBridgeBeamPosts(
+		const FABTSM73BeamBPreviewSettings& Settings,
+		FABTSM73BeamBGenerationResult& InOutResult,
+		FString& OutError)
+	{
+		FABTSM73BeamAGenerationResult& Closed =
+			InOutResult.ClosedAssembly;
+		const double CrossSection = Settings.BeamA.BlockCrossSectionCM;
+		const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+		const int32 InitialMemberCount = Closed.Members.Num();
+		TMap<int32, TArray<int32>> OwnersByMember;
+		for (const FABTSM73BeamAAssembly& Assembly : Closed.Assemblies)
+		{
+			for (const int32 MemberId : Assembly.MemberIds)
+			{
+				OwnersByMember.FindOrAdd(MemberId).AddUnique(
+					Assembly.AssemblyId);
+			}
+		}
+
+		struct FSuspendedBeamTarget
+		{
+			int32 LowerMemberId = INDEX_NONE;
+			int32 UpperMemberId = INDEX_NONE;
+			FBox LowerBounds = FBox(EForceInit::ForceInit);
+			FBox UpperBounds = FBox(EForceInit::ForceInit);
+		};
+
+		TArray<int32> LowerMemberIds;
+		for (int32 MemberId = 0; MemberId < InitialMemberCount; ++MemberId)
+		{
+			const FABTSM73BeamAMember& Member = Closed.Members[MemberId];
+			const bool bBridgeBearer = Member.Role
+					== EABTSM73BeamAMemberRole::BridgeRail
+				|| Member.Role == EABTSM73BeamAMemberRole::BridgeSeat;
+			if (bBridgeBearer
+				&& Member.Axis != EABTSM73BeamAFrameAxis::Z
+				&& Member.Axis != EABTSM73BeamAFrameAxis::Diagonal)
+			{
+				LowerMemberIds.Add(MemberId);
+			}
+		}
+		LowerMemberIds.Sort([&Closed, CrossSection](
+			const int32 A, const int32 B)
+		{
+			const double TopA = ClosedMemberBounds(
+				Closed.Members[A], Closed, CrossSection).Max.Z;
+			const double TopB = ClosedMemberBounds(
+				Closed.Members[B], Closed, CrossSection).Max.Z;
+			return !FMath::IsNearlyEqual(TopA, TopB)
+				? TopA > TopB : A < B;
+		});
+
+		TArray<FSuspendedBeamTarget> Targets;
+		TMap<int32, int32> TargetIndexByUpperMember;
+		for (const int32 LowerMemberId : LowerMemberIds)
+		{
+			const FBox LowerBounds = ClosedMemberBounds(
+				Closed.Members[LowerMemberId], Closed, CrossSection);
+			double NearestGap = TNumericLimits<double>::Max();
+			TArray<int32> NearestUpperMemberIds;
+			for (int32 CandidateId = 0;
+				CandidateId < InitialMemberCount; ++CandidateId)
+			{
+				if (CandidateId == LowerMemberId)
+				{
+					continue;
+				}
+				const FABTSM73BeamAMember& Candidate =
+					Closed.Members[CandidateId];
+				if (Candidate.Axis == EABTSM73BeamAFrameAxis::Z
+					|| Candidate.Axis
+						== EABTSM73BeamAFrameAxis::Diagonal
+					|| Candidate.Role
+						== EABTSM73BeamAMemberRole::BridgePost)
+				{
+					continue;
+				}
+				const FBox UpperBounds = ClosedMemberBounds(
+					Candidate, Closed, CrossSection);
+				const double XOverlap = FMath::Min(
+					LowerBounds.Max.X, UpperBounds.Max.X)
+					- FMath::Max(LowerBounds.Min.X, UpperBounds.Min.X);
+				const double YOverlap = FMath::Min(
+					LowerBounds.Max.Y, UpperBounds.Max.Y)
+					- FMath::Max(LowerBounds.Min.Y, UpperBounds.Min.Y);
+				const double VerticalGap = UpperBounds.Min.Z
+					- LowerBounds.Max.Z;
+				if (XOverlap <= Tolerance || YOverlap <= Tolerance
+					|| VerticalGap <= Tolerance)
+				{
+					continue;
+				}
+				if (VerticalGap < NearestGap - Tolerance)
+				{
+					NearestGap = VerticalGap;
+					NearestUpperMemberIds.Reset();
+					NearestUpperMemberIds.Add(CandidateId);
+				}
+				else if (FMath::IsNearlyEqual(
+					VerticalGap, NearestGap, Tolerance))
+				{
+					NearestUpperMemberIds.Add(CandidateId);
+				}
+			}
+			NearestUpperMemberIds.Sort();
+			for (const int32 UpperMemberId : NearestUpperMemberIds)
+			{
+				const FBox UpperBounds = ClosedMemberBounds(
+					Closed.Members[UpperMemberId], Closed, CrossSection);
+				const double NewOverlapArea = FMath::Max(0.0,
+					FMath::Min(LowerBounds.Max.X, UpperBounds.Max.X)
+						- FMath::Max(LowerBounds.Min.X, UpperBounds.Min.X))
+					* FMath::Max(0.0,
+						FMath::Min(LowerBounds.Max.Y, UpperBounds.Max.Y)
+							- FMath::Max(
+								LowerBounds.Min.Y, UpperBounds.Min.Y));
+				const int32* ExistingTargetIndex =
+					TargetIndexByUpperMember.Find(UpperMemberId);
+				if (ExistingTargetIndex != nullptr)
+				{
+					FSuspendedBeamTarget& ExistingTarget =
+						Targets[*ExistingTargetIndex];
+					const double ExistingOverlapArea = FMath::Max(0.0,
+						FMath::Min(
+							ExistingTarget.LowerBounds.Max.X,
+							ExistingTarget.UpperBounds.Max.X)
+							- FMath::Max(
+								ExistingTarget.LowerBounds.Min.X,
+								ExistingTarget.UpperBounds.Min.X))
+						* FMath::Max(0.0,
+							FMath::Min(
+								ExistingTarget.LowerBounds.Max.Y,
+								ExistingTarget.UpperBounds.Max.Y)
+								- FMath::Max(
+									ExistingTarget.LowerBounds.Min.Y,
+									ExistingTarget.UpperBounds.Min.Y));
+					if (NewOverlapArea <= ExistingOverlapArea + Tolerance)
+					{
+						continue;
+					}
+					ExistingTarget.LowerMemberId = LowerMemberId;
+					ExistingTarget.LowerBounds = LowerBounds;
+					ExistingTarget.UpperBounds = UpperBounds;
+					continue;
+				}
+				const int32 TargetIndex = Targets.Num();
+				FSuspendedBeamTarget& Target = Targets.AddDefaulted_GetRef();
+				Target.LowerMemberId = LowerMemberId;
+				Target.UpperMemberId = UpperMemberId;
+				Target.LowerBounds = LowerBounds;
+				Target.UpperBounds = UpperBounds;
+				TargetIndexByUpperMember.Add(UpperMemberId, TargetIndex);
+			}
+		}
+
+		auto AddContact = [
+			&Closed, &Settings, &OutError, CrossSection](
+			const int32 LowerMemberId,
+			const int32 UpperMemberId,
+			const FVector& Position)
+		{
+			if (Closed.BearingContacts.ContainsByPredicate(
+				[LowerMemberId, UpperMemberId](
+					const FABTSM73BeamABearingContact& Contact)
+				{
+					return Contact.LowerMemberId == LowerMemberId
+						&& Contact.UpperMemberId == UpperMemberId;
+				}))
+			{
+				return true;
+			}
+			if (Closed.BearingContacts.Num()
+				>= Settings.BeamA.MaxBearingContactCount)
+			{
+				OutError = TEXT(
+					"BeamBBridgeSuspendedPostBearingBudgetExceeded");
+				return false;
+			}
+			FABTSM73BeamABearingContact& Contact =
+				Closed.BearingContacts.AddDefaulted_GetRef();
+			Contact.ContactId = Closed.BearingContacts.Num() - 1;
+			Contact.LowerMemberId = LowerMemberId;
+			Contact.UpperMemberId = UpperMemberId;
+			const FABTSM73BeamAMember& Lower =
+				Closed.Members[LowerMemberId];
+			const FABTSM73BeamAMember& Upper =
+				Closed.Members[UpperMemberId];
+			Contact.Type = Upper.Axis == EABTSM73BeamAFrameAxis::Z
+				? EABTSM73BeamABearingType::PostOnBeam
+				: (Lower.Axis == EABTSM73BeamAFrameAxis::Z
+					? EABTSM73BeamABearingType::BeamOnPost
+					: (Lower.Axis != Upper.Axis
+						? EABTSM73BeamABearingType::CrossBearing
+						: EABTSM73BeamABearingType::ParallelBearing));
+			Contact.LocalPosition = Position;
+			Contact.ContactAreaCM2 = CrossSection * CrossSection;
+			return true;
+		};
+
+		InOutResult.Summary.BridgeSuspendedBeamTargetCount = Targets.Num();
+		InOutResult.Summary.BridgeSuspendedBeamSupportedCount = 0;
+		InOutResult.Summary.BridgeSuspendedBeamSupportViolationCount = 0;
+		int32 ExistingSupportCount = 0;
+		int32 AddedPostCount = 0;
+		for (const FSuspendedBeamTarget& Target : Targets)
+		{
+			auto IsPhysicalSupport = [&Closed, &Target, CrossSection, Tolerance](
+				const FABTSM73BeamAMember& Member)
+			{
+				if (Member.MemberId == Target.UpperMemberId
+					|| Member.Axis != EABTSM73BeamAFrameAxis::Z)
+				{
+					return false;
+				}
+				const FBox Bounds = ClosedMemberBounds(
+					Member, Closed, CrossSection);
+				const double XOverlap = FMath::Min(
+					Bounds.Max.X, Target.UpperBounds.Max.X)
+					- FMath::Max(Bounds.Min.X, Target.UpperBounds.Min.X);
+				const double YOverlap = FMath::Min(
+					Bounds.Max.Y, Target.UpperBounds.Max.Y)
+					- FMath::Max(Bounds.Min.Y, Target.UpperBounds.Min.Y);
+				return XOverlap > Tolerance && YOverlap > Tolerance
+					&& FMath::Abs(
+						Bounds.Max.Z - Target.UpperBounds.Min.Z) <= Tolerance
+					&& Bounds.Min.Z < Target.UpperBounds.Min.Z - Tolerance;
+			};
+			if (Closed.Members.ContainsByPredicate(IsPhysicalSupport))
+			{
+				++ExistingSupportCount;
+				++InOutResult.Summary.BridgeSuspendedBeamSupportedCount;
+				continue;
+			}
+
+			const double OverlapMinX = FMath::Max(
+				Target.LowerBounds.Min.X, Target.UpperBounds.Min.X);
+			const double OverlapMaxX = FMath::Min(
+				Target.LowerBounds.Max.X, Target.UpperBounds.Max.X);
+			const double OverlapMinY = FMath::Max(
+				Target.LowerBounds.Min.Y, Target.UpperBounds.Min.Y);
+			const double OverlapMaxY = FMath::Min(
+				Target.LowerBounds.Max.Y, Target.UpperBounds.Max.Y);
+			const FVector2D OverlapCenter(
+				(OverlapMinX + OverlapMaxX) * 0.5,
+				(OverlapMinY + OverlapMaxY) * 0.5);
+			auto BuildAxisCandidates = [CrossSection, Tolerance](
+				const double Minimum, const double Maximum)
+			{
+				TArray<double> Values;
+				Values.Add((Minimum + Maximum) * 0.5);
+				const double Span = Maximum - Minimum;
+				if (Span > Tolerance)
+				{
+					const int32 StepCount = FMath::Clamp(
+						FMath::CeilToInt(Span / FMath::Max(
+							CrossSection * 0.5, Tolerance)),
+						1,
+						64);
+					for (int32 Step = 0; Step <= StepCount; ++Step)
+					{
+						Values.AddUnique(FMath::Lerp(
+							Minimum,
+							Maximum,
+							static_cast<double>(Step) / StepCount));
+					}
+				}
+				return Values;
+			};
+			const TArray<double> CandidateXs = BuildAxisCandidates(
+				OverlapMinX, OverlapMaxX);
+			const TArray<double> CandidateYs = BuildAxisCandidates(
+				OverlapMinY, OverlapMaxY);
+			TArray<FVector2D> CandidateCenters;
+			CandidateCenters.Add(OverlapCenter);
+			for (const double CandidateX : CandidateXs)
+			{
+				for (const double CandidateY : CandidateYs)
+				{
+					CandidateCenters.AddUnique(FVector2D(
+						CandidateX, CandidateY));
+				}
+			}
+
+			const double PostBottomZ = Target.LowerBounds.Max.Z;
+			const double PostTopZ = Target.UpperBounds.Min.Z;
+			const double PostLength = PostTopZ - PostBottomZ;
+			FVector PostCenter = FVector::ZeroVector;
+			bool bFoundClearLane = false;
+			int32 LastBlockingMemberId = INDEX_NONE;
+			for (const FVector2D& CandidateCenter : CandidateCenters)
+			{
+				PostCenter = FVector(
+					CandidateCenter.X,
+					CandidateCenter.Y,
+					(PostBottomZ + PostTopZ) * 0.5);
+				const FBox PostBounds(
+					PostCenter - FVector(
+						CrossSection * 0.5,
+						CrossSection * 0.5,
+						PostLength * 0.5),
+					PostCenter + FVector(
+						CrossSection * 0.5,
+						CrossSection * 0.5,
+						PostLength * 0.5));
+				bool bBlocked = false;
+				for (const FABTSM73BeamAMember& Existing : Closed.Members)
+				{
+					if (Existing.MemberId == Target.LowerMemberId
+						|| Existing.MemberId == Target.UpperMemberId)
+					{
+						continue;
+					}
+					const FBox ExistingBounds = ClosedMemberBounds(
+						Existing, Closed, CrossSection);
+					const double XOverlap = FMath::Min(
+						PostBounds.Max.X, ExistingBounds.Max.X)
+						- FMath::Max(
+							PostBounds.Min.X, ExistingBounds.Min.X);
+					const double YOverlap = FMath::Min(
+						PostBounds.Max.Y, ExistingBounds.Max.Y)
+						- FMath::Max(
+							PostBounds.Min.Y, ExistingBounds.Min.Y);
+					const double ZOverlap = FMath::Min(
+						PostBounds.Max.Z, ExistingBounds.Max.Z)
+						- FMath::Max(
+							PostBounds.Min.Z, ExistingBounds.Min.Z);
+					if (XOverlap > Tolerance && YOverlap > Tolerance
+						&& ZOverlap > Tolerance)
+					{
+						LastBlockingMemberId = Existing.MemberId;
+						bBlocked = true;
+						break;
+					}
+				}
+				if (!bBlocked)
+				{
+					bFoundClearLane = true;
+					break;
+				}
+			}
+			if (!bFoundClearLane)
+			{
+				const bool bHasDirectCrossBearing =
+					Closed.Members.ContainsByPredicate(
+						[&Closed, &Target, CrossSection, Tolerance](
+							const FABTSM73BeamAMember& Member)
+						{
+							if (Member.MemberId == Target.UpperMemberId)
+							{
+								return false;
+							}
+							const FBox Bounds = ClosedMemberBounds(
+								Member, Closed, CrossSection);
+							const double XOverlap = FMath::Min(
+								Bounds.Max.X, Target.UpperBounds.Max.X)
+								- FMath::Max(
+									Bounds.Min.X, Target.UpperBounds.Min.X);
+							const double YOverlap = FMath::Min(
+								Bounds.Max.Y, Target.UpperBounds.Max.Y)
+								- FMath::Max(
+									Bounds.Min.Y, Target.UpperBounds.Min.Y);
+							return XOverlap > Tolerance
+								&& YOverlap > Tolerance
+								&& FMath::Abs(
+									Bounds.Max.Z
+										- Target.UpperBounds.Min.Z)
+									<= Tolerance
+								&& Bounds.Min.Z
+									< Target.UpperBounds.Min.Z - Tolerance;
+						});
+				if (bHasDirectCrossBearing)
+				{
+					++ExistingSupportCount;
+					++InOutResult.Summary
+						.BridgeSuspendedBeamSupportedCount;
+					continue;
+				}
+				const FABTSM73BeamAMember* Blocker =
+					Closed.Members.IsValidIndex(LastBlockingMemberId)
+						? &Closed.Members[LastBlockingMemberId] : nullptr;
+				UE_LOG(
+					LogABTSRuntime,
+					Warning,
+					TEXT("[ABTS][M7.3-Beam-B][SuspendedBeamPostLaneBlocked] Lower=%d Upper=%d LowerBounds=%s..%s UpperBounds=%s..%s Blocker=%d BlockerAxis=%d BlockerRole=%d BlockerBounds=%s..%s"),
+					Target.LowerMemberId,
+					Target.UpperMemberId,
+					*Target.LowerBounds.Min.ToCompactString(),
+					*Target.LowerBounds.Max.ToCompactString(),
+					*Target.UpperBounds.Min.ToCompactString(),
+					*Target.UpperBounds.Max.ToCompactString(),
+					LastBlockingMemberId,
+					Blocker != nullptr
+						? static_cast<int32>(Blocker->Axis) : INDEX_NONE,
+					Blocker != nullptr
+						? static_cast<int32>(Blocker->Role) : INDEX_NONE,
+					Blocker != nullptr
+						? *ClosedMemberBounds(
+							*Blocker, Closed, CrossSection).Min.ToCompactString()
+						: TEXT("None"),
+					Blocker != nullptr
+						? *ClosedMemberBounds(
+							*Blocker, Closed, CrossSection).Max.ToCompactString()
+						: TEXT("None"));
+				++InOutResult.Summary
+					.BridgeSuspendedBeamSupportViolationCount;
+				continue;
+			}
+			if (Closed.Members.Num() >= Settings.BeamA.MaxMemberCount
+				|| Closed.Joints.Num() + 2
+					> Settings.BeamA.MaxJointCount)
+			{
+				OutError = TEXT("BeamBBridgeSuspendedPostBudgetExceeded");
+				return false;
+			}
+			const TArray<int32>* Owners =
+				OwnersByMember.Find(Target.LowerMemberId);
+			if (Owners == nullptr || Owners->IsEmpty()
+				|| !Closed.Assemblies.IsValidIndex((*Owners)[0]))
+			{
+				OutError = TEXT("BeamBBridgeSuspendedPostOwnerMissing");
+				return false;
+			}
+			FVector LowerPosition = PostCenter;
+			LowerPosition.Z = PostBottomZ;
+			FVector UpperPosition = PostCenter;
+			UpperPosition.Z = PostTopZ;
+			const int32 JointA = Closed.Joints.Num();
+			FABTSM73BeamAJoint& A = Closed.Joints.AddDefaulted_GetRef();
+			A.JointId = JointA;
+			A.LocalPosition = LowerPosition;
+			A.Role = EABTSM73BeamAJointRole::BeamEnd;
+			const int32 JointB = Closed.Joints.Num();
+			FABTSM73BeamAJoint& B = Closed.Joints.AddDefaulted_GetRef();
+			B.JointId = JointB;
+			B.LocalPosition = UpperPosition;
+			B.Role = EABTSM73BeamAJointRole::ColumnHead;
+			FABTSM73BeamAMember& Post =
+				Closed.Members.AddDefaulted_GetRef();
+			Post.MemberId = Closed.Members.Num() - 1;
+			Post.JointA = JointA;
+			Post.JointB = JointB;
+			Post.Axis = EABTSM73BeamAFrameAxis::Z;
+			Post.Role = EABTSM73BeamAMemberRole::BridgePost;
+			Post.LengthCM = PostLength;
+			FABTSM73BeamAAssembly& Owner = Closed.Assemblies[(*Owners)[0]];
+			Owner.JointIds.AddUnique(JointA);
+			Owner.JointIds.AddUnique(JointB);
+			Owner.MemberIds.AddUnique(Post.MemberId);
+			OwnersByMember.FindOrAdd(Post.MemberId).AddUnique(Owner.AssemblyId);
+			if (!AddContact(
+				Target.LowerMemberId, Post.MemberId, LowerPosition)
+				|| !AddContact(
+					Post.MemberId, Target.UpperMemberId, UpperPosition))
+			{
+				return false;
+			}
+			++InOutResult.Summary.BridgeSuspendedBeamSupportedCount;
+			++AddedPostCount;
+		}
+		UE_LOG(
+			LogABTSRuntime,
+			Display,
+			TEXT("[ABTS][M7.3-Beam-B][SuspendedBeamSupportAudit] Targets=%d Supported=%d Existing=%d Added=%d Violations=%d"),
+			InOutResult.Summary.BridgeSuspendedBeamTargetCount,
+			InOutResult.Summary.BridgeSuspendedBeamSupportedCount,
+			ExistingSupportCount,
+			AddedPostCount,
+			InOutResult.Summary.BridgeSuspendedBeamSupportViolationCount);
+		Closed.Summary.JointCount = Closed.Joints.Num();
+		Closed.Summary.MemberCount = Closed.Members.Num();
+		Closed.Summary.BearingContactCount = Closed.BearingContacts.Num();
+		return true;
+	}
+
 	bool CompileAndCloseAssembly(
 		const FABTSM73BeamBPreviewSettings& Settings,
 		const FABTSM73DAG5BV2GenerationResult& Silhouette,
@@ -2534,6 +3009,19 @@ namespace ABTSM73BeamB
 		if (!InstallClosedBridgeEndpointCorbels(
 			Settings, Silhouette, InOutResult, OutError))
 		{
+			return false;
+		}
+		if (!InstallSuspendedBridgeBeamPosts(
+			Settings, InOutResult, OutError))
+		{
+			return false;
+		}
+		if (InOutResult.Summary.BridgeSuspendedBeamSupportViolationCount > 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamBBridgeSuspendedBeamSupportViolation:Count=%d"),
+				InOutResult.Summary
+					.BridgeSuspendedBeamSupportViolationCount);
 			return false;
 		}
 		InOutResult.Summary.SemanticEnvelopeViolationCount =

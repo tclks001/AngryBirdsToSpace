@@ -727,6 +727,13 @@ bool FABTSM73BeamBDefaultBridgedArcologyRailBearingTest::RunTest(
 		Result.Summary.BridgeRailEndpointBearingViolationCount, 0);
 	TestEqual(TEXT("Default fixture has no endpoint-bearing violation"),
 		Result.Summary.BridgeEndpointBearingViolationCount, 0);
+	TestTrue(TEXT("Default fixture audits every separated suspended beam"),
+		Result.Summary.BridgeSuspendedBeamTargetCount >= 4);
+	TestEqual(TEXT("Default fixture supports every audited suspended beam"),
+		Result.Summary.BridgeSuspendedBeamSupportedCount,
+		Result.Summary.BridgeSuspendedBeamTargetCount);
+	TestEqual(TEXT("Default fixture has no suspended-beam support violation"),
+		Result.Summary.BridgeSuspendedBeamSupportViolationCount, 0);
 	TestEqual(TEXT("Default fixture has no bridge ground rescue post"),
 		Result.Summary.BridgeGroundRescuePostCount, 0);
 	int32 ShortCorbelCount = 0;
@@ -767,7 +774,6 @@ bool FABTSM73BeamBDefaultBridgedArcologyRailBearingTest::RunTest(
 				const FABTSM73BeamAMember& Upper =
 					Result.ClosedAssembly.Members[Contact.UpperMemberId];
 				bModuleAbove = Upper.Axis != EABTSM73BeamAFrameAxis::Z
-					&& Upper.Role != EABTSM73BeamAMemberRole::BridgeRail
 					&& Upper.Role != EABTSM73BeamAMemberRole::BridgePost;
 			}
 		}
@@ -778,10 +784,12 @@ bool FABTSM73BeamBDefaultBridgedArcologyRailBearingTest::RunTest(
 	}
 	TestTrue(TEXT("Default fixture materializes local short bridge corbels"),
 		ShortCorbelCount > 0);
-	TestTrue(TEXT("Default fixture closes elevated endpoint gaps with a Z-post group"),
-		UpperPostCount >= 2);
+	TestTrue(TEXT("Default fixture closes every separated elevated beam with Z posts"),
+		UpperPostCount >= 4);
 	TestEqual(TEXT("Bridge upper-post summary matches materialized posts"),
 		Result.Summary.BridgeUpperPostMemberCount, UpperPostCount);
+	TestTrue(TEXT("Added suspended-beam posts preserve ground reachability"),
+		EveryMemberReachesGround(Result.ClosedAssembly, Settings));
 	return true;
 }
 

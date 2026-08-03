@@ -70,12 +70,14 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 也不得从地面补长柱。最终 Bearing 图必须显式包含“承托模块 -> 桥托 -> 短托块（可选） ->
 每根桥面纵梁”的路径。
 
-桥面纵梁与承托模块之间还必须闭合上向传力路径。若同一端部模块内存在位于纵梁上方、
-XY 投影与纵梁相交的悬空水平构件，则在每个有效纵梁站位选择最近的上方构件，并在二者
-实际重叠区域中心生成局部 `BridgePost`。该柱只跨越“纵梁上表面 -> 上部构件下表面”，
-不得落地、不得侵入跨中保留净空，也不得与第三方构件发生正体积重叠。Bearing 图对应增加
-“桥面纵梁 -> BridgePost -> 上部构件”的实体路径；若该通道已被既有实体占据，则保留原构件，
-不叠加重复修补柱。
+桥面纵梁与承托模块之间还必须闭合上向传力路径。闭合后的每根水平 `BridgeRail` / `BridgeSeat`
+都要审计其最近上层的全部独立水平构件，不能再由一次 `BestUpper` 贪心选择代表整层。若同一
+上层构件与多根桥梁承托相交，则优先选择 XY 实际重叠面积最大的承托关系，并在完整重叠域内
+确定性搜索无穿插柱位，而不是只尝试中心点。缺少 Z 向实体支承时生成局部 `BridgePost`；该柱
+只跨越“承托梁上表面 -> 上部构件下表面”，不得落地、不得侵入跨中保留净空，也不得与第三方
+构件发生正体积重叠。Bearing 图对应增加“桥面纵梁/桥托 -> BridgePost -> 上部构件”的实体路径。
+若已有 Z 柱则复用；若全部合法柱位都被一个直接贴住上部构件下表面的横向 Cross Bearing 占据，
+则该上部构件并非悬空，保留现有堆放传力关系，不叠加穿插柱。除此之外的漏支撑一律 fail closed。
 
 ## 3. Motif 与 Port
 
@@ -135,8 +137,10 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 - `BridgeEndpointBearing`：每个 SupportedSpan 必须有两份桥托账本；桥托留在上游指定的语义模块内，闭合后两端均存在“指定模块 -> 桥体”的局部 Bearing 路径，且桥体 Assembly 不得靠落地长柱救援。
 - `DefaultBridgedArcologyRailBearing`：默认 `BridgedArcology` 固定种子下，不仅两个端点整体可达，
   每根桥面纵梁的两个端点都必须直接落在地面可达的 `BridgeSeat`/短托块上；同时默认夹层必须
-  实体化至少一根 `BridgePost`，并逐根证明“纵梁 -> Z 柱 -> 端部模块水平构件”的上下 Bearing；
-  任一局部端缝均拒绝整次生成。
+  逐根审计最近层的独立水平构件，`BridgeSuspendedBeamSupportedCount` 必须等于
+  `BridgeSuspendedBeamTargetCount`，且 `BridgeSuspendedBeamSupportViolationCount` 为 0；新增
+  `BridgePost` 必须逐根证明“纵梁/桥托 -> Z 柱 -> 端部模块水平构件”的上下 Bearing。任一局部
+  端缝或漏支撑均拒绝整次生成。
 - `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
   在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
 
@@ -148,14 +152,17 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
 2. `GrammarDepth` 从 1 提高到 3～4 时，门架联系层、木垛层或平行梁数量应增加；
 3. SupportedSpan 必须显示双长梁/横向端梁；终端主梁应延伸至净开口边界并分别落在两端横向桥托上，
    不得留下可见端缝，也不得坍缩为普通塔楼母题；若桥托或纵梁上方仍有端部模块，则各有效站位
-   必须显示连接横梁和悬空模块的短 Z 柱组，而不是再次生成落地长柱；
+   及同层每根彼此分离的悬空横梁都必须显示短 Z 柱支撑，而不是只支撑最左/最先命中的一根，也
+   不能再次生成落地长柱；直接搭在横向 Cross Bearing 上的构件可保留积木堆放关系；
 4. 不得生成单边 Cantilever；旧 `bAllowCantilever` 开关不再恢复该形态，当前任何设置下也不应出现斜杆；
 5. 上游 Prism 应由逐层缩短一个水平轴的梁层读出坡屋顶；Pyramid 应同时沿 X/Y 收分，
    不得再显示为等宽矩形木垛或平顶框；
 6. 不应再看到整组悬空、相互横穿或大块正体积重叠；允许端面接触与上下承托接触；
 7. Details 中 Accepted 为真，PortViolationCount、OutOfBoundsMemberCount、
    RemainingPenetrationCount、UnsupportedMemberCount、DiagonalMemberCount 均为 0，
-   SemanticEnvelopeViolationCount 为 0，ClosedMemberCount 与 ClosedBearingContactCount 大于 0；
+   SemanticEnvelopeViolationCount、BridgeSuspendedBeamSupportViolationCount 均为 0，
+   BridgeSuspendedBeamSupportedCount 等于 BridgeSuspendedBeamTargetCount，ClosedMemberCount 与
+   ClosedBearingContactCount 大于 0；
 8. SupportedSpan 下方必须保持为空，不得生成跨中落地长柱；两端桥托应由上游指定的承托模块承担，允许收口后与该模块既有承托梁合并，也允许使用连接该模块的水平桥托与短 Z 向托块，但不允许桥体自身补到地面；每根平行桥面纵梁均不得留下局部端缝；
 9. 进入 PIE 后预览不可见且不参与物理 Gate。
 
@@ -204,3 +211,16 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
   10/10 Success。
 - `Saved/Logs/BridgeUpperPosts-M7Final-20260802-2301.log`：精确找到 95 项 `ABTS.M7`，
   95/95 Success；覆盖新增上向 Z 柱、无正体积穿透、Bearing 到地可达及既有 M7 回归集合。
+- 2026-08-03 完成“逐根悬空横梁”闭合：默认 `BridgedArcology/735201` 审计 15 根最近层
+  水平构件，8 根复用既有 Z 柱或无可插柱通道的直接 Cross Bearing，7 根新增局部
+  `BridgePost`，最终 `Supported=15/15`、`Violations=0`；不再只修补 `BestUpper` 命中的首根横梁。
+- `Saved/Logs/BeamB-AllSuspendedPosts-Final2-20260803-112410-ForceUnity-Build.log`：使用
+  `-ForceUnity -DisableAdaptiveUnity` 强制 Unity 完整链接，`Result: Succeeded`。
+- `Saved/Logs/BeamB-AllSuspendedPosts-FinalExact-20260803-112247-FreshAutomation.log`：默认实例精确门禁
+  1/1 Success；`BridgeSuspendedBeamSupportedCount == BridgeSuspendedBeamTargetCount`。
+- `Saved/Logs/BeamB-AllSuspendedPosts-BeamB-20260803-111528-FreshAutomation.log`：精确找到
+  12 项 Beam-B，12/12 Success。
+- `Saved/Logs/BeamB-AllSuspendedPosts-BeamA-20260803-111631-FreshAutomation.log`：精确找到
+  10 项 Beam-A，10/10 Success。
+- `Saved/Logs/BeamB-AllSuspendedPosts-M7-20260803-111927-FreshAutomation.log`：精确找到
+  95 项 `ABTS.M7`，95/95 Success。
