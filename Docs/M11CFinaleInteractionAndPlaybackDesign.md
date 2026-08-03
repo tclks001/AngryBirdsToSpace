@@ -10,6 +10,8 @@
 >
 > 表现语义上游：[M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md)。
 >
+> HUD 交互优化子稿：[M11-C/HUD-1 终局发射控制台、轨迹探针与联动画中画](M11CFinaleLaunchHUDOptimizationDesign.md)。
+>
 > 集成约束：[多工作树协作与集成规范](ABTSMultiWorktreeDevelopmentGuide.md) · [项目工作流](ABTSProjectWorkflow.md)。
 
 ## 1. 一句话目标
