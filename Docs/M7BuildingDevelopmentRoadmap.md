@@ -6,7 +6,8 @@
 > [M7.3-Beam-B](M73BeamBMotifWFCAndGraphGrammarDesign.md) 已完成并通过用户编辑器读形验收。
 > Beam-C 已完成用户编辑器读形验收；
 > [M7.3-Beam-D0](M73BeamD0GameplayProfileCatalogDesign.md) 的 Profile Catalog、Difficulty Curve 与统一 Settings Resolver 首版已完成。
-> 下一阶段为 Beam-D1：真实 Brick 与材料角色。
+> [M7.3-Beam-D1](M73BeamD1RealBrickAndMaterialRolesDesign.md) 的真实 Brick、材料角色与独立预览链代码及自动化已完成，待用户编辑器读形验收。
+> 完成可见验收后进入 Beam-D2：弱点、Chaos 与 Profile×Tier 认证。
 >
 > 生产现状：球面 TaskGraph 普通建筑仍使用已稳定的 DAG2.3 路径。Beam 路线在完成
 > Beam-D1/D2 真实 Brick/弱点/Chaos 闭环与 Beam-E 生产认证完成前不得替换生产默认值。
@@ -26,7 +27,7 @@ M7 材料、碰撞与破坏服务
       ├─ Beam-B：Bay 内 Motif WFC、Beam-A 语义屋顶与全局装配收口（已验收）
       ├─ Beam-C：Load DAG 提取、多支点反力与静态传力代理（已验收）
       ├─ Beam-D0：Profile Catalog、Difficulty Curve 与统一 Settings Resolver
-      ├─ Beam-D1：真实 Brick 与材料角色
+      ├─ Beam-D1：真实 Brick 与材料角色（代码/自动化完成，待读形验收）
       ├─ Beam-D2：弱点、Chaos 与 Profile×Tier 认证
       └─ Beam-E：Catalog 冻结、共享 vNext 合同与 M3 六栋生产接入
 ```
@@ -77,7 +78,7 @@ M7 材料、碰撞与破坏服务
 | 递归图 | `FABTSM73DAGGrammarExpander` | Beam-C 对 Assembly/Member 做受限展开时复用确定性推导原则 |
 | 布局与几何 | `FABTSM73DAGLayoutSolver`、`FABTSM73DAGSupportGeometry` | Beam-C/D 复用边界、跨度、落脚点和适配规则 |
 | 荷载 | `FABTSM73DAGLoadSupportSolver` | Beam-C 从 Beam Assembly Graph 提取 Load DAG 后复用累计荷载合同 |
-| 真实模块编译 | `FABTSM73DAGModuleCompiler`、`FABTSM73DAGBuildingPipeline` | Beam-D 把选中的 Member 编译为真实 Brick/Actor |
+| 真实模块编译 | `FABTSM73BeamD1BrickCompiler`、`AABTSM73BeamD1PreviewActor`、`AABTSM7BuildingMaterialSystem` | Beam-D1 一对一编译 Member/Brick，并通过独立开关生成真实 Module；旧 DAG ModuleCompiler 不进入 Beam 几何 |
 | 地面与施工面 | `FABTSM73GroundAdapter` | Beam-D 的平面/球面共同落地层 |
 | 静态稳定 | `FABTSM73DAGValidator`、`FABTSM73StabilityValidator`、`FABTSM7PenetrationValidator` | Beam-C/D 的快速拒绝与无穿透检查 |
 | 弱点与可玩性 | `FABTSM73DAGFailureFrontierAnalyzer`、`FABTSM73DAGFailurePatternRewriter`、`FABTSM73DAGFailurePlayabilityPlanner` | Beam-C/D 基于新 Load DAG 复用，不复用旧固定楼板轮廓 |
@@ -96,7 +97,7 @@ Graph 是无向/混合方向的几何装配图；Load DAG 是之后按重力和�
 | Beam-B | Box Bay 用 Motif WFC 选择结构家族，Prism/Pyramid Bay 复用 Beam-A 逐层收分语义屋顶；SupportedSpan 保留双端承托门洞，禁用单边 Cantilever，并统一装配收口 | [自动化与编辑器读形验收完成](M73BeamBMotifWFCAndGraphGrammarDesign.md) |
 | Beam-C | 从闭合 Bearing Contact 提取/验证 Load DAG，计算多支点反力并执行跨度、悬臂、长细比和侧向静态代理 | [代码、自动化与用户编辑器读形验收完成](M73BeamCLoadDAGAndStaticProxyDesign.md) |
 | Beam-D0 | 用 `GameplayProfileId + DifficultyTier` 解析语义、难度曲线和完整内部生成设置；项目硬门槛不成为地图输入 | [首版代码与自动化完成](M73BeamD0GameplayProfileCatalogDesign.md) |
-| Beam-D1 | 把 Beam Member 编译为真实 Brick，并落实材料角色与装置意图 | 未开始 |
+| Beam-D1 | 把 Beam Member 编译为真实 Brick，并落实材料角色与装置意图 | [代码与自动化完成，待用户编辑器读形验收](M73BeamD1RealBrickAndMaterialRolesDesign.md) |
 | Beam-D2 | 联合 Failure Frontier、真实接触、Chaos，对完整 Profile×Tier 矩阵认证 | 未开始 |
 | Beam-E | 冻结 Catalog，经共享 vNext 合同接入 M3 六栋生产建筑、Encounter 难度和视觉元数据 | 未开始；共享合同改动由集成工作树执行 |
 
@@ -114,7 +115,7 @@ DAG5-B v2 Shape Grammar + graph WFC
   -> Beam-B Box motifs + Beam-A semantic roof fitting + global closure (implemented)
   -> Beam-C Load DAG + multi-support reaction + static proxy (accepted)
   -> Beam-D0 Profile Catalog + Difficulty Curve + Settings Resolver (implemented)
-  -> Beam-D1 real Brick + material roles
+  -> Beam-D1 real Brick + material roles (implemented; visual acceptance pending)
   -> Beam-D2 weakness + Chaos + Profile x Tier certification
   -> Beam-E catalog freeze + shared vNext + M3 six-building production routing
 ```

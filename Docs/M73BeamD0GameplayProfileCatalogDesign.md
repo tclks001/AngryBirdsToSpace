@@ -2,7 +2,7 @@
 
 > 父文档：[M7 建筑生成演进路线](M7BuildingDevelopmentRoadmap.md)
 > 上游：[M7.3-Beam-C Load DAG 与静态传力代理](M73BeamCLoadDAGAndStaticProxyDesign.md)
-> 后续：Beam-D1 真实 Brick/材料角色，Beam-D2 弱点/Chaos/Profile×Tier 认证，Beam-E Catalog 冻结与 M3 六栋生产接入
+> 后续：[Beam-D1 真实 Brick/材料角色](M73BeamD1RealBrickAndMaterialRolesDesign.md)，Beam-D2 弱点/Chaos/Profile×Tier 认证，Beam-E Catalog 冻结与 M3 六栋生产接入
 > 状态：首版 C++ 与自动化已完成；不修改共享世界生成合同，不接管 TaskGraph 生产建筑。
 
 ## 1. 目标
