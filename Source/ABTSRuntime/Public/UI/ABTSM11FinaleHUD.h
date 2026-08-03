@@ -99,6 +99,8 @@ private:
 		double NormalizedRadius,
 		const FLinearColor& Color);
 	void UpdateFinaleHudLayout(float Width, float Height);
+	FVector2D ToHudCanvasPosition(
+		const FVector2D& ViewportPosition) const;
 	bool IsInside(const FVector2D& Point, const FBox2D& Box) const;
 	bool IsInsideDiagram(const FVector2D& Point) const;
 	int32 FindKnobAt(const FVector2D& Point) const;
@@ -137,5 +139,6 @@ private:
 	FBox2D HudResetViewButton;
 	FBox2D HudRebasePipButton;
 	FBox2D HudFollowAutoButton;
+	FVector2D HudCanvasSize = FVector2D::ZeroVector;
 	bool bHudLayoutValid = false;
 };

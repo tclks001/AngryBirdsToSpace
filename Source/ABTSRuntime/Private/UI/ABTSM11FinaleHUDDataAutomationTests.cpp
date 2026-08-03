@@ -409,6 +409,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FABTSM11HudInputCaptureTest::RunTest(const FString& Parameters)
 {
+	const FVector2D DpiMapped = ABTSM11MapViewportPointToHudCanvas(
+		FVector2D(1250.0f, 750.0f),
+		FVector2D(2500.0f, 1500.0f),
+		FVector2D(2000.0f, 1200.0f));
+	TestTrue(TEXT("Viewport pixels map into HUD Canvas coordinates"),
+		DpiMapped.Equals(FVector2D(1000.0f, 600.0f), 0.001f));
+	const FVector2D NonUniformMapped = ABTSM11MapViewportPointToHudCanvas(
+		FVector2D(960.0f, 540.0f),
+		FVector2D(1920.0f, 1080.0f),
+		FVector2D(1280.0f, 800.0f));
+	TestTrue(TEXT("Each HUD Canvas axis is mapped independently"),
+		NonUniformMapped.Equals(FVector2D(640.0f, 400.0f), 0.001f));
+	TestTrue(TEXT("Invalid size fails safely without moving the pointer"),
+		ABTSM11MapViewportPointToHudCanvas(
+			FVector2D(11.0f, 22.0f),
+			FVector2D::ZeroVector,
+			FVector2D(1280.0f, 720.0f)).Equals(
+				FVector2D(11.0f, 22.0f), 0.001f));
+
 	FABTSM11FinaleHudCaptureState State;
 	TestTrue(TEXT("Yaw knob acquires exclusive capture"),
 		State.TryBegin(EABTSM11FinaleHudCapture::AdjustYaw));

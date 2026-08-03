@@ -596,6 +596,23 @@ bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
 			&& (!bCaptureInitialized || bAutomaticTargetChanged));
 }
 
+FVector2D ABTSM11MapViewportPointToHudCanvas(
+	const FVector2D& ViewportPoint,
+	const FVector2D& ViewportSize,
+	const FVector2D& HudCanvasSize)
+{
+	if (ViewportSize.X <= KINDA_SMALL_NUMBER
+		|| ViewportSize.Y <= KINDA_SMALL_NUMBER
+		|| HudCanvasSize.X <= KINDA_SMALL_NUMBER
+		|| HudCanvasSize.Y <= KINDA_SMALL_NUMBER)
+	{
+		return ViewportPoint;
+	}
+	return FVector2D(
+		ViewportPoint.X * HudCanvasSize.X / ViewportSize.X,
+		ViewportPoint.Y * HudCanvasSize.Y / ViewportSize.Y);
+}
+
 bool FABTSM11TrajectorySemanticSegment::IsValid(
 	const int32 PointCount) const
 {

@@ -107,6 +107,7 @@ void AABTSM11FinaleHUD::UpdateFinaleHudLayout(
 	const float Width,
 	const float Height)
 {
+	HudCanvasSize = FVector2D(Width, Height);
 	HudDiagramRadius = FMath::Min(170.0f, Height * 0.18f);
 	HudDiagramCenter = FVector2D(
 		HudDiagramRadius + 22.0f,
@@ -138,6 +139,23 @@ void AABTSM11FinaleHUD::UpdateFinaleHudLayout(
 	HudRebasePipButton = Box(ModeX, ModeY + 99.0f, 82.0f, 27.0f);
 	HudFollowAutoButton = Box(ModeX, ModeY + 132.0f, 82.0f, 27.0f);
 	bHudLayoutValid = Width > 1.0f && Height > 1.0f;
+}
+
+FVector2D AABTSM11FinaleHUD::ToHudCanvasPosition(
+	const FVector2D& ViewportPosition) const
+{
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	if (const APlayerController* Controller = GetOwningPlayerController())
+	{
+		Controller->GetViewportSize(ViewportWidth, ViewportHeight);
+	}
+	return ABTSM11MapViewportPointToHudCanvas(
+		ViewportPosition,
+		FVector2D(
+			static_cast<float>(ViewportWidth),
+			static_cast<float>(ViewportHeight)),
+		HudCanvasSize);
 }
 
 bool AABTSM11FinaleHUD::IsInside(
@@ -189,12 +207,13 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 			static_cast<float>(Width),
 			static_cast<float>(Height));
 	}
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
 	if (HudCapture.GetCapture() != EABTSM11FinaleHudCapture::None)
 	{
 		return true;
 	}
 
-	const int32 KnobIndex = FindKnobAt(MousePosition);
+	const int32 KnobIndex = FindKnobAt(HudPosition);
 	if (KnobIndex != INDEX_NONE)
 	{
 		const EABTSM11FinaleHudCapture Capture = KnobIndex == 0
@@ -202,57 +221,57 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 			: KnobIndex == 1
 				? EABTSM11FinaleHudCapture::AdjustPitch
 				: EABTSM11FinaleHudCapture::AdjustPower;
-		LastCapturedPointer = MousePosition;
+		LastCapturedPointer = HudPosition;
 		return HudCapture.TryBegin(Capture);
 	}
-	if (IsInside(MousePosition, HudGearCoarse))
+	if (IsInside(HudPosition, HudGearCoarse))
 	{
 		HudSpeedGear = EABTSM11ControlSpeedGear::Coarse;
 		return true;
 	}
-	if (IsInside(MousePosition, HudGearFine))
+	if (IsInside(HudPosition, HudGearFine))
 	{
 		HudSpeedGear = EABTSM11ControlSpeedGear::Fine;
 		return true;
 	}
-	if (IsInside(MousePosition, HudGearUltraFine))
+	if (IsInside(HudPosition, HudGearUltraFine))
 	{
 		HudSpeedGear = EABTSM11ControlSpeedGear::UltraFine;
 		return true;
 	}
-	if (IsInside(MousePosition, HudSelectButton))
+	if (IsInside(HudPosition, HudSelectButton))
 	{
 		OverviewMode = EABTSM11OverviewInteractionMode::Select;
 		return true;
 	}
-	if (IsInside(MousePosition, HudRotateButton))
+	if (IsInside(HudPosition, HudRotateButton))
 	{
 		OverviewMode = EABTSM11OverviewInteractionMode::Rotate;
 		return true;
 	}
-	if (IsInside(MousePosition, HudResetViewButton))
+	if (IsInside(HudPosition, HudResetViewButton))
 	{
 		System.ResetHudOverview();
 		return true;
 	}
-	if (IsInside(MousePosition, HudRebasePipButton))
+	if (IsInside(HudPosition, HudRebasePipButton))
 	{
 		System.RebaseHudTrajectoryProbe();
 		return true;
 	}
-	if (IsInside(MousePosition, HudFollowAutoButton))
+	if (IsInside(HudPosition, HudFollowAutoButton))
 	{
 		System.FollowAutomaticPreviewTarget();
 		return true;
 	}
-	if (IsInside(MousePosition, HudLaunchButton))
+	if (IsInside(HudPosition, HudLaunchButton))
 	{
-		LastCapturedPointer = MousePosition;
+		LastCapturedPointer = HudPosition;
 		return HudCapture.TryBeginLaunch();
 	}
-	if (IsInsideDiagram(MousePosition))
+	if (IsInsideDiagram(HudPosition))
 	{
-		LastCapturedPointer = MousePosition;
+		LastCapturedPointer = HudPosition;
 		if (OverviewMode == EABTSM11OverviewInteractionMode::Rotate)
 		{
 			return HudCapture.TryBegin(
@@ -262,8 +281,8 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryPressed(
 		if (!ABTSM11HitTestOverviewTrajectory(
 			System.GetHudOverviewProjection(),
 			FVector2D(
-				MousePosition.X,
-				HudDiagramCenter.Y * 2.0f - MousePosition.Y),
+				HudPosition.X,
+				HudDiagramCenter.Y * 2.0f - HudPosition.Y),
 			HudDiagramCenter,
 			HudDiagramRadius,
 			10.0,
@@ -289,8 +308,9 @@ bool AABTSM11FinaleHUD::HandleFinalePointerMoved(
 		CancelFinaleHudCapture();
 		return false;
 	}
-	const FVector2D Delta = MousePosition - LastCapturedPointer;
-	LastCapturedPointer = MousePosition;
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
+	const FVector2D Delta = HudPosition - LastCapturedPointer;
+	LastCapturedPointer = HudPosition;
 	switch (HudCapture.GetCapture())
 	{
 	case EABTSM11FinaleHudCapture::AdjustYaw:
@@ -316,8 +336,8 @@ bool AABTSM11FinaleHUD::HandleFinalePointerMoved(
 		return ABTSM11HitTestOverviewTrajectory(
 			System.GetHudOverviewProjection(),
 			FVector2D(
-				MousePosition.X,
-				HudDiagramCenter.Y * 2.0f - MousePosition.Y),
+				HudPosition.X,
+				HudDiagramCenter.Y * 2.0f - HudPosition.Y),
 			HudDiagramCenter,
 			HudDiagramRadius,
 			12.0,
@@ -333,6 +353,7 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryReleased(
 	AABTSM11FinaleInteractionSystem& System,
 	const FVector2D& MousePosition)
 {
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
 	const EABTSM11FinaleHudCapture Capture = HudCapture.GetCapture();
 	if (Capture == EABTSM11FinaleHudCapture::None)
 	{
@@ -345,7 +366,7 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryReleased(
 	}
 	else if (ABTSM11ShouldCommitFinaleHudLaunch(
 		Capture,
-		IsInside(MousePosition, HudLaunchButton),
+		IsInside(HudPosition, HudLaunchButton),
 		System.IsAiming()))
 	{
 		System.RequestRelease();
@@ -363,14 +384,15 @@ bool AABTSM11FinaleHUD::HandleFinalePrimaryDoubleClicked(
 	{
 		return false;
 	}
-	const int32 KnobIndex = FindKnobAt(MousePosition);
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
+	const int32 KnobIndex = FindKnobAt(HudPosition);
 	if (KnobIndex != INDEX_NONE)
 	{
 		CancelFinaleHudCapture();
 		return System.ResetHudControlAxis(
 			static_cast<EABTSM11FinaleControlAxis>(KnobIndex));
 	}
-	if (IsInsideDiagram(MousePosition))
+	if (IsInsideDiagram(HudPosition))
 	{
 		return System.ResetHudOverview();
 	}
@@ -386,7 +408,8 @@ bool AABTSM11FinaleHUD::HandleFinaleWheel(
 	{
 		return false;
 	}
-	const int32 KnobIndex = FindKnobAt(MousePosition);
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
+	const int32 KnobIndex = FindKnobAt(HudPosition);
 	if (KnobIndex != INDEX_NONE)
 	{
 		return System.ApplyHudControlWheel(
@@ -394,7 +417,7 @@ bool AABTSM11FinaleHUD::HandleFinaleWheel(
 			WheelSteps,
 			HudSpeedGear);
 	}
-	if (IsInsideDiagram(MousePosition)
+	if (IsInsideDiagram(HudPosition)
 		&& OverviewMode == EABTSM11OverviewInteractionMode::Rotate)
 	{
 		return System.ZoomHudOverview(
@@ -416,7 +439,10 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 	{
 		return;
 	}
-	UpdateFinaleHudLayout(Canvas->SizeX, Canvas->SizeY);
+	// UCanvas draws in DPI-adjusted Clip space. SizeX/SizeY remain raw
+	// viewport pixels, so using them here shifts rendered controls away from
+	// hit boxes whenever the platform Canvas DPI is not 1.0.
+	UpdateFinaleHudLayout(Canvas->ClipX, Canvas->ClipY);
 	DrawOrbitalDiagram(System, HudDiagramCenter, HudDiagramRadius);
 	if (System.IsAiming())
 	{
