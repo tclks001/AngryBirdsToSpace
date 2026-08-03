@@ -485,7 +485,7 @@ bool AABTSM11FinaleInteractionSystem::RotateHudOverview(
 	const double PitchDegrees)
 {
 	if (!IsAiming()
-		|| !HudOverviewView.ApplyConstrainedRotation(
+		|| !HudOverviewView.ApplyOrbitRotation(
 			YawDegrees,
 			PitchDegrees)
 		|| !FABTSM11OverviewProjector::Build(

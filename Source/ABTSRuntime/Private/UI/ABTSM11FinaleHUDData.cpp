@@ -973,21 +973,18 @@ bool FABTSM11OverviewViewState::Initialize(
 	const FVector3d& InCenterCM,
 	const FVector3d& InAxisX,
 	const FVector3d& InAxisY,
-	const double InProjectionScaleCM,
-	const FVector3d& InFixedUp)
+	const double InProjectionScaleCM)
 {
 	ProjectionCenterCM = InCenterCM;
 	AxisX = InAxisX.GetSafeNormal();
 	ViewForward = AxisX.Cross(InAxisY).GetSafeNormal();
 	AxisY = ViewForward.Cross(AxisX).GetSafeNormal();
-	FixedUp = InFixedUp.GetSafeNormal();
 	ProjectionScaleCM = InProjectionScaleCM;
 	Zoom = 1.0;
 	bValid = IsFiniteFinaleHudVector(ProjectionCenterCM)
 		&& !AxisX.IsNearlyZero()
 		&& !AxisY.IsNearlyZero()
 		&& !ViewForward.IsNearlyZero()
-		&& !FixedUp.IsNearlyZero()
 		&& FMath::IsFinite(ProjectionScaleCM)
 		&& ProjectionScaleCM > 0.0;
 	return bValid;
@@ -1001,11 +998,10 @@ bool FABTSM11OverviewViewState::InitializeFromDiagram(
 			Diagram.PlaneOriginCM,
 			Diagram.PlaneAxisX,
 			Diagram.PlaneAxisY,
-			Diagram.FitRadiusCM,
-			Diagram.PlaneAxisY);
+			Diagram.FitRadiusCM);
 }
 
-bool FABTSM11OverviewViewState::ApplyConstrainedRotation(
+bool FABTSM11OverviewViewState::ApplyOrbitRotation(
 	const double YawDegrees,
 	const double PitchDegrees)
 {
@@ -1015,30 +1011,45 @@ bool FABTSM11OverviewViewState::ApplyConstrainedRotation(
 	{
 		return false;
 	}
-	FVector3d NewForward = FQuat4d(
-		FixedUp,
-		FMath::DegreesToRadians(YawDegrees)).RotateVector(ViewForward);
-	FVector3d Right = FixedUp.Cross(NewForward).GetSafeNormal();
-	if (Right.IsNearlyZero())
-	{
-		Right = AxisX;
-	}
-	NewForward = FQuat4d(
-		Right,
-		FMath::DegreesToRadians(PitchDegrees)).RotateVector(NewForward);
-	Right = FixedUp.Cross(NewForward).GetSafeNormal();
-	if (Right.IsNearlyZero())
+	if (FMath::IsNearlyZero(YawDegrees)
+		&& FMath::IsNearlyZero(PitchDegrees))
 	{
 		return false;
 	}
-	const FVector3d NewUp = NewForward.Cross(Right).GetSafeNormal();
-	if (NewUp.IsNearlyZero())
+
+	// Trackball-style local orbit. Horizontal drag rotates around the current
+	// screen Up; vertical drag then rotates around the yawed screen Right.
+	// No world Up is reintroduced, so composed drags naturally accumulate
+	// roll without exposing a direct roll control.
+	const FQuat4d YawRotation(
+		AxisY,
+		FMath::DegreesToRadians(YawDegrees));
+	FVector3d RotatedRight = YawRotation.RotateVector(AxisX);
+	FVector3d RotatedUp = YawRotation.RotateVector(AxisY);
+	FVector3d RotatedForward = YawRotation.RotateVector(ViewForward);
+	const FQuat4d PitchRotation(
+		RotatedRight.GetSafeNormal(),
+		FMath::DegreesToRadians(PitchDegrees));
+	RotatedRight = PitchRotation.RotateVector(RotatedRight);
+	RotatedUp = PitchRotation.RotateVector(RotatedUp);
+	RotatedForward = PitchRotation.RotateVector(RotatedForward);
+	if (!IsFiniteFinaleHudVector(RotatedRight)
+		|| !IsFiniteFinaleHudVector(RotatedUp)
+		|| !IsFiniteFinaleHudVector(RotatedForward))
 	{
 		return false;
 	}
-	AxisX = Right;
-	AxisY = NewUp;
-	ViewForward = NewForward.GetSafeNormal();
+
+	ViewForward = RotatedForward.GetSafeNormal();
+	AxisX = RotatedRight.GetSafeNormal();
+	AxisY = ViewForward.Cross(AxisX).GetSafeNormal();
+	AxisX = AxisY.Cross(ViewForward).GetSafeNormal();
+	if (AxisX.IsNearlyZero()
+		|| AxisY.IsNearlyZero()
+		|| ViewForward.IsNearlyZero())
+	{
+		return false;
+	}
 	return true;
 }
 

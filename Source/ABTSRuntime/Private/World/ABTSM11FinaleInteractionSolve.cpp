@@ -441,8 +441,7 @@ void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
 				FVector3d::ZeroVector,
 				FVector3d::ForwardVector,
 				FVector3d::RightVector,
-				FitRadiusCM * 1.08,
-				FVector3d::UpVector);
+				FitRadiusCM * 1.08);
 		}
 		InitialHudOverviewView = HudOverviewView;
 	}

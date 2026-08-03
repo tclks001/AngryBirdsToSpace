@@ -232,7 +232,6 @@ struct ABTSRUNTIME_API FABTSM11OverviewViewState
 	FVector3d AxisX = FVector3d::ForwardVector;
 	FVector3d AxisY = FVector3d::RightVector;
 	FVector3d ViewForward = FVector3d::UpVector;
-	FVector3d FixedUp = FVector3d::UpVector;
 	double ProjectionScaleCM = 1.0;
 	double Zoom = 1.0;
 	bool bValid = false;
@@ -241,10 +240,9 @@ struct ABTSRUNTIME_API FABTSM11OverviewViewState
 		const FVector3d& InCenterCM,
 		const FVector3d& InAxisX,
 		const FVector3d& InAxisY,
-		double InProjectionScaleCM,
-		const FVector3d& InFixedUp);
+		double InProjectionScaleCM);
 	bool InitializeFromDiagram(const FABTSM11OrbitalDiagramSnapshot& Diagram);
-	bool ApplyConstrainedRotation(double YawDegrees, double PitchDegrees);
+	bool ApplyOrbitRotation(double YawDegrees, double PitchDegrees);
 	bool ApplyZoom(double ZoomMultiplier, double MinimumZoom = 0.25, double MaximumZoom = 4.0);
 	FVector2d Project(const FVector3d& PositionCM) const;
 	double ProjectDepth(const FVector3d& PositionCM) const;

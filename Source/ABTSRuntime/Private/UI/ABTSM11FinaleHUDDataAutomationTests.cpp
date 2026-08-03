@@ -148,8 +148,7 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 			FVector3d::ZeroVector,
 			FVector3d::ForwardVector,
 			FVector3d::RightVector,
-			2000000.0,
-			FVector3d::UpVector));
+			2000000.0));
 	FABTSM11OverviewProjection A;
 	FABTSM11OverviewProjection B;
 	const FABTSM11OrbitalSceneSnapshot Shifted = ShiftTrajectory(
@@ -169,8 +168,23 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Only the trajectory moves under aim changes"),
 		NearlyEqual(A.Trajectory[0].Position, B.Trajectory[0].Position, 1.0e-9));
 	const FVector2d BodyBeforeRotate = A.Bodies[1].Center;
-	TestTrue(TEXT("Rotate mode changes the frozen view explicitly"),
-		View.ApplyConstrainedRotation(18.0, -7.0));
+	const FVector3d InitialWorldUp = View.AxisY;
+	TestTrue(TEXT("Vertical drag orbits around current screen Right"),
+		View.ApplyOrbitRotation(0.0, 23.0));
+	const FVector3d TiltedLocalUp = View.AxisY;
+	TestFalse(TEXT("Vertical orbit tilts local Up away from initial world Up"),
+		TiltedLocalUp.Equals(InitialWorldUp, 1.0e-8));
+	TestTrue(TEXT("Horizontal drag orbits around the tilted local Up"),
+		View.ApplyOrbitRotation(31.0, 0.0));
+	TestTrue(TEXT("Local Up is preserved by its own horizontal orbit"),
+		View.AxisY.Equals(TiltedLocalUp, 1.0e-8));
+	TestTrue(TEXT("Composed local drags naturally accumulate world-relative roll"),
+		FMath::Abs(View.AxisX.Dot(InitialWorldUp)) > 1.0e-4);
+	TestTrue(TEXT("Free-orbit basis remains right handed and orthonormal"),
+		View.AxisX.Cross(View.AxisY).Equals(View.ViewForward, 1.0e-8)
+		&& FMath::Abs(View.AxisX.Dot(View.AxisY)) < 1.0e-8
+		&& FMath::Abs(View.AxisX.Dot(View.ViewForward)) < 1.0e-8
+		&& FMath::Abs(View.AxisY.Dot(View.ViewForward)) < 1.0e-8);
 	FABTSM11OverviewProjection Rotated;
 	TestTrue(TEXT("Rotated projection builds"),
 		FABTSM11OverviewProjector::Build(Fixture.Scene, View, Rotated));
