@@ -1,6 +1,6 @@
 # ABTS：统一镜头视觉优化设计
 
-> 状态：视觉优化阶段规划稿；2026-07-31 建立。当前只记录问题、职责边界与验收门槛，不修改运行时镜头。
+> 状态：视觉优化阶段规划稿；2026-07-31 建立，2026-08-03 补充直接操纵与遮挡联合方案。当前只记录问题、职责边界与验收门槛，不修改运行时镜头。
 >
 > 父级入口：[项目工作流](ABTSProjectWorkflow.md) · [游戏主设计稿](AngryBirdsToSpaceGameDesign.md)
 >
@@ -10,10 +10,11 @@
 
 本阶段统一处理地面移动、弹射实飞、卫星引力绕行和终局演出之间的镜头可读性，不改变轨迹积分、Chaos 碰撞、成功岛、发射输入或任务判定。
 
-当前已确认但暂不修复的两项问题是：
+当前已确认但暂不修复的三项问题是：
 
 1. 鸟接近卫星后，镜头会按距离接管到卫星侧视构图。画面容易只读到卫星、读不到鸟，普通借力飞越也发生不必要的大幅转向。
 2. 鸟群在地面移动时，一旦相机射线被地形、建筑或装饰物阻挡，镜头会在短时间内突然拉近；离开遮挡后的恢复速度与进入速度不对称，但边缘反复命中仍可能造成抽动。
+3. 地面轨道镜头拖拽缺少直接操纵感：拖拽过程中镜头像带有质量和惯性，输入停止后画面仍继续运动，并容易把遮挡后的距离恢复或 Pivot 跟随误读为“镜头被拉回”。玩家期望的是拖到哪里就停在哪里，除非显式按下回正键或玩法状态切换要求接管。
 
 月面着陆画中画已经独立完成验收，不属于本稿的待修问题。后续不得为了修主镜头而改变画中画的月面终点资格、固定俯角、径向 Up 或共享着陆相机距离。
 
@@ -42,16 +43,30 @@
 - 主星径向跟随突然切到卫星局部 frame，普通发射也会产生幅度过大的倾斜和构图变化；
 - 当前状态机描述相机所处空间阶段，却没有表达镜头意图、构图约束和玩家是否需要继续读轨迹。
 
+### 2.3 地面拖拽输入与“回弹感”
+
+`AABTSM4PlayerController` 在按住右键时把 `MouseX/MouseY` 直接传给 `AddOrbitYawInput/AddOrbitPitchInput`，松开时只恢复光标位置，并没有调用 `RequestRecenter()`。因此当前体验不是由“松手自动回正”这一条显式逻辑造成，而是以下状态叠加后的感知结果：
+
+- `DefaultInput.ini` 中鼠标轴灵敏度为 `0.07`，之后又乘 `OrbitYawDegreesPerInput=1.0` 和 `OrbitPitchDegreesPerInput=0.7`，拖拽目标本身偏慢；
+- 输入立即修改 `OrbitForwardTangent/ElevationDegrees`，但 Actor 位置继续用 `VInterpTo(..., OrbitPivotFollowSpeed=7.5)`，旋转继续用 `QInterpTo(..., OrbitRotationFollowSpeed=12.0)` 追赶目标。松手后目标虽然停止，显示镜头仍会继续追赶，因此表现为惯性；
+- Pivot 另有 `22 cm` 死区和位置插值，玩家移动或刚停止时，焦点与局部径向 Up 仍可能继续变化，进而带动相机位置与朝向；
+- 遮挡把 `EffectiveDistanceCM` 收缩后，会以 `CameraObstructionRestoreSpeed=5.0` 自动恢复到持久的 `OrbitDistanceCM`。这项正确的安全恢复与旋转/位置追赶同时发生时，很像镜头被拉回旧构图；
+- 鼠标和手柄目前共用同一逐帧增量接口。鼠标 Delta 不应乘帧时间，而手柄摇杆应解释为角速度并乘 `DeltaSeconds`；当前手柄路径会随帧率改变转速。
+
+`TransportOrbitForward` 只负责在球面移动时平行运输玩家保存的切向朝向，不是自动回正；显式回正目前只应由 `R -> RequestRecenter()`、切鸟初始化或更高优先级玩法镜头触发。后续诊断必须区分“用户意图没变但显示仍在追赶”“Pivot 在移动”“遮挡距离恢复”和“真正的回正请求”。
+
 ## 3. 统一职责模型
 
 后续新增统一的镜头仲裁与遮挡解算层。各玩法镜头只提交“期望构图”，最终位姿由同一层完成混合、Up 约束和碰撞安全：
 
 ```text
+Mouse Direct Delta / Gamepad Angular Velocity
+    -> Persistent User Orbit Intent (Yaw/Pitch/Distance; release does not rewrite)
 PartyGround / Aim / PrimaryFlight / SatelliteAssist / SatelliteCinematic / Finale
     -> Desired Pose + Focus Set + Framing Constraints + Transition Intent
     -> Camera Arbiter
-    -> Obstruction Resolver
-    -> Final View
+    -> Obstruction Resolver (Safe Pose; never rewrites User Intent)
+    -> Rendered Pose
 ```
 
 约束如下：
@@ -60,6 +75,8 @@ PartyGround / Aim / PrimaryFlight / SatelliteAssist / SatelliteCinematic / Final
 - 每一时刻只有一个主镜头状态拥有最终构图，状态转换必须有来源、原因和退出条件。
 - 球面地表继续采用主星径向 Up；近月演出采用稳定的轨道平面 frame，并通过连续运输避免 Up 翻转。
 - 保留“期望距离”和“碰撞安全距离”两个独立状态，不能让一次遮挡永久改写玩家设置的轨道距离。
+- 地面自由观察时，Yaw/Pitch/Distance 是持久用户意图。鼠标松开必须零残余角速度、零自动回正；碰撞、Pivot 跟随和显示平滑都不得反写该意图。
+- 鼠标采用位移到角度的直接映射；手柄采用角速度到角度的时间积分。两种输入不得继续共用含糊的逐帧增量语义。
 
 ## 4. 地面遮挡改进
 
@@ -82,6 +99,25 @@ PartyGround / Aim / PrimaryFlight / SatelliteAssist / SatelliteCinematic / Final
 - `PullInSpeed`、`RestoreSpeed`、`MaxPullInSpeedCMPerSecond`
 - `MaxLateralEscapeCM`、`MaxVerticalEscapeCM`
 - 可淡出对象类型、忽略对象类型与最小遮挡投影面积
+
+### 4.3 直接操纵与遮挡的联合解算
+
+不能只把 `OrbitRotationFollowSpeed` 调大：这会减轻拖拽延迟，却不能消除 Pivot 追赶、遮挡恢复和手柄帧率相关问题。地面镜头应明确保存四层状态：
+
+1. `UserOrbitIntent`：持久 Yaw、Pitch、Distance，以及输入来源；只被玩家输入、显式回正或明确模式接管修改。
+2. `DesiredPose`：根据当前 Pivot、球面 Up 和 `UserOrbitIntent` 每帧重建的无遮挡位姿。
+3. `SafePose`：遮挡解算器在不修改用户意图的前提下选择的安全距离、有限抬升或侧移位姿。
+4. `RenderedPose`：最终显示位姿。鼠标拖拽期间采用直接或最多 1–2 帧的紧跟响应；松手后不得继续消费虚构的角速度。只有 Pivot 移动、遮挡状态转换或显式模式 Blend 可以继续移动，并必须在调试信息中标明原因。
+
+遮挡期间仍然完整积累用户拖拽意图。如果障碍使目标位置不可达，镜头只在 `SafePose` 层受限；障碍解除后沿当前用户角度单调恢复距离，不能旋回进入遮挡前的方向。边缘迟滞、最短保持时间和候选位姿粘滞同时用于防止“拖拽跟手”与“碰撞安全”互相打架。
+
+建议新增参数：
+
+- `MouseYawDegreesPerPixel`、`MousePitchDegreesPerPixel`；不乘 `DeltaSeconds`；
+- `GamepadYawDegreesPerSecond`、`GamepadPitchDegreesPerSecond`、摇杆死区与响应曲线；必须乘 `DeltaSeconds`；
+- `DirectManipulationMaxSettleSeconds`，默认目标为 0–2 帧，不提供松手惯性；
+- `PivotFollowWhileOrbitingSpeed` 与 `PivotFollowAfterOrbitingSpeed`，但两者只影响焦点追踪，不得改变用户角度；
+- 显式 `RecenterBlendSeconds`，只服务玩家按键或模式切换，不能复用普通拖拽的平滑参数。
 
 ## 5. 绕月镜头改进
 
@@ -114,21 +150,25 @@ PartyGround / Aim / PrimaryFlight / SatelliteAssist / SatelliteCinematic / Final
 
 ## 6. 实施顺序
 
-1. 增加镜头调试显示与日志：当前模式、转换原因、期望/实际距离、阻挡对象、卫星意图与近月点时间。
-2. 独立改造地面遮挡解算并完成地面回归，不同时改绕月状态机。
-3. 为发射快照增加只读镜头意图，完成 `SubtleAssist` 与 `CinematicE5` 构图。
-4. 最后接入 M11、开场和终局演出，统一状态优先级和转场规范。
+1. 增加镜头调试显示与日志：输入来源、拖拽状态、用户意图角、Desired/Safe/Rendered 位姿、继续运动原因、阻挡对象、卫星意图与近月点时间。
+2. 拆分鼠标 Delta 与手柄角速度，建立持久 `UserOrbitIntent`；先证明松手零惯性、无隐式回正，再调整手感参数。
+3. 独立改造地面遮挡解算，使其只生成 `SafePose` 并完成地面回归，不同时改绕月状态机。
+4. 为发射快照增加只读镜头意图，完成 `SubtleAssist` 与 `CinematicE5` 构图。
+5. 最后接入 M11、开场和终局演出，统一状态优先级和转场规范。
 
-前两步属于共享镜头热点，应由集成工作树实施；功能工作树只提供只读状态或事件，不直接修改统一仲裁器。
+前三步属于共享镜头热点，应由集成工作树实施；功能工作树只提供只读状态或事件，不直接修改统一仲裁器。
 
 ## 7. 正式验收门槛
 
 ### 7.1 地面
 
+- 鼠标以多种速度拖拽后，画面在松手时停留于当前用户角度；不存在可感知的残余角速度，也不会自动朝角色朝向或默认角度回正。
+- 30/60/120 FPS 下，相同鼠标物理位移产生近似相同角度；相同手柄保持时间产生近似相同角度，二者的帧率语义均正确。
+- 遮挡中仍可连续拖拽；解除遮挡后只恢复安全距离，不改变玩家最后的 Yaw/Pitch，也不返回遮挡前构图。
 - 在 30/60/120 FPS 下反复经过地形脊线、建筑墙角、树木和石块，均无单帧突跳、穿模或障碍边缘振荡。
 - 解除遮挡后距离单调恢复，不出现一次拉远后立即再次拉近。
 - 小型装饰物不会触发显著贴脸；被配置为淡出的对象不会持续遮住鸟群。
-- 调试证据能唯一指出造成收缩的 Actor/Component 和当前解算状态。
+- 调试证据能唯一指出造成收缩的 Actor/Component、当前解算状态，以及松手后每一帧继续运动究竟来自 Pivot、遮挡恢复还是显式模式 Blend。
 
 ### 7.2 卫星
 
