@@ -30,4 +30,3 @@ public:
 		FABTSM73BeamD1GenerationResult& OutResult,
 		FString& OutError) const;
 };
-

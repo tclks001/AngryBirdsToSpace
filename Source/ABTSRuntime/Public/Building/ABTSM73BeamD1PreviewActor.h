@@ -87,4 +87,3 @@ private:
 	TArray<FABTSM73BeamD1BrickBinding> CompiledBricks;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
 };
-
