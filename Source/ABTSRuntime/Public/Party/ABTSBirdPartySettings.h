@@ -115,11 +115,33 @@ public:
 	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Orbit pitch now always uses the fixed -85 to +85 degree range."))
 	float MaxElevationDegrees = 85.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "0.01", UIMax = "5.0"))
+	/** Legacy serialized scale; direct mouse displacement uses MouseYawDegreesPerPixel. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use MouseYawDegreesPerPixel."))
 	float OrbitYawDegreesPerInput = 1.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "0.01", UIMax = "5.0"))
+	/** Legacy serialized scale; direct mouse displacement uses MousePitchDegreesPerPixel. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use MousePitchDegreesPerPixel."))
 	float OrbitPitchDegreesPerInput = 0.7f;
+
+	/** Direct mouse displacement mapping. Mouse input is not multiplied by frame time. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "0.01", ClampMax = "1.0", UIMin = "0.05", UIMax = "0.3"))
+	float MouseYawDegreesPerPixel = 0.14f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "0.01", ClampMax = "1.0", UIMin = "0.05", UIMax = "0.3"))
+	float MousePitchDegreesPerPixel = 0.11f;
+
+	/** Full-stick angular velocity. Gamepad input is integrated using DeltaSeconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "10.0", ClampMax = "360.0"))
+	float GamepadYawDegreesPerSecond = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "10.0", ClampMax = "360.0"))
+	float GamepadPitchDegreesPerSecond = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "0.0", ClampMax = "0.95"))
+	float GamepadLookDeadZone = 0.18f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "0.1", ClampMax = "4.0"))
+	float GamepadLookExponent = 1.35f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Input", meta = (ClampMin = "10.0", UIMax = "300.0"))
 	float OrbitZoomStepCM = 80.0f;
@@ -130,8 +152,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.1", UIMax = "30.0"))
 	float OrbitPivotFollowSpeed = 7.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.1", UIMax = "30.0"))
+	/** Legacy final-rotation lag; direct orbit intent is now rendered without a second rotation filter. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Direct orbit rotation no longer uses final-pose lag."))
 	float OrbitRotationFollowSpeed = 12.0f;
+
+	/** Pivot-only response while the player is directly dragging. User orbit angles are never damped. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.1", UIMax = "40.0"))
+	float PivotFollowWhileOrbitingSpeed = 18.0f;
+
+	/** Maximum focus-point lag. Prevents a hitch from leaving the camera far behind the controlled bird. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.0", UIMax = "500.0"))
+	float CameraMaxPivotLagCM = 180.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.0", UIMax = "100.0"))
 	float CameraPivotDeadZoneCM = 22.0f;
@@ -143,9 +174,42 @@ public:
 	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Collision safety now overrides the old minimum obstructed distance."))
 	float CameraMinimumObstructedDistanceCM = 280.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.1", UIMax = "50.0"))
+	/** Legacy interpolation factor; hard pull-in is now an immediate collision constraint. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Hard obstruction contraction is immediate."))
 	float CameraObstructionPullInSpeed = 22.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.1", UIMax = "20.0"))
+	/** Legacy interpolation factor; use CameraObstructionRestoreSpeedCMPerSecond. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use CameraObstructionRestoreSpeedCMPerSecond."))
 	float CameraObstructionRestoreSpeed = 5.0f;
+
+	/** Small extra margin after the swept sphere's already-safe center location. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", UIMax = "20.0"))
+	float CameraCollisionSafetyMarginCM = 4.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", UIMax = "0.5"))
+	float CameraObstructionEnterDelaySeconds = 0.04f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", UIMax = "1.0"))
+	float CameraObstructionExitDelaySeconds = 0.16f;
+
+	/** Constant, frame-rate-independent recovery speed after the exit delay. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "1.0", UIMax = "2000.0"))
+	float CameraObstructionRestoreSpeedCMPerSecond = 520.0f;
+
+	/** Expansion speed while a swept alternate candidate is escaping the blocker. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "1.0", UIMax = "3000.0"))
+	float CameraObstructionEscapeSpeedCMPerSecond = 900.0f;
+
+	/** Fixed-budget candidate offsets used before accepting a deep pull-in. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", ClampMax = "25.0"))
+	float CameraObstructionLateralEscapeDegrees = 8.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", ClampMax = "25.0"))
+	float CameraObstructionVerticalEscapeDegrees = 7.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", UIMax = "300.0"))
+	float CameraObstructionCandidateMinBenefitCM = 80.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "1.0", UIMax = "360.0"))
+	float CameraObstructionOffsetBlendDegreesPerSecond = 100.0f;
 };

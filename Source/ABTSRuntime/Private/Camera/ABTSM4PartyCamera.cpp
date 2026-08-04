@@ -18,6 +18,35 @@ namespace
 	// -85 is near bottom-up. Avoid +/-90 because radial screen-up degenerates
 	// when the look direction becomes exactly parallel to radial Up.
 	constexpr float OrbitPitchLimitDegrees = 85.0f;
+
+	struct FABTSM4CameraSweepCandidate
+	{
+		FVector Direction = FVector::BackwardVector;
+		FHitResult Hit;
+		float SafeDistanceCM = 0.0f;
+		float YawOffsetDegrees = 0.0f;
+		float VerticalOffsetDegrees = 0.0f;
+		float Score = 0.0f;
+		int32 Index = 0;
+		bool bBlocked = false;
+	};
+
+	FVector BuildOffsetArmDirection(
+		const FVector& DesiredArmDirection,
+		const FVector& CameraUp,
+		const float YawOffsetDegrees,
+		const float VerticalOffsetDegrees)
+	{
+		FVector Direction = DesiredArmDirection.RotateAngleAxis(YawOffsetDegrees, CameraUp).GetSafeNormal();
+		FVector Horizontal = FVector::VectorPlaneProject(Direction, CameraUp).GetSafeNormal();
+		if (Horizontal.IsNearlyZero()) return Direction;
+		const float CurrentElevation = FMath::Asin(FMath::Clamp(FVector::DotProduct(Direction, CameraUp), -1.0f, 1.0f));
+		const float TargetElevation = FMath::Clamp(
+			CurrentElevation + FMath::DegreesToRadians(VerticalOffsetDegrees),
+			FMath::DegreesToRadians(-OrbitPitchLimitDegrees),
+			FMath::DegreesToRadians(OrbitPitchLimitDegrees));
+		return (Horizontal * FMath::Cos(TargetElevation) + CameraUp * FMath::Sin(TargetElevation)).GetSafeNormal();
+	}
 }
 
 AABTSM4PartyCamera::AABTSM4PartyCamera()
@@ -52,6 +81,10 @@ void AABTSM4PartyCamera::InitializeOrbit(AABTSM25BirdCharacter& TargetBird, cons
 	ElevationDegrees = Settings ? Settings->DefaultElevationDegrees : 60.0f;
 	OrbitDistanceCM = Settings ? Settings->OrbitDistanceCM : 850.0f;
 	EffectiveDistanceCM = OrbitDistanceCM;
+	ObstructionFilter.Reset(OrbitDistanceCM);
+	ObstructionYawOffsetDegrees = 0.0f;
+	ObstructionVerticalOffsetDegrees = 0.0f;
+	SelectedObstructionCandidate = 0;
 	PreviousUp = Up;
 }
 
@@ -100,8 +133,10 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 
 	const AABTSBirdPartySettings* Settings = ResolvedParty->GetResolvedSettings();
 	const float LookAtHeightCM = Settings ? Settings->CameraLookAtHeightCM : 35.0f;
-	const float PivotFollowSpeed = Settings ? Settings->OrbitPivotFollowSpeed : 7.5f;
-	const float RotationFollowSpeed = Settings ? Settings->OrbitRotationFollowSpeed : 12.0f;
+	const float PivotFollowSpeed = Settings
+		? (bDirectManipulation ? Settings->PivotFollowWhileOrbitingSpeed : Settings->OrbitPivotFollowSpeed)
+		: (bDirectManipulation ? 18.0f : 7.5f);
+	const float MaxPivotLagCM = Settings ? Settings->CameraMaxPivotLagCM : 180.0f;
 	const float DeadZoneCM = Settings ? Settings->CameraPivotDeadZoneCM : 22.0f;
 	const float SwitchBlendSeconds = Settings ? Settings->CameraSwitchBlendSeconds : 0.48f;
 	const float MinDistance = Settings ? Settings->MinOrbitDistanceCM : 550.0f;
@@ -144,7 +179,12 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	}
 	else if (FVector::Distance(SmoothedPivot, RawPivot) > DeadZoneCM)
 	{
-		const FVector Interpolated = FMath::VInterpTo(SmoothedPivot, RawPivot, DeltaSeconds, PivotFollowSpeed);
+		FVector Interpolated = FMath::VInterpTo(SmoothedPivot, RawPivot, DeltaSeconds, PivotFollowSpeed);
+		const FVector RemainingLag = RawPivot - Interpolated;
+		if (MaxPivotLagCM > 0.0f && RemainingLag.SizeSquared() > FMath::Square(MaxPivotLagCM))
+		{
+			Interpolated = RawPivot - RemainingLag.GetSafeNormal() * MaxPivotLagCM;
+		}
 		if (bPlanar) SmoothedPivot = Interpolated;
 		else
 		{
@@ -175,32 +215,31 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 		CameraUp * FMath::Sin(ElevationRadians)
 		- OrbitForwardTangent * FMath::Cos(ElevationRadians)).GetSafeNormal();
 	const FVector UnblockedLocation = SmoothedPivot + UnblockedOffsetDirection * OrbitDistanceCM;
-	EffectiveDistanceCM = ResolveObstructedDistance(SmoothedPivot, UnblockedLocation, OrbitDistanceCM, DeltaSeconds);
-	const FVector DesiredLocation = SmoothedPivot + UnblockedOffsetDirection * EffectiveDistanceCM;
-	const FVector DesiredLookDirection = (SmoothedPivot - DesiredLocation).GetSafeNormal();
+	float HardSafeDistanceCM = OrbitDistanceCM;
+	const FVector RenderedLocation = ResolveObstructedLocation(
+		SmoothedPivot,
+		CameraUp,
+		UnblockedOffsetDirection,
+		OrbitDistanceCM,
+		DeltaSeconds,
+		HardSafeDistanceCM);
+	const FVector DesiredLookDirection = (SmoothedPivot - RenderedLocation).GetSafeNormal();
 	// Forward alone does not define camera roll. Constrain the screen-up axis to
 	// the focus point's radial Up projected onto the image plane, so the visible
 	// world cannot roll sideways or invert while orbiting.
 	FVector DesiredScreenUp = FVector::VectorPlaneProject(CameraUp, DesiredLookDirection).GetSafeNormal();
 	if (DesiredScreenUp.IsNearlyZero()) DesiredScreenUp = OrbitForwardTangent;
 	const FQuat DesiredRotation = FRotationMatrix::MakeFromXZ(DesiredLookDirection, DesiredScreenUp).ToQuat();
-	const bool bInstant = bForceInstant || !bInitializedView;
-	const FVector NewLocation = bInstant
-		? DesiredLocation
-		: FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, PivotFollowSpeed);
-	const FQuat InterpolatedRotation = bInstant
-		? DesiredRotation
-		: FMath::QInterpTo(GetActorQuat(), DesiredRotation, DeltaSeconds, RotationFollowSpeed).GetNormalized();
-	// A shortest-arc quaternion interpolation is continuous, but its intermediate
-	// orientation can still contain roll. Rebuild the final basis around the
-	// interpolated look direction and current radial Up every frame.
-	const FVector InterpolatedLookDirection = InterpolatedRotation.GetForwardVector().GetSafeNormal();
-	FVector ConstrainedScreenUp = FVector::VectorPlaneProject(CameraUp, InterpolatedLookDirection).GetSafeNormal();
+	// User orbit is a direct target, not a physical body. Follow lag remains on
+	// the pivot only; adding another location/rotation filter here creates the
+	// residual motion that used to continue after mouse release.
+	const FVector RenderedLookDirection = DesiredRotation.GetForwardVector().GetSafeNormal();
+	FVector ConstrainedScreenUp = FVector::VectorPlaneProject(CameraUp, RenderedLookDirection).GetSafeNormal();
 	if (ConstrainedScreenUp.IsNearlyZero()) ConstrainedScreenUp = DesiredScreenUp;
 	const FQuat RollLockedRotation = FRotationMatrix::MakeFromXZ(
-		InterpolatedLookDirection,
+		RenderedLookDirection,
 		ConstrainedScreenUp).ToQuat();
-	SetActorLocationAndRotation(NewLocation, RollLockedRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	SetActorLocationAndRotation(RenderedLocation, RollLockedRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	const FVector ActualScreenUp = RollLockedRotation.RotateVector(FVector::UpVector).GetSafeNormal();
 	const float RollErrorDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
 		FVector::DotProduct(ActualScreenUp, ConstrainedScreenUp), -1.0f, 1.0f)));
@@ -208,7 +247,7 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	if (bTargetChanged)
 	{
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M4][OrbitCamera] Target=%d Distance=%.1f Elevation=%.1f PitchRange=[%.1f,%.1f] SwitchBlend=%.2f PivotLag=%.2f RollError=%.3f"),
+			TEXT("[ABTS][M4][OrbitCamera] Target=%d Distance=%.1f Elevation=%.1f PitchRange=[%.1f,%.1f] SwitchBlend=%.2f PivotLag=%.2f Direct=%d RollError=%.3f"),
 			ABTSBirdIdToIndex(TargetBird->GetBirdId()),
 			OrbitDistanceCM,
 			ElevationDegrees,
@@ -216,70 +255,239 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 			OrbitPitchLimitDegrees,
 			SwitchBlendSeconds,
 			PivotFollowSpeed,
+			bDirectManipulation ? 1 : 0,
 			RollErrorDegrees);
 	}
+	PoseSnapshot.Pivot = SmoothedPivot;
+	PoseSnapshot.DesiredLocation = UnblockedLocation;
+	PoseSnapshot.RenderedLocation = RenderedLocation;
+	PoseSnapshot.DesiredDistanceCM = OrbitDistanceCM;
+	PoseSnapshot.SafeDistanceCM = HardSafeDistanceCM;
+	PoseSnapshot.RenderedDistanceCM = EffectiveDistanceCM;
+	PoseSnapshot.UserElevationDegrees = ElevationDegrees;
+	PoseSnapshot.ObstructionCandidateIndex = SelectedObstructionCandidate;
+	PoseSnapshot.ObstructionPhase = ObstructionFilter.GetPhase();
+	PoseSnapshot.bDirectManipulation = bDirectManipulation;
 	LastTargetBird = TargetBird;
 	bInitializedView = true;
 }
 
-float AABTSM4PartyCamera::ResolveObstructedDistance(
+FVector AABTSM4PartyCamera::ResolveObstructedLocation(
 	const FVector& Pivot,
-	const FVector& DesiredLocation,
+	const FVector& CameraUp,
+	const FVector& DesiredArmDirection,
 	const float DesiredDistance,
-	const float DeltaSeconds)
+	const float DeltaSeconds,
+	float& OutSafeDistance)
 {
 	AABTSBirdParty* ResolvedParty = FindParty();
 	const AABTSBirdPartySettings* Settings = ResolvedParty ? ResolvedParty->GetResolvedSettings() : nullptr;
 	UWorld* World = GetWorld();
-	if (World == nullptr) return DesiredDistance;
+	if (World == nullptr)
+	{
+		OutSafeDistance = DesiredDistance;
+		EffectiveDistanceCM = DesiredDistance;
+		return Pivot + DesiredArmDirection * DesiredDistance;
+	}
 	const float ProbeRadius = Settings ? Settings->CameraProbeRadiusCM : 24.0f;
-	const float PullInSpeed = Settings ? Settings->CameraObstructionPullInSpeed : 22.0f;
-	const float RestoreSpeed = Settings ? Settings->CameraObstructionRestoreSpeed : 5.0f;
+	const float SafetyMargin = Settings ? Settings->CameraCollisionSafetyMarginCM : 4.0f;
+	const float LateralEscapeDegrees = Settings ? Settings->CameraObstructionLateralEscapeDegrees : 8.0f;
+	const float VerticalEscapeDegrees = Settings ? Settings->CameraObstructionVerticalEscapeDegrees : 7.0f;
+	const float CandidateMinBenefitCM = Settings ? Settings->CameraObstructionCandidateMinBenefitCM : 80.0f;
+	const float OffsetBlendSpeed = Settings ? Settings->CameraObstructionOffsetBlendDegreesPerSecond : 100.0f;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ABTSM4OrbitCamera), false, this);
-	for (TActorIterator<AABTSM25BirdCharacter> It(World); It; ++It) QueryParams.AddIgnoredActor(*It);
-	if (ResolvedParty) QueryParams.AddIgnoredActor(ResolvedParty);
-	FHitResult Hit;
-	const bool bHit = World->SweepSingleByChannel(
-		Hit,
-		Pivot,
-		DesiredLocation,
-		FQuat::Identity,
-		ECC_Camera,
-		FCollisionShape::MakeSphere(FMath::Max(1.0f, ProbeRadius)),
-		QueryParams);
-	// Collision safety must override any comfort minimum. This is especially
-	// important for negative elevation: the orbit ray approaches the ground and
-	// must be allowed to contract close to the pivot instead of forcing the
-	// camera through the terrain to preserve an arbitrary minimum arm length.
-	const float TargetDistance = bHit && Hit.bBlockingHit
-		? FMath::Clamp(DesiredDistance * Hit.Time - ProbeRadius, 1.0f, DesiredDistance)
-		: DesiredDistance;
-	const float InterpSpeed = TargetDistance < EffectiveDistanceCM ? PullInSpeed : RestoreSpeed;
-	return DeltaSeconds <= 0.0f
-		? TargetDistance
-		: FMath::FInterpTo(EffectiveDistanceCM, TargetDistance, DeltaSeconds, InterpSpeed);
+	if (ResolvedParty)
+	{
+		QueryParams.AddIgnoredActor(ResolvedParty);
+		for (const AABTSM25BirdCharacter* Bird : ResolvedParty->GetPartyMembers())
+		{
+			if (Bird) QueryParams.AddIgnoredActor(Bird);
+		}
+	}
+
+	auto SweepCandidate = [&](const int32 Index, const float YawOffset, const float VerticalOffset)
+	{
+		FABTSM4CameraSweepCandidate Candidate;
+		Candidate.Index = Index;
+		Candidate.YawOffsetDegrees = YawOffset;
+		Candidate.VerticalOffsetDegrees = VerticalOffset;
+		Candidate.Direction = BuildOffsetArmDirection(DesiredArmDirection, CameraUp, YawOffset, VerticalOffset);
+		Candidate.bBlocked = World->SweepSingleByChannel(
+			Candidate.Hit,
+			Pivot,
+			Pivot + Candidate.Direction * DesiredDistance,
+			FQuat::Identity,
+			ECC_Camera,
+			FCollisionShape::MakeSphere(FMath::Max(1.0f, ProbeRadius)),
+			QueryParams) && Candidate.Hit.bBlockingHit;
+		Candidate.SafeDistanceCM = ABTSM4CameraRigModel::ComputeSafeSweepDistance(
+			DesiredDistance,
+			Candidate.bBlocked,
+			Candidate.Hit.bStartPenetrating,
+			Candidate.Hit.Distance,
+			SafetyMargin);
+		const float AngularCost = (FMath::Abs(YawOffset) + FMath::Abs(VerticalOffset)) * 5.0f;
+		const float StickyBonus = Index == SelectedObstructionCandidate ? 35.0f : 0.0f;
+		Candidate.Score = Candidate.SafeDistanceCM - AngularCost + StickyBonus;
+		return Candidate;
+	};
+
+	TStaticArray<FABTSM4CameraSweepCandidate, 4> Candidates;
+	Candidates[0] = SweepCandidate(0, 0.0f, 0.0f);
+	Candidates[1] = SweepCandidate(1, 0.0f, VerticalEscapeDegrees);
+	Candidates[2] = SweepCandidate(2, -LateralEscapeDegrees, 0.0f);
+	Candidates[3] = SweepCandidate(3, LateralEscapeDegrees, 0.0f);
+
+	int32 TargetCandidate = 0;
+	if (Candidates[0].bBlocked)
+	{
+		for (int32 Index = 1; Index < Candidates.Num(); ++Index)
+		{
+			if (Candidates[Index].SafeDistanceCM >= Candidates[0].SafeDistanceCM + CandidateMinBenefitCM
+				&& Candidates[Index].Score > Candidates[TargetCandidate].Score)
+			{
+				TargetCandidate = Index;
+			}
+		}
+	}
+	else if (ObstructionFilter.GetPhase() != EABTSM4CameraObstructionPhase::Clear
+		&& SelectedObstructionCandidate > 0
+		&& SelectedObstructionCandidate < Candidates.Num())
+	{
+		// Hold the previous framing candidate through the clear-side hysteresis.
+		TargetCandidate = SelectedObstructionCandidate;
+	}
+	SelectedObstructionCandidate = TargetCandidate;
+
+	const FABTSM4CameraSweepCandidate& Target = Candidates[TargetCandidate];
+	ObstructionYawOffsetDegrees = FMath::FInterpConstantTo(
+		ObstructionYawOffsetDegrees,
+		Target.YawOffsetDegrees,
+		FMath::Max(0.0f, DeltaSeconds),
+		FMath::Max(1.0f, OffsetBlendSpeed));
+	ObstructionVerticalOffsetDegrees = FMath::FInterpConstantTo(
+		ObstructionVerticalOffsetDegrees,
+		Target.VerticalOffsetDegrees,
+		FMath::Max(0.0f, DeltaSeconds),
+		FMath::Max(1.0f, OffsetBlendSpeed));
+
+	// Re-sweep the blended offset. This keeps the transition itself collision
+	// safe instead of assuming that both safe endpoints imply a safe arc.
+	const FABTSM4CameraSweepCandidate Blended = SweepCandidate(
+		TargetCandidate,
+		ObstructionYawOffsetDegrees,
+		ObstructionVerticalOffsetDegrees);
+	FABTSM4CameraObstructionFilterSettings FilterSettings;
+	FilterSettings.EnterDelaySeconds = Settings ? Settings->CameraObstructionEnterDelaySeconds : 0.04f;
+	FilterSettings.ExitDelaySeconds = Settings ? Settings->CameraObstructionExitDelaySeconds : 0.16f;
+	FilterSettings.RestoreSpeedCMPerSecond = Settings ? Settings->CameraObstructionRestoreSpeedCMPerSecond : 520.0f;
+	FilterSettings.EscapeExpansionSpeedCMPerSecond = Settings ? Settings->CameraObstructionEscapeSpeedCMPerSecond : 900.0f;
+	EffectiveDistanceCM = ObstructionFilter.Update(
+		Candidates[0].bBlocked,
+		Blended.SafeDistanceCM,
+		DesiredDistance,
+		TargetCandidate != 0,
+		DeltaSeconds,
+		FilterSettings);
+	OutSafeDistance = Blended.SafeDistanceCM;
+	PoseSnapshot.SafeLocation = Pivot + Blended.Direction * Blended.SafeDistanceCM;
+	PoseSnapshot.BlockingActor = Candidates[0].bBlocked ? Candidates[0].Hit.GetActor() : Blended.Hit.GetActor();
+	PoseSnapshot.BlockingComponent = Candidates[0].bBlocked ? Candidates[0].Hit.GetComponent() : Blended.Hit.GetComponent();
+
+	const EABTSM4CameraObstructionPhase Phase = ObstructionFilter.GetPhase();
+	if (Phase != LastLoggedObstructionPhase || TargetCandidate != LastLoggedObstructionCandidate)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M4][CameraObstruction] Phase=%s Candidate=%d Desired=%.1f Safe=%.1f Rendered=%.1f Direct=%d Blocker=%s Component=%s"),
+			ABTSM4CameraRigModel::LexToString(Phase),
+			TargetCandidate,
+			DesiredDistance,
+			Blended.SafeDistanceCM,
+			EffectiveDistanceCM,
+			bDirectManipulation ? 1 : 0,
+			*GetNameSafe(PoseSnapshot.BlockingActor.Get()),
+			*GetNameSafe(PoseSnapshot.BlockingComponent.Get()));
+		LastLoggedObstructionPhase = Phase;
+		LastLoggedObstructionCandidate = TargetCandidate;
+	}
+	return Pivot + Blended.Direction * EffectiveDistanceCM;
 }
 
 void AABTSM4PartyCamera::AddOrbitYawInput(const float Value)
 {
-	if (!bInitializedView || FMath::IsNearlyZero(Value)) return;
-	const AABTSBirdParty* ResolvedParty = FindParty();
-	const AABTSBirdPartySettings* Settings = ResolvedParty ? ResolvedParty->GetResolvedSettings() : nullptr;
-	const float DegreesPerInput = Settings ? Settings->OrbitYawDegreesPerInput : 1.0f;
-	OrbitForwardTangent = OrbitForwardTangent.RotateAngleAxis(Value * DegreesPerInput, PreviousUp).GetSafeNormal();
-	bRecenterRequested = false;
+	AddMouseOrbitYawInput(Value);
 }
 
 void AABTSM4PartyCamera::AddOrbitPitchInput(const float Value)
 {
-	if (!bInitializedView || FMath::IsNearlyZero(Value)) return;
+	AddMouseOrbitPitchInput(Value);
+}
+
+void AABTSM4PartyCamera::BeginDirectManipulation()
+{
+	bDirectManipulation = true;
+	bRecenterRequested = false;
+}
+
+void AABTSM4PartyCamera::EndDirectManipulation()
+{
+	bDirectManipulation = false;
+}
+
+void AABTSM4PartyCamera::AddMouseOrbitYawInput(const float MouseDeltaPixels)
+{
+	if (!bInitializedView || FMath::IsNearlyZero(MouseDeltaPixels)) return;
 	const AABTSBirdParty* ResolvedParty = FindParty();
 	const AABTSBirdPartySettings* Settings = ResolvedParty ? ResolvedParty->GetResolvedSettings() : nullptr;
-	const float DegreesPerInput = Settings ? Settings->OrbitPitchDegreesPerInput : 0.7f;
+	const float DegreesPerPixel = Settings ? Settings->MouseYawDegreesPerPixel : 0.14f;
+	OrbitForwardTangent = OrbitForwardTangent.RotateAngleAxis(MouseDeltaPixels * DegreesPerPixel, PreviousUp).GetSafeNormal();
+	bRecenterRequested = false;
+}
+
+void AABTSM4PartyCamera::AddMouseOrbitPitchInput(const float MouseDeltaPixels)
+{
+	if (!bInitializedView || FMath::IsNearlyZero(MouseDeltaPixels)) return;
+	const AABTSBirdParty* ResolvedParty = FindParty();
+	const AABTSBirdPartySettings* Settings = ResolvedParty ? ResolvedParty->GetResolvedSettings() : nullptr;
+	const float DegreesPerPixel = Settings ? Settings->MousePitchDegreesPerPixel : 0.11f;
 	ElevationDegrees = FMath::Clamp(
-		ElevationDegrees + Value * DegreesPerInput,
+		ElevationDegrees + MouseDeltaPixels * DegreesPerPixel,
 		-OrbitPitchLimitDegrees,
 		OrbitPitchLimitDegrees);
+	bRecenterRequested = false;
+}
+
+void AABTSM4PartyCamera::AddGamepadOrbitYawInput(const float AxisValue, const float DeltaSeconds)
+{
+	if (!bInitializedView || DeltaSeconds <= 0.0f) return;
+	const AABTSBirdParty* ResolvedParty = FindParty();
+	const AABTSBirdPartySettings* Settings = ResolvedParty ? ResolvedParty->GetResolvedSettings() : nullptr;
+	const float Response = ABTSM4CameraRigModel::ApplyGamepadResponse(
+		AxisValue,
+		Settings ? Settings->GamepadLookDeadZone : 0.18f,
+		Settings ? Settings->GamepadLookExponent : 1.35f);
+	if (FMath::IsNearlyZero(Response)) return;
+	const float Rate = Settings ? Settings->GamepadYawDegreesPerSecond : 120.0f;
+	OrbitForwardTangent = OrbitForwardTangent.RotateAngleAxis(Response * Rate * DeltaSeconds, PreviousUp).GetSafeNormal();
+	bRecenterRequested = false;
+}
+
+void AABTSM4PartyCamera::AddGamepadOrbitPitchInput(const float AxisValue, const float DeltaSeconds)
+{
+	if (!bInitializedView || DeltaSeconds <= 0.0f) return;
+	const AABTSBirdParty* ResolvedParty = FindParty();
+	const AABTSBirdPartySettings* Settings = ResolvedParty ? ResolvedParty->GetResolvedSettings() : nullptr;
+	const float Response = ABTSM4CameraRigModel::ApplyGamepadResponse(
+		AxisValue,
+		Settings ? Settings->GamepadLookDeadZone : 0.18f,
+		Settings ? Settings->GamepadLookExponent : 1.35f);
+	if (FMath::IsNearlyZero(Response)) return;
+	const float Rate = Settings ? Settings->GamepadPitchDegreesPerSecond : 90.0f;
+	ElevationDegrees = FMath::Clamp(
+		ElevationDegrees + Response * Rate * DeltaSeconds,
+		-OrbitPitchLimitDegrees,
+		OrbitPitchLimitDegrees);
+	bRecenterRequested = false;
 }
 
 void AABTSM4PartyCamera::AddZoomInput(const float Value)
