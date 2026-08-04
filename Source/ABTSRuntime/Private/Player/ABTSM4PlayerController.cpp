@@ -124,6 +124,7 @@ void AABTSM4PlayerController::BeginOrbitInput()
 {
 	if (bGameplayInputBlocked) return;
 	bOrbitInputHeld = true;
+	if (PartyCamera) PartyCamera->BeginDirectManipulation();
 	bSavedCursorPositionValid = GetMousePosition(SavedCursorX, SavedCursorY);
 	SetCursorInteractionMode(false);
 }
@@ -131,6 +132,7 @@ void AABTSM4PlayerController::BeginOrbitInput()
 void AABTSM4PlayerController::EndOrbitInput()
 {
 	bOrbitInputHeld = false;
+	if (PartyCamera) PartyCamera->EndDirectManipulation();
 	SetCursorInteractionMode(true);
 	if (bSavedCursorPositionValid)
 	{
@@ -157,16 +159,35 @@ void AABTSM4PlayerController::SetCursorInteractionMode(const bool bEnableCursor)
 
 void AABTSM4PlayerController::ApplyOrbitYaw(const float Value)
 {
+	(void)Value;
 	if (bGameplayInputBlocked) return;
-	const bool bGamepadInput = FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_RightX)) > 0.05f;
-	if (PartyCamera && (bOrbitInputHeld || bGamepadInput)) PartyCamera->AddOrbitYawInput(Value);
+	if (PartyCamera == nullptr) return;
+	if (bOrbitInputHeld)
+	{
+		PartyCamera->AddMouseOrbitYawInput(GetInputAnalogKeyState(EKeys::MouseX));
+	}
+	const float GamepadAxis = GetInputAnalogKeyState(EKeys::Gamepad_RightX);
+	if (!FMath::IsNearlyZero(GamepadAxis))
+	{
+		PartyCamera->AddGamepadOrbitYawInput(GamepadAxis, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+	}
 }
 
 void AABTSM4PlayerController::ApplyOrbitPitch(const float Value)
 {
+	(void)Value;
 	if (bGameplayInputBlocked) return;
-	const bool bGamepadInput = FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_RightY)) > 0.05f;
-	if (PartyCamera && (bOrbitInputHeld || bGamepadInput)) PartyCamera->AddOrbitPitchInput(Value);
+	if (PartyCamera == nullptr) return;
+	if (bOrbitInputHeld)
+	{
+		// Preserve the existing ABTS_LookUp mouse mapping, whose MouseY scale is -1.
+		PartyCamera->AddMouseOrbitPitchInput(-GetInputAnalogKeyState(EKeys::MouseY));
+	}
+	const float GamepadAxis = GetInputAnalogKeyState(EKeys::Gamepad_RightY);
+	if (!FMath::IsNearlyZero(GamepadAxis))
+	{
+		PartyCamera->AddGamepadOrbitPitchInput(GamepadAxis, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+	}
 }
 
 void AABTSM4PlayerController::ApplyCameraZoom(const float Value)
@@ -184,6 +205,11 @@ void AABTSM4PlayerController::RecenterCamera()
 void AABTSM4PlayerController::SetGameplayInputBlocked(const bool bBlocked)
 {
 	bGameplayInputBlocked = bBlocked;
+	if (bBlocked && bOrbitInputHeld)
+	{
+		bOrbitInputHeld = false;
+		if (PartyCamera) PartyCamera->EndDirectManipulation();
+	}
 	SetIgnoreMoveInput(bBlocked);
 	SetIgnoreLookInput(bBlocked);
 }
