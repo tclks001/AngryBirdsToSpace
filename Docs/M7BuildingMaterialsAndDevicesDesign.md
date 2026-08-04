@@ -3,6 +3,7 @@
 > 状态：基础材料 C++ 已实现；本稿的基础子阶段只验收材料库、参数化生成和破坏响应。完整建筑已在后续 [M7TaskGraphSphericalBuildingIntegrationDesign.md](M7TaskGraphSphericalBuildingIntegrationDesign.md) 接入球面 TaskGraph。
 >
 > 父级：[主设计稿](AngryBirdsToSpaceGameDesign.md)。前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。后续建筑拼装器只调用本稿公开的添加接口，不重复实现材质、碰撞或爆炸。
+> M7 全部阶段、历史方案与模块复用关系见 [M7 建筑系统文档导航](M7BuildingDevelopmentRoadmap.md)。
 >
 > 本阶段的碰撞爽感、持续损伤和结构破坏升级建议见 [PhysicsImpactDestructionResearch.md](PhysicsImpactDestructionResearch.md)。
 >

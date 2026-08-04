@@ -1,6 +1,7 @@
 # M7.1：平面物理测试台与手工关卡搭建设计
 
 > 状态：C++ 已实现。M7.1 是与正式球面 TaskGraph 地图并行的实验关卡，不改变正式地图的 `CellTopo` 逻辑源约束。
+> M7 文档关系与当前执行路线见 [M7 建筑系统文档导航](M7BuildingDevelopmentRoadmap.md)。
 >
 > 父级：[M7 模块化建筑基础材料与装置](M7BuildingMaterialsAndDevicesDesign.md)。前置：[M6SlingshotLaunchAndImpactDesign.md](M6SlingshotLaunchAndImpactDesign.md)。
 >
