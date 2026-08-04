@@ -17,5 +17,11 @@ public class ABTSRuntime : ModuleRules
 			"PhysicsCore",
 			"ProceduralMeshComponent",
 		});
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Json",
+			"RHI",
+		});
 	}
 }

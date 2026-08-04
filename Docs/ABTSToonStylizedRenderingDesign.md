@@ -1,10 +1,10 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。当前只确定视觉目标、技术路线、分阶段范围与验收门槛，尚未修改材质、后处理、光照或引擎源码。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉基线源码与纯数据自动化已完成，真实 RHI 截图/GPU 证据待验收；尚未修改材质、后处理、光照或引擎源码。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
-> 相关文档：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
+> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
 
 ## 1. 结论先行
 
@@ -288,10 +288,11 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 
 ### Phase T0：基线和垂直切片定义
 
-- Integration 建立固定 Seed、固定相机的 A/B 截图点；
-- 选择 `L_ABTS_M10` 作为地表综合切片，覆盖 SDF、鸟、树石、弹弓、M7 建筑与卫星；
-- 选择 `L_ABTS_M11` 作为终局/星空独立切片；
-- 记录关闭/开启风格时的 GPU 基线。
+- Integration 在唯一 `L_ABTS_M11` 世界中建立固定 Seed、四个语义相机点和 Style Off/On；M11 的 M10 继承链已经覆盖地表、鸟、树石、弹弓、M7 建筑、卫星/E5 与终局，不再维护第二张切片；
+- 相机从 Start 路口、建筑合同/普通槽、卫星练习快照和终局局部帧实时解析，不保存绝对世界坐标；
+- 截图与 GPU 基线复用相同 Pose Hash，但必须分进程/分帧运行；
+- 每次运行记录 Seed、生成合同、卫星/终局身份、Profile、分辨率、镜头 Hash 和文件/命令证据；
+- T0 具体运行方式、manifest 门槛与当前分层状态见 [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)。
 
 ### Phase T1：全局色调原型
 
@@ -345,13 +346,13 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 
 ## 11. 建议的第一次实现任务
 
-第一轮不要创建几十个材质实例。只做一个可随时删除的垂直切片：
+第一轮不要创建几十个材质实例。按两个小阶段建立可随时删除的垂直切片：
 
-1. 在 `L_ABTS_M10` 选定包含地表、小鸟、树石、强化弹弓、M7 建筑和卫星的固定视角；
-2. 建立 Style Off/On 与 `GroundDay` Profile；
-3. 只实现柔和三档色调、冷色暗部和 1–2 像素 Depth/Normal 轮廓；
-4. 只给当前鸟、弹弓和一栋建筑写入选择性 Stencil；
-5. 用同一参数检查 M10 地面 PIP 与月面 BaseColor PIP，暂不强求完全相同；
+1. T0 只在唯一 `L_ABTS_M11` 中建立固定 Seed、`GroundStart`、`SlingshotBuilding`、`SatelliteE5`、`FinaleLayout` 四个语义相机点，以及完全同姿态的 Style Off/On 截图和独立 GPU 证据；具体运行契约见 [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)；
+2. T0 不进入瞄准或发射状态，因此 HUD 绘制链会保留，但地面/月面 PIP 和轨迹显示不属于本轮已覆盖证据；
+3. T1 再让稳定 Style/Profile 接缝真实消费柔和三档色调、冷色暗部和 1–2 像素 Depth/Normal 轮廓；
+4. T1 首批只给当前鸟、弹弓和一栋建筑写入选择性 Stencil；
+5. T2 增加显式玩法状态截图，用同一参数检查地面 PIP 与月面 BaseColor PIP，暂不强求完全相同；
 6. 达到稳定性与性能门槛后，再决定是否迁移第一批材质族。
 
 这一步完成后应进行一次明确的美术决策：保留原渲染、采用柔和三渲二、或停止全局描边只保留色板/材质风格化。没有通过这道决策门，不进入引擎源码分叉。
