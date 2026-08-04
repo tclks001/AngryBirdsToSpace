@@ -5,6 +5,8 @@
 > 用途：沉淀本项目已经遇到或已经被设计约束覆盖的问题。新增问题时，记录“现象—根因—修复—防回归验证”，不要只保留最后一次临时改动。
 >
 > 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) · [M6/M9 标定模式](M6M9SlingshotSatelliteCalibrationDesign.md) · [M9 卫星](M9SatelliteGravityDesign.md) · [M7.3-A 稳定建筑](M73AStableBlockBuildingImplementationDesign.md) · [M7.3-B 弱点与难度](M73BWeakPointAndDifficultyDesign.md) · [M7.3-B2 结构失效验证](M73B2StructuralWeaknessAndFailureValidationDesign.md) · [M7.3-DAG 递归主体建筑](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [M7.3-DAG-2 空间布局](M73DAG2SpatialLayoutAndModuleCompilationDesign.md) · [M7.3-DAG-2.1 支撑模式](M73DAG21SupportPatternsDesign.md)
+>
+> 持续追加的阶段原始账本：[M3 工作树排错记录](M3WorktreeTroubleshootingLog.md) · [M7 工作树排错记录](M7WorktreeTroubleshooting.md) · [M11 工作树排错记录](M11WorktreeTroubleshooting.md)
 
 ## 1. 使用规则
 
@@ -178,3 +180,79 @@
 | 现象 | 根因 | 修复 | 防回归验证 |
 | --- | --- | --- | --- |
 | 卫星视觉存在，但强化弹弓不调高功率就完全够不到；标定日志中 `SatelliteRadiusFromPrimary` 接近预期值的两倍 | 卫星以 `FTransform::Identity` deferred spawn，`ConfigureFromPrimaryPlanet/Direction` 又在 Finish 前移动原生 Root；随后把已经移动后的 `GetActorTransform()` 传给 `FinishSpawningActor`。UE 5.8 会相对缓存的原始 deferred Transform 重算模板并再次组合这段平移，导致卫星中心位移近似翻倍 | Finish 时传回原始 `FTransform::Identity`；卫星保存 `ConfiguredCenterWorld`，Finish 后用 `IsAtConfiguredCenter()` fail closed，避免生命周期调整再次静默改变位置。隔离标定预设不写回生产 M9 默认值 | 按[标定详稿第 7.3 节](M6M9SlingshotSatelliteCalibrationDesign.md#73-生产-m9-deferred-transform-回归)单列运行生产回归：标定载体中主星半径约 `10000cm`、半径/离地比例均为 `0.125` 时，卫星球心距主星约 `11480cm` 而非 `22960cm`；生产 M9 必须唯一 ready、`Radius=1250.0 Clearance=1250.0 Gravity=245.0 FinaleGravitySource=0`，且无 center/rejected/error。标定侧还须以真实 M6 pouch 和相机 `Look/ScreenUp/ScreenRight` 投影平面的离散可达 Pull × 规则 `AimPlaneOffsetCM` 网格证明 Reinforced 存在成功岛、Simple 和认证功率带外均为 0 命中；当前 fresh 自动化/runtime 与可见 PIE 证据未补齐前不得写成已通过 |
+
+## 13. 多工作树排错提炼与持续同步
+
+### 13.1 总文档与阶段账本的职责
+
+本节是三份功能工作树排错账本的集成提炼层，不取代原始记录：
+
+- M3、M7、M11 工作树继续在各自账本中追加完整的“现象—根因—修复—防回归验证”、失败假设、提交和阶段证据；不得因总文档已摘录而删除历史。
+- 集成工作树只把根因已经稳定、能跨阶段复用或会影响交界验收的结论整理到本文。仍在验证的推断必须保留“开放/候选未认证”等状态。
+- 总文档不复制会持续变化的整段参数和逐次实验数据；需要复盘时以子文档中的原始 ID、日志和提交为准。
+- 后续摘录先比较上次基线之后的子文档差异，再更新本文和基线；功能工作树不得直接修改本文。
+
+| 原始账本 | 主要职责 | 本次摘录基线（2026-08-04） |
+| --- | --- | --- |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `29e3de0d49c00325a9899871458934bd6850342c` |
+| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
+| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `51b391d8e1068d1c2a030fe64667ec21418de33c` |
+
+### 13.2 跨阶段统一诊断顺序
+
+三个工作树反复出现的共同根因不是“算法没运行”，而是观察者读取了错误的权威层。统一按以下顺序排查：
+
+1. **先确认工作树和二进制身份。** 记录 `git rev-parse --show-toplevel`、当前分支、`git status --short`、`.uproject` 绝对路径、Editor 命令行和日志路径。不能用 Codex 工作树目录编号或进程名推断归属。
+2. **再标明证据层。** 区分编辑器预览、Preview/Test Candidate、正式生产消费、NullRHI 数据合同、实时 Chaos、SceneCapture 像素和可见 PIE；任一层通过都不能代替另一层。
+3. **找到本阶段唯一权威。** M3 以带 `SourceResultHash + CandidateHash` 的候选/正式发布结果为准；M7 以最终 Brick 重建的 Realized Contact DAG 和建筑合同为准；M11 以标准 C++ Core 的 Result、事件序列和认证 Hash 为准。
+4. **沿链路找第一个缺失证据。** 例如“建筑不见了”应按 Candidate → Spawn → Generated → IdleValidation → BuildingGate → WorldReady 查找；“轨迹没偏转”应按 Production Profile → Pouch Frame → Surface → Gravity Query → Preview/Flight parity 查找。不要从最终截图反推上游一定没有执行。
+5. **保存可复现身份。** 日志至少包含 Seed、算法/版本、Profile、布局或候选 Hash、权威状态和拒绝原因。确定性问题先比较身份是否相同，再比较画面或性能。
+6. **分层验收。** 单元/合同自动化证明纯数据，fresh NullRHI 证明无渲染生命周期，实时运行证明 Chaos/线程时序，可见 PIE 证明构图、像素、输入和手感。`-benchmark` 固定时间步不能代替实时 PIE。
+7. **失败应 fail closed。** 候选、建筑或认证失败时不得回退旧布局、发布半成品、保留隐形碰撞或把 Preview/Test 晋升为生产结果。
+
+### 13.3 M3：候选、真实世界与消费链
+
+| 现象或风险 | 稳定结论 | 首要回归证据 |
+| --- | --- | --- |
+| 冻结射程已经接入，实体建筑和走廊却看似仍在旧位置 | 冻结档位是能力包络，不是每关固定距离；候选逻辑位置与兼容 TaskGraph 实体是两条链。R-6 正式发布前只能用候选叠层和身份日志验收，不能用旧实体作反证。 | 同档位各关厘米距离严格递增；Candidate Hash 随档位变化；日志明确 `MonthlyAccepted` 和 Authority。详见子文档 `M3-R3-001/002`。 |
+| F7/测试地图中的区域、卫星或终局槽位置正确 | Preview/Test 只消费显式候选，不代表月度世界已经发布。禁止默认取 `RetainedCandidates[0]`，跨消费者必须用同一 `SourceResultHash + CandidateHash` Join。 | 分别运行无预览参数和显式 Candidate；前者不迁移生产世界，后者打印完整来源身份且仍为 `MonthlyAccepted=0`。详见 `M3-R5-001/002`。 |
+| 弹弓埋地、朝向错误，或候选预测与实际发射不同 | 球面规划点不是运行时发射帧。两根桩分别查询真实地表，最终朝向、卫星锚点和轨迹都从真实桩顶及 `GetRestPouchTransform()` 派生；不得用道路切线、共同高度或固定桩距伪造。 | 两桩贴地误差、Pouch/卫星中心差、朝向误差和补偿角进入日志与 Hash。详见 `M3-R51-001/002`。 |
+| `SatelliteGravity=1` 但没有可见偏转 | 布尔开关不能证明生产链闭环。生产 M6 必须消费冻结 Launch Profile；候选和运行时共用真实表面/Pouch 帧；预演与实飞共用 M9 引力查询，不复制公式。 | Profile/Candidate Hash 相符；同输入 gravity-on 命中且 gravity-off miss；fresh Standalone 在实际游戏进程设置 CVar。详见 `M3-R51-003`。 |
+| 自动装配的弦袋无法点击 | 视觉上重叠的桩组件先阻挡了 `ECC_Visibility`，交互射线没有到达 Pouch。装配后 Pouch 应是 Cord 唯一 Visibility 点击目标。 | `CordVisibilityTargets=1`、`PouchVisibilityTargets=1`，PIE 点击袋口进入发射且桩不抢占。详见 `M3-R51-004`。 |
+| 太空槽在起伏球面被旧“共面/同高”门拒绝 | 两端应各自贴合真实地表；局部帧用两槽中点、切平面 Right、道路 Forward 和径向 Up 正交化，检查右手系与有界倾角，而不是强行拉平。 | 两槽各自贴地、Origin 等于中点、Frame 非退化且 Hash 可复现。详见 `M3-R52-001/002`。 |
+| 建筑先生成后消失 | `[Generated] Accepted=1` 只表示生成期通过；后续 M7 Idle Reject 会事务删除模块和 Foundation。M3 不应通过移动 Cell 或保留失败 Actor 掩盖它。 | 等待建筑合同封口，要求 `Expected=Registered=Accepted` 且 `Rejected=0` 后才发布 WorldReady。详见 `M3-X-001`。 |
+| 性能门单次轻微越线 | 保留首次失败；先核对 Seed/Oracle/Hash，再停止并行重型任务，以相同二进制 fresh 隔离重跑。既不能直接忽略，也不能在身份未变时立即断言算法回归。 | 同时保存 P50/P95/Max、接受数、Oracle Hash、命令和首次失败日志。详见 `M3-TEST-001`。 |
+
+### 13.4 M7：语义结构、最终几何与物理权威
+
+| 现象或风险 | 稳定结论 | 首要回归证据 |
+| --- | --- | --- |
+| 同为 UE 5.8 却提示模块缺失或版本不同 | 安装版与源码版 Editor 的 BuildId 不同。必须用项目绑定的安装版全链接，不能复制其他工作树 DLL 或依赖 Hot Reload。 | 安装版默认构建和 `-ForceUnity -DisableAdaptiveUnity` 全链接成功，fresh Editor 可加载两个模块。详见 `M7-WT-002`。 |
+| 编辑器中建筑/弱点存在，PIE 却不同或失败 | 无碰撞 HISM 预览、运行时 Chaos 模块和诊断覆盖层是三种生命周期。诊断组件不得进入 Game World；视觉预览不证明 Idle 通过。 | Summary 含启用状态和 Realized Hash；实时 PIE 所有必需建筑 `IdleValidation Accepted=1`；游戏中无诊断组件。详见 `M7-DAG3-001`、`M7-DAG4-001`。 |
+| 所有 Seed 都在同一预算门失败，或提高深度后整栋消失 | 候选搜索不是无限重抽；下游流、估算 Brick、真实 Brick、递归和搜索预算必须成组匹配。预算不足应在规则应用前终止并保留合法抽象前缀，或明确拒绝，不发布半成品。 | 日志给出实际值/上限和具体下游门；K>1 对可解域提高成功率，数学无解配置仍前置拒绝。详见 `M7-DAG3-003`、`M7-DAG5-001`～`004`。 |
+| Port/WFC/DAG 通过但积木悬空、重叠或桥端留缝 | 语义兼容、中心线 Joint 或 authored Bearing 都不是最终物理接触。所有 Motif 必须编译回统一 Assembly IR，并做全建筑闭合；桥端按每根梁、每一端审计 Bearing。 | `RemainingPenetrationCount=0`、`UnsupportedMemberCount=0`、桥端逐梁承托、跨中无补救地柱。详见 `M7-BA-*`、`M7-BB-*`。 |
+| Load DAG 通过但最终 Brick 有旁路或局部倾覆 | 最终 Brick AABB 重建的 Real Contact 才是权威；承重层还要检查累计合力是否落入联合支撑区域，不能只证明存在 Ground 可达路径。 | `RealContactMismatchCount=0`、支撑违规为 0；补柱后重新运行接触和 Load DAG。详见 `M7-BC-002/003`。 |
+| 屋顶分层够不到、裂成多个小屋顶或闭合循环耗时失控 | 屋顶要逐层直接 Bearing；相邻同标高终端先聚合 Crown，Prism 屋脊沿长轴；每轮闭合记录违规签名，无进展则转入明确补支撑、裁剪或 fail closed。 | 固定种子屋顶无补救长柱，聚合不跨大空洞，闭合轮数有界且最终穿透/悬空为 0。详见 `M7-D1-003`～`007`。 |
+| Chaos 固定时间步通过，实时 PIE 仍漂移或拒绝 | 静态几何正确不等于变步长接触稳定。保留严格空间门、quiet window、硬上限和事务回滚；`-benchmark` 只用于算法回归。 | fresh 实时运行记录 Drift/Settlement/Rotation、速度、Awake、TimedOut 和合同封口；失败后无模块或隐形 Foundation。 |
+
+### 13.5 M11：唯一 Core、认证与表现消费
+
+| 现象或风险 | 稳定结论 | 首要回归证据 |
+| --- | --- | --- |
+| 单文件/Non-Unity 编译通过，集成 Unity 构建发生调用歧义或重定义 | 匿名命名空间不能防止 Unity 同翻译单元冲突；私有辅助函数也必须使用文件职责唯一名称。 | 默认 Development Editor 与强制 Unity 全链接都通过。详见 M11 子文档第 2 节。 |
+| Worker 发布结果时触发 GameThread/Renderer ensure，或快速输入显示旧结果 | Worker 只计算纯数据并返回 `TFuture`；原生 Game Thread Tick 轮询并发布。求解采用 revision/dirty/latest-only 语义，丢弃 stale result；SceneCapture 不随每次微调高频重拍。 | worker 不触碰 UObject/HUD/SceneCapture；日志有 solve、端到端 latency、discarded；fresh 可见 PIE 无线程 ensure。 |
+| 终局相机没有继承已经调好的 Blueprint 参数 | 直接生成原生基类绕过了 M6 运行时选择的 BP 子类。M11 必须解析并生成唯一 M6-owned 精确相机类，歧义时 fail closed。 | 自动化验证精确类相等，日志输出 `CameraClassParity`，可见 PIE 比较构图。 |
+| SceneCapture 中有目标却没有解析轨迹，或 PIP 随微调乱晃 | SceneCapture 只能捕获场景组件，纯数据轨迹必须由 HUD 叠加；背景相机按目标缓存，同目标新解只更新线条。AUTO 与 Probe 共用同一权威结果和框体，但观察锚点不同。 | ResultHash 不因 AUTO/Probe 改变；同目标背景稳定、轨迹即时更新；切目标才重构图。 |
+| PIE 手感或 5000 点 ScreenAim 合格，却被误认为可正式绑定 | Candidate、Certified、Production Binding 是三个状态。二维满功率 ScreenAim 只证明手感/Hull，不能证明三维 `Yaw × Pitch × Power` 完整输入域。 | 报表标明 Domain、Power slice、采样和邻接；正式门覆盖完整 Power，且 F4 六邻域唯一连通、前缀集合嵌套、消融/错序/多圈/旁路失败。 |
+| 轨迹最终到达 UFO，但 `TargetHit` 早于第三次引力弹弓退出 | 事件顺序是认证语义的一部分，不能只检查“曾进入所有包络”。 | Core/CLI/Runtime 统一要求 `Assist3 Exit → TargetApproach → TargetHit`，错序命中归为失败。 |
+| 放大模型后出现视觉穿模，或统一缩放后候选失效 | `VisualRadius`、解析 `CollisionRadius`、`InfluenceRadius` 职责不同；离散积分、角域、步长、事件阈值和评分也破坏简单相似缩放。 | 尺度变化后重新跑 Core parity、扫掠、事件、Hull 和完整域认证；最小近掠距离包含鸟体净空，候选 Hash 改变。 |
+| HUD 控件绘制位置与点击热区偏移，或全览图元溢出圆框 | 输入必须依次转换 raw viewport、`UnscaledViewRect` origin/size、DPI 和 Canvas logical space；所有线、圆、文本和 hit test 共用变换与圆裁剪。 | 自动化覆盖 DPI≠1、非零 viewport origin 和线宽/文本 bounds；可见 PIE 改窗口尺寸后仍像素对齐。 |
+| 发射后鸟/UFO 在远景中不可读 | 当前仅确认可能由 Flight Camera lag 和共享雾/云叠加造成，仍是开放项；不得把推断写成已修复。 | 分别做无 lag、无雾云和同时修改的 fresh 可见 PIE A/B；共享天空/地图修改仍由集成工作树执行。 |
+
+### 13.6 后续摘录流程
+
+1. 功能工作树在原条目追加新证据、被推翻的假设和当前状态，不删除历史，也不直接修改本文。
+2. 集成时按本节记录的摘录基线查看三份子文档增量；只上收已稳定根因、跨工作树分诊规则和正式验收门。
+3. 若子文档条目仍为“开放/候选未认证”，本文只保留风险、验证方法和所有权，不写成已解决。
+4. 更新本文后，把对应子文档最新提交写成新的摘录基线；三个子文档仍作为完整证据源继续维护。
+5. Markdown-only 摘录不要求 UE 编译；若摘录同时修改源码、配置、Blueprint、地图或稳定契约，则按多工作树规范执行相应构建、自动化和 PIE 门。
