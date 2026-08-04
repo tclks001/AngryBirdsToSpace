@@ -1,0 +1,457 @@
+# M3 专属工作树排错记录
+
+> 状态：持续更新
+>
+> 记录范围：自 2026-07-28 M3 功能工作树分离起，在 `feature/m3-pcg-map` 的开发、同步、自动化和 PIE/Standalone 验收中实际遇到的问题。
+>
+> 上游：[M3R PCG 地图生成改进方案](M3PCGMapImprovementPlan.md) · [项目排错总文档](DevelopmentTroubleshooting.md) · [多工作树协作规范](ABTSMultiWorktreeDevelopmentGuide.md)
+>
+> 详细设计：[M3R-5.1 卫星预览](M3R51SatellitePreviewDesign.md) · [M3R-5.2/M11 Preview 终局接缝](M3R52M11PreviewFinaleIntegrationDesign.md)
+
+## 1. 文档职责与更新规则
+
+本文件是 M3 功能工作树的增量排错账本，不替代项目排错总文档：
+
+1. M3 工作树每次出现新的、可以复现的问题后，都应在本文件补充“现象—根因—修复—防回归验证”；不要等到集成时再依靠会话记忆恢复。
+2. 功能工作树不直接修改 `DevelopmentTroubleshooting.md`。集成工作树合并 M3 时，从本文件筛选已经稳定、具有全项目复用价值的条目整理进总文档。
+3. 只写已经实际遇到的问题或已经证明必要的诊断边界。尚未实现的功能、纯设计风险和普通开发进度不冒充故障。
+4. 每条记录注明修复归属。若问题属于 M7、M11 或 Integration，M3 只记录如何识别、如何同步修复，不越权修改共享契约。
+5. 验收证据必须来自本次修改后的 fresh 进程、唯一日志或可见 PIE；旧日志、Editor 已加载的 CDO 和单纯“编译了某个 `.cpp`”都不是闭环证据。
+6. 新条目使用第 10 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
+
+## 2. 快速索引
+
+| ID | 问题 | 当前状态 | 修复归属 |
+| --- | --- | --- | --- |
+| M3-WT-001 | Codex 管理工作树不在旧 `C:\workspace` 路径 | 已建立固定检查流程 | M3 |
+| M3-WT-002 | 普通/Adaptive Unity 编译通过，强制 Unity 才暴露同名私有符号 | 已从 `master` 同步修复并建立构建门 | M11/Integration；M3 回归 |
+| M3-WT-003 | 其他工作树 Editor 导致 Live Coding/DLL 锁，容易误杀进程 | 已建立进程归属检查 | 各工作树 |
+| M3-R3-001 | 冻结弹弓参数接入后，攻击走廊和建筑位置看似未变化 | 已修复数据布局；实体仍等 R-6 | M3 + Integration |
+| M3-R3-002 | 同一弹弓阶段的建筑距离全部退化为同一个舒适射程 | 已改为逐关递增射程窗口 | M3 |
+| M3-R5-001 | 逻辑 Target/Attack Corridor 已生成但画面无法辨认 | 已增加 F7 只读叠层 | M3 |
+| M3-R5-002 | 候选预览正确，却被误认为生产世界已经移动 | 已明确 Preview/Test 权威边界 | M3 + Integration |
+| M3-R51-001 | 强化弹弓落入地表或两桩悬空/下沉 | 已改为两槽分别查询真实地表 | M3 |
+| M3-R51-002 | 强化弹弓没有朝向卫星 | 已改为真实 Pouch 发射帧并加 `<=5°` 门 | M3 |
+| M3-R51-003 | `SatelliteGravity=1` 但预览和真实飞行无可见偏转 | 已完成生产档位、真实地表、共享引力链闭环 | M3 + Integration/M6/M9 |
+| M3-R51-004 | 自动生成的强化弹弓袋无法点击，其他弹弓正常 | 已使 Pouch 成为唯一 Visibility 点击目标 | M3 |
+| M3-R52-001 | 太空槽仍出现在兼容 TaskGraph 旧位置，而非月度道路末端 | Preview/Test 接缝已验收，尚非月度正式布局 | M3 + Integration/M5.1/M11 |
+| M3-R52-002 | 起伏地表上的太空槽对因两端高度不同被旧帧校验拒绝 | Preview/Test 校验已改为曲面局部帧 | Integration/M11 |
+| M3-X-001 | 建筑日志显示已生成，随后建筑消失，容易误判为 M3 漏生成 | 已建立 M7 Idle Reject 分诊规则 | M7；M3 只分诊 |
+| M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
+
+## 3. 工作树、同步与构建
+
+### M3-WT-001：不能再假定项目位于 `C:\workspace`
+
+**现象**
+
+- 命令、日志或 Editor 启动参数仍指向旧的 `C:\workspace\AngryBirdsToSpace`，导致看到的是集成工作树或另一份 DLL；当前修改在画面中“没有生效”。
+- 仅从目录名判断工作树身份，容易把功能分支操作成集成分支。
+
+**根因**
+
+Codex 内置工作树位于 `C:\Users\mingyangwu\.codex-official\worktrees\...`。工作树目录末段是动态标识，不是稳定路径；唯一可靠身份是 Git 顶层目录、当前分支和状态的组合。
+
+**修复**
+
+每次会话、同步或重型构建前先执行：
+
+```powershell
+git rev-parse --show-toplevel
+git branch --show-current
+git status --short
+```
+
+所有 `.uproject`、`-AbsLog`、自动化和 Standalone 参数都使用本次查询得到的绝对路径。M3 功能工作树只把更新后的 `master` 合入自身，不直接移动或推送 `master`。
+
+**防回归验证**
+
+- 当前分支明确为 `feature/m3-pcg-map`；
+- 构建命令、运行进程命令行和日志路径都包含同一个工作树绝对路径；
+- 合并前工作区无未知修改，并用 `git log --oneline HEAD..master` 确认待同步提交。
+
+### M3-WT-002：普通编译没有暴露 Unity 同翻译单元冲突
+
+**现象**
+
+M3 工作树曾正常编译，但 M7/集成进行默认 Development Editor 全链接时出现：
+
+```text
+ABTSM11GravityAssistSolver.cpp(71,72): error C2668: IsFiniteVector 调用不明确
+```
+
+冲突来自 `ABTSM11GravityAssist::IsFiniteVector` 与 `ABTSM11FinaleSystem.cpp` 匿名命名空间内的同名函数。
+
+**根因**
+
+Adaptive Unity 的分桶会随源文件集合变化。两个内部辅助函数此前未被编进同一个 Unity 翻译单元，所以 M3 的一次普通编译是假绿灯；集成后的 Unity 分桶把它们放进同一 TU 才暴露未限定调用。
+
+**修复**
+
+实际符号修复由 M11/集成工作树完成并进入 `master`；M3 合并该提交。M3 新增 `.cpp` 私有辅助函数时也应使用阶段专属命名或显式命名空间限定，不能依赖“当前恰好不在同一 Unity TU”。
+
+**防回归验证**
+
+关闭属于当前工作树的 Editor 后，执行强制 Unity Development Editor 全链接：
+
+```text
+-ForceUnity -DisableAdaptiveUnity
+```
+
+必须看到最终链接成功；只看到对象文件编译完成不算通过。
+
+### M3-WT-003：Live Coding/DLL 锁可能来自另一工作树
+
+**现象**
+
+当前 M3 Editor 已关闭，完整链接仍被 Live Coding 或 DLL 占用阻断；若只按进程名处理，会误关用户正在使用的集成、M7 或 M11 Editor。
+
+**根因**
+
+多个工作树共用同一 UE 安装和部分全局构建基础设施。进程名相同不能证明进程属于当前项目路径。
+
+**修复**
+
+先读取 Unreal/Live Coding 相关进程的完整命令行，确认其 `.uproject` 绝对路径和工作树归属。只结束本任务启动且明确属于当前 M3 工作树的进程；不得批量结束所有 Unreal 进程。确认当前项目未被加载后，构建可使用 `-NoHotReloadFromIDE`，但它不能替代进程归属调查。
+
+**防回归验证**
+
+- 记录占用进程 PID、命令行中的项目路径和处理结果；
+- 重试同一完整链接命令；
+- 最终交付说明是否仍有本任务启动的进程在运行。
+
+## 4. R-3 射程、建筑范围与攻击走廊
+
+### M3-R3-001：冻结参数已接入，但 PIE 中建筑和走廊看似没变
+
+**现象**
+
+代码端已有冻结弹弓构造参数后，PIE 中实体建筑仍在旧位置，攻击走廊看起来也与旧 TaskGraph 相同。
+
+**根因**
+
+这里曾同时存在两个问题：
+
+1. 早期 R-3 只把冻结最大射程当末端拒绝条件，没有把射程用于目标初选、道路到达点和 strict rebuild 后的最终弹弓位置联合求解；
+2. 即使 R-3 逻辑区域已经修正，玩家世界中的 M7 实体建筑仍由兼容 TaskGraph 链生成。R-6/Integration 尚未把唯一月度 Candidate 发布给实体生成链，所以观察旧建筑 Actor 不能证明 R-3 未生效。
+
+**修复**
+
+- R-3 显式保存 `LaunchToTargetDistanceCM` 和 `AttackCorridorLengthCM`，并将两者纳入 Candidate Hash；
+- 初选、侧路真实到达点和 strict rebuild 都必须满足同一冻结射程窗口；
+- 长攻击走廊的全部 Cell 在道路重建前进入保留集合，避免重建时悄悄缩短；
+- R-6 前只用 F7 逻辑叠层和 `[ABTS][PCG][EncounterReach]` 日志验收逻辑位置，不用兼容 M7 实体位置作反证。
+
+**防回归验证**
+
+固定展示 Seed 应输出六个非零、顺序正确的发射距离和走廊长度；当前基线为：
+
+```text
+LaunchToTargetCM=[986,1805,2631,3143,4697,6382]
+AttackCorridorCM=[1907,2697,3594,4388,5926,8295]
+```
+
+同时确认 `MonthlyAccepted=0` 时没有宣称实体建筑已经迁移。
+
+### M3-R3-002：不能把每关距离简单设为 `ComfortableReachCM`
+
+**现象**
+
+若同一弹弓阶段的 E1–E3 或 E4–E6 都直接使用同一个 `ComfortableReachCM`，三关距离几乎相同，难度和探索节奏消失。
+
+**根因**
+
+冻结标定给出的是弹弓档位的能力包络，不是每关唯一目标距离。把档位参数一对一映射为关卡距离，会丢掉同档位内的渐进关系。
+
+**修复**
+
+按关卡使用 `ComfortableReachCM` 的递增利用率窗口：
+
+- Simple E1/E2/E3：`10–30% / 25–50% / 45–65%`；
+- Reinforced E4/E5/E6：`20–40% / 35–55% / 50–70%`。
+
+窗口可少量重叠以容纳离散球面拓扑，但同一档位的最终厘米距离必须严格递增；任何窗口上界也不能超过 `MaximumReachCM`。
+
+**防回归验证**
+
+- Validator 检查同档位 `LaunchToTargetDistanceCM` 严格递增；
+- 100 Seed 接受门保持全通过；
+- 修改冻结档位后，Candidate Hash 和厘米日志都随之变化，而不是只改蓝图显示值。
+
+## 5. R-5 候选表现与诊断权威
+
+### M3-R5-001：逻辑区域存在，但画面没有可验收证据
+
+**现象**
+
+自动化显示目标范围和攻击走廊已生成，PIE 中却无法区分这些逻辑区域，难以判断建筑是否离路、走廊是否足够长。
+
+**根因**
+
+Target Footprint、Attack Corridor 等是 Candidate 数据，不对应默认可见 Actor 或材质。仅看兼容世界的建筑和道路会把数据层与实体层混为一谈。
+
+**修复**
+
+Editor 构建增加 F7 只读叠层：红色显示 Target Footprint，橙色显示 Attack Corridor。可用 `-ABTSM3R5LogicRegions` 启动时打开；精确月度候选仍必须同时显式传入预览参数，叠层不得自行选择候选。
+
+**防回归验证**
+
+- F7 可重复开关，关闭后不残留组件或 Actor；
+- 调试开关不进入 Candidate/Presentation Hash，不修改 `Input.ini`；
+- 缺少精确 Candidate 时明确显示不可用，不回退到 `RetainedCandidates[0]`。
+
+### M3-R5-002：Preview 看起来正确，不代表月度世界已发布
+
+**现象**
+
+F7 中道路、卫星、E5 或太空槽位置正确，但普通启动路径仍显示旧 TaskGraph 布局；容易被误报成“修改没有生效”或反过来误报成“月度布局已验收”。
+
+**根因**
+
+R-3/R-5 同时保留多个候选。显式预览只消费指定 Candidate，不执行 R-4/R-6 的最终唯一候选发布。表现正确与 Gameplay Authority 是两件事。
+
+**修复**
+
+- 所有预览/运行时桥保存 `SourceResultHash + CandidateHash`，按同一身份 Join Spatial、SlotField、Satellite、Finale 和表现数据；
+- `RetainedCandidates[0]` 永远不能被当作默认已接受世界；
+- Preview/Test 结果保持 `MonthlyAccepted=0`，默认生产路径不因 F7 或预览参数而改变；
+- 日志和文档显式写出 `Authority=PreviewTest` 或兼容路径，禁止只写模糊的 `Ready=1`。
+
+**防回归验证**
+
+分别运行“无预览参数”和“显式 Candidate 预览”两条路径：前者保持兼容世界，后者必须打印指定 Candidate 与完整来源 Hash；两者都不得把未决候选发布为月度正式布局。
+
+## 6. R-5.1 卫星练习链路
+
+### M3-R51-001：强化弹弓生成到地下
+
+**现象**
+
+自动生成的强化弹弓一根或两根桩落入地表，画面中袋口、弦和桩体与坡面明显错位。
+
+**根因**
+
+Candidate 的槽对中点和理想球面位置只适合离散规划。旧运行时把槽对中点当作共同地面，在起伏地表上没有分别解析两根桩的实际高度和法线，因此中点正确也不能保证任一桩底贴地。
+
+**修复**
+
+1. 用两个参考槽各自的 `CellId` 分别调用当前 Planet 的 `QuerySurface`；
+2. 每根桩的可视底面落在自身 `WorldLocation`，桩轴使用自身真实地表法线；
+3. 禁止把两地表点中点当共同地面；
+4. 两根实际桩顶生成正式强化弦，`GetRestPouchTransform()` 成为唯一发射帧；
+5. 卫星锚点从该真实 Pouch 帧重新求解并再次落到真实主星地表 Cell。
+
+**防回归验证**
+
+- 两根桩都能解析回各自原始 Cell；
+- 两个桩底地表误差均 `<=1 cm`；
+- Candidate 与运行时 Pouch 位置差进入日志和失败闭合门，不能只靠截图判断。
+
+### M3-R51-002：强化弹弓没有面对卫星
+
+**现象**
+
+蓝色弹弓—卫星连线与强化弹弓的实际发射正前方夹角明显过大，无法按冻结手感发射。
+
+**根因**
+
+旧布局使用道路切线、局部坡面法线或固定桩距伪造发射帧；M6 实际发射方向来自两根真实桩和弦袋。坡面法线也不等于主星径向，把它用于冻结卫星弧环会进一步旋转空间关系。
+
+**修复**
+
+- 用真实桩顶、弦锚和 Pouch 生成 M6 Sling Frame；
+- 卫星弧距以 Pouch 相对主星中心的真实径向为基准；
+- 在冻结 30° 弧环内进行有界、确定性的地形补偿，而不是运行时任意搬动卫星；
+- 将卫星视线投影到 Pouch 的 `Forward/Right` 平面，朝向误差超过 `5°` 时整套布局 fail closed；补偿角和最终 Transform 纳入 Hash。
+
+**防回归验证**
+
+F7 显示 `SAT FACING <角度> deg`。当前生产档位闭环基线朝向误差为 `0.007°`；早期的 `0.002°`、Cell `4218` 等数据来自理想球面旧链路，不再是验收基线。
+
+### M3-R51-003：开启卫星重力后仍没有轨迹偏转
+
+**现象**
+
+在控制台执行 `abts.Calibration.SatelliteGravity 1` 后，轨迹预览和真实发射仍像没有卫星引力，强化弹弓甚至飞不到卫星线框附近。
+
+**根因**
+
+这不是一个布尔开关问题，而是多段数据链同时不一致：
+
+1. Standalone/game 是独立进程，在 Editor 控制台设置的 CVar 不会自动传播过去；
+2. 生产 M6 一度仍使用旧兼容强化速度 `2300 cm/s`，而冻结档位要求 `3300 cm/s`；
+3. 候选端使用理想球面位置，运行时使用 TerrainVisualField/`QuerySurface`，Pouch 与卫星中心会相差数百厘米；
+4. 候选端以道路切线和固定 `190 cm` 桩距伪造发射帧，运行时却从真实弦袋发射；
+5. 如果预览积分、实际飞行和诊断各复制一份引力公式，即使开关值相同也无法证明使用了同一 M9 引力源。
+
+**修复**
+
+- 在实际运行游戏进程的控制台设置 CVar；`-1/0/1` 分别表示冻结默认/强制关闭/强制开启；
+- M3 从活跃生产 `AABTSM6SlingshotSystem` 回读 Launch Profile Catalog，生产 Hash 与 Candidate Hash 不一致即 fail closed；
+- 候选表面改用 `GetSurfaceRadiusAtDirection()` 读取 TerrainVisualField 真实半径，并与运行时 `QuerySurface()` 对齐；
+- 候选和运行时都从真实强化桩、弦端点和 `GetRestPouchTransform()` 建立发射帧；
+- 轨迹预演和实际飞行共同调用共享 M9 引力查询，不在 M3 复制引力公式；
+- 运行时同时计算 gravity-on 命中和同输入 gravity-off miss，只有存在引力依赖成功集才认证通过。
+
+**防回归验证**
+
+fresh 专项和 Standalone 必须同时给出以下证据：
+
+```text
+ProductionProfile=1
+TrajectoryCertified=1
+GravityOnHits=14
+GravityDependentHits=14
+LargestSuccessIslandSamples=3
+GravityOffMinimumMiss=2756.2 cm
+```
+
+当前生产档位 Hash 为 `C2B94139752AD846`，Candidate/运行时 Pouch 与卫星中心差均为 `0.00 cm`。F7 显示 `SAT TRAJECTORY PASS/FAIL`；仅看到 `GravityEnabled=1` 不能作为引力生效证据。
+
+### M3-R51-004：自动生成的强化弹弓袋无法点击
+
+**现象**
+
+点击 M3 自动生成并标黄的强化弹弓袋没有日志，也不进入发射状态；同地图其他弹弓袋可以正常进入。
+
+**根因**
+
+这套练习弹弓是运行时完整装配的。强化桩网格与 Pouch 在鼠标视线中重叠，桩组件同样阻挡 `ECC_Visibility`，点击射线先命中桩并进入“给手持弦选择桩”的无效交互，真正 Pouch 没有得到点击。
+
+**修复**
+
+保留两根已装配强化桩的可见性和玩法碰撞，但让它们忽略 `ECC_Visibility`；运行时检查整根 Cord 恰好只有一个 Visibility 目标，并且该目标名为 `PouchVisual`。不满足该交互合同则练习布局 fail closed。
+
+**防回归验证**
+
+日志必须包含：
+
+```text
+[ABTS][M3R5.1][RuntimePractice][Interaction] Ready=1 ... CordVisibilityTargets=1 PouchVisibilityTargets=1
+```
+
+PIE 中点击袋口应立即进入强化弹弓发射状态；点击桩体不能抢占袋口射线。
+
+## 7. R-5.2 道路末端太空槽
+
+### M3-R52-001：太空槽仍生成在旧位置
+
+**现象**
+
+额外普通槽场和太空槽模型已经接入测试地图，但 PIE 中唯一太空槽对没有出现在月度道路末端。
+
+**根因**
+
+实体消费链仍读取兼容 TaskGraph 的 `FinaleLaunchFrame`/旧 Cell，而 M3R-5.2 只生成了候选端道路末端提案。没有显式 Candidate 和来源 Hash 的适配器时，M5.1、M11 和 M3 看到的是三套不同局部帧。
+
+**修复**
+
+- M3R-5.2 对每个候选保存精确 `RoadTerminalCellId`、末端候选窗、左右槽真实地表位置和 `ClearanceCellIds`；
+- 普通槽场必须先 Join 同一 Candidate 的终局净空，再生成所有指定/道路附加槽，禁止“先生成普通槽，最后覆盖”；
+- Integration 的 Preview/Test 适配器把同一帧交给 M5.1 太空槽和 M11 四行星布局，任何 Candidate、Hash 或坐标轴不一致都 fail closed，不回退旧 Cell；
+- M3 不硬编码 M11 世界坐标，M11 只相对 `FrameOrigin + Forward/Right/Up` 解析预冻结局部布局。
+
+**防回归验证**
+
+- 太空槽恰好一对，普通槽不进入 `ClearanceCellIds`；
+- M3、M5.1、M11 日志输出同一 `Authority=PreviewTest`、Candidate、Anchor Cell 和 Frame 身份；
+- 可见 PIE 中太空槽位于道路末端真实地表，三颗助推行星和 UFO 使用同一局部帧；
+- 当前接缝仍是 Preview/Test，未完成 R-6/R-7 前不得写成月度正式布局。
+
+### M3-R52-002：真实地表槽对不应被“必须完全水平”拒绝
+
+**现象**
+
+左右太空槽分别贴合起伏地表后存在合理的径向高度差，旧 M11 局部帧校验把它判为不可用。
+
+**根因**
+
+旧校验隐含假设两个槽位处于同一欧氏水平面；球面和起伏 TerrainVisualField 不满足该假设。强行拉平会重新制造悬空或埋地。
+
+**修复**
+
+Preview/Test 帧以两槽真实位置的中点为 Origin，将槽对向量投影到局部切平面得到 Right，再与道路 Forward、主星径向 Up 正交化；允许受限地形倾角，但拒绝退化轴、反手系或过大倾斜。
+
+**防回归验证**
+
+- Frame Origin 与两槽中点一致；
+- 左右槽各自贴地，不以共同高度覆盖；
+- 当前 Preview/Test 倾角门 `<=45°`，并验证右手系、非退化轴及重复构建 Hash 一致。
+
+## 8. 跨工作树分诊
+
+### M3-X-001：建筑“生成后消失”不是 M3 漏生成
+
+**现象**
+
+建筑标签处没有实体，但日志先出现 `[Generated] ... Accepted=1`，随后出现：
+
+```text
+[IdleValidation] ... Accepted=0
+[StartupPhysics] WorldReadyBlocked Reason=BuildingGateRejected
+```
+
+**根因**
+
+M7.3 的生成期 `Accepted=1` 只表示结构方案和初始穿透门通过。其后的 Idle 稳定门拒绝会执行事务回滚，销毁模块和 Foundation，因此最终画面为空。这与 M3 是否选到了建筑 Cell 是不同阶段的问题。
+
+**修复**
+
+M3 分诊时先按 Actor/Task/Cell 关联完整日志：若存在 Spawn/Generated，随后是 `IdleValidation Accepted=0`，将问题交给 M7，M3 不通过移动建筑、放宽道路或保留失败 Actor 掩盖它。M7 的具体支撑几何、Idle 门和事务回滚修复记录以 [项目排错总文档](DevelopmentTroubleshooting.md) 为准。
+
+**防回归验证**
+
+月度联合验收不仅检查六个 Spawn，还必须等待建筑合同封口，并要求 `Expected=Registered=Accepted=6`、`Rejected=0` 后才发布 WorldReady。
+
+## 9. 自动化与性能证据
+
+### M3-TEST-001：单次性能门越线不能被简单忽略或直接定性回归
+
+**现象**
+
+完整 M3 自动化曾出现 `58/59`：Biome 100 Seed 的 `P95=250.469 ms`，比 `250 ms` 门槛高 `0.469 ms`；同一筛选器独立 fresh 重跑为 `236.763 ms`，冻结 Oracle Hash 相同。
+
+**根因**
+
+毫秒级性能门会受同机其他 Editor、编译、杀毒和调度抖动影响；但“可能是抖动”也不能把首次失败改写为通过。必须先区分输出身份变化、算法退化和环境噪声。
+
+**修复**
+
+保留首次失败结果，停止并行重型任务，以相同二进制、相同筛选器、相同 Seed/Oracle 在 fresh 进程中隔离重跑；同时核对调用关系，确认本次修改没有进入失败测试的代码路径。若 Hash 或接受集合变化，按功能回归处理；若结果身份相同但多次仍越门，则按性能回归处理。
+
+**防回归验证**
+
+- 性能报告同时保存 P50/P95/Max、Accepted/Rejected、Oracle Hash 和运行命令；
+- 不用完整测试中的第二次缓存运行替换 fresh 首次数据；
+- 重型构建、慢速认证和可见 PIE 按多工作树规范串行执行。
+
+## 10. 新条目模板
+
+```markdown
+### M3-<阶段>-<序号>：<短标题>
+
+**现象**
+
+- <玩家画面、日志或构建错误；附最小复现条件>
+
+**根因**
+
+<说明错误发生在哪个数据/生命周期/工作树边界，区分已证实与推测。>
+
+**修复**
+
+<代码、配置或流程上的最终处理；注明归属工作树。>
+
+**防回归验证**
+
+- <自动化筛选器、fresh 运行命令或 PIE 操作>
+- <必须出现/不得出现的日志、Hash、数量和视觉结果>
+```
+
+更新后还应检查：
+
+1. 是否需要从 M3 主改进稿或阶段详稿建立链接；
+2. 是否误写了 Integration/M7/M11 所有权内的修复动作；
+3. 是否保留了被推翻的旧诊断值并标明作废；
+4. 是否给出了用户能独立复现的验收证据；
+5. 下次合入 `master` 时，哪些条目已足够稳定，可由集成工作树整理进总排错文档。
