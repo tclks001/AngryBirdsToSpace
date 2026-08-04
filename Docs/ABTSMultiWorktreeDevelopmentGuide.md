@@ -167,6 +167,7 @@ M3 已接受的生成结果
 - `Docs/ABTSTaskGraphPCGDesign.md`
 - `Docs/M3PCGMapImprovementPlan.md`
 - `Docs/M3TaskGraphTerrainPresentationDesign.md`
+- `Docs/M3WorktreeTroubleshootingLog.md`
 
 专属二进制资产：
 
@@ -232,6 +233,7 @@ M7 不得修改 M3 站点生成规则来“配合建筑”，也不得从 `AABTS
 - `Docs/M11AGravityAssistSolverDesign.md`
 - `Docs/M11BFinaleLayoutCertificationDesign.md`
 - `Docs/M11GravityAssistAlgorithmPrevisualization.md`
+- `Docs/M11WorktreeTroubleshooting.md`
 - 后续 `Docs/M11[A-Z]*` 阶段详稿；明确排除 `M110PreFinaleClosureDesign.md` 和共享总设计
 
 专属二进制资产：
@@ -331,6 +333,26 @@ Codex 托管目录中的数字 ID 是透明实现细节；会话不得把
 
 正在运行的 Codex 会话不会因为另一个工作树提交了规范就自动重新阅读。共享规范更新合并后，用户或集成者必须在每个会话明确要求其重新读取 `AGENTS.md` 和本规范，然后才能继续工作。
 
+### 6.1 电脑、Editor 与 PIE 操作授权边界
+
+“实现功能”“编译验证”“给出 PIE 验收方案”不等于授权会话控制用户电脑或图形界面。除非用户在当前任务中明确要求 Codex 代为控制电脑、操作 Unreal Editor 或执行可见 PIE，否则：
+
+- 不得调用 GUI/电脑控制工具打开、切换、点击或关闭 Unreal Editor、Visual Studio、Content Browser、Blueprint Editor、PIE 窗口或其他桌面应用；也不得用命令行绕过本条启动图形化 Editor。
+- 可以在任务授权范围内读取文件、修改代码/文档、运行 Git、使用命令行 `Build.bat` 编译，以及运行明确要求的 unattended/NullRHI 自动化；这些操作不自动扩展为可见 Editor/PIE 权限。
+- 需要资产、Blueprint、地图或视觉验收时，只提供严格的 Editor/PIE 操作步骤、地图/GameMode、启动参数或 CVar、日志标志、视觉标准和失败标准，并将状态写为“代码/自动化完成，待用户 PIE 验收”。
+- 用户说“我来验收”“之后在 PIE 确认”或只询问“应该如何验收”时，明确表示验收由用户执行；不得自行启动 Editor。
+- 只有“请控制电脑打开 Editor 并验收”“请代为执行 PIE”等当前任务中的明确指令才授予 GUI 操作权；历史任务中的一次授权不延续到后续任务。
+- 即使已获 GUI 授权，也只能操作当前任务、当前工作树的应用和资产；不得关闭或干预其他工作树、其他项目或用户已有进程。
+
+### 6.2 会话身份与共性误判防护
+
+开始诊断前先区分“工作树/二进制身份、证据层、运行时权威”三个维度：
+
+1. 工作树身份以 Git root、branch、status 和 `.uproject` 绝对路径为准；目录数字 ID、进程名和旧日志都不构成身份。
+2. 编辑器预览、Preview/Test Candidate、生产消费、NullRHI 数据合同、实时 Chaos、SceneCapture 像素与可见 PIE 是不同证据层，不能互相替代。
+3. 日志应保存 Seed、算法/版本、Profile、Candidate/Result Hash、Authority 和明确拒绝原因；先比较身份是否一致，再比较画面、性能或手感。
+4. 沿完整链路寻找第一个缺失证据，不从最终截图直接断言上游没有执行。失败结果必须 fail closed，不得回退旧布局、发布半成品或保留隐形碰撞。
+
 Windows 当前启用 `core.autocrlf=true` 和 `core.ignorecase=true`。因此：
 
 - 禁止只改变文件名大小写；确需改名时由集成工作树执行两步显式重命名。
@@ -361,6 +383,22 @@ git commit -m "<阶段>: <单一可验收结果>"
 - `.gitignore` 当前忽略 `Scripts/*`；未来需要纳入版本控制的集成工具放在 `Tools/`，并由集成工作树创建。
 - 不使用仓库级共享 `git stash` 作为会话交接手段。未完成内容保留在当前功能工作树等待原会话继续；未通过编译/测试的提交可以存在，但不得作为交接 SHA。
 - 已推送或已交接的功能提交不 rebase、不改写历史；后续用新提交修正。
+
+### 排错记录闭环
+
+三个功能工作树必须把排错文档作为开发产物持续维护，而不是等集成时依靠会话记忆补写：
+
+| 工作树 | 持续追加的原始账本 |
+| --- | --- |
+| M3 | [M3WorktreeTroubleshootingLog.md](M3WorktreeTroubleshootingLog.md) |
+| M7 | [M7WorktreeTroubleshooting.md](M7WorktreeTroubleshooting.md) |
+| M11 | [M11WorktreeTroubleshooting.md](M11WorktreeTroubleshooting.md) |
+
+- 新出现且可复现的故障、被证明错误的修复假设、跨工作树分诊边界、假绿灯和新的验收门，应在功能提交或紧邻的文档提交中记录；普通拼写错误和立即修正的局部编译错误不必单独立项。
+- 每条至少包含“现象—根因—最终处理—防回归验证”，并标明状态、修复所有权、fresh 日志/自动化/PIE 等证据。仍是推断时必须标为开放，不得伪装成已确认根因。
+- 功能交接必须列出本轮新增或更新的排错 ID；功能工作树只更新自己的账本，不直接修改共享 [DevelopmentTroubleshooting.md](DevelopmentTroubleshooting.md)。
+- 集成工作树合并阶段成果时，必须比较总文档中记录的上次摘录基线与三份账本最新提交，去重后把稳定、跨阶段可复用的结论提炼到总文档，并更新摘录基线。
+- 提炼完成后保留三份原始账本及其历史；不得以“已经汇总”为由删除、清空或停止维护。Markdown-only 摘录无需 UE 编译。
 
 功能分支首次形成可恢复提交后，由该工作树推送自己的分支：
 
@@ -396,15 +434,28 @@ git merge --no-edit master
 
 ## 8. 独立验收
 
-### 8.1 通用编译
+### 8.1 唯一引擎基线与通用编译
+
+本项目唯一允许用于编译、UnrealHeaderTool、自动化、Standalone 和 Editor/PIE 的引擎安装为：
+
+```text
+C:\Program Files\Epic Games\UE_5.8
+```
+
+`.uproject` 中的 `EngineAssociation=5.8` 只表示版本族，不能证明某个 UE 5.8 安装具有相同 BuildId。禁止使用源码版 `C:\workspace\UnrealEngine-5.8.0-release`、其他磁盘上的 UE 5.8、PATH 中偶然命中的 `UnrealEditor.exe`、Visual Studio 当前选择的其他引擎或从别的工作树复制来的 DLL。命令必须从上述绝对 `$EngineRoot` 派生，并在执行前检查目标存在：
 
 每个工作树使用自己的项目绝对路径：
 
 ```powershell
 $EngineRoot = 'C:\Program Files\Epic Games\UE_5.8'
 $ProjectRoot = (git rev-parse --show-toplevel).Trim()
+$BuildBat = "$EngineRoot\Engine\Build\BatchFiles\Build.bat"
 
-& "$EngineRoot\Engine\Build\BatchFiles\Build.bat" `
+if (-not (Test-Path -LiteralPath $BuildBat)) {
+  throw "Required UE 5.8 installation is missing: $BuildBat"
+}
+
+& $BuildBat `
   AngryBirdsToSpaceEditor Win64 Development `
   "-Project=$ProjectRoot\AngryBirdsToSpace.uproject" `
   -WaitMutex -NoHotReload
@@ -413,6 +464,8 @@ if ($LASTEXITCODE -ne 0) {
   throw "Development Editor build failed: $LASTEXITCODE"
 }
 ```
+
+默认 Development Editor 成功不能覆盖 Unity 分桶问题。出现以下任一情况时，功能工作树交接前还必须使用同一 `$BuildBat` 追加一次 `-ForceUnity -DisableAdaptiveUnity` 全链接：新增/删除/重命名 `.cpp`、修改匿名命名空间或文件内辅助函数、改变模块源文件集合，或曾出现仅 Unity 才能复现的歧义/重定义。集成候选只要合并了 C++ 源码，就必须执行该 ForceUnity 门。匿名命名空间不会隔离被 Unity 合入同一翻译单元的同名函数，私有帮助函数应使用职责唯一名称。
 
 自动化必须在全新 `UnrealEditor-Cmd` 进程运行，并使用当前工作树独有的绝对日志：
 
@@ -490,6 +543,18 @@ M7 的 `-benchmark` 固定时间步只作为算法回归。正式建筑门禁仍
 
 “编译成功”或 NullRHI 自动化不能替代可见 PIE；可见 PIE 也不能替代确定性自动化。独立验收需要两者中与本阶段相关的部分。
 
+### 8.4 共性故障的强制分诊
+
+| 常见误判 | 强制处理 |
+| --- | --- |
+| “代码已改但画面没变” | 先核对工作树、项目绝对路径、最终 DLL 时间和 fresh 进程；再区分 Blueprint 序列化默认值、C++ CDO、Preview/Test 与生产消费链。不得直接重复改参数。 |
+| “预览/候选正确，所以生产世界已完成” | 明确记录 Authority。Preview/Test 不得被晋升为生产结果；M3/M7/M11 跨消费者用同一 Source/Candidate/Result Hash 对齐。 |
+| “生成日志成功但 Actor 消失” | 沿 Spawn/Generated → Idle/Runtime Validation → Gate → WorldReady 查找首次拒绝；事务回滚后的消失不是上游漏生成。 |
+| “自动化绿灯，所以视觉/物理已通过” | NullRHI 不证明像素、光照、SceneCapture 或手感；`-benchmark` 不证明实时 Chaos；截图也不证明确定性、完整输入域或事件顺序。按证据层补门。 |
+| “同一个 Seed 结果不同” | 同时比较版本、Profile、布局/候选 Hash、派生路径和输入域；禁止共享全局随机流依赖遍历次数，不能只比较 Seed 字面值。 |
+| “单次性能门越线/通过” | 保留首次结果和 Oracle/Hash；停止并行重负载后用同一二进制、同一过滤器 fresh 隔离重跑。不得直接忽略首次失败，也不得用缓存热跑覆盖。 |
+| “修一下穿透/位置后看起来能用” | 若运行时修复改变了权威几何或 Transform，必须重建下游接触、支撑、碰撞和 Hash；无法证明一致时 fail closed，不能以视觉可站立替代数据一致性。 |
+
 ## 9. 交接格式
 
 功能工作树完成后向集成者提供：
@@ -505,6 +570,7 @@ Binary assets changed:
 Build command/result:
 Fresh automation filters/result/log:
 PIE map/result:
+Troubleshooting IDs added/updated:
 Known limitations:
 Integration notes:
 ```
@@ -554,6 +620,7 @@ git -C $IntegrationRoot push origin master
 5. M11-A、M11-B Unit/Runtime；阶段交接时包含两项慢速认证。
 6. 当前 canonical `Content/Maps/L_ABTS_M10.umap` 的全新进程运行；本批次若修改 `Test.umap`，还必须额外验证它，不能二选一。
 7. 一次可见 PIE 联合验收：在 `L_ABTS_M10` 验证地图引导 → 建筑 → 太空弹弓入口，并在 `L_ABTS_M11` 验证终局入口与 3+1 表现。
+8. 比较 M3/M7/M11 排错账本自上次摘录基线以来的增量，将已稳定的共性结论提炼进 `DevelopmentTroubleshooting.md`；保留原账本并更新摘录基线。
 
 ## 11. 冲突处理
 
@@ -613,6 +680,7 @@ git merge --abort
 - [ ] 二进制资产具有唯一所有者且无冲突。
 - [ ] 候选分支按 M3 → M7 → M11 合并精确 SHA。
 - [ ] 联合构建、自动化、实时门禁和可见 PIE 通过。
+- [ ] 各功能交接列出新增/更新的排错 ID；总排错文档已完成本批次提炼，三份原始账本仍保留。
 - [ ] `master` 只以 `--ff-only` 接收已验证候选。
 - [ ] 合并后记录精确提交、测试日志与未解决限制。
 
