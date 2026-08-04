@@ -52,6 +52,29 @@ struct FABTSM73BeamD0DifficultyMetrics
 	int32 SolutionSteps = 1;
 };
 
+/** Visual-only tier recipe. Beam-D2 gameplay difficulty does not consume it. */
+struct FABTSM73BeamD0VisualComplexityRecipe
+{
+	int32 MilestoneTier = INDEX_NONE;
+	int32 MinimumBrickCount = 0;
+	int32 MaximumBrickCount = 0;
+	int32 MaximumCandidateAttempts = 0;
+	float BoundsScale = 1.0f;
+	float BaySpanScale = 1.0f;
+	int32 ShapeGrammarDepth = 2;
+	int32 MotifGrammarDepth = 1;
+	int32 TargetShapeVolumeCount = 12;
+	int32 MaximumBaysPerVolume = 2;
+	int32 MaximumParallelBlocksPerCourse = 2;
+	int32 MaximumRoofCourseCount = 8;
+	int32 SingleTerminalRoofCourseCount = 0;
+	bool bRequirePrimitiveVariety = false;
+	bool bRequireSingleTerminalRoof = false;
+	bool bRequireMotifVariety = false;
+
+	bool Validate(FString& OutError) const;
+};
+
 /** Monotonic per-profile curve. It is catalog data, never a TaskGraph input. */
 struct FABTSM73BeamD0DifficultyCurve
 {
@@ -127,6 +150,7 @@ struct FABTSM73BeamD0ResolvedProfile
 	EABTSM73BeamD0CollapseIntent CollapseIntent =
 		EABTSM73BeamD0CollapseIntent::ProgressiveFold;
 	FABTSM73BeamD0DifficultyMetrics Difficulty;
+	FABTSM73BeamD0VisualComplexityRecipe VisualComplexity;
 	FABTSM73BeamCPreviewSettings BeamSettings;
 	FString RejectReason;
 };

@@ -97,6 +97,55 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 BrickCount = 0;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 TargetMinimumBrickCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 TargetMaximumBrickCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 VisualCandidateAttempt = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 SemanticVolumeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 SemanticBoxCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 SemanticPrismCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 SemanticPyramidCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 RoofCourseBrickCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 DistinctMotifCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	int32 SupportedSpanCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visual Complexity")
+	bool bVisualComplexityCertified = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Assembly Quality")
+	int32 XColumnStationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Assembly Quality")
+	int32 YColumnStationCount = 0;
+
+	/** Lower normalized station density divided by the higher density. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Assembly Quality")
+	float AxisStationDensityRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Assembly Quality")
+	float StructuralClosurePostRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Assembly Quality")
+	bool bAssemblyQualityCertified = false;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 CompleteReferenceCount = 0;
 
@@ -121,6 +170,21 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 StrictPenetrationCount = 0;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 StructuralClosurePassCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 AddedStructuralSupportPostCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 RealContactMismatchCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 RemainingSupportViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 SupportResultantAdvisoryCount = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
 	FBox LocalBounds = FBox(EForceInit::ForceInit);
 
@@ -136,4 +200,3 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	FString RejectReason;
 };
-

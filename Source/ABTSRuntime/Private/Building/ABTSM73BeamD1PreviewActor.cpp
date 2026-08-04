@@ -170,10 +170,34 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7.3-Beam-D1][PreviewGenerated]")
 		TEXT(" Actor=%s Profile=%s Tier=%d Members=%d Bricks=%d")
+		TEXT(" Target=%d-%d Attempt=%d Volumes=%d Box=%d Prism=%d Pyramid=%d RoofBricks=%d Motifs=%d Spans=%d Certified=%d")
+		TEXT(" ClosurePass=%d AddedPosts=%d ContactMismatch=%d SupportViolations=%d Advisory=%d")
+		TEXT(" Stations=%d/%d AxisDensity=%.3f ClosureRatio=%.3f Quality=%d")
 		TEXT(" Wood=%d Stone=%d Iron=%d Glass=%d Weak=%d Device=%d Hash=%lld"),
 		*GetName(), *LastSummary.GameplayProfileId.ToString(),
 		LastSummary.DifficultyTier, LastSummary.MemberCount,
-		LastSummary.BrickCount, LastSummary.WoodBrickCount,
+		LastSummary.BrickCount, LastSummary.TargetMinimumBrickCount,
+		LastSummary.TargetMaximumBrickCount,
+		LastSummary.VisualCandidateAttempt,
+		LastSummary.SemanticVolumeCount,
+		LastSummary.SemanticBoxCount,
+		LastSummary.SemanticPrismCount,
+		LastSummary.SemanticPyramidCount,
+		LastSummary.RoofCourseBrickCount,
+		LastSummary.DistinctMotifCount,
+		LastSummary.SupportedSpanCount,
+		LastSummary.bVisualComplexityCertified ? 1 : 0,
+		LastSummary.StructuralClosurePassCount,
+		LastSummary.AddedStructuralSupportPostCount,
+		LastSummary.RealContactMismatchCount,
+		LastSummary.RemainingSupportViolationCount,
+		LastSummary.SupportResultantAdvisoryCount,
+		LastSummary.XColumnStationCount,
+		LastSummary.YColumnStationCount,
+		LastSummary.AxisStationDensityRatio,
+		LastSummary.StructuralClosurePostRatio,
+		LastSummary.bAssemblyQualityCertified ? 1 : 0,
+		LastSummary.WoodBrickCount,
 		LastSummary.StoneBrickCount, LastSummary.IronBrickCount,
 		LastSummary.GlassBrickCount, LastSummary.WeaknessCandidateCount,
 		LastSummary.DeviceRoleCount, LastSummary.BrickGeometryHash);
@@ -224,4 +248,3 @@ int32 AABTSM73BeamD1PreviewActor::GetRuntimeModuleCountForValidation() const
 	}
 	return Count;
 }
-

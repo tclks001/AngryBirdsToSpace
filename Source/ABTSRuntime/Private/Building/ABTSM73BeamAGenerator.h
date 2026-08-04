@@ -47,6 +47,20 @@ namespace ABTSM73BeamA
 		double Alpha,
 		double CrossSectionCM);
 
+	/**
+	 * Physical placement envelope for one alternating roof course. The course
+	 * keeps its own transverse taper, but inherits the immediately lower
+	 * semantic course's span along its beam axis so it directly cross-bears on
+	 * the lower blocks instead of requiring a rescue post.
+	 */
+	FBox SemanticRoofBearingCourseBounds(
+		const FBox& Bounds,
+		EABTSM73DAG5BV2Primitive Primitive,
+		int32 CourseIndex,
+		int32 CourseCount,
+		EABTSM73BeamAFrameAxis Axis,
+		double CrossSectionCM);
+
 	/** Compile the pre-closure layered roof members used by Beam-A. */
 	bool BuildSemanticRoofMembers(
 		const FABTSM73BeamAPreviewSettings& Settings,
@@ -71,6 +85,12 @@ namespace ABTSM73BeamA
 	 * ground-reachability contract.
 	 */
 	bool CloseGeneratedAssembly(
+		const FABTSM73BeamAPreviewSettings& Settings,
+		FABTSM73BeamAGenerationResult& InOutResult,
+		FString& OutError);
+
+	/** Rebuild the authoritative face-contact set after an owning stage adds members. */
+	bool RebuildBearingContacts(
 		const FABTSM73BeamAPreviewSettings& Settings,
 		FABTSM73BeamAGenerationResult& InOutResult,
 		FString& OutError);

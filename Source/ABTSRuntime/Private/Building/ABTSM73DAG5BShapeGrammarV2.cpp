@@ -108,6 +108,8 @@ namespace ABTSM73DAG5BV2
 			|| Settings.MaxGrammarDepth < Settings.MinGrammarDepth
 			|| Settings.MaxGrammarDepth > 6
 			|| Settings.MaxVolumeCount < 8
+			|| Settings.TargetVolumeCount < 3
+			|| Settings.TargetVolumeCount > 256
 			|| !FMath::IsFinite(Settings.StackWeight)
 			|| !FMath::IsFinite(Settings.HorizontalSplitWeight)
 			|| !FMath::IsFinite(Settings.SetbackWeight)
@@ -133,9 +135,28 @@ namespace ABTSM73DAG5BV2
 			|| Settings.BoxWeight < 0.0f
 			|| Settings.PrismWeight < 0.0f
 			|| Settings.PyramidWeight < 0.0f
+			|| !FMath::IsFinite(Settings.RoofMergeGapCM)
+			|| Settings.RoofMergeGapCM < 0.0f
+			|| !IsFinitePositive(Settings.RoofCourseHeightCM)
+			|| Settings.MinimumRoofCourseCount < 2
+			|| Settings.MaximumRoofCourseCount
+				< Settings.MinimumRoofCourseCount
+			|| Settings.MaximumRoofCourseCount > 64
+			|| !IsFinitePositive(Settings.RoofHeightToShortSpanRatio)
+			|| !IsFinitePositive(Settings.PyramidPreferredMaxAspectRatio)
+			|| !IsFinitePositive(Settings.PrismPreferredMinAspectRatio)
+			|| Settings.PyramidPreferredMaxAspectRatio < 1.0f
+			|| Settings.PrismPreferredMinAspectRatio
+				<= Settings.PyramidPreferredMaxAspectRatio
+			|| !FMath::IsFinite(Settings.SingleTerminalRoofHeightCM)
+			|| Settings.SingleTerminalRoofHeightCM <= 0.0f
 			|| Settings.BoxWeight
 				+ Settings.PrismWeight
 				+ Settings.PyramidWeight <= UE_SMALL_NUMBER
+			|| (Settings.bRequireSingleTerminalRoof
+				&& (Settings.bRequirePrimitiveVariety
+					|| Settings.PrismWeight + Settings.PyramidWeight
+						<= UE_SMALL_NUMBER))
 			|| Settings.MaxWFCPropagationOperations < 1
 			|| Settings.MaxWFCBacktrackSteps < 0)
 		{
@@ -201,6 +222,8 @@ namespace ABTSM73DAG5BV2
 		const float W = Settings.TargetWidthCM;
 		const float D = Settings.TargetDepthCM;
 		const float H = Settings.TargetHeightCM;
+		const int32 Milestone = Settings.ComplexityMilestoneTier;
+		const bool bLegacy = Milestone < 0;
 
 		switch (Archetype)
 		{
@@ -210,16 +233,22 @@ namespace ABTSM73DAG5BV2
 				FVector(0.0, 0.0, H * 0.5),
 				FVector(W * 0.58, D * 0.78, H),
 				EABTSM73DAG5BV2VolumeRole::Body));
-			Plan.Roots.Add(MakeScope(
+			if (bLegacy || Milestone >= 1)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Citadel/LeftAnnex"),
 				FVector(-W * 0.39, 0.0, H * 0.24),
 				FVector(W * 0.18, D * 0.92, H * 0.48),
 				EABTSM73DAG5BV2VolumeRole::Annex));
-			Plan.Roots.Add(MakeScope(
+			}
+			if (bLegacy || Milestone >= 2)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Citadel/RightAnnex"),
 				FVector(W * 0.39, 0.0, H * 0.29),
 				FVector(W * 0.18, D * 0.70, H * 0.58),
 				EABTSM73DAG5BV2VolumeRole::Annex));
+			}
 			break;
 
 		case EABTSM73DAG5BV2Archetype::TwinTowerComplex:
@@ -228,12 +257,17 @@ namespace ABTSM73DAG5BV2
 				FVector(-W * 0.27, 0.0, H * 0.50),
 				FVector(W * 0.38, D * 0.72, H),
 				EABTSM73DAG5BV2VolumeRole::Body));
-			Plan.Roots.Add(MakeScope(
+			if (bLegacy || Milestone >= 1)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Twin/RightTower"),
 				FVector(W * 0.27, 0.0, H * 0.43),
 				FVector(W * 0.38, D * 0.88, H * 0.86),
 				EABTSM73DAG5BV2VolumeRole::Body));
-			AddBridge(
+			}
+			if (bLegacy || Milestone >= 4)
+			{
+				AddBridge(
 				Plan,
 				TEXT("Twin/Bridge"),
 				FVector(0.0, 0.0, H * 0.56),
@@ -241,25 +275,34 @@ namespace ABTSM73DAG5BV2
 					W * 0.46,
 					D * 0.44,
 					H * Settings.BridgeThicknessRatio));
+			}
 			break;
 
 		case EABTSM73DAG5BV2Archetype::BridgedArcology:
-			Plan.Roots.Add(MakeScope(
+			if (bLegacy || Milestone >= 1)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Arcology/West"),
 				FVector(-W * 0.34, 0.0, H * 0.45),
 				FVector(W * 0.25, D * 0.62, H * 0.90),
 				EABTSM73DAG5BV2VolumeRole::Body));
+			}
 			Plan.Roots.Add(MakeScope(
 				TEXT("Arcology/Core"),
 				FVector(0.0, 0.0, H * 0.34),
 				FVector(W * 0.25, D * 0.90, H * 0.68),
 				EABTSM73DAG5BV2VolumeRole::Body));
-			Plan.Roots.Add(MakeScope(
+			if (bLegacy || Milestone >= 2)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Arcology/East"),
 				FVector(W * 0.34, 0.0, H * 0.50),
 				FVector(W * 0.25, D * 0.68, H),
 				EABTSM73DAG5BV2VolumeRole::Body));
-			AddBridge(
+			}
+			if (bLegacy || Milestone >= 4)
+			{
+				AddBridge(
 				Plan,
 				TEXT("Arcology/WestBridge"),
 				FVector(-W * 0.17, 0.0, H * 0.54),
@@ -267,7 +310,10 @@ namespace ABTSM73DAG5BV2
 					W * 0.27,
 					D * 0.40,
 					H * Settings.BridgeThicknessRatio));
-			AddBridge(
+			}
+			if (bLegacy)
+			{
+				AddBridge(
 				Plan,
 				TEXT("Arcology/EastBridge"),
 				FVector(W * 0.17, 0.0, H * 0.66),
@@ -275,6 +321,7 @@ namespace ABTSM73DAG5BV2
 					W * 0.27,
 					D * 0.36,
 					H * Settings.BridgeThicknessRatio));
+			}
 			break;
 
 		case EABTSM73DAG5BV2Archetype::SpiredCampus:
@@ -284,17 +331,25 @@ namespace ABTSM73DAG5BV2
 				FVector(0.0, 0.0, H * 0.50),
 				FVector(W * 0.38, D * 0.50, H),
 				EABTSM73DAG5BV2VolumeRole::Body));
-			Plan.Roots.Add(MakeScope(
+			if (bLegacy || Milestone >= 1)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Campus/WestWing"),
-				FVector(-W * 0.34, 0.0, H * 0.23),
+				FVector(-W * (bLegacy ? 0.34 : 0.36), 0.0, H * 0.23),
 				FVector(W * 0.26, D * 0.82, H * 0.46),
 				EABTSM73DAG5BV2VolumeRole::Annex));
-			Plan.Roots.Add(MakeScope(
+			}
+			if (bLegacy || Milestone >= 2)
+			{
+				Plan.Roots.Add(MakeScope(
 				TEXT("Campus/EastWing"),
-				FVector(W * 0.34, 0.0, H * 0.28),
+				FVector(W * (bLegacy ? 0.34 : 0.36), 0.0, H * 0.28),
 				FVector(W * 0.26, D * 0.68, H * 0.56),
 				EABTSM73DAG5BV2VolumeRole::Annex));
-			AddBridge(
+			}
+			if (bLegacy || Milestone >= 4)
+			{
+				AddBridge(
 				Plan,
 				TEXT("Campus/WestLink"),
 				FVector(-W * 0.18, 0.0, H * 0.35),
@@ -302,7 +357,10 @@ namespace ABTSM73DAG5BV2
 					W * 0.22,
 					D * 0.32,
 					H * Settings.BridgeThicknessRatio));
-			AddBridge(
+			}
+			if (bLegacy)
+			{
+				AddBridge(
 				Plan,
 				TEXT("Campus/EastLink"),
 				FVector(W * 0.18, 0.0, H * 0.42),
@@ -310,6 +368,7 @@ namespace ABTSM73DAG5BV2
 					W * 0.22,
 					D * 0.28,
 					H * Settings.BridgeThicknessRatio));
+			}
 			break;
 		}
 		return Plan;
@@ -381,6 +440,42 @@ namespace ABTSM73DAG5BV2
 			return EGrammarRule::Terminal;
 		}
 
+		// Beam-D1.5 macro milestones precede weighted detail. They make each
+		// tier structurally legible for every seed instead of hoping that a
+		// weighted rule happens to be selected.
+		if (Settings.ComplexityMilestoneTier >= 0)
+		{
+			const int32 Tier = Settings.ComplexityMilestoneTier;
+			if (Tier >= 3 && Scope.Depth == 0)
+			{
+				const bool bBalanceHorizontalAxes = Settings.Archetype
+					== EABTSM73DAG5BV2Archetype::TerracedCitadel;
+				// Terraced modules preserve their long dimension for Beam-A's
+				// one-dimensional bay subdivision, so the semantic grammar splits
+				// the short dimension first. Other archetypes retain legacy X-first.
+				const bool bPreferX = !bBalanceHorizontalAxes
+					|| Scope.Bounds.GetSize().X < Scope.Bounds.GetSize().Y;
+				if (bPreferX && CanSplitX(Scope, Settings))
+				{
+					return EGrammarRule::SplitX;
+				}
+				if (!bPreferX && CanSplitY(Scope, Settings))
+				{
+					return EGrammarRule::SplitY;
+				}
+				if (CanSplitX(Scope, Settings)) return EGrammarRule::SplitX;
+				if (CanSplitY(Scope, Settings)) return EGrammarRule::SplitY;
+			}
+			if (Tier >= 2 && Scope.Depth <= 1 && CanStack(Scope, Settings))
+			{
+				return EGrammarRule::Setback;
+			}
+			if (CanStack(Scope, Settings))
+			{
+				return EGrammarRule::Stack;
+			}
+		}
+
 		struct FWeightedRule
 		{
 			EGrammarRule Rule = EGrammarRule::Terminal;
@@ -392,17 +487,26 @@ namespace ABTSM73DAG5BV2
 			Candidates.Add({EGrammarRule::Stack, Settings.StackWeight});
 			Candidates.Add({EGrammarRule::Setback, Settings.SetbackWeight});
 		}
+		const bool bBalanceHorizontalAxes = Settings.Archetype
+			== EABTSM73DAG5BV2Archetype::TerracedCitadel;
+		const FVector HorizontalSize = Scope.Bounds.GetSize();
+		const float SafeX = FMath::Max(HorizontalSize.X, 1.0f);
+		const float SafeY = FMath::Max(HorizontalSize.Y, 1.0f);
+		const float XAspectWeight = bBalanceHorizontalAxes
+			? FMath::Clamp(SafeY / SafeX, 0.5f, 2.0f) : 1.0f;
+		const float YAspectWeight = bBalanceHorizontalAxes
+			? FMath::Clamp(SafeX / SafeY, 0.5f, 2.0f) : 0.75f;
 		if (LeafBudget >= 2 && CanSplitX(Scope, Settings))
 		{
 			Candidates.Add({
 				EGrammarRule::SplitX,
-				Settings.HorizontalSplitWeight});
+				Settings.HorizontalSplitWeight * XAspectWeight});
 		}
 		if (LeafBudget >= 2 && CanSplitY(Scope, Settings))
 		{
 			Candidates.Add({
 				EGrammarRule::SplitY,
-				Settings.HorizontalSplitWeight * 0.75f});
+				Settings.HorizontalSplitWeight * YAspectWeight});
 		}
 		if (Scope.Depth >= Settings.MinGrammarDepth)
 		{
@@ -518,7 +622,10 @@ namespace ABTSM73DAG5BV2
 					+ FVector(OffsetX, OffsetY, 0.0);
 				const FVector NewSize(
 					UpperSize.X * (1.0f - Shrink),
-					UpperSize.Y * (1.0f - Shrink * 0.75f),
+					UpperSize.Y * (1.0f - Shrink
+						* (Settings.Archetype
+							== EABTSM73DAG5BV2Archetype::TerracedCitadel
+								? 1.0f : 0.75f)),
 					UpperSize.Z);
 				Center.X = FMath::Clamp(
 					Center.X,
@@ -919,6 +1026,277 @@ namespace ABTSM73DAG5BV2
 		}
 	}
 
+	bool RoofLeavesAreNeighbors(
+		const FABTSM73DAG5BV2Volume& A,
+		const FABTSM73DAG5BV2Volume& B,
+		const FABTSM73DAG5BV2PreviewSettings& Settings)
+	{
+		if (!FMath::IsNearlyEqual(
+				A.LocalBounds.Min.Z, B.LocalBounds.Min.Z, 1.0)
+			|| !FMath::IsNearlyEqual(
+				A.LocalBounds.Max.Z, B.LocalBounds.Max.Z, 1.0))
+		{
+			return false;
+		}
+		const double XOverlap = OverlapLength(
+			A.LocalBounds.Min.X, A.LocalBounds.Max.X,
+			B.LocalBounds.Min.X, B.LocalBounds.Max.X);
+		const double YOverlap = OverlapLength(
+			A.LocalBounds.Min.Y, A.LocalBounds.Max.Y,
+			B.LocalBounds.Min.Y, B.LocalBounds.Max.Y);
+		const double XGap = FMath::Max(
+			0.0,
+			FMath::Max(
+				A.LocalBounds.Min.X - B.LocalBounds.Max.X,
+				B.LocalBounds.Min.X - A.LocalBounds.Max.X));
+		const double YGap = FMath::Max(
+			0.0,
+			FMath::Max(
+				A.LocalBounds.Min.Y - B.LocalBounds.Max.Y,
+				B.LocalBounds.Min.Y - A.LocalBounds.Max.Y));
+		return (YOverlap > 1.0 && XGap <= Settings.RoofMergeGapCM)
+			|| (XOverlap > 1.0 && YGap <= Settings.RoofMergeGapCM);
+	}
+
+	bool AggregateRoofTerminals(
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		TArray<FString>& Trace,
+		FABTSM73DAG5BV2PreviewSummary& Summary)
+	{
+		TArray<FAdjacencyEdge> InitialEdges;
+		TArray<bool> HasAbove;
+		BuildAdjacency(Volumes, InitialEdges, HasAbove);
+		TArray<int32> Candidates;
+		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
+		{
+			if (!HasAbove[Index]
+				&& !IsSpanRole(Volumes[Index].Role)
+				&& Volumes[Index].Role
+					!= EABTSM73DAG5BV2VolumeRole::Foundation)
+			{
+				Candidates.Add(Index);
+			}
+		}
+		if (Candidates.IsEmpty())
+		{
+			return false;
+		}
+
+		TArray<bool> CandidateVisited;
+		CandidateVisited.Init(false, Volumes.Num());
+		TArray<bool> Keep;
+		Keep.Init(true, Volumes.Num());
+		TArray<int32> Replacement;
+		Replacement.Init(INDEX_NONE, Volumes.Num());
+		for (const int32 Start : Candidates)
+		{
+			if (CandidateVisited[Start])
+			{
+				continue;
+			}
+			TArray<int32> Component;
+			TArray<int32> Queue;
+			Queue.Add(Start);
+			CandidateVisited[Start] = true;
+			for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+			{
+				const int32 Current = Queue[QueueIndex];
+				Component.Add(Current);
+				for (const int32 Other : Candidates)
+				{
+					if (!CandidateVisited[Other]
+						&& RoofLeavesAreNeighbors(
+							Volumes[Current], Volumes[Other], Settings))
+					{
+						CandidateVisited[Other] = true;
+						Queue.Add(Other);
+					}
+				}
+			}
+
+			Component.Sort();
+			const int32 Representative = Component[0];
+			FBox Envelope = Volumes[Representative].LocalBounds;
+			double SourceArea = 0.0;
+			for (const int32 Index : Component)
+			{
+				Envelope += Volumes[Index].LocalBounds;
+				const FVector Size = Volumes[Index].LocalBounds.GetSize();
+				SourceArea += Size.X * Size.Y;
+			}
+			const FVector EnvelopeSize = Envelope.GetSize();
+			const double EnvelopeArea = EnvelopeSize.X * EnvelopeSize.Y;
+			const bool bMerge = Settings.bMergeRoofTerminals
+				&& Component.Num() > 1
+				&& EnvelopeArea > UE_DOUBLE_SMALL_NUMBER
+				&& SourceArea / EnvelopeArea >= 0.55;
+			if (!bMerge)
+			{
+				for (const int32 Index : Component)
+				{
+					Volumes[Index].Role =
+						EABTSM73DAG5BV2VolumeRole::Crown;
+					++Summary.RoofTerminalCount;
+				}
+				continue;
+			}
+
+			FABTSM73DAG5BV2Volume& Roof = Volumes[Representative];
+			Roof.LocalBounds = Envelope;
+			Roof.Role = EABTSM73DAG5BV2VolumeRole::Crown;
+			Roof.DerivationPath = SemanticRootPath(Roof.DerivationPath)
+				+ FString::Printf(TEXT("/MergedRoof/%d"), Representative);
+			for (int32 ComponentIndex = 1;
+				ComponentIndex < Component.Num(); ++ComponentIndex)
+			{
+				const int32 Removed = Component[ComponentIndex];
+				Keep[Removed] = false;
+				Replacement[Removed] = Representative;
+			}
+			Summary.MergedRoofSourceCount += Component.Num();
+			++Summary.RoofTerminalCount;
+			Trace.Add(FString::Printf(
+				TEXT("%s -> MergeRoofTerminals(%d)"),
+				*Roof.DerivationPath,
+				Component.Num()));
+		}
+
+		TArray<int32> Remap;
+		Remap.Init(INDEX_NONE, Volumes.Num());
+		TArray<FABTSM73DAG5BV2Volume> Accepted;
+		Accepted.Reserve(Volumes.Num());
+		for (int32 OldId = 0; OldId < Volumes.Num(); ++OldId)
+		{
+			if (!Keep[OldId])
+			{
+				continue;
+			}
+			Remap[OldId] = Accepted.Num();
+			FABTSM73DAG5BV2Volume Volume = Volumes[OldId];
+			Volume.VolumeId = Accepted.Num();
+			Accepted.Add(MoveTemp(Volume));
+		}
+		for (int32 OldId = 0; OldId < Replacement.Num(); ++OldId)
+		{
+			if (Replacement[OldId] != INDEX_NONE)
+			{
+				Remap[OldId] = Remap[Replacement[OldId]];
+			}
+		}
+		for (FABTSM73DAG5BV2Volume& Volume : Accepted)
+		{
+			if (Volume.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				continue;
+			}
+			if (!Remap.IsValidIndex(Volume.NegativeSupportVolumeId)
+				|| !Remap.IsValidIndex(Volume.PositiveSupportVolumeId)
+				|| Remap[Volume.NegativeSupportVolumeId] == INDEX_NONE
+				|| Remap[Volume.PositiveSupportVolumeId] == INDEX_NONE)
+			{
+				return false;
+			}
+			Volume.NegativeSupportVolumeId =
+				Remap[Volume.NegativeSupportVolumeId];
+			Volume.PositiveSupportVolumeId =
+				Remap[Volume.PositiveSupportVolumeId];
+		}
+		Volumes = MoveTemp(Accepted);
+
+		TArray<FAdjacencyEdge> Edges;
+		TArray<bool> IgnoredHasAbove;
+		BuildAdjacency(Volumes, Edges, IgnoredHasAbove);
+		TArray<int32> UpperCounts;
+		UpperCounts.Init(0, Volumes.Num());
+		for (const FAdjacencyEdge& Edge : Edges)
+		{
+			if (Edge.Type == EAdjacency::Vertical)
+			{
+				++UpperCounts[Edge.A];
+			}
+		}
+		for (FABTSM73DAG5BV2Volume& Roof : Volumes)
+		{
+			if (Roof.Role != EABTSM73DAG5BV2VolumeRole::Crown)
+			{
+				continue;
+			}
+			TArray<int32> Supports;
+			for (const FAdjacencyEdge& Edge : Edges)
+			{
+				if (Edge.Type == EAdjacency::Vertical
+					&& Edge.B == Roof.VolumeId)
+				{
+					Supports.AddUnique(Edge.A);
+				}
+			}
+			const FVector RoofSize = Roof.LocalBounds.GetSize();
+			const double ShortSpan = FMath::Min(RoofSize.X, RoofSize.Y);
+			const int32 DesiredCourses = FMath::Clamp(
+				FMath::RoundToInt(
+					ShortSpan * Settings.RoofHeightToShortSpanRatio
+						/ Settings.RoofCourseHeightCM),
+				Settings.MinimumRoofCourseCount,
+				Settings.MaximumRoofCourseCount);
+			const bool bHasExclusiveSupports = !Supports.IsEmpty()
+				&& !Supports.ContainsByPredicate(
+					[&UpperCounts](const int32 Support)
+					{
+						return UpperCounts[Support] != 1;
+					});
+			if (!bHasExclusiveSupports)
+			{
+				// A support shared by several semantic crowns cannot move to two
+				// different roof bottoms. Preserve the contact plane and quantize
+				// downward from the existing envelope top instead.
+				const int32 QuantizedCourses = FMath::Clamp(
+					FMath::FloorToInt(
+						RoofSize.Z / Settings.RoofCourseHeightCM),
+					2,
+					Settings.MaximumRoofCourseCount);
+				Roof.LocalBounds.Max.Z = Roof.LocalBounds.Min.Z
+					+ QuantizedCourses * Settings.RoofCourseHeightCM;
+				Trace.Add(FString::Printf(
+					TEXT("%s -> SharedRoofCourses(%d)"),
+					*Roof.DerivationPath,
+					QuantizedCourses));
+				continue;
+			}
+			int32 FeasibleCourses = Settings.MaximumRoofCourseCount;
+			for (const int32 Support : Supports)
+			{
+				const double AvailableHeight = Roof.LocalBounds.Max.Z
+					- Volumes[Support].LocalBounds.Min.Z
+					- Settings.RoofCourseHeightCM * 2.0;
+				FeasibleCourses = FMath::Min(
+					FeasibleCourses,
+					FMath::FloorToInt(
+						AvailableHeight / Settings.RoofCourseHeightCM));
+			}
+			if (FeasibleCourses < 2)
+			{
+				continue;
+			}
+			const int32 CourseCount = FMath::Clamp(
+				FMath::Min(DesiredCourses, FeasibleCourses),
+				2,
+				Settings.MaximumRoofCourseCount);
+			const double NewBottom = Roof.LocalBounds.Max.Z
+				- CourseCount * Settings.RoofCourseHeightCM;
+			for (const int32 Support : Supports)
+			{
+				Volumes[Support].LocalBounds.Max.Z = NewBottom;
+			}
+			Roof.LocalBounds.Min.Z = NewBottom;
+			Trace.Add(FString::Printf(
+				TEXT("%s -> RoofCourses(%d)"),
+				*Roof.DerivationPath,
+				CourseCount));
+		}
+		return true;
+	}
+
 	uint8 PrimitiveToMask(
 		const EABTSM73DAG5BV2Primitive Primitive)
 	{
@@ -934,6 +1312,35 @@ namespace ABTSM73DAG5BV2
 		default:
 			return BoxMask;
 		}
+	}
+
+	uint8 LongRidgePrismMask(const FABTSM73DAG5BV2Volume& Volume)
+	{
+		const FVector Size = Volume.LocalBounds.GetSize();
+		// PrismX contracts X and therefore has a Y-aligned ridge. A long X
+		// envelope must use PrismY so its ridge follows the long X axis.
+		return Size.X >= Size.Y ? PrismYMask : PrismXMask;
+	}
+
+	uint8 AspectRoofDomain(const FABTSM73DAG5BV2Volume& Volume)
+	{
+		return PyramidMask | LongRidgePrismMask(Volume);
+	}
+
+	float RoofAspectBlend(
+		const FABTSM73DAG5BV2Volume& Volume,
+		const FABTSM73DAG5BV2PreviewSettings& Settings)
+	{
+		const FVector Size = Volume.LocalBounds.GetSize();
+		const double ShortSpan = FMath::Max(1.0, FMath::Min(Size.X, Size.Y));
+		const double Aspect = FMath::Max(Size.X, Size.Y) / ShortSpan;
+		return FMath::Clamp(
+			static_cast<float>(
+				(Aspect - Settings.PyramidPreferredMaxAspectRatio)
+				/ (Settings.PrismPreferredMinAspectRatio
+					- Settings.PyramidPreferredMaxAspectRatio)),
+			0.0f,
+			1.0f);
 	}
 
 	EABTSM73DAG5BV2Primitive MaskToPrimitive(const uint8 Mask)
@@ -1063,8 +1470,24 @@ namespace ABTSM73DAG5BV2
 
 	float PrimitiveWeight(
 		const uint8 Bit,
-		const FABTSM73DAG5BV2PreviewSettings& Settings)
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		const FABTSM73DAG5BV2Volume& Volume)
 	{
+		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Crown)
+		{
+			const float PrismBlend = RoofAspectBlend(Volume, Settings);
+			if (Bit == PyramidMask)
+			{
+				return Settings.PyramidWeight
+					* FMath::Lerp(2.4f, 0.20f, PrismBlend);
+			}
+			if (Bit == LongRidgePrismMask(Volume))
+			{
+				return Settings.PrismWeight
+					* FMath::Lerp(0.20f, 2.4f, PrismBlend);
+			}
+			return 0.0f;
+		}
 		switch (Bit)
 		{
 		case PrismXMask:
@@ -1081,6 +1504,7 @@ namespace ABTSM73DAG5BV2
 	TArray<uint8, TInlineAllocator<4>> CandidateOrder(
 		const uint8 Domain,
 		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		const FABTSM73DAG5BV2Volume& Volume,
 		const FString& Path,
 		const int32 DecisionDepth)
 	{
@@ -1101,7 +1525,7 @@ namespace ABTSM73DAG5BV2
 			{
 				continue;
 			}
-			const float Weight = PrimitiveWeight(Bit, Settings);
+			const float Weight = PrimitiveWeight(Bit, Settings, Volume);
 			if (Weight <= UE_SMALL_NUMBER)
 			{
 				continue;
@@ -1157,6 +1581,7 @@ namespace ABTSM73DAG5BV2
 		const auto Ordered = CandidateOrder(
 			Domains[BestIndex],
 			*Context.Settings,
+			(*Context.Volumes)[BestIndex],
 			(*Context.Volumes)[BestIndex].DerivationPath,
 			DecisionDepth);
 		for (const uint8 Candidate : Ordered)
@@ -1185,6 +1610,8 @@ namespace ABTSM73DAG5BV2
 		int32 BoxIndex = INDEX_NONE;
 		int32 PyramidIndex = INDEX_NONE;
 		int32 PrismIndex = INDEX_NONE;
+		double MostSquareAspect = TNumericLimits<double>::Max();
+		double MostElongatedAspect = 0.0;
 		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
 		{
 			if (BoxIndex == INDEX_NONE
@@ -1197,40 +1624,161 @@ namespace ABTSM73DAG5BV2
 		}
 		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
 		{
-			if (Index != BoxIndex
-				&& !HasAbove[Index]
-				&& (Domains[Index] & PyramidMask) != 0)
-			{
-				PyramidIndex = Index;
-				break;
-			}
-		}
-		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
-		{
-			if (Index == BoxIndex
-				|| Index == PyramidIndex
-				|| HasAbove[Index])
+			if (HasAbove[Index]
+				|| Volumes[Index].Role
+					!= EABTSM73DAG5BV2VolumeRole::Crown)
 			{
 				continue;
 			}
 			const FVector Size = Volumes[Index].LocalBounds.GetSize();
-			const uint8 Preferred =
-				Size.X >= Size.Y ? PrismXMask : PrismYMask;
-			if ((Domains[Index] & Preferred) != 0)
+			const double ShortSpan = FMath::Max(
+				1.0, FMath::Min(Size.X, Size.Y));
+			const double Aspect = FMath::Max(Size.X, Size.Y) / ShortSpan;
+			if ((Domains[Index] & PyramidMask) != 0
+				&& Aspect < MostSquareAspect)
 			{
+				MostSquareAspect = Aspect;
+				PyramidIndex = Index;
+			}
+			const uint8 Preferred = LongRidgePrismMask(Volumes[Index]);
+			if ((Domains[Index] & Preferred) != 0
+				&& Aspect > MostElongatedAspect)
+			{
+				MostElongatedAspect = Aspect;
 				PrismIndex = Index;
-				Domains[Index] = Preferred;
-				break;
 			}
 		}
-		if (BoxIndex == INDEX_NONE
-			|| PyramidIndex == INDEX_NONE
-			|| PrismIndex == INDEX_NONE)
+		if (BoxIndex == INDEX_NONE || PyramidIndex == INDEX_NONE)
 		{
 			return false;
 		}
 		Domains[BoxIndex] = BoxMask;
+		if (PrismIndex == PyramidIndex)
+		{
+			// One dominant roof cannot realize two shapes. Leave its aspect domain
+			// intact and let deterministic weighted collapse choose the best fit.
+			return true;
+		}
 		Domains[PyramidIndex] = PyramidMask;
+		Domains[PrismIndex] = LongRidgePrismMask(Volumes[PrismIndex]);
+		return true;
+	}
+
+	int32 FindSingleTerminalRoofIndex(
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		const TArray<bool>& HasAbove)
+	{
+		int32 RoofIndex = INDEX_NONE;
+		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
+		{
+			const FABTSM73DAG5BV2Volume& Volume = Volumes[Index];
+			if (HasAbove[Index]
+				|| IsSpanRole(Volume.Role)
+				|| Volume.Role != EABTSM73DAG5BV2VolumeRole::Crown)
+			{
+				continue;
+			}
+
+			if (RoofIndex == INDEX_NONE)
+			{
+				RoofIndex = Index;
+				continue;
+			}
+			const FABTSM73DAG5BV2Volume& Current = Volumes[RoofIndex];
+			const double CandidateTop = Volume.LocalBounds.Max.Z;
+			const double CurrentTop = Current.LocalBounds.Max.Z;
+			const double CandidateArea =
+				Volume.LocalBounds.GetSize().X * Volume.LocalBounds.GetSize().Y;
+			const double CurrentArea =
+				Current.LocalBounds.GetSize().X * Current.LocalBounds.GetSize().Y;
+			if (CandidateTop > CurrentTop + UE_KINDA_SMALL_NUMBER
+				|| (FMath::IsNearlyEqual(CandidateTop, CurrentTop)
+					&& (CandidateArea > CurrentArea + UE_KINDA_SMALL_NUMBER
+						|| (FMath::IsNearlyEqual(CandidateArea, CurrentArea)
+							&& Volume.DerivationPath
+								< Current.DerivationPath))))
+			{
+				RoofIndex = Index;
+			}
+		}
+		return RoofIndex;
+	}
+
+	bool ReallocateSingleTerminalRoofEnvelope(
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		const TArray<bool>& HasAbove)
+	{
+		const int32 RoofIndex = FindSingleTerminalRoofIndex(
+			Volumes, HasAbove);
+		if (RoofIndex == INDEX_NONE)
+		{
+			return false;
+		}
+		FABTSM73DAG5BV2Volume& Roof = Volumes[RoofIndex];
+		const double OldBottomZ = Roof.LocalBounds.Min.Z;
+		const double NewBottomZ = FMath::Max(
+			OldBottomZ,
+			Roof.LocalBounds.Max.Z - Settings.SingleTerminalRoofHeightCM);
+		if (NewBottomZ <= OldBottomZ + UE_KINDA_SMALL_NUMBER)
+		{
+			return true;
+		}
+
+		bool bExtendedSupport = false;
+		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
+		{
+			if (Index == RoofIndex)
+			{
+				continue;
+			}
+			FABTSM73DAG5BV2Volume& Lower = Volumes[Index];
+			const double XOverlap = FMath::Min(
+				Lower.LocalBounds.Max.X, Roof.LocalBounds.Max.X) - FMath::Max(
+				Lower.LocalBounds.Min.X, Roof.LocalBounds.Min.X);
+			const double YOverlap = FMath::Min(
+				Lower.LocalBounds.Max.Y, Roof.LocalBounds.Max.Y) - FMath::Max(
+				Lower.LocalBounds.Min.Y, Roof.LocalBounds.Min.Y);
+			if (FMath::Abs(Lower.LocalBounds.Max.Z - OldBottomZ) <= 1.0
+				&& XOverlap > 1.0 && YOverlap > 1.0)
+			{
+				Lower.LocalBounds.Max.Z = NewBottomZ;
+				bExtendedSupport = true;
+			}
+		}
+		if (!bExtendedSupport)
+		{
+			return false;
+		}
+		Roof.LocalBounds.Min.Z = NewBottomZ;
+		return true;
+	}
+
+	bool ApplySingleTerminalRoofAnchor(
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		const TArray<bool>& HasAbove,
+		TArray<uint8>& Domains)
+	{
+		const int32 RoofIndex = FindSingleTerminalRoofIndex(
+			Volumes, HasAbove);
+		if (RoofIndex == INDEX_NONE)
+		{
+			return false;
+		}
+
+		// Other exposed terminals remain flat Box volumes. The low tier gains
+		// one readable crown, not full primitive variety or several expensive
+		// roofs.
+		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
+		{
+			if (!HasAbove[Index] && !IsSpanRole(Volumes[Index].Role))
+			{
+				Domains[Index] = BoxMask;
+			}
+		}
+
+		Domains[RoofIndex] = AspectRoofDomain(Volumes[RoofIndex]);
 		return true;
 	}
 
@@ -1332,8 +1880,9 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 		++GrammarContext.GrammarSteps;
 	}
 
-	const int32 RootBudget =
-		Settings.MaxVolumeCount - Initial.FixedVolumes.Num();
+	const int32 RootBudget = FMath::Min(
+		Settings.MaxVolumeCount,
+		Settings.TargetVolumeCount) - Initial.FixedVolumes.Num();
 	const int32 BaseBudget = RootBudget / Initial.Roots.Num();
 	int32 Remainder = RootBudget % Initial.Roots.Num();
 	for (const FScope& Root : Initial.Roots)
@@ -1350,6 +1899,16 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 		Settings, OutResult.Volumes, OutResult.GrammarTrace))
 	{
 		OutError = TEXT("DAG5BV2SupportedSpanResolutionFailed");
+		OutResult.Summary.RejectReason = OutError;
+		return false;
+	}
+	if (!AggregateRoofTerminals(
+		Settings,
+		OutResult.Volumes,
+		OutResult.GrammarTrace,
+		OutResult.Summary))
+	{
+		OutError = TEXT("DAG5BV2RoofTerminalAggregationFailed");
 		OutResult.Summary.RejectReason = OutError;
 		return false;
 	}
@@ -1386,6 +1945,22 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 		{
 			Domains[Index] = BoxMask;
 		}
+		else if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Crown)
+		{
+			Domains[Index] = AspectRoofDomain(Volume);
+		}
+		else
+		{
+			Domains[Index] = BoxMask;
+		}
+	}
+	if (Settings.bRequireSingleTerminalRoof
+		&& !ApplySingleTerminalRoofAnchor(
+			Settings, OutResult.Volumes, HasAbove, Domains))
+	{
+		OutError = TEXT("DAG5BV2SingleTerminalRoofUnreachable");
+		OutResult.Summary.RejectReason = OutError;
+		return false;
 	}
 	if (Settings.bRequirePrimitiveVariety
 		&& !ApplyVarietyAnchors(OutResult.Volumes, HasAbove, Domains))
@@ -1444,10 +2019,21 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 	}
 	if (Settings.bRequirePrimitiveVariety
 		&& (OutResult.Summary.BoxCount == 0
-			|| OutResult.Summary.PrismCount == 0
-			|| OutResult.Summary.PyramidCount == 0))
+			|| OutResult.Summary.PrismCount
+				+ OutResult.Summary.PyramidCount == 0
+			|| (OutResult.Summary.RoofTerminalCount >= 2
+				&& (OutResult.Summary.PrismCount == 0
+					|| OutResult.Summary.PyramidCount == 0))))
 	{
 		OutError = TEXT("DAG5BV2PrimitiveVarietyNotRealized");
+		OutResult.Summary.RejectReason = OutError;
+		return false;
+	}
+	if (Settings.bRequireSingleTerminalRoof
+		&& OutResult.Summary.PrismCount
+			+ OutResult.Summary.PyramidCount != 1)
+	{
+		OutError = TEXT("DAG5BV2SingleTerminalRoofNotRealized");
 		OutResult.Summary.RejectReason = OutError;
 		return false;
 	}

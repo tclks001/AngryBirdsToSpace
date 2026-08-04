@@ -11,6 +11,50 @@
 
 namespace ABTSM73BeamD1
 {
+	int32 CandidateSeed(const int32 BaseSeed, const int32 Attempt)
+	{
+		if (Attempt == 0)
+		{
+			return BaseSeed;
+		}
+		uint32 Hash = HashCombineFast(GetTypeHash(BaseSeed), 0xD1500001u);
+		Hash = HashCombineFast(Hash, GetTypeHash(Attempt));
+		return static_cast<int32>(Hash);
+	}
+
+	int32 RequiredSupportedSpanCount(
+		const EABTSM73DAG5BV2Archetype Archetype,
+		const int32 Tier)
+	{
+		if (Tier < 4)
+		{
+			return 0;
+		}
+		return Archetype == EABTSM73DAG5BV2Archetype::BridgedArcology ? 1 : 0;
+	}
+
+	bool MeetsVisualMilestone(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const FABTSM73BeamBGenerationResult& BeamB)
+	{
+		static constexpr int32 MinimumVolumes[6] = {3, 6, 8, 16, 21, 25};
+		const int32 Tier = FMath::Clamp(Profile.DifficultyTier, 0, 5);
+		const int32 RequiredVolumeCount =
+			Profile.GameplayProfileId == TEXT("ColumnBreak") && Tier == 5
+				? 16 : MinimumVolumes[Tier];
+		const int32 RequiredSpans = RequiredSupportedSpanCount(
+			Silhouette.Summary.ResolvedArchetype, Tier);
+		const int32 RoofPrimitiveCount =
+			Silhouette.Summary.PrismCount
+			+ Silhouette.Summary.PyramidCount;
+		return Silhouette.Summary.VolumeCount >= RequiredVolumeCount
+			&& Silhouette.Summary.SupportedSpanCount >= RequiredSpans
+			&& (!Profile.VisualComplexity.bRequireSingleTerminalRoof
+				|| RoofPrimitiveCount == 1)
+			&& (Tier < 2 || BeamB.Summary.DistinctMotifCount >= 2);
+	}
+
 	bool Reject(
 		FABTSM73BeamD1GenerationResult& Result,
 		FString& OutError,
@@ -223,6 +267,64 @@ namespace ABTSM73BeamD1
 		return Count;
 	}
 
+	void MeasureAssemblyQuality(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const TArray<FABTSM73BeamD1BrickBinding>& Bricks,
+		FABTSM73BeamD1Summary& Summary)
+	{
+		const double Section =
+			Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM;
+		const double StationTolerance = FMath::Max(
+			0.1,
+			static_cast<double>(
+				Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+		TSet<int64> XStations;
+		TSet<int64> YStations;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Bricks)
+		{
+			if (Brick.Axis != EABTSM73BeamAFrameAxis::Z)
+			{
+				continue;
+			}
+			const FVector Center = Brick.LocalTransform.GetLocation();
+			XStations.Add(FMath::RoundToInt64(Center.X / StationTolerance));
+			YStations.Add(FMath::RoundToInt64(Center.Y / StationTolerance));
+		}
+		Summary.XColumnStationCount = XStations.Num();
+		Summary.YColumnStationCount = YStations.Num();
+		const FVector BoundsSize = Summary.LocalBounds.GetSize();
+		const double XDensity = BoundsSize.X > Section
+			? XStations.Num() / BoundsSize.X : 0.0;
+		const double YDensity = BoundsSize.Y > Section
+			? YStations.Num() / BoundsSize.Y : 0.0;
+		const double MaximumDensity = FMath::Max(XDensity, YDensity);
+		Summary.AxisStationDensityRatio = MaximumDensity > UE_DOUBLE_SMALL_NUMBER
+			? static_cast<float>(FMath::Min(XDensity, YDensity) / MaximumDensity)
+			: 0.0f;
+		Summary.StructuralClosurePostRatio = Bricks.IsEmpty()
+			? 0.0f
+			: static_cast<float>(Summary.AddedStructuralSupportPostCount)
+				/ Bricks.Num();
+	}
+
+	bool MeetsAssemblyQuality(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73BeamD1Summary& Summary)
+	{
+		const bool bBalancedCitadel =
+			Profile.BeamSettings.BeamB.BeamA.Silhouette.Archetype
+				== EABTSM73DAG5BV2Archetype::TerracedCitadel;
+		const float MinimumDensityRatio = Profile.DifficultyTier <= 1
+			? 0.08f
+			: bBalancedCitadel ? 0.20f : 0.10f;
+		const float MaximumClosurePostRatio =
+			Profile.DifficultyTier <= 1 ? 0.20f : 0.12f;
+		return Summary.XColumnStationCount > 0
+			&& Summary.YColumnStationCount > 0
+			&& Summary.AxisStationDensityRatio >= MinimumDensityRatio
+			&& Summary.StructuralClosurePostRatio <= MaximumClosurePostRatio;
+	}
+
 	int64 HashBricks(
 		const FABTSM73BeamD1Summary& Summary,
 		const TArray<FABTSM73BeamD1BrickBinding>& Bricks)
@@ -254,54 +356,153 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 	FString& OutError) const
 {
 	OutResult = FABTSM73BeamD1GenerationResult();
-	FABTSM73BeamD0ResolvedProfile Profile;
+	FABTSM73BeamD0ResolvedProfile InitialProfile;
 	if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
 		Settings.GameplayProfileId, Settings.DifficultyTier,
-		Settings.BuildingSeed, Profile, OutError))
+		Settings.BuildingSeed, InitialProfile, OutError))
 	{
 		return ABTSM73BeamD1::Reject(OutResult, OutError,
 			FString::Printf(TEXT("BeamD1Profile:%s"), *OutError));
 	}
 
-	FABTSM73DAG5BV2GenerationResult Silhouette;
-	FABTSM73DAG5BShapeGrammarV2 ShapeGenerator;
-	if (!ShapeGenerator.Generate(
-		Profile.BeamSettings.BeamB.BeamA.Silhouette,
-		Silhouette, OutError))
+	const FABTSM73BeamD0VisualComplexityRecipe& Target =
+		InitialProfile.VisualComplexity;
+	FString LastFailure = TEXT("NoAttempt");
+	int32 LastBrickCount = 0;
+	for (int32 Attempt = 0; Attempt < Target.MaximumCandidateAttempts; ++Attempt)
 	{
-		return ABTSM73BeamD1::Reject(OutResult, OutError,
-			FString::Printf(TEXT("BeamD1Silhouette:%s"), *OutError));
+		FABTSM73BeamD0ResolvedProfile Profile;
+		FString CandidateError;
+		if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
+			Settings.GameplayProfileId, Settings.DifficultyTier,
+			ABTSM73BeamD1::CandidateSeed(Settings.BuildingSeed, Attempt),
+			Profile, CandidateError))
+		{
+			LastFailure = FString::Printf(TEXT("Profile:%s"), *CandidateError);
+			continue;
+		}
+
+		FABTSM73DAG5BV2GenerationResult Silhouette;
+		FABTSM73DAG5BShapeGrammarV2 ShapeGenerator;
+		if (!ShapeGenerator.Generate(
+			Profile.BeamSettings.BeamB.BeamA.Silhouette,
+			Silhouette, CandidateError))
+		{
+			LastFailure = FString::Printf(TEXT("Silhouette:%s"), *CandidateError);
+			continue;
+		}
+
+		FABTSM73BeamAGenerationResult BeamA;
+		FABTSM73BeamAGenerator BeamAGenerator;
+		if (!BeamAGenerator.Generate(
+			Profile.BeamSettings.BeamB.BeamA,
+			Silhouette, BeamA, CandidateError))
+		{
+			LastFailure = FString::Printf(TEXT("BeamA:%s"), *CandidateError);
+			continue;
+		}
+
+		FABTSM73BeamBGenerationResult BeamB;
+		FABTSM73BeamBGenerator BeamBGenerator;
+		if (!BeamBGenerator.Generate(
+			Profile.BeamSettings.BeamB,
+			Silhouette, BeamA, BeamB, CandidateError))
+		{
+			LastFailure = FString::Printf(TEXT("BeamB:%s"), *CandidateError);
+			continue;
+		}
+
+		FABTSM73BeamCGenerationResult BeamC;
+		FABTSM73BeamCGenerator BeamCGenerator;
+		if (!BeamCGenerator.GenerateWithStructuralClosure(
+			Profile.BeamSettings, BeamB.ClosedAssembly, BeamC, CandidateError))
+		{
+			LastFailure = FString::Printf(
+				TEXT("BeamC:%s:Contact=%d:Resultant=%d:Spread=%d:Span=%d:Cantilever=%d"),
+				*CandidateError,
+				BeamC.Summary.RealContactMismatchCount,
+				BeamC.Summary.SupportResultantViolationCount,
+				BeamC.Summary.SupportSpreadViolationCount,
+				BeamC.Summary.SpanViolationCount,
+				BeamC.Summary.CantileverViolationCount);
+			continue;
+		}
+		BeamB.Summary.ClosedMemberCount = BeamB.ClosedAssembly.Members.Num();
+		BeamB.Summary.ClosedBearingContactCount =
+			BeamB.ClosedAssembly.BearingContacts.Num();
+		BeamB.Summary.ResultHash = static_cast<int64>(HashCombineFast(
+			static_cast<uint32>(BeamB.Summary.ResultHash),
+			static_cast<uint32>(BeamC.Summary.LoadDAGHash)));
+
+		FABTSM73BeamD1GenerationResult Candidate;
+		if (!CompileResolved(Profile, BeamB, BeamC, Candidate, CandidateError))
+		{
+			LastFailure = FString::Printf(TEXT("Compile:%s"), *CandidateError);
+			continue;
+		}
+		LastBrickCount = Candidate.Summary.BrickCount;
+		Candidate.Summary.bAssemblyQualityCertified =
+			ABTSM73BeamD1::MeetsAssemblyQuality(Profile, Candidate.Summary);
+		if (!Candidate.Summary.bAssemblyQualityCertified)
+		{
+			LastFailure = FString::Printf(
+				TEXT("AssemblyQualityNotMet:XStations=%d:YStations=%d:Density=%.3f:Closure=%.3f"),
+				Candidate.Summary.XColumnStationCount,
+				Candidate.Summary.YColumnStationCount,
+				Candidate.Summary.AxisStationDensityRatio,
+				Candidate.Summary.StructuralClosurePostRatio);
+			continue;
+		}
+		if (!ABTSM73BeamD1::MeetsVisualMilestone(Profile, Silhouette, BeamB))
+		{
+			LastFailure = FString::Printf(
+				TEXT("VisualMilestoneNotMet:Volumes=%d:Motifs=%d:Spans=%d:RequiredSpans=%d"),
+				Silhouette.Summary.VolumeCount,
+				BeamB.Summary.DistinctMotifCount,
+				Silhouette.Summary.SupportedSpanCount,
+				ABTSM73BeamD1::RequiredSupportedSpanCount(
+					Silhouette.Summary.ResolvedArchetype,
+					Profile.DifficultyTier));
+			continue;
+		}
+		if (LastBrickCount < Target.MinimumBrickCount
+			|| LastBrickCount > Target.MaximumBrickCount)
+		{
+			LastFailure = TEXT("BrickCountOutsideTarget");
+			continue;
+		}
+
+		Candidate.Summary.TargetMinimumBrickCount =
+			Target.MinimumBrickCount;
+		Candidate.Summary.TargetMaximumBrickCount =
+			Target.MaximumBrickCount;
+		Candidate.Summary.VisualCandidateAttempt = Attempt;
+		Candidate.Summary.SemanticVolumeCount =
+			Silhouette.Summary.VolumeCount;
+		Candidate.Summary.SemanticBoxCount =
+			Silhouette.Summary.BoxCount;
+		Candidate.Summary.SemanticPrismCount =
+			Silhouette.Summary.PrismCount;
+		Candidate.Summary.SemanticPyramidCount =
+			Silhouette.Summary.PyramidCount;
+		Candidate.Summary.DistinctMotifCount =
+			BeamB.Summary.DistinctMotifCount;
+		Candidate.Summary.SupportedSpanCount =
+			Silhouette.Summary.SupportedSpanCount;
+		Candidate.Summary.bVisualComplexityCertified = true;
+		OutResult = MoveTemp(Candidate);
+		OutError.Reset();
+		return true;
 	}
 
-	FABTSM73BeamAGenerationResult BeamA;
-	FABTSM73BeamAGenerator BeamAGenerator;
-	if (!BeamAGenerator.Generate(
-		Profile.BeamSettings.BeamB.BeamA,
-		Silhouette, BeamA, OutError))
-	{
-		return ABTSM73BeamD1::Reject(OutResult, OutError,
-			FString::Printf(TEXT("BeamD1BeamA:%s"), *OutError));
-	}
-
-	FABTSM73BeamBGenerationResult BeamB;
-	FABTSM73BeamBGenerator BeamBGenerator;
-	if (!BeamBGenerator.Generate(
-		Profile.BeamSettings.BeamB,
-		Silhouette, BeamA, BeamB, OutError))
-	{
-		return ABTSM73BeamD1::Reject(OutResult, OutError,
-			FString::Printf(TEXT("BeamD1BeamB:%s"), *OutError));
-	}
-
-	FABTSM73BeamCGenerationResult BeamC;
-	FABTSM73BeamCGenerator BeamCGenerator;
-	if (!BeamCGenerator.Generate(
-		Profile.BeamSettings, BeamB.ClosedAssembly, BeamC, OutError))
-	{
-		return ABTSM73BeamD1::Reject(OutResult, OutError,
-			FString::Printf(TEXT("BeamD1BeamC:%s"), *OutError));
-	}
-	return CompileResolved(Profile, BeamB, BeamC, OutResult, OutError);
+	return ABTSM73BeamD1::Reject(
+		OutResult,
+		OutError,
+		FString::Printf(
+			TEXT("BeamD15NoCandidateInBrickWindow:Attempts=%d:Last=%s:Bricks=%d"),
+			Target.MaximumCandidateAttempts,
+			*LastFailure,
+			LastBrickCount));
 }
 
 bool FABTSM73BeamD1BrickCompiler::CompileResolved(
@@ -319,6 +520,17 @@ bool FABTSM73BeamD1BrickCompiler::CompileResolved(
 	Summary.ResolvedM7ProfileId = Profile.ResolvedM7ProfileId;
 	Summary.ResolvedSettingsHash = Profile.ResolvedSettingsHash;
 	Summary.UpstreamBeamHash = BeamB.Summary.ResultHash;
+	Summary.StructuralClosurePassCount =
+		BeamC.Summary.StructuralClosurePassCount;
+	Summary.AddedStructuralSupportPostCount =
+		BeamC.Summary.AddedStructuralSupportPostCount;
+	Summary.RealContactMismatchCount =
+		BeamC.Summary.RealContactMismatchCount;
+	Summary.RemainingSupportViolationCount =
+		BeamC.Summary.SupportResultantViolationCount
+		+ BeamC.Summary.SupportSpreadViolationCount;
+	Summary.SupportResultantAdvisoryCount =
+		BeamC.Summary.SupportResultantAdvisoryCount;
 
 	const FABTSM73BeamAGenerationResult& Assembly = BeamB.ClosedAssembly;
 	if (!Profile.bAccepted || !BeamB.Summary.bAccepted
@@ -395,6 +607,8 @@ bool FABTSM73BeamD1BrickCompiler::CompileResolved(
 		Summary.WeaknessCandidateCount += Brick.bWeaknessCandidate ? 1 : 0;
 		Summary.DeviceRoleCount +=
 			Brick.DeviceRole != EABTSM73BeamD1DeviceRole::None ? 1 : 0;
+		Summary.RoofCourseBrickCount +=
+			Member.Role == EABTSM73BeamAMemberRole::RoofCourse ? 1 : 0;
 	}
 
 	OutResult.Bricks.Sort([](
@@ -414,6 +628,7 @@ bool FABTSM73BeamD1BrickCompiler::CompileResolved(
 		OutResult.Bricks,
 		FMath::Max(0.01,
 			Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM + 0.01));
+	MeasureAssemblyQuality(Profile, OutResult.Bricks, Summary);
 	if (Summary.BrickCount != Summary.MemberCount
 		|| Summary.CompleteReferenceCount != Summary.MemberCount)
 	{

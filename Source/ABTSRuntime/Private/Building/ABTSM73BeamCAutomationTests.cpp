@@ -50,7 +50,7 @@ namespace ABTSM73BeamCTests
 			return false;
 		}
 		FABTSM73BeamCGenerator BeamCGenerator;
-		return BeamCGenerator.Generate(
+		return BeamCGenerator.GenerateWithStructuralClosure(
 			Settings, OutBeamB.ClosedAssembly, OutBeamC, OutError);
 	}
 
@@ -115,10 +115,10 @@ namespace ABTSM73BeamCTests
 			FVector(300.0, -18.0, 18.0), FVector(300.0, 18.0, 18.0),
 			EABTSM73BeamAFrameAxis::Y);
 		const int32 Beam = AddMember(Assembly,
-			FVector(0.0, 0.0, 54.0), FVector(300.0, 0.0, 54.0),
+			FVector(-18.0, 0.0, 54.0), FVector(318.0, 0.0, 54.0),
 			EABTSM73BeamAFrameAxis::X);
 		const int32 UpperPost = AddMember(Assembly,
-			FVector(225.0, 0.0, 90.0), FVector(225.0, 0.0, 390.0),
+			FVector(225.0, 0.0, 72.0), FVector(225.0, 0.0, 372.0),
 			EABTSM73BeamAFrameAxis::Z);
 		AddBearing(Assembly, LeftGround, Beam, FVector(0.0, 0.0, 36.0));
 		AddBearing(Assembly, RightGround, Beam, FVector(300.0, 0.0, 36.0));
@@ -143,10 +143,15 @@ bool FABTSM73BeamCDeterminismTest::RunTest(const FString& Parameters)
 	FABTSM73BeamCGenerationResult A;
 	FABTSM73BeamCGenerationResult B;
 	FString Error;
-	TestTrue(TEXT("First pipeline succeeds"),
-		GeneratePipeline(Settings, BeamBA, A, Error));
-	TestTrue(TEXT("Second pipeline succeeds"),
-		GeneratePipeline(Settings, BeamBB, B, Error));
+	const bool bFirstSucceeded = GeneratePipeline(
+		Settings, BeamBA, A, Error);
+	TestTrue(*FString::Printf(TEXT("First pipeline succeeds: %s"), *Error),
+		bFirstSucceeded);
+	Error.Reset();
+	const bool bSecondSucceeded = GeneratePipeline(
+		Settings, BeamBB, B, Error);
+	TestTrue(*FString::Printf(TEXT("Second pipeline succeeds: %s"), *Error),
+		bSecondSucceeded);
 	TestEqual(TEXT("Load DAG hash is deterministic"),
 		A.Summary.LoadDAGHash, B.Summary.LoadDAGHash);
 	TestEqual(TEXT("Node count is deterministic"), A.Nodes.Num(), B.Nodes.Num());
@@ -206,8 +211,10 @@ bool FABTSM73BeamCCycleRejectTest::RunTest(const FString& Parameters)
 	FABTSM73BeamCGenerationResult Result;
 	FString Error;
 	FABTSM73BeamCGenerator Generator;
+	FABTSM73BeamCPreviewSettings Settings;
+	Settings.bRequireRealContactAgreement = false;
 	TestFalse(TEXT("Reciprocal support is rejected"),
-		Generator.Generate(FABTSM73BeamCPreviewSettings(), Assembly, Result, Error));
+		Generator.Generate(Settings, Assembly, Result, Error));
 	TestEqual(TEXT("Stable cycle reason"), Error, FString(TEXT("BeamCLoadDAGCycle")));
 	TestTrue(TEXT("Cycle nodes are reported"), Result.Summary.CycleNodeCount > 0);
 	return true;
@@ -251,10 +258,74 @@ bool FABTSM73BeamCBearingAreaRejectTest::RunTest(const FString& Parameters)
 	FABTSM73BeamCGenerationResult Result;
 	FString Error;
 	FABTSM73BeamCGenerator Generator;
+	FABTSM73BeamCPreviewSettings Settings;
+	Settings.bRequireRealContactAgreement = false;
 	TestFalse(TEXT("Tiny bearing is rejected"),
-		Generator.Generate(FABTSM73BeamCPreviewSettings(), Assembly, Result, Error));
+		Generator.Generate(Settings, Assembly, Result, Error));
 	TestEqual(TEXT("Stable bearing reason"), Error,
 		FString(TEXT("BeamCBearingAreaInsufficient")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamCRealContactRejectTest,
+	"ABTS.M73DAG.BeamC.RealContactReject",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamCRealContactRejectTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamCTests;
+	FABTSM73BeamAGenerationResult Assembly = MakeAcceptedAssembly();
+	const int32 Ground = AddMember(Assembly,
+		FVector(-100, 0, 18), FVector(100, 0, 18),
+		EABTSM73BeamAFrameAxis::X);
+	const int32 Upper = AddMember(Assembly,
+		FVector(-100, 0, 54), FVector(100, 0, 54),
+		EABTSM73BeamAFrameAxis::X);
+	AddBearing(Assembly, Ground, Upper, FVector(0, 0, 40), 1296.0f);
+	FABTSM73BeamCGenerationResult Result;
+	FString Error;
+	FABTSM73BeamCGenerator Generator;
+	TestFalse(TEXT("Declared bearing must match final Brick faces"),
+		Generator.Generate(FABTSM73BeamCPreviewSettings(), Assembly, Result, Error));
+	TestEqual(TEXT("Stable real-contact reason"), Error,
+		FString(TEXT("BeamCRealContactMismatch")));
+	TestEqual(TEXT("Mismatch is counted"),
+		Result.Summary.RealContactMismatchCount, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamCSupportSpreadRejectTest,
+	"ABTS.M73DAG.BeamC.SupportSpreadReject",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamCSupportSpreadRejectTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamCTests;
+	FABTSM73BeamAGenerationResult Assembly = MakeAcceptedAssembly();
+	const int32 Ground = AddMember(Assembly,
+		FVector(-200, 0, 18), FVector(200, 0, 18),
+		EABTSM73BeamAFrameAxis::X);
+	const int32 Post = AddMember(Assembly,
+		FVector(0, 0, 36), FVector(0, 0, 272),
+		EABTSM73BeamAFrameAxis::Z);
+	const int32 WideTop = AddMember(Assembly,
+		FVector(-300, 0, 290), FVector(300, 0, 290),
+		EABTSM73BeamAFrameAxis::X);
+	AddBearing(Assembly, Ground, Post, FVector(0, 0, 36));
+	AddBearing(Assembly, Post, WideTop, FVector(0, 0, 272));
+	FABTSM73BeamCPreviewSettings Settings;
+	Settings.bRequireBidirectionalLateralTies = false;
+	FABTSM73BeamCGenerationResult Result;
+	FString Error;
+	FABTSM73BeamCGenerator Generator;
+	TestFalse(TEXT("A wide frame may not balance on one narrow post"),
+		Generator.Generate(Settings, Assembly, Result, Error));
+	TestEqual(TEXT("Stable support-spread reason"), Error,
+		FString(TEXT("BeamCSupportSpreadInsufficient")));
+	TestTrue(TEXT("Support-spread violation is reported"),
+		Result.Summary.SupportSpreadViolationCount > 0);
 	return true;
 }
 
@@ -271,7 +342,7 @@ bool FABTSM73BeamCSpanRejectTest::RunTest(const FString& Parameters)
 		EABTSM73BeamAFrameAxis::Y);
 	const int32 Right = AddMember(Assembly, FVector(1000, -18, 18), FVector(1000, 18, 18),
 		EABTSM73BeamAFrameAxis::Y);
-	const int32 Beam = AddMember(Assembly, FVector(0, 0, 54), FVector(1000, 0, 54),
+	const int32 Beam = AddMember(Assembly, FVector(-18, 0, 54), FVector(1018, 0, 54),
 		EABTSM73BeamAFrameAxis::X);
 	AddBearing(Assembly, Left, Beam, FVector(0, 0, 36));
 	AddBearing(Assembly, Right, Beam, FVector(1000, 0, 36));
@@ -299,7 +370,7 @@ bool FABTSM73BeamCSlendernessRejectTest::RunTest(const FString& Parameters)
 	FABTSM73BeamAGenerationResult Assembly = MakeAcceptedAssembly();
 	const int32 Ground = AddMember(Assembly, FVector(-50, 0, 18), FVector(50, 0, 18),
 		EABTSM73BeamAFrameAxis::X);
-	const int32 Post = AddMember(Assembly, FVector(0, 0, 54), FVector(0, 0, 4054),
+	const int32 Post = AddMember(Assembly, FVector(0, 0, 36), FVector(0, 0, 4036),
 		EABTSM73BeamAFrameAxis::Z);
 	AddBearing(Assembly, Ground, Post, FVector(0, 0, 36));
 	FABTSM73BeamCPreviewSettings Settings;
@@ -371,7 +442,7 @@ bool FABTSM73BeamCLateralMechanismRejectTest::RunTest(const FString& Parameters)
 	FABTSM73BeamAGenerationResult Assembly = MakeAcceptedAssembly();
 	const int32 Ground = AddMember(Assembly, FVector(-50, 0, 18), FVector(50, 0, 18),
 		EABTSM73BeamAFrameAxis::X);
-	const int32 Post = AddMember(Assembly, FVector(0, 0, 54), FVector(0, 0, 254),
+	const int32 Post = AddMember(Assembly, FVector(0, 0, 36), FVector(0, 0, 236),
 		EABTSM73BeamAFrameAxis::Z);
 	AddBearing(Assembly, Ground, Post, FVector(0, 0, 36));
 	FABTSM73BeamCGenerationResult Result;

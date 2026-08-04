@@ -86,6 +86,157 @@ namespace ABTSM73BeamD1Tests
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD15VisualComplexityLadderTest,
+	"ABTS.M73DAG.BeamD15.VisualComplexityLadder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD15VisualComplexityLadderTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamD1BrickCompiler Compiler;
+	for (const FName ProfileId : ProfileIds())
+	{
+		int32 PreviousBrickCount = 0;
+		for (int32 Tier = 0; Tier <= 5; ++Tier)
+		{
+			FABTSM73BeamD1GenerationResult Result;
+			FString Error;
+			const bool bGenerated = Compiler.Generate(
+				MakeSettings(ProfileId, AcceptedFixtureSeed(ProfileId), Tier),
+				Result,
+				Error);
+			TestTrue(*FString::Printf(TEXT("%s E%d compiles: %s"),
+				*ProfileId.ToString(), Tier + 1, *Error), bGenerated);
+			if (!bGenerated)
+			{
+				continue;
+			}
+			AddInfo(FString::Printf(
+				TEXT("Beam-D1.5 %s E%d Bricks=%d Target=%d-%d Attempt=%d Volumes=%d Box=%d Prism=%d Pyramid=%d RoofBricks=%d Motifs=%d Spans=%d"),
+				*ProfileId.ToString(), Tier + 1, Result.Summary.BrickCount,
+				Result.Summary.TargetMinimumBrickCount,
+				Result.Summary.TargetMaximumBrickCount,
+				Result.Summary.VisualCandidateAttempt,
+				Result.Summary.SemanticVolumeCount,
+				Result.Summary.SemanticBoxCount,
+				Result.Summary.SemanticPrismCount,
+				Result.Summary.SemanticPyramidCount,
+				Result.Summary.RoofCourseBrickCount,
+				Result.Summary.DistinctMotifCount,
+				Result.Summary.SupportedSpanCount));
+			TestTrue(TEXT("Visual complexity is certified"),
+				Result.Summary.bVisualComplexityCertified);
+			TestTrue(TEXT("Assembly axis/contact quality is certified"),
+				Result.Summary.bAssemblyQualityCertified);
+			TestTrue(TEXT("Brick count reaches tier minimum"),
+				Result.Summary.BrickCount
+					>= Result.Summary.TargetMinimumBrickCount);
+			TestTrue(TEXT("Brick count stays below tier maximum"),
+				Result.Summary.BrickCount
+					<= Result.Summary.TargetMaximumBrickCount);
+			if (Tier <= 1)
+			{
+				TestTrue(TEXT("Low tier retains a Box body"),
+					Result.Summary.SemanticBoxCount > 0);
+				TestEqual(TEXT("Low tier has exactly one terminal roof"),
+					Result.Summary.SemanticPrismCount
+						+ Result.Summary.SemanticPyramidCount,
+					1);
+				TestTrue(TEXT("Low tier roof has enough stacked courses to read in 3D"),
+					Result.Summary.RoofCourseBrickCount
+						>= (Tier == 0 ? 8 : 10));
+			}
+			if (Tier == 2)
+			{
+				TestTrue(TEXT("E3 realizes a prism"),
+					Result.Summary.SemanticPrismCount > 0);
+				TestTrue(TEXT("E3 realizes a pyramid"),
+					Result.Summary.SemanticPyramidCount > 0);
+			}
+			if (Tier > 0)
+			{
+				TestTrue(TEXT("Adjacent tier adds visible Brick complexity"),
+					Result.Summary.BrickCount > PreviousBrickCount);
+			}
+			PreviousBrickCount = Result.Summary.BrickCount;
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1ReportedAxisBalanceRegressionTest,
+	"ABTS.M73DAG.BeamD1.ReportedAxisBalanceRegression",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1ReportedAxisBalanceRegressionTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamD1BrickCompiler Compiler;
+	FABTSM73BeamD1GenerationResult Result;
+	FString Error;
+	const bool bGenerated = Compiler.Generate(
+		MakeSettings(TEXT("DropTrigger"), 669740, 4), Result, Error);
+	TestTrue(*FString::Printf(
+		TEXT("Reported DropTrigger T4 seed compiles: %s"), *Error),
+		bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	AddInfo(FString::Printf(
+		TEXT("DropTrigger T4 Seed=669740 Bricks=%d Stations=%d/%d Density=%.3f ClosurePosts=%d ClosureRatio=%.3f Attempt=%d"),
+		Result.Summary.BrickCount,
+		Result.Summary.XColumnStationCount,
+		Result.Summary.YColumnStationCount,
+		Result.Summary.AxisStationDensityRatio,
+		Result.Summary.AddedStructuralSupportPostCount,
+		Result.Summary.StructuralClosurePostRatio,
+		Result.Summary.VisualCandidateAttempt));
+	TestTrue(TEXT("Reported seed passes assembly-quality gate"),
+		Result.Summary.bAssemblyQualityCertified);
+	TestTrue(TEXT("Normalized X/Y column density is balanced"),
+		Result.Summary.AxisStationDensityRatio >= 0.20f);
+	TestTrue(TEXT("Structural closure does not dominate the frame"),
+		Result.Summary.StructuralClosurePostRatio <= 0.12f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD15ColumnHighTierClosureTest,
+	"ABTS.M73DAG.BeamD15.ColumnHighTierClosure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD15ColumnHighTierClosureTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamD1BrickCompiler Compiler;
+	for (int32 Tier = 4; Tier <= 5; ++Tier)
+	{
+		FABTSM73BeamD1GenerationResult Result;
+		FString Error;
+		const bool bGenerated = Compiler.Generate(
+			MakeSettings(TEXT("ColumnBreak"),
+				AcceptedFixtureSeed(TEXT("ColumnBreak")), Tier),
+			Result, Error);
+		TestTrue(*FString::Printf(
+			TEXT("ColumnBreak E%d structurally closes: %s"),
+			Tier + 1, *Error), bGenerated);
+		if (bGenerated)
+		{
+			TestEqual(TEXT("No real-contact mismatch remains"),
+				Result.Summary.RealContactMismatchCount, 0);
+			TestEqual(TEXT("No blocking support violation remains"),
+				Result.Summary.RemainingSupportViolationCount, 0);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamD1FiveProfileCompilationTest,
 	"ABTS.M73DAG.BeamD1.FiveProfileCompilation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -186,6 +337,50 @@ bool FABTSM73BeamD1MaterialRoleTest::RunTest(const FString& Parameters)
 		Drop.Summary.StoneBrickCount > 0);
 	TestEqual(TEXT("Hanging mass exposes one device role"),
 		Drop.Summary.DeviceRoleCount, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD15LowTierRoofBearingContinuityTest,
+	"ABTS.M73DAG.BeamD15.LowTierRoofBearingContinuity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD15LowTierRoofBearingContinuityTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamD1BrickCompiler Compiler;
+	FABTSM73BeamD1GenerationResult Result;
+	FString Error;
+	const bool bGenerated = Compiler.Generate(
+		MakeSettings(TEXT("DropTrigger"), 669740, 0), Result, Error);
+	TestTrue(*FString::Printf(
+		TEXT("Reported low-tier roof seed compiles: %s"), *Error),
+		bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	AddInfo(FString::Printf(
+		TEXT("DropTrigger T0 Seed=669740 Bricks=%d RoofBricks=%d ClosurePass=%d AddedPosts=%d ContactMismatch=%d SupportViolations=%d"),
+		Result.Summary.BrickCount,
+		Result.Summary.RoofCourseBrickCount,
+		Result.Summary.StructuralClosurePassCount,
+		Result.Summary.AddedStructuralSupportPostCount,
+		Result.Summary.RealContactMismatchCount,
+		Result.Summary.RemainingSupportViolationCount));
+	TestTrue(TEXT("Reported roof keeps its full low-tier physical output"),
+		Result.Summary.RoofCourseBrickCount >= 8);
+	TestEqual(TEXT("Reported roof needs no downstream structural closure pass"),
+		Result.Summary.StructuralClosurePassCount, 0);
+	TestEqual(TEXT("Reported roof needs no rescue support post"),
+		Result.Summary.AddedStructuralSupportPostCount, 0);
+	TestEqual(TEXT("Reported roof has no real-contact mismatch"),
+		Result.Summary.RealContactMismatchCount, 0);
+	TestEqual(TEXT("Reported roof has no remaining support violation"),
+		Result.Summary.RemainingSupportViolationCount, 0);
+	TestEqual(TEXT("Reported roof has no strict Brick penetration"),
+		Result.Summary.StrictPenetrationCount, 0);
 	return true;
 }
 

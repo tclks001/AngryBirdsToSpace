@@ -356,9 +356,22 @@ namespace ABTSM73BeamB
 		const double U0,
 		const double U1)
 	{
+		// U0/U1 are post centre-lines inset by half a block from the Bay
+		// boundary. A full-span beam must cover the complete footprint of
+		// those terminal posts, rather than ending at their centre-lines.
+		// Only expand an endpoint that is actually on a terminal station so
+		// partial grammar members keep their intentional length.
+		const double HalfThickness =
+			B.Settings.BeamA.BlockCrossSectionCM * 0.5;
+		const double Tolerance =
+			B.Settings.BeamA.JointMergeToleranceCM;
+		const double PhysicalU0 = FMath::IsNearlyEqual(U0, C.U0, Tolerance)
+			? U0 - HalfThickness : U0;
+		const double PhysicalU1 = FMath::IsNearlyEqual(U1, C.U1, Tolerance)
+			? U1 + HalfThickness : U1;
 		return B.Add(P.BayId, P.Motif, C.PrimaryAxis,
 			EABTSM73BeamAMemberRole::PrimaryBeam,
-			C.P(U0, V, Z), C.P(U1, V, Z));
+			C.P(PhysicalU0, V, Z), C.P(PhysicalU1, V, Z));
 	}
 
 	bool AddCross(
@@ -368,9 +381,15 @@ namespace ABTSM73BeamB
 		const double U,
 		const double Z)
 	{
+		// Cross members always span the complete Bay course. Extend from the
+		// inset post centre-lines to the physical Bay faces for full terminal
+		// post coverage and exact contact across a shared Bay boundary.
+		const double HalfThickness =
+			B.Settings.BeamA.BlockCrossSectionCM * 0.5;
 		return B.Add(P.BayId, P.Motif, C.CrossAxis(),
 			EABTSM73BeamAMemberRole::SecondaryBeam,
-			C.P(U, C.V0, Z), C.P(U, C.V1, Z));
+			C.P(U, C.V0 - HalfThickness, Z),
+			C.P(U, C.V1 + HalfThickness, Z));
 	}
 
 	bool AddPost(
@@ -975,10 +994,14 @@ namespace ABTSM73BeamB
 				const int32 CourseIndex = FMath::Clamp(FMath::RoundToInt(
 					(CenterZ - Bay.LocalBounds.Min.Z - CrossSection * 0.5)
 					/ CrossSection), 0, CourseCount - 1);
-				const FBox Expected = ABTSM73BeamA::SemanticRoofCourseBounds(
-					Bay.LocalBounds, Volume->Primitive,
-					static_cast<double>(CourseIndex) / CourseCount,
-					CrossSection).ExpandBy(Tolerance);
+				const FBox Expected =
+					ABTSM73BeamA::SemanticRoofBearingCourseBounds(
+						Bay.LocalBounds,
+						Volume->Primitive,
+						CourseIndex,
+						CourseCount,
+						Member.Axis,
+						CrossSection).ExpandBy(Tolerance);
 				if (Actual.Min.X < Expected.Min.X
 					|| Actual.Max.X > Expected.Max.X
 					|| Actual.Min.Y < Expected.Min.Y
@@ -998,6 +1021,32 @@ namespace ABTSM73BeamB
 				if (FMath::IsNearlyEqual(Course.Key, HighestZ, Tolerance))
 				{
 					HighestBounds += Course.Value;
+				}
+				if (Course.Key <= LowestZ + Tolerance)
+				{
+					continue;
+				}
+				const bool bDirectlyBearsOnLowerCourse =
+					Courses.ContainsByPredicate(
+						[&Course, CrossSection, Tolerance](
+							const TPair<double, FBox>& Lower)
+						{
+							return FMath::IsNearlyEqual(
+								Lower.Key,
+								Course.Key - CrossSection,
+								Tolerance)
+								&& FMath::Min(Lower.Value.Max.X,
+									Course.Value.Max.X)
+									- FMath::Max(Lower.Value.Min.X,
+										Course.Value.Min.X) > Tolerance
+								&& FMath::Min(Lower.Value.Max.Y,
+									Course.Value.Max.Y)
+									- FMath::Max(Lower.Value.Min.Y,
+										Course.Value.Min.Y) > Tolerance;
+						});
+				if (!bDirectlyBearsOnLowerCourse)
+				{
+					++ViolationCount;
 				}
 			}
 			const bool bTapersX =
@@ -3016,6 +3065,14 @@ namespace ABTSM73BeamB
 		{
 			return false;
 		}
+		if (!ABTSM73BeamA::RebuildBearingContacts(
+			Settings.BeamA, Closed, OutError))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamBFinalContactRebuild:%s"), *OutError);
+			return false;
+		}
+		Closed.Summary.BearingContactCount = Closed.BearingContacts.Num();
 		if (InOutResult.Summary.BridgeSuspendedBeamSupportViolationCount > 0)
 		{
 			OutError = FString::Printf(

@@ -87,6 +87,7 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 	for (const FName ProfileId : ProfileIds())
 	{
 		FABTSM73BeamD0DifficultyMetrics Previous;
+		FABTSM73BeamD0VisualComplexityRecipe PreviousVisual;
 		bool bHasPrevious = false;
 		for (int32 Tier = 0; Tier <= 5; ++Tier)
 		{
@@ -98,6 +99,41 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Resolved profile is accepted"), Resolved.bAccepted);
 			TestEqual(TEXT("Solution family remains single-step"),
 				Resolved.Difficulty.SolutionSteps, 1);
+			TestEqual(TEXT("Visual milestone matches exact tier"),
+				Resolved.VisualComplexity.MilestoneTier, Tier);
+			if (Tier <= 1)
+			{
+				TestTrue(TEXT("Low tier requires one terminal roof"),
+					Resolved.VisualComplexity.bRequireSingleTerminalRoof);
+				TestFalse(TEXT("Low tier does not require full primitive variety"),
+					Resolved.VisualComplexity.bRequirePrimitiveVariety);
+				TestTrue(TEXT("Low tier keeps a non-Box roof domain"),
+					Resolved.BeamSettings.BeamB.BeamA.Silhouette.PrismWeight
+						+ Resolved.BeamSettings.BeamB.BeamA.Silhouette.PyramidWeight
+						> 0.0f);
+				const int32 RequiredRoofCourses = Tier == 0 ? 8 : 10;
+				TestEqual(TEXT("Low tier resolves the required roof course count"),
+					Resolved.VisualComplexity.SingleTerminalRoofCourseCount,
+					RequiredRoofCourses);
+				TestEqual(TEXT("Roof quantization follows the real Brick section"),
+					Resolved.BeamSettings.BeamB.BeamA.Silhouette
+						.RoofCourseHeightCM,
+					Resolved.BeamSettings.BeamB.BeamA.BlockCrossSectionCM);
+				TestEqual(TEXT("Roof minimum course floor follows the tier recipe"),
+					Resolved.BeamSettings.BeamB.BeamA.Silhouette
+						.MinimumRoofCourseCount,
+					RequiredRoofCourses);
+				TestEqual(TEXT("Roof envelope height matches full courses"),
+					Resolved.BeamSettings.BeamB.BeamA.Silhouette
+						.SingleTerminalRoofHeightCM,
+					Resolved.BeamSettings.BeamB.BeamA.BlockCrossSectionCM
+						* RequiredRoofCourses);
+			}
+			else
+			{
+				TestFalse(TEXT("Higher tier leaves single-roof policy"),
+					Resolved.VisualComplexity.bRequireSingleTerminalRoof);
+			}
 			TestFalse(TEXT("Exact resolved id is unique in the matrix"),
 				ExactIds.Contains(Resolved.ResolvedM7ProfileId));
 			ExactIds.Add(Resolved.ResolvedM7ProfileId);
@@ -118,8 +154,21 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 				TestTrue(TEXT("Weakness reward is monotonic"),
 					Resolved.Difficulty.WeaknessRewardMultiplier
 						>= Previous.WeaknessRewardMultiplier);
+				TestTrue(TEXT("Adjacent visual Brick windows do not overlap"),
+					Resolved.VisualComplexity.MinimumBrickCount
+						> PreviousVisual.MaximumBrickCount);
+				TestTrue(TEXT("Every adjacent tier advances the macro recipe"),
+					Resolved.VisualComplexity.ShapeGrammarDepth
+						> PreviousVisual.ShapeGrammarDepth
+					|| Resolved.VisualComplexity.TargetShapeVolumeCount
+						> PreviousVisual.TargetShapeVolumeCount
+					|| Resolved.VisualComplexity.MaximumBaysPerVolume
+						> PreviousVisual.MaximumBaysPerVolume
+					|| Resolved.VisualComplexity.MaximumParallelBlocksPerCourse
+						> PreviousVisual.MaximumParallelBlocksPerCourse);
 			}
 			Previous = Resolved.Difficulty;
+			PreviousVisual = Resolved.VisualComplexity;
 			bHasPrevious = true;
 		}
 	}
@@ -228,14 +277,16 @@ bool FABTSM73BeamD0CatalogHashCoverageTest::RunTest(const FString& Parameters)
 	TArray<FABTSM73BeamD0ProfileDefinition> Reordered =
 		DefaultCatalog.GetDefinitions();
 	Algo::Reverse(Reordered);
-	const FABTSM73BeamD0ProfileCatalog ReorderedCatalog(Reordered);
+	const FABTSM73BeamD0ProfileCatalog ReorderedCatalogV2(
+		Reordered, DefaultCatalog.GetCatalogVersion());
 	TestEqual(TEXT("Definition order does not change catalog identity"),
-		ReorderedCatalog.GetCatalogHash(), DefaultCatalog.GetCatalogHash());
+		ReorderedCatalogV2.GetCatalogHash(), DefaultCatalog.GetCatalogHash());
 
 	TArray<FABTSM73BeamD0ProfileDefinition> Mutated =
 		DefaultCatalog.GetDefinitions();
 	Mutated[0].BaseWidthCM += 1.0f;
-	const FABTSM73BeamD0ProfileCatalog MutatedCatalog(Mutated);
+	const FABTSM73BeamD0ProfileCatalog MutatedCatalog(
+		Mutated, DefaultCatalog.GetCatalogVersion());
 	TestNotEqual(TEXT("Behavior-affecting data changes catalog identity"),
 		MutatedCatalog.GetCatalogHash(), DefaultCatalog.GetCatalogHash());
 
@@ -243,7 +294,8 @@ bool FABTSM73BeamD0CatalogHashCoverageTest::RunTest(const FString& Parameters)
 		DefaultCatalog.GetDefinitions();
 	const FABTSM73BeamD0ProfileDefinition Duplicate = Duplicated[0];
 	Duplicated.Add(Duplicate);
-	const FABTSM73BeamD0ProfileCatalog DuplicateCatalog(Duplicated);
+	const FABTSM73BeamD0ProfileCatalog DuplicateCatalog(
+		Duplicated, DefaultCatalog.GetCatalogVersion());
 	FString Error;
 	TestFalse(TEXT("Duplicate gameplay profile ids fail closed"),
 		DuplicateCatalog.Validate(Error));

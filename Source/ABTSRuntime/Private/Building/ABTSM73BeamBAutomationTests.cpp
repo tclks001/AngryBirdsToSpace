@@ -821,6 +821,82 @@ bool FABTSM73BeamBPortCompatibilityTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamBMotifTerminalCoverageTest,
+	"ABTS.M73DAG.BeamB.MotifTerminalCoverage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamBMotifTerminalCoverageTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamBTests;
+	const FABTSM73BeamBPreviewSettings Settings = SettingsForSeed(735201);
+	FABTSM73DAG5BV2GenerationResult Silhouette;
+	FABTSM73BeamAGenerationResult BeamA;
+	FABTSM73BeamBGenerationResult Result;
+	FString Error;
+	if (!GenerateUpstream(Settings, Silhouette, BeamA, Error))
+	{
+		AddError(FString::Printf(TEXT("Upstream failed: %s"), *Error));
+		return false;
+	}
+	FABTSM73BeamBGenerator Generator;
+	if (!Generator.Generate(Settings, Silhouette, BeamA, Result, Error))
+	{
+		AddError(FString::Printf(TEXT("Beam-B failed: %s"), *Error));
+		return false;
+	}
+
+	const double Tolerance = Settings.BeamA.JointMergeToleranceCM;
+	int32 AuditedMemberCount = 0;
+	for (const FABTSM73BeamBPlannedMember& Member : Result.PlannedMembers)
+	{
+		const bool bAuditedMotif =
+			Member.Motif == EABTSM73BeamBMotif::PostAndLintel
+			|| Member.Motif == EABTSM73BeamBMotif::PortalFrame
+			|| Member.Motif == EABTSM73BeamBMotif::CrossBeam
+			|| Member.Motif == EABTSM73BeamBMotif::TwoLayerCrib
+			|| Member.Motif == EABTSM73BeamBMotif::TransferFrame
+			|| Member.Motif == EABTSM73BeamBMotif::BracedBay;
+		const bool bAuditedRole =
+			Member.Role == EABTSM73BeamAMemberRole::PrimaryBeam
+			|| Member.Role == EABTSM73BeamAMemberRole::SecondaryBeam;
+		if (!bAuditedMotif || !bAuditedRole
+			|| Member.Axis == EABTSM73BeamAFrameAxis::Z
+			|| !BeamA.Bays.IsValidIndex(Member.BayId))
+		{
+			continue;
+		}
+
+		++AuditedMemberCount;
+		const FABTSM73BeamABay& Bay = BeamA.Bays[Member.BayId];
+		const int32 AxisIndex = static_cast<int32>(Member.Axis);
+		const double MemberMin = FMath::Min(
+			Member.LocalStart[AxisIndex], Member.LocalEnd[AxisIndex]);
+		const double MemberMax = FMath::Max(
+			Member.LocalStart[AxisIndex], Member.LocalEnd[AxisIndex]);
+		TestTrue(FString::Printf(
+			TEXT("Bay %d member %d reaches its negative terminal"),
+			Member.BayId, Member.PlannedMemberId),
+			FMath::IsNearlyEqual(MemberMin,
+				Bay.LocalBounds.Min[AxisIndex], Tolerance));
+		TestTrue(FString::Printf(
+			TEXT("Bay %d member %d reaches its positive terminal"),
+			Member.BayId, Member.PlannedMemberId),
+			FMath::IsNearlyEqual(MemberMax,
+				Bay.LocalBounds.Max[AxisIndex], Tolerance));
+	}
+	TestTrue(TEXT("Default fixture audits full-span motif beams"),
+		AuditedMemberCount > 0);
+	TestEqual(TEXT("Full terminal coverage preserves bounds acceptance"),
+		Result.Summary.OutOfBoundsMemberCount, 0);
+	TestEqual(TEXT("Full terminal coverage closes without penetration"),
+		Result.Summary.RemainingPenetrationCount, 0);
+	TestEqual(TEXT("Full terminal coverage closes without unsupported members"),
+		Result.Summary.UnsupportedMemberCount, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamBGrammarDepthTest,
 	"ABTS.M73DAG.BeamB.GrammarDepthAddsTopology",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -920,6 +996,7 @@ bool FABTSM73BeamBSemanticRoofFittingTest::RunTest(
 	int32 NonBoxBayCount = 0;
 	int32 RoofCourseCount = 0;
 	int32 IndependentViolationCount = 0;
+	int32 DirectBearingViolationCount = 0;
 	int32 VisiblyTaperedBayCount = 0;
 	for (int32 Value = static_cast<int32>(
 		EABTSM73DAG5BV2Archetype::TerracedCitadel);
@@ -992,10 +1069,21 @@ bool FABTSM73BeamBSemanticRoofFittingTest::RunTest(
 				const int32 CourseIndex = FMath::Clamp(FMath::RoundToInt(
 					(CenterZ - Bay.LocalBounds.Min.Z - CrossSection * 0.5)
 					/ CrossSection), 0, CourseCount - 1);
-				const FBox Expected = IndependentRoofEnvelope(
+				FBox Expected = IndependentRoofEnvelope(
 					Bay.LocalBounds, Volume->Primitive,
 					static_cast<double>(CourseIndex) / CourseCount,
 					CrossSection).ExpandBy(Tolerance);
+				if (CourseIndex > 0)
+				{
+					const FBox LowerEnvelope = IndependentRoofEnvelope(
+						Bay.LocalBounds,
+						Volume->Primitive,
+						static_cast<double>(CourseIndex - 1) / CourseCount,
+						CrossSection).ExpandBy(Tolerance);
+					const int32 AxisIndex = static_cast<int32>(Member.Axis);
+					Expected.Min[AxisIndex] = LowerEnvelope.Min[AxisIndex];
+					Expected.Max[AxisIndex] = LowerEnvelope.Max[AxisIndex];
+				}
 				if (Actual.Min.X < Expected.Min.X
 					|| Actual.Max.X > Expected.Max.X
 					|| Actual.Min.Y < Expected.Min.Y
@@ -1013,6 +1101,32 @@ bool FABTSM73BeamBSemanticRoofFittingTest::RunTest(
 				if (FMath::IsNearlyEqual(CourseMember.Key, HighestZ, Tolerance))
 				{
 					HighestBounds += CourseMember.Value;
+				}
+				if (CourseMember.Key <= LowestZ + Tolerance)
+				{
+					continue;
+				}
+				const bool bDirectlyBearsOnLowerCourse =
+					CourseMembers.ContainsByPredicate(
+						[&CourseMember, CrossSection, Tolerance](
+							const TPair<double, FBox>& Lower)
+						{
+							return FMath::IsNearlyEqual(
+								Lower.Key,
+								CourseMember.Key - CrossSection,
+								Tolerance)
+								&& FMath::Min(Lower.Value.Max.X,
+									CourseMember.Value.Max.X)
+									- FMath::Max(Lower.Value.Min.X,
+										CourseMember.Value.Min.X) > Tolerance
+								&& FMath::Min(Lower.Value.Max.Y,
+									CourseMember.Value.Max.Y)
+									- FMath::Max(Lower.Value.Min.Y,
+										CourseMember.Value.Min.Y) > Tolerance;
+						});
+				if (!bDirectlyBearsOnLowerCourse)
+				{
+					++DirectBearingViolationCount;
 				}
 			}
 			if (LowestBounds.IsValid && HighestBounds.IsValid
@@ -1041,6 +1155,8 @@ bool FABTSM73BeamBSemanticRoofFittingTest::RunTest(
 		RoofCourseCount > 0);
 	TestEqual(TEXT("Independent envelope audit finds no violations"),
 		IndependentViolationCount, 0);
+	TestEqual(TEXT("Every upper roof block directly bears on the lower course"),
+		DirectBearingViolationCount, 0);
 	TestTrue(TEXT("At least one closed roof visibly tapers"),
 		VisiblyTaperedBayCount > 0);
 	return true;

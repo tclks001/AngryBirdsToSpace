@@ -22,4 +22,15 @@ public:
 		const FABTSM73BeamAGenerationResult& ClosedAssembly,
 		FABTSM73BeamCGenerationResult& OutResult,
 		FString& OutError) const;
+
+	/**
+	 * Production path: validate final Brick contacts, add bounded local Z
+	 * supports for failed horizontal bearing footprints, then re-close and
+	 * revalidate the authoritative assembly.
+	 */
+	bool GenerateWithStructuralClosure(
+		const FABTSM73BeamCPreviewSettings& Settings,
+		FABTSM73BeamAGenerationResult& InOutClosedAssembly,
+		FABTSM73BeamCGenerationResult& OutResult,
+		FString& OutError) const;
 };

@@ -813,6 +813,96 @@ bool FABTSM73BeamAParallelZSupportPlacementTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamAPrismLongAxisRidgeTest,
+	"ABTS.M73DAG.BeamA.PrismLongAxisRidge",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamAPrismLongAxisRidgeTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamATests;
+	FABTSM73BeamAPreviewSettings Settings = MakeSettings();
+	Settings.TargetBaySpanCM = 240.0f;
+	FABTSM73DAG5BV2GenerationResult Silhouette;
+	Silhouette.Summary.bAccepted = true;
+	FABTSM73DAG5BV2Volume& Body =
+		Silhouette.Volumes.AddDefaulted_GetRef();
+	Body.VolumeId = 0;
+	Body.Role = EABTSM73DAG5BV2VolumeRole::Foundation;
+	Body.Primitive = EABTSM73DAG5BV2Primitive::Box;
+	Body.LocalBounds = FBox(
+		FVector(-360.0, -180.0, 0.0),
+		FVector(360.0, 180.0, 360.0));
+	FABTSM73DAG5BV2Volume& Roof =
+		Silhouette.Volumes.AddDefaulted_GetRef();
+	Roof.VolumeId = 1;
+	Roof.Role = EABTSM73DAG5BV2VolumeRole::Crown;
+	Roof.Primitive = EABTSM73DAG5BV2Primitive::TriangularPrismY;
+	Roof.LocalBounds = FBox(
+		FVector(-360.0, -180.0, 360.0),
+		FVector(360.0, 180.0, 720.0));
+
+	FABTSM73BeamAGenerator Generator;
+	FABTSM73BeamAGenerationResult Result;
+	FString Error;
+	const bool bGenerated = Generator.Generate(
+		Settings, Silhouette, Result, Error);
+	TestTrue(*FString::Printf(
+		TEXT("Prism ridge fixture generates: %s"), *Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	int32 RoofBayCount = 0;
+	for (const FABTSM73BeamABay& Bay : Result.Bays)
+	{
+		RoofBayCount += Bay.SourceVolumeId == Roof.VolumeId ? 1 : 0;
+	}
+	TestEqual(TEXT("A semantic roof remains one undivided Bay"),
+		RoofBayCount, 1);
+
+	double HighestRoofZ = -TNumericLimits<double>::Max();
+	for (const FABTSM73BeamAMember& Member : Result.Members)
+	{
+		if (Member.Role != EABTSM73BeamAMemberRole::RoofCourse)
+		{
+			continue;
+		}
+		const FVector Center =
+			(Result.Joints[Member.JointA].LocalPosition
+				+ Result.Joints[Member.JointB].LocalPosition) * 0.5;
+		HighestRoofZ = FMath::Max(HighestRoofZ, Center.Z);
+	}
+	TArray<const FABTSM73BeamAMember*> RidgeMembers;
+	for (const FABTSM73BeamAMember& Member : Result.Members)
+	{
+		if (Member.Role != EABTSM73BeamAMemberRole::RoofCourse)
+		{
+			continue;
+		}
+		const FVector Center =
+			(Result.Joints[Member.JointA].LocalPosition
+				+ Result.Joints[Member.JointB].LocalPosition) * 0.5;
+		if (FMath::IsNearlyEqual(Center.Z, HighestRoofZ, 0.01))
+		{
+			RidgeMembers.Add(&Member);
+		}
+	}
+	TestEqual(TEXT("Prism apex contains one physical ridge block"),
+		RidgeMembers.Num(), 1);
+	if (RidgeMembers.Num() == 1)
+	{
+		TestEqual(TEXT("PrismY ridge follows the long X axis"),
+			RidgeMembers[0]->Axis,
+			EABTSM73BeamAFrameAxis::X);
+		TestTrue(TEXT("The ridge spans the semantic roof long axis"),
+			RidgeMembers[0]->LengthCM >= 700.0f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamABudgetFailureTest,
 	"ABTS.M73DAG.BeamA.BudgetFailure",
 	EAutomationTestFlags::EditorContext

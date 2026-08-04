@@ -650,6 +650,40 @@ namespace ABTSM73BeamA
 		return CourseBounds;
 	}
 
+	FBox SemanticRoofBearingCourseBounds(
+		const FBox& Bounds,
+		const EABTSM73DAG5BV2Primitive Primitive,
+		const int32 CourseIndex,
+		const int32 CourseCount,
+		const EABTSM73BeamAFrameAxis Axis,
+		const double CrossSectionCM)
+	{
+		const int32 SafeCourseCount = FMath::Max(1, CourseCount);
+		const int32 SafeCourseIndex = FMath::Clamp(
+			CourseIndex, 0, SafeCourseCount - 1);
+		FBox CourseBounds = SemanticRoofCourseBounds(
+			Bounds,
+			Primitive,
+			static_cast<double>(SafeCourseIndex) / SafeCourseCount,
+			CrossSectionCM);
+		if (SafeCourseIndex == 0
+			|| (Axis != EABTSM73BeamAFrameAxis::X
+				&& Axis != EABTSM73BeamAFrameAxis::Y))
+		{
+			return CourseBounds;
+		}
+
+		const FBox LowerCourseBounds = SemanticRoofCourseBounds(
+			Bounds,
+			Primitive,
+			static_cast<double>(SafeCourseIndex - 1) / SafeCourseCount,
+			CrossSectionCM);
+		const int32 AxisIndex = static_cast<int32>(Axis);
+		CourseBounds.Min[AxisIndex] = LowerCourseBounds.Min[AxisIndex];
+		CourseBounds.Max[AxisIndex] = LowerCourseBounds.Max[AxisIndex];
+		return CourseBounds;
+	}
+
 	bool AddLayeredRoof(
 		FBuildContext& Context,
 		const FABTSM73BeamABay& Bay,
@@ -668,18 +702,33 @@ namespace ABTSM73BeamA
 		}
 		const int32 RequestedBlocks =
 			Context.Settings->MaxParallelBlocksPerCourse;
+		const bool bPrism =
+			Primitive == EABTSM73DAG5BV2Primitive::TriangularPrismX
+			|| Primitive == EABTSM73DAG5BV2Primitive::TriangularPrismY;
+		const EABTSM73BeamAFrameAxis RidgeAxis =
+			Primitive == EABTSM73DAG5BV2Primitive::TriangularPrismX
+				? EABTSM73BeamAFrameAxis::Y
+				: EABTSM73BeamAFrameAxis::X;
 		for (int32 CourseIndex = 0;
 			CourseIndex < RequiredCourseCount;
 			++CourseIndex)
 		{
-			const double Alpha =
-				static_cast<double>(CourseIndex) / RequiredCourseCount;
-			const FBox CourseBounds = SemanticRoofCourseBounds(
-				Bounds, Primitive, Alpha, CrossSection);
-			const EABTSM73BeamAFrameAxis Axis =
-				CourseIndex % 2 == 0
+			const int32 DistanceFromTop =
+				RequiredCourseCount - 1 - CourseIndex;
+			const EABTSM73BeamAFrameAxis Axis = bPrism
+				? (DistanceFromTop % 2 == 0
+					? RidgeAxis
+					: OtherHorizontalAxis(RidgeAxis))
+				: (CourseIndex % 2 == 0
 					? Bay.PreferredAxis
-					: OtherHorizontalAxis(Bay.PreferredAxis);
+					: OtherHorizontalAxis(Bay.PreferredAxis));
+			const FBox CourseBounds = SemanticRoofBearingCourseBounds(
+				Bounds,
+				Primitive,
+				CourseIndex,
+				RequiredCourseCount,
+				Axis,
+				CrossSection);
 			if (!AddHorizontalCourse(
 				Context,
 				Bay,
@@ -687,7 +736,9 @@ namespace ABTSM73BeamA
 				CourseBounds,
 				Bounds.Min.Z + CrossSection * (CourseIndex + 0.5),
 				Axis,
-				RequestedBlocks,
+				bPrism && CourseIndex == RequiredCourseCount - 1
+					? 1
+					: RequestedBlocks,
 				EABTSM73BeamAMemberRole::RoofCourse))
 			{
 				return false;
@@ -1885,6 +1936,9 @@ namespace ABTSM73BeamA
 		constexpr int32 MaxClosurePasses = 32;
 		int32 PreviousUnsupportedCount = TNumericLimits<int32>::Max();
 		bool bSupportAttemptedLastPass = false;
+		int32 PreviousGapLiftUnsupportedCount =
+			TNumericLimits<int32>::Max();
+		bool bGapLiftAttemptedLastPass = false;
 		for (int32 Pass = 0; Pass < MaxClosurePasses; ++Pass)
 		{
 			TArray<FMemberBuildSpec> Specs;
@@ -1956,8 +2010,12 @@ namespace ABTSM73BeamA
 				return true;
 			}
 			int32 LiftedCourseCount = 0;
-			if (!ExpandUnsupportedCourseGaps(
-				Context, Reachable, LiftedCourseCount))
+			const bool bGapLiftMadeProgress =
+				!bGapLiftAttemptedLastPass
+				|| UnsupportedCount < PreviousGapLiftUnsupportedCount;
+			if (bGapLiftMadeProgress
+				&& !ExpandUnsupportedCourseGaps(
+					Context, Reachable, LiftedCourseCount))
 			{
 				OutError = TEXT("BeamAGlobalCompactionRebuildFailed");
 				return false;
@@ -1975,8 +2033,11 @@ namespace ABTSM73BeamA
 					LiftedCourseCount);
 				PreviousUnsupportedCount = TNumericLimits<int32>::Max();
 				bSupportAttemptedLastPass = false;
+				PreviousGapLiftUnsupportedCount = UnsupportedCount;
+				bGapLiftAttemptedLastPass = true;
 				continue;
 			}
+			bGapLiftAttemptedLastPass = false;
 			if (bSupportAttemptedLastPass
 				&& UnsupportedCount >= PreviousUnsupportedCount)
 			{
@@ -2329,6 +2390,14 @@ namespace ABTSM73BeamA
 		Context.Result = &InOutResult;
 		return CloseGlobalAssembly(Context, OutError);
 	}
+
+	bool RebuildBearingContacts(
+		const FABTSM73BeamAPreviewSettings& Settings,
+		FABTSM73BeamAGenerationResult& InOutResult,
+		FString& OutError)
+	{
+		return BuildBearingContacts(Settings, InOutResult, OutError);
+	}
 }
 
 bool FABTSM73BeamAGenerator::Generate(
@@ -2448,36 +2517,45 @@ bool FABTSM73BeamAGenerator::Generate(
 			}
 		}
 		const FVector Size = StructuralBounds.GetSize();
-		const int32 AxisIndex =
-			Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan
-				&& (Volume.SpanAxisIndex == 0 || Volume.SpanAxisIndex == 1)
-				? Volume.SpanAxisIndex
-				: Size.X >= Size.Y ? 0 : 1;
-		const float AxisSpan = static_cast<float>(Size[AxisIndex]);
-		const int32 BayCount = FMath::Clamp(
-			FMath::CeilToInt(AxisSpan / Settings.TargetBaySpanCM),
-			1,
-			Settings.MaxBaysPerVolume);
+		const bool bSupportedSpan = IsSupportedSpanRole(Volume.Role);
+		const int32 SemanticAxisIndex = bSupportedSpan
+			&& (Volume.SpanAxisIndex == 0 || Volume.SpanAxisIndex == 1)
+			? Volume.SpanAxisIndex
+			: Size.X >= Size.Y ? 0 : 1;
+		// The silhouette grammar is responsible for X/Y module balance. Each
+		// module keeps the proven long-axis one-dimensional frame subdivision;
+		// Beam-A must not compensate for a biased silhouette by twisting local
+		// structural topology into the short direction.
+		const int32 AxisIndex = SemanticAxisIndex;
+		const bool bSemanticRoof = !bSupportedSpan
+			&& Volume.Primitive != EABTSM73DAG5BV2Primitive::Box;
+		const int32 BayCount = bSemanticRoof
+			? 1
+			: FMath::Clamp(
+				FMath::CeilToInt(
+					static_cast<float>(Size[AxisIndex])
+						/ Settings.TargetBaySpanCM),
+				1,
+				Settings.MaxBaysPerVolume);
 		if (OutResult.Bays.Num() + BayCount > Settings.MaxBayCount)
 		{
 			return Reject(TEXT("BeamAMaxBayCountExceeded"));
 		}
 		for (int32 BayIndex = 0; BayIndex < BayCount; ++BayIndex)
 		{
-			FABTSM73BeamABay& Bay = OutResult.Bays.AddDefaulted_GetRef();
+			FABTSM73BeamABay& Bay =
+				OutResult.Bays.AddDefaulted_GetRef();
 			Bay.BayId = OutResult.Bays.Num() - 1;
 			Bay.SourceVolumeId = Volume.VolumeId;
 			Bay.LocalBounds = StructuralBounds;
-			const double AlphaMin = static_cast<double>(BayIndex) / BayCount;
-			const double AlphaMax = static_cast<double>(BayIndex + 1) / BayCount;
 			Bay.LocalBounds.Min[AxisIndex] = FMath::Lerp(
 				StructuralBounds.Min[AxisIndex],
 				StructuralBounds.Max[AxisIndex],
-				AlphaMin);
+				static_cast<double>(BayIndex) / BayCount);
 			Bay.LocalBounds.Max[AxisIndex] = FMath::Lerp(
 				StructuralBounds.Min[AxisIndex],
 				StructuralBounds.Max[AxisIndex],
-				AlphaMax);
+				static_cast<double>(BayIndex + 1) / BayCount);
 			Bay.PreferredAxis = AxisIndex == 0
 				? EABTSM73BeamAFrameAxis::X
 				: EABTSM73BeamAFrameAxis::Y;

@@ -295,6 +295,7 @@ bool FABTSM73DAG5BV2RoofPrimitiveTerminalTest::RunTest(
 	const FString& Parameters)
 {
 	using namespace ABTSM73DAG5BV2Tests;
+	bool bSawMergedRoofTerminal = false;
 	for (int32 ArchetypeValue =
 			static_cast<int32>(
 				EABTSM73DAG5BV2Archetype::TerracedCitadel);
@@ -323,6 +324,10 @@ bool FABTSM73DAG5BV2RoofPrimitiveTerminalTest::RunTest(
 			{
 				continue;
 			}
+			bSawMergedRoofTerminal |=
+				Result.Summary.MergedRoofSourceCount > 0;
+			TestTrue(TEXT("Generation retains a semantic roof terminal"),
+				Result.Summary.RoofTerminalCount > 0);
 			for (int32 Index = 0; Index < Result.Volumes.Num(); ++Index)
 			{
 				const FABTSM73DAG5BV2Volume& Volume =
@@ -336,6 +341,24 @@ bool FABTSM73DAG5BV2RoofPrimitiveTerminalTest::RunTest(
 						== EABTSM73DAG5BV2Primitive::Pyramid;
 				if (bRoofPrimitive)
 				{
+					const FVector RoofSize = Volume.LocalBounds.GetSize();
+					const double CourseCount =
+						RoofSize.Z / Settings.RoofCourseHeightCM;
+					TestTrue(TEXT("Roof height is quantized to whole Brick courses"),
+						FMath::IsNearlyEqual(
+							CourseCount,
+							static_cast<double>(FMath::RoundToInt(CourseCount)),
+							0.01));
+					if (Volume.Primitive
+						!= EABTSM73DAG5BV2Primitive::Pyramid)
+					{
+						const EABTSM73DAG5BV2Primitive ExpectedPrism =
+							RoofSize.X >= RoofSize.Y
+								? EABTSM73DAG5BV2Primitive::TriangularPrismY
+								: EABTSM73DAG5BV2Primitive::TriangularPrismX;
+						TestEqual(TEXT("Prism ridge follows the terminal long axis"),
+							Volume.Primitive, ExpectedPrism);
+					}
 					TestFalse(
 						FString::Printf(
 							TEXT(
@@ -349,6 +372,8 @@ bool FABTSM73DAG5BV2RoofPrimitiveTerminalTest::RunTest(
 			}
 		}
 	}
+	TestTrue(TEXT("Seed matrix exercises pre-WFC roof aggregation"),
+		bSawMergedRoofTerminal);
 	return true;
 }
 

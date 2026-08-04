@@ -76,9 +76,23 @@ struct FABTSM73DAG5BV2PreviewSettings
 		meta = (ClampMin = "1", ClampMax = "6"))
 	int32 MaxGrammarDepth = 4;
 
+	/**
+	 * Optional deterministic macro ladder used by the Beam Profile resolver.
+	 * -1 preserves the free weighted grammar; 0..5 force progressively richer
+	 * core/wing/split/setback/supported-span milestones before random detail.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape Grammar",
+		meta = (ClampMin = "-1", ClampMax = "5", AdvancedDisplay))
+	int32 ComplexityMilestoneTier = -1;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape Grammar",
 		meta = (ClampMin = "8", ClampMax = "256"))
 	int32 MaxVolumeCount = 96;
+
+	/** Soft leaf budget; never raises the project-owned MaxVolumeCount gate. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape Grammar",
+		meta = (ClampMin = "3", ClampMax = "256", AdvancedDisplay))
+	int32 TargetVolumeCount = 96;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shape Grammar",
 		meta = (ClampMin = "80.0", ClampMax = "1000.0", Units = "cm"))
@@ -132,8 +146,64 @@ struct FABTSM73DAG5BV2PreviewSettings
 		meta = (ClampMin = "0.0", ClampMax = "10.0"))
 	float PyramidWeight = 1.15f;
 
+	/** Merge coplanar terminal leaves from the same semantic mass before WFC. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (AdvancedDisplay))
+	bool bMergeRoofTerminals = true;
+
+	/** Maximum clear horizontal gap bridged by one semantic roof envelope. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "0.0", ClampMax = "1000.0", Units = "cm",
+			AdvancedDisplay))
+	float RoofMergeGapCM = 320.0f;
+
+	/** Brick course height used to quantize the semantic roof envelope. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "12.0", ClampMax = "120.0", Units = "cm",
+			AdvancedDisplay))
+	float RoofCourseHeightCM = 36.0f;
+
+	/** Lower course-count floor retained even by low-tier roofs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "2", ClampMax = "64", AdvancedDisplay))
+	int32 MinimumRoofCourseCount = 8;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "2", ClampMax = "64", AdvancedDisplay))
+	int32 MaximumRoofCourseCount = 64;
+
+	/** Target roof height divided by the shorter horizontal envelope span. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "0.25", ClampMax = "1.25", AdvancedDisplay))
+	float RoofHeightToShortSpanRatio = 0.90f;
+
+	/** Aspect interval over which primitive preference blends to a prism. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "1.0", ClampMax = "3.0", AdvancedDisplay))
+	float PyramidPreferredMaxAspectRatio = 1.20f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Roof",
+		meta = (ClampMin = "1.0", ClampMax = "5.0", AdvancedDisplay))
+	float PrismPreferredMinAspectRatio = 1.70f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC")
 	bool bRequirePrimitiveVariety = true;
+
+	/**
+	 * Replace the highest eligible terminal Box with exactly one deterministic
+	 * prism or pyramid. Used by low visual tiers to keep a complete building
+	 * silhouette without paying for full primitive variety.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC",
+		meta = (AdvancedDisplay))
+	bool bRequireSingleTerminalRoof = false;
+
+	/** Height reserved for the low-tier terminal roof; displaced height is
+	 * returned to its directly supporting Box volume. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC",
+		meta = (ClampMin = "72.0", ClampMax = "1000.0", Units = "cm",
+			AdvancedDisplay))
+	float SingleTerminalRoofHeightCM = 144.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WFC|Budget",
 		meta = (ClampMin = "64", ClampMax = "131072"))
@@ -171,6 +241,12 @@ struct FABTSM73DAG5BV2PreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 PyramidCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 RoofTerminalCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
+	int32 MergedRoofSourceCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Result")
 	int32 SupportedSpanCount = 0;

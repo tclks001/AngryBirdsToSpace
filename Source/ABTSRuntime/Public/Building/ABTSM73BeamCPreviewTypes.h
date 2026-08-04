@@ -24,6 +24,20 @@ struct FABTSM73BeamCPreviewSettings
 		meta = (ClampMin = "0.0001", ClampMax = "1.0"))
 	float MinimumBearingAreaRatio = 0.001f;
 
+	/** Recompute every declared bearing from final Brick AABBs and reject disagreement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Real Contact")
+	bool bRequireRealContactAgreement = true;
+
+	/** Maximum accepted position/face-plane error in the real-contact audit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Real Contact",
+		meta = (ClampMin = "0.01", ClampMax = "10.0", Units = "cm"))
+	float RealContactToleranceCM = 0.25f;
+
+	/** Relative tolerance between declared and recomputed contact area. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Real Contact",
+		meta = (ClampMin = "0.0001", ClampMax = "0.25"))
+	float RealContactAreaToleranceRatio = 0.001f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy",
 		meta = (ClampMin = "1.0", ClampMax = "1000000.0"))
 	float ReferenceLoadKG = 10000.0f;
@@ -47,6 +61,36 @@ struct FABTSM73BeamCPreviewSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float MaximumCantileverRatio = 1.0f;
+
+	/** Long horizontal blocks above this length/section ratio require robust support spread. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy|Support Spread",
+		meta = (ClampMin = "1.0", ClampMax = "20.0"))
+	float MaximumSingleSupportMemberLengthRatio = 3.0f;
+
+	/** One continuous bearing patch is sufficient only when it covers this fraction of the block. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy|Support Spread",
+		meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	float MinimumSingleSupportCoverageRatio = 0.20f;
+
+	/** Multiple bearing patches must span at least this fraction of the supported block. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy|Support Spread",
+		meta = (ClampMin = "0.01", ClampMax = "1.0"))
+	float MinimumSeparatedSupportSpanRatio = 0.20f;
+
+	/** Required distance from the accumulated load resultant to the support envelope edge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy|Support Spread",
+		meta = (ClampMin = "0.0", ClampMax = "60.0", Units = "cm"))
+	float SupportResultantMarginCM = 0.50f;
+
+	/** Bounded repair passes used by production structural closure. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Closure",
+		meta = (ClampMin = "1", ClampMax = "32"))
+	int32 MaximumStructuralClosurePasses = 32;
+
+	/** Hard cap for Z posts inserted by one production structural closure. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural Closure",
+		meta = (ClampMin = "1", ClampMax = "4096"))
+	int32 MaximumStructuralSupportPosts = 2048;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Static Proxy",
 		meta = (ClampMin = "1.0", ClampMax = "1000.0"))
@@ -105,6 +149,21 @@ struct FABTSM73BeamCLoadNode
 	float CantileverRatio = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static Proxy")
+	int32 RealSupportIntervalCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static Proxy")
+	float RealSupportCoverageRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static Proxy")
+	float RealSupportSpanRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	bool bSupportResultantValid = true;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	bool bSupportSpreadValid = true;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static Proxy")
 	float SpanUtilization = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static Proxy")
@@ -133,6 +192,13 @@ struct FABTSM73BeamCLoadEdge
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
 	float ContactAreaCM2 = 0.0f;
+
+	/** Recomputed final-Brick contact rectangle in local XY. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	FVector2D ContactMinXY = FVector2D::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
+	FVector2D ContactMaxXY = FVector2D::ZeroVector;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Load")
 	float LoadShare = 0.0f;
@@ -166,6 +232,25 @@ struct FABTSM73BeamCPreviewSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 BearingAreaViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 RealContactMismatchCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 SupportResultantViolationCount = 0;
+
+	/** Residual longitudinal imbalance deferred to Beam-D2 after bounded repair. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 SupportResultantAdvisoryCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+	int32 SupportSpreadViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 StructuralClosurePassCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
+	int32 AddedStructuralSupportPostCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
 	int32 ReactionBalanceViolationCount = 0;
