@@ -24,6 +24,7 @@ R-4.1 直接前置：
 阶段子文档：
 
 - [M3R-4 弹道 Witness 与流程闭环设计](M3R4BallisticWitnessAndFlowClosureDesign.md)
+- [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md)
 
 直接下游：
 
