@@ -4,6 +4,7 @@
 > 上游：[M7.3-Beam-B Motif WFC 与结构图语法](M73BeamBMotifWFCAndGraphGrammarDesign.md)
 > 理论依据：[长条积木结构生成调研](M73BeamBlockStructuralGenerationResearch.md)
 > 状态：首版 C++、自动化和用户编辑器读形验收已完成；不接管 TaskGraph 生产建筑。
+> 承重收口子阶段：[M7.3-Beam-C2 真实接触检测与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)
 > 下一阶段：[M7.3-Beam-D0 Profile Catalog、Difficulty Curve 与 Settings Resolver](M73BeamD0GameplayProfileCatalogDesign.md)
 
 ## 1. 阶段目标
@@ -51,8 +52,9 @@ Shape Grammar + WFC silhouette
   -> Beam-D real bricks + Chaos + weakness closure
 ```
 
-Beam-C 不再移动、增删或重新猜测 Beam-B 构件。若输入缺少支撑，Beam-C 返回稳定拒绝，
-修复必须回到 Beam-A/B 的装配规则。
+Beam-C 首版只分析、不修复。Beam-C2 在保持该分析器纯数据、失败关闭的前提下增加独立的
+有界结构收口器：它只为阻断型支撑违规补充局部 Z 柱，并在每轮后回到 Beam-A 的权威装配闭合，
+重新计算真实接触和 Load DAG。具体合同见 [Beam-C2 子设计稿](M73BeamC2RealContactAndLoadClosureDesign.md)。
 
 ## 4. Load DAG 数据模型
 
@@ -144,3 +146,12 @@ UpperMemberId -> LowerMemberId
   环、失地、承压面积、跨度、长细比与侧向机制；
 - fresh NullRHI `ABTS.M7` 全量回归 104/104；
 - 新 Preview Actor 无碰撞、运行时隐藏，不修改共享地图或生产默认绑定。
+
+## 10. 2026-08-03 Beam-C2 承重收口
+
+- 最终 Member 几何成为 Bearing Contact 真值来源，声明接触与真实 AABB 面接触不一致会稳定拒绝；
+- 新增合力落点与支撑展宽检查，阻止宽水平构件仅由一根细柱承载；
+- D1 生产编译改为消费有界结构收口结果，新增支撑后重建 Beam-A/B 接触、计数与 Hash；
+- Beam-C 专项由 9 项扩展为 11 项，加入伪接触和单细柱展宽拒绝；
+- 完整参数、拒绝语义和自动化门槛见
+  [M7.3-Beam-C2 真实接触检测与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)。

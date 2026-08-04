@@ -110,11 +110,20 @@ Z4  两根上层 Secondary，再次正交压住 Primary
 
 屋顶不生成斜杆。每层使用 1、3 或 5 根同向水平积木，相邻层交替 X/Y；随高度增加：
 
+- 一个非 Box 屋顶语义体始终编译成一个不可再沿长轴切分的 Roof Bay，避免同一屋脊被 Bay 边界拆成数段；
+- Prism 的收分轴由上游 primitive 决定，物理屋脊沿包络长轴；最顶 course 强制只生成一根覆盖长轴的积木，下一层开始逐层均匀展开；
+- Pyramid 同时沿 X/Y 收分；Prism 只沿短轴收分。两者的 course 数均来自上游已经按短边量化的屋顶高度，而不是独立的固定低层数；
 - `Pyramid` 同时缩短 X、Y 可用范围；
 - `TriangularPrismX` 只沿 X 收分；
 - `TriangularPrismY` 只沿 Y 收分。
 
-中心积木保证相邻正交层至少存在一个真实承托交点，外侧积木负责拟合阶梯状轮廓。
+语义包络仍决定当前层的横向站位和屋顶外轮廓；但物理积木沿自身长轴必须继承紧邻下层的完整跨度，
+即“上层积木长度 = 下层在该轴上的宽度”。这样正交堆放的上层会直接跨到下层平行积木上，
+而不是因为低层数、大收分步长而在两层之间断开。`Pyramid` 每层都应用该逐层承托规则；
+`TriangularPrismX/Y` 因只有一个轴收分，在 X/Y 交替铺设时表现为每两层修正一次。
+
+中心积木和外侧积木都必须在紧邻下层找到正面积 XY 接触。屋顶的语义收分不得靠全局装配阶段新增
+落地救援柱掩盖；固定种子回归会同时检查直接承托、真实接触和补救立柱计数。
 
 ### 4.4 接触提取与预算
 
@@ -186,7 +195,7 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 
 ## 6. 自动化验收合同
 
-过滤器：`ABTS.M73DAG.BeamA.`，当前共 10 项。
+过滤器：`ABTS.M73DAG.BeamA.`，当前共 11 项；新增 `PrismLongAxisRidge` 固定验证单一 Roof Bay、单根长轴屋脊和完整屋脊跨度。
 
 - `Determinism`：同输入的 Bay、Member、Bearing、Assembly 和 Hash 完全相同；
 - `ArchetypeCoverage`：四类轮廓均接受，拥有 X/Y/Z、Bearing，且 Diagonal 恒为 0；
@@ -212,7 +221,7 @@ Overlap、无导航影响，并在 PIE/游戏中隐藏。
 2. 红色 X 积木与绿色 Y 积木应位于不同高度，清楚显示谁搭在谁上；
 3. 蓝色柱底应落在水平梁上，柱头上方应承托另一层水平梁；
 4. 所有积木只有 XYZ 三种方向，不应出现任何斜杆；
-5. Prism/Pyramid 屋顶应呈阶梯式逐层收分，而不是三角斜杆；
+5. Prism/Pyramid 屋顶应呈阶梯式逐层收分，而不是三角斜杆；Prism 顶部还应只有一根沿长轴的连续屋脊，不得被拆成多个相邻小屋脊；
 6. 调整 `BlockCrossSectionCM` 时所有积木的两条短边同步变化，长度仍随轮廓独立变化；
 7. Details 中 Accepted 为真、BearingContactCount 大于 0、DiagonalMemberCount 等于 0；
    `RemainingPenetrationCount` 与 `UnsupportedMemberCount` 均为 0；

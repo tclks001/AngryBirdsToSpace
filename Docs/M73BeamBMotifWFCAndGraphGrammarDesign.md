@@ -40,6 +40,8 @@ Beam-A 已解决“语义 Volume 如何变成可搭放的 XYZ 长条积木和 Be
 
 ```text
 DAG5-B v2 semantic volumes
+  -> merge coplanar neighboring roof terminals before primitive WFC
+  -> choose Pyramid/Prism from merged-terminal aspect ratio; Prism ridge follows long axis
   -> Beam-A Bay decomposition and accepted stacked-block baseline
   -> Beam-B domain construction
   -> deterministic Motif WFC collapse + port propagation
@@ -59,6 +61,7 @@ Beam-B 的 `PlannedMember` 是结构意图，不是物理 Brick。它保留 Bay�
 重建和最终穿透检查。Beam-C 只消费闭合结果，不再重新猜测 Beam-B 的空间装配关系。
 
 非 Box Bay 使用共享的 `ABTSM73BeamA::BuildSemanticRoofMembers` 生成规划层 `RoofCourse`。
+上游已经把相邻屋顶叶合并成 Crown，并把高度量化为完整 Brick course；Beam-B 不得重新拆分 Crown、改变屋脊方向或用 Motif 替代语义屋顶。
 闭合编译不复制一套近似屋顶，而是从已验收的 Beam-A Assembly 中保留该语义体及其沿 Bearing
 向下的完整支撑祖先，再与 Box Bay 的 Beam-B Motif 构件一起交给
 `ABTSM73BeamA::CloseGeneratedAssembly`。这样轮廓来源和结构闭合各有唯一权威实现。
@@ -141,8 +144,10 @@ Actor：`M7.3 Beam-B Motif WFC Preview`。
   `BridgeSuspendedBeamTargetCount`，且 `BridgeSuspendedBeamSupportViolationCount` 为 0；新增
   `BridgePost` 必须逐根证明“纵梁/桥托 -> Z 柱 -> 端部模块水平构件”的上下 Bearing。任一局部
   端缝或漏支撑均拒绝整次生成。
-- `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层包络内，最高层相对最低层
-  在对应轴上明显收分，同时最终闭合结构仍须无悬空、无穿透。
+- `SemanticRoofFitting`：Prism/Pyramid 的规划屋顶必须落在 Beam-A 权威逐层承托包络内。当前层横向
+  站位服从自身语义收分，但积木长轴继承紧邻下层的跨度；最高层相对最低层仍须在对应轴上明显
+  收分。审计逐根要求每根非底层屋顶积木与紧邻下层存在正面积 XY 接触，不能把后续新增救援柱
+  当作屋顶层间连接，同时最终闭合结构仍须无悬空、无穿透。
 
 ## 7. 用户编辑器验收
 

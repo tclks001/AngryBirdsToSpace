@@ -1,12 +1,12 @@
 # M7.3-Beam-D1：真实 Brick 与材料角色编译
 
-> 上游：[Beam-D0 Profile Catalog](M73BeamD0GameplayProfileCatalogDesign.md) · [Beam-C Load DAG](M73BeamCLoadDAGAndStaticProxyDesign.md)
+> 上游：[Beam-D0 Profile Catalog](M73BeamD0GameplayProfileCatalogDesign.md) · [Beam-C Load DAG](M73BeamCLoadDAGAndStaticProxyDesign.md) · [Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)
 >
 > 总路线：[M7 建筑开发路线](M7BuildingDevelopmentRoadmap.md)
 >
-> 下游：Beam-D2 弱点、Chaos 与 `Profile × Tier` 认证；Beam-E Catalog 冻结和 M3 生产接入
+> 下游：[Beam-D1.5 视觉复杂度阶梯](M73BeamD15VisualComplexityLadderDesign.md) → Beam-D2 弱点、Chaos 与 `Profile × Tier` 认证；Beam-E Catalog 冻结和 M3 生产接入
 >
-> 状态：首版 C++、独立编辑器预览、真实 Module 测试入口与自动化已完成；待用户编辑器读形验收
+> 状态：首版 C++、独立编辑器预览、真实 Module 测试入口与自动化已完成，并已通过用户编辑器读形验收
 
 ## 1. 阶段目标
 
@@ -33,7 +33,7 @@ GameplayProfileId + DifficultyTier + Seed
   -> Shape Grammar/WFC silhouette
   -> Beam-A structural IR
   -> Beam-B closed assembly
-  -> Beam-C Load DAG/static proxy
+  -> Beam-C2 exact contact + structural load closure + Load DAG/static proxy
   -> Beam-D1 member-role selection
   -> one Member : one Brick binding
   -> FABTSM7BrickSpec + LocalTransform
@@ -89,7 +89,8 @@ Seam/Slide 优先桥梁与连接构件，TipOver 选外侧承载 Z 柱，DropTri
 ## 7. 输出与诊断
 
 Summary 至少包含：Profile 身份、Tier、Member/Brick/引用数、四种材料数量、弱点/装置角色
-数量、严格穿透数、真实局部 AABB、上游 Hash、D1 几何/角色 Hash 和稳定拒绝原因。
+数量、严格穿透数、真实局部 AABB、上游 Hash、D1 几何/角色 Hash 和稳定拒绝原因；并透传
+Beam-C2 的收口轮次、新增支撑柱、真实接触不一致、阻断支撑违规与静态 Advisory 数量。
 
 ## 8. 自动化验收
 
@@ -124,3 +125,10 @@ Summary 至少包含：Profile 身份、Tier、Member/Brick/引用数、四种�
 - `ABTS.M73DAG.Beam` 路线回归 42/42、`ABTS.M7` 全量回归 115/115 通过；
 - 强制 Unity、禁用 Adaptive Unity 的 Development Editor 编译通过；
 - 未修改共享合同、配置、Build.cs、地图资产或 DAG2.3 生产绑定。
+
+## 11. Beam-C2 接入
+
+- D1 不再直接编译首轮 Beam-B 结果，而是编译 Beam-C2 接受后的闭合 Member 集；
+- 新增支撑柱与重建接触计入最终 `MemberCount == BrickCount`、几何 Hash 和 Bounds；
+- `RealContactMismatchCount`、阻断型合力违规或支撑展宽违规任一非零时，D1 fail closed；
+- 一维合力 Advisory 保留在 Summary，等待 Beam-D2 的 settled contact 与 Chaos 认证。

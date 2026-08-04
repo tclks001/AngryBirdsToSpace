@@ -1,8 +1,8 @@
 # M7.3-Beam-D0：Gameplay Profile Catalog、Difficulty Curve 与 Settings Resolver
 
 > 父文档：[M7 建筑生成演进路线](M7BuildingDevelopmentRoadmap.md)
-> 上游：[M7.3-Beam-C Load DAG 与静态传力代理](M73BeamCLoadDAGAndStaticProxyDesign.md)
-> 后续：[Beam-D1 真实 Brick/材料角色](M73BeamD1RealBrickAndMaterialRolesDesign.md)，Beam-D2 弱点/Chaos/Profile×Tier 认证，Beam-E Catalog 冻结与 M3 六栋生产接入
+> 上游：[M7.3-Beam-C Load DAG 与静态传力代理](M73BeamCLoadDAGAndStaticProxyDesign.md) · [Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)
+> 后续：[Beam-D1 真实 Brick/材料角色](M73BeamD1RealBrickAndMaterialRolesDesign.md) → [Beam-D1.5 视觉复杂度阶梯](M73BeamD15VisualComplexityLadderDesign.md)，Beam-D2 弱点/Chaos/Profile×Tier 认证，Beam-E Catalog 冻结与 M3 六栋生产接入
 > 状态：首版 C++ 与自动化已完成；不修改共享世界生成合同，不接管 TaskGraph 生产建筑。
 
 ## 1. 目标
@@ -91,6 +91,8 @@ Tier 还可温和改变轮廓尺寸、语法深度、Bay 间距和并行积木�
 - `ResolvedM7ProfileId = <GameplayProfileId>_T<DifficultyTier>`；
 - `ProfileCatalogHash` 覆盖 Catalog 版本、所有 Profile 语义、几何策略和完整 Difficulty Curve；
 - `ResolvedSettingsHash` 额外覆盖精确 Tier、种子、派生玩法指标和派生生成策略；
+- Beam-C2 的真实接触容差、支撑覆盖/跨度门槛和结构收口预算属于行为相关设置，必须进入
+  `ResolvedSettingsHash`；它们仍是 M7 内部项目级策略，不成为 M3 输入；
 - Catalog 定义先按 ID 排序再 Hash，源数组顺序不影响身份；
 - 改变任何行为相关字段必须改变 Catalog Hash；
 - 未知 ID、越界 Tier、重复 ID 或非法数据全部 fail closed。
@@ -122,3 +124,22 @@ Beam-D0 为纯数据阶段，不要求新建或修改地图资产，也不以可
 - fresh NullRHI `ABTS.M73DAG.Beam` 路线回归 37/37；
 - fresh NullRHI `ABTS.M7` 全量回归 110/110；
 - 未修改共享合同、配置、Build.cs 或地图资产，现行 DAG2.3 生产绑定保持不变。
+
+## 10. Catalog v3 与 Beam-C2
+
+- Catalog 版本提升为 3，Resolved Settings Hash 覆盖真实接触与承重收口全部行为参数；
+- 高 Tier 候选次数和 Brick 窗口按 30 组生产矩阵重新校准；
+- `ColumnBreak` E5/E6 使用稳定双塔和密度增长，不以不稳定的深轮廓递归冒充复杂度；
+- Catalog 仍只暴露 `GameplayProfileId + DifficultyTier + DeterministicSeed`，不向 M3 暴露收口参数。
+
+## 11. Catalog v6 与按终端比例生成的立体屋顶
+
+- E1/E2 不再把 Prism/Pyramid 权重归零；Catalog v6 为两档启用 `bRequireSingleTerminalRoof`，并分别保留至少 8/10 个屋顶 course。
+- Shape Grammar 在 primitive WFC 之前先合并同高、相邻且覆盖率足够的屋顶终端；低 Tier 再从合并后的 Crown 中选择最高、面积最大的唯一屋顶，其余终端保持 Box。
+- 屋顶目标高度取合并终端短边的约 90%，并量化为完整 Beam-A 截面；E1/E2 的 8/10 course 是下限，不是固定低高度。独占承重体把高度边界返还给直接承托的 Box；共享承重体保持接触底面并量化顶面，不新增量体、不制造缝隙。
+- WFC 依据合并终端的长宽比加权选择形体：接近方形时偏向 Pyramid，长宽差较大时偏向 Prism；Prism 收分短轴并把屋脊对齐长轴。
+- E3 仍是首次强制完整 primitive 多样性的档位，因此 E1/E2 获得建筑读形，但不会偷跑 E3 的轮廓复杂度。
+- 单屋顶策略、屋顶合并、短边高度比例、长宽比阈值、屋顶 course 数及 Catalog v6 均进入 Catalog/Resolved Settings Hash；M3 外部输入合同保持不变。
+- D1 Summary 记录 `RoofCourseBrickCount`，Preview 日志直接输出 `RoofBricks=`，用于区分“语义上是屋顶”和“实际已有足够层数可读”两件事。
+- 固定矩阵仍满足原 Brick 窗口，因此没有调整平行积木最小间距或二并一阈值。
+- fresh NullRHI `ABTS.M73DAG.BeamD0.*` 6/6、`ABTS.M73DAG.BeamD15.*` 3/3、`ABTS.M7` 123/123；强制 Unity、禁用 Adaptive Unity 的 Development Editor 完整链接通过。
