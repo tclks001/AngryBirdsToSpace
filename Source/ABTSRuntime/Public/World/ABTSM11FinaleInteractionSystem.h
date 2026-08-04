@@ -5,6 +5,7 @@
 #include "Async/Future.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "UI/ABTSM11FinaleHUDData.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
 #include "ABTSM11FinaleInteractionSystem.generated.h"
 
@@ -48,6 +49,22 @@ public:
 	bool BeginAimFromCursor(APlayerController& Controller);
 	bool UpdateAimFromCursor(APlayerController& Controller);
 	void AdjustAimPower(double WheelSteps);
+	bool ApplyHudControlDrag(
+		EABTSM11FinaleControlAxis Axis,
+		double PixelDelta,
+		EABTSM11ControlSpeedGear Gear);
+	bool ApplyHudControlWheel(
+		EABTSM11FinaleControlAxis Axis,
+		double WheelSteps,
+		EABTSM11ControlSpeedGear Gear);
+	bool ResetHudControlAxis(EABTSM11FinaleControlAxis Axis);
+	bool PanHudOverview(const FVector2d& NormalizedScreenDelta);
+	bool RotateHudOverview(double YawDegrees, double PitchDegrees);
+	bool ZoomHudOverview(double ZoomMultiplier);
+	bool ResetHudOverview();
+	bool SelectHudTrajectoryProbe(const FABTSM11TrajectoryHit& Hit);
+	bool RebaseHudTrajectoryProbe();
+	void FollowAutomaticPreviewTarget();
 	void RequestRelease();
 	void CancelStabilizerOrResetAttempt();
 	void ExitFinale();
@@ -80,6 +97,37 @@ public:
 	{
 		return DiagramSnapshot;
 	}
+	const FABTSM11OrbitalSceneSnapshot& GetHudOrbitalScene() const
+	{
+		return HudOrbitalScene;
+	}
+	const FABTSM11OverviewProjection& GetHudOverviewProjection() const
+	{
+		return HudOverviewProjection;
+	}
+	const FABTSM11OverviewViewState& GetHudOverviewView() const
+	{
+		return HudOverviewView;
+	}
+	const FABTSM11TrajectoryProbe& GetHudTrajectoryProbe() const
+	{
+		return HudTrajectoryProbe;
+	}
+	const FABTSM11ProbeProjection& GetHudProbeProjection() const
+	{
+		return HudProbeProjection;
+	}
+	const FABTSM11OrbitalSceneSnapshot& GetHudProbeReferenceScene() const
+	{
+		return HudProbeReferenceScene;
+	}
+	bool HasHudTrajectoryProbe() const
+	{
+		return HudTrajectoryProbe.bValid;
+	}
+	uint64 GetHudOverviewRevision() const { return HudOverviewRevision; }
+	uint64 GetHudProbeRevision() const { return HudProbeRevision; }
+	uint64 GetTargetCaptureCount() const { return TargetCaptureCount; }
 	const FABTSM11PlaybackPlan& GetPreviewPlaybackPlan() const
 	{
 		return PreviewPlaybackPlan;
@@ -146,6 +194,9 @@ private:
 		TSharedPtr<FABTSM11NominalSolvePayload> Payload);
 	void DrainCompletedSolves();
 	void RebuildPublishedPreview();
+	void RebuildHudPublishedData();
+	bool ApplyHudTargetInput(
+		const FABTSM11FinaleLaunchInput& TargetDesiredInput);
 	bool FinalizePendingRelease();
 	void UpdateAiming(float DeltaSeconds);
 	void UpdatePlayback(float DeltaSeconds);
@@ -166,6 +217,7 @@ private:
 	bool DoesInputMatchLatestSolve() const;
 	AActor* ResolvePreviewTargetActor(
 		EABTSM11PreviewTarget Target) const;
+	AActor* ResolveHudProbeContextActor() const;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11-C|Capture")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -251,6 +303,14 @@ private:
 	FABTSM11PlaybackPlan PreviewPlaybackPlan;
 	FABTSM11PlaybackPlan ReleasedPlaybackPlan;
 	FABTSM11OrbitalDiagramSnapshot DiagramSnapshot;
+	FABTSM11FinaleControlPanelState HudControlPanel;
+	FABTSM11OverviewViewState HudOverviewView;
+	FABTSM11OverviewViewState InitialHudOverviewView;
+	FABTSM11OrbitalSceneSnapshot HudOrbitalScene;
+	FABTSM11OverviewProjection HudOverviewProjection;
+	FABTSM11TrajectoryProbe HudTrajectoryProbe;
+	FABTSM11ProbeProjection HudProbeProjection;
+	FABTSM11OrbitalSceneSnapshot HudProbeReferenceScene;
 	FABTSM11FinaleLaunchInput InitialAimInput;
 	FABTSM11FinaleLaunchInput LatestSolvedInput;
 	FABTSM11FinaleLaunchInput FrozenReleaseInput;
@@ -267,6 +327,9 @@ private:
 	double PlaybackElapsedSeconds = 0.0;
 	double PlaybackPresentationEndTimeSeconds = 0.0;
 	uint64 DiscardedPreviewSolveCount = 0;
+	uint64 HudOverviewRevision = 0;
+	uint64 HudProbeRevision = 0;
+	uint64 TargetCaptureCount = 0;
 	int64 AimRevision = 0;
 	int64 LatestSolvedRevision = INDEX_NONE;
 	TFuture<TSharedPtr<FABTSM11PreviewSolvePayload>> PreviewSolveFuture;

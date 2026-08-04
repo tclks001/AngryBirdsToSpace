@@ -6,6 +6,7 @@
 #include "Game/ABTSM11GameMode.h"
 #include "InputCoreTypes.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
+#include "UI/ABTSM11FinaleHUD.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM51WorldActors.h"
 
@@ -17,6 +18,11 @@ void AABTSM11PlayerController::SetupInputComponent()
 		IE_Released,
 		this,
 		&AABTSM11PlayerController::M11PrimaryReleased);
+	InputComponent->BindAction(
+		TEXT("ABTS_PrimaryInteract"),
+		IE_DoubleClick,
+		this,
+		&AABTSM11PlayerController::M11PrimaryDoubleClicked);
 	InputComponent->BindAxis(
 		TEXT("ABTS_CameraZoom"),
 		this,
@@ -58,18 +64,31 @@ void AABTSM11PlayerController::PlayerTick(const float DeltaTime)
 	}
 	if (bActive
 		&& !bRestoreOrbitCursorThisFrame
-		&& bM11PullReleaseArmed
-		&& Interaction->IsAiming()
-		&& IsInputKeyDown(EKeys::LeftMouseButton))
+		&& Interaction->IsAiming())
 	{
-		Interaction->UpdateAimFromCursor(*this);
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
+		if (GetMousePosition(MouseX, MouseY))
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinalePointerMoved(
+					*Interaction,
+					FVector2D(MouseX, MouseY));
+			}
+		}
 	}
 	if (bActive != bWasM11FinaleActive)
 	{
 		SetM11FinaleInputMode(bActive);
 		if (!bActive)
 		{
-			bM11PullReleaseArmed = false;
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->CancelFinaleHudCapture();
+			}
 		}
 		bWasM11FinaleActive = bActive;
 	}
@@ -79,9 +98,13 @@ void AABTSM11PlayerController::FlushPressedKeys()
 {
 	// Focus loss may synthesize a release. Disarm before the base class
 	// flushes keys so an inherited/synthetic release can never launch.
-	bM11PullReleaseArmed = false;
 	bM11OrbitCursorSaved = false;
 	bRestoreM11CursorAfterOrbitRelease = false;
+	if (AABTSM11FinaleHUD* FinaleHud =
+		Cast<AABTSM11FinaleHUD>(GetHUD()))
+	{
+		FinaleHud->CancelFinaleHudCapture();
+	}
 	Super::FlushPressedKeys();
 }
 
@@ -106,9 +129,8 @@ void AABTSM11PlayerController::InteractWithSlingshotCord(
 		{
 			if (Interaction->TryEnterFinale(*Cord, *this))
 			{
-				// The Space-pouch actor press is also the first drag press.
-				// Its matching release launches; no second click is required.
-				bM11PullReleaseArmed = true;
+				// HUD-1B enters a console. The entry click never arms launch;
+				// only the explicit LAUNCH button may request Release.
 				SetM11FinaleInputMode(true);
 				bWasM11FinaleActive = true;
 			}
@@ -124,10 +146,18 @@ void AABTSM11PlayerController::PrimaryWorldInteract()
 		FindM11Interaction();
 		Interaction != nullptr && Interaction->IsFinaleActive())
 	{
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
 		if (Interaction->IsAiming()
-			&& Interaction->BeginAimFromCursor(*this))
+			&& GetMousePosition(MouseX, MouseY))
 		{
-			bM11PullReleaseArmed = true;
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinalePrimaryPressed(
+					*Interaction,
+					FVector2D(MouseX, MouseY));
+			}
 		}
 		return;
 	}
@@ -166,15 +196,40 @@ void AABTSM11PlayerController::M11PrimaryReleased()
 	if (AABTSM11FinaleInteractionSystem* Interaction =
 		FindM11Interaction();
 		Interaction != nullptr
-		&& Interaction->IsAiming()
-		&& bM11PullReleaseArmed)
+		&& Interaction->IsFinaleActive())
 	{
-		bM11PullReleaseArmed = false;
-		Interaction->RequestRelease();
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
+		if (GetMousePosition(MouseX, MouseY))
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinalePrimaryReleased(
+					*Interaction,
+					FVector2D(MouseX, MouseY));
+			}
+		}
 	}
-	else
+}
+
+void AABTSM11PlayerController::M11PrimaryDoubleClicked()
+{
+	if (AABTSM11FinaleInteractionSystem* Interaction = FindM11Interaction();
+		Interaction != nullptr && Interaction->IsAiming())
 	{
-		bM11PullReleaseArmed = false;
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
+		if (GetMousePosition(MouseX, MouseY))
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinalePrimaryDoubleClicked(
+					*Interaction,
+					FVector2D(MouseX, MouseY));
+			}
+		}
 	}
 }
 
@@ -187,11 +242,18 @@ void AABTSM11PlayerController::M11Power(const float Value)
 			FindM11Interaction();
 			Interaction != nullptr && Interaction->IsAiming())
 		{
-			// Match the existing ABTS convention: wheel down increases power.
-			Interaction->AdjustAimPower(-Value);
-			if (bM11PullReleaseArmed)
+			float MouseX = 0.0f;
+			float MouseY = 0.0f;
+			if (GetMousePosition(MouseX, MouseY))
 			{
-				Interaction->UpdateAimFromCursor(*this);
+				if (AABTSM11FinaleHUD* FinaleHud =
+					Cast<AABTSM11FinaleHUD>(GetHUD()))
+				{
+					FinaleHud->HandleFinaleWheel(
+						*Interaction,
+						FVector2D(MouseX, MouseY),
+						-Value);
+				}
 			}
 		}
 	}
@@ -217,6 +279,16 @@ void AABTSM11PlayerController::M11OrbitPressed()
 			M11OrbitCursorX,
 			M11OrbitCursorY);
 		bRestoreM11CursorAfterOrbitRelease = false;
+		if (bM11OrbitCursorSaved && Interaction->IsAiming())
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinaleSecondaryPressed(
+					*Interaction,
+					FVector2D(M11OrbitCursorX, M11OrbitCursorY));
+			}
+		}
 	}
 }
 
@@ -226,6 +298,18 @@ void AABTSM11PlayerController::M11OrbitReleased()
 		FindM11Interaction();
 		Interaction != nullptr && Interaction->IsFinaleActive())
 	{
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
+		if (GetMousePosition(MouseX, MouseY))
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinaleSecondaryReleased(
+					*Interaction,
+					FVector2D(MouseX, MouseY));
+			}
+		}
 		// M4's release handler restores its historical orbit cursor even when
 		// finale input blocked the matching press. Restore the M11 cursor
 		// after all input delegates have run, in PlayerTick.

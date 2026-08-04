@@ -279,6 +279,16 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	PreviewSelection = FABTSM11PreviewSelection();
 	PreviewPlaybackPlan.Reset();
 	DiagramSnapshot = FABTSM11OrbitalDiagramSnapshot();
+	HudControlPanel = FABTSM11FinaleControlPanelState();
+	HudOverviewView = FABTSM11OverviewViewState();
+	InitialHudOverviewView = FABTSM11OverviewViewState();
+	HudOrbitalScene = FABTSM11OrbitalSceneSnapshot();
+	HudOverviewProjection = FABTSM11OverviewProjection();
+	HudTrajectoryProbe = FABTSM11TrajectoryProbe();
+	HudProbeProjection = FABTSM11ProbeProjection();
+	HudProbeReferenceScene = FABTSM11OrbitalSceneSnapshot();
+	HudOverviewRevision = 0;
+	HudProbeRevision = 0;
 	bTargetCaptureDirty = false;
 	bTargetCaptureInitialized = false;
 	UpdatePouchPresentation();
@@ -379,6 +389,236 @@ void AABTSM11FinaleInteractionSystem::AdjustAimPower(
 		bPreviewDirty = true;
 		UpdatePouchPresentation();
 	}
+}
+
+bool AABTSM11FinaleInteractionSystem::ApplyHudControlDrag(
+	const EABTSM11FinaleControlAxis Axis,
+	const double PixelDelta,
+	const EABTSM11ControlSpeedGear Gear)
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		|| !IsValid(FinaleSystem)
+		|| !HudControlPanel.Initialize(
+			FinaleSystem->GetLayoutPreset().LaunchModel,
+			Stabilizer.GetDesiredInput()))
+	{
+		return false;
+	}
+	HudControlPanel.SetSpeedGear(Gear);
+	return HudControlPanel.ApplyDragPixels(Axis, PixelDelta)
+		&& ApplyHudTargetInput(HudControlPanel.GetInput());
+}
+
+bool AABTSM11FinaleInteractionSystem::ApplyHudControlWheel(
+	const EABTSM11FinaleControlAxis Axis,
+	const double WheelSteps,
+	const EABTSM11ControlSpeedGear Gear)
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		|| !IsValid(FinaleSystem)
+		|| !HudControlPanel.Initialize(
+			FinaleSystem->GetLayoutPreset().LaunchModel,
+			Stabilizer.GetDesiredInput()))
+	{
+		return false;
+	}
+	HudControlPanel.SetSpeedGear(Gear);
+	return HudControlPanel.ApplyWheelSteps(Axis, WheelSteps)
+		&& ApplyHudTargetInput(HudControlPanel.GetInput());
+}
+
+bool AABTSM11FinaleInteractionSystem::ResetHudControlAxis(
+	const EABTSM11FinaleControlAxis Axis)
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming)
+	{
+		return false;
+	}
+	FABTSM11FinaleLaunchInput Target = Stabilizer.GetDesiredInput();
+	switch (Axis)
+	{
+	case EABTSM11FinaleControlAxis::Yaw:
+		Target.YawDegrees = InitialAimInput.YawDegrees;
+		break;
+	case EABTSM11FinaleControlAxis::Pitch:
+		Target.PitchDegrees = InitialAimInput.PitchDegrees;
+		break;
+	case EABTSM11FinaleControlAxis::Power:
+		Target.Power = InitialAimInput.Power;
+		break;
+	default:
+		return false;
+	}
+	// A reset is an explicit absolute command, not a precision-scaled trim.
+	Stabilizer.CancelProtection();
+	return ApplyHudTargetInput(Target);
+}
+
+bool AABTSM11FinaleInteractionSystem::ApplyHudTargetInput(
+	const FABTSM11FinaleLaunchInput& TargetDesiredInput)
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::Aiming
+		|| !TargetDesiredInput.IsFinite())
+	{
+		return false;
+	}
+	const FABTSM11FinaleLaunchInput Before =
+		Stabilizer.GetControlledInput();
+	const FABTSM11FinaleLaunchInput Desired =
+		Stabilizer.GetDesiredInput();
+	Stabilizer.ApplyInputDelta(
+		TargetDesiredInput.YawDegrees - Desired.YawDegrees,
+		TargetDesiredInput.PitchDegrees - Desired.PitchDegrees,
+		TargetDesiredInput.Power - Desired.Power);
+	if (SameInteractionInput(Before, Stabilizer.GetControlledInput()))
+	{
+		return false;
+	}
+	++AimRevision;
+	bPreviewDirty = true;
+	UpdatePouchPresentation();
+	return true;
+}
+
+bool AABTSM11FinaleInteractionSystem::RotateHudOverview(
+	const double YawDegrees,
+	const double PitchDegrees)
+{
+	if (!IsAiming()
+		|| !HudOverviewView.ApplyOrbitRotation(
+			YawDegrees,
+			PitchDegrees)
+		|| !FABTSM11OverviewProjector::Build(
+			HudOrbitalScene,
+			HudOverviewView,
+			HudOverviewProjection))
+	{
+		return false;
+	}
+	++HudOverviewRevision;
+	return true;
+}
+
+bool AABTSM11FinaleInteractionSystem::PanHudOverview(
+	const FVector2d& NormalizedScreenDelta)
+{
+	if (!IsAiming()
+		|| !HudOverviewView.ApplyPanNormalized(NormalizedScreenDelta)
+		|| !FABTSM11OverviewProjector::Build(
+			HudOrbitalScene,
+			HudOverviewView,
+			HudOverviewProjection))
+	{
+		return false;
+	}
+	++HudOverviewRevision;
+	return true;
+}
+
+bool AABTSM11FinaleInteractionSystem::ZoomHudOverview(
+	const double ZoomMultiplier)
+{
+	if (!IsAiming()
+		|| !HudOverviewView.ApplyZoom(ZoomMultiplier)
+		|| !FABTSM11OverviewProjector::Build(
+			HudOrbitalScene,
+			HudOverviewView,
+			HudOverviewProjection))
+	{
+		return false;
+	}
+	++HudOverviewRevision;
+	return true;
+}
+
+bool AABTSM11FinaleInteractionSystem::ResetHudOverview()
+{
+	if (!IsAiming() || !InitialHudOverviewView.bValid)
+	{
+		return false;
+	}
+	HudOverviewView = InitialHudOverviewView;
+	if (!FABTSM11OverviewProjector::Build(
+		HudOrbitalScene,
+		HudOverviewView,
+		HudOverviewProjection))
+	{
+		return false;
+	}
+	++HudOverviewRevision;
+	return true;
+}
+
+bool AABTSM11FinaleInteractionSystem::SelectHudTrajectoryProbe(
+	const FABTSM11TrajectoryHit& Hit)
+{
+	if (!IsAiming()
+		|| !HudOrbitalScene.bValid
+		|| !HudOverviewView.bValid
+		|| !FABTSM11TrajectoryProbeBuilder::Create(
+			HudOrbitalScene,
+			Hit,
+			FVector3d::UpVector,
+			HudOverviewView.ViewForward,
+			HudTrajectoryProbe))
+	{
+		return false;
+	}
+	HudProbeReferenceScene = HudOrbitalScene;
+	if (!FABTSM11TrajectoryProbeResolver::Resolve(
+		HudOrbitalScene,
+		HudTrajectoryProbe,
+		HudProbeProjection))
+	{
+		HudTrajectoryProbe = FABTSM11TrajectoryProbe();
+		HudProbeReferenceScene = FABTSM11OrbitalSceneSnapshot();
+		return false;
+	}
+	++HudProbeRevision;
+	MarkTargetCaptureDirty();
+	return true;
+}
+
+bool AABTSM11FinaleInteractionSystem::RebaseHudTrajectoryProbe()
+{
+	if (!IsAiming() || !HudTrajectoryProbe.bValid)
+	{
+		return false;
+	}
+	FABTSM11TrajectoryProbe Rebased;
+	if (!FABTSM11TrajectoryProbeBuilder::Rebase(
+		HudOrbitalScene,
+		HudTrajectoryProbe,
+		FVector3d::UpVector,
+		Rebased))
+	{
+		return false;
+	}
+	HudTrajectoryProbe = Rebased;
+	HudProbeReferenceScene = HudOrbitalScene;
+	if (!FABTSM11TrajectoryProbeResolver::Resolve(
+		HudOrbitalScene,
+		HudTrajectoryProbe,
+		HudProbeProjection))
+	{
+		return false;
+	}
+	++HudProbeRevision;
+	MarkTargetCaptureDirty();
+	return true;
+}
+
+void AABTSM11FinaleInteractionSystem::FollowAutomaticPreviewTarget()
+{
+	if (!IsAiming())
+	{
+		return;
+	}
+	HudTrajectoryProbe = FABTSM11TrajectoryProbe();
+	HudProbeProjection = FABTSM11ProbeProjection();
+	HudProbeReferenceScene = FABTSM11OrbitalSceneSnapshot();
+	++HudProbeRevision;
+	MarkTargetCaptureDirty();
 }
 
 void AABTSM11FinaleInteractionSystem::RequestRelease()
@@ -613,8 +853,11 @@ void AABTSM11FinaleInteractionSystem::UpdateAiming(
 			FinaleSystem->GetLayoutPreset(),
 			TargetSelectionResult,
 			CurrentClassification);
-		if (!bTargetCaptureInitialized
-			|| PreviewSelection.Target != PreviousTarget)
+		if (ABTSM11ShouldRefreshFinaleHudTargetCapture(
+			HudTrajectoryProbe.bValid,
+			bTargetCaptureInitialized,
+			PreviewSelection.Target != PreviousTarget,
+			false))
 		{
 			MarkTargetCaptureDirty();
 		}
@@ -1155,32 +1398,65 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 	{
 		return;
 	}
-	AActor* TargetActor = ResolvePreviewTargetActor(
-		PreviewSelection.Target);
+	AActor* TargetActor = HudTrajectoryProbe.bValid
+		? ResolveHudProbeContextActor()
+		: ResolvePreviewTargetActor(PreviewSelection.Target);
 	if (!IsValid(TargetActor))
 	{
 		return;
 	}
 	const FABTSM110FinaleLocalFrame& Frame =
 		FinaleSystem->GetFinaleFrame();
-	FABTSM11TargetPipView PipView;
-	if (!ABTSM11BuildTargetPipView(
-		FinaleSystem->GetLayoutPreset(),
-		PreviewSelection,
-		TargetPreviewRenderTarget->SizeX,
-		TargetPreviewRenderTarget->SizeY,
-		PipView))
+	FVector CameraWorld = FVector::ZeroVector;
+	FVector ForwardWorld = FVector::ForwardVector;
+	FVector UpWorld = FVector::UpVector;
+	double HorizontalFovDegrees =
+		ABTSM11FinaleTargetPreviewFOVDegrees;
+	if (HudTrajectoryProbe.bValid)
 	{
-		return;
+		const FABTSM11FrozenPipView& Frozen =
+			HudTrajectoryProbe.FrozenPipView;
+		if (!Frozen.bValid)
+		{
+			return;
+		}
+		const double CameraDistanceCM = Frozen.HalfExtentCM * 2.5;
+		const FVector3d CameraLocal = Frozen.ViewCenterCM
+			- Frozen.ViewForward * CameraDistanceCM;
+		CameraWorld = Frame.TransformLocalPosition(FVector(CameraLocal));
+		ForwardWorld = Frame.WorldTransform.TransformVectorNoScale(
+			FVector(Frozen.ViewForward)).GetSafeNormal();
+		UpWorld = Frame.WorldTransform.TransformVectorNoScale(
+			FVector(Frozen.ViewUp)).GetSafeNormal();
+		HorizontalFovDegrees = FMath::RadiansToDegrees(
+			2.0 * FMath::Atan(Frozen.HalfExtentCM / CameraDistanceCM));
+		TargetPreviewCapture->ProjectionType =
+			ECameraProjectionMode::Orthographic;
+		TargetPreviewCapture->OrthoWidth = static_cast<float>(
+			Frozen.HalfExtentCM * 2.0);
 	}
-	const FVector CameraWorld = Frame.TransformLocalPosition(
-		FVector(PipView.CameraLocationCM));
-	const FVector ForwardWorld =
-		Frame.WorldTransform.TransformVectorNoScale(
+	else
+	{
+		FABTSM11TargetPipView PipView;
+		if (!ABTSM11BuildTargetPipView(
+			FinaleSystem->GetLayoutPreset(),
+			PreviewSelection,
+			TargetPreviewRenderTarget->SizeX,
+			TargetPreviewRenderTarget->SizeY,
+			PipView))
+		{
+			return;
+		}
+		CameraWorld = Frame.TransformLocalPosition(
+			FVector(PipView.CameraLocationCM));
+		ForwardWorld = Frame.WorldTransform.TransformVectorNoScale(
 			FVector(PipView.Forward)).GetSafeNormal();
-	const FVector UpWorld =
-		Frame.WorldTransform.TransformVectorNoScale(
+		UpWorld = Frame.WorldTransform.TransformVectorNoScale(
 			FVector(PipView.Up)).GetSafeNormal();
+		HorizontalFovDegrees = PipView.HorizontalFOVDegrees;
+		TargetPreviewCapture->ProjectionType =
+			ECameraProjectionMode::Perspective;
+	}
 	if (ForwardWorld.IsNearlyZero() || UpWorld.IsNearlyZero())
 	{
 		return;
@@ -1191,13 +1467,14 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 			ForwardWorld,
 			UpWorld).ToQuat());
 	TargetPreviewCapture->FOVAngle = static_cast<float>(
-		PipView.HorizontalFOVDegrees);
+		HorizontalFovDegrees);
 	TargetPreviewCapture->ClearShowOnlyComponents();
 	TargetPreviewCapture->ShowOnlyActorComponents(TargetActor);
 	TargetPreviewCapture->bCameraCutThisFrame = true;
 	bTargetCaptureDirty = false;
 	bTargetCaptureInitialized = true;
 	TargetPreviewCapture->CaptureScene();
+	++TargetCaptureCount;
 }
 
 void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
@@ -1209,6 +1486,13 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	bPreviewDirty = false;
 	bTargetCaptureDirty = false;
 	bTargetCaptureInitialized = false;
+	HudOverviewView = FABTSM11OverviewViewState();
+	InitialHudOverviewView = FABTSM11OverviewViewState();
+	HudOrbitalScene = FABTSM11OrbitalSceneSnapshot();
+	HudOverviewProjection = FABTSM11OverviewProjection();
+	HudTrajectoryProbe = FABTSM11TrajectoryProbe();
+	HudProbeProjection = FABTSM11ProbeProjection();
+	HudProbeReferenceScene = FABTSM11OrbitalSceneSnapshot();
 	if (IsValid(AttemptBird) && bAttemptBirdInPouch)
 	{
 		// Collision must remain disabled until the bird has left any analytic
@@ -1335,6 +1619,36 @@ AActor* AABTSM11FinaleInteractionSystem::ResolvePreviewTargetActor(
 	const int32 BodyId = FinaleSystem->GetLayoutPreset()
 		.CanonicalScenario.GetAssist(
 			static_cast<int32>(Target) + 1).BodyId;
+	for (AABTSM11GravityBodyActor* Actor
+		: FinaleSystem->GetGravityBodyActors())
+	{
+		if (IsValid(Actor) && Actor->GetStableBodyId() == BodyId)
+		{
+			return Actor;
+		}
+	}
+	return nullptr;
+}
+
+AActor* AABTSM11FinaleInteractionSystem::ResolveHudProbeContextActor() const
+{
+	if (!IsValid(FinaleSystem) || !HudTrajectoryProbe.bValid)
+	{
+		return nullptr;
+	}
+	if (HudTrajectoryProbe.bContextIsTarget)
+	{
+		return FinaleSystem->GetUFOActor();
+	}
+	if (HudTrajectoryProbe.ContextBodyIndex < 1
+		|| HudTrajectoryProbe.ContextBodyIndex
+			> FABTSM11GravityScenario::AssistCount)
+	{
+		return nullptr;
+	}
+	const int32 BodyId = FinaleSystem->GetLayoutPreset()
+		.CanonicalScenario.Bodies[
+			HudTrajectoryProbe.ContextBodyIndex].BodyId;
 	for (AABTSM11GravityBodyActor* Actor
 		: FinaleSystem->GetGravityBodyActors())
 	{
