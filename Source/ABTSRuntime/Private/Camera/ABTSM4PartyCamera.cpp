@@ -177,7 +177,7 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	{
 		SmoothedPivot = RawPivot;
 	}
-	else if (FVector::Distance(SmoothedPivot, RawPivot) > DeadZoneCM)
+	else if (bPlanar && FVector::Distance(SmoothedPivot, RawPivot) > DeadZoneCM)
 	{
 		FVector Interpolated = FMath::VInterpTo(SmoothedPivot, RawPivot, DeltaSeconds, PivotFollowSpeed);
 		const FVector RemainingLag = RawPivot - Interpolated;
@@ -185,12 +185,19 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 		{
 			Interpolated = RawPivot - RemainingLag.GetSafeNormal() * MaxPivotLagCM;
 		}
-		if (bPlanar) SmoothedPivot = Interpolated;
-		else
-		{
-			const float TargetRadius = FVector::Distance(RawPivot, PlanetCenter);
-			SmoothedPivot = PlanetCenter + (Interpolated - PlanetCenter).GetSafeNormal() * TargetRadius;
-		}
+		SmoothedPivot = Interpolated;
+	}
+	else if (!bPlanar)
+	{
+		SmoothedPivot = ABTSM4CameraRigModel::UpdateSphericalPivot(
+			SmoothedPivot,
+			RawPivot,
+			PlanetCenter,
+			DeltaSeconds,
+			PivotFollowSpeed,
+			MaxPivotLagCM,
+			DeadZoneCM,
+			TargetBird->IsRadiallyGrounded());
 	}
 
 	const FVector CameraUp = bPlanar ? TargetUp : (SmoothedPivot - PlanetCenter).GetSafeNormal();
@@ -216,13 +223,32 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 		- OrbitForwardTangent * FMath::Cos(ElevationRadians)).GetSafeNormal();
 	const FVector UnblockedLocation = SmoothedPivot + UnblockedOffsetDirection * OrbitDistanceCM;
 	float HardSafeDistanceCM = OrbitDistanceCM;
-	const FVector RenderedLocation = ResolveObstructedLocation(
-		SmoothedPivot,
-		CameraUp,
-		UnblockedOffsetDirection,
-		OrbitDistanceCM,
-		DeltaSeconds,
-		HardSafeDistanceCM);
+	FVector RenderedLocation = UnblockedLocation;
+	if (Settings && Settings->bEnableCameraObstructionAvoidance)
+	{
+		RenderedLocation = ResolveObstructedLocation(
+			SmoothedPivot,
+			CameraUp,
+			UnblockedOffsetDirection,
+			OrbitDistanceCM,
+			DeltaSeconds,
+			HardSafeDistanceCM);
+	}
+	else
+	{
+		// Intentional no-op obstruction policy: keep the requested camera pose and
+		// let world geometry remain visibly between the camera and controlled bird.
+		EffectiveDistanceCM = OrbitDistanceCM;
+		ObstructionFilter.Reset(OrbitDistanceCM);
+		ObstructionYawOffsetDegrees = 0.0f;
+		ObstructionVerticalOffsetDegrees = 0.0f;
+		SelectedObstructionCandidate = 0;
+		LastLoggedObstructionCandidate = 0;
+		LastLoggedObstructionPhase = EABTSM4CameraObstructionPhase::Clear;
+		PoseSnapshot.SafeLocation = UnblockedLocation;
+		PoseSnapshot.BlockingActor.Reset();
+		PoseSnapshot.BlockingComponent.Reset();
+	}
 	const FVector DesiredLookDirection = (SmoothedPivot - RenderedLocation).GetSafeNormal();
 	// Forward alone does not define camera roll. Constrain the screen-up axis to
 	// the focus point's radial Up projected onto the image plane, so the visible
@@ -380,8 +406,6 @@ FVector AABTSM4PartyCamera::ResolveObstructedLocation(
 	FABTSM4CameraObstructionFilterSettings FilterSettings;
 	FilterSettings.EnterDelaySeconds = Settings ? Settings->CameraObstructionEnterDelaySeconds : 0.04f;
 	FilterSettings.ExitDelaySeconds = Settings ? Settings->CameraObstructionExitDelaySeconds : 0.16f;
-	FilterSettings.RestoreSpeedCMPerSecond = Settings ? Settings->CameraObstructionRestoreSpeedCMPerSecond : 520.0f;
-	FilterSettings.EscapeExpansionSpeedCMPerSecond = Settings ? Settings->CameraObstructionEscapeSpeedCMPerSecond : 900.0f;
 	EffectiveDistanceCM = ObstructionFilter.Update(
 		Candidates[0].bBlocked,
 		Blended.SafeDistanceCM,

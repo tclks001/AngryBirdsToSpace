@@ -18,6 +18,7 @@ float FABTSM4CameraObstructionFilter::Update(
 	const float DeltaSeconds,
 	const FABTSM4CameraObstructionFilterSettings& Settings)
 {
+	(void)bEscapingWithAlternateCandidate;
 	const float SafeDesiredDistance = FMath::Max(1.0f, DesiredDistanceCM);
 	const float HardSafeDistance = FMath::Clamp(SafeDistanceCM, 1.0f, SafeDesiredDistance);
 	const float SafeDeltaSeconds = FMath::Max(0.0f, DeltaSeconds);
@@ -30,20 +31,9 @@ float FABTSM4CameraObstructionFilter::Update(
 			? EABTSM4CameraObstructionPhase::Obstructed
 			: EABTSM4CameraObstructionPhase::EnterPending;
 
-		// A hard constraint is never interpolated through. An alternate candidate
-		// may expand only as its swept transition becomes safe.
-		if (HardSafeDistance < DistanceCM)
-		{
-			DistanceCM = HardSafeDistance;
-		}
-		else if (bEscapingWithAlternateCandidate)
-		{
-			DistanceCM = FMath::FInterpConstantTo(
-				DistanceCM,
-				HardSafeDistance,
-				SafeDeltaSeconds,
-				FMath::Max(0.0f, Settings.EscapeExpansionSpeedCMPerSecond));
-		}
+		// When this optional solver is enabled, never rate-limit a user-requested
+		// zoom-out or a safe alternate candidate.
+		DistanceCM = HardSafeDistance;
 	}
 	else
 	{
@@ -57,12 +47,8 @@ float FABTSM4CameraObstructionFilter::Update(
 		else
 		{
 			Phase = EABTSM4CameraObstructionPhase::Clear;
-			DistanceCM = FMath::FInterpConstantTo(
-				DistanceCM,
-				HardSafeDistance,
-				SafeDeltaSeconds,
-				FMath::Max(0.0f, Settings.RestoreSpeedCMPerSecond));
 		}
+		DistanceCM = HardSafeDistance;
 	}
 
 	DistanceCM = FMath::Clamp(DistanceCM, 1.0f, HardSafeDistance);
@@ -80,6 +66,58 @@ float ABTSM4CameraRigModel::ApplyGamepadResponse(
 
 	const float Normalized = (Magnitude - SafeDeadZone) / (1.0f - SafeDeadZone);
 	return FMath::Sign(RawValue) * FMath::Pow(Normalized, FMath::Max(0.01f, Exponent));
+}
+
+FVector ABTSM4CameraRigModel::UpdateSphericalPivot(
+	const FVector& CurrentPivot,
+	const FVector& TargetPivot,
+	const FVector& PlanetCenter,
+	const float DeltaSeconds,
+	const float FollowSpeed,
+	const float MaxLagCM,
+	const float GroundedTangentialDeadZoneCM,
+	const bool bApplyGroundedTangentialDeadZone)
+{
+	const FVector CurrentOffset = CurrentPivot - PlanetCenter;
+	const FVector TargetOffset = TargetPivot - PlanetCenter;
+	const float CurrentRadius = CurrentOffset.Size();
+	const float TargetRadius = TargetOffset.Size();
+	if (CurrentRadius <= SMALL_NUMBER || TargetRadius <= SMALL_NUMBER)
+	{
+		return TargetPivot;
+	}
+
+	const float SafeDeltaSeconds = FMath::Max(0.0f, DeltaSeconds);
+	const float SmoothingAlpha = 1.0f - FMath::Exp(-FMath::Max(0.0f, FollowSpeed) * SafeDeltaSeconds);
+	const FVector CurrentDirection = CurrentOffset / CurrentRadius;
+	const FVector TargetDirection = TargetOffset / TargetRadius;
+	const float ArcAngleRadians = FMath::Acos(FMath::Clamp(
+		FVector::DotProduct(CurrentDirection, TargetDirection),
+		-1.0f,
+		1.0f));
+	const float TangentialErrorCM = ArcAngleRadians * TargetRadius;
+	const bool bFollowTangentially = !bApplyGroundedTangentialDeadZone
+		|| TangentialErrorCM > FMath::Max(0.0f, GroundedTangentialDeadZoneCM);
+
+	FVector SmoothedDirection = CurrentDirection;
+	if (bFollowTangentially && SmoothingAlpha > 0.0f)
+	{
+		const FQuat ArcRotation = FQuat::FindBetweenNormals(CurrentDirection, TargetDirection);
+		SmoothedDirection = FQuat::Slerp(FQuat::Identity, ArcRotation, SmoothingAlpha)
+			.RotateVector(CurrentDirection)
+			.GetSafeNormal();
+	}
+
+	// Radius deliberately has no dead zone. Applying the old full-vector dead
+	// zone and then copying TargetRadius produced one visible jump per threshold.
+	const float SmoothedRadius = FMath::Lerp(CurrentRadius, TargetRadius, SmoothingAlpha);
+	FVector UpdatedPivot = PlanetCenter + SmoothedDirection * SmoothedRadius;
+	const FVector RemainingLag = TargetPivot - UpdatedPivot;
+	if (MaxLagCM > 0.0f && RemainingLag.SizeSquared() > FMath::Square(MaxLagCM))
+	{
+		UpdatedPivot = TargetPivot - RemainingLag.GetSafeNormal() * MaxLagCM;
+	}
+	return UpdatedPivot;
 }
 
 float ABTSM4CameraRigModel::ComputeSafeSweepDistance(

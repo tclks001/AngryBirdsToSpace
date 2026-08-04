@@ -164,8 +164,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.0", UIMax = "500.0"))
 	float CameraMaxPivotLagCM = 180.0f;
 
+	/** Spherical-world grounded tangential focus window. Radial height and all airborne movement remain continuous. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.0", UIMax = "100.0"))
 	float CameraPivotDeadZoneCM = 22.0f;
+
+	/** Optional camera collision avoidance. Disabled by default so blockers remain visibly between the camera and bird. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction")
+	bool bEnableCameraObstructionAvoidance = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "1.0", UIMax = "80.0"))
 	float CameraProbeRadiusCM = 24.0f;
@@ -192,12 +197,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "0.0", UIMax = "1.0"))
 	float CameraObstructionExitDelaySeconds = 0.16f;
 
-	/** Constant, frame-rate-independent recovery speed after the exit delay. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "1.0", UIMax = "2000.0"))
+	/** Legacy serialized speed retained for compatibility; obstruction expansion is now immediate. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Obstruction expansion no longer has a speed limit."))
 	float CameraObstructionRestoreSpeedCMPerSecond = 520.0f;
 
-	/** Expansion speed while a swept alternate candidate is escaping the blocker. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction", meta = (ClampMin = "1.0", UIMax = "3000.0"))
+	/** Legacy serialized speed retained for compatibility; obstruction expansion is now immediate. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Obstruction expansion no longer has a speed limit."))
 	float CameraObstructionEscapeSpeedCMPerSecond = 900.0f;
 
 	/** Fixed-budget candidate offsets used before accepting a deep pull-in. */

@@ -13,18 +13,16 @@ enum class EABTSM4CameraObstructionPhase : uint8
 	ExitPending
 };
 
-/** Frame-rate-independent settings for the obstruction distance filter. */
+/** Timing settings for the optional obstruction state filter. */
 struct ABTSRUNTIME_API FABTSM4CameraObstructionFilterSettings
 {
 	float EnterDelaySeconds = 0.04f;
 	float ExitDelaySeconds = 0.16f;
-	float RestoreSpeedCMPerSecond = 520.0f;
-	float EscapeExpansionSpeedCMPerSecond = 900.0f;
 };
 
 /**
- * Spring-arm style distance state. Hard collision contraction is immediate;
- * expansion is monotonic and delayed so edge contacts cannot pump the camera.
+ * Optional spring-arm style distance state. Contraction and expansion are
+ * immediate; timing remains observable only for obstruction diagnostics.
  */
 struct ABTSRUNTIME_API FABTSM4CameraObstructionFilter
 {
@@ -54,6 +52,21 @@ namespace ABTSM4CameraRigModel
 {
 	/** Converts a stick sample to a signed normalized response after dead zone and exponent. */
 	ABTSRUNTIME_API float ApplyGamepadResponse(float RawValue, float DeadZone, float Exponent);
+
+	/**
+	 * Smooths a planet-relative focus point without quantizing radial motion.
+	 * Radius always follows continuously. The optional dead zone applies only to
+	 * grounded tangential travel, so airborne ascent/descent cannot staircase.
+	 */
+	ABTSRUNTIME_API FVector UpdateSphericalPivot(
+		const FVector& CurrentPivot,
+		const FVector& TargetPivot,
+		const FVector& PlanetCenter,
+		float DeltaSeconds,
+		float FollowSpeed,
+		float MaxLagCM,
+		float GroundedTangentialDeadZoneCM,
+		bool bApplyGroundedTangentialDeadZone);
 
 	/**
 	 * Converts a swept sphere result to camera-center distance. The sweep already
