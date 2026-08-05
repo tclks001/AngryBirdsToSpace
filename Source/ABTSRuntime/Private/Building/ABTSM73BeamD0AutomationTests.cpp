@@ -71,6 +71,8 @@ bool FABTSM73BeamD0CatalogValidationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Default catalog validates"), Catalog.Validate(Error));
 	TestEqual(TEXT("Default catalog exposes five semantic families"),
 		Catalog.GetDefinitions().Num(), 5);
+	TestEqual(TEXT("Default catalog identity includes the high-tier closure recipe"),
+		Catalog.GetCatalogVersion(), 9);
 	TestTrue(TEXT("Catalog hash is non-zero"), Catalog.GetCatalogHash() != 0);
 	return true;
 }
@@ -103,6 +105,12 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 				Resolved.Difficulty.SolutionSteps, 1);
 			TestEqual(TEXT("Visual milestone matches exact tier"),
 				Resolved.VisualComplexity.MilestoneTier, Tier);
+			if (ProfileId == TEXT("ColumnBreak") && Tier >= 4)
+			{
+				TestEqual(TEXT("Column high-tier bay span is an exact closure contract"),
+					Resolved.BeamSettings.BeamB.BeamA.TargetBaySpanCM,
+					Tier == 4 ? 473.0f : 420.0f);
+			}
 			if (Tier <= 1)
 			{
 				TestTrue(TEXT("Low tier requires one terminal roof"),

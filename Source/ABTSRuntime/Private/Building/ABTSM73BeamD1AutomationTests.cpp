@@ -218,23 +218,132 @@ bool FABTSM73BeamD15ColumnHighTierClosureTest::RunTest(
 {
 	using namespace ABTSM73BeamD1Tests;
 	FABTSM73BeamD1BrickCompiler Compiler;
+	FABTSM73BeamD1GenerationResult TierResults[2];
+	bool bTierGenerated[2] = {false, false};
 	for (int32 Tier = 4; Tier <= 5; ++Tier)
 	{
-		FABTSM73BeamD1GenerationResult Result;
+		FABTSM73BeamD1GenerationResult& Result = TierResults[Tier - 4];
 		FString Error;
 		const bool bGenerated = Compiler.Generate(
 			MakeSettings(TEXT("ColumnBreak"),
 				AcceptedFixtureSeed(TEXT("ColumnBreak")), Tier),
 			Result, Error);
+		bTierGenerated[Tier - 4] = bGenerated;
 		TestTrue(*FString::Printf(
 			TEXT("ColumnBreak E%d structurally closes: %s"),
 			Tier + 1, *Error), bGenerated);
 		if (bGenerated)
 		{
+			TestTrue(TEXT("High-tier result is accepted"),
+				Result.Summary.bAccepted);
+			TestTrue(TEXT("Visual milestone is certified"),
+				Result.Summary.bVisualComplexityCertified);
+			TestTrue(TEXT("Assembly quality is certified"),
+				Result.Summary.bAssemblyQualityCertified);
+			TestTrue(TEXT("Stability core is certified"),
+				Result.Summary.bStabilityCoreCertified);
+			TestTrue(TEXT("Brick count remains inside the resolved window"),
+				Result.Summary.BrickCount >= Result.Summary.TargetMinimumBrickCount
+				&& Result.Summary.BrickCount <= Result.Summary.TargetMaximumBrickCount);
+			TestEqual(TEXT("Resolved lower Brick window is exact"),
+				Result.Summary.TargetMinimumBrickCount, Tier == 4 ? 1300 : 1500);
+			TestEqual(TEXT("Resolved upper Brick window is exact"),
+				Result.Summary.TargetMaximumBrickCount, Tier == 4 ? 1499 : 3499);
+			TestEqual(TEXT("Every emitted Brick is counted"),
+				Result.Bricks.Num(), Result.Summary.BrickCount);
+			TestEqual(TEXT("Every Member owns one Brick"),
+				Result.Summary.BrickCount, Result.Summary.MemberCount);
+			TestEqual(TEXT("Every Member reference is complete"),
+				Result.Summary.CompleteReferenceCount, Result.Summary.MemberCount);
+			TestEqual(TEXT("Real Brick AABBs do not penetrate"),
+				Result.Summary.StrictPenetrationCount, 0);
 			TestEqual(TEXT("No real-contact mismatch remains"),
 				Result.Summary.RealContactMismatchCount, 0);
 			TestEqual(TEXT("No blocking support violation remains"),
 				Result.Summary.RemainingSupportViolationCount, 0);
+			TestTrue(TEXT("Structural closure remains inside the high-tier pass ledger"),
+				Result.Summary.StructuralClosurePassCount <= (Tier == 4 ? 6 : 1));
+			TestTrue(TEXT("Structural closure remains inside the high-tier add ledger"),
+				Result.Summary.AddedStructuralSupportPostCount
+					<= (Tier == 4 ? 33 : 15));
+			TestTrue(TEXT("Final all-Z span remains inside the hard 720 cm gate"),
+				Result.Summary.MaximumUnbracedCorePostSpanAfterCM <= 720.01f);
+			TestTrue(TEXT("At least one strict rooted course is certified"),
+				Result.Summary.StabilityRootedExistingCourseCount > 0);
+			TestTrue(TEXT("Candidate search terminates inside its fixed ledger"),
+				Result.Summary.VisualCandidateAttempt >= 0
+				&& Result.Summary.VisualCandidateAttempt
+					< (Tier == 4 ? 10 : 12));
+			TestTrue(TEXT("Resolved settings identity is non-zero"),
+				Result.Summary.ResolvedSettingsHash != 0);
+			TestTrue(TEXT("Upstream structural identity is non-zero"),
+				Result.Summary.UpstreamBeamHash != 0);
+			TestTrue(TEXT("Core plan identity is non-zero"),
+				Result.Summary.StabilityCorePlanHash != 0);
+			TestTrue(TEXT("Rooted evidence identity is non-zero"),
+				Result.Summary.StabilityRootedEvidenceHash != 0);
+			TestTrue(TEXT("Brick geometry identity is non-zero"),
+				Result.Summary.BrickGeometryHash != 0);
+			TestTrue(TEXT("Tier-specific semantic volume milestone is retained"),
+				Result.Summary.SemanticVolumeCount >= (Tier == 4 ? 21 : 16));
+		}
+	}
+	if (bTierGenerated[0] && bTierGenerated[1])
+	{
+		TestTrue(TEXT("E6 remains a visible Brick-count step above E5"),
+			TierResults[1].Summary.BrickCount > TierResults[0].Summary.BrickCount);
+	}
+	for (int32 RepeatIndex = 0; RepeatIndex < 2; ++RepeatIndex)
+	{
+		if (!bTierGenerated[RepeatIndex])
+		{
+			continue;
+		}
+		const int32 Tier = RepeatIndex + 4;
+		const FString Identity = FString::Printf(TEXT("E%d"), Tier + 1);
+		FABTSM73BeamD1GenerationResult Repeat;
+		FString RepeatError;
+		const bool bRepeated = Compiler.Generate(
+			MakeSettings(TEXT("ColumnBreak"),
+				AcceptedFixtureSeed(TEXT("ColumnBreak")), Tier),
+			Repeat, RepeatError);
+		TestTrue(*FString::Printf(
+			TEXT("ColumnBreak %s repeat closes deterministically: %s"),
+			*Identity, *RepeatError), bRepeated);
+		if (bRepeated)
+		{
+			const FABTSM73BeamD1Summary& Expected =
+				TierResults[RepeatIndex].Summary;
+			const FABTSM73BeamD1Summary& Actual = Repeat.Summary;
+			TestEqual(*FString::Printf(TEXT("%s resolved settings hash is deterministic"),
+				*Identity), Actual.ResolvedSettingsHash, Expected.ResolvedSettingsHash);
+			TestEqual(*FString::Printf(TEXT("%s upstream structural hash is deterministic"),
+				*Identity), Actual.UpstreamBeamHash, Expected.UpstreamBeamHash);
+			TestEqual(*FString::Printf(TEXT("%s core plan hash is deterministic"),
+				*Identity), Actual.StabilityCorePlanHash,
+				Expected.StabilityCorePlanHash);
+			TestEqual(*FString::Printf(TEXT("%s rooted evidence hash is deterministic"),
+				*Identity), Actual.StabilityRootedEvidenceHash,
+				Expected.StabilityRootedEvidenceHash);
+			TestEqual(*FString::Printf(TEXT("%s Brick geometry hash is deterministic"),
+				*Identity), Actual.BrickGeometryHash, Expected.BrickGeometryHash);
+			TestEqual(*FString::Printf(TEXT("%s accepted attempt is deterministic"),
+				*Identity), Actual.VisualCandidateAttempt,
+				Expected.VisualCandidateAttempt);
+			TestEqual(*FString::Printf(TEXT("%s Brick count is deterministic"),
+				*Identity), Actual.BrickCount, Expected.BrickCount);
+			TestEqual(*FString::Printf(TEXT("%s rooted course count is deterministic"),
+				*Identity), Actual.StabilityRootedExistingCourseCount,
+				Expected.StabilityRootedExistingCourseCount);
+			TestEqual(*FString::Printf(TEXT("%s maximum all-Z span is deterministic"),
+				*Identity), Actual.MaximumUnbracedCorePostSpanAfterCM,
+				Expected.MaximumUnbracedCorePostSpanAfterCM);
+			TestEqual(*FString::Printf(TEXT("%s closure pass ledger is deterministic"),
+				*Identity), Actual.StructuralClosurePassCount,
+				Expected.StructuralClosurePassCount);
+			TestEqual(*FString::Printf(TEXT("%s closure add ledger is deterministic"),
+				*Identity), Actual.AddedStructuralSupportPostCount,
+				Expected.AddedStructuralSupportPostCount);
 		}
 	}
 	return true;

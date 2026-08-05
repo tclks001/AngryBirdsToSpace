@@ -575,7 +575,7 @@ FABTSM73BeamD0ProfileCatalog::FABTSM73BeamD0ProfileCatalog(
 const FABTSM73BeamD0ProfileCatalog& FABTSM73BeamD0ProfileCatalog::GetDefault()
 {
 	static const FABTSM73BeamD0ProfileCatalog Catalog(
-		ABTSM73BeamD0::BuildDefaultDefinitions(), 8);
+		ABTSM73BeamD0::BuildDefaultDefinitions(), 9);
 	return Catalog;
 }
 
@@ -769,9 +769,11 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 		OutProfile.StabilityCore.MaximumUnbracedCorePostSpanCM;
 	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier >= 4)
 	{
+		// E5 needs one wider bay to leave enough final-member capacity for the
+		// physical C2 support cap. E6 keeps its denser certified four-lane frame.
 		Settings.BeamB.BeamA.TargetBaySpanCM = FMath::Max(
 			Settings.BeamB.BeamA.TargetBaySpanCM,
-			420.0f);
+			DifficultyTier == 4 ? 473.0f : 420.0f);
 	}
 	Settings.BeamB.BeamA.MaxBaysPerVolume = Visual.MaximumBaysPerVolume;
 	Settings.BeamB.BeamA.MaxParallelBlocksPerCourse =

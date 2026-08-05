@@ -5036,21 +5036,30 @@ bool FABTSM73BeamC3CribCoreGenerator::Generate(
 		// first: the selector preserves both silhouette eaves and the single ridge,
 		// whereas deleting an entire ordinary frame can create a much larger support
 		// deficit and force closure to add more posts than the repair saved.
+		FABTSM73BeamAGenerationResult BeforeRoofAttempt = Scratch;
+		FCertifiedC3BraceEvidence BeforeRoofEvidence = CertifiedEvidence;
+		const int32 BeforeInsertedPosts = InsertedSyntheticPostCount;
 		const int32 RemovedRoofMembers = ReallocateRoofLanes(
 			Scratch, Scratch.Members.Num() - CapacityBeforeC2, Tolerance);
-		RemovedDonors += RemovedRoofMembers;
-		if (RemovedRoofMembers > 0
-			&& !ABTSM73BeamA::CloseGeneratedAssembly(
-				BeamASettings, Scratch, ClosureError))
+		if (RemovedRoofMembers > 0)
 		{
-			return Reject(FString::Printf(
-				TEXT("BeamC3BudgetClosureFailed:%s"), *ClosureError));
-		}
-		if (RemovedRoofMembers > 0 && !RevalidateCoreAfterBudgetClosure())
-		{
-			return Reject(FString::Printf(
-				TEXT("BeamC3RoofBudgetCertificationFailed:%s"),
-				*ClosureError));
+			const bool bRoofClosed = ABTSM73BeamA::CloseGeneratedAssembly(
+				BeamASettings, Scratch, ClosureError);
+			const bool bRoofCertified = bRoofClosed
+				&& RevalidateCoreAfterBudgetClosure();
+			if (!bRoofCertified)
+			{
+				UE_LOG(LogABTSRuntime, Display,
+					TEXT("[ABTS][M7.3-Beam-C3][RoofBudgetDonorRejected] Members=%d Error=%s"),
+					RemovedRoofMembers, *ClosureError);
+				Scratch = MoveTemp(BeforeRoofAttempt);
+				CertifiedEvidence = MoveTemp(BeforeRoofEvidence);
+				InsertedSyntheticPostCount = BeforeInsertedPosts;
+			}
+			else
+			{
+				RemovedDonors += RemovedRoofMembers;
+			}
 		}
 	}
 	TSet<int32> RejectedDonorAssemblyIds;

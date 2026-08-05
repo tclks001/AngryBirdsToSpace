@@ -6,11 +6,11 @@
 >
 > 下游：[Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md) → [Beam-D1 真实 Brick](M73BeamD1RealBrickAndMaterialRolesDesign.md) → Beam-D2 Chaos 认证
 >
-> 状态：Catalog v8 四柱闭环、根系化定向拉结、普通楼层网根系认证、C2 后有界修复与低 Tier 预算收口已完成；安装版 UE 5.8 fresh 二进制下 `ABTS.M73DAG.BeamC3` 14/14 通过，低 Tier `5 Profile × Tier 0/1` 生产矩阵 10/10 通过，`DropTrigger / Tier 4` 专项通过。本轮进一步冻结了 source-aware 跨 Bay Portal 拉结合同；对应的 `ColumnBreak / Tier 4/5` 实现与回归、完整矩阵重跑以及真实 Chaos 静置/攻击 PIE 仍待完成。本阶段不接管 TaskGraph 生产建筑。
+> 状态：Catalog v9 四柱闭环、根系化定向拉结、普通楼层网根系认证、C2 后有界修复与低 Tier 预算收口已完成；安装版 UE 5.8 下，本工作树相关 Unity 对象重新编译链接后的 `ABTS.M73DAG.BeamC3` 17/17 与 `ColumnBreak / Tier 4/5` 专项均通过，随后 `-ForceUnity -DisableAdaptiveUnity` 全链接成功。完整 D1、D1.5、5 Profile × 6 Tier 生产矩阵和真实 Chaos 静置/攻击 PIE 仍待完成。本阶段不接管 TaskGraph 生产建筑。
 >
-> 2026-08-05 暂停检查点：最新 E5 仍因 `1803>1499` 预算门失败，E6 已认证通过。现场、日志、
-> 不可放宽约束与仅允许继续验证的三个假设见
-> [M73BeamC3Checkpoint_20260805.md](M73BeamC3Checkpoint_20260805.md)。在该检查点解除前不再追加启发式修复。
+> 2026-08-05 暂停检查点保留了 E5 `1803>1499` 的历史失败现场；恢复后的证伪过程、未重复的失败方案与
+> Catalog v9 收敛证据已追加到
+> [M73BeamC3Checkpoint_20260805.md](M73BeamC3Checkpoint_20260805.md)。该静态检查点已解除，但不代表 Chaos 动态验收完成。
 
 ## 1. 为什么需要 C3
 
@@ -145,11 +145,14 @@ Tier 0 最终上限仍为 49，Tier 1 仍为 199。C3 的累计净增额度分�
 第二份预算。Beam-C2 每次补柱和重闭合后都以实际 `Members.Num()` 对 `MaximumFinalMemberCount` 执行硬检查；
 最终 D1 Brick 数必须与最终 Member 数一对一且位于原数量窗。
 
-## 6. Catalog v8、身份与诊断
+## 6. Catalog v9、身份与诊断
 
-`FABTSM73BeamC3CribCoreSettings` 属于 D0 私有 Resolved Profile。Catalog v8 的
+`FABTSM73BeamC3CribCoreSettings` 属于 D0 私有 Resolved Profile。Catalog v9 的
 `ResolvedSettingsHash` 覆盖柱跨、最小芯体力臂、Belt 目标、净增预算、最终 Member 上限、C2 规划预留、
-普通框架替换与屋顶保护策略；这些字段不暴露给 M3。
+普通框架替换与屋顶保护策略；这些字段不暴露给 M3。v9 的唯一配置参数变化是对
+`ColumnBreak / Tier 4` 把 `TargetBaySpanCM` 固定为 473 cm，Tier 5 保持 420 cm；CatalogVersion 升级仍会
+使全局 Catalog/Resolved 身份 Hash 改变。前者为最终真实 C2 cap 留出 1499 Brick 窗内的容量，不能外推为
+全 Profile 的轮廓变化。
 
 D1 Summary 至少记录：
 
@@ -157,7 +160,9 @@ D1 Summary 至少记录：
 - `StabilityRootedExistingCourseCount`：最终派生的、通过严格根系合同认证的普通楼层 course 数；
 - 复用、插入、移除普通 donor 与净增 Member 数；
 - 改写前后最大“全部 Z 站位”无水平约束柱跨；
-- 确定性 `StabilityCorePlanHash`、`StabilityRootedEvidenceHash`、Catalog/Resolved Hash 与最终 Brick 数。
+- 确定性 `StabilityCorePlanHash`、`StabilityRootedEvidenceHash`、Catalog/Resolved Hash 与最终 Brick 数；
+- 最终结构闭合的 `ClosurePasses` / `ClosureAdded`，以及每次候选拒绝的 Profile、Tier、Base/Candidate Seed、
+  Attempt、Gate、Reason、Member/Brick 实数。
 
 `StabilityRootedEvidenceHash` 对根系普通 course 的轴向、中心、长度和 `SourceVolumeId` 集合排序后取 Hash；
 它与 Count 一起区分“数量相同但根系成员不同”的候选。Count/Hash 都必须在 C2 后最终几何上重新计算并进入
@@ -191,7 +196,7 @@ D1 Summary 至少记录：
 5. 真实接触不一致、阻断型支撑违规、严格穿透和悬空 Member 均为零；
 6. 同输入的 Candidate Attempt、Catalog/Resolved Hash、Core Plan Hash 与 Brick Geometry Hash 完全确定。
 
-安装版 UE 5.8、`-ForceUnity -DisableAdaptiveUnity` fresh 构建后的最终静态结果：
+以下是 Catalog v8 的历史静态基线，只用于比较，不能冒充 v9 结果：
 
 | Profile | Tier 0：Brick / 最大柱跨 / Rooted | Tier 1：Brick / 最大柱跨 / Rooted | Tier 1 Host / Tie |
 | --- | ---: | ---: | ---: |
@@ -201,28 +206,54 @@ D1 Summary 至少记录：
 | DropTrigger | 49 / 660.00 / 0 | 190 / 699.36 / 22 | 2 / 0 |
 | SlideRelease | 49 / 693.00 / 0 | 176 / 637.34 / 10 | 2 / 2 |
 
+Catalog v9 当前 5 × 2 静态回归记录于
+`BeamC3-Full17-V9-PhysicalCommitFinal-20260805-1821.log`：
+
+| Profile | Tier 0：Brick / 最大柱跨 / Rooted | Tier 1：Brick / 最大柱跨 / Rooted |
+| --- | ---: | ---: |
+| ColumnBreak | 46 / 299.74 / 0 | 133 / 612.29 / 10 |
+| SeamRelease | 48 / 202.02 / 12 | 138 / 690.24 / 0 |
+| TipOver | 48 / 543.28 / 12 | 134 / 631.20 / 16 |
+| DropTrigger | 45 / 431.70 / 5 | 188 / 683.94 / 0 |
+| SlideRelease | 45 / 436.61 / 5 | 181 / 636.64 / 23 |
+
+其中 `ColumnBreak / Tier 1` 为 Host=3、Tie=0；三个真实闭合 Host 与 Rooted=10 已满足合同，不能把 v8
+曾出现的定向 Tie 形态升级为强制身份断言。
+
 `DropTrigger / Tier 0 / Seed 669740` 继续作为屋顶与确定性专项，但不能代替上述 10 个生产夹具。5 × 2
-通过后还要重跑 D0、D1、D1.5 以及完整 5 × 6 视觉生产矩阵，证明 Catalog v8 没有破坏既有阶梯。
+已通过，D0 已以 6/6 复验；仍要重跑完整 D1、D1.5 与 5 × 6 视觉生产矩阵，证明 Catalog v9 没有破坏既有阶梯。
 
 旧 Catalog v7 的三柱数值和 `128/128` 日志仅是历史探索证据，不能作为四柱 v8 的完成证据。本轮最终代码
-已用安装版 UE 5.8 fresh 编译，并以 `BeamC3-Full-ContactFaces-Final.log` 登记
-`ABTS.M73DAG.BeamC3` 14/14 与 v8 的 5 × 2 静态门槛通过。14 项包含普通楼层网正例、单锚悬臂反例、
-最终 all-Z 审计、现有 Plan 修复、确定性和事务回滚；该结论不外推为 Chaos 动态稳定完成。
+又经 v9 重新编译相关 Unity 对象并全链接，以 `BeamC3-Full17-V9-PhysicalCommitFinal-20260805-1821.log` 登记
+`ABTS.M73DAG.BeamC3` 17/17 与 v9 的 5 × 2 静态门槛通过。17 项包含同 Source 跨 Bay、跨 Source 隔离、
+严格根系横隔、单锚悬臂反例、最终 all-Z 审计、现有 Plan 修复、确定性和事务回滚；该结论不外推为
+Chaos 动态稳定完成。
 
-### 7.2 高 Tier 专项与未闭合项
+### 7.2 高 Tier 专项与剩余证据层
 
 - `DropTrigger / Tier 4 / Seed 669740` 已在 `BeamC3-HighTier-StrictRooted-Final.log` 通过：候选
   Attempt 1，最终 2297 Brick、15 Host、20 Belt、219 Rooted，最大 all-Z 柱跨 713.04 cm，
   `PlanHash=3458810760`、`RootedEvidenceHash=2232029679`；
-- `ColumnBreak` 高 Tier 尚未形成正式通过证据。当前 `ColumnHighTierClosure` 的 E5/E6 回归仍可出现
-  `BeamC3CoreTopologyIncomplete:MissingPostBearing`、`BeamC3CoreClosureFailed:BeamAGlobalAssemblyRebuildFailed`
-  或最终 all-Z 超限，因此不得把 DropTrigger 的高 Tier 结果外推到 ColumnBreak；
-- Source-aware Portal 收口须增加固定正反例：同 Source 跨 Bay 成功、不同 Source 失败、严格根系 XY
-  横隔可作为端点、单锚/装饰横隔失败、任一端缺少真实 Bearing 失败、局部与最终证据集合一致，以及
-  原始 Z Member 超过 720 cm 仍失败；
-- 上述收口后必须重跑 Tier 0/1 的 49/199 最终上限与 12/33 累计净增额度，任何高 Tier 修复不得以
-  低 Tier 数量合同回退作为代价；
-- 高 Tier Column 收口后仍须重跑完整生产矩阵，随后才进入第 8 节实时 Chaos 门槛。
+- `ColumnBreak / Tier 4 / Seed 710000` 已在
+  `BeamC3-ColumnHighTier-V9-PhysicalCommitFinal-20260805-1822.log` 通过：Attempt 5，最终 1499 Brick、Rooted=159、
+  最大 all-Z 柱跨 712.19 cm，`ResolvedHash=1404937059`、`PlanHash=1954804974`、
+  `RootedEvidenceHash=2654780606`，闭合账本为 6 Pass / 33 Added；E5 在该测试中重放，全部身份、
+  Attempt、Brick、Rooted、MaxAllZ 与账本完全一致；
+- `ColumnBreak / Tier 5 / Seed 710000` 同日志通过：Attempt 5，最终 2325 Brick、Rooted=220、
+  最大 all-Z 柱跨 667.03 cm，`ResolvedHash=3234425960`、`PlanHash=3180370346`、
+  `RootedEvidenceHash=3782347597`，闭合账本为 1 Pass / 15 Added；E6 也执行同等重放并完全一致；
+- Source-aware Portal 固定正反例已进入 17 项 Beam-C3 全套：同 Source 跨 Bay 成功、跨 Source 失败、
+  严格根系 XY 横隔可作为端点、单锚/装饰横隔失败、任一端缺 Bearing 失败、局部/最终证据一致，
+  原始 Z Member 的 720 cm 硬门保持不变；
+- E5 的无 void 平行 cap 只允许在“前一轮两条精确 25/75 根系 lane 已被实体证明、随后权威闭合返回同一
+  失败 DAG”时生成。普通 proposal 被归一化时先进入 twin-evidence 阶段，不提前消费 token；`BestVoid`
+  grillage 不依赖该证据，但修复函数只有在 `BridgeSeat + 2 BridgePost` 全部实际追加后才返回实体事务标志，
+  调用层随即在重闭合前登记该失败 DAG，下一轮在任何再次修改前 fail closed。`H1→H2→H1` 等非相邻循环
+  同样 fail closed。每个失败 DAG Hash 只允许一次实体 grillage 事务，后续以
+  `BeamCStructuralClosureNoProgress` 拒绝，不能把尝试添加数当作真实 Bearing；
+- 低 Tier 5 × 2、D0 6/6、Beam-C 13/13 与 Beam-C3 17/17 已复验；仍须重跑完整 D1、D1.5 与
+  5 × 6 生产矩阵，
+  随后才进入第 8 节实时 Chaos 门槛。
 
 ## 8. PIE 动态验收（后续正式门槛）
 

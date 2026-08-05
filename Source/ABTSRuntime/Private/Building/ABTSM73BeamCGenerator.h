@@ -13,6 +13,41 @@ struct FABTSM73BeamCGenerationResult
 	TArray<int32> TopologicalMemberOrder;
 };
 
+namespace ABTSM73BeamC
+{
+	/** Register a failed DAG and reject non-adjacent hash cycles fail closed. */
+	bool TryObserveStructuralClosureFailure(
+		uint32 FailedAnalysisHash,
+		const TOptional<uint32>& PreviousFailedAnalysisHash,
+		TSet<uint32>& SeenHashes,
+		bool& bOutImmediateRepeat,
+		FString& OutError);
+
+	/** A repeated DAG may force the prior-lane cap only after reclose proved twin lanes. */
+	bool ShouldForceRootedGrillageRepair(
+		bool bRepeatedFailedAnalysis,
+		int32 PriorTwinAttemptCount);
+
+	/** One physical rooted-grillage transaction is allowed per failed DAG. */
+	bool TryBeginRootedGrillageRepair(
+		uint32 FailedAnalysisHash,
+		TSet<uint32>& AttemptedHashes,
+		FString& OutError);
+
+	/** Reject a failed DAG before repair if it already consumed its grillage token. */
+	bool TryCheckRootedGrillageRepairAvailable(
+		uint32 FailedAnalysisHash,
+		const TSet<uint32>& AttemptedHashes,
+		FString& OutError);
+
+	/** Commit the failed-DAG token only when the repair helper added physical grillage. */
+	bool TryCommitAddedRootedGrillageRepair(
+		uint32 FailedAnalysisHash,
+		bool bAddedRootedGrillage,
+		TSet<uint32>& AttemptedHashes,
+		FString& OutError);
+}
+
 /** Pure-data Beam-C Load DAG extractor and static proxy validator. */
 class FABTSM73BeamCGenerator
 {

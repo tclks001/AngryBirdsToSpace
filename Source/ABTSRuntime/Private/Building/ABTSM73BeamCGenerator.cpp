@@ -138,6 +138,75 @@ namespace ABTSM73BeamC
 		return FCrc::StrCrc32(*Signature);
 	}
 
+	bool TryObserveStructuralClosureFailure(
+		const uint32 FailedAnalysisHash,
+		const TOptional<uint32>& PreviousFailedAnalysisHash,
+		TSet<uint32>& SeenHashes,
+		bool& bOutImmediateRepeat,
+		FString& OutError)
+	{
+		bOutImmediateRepeat = PreviousFailedAnalysisHash.IsSet()
+			&& PreviousFailedAnalysisHash.GetValue() == FailedAnalysisHash;
+		if (SeenHashes.Contains(FailedAnalysisHash) && !bOutImmediateRepeat)
+		{
+			OutError = TEXT("BeamCStructuralClosureNoProgress");
+			return false;
+		}
+		SeenHashes.Add(FailedAnalysisHash);
+		OutError.Reset();
+		return true;
+	}
+
+	bool ShouldForceRootedGrillageRepair(
+		const bool bRepeatedFailedAnalysis,
+		const int32 PriorTwinAttemptCount)
+	{
+		return bRepeatedFailedAnalysis && PriorTwinAttemptCount > 0;
+	}
+
+	bool TryBeginRootedGrillageRepair(
+		const uint32 FailedAnalysisHash,
+		TSet<uint32>& AttemptedHashes,
+		FString& OutError)
+	{
+		if (AttemptedHashes.Contains(FailedAnalysisHash))
+		{
+			OutError = TEXT("BeamCStructuralClosureNoProgress");
+			return false;
+		}
+		AttemptedHashes.Add(FailedAnalysisHash);
+		OutError.Reset();
+		return true;
+	}
+
+	bool TryCheckRootedGrillageRepairAvailable(
+		const uint32 FailedAnalysisHash,
+		const TSet<uint32>& AttemptedHashes,
+		FString& OutError)
+	{
+		if (AttemptedHashes.Contains(FailedAnalysisHash))
+		{
+			OutError = TEXT("BeamCStructuralClosureNoProgress");
+			return false;
+		}
+		return true;
+	}
+
+	bool TryCommitAddedRootedGrillageRepair(
+		const uint32 FailedAnalysisHash,
+		const bool bAddedRootedGrillage,
+		TSet<uint32>& AttemptedHashes,
+		FString& OutError)
+	{
+		if (!bAddedRootedGrillage)
+		{
+			OutError.Reset();
+			return true;
+		}
+		return TryBeginRootedGrillageRepair(
+			FailedAnalysisHash, AttemptedHashes, OutError);
+	}
+
 	struct FStructuralSupportProposal
 	{
 		int32 AssemblyId = INDEX_NONE;
@@ -152,6 +221,27 @@ namespace ABTSM73BeamC
 		FVector2D Maximum = FVector2D::ZeroVector;
 	};
 
+	struct FRootedTwinLaneAttempt
+	{
+		int32 SpanAxis = INDEX_NONE;
+		FVector2D NegativeLane = FVector2D::ZeroVector;
+		FVector2D PositiveLane = FVector2D::ZeroVector;
+		double SeatTopZ = 0.0;
+	};
+
+	bool MatchesRootedTwinLaneAttempt(
+		const FRootedTwinLaneAttempt& A,
+		const FRootedTwinLaneAttempt& B,
+		const double Tolerance)
+	{
+		return A.SpanAxis == B.SpanAxis
+			&& FMath::Abs(A.NegativeLane.X - B.NegativeLane.X) <= Tolerance
+			&& FMath::Abs(A.NegativeLane.Y - B.NegativeLane.Y) <= Tolerance
+			&& FMath::Abs(A.PositiveLane.X - B.PositiveLane.X) <= Tolerance
+			&& FMath::Abs(A.PositiveLane.Y - B.PositiveLane.Y) <= Tolerance
+			&& FMath::Abs(A.SeatTopZ - B.SeatTopZ) <= Tolerance;
+	}
+
 	bool AddStructuralSupportPosts(
 		const FABTSM73BeamCPreviewSettings& Settings,
 		const FABTSM73BeamCGenerationResult& Analysis,
@@ -159,11 +249,17 @@ namespace ABTSM73BeamC
 		const int32 RemainingPostBudget,
 		const bool bAllowDeferredCoreBracing,
 		const bool bRequireIndependentSupportLane,
+		const bool bSuppressEquivalentProposals,
 		const bool bForceRootedGrillage,
+		const TArray<FRootedTwinLaneAttempt>& PriorTwinAttempts,
+		TArray<FRootedTwinLaneAttempt>& OutTwinAttempts,
+		bool& bOutAddedRootedGrillage,
 		int32& OutAddedCount,
 		FString& OutError)
 	{
 		OutAddedCount = 0;
+		OutTwinAttempts.Reset();
+		bOutAddedRootedGrillage = false;
 		const double Section = Settings.BeamB.BeamA.BlockCrossSectionCM;
 		const double HalfSection = Section * 0.5;
 		const double Tolerance = Settings.BeamB.BeamA.JointMergeToleranceCM;
@@ -750,7 +846,7 @@ namespace ABTSM73BeamC
 			}
 		}
 
-		if (bForceRootedGrillage)
+		if (bSuppressEquivalentProposals)
 		{
 			// The exact failed load hash has already repeated after an authoritative
 			// Beam-A reclose. Another direct post would be folded into the same lane,
@@ -846,7 +942,11 @@ namespace ABTSM73BeamC
 						BestVoidScore = Score;
 					}
 				}
-				if (BestVoid == nullptr)
+				// Direct twin roots get one attempt. If authoritative closure repeats
+				// the same failed analysis, fall through to a physical seat
+				// below; otherwise this branch keeps recreating posts that Beam-A
+				// folds into the same lanes and the rooted grillage is unreachable.
+				if (BestVoid == nullptr && !bForceRootedGrillage)
 				{
 					const int32 OwnerId = OwnerByMember.IsValidIndex(Node.MemberId)
 						? OwnerByMember[Node.MemberId] : INDEX_NONE;
@@ -862,18 +962,29 @@ namespace ABTSM73BeamC
 						UpperBounds.Min[AxisIndex] + HalfSection;
 					const double UsableMaximum =
 						UpperBounds.Max[AxisIndex] - HalfSection;
-					int32 AddedTwinPosts = 0;
-					for (const double Alpha : {0.25, 0.75})
+					if ((UsableMaximum - UsableMinimum) * 0.5
+						< Section - Tolerance)
 					{
-						FVector2D Station(
+						continue;
+					}
+					FVector2D TwinLanes[2];
+					for (int32 LaneIndex = 0; LaneIndex < 2; ++LaneIndex)
+					{
+						const double Alpha = LaneIndex == 0 ? 0.25 : 0.75;
+						TwinLanes[LaneIndex] = FVector2D(
 							UpperBounds.GetCenter().X,
 							UpperBounds.GetCenter().Y);
-						Station[AxisIndex] = FMath::Lerp(
+						TwinLanes[LaneIndex][AxisIndex] = FMath::Lerp(
 							UsableMinimum, UsableMaximum, Alpha);
-						Station[CrossIndex] = FMath::Clamp(
+						TwinLanes[LaneIndex][CrossIndex] = FMath::Clamp(
 							Node.LoadResultant[CrossIndex],
 							UpperBounds.Min[CrossIndex] + HalfSection,
 							UpperBounds.Max[CrossIndex] - HalfSection);
+					}
+					int32 AddedTwinPosts = 0;
+					int32 ProvenTwinLanes = 0;
+					for (const FVector2D& Station : TwinLanes)
+					{
 						if (IsReserved(Station, 0.0, TargetTopZ))
 						{
 							continue;
@@ -899,6 +1010,7 @@ namespace ABTSM73BeamC
 							});
 						if (bExistingRoot)
 						{
+							++ProvenTwinLanes;
 							continue;
 						}
 						if (OutAddedCount + 1 > RemainingPostBudget
@@ -936,7 +1048,17 @@ namespace ABTSM73BeamC
 						Owner.JointIds.AddUnique(JointB);
 						Owner.MemberIds.AddUnique(Post.MemberId);
 						++AddedTwinPosts;
+						++ProvenTwinLanes;
 						++OutAddedCount;
+					}
+					if (AddedTwinPosts > 0 && ProvenTwinLanes == 2)
+					{
+						FRootedTwinLaneAttempt& Attempt =
+							OutTwinAttempts.AddDefaulted_GetRef();
+						Attempt.SpanAxis = AxisIndex;
+						Attempt.NegativeLane = TwinLanes[0];
+						Attempt.PositiveLane = TwinLanes[1];
+						Attempt.SeatTopZ = TargetTopZ;
 					}
 					if (AddedTwinPosts > 0)
 					{
@@ -948,12 +1070,20 @@ namespace ABTSM73BeamC
 					}
 					continue;
 				}
+				const bool bRequiresPriorTwinAttempt =
+					BestVoid == nullptr && bForceRootedGrillage;
+				bool bParallelCap = false;
+				const int32 UpperAxis =
+					Upper.Axis == EABTSM73BeamAFrameAxis::X ? 0 : 1;
 				const int32 SpanAxis = BestVoid != nullptr
 					? BestVoid->SpanAxisIndex
-					: (Upper.Axis == EABTSM73BeamAFrameAxis::X ? 1 : 0);
+					: (bRequiresPriorTwinAttempt
+						? UpperAxis : (UpperAxis == 0 ? 1 : 0));
 				const int32 Perpendicular = SpanAxis == 0 ? 1 : 0;
 				double NegativeStation = 0.0;
 				double PositiveStation = 0.0;
+				double NegativePostStation = 0.0;
+				double PositivePostStation = 0.0;
 				double PerpendicularMinimum =
 					UpperBounds.Min[Perpendicular] + HalfSection;
 				double PerpendicularMaximum =
@@ -964,12 +1094,65 @@ namespace ABTSM73BeamC
 						BestVoid->Bounds.Min[SpanAxis] - HalfSection;
 					PositiveStation =
 						BestVoid->Bounds.Max[SpanAxis] + HalfSection;
+					NegativePostStation = NegativeStation;
+					PositivePostStation = PositiveStation;
 					PerpendicularMinimum = FMath::Max(
 						UpperBounds.Min[Perpendicular],
 						BestVoid->Bounds.Min[Perpendicular]) + HalfSection;
 					PerpendicularMaximum = FMath::Min(
 						UpperBounds.Max[Perpendicular],
 						BestVoid->Bounds.Max[Perpendicular]) - HalfSection;
+				}
+				else if (bRequiresPriorTwinAttempt)
+				{
+					// Reuse the exact 25/75 lanes attempted by the direct roots. Beam-A
+					// normalized those roots into existing segmented Z columns, so the
+					// missing physical element is their horizontal cap, not another Z
+					// lane. Keep the cap inside the failed course footprint and exactly
+					// one section below it; authoritative Beam-A reclose still decides
+					// whether the transaction creates a real bearing.
+					const double UsableMinimum =
+						UpperBounds.Min[SpanAxis] + HalfSection;
+					const double UsableMaximum =
+						UpperBounds.Max[SpanAxis] - HalfSection;
+					if (UsableMinimum > UsableMaximum + Tolerance)
+					{
+						continue;
+					}
+					NegativeStation = FMath::Lerp(
+						UsableMinimum, UsableMaximum, 0.25);
+					PositiveStation = FMath::Lerp(
+						UsableMinimum, UsableMaximum, 0.75);
+					if (PositiveStation - NegativeStation < Section - Tolerance)
+					{
+						continue;
+					}
+					NegativePostStation = NegativeStation;
+					PositivePostStation = PositiveStation;
+					FRootedTwinLaneAttempt CandidateAttempt;
+					CandidateAttempt.SpanAxis = SpanAxis;
+					CandidateAttempt.NegativeLane = FVector2D(
+						UpperBounds.GetCenter().X, UpperBounds.GetCenter().Y);
+					CandidateAttempt.PositiveLane = CandidateAttempt.NegativeLane;
+					CandidateAttempt.NegativeLane[SpanAxis] = NegativeStation;
+					CandidateAttempt.PositiveLane[SpanAxis] = PositiveStation;
+					CandidateAttempt.NegativeLane[Perpendicular] = FMath::Clamp(
+						Node.LoadResultant[Perpendicular],
+						PerpendicularMinimum, PerpendicularMaximum);
+					CandidateAttempt.PositiveLane[Perpendicular] =
+						CandidateAttempt.NegativeLane[Perpendicular];
+					CandidateAttempt.SeatTopZ = UpperBounds.Min.Z;
+					bParallelCap = PriorTwinAttempts.ContainsByPredicate(
+						[&CandidateAttempt, Tolerance](
+							const FRootedTwinLaneAttempt& Prior)
+						{
+							return MatchesRootedTwinLaneAttempt(
+								Prior, CandidateAttempt, Tolerance);
+						});
+					if (!bParallelCap)
+					{
+						continue;
+					}
 				}
 				else
 				{
@@ -981,6 +1164,8 @@ namespace ABTSM73BeamC
 						UpperBounds.GetCenter()[SpanAxis];
 					NegativeStation = SeatCenter - SeatLength * 0.5;
 					PositiveStation = SeatCenter + SeatLength * 0.5;
+					NegativePostStation = NegativeStation;
+					PositivePostStation = PositiveStation;
 				}
 				if (PerpendicularMinimum > PerpendicularMaximum + Tolerance)
 				{
@@ -996,8 +1181,8 @@ namespace ABTSM73BeamC
 				const double PostTopZ = SeatTopZ - Section;
 				FVector2D NegativePost = SeatStation;
 				FVector2D PositivePost = SeatStation;
-				NegativePost[SpanAxis] = NegativeStation;
-				PositivePost[SpanAxis] = PositiveStation;
+				NegativePost[SpanAxis] = NegativePostStation;
+				PositivePost[SpanAxis] = PositivePostStation;
 				if (PostTopZ < Section - Tolerance
 					|| IsReserved(NegativePost, 0.0, PostTopZ)
 					|| IsReserved(PositivePost, 0.0, PostTopZ))
@@ -1093,16 +1278,18 @@ namespace ABTSM73BeamC
 					EABTSM73BeamAFrameAxis::Z,
 					EABTSM73BeamAMemberRole::BridgePost);
 				OutAddedCount += 3;
+				bOutAddedRootedGrillage = true;
 				UE_LOG(LogABTSRuntime, Display,
 					TEXT("[ABTS][M7.3-Beam-C2][RootedGrillage]")
 					TEXT(" Upper=%d VoidSource=%d SpanAxis=%d SeatZ=%.2f")
-					TEXT(" Negative=%.2f Positive=%.2f Perpendicular=%.2f"),
+					TEXT(" Negative=%.2f Positive=%.2f Perpendicular=%.2f")
+					TEXT(" ParallelCap=%d"),
 					Node.MemberId,
 					BestVoid != nullptr
 						? BestVoid->SpanSourceVolumeId : INDEX_NONE,
 					SpanAxis,
 					SeatTopZ, NegativeStation, PositiveStation,
-					SeatStation[Perpendicular]);
+					SeatStation[Perpendicular], bParallelCap ? 1 : 0);
 			}
 		}
 		if (OutAddedCount == 0)
@@ -1765,6 +1952,9 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 	}
 	int32 TotalAddedPosts = PriorAddedStructuralSupportPostCount;
 	TOptional<uint32> PreviousFailedAnalysisHash;
+	TSet<uint32> SeenFailedAnalysisHashes;
+	TSet<uint32> AttemptedRootedGrillageHashes;
+	TArray<ABTSM73BeamC::FRootedTwinLaneAttempt> PreviousTwinAttempts;
 	const int32 RemainingClosurePasses =
 		Settings.MaximumStructuralClosurePasses
 		- PriorStructuralClosurePassCount;
@@ -1808,9 +1998,23 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 			return true;
 		}
 		const uint32 FailedAnalysisHash = HashResult(OutResult);
-		const bool bRepeatedFailedAnalysis = bRepairable
-			&& PreviousFailedAnalysisHash.IsSet()
-			&& PreviousFailedAnalysisHash.GetValue() == FailedAnalysisHash;
+		bool bRepeatedFailedAnalysis = false;
+		if (bRepairable
+			&& !ABTSM73BeamC::TryObserveStructuralClosureFailure(
+				FailedAnalysisHash, PreviousFailedAnalysisHash,
+				SeenFailedAnalysisHashes, bRepeatedFailedAnalysis, OutError))
+		{
+			OutResult.Summary.StructuralClosurePassCount = CumulativePass;
+			OutResult.Summary.AddedStructuralSupportPostCount = TotalAddedPosts;
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-C2][ClosureCycleNoProgress]")
+				TEXT(" Pass=%d Added=%d Members=%d Bearings=%d Hash=%u"),
+				CumulativePass, TotalAddedPosts,
+				InOutClosedAssembly.Members.Num(),
+				InOutClosedAssembly.BearingContacts.Num(),
+				FailedAnalysisHash);
+			return false;
+		}
 		if (bRepeatedFailedAnalysis)
 		{
 			OutResult.Summary.StructuralClosurePassCount = CumulativePass;
@@ -1929,9 +2133,18 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 						*CandidateBounds.Max.ToCompactString());
 				}
 			}
-			// Do not spin another equivalent Z-post proposal. The repair helper gets
-			// one chance to install an explicit two-root void grillage; if no legal
-			// grillage exists it returns zero and the closure fails immediately.
+		}
+		if (bRepairable
+			&& !ABTSM73BeamC::TryCheckRootedGrillageRepairAvailable(
+				FailedAnalysisHash, AttemptedRootedGrillageHashes, OutError))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-C2][RootedGrillageNoProgress]")
+				TEXT(" Pass=%d Members=%d Bearings=%d Hash=%u"),
+				CumulativePass, InOutClosedAssembly.Members.Num(),
+				InOutClosedAssembly.BearingContacts.Num(),
+				FailedAnalysisHash);
+			return false;
 		}
 		PreviousFailedAnalysisHash = bRepairable
 			? TOptional<uint32>(FailedAnalysisHash) : TOptional<uint32>();
@@ -1963,7 +2176,12 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 			}
 			return false;
 		}
+		const bool bForceRootedGrillage =
+			ABTSM73BeamC::ShouldForceRootedGrillageRepair(
+				bRepeatedFailedAnalysis, PreviousTwinAttempts.Num());
 		int32 AddedThisPass = 0;
+		TArray<ABTSM73BeamC::FRootedTwinLaneAttempt> ThisPassTwinAttempts;
+		bool bAddedRootedGrillage = false;
 		FString RepairError;
 		const int32 RemainingMemberCapacity =
 			MaximumFinalMemberCount - InOutClosedAssembly.Members.Num();
@@ -1981,11 +2199,28 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 			bAllowDeferredCoreBracing,
 			CumulativePass > 0,
 			bRepeatedFailedAnalysis,
+			bForceRootedGrillage,
+			PreviousTwinAttempts,
+			ThisPassTwinAttempts,
+			bAddedRootedGrillage,
 			AddedThisPass, RepairError))
 		{
 			OutError = RepairError.IsEmpty()
 				? TEXT("BeamCStructuralClosureStalled") : RepairError;
 			return false;
+		}
+		if (!ABTSM73BeamC::TryCommitAddedRootedGrillageRepair(
+			FailedAnalysisHash, bAddedRootedGrillage,
+			AttemptedRootedGrillageHashes, OutError))
+		{
+			return false;
+		}
+		if (bAddedRootedGrillage)
+		{
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-Beam-C2][RootedGrillageCommitted]")
+				TEXT(" Pass=%d Added=%d Hash=%u"),
+				CumulativePass, AddedThisPass, FailedAnalysisHash);
 		}
 		TotalAddedPosts += AddedThisPass;
 		if (InOutClosedAssembly.Members.Num() > MaximumFinalMemberCount)
@@ -1999,6 +2234,7 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 				TEXT("BeamCStructuralReclose:%s"), *RepairError);
 			return false;
 		}
+		PreviousTwinAttempts = MoveTemp(ThisPassTwinAttempts);
 		if (InOutClosedAssembly.Members.Num() > MaximumFinalMemberCount)
 		{
 			return RejectMemberBudget(InOutClosedAssembly.Members.Num());

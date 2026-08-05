@@ -1,11 +1,13 @@
-# M7.3-Beam-C3 暂停检查点（2026-08-05）
+# M7.3-Beam-C3 暂停检查点（2026-08-05，历史冻结）
 
-> 状态：**暂停继续修复，保留现场。** 最新复合回归中 E5（`ColumnBreak / Tier 4`）仍失败，
+> 建立检查点时状态：**暂停继续修复，保留现场。** 当时最新复合回归中 E5（`ColumnBreak / Tier 4`）仍失败，
 > E6（`ColumnBreak / Tier 5`）已通过。除下文列出的 1–3 个假设外，不再继续扩展修复路径。
 >
 > 工作树：`feature/m7-buildings`；建立检查点时的基线 HEAD：`c571817`。
+>
+> 当前静态收敛结论与剩余证据层见[第 10 节](#10-恢复后的续处理结论2026-08-05-追加)。
 
-本文件冻结 [M73BeamC3CribCoreStabilityDesign.md](M73BeamC3CribCoreStabilityDesign.md) 当前实现、
+本文件冻结 [M73BeamC3CribCoreStabilityDesign.md](M73BeamC3CribCoreStabilityDesign.md) 建立检查点时的实现、
 测试证据、失败现场和恢复边界。它不是 Beam-C3 完成声明；实时 Chaos 静置与攻击 PIE 仍未验收。
 
 ## 1. 目标、不变量与预算限制
@@ -31,7 +33,7 @@ Beam-C3 的目标是在不改变当前 Shape Grammar / WFC 主轮廓的前提下
 
 ## 2. 已完成的源码与测试改动
 
-当前未提交源码已经实现：
+建立检查点时的未提交源码已经实现：
 
 - Catalog v8 四柱井干芯体、交错 X/Y course、四角 CorePost 与分层 Belt；
 - 低 Tier 复用优先、普通 frame/roof donor 与 49/199、12/33 双重预算收口；
@@ -44,8 +46,8 @@ Beam-C3 的目标是在不改变当前 Shape Grammar / WFC 主轮廓的前提下
   support cone；
 - D1 compiler、Beam-A/B/C、D0 Profile/Settings/Hash 与 C3 certificate 的生产链接入。
 
-自动化测试文件当前定义 17 项。原有 14 项覆盖低 Tier 生产矩阵、确定性、四柱闭环、根系拉结、
-fail-closed、C2 后修复、最终 all-Z 审计及事务回滚；新增但尚未正式执行的 3 项为：
+建立检查点时自动化测试文件定义 17 项。原有 14 项覆盖低 Tier 生产矩阵、确定性、四柱闭环、根系拉结、
+fail-closed、C2 后修复、最终 all-Z 审计及事务回滚；当时新增但尚未正式执行的 3 项为：
 
 - `SameSourceCrossBayTargetedTie`；
 - `StructuralSourceProgressIsolation`；
@@ -71,13 +73,13 @@ fail-closed、C2 后修复、最终 all-Z 审计及事务回滚；新增但尚�
 | `ABTS.M73DAG.BeamD1.ReportedAxisBalanceRegression` | Success | `BeamC3-HighTier-StrictRooted-Final.log` | `DropTrigger / Tier 4`，2297 Brick，`MaxAllZ=713.04` |
 | `ColumnBreak / Tier 5`（E6） | 候选通过 | `BeamC3-ColumnHighTier-PartialSafeDonor-20260805-134205.log` | 复合测试整体因 E5 失败；E6 自身已有 `Certified` |
 
-当前 `UnrealEditor-ABTSRuntime.dll` 包含新增 3 个测试名，说明当前模块曾成功编译链接；但没有保存
+建立检查点时的 `UnrealEditor-ABTSRuntime.dll` 包含新增 3 个测试名，说明当时模块曾成功编译链接；但没有保存
 与最新源码一一对应的正式 `-ForceUnity -DisableAdaptiveUnity` 构建日志，因此它不列为最终正式构建门。
-当前源码的 fresh 17/17、完整生产矩阵和实时 Chaos PIE 均尚未执行。
+建立检查点时源码的 fresh 17/17、完整生产矩阵和实时 Chaos PIE 均尚未执行。
 
-## 4. 最新 E5 / E6 结果与失败签名
+## 4. 建立检查点时最新的 E5 / E6 结果与失败签名
 
-最新命令：
+当时最新命令：
 
 ```text
 C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
@@ -150,7 +152,7 @@ Bricks=2325 Rooted=220 MaxAllZ=667.03
 
 需要区分两个层次：
 
-1. **当前终态阻塞是预算。** PartialSafeDonor 只把 E5 末端需求从 1836 降到 1803；剩余 304 个
+1. **建立检查点时的终态阻塞是预算。** PartialSafeDonor 只把 E5 末端需求从 1836 降到 1803；剩余 304 个
    Member 没有可证明安全的 donor，不能以破坏 720 cm 或承接链换取。
 2. **候选级高频阻塞仍是实体锚路径。** 典型拒绝为：
 
@@ -248,3 +250,67 @@ Docs/AIReports/M73BeamC3Checkpoint-20260805-FullLogs.zip
 E5 在 1499 窗内没有安全 donor，下一步应调整 `ColumnBreak / Tier 4` 的轮廓/语义生成预算，而不是
 继续在 C3 内增加特殊分支。完成 fresh 17/17、E5/E6、生产矩阵和 Chaos PIE 之前，不得把 Beam-C3
 标记为完成。
+
+## 10. 恢复后的续处理结论（2026-08-05 追加）
+
+本节只追加恢复后的证伪和结果；第 1～9 节仍是当时的冻结现场，不回写为“从未失败”。其中 E5/E6
+静态阻塞已解除，但完整 D1/D1.5、5 × 6 与 Chaos PIE 仍未完成，所以本文件仍不是 Beam-C3 动态完成声明。
+
+### 10.1 恢复后先证伪且已撤回的路径
+
+| 路径 | 结果 | 结论 |
+|---|---|---|
+| 候选 Gate、屋顶回滚、Host 深度 5→4、固定站位、多 Host 身份、按需求精确 Reserve、Bounds 1.20/1.21、MaxBays 5/4、复用 Tie 柱、Attempt 10/11、post-C2 临时事务 | 可改变局部数量或搜索顺序，但没有同时保住最终 DAG、真实 Bearing、720 cm 与 Brick 窗 | 均已撤回，不再以参数组合重复试验 |
+| `TargetBaySpanCM=440`，以及只把 E5 调到 473 而不改变 Beam-C 实体闭合 | 473 能留下预算，但 Node 606 仍回到相同失败 DAG | 473 是最终方案的容量条件，不是单独的结构修复 |
+| 相邻 Void cross-seat 上移两个 Brick 层 | 没有形成可认证 anchor/progress | 不再扩大 Portal/高度启发式 |
+| 外侧单边 cross-seat | Beam-C 局部通过，但最终 `MaxAllZ` 退化到约 1585/808 cm | 不能用局部 DAG 通过替代最终全部 Z 站位审计 |
+| 在 Attempt 0/2 批量给候选加平行 cap | 能改变部分 bearing，但没有先证明两条根系 lane | 证据不足的 bulk cap 会制造假承托，保持撤回 |
+
+### 10.2 最终根因与有界修复
+
+E5 最终失败集中在 Node 606：两条 25/75 全高 Z 根柱虽被尝试加入，却在 Beam-A 的 merge/split 后折入
+既有分段柱，Member/Bearing/DAG Hash 不变。旧循环把 `Added=2` 当成进展，既无法到达缺失的水平 cap，
+也可能无限重试同一结构身份。
+
+最终修复由四个互相约束的部分组成：
+
+1. Catalog v9 的唯一配置参数变化是把 `ColumnBreak / Tier 4` 的 `TargetBaySpanCM` 固定为 473 cm；
+   Tier 5 保持 420 cm；CatalogVersion 升级仍会使全局 Catalog/Resolved 身份 Hash 改变，
+   E5 因而能为最终实体 C2 cap 留出恰好 1499 Brick 的容量；
+2. Beam-C 先按失败上梁的真实 footprint 尝试并证明精确 25/75 双 lane；该证据只跨一次权威 Beam-A
+   重闭合存在。只有同一几何再次出现时，才允许在上梁下一截面生成平行 cap；短 course 还必须满足
+   两 lane 的真实截面间距；
+3. 无 void 的相邻重复 Hash 只有在上一轮留下精确 twin-lane 证据后才可生成平行 cap；`BestVoid` 不需要
+   该证据，但两类路径都只在 `BridgeSeat + 2 BridgePost` 全部实际追加后消费 token，并在 Beam-A 重闭合前
+   登记失败 DAG。任何已登记 Hash 都在下一次修改前以 `BeamCStructuralClosureNoProgress` 拒绝；
+   `H1→H2→H1` 等非相邻循环也直接 fail closed，不能再用累计 `Added` 伪造进展；
+4. C3 屋顶 donor 改为事务：删除、重闭合或重新认证任一失败即恢复 Assembly/Evidence/插入账本，随后
+   才尝试 frame donor。D1 的所有候选拒绝统一记录 Profile/Tier/BaseSeed/Attempt/CandidateSeed/Gate/
+   Reason 及实际 Member/Brick，认证日志同时记录 closure pass/add ledger。
+
+### 10.3 当前静态证据
+
+| 目标 | Attempt | Resolved / Plan / Evidence Hash | Brick / Rooted / MaxAllZ | Closure ledger |
+|---|---:|---|---|---|
+| ColumnBreak E5 / Tier 4 | 5 | `1404937059 / 1954804974 / 2654780606` | `1499 / 159 / 712.19` | `6 Pass / 33 Added` |
+| ColumnBreak E6 / Tier 5 | 5 | `3234425960 / 3180370346 / 3782347597` | `2325 / 220 / 667.03` | `1 Pass / 15 Added` |
+
+E5 与 E6 均在同一测试中重放，Resolved/Upstream/Core/Rooted/Brick Geometry Hash、Attempt、Brick 数、
+Rooted、最大柱跨和 closure ledger 全部一致。
+证据日志为：
+
+- `BeamC3-ColumnHighTier-V9-PhysicalCommitFinal-20260805-1822.log`：`ColumnHighTierClosure` 1/1，E5/E6 均双次重放，并记录实体 grillage 的即时 DAG 提交；
+- `BeamC3-Full17-V9-PhysicalCommitFinal-20260805-1821.log`：Beam-C3 17/17，并含 Catalog v9 低 Tier 5 × 2；
+- `BeamC3-BeamC13-V9-PhysicalCommitFinal-20260805-1820.log`：精确 Beam-C 前缀 13/13；
+- `BeamC3-D0-6-V9-PhysicalCommitFinal-20260805-1825.log`：D0 6/6。
+
+相关 Unity 对象已直接重新编译并链接；随后安装版 UE 5.8 的
+`Build.bat AngryBirdsToSpaceEditor Win64 Development -ForceUnity -DisableAdaptiveUnity` 全链接成功。
+这不是清理全部 Intermediate 后的 clean rebuild，不应扩大为其它工作树或共享热点的 fresh 编译证明。
+
+### 10.4 仍未完成与资产边界
+
+- 未执行完整 D1、D1.5 与 5 Profile × 6 Tier 生产矩阵；
+- 当前任务没有 GUI 授权，未启动可见 Editor/PIE，也未执行实时 Chaos 静置或攻击验收；
+- `Content/Maps/PlanarPhysicsTestMap.umap` 仍是用户已有二进制改动，本轮未保存或覆盖、未暂存；
+- 在上述证据补齐前，只能声明 E5/E6 静态收敛，不能声明 Beam-C3 动态完成。

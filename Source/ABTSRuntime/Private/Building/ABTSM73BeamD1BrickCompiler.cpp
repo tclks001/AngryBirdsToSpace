@@ -407,14 +407,29 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 	int32 LastBrickCount = 0;
 	for (int32 Attempt = 0; Attempt < Target.MaximumCandidateAttempts; ++Attempt)
 	{
+		const int32 AttemptSeed = ABTSM73BeamD1::CandidateSeed(
+			Settings.BuildingSeed, Attempt);
+		auto LogCandidateRejection = [&Settings, Attempt, AttemptSeed](
+			const TCHAR* Gate, const FString& Reason, const int32 MemberCount,
+			const int32 BrickCount = 0)
+		{
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
+				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
+				TEXT(" Gate=%s Reason=%s Members=%d Bricks=%d"),
+				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+				Settings.BuildingSeed, Attempt, AttemptSeed, Gate, *Reason,
+				MemberCount, BrickCount);
+		};
 		FABTSM73BeamD0ResolvedProfile Profile;
 		FString CandidateError;
 		if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
 			Settings.GameplayProfileId, Settings.DifficultyTier,
-			ABTSM73BeamD1::CandidateSeed(Settings.BuildingSeed, Attempt),
+			AttemptSeed,
 			Profile, CandidateError))
 		{
 			LastFailure = FString::Printf(TEXT("Profile:%s"), *CandidateError);
+			LogCandidateRejection(TEXT("Profile"), LastFailure, 0);
 			continue;
 		}
 
@@ -425,6 +440,7 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			Silhouette, CandidateError))
 		{
 			LastFailure = FString::Printf(TEXT("Silhouette:%s"), *CandidateError);
+			LogCandidateRejection(TEXT("Silhouette"), LastFailure, 0);
 			continue;
 		}
 
@@ -435,9 +451,10 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			Silhouette, BeamA, CandidateError))
 		{
 			LastFailure = FString::Printf(TEXT("BeamA:%s"), *CandidateError);
+			LogCandidateRejection(TEXT("BeamA"), LastFailure,
+				BeamA.Members.Num());
 			continue;
 		}
-
 		FABTSM73BeamBGenerationResult BeamB;
 		FABTSM73BeamBGenerator BeamBGenerator;
 		if (!BeamBGenerator.Generate(
@@ -445,6 +462,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			Silhouette, BeamA, BeamB, CandidateError))
 		{
 			LastFailure = FString::Printf(TEXT("BeamB:%s"), *CandidateError);
+			LogCandidateRejection(TEXT("BeamB"), LastFailure,
+				BeamB.ClosedAssembly.Members.Num());
 			continue;
 		}
 		const int32 MemberCountBeforeStabilityCore =
@@ -460,6 +479,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			CandidateError))
 		{
 			LastFailure = FString::Printf(TEXT("BeamC3:%s"), *CandidateError);
+			LogCandidateRejection(TEXT("BeamC3"), LastFailure,
+				BeamB.ClosedAssembly.Members.Num());
 			continue;
 		}
 		const FABTSM73BeamC3CribCoreSummary InitialBeamC3Summary =
@@ -483,6 +504,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				BeamC.Summary.SupportSpreadViolationCount,
 				BeamC.Summary.SpanViolationCount,
 				BeamC.Summary.CantileverViolationCount);
+			LogCandidateRejection(TEXT("BeamC"), LastFailure,
+				BeamB.ClosedAssembly.Members.Num());
 			continue;
 		}
 		const int32 InitialBeamCClosurePassCount =
@@ -514,6 +537,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamC3Final:%s"), *CandidateError);
+				LogCandidateRejection(TEXT("BeamC3Final"), LastFailure,
+					BeamB.ClosedAssembly.Members.Num());
 				continue;
 			}
 			FABTSM73BeamC3CribCoreSettings RepairSettings =
@@ -541,6 +566,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamC3PostC2Repair:%s"), *CandidateError);
+				LogCandidateRejection(TEXT("BeamC3PostC2Repair"), LastFailure,
+					BeamB.ClosedAssembly.Members.Num());
 				continue;
 			}
 			CandidateError.Reset();
@@ -554,12 +581,7 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamCPostC3Repair:%s"), *CandidateError);
-				UE_LOG(LogABTSRuntime, Display,
-					TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-					TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=BeamCPostC3Repair")
-					TEXT(" Reason=%s Members=%d"),
-					*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-					Settings.BuildingSeed, Attempt, *LastFailure,
+				LogCandidateRejection(TEXT("BeamCPostC3Repair"), LastFailure,
 					BeamB.ClosedAssembly.Members.Num());
 				continue;
 			}
@@ -573,12 +595,7 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamC3FinalAfterRepair:%s"), *CandidateError);
-				UE_LOG(LogABTSRuntime, Display,
-					TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-					TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=BeamC3FinalAfterRepair")
-					TEXT(" Reason=%s Members=%d"),
-					*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-					Settings.BuildingSeed, Attempt, *LastFailure,
+				LogCandidateRejection(TEXT("BeamC3FinalAfterRepair"), LastFailure,
 					BeamB.ClosedAssembly.Members.Num());
 				continue;
 			}
@@ -601,12 +618,7 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				TEXT("BeamC3CumulativeNetMemberBudgetExceeded:%d>%d"),
 				BeamC3.Summary.NetMemberDelta,
 				Profile.StabilityCore.MaximumNetMemberIncrease);
-			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=BeamC3Budget")
-				TEXT(" Reason=%s Members=%d"),
-				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-				Settings.BuildingSeed, Attempt, *LastFailure,
+			LogCandidateRejection(TEXT("BeamC3Budget"), LastFailure,
 				BeamB.ClosedAssembly.Members.Num());
 			continue;
 		}
@@ -624,13 +636,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 		if (!CompileResolved(Profile, BeamB, BeamC, Candidate, CandidateError))
 		{
 			LastFailure = FString::Printf(TEXT("Compile:%s"), *CandidateError);
-			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=Compile")
-				TEXT(" Reason=%s Members=%d"),
-				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-				Settings.BuildingSeed, Attempt, *LastFailure,
-				BeamB.ClosedAssembly.Members.Num());
+			LogCandidateRejection(TEXT("Compile"), LastFailure,
+				BeamB.ClosedAssembly.Members.Num(), Candidate.Summary.BrickCount);
 			continue;
 		}
 		Candidate.Summary.bStabilityCoreCertified =
@@ -665,13 +672,8 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				Candidate.Summary.YColumnStationCount,
 				Candidate.Summary.AxisStationDensityRatio,
 				Candidate.Summary.StructuralClosurePostRatio);
-			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=AssemblyQuality")
-				TEXT(" Reason=%s Bricks=%d"),
-				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-				Settings.BuildingSeed, Attempt, *LastFailure,
-				Candidate.Summary.BrickCount);
+			LogCandidateRejection(TEXT("AssemblyQuality"), LastFailure,
+				Candidate.Summary.MemberCount, Candidate.Summary.BrickCount);
 			continue;
 		}
 		if (!ABTSM73BeamD1::MeetsVisualMilestone(Profile, Silhouette, BeamB))
@@ -684,26 +686,18 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				ABTSM73BeamD1::RequiredSupportedSpanCount(
 					Silhouette.Summary.ResolvedArchetype,
 					Profile.DifficultyTier));
-			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=VisualMilestone")
-				TEXT(" Reason=%s Bricks=%d"),
-				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-				Settings.BuildingSeed, Attempt, *LastFailure,
-				Candidate.Summary.BrickCount);
+			LogCandidateRejection(TEXT("VisualMilestone"), LastFailure,
+				Candidate.Summary.MemberCount, Candidate.Summary.BrickCount);
 			continue;
 		}
 		if (LastBrickCount < Target.MinimumBrickCount
 			|| LastBrickCount > Target.MaximumBrickCount)
 		{
-			LastFailure = TEXT("BrickCountOutsideTarget");
-			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
-				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d Gate=BrickWindow")
-				TEXT(" Bricks=%d Target=%d..%d"),
-				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
-				Settings.BuildingSeed, Attempt, LastBrickCount,
-				Target.MinimumBrickCount, Target.MaximumBrickCount);
+			LastFailure = FString::Printf(
+				TEXT("BrickCountOutsideTarget:%d:notin:%d..%d"),
+				LastBrickCount, Target.MinimumBrickCount, Target.MaximumBrickCount);
+			LogCandidateRejection(TEXT("BrickWindow"), LastFailure,
+				Candidate.Summary.MemberCount, LastBrickCount);
 			continue;
 		}
 
@@ -715,13 +709,16 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7.3-Beam-C3][Certified]")
 			TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d")
-			TEXT(" ResolvedHash=%lld PlanHash=%lld EvidenceHash=%lld Bricks=%d Rooted=%d MaxAllZ=%.2f"),
+			TEXT(" ResolvedHash=%lld PlanHash=%lld EvidenceHash=%lld")
+			TEXT(" Bricks=%d Rooted=%d MaxAllZ=%.2f ClosurePasses=%d ClosureAdded=%d"),
 			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
 			Settings.BuildingSeed, Attempt, Profile.ResolvedSettingsHash,
 			BeamC3.Summary.CorePlanHash, BeamC3.Summary.RootedEvidenceHash,
 			Candidate.Summary.BrickCount,
 			BeamC3.Summary.RootedExistingCourseCount,
-			BeamC3.Summary.MaximumUnbracedCorePostSpanAfterCM);
+			BeamC3.Summary.MaximumUnbracedCorePostSpanAfterCM,
+			Candidate.Summary.StructuralClosurePassCount,
+			Candidate.Summary.AddedStructuralSupportPostCount);
 		Candidate.Summary.SemanticVolumeCount =
 			Silhouette.Summary.VolumeCount;
 		Candidate.Summary.SemanticBoxCount =
