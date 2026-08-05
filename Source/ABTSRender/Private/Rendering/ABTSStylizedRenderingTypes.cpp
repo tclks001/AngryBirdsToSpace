@@ -31,7 +31,7 @@ bool FABTSStylizedRenderingContract::IsViewClassValid(
 	EABTSStylizedViewClass ViewClass)
 {
 	return ViewClass >= EABTSStylizedViewClass::MainWorld
-		&& ViewClass <= EABTSStylizedViewClass::FinaleRemotePreview;
+		&& ViewClass <= EABTSStylizedViewClass::FinaleCinematicCapture;
 }
 
 bool FABTSStylizedRenderingContract::RequiresSelectiveStencil(
@@ -81,9 +81,14 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 		break;
 	case EABTSStylizedViewClass::SatelliteLandingPreview:
 		Policy.Profile = EABTSStylizedRenderProfile::SatelliteGuide;
+		// The lunar landing preview intentionally captures BaseColor so the
+		// far side remains a readable navigation instrument.  Preserve that
+		// lighting-independent palette and only add its thin outline layer.
+		Policy.bApplyTone = false;
 		Policy.bAllowSelectiveStencil = true;
 		break;
 	case EABTSStylizedViewClass::FinaleRemotePreview:
+	case EABTSStylizedViewClass::FinaleCinematicCapture:
 		Policy.Profile = EABTSStylizedRenderProfile::FinaleSpace;
 		Policy.bAllowSelectiveStencil = true;
 		break;
@@ -103,5 +108,5 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 bool FABTSStylizedRenderingContract::IsViewClassImplemented(
 	EABTSStylizedViewClass ViewClass)
 {
-	return ViewClass == EABTSStylizedViewClass::MainWorld;
+	return IsViewClassValid(ViewClass);
 }

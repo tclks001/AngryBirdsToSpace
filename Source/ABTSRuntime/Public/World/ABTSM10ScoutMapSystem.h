@@ -52,6 +52,11 @@ public:
 	bool IsSatelliteLandingPreviewActive() const;
 	/** Runtime-only render target consumed by the M10 HUD; nullptr while no capture was initialized. */
 	UTextureRenderTarget2D* GetLandingPreviewRenderTarget() const;
+	/** Integration-only read seam; ownership and capture cadence remain with M10. */
+	AABTSM101LandingPreviewCamera* GetLandingPreviewCamera() const
+	{
+		return LandingPreviewCamera;
+	}
 	/** True while M10.1-C has a long reinforced prediction and a valid fitted-plane snapshot. */
 	bool IsOrbitalOverviewActive() const { return OrbitalOverviewSnapshot.bValid; }
 	/** Screen-independent projected geometry consumed read-only by the HUD. */

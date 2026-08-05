@@ -121,6 +121,8 @@ Manifest 至少记录：
 
 AVI 是视觉证据；Manifest/日志是身份与流程证据。两者缺一不算完成。
 
+从录制合同版本 3 起，Manifest 还必须写出 `stylizedViewClass=FinaleCinematicCapture`、组件注册状态及 resolved policy。它们只证明录制组件已接入预期风格策略，不能单独证明 Tone/Outline 已进入最终像素；最终仍以从 AVI 本体解码的帧为准。
+
 ### 3.4 M0 fresh-process 基线证据
 
 2026-08-05 以 Rank 11、Stylized 1、DX11、RenderOffscreen、1280×720、30 fps 运行一次完整旧镜头基线：
@@ -129,6 +131,15 @@ AVI 是视觉证据；Manifest/日志是身份与流程证据。两者缺一不�
 - 同一进程写出 `000000..000948` 共 949 个连续 JPG，封装 MJPEG AVI 后以状态 0 自行退出；
 - AVI `avih.dwTotalFrames`、视频流 `strh.dwLength`、`idx1` 条目均为 949，分辨率 1280×720，时长 31.633333 秒，文件 21757000 bytes，SHA-256 为 `C5B8EB3088B9DD6471DA0808062CBEDB50FC7A6CF7DEF725DE6FB1AF4296A1B3`；
 - 抽帧显示发射起点与鸟画面有效，但旧飞行镜头随后长时间只留下浅蓝天空。这是 M0 忠实记录的旧镜头失败基线，不是导演验收通过；后续 M1/M2 应直接用它量化和修复。
+
+### 3.5 Integration 风格化离屏视图复验
+
+2026-08-05 由集成工作树为录制器增加专用 `FinaleCinematicCapture`，保持主视图扩展拒绝未知 Scene Capture，并将风格化实现版本升为 6。随后按第 3.1 节命令以 Rank 11、Stylized 1 运行 fresh DX11 RenderOffscreen：
+
+- 输出 `Rank11-Stylized-FinaleCapture-v6-20260805-230434`，Manifest 合同版本 3、状态 `Complete`、原因 `TargetHit`，并记录 ViewClass、注册和三项 policy 均有效；
+- JPG 与从 AVI 本体扫描解码的 MJPEG 帧均为 949，1280×720、30 fps；AVI 19506476 bytes，SHA-256 `FE16E64797EE8101E414E1781C51EE730EF7B9EC45D400966B6B8A81C65CA3A1`；
+- AVI 第 3 帧可见带稳定轮廓的鸟、弹弓及远端球体；第 250/500 帧仍能看到鸟和行星轮廓，证明独立 SceneCapture 已实际消费 Outline，不再是仅有实现版本号的假阳性；
+- UFO 在终段仍不足以从远景球形代理中可靠辨认，终帧也没有形成可读的鸟/UFO 双目标构图。因此本次只关闭风格化离屏接线缺口，不宣称旧镜头导演验收通过；UFO 可读性仍归 M1–M4。
 
 ## 4. 后续镜头导演模型（本轮不实现）
 

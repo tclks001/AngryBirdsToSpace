@@ -193,11 +193,11 @@
 - 总文档不复制会持续变化的整段参数和逐次实验数据；需要复盘时以子文档中的原始 ID、日志和提交为准。
 - 后续摘录先比较上次基线之后的子文档差异，再更新本文和基线；功能工作树不得直接修改本文。
 
-| 原始账本 | 主要职责 | 本次摘录基线（2026-08-04） |
+| 原始账本 | 主要职责 | 本次摘录基线（截至 2026-08-05） |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `29e3de0d49c00325a9899871458934bd6850342c` |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `2ddc974978c4c717db967b048209258dbca80c04` |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
-| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `51b391d8e1068d1c2a030fe64667ec21418de33c` |
+| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `550545141908fd3cf6b42442a97109563549fc24` |
 
 ### 13.2 跨阶段统一诊断顺序
 
@@ -222,6 +222,8 @@
 | 自动装配的弦袋无法点击 | 视觉上重叠的桩组件先阻挡了 `ECC_Visibility`，交互射线没有到达 Pouch。装配后 Pouch 应是 Cord 唯一 Visibility 点击目标。 | `CordVisibilityTargets=1`、`PouchVisibilityTargets=1`，PIE 点击袋口进入发射且桩不抢占。详见 `M3-R51-004`。 |
 | 太空槽在起伏球面被旧“共面/同高”门拒绝 | 两端应各自贴合真实地表；局部帧用两槽中点、切平面 Right、道路 Forward 和径向 Up 正交化，检查右手系与有界倾角，而不是强行拉平。 | 两槽各自贴地、Origin 等于中点、Frame 非退化且 Hash 可复现。详见 `M3-R52-001/002`。 |
 | 建筑先生成后消失 | `[Generated] Accepted=1` 只表示生成期通过；后续 M7 Idle Reject 会事务删除模块和 Foundation。M3 不应通过移动 Cell 或保留失败 Actor 掩盖它。 | 等待建筑合同封口，要求 `Expected=Registered=Accepted` 且 `Rejected=0` 后才发布 WorldReady。详见 `M3-X-001`。 |
+| T2-B 风格语义在 Preview/Test 与生产运行时漂移，或 HISM 产生逐实例注册 | 地图名、Actor 名称、Transform 和当前相机都不是权威身份。M3 只读适配器只接受精确 Planet/Component、卫星运行时 Actor 或已验证 Candidate/Result；未知对象返回 `None`。树石以 HISM 组件批次发布，不逐实例展开。适配器不保存 Profile、Stencil、Authority 或 Hash。 | `ABTS.M3.StylizedSemantics` 验证映射、确定性、批次粒度、fail closed 及 Custom Depth/Stencil 状态不变；`ABTS.M3.Monthly.SatellitePreview` 验证 Preview 与生产卫星/E5 语义且 Result/Candidate/Runtime Hash、月度权威和引力开关不变。详见 `M3-T2B-001`。 |
+| Integration 需要接线地面/月面 SceneCapture，但 M3 没有稳定访问入口 | 捕获 owner/component 位于共享 M10 私有成员，功能树不能靠名称或组件扫描绕过所有权。M3 只记录需求；Integration 应在共享类型增加 const getter，并用现有 Preview Subject 显式映射 `GroundLandingPreview` / `SatelliteLandingPreview`，缺失或未知时 fail closed。 | M3 提交不得修改共享 Camera/M10 类型；Integration 后续测试检查 Subject 映射及接线前后 M3/M9 Gameplay 身份不变。详见 `M3-T2B-002`。 |
 | 性能门单次轻微越线 | 保留首次失败；先核对 Seed/Oracle/Hash，再停止并行重型任务，以相同二进制 fresh 隔离重跑。既不能直接忽略，也不能在身份未变时立即断言算法回归。 | 同时保存 P50/P95/Max、接受数、Oracle Hash、命令和首次失败日志。详见 `M3-TEST-001`。 |
 
 ### 13.4 M7：语义结构、最终几何与物理权威
@@ -248,6 +250,7 @@
 | 轨迹最终到达 UFO，但 `TargetHit` 早于第三次引力弹弓退出 | 事件顺序是认证语义的一部分，不能只检查“曾进入所有包络”。 | Core/CLI/Runtime 统一要求 `Assist3 Exit → TargetApproach → TargetHit`，错序命中归为失败。 |
 | 放大模型后出现视觉穿模，或统一缩放后候选失效 | `VisualRadius`、解析 `CollisionRadius`、`InfluenceRadius` 职责不同；离散积分、角域、步长、事件阈值和评分也破坏简单相似缩放。 | 尺度变化后重新跑 Core parity、扫掠、事件、Hull 和完整域认证；最小近掠距离包含鸟体净空，候选 Hash 改变。 |
 | HUD 控件绘制位置与点击热区偏移，或全览图元溢出圆框 | 输入必须依次转换 raw viewport、`UnscaledViewRect` origin/size、DPI 和 Canvas logical space；所有线、圆、文本和 hit test 共用变换与圆裁剪。 | 自动化覆盖 DPI≠1、非零 viewport origin 和线宽/文本 bounds；可见 PIE 改窗口尺寸后仍像素对齐。 |
+| T2-B 按名称、模型、距离或当前 PIP 目标推断终局类别，或 M11 自行给远端捕获应用风格 | 终局语义只来自当前已提交布局及系统实际持有的表现 Actor：Assist1/2/3 为 `FinalePlanet`，Target 为 `FinaleUFO`；主星、普通卫星、候选辅助物和二维图元均 fail closed。M11 只以 const 入口暴露既有远端 SceneCapture 并声明 `FinaleRemotePreview`，不消费 Profile、Stencil 或后处理。 | `ABTS.M11B.Runtime.StylizedSemanticAdapter` 覆盖生产 3+1、候选兼容、未知对象、销毁重建、Core Result/事件/认证 Hash 不变，以及捕获接口不改变相机和生命周期；Integration 后续负责实际 Profile/PIP 像素门。详见 `M11-T2B-RO-001`。 |
 | 发射后鸟/UFO 在远景中不可读 | 当前仅确认可能由 Flight Camera lag 和共享雾/云叠加造成，仍是开放项；不得把推断写成已修复。 | 分别做无 lag、无雾云和同时修改的 fresh 可见 PIE A/B；共享天空/地图修改仍由集成工作树执行。 |
 
 ### 13.6 后续摘录流程
@@ -264,3 +267,8 @@
 | --- | --- | --- | --- |
 | T2-A 静态截图能看到描边，但地形、鸟、物体和建筑边缘有明显像素锯齿；相机或对象运动时线条抖动 | 初版轮廓订阅 `Tonemap` 后扩展点，晚于 UE 5.8 的 TSR/TAA。Temporal Jitter 改变每帧 Depth/Normal 边缘采样位置，而硬四邻域 `max` 把细小变化放大为二值跳变；最终线条没有再经过时域稳定 | 把轮廓独立为 `AfterDOF` 的 `ABTS Stylized OutlinePreTSR`，在 TSR/TAA 前用深度与法线八邻域累积连续覆盖率；按内部/最终 Viewport 比例换算宽度。T1 色调保留在 Tonemap 后的独立 `ABTS Stylized Tone`，运行身份升级为版本 3 | 强制 Unity；fresh NullRHI `ABTS.Rendering.Toon`；fresh D3D12 8/8 截图；Style On 的两个 pass 合计 `<=1.5 ms @ 1080p` 且 Outline `<=1.0 ms`；可见 PIE 旋转相机并让鸟/建筑运动，确认轮廓不再出现不可接受的闪烁。静态图不能替代最后一项 |
 | NullRHI 自动化通过，但真实 D3D12 首帧在新描边 Shader 上报告 `View` 未绑定并因 `Missing uniform buffer` 退出 | `ViewportUVToBufferUV` 间接读取 `FViewUniformShaderParameters`；NullRHI 不执行真实绘制，无法暴露 Shader 参数绑定缺口 | 在描边 pass 参数结构中显式声明 `SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)`，并绑定当前 `View.ViewUniformBuffer` | 每次改变后处理阶段、Scene Texture 或 Viewport UV 换算后，都必须重新起 fresh 真实 RHI 进程完成 Shader 冷编译和至少一轮 8/8 截图；不得以编译或 NullRHI 通过代替 |
+| T2-B1 把全局 View Extension 放开给 Scene Capture 后，未知捕获、反射或月面 BaseColor PIP 被错误套用主视图效果 | 主视图与地面/月面/终局捕获不是同一输出链；仅凭 `bIsSceneCapture`、地图、相机位置或 Actor 名不能确定视图语义 | 主视图扩展继续拒绝所有 Scene Capture；对已知 `USceneCaptureComponent2D` 注册逐组件 `ISceneViewExtension` 和固定视图类，未知捕获 fail closed。月面 BaseColor 只加轮廓，不重复 Tone | `TOON-T2B1-001`：`ABTS.Rendering.Toon.T2B1.SceneCaptureRegistry` 覆盖注册/替换/注销；真实 PIE 分别检查地面、月面、终局 PIP，未知捕获不得被改变 |
+| M11 命令行录制 Manifest 显示最新风格化版本，但 AVI 没有 Tone/Outline | 版本号是进程身份，不是视图消费证据；M11 录制器拥有独立 SceneCapture，而全局扩展按合同拒绝所有 Scene Capture，未注册组件就不会执行风格 pass | 为录制器新增 `FinaleCinematicCapture`，只由显式 Runner 对自身组件直接注册；完成、失败和 EndPlay 都注销。Manifest 记录 ViewClass、注册和 PolicyEnabled，但像素仍以 AVI 解码为准 | `TOON-M11-CAP-004`：ForceUnity、风格合同 7/7、录制配置 1/1；fresh Rank11 Stylized DX11 离屏录制后从 AVI 本体解码 949 帧，关键帧必须看到鸟/行星轮廓。UFO 构图可读性是独立镜头门，不得用渲染接线绿灯代替 |
+| T0 暂停世界后切换 Style Off/On，日志一直没有选择性 Stencil，导致截图看似只验证了 T2-A | T2-B1 的世界子系统原先依赖普通 Tick；T0 在固定姿态前暂停世界，语义刷新不会运行 | 子系统声明暂停时可 Tick，并在 Style 状态变化时立即刷新；Off 恢复全部自有 Custom Depth，On 从显式适配器重建 | `TOON-T2B1-002`：同一 fresh D3D12 8/8 日志必须先见 `Style=0 SelectiveProducers=0`，再见 `Style=1 SelectiveProducers>0`；不得只比较 PNG |
+| Style Off 后组件仍残留 Stencil，或风格系统覆盖了玩法/调试已有的 Custom Depth 值 | Custom Depth 是共享组件状态；若不保存原值或只在世界退出恢复，会污染普通渲染；若无条件写入会偷走其他系统的 producer | Integration 注册表仅接管显式语义组件，保存三项原状态，离场/Off/销毁时仅在仍持有自己写入值时恢复；发现不同的既有 Stencil 时记录唯一冲突并 fail closed | `TOON-T2B1-003`：`ABTS.Rendering.Toon.T2B1.PrimitiveRegistry` 覆盖精确恢复、重复刷新不重复计冲突和外部值不被改写；可见 PIE 切换 Style Off 后摘要必须为 `SelectiveProducers=0` |
+| 地面落点 PIP 在 Style Off 时阴影稳定，Style On 后出现密集青黑噪点 | 地面 PIP 已禁用选择性 Stencil，根因不是分类或 Custom Depth。手动低频 Scene Capture 每次 Camera Cut 都没有可复用的时域历史；Tone 旧算法再用固定阴影目标亮度除以近零输入亮度，把不可见的 Lumen/阴影微色噪放大 | 主视图保持已验收映射；仅 Scene Capture 将 Tone 归一化分母限制到当前 Profile 的 `ShadowLuminance`，保证近黑信号不获得大于 1 的增益。实现版本升为 5，不通过关闭 PIP 风格化规避 | `TOON-T2B1-004`：ForceUnity、`ABTS.Rendering.Toon`、fresh D3D12 Shader 冷启动；可见 PIE 在同一地面落点切换 Style Off/On，On 可改变色阶/轮廓但不得再出现密集随机青黑像素。T0 被动四点不进入 PIP，不能替代该门 |

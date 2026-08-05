@@ -13,6 +13,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
+#include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "UI/ABTSM11FinalePresentation.h"
@@ -1523,6 +1524,9 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 	TargetPreviewCapture->ClearShowOnlyComponents();
 	TargetPreviewCapture->ShowOnlyActorComponents(TargetActor);
 	TargetPreviewCapture->bCameraCutThisFrame = true;
+	FABTSStylizedSceneCaptureRegistry::Register(
+		*TargetPreviewCapture,
+		EABTSStylizedViewClass::FinaleRemotePreview);
 	bTargetCaptureDirty = false;
 	bTargetCaptureInitialized = true;
 	TargetPreviewCapture->CaptureScene();
@@ -1715,6 +1719,10 @@ AActor* AABTSM11FinaleInteractionSystem::ResolveHudProbeContextActor() const
 void AABTSM11FinaleInteractionSystem::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (TargetPreviewCapture)
+	{
+		FABTSStylizedSceneCaptureRegistry::Unregister(*TargetPreviewCapture);
+	}
 	if (IsFinaleActive())
 	{
 		RestoreAttemptToWorld(false);

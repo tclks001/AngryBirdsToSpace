@@ -154,6 +154,10 @@ public:
 	}
 	/** Stable read-only T2-B integration surface for the existing remote PIP. */
 	const AActor* GetFinaleRemotePreviewCaptureOwner() const;
+	USceneCaptureComponent2D* GetFinaleRemotePreviewCaptureComponent()
+	{
+		return TargetPreviewCapture;
+	}
 	const USceneCaptureComponent2D*
 		GetFinaleRemotePreviewCaptureComponent() const;
 	EABTSStylizedViewClass GetFinaleRemotePreviewStylizedViewClass() const;

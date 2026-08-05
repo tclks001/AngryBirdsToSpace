@@ -25,6 +25,7 @@ class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 class UPhysicalMaterial;
+class UPrimitiveComponent;
 
 /** One HISM component's descending, index-stable startup overlap queue. */
 struct FABTSM6StartupHISMWarmupQueue
@@ -170,6 +171,12 @@ public:
 	void GatherLiveDestructibleProxies(TArray<AABTSM6DestructibleProxy*>& OutProxies) const;
 	/** Copies the same prediction currently drawn by M6. Valid only while the pouch is being pulled. */
 	bool CopyCurrentTrajectoryPreview(FABTSM6TrajectoryPreview& OutPreview) const;
+	/**
+	 * Read-only Integration seam for the currently selected cord, its two stakes
+	 * and the runtime pouch. Empty outside launch mode; it never exposes M6 state.
+	 */
+	void GatherActiveSlingshotPrimitives(
+		TArray<UPrimitiveComponent*>& OutPrimitives) const;
 
 private:
 	bool ResolveDependencies();

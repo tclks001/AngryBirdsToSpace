@@ -72,6 +72,11 @@ public:
 	}
 	EABTSM101PreviewSubject GetPreviewSubject() const { return PreviewSubject; }
 	UTextureRenderTarget2D* GetRenderTarget() const { return RenderTarget; }
+	/** Integration-only read seam for explicit component-local view styling. */
+	USceneCaptureComponent2D* GetSceneCaptureComponent() const
+	{
+		return SceneCapture;
+	}
 
 private:
 	void EnsureRenderTarget();
