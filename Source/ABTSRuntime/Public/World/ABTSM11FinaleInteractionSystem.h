@@ -47,6 +47,14 @@ public:
 	bool TryEnterFinale(
 		AABTSM51SlingshotCord& Cord,
 		APlayerController& Controller);
+	/**
+	 * Explicit visual-acceptance entry. It uses the normal interaction and
+	 * release pipeline, but replaces authored aim input with the current
+	 * layout's exact NominalInput before requesting release.
+	 */
+	bool TryLaunchNominalCaptureAttempt(
+		AABTSM51SlingshotCord& Cord,
+		APlayerController& Controller);
 	bool BeginAimFromCursor(APlayerController& Controller);
 	bool UpdateAimFromCursor(APlayerController& Controller);
 	void AdjustAimPower(double WheelSteps);

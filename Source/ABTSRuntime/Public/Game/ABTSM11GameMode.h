@@ -8,6 +8,7 @@
 
 class AABTSM11FinaleSystem;
 class AABTSM11FinaleInteractionSystem;
+class AABTSM11FinaleCameraCaptureRunner;
 class AABTSM6SlingshotCamera;
 class AABTSM6SlingshotSystem;
 class UWorld;
@@ -73,4 +74,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM11FinaleInteractionSystem>
 		FinaleInteractionSystem;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM11FinaleCameraCaptureRunner>
+		FinaleCameraCaptureRunner;
 };
