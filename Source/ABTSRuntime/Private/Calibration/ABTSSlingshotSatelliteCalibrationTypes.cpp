@@ -2,6 +2,7 @@
 
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 
+#include "ABTSRuntime.h"
 #include "Algo/Sort.h"
 #include "Physics/ABTSSweptCollision.h"
 
