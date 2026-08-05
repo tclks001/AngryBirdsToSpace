@@ -9,7 +9,7 @@ namespace ABTSStylizedRenderingControl
 	TAutoConsoleVariable<int32> CVarEnabled(
 		TEXT("abts.Rendering.Stylized.Enabled"),
 		0,
-		TEXT("Integration-owned stylized rendering switch. T2-A enables main-view tone and outline."),
+		TEXT("Integration-owned stylized rendering switch. T2-B1 enables explicit main and preview view policies."),
 		ECVF_Default);
 
 	TAutoConsoleVariable<int32> CVarProfile(
@@ -68,7 +68,7 @@ void FABTSStylizedRenderingControl::SetProfile(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 3;
+	return 4;
 }
 
 FABTSStylizedToneProfileParameters

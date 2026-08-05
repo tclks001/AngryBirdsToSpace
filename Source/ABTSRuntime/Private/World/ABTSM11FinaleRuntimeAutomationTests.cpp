@@ -1294,8 +1294,8 @@ bool FABTSM11BStylizedSemanticAdapterTest::RunTest(
 			ReadOnlyInteraction->GetFinaleRemotePreviewStylizedViewClass()),
 		static_cast<int32>(
 			EABTSStylizedViewClass::FinaleRemotePreview));
-	TestFalse(
-		TEXT("M11 semantic declaration does not implement styling"),
+	TestTrue(
+		TEXT("Integration implements the declared finale preview view"),
 		FABTSStylizedRenderingContract::IsViewClassImplemented(
 			ReadOnlyInteraction->
 				GetFinaleRemotePreviewStylizedViewClass()));

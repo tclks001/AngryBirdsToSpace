@@ -8,6 +8,8 @@
 #include "Components/SceneComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
+#include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Slingshot/ABTSM6Types.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "UObject/ConstructorHelpers.h"
@@ -202,6 +204,26 @@ void AABTSM101LandingPreviewCamera::SetPreviewSubject(
 	if (PreviewSubject == NewSubject) return;
 	const EABTSM101PreviewSubject PreviousSubject = PreviewSubject;
 	PreviewSubject = NewSubject;
+	if (SceneCapture)
+	{
+		switch (NewSubject)
+		{
+		case EABTSM101PreviewSubject::PrimaryLanding:
+			FABTSStylizedSceneCaptureRegistry::Register(
+				*SceneCapture,
+				EABTSStylizedViewClass::GroundLandingPreview);
+			break;
+		case EABTSM101PreviewSubject::SatelliteLanding:
+			FABTSStylizedSceneCaptureRegistry::Register(
+				*SceneCapture,
+				EABTSStylizedViewClass::SatelliteLandingPreview);
+			break;
+		case EABTSM101PreviewSubject::None:
+		default:
+			FABTSStylizedSceneCaptureRegistry::Unregister(*SceneCapture);
+			break;
+		}
+	}
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M10.1][LandingPreview] Subject=%s Previous=%s"),
 		*UEnum::GetValueAsString(NewSubject),

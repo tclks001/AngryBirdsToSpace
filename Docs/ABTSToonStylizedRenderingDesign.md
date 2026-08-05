@@ -1,10 +1,10 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调和 T2-A 主视图描边与共享语义契约均已通过验收；下一步为 T2-B 功能工作树只读语义适配与 Integration 串行接线，详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调和 T2-A 主视图描边与共享语义契约均已通过验收；T2-B1 已完成 M3/M11、共享鸟/当前弹弓及三类画中画的 Integration 候选接线，等待可见 PIE 验收。M7 在 Beam-C3 完成前保持 fail closed，后续以 T2-B2 补入。详见 [T2-B1 设计](ABTSToonStylizedRenderingT2B1.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
-> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
+> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
 
 ## 1. 结论先行
 
@@ -304,9 +304,10 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 ### Phase T2：描边和视图契约
 
 - T2-A：Integration 冻结对象/视图语义、Stencil 保留区和主视图 Depth/Normal 描边；Scene Capture 明确跳过，不启用 Custom Depth producer；
-- T2-B：M3/M7/M11 只提供稳定只读的对象类别适配，Integration 串行接入选择性 Stencil 与地面/月面/终局 Scene Capture；
+- T2-B1：消费已完成的 M3/M11 只读适配器，并由 Integration 接入鸟、当前弹弓、选择性 Stencil 与地面/月面/终局 Scene Capture；M7 明确 fail closed；
+- T2-B2：M7 Beam-C3 稳定后只发布建筑主体/弱点语义，Integration 接入同一注册表，不重写渲染链；
 - T2-C：补动态镜头、瞄准/PIP、破坏过程和 Screen Percentage 回归，冻结美术参数及性能门槛；
-- M10/M11 的 Scene Capture 始终由 Integration 串行接线，禁止两工作树同时编辑同一相机或材质资产。详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)。
+- M10/M11 的 Scene Capture 始终由 Integration 串行接线，禁止两工作树同时编辑同一相机或材质资产。详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md) 与 [T2-B1 设计](ABTSToonStylizedRenderingT2B1.md)。
 
 ### Phase T3：材质族迁移
 
@@ -354,8 +355,9 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 2. T0 不进入瞄准或发射状态，因此 HUD 绘制链会保留，但地面/月面 PIP 和轨迹显示不属于本轮已覆盖证据；
 3. T1 让稳定 Style/Profile 接缝真实消费柔和三档色调与冷色暗部；
 4. T2-A 增加最终主视图的 1–2 像素 Depth/Normal 轮廓，并冻结对象/视图语义及 Stencil 保留区，但不产生 Custom Depth；
-5. T2-B 再给当前鸟、弹弓、建筑弱点和终局目标接入选择性 Stencil，并增加显式玩法状态截图，用冻结视图类别检查地面/月面/终局 PIP；
-6. 达到稳定性与性能门槛后，再决定是否迁移第一批材质族。
+5. T2-B1 先给当前鸟、弹弓、卫星目标和终局目标接入选择性 Stencil，并显式接通地面/月面/终局 PIP；M7 未就绪时不猜测建筑语义；
+6. T2-B2 在 M7 稳定后补建筑主体/弱点，T2-C 再增加瞄准/PIP、破坏过程和动态截图；
+7. 达到稳定性与性能门槛后，再决定是否迁移第一批材质族。
 
 这一步完成后应进行一次明确的美术决策：保留原渲染、采用柔和三渲二、或停止全局描边只保留色板/材质风格化。没有通过这道决策门，不进入引擎源码分叉。
 

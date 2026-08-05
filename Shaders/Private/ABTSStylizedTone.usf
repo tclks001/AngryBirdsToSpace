@@ -27,6 +27,9 @@ float OutlineDepthSoftness;
 float OutlineNormalThreshold;
 float OutlineNormalSoftness;
 float OutlineStrength;
+float SelectiveOutlineStrength;
+float SelectiveOutlineWidthScale;
+uint bAllowSelectiveStencil;
 float3 OutlineColor;
 
 float3 ABTSApplySoftToneBands(float3 EncodedColor)
@@ -78,6 +81,37 @@ float3 ABTSSampleWorldNormal(float2 ViewportUV)
 		BufferUV,
 		0).rgb;
 	return normalize(DecodeNormal(EncodedNormal));
+}
+
+uint2 ABTSViewportUVToBufferPixel(float2 ViewportUV)
+{
+	const float2 BufferUV = ViewportUVToBufferUV(saturate(ViewportUV));
+	const uint2 BufferSize = max(uint2(View.BufferSizeAndInvSize.xy), uint2(1, 1));
+	return min(uint2(BufferUV * BufferSize), BufferSize - uint2(1, 1));
+}
+
+uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
+{
+	const uint2 BufferPixel = ABTSViewportUVToBufferPixel(ViewportUV);
+	const uint Stencil = CalcSceneCustomStencil(BufferPixel);
+	if (Stencil < 1u || Stencil > 7u)
+	{
+		return 0u;
+	}
+
+	const float CustomDeviceDepth = SceneTexturesStruct.CustomDepthTexture.Load(
+		int3(BufferPixel, 0)).r;
+	const float SceneDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	if (CustomDeviceDepth <= 1.0e-7f || SceneDeviceDepth <= 1.0e-7f)
+	{
+		return 0u;
+	}
+
+	const float CustomDepth = ConvertFromDeviceZ(CustomDeviceDepth);
+	const float SceneDepth = ConvertFromDeviceZ(SceneDeviceDepth);
+	const float RelativeDepthDelta =
+		abs(CustomDepth - SceneDepth) / max(min(CustomDepth, SceneDepth), 1.0f);
+	return RelativeDepthDelta <= 0.006f ? Stencil : 0u;
 }
 
 float ABTSComputeNeighborEdge(
@@ -148,6 +182,42 @@ float ABTSComputeOutlineCoverage(float2 ViewportUV)
 	return smoothstep(0.10f, 0.90f, NormalizedCoverage);
 }
 
+float ABTSComputeSelectiveOutlineCoverage(float2 ViewportUV)
+{
+	if (bAllowSelectiveStencil == 0u)
+	{
+		return 0.0f;
+	}
+
+	const uint CenterStencil = ABTSSampleVisibleReservedStencil(ViewportUV);
+	const float2 PixelOffset =
+		ViewportInvSize * OutlineWidthPixels * SelectiveOutlineWidthScale;
+	const float2 DiagonalOffset = PixelOffset * 0.70710678f;
+	const float2 Offsets[8] =
+	{
+		float2(PixelOffset.x, 0.0f),
+		float2(-PixelOffset.x, 0.0f),
+		float2(0.0f, PixelOffset.y),
+		float2(0.0f, -PixelOffset.y),
+		float2(DiagonalOffset.x, DiagonalOffset.y),
+		float2(-DiagonalOffset.x, DiagonalOffset.y),
+		float2(DiagonalOffset.x, -DiagonalOffset.y),
+		float2(-DiagonalOffset.x, -DiagonalOffset.y)
+	};
+
+	float BoundarySamples = 0.0f;
+	UNROLL
+	for (int SampleIndex = 0; SampleIndex < 8; ++SampleIndex)
+	{
+		const uint SampleStencil = ABTSSampleVisibleReservedStencil(
+			saturate(ViewportUV + Offsets[SampleIndex]));
+		const bool bTouchesReserved = CenterStencil != 0u || SampleStencil != 0u;
+		BoundarySamples +=
+			bTouchesReserved && CenterStencil != SampleStencil ? 1.0f : 0.0f;
+	}
+	return smoothstep(0.08f, 0.75f, BoundarySamples / 3.0f);
+}
+
 void ABTSStylizedOutlineMainPS(
 	in noperspective float4 UVAndScreenPos : TEXCOORD0,
 	out float4 OutColor : SV_Target0)
@@ -158,7 +228,11 @@ void ABTSStylizedOutlineMainPS(
 		UVAndScreenPos.xy);
 	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
 	const float OutlineCoverage = ABTSComputeOutlineCoverage(ViewportUV);
-	const float OutlineAmount = saturate(OutlineCoverage * OutlineStrength);
+	const float SelectiveCoverage =
+		ABTSComputeSelectiveOutlineCoverage(ViewportUV);
+	const float OutlineAmount = saturate(max(
+		OutlineCoverage * OutlineStrength,
+		SelectiveCoverage * SelectiveOutlineStrength));
 	const float3 OutlineTarget = SceneColor.rgb * OutlineColor;
 	OutColor = float4(
 		lerp(SceneColor.rgb, OutlineTarget, OutlineAmount),
