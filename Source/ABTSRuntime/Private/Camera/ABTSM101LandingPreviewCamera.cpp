@@ -367,6 +367,7 @@ void AABTSM101LandingPreviewCamera::RefreshCapture(
 		ESceneCapturePrimitiveRenderMode::PRM_RenderScenePrimitives;
 	SceneCapture->CaptureSource =
 		ESceneCaptureSource::SCS_FinalColorLDR;
+	SceneCapture->ShowFlags.SetLighting(true);
 	SceneCapture->ClearShowOnlyComponents();
 	const FVector Landing = Preview.PrimarySurfaceLandingWorld;
 	// Gameplay's stable surface frame is radial.  Do not use the rendered terrain
@@ -420,10 +421,14 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 
 	SceneCapture->PrimitiveRenderMode =
 		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
-	// BaseColor is deliberate: the E5 hemisphere may face away from the world
-	// directional light, but this guidance view must remain readable.
+	// Keep the far-side guidance view independent of world lighting, but use a
+	// final-color capture so the explicitly registered SatelliteLandingPreview
+	// can execute its AfterDOF outline pass. SCS_BaseColor bypasses that pass
+	// completely, making Style Off and Style On pixel-identical even though the
+	// ViewClass registry is correct.
 	SceneCapture->CaptureSource =
-		ESceneCaptureSource::SCS_BaseColor;
+		ESceneCaptureSource::SCS_FinalColorLDR;
+	SceneCapture->ShowFlags.SetLighting(false);
 	SceneCapture->ClearShowOnlyComponents();
 	SceneCapture->ShowOnlyActorComponents(&Satellite);
 	if (Preview.TerminalType

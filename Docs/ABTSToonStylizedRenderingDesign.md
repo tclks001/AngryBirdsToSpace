@@ -1,10 +1,10 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过自动门、真实 RHI 与用户可见 PIE 验收。M7 在 Beam-C3 完成前保持 fail closed，后续以 T2-B2 补入。详见 [T2-B1 设计](ABTSToonStylizedRenderingT2B1.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过验收。无 M7 的动态与画中画回归现进入 T2-C1 实现候选；M7 在 Beam-C3 完成前保持 fail closed，后续以 T2-B2/T2-C2 补入。详见 [T2-B1](ABTSToonStylizedRenderingT2B1.md) 与 [T2-C1](ABTSToonStylizedRenderingT2C1.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
-> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
+> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [T2-C1 无 M7 动态与画中画回归](ABTSToonStylizedRenderingT2C1.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
 
 ## 1. 结论先行
 
