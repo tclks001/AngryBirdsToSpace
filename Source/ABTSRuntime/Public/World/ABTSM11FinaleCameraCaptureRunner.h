@@ -16,7 +16,7 @@ class UTextureRenderTarget2D;
 /** Explicit, process-start contract for one M11 old-camera baseline recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	static constexpr int32 ContractVersion = 2;
+	static constexpr int32 ContractVersion = 3;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -71,6 +71,7 @@ class ABTSRUNTIME_API AABTSM11FinaleCameraCaptureRunner final : public AActor
 public:
 	AABTSM11FinaleCameraCaptureRunner();
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	bool Initialize(
 		const FABTSM11FinaleCameraCaptureConfig& InConfig,
@@ -132,4 +133,5 @@ private:
 	bool bMovieCaptureStopped = false;
 	bool bPendingFinalizeSuccess = false;
 	bool bCaptureFixtureCreated = false;
+	bool bStylizedViewRegistered = false;
 };

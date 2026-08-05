@@ -31,7 +31,7 @@ bool FABTSStylizedRenderingContract::IsViewClassValid(
 	EABTSStylizedViewClass ViewClass)
 {
 	return ViewClass >= EABTSStylizedViewClass::MainWorld
-		&& ViewClass <= EABTSStylizedViewClass::FinaleRemotePreview;
+		&& ViewClass <= EABTSStylizedViewClass::FinaleCinematicCapture;
 }
 
 bool FABTSStylizedRenderingContract::RequiresSelectiveStencil(
@@ -88,6 +88,7 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 		Policy.bAllowSelectiveStencil = true;
 		break;
 	case EABTSStylizedViewClass::FinaleRemotePreview:
+	case EABTSStylizedViewClass::FinaleCinematicCapture:
 		Policy.Profile = EABTSStylizedRenderProfile::FinaleSpace;
 		Policy.bAllowSelectiveStencil = true;
 		break;

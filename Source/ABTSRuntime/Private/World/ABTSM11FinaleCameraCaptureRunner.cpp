@@ -24,6 +24,8 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
+#include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "ImageUtils.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -102,7 +104,9 @@ namespace ABTSM11FinaleCameraCaptureRunnerPrivate
 			&& File.Seek(EndAfterPadding);
 	}
 
-	bool Reject(FString* OutFailure, const FString& Reason)
+	bool RejectFinaleCameraCaptureConfig(
+		FString* OutFailure,
+		const FString& Reason)
 	{
 		if (OutFailure != nullptr)
 		{
@@ -123,7 +127,7 @@ namespace ABTSM11FinaleCameraCaptureRunnerPrivate
 			&& Value != 0
 			&& Value != 1)
 		{
-			return Reject(
+			return RejectFinaleCameraCaptureConfig(
 				OutFailure,
 				FString::Printf(TEXT("%s must be 0 or 1."), Key));
 		}
@@ -171,7 +175,9 @@ bool FABTSM11FinaleCameraCaptureConfig::Parse(
 	OutConfig = FABTSM11FinaleCameraCaptureConfig();
 	if (CommandLine == nullptr)
 	{
-		return Reject(OutFailure, TEXT("Command line is null."));
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("Command line is null."));
 	}
 	OutConfig.bEnabled = FParse::Param(
 		CommandLine,
@@ -253,28 +259,28 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 	}
 	if (CandidateRank < 0 || CandidateRank > 11)
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("ABTSM11CaptureRank must be in [0, 11]."));
 	}
 	if (WarmupFrames < 0 || WarmupFrames > 600
 		|| TerminalHoldFrames < 0 || TerminalHoldFrames > 600)
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("Capture frame counts must be in [0, 600]."));
 	}
 	if (FrameRate < 1 || FrameRate > 120
 		|| JpegQuality < 1 || JpegQuality > 100)
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("MovieFrameRate must be in [1, 120] and MovieQuality in [1, 100]."));
 	}
 	if (CaptureWidth < 320 || CaptureWidth > 7680
 		|| CaptureHeight < 180 || CaptureHeight > 4320)
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("ResX/ResY must describe a capture in [320x180, 7680x4320]."));
 	}
@@ -282,13 +288,13 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 		|| TimeoutSeconds < 10.0
 		|| TimeoutSeconds > 1800.0)
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("ABTSM11CaptureTimeoutSeconds must be in [10, 1800]."));
 	}
 	if (OutputDirectory.IsEmpty() || FPaths::IsRelative(OutputDirectory))
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("-MovieFolder must be an absolute path."));
 	}
@@ -298,13 +304,13 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 		|| MovieName.Contains(TEXT("/"))
 		|| MovieName.Contains(TEXT("\\")))
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("-MovieName must be a plain filename without format tokens."));
 	}
 	if (!MovieFormat.Equals(TEXT("JPG"), ESearchCase::IgnoreCase))
 	{
-		return Reject(
+		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("-MovieFormat=JPG is required; native startup AVI is not accepted because its finalized frame count is not reliable in unattended capture."));
 	}
@@ -409,12 +415,23 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 		false);
 	RecordingRenderTarget->UpdateResourceImmediate(true);
 	RecordingCapture->TextureTarget = RecordingRenderTarget;
+	bStylizedViewRegistered = FABTSStylizedSceneCaptureRegistry::Register(
+		*RecordingCapture,
+		EABTSStylizedViewClass::FinaleCinematicCapture);
+	const FABTSStylizedViewPolicy CaptureViewPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::FinaleCinematicCapture);
+	if (!bStylizedViewRegistered || !CaptureViewPolicy.IsValid())
+	{
+		FailureReason = TEXT("RecordingStylizedViewRegistrationFailed");
+		return false;
+	}
 	Phase = EABTSM11FinaleCameraCapturePhase::WarmingRenderMode;
 
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d RenderVersion=%d WarmupFrames=%d Frames=%s Video=%s"),
+		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d RenderVersion=%d ViewClass=FinaleCinematicCapture PolicyTone=%d PolicyOutline=%d PolicySelective=%d WarmupFrames=%d Frames=%s Video=%s"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
 		static_cast<int32>(GetWorld()->WorldType),
 		TEXT("StandaloneSceneCaptureFrameCapture"),
@@ -423,10 +440,24 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 		Config.CandidateRank == 0 ? TEXT("Certified") : TEXT("UNCERTIFIED"),
 		Config.bStylized ? 1 : 0,
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
+		CaptureViewPolicy.bApplyTone ? 1 : 0,
+		CaptureViewPolicy.bApplyOutline ? 1 : 0,
+		CaptureViewPolicy.bAllowSelectiveStencil ? 1 : 0,
 		RemainingWarmupFrames,
 		*Config.GetFrameWildcard(),
 		*Config.GetExpectedVideoPath());
 	return true;
+}
+
+void AABTSM11FinaleCameraCaptureRunner::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	if (bStylizedViewRegistered && IsValid(RecordingCapture))
+	{
+		FABTSStylizedSceneCaptureRegistry::Unregister(*RecordingCapture);
+		bStylizedViewRegistered = false;
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
@@ -1079,6 +1110,11 @@ void AABTSM11FinaleCameraCaptureRunner::Finish(
 	Phase = EABTSM11FinaleCameraCapturePhase::Terminal;
 	SetActorTickEnabled(false);
 	const bool bManifestWritten = WriteManifest(bSuccess, Reason);
+	if (bStylizedViewRegistered && IsValid(RecordingCapture))
+	{
+		FABTSStylizedSceneCaptureRegistry::Unregister(*RecordingCapture);
+		bStylizedViewRegistered = false;
+	}
 
 	const FString Summary = FString::Printf(
 		TEXT("[ABTS][M11][CameraCapture] Complete Success=%d Rank=%d Stylized=%d State=%s Frames=%d Manifest=%d Reason=%s Video=%s"),
@@ -1146,6 +1182,27 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		TEXT("captureFixtureCreated"),
 		bCaptureFixtureCreated);
 	Root->SetStringField(TEXT("stylizedProfile"), TEXT("FinaleSpace"));
+	Root->SetStringField(
+		TEXT("stylizedViewClass"),
+		TEXT("FinaleCinematicCapture"));
+	const FABTSStylizedViewPolicy CaptureViewPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::FinaleCinematicCapture);
+	Root->SetBoolField(
+		TEXT("stylizedViewRegistered"),
+		bStylizedViewRegistered);
+	Root->SetBoolField(
+		TEXT("stylizedViewPolicyValid"),
+		CaptureViewPolicy.IsValid());
+	Root->SetBoolField(
+		TEXT("stylizedTonePolicyEnabled"),
+		Config.bStylized && CaptureViewPolicy.bApplyTone);
+	Root->SetBoolField(
+		TEXT("stylizedOutlinePolicyEnabled"),
+		Config.bStylized && CaptureViewPolicy.bApplyOutline);
+	Root->SetBoolField(
+		TEXT("stylizedSelectiveStencilPolicyEnabled"),
+		Config.bStylized && CaptureViewPolicy.bAllowSelectiveStencil);
 	Root->SetStringField(
 		TEXT("captureProtocol"),
 		TEXT("SceneCaptureJPG+MJPEGAVI"));

@@ -26,7 +26,9 @@ enum class EABTSStylizedViewClass : uint8
 	MainWorld = 0,
 	GroundLandingPreview,
 	SatelliteLandingPreview,
-	FinaleRemotePreview
+	FinaleRemotePreview,
+	/** Main-world-equivalent offscreen view used only by the M11 AVI recorder. */
+	FinaleCinematicCapture
 };
 
 /** Read-only rendering policy resolved by Integration from a semantic view class. */
