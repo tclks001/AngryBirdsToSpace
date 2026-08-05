@@ -237,6 +237,15 @@ void AABTSM73StableBuildingActor::OnConstruction(const FTransform& Transform)
 void AABTSM73StableBuildingActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!bParticipateInPIERuntime)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::NotRequired;
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-A][PIERuntimeSkipped]")
+			TEXT(" Actor=%s SlingshotGate=%d"),
+			*GetName(), bParticipateInSlingshotValidationGate ? 1 : 0);
+		return;
+	}
 	TryFindRuntimeMaterialSystem();
 }
 
@@ -981,6 +990,11 @@ void AABTSM73StableBuildingActor::UpdateFoundationComponents(
 
 void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 {
+	if (!bParticipateInPIERuntime)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::NotRequired;
+		return;
+	}
 	if (bRuntimeSpawned || GetWorld() == nullptr) return;
 	for (TActorIterator<AABTSM7BuildingMaterialSystem> It(GetWorld()); It; ++It)
 	{
@@ -1000,6 +1014,11 @@ void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 
 void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMaterialSystem* MaterialSystem)
 {
+	if (!bParticipateInPIERuntime)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::NotRequired;
+		return;
+	}
 	if (bRuntimeSpawned || MaterialSystem == nullptr) return;
 	LastDAG4ValidationResult = FABTSM73DAG4ValidationResult();
 	LastDAG4ValidationResult.bEnabled =

@@ -11,10 +11,14 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace ABTSM73BeamD1Preview
 {
+	constexpr int32 MaximumRuntimeSystemSearchAttempts = 40;
+	constexpr float RuntimeSystemSearchIntervalSeconds = 0.1f;
+
 	void ConfigurePreview(
 		UHierarchicalInstancedStaticMeshComponent& Component,
 		USceneComponent& Parent)
@@ -89,16 +93,66 @@ void AABTSM73BeamD1PreviewActor::BeginPlay()
 	{
 		return;
 	}
+	RuntimeSystemSearchAttempts = 0;
+	TryInitializeRuntimeBuilding();
+}
+
+void AABTSM73BeamD1PreviewActor::TryInitializeRuntimeBuilding()
+{
+	if (!bSpawnRuntimeModulesInPIE || GetWorld() == nullptr
+		|| !RuntimeModules.IsEmpty())
+	{
+		return;
+	}
 	for (TActorIterator<AABTSM7BuildingMaterialSystem> It(GetWorld()); It; ++It)
 	{
-		InitializeRuntimeBuilding(*It);
-		break;
+		const bool bInitialized = InitializeRuntimeBuilding(*It);
+		GetWorldTimerManager().ClearTimer(RuntimeSystemSearchTimer);
+		if (bInitialized)
+		{
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-Beam-D1][RuntimeModulesSpawned]")
+				TEXT(" Actor=%s Modules=%d Attempts=%d"),
+				*GetName(), GetRuntimeModuleCountForValidation(),
+				RuntimeSystemSearchAttempts + 1);
+		}
+		else
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][RuntimeModulesRejected]")
+				TEXT(" Actor=%s Accepted=%d Bricks=%d ExistingModules=%d"),
+				*GetName(), LastSummary.bAccepted ? 1 : 0,
+				CompiledBricks.Num(), GetRuntimeModuleCountForValidation());
+		}
+		return;
 	}
+
+	++RuntimeSystemSearchAttempts;
+	if (RuntimeSystemSearchAttempts
+		< ABTSM73BeamD1Preview::MaximumRuntimeSystemSearchAttempts)
+	{
+		GetWorldTimerManager().SetTimer(
+			RuntimeSystemSearchTimer,
+			this,
+			&AABTSM73BeamD1PreviewActor::TryInitializeRuntimeBuilding,
+			ABTSM73BeamD1Preview::RuntimeSystemSearchIntervalSeconds,
+			false);
+		return;
+	}
+
+	UE_LOG(LogABTSRuntime, Warning,
+		TEXT("[ABTS][M7.3-Beam-D1][RuntimeMaterialSystemTimeout]")
+		TEXT(" Actor=%s Attempts=%d"),
+		*GetName(), RuntimeSystemSearchAttempts);
 }
 
 void AABTSM73BeamD1PreviewActor::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (GetWorld() != nullptr)
+	{
+		GetWorldTimerManager().ClearTimer(RuntimeSystemSearchTimer);
+	}
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Module : RuntimeModules)
 	{
 		if (Module.IsValid())

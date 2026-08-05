@@ -4,6 +4,8 @@
 
 #include "ABTSM73BeamD1BrickCompiler.h"
 
+#include "Building/ABTSM73BeamD1PreviewActor.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "Components/StaticMeshComponent.h"
@@ -11,8 +13,10 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
+#include "UObject/UnrealType.h"
 
 namespace ABTSM73BeamD1Tests
 {
@@ -454,6 +458,151 @@ bool FABTSM73BeamD1RealModuleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Real Module dimensions are encoded in component scale"),
 		Module->GetActorScale3D().Equals(
 			Binding.BrickSpec.DimensionsCM / 100.0f, 0.001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1DelayedMaterialSystemTest,
+	"ABTS.M73DAG.BeamD1.DelayedMaterialSystem",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1DelayedMaterialSystemTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	FTransform PreviewTransform = FTransform::Identity;
+	AABTSM73BeamD1PreviewActor* Preview =
+		World->SpawnActorDeferred<AABTSM73BeamD1PreviewActor>(
+			AABTSM73BeamD1PreviewActor::StaticClass(), PreviewTransform,
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!TestNotNull(TEXT("Delayed dependency PreviewActor"), Preview))
+	{
+		return false;
+	}
+	FBoolProperty* SpawnProperty = FindFProperty<FBoolProperty>(
+		AABTSM73BeamD1PreviewActor::StaticClass(),
+		TEXT("bSpawnRuntimeModulesInPIE"));
+	if (!TestNotNull(TEXT("Runtime spawn property"), SpawnProperty))
+	{
+		return false;
+	}
+	SpawnProperty->SetPropertyValue_InContainer(Preview, true);
+	UGameplayStatics::FinishSpawningActor(Preview, PreviewTransform);
+	Preview->TryInitializeRuntimeBuilding();
+	TestEqual(TEXT("No Module exists before delayed MaterialSystem"),
+		Preview->GetRuntimeModuleCountForValidation(), 0);
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM7BuildingMaterialSystem* MaterialSystem =
+		World->SpawnActor<AABTSM7BuildingMaterialSystem>(
+			AABTSM7BuildingMaterialSystem::StaticClass(),
+			FTransform::Identity, Params);
+	if (!TestNotNull(TEXT("Delayed M7 MaterialSystem"), MaterialSystem))
+	{
+		return false;
+	}
+	Preview->TryInitializeRuntimeBuilding();
+	TestTrue(TEXT("Delayed Preview generation remains accepted"),
+		Preview->GetSummaryForValidation().bAccepted);
+	TestEqual(TEXT("Delayed MaterialSystem receives every compiled Brick"),
+		Preview->GetRuntimeModuleCountForValidation(),
+		Preview->GetSummaryForValidation().BrickCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73StableBuildingParticipationTest,
+	"ABTS.M73A.StableBuildingParticipation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73StableBuildingParticipationTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	FActorSpawnParameters SystemParams;
+	SystemParams.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM7BuildingMaterialSystem* MaterialSystem =
+		World->SpawnActor<AABTSM7BuildingMaterialSystem>(
+			AABTSM7BuildingMaterialSystem::StaticClass(),
+			FTransform::Identity, SystemParams);
+	if (!TestNotNull(TEXT("Participation MaterialSystem"), MaterialSystem))
+	{
+		return false;
+	}
+
+	const auto SpawnWithFlags = [World](
+		const bool bPIERuntime,
+		const bool bSlingshotGate)
+	{
+		FTransform Transform = FTransform::Identity;
+		AABTSM73StableBuildingActor* Actor =
+			World->SpawnActorDeferred<AABTSM73StableBuildingActor>(
+				AABTSM73StableBuildingActor::StaticClass(), Transform,
+				nullptr, nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (Actor == nullptr) return Actor;
+		FBoolProperty* RuntimeProperty = FindFProperty<FBoolProperty>(
+			AABTSM73StableBuildingActor::StaticClass(),
+			TEXT("bParticipateInPIERuntime"));
+		FBoolProperty* GateProperty = FindFProperty<FBoolProperty>(
+			AABTSM73StableBuildingActor::StaticClass(),
+			TEXT("bParticipateInSlingshotValidationGate"));
+		if (RuntimeProperty != nullptr)
+		{
+			RuntimeProperty->SetPropertyValue_InContainer(Actor, bPIERuntime);
+		}
+		if (GateProperty != nullptr)
+		{
+			GateProperty->SetPropertyValue_InContainer(Actor, bSlingshotGate);
+		}
+		UGameplayStatics::FinishSpawningActor(Actor, Transform);
+		return Actor;
+	};
+
+	AABTSM73StableBuildingActor* PreviewOnly = SpawnWithFlags(false, true);
+	if (!TestNotNull(TEXT("Preview-only StableBuildingActor"), PreviewOnly))
+	{
+		return false;
+	}
+	PreviewOnly->InitializeRuntimeBuilding(MaterialSystem);
+	TestFalse(TEXT("Preview-only fixture skips PIE runtime"),
+		PreviewOnly->ShouldParticipateInPIERuntime());
+	TestEqual(TEXT("Preview-only fixture is not required by startup physics"),
+		PreviewOnly->GetIdleValidationState(),
+		EABTSM73IdleValidationState::NotRequired);
+
+	AABTSM73StableBuildingActor* GateExempt = SpawnWithFlags(true, false);
+	if (!TestNotNull(TEXT("Gate-exempt StableBuildingActor"), GateExempt))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Gate-exempt fixture can still participate in PIE runtime"),
+		GateExempt->ShouldParticipateInPIERuntime());
+	TestFalse(TEXT("Gate-exempt fixture opts out of slingshot validation"),
+		GateExempt->ShouldParticipateInSlingshotValidationGate());
+	TestEqual(TEXT("Gate exemption preserves the internal diagnostic state"),
+		GateExempt->GetRawIdleValidationStateForValidation(),
+		EABTSM73IdleValidationState::Pending);
+	TestEqual(TEXT("Gate exemption maps its public state to NotRequired"),
+		GateExempt->GetIdleValidationState(),
+		EABTSM73IdleValidationState::NotRequired);
 	return true;
 }
 
