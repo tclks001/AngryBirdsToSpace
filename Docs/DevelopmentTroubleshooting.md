@@ -193,9 +193,9 @@
 - 总文档不复制会持续变化的整段参数和逐次实验数据；需要复盘时以子文档中的原始 ID、日志和提交为准。
 - 后续摘录先比较上次基线之后的子文档差异，再更新本文和基线；功能工作树不得直接修改本文。
 
-| 原始账本 | 主要职责 | 本次摘录基线（2026-08-04） |
+| 原始账本 | 主要职责 | 本次摘录基线（截至 2026-08-05） |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `29e3de0d49c00325a9899871458934bd6850342c` |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `2ddc974978c4c717db967b048209258dbca80c04` |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `51b391d8e1068d1c2a030fe64667ec21418de33c` |
 
@@ -222,6 +222,8 @@
 | 自动装配的弦袋无法点击 | 视觉上重叠的桩组件先阻挡了 `ECC_Visibility`，交互射线没有到达 Pouch。装配后 Pouch 应是 Cord 唯一 Visibility 点击目标。 | `CordVisibilityTargets=1`、`PouchVisibilityTargets=1`，PIE 点击袋口进入发射且桩不抢占。详见 `M3-R51-004`。 |
 | 太空槽在起伏球面被旧“共面/同高”门拒绝 | 两端应各自贴合真实地表；局部帧用两槽中点、切平面 Right、道路 Forward 和径向 Up 正交化，检查右手系与有界倾角，而不是强行拉平。 | 两槽各自贴地、Origin 等于中点、Frame 非退化且 Hash 可复现。详见 `M3-R52-001/002`。 |
 | 建筑先生成后消失 | `[Generated] Accepted=1` 只表示生成期通过；后续 M7 Idle Reject 会事务删除模块和 Foundation。M3 不应通过移动 Cell 或保留失败 Actor 掩盖它。 | 等待建筑合同封口，要求 `Expected=Registered=Accepted` 且 `Rejected=0` 后才发布 WorldReady。详见 `M3-X-001`。 |
+| T2-B 风格语义在 Preview/Test 与生产运行时漂移，或 HISM 产生逐实例注册 | 地图名、Actor 名称、Transform 和当前相机都不是权威身份。M3 只读适配器只接受精确 Planet/Component、卫星运行时 Actor 或已验证 Candidate/Result；未知对象返回 `None`。树石以 HISM 组件批次发布，不逐实例展开。适配器不保存 Profile、Stencil、Authority 或 Hash。 | `ABTS.M3.StylizedSemantics` 验证映射、确定性、批次粒度、fail closed 及 Custom Depth/Stencil 状态不变；`ABTS.M3.Monthly.SatellitePreview` 验证 Preview 与生产卫星/E5 语义且 Result/Candidate/Runtime Hash、月度权威和引力开关不变。详见 `M3-T2B-001`。 |
+| Integration 需要接线地面/月面 SceneCapture，但 M3 没有稳定访问入口 | 捕获 owner/component 位于共享 M10 私有成员，功能树不能靠名称或组件扫描绕过所有权。M3 只记录需求；Integration 应在共享类型增加 const getter，并用现有 Preview Subject 显式映射 `GroundLandingPreview` / `SatelliteLandingPreview`，缺失或未知时 fail closed。 | M3 提交不得修改共享 Camera/M10 类型；Integration 后续测试检查 Subject 映射及接线前后 M3/M9 Gameplay 身份不变。详见 `M3-T2B-002`。 |
 | 性能门单次轻微越线 | 保留首次失败；先核对 Seed/Oracle/Hash，再停止并行重型任务，以相同二进制 fresh 隔离重跑。既不能直接忽略，也不能在身份未变时立即断言算法回归。 | 同时保存 P50/P95/Max、接受数、Oracle Hash、命令和首次失败日志。详见 `M3-TEST-001`。 |
 
 ### 13.4 M7：语义结构、最终几何与物理权威
