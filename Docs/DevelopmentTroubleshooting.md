@@ -22,6 +22,7 @@
 | 添加 M1/M2 C++ 类后编辑器找不到类 | `.uproject` 未注册 Runtime 模块，或 Editor 使用旧 DLL。 | 在 `.uproject` 注册 `ABTSRuntime`，主模块明确依赖它；关闭编辑器后完整编译 `AngryBirdsToSpaceEditor Win64 Development`。 | 启动新 Editor 后在 Class Viewer 搜索 `ABTSM1GameMode`、`ABTSM2Planet`。 |
 | UE 5.8 编译 HUD 准星时报 `UCanvas` 没有 `DrawLine` | 调用了错误的绘制对象接口。 | 使用 `AHUD::DrawLine`，而不是 `UCanvas::DrawLine`。 | Development Editor 编译成功；PIE 有中心准星。 |
 | 源文件职责膨胀 | 入口 GameMode 被当作玩法总线。 | 保持 `Game / Player / Planet / UI` 分目录；新玩法以独立组件或模块加入。 | 每个文件保持小于 600 行；M1/M2 不把 PCG、库存或鸟群实现塞进 GameMode。 |
+| 为注册项目 Global Shader，把整个 `ABTSRuntime` 改为 `PostConfigInit` 后 fresh Editor 在动画 CDO 构造阶段断言 `AnimationDataController` 未加载；同时 Scene View Extension 报 `GEngine` 尚未建立 | Global Shader 类型确实必须在引擎 Shader 初始化前注册，但 Gameplay Runtime 含大量 UObject 和内容构造链，不能整体提前加载；`PostConfigInit` 时也尚不满足 View Extension 的引擎生命周期前置条件 | 拆出不依赖 Gameplay/UObject 的轻量 `ABTSRender` 早加载模块，只在其中注册 Global Shader；`ABTSRuntime` 恢复 `Default`。View Extension 延迟到 `GetOnPostEngineInit()` 创建，关停时解绑委托并释放扩展 | UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 全链接；fresh `UnrealEditor-Cmd -NullRHI` 无 GEngine ensure、模块断言或 Critical Error；fresh D3D12 能编译项目 Shader 并完成 T0 A/B 截图与 ProfileGPU |
 
 ## 3. M1 独立入口
 

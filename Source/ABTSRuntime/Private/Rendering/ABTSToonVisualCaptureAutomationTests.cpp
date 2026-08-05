@@ -195,9 +195,39 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T0 truthfully reports an identity-only implementation"),
+		TEXT("T1 reports the first pixel-consuming implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		0);
+		1);
+	TestTrue(
+		TEXT("Any-thread switch mirrors the game-thread switch"),
+		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
+	TestEqual(
+		TEXT("Any-thread profile mirrors the game-thread profile"),
+		static_cast<int32>(
+			FABTSStylizedRenderingControl::GetProfileOnAnyThread()),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+
+	TArray<FABTSStylizedToneProfileParameters> Profiles;
+	for (int32 ProfileIndex =
+			static_cast<int32>(EABTSStylizedRenderProfile::GroundDay);
+		ProfileIndex <=
+			static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace);
+		++ProfileIndex)
+	{
+		const FABTSStylizedToneProfileParameters Profile =
+			FABTSStylizedRenderingControl::GetToneProfileParameters(
+				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
+		TestTrue(TEXT("Every T1 tone profile is valid"), Profile.IsValid());
+		Profiles.Add(Profile);
+	}
+	TestNotEqual(
+		TEXT("Ground and satellite shadow thresholds differ"),
+		Profiles[0].ShadowThreshold,
+		Profiles[1].ShadowThreshold);
+	TestNotEqual(
+		TEXT("Satellite and finale strengths differ"),
+		Profiles[1].Strength,
+		Profiles[2].Strength);
 	TestFalse(
 		TEXT("Out-of-range profiles are rejected"),
 		FABTSStylizedRenderingControl::IsProfileValid(

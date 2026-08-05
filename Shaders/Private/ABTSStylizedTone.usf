@@ -1,0 +1,61 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GammaCorrectionCommon.ush"
+#include "/Engine/Private/ScreenPass.ush"
+
+Texture2D SceneColorTexture;
+SamplerState SceneColorSampler;
+
+float ShadowThreshold;
+float HighlightThreshold;
+float TransitionSoftness;
+float Strength;
+float ShadowLuminance;
+float MidLuminance;
+float HighlightLuminance;
+float Saturation;
+float3 ShadowTint;
+float3 MidTint;
+float3 HighlightTint;
+
+float3 ABTSApplySoftToneBands(float3 EncodedColor)
+{
+	float3 LinearColor = max(sRGBToLinear(saturate(EncodedColor)), 0.0f);
+	float Luminance = max(dot(LinearColor, float3(0.2126f, 0.7152f, 0.0722f)), 1.0e-4f);
+	float MidWeight = smoothstep(
+		ShadowThreshold - TransitionSoftness,
+		ShadowThreshold + TransitionSoftness,
+		Luminance);
+	float HighlightWeight = smoothstep(
+		HighlightThreshold - TransitionSoftness,
+		HighlightThreshold + TransitionSoftness,
+		Luminance);
+
+	float TargetLuminance = lerp(ShadowLuminance, MidLuminance, MidWeight);
+	TargetLuminance = lerp(TargetLuminance, HighlightLuminance, HighlightWeight);
+	float3 ToneTint = lerp(ShadowTint, MidTint, MidWeight);
+	ToneTint = lerp(ToneTint, HighlightTint, HighlightWeight);
+
+	float3 QuantizedColor = LinearColor * (TargetLuminance / Luminance) * ToneTint;
+	float QuantizedLuminance = dot(
+		QuantizedColor,
+		float3(0.2126f, 0.7152f, 0.0722f));
+	QuantizedColor = lerp(
+		QuantizedLuminance.xxx,
+		QuantizedColor,
+		Saturation);
+	float3 StylizedColor = lerp(LinearColor, QuantizedColor, Strength);
+	return LinearToSrgb(saturate(StylizedColor));
+}
+
+void ABTSStylizedToneMainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float4 SceneColor = Texture2DSample(
+		SceneColorTexture,
+		SceneColorSampler,
+		UVAndScreenPos.xy);
+	OutColor = float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
+}

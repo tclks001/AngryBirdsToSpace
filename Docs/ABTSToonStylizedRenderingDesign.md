@@ -1,6 +1,6 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉基线源码与纯数据自动化已完成，真实 RHI 截图/GPU 证据待验收；尚未修改材质、后处理、光照或引擎源码。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线已通过；T1 全局色调候选实现中，详见 [T1 全局色调原型](ABTSToonStylizedRenderingT1.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -299,6 +299,7 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 - Integration 独占 Post Process Material、MPC、Profile 与共享配置；
 - 不改现有资产默认绑定；
 - 通过开关在同一 PIE 运行中比较原图与风格图。
+- 当前首版以项目级 Scene View Extension + Global Shader 落地同等的全屏后处理职责，避免在未获 Editor 资产写入授权时生成不可审阅的二进制材质；不修改引擎源码，T2 可在美术决策后迁移到 Material/MPC 资产链。
 
 ### Phase T2：描边和视图契约
 

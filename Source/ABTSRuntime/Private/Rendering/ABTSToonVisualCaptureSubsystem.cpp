@@ -2144,7 +2144,7 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		FABTSStylizedRenderingControl::GetImplementationVersion());
 	Style->SetStringField(
 		TEXT("t0Contract"),
-		TEXT("On is an identity-only switch until T1 consumes the seam."));
+		TEXT("Style implementation is versioned; Off bypasses project stylization."));
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);

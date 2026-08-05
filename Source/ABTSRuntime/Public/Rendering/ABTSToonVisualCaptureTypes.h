@@ -3,14 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-
-/** Rendering profile identities shared by the T0 baseline and the future T1 implementation. */
-enum class EABTSStylizedRenderProfile : uint8
-{
-	GroundDay = 0,
-	SatelliteGuide,
-	FinaleSpace
-};
+#include "Rendering/ABTSStylizedRenderProfile.h"
 
 /** A semantic world anchor; no entry stores an authored absolute world transform. */
 enum class EABTSToonVisualCaptureAnchor : uint8

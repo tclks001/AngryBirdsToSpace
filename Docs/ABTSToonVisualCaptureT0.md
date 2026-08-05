@@ -141,6 +141,6 @@ ABTS.Rendering.Toon.T0
 | --- | --- |
 | UHT / ForceUnity / 链接 | 已通过 |
 | fresh NullRHI 纯数据自动化 | 已通过，3/3 |
-| `L_ABTS_M11` 真实 RHI 自动截图 | 待用户显式运行与美术检查 |
-| 独立 ProfileGPU 基线 | 待用户显式运行与数据归档 |
-| T1 Style On 像素差异 | 尚未实现，不能提前验收 |
+| `L_ABTS_M11` 真实 RHI 自动截图 | T0 已通过；T1 参数变更后必须重跑 |
+| 独立 ProfileGPU 基线 | T0 已通过；T1 必须记录 Style On 增量 |
+| T1 Style On 像素差异 | 候选实现版本 `1`，待 T1 真实 RHI 与美术验收 |

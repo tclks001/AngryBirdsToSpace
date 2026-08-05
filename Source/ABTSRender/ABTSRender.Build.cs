@@ -2,27 +2,24 @@
 
 using UnrealBuildTool;
 
-public class ABTSRuntime : ModuleRules
+public class ABTSRender : ModuleRules
 {
-	public ABTSRuntime(ReadOnlyTargetRules Target) : base(Target)
+	public ABTSRender(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
-			"ABTSRender",
-			"CoreUObject",
-			"Engine",
-			"InputCore",
-			"PhysicsCore",
-			"ProceduralMeshComponent",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"Json",
+			"CoreUObject",
+			"Engine",
 			"RHI",
+			"RenderCore",
+			"Renderer",
 		});
 	}
 }
