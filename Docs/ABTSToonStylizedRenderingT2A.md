@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-A 主视图描边与共享语义契约
 
-> 状态：Integration 稳定性修复候选。初版 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 的静态功能与预算证据有效，但其 Tonemap 后硬四邻域描边在可见 PIE 中出现锯齿和时域抖动；实现版本 3 已改为 TSR 前连续覆盖描边与 Tonemap 后色调两个通道，待用户可见 PIE 动态验收。
+> 状态：Integration 稳定性修复候选。初版 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 的静态功能与预算证据有效，但其 Tonemap 后硬四邻域描边在可见 PIE 中出现锯齿和时域抖动；实现版本 3 的源码提交 `130be2ab9ab50e462af0515f6cacd29dcba58647` 已改为 TSR 前连续覆盖描边与 Tonemap 后色调两个通道，并通过自动门槛，待用户可见 PIE 动态验收。
 >
 > 上游：[三渲二与全局风格化渲染设计](ABTSToonStylizedRenderingDesign.md) · [T1 全局色调原型](ABTSToonStylizedRenderingT1.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
@@ -120,4 +120,14 @@ T2-B 的正式门槛包括主视图选择性强化、地面/月面/终局预览�
 
 ### 7.2 稳定性修复版本 3
 
-版本 3 的正式干净提交证据在源码候选提交后重新生成。提交前 WIP 验证已确认：强制 Unity 编译成功；真实 D3D12 冷启动不再出现未绑定 `View` uniform 或缺失 uniform buffer；四点截图 `8/8` 成功；ProfileGPU 中两个 Style On pass 共 12 组样本，合计 `0.079–0.149 ms`、平均 `0.118 ms @ 1920x1080`。这些 WIP 数值只用于确认方案和预算，正式交接仍以干净提交 Build Identity 的重跑结果为准。
+2026-08-05 在干净源码提交 `130be2ab9ab50e462af0515f6cacd29dcba58647` 上完成：
+
+- UE 5.8 `-ForceUnity -DisableAdaptiveUnity`：`Result: Succeeded`；
+- fresh NullRHI：`ABTS.Rendering.Toon` 共 `5/5` 成功并以 `TEST COMPLETE. EXIT CODE: 0` 终止，日志 `Saved/Logs/ToonT2A-130be2a-FreshAutomation.log`；
+- fresh D3D12 离屏截图：`8/8`，manifest 为 `Saved/ABTSVisualCaptures/ToonT0/Screenshots_20260805T074124Z_68668/manifest.json`，日志 `Saved/Logs/ToonT2A-130be2a-Formal-Screenshots.log`；
+- fresh D3D12 GPU：`8/8`，manifest 为 `Saved/ABTSVisualCaptures/ToonT0/GPUProfile_20260805T074219Z_3504/manifest.json`，日志 `Saved/Logs/ToonT2A-130be2a-Formal-GPU.log`；
+- 两个 manifest 均绑定完整提交号、Seed `312503`、Catalogue Hash、实现版本 3 与 `1920x1080`；四组 Style Off/On requested/effective Pose Hash 全部一致；
+- Style On 共 12 组：`OutlinePreTSR 0.039–0.106 ms`，平均 `0.075 ms`；`Tone 0.041–0.044 ms`，平均 `0.042 ms`；两者合计 `0.082–0.150 ms`，平均 `0.118 ms`；Style Off 不出现这两个 pass；
+- 真实 RHI Shader 冷启动无未绑定 `View`、`Missing uniform buffer`、Fatal 或 Assertion。
+
+自动证据证明实现位置、静态边缘、身份与预算；相机旋转、鸟移动和建筑运动时的主观抖动改善仍由可见 PIE 最终验收。
