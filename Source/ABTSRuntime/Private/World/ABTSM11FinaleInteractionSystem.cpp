@@ -12,6 +12,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "UI/ABTSM11FinalePresentation.h"
@@ -103,6 +104,26 @@ AABTSM11FinaleInteractionSystem::AABTSM11FinaleInteractionSystem()
 		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	TargetPreviewCapture->CaptureSource =
 		ESceneCaptureSource::SCS_FinalColorLDR;
+}
+
+const AActor*
+AABTSM11FinaleInteractionSystem::GetFinaleRemotePreviewCaptureOwner() const
+{
+	return TargetPreviewCapture != nullptr
+		? TargetPreviewCapture->GetOwner()
+		: nullptr;
+}
+
+const USceneCaptureComponent2D*
+AABTSM11FinaleInteractionSystem::GetFinaleRemotePreviewCaptureComponent() const
+{
+	return TargetPreviewCapture;
+}
+
+EABTSStylizedViewClass
+AABTSM11FinaleInteractionSystem::GetFinaleRemotePreviewStylizedViewClass() const
+{
+	return EABTSStylizedViewClass::FinaleRemotePreview;
 }
 
 bool AABTSM11FinaleInteractionSystem::Initialize(

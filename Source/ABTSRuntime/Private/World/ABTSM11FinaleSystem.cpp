@@ -7,6 +7,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSM11FinaleActors.h"
 
@@ -583,6 +584,61 @@ bool AABTSM11FinaleSystem::HasSpawnedUFOActor() const
 AABTSM11UFOActor* AABTSM11FinaleSystem::GetUFOActor() const
 {
 	return UFOActor.Get();
+}
+
+bool AABTSM11FinaleSystem::TryGetStylizedObjectClass(
+	const AActor& RuntimePresentationActor,
+	EABTSStylizedObjectClass& OutObjectClass) const
+{
+	OutObjectClass = EABTSStylizedObjectClass::None;
+	if (!IsLayoutReady())
+	{
+		return false;
+	}
+
+	if (const AABTSM11GravityBodyActor* BodyActor =
+		Cast<AABTSM11GravityBodyActor>(&RuntimePresentationActor))
+	{
+		if (!IsValid(BodyActor)
+			|| BodyActor->GetOwner() != this
+			|| !BodyActor->IsPresentationConfigured())
+		{
+			return false;
+		}
+
+		for (int32 AssistIndex = 1;
+			AssistIndex <= FABTSM11GravityScenario::AssistCount;
+			++AssistIndex)
+		{
+			const FABTSM11GravityBodySpec& Assist =
+				LayoutPreset.CanonicalScenario.GetAssist(AssistIndex);
+			if (GravityBodyActors.IsValidIndex(AssistIndex - 1)
+				&& GravityBodyActors[AssistIndex - 1] == BodyActor
+				&& BodyActor->GetStableBodyId() == Assist.BodyId
+				&& BodyActor->GetGravityRole() == Assist.Role
+				&& Assist.IsAssist())
+			{
+				OutObjectClass = EABTSStylizedObjectClass::FinalePlanet;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const AABTSM11UFOActor* TargetActor =
+		Cast<AABTSM11UFOActor>(&RuntimePresentationActor);
+	if (!IsValid(TargetActor)
+		|| TargetActor != UFOActor.Get()
+		|| TargetActor->GetOwner() != this
+		|| !TargetActor->IsPresentationConfigured()
+		|| TargetActor->GetStableTargetId()
+			!= LayoutPreset.CanonicalScenario.Target.TargetId)
+	{
+		return false;
+	}
+
+	OutObjectClass = EABTSStylizedObjectClass::FinaleUFO;
+	return true;
 }
 
 void AABTSM11FinaleSystem::EndPlay(
