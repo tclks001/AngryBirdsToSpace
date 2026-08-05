@@ -1,6 +1,6 @@
 # ABTS 三渲二 T0 自动视觉基线
 
-> 状态：**T0 源码与纯数据自动化已完成；真实 RHI 截图、GPU 数据与美术批准基线待显式运行验收**
+> 状态：**T0 自动截图/GPU 基线已通过；T1 已验收，T2-A 复用同一证据链，详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)**
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`
 > 唯一引擎：`C:\Program Files\Epic Games\UE_5.8`
 

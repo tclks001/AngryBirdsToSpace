@@ -22,6 +22,19 @@ struct ABTSRENDER_API FABTSStylizedToneProfileParameters
 	bool IsValid() const;
 };
 
+struct ABTSRENDER_API FABTSStylizedOutlineProfileParameters
+{
+	float WidthPixels = 1.25f;
+	float DepthThreshold = 0.012f;
+	float DepthSoftness = 0.018f;
+	float NormalThreshold = 0.16f;
+	float NormalSoftness = 0.18f;
+	float Strength = 0.78f;
+	FVector3f Color = FVector3f(0.035f, 0.050f, 0.075f);
+
+	bool IsValid() const;
+};
+
 /** Stable Integration-owned switch and profile seam for stylized rendering. */
 class ABTSRENDER_API FABTSStylizedRenderingControl
 {
@@ -34,6 +47,8 @@ public:
 	static EABTSStylizedRenderProfile GetProfileOnAnyThread();
 	static void SetProfile(EABTSStylizedRenderProfile Profile);
 	static FABTSStylizedToneProfileParameters GetToneProfileParameters(
+		EABTSStylizedRenderProfile Profile);
+	static FABTSStylizedOutlineProfileParameters GetOutlineProfileParameters(
 		EABTSStylizedRenderProfile Profile);
 
 	static int32 GetImplementationVersion();

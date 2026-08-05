@@ -9,7 +9,7 @@ namespace ABTSStylizedRenderingControl
 	TAutoConsoleVariable<int32> CVarEnabled(
 		TEXT("abts.Rendering.Stylized.Enabled"),
 		0,
-		TEXT("Integration-owned stylized rendering switch. T1 enables the tone pass."),
+		TEXT("Integration-owned stylized rendering switch. T2-A enables main-view tone and outline."),
 		ECVF_Default);
 
 	TAutoConsoleVariable<int32> CVarProfile(
@@ -68,7 +68,7 @@ void FABTSStylizedRenderingControl::SetProfile(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 1;
+	return 2;
 }
 
 FABTSStylizedToneProfileParameters
@@ -111,6 +111,38 @@ FABTSStylizedRenderingControl::GetToneProfileParameters(
 	return Parameters;
 }
 
+FABTSStylizedOutlineProfileParameters
+FABTSStylizedRenderingControl::GetOutlineProfileParameters(
+	EABTSStylizedRenderProfile Profile)
+{
+	FABTSStylizedOutlineProfileParameters Parameters;
+	switch (Profile)
+	{
+	case EABTSStylizedRenderProfile::SatelliteGuide:
+		Parameters.WidthPixels = 1.20f;
+		Parameters.DepthThreshold = 0.010f;
+		Parameters.DepthSoftness = 0.016f;
+		Parameters.NormalThreshold = 0.14f;
+		Parameters.NormalSoftness = 0.17f;
+		Parameters.Strength = 0.82f;
+		Parameters.Color = FVector3f(0.030f, 0.045f, 0.075f);
+		break;
+	case EABTSStylizedRenderProfile::FinaleSpace:
+		Parameters.WidthPixels = 1.40f;
+		Parameters.DepthThreshold = 0.009f;
+		Parameters.DepthSoftness = 0.015f;
+		Parameters.NormalThreshold = 0.13f;
+		Parameters.NormalSoftness = 0.16f;
+		Parameters.Strength = 0.86f;
+		Parameters.Color = FVector3f(0.022f, 0.030f, 0.055f);
+		break;
+	case EABTSStylizedRenderProfile::GroundDay:
+	default:
+		break;
+	}
+	return Parameters;
+}
+
 bool FABTSStylizedRenderingControl::IsProfileValid(
 	EABTSStylizedRenderProfile Profile)
 {
@@ -135,4 +167,19 @@ bool FABTSStylizedToneProfileParameters::IsValid() const
 		&& ShadowTint.GetMin() > 0.0f
 		&& MidTint.GetMin() > 0.0f
 		&& HighlightTint.GetMin() > 0.0f;
+}
+
+bool FABTSStylizedOutlineProfileParameters::IsValid() const
+{
+	return WidthPixels > 0.0f
+		&& WidthPixels <= 4.0f
+		&& DepthThreshold > 0.0f
+		&& DepthSoftness > 0.0f
+		&& NormalThreshold > 0.0f
+		&& NormalThreshold < 1.0f
+		&& NormalSoftness > 0.0f
+		&& Strength > 0.0f
+		&& Strength <= 1.0f
+		&& Color.GetMin() >= 0.0f
+		&& Color.GetMax() <= 1.0f;
 }

@@ -4,6 +4,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSToonVisualCaptureTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -195,9 +196,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T1 reports the first pixel-consuming implementation"),
+		TEXT("T2-A reports the tone-and-outline implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		1);
+		2);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -208,6 +209,7 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 
 	TArray<FABTSStylizedToneProfileParameters> Profiles;
+	TArray<FABTSStylizedOutlineProfileParameters> OutlineProfiles;
 	for (int32 ProfileIndex =
 			static_cast<int32>(EABTSStylizedRenderProfile::GroundDay);
 		ProfileIndex <=
@@ -219,6 +221,11 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
 		TestTrue(TEXT("Every T1 tone profile is valid"), Profile.IsValid());
 		Profiles.Add(Profile);
+		const FABTSStylizedOutlineProfileParameters OutlineProfile =
+			FABTSStylizedRenderingControl::GetOutlineProfileParameters(
+				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
+		TestTrue(TEXT("Every T2-A outline profile is valid"), OutlineProfile.IsValid());
+		OutlineProfiles.Add(OutlineProfile);
 	}
 	TestNotEqual(
 		TEXT("Ground and satellite shadow thresholds differ"),
@@ -228,6 +235,10 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		TEXT("Satellite and finale strengths differ"),
 		Profiles[1].Strength,
 		Profiles[2].Strength);
+	TestNotEqual(
+		TEXT("Ground and finale outline widths differ"),
+		OutlineProfiles[0].WidthPixels,
+		OutlineProfiles[2].WidthPixels);
 	TestFalse(
 		TEXT("Out-of-range profiles are rejected"),
 		FABTSStylizedRenderingControl::IsProfileValid(
@@ -235,6 +246,126 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 
 	FABTSStylizedRenderingControl::SetProfile(SavedProfile);
 	FABTSStylizedRenderingControl::SetEnabled(bSavedEnabled);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT2ASharedRenderingContractTest,
+	"ABTS.Rendering.Toon.T2A.SharedRenderingContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT2ASharedRenderingContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	TSet<uint8> SelectiveStencilValues;
+	for (int32 ClassIndex =
+		static_cast<int32>(EABTSStylizedObjectClass::None);
+		ClassIndex <= static_cast<int32>(EABTSStylizedObjectClass::FinaleUFO);
+		++ClassIndex)
+	{
+		const EABTSStylizedObjectClass ObjectClass =
+			static_cast<EABTSStylizedObjectClass>(ClassIndex);
+		TestTrue(
+			TEXT("Every declared object class is valid"),
+			FABTSStylizedRenderingContract::IsObjectClassValid(ObjectClass));
+		const uint8 StencilValue =
+			FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
+				ObjectClass);
+		TestEqual(
+			TEXT("Selective classification matches the renderer allocation"),
+			FABTSStylizedRenderingContract::RequiresSelectiveStencil(ObjectClass),
+			StencilValue != 0);
+		if (StencilValue != 0)
+		{
+			TestTrue(
+				TEXT("Feature stencil values remain inside the Integration reserve"),
+				StencilValue <= 31);
+			TestFalse(
+				TEXT("Every selective object class has a unique stencil value"),
+				SelectiveStencilValues.Contains(StencilValue));
+			SelectiveStencilValues.Add(StencilValue);
+		}
+	}
+	TestEqual(TEXT("Seven gameplay classes are selective"), SelectiveStencilValues.Num(), 7);
+	TestFalse(
+		TEXT("Unknown object classes fail closed"),
+		FABTSStylizedRenderingContract::IsObjectClassValid(
+			static_cast<EABTSStylizedObjectClass>(255)));
+	TestEqual(
+		TEXT("Unknown object classes never receive a stencil value"),
+		FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
+			static_cast<EABTSStylizedObjectClass>(255)),
+		static_cast<uint8>(0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT2AViewPolicyTest,
+	"ABTS.Rendering.Toon.T2A.ViewPolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	for (int32 ViewIndex = static_cast<int32>(EABTSStylizedViewClass::MainWorld);
+		ViewIndex <= static_cast<int32>(EABTSStylizedViewClass::FinaleRemotePreview);
+		++ViewIndex)
+	{
+		const EABTSStylizedViewClass ViewClass =
+			static_cast<EABTSStylizedViewClass>(ViewIndex);
+		TestTrue(
+			TEXT("Every declared view class is valid"),
+			FABTSStylizedRenderingContract::IsViewClassValid(ViewClass));
+		TestTrue(
+			TEXT("Every declared view class resolves a valid policy"),
+			FABTSStylizedRenderingContract::ResolveViewPolicy(
+				ViewClass,
+				EABTSStylizedRenderProfile::FinaleSpace).IsValid());
+	}
+
+	const FABTSStylizedViewPolicy MainPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::MainWorld,
+			EABTSStylizedRenderProfile::FinaleSpace);
+	TestEqual(
+		TEXT("Main view consumes the active runtime profile"),
+		static_cast<int32>(MainPolicy.Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestTrue(TEXT("Main view applies tone"), MainPolicy.bApplyTone);
+	TestTrue(TEXT("Main view applies outline"), MainPolicy.bApplyOutline);
+	TestTrue(TEXT("Main view permits selective stencil"), MainPolicy.bAllowSelectiveStencil);
+	TestTrue(
+		TEXT("T2-A implements the final main view"),
+		FABTSStylizedRenderingContract::IsViewClassImplemented(
+			EABTSStylizedViewClass::MainWorld));
+	TestFalse(
+		TEXT("T2-A leaves Scene Capture wiring to T2-B"),
+		FABTSStylizedRenderingContract::IsViewClassImplemented(
+			EABTSStylizedViewClass::SatelliteLandingPreview));
+
+	TestEqual(
+		TEXT("Ground preview has a frozen ground profile"),
+		static_cast<int32>(
+			FABTSStylizedRenderingContract::ResolveViewPolicy(
+				EABTSStylizedViewClass::GroundLandingPreview).Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestEqual(
+		TEXT("Satellite preview has a frozen satellite profile"),
+		static_cast<int32>(
+			FABTSStylizedRenderingContract::ResolveViewPolicy(
+				EABTSStylizedViewClass::SatelliteLandingPreview).Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
+	TestEqual(
+		TEXT("Finale preview has a frozen finale profile"),
+		static_cast<int32>(
+			FABTSStylizedRenderingContract::ResolveViewPolicy(
+				EABTSStylizedViewClass::FinaleRemotePreview).Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestFalse(
+		TEXT("Unknown view classes fail closed"),
+		FABTSStylizedRenderingContract::IsViewClassValid(
+			static_cast<EABTSStylizedViewClass>(255)));
 	return true;
 }
 

@@ -1,6 +1,6 @@
 # ABTS 三渲二 T1 全局色调原型
 
-> 状态：Integration 候选实现。
+> 状态：已完成自动化、真实 RHI、GPU 与用户可见验收；后续由 [T2-A 主视图描边与共享语义契约](ABTSToonStylizedRenderingT2A.md) 继承。
 >
 > 上游：[三渲二与全局风格化渲染设计](ABTSToonStylizedRenderingDesign.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 

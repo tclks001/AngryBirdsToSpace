@@ -1,10 +1,10 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线已通过；T1 全局色调候选实现中，详见 [T1 全局色调原型](ABTSToonStylizedRenderingT1.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线与 T1 全局色调已通过验收；T2-A 主视图描边与共享语义契约进入 Integration 候选，详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
-> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
+> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
 
 ## 1. 结论先行
 
@@ -303,9 +303,10 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 
 ### Phase T2：描边和视图契约
 
-- Integration 实现主视图描边和 Stencil 分区；
-- M3/M7/M11 只提供稳定只读的“对象类别/视图类别”消费数据；
-- M10/M11 的 Scene Capture 由 Integration 串行接线，禁止两工作树同时编辑同一相机或材质资产。
+- T2-A：Integration 冻结对象/视图语义、Stencil 保留区和主视图 Depth/Normal 描边；Scene Capture 明确跳过，不启用 Custom Depth producer；
+- T2-B：M3/M7/M11 只提供稳定只读的对象类别适配，Integration 串行接入选择性 Stencil 与地面/月面/终局 Scene Capture；
+- T2-C：补动态镜头、瞄准/PIP、破坏过程和 Screen Percentage 回归，冻结美术参数及性能门槛；
+- M10/M11 的 Scene Capture 始终由 Integration 串行接线，禁止两工作树同时编辑同一相机或材质资产。详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)。
 
 ### Phase T3：材质族迁移
 
@@ -351,9 +352,9 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 
 1. T0 只在唯一 `L_ABTS_M11` 中建立固定 Seed、`GroundStart`、`SlingshotBuilding`、`SatelliteE5`、`FinaleLayout` 四个语义相机点，以及完全同姿态的 Style Off/On 截图和独立 GPU 证据；具体运行契约见 [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)；
 2. T0 不进入瞄准或发射状态，因此 HUD 绘制链会保留，但地面/月面 PIP 和轨迹显示不属于本轮已覆盖证据；
-3. T1 再让稳定 Style/Profile 接缝真实消费柔和三档色调、冷色暗部和 1–2 像素 Depth/Normal 轮廓；
-4. T1 首批只给当前鸟、弹弓和一栋建筑写入选择性 Stencil；
-5. T2 增加显式玩法状态截图，用同一参数检查地面 PIP 与月面 BaseColor PIP，暂不强求完全相同；
+3. T1 让稳定 Style/Profile 接缝真实消费柔和三档色调与冷色暗部；
+4. T2-A 增加最终主视图的 1–2 像素 Depth/Normal 轮廓，并冻结对象/视图语义及 Stencil 保留区，但不产生 Custom Depth；
+5. T2-B 再给当前鸟、弹弓、建筑弱点和终局目标接入选择性 Stencil，并增加显式玩法状态截图，用冻结视图类别检查地面/月面/终局 PIP；
 6. 达到稳定性与性能门槛后，再决定是否迁移第一批材质族。
 
 这一步完成后应进行一次明确的美术决策：保留原渲染、采用柔和三渲二、或停止全局描边只保留色板/材质风格化。没有通过这道决策门，不进入引擎源码分叉。

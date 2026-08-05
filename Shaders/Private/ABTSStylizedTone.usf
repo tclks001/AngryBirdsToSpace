@@ -1,12 +1,15 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "/Engine/Private/Common.ush"
+#include "/Engine/Private/DeferredShadingCommon.ush"
 #include "/Engine/Private/GammaCorrectionCommon.ush"
+#include "/Engine/Private/SceneTexturesCommon.ush"
 #include "/Engine/Private/ScreenPass.ush"
 
 Texture2D SceneColorTexture;
 SamplerState SceneColorSampler;
 
+float2 ViewportInvSize;
 float ShadowThreshold;
 float HighlightThreshold;
 float TransitionSoftness;
@@ -18,6 +21,13 @@ float Saturation;
 float3 ShadowTint;
 float3 MidTint;
 float3 HighlightTint;
+float OutlineWidthPixels;
+float OutlineDepthThreshold;
+float OutlineDepthSoftness;
+float OutlineNormalThreshold;
+float OutlineNormalSoftness;
+float OutlineStrength;
+float3 OutlineColor;
 
 float3 ABTSApplySoftToneBands(float3 EncodedColor)
 {
@@ -49,7 +59,84 @@ float3 ABTSApplySoftToneBands(float3 EncodedColor)
 	return LinearToSrgb(saturate(StylizedColor));
 }
 
-void ABTSStylizedToneMainPS(
+float ABTSSampleDeviceDepth(float2 ViewportUV)
+{
+	float2 BufferUV = ViewportUVToBufferUV(saturate(ViewportUV));
+	return Texture2DSampleLevel(
+		SceneTexturesStruct.SceneDepthTexture,
+		SceneTexturesStruct_SceneDepthTextureSampler,
+		BufferUV,
+		0).r;
+}
+
+float3 ABTSSampleWorldNormal(float2 ViewportUV)
+{
+	float2 BufferUV = ViewportUVToBufferUV(saturate(ViewportUV));
+	float3 EncodedNormal = Texture2DSampleLevel(
+		SceneTexturesStruct.GBufferATexture,
+		SceneTexturesStruct_GBufferATextureSampler,
+		BufferUV,
+		0).rgb;
+	return normalize(DecodeNormal(EncodedNormal));
+}
+
+float ABTSComputeOutline(float2 ViewportUV)
+{
+	const float CenterDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	if (CenterDeviceDepth <= 1.0e-7f)
+	{
+		return 0.0f;
+	}
+
+	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
+	const float3 CenterNormal = ABTSSampleWorldNormal(ViewportUV);
+	const float2 PixelOffset = ViewportInvSize * OutlineWidthPixels;
+	const float2 Offsets[4] =
+	{
+		float2(PixelOffset.x, 0.0f),
+		float2(-PixelOffset.x, 0.0f),
+		float2(0.0f, PixelOffset.y),
+		float2(0.0f, -PixelOffset.y)
+	};
+
+	float MaxDepthDelta = 0.0f;
+	float MaxNormalDelta = 0.0f;
+	float SilhouetteEdge = 0.0f;
+	UNROLL
+	for (int SampleIndex = 0; SampleIndex < 4; ++SampleIndex)
+	{
+		const float2 SampleUV = saturate(ViewportUV + Offsets[SampleIndex]);
+		const float SampleDeviceDepth = ABTSSampleDeviceDepth(SampleUV);
+		if (SampleDeviceDepth <= 1.0e-7f)
+		{
+			SilhouetteEdge = 1.0f;
+			continue;
+		}
+
+		const float SampleDepth = ConvertFromDeviceZ(SampleDeviceDepth);
+		const float RelativeDepthDelta =
+			abs(SampleDepth - CenterDepth) /
+			max(min(SampleDepth, CenterDepth), 1.0f);
+		MaxDepthDelta = max(MaxDepthDelta, RelativeDepthDelta);
+
+		const float3 SampleNormal = ABTSSampleWorldNormal(SampleUV);
+		MaxNormalDelta = max(
+			MaxNormalDelta,
+			1.0f - saturate(dot(CenterNormal, SampleNormal)));
+	}
+
+	const float DepthEdge = smoothstep(
+		OutlineDepthThreshold,
+		OutlineDepthThreshold + OutlineDepthSoftness,
+		MaxDepthDelta);
+	const float NormalEdge = smoothstep(
+		OutlineNormalThreshold,
+		OutlineNormalThreshold + OutlineNormalSoftness,
+		MaxNormalDelta);
+	return saturate(max(SilhouetteEdge, max(DepthEdge, NormalEdge)));
+}
+
+void ABTSStylizedToneAndOutlineMainPS(
 	in noperspective float4 UVAndScreenPos : TEXCOORD0,
 	out float4 OutColor : SV_Target0)
 {
@@ -57,5 +144,8 @@ void ABTSStylizedToneMainPS(
 		SceneColorTexture,
 		SceneColorSampler,
 		UVAndScreenPos.xy);
-	OutColor = float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
+	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
+	const float Outline = ABTSComputeOutline(ViewportUV) * OutlineStrength;
+	const float3 ToneColor = ABTSApplySoftToneBands(SceneColor.rgb);
+	OutColor = float4(lerp(ToneColor, OutlineColor, Outline), SceneColor.a);
 }
