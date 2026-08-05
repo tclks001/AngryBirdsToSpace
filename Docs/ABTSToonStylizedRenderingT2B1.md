@@ -104,3 +104,19 @@ abts.Rendering.Stylized.Enabled 1
 - **T2-B2（等待 M7）**：M7 发布已认证建筑主体/弱点只读语义，Integration 接入现有注册表并补破坏前后恢复测试。
 - **T2-C**：增加确定性的瞄准、地面/月面/终局 PIP 和建筑破坏截图状态，覆盖 Screen Percentage 与动态运动，最终冻结线宽、强度和 GPU 预算。
 - 只有 T2-B2/T2-C 均完成且美术门通过，才进入第一批材质族迁移；T2-B1 本身不授权修改 M7 材质或 Blueprint 默认绑定。
+
+## 8. 当前自动证据
+
+2026-08-05 在干净源码提交 `8a225e843a71a7781718e63c77181bde615b6644` 上完成：
+
+- UE 5.8 `-ForceUnity -DisableAdaptiveUnity`：`Result: Succeeded`；
+- fresh NullRHI `ABTS.Rendering.Toon`：`7/7`，终止标记 `TEST COMPLETE. EXIT CODE: 0`，日志 `Saved/Logs/ToonT2B1-8a225e8-FreshAutomation.log`；
+- M3 回归：`ABTS.M3.StylizedSemantics` 为 `1/1`，`ABTS.M3.Monthly.SatellitePreview` 为 `3/3`；
+- M11 回归：`ABTS.M11B.Runtime` 为 `6/6`，`ABTS.M110` 为 `4/4`；
+- fresh D3D12 截图：`8/8`，manifest 为 `Saved/ABTSVisualCaptures/ToonT0/Screenshots_20260805T093823Z_45872/manifest.json`，日志 `Saved/Logs/ToonT2B1-8a225e8-Formal-Screenshots.log`；
+- fresh D3D12 GPU：`8/8`、每项 3 个样本，manifest 为 `Saved/ABTSVisualCaptures/ToonT0/GPUProfile_20260805T094014Z_47100/manifest.json`，日志 `Saved/Logs/ToonT2B1-8a225e8-Formal-GPU.log`；
+- 两份 manifest 均绑定完整提交号、Seed `312503`、实现版本 4 与 `1920x1080`；四组 Off/On 的 requested/effective Pose Hash 分别一致；
+- Style Off 没有风格 pass，且日志反复确认 `SelectiveProducers=0`；Style On 为 `M3Semantics=6`、`M11Semantics=4`、`Birds=4`、`SelectiveProducers=32`、`M7AdapterReady=0`、`Conflicts=0`；
+- Style On 的 12 个正式 GPU 样本中，`OutlinePreTSR` 为 `0.072–0.133 ms`、平均 `0.1111 ms`，`Tone` 为 `0.041–0.047 ms`、平均 `0.0430 ms`，远低于 T2-A 的 `1.5 ms @ 1080p` 合计门槛；真实 RHI 无 Shader Error、Fatal 或 Assertion。
+
+T0 的被动点没有进入弹弓瞄准，故正式日志中的 `SlingshotPrimitives=0` 是预期结果；地面/月面/终局 PIP 也不属于四张被动主视图截图。当前自动证据不能替代第 6 节的可见 PIE，候选仍等待用户验收后才能合并 `master`。
