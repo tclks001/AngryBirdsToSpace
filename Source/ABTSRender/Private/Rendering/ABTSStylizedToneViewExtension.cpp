@@ -6,11 +6,13 @@
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "RenderGraphBuilder.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "SceneRenderTargetParameters.h"
 #include "SceneViewExtension.h"
 #include "ScreenPass.h"
 #include "ShaderParameterStruct.h"
+#include "Components/SceneCaptureComponent2D.h"
 
 namespace ABTSStylizedToneViewExtensionPrivate
 {
@@ -26,6 +28,9 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(float, OutlineNormalThreshold)
 		SHADER_PARAMETER(float, OutlineNormalSoftness)
 		SHADER_PARAMETER(float, OutlineStrength)
+		SHADER_PARAMETER(float, SelectiveOutlineStrength)
+		SHADER_PARAMETER(float, SelectiveOutlineWidthScale)
+		SHADER_PARAMETER(uint32, bAllowSelectiveStencil)
 		SHADER_PARAMETER(FVector3f, OutlineColor)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
@@ -34,6 +39,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColorTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
 		SHADER_PARAMETER(float, ShadowThreshold)
+		SHADER_PARAMETER(float, ToneNormalizationFloor)
 		SHADER_PARAMETER(float, HighlightThreshold)
 		SHADER_PARAMETER(float, TransitionSoftness)
 		SHADER_PARAMETER(float, Strength)
@@ -132,8 +138,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 				const FABTSStylizedOutlineProfileParameters OutlineProfile =
 					FABTSStylizedRenderingControl::GetOutlineProfileParameters(
 						ViewPolicy.Profile);
+				const bool bAllowSelectiveStencil =
+					ViewPolicy.bAllowSelectiveStencil;
 				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
-					[OutlineProfile](
+					[OutlineProfile, bAllowSelectiveStencil](
 						FRDGBuilder& GraphBuilder,
 						const FSceneView& View,
 						const FPostProcessMaterialInputs& Inputs)
@@ -142,7 +150,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 							GraphBuilder,
 							View,
 							Inputs,
-							OutlineProfile);
+							OutlineProfile,
+							bAllowSelectiveStencil);
 					});
 			}
 			else if (Pass == EPostProcessingPass::Tonemap
@@ -166,12 +175,13 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			}
 		}
 
-	private:
+	public:
 		static FScreenPassTexture AddOutlinePass(
 			FRDGBuilder& GraphBuilder,
 			const FSceneView& View,
 			const FPostProcessMaterialInputs& Inputs,
-			const FABTSStylizedOutlineProfileParameters& OutlineProfile)
+			const FABTSStylizedOutlineProfileParameters& OutlineProfile,
+			const bool bAllowSelectiveStencil)
 		{
 			const FScreenPassTexture SceneColor(
 				Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
@@ -215,6 +225,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			PassParameters->OutlineNormalThreshold = OutlineProfile.NormalThreshold;
 			PassParameters->OutlineNormalSoftness = OutlineProfile.NormalSoftness;
 			PassParameters->OutlineStrength = OutlineProfile.Strength;
+			PassParameters->SelectiveOutlineStrength = 0.96f;
+			PassParameters->SelectiveOutlineWidthScale = 1.45f;
+			PassParameters->bAllowSelectiveStencil =
+				bAllowSelectiveStencil ? 1u : 0u;
 			PassParameters->OutlineColor = OutlineProfile.Color;
 			PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 
@@ -235,7 +249,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			FRDGBuilder& GraphBuilder,
 			const FSceneView& View,
 			const FPostProcessMaterialInputs& Inputs,
-			const FABTSStylizedToneProfileParameters& ToneProfile)
+			const FABTSStylizedToneProfileParameters& ToneProfile,
+			const float ToneNormalizationFloor = 1.0e-4f)
 		{
 			const FScreenPassTexture SceneColor(
 				Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
@@ -261,6 +276,9 @@ namespace ABTSStylizedToneViewExtensionPrivate
 					AM_Clamp,
 					AM_Clamp>::GetRHI();
 			PassParameters->ShadowThreshold = ToneProfile.ShadowThreshold;
+			PassParameters->ToneNormalizationFloor = FMath::Max(
+				ToneNormalizationFloor,
+				1.0e-4f);
 			PassParameters->HighlightThreshold = ToneProfile.HighlightThreshold;
 			PassParameters->TransitionSoftness = ToneProfile.TransitionSoftness;
 			PassParameters->Strength = ToneProfile.Strength;
@@ -289,6 +307,99 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		}
 	};
 
+	class FABTSStylizedCaptureViewExtension final : public ISceneViewExtension
+	{
+	public:
+		explicit FABTSStylizedCaptureViewExtension(
+			const EABTSStylizedViewClass InViewClass)
+			: ViewClass(InViewClass)
+		{
+		}
+
+		virtual void SubscribeToPostProcessingPass(
+			EPostProcessingPass Pass,
+			const FSceneView& InView,
+			FPostProcessingPassDelegateArray& InOutPassCallbacks,
+			bool bIsPassEnabled) override
+		{
+			if (!bIsPassEnabled
+				|| !FABTSStylizedRenderingControl::IsEnabledOnAnyThread()
+				|| !InView.bIsSceneCapture
+				|| InView.bIsReflectionCapture
+				|| InView.bIsPlanarReflection
+				|| !FABTSStylizedRenderingContract::IsViewClassImplemented(ViewClass))
+			{
+				return;
+			}
+
+			const FABTSStylizedViewPolicy ViewPolicy =
+				FABTSStylizedRenderingContract::ResolveViewPolicy(ViewClass);
+			if (!ViewPolicy.IsValid())
+			{
+				return;
+			}
+
+			if (Pass == EPostProcessingPass::AfterDOF
+				&& ViewPolicy.bApplyOutline)
+			{
+				const FABTSStylizedOutlineProfileParameters OutlineProfile =
+					FABTSStylizedRenderingControl::GetOutlineProfileParameters(
+						ViewPolicy.Profile);
+				const bool bAllowSelectiveStencil =
+					ViewPolicy.bAllowSelectiveStencil;
+				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
+					[OutlineProfile, bAllowSelectiveStencil](
+						FRDGBuilder& GraphBuilder,
+						const FSceneView& View,
+						const FPostProcessMaterialInputs& Inputs)
+					{
+						return FABTSStylizedToneSceneViewExtension::AddOutlinePass(
+							GraphBuilder,
+							View,
+							Inputs,
+							OutlineProfile,
+							bAllowSelectiveStencil);
+					});
+			}
+			else if (Pass == EPostProcessingPass::Tonemap
+				&& ViewPolicy.bApplyTone)
+			{
+				const FABTSStylizedToneProfileParameters ToneProfile =
+					FABTSStylizedRenderingControl::GetToneProfileParameters(
+						ViewPolicy.Profile);
+				const float ToneNormalizationFloor =
+					FABTSStylizedRenderingControl::
+						GetSceneCaptureToneNormalizationFloor(
+							ViewPolicy.Profile);
+				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
+					[ToneProfile, ToneNormalizationFloor](
+						FRDGBuilder& GraphBuilder,
+						const FSceneView& View,
+						const FPostProcessMaterialInputs& Inputs)
+					{
+						return FABTSStylizedToneSceneViewExtension::AddTonePass(
+							GraphBuilder,
+							View,
+							Inputs,
+							ToneProfile,
+							ToneNormalizationFloor);
+					});
+			}
+		}
+
+	private:
+		EABTSStylizedViewClass ViewClass;
+	};
+
+	struct FABTSStylizedCaptureRegistration
+	{
+		EABTSStylizedViewClass ViewClass = EABTSStylizedViewClass::MainWorld;
+		TSharedPtr<FABTSStylizedCaptureViewExtension, ESPMode::ThreadSafe> Extension;
+	};
+
+	TMap<TWeakObjectPtr<USceneCaptureComponent2D>, FABTSStylizedCaptureRegistration>
+		GCaptureRegistrations;
+
 	TSharedPtr<FABTSStylizedToneSceneViewExtension, ESPMode::ThreadSafe>
 		GViewExtension;
 }
@@ -306,5 +417,100 @@ void ABTSStylizedToneViewExtension::Initialize()
 
 void ABTSStylizedToneViewExtension::Shutdown()
 {
+	FABTSStylizedSceneCaptureRegistry::Reset();
 	ABTSStylizedToneViewExtensionPrivate::GViewExtension.Reset();
+}
+
+bool FABTSStylizedSceneCaptureRegistry::Register(
+	USceneCaptureComponent2D& Capture,
+	const EABTSStylizedViewClass ViewClass)
+{
+	using namespace ABTSStylizedToneViewExtensionPrivate;
+	check(IsInGameThread());
+	if (ViewClass == EABTSStylizedViewClass::MainWorld
+		|| !FABTSStylizedRenderingContract::IsViewClassImplemented(ViewClass))
+	{
+		return false;
+	}
+
+	for (auto It = GCaptureRegistrations.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	if (FABTSStylizedCaptureRegistration* Existing =
+		GCaptureRegistrations.Find(&Capture))
+	{
+		if (Existing->ViewClass == ViewClass && Existing->Extension.IsValid())
+		{
+			return true;
+		}
+		Unregister(Capture);
+	}
+
+	FABTSStylizedCaptureRegistration Registration;
+	Registration.ViewClass = ViewClass;
+	Registration.Extension =
+		MakeShared<FABTSStylizedCaptureViewExtension, ESPMode::ThreadSafe>(
+			ViewClass);
+	Capture.SceneViewExtensions.Add(
+		StaticCastSharedPtr<ISceneViewExtension>(Registration.Extension));
+	GCaptureRegistrations.Add(&Capture, MoveTemp(Registration));
+	return true;
+}
+
+void FABTSStylizedSceneCaptureRegistry::Unregister(
+	USceneCaptureComponent2D& Capture)
+{
+	using namespace ABTSStylizedToneViewExtensionPrivate;
+	check(IsInGameThread());
+	FABTSStylizedCaptureRegistration Registration;
+	if (!GCaptureRegistrations.RemoveAndCopyValue(&Capture, Registration))
+	{
+		return;
+	}
+	const TSharedPtr<ISceneViewExtension, ESPMode::ThreadSafe> RegisteredExtension =
+		StaticCastSharedPtr<ISceneViewExtension>(Registration.Extension);
+	Capture.SceneViewExtensions.RemoveAll(
+		[&RegisteredExtension](
+			const TWeakPtr<ISceneViewExtension, ESPMode::ThreadSafe>& Candidate)
+		{
+			return Candidate.Pin() == RegisteredExtension;
+		});
+}
+
+bool FABTSStylizedSceneCaptureRegistry::TryGetViewClass(
+	const USceneCaptureComponent2D& Capture,
+	EABTSStylizedViewClass& OutViewClass)
+{
+	using namespace ABTSStylizedToneViewExtensionPrivate;
+	check(IsInGameThread());
+	OutViewClass = EABTSStylizedViewClass::MainWorld;
+	const FABTSStylizedCaptureRegistration* Registration =
+		GCaptureRegistrations.Find(&Capture);
+	if (Registration == nullptr || !Registration->Extension.IsValid())
+	{
+		return false;
+	}
+	OutViewClass = Registration->ViewClass;
+	return true;
+}
+
+void FABTSStylizedSceneCaptureRegistry::Reset()
+{
+	using namespace ABTSStylizedToneViewExtensionPrivate;
+	check(IsInGameThread());
+	TArray<TWeakObjectPtr<USceneCaptureComponent2D>> Captures;
+	GCaptureRegistrations.GetKeys(Captures);
+	for (const TWeakObjectPtr<USceneCaptureComponent2D>& Capture : Captures)
+	{
+		if (Capture.IsValid())
+		{
+			Unregister(*Capture.Get());
+		}
+	}
+	GCaptureRegistrations.Reset();
 }

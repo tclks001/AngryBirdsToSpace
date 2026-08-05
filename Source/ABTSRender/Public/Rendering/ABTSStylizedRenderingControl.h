@@ -48,6 +48,13 @@ public:
 	static void SetProfile(EABTSStylizedRenderProfile Profile);
 	static FABTSStylizedToneProfileParameters GetToneProfileParameters(
 		EABTSStylizedRenderProfile Profile);
+	/**
+	 * Scene captures do not retain the main view's temporal lighting history.
+	 * Clamp tone normalization to this profile-specific floor so sub-visible
+	 * dark noise cannot be expanded into bright chromatic speckles.
+	 */
+	static float GetSceneCaptureToneNormalizationFloor(
+		EABTSStylizedRenderProfile Profile);
 	static FABTSStylizedOutlineProfileParameters GetOutlineProfileParameters(
 		EABTSStylizedRenderProfile Profile);
 

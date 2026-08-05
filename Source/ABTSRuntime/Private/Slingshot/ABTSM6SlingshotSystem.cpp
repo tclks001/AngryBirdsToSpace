@@ -952,3 +952,39 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 	if (BuildingMaterialSystem.IsValid()) BuildingMaterialSystem->ApplyRadialBlast(LaunchedBird->GetActorLocation(), BlackExplosionRadiusCM, BlackExplosionImpulseRadiusCM, BlackExplosionImpulseSpeedCMPerSec);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][BlackExplosion] Manual=%d DestroyRadius=%.1f ImpulseRadius=%.1f HISM=%d Impulsed=%d Proxies=%d"), bManual ? 1 : 0, BlackExplosionRadiusCM, BlackExplosionImpulseRadiusCM, BrokenInstances, ImpulsedInstances, BrokenProxies);
 }
+
+void AABTSM6SlingshotSystem::GatherActiveSlingshotPrimitives(
+	TArray<UPrimitiveComponent*>& OutPrimitives) const
+{
+	OutPrimitives.Reset();
+	const AABTSM51SlingshotCord* Cord = ActiveCord.Get();
+	if (!IsValid(Cord) || !IsLaunchModeActive())
+	{
+		return;
+	}
+
+	auto AppendActorPrimitives = [&OutPrimitives](const AActor* Actor)
+	{
+		if (!IsValid(Actor))
+		{
+			return;
+		}
+		TInlineComponentArray<UPrimitiveComponent*> Components;
+		Actor->GetComponents(Components);
+		for (UPrimitiveComponent* Component : Components)
+		{
+			if (IsValid(Component))
+			{
+				OutPrimitives.AddUnique(Component);
+			}
+		}
+	};
+
+	AppendActorPrimitives(Cord);
+	AppendActorPrimitives(Cord->GetStakeA());
+	AppendActorPrimitives(Cord->GetStakeB());
+	if (IsValid(PouchVisualMesh) && PouchVisualMesh->IsVisible())
+	{
+		OutPrimitives.AddUnique(PouchVisualMesh);
+	}
+}

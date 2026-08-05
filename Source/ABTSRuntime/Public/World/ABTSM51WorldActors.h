@@ -161,6 +161,8 @@ public:
 	float GetCordObstructionRadiusCM() const { return CordObstructionRadiusCM; }
 	EABTSItemId GetStakeItem() const;
 	EABTSSlingshotTier GetSlingshotTier() const { return SlingshotTier; }
+	AABTSM51SlingshotStake* GetStakeA() const { return StakeA.Get(); }
+	AABTSM51SlingshotStake* GetStakeB() const { return StakeB.Get(); }
 	bool IsFinaleSpaceSlingshot() const;
 	int32 GetFinaleSlotPairId() const;
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;

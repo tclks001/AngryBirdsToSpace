@@ -3,8 +3,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Components/SceneCaptureComponent2D.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
+#include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Rendering/ABTSToonVisualCaptureTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -196,9 +198,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T2-A reports the temporally stabilized outline implementation"),
+		TEXT("T2-B1 reports the capture dark-noise stabilization implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		3);
+		5);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -220,6 +222,17 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 			FABTSStylizedRenderingControl::GetToneProfileParameters(
 				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
 		TestTrue(TEXT("Every T1 tone profile is valid"), Profile.IsValid());
+		const float CaptureNormalizationFloor =
+			FABTSStylizedRenderingControl::
+				GetSceneCaptureToneNormalizationFloor(
+					static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
+		TestEqual(
+			TEXT("Capture tone floor uses the stable shadow band"),
+			CaptureNormalizationFloor,
+			Profile.ShadowLuminance);
+		TestTrue(
+			TEXT("Capture tone floor prevents dark-signal amplification"),
+			CaptureNormalizationFloor > 1.0e-4f);
 		Profiles.Add(Profile);
 		const FABTSStylizedOutlineProfileParameters OutlineProfile =
 			FABTSStylizedRenderingControl::GetOutlineProfileParameters(
@@ -339,8 +352,8 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 		TEXT("T2-A implements the final main view"),
 		FABTSStylizedRenderingContract::IsViewClassImplemented(
 			EABTSStylizedViewClass::MainWorld));
-	TestFalse(
-		TEXT("T2-A leaves Scene Capture wiring to T2-B"),
+	TestTrue(
+		TEXT("T2-B1 implements every explicit Scene Capture class"),
 		FABTSStylizedRenderingContract::IsViewClassImplemented(
 			EABTSStylizedViewClass::SatelliteLandingPreview));
 
@@ -356,6 +369,15 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 			FABTSStylizedRenderingContract::ResolveViewPolicy(
 				EABTSStylizedViewClass::SatelliteLandingPreview).Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
+	const FABTSStylizedViewPolicy SatellitePolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::SatelliteLandingPreview);
+	TestFalse(
+		TEXT("Satellite BaseColor preview does not re-quantize lighting"),
+		SatellitePolicy.bApplyTone);
+	TestTrue(
+		TEXT("Satellite BaseColor preview keeps a thin outline layer"),
+		SatellitePolicy.bApplyOutline);
 	TestEqual(
 		TEXT("Finale preview has a frozen finale profile"),
 		static_cast<int32>(
@@ -366,6 +388,72 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 		TEXT("Unknown view classes fail closed"),
 		FABTSStylizedRenderingContract::IsViewClassValid(
 			static_cast<EABTSStylizedViewClass>(255)));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT2B1SceneCaptureRegistryTest,
+	"ABTS.Rendering.Toon.T2B1.SceneCaptureRegistry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT2B1SceneCaptureRegistryTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSStylizedSceneCaptureRegistry::Reset();
+	USceneCaptureComponent2D* Capture =
+		NewObject<USceneCaptureComponent2D>(GetTransientPackage());
+	TestNotNull(TEXT("Transient capture is available"), Capture);
+	if (Capture == nullptr)
+	{
+		return false;
+	}
+
+	TestFalse(
+		TEXT("MainWorld cannot be attached to a SceneCapture"),
+		FABTSStylizedSceneCaptureRegistry::Register(
+			*Capture,
+			EABTSStylizedViewClass::MainWorld));
+	TestTrue(
+		TEXT("Ground preview registers explicitly"),
+		FABTSStylizedSceneCaptureRegistry::Register(
+			*Capture,
+			EABTSStylizedViewClass::GroundLandingPreview));
+	TestEqual(
+		TEXT("Exactly one component-local extension is installed"),
+		Capture->SceneViewExtensions.Num(),
+		1);
+	EABTSStylizedViewClass ViewClass = EABTSStylizedViewClass::MainWorld;
+	TestTrue(
+		TEXT("Registered class can be diagnosed"),
+		FABTSStylizedSceneCaptureRegistry::TryGetViewClass(
+			*Capture,
+			ViewClass));
+	TestEqual(
+		TEXT("Ground class is preserved"),
+		static_cast<int32>(ViewClass),
+		static_cast<int32>(EABTSStylizedViewClass::GroundLandingPreview));
+
+	TestTrue(
+		TEXT("Subject transition atomically replaces the extension"),
+		FABTSStylizedSceneCaptureRegistry::Register(
+			*Capture,
+			EABTSStylizedViewClass::SatelliteLandingPreview));
+	TestEqual(
+		TEXT("Replacement does not accumulate extensions"),
+		Capture->SceneViewExtensions.Num(),
+		1);
+	FABTSStylizedSceneCaptureRegistry::Unregister(*Capture);
+	TestEqual(
+		TEXT("Unregister removes the Integration extension"),
+		Capture->SceneViewExtensions.Num(),
+		0);
+	TestFalse(
+		TEXT("Unregistered captures fail closed"),
+		FABTSStylizedSceneCaptureRegistry::TryGetViewClass(
+			*Capture,
+			ViewClass));
+	FABTSStylizedSceneCaptureRegistry::Reset();
 	return true;
 }
 

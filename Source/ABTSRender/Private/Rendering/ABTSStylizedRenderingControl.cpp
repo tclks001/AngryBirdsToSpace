@@ -9,7 +9,7 @@ namespace ABTSStylizedRenderingControl
 	TAutoConsoleVariable<int32> CVarEnabled(
 		TEXT("abts.Rendering.Stylized.Enabled"),
 		0,
-		TEXT("Integration-owned stylized rendering switch. T2-A enables main-view tone and outline."),
+		TEXT("Integration-owned stylized rendering switch. T2-B1 enables explicit main and preview view policies."),
 		ECVF_Default);
 
 	TAutoConsoleVariable<int32> CVarProfile(
@@ -68,7 +68,7 @@ void FABTSStylizedRenderingControl::SetProfile(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 3;
+	return 5;
 }
 
 FABTSStylizedToneProfileParameters
@@ -109,6 +109,17 @@ FABTSStylizedRenderingControl::GetToneProfileParameters(
 		break;
 	}
 	return Parameters;
+}
+
+float FABTSStylizedRenderingControl::GetSceneCaptureToneNormalizationFloor(
+	const EABTSStylizedRenderProfile Profile)
+{
+	const FABTSStylizedToneProfileParameters Parameters =
+		GetToneProfileParameters(Profile);
+	// Preserve the accepted main-view mapping.  Only low-history Scene Captures
+	// use this floor, and ShadowLuminance is the first trustworthy output band:
+	// values below it must not receive gain greater than one.
+	return FMath::Max(Parameters.ShadowLuminance, 1.0e-4f);
 }
 
 FABTSStylizedOutlineProfileParameters
