@@ -14,6 +14,7 @@
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "Terrain/ABTSM3StylizedSemanticAdapter.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "World/ABTSM9Satellite.h"
@@ -263,6 +264,55 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	}
 	const FABTSM3MonthlySatellitePreviewCandidate Candidate =
 		Preview.RetainedCandidates[0];
+	const int64 PreviewResultHashBeforeSemanticQuery = Preview.ResultHash;
+	const int64 CandidateHashBeforeSemanticQuery = Candidate.CandidateHash;
+	const bool bPreviewAcceptedBeforeSemanticQuery =
+		Preview.bMonthlyWorldAccepted;
+	EABTSStylizedObjectClass PreviewSatelliteClass =
+		EABTSStylizedObjectClass::None;
+	EABTSStylizedObjectClass PreviewE5Class =
+		EABTSStylizedObjectClass::None;
+	TestTrue(TEXT("Preview result publishes the satellite semantic"),
+		FABTSM3StylizedSemanticAdapter::
+			TryResolveMonthlySatellitePreviewElement(
+				Preview,
+				Candidate,
+				EABTSM3StylizedSatellitePreviewElement::SatelliteSurface,
+				PreviewSatelliteClass));
+	TestTrue(TEXT("Preview result publishes the backside E5 semantic"),
+		FABTSM3StylizedSemanticAdapter::
+			TryResolveMonthlySatellitePreviewElement(
+				Preview,
+				Candidate,
+				EABTSM3StylizedSatellitePreviewElement::BacksideE5Target,
+				PreviewE5Class));
+	TestEqual(TEXT("Preview satellite maps to SatelliteTarget"),
+		PreviewSatelliteClass,
+		EABTSStylizedObjectClass::SatelliteTarget);
+	TestEqual(TEXT("Preview E5 maps to SatelliteTarget"),
+		PreviewE5Class,
+		EABTSStylizedObjectClass::SatelliteTarget);
+	EABTSStylizedObjectClass UnknownPreviewClass =
+		EABTSStylizedObjectClass::SatelliteTarget;
+	TestFalse(TEXT("Unknown preview element fails closed"),
+		FABTSM3StylizedSemanticAdapter::
+			TryResolveMonthlySatellitePreviewElement(
+				Preview,
+				Candidate,
+				static_cast<EABTSM3StylizedSatellitePreviewElement>(255),
+				UnknownPreviewClass));
+	TestEqual(TEXT("Unknown preview element publishes None"),
+		UnknownPreviewClass,
+		EABTSStylizedObjectClass::None);
+	TestEqual(TEXT("Preview semantic query preserves result hash"),
+		Preview.ResultHash,
+		PreviewResultHashBeforeSemanticQuery);
+	TestEqual(TEXT("Preview semantic query preserves candidate hash"),
+		Candidate.CandidateHash,
+		CandidateHashBeforeSemanticQuery);
+	TestEqual(TEXT("Preview semantic query preserves preview authority"),
+		Preview.bMonthlyWorldAccepted,
+		bPreviewAcceptedBeforeSemanticQuery);
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride =
@@ -325,6 +375,65 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsPracticeSlingshotReady());
 	TestTrue(TEXT("The assembled practice slingshot exposes only its pouch to cursor interaction"),
 		Runtime->IsPracticePouchInteractionReady());
+	const FABTSM3MonthlySatelliteRuntimeSnapshot
+		RuntimeSnapshotBeforeSemanticQuery = Runtime->GetRuntimeSnapshot();
+	const bool bGravityBeforeSemanticQuery =
+		Runtime->IsSatelliteGravityEnabled();
+	TArray<FABTSM3StylizedSemanticBinding> RuntimeSemanticsFirst;
+	TArray<FABTSM3StylizedSemanticBinding> RuntimeSemanticsSecond;
+	FABTSM3StylizedSemanticAdapter::GatherMonthlyPracticeSemantics(
+		*Runtime,
+		RuntimeSemanticsFirst);
+	FABTSM3StylizedSemanticAdapter::GatherMonthlyPracticeSemantics(
+		*Runtime,
+		RuntimeSemanticsSecond);
+	TestEqual(TEXT("Production practice publishes satellite and E5 actors"),
+		RuntimeSemanticsFirst.Num(),
+		2);
+	TestEqual(TEXT("Repeated production semantic query is deterministic"),
+		RuntimeSemanticsSecond.Num(),
+		RuntimeSemanticsFirst.Num());
+	for (int32 SemanticIndex = 0;
+		SemanticIndex < RuntimeSemanticsFirst.Num()
+			&& SemanticIndex < RuntimeSemanticsSecond.Num();
+		++SemanticIndex)
+	{
+		TestTrue(TEXT("Production semantic binding is valid"),
+			RuntimeSemanticsFirst[SemanticIndex].IsValid());
+		TestEqual(TEXT("Production semantic is SatelliteTarget"),
+			RuntimeSemanticsFirst[SemanticIndex].ObjectClass,
+			EABTSStylizedObjectClass::SatelliteTarget);
+		TestTrue(TEXT("Repeated production query keeps the exact Actor"),
+			RuntimeSemanticsFirst[SemanticIndex].Actor
+				== RuntimeSemanticsSecond[SemanticIndex].Actor);
+		TestEqual(TEXT("Repeated production query keeps the exact source"),
+			RuntimeSemanticsFirst[SemanticIndex].Source,
+			RuntimeSemanticsSecond[SemanticIndex].Source);
+	}
+	if (RuntimeSemanticsFirst.Num() == 2)
+	{
+		TestTrue(TEXT("Production satellite semantic uses the runtime Actor"),
+			RuntimeSemanticsFirst[0].Actor
+				== Runtime->GetRuntimeSatellite());
+		TestTrue(TEXT("Production E5 semantic uses the runtime Actor"),
+			RuntimeSemanticsFirst[1].Actor
+				== Runtime->GetRuntimeE5Target());
+	}
+	FABTSM3StylizedSemanticBinding UnrelatedRuntimeBinding;
+	TestFalse(TEXT("Unrelated M6 actor under runtime authority fails closed"),
+		FABTSM3StylizedSemanticAdapter::TryResolveActor(
+			*Runtime,
+			*SlingshotSystem,
+			UnrelatedRuntimeBinding));
+	TestEqual(TEXT("Production semantic query preserves runtime layout hash"),
+		Runtime->GetRuntimeSnapshot().RuntimeLayoutSnapshotHash,
+		RuntimeSnapshotBeforeSemanticQuery.RuntimeLayoutSnapshotHash);
+	TestEqual(TEXT("Production semantic query preserves source result hash"),
+		Runtime->GetRuntimeSnapshot().SourcePreviewResultHash,
+		RuntimeSnapshotBeforeSemanticQuery.SourcePreviewResultHash);
+	TestEqual(TEXT("Production semantic query preserves gravity authority"),
+		Runtime->IsSatelliteGravityEnabled(),
+		bGravityBeforeSemanticQuery);
 	AABTSM51SlingshotStake* PracticeStakeA =
 		Runtime->GetRuntimePracticeStakeA();
 	AABTSM51SlingshotStake* PracticeStakeB =
