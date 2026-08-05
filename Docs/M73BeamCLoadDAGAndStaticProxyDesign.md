@@ -5,6 +5,7 @@
 > 理论依据：[长条积木结构生成调研](M73BeamBlockStructuralGenerationResearch.md)
 > 状态：首版 C++、自动化和用户编辑器读形验收已完成；不接管 TaskGraph 生产建筑。
 > 承重收口子阶段：[M7.3-Beam-C2 真实接触检测与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)
+> 动态稳定前置子阶段：[M7.3-Beam-C3 井干式稳定芯体](M73BeamC3CribCoreStabilityDesign.md)
 > 下一阶段：[M7.3-Beam-D0 Profile Catalog、Difficulty Curve 与 Settings Resolver](M73BeamD0GameplayProfileCatalogDesign.md)
 
 ## 1. 阶段目标
@@ -44,17 +45,24 @@ Beam-C 首版包含：
 Shape Grammar + WFC silhouette
   -> Beam-A block topology / explicit BearingContact
   -> Beam-B motif grammar / global assembly closure
-  -> Beam-C Load DAG extraction
-       -> topological order
-       -> cumulative load + first moment
-       -> non-negative reactions
-       -> span / cantilever / slenderness / lateral proxies
+  -> Beam-C3 closed four-post crib rewrite
+  -> Beam-C2 exact-contact reconstruction + bounded structural closure
+       -> hard-check actual final Member count on every repair/reclose pass
+       -> extract the authoritative Load DAG / static proxy
+  -> Beam-C3 final topology / all-Z-span / final-budget certification
+       -> certify without mutating the final geometry or Load DAG
   -> Beam-D real bricks + Chaos + weakness closure
 ```
 
 Beam-C 首版只分析、不修复。Beam-C2 在保持该分析器纯数据、失败关闭的前提下增加独立的
 有界结构收口器：它只为阻断型支撑违规补充局部 Z 柱，并在每轮后回到 Beam-A 的权威装配闭合，
 重新计算真实接触和 Load DAG。具体合同见 [Beam-C2 子设计稿](M73BeamC2RealContactAndLoadClosureDesign.md)。
+
+后续 Chaos 试验进一步证明“存在 Load DAG”不等于摩擦积木动态自稳定。Beam-C3 因而插入
+Beam-B 闭合装配和 Beam-C2 分析/修复之间，用四角 Z 柱与每道两 X + 两 Y 实体 course 形成闭合
+井干 Host，并审计最终装配中的全部 Z 站位。Beam-C2 只能在最终 Brick 上限的真实剩余容量内补柱；
+随后 C3 再次认证闭环、柱跨与预算。具体合同见
+[Beam-C3 子设计稿](M73BeamC3CribCoreStabilityDesign.md)。
 
 ## 4. Load DAG 数据模型
 
@@ -155,3 +163,20 @@ UpperMemberId -> LowerMemberId
 - Beam-C 专项由 9 项扩展为 11 项，加入伪接触和单细柱展宽拒绝；
 - 完整参数、拒绝语义和自动化门槛见
   [M7.3-Beam-C2 真实接触检测与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)。
+
+## 11. Catalog v8：C3 前置改写与 C2 最终硬预算
+
+- C3 的四柱井干 Host 是 Beam-C2 的正式输入，不是 Load DAG 之后追加的装饰：每道 Belt 必须包含
+  两根 X course、两根 Y course、四个角站位及可重建的四角真实 Bearing；
+- C2 可以根据最终 AABB 接触补充局部 Z 支撑，但不得创造超过统一柱跨的裸长柱、侵入门洞/桥洞，或绕开
+  `CoreCourse` 的权威承托位置；
+- `BeamC2MemberReserve` 只用于候选规划。`GenerateWithStructuralClosure` 接收绝对
+  `MaximumFinalMemberCount`，在初始输入、每次补柱、每次 Beam-A 重闭合及成功返回前检查实际
+  `Members.Num()`；容量不足时以 `BeamCFinalMemberBudgetExceeded` 失败关闭；
+- C2 通过后，C3 对同一最终 Assembly 再做一次四柱拓扑、全部 Z 站位柱跨和最终 Member 数认证。
+  因此 `C3 初次通过`、`C2 静态通过` 和 `C3 最终认证` 三项缺一不可；
+- Tier 0 的 49 与 Tier 1 的 199 是最终 Member/Brick 上限，不得把 C2 预留再加到上限外。普通框架替换
+  用于回收芯体预算；主屋顶檐口、屋脊、桥和 Reserved Void 属于保护几何；
+- 正式静态门槛是 5 Profile × Tier 0/1；实时 Chaos 静置与受控击打仍须按
+  [Beam-C3 PIE 门槛](M73BeamC3CribCoreStabilityDesign.md) 第 8 节单独执行，
+  Load DAG 或 NullRHI 通过不能替代它。本轮固定 5 × 2 已通过静态门槛；该结论不扩大为动态稳定完成。

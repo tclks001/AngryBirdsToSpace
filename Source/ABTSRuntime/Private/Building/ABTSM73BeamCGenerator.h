@@ -26,11 +26,17 @@ public:
 	/**
 	 * Production path: validate final Brick contacts, add bounded local Z
 	 * supports for failed horizontal bearing footprints, then re-close and
-	 * revalidate the authoritative assembly.
+	 * revalidate the authoritative assembly. Deferred core bracing may only be
+	 * enabled by an orchestrator that immediately runs Beam-C3 again and rejects
+	 * the candidate unless the final all-Z span audit succeeds.
 	 */
 	bool GenerateWithStructuralClosure(
 		const FABTSM73BeamCPreviewSettings& Settings,
 		FABTSM73BeamAGenerationResult& InOutClosedAssembly,
 		FABTSM73BeamCGenerationResult& OutResult,
-		FString& OutError) const;
+		FString& OutError,
+		int32 MaximumFinalMemberCount = MAX_int32,
+		bool bAllowDeferredCoreBracing = false,
+		int32 PriorStructuralClosurePassCount = 0,
+		int32 PriorAddedStructuralSupportPostCount = 0) const;
 };

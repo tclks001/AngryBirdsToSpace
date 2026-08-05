@@ -38,6 +38,8 @@ namespace ABTSM73BeamD0Tests
 				== B.BeamB.BeamA.MaxBearingContactCount
 			&& A.BeamB.BeamA.MaxBearingPairChecks
 				== B.BeamB.BeamA.MaxBearingPairChecks
+			&& A.BeamB.BeamA.MaximumVerticalSupportSpanCM
+				== B.BeamB.BeamA.MaximumVerticalSupportSpanCM
 			&& A.BeamB.MaxWFCPropagationOperations
 				== B.BeamB.MaxWFCPropagationOperations
 			&& A.BeamB.MaxWFCBacktrackSteps == B.BeamB.MaxWFCBacktrackSteps
@@ -262,6 +264,23 @@ bool FABTSM73BeamD0HardGateIsolationTest::RunTest(const FString& Parameters)
 			> Easy.BeamSettings.BeamB.BeamA.Silhouette.TargetHeightCM);
 	TestTrue(TEXT("Validation budgets and hard gates stay project-owned"),
 		HardGatesEqual(Easy.BeamSettings, Hard.BeamSettings));
+	TestEqual(TEXT("Core post span safety gate is tier-independent"),
+		Easy.StabilityCore.MaximumUnbracedCorePostSpanCM,
+		Hard.StabilityCore.MaximumUnbracedCorePostSpanCM);
+	TestEqual(TEXT("Beam-A vertical segmentation consumes the C3 hard gate"),
+		Easy.BeamSettings.BeamB.BeamA.MaximumVerticalSupportSpanCM,
+		Easy.StabilityCore.MaximumUnbracedCorePostSpanCM);
+	TestEqual(TEXT("Core arm safety gate is tier-independent"),
+		Easy.StabilityCore.MinimumCoreArmSpanCM,
+		Hard.StabilityCore.MinimumCoreArmSpanCM);
+	TestEqual(TEXT("Minimum crib topology is tier-independent"),
+		Easy.StabilityCore.TargetBeltCount,
+		Hard.StabilityCore.TargetBeltCount);
+	TestTrue(TEXT("Large tiers receive more bounded local crib hosts"),
+		Hard.StabilityCore.MaximumHostCount
+			> Easy.StabilityCore.MaximumHostCount);
+	TestEqual(TEXT("Easy tier uses one Bay per semantic volume"),
+		Easy.BeamSettings.BeamB.BeamA.MaxBaysPerVolume, 1);
 	return true;
 }
 

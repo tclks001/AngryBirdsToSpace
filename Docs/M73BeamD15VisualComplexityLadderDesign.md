@@ -2,9 +2,10 @@
 
 > 上游：[Beam-D0 Profile Catalog](M73BeamD0GameplayProfileCatalogDesign.md) → [Beam-D1 真实 Brick](M73BeamD1RealBrickAndMaterialRolesDesign.md)
 >
-> 下游：Beam-D2 弱点、Chaos 与 `Profile × Tier` 解题认证
+> 并行结构门槛：[Beam-C3 井干式稳定芯体](M73BeamC3CribCoreStabilityDesign.md)；下游：Beam-D2 弱点、Chaos 与 `Profile × Tier` 解题认证
 >
-> 状态：C++ 与自动化已完成；低 Tier 完整轮廓校正待用户编辑器读形验收。本阶段只认证视觉复杂度，不认证解题难度。
+> 状态：视觉阶梯与低 Tier 完整轮廓已通过用户编辑器读形；Catalog v8 的 C3 四柱芯体独立
+> 5 × 2 静态门槛已通过。本阶段只认证视觉复杂度，不认证动态稳定或解题难度。
 
 ## 1. 目标与边界
 
@@ -58,15 +59,15 @@ Profile × Tier × BaseSeed
 
 ## 4. 参数策略
 
-- E1 使用单主量体、低 Bay 数、2 根并行积木、单层 Motif Grammar，关闭完整 primitive/motif 强制多样性，但强制最高合法终端量体成为唯一主屋顶。
+- E1 使用三段可读语义轮廓、每量体一个结构 Bay、2 根平行视觉站位、单层 Motif Grammar，关闭完整 primitive/motif 强制多样性，但强制最高合法终端量体成为唯一主屋顶。减少重复 Bay 并允许 C3 在选中 Host 中以四柱芯体替换一组普通框架；不得删除语义量体、主屋顶 Crown、檐口或屋脊。
 - 屋顶原语分配前先把同高、相邻且覆盖率足够的暴露终端合并为较大的 Crown；WFC 再按合并终端的 X/Y 长宽比选择形体。近方形终端偏向 Pyramid，长条终端偏向 Prism，且 Prism 屋脊沿长轴。
 - 屋顶高度按短边与 Brick 截面量化：目标高度为短边的约 90%，E1/E2 仍分别保留至少 8/10 个 course。独占承重体时从 Box 主体重分配高度；共享承重体时保持接触底面并向下量化顶面，避免制造缝隙或重叠。
 - `RoofCourseBrickCount` 作为读形诊断进入 D1 Summary；自动化同时检查屋顶唯一性、Box 主体和最低屋顶 course 数。
 - 其余暴露终端在 E1/E2 强制保持 Box；E3 才首次要求 Box、Prism、Pyramid 完整多样性，避免低 Tier 提前获得高档轮廓密度。
 - 每升一档至少提高语义里程碑，并提高尺寸、语法深度、Bay 密度、并行积木或屋顶 course 上限中的两项。
 - Shape Grammar 的里程碑覆盖发生在随机规则选择之前，因此不会因 Seed 缺失。
-- 预算随 Tier 提升，但仍受既有 Beam-A/B/C 项目级硬上限约束；硬门槛不作为难度旋钮。
-- Brick 数量统计发生在 Beam-B 全局装配收口与 Beam-C 通过之后，使用最终 D1 一对一绑定数。
+- 预算随 Tier 提升，但仍受既有 Beam-A/B/C 项目级硬上限约束；硬门槛不作为难度旋钮。C3 的统一柱跨与四柱闭环对 E1–E6 相同。
+- Brick 数量统计发生在 C3 改写、C2 真实接触/收口及 C3 最终认证之后，使用最终 D1 一对一绑定数；C2 规划 Reserve 不得加在 Tier 数量窗之外。
 
 ## 5. 自动化门槛
 
@@ -78,6 +79,9 @@ Profile × Tier × BaseSeed
 6. 同输入选择相同 attempt、Hash 与 Brick 几何；
 7. 候选搜索不改变 `ResolvedM7ProfileId`；
 8. Beam-D2 gameplay 指标保持现状，不作为 D1.5 接受条件。
+
+C3 接入后还必须区分两张矩阵：5 × 6 D1.5 矩阵验证视觉里程碑与 Brick 递增；5 Profile ×
+Tier 0/1 验证四柱闭环、全部 Z 站位柱跨和最终预算。两张矩阵都必须通过，但都不能替代实时 Chaos PIE。
 
 ## 6. 编辑器验收
 
@@ -117,3 +121,15 @@ Profile × Tier × BaseSeed
 
 Beam-C2、Catalog v6 屋顶终端合并、短边高度、长轴屋脊与逐层承托长度接入后的最终回归为 `ABTS.M73DAG.BeamD1` 9/9
 （视觉矩阵、Column 高阶承重与低 Tier 固定屋顶专项）和 `ABTS.M7` 123/123；30 组样本的真实接触不一致、阻断支撑违规均为零。
+
+## 9. Catalog v7 历史结果与 Catalog v8 静态门槛
+
+- v7 将 E1 的 `MaximumBaysPerVolume` 从 2 收敛为 1，并证明低 Tier 可以在不删除量体和主屋顶的
+  前提下为稳定结构让出预算；其三柱芯体 Brick 数与旧 NullRHI 通过记录只作历史基线；
+- v8 把芯体合同升级为四柱矩形闭环：每 Belt 两 X + 两 Y course、四角真实接触，并在 C2 后审计
+  全部 Z 站位和最终 Member 上限；
+- Tier 0 优先用 Host 内普通框架替换支付芯体预算。单/双 lane 屋顶、檐口和单根屋脊不可作为 donor；
+  任何兼容性回退都不得改变单主屋顶指纹或最低 course 数；
+- v8 的正式低 Tier 门槛是固定 Seed 的 5 Profile × Tier 0/1；本轮 fresh v8 日志已 10/10 全绿。
+  完整 5 × 6 视觉矩阵仍需独立回归，旧 v7 的“低 Tier 10 组已通过”结论仍不作为 v8 证据；
+- 动态静置证据继续以 [Beam-C3 设计稿](M73BeamC3CribCoreStabilityDesign.md) 的 PIE 门槛为准。

@@ -194,6 +194,40 @@ bool FABTSM73BeamCMultiSupportReactionTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamCStructuralClosureLedgerTest,
+	"ABTS.M73DAG.BeamC.StructuralClosureLedger",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamCStructuralClosureLedgerTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamCTests;
+	FABTSM73BeamCPreviewSettings Settings;
+	Settings.bRequireBidirectionalLateralTies = false;
+	FABTSM73BeamAGenerationResult Assembly = MakeTwoSupportAssembly();
+	FABTSM73BeamCGenerationResult Result;
+	FString Error;
+	FABTSM73BeamCGenerator Generator;
+	TestTrue(TEXT("A valid prior closure ledger is preserved"),
+		Generator.GenerateWithStructuralClosure(
+			Settings, Assembly, Result, Error, MAX_int32, false, 2, 3));
+	TestEqual(TEXT("Closure passes remain cumulative"),
+		Result.Summary.StructuralClosurePassCount, 2);
+	TestEqual(TEXT("Added posts remain cumulative"),
+		Result.Summary.AddedStructuralSupportPostCount, 3);
+
+	Assembly = MakeTwoSupportAssembly();
+	Error.Reset();
+	TestFalse(TEXT("An exhausted closure ledger fails closed"),
+		Generator.GenerateWithStructuralClosure(
+			Settings, Assembly, Result, Error, MAX_int32, false,
+			Settings.MaximumStructuralClosurePasses + 1, 0));
+	TestEqual(TEXT("Ledger rejection is stable"), Error,
+		FString(TEXT("BeamCStructuralClosureLedgerInvalid")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamCCycleRejectTest,
 	"ABTS.M73DAG.BeamC.CycleReject",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

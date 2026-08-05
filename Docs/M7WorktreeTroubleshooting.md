@@ -4,7 +4,7 @@
 >
 > 文档性质：`feature/m7-buildings` 的增量排错台账，不是共享总文档。
 >
-> 记录范围：从 2026-07-28 22:59（Asia/Hong_Kong）本工作树会话建立职责约定起，至当前 M7.3 Beam-D1.5/语义屋顶收口。
+> 记录范围：从 2026-07-28 22:59（Asia/Hong_Kong）本工作树会话建立职责约定起，至当前 M7.3 Beam-C3 稳定芯体收口。
 >
 > 上收关系：集成工作树在合并 M7 阶段提交时，从本文提炼已确认条目到
 > [开发排错总文档](DevelopmentTroubleshooting.md)。总文档由集成工作树所有；M7 功能工作树不得直接修改。
@@ -96,6 +96,19 @@
 | M7-BC-001 | 屋顶最上层颜色比下层更“高负载” | 颜色表示 `max(跨度利用率, 悬臂比, 柱长细比)`，不是累计重量；单支点长梁的跨度平方项可高于下层多支点重梁 | 将 UI/文档命名为结构利用率；调试时同时看累计荷载、支点数和 EffectiveSpan | Ground 深灰；蓝/青/黄/橙/红按阈值利用率；不得只凭颜色认定弱点或真实应力 |
 | M7-BC-002 | Beam-C Load DAG 通过，但最终 Brick 看起来不接触或意外旁路 | C 最初直接消费上游声明的 BearingContact，没有从最终 Brick AABB 重建真实上下接触 | Beam-C2 从最终 Brick 几何重建接触，比较声明/真实边，计算合力落点、接触覆盖和支撑展宽；闭合后重新跑接触与 Load DAG | `RealContactMismatchCount=0`、阻断型支撑违规为 0；声明图不再是最终物理权威 |
 | M7-BC-003 | `SeamRelease Tier 0` 出现宽大上部结构只靠单根细柱，编辑器却判为承重通过 | 旧 C 只证明存在 Ground 可达路径并按面积分荷载，没有验证局部合力是否落在支撑面/凸包，也没有局部抗倾覆门槛 | 对每个承重层计算真实支撑区域与累计合力；不满足时确定性补 Z 柱，并保护门洞/桥洞 ReservedSupportVoids | 真实接触与支撑违规均为 0；`AddedStructuralSupportPostCount` 可大于 0；D1 只编译闭合后的最终 Member |
+| M7-BC-004 | D1 建筑不受击也会在 Chaos 中倾倒；承重 DAG、真实接触和静态代理却全部通过 | “存在向下荷载路径”只证明竖向静力可传递；大量贯通楼层的细长自由 Z 柱在无隐式连接的摩擦模型中会因微小偏心先倾倒，再被高重心上部结构放大为连锁坍塌 | 在 Beam-B 与 C2 之间加入 C3 四柱闭合井干芯体：每 Belt 两 X + 两 Y 实体 course、四角 Z 柱分段、Beam-A 重闭合和统一 720cm 全部 Z 站位柱跨；Core Member 不作为弱点候选 | 固定 5 Profile × Tier 0/1 静态矩阵必须全部通过；最终防回归必须追加实时 Chaos 静置 PIE，NullRHI 不能替代 |
+| M7-BC-005 | Tier 0 加芯体后超过 49 Brick；事后删屋顶平行梁会破坏屋顶读形，C2 还可能把缺失承托补成更多长柱 | 芯体被当成附加装饰而非原框架替换；在已闭合承重结构后偷删 donor 会改变真实接触与合力，C2 正确修复后又超预算 | D0 先减少重复普通 Bay；C3 在 Host 内优先以普通框架 Assembly 交换四柱芯体预算。保护桥、Void、主屋顶 Crown、檐口与屋脊；单/双 lane 屋顶不可删除，任何内部冗余 lane 回退都要重闭合并保持屋顶指纹 | Tier 0 最终 Brick ≤49 且仍有单主屋顶；四柱闭环、真实接触、屋顶 course/指纹和 C2 后最终预算同时通过，不能只看 C3 改写后的中间数量 |
+| M7-BC-006 | 三柱 L 形“芯体”已有 X/Y course，静态日志却仍会出现 `MissingPostBearing`，也不能形成抗双向侧倾的闭合围合 | 只有一个 X/Y 交点的三柱拓扑不是闭环；某一角/边缺失时，重闭合可能保留 course 数却没有四角真实堆放接触 | Catalog v8 升级为矩形四站位；每 Belt 明确生成/复用 X0、X1、Y0、Y1，并逐 Host 校验四角 course-course 与 post-course Bearing。缺任一角稳定拒绝 | `StationPositions.Num()==4`；每 Belt 至少四条 CoreCourse、四角 Bearing 完整；`BeamC3CoreTopologyIncomplete` 夹具 fail closed；5×2 不得降级三柱 |
+| M7-BC-007 | C3 预留了 `BeamC2MemberReserve`，但 C2 补柱后最终 Brick 仍可能超过 Tier 上限 | Reserve 只是先验估算；候选需要多少 C2 修复只能从实际接触得知。若只检查“新增柱数量”或 C3 中间数量，就没有约束最终 Assembly | 把 `MaximumFinalMemberCount` 传入 C2；初始、每次补柱、每次重闭合与成功返回均检查实际 `Members.Num()`，容量不足以 `BeamCFinalMemberBudgetExceeded` 失败；C3 最终再防御性复核 | Tier 0/1 分别不超过 49/199；构造剩余容量不足的修复夹具必须在 C2 内失败，而不是等 D1 少编译或事后截断 |
+| M7-BC-008 | 旧 v7 日志显示低 Tier 与全量矩阵通过，于是容易误判 Catalog v8 四柱实现已完成 | Catalog 版本、拓扑语义和 Hash 已改变；旧三柱夹具不检查四角接触、全部 Z 站位、严格根系普通楼层网或 C2 最终硬预算，证据不可继承 | v8 重新固定 5 个 Profile Seed × Tier 0/1 正式门槛；记录 Catalog/Resolved/Core/RootedEvidence/Brick Hash，并在最终代码 fresh 编译后用唯一日志重跑；失败项保留明确原因 | 安装版 UE 5.8 的 `BeamC3-Full-ContactFaces-Final.log` 已登记 `ABTS.M73DAG.BeamC3` 14/14 与低 Tier 10/10；`DropTrigger/Tier4/Seed669740` 另以 2297 Brick、Rooted=219、最大柱跨 713.04 cm 通过。仍须 Column 高 Tier、5×6 视觉回归与 Chaos PIE |
+| M7-BC-009 | NullRHI 的四柱拓扑、接触与预算全部通过后，仍可能在实际摩擦、质量和求解器条件下静置倾倒 | 静态几何/Load DAG 不包含 Chaos 的接触迭代、摩擦滑移、微小偏心和连锁碰撞；自动化证据层级不同 | 把可见 PIE 作为后续独立门槛：5 Profile × Tier 0/1 无攻击跑完整 IdleValidation，再做一次受控普通底部支撑击打；记录身份 Hash、首动 Member、位移/转角与坍塌范围 | `Accepted=1` 且无静置连锁坍塌才证明 C3 动态基线；受击局部性与弱点差异仍交给 D2，不得靠隐式锁定或放宽 IdleValidation |
+| M7-BC-010 | C3 初次通过、C2 收口后只多出一处 720 cm 柱跨违规；修复时要么找不到合适高度，要么为缺 1 根预算删掉整组框架，触发更多补柱和更长裸 Z 柱 | 旧修复没有继续已有 Host/Tie Plan；高度搜索跳过了违规区间内的可用接触面；C3/C2 两次调用各自看局部预算，且预算供体先删整组普通框架 | final-only 修复继续已认证 Plan，重建 Host 签名和既有 Tie 计数；只在违规区间内按单截面步长搜索；定向 Tie 必须锚到已有 Host 并有两端真实 Z Bearing；C2/C3 使用累计账本。低 Tier 优先安全屋顶内部 lane，Tier 1 净增额度按三 Member 拉结原子校准为 33 | `ColumnBreak/Tier1/Seed710000` 以 163 Brick、Host=3、Tie=3、Rooted=19 通过，最大柱跨 1223→648.00 cm；普通横梁、脱离锚点和重复局部预算均有 fail-closed 自动化 |
+| M7-BC-011 | `TipOver/Tier1` 的 C3/C2/C3 认证和预算均通过，D1 却以 `BeamD1BrickPenetration` 淘汰候选；顶层只显示最后一次 `AllZSpanExceeded`，掩盖了更接近成功的候选 | post-C2 修复为缺失承接面补一个截面高的短 Z 柱时，没有检查该体积是否已被普通水平梁占用，因而形成完整 `36×36×36 cm` 穿透；候选循环只保留最后失败原因 | 在所有承接面补柱前按真实 Member AABB 检查非 Z 占用；被阻挡时回滚当前 Host/Belt 并改选高度或 Host，不放宽 D1 穿透门；为后续门禁增加按 Attempt 的 `CandidateRejected` 诊断 | `TipOver/Tier1/Seed730000` 在 Attempt 0 确定性通过，134 Brick、Rooted=16、最大全部 Z 柱跨 679.02 cm、`StrictPenetrationCount=0`；生产确定性专项通过 |
+| M7-BC-012 | 把与芯体“连通”的普通楼层梁全部算作约束后，单个偶然接触便可能给整片塔楼截断 all-Z 柱跨；单锚悬臂也会成为假稳定证据 | 宽泛组件 BFS 可穿过普通 Z 柱、跨楼层和跨语义量体传播；组件只要某处含 X/Y 且碰到一个芯体，就无法证明每条普通 course 位于两个独立根锚之间 | 最终几何上重新派生严格根系网：根链必须由精确 Host course 经真实 Bearing 到同源 `CorePost`；普通网只沿水平—水平 Bearing、同一 `SourceVolumeId` 和 `Section*2.5+Tolerance` 楼层带传播；剪除无锚叶枝，并要求剩余骨干含 X/Y 且连接至少两个不同根锚。Disconnected course 不参与柱跨截断 | `RootedExistingFloorNetworkBracesPeripheralPost` 正例与 `SingleAnchorCantileverNetworkRejected` 反例均通过；Summary 输出 `StabilityRootedExistingCourseCount` 和按轴/中心/长度/Source 排序的 `StabilityRootedEvidenceHash`，完整 C3 为 14/14 |
+| M7-BC-013 | C3 排除一个失败 Host 后再次选址时可能无限重试同一矩形，表现为候选搜索不结束 | `SelectCoreHost` 的 `FCoreHost& OutHost` 保留上轮的高 Score 和有效索引；剩余低分候选无法覆盖旧值，而调用方又把旧索引误判为本轮成功 | 每次进入 `SelectCoreHost` 立即以默认 `FCoreHost()` 清空输出，再在当前排除集上独立选优；不得把输出引用同时当作跨轮缓存 | 排除 Host 后要么选到新的签名，要么有界返回 `BeamC3NoClosedCoreHost`；完整 C3 14/14 在固定时限内结束，不再出现 stale OutHost 自旋 |
+| M7-BC-014 | 稀疏夹具日志显示已经生成 65 个确定性备用 Belt 高度，实际却没有任何高度进入评分/尝试 | 评分数组在备用高度循环之前构造；随后加入 `CandidateMidZs` 的高度没有同步进入 `ScoredCandidateMidZs`，形成“候选计数存在、求值集合为空”的时序错误 | 先收集已有楼层高度与全部确定性备用高度，再统一计算可复用 course 数并排序；优先复用最多，其次按距目标高度与高度本身稳定排序 | `ExistingPlanRestoresMissingCourse`、`ExistingPlanRepairsPostC2HighZStation` 与完整 C3 14/14 通过；日志中的候选计数必须等于真正进入求值的集合大小 |
+| M7-BC-015 | 高 Tier Column 在 C2 重闭合后仍可丢失 Belt 一侧的短 Z 承接面，随后出现 `MissingPostBearing`、`BeamAGlobalAssemblyRebuildFailed` 或剩余 all-Z 超限 | C2/Beam-A 会重新分割、合并计划 Z 链；宽连续区间仍存在并不保证 Belt 上下各有一个真实短 Z 面。补入一截面高残段后，后续全局重闭合又可能消费、重分段或与密集楼层梁冲突 | 已完成的保守处理是：按 Host 站位重新标记实际 Z 段、重建 Bearing，只为确实缺失的一侧补一截面短面，并在补入前检查非 Z AABB 占用。未完成项是避免后续全局闭合再次破坏这些残段，并让高 Tier 修复在真实面级别稳定收敛；不能用“有连续区间”替代真实接触 | `BeamC3-Full-ContactFaces-Final.log` 的低 Tier 与 C3 14/14 已通过；但 `BeamC3-ColumnHighTier-NoShortFaces.log` 中 `ColumnHighTierClosure` 的 E5/E6 仍失败，因此本条保持开放，Column 高 Tier 与 Chaos PIE 均不得宣称完成 |
+| M7-BC-016 | 高 Tier 定向拉结在局部候选中看似可用，最终认证却仍报告 all-Z 超限；或者同一语义量体被 Bay 切分后只能反复增设 Host | 旧链路把 `BayId` 同时当作装配归属和物理断开边界，且局部枚举、插入闭合与最终审计使用了不同的 Source/Bay 判定；精确 Host 四角之外已经严格根系化的 XY 楼层横隔也未被统一视为双向约束端点 | 冻结 source-aware Portal 合同：同 `SourceVolumeId` 可跨 Bay，不同 Source 继续 fail closed；局部与全局使用同一判定；严格 rooted XY floor diaphragm 可作为端点；Portal 必须是两端均有最终真实 Bearing 的水平 Brick。原始 Z Member 的 720 cm 硬门不放宽，必须以实体分段消除超长柱 | 增加同 Source 跨 Bay 正例、跨 Source 反例、rooted diaphragm 正例、单锚/装饰横隔反例、缺任一端 Bearing 反例和局部/全局一致性夹具；Tier 0/1 仍须满足 49/199 与净增 12/33。合同与自动化完成后仍必须人工执行实时 Chaos PIE，NullRHI 不得替代 |
 | M7-D0-001 | 调节 DifficultyTier 时相邻档视觉变化很小 | 旧 Tier 主要以 3% 尺寸和连续权重微调，且许多解题指标尚未由 D2 消费 | D1.5 同时使用强制语义里程碑与互不重叠 Brick 数量窗，有限候选必须同时满足二者 | 五 Profile × 六 Tier 的 Brick 数逐级落入独立窗口；E1～E6 每一档有明确量体/退台/屋顶/桥接差异 |
 | M7-D1-001 | E1/E2 只有架子，E3 才突然出现完整楼体和屋顶 | D0 曾把 Tier 0/1 强制为 Box-only，Prism/Pyramid 权重为 0 | 改为“低分辨率完整建筑”：E1 一个主体+唯一主屋顶，E2 增加第二量体/侧翼且仍保留主屋顶；不靠额外语义量体抬 Brick 数 | 固定 Profile/Seed 逐档观察；E1/E2 已有主体—屋顶层次，E3 仍有清晰复杂度跃升 |
 | M7-D1-002 | E1/E2 屋顶只有两三层，仍像方盒，和 E3 差距过大 | 低 Tier 屋顶 course 被 Brick 预算压得过少，短边高度没有转化为足够收分层数 | E1/E2 保留一个主屋顶并提高最低 course；预算紧张时优先降低主体密度/包络，不牺牲屋顶立体感 | 屋顶诊断输出 `RoofBricks`；低 Tier 屋顶有明确收分高度，且 Brick 总数仍落在本 Tier 窗口 |
@@ -104,6 +117,10 @@
 | M7-D1-005 | 平衡 X/Y 后，一个大屋顶裂成四个小棱锥，失去整体立体感 | 平衡/切分产生多个相邻顶层终端；WFC 对每个叶终端独立分配屋顶原语 | 在 WFC 分配前聚合同标高、水平相邻且覆盖率足够的屋顶终端；聚合 Crown 的长宽比决定 Pyramid/Prism 权重 | 相邻屋顶恢复为大 Crown；不跨大空洞误合并；同输入聚合 Hash 确定 |
 | M7-D1-006 | 棱柱屋脊方向和屋顶高度不能稳定表达原终端比例 | 旧原语选择与 terminal 长宽比弱相关；course 数是固定/低阶 Tier 值；屋脊可能被切成多个 Bay | 短边决定屋顶高度，近方形偏 Pyramid、长宽差大偏 Prism；Prism 屋脊沿长轴，顶层强制为一根长轴梁，下层均匀展开 | E1/E2 也使用同一几何规则；屋顶高度约随短边增长；Prism 最顶层只有一根连续长轴屋脊 |
 | M7-D1-007 | 提高语义屋顶后，Beam-B 全局闭合循环反复抬升间隙，运行很久或触及轮次上限 | 某些 gap-lift 修复没有减少违规集合；闭合循环缺少 no-progress 判定 | 记录每轮违规签名；无进展时转入明确补支撑/裁剪或 fail closed，不继续重复同一变换 | 闭合轮数有界；固定低 Tier/高屋顶种子不再出现重复相同违规；最终 Penetration/Unsupported 为 0 |
+
+| M7-D1-008 | `ABTSM73BeamD1PreviewActor` 开启 `Spawn Runtime Modules in PIE` 后建筑消失，既没有编辑器预览，也没有真实 Module | PreviewActor 是关卡放置 Actor，其 `BeginPlay` 早于 `AABTSM7GameMode` 动态创建 `AABTSM7BuildingMaterialSystem`；旧逻辑只搜索一次，找不到便静默返回，而 HISM 预览在游戏中默认隐藏 | 将一次性搜索改为有界定时重试：每 0.1 秒查找一次，最多 40 次；找到后生成全部真实 Module、清除定时器并输出成功日志，超时或编译拒绝输出明确诊断；`EndPlay` 清理定时器 | 自动化先在没有 MaterialSystem 时执行同一重试入口，再延迟创建系统并确认生成数等于 Brick 数；日志必须出现 `RuntimeModulesSpawned`，完整 `ABTS.M73DAG.BeamD1` 10/10 通过 |
+
+| M7-D1-009 | 物理测试场点击弹弓后报 `Accepted=7 Rejected=2 Contract=0`，预览夹具阻塞发射 | `AABTSM73StableBuildingActor` 过去没有预览/运行时边界：所有关卡实例都会在 PIE 生成真实 Module；测试场又未开启生产 Building Contract，因此 M6 兼容路径扫描世界中全部 StableBuildingActor。一个深递归夹具有 76cm 内部穿透，另一个 DAG5B+DAG3 夹具无可行候选，二者共同拒绝 | 新增互相独立的 `Participate in PIE Runtime` 与 `Participate in Slingshot Validation Gate`。前者关闭时不生成 Module、不运行 Chaos，并标记 `NotRequired`；后者关闭时保留真实 PIE 物理和内部诊断，但对弹弓门禁公开为 `NotRequired` | `ABTS.M73A.StableBuildingParticipation` 验证两种开关组合；M73A 2/2、Beam-D1 10/10 通过。测试地图中的失败夹具应按验收目的选择“纯预览”或“物理但不阻塞”，不得依靠放宽全局门禁 |
 
 ## 9. 待集成工作树提炼
 
@@ -116,6 +133,9 @@
 5. `M7-BB-001`～`007`：Port 假绿灯、斜撑延期、语义屋顶与桥端逐梁承托。
 6. `M7-BC-002`、`003`：声明 Bearing 与最终 Brick 真实接触的权威切换。
 7. `M7-D1-003`～`007`：屋顶逐层直接承接、聚合 Crown、长轴屋脊和闭合无进展保护。
+8. `M7-BC-004`～`016`：静态 DAG 不等于 Chaos 自稳定、四柱闭环、低 Tier 普通框架替换、
+   C2 最终硬预算、严格根系普通楼层网、Host/高度候选时序、短 Z 承接面，以及 v8 fresh
+   14/14、5×2、Drop Tier 4、Source-aware 跨 Bay Portal、Column 高 Tier 与 PIE 的证据分层。
 
 ## 10. 相关文档
 
@@ -126,5 +146,5 @@
 - DAG5：[M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md)
 - Beam-A：[M73BeamAStructuralIRPreviewDesign.md](M73BeamAStructuralIRPreviewDesign.md)
 - Beam-B：[M73BeamBMotifWFCAndGraphGrammarDesign.md](M73BeamBMotifWFCAndGraphGrammarDesign.md)
-- Beam-C / C2：[M73BeamCLoadDAGAndStaticProxyDesign.md](M73BeamCLoadDAGAndStaticProxyDesign.md) · [M73BeamC2RealContactAndLoadClosureDesign.md](M73BeamC2RealContactAndLoadClosureDesign.md)
+- Beam-C / C2 / C3：[M73BeamCLoadDAGAndStaticProxyDesign.md](M73BeamCLoadDAGAndStaticProxyDesign.md) · [M73BeamC2RealContactAndLoadClosureDesign.md](M73BeamC2RealContactAndLoadClosureDesign.md) · [M73BeamC3CribCoreStabilityDesign.md](M73BeamC3CribCoreStabilityDesign.md)
 - Beam-D0 / D1 / D1.5：[M73BeamD0GameplayProfileCatalogDesign.md](M73BeamD0GameplayProfileCatalogDesign.md) · [M73BeamD1RealBrickAndMaterialRolesDesign.md](M73BeamD1RealBrickAndMaterialRolesDesign.md) · [M73BeamD15VisualComplexityLadderDesign.md](M73BeamD15VisualComplexityLadderDesign.md)

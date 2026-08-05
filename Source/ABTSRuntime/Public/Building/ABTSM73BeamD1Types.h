@@ -185,6 +185,44 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Structural Closure")
 	int32 SupportResultantAdvisoryCount = 0;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	bool bStabilityCoreCertified = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 StabilityCoreHostCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 StabilityCoreBeltCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 StabilityCoreTieCourseCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 StabilityRootedExistingCourseCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 ReusedStabilityCoreMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 InsertedStabilityCoreMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int32 StabilityCoreNetMemberDelta = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core",
+		meta = (Units = "cm"))
+	float MaximumUnbracedCorePostSpanBeforeCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core",
+		meta = (Units = "cm"))
+	float MaximumUnbracedCorePostSpanAfterCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int64 StabilityCorePlanHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stability Core")
+	int64 StabilityRootedEvidenceHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Geometry")
 	FBox LocalBounds = FBox(EForceInit::ForceInit);
 
