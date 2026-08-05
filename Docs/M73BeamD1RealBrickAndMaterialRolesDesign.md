@@ -1,6 +1,6 @@
 # M7.3-Beam-D1：真实 Brick 与材料角色编译
 
-> 上游：[Beam-D0 Profile Catalog](M73BeamD0GameplayProfileCatalogDesign.md) · [Beam-C Load DAG](M73BeamCLoadDAGAndStaticProxyDesign.md) · [Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)
+> 上游：[Beam-D0 Profile Catalog](M73BeamD0GameplayProfileCatalogDesign.md) · [Beam-C Load DAG](M73BeamCLoadDAGAndStaticProxyDesign.md) · [Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md) · [Beam-C3 井干式稳定芯体](M73BeamC3CribCoreStabilityDesign.md)
 >
 > 总路线：[M7 建筑开发路线](M7BuildingDevelopmentRoadmap.md)
 >
@@ -33,7 +33,9 @@ GameplayProfileId + DifficultyTier + Seed
   -> Shape Grammar/WFC silhouette
   -> Beam-A structural IR
   -> Beam-B closed assembly
+  -> Beam-C3 budget-aware crib core rewrite
   -> Beam-C2 exact contact + structural load closure + Load DAG/static proxy
+  -> Beam-C3 final topology / all-Z-span / final-budget certification
   -> Beam-D1 member-role selection
   -> one Member : one Brick binding
   -> FABTSM7BrickSpec + LocalTransform
@@ -62,7 +64,8 @@ GameplayProfileId + DifficultyTier + Seed
 
 1. `EABTSM7BuildingMaterial`：Wood / Stone / Iron / Glass，直接消费现有网格、材质和物理参数；
 2. D1 语义角色：PrimaryFrame、SecondaryFrame、Connector、WeaknessCandidate、
-   DeviceAnchor、DevicePayload。
+   DeviceAnchor、DevicePayload；此外，编译前仍保留上游 Member 的 `CoreCourse/CorePost` 身份，
+   用于弱点排除和 C3 Summary。两者在首版 D1 StructuralRole 中映射为 PrimaryFrame，不扩展共享枚举。
 
 首版 Palette 映射：
 
@@ -76,6 +79,8 @@ GameplayProfileId + DifficultyTier + Seed
 候选选择只使用已存在的 Member/Load DAG，且完全确定：ColumnBreak 选承载 Z 柱，
 Seam/Slide 优先桥梁与连接构件，TipOver 选外侧承载 Z 柱，DropTrigger 选高处承载构件。
 选择结果必须至少覆盖一个真实 Brick；但 D1 不降低 BreakDamage，也不生成隐式约束。
+`CoreCourse/CorePost` 是四柱井干芯体的安全结构，不进入弱点候选或弱点兜底；若除芯体外不存在合法候选，
+D1 必须明确拒绝或把决定留给 D2，不能把稳定芯体偷偷改成玻璃弱点。
 
 ## 6. 编辑器与运行时
 
@@ -90,7 +95,8 @@ Seam/Slide 优先桥梁与连接构件，TipOver 选外侧承载 Z 柱，DropTri
 
 Summary 至少包含：Profile 身份、Tier、Member/Brick/引用数、四种材料数量、弱点/装置角色
 数量、严格穿透数、真实局部 AABB、上游 Hash、D1 几何/角色 Hash 和稳定拒绝原因；并透传
-Beam-C2 的收口轮次、新增支撑柱、真实接触不一致、阻断支撑违规与静态 Advisory 数量。
+Beam-C2 的收口轮次、新增支撑柱、真实接触不一致、阻断支撑违规与静态 Advisory 数量，以及 C3 的
+四柱拓扑认证、Host/Belt/CoreCourse 数、四角 Bearing、全部 Z 站位最大柱跨和 Core Plan Hash。
 
 ## 8. 自动化验收
 
@@ -101,7 +107,9 @@ Beam-C2 的收口轮次、新增支撑柱、真实接触不一致、阻断支撑
 5. 所有 Brick 位于报告的真实局部 AABB 内，严格穿透为零；
 6. 在测试 World 中，通过真实 MaterialSystem 至少生成一个
    `AABTSM7BuildingModule`，其材质枚举、尺寸和引用可回查；
-7. 强制 Unity 编译以及 `ABTS.M73DAG.BeamD1.*`、`ABTS.M7.*` 回归通过。
+7. C3/C2 后仍满足 `MemberCount == BrickCount <= MaximumFinalMemberCount`；Tier 0/1 的固定
+   5 × 2 矩阵必须全部拥有四柱闭环且无真实接触、穿透和阻断支撑违规；
+8. 强制 Unity 编译以及 `ABTS.M73DAG.BeamD1.*`、`ABTS.M7.*` 回归通过。
 
 ## 9. 可见验收
 
@@ -132,3 +140,18 @@ Beam-C2 的收口轮次、新增支撑柱、真实接触不一致、阻断支撑
 - 新增支撑柱与重建接触计入最终 `MemberCount == BrickCount`、几何 Hash 和 Bounds；
 - `RealContactMismatchCount`、阻断型合力违规或支撑展宽违规任一非零时，D1 fail closed；
 - 一维合力 Advisory 保留在 Summary，等待 Beam-D2 的 settled contact 与 Chaos 认证。
+
+## 12. Catalog v8 与 Beam-C3 最终输入合同
+
+- D1 不生成、重排或补救芯体。它只编译“C3 四柱闭环改写 → C2 真实接触/有界修复 → C3 最终认证”
+  后的权威 Member 集；
+- 一道完整 C3 Belt 含两根 X `CoreCourse` 和两根 Y `CoreCourse`，四个角站位的 Z 段标记为
+  `CorePost`。这些角色仍遵守一 Member 对一 Brick，不使用不可见锁定；
+- Tier 0 的普通框架替换只改变 C3 上游 Member 集，不改变 D1 几何规则。主屋顶、桥和门洞保护失败时，
+  候选必须在进入 D1 前拒绝；
+- C2 的 `MaximumFinalMemberCount` 是实际最终数量硬上限；D1 不接受“C3 在预算内、C2 补柱后超预算”
+  的结果，也不通过事后少编译 Brick 掩盖超限；
+- C2 若只在最终装配上制造新的全 Z 柱跨违规，D1 编译链继续既有 C3 Plan，加入有真实 Host 锚点和
+  两端 Z 柱 Bearing 的定向拉结，再按同一累计 C2/C3 账本重跑 C2 与最终 C3；普通横梁不得冒充该证据；
+- Catalog v8 的低 Tier 5 × 2 静态门槛已通过；完整 5 × 6 仍是独立视觉回归，实时 Module 静置和
+  受控击打 PIE 仍属于 C3/D2 的独立证据层。

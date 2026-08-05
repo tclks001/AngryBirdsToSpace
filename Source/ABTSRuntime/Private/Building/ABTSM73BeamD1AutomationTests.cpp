@@ -4,6 +4,8 @@
 
 #include "ABTSM73BeamD1BrickCompiler.h"
 
+#include "Building/ABTSM73BeamD1PreviewActor.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "Components/StaticMeshComponent.h"
@@ -11,8 +13,10 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
+#include "UObject/UnrealType.h"
 
 namespace ABTSM73BeamD1Tests
 {
@@ -214,23 +218,132 @@ bool FABTSM73BeamD15ColumnHighTierClosureTest::RunTest(
 {
 	using namespace ABTSM73BeamD1Tests;
 	FABTSM73BeamD1BrickCompiler Compiler;
+	FABTSM73BeamD1GenerationResult TierResults[2];
+	bool bTierGenerated[2] = {false, false};
 	for (int32 Tier = 4; Tier <= 5; ++Tier)
 	{
-		FABTSM73BeamD1GenerationResult Result;
+		FABTSM73BeamD1GenerationResult& Result = TierResults[Tier - 4];
 		FString Error;
 		const bool bGenerated = Compiler.Generate(
 			MakeSettings(TEXT("ColumnBreak"),
 				AcceptedFixtureSeed(TEXT("ColumnBreak")), Tier),
 			Result, Error);
+		bTierGenerated[Tier - 4] = bGenerated;
 		TestTrue(*FString::Printf(
 			TEXT("ColumnBreak E%d structurally closes: %s"),
 			Tier + 1, *Error), bGenerated);
 		if (bGenerated)
 		{
+			TestTrue(TEXT("High-tier result is accepted"),
+				Result.Summary.bAccepted);
+			TestTrue(TEXT("Visual milestone is certified"),
+				Result.Summary.bVisualComplexityCertified);
+			TestTrue(TEXT("Assembly quality is certified"),
+				Result.Summary.bAssemblyQualityCertified);
+			TestTrue(TEXT("Stability core is certified"),
+				Result.Summary.bStabilityCoreCertified);
+			TestTrue(TEXT("Brick count remains inside the resolved window"),
+				Result.Summary.BrickCount >= Result.Summary.TargetMinimumBrickCount
+				&& Result.Summary.BrickCount <= Result.Summary.TargetMaximumBrickCount);
+			TestEqual(TEXT("Resolved lower Brick window is exact"),
+				Result.Summary.TargetMinimumBrickCount, Tier == 4 ? 1300 : 1500);
+			TestEqual(TEXT("Resolved upper Brick window is exact"),
+				Result.Summary.TargetMaximumBrickCount, Tier == 4 ? 1499 : 3499);
+			TestEqual(TEXT("Every emitted Brick is counted"),
+				Result.Bricks.Num(), Result.Summary.BrickCount);
+			TestEqual(TEXT("Every Member owns one Brick"),
+				Result.Summary.BrickCount, Result.Summary.MemberCount);
+			TestEqual(TEXT("Every Member reference is complete"),
+				Result.Summary.CompleteReferenceCount, Result.Summary.MemberCount);
+			TestEqual(TEXT("Real Brick AABBs do not penetrate"),
+				Result.Summary.StrictPenetrationCount, 0);
 			TestEqual(TEXT("No real-contact mismatch remains"),
 				Result.Summary.RealContactMismatchCount, 0);
 			TestEqual(TEXT("No blocking support violation remains"),
 				Result.Summary.RemainingSupportViolationCount, 0);
+			TestTrue(TEXT("Structural closure remains inside the high-tier pass ledger"),
+				Result.Summary.StructuralClosurePassCount <= (Tier == 4 ? 6 : 1));
+			TestTrue(TEXT("Structural closure remains inside the high-tier add ledger"),
+				Result.Summary.AddedStructuralSupportPostCount
+					<= (Tier == 4 ? 33 : 15));
+			TestTrue(TEXT("Final all-Z span remains inside the hard 720 cm gate"),
+				Result.Summary.MaximumUnbracedCorePostSpanAfterCM <= 720.01f);
+			TestTrue(TEXT("At least one strict rooted course is certified"),
+				Result.Summary.StabilityRootedExistingCourseCount > 0);
+			TestTrue(TEXT("Candidate search terminates inside its fixed ledger"),
+				Result.Summary.VisualCandidateAttempt >= 0
+				&& Result.Summary.VisualCandidateAttempt
+					< (Tier == 4 ? 10 : 12));
+			TestTrue(TEXT("Resolved settings identity is non-zero"),
+				Result.Summary.ResolvedSettingsHash != 0);
+			TestTrue(TEXT("Upstream structural identity is non-zero"),
+				Result.Summary.UpstreamBeamHash != 0);
+			TestTrue(TEXT("Core plan identity is non-zero"),
+				Result.Summary.StabilityCorePlanHash != 0);
+			TestTrue(TEXT("Rooted evidence identity is non-zero"),
+				Result.Summary.StabilityRootedEvidenceHash != 0);
+			TestTrue(TEXT("Brick geometry identity is non-zero"),
+				Result.Summary.BrickGeometryHash != 0);
+			TestTrue(TEXT("Tier-specific semantic volume milestone is retained"),
+				Result.Summary.SemanticVolumeCount >= (Tier == 4 ? 21 : 16));
+		}
+	}
+	if (bTierGenerated[0] && bTierGenerated[1])
+	{
+		TestTrue(TEXT("E6 remains a visible Brick-count step above E5"),
+			TierResults[1].Summary.BrickCount > TierResults[0].Summary.BrickCount);
+	}
+	for (int32 RepeatIndex = 0; RepeatIndex < 2; ++RepeatIndex)
+	{
+		if (!bTierGenerated[RepeatIndex])
+		{
+			continue;
+		}
+		const int32 Tier = RepeatIndex + 4;
+		const FString Identity = FString::Printf(TEXT("E%d"), Tier + 1);
+		FABTSM73BeamD1GenerationResult Repeat;
+		FString RepeatError;
+		const bool bRepeated = Compiler.Generate(
+			MakeSettings(TEXT("ColumnBreak"),
+				AcceptedFixtureSeed(TEXT("ColumnBreak")), Tier),
+			Repeat, RepeatError);
+		TestTrue(*FString::Printf(
+			TEXT("ColumnBreak %s repeat closes deterministically: %s"),
+			*Identity, *RepeatError), bRepeated);
+		if (bRepeated)
+		{
+			const FABTSM73BeamD1Summary& Expected =
+				TierResults[RepeatIndex].Summary;
+			const FABTSM73BeamD1Summary& Actual = Repeat.Summary;
+			TestEqual(*FString::Printf(TEXT("%s resolved settings hash is deterministic"),
+				*Identity), Actual.ResolvedSettingsHash, Expected.ResolvedSettingsHash);
+			TestEqual(*FString::Printf(TEXT("%s upstream structural hash is deterministic"),
+				*Identity), Actual.UpstreamBeamHash, Expected.UpstreamBeamHash);
+			TestEqual(*FString::Printf(TEXT("%s core plan hash is deterministic"),
+				*Identity), Actual.StabilityCorePlanHash,
+				Expected.StabilityCorePlanHash);
+			TestEqual(*FString::Printf(TEXT("%s rooted evidence hash is deterministic"),
+				*Identity), Actual.StabilityRootedEvidenceHash,
+				Expected.StabilityRootedEvidenceHash);
+			TestEqual(*FString::Printf(TEXT("%s Brick geometry hash is deterministic"),
+				*Identity), Actual.BrickGeometryHash, Expected.BrickGeometryHash);
+			TestEqual(*FString::Printf(TEXT("%s accepted attempt is deterministic"),
+				*Identity), Actual.VisualCandidateAttempt,
+				Expected.VisualCandidateAttempt);
+			TestEqual(*FString::Printf(TEXT("%s Brick count is deterministic"),
+				*Identity), Actual.BrickCount, Expected.BrickCount);
+			TestEqual(*FString::Printf(TEXT("%s rooted course count is deterministic"),
+				*Identity), Actual.StabilityRootedExistingCourseCount,
+				Expected.StabilityRootedExistingCourseCount);
+			TestEqual(*FString::Printf(TEXT("%s maximum all-Z span is deterministic"),
+				*Identity), Actual.MaximumUnbracedCorePostSpanAfterCM,
+				Expected.MaximumUnbracedCorePostSpanAfterCM);
+			TestEqual(*FString::Printf(TEXT("%s closure pass ledger is deterministic"),
+				*Identity), Actual.StructuralClosurePassCount,
+				Expected.StructuralClosurePassCount);
+			TestEqual(*FString::Printf(TEXT("%s closure add ledger is deterministic"),
+				*Identity), Actual.AddedStructuralSupportPostCount,
+				Expected.AddedStructuralSupportPostCount);
 		}
 	}
 	return true;
@@ -454,6 +567,151 @@ bool FABTSM73BeamD1RealModuleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Real Module dimensions are encoded in component scale"),
 		Module->GetActorScale3D().Equals(
 			Binding.BrickSpec.DimensionsCM / 100.0f, 0.001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1DelayedMaterialSystemTest,
+	"ABTS.M73DAG.BeamD1.DelayedMaterialSystem",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1DelayedMaterialSystemTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	FTransform PreviewTransform = FTransform::Identity;
+	AABTSM73BeamD1PreviewActor* Preview =
+		World->SpawnActorDeferred<AABTSM73BeamD1PreviewActor>(
+			AABTSM73BeamD1PreviewActor::StaticClass(), PreviewTransform,
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!TestNotNull(TEXT("Delayed dependency PreviewActor"), Preview))
+	{
+		return false;
+	}
+	FBoolProperty* SpawnProperty = FindFProperty<FBoolProperty>(
+		AABTSM73BeamD1PreviewActor::StaticClass(),
+		TEXT("bSpawnRuntimeModulesInPIE"));
+	if (!TestNotNull(TEXT("Runtime spawn property"), SpawnProperty))
+	{
+		return false;
+	}
+	SpawnProperty->SetPropertyValue_InContainer(Preview, true);
+	UGameplayStatics::FinishSpawningActor(Preview, PreviewTransform);
+	Preview->TryInitializeRuntimeBuilding();
+	TestEqual(TEXT("No Module exists before delayed MaterialSystem"),
+		Preview->GetRuntimeModuleCountForValidation(), 0);
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM7BuildingMaterialSystem* MaterialSystem =
+		World->SpawnActor<AABTSM7BuildingMaterialSystem>(
+			AABTSM7BuildingMaterialSystem::StaticClass(),
+			FTransform::Identity, Params);
+	if (!TestNotNull(TEXT("Delayed M7 MaterialSystem"), MaterialSystem))
+	{
+		return false;
+	}
+	Preview->TryInitializeRuntimeBuilding();
+	TestTrue(TEXT("Delayed Preview generation remains accepted"),
+		Preview->GetSummaryForValidation().bAccepted);
+	TestEqual(TEXT("Delayed MaterialSystem receives every compiled Brick"),
+		Preview->GetRuntimeModuleCountForValidation(),
+		Preview->GetSummaryForValidation().BrickCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73StableBuildingParticipationTest,
+	"ABTS.M73A.StableBuildingParticipation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73StableBuildingParticipationTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	FActorSpawnParameters SystemParams;
+	SystemParams.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM7BuildingMaterialSystem* MaterialSystem =
+		World->SpawnActor<AABTSM7BuildingMaterialSystem>(
+			AABTSM7BuildingMaterialSystem::StaticClass(),
+			FTransform::Identity, SystemParams);
+	if (!TestNotNull(TEXT("Participation MaterialSystem"), MaterialSystem))
+	{
+		return false;
+	}
+
+	const auto SpawnWithFlags = [World](
+		const bool bPIERuntime,
+		const bool bSlingshotGate)
+	{
+		FTransform Transform = FTransform::Identity;
+		AABTSM73StableBuildingActor* Actor =
+			World->SpawnActorDeferred<AABTSM73StableBuildingActor>(
+				AABTSM73StableBuildingActor::StaticClass(), Transform,
+				nullptr, nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (Actor == nullptr) return Actor;
+		FBoolProperty* RuntimeProperty = FindFProperty<FBoolProperty>(
+			AABTSM73StableBuildingActor::StaticClass(),
+			TEXT("bParticipateInPIERuntime"));
+		FBoolProperty* GateProperty = FindFProperty<FBoolProperty>(
+			AABTSM73StableBuildingActor::StaticClass(),
+			TEXT("bParticipateInSlingshotValidationGate"));
+		if (RuntimeProperty != nullptr)
+		{
+			RuntimeProperty->SetPropertyValue_InContainer(Actor, bPIERuntime);
+		}
+		if (GateProperty != nullptr)
+		{
+			GateProperty->SetPropertyValue_InContainer(Actor, bSlingshotGate);
+		}
+		UGameplayStatics::FinishSpawningActor(Actor, Transform);
+		return Actor;
+	};
+
+	AABTSM73StableBuildingActor* PreviewOnly = SpawnWithFlags(false, true);
+	if (!TestNotNull(TEXT("Preview-only StableBuildingActor"), PreviewOnly))
+	{
+		return false;
+	}
+	PreviewOnly->InitializeRuntimeBuilding(MaterialSystem);
+	TestFalse(TEXT("Preview-only fixture skips PIE runtime"),
+		PreviewOnly->ShouldParticipateInPIERuntime());
+	TestEqual(TEXT("Preview-only fixture is not required by startup physics"),
+		PreviewOnly->GetIdleValidationState(),
+		EABTSM73IdleValidationState::NotRequired);
+
+	AABTSM73StableBuildingActor* GateExempt = SpawnWithFlags(true, false);
+	if (!TestNotNull(TEXT("Gate-exempt StableBuildingActor"), GateExempt))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Gate-exempt fixture can still participate in PIE runtime"),
+		GateExempt->ShouldParticipateInPIERuntime());
+	TestFalse(TEXT("Gate-exempt fixture opts out of slingshot validation"),
+		GateExempt->ShouldParticipateInSlingshotValidationGate());
+	TestEqual(TEXT("Gate exemption preserves the internal diagnostic state"),
+		GateExempt->GetRawIdleValidationStateForValidation(),
+		EABTSM73IdleValidationState::Pending);
+	TestEqual(TEXT("Gate exemption maps its public state to NotRequired"),
+		GateExempt->GetIdleValidationState(),
+		EABTSM73IdleValidationState::NotRequired);
 	return true;
 }
 

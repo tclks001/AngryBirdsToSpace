@@ -1933,6 +1933,7 @@ namespace ABTSM73BeamB
 								- CandidateLowerBounds.Max.Z;
 							if (XOverlap <= Tolerance || YOverlap <= Tolerance
 								|| VerticalGap <= Tolerance
+								|| VerticalGap + Tolerance < CrossSection
 								|| VerticalGap >= BestUpperGap)
 							{
 								continue;
@@ -2058,6 +2059,7 @@ namespace ABTSM73BeamB
 					}
 					const FBox Bounds = ClosedMemberBounds(
 						Seat, Closed, CrossSection);
+					const double SeatGap = RailBounds.Min.Z - Bounds.Max.Z;
 					if (Endpoint.BearingPlaneCM < Bounds.Min[Span->SpanAxisIndex]
 							- Tolerance
 						|| Endpoint.BearingPlaneCM
@@ -2068,6 +2070,8 @@ namespace ABTSM73BeamB
 						continue;
 					}
 					if (Bounds.Max.Z <= RailBounds.Min.Z + Tolerance
+						&& (SeatGap <= Tolerance
+							|| SeatGap + Tolerance >= CrossSection)
 						&& Bounds.Max.Z > BestSeatTopScore)
 					{
 						BestSeat = &Seat;
@@ -2095,6 +2099,8 @@ namespace ABTSM73BeamB
 							Closed.Members[MemberId];
 						const FBox Bounds = ClosedMemberBounds(
 							Candidate, Closed, CrossSection);
+						const double BearerGap = RailBounds.Min.Z
+							- (Bounds.Max.Z + CrossSection);
 						const double StationOverlap = FMath::Min(
 							Bounds.Max[Perpendicular], StationMax + Tolerance)
 							- FMath::Max(
@@ -2105,6 +2111,9 @@ namespace ABTSM73BeamB
 							> Bounds.Max[Span->SpanAxisIndex] + Tolerance
 							|| StationOverlap <= Tolerance
 							|| Bounds.Max.Z > RailBounds.Min.Z + Tolerance
+							|| BearerGap < -Tolerance
+							|| (BearerGap > Tolerance
+								&& BearerGap + Tolerance < CrossSection)
 							|| Bounds.Max.Z <= BestSupportTop)
 						{
 							continue;
@@ -2125,12 +2134,16 @@ namespace ABTSM73BeamB
 								Closed.Members[MemberId];
 							const FBox Bounds = ClosedMemberBounds(
 								Candidate, Closed, CrossSection);
+							const double BearerGap = RailBounds.Min.Z
+								- (Bounds.Max.Z + CrossSection);
 							if (RailStation
 								< Bounds.Min[Perpendicular] - Tolerance
 								|| RailStation
 								> Bounds.Max[Perpendicular] + Tolerance
 								|| Bounds.Max.Z + CrossSection
-									> RailBounds.Min.Z + Tolerance)
+									> RailBounds.Min.Z + Tolerance
+								|| (BearerGap > Tolerance
+									&& BearerGap + Tolerance < CrossSection))
 							{
 								continue;
 							}
@@ -2280,6 +2293,13 @@ namespace ABTSM73BeamB
 					}
 					continue;
 				}
+				if (Gap + Tolerance < CrossSection)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamBBridgeCorbelSubBlockGap:Gap=%.2f:Section=%.2f"),
+						Gap, CrossSection);
+					return false;
+				}
 				if (Closed.Members.Num() >= Settings.BeamA.MaxMemberCount
 					|| Closed.Joints.Num() + 2 > Settings.BeamA.MaxJointCount)
 				{
@@ -2427,7 +2447,8 @@ namespace ABTSM73BeamB
 				const double VerticalGap = UpperBounds.Min.Z
 					- LowerBounds.Max.Z;
 				if (XOverlap <= Tolerance || YOverlap <= Tolerance
-					|| VerticalGap <= Tolerance)
+					|| VerticalGap <= Tolerance
+					|| VerticalGap + Tolerance < CrossSection)
 				{
 					continue;
 				}
@@ -2625,6 +2646,13 @@ namespace ABTSM73BeamB
 			const double PostBottomZ = Target.LowerBounds.Max.Z;
 			const double PostTopZ = Target.UpperBounds.Min.Z;
 			const double PostLength = PostTopZ - PostBottomZ;
+			if (PostLength + Tolerance < CrossSection)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamBBridgeSuspendedPostSubBlockGap:Gap=%.2f:Section=%.2f"),
+					PostLength, CrossSection);
+				return false;
+			}
 			FVector PostCenter = FVector::ZeroVector;
 			bool bFoundClearLane = false;
 			int32 LastBlockingMemberId = INDEX_NONE;
@@ -3065,11 +3093,15 @@ namespace ABTSM73BeamB
 		{
 			return false;
 		}
-		if (!ABTSM73BeamA::RebuildBearingContacts(
+		// Endpoint corbels and suspended-beam posts are installed after the first
+		// Beam-A closure.  Run the same physical closure again so those members
+		// cannot bypass minimum brick size, penetration, reachability, or contact
+		// reconstruction before C3 consumes the assembly.
+		if (!ABTSM73BeamA::CloseGeneratedAssembly(
 			Settings.BeamA, Closed, OutError))
 		{
 			OutError = FString::Printf(
-				TEXT("BeamBFinalContactRebuild:%s"), *OutError);
+				TEXT("BeamBFinalSupportClosure:%s"), *OutError);
 			return false;
 		}
 		Closed.Summary.BearingContactCount = Closed.BearingContacts.Num();

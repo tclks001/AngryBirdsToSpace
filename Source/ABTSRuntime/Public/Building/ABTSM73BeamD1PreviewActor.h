@@ -9,6 +9,7 @@
 
 class AABTSM7BuildingMaterialSystem;
 class AABTSM7BuildingModule;
+class FABTSM73BeamD1DelayedMaterialSystemTest;
 class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
 
@@ -80,10 +81,15 @@ protected:
 	FABTSM73BeamD1Summary LastSummary;
 
 private:
+	friend class FABTSM73BeamD1DelayedMaterialSystemTest;
+
 	UHierarchicalInstancedStaticMeshComponent* GetPreview(
 		EABTSM7BuildingMaterial Material) const;
 	void ClearPreview();
+	void TryInitializeRuntimeBuilding();
 
 	TArray<FABTSM73BeamD1BrickBinding> CompiledBricks;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
+	int32 RuntimeSystemSearchAttempts = 0;
+	FTimerHandle RuntimeSystemSearchTimer;
 };

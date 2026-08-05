@@ -14,6 +14,7 @@ namespace ABTSM73BeamD0
 		switch (Tier)
 		{
 		case 0:
+			Recipe.MaximumCandidateAttempts = 12;
 			Recipe.MinimumBrickCount = 20;
 			Recipe.MaximumBrickCount = 49;
 			Recipe.BoundsScale = 0.50f;
@@ -21,7 +22,10 @@ namespace ABTSM73BeamD0
 			Recipe.ShapeGrammarDepth = 2;
 			Recipe.MotifGrammarDepth = 1;
 			Recipe.TargetShapeVolumeCount = 12;
-			Recipe.MaximumBaysPerVolume = 2;
+			// Keep the macro silhouette and full-height roof, but spend the easy
+			// tier's scarce Brick budget on one stable core instead of duplicate
+			// long-post frame bays inside the same semantic volume.
+			Recipe.MaximumBaysPerVolume = 1;
 			Recipe.MaximumParallelBlocksPerCourse = 2;
 			Recipe.MaximumRoofCourseCount = 64;
 			Recipe.SingleTerminalRoofCourseCount = 8;
@@ -101,6 +105,44 @@ namespace ABTSM73BeamD0
 			break;
 		}
 		return Recipe;
+	}
+
+	FABTSM73BeamC3CribCoreSettings StabilityCoreRecipe(
+		const int32 Tier,
+		const int32 MaximumFinalMemberCount)
+	{
+		FABTSM73BeamC3CribCoreSettings Settings;
+		Settings.MaximumFinalMemberCount = MaximumFinalMemberCount;
+		// Safety geometry is height-driven. Difficulty must not make an easy
+		// building less stable or add decorative belts to a hard one.
+		Settings.TargetBeltCount = 1;
+		Settings.MaximumHostCount =
+			Tier == 0 ? 1
+			: Tier == 1 ? 4
+			: Tier == 2 ? 16
+			: Tier == 3 ? 32
+			: Tier == 4 ? 64 : 96;
+		Settings.MaximumNetMemberIncrease =
+			Tier == 0 ? 12
+			// A rooted C3 tie is one horizontal course plus the two real
+			// contact splits at its Z-post endpoints. Keep E2's allowance on
+			// that three-member quantum instead of forcing an unsafe whole-frame
+			// deletion when the cumulative C2+C3 delta is exactly 33.
+			: Tier == 1 ? 33
+			: Tier == 2 ? 64
+			: Tier == 3 ? 128
+			: Tier == 4 ? 256 : 384;
+		Settings.BeamC2MemberReserve =
+			Tier == 0 ? 2
+			: Tier == 1 ? 8
+			: Tier == 2 ? 16
+			: Tier == 3 ? 32
+			: Tier == 4 ? 64 : 96;
+		// Stability geometry wins over one protected interior roof lane at every
+		// tier. The donor selector preserves eaves and the unique ridge, so this is
+		// a bounded silhouette-neutral fallback rather than a difficulty reduction.
+		Settings.bAllowRoofLaneBudgetReallocation = true;
+		return Settings;
 	}
 
 	bool IsFinitePositive(const float Value)
@@ -296,9 +338,10 @@ namespace ABTSM73BeamD0
 			TEXT("Metrics=%.6f:%.6f:%.6f:%d:%.6f:%d|")
 			TEXT("Shape=%d:%.6f:%.6f:%.6f:%d:%d:%d:%d:%.6f:")
 			TEXT("%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f|")
-			TEXT("Beam=%.6f:%d:%d|")
+			TEXT("Beam=%.6f:%.6f:%d:%d:%d|")
 			TEXT("Visual=%d:%d:%d:%d:%.6f:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%d|")
-			TEXT("C2=%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d"),
+			TEXT("C2=%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d|")
+			TEXT("C3=%d:%.6f:%.6f:%d:%d:%d:%d:%d:%d"),
 			Profile.ProfileCatalogHash,
 			*Profile.ResolvedM7ProfileId.ToString(),
 			Profile.DifficultyTier,
@@ -331,7 +374,9 @@ namespace ABTSM73BeamD0
 			Shape.PyramidPreferredMaxAspectRatio,
 			Shape.PrismPreferredMinAspectRatio,
 			Profile.BeamSettings.BeamB.BeamA.TargetBaySpanCM,
+			Profile.BeamSettings.BeamB.BeamA.MaximumVerticalSupportSpanCM,
 			Profile.BeamSettings.BeamB.BeamA.MaxParallelBlocksPerCourse,
+			Profile.BeamSettings.BeamB.BeamA.MaxFrameParallelBlocksPerCourse,
 			Profile.BeamSettings.BeamB.bRequireMotifVariety ? 1 : 0,
 			Profile.VisualComplexity.MilestoneTier,
 			Profile.VisualComplexity.MinimumBrickCount,
@@ -355,7 +400,16 @@ namespace ABTSM73BeamD0
 			Profile.BeamSettings.MinimumSeparatedSupportSpanRatio,
 			Profile.BeamSettings.SupportResultantMarginCM,
 			Profile.BeamSettings.MaximumStructuralClosurePasses,
-			Profile.BeamSettings.MaximumStructuralSupportPosts);
+			Profile.BeamSettings.MaximumStructuralSupportPosts,
+			Profile.StabilityCore.bEnabled ? 1 : 0,
+			Profile.StabilityCore.MaximumUnbracedCorePostSpanCM,
+			Profile.StabilityCore.MinimumCoreArmSpanCM,
+			Profile.StabilityCore.TargetBeltCount,
+			Profile.StabilityCore.MaximumHostCount,
+			Profile.StabilityCore.MaximumNetMemberIncrease,
+			Profile.StabilityCore.MaximumFinalMemberCount,
+			Profile.StabilityCore.BeamC2MemberReserve,
+			Profile.StabilityCore.bAllowRoofLaneBudgetReallocation ? 1 : 0);
 		return static_cast<int64>(FCrc::StrCrc32(*Canonical));
 	}
 
@@ -521,7 +575,7 @@ FABTSM73BeamD0ProfileCatalog::FABTSM73BeamD0ProfileCatalog(
 const FABTSM73BeamD0ProfileCatalog& FABTSM73BeamD0ProfileCatalog::GetDefault()
 {
 	static const FABTSM73BeamD0ProfileCatalog Catalog(
-		ABTSM73BeamD0::BuildDefaultDefinitions(), 6);
+		ABTSM73BeamD0::BuildDefaultDefinitions(), 9);
 	return Catalog;
 }
 
@@ -633,6 +687,13 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 		OutProfile.RejectReason = OutError;
 		return false;
 	}
+	OutProfile.StabilityCore = ABTSM73BeamD0::StabilityCoreRecipe(
+		DifficultyTier, OutProfile.VisualComplexity.MaximumBrickCount);
+	if (!OutProfile.StabilityCore.Validate(OutError))
+	{
+		OutProfile.RejectReason = OutError;
+		return false;
+	}
 
 	OutProfile.GameplayProfileId = GameplayProfileId;
 	OutProfile.DifficultyTier = DifficultyTier;
@@ -704,15 +765,23 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 
 	Settings.BeamB.BeamA.TargetBaySpanCM = FMath::Max(
 		220.0f, Definition->BaseTargetBaySpanCM * Visual.BaySpanScale);
+	Settings.BeamB.BeamA.MaximumVerticalSupportSpanCM =
+		OutProfile.StabilityCore.MaximumUnbracedCorePostSpanCM;
 	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier >= 4)
 	{
+		// E5 needs one wider bay to leave enough final-member capacity for the
+		// physical C2 support cap. E6 keeps its denser certified four-lane frame.
 		Settings.BeamB.BeamA.TargetBaySpanCM = FMath::Max(
 			Settings.BeamB.BeamA.TargetBaySpanCM,
-			420.0f);
+			DifficultyTier == 4 ? 473.0f : 420.0f);
 	}
 	Settings.BeamB.BeamA.MaxBaysPerVolume = Visual.MaximumBaysPerVolume;
 	Settings.BeamB.BeamA.MaxParallelBlocksPerCourse =
 		Visual.MaximumParallelBlocksPerCourse;
+	Settings.BeamB.BeamA.MaxFrameParallelBlocksPerCourse =
+		DifficultyTier == 0
+			? 1
+			: Visual.MaximumParallelBlocksPerCourse;
 	Settings.BeamB.BeamA.MaxRoofCourseCount =
 		Visual.MaximumRoofCourseCount;
 	Settings.BeamB.GrammarDepth = Visual.MotifGrammarDepth;

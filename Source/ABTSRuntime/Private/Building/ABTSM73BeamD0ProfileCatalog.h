@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ABTSM73BeamC3CribCoreTypes.h"
 #include "Building/ABTSM73BeamCPreviewTypes.h"
 
 /** Gameplay-facing failure family selected before real Brick compilation. */
@@ -151,6 +152,7 @@ struct FABTSM73BeamD0ResolvedProfile
 		EABTSM73BeamD0CollapseIntent::ProgressiveFold;
 	FABTSM73BeamD0DifficultyMetrics Difficulty;
 	FABTSM73BeamD0VisualComplexityRecipe VisualComplexity;
+	FABTSM73BeamC3CribCoreSettings StabilityCore;
 	FABTSM73BeamCPreviewSettings BeamSettings;
 	FString RejectReason;
 };

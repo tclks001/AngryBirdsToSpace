@@ -1,9 +1,9 @@
 # M7.3-Beam-D0：Gameplay Profile Catalog、Difficulty Curve 与 Settings Resolver
 
 > 父文档：[M7 建筑生成演进路线](M7BuildingDevelopmentRoadmap.md)
-> 上游：[M7.3-Beam-C Load DAG 与静态传力代理](M73BeamCLoadDAGAndStaticProxyDesign.md) · [Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md)
+> 上游：[M7.3-Beam-C Load DAG 与静态传力代理](M73BeamCLoadDAGAndStaticProxyDesign.md) · [Beam-C2 真实接触与承重收口](M73BeamC2RealContactAndLoadClosureDesign.md) · [Beam-C3 井干式稳定芯体](M73BeamC3CribCoreStabilityDesign.md)
 > 后续：[Beam-D1 真实 Brick/材料角色](M73BeamD1RealBrickAndMaterialRolesDesign.md) → [Beam-D1.5 视觉复杂度阶梯](M73BeamD15VisualComplexityLadderDesign.md)，Beam-D2 弱点/Chaos/Profile×Tier 认证，Beam-E Catalog 冻结与 M3 六栋生产接入
-> 状态：首版 C++ 与自动化已完成；不修改共享世界生成合同，不接管 TaskGraph 生产建筑。
+> 状态：Resolver 已演进到 Catalog v8；四柱 C3 的固定 5 × 2 静态生产门槛已通过。本文不修改共享世界生成合同，不接管 TaskGraph 生产建筑。
 
 ## 1. 目标
 
@@ -47,7 +47,8 @@ External gameplay key
        -> Shape Grammar / silhouette policy
        -> Beam-A stacking policy
        -> Beam-B motif grammar policy
-       -> Beam-C fixed validation policy
+       -> Beam-C3 four-post crib / low-tier replacement policy
+       -> Beam-C2 fixed validation + absolute final-member policy
        -> Beam-D1 material/device intent
        -> Beam-D2 weakness/collapse certification intent
     -> ResolvedM7ProfileId + ProfileCatalogHash + ResolvedSettingsHash
@@ -93,6 +94,9 @@ Tier 还可温和改变轮廓尺寸、语法深度、Bay 间距和并行积木�
 - `ResolvedSettingsHash` 额外覆盖精确 Tier、种子、派生玩法指标和派生生成策略；
 - Beam-C2 的真实接触容差、支撑覆盖/跨度门槛和结构收口预算属于行为相关设置，必须进入
   `ResolvedSettingsHash`；它们仍是 M7 内部项目级策略，不成为 M3 输入；
+- Beam-C3 的统一“全部 Z 站位”柱跨、四站位闭环、最小力臂、Belt 数量推导、净增预算、最终
+  Member 上限、C2 规划预留、普通框架替换与屋顶保护策略同样进入 `ResolvedSettingsHash`；
+  稳定性不得作为 Difficulty 旋钮；
 - Catalog 定义先按 ID 排序再 Hash，源数组顺序不影响身份；
 - 改变任何行为相关字段必须改变 Catalog Hash；
 - 未知 ID、越界 Tier、重复 ID 或非法数据全部 fail closed。
@@ -114,6 +118,10 @@ Tier 还可温和改变轮廓尺寸、语法深度、Bay 间距和并行积木�
 5. 未知 Profile、越界 Tier、重复 Profile ID 稳定拒绝；
 6. Profile/Tier 改变内部生成策略，但项目级预算和 Beam-C 硬门槛完全不变；
 7. Catalog 定义顺序不改变 Hash，行为字段变更必须改变 Hash。
+
+对 C3 接入后的正式扩展门槛：5 个 Profile × Tier 0/1 必须形成 10 个四柱闭环、最终预算内的
+生产结果；Catalog 版本、Resolved Hash、Core Plan Hash 和最终 Brick Hash 均须可复现。该静态矩阵不
+替代实时 Chaos PIE。
 
 Beam-D0 为纯数据阶段，不要求新建或修改地图资产，也不以可见 PIE 代替自动化。
 
@@ -143,3 +151,26 @@ Beam-D0 为纯数据阶段，不要求新建或修改地图资产，也不以可
 - D1 Summary 记录 `RoofCourseBrickCount`，Preview 日志直接输出 `RoofBricks=`，用于区分“语义上是屋顶”和“实际已有足够层数可读”两件事。
 - 固定矩阵仍满足原 Brick 窗口，因此没有调整平行积木最小间距或二并一阈值。
 - fresh NullRHI `ABTS.M73DAG.BeamD0.*` 6/6、`ABTS.M73DAG.BeamD15.*` 3/3、`ABTS.M7` 123/123；强制 Unity、禁用 Adaptive Unity 的 Development Editor 完整链接通过。
+
+## 12. Catalog v7（历史基线）
+
+- v7 首次加入私有 `StabilityCore` Recipe、统一柱跨和低 Tier Bay 预算重分配；
+- 该版本验证过的是三柱/L 形探索芯体，其历史 Brick 数与自动化日志不得继续作为四柱闭环的验收证据；
+- v7 已被 v8 取代。保留本节仅用于解释 Catalog 身份为何必须随稳定结构语义变化。
+
+## 13. Catalog v8：四柱闭环、屋顶保护与最终预算
+
+- 默认 Catalog 版本提升为 8；四角站位、每 Belt 两 X + 两 Y course、全部 Z 站位柱跨审计、最终
+  C3 再认证均属于 Resolved 行为；
+- Tier 0/1 不在旧建筑上简单追加芯体。Resolver 先降低重复普通 Bay，C3 再优先以 Host 内普通框架
+  Assembly 交换四柱芯体预算；桥、Reserved Void、主屋顶 Crown、檐口和屋脊是保护语义；
+- 单/双 lane roof course 不得成为 donor；兼容性回退最多处理 3+ lane course 的内部冗余 lane，且必须
+  保持单主屋顶指纹、最低 course 数并重新通过 Beam-A/C2/C3。正式候选不能靠削掉屋顶读形过预算；
+- `MaximumFinalMemberCount` 是 C2 与最终 C3 共用的绝对上限。`BeamC2MemberReserve` 只是规划余量，
+  不是允许超出 49/199 的追加额度；
+- Tier 0/1 的 C3 累计净增额度为 12/33。Tier 1 采用 33，是因为一个具备两端真实 Z 柱承接的定向拉结
+  在闭合后最少形成“一根 course + 两个端柱接触分段”三 Member 原子；它仍受 199 根最终硬上限约束；
+- 正式静态门槛为固定 Seed 的 5 Profile × Tier 0/1。本轮 Catalog v8 安装版 UE 5.8 fresh 编译后的
+  10 个夹具已全部通过，C3 静态自动化门槛完成；之后仍须执行完整 5 × 6 视觉回归与实时 Chaos
+  静置/受控击打 PIE；
+- 完整 5 × 6 D1.5 矩阵是视觉阶梯回归，5 × 2 是低 Tier 稳定芯体门槛，二者互不替代。
