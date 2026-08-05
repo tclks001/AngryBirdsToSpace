@@ -197,7 +197,7 @@
 | --- | --- | --- |
 | [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `2ddc974978c4c717db967b048209258dbca80c04` |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
-| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `51b391d8e1068d1c2a030fe64667ec21418de33c` |
+| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `550545141908fd3cf6b42442a97109563549fc24` |
 
 ### 13.2 跨阶段统一诊断顺序
 
@@ -250,6 +250,7 @@
 | 轨迹最终到达 UFO，但 `TargetHit` 早于第三次引力弹弓退出 | 事件顺序是认证语义的一部分，不能只检查“曾进入所有包络”。 | Core/CLI/Runtime 统一要求 `Assist3 Exit → TargetApproach → TargetHit`，错序命中归为失败。 |
 | 放大模型后出现视觉穿模，或统一缩放后候选失效 | `VisualRadius`、解析 `CollisionRadius`、`InfluenceRadius` 职责不同；离散积分、角域、步长、事件阈值和评分也破坏简单相似缩放。 | 尺度变化后重新跑 Core parity、扫掠、事件、Hull 和完整域认证；最小近掠距离包含鸟体净空，候选 Hash 改变。 |
 | HUD 控件绘制位置与点击热区偏移，或全览图元溢出圆框 | 输入必须依次转换 raw viewport、`UnscaledViewRect` origin/size、DPI 和 Canvas logical space；所有线、圆、文本和 hit test 共用变换与圆裁剪。 | 自动化覆盖 DPI≠1、非零 viewport origin 和线宽/文本 bounds；可见 PIE 改窗口尺寸后仍像素对齐。 |
+| T2-B 按名称、模型、距离或当前 PIP 目标推断终局类别，或 M11 自行给远端捕获应用风格 | 终局语义只来自当前已提交布局及系统实际持有的表现 Actor：Assist1/2/3 为 `FinalePlanet`，Target 为 `FinaleUFO`；主星、普通卫星、候选辅助物和二维图元均 fail closed。M11 只以 const 入口暴露既有远端 SceneCapture 并声明 `FinaleRemotePreview`，不消费 Profile、Stencil 或后处理。 | `ABTS.M11B.Runtime.StylizedSemanticAdapter` 覆盖生产 3+1、候选兼容、未知对象、销毁重建、Core Result/事件/认证 Hash 不变，以及捕获接口不改变相机和生命周期；Integration 后续负责实际 Profile/PIP 像素门。详见 `M11-T2B-RO-001`。 |
 | 发射后鸟/UFO 在远景中不可读 | 当前仅确认可能由 Flight Camera lag 和共享雾/云叠加造成，仍是开放项；不得把推断写成已修复。 | 分别做无 lag、无雾云和同时修改的 fresh 可见 PIE A/B；共享天空/地图修改仍由集成工作树执行。 |
 
 ### 13.6 后续摘录流程
