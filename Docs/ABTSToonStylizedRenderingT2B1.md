@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-B1 选择性语义与画中画接线
 
-> 状态：2026-08-05 Integration 候选实现；M3、M11 及共享鸟/当前弹弓已接入，自动化与真实 RHI 候选烟测通过。首次可见 PIE 发现地面 PIP 暗部噪点，现已形成实现版本 5 的低信号稳定修复候选，等待用户复验。M7 因 `Beam-C3` 长任务仍在独立工作树中，本阶段明确保持 fail closed，建筑暂时只消费 T2-A 的全局 Depth/Normal 描边。
+> 状态：2026-08-05 已通过自动门、真实 RHI 与用户可见 PIE 验收；M3、M11 及共享鸟/当前弹弓已接入。首次 PIE 发现的地面 PIP 暗部噪点已由实现版本 5 的低信号稳定修复消除并通过复验。M7 因 `Beam-C3` 长任务仍在独立工作树中，本阶段明确保持 fail closed，建筑暂时只消费 T2-A 的全局 Depth/Normal 描边。
 >
 > 上游：[三渲二总设计](ABTSToonStylizedRenderingDesign.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
@@ -119,7 +119,7 @@ abts.Rendering.Stylized.Enabled 1
 - Style Off 没有风格 pass，且日志反复确认 `SelectiveProducers=0`；Style On 为 `M3Semantics=6`、`M11Semantics=4`、`Birds=4`、`SelectiveProducers=32`、`M7AdapterReady=0`、`Conflicts=0`；
 - Style On 的 12 个正式 GPU 样本中，`OutlinePreTSR` 为 `0.072–0.133 ms`、平均 `0.1111 ms`，`Tone` 为 `0.041–0.047 ms`、平均 `0.0430 ms`，远低于 T2-A 的 `1.5 ms @ 1080p` 合计门槛；真实 RHI 无 Shader Error、Fatal 或 Assertion。
 
-T0 的被动点没有进入弹弓瞄准，故正式日志中的 `SlingshotPrimitives=0` 是预期结果；地面/月面/终局 PIP 也不属于四张被动主视图截图。当前自动证据不能替代第 6 节的可见 PIE，候选仍等待用户验收后才能合并 `master`。
+T0 的被动点没有进入弹弓瞄准，故正式日志中的 `SlingshotPrimitives=0` 是预期结果；地面/月面/终局 PIP 也不属于四张被动主视图截图。2026-08-05 用户已完成第 6 节的可见 PIE，并在实现版本 5 上复验地面 PIP 暗部噪点消失。
 
 ## 9. 地面 PIP 暗部噪点修复
 

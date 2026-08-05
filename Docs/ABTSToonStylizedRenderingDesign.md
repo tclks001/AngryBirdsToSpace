@@ -1,6 +1,6 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调和 T2-A 主视图描边与共享语义契约均已通过验收；T2-B1 已完成 M3/M11、共享鸟/当前弹弓及三类画中画的 Integration 候选接线，等待可见 PIE 验收。M7 在 Beam-C3 完成前保持 fail closed，后续以 T2-B2 补入。详见 [T2-B1 设计](ABTSToonStylizedRenderingT2B1.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过自动门、真实 RHI 与用户可见 PIE 验收。M7 在 Beam-C3 完成前保持 fail closed，后续以 T2-B2 补入。详见 [T2-B1 设计](ABTSToonStylizedRenderingT2B1.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
