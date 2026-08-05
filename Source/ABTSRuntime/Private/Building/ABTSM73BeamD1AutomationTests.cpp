@@ -4,6 +4,7 @@
 
 #include "ABTSM73BeamD1BrickCompiler.h"
 
+#include "ABTSM73BeamD0ProfileCatalog.h"
 #include "Building/ABTSM73BeamD1PreviewActor.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
@@ -13,6 +14,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
+#include "HAL/PlatformTime.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
@@ -89,81 +91,128 @@ namespace ABTSM73BeamD1Tests
 	};
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(
 	FABTSM73BeamD15VisualComplexityLadderTest,
 	"ABTS.M73DAG.BeamD15.VisualComplexityLadder",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+void FABTSM73BeamD15VisualComplexityLadderTest::GetTests(
+	TArray<FString>& OutBeautifiedNames,
+	TArray<FString>& OutTestCommands) const
+{
+	using namespace ABTSM73BeamD1Tests;
+	for (const FName ProfileId : ProfileIds())
+	{
+		for (int32 Tier = 0; Tier <= 5; ++Tier)
+		{
+			OutBeautifiedNames.Add(FString::Printf(
+				TEXT("%s.E%d"), *ProfileId.ToString(), Tier + 1));
+			OutTestCommands.Add(FString::Printf(
+				TEXT("%s|%d"), *ProfileId.ToString(), Tier));
+		}
+	}
+}
 
 bool FABTSM73BeamD15VisualComplexityLadderTest::RunTest(
 	const FString& Parameters)
 {
 	using namespace ABTSM73BeamD1Tests;
-	FABTSM73BeamD1BrickCompiler Compiler;
-	for (const FName ProfileId : ProfileIds())
+	FString ProfileText;
+	FString TierText;
+	if (!Parameters.Split(TEXT("|"), &ProfileText, &TierText))
 	{
-		int32 PreviousBrickCount = 0;
-		for (int32 Tier = 0; Tier <= 5; ++Tier)
+		AddError(FString::Printf(
+			TEXT("Invalid Beam-D1.5 case command: %s"), *Parameters));
+		return false;
+	}
+	const FName ProfileId(*ProfileText);
+	const int32 Tier = FCString::Atoi(*TierText);
+	if (!ProfileIds().Contains(ProfileId) || Tier < 0 || Tier > 5)
+	{
+		AddError(FString::Printf(
+			TEXT("Unknown Beam-D1.5 case: %s"), *Parameters));
+		return false;
+	}
+
+	FABTSM73BeamD1BrickCompiler Compiler;
+	FABTSM73BeamD1GenerationResult Result;
+	FString Error;
+	const double StartSeconds = FPlatformTime::Seconds();
+	const bool bGenerated = Compiler.Generate(
+		MakeSettings(ProfileId, AcceptedFixtureSeed(ProfileId), Tier),
+		Result,
+		Error);
+	const double ElapsedMilliseconds =
+		(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	AddInfo(FString::Printf(
+		TEXT("Beam-D1.5 Case=%s E%d Result=%s ElapsedMs=%.2f Error=%s"),
+		*ProfileId.ToString(), Tier + 1,
+		bGenerated ? TEXT("Success") : TEXT("Fail"),
+		ElapsedMilliseconds, *Error));
+	TestTrue(*FString::Printf(TEXT("%s E%d compiles: %s"),
+		*ProfileId.ToString(), Tier + 1, *Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	AddInfo(FString::Printf(
+		TEXT("Beam-D1.5 %s E%d Bricks=%d Target=%d-%d Attempt=%d Volumes=%d Box=%d Prism=%d Pyramid=%d RoofBricks=%d Motifs=%d Spans=%d"),
+		*ProfileId.ToString(), Tier + 1, Result.Summary.BrickCount,
+		Result.Summary.TargetMinimumBrickCount,
+		Result.Summary.TargetMaximumBrickCount,
+		Result.Summary.VisualCandidateAttempt,
+		Result.Summary.SemanticVolumeCount,
+		Result.Summary.SemanticBoxCount,
+		Result.Summary.SemanticPrismCount,
+		Result.Summary.SemanticPyramidCount,
+		Result.Summary.RoofCourseBrickCount,
+		Result.Summary.DistinctMotifCount,
+		Result.Summary.SupportedSpanCount));
+	TestTrue(TEXT("Visual complexity is certified"),
+		Result.Summary.bVisualComplexityCertified);
+	TestTrue(TEXT("Assembly axis/contact quality is certified"),
+		Result.Summary.bAssemblyQualityCertified);
+	TestTrue(TEXT("Brick count reaches tier minimum"),
+		Result.Summary.BrickCount
+			>= Result.Summary.TargetMinimumBrickCount);
+	TestTrue(TEXT("Brick count stays below tier maximum"),
+		Result.Summary.BrickCount
+			<= Result.Summary.TargetMaximumBrickCount);
+	if (Tier <= 1)
+	{
+		TestTrue(TEXT("Low tier retains a Box body"),
+			Result.Summary.SemanticBoxCount > 0);
+		TestEqual(TEXT("Low tier has exactly one terminal roof"),
+			Result.Summary.SemanticPrismCount
+				+ Result.Summary.SemanticPyramidCount,
+			1);
+		TestTrue(TEXT("Low tier roof has enough stacked courses to read in 3D"),
+			Result.Summary.RoofCourseBrickCount
+				>= (Tier == 0 ? 8 : 10));
+	}
+	if (Tier == 2)
+	{
+		TestTrue(TEXT("E3 realizes a prism"),
+			Result.Summary.SemanticPrismCount > 0);
+		TestTrue(TEXT("E3 realizes a pyramid"),
+			Result.Summary.SemanticPyramidCount > 0);
+	}
+	if (Tier > 0)
+	{
+		FABTSM73BeamD0ResolvedProfile PreviousProfile;
+		FString PreviousError;
+		const bool bPreviousResolved =
+			FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
+				ProfileId, Tier - 1, AcceptedFixtureSeed(ProfileId),
+				PreviousProfile, PreviousError);
+		TestTrue(*FString::Printf(
+			TEXT("Previous tier resolves: %s"), *PreviousError),
+			bPreviousResolved);
+		if (bPreviousResolved)
 		{
-			FABTSM73BeamD1GenerationResult Result;
-			FString Error;
-			const bool bGenerated = Compiler.Generate(
-				MakeSettings(ProfileId, AcceptedFixtureSeed(ProfileId), Tier),
-				Result,
-				Error);
-			TestTrue(*FString::Printf(TEXT("%s E%d compiles: %s"),
-				*ProfileId.ToString(), Tier + 1, *Error), bGenerated);
-			if (!bGenerated)
-			{
-				continue;
-			}
-			AddInfo(FString::Printf(
-				TEXT("Beam-D1.5 %s E%d Bricks=%d Target=%d-%d Attempt=%d Volumes=%d Box=%d Prism=%d Pyramid=%d RoofBricks=%d Motifs=%d Spans=%d"),
-				*ProfileId.ToString(), Tier + 1, Result.Summary.BrickCount,
-				Result.Summary.TargetMinimumBrickCount,
-				Result.Summary.TargetMaximumBrickCount,
-				Result.Summary.VisualCandidateAttempt,
-				Result.Summary.SemanticVolumeCount,
-				Result.Summary.SemanticBoxCount,
-				Result.Summary.SemanticPrismCount,
-				Result.Summary.SemanticPyramidCount,
-				Result.Summary.RoofCourseBrickCount,
-				Result.Summary.DistinctMotifCount,
-				Result.Summary.SupportedSpanCount));
-			TestTrue(TEXT("Visual complexity is certified"),
-				Result.Summary.bVisualComplexityCertified);
-			TestTrue(TEXT("Assembly axis/contact quality is certified"),
-				Result.Summary.bAssemblyQualityCertified);
-			TestTrue(TEXT("Brick count reaches tier minimum"),
-				Result.Summary.BrickCount
-					>= Result.Summary.TargetMinimumBrickCount);
-			TestTrue(TEXT("Brick count stays below tier maximum"),
-				Result.Summary.BrickCount
-					<= Result.Summary.TargetMaximumBrickCount);
-			if (Tier <= 1)
-			{
-				TestTrue(TEXT("Low tier retains a Box body"),
-					Result.Summary.SemanticBoxCount > 0);
-				TestEqual(TEXT("Low tier has exactly one terminal roof"),
-					Result.Summary.SemanticPrismCount
-						+ Result.Summary.SemanticPyramidCount,
-					1);
-				TestTrue(TEXT("Low tier roof has enough stacked courses to read in 3D"),
-					Result.Summary.RoofCourseBrickCount
-						>= (Tier == 0 ? 8 : 10));
-			}
-			if (Tier == 2)
-			{
-				TestTrue(TEXT("E3 realizes a prism"),
-					Result.Summary.SemanticPrismCount > 0);
-				TestTrue(TEXT("E3 realizes a pyramid"),
-					Result.Summary.SemanticPyramidCount > 0);
-			}
-			if (Tier > 0)
-			{
-				TestTrue(TEXT("Adjacent tier adds visible Brick complexity"),
-					Result.Summary.BrickCount > PreviousBrickCount);
-			}
-			PreviousBrickCount = Result.Summary.BrickCount;
+			TestTrue(TEXT("Adjacent tier Brick windows do not overlap"),
+				PreviousProfile.VisualComplexity.MaximumBrickCount
+					< Result.Summary.TargetMinimumBrickCount);
 		}
 	}
 	return true;

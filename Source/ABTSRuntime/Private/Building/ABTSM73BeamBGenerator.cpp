@@ -1554,7 +1554,10 @@ namespace ABTSM73BeamB
 			if (Closed.BearingContacts.Num()
 				>= Settings.BeamA.MaxBearingContactCount)
 			{
-				OutError = TEXT("BeamBBridgeCorbelBearingBudgetExceeded");
+				OutError = FString::Printf(
+					TEXT("BeamBBridgeCorbelBearingBudgetExceeded:Contacts=%d/%d"),
+					Closed.BearingContacts.Num(),
+					Settings.BeamA.MaxBearingContactCount);
 				return false;
 			}
 			FABTSM73BeamABearingContact& Contact =
@@ -2534,8 +2537,10 @@ namespace ABTSM73BeamB
 			if (Closed.BearingContacts.Num()
 				>= Settings.BeamA.MaxBearingContactCount)
 			{
-				OutError = TEXT(
-					"BeamBBridgeSuspendedPostBearingBudgetExceeded");
+				OutError = FString::Printf(
+					TEXT("BeamBBridgeSuspendedPostBearingBudgetExceeded:Contacts=%d/%d"),
+					Closed.BearingContacts.Num(),
+					Settings.BeamA.MaxBearingContactCount);
 				return false;
 			}
 			FABTSM73BeamABearingContact& Contact =
@@ -2999,7 +3004,12 @@ namespace ABTSM73BeamB
 			if (Closed.Joints.Num() + 2 > Settings.BeamA.MaxJointCount
 				|| Closed.Members.Num() >= Settings.BeamA.MaxMemberCount)
 			{
-				OutError = TEXT("BeamBBeamAIRBudgetExceeded");
+				OutError = FString::Printf(
+					TEXT("BeamBBeamAIRBudgetExceeded:Members=%d/%d:Joints=%d/%d:Planned=%d:Bay=%d:Role=%d"),
+					Closed.Members.Num(), Settings.BeamA.MaxMemberCount,
+					Closed.Joints.Num(), Settings.BeamA.MaxJointCount,
+					Planned.PlannedMemberId, Planned.BayId,
+					static_cast<int32>(Planned.Role));
 				return false;
 			}
 

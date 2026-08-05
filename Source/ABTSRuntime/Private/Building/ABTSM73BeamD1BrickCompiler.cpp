@@ -9,6 +9,7 @@
 #include "ABTSM73BeamC3CribCoreGenerator.h"
 #include "ABTSM73BeamD0ProfileCatalog.h"
 #include "Building/ABTSM73DAG5BShapeGrammarV2.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/Crc.h"
 
 namespace ABTSM73BeamD1
@@ -407,26 +408,51 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 	int32 LastBrickCount = 0;
 	for (int32 Attempt = 0; Attempt < Target.MaximumCandidateAttempts; ++Attempt)
 	{
+		const double AttemptStartSeconds = FPlatformTime::Seconds();
+		double ProfileMilliseconds = 0.0;
+		double SilhouetteMilliseconds = 0.0;
+		double BeamAMilliseconds = 0.0;
+		double BeamBMilliseconds = 0.0;
+		double BeamC3Milliseconds = 0.0;
+		double BeamCMilliseconds = 0.0;
+		double CompileMilliseconds = 0.0;
+		auto MeasureStage = [](double& InOutMilliseconds, auto&& Operation)
+		{
+			const double StartSeconds = FPlatformTime::Seconds();
+			const bool bSucceeded = Operation();
+			InOutMilliseconds +=
+				(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+			return bSucceeded;
+		};
 		const int32 AttemptSeed = ABTSM73BeamD1::CandidateSeed(
 			Settings.BuildingSeed, Attempt);
-		auto LogCandidateRejection = [&Settings, Attempt, AttemptSeed](
+		auto LogCandidateRejection = [&Settings, Attempt, AttemptSeed,
+			AttemptStartSeconds, &ProfileMilliseconds, &SilhouetteMilliseconds,
+			&BeamAMilliseconds, &BeamBMilliseconds, &BeamC3Milliseconds,
+			&BeamCMilliseconds, &CompileMilliseconds](
 			const TCHAR* Gate, const FString& Reason, const int32 MemberCount,
 			const int32 BrickCount = 0)
 		{
 			UE_LOG(LogABTSRuntime, Display,
 				TEXT("[ABTS][M7.3-Beam-D1][CandidateRejected]")
 				TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
-				TEXT(" Gate=%s Reason=%s Members=%d Bricks=%d"),
+				TEXT(" Gate=%s Reason=%s Members=%d Bricks=%d")
+				TEXT(" TimingMs=Profile:%.2f,Shape:%.2f,BeamA:%.2f,BeamB:%.2f,C3:%.2f,BeamC:%.2f,Compile:%.2f,Total:%.2f"),
 				*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
 				Settings.BuildingSeed, Attempt, AttemptSeed, Gate, *Reason,
-				MemberCount, BrickCount);
+				MemberCount, BrickCount, ProfileMilliseconds,
+				SilhouetteMilliseconds, BeamAMilliseconds, BeamBMilliseconds,
+				BeamC3Milliseconds, BeamCMilliseconds, CompileMilliseconds,
+				(FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
 		};
 		FABTSM73BeamD0ResolvedProfile Profile;
 		FString CandidateError;
-		if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
-			Settings.GameplayProfileId, Settings.DifficultyTier,
-			AttemptSeed,
-			Profile, CandidateError))
+		if (!MeasureStage(ProfileMilliseconds, [&]()
+			{
+				return FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
+					Settings.GameplayProfileId, Settings.DifficultyTier,
+					AttemptSeed, Profile, CandidateError);
+			}))
 		{
 			LastFailure = FString::Printf(TEXT("Profile:%s"), *CandidateError);
 			LogCandidateRejection(TEXT("Profile"), LastFailure, 0);
@@ -435,9 +461,12 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 
 		FABTSM73DAG5BV2GenerationResult Silhouette;
 		FABTSM73DAG5BShapeGrammarV2 ShapeGenerator;
-		if (!ShapeGenerator.Generate(
-			Profile.BeamSettings.BeamB.BeamA.Silhouette,
-			Silhouette, CandidateError))
+		if (!MeasureStage(SilhouetteMilliseconds, [&]()
+			{
+				return ShapeGenerator.Generate(
+					Profile.BeamSettings.BeamB.BeamA.Silhouette,
+					Silhouette, CandidateError);
+			}))
 		{
 			LastFailure = FString::Printf(TEXT("Silhouette:%s"), *CandidateError);
 			LogCandidateRejection(TEXT("Silhouette"), LastFailure, 0);
@@ -446,9 +475,12 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 
 		FABTSM73BeamAGenerationResult BeamA;
 		FABTSM73BeamAGenerator BeamAGenerator;
-		if (!BeamAGenerator.Generate(
-			Profile.BeamSettings.BeamB.BeamA,
-			Silhouette, BeamA, CandidateError))
+		if (!MeasureStage(BeamAMilliseconds, [&]()
+			{
+				return BeamAGenerator.Generate(
+					Profile.BeamSettings.BeamB.BeamA,
+					Silhouette, BeamA, CandidateError);
+			}))
 		{
 			LastFailure = FString::Printf(TEXT("BeamA:%s"), *CandidateError);
 			LogCandidateRejection(TEXT("BeamA"), LastFailure,
@@ -457,9 +489,12 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 		}
 		FABTSM73BeamBGenerationResult BeamB;
 		FABTSM73BeamBGenerator BeamBGenerator;
-		if (!BeamBGenerator.Generate(
-			Profile.BeamSettings.BeamB,
-			Silhouette, BeamA, BeamB, CandidateError))
+		if (!MeasureStage(BeamBMilliseconds, [&]()
+			{
+				return BeamBGenerator.Generate(
+					Profile.BeamSettings.BeamB,
+					Silhouette, BeamA, BeamB, CandidateError);
+			}))
 		{
 			LastFailure = FString::Printf(TEXT("BeamB:%s"), *CandidateError);
 			LogCandidateRejection(TEXT("BeamB"), LastFailure,
@@ -471,12 +506,13 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 
 		FABTSM73BeamC3CribCoreResult BeamC3;
 		FABTSM73BeamC3CribCoreGenerator BeamC3Generator;
-		if (!BeamC3Generator.Generate(
-			Profile.StabilityCore,
-			Profile.BeamSettings.BeamB.BeamA,
-			BeamB.ClosedAssembly,
-			BeamC3,
-			CandidateError))
+		if (!MeasureStage(BeamC3Milliseconds, [&]()
+			{
+				return BeamC3Generator.Generate(
+					Profile.StabilityCore,
+					Profile.BeamSettings.BeamB.BeamA,
+					BeamB.ClosedAssembly, BeamC3, CandidateError);
+			}))
 		{
 			LastFailure = FString::Printf(TEXT("BeamC3:%s"), *CandidateError);
 			LogCandidateRejection(TEXT("BeamC3"), LastFailure,
@@ -491,10 +527,14 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 
 		FABTSM73BeamCGenerationResult BeamC;
 		FABTSM73BeamCGenerator BeamCGenerator;
-		if (!BeamCGenerator.GenerateWithStructuralClosure(
-			Profile.BeamSettings, BeamB.ClosedAssembly, BeamC, CandidateError,
-			Profile.StabilityCore.MaximumFinalMemberCount,
-			Profile.StabilityCore.bEnabled))
+		if (!MeasureStage(BeamCMilliseconds, [&]()
+			{
+				return BeamCGenerator.GenerateWithStructuralClosure(
+					Profile.BeamSettings, BeamB.ClosedAssembly, BeamC,
+					CandidateError,
+					Profile.StabilityCore.MaximumFinalMemberCount,
+					Profile.StabilityCore.bEnabled);
+			}))
 		{
 			LastFailure = FString::Printf(
 				TEXT("BeamC:%s:Contact=%d:Resultant=%d:Spread=%d:Span=%d:Cantilever=%d"),
@@ -512,12 +552,13 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			BeamC.Summary.StructuralClosurePassCount;
 		const int32 InitialBeamCAddedSupportPostCount =
 			BeamC.Summary.AddedStructuralSupportPostCount;
-		if (!BeamC3Generator.CertifyFinalAssembly(
-			Profile.StabilityCore,
-			Profile.BeamSettings.BeamB.BeamA,
-			BeamB.ClosedAssembly,
-			BeamC3,
-			CandidateError))
+		if (!MeasureStage(BeamC3Milliseconds, [&]()
+			{
+				return BeamC3Generator.CertifyFinalAssembly(
+					Profile.StabilityCore,
+					Profile.BeamSettings.BeamB.BeamA,
+					BeamB.ClosedAssembly, BeamC3, CandidateError);
+			}))
 		{
 			// Beam-C2 may introduce a new real support station after the first
 			// core rewrite, or its authoritative reclose may merge a nearby
@@ -556,13 +597,14 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			RepairSettings.BeamC2MemberReserve = 0;
 			const FABTSM73BeamC3CribCoreResult ExistingCorePlan = BeamC3;
 			CandidateError.Reset();
-			if (!BeamC3Generator.Generate(
-				RepairSettings,
-				Profile.BeamSettings.BeamB.BeamA,
-				BeamB.ClosedAssembly,
-				BeamC3,
-				CandidateError,
-				&ExistingCorePlan))
+			if (!MeasureStage(BeamC3Milliseconds, [&]()
+				{
+					return BeamC3Generator.Generate(
+						RepairSettings,
+						Profile.BeamSettings.BeamB.BeamA,
+						BeamB.ClosedAssembly, BeamC3, CandidateError,
+						&ExistingCorePlan);
+				}))
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamC3PostC2Repair:%s"), *CandidateError);
@@ -571,13 +613,16 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				continue;
 			}
 			CandidateError.Reset();
-			if (!BeamCGenerator.GenerateWithStructuralClosure(
-				Profile.BeamSettings, BeamB.ClosedAssembly,
-				BeamC, CandidateError,
-				Profile.StabilityCore.MaximumFinalMemberCount,
-				Profile.StabilityCore.bEnabled,
-				InitialBeamCClosurePassCount,
-				InitialBeamCAddedSupportPostCount))
+			if (!MeasureStage(BeamCMilliseconds, [&]()
+				{
+					return BeamCGenerator.GenerateWithStructuralClosure(
+						Profile.BeamSettings, BeamB.ClosedAssembly,
+						BeamC, CandidateError,
+						Profile.StabilityCore.MaximumFinalMemberCount,
+						Profile.StabilityCore.bEnabled,
+						InitialBeamCClosurePassCount,
+						InitialBeamCAddedSupportPostCount);
+				}))
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamCPostC3Repair:%s"), *CandidateError);
@@ -586,12 +631,13 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				continue;
 			}
 			CandidateError.Reset();
-			if (!BeamC3Generator.CertifyFinalAssembly(
-				RepairSettings,
-				Profile.BeamSettings.BeamB.BeamA,
-				BeamB.ClosedAssembly,
-				BeamC3,
-				CandidateError))
+			if (!MeasureStage(BeamC3Milliseconds, [&]()
+				{
+					return BeamC3Generator.CertifyFinalAssembly(
+						RepairSettings,
+						Profile.BeamSettings.BeamB.BeamA,
+						BeamB.ClosedAssembly, BeamC3, CandidateError);
+				}))
 			{
 				LastFailure = FString::Printf(
 					TEXT("BeamC3FinalAfterRepair:%s"), *CandidateError);
@@ -633,7 +679,11 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			static_cast<uint32>(BeamC.Summary.LoadDAGHash)));
 
 		FABTSM73BeamD1GenerationResult Candidate;
-		if (!CompileResolved(Profile, BeamB, BeamC, Candidate, CandidateError))
+		if (!MeasureStage(CompileMilliseconds, [&]()
+			{
+				return CompileResolved(
+					Profile, BeamB, BeamC, Candidate, CandidateError);
+			}))
 		{
 			LastFailure = FString::Printf(TEXT("Compile:%s"), *CandidateError);
 			LogCandidateRejection(TEXT("Compile"), LastFailure,
@@ -719,6 +769,15 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 			BeamC3.Summary.MaximumUnbracedCorePostSpanAfterCM,
 			Candidate.Summary.StructuralClosurePassCount,
 			Candidate.Summary.AddedStructuralSupportPostCount);
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-Beam-D1][CandidateTiming]")
+			TEXT(" Profile=%s Tier=%d Attempt=%d")
+			TEXT(" TimingMs=Profile:%.2f,Shape:%.2f,BeamA:%.2f,BeamB:%.2f,C3:%.2f,BeamC:%.2f,Compile:%.2f,Total:%.2f"),
+			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+			Attempt, ProfileMilliseconds, SilhouetteMilliseconds,
+			BeamAMilliseconds, BeamBMilliseconds, BeamC3Milliseconds,
+			BeamCMilliseconds, CompileMilliseconds,
+			(FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
 		Candidate.Summary.SemanticVolumeCount =
 			Silhouette.Summary.VolumeCount;
 		Candidate.Summary.SemanticBoxCount =

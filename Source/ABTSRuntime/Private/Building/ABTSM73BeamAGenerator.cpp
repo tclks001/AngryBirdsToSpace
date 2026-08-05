@@ -945,7 +945,11 @@ namespace ABTSM73BeamA
 				{
 					if (++PairChecks > Settings.MaxBearingPairChecks)
 					{
-						OutError = TEXT("BeamAMaxBearingPairChecksExceeded");
+						OutError = FString::Printf(
+							TEXT("BeamAMaxBearingPairChecksExceeded:Checks=%d/%d:Contacts=%d/%d"),
+							PairChecks, Settings.MaxBearingPairChecks,
+							Result.BearingContacts.Num(),
+							Settings.MaxBearingContactCount);
 						return false;
 					}
 					if (LowerId == UpperId)
@@ -978,7 +982,11 @@ namespace ABTSM73BeamA
 					if (Result.BearingContacts.Num()
 						>= Settings.MaxBearingContactCount)
 					{
-						OutError = TEXT("BeamAMaxBearingContactCountExceeded");
+						OutError = FString::Printf(
+							TEXT("BeamAMaxBearingContactCountExceeded:Contacts=%d/%d:Checks=%d/%d"),
+							Result.BearingContacts.Num(),
+							Settings.MaxBearingContactCount,
+							PairChecks, Settings.MaxBearingPairChecks);
 						return false;
 					}
 					FABTSM73BeamABearingContact& Contact =
@@ -1530,13 +1538,15 @@ namespace ABTSM73BeamA
 							LogABTSRuntime,
 							Warning,
 							TEXT("[ABTS][M7.3-Beam-A][Penetration]")
-							TEXT(" A=%d AxisA=%d BoundsA=%s")
-							TEXT(" B=%d AxisB=%d BoundsB=%s"),
+							TEXT(" A=%d AxisA=%d RoleA=%d BoundsA=%s")
+							TEXT(" B=%d AxisB=%d RoleB=%d BoundsB=%s"),
 							A,
 							static_cast<int32>(Result.Members[A].Axis),
+							static_cast<int32>(Result.Members[A].Role),
 							*Bounds[A].ToString(),
 							B,
 							static_cast<int32>(Result.Members[B].Axis),
+							static_cast<int32>(Result.Members[B].Role),
 							*Bounds[B].ToString());
 					}
 					++Count;
@@ -2089,6 +2099,14 @@ namespace ABTSM73BeamA
 				Context.Settings->BlockCrossSectionCM,
 				Context.Settings->JointMergeToleranceCM,
 				PostMergedCount);
+			// The post-split collinear merge can legitimately combine overlapping
+			// fragments from the same Z lane, but their union may cross the
+			// horizontal course that caused the split. Re-apply the physical course
+			// exclusion once after the final merge; no later merge may undo it.
+			int32 FinalSplitCount = 0;
+			SplitPostsAtHorizontalCourses(
+				Specs, *Context.Settings, FinalSplitCount);
+			SplitCount += FinalSplitCount;
 			const int32 MergedCount = PreMergedCount + PostMergedCount;
 			Context.Result->Summary.SplitPostMemberCount += SplitCount;
 			Context.Result->Summary.MergedMemberCount += MergedCount;

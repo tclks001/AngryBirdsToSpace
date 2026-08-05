@@ -834,7 +834,9 @@ namespace ABTSM73BeamC
 				}
 				if (Proposals.Num() >= RemainingPostBudget)
 				{
-					OutError = TEXT("BeamCStructuralSupportBudgetExceeded");
+					OutError = FString::Printf(
+						TEXT("BeamCStructuralSupportBudgetExceeded:Required=%d:Capacity=%d"),
+						Proposals.Num() + 1, RemainingPostBudget);
 					return false;
 				}
 				FStructuralSupportProposal& Proposal =
@@ -858,7 +860,13 @@ namespace ABTSM73BeamC
 			if (Assembly.Members.Num() >= Settings.BeamB.BeamA.MaxMemberCount
 				|| Assembly.Joints.Num() + 2 > Settings.BeamB.BeamA.MaxJointCount)
 			{
-				OutError = TEXT("BeamCStructuralSupportMemberBudgetExceeded");
+				OutError = FString::Printf(
+					TEXT("BeamCStructuralSupportIRBudgetExceeded:Members=%d/%d:Joints=%d/%d:Proposals=%d:Committed=%d"),
+					Assembly.Members.Num(),
+					Settings.BeamB.BeamA.MaxMemberCount,
+					Assembly.Joints.Num(),
+					Settings.BeamB.BeamA.MaxJointCount,
+					Proposals.Num(), OutAddedCount);
 				return false;
 			}
 			const int32 JointA = Assembly.Joints.Num();
@@ -2185,8 +2193,10 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 		FString RepairError;
 		const int32 RemainingMemberCapacity =
 			MaximumFinalMemberCount - InOutClosedAssembly.Members.Num();
+		const int32 RemainingConfiguredSupportCapacity =
+			Settings.MaximumStructuralSupportPosts - TotalAddedPosts;
 		const int32 RemainingSupportCapacity = FMath::Min(
-			Settings.MaximumStructuralSupportPosts - TotalAddedPosts,
+			RemainingConfiguredSupportCapacity,
 			RemainingMemberCapacity);
 		if (RemainingSupportCapacity <= 0)
 		{
@@ -2205,6 +2215,18 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 			bAddedRootedGrillage,
 			AddedThisPass, RepairError))
 		{
+			if (RepairError.StartsWith(
+				TEXT("BeamCStructuralSupportBudgetExceeded")))
+			{
+				RepairError += FString::Printf(
+					TEXT(":SupportRemaining=%d:MemberRemaining=%d:Members=%d/%d:Added=%d/%d"),
+					RemainingConfiguredSupportCapacity,
+					RemainingMemberCapacity,
+					InOutClosedAssembly.Members.Num(),
+					MaximumFinalMemberCount,
+					TotalAddedPosts,
+					Settings.MaximumStructuralSupportPosts);
+			}
 			OutError = RepairError.IsEmpty()
 				? TEXT("BeamCStructuralClosureStalled") : RepairError;
 			return false;

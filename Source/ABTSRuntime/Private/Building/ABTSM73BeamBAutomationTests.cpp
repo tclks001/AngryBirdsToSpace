@@ -916,16 +916,30 @@ bool FABTSM73BeamBGrammarDepthTest::RunTest(const FString& Parameters)
 	FABTSM73BeamBGenerator Generator;
 	FABTSM73BeamBGenerationResult Shallow;
 	FABTSM73BeamBGenerationResult Deep;
-	TestTrue(TEXT("Shallow accepts"), Generator.Generate(
-		ShallowSettings, Silhouette, BeamA, Shallow, Error));
-	TestTrue(TEXT("Deep accepts"), Generator.Generate(
-		DeepSettings, Silhouette, BeamA, Deep, Error));
+	const bool bShallowAccepted = Generator.Generate(
+		ShallowSettings, Silhouette, BeamA, Shallow, Error);
+	TestTrue(*FString::Printf(TEXT("Shallow accepts: %s"), *Error),
+		bShallowAccepted);
+	if (!bShallowAccepted)
+	{
+		return false;
+	}
+	const bool bDeepAccepted = Generator.Generate(
+		DeepSettings, Silhouette, BeamA, Deep, Error);
+	TestTrue(*FString::Printf(TEXT("Deep accepts: %s"), *Error),
+		bDeepAccepted);
+	if (!bDeepAccepted)
+	{
+		return false;
+	}
 	TestEqual(TEXT("Motif collapse remains stable across grammar depth"),
 		Shallow.Summary.MotifWFCHash, Deep.Summary.MotifWFCHash);
 	TestTrue(TEXT("Deep grammar adds rule steps"),
 		Deep.GrammarSteps.Num() > Shallow.GrammarSteps.Num());
 	TestTrue(TEXT("Deep grammar adds planned topology"),
 		Deep.PlannedMembers.Num() > Shallow.PlannedMembers.Num());
+	TestEqual(TEXT("Deep grammar closes without penetration"),
+		Deep.Summary.RemainingPenetrationCount, 0);
 	return true;
 }
 

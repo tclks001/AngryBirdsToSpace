@@ -88,6 +88,7 @@
 | M7-BB-005 | 桥两端仍留可见缝隙或只部分纵梁落在桥托上 | Bridge Bay 与塔体都向各自 Bounds 内缩半截面；旧审计只要端点区域存在任意一条接触就把整端记为通过 | 主桥延伸至权威门洞边界；两端生成模块归属的 BridgeSeat/托块；逐根、逐端审计所有 BridgeRail | 每根纵梁左右端均有局部 Bearing；跨中无地柱；端点错位稳定 fail closed |
 | M7-BB-006 | 只给一根悬空横梁补了 Z 柱，其余同层横梁仍悬空 | 支撑搜索每组只选一个 `BestUpper`，没有遍历全部独立上层横梁 | 逐根审计 BridgeRail/Seat 上方最近层全部水平 Member，为每根真正悬空梁在重叠区补局部 `BridgePost` | 默认夹具记录 `Targets=Supported`、`Violations=0`；已有直接承托的梁不重复补柱 |
 | M7-BB-007 | 相邻 Bay 的横梁端部差半格未贴合 | Motif 的 `U0/U1` 从 Bounds 两侧各内缩半个截面；Port 相容与 Ground 可达都不要求端部完整覆盖 | 完整横梁延伸到 Bay 实体边界；邻接 Bay 在公共边界精确相接；只有局部短梁保留非连接端内缩 | 固定种子端部覆盖测试；不得以“有任意接触”替代完整接口覆盖 |
+| M7-BB-008 | `GrammarDepthAddsTopology` 的深层语法稳定产生 `BridgeSeat` 与 `Post` 约 7.3 cm 穿透；在 corbel 前额外闭合后失败签名不变 | Beam-A 先按水平 course 切 Z 柱，随后共线合并又把同 lane 片段跨 course 并回完整区间；问题属于最终装配规范化顺序，不是 corbel 局部补闭合 | 保留第一次 split/merge 去重流程，并在最后一次共线合并后再执行一次物理 course 分段；同时让穿透日志输出双方 Role，测试失败时立即返回真实错误，避免后续断言噪声 | fresh `GrammarDepthAddsTopology` 1/1、`ABTS.M73DAG.BeamB` 13/13；`BeamAMemberPenetration=0`。不得通过缩小 BridgeSeat、放宽穿透容差或重复局部闭合掩盖规范化顺序错误 |
 
 ## 8. Beam-C、D0、D1/D1.5：荷载、真实接触、难度与屋顶
 
@@ -122,6 +123,7 @@
 | M7-D1-008 | `ABTSM73BeamD1PreviewActor` 开启 `Spawn Runtime Modules in PIE` 后建筑消失，既没有编辑器预览，也没有真实 Module | PreviewActor 是关卡放置 Actor，其 `BeginPlay` 早于 `AABTSM7GameMode` 动态创建 `AABTSM7BuildingMaterialSystem`；旧逻辑只搜索一次，找不到便静默返回，而 HISM 预览在游戏中默认隐藏 | 将一次性搜索改为有界定时重试：每 0.1 秒查找一次，最多 40 次；找到后生成全部真实 Module、清除定时器并输出成功日志，超时或编译拒绝输出明确诊断；`EndPlay` 清理定时器 | 自动化先在没有 MaterialSystem 时执行同一重试入口，再延迟创建系统并确认生成数等于 Brick 数；日志必须出现 `RuntimeModulesSpawned`，完整 `ABTS.M73DAG.BeamD1` 10/10 通过 |
 
 | M7-D1-009 | 物理测试场点击弹弓后报 `Accepted=7 Rejected=2 Contract=0`，预览夹具阻塞发射 | `AABTSM73StableBuildingActor` 过去没有预览/运行时边界：所有关卡实例都会在 PIE 生成真实 Module；测试场又未开启生产 Building Contract，因此 M6 兼容路径扫描世界中全部 StableBuildingActor。一个深递归夹具有 76cm 内部穿透，另一个 DAG5B+DAG3 夹具无可行候选，二者共同拒绝 | 新增互相独立的 `Participate in PIE Runtime` 与 `Participate in Slingshot Validation Gate`。前者关闭时不生成 Module、不运行 Chaos，并标记 `NotRequired`；后者关闭时保留真实 PIE 物理和内部诊断，但对弹弓门禁公开为 `NotRequired` | `ABTS.M73A.StableBuildingParticipation` 验证两种开关组合；M73A 2/2、Beam-D1 10/10 通过。测试地图中的失败夹具应按验收目的选择“纯预览”或“物理但不阻塞”，不得依靠放宽全局门禁 |
+| M7-D1-010 | D1.5 视觉矩阵以一个测试串行执行 30 个 Profile/Tier，每格又做 6–12 次完整候选流水线；集成失败约 20 分钟后才只报告末项错误 | 测试粒度与故障域不一致，且候选日志没有阶段耗时；实测 `ColumnBreak.E4` 单格约 43 秒，其中一次旧 C3 达 18.7 秒。通用预算错误又不能区分 Member、Joint、Bearing 或配置 Support 配额 | 保留同一 5×6 合同，但改为 30 个可独立过滤的复杂自动化叶子；每个 Attempt 输出 Profile/Shape/BeamA/BeamB/C3/BeamC/Compile/Total 计时；Beam-A/B/C 容量错误输出实际值、上限和所需量，不调大预算 | `ColumnBreak.E1` 叶子 1/1；旧 C3 红样本仍 fail closed，但可单独运行。`ColumnBreak.E4` 明确为 `Required=2`、`MemberRemaining=1`，`SeamRelease.E6` 明确为 `Joints=8192/8192` 而非 Member；最终 30/30 仍是新版 C3 的完整门，不得删除、放宽或用部分叶子代替 |
 
 ## 9. Beam-C3 第一版约 20 小时复盘：效率与停止合同
 
@@ -184,9 +186,9 @@ Chaos 夹具证伪，静态代理和生产实现先被做深；候选搜索、do
 2. `M7-DAG3-001`、`M7-DAG4-001`：编辑器预览、PIE 真实 Actor 和诊断覆盖层生命周期。
 3. `M7-DAG5-001`～`004`：候选搜索不是深度扩展，以及下游预算导致所有 Seed 同门失败。
 4. `M7-BA-001`～`007`：Bearing Contact、公共边界实际 Gap、Z 柱站位和全局装配。
-5. `M7-BB-001`～`007`：Port 假绿灯、斜撑延期、语义屋顶与桥端逐梁承托。
+5. `M7-BB-001`～`008`：Port 假绿灯、斜撑延期、语义屋顶、桥端逐梁承托与 split/merge 顺序穿透。
 6. `M7-BC-002`、`003`：声明 Bearing 与最终 Brick 真实接触的权威切换。
-7. `M7-D1-003`～`007`：屋顶逐层直接承接、聚合 Crown、长轴屋脊和闭合无进展保护。
+7. `M7-D1-003`～`010`：屋顶逐层直接承接、聚合 Crown、长轴屋脊、闭合无进展保护，以及 5×6 叶子拆分和阶段计时。
 8. `M7-BC-004`～`017`：静态 DAG 不等于 Chaos 自稳定、四柱闭环、低 Tier 普通框架替换、
    C2 最终硬预算、严格根系普通楼层网、Host/高度候选时序、短 Z 承接面，以及 v9 的
    17/17、5×2、Drop Tier 4、Source-aware 跨 Bay Portal、按失败 DAG 有界的实体 cap、Column 高 Tier，

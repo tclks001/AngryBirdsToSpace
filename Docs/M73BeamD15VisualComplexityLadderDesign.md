@@ -83,6 +83,12 @@ Profile × Tier × BaseSeed
 C3 接入后还必须区分两张矩阵：5 × 6 D1.5 矩阵验证视觉里程碑与 Brick 递增；5 Profile ×
 Tier 0/1 验证四柱闭环、全部 Z 站位柱跨和最终预算。两张矩阵都必须通过，但都不能替代实时 Chaos PIE。
 
+5 × 6 合同实现为 30 个独立自动化叶子：
+`ABTS.M73DAG.BeamD15.VisualComplexityLadder.<Profile>.E1..E6`。运行父 Filter 仍执行完整
+30 格门槛；调试时必须先运行单一失败叶子。每个候选 Attempt 记录 Profile、Shape、Beam-A、Beam-B、
+C3、Beam-C、Compile 与 Total 阶段耗时。拆分只改变调度和取证粒度，不改变 Recipe、Brick 窗、
+里程碑、候选上限或 5 × 6 完整验收要求。
+
 ## 6. 编辑器验收
 
 在同一个 `M7.3 Beam-D1 Real Brick Preview` Actor 上固定 Profile 与 Seed，只依次修改
