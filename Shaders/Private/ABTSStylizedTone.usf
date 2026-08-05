@@ -80,7 +80,37 @@ float3 ABTSSampleWorldNormal(float2 ViewportUV)
 	return normalize(DecodeNormal(EncodedNormal));
 }
 
-float ABTSComputeOutline(float2 ViewportUV)
+float ABTSComputeNeighborEdge(
+	float CenterDepth,
+	float3 CenterNormal,
+	float2 SampleUV)
+{
+	const float SampleDeviceDepth = ABTSSampleDeviceDepth(SampleUV);
+	if (SampleDeviceDepth <= 1.0e-7f)
+	{
+		return 1.0f;
+	}
+
+	const float SampleDepth = ConvertFromDeviceZ(SampleDeviceDepth);
+	const float RelativeDepthDelta =
+		abs(SampleDepth - CenterDepth) /
+		max(min(SampleDepth, CenterDepth), 1.0f);
+	const float DepthEdge = smoothstep(
+		OutlineDepthThreshold,
+		OutlineDepthThreshold + OutlineDepthSoftness,
+		RelativeDepthDelta);
+
+	const float3 SampleNormal = ABTSSampleWorldNormal(SampleUV);
+	const float NormalDelta =
+		1.0f - saturate(dot(CenterNormal, SampleNormal));
+	const float NormalEdge = smoothstep(
+		OutlineNormalThreshold,
+		OutlineNormalThreshold + OutlineNormalSoftness,
+		NormalDelta);
+	return max(DepthEdge, NormalEdge);
+}
+
+float ABTSComputeOutlineCoverage(float2 ViewportUV)
 {
 	const float CenterDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
 	if (CenterDeviceDepth <= 1.0e-7f)
@@ -91,61 +121,57 @@ float ABTSComputeOutline(float2 ViewportUV)
 	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
 	const float3 CenterNormal = ABTSSampleWorldNormal(ViewportUV);
 	const float2 PixelOffset = ViewportInvSize * OutlineWidthPixels;
-	const float2 Offsets[4] =
+	const float2 DiagonalOffset = PixelOffset * 0.70710678f;
+	const float2 Offsets[8] =
 	{
 		float2(PixelOffset.x, 0.0f),
 		float2(-PixelOffset.x, 0.0f),
 		float2(0.0f, PixelOffset.y),
-		float2(0.0f, -PixelOffset.y)
+		float2(0.0f, -PixelOffset.y),
+		float2(DiagonalOffset.x, DiagonalOffset.y),
+		float2(-DiagonalOffset.x, DiagonalOffset.y),
+		float2(DiagonalOffset.x, -DiagonalOffset.y),
+		float2(-DiagonalOffset.x, -DiagonalOffset.y)
 	};
 
-	float MaxDepthDelta = 0.0f;
-	float MaxNormalDelta = 0.0f;
-	float SilhouetteEdge = 0.0f;
+	float AccumulatedEdge = 0.0f;
 	UNROLL
-	for (int SampleIndex = 0; SampleIndex < 4; ++SampleIndex)
+	for (int SampleIndex = 0; SampleIndex < 8; ++SampleIndex)
 	{
-		const float2 SampleUV = saturate(ViewportUV + Offsets[SampleIndex]);
-		const float SampleDeviceDepth = ABTSSampleDeviceDepth(SampleUV);
-		if (SampleDeviceDepth <= 1.0e-7f)
-		{
-			SilhouetteEdge = 1.0f;
-			continue;
-		}
-
-		const float SampleDepth = ConvertFromDeviceZ(SampleDeviceDepth);
-		const float RelativeDepthDelta =
-			abs(SampleDepth - CenterDepth) /
-			max(min(SampleDepth, CenterDepth), 1.0f);
-		MaxDepthDelta = max(MaxDepthDelta, RelativeDepthDelta);
-
-		const float3 SampleNormal = ABTSSampleWorldNormal(SampleUV);
-		MaxNormalDelta = max(
-			MaxNormalDelta,
-			1.0f - saturate(dot(CenterNormal, SampleNormal)));
+		AccumulatedEdge += ABTSComputeNeighborEdge(
+			CenterDepth,
+			CenterNormal,
+			saturate(ViewportUV + Offsets[SampleIndex]));
 	}
 
-	const float DepthEdge = smoothstep(
-		OutlineDepthThreshold,
-		OutlineDepthThreshold + OutlineDepthSoftness,
-		MaxDepthDelta);
-	const float NormalEdge = smoothstep(
-		OutlineNormalThreshold,
-		OutlineNormalThreshold + OutlineNormalSoftness,
-		MaxNormalDelta);
-	return saturate(max(SilhouetteEdge, max(DepthEdge, NormalEdge)));
+	const float NormalizedCoverage = AccumulatedEdge / 3.0f;
+	return smoothstep(0.10f, 0.90f, NormalizedCoverage);
 }
 
-void ABTSStylizedToneAndOutlineMainPS(
+void ABTSStylizedOutlineMainPS(
 	in noperspective float4 UVAndScreenPos : TEXCOORD0,
 	out float4 OutColor : SV_Target0)
 {
-	float4 SceneColor = Texture2DSample(
+	const float4 SceneColor = Texture2DSample(
 		SceneColorTexture,
 		SceneColorSampler,
 		UVAndScreenPos.xy);
 	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
-	const float Outline = ABTSComputeOutline(ViewportUV) * OutlineStrength;
-	const float3 ToneColor = ABTSApplySoftToneBands(SceneColor.rgb);
-	OutColor = float4(lerp(ToneColor, OutlineColor, Outline), SceneColor.a);
+	const float OutlineCoverage = ABTSComputeOutlineCoverage(ViewportUV);
+	const float OutlineAmount = saturate(OutlineCoverage * OutlineStrength);
+	const float3 OutlineTarget = SceneColor.rgb * OutlineColor;
+	OutColor = float4(
+		lerp(SceneColor.rgb, OutlineTarget, OutlineAmount),
+		SceneColor.a);
+}
+
+void ABTSStylizedToneMainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	const float4 SceneColor = Texture2DSample(
+		SceneColorTexture,
+		SceneColorSampler,
+		UVAndScreenPos.xy);
+	OutColor = float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
 }

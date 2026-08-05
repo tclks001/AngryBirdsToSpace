@@ -196,9 +196,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T2-A reports the tone-and-outline implementation"),
+		TEXT("T2-A reports the temporally stabilized outline implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		2);
+		3);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());

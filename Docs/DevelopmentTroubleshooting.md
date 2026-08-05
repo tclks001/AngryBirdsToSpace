@@ -257,3 +257,10 @@
 3. 若子文档条目仍为“开放/候选未认证”，本文只保留风险、验证方法和所有权，不写成已解决。
 4. 更新本文后，把对应子文档最新提交写成新的摘录基线；三个子文档仍作为完整证据源继续维护。
 5. Markdown-only 摘录不要求 UE 编译；若摘录同时修改源码、配置、Blueprint、地图或稳定契约，则按多工作树规范执行相应构建、自动化和 PIE 门。
+
+## 14. 风格化描边的锯齿、抖动与真实 RHI 绑定
+
+| 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| T2-A 静态截图能看到描边，但地形、鸟、物体和建筑边缘有明显像素锯齿；相机或对象运动时线条抖动 | 初版轮廓订阅 `Tonemap` 后扩展点，晚于 UE 5.8 的 TSR/TAA。Temporal Jitter 改变每帧 Depth/Normal 边缘采样位置，而硬四邻域 `max` 把细小变化放大为二值跳变；最终线条没有再经过时域稳定 | 把轮廓独立为 `AfterDOF` 的 `ABTS Stylized OutlinePreTSR`，在 TSR/TAA 前用深度与法线八邻域累积连续覆盖率；按内部/最终 Viewport 比例换算宽度。T1 色调保留在 Tonemap 后的独立 `ABTS Stylized Tone`，运行身份升级为版本 3 | 强制 Unity；fresh NullRHI `ABTS.Rendering.Toon`；fresh D3D12 8/8 截图；Style On 的两个 pass 合计 `<=1.5 ms @ 1080p` 且 Outline `<=1.0 ms`；可见 PIE 旋转相机并让鸟/建筑运动，确认轮廓不再出现不可接受的闪烁。静态图不能替代最后一项 |
+| NullRHI 自动化通过，但真实 D3D12 首帧在新描边 Shader 上报告 `View` 未绑定并因 `Missing uniform buffer` 退出 | `ViewportUVToBufferUV` 间接读取 `FViewUniformShaderParameters`；NullRHI 不执行真实绘制，无法暴露 Shader 参数绑定缺口 | 在描边 pass 参数结构中显式声明 `SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)`，并绑定当前 `View.ViewUniformBuffer` | 每次改变后处理阶段、Scene Texture 或 Viewport UV 换算后，都必须重新起 fresh 真实 RHI 进程完成 Shader 冷编译和至少一轮 8/8 截图；不得以编译或 NullRHI 通过代替 |

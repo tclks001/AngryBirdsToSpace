@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-A 主视图描边与共享语义契约
 
-> 状态：Integration 候选实现；源码提交 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 已通过强制 Unity、NullRHI、真实 DX12 截图与 GPU 门槛，待用户可见 PIE 美术验收。
+> 状态：Integration 稳定性修复候选。初版 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 的静态功能与预算证据有效，但其 Tonemap 后硬四邻域描边在可见 PIE 中出现锯齿和时域抖动；实现版本 3 已改为 TSR 前连续覆盖描边与 Tonemap 后色调两个通道，待用户可见 PIE 动态验收。
 >
 > 上游：[三渲二与全局风格化渲染设计](ABTSToonStylizedRenderingDesign.md) · [T1 全局色调原型](ABTSToonStylizedRenderingT1.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
@@ -47,17 +47,21 @@ T2-A 也只预留 Stencil 语义及数字分区，不让任何 Actor 写入 Cust
 ```text
 abts.Rendering.Stylized.Enabled / Profile
   -> FABTSStylizedRenderingContract::ResolveViewPolicy(MainWorld)
-  -> Tonemap 后 Scene View Extension 回调
-  -> 同一个 ABTS Stylized ToneAndOutline 全屏 pass
+  -> AfterDOF（TSR/TAA 之前）ABTS Stylized OutlinePreTSR
+       1. Scene Depth 八邻域外轮廓
+       2. GBufferA World Normal 八邻域大折痕
+       3. 邻域响应累积为连续覆盖率，不再用单点 max 形成硬台阶
+  -> TSR/TAA 时域重建与抗锯齿
+  -> Tonemap 后 ABTS Stylized Tone
        1. T1 柔和三档色调
-       2. Scene Depth 四邻域外轮廓
-       3. GBufferA World Normal 四邻域大折痕
   -> UI / HUD 后续合成
 ```
 
-轮廓宽度以最终 Viewport 像素定义，再转换为 Scene Buffer UV，因此 100% 与非 100% Screen Percentage 不会因直接使用内部 Buffer 像素而成倍变粗。深度使用相对差异，避免同一个斜面仅因距离较远就被整体描线；法线只强化明显折角。天空没有有效 Scene Depth，中心天空像素不参与轮廓，物体邻接天空时只从物体侧形成外轮廓。颜色使用深蓝灰而非纯黑，避免低模资产变成硬质剪影。
+初版把轮廓放在 Tonemap 后，已经晚于 UE 5.8 的 TSR/TAA：Temporal Jitter 每帧改变 Depth/Normal 边缘落在哪个最终像素，而硬四邻域 `max` 又把很小的采样变化放大为 0/1 跳变，因此静态截图虽能显示轮廓，运动时仍会锯齿和抖动。版本 3 把只依赖 HDR Scene Color、Scene Depth 和 GBuffer Normal 的轮廓移到 `AfterDOF` 扩展点，让后续 TSR/TAA 共同稳定几何与线条；色调仍留在 Tonemap 后，避免改变 T1 已验收的显示空间观感。
 
-Tone 与 Outline 合并为一个全屏 pass，避免额外 Scene Color 中间纹理和第二次全屏读写。`StyleImplementationVersion=2` 是 T2-A 的运行身份；`Enabled=0` 时不订阅回调。
+轮廓宽度从最终 Viewport 像素换算为当前内部渲染像素，并在低 Screen Percentage 下保留 `0.75` 内部像素下限，避免线条完全丢失或随分辨率成倍变粗。深度使用相对差异，避免同一个斜面仅因距离较远就被整体描线；法线只强化明显折角。天空没有有效 Scene Depth，中心天空像素不参与轮廓，物体邻接天空时只从物体侧形成外轮廓。颜色使用深蓝灰乘入当前 HDR Scene Color，而非在 TSR 前直接写固定 LDR 黑色，避免低模资产变成硬质剪影。
+
+稳定性优先于省掉一次全屏读写，因此版本 3 明确拆分 Tone 与 Outline。`StyleImplementationVersion=3` 是修复后的运行身份；`Enabled=0` 时两个通道都不订阅。Outline pass 必须显式绑定 `FViewUniformShaderParameters`，因为 UE 的 `ViewportUVToBufferUV` 在真实 RHI Shader 中消费该 uniform；NullRHI 不绘制，不能替代这项验证。
 
 ## 4. 冻结候选参数
 
@@ -87,8 +91,8 @@ ABTS.Rendering.Toon
 1. UE 5.8 `-ForceUnity -DisableAdaptiveUnity`；
 2. fresh NullRHI `5/5`，终止标记 `TEST COMPLETE. EXIT CODE: 0`；
 3. fresh DX12 四点 Style Off/On 截图，8/8 成功，On/Off Pose Hash 完全相同；
-4. fresh DX12 ProfileGPU，Style Off 不出现风格 pass，Style On 出现 `ABTS Stylized ToneAndOutline`；
-5. `ToneAndOutline <= 1.5 ms @ 1920x1080`，其中轮廓设计预算仍以 `<= 1.0 ms` 为目标；
+4. fresh DX12 ProfileGPU，Style Off 不出现风格 pass，Style On 同时出现 `ABTS Stylized OutlinePreTSR` 与 `ABTS Stylized Tone`；
+5. 两个 pass 合计 `<= 1.5 ms @ 1920x1080`，其中 `OutlinePreTSR <= 1.0 ms`；
 6. 用户在 `L_ABTS_M11` 可见 PIE 检查动态运动与身份可读性。
 
 可见 PIE 重点不是再次证明编译，而是检查：鸟脸不被粗线覆盖；树石不出现全部低模三角边；建筑外轮廓和大折角可读；天空和 HUD 没有描边；相机旋转、鸟跳跃及建筑动态过程没有不可接受的闪烁。PIP 在 T2-A 必须保持原样，这一点也是验收项。
@@ -101,6 +105,8 @@ T2-B 的正式门槛包括主视图选择性强化、地面/月面/终局预览�
 
 ## 7. 当前自动证据
 
+### 7.1 初版版本 2（历史证据）
+
 2026-08-05 在干净源码提交 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 上完成：
 
 - UE 5.8 `-ForceUnity -DisableAdaptiveUnity`：`Result: Succeeded`；
@@ -111,3 +117,7 @@ T2-B 的正式门槛包括主视图选择性强化、地面/月面/终局预览�
 - Style On 的 `ABTS Stylized ToneAndOutline` 共 12 个样本，`0.059–0.129 ms`，平均 `0.0952 ms @ 1920x1080`；Style Off 未出现该 pass。
 
 这些文件位于本地 `Saved/`，不进入 Git。它们证明确定性、shader 冷启动与性能门槛，但不能代替动态可见 PIE 的线条闪烁、脸部可读性和主观美术判断。
+
+### 7.2 稳定性修复版本 3
+
+版本 3 的正式干净提交证据在源码候选提交后重新生成。提交前 WIP 验证已确认：强制 Unity 编译成功；真实 D3D12 冷启动不再出现未绑定 `View` uniform 或缺失 uniform buffer；四点截图 `8/8` 成功；ProfileGPU 中两个 Style On pass 共 12 组样本，合计 `0.079–0.149 ms`、平均 `0.118 ms @ 1920x1080`。这些 WIP 数值只用于确认方案和预算，正式交接仍以干净提交 Build Identity 的重跑结果为准。
