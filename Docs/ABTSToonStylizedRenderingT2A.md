@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-A 主视图描边与共享语义契约
 
-> 状态：Integration 稳定性修复候选。初版 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 的静态功能与预算证据有效，但其 Tonemap 后硬四邻域描边在可见 PIE 中出现锯齿和时域抖动；实现版本 3 的源码提交 `130be2ab9ab50e462af0515f6cacd29dcba58647` 已改为 TSR 前连续覆盖描边与 Tonemap 后色调两个通道，并通过自动门槛，待用户可见 PIE 动态验收。
+> 状态：已于 2026-08-05 通过自动门槛与用户可见 PIE 验收并合入 `master`。初版 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 的 Tonemap 后硬四邻域描边曾出现锯齿和时域抖动；最终实现版本 3 的源码提交 `130be2ab9ab50e462af0515f6cacd29dcba58647` 使用 TSR 前连续覆盖描边与 Tonemap 后色调两个通道。
 >
 > 上游：[三渲二与全局风格化渲染设计](ABTSToonStylizedRenderingDesign.md) · [T1 全局色调原型](ABTSToonStylizedRenderingT1.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
