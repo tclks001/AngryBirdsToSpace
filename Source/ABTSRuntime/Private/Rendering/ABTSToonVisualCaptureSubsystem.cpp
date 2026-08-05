@@ -1314,6 +1314,18 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 
 	CaptureCamera->GetCameraComponent()->SetProjectionMode(
 		ECameraProjectionMode::Perspective);
+	// T0 captures static comparison frames after teleporting one transient
+	// camera between distant semantic anchors. With world time frozen, scene
+	// motion-blur history cannot decay after those teleports and would smear a
+	// valid still frame. Disable motion blur only on this transient baseline
+	// camera; the game's production cameras and render settings are untouched.
+	FPostProcessSettings& CapturePostProcess =
+		CaptureCamera->GetCameraComponent()->PostProcessSettings;
+	CapturePostProcess.bOverride_MotionBlurAmount = true;
+	CapturePostProcess.MotionBlurAmount = 0.0f;
+	CapturePostProcess.bOverride_MotionBlurMax = true;
+	CapturePostProcess.MotionBlurMax = 0.0f;
+	CaptureCamera->GetCameraComponent()->SetPostProcessBlendWeight(1.0f);
 	Controller->SetViewTarget(CaptureCamera);
 	// Keep real HUD/PIP rendering while excluding transient AddOnScreenDebugMessage
 	// overlays from the visual baseline.
