@@ -4,6 +4,7 @@
 
 #include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneCaptureComponent2D.h"
 #include "Components/StaticMeshComponent.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "EngineUtils.h"
@@ -12,11 +13,25 @@
 #include "Game/ABTSM11GameMode.h"
 #include "Math/RotationMatrix.h"
 #include "Misc/AutomationTest.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "World/ABTSM11FinaleActors.h"
+#include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM11GravityAssistSolver.h"
+
+#include <type_traits>
+#include <utility>
+
+static_assert(std::is_same_v<
+	decltype(std::declval<const AABTSM11FinaleInteractionSystem&>()
+		.GetFinaleRemotePreviewCaptureOwner()),
+	const AActor*>);
+static_assert(std::is_same_v<
+	decltype(std::declval<const AABTSM11FinaleInteractionSystem&>()
+		.GetFinaleRemotePreviewCaptureComponent()),
+	const USceneCaptureComponent2D*>);
 
 namespace
 {
@@ -108,6 +123,98 @@ namespace
 				== B.Scenario.Target.GeometricContactCenterCM;
 	}
 
+	struct FM11StylizedSemanticCounts
+	{
+		int32 FinalePlanets = 0;
+		int32 FinaleUFOs = 0;
+		int32 Unexpected = 0;
+	};
+
+	FM11StylizedSemanticCounts CountM11CommittedStylizedSemantics(
+		const AABTSM11FinaleSystem& System)
+	{
+		FM11StylizedSemanticCounts Counts;
+		for (const AABTSM11GravityBodyActor* Actor
+			: System.GetGravityBodyActors())
+		{
+			EABTSStylizedObjectClass ObjectClass =
+				EABTSStylizedObjectClass::None;
+			if (Actor == nullptr
+				|| !System.TryGetStylizedObjectClass(*Actor, ObjectClass))
+			{
+				++Counts.Unexpected;
+				continue;
+			}
+			if (ObjectClass == EABTSStylizedObjectClass::FinalePlanet)
+			{
+				++Counts.FinalePlanets;
+			}
+			else
+			{
+				++Counts.Unexpected;
+			}
+		}
+
+		const AABTSM11UFOActor* UFO = System.GetUFOActor();
+		EABTSStylizedObjectClass UFOClass =
+			EABTSStylizedObjectClass::None;
+		if (UFO != nullptr
+			&& System.TryGetStylizedObjectClass(*UFO, UFOClass)
+			&& UFOClass == EABTSStylizedObjectClass::FinaleUFO)
+		{
+			++Counts.FinaleUFOs;
+		}
+		else
+		{
+			++Counts.Unexpected;
+		}
+		return Counts;
+	}
+
+	bool M11StylizedSemanticResultsExactlyEqual(
+		const FABTSM11TrajectoryResult& A,
+		const FABTSM11TrajectoryResult& B)
+	{
+		if (A.ValidationHash != B.ValidationHash
+			|| A.Termination != B.Termination
+			|| A.CompletedAssistCount != B.CompletedAssistCount
+			|| A.Points.Num() != B.Points.Num()
+			|| A.Events.Num() != B.Events.Num())
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Points.Num(); ++Index)
+		{
+			const FABTSM11TrajectoryPoint& PointA = A.Points[Index];
+			const FABTSM11TrajectoryPoint& PointB = B.Points[Index];
+			if (PointA.TimeSeconds != PointB.TimeSeconds
+				|| PointA.PositionCM != PointB.PositionCM
+				|| PointA.VelocityCMPerSec != PointB.VelocityCMPerSec
+				|| PointA.PrimarySpecificEnergyCM2PerSec2
+					!= PointB.PrimarySpecificEnergyCM2PerSec2)
+			{
+				return false;
+			}
+		}
+		for (int32 Index = 0; Index < A.Events.Num(); ++Index)
+		{
+			const FABTSM11TrajectoryEvent& EventA = A.Events[Index];
+			const FABTSM11TrajectoryEvent& EventB = B.Events[Index];
+			if (EventA.Type != EventB.Type
+				|| EventA.BodyId != EventB.BodyId
+				|| EventA.AssistIndex != EventB.AssistIndex
+				|| EventA.TimeSeconds != EventB.TimeSeconds
+				|| EventA.PositionCM != EventB.PositionCM
+				|| EventA.VelocityCMPerSec != EventB.VelocityCMPerSec
+				|| EventA.AppliedEnergyChangeCM2PerSec2
+					!= EventB.AppliedEnergyChangeCM2PerSec2)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	void TestVisualOnlyActorContract(
 		FAutomationTestBase& Test,
 		const AActor& Actor,
@@ -159,6 +266,12 @@ namespace
 			if (const UPrimitiveComponent* Primitive =
 				Cast<UPrimitiveComponent>(Component))
 			{
+				Test.TestFalse(
+					*FString::Printf(
+						TEXT("%s primitive %d does not render Custom Depth"),
+						*Label,
+						Index),
+					Primitive->bRenderCustomDepth);
 				Test.TestEqual(
 					*FString::Printf(
 						TEXT("%s primitive %d has no collision"),
@@ -343,6 +456,14 @@ bool FABTSM11BNativePresentationIsolationTest::RunTest(
 		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
 	const FABTSM110FinaleLocalFrame Frame =
 		MakeM11BRuntimeTestFrame();
+	TestFalse(
+		TEXT("Primary body cannot enter the assist presentation role"),
+		Body->ConfigurePresentation(
+			Preset.CanonicalScenario.GetPrimary(),
+			Frame));
+	TestFalse(
+		TEXT("Rejected primary body remains unconfigured"),
+		Body->IsPresentationConfigured());
 	TestTrue(
 		TEXT("Gravity-body ConfigurePresentation accepts the analytic spec"),
 		Body->ConfigurePresentation(
@@ -1024,6 +1145,294 @@ bool FABTSM11BRuntimePresentationTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11BStylizedSemanticAdapterTest,
+	"ABTS.M11B.Runtime.StylizedSemanticAdapter",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11BStylizedSemanticAdapterTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FScopedM11BAutomationWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	TestNotNull(TEXT("Stylized adapter automation World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM11FinaleSystem* System =
+		World->SpawnActor<AABTSM11FinaleSystem>(
+			AABTSM11FinaleSystem::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(TEXT("Production finale system spawns"), System);
+	if (System == nullptr)
+	{
+		return false;
+	}
+
+	const FABTSM11FinaleLayoutPreset CertifiedPreset =
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
+	const FABTSM110FinaleLocalFrame Frame =
+		MakeM11BRuntimeTestFrame();
+	TestTrue(
+		TEXT("Production certified layout initializes"),
+		System->InitializeFromRuntimeData(
+			3,
+			CertifiedPreset.ReferencePrimaryRadiusCM,
+			Frame));
+	if (!System->IsLayoutReady())
+	{
+		return false;
+	}
+
+	const uint64 PresetHashBefore = System->GetLayoutPreset().PresetHash;
+	const uint64 CertificationHashBefore =
+		System->GetLayoutPreset().CertificationHash;
+	const uint64 BundleHashBefore =
+		System->GetLayoutPreset().CertifiedBundleHash;
+	FABTSM11TrajectoryRequest RequestBefore;
+	FABTSM11TrajectoryResult ResultBefore;
+	FString Failure;
+	TestTrue(
+		TEXT("Core request builds before semantic publication"),
+		System->BuildRequest(
+			CertifiedPreset.NominalInput,
+			0x7u,
+			RequestBefore,
+			&Failure));
+	TestTrue(
+		TEXT("Core result solves before semantic publication"),
+		FABTSM11GravityAssistSolver::Solve(
+			RequestBefore,
+			ResultBefore,
+			&Failure));
+
+	const FM11StylizedSemanticCounts ProductionCounts =
+		CountM11CommittedStylizedSemantics(*System);
+	TestEqual(
+		TEXT("Production publishes exactly three FinalePlanet semantics"),
+		ProductionCounts.FinalePlanets,
+		3);
+	TestEqual(
+		TEXT("Production publishes exactly one FinaleUFO semantic"),
+		ProductionCounts.FinaleUFOs,
+		1);
+	TestEqual(
+		TEXT("Production publishes no unexpected style semantics"),
+		ProductionCounts.Unexpected,
+		0);
+
+	EABTSStylizedObjectClass UnknownClass =
+		EABTSStylizedObjectClass::FinaleUFO;
+	TestFalse(
+		TEXT("Finale system itself fails closed as an unknown object"),
+		System->TryGetStylizedObjectClass(*System, UnknownClass));
+	TestEqual(
+		TEXT("Unknown object resets its semantic to None"),
+		static_cast<int32>(UnknownClass),
+		static_cast<int32>(EABTSStylizedObjectClass::None));
+
+	FActorSpawnParameters HelperSpawnParameters = SpawnParameters;
+	HelperSpawnParameters.Owner = System;
+	AActor* CandidatePreviewHelper = World->SpawnActor<AActor>(
+		AActor::StaticClass(),
+		FTransform::Identity,
+		HelperSpawnParameters);
+	TestNotNull(
+		TEXT("Candidate preview helper fixture spawns"),
+		CandidatePreviewHelper);
+	if (CandidatePreviewHelper != nullptr)
+	{
+		UnknownClass = EABTSStylizedObjectClass::FinalePlanet;
+		TestFalse(
+			TEXT("Owned preview helper still fails closed"),
+			System->TryGetStylizedObjectClass(
+				*CandidatePreviewHelper,
+				UnknownClass));
+		TestEqual(
+			TEXT("Preview helper remains None"),
+			static_cast<int32>(UnknownClass),
+			static_cast<int32>(EABTSStylizedObjectClass::None));
+	}
+
+	AABTSM11FinaleInteractionSystem* Interaction =
+		World->SpawnActor<AABTSM11FinaleInteractionSystem>(
+			AABTSM11FinaleInteractionSystem::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(TEXT("Finale interaction system spawns"), Interaction);
+	if (Interaction == nullptr)
+	{
+		return false;
+	}
+	const AABTSM11FinaleInteractionSystem* ReadOnlyInteraction =
+		Interaction;
+	const USceneCaptureComponent2D* Capture =
+		ReadOnlyInteraction->GetFinaleRemotePreviewCaptureComponent();
+	TestNotNull(TEXT("Remote preview capture component is exposed"), Capture);
+	if (Capture == nullptr)
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Remote preview capture owner is the stable interaction Actor"),
+		ReadOnlyInteraction->GetFinaleRemotePreviewCaptureOwner()
+			== Interaction);
+	TestTrue(
+		TEXT("Remote preview component reports the same owner"),
+		Capture->GetOwner() == Interaction);
+	TestEqual(
+		TEXT("Remote preview declares FinaleRemotePreview semantics"),
+		static_cast<int32>(
+			ReadOnlyInteraction->GetFinaleRemotePreviewStylizedViewClass()),
+		static_cast<int32>(
+			EABTSStylizedViewClass::FinaleRemotePreview));
+	TestTrue(
+		TEXT("Integration implements the declared finale preview view"),
+		FABTSStylizedRenderingContract::IsViewClassImplemented(
+			ReadOnlyInteraction->
+				GetFinaleRemotePreviewStylizedViewClass()));
+
+	const FTransform CaptureTransformBefore =
+		Capture->GetComponentTransform();
+	const float CaptureFOVBefore = Capture->FOVAngle;
+	const float CaptureOrthoWidthBefore = Capture->OrthoWidth;
+	const ECameraProjectionMode::Type CaptureProjectionBefore =
+		Capture->ProjectionType;
+	const ESceneCaptureSource CaptureSourceBefore =
+		Capture->CaptureSource;
+	const bool bCaptureEveryFrameBefore = Capture->bCaptureEveryFrame;
+	const bool bCaptureOnMovementBefore = Capture->bCaptureOnMovement;
+	const int32 BlendableCountBefore =
+		Capture->PostProcessSettings.WeightedBlendables.Array.Num();
+	const uint64 CaptureCountBefore = Interaction->GetTargetCaptureCount();
+	TestFalse(
+		TEXT("Remote preview owns no M11 post-process blendables"),
+		BlendableCountBefore > 0);
+	TestNull(
+		TEXT("Uninitialized remote preview does not allocate a render target"),
+		Capture->TextureTarget);
+
+	ReadOnlyInteraction->GetFinaleRemotePreviewCaptureOwner();
+	ReadOnlyInteraction->GetFinaleRemotePreviewCaptureComponent();
+	ReadOnlyInteraction->GetFinaleRemotePreviewStylizedViewClass();
+	TestTrue(
+		TEXT("Read-only access preserves the capture transform"),
+		Capture->GetComponentTransform().Equals(CaptureTransformBefore));
+	TestEqual(
+		TEXT("Read-only access preserves capture FOV"),
+		Capture->FOVAngle,
+		CaptureFOVBefore);
+	TestEqual(
+		TEXT("Read-only access preserves capture OrthoWidth"),
+		Capture->OrthoWidth,
+		CaptureOrthoWidthBefore);
+	TestEqual(
+		TEXT("Read-only access preserves projection mode"),
+		static_cast<int32>(Capture->ProjectionType),
+		static_cast<int32>(CaptureProjectionBefore));
+	TestEqual(
+		TEXT("Read-only access preserves capture source"),
+		static_cast<int32>(Capture->CaptureSource),
+		static_cast<int32>(CaptureSourceBefore));
+	TestEqual(
+		TEXT("Read-only access preserves capture-every-frame lifecycle"),
+		Capture->bCaptureEveryFrame,
+		bCaptureEveryFrameBefore);
+	TestEqual(
+		TEXT("Read-only access preserves capture-on-movement lifecycle"),
+		Capture->bCaptureOnMovement,
+		bCaptureOnMovementBefore);
+	TestEqual(
+		TEXT("Read-only access adds no post-process blendables"),
+		Capture->PostProcessSettings.WeightedBlendables.Array.Num(),
+		BlendableCountBefore);
+	TestEqual(
+		TEXT("Read-only access never triggers a SceneCapture"),
+		Interaction->GetTargetCaptureCount(),
+		CaptureCountBefore);
+
+	FABTSM11TrajectoryRequest RequestAfter;
+	FABTSM11TrajectoryResult ResultAfter;
+	TestTrue(
+		TEXT("Core request builds after semantic publication"),
+		System->BuildRequest(
+			CertifiedPreset.NominalInput,
+			0x7u,
+			RequestAfter,
+			&Failure));
+	TestTrue(
+		TEXT("Core result solves after semantic publication"),
+		FABTSM11GravityAssistSolver::Solve(
+			RequestAfter,
+			ResultAfter,
+			&Failure));
+	TestTrue(
+		TEXT("Semantic queries preserve Core result and event sequence"),
+		M11StylizedSemanticResultsExactlyEqual(
+			ResultBefore,
+			ResultAfter));
+	TestEqual(
+		TEXT("Semantic queries preserve Preset Hash"),
+		System->GetLayoutPreset().PresetHash,
+		PresetHashBefore);
+	TestEqual(
+		TEXT("Semantic queries preserve Certification Hash"),
+		System->GetLayoutPreset().CertificationHash,
+		CertificationHashBefore);
+	TestEqual(
+		TEXT("Semantic queries preserve Certified Bundle Hash"),
+		System->GetLayoutPreset().CertifiedBundleHash,
+		BundleHashBefore);
+
+	System->DestroyPresentationActors();
+	TestEqual(
+		TEXT("Presentation destruction clears all FinalePlanet publishers"),
+		System->GetSpawnedAssistActorCount(),
+		0);
+	TestFalse(
+		TEXT("Presentation destruction clears the FinaleUFO publisher"),
+		System->HasSpawnedUFOActor());
+
+	AABTSM11FinaleSystem* RebuiltSystem =
+		World->SpawnActor<AABTSM11FinaleSystem>(
+			AABTSM11FinaleSystem::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(TEXT("Rebuilt finale system spawns"), RebuiltSystem);
+	if (RebuiltSystem != nullptr)
+	{
+		TestTrue(
+			TEXT("Rebuilt finale system binds the same certified layout"),
+			RebuiltSystem->InitializeFromRuntimeData(
+				3,
+				CertifiedPreset.ReferencePrimaryRadiusCM,
+				Frame));
+		const FM11StylizedSemanticCounts RebuiltCounts =
+			CountM11CommittedStylizedSemantics(*RebuiltSystem);
+		TestEqual(
+			TEXT("Rebuild republishes exactly three FinalePlanet semantics"),
+			RebuiltCounts.FinalePlanets,
+			3);
+		TestEqual(
+			TEXT("Rebuild republishes exactly one FinaleUFO semantic"),
+			RebuiltCounts.FinaleUFOs,
+			1);
+		TestEqual(
+			TEXT("Rebuild publishes no unexpected semantics"),
+			RebuiltCounts.Unexpected,
+			0);
+	}
+	return !HasAnyErrors();
+}
+
 #if WITH_EDITOR
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1135,6 +1544,26 @@ bool FABTSM11BPreviewFinaleFrameCompatibilityTest::RunTest(
 			*FString::Printf(TEXT("%s retains Candidate Rank"), *Prefix),
 			System->GetEditorCandidateIdentity().Rank,
 			11);
+		const FM11StylizedSemanticCounts CandidateCounts =
+			CountM11CommittedStylizedSemantics(*System);
+		TestEqual(
+			*FString::Printf(
+				TEXT("%s candidate publishes three FinalePlanets"),
+				*Prefix),
+			CandidateCounts.FinalePlanets,
+			3);
+		TestEqual(
+			*FString::Printf(
+				TEXT("%s candidate publishes one FinaleUFO"),
+				*Prefix),
+			CandidateCounts.FinaleUFOs,
+			1);
+		TestEqual(
+			*FString::Printf(
+				TEXT("%s candidate publishes no unknown semantics"),
+				*Prefix),
+			CandidateCounts.Unexpected,
+			0);
 		TestEqual(
 			*FString::Printf(TEXT("%s commits the exact frame"), *Prefix),
 			AABTSM11FinaleSystem::ComputeFinaleFrameDiagnosticHash(

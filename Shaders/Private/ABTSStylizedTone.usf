@@ -1,0 +1,262 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/DeferredShadingCommon.ush"
+#include "/Engine/Private/GammaCorrectionCommon.ush"
+#include "/Engine/Private/SceneTexturesCommon.ush"
+#include "/Engine/Private/ScreenPass.ush"
+
+Texture2D SceneColorTexture;
+SamplerState SceneColorSampler;
+
+float2 ViewportInvSize;
+float ShadowThreshold;
+float ToneNormalizationFloor;
+float HighlightThreshold;
+float TransitionSoftness;
+float Strength;
+float ShadowLuminance;
+float MidLuminance;
+float HighlightLuminance;
+float Saturation;
+float3 ShadowTint;
+float3 MidTint;
+float3 HighlightTint;
+float OutlineWidthPixels;
+float OutlineDepthThreshold;
+float OutlineDepthSoftness;
+float OutlineNormalThreshold;
+float OutlineNormalSoftness;
+float OutlineStrength;
+float SelectiveOutlineStrength;
+float SelectiveOutlineWidthScale;
+uint bAllowSelectiveStencil;
+float3 OutlineColor;
+
+float3 ABTSApplySoftToneBands(float3 EncodedColor)
+{
+	float3 LinearColor = max(sRGBToLinear(saturate(EncodedColor)), 0.0f);
+	float Luminance = max(dot(LinearColor, float3(0.2126f, 0.7152f, 0.0722f)), 1.0e-4f);
+	float MidWeight = smoothstep(
+		ShadowThreshold - TransitionSoftness,
+		ShadowThreshold + TransitionSoftness,
+		Luminance);
+	float HighlightWeight = smoothstep(
+		HighlightThreshold - TransitionSoftness,
+		HighlightThreshold + TransitionSoftness,
+		Luminance);
+
+	float TargetLuminance = lerp(ShadowLuminance, MidLuminance, MidWeight);
+	TargetLuminance = lerp(TargetLuminance, HighlightLuminance, HighlightWeight);
+	float3 ToneTint = lerp(ShadowTint, MidTint, MidWeight);
+	ToneTint = lerp(ToneTint, HighlightTint, HighlightWeight);
+
+	// Low-frequency Scene Captures deliberately reset temporal history on every
+	// manual camera cut.  Their almost-black pixels can therefore contain tiny
+	// chromatic lighting noise.  Dividing by that near-zero luminance turns the
+	// noise into bright cyan/black speckles.  Main views keep the historical
+	// 1e-4 behavior; capture views provide a profile-specific no-gain floor.
+	const float StableNormalizationLuminance = max(
+		Luminance,
+		ToneNormalizationFloor);
+	float3 QuantizedColor = LinearColor
+		* (TargetLuminance / StableNormalizationLuminance)
+		* ToneTint;
+	float QuantizedLuminance = dot(
+		QuantizedColor,
+		float3(0.2126f, 0.7152f, 0.0722f));
+	QuantizedColor = lerp(
+		QuantizedLuminance.xxx,
+		QuantizedColor,
+		Saturation);
+	float3 StylizedColor = lerp(LinearColor, QuantizedColor, Strength);
+	return LinearToSrgb(saturate(StylizedColor));
+}
+
+float ABTSSampleDeviceDepth(float2 ViewportUV)
+{
+	float2 BufferUV = ViewportUVToBufferUV(saturate(ViewportUV));
+	return Texture2DSampleLevel(
+		SceneTexturesStruct.SceneDepthTexture,
+		SceneTexturesStruct_SceneDepthTextureSampler,
+		BufferUV,
+		0).r;
+}
+
+float3 ABTSSampleWorldNormal(float2 ViewportUV)
+{
+	float2 BufferUV = ViewportUVToBufferUV(saturate(ViewportUV));
+	float3 EncodedNormal = Texture2DSampleLevel(
+		SceneTexturesStruct.GBufferATexture,
+		SceneTexturesStruct_GBufferATextureSampler,
+		BufferUV,
+		0).rgb;
+	return normalize(DecodeNormal(EncodedNormal));
+}
+
+uint2 ABTSViewportUVToBufferPixel(float2 ViewportUV)
+{
+	const float2 BufferUV = ViewportUVToBufferUV(saturate(ViewportUV));
+	const uint2 BufferSize = max(uint2(View.BufferSizeAndInvSize.xy), uint2(1, 1));
+	return min(uint2(BufferUV * BufferSize), BufferSize - uint2(1, 1));
+}
+
+uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
+{
+	const uint2 BufferPixel = ABTSViewportUVToBufferPixel(ViewportUV);
+	const uint Stencil = CalcSceneCustomStencil(BufferPixel);
+	if (Stencil < 1u || Stencil > 7u)
+	{
+		return 0u;
+	}
+
+	const float CustomDeviceDepth = SceneTexturesStruct.CustomDepthTexture.Load(
+		int3(BufferPixel, 0)).r;
+	const float SceneDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	if (CustomDeviceDepth <= 1.0e-7f || SceneDeviceDepth <= 1.0e-7f)
+	{
+		return 0u;
+	}
+
+	const float CustomDepth = ConvertFromDeviceZ(CustomDeviceDepth);
+	const float SceneDepth = ConvertFromDeviceZ(SceneDeviceDepth);
+	const float RelativeDepthDelta =
+		abs(CustomDepth - SceneDepth) / max(min(CustomDepth, SceneDepth), 1.0f);
+	return RelativeDepthDelta <= 0.006f ? Stencil : 0u;
+}
+
+float ABTSComputeNeighborEdge(
+	float CenterDepth,
+	float3 CenterNormal,
+	float2 SampleUV)
+{
+	const float SampleDeviceDepth = ABTSSampleDeviceDepth(SampleUV);
+	if (SampleDeviceDepth <= 1.0e-7f)
+	{
+		return 1.0f;
+	}
+
+	const float SampleDepth = ConvertFromDeviceZ(SampleDeviceDepth);
+	const float RelativeDepthDelta =
+		abs(SampleDepth - CenterDepth) /
+		max(min(SampleDepth, CenterDepth), 1.0f);
+	const float DepthEdge = smoothstep(
+		OutlineDepthThreshold,
+		OutlineDepthThreshold + OutlineDepthSoftness,
+		RelativeDepthDelta);
+
+	const float3 SampleNormal = ABTSSampleWorldNormal(SampleUV);
+	const float NormalDelta =
+		1.0f - saturate(dot(CenterNormal, SampleNormal));
+	const float NormalEdge = smoothstep(
+		OutlineNormalThreshold,
+		OutlineNormalThreshold + OutlineNormalSoftness,
+		NormalDelta);
+	return max(DepthEdge, NormalEdge);
+}
+
+float ABTSComputeOutlineCoverage(float2 ViewportUV)
+{
+	const float CenterDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	if (CenterDeviceDepth <= 1.0e-7f)
+	{
+		return 0.0f;
+	}
+
+	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
+	const float3 CenterNormal = ABTSSampleWorldNormal(ViewportUV);
+	const float2 PixelOffset = ViewportInvSize * OutlineWidthPixels;
+	const float2 DiagonalOffset = PixelOffset * 0.70710678f;
+	const float2 Offsets[8] =
+	{
+		float2(PixelOffset.x, 0.0f),
+		float2(-PixelOffset.x, 0.0f),
+		float2(0.0f, PixelOffset.y),
+		float2(0.0f, -PixelOffset.y),
+		float2(DiagonalOffset.x, DiagonalOffset.y),
+		float2(-DiagonalOffset.x, DiagonalOffset.y),
+		float2(DiagonalOffset.x, -DiagonalOffset.y),
+		float2(-DiagonalOffset.x, -DiagonalOffset.y)
+	};
+
+	float AccumulatedEdge = 0.0f;
+	UNROLL
+	for (int SampleIndex = 0; SampleIndex < 8; ++SampleIndex)
+	{
+		AccumulatedEdge += ABTSComputeNeighborEdge(
+			CenterDepth,
+			CenterNormal,
+			saturate(ViewportUV + Offsets[SampleIndex]));
+	}
+
+	const float NormalizedCoverage = AccumulatedEdge / 3.0f;
+	return smoothstep(0.10f, 0.90f, NormalizedCoverage);
+}
+
+float ABTSComputeSelectiveOutlineCoverage(float2 ViewportUV)
+{
+	if (bAllowSelectiveStencil == 0u)
+	{
+		return 0.0f;
+	}
+
+	const uint CenterStencil = ABTSSampleVisibleReservedStencil(ViewportUV);
+	const float2 PixelOffset =
+		ViewportInvSize * OutlineWidthPixels * SelectiveOutlineWidthScale;
+	const float2 DiagonalOffset = PixelOffset * 0.70710678f;
+	const float2 Offsets[8] =
+	{
+		float2(PixelOffset.x, 0.0f),
+		float2(-PixelOffset.x, 0.0f),
+		float2(0.0f, PixelOffset.y),
+		float2(0.0f, -PixelOffset.y),
+		float2(DiagonalOffset.x, DiagonalOffset.y),
+		float2(-DiagonalOffset.x, DiagonalOffset.y),
+		float2(DiagonalOffset.x, -DiagonalOffset.y),
+		float2(-DiagonalOffset.x, -DiagonalOffset.y)
+	};
+
+	float BoundarySamples = 0.0f;
+	UNROLL
+	for (int SampleIndex = 0; SampleIndex < 8; ++SampleIndex)
+	{
+		const uint SampleStencil = ABTSSampleVisibleReservedStencil(
+			saturate(ViewportUV + Offsets[SampleIndex]));
+		const bool bTouchesReserved = CenterStencil != 0u || SampleStencil != 0u;
+		BoundarySamples +=
+			bTouchesReserved && CenterStencil != SampleStencil ? 1.0f : 0.0f;
+	}
+	return smoothstep(0.08f, 0.75f, BoundarySamples / 3.0f);
+}
+
+void ABTSStylizedOutlineMainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	const float4 SceneColor = Texture2DSample(
+		SceneColorTexture,
+		SceneColorSampler,
+		UVAndScreenPos.xy);
+	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
+	const float OutlineCoverage = ABTSComputeOutlineCoverage(ViewportUV);
+	const float SelectiveCoverage =
+		ABTSComputeSelectiveOutlineCoverage(ViewportUV);
+	const float OutlineAmount = saturate(max(
+		OutlineCoverage * OutlineStrength,
+		SelectiveCoverage * SelectiveOutlineStrength));
+	const float3 OutlineTarget = SceneColor.rgb * OutlineColor;
+	OutColor = float4(
+		lerp(SceneColor.rgb, OutlineTarget, OutlineAmount),
+		SceneColor.a);
+}
+
+void ABTSStylizedToneMainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	const float4 SceneColor = Texture2DSample(
+		SceneColorTexture,
+		SceneColorSampler,
+		UVAndScreenPos.xy);
+	OutColor = float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
+}

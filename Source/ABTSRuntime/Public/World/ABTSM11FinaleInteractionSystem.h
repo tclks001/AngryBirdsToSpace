@@ -19,6 +19,7 @@ class APlayerController;
 class USceneCaptureComponent2D;
 class USceneComponent;
 class UTextureRenderTarget2D;
+enum class EABTSStylizedViewClass : uint8;
 struct FABTSM11NominalSolvePayload;
 struct FABTSM11PreviewSolvePayload;
 
@@ -143,6 +144,15 @@ public:
 	{
 		return TargetPreviewRenderTarget;
 	}
+	/** Stable read-only T2-B integration surface for the existing remote PIP. */
+	const AActor* GetFinaleRemotePreviewCaptureOwner() const;
+	USceneCaptureComponent2D* GetFinaleRemotePreviewCaptureComponent()
+	{
+		return TargetPreviewCapture;
+	}
+	const USceneCaptureComponent2D*
+		GetFinaleRemotePreviewCaptureComponent() const;
+	EABTSStylizedViewClass GetFinaleRemotePreviewStylizedViewClass() const;
 	double GetPlaybackElapsedSeconds() const { return PlaybackElapsedSeconds; }
 	double GetFailureBlackoutAlpha() const
 	{

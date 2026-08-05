@@ -13,6 +13,7 @@ class AABTSM3Planet;
 class AABTSM11GravityBodyActor;
 class AABTSM11UFOActor;
 class UStaticMesh;
+enum class EABTSStylizedObjectClass : uint8;
 struct FABTSFinaleWorldContract;
 
 UENUM(BlueprintType)
@@ -160,11 +161,21 @@ public:
 
 	AABTSM11UFOActor* GetUFOActor() const;
 
+	/**
+	 * Resolves style semantics only for the currently committed 3+1 runtime
+	 * presentation set. Unconfigured, stale, foreign and primary-body Actors
+	 * fail closed as None.
+	 */
+	bool TryGetStylizedObjectClass(
+		const AActor& RuntimePresentationActor,
+		EABTSStylizedObjectClass& OutObjectClass) const;
+
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	friend class FABTSM11BRuntimePresentationTest;
+	friend class FABTSM11BStylizedSemanticAdapterTest;
 
 	bool InitializeFromCertifiedPreset(
 		const FABTSM11FinaleLayoutPreset& InPreset,

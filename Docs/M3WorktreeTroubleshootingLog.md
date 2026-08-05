@@ -37,6 +37,8 @@
 | M3-R52-001 | 太空槽仍出现在兼容 TaskGraph 旧位置，而非月度道路末端 | Preview/Test 接缝已验收，尚非月度正式布局 | M3 + Integration/M5.1/M11 |
 | M3-R52-002 | 起伏地表上的太空槽对因两端高度不同被旧帧校验拒绝 | Preview/Test 校验已改为曲面局部帧 | Integration/M11 |
 | M3-X-001 | 建筑日志显示已生成，随后建筑消失，容易误判为 M3 漏生成 | 已建立 M7 Idle Reject 分诊规则 | M7；M3 只分诊 |
+| M3-T2B-001 | 风格语义若按名字、地图或位置识别，会随预览与生产身份漂移 | 已改为权威 Actor/组件/结果只读适配 | M3 |
+| M3-T2B-002 | M10 落点预览的 SceneCapture 没有跨模块稳定只读入口 | 已记录共享类型接线需求；M3 不越界绕过 | Integration/M10 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
 
 ## 3. 工作树、同步与构建
@@ -403,7 +405,58 @@ M3 分诊时先按 Actor/Task/Cell 关联完整日志：若存在 Spawn/Generate
 
 月度联合验收不仅检查六个 Spawn，还必须等待建筑合同封口，并要求 `Expected=Registered=Accepted=6`、`Rejected=0` 后才发布 WorldReady。
 
-## 9. 自动化与性能证据
+## 9. T2-B 只读风格语义
+
+### M3-T2B-001：按名字或位置猜测风格类别会破坏确定性
+
+**现象**
+
+同一主星在生产表现与月度 Preview/Test 表现中复用 Actor 和组件；卫星/E5 也会从候选结果进入真实运行时 Actor。若适配器按地图名、Actor 名称、位置或当前相机判断类别，切换证据层后会得到不同语义，并可能把未知对象静默归入已有类别。
+
+**根因**
+
+这些外观线索不是权威身份。主星地表、道路和水域实际共用 `ContinuousSurface`；树石由 `ForestHISM`、`RockHISM` 两个权威组件批次承载；月面练习卫星与背面 E5 由 `AABTSM3MonthlySatellitePracticeRuntime` 的精确 Actor 引用和 R-5.1 Candidate/Result Hash 连接。
+
+**修复**
+
+- 新增 M3 只读适配器，只接受精确权威 Actor、组件或已验证的 R-5.1 结果；
+- `ContinuousSurface` 发布 `WorldSurface`，两个 HISM 批次发布 `BackgroundProp`；
+- 练习卫星与背面 E5 的 Preview/Test 结果及生产 Actor 均发布 `SatelliteTarget`；
+- HISM 每个组件只生成一个 `ComponentBatch` 绑定，实例数仅作为只读批次摘要，不形成逐实例注册；
+- 未知 Authority、组件、Actor、枚举值或 Hash 不一致一律返回 `None` 并 fail closed；适配器不保存 Profile、Stencil 数字、Authority 或 Hash。
+
+**防回归验证**
+
+- `ABTS.M3.StylizedSemantics` 覆盖完整映射、重复查询确定性、未知对象 fail closed、HISM 批次数量，以及调用前后 Custom Depth/Stencil 状态不变；
+- `ABTS.M3.Monthly.SatellitePreview` 同时验证 Preview/Test 结果与生产卫星/E5 Actor 可查询，并比较调用前后的 Preview/Runtime Hash、月度接受状态和 M9 引力开关；
+- 提交前全文检查 M3 新增实现不得出现 Custom Depth/Stencil setter 或 raw stencil 解析调用。
+
+### M3-T2B-002：共享落点 SceneCapture 没有稳定只读 getter
+
+**现象**
+
+Integration 需要把地面落点和月面落点分别接到 `GroundLandingPreview`、`SatelliteLandingPreview`，但当前 `AABTSM10ScoutMapSystem::LandingPreviewCamera` 与 `AABTSM101LandingPreviewCamera::SceneCapture` 都是共享 M10 类型的私有成员。M3 无法在所有权范围内提供稳定 owner/component 指针。
+
+**根因**
+
+T2-A 刻意没有接线 Scene Capture；现有 M10 API 只公开激活状态和 RenderTarget，没有公开捕获 owner/component。通过 `GetName()`、地图扫描、组件名或相机位置寻找捕获会重新引入隐式猜测，也会绕过共享类型所有权。
+
+**修复**
+
+M3 不修改 M10 相机、不应用 Profile、不添加后处理，也不扫描猜测组件。Integration 应在共享类型中增加两个 `const` 只读入口：
+
+1. `AABTSM10ScoutMapSystem` 返回当前 `AABTSM101LandingPreviewCamera*`；
+2. `AABTSM101LandingPreviewCamera` 返回其现有 `USceneCaptureComponent2D*`，并继续用现有 `GetPreviewSubject()` 显式区分 `PrimaryLanding` 与 `SatelliteLanding`。
+
+Integration 接线必须在 owner/component 不存在、Subject 为 `None` 或类型未知时 fail closed；不得根据地图、名称、Transform 或当前主视图 Profile 回退。
+
+**防回归验证**
+
+- M3 功能提交的变更清单不得包含 `Source/ABTSRuntime/Public/Camera/**`、`Private/Camera/**` 或 `World/ABTSM10ScoutMapSystem*`；
+- Integration 定向测试应验证两个 Preview Subject 映射到固定视图类，`None` 不接线，且接线前后 M3 Candidate/Result Hash、M9 引力、轨迹、碰撞均不变；
+- SceneCapture 的 Profile、后处理与 Custom Depth 消费只由 Integration 验证，不能用 M3 NullRHI 语义测试替代像素门。
+
+## 10. 自动化与性能证据
 
 ### M3-TEST-001：单次性能门越线不能被简单忽略或直接定性回归
 
@@ -425,7 +478,7 @@ M3 分诊时先按 Actor/Task/Cell 关联完整日志：若存在 Spawn/Generate
 - 不用完整测试中的第二次缓存运行替换 fresh 首次数据；
 - 重型构建、慢速认证和可见 PIE 按多工作树规范串行执行。
 
-## 10. 新条目模板
+## 11. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>
