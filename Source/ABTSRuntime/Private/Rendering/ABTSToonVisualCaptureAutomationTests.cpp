@@ -200,7 +200,7 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("T2-B1 reports the capture dark-noise stabilization implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		5);
+		6);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -322,7 +322,8 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 	for (int32 ViewIndex = static_cast<int32>(EABTSStylizedViewClass::MainWorld);
-		ViewIndex <= static_cast<int32>(EABTSStylizedViewClass::FinaleRemotePreview);
+		ViewIndex <= static_cast<int32>(
+			EABTSStylizedViewClass::FinaleCinematicCapture);
 		++ViewIndex)
 	{
 		const EABTSStylizedViewClass ViewClass =
@@ -384,6 +385,22 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 			FABTSStylizedRenderingContract::ResolveViewPolicy(
 				EABTSStylizedViewClass::FinaleRemotePreview).Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	const FABTSStylizedViewPolicy CinematicCapturePolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::FinaleCinematicCapture);
+	TestEqual(
+		TEXT("Finale recording uses the frozen finale profile"),
+		static_cast<int32>(CinematicCapturePolicy.Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestTrue(
+		TEXT("Finale recording applies tone"),
+		CinematicCapturePolicy.bApplyTone);
+	TestTrue(
+		TEXT("Finale recording applies outline"),
+		CinematicCapturePolicy.bApplyOutline);
+	TestTrue(
+		TEXT("Finale recording permits selective stencil"),
+		CinematicCapturePolicy.bAllowSelectiveStencil);
 	TestFalse(
 		TEXT("Unknown view classes fail closed"),
 		FABTSStylizedRenderingContract::IsViewClassValid(
@@ -441,6 +458,25 @@ bool FABTSToonT2B1SceneCaptureRegistryTest::RunTest(
 			EABTSStylizedViewClass::SatelliteLandingPreview));
 	TestEqual(
 		TEXT("Replacement does not accumulate extensions"),
+		Capture->SceneViewExtensions.Num(),
+		1);
+	TestTrue(
+		TEXT("Finale cinematic capture registers explicitly"),
+		FABTSStylizedSceneCaptureRegistry::Register(
+			*Capture,
+			EABTSStylizedViewClass::FinaleCinematicCapture));
+	TestTrue(
+		TEXT("Finale cinematic class can be diagnosed"),
+		FABTSStylizedSceneCaptureRegistry::TryGetViewClass(
+			*Capture,
+			ViewClass));
+	TestEqual(
+		TEXT("Finale cinematic class is preserved"),
+		static_cast<int32>(ViewClass),
+		static_cast<int32>(
+			EABTSStylizedViewClass::FinaleCinematicCapture));
+	TestEqual(
+		TEXT("Second replacement still owns one extension"),
 		Capture->SceneViewExtensions.Num(),
 		1);
 	FABTSStylizedSceneCaptureRegistry::Unregister(*Capture);

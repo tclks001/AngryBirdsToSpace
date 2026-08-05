@@ -68,7 +68,7 @@ void FABTSStylizedRenderingControl::SetProfile(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 5;
+	return 6;
 }
 
 FABTSStylizedToneProfileParameters
