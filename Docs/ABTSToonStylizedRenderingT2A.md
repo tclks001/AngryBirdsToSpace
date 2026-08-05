@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-A 主视图描边与共享语义契约
 
-> 状态：Integration 候选实现；自动化与真实 RHI 证据待本分支冻结后补齐。
+> 状态：Integration 候选实现；源码提交 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 已通过强制 Unity、NullRHI、真实 DX12 截图与 GPU 门槛，待用户可见 PIE 美术验收。
 >
 > 上游：[三渲二与全局风格化渲染设计](ABTSToonStylizedRenderingDesign.md) · [T1 全局色调原型](ABTSToonStylizedRenderingT1.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
@@ -98,3 +98,16 @@ ABTS.Rendering.Toon
 T2-B 才允许三个功能工作树分别提供只读适配器：M3 提供地表/背景物与卫星目标类别，M7 提供建筑主体/弱点类别，M11 提供助推行星/UFO 类别。Integration 在功能提交都基于同一 `master` 后串行接入 Custom Stencil 与三个 Scene Capture；功能树不得互相合并，也不得编辑共享 PP、相机资产或项目渲染设置。
 
 T2-B 的正式门槛包括主视图选择性强化、地面/月面/终局预览的显式 Profile、Style Off 的 Custom Depth 成本核验，以及新增瞄准状态自动截图。未满足这些条件前，T2-A 的 raw Stencil 分区只是保留合同，不代表选择性描边已经实现。
+
+## 7. 当前自动证据
+
+2026-08-05 在干净源码提交 `b37d792f7835da107d2bdd50f7e533e32e79ee5a` 上完成：
+
+- UE 5.8 `-ForceUnity -DisableAdaptiveUnity`：`Result: Succeeded`；
+- fresh NullRHI：`ABTS.Rendering.Toon` 共 `5/5` 成功，日志 `Saved/Logs/ToonT2A-b37d792-FreshAutomation.log`；
+- fresh DX12 离屏截图：`8/8`，manifest 为 `Saved/ABTSVisualCaptures/ToonT0/Screenshots_20260805T070211Z_48956/manifest.json`；
+- fresh DX12 GPU：`8/8`，manifest 为 `Saved/ABTSVisualCaptures/ToonT0/GPUProfile_20260805T070309Z_67776/manifest.json`，日志 `Saved/Logs/ToonT2A-b37d792-Formal-GPU.log`；
+- 两个 manifest 的 Build、Seed `312503`、Catalogue Hash 及全部 requested/effective Pose Hash 对齐，`StyleImplementationVersion=2`；
+- Style On 的 `ABTS Stylized ToneAndOutline` 共 12 个样本，`0.059–0.129 ms`，平均 `0.0952 ms @ 1920x1080`；Style Off 未出现该 pass。
+
+这些文件位于本地 `Saved/`，不进入 Git。它们证明确定性、shader 冷启动与性能门槛，但不能代替动态可见 PIE 的线条闪烁、脸部可读性和主观美术判断。

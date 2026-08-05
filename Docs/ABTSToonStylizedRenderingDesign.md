@@ -1,6 +1,6 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线与 T1 全局色调已通过验收；T2-A 主视图描边与共享语义契约进入 Integration 候选，详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线与 T1 全局色调已通过验收；T2-A 主视图描边与共享语义契约已通过自动门槛，待用户可见 PIE，详见 [T2-A 设计](ABTSToonStylizedRenderingT2A.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
