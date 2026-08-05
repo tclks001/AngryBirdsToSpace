@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-B1 选择性语义与画中画接线
 
-> 状态：2026-08-05 Integration 候选实现；M3、M11 及共享鸟/当前弹弓已接入，自动化与真实 RHI 候选烟测通过，等待用户可见 PIE 验收。M7 因 `Beam-C3` 长任务仍在独立工作树中，本阶段明确保持 fail closed，建筑暂时只消费 T2-A 的全局 Depth/Normal 描边。
+> 状态：2026-08-05 Integration 候选实现；M3、M11 及共享鸟/当前弹弓已接入，自动化与真实 RHI 候选烟测通过。首次可见 PIE 发现地面 PIP 暗部噪点，现已形成实现版本 5 的低信号稳定修复候选，等待用户复验。M7 因 `Beam-C3` 长任务仍在独立工作树中，本阶段明确保持 fail closed，建筑暂时只消费 T2-A 的全局 Depth/Normal 描边。
 >
 > 上游：[三渲二总设计](ABTSToonStylizedRenderingDesign.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
@@ -120,3 +120,13 @@ abts.Rendering.Stylized.Enabled 1
 - Style On 的 12 个正式 GPU 样本中，`OutlinePreTSR` 为 `0.072–0.133 ms`、平均 `0.1111 ms`，`Tone` 为 `0.041–0.047 ms`、平均 `0.0430 ms`，远低于 T2-A 的 `1.5 ms @ 1080p` 合计门槛；真实 RHI 无 Shader Error、Fatal 或 Assertion。
 
 T0 的被动点没有进入弹弓瞄准，故正式日志中的 `SlingshotPrimitives=0` 是预期结果；地面/月面/终局 PIP 也不属于四张被动主视图截图。当前自动证据不能替代第 6 节的可见 PIE，候选仍等待用户验收后才能合并 `master`。
+
+## 9. 地面 PIP 暗部噪点修复
+
+首次可见 PIE 显示：Style Off 的地面 PIP 阴影为稳定黑色，Style On 后同一区域出现密集青黑散点。地面 PIP 的视图策略本来就禁用了选择性 Stencil，因此根因不是 Custom Depth，也不是树石被错误分类。
+
+根因位于 Tone 的低亮度归一化：地面捕获以较低频率手动更新，并在每次预测落点改变时设置 Camera Cut、丢弃旧的时域历史。Lumen/阴影在近黑区域残留的微小随机色在普通画面中不可见；旧算法却用固定 `ShadowLuminance / 输入亮度` 提升整段阴影。当输入亮度接近零时，增益会非常大，把微小色噪放大成截图中的青黑散点。
+
+实现版本 5 保持主视图已验收的 `1e-4` 归一化行为不变，只给需要 Tone 的 Scene Capture 注入 `ToneNormalizationFloor=Profile.ShadowLuminance`。这保证低于可信阴影色阶的像素不会获得大于 1 的亮度增益；地面 PIP 仍消费 `GroundDay` Tone 和 Outline，不以关闭风格化掩盖问题。月面 PIP 本就只画 Outline，不受影响；终局远端 PIP 同样获得低信号保护。
+
+自动门仍包括 `ABTS.Rendering.Toon` 与 fresh D3D12 Shader 冷启动，但 T0 被动四点不进入地面 PIP，无法自动证明散点消失。修复的最终门是按第 6 节重新进入强化弹弓瞄准，比较同一落点 Style Off/On：On 可以改变色阶和轮廓，但阴影中不得再出现高密度青/黑随机像素。后续 T2-C 应把该瞄准/PIP 状态纳入确定性截图，消除这项人工证据缺口。

@@ -68,7 +68,7 @@ void FABTSStylizedRenderingControl::SetProfile(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 4;
+	return 5;
 }
 
 FABTSStylizedToneProfileParameters
@@ -109,6 +109,17 @@ FABTSStylizedRenderingControl::GetToneProfileParameters(
 		break;
 	}
 	return Parameters;
+}
+
+float FABTSStylizedRenderingControl::GetSceneCaptureToneNormalizationFloor(
+	const EABTSStylizedRenderProfile Profile)
+{
+	const FABTSStylizedToneProfileParameters Parameters =
+		GetToneProfileParameters(Profile);
+	// Preserve the accepted main-view mapping.  Only low-history Scene Captures
+	// use this floor, and ShadowLuminance is the first trustworthy output band:
+	// values below it must not receive gain greater than one.
+	return FMath::Max(Parameters.ShadowLuminance, 1.0e-4f);
 }
 
 FABTSStylizedOutlineProfileParameters

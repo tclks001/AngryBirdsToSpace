@@ -39,6 +39,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColorTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
 		SHADER_PARAMETER(float, ShadowThreshold)
+		SHADER_PARAMETER(float, ToneNormalizationFloor)
 		SHADER_PARAMETER(float, HighlightThreshold)
 		SHADER_PARAMETER(float, TransitionSoftness)
 		SHADER_PARAMETER(float, Strength)
@@ -248,7 +249,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			FRDGBuilder& GraphBuilder,
 			const FSceneView& View,
 			const FPostProcessMaterialInputs& Inputs,
-			const FABTSStylizedToneProfileParameters& ToneProfile)
+			const FABTSStylizedToneProfileParameters& ToneProfile,
+			const float ToneNormalizationFloor = 1.0e-4f)
 		{
 			const FScreenPassTexture SceneColor(
 				Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
@@ -274,6 +276,9 @@ namespace ABTSStylizedToneViewExtensionPrivate
 					AM_Clamp,
 					AM_Clamp>::GetRHI();
 			PassParameters->ShadowThreshold = ToneProfile.ShadowThreshold;
+			PassParameters->ToneNormalizationFloor = FMath::Max(
+				ToneNormalizationFloor,
+				1.0e-4f);
 			PassParameters->HighlightThreshold = ToneProfile.HighlightThreshold;
 			PassParameters->TransitionSoftness = ToneProfile.TransitionSoftness;
 			PassParameters->Strength = ToneProfile.Strength;
@@ -362,8 +367,12 @@ namespace ABTSStylizedToneViewExtensionPrivate
 				const FABTSStylizedToneProfileParameters ToneProfile =
 					FABTSStylizedRenderingControl::GetToneProfileParameters(
 						ViewPolicy.Profile);
+				const float ToneNormalizationFloor =
+					FABTSStylizedRenderingControl::
+						GetSceneCaptureToneNormalizationFloor(
+							ViewPolicy.Profile);
 				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
-					[ToneProfile](
+					[ToneProfile, ToneNormalizationFloor](
 						FRDGBuilder& GraphBuilder,
 						const FSceneView& View,
 						const FPostProcessMaterialInputs& Inputs)
@@ -372,7 +381,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 							GraphBuilder,
 							View,
 							Inputs,
-							ToneProfile);
+							ToneProfile,
+							ToneNormalizationFloor);
 					});
 			}
 		}

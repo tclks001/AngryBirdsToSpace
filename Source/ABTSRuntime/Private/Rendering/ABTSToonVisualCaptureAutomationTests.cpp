@@ -198,9 +198,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T2-B1 reports explicit selective/capture implementation"),
+		TEXT("T2-B1 reports the capture dark-noise stabilization implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		4);
+		5);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -222,6 +222,17 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 			FABTSStylizedRenderingControl::GetToneProfileParameters(
 				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
 		TestTrue(TEXT("Every T1 tone profile is valid"), Profile.IsValid());
+		const float CaptureNormalizationFloor =
+			FABTSStylizedRenderingControl::
+				GetSceneCaptureToneNormalizationFloor(
+					static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
+		TestEqual(
+			TEXT("Capture tone floor uses the stable shadow band"),
+			CaptureNormalizationFloor,
+			Profile.ShadowLuminance);
+		TestTrue(
+			TEXT("Capture tone floor prevents dark-signal amplification"),
+			CaptureNormalizationFloor > 1.0e-4f);
 		Profiles.Add(Profile);
 		const FABTSStylizedOutlineProfileParameters OutlineProfile =
 			FABTSStylizedRenderingControl::GetOutlineProfileParameters(
