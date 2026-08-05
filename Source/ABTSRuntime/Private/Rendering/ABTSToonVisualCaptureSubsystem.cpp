@@ -1400,6 +1400,13 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 		Controller->SetViewTarget(CaptureCamera);
 		if (Controller->PlayerCameraManager != nullptr)
 		{
+			// The T0 runner intentionally pauses the world so Off/On variants
+			// share an identical world time. A paused PlayerCameraManager does
+			// not tick after the transient camera moves to the next anchor, so
+			// its camera cache would otherwise keep the previous anchor's pose.
+			// Refresh only the camera evaluation with a zero delta; gameplay and
+			// world simulation remain frozen.
+			Controller->PlayerCameraManager->UpdateCamera(0.0f);
 			// Give Off and On the same temporal-history starting condition.
 			Controller->PlayerCameraManager->SetGameCameraCutThisFrame();
 		}
