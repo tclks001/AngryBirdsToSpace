@@ -78,7 +78,17 @@
 | --- | --- | --- | --- |
 | 【已修复接线】M11 候选最初只在本地独立预览坐标中成立，不能证明接入 M3 Task Graph 生成世界后仍相对终局弹弓正确摆放 | 候选使用终局局部布局预设，但 M3 生成的 launch frame、月度世界位置和编辑器预览入口没有统一桥接；若退回世界坐标硬编码，会随世界生成结果失效。 | M3R-5.2 输出冻结的 Finale Preview Frame，M11 只把候选局部位置变换进该 frame；提交 `a87cfda` 接通，`5b62856` 补充月度 frame 验证。PIE 前可用 `abts.M11.CandidateRank <n>` 切换 Candidate Catalog，不修改 production 认证绑定。 | 对多个月度/M3 frame 验证平移旋转兼容、哈希和局部相对关系；控制台必须明确显示 `EDITOR CANDIDATE / NOT CERTIFIED`、Rank 和 Source Hash。共享地图、Task Graph 稳定契约仍由集成工作树修改。 |
 
-## 8. 集成工作树摘录清单
+## 8. 终局镜头独立录制
+
+| ID / 现象 | 根因 | 处理 | 防回归验证 |
+| --- | --- | --- | --- |
+| `M11-CAP-001` 【已修复】命令行 startup `LevelCapture` 能创建 AVI 并自动退出，日志也有完整发射/命中链，但最终 AVI 主头 `TotalFrames=0`，文件只有 65536 bytes；仅以“文件存在且非空”会假绿。 | UE 5.8 旧 `MovieSceneCapture`/FrameGrabber 在本项目的 `UnrealEditor.exe -game` unattended 生命周期中没有持续取得有效游戏 backbuffer；改成 JPG 协议或普通窗口也不能产生可验收全程帧。 | M11 Runner 不再使用 startup LevelCapture。显式捕获进程创建独立 `SceneCapture2D + TextureRenderTarget2D`，逐帧复制当前 PlayerCameraManager 最终 View 并同步写 JPG；TargetHit 后在同一进程内封装 MJPEG AVI。原生 AVI 直写在参数解析层 fail closed。 | AVI 验收必须解析 `avih.dwTotalFrames`、视频 `strh.dwLength` 和 `idx1` 条目数，三者均须等于连续 JPG 数；首尾索引须指向合法 JPEG。Rank11 三渲二 fresh 证据为 949 帧、1280×720、30 fps、31.633 s、AVI 21757000 bytes。 |
+| `M11-CAP-002` 【已修复】独立 M11 地图具备 Finale Slot Pair，但没有已安装的 Space Stake/Cord，自动录制等待到超时，无法进入正常发射链。 | 终局交互正确要求与 Finale Slot Pair 精确匹配的已装配太空弹弓；录制工具不能假设玩家库存/安装步骤已在 fresh process 中发生，也不能绕过交互直接搬运鸟。 | 只在显式 `-ABTSM11CameraCapture` 进程中，根据唯一 Finale Slot Pair 创建瞬态 Space Stake/Cord 夹具；随后仍调用 `TryEnterFinale`、精确 `NominalInput`、ReleasePending、求解、发布和权威播放链。夹具不写地图、不改库存。 | Manifest 必须记录 `captureFixtureCreated=true`；日志须依次出现 `CaptureFixtureCreated → NominalAttemptQueued → Release CandidateQualified=1 → FlightCamera FollowStarted → TargetHit`，Rank 1–11 始终标为 `UNCERTIFIED`。 |
+| `M11-CAP-003` 【已修复工具；旧镜头问题保留】直接从 Actor Tick 读 GameViewport 或在首帧请求 Slate Screenshot 会得到黑帧、D3D11 `TextureRHI` ensure 或卡在首次截图；成功录到旧镜头后，发射初段可见鸟，随后大部分帧只剩浅蓝天空。 | 前半是生命周期问题：Actor Tick 早于可读 backbuffer，且 unattended/offscreen 窗口不能作为稳定截图源。后半是既有旧镜头问题，不是录制器丢帧：`AABTSM11FinaleFlightCamera` 在高速段不能持续把鸟/叙事行星保持在画面内，与本文“实飞后鸟离框”的开放项一致。 | 验收器改为自身拥有的 RenderTarget，在 `TG_PostUpdateWork` 复制已结算相机 View 后 CaptureScene/读回；预热完成且至少两个起始帧落盘后才发射。M0 不修镜头导演，忠实保留“鸟离框/天空空镜”作为旧版基线。 | 抽检起始帧、发射帧、1/4、1/2、3/4 和终帧；验证图像非黑、尺寸一致和编号连续。M1 起用屏幕空间指标量化鸟/当前行星离框；不得把录制器成功误写成旧镜头构图通过。 |
+
+| `M11-CAP-004` 【开放；需 Integration 接线】合入包含三渲二实现版本 3 的最新 master 后，Rank 11、Stylized=1 的命令行录屏仍在发射初段之后只剩浅蓝天空；抽检第 4 帧可见鸟和弹弓，第 250/500/750/948 帧均未见鸟、行星或 UFO 轮廓。 | 录屏工具使用独立 `USceneCaptureComponent2D`；当前 `FABTSStylizedToneSceneViewExtension` 对 `InView.bIsSceneCapture` 显式跳过，而 T2-A 合同也只把 `MainWorld` 标为已实现，`FinaleRemotePreview` 尚未接入实际 pass。Manifest 中的 `stylizedImplementationVersion=3` 只证明进程加载了该版本，不能证明这个 SceneCapture 消费了 Tone/Outline。旧飞行镜头离框问题仍然同时存在。 | 本轮不在 M11 越权修改 ABTSRender 的共享视图契约。保留拒收 AVI、949 连续 JPG、manifest 与 fresh 日志；后续由 Integration 为“主视图等价的离屏验收捕获”建立显式 ViewClass/消费入口，或把录制源改为可读取真实 MainWorld 最终 backbuffer 的稳定命令行通路。接线后再进入 M1 镜头导演。 | 回归必须同时检查：日志明确记录捕获 ViewClass 与 resolved policy；Style On 的捕获帧存在 Tone/Outline，Style Off 不存在；鸟、三颗行星和 UFO 在关键事件帧可辨；不得只看实现版本号。证据：`Rank11-Stylized-v3Outline-20260805-224515`，949 帧、1280x720、30 fps、31.633 s，AVI SHA-256 `37B5D2DB637F15F70EC6BA7242FA4ADC2D07079B2D06DAECA58CB56261CC4471`。 |
+
+## 9. 集成工作树摘录清单
 
 集成工作树每次整理本文时，至少检查：
 

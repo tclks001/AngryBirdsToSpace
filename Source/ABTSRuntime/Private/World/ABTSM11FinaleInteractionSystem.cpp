@@ -333,6 +333,37 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	return true;
 }
 
+bool AABTSM11FinaleInteractionSystem::TryLaunchNominalCaptureAttempt(
+	AABTSM51SlingshotCord& Cord,
+	APlayerController& Controller)
+{
+	if (!TryEnterFinale(Cord, Controller)
+		|| !IsValid(FinaleSystem)
+		|| InteractionState != EABTSM11FinaleInteractionState::Aiming)
+	{
+		return false;
+	}
+
+	const FABTSM11FinaleLaunchInput NominalInput =
+		FinaleSystem->GetLayoutPreset().NominalInput;
+	if (!FinaleSystem->GetLayoutPreset().LaunchModel.Contains(NominalInput))
+	{
+		FailInteraction(TEXT("CaptureNominalInputOutsideLaunchDomain"));
+		return false;
+	}
+
+	Stabilizer.CancelProtection();
+	Stabilizer.Reset(NominalInput);
+	++AimRevision;
+	bPreviewDirty = true;
+	LatestSolvedRevision = INDEX_NONE;
+	UpdatePouchPresentation();
+	RequestRelease();
+	return InteractionState
+		== EABTSM11FinaleInteractionState::ReleasePending
+		|| InteractionState == EABTSM11FinaleInteractionState::Launched;
+}
+
 void AABTSM11FinaleInteractionSystem::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);

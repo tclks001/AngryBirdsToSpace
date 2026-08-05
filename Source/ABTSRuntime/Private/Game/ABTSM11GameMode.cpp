@@ -5,14 +5,19 @@
 #include "ABTSRuntime.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/CommandLine.h"
+#include "Misc/ScopeExit.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM11PlayerController.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "UI/ABTSM11FinaleHUD.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
+#include "World/ABTSM11FinaleCameraCaptureRunner.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM51WorldSystem.h"
 
@@ -120,6 +125,46 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 			TEXT("[ABTS][M11-B][GameMode] Duplicate player-placement hook ignored."));
 		return;
 	}
+	FABTSM11FinaleCameraCaptureConfig CaptureConfig;
+	FString CaptureConfigFailure;
+	if (!FABTSM11FinaleCameraCaptureConfig::Parse(
+		FCommandLine::Get(),
+		CaptureConfig,
+		&CaptureConfigFailure))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M11][CameraCapture] ConfigRejected Reason=%s"),
+			*CaptureConfigFailure);
+		if (CaptureConfig.bEnabled)
+		{
+			FPlatformMisc::RequestExitWithStatus(false, 2);
+		}
+		return;
+	}
+	bool bCaptureLifecycleTransferred = false;
+	ON_SCOPE_EXIT
+	{
+		if (CaptureConfig.bEnabled && !bCaptureLifecycleTransferred)
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Error,
+				TEXT("[ABTS][M11][CameraCapture] LifecycleAbortedBeforeRunner"));
+			FPlatformMisc::RequestExitWithStatus(false, 2);
+		}
+	};
+	if (CaptureConfig.bEnabled
+		&& GetWorld()->WorldType != EWorldType::Game)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M11][CameraCapture] RejectedWorldType=%d"),
+			static_cast<int32>(GetWorld()->WorldType));
+		return;
+	}
 	AABTSM6SlingshotSystem* SourceSlingshotSystem =
 		GetRuntimeSlingshotSystem();
 	int32 RuntimeCameraCount = 0;
@@ -219,20 +264,28 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 		WorldContract.LaunchFrame = PreviewFinaleContext->Frame;
 	}
 #if WITH_EDITOR
-	const int32 CandidateRank =
-		FABTSM11CandidateExperienceCatalog::GetRequestedCandidateRank();
+	const int32 CandidateRank = CaptureConfig.bEnabled
+		? CaptureConfig.CandidateRank
+		: FABTSM11CandidateExperienceCatalog::GetRequestedCandidateRank();
 	const bool bCandidateRequested = CandidateRank != 0;
 	const bool bIsPIEWorld =
 		GetWorld() != nullptr
 		&& GetWorld()->WorldType == EWorldType::PIE;
+	const bool bIsExplicitCaptureGameWorld =
+		CaptureConfig.bEnabled
+		&& GetWorld() != nullptr
+		&& GetWorld()->WorldType == EWorldType::Game;
 	const bool bUseEditorCandidate =
-		bCandidateRequested && bIsPIEWorld;
-	if (bCandidateRequested && !bIsPIEWorld)
+		bCandidateRequested
+		&& (bIsPIEWorld || bIsExplicitCaptureGameWorld);
+	if (bCandidateRequested
+		&& !bIsPIEWorld
+		&& !bIsExplicitCaptureGameWorld)
 	{
 		UE_LOG(
 			LogABTSRuntime,
 			Warning,
-			TEXT("[ABTS][M11-C-v2.1][GameMode] Candidate Rank=%d ignored outside PIE; production Certified v1 remains active."),
+			TEXT("[ABTS][M11-C-v2.1][GameMode] Candidate Rank=%d ignored outside PIE or explicit M11 capture; production Certified v1 remains active."),
 			CandidateRank);
 	}
 	const bool bReady = bUseEditorCandidate
@@ -322,6 +375,27 @@ void AABTSM11GameMode::OnInitialPlayerPlaced(
 			Log,
 			TEXT("[ABTS][M11-C][GameMode] Entry Ready=1 StartCell=%d"),
 			SpawnCellId);
+		if (CaptureConfig.bEnabled)
+		{
+			FinaleCameraCaptureRunner =
+				GetWorld()->SpawnActor<AABTSM11FinaleCameraCaptureRunner>(
+					AABTSM11FinaleCameraCaptureRunner::StaticClass(),
+					FTransform::Identity,
+					SpawnParameters);
+			if (!IsValid(FinaleCameraCaptureRunner)
+				|| !FinaleCameraCaptureRunner->Initialize(
+					CaptureConfig,
+					*FinaleSystem,
+					*FinaleInteractionSystem))
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Error,
+					TEXT("[ABTS][M11][CameraCapture] RunnerInitializationFailed"));
+				return;
+			}
+			bCaptureLifecycleTransferred = true;
+		}
 	}
 	else
 	{
