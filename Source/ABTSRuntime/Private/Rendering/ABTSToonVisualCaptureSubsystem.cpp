@@ -31,6 +31,7 @@
 #include "Misc/SecureHash.h"
 #include "Party/ABTSBirdParty.h"
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "DynamicRHI.h"
 #include "GPUProfiler.h"
