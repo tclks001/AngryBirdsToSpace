@@ -28,6 +28,8 @@ float OutlineDepthSoftness;
 float OutlineNormalThreshold;
 float OutlineNormalSoftness;
 float OutlineStrength;
+float OutlineOcclusionStrength;
+float OutlineNormalCreaseStrength;
 float SelectiveOutlineStrength;
 float SelectiveOutlineWidthScale;
 uint bAllowSelectiveStencil;
@@ -125,7 +127,9 @@ uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
 	return RelativeDepthDelta <= 0.006f ? Stencil : 0u;
 }
 
-float ABTSComputeNeighborEdge(
+// x: geometry-to-background silhouette, y: depth occlusion,
+// z: depth-continuous normal crease.
+float3 ABTSComputeNeighborEdgeLayers(
 	float CenterDepth,
 	float3 CenterNormal,
 	float2 SampleUV)
@@ -133,7 +137,7 @@ float ABTSComputeNeighborEdge(
 	const float SampleDeviceDepth = ABTSSampleDeviceDepth(SampleUV);
 	if (SampleDeviceDepth <= 1.0e-7f)
 	{
-		return 1.0f;
+		return float3(1.0f, 0.0f, 0.0f);
 	}
 
 	const float SampleDepth = ConvertFromDeviceZ(SampleDeviceDepth);
@@ -152,15 +156,19 @@ float ABTSComputeNeighborEdge(
 		OutlineNormalThreshold,
 		OutlineNormalThreshold + OutlineNormalSoftness,
 		NormalDelta);
-	return max(DepthEdge, NormalEdge);
+	// Classify a normal discontinuity as a crease only while depth remains
+	// continuous.  The final pass can then keep low-poly facets subordinate
+	// without weakening real occluding contours.
+	const float NormalCreaseEdge = NormalEdge * (1.0f - DepthEdge);
+	return float3(0.0f, DepthEdge, NormalCreaseEdge);
 }
 
-float ABTSComputeOutlineCoverage(float2 ViewportUV)
+float3 ABTSComputeOutlineLayerCoverage(float2 ViewportUV)
 {
 	const float CenterDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
 	if (CenterDeviceDepth <= 1.0e-7f)
 	{
-		return 0.0f;
+		return float3(0.0f, 0.0f, 0.0f);
 	}
 
 	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
@@ -179,17 +187,17 @@ float ABTSComputeOutlineCoverage(float2 ViewportUV)
 		float2(-DiagonalOffset.x, -DiagonalOffset.y)
 	};
 
-	float AccumulatedEdge = 0.0f;
+	float3 AccumulatedEdgeLayers = float3(0.0f, 0.0f, 0.0f);
 	UNROLL
 	for (int SampleIndex = 0; SampleIndex < 8; ++SampleIndex)
 	{
-		AccumulatedEdge += ABTSComputeNeighborEdge(
+		AccumulatedEdgeLayers += ABTSComputeNeighborEdgeLayers(
 			CenterDepth,
 			CenterNormal,
 			saturate(ViewportUV + Offsets[SampleIndex]));
 	}
 
-	const float NormalizedCoverage = AccumulatedEdge / 3.0f;
+	const float3 NormalizedCoverage = AccumulatedEdgeLayers / 3.0f;
 	return smoothstep(0.10f, 0.90f, NormalizedCoverage);
 }
 
@@ -238,12 +246,20 @@ void ABTSStylizedOutlineMainPS(
 		SceneColorSampler,
 		UVAndScreenPos.xy);
 	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
-	const float OutlineCoverage = ABTSComputeOutlineCoverage(ViewportUV);
+	const float3 OutlineLayerCoverage =
+		ABTSComputeOutlineLayerCoverage(ViewportUV);
 	const float SelectiveCoverage =
 		ABTSComputeSelectiveOutlineCoverage(ViewportUV);
+	const float BackgroundSilhouetteAmount =
+		OutlineLayerCoverage.x * OutlineStrength;
+	const float OcclusionAmount =
+		OutlineLayerCoverage.y * OutlineOcclusionStrength;
+	const float NormalCreaseAmount =
+		OutlineLayerCoverage.z * OutlineNormalCreaseStrength;
 	const float OutlineAmount = saturate(max(
-		OutlineCoverage * OutlineStrength,
-		SelectiveCoverage * SelectiveOutlineStrength));
+		max(BackgroundSilhouetteAmount, OcclusionAmount),
+		max(NormalCreaseAmount,
+			SelectiveCoverage * SelectiveOutlineStrength)));
 	const float3 OutlineTarget = SceneColor.rgb * OutlineColor;
 	OutColor = float4(
 		lerp(SceneColor.rgb, OutlineTarget, OutlineAmount),

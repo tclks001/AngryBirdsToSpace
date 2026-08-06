@@ -124,7 +124,7 @@ AVI 是视觉证据；Manifest/日志是身份与流程证据。两者缺一不�
 
 从录制合同版本 3 起，Manifest 还必须写出 `stylizedViewClass=FinaleCinematicCapture`、组件注册状态及 resolved policy。它们只证明录制组件已接入预期风格策略，不能单独证明 Tone/Outline 已进入最终像素；最终仍以从 AVI 本体解码的帧为准。
 
-从录制合同版本 4 起，成功录制还必须写出与影像逐帧一一对应的 `.camera-observations.csv`；Manifest 记录其路径、Schema、行数和只读诊断摘要。CSV 缺失或行数与影像不一致时整个录制 fail closed。字段与离线判据见 [M1 观测设计](M11FinaleCameraObservationAndOfflineCriteria.md)。
+M11 历史分支的录制合同 v4/v5 分别引入逐帧 `.camera-observations.csv` 与 M2 导演扩展；Manifest 记录其路径、Schema、行数和只读诊断摘要。CSV 缺失或行数与影像不一致时整个录制 fail closed。合并集成线独立占用的 T2-C1 v4 全程渲染状态门后，首个无歧义的完整合同为 v6；它同时要求 CSV Schema 2、导演遥测和 `stylizedRuntimeState*` 全程证据。字段、历史证据与离线判据见 [M1 观测设计](M11FinaleCameraObservationAndOfflineCriteria.md)。
 
 ### 3.4 M0 fresh-process 基线证据
 

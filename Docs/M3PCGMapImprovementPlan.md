@@ -1384,13 +1384,14 @@ Visible PIE，才能整体晋升为 **IntegrationAccepted**。
 
 - 新增独立的候选绑定 `MonthlyPresentation` 结果层。构造前先完整验证 R-3 `EncounterSpatial`，随后为三个保留候选逐一生成表现快照；它不选择、重排或淘汰候选，也不改写 Source RouteId、RouteCandidateHash、SpatialCandidateHash、`BiomeDistrictId`、Envelope 或 ActiveRole。每个 Cell 保存完整且稳定排序的 Envelope 成员关系，不以单一 PrimaryEnvelope 代替重叠成员；
 - `DisplayBiomeArchetype` 与冻结的逻辑 `BiomeArchetype/BiomeDistrictId` 分离。表现层按 20–45 m 视觉 Beat 编排主题；小于 3 Cell 的显示连通块只在显示副本中确定性合并到邻区多数主题，源 District 身份与全部 R-3 Hash 保持不变。100 Seed 中共发现 2 个逻辑 singleton，第一轮视觉合并后又修复 2 个 Cell 的小碎片；最终显示 singleton 为 0、最小显示连通块为 3 Cell；
-- 材质桥和 HISM 只消费显式预览副本；生产默认不把任一候选宣布为世界权威。材质 LUT 用 Beat/Theme 变体形成低幅明暗节拍，树石 HISM 用同一 Beat 变体形成疏密和尺度变化，故 20–45 m Visual Beat 不再只是 DTO/Hash。固定展示运行时会逐项证明全部材质 Cell 和全部实际 HISM 实例均经过该消费路径，并报告 `PreviewAuthority=1`、`MonthlyAccepted=0`；关闭预览时继续使用兼容世界。权威 `GeneratedCellStates/GeneratedEdgeStates/TerrainVisualField`、`QuerySurface`、旧 TaskGraph 与稳定合同不因预览开关改变；
+- 生产默认不把任一候选宣布为世界权威。地表材质已取消 Beat/Theme 变体消费：`CellVisualLUT` 只按有效陆地 `TerrainType` 写入固定基础色，不在 Cell 中心预烘焙边界混色；真实异色分界继续由 TerrainType 线段 SDF 表现。月度 `VisualBeatId/AccentVariantId/ThemeVariantId`、DTO 与 Hash 均保留，当前只由树石 HISM 等非地表表现用来形成疏密、随机序列和尺度变化。固定展示运行时会证明全部材质 Cell 经过 BasePalette 路径并报告 `MaterialVisualBeatConsumed=0/MaterialThemeVariantConsumed=0`，同时证明全部实际 HISM 实例经过 Beat 消费路径，并保持 `PreviewAuthority=1`、`MonthlyAccepted=0`；关闭预览时继续使用兼容世界。权威 `GeneratedCellStates/GeneratedEdgeStates/TerrainVisualField`、`QuerySurface`、旧 TaskGraph 与稳定合同不因预览开关改变；
+- 候选预览的 CellStates、EdgeStates 与 VisualField 由 Planet 持久持有。材质桥与 M10 小地图颜色查询在 `PreviewAuthority=1` 时消费同一个活动候选 VisualField，在预览关闭时共同消费兼容 VisualField；候选字段缺失时 fail closed，不回退到另一候选冒充当前地表。该同步只覆盖表现颜色和候选道路/河流 SDF，不改变 `QuerySurface`、物理或跨阶段合同的兼容世界权威；
 - 装饰实例在写入前和散点落点重解析后两次检查保护区：道路、ActiveRole、Target Footprint、NoRoad、攻击走廊与水体均禁止树石侵入。树石 HISM 每次重建重申 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，只作为静态碰撞表现，不成为任务、PVS、Witness、道路或布局身份的数据源。
 - Editor 调试叠层可独立开关 Biome、Envelope 边界、Visual Beat 边界和 ActiveRole/DeepWild 覆盖；调试开关不进入表现配置或候选身份。PIE 使用精确预览 Candidate 时可按 `F7` 切换逻辑区域快捷叠层：红色球点表示 Target Footprint，橙色点线表示 Attack Corridor；再次按 `F7` 关闭。该快捷键只存在于 Editor 构建，不修改 Input.ini、玩家输入映射或候选 Hash。也可用 `-ABTSM3R5LogicRegions` 在启动时默认开启；若没有同时提供 `-ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4`，叠层会明确显示不可用而不会隐式选择候选。
 
 **本地自动验收证据**
 
-- `M3R5AcceptanceManifest` 冻结为 `ManifestHash=0A8A186B4B2C359A`，展示 SourceSpatial/Config/Result/Preview Hash 分别为 `836665565E758FA2/9BB9CF98FB4127F9/C38283DF9504A92F/9BE1F04A45277AEF`；`ABTS.M3.Monthly.Biome.0`、`ABTS.M3.Monthly.BiomeFailure` 与 `ABTS.M3.Monthly.Biome.Sweep100` 各自冻结为 1 个 UE Automation Test，Sweep 内部再完整遍历 100 Seed。R-5 不重新构造射程，而是通过已验证的 `SourceSpatialResultHash` 消费同一冻结校准批次；
+- `M3R5AcceptanceManifest` 冻结为 `ManifestHash=0A8A186B4B2C359A`，展示 SourceSpatial/Config/Result/Preview Hash 分别为 `836665565E758FA2/9BB9CF98FB4127F9/C38283DF9504A92F/9BE1F04A45277AEF`；`ABTS.M3.Monthly.Biome.0`、`ABTS.M3.Monthly.BiomeFailure` 与 `ABTS.M3.Monthly.Biome.Sweep100` 各自冻结为 1 个 UE Automation Test，Sweep 内部再完整遍历 100 Seed；`ABTS.M3.Monthly.Biome.BaseTerrainPalette` 额外验证同一 TerrainType 不受 Cell 高度/湿度标量影响；`ABTS.M3.Monthly.SatellitePreview.04ScoutMapPresentationAuthority` 以候选/兼容地貌不同的 Cell 证明小地图查询消费当前活动候选。R-5 不重新构造射程，而是通过已验证的 `SourceSpatialResultHash` 消费同一冻结校准批次；
 - 100 Seed 为 `Terminal=100, Accepted=100, Rejected=0`，共验证 300 个候选表现计划，冻结 Oracle 为 `33DEB2FB047DE412`。最差统计为 ActiveRole 覆盖下限 `786‰`、DeepWild 上限 `0‰`、六 Encounter 主地貌主题下限 `4`、最小显示连通块 `3 Cell`、全局显示邻接边界率 `21‰`；逻辑 singleton 共 2 个、小碎片修复共 2 Cell、最终显示 singleton 为 0，受保护区域实例违规为 0；
 - 候选表现构造耗时最终基线 `P95=127.860 ms`、`Max=139.359 ms`，满足冻结的 `P95<=250 ms / Max<=1000 ms` 算法预算；同一输入深度重放一致，日志开关与显式预览开关不改变 R-3 身份。
 - `SurfaceSubdivision=7` 完整显式预览 runtime 通过等价的唯一顶点地表采样缓存，将重复的三角形顶点高度/法线/颜色查询合并为每个 icosphere 顶点一次采样；没有降低 Subdivision、关闭碰撞或跳过材质/HISM。最终 fresh 实测 `PlannerMS=130.092`、`RebuildMS=6057.156`、`PeakPhysicalMB=2221.3`，满足冻结的 `1000 ms / 8000 ms / 2.25GB×115%` 门槛。
@@ -1405,7 +1406,7 @@ Visible PIE，才能整体晋升为 **IntegrationAccepted**。
 - 开关 UE PCG/HISM 表现不改变 Task、Route、Encounter、`QuerySurface`、PVS、Witness 或布局 Hash；
 - 树石 HISM 保持当前生产基线 `QueryAndPhysics + ABTSDeveloperObstacleChannel + SimulatePhysics=false`，不得退回旧表现稿的 `NoCollision`，也不得让全图实例成为刚体；这里的“静态实例”只表示不模拟、不自主移动，不代表 UE Object Type 是 `WorldStatic`。Character Sweep、Visibility Query、M9 开发者穿行和 M6 动态代理撞击静态实例均须回归通过。实例数不超过既有每 Cell 配额；地表材质增量仍以 `<=2 ms @ 1080p` 为正式目标；
 - 同一验收机的 fresh Commandlet 中，Sub=7 逻辑生成、低频网格、碰撞与无材质资源重建保持 `<=8 s`，进程峰值物理内存不超过冻结基线 `2.25 GB` 的 115%；
-- `L_ABTS_M3` fresh runtime 发布 `Ready=1/MaterialReady=1`，可见 PIE 检查 Lit/Unlit、地貌边界，以及关闭 Editor Debug Layer 后道路和玩家可见地标仍持续指向下一 Beat；整条六关流程的最终 debug-off 视觉结论仍由 R-7 冻结。
+- `L_ABTS_M3` fresh runtime 发布 `Ready=1/MaterialReady=1` 与 `MaterialBasePaletteApplied=1`，并明确报告材质端 Beat/Theme 消费为 0；可见 PIE 检查 Lit/Unlit 下同一 TerrainType 内无深浅块、异色区只沿真实 TerrainType SDF 边界过渡，以及关闭 Editor Debug Layer 后道路和玩家可见地标仍持续指向下一 Beat；整条六关流程的最终 debug-off 视觉结论仍由 R-7 冻结。
 
 **阶段边界**
 

@@ -198,9 +198,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T2-B1 reports the capture dark-noise stabilization implementation"),
+		TEXT("Stylized renderer reports the layered terrain-outline implementation"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		6);
+		7);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -238,6 +238,13 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 			FABTSStylizedRenderingControl::GetOutlineProfileParameters(
 				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
 		TestTrue(TEXT("Every T2-A outline profile is valid"), OutlineProfile.IsValid());
+		TestTrue(
+			TEXT("Background silhouettes remain stronger than depth occlusions"),
+			OutlineProfile.Strength > OutlineProfile.OcclusionStrength);
+		TestTrue(
+			TEXT("Depth occlusions remain stronger than normal creases"),
+			OutlineProfile.OcclusionStrength
+				> OutlineProfile.NormalCreaseStrength);
 		OutlineProfiles.Add(OutlineProfile);
 	}
 	TestNotEqual(
@@ -252,6 +259,13 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		TEXT("Ground and finale outline widths differ"),
 		OutlineProfiles[0].WidthPixels,
 		OutlineProfiles[2].WidthPixels);
+	FABTSStylizedOutlineProfileParameters InvalidOutlineHierarchy =
+		OutlineProfiles[0];
+	InvalidOutlineHierarchy.NormalCreaseStrength =
+		InvalidOutlineHierarchy.OcclusionStrength + 0.01f;
+	TestFalse(
+		TEXT("An inverted outline hierarchy is rejected"),
+		InvalidOutlineHierarchy.IsValid());
 	TestFalse(
 		TEXT("Out-of-range profiles are rejected"),
 		FABTSStylizedRenderingControl::IsProfileValid(

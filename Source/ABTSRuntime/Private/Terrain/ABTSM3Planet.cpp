@@ -196,14 +196,17 @@ bool AABTSM3Planet::RebuildPlanet()
 		FPlatformTime::Seconds();
 	LastM3RebuildDurationMS = 0.0;
 	LastMonthlyPresentationBuildDurationMS = 0.0;
-	bMonthlyMaterialRhythmApplied = false;
-	MonthlyMaterialRhythmCellCount = 0;
+	bTerrainBasePaletteApplied = false;
+	TerrainBasePaletteCellCount = 0;
 	MonthlyDecorAccent0InstanceCount = 0;
 	MonthlyDecorAccent1InstanceCount = 0;
 	bM3PresentationReady = false;
 	bMonthlyPresentationPreviewActive = false;
 	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
 	ActiveMonthlyPresentationPreviewCandidateHash = 0;
+	MonthlyPresentationPreviewCellStates.Reset();
+	MonthlyPresentationPreviewEdgeStates.Reset();
+	MonthlyPresentationPreviewVisualField.Reset();
 	ActiveMonthlyFinaleAnchorPreview =
 		FABTSM3MonthlyFinaleAnchorPreview();
 	MonthlyPresentationResult =
@@ -273,19 +276,18 @@ bool AABTSM3Planet::RebuildPlanet()
 			*SatellitePreviewFailure);
 	}
 	BuildM3ContinuousSurface();
-	TArray<FABTSM3CellState> PresentationCellStates;
-	TArray<FABTSM3CellEdgeState> PresentationEdgeStates;
 	const FABTSM3MonthlyCandidatePresentation*
 		PresentationCandidate = nullptr;
-	const bool bPreviewDataReady =
+	bool bPreviewDataReady =
 		TryBuildMonthlyPresentationPreviewData(
-			PresentationCellStates,
-			PresentationEdgeStates,
+			MonthlyPresentationPreviewCellStates,
+			MonthlyPresentationPreviewEdgeStates,
 			PresentationCandidate);
-	FABTSM3TerrainVisualField PresentationVisualField;
 	if (bPreviewDataReady)
 	{
-		PresentationVisualField.Initialize(
+		MonthlyPresentationPreviewVisualField =
+			MakeUnique<FABTSM3TerrainVisualField>();
+		MonthlyPresentationPreviewVisualField->Initialize(
 			PlanetRadiusCM,
 			ResolvedHeightScaleCM,
 			ResolvedWaterDepthCM,
@@ -293,13 +295,27 @@ bool AABTSM3Planet::RebuildPlanet()
 			TerrainBlendWidthCM,
 			SurfaceNormalSmoothingDistanceCM,
 			LogicalCells,
-			PresentationCellStates,
-			PresentationEdgeStates,
+			MonthlyPresentationPreviewCellStates,
+			MonthlyPresentationPreviewEdgeStates,
 			TrailVisualHalfWidthCM,
 			MainRoadVisualHalfWidthCM,
 			StreamVisualHalfWidthCM,
 			ShallowRiverVisualHalfWidthCM,
 			DeepRiverVisualHalfWidthCM);
+		if (!MonthlyPresentationPreviewVisualField->IsReady())
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=PresentationVisualFieldUnavailable CompatibilityWorldPreserved=1 MonthlyAccepted=0"),
+				ActiveMonthlyPresentationPreviewCandidateId);
+			MonthlyPresentationPreviewCellStates.Reset();
+			MonthlyPresentationPreviewEdgeStates.Reset();
+			MonthlyPresentationPreviewVisualField.Reset();
+			bMonthlyPresentationPreviewActive = false;
+			ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
+			ActiveMonthlyPresentationPreviewCandidateHash = 0;
+			bPreviewDataReady = false;
+			PresentationCandidate = nullptr;
+		}
 	}
 	bool bMaterialReady = false;
 	bool bPresentationReady = bFinaleFrameReady;
@@ -311,25 +327,25 @@ bool AABTSM3Planet::RebuildPlanet()
 			RiverColor, StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM,
 			LogicalCells,
 			bPreviewDataReady
-				? PresentationCellStates
+				? MonthlyPresentationPreviewCellStates
 				: GeneratedCellStates,
 			bPreviewDataReady
-				? PresentationEdgeStates
+				? MonthlyPresentationPreviewEdgeStates
 				: GeneratedEdgeStates,
 			bPreviewDataReady
-				? PresentationVisualField
+				? *MonthlyPresentationPreviewVisualField
 				: *TerrainVisualField,
 			bPreviewDataReady
 				? PresentationCandidate
 				: nullptr);
-		bMonthlyMaterialRhythmApplied =
+		bTerrainBasePaletteApplied =
 			bMaterialReady
 			&& TerrainMaterialBridge->
-				IsMonthlyPresentationRhythmApplied();
-		MonthlyMaterialRhythmCellCount =
+				IsTerrainBasePaletteApplied();
+		TerrainBasePaletteCellCount =
 			bMaterialReady
 			? TerrainMaterialBridge->
-				GetMonthlyPresentationRhythmCellCount()
+				GetTerrainBasePaletteCellCount()
 			: 0;
 		if (!bMaterialReady)
 		{
@@ -338,7 +354,9 @@ bool AABTSM3Planet::RebuildPlanet()
 		}
 	}
 	BuildDecorInstances(
-		bPreviewDataReady ? &PresentationCellStates : nullptr,
+		bPreviewDataReady
+			? &MonthlyPresentationPreviewCellStates
+			: nullptr,
 		bPreviewDataReady ? PresentationCandidate : nullptr);
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M5.2][Collision] ForestHISM=%s RockHISM=%s StaticPhysics=1 DestroyableOutsideLaunch=0 PhysicsBlend=%.1f"),
@@ -1836,9 +1854,18 @@ bool AABTSM3Planet::QueryScoutMapTerrainColor(
 	int32* OutCellId) const
 {
 	OutColor = FLinearColor::Black;
-	if (!TerrainVisualField || !TerrainVisualField->IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FABTSM3TerrainVisualField* PresentedVisualField =
+		bMonthlyPresentationPreviewActive
+			? MonthlyPresentationPreviewVisualField.Get()
+			: TerrainVisualField.Get();
+	if (PresentedVisualField == nullptr
+		|| !PresentedVisualField->IsReady()
+		|| UnitDirection.IsNearlyZero())
+	{
+		return false;
+	}
 	int32 ResolvedCellId = INDEX_NONE;
-	const bool bResult = TerrainVisualField->QueryScoutMapColor(
+	const bool bResult = PresentedVisualField->QueryScoutMapColor(
 		UnitDirection, RoadColor, RiverColor, StartCellHint, ResolvedCellId, OutColor);
 	if (OutCellId) *OutCellId = ResolvedCellId;
 	return bResult;

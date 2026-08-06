@@ -81,8 +81,8 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 		break;
 	case EABTSStylizedViewClass::SatelliteLandingPreview:
 		Policy.Profile = EABTSStylizedRenderProfile::SatelliteGuide;
-		// The lunar landing preview intentionally captures BaseColor so the
-		// far side remains a readable navigation instrument.  Preserve that
+		// The lunar landing preview disables the SceneCapture lighting show flag
+		// so the far side remains a readable navigation instrument. Preserve that
 		// lighting-independent palette and only add its thin outline layer.
 		Policy.bApplyTone = false;
 		Policy.bAllowSelectiveStencil = true;

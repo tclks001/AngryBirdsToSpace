@@ -28,6 +28,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(float, OutlineNormalThreshold)
 		SHADER_PARAMETER(float, OutlineNormalSoftness)
 		SHADER_PARAMETER(float, OutlineStrength)
+		SHADER_PARAMETER(float, OutlineOcclusionStrength)
+		SHADER_PARAMETER(float, OutlineNormalCreaseStrength)
 		SHADER_PARAMETER(float, SelectiveOutlineStrength)
 		SHADER_PARAMETER(float, SelectiveOutlineWidthScale)
 		SHADER_PARAMETER(uint32, bAllowSelectiveStencil)
@@ -225,6 +227,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			PassParameters->OutlineNormalThreshold = OutlineProfile.NormalThreshold;
 			PassParameters->OutlineNormalSoftness = OutlineProfile.NormalSoftness;
 			PassParameters->OutlineStrength = OutlineProfile.Strength;
+			PassParameters->OutlineOcclusionStrength =
+				OutlineProfile.OcclusionStrength;
+			PassParameters->OutlineNormalCreaseStrength =
+				OutlineProfile.NormalCreaseStrength;
 			PassParameters->SelectiveOutlineStrength = 0.96f;
 			PassParameters->SelectiveOutlineWidthScale = 1.45f;
 			PassParameters->bAllowSelectiveStencil =

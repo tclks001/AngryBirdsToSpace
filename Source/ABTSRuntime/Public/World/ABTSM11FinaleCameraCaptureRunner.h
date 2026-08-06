@@ -17,7 +17,9 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	static constexpr int32 ContractVersion = 5;
+	// First integrated contract that combines the T2-C1 runtime-state gate
+	// with M1/M2 camera observations and director telemetry.
+	static constexpr int32 ContractVersion = 6;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -125,6 +127,8 @@ private:
 	bool TryResolveOrCreateCaptureCord(
 		AABTSM51SlingshotCord*& OutCord);
 	bool TryStartRecording();
+	bool HasExpectedStylizedRuntimeState() const;
+	void FailForStylizedRuntimeStateDrift();
 	bool CaptureCurrentFrame();
 	bool RecordCameraObservation(const FMinimalViewInfo& View);
 	bool WriteObservationCsv();
@@ -176,6 +180,8 @@ private:
 	bool bPendingFinalizeSuccess = false;
 	bool bCaptureFixtureCreated = false;
 	bool bStylizedViewRegistered = false;
+	bool bStylizedRuntimeStateMaintained = true;
+	int32 StylizedRuntimeStateFailureFrame = INDEX_NONE;
 	bool bHasPreviousCameraObservation = false;
 	bool bObservationCsvWritten = false;
 };

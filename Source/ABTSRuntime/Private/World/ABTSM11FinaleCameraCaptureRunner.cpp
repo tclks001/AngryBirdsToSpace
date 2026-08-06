@@ -515,6 +515,8 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	StartPlatformSeconds = FPlatformTime::Seconds();
 	RemainingWarmupFrames = Config.WarmupFrames;
 	ObservationSamples.Reset();
+	bStylizedRuntimeStateMaintained = true;
+	StylizedRuntimeStateFailureFrame = INDEX_NONE;
 	bHasPreviousCameraObservation = false;
 	bObservationCsvWritten = false;
 	ABTSM11FinaleCameraDirector::SetM2Enabled(Config.bDirectorM2);
@@ -589,6 +591,11 @@ void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
 	if (Phase == EABTSM11FinaleCameraCapturePhase::Inactive
 		|| Phase == EABTSM11FinaleCameraCapturePhase::Terminal)
 	{
+		return;
+	}
+	if (!HasExpectedStylizedRuntimeState())
+	{
+		FailForStylizedRuntimeStateDrift();
 		return;
 	}
 	if (bMovieCaptureStarted
@@ -711,6 +718,40 @@ void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
 
 	default:
 		break;
+	}
+}
+
+bool AABTSM11FinaleCameraCaptureRunner::HasExpectedStylizedRuntimeState() const
+{
+	return FABTSStylizedRenderingControl::IsEnabled() == Config.bStylized
+		&& FABTSStylizedRenderingControl::GetProfile()
+			== EABTSStylizedRenderProfile::FinaleSpace;
+}
+
+void AABTSM11FinaleCameraCaptureRunner::FailForStylizedRuntimeStateDrift()
+{
+	bStylizedRuntimeStateMaintained = false;
+	StylizedRuntimeStateFailureFrame = CapturedFrameCount;
+	const FString Reason = FString::Printf(
+		TEXT("StylizedRuntimeStateDrift:Frame=%d ExpectedEnabled=%d ActualEnabled=%d ExpectedProfile=FinaleSpace ActualProfile=%d"),
+		CapturedFrameCount,
+		Config.bStylized ? 1 : 0,
+		FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0,
+		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()));
+	UE_LOG(
+		LogABTSRuntime,
+		Error,
+		TEXT("[ABTS][M11][CameraCapture] %s"),
+		*Reason);
+	if (bMovieCaptureStarted && !bMovieCaptureStopped)
+	{
+		bPendingFinalizeSuccess = false;
+		PendingFinalizeReason = Reason;
+		StopRecording();
+	}
+	else
+	{
+		Finish(false, Reason);
 	}
 }
 
@@ -1558,6 +1599,12 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		TEXT("stylizedViewPolicyValid"),
 		CaptureViewPolicy.IsValid());
 	Root->SetBoolField(
+		TEXT("stylizedRuntimeStateMaintained"),
+		bStylizedRuntimeStateMaintained);
+	Root->SetNumberField(
+		TEXT("stylizedRuntimeStateFailureFrame"),
+		StylizedRuntimeStateFailureFrame);
+	Root->SetBoolField(
 		TEXT("stylizedTonePolicyEnabled"),
 		Config.bStylized && CaptureViewPolicy.bApplyTone);
 	Root->SetBoolField(
@@ -1786,6 +1833,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	const FString& Parameters)
 {
+	TestEqual(
+		TEXT("Capture contract version is integrated v6"),
+		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
+		6);
+
 	FABTSM11FinaleCameraCaptureConfig Config;
 	FString Failure;
 	TestTrue(

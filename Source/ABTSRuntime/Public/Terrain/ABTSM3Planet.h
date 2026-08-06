@@ -232,14 +232,14 @@ public:
 		return LastMonthlyPresentationBuildDurationMS;
 	}
 
-	bool IsMonthlyMaterialRhythmApplied() const
+	bool IsTerrainBasePaletteApplied() const
 	{
-		return bMonthlyMaterialRhythmApplied;
+		return bTerrainBasePaletteApplied;
 	}
 
-	int32 GetMonthlyMaterialRhythmCellCount() const
+	int32 GetTerrainBasePaletteCellCount() const
 	{
-		return MonthlyMaterialRhythmCellCount;
+		return TerrainBasePaletteCellCount;
 	}
 
 	int32 GetMonthlyDecorAccent0InstanceCount() const
@@ -556,11 +556,20 @@ private:
 #endif
 
 	TUniquePtr<FABTSM3TerrainVisualField> TerrainVisualField;
+	/**
+	 * Persistent preview-owned inputs and field used by every color consumer.
+	 * The field stores pointers to these arrays, so all three must share the
+	 * Planet lifetime rather than a RebuildPlanet() stack frame.
+	 */
+	TArray<FABTSM3CellState> MonthlyPresentationPreviewCellStates;
+	TArray<FABTSM3CellEdgeState> MonthlyPresentationPreviewEdgeStates;
+	TUniquePtr<FABTSM3TerrainVisualField>
+		MonthlyPresentationPreviewVisualField;
 	bool bM3PresentationReady = false;
 	double LastM3RebuildDurationMS = 0.0;
 	double LastMonthlyPresentationBuildDurationMS = 0.0;
-	bool bMonthlyMaterialRhythmApplied = false;
-	int32 MonthlyMaterialRhythmCellCount = 0;
+	bool bTerrainBasePaletteApplied = false;
+	int32 TerrainBasePaletteCellCount = 0;
 	int32 MonthlyDecorAccent0InstanceCount = 0;
 	int32 MonthlyDecorAccent1InstanceCount = 0;
 	bool bMonthlyPresentationPreviewActive = false;

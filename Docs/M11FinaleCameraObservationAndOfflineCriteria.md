@@ -60,6 +60,12 @@ CSV 行数必须严格等于 JPG/AVI 帧数，`frameIndex` 必须为 `0..N-1`。
 
 M2 把录制合同升级到 5、CSV Schema 升级到 2，并在原 36 列基础上增加 `directorMode`、`directorM2FrozenEnabled`、`directorBlendAlpha`。Manifest 同步记录请求模式、实际冻结模式、混合帧数、非 Assist1 越界帧数和最大混合权重。离线工具同时接受 Schema 1/2；旧 M1 四象限 CSV 不需要重录。
 
+### 3.2 v6 集成合同
+
+2026-08-06 合并 `master` 时发现版本号发生并行碰撞：M11 历史 v4/v5 分别表示 M1 观测与 M2 导演扩展，而集成线也曾独立用 v4 表示“录制期间三渲二 Enabled/Profile 必须逐帧保持”的 fail-closed 门。已有 v4/v5 产物的身份不可重写，因此合并结果不复用 v5，统一升级为 v6。
+
+v6 是首个无歧义的完整集成合同：它同时要求 CSV Schema 2/M2 导演遥测，以及 `stylizedRuntimeStateMaintained`、`stylizedRuntimeStateFailureFrame` 两项全程渲染状态证据。逐帧状态检查发生在观测与图像捕获之前；发生漂移时必须在该帧停止录制、写失败 Manifest，不能把半段普通渲染视频标为 `Complete`。后续并行开发修改录制合同前，必须先合并最新 `master` 并从当前最高版本单调递增，不能只基于功能分支旧基线自行占用版本号。
+
 M2 A/B 使用：
 
 ```powershell

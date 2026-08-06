@@ -40,17 +40,18 @@ public:
 		const TArray<FABTSM3CellState>& CellStates,
 		const TArray<FABTSM3CellEdgeState>& EdgeStates,
 		const FABTSM3TerrainVisualField& VisualField,
+		/** Preview identity is diagnostic-only; ground colors never consume monthly variants. */
 		const FABTSM3MonthlyCandidatePresentation*
 			MonthlyPresentation = nullptr);
 
-	bool IsMonthlyPresentationRhythmApplied() const
+	bool IsTerrainBasePaletteApplied() const
 	{
-		return bMonthlyPresentationRhythmApplied;
+		return bTerrainBasePaletteApplied;
 	}
 
-	int32 GetMonthlyPresentationRhythmCellCount() const
+	int32 GetTerrainBasePaletteCellCount() const
 	{
-		return MonthlyPresentationRhythmCellCount;
+		return TerrainBasePaletteCellCount;
 	}
 
 private:
@@ -74,6 +75,6 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TerrainMID;
 
-	bool bMonthlyPresentationRhythmApplied = false;
-	int32 MonthlyPresentationRhythmCellCount = 0;
+	bool bTerrainBasePaletteApplied = false;
+	int32 TerrainBasePaletteCellCount = 0;
 };
