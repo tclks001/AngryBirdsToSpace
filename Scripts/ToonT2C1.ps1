@@ -105,10 +105,13 @@ if ($Slice -eq 'LandingPreviews') {
         ConvertFrom-Json
     if ($M11Manifest.status -ne 'Complete' -or
         $M11Manifest.reason -ne 'TargetHit' -or
+        $M11Manifest.contractVersion -lt 4 -or
         $M11Manifest.rank -ne $Rank -or
         $M11Manifest.stylizedEnabled -ne ($StyleValue -ne 0) -or
         -not $M11Manifest.stylizedViewRegistered -or
         -not $M11Manifest.stylizedViewPolicyValid -or
+        -not $M11Manifest.stylizedRuntimeStateMaintained -or
+        $M11Manifest.stylizedRuntimeStateFailureFrame -ne -1 -or
         $M11Manifest.frameCountObserved -le 0 -or
         $M11Manifest.playbackPlanHash -ne $Record.fixtureHash) {
         throw 'M11 recorder identity or completion contract mismatch.'

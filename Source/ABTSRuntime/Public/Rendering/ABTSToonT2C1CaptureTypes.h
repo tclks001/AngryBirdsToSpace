@@ -14,7 +14,7 @@ enum class EABTSToonT2C1CaptureSlice : uint8
 /** Explicit, testable command-line contract for one no-M7 T2-C1 slice. */
 struct ABTSRUNTIME_API FABTSToonT2C1CaptureConfig
 {
-	static constexpr int32 ContractVersion = 1;
+	static constexpr int32 ContractVersion = 2;
 
 	bool bEnabled = false;
 	EABTSToonT2C1CaptureSlice Slice =
@@ -33,6 +33,11 @@ struct ABTSRUNTIME_API FABTSToonT2C1CaptureConfig
 		FABTSToonT2C1CaptureConfig& OutConfig,
 		FString* OutFailure = nullptr);
 	bool IsValid(FString* OutFailure = nullptr) const;
+	/** Landing owns its temporary Style state; Finale only observes M11's owner. */
+	bool OwnsStylizedRuntimeState() const
+	{
+		return Slice == EABTSToonT2C1CaptureSlice::LandingPreviews;
+	}
 };
 
 /** Pure-data deterministic fixtures consumed by the production preview camera. */

@@ -42,6 +42,9 @@ bool FABTSToonT2C1CommandLineContractTest::RunTest(
 		static_cast<int32>(EABTSToonT2C1CaptureSlice::LandingPreviews));
 	TestFalse(TEXT("Style Off parsed"), Config.bStylized);
 	TestTrue(TEXT("Landing slice owns process exit"), Config.bExitWhenComplete);
+	TestTrue(
+		TEXT("Landing slice owns its temporary stylized state"),
+		Config.OwnsStylizedRuntimeState());
 	TestEqual(TEXT("Expected seed parsed"), Config.ExpectedWorldSeed, 42);
 	TestEqual(TEXT("Screen percentage parsed"), Config.ScreenPercentage, 75);
 	TestEqual(TEXT("Warmup parsed"), Config.WarmupFrames, 12);
@@ -64,6 +67,9 @@ bool FABTSToonT2C1CommandLineContractTest::RunTest(
 		static_cast<int32>(EABTSToonT2C1CaptureSlice::FinaleRemotePreview));
 	TestTrue(TEXT("Finale style on parsed"), Config.bStylized);
 	TestFalse(TEXT("Finale does not steal auto exit"), Config.bExitWhenComplete);
+	TestFalse(
+		TEXT("Finale observes the M11-owned stylized state"),
+		Config.OwnsStylizedRuntimeState());
 
 	TestFalse(
 		TEXT("Unknown slice fails closed"),

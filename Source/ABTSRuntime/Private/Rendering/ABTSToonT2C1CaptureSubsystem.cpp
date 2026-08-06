@@ -116,9 +116,21 @@ void UABTSToonT2C1CaptureSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		Finish(false, TEXT("OutputDirectoryCreateFailed"));
 		return;
 	}
-	bSavedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
-	SavedStyleProfile = FABTSStylizedRenderingControl::GetProfile();
-	bRuntimeStateCaptured = true;
+	// Landing is a self-contained T2-C1 capture and owns a temporary Style
+	// override. Finale runs beside the longer-lived M11 recorder: M11 is the
+	// sole owner of Style/Profile for that process, while this subsystem only
+	// observes the remote preview. Saving the pre-M11 Style here and restoring
+	// it after the early PIP readback would disable styling for the remaining
+	// cinematic frames.
+	if (Config.OwnsStylizedRuntimeState())
+	{
+		bSavedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
+		SavedStyleProfile = FABTSStylizedRenderingControl::GetProfile();
+		bRuntimeStateCaptured = true;
+		FABTSStylizedRenderingControl::SetProfile(
+			EABTSStylizedRenderProfile::GroundDay);
+		FABTSStylizedRenderingControl::SetEnabled(Config.bStylized);
+	}
 	if (IConsoleVariable* ScreenPercentage =
 		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
 	{
@@ -128,11 +140,6 @@ void UABTSToonT2C1CaptureSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			static_cast<float>(Config.ScreenPercentage),
 			ECVF_SetByCommandline);
 	}
-	FABTSStylizedRenderingControl::SetProfile(
-		Config.Slice == EABTSToonT2C1CaptureSlice::LandingPreviews
-			? EABTSStylizedRenderProfile::GroundDay
-			: EABTSStylizedRenderProfile::FinaleSpace);
-	FABTSStylizedRenderingControl::SetEnabled(Config.bStylized);
 	if (UABTSStylizedRenderingWorldSubsystem* StylizedSubsystem =
 		InWorld.GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
 	{

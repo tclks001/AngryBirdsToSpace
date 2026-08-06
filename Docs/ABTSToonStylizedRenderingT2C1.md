@@ -32,7 +32,9 @@ L_ABTS_M11 / 固定 Seed 312503
        └─ Rank11 全程 JPG/MJPEG AVI -> 动态轮廓与构图证据
 ```
 
-`UABTSToonT2C1CaptureSubsystem` 只有显式 `-ABTSToonT2C1Capture` 或 `-ABTSVisualCaptureSuite=ToonT2C1` 时才创建。Landing slice 自己拥有瞬态预览相机并在终止时销毁；Finale slice 不调用 `CaptureScene`、不改变 M11 输入，只观察 `TargetCaptureCount>0` 后的实际 RenderTarget。普通游戏零 Tick、零对象、零读回。
+`UABTSToonT2C1CaptureSubsystem` 只有显式 `-ABTSToonT2C1Capture` 或 `-ABTSVisualCaptureSuite=ToonT2C1` 时才创建。Landing slice 自己拥有瞬态预览相机和临时 Style/Profile，并在终止时恢复；Finale slice 不调用 `CaptureScene`、不改变 M11 输入，也不拥有、设置或恢复全局 Style/Profile，只观察 M11 录制器已经建立的 `FinaleSpace` 状态与 `TargetCaptureCount>0` 后的实际 RenderTarget。普通游戏零 Tick、零对象、零读回。
+
+Finale 的 Style 生命周期唯一所有者是 `AABTSM11FinaleCameraCaptureRunner`。录制器每帧验证 `Enabled` 与 `FinaleSpace` Profile；任何中途漂移都以 `StylizedRuntimeStateDrift` fail closed，禁止把“初始化时启用、实际中途关闭”的 AVI 写成成功证据。
 
 ## 3. 确定性夹具
 
@@ -76,7 +78,7 @@ L_ABTS_M11 / 固定 Seed 312503
 
 每份 Manifest 至少满足：
 
-- `contractVersion=1`、`status=Succeeded`；
+- `contractVersion=2`、`status=Succeeded`；
 - `buildIdentity` 等于本次干净编译 HEAD；
 - `expectedWorldSeed=actualWorldSeed=312503`；
 - `screenPercentage` 与运行请求相等，且 `screenPercentageCVar` 已实际生效；
@@ -85,7 +87,7 @@ L_ABTS_M11 / 固定 Seed 312503
 - 每条记录包含显式 ViewClass、PNG 路径、可解码尺寸、MD5、Fixture/Revision；
 - 同一切片 Off/On 的 Fixture Hash、分辨率和世界身份相同，MD5 允许不同；
 - 日志只有一个 `[ABTS][Rendering][T2-C1][Terminal] Success=1`。
-- Finale 还必须验证 M11 recorder manifest 为 `Complete/TargetHit`、Rank/Style 一致、`CaptureRevision>0`、Playback Hash 与 T2-C1 Fixture Hash 一致、AVI 存在且非空。
+- Finale 还必须验证 M11 recorder manifest 合同至少为 v4，且为 `Complete/TargetHit`、Rank/Style 一致、`stylizedRuntimeStateMaintained=true`、`stylizedRuntimeStateFailureFrame=-1`、`CaptureRevision>0`、Playback Hash 与 T2-C1 Fixture Hash 一致、AVI 存在且非空。
 
 快速自动化过滤器：
 
@@ -118,7 +120,7 @@ Screen Percentage 50/75/100 只冻结主视图行为；SceneCapture 有自己的
 4. Rank11 动态帧中鸟和行星轮廓无明显锯齿/抖动；UFO 可读性仍按 M11 镜头导演独立判定。
 5. 日志始终为 `M7AdapterReady=0`；建筑只有 T2-A 默认外轮廓，不得作为 T2-C1 成功项。
 
-脏工作树预演同时确认了一个既有、非风格化专属的 M11 镜头风险：首个远端目标在 Off/On 中都偏暗且占屏很小，Rank 11 飞行录制后段也会因既有 Flight Camera 构图而长时间只见天空。这不阻断 T2-C1 的生产 RT/AVI 接线与确定性合同，但在用户视觉验收时不得误报为已解决；它仍归属 M11 镜头导演后续优化。
+首版录制曾在 T2-C1 远端 PIP 提前完成后恢复为 Style Off，使中后段远景对象丢失轮廓、看似只剩天空；该生命周期问题已由合同 v2/v4 修复。修复后的 Rank 11 中后段仍采用既有 Flight Camera 远景构图，鸟、行星和 UFO 占屏较小，但轮廓全程可辨。进一步放大主体或调整导演节奏仍归属 M11 镜头导演后续优化，不再与风格状态生命周期混为一谈。
 
 ## 8. 后续 T2-C2
 

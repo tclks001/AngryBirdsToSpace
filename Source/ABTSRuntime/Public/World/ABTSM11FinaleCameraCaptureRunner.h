@@ -16,7 +16,7 @@ class UTextureRenderTarget2D;
 /** Explicit, process-start contract for one M11 old-camera baseline recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	static constexpr int32 ContractVersion = 3;
+	static constexpr int32 ContractVersion = 4;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -89,6 +89,8 @@ private:
 	bool TryResolveOrCreateCaptureCord(
 		AABTSM51SlingshotCord*& OutCord);
 	bool TryStartRecording();
+	bool HasExpectedStylizedRuntimeState() const;
+	void FailForStylizedRuntimeStateDrift();
 	bool CaptureCurrentFrame();
 	bool MuxCapturedFramesToAvi();
 	void StopRecording();
@@ -134,4 +136,6 @@ private:
 	bool bPendingFinalizeSuccess = false;
 	bool bCaptureFixtureCreated = false;
 	bool bStylizedViewRegistered = false;
+	bool bStylizedRuntimeStateMaintained = true;
+	int32 StylizedRuntimeStateFailureFrame = INDEX_NONE;
 };

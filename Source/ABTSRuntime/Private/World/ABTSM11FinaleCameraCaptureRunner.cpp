@@ -468,6 +468,11 @@ void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
 	{
 		return;
 	}
+	if (!HasExpectedStylizedRuntimeState())
+	{
+		FailForStylizedRuntimeStateDrift();
+		return;
+	}
 	if (bMovieCaptureStarted
 		&& !bMovieCaptureStopped
 		&& !CaptureCurrentFrame())
@@ -588,6 +593,40 @@ void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
 
 	default:
 		break;
+	}
+}
+
+bool AABTSM11FinaleCameraCaptureRunner::HasExpectedStylizedRuntimeState() const
+{
+	return FABTSStylizedRenderingControl::IsEnabled() == Config.bStylized
+		&& FABTSStylizedRenderingControl::GetProfile()
+			== EABTSStylizedRenderProfile::FinaleSpace;
+}
+
+void AABTSM11FinaleCameraCaptureRunner::FailForStylizedRuntimeStateDrift()
+{
+	bStylizedRuntimeStateMaintained = false;
+	StylizedRuntimeStateFailureFrame = CapturedFrameCount;
+	const FString Reason = FString::Printf(
+		TEXT("StylizedRuntimeStateDrift:Frame=%d ExpectedEnabled=%d ActualEnabled=%d ExpectedProfile=FinaleSpace ActualProfile=%d"),
+		CapturedFrameCount,
+		Config.bStylized ? 1 : 0,
+		FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0,
+		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()));
+	UE_LOG(
+		LogABTSRuntime,
+		Error,
+		TEXT("[ABTS][M11][CameraCapture] %s"),
+		*Reason);
+	if (bMovieCaptureStarted && !bMovieCaptureStopped)
+	{
+		bPendingFinalizeSuccess = false;
+		PendingFinalizeReason = Reason;
+		StopRecording();
+	}
+	else
+	{
+		Finish(false, Reason);
 	}
 }
 
@@ -1194,6 +1233,12 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetBoolField(
 		TEXT("stylizedViewPolicyValid"),
 		CaptureViewPolicy.IsValid());
+	Root->SetBoolField(
+		TEXT("stylizedRuntimeStateMaintained"),
+		bStylizedRuntimeStateMaintained);
+	Root->SetNumberField(
+		TEXT("stylizedRuntimeStateFailureFrame"),
+		StylizedRuntimeStateFailureFrame);
 	Root->SetBoolField(
 		TEXT("stylizedTonePolicyEnabled"),
 		Config.bStylized && CaptureViewPolicy.bApplyTone);
