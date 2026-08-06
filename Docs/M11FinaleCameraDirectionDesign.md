@@ -1,20 +1,21 @@
 # M11 终局实飞镜头导演与独立验收设计
 
 > 编码：UTF-8，简体中文。  
-> 状态：M0 独立验收工具已实现并完成 Rank 11 三渲二旧镜头基线；镜头导演尚未落地。  
+> 状态：M0 独立录制与 M1 导演观测/离线判据已完成；镜头导演尚未落地。
 > 所有权：`feature/m11-finale`。本文只描述 M11 实飞镜头与其验收，不修改集成工作树拥有的三渲二实现、共享地图或稳定跨阶段契约。
 
 ## 1. 目标与本轮边界
 
 目标是在任意 M11 冻结布局（生产 Rank 0 或编辑器候选 Rank 1–11）上，以同一条确定性最佳路线完整播放主控鸟飞行，并把镜头表现做成可重复比较的独立录屏。最终镜头应接近参考视频的阅读方式：飞向当前行星时逐渐拉近，进入近掠窗口时逐渐拉远，离开后把叙事重心平滑交给下一颗行星；画面始终同时保留主控鸟和当前叙事行星。
 
-本轮只完成 M0：
+M0 已完成独立录制闭环；本轮 M1 只在其上增加只读观测和离线判据：
 
 - 复用当前 `AABTSM11FinaleFlightCamera`，不改变其位置、朝向、FOV、Lag 或切镜逻辑；
 - 自动选择 Rank 的 `NominalInput`，走现有 M11-C 求解、发布和权威播放链；
 - 启动前可选择 Rank 0–11 与原渲染/三渲二；
 - 自动创建只读 SceneCapture、逐帧写 JPG，并在同一 UE 进程内封装 MJPEG AVI，输出 AVI、Manifest 和独立日志；
 - Rank 1–11 始终标记为 `UNCERTIFIED`，录屏不构成全操作域认证；
+- 每个影像帧同步输出当前鸟/叙事目标、相机和阶段观测，离线量化旧镜头失败；
 - 暂不实现四鸟编队、UFO 救援、破碎、音效、三渲二参数调优或共享地图修改。
 
 ## 2. 分层架构
@@ -123,6 +124,8 @@ AVI 是视觉证据；Manifest/日志是身份与流程证据。两者缺一不�
 
 从录制合同版本 3 起，Manifest 还必须写出 `stylizedViewClass=FinaleCinematicCapture`、组件注册状态及 resolved policy。它们只证明录制组件已接入预期风格策略，不能单独证明 Tone/Outline 已进入最终像素；最终仍以从 AVI 本体解码的帧为准。
 
+M11 历史分支的录制合同 v4/v5 分别引入逐帧 `.camera-observations.csv` 与 M2 导演扩展；Manifest 记录其路径、Schema、行数和只读诊断摘要。CSV 缺失或行数与影像不一致时整个录制 fail closed。合并集成线独立占用的 T2-C1 v4 全程渲染状态门后，首个无歧义的完整合同为 v6；它同时要求 CSV Schema 2、导演遥测和 `stylizedRuntimeState*` 全程证据。字段、历史证据与离线判据见 [M1 观测设计](M11FinaleCameraObservationAndOfflineCriteria.md)。
+
 ### 3.4 M0 fresh-process 基线证据
 
 2026-08-05 以 Rank 11、Stylized 1、DX11、RenderOffscreen、1280×720、30 fps 运行一次完整旧镜头基线：
@@ -184,7 +187,7 @@ CameraDistance  = clamp(FramingDistance, MinDistance, MaxDistance)
 
 ## 5. 阶段里程碑与验收
 
-### M0：旧镜头独立录制基线（本轮）
+### M0：旧镜头独立录制基线（已完成）
 
 - Rank 0–11 与 Stylized 0/1 可在启动参数中独立选择；
 - Rank 11 + Stylized 1 能从 Nominal 起点自动飞到合格终点；
@@ -192,18 +195,27 @@ CameraDistance  = clamp(FramingDistance, MinDistance, MaxDistance)
 - fresh `UnrealEditor.exe -game` 命令输出连续 JPG、可读取 MJPEG AVI、`Complete` Manifest 和唯一 AbsLog，AVI 封装完成后自动退出本次 UE 进程；
 - Manifest 明确 Rank 11 为 `UNCERTIFIED`。
 
-### M1：导演观测与离线判据
+### M1：导演观测与离线判据（已完成）
+
+详细合同、阈值与四象限证据见 [M11 终局镜头导演观测与离线判据](M11FinaleCameraObservationAndOfflineCriteria.md)。
 
 - 为每帧输出鸟/当前目标屏幕坐标、可见比例、目标像素半径、相机距离、FOV、阶段和切换原因；
 - 先在旧镜头上量化离框、目标丢失和镜头跃变，不改变画面；
 - Rank 0 与 Rank 11、Stylized 0/1 的指标身份一致且渲染方式不影响阶段决策。
 
-### M2：单行星 Approach / Periapsis 镜头
+2026-08-05 fresh 四象限基线显示：Rank11 两种渲染均有 946/946 个有效飞行帧丢失当前叙事目标；Rank0 两种渲染均为 391/1140。两组的阶段决策与阈值判据指纹分别跨 Stylized 0/1 相等，证明 M1 指标与渲染方式正交；这些失败是旧镜头的量化结果，不是录制器或 M1 失败。
+
+### M2：单行星 Cruise Lead-in / Lucy 式 Approach / Periapsis 镜头（已完成）
 
 - 只对 Assist1 启用双目标构图；Assist2/3 仍走旧镜头，便于 A/B；
-- Approach 的目标像素半径总体上升，Periapsis 前开始后拉；
+- Cruise 后段提前建立鸟与 Assist1 的相对方向，不等到 Assist1Enter 才开始切入；
+- 用 Enter/Closest/Exit 冻结 encounter right/up，以行星中心为视轴锚点，在实际投影平面编排左缘→盘前→右缘的前景穿越；
+- Cruise 保留稳定盘外接近段，Approach 提高近星屏幕速度，Periapsis 快速出盘后减速；最近点把 FOV 从 50° 平滑推近到 30°，离开后恢复；
+- Approach 后段与 Periapsis 前段共享 C2 连续后拉包络，目标像素半径在最近点形成宽峰而非阶段硬切；
 - 主控鸟全程在安全框，目标至少保留可读边缘；
 - 无单帧位置、旋转或 FOV 跳变。
+
+详细设计与证据见 [M11 终局镜头 M2：Assist1 双目标 Cruise Lead-in / Approach / Periapsis](M11FinaleCameraM2SingleAssistDirection.md)。2026-08-06 Rank11、Stylized 0 A/B 中，Assist1 Cruise/Approach/Periapsis 当前目标丢失由 413/413 降至 67/413，鸟丢失 0、导演越界 0、位置/旋转/FOV 跳变均为 0；两次 Released Trajectory、PlaybackPlan 与阶段决策身份一致。首版 M2 到第 237 帧才看到 106.38 px 的 Assist1，提前 Lead-in 后第 55 帧即看到远景边缘。M2.1 建立左→右方向，M2.2 修复盘外假穿越，M2.3 再按 Lucy 参考重做速度与推拉：稳定盘外接近段 94 个速度样本，盘外/盘内中位速度为 `8.34 / 80.79 px/s`，近星加速 `9.68×`；行星峰值半径由 `136.87` 提高到 `238.22 px`，FOV 从 50° 平滑缩至 30° 后恢复。鸟心盘内 100 帧、轮廓相交 114 帧、179/179 个可观测帧鸟在行星前，鸟仍零丢失。当前颜色受大气散射影响，不属于 M2 结论。
 
 ### M3：三行星连续目标交接
 
@@ -240,4 +252,4 @@ CameraDistance  = clamp(FramingDistance, MinDistance, MaxDistance)
 - Rank 11 录屏好看不代表它通过 M11-B v2.2 全操作域认证。
 - NullRHI 或自动化绿灯不证明 AVI 像素、构图或三渲二质量。
 - 三渲二开启后的颜色、描边、抗锯齿和性能由集成工作树继续演进；M11 不冻结这些像素参数。
-- M0 只证明独立录制工作流能完整观察旧镜头，不能证明 Lucy 风格镜头已经实现。
+- M0/M1 只证明独立录制工作流能完整观察并量化旧镜头，不能证明 Lucy 风格镜头已经实现。

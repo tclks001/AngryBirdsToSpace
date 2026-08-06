@@ -3,12 +3,14 @@
 #include "World/ABTSM11FinaleInteractionSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Camera/ABTSM11FinaleCameraDirector.h"
 #include "Camera/ABTSM11FinaleFlightCamera.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -1010,10 +1012,93 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+	FABTSM11FinaleCameraDirectorSample DirectorSample;
+	const FABTSM11FinaleCameraDirectorSample* DirectorSamplePtr = nullptr;
+	if (FlightCamera->IsM2DirectorFrozenEnabled())
+	{
+		const FABTSM11TrajectoryResult* Prediction =
+			GetCurrentPrediction();
+		DirectorSample.Selection =
+			ABTSM11FinaleCameraDirector::ResolveStage(
+				true,
+				false,
+				PlaybackElapsedSeconds,
+				Prediction);
+		const FABTSM11FinaleLayoutPreset& Preset =
+			FinaleSystem->GetLayoutPreset();
+		if (DirectorSample.Selection.bTargetIsUFO)
+		{
+			const FABTSM11TargetSpec& Target =
+				Preset.CanonicalScenario.Target;
+			DirectorSample.TargetCenter = Frame.TransformLocalPosition(
+				FVector(Target.GetGeometricContactCenterCM()));
+			DirectorSample.TargetRadiusCM =
+				Target.GetGeometricContactRadiusCM();
+		}
+		else if (DirectorSample.Selection.AssistIndex >= 1
+			&& DirectorSample.Selection.AssistIndex
+				<= FABTSM11GravityScenario::AssistCount)
+		{
+			const FABTSM11GravityBodySpec& Body =
+				Preset.CanonicalScenario.GetAssist(
+					DirectorSample.Selection.AssistIndex);
+			DirectorSample.TargetCenter = Frame.TransformLocalPosition(
+				FVector(Body.CenterCM));
+			DirectorSample.TargetRadiusCM = Body.VisualRadiusCM;
+			const FABTSM11TrajectoryEvent* Enter =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::AssistEnter,
+						DirectorSample.Selection.AssistIndex)
+					: nullptr;
+			const FABTSM11TrajectoryEvent* Closest =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::ClosestApproach,
+						DirectorSample.Selection.AssistIndex)
+					: nullptr;
+			const FABTSM11TrajectoryEvent* Exit =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::AssistExit,
+						DirectorSample.Selection.AssistIndex)
+					: nullptr;
+			if (Enter == nullptr || Closest == nullptr || Exit == nullptr
+				|| !ABTSM11FinaleCameraDirector::BuildAssistEncounterBasis(
+					DirectorSample.TargetCenter,
+					Frame.TransformLocalPosition(FVector(Enter->PositionCM)),
+					Frame.TransformLocalPosition(FVector(Closest->PositionCM)),
+					Frame.WorldTransform.TransformVectorNoScale(
+						FVector(Closest->VelocityCMPerSec)),
+					Frame.TransformLocalPosition(FVector(Exit->PositionCM)),
+					DirectorSample.EncounterScreenRight,
+					DirectorSample.EncounterScreenUp))
+			{
+				FailInteraction(TEXT("FlightCameraEncounterBasisRejected"));
+				return;
+			}
+		}
+		const USkeletalMeshComponent* BirdVisual =
+			AttemptBird->GetBirdVisual();
+		if (IsValid(BirdVisual)
+			&& FMath::IsFinite(BirdVisual->Bounds.SphereRadius)
+			&& BirdVisual->Bounds.SphereRadius > 1.0)
+		{
+			DirectorSample.BirdRadiusCM =
+				BirdVisual->Bounds.SphereRadius;
+		}
+		if (!DirectorSample.IsUsable())
+		{
+			FailInteraction(TEXT("FlightCameraDirectorSampleRejected"));
+			return;
+		}
+		DirectorSamplePtr = &DirectorSample;
+	}
 	if (!FlightCamera->UpdateAuthoritySample(
 		WorldPosition,
 		CameraTangent,
 		Frame.GetUp(),
+		DirectorSamplePtr,
 		static_cast<float>(
 			FMath::Max(0.0, static_cast<double>(DeltaSeconds))
 				* PresentationTimeScale)))

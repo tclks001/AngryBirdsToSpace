@@ -12,15 +12,19 @@ class AABTSM51SlingshotCord;
 class AABTSM51SlingshotStake;
 class USceneCaptureComponent2D;
 class UTextureRenderTarget2D;
+struct FMinimalViewInfo;
 
-/** Explicit, process-start contract for one M11 old-camera baseline recording. */
+/** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	static constexpr int32 ContractVersion = 4;
+	// First integrated contract that combines the T2-C1 runtime-state gate
+	// with M1/M2 camera observations and director telemetry.
+	static constexpr int32 ContractVersion = 6;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
 	bool bStylized = false;
+	bool bDirectorM2 = false;
 	bool bAutoExit = true;
 	int32 WarmupFrames = 30;
 	int32 TerminalHoldFrames = 24;
@@ -42,6 +46,40 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 	FString GetFrameWildcard() const;
 	int32 GetObservedFrameCount() const;
 	FString GetManifestPath() const;
+	FString GetObservationCsvPath() const;
+};
+
+/** One frame of renderer-independent M1 camera/subject telemetry. */
+struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
+{
+	int32 FrameIndex = INDEX_NONE;
+	double CaptureSeconds = 0.0;
+	double PlaybackSeconds = 0.0;
+	FString InteractionState;
+	FString Stage;
+	FString CurrentTarget;
+	FString StageReason;
+	FString DirectorMode;
+	double DirectorBlendAlpha = 0.0;
+	bool bDirectorM2FrozenEnabled = false;
+	FVector BirdWorld = FVector::ZeroVector;
+	FVector2D BirdScreen = FVector2D::ZeroVector;
+	double BirdDepthCM = 0.0;
+	double BirdPixelRadius = 0.0;
+	double BirdVisibleRatio = 0.0;
+	FVector TargetWorld = FVector::ZeroVector;
+	FVector2D TargetScreen = FVector2D::ZeroVector;
+	double TargetDepthCM = 0.0;
+	double TargetPixelRadius = 0.0;
+	double TargetVisibleRatio = 0.0;
+	FVector CameraWorld = FVector::ZeroVector;
+	FRotator CameraRotation = FRotator::ZeroRotator;
+	double CameraToBirdCM = 0.0;
+	double CameraToTargetCM = 0.0;
+	double FovDegrees = 0.0;
+	double CameraPositionDeltaCM = 0.0;
+	double CameraRotationDeltaDegrees = 0.0;
+	double FovDeltaDegrees = 0.0;
 };
 
 enum class EABTSM11FinaleCameraCapturePhase : uint8
@@ -92,6 +130,8 @@ private:
 	bool HasExpectedStylizedRuntimeState() const;
 	void FailForStylizedRuntimeStateDrift();
 	bool CaptureCurrentFrame();
+	bool RecordCameraObservation(const FMinimalViewInfo& View);
+	bool WriteObservationCsv();
 	bool MuxCapturedFramesToAvi();
 	void StopRecording();
 	void Finish(bool bSuccess, const FString& Reason);
@@ -131,6 +171,10 @@ private:
 	int32 RemainingTerminalHoldFrames = 0;
 	int32 CapturedFrameCount = 0;
 	FIntPoint CapturedFrameSize = FIntPoint::ZeroValue;
+	TArray<FABTSM11FinaleCameraObservationSample> ObservationSamples;
+	FVector PreviousObservedCameraLocation = FVector::ZeroVector;
+	FRotator PreviousObservedCameraRotation = FRotator::ZeroRotator;
+	double PreviousObservedFovDegrees = 0.0;
 	bool bMovieCaptureStarted = false;
 	bool bMovieCaptureStopped = false;
 	bool bPendingFinalizeSuccess = false;
@@ -138,4 +182,6 @@ private:
 	bool bStylizedViewRegistered = false;
 	bool bStylizedRuntimeStateMaintained = true;
 	int32 StylizedRuntimeStateFailureFrame = INDEX_NONE;
+	bool bHasPreviousCameraObservation = false;
+	bool bObservationCsvWritten = false;
 };
