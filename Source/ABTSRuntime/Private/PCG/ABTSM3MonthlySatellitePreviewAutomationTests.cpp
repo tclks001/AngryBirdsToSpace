@@ -587,4 +587,146 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM3R51ScoutMapPresentationAuthorityTest,
+	"ABTS.M3.Monthly.SatellitePreview.04ScoutMapPresentationAuthority",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM3R51ScoutMapPresentationAuthorityTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace ABTSM3R51SatellitePreviewTests;
+	FScopedTestWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	TestNotNull(TEXT("Transient test World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	AABTSM3Planet* Planet = SpawnPreviewPlanet(*this, *World);
+	if (Planet == nullptr || !Planet->RebuildPlanet())
+	{
+		AddError(TEXT("Compatibility fixture failed to rebuild"));
+		return false;
+	}
+
+	const TArray<FABTSM3CellState>& CompatibilityStates =
+		Planet->GetGeneratedCellStates();
+	const FABTSM3MonthlyCandidatePresentation* SelectedCandidate =
+		nullptr;
+	for (const FABTSM3MonthlyCandidatePresentation& Candidate :
+		Planet->GetMonthlyPresentationResult().CandidatePresentations)
+	{
+		const bool bHasDiscriminatingLandCell =
+			Candidate.Cells.ContainsByPredicate(
+				[&CompatibilityStates](
+					const FABTSM3MonthlyPresentationCell& Cell)
+				{
+					return CompatibilityStates.IsValidIndex(Cell.CellId)
+						&& Cell.ActiveRoleMask == 0
+						&& !Cell.bWater
+						&& !CompatibilityStates[Cell.CellId].bWater
+						&& Cell.VisualTerrainType
+							!= EABTSM3TerrainType::Water
+						&& CompatibilityStates[Cell.CellId].TerrainType
+							!= EABTSM3TerrainType::Water
+						&& Cell.VisualTerrainType
+							!= CompatibilityStates[Cell.CellId].TerrainType;
+				});
+		if (bHasDiscriminatingLandCell)
+		{
+			SelectedCandidate = &Candidate;
+			break;
+		}
+	}
+	TestNotNull(
+		TEXT("Fixture contains a candidate whose presented land differs from compatibility terrain"),
+		SelectedCandidate);
+	if (SelectedCandidate == nullptr)
+	{
+		return false;
+	}
+
+	const int32 SelectedCandidateId =
+		SelectedCandidate->SourceRouteCandidateId;
+	Planet->bEnableMonthlyPresentationPreview = true;
+	Planet->MonthlyPresentationPreviewCandidateId =
+		SelectedCandidateId;
+	TestTrue(TEXT("Candidate preview rebuild succeeds"),
+		Planet->RebuildPlanet());
+	TestTrue(TEXT("Candidate preview becomes the presentation authority"),
+		Planet->IsMonthlyPresentationPreviewActive());
+	TestEqual(TEXT("Preview keeps the selected candidate identity"),
+		Planet->GetMonthlyPresentationPreviewCandidateId(),
+		SelectedCandidateId);
+
+	const FABTSM3MonthlyCandidatePresentation* ActiveCandidate =
+		FABTSM3MonthlyPresentationBuilder::FindCandidatePresentation(
+			Planet->GetMonthlyPresentationResult(),
+			SelectedCandidateId);
+	TestNotNull(TEXT("Active candidate remains available after rebuild"),
+		ActiveCandidate);
+	if (ActiveCandidate == nullptr)
+	{
+		return false;
+	}
+
+	int32 DiscriminatingSamples = 0;
+	int32 PresentedPaletteMatches = 0;
+	for (const FABTSM3MonthlyPresentationCell& Cell :
+		ActiveCandidate->Cells)
+	{
+		if (!Planet->LogicalCells.IsValidIndex(Cell.CellId)
+			|| !CompatibilityStates.IsValidIndex(Cell.CellId)
+			|| Cell.ActiveRoleMask != 0
+			|| Cell.bWater
+			|| CompatibilityStates[Cell.CellId].bWater
+			|| Cell.VisualTerrainType == EABTSM3TerrainType::Water
+			|| CompatibilityStates[Cell.CellId].TerrainType
+				== EABTSM3TerrainType::Water
+			|| Cell.VisualTerrainType
+				== CompatibilityStates[Cell.CellId].TerrainType)
+		{
+			continue;
+		}
+		++DiscriminatingSamples;
+		FLinearColor ScoutColor = FLinearColor::Black;
+		int32 ResolvedCellId = INDEX_NONE;
+		if (!Planet->QueryScoutMapTerrainColor(
+				Planet->LogicalCells[Cell.CellId].UnitCenter,
+				ScoutColor,
+				Cell.CellId,
+				&ResolvedCellId)
+			|| ResolvedCellId != Cell.CellId)
+		{
+			continue;
+		}
+		const FLinearColor PresentedColor =
+			FABTSM3TerrainVisualField::GetTerrainBaseColor(
+				Cell.VisualTerrainType);
+		const FLinearColor CompatibilityColor =
+			FABTSM3TerrainVisualField::GetTerrainBaseColor(
+				CompatibilityStates[Cell.CellId].TerrainType);
+		if (ScoutColor.Equals(PresentedColor, 0.0001f)
+			&& !ScoutColor.Equals(CompatibilityColor, 0.0001f))
+		{
+			++PresentedPaletteMatches;
+		}
+	}
+	TestTrue(TEXT("Preview exposes discriminating scout-map samples"),
+		DiscriminatingSamples > 0);
+	TestTrue(
+		TEXT("Scout map samples the selected presentation palette instead of the compatibility candidate"),
+		PresentedPaletteMatches > 0);
+	AddInfo(FString::Printf(
+		TEXT("ScoutMapPresentationAuthority Candidate=%d Samples=%d PresentedMatches=%d"),
+		SelectedCandidateId,
+		DiscriminatingSamples,
+		PresentedPaletteMatches));
+	return true;
+}
+
 #endif

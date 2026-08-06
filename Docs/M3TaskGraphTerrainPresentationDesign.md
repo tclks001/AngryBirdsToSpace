@@ -69,7 +69,7 @@ R-2 Pool 不替换首周 `GeneratedCellStates`、`GeneratedEdgeStates`、`PCGSum
 
 树石散布既在源 Cell 上检查保护标记，也在偏移后的最终落点重新解析 Cell 并复查。道路、ActiveRole、Target Footprint、NoRoad、攻击走廊和水体禁止装饰侵入。完整实现状态、100 Seed 证据与待集成门禁见 [M3R-5](M3PCGMapImprovementPlan.md#148-m3r-5实现-biomedistrict-与-playable-envelope-表现)。
 
-显式预览时，材质桥按 `VisualBeatId/AccentVariantId/ThemeVariantId` 对 Cell LUT 做低幅明暗调制；HISM 用相同字段调整树石疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell、全部实际树石实例均经过 Beat 消费路径，因而 20–45 m 节拍不是只存在于数据快照。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
+地表材质不再消费 `VisualBeatId/AccentVariantId/ThemeVariantId`。`CellVisualLUT` 对每个有效陆地 `TerrainType` 只写入一套固定基础色，且不在 Cell 中心预先采样边界混色；同色区域内部因此没有 Beat/Theme 深浅块，异色区域仍完全复用 TerrainType 线段 SDF 的平滑分界。候选预览的 Cell/Edge/VisualField 由 Planet 持久持有，材质桥和 M10 小地图颜色查询在 PreviewAuthority 生效时消费同一个活动 VisualField；关闭预览时共同回到兼容 VisualField。该表现颜色切换不改变仍由兼容世界负责的 `QuerySurface`、物理或稳定合同。月度 DTO、Hash 和 Visual Beat 调试边界继续保留，供 HISM 等非地表表现消费；当前树石 HISM 仍用这些字段调整疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell 已走固定色板路径并明确报告 `VisualBeatConsumed=0/ThemeVariantConsumed=0`，同时证明全部实际树石实例经过 HISM Beat 消费路径。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
 
 ### 2.5 M3R-5.1 卫星与 E5 预览叠层
 

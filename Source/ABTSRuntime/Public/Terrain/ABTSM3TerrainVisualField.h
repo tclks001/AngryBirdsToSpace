@@ -65,6 +65,10 @@ public:
 	FLinearColor GetDebugTerrainColor(const FVector& UnitDirection) const;
 	/** Land-only color used by the material LUT; rivers are rendered from edge segments. */
 	FLinearColor GetDebugLandColor(const FVector& UnitDirection) const;
+	/** Fixed base color for one effective land TerrainType; no monthly presentation variation. */
+	static FLinearColor GetTerrainBaseColor(EABTSM3TerrainType TerrainType);
+	/** Fixed base color for the Cell's effective land type; does not sample or blend boundaries. */
+	FLinearColor GetCellBaseLandColor(int32 CellId) const;
 	/** M10-only color query: one nearest-cell walk, no height or surface-normal work. */
 	bool QueryScoutMapColor(
 		const FVector& UnitDirection,
@@ -87,7 +91,6 @@ private:
 	float GetDistanceToSegmentCM(const FVector& UnitDirection, const FABTSM3BoundarySegment& Segment) const;
 	void FindTwoNearestTerrainFeatures(const FVector& UnitDirection, int32 CellId, const FABTSM3BoundarySegment*& OutBest, float& OutBestDistanceCM, const FABTSM3BoundarySegment*& OutSecond, float& OutSecondDistanceCM) const;
 	FLinearColor GetCellColor(int32 CellId) const;
-	FLinearColor GetCellLandColor(int32 CellId) const;
 
 	float BaseRadiusCM = 10000.0f;
 	float HeightScaleCM = 900.0f;

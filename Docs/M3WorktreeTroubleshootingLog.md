@@ -30,6 +30,8 @@
 | M3-R3-002 | 同一弹弓阶段的建筑距离全部退化为同一个舒适射程 | 已改为逐关递增射程窗口 | M3 |
 | M3-R5-001 | 逻辑 Target/Attack Corridor 已生成但画面无法辨认 | 已增加 F7 只读叠层 | M3 |
 | M3-R5-002 | 候选预览正确，却被误认为生产世界已经移动 | 已明确 Preview/Test 权威边界 | M3 + Integration |
+| M3-R5-003 | 同一 TerrainType 出现深浅块，且块边界与真实地貌分界错位 | 已取消地表 Beat/Theme 调色并改为固定基础色板 | M3 |
+| M3-R5-004 | 小地图显示兼容世界颜色，而落点实拍显示当前候选颜色 | 已让材质与小地图共享持久的活动候选 VisualField | M3 |
 | M3-R51-001 | 强化弹弓落入地表或两桩悬空/下沉 | 已改为两槽分别查询真实地表 | M3 |
 | M3-R51-002 | 强化弹弓没有朝向卫星 | 已改为真实 Pouch 发射帧并加 `<=5°` 门 | M3 |
 | M3-R51-003 | `SatelliteGravity=1` 但预览和真实飞行无可见偏转 | 已完成生产档位、真实地表、共享引力链闭环 | M3 + Integration/M6/M9 |
@@ -222,6 +224,53 @@ R-3/R-5 同时保留多个候选。显式预览只消费指定 Candidate，不�
 **防回归验证**
 
 分别运行“无预览参数”和“显式 Candidate 预览”两条路径：前者保持兼容世界，后者必须打印指定 Candidate 与完整来源 Hash；两者都不得把未决候选发布为月度正式布局。
+
+### M3-R5-003：同色深浅块与真实 TerrainType 分界错位
+
+**现象**
+
+月度表现预览开启后，同一片绿色、土黄色或灰色地貌中出现规则或不规则的深浅区块；这些色块边缘按 Cell/Beat 身份变化，与真正的 TerrainType 线段边界不重合。
+
+**根因**
+
+材质桥曾先在每个 Cell 中心调用带边界插值的 `GetDebugLandColor()`，再按 `VisualBeatId/AccentVariantId/ThemeVariantId` 乘以两级明暗系数，最后把结果写进 `CellVisualLUT`。材质 HLSL 随后仍使用 TerrainType 线段 SDF 选择和混合这些 Cell 颜色。于是 LUT 中同时烘入了“Cell 中心的边界混色”和“月度 Beat/Theme 调色”，而 GPU 分界几何只认识 TerrainType 线段；两套分区来源不同，必然出现同色深浅块及错位边缘。
+
+**修复**
+
+- 地表材质桥不再读取月度 `VisualBeatId`、`AccentVariantId` 或 `ThemeVariantId`，也不再做亮度乘法；
+- `CellVisualLUT` 改为读取 Cell 的有效陆地 TerrainType 固定基础色，不在 Cell 中心预先采样或烘焙边界混色；
+- TerrainType 异色分界继续使用既有线段 SDF，未修改材质资产；
+- 月度 DTO、Visual Beat、ThemeVariant 与 Hash 保留，供 HISM 等非地表表现以后独立消费；运行时门由 `MaterialRhythm` 改为 `MaterialBasePalette`。
+
+**防回归验证**
+
+- `Saved/Logs/M3BasePalette-20260805-182627.log` 中 `ABTS.M3.Monthly.Biome.BaseTerrainPalette` fresh NullRHI 精确 `1/1 Success`，验证 Plain/Forest/Highland/Mountain 各自只有一套基础色，Cell 的高度和湿度标量不会改变同类色；
+- fresh runtime 必须输出 `[ABTS][M3R5][MaterialBasePalette] Applied=1 ... VisualBeatConsumed=0 ThemeVariantConsumed=0`，且 Palette Cell 数等于预览 Cell 数；
+- 可见 PIE 分别在 Lit/Unlit 检查：同一 TerrainType 内不得再出现深浅块，异色过渡必须贴合 TerrainType 线段 SDF；道路与河流的独立 SDF 不受影响。
+
+### M3-R5-004：小地图采样到兼容世界而非当前候选
+
+**现象**
+
+显式候选预览中，落点远端实拍已经显示当前 Candidate 的地表颜色，但同一落点在小地图上仍显示另一套地貌颜色。取消地表 Beat/Theme 亮度后问题保持不变，说明它不是节拍调色残留。
+
+**根因**
+
+候选预览重建时，材质桥消费的是 `RebuildPlanet()` 栈内临时创建的候选 `PresentationCellStates/PresentationEdgeStates/PresentationVisualField`；`QueryScoutMapTerrainColor()` 却始终查询由兼容 `GeneratedCellStates/GeneratedEdgeStates` 初始化的成员 `TerrainVisualField`。落点红叉与远端实拍使用同一世界位置，投影公式没有错；分叉发生在地表表现权威选择处。基础色函数和 sRGB 转换也不是根因。
+
+**修复**
+
+- 将候选预览的 CellStates、EdgeStates 和 VisualField 一并持久保存在 `AABTSM3Planet`，避免 VisualField 持有 `RebuildPlanet()` 栈数组指针；
+- 地表材质桥与 `QueryScoutMapTerrainColor()` 在 PreviewAuthority 生效时消费同一个持久候选 VisualField；关闭预览时两者仍共同消费兼容 `TerrainVisualField`；
+- PreviewAuthority 已生效但候选 VisualField 不可用时 fail closed，不静默回退到兼容候选；
+- `QuerySurface`、物理、TaskGraph 与稳定合同继续使用兼容世界，不把 Preview/Test 候选误晋升为正式生成结果。
+
+**防回归验证**
+
+- `Saved/Logs/M3ScoutMapPresentationAuthority-20260806-162927.log` 中 `ABTS.M3.Monthly.SatellitePreview.04ScoutMapPresentationAuthority` fresh NullRHI 精确 `1/1 Success`；Candidate 4 共发现 `6064` 个候选/兼容地貌不同的判别样本，其中 `4636` 个 Cell 中心采样明确命中候选基础色而非兼容基础色；
+- `Saved/Logs/M3SatellitePreview-20260806-163013.log` 中完整 `ABTS.M3.Monthly.SatellitePreview` fresh NullRHI 精确 `4/4 Success`；
+- `Saved/Logs/M3BasePalette-20260806-163059.log` 中固定基础色板 fresh NullRHI 精确 `1/1 Success`；
+- 可见 PIE 待用户在同一显式 Candidate 下复查：红叉附近小地图地貌分类必须与落点实拍采用的地表分类一致；真实光照、SceneCapture 和 Toon 后处理造成的像素亮度差异不算分类错误。
 
 ## 6. R-5.1 卫星练习链路
 

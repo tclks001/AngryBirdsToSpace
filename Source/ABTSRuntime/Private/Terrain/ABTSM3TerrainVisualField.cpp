@@ -379,10 +379,10 @@ bool FABTSM3TerrainVisualField::QuerySurfaceSDF(
 	return true;
 }
 
-FLinearColor FABTSM3TerrainVisualField::GetCellColor(const int32 CellId) const
+FLinearColor FABTSM3TerrainVisualField::GetTerrainBaseColor(
+	const EABTSM3TerrainType TerrainType)
 {
-	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return FLinearColor::Gray;
-	switch ((*CellStates)[CellId].TerrainType)
+	switch (TerrainType)
 	{
 	case EABTSM3TerrainType::Forest: return FLinearColor(0.08f, 0.28f, 0.10f);
 	case EABTSM3TerrainType::Highland: return FLinearColor(0.45f, 0.34f, 0.18f);
@@ -392,15 +392,21 @@ FLinearColor FABTSM3TerrainVisualField::GetCellColor(const int32 CellId) const
 	}
 }
 
-FLinearColor FABTSM3TerrainVisualField::GetCellLandColor(const int32 CellId) const
+FLinearColor FABTSM3TerrainVisualField::GetCellColor(const int32 CellId) const
+{
+	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return FLinearColor::Gray;
+	return GetTerrainBaseColor((*CellStates)[CellId].TerrainType);
+}
+
+FLinearColor FABTSM3TerrainVisualField::GetCellBaseLandColor(
+	const int32 CellId) const
 {
 	if (CellStates == nullptr || !CellStates->IsValidIndex(CellId)) return FLinearColor::Gray;
 	// bWater is a compatibility/cache flag derived from river edges. It must not
 	// turn the entire logical Cell into a hexagonal water polygon in the material.
-	if ((*CellStates)[CellId].TerrainType != EABTSM3TerrainType::Water) return GetCellColor(CellId);
-	if ((*CellStates)[CellId].LogicalHeight01 >= 0.62f) return FLinearColor(0.32f, 0.30f, 0.28f);
-	if ((*CellStates)[CellId].LogicalHeight01 >= 0.38f) return FLinearColor(0.45f, 0.34f, 0.18f);
-	return (*CellStates)[CellId].Moisture01 >= 0.48f ? FLinearColor(0.08f, 0.28f, 0.10f) : FLinearColor(0.28f, 0.46f, 0.18f);
+	return GetTerrainBaseColor(
+		FABTSM3TerrainFeatureVisualBuilder::ResolveLandType(
+			(*CellStates)[CellId]));
 }
 
 FLinearColor FABTSM3TerrainVisualField::GetDebugTerrainColor(const FVector& UnitDirection) const
@@ -427,10 +433,10 @@ FLinearColor FABTSM3TerrainVisualField::GetDebugLandColor(const FVector& UnitDir
 	const FABTSM3BoundarySegment* Second = nullptr;
 	float BestDistance = 0.0f, SecondDistance = 0.0f;
 	FindTwoNearestTerrainFeatures(Direction, CellId, Best, BestDistance, Second, SecondDistance);
-	if (Best == nullptr) return GetCellLandColor(CellId);
-	const FLinearColor BestColor = GetCellLandColor(Best->SourceCellAId);
+	if (Best == nullptr) return GetCellBaseLandColor(CellId);
+	const FLinearColor BestColor = GetCellBaseLandColor(Best->SourceCellAId);
 	if (Second == nullptr) return BestColor;
-	const FLinearColor SecondColor = GetCellLandColor(Second->SourceCellAId);
+	const FLinearColor SecondColor = GetCellBaseLandColor(Second->SourceCellAId);
 	const float BestWeight = FMath::SmoothStep(0.0f, ColorBlendWidthCM * 2.0f, SecondDistance - BestDistance);
 	return FMath::Lerp(0.5f * (BestColor + SecondColor), BestColor, BestWeight);
 }
@@ -457,18 +463,18 @@ bool FABTSM3TerrainVisualField::QueryScoutMapColor(
 	FindTwoNearestTerrainFeatures(Direction, OutCellId, Best, BestDistanceCM, Second, SecondDistanceCM);
 	if (Best == nullptr)
 	{
-		OutColor = GetCellLandColor(OutCellId);
+		OutColor = GetCellBaseLandColor(OutCellId);
 	}
 	else
 	{
-		const FLinearColor BestColor = GetCellLandColor(Best->SourceCellAId);
+		const FLinearColor BestColor = GetCellBaseLandColor(Best->SourceCellAId);
 		if (Second == nullptr)
 		{
 			OutColor = BestColor;
 		}
 		else
 		{
-			const FLinearColor SecondColor = GetCellLandColor(Second->SourceCellAId);
+			const FLinearColor SecondColor = GetCellBaseLandColor(Second->SourceCellAId);
 			const float BestWeight = FMath::SmoothStep(
 				0.0f, ColorBlendWidthCM * 2.0f, SecondDistanceCM - BestDistanceCM);
 			OutColor = FMath::Lerp(0.5f * (BestColor + SecondColor), BestColor, BestWeight);
