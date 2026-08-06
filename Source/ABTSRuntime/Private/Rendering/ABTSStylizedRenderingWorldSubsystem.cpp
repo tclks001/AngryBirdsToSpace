@@ -11,6 +11,8 @@
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedMaterialContract.h"
+#include "Rendering/ABTSStylizedMaterialOverrideRegistry.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
@@ -191,10 +193,16 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 {
 	Super::Initialize(Collection);
 	PrimitiveRegistry = MakeUnique<FPrimitiveOverrideRegistry>();
+	MaterialRegistry = MakeUnique<FABTSStylizedMaterialOverrideRegistry>();
 }
 
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 {
+	if (MaterialRegistry)
+	{
+		MaterialRegistry->RestoreAll();
+		MaterialRegistry.Reset();
+	}
 	if (PrimitiveRegistry)
 	{
 		PrimitiveRegistry->RestoreAll();
@@ -254,11 +262,16 @@ int32 UABTSStylizedRenderingWorldSubsystem::GetRegisteredPrimitiveCount() const
 	return PrimitiveRegistry ? PrimitiveRegistry->Num() : 0;
 }
 
+int32 UABTSStylizedRenderingWorldSubsystem::GetRegisteredMaterialSlotCount() const
+{
+	return MaterialRegistry ? MaterialRegistry->Num() : 0;
+}
+
 void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 {
 	using namespace ABTSStylizedRenderingWorldSubsystemPrivate;
 	UWorld* World = GetWorld();
-	if (World == nullptr || PrimitiveRegistry == nullptr)
+	if (World == nullptr || PrimitiveRegistry == nullptr || MaterialRegistry == nullptr)
 	{
 		return;
 	}
@@ -393,6 +406,13 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	}
 	PrimitiveRegistry->Apply(Desired);
 
+	// T3-A0 freezes the reversible consumer seam before any feature family is
+	// migrated. T3-A1/A2/A3 will populate this array through owned adapters.
+	const TArray<FABTSStylizedMaterialSlotBinding> DesiredMaterialBindings;
+	MaterialRegistry->Apply(
+		DesiredMaterialBindings,
+		FABTSStylizedRenderingControl::IsEnabled());
+
 	TMap<TWeakObjectPtr<USceneCaptureComponent2D>, EABTSStylizedViewClass>
 		DesiredCaptures;
 	for (TActorIterator<AABTSM10ScoutMapSystem> It(World); It; ++It)
@@ -478,6 +498,18 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		GetTypeHash(PrimitiveRegistry->GetConflictCount()));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
+		GetTypeHash(MaterialRegistry->Num()));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(MaterialRegistry->GetConflictCount()));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(MaterialRegistry->GetRejectedBindingCount()));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(FABTSStylizedMaterialContract::GetContractHash()));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
 		GetTypeHash(FABTSStylizedRenderingControl::IsEnabled()));
 	if (LastDiagnosticSummaryHash != DiagnosticSummaryHash)
 	{
@@ -493,6 +525,16 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			PrimitiveRegistry->Num(),
 			RegisteredCaptures.Num(),
 			PrimitiveRegistry->GetConflictCount(),
+			FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T3-A0] MaterialSlots=%d MaterialConflicts=%d MaterialRejected=%d MaterialContractVersion=%d MaterialContractHash=%u Style=%d"),
+			MaterialRegistry->Num(),
+			MaterialRegistry->GetConflictCount(),
+			MaterialRegistry->GetRejectedBindingCount(),
+			FABTSStylizedMaterialContract::GetVersion(),
+			FABTSStylizedMaterialContract::GetContractHash(),
 			FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0);
 	}
 }

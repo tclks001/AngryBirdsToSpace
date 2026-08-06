@@ -8,6 +8,7 @@
 
 class UPrimitiveComponent;
 class USceneCaptureComponent2D;
+class FABTSStylizedMaterialOverrideRegistry;
 
 /**
  * Integration-owned T2-B1 consumer. Feature systems publish read-only semantic
@@ -35,6 +36,7 @@ public:
 	/** Deterministic immediate refresh used by automation and diagnostics. */
 	void RefreshNow();
 	int32 GetRegisteredPrimitiveCount() const;
+	int32 GetRegisteredMaterialSlotCount() const;
 	int32 GetRegisteredPreviewCount() const
 	{
 		return RegisteredCaptures.Num();
@@ -49,6 +51,7 @@ private:
 	friend class FABTSToonT2B1PrimitiveRegistryTest;
 	class FPrimitiveOverrideRegistry;
 	TUniquePtr<FPrimitiveOverrideRegistry> PrimitiveRegistry;
+	TUniquePtr<FABTSStylizedMaterialOverrideRegistry> MaterialRegistry;
 	TSet<TWeakObjectPtr<USceneCaptureComponent2D>> RegisteredCaptures;
 	float RefreshAccumulatorSeconds = 0.0f;
 	bool bWorldBeganPlay = false;
