@@ -92,6 +92,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3TaskLink>& GetGeneratedTaskLinks() const { return GeneratedTaskLinks; }
 
+	/** Integration-owned rendering refresh calls this without rebuilding M3. */
+	bool ApplyStylizedSurfaceStyle(bool bStyleEnabled);
+	bool TryGetStylizedSurfaceStyleEnabled(float& OutValue) const;
+
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellEdgeState>& GetGeneratedEdgeStates() const { return GeneratedEdgeStates; }
 
@@ -434,6 +438,14 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> RockHISM;
+
+	/** M3-owned T3-A1 material; published read-only to Integration. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM|Stylized")
+	TObjectPtr<UMaterialInterface> ForestStylizedMaterial;
+
+	/** M3-owned T3-A1 material; published read-only to Integration. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM|Stylized")
+	TObjectPtr<UMaterialInterface> RockStylizedMaterial;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	TArray<FABTSM3TaskNode> GeneratedTasks;
