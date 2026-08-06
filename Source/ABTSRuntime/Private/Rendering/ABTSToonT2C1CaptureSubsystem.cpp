@@ -31,6 +31,7 @@
 #include "World/ABTSM10ScoutMapSystem.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
+#include "World/ABTSM9Satellite.h"
 
 namespace ABTSToonT2C1CaptureSubsystemPrivate
 {
