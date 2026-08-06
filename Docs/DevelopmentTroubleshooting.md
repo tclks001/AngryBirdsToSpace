@@ -193,9 +193,9 @@
 - 总文档不复制会持续变化的整段参数和逐次实验数据；需要复盘时以子文档中的原始 ID、日志和提交为准。
 - 后续摘录先比较上次基线之后的子文档差异，再更新本文和基线；功能工作树不得直接修改本文。
 
-| 原始账本 | 主要职责 | 本次摘录基线（截至 2026-08-05） |
+| 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `2ddc974978c4c717db967b048209258dbca80c04` |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `9c6c4a03cfe766c12b0eda1ac7128ca003ff95cd`（2026-08-06） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `550545141908fd3cf6b42442a97109563549fc24` |
 
@@ -217,6 +217,8 @@
 | --- | --- | --- |
 | 冻结射程已经接入，实体建筑和走廊却看似仍在旧位置 | 冻结档位是能力包络，不是每关固定距离；候选逻辑位置与兼容 TaskGraph 实体是两条链。R-6 正式发布前只能用候选叠层和身份日志验收，不能用旧实体作反证。 | 同档位各关厘米距离严格递增；Candidate Hash 随档位变化；日志明确 `MonthlyAccepted` 和 Authority。详见子文档 `M3-R3-001/002`。 |
 | F7/测试地图中的区域、卫星或终局槽位置正确 | Preview/Test 只消费显式候选，不代表月度世界已经发布。禁止默认取 `RetainedCandidates[0]`，跨消费者必须用同一 `SourceResultHash + CandidateHash` Join。 | 分别运行无预览参数和显式 Candidate；前者不迁移生产世界，后者打印完整来源身份且仍为 `MonthlyAccepted=0`。详见 `M3-R5-001/002`。 |
+| 同一 TerrainType 出现与真实地貌分界错位的深浅色块 | Cell 中心预采样边界混色、Beat/Theme 调色与 GPU TerrainType 线段 SDF 属于不同分区权威，混合使用必然制造伪边界。地表 LUT 只保存 TerrainType 固定基础色，异色过渡统一由线段 SDF 处理；月度节拍语义保留给非地表表现消费。 | `ABTS.M3.Monthly.Biome.BaseTerrainPalette` 验证同类地形不受 Cell 高度、湿度、Beat 或 Theme 改色；可见 PIE 的异色边界必须贴合 TerrainType SDF。详见 `M3-R5-003`。 |
+| 显式候选预览中，小地图地貌颜色与同一落点实拍不一致 | 材质桥消费临时候选 VisualField，而小地图仍查询兼容世界成员，属于表现权威分叉。候选 Cell/Edge/VisualField 必须共同持久化，材质与小地图按同一 PreviewAuthority 选择；候选权威缺失时 fail closed，不能静默回退兼容世界。物理、TaskGraph 与正式合同仍使用兼容世界。 | `ABTS.M3.Monthly.SatellitePreview.04ScoutMapPresentationAuthority` 验证候选/兼容判别样本与权威一致；完整 SatellitePreview、基础色板自动化及同一 Candidate 的可见 PIE 分类对齐。详见 `M3-R5-004`。 |
 | 弹弓埋地、朝向错误，或候选预测与实际发射不同 | 球面规划点不是运行时发射帧。两根桩分别查询真实地表，最终朝向、卫星锚点和轨迹都从真实桩顶及 `GetRestPouchTransform()` 派生；不得用道路切线、共同高度或固定桩距伪造。 | 两桩贴地误差、Pouch/卫星中心差、朝向误差和补偿角进入日志与 Hash。详见 `M3-R51-001/002`。 |
 | `SatelliteGravity=1` 但没有可见偏转 | 布尔开关不能证明生产链闭环。生产 M6 必须消费冻结 Launch Profile；候选和运行时共用真实表面/Pouch 帧；预演与实飞共用 M9 引力查询，不复制公式。 | Profile/Candidate Hash 相符；同输入 gravity-on 命中且 gravity-off miss；fresh Standalone 在实际游戏进程设置 CVar。详见 `M3-R51-003`。 |
 | 自动装配的弦袋无法点击 | 视觉上重叠的桩组件先阻挡了 `ECC_Visibility`，交互射线没有到达 Pouch。装配后 Pouch 应是 Cord 唯一 Visibility 点击目标。 | `CordVisibilityTargets=1`、`PouchVisibilityTargets=1`，PIE 点击袋口进入发射且桩不抢占。详见 `M3-R51-004`。 |
