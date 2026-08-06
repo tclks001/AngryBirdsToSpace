@@ -68,7 +68,7 @@ void FABTSStylizedRenderingControl::SetProfile(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 6;
+	return 7;
 }
 
 FABTSStylizedToneProfileParameters
@@ -136,6 +136,8 @@ FABTSStylizedRenderingControl::GetOutlineProfileParameters(
 		Parameters.NormalThreshold = 0.14f;
 		Parameters.NormalSoftness = 0.17f;
 		Parameters.Strength = 0.82f;
+		Parameters.OcclusionStrength = 0.68f;
+		Parameters.NormalCreaseStrength = 0.28f;
 		Parameters.Color = FVector3f(0.030f, 0.045f, 0.075f);
 		break;
 	case EABTSStylizedRenderProfile::FinaleSpace:
@@ -145,6 +147,8 @@ FABTSStylizedRenderingControl::GetOutlineProfileParameters(
 		Parameters.NormalThreshold = 0.13f;
 		Parameters.NormalSoftness = 0.16f;
 		Parameters.Strength = 0.86f;
+		Parameters.OcclusionStrength = 0.72f;
+		Parameters.NormalCreaseStrength = 0.30f;
 		Parameters.Color = FVector3f(0.022f, 0.030f, 0.055f);
 		break;
 	case EABTSStylizedRenderProfile::GroundDay:
@@ -191,6 +195,10 @@ bool FABTSStylizedOutlineProfileParameters::IsValid() const
 		&& NormalSoftness > 0.0f
 		&& Strength > 0.0f
 		&& Strength <= 1.0f
+		&& OcclusionStrength > 0.0f
+		&& OcclusionStrength <= Strength
+		&& NormalCreaseStrength > 0.0f
+		&& NormalCreaseStrength <= OcclusionStrength
 		&& Color.GetMin() >= 0.0f
 		&& Color.GetMax() <= 1.0f;
 }

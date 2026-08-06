@@ -319,6 +319,7 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 ### Phase T4：环境与光照
 
 - 先冻结 T1–T3 的风格基线，再由 Integration 处理光照、球面雾云与高空星空；
+- 首先复查开放项 `TOON-T2A-002`：固定 Seed、相机与地形，对比 Style Off、Tone-only、Outline-only、Tone+Outline、阴影关闭和 Lighting-only，确认远端粗褶皱是否由阴影/量化光照与轮廓叠加造成；在完成该隔离前不继续调低轮廓阈值或强度；
 - 环境改造不得与 M3 世界生成、M11 轨迹或镜头优化混为同一提交；
 - 自定义 Shading Model 只有在 T3 验收明确失败、且项目允许改为源码引擎后才能立项。
 

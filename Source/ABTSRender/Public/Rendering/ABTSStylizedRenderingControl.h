@@ -29,7 +29,12 @@ struct ABTSRENDER_API FABTSStylizedOutlineProfileParameters
 	float DepthSoftness = 0.018f;
 	float NormalThreshold = 0.16f;
 	float NormalSoftness = 0.18f;
-	float Strength = 0.78f;
+	/** Geometry-to-background silhouette strength. */
+	float Strength = 0.92f;
+	/** Visible geometry-to-geometry depth discontinuity strength. */
+	float OcclusionStrength = 0.64f;
+	/** Same-depth normal crease strength; kept subordinate to silhouettes. */
+	float NormalCreaseStrength = 0.22f;
 	FVector3f Color = FVector3f(0.035f, 0.050f, 0.075f);
 
 	bool IsValid() const;
