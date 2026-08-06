@@ -174,6 +174,11 @@ public:
 	{
 		return FlightCamera;
 	}
+	/** Read-only subject identity for M11 camera observation/capture tools. */
+	AABTSM25BirdCharacter* GetAttemptBird() const
+	{
+		return AttemptBird;
+	}
 	const AABTSM11FinaleSystem* GetFinaleSystem() const
 	{
 		return FinaleSystem;
