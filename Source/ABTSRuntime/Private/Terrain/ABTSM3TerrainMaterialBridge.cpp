@@ -3,6 +3,8 @@
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 
 #include "ABTSRuntime.h"
+#include "Rendering/ABTSStylizedMaterialContract.h"
+#include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
 #include "Planet/ABTSM2Planet.h"
@@ -20,6 +22,54 @@ namespace ABTSM3TerrainMaterialBridgePrivate
 	constexpr int32 RoadTexelsPerSlot = 2;
 	constexpr int32 RiverSlotsPerCell = 24;
 	constexpr int32 RiverTexelsPerSlot = 2;
+
+	bool HasScalarParameter(
+		const UMaterialInterface& Material,
+		const FName& ParameterName)
+	{
+		float Value = 0.0f;
+		return Material.GetScalarParameterValue(
+			FHashedMaterialParameterInfo(ParameterName),
+			Value);
+	}
+
+	bool HasVectorParameter(
+		const UMaterialInterface& Material,
+		const FName& ParameterName)
+	{
+		FLinearColor Value = FLinearColor::Black;
+		return Material.GetVectorParameterValue(
+			FHashedMaterialParameterInfo(ParameterName),
+			Value);
+	}
+
+	bool HasStylizedSurfaceParameters(const UMaterialInterface& Material)
+	{
+		return HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetStyleEnabledParameterName())
+			&& HasVectorParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetBaseColorTintParameterName())
+			&& HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetRoughnessFloorParameterName())
+			&& HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetRoughnessScaleParameterName())
+			&& HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetSpecularScaleParameterName())
+			&& HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetMetallicScaleParameterName())
+			&& HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetRimStrengthParameterName())
+			&& HasScalarParameter(
+				Material,
+				FABTSStylizedMaterialContract::GetRimPowerParameterName());
+	}
 }
 
 UTexture2D* UABTSM3TerrainMaterialBridge::CreateFloatTexture(
@@ -172,6 +222,9 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 
 	TerrainMID = UMaterialInstanceDynamic::Create(SourceMaterial, Surface);
 	if (TerrainMID == nullptr) return false;
+	bStylizedSurfaceContractAvailable =
+		HasStylizedSurfaceParameters(*SourceMaterial);
+	bHasAppliedStyleState = false;
 	TerrainMID->SetTextureParameterValue(TEXT("M3_CellDirectionLUT"), CellDirectionLUT);
 	TerrainMID->SetTextureParameterValue(TEXT("M3_CellVisualLUT"), CellVisualLUT);
 	TerrainMID->SetTextureParameterValue(TEXT("M3_BoundarySegmentLUT"), BoundarySegmentLUT);
@@ -186,6 +239,16 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 	TerrainMID->SetVectorParameterValue(TEXT("M3_RoadColor"), RoadColor);
 	TerrainMID->SetVectorParameterValue(TEXT("M3_RiverColor"), RiverColor);
 	TerrainMID->SetScalarParameterValue(TEXT("M3_RiverSegmentCount"), RiverSlotsPerCell);
+	const bool bStylizedParametersApplied = ApplyStylizedSurfaceParameters(
+		FABTSStylizedRenderingControl::IsEnabled());
+	if (!bStylizedParametersApplied)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M3][T3-A1] SurfaceStyleUnavailable Material=%s Family=M3Surface Adoption=InPlaceStyleParameter OriginalSurfacePreserved=1 PlanetReadyBlocked=0"),
+			*GetNameSafe(SourceMaterial));
+	}
 	Surface->SetMaterial(0, TerrainMID);
 	UE_LOG(LogTemp, Log, TEXT("[ABTS][M3][RiverSDF] Segments=%d FlowCenterlines=%d BarrierDuals=%d TextureWidth=%d DroppedLocalRefs=%d StreamHalfWidth=%.1f ShallowHalfWidth=%.1f DeepHalfWidth=%.1f"),
 		RiverSegments.Num(), FlowCenterlineSegments, BarrierDualSegments, RiverTextureWidth, DroppedRiverReferences,
@@ -199,4 +262,103 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 		TerrainBasePaletteCellCount,
 		MonthlyPresentation != nullptr ? 1 : 0);
 	return true;
+}
+
+bool UABTSM3TerrainMaterialBridge::ApplyStylizedSurfaceParameters(
+	const bool bStyleEnabled)
+{
+	if (TerrainMID == nullptr
+		|| !bStylizedSurfaceContractAvailable
+		|| FABTSStylizedMaterialContract::ResolveOwner(
+			EABTSStylizedMaterialFamily::M3Surface)
+			!= EABTSStylizedMaterialOwner::M3
+		|| FABTSStylizedMaterialContract::ResolveAdoptionMode(
+			EABTSStylizedMaterialFamily::M3Surface)
+			!= EABTSStylizedMaterialAdoptionMode::InPlaceStyleParameter)
+	{
+		return false;
+	}
+
+	const FABTSStylizedSurfaceParameters Parameters =
+		FABTSStylizedMaterialContract::ResolveDefaultParameters(
+			EABTSStylizedMaterialFamily::M3Surface);
+	if (!Parameters.IsValid())
+	{
+		return false;
+	}
+
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetStyleEnabledParameterName(),
+		bStyleEnabled ? 1.0f : 0.0f);
+	TerrainMID->SetVectorParameterValue(
+		FABTSStylizedMaterialContract::GetBaseColorTintParameterName(),
+		Parameters.BaseColorTint);
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetRoughnessFloorParameterName(),
+		Parameters.RoughnessFloor);
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetRoughnessScaleParameterName(),
+		Parameters.RoughnessScale);
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetSpecularScaleParameterName(),
+		Parameters.SpecularScale);
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetMetallicScaleParameterName(),
+		Parameters.MetallicScale);
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetRimStrengthParameterName(),
+		Parameters.RimStrength);
+	TerrainMID->SetScalarParameterValue(
+		FABTSStylizedMaterialContract::GetRimPowerParameterName(),
+		Parameters.RimPower);
+
+	if (!bHasAppliedStyleState || bLastStyleEnabled != bStyleEnabled)
+	{
+		bLastStyleEnabled = bStyleEnabled;
+		bHasAppliedStyleState = true;
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M3][T3-A1] SurfaceStyle=%d Family=M3Surface Adoption=InPlaceStyleParameter MID=%s RoughnessFloor=%.3f RoughnessScale=%.3f SpecularScale=%.3f MetallicScale=%.3f"),
+			bStyleEnabled ? 1 : 0,
+			*GetNameSafe(TerrainMID),
+			Parameters.RoughnessFloor,
+			Parameters.RoughnessScale,
+			Parameters.SpecularScale,
+			Parameters.MetallicScale);
+	}
+	return true;
+}
+
+bool UABTSM3TerrainMaterialBridge::TryGetScalarParameterValue(
+	const FName& ParameterName,
+	float& OutValue) const
+{
+	return TerrainMID != nullptr
+		&& TerrainMID->GetScalarParameterValue(
+			FHashedMaterialParameterInfo(ParameterName),
+			OutValue,
+			true);
+}
+
+bool UABTSM3TerrainMaterialBridge::TryGetVectorParameterValue(
+	const FName& ParameterName,
+	FLinearColor& OutValue) const
+{
+	return TerrainMID != nullptr
+		&& TerrainMID->GetVectorParameterValue(
+			FHashedMaterialParameterInfo(ParameterName),
+			OutValue,
+			true);
+}
+
+bool UABTSM3TerrainMaterialBridge::TryGetTextureParameterValue(
+	const FName& ParameterName,
+	UTexture*& OutValue) const
+{
+	return TerrainMID != nullptr
+		&& TerrainMID->GetTextureParameterValue(
+			FHashedMaterialParameterInfo(ParameterName),
+			OutValue,
+			true);
 }
