@@ -1,6 +1,6 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过验收；无 M7 的 T2-C1 已形成当前基线。M7 在 Beam-C3 完成前继续 fail closed。2026-08-06 起把材质迁移拆成可独立交付的 T3-A0/A1/A2/A3、延后的 T3-B 和最终 T3-C；T3-A0 共享契约已完成，T3-A2 共享鸟与弹弓材质族已于 2026-08-07 完成自动化及可见 PIE 验收，T3-A1 M3 地形与自然物已接入 Integration 待验收分支并通过编译与自动化，待可见 PIE。详见 [T3-A0](ABTSToonStylizedRenderingT3A0.md)、[T3-A1](M3ToonStylizedRenderingT3A1.md) 与 [T3-A2](ABTSToonStylizedRenderingT3A2.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过验收；无 M7 的 T2-C1 已形成当前基线。M7 在 Beam-C3 完成前继续 fail closed。2026-08-06 起把材质迁移拆成可独立交付的 T3-A0/A1/A2/A3、延后的 T3-B 和最终 T3-C；T3-A0 共享契约已完成，T3-A1 M3 地形/自然物与 T3-A2 共享鸟/弹弓材质族均已于 2026-08-07 完成自动化及可见 PIE 验收。详见 [T3-A0](ABTSToonStylizedRenderingT3A0.md)、[T3-A1](M3ToonStylizedRenderingT3A1.md) 与 [T3-A2](ABTSToonStylizedRenderingT3A2.md)。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >

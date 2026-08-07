@@ -1,6 +1,6 @@
 # ABTS 三渲二 T3-A1：M3 地形与自然物材质族适配
 
-> 状态：M3 代码、自有资产与自动化完成，Integration 只读消费已接入待验收分支；待可见 PIE。2026-08-06 建立，2026-08-07 接入。
+> 状态：M3 代码、自有资产、Integration 只读消费、自动化与可见 PIE 均已完成；2026-08-06 建立，2026-08-07 接入并验收通过。
 >
 > Base：`803bb2512c0da68ac889ce25d98fa4f91cbe10b1`（T3-A0）。
 >
@@ -124,8 +124,12 @@ fresh 日志：
 6. 同一 PIE 中切回 `0`。日志必须出现 `SurfaceStyle=0`，树石精确恢复原材质槽，地表走原分支；不得残留风格材质或改变 Hash/WorldReady。
 7. 用相同相机保存 Style Off/On 对照，并检查近景/远景道路、河流、地貌交界、森林和岩石。`TOON-T2A-002` 远端粗褶皱仍按 T4 独立处理，不以本轮 Roughness 改善关闭。
 
+### 6.1 2026-08-07 验收结果
+
+用户已在 Integration 待验收分支完成本节可见 PIE 验收并确认通过。结合 UE 5.8 ForceUnity 成功、`ABTS.M3.Stylized` 3/3 与 `ABTS.Rendering.Toon.T3A` 3/3，本 T3-A1 独立切片验收门已关闭。该结论只覆盖 M3 SDF 地表、树木和岩石材质族，不替代仍待 M7/T3-B 接入后的 T3-C 全量视觉、GPU 与回归冻结。
+
 ## 7. 当前限制
 
-- M3 已发布运行时地表入口和只读 HISM 绑定，共享 WorldSubsystem 已在 Integration 待验收分支接入；在可见 PIE 完成前仍不能宣称完整运行时 A/B 或视觉验收通过。
+- M3 已发布运行时地表入口和只读 HISM 绑定，共享 WorldSubsystem 已由 Integration 接入并通过可见 PIE；后续修改共享材质注册表、M3 TerrainMID 或树石资产时仍须重跑本阶段 0→1→0 回归。
 - 本轮没有 GPU 像素/耗时证据；T3-C 仍需完整 M7、Scene Capture、1080p/1440p GPU 和可见 PIE 门。
 - 首版 RimStrength 为零，未引入额外高光；后续美术调参仍只能使用冻结公共参数名。
