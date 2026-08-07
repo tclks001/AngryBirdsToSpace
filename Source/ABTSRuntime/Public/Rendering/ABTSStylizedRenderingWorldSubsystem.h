@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Rendering/ABTSToonEnvironmentTypes.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "ABTSStylizedRenderingWorldSubsystem.generated.h"
 
@@ -51,6 +52,13 @@ public:
 		return RegisteredCaptures.Num();
 	}
 	bool IsM7SemanticAdapterReady() const { return false; }
+	/** Latest accepted T4 environment snapshot; false means fail closed. */
+	bool TryGetEnvironmentSnapshot(
+		FABTSToonEnvironmentSnapshot& OutSnapshot) const
+	{
+		OutSnapshot = EnvironmentSnapshot;
+		return bEnvironmentSnapshotReady && OutSnapshot.IsValid();
+	}
 
 protected:
 	virtual bool DoesSupportWorldType(
@@ -71,4 +79,7 @@ private:
 	bool bLastObservedStyleEnabled = false;
 	bool bSharedMaterialPreloadReady = false;
 	uint64 LastDiagnosticSummaryHash = 0;
+	FABTSToonEnvironmentSnapshot EnvironmentSnapshot;
+	bool bEnvironmentSnapshotReady = false;
+	uint64 LastEnvironmentDiagnosticHash = 0;
 };

@@ -202,6 +202,9 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 	MaterialRegistry = MakeUnique<FABTSStylizedMaterialOverrideRegistry>();
 	PreloadedSharedMaterials.Reset();
 	bSharedMaterialPreloadReady = false;
+	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
+	bEnvironmentSnapshotReady = false;
+	LastEnvironmentDiagnosticHash = 0;
 }
 
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
@@ -227,6 +230,9 @@ void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 	RegisteredCaptures.Reset();
 	PreloadedSharedMaterials.Reset();
 	bSharedMaterialPreloadReady = false;
+	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
+	bEnvironmentSnapshotReady = false;
+	LastEnvironmentDiagnosticHash = 0;
 	Super::Deinitialize();
 }
 
@@ -341,6 +347,55 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		return;
 	}
 	bLastObservedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
+
+	FABTSToonEnvironmentSnapshot ResolvedEnvironment;
+	FString EnvironmentFailure;
+	bEnvironmentSnapshotReady =
+		FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+			*World,
+			FABTSStylizedRenderingControl::GetProfile(),
+			ResolvedEnvironment,
+			&EnvironmentFailure);
+	EnvironmentSnapshot = bEnvironmentSnapshotReady
+		? ResolvedEnvironment
+		: FABTSToonEnvironmentSnapshot();
+	uint64 EnvironmentDiagnosticHash = bEnvironmentSnapshotReady
+		? EnvironmentSnapshot.IdentityHash
+		: GetTypeHash(EnvironmentFailure);
+	EnvironmentDiagnosticHash = HashCombineFast(
+		EnvironmentDiagnosticHash,
+		GetTypeHash(bEnvironmentSnapshotReady));
+	if (EnvironmentDiagnosticHash != LastEnvironmentDiagnosticHash)
+	{
+		LastEnvironmentDiagnosticHash = EnvironmentDiagnosticHash;
+		if (bEnvironmentSnapshotReady)
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Log,
+				TEXT("[ABTS][Rendering][T4-A0][Environment] Ready=1 Version=%d Profile=%d Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
+				EnvironmentSnapshot.Version,
+				static_cast<int32>(EnvironmentSnapshot.Profile),
+				EnvironmentSnapshot.WorldSeed,
+				EnvironmentSnapshot.GeneratorVersion,
+				EnvironmentSnapshot.GenerationAttempt,
+				*EnvironmentSnapshot.PlanetCenterWorld.ToCompactString(),
+				EnvironmentSnapshot.PlanetRadiusCM,
+				*EnvironmentSnapshot.SunDirectionToSunWorld.ToCompactString(),
+				static_cast<unsigned long long>(
+					EnvironmentSnapshot.IdentityHash));
+		}
+		else
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Verbose,
+				TEXT("[ABTS][Rendering][T4-A0][Environment] Ready=0 Reason=%s"),
+				EnvironmentFailure.IsEmpty()
+					? TEXT("Unknown")
+					: *EnvironmentFailure);
+		}
+	}
 
 	TMap<TWeakObjectPtr<UPrimitiveComponent>, EABTSStylizedObjectClass> Desired;
 	int32 M3SemanticCount = 0;

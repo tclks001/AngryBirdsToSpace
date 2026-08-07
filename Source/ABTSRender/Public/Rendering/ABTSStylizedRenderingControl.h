@@ -40,6 +40,19 @@ struct ABTSRENDER_API FABTSStylizedOutlineProfileParameters
 	bool IsValid() const;
 };
 
+/**
+ * Integration-owned diagnostic mask.  Production uses ToneAndOutline; the
+ * other values exist so the T4 capture runner can isolate rendering layers
+ * without changing material families or gameplay state.
+ */
+enum class EABTSStylizedDiagnosticPassMask : uint8
+{
+	None = 0,
+	Tone = 1 << 0,
+	Outline = 1 << 1,
+	ToneAndOutline = 3
+};
+
 /** Stable Integration-owned switch and profile seam for stylized rendering. */
 class ABTSRENDER_API FABTSStylizedRenderingControl
 {
@@ -51,6 +64,11 @@ public:
 	static EABTSStylizedRenderProfile GetProfile();
 	static EABTSStylizedRenderProfile GetProfileOnAnyThread();
 	static void SetProfile(EABTSStylizedRenderProfile Profile);
+	static EABTSStylizedDiagnosticPassMask GetDiagnosticPassMask();
+	static EABTSStylizedDiagnosticPassMask GetDiagnosticPassMaskOnAnyThread();
+	static void SetDiagnosticPassMask(EABTSStylizedDiagnosticPassMask Mask);
+	static bool IsTonePassEnabledOnAnyThread();
+	static bool IsOutlinePassEnabledOnAnyThread();
 	static FABTSStylizedToneProfileParameters GetToneProfileParameters(
 		EABTSStylizedRenderProfile Profile);
 	/**

@@ -1,10 +1,10 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过验收；无 M7 的 T2-C1 已形成当前基线。M7 在 Beam-C3 完成前继续 fail closed。2026-08-06 起把材质迁移拆成可独立交付的 T3-A0/A1/A2/A3、延后的 T3-B 和最终 T3-C；T3-A0 共享契约已完成，T3-A1 M3 地形/自然物与 T3-A2 共享鸟/弹弓材质族均已于 2026-08-07 完成自动化及可见 PIE 验收；T3-A3 M11 终局材质同日完成资产合同、Integration 接线、ForceUnity、集成自动化和 Rank11 风格化 AVI 轮廓验收。终局大气散射、光照与色彩体积不属于本门。详见 [T3-A0](ABTSToonStylizedRenderingT3A0.md)、[T3-A1](M3ToonStylizedRenderingT3A1.md)、[T3-A2](ABTSToonStylizedRenderingT3A2.md) 与 [T3-A3](M11ToonStylizedRenderingT3A3.md)。
+> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过验收；无 M7 的 T2-C1 已形成当前基线。M7 在 Beam-C3 完成前继续 fail closed。T3-A0/A1/A2/A3 已形成非 M7 当前材质基线，T3-B/C 等待 M7。2026-08-07 启动 [T4 球面环境、光照、云雾与程序化星空](ABTSToonStylizedRenderingT4.md)：实施顺序冻结为 A0 环境合同/诊断 → A1 Sky Atmosphere/确定性程序化 HDR 星场 → A2 球面云 → A3 环境 Profile → B 联合校色；A0 代码、ForceUnity 与 8 项相关自动化已通过，待用户可见的 30 图隔离矩阵验收。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
-> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [T2-C1 无 M7 动态与画中画回归](ABTSToonStylizedRenderingT2C1.md) · [T3-A0 共享材质契约](ABTSToonStylizedRenderingT3A0.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
+> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [T2-C1 无 M7 动态与画中画回归](ABTSToonStylizedRenderingT2C1.md) · [T3-A0 共享材质契约](ABTSToonStylizedRenderingT3A0.md) · [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
 
 ## 1. 结论先行
 
@@ -332,10 +332,12 @@ T3 不再把“所有材质族同时完成”作为开工条件。M7 Beam-C3 长
 
 ### Phase T4：环境与光照
 
-- 先冻结 T1–T3 的风格基线，再由 Integration 处理光照、球面雾云与高空星空；
-- 首先复查开放项 `TOON-T2A-002`：固定 Seed、相机与地形，对比 Style Off、Tone-only、Outline-only、Tone+Outline、阴影关闭和 Lighting-only，确认远端粗褶皱是否由阴影/量化光照与轮廓叠加造成；在完成该隔离前不继续调低轮廓阈值或强度；
-- 环境改造不得与 M3 世界生成、M11 轨迹或镜头优化混为同一提交；
-- 自定义 Shading Model 只有在 T3 验收明确失败、且项目允许改为源码引擎后才能立项。
+- **T4-A0**：建立主星中心/半径、太阳方向和 Profile 的只读快照；固定白昼、晨昏、夜面、高空和终局五点；完成 `TOON-T2A-002` 的六变体 Tone/Outline/Shadow 隔离矩阵，但不调最终参数；
+- **T4-A1**：关闭不相容的全局 Z 高度雾，接入球心 Sky Atmosphere、唯一 Atmosphere Sun、固定曝光，以及不使用 EXR/逐星循环的确定性程序化 HDR 星场；
+- **T4-A2**：验证原生 Volumetric Cloud 径向密度；若小星球尺度的 GPU、噪点或 SceneCapture 不合格，切换双层风格化云壳；
+- **T4-A3**：装配 `GroundDay`、`SatelliteGuide`、`FinaleSpace` 环境 Profile，并接入 M11 进入/失败/恢复；
+- **T4-B**：回开 T3 参数联合校色，解决地形褶皱；M7 仍可延后，但不得在缺失 T3-B 时宣布全项目冻结；
+- 环境改造不得与 M3 世界生成、M11 轨迹或镜头优化混为同一提交；自定义 Shading Model 只有在安装版路线明确失败且项目允许源码引擎后才能立项。完整合同、星场算法、门槛与命令见 [T4 详稿](ABTSToonStylizedRenderingT4.md)。
 
 ## 10. 正式验收门槛
 

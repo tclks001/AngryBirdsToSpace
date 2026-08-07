@@ -33,6 +33,7 @@
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedRenderingWorldSubsystem.h"
 #include "DynamicRHI.h"
 #include "GPUProfiler.h"
 #include "RHIGlobals.h"
@@ -235,11 +236,13 @@ bool UABTSToonVisualCaptureSubsystem::ShouldCreateSubsystem(UObject* Outer) cons
 	FString Suite;
 	const bool bExplicitlyRequested =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| (FParse::Value(
 			CommandLine,
 			TEXT("ABTSVisualCaptureSuite="),
 			Suite)
-			&& Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase));
+			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)));
 	return bExplicitlyRequested && Super::ShouldCreateSubsystem(Outer);
 }
 
@@ -429,7 +432,8 @@ void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 	CaptureStartRealSeconds = FPlatformTime::Seconds();
 	Phase = EABTSToonVisualCapturePhase::WaitingForWorld;
 	RunId = FString::Printf(
-		TEXT("%s_%s_%u"),
+		TEXT("%s_%s_%s_%u"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 		*FDateTime::UtcNow().ToString(TEXT("%Y%m%dT%H%M%SZ")),
 		FPlatformProcess::GetCurrentProcessId());
@@ -440,7 +444,7 @@ void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 		Root = FPaths::Combine(
 			FPaths::ProjectSavedDir(),
 			TEXT("ABTSVisualCaptures"),
-			TEXT("ToonT0"));
+			FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
 	}
 	else if (FPaths::IsRelative(Root))
 	{
@@ -463,7 +467,8 @@ void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][ToonT0][Begin] Map=%s Mode=%s Build=%s ExpectedSeed=%d Resolution=%dx%d ExactResolution=%d GPUSamples=%d Output=%s"),
+		TEXT("[ABTS][%s][Begin] Map=%s Mode=%s Build=%s ExpectedSeed=%d Resolution=%dx%d ExactResolution=%d GPUSamples=%d Output=%s"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 		*World.GetMapName(),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 		*RunConfig.BuildIdentity,
@@ -809,9 +814,44 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 	}
 
 	const TArray<FABTSToonVisualCapturePointDefinition> Definitions =
-		FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+			? FABTSToonVisualCaptureMath::BuildT4A0Catalogue()
+			: FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
+	VariantDefinitions =
+		FABTSToonVisualCaptureMath::BuildVariantCatalogue(RunConfig.Suite);
+	if (Definitions.IsEmpty() || VariantDefinitions.IsEmpty())
+	{
+		OutReason = TEXT("Capture point or variant catalogue is empty.");
+		return EWorldResolveResult::Failed;
+	}
+	for (const FABTSToonDiagnosticVariantDefinition& Variant
+		: VariantDefinitions)
+	{
+		if (!Variant.IsValid())
+		{
+			OutReason = TEXT("Capture variant catalogue contains an invalid entry.");
+			return EWorldResolveResult::Failed;
+		}
+	}
 	CaptureCatalogueHash =
 		FABTSToonVisualCaptureMath::ComputeCatalogueHash(Definitions);
+	VariantCatalogueHash =
+		FABTSToonVisualCaptureMath::ComputeVariantCatalogueHash(
+			VariantDefinitions);
+	FString EnvironmentFailure;
+	if (!FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+		*World,
+		EABTSStylizedRenderProfile::GroundDay,
+		EnvironmentSnapshot,
+		&EnvironmentFailure))
+	{
+		OutReason = FString::Printf(
+			TEXT("T4 environment contract is unavailable: %s"),
+			EnvironmentFailure.IsEmpty()
+				? TEXT("Unknown")
+				: *EnvironmentFailure);
+		return EWorldResolveResult::Failed;
+	}
 	ResolvedPoints.Reset();
 	ResolvedPoints.Reserve(Definitions.Num());
 
@@ -824,6 +864,25 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 	{
 		OutReason = TEXT("Unable to resolve the semantic Start-road frame.");
 		return EWorldResolveResult::Failed;
+	}
+	const FVector EnvironmentReferenceUp =
+		(StartTransform.GetLocation()
+			- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+	FVector EnvironmentDawnUp = FVector::VectorPlaneProject(
+		EnvironmentReferenceUp,
+		EnvironmentSnapshot.SunDirectionToSunWorld).GetSafeNormal();
+	if (EnvironmentDawnUp.IsNearlyZero())
+	{
+		FVector AxisA;
+		FVector AxisB;
+		EnvironmentSnapshot.SunDirectionToSunWorld.FindBestAxisVectors(
+			AxisA,
+			AxisB);
+		EnvironmentDawnUp = AxisA;
+	}
+	if (FVector::DotProduct(EnvironmentDawnUp, EnvironmentReferenceUp) < 0.0)
+	{
+		EnvironmentDawnUp *= -1.0;
 	}
 
 	const FABTSGeneratedBuildingSite* SelectedSite = nullptr;
@@ -968,6 +1027,68 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		OutReason = TEXT("Finale local frame is unusable.");
 		return EWorldResolveResult::Failed;
 	}
+
+	auto BuildEnvironmentSurfacePoint = [
+		this,
+		&Planet,
+		&EnvironmentDawnUp](
+		const FVector& RequestedUp,
+		const FABTSToonVisualCapturePointDefinition& Definition,
+		FABTSToonResolvedCapturePoint& OutPoint,
+		FString& OutFailure)
+	{
+		const FVector Up = RequestedUp.GetSafeNormal();
+		if (Up.IsNearlyZero())
+		{
+			OutFailure = TEXT("Environment surface radial direction is degenerate.");
+			return false;
+		}
+		FVector Forward = FVector::VectorPlaneProject(
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			Up).GetSafeNormal();
+		if (Forward.IsNearlyZero())
+		{
+			Forward = FVector::VectorPlaneProject(
+				EnvironmentDawnUp,
+				Up).GetSafeNormal();
+		}
+		if (Forward.IsNearlyZero())
+		{
+			FVector FallbackRight;
+			Up.FindBestAxisVectors(Forward, FallbackRight);
+		}
+		const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
+		if (Forward.IsNearlyZero() || Right.IsNearlyZero())
+		{
+			OutFailure = TEXT("Environment surface tangent frame is degenerate.");
+			return false;
+		}
+		const double SurfaceRadiusCM =
+			Planet.GetSurfaceRadiusAtDirection(Up);
+		const FVector SurfaceLocation =
+			EnvironmentSnapshot.PlanetCenterWorld + Up * SurfaceRadiusCM;
+		OutPoint.LookAtWorld = SurfaceLocation
+			+ Forward * 320.0
+			+ Up * 120.0;
+		const FVector CameraLocation = OutPoint.LookAtWorld
+			- Forward * 1450.0
+			+ Right * 420.0
+			+ Up * 560.0;
+		if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+			CameraLocation,
+			OutPoint.LookAtWorld,
+			Up,
+			OutPoint.CameraWorldTransform,
+			&OutFailure))
+		{
+			return false;
+		}
+		OutPoint.SemanticIdentityHash =
+			ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+				EnvironmentSnapshot.IdentityHash,
+				static_cast<uint64>(Definition.Anchor));
+		return true;
+	};
 
 	for (const FABTSToonVisualCapturePointDefinition& Definition : Definitions)
 	{
@@ -1146,6 +1267,67 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 					static_cast<uint64>(SatelliteSnapshot.TrajectoryCertificationHash));
 			break;
 		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentGroundDay:
+			if (!BuildEnvironmentSurfacePoint(
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				Definition,
+				Point,
+				CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentGroundDawn:
+			if (!BuildEnvironmentSurfacePoint(
+				EnvironmentDawnUp,
+				Definition,
+				Point,
+				CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentGroundNight:
+			if (!BuildEnvironmentSurfacePoint(
+				-EnvironmentSnapshot.SunDirectionToSunWorld,
+				Definition,
+				Point,
+				CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude:
+		{
+			const FVector HighUp = (
+				EnvironmentSnapshot.SunDirectionToSunWorld
+				+ EnvironmentDawnUp * 0.55).GetSafeNormal();
+			const FVector CameraLocation =
+				EnvironmentSnapshot.PlanetCenterWorld
+				+ HighUp * EnvironmentSnapshot.PlanetRadiusCM * 3.2
+				+ EnvironmentDawnUp
+					* EnvironmentSnapshot.PlanetRadiusCM * 0.35;
+			Point.LookAtWorld = EnvironmentSnapshot.PlanetCenterWorld
+				+ HighUp * EnvironmentSnapshot.PlanetRadiusCM * 0.15;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				HighUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
 		case EABTSToonVisualCaptureAnchor::FinaleLayout:
 		{
 			FBox Bounds(EForceInit::ForceInit);
@@ -1212,6 +1394,27 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 			OutReason = TEXT("Capture catalogue contains an unsupported anchor.");
 			return EWorldResolveResult::Failed;
 		}
+
+		FABTSToonEnvironmentSnapshot PointEnvironment;
+		FString PointEnvironmentFailure;
+		if (!FABTSToonEnvironmentResolver::BuildSnapshot(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			Definition.StyleProfile,
+			EnvironmentSnapshot.WorldSeed,
+			EnvironmentSnapshot.GeneratorVersion,
+			EnvironmentSnapshot.GenerationAttempt,
+			EnvironmentSnapshot.bSourceWorldAccepted,
+			PointEnvironment,
+			&PointEnvironmentFailure))
+		{
+			OutReason = FString::Printf(
+				TEXT("Capture point environment identity failed: %s"),
+				*PointEnvironmentFailure);
+			return EWorldResolveResult::Failed;
+		}
+		Point.EnvironmentSnapshotHash = PointEnvironment.IdentityHash;
 
 		Point.CameraPoseHash =
 			FABTSToonVisualCaptureMath::ComputeCameraPoseHash(
@@ -1292,6 +1495,26 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 	bSavedScreenMessagesEnabled = GAreScreenMessagesEnabled;
 	bSavedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
 	SavedStyleProfile = FABTSStylizedRenderingControl::GetProfile();
+	SavedDiagnosticPassMask =
+		FABTSStylizedRenderingControl::GetDiagnosticPassMask();
+	IConsoleVariable* ShadowQuality =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
+	if (ShadowQuality == nullptr)
+	{
+		OutFailure = TEXT("r.ShadowQuality is unavailable for T4 isolation.");
+		return false;
+	}
+	SavedShadowQuality = ShadowQuality->GetInt();
+	SavedShadowQualitySetBy =
+		static_cast<uint32>(ShadowQuality->GetFlags())
+		& static_cast<uint32>(ECVF_SetByMask);
+	bShadowQualityStateCaptured = true;
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+		&& SavedShadowQuality <= 0)
+	{
+		OutFailure = TEXT("ToonT4A0 requires a shadow-enabled source baseline.");
+		return false;
+	}
 	bRuntimeStateCaptured = true;
 
 	FActorSpawnParameters SpawnParameters;
@@ -1380,6 +1603,7 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 {
 	if (!ResolvedPoints.IsValidIndex(CurrentPointIndex)
+		|| !VariantDefinitions.IsValidIndex(CurrentVariantIndex)
 		|| !IsValid(CaptureCamera)
 		|| CaptureCamera->GetCameraComponent() == nullptr)
 	{
@@ -1389,16 +1613,41 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	FABTSStylizedRenderingControl::SetProfile(Point.Definition.StyleProfile);
-	FABTSStylizedRenderingControl::SetEnabled(bCurrentStyleEnabled);
+	FABTSStylizedRenderingControl::SetDiagnosticPassMask(Variant.PassMask);
+	FABTSStylizedRenderingControl::SetEnabled(Variant.bStyleEnabled);
+	IConsoleVariable* ShadowQuality =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
+	if (ShadowQuality == nullptr)
+	{
+		FinishCapture(false, TEXT("r.ShadowQuality disappeared during capture."));
+		return;
+	}
+	ShadowQuality->Set(
+		Variant.bShadowsEnabled ? SavedShadowQuality : 0,
+		ECVF_SetByCode);
+	if (UWorld* World = GetWorld())
+	{
+		if (UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+			World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
+		{
+			StyleSubsystem->RefreshNow();
+		}
+	}
 	if (FABTSStylizedRenderingControl::GetProfile()
 			!= Point.Definition.StyleProfile
 		|| FABTSStylizedRenderingControl::IsEnabled()
-			!= bCurrentStyleEnabled)
+			!= Variant.bStyleEnabled
+		|| FABTSStylizedRenderingControl::GetDiagnosticPassMask()
+			!= Variant.PassMask
+		|| ShadowQuality->GetInt()
+			!= (Variant.bShadowsEnabled ? SavedShadowQuality : 0))
 	{
 		FinishCapture(
 			false,
-			TEXT("The stylized rendering seam did not retain the requested Style/Profile state."));
+			TEXT("The stylized rendering seam did not retain the requested Style/Profile/pass/shadow state."));
 		return;
 	}
 	CaptureCamera->SetActorTransform(
@@ -1434,16 +1683,25 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][ToonT0][Variant] Point=%s Anchor=%s Style=%s Profile=%s StyleImplementation=%d PoseHash=%s SemanticHash=%s Warmup=%d"),
+		TEXT("[ABTS][%s][Variant] Point=%s Anchor=%s Variant=%s Style=%s Tone=%d Outline=%d Shadows=%d Profile=%s StyleImplementation=%d PoseHash=%s SemanticHash=%s EnvironmentHash=%s Warmup=%d"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 		*Point.Definition.PointId.ToString(),
 		FABTSToonVisualCaptureMath::LexToString(Point.Definition.Anchor),
-		bCurrentStyleEnabled ? TEXT("On") : TEXT("Off"),
+		*Variant.VariantId.ToString(),
+		Variant.bStyleEnabled ? TEXT("On") : TEXT("Off"),
+		(static_cast<uint8>(Variant.PassMask)
+			& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Tone)) != 0,
+		(static_cast<uint8>(Variant.PassMask)
+			& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Outline)) != 0,
+		Variant.bShadowsEnabled ? 1 : 0,
 		FABTSToonVisualCaptureMath::LexToString(
 			Point.Definition.StyleProfile),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(Point.CameraPoseHash),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 			Point.SemanticIdentityHash),
+		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+			Point.EnvironmentSnapshotHash),
 		RemainingWarmupFrames);
 }
 
@@ -1467,12 +1725,26 @@ bool UABTSToonVisualCaptureSubsystem::ValidateEffectiveCamera(
 
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	if (!VariantDefinitions.IsValidIndex(CurrentVariantIndex))
+	{
+		OutFailure = TEXT("The requested diagnostic variant is unavailable.");
+		return false;
+	}
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
+	const IConsoleVariable* ShadowQuality =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
 	if (FABTSStylizedRenderingControl::GetProfile()
 			!= Point.Definition.StyleProfile
 		|| FABTSStylizedRenderingControl::IsEnabled()
-			!= bCurrentStyleEnabled)
+			!= Variant.bStyleEnabled
+		|| FABTSStylizedRenderingControl::GetDiagnosticPassMask()
+			!= Variant.PassMask
+		|| ShadowQuality == nullptr
+		|| ShadowQuality->GetInt()
+			!= (Variant.bShadowsEnabled ? SavedShadowQuality : 0))
 	{
-		OutFailure = TEXT("Style/Profile state changed during camera warmup.");
+		OutFailure = TEXT("Style/Profile/pass/shadow state changed during camera warmup.");
 		return false;
 	}
 
@@ -1524,7 +1796,7 @@ bool UABTSToonVisualCaptureSubsystem::ValidateEffectiveCamera(
 				!= CurrentEffectiveCameraPoseHash)
 		{
 			OutFailure = FString::Printf(
-				TEXT("Style Off/On effective camera identity diverged at %s."),
+				TEXT("Diagnostic variants have divergent effective camera identity at %s."),
 				*Point.Definition.PointId.ToString());
 			return false;
 		}
@@ -1628,10 +1900,15 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentScreenshot()
 	}
 
 	FABTSToonVisualCaptureManifestRecord Record;
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	Record.PointId = Point.Definition.PointId;
 	Record.Anchor = Point.Definition.Anchor;
 	Record.Profile = Point.Definition.StyleProfile;
-	Record.bStyleEnabled = bCurrentStyleEnabled;
+	Record.VariantId = Variant.VariantId;
+	Record.bStyleEnabled = Variant.bStyleEnabled;
+	Record.PassMask = Variant.PassMask;
+	Record.bShadowsEnabled = Variant.bShadowsEnabled;
 	Record.StyleImplementationVersion =
 		FABTSStylizedRenderingControl::GetImplementationVersion();
 	Record.CameraWorldTransform = Point.CameraWorldTransform;
@@ -1640,6 +1917,7 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentScreenshot()
 	Record.SemanticIdentityHash = Point.SemanticIdentityHash;
 	Record.CameraPoseHash = Point.CameraPoseHash;
 	Record.EffectiveCameraPoseHash = CurrentEffectiveCameraPoseHash;
+	Record.EnvironmentSnapshotHash = Point.EnvironmentSnapshotHash;
 	Record.Resolution = PngResolution;
 	Record.ArtifactPath = ActiveScreenshotPath;
 	Record.ArtifactMD5 =
@@ -1681,13 +1959,15 @@ void UABTSToonVisualCaptureSubsystem::DispatchCurrentGPUProfile()
 	}
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
 		TEXT("[ABTS][ToonT0][GPUProfileMarker] Run=%s Point=%s Style=%s PoseHash=%s EffectivePoseHash=%s Sample=%d/%d"),
 		*RunId,
 		*Point.Definition.PointId.ToString(),
-		bCurrentStyleEnabled ? TEXT("On") : TEXT("Off"),
+		*Variant.VariantId.ToString(),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(Point.CameraPoseHash),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 			CurrentEffectiveCameraPoseHash),
@@ -1728,11 +2008,16 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentGPUProfile()
 
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	FABTSToonVisualCaptureManifestRecord Record;
 	Record.PointId = Point.Definition.PointId;
 	Record.Anchor = Point.Definition.Anchor;
 	Record.Profile = Point.Definition.StyleProfile;
-	Record.bStyleEnabled = bCurrentStyleEnabled;
+	Record.VariantId = Variant.VariantId;
+	Record.bStyleEnabled = Variant.bStyleEnabled;
+	Record.PassMask = Variant.PassMask;
+	Record.bShadowsEnabled = Variant.bShadowsEnabled;
 	Record.StyleImplementationVersion =
 		FABTSStylizedRenderingControl::GetImplementationVersion();
 	Record.CameraWorldTransform = Point.CameraWorldTransform;
@@ -1741,6 +2026,7 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentGPUProfile()
 	Record.SemanticIdentityHash = Point.SemanticIdentityHash;
 	Record.CameraPoseHash = Point.CameraPoseHash;
 	Record.EffectiveCameraPoseHash = CurrentEffectiveCameraPoseHash;
+	Record.EnvironmentSnapshotHash = Point.EnvironmentSnapshotHash;
 	Record.Resolution = GetActualViewportResolution();
 	Record.bGPUProfileCommandAccepted = true;
 	Record.GPUProfileSampleCount = CurrentGPUProfileSampleIndex;
@@ -1755,14 +2041,14 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentGPUProfile()
 
 void UABTSToonVisualCaptureSubsystem::AdvanceVariantOrFinish()
 {
-	if (!bCurrentStyleEnabled)
+	++CurrentVariantIndex;
+	if (CurrentVariantIndex < VariantDefinitions.Num())
 	{
-		bCurrentStyleEnabled = true;
 		BeginCurrentVariant();
 		return;
 	}
 
-	bCurrentStyleEnabled = false;
+	CurrentVariantIndex = 0;
 	++CurrentPointIndex;
 	if (CurrentPointIndex >= ResolvedPoints.Num())
 	{
@@ -1784,7 +2070,8 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 	}
 	bool bEffectiveSuccess = bSuccess;
 	FString EffectiveReason = Reason;
-	const int32 ExpectedRecordCount = ResolvedPoints.Num() * 2;
+	const int32 ExpectedRecordCount =
+		ResolvedPoints.Num() * VariantDefinitions.Num();
 	if (bEffectiveSuccess
 		&& ManifestRecords.Num() != ExpectedRecordCount)
 	{
@@ -1813,7 +2100,8 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][ToonT0][Terminal] Success=1 Mode=%s Records=%d Expected=%d Output=%s Reason=None"),
+			TEXT("[ABTS][%s][Terminal] Success=1 Mode=%s Records=%d Expected=%d Output=%s Reason=None"),
+			FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 			FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 			ManifestRecords.Num(),
 			ExpectedRecordCount,
@@ -1824,7 +2112,8 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 		UE_LOG(
 			LogABTSRuntime,
 			Error,
-			TEXT("[ABTS][ToonT0][Terminal] Success=0 Mode=%s Records=%d Expected=%d Output=%s Reason=%s"),
+			TEXT("[ABTS][%s][Terminal] Success=0 Mode=%s Records=%d Expected=%d Output=%s Reason=%s"),
+			FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 			FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 			ManifestRecords.Num(),
 			ExpectedRecordCount,
@@ -1872,9 +2161,29 @@ void UABTSToonVisualCaptureSubsystem::RestoreRuntimeState()
 		}
 		GAreScreenMessagesEnabled = bSavedScreenMessagesEnabled;
 		FABTSStylizedRenderingControl::SetProfile(SavedStyleProfile);
+		FABTSStylizedRenderingControl::SetDiagnosticPassMask(
+			SavedDiagnosticPassMask);
 		FABTSStylizedRenderingControl::SetEnabled(bSavedStyleEnabled);
+		if (bShadowQualityStateCaptured)
+		{
+			if (IConsoleVariable* ShadowQuality =
+				IConsoleManager::Get().FindConsoleVariable(
+					TEXT("r.ShadowQuality")))
+			{
+				ShadowQuality->Set(
+					SavedShadowQuality,
+					static_cast<EConsoleVariableFlags>(
+						SavedShadowQualitySetBy));
+			}
+			bShadowQualityStateCaptured = false;
+		}
 		if (UWorld* World = GetWorld())
 		{
+			if (UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+				World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
+			{
+				StyleSubsystem->RefreshNow();
+			}
 			if (UGameplayStatics::IsGamePaused(World) != bWorldWasPaused)
 			{
 				UGameplayStatics::SetGamePaused(World, bWorldWasPaused);
@@ -1910,8 +2219,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	}
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetNumberField(TEXT("schemaVersion"), 2);
-	Root->SetStringField(TEXT("suite"), TEXT("ToonT0"));
+	Root->SetNumberField(TEXT("schemaVersion"), 3);
+	Root->SetStringField(
+		TEXT("suite"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
 	Root->SetStringField(TEXT("runId"), RunId);
 	Root->SetStringField(TEXT("buildIdentity"), RunConfig.BuildIdentity);
 	Root->SetStringField(TEXT("status"), Status);
@@ -1971,6 +2282,20 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	Environment->SetStringField(
 		TEXT("exposurePolicy"),
 		TEXT("SceneConfiguredAutoExposure_CameraCut_PerVariantWarmup"));
+	Environment->SetNumberField(
+		TEXT("snapshotContractVersion"),
+		EnvironmentSnapshot.Version);
+	Environment->SetObjectField(
+		TEXT("planetCenterWorld"),
+		ABTSToonVisualCaptureSubsystemPrivate::VectorToJson(
+			EnvironmentSnapshot.PlanetCenterWorld));
+	Environment->SetNumberField(
+		TEXT("planetRadiusCM"),
+		EnvironmentSnapshot.PlanetRadiusCM);
+	Environment->SetObjectField(
+		TEXT("sunDirectionToSunWorld"),
+		ABTSToonVisualCaptureSubsystemPrivate::VectorToJson(
+			EnvironmentSnapshot.SunDirectionToSunWorld));
 	const Scalability::FQualityLevels Quality =
 		Scalability::GetQualityLevels();
 	TSharedRef<FJsonObject> ScalabilityJson = MakeShared<FJsonObject>();
@@ -2122,6 +2447,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("captureCatalogueHash"),
 		ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 			CaptureCatalogueHash));
+	WorldIdentity->SetStringField(
+		TEXT("variantCatalogueHash"),
+		ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+			VariantCatalogueHash));
 	Root->SetObjectField(TEXT("worldIdentity"), WorldIdentity);
 
 	const FIntPoint ActualResolution = GetActualViewportResolution();
@@ -2144,8 +2473,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("implementationVersion"),
 		FABTSStylizedRenderingControl::GetImplementationVersion());
 	Style->SetStringField(
-		TEXT("t0Contract"),
-		TEXT("Style implementation is versioned; Off bypasses project stylization."));
+		TEXT("captureContract"),
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+			? TEXT("T4-A0 freezes six Tone/Outline/Shadow isolation variants without changing gameplay authority.")
+			: TEXT("Style implementation is versioned; Off bypasses project stylization."));
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);
@@ -2165,9 +2496,26 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		RecordJson->SetStringField(
 			TEXT("profile"),
 			FABTSToonVisualCaptureMath::LexToString(Record.Profile));
+		RecordJson->SetStringField(
+			TEXT("variantId"),
+			Record.VariantId.ToString());
 		RecordJson->SetBoolField(
 			TEXT("styleEnabled"),
 			Record.bStyleEnabled);
+		RecordJson->SetNumberField(
+			TEXT("diagnosticPassMask"),
+			static_cast<int32>(Record.PassMask));
+		RecordJson->SetBoolField(
+			TEXT("toneEnabled"),
+			(static_cast<uint8>(Record.PassMask)
+				& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Tone)) != 0);
+		RecordJson->SetBoolField(
+			TEXT("outlineEnabled"),
+			(static_cast<uint8>(Record.PassMask)
+				& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Outline)) != 0);
+		RecordJson->SetBoolField(
+			TEXT("shadowsEnabled"),
+			Record.bShadowsEnabled);
 		RecordJson->SetNumberField(
 			TEXT("styleImplementationVersion"),
 			Record.StyleImplementationVersion);
@@ -2194,6 +2542,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			TEXT("effectiveCameraPoseHash"),
 			ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 				Record.EffectiveCameraPoseHash));
+		RecordJson->SetStringField(
+			TEXT("environmentSnapshotHash"),
+			ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+				Record.EnvironmentSnapshotHash));
 		RecordJson->SetNumberField(TEXT("resolutionX"), Record.Resolution.X);
 		RecordJson->SetNumberField(TEXT("resolutionY"), Record.Resolution.Y);
 		RecordJson->SetStringField(TEXT("artifactPath"), Record.ArtifactPath);
@@ -2250,11 +2602,22 @@ FString UABTSToonVisualCaptureSubsystem::MakeCurrentArtifactPath() const
 	{
 		return FString();
 	}
-	return FPaths::Combine(
-		OutputDirectory,
-		FString::Printf(
-			TEXT("%02d_%s_Style%s.png"),
+	if (!VariantDefinitions.IsValidIndex(CurrentVariantIndex))
+	{
+		return FString();
+	}
+	const FString Filename = RunConfig.Suite
+		== EABTSToonVisualCaptureSuite::ToonT0
+		? FString::Printf(
+			TEXT("%02d_%s_%s.png"),
 			CurrentPointIndex + 1,
 			*ResolvedPoints[CurrentPointIndex].Definition.PointId.ToString(),
-			bCurrentStyleEnabled ? TEXT("On") : TEXT("Off")));
+			*VariantDefinitions[CurrentVariantIndex].VariantId.ToString())
+		: FString::Printf(
+			TEXT("%02d_%s_%02d_%s.png"),
+			CurrentPointIndex + 1,
+			*ResolvedPoints[CurrentPointIndex].Definition.PointId.ToString(),
+			CurrentVariantIndex + 1,
+			*VariantDefinitions[CurrentVariantIndex].VariantId.ToString());
+	return FPaths::Combine(OutputDirectory, Filename);
 }

@@ -17,6 +17,21 @@ namespace ABTSStylizedRenderingControl
 		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay),
 		TEXT("0=GroundDay, 1=SatelliteGuide, 2=FinaleSpace."),
 		ECVF_Default);
+
+	TAutoConsoleVariable<int32> CVarDiagnosticPassMask(
+		TEXT("abts.Rendering.Stylized.DiagnosticPassMask"),
+		static_cast<int32>(EABTSStylizedDiagnosticPassMask::ToneAndOutline),
+		TEXT("Integration diagnostic seam. 0=None, 1=Tone, 2=Outline, 3=ToneAndOutline. Production default is 3."),
+		ECVF_Default);
+
+	EABTSStylizedDiagnosticPassMask SanitizeDiagnosticPassMask(const int32 Value)
+	{
+		return static_cast<EABTSStylizedDiagnosticPassMask>(
+			FMath::Clamp(
+				Value,
+				static_cast<int32>(EABTSStylizedDiagnosticPassMask::None),
+				static_cast<int32>(EABTSStylizedDiagnosticPassMask::ToneAndOutline)));
+	}
 }
 
 bool FABTSStylizedRenderingControl::IsEnabled()
@@ -64,6 +79,47 @@ void FABTSStylizedRenderingControl::SetProfile(
 	ABTSStylizedRenderingControl::CVarProfile->Set(
 		static_cast<int32>(Profile),
 		ECVF_SetByCode);
+}
+
+EABTSStylizedDiagnosticPassMask
+FABTSStylizedRenderingControl::GetDiagnosticPassMask()
+{
+	return ABTSStylizedRenderingControl::SanitizeDiagnosticPassMask(
+		ABTSStylizedRenderingControl::CVarDiagnosticPassMask.GetValueOnGameThread());
+}
+
+EABTSStylizedDiagnosticPassMask
+FABTSStylizedRenderingControl::GetDiagnosticPassMaskOnAnyThread()
+{
+	return ABTSStylizedRenderingControl::SanitizeDiagnosticPassMask(
+		ABTSStylizedRenderingControl::CVarDiagnosticPassMask.GetValueOnAnyThread());
+}
+
+void FABTSStylizedRenderingControl::SetDiagnosticPassMask(
+	const EABTSStylizedDiagnosticPassMask Mask)
+{
+	const int32 Value = static_cast<int32>(Mask);
+	if (Value < static_cast<int32>(EABTSStylizedDiagnosticPassMask::None)
+		|| Value > static_cast<int32>(
+			EABTSStylizedDiagnosticPassMask::ToneAndOutline))
+	{
+		return;
+	}
+	ABTSStylizedRenderingControl::CVarDiagnosticPassMask->Set(
+		Value,
+		ECVF_SetByCode);
+}
+
+bool FABTSStylizedRenderingControl::IsTonePassEnabledOnAnyThread()
+{
+	return (static_cast<uint8>(GetDiagnosticPassMaskOnAnyThread())
+		& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Tone)) != 0;
+}
+
+bool FABTSStylizedRenderingControl::IsOutlinePassEnabledOnAnyThread()
+{
+	return (static_cast<uint8>(GetDiagnosticPassMaskOnAnyThread())
+		& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Outline)) != 0;
 }
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()

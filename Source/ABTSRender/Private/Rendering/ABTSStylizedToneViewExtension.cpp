@@ -135,7 +135,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			}
 
 			if (Pass == EPostProcessingPass::AfterDOF
-				&& ViewPolicy.bApplyOutline)
+				&& ViewPolicy.bApplyOutline
+				&& FABTSStylizedRenderingControl::IsOutlinePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedOutlineProfileParameters OutlineProfile =
 					FABTSStylizedRenderingControl::GetOutlineProfileParameters(
@@ -157,7 +158,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 					});
 			}
 			else if (Pass == EPostProcessingPass::Tonemap
-				&& ViewPolicy.bApplyTone)
+				&& ViewPolicy.bApplyTone
+				&& FABTSStylizedRenderingControl::IsTonePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedToneProfileParameters ToneProfile =
 					FABTSStylizedRenderingControl::GetToneProfileParameters(
@@ -346,7 +348,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			}
 
 			if (Pass == EPostProcessingPass::AfterDOF
-				&& ViewPolicy.bApplyOutline)
+				&& ViewPolicy.bApplyOutline
+				&& FABTSStylizedRenderingControl::IsOutlinePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedOutlineProfileParameters OutlineProfile =
 					FABTSStylizedRenderingControl::GetOutlineProfileParameters(
@@ -368,7 +371,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 					});
 			}
 			else if (Pass == EPostProcessingPass::Tonemap
-				&& ViewPolicy.bApplyTone)
+				&& ViewPolicy.bApplyTone
+				&& FABTSStylizedRenderingControl::IsTonePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedToneProfileParameters ToneProfile =
 					FABTSStylizedRenderingControl::GetToneProfileParameters(
