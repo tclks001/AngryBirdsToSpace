@@ -195,7 +195,7 @@
 
 | 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `9c6c4a03cfe766c12b0eda1ac7128ca003ff95cd`（2026-08-06） |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `20cceaeaa1069a8b1b2f12c71e4740890b989006`（2026-08-07，含 `M3-T3A1-001/002`） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `550545141908fd3cf6b42442a97109563549fc24` |
 
@@ -267,6 +267,8 @@
 
 | 现象 | 根因 | 修复 | 防回归验证 |
 | --- | --- | --- | --- |
+| T3-A1 用完全空白的 transient 材质模拟“只缺 ABTS 风格参数”，自动化结果虽成功但日志出现多条 MID 参数错误 | 空材质同时缺失全部既有 `M3_*` LUT、道路、河流和半径参数，并不代表“原地形合同完整、仅风格入口缺失”的产品场景；只看 Success 数会形成假绿灯 | 生产桥先只读检查八个公共风格参数，缺失时保留原 TerrainMID 并 fail soft；自动化以未就绪桥和缺失树石候选验证拒绝路径，不再破坏原 M3 参数合同 | `M3-T3A1-001`：fresh `ABTS.M3.StylizedMaterials` 必须 2/2 且项目测试期间 `LogABTSRuntime/LogAutomationController Error=0`；PlanetReady、TaskGraph、实例数及 Layout/Result Hash 不变 |
+| 无 GUI 重接地形/树石材质时，复制了 BaseColor 源表达式却丢失 TextureSample 的命名输出 `RGB` | Material Graph 连接身份包含“源表达式 + 输出名”；只保存表达式指针并按默认空输出名重连，会静默改用错误通道 | 资产脚本同时读取源节点和 `GetMaterialPropertyInputNodeOutputName()`，原样接入 Tint/Lerp；全部节点创建、编译成功后才保存，失败不落半张材质图 | `M3-T3A1-002`：只读回查三项材质的 BaseColor/Roughness/Specular/Metallic/Emissive 接线；树石保持 `Used with Instanced Static Meshes=True`，并核对失败后工作区无半成品 |
 | T3-A2 开启后四只鸟全部变成同一蓝色、脸部消失，材质实例审计却能读到正确的红/蓝/黄/黑贴图 | 鸟风格母材质没有持久化 `Used with Skeletal Mesh`。材质实例和贴图参数可以正常加载，但骨骼网格渲染时 UE 明确输出 `missing usage flag SkeletalMesh! Default Material will be used in game` 并替换为默认材质；原自动化只验证资产、参数名和可逆槽链，形成假绿灯 | 在 Integration 自有生成器中为身体/脸部母材质固定 Skeletal Mesh Usage，强制重建并保存；生成后逐项回读两个 Usage 和十个鸟身份贴图，普通无重写运行也执行内容验证而非只检查资产存在 | `TOON-T3A2-001`：ForceUnity 成功；`ABTS.Rendering.Toon.T3A` 3/3；候选测试要求身体/脸部 `GetUsageByFlag(MATUSAGE_SkeletalMesh)` 为真、源贴图非空且红/蓝身份不塌缩；最终仍在 fresh 可见 PIE 检查四鸟颜色和脸部，因为 NullRHI 不证明像素 |
 | T3-A2 材质已正常显示，但原青蓝小鸟变成荧光黄绿色；源贴图和白色 Tint 审计均正确 | 首轮把问题归因于粗糙度/高光，复验仍绿，证明该假设错误。最终资产回读显示蓝鸟是唯一历史特例：`T_Cutebird_03` 为 `TC_Normalmap / sRGB=false`，原 `M_CuteBird_3` 以 `Normal` sampler 读取；其余鸟均为 `TC_Default / sRGB=true / Color`。T3 统一使用 Color sampler 破坏了蓝鸟的既有通道解码契约 | 不修改源纹理、不加任意蓝色 Tint，并移除无效的蓝鸟粗糙度特例；新增蓝鸟专用 `M_ABTS_Toon_BirdBody_LegacyNormalColor` 主材质，以 Normal sampler 复现已接受源语义，其他鸟仍使用标准 Color 主材质 | `TOON-T3A2-002`：生成器验证源纹理 Compression/sRGB、专用主材质 SamplerType 和蓝候选 Parent；自动化冻结 Parent；同一 Seed/相机的可见 PIE 中蓝鸟必须恢复青蓝，其他鸟与地形色调不得变化 |
 | 普通弹弓在地图中材质正常，进入 M6 发射状态后桩和袋回退默认材质；弦表面看似正常，太空弹弓未复现 | 发射模式是 T3 首次替换当前普通弹弓材质的时机。PIE 日志显示 Textured 母材质的 Normal 参数仍使用引擎 Color 默认纹理，SamplerType 不匹配而编译失败；同时 Textured/Solid 母材质都缺 Nanite Usage，桩、弦、袋候选均报告 `missing usage flag Nanite`。弦“看似正常”不能覆盖该日志失败 | 为 Textured Normal 参数设置真实 Normalmap 默认资源；为两个弹弓母材质持久化 StaticMesh 和 Nanite Usage。只修 T3 候选资产合同，不改变 M6 组件、视觉槽或发射状态 | `TOON-T3A2-003`：生成器回读两个 Usage 和 Normal 默认资源；自动化要求 Textured/Solid 候选均具有 `MATUSAGE_StaticMesh`、`MATUSAGE_Nanite`；fresh 可见 PIE 进入 Twig/Simple/Reinforced 发射模式时两桩、两弦和袋均不得回退，日志不得再出现 T3 弹弓材质编译或 Usage 警告 |

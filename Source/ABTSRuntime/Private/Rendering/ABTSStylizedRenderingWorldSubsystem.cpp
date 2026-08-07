@@ -21,6 +21,7 @@
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "Terrain/ABTSM3StylizedMaterialAdapter.h"
 #include "Terrain/ABTSM3StylizedSemanticAdapter.h"
 #include "World/ABTSM10ScoutMapSystem.h"
 #include "World/ABTSM11FinaleActors.h"
@@ -345,6 +346,8 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	int32 M11SemanticCount = 0;
 	int32 PlayerSemanticCount = 0;
 	int32 SlingshotSemanticCount = 0;
+	int32 M3SurfaceStyleCount = 0;
+	int32 M3BackgroundMaterialCount = 0;
 	int32 SharedBirdMaterialCount = 0;
 	int32 SharedSlingshotMaterialCount = 0;
 	TArray<FABTSStylizedMaterialSlotBinding> DesiredMaterialBindings;
@@ -372,7 +375,25 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		}
 	};
 
-	if (FABTSStylizedRenderingControl::IsEnabled())
+	// M3 surface parameters must be refreshed outside the Style-On-only
+	// semantic pass so a 1 -> 0 transition restores the same TerrainMID. Tree
+	// and rock slots remain read-only publications consumed by the Integration
+	// registry, which owns exact source-material restoration.
+	for (TActorIterator<AABTSM3Planet> It(World); It; ++It)
+	{
+		if (It->ApplyStylizedSurfaceStyle(bLastObservedStyleEnabled))
+		{
+			++M3SurfaceStyleCount;
+		}
+		TArray<FABTSStylizedMaterialSlotBinding> M3MaterialBindings;
+		FABTSM3StylizedMaterialAdapter::GatherBackgroundPropMaterialBindings(
+			**It,
+			M3MaterialBindings);
+		M3BackgroundMaterialCount += M3MaterialBindings.Num();
+		DesiredMaterialBindings.Append(MoveTemp(M3MaterialBindings));
+	}
+
+	if (bLastObservedStyleEnabled)
 	{
 		for (TActorIterator<AABTSM3Planet> It(World); It; ++It)
 		{
@@ -594,6 +615,12 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		GetTypeHash(MaterialRegistry->GetRejectedBindingCount()));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
+		GetTypeHash(M3SurfaceStyleCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(M3BackgroundMaterialCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
 		GetTypeHash(SharedBirdMaterialCount));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
@@ -638,6 +665,16 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			FABTSStylizedMaterialContract::GetVersion(),
 			FABTSStylizedMaterialContract::GetContractHash(),
 			FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T3-A1] SurfaceStyles=%d BackgroundMaterialSlots=%d AppliedSlots=%d Conflicts=%d Rejected=%d Style=%d"),
+			M3SurfaceStyleCount,
+			M3BackgroundMaterialCount,
+			MaterialRegistry->Num(),
+			MaterialRegistry->GetConflictCount(),
+			MaterialRegistry->GetRejectedBindingCount(),
+			bLastObservedStyleEnabled ? 1 : 0);
 		UE_LOG(
 			LogABTSRuntime,
 			Log,

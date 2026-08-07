@@ -1,6 +1,6 @@
 # ABTS 三渲二 T3-A1：M3 地形与自然物材质族适配
 
-> 状态：代码、M3 自有资产与自动化完成；待 Integration 消费只读绑定并进行可见 PIE。2026-08-06 建立。
+> 状态：M3 代码、自有资产与自动化完成，Integration 只读消费已接入待验收分支；待可见 PIE。2026-08-06 建立，2026-08-07 接入。
 >
 > Base：`803bb2512c0da68ac889ce25d98fa4f91cbe10b1`（T3-A0）。
 >
@@ -126,6 +126,6 @@ fresh 日志：
 
 ## 7. 当前限制
 
-- M3 已发布运行时地表入口和只读 HISM 绑定，但共享 WorldSubsystem 的实际消费必须由 Integration 串行接入；在接入前不能宣称完整运行时 A/B 或可见视觉验收完成。
+- M3 已发布运行时地表入口和只读 HISM 绑定，共享 WorldSubsystem 已在 Integration 待验收分支接入；在可见 PIE 完成前仍不能宣称完整运行时 A/B 或视觉验收通过。
 - 本轮没有 GPU 像素/耗时证据；T3-C 仍需完整 M7、Scene Capture、1080p/1440p GPU 和可见 PIE 门。
 - 首版 RimStrength 为零，未引入额外高光；后续美术调参仍只能使用冻结公共参数名。
