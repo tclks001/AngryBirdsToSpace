@@ -8,6 +8,7 @@
 
 class UPrimitiveComponent;
 class USceneCaptureComponent2D;
+class UMaterialInterface;
 class FABTSStylizedMaterialOverrideRegistry;
 
 /**
@@ -37,6 +38,14 @@ public:
 	void RefreshNow();
 	int32 GetRegisteredPrimitiveCount() const;
 	int32 GetRegisteredMaterialSlotCount() const;
+	int32 GetPreloadedSharedMaterialCount() const
+	{
+		return PreloadedSharedMaterials.Num();
+	}
+	bool AreSharedMaterialsPreloaded() const
+	{
+		return bSharedMaterialPreloadReady;
+	}
 	int32 GetRegisteredPreviewCount() const
 	{
 		return RegisteredCaptures.Num();
@@ -48,13 +57,18 @@ protected:
 		const EWorldType::Type WorldType) const override;
 
 private:
+	void PreloadSharedMaterials();
+
 	friend class FABTSToonT2B1PrimitiveRegistryTest;
 	class FPrimitiveOverrideRegistry;
 	TUniquePtr<FPrimitiveOverrideRegistry> PrimitiveRegistry;
 	TUniquePtr<FABTSStylizedMaterialOverrideRegistry> MaterialRegistry;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> PreloadedSharedMaterials;
 	TSet<TWeakObjectPtr<USceneCaptureComponent2D>> RegisteredCaptures;
 	float RefreshAccumulatorSeconds = 0.0f;
 	bool bWorldBeganPlay = false;
 	bool bLastObservedStyleEnabled = false;
+	bool bSharedMaterialPreloadReady = false;
 	uint64 LastDiagnosticSummaryHash = 0;
 };
