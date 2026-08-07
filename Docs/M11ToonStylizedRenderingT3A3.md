@@ -1,6 +1,6 @@
 # M11 三渲二 T3-A3：助推行星、UFO 与终局专属材质
 
-> 状态：M11 代码、自动化与资产合同完成，Integration 只读消费已接入待验收分支；待可见 PIE/AVI。2026-08-07 接入。
+> 状态：2026-08-07 M11 代码、资产合同、Integration 只读消费、ForceUnity、集成自动化与 Rank11 风格化 AVI 均已验收通过。当前门只确认三颗行星/UFO 的材质消费与动态轮廓；终局大气散射、光照、色彩体积和最终 UFO 辨识度留待后续视觉阶段。
 >
 > 基线：`803bb2512c0da68ac889ce25d98fa4f91cbe10b1`（T3-A0）。
 >
@@ -340,9 +340,24 @@ ABTS.M11C.CameraCapture.Config
 5. Style Off 后四个组件恢复进入 T3 前的精确 `UMaterialInterface*`；若外部系统已改同槽，Integration 注册表必须记录冲突并保留外部接口。
 6. 检查无碰撞、质量、引力参数、四体位置、轨迹、HUD、二维图、Niagara、雾云星空或地图资产变化。
 
+### 6.1 2026-08-07 Rank11 AVI 验收记录
+
+Integration 候选 `codex/integration-toon-t3a3-acceptance-20260807` 使用唯一 UE 5.8，以 fresh `UnrealEditor.exe -game -dx11 -RenderOffscreen` 运行 Rank11、Stylized 1、M2 导演录制。证据目录为：
+
+`Saved/M11CameraCaptures/M11-T3A3-Rank11-Stylized-20260807-154207/`
+
+- Manifest 为 Contract 6、`Complete/TargetHit`、`UNCERTIFIED` Rank11，`FinaleCinematicCapture` 已注册且 Policy 有效；
+- `stylizedRuntimeStateMaintained=true`、失败帧 `-1`，录制期间未发生 `StylizedRuntimeStateDrift`；
+- 日志确认 `FinaleMaterialSlots=4`、`AppliedSlots=14`、`Conflicts=0`、`Rejected=0`；
+- AVI 为 949 帧、1280x720、30 fps、20,577,550 bytes，RIFF/AVI 签名、949 个 MJPEG 帧块与 `idx1` 均有效；
+- AVI SHA-256 为 `2B00D0E1EAD0A077EEE4D3DD6329AB3226C3B6FACB237AAB4A5D0CF8BA7F00D6`；
+- 人工抽检第 3/250/500/750/948 帧，鸟、行星与土星环的动态轮廓可读，用户确认当前 T3-A3 验收通过。
+
+本轮没有把近似同色的表面、终局大气散射、星空、光照体积或 UFO 最终身份可读性判为通过；这些属于后续环境与光照模型，而不是 T3-A3 材质接线回归。
+
 ## 7. 当前限制与 Integration 交接
 
-- 当前状态是“代码、自动化、资产合同与 Integration 接线完成，待可见 PIE/AVI”，不是 T3-A3 视觉完成。
+- 当前状态是“代码、自动化、资产合同、Integration 接线与 Rank11 AVI 轮廓门通过”；这不等于终局环境和光照视觉完成。
 - Integration 已只枚举 Ready 的 `AABTSM11FinaleSystem`，调用默认 `CollectBindings()` 并把结果交给现有唯一 Registry；M11 仍不得创建第二份 Registry。
 - 所有 View 继续使用既有 ViewClass 与全局 `abts.Rendering.Stylized.Enabled`。
 - `Content/Maps/L_ABTS_M11.umap` 不在本阶段写入范围。

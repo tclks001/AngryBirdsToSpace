@@ -12,7 +12,7 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`；候选仍为 Preview/Test、`NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；普通 M6 已按 Twig/Simple/Reinforced 消费同一目录并公开只读身份，Space 仍由 M11 单独管理。三渲二 T0/T1/T2-A 已通过；T2-B 由 M3/M7/M11 分别发布只读对象语义适配，Integration 再串行接入 Custom Stencil 与三个 Scene Capture，功能树不得修改共享渲染热点。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；普通 M6 已按 Twig/Simple/Reinforced 消费同一目录并公开只读身份，Space 仍由 M11 单独管理。三渲二 T0/T1/T2 以及 T3-A0/A1/A2/A3 当前范围均已通过；T3-A3 只通过了终局材质消费与 Rank11 AVI 轮廓门，环境光照仍后置。M7 在 Beam-C3 完成后补 T3-B，最终由 Integration 执行 T3-C 全量冻结。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M3R-5.2/M11 集成验收](M3R52M11PreviewFinaleIntegrationDesign.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
