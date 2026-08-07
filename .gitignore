@@ -76,6 +76,8 @@ Plugins/**/Intermediate/*
 DerivedDataCache/*
 
 # Extra
+__pycache__/
+*.py[cod]
 .codebuddy/*
 .codex/*
 .claude/*

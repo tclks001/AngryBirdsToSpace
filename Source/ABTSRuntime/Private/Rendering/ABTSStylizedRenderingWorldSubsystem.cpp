@@ -8,8 +8,12 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "HAL/PlatformTime.h"
+#include "Materials/MaterialInterface.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
+#include "Presentation/ABTSOpeningCinematicPreview.h"
+#include "Rendering/ABTSSharedStylizedMaterialAdapter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedMaterialContract.h"
 #include "Rendering/ABTSStylizedMaterialOverrideRegistry.h"
@@ -194,6 +198,8 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 	Super::Initialize(Collection);
 	PrimitiveRegistry = MakeUnique<FPrimitiveOverrideRegistry>();
 	MaterialRegistry = MakeUnique<FABTSStylizedMaterialOverrideRegistry>();
+	PreloadedSharedMaterials.Reset();
+	bSharedMaterialPreloadReady = false;
 }
 
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
@@ -217,14 +223,71 @@ void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 		}
 	}
 	RegisteredCaptures.Reset();
+	PreloadedSharedMaterials.Reset();
+	bSharedMaterialPreloadReady = false;
 	Super::Deinitialize();
 }
 
 void UABTSStylizedRenderingWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
+	PreloadSharedMaterials();
 	bWorldBeganPlay = true;
 	RefreshNow();
+}
+
+void UABTSStylizedRenderingWorldSubsystem::PreloadSharedMaterials()
+{
+	const double StartSeconds = FPlatformTime::Seconds();
+	PreloadedSharedMaterials.Reset();
+	bSharedMaterialPreloadReady = false;
+
+	TArray<UMaterialInterface*> LoadedMaterials;
+	int32 FailureCount = 0;
+	const int32 LoadedCount =
+		FABTSSharedStylizedMaterialAdapter::PreloadCatalogMaterials(
+			LoadedMaterials,
+			FailureCount);
+	int32 CompleteCount = 0;
+	for (UMaterialInterface* Material : LoadedMaterials)
+	{
+		if (!IsValid(Material))
+		{
+			++FailureCount;
+			continue;
+		}
+
+		// In Editor this blocks until any missing shader map is complete. That
+		// deliberately moves the one-time fallback-material window from the first
+		// slingshot click to world startup. Cooked builds retain the same strong
+		// reference preload without requiring runtime shader compilation.
+		Material->EnsureIsComplete();
+		if (!Material->IsCompiling())
+		{
+			++CompleteCount;
+		}
+		PreloadedSharedMaterials.Add(Material);
+	}
+
+	const int32 CatalogCount =
+		FABTSSharedStylizedMaterialAdapter::GetCatalogEntryCount();
+	bSharedMaterialPreloadReady =
+		FailureCount == 0
+		&& LoadedCount == CatalogCount
+		&& CompleteCount == CatalogCount
+		&& PreloadedSharedMaterials.Num() == CatalogCount;
+	const double ElapsedMilliseconds =
+		(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][Rendering][T3-A2][Preload] Catalog=%d Loaded=%d Complete=%d Failed=%d Ready=%d ElapsedMS=%.2f"),
+		CatalogCount,
+		LoadedCount,
+		CompleteCount,
+		FailureCount,
+		bSharedMaterialPreloadReady ? 1 : 0,
+		ElapsedMilliseconds);
 }
 
 void UABTSStylizedRenderingWorldSubsystem::Tick(const float DeltaTime)
@@ -282,6 +345,9 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	int32 M11SemanticCount = 0;
 	int32 PlayerSemanticCount = 0;
 	int32 SlingshotSemanticCount = 0;
+	int32 SharedBirdMaterialCount = 0;
+	int32 SharedSlingshotMaterialCount = 0;
+	TArray<FABTSStylizedMaterialSlotBinding> DesiredMaterialBindings;
 
 	auto AddPrimitive = [&Desired](
 		UPrimitiveComponent* Component,
@@ -360,8 +426,25 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 				if (IsValid(Bird))
 				{
 					AddActor(*Bird, EABTSStylizedObjectClass::PlayerBird);
+					if (bSharedMaterialPreloadReady)
+					{
+						SharedBirdMaterialCount +=
+							FABTSSharedStylizedMaterialAdapter::GatherActorBindings(
+								*Bird,
+								DesiredMaterialBindings);
+					}
 					++PlayerSemanticCount;
 				}
+			}
+		}
+		for (TActorIterator<AABTSOpeningCinematicPreview> It(World); It; ++It)
+		{
+			if (bSharedMaterialPreloadReady)
+			{
+				SharedBirdMaterialCount +=
+					FABTSSharedStylizedMaterialAdapter::GatherActorBindings(
+						**It,
+						DesiredMaterialBindings);
 			}
 		}
 
@@ -372,6 +455,13 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			for (UPrimitiveComponent* Primitive : Primitives)
 			{
 				AddPrimitive(Primitive, EABTSStylizedObjectClass::Slingshot);
+			}
+			if (bSharedMaterialPreloadReady)
+			{
+				SharedSlingshotMaterialCount +=
+					FABTSSharedStylizedMaterialAdapter::GatherPrimitiveBindings(
+						Primitives,
+						DesiredMaterialBindings);
 			}
 			SlingshotSemanticCount += Primitives.Num();
 		}
@@ -406,9 +496,6 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	}
 	PrimitiveRegistry->Apply(Desired);
 
-	// T3-A0 freezes the reversible consumer seam before any feature family is
-	// migrated. T3-A1/A2/A3 will populate this array through owned adapters.
-	const TArray<FABTSStylizedMaterialSlotBinding> DesiredMaterialBindings;
 	MaterialRegistry->Apply(
 		DesiredMaterialBindings,
 		FABTSStylizedRenderingControl::IsEnabled());
@@ -507,6 +594,21 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		GetTypeHash(MaterialRegistry->GetRejectedBindingCount()));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
+		GetTypeHash(SharedBirdMaterialCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(SharedSlingshotMaterialCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(bSharedMaterialPreloadReady));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(PreloadedSharedMaterials.Num()));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(FABTSSharedStylizedMaterialAdapter::GetCatalogHash()));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
 		GetTypeHash(FABTSStylizedMaterialContract::GetContractHash()));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
@@ -535,6 +637,20 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			MaterialRegistry->GetRejectedBindingCount(),
 			FABTSStylizedMaterialContract::GetVersion(),
 			FABTSStylizedMaterialContract::GetContractHash(),
+			FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T3-A2] BirdMaterialSlots=%d SlingshotMaterialSlots=%d SharedCatalogEntries=%d SharedCatalogHash=%u Preloaded=%d PreloadReady=%d AppliedSlots=%d Conflicts=%d Rejected=%d Style=%d"),
+			SharedBirdMaterialCount,
+			SharedSlingshotMaterialCount,
+			FABTSSharedStylizedMaterialAdapter::GetCatalogEntryCount(),
+			FABTSSharedStylizedMaterialAdapter::GetCatalogHash(),
+			PreloadedSharedMaterials.Num(),
+			bSharedMaterialPreloadReady ? 1 : 0,
+			MaterialRegistry->Num(),
+			MaterialRegistry->GetConflictCount(),
+			MaterialRegistry->GetRejectedBindingCount(),
 			FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0);
 	}
 }
