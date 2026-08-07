@@ -1,6 +1,6 @@
 # M11 三渲二 T3-A3：助推行星、UFO 与终局专属材质
 
-> 状态：代码、自动化与资产合同完成，待可见 PIE；Integration 只读接线和可见 AVI 同样未验收。
+> 状态：M11 代码、自动化与资产合同完成，Integration 只读消费已接入待验收分支；待可见 PIE/AVI。2026-08-07 接入。
 >
 > 基线：`803bb2512c0da68ac889ce25d98fa4f91cbe10b1`（T3-A0）。
 >
@@ -327,6 +327,8 @@ ABTS.M11C.CameraCapture.Config
 - `ABTS.M11C.CameraCapture.Config`：`1/1`，日志 `Saved/Logs/M11-T3A3-FinalAssets-CameraCaptureConfig-20260807-FreshAutomation.log`；
 - 六个过滤器合计 `9/9` Success、零失败；未运行 FullInputDomain，未启动可见 Editor/PIE/AVI。
 
+2026-08-07 Integration 待验收分支接入唯一共享注册表后，使用同一 UE 5.8 再次完成 ForceUnity；fresh NullRHI `ABTS.M11.StylizedMaterials` 为 3/3，`ABTS.Rendering.Toon.T3A` 为 3/3，分别记录于 `Saved/Logs/M11T3A3-Integration-StylizedMaterials-20260807.log` 与 `Saved/Logs/M11T3A3-Integration-ToonT3A-20260807.log`。这组证据证明集成编译、M11 绑定/权威不变量及共享注册表回归，不替代下一节 PIE/AVI 像素门。
+
 ## 6. 可见 PIE / AVI 验收
 
 资产和 Integration 接线后，由用户/Integration 串行执行：
@@ -340,7 +342,7 @@ ABTS.M11C.CameraCapture.Config
 
 ## 7. 当前限制与 Integration 交接
 
-- 当前状态是“代码、自动化与资产合同完成，待可见 PIE；Integration 接线/AVI 同样待验收”，不是 T3-A3 视觉完成。
-- Integration 只需枚举 Ready 的 `AABTSM11FinaleSystem`，调用默认 `CollectBindings()`，再把结果交给现有唯一 Registry；不得在 M11 创建第二份 Registry。
+- 当前状态是“代码、自动化、资产合同与 Integration 接线完成，待可见 PIE/AVI”，不是 T3-A3 视觉完成。
+- Integration 已只枚举 Ready 的 `AABTSM11FinaleSystem`，调用默认 `CollectBindings()` 并把结果交给现有唯一 Registry；M11 仍不得创建第二份 Registry。
 - 所有 View 继续使用既有 ViewClass 与全局 `abts.Rendering.Stylized.Enabled`。
 - `Content/Maps/L_ABTS_M11.umap` 不在本阶段写入范围。

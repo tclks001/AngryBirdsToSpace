@@ -197,7 +197,7 @@
 | --- | --- | --- |
 | [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `20cceaeaa1069a8b1b2f12c71e4740890b989006`（2026-08-07，含 `M3-T3A1-001/002`） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
-| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `550545141908fd3cf6b42442a97109563549fc24` |
+| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `b3140451d4d8072008110ca645eb10a8f85574c6`（2026-08-07，含 `M11-T3A3-MAT-001/002`） |
 
 ### 13.2 跨阶段统一诊断顺序
 
@@ -267,6 +267,8 @@
 
 | 现象 | 根因 | 修复 | 防回归验证 |
 | --- | --- | --- | --- |
+| T3-A3 若按 Actor 名、遍历顺序或槽数推断终局对象并直接改材质，会误覆盖外来辅助物且 Style Off 可能覆盖外部系统接口 | 终局唯一身份是 Ready `AABTSM11FinaleSystem` 持有、Stable ID/Role 与冻结布局一致的 3+1 Actor；材质恢复权只属于 Integration 单一注册表 | M11 只读适配器消费系统 getter、`TryGetStylizedObjectClass()` 和明确 VisualMesh，按 Certified Stable ID 发布 `FinalePlanet/FinaleUFO`；Integration 只对 Ready 系统收集并交给共享注册表，缺材质 fail soft | `M11-T3A3-MAT-001`：`ABTS.M11.StylizedMaterials` 覆盖顺序、合法槽、辅助组件排除、共享 Registry 精确恢复，以及求解/事件/认证/Frame/Camera Pose Hash 和 Actor Transform 不变；像素仍由 PIE/AVI 验收 |
+| 从 Planet 母材质复制 UFO 图后，UFO 仍可能继承 Two Sided、Planet Description 或 Mars 默认纹理；材质可编译但表面身份错误 | 复制材质图会保留非参数属性和 Texture Parameter 默认资源；Python 设置 MI 纹理成功时也可能返回空值，不能直接把返回值当失败 | UFO 母材质固定单面、FinaleUFO Description、0.35 Rim，并让母材质默认纹理和实例覆盖均指向现有四张 UFO 纹理；写入后以 getter 比对象身份再保存 | `M11-T3A3-MAT-002`：fresh 重载检查 TwoSided=false、14 输入、Normal Sampler、四纹理和八公共参数，重编译 0 error/0 warning；背光体积与金属高光仍需 PIE/AVI |
 | T3-A1 用完全空白的 transient 材质模拟“只缺 ABTS 风格参数”，自动化结果虽成功但日志出现多条 MID 参数错误 | 空材质同时缺失全部既有 `M3_*` LUT、道路、河流和半径参数，并不代表“原地形合同完整、仅风格入口缺失”的产品场景；只看 Success 数会形成假绿灯 | 生产桥先只读检查八个公共风格参数，缺失时保留原 TerrainMID 并 fail soft；自动化以未就绪桥和缺失树石候选验证拒绝路径，不再破坏原 M3 参数合同 | `M3-T3A1-001`：fresh `ABTS.M3.StylizedMaterials` 必须 2/2 且项目测试期间 `LogABTSRuntime/LogAutomationController Error=0`；PlanetReady、TaskGraph、实例数及 Layout/Result Hash 不变 |
 | 无 GUI 重接地形/树石材质时，复制了 BaseColor 源表达式却丢失 TextureSample 的命名输出 `RGB` | Material Graph 连接身份包含“源表达式 + 输出名”；只保存表达式指针并按默认空输出名重连，会静默改用错误通道 | 资产脚本同时读取源节点和 `GetMaterialPropertyInputNodeOutputName()`，原样接入 Tint/Lerp；全部节点创建、编译成功后才保存，失败不落半张材质图 | `M3-T3A1-002`：只读回查三项材质的 BaseColor/Roughness/Specular/Metallic/Emissive 接线；树石保持 `Used with Instanced Static Meshes=True`，并核对失败后工作区无半成品 |
 | T3-A2 开启后四只鸟全部变成同一蓝色、脸部消失，材质实例审计却能读到正确的红/蓝/黄/黑贴图 | 鸟风格母材质没有持久化 `Used with Skeletal Mesh`。材质实例和贴图参数可以正常加载，但骨骼网格渲染时 UE 明确输出 `missing usage flag SkeletalMesh! Default Material will be used in game` 并替换为默认材质；原自动化只验证资产、参数名和可逆槽链，形成假绿灯 | 在 Integration 自有生成器中为身体/脸部母材质固定 Skeletal Mesh Usage，强制重建并保存；生成后逐项回读两个 Usage 和十个鸟身份贴图，普通无重写运行也执行内容验证而非只检查资产存在 | `TOON-T3A2-001`：ForceUnity 成功；`ABTS.Rendering.Toon.T3A` 3/3；候选测试要求身体/脸部 `GetUsageByFlag(MATUSAGE_SkeletalMesh)` 为真、源贴图非空且红/蓝身份不塌缩；最终仍在 fresh 可见 PIE 检查四鸟颜色和脸部，因为 NullRHI 不证明像素 |

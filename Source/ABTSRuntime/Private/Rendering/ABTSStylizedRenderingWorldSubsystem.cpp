@@ -27,6 +27,7 @@
 #include "World/ABTSM11FinaleActors.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
+#include "World/ABTSM11StylizedMaterialAdapter.h"
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "World/ABTSM9Satellite.h"
 
@@ -348,6 +349,7 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	int32 SlingshotSemanticCount = 0;
 	int32 M3SurfaceStyleCount = 0;
 	int32 M3BackgroundMaterialCount = 0;
+	int32 M11FinaleMaterialCount = 0;
 	int32 SharedBirdMaterialCount = 0;
 	int32 SharedSlingshotMaterialCount = 0;
 	TArray<FABTSStylizedMaterialSlotBinding> DesiredMaterialBindings;
@@ -513,6 +515,16 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 					++M11SemanticCount;
 				}
 			}
+
+			if (It->IsLayoutReady())
+			{
+				TArray<FABTSStylizedMaterialSlotBinding> M11MaterialBindings;
+				FABTSM11StylizedMaterialAdapter::CollectBindings(
+					**It,
+					M11MaterialBindings);
+				M11FinaleMaterialCount += M11MaterialBindings.Num();
+				DesiredMaterialBindings.Append(MoveTemp(M11MaterialBindings));
+			}
 		}
 	}
 	PrimitiveRegistry->Apply(Desired);
@@ -621,6 +633,9 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		GetTypeHash(M3BackgroundMaterialCount));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
+		GetTypeHash(M11FinaleMaterialCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
 		GetTypeHash(SharedBirdMaterialCount));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
@@ -671,6 +686,15 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			TEXT("[ABTS][Rendering][T3-A1] SurfaceStyles=%d BackgroundMaterialSlots=%d AppliedSlots=%d Conflicts=%d Rejected=%d Style=%d"),
 			M3SurfaceStyleCount,
 			M3BackgroundMaterialCount,
+			MaterialRegistry->Num(),
+			MaterialRegistry->GetConflictCount(),
+			MaterialRegistry->GetRejectedBindingCount(),
+			bLastObservedStyleEnabled ? 1 : 0);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T3-A3] FinaleMaterialSlots=%d AppliedSlots=%d Conflicts=%d Rejected=%d Style=%d"),
+			M11FinaleMaterialCount,
 			MaterialRegistry->Num(),
 			MaterialRegistry->GetConflictCount(),
 			MaterialRegistry->GetRejectedBindingCount(),
