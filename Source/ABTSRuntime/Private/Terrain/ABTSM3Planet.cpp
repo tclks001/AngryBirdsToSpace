@@ -13,6 +13,7 @@
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
+#include "Rendering/ABTSStylizedMaterialContract.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
@@ -166,6 +167,16 @@ AABTSM3Planet::AABTSM3Planet()
 		TEXT("/Game/StaticMesh/Tree/M_PineTree.M_PineTree"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockAssetMaterial(
 		TEXT("/Game/StaticMesh/Stone/M_Stone.M_Stone"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ForestStylizedMaterialAsset(
+		TEXT("/Game/M3/Toon/Trees/M_ABTS_M3_ToonPine.M_ABTS_M3_ToonPine"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockStylizedMaterialAsset(
+		TEXT("/Game/M3/Toon/Stones/M_ABTS_M3_ToonStone.M_ABTS_M3_ToonStone"));
+	ForestStylizedMaterial = ForestStylizedMaterialAsset.Succeeded()
+		? ForestStylizedMaterialAsset.Object
+		: nullptr;
+	RockStylizedMaterial = RockStylizedMaterialAsset.Succeeded()
+		? RockStylizedMaterialAsset.Object
+		: nullptr;
 
 	ForestHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("ForestHISM"));
 	ForestHISM->SetupAttachment(ContinuousSurface);
@@ -188,6 +199,20 @@ AABTSM3Planet::AABTSM3Planet()
 	RockHISM->SetMobility(EComponentMobility::Movable);
 	RockHISM->SetStaticMesh(RockAssetMesh.Succeeded() ? RockAssetMesh.Object : RockPreviewMesh.Object);
 	if (RockAssetMaterial.Succeeded()) RockHISM->SetMaterial(0, RockAssetMaterial.Object);
+}
+
+bool AABTSM3Planet::ApplyStylizedSurfaceStyle(const bool bStyleEnabled)
+{
+	return TerrainMaterialBridge != nullptr
+		&& TerrainMaterialBridge->ApplyStylizedSurfaceParameters(bStyleEnabled);
+}
+
+bool AABTSM3Planet::TryGetStylizedSurfaceStyleEnabled(float& OutValue) const
+{
+	return TerrainMaterialBridge != nullptr
+		&& TerrainMaterialBridge->TryGetScalarParameterValue(
+			FABTSStylizedMaterialContract::GetStyleEnabledParameterName(),
+			OutValue);
 }
 
 bool AABTSM3Planet::RebuildPlanet()
