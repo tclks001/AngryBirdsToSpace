@@ -223,6 +223,13 @@ AABTSM11FinaleSystem::AABTSM11FinaleSystem()
 	SetActorEnableCollision(false);
 
 	AssistPlanetMeshes.SetNum(ExpectedAssistPresentationCount);
+	AssistPlanetMeshes[0] = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT(
+		"/Game/M11/Toon/Planets/Mars/SM_Mars.SM_Mars")));
+	AssistPlanetMeshes[1] = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT(
+		"/Game/M11/Toon/Planets/Jupiter/SM_Jupiter.SM_Jupiter")));
+	AssistPlanetMeshes[2] = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT(
+		"/Game/M11/Toon/Planets/Saturn/SM_Saturn.SM_Saturn")));
+	AssistMeshReferenceRadiusCM = FVector(50.0);
 	UFOMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Game/StaticMesh/UFO/SM_UFO.SM_UFO")));
 }
