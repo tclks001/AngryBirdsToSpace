@@ -220,4 +220,124 @@ bool FABTSToonT4A0DiagnosticPassControlTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A1EnvironmentControlTest,
+	"ABTS.Rendering.Toon.T4A1.EnvironmentControl",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A1EnvironmentControlTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	FABTSStylizedEnvironmentParameters Readback;
+	TestFalse(
+		TEXT("Environment parameters fail closed before publication"),
+		FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
+			Readback));
+
+	const FABTSStylizedEnvironmentParameters Ground =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(100.0, 200.0, -300.0),
+			500000.0,
+			FVector(10.0, 0.0, 0.0),
+			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentParameters Finale =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(100.0, 200.0, -300.0),
+			500000.0,
+			FVector(10.0, 0.0, 0.0),
+			EABTSStylizedRenderProfile::FinaleSpace);
+	TestTrue(TEXT("Ground parameters validate"), Ground.IsValid());
+	TestTrue(TEXT("Finale parameters validate"), Finale.IsValid());
+	TestEqual(
+		TEXT("The art-directed star field seed is profile-independent"),
+		Ground.StarSeed,
+		Finale.StarSeed);
+	TestTrue(
+		TEXT("Finale stars are intentionally stronger"),
+		Finale.StarHDRIntensity > Ground.StarHDRIntensity);
+	TestTrue(
+		TEXT("Atmosphere height derives from the accepted radius"),
+		FMath::IsNearlyEqual(Ground.AtmosphereHeightCM, 300000.0f));
+
+	FABTSStylizedRenderingControl::SetEnvironmentParameters(Finale);
+	TestTrue(
+		TEXT("A valid immutable snapshot publishes to render readers"),
+		FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
+			Readback));
+	TestEqual(TEXT("Readback keeps the deterministic seed"),
+		Readback.StarSeed, Finale.StarSeed);
+	TestTrue(TEXT("Readback keeps the planet center"),
+		Readback.PlanetCenterWorld.Equals(Finale.PlanetCenterWorld));
+	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	TestFalse(
+		TEXT("Clearing the contract disables the pass"),
+		FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
+			Readback));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A1CaptureCatalogueTest,
+	"ABTS.Rendering.Toon.T4A1.CaptureCatalogue",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A1CaptureCatalogueTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSToonVisualCaptureRunConfig Config;
+	FString Failure;
+	TestTrue(
+		TEXT("T4-A1 screenshot mode parses"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A1 -ABTSToonT0BuildId=T4A1-Test"),
+			Config,
+			&Failure));
+	TestEqual(TEXT("The parser selects T4-A1"),
+		static_cast<int32>(Config.Suite),
+		static_cast<int32>(EABTSToonVisualCaptureSuite::ToonT4A1));
+
+	Failure.Reset();
+	TestTrue(
+		TEXT("T4-A1 is the first T4 suite to allow GPU evidence"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A1 -ABTSToonT0Mode=GPU -ABTSToonT0BuildId=T4A1-GPU"),
+			Config,
+			&Failure));
+	TestEqual(TEXT("GPU mode is retained"),
+		static_cast<int32>(Config.Mode),
+		static_cast<int32>(EABTSToonVisualCaptureMode::GPUProfile));
+
+	const TArray<FABTSToonVisualCapturePointDefinition> Points =
+		FABTSToonVisualCaptureMath::BuildT4A1Catalogue();
+	const TArray<FABTSToonDiagnosticVariantDefinition> Variants =
+		FABTSToonVisualCaptureMath::BuildVariantCatalogue(
+			EABTSToonVisualCaptureSuite::ToonT4A1);
+	TestEqual(TEXT("T4-A1 adds banding, terminator direction and backlit diagnostics"),
+		Points.Num(), 10);
+	if (Points.Num() == 10)
+	{
+		TestEqual(TEXT("Terminator sky diagnostic order is frozen"),
+			Points[2].PointId, FName(TEXT("TerminatorSky")));
+		TestEqual(TEXT("Bright sky banding diagnostic order is frozen"),
+			Points[3].PointId, FName(TEXT("BrightSkyBanding")));
+		TestEqual(TEXT("Terminator sunward diagnostic order is frozen"),
+			Points[4].PointId, FName(TEXT("TerminatorSunwardSky")));
+		TestEqual(TEXT("Terminator anti-sunward diagnostic order is frozen"),
+			Points[5].PointId, FName(TEXT("TerminatorAntiSunwardSky")));
+		TestEqual(TEXT("Backlit diagnostic order is frozen"),
+			Points[7].PointId, FName(TEXT("BacklitBirdParty")));
+	}
+	TestEqual(TEXT("T4-A1 compares only reversible Off and On states"),
+		Variants.Num(), 2);
+	if (Variants.Num() == 2)
+	{
+		TestEqual(TEXT("First variant is StyleOff"),
+			Variants[0].VariantId, FName(TEXT("StyleOff")));
+		TestEqual(TEXT("Second variant is StyleOn"),
+			Variants[1].VariantId, FName(TEXT("StyleOn")));
+	}
+	return true;
+}
+
 #endif

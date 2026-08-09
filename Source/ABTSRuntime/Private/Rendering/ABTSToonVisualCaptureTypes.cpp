@@ -69,20 +69,28 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 	OutConfig.bEnabled =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
 		|| (bNamedSuite
 			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
-				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)));
+				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)));
 	if (!OutConfig.bEnabled)
 	{
 		return true;
 	}
-	const bool bT4Requested =
+	const bool bT4A1Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase));
+	const bool bT4A0Requested =
 		FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| (bNamedSuite
 			&& Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase));
-	OutConfig.Suite = bT4Requested
-		? EABTSToonVisualCaptureSuite::ToonT4A0
-		: EABTSToonVisualCaptureSuite::ToonT0;
+	OutConfig.Suite = bT4A1Requested
+		? EABTSToonVisualCaptureSuite::ToonT4A1
+		: bT4A0Requested
+			? EABTSToonVisualCaptureSuite::ToonT4A0
+			: EABTSToonVisualCaptureSuite::ToonT0;
 
 	FString ModeText;
 	if (FParse::Value(CommandLine, TEXT("ABTSToonT0Mode="), ModeText))
@@ -312,6 +320,53 @@ FABTSToonVisualCaptureMath::BuildT4A0Catalogue()
 	return Result;
 }
 
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
+{
+	TArray<FABTSToonVisualCapturePointDefinition> Result =
+		BuildT4A0Catalogue();
+	FABTSToonVisualCapturePointDefinition TerminatorSky;
+	TerminatorSky.PointId = TEXT("TerminatorSky");
+	TerminatorSky.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSky;
+	TerminatorSky.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	TerminatorSky.FieldOfViewDegrees = 52.0f;
+	Result.Insert(TerminatorSky, 2);
+
+	FABTSToonVisualCapturePointDefinition BrightSkyBanding;
+	BrightSkyBanding.PointId = TEXT("BrightSkyBanding");
+	BrightSkyBanding.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentBrightSkyBanding;
+	BrightSkyBanding.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	BrightSkyBanding.FieldOfViewDegrees = 52.0f;
+	Result.Insert(BrightSkyBanding, 3);
+
+	FABTSToonVisualCapturePointDefinition TerminatorSunwardSky;
+	TerminatorSunwardSky.PointId = TEXT("TerminatorSunwardSky");
+	TerminatorSunwardSky.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSunwardSky;
+	TerminatorSunwardSky.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	TerminatorSunwardSky.FieldOfViewDegrees = 52.0f;
+	Result.Insert(TerminatorSunwardSky, 4);
+
+	FABTSToonVisualCapturePointDefinition TerminatorAntiSunwardSky;
+	TerminatorAntiSunwardSky.PointId = TEXT("TerminatorAntiSunwardSky");
+	TerminatorAntiSunwardSky.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentTerminatorAntiSunwardSky;
+	TerminatorAntiSunwardSky.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	TerminatorAntiSunwardSky.FieldOfViewDegrees = 52.0f;
+	Result.Insert(TerminatorAntiSunwardSky, 5);
+
+	FABTSToonVisualCapturePointDefinition BacklitParty;
+	BacklitParty.PointId = TEXT("BacklitBirdParty");
+	BacklitParty.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentBacklitBirdParty;
+	BacklitParty.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	BacklitParty.FieldOfViewDegrees = 56.0f;
+	Result.Insert(BacklitParty, 7);
+	return Result;
+}
+
 TArray<FABTSToonDiagnosticVariantDefinition>
 FABTSToonVisualCaptureMath::BuildVariantCatalogue(
 	const EABTSToonVisualCaptureSuite Suite)
@@ -332,6 +387,15 @@ FABTSToonVisualCaptureMath::BuildVariantCatalogue(
 	};
 
 	if (Suite == EABTSToonVisualCaptureSuite::ToonT0)
+	{
+		Result.Reserve(2);
+		Add(TEXT("StyleOff"), false,
+			EABTSStylizedDiagnosticPassMask::None, true);
+		Add(TEXT("StyleOn"), true,
+			EABTSStylizedDiagnosticPassMask::ToneAndOutline, true);
+		return Result;
+	}
+	if (Suite == EABTSToonVisualCaptureSuite::ToonT4A1)
 	{
 		Result.Reserve(2);
 		Add(TEXT("StyleOff"), false,
@@ -528,9 +592,16 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 	EABTSToonVisualCaptureSuite Suite)
 {
-	return Suite == EABTSToonVisualCaptureSuite::ToonT4A0
-		? TEXT("ToonT4A0")
-		: TEXT("ToonT0");
+	switch (Suite)
+	{
+	case EABTSToonVisualCaptureSuite::ToonT4A1:
+		return TEXT("ToonT4A1");
+	case EABTSToonVisualCaptureSuite::ToonT4A0:
+		return TEXT("ToonT4A0");
+	case EABTSToonVisualCaptureSuite::ToonT0:
+	default:
+		return TEXT("ToonT0");
+	}
 }
 
 const TCHAR* FABTSToonVisualCaptureMath::LexToString(
@@ -550,8 +621,18 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 		return TEXT("EnvironmentGroundDay");
 	case EABTSToonVisualCaptureAnchor::EnvironmentGroundDawn:
 		return TEXT("EnvironmentGroundDawn");
+	case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSky:
+		return TEXT("EnvironmentTerminatorSky");
+	case EABTSToonVisualCaptureAnchor::EnvironmentBrightSkyBanding:
+		return TEXT("EnvironmentBrightSkyBanding");
+	case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSunwardSky:
+		return TEXT("EnvironmentTerminatorSunwardSky");
+	case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorAntiSunwardSky:
+		return TEXT("EnvironmentTerminatorAntiSunwardSky");
 	case EABTSToonVisualCaptureAnchor::EnvironmentGroundNight:
 		return TEXT("EnvironmentGroundNight");
+	case EABTSToonVisualCaptureAnchor::EnvironmentBacklitBirdParty:
+		return TEXT("EnvironmentBacklitBirdParty");
 	case EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude:
 		return TEXT("EnvironmentHighAltitude");
 	default:

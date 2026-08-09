@@ -2,12 +2,19 @@
 
 #include "Rendering/ABTSStylizedRenderingWorldSubsystem.h"
 
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+
 #include "ABTSRuntime.h"
 #include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Materials/MaterialInterface.h"
 #include "Party/ABTSBirdParty.h"
@@ -39,6 +46,207 @@
 namespace ABTSStylizedRenderingWorldSubsystemPrivate
 {
 	constexpr float RefreshIntervalSeconds = 0.10f;
+	constexpr float ContinuousAtmosphereTraceSampleCountScale = 2.0f;
+
+	/**
+	 * UE's sky defaults target an Earth-scale atmosphere. ABTS uses a five-
+	 * kilometre planet with roughly three kilometres of atmosphere, so the
+	 * variable ray-march count remains near its two-sample minimum across most
+	 * gameplay paths. Conversely, forcing the full-resolution sky path exposes
+	 * large camera-space integration tiles at UE's 0.1 km minimum planet radius.
+	 * Use a higher-resolution, fixed-sample SkyView LUT for the background, keep
+	 * full-precision supporting LUTs, and restore every process-wide CVar after
+	 * the last stylized world. SDR sky quantization is handled by the final
+	 * stylized Tone pass, where the actual background/depth identity is known;
+	 * it must not be applied here as a process-wide mesh/PIP override.
+	 */
+	class FContinuousAtmosphereOverride
+	{
+	public:
+		static bool Acquire(FString& OutFailure)
+		{
+			OutFailure.Reset();
+			if (ReferenceCount > 0)
+			{
+				++ReferenceCount;
+				return true;
+			}
+
+			Overrides = {
+				{ TEXT("r.SkyAtmosphere.FastSkyLUT"), 1.0f },
+				{ TEXT("r.SkyAtmosphere.FastSkyLUT.Width"), 384.0f },
+				{ TEXT("r.SkyAtmosphere.FastSkyLUT.Height"), 208.0f },
+				{ TEXT("r.SkyAtmosphere.FastSkyLUT.SampleCountMin"), 16.0f },
+				{ TEXT("r.SkyAtmosphere.FastSkyLUT.SampleCountMax"), 32.0f },
+				{ TEXT("r.SkyAtmosphere.FastSkyLUT.DistanceToSampleCountMax"), 0.01f },
+				{ TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque"), 0.0f },
+				{ TEXT("r.SkyAtmosphere.SampleCountMin"), 16.0f },
+				{ TEXT("r.SkyAtmosphere.SampleCountMax"), 32.0f },
+				{ TEXT("r.SkyAtmosphere.DistanceToSampleCountMax"), 0.01f },
+				{ TEXT("r.SkyAtmosphere.LUT32"), 1.0f },
+				{ TEXT("r.SkyAtmosphere.TransmittanceLUT.SampleCount"), 32.0f },
+				{ TEXT("r.SkyAtmosphere.MultiScatteringLUT.HighQuality"), 1.0f }
+			};
+			FString BandingExperiment;
+			FParse::Value(
+				FCommandLine::Get(),
+				TEXT("ABTSToonSkyBandingExperiment="),
+				BandingExperiment);
+			if (!BandingExperiment.IsEmpty()
+				&& !BandingExperiment.Equals(
+					TEXT("Control"),
+					ESearchCase::IgnoreCase))
+			{
+				auto SetDesiredValue = [](const TCHAR* Name, const float Value)
+				{
+					FCVarOverride* Override = Overrides.FindByPredicate(
+						[Name](const FCVarOverride& Candidate)
+						{
+							return FCString::Stricmp(Candidate.Name, Name) == 0;
+						});
+					check(Override != nullptr);
+					Override->DesiredValue = Value;
+				};
+
+				if (BandingExperiment.Equals(
+					TEXT("HighResolution"),
+					ESearchCase::IgnoreCase))
+				{
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.FastSkyLUT.Width"),
+						768.0f);
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.FastSkyLUT.Height"),
+						416.0f);
+				}
+				else if (BandingExperiment.Equals(
+					TEXT("HighSamples"),
+					ESearchCase::IgnoreCase))
+				{
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.FastSkyLUT.SampleCountMin"),
+						64.0f);
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.FastSkyLUT.SampleCountMax"),
+						128.0f);
+				}
+				else if (BandingExperiment.Equals(
+					TEXT("PerPixel"),
+					ESearchCase::IgnoreCase))
+				{
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.FastSkyLUT"),
+						0.0f);
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.SampleCountMin"),
+						64.0f);
+					SetDesiredValue(
+						TEXT("r.SkyAtmosphere.SampleCountMax"),
+						128.0f);
+				}
+				else
+				{
+					Overrides.Reset();
+					OutFailure = FString::Printf(
+						TEXT("Unknown ABTSToonSkyBandingExperiment: %s"),
+						*BandingExperiment);
+					return false;
+				}
+			}
+			for (FCVarOverride& Override : Overrides)
+			{
+				Override.Variable = IConsoleManager::Get().FindConsoleVariable(
+					Override.Name);
+				if (Override.Variable == nullptr)
+				{
+					RestoreAppliedOverrides();
+					OutFailure = FString::Printf(
+						TEXT("Required UE 5.8 SkyAtmosphere CVar is unavailable: %s"),
+						Override.Name);
+					return false;
+				}
+				Override.OriginalValue = Override.Variable->GetString();
+				Override.bApplied = true;
+				Override.Variable->SetWithCurrentPriority(Override.DesiredValue);
+				if (!FMath::IsNearlyEqual(
+					Override.Variable->GetFloat(),
+					Override.DesiredValue,
+					1.0e-4f))
+				{
+					const FString RejectedName(Override.Name);
+					RestoreAppliedOverrides();
+					OutFailure = FString::Printf(
+						TEXT("Continuous SkyAtmosphere value was not retained: %s"),
+						*RejectedName);
+					return false;
+				}
+			}
+			ReferenceCount = 1;
+			return true;
+		}
+
+		static void Release()
+		{
+			if (ReferenceCount <= 0)
+			{
+				return;
+			}
+			--ReferenceCount;
+			if (ReferenceCount > 0)
+			{
+				return;
+			}
+
+			RestoreAppliedOverrides();
+		}
+
+		static FString DescribeEffectiveValues()
+		{
+			FString Result;
+			for (const FCVarOverride& Override : Overrides)
+			{
+				if (Override.Variable != nullptr)
+				{
+					if (!Result.IsEmpty())
+					{
+						Result += TEXT(" ");
+					}
+					Result += FString::Printf(
+						TEXT("%s=%s"),
+						Override.Name,
+						*Override.Variable->GetString());
+				}
+			}
+			return Result;
+		}
+
+	private:
+		struct FCVarOverride
+		{
+			const TCHAR* Name = nullptr;
+			float DesiredValue = 0.0f;
+			IConsoleVariable* Variable = nullptr;
+			FString OriginalValue;
+			bool bApplied = false;
+		};
+
+		static void RestoreAppliedOverrides()
+		{
+			for (int32 Index = Overrides.Num() - 1; Index >= 0; --Index)
+			{
+				FCVarOverride& Override = Overrides[Index];
+				if (Override.bApplied && Override.Variable != nullptr)
+				{
+					Override.Variable->SetWithCurrentPriority(
+						*Override.OriginalValue);
+				}
+			}
+			Overrides.Reset();
+		}
+
+		inline static int32 ReferenceCount = 0;
+		inline static TArray<FCVarOverride> Overrides;
+	};
 
 	struct FPrimitiveSavedState
 	{
@@ -172,6 +380,241 @@ private:
 	TSet<TWeakObjectPtr<UPrimitiveComponent>> ConflictingComponents;
 };
 
+/**
+ * Reversible, runtime-only presentation of the accepted spherical environment.
+ * It deliberately edits the existing map actors instead of creating authored
+ * assets, and restores every field when stylization is disabled.
+ */
+class FABTSToonEnvironmentPresentationState
+{
+public:
+	bool Apply(
+		UWorld& World,
+		const FABTSToonEnvironmentSnapshot& Snapshot,
+		const FABTSStylizedEnvironmentParameters& Parameters,
+		FString& OutFailure)
+	{
+		OutFailure.Reset();
+		if (!Snapshot.IsValid() || !Parameters.IsValid())
+		{
+			OutFailure = TEXT("The accepted environment snapshot is invalid.");
+			return false;
+		}
+
+		TArray<ASkyAtmosphere*> Atmospheres;
+		for (TActorIterator<ASkyAtmosphere> It(&World); It; ++It)
+		{
+			if (IsValid(*It) && IsValid(It->GetComponent()))
+			{
+				Atmospheres.Add(*It);
+			}
+		}
+		if (Atmospheres.Num() != 1)
+		{
+			OutFailure = FString::Printf(
+				TEXT("Expected exactly one SkyAtmosphere, found %d."),
+				Atmospheres.Num());
+			return false;
+		}
+
+		ASkyAtmosphere* AtmosphereActor = Atmospheres[0];
+		USkyAtmosphereComponent* Atmosphere = AtmosphereActor->GetComponent();
+		if (!bOriginalCaptured)
+		{
+			CaptureOriginal(World, *AtmosphereActor, *Atmosphere);
+		}
+		else if (SavedAtmosphereActor.Get() != AtmosphereActor
+			|| SavedAtmosphereComponent.Get() != Atmosphere)
+		{
+			OutFailure = TEXT("The authoritative SkyAtmosphere changed during the run.");
+			return false;
+		}
+
+		if (!bContinuousAtmosphereOverrideAcquired)
+		{
+			if (!ABTSStylizedRenderingWorldSubsystemPrivate::
+				FContinuousAtmosphereOverride::Acquire(OutFailure))
+			{
+				return false;
+			}
+			bContinuousAtmosphereOverrideAcquired = true;
+		}
+
+		AtmosphereActor->SetActorLocation(
+			Snapshot.PlanetCenterWorld,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		Atmosphere->TransformMode =
+			ESkyAtmosphereTransformMode::PlanetCenterAtComponentTransform;
+		Atmosphere->SetBottomRadius(FMath::Max(
+			static_cast<float>(Snapshot.PlanetRadiusCM / 100000.0),
+			0.1f));
+		const float AtmosphereHeightKM = FMath::Max(
+			Parameters.AtmosphereHeightCM / 100000.0f,
+			0.1f);
+		Atmosphere->SetAtmosphereHeight(AtmosphereHeightKM);
+		Atmosphere->TraceSampleCountScale =
+			ABTSStylizedRenderingWorldSubsystemPrivate::
+				ContinuousAtmosphereTraceSampleCountScale;
+		// The physically tiny ABTS planet produces much less optical path energy
+		// than UE's Earth-scale defaults.  Compensate atmosphere radiance only;
+		// object albedo, sun, clouds and HDR stars keep their independent exposure.
+		const FLinearColor SkyLuminanceFactor =
+			Parameters.Profile == EABTSStylizedRenderProfile::GroundDay
+				? FLinearColor(22.0f, 24.0f, 24.0f, 1.0f)
+				: FLinearColor::White;
+		Atmosphere->SetSkyLuminanceFactor(SkyLuminanceFactor);
+		Atmosphere->SetMultiScatteringFactor(0.75f);
+		Atmosphere->SetRayleighScatteringScale(0.65f);
+		Atmosphere->SetRayleighExponentialDistribution(
+			FMath::Max(AtmosphereHeightKM * 0.22f, 0.001f));
+		Atmosphere->SetMieScatteringScale(0.35f);
+		Atmosphere->SetMieAnisotropy(0.72f);
+		Atmosphere->SetMieExponentialDistribution(
+			FMath::Max(AtmosphereHeightKM * 0.08f, 0.001f));
+		Atmosphere->SetHeightFogContribution(0.0f);
+		Atmosphere->SetAerialPerspectiveStartDepth(0.001f);
+		Atmosphere->MarkRenderStateDirty();
+
+		for (const FFogSavedState& Fog : SavedFogs)
+		{
+			if (UExponentialHeightFogComponent* Component = Fog.Component.Get())
+			{
+				Component->SetVisibility(false, true);
+			}
+		}
+		bApplied = true;
+		return true;
+	}
+
+	void Restore()
+	{
+		if (!bOriginalCaptured)
+		{
+			return;
+		}
+		if (bContinuousAtmosphereOverrideAcquired)
+		{
+			ABTSStylizedRenderingWorldSubsystemPrivate::
+				FContinuousAtmosphereOverride::Release();
+			bContinuousAtmosphereOverrideAcquired = false;
+		}
+		if (ASkyAtmosphere* Actor = SavedAtmosphereActor.Get())
+		{
+			Actor->SetActorLocation(
+				OriginalActorLocation,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+		}
+		if (USkyAtmosphereComponent* Atmosphere =
+			SavedAtmosphereComponent.Get())
+		{
+			Atmosphere->TransformMode = OriginalTransformMode;
+			Atmosphere->SetBottomRadius(OriginalBottomRadius);
+			Atmosphere->SetAtmosphereHeight(OriginalAtmosphereHeight);
+			Atmosphere->TraceSampleCountScale = OriginalTraceSampleCountScale;
+			Atmosphere->SetSkyLuminanceFactor(OriginalSkyLuminanceFactor);
+			Atmosphere->SetMultiScatteringFactor(
+				OriginalMultiScatteringFactor);
+			Atmosphere->SetRayleighScatteringScale(
+				OriginalRayleighScatteringScale);
+			Atmosphere->SetRayleighExponentialDistribution(
+				OriginalRayleighExponentialDistribution);
+			Atmosphere->SetMieScatteringScale(OriginalMieScatteringScale);
+			Atmosphere->SetMieAnisotropy(OriginalMieAnisotropy);
+			Atmosphere->SetMieExponentialDistribution(
+				OriginalMieExponentialDistribution);
+			Atmosphere->SetHeightFogContribution(
+				OriginalHeightFogContribution);
+			Atmosphere->SetAerialPerspectiveStartDepth(
+				OriginalAerialPerspectiveStartDepth);
+			Atmosphere->MarkRenderStateDirty();
+		}
+		for (const FFogSavedState& Fog : SavedFogs)
+		{
+			if (UExponentialHeightFogComponent* Component = Fog.Component.Get())
+			{
+				Component->SetVisibility(Fog.bVisible, true);
+			}
+		}
+		bApplied = false;
+	}
+
+	bool IsApplied() const { return bApplied; }
+	int32 GetFogCount() const { return SavedFogs.Num(); }
+
+private:
+	struct FFogSavedState
+	{
+		TWeakObjectPtr<UExponentialHeightFogComponent> Component;
+		bool bVisible = true;
+	};
+
+	void CaptureOriginal(
+		UWorld& World,
+		ASkyAtmosphere& Actor,
+		USkyAtmosphereComponent& Atmosphere)
+	{
+		SavedAtmosphereActor = &Actor;
+		SavedAtmosphereComponent = &Atmosphere;
+		OriginalActorLocation = Actor.GetActorLocation();
+		OriginalTransformMode = Atmosphere.TransformMode;
+		OriginalBottomRadius = Atmosphere.BottomRadius;
+		OriginalAtmosphereHeight = Atmosphere.AtmosphereHeight;
+		OriginalTraceSampleCountScale = Atmosphere.TraceSampleCountScale;
+		OriginalSkyLuminanceFactor = Atmosphere.SkyLuminanceFactor;
+		OriginalMultiScatteringFactor = Atmosphere.MultiScatteringFactor;
+		OriginalRayleighScatteringScale = Atmosphere.RayleighScatteringScale;
+		OriginalRayleighExponentialDistribution =
+			Atmosphere.RayleighExponentialDistribution;
+		OriginalMieScatteringScale = Atmosphere.MieScatteringScale;
+		OriginalMieAnisotropy = Atmosphere.MieAnisotropy;
+		OriginalMieExponentialDistribution =
+			Atmosphere.MieExponentialDistribution;
+		OriginalHeightFogContribution = Atmosphere.HeightFogContribution;
+		OriginalAerialPerspectiveStartDepth =
+			Atmosphere.AerialPerspectiveStartDepth;
+
+		SavedFogs.Reset();
+		for (TActorIterator<AExponentialHeightFog> It(&World); It; ++It)
+		{
+			if (UExponentialHeightFogComponent* Fog =
+				IsValid(*It) ? It->GetComponent() : nullptr)
+			{
+				FFogSavedState Saved;
+				Saved.Component = Fog;
+				Saved.bVisible = Fog->IsVisible();
+				SavedFogs.Add(Saved);
+			}
+		}
+		bOriginalCaptured = true;
+	}
+
+	TWeakObjectPtr<ASkyAtmosphere> SavedAtmosphereActor;
+	TWeakObjectPtr<USkyAtmosphereComponent> SavedAtmosphereComponent;
+	TArray<FFogSavedState> SavedFogs;
+	FVector OriginalActorLocation = FVector::ZeroVector;
+	ESkyAtmosphereTransformMode OriginalTransformMode =
+		ESkyAtmosphereTransformMode::PlanetTopAtAbsoluteWorldOrigin;
+	float OriginalBottomRadius = 0.0f;
+	float OriginalAtmosphereHeight = 0.0f;
+	float OriginalTraceSampleCountScale = 1.0f;
+	FLinearColor OriginalSkyLuminanceFactor = FLinearColor::White;
+	float OriginalMultiScatteringFactor = 0.0f;
+	float OriginalRayleighScatteringScale = 0.0f;
+	float OriginalRayleighExponentialDistribution = 0.0f;
+	float OriginalMieScatteringScale = 0.0f;
+	float OriginalMieAnisotropy = 0.0f;
+	float OriginalMieExponentialDistribution = 0.0f;
+	float OriginalHeightFogContribution = 0.0f;
+	float OriginalAerialPerspectiveStartDepth = 0.0f;
+	bool bOriginalCaptured = false;
+	bool bApplied = false;
+	bool bContinuousAtmosphereOverrideAcquired = false;
+};
+
 UABTSStylizedRenderingWorldSubsystem::UABTSStylizedRenderingWorldSubsystem() = default;
 
 UABTSStylizedRenderingWorldSubsystem::UABTSStylizedRenderingWorldSubsystem(
@@ -200,6 +643,8 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 	Super::Initialize(Collection);
 	PrimitiveRegistry = MakeUnique<FPrimitiveOverrideRegistry>();
 	MaterialRegistry = MakeUnique<FABTSStylizedMaterialOverrideRegistry>();
+	EnvironmentPresentation =
+		MakeUnique<FABTSToonEnvironmentPresentationState>();
 	PreloadedSharedMaterials.Reset();
 	bSharedMaterialPreloadReady = false;
 	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
@@ -209,6 +654,12 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 {
+	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	if (EnvironmentPresentation)
+	{
+		EnvironmentPresentation->Restore();
+		EnvironmentPresentation.Reset();
+	}
 	if (MaterialRegistry)
 	{
 		MaterialRegistry->RestoreAll();
@@ -396,6 +847,7 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 					: *EnvironmentFailure);
 		}
 	}
+	RefreshEnvironmentPresentation();
 
 	TMap<TWeakObjectPtr<UPrimitiveComponent>, EABTSStylizedObjectClass> Desired;
 	int32 M3SemanticCount = 0;
@@ -771,6 +1223,71 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	}
 }
 
+void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
+{
+	if (!EnvironmentPresentation)
+	{
+		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		return;
+	}
+
+	if (!FABTSStylizedRenderingControl::IsEnabled()
+		|| !bEnvironmentSnapshotReady)
+	{
+		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		EnvironmentPresentation->Restore();
+		return;
+	}
+
+	const FABTSStylizedEnvironmentParameters Parameters =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			EnvironmentSnapshot.Profile);
+	FString Failure;
+	UWorld* World = GetWorld();
+	const bool bWasApplied = EnvironmentPresentation->IsApplied();
+	if (World == nullptr
+		|| !EnvironmentPresentation->Apply(
+			*World,
+			EnvironmentSnapshot,
+			Parameters,
+			Failure))
+	{
+		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		EnvironmentPresentation->Restore();
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][Rendering][T4-A1][Environment] Applied=0 Reason=%s"),
+			Failure.IsEmpty() ? TEXT("WorldUnavailable") : *Failure);
+		return;
+	}
+
+	FABTSStylizedRenderingControl::SetEnvironmentParameters(Parameters);
+	if (!bWasApplied)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T4-A1][AtmosphereQuality] %s TraceScale=%.2f"),
+			*ABTSStylizedRenderingWorldSubsystemPrivate::
+				FContinuousAtmosphereOverride::DescribeEffectiveValues(),
+			ABTSStylizedRenderingWorldSubsystemPrivate::
+				ContinuousAtmosphereTraceSampleCountScale);
+	}
+	UE_LOG(
+		LogABTSRuntime,
+		VeryVerbose,
+		TEXT("[ABTS][Rendering][T4-A1][Environment] Applied=1 Profile=%d RadiusCM=%.2f AtmosphereHeightCM=%.2f FogHidden=%d StarSeed=%u"),
+		static_cast<int32>(Parameters.Profile),
+		Parameters.PlanetRadiusCM,
+		Parameters.AtmosphereHeightCM,
+		EnvironmentPresentation->GetFogCount(),
+		Parameters.StarSeed);
+}
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -828,6 +1345,140 @@ bool FABTSToonT2B1PrimitiveRegistryTest::RunTest(
 	Registry.Apply(Desired);
 	TestEqual(TEXT("Conflict fails closed once"), Registry.GetConflictCount(), 1);
 	Registry.RestoreAll();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A1ContinuousAtmosphereOverrideTest,
+	"ABTS.Rendering.Toon.T4A1.ContinuousAtmosphereOverride",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A1ContinuousAtmosphereOverrideTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	IConsoleVariable* FastSky = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.FastSkyLUT"));
+	IConsoleVariable* FastSkyWidth = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.FastSkyLUT.Width"));
+	IConsoleVariable* FastSkyHeight = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.FastSkyLUT.Height"));
+	IConsoleVariable* FastSkySampleMin = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.FastSkyLUT.SampleCountMin"));
+	IConsoleVariable* FastSkySampleMax = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.FastSkyLUT.SampleCountMax"));
+	IConsoleVariable* FastSkySampleDistance =
+		IConsoleManager::Get().FindConsoleVariable(
+			TEXT("r.SkyAtmosphere.FastSkyLUT.DistanceToSampleCountMax"));
+	IConsoleVariable* FastAerial = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque"));
+	IConsoleVariable* SampleMin = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.SampleCountMin"));
+	IConsoleVariable* SampleMax = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.SampleCountMax"));
+	IConsoleVariable* SampleDistance = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.DistanceToSampleCountMax"));
+	IConsoleVariable* LUT32 = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("r.SkyAtmosphere.LUT32"));
+	TestNotNull(TEXT("Fast sky CVar exists in UE 5.8"), FastSky);
+	TestNotNull(TEXT("Fast sky width CVar exists in UE 5.8"), FastSkyWidth);
+	TestNotNull(TEXT("Fast sky height CVar exists in UE 5.8"), FastSkyHeight);
+	TestNotNull(TEXT("Fast sky minimum sample CVar exists in UE 5.8"),
+		FastSkySampleMin);
+	TestNotNull(TEXT("Fast sky maximum sample CVar exists in UE 5.8"),
+		FastSkySampleMax);
+	TestNotNull(TEXT("Fast sky sample distance CVar exists in UE 5.8"),
+		FastSkySampleDistance);
+	TestNotNull(TEXT("Fast aerial CVar exists in UE 5.8"), FastAerial);
+	TestNotNull(TEXT("Full sky minimum sample CVar exists in UE 5.8"), SampleMin);
+	TestNotNull(TEXT("Full sky maximum sample CVar exists in UE 5.8"), SampleMax);
+	TestNotNull(TEXT("Full sky sample distance CVar exists in UE 5.8"), SampleDistance);
+	TestNotNull(TEXT("Full precision LUT CVar exists in UE 5.8"), LUT32);
+	if (FastSky == nullptr || FastSkyWidth == nullptr || FastSkyHeight == nullptr
+		|| FastSkySampleMin == nullptr || FastSkySampleMax == nullptr
+		|| FastSkySampleDistance == nullptr || FastAerial == nullptr
+		|| SampleMin == nullptr
+		|| SampleMax == nullptr || SampleDistance == nullptr || LUT32 == nullptr)
+	{
+		return false;
+	}
+
+	const int32 OriginalFastSky = FastSky->GetInt();
+	const float OriginalFastSkyWidth = FastSkyWidth->GetFloat();
+	const float OriginalFastSkyHeight = FastSkyHeight->GetFloat();
+	const float OriginalFastSkySampleMin = FastSkySampleMin->GetFloat();
+	const float OriginalFastSkySampleMax = FastSkySampleMax->GetFloat();
+	const float OriginalFastSkySampleDistance = FastSkySampleDistance->GetFloat();
+	const int32 OriginalFastAerial = FastAerial->GetInt();
+	const float OriginalSampleMin = SampleMin->GetFloat();
+	const float OriginalSampleMax = SampleMax->GetFloat();
+	const float OriginalSampleDistance = SampleDistance->GetFloat();
+	const int32 OriginalLUT32 = LUT32->GetInt();
+	FString Failure;
+	TestTrue(
+		TEXT("First stylized world acquires the continuous atmosphere override"),
+		ABTSStylizedRenderingWorldSubsystemPrivate::
+			FContinuousAtmosphereOverride::Acquire(Failure));
+	TestTrue(TEXT("Acquire failure remains empty"), Failure.IsEmpty());
+	TestEqual(TEXT("Fast sky LUT is enabled while owned"), FastSky->GetInt(), 1);
+	TestTrue(TEXT("SkyView LUT width is doubled"),
+		FMath::IsNearlyEqual(FastSkyWidth->GetFloat(), 384.0f));
+	TestTrue(TEXT("SkyView LUT height is doubled"),
+		FMath::IsNearlyEqual(FastSkyHeight->GetFloat(), 208.0f));
+	TestTrue(TEXT("SkyView LUT has a 16-sample floor"),
+		FMath::IsNearlyEqual(FastSkySampleMin->GetFloat(), 16.0f));
+	TestTrue(TEXT("SkyView LUT is capped at 32 samples"),
+		FMath::IsNearlyEqual(FastSkySampleMax->GetFloat(), 32.0f));
+	TestTrue(TEXT("Tiny-planet SkyView rays reach the cap after ten metres"),
+		FMath::IsNearlyEqual(FastSkySampleDistance->GetFloat(), 0.01f));
+	TestEqual(TEXT("Fast aerial LUT is disabled while owned"), FastAerial->GetInt(), 0);
+	TestTrue(TEXT("Full ray march has a 16-sample floor"),
+		FMath::IsNearlyEqual(SampleMin->GetFloat(), 16.0f));
+	TestTrue(TEXT("Full ray march is capped at 32 samples"),
+		FMath::IsNearlyEqual(SampleMax->GetFloat(), 32.0f));
+	TestTrue(TEXT("Tiny-planet rays reach the cap after ten metres"),
+		FMath::IsNearlyEqual(SampleDistance->GetFloat(), 0.01f));
+	TestEqual(TEXT("Atmosphere LUTs use full precision while owned"),
+		LUT32->GetInt(), 1);
+
+	Failure.Reset();
+	TestTrue(
+		TEXT("A second game world shares the same process override"),
+		ABTSStylizedRenderingWorldSubsystemPrivate::
+			FContinuousAtmosphereOverride::Acquire(Failure));
+	ABTSStylizedRenderingWorldSubsystemPrivate::
+		FContinuousAtmosphereOverride::Release();
+	TestEqual(TEXT("One remaining owner keeps fast sky enabled"), FastSky->GetInt(), 1);
+	TestEqual(TEXT("One remaining owner keeps fast aerial disabled"), FastAerial->GetInt(), 0);
+
+	ABTSStylizedRenderingWorldSubsystemPrivate::
+		FContinuousAtmosphereOverride::Release();
+	TestEqual(TEXT("Final release restores the original fast sky value"),
+		FastSky->GetInt(), OriginalFastSky);
+	TestTrue(TEXT("Final release restores the original SkyView LUT width"),
+		FMath::IsNearlyEqual(FastSkyWidth->GetFloat(), OriginalFastSkyWidth));
+	TestTrue(TEXT("Final release restores the original SkyView LUT height"),
+		FMath::IsNearlyEqual(FastSkyHeight->GetFloat(), OriginalFastSkyHeight));
+	TestTrue(TEXT("Final release restores the original SkyView minimum samples"),
+		FMath::IsNearlyEqual(
+			FastSkySampleMin->GetFloat(), OriginalFastSkySampleMin));
+	TestTrue(TEXT("Final release restores the original SkyView maximum samples"),
+		FMath::IsNearlyEqual(
+			FastSkySampleMax->GetFloat(), OriginalFastSkySampleMax));
+	TestTrue(TEXT("Final release restores the original SkyView sample distance"),
+		FMath::IsNearlyEqual(
+			FastSkySampleDistance->GetFloat(), OriginalFastSkySampleDistance));
+	TestEqual(TEXT("Final release restores the original fast aerial value"),
+		FastAerial->GetInt(), OriginalFastAerial);
+	TestTrue(TEXT("Final release restores the original minimum samples"),
+		FMath::IsNearlyEqual(SampleMin->GetFloat(), OriginalSampleMin));
+	TestTrue(TEXT("Final release restores the original maximum samples"),
+		FMath::IsNearlyEqual(SampleMax->GetFloat(), OriginalSampleMax));
+	TestTrue(TEXT("Final release restores the original sample distance"),
+		FMath::IsNearlyEqual(
+			SampleDistance->GetFloat(), OriginalSampleDistance));
+	TestEqual(TEXT("Final release restores the original LUT precision"),
+		LUT32->GetInt(), OriginalLUT32);
 	return true;
 }
 

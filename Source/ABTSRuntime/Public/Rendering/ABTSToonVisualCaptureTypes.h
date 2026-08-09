@@ -15,14 +15,20 @@ enum class EABTSToonVisualCaptureAnchor : uint8
 	FinaleLayout,
 	EnvironmentGroundDay,
 	EnvironmentGroundDawn,
+	EnvironmentTerminatorSky,
+	EnvironmentBrightSkyBanding,
+	EnvironmentTerminatorSunwardSky,
+	EnvironmentTerminatorAntiSunwardSky,
 	EnvironmentGroundNight,
+	EnvironmentBacklitBirdParty,
 	EnvironmentHighAltitude
 };
 
 enum class EABTSToonVisualCaptureSuite : uint8
 {
 	ToonT0 = 0,
-	ToonT4A0
+	ToonT4A0,
+	ToonT4A1
 };
 
 enum class EABTSToonVisualCaptureMode : uint8
@@ -107,6 +113,8 @@ public:
 		BuildDefaultCatalogue();
 	static TArray<FABTSToonVisualCapturePointDefinition>
 		BuildT4A0Catalogue();
+	static TArray<FABTSToonVisualCapturePointDefinition>
+		BuildT4A1Catalogue();
 	static TArray<FABTSToonDiagnosticVariantDefinition>
 		BuildVariantCatalogue(EABTSToonVisualCaptureSuite Suite);
 

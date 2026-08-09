@@ -3,6 +3,7 @@
 #include "Rendering/ABTSStylizedRenderingControl.h"
 
 #include "HAL/IConsoleManager.h"
+#include "Misc/ScopeRWLock.h"
 
 namespace ABTSStylizedRenderingControl
 {
@@ -23,6 +24,10 @@ namespace ABTSStylizedRenderingControl
 		static_cast<int32>(EABTSStylizedDiagnosticPassMask::ToneAndOutline),
 		TEXT("Integration diagnostic seam. 0=None, 1=Tone, 2=Outline, 3=ToneAndOutline. Production default is 3."),
 		ECVF_Default);
+
+	FRWLock EnvironmentLock;
+	FABTSStylizedEnvironmentParameters EnvironmentParameters;
+	bool bEnvironmentParametersReady = false;
 
 	EABTSStylizedDiagnosticPassMask SanitizeDiagnosticPassMask(const int32 Value)
 	{
@@ -122,9 +127,85 @@ bool FABTSStylizedRenderingControl::IsOutlinePassEnabledOnAnyThread()
 		& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Outline)) != 0;
 }
 
+FABTSStylizedEnvironmentParameters
+FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+	const FVector& PlanetCenterWorld,
+	const double PlanetRadiusCM,
+	const FVector& SunDirectionToSunWorld,
+	const EABTSStylizedRenderProfile Profile)
+{
+	FABTSStylizedEnvironmentParameters Parameters;
+	Parameters.PlanetCenterWorld = PlanetCenterWorld;
+	Parameters.PlanetRadiusCM = static_cast<float>(PlanetRadiusCM);
+	Parameters.AtmosphereHeightCM = static_cast<float>(FMath::Clamp(
+		PlanetRadiusCM * 0.60,
+		10000.0,
+		8000000.0));
+	Parameters.SunDirectionToSunWorld = FVector3f(
+		SunDirectionToSunWorld.GetSafeNormal());
+	Parameters.Profile = Profile;
+	// Star positions are an art-direction identity, not a generated-world
+	// identity. Keeping this seed fixed makes the sky stable across M3 seeds.
+	Parameters.StarSeed = 0x00A8B751u;
+	switch (Profile)
+	{
+	case EABTSStylizedRenderProfile::SatelliteGuide:
+		Parameters.StarCellProbability = 0.014f;
+		Parameters.StarHDRIntensity = 2.1f;
+		Parameters.FixedExposureBias = -0.10f;
+		break;
+	case EABTSStylizedRenderProfile::FinaleSpace:
+		Parameters.StarCellProbability = 0.016f;
+		Parameters.StarHDRIntensity = 2.5f;
+		Parameters.FixedExposureBias = -0.20f;
+		break;
+	case EABTSStylizedRenderProfile::GroundDay:
+	default:
+		// The project sky/ground lighting was authored against auto exposure.
+		// Manual 0 EV underexposes the authored ground lighting. Keep a modest,
+		// reproducible lift; sky scattering remains an independent environment
+		// layer and must not be compensated by washing out object albedo.
+		Parameters.FixedExposureBias = 0.75f;
+		break;
+	}
+	return Parameters;
+}
+
+void FABTSStylizedRenderingControl::SetEnvironmentParameters(
+	const FABTSStylizedEnvironmentParameters& Parameters)
+{
+	if (!Parameters.IsValid())
+	{
+		return;
+	}
+	FWriteScopeLock ScopeLock(
+		ABTSStylizedRenderingControl::EnvironmentLock);
+	ABTSStylizedRenderingControl::EnvironmentParameters = Parameters;
+	ABTSStylizedRenderingControl::bEnvironmentParametersReady = true;
+}
+
+void FABTSStylizedRenderingControl::ClearEnvironmentParameters()
+{
+	FWriteScopeLock ScopeLock(
+		ABTSStylizedRenderingControl::EnvironmentLock);
+	ABTSStylizedRenderingControl::EnvironmentParameters =
+		FABTSStylizedEnvironmentParameters();
+	ABTSStylizedRenderingControl::bEnvironmentParametersReady = false;
+}
+
+bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
+	FABTSStylizedEnvironmentParameters& OutParameters)
+{
+	FReadScopeLock ScopeLock(
+		ABTSStylizedRenderingControl::EnvironmentLock);
+	OutParameters = ABTSStylizedRenderingControl::EnvironmentParameters;
+	return ABTSStylizedRenderingControl::bEnvironmentParametersReady
+		&& OutParameters.IsValid();
+}
+
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 7;
+	return 19;
 }
 
 FABTSStylizedToneProfileParameters
@@ -172,9 +253,8 @@ float FABTSStylizedRenderingControl::GetSceneCaptureToneNormalizationFloor(
 {
 	const FABTSStylizedToneProfileParameters Parameters =
 		GetToneProfileParameters(Profile);
-	// Preserve the accepted main-view mapping.  Only low-history Scene Captures
-	// use this floor, and ShadowLuminance is the first trustworthy output band:
-	// values below it must not receive gain greater than one.
+	// ShadowLuminance is the first trustworthy output band for both main and
+	// low-history capture views: values below it must not receive gain > 1.
 	return FMath::Max(Parameters.ShadowLuminance, 1.0e-4f);
 }
 
@@ -257,4 +337,29 @@ bool FABTSStylizedOutlineProfileParameters::IsValid() const
 		&& NormalCreaseStrength <= OcclusionStrength
 		&& Color.GetMin() >= 0.0f
 		&& Color.GetMax() <= 1.0f;
+}
+
+bool FABTSStylizedEnvironmentParameters::IsValid() const
+{
+	return !PlanetCenterWorld.ContainsNaN()
+		&& FMath::IsFinite(PlanetRadiusCM)
+		&& PlanetRadiusCM > 0.0f
+		&& FMath::IsFinite(AtmosphereHeightCM)
+		&& AtmosphereHeightCM > 0.0f
+		&& !SunDirectionToSunWorld.ContainsNaN()
+		&& FMath::Abs(SunDirectionToSunWorld.SizeSquared() - 1.0f) <= 1.0e-3f
+		&& FABTSStylizedRenderingControl::IsProfileValid(Profile)
+		&& StarSeed != 0
+		&& FMath::IsFinite(StarGridResolution)
+		&& StarGridResolution >= 32.0f
+		&& StarGridResolution <= 1024.0f
+		&& FMath::IsFinite(StarCellProbability)
+		&& StarCellProbability > 0.0f
+		&& StarCellProbability < 1.0f
+		&& FMath::IsFinite(StarAngularRadiusScale)
+		&& StarAngularRadiusScale > 0.0f
+		&& StarAngularRadiusScale <= 0.5f
+		&& FMath::IsFinite(StarHDRIntensity)
+		&& StarHDRIntensity > 0.0f
+		&& FMath::IsFinite(FixedExposureBias);
 }

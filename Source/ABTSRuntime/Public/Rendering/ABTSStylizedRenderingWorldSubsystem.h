@@ -11,6 +11,7 @@ class UPrimitiveComponent;
 class USceneCaptureComponent2D;
 class UMaterialInterface;
 class FABTSStylizedMaterialOverrideRegistry;
+class FABTSToonEnvironmentPresentationState;
 
 /**
  * Integration-owned T2-B1 consumer. Feature systems publish read-only semantic
@@ -66,11 +67,13 @@ protected:
 
 private:
 	void PreloadSharedMaterials();
+	void RefreshEnvironmentPresentation();
 
 	friend class FABTSToonT2B1PrimitiveRegistryTest;
 	class FPrimitiveOverrideRegistry;
 	TUniquePtr<FPrimitiveOverrideRegistry> PrimitiveRegistry;
 	TUniquePtr<FABTSStylizedMaterialOverrideRegistry> MaterialRegistry;
+	TUniquePtr<FABTSToonEnvironmentPresentationState> EnvironmentPresentation;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInterface>> PreloadedSharedMaterials;
 	TSet<TWeakObjectPtr<USceneCaptureComponent2D>> RegisteredCaptures;

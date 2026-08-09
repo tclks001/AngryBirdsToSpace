@@ -237,12 +237,14 @@ bool UABTSToonVisualCaptureSubsystem::ShouldCreateSubsystem(UObject* Outer) cons
 	const bool bExplicitlyRequested =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
 		|| (FParse::Value(
 			CommandLine,
 			TEXT("ABTSVisualCaptureSuite="),
 			Suite)
 			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
-				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)));
+				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)));
 	return bExplicitlyRequested && Super::ShouldCreateSubsystem(Outer);
 }
 
@@ -814,9 +816,11 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 	}
 
 	const TArray<FABTSToonVisualCapturePointDefinition> Definitions =
-		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
-			? FABTSToonVisualCaptureMath::BuildT4A0Catalogue()
-			: FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+			? FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+				? FABTSToonVisualCaptureMath::BuildT4A0Catalogue()
+				: FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
 	VariantDefinitions =
 		FABTSToonVisualCaptureMath::BuildVariantCatalogue(RunConfig.Suite);
 	if (Definitions.IsEmpty() || VariantDefinitions.IsEmpty())
@@ -1277,6 +1281,32 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				OutReason = CameraFailure;
 				return EWorldResolveResult::Failed;
 			}
+			// Preserve the accepted deterministic camera position, but face due
+			// north on the spherical surface: project world +Z into the local
+			// tangent plane so the frame includes the daytime cloud horizon.
+			const FVector GroundDayCameraLocation =
+				Point.CameraWorldTransform.GetLocation();
+			const FVector GroundDayRadialUp = (GroundDayCameraLocation
+				- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+			FVector GroundDayNorth = FVector::VectorPlaneProject(
+				FVector::UpVector,
+				GroundDayRadialUp).GetSafeNormal();
+			if (GroundDayNorth.IsNearlyZero())
+			{
+				GroundDayNorth = EnvironmentDawnUp;
+			}
+			Point.LookAtWorld = GroundDayCameraLocation
+				+ GroundDayNorth * 10000.0;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				GroundDayCameraLocation,
+				Point.LookAtWorld,
+				GroundDayRadialUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
 			break;
 		case EABTSToonVisualCaptureAnchor::EnvironmentGroundDawn:
 			if (!BuildEnvironmentSurfacePoint(
@@ -1289,6 +1319,103 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				return EWorldResolveResult::Failed;
 			}
 			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSky:
+		{
+			// Frozen repro supplied by the T4-A1 PIE visual gate. Unlike a derived
+			// terminator approximation, this pose observes the exact sky sector that
+			// exposed the remaining staircase. UE's Details panel reports rotation
+			// as X=Roll, Y=Pitch, Z=Yaw; FRotator stores Pitch, Yaw, Roll.
+			const FVector ReportedCameraLocation(
+				7330.839531,
+				-8195.326369,
+				-2132.005920);
+			const FRotator ReportedCameraRotation(
+				41.294936,
+				59.050687,
+				-87.010167);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentBrightSkyBanding:
+		{
+			// Frozen bright-side repro supplied by the T4-A1 PIE visual gate.
+			// Details reports X=Roll, Y=Pitch, Z=Yaw; FRotator stores
+			// Pitch, Yaw, Roll.
+			const FVector ReportedCameraLocation(
+				5055.549427,
+				-9511.377996,
+				-4376.699690);
+			const FRotator ReportedCameraRotation(
+				82.960042,
+				151.889451,
+				35.775644);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSunwardSky:
+		{
+			// Frozen PIE repro: the camera is on the night-side edge of the
+			// terminator and looks almost exactly toward the accepted sun vector.
+			// Details reports X=Roll, Y=Pitch, Z=Yaw.
+			const FVector ReportedCameraLocation(
+				8174.509529,
+				-7018.140929,
+				4234.994413);
+			const FRotator ReportedCameraRotation(
+				39.625340,
+				161.729072,
+				23.100288);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorAntiSunwardSky:
+		{
+			// Frozen PIE repro: the camera is on the day-side edge of the
+			// terminator and looks almost exactly away from the accepted sun vector.
+			// Details reports X=Roll, Y=Pitch, Z=Yaw.
+			const FVector ReportedCameraLocation(
+				4378.023910,
+				-6442.873313,
+				8680.170513);
+			const FRotator ReportedCameraRotation(
+				-57.560810,
+				5.318501,
+				-41.056320);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
 		case EABTSToonVisualCaptureAnchor::EnvironmentGroundNight:
 			if (!BuildEnvironmentSurfacePoint(
 				-EnvironmentSnapshot.SunDirectionToSunWorld,
@@ -1300,6 +1427,68 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				return EWorldResolveResult::Failed;
 			}
 			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentBacklitBirdParty:
+		{
+			FBox PartyBounds(EForceInit::ForceInit);
+			uint64 PartyIdentity = EnvironmentSnapshot.IdentityHash;
+			for (const AABTSM25BirdCharacter* Bird
+				: Parties[0]->GetPartyMembers())
+			{
+				if (!IsValid(Bird))
+				{
+					OutReason = TEXT("Backlit bird-party member is invalid.");
+					return EWorldResolveResult::Failed;
+				}
+				PartyBounds += Bird->GetComponentsBoundingBox(true);
+				PartyIdentity = ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					PartyIdentity,
+					static_cast<uint64>(Bird->GetBirdId()));
+			}
+			if (!PartyBounds.IsValid)
+			{
+				OutReason = TEXT("Backlit bird-party bounds are invalid.");
+				return EWorldResolveResult::Failed;
+			}
+			const FVector PartyCenter = PartyBounds.GetCenter();
+			const FVector RadialUp = (PartyCenter
+				- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+			FVector SunTangent = FVector::VectorPlaneProject(
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				RadialUp).GetSafeNormal();
+			if (SunTangent.IsNearlyZero())
+			{
+				SunTangent = ABTSToonVisualCaptureSubsystemPrivate::
+					MakeStablePlanarDirection(
+						StartTransform.GetUnitAxis(EAxis::X),
+						RadialUp,
+						EnvironmentDawnUp);
+			}
+			Point.LookAtWorld = PartyCenter + RadialUp * 65.0;
+			const double FitDistance = FMath::Clamp(
+				FABTSToonVisualCaptureMath::ComputePerspectiveFitDistanceCM(
+					PartyBounds.GetExtent().Size(),
+					Definition.FieldOfViewDegrees,
+					static_cast<double>(ActualResolution.X) / ActualResolution.Y,
+					1.35),
+				700.0,
+				1800.0);
+			const FVector CameraLocation = Point.LookAtWorld
+				- SunTangent * FitDistance
+				+ RadialUp * FitDistance * 0.20;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				RadialUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash = ABTSToonVisualCaptureSubsystemPrivate::
+				Mix64(PartyIdentity, static_cast<uint64>(Definition.Anchor));
+			break;
+		}
 		case EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude:
 		{
 			const FVector HighUp = (
@@ -2219,7 +2408,7 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	}
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetNumberField(TEXT("schemaVersion"), 3);
+	Root->SetNumberField(TEXT("schemaVersion"), 4);
 	Root->SetStringField(
 		TEXT("suite"),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
@@ -2281,7 +2470,9 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			TEXT("r.ProfileGPU.ShowUI")));
 	Environment->SetStringField(
 		TEXT("exposurePolicy"),
-		TEXT("SceneConfiguredAutoExposure_CameraCut_PerVariantWarmup"));
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+			? TEXT("T4A1_StyleOnManualExposure_StyleOffSceneConfigured_PerVariantWarmup")
+			: TEXT("SceneConfiguredAutoExposure_CameraCut_PerVariantWarmup"));
 	Environment->SetNumberField(
 		TEXT("snapshotContractVersion"),
 		EnvironmentSnapshot.Version);
@@ -2476,7 +2667,9 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("captureContract"),
 		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
 			? TEXT("T4-A0 freezes six Tone/Outline/Shadow isolation variants without changing gameplay authority.")
-			: TEXT("Style implementation is versioned; Off bypasses project stylization."));
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+				? TEXT("T4-A1 freezes ten spherical-environment points with reversible StyleOff/StyleOn presentation and GPU evidence.")
+				: TEXT("Style implementation is versioned; Off bypasses project stylization."));
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);
@@ -2519,6 +2712,37 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		RecordJson->SetNumberField(
 			TEXT("styleImplementationVersion"),
 			Record.StyleImplementationVersion);
+		if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1)
+		{
+			const FABTSStylizedEnvironmentParameters Presentation =
+				FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+					EnvironmentSnapshot.PlanetCenterWorld,
+					EnvironmentSnapshot.PlanetRadiusCM,
+					EnvironmentSnapshot.SunDirectionToSunWorld,
+					Record.Profile);
+			RecordJson->SetBoolField(
+				TEXT("environmentPresentationEnabled"),
+				Record.bStyleEnabled);
+			RecordJson->SetNumberField(
+				TEXT("atmosphereHeightCM"),
+				Presentation.AtmosphereHeightCM);
+			RecordJson->SetNumberField(TEXT("starSeed"), Presentation.StarSeed);
+			RecordJson->SetNumberField(
+				TEXT("starGridResolution"),
+				Presentation.StarGridResolution);
+			RecordJson->SetNumberField(
+				TEXT("starCellProbability"),
+				Presentation.StarCellProbability);
+			RecordJson->SetNumberField(
+				TEXT("starAngularRadiusScale"),
+				Presentation.StarAngularRadiusScale);
+			RecordJson->SetNumberField(
+				TEXT("starHDRIntensity"),
+				Presentation.StarHDRIntensity);
+			RecordJson->SetNumberField(
+				TEXT("fixedExposureBias"),
+				Presentation.FixedExposureBias);
+		}
 		RecordJson->SetObjectField(
 			TEXT("cameraWorldTransform"),
 			ABTSToonVisualCaptureSubsystemPrivate::TransformToJson(
