@@ -20,6 +20,7 @@
 #include "Player/ABTSM25BirdCharacter.h"
 #include "UI/ABTSM11FinalePresentation.h"
 #include "World/ABTSM11FinaleActors.h"
+#include "World/ABTSM11FinaleBirdTrailComponent.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM51WorldActors.h"
 
@@ -96,6 +97,10 @@ AABTSM11FinaleInteractionSystem::AABTSM11FinaleInteractionSystem()
 	PrimaryActorTick.bCanEverTick = true;
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+	FinaleBirdTrail =
+		CreateDefaultSubobject<UABTSM11FinaleBirdTrailComponent>(
+			TEXT("FinaleBirdTrail"));
+	FinaleBirdTrail->SetupAttachment(SceneRoot);
 	TargetPreviewCapture = CreateDefaultSubobject<USceneCaptureComponent2D>(
 		TEXT("TargetPreviewCapture"));
 	TargetPreviewCapture->SetupAttachment(SceneRoot);
@@ -256,6 +261,7 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 		AttemptBirdOriginalVisualScale =
 			BirdVisual->GetRelativeScale3D();
 	}
+	FinaleBirdTrail->ClearTrail();
 	Party->SetSlingshotMode(true);
 	const FABTSM11FinaleLayoutPreset& Preset =
 		FinaleSystem->GetLayoutPreset();
@@ -1017,6 +1023,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+	FinaleBirdTrail->AdvanceTrail(WorldPosition, DeltaSeconds);
 	FABTSM11FinaleCameraDirectorSample DirectorSample;
 	const FABTSM11FinaleCameraDirectorSample* DirectorSamplePtr = nullptr;
 	if (FlightCamera->IsM2DirectorFrozenEnabled()
@@ -1109,53 +1116,6 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		}
 		USkeletalMeshComponent* BirdVisual =
 			AttemptBird->GetBirdVisual();
-		if (IsValid(BirdVisual))
-		{
-			double BridgeVisualScale = 1.0;
-			if (DirectorSample.Selection.IsM3InterBodyTransition())
-			{
-				const double WideScale =
-					FlightCamera->GetM3BridgeBirdVisualScale();
-				if (DirectorSample.Selection.ShotPhase
-					== EABTSM11FinaleCameraShotPhase::OutgoingHold)
-				{
-					BridgeVisualScale = FMath::Lerp(
-						1.0,
-						WideScale,
-						DirectorSample.Selection.ShotProgress);
-				}
-				else if (DirectorSample.Selection.ShotPhase
-					== EABTSM11FinaleCameraShotPhase::DualBodyBridge)
-				{
-					BridgeVisualScale = WideScale;
-				}
-				else if (DirectorSample.Selection.ShotPhase
-					== EABTSM11FinaleCameraShotPhase::IncomingTrack)
-				{
-					const double Elapsed =
-						DirectorSample.Selection.ShotProgress
-							* DirectorSample.Selection.ShotDurationSeconds;
-					const double CommitEnd = FMath::Max(
-						M3ShotSettings.DualBodyBridgeSeconds,
-						DirectorSample.Selection.ShotDurationSeconds
-							- M3ShotSettings.EntryMatchSeconds);
-					const double Commit = FMath::Clamp(
-						(Elapsed - M3ShotSettings.DualBodyBridgeSeconds)
-							/ FMath::Max(
-								UE_DOUBLE_SMALL_NUMBER,
-								CommitEnd
-									- M3ShotSettings.DualBodyBridgeSeconds),
-						0.0,
-						1.0);
-					BridgeVisualScale = FMath::Lerp(
-						WideScale,
-						1.0,
-						Commit);
-				}
-			}
-			BirdVisual->SetRelativeScale3D(
-				AttemptBirdOriginalVisualScale * BridgeVisualScale);
-		}
 		if (IsValid(BirdVisual)
 			&& FMath::IsFinite(BirdVisual->Bounds.SphereRadius)
 			&& BirdVisual->Bounds.SphereRadius > 1.0)
@@ -1697,6 +1657,14 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	const bool bKeepFinaleMode)
 {
+	FinaleBirdTrail->ClearTrail();
+	if (IsValid(AttemptBird))
+	{
+		if (USkeletalMeshComponent* BirdVisual = AttemptBird->GetBirdVisual())
+		{
+			BirdVisual->SetRelativeScale3D(AttemptBirdOriginalVisualScale);
+		}
+	}
 	RestoreAimCameraView();
 	++AimRevision;
 	LatestSolvedRevision = INDEX_NONE;

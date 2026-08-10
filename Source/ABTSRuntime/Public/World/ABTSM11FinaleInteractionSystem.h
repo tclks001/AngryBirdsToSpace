@@ -16,6 +16,7 @@ class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
 class AABTSM6SlingshotCamera;
 class APlayerController;
+class UABTSM11FinaleBirdTrailComponent;
 class USceneCaptureComponent2D;
 class USceneComponent;
 class UTextureRenderTarget2D;
@@ -179,6 +180,10 @@ public:
 	{
 		return AttemptBird;
 	}
+	const UABTSM11FinaleBirdTrailComponent* GetFinaleBirdTrail() const
+	{
+		return FinaleBirdTrail;
+	}
 	const AABTSM11FinaleSystem* GetFinaleSystem() const
 	{
 		return FinaleSystem;
@@ -247,6 +252,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11-C|Capture")
 	TObjectPtr<USceneCaptureComponent2D> TargetPreviewCapture;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11-C|Presentation")
+	TObjectPtr<UABTSM11FinaleBirdTrailComponent> FinaleBirdTrail;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> TargetPreviewRenderTarget;

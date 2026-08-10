@@ -165,10 +165,6 @@ public:
 	{
 		return LastM2TransitScreenXInTargetRadii;
 	}
-	double GetM3BridgeBirdVisualScale() const
-	{
-		return M3BridgeBirdVisualScale;
-	}
 	EABTSM11FinaleCameraStage GetLastDirectorStage() const
 	{
 		return LastDirectorStage;
@@ -259,11 +255,6 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
 		meta = (ClampMin = "1.02", ClampMax = "1.5", UIMin = "1.05", UIMax = "1.25"))
 	double M3DualBodyBridgeFitMargin = 1.15;
-
-	/** Presentation-only bird magnification used while the wide bridge is open. */
-	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
-		meta = (ClampMin = "1.0", ClampMax = "20.0", UIMin = "4.0", UIMax = "12.0"))
-	double M3BridgeBirdVisualScale = 10.0;
 
 	/** Pull-back duration before the dual-body bridge becomes authoritative. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
