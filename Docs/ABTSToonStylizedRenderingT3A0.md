@@ -4,7 +4,7 @@
 >
 > 上游：[三渲二总设计](ABTSToonStylizedRenderingDesign.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [T2-C1 无 M7 动态回归](ABTSToonStylizedRenderingT2C1.md)
 >
-> 下游：T3-A1 M3 地形/自然物、T3-A2 共享鸟/弹弓、T3-A3 M11 行星/UFO、T3-B M7 建筑、T3-C 全量冻结。
+> 下游：T3-A1 M3 地形/自然物、[T3-A2 共享鸟/弹弓](ABTSToonStylizedRenderingT3A2.md)、T3-A3 M11 行星/UFO、T3-B M7 建筑、T3-C 全量冻结。
 
 ## 1. 目标与边界
 

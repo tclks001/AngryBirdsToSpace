@@ -34,11 +34,145 @@ float SelectiveOutlineStrength;
 float SelectiveOutlineWidthScale;
 uint bAllowSelectiveStencil;
 float3 OutlineColor;
+float3 CameraFromPlanetCenterWorld;
+float PlanetRadiusCM;
+float AtmosphereHeightCM;
+float3 SunDirectionToSunWorld;
+uint StarSeed;
+float StarGridResolution;
+float StarCellProbability;
+float StarAngularRadiusScale;
+float StarHDRIntensity;
+uint EnvironmentProfile;
+uint bHasEnvironmentParameters;
+
+uint ABTSStarHash(uint Value)
+{
+	Value ^= Value >> 16;
+	Value *= 0x7feb352du;
+	Value ^= Value >> 15;
+	Value *= 0x846ca68bu;
+	Value ^= Value >> 16;
+	return Value;
+}
+
+float ABTSStarHash01(uint Value)
+{
+	return (ABTSStarHash(Value) & 0x00ffffffu) / 16777216.0f;
+}
+
+void ABTSWorldDirectionToCubeCell(
+	float3 Direction,
+	out uint Face,
+	out float2 FaceUV)
+{
+	const float3 AbsDirection = abs(Direction);
+	float2 Projected;
+	if (AbsDirection.x >= AbsDirection.y && AbsDirection.x >= AbsDirection.z)
+	{
+		const bool Positive = Direction.x >= 0.0f;
+		Face = Positive ? 0u : 1u;
+		Projected = Positive
+			? float2(-Direction.z, Direction.y) / AbsDirection.x
+			: float2(Direction.z, Direction.y) / AbsDirection.x;
+	}
+	else if (AbsDirection.y >= AbsDirection.z)
+	{
+		const bool Positive = Direction.y >= 0.0f;
+		Face = Positive ? 2u : 3u;
+		Projected = Positive
+			? float2(Direction.x, -Direction.z) / AbsDirection.y
+			: float2(Direction.x, Direction.z) / AbsDirection.y;
+	}
+	else
+	{
+		const bool Positive = Direction.z >= 0.0f;
+		Face = Positive ? 4u : 5u;
+		Projected = Positive
+			? float2(Direction.x, Direction.y) / AbsDirection.z
+			: float2(-Direction.x, Direction.y) / AbsDirection.z;
+	}
+	FaceUV = Projected * 0.5f + 0.5f;
+}
+
+float3 ABTSEvaluateDeterministicHDRStars(float3 WorldViewDirection)
+{
+	uint Face;
+	float2 FaceUV;
+	ABTSWorldDirectionToCubeCell(
+		normalize(WorldViewDirection),
+		Face,
+		FaceUV);
+	const int Grid = max((int)round(StarGridResolution), 32);
+	const float2 GridPosition = saturate(FaceUV) * Grid;
+	const int2 BaseCell = min((int2)floor(GridPosition), Grid - 1);
+	const float2 LocalPosition = GridPosition - BaseCell;
+	float3 Accumulated = 0.0f;
+
+	UNROLL
+	for (int OffsetY = -1; OffsetY <= 1; ++OffsetY)
+	{
+		UNROLL
+		for (int OffsetX = -1; OffsetX <= 1; ++OffsetX)
+		{
+			const int2 CandidateCell = BaseCell + int2(OffsetX, OffsetY);
+			if (any(CandidateCell < 0) || any(CandidateCell >= Grid))
+			{
+				continue;
+			}
+			const uint CellIdentity = StarSeed
+				^ (Face * 0x9e3779b9u)
+				^ ((uint)CandidateCell.x * 0x85ebca6bu)
+				^ ((uint)CandidateCell.y * 0xc2b2ae35u);
+			const float Exists = ABTSStarHash01(CellIdentity);
+			if (Exists >= StarCellProbability)
+			{
+				continue;
+			}
+
+			const float2 InCellOffset = float2(
+				ABTSStarHash01(CellIdentity ^ 0x68bc21ebu),
+				ABTSStarHash01(CellIdentity ^ 0x02e5be93u));
+			const float2 CandidatePosition =
+				(CandidateCell - BaseCell) + lerp(0.08f, 0.92f, InCellOffset);
+			const float DistanceInCells = length(LocalPosition - CandidatePosition);
+			const float SizeRandom = ABTSStarHash01(CellIdentity ^ 0x967a889bu);
+			const float Radius = StarAngularRadiusScale
+				* lerp(0.55f, 1.55f, SizeRandom * SizeRandom);
+			const float AntialiasWidth = max(fwidth(DistanceInCells), 0.004f);
+			const float Coverage = 1.0f - smoothstep(
+				Radius - AntialiasWidth,
+				Radius + AntialiasWidth,
+				DistanceInCells);
+			if (Coverage <= 0.0f)
+			{
+				continue;
+			}
+
+			const float MagnitudeRandom =
+				ABTSStarHash01(CellIdentity ^ 0xb5297a4du);
+			const float Magnitude = MagnitudeRandom > 0.995f
+				? 2.8f
+				: (MagnitudeRandom > 0.90f ? 0.8f : 0.18f);
+			const float TemperatureRandom =
+				ABTSStarHash01(CellIdentity ^ 0x1b56c4e9u);
+			const float3 WarmColor = float3(1.0f, 0.76f, 0.52f);
+			const float3 NeutralColor = float3(1.0f, 0.96f, 0.86f);
+			const float3 CoolColor = float3(0.62f, 0.78f, 1.0f);
+			const float3 StarColor = TemperatureRandom < 0.18f
+				? lerp(WarmColor, NeutralColor, TemperatureRandom / 0.18f)
+				: lerp(NeutralColor, CoolColor,
+					saturate((TemperatureRandom - 0.18f) / 0.82f));
+			Accumulated += Coverage * Magnitude * StarColor;
+		}
+	}
+	return Accumulated * StarHDRIntensity;
+}
 
 float3 ABTSApplySoftToneBands(float3 EncodedColor)
 {
 	float3 LinearColor = max(sRGBToLinear(saturate(EncodedColor)), 0.0f);
-	float Luminance = max(dot(LinearColor, float3(0.2126f, 0.7152f, 0.0722f)), 1.0e-4f);
+	float Luminance = max(dot(LinearColor, float3(0.2126f, 0.7152f, 0.0722f)), 1.0e-6f);
 	float MidWeight = smoothstep(
 		ShadowThreshold - TransitionSoftness,
 		ShadowThreshold + TransitionSoftness,
@@ -53,16 +187,25 @@ float3 ABTSApplySoftToneBands(float3 EncodedColor)
 	float3 ToneTint = lerp(ShadowTint, MidTint, MidWeight);
 	ToneTint = lerp(ToneTint, HighlightTint, HighlightWeight);
 
-	// Low-frequency Scene Captures deliberately reset temporal history on every
-	// manual camera cut.  Their almost-black pixels can therefore contain tiny
-	// chromatic lighting noise.  Dividing by that near-zero luminance turns the
-	// noise into bright cyan/black speckles.  Main views keep the historical
-	// 1e-4 behavior; capture views provide a profile-specific no-gain floor.
+	// Very dark main and capture pixels can contain tiny chromatic lighting noise.
+	// Dividing by that near-zero luminance turns it into bright cyan/black speckles.
+	// Every view therefore shares a profile-specific no-gain floor. Below the
+	// trustworthy floor, tint and saturation also fade out.
 	const float StableNormalizationLuminance = max(
 		Luminance,
 		ToneNormalizationFloor);
+	float ToneGain = TargetLuminance / StableNormalizationLuminance;
+	if (Luminance < ToneNormalizationFloor)
+	{
+		ToneGain = min(ToneGain, 1.0f);
+	}
+	const float ShadowReliability = smoothstep(
+		ToneNormalizationFloor * 0.25f,
+		ToneNormalizationFloor,
+		Luminance);
+	ToneTint = lerp(1.0f.xxx, ToneTint, ShadowReliability);
 	float3 QuantizedColor = LinearColor
-		* (TargetLuminance / StableNormalizationLuminance)
+		* ToneGain
 		* ToneTint;
 	float QuantizedLuminance = dot(
 		QuantizedColor,
@@ -70,9 +213,136 @@ float3 ABTSApplySoftToneBands(float3 EncodedColor)
 	QuantizedColor = lerp(
 		QuantizedLuminance.xxx,
 		QuantizedColor,
-		Saturation);
+		lerp(1.0f, Saturation, ShadowReliability));
 	float3 StylizedColor = lerp(LinearColor, QuantizedColor, Strength);
 	return LinearToSrgb(saturate(StylizedColor));
+}
+
+float3 ABTSQuantizeContinuousSkyForSDR(
+	float3 EncodedColor,
+	float2 ViewportUV)
+{
+	const float2 SafeInvSize = max(
+		ViewportInvSize,
+		float2(1.0e-7f, 1.0e-7f));
+	const uint2 Pixel = uint2(floor(saturate(ViewportUV) / SafeInvSize));
+	const uint PixelIdentity =
+		(Pixel.x * 0x9e3779b9u) ^
+		(Pixel.y * 0x85ebca6bu) ^
+		0xc2b2ae35u;
+	const float3 Threshold = float3(
+		ABTSStarHash01(PixelIdentity ^ 0x68bc21ebu),
+		ABTSStarHash01(PixelIdentity ^ 0x02e5be93u),
+		ABTSStarHash01(PixelIdentity ^ 0x967a889bu));
+	return floor(saturate(EncodedColor) * 255.0f + Threshold) / 255.0f;
+}
+
+float ABTSComputeStylizedStarVisibility(float3 WorldViewDirection)
+{
+	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
+	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
+	const float AltitudeCM = max(CameraRadius - PlanetRadiusCM, 0.0f);
+	const float SunHeight = dot(RadialUp, normalize(SunDirectionToSunWorld));
+	const float NightFactor = 1.0f - smoothstep(-0.18f, 0.06f, SunHeight);
+	const float AltitudeFactor = smoothstep(
+		AtmosphereHeightCM * 0.18f,
+		AtmosphereHeightCM * 1.15f,
+		AltitudeCM);
+	float Visibility = max(NightFactor, AltitudeFactor);
+	if (EnvironmentProfile == 1u)
+	{
+		Visibility = max(Visibility, AltitudeFactor * 0.72f);
+	}
+	else if (EnvironmentProfile == 2u)
+	{
+		Visibility = max(Visibility, 0.98f);
+	}
+	const float HorizonVisibility = smoothstep(
+		-0.06f,
+		0.16f,
+		dot(WorldViewDirection, RadialUp));
+	return saturate(
+		Visibility * lerp(HorizonVisibility, 1.0f, AltitudeFactor));
+}
+
+float3 ABTSBuildContinuousGroundSky(float3 WorldViewDirection)
+{
+	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
+	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
+	const float3 SunDirection = normalize(SunDirectionToSunWorld);
+	const float ViewHeight = dot(WorldViewDirection, RadialUp);
+	const float ViewToSun = dot(WorldViewDirection, SunDirection);
+	const float SunHeight = dot(RadialUp, SunDirection);
+	const float Horizon = pow(saturate(1.0f - max(ViewHeight, 0.0f)), 1.35f);
+	const float Sunward = pow(
+		smoothstep(-0.72f, 0.92f, ViewToSun),
+		1.45f);
+	// At the terminator the visible sky is lit along the view ray, not only by
+	// the solar elevation directly above the observer. A position-only day
+	// factor makes a camera just inside the night side see a darker sunward sky
+	// than a camera just inside the day side looking away from the sun. Blend a
+	// smooth observer factor with a ray-effective solar height near the
+	// terminator; deep day and deep night remain position-authoritative.
+	const float ObserverDay = smoothstep(-0.30f, 0.14f, SunHeight);
+	const float RayEffectiveSunHeight = SunHeight + ViewToSun * 0.42f;
+	const float RayDay = smoothstep(-0.24f, 0.12f, RayEffectiveSunHeight);
+	const float TerminatorInfluence = 1.0f - smoothstep(
+		0.20f,
+		0.65f,
+		abs(SunHeight));
+	const float Day = lerp(
+		ObserverDay,
+		RayDay,
+		0.82f * TerminatorInfluence);
+	const float Twilight =
+		(1.0f - Day) * smoothstep(-0.90f, -0.03f, SunHeight);
+
+	const float3 NightZenith = float3(0.008f, 0.040f, 0.130f);
+	const float3 NightHorizon = float3(0.020f, 0.100f, 0.260f);
+	const float3 TwilightSunward = float3(0.180f, 0.370f, 0.650f);
+	float3 NightSky = lerp(NightZenith, NightHorizon, Horizon);
+	NightSky = lerp(
+		NightSky,
+		TwilightSunward,
+		Sunward * (0.12f + 0.88f * Twilight));
+
+	const float3 DayZenith = float3(0.090f, 0.300f, 0.650f);
+	const float3 DayHorizon = float3(0.420f, 0.650f, 0.860f);
+	const float3 DaySunward = float3(0.600f, 0.760f, 0.930f);
+	float3 DaySky = lerp(DayZenith, DayHorizon, Horizon);
+	DaySky = lerp(DaySky, DaySunward, Sunward * (0.18f + 0.42f * Horizon));
+	const float3 ContinuousAtmosphere = lerp(NightSky, DaySky, Day);
+
+	// The low-frequency sky must never fall back to EngineSkyColor. The native
+	// small-planet atmosphere contains the coherent contour plateaus diagnosed by
+	// BrightSkyBanding; cloud/sun/star detail is reconstructed separately.
+	return ContinuousAtmosphere;
+}
+
+float3 ABTSComposeContinuousGroundSky(float3 WorldViewDirection)
+{
+	float3 Sky = ABTSBuildContinuousGroundSky(WorldViewDirection);
+	const float3 SunDirection = normalize(SunDirectionToSunWorld);
+	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
+	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
+	const float SunHeight = dot(RadialUp, SunDirection);
+	const float ViewToSun = dot(WorldViewDirection, SunDirection);
+	const float SunAboveHorizon = smoothstep(-0.055f, 0.015f, SunHeight);
+	const float SunDisc = smoothstep(
+		cos(radians(0.80f)),
+		cos(radians(0.32f)),
+		ViewToSun) * SunAboveHorizon;
+	const float SunHalo = pow(
+		smoothstep(cos(radians(4.0f)), 1.0f, ViewToSun),
+		2.2f) * SunAboveHorizon;
+	Sky += SunHalo * float3(0.14f, 0.12f, 0.09f);
+	Sky = lerp(Sky, float3(1.0f, 0.95f, 0.82f), SunDisc);
+
+	const float3 HDRStars = ABTSEvaluateDeterministicHDRStars(
+		WorldViewDirection) * ABTSComputeStylizedStarVisibility(
+			WorldViewDirection);
+	const float3 DisplayStars = 1.0f - exp(-HDRStars * 0.46f);
+	return saturate(Sky + DisplayStars);
 }
 
 float ABTSSampleDeviceDepth(float2 ViewportUV)
@@ -274,5 +544,55 @@ void ABTSStylizedToneMainPS(
 		SceneColorTexture,
 		SceneColorSampler,
 		UVAndScreenPos.xy);
-	OutColor = float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
+	// SceneColor uses the screen-pass input UV, while scene textures require a
+	// viewport UV reconstructed from screen position. Feeding the former into
+	// ViewportUVToBufferUV applies the view-rect transform twice and displaces
+	// the geometry/background mask, which appears as a pale duplicate silhouette.
+	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
+	const float DeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	// Atmosphere, sun, clouds and deterministic HDR stars are environment
+	// lighting layers. GroundDay replaces only the background with a continuous
+	// analytic atmosphere plus independently reconstructed sun/stars; geometry
+	// that owns a depth sample continues through the toon tone bands.
+	const bool bEnvironmentBackground = DeviceDepth <= 1.0e-7f;
+	if (bEnvironmentBackground
+		&& bHasEnvironmentParameters != 0u
+		&& EnvironmentProfile == 0u)
+	{
+		const float3 WorldViewDirection = normalize(
+			ScreenVectorFromScreenRect(float4(UVAndScreenPos.zw, 1.0f, 0.0f)));
+		const float3 ContinuousSky = ABTSComposeContinuousGroundSky(
+			WorldViewDirection);
+		OutColor = float4(
+			ABTSQuantizeContinuousSkyForSDR(ContinuousSky, ViewportUV),
+			SceneColor.a);
+		return;
+	}
+	OutColor = bEnvironmentBackground
+		? SceneColor
+		: float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
+}
+
+void ABTSStylizedStarMainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	const float4 SceneColor = Texture2DSample(
+		SceneColorTexture,
+		SceneColorSampler,
+		UVAndScreenPos.xy);
+	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
+	const float DeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	if (DeviceDepth > 1.0e-7f)
+	{
+		OutColor = SceneColor;
+		return;
+	}
+
+	const float3 WorldViewDirection = normalize(
+		ScreenVectorFromScreenRect(float4(UVAndScreenPos.zw, 1.0f, 0.0f)));
+	const float3 Stars = ABTSEvaluateDeterministicHDRStars(
+		WorldViewDirection) * ABTSComputeStylizedStarVisibility(
+			WorldViewDirection);
+	OutColor = float4(SceneColor.rgb + Stars, SceneColor.a);
 }

@@ -505,7 +505,51 @@ Integration 接线必须在 owner/component 不存在、Subject 为 `None` 或�
 - Integration 定向测试应验证两个 Preview Subject 映射到固定视图类，`None` 不接线，且接线前后 M3 Candidate/Result Hash、M9 引力、轨迹、碰撞均不变；
 - SceneCapture 的 Profile、后处理与 Custom Depth 消费只由 Integration 验证，不能用 M3 NullRHI 语义测试替代像素门。
 
-## 10. 自动化与性能证据
+## 10. T3-A1 材质族适配
+
+### M3-T3A1-001：用空材质测试“风格参数缺失”会制造 MID 假错误
+
+**现象**
+
+`ABTS.M3.StylizedMaterials` 最初虽为 `2/2 Success`，日志却在测试期间出现多条 `LogAutomationTest: Error: Condition failed`。最小复现是把完全无参数的 transient `UMaterial` 传给 TerrainMaterialBridge，试图模拟只缺少 `ABTS_*` 风格参数。
+
+**根因**
+
+该 fixture 同时缺少全部既有 `M3_*` Texture/Scalar/Vector 参数。TerrainMaterialBridge 按冻结契约继续注入原 LUT、道路、河流和半径参数时，MID 会对每个不存在的原参数触发引擎诊断；这与“原地形材质仍完整、仅 T3 风格参数缺失”的产品场景不同。仅看 Automation Result 会形成假绿灯。
+
+**修复**
+
+- 生产桥先只读检查八个公共风格参数；缺任一个时 `ApplyStylizedSurfaceParameters()` 返回 false，保留原地形 MID，不阻断生成；
+- 自动化不再用破坏原 M3 参数契约的空材质冒充合法地形，改为验证未就绪桥安全拒绝，以及树石风格资产缺失时不发布非法绑定；
+- 完整地形 fixture 继续验证全部原 `M3_*` 参数与 `ABTS_*` 参数由同一 MID 消费。
+
+**防回归验证**
+
+- fresh `ABTS.M3.StylizedMaterials` 必须精确 `2/2 Success`、项目 `LogABTSRuntime/LogAutomationController Error=0`；
+- 不得用测试成功数掩盖测试期间的项目 Error；UE 初始化期自带的 `UnifiedErrorTest` 噪声需按时间和类别与项目测试区分；
+- 风格缺失只允许影响表现，PlanetReady、TaskGraph、实例数、LayoutHash 和月度 ResultHash 必须保持。
+
+### M3-T3A1-002：无 GUI 材质接线必须保留原表达式输出名
+
+**现象**
+
+地形 Custom 节点的 BaseColor 使用默认输出名，而树石 TextureSample 的 BaseColor 使用命名输出 `RGB`。首轮 headless 材质脚本将所有原节点都按空输出名处理，并在发现 `RGB` 时保守中止；未保存任何资产。
+
+**根因**
+
+Material Graph 的连接身份同时包含源表达式和输出名。只保存表达式指针、不保存 `GetMaterialPropertyInputNodeOutputName()` 会让复制后的树石接线丢失准确通道，可能静默改用错误输出。
+
+**修复**
+
+资产脚本先读取 BaseColor 的源节点与实际输出名，再把二者原样连接到 Tint/Lerp 分支；只在所有节点创建和编译成功后保存三个 M3 资产。原共享树石材质不写入。
+
+**防回归验证**
+
+- UE 5.8 只读反射确认地形和两项新材质的 BaseColor/Roughness/Specular/Metallic/Emissive 均有预期节点；
+- 两项树石材质必须保持 `Used with Instanced Static Meshes=True`；
+- 资产生成失败时不得保存半张材质图，必须核对 `git status --short` 后修正并从唯一基线重试。
+
+## 11. 自动化与性能证据
 
 ### M3-TEST-001：单次性能门越线不能被简单忽略或直接定性回归
 
@@ -527,7 +571,7 @@ Integration 接线必须在 owner/component 不存在、Subject 为 `None` 或�
 - 不用完整测试中的第二次缓存运行替换 fresh 首次数据；
 - 重型构建、慢速认证和可见 PIE 按多工作树规范串行执行。
 
-## 11. 新条目模板
+## 12. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>

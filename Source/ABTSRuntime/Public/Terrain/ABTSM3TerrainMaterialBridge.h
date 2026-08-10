@@ -9,6 +9,7 @@
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UProceduralMeshComponent;
+class UTexture;
 class UTexture2D;
 struct FABTSM2Cell;
 struct FABTSM3CellState;
@@ -54,6 +55,32 @@ public:
 		return TerrainBasePaletteCellCount;
 	}
 
+	/**
+	 * Updates the T3-A1 parameters on the existing terrain MID. Integration may
+	 * call this repeatedly when the global runtime style switch changes.
+	 * Missing material parameters fail soft and leave the pre-T3 surface active.
+	 */
+	bool ApplyStylizedSurfaceParameters(bool bStyleEnabled);
+
+	bool IsStylizedSurfaceContractAvailable() const
+	{
+		return bStylizedSurfaceContractAvailable;
+	}
+
+	bool TryGetScalarParameterValue(
+		const FName& ParameterName,
+		float& OutValue) const;
+	bool TryGetVectorParameterValue(
+		const FName& ParameterName,
+		FLinearColor& OutValue) const;
+	bool TryGetTextureParameterValue(
+		const FName& ParameterName,
+		UTexture*& OutValue) const;
+	const UMaterialInstanceDynamic* GetTerrainMIDForDiagnostics() const
+	{
+		return TerrainMID;
+	}
+
 private:
 	static UTexture2D* CreateFloatTexture(UObject* Outer, int32 Width, int32 Height, const TArray<FLinearColor>& Pixels, const TCHAR* Name);
 
@@ -75,6 +102,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TerrainMID;
 
+	bool bStylizedSurfaceContractAvailable = false;
+	bool bLastStyleEnabled = false;
+	bool bHasAppliedStyleState = false;
 	bool bTerrainBasePaletteApplied = false;
 	int32 TerrainBasePaletteCellCount = 0;
 };

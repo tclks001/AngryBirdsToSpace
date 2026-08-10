@@ -6,13 +6,15 @@
 
 ## 1. 当前状态
 
+- 三渲二非 M7 材质基线已形成；T4-A0 已验收，A1 已落地球心大气、固定曝光、确定性程序化 HDR 星场、天空/物体 Tone 分离和主视图暗部保护。v18 已隔离原生低频天空颜色并消除暗处/亮处斜向色阶；v19 进一步让晨昏天空共同响应观察者太阳高度与视线朝阳程度，修复朝阳面反而更暗。fresh DX12 十点、20 张对照图、四张 float32 高频残差门和用户可见 PIE 均已通过；新版 GPU 基线留待 T4 联合冻结前刷新，体积云形态与合成进入 A2 路线决策。实施顺序和验收入口见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
+
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`；候选仍为 Preview/Test、`NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；普通 M6 已按 Twig/Simple/Reinforced 消费同一目录并公开只读身份，Space 仍由 M11 单独管理。三渲二 T0/T1/T2-A 已通过；T2-B 由 M3/M7/M11 分别发布只读对象语义适配，Integration 再串行接入 Custom Stencil 与三个 Scene Capture，功能树不得修改共享渲染热点。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；普通 M6 已按 Twig/Simple/Reinforced 消费同一目录并公开只读身份，Space 仍由 M11 单独管理。三渲二 T0/T1/T2 以及 T3-A0/A1/A2/A3 当前范围均已通过；T3-A3 只通过了终局材质消费与 Rank11 AVI 轮廓门，环境光照仍后置。M7 在 Beam-C3 完成后补 T3-B，最终由 Integration 执行 T3-C 全量冻结。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M3R-5.2/M11 集成验收](M3R52M11PreviewFinaleIntegrationDesign.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 

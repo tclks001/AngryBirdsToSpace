@@ -198,9 +198,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports the layered terrain-outline implementation"),
+		TEXT("Stylized renderer reports view-aware continuous terminator lighting"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		7);
+		19);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());

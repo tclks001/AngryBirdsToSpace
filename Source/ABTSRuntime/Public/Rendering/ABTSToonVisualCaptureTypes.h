@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedRenderProfile.h"
 
 /** A semantic world anchor; no entry stores an authored absolute world transform. */
@@ -11,7 +12,23 @@ enum class EABTSToonVisualCaptureAnchor : uint8
 	GroundStart = 0,
 	SlingshotBuilding,
 	SatelliteE5,
-	FinaleLayout
+	FinaleLayout,
+	EnvironmentGroundDay,
+	EnvironmentGroundDawn,
+	EnvironmentTerminatorSky,
+	EnvironmentBrightSkyBanding,
+	EnvironmentTerminatorSunwardSky,
+	EnvironmentTerminatorAntiSunwardSky,
+	EnvironmentGroundNight,
+	EnvironmentBacklitBirdParty,
+	EnvironmentHighAltitude
+};
+
+enum class EABTSToonVisualCaptureSuite : uint8
+{
+	ToonT0 = 0,
+	ToonT4A0,
+	ToonT4A1
 };
 
 enum class EABTSToonVisualCaptureMode : uint8
@@ -24,6 +41,8 @@ enum class EABTSToonVisualCaptureMode : uint8
 struct ABTSRUNTIME_API FABTSToonVisualCaptureRunConfig
 {
 	bool bEnabled = false;
+	EABTSToonVisualCaptureSuite Suite =
+		EABTSToonVisualCaptureSuite::ToonT0;
 	EABTSToonVisualCaptureMode Mode =
 		EABTSToonVisualCaptureMode::Screenshots;
 	int32 ExpectedWorldSeed = 312503;
@@ -45,6 +64,18 @@ struct ABTSRUNTIME_API FABTSToonVisualCaptureRunConfig
 		FString* OutFailure = nullptr);
 
 	bool IsValid(FString* OutFailure = nullptr) const;
+};
+
+/** One deterministic T4 layer-isolation state. */
+struct ABTSRUNTIME_API FABTSToonDiagnosticVariantDefinition
+{
+	FName VariantId = NAME_None;
+	bool bStyleEnabled = false;
+	EABTSStylizedDiagnosticPassMask PassMask =
+		EABTSStylizedDiagnosticPassMask::ToneAndOutline;
+	bool bShadowsEnabled = true;
+
+	bool IsValid() const;
 };
 
 /** Stable catalogue entry. Off and On always reuse the same resolved pose. */
@@ -69,6 +100,7 @@ struct ABTSRUNTIME_API FABTSToonResolvedCapturePoint
 	FVector LookAtWorld = FVector::ZeroVector;
 	uint64 SemanticIdentityHash = 0;
 	uint64 CameraPoseHash = 0;
+	uint64 EnvironmentSnapshotHash = 0;
 
 	bool IsValid() const;
 };
@@ -79,6 +111,12 @@ class ABTSRUNTIME_API FABTSToonVisualCaptureMath
 public:
 	static TArray<FABTSToonVisualCapturePointDefinition>
 		BuildDefaultCatalogue();
+	static TArray<FABTSToonVisualCapturePointDefinition>
+		BuildT4A0Catalogue();
+	static TArray<FABTSToonVisualCapturePointDefinition>
+		BuildT4A1Catalogue();
+	static TArray<FABTSToonDiagnosticVariantDefinition>
+		BuildVariantCatalogue(EABTSToonVisualCaptureSuite Suite);
 
 	static bool BuildLookAtCameraTransform(
 		const FVector& CameraWorldLocation,
@@ -95,6 +133,8 @@ public:
 
 	static uint64 ComputeCatalogueHash(
 		TConstArrayView<FABTSToonVisualCapturePointDefinition> Definitions);
+	static uint64 ComputeVariantCatalogueHash(
+		TConstArrayView<FABTSToonDiagnosticVariantDefinition> Definitions);
 
 	static uint64 ComputeCameraPoseHash(
 		const FTransform& CameraWorldTransform,
@@ -102,6 +142,7 @@ public:
 		float FieldOfViewDegrees);
 
 	static const TCHAR* LexToString(EABTSStylizedRenderProfile Profile);
+	static const TCHAR* LexToString(EABTSToonVisualCaptureSuite Suite);
 	static const TCHAR* LexToString(EABTSToonVisualCaptureAnchor Anchor);
 	static const TCHAR* LexToString(EABTSToonVisualCaptureMode Mode);
 };

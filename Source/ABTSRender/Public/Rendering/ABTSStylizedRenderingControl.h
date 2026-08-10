@@ -40,6 +40,41 @@ struct ABTSRENDER_API FABTSStylizedOutlineProfileParameters
 	bool IsValid() const;
 };
 
+/**
+ * Immutable render-thread value snapshot for T4 spherical atmosphere and
+ * deterministic HDR stars. It contains no UObject references.
+ */
+struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
+{
+	FVector PlanetCenterWorld = FVector::ZeroVector;
+	float PlanetRadiusCM = 0.0f;
+	float AtmosphereHeightCM = 0.0f;
+	FVector3f SunDirectionToSunWorld = FVector3f::ZeroVector;
+	EABTSStylizedRenderProfile Profile =
+		EABTSStylizedRenderProfile::GroundDay;
+	uint32 StarSeed = 0;
+	float StarGridResolution = 256.0f;
+	float StarCellProbability = 0.012f;
+	float StarAngularRadiusScale = 0.055f;
+	float StarHDRIntensity = 1.8f;
+	float FixedExposureBias = 0.0f;
+
+	bool IsValid() const;
+};
+
+/**
+ * Integration-owned diagnostic mask.  Production uses ToneAndOutline; the
+ * other values exist so the T4 capture runner can isolate rendering layers
+ * without changing material families or gameplay state.
+ */
+enum class EABTSStylizedDiagnosticPassMask : uint8
+{
+	None = 0,
+	Tone = 1 << 0,
+	Outline = 1 << 1,
+	ToneAndOutline = 3
+};
+
 /** Stable Integration-owned switch and profile seam for stylized rendering. */
 class ABTSRENDER_API FABTSStylizedRenderingControl
 {
@@ -51,6 +86,21 @@ public:
 	static EABTSStylizedRenderProfile GetProfile();
 	static EABTSStylizedRenderProfile GetProfileOnAnyThread();
 	static void SetProfile(EABTSStylizedRenderProfile Profile);
+	static EABTSStylizedDiagnosticPassMask GetDiagnosticPassMask();
+	static EABTSStylizedDiagnosticPassMask GetDiagnosticPassMaskOnAnyThread();
+	static void SetDiagnosticPassMask(EABTSStylizedDiagnosticPassMask Mask);
+	static bool IsTonePassEnabledOnAnyThread();
+	static bool IsOutlinePassEnabledOnAnyThread();
+	static FABTSStylizedEnvironmentParameters BuildEnvironmentParameters(
+		const FVector& PlanetCenterWorld,
+		double PlanetRadiusCM,
+		const FVector& SunDirectionToSunWorld,
+		EABTSStylizedRenderProfile Profile);
+	static void SetEnvironmentParameters(
+		const FABTSStylizedEnvironmentParameters& Parameters);
+	static void ClearEnvironmentParameters();
+	static bool TryGetEnvironmentParametersOnAnyThread(
+		FABTSStylizedEnvironmentParameters& OutParameters);
 	static FABTSStylizedToneProfileParameters GetToneProfileParameters(
 		EABTSStylizedRenderProfile Profile);
 	/**
