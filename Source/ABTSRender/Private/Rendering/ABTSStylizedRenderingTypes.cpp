@@ -11,6 +11,7 @@ namespace ABTSStylizedStencilAllocation
 	constexpr uint8 SatelliteTarget = 5;
 	constexpr uint8 FinalePlanet = 6;
 	constexpr uint8 FinaleUFO = 7;
+	constexpr uint8 CloudComposite = 8;
 }
 
 bool FABTSStylizedViewPolicy::IsValid() const
@@ -66,6 +67,23 @@ uint8 FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
 	default:
 		return 0;
 	}
+}
+
+uint8 FABTSStylizedRenderingContract::
+	ResolveCloudCompositeStencilValueForRenderer()
+{
+	return ABTSStylizedStencilAllocation::CloudComposite;
+}
+
+bool FABTSStylizedRenderingContract::
+	ShouldSuppressInternalOutlineBetweenStencilValues(
+		uint8 CenterStencilValue,
+		uint8 SampleStencilValue)
+{
+	const uint8 CloudStencil =
+		ResolveCloudCompositeStencilValueForRenderer();
+	return CenterStencilValue == CloudStencil
+		&& SampleStencilValue == CloudStencil;
 }
 
 FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(

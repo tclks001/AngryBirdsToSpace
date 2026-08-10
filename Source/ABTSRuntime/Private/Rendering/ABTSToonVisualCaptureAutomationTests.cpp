@@ -198,9 +198,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports view-aware continuous terminator lighting"),
+		TEXT("Stylized renderer reports R1-C2-B3-B6 underside-field whitening"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		19);
+		44);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -324,6 +324,57 @@ bool FABTSToonT2ASharedRenderingContractTest::RunTest(
 		FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
 			static_cast<EABTSStylizedObjectClass>(255)),
 		static_cast<uint8>(0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2R1CCloudCompositeStencilContractTest,
+	"ABTS.Rendering.Toon.T4A2R1C.CloudCompositeStencilContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2R1CCloudCompositeStencilContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const uint8 CloudStencil = FABTSStylizedRenderingContract::
+		ResolveCloudCompositeStencilValueForRenderer();
+	TestEqual(TEXT("R1-C freezes the cloud composite stencil"),
+		CloudStencil, static_cast<uint8>(8));
+	for (int32 ClassIndex =
+		static_cast<int32>(EABTSStylizedObjectClass::None);
+		ClassIndex <= static_cast<int32>(EABTSStylizedObjectClass::FinaleUFO);
+		++ClassIndex)
+	{
+		TestNotEqual(
+			TEXT("Cloud composite stencil never aliases gameplay semantics"),
+			FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
+				static_cast<EABTSStylizedObjectClass>(ClassIndex)),
+			CloudStencil);
+	}
+	TestTrue(
+		TEXT("Two visible cloud pixels suppress their mutual outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudStencil, CloudStencil));
+	TestFalse(
+		TEXT("Cloud-to-background boundary retains the ordinary outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudStencil, 0));
+	TestFalse(
+		TEXT("Background-to-cloud boundary retains the ordinary outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				0, CloudStencil));
+	TestFalse(
+		TEXT("Cloud-to-gameplay boundary retains the ordinary outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudStencil, 1));
+	TestFalse(
+		TEXT("Matching gameplay stencil does not suppress normal outlines"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(1, 1));
 	return true;
 }
 

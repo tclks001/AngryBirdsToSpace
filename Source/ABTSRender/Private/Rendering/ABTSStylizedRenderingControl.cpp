@@ -166,6 +166,24 @@ FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 		// reproducible lift; sky scattering remains an independent environment
 		// layer and must not be compensated by washing out object albedo.
 		Parameters.FixedExposureBias = 0.75f;
+		// UE's Earth-scale VolumetricCloud material becomes either empty or a
+		// uniform grey veil at this gameplay planet scale. T4-A2R0 therefore uses
+		// three deterministic, bounded low-poly cloud islands. These values define
+		// their radial altitude envelope and remain part of capture identity.
+		Parameters.bCloudsEnabled = 1u;
+		Parameters.CloudBaseAltitudeCM = FMath::Clamp(
+			Parameters.PlanetRadiusCM * 0.12f,
+			900.0f,
+			2400.0f);
+		Parameters.CloudLayerHeightCM = FMath::Clamp(
+			Parameters.PlanetRadiusCM * 0.085f,
+			650.0f,
+			1700.0f);
+		Parameters.CloudGlobalScaleKM = 0.10f;
+		Parameters.CloudCoverage = 0.48f;
+		Parameters.CloudDensity = 0.84f;
+		// Retained for schema compatibility; the R0 mesh route does not ray march.
+		Parameters.CloudViewSampleCountScale = 1.0f;
 		break;
 	}
 	return Parameters;
@@ -205,7 +223,7 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 19;
+	return 44;
 }
 
 FABTSStylizedToneProfileParameters
@@ -361,5 +379,19 @@ bool FABTSStylizedEnvironmentParameters::IsValid() const
 		&& StarAngularRadiusScale <= 0.5f
 		&& FMath::IsFinite(StarHDRIntensity)
 		&& StarHDRIntensity > 0.0f
-		&& FMath::IsFinite(FixedExposureBias);
+		&& FMath::IsFinite(FixedExposureBias)
+		&& (bCloudsEnabled == 0u || bCloudsEnabled == 1u)
+		&& (bCloudsEnabled == 0u
+			|| (Profile == EABTSStylizedRenderProfile::GroundDay
+				&& FMath::IsFinite(CloudBaseAltitudeCM)
+				&& CloudBaseAltitudeCM > 0.0f
+				&& FMath::IsFinite(CloudLayerHeightCM)
+				&& CloudLayerHeightCM > 0.0f
+				&& FMath::IsFinite(CloudGlobalScaleKM)
+				&& CloudGlobalScaleKM > 0.0f
+				&& FMath::IsFinite(CloudCoverage)
+				&& FMath::IsFinite(CloudDensity)
+				&& CloudDensity > 0.0f
+				&& FMath::IsFinite(CloudViewSampleCountScale)
+				&& CloudViewSampleCountScale >= 0.05f));
 }

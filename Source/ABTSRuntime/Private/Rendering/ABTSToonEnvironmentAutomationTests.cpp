@@ -340,4 +340,65 @@ bool FABTSToonT4A1CaptureCatalogueTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2CloudContractTest,
+	"ABTS.Rendering.Toon.T4A2.CloudContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2CloudContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSStylizedEnvironmentParameters Ground =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector::ZeroVector,
+			10000.0,
+			FVector::UpVector,
+			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentParameters Satellite =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector::ZeroVector,
+			10000.0,
+			FVector::UpVector,
+			EABTSStylizedRenderProfile::SatelliteGuide);
+	TestTrue(TEXT("Ground cloud contract validates"), Ground.IsValid());
+	TestEqual(TEXT("Ground profile enables bounded cloud islands"),
+		Ground.bCloudsEnabled, 1u);
+	TestTrue(TEXT("Cloud base is above the accepted planet"),
+		Ground.CloudBaseAltitudeCM > 0.0f);
+	TestTrue(TEXT("Cloud island envelope has finite thickness"),
+		Ground.CloudLayerHeightCM > 0.0f);
+	TestEqual(TEXT("Satellite profile suppresses the ground cloud actor"),
+		Satellite.bCloudsEnabled, 0u);
+
+	FABTSToonVisualCaptureRunConfig Config;
+	FString Failure;
+	TestTrue(TEXT("T4-A2 capture suite parses"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A2 -ABTSToonT0BuildId=T4A2-Test"),
+			Config,
+			&Failure));
+	TestEqual(TEXT("Parser selects T4-A2"),
+		static_cast<int32>(Config.Suite),
+		static_cast<int32>(EABTSToonVisualCaptureSuite::ToonT4A2));
+	const TArray<FABTSToonVisualCapturePointDefinition> CloudCatalogue =
+		FABTSToonVisualCaptureMath::BuildT4A2Catalogue();
+	TestEqual(TEXT("T4-A2 keeps ten atmosphere poses and adds seven cloud views"),
+		CloudCatalogue.Num(), 17);
+	TestTrue(TEXT("T4-A2 includes the gameplay-facing ground oblique-up view"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp;
+			}));
+	TestTrue(TEXT("T4-A2 includes the gameplay-facing ground zenith view"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudR0GroundZenith;
+			}));
+	return true;
+}
+
 #endif

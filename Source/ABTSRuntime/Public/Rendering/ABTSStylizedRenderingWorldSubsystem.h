@@ -10,6 +10,7 @@
 class UPrimitiveComponent;
 class USceneCaptureComponent2D;
 class UMaterialInterface;
+class AActor;
 class FABTSStylizedMaterialOverrideRegistry;
 class FABTSToonEnvironmentPresentationState;
 
@@ -68,6 +69,10 @@ protected:
 private:
 	void PreloadSharedMaterials();
 	void RefreshEnvironmentPresentation();
+	bool RefreshLowPolyCloudPrototype(
+		const struct FABTSStylizedEnvironmentParameters& Parameters,
+		FString& OutFailure);
+	void DestroyLowPolyCloudPrototype();
 
 	friend class FABTSToonT2B1PrimitiveRegistryTest;
 	class FPrimitiveOverrideRegistry;
@@ -85,4 +90,6 @@ private:
 	FABTSToonEnvironmentSnapshot EnvironmentSnapshot;
 	bool bEnvironmentSnapshotReady = false;
 	uint64 LastEnvironmentDiagnosticHash = 0;
+	TWeakObjectPtr<AActor> LowPolyCloudPrototypeActor;
+	uint64 LowPolyCloudLayoutHash = 0;
 };

@@ -56,6 +56,17 @@ public:
 	static bool RequiresSelectiveStencil(EABTSStylizedObjectClass ObjectClass);
 	static uint8 ResolveStencilValueForRenderer(EABTSStylizedObjectClass ObjectClass);
 
+	/**
+	 * Integration-only stencil used by the cloud composite.  It is deliberately
+	 * outside the 1..7 selective gameplay allocation: matching cloud pixels
+	 * suppress only their mutual depth/normal seams while cloud-to-world
+	 * boundaries continue through the ordinary outline path.
+	 */
+	static uint8 ResolveCloudCompositeStencilValueForRenderer();
+	static bool ShouldSuppressInternalOutlineBetweenStencilValues(
+		uint8 CenterStencilValue,
+		uint8 SampleStencilValue);
+
 	static FABTSStylizedViewPolicy ResolveViewPolicy(
 		EABTSStylizedViewClass ViewClass,
 		EABTSStylizedRenderProfile MainWorldProfile =

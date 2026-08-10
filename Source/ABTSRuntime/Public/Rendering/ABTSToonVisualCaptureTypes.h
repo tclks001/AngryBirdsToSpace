@@ -21,14 +21,25 @@ enum class EABTSToonVisualCaptureAnchor : uint8
 	EnvironmentTerminatorAntiSunwardSky,
 	EnvironmentGroundNight,
 	EnvironmentBacklitBirdParty,
-	EnvironmentHighAltitude
+	EnvironmentHighAltitude,
+	CloudR0Ground,
+	CloudR0Side,
+	CloudR0Above,
+	CloudR0FlyThrough,
+	/** Orthogonal side view; append-only diagnostic for azimuthal cloud shape. */
+	CloudR0SideOrthogonal,
+	/** Ground-height camera looking diagonally into the cloud underside/side. */
+	CloudR0GroundObliqueUp,
+	/** Ground-height camera directly below the island looking radially upward. */
+	CloudR0GroundZenith
 };
 
 enum class EABTSToonVisualCaptureSuite : uint8
 {
 	ToonT0 = 0,
 	ToonT4A0,
-	ToonT4A1
+	ToonT4A1,
+	ToonT4A2
 };
 
 enum class EABTSToonVisualCaptureMode : uint8
@@ -115,6 +126,8 @@ public:
 		BuildT4A0Catalogue();
 	static TArray<FABTSToonVisualCapturePointDefinition>
 		BuildT4A1Catalogue();
+	static TArray<FABTSToonVisualCapturePointDefinition>
+		BuildT4A2Catalogue();
 	static TArray<FABTSToonDiagnosticVariantDefinition>
 		BuildVariantCatalogue(EABTSToonVisualCaptureSuite Suite);
 

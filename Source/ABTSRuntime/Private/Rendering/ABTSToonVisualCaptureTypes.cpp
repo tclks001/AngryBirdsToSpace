@@ -70,14 +70,20 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		FParse::Param(CommandLine, TEXT("ABTSToonT0Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
 		|| (bNamedSuite
 			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
 				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
-				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)));
+				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)));
 	if (!OutConfig.bEnabled)
 	{
 		return true;
 	}
+	const bool bT4A2Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase));
 	const bool bT4A1Requested =
 		FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
 		|| (bNamedSuite
@@ -86,8 +92,10 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| (bNamedSuite
 			&& Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase));
-	OutConfig.Suite = bT4A1Requested
-		? EABTSToonVisualCaptureSuite::ToonT4A1
+	OutConfig.Suite = bT4A2Requested
+		? EABTSToonVisualCaptureSuite::ToonT4A2
+		: bT4A1Requested
+			? EABTSToonVisualCaptureSuite::ToonT4A1
 		: bT4A0Requested
 			? EABTSToonVisualCaptureSuite::ToonT4A0
 			: EABTSToonVisualCaptureSuite::ToonT0;
@@ -367,6 +375,45 @@ FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
 	return Result;
 }
 
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
+{
+	// Preserve all accepted A1 atmosphere poses, then add seven cloud-specific
+	// views. The orthogonal side pair prevents a long-axis-only cloud from
+	// passing the visual gate; the two ground-up views make the gameplay-facing
+	// underside and lighting continuity first-class evidence.
+	TArray<FABTSToonVisualCapturePointDefinition> Result =
+		BuildT4A1Catalogue();
+	auto AddCloudPoint = [&Result](
+		const TCHAR* Id,
+		const EABTSToonVisualCaptureAnchor Anchor,
+		const float Fov)
+	{
+		FABTSToonVisualCapturePointDefinition Point;
+		Point.PointId = Id;
+		Point.Anchor = Anchor;
+		Point.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+		Point.FieldOfViewDegrees = Fov;
+		Point.WarmupFrameOverride = 12;
+		Result.Add(Point);
+	};
+	AddCloudPoint(TEXT("CloudR0Ground"),
+		EABTSToonVisualCaptureAnchor::CloudR0Ground, 62.0f);
+	AddCloudPoint(TEXT("CloudR0Side"),
+		EABTSToonVisualCaptureAnchor::CloudR0Side, 58.0f);
+	AddCloudPoint(TEXT("CloudR0SideOrthogonal"),
+		EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal, 58.0f);
+	AddCloudPoint(TEXT("CloudR0Above"),
+		EABTSToonVisualCaptureAnchor::CloudR0Above, 58.0f);
+	AddCloudPoint(TEXT("CloudR0FlyThrough"),
+		EABTSToonVisualCaptureAnchor::CloudR0FlyThrough, 68.0f);
+	AddCloudPoint(TEXT("CloudR0GroundObliqueUp"),
+		EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp, 68.0f);
+	AddCloudPoint(TEXT("CloudR0GroundZenith"),
+		EABTSToonVisualCaptureAnchor::CloudR0GroundZenith, 76.0f);
+	return Result;
+}
+
 TArray<FABTSToonDiagnosticVariantDefinition>
 FABTSToonVisualCaptureMath::BuildVariantCatalogue(
 	const EABTSToonVisualCaptureSuite Suite)
@@ -395,7 +442,8 @@ FABTSToonVisualCaptureMath::BuildVariantCatalogue(
 			EABTSStylizedDiagnosticPassMask::ToneAndOutline, true);
 		return Result;
 	}
-	if (Suite == EABTSToonVisualCaptureSuite::ToonT4A1)
+	if (Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+		|| Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
 	{
 		Result.Reserve(2);
 		Add(TEXT("StyleOff"), false,
@@ -594,6 +642,8 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 {
 	switch (Suite)
 	{
+	case EABTSToonVisualCaptureSuite::ToonT4A2:
+		return TEXT("ToonT4A2");
 	case EABTSToonVisualCaptureSuite::ToonT4A1:
 		return TEXT("ToonT4A1");
 	case EABTSToonVisualCaptureSuite::ToonT4A0:
@@ -635,6 +685,20 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 		return TEXT("EnvironmentBacklitBirdParty");
 	case EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude:
 		return TEXT("EnvironmentHighAltitude");
+	case EABTSToonVisualCaptureAnchor::CloudR0Ground:
+		return TEXT("CloudR0Ground");
+	case EABTSToonVisualCaptureAnchor::CloudR0Side:
+		return TEXT("CloudR0Side");
+	case EABTSToonVisualCaptureAnchor::CloudR0Above:
+		return TEXT("CloudR0Above");
+	case EABTSToonVisualCaptureAnchor::CloudR0FlyThrough:
+		return TEXT("CloudR0FlyThrough");
+	case EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal:
+		return TEXT("CloudR0SideOrthogonal");
+	case EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp:
+		return TEXT("CloudR0GroundObliqueUp");
+	case EABTSToonVisualCaptureAnchor::CloudR0GroundZenith:
+		return TEXT("CloudR0GroundZenith");
 	default:
 		return TEXT("Unknown");
 	}

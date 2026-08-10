@@ -3,12 +3,20 @@
 #include "Rendering/ABTSStylizedRenderingWorldSubsystem.h"
 
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
+#include "Components/VolumetricCloudComponent.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "ProceduralMeshComponent.h"
 
 #include "ABTSRuntime.h"
 #include "Camera/ABTSM101LandingPreviewCamera.h"
@@ -22,6 +30,7 @@
 #include "Presentation/ABTSOpeningCinematicPreview.h"
 #include "Rendering/ABTSSharedStylizedMaterialAdapter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTST4LowPolyCloudPrototype.h"
 #include "Rendering/ABTSStylizedMaterialContract.h"
 #include "Rendering/ABTSStylizedMaterialOverrideRegistry.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
@@ -416,15 +425,34 @@ public:
 				Atmospheres.Num());
 			return false;
 		}
+		TArray<AVolumetricCloud*> CloudActors;
+		for (TActorIterator<AVolumetricCloud> It(&World); It; ++It)
+		{
+			if (IsValid(*It)
+				&& IsValid(It->FindComponentByClass<UVolumetricCloudComponent>()))
+			{
+				CloudActors.Add(*It);
+			}
+		}
+		if (CloudActors.Num() != 1)
+		{
+			OutFailure = FString::Printf(
+				TEXT("Expected exactly one VolumetricCloud, found %d."),
+				CloudActors.Num());
+			return false;
+		}
 
 		ASkyAtmosphere* AtmosphereActor = Atmospheres[0];
 		USkyAtmosphereComponent* Atmosphere = AtmosphereActor->GetComponent();
+		UVolumetricCloudComponent* Cloud =
+			CloudActors[0]->FindComponentByClass<UVolumetricCloudComponent>();
 		if (!bOriginalCaptured)
 		{
-			CaptureOriginal(World, *AtmosphereActor, *Atmosphere);
+			CaptureOriginal(World, *AtmosphereActor, *Atmosphere, *Cloud);
 		}
 		else if (SavedAtmosphereActor.Get() != AtmosphereActor
-			|| SavedAtmosphereComponent.Get() != Atmosphere)
+			|| SavedAtmosphereComponent.Get() != Atmosphere
+			|| SavedCloudComponent.Get() != Cloud)
 		{
 			OutFailure = TEXT("The authoritative SkyAtmosphere changed during the run.");
 			return false;
@@ -484,6 +512,14 @@ public:
 				Component->SetVisibility(false, true);
 			}
 		}
+
+		// The stock Earth-scale volumetric material was proven to have no usable
+		// interval at ABTS scale: it is transparent at authored density and a
+		// uniform grey veil once optical depth is compensated. Hide it while the
+		// reversible stylized presentation owns the world. T4-A2R0 supplies three
+		// bounded, deterministic low-poly cloud islands instead of a global shell.
+		Cloud->SetVisibility(false, true);
+		bLowPolyCloudPrototypeEnabled = Parameters.bCloudsEnabled != 0u;
 		bApplied = true;
 		return true;
 	}
@@ -539,11 +575,42 @@ public:
 				Component->SetVisibility(Fog.bVisible, true);
 			}
 		}
+		if (UVolumetricCloudComponent* Cloud = SavedCloudComponent.Get())
+		{
+			Cloud->SetLayerBottomAltitude(OriginalCloudLayerBottomAltitude);
+			Cloud->SetLayerHeight(OriginalCloudLayerHeight);
+			Cloud->SetTracingStartMaxDistance(OriginalCloudTracingStartMaxDistance);
+			Cloud->SetTracingStartDistanceFromCamera(
+				OriginalCloudTracingStartDistanceFromCamera);
+			Cloud->TracingMaxDistanceMode = OriginalCloudTracingMaxDistanceMode;
+			Cloud->SetTracingMaxDistance(OriginalCloudTracingMaxDistance);
+			Cloud->SetPlanetRadius(OriginalCloudPlanetRadius);
+			Cloud->SetbUsePerSampleAtmosphericLightTransmittance(
+				bOriginalCloudPerSampleTransmittance);
+			Cloud->SetSkyLightCloudBottomOcclusion(
+				OriginalCloudBottomOcclusion);
+			Cloud->SetViewSampleCountScale(OriginalCloudViewSampleScale);
+			Cloud->SetReflectionViewSampleCountScale(
+				OriginalCloudReflectionSampleScale);
+			Cloud->SetShadowViewSampleCountScale(OriginalCloudShadowSampleScale);
+			Cloud->SetShadowReflectionViewSampleCountScale(
+				OriginalCloudShadowReflectionSampleScale);
+			Cloud->SetShadowTracingDistance(OriginalCloudShadowTracingDistance);
+			Cloud->SetStopTracingTransmittanceThreshold(
+				OriginalCloudStopTracingThreshold);
+			Cloud->SetMaterial(OriginalCloudMaterial.Get());
+			Cloud->SetVisibility(bOriginalCloudVisible, true);
+		}
+		bLowPolyCloudPrototypeEnabled = false;
 		bApplied = false;
 	}
 
 	bool IsApplied() const { return bApplied; }
 	int32 GetFogCount() const { return SavedFogs.Num(); }
+	bool IsCloudApplied() const
+	{
+		return bApplied && bLowPolyCloudPrototypeEnabled;
+	}
 
 private:
 	struct FFogSavedState
@@ -555,7 +622,8 @@ private:
 	void CaptureOriginal(
 		UWorld& World,
 		ASkyAtmosphere& Actor,
-		USkyAtmosphereComponent& Atmosphere)
+		USkyAtmosphereComponent& Atmosphere,
+		UVolumetricCloudComponent& Cloud)
 	{
 		SavedAtmosphereActor = &Actor;
 		SavedAtmosphereComponent = &Atmosphere;
@@ -576,6 +644,29 @@ private:
 		OriginalHeightFogContribution = Atmosphere.HeightFogContribution;
 		OriginalAerialPerspectiveStartDepth =
 			Atmosphere.AerialPerspectiveStartDepth;
+		SavedCloudComponent = &Cloud;
+		OriginalCloudLayerBottomAltitude = Cloud.LayerBottomAltitude;
+		OriginalCloudLayerHeight = Cloud.LayerHeight;
+		OriginalCloudTracingStartMaxDistance = Cloud.TracingStartMaxDistance;
+		OriginalCloudTracingStartDistanceFromCamera =
+			Cloud.TracingStartDistanceFromCamera;
+		OriginalCloudTracingMaxDistanceMode = Cloud.TracingMaxDistanceMode;
+		OriginalCloudTracingMaxDistance = Cloud.TracingMaxDistance;
+		OriginalCloudPlanetRadius = Cloud.PlanetRadius;
+		OriginalCloudMaterial = Cloud.GetMaterial();
+		bOriginalCloudPerSampleTransmittance =
+			Cloud.bUsePerSampleAtmosphericLightTransmittance != 0;
+		OriginalCloudBottomOcclusion = Cloud.SkyLightCloudBottomOcclusion;
+		OriginalCloudViewSampleScale = Cloud.ViewSampleCountScale;
+		OriginalCloudReflectionSampleScale =
+			Cloud.ReflectionViewSampleCountScaleValue;
+		OriginalCloudShadowSampleScale = Cloud.ShadowViewSampleCountScale;
+		OriginalCloudShadowReflectionSampleScale =
+			Cloud.ShadowReflectionViewSampleCountScaleValue;
+		OriginalCloudShadowTracingDistance = Cloud.ShadowTracingDistance;
+		OriginalCloudStopTracingThreshold =
+			Cloud.StopTracingTransmittanceThreshold;
+		bOriginalCloudVisible = Cloud.IsVisible();
 
 		SavedFogs.Reset();
 		for (TActorIterator<AExponentialHeightFog> It(&World); It; ++It)
@@ -594,6 +685,7 @@ private:
 
 	TWeakObjectPtr<ASkyAtmosphere> SavedAtmosphereActor;
 	TWeakObjectPtr<USkyAtmosphereComponent> SavedAtmosphereComponent;
+	TWeakObjectPtr<UVolumetricCloudComponent> SavedCloudComponent;
 	TArray<FFogSavedState> SavedFogs;
 	FVector OriginalActorLocation = FVector::ZeroVector;
 	ESkyAtmosphereTransformMode OriginalTransformMode =
@@ -610,9 +702,28 @@ private:
 	float OriginalMieExponentialDistribution = 0.0f;
 	float OriginalHeightFogContribution = 0.0f;
 	float OriginalAerialPerspectiveStartDepth = 0.0f;
+	float OriginalCloudLayerBottomAltitude = 0.0f;
+	float OriginalCloudLayerHeight = 0.0f;
+	float OriginalCloudTracingStartMaxDistance = 0.0f;
+	float OriginalCloudTracingStartDistanceFromCamera = 0.0f;
+	EVolumetricCloudTracingMaxDistanceMode OriginalCloudTracingMaxDistanceMode =
+		EVolumetricCloudTracingMaxDistanceMode::DistanceFromCloudLayerEntryPoint;
+	float OriginalCloudTracingMaxDistance = 0.0f;
+	float OriginalCloudPlanetRadius = 0.0f;
+	TWeakObjectPtr<UMaterialInterface> OriginalCloudMaterial;
+	float OriginalCloudBottomOcclusion = 0.0f;
+	float OriginalCloudViewSampleScale = 1.0f;
+	float OriginalCloudReflectionSampleScale = 1.0f;
+	float OriginalCloudShadowSampleScale = 1.0f;
+	float OriginalCloudShadowReflectionSampleScale = 1.0f;
+	float OriginalCloudShadowTracingDistance = 0.0f;
+	float OriginalCloudStopTracingThreshold = 0.0f;
+	bool bOriginalCloudPerSampleTransmittance = false;
+	bool bOriginalCloudVisible = true;
 	bool bOriginalCaptured = false;
 	bool bApplied = false;
 	bool bContinuousAtmosphereOverrideAcquired = false;
+	bool bLowPolyCloudPrototypeEnabled = false;
 };
 
 UABTSStylizedRenderingWorldSubsystem::UABTSStylizedRenderingWorldSubsystem() = default;
@@ -655,6 +766,7 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 {
 	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	DestroyLowPolyCloudPrototype();
 	if (EnvironmentPresentation)
 	{
 		EnvironmentPresentation->Restore();
@@ -1228,6 +1340,7 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 	if (!EnvironmentPresentation)
 	{
 		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		DestroyLowPolyCloudPrototype();
 		return;
 	}
 
@@ -1235,6 +1348,7 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 		|| !bEnvironmentSnapshotReady)
 	{
 		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		DestroyLowPolyCloudPrototype();
 		EnvironmentPresentation->Restore();
 		return;
 	}
@@ -1256,12 +1370,25 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 			Failure))
 	{
 		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		DestroyLowPolyCloudPrototype();
 		EnvironmentPresentation->Restore();
 		UE_LOG(
 			LogABTSRuntime,
 			Warning,
-			TEXT("[ABTS][Rendering][T4-A1][Environment] Applied=0 Reason=%s"),
+			TEXT("[ABTS][Rendering][T4-A2][Environment] Applied=0 Reason=%s"),
 			Failure.IsEmpty() ? TEXT("WorldUnavailable") : *Failure);
+		return;
+	}
+	if (!RefreshLowPolyCloudPrototype(Parameters, Failure))
+	{
+		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+		DestroyLowPolyCloudPrototype();
+		EnvironmentPresentation->Restore();
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][Rendering][T4-A2R1A][CloudPrototype] Applied=0 Reason=%s"),
+			Failure.IsEmpty() ? TEXT("Unknown") : *Failure);
 		return;
 	}
 
@@ -1277,15 +1404,347 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 			ABTSStylizedRenderingWorldSubsystemPrivate::
 				ContinuousAtmosphereTraceSampleCountScale);
 	}
+	if (!bWasApplied && EnvironmentPresentation->IsCloudApplied())
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T4-A2R1C2B3B6][CloudQuality] Route=InstancedCloudletsR1C2B3B6 Islands=3 MacroClusters=18 Cloudlets=%d Body=73 Crown=116 Edge=63 MacroMaskCoverageMin=0.98 HorizontalEnvelopeAspectMax=1.08 AzimuthalFootprintIsotropyMin=0.80 SeededAmorphous=1 OrthogonalSideDiagnostics=1 GroundObliqueUpDiagnostics=1 GroundZenithDiagnostics=1 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=Unlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 CompositeStencil=%d InternalOutlineSuppression=1 NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
+			FABTST4LowPolyCloudPrototype::TotalCloudletCount,
+			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount,
+			static_cast<int32>(FABTSStylizedRenderingContract::
+				ResolveCloudCompositeStencilValueForRenderer()),
+			static_cast<unsigned long long>(LowPolyCloudLayoutHash),
+			Parameters.CloudBaseAltitudeCM,
+			Parameters.CloudLayerHeightCM);
+	}
 	UE_LOG(
 		LogABTSRuntime,
 		VeryVerbose,
-		TEXT("[ABTS][Rendering][T4-A1][Environment] Applied=1 Profile=%d RadiusCM=%.2f AtmosphereHeightCM=%.2f FogHidden=%d StarSeed=%u"),
+		TEXT("[ABTS][Rendering][T4-A2][Environment] Applied=1 Profile=%d RadiusCM=%.2f AtmosphereHeightCM=%.2f FogHidden=%d Cloud=%d StarSeed=%u"),
 		static_cast<int32>(Parameters.Profile),
 		Parameters.PlanetRadiusCM,
 		Parameters.AtmosphereHeightCM,
 		EnvironmentPresentation->GetFogCount(),
+		EnvironmentPresentation->IsCloudApplied() ? 1 : 0,
 		Parameters.StarSeed);
+}
+
+bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
+	const FABTSStylizedEnvironmentParameters& Parameters,
+	FString& OutFailure)
+{
+	OutFailure.Reset();
+	if (Parameters.bCloudsEnabled == 0u)
+	{
+		DestroyLowPolyCloudPrototype();
+		return true;
+	}
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		OutFailure = TEXT("Cloud prototype world is unavailable.");
+		return false;
+	}
+	const TArray<FABTST4LowPolyCloudIslandDefinition> Definitions =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Parameters.PlanetCenterWorld,
+			Parameters.PlanetRadiusCM,
+			FVector(Parameters.SunDirectionToSunWorld),
+			Parameters.CloudBaseAltitudeCM,
+			Parameters.CloudLayerHeightCM);
+	if (Definitions.Num() != FABTST4LowPolyCloudPrototype::IslandCount)
+	{
+		OutFailure = TEXT("Cloud prototype layout did not produce three islands.");
+		return false;
+	}
+	const uint64 DesiredLayoutHash =
+		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(Definitions);
+	uint64 DesiredCloudletHash = DesiredLayoutHash;
+	TArray<TArray<FABTST4InstancedCloudletDefinition>> IslandCloudlets;
+	IslandCloudlets.SetNum(Definitions.Num());
+	int32 TotalCloudlets = 0;
+	for (int32 DefinitionIndex = 0;
+		DefinitionIndex < Definitions.Num();
+		++DefinitionIndex)
+	{
+		FString CloudletFailure;
+		if (!FABTST4LowPolyCloudPrototype::BuildInstancedCloudlets(
+			Definitions[DefinitionIndex],
+			IslandCloudlets[DefinitionIndex],
+			&CloudletFailure))
+		{
+			OutFailure = FString::Printf(
+				TEXT("Cloud island %d instance layout failed: %s"),
+				Definitions[DefinitionIndex].IslandIndex,
+				*CloudletFailure);
+			return false;
+		}
+		const uint64 IslandHash =
+			FABTST4LowPolyCloudPrototype::ComputeCloudletLayoutHash(
+				IslandCloudlets[DefinitionIndex]);
+		DesiredCloudletHash ^= IslandHash + 0x9e3779b97f4a7c15ull
+			+ (DesiredCloudletHash << 6) + (DesiredCloudletHash >> 2);
+		TotalCloudlets += IslandCloudlets[DefinitionIndex].Num();
+	}
+	if (TotalCloudlets != FABTST4LowPolyCloudPrototype::TotalCloudletCount)
+	{
+		OutFailure = FString::Printf(
+			TEXT("Cloudlet budget mismatch: expected %d, produced %d."),
+			FABTST4LowPolyCloudPrototype::TotalCloudletCount,
+			TotalCloudlets);
+		return false;
+	}
+	if (LowPolyCloudPrototypeActor.IsValid()
+		&& LowPolyCloudLayoutHash == DesiredCloudletHash)
+	{
+		return true;
+	}
+	DestroyLowPolyCloudPrototype();
+
+	UMaterialInterface* BaseMaterial = LoadObject<UMaterialInterface>(
+		nullptr,
+		TEXT("/Game/Toon/Environment/Cloud/M_ABTS_Toon_Cloudlet.M_ABTS_Toon_Cloudlet"));
+	if (!IsValid(BaseMaterial))
+	{
+		OutFailure = TEXT("T4-A2R1-B cloudlet material is unavailable.");
+		return false;
+	}
+	UStaticMesh* CloudletMesh = LoadObject<UStaticMesh>(
+		nullptr,
+		TEXT("/Game/Toon/Environment/Cloud/SM_ABTS_Toon_Cloudlet.SM_ABTS_Toon_Cloudlet"));
+	if (!IsValid(CloudletMesh))
+	{
+		OutFailure = TEXT("T4-A2R1-B cloudlet mesh is unavailable.");
+		return false;
+	}
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Name = MakeUniqueObjectName(
+		World,
+		AActor::StaticClass(),
+		TEXT("ABTST4InstancedCloudPrototype"));
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AActor* Actor = World->SpawnActor<AActor>(
+		AActor::StaticClass(),
+		FTransform(FQuat::Identity, Parameters.PlanetCenterWorld),
+		SpawnParameters);
+	if (!IsValid(Actor))
+	{
+		OutFailure = TEXT("Unable to spawn the transient cloud prototype actor.");
+		return false;
+	}
+	Actor->SetActorEnableCollision(false);
+	USceneComponent* Root = NewObject<USceneComponent>(
+		Actor,
+		TEXT("CloudPrototypeRoot"),
+		RF_Transient);
+	if (!IsValid(Root))
+	{
+		Actor->Destroy();
+		OutFailure = TEXT("Unable to allocate the cloud prototype root.");
+		return false;
+	}
+	Actor->AddInstanceComponent(Root);
+	Actor->SetRootComponent(Root);
+	Root->RegisterComponent();
+	Actor->SetActorLocation(
+		Parameters.PlanetCenterWorld,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	for (int32 DefinitionIndex = 0;
+		DefinitionIndex < Definitions.Num();
+		++DefinitionIndex)
+	{
+		const FABTST4LowPolyCloudIslandDefinition& Definition =
+			Definitions[DefinitionIndex];
+		UHierarchicalInstancedStaticMeshComponent* Component =
+			NewObject<UHierarchicalInstancedStaticMeshComponent>(
+				Actor,
+				*FString::Printf(
+					TEXT("CloudIslandInstances_%d"),
+					Definition.IslandIndex),
+				RF_Transient);
+		if (!IsValid(Component))
+		{
+			Actor->Destroy();
+			OutFailure = TEXT("Unable to allocate a cloud island component.");
+			return false;
+		}
+		Actor->AddInstanceComponent(Component);
+		Component->SetupAttachment(Root);
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->SetStaticMesh(CloudletMesh);
+		Component->SetNumCustomDataFloats(
+			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount);
+		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Component->SetGenerateOverlapEvents(false);
+		Component->SetCanEverAffectNavigation(false);
+		Component->SetCastShadow(false);
+		Component->bCastDynamicShadow = false;
+		Component->bCastStaticShadow = false;
+		Component->SetCustomDepthStencilWriteMask(
+			ERendererStencilMask::ERSM_Default);
+		Component->SetCustomDepthStencilValue(
+			FABTSStylizedRenderingContract::
+				ResolveCloudCompositeStencilValueForRenderer());
+		Component->SetRenderCustomDepth(true);
+		Component->RegisterComponent();
+		for (const FABTST4InstancedCloudletDefinition& Cloudlet
+			: IslandCloudlets[DefinitionIndex])
+		{
+			const int32 InstanceIndex = Component->AddInstance(
+				Cloudlet.TransformRelativeToPlanet, false);
+			if (InstanceIndex == INDEX_NONE)
+			{
+				Actor->Destroy();
+				OutFailure = TEXT("Unable to add a cloudlet instance.");
+				return false;
+			}
+			Component->SetCustomDataValue(
+				InstanceIndex, 0, Cloudlet.Seed01, false);
+			Component->SetCustomDataValue(
+				InstanceIndex, 1, Cloudlet.NormalizedHeight, false);
+			Component->SetCustomDataValue(
+				InstanceIndex, 2, Cloudlet.FakeOcclusion, false);
+			Component->SetCustomDataValue(
+				InstanceIndex, 3, Cloudlet.SizeTier, false);
+			Component->SetCustomDataValue(
+				InstanceIndex,
+				4,
+				static_cast<float>(Cloudlet.Layer) / 2.0f,
+				false);
+		}
+		Component->MarkRenderStateDirty();
+		UMaterialInstanceDynamic* Material =
+			UMaterialInstanceDynamic::Create(BaseMaterial, Component);
+		if (!IsValid(Material))
+		{
+			Actor->Destroy();
+			OutFailure = TEXT("Unable to allocate the T4-A2R1-B cloudlet material instance.");
+			return false;
+		}
+		const FVector SunDirection =
+			FVector(Parameters.SunDirectionToSunWorld).GetSafeNormal();
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudSunDirection"),
+			FLinearColor(
+				SunDirection.X,
+				SunDirection.Y,
+				SunDirection.Z,
+				0.0f));
+		const FLinearColor LightColor = Definition.IslandIndex == 1
+			? FLinearColor(0.86f, 0.89f, 0.94f, 1.0f)
+			: FLinearColor(0.92f, 0.93f, 0.96f, 1.0f);
+		const FLinearColor BodyColor = Definition.IslandIndex == 1
+			? FLinearColor(0.38f, 0.46f, 0.58f, 1.0f)
+			: FLinearColor(0.45f, 0.53f, 0.64f, 1.0f);
+		const FLinearColor ShadowColor = Definition.IslandIndex == 1
+			? FLinearColor(0.15f, 0.20f, 0.30f, 1.0f)
+			: FLinearColor(0.18f, 0.24f, 0.34f, 1.0f);
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudLightColor"), LightColor);
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudBodyColor"), BodyColor);
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudShadowColor"), ShadowColor);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudSunWhiteStrength"), 0.70f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudThinWhiteStrength"), 0.58f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudThinDensityStart"), 0.30f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudThinDensityEnd"), 0.78f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudGradientConfidenceStart"), 0.10f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudGradientConfidenceEnd"), 0.34f);
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudIslandCenter"),
+			FLinearColor(
+				Definition.CenterWorld.X,
+				Definition.CenterWorld.Y,
+				Definition.CenterWorld.Z,
+				0.0f));
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudIslandAxisX"),
+			FLinearColor(
+				Definition.TangentX.X,
+				Definition.TangentX.Y,
+				Definition.TangentX.Z,
+				0.0f));
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudIslandAxisY"),
+			FLinearColor(
+				Definition.TangentY.X,
+				Definition.TangentY.Y,
+				Definition.TangentY.Z,
+				0.0f));
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudIslandUp"),
+			FLinearColor(
+				Definition.RadialUp.X,
+				Definition.RadialUp.Y,
+				Definition.RadialUp.Z,
+				0.0f));
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudIslandExtents"),
+			FLinearColor(
+				Definition.ExtentsCM.X,
+				Definition.ExtentsCM.Y,
+				Definition.ExtentsCM.Z,
+				0.0f));
+		const TArray<FABTST4CloudMacroClusterDefinition> MacroClusters =
+			FABTST4LowPolyCloudPrototype::BuildMacroClusters(Definition);
+		if (MacroClusters.Num()
+			!= FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland)
+		{
+			Actor->Destroy();
+			OutFailure = TEXT("R1-C2-B3-B1 gradient-confidence island parameters are incomplete.");
+			return false;
+		}
+		for (const FABTST4CloudMacroClusterDefinition& Cluster : MacroClusters)
+		{
+			Material->SetVectorParameterValue(
+				*FString::Printf(
+					TEXT("ABTS_CloudMacroCluster%d"), Cluster.ClusterIndex),
+				FLinearColor(
+					Cluster.NormalizedCenter.X,
+					Cluster.NormalizedCenter.Y,
+					Cluster.NormalizedRadii.X,
+					0.0f));
+			Material->SetVectorParameterValue(
+				*FString::Printf(
+					TEXT("ABTS_CloudMacroShape%d"), Cluster.ClusterIndex),
+				FLinearColor(
+					Cluster.NormalizedRadii.Y,
+					FMath::Cos(Cluster.OrientationRadians),
+					FMath::Sin(Cluster.OrientationRadians),
+					0.0f));
+			Material->SetScalarParameterValue(
+				*FString::Printf(
+					TEXT("ABTS_CloudMacroHeight%d"), Cluster.ClusterIndex),
+				Cluster.HeightBias);
+		}
+		Component->SetMaterial(0, Material);
+	}
+	LowPolyCloudPrototypeActor = Actor;
+	LowPolyCloudLayoutHash = DesiredCloudletHash;
+	return true;
+}
+
+void UABTSStylizedRenderingWorldSubsystem::DestroyLowPolyCloudPrototype()
+{
+	if (AActor* Actor = LowPolyCloudPrototypeActor.Get())
+	{
+		Actor->Destroy();
+	}
+	LowPolyCloudPrototypeActor.Reset();
+	LowPolyCloudLayoutHash = 0;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1479,6 +1938,626 @@ bool FABTSToonT4A1ContinuousAtmosphereOverrideTest::RunTest(
 			SampleDistance->GetFloat(), OriginalSampleDistance));
 	TestEqual(TEXT("Final release restores the original LUT precision"),
 		LUT32->GetInt(), OriginalLUT32);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2R0LowPolyCloudContractTest,
+	"ABTS.Rendering.Toon.T4A2R0.LowPolyCloudContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2R0LowPolyCloudContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSStylizedEnvironmentParameters First =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector::ZeroVector,
+			10000.0,
+			FVector::UpVector,
+			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentParameters Second =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector::ZeroVector,
+			10000.0,
+			FVector::UpVector,
+			EABTSStylizedRenderProfile::GroundDay);
+	TestTrue(TEXT("Low-poly cloud envelope validates"), First.IsValid());
+	TestEqual(TEXT("Cloud islands are enabled only by the GroundDay profile"),
+		First.bCloudsEnabled, 1u);
+	TestTrue(TEXT("Cloud base is radial and above the planet"),
+		First.CloudBaseAltitudeCM > 0.0f);
+	TestTrue(TEXT("Cloud island envelope has finite radial separation"),
+		First.CloudLayerHeightCM > 0.0f);
+	TestTrue(TEXT("Cloud opacity is normalized"),
+		First.CloudDensity > 0.0f && First.CloudDensity <= 1.0f);
+	TestTrue(TEXT("Cloud coverage is normalized"),
+		First.CloudCoverage >= 0.0f && First.CloudCoverage <= 1.0f);
+	TestTrue(TEXT("Cloud profile is deterministic"),
+		FMath::IsNearlyEqual(
+			First.CloudBaseAltitudeCM, Second.CloudBaseAltitudeCM)
+		&& FMath::IsNearlyEqual(
+			First.CloudLayerHeightCM, Second.CloudLayerHeightCM)
+		&& FMath::IsNearlyEqual(
+			First.CloudGlobalScaleKM, Second.CloudGlobalScaleKM)
+		&& FMath::IsNearlyEqual(First.CloudCoverage, Second.CloudCoverage)
+		&& FMath::IsNearlyEqual(First.CloudDensity, Second.CloudDensity));
+
+	const TArray<FABTST4LowPolyCloudIslandDefinition> FirstLayout =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			First.PlanetCenterWorld,
+			First.PlanetRadiusCM,
+			FVector(First.SunDirectionToSunWorld),
+			First.CloudBaseAltitudeCM,
+			First.CloudLayerHeightCM);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> SecondLayout =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Second.PlanetCenterWorld,
+			Second.PlanetRadiusCM,
+			FVector(Second.SunDirectionToSunWorld),
+			Second.CloudBaseAltitudeCM,
+			Second.CloudLayerHeightCM);
+	TestEqual(TEXT("R0 fixes exactly three cloud islands"),
+		FirstLayout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
+	const uint64 FirstHash =
+		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(FirstLayout);
+	TestTrue(TEXT("Cloud layout hash is non-zero"), FirstHash != 0);
+	TestEqual(TEXT("Cloud layout is deterministic"), FirstHash,
+		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(SecondLayout));
+	for (const FABTST4LowPolyCloudIslandDefinition& Definition : FirstLayout)
+	{
+		FABTST4LowPolyCloudMeshData Mesh;
+		FString Failure;
+		TestTrue(TEXT("Every cloud island produces a closed mesh"),
+			FABTST4LowPolyCloudPrototype::BuildClosedMesh(
+				Definition, Mesh, &Failure));
+		TestTrue(TEXT("Every cloud mesh validates"), Mesh.IsValid());
+		TestTrue(TEXT("Every cloud mesh has a deterministic geometry identity"),
+			Mesh.GeometryHash != 0);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2R1AInstancedCloudletContractTest,
+	"ABTS.Rendering.Toon.T4A2R1A.InstancedCloudletContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2R1AInstancedCloudletContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSStylizedEnvironmentParameters Environment =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(120.0, -340.0, 560.0),
+			10000.0,
+			FVector(0.3, -0.6, 0.7).GetSafeNormal(),
+			EABTSStylizedRenderProfile::GroundDay);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> Layout =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM);
+	TestEqual(TEXT("R1-A retains exactly three deterministic cloud islands"),
+		Layout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
+
+	int32 TotalCloudlets = 0;
+	uint64 CombinedHashA = 0xA2C1A11Aull;
+	uint64 CombinedHashB = 0xA2C1A11Aull;
+	for (const FABTST4LowPolyCloudIslandDefinition& Island : Layout)
+	{
+		TArray<FABTST4InstancedCloudletDefinition> First;
+		TArray<FABTST4InstancedCloudletDefinition> Second;
+		FString Failure;
+		TestTrue(TEXT("Cloud island builds an instanced cloudlet population"),
+			FABTST4LowPolyCloudPrototype::BuildInstancedCloudlets(
+				Island, First, &Failure));
+		TestTrue(TEXT("Repeated cloudlet generation succeeds"),
+			FABTST4LowPolyCloudPrototype::BuildInstancedCloudlets(
+				Island, Second, &Failure));
+		TestTrue(TEXT("Every cloud island has more than one shared-mesh instance"),
+			First.Num() > 1);
+		const uint64 FirstHash =
+			FABTST4LowPolyCloudPrototype::ComputeCloudletLayoutHash(First);
+		const uint64 SecondHash =
+			FABTST4LowPolyCloudPrototype::ComputeCloudletLayoutHash(Second);
+		TestTrue(TEXT("Cloudlet population hash is non-zero"), FirstHash != 0);
+		TestEqual(TEXT("Cloudlet transforms and custom data are deterministic"),
+			FirstHash, SecondHash);
+		CombinedHashA ^= FirstHash + 0x9e3779b97f4a7c15ull
+			+ (CombinedHashA << 6) + (CombinedHashA >> 2);
+		CombinedHashB ^= SecondHash + 0x9e3779b97f4a7c15ull
+			+ (CombinedHashB << 6) + (CombinedHashB >> 2);
+		TotalCloudlets += First.Num();
+		for (const FABTST4InstancedCloudletDefinition& Cloudlet : First)
+		{
+			TestTrue(TEXT("Every cloudlet validates"), Cloudlet.IsValid());
+		}
+	}
+	TestEqual(TEXT("R1-A freezes the total instance budget"),
+		TotalCloudlets, FABTST4LowPolyCloudPrototype::TotalCloudletCount);
+	TestEqual(TEXT("Combined cloudlet identity is repeatable"),
+		CombinedHashA, CombinedHashB);
+	TestEqual(TEXT("R1-C2-B3-B1 retains five geometry custom-data channels"),
+		FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount, 5);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2R1BCloudAssetContractTest,
+	"ABTS.Rendering.Toon.T4A2R1B.CloudAssetContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2R1BCloudAssetContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	UMaterial* CloudMaterial = LoadObject<UMaterial>(
+		nullptr,
+		TEXT("/Game/Toon/Environment/Cloud/M_ABTS_Toon_Cloudlet.M_ABTS_Toon_Cloudlet"));
+	UStaticMesh* CloudMesh = LoadObject<UStaticMesh>(
+		nullptr,
+		TEXT("/Game/Toon/Environment/Cloud/SM_ABTS_Toon_Cloudlet.SM_ABTS_Toon_Cloudlet"));
+	TestNotNull(TEXT("R1-B cloudlet material is loadable"), CloudMaterial);
+	TestNotNull(TEXT("R1-B cloudlet mesh is loadable"), CloudMesh);
+	if (!IsValid(CloudMaterial) || !IsValid(CloudMesh))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("R1-B cloudlet material is exclusively Unlit"),
+		CloudMaterial->GetShadingModels().HasOnlyShadingModel(MSM_Unlit));
+	TestTrue(
+		TEXT("R1-B cloudlet material is compiled for static meshes"),
+		CloudMaterial->GetUsageByFlag(MATUSAGE_StaticMesh));
+	TestTrue(
+		TEXT("R1-B cloudlet material is compiled for instanced static meshes"),
+		CloudMaterial->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes));
+	float MacroLightingVersion = 0.0f;
+	TestTrue(
+		TEXT("R1-C2-B3-B1 material exposes its guarded view-invariant whitening version"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudMacroLightingVersion")),
+			MacroLightingVersion));
+	TestEqual(
+		TEXT("R1-C2-B3-B1 material version is current"),
+		MacroLightingVersion,
+		7.0f);
+	FLinearColor CloudLightColor = FLinearColor::Transparent;
+	TestTrue(
+		TEXT("R1-C2-B3-B material exposes a neutral white light band"),
+		CloudMaterial->GetVectorParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudLightColor")),
+			CloudLightColor));
+	TestTrue(
+		TEXT("R1-C2-B3-B light band is bright enough to read as sunlit white"),
+		CloudLightColor.GetLuminance() > 0.80f);
+	FLinearColor CloudBodyColor = FLinearColor::Transparent;
+	TestTrue(
+		TEXT("R1-C2-B3-B material exposes a distinct body colour band"),
+		CloudMaterial->GetVectorParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudBodyColor")),
+			CloudBodyColor));
+	TestTrue(
+		TEXT("R1-C2-B3-B body colour remains below the cloud-top band"),
+		CloudBodyColor.GetLuminance() < CloudLightColor.GetLuminance());
+	float SunWhiteStrength = 0.0f;
+	float ThinWhiteStrength = 0.0f;
+	TestTrue(
+		TEXT("R1-C2-B3-B exposes sunward whitening"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudSunWhiteStrength")),
+			SunWhiteStrength));
+	TestTrue(
+		TEXT("R1-C2-B3-B exposes thin-density whitening"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudThinWhiteStrength")),
+			ThinWhiteStrength));
+	TestTrue(
+		TEXT("R1-C2-B3-B sunward whitening is visually material"),
+		SunWhiteStrength >= 0.60f);
+	TestTrue(
+		TEXT("R1-C2-B3-B thin-density whitening is visually material"),
+		ThinWhiteStrength >= 0.50f);
+	float GradientConfidenceStart = 0.0f;
+	float GradientConfidenceEnd = 0.0f;
+	TestTrue(
+		TEXT("R1-C2-B3-B1 exposes a gradient-confidence start"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudGradientConfidenceStart")),
+			GradientConfidenceStart));
+	TestTrue(
+		TEXT("R1-C2-B3-B1 exposes a gradient-confidence end"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudGradientConfidenceEnd")),
+			GradientConfidenceEnd));
+	TestTrue(
+		TEXT("R1-C2-B3-B1 keeps a non-zero critical-point fallback band"),
+		GradientConfidenceStart >= 0.05f
+			&& GradientConfidenceEnd >= GradientConfidenceStart + 0.15f);
+	float RetiredPerInstancePixelParameter = 0.0f;
+	TestFalse(
+		TEXT("R1-C2-B3-B keeps local-normal detail out of pixel lighting"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudBodyDetailWeight")),
+			RetiredPerInstancePixelParameter));
+	TestFalse(
+		TEXT("R1-C2-B3-B keeps instance variation out of pixel lighting"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudInstanceVariationStrength")),
+			RetiredPerInstancePixelParameter));
+	const FVector PositiveBounds = CloudMesh->GetPositiveBoundsExtension();
+	const FVector NegativeBounds = CloudMesh->GetNegativeBoundsExtension();
+	TestTrue(
+		TEXT("R1-B cloudlet mesh reserves positive WPO bounds"),
+		PositiveBounds.GetMin() >= 18.0);
+	TestTrue(
+		TEXT("R1-B cloudlet mesh reserves negative WPO bounds"),
+		NegativeBounds.GetMin() >= 18.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2R1C2A4SeededAmorphousFootprintContractTest,
+	"ABTS.Rendering.Toon.T4A2R1C2A4.SeededAmorphousFootprintContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2R1C2A4SeededAmorphousFootprintContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSStylizedEnvironmentParameters Environment =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(120.0, -340.0, 560.0),
+			10000.0,
+			FVector(0.3, -0.6, 0.7).GetSafeNormal(),
+			EABTSStylizedRenderProfile::GroundDay);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> Layout =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM);
+	TestEqual(TEXT("R1-C2-A4 retains three cloud islands"),
+		Layout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
+
+	int32 TotalBody = 0;
+	int32 TotalCrown = 0;
+	int32 TotalEdge = 0;
+	int32 TotalMacroClusters = 0;
+	for (const FABTST4LowPolyCloudIslandDefinition& Island : Layout)
+	{
+		const double HorizontalEnvelopeAspect = FMath::Max(
+			Island.ExtentsCM.X, Island.ExtentsCM.Y) / FMath::Min(
+				Island.ExtentsCM.X, Island.ExtentsCM.Y);
+		TestTrue(TEXT("Cloud island horizontal envelope has no dominant axis"),
+			HorizontalEnvelopeAspect <= 1.08);
+		const TArray<FABTST4CloudMacroClusterDefinition> MacroClusters =
+			FABTST4LowPolyCloudPrototype::BuildMacroClusters(Island);
+		const TArray<FABTST4CloudMacroClusterDefinition> RepeatedClusters =
+			FABTST4LowPolyCloudPrototype::BuildMacroClusters(Island);
+		TestEqual(TEXT("Every island owns six deterministic macro clusters"),
+			MacroClusters.Num(),
+			FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland);
+		TestEqual(TEXT("Repeated macro-cluster generation keeps its count"),
+			RepeatedClusters.Num(), MacroClusters.Num());
+		for (int32 ClusterIndex = 0;
+			ClusterIndex < MacroClusters.Num(); ++ClusterIndex)
+		{
+			TestTrue(TEXT("Every macro cluster validates"),
+				MacroClusters[ClusterIndex].IsValid());
+			TestEqual(TEXT("Macro cluster identity is deterministic"),
+				MacroClusters[ClusterIndex].IdentityHash,
+				RepeatedClusters[ClusterIndex].IdentityHash);
+		}
+		if (MacroClusters.Num()
+			== FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland)
+		{
+			TestTrue(TEXT("Seeded core remains close to the island centre"),
+				MacroClusters[0].NormalizedCenter.Size() <= 0.10);
+			TArray<double> OuterAngles;
+			OuterAngles.Reserve(MacroClusters.Num() - 1);
+			double MinimumOuterDistance = TNumericLimits<double>::Max();
+			double MaximumOuterDistance = 0.0;
+			double MinimumEquivalentRadius = TNumericLimits<double>::Max();
+			double MaximumEquivalentRadius = 0.0;
+			for (int32 ClusterIndex = 1;
+				ClusterIndex < MacroClusters.Num(); ++ClusterIndex)
+			{
+				const FABTST4CloudMacroClusterDefinition& Cluster =
+					MacroClusters[ClusterIndex];
+				double Angle = FMath::Atan2(
+					Cluster.NormalizedCenter.Y,
+					Cluster.NormalizedCenter.X);
+				if (Angle < 0.0)
+				{
+					Angle += UE_TWO_PI;
+				}
+				OuterAngles.Add(Angle);
+				const double Distance = Cluster.NormalizedCenter.Size();
+				MinimumOuterDistance = FMath::Min(
+					MinimumOuterDistance, Distance);
+				MaximumOuterDistance = FMath::Max(
+					MaximumOuterDistance, Distance);
+				const double EquivalentRadius = FMath::Sqrt(
+					Cluster.NormalizedRadii.X * Cluster.NormalizedRadii.Y);
+				MinimumEquivalentRadius = FMath::Min(
+					MinimumEquivalentRadius, EquivalentRadius);
+				MaximumEquivalentRadius = FMath::Max(
+					MaximumEquivalentRadius, EquivalentRadius);
+			}
+			OuterAngles.Sort();
+			double MinimumAngularGap = TNumericLimits<double>::Max();
+			double MaximumAngularGap = 0.0;
+			for (int32 AngleIndex = 0;
+				AngleIndex < OuterAngles.Num(); ++AngleIndex)
+			{
+				const double NextAngle = AngleIndex + 1 < OuterAngles.Num()
+					? OuterAngles[AngleIndex + 1]
+					: OuterAngles[0] + UE_TWO_PI;
+				const double Gap = NextAngle - OuterAngles[AngleIndex];
+				MinimumAngularGap = FMath::Min(MinimumAngularGap, Gap);
+				MaximumAngularGap = FMath::Max(MaximumAngularGap, Gap);
+			}
+			TestTrue(TEXT("Outer lobe distances vary enough to avoid a regular ring"),
+				MaximumOuterDistance - MinimumOuterDistance >= 0.045);
+			TestTrue(TEXT("Outer lobe angular gaps vary enough to avoid a regular polygon"),
+				MaximumAngularGap - MinimumAngularGap >= 0.10);
+			TestTrue(TEXT("Outer lobe sizes vary enough to avoid repeated corner puffs"),
+				MaximumEquivalentRadius - MinimumEquivalentRadius >= 0.025);
+		}
+		TotalMacroClusters += MacroClusters.Num();
+
+		TArray<FABTST4InstancedCloudletDefinition> Cloudlets;
+		TArray<FABTST4InstancedCloudletDefinition> RepeatedCloudlets;
+		FString Failure;
+		TestTrue(TEXT("Curved clustered cloudlet population builds"),
+			FABTST4LowPolyCloudPrototype::BuildInstancedCloudlets(
+				Island, Cloudlets, &Failure));
+		TestTrue(TEXT("Repeated curved cloudlet population builds"),
+			FABTST4LowPolyCloudPrototype::BuildInstancedCloudlets(
+				Island, RepeatedCloudlets, &Failure));
+		TestEqual(TEXT("R1-C2-A4 layout identity is deterministic"),
+			FABTST4LowPolyCloudPrototype::ComputeCloudletLayoutHash(Cloudlets),
+			FABTST4LowPolyCloudPrototype::ComputeCloudletLayoutHash(
+				RepeatedCloudlets));
+		int32 BodyCount = 0;
+		int32 CrownCount = 0;
+		int32 EdgeCount = 0;
+		double BodyHeightSum = 0.0;
+		double CrownHeightSum = 0.0;
+		for (const FABTST4InstancedCloudletDefinition& Cloudlet : Cloudlets)
+		{
+			TestTrue(TEXT("Cloudlet keeps a valid macro-cluster membership"),
+				MacroClusters.IsValidIndex(Cloudlet.MacroClusterIndex));
+			const FVector TranslationUp =
+				Cloudlet.TransformRelativeToPlanet.GetLocation().GetSafeNormal();
+			const FVector RotationUp =
+				Cloudlet.TransformRelativeToPlanet.GetRotation().GetAxisZ();
+			TestTrue(TEXT("Cloudlet radial up follows curved shell position"),
+				FVector::DotProduct(TranslationUp, Cloudlet.RadialUp) > 0.9999);
+			TestTrue(TEXT("Cloudlet local Z follows curved radial up"),
+				FVector::DotProduct(RotationUp, Cloudlet.RadialUp) > 0.9999);
+			switch (Cloudlet.Layer)
+			{
+			case EABTST4CloudletLayer::Body:
+				++BodyCount;
+				BodyHeightSum += Cloudlet.NormalizedHeight;
+				TestTrue(TEXT("Body cloudlets form a flattened coverage layer"),
+					Cloudlet.TransformRelativeToPlanet.GetScale3D().Z
+					< FMath::Max(
+						Cloudlet.TransformRelativeToPlanet.GetScale3D().X,
+						Cloudlet.TransformRelativeToPlanet.GetScale3D().Y));
+				break;
+			case EABTST4CloudletLayer::Crown:
+				++CrownCount;
+				CrownHeightSum += Cloudlet.NormalizedHeight;
+				break;
+			case EABTST4CloudletLayer::Edge:
+				++EdgeCount;
+				{
+					bool bAttachedToBody = false;
+					for (const FABTST4InstancedCloudletDefinition& Body : Cloudlets)
+					{
+						if (Body.Layer != EABTST4CloudletLayer::Body
+							|| Body.MacroClusterIndex
+								!= Cloudlet.MacroClusterIndex)
+						{
+							continue;
+						}
+						const FVector2D Delta =
+							Cloudlet.NormalizedPlanarCenter
+							- Body.NormalizedPlanarCenter;
+						const double CosYaw = FMath::Cos(
+							Body.PlanarOrientationRadians);
+						const double SinYaw = FMath::Sin(
+							Body.PlanarOrientationRadians);
+						const double LocalX =
+							Delta.X * CosYaw + Delta.Y * SinYaw;
+						const double LocalY =
+							-Delta.X * SinYaw + Delta.Y * CosYaw;
+						const double ExpandedDistance = FMath::Square(
+							LocalX / (Body.NormalizedPlanarRadii.X * 1.08))
+							+ FMath::Square(
+								LocalY / (Body.NormalizedPlanarRadii.Y * 1.08));
+						if (ExpandedDistance <= 1.0)
+						{
+							bAttachedToBody = true;
+							break;
+						}
+					}
+					TestTrue(TEXT("Edge cloudlet remains attached to its body cluster"),
+						bAttachedToBody);
+				}
+				break;
+			default:
+				AddError(TEXT("Unknown cloudlet layer."));
+				break;
+			}
+		}
+		TestEqual(TEXT("Body budget is frozen per island"), BodyCount,
+			FABTST4LowPolyCloudPrototype::GetCloudletLayerCount(
+				Island.IslandIndex, EABTST4CloudletLayer::Body));
+		TestEqual(TEXT("Crown budget is frozen per island"), CrownCount,
+			FABTST4LowPolyCloudPrototype::GetCloudletLayerCount(
+				Island.IslandIndex, EABTST4CloudletLayer::Crown));
+		TestEqual(TEXT("Edge budget is frozen per island"), EdgeCount,
+			FABTST4LowPolyCloudPrototype::GetCloudletLayerCount(
+				Island.IslandIndex, EABTST4CloudletLayer::Edge));
+		TestTrue(TEXT("Crown layer is higher than body coverage"),
+			CrownCount > 0 && BodyCount > 0
+			&& CrownHeightSum / CrownCount > BodyHeightSum / BodyCount);
+
+		// Measure the actual cloudlet union rather than only the authored island
+		// extents. A support-width sweep catches a chain of clusters or locally
+		// stretched edge cloudlets even when the outer envelope looks square.
+		double MinimumProjectedWidthCM = TNumericLimits<double>::Max();
+		double MaximumProjectedWidthCM = 0.0;
+		constexpr int32 AzimuthSampleCount = 24;
+		for (int32 AzimuthIndex = 0;
+			AzimuthIndex < AzimuthSampleCount; ++AzimuthIndex)
+		{
+			const double Angle = UE_TWO_PI
+				* static_cast<double>(AzimuthIndex)
+				/ static_cast<double>(AzimuthSampleCount);
+			const FVector2D Direction(FMath::Cos(Angle), FMath::Sin(Angle));
+			double MinimumSupportCM = TNumericLimits<double>::Max();
+			double MaximumSupportCM = -TNumericLimits<double>::Max();
+			for (const FABTST4InstancedCloudletDefinition& Cloudlet : Cloudlets)
+			{
+				const FVector2D CenterCM(
+					Cloudlet.NormalizedPlanarCenter.X * Island.ExtentsCM.X,
+					Cloudlet.NormalizedPlanarCenter.Y * Island.ExtentsCM.Y);
+				const FVector2D RadiiCM(
+					Cloudlet.NormalizedPlanarRadii.X * Island.ExtentsCM.X,
+					Cloudlet.NormalizedPlanarRadii.Y * Island.ExtentsCM.Y);
+				const double Orientation = Cloudlet.PlanarOrientationRadians;
+				const FVector2D AxisX(FMath::Cos(Orientation), FMath::Sin(Orientation));
+				const FVector2D AxisY(-FMath::Sin(Orientation), FMath::Cos(Orientation));
+				const double RadiusSupportCM = FMath::Sqrt(
+					FMath::Square(RadiiCM.X * FVector2D::DotProduct(Direction, AxisX))
+					+ FMath::Square(RadiiCM.Y * FVector2D::DotProduct(Direction, AxisY)));
+				const double CenterSupportCM = FVector2D::DotProduct(
+					Direction, CenterCM);
+				MinimumSupportCM = FMath::Min(
+					MinimumSupportCM, CenterSupportCM - RadiusSupportCM);
+				MaximumSupportCM = FMath::Max(
+					MaximumSupportCM, CenterSupportCM + RadiusSupportCM);
+			}
+			const double ProjectedWidthCM = MaximumSupportCM - MinimumSupportCM;
+			MinimumProjectedWidthCM = FMath::Min(
+				MinimumProjectedWidthCM, ProjectedWidthCM);
+			MaximumProjectedWidthCM = FMath::Max(
+				MaximumProjectedWidthCM, ProjectedWidthCM);
+		}
+		const double AzimuthalFootprintIsotropy = MaximumProjectedWidthCM > 0.0
+			? MinimumProjectedWidthCM / MaximumProjectedWidthCM
+			: 0.0;
+		TestTrue(
+			FString::Printf(
+				TEXT("Cloudlet union remains broad from every sampled azimuth (Island=%d Isotropy=%.4f MinWidthCM=%.2f MaxWidthCM=%.2f)"),
+				Island.IslandIndex,
+				AzimuthalFootprintIsotropy,
+				MinimumProjectedWidthCM,
+				MaximumProjectedWidthCM),
+			AzimuthalFootprintIsotropy >= 0.80);
+
+		constexpr int32 CoverageGrid = 65;
+		int32 EnclosingSamples = 0;
+		int32 MaskSamples = 0;
+		int32 CoveredSamples = 0;
+		for (int32 YIndex = 0; YIndex < CoverageGrid; ++YIndex)
+		{
+			const double Y = FMath::Lerp(
+				-1.0, 1.0,
+				static_cast<double>(YIndex) / (CoverageGrid - 1));
+			for (int32 XIndex = 0; XIndex < CoverageGrid; ++XIndex)
+			{
+				const double X = FMath::Lerp(
+					-1.0, 1.0,
+					static_cast<double>(XIndex) / (CoverageGrid - 1));
+				if (X * X + Y * Y > 1.0)
+				{
+					continue;
+				}
+				++EnclosingSamples;
+				bool bInsideMacroMaskCore = false;
+				for (const FABTST4CloudMacroClusterDefinition& Cluster
+					: MacroClusters)
+				{
+					const FVector2D Delta = FVector2D(X, Y)
+						- Cluster.NormalizedCenter;
+					const double CosYaw = FMath::Cos(Cluster.OrientationRadians);
+					const double SinYaw = FMath::Sin(Cluster.OrientationRadians);
+					const double LocalX = Delta.X * CosYaw + Delta.Y * SinYaw;
+					const double LocalY = -Delta.X * SinYaw + Delta.Y * CosYaw;
+					const double ClusterDistance = FMath::Square(
+						LocalX / Cluster.NormalizedRadii.X)
+						+ FMath::Square(LocalY / Cluster.NormalizedRadii.Y);
+					if (ClusterDistance <= FMath::Square(0.76))
+					{
+						bInsideMacroMaskCore = true;
+						break;
+					}
+				}
+				if (!bInsideMacroMaskCore)
+				{
+					continue;
+				}
+				++MaskSamples;
+				bool bCovered = false;
+				for (const FABTST4InstancedCloudletDefinition& Cloudlet : Cloudlets)
+				{
+					if (Cloudlet.Layer != EABTST4CloudletLayer::Body)
+					{
+						continue;
+					}
+					const FVector2D Delta = FVector2D(X, Y)
+						- Cloudlet.NormalizedPlanarCenter;
+					const double CosYaw = FMath::Cos(
+						Cloudlet.PlanarOrientationRadians);
+					const double SinYaw = FMath::Sin(
+						Cloudlet.PlanarOrientationRadians);
+					const double LocalX = Delta.X * CosYaw + Delta.Y * SinYaw;
+					const double LocalY = -Delta.X * SinYaw + Delta.Y * CosYaw;
+					const double EllipseDistance = FMath::Square(
+						LocalX / Cloudlet.NormalizedPlanarRadii.X)
+						+ FMath::Square(
+							LocalY / Cloudlet.NormalizedPlanarRadii.Y);
+					if (EllipseDistance <= 1.0)
+					{
+						bCovered = true;
+						break;
+					}
+				}
+				CoveredSamples += bCovered ? 1 : 0;
+			}
+		}
+		const double Coverage = MaskSamples > 0
+			? static_cast<double>(CoveredSamples) / MaskSamples
+			: 0.0;
+		const double MaskOccupancy = EnclosingSamples > 0
+			? static_cast<double>(MaskSamples) / EnclosingSamples
+			: 0.0;
+		TestTrue(TEXT("Body covers at least 98 percent of intended macro mask"),
+			Coverage >= 0.98);
+		TestTrue(TEXT("Macro mask preserves deliberate non-convex negative space"),
+			MaskOccupancy >= 0.12 && MaskOccupancy <= 0.62);
+		TotalBody += BodyCount;
+		TotalCrown += CrownCount;
+		TotalEdge += EdgeCount;
+	}
+	TestEqual(TEXT("R1-C2-A4 total macro-cluster budget"),
+		TotalMacroClusters, 18);
+	TestEqual(TEXT("R1-C2-A4 total body budget"), TotalBody, 73);
+	TestEqual(TEXT("R1-C2-A4 total crown budget"), TotalCrown, 116);
+	TestEqual(TEXT("R1-C2-A4 total edge budget"), TotalEdge, 63);
+	TestEqual(TEXT("R1-C2-A4 retains the 252-instance GPU budget"),
+		TotalBody + TotalCrown + TotalEdge,
+		FABTST4LowPolyCloudPrototype::TotalCloudletCount);
 	return true;
 }
 

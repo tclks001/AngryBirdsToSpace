@@ -33,6 +33,7 @@ float OutlineNormalCreaseStrength;
 float SelectiveOutlineStrength;
 float SelectiveOutlineWidthScale;
 uint bAllowSelectiveStencil;
+uint CloudCompositeStencilValue;
 float3 OutlineColor;
 float3 CameraFromPlanetCenterWorld;
 float PlanetRadiusCM;
@@ -373,11 +374,11 @@ uint2 ABTSViewportUVToBufferPixel(float2 ViewportUV)
 	return min(uint2(BufferUV * BufferSize), BufferSize - uint2(1, 1));
 }
 
-uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
+uint ABTSSampleVisibleStencil(float2 ViewportUV)
 {
 	const uint2 BufferPixel = ABTSViewportUVToBufferPixel(ViewportUV);
 	const uint Stencil = CalcSceneCustomStencil(BufferPixel);
-	if (Stencil < 1u || Stencil > 7u)
+	if (Stencil == 0u)
 	{
 		return 0u;
 	}
@@ -397,17 +398,35 @@ uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
 	return RelativeDepthDelta <= 0.006f ? Stencil : 0u;
 }
 
+uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
+{
+	const uint Stencil = ABTSSampleVisibleStencil(ViewportUV);
+	return Stencil >= 1u && Stencil <= 7u ? Stencil : 0u;
+}
+
 // x: geometry-to-background silhouette, y: depth occlusion,
 // z: depth-continuous normal crease.
 float3 ABTSComputeNeighborEdgeLayers(
 	float CenterDepth,
 	float3 CenterNormal,
+	uint CenterStencil,
 	float2 SampleUV)
 {
 	const float SampleDeviceDepth = ABTSSampleDeviceDepth(SampleUV);
 	if (SampleDeviceDepth <= 1.0e-7f)
 	{
 		return float3(1.0f, 0.0f, 0.0f);
+	}
+
+	const uint SampleStencil = ABTSSampleVisibleStencil(SampleUV);
+	if (CloudCompositeStencilValue != 0u
+		&& CenterStencil == CloudCompositeStencilValue
+		&& SampleStencil == CloudCompositeStencilValue)
+	{
+		// All cloudlets in the transient composite share one stencil identity.
+		// Suppress their mutual depth and normal seams, but leave cloud-to-sky
+		// and cloud-to-world boundaries on the ordinary outline path.
+		return float3(0.0f, 0.0f, 0.0f);
 	}
 
 	const float SampleDepth = ConvertFromDeviceZ(SampleDeviceDepth);
@@ -443,6 +462,7 @@ float3 ABTSComputeOutlineLayerCoverage(float2 ViewportUV)
 
 	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
 	const float3 CenterNormal = ABTSSampleWorldNormal(ViewportUV);
+	const uint CenterStencil = ABTSSampleVisibleStencil(ViewportUV);
 	const float2 PixelOffset = ViewportInvSize * OutlineWidthPixels;
 	const float2 DiagonalOffset = PixelOffset * 0.70710678f;
 	const float2 Offsets[8] =
@@ -464,6 +484,7 @@ float3 ABTSComputeOutlineLayerCoverage(float2 ViewportUV)
 		AccumulatedEdgeLayers += ABTSComputeNeighborEdgeLayers(
 			CenterDepth,
 			CenterNormal,
+			CenterStencil,
 			saturate(ViewportUV + Offsets[SampleIndex]));
 	}
 
@@ -561,16 +582,27 @@ void ABTSStylizedToneMainPS(
 	{
 		const float3 WorldViewDirection = normalize(
 			ScreenVectorFromScreenRect(float4(UVAndScreenPos.zw, 1.0f, 0.0f)));
-		const float3 ContinuousSky = ABTSComposeContinuousGroundSky(
+		float3 ContinuousSky = ABTSComposeContinuousGroundSky(
 			WorldViewDirection);
 		OutColor = float4(
 			ABTSQuantizeContinuousSkyForSDR(ContinuousSky, ViewportUV),
 			SceneColor.a);
 		return;
 	}
+	// The cloudlet material already produces its own continuous, low-frequency
+	// toon bands from a shared island field. Feeding those bands through the
+	// generic object luminance quantizer collapses the whole cloud into one
+	// highlight target and erases its relief. Stencil 8 is Integration-owned by
+	// the cloud composite, so preserve the material-authored result while the
+	// ordinary outline pass still owns the cloud silhouette.
+	const uint ToneStencil = ABTSSampleVisibleStencil(ViewportUV);
+	const bool bCloudComposite = CloudCompositeStencilValue != 0u
+		&& ToneStencil == CloudCompositeStencilValue;
 	OutColor = bEnvironmentBackground
 		? SceneColor
-		: float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a);
+		: (bCloudComposite
+			? SceneColor
+			: float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a));
 }
 
 void ABTSStylizedStarMainPS(

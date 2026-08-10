@@ -58,6 +58,14 @@ struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
 	float StarAngularRadiusScale = 0.055f;
 	float StarHDRIntensity = 1.8f;
 	float FixedExposureBias = 0.0f;
+	/** T4-A2 native radial cloud-shell route. Zero keeps non-ground profiles cloud-free. */
+	uint32 bCloudsEnabled = 0;
+	float CloudBaseAltitudeCM = 0.0f;
+	float CloudLayerHeightCM = 0.0f;
+	float CloudGlobalScaleKM = 0.0f;
+	float CloudCoverage = 0.0f;
+	float CloudDensity = 0.0f;
+	float CloudViewSampleCountScale = 0.0f;
 
 	bool IsValid() const;
 };

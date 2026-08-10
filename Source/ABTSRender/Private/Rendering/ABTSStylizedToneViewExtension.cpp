@@ -33,6 +33,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(float, SelectiveOutlineStrength)
 		SHADER_PARAMETER(float, SelectiveOutlineWidthScale)
 		SHADER_PARAMETER(uint32, bAllowSelectiveStencil)
+		SHADER_PARAMETER(uint32, CloudCompositeStencilValue)
 		SHADER_PARAMETER(FVector3f, OutlineColor)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
@@ -54,6 +55,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(float, StarHDRIntensity)
 		SHADER_PARAMETER(uint32, EnvironmentProfile)
 		SHADER_PARAMETER(uint32, bHasEnvironmentParameters)
+		SHADER_PARAMETER(uint32, CloudCompositeStencilValue)
 		SHADER_PARAMETER(float, ShadowThreshold)
 		SHADER_PARAMETER(float, ToneNormalizationFloor)
 		SHADER_PARAMETER(float, HighlightThreshold)
@@ -407,6 +409,9 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			PassParameters->SelectiveOutlineWidthScale = 1.45f;
 			PassParameters->bAllowSelectiveStencil =
 				bAllowSelectiveStencil ? 1u : 0u;
+			PassParameters->CloudCompositeStencilValue =
+				FABTSStylizedRenderingContract::
+					ResolveCloudCompositeStencilValueForRenderer();
 			PassParameters->OutlineColor = OutlineProfile.Color;
 			PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 
@@ -477,6 +482,9 @@ namespace ABTSStylizedToneViewExtensionPrivate
 				static_cast<uint32>(Environment.Profile);
 			PassParameters->bHasEnvironmentParameters =
 				bHasEnvironment ? 1u : 0u;
+			PassParameters->CloudCompositeStencilValue =
+				FABTSStylizedRenderingContract::
+					ResolveCloudCompositeStencilValueForRenderer();
 			PassParameters->ShadowThreshold = ToneProfile.ShadowThreshold;
 			PassParameters->ToneNormalizationFloor = FMath::Max(
 				ToneNormalizationFloor,
@@ -636,6 +644,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 
 	TSharedPtr<FABTSStylizedToneSceneViewExtension, ESPMode::ThreadSafe>
 		GViewExtension;
+
 }
 
 void ABTSStylizedToneViewExtension::Initialize()
