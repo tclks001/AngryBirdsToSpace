@@ -223,6 +223,14 @@ CameraDistance  = clamp(FramingDistance, MinDistance, MaxDistance)
 - 切换前后相机位置、速度、朝向和 FOV 一阶连续；
 - Rank 0 与 Rank 11 全程无鸟离框、无目标空窗、无 Frenet 翻转。
 
+M3 已开始实现，详细合同与阶段门见 [M3 三行星连续导演与 Handoff](M11FinaleCameraM3MultiAssistHandoff.md)。2026-08-09 Rank11、Stylized 1 迭代已让 Assist1/2/3 进入同一套 Lucy 构图数学，两个 CurrentBody 切换均只发生在 Handoff，三颗左→右均成立，M3 窗口鸟丢失为 0、Approach 累计回撤为 0；但 Handoff 当前目标仍有 22 帧空窗，因此 `m3HandoffPassed=false`，M3 尚未完成。全局 FinalApproach 的鸟丢失与旋转跃变属于 M4，不混入本阶段放行结论。
+
+首轮在三颗 Approach 开始后 0.75 秒均出现一次屏幕方向回跳；初次交叉淡化虽消除了单帧跳变，却把问题摊成 230–242 帧一类的连续慢回摆。最终状态职责改为：鸟优先安全构图只在 Handoff 工作并于末尾 0.50 秒释放，Approach 从第一帧起只运行唯一的 Lucy 位置解算。离线门同时检查负向单帧跳变和历史最右位置后的累计回撤。fresh Rank11 三颗 Assist 的两类回撤均为 0、M3 鸟丢失为 0、三颗左→右均成立，`m3NoApproachReversal=true`；Handoff 22 帧目标空窗仍为独立开放项。
+
+后续节奏复核又确认，单用物理 `Periapsis/Handoff/Approach` 作为镜头状态会让不同候选、不同 Assist 的可用叙事时长失衡：木星没有足够盘外建立段，土星转轴则被压缩在 Handoff 尾部。现将权威 Stage 保持不变，在其上叠加 `OutgoingHold/IncomingReveal/IncomingTrack/IncomingEntryMatch`；下一行星按 AssistEnter 前 3.25 秒反向调度，并为上一行星保留 Closest 后至少 0.75 秒。Assist1 不再是旧 M2 百分比 Lead-in 特例，而把发射点视为虚拟 `LaunchAnchor`，从 playback 0 开始平滑获取火星，完成获取后进入稳定 Track。揭示曲线的末端位置和速度均与 Approach 入口匹配，从而把“何时开始讲下一颗行星”从物理作用域中解耦。该改造属于 M3 内部镜头导演，不改变候选、渲染或 PlaybackPlan。
+
+跨行星空窗现由显式 `DualBodyBridge` 处理：`OutgoingHold` 把镜头扩到 85°，桥接解同时拟合鸟、上一行星和下一行星，并保持上一颗在左、下一颗在右；随后 `IncomingTrack/IncomingEntryMatch` 改用鸟与下一行星的双主体拟合，直到物理 Enter 后 0.50 秒才把位置权威交还 Lucy 穿越解。桥接远景仅对鸟的演出视觉做临时倍率补偿，不修改鸟的 Actor、碰撞、轨迹或事件。Rank11 fresh 证据已消除两次“零行星帧”和全部 M3 窗口鸟丢失，但远景桥两端仍包含显式匹配切换，旧的严格单镜头位姿/FOV 连续门仍失败；因此本轮只关闭空窗问题，不宣称 M3-B/M3-C 完成。
+
 ### M4：UFO 终端与镜头收束
 
 - FinalApproach 同时保持鸟与 UFO；

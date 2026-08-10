@@ -17,14 +17,14 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// First integrated contract that combines the T2-C1 runtime-state gate
-	// with M1/M2 camera observations and director telemetry.
-	static constexpr int32 ContractVersion = 6;
+	// Adds dual-body bridge telemetry and the wide three-subject composition.
+	static constexpr int32 ContractVersion = 10;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
 	bool bStylized = false;
 	bool bDirectorM2 = false;
+	bool bDirectorM3 = false;
 	bool bAutoExit = true;
 	int32 WarmupFrames = 30;
 	int32 TerminalHoldFrames = 24;
@@ -58,10 +58,19 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	FString InteractionState;
 	FString Stage;
 	FString CurrentTarget;
+	FString FramingTarget;
 	FString StageReason;
+	double StageProgress = 0.0;
+	double StageDurationSeconds = 0.0;
+	FString ShotPhase;
+	FString ShotReason;
+	double ShotProgress = 0.0;
+	double ShotDurationSeconds = 0.0;
+	double ShotEndSlope = 0.0;
 	FString DirectorMode;
 	double DirectorBlendAlpha = 0.0;
 	bool bDirectorM2FrozenEnabled = false;
+	bool bDirectorM3FrozenEnabled = false;
 	FVector BirdWorld = FVector::ZeroVector;
 	FVector2D BirdScreen = FVector2D::ZeroVector;
 	double BirdDepthCM = 0.0;
@@ -72,6 +81,14 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	double TargetDepthCM = 0.0;
 	double TargetPixelRadius = 0.0;
 	double TargetVisibleRatio = 0.0;
+	FString BridgeOutgoingTarget;
+	FVector2D BridgeOutgoingScreen = FVector2D::ZeroVector;
+	double BridgeOutgoingPixelRadius = 0.0;
+	double BridgeOutgoingVisibleRatio = 0.0;
+	FString BridgeIncomingTarget;
+	FVector2D BridgeIncomingScreen = FVector2D::ZeroVector;
+	double BridgeIncomingPixelRadius = 0.0;
+	double BridgeIncomingVisibleRatio = 0.0;
 	FVector CameraWorld = FVector::ZeroVector;
 	FRotator CameraRotation = FRotator::ZeroRotator;
 	double CameraToBirdCM = 0.0;

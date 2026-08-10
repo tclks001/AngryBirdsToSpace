@@ -555,6 +555,408 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		Diagnostics.DirectedFovDegrees,
 		M2Settings.BaselineFovDegrees,
 		1.0e-9);
+
+	FABTSM11FinaleCameraShotSettings M3ShotSettings;
+	const FABTSM11FinaleCameraStageSelection M3LaunchAcquire =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			0.2,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Launch immediately acquires Assist1"),
+		M3LaunchAcquire.FramingAssistIndex,
+		1);
+	TestEqual(
+		TEXT("Launch acquisition is an explicit incoming reveal"),
+		static_cast<uint8>(M3LaunchAcquire.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::IncomingReveal));
+	TestEqual(
+		TEXT("Launch acquisition starts at the launch authority time"),
+		M3LaunchAcquire.ShotDurationSeconds,
+		10.0,
+		1.0e-9);
+	TestEqual(
+		TEXT("Launch acquisition uses the full first encounter progress"),
+		M3LaunchAcquire.ShotProgress,
+		0.02,
+		1.0e-9);
+
+	const FABTSM11FinaleCameraStageSelection M3LaunchTrack =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			1.0,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Assist1 becomes an established incoming track after acquire"),
+		static_cast<uint8>(M3LaunchTrack.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::IncomingTrack));
+	TestTrue(
+		TEXT("Established Assist1 track remains an incoming shot"),
+		M3LaunchTrack.IsM3IncomingShot());
+	TestFalse(
+		TEXT("Established Assist1 track is no longer the acquire phase"),
+		M3LaunchTrack.IsM3IncomingAcquire());
+
+	const FABTSM11FinaleCameraStageSelection M3LaunchEntryMatch =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			9.6,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Assist1 uses the same pre-enter match state as later bodies"),
+		static_cast<uint8>(M3LaunchEntryMatch.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::IncomingEntryMatch));
+
+	DirectorSample.Selection = M3LaunchAcquire;
+	DirectorSample.Selection.ShotProgress =
+		0.5 * M2Settings.HandoffLeadInSeconds
+		/ DirectorSample.Selection.ShotDurationSeconds;
+	TestTrue(
+		TEXT("Launch-anchored Assist1 acquisition builds a finite frame"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestEqual(
+		TEXT("Launch-anchored acquisition reaches half director weight"),
+		Diagnostics.DirectorBlendAlpha,
+		0.5,
+		1.0e-9);
+
+	const FABTSM11FinaleCameraStageSelection M3OutgoingHold =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			15.0,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Authority CurrentBody still switches at the physical Handoff"),
+		M3OutgoingHold.AssistIndex,
+		2);
+	TestEqual(
+		TEXT("Outgoing hold keeps framing the departed body"),
+		M3OutgoingHold.FramingAssistIndex,
+		1);
+	TestEqual(
+		TEXT("Physical Handoff can carry an outgoing presentation shot"),
+		static_cast<uint8>(M3OutgoingHold.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::OutgoingHold));
+	TestTrue(
+		TEXT("M3 Handoff is a directed assist window"),
+		M3OutgoingHold.IsM3AssistWindow());
+	TestFalse(
+		TEXT("M3 Handoff does not leak into the M2 scope"),
+		M3OutgoingHold.IsM2Assist1Window());
+	DirectorSample.Selection = M3OutgoingHold;
+	DirectorSample.TargetCenter = FVector(5000.0, 3000.0, 0.0);
+	DirectorSample.OutgoingTargetCenter = DirectorSample.TargetCenter;
+	DirectorSample.OutgoingTargetRadiusCM = DirectorSample.TargetRadiusCM;
+	DirectorSample.IncomingTargetCenter = FVector(9000.0, 3000.0, 0.0);
+	DirectorSample.IncomingTargetRadiusCM = DirectorSample.TargetRadiusCM;
+	TestTrue(
+		TEXT("Outgoing hold remains a finite directed frame"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestEqual(
+		TEXT("Physical Handoff preserves the outgoing Lucy exit mark"),
+		Diagnostics.TransitScreenXInTargetRadii,
+		M2Settings.TransitExitOffsetRadii,
+		1.0e-9);
+	TestEqual(
+		TEXT("Outgoing hold never fades to the subject-losing legacy chase"),
+		Diagnostics.DirectorBlendAlpha,
+		1.0,
+		1.0e-9);
+
+	const FABTSM11FinaleCameraStageSelection M3DualBodyBridge =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			17.0,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Dual-body bridge frames Assist2 before AssistEnter"),
+		M3DualBodyBridge.FramingAssistIndex,
+		2);
+	TestEqual(
+		TEXT("Inter-body handoff has an explicit bridge state"),
+		static_cast<uint8>(M3DualBodyBridge.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::DualBodyBridge));
+	TestEqual(
+		TEXT("Dual-body bridge keeps the full incoming shot budget"),
+		M3DualBodyBridge.ShotDurationSeconds,
+		M3ShotSettings.IncomingRevealLeadSeconds,
+		1.0e-9);
+	TestEqual(
+		TEXT("Bridge identifies the outgoing assist"),
+		M3DualBodyBridge.OutgoingAssistIndex,
+		1);
+	TestEqual(
+		TEXT("Bridge identifies the incoming assist"),
+		M3DualBodyBridge.IncomingAssistIndex,
+		2);
+	TestEqual(
+		TEXT("Bridge exposes both subjects in its framing label"),
+		M3DualBodyBridge.FramingTargetLabel,
+		FString(TEXT("Assist1+Assist2")));
+	DirectorSample.Selection = M3DualBodyBridge;
+	DirectorSample.TargetCenter = DirectorSample.IncomingTargetCenter;
+	TestTrue(
+		TEXT("Dual-body bridge builds one finite three-subject frame"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestEqual(
+		TEXT("Dual-body bridge owns the wide lens"),
+		Diagnostics.DirectedFovDegrees,
+		M2Settings.DualBodyBridgeFovDegrees,
+		1.0e-9);
+	TestEqual(
+		TEXT("Dual-body bridge is fully presentation authoritative"),
+		Diagnostics.DirectorBlendAlpha,
+		1.0,
+		1.0e-9);
+	const FABTSM11FinaleCameraStageSelection M3IncomingTrack =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			17.5,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Incoming body enters Track after its acquisition interval"),
+		static_cast<uint8>(M3IncomingTrack.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::IncomingTrack));
+
+	const FABTSM11FinaleCameraStageSelection M3EntryMatch =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			19.6,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Final pre-enter interval is explicitly EntryMatch"),
+		static_cast<uint8>(M3EntryMatch.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::IncomingEntryMatch));
+
+	FABTSM11FinaleCameraShotSettings BorrowedTimeSettings = M3ShotSettings;
+	BorrowedTimeSettings.IncomingRevealLeadSeconds = 7.0;
+	const FABTSM11FinaleCameraStageSelection BorrowedPeriapsis =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			13.5,
+			&EventResult,
+			true,
+			&BorrowedTimeSettings);
+	TestEqual(
+		TEXT("Authority remains in outgoing Periapsis during early reveal"),
+		static_cast<uint8>(BorrowedPeriapsis.Stage),
+		static_cast<uint8>(EABTSM11FinaleCameraStage::Periapsis));
+	TestEqual(
+		TEXT("Presentation can already frame the next assist"),
+		BorrowedPeriapsis.FramingAssistIndex,
+		2);
+	TestTrue(
+		TEXT("Early reveal borrows only presentation time"),
+		BorrowedPeriapsis.IsM3IncomingShot());
+
+	FABTSM11FinaleCameraStageSelection M3IncomingReveal = M3DualBodyBridge;
+	M3IncomingReveal.ShotPhase =
+		EABTSM11FinaleCameraShotPhase::IncomingReveal;
+	M3IncomingReveal.OutgoingAssistIndex = 0;
+	M3IncomingReveal.IncomingAssistIndex = 0;
+	M3IncomingReveal.FramingTargetLabel = TEXT("Assist2");
+	M3IncomingReveal.ShotReason = TEXT("Assist2AcquireUnit");
+	DirectorSample.Selection = M3IncomingReveal;
+	DirectorSample.TargetCenter = FVector(9000.0, 3000.0, 0.0);
+	DirectorSample.Selection.ShotProgress = 0.0;
+	TestTrue(
+		TEXT("M3 IncomingReveal start builds the incoming assist frame"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestEqual(
+		TEXT("M3 IncomingReveal starts at exact legacy weight"),
+		Diagnostics.DirectorBlendAlpha,
+		0.0,
+		1.0e-9);
+	TestEqual(
+		TEXT("M3 IncomingReveal starts from the far incoming mark"),
+		Diagnostics.TransitScreenXInTargetRadii,
+		-M2Settings.TransitCruiseFarOffsetRadii,
+		1.0e-9);
+	DirectorSample.Selection.ShotProgress =
+		0.5 * M2Settings.HandoffLeadInSeconds
+		/ DirectorSample.Selection.ShotDurationSeconds;
+	TestTrue(
+		TEXT("M3 IncomingReveal blend midpoint remains finite"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestEqual(
+		TEXT("M3 IncomingReveal midpoint reaches half director weight"),
+		Diagnostics.DirectorBlendAlpha,
+		0.5,
+		1.0e-9);
+	DirectorSample.Selection.ShotProgress =
+		M2Settings.HandoffLeadInSeconds
+		/ DirectorSample.Selection.ShotDurationSeconds;
+	TestTrue(
+		TEXT("M3 IncomingReveal establishment remains finite"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestEqual(
+		TEXT("M3 reaches full incoming director weight after lead-in"),
+		Diagnostics.DirectorBlendAlpha,
+		1.0,
+		1.0e-9);
+	TestEqual(
+		TEXT("M3 IncomingReveal retains the baseline lens"),
+		Diagnostics.DirectedFovDegrees,
+		M2Settings.BaselineFovDegrees,
+		1.0e-9);
+
+	const double DerivativeStep = 1.0e-4;
+	DirectorSample.Selection = M3IncomingReveal;
+	DirectorSample.Selection.ShotProgress = 1.0 - DerivativeStep;
+	FABTSM11FinaleCameraM2Diagnostics HandoffBeforeBoundary;
+	TestTrue(
+		TEXT("Incoming reveal derivative sample is valid"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			HandoffBeforeBoundary));
+	DirectorSample.Selection.ShotProgress = 1.0;
+	FABTSM11FinaleCameraM2Diagnostics HandoffAtBoundary;
+	TestTrue(
+		TEXT("Incoming reveal reaches the entry boundary"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			HandoffAtBoundary));
+	const double HandoffBoundarySpeed =
+		(HandoffAtBoundary.TransitScreenXInTargetRadii
+			- HandoffBeforeBoundary.TransitScreenXInTargetRadii)
+		/ (DerivativeStep
+			* DirectorSample.Selection.ShotDurationSeconds);
+
+	DirectorSample.Selection.Stage = EABTSM11FinaleCameraStage::Approach;
+	DirectorSample.Selection.ShotPhase =
+		EABTSM11FinaleCameraShotPhase::Authority;
+	DirectorSample.Selection.ShotProgress = 0.0;
+	DirectorSample.Selection.ShotDurationSeconds = 0.0;
+	DirectorSample.Selection.ShotEndSlope = 0.0;
+	DirectorSample.Selection.ShotReason = TEXT("AuthorityStage");
+	DirectorSample.Selection.AssistIndex = 2;
+	DirectorSample.Selection.FramingAssistIndex = 2;
+	DirectorSample.Selection.TargetLabel = TEXT("Assist2");
+	DirectorSample.Selection.FramingTargetLabel = TEXT("Assist2");
+	DirectorSample.Selection.StageProgress = 0.0;
+	FABTSM11FinaleCameraM2Diagnostics ApproachAtBoundary;
+	TestTrue(
+		TEXT("M3 Approach entry remains finite"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			ApproachAtBoundary));
+	DirectorSample.Selection.StageProgress = DerivativeStep;
+	FABTSM11FinaleCameraM2Diagnostics ApproachAfterBoundary;
+	TestTrue(
+		TEXT("M3 Approach derivative sample remains finite"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			ApproachAfterBoundary));
+	const double ApproachBoundarySpeed =
+		(ApproachAfterBoundary.TransitScreenXInTargetRadii
+			- ApproachAtBoundary.TransitScreenXInTargetRadii)
+		/ (DerivativeStep * 2.0);
+	TestEqual(
+		TEXT("Incoming reveal matches Approach screen velocity"),
+		HandoffBoundarySpeed,
+		ApproachBoundarySpeed,
+		1.0e-3);
+
+	DirectorSample.Selection.StageProgress = 0.5;
+	TestTrue(
+		TEXT("M3 applies the Lucy encounter to Assist2"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
+	TestFalse(
+		TEXT("M2 still rejects Assist2"),
+		ABTSM11FinaleFlightCameraMath::BuildM2Assist1Frame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			DirectedTransform,
+			Diagnostics));
 	return true;
 }
 

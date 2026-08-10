@@ -23,6 +23,8 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 	double MaximumRetreatCM = 4500.0;
 	double CruiseLeadInStartFraction = 0.15;
 	double CruiseLeadInBlendFraction = 0.35;
+	double HandoffLeadInSeconds = 0.40;
+	bool bReleaseDirectorDuringPeriapsis = true;
 	double ApproachBrakeStartFraction = 0.65;
 	double ClosestRetreatFraction = 0.10;
 	double PeriapsisReleaseFraction = 0.80;
@@ -36,6 +38,9 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 	double BaselineFovDegrees = 50.0;
 	double ClosestFovDegrees = 30.0;
 	double PeriapsisFovRestoreFraction = 0.80;
+	double DualBodyBridgeFovDegrees = 85.0;
+	double DualBodyBridgeFitMargin = 1.15;
+	double DualBodyBridgeSeconds = 0.60;
 
 	bool IsUsable() const;
 };
@@ -81,6 +86,23 @@ namespace ABTSM11FinaleFlightCameraMath
 		const FABTSM11FinaleCameraM2Settings& Settings,
 		FTransform& OutDirectedTransform,
 		FABTSM11FinaleCameraM2Diagnostics& OutDiagnostics);
+
+	/** Builds the same Lucy encounter envelope for any M3 assist/Handoff. */
+	ABTSRUNTIME_API bool BuildM3AssistFrame(
+		const FABTSM11FinaleFlightCameraFrame& BaselineFrame,
+		const FVector& BirdPosition,
+		const FABTSM11FinaleCameraDirectorSample& DirectorSample,
+		const FABTSM11FinaleCameraM2Settings& Settings,
+		FTransform& OutDirectedTransform,
+		FABTSM11FinaleCameraM2Diagnostics& OutDiagnostics);
+
+	/** Fits the bird and the outgoing/incoming planets into one wide bridge. */
+	ABTSRUNTIME_API bool BuildM3DualBodyBridgeFrame(
+		const FABTSM11FinaleFlightCameraFrame& BaselineFrame,
+		const FVector& BirdPosition,
+		const FABTSM11FinaleCameraDirectorSample& DirectorSample,
+		const FABTSM11FinaleCameraM2Settings& Settings,
+		FTransform& OutBridgeTransform);
 
 	/** Keeps the planet anchored after the camera location has been smoothed. */
 	ABTSRUNTIME_API bool BuildM2PlanetAnchoredRotation(
@@ -133,15 +155,37 @@ public:
 	{
 		return bM2DirectorFrozenEnabled;
 	}
+	bool IsM3DirectorFrozenEnabled() const
+	{
+		return bM3DirectorFrozenEnabled;
+	}
 	double GetLastM2BlendAlpha() const { return LastM2BlendAlpha; }
 	double GetLastM2RetreatAlpha() const { return LastM2RetreatAlpha; }
 	double GetLastM2TransitScreenXInTargetRadii() const
 	{
 		return LastM2TransitScreenXInTargetRadii;
 	}
+	double GetM3BridgeBirdVisualScale() const
+	{
+		return M3BridgeBirdVisualScale;
+	}
 	EABTSM11FinaleCameraStage GetLastDirectorStage() const
 	{
 		return LastDirectorStage;
+	}
+	FABTSM11FinaleCameraShotSettings GetM3ShotSettings() const
+	{
+		FABTSM11FinaleCameraShotSettings Settings;
+		Settings.IncomingRevealLeadSeconds =
+			M3IncomingRevealLeadSeconds;
+		Settings.IncomingAcquireSeconds = M3HandoffLeadInSeconds;
+		Settings.DualBodyBridgeSeconds = M3DualBodyBridgeHoldSeconds;
+		Settings.MinimumDepartureHoldSeconds =
+			M3MinimumDepartureHoldSeconds;
+		Settings.OutgoingReleaseSeconds =
+			M3OutgoingBridgePullbackSeconds;
+		Settings.EntryMatchSeconds = M3HandoffReleaseSeconds;
+		return Settings;
 	}
 
 private:
@@ -195,6 +239,61 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M2",
 		meta = (ClampMin = "0.05", ClampMax = "0.9", UIMin = "0.1", UIMax = "0.6"))
 	double M2CruiseLeadInBlendFraction = 0.35;
+
+	/** Real-time duration used to establish the incoming M3 assist frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "2.0", UIMin = "0.2", UIMax = "1.0", Units = "s"))
+	double M3HandoffLeadInSeconds = 0.40;
+
+	/** Minimum time for which both planets own the bridge composition. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.2", ClampMax = "2.0", UIMin = "0.4", UIMax = "1.0", Units = "s"))
+	double M3DualBodyBridgeHoldSeconds = 0.60;
+
+	/** Wide lens used while the outgoing and incoming planets share the frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "50.0", ClampMax = "100.0", UIMin = "60.0", UIMax = "80.0", Units = "deg"))
+	double M3DualBodyBridgeFovDegrees = 85.0;
+
+	/** Projection margin around all three bridge subjects. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.02", ClampMax = "1.5", UIMin = "1.05", UIMax = "1.25"))
+	double M3DualBodyBridgeFitMargin = 1.15;
+
+	/** Presentation-only bird magnification used while the wide bridge is open. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.0", ClampMax = "20.0", UIMin = "4.0", UIMax = "12.0"))
+	double M3BridgeBirdVisualScale = 10.0;
+
+	/** Pull-back duration before the dual-body bridge becomes authoritative. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.2", ClampMax = "2.0", UIMin = "0.5", UIMax = "1.2", Units = "s"))
+	double M3OutgoingBridgePullbackSeconds = 0.90;
+
+	/** Lead time before AssistEnter at which the next body reveal begins. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.0", ClampMax = "6.0", UIMin = "2.0", UIMax = "4.5", Units = "s"))
+	double M3IncomingRevealLeadSeconds = 3.25;
+
+	/** Minimum outgoing-body hold after physical Closest before pre-reveal. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.0", ClampMax = "2.0", UIMin = "0.4", UIMax = "1.2", Units = "s"))
+	double M3MinimumDepartureHoldSeconds = 0.75;
+
+	/** Final interval already fully aligned to the incoming Lucy frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "2.0", UIMin = "0.25", UIMax = "1.0", Units = "s"))
+	double M3HandoffReleaseSeconds = 0.50;
+
+	/** Position step ceiling while Handoff changes the framing target. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "100.0", UIMin = "1000.0", UIMax = "4500.0", Units = "cm"))
+	double M3TransitionMaximumPositionStepCM = 1500.0;
+
+	/** Rotation step ceiling while M3 Handoff/Approach framing is active. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "14.0", UIMin = "2.0", UIMax = "12.0", Units = "deg"))
+	double M3TransitionMaximumRotationStepDegrees = 10.0;
 
 	/** Approach fraction at which the pull-out begins braking into Closest. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M2",
@@ -263,6 +362,7 @@ private:
 
 	FVector LastAuthorityForward = FVector::ForwardVector;
 	FVector LastTransportedUp = FVector::UpVector;
+	FVector LastAuthorityTargetPosition = FVector::ZeroVector;
 	double LastM2BlendAlpha = 0.0;
 	double LastM2RetreatAlpha = 0.0;
 	double LastM2TransitScreenXInTargetRadii = -3.00;
@@ -270,4 +370,5 @@ private:
 		EABTSM11FinaleCameraStage::PreLaunch;
 	bool bAuthorityFollowActive = false;
 	bool bM2DirectorFrozenEnabled = false;
+	bool bM3DirectorFrozenEnabled = false;
 };

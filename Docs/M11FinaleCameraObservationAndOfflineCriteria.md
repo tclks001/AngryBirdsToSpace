@@ -66,6 +66,16 @@ M2 把录制合同升级到 5、CSV Schema 升级到 2，并在原 36 列基础�
 
 v6 是首个无歧义的完整集成合同：它同时要求 CSV Schema 2/M2 导演遥测，以及 `stylizedRuntimeStateMaintained`、`stylizedRuntimeStateFailureFrame` 两项全程渲染状态证据。逐帧状态检查发生在观测与图像捕获之前；发生漂移时必须在该帧停止录制、写失败 Manifest，不能把半段普通渲染视频标为 `Complete`。后续并行开发修改录制合同前，必须先合并最新 `master` 并从当前最高版本单调递增，不能只基于功能分支旧基线自行占用版本号。
 
+### 3.3 M3 三行星扩展
+
+M3 把录制合同升级到 7、CSV Schema 升级到 3，并增加 `framingTarget`、`stageProgress`、`stageDurationSeconds`、`directorM3FrozenEnabled`。`currentTarget` 表示叙事 CurrentBody；`framingTarget` 表示实际提供行星中心、半径和冻结 encounter basis 的 Assist。两者分离后，离线工具可以验证 CurrentBody 只在 Handoff 切换，同时防止相机在后台偷偷使用另一颗行星而没有留下证据。
+
+Schema 3 的阶段决策指纹同时纳入 CurrentBody、FramingBody、阶段进度和真实阶段时长。Schema 4 再加入 `shotPhase/shotReason/shotProgress/shotDurationSeconds/shotEndSlope`，把独立镜头叙事状态、提前揭示时长与入口速度匹配纳入决策身份。离线工具继续接受 Schema 1/2/3，并为缺失的新列填入明确的旧版默认值；旧 M1/M2/M3 证据不需要重录。M3 报告按 Assist1/2/3 分列鸟/目标丢失、导演帧、提前揭示帧和左→右穿越，并单列 ShotPhase 数量、两次 Handoff 的切换位置、目标空窗与连续性门。详见 [M3 三行星连续导演与 Handoff](M11FinaleCameraM3MultiAssistHandoff.md)。
+
+Schema 5 保持列结构不变，扩展 `shotPhase` 合法值为 `IncomingReveal/IncomingTrack/IncomingEntryMatch`，并把 Assist1 纳入同一 Incoming 状态合同。离线工具新增 `m3FirstBodyAcquisitionPassed`：按 playback seconds 要求发射后 0.10 秒内启动导演混合、0.75 秒内首个目标首次可见、1.00 秒内完整入画，并保证首段鸟不丢失。Schema 1–4 继续兼容读取，不追溯应用该新门。
+
+录制合同 v10、CSV Schema 6 新增 `DualBodyBridge` 以及上一/下一桥接行星各自的标签、屏幕坐标、像素半径和可见比例。`m3DualBodyBridgePassed` 要求桥接状态实际出现、每个桥接帧两颗行星均可见、跨行星叙事窗口不存在两颗行星同时不可见的帧、桥接全过程鸟不离框，且桥接远景中的鸟半径至少 2 px。该门只证明三主体远景桥和无空窗，不豁免 `m3HandoffPassed` 原有的相机位置、旋转与 FOV 连续性要求。
+
 M2 A/B 使用：
 
 ```powershell
@@ -79,7 +89,7 @@ python Tools/M11Camera/analyze_camera_observations.py `
 
 该门要求两条阶段决策指纹相等、旧镜头混合帧为 0、导演镜头只在 Assist1 Cruise/Approach/Periapsis 混合、鸟不丢失、当前目标丢失显著改善且相机无跳变。报告额外记录 Cruise 混合帧、Cruise 目标丢失帧、首次 Cruise 混合帧和首次 Cruise 目标可见帧，用于防止“Approach 出现太晚且首次出现已经过大”的假通过。
 
-### 3.2 投影与可见比例
+### 3.4 投影与可见比例
 
 观测器用录制帧相同的最终相机 View、水平 FOV 和分辨率做解析投影。视觉包围球投影为屏幕圆，其可见比例定义为“圆的轴对齐包围方形与画幅相交面积 / 包围方形面积”，并限制在 `[0,1]`。深度不为正时像素半径和可见比例为 0。
 
@@ -107,6 +117,8 @@ python Tools/M11Camera/analyze_camera_observations.py `
 | 相机位置连续 | 单帧变化 `<= 5000 cm` | 位置跃变 |
 | 相机旋转连续 | 单帧变化 `<= 15°` | 朝向跃变 |
 | FOV 连续 | 单帧变化 `<= 2°` | 焦段跃变 |
+
+M3 的 Approach 方向门不能只检查单帧大跳。对每颗 Assist 的可观测 Approach 相对 X，工具同时记录 `maximumApproachBackwardJumpPixels` 和 `maximumApproachBackwardExcursionPixels`；后者维护历史最大相对 X，并计算后续帧相对该最大值的累计回撤。任一累计回撤超过 20 px 时，`m3NoApproachReversal=false`。这可识别“每帧只退几像素、持续十余帧”的慢回摆。
 
 报告同时给出失败帧数、最长连续失败、最大跃变量，以及每个连续 Stage/Target 窗口的帧范围和极值。阈值是 M1 的离线诊断基线，不是最终 M2–M5 镜头质量目标。
 

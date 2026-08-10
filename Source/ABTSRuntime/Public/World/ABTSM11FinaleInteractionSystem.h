@@ -338,6 +338,7 @@ private:
 	FABTSM11FinaleLaunchInput LatestSolvedInput;
 	FABTSM11FinaleLaunchInput FrozenReleaseInput;
 	FTransform AttemptBirdOriginalTransform = FTransform::Identity;
+	FVector AttemptBirdOriginalVisualScale = FVector::OneVector;
 	TWeakObjectPtr<APlayerController> ActiveFinaleController;
 	FVector AimSlingCenter = FVector::ZeroVector;
 	FVector AimSlingForward = FVector::ForwardVector;

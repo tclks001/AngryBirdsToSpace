@@ -251,6 +251,11 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	AttemptBird = Bird;
 	ActiveCord = &Cord;
 	AttemptBirdOriginalTransform = Bird->GetActorTransform();
+	if (const USkeletalMeshComponent* BirdVisual = Bird->GetBirdVisual())
+	{
+		AttemptBirdOriginalVisualScale =
+			BirdVisual->GetRelativeScale3D();
+	}
 	Party->SetSlingshotMode(true);
 	const FABTSM11FinaleLayoutPreset& Preset =
 		FinaleSystem->GetLayoutPreset();
@@ -1014,16 +1019,21 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		ETeleportType::TeleportPhysics);
 	FABTSM11FinaleCameraDirectorSample DirectorSample;
 	const FABTSM11FinaleCameraDirectorSample* DirectorSamplePtr = nullptr;
-	if (FlightCamera->IsM2DirectorFrozenEnabled())
+	if (FlightCamera->IsM2DirectorFrozenEnabled()
+		|| FlightCamera->IsM3DirectorFrozenEnabled())
 	{
 		const FABTSM11TrajectoryResult* Prediction =
 			GetCurrentPrediction();
+		const FABTSM11FinaleCameraShotSettings M3ShotSettings =
+			FlightCamera->GetM3ShotSettings();
 		DirectorSample.Selection =
 			ABTSM11FinaleCameraDirector::ResolveStage(
 				true,
 				false,
 				PlaybackElapsedSeconds,
-				Prediction);
+				Prediction,
+				FlightCamera->IsM3DirectorFrozenEnabled(),
+				&M3ShotSettings);
 		const FABTSM11FinaleLayoutPreset& Preset =
 			FinaleSystem->GetLayoutPreset();
 		if (DirectorSample.Selection.bTargetIsUFO)
@@ -1035,13 +1045,13 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 			DirectorSample.TargetRadiusCM =
 				Target.GetGeometricContactRadiusCM();
 		}
-		else if (DirectorSample.Selection.AssistIndex >= 1
-			&& DirectorSample.Selection.AssistIndex
+		else if (DirectorSample.Selection.FramingAssistIndex >= 1
+			&& DirectorSample.Selection.FramingAssistIndex
 				<= FABTSM11GravityScenario::AssistCount)
 		{
 			const FABTSM11GravityBodySpec& Body =
 				Preset.CanonicalScenario.GetAssist(
-					DirectorSample.Selection.AssistIndex);
+					DirectorSample.Selection.FramingAssistIndex);
 			DirectorSample.TargetCenter = Frame.TransformLocalPosition(
 				FVector(Body.CenterCM));
 			DirectorSample.TargetRadiusCM = Body.VisualRadiusCM;
@@ -1049,19 +1059,19 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 				Prediction != nullptr
 					? Prediction->FindAssistEvent(
 						EABTSM11TrajectoryEventType::AssistEnter,
-						DirectorSample.Selection.AssistIndex)
+						DirectorSample.Selection.FramingAssistIndex)
 					: nullptr;
 			const FABTSM11TrajectoryEvent* Closest =
 				Prediction != nullptr
 					? Prediction->FindAssistEvent(
 						EABTSM11TrajectoryEventType::ClosestApproach,
-						DirectorSample.Selection.AssistIndex)
+						DirectorSample.Selection.FramingAssistIndex)
 					: nullptr;
 			const FABTSM11TrajectoryEvent* Exit =
 				Prediction != nullptr
 					? Prediction->FindAssistEvent(
 						EABTSM11TrajectoryEventType::AssistExit,
-						DirectorSample.Selection.AssistIndex)
+						DirectorSample.Selection.FramingAssistIndex)
 					: nullptr;
 			if (Enter == nullptr || Closest == nullptr || Exit == nullptr
 				|| !ABTSM11FinaleCameraDirector::BuildAssistEncounterBasis(
@@ -1078,8 +1088,74 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 				return;
 			}
 		}
-		const USkeletalMeshComponent* BirdVisual =
+		if (DirectorSample.Selection.OutgoingAssistIndex >= 1
+			&& DirectorSample.Selection.IncomingAssistIndex
+				== DirectorSample.Selection.OutgoingAssistIndex + 1)
+		{
+			const FABTSM11GravityBodySpec& OutgoingBody =
+				Preset.CanonicalScenario.GetAssist(
+					DirectorSample.Selection.OutgoingAssistIndex);
+			const FABTSM11GravityBodySpec& IncomingBody =
+				Preset.CanonicalScenario.GetAssist(
+					DirectorSample.Selection.IncomingAssistIndex);
+			DirectorSample.OutgoingTargetCenter =
+				Frame.TransformLocalPosition(FVector(OutgoingBody.CenterCM));
+			DirectorSample.OutgoingTargetRadiusCM =
+				OutgoingBody.VisualRadiusCM;
+			DirectorSample.IncomingTargetCenter =
+				Frame.TransformLocalPosition(FVector(IncomingBody.CenterCM));
+			DirectorSample.IncomingTargetRadiusCM =
+				IncomingBody.VisualRadiusCM;
+		}
+		USkeletalMeshComponent* BirdVisual =
 			AttemptBird->GetBirdVisual();
+		if (IsValid(BirdVisual))
+		{
+			double BridgeVisualScale = 1.0;
+			if (DirectorSample.Selection.IsM3InterBodyTransition())
+			{
+				const double WideScale =
+					FlightCamera->GetM3BridgeBirdVisualScale();
+				if (DirectorSample.Selection.ShotPhase
+					== EABTSM11FinaleCameraShotPhase::OutgoingHold)
+				{
+					BridgeVisualScale = FMath::Lerp(
+						1.0,
+						WideScale,
+						DirectorSample.Selection.ShotProgress);
+				}
+				else if (DirectorSample.Selection.ShotPhase
+					== EABTSM11FinaleCameraShotPhase::DualBodyBridge)
+				{
+					BridgeVisualScale = WideScale;
+				}
+				else if (DirectorSample.Selection.ShotPhase
+					== EABTSM11FinaleCameraShotPhase::IncomingTrack)
+				{
+					const double Elapsed =
+						DirectorSample.Selection.ShotProgress
+							* DirectorSample.Selection.ShotDurationSeconds;
+					const double CommitEnd = FMath::Max(
+						M3ShotSettings.DualBodyBridgeSeconds,
+						DirectorSample.Selection.ShotDurationSeconds
+							- M3ShotSettings.EntryMatchSeconds);
+					const double Commit = FMath::Clamp(
+						(Elapsed - M3ShotSettings.DualBodyBridgeSeconds)
+							/ FMath::Max(
+								UE_DOUBLE_SMALL_NUMBER,
+								CommitEnd
+									- M3ShotSettings.DualBodyBridgeSeconds),
+						0.0,
+						1.0);
+					BridgeVisualScale = FMath::Lerp(
+						WideScale,
+						1.0,
+						Commit);
+				}
+			}
+			BirdVisual->SetRelativeScale3D(
+				AttemptBirdOriginalVisualScale * BridgeVisualScale);
+		}
 		if (IsValid(BirdVisual)
 			&& FMath::IsFinite(BirdVisual->Bounds.SphereRadius)
 			&& BirdVisual->Bounds.SphereRadius > 1.0)
