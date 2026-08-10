@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-10 更新。T4-A0/A1 已完成用户截图与 PIE 验收。T4-A2 的原生 `VolumetricCloud`、全屏径向云壳及五叶瓣路线均已退役。R1-A/B/C 已形成 HISM 云滴、专用材质与云团轮廓合同；R1-C2-A4 的确定性随机不定形已经用户确认。版本 33 回混逐实例量而留下碎裂接缝，版本 34 退化为近均匀白块，版本 35 又引入相机驱动的整体跳亮。**R1-C2-B3-A2 v37** 已用视角无关三维宏簇梯度解决移动时整体忽明忽暗，并通过用户 PIE；当前进入 **B3-B v38 调色**，在同一共享体场上分别增加向光面变白与低密度薄层变白，不读取相机或逐实例像素量。下一步仍为 B3-C 多云团身份/合并、B3-D 消费端与 GPU 冻结；R1-D 有界穿云在 B3 视觉成立后继续。当前不得宣布 T4-A2 冻结，T4-A3/B 尚未开始。
+> 状态：2026-08-10 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**已在实现版本 44、路线 `InstancedCloudletsR1C2B3B6` 上通过 ForceUnity、fresh Toon 24/24、资产只读验证、D3D12 17 点/34 条及用户可见 PIE，状态为 `IntegrationAccepted`。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。当前下一步是 **T4-A2.2 多云团语义**，随后依次为 **A2.3 有界穿云表现**、**A2.4 消费端与性能冻结**；只有三者通过后才能宣布 T4-A2 冻结。T4-A3/B 尚未开始。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -26,11 +26,11 @@ T4 不改变：
 | --- | --- | --- | --- |
 | **T4-A0 球面环境合同与诊断** | 主星中心/半径、太阳方向、Profile 的只读快照；五个固定环境截图点；Tone/Outline/Shadow 隔离矩阵 | 不改生产光照、雾云、曝光和最终参数 | ForceUnity；`ABTS.Rendering.Toon.T4A0`；30 张同姿态矩阵可生成；`TOON-T2A-002` 保持开放直至人工判读 |
 | **T4-A1 Sky Atmosphere 与程序化 HDR 星场** | 关闭生产全局 Z 高度雾；球心大气；唯一 Atmosphere Sun；固定曝光；昼夜/高度星空显隐 | 不做体积云，不回调 T3 最终材质 | 昼面→晨昏→夜面→高空→太空连续；主视图/PIP/AVI 身份一致；GPU 证据 |
-| **T4-A2 球面云原型** | 原生云与全局云壳均已退役；按 R0 → R1-A/B/C → R1-C2-A 数据预演 → R1-C2-A2 非凸球面宏簇 → R1-C2-A3 方位均衡 → **R1-C2-A4 确定性随机不定形** → R1-C2-B 连续宏法线 → R1-D 局部穿云 → R2 推进 | 不先开真实云影；不保留原生体积云与风格云双重消费；不以自动化绿灯覆盖可见 PIE 拒绝 | 地面、两个正交侧面、云上、穿云视角可读；GPU、噪点、时域稳定性、SceneCapture 四门；路线决策被记录 |
+| **T4-A2 球面云** | **A2.1 云岛形态与表面基线** → **A2.2 多云团语义** → **A2.3 有界穿云表现** → **A2.4 消费端与性能冻结** | 不先开真实云影；不保留原生体积云与风格云双重消费；不以自动化绿灯覆盖可见 PIE 拒绝 | A2.1 已通过；A2.2～A2.4 分别通过多团遮挡、穿云连续性以及 PIP/AVI/时域/GPU 正式门后，T4-A2 才能冻结 |
 | **T4-A3 环境 Profile** | `GroundDay`、`SatelliteGuide`、`FinaleSpace` 环境装配；M11 快照与失败恢复 | 不改变 M11 求解/轨迹 | 主视图、地面/月面/终局 PIP、Rank11 AVI 与退出终局恢复一致 |
 | **T4-B T3/T4 联合校色** | 回开并调整 Roughness、Specular、Rim、Tint；解决地形褶皱；形成非 M7 联合基线 | M7 未完成时不宣称全项目冻结 | `TOON-T2A-002` 关闭证据；T3/T4 视觉和 GPU 联合基线；M7 后补建筑材质/特效 |
 
-阶段必须按 A0→A1→A2→A3→B 前进。A2 内部当前固定按 **R0→R1-A→R1-B→R1-C→R1-C2-A（数据通过、视觉拒绝）→R1-C2-A2→R1-C2-A3→R1-C2-A4→R1-C2-B→R1-D→R2** 前进。A2 用非凸宏簇和球面贴合修复错误的“整椭圆 98% 覆盖”目标，用方位均衡门阻止云岛退化为只能从单一侧面读取的云带，再以 Seed 驱动的不规则宏簇拓扑消除十字/方形人工痕迹；B 才解决跨云滴伪法线/遮蔽连续性，D 才加入有界穿云，R2 才执行 PIP/AVI、快速相机、分辨率和 GPU 正式门。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
+阶段必须按 A0→A1→A2→A3→B 前进。A2 的现行排期只使用 **A2.1→A2.2→A2.3→A2.4**；其中 A2.1 已于 2026-08-10 通过用户可见 PIE，当前从 A2.2 继续。`R0/R1-A/R1-C2-A4/B3B6/v44` 等名称只用于说明 A2.1 的技术演进、资产合同和日志身份，不再作为排期编号，也不得由它们推导新的后续阶段名。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
 
 ## 3. T4-A0：只读球面环境合同
 
@@ -230,23 +230,24 @@ $BuildId = 'T4A1-Visual-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 
 原生 `VolumetricCloud` 的地球尺度材质在当前约 100 m 主星上没有可用参数窗口：公开 ViewState 云纹理和透射率读取无误，但密度较低时完全透明，按薄壳光程补偿后立即饱和为均匀灰幕。v24 的 `StylizedDualRadialShell` 虽能在地面得到局部云形，却仍是包裹整颗主星的全屏背景算法；云上视角会读成连续壳层，不能提供有限云团的侧面、顶部与穿越体积，也无法支持本游戏高频弹弓飞越云层。两条路线均保留为历史证据，不再作为生产候选。
 
-### 7.2 冻结排期
+### 7.2 统一编号与冻结排期
+
+排期编号只表达可独立验收的交付物；实现路线和版本号只表达内部技术身份：
+
+- 排期：`T4-A2.1`～`T4-A2.4`；用于工作流、任务交接和验收结论；
+- 技术历史：`R0/R1-A/R1-C2-A4/B3B6`；只在本详稿的演进记录和日志中保留；
+- 实现版本：`v25`～`v44`；只用于 manifest、自动化与回归定位。
+
+不得再把内部试验名拼接成 `B3-B6-C` 一类新排期。旧文档中的 `B3-C` 内容统一归入 A2.2，`R1-D` 统一归入 A2.3，`B3-D/R2` 统一归入 A2.4。
 
 | 子阶段 | 实现范围 | 明确不做 | 退出门 |
 | --- | --- | --- | --- |
-| **T4-A2R0 有限低模云岛** | 三组固定、确定性、径向布置的云岛；每组由五个相交封闭低模叶瓣组成；无碰撞、无投影；原生云可逆隐藏 | 不做内部雾、运动、LOD、随机铺量和最终材质 | 布局/几何 Hash 稳定；每个叶瓣拓扑封闭；地面、侧面、云上、入云四点均能读到有限轮廓；Style/Profile 恢复正确 |
-| **T4-A2R1-A 云滴实例层** | 每座云岛一个 HISM；共享网格；2.5D 确定性云滴布局；Seed/高度/伪遮蔽/尺寸级四路实例数据 | 不把 Engine Sphere 外观当最终云；不在 Tick 重写全部矩阵 | 三岛总计 252 个实例；Hash 稳定；无碰撞/投影；生命周期继承 R0；ForceUnity 与合同测试通过 |
-| **T4-A2R1-B 云滴形态与材质** | 专用低面数云滴网格；顶点噪声扰动轮廓；不透明 Unlit 卡通亮暗与伪自阴影 | 不开每球 VSM；不做写实多重散射 | 云团不再像规则球堆或泡沫塑料；昼夜方向可读；WPO Bounds 无裁切 |
-| **T4-A2R1-C 云轮廓语义** | 注册 `EnvironmentCloud` 语义；抑制云滴之间的深度/法线内部描边，保留云团对天空/地面的外轮廓 | 不影响鸟、建筑、地形现有轮廓 | 外轮廓稳定，内部无黑色球缝；主视图与 SceneCapture 语义一致 |
-| **T4-A2R1-C2-A 分层覆盖布局** | 总预算仍为 252；每岛拆成连续主体层、云顶隆起层和切向边缘层；主体层按确定性最近邻覆盖尺度填满核心 | 不靠提高实例数、扩大 stencil 容差或后处理闭孔掩盖真实空隙；不修改材质伪法线 | 三层预算与 Hash 固定；主体核心解析覆盖率不低于 98%；俯视不再呈均匀圆点阵列，侧面仍保留有限云团轮廓 |
-| **T4-A2R1-C2-A2 非凸球面宏簇** | 每岛 5 个相交但保留负空间的确定性宏簇；Body 只覆盖宏簇核心；所有云滴按主星曲率正交定位；Edge 必须与同簇 Body 相交 | 不恢复整椭圆填充；不以孤立小球制造轮廓噪声；不提前修改 B 阶段材质法线 | 15 宏簇、252 实例和三层预算/Hash 固定；宏簇核心覆盖 `>=98%`、包围域保留负空间、Detached Edge=0；可见 PIE 不再读成云板/云墙 |
-| **T4-A2R1-C2-A3 方位均衡云岛** | 水平包络 X/Y 接近等尺度；中心簇加四个不规则方位簇并按岛 Seed 整体旋转；收敛单个 Edge 的切向拉伸；增加正交侧视诊断 | 不把云改成正圆盘；不改变高度层、球面贴合、材质、层预算或 252 实例总预算 | 水平包络长宽比 `<=1.08`；24 方位实例联合投影最窄/最宽 `>=0.80`；两个正交侧视均保持接近原宽侧视的云团阅读，不再出现叶片端面 |
-| **T4-A2R1-C2-A4 确定性随机不定形云岛** | 每岛使用一个偏心核心和五个 Seed 驱动外瓣；随机化外瓣角度、离心距离、等效半径、长宽比、局部朝向和高度，同时保留宽方位覆盖下限 | 不用固定四象限或规则网格；不放宽 `0.80` 方位饱满度掩盖新的窄轴；不改变球面贴合、材质、层预算或 252 实例总预算 | 18 宏簇及重复 Hash 固定；核心保持连接，外瓣距离/角间隔/尺寸均有可测离散度；24 方位实例联合投影最窄/最宽仍 `>=0.80`；可见 PIE 不再读出正方形、十字或规则多边形骨架 |
-| **T4-A2R1-C2-B 云岛连续宏法线（已落地，待 PIE）** | 每岛以世界位置、六个宏簇及共享解析云顶高度场构造连续宏法线、交叠谷和遮蔽，再按 Body/Crown/Edge 混入少量云滴局部法线 | 不以平滑颜色抹除外轮廓；不恢复逐云滴硬受光；不在本阶段加入穿云雾 | 横向移动时云滴交界不跳色；侧视明暗属于同一云团且仍有低频层次；WPO 轮廓与伪光照方向相容 |
-| **T4-A2R1-D 有界穿云** | 只在相机进入具体云岛包络时启用可恢复的局部遮蔽/雾；快速进出做连续过渡 | 不恢复全屏球壳；不让云改变轨迹或碰撞 | 穿云短暂可读、不整屏灰；云上/云下连续；Camera Cut 不残留 |
-| **T4-A2R2 消费端与性能冻结** | 主视图、地面 PIP、月面/终局 SceneCapture、Rank11 AVI；50/75/100% SP、1080p/1440p、快速 Camera Cut 与 GPU 基线 | 不回调 T3 材质和最终光照 | 视觉、时域、SceneCapture、GPU 四门全部通过后才可宣布 T4-A2 冻结 |
+| **T4-A2.1 云岛形态与表面基线** | 三座确定性球面云岛；252 个 HISM 云滴、18 个 Seed 驱动宏簇；专用低模网格/Unlit 材质；内部描边抑制；视角无关共享体场、向光/薄层变白和连续云底 | 不做多云团分组、相机入云效果、最终消费端/GPU 冻结 | **`IntegrationAccepted`**：ForceUnity、fresh Toon 24/24、资产只读验证、D3D12 17 点/34 条及用户 PIE 均通过；当前实现路线 `InstancedCloudletsR1C2B3B6`、版本 44 |
+| **T4-A2.2 多云团语义** | 为逻辑云团建立 `CloudGroup` 身份；同组抑制内部线，不同组保留遮挡边；重叠组明确合并或由布局隔离 | 不继续用全局 stencil `8` 猜测所有云都属于一组；不修改 A2.1 单云团着色 | 至少两团相离、前后遮挡和局部重叠均无错误消边；组身份进入 Hash/manifest；A2.1 视觉基线不回退 |
+| **T4-A2.3 有界穿云表现** | 相机进入具体云团包络时启用可恢复的局部遮蔽/雾，并连续处理进入、离开和 Camera Cut | 不恢复全屏球壳；不让云改变轨迹、碰撞或 WorldReady | 穿云短暂可读且不整屏灰；云上/云下连续；快速进出和 Camera Cut 不残留 |
+| **T4-A2.4 消费端与性能冻结** | 主视图、地面/月面/终局 PIP、Rank11 AVI；50/75/100% SP、1080p/1440p、快速相机、时域稳定性和 GPU 增量 | 不回调 T3 材质和最终光照；不以单一截图代替消费端矩阵 | 视觉、时域、SceneCapture/AVI 与 GPU 四门全部通过；A2.1～A2.3 无回归后才宣布 T4-A2 冻结 |
 
-### 7.3 R0 实现合同（版本 25）
+### 7.3 A2.1 技术演进：R0 有限云岛（版本 25）
 
 R0 继续消费 A0 的 `PlanetCenterWorld`、`PlanetRadiusCM`、`SunDirectionToSunWorld`、`CloudBaseAltitudeCM` 与 `CloudLayerHeightCM`。纯 C++ 布局器在昼面固定三个径向中心并建立局部切平面；云岛 Actor 以球心为原点生成 transient `UProceduralMeshComponent`，不写地图或资产。三个岛的位置、尺度、Seed、布局 Hash 与几何 Hash 均由合同确定；同一环境快照重复进入不得漂移。
 
@@ -278,9 +279,9 @@ $BuildId = 'T4A2-Visual-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
   "-ABTSToonT0BuildId=$BuildId" -ABTSToonT0ExitWhenDone
 ```
 
-R0 当前证据为 UE 5.8 ForceUnity 构建、fresh `ABTS.Rendering.Toon` 20/20，以及命令行 DX12 的 28/28 manifest。最新截图目录：`Saved/ABTSVisualCaptures/ToonT4A2R0/T4A2R0-Final-R2-20260809-203210/ToonT4A2_Screenshots_20260809T123235Z_19368`；当前径向法线偏置已消除云底近黑，但不透明基础材质仍只代表 R0 几何原型。该证据只证明有限几何路线成立；地面 PIP、SceneCapture、时域、TSR、GPU 和可见 PIE 留给 R1/R2，R0 不据此关闭 A2。
+R0 当前证据为 UE 5.8 ForceUnity 构建、fresh `ABTS.Rendering.Toon` 20/20，以及命令行 DX12 的 28/28 manifest。最新截图目录：`Saved/ABTSVisualCaptures/ToonT4A2R0/T4A2R0-Final-R2-20260809-203210/ToonT4A2_Screenshots_20260809T123235Z_19368`；当前径向法线偏置已消除云底近黑，但不透明基础材质仍只代表 R0 几何原型。该证据只证明有限几何路线成立；地面 PIP、SceneCapture、时域、TSR、GPU 和可见 PIE 后来分别进入 A2.1 演进与 A2.4 正式门，R0 不据此关闭 A2。
 
-### 7.4 R1 演进依据与 R1-A 合同（版本 26）
+### 7.4 A2.1 技术演进：R1-A 实例层（版本 26）
 
 R1 采用“许多共享低模云滴组成有限云团”的路线。参考方案以 GPU 实例、小球矩阵、顶点 Noise 和伪阴影构造可控云形；本项目吸收其表示思想，但不照搬“数千个 CPU 每帧更新的球”。UE 实现优先使用 `UHierarchicalInstancedStaticMeshComponent`：每座云岛一个组件，共享同一网格与材质；静态实例矩阵只在环境快照或布局 Hash 改变时重建，整座云的运动以后只改根 Actor。首版固定 96/72/84，共 252 个实例，先验证表示和生命周期，再以 GPU 数据决定是否扩到 600–1200。参考说明：[程序化 GPU 实例云方案](https://www.bilibili.com/video/BV1xNjt6hEMw/)。
 
@@ -290,7 +291,7 @@ R1-A 退出门只包含：三岛/252 实例数量、重复生成 Hash、四路�
 
 R1-A 当前代码证据已形成：UE 5.8 ForceUnity 成功；fresh `ABTS.Rendering.Toon` 为 21/21，日志 `Saved/Logs/T4A2R1A-Toon-20260809-210124-FreshAutomation.log`；隐藏 D3D12 `ToonT4A2` manifest 为 `Succeeded`、28/28、版本 26、`cloudRoute=InstancedCloudletsR1A`，目录 `Saved/ABTSVisualCaptures/ToonT4A2R1A/ToonT4A2_Screenshots_20260809T130439Z_66116`。运行日志冻结 `Islands=3 / Cloudlets=252 / CustomDataFloats=4 / LayoutHash=12476466087894278273`。四个云诊断点确认云团是有界实例集合且没有回归全局壳；同时清楚暴露规则球、硬明暗半球、内部描边和上下视角空隙，这些是 R1-B/C 的输入证据，不是调 R1-A 实例数来掩盖的问题。R1-A 尚待用户决定是否需要单独 PIE 验收；当前自动证据不替代最终云视觉验收。
 
-### 7.5 R1-B 专用云滴材质与不规则轮廓（版本 27）
+### 7.5 A2.1 技术演进：R1-B 云滴材质（版本 27）
 
 R1-B 不改变 R1-A 的三岛、252 实例、四路实例数据或生命周期，只替换视觉消费端。Integration 以 `Tools/Rendering/GenerateT4A2CloudAssets.py` 在 UE 5.8 命令行中确定性生成 `/Game/Toon/Environment/Cloud/M_ABTS_Toon_Cloudlet` 与 `SM_ABTS_Toon_Cloudlet`；无 `ABTS_T4A2_REBUILD=1` 时脚本只读验证且不得重写资产。网格是项目自有的共享云滴资产，正负 WPO Bounds 各扩展 30 cm；材质固定 Opaque/Unlit、StaticMesh/HISM Usage，并消费 `Seed01 / NormalizedHeight / FakeOcclusion / SizeTier` 四路实例数据。顶点阶段以世界位置、Seed 和 SizeTier 驱动连续 Noise 沿世界法线扰动；像素阶段用世界法线、权威太阳方向、高度抬升和伪遮蔽在冷色亮/暗两档间连续插值。云不再接收 UE 方向光硬阴影，避免受光球体的黑白半球，但太阳方向仍随环境快照更新。
 
@@ -298,15 +299,15 @@ R1-B 的退出门是“专用资产真实消费且没有退回默认材质”，
 
 当前证据：资产重建日志 `Saved/Logs/T4A2R1B-GenerateAssets-20260809-212229.log`；普通无重写验证日志 `Saved/Logs/T4A2R1B-ValidateAssets-20260809-212703.log`；ForceUnity 日志 `Saved/Logs/T4A2R1B-ForceUnity-20260809-212743.log`；fresh `ABTS.Rendering.Toon` 为 22/22，日志 `Saved/Logs/T4A2R1B-Toon-20260809-212816-FreshAutomation.log`。隐藏 D3D12 manifest 为 `Succeeded`、28/28、实现版本 27、全部记录 `cloudRoute=InstancedCloudletsR1B`，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260809T133015Z_66060`。四图确认有限云岛和蓝天空隙保持，硬明暗半球已消失，近景轮廓已被 WPO 打散；内部云滴描边与俯视圆石感继续开放给 R1-C。R1-B 自动证据不替代后续可见 PIE、PIP、时域和 GPU 门。
 
-### 7.6 R1-C 云团级轮廓语义（版本 28）
+### 7.6 A2.1 技术演进：R1-C 内部轮廓语义（版本 28）
 
 R1-C 不合并几何，也不关闭云的全局描边。三座 transient 云岛在写入 Custom Depth 时统一使用 Integration 保留值 `8`；现有鸟、建筑、地形和交互对象的选择性语义仍只使用 `1..7`。Tone/Outline pass 先以 SceneDepth 与 CustomDepth 一致性取得当前可见表面的 stencil，只有中心像素和邻域样本的可见 stencil **同时为 8** 时，才把这条深度/法线边视为同一云团内部接缝并抑制。云对天空、地面、主星、鸟或其他非云对象的边界仍沿用普通轮廓，因此不会把云整体抹成无边界白块，也不会改变玩法对象的选择性描边。
 
-该规则只解决“相交云滴被逐个套黑线”的合成问题。俯视时若两个云滴之间真实露出地面或天空，它们各自仍拥有合法外轮廓；这些空隙属于实例布局和后续美术形态问题，不应通过扩大 stencil 深度容差或无条件关闭云轮廓掩盖。R1-C 也不添加相机内雾、半透明壳或全屏灰幕，穿云内部表现继续由 R1-D 负责。
+该规则只解决“相交云滴被逐个套黑线”的合成问题。俯视时若两个云滴之间真实露出地面或天空，它们各自仍拥有合法外轮廓；这些空隙属于实例布局和后续美术形态问题，不应通过扩大 stencil 深度容差或无条件关闭云轮廓掩盖。R1-C 也不添加相机内雾、半透明壳或全屏灰幕，穿云内部表现现统一由 T4-A2.3 负责。
 
-当前证据：ForceUnity 日志 `Saved/Logs/T4A2R1C-ForceUnity-20260810-103012.log`；fresh `ABTS.Rendering.Toon` 为 23/23，日志 `Saved/Logs/T4A2R1C-Toon-20260810-103220.log`，其中 `CloudCompositeStencilContract` 验证值 8 不与 `1..7` 相撞、只抑制 `8/8` 边。隐藏 D3D12 manifest 为 `Succeeded`、28/28、实现版本 28、全部记录 `cloudRoute=InstancedCloudletsR1C`、`cloudCompositeStencilValue=8`、`cloudInternalOutlineSuppression=true`，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260810T023343Z_33084`。侧视和穿云点确认相交云滴之间的黑色石堆线已消失，云团对蓝天的轮廓仍存在；俯视点保留真实分离云滴的外边界。该自动像素证据仍不替代用户可见 PIE、R1-D 穿云与 R2 消费端/性能门。
+当前证据：ForceUnity 日志 `Saved/Logs/T4A2R1C-ForceUnity-20260810-103012.log`；fresh `ABTS.Rendering.Toon` 为 23/23，日志 `Saved/Logs/T4A2R1C-Toon-20260810-103220.log`，其中 `CloudCompositeStencilContract` 验证值 8 不与 `1..7` 相撞、只抑制 `8/8` 边。隐藏 D3D12 manifest 为 `Succeeded`、28/28、实现版本 28、全部记录 `cloudRoute=InstancedCloudletsR1C`、`cloudCompositeStencilValue=8`、`cloudInternalOutlineSuppression=true`，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260810T023343Z_33084`。侧视和穿云点确认相交云滴之间的黑色石堆线已消失，云团对蓝天的轮廓仍存在；俯视点保留真实分离云滴的外边界。该自动像素证据仍不替代用户可见 PIE、A2.3 穿云与 A2.4 消费端/性能门。
 
-### 7.7 R1-C2 云面聚合排期
+### 7.7 A2.1 技术演进：R1-C2 形态与云面聚合
 
 R1-C2-A 保留 R1-C 的 stencil 8、R1-B 资产、四路 Custom Data、三岛和 252 总预算，并建立 Body/Crown/Edge 三层数据角色。它的 ForceUnity、fresh Toon 24/24 和隐藏 D3D12 28/28 均通过，但验收目标错误地要求 Body 覆盖完整归一化椭圆核心 98%。用户可见 PIE 因而读到整块实心凸云板；同时所有实例共用一个切平面，低空侧视形成云墙，规则椭球方向产生平行肋纹，环带 Edge 又留下孤立小球。故 R1-C2-A 只保留为数据预演，**视觉状态为 Rejected**，不得直接进入 B。
 
@@ -316,9 +317,9 @@ R1-C2-A2 当前自动证据已形成：实现版本 30、路线 `InstancedCloudl
 
 R1-C2-A2 的后续正交方位 PIE 显示：云岛包络 X/Y、宏簇中心链、簇椭圆和 Edge 切向拉伸共享同一主轴，方向性被逐层放大；宽侧面可读，端面却成为狭长叶片。这不是材质或相机问题，而是布局合同缺少方位不变量。R1-C2-A3 因而保持 A2 的非凸、球面、附着和预算合同，只把水平包络改为近等尺度，将宏簇改为中心加四方位的不规则组合，并按每岛 Seed 整体旋转；自动化直接扫描实际云滴椭圆联合体的 24 个水平投影，不再以作者 Extents 冒充最终形态。版本 31 路线为 `InstancedCloudletsR1C2A3`。UE 5.8 ForceUnity 已通过，日志 `Saved/Logs/T4A2R1C2A3-ForceUnity-20260810-120255.log`；fresh `ABTS.Rendering.Toon` 为 24/24，日志 `Saved/Logs/T4A2R1C2A3-Toon-20260810-120340-FreshAutomation.log`。A3 消除了叶片端面，却由近等半径的中心加四象限固定结构产生了方形/十字轮廓，说明“方位均衡”不能等同于“人工对称”。
 
-R1-C2-A4 保留 A3 的包络、球面贴合、实例预算和方位门，将每岛拓扑改为一个轻微偏心核心加五个 Seed 驱动外瓣。五瓣只用等角骨架防止全部随机落在同一侧，随后分别随机角度扰动、离心距离、等效半径、长宽比、局部朝向和高度；外瓣半径下限及离心距离上限受控，以免随机不定形重新退化为窄云带。实现版本 32，路线 `InstancedCloudletsR1C2A4`，三岛共 18 宏簇。UE 5.8 ForceUnity 日志为 `Saved/Logs/T4A2R1C2A4-ForceUnity-20260810-123219.log`；定向合同日志为 `Saved/Logs/T4A2R1C2A4-Targeted-20260810-123219.log`；fresh `ABTS.Rendering.Toon` 为 24/24，日志 `Saved/Logs/T4A2R1C2A4-Toon-20260810-123322-FreshAutomation.log`。代码/数据门完成，可见 PIE 仍须确认三组固定 Seed 的整体轮廓不再呈正方形、十字或规则五边形；自动门不得代替该视觉门。
+R1-C2-A4 保留 A3 的包络、球面贴合、实例预算和方位门，将每岛拓扑改为一个轻微偏心核心加五个 Seed 驱动外瓣。五瓣只用等角骨架防止全部随机落在同一侧，随后分别随机角度扰动、离心距离、等效半径、长宽比、局部朝向和高度；外瓣半径下限及离心距离上限受控，以免随机不定形重新退化为窄云带。实现版本 32，路线 `InstancedCloudletsR1C2A4`，三岛共 18 宏簇。UE 5.8 ForceUnity 日志为 `Saved/Logs/T4A2R1C2A4-ForceUnity-20260810-123219.log`；定向合同日志为 `Saved/Logs/T4A2R1C2A4-Targeted-20260810-123219.log`；fresh `ABTS.Rendering.Toon` 为 24/24，日志 `Saved/Logs/T4A2R1C2A4-Toon-20260810-123322-FreshAutomation.log`。后续用户可见 PIE 已确认随机不定形轮廓不再呈正方形、十字或规则多边形；该成果已经并入 A2.1 最终基线，不再作为独立待验收阶段。
 
-R1-C2-B 在 A4 可见形态通过后建立云岛级连续着色坐标。每座 HISM 的 MID 消费中心、径向 Up、两个切向轴、范围和六个宏簇；第五路实例数据只提供 Body/Crown/Edge 层身份。像素先把六个宏簇解析为连续云顶高度场并对高度场求导，得到跨云滴共享的宏法线；宏簇高度、主导度和交叠谷继续生成低频明暗与连续遮蔽。局部 `VertexNormalWS` 只按 Body/Crown/Edge 权重 `0.18/0.30/0.36` 混入，宏法线强度为 `0.84`，逐实例伪遮蔽仅保留 `0.045` 的轻微变化。这样明显的球面接缝不再承担层次表达，云顶、主体和边缘仍可由共享场读出；R1-D 不得用雾效遮盖法线问题。
+R1-C2-B 在 A4 可见形态通过后建立云岛级连续着色坐标。每座 HISM 的 MID 消费中心、径向 Up、两个切向轴、范围和六个宏簇；第五路实例数据只提供 Body/Crown/Edge 层身份。像素先把六个宏簇解析为连续云顶高度场并对高度场求导，得到跨云滴共享的宏法线；宏簇高度、主导度和交叠谷继续生成低频明暗与连续遮蔽。局部 `VertexNormalWS` 只按 Body/Crown/Edge 权重 `0.18/0.30/0.36` 混入，宏法线强度为 `0.84`，逐实例伪遮蔽仅保留 `0.045` 的轻微变化。这样明显的球面接缝不再承担层次表达，云顶、主体和边缘仍可由共享场读出；后续 A2.3 不得用雾效遮盖法线问题。
 
 实现版本为 33，路线 `InstancedCloudletsR1C2B`，三岛仍为 18 宏簇、252 云滴和 stencil 8，布局 Hash 保持 `3043688260911877677`。资产必须由 `Tools/Rendering/GenerateT4A2CloudAssets.py` 在 `ABTS_T4A2_REBUILD=1` 时重建；普通运行只读验证。当前证据：资产重建日志 `Saved/Logs/T4A2R1C2B-GenerateAssets-20260810-134357-Rebuild.log`；ForceUnity 日志 `Saved/Logs/T4A2R1C2B-ForceUnity-20260810-133600.log`；fresh `ABTS.Rendering.Toon` 为 24/24，日志 `Saved/Logs/T4A2R1C2B-Toon-20260810-135001-FinalAutomation.log`。真实 D3D12 manifest 为 `Succeeded`、30/30，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260810T054507Z_68612`；日志无云材质 shader 编译错误。`CloudR0Side`、`CloudR0SideOrthogonal`、`CloudR0Above`、`CloudR0FlyThrough` 显示逐云滴明暗边界已收敛为连续浅蓝低频起伏，同时保留云团外轮廓。可见 PIE 仍须绕云横向移动，确认接缝不会随遮挡顺序重新跳变；该门通过前不得进入视觉冻结。
 
@@ -326,18 +327,18 @@ R1-C2-B 在 A4 可见形态通过后建立云岛级连续着色坐标。每座 H
 
 R1-C2-B2 当前代码与资产门已完成：最终资产重建日志为 `Saved/Logs/T4A2R1C2B2-GenerateAssets-20260810-141651-FinalRebuild.log`，确认 `ContinuousPlanarLighting=1 / PixelLocalNormalWeight=0 / PixelInstanceVariation=0`；UE 5.8 ForceUnity 日志为 `Saved/Logs/T4A2R1C2B2-ForceUnity-20260810-141345.log`；最终 fresh `ABTS.Rendering.Toon` 为 24/24，日志 `Saved/Logs/T4A2R1C2B2-Toon-20260810-141732-FinalAutomation.log`。用户 PIE 随后确认碎裂边界消失，但整体退化为均匀白块，因此 B2 作为“接缝归零”诊断成立，视觉不接受。
 
-### 7.8 R1-C2-B3 共享三维隐式云团排期
+### 7.8 A2.1 技术演进：连续云体着色与最终基线
 
 R1-C2-B3 不把逐实例法线、Layer、高度或 FakeOcclusion 放回像素端。HISM 云滴只负责不规则外轮廓、深度覆盖和 WPO；每岛六个确定性宏簇同时定义一个共享三维体场，所有相交云滴在同一相机射线上必须读取同一虚拟表面、体场梯度和光学厚度，从结构上兼容“无碎裂接缝”和“可读云体层次”。
 
-| 子阶段 | 内容 | 退出门 |
-| --- | --- | --- |
-| **B3-A 体场与表面** | 对六个定向椭球做解析射线相交，以软联合得到统一虚拟表面；三维高斯联合梯度生成共享法线，射线弦长形成连续光学厚度；云顶/主体/云底使用三个独立色带 | 材质版本 3、实现版本 35；逐实例像素权重仍为 0；ForceUnity 与 fresh Toon；侧视/正交侧视/俯视/近距 PIE 同时无碎裂接缝且不再是均匀白块 |
-| **B3-B 调色** | 只调共享体场的上表面、主体、云底、迎光边和密度响应；向光变白只消费宏体法线与太阳方向，薄层变白只消费共享三维密度；不得用局部球法线、Fresnel 或相机方向“补层次” | 向光凸起和薄层明显趋白，主体仍保留冷灰蓝层次；晨昏、昼面和背光面均可读；层次不沿单颗云滴边界移动；参数形成冻结 Profile |
-| **B3-C 多云团语义** | 引入 CloudGroup 身份；同组共享体场并抑制内部线，不同组保留遮挡边；实际重叠的两组先合并为同一组或由布局避免，不用统一 stencil 8 猜测逻辑归属 | 至少两团前后遮挡和相离画面无错误消边；组身份进入 Hash/manifest；单云团基线不变 |
-| **B3-D 消费与性能冻结** | 验证主视图、地面/月面 PIP、Rank11 AVI、快速相机、1080p/1440p、时域稳定性和 GPU；再衔接 R1-D 有界穿云 | shader 无回退；消费端一致；GPU 达预算；用户可见 PIE 通过后才允许冻结 B3 |
+下表仅记录 A2.1 内部被验证或否决的着色方案，不是后续排期：
 
-B3-A 使用六个宏椭球的解析二次方程，不做固定步数 Ray March；每像素成本与六宏簇数线性相关。软联合只混合邻近的命中深度，避免宏簇切换形成新的硬缝。体场法线来自联合密度梯度，连续低频细节也只使用岛局部坐标；像素端不得采样 PerInstanceCustomData。多云团并非本轮偷偷复用同一 stencil 的问题，正式身份与轮廓策略留在 B3-C 单独验收。
+| 历史路线 | 内容 | 结论 |
+| --- | --- | --- |
+| **B3-A 体场与表面** | 对六个定向椭球做解析射线相交，以软联合得到统一虚拟表面；三维高斯联合梯度生成共享法线，射线弦长形成连续光学厚度 | **Rejected**：实现版本 35 虽去除碎裂接缝，但相机射线参与光照权威，绕云时出现整团 brightness pumping |
+| **B3-B 调色及后续修正** | 改用固定岛坐标的视角无关体场，增加向光/薄层变白，并以连续云底场消除六瓣放射纹 | v37～v44 最终收敛为 A2.1 当前基线；实现版本 44 已通过用户 PIE，不再拆成新的排期子阶段 |
+
+B3-A 使用六个宏椭球的解析二次方程，不做固定步数 Ray March；每像素成本与六宏簇数线性相关。软联合只混合邻近的命中深度，避免宏簇切换形成新的硬缝。体场法线来自联合密度梯度，连续低频细节也只使用岛局部坐标；像素端不得采样 PerInstanceCustomData。多云团身份当时未进入本轮，现统一由 T4-A2.2 单独验收。
 
 B3-A 当前代码、资产和数据门已完成：材质重建日志为 `Saved/Logs/T4A2R1C2B3-GenerateAssets-20260810-145832.log`；UE 5.8 ForceUnity 独立证据为 `Saved/Logs/T4A2R1C2B3-ForceUnity-20260810-150352.log`；fresh `ABTS.Rendering.Toon` 为 24/24，日志 `Saved/Logs/T4A2R1C2B3-Toon-20260810-150203-FreshAutomation.log`。当前实现版本 35、材质版本 3，manifest 路线为 `InstancedCloudletsR1C2B3`。NullRHI 不编译最终像素 shader，也不能判断三段色是否真正可读；真实 RHI shader 扫描和用户侧视/正交侧视/俯视/近距 PIE 是 B3-A 尚未完成的视觉门。
 
@@ -358,6 +359,24 @@ v38 代码与静态视觉门已完成：资产重建日志为 `Saved/Logs/T4A2R1
 最终 v44 路线 `InstancedCloudletsR1C2B3B6` 为云底引入**视角无关的连续底面场**：只按固定云岛坐标中的局部高度生成 `UndersideBlend`，在云底逐渐压低宏簇交界项，并把密度、垂直层和直射光收敛到连续的大尺度响应；云侧、云顶继续消费原有共享体梯度、向光变白和薄层变白。该修复不读取相机位置、View Ray、Fresnel 或逐实例像素量，因此不会恢复 brightness pumping 或碎裂接缝。实现版本为 44，manifest 固定 `cloudUndersideField=true`。
 
 v44 证据：资产重建 `Saved/Logs/T4A2R1C2B3B6V44-GenerateAssets-20260810.log`；UE 5.8 ForceUnity `Saved/Logs/T4A2R1C2B3B6V44-ForceUnity-20260810.log`；资产无重写验证 `Saved/Logs/T4A2R1C2B3B6V44-Validate-NoRewrite-20260810.log`；fresh `ABTS.Rendering.Toon` 24/24 为 `Saved/Logs/T4A2R1C2B3B6V44-Toon-FreshAutomation-20260810.log`。真实 D3D12 17 点/34 条位于 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260810T105146Z_13992`，云材质无编译错误或 shader fallback；日志中的四条 M11 Finale Nanite usage 警告是既有独立项，不属于本次云修复。`CloudR0GroundZenith` 原图及高频残差均不再出现中心放射纹；`CloudR0GroundObliqueUp` 仍保留较暗云底与受光边，两个正交侧视保留亮云体/暗底分层，`CloudR0Above` 保留云顶低频层次。用户已于 2026-08-10 完成 R1-C2-B 可见 PIE 验收，确认放射纹消失且正常云体层次保留；该阶段状态更新为 `IntegrationAccepted`。云底色带的后续冷暖微调不得重新引入按实例或按视角的亮度源。
+
+### 7.9 T4-A2.2 多云团语义（下一阶段）
+
+当前三个云岛都写入同一个 composite stencil `8`，这足以完成单云团内部消线，却不能表达“两个相互独立的云团”。A2.2 必须引入稳定 `CloudGroup` 身份：同组云滴共享体场并抑制内部边，不同组在前后遮挡时保留合法边界；发生实际交叠的组必须在布局阶段合并，或由确定性间距规则避免，不得继续依赖全局 stencil 猜测。
+
+正式门为至少两团相离、前后遮挡和局部重叠三类构图；组身份进入布局 Hash、运行日志和 capture manifest；A2.1 的三座云岛、252 实例、外轮廓、连续层次和 PIE 基线不得回退。
+
+### 7.10 T4-A2.3 有界穿云表现
+
+A2.3 只在相机进入某个 `CloudGroup` 的有限包络时启用局部遮蔽/雾，并以连续权重处理接近、进入、离开和 Camera Cut。它不得恢复全屏球壳，不参与鸟的轨迹、碰撞、世界生成或 `WorldReady`。现有 `CloudR0FlyThrough` 只是观察姿态，不代表穿云效果已经实现。
+
+正式门为云下、云内、云上连续；短暂穿越可读而不整屏灰；快速进入/离开与 Camera Cut 后无残留；Style Off、Profile 切换和子系统退出可完整恢复。
+
+### 7.11 T4-A2.4 消费端与性能冻结
+
+A2.4 汇总原 `B3-D/R2`：验证主视图、地面/月面/终局 PIP、Rank11 AVI、快速相机、50%/75%/100% Screen Percentage、1080p/1440p、时域稳定性和 GPU 增量。该阶段不再修改 T3 材质，也不以某一个截图点或 NullRHI 绿灯替代消费端矩阵。
+
+只有 A2.1～A2.3 均无回归，真实 RHI 无云 shader fallback，SceneCapture/AVI 与主视图身份一致且 GPU 达到预算，才允许把 T4-A2 标记为冻结并进入 T4-A3。
 
 ## 8. T4-A3 与 T4-B
 
