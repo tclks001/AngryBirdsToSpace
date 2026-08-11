@@ -450,8 +450,40 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> CrownSourceVolumeIds;
 		TArray<int32> GroundSourceVolumeIds;
 		TArray<int32> AdjacentDemandIds;
+		/** Diagnostic-only ground catchment selected after the semantic graph closes. */
+		int32 SupportProvinceId = INDEX_NONE;
 		bool bHasContinuousCoreFit = false;
 		bool bSharesMergedCrown = false;
+	};
+
+	/** A deterministic ground catchment for one or more overlapping terminal
+	 * demand seeds.  Provinces partition course-0 semantic occupancy exactly;
+	 * they do not yet alter podium/core geometry. */
+	struct FSupportProvinceDiagnostic
+	{
+		int32 ProvinceId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 StableSeedDemandId = INDEX_NONE;
+		int32 MinimumXUnit = 0;
+		int32 MinimumYUnit = 0;
+		int32 SizeX = 0;
+		int32 SizeY = 0;
+		int32 GroundCellCount = 0;
+		int32 TieBreakCellCount = 0;
+		/** Exclusive highest course for which every assigned ground cell remains occupied. */
+		int32 HighestFullyOccupiedTopCourse = 0;
+		/** Conservative, diagnostic-only local podium proposal. */
+		int32 ProposedPodiumTopCourse = 0;
+		int32 MinimumRequiredTopCourse = 0;
+		TArray<uint64> GroundCellWords;
+		TArray<int32> DemandIds;
+		TArray<int32> TerminalBodyNodeIds;
+		TArray<int32> GroundSourceVolumeIds;
+		TArray<int32> AdjacentProvinceIds;
+		FBox GroundBounds = FBox(EForceInit::ForceInit);
+		FVector GroundCentroid = FVector::ZeroVector;
+		bool bUsedNearestGroundSeed = false;
+		bool bSyntheticGroundOnly = false;
 	};
 
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
@@ -579,6 +611,12 @@ namespace ABTSM73BeamC3V3
 		int32 SemanticSupportCourseCount = 0;
 		int32 SemanticTerminalDemandCount = 0;
 		int32 SemanticTerminalDemandWithoutContinuousFitCount = 0;
+		int32 SupportProvinceCount = 0;
+		int32 MultiDemandSupportProvinceCount = 0;
+		int32 SupportProvinceGroundCellCount = 0;
+		int32 SupportProvinceBoundaryCount = 0;
+		int32 SupportProvinceTieBreakCellCount = 0;
+		int32 SupportProvinceNearestSeedFallbackCount = 0;
 		int32 CoreMergeRegionCount = 0;
 		int32 MergedGroundComponentCount = 0;
 		int32 MaximumCoreRailCount = 0;
@@ -647,6 +685,8 @@ namespace ABTSM73BeamC3V3
 		int64 SupportPlanHash = 0;
 		/** Diagnostic identity only; deliberately excluded from Stage1 geometry hashes. */
 		int64 SemanticSupportDemandHash = 0;
+		/** Diagnostic support-catchment identity; excluded from all geometry hashes. */
+		int64 SupportProvinceHash = 0;
 		int64 FinalGeometryHash = 0;
 		FString RejectReason;
 	};
@@ -686,6 +726,7 @@ namespace ABTSM73BeamC3V3
 			SemanticSupportCourseOccupancies;
 		TArray<FSemanticTerminalDemandDiagnostic>
 			SemanticTerminalDemands;
+		TArray<FSupportProvinceDiagnostic> SupportProvinces;
 		TArray<FCoreCellPlan> CoreCells;
 		TArray<FSharedEndpointReachabilityDiagnostic>
 			SharedEndpointReachabilityDiagnostics;

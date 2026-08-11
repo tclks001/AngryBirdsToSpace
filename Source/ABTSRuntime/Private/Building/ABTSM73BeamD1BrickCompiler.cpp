@@ -2734,6 +2734,18 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.SemanticTerminalDemandWithoutContinuousFitCount;
 	Summary.SkeletonFirstSemanticSupportDemandHash =
 		Stage1.SemanticSupportDemandHash;
+	Summary.SkeletonFirstSupportProvinceCount = Stage1.SupportProvinceCount;
+	Summary.SkeletonFirstMultiDemandSupportProvinceCount =
+		Stage1.MultiDemandSupportProvinceCount;
+	Summary.SkeletonFirstSupportProvinceGroundCellCount =
+		Stage1.SupportProvinceGroundCellCount;
+	Summary.SkeletonFirstSupportProvinceBoundaryCount =
+		Stage1.SupportProvinceBoundaryCount;
+	Summary.SkeletonFirstSupportProvinceTieBreakCellCount =
+		Stage1.SupportProvinceTieBreakCellCount;
+	Summary.SkeletonFirstSupportProvinceNearestSeedFallbackCount =
+		Stage1.SupportProvinceNearestSeedFallbackCount;
+	Summary.SkeletonFirstSupportProvinceHash = Stage1.SupportProvinceHash;
 	Summary.SkeletonFirstCoreCellCount = Stage1.CoreCellCount;
 	Summary.SkeletonFirstCoreMergeRegionCount = Stage1.CoreMergeRegionCount;
 	Summary.SkeletonFirstMergedGroundComponentCount =
@@ -2786,11 +2798,37 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SupportResultantAdvisoryCount =
 		OutResult.StaticDAG.Summary.SupportResultantAdvisoryCount;
 	Summary.BrickGeometryHash = Stage1.FinalGeometryHash;
+	for (const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province
+		: OutResult.Skeleton.Plan.SupportProvinces)
+	{
+		FString DemandList;
+		for (const int32 DemandId : Province.DemandIds)
+		{
+			DemandList += DemandList.IsEmpty()
+				? FString::FromInt(DemandId)
+				: FString::Printf(TEXT(",%d"), DemandId);
+		}
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-Beam-C3V3][SupportProvince]")
+			TEXT(" Province=%d Component=%d SeedDemand=%d Demands=%s")
+			TEXT(" Cells=%d Ties=%d Neighbors=%d FullyOccupiedTop=%d ProposedPodiumTop=%d RequiredTop=%d")
+			TEXT(" SyntheticGroundOnly=%d NearestSeedFallback=%d"),
+			Province.ProvinceId, Province.ComponentId,
+			Province.StableSeedDemandId, *DemandList,
+			Province.GroundCellCount, Province.TieBreakCellCount,
+			Province.AdjacentProvinceIds.Num(),
+			Province.HighestFullyOccupiedTopCourse,
+			Province.ProposedPodiumTopCourse,
+			Province.MinimumRequiredTopCourse,
+			Province.bSyntheticGroundOnly ? 1 : 0,
+			Province.bUsedNearestGroundSeed ? 1 : 0);
+	}
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7.3-Beam-C3V3][Stage1Stopped]")
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
 		TEXT(" GrammarHash=%lld WFCHash=%lld EnvelopeHash=%lld Stage1Hash=%lld")
 		TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+		TEXT(" Provinces=%d MultiDemandProvinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceTies=%d ProvinceFallbacks=%d ProvinceHash=%lld")
 		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
 		TEXT(" StaticDAG=Accepted LoadDAGHash=%lld Physical=NotEvaluated")
 		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
@@ -2803,6 +2841,13 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.SemanticTerminalDemandCount,
 		Stage1.SemanticSupportLedgerCount,
 		Stage1.SemanticSupportDemandHash,
+		Stage1.SupportProvinceCount,
+		Stage1.MultiDemandSupportProvinceCount,
+		Stage1.SupportProvinceGroundCellCount,
+		Stage1.SupportProvinceBoundaryCount,
+		Stage1.SupportProvinceTieBreakCellCount,
+		Stage1.SupportProvinceNearestSeedFallbackCount,
+		Stage1.SupportProvinceHash,
 		Stage1.ExplicitCoreCellCount,
 		Stage1.PodiumMainCoreCellCount, Stage1.TowerChildCoreCellCount,
 		Stage1.HighProjectionRegionCount,

@@ -3083,6 +3083,27 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 			&& Plan.Summary.SemanticSupportCourseCount > 0
 			&& Plan.Summary.SemanticTerminalDemandCount > 0
 			&& Plan.Summary.SemanticSupportDemandHash != 0);
+	Check(TEXT("partitions semantic ground occupancy into support provinces"),
+		Plan.Summary.SupportProvinceCount == Plan.SupportProvinces.Num()
+			&& Plan.Summary.SupportProvinceCount > 0
+			&& Plan.Summary.SupportProvinceGroundCellCount > 0
+			&& Plan.Summary.SupportProvinceHash != 0
+			&& Algo::AllOf(Plan.SemanticTerminalDemands,
+				[&Plan](const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand)
+				{
+					return Plan.SupportProvinces.IsValidIndex(Demand.SupportProvinceId)
+						&& Plan.SupportProvinces[Demand.SupportProvinceId]
+							.DemandIds.Contains(Demand.DemandId);
+				}));
+	int32 GroundCourseCellCount = 0;
+	for (const ABTSM73BeamC3V3::FSemanticSupportCourseOccupancyDiagnostic& Occupancy
+		: Plan.SemanticSupportCourseOccupancies)
+	{
+		GroundCourseCellCount += Occupancy.CourseIndex == 0
+			? Occupancy.OccupiedCellCount : 0;
+	}
+	Check(TEXT("support provinces exactly partition course-zero occupancy"),
+		Plan.Summary.SupportProvinceGroundCellCount == GroundCourseCellCount);
 	bool bSemanticOccupancyCloses = true;
 	for (const ABTSM73BeamC3V3::FSemanticSupportCourseOccupancyDiagnostic& Occupancy
 		: Plan.SemanticSupportCourseOccupancies)
@@ -3498,12 +3519,18 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 	}
 
 	AddInfo(FString::Printf(
-		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
+		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Provinces=%d:ProvinceCells=%d:ProvinceBoundaries=%d:ProvinceTies=%d:ProvinceFallbacks=%d:ProvinceHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
 		*Prefix, Result.Silhouette.Volumes.Num(),
 		Plan.Summary.SemanticSupportNodeCount,
 		Plan.Summary.SemanticTerminalDemandCount,
 		Plan.Summary.SemanticSupportLedgerCount,
 		Plan.Summary.SemanticSupportDemandHash,
+		Plan.Summary.SupportProvinceCount,
+		Plan.Summary.SupportProvinceGroundCellCount,
+		Plan.Summary.SupportProvinceBoundaryCount,
+		Plan.Summary.SupportProvinceTieBreakCellCount,
+		Plan.Summary.SupportProvinceNearestSeedFallbackCount,
+		Plan.Summary.SupportProvinceHash,
 		Plan.CoreCells.Num(),
 		Plan.Summary.PodiumMainCoreCellCount,
 		Plan.Summary.TowerChildCoreCellCount,
@@ -4173,6 +4200,21 @@ bool FABTSM73BeamC3SemanticSupportMergedRoofDemandTest::RunTest(
 			}));
 	TestNotEqual(TEXT("Diagnostic graph has a stable independent identity"),
 		Plan.Summary.SemanticSupportDemandHash, int64(0));
+	TestEqual(TEXT("Separated Body footprints remain two support provinces"),
+		Plan.Summary.SupportProvinceCount, 2);
+	TestEqual(TEXT("Each merged-roof demand binds exactly one province"),
+		Plan.SupportProvinces.Num(), 2);
+	TestTrue(TEXT("Support provinces preserve the shared synthetic podium source"),
+		Algo::AllOf(Plan.SupportProvinces,
+			[](const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province)
+			{
+				return Province.DemandIds.Num() == 1
+					&& Province.GroundCellCount > 0
+					&& Province.ProposedPodiumTopCourse > 0
+					&& Province.bSyntheticGroundOnly;
+			}));
+	TestNotEqual(TEXT("Support-province partition has a separate identity"),
+		Plan.Summary.SupportProvinceHash, int64(0));
 	return true;
 }
 

@@ -45,7 +45,8 @@ enum class EABTSM73BeamC3Stage1DiagnosticLayer : uint8
 	CoreMergeRegions UMETA(DisplayName = "4 - Core Merge Regions"),
 	CompositeCoreXLanes UMETA(DisplayName = "5 - Composite Core X Lanes"),
 	CompositeCoreYLanes UMETA(DisplayName = "6 - Composite Core Y Lanes"),
-	SemanticSupportDemandDAG UMETA(DisplayName = "7 - Semantic Support Demand DAG")
+	SemanticSupportDemandDAG UMETA(DisplayName = "7 - Semantic Support Demand DAG"),
+	SupportProvincePartition UMETA(DisplayName = "8 - Support Province Partition")
 };
 
 USTRUCT(BlueprintType)
@@ -386,6 +387,27 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Identity")
 	int64 SkeletonFirstSemanticSupportDemandHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstSupportProvinceCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstMultiDemandSupportProvinceCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstSupportProvinceGroundCellCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstSupportProvinceBoundaryCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstSupportProvinceTieBreakCellCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstSupportProvinceNearestSeedFallbackCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province|Identity")
+	int64 SkeletonFirstSupportProvinceHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First")
 	int32 SkeletonFirstCoreCellCount = 0;

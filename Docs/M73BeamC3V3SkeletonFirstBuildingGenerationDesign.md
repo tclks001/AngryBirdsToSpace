@@ -1655,3 +1655,59 @@ TipOver E6 710000/730000/750000 的原 `Stage1Hash` 分别保持
 `SemanticDemands != HighRegions` 时应记录为下一步 support-province 输入：先结合逐 course occupancy、split/merge
 ledger 和视觉分区决定真实支撑省份，再修改芯体；禁止为了让两个计数相等而直接合并/拆分节点。Physical 仍为
 `NotEvaluated`，未运行 Stage 2+、Beam-D1.5、Chaos 或可见 PIE。
+
+## 38. 支撑省份诊断分区（2026-08-11）
+
+本节只建立 `SupportProvincePartition` 诊断权威，不改变 `CoupledGround`、PodiumMain、TowerChild、shared course、
+member emission 或 Static DAG。省份 Hash 独立于 `SemanticSupportDemandHash` 和全部几何 Hash；因此当前几何消费者
+仍使用第 36 节冻结的 terminal/high-projection 路径，用户视觉批准前不得让省份结果参与选型。
+
+### 38.1 确定性地面汇水区
+
+每个 component 以 `course 0` 的 `FSemanticSupportCourseOccupancyDiagnostic` 为精确地面域：
+
+1. 每个 `SemanticTerminalDemand` 的 `GroundProjectionBounds` 是一个种子区域；只有投影具有正面积重叠的 demand
+   才先合并成同一 seed group。完整边接触、屋顶共享或高处 merge 都不会自动吞并地面种子；
+2. 种子必须与真实 ground occupancy 相交。若没有交集，诊断允许确定性选择离 demand 质心最近的占用格，但必须
+   发布 `NearestSeedFallback=1`；它不能被解释为合法支撑，只用于暴露 WFC 投影缺口；
+3. 对每个 course-0 占用格，计算到各 seed group 的四邻域 Manhattan 最短距离；最短者获得该格。等距时按最小
+   `StableSeedDemandId` 决胜并累计 `TieBreakCellCount`；省份位图必须互斥，全部省份的并集必须精确等于地面占用；
+4. 四邻域中所有权不同的格边形成省份边界，并双向登记 `AdjacentProvinceIds`。每个 demand 必须恰好绑定一个
+   `SupportProvinceId`；每个省份至少含一个 demand 和一个地面格；
+5. 每个省份从 course 0 向上扫描，求“全部省份地面格仍同时被 WFC 占用”的最高连续 exclusive course，记为
+   `HighestFullyOccupiedTopCourse`。`ProposedPodiumTopCourse` 还必须至少给最矮 demand 留出两个 course。该值是
+   保守视觉候选，不是已经通过 SupportedSpan、Crown、720 cm、轨道或 Chaos 的生产裙房高度。
+
+这种定义允许一个连续 synthetic `CoupledGround` 内部出现多个承重汇水区：两个独立 Body 即使共用同一屋顶和
+同一共同基座，也保持两个省份；只有它们的地面投影真实正面积重叠时才合组。省份是未来局部裙房和 main/child
+联合选择的输入，不冒充当前语义 DAG 根节点数或最终 Beam-C ground-seat 数。
+
+### 38.2 编辑器诊断层
+
+`Stage 1 Diagnostic Layer` 追加 `8 - Support Province Partition`，与前七层互斥：
+
+- Wood/Stone/Iron/Glass 四种现有材质循环：每个省份 course-0 汇水区的 32 cm 内缩地面格，以及同一精确位图在
+  `ProposedPodiumTopCourse` 上的候选顶面；内缩缝明确显示相邻省份边界；
+- 钢材色细柱：省份地面质心到候选顶面的 anchor；
+- 石材色细线：从省份 anchor 指向该省份每个 terminal Body 的归属路径。
+
+该层不显示 WFC 包络、支撑需求 DAG 的 Body/fit Box、现有芯体或真实 core/shared members。四种颜色循环不承担
+稳定身份；Province ID、Demand 列表、Cells、Ties、Neighbors、FullyOccupiedTop、ProposedTop、RequiredTop、
+SyntheticGroundOnly、NearestSeedFallback 和独立 Hash 均由日志发布。
+
+### 38.3 自动化证据与当前边界
+
+`SemanticSupportMergedRoofDemand` 夹具现在同时证明：两个 Body 汇入一个 Crown、共享一个 synthetic podium 时，
+旧 geometry terminal 仍为 1、semantic demand 为 2、support province 也为 2；现有几何未被诊断结果改写。
+`PreviewDiagnosticContracts` 证明第 8 层与前七层位掩码互斥。
+
+TipOver E6 710000/730000/750000 的原 `Stage1Hash` 继续保持
+`6381458846136252022 / 4360458529242908803 / 2446638802680686583`，分别发布 `8/7/8` 个省份，种子回退均为 0。
+fresh Stage 1-only 5×6 为 30/30，省份数范围 `1..8`，30 叶种子回退合计 0；算法总计 `52858.10 ms`、平均
+`1761.94 ms`、中位 `1431.11 ms`，最慢 `SeamRelease E6=6423.79 ms`。最慢叶的 `TerminalDemand=2.42 ms`，
+主要时间仍在 `ChildCandidate=4122.48 ms` 和 `JointSelection=1157.16 ms`，省份分区不是新瓶颈。所有叶保持
+Static DAG Accepted、Physical NotEvaluated。
+
+当前分区仍是 Manhattan 汇水区，不是最终建筑美学边界；tie 边界、颜色循环、保守全格顶面都必须由用户在第 8 层
+视觉验收。批准后下一步才允许把省份提升为局部裙房候选，逐省份重跑 SupportedSpan/Crown/保护空洞合法性，并
+联合选择 PodiumMain/TowerChild；不得直接用 `ProposedPodiumTopCourse` 改写 WFC。

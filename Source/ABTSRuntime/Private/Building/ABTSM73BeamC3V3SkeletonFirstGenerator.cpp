@@ -1230,6 +1230,480 @@ namespace
 		return Plan.Summary.SemanticSupportDemandHash != 0;
 	}
 
+	bool SkeletonV3SupportProvinceWordContains(
+		const TArray<uint64>& Words, const int32 BitIndex)
+	{
+		return BitIndex >= 0 && Words.IsValidIndex(BitIndex >> 6)
+			&& (Words[BitIndex >> 6] & (uint64(1) << (BitIndex & 63))) != 0;
+	}
+
+	bool BuildSupportProvinceDiagnostics(FPlan& Plan, FString& OutError)
+	{
+		Plan.SupportProvinces.Reset();
+		Plan.Summary.SupportProvinceCount = 0;
+		Plan.Summary.MultiDemandSupportProvinceCount = 0;
+		Plan.Summary.SupportProvinceGroundCellCount = 0;
+		Plan.Summary.SupportProvinceBoundaryCount = 0;
+		Plan.Summary.SupportProvinceTieBreakCellCount = 0;
+		Plan.Summary.SupportProvinceNearestSeedFallbackCount = 0;
+		Plan.Summary.SupportProvinceHash = 0;
+		for (FSemanticTerminalDemandDiagnostic& Demand : Plan.SemanticTerminalDemands)
+		{
+			Demand.SupportProvinceId = INDEX_NONE;
+		}
+
+		TArray<int32> ComponentIds;
+		for (const FSemanticTerminalDemandDiagnostic& Demand : Plan.SemanticTerminalDemands)
+		{
+			ComponentIds.AddUnique(Demand.ComponentId);
+		}
+		ComponentIds.Sort();
+		for (const int32 ComponentId : ComponentIds)
+		{
+			const FSemanticSupportCourseOccupancyDiagnostic* GroundOccupancy =
+				Plan.SemanticSupportCourseOccupancies.FindByPredicate(
+					[ComponentId](const FSemanticSupportCourseOccupancyDiagnostic& Occupancy)
+					{
+						return Occupancy.ComponentId == ComponentId
+							&& Occupancy.CourseIndex == 0;
+					});
+			if (GroundOccupancy == nullptr)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SupportProvinceGroundOccupancyMissing:Component=%d"),
+					ComponentId);
+				return false;
+			}
+			TArray<int32> DemandIndices;
+			for (int32 DemandIndex = 0;
+				DemandIndex < Plan.SemanticTerminalDemands.Num(); ++DemandIndex)
+			{
+				if (Plan.SemanticTerminalDemands[DemandIndex].ComponentId == ComponentId)
+				{
+					DemandIndices.Add(DemandIndex);
+				}
+			}
+			DemandIndices.Sort([&Plan](const int32 A, const int32 B)
+			{
+				return Plan.SemanticTerminalDemands[A].DemandId
+					< Plan.SemanticTerminalDemands[B].DemandId;
+			});
+			if (DemandIndices.IsEmpty())
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SupportProvinceDemandSetEmpty:Component=%d"),
+					ComponentId);
+				return false;
+			}
+
+			TArray<int32> Parent;
+			Parent.SetNum(DemandIndices.Num());
+			for (int32 Index = 0; Index < Parent.Num(); ++Index)
+			{
+				Parent[Index] = Index;
+			}
+			auto FindRoot = [&Parent](int32 Index)
+			{
+				while (Parent[Index] != Index)
+				{
+					Parent[Index] = Parent[Parent[Index]];
+					Index = Parent[Index];
+				}
+				return Index;
+			};
+			for (int32 A = 0; A < DemandIndices.Num(); ++A)
+			{
+				const FBox& ABounds =
+					Plan.SemanticTerminalDemands[DemandIndices[A]].GroundProjectionBounds;
+				for (int32 B = A + 1; B < DemandIndices.Num(); ++B)
+				{
+					const FBox& BBounds = Plan.SemanticTerminalDemands[
+						DemandIndices[B]].GroundProjectionBounds;
+					const double XOverlap = FMath::Min(ABounds.Max.X, BBounds.Max.X)
+						- FMath::Max(ABounds.Min.X, BBounds.Min.X);
+					const double YOverlap = FMath::Min(ABounds.Max.Y, BBounds.Max.Y)
+						- FMath::Max(ABounds.Min.Y, BBounds.Min.Y);
+					if (XOverlap > GeometryToleranceCM && YOverlap > GeometryToleranceCM)
+					{
+						const int32 ARoot = FindRoot(A);
+						const int32 BRoot = FindRoot(B);
+						if (ARoot != BRoot)
+						{
+							Parent[FMath::Max(ARoot, BRoot)] = FMath::Min(ARoot, BRoot);
+						}
+					}
+				}
+			}
+
+			struct FProvinceSeed
+			{
+				TArray<int32> DemandIndices;
+				TArray<int32> CellIndices;
+				bool bUsedNearestGroundSeed = false;
+			};
+			TArray<FProvinceSeed> Seeds;
+			TMap<int32, int32> SeedIndexByRoot;
+			for (int32 LocalDemandIndex = 0;
+				LocalDemandIndex < DemandIndices.Num(); ++LocalDemandIndex)
+			{
+				const int32 RootIndex = FindRoot(LocalDemandIndex);
+				int32* ExistingSeedIndex = SeedIndexByRoot.Find(RootIndex);
+				const int32 SeedIndex = ExistingSeedIndex != nullptr
+					? *ExistingSeedIndex : Seeds.AddDefaulted();
+				if (ExistingSeedIndex == nullptr)
+				{
+					SeedIndexByRoot.Add(RootIndex, SeedIndex);
+				}
+				Seeds[SeedIndex].DemandIndices.Add(DemandIndices[LocalDemandIndex]);
+			}
+
+			TArray<int32> GroundCells;
+			for (int32 BitIndex = 0;
+				BitIndex < GroundOccupancy->SizeX * GroundOccupancy->SizeY; ++BitIndex)
+			{
+				if (SkeletonV3SupportProvinceWordContains(
+					GroundOccupancy->OccupiedWords, BitIndex))
+				{
+					GroundCells.Add(BitIndex);
+				}
+			}
+			for (FProvinceSeed& Seed : Seeds)
+			{
+				for (const int32 BitIndex : GroundCells)
+				{
+					const int32 X = BitIndex % GroundOccupancy->SizeX;
+					const int32 Y = BitIndex / GroundOccupancy->SizeX;
+					const FVector Sample(
+						(GroundOccupancy->MinimumXUnit + X) * BlockUnitsCM,
+						(GroundOccupancy->MinimumYUnit + Y) * BlockUnitsCM,
+						0.0);
+					if (Seed.DemandIndices.ContainsByPredicate(
+						[&Plan, &Sample](const int32 DemandIndex)
+						{
+							const FBox& Bounds = Plan.SemanticTerminalDemands[
+								DemandIndex].GroundProjectionBounds;
+							return Sample.X >= Bounds.Min.X - GeometryToleranceCM
+								&& Sample.X <= Bounds.Max.X + GeometryToleranceCM
+								&& Sample.Y >= Bounds.Min.Y - GeometryToleranceCM
+								&& Sample.Y <= Bounds.Max.Y + GeometryToleranceCM;
+						}))
+					{
+						Seed.CellIndices.Add(BitIndex);
+					}
+				}
+				if (Seed.CellIndices.IsEmpty())
+				{
+					FVector2D DemandCenter = FVector2D::ZeroVector;
+					for (const int32 DemandIndex : Seed.DemandIndices)
+					{
+						const FVector Center = Plan.SemanticTerminalDemands[
+							DemandIndex].BodyBounds.GetCenter();
+						DemandCenter += FVector2D(Center.X, Center.Y);
+					}
+					DemandCenter /= static_cast<double>(Seed.DemandIndices.Num());
+					double BestDistanceSquared = DBL_MAX;
+					int32 BestCell = INDEX_NONE;
+					for (const int32 BitIndex : GroundCells)
+					{
+						const int32 X = BitIndex % GroundOccupancy->SizeX;
+						const int32 Y = BitIndex / GroundOccupancy->SizeX;
+						const FVector2D CellCenter(
+							(GroundOccupancy->MinimumXUnit + X) * BlockUnitsCM,
+							(GroundOccupancy->MinimumYUnit + Y) * BlockUnitsCM);
+						const double DistanceSquared = FVector2D::DistSquared(
+							CellCenter, DemandCenter);
+						if (DistanceSquared < BestDistanceSquared
+							|| (FMath::IsNearlyEqual(DistanceSquared, BestDistanceSquared)
+								&& BitIndex < BestCell))
+						{
+							BestDistanceSquared = DistanceSquared;
+							BestCell = BitIndex;
+						}
+					}
+					if (BestCell == INDEX_NONE)
+					{
+						OutError = FString::Printf(
+							TEXT("BeamC3V3SupportProvinceSeedUnavailable:Component=%d"),
+							ComponentId);
+						return false;
+					}
+					Seed.CellIndices.Add(BestCell);
+					Seed.bUsedNearestGroundSeed = true;
+				}
+				Seed.CellIndices.Sort();
+			}
+
+			TArray<int32> OwnerByCell;
+			OwnerByCell.Init(INDEX_NONE,
+				GroundOccupancy->SizeX * GroundOccupancy->SizeY);
+			TArray<int32> TieBreakCounts;
+			TieBreakCounts.Init(0, Seeds.Num());
+			for (const int32 BitIndex : GroundCells)
+			{
+				const int32 CellX = BitIndex % GroundOccupancy->SizeX;
+				const int32 CellY = BitIndex / GroundOccupancy->SizeX;
+				int32 BestSeed = INDEX_NONE;
+				int32 BestDistance = MAX_int32;
+				int32 EqualBestCount = 0;
+				for (int32 SeedIndex = 0; SeedIndex < Seeds.Num(); ++SeedIndex)
+				{
+					int32 SeedDistance = MAX_int32;
+					for (const int32 SeedCell : Seeds[SeedIndex].CellIndices)
+					{
+						const int32 SeedX = SeedCell % GroundOccupancy->SizeX;
+						const int32 SeedY = SeedCell / GroundOccupancy->SizeX;
+						SeedDistance = FMath::Min(SeedDistance,
+							FMath::Abs(CellX - SeedX) + FMath::Abs(CellY - SeedY));
+					}
+					if (SeedDistance < BestDistance)
+					{
+						BestDistance = SeedDistance;
+						BestSeed = SeedIndex;
+						EqualBestCount = 1;
+					}
+					else if (SeedDistance == BestDistance)
+					{
+						++EqualBestCount;
+					}
+				}
+				if (BestSeed == INDEX_NONE)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SupportProvinceCellUnassigned:Component=%d:Cell=%d"),
+						ComponentId, BitIndex);
+					return false;
+				}
+				OwnerByCell[BitIndex] = BestSeed;
+				TieBreakCounts[BestSeed] += EqualBestCount > 1 ? 1 : 0;
+			}
+
+			const int32 FirstProvinceId = Plan.SupportProvinces.Num();
+			for (int32 SeedIndex = 0; SeedIndex < Seeds.Num(); ++SeedIndex)
+			{
+				FSupportProvinceDiagnostic& Province =
+					Plan.SupportProvinces.AddDefaulted_GetRef();
+				Province.ProvinceId = Plan.SupportProvinces.Num() - 1;
+				Province.ComponentId = ComponentId;
+				Province.MinimumXUnit = GroundOccupancy->MinimumXUnit;
+				Province.MinimumYUnit = GroundOccupancy->MinimumYUnit;
+				Province.SizeX = GroundOccupancy->SizeX;
+				Province.SizeY = GroundOccupancy->SizeY;
+				Province.GroundCellWords.SetNumZeroed(
+					(Province.SizeX * Province.SizeY + 63) / 64);
+				Province.TieBreakCellCount = TieBreakCounts[SeedIndex];
+				Province.bUsedNearestGroundSeed =
+					Seeds[SeedIndex].bUsedNearestGroundSeed;
+				FVector CentroidSum = FVector::ZeroVector;
+				TArray<int32> ProvinceCells;
+				for (const int32 BitIndex : GroundCells)
+				{
+					if (OwnerByCell[BitIndex] != SeedIndex)
+					{
+						continue;
+					}
+					ProvinceCells.Add(BitIndex);
+					Province.GroundCellWords[BitIndex >> 6] |=
+						uint64(1) << (BitIndex & 63);
+					const int32 X = BitIndex % Province.SizeX;
+					const int32 Y = BitIndex / Province.SizeX;
+					const FVector Center(
+						(Province.MinimumXUnit + X) * BlockUnitsCM,
+						(Province.MinimumYUnit + Y) * BlockUnitsCM,
+						GroundOccupancy->OccupiedBounds.Min.Z + BlockUnitsCM * 0.5);
+					CentroidSum += Center;
+					Province.GroundBounds += FBox(
+						Center - FVector(BlockUnitsCM * 0.5),
+						Center + FVector(BlockUnitsCM * 0.5));
+				}
+				Province.GroundCellCount = ProvinceCells.Num();
+				if (Province.GroundCellCount == 0)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SupportProvinceEmpty:Component=%d:Seed=%d"),
+						ComponentId, SeedIndex);
+					return false;
+				}
+				Province.GroundCentroid = CentroidSum
+					/ static_cast<double>(Province.GroundCellCount);
+				Province.MinimumRequiredTopCourse = MAX_int32;
+				for (const int32 DemandIndex : Seeds[SeedIndex].DemandIndices)
+				{
+					FSemanticTerminalDemandDiagnostic& Demand =
+						Plan.SemanticTerminalDemands[DemandIndex];
+					Demand.SupportProvinceId = Province.ProvinceId;
+					Province.DemandIds.Add(Demand.DemandId);
+					Province.TerminalBodyNodeIds.Add(Demand.TerminalBodyNodeId);
+					Province.GroundSourceVolumeIds.Append(
+						Demand.GroundSourceVolumeIds);
+					Province.MinimumRequiredTopCourse = FMath::Min(
+						Province.MinimumRequiredTopCourse, Demand.RequiredTopCourse);
+				}
+				Province.DemandIds.Sort();
+				Province.TerminalBodyNodeIds.Sort();
+				Province.GroundSourceVolumeIds.Sort();
+				Province.GroundSourceVolumeIds.SetNum(Algo::Unique(
+					Province.GroundSourceVolumeIds));
+				Province.StableSeedDemandId = Province.DemandIds[0];
+				Province.bSyntheticGroundOnly =
+					!Province.GroundSourceVolumeIds.IsEmpty();
+				for (const int32 SourceVolumeId : Province.GroundSourceVolumeIds)
+				{
+					const FSemanticSupportVolumeNodeDiagnostic* GroundNode =
+						Plan.SemanticSupportVolumeNodes.FindByPredicate(
+							[ComponentId, SourceVolumeId](
+								const FSemanticSupportVolumeNodeDiagnostic& Node)
+							{
+								return Node.ComponentId == ComponentId
+									&& Node.SourceVolumeId == SourceVolumeId;
+							});
+					Province.bSyntheticGroundOnly &= GroundNode != nullptr
+						&& GroundNode->bSyntheticCoupledGround;
+				}
+
+				for (int32 Course = 0; ; ++Course)
+				{
+					const FSemanticSupportCourseOccupancyDiagnostic* Occupancy =
+						Plan.SemanticSupportCourseOccupancies.FindByPredicate(
+							[ComponentId, Course](
+								const FSemanticSupportCourseOccupancyDiagnostic& Candidate)
+							{
+								return Candidate.ComponentId == ComponentId
+									&& Candidate.CourseIndex == Course;
+							});
+					if (Occupancy == nullptr || Occupancy->SizeX != Province.SizeX
+						|| Occupancy->SizeY != Province.SizeY
+						|| Occupancy->MinimumXUnit != Province.MinimumXUnit
+						|| Occupancy->MinimumYUnit != Province.MinimumYUnit)
+					{
+						break;
+					}
+					bool bFullyOccupied = true;
+					for (const int32 BitIndex : ProvinceCells)
+					{
+						if (!SkeletonV3SupportProvinceWordContains(
+							Occupancy->OccupiedWords, BitIndex))
+						{
+							bFullyOccupied = false;
+							break;
+						}
+					}
+					if (!bFullyOccupied)
+					{
+						break;
+					}
+					Province.HighestFullyOccupiedTopCourse = Course + 1;
+				}
+				const int32 MaximumPodiumTop = FMath::Max(
+					1, Province.MinimumRequiredTopCourse - 2);
+				Province.ProposedPodiumTopCourse = FMath::Clamp(
+					Province.HighestFullyOccupiedTopCourse, 1, MaximumPodiumTop);
+			}
+
+			for (const int32 BitIndex : GroundCells)
+			{
+				const int32 Owner = OwnerByCell[BitIndex];
+				const int32 X = BitIndex % GroundOccupancy->SizeX;
+				const int32 Y = BitIndex / GroundOccupancy->SizeX;
+				for (const FIntPoint Delta : {FIntPoint(1, 0), FIntPoint(0, 1)})
+				{
+					const int32 NX = X + Delta.X;
+					const int32 NY = Y + Delta.Y;
+					if (NX >= GroundOccupancy->SizeX || NY >= GroundOccupancy->SizeY)
+					{
+						continue;
+					}
+					const int32 NeighborBit = NY * GroundOccupancy->SizeX + NX;
+					const int32 NeighborOwner = OwnerByCell[NeighborBit];
+					if (NeighborOwner != INDEX_NONE && NeighborOwner != Owner)
+					{
+						FSupportProvinceDiagnostic& A =
+							Plan.SupportProvinces[FirstProvinceId + Owner];
+						FSupportProvinceDiagnostic& B =
+							Plan.SupportProvinces[FirstProvinceId + NeighborOwner];
+						A.AdjacentProvinceIds.AddUnique(B.ProvinceId);
+						B.AdjacentProvinceIds.AddUnique(A.ProvinceId);
+						++Plan.Summary.SupportProvinceBoundaryCount;
+					}
+				}
+			}
+			for (int32 ProvinceId = FirstProvinceId;
+				ProvinceId < Plan.SupportProvinces.Num(); ++ProvinceId)
+			{
+				Plan.SupportProvinces[ProvinceId].AdjacentProvinceIds.Sort();
+			}
+		}
+
+		FString Canonical;
+		TSet<int32> AssignedDemandIds;
+		for (const FSupportProvinceDiagnostic& Province : Plan.SupportProvinces)
+		{
+			if (Province.ProvinceId == INDEX_NONE || Province.ComponentId == INDEX_NONE
+				|| Province.GroundCellCount <= 0 || !Province.GroundBounds.IsValid
+				|| Province.DemandIds.IsEmpty()
+				|| Province.GroundCellWords.Num()
+					!= (Province.SizeX * Province.SizeY + 63) / 64
+				|| Province.ProposedPodiumTopCourse <= 0)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SupportProvinceInvalid:Province=%d:Component=%d:Cells=%d:Demands=%d:Top=%d"),
+					Province.ProvinceId, Province.ComponentId,
+					Province.GroundCellCount, Province.DemandIds.Num(),
+					Province.ProposedPodiumTopCourse);
+				return false;
+			}
+			Plan.Summary.SupportProvinceGroundCellCount += Province.GroundCellCount;
+			Plan.Summary.SupportProvinceTieBreakCellCount += Province.TieBreakCellCount;
+			Plan.Summary.SupportProvinceNearestSeedFallbackCount +=
+				Province.bUsedNearestGroundSeed ? 1 : 0;
+			Plan.Summary.MultiDemandSupportProvinceCount +=
+				Province.DemandIds.Num() > 1 ? 1 : 0;
+			Canonical += FString::Printf(
+				TEXT("|P:%d:C=%d:S=%d:N=%d:TIE=%d:FULL=%d:TOP=%d:REQ=%d:FALL=%d:SYN=%d:X=%d:Y=%d:W=%d:H=%d"),
+				Province.ProvinceId, Province.ComponentId,
+				Province.StableSeedDemandId, Province.GroundCellCount,
+				Province.TieBreakCellCount,
+				Province.HighestFullyOccupiedTopCourse,
+				Province.ProposedPodiumTopCourse,
+				Province.MinimumRequiredTopCourse,
+				Province.bUsedNearestGroundSeed ? 1 : 0,
+				Province.bSyntheticGroundOnly ? 1 : 0,
+				Province.MinimumXUnit, Province.MinimumYUnit,
+				Province.SizeX, Province.SizeY);
+			for (const int32 DemandId : Province.DemandIds)
+			{
+				if (AssignedDemandIds.Contains(DemandId))
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SupportProvinceDemandMultiplyAssigned:Demand=%d"),
+						DemandId);
+					return false;
+				}
+				AssignedDemandIds.Add(DemandId);
+				Canonical += FString::Printf(TEXT(":D%d"), DemandId);
+			}
+			for (const int32 Adjacent : Province.AdjacentProvinceIds)
+			{
+				Canonical += FString::Printf(TEXT(":A%d"), Adjacent);
+			}
+			for (const uint64 Word : Province.GroundCellWords)
+			{
+				Canonical += FString::Printf(TEXT(":%016llx"), Word);
+			}
+		}
+		if (AssignedDemandIds.Num() != Plan.SemanticTerminalDemands.Num())
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3SupportProvinceDemandCoverageMismatch:Assigned=%d:Demands=%d"),
+				AssignedDemandIds.Num(), Plan.SemanticTerminalDemands.Num());
+			return false;
+		}
+		Plan.Summary.SupportProvinceCount = Plan.SupportProvinces.Num();
+		Plan.Summary.SupportProvinceHash = HashText(Canonical);
+		return Plan.Summary.SupportProvinceCount > 0
+			&& Plan.Summary.SupportProvinceGroundCellCount > 0
+			&& Plan.Summary.SupportProvinceHash != 0;
+	}
+
 	double CellFaceAtOrAbove(const double Value)
 	{
 		const double FaceOffsetCM = BlockUnitsCM * 0.5;
@@ -14643,6 +15117,10 @@ namespace
 				return false;
 			}
 			if (!FinalizeSemanticSupportDemandDiagnostics(OutPlan, OutError))
+			{
+				return false;
+			}
+			if (!BuildSupportProvinceDiagnostics(OutPlan, OutError))
 			{
 				return false;
 			}
