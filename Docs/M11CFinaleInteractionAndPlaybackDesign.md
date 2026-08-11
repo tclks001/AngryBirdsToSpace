@@ -39,15 +39,18 @@ M11-C 把 M11-B 的冻结终局布局和 M11-A 的唯一积分器接入玩家操
 13. 目标选择几何按 Result Hash/目标身份缓存，Scene Capture 只在首次有效结果或目标切换时捕获；
 14. Development Editor 全链接、全新进程自动化和 PIE 验收清单。
 
-### 2.2 延期到 M11-D
+### 2.2 M6 四鸟扩展与仍延期到 M11-D 的内容
 
-- 四鸟同时进入弹珠袋及完整编队标架；
+- 2026-08-11，M6 已在 M11 内完成四鸟逻辑装袋、同一 Playback Plan 弧长单列、
+  四鸟事务恢复、镜头安全框和 Schema 8 观测；完整合同见
+  [M11 M6 四鸟终局编队设计](M11FinaleCameraM6FourBirdFormation.md)；
+- Space 袋/弦/桩共享视觉定型与正式 force-flight 动画 API 仍由 Integration 完成；
 - 星空材质切换、雾云关闭、曝光和环境状态快照；
 - 白鸟救援、UFO 破坏、接触后的局部 Chaos 演出；
 - 四鸟 Party、星空/雾云和剧情镜头共同参与的完整 Attempt Snapshot 与失败演出扩展；
 - 最终音频、镜头节奏和剧情收尾。
 
-M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M11-D 只能扩展四鸟/环境/剧情快照并消费这一条冻结播放计划，不能再建立第二套飞行模拟。
+M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M6 已把四只鸟映射到同一冻结播放计划。M11-D 后续只能扩展环境/剧情快照和接触后演出，不能再建立第二套飞行模拟。
 
 ## 3. 权威数据流
 
@@ -450,9 +453,9 @@ Rank 1 的真实侧向偏转为 `+0.590804 / -0.306536 / +0.645047 rad`，发生
 
 任一 `InteractionContract`、`ReleasePreviewIdentityMismatch`、`PlaybackSamplingFailed` 或上游 M11-B Rejected 都是阻断错误。
 
-## 13. M11-D 交接清单
+## 13. M6 已落实合同与 M11-D 交接清单
 
-1. M11-D 只把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的切线/法线标架，不复制积分器；
+1. M6 已把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的弧长标架，不复制积分器；M11-D 必须继续消费该结果；
 2. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
 3. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
 4. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；

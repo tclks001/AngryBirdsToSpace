@@ -1820,12 +1820,122 @@ bool AABTSM11FinaleFlightCamera::BeginAuthorityFollow(
 	return true;
 }
 
+bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
+	const FVector& PrimaryTargetPosition,
+	const TConstArrayView<FABTSM11FinaleFormationCameraSubject>
+		FormationSubjects,
+	const FQuat& CameraRotation,
+	const double HorizontalFovDegrees,
+	FVector& InOutCameraLocation) const
+{
+	if (FormationSubjects.Num() <= 1)
+	{
+		return true;
+	}
+	constexpr double AspectRatio = 16.0 / 9.0;
+	constexpr double SafeHorizontalNdc = 0.88;
+	constexpr double SafeVerticalNdc = 0.84;
+	constexpr double MaximumRetreatCM = 30000.0;
+	const double TanHalfHorizontal = FMath::Tan(
+		FMath::DegreesToRadians(HorizontalFovDegrees * 0.5));
+	const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+	if (!FMath::IsFinite(TanHalfHorizontal)
+		|| !FMath::IsFinite(TanHalfVertical)
+		|| TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
+		|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+	const FVector Forward = CameraRotation.GetForwardVector();
+	const FVector Right = CameraRotation.GetRightVector();
+	const FVector Up = CameraRotation.GetUpVector();
+	const FVector PrimaryOffset = PrimaryTargetPosition - InOutCameraLocation;
+	const double PrimaryDepth = FVector::DotProduct(PrimaryOffset, Forward);
+	const double PrimaryRight = FVector::DotProduct(PrimaryOffset, Right);
+	const double PrimaryUp = FVector::DotProduct(PrimaryOffset, Up);
+	if (!FMath::IsFinite(PrimaryDepth)
+		|| PrimaryDepth <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+	const FVector BaseLocation = InOutCameraLocation;
+	const auto BuildCandidateLocation = [&](const double RetreatCM)
+	{
+		// Retreat along the primary ray, not only along camera forward. This
+		// preserves the director's primary-bird NDC anchor while creating room
+		// for the three followers.
+		return BaseLocation
+			- Forward * RetreatCM
+			- Right * (PrimaryRight * RetreatCM / PrimaryDepth)
+			- Up * (PrimaryUp * RetreatCM / PrimaryDepth);
+	};
+	const auto Fits = [&](const double RetreatCM)
+	{
+		const FVector CandidateLocation = BuildCandidateLocation(RetreatCM);
+		for (const FABTSM11FinaleFormationCameraSubject& Subject
+			: FormationSubjects)
+		{
+			if (!Subject.IsUsable())
+			{
+				return false;
+			}
+			const FVector Offset = Subject.Center - CandidateLocation;
+			const double Depth = FVector::DotProduct(Offset, Forward);
+			if (Depth <= Subject.RadiusCM + 1.0)
+			{
+				return false;
+			}
+			const double ConservativeDepth = Depth - Subject.RadiusCM;
+			const double CenterX = FVector::DotProduct(Offset, Right)
+				/ (Depth * TanHalfHorizontal);
+			const double CenterY = FVector::DotProduct(Offset, Up)
+				/ (Depth * TanHalfVertical);
+			const double RadiusX = Subject.RadiusCM
+				/ (ConservativeDepth * TanHalfHorizontal);
+			const double RadiusY = Subject.RadiusCM
+				/ (ConservativeDepth * TanHalfVertical);
+			if (FMath::Abs(CenterX) + RadiusX > SafeHorizontalNdc
+				|| FMath::Abs(CenterY) + RadiusY > SafeVerticalNdc)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	if (Fits(0.0))
+	{
+		return true;
+	}
+	if (!Fits(MaximumRetreatCM))
+	{
+		return false;
+	}
+	double Low = 0.0;
+	double High = MaximumRetreatCM;
+	for (int32 Iteration = 0; Iteration < 32; ++Iteration)
+	{
+		const double Mid = (Low + High) * 0.5;
+		if (Fits(Mid))
+		{
+			High = Mid;
+		}
+		else
+		{
+			Low = Mid;
+		}
+	}
+	InOutCameraLocation = BuildCandidateLocation(High);
+	return !InOutCameraLocation.ContainsNaN();
+}
+
 bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	const FVector& TargetPosition,
 	const FVector& TrajectoryTangent,
 	const FVector& PreferredUp,
 	const FABTSM11FinaleCameraDirectorSample* DirectorSample,
-	const float DeltaSeconds)
+	const float DeltaSeconds,
+	const TConstArrayView<FABTSM11FinaleFormationCameraSubject>
+		FormationSubjects)
 {
 	if (!bAuthorityFollowActive)
 	{
@@ -2215,6 +2325,15 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 				MaximumRotationStepRadians
 					/ FinalRotationDeltaRadians).GetNormalized();
 		}
+	}
+	if (!ApplyM6FormationSafetyEnvelope(
+		TargetPosition,
+		FormationSubjects,
+		SmoothedRotation,
+		DesiredFovDegrees,
+		SmoothedLocation))
+	{
+		return false;
 	}
 	SetActorLocationAndRotation(
 		SmoothedLocation,

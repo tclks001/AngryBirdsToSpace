@@ -327,3 +327,10 @@ abts.M11.CameraDirector.M3.Enabled 1
 - NullRHI 或自动化绿灯不证明 AVI 像素、构图或三渲二质量。
 - 三渲二开启后的颜色、描边、抗锯齿和性能由集成工作树继续演进；M11 不冻结这些像素参数。
 - M0/M1 只证明独立录制工作流能完整观察并量化旧镜头，不能证明 Lucy 风格镜头已经实现。
+# M6 四鸟编队实施入口（2026-08-11）
+
+M6 已进入 M11-owned 落地阶段：四鸟只消费同一条冻结 Playback Plan，主控鸟仍是
+唯一轨迹、镜头和 UFO 接触权威；相机安全框扩展为四个独立投影球，禁止缩放鸟体。
+详细顺序、袋内槽位、弧长播放、事务恢复、Schema 8 判据和 Integration 交接见
+[M11 M6 四鸟终局编队设计](M11FinaleCameraM6FourBirdFormation.md)。共享 Space
+袋/弦/桩与正式 Fly 动画 API 仍由 Integration 唯一写入。

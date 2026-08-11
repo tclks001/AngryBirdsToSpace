@@ -17,6 +17,20 @@ struct ABTSRUNTIME_API FABTSM11FinaleFlightCameraFrame
 	bool IsUsable() const;
 };
 
+/** Presentation-only sphere used to keep all M6 formation members in frame. */
+struct ABTSRUNTIME_API FABTSM11FinaleFormationCameraSubject
+{
+	FVector Center = FVector::ZeroVector;
+	double RadiusCM = 1.0;
+
+	bool IsUsable() const
+	{
+		return !Center.ContainsNaN()
+			&& FMath::IsFinite(RadiusCM)
+			&& RadiusCM > 0.0;
+	}
+};
+
 /** Tunable, renderer-independent envelope for the Assist1 single encounter. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 {
@@ -174,7 +188,9 @@ public:
 		const FVector& TrajectoryTangent,
 		const FVector& PreferredUp,
 		const FABTSM11FinaleCameraDirectorSample* DirectorSample,
-		float DeltaSeconds);
+		float DeltaSeconds,
+		TConstArrayView<FABTSM11FinaleFormationCameraSubject>
+			FormationSubjects = {});
 	void ResetAuthorityFollow();
 
 	bool IsAuthorityFollowActive() const
@@ -235,6 +251,13 @@ private:
 	void ActivateFinaleAntiAliasingOverride();
 	void EnsureFinaleAntiAliasingOverride() const;
 	void RestoreFinaleAntiAliasingOverride();
+	bool ApplyM6FormationSafetyEnvelope(
+		const FVector& PrimaryTargetPosition,
+		TConstArrayView<FABTSM11FinaleFormationCameraSubject>
+			FormationSubjects,
+		const FQuat& CameraRotation,
+		double HorizontalFovDegrees,
+		FVector& InOutCameraLocation) const;
 
 	bool BuildAuthorityFrame(
 		const FVector& TargetPosition,

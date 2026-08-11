@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "Containers/StaticArray.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "World/ABTSM11FinaleLayoutTypes.h"
@@ -9,6 +10,7 @@
 
 class AABTSM11FinaleInteractionSystem;
 class AABTSM11FinaleSystem;
+class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
 class AABTSM51SlingshotStake;
 class USceneCaptureComponent2D;
@@ -18,8 +20,8 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// Adds M5 renderer-independent telemetry and orthogonality digests.
-	static constexpr int32 ContractVersion = 15;
+	// Adds M6 four-bird formation identity, spacing and visibility telemetry.
+	static constexpr int32 ContractVersion = 16;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -58,6 +60,18 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 /** One frame of renderer-independent M1 camera/subject telemetry. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 {
+	static constexpr int32 M6FormationMemberCount = 4;
+	struct FM6FormationMember
+	{
+		int32 BirdId = INDEX_NONE;
+		FString ActorName;
+		FVector World = FVector::ZeroVector;
+		FVector2D Screen = FVector2D::ZeroVector;
+		double DepthCM = 0.0;
+		double PixelRadius = 0.0;
+		double VisibleRatio = 0.0;
+	};
+
 	int32 FrameIndex = INDEX_NONE;
 	double CaptureSeconds = 0.0;
 	double PlaybackSeconds = 0.0;
@@ -104,6 +118,14 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	double CameraPositionDeltaCM = 0.0;
 	double CameraRotationDeltaDegrees = 0.0;
 	double FovDeltaDegrees = 0.0;
+	TStaticArray<FM6FormationMember, M6FormationMemberCount>
+		FormationMembers;
+	TStaticArray<double, M6FormationMemberCount - 1>
+		FormationAdjacentArcSpacingCM = {0.0, 0.0, 0.0};
+	double FormationExpectedSpacingCM = 0.0;
+	bool bFormationOrderStable = false;
+	bool bFormationPrimaryAnchored = false;
+	bool bFormationFullyDeployed = false;
 };
 
 enum class EABTSM11FinaleCameraCapturePhase : uint8

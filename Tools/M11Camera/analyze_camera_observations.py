@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline M11 camera-observation criteria and orthogonality comparison.
 
-This tool consumes observation schema v1-v7 CSV from the M11 capture runner.
+This tool consumes observation schema v1-v8 CSV from the M11 capture runner.
 It never reads pixels and never changes a candidate, trajectory, camera, or UE
 asset. A criteria failure is a useful M1 result, so the default exit status is
 zero for a structurally valid report. Use --require-pass to gate later stages.
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7}
+SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8}
 M3_APPROACH_BACKWARD_JUMP_PX_MAX = 20.0
 M3_FIRST_BODY_BLEND_SECONDS_MAX = 0.10
 M3_FIRST_BODY_VISIBLE_SECONDS_MAX = 0.75
@@ -114,6 +114,22 @@ M4_ENDPOINT_AUTHORITIES = {
 }
 M4_TERMINAL_STAGES = {"FinalApproach", "Terminal"}
 M4_TERMINAL_SHOT_PHASES = {"TerminalAcquire", "TerminalTrack"}
+M6_FORMATION_COLUMNS = {
+    "formationExpectedSpacingCM",
+    "formationSpacing01CM",
+    "formationSpacing12CM",
+    "formationSpacing23CM",
+    "formationOrderStable",
+    "formationPrimaryAnchored",
+    "formationFullyDeployed",
+} | {
+    f"formation{index}{suffix}"
+    for index in range(4)
+    for suffix in (
+        "BirdId", "Actor", "WorldX", "WorldY", "WorldZ",
+        "ScreenX", "ScreenY", "DepthCM", "PixelRadius", "VisibleRatio",
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -329,6 +345,22 @@ def read_rows(path: pathlib.Path) -> list[dict[str, str]]:
                     f"{path}: invalid endpointAuthority "
                     f"{row['endpointAuthority']!r}"
                 )
+        if schema >= 8:
+            missing_formation = M6_FORMATION_COLUMNS.difference(row)
+            if missing_formation:
+                raise ValueError(
+                    f"{path}: schema {schema} missing M6 columns: "
+                    f"{sorted(missing_formation)}"
+                )
+            for key in M6_FORMATION_COLUMNS:
+                if key.endswith("Actor"):
+                    if (
+                        row["interactionState"] in {"Launched", "TargetHit"}
+                        and not row[key]
+                    ):
+                        raise ValueError(f"{path}: empty M6 actor identity {key}")
+                else:
+                    _finite(row, key)
         row.setdefault("framingTarget", row["currentTarget"])
         row.setdefault("directorM3FrozenEnabled", "0")
         row.setdefault("stageProgress", "0")
@@ -370,6 +402,7 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
         raise ValueError(f"{path}: no Launched/TargetHit observation rows")
     observation_schema = int(_finite(flight_rows[0], "schemaVersion"))
     has_m4_terminal_schema = observation_schema >= 7
+    has_m6_formation_schema = observation_schema >= 8
 
     bird_lost = [
         _finite(row, "birdVisibleRatio") < thresholds.bird_visible_ratio
@@ -926,6 +959,49 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
             and sum(m4_fov_jump) == 0
         )
     )
+    m6_order_mismatch = [
+        has_m6_formation_schema
+        and int(_finite(row, "formationOrderStable")) == 0
+        for row in flight_rows
+    ]
+    m6_primary_mismatch = [
+        has_m6_formation_schema
+        and int(_finite(row, "formationPrimaryAnchored")) == 0
+        for row in flight_rows
+    ]
+    m6_lost = [
+        has_m6_formation_schema
+        and any(
+            _finite(row, f"formation{index}VisibleRatio")
+            < thresholds.bird_visible_ratio
+            for index in range(4)
+        )
+        for row in flight_rows
+    ]
+    m6_deployed_rows = [
+        row for row in flight_rows
+        if has_m6_formation_schema
+        and int(_finite(row, "formationFullyDeployed")) != 0
+    ]
+    m6_spacing_mismatch_count = sum(
+        spacing + 1.0e-3 < _finite(row, "formationExpectedSpacingCM") * 0.95
+        for row in m6_deployed_rows
+        for spacing in (
+            _finite(row, "formationSpacing01CM"),
+            _finite(row, "formationSpacing12CM"),
+            _finite(row, "formationSpacing23CM"),
+        )
+    )
+    m6_formation_passed = (
+        not has_m6_formation_schema
+        or (
+            bool(m6_deployed_rows)
+            and sum(m6_order_mismatch) == 0
+            and sum(m6_primary_mismatch) == 0
+            and sum(m6_lost) == 0
+            and m6_spacing_mismatch_count == 0
+        )
+    )
     approach_left_mean = _edge_mean(approach_relative_x, False)
     periapsis_right_mean = _edge_mean(periapsis_relative_x, True)
     bird_motion_maxima = _derivative_maxima(
@@ -991,6 +1067,7 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
     passed = (
         all(value == 0 for value in failures.values())
         and m4_offline_camera_closure_passed
+        and m6_formation_passed
     )
     decision_fingerprint_columns = DECISION_FINGERPRINT_COLUMNS
     if has_m4_terminal_schema:
@@ -1063,6 +1140,35 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
                 if has_m4_terminal_schema
                 else "SchemaUnavailable"
             ),
+        },
+        "m6Formation": {
+            "schemaAvailable": has_m6_formation_schema,
+            "fullyDeployedFrames": len(m6_deployed_rows),
+            "lostFrames": sum(m6_lost),
+            "orderMismatchFrames": sum(m6_order_mismatch),
+            "primaryMismatchFrames": sum(m6_primary_mismatch),
+            "spacingMismatchCount": m6_spacing_mismatch_count,
+            "minimumAdjacentSpacingCM": min(
+                (
+                    spacing
+                    for row in m6_deployed_rows
+                    for spacing in (
+                        _finite(row, "formationSpacing01CM"),
+                        _finite(row, "formationSpacing12CM"),
+                        _finite(row, "formationSpacing23CM"),
+                    )
+                ),
+                default=0.0,
+            ),
+            "minimumPixelRadius": min(
+                (
+                    _finite(row, f"formation{index}PixelRadius")
+                    for row in flight_rows
+                    for index in range(4)
+                ),
+                default=0.0,
+            ),
+            "passed": m6_formation_passed,
         },
         "director": {
             "schemaAvailable": has_director_schema,

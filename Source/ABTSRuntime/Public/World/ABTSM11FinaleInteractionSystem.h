@@ -7,6 +7,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "UI/ABTSM11FinaleHUDData.h"
+#include "World/ABTSM11FinaleFormation.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
 #include "ABTSM11FinaleInteractionSystem.generated.h"
 
@@ -192,6 +193,24 @@ public:
 	{
 		return AttemptBird;
 	}
+	/** Frozen M6 order: controlled bird first, remaining BirdIds ascending. */
+	const TArray<TObjectPtr<AABTSM25BirdCharacter>>&
+		GetAttemptFormationBirds() const
+	{
+		return AttemptFormationBirds;
+	}
+	const TArray<double>& GetFormationAdjacentArcSpacingCM() const
+	{
+		return FormationAdjacentArcSpacingCM;
+	}
+	double GetFinaleFormationSpacingCM() const
+	{
+		return ResolvedFormationSpacingCM;
+	}
+	bool IsFinaleFormationFullyDeployed() const
+	{
+		return bFormationFullyDeployed;
+	}
 	const UABTSM11FinaleBirdTrailComponent* GetFinaleBirdTrail() const
 	{
 		return FinaleBirdTrail;
@@ -242,6 +261,22 @@ private:
 	void UpdatePlayback(float DeltaSeconds);
 	void UpdateFailurePresentation(float DeltaSeconds);
 	void UpdatePouchPresentation();
+	bool BuildAttemptFormation(
+		AABTSM25BirdCharacter& ControlledBird,
+		FString& OutFailure);
+	bool EnterAttemptFormationPouch(
+		const FVector& PouchLocation,
+		const FQuat& PouchRotation);
+	bool UpdateFormationPlayback(
+		double PlaybackTimeSeconds,
+		const FABTSM110FinaleLocalFrame& Frame,
+		const FVector& PrimaryWorldPosition,
+		const FVector& PrimaryWorldVelocity);
+	FTransform BuildFormationPouchTransform(
+		int32 FormationIndex,
+		const FVector& PouchLocation,
+		const FQuat& PouchRotation) const;
+	void ResetFormationRuntime();
 	bool EnsureAimCamera();
 	bool EnsureFlightCamera();
 	void RestoreAimCameraView();
@@ -281,6 +316,9 @@ private:
 	TObjectPtr<AABTSM25BirdCharacter> AttemptBird;
 
 	UPROPERTY(Transient)
+	TArray<TObjectPtr<AABTSM25BirdCharacter>> AttemptFormationBirds;
+
+	UPROPERTY(Transient)
 	TObjectPtr<AABTSM51SlingshotCord> ActiveCord;
 
 	UPROPERTY(Transient)
@@ -303,6 +341,26 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Playback",
 		meta = (ClampMin = "0.1", ClampMax = "100.0"))
 	double PlaybackTimeScale = 18.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
+		meta = (ClampMin = "20.0", ClampMax = "500.0", Units = "cm"))
+	double M6PouchHorizontalSpacingCM = 110.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
+		meta = (ClampMin = "20.0", ClampMax = "500.0", Units = "cm"))
+	double M6PouchVerticalSpacingCM = 100.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
+		meta = (ClampMin = "50.0", ClampMax = "2000.0", Units = "cm"))
+	double M6MinimumFlightSpacingCM = 260.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
+		meta = (ClampMin = "0.0", ClampMax = "500.0", Units = "cm"))
+	double M6FormationClearanceCM = 80.0;
+
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
+		meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	double M6FollowerDeploymentWindowSpacingFraction = 0.50;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|Failure",
 		meta = (ClampMin = "0.0", ClampMax = "6.0", Units = "s"))
@@ -361,6 +419,14 @@ private:
 	FABTSM11FinaleLaunchInput FrozenReleaseInput;
 	FTransform AttemptBirdOriginalTransform = FTransform::Identity;
 	FVector AttemptBirdOriginalVisualScale = FVector::OneVector;
+	TArray<FTransform> AttemptFormationOriginalTransforms;
+	TArray<FVector> AttemptFormationOriginalVisualScales;
+	TArray<FTransform> AttemptFormationPouchTransforms;
+	TArray<uint8> AttemptFormationInPouch;
+	FABTSM11FinaleFormationPath FormationPath;
+	TArray<double> FormationAdjacentArcSpacingCM;
+	double ResolvedFormationSpacingCM = 0.0;
+	bool bFormationFullyDeployed = false;
 	TWeakObjectPtr<APlayerController> ActiveFinaleController;
 	FVector AimSlingCenter = FVector::ZeroVector;
 	FVector AimSlingForward = FVector::ForwardVector;
