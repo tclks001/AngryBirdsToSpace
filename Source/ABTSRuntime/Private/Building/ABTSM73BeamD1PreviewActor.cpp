@@ -204,6 +204,11 @@ namespace ABTSM73BeamD1Preview
 		}
 	}
 
+	bool ShouldShowSemanticSupportDemandVolumes(const bool bHideVolumes)
+	{
+		return !bHideVolumes;
+	}
+
 	UMaterialInstanceDynamic* MakeDiagnosticMaterial(
 		UObject* Owner, UMaterialInterface* Parent, const FLinearColor& Color)
 	{
@@ -314,6 +319,10 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 	TestEqual(TEXT("Support-demand graph is disjoint from WFC, intent, and members"),
 		static_cast<uint16>(SupportDemandMask
 			& (WFCMask | IntentMask | MembersMask)), static_cast<uint16>(0));
+	TestTrue(TEXT("Support-demand volumes are visible by default"),
+		ShouldShowSemanticSupportDemandVolumes(false));
+	TestFalse(TEXT("Lines-only option hides support-demand volumes"),
+		ShouldShowSemanticSupportDemandVolumes(true));
 
 	const FBox Bounds(FVector(-108.0, -72.0, 0.0), FVector(108.0, 72.0, 180.0));
 	auto TestOutwardWinding = [this, &Bounds](
@@ -693,10 +702,13 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			& ABTSM73BeamD1Preview::SemanticSupportDemandVisibility) != 0)
 		{
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			const bool bShowSupportDemandVolumes =
+				ABTSM73BeamD1Preview::ShouldShowSemanticSupportDemandVolumes(
+					bHideSemanticSupportDemandVolumes);
 			for (const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic& Node
 				: Plan.SemanticSupportVolumeNodes)
 			{
-				if (Node.bSquareBody)
+				if (bShowSupportDemandVolumes && Node.bSquareBody)
 				{
 					ABTSM73BeamD1Preview::AddBoxInstance(
 						CoreMergeRegionPreview, Node.LocalBounds);
@@ -714,19 +726,24 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 						Node.LocalBounds.GetCenter(), Child.LocalBounds.GetCenter());
 				}
 			}
-			for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
-				: Plan.SemanticTerminalDemands)
+			if (bShowSupportDemandVolumes)
 			{
-				const FBox DemandBounds = Demand.bHasContinuousCoreFit
-					? Demand.ContinuousCoreFitBounds
-					: Demand.GroundProjectionBounds;
-				ABTSM73BeamD1Preview::AddBoxInstance(
-					CoreIntentPreview, DemandBounds);
+				for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
+					: Plan.SemanticTerminalDemands)
+				{
+					const FBox DemandBounds = Demand.bHasContinuousCoreFit
+						? Demand.ContinuousCoreFitBounds
+						: Demand.GroundProjectionBounds;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview, DemandBounds);
+				}
 			}
 			CoreMergeRegionPreview->SetVisibility(
-				CoreMergeRegionPreview->GetInstanceCount() > 0, true);
+				bShowSupportDemandVolumes
+					&& CoreMergeRegionPreview->GetInstanceCount() > 0, true);
 			CoreIntentPreview->SetVisibility(
-				CoreIntentPreview->GetInstanceCount() > 0, true);
+				bShowSupportDemandVolumes
+					&& CoreIntentPreview->GetInstanceCount() > 0, true);
 			SharedPairIntentPreview->SetVisibility(
 				SharedPairIntentPreview->GetInstanceCount() > 0, true);
 		}
@@ -857,12 +874,13 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewGenerated]")
-			TEXT(" Actor=%s Stage=%d Layer=%d Profile=%s Tier=%d")
+			TEXT(" Actor=%s Stage=%d Layer=%d HideSupportDemandVolumes=%d Profile=%s Tier=%d")
 			TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
 			static_cast<int32>(EffectiveLayer),
+			bHideSemanticSupportDemandVolumes ? 1 : 0,
 			*LastSummary.GameplayProfileId.ToString(), LastSummary.DifficultyTier,
 			StageResult.Silhouette.Volumes.Num(),
 			StageResult.Skeleton.Plan.Summary.SemanticSupportNodeCount,

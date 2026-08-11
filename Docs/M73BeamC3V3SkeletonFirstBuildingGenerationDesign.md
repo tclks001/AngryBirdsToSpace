@@ -1634,6 +1634,11 @@ split/merge；不同位置恰好同高的独立楼体不会被合并成一条 le
 Profile/Tier/Seed 下依次切换第 1 层与第 7 层，核对“原始 WFC 体积 → 支撑 Body → Crown 荷载”的因果关系；
 切换层不会重新选择候选。
 
+第 7 层另提供 `Hide Support Demand Volumes (Lines Only)` 复选框。勾选后只隐藏方形 Body Box 和 demand 的
+连续 fit/ground projection Box，保留全部 Body→Body/Crown 支撑线；取消勾选恢复完整诊断。该开关纯属编辑器
+可见性过滤，不重新生成 Stage 1，不改变 demand、ledger、occupancy、候选或任何 Hash。它只在第 7 层显示，
+避免被误解为其他诊断层或生产几何的控制项。
+
 ### 37.4 自动化与当前结论
 
 纯数据 `SemanticSupportMergedRoofDemand` 固定反例：两个独立 Body 汇入一个 triangular-prism Crown。旧几何

@@ -107,6 +107,14 @@ protected:
 	EABTSM73BeamC3Stage1DiagnosticLayer Stage1DiagnosticLayer =
 		EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope;
 
+	/** Visualization only: hide support Body/core-fit volumes while retaining DAG edges. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Hide Support Demand Volumes (Lines Only)",
+			EditCondition = "Stage1DiagnosticLayer == EABTSM73BeamC3Stage1DiagnosticLayer::SemanticSupportDemandDAG",
+			EditConditionHides))
+	bool bHideSemanticSupportDemandVolumes = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-D1|Preview")
 	bool bShowEditorPreview = true;
