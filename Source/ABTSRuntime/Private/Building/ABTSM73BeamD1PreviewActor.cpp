@@ -769,11 +769,23 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 						SharedPairIntentPreview,
 						Node.LocalBounds.GetCenter(), Child.LocalBounds.GetCenter());
 				}
+				if (Node.bTerminalBody || Node.bGraphTerminal)
+				{
+					const FVector Center = Node.LocalBounds.GetCenter();
+					const double HalfExtent = Node.bTerminalBody ? 18.0 : 12.0;
+					UHierarchicalInstancedStaticMeshComponent* Marker =
+						Node.bTerminalBody ? StonePreview.Get()
+						: Node.Role == EABTSM73DAG5BV2VolumeRole::Crown
+							? GlassPreview.Get() : IronPreview.Get();
+					ABTSM73BeamD1Preview::AddBoxInstance(Marker, FBox(
+						Center - FVector(HalfExtent),
+						Center + FVector(HalfExtent)));
+				}
 			}
-			if (bShowSupportDemandVolumes)
+			for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
+				: Plan.SemanticTerminalDemands)
 			{
-				for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
-					: Plan.SemanticTerminalDemands)
+				if (bShowSupportDemandVolumes)
 				{
 					const FBox DemandBounds = Demand.bHasContinuousCoreFit
 						? Demand.ContinuousCoreFitBounds
@@ -781,6 +793,11 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					ABTSM73BeamD1Preview::AddBoxInstance(
 						CoreIntentPreview, DemandBounds);
 				}
+				const FVector LoadCenter = Demand.TerminalLoadBounds.GetCenter();
+				ABTSM73BeamD1Preview::AddBoxInstance(
+					TowerChildIntentPreview, FBox(
+						LoadCenter - FVector(8.0),
+						LoadCenter + FVector(8.0)));
 			}
 			CoreMergeRegionPreview->SetVisibility(
 				bShowSupportDemandVolumes
@@ -790,6 +807,12 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					&& CoreIntentPreview->GetInstanceCount() > 0, true);
 			SharedPairIntentPreview->SetVisibility(
 				SharedPairIntentPreview->GetInstanceCount() > 0, true);
+			for (UHierarchicalInstancedStaticMeshComponent* Marker : {
+				StonePreview.Get(), GlassPreview.Get(), IronPreview.Get(),
+				TowerChildIntentPreview.Get()})
+			{
+				Marker->SetVisibility(Marker->GetInstanceCount() > 0, true);
+			}
 		}
 		else if ((VisibilityMask
 			& ABTSM73BeamD1Preview::DemandCoreCouplingVisibility) != 0)
@@ -800,11 +823,12 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			for (const ABTSM73BeamC3V3::FSemanticDemandCoreBindingDiagnostic& Binding
 				: Plan.SemanticDemandCoreBindings)
 			{
-				FBox DemandPlate = Binding.DemandBodyBounds;
+				FBox DemandPlate = Binding.TerminalLoadBounds.IsValid
+					? Binding.TerminalLoadBounds : Binding.DemandBodyBounds;
 				DemandPlate.Min.Z = DemandPlate.Max.Z - 8.0;
 				ABTSM73BeamD1Preview::AddBoxInstance(GlassPreview, DemandPlate);
-				FVector DemandAnchor = Binding.DemandBodyBounds.GetCenter();
-				DemandAnchor.Z = Binding.DemandBodyBounds.Max.Z;
+				FVector DemandAnchor = DemandPlate.GetCenter();
+				DemandAnchor.Z = DemandPlate.Max.Z;
 				if (!Plan.CoreCells.IsValidIndex(Binding.BoundTowerChildCoreCellId))
 				{
 					ABTSM73BeamD1Preview::AddSegmentInstance(
@@ -1119,7 +1143,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewGenerated]")
 			TEXT(" Actor=%s Stage=%d Layer=%d HideSupportDemandVolumes=%d Profile=%s Tier=%d")
-			TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+			TEXT(" Volumes=%d SupportNodes=%d LoadBranches=%d MultiBranchBodies=%d UnrepresentedBranches=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 			TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
@@ -1130,6 +1154,10 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			*LastSummary.GameplayProfileId.ToString(), LastSummary.DifficultyTier,
 			StageResult.Silhouette.Volumes.Num(),
 			StageResult.Skeleton.Plan.Summary.SemanticSupportNodeCount,
+			StageResult.Skeleton.Plan.Summary.SemanticTerminalLoadBranchCount,
+			StageResult.Skeleton.Plan.Summary.MultiBranchTerminalBodyCount,
+			StageResult.Skeleton.Plan.Summary
+				.UnrepresentedSemanticTerminalLoadBranchCount,
 			StageResult.Skeleton.Plan.Summary.SemanticTerminalDemandCount,
 			StageResult.Skeleton.Plan.Summary.SemanticSupportLedgerCount,
 			StageResult.Skeleton.Plan.Summary.SemanticSupportDemandHash,

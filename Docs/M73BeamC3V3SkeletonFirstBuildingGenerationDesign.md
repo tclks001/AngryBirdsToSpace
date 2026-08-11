@@ -1829,3 +1829,92 @@ bearing。由此确认截图中的缺失不是计数错误，而是旧 HighRegio
 本节仍是视觉/根因证据，不是修复。下一步应以该账本作为 replacement contract：先要求每个 semantic demand 获得
 唯一且位于 Body/continuous-fit 内的全高 child，再联合选择 main；是否允许无直接 main 接触应在 Stage 2 耦合路径
 明确后单独冻结。禁止通过删 demand、合并右侧 Body、调 Seed/Attempt/36 cm/720 cm/轨距或放宽空间容差让总账变绿。
+
+## 41. Semantic Demand 权威化与 Demand–Child 空间双射（2026-08-11）
+
+第 40 节确认旧 `HighProjectionRegion` 的 course-slice 血缘不能作为 TowerChild 的生产权威。本节将
+`SemanticTerminalDemand` 提升为子芯体生成的唯一身份来源，但仍保持 Stage 1 的视觉停点：不生成 Stage 2 外伸耦合、
+不运行 Chaos，也不把“必须直接接触 PodiumMain”提前写成硬门。
+
+### 41.1 生产顺序与唯一性合同
+
+每个 WFC component 按以下顺序生成：
+
+1. 先完成 `SemanticSupportDemandDAG`、逐 course occupancy、support province 与每个 terminal Body 的
+   `ContinuousCoreFitBounds`；Crown 的 merge/split 只记录荷载血缘，不改变 terminal Body 数；
+2. 对每个 `SemanticTerminalDemand` 建立一个 `RequiredHighProjectionDemand`。其 entry/terminal/branch bounds 与逐层
+   source lineage 均从该 demand 的 Body 路径计算；旧 HighProjection 分析只提供可追溯的 terminal course/component
+   诊断身份，不再决定需求数或合并需求；
+3. 在 joint main/child 选择中，每个 demand 必须拥有至少一个能从接地层连续达到 `RequiredTopCourse`、且 footprint
+   完整位于 `ContinuousCoreFitBounds` 内的固定截面 child 候选。main 组合必须同时兼容全部这些候选；必要时允许增加
+   PodiumMain，而不能因为已有 main 数较少而删掉 child；
+4. 选中后将同一个 `SemanticDemandId` 直接写入 HighProjection region、full-height candidate diagnostic 和最终
+   TowerChild。最终必须形成严格的 `Demand 1→1 Region 1→1 Child` 双射；任何缺失、歧义、越界、复用或孤儿 child
+   都 fail closed；
+5. `SemanticDemandCoreBinding` 不再通过 source overlap 或最近距离猜测 owner，而是按显式 ID 建账，并复核 Body overlap、
+   continuous fit、top course 与 ID 一致性。`NoDirectMain` 继续发布但不拒绝，因为 Stage 2 尚未冻结 child→main 的实体
+   耦合路径。
+
+该顺序消除了“没有 main 所以不生成 child、没有 child 又无法联合选择 main”的循环论证。支撑需求先完整存在，main
+选择只能满足它，不能反向定义它。共同屋顶仍可由两个 Body 共同承载，但必须保留两个独立 demand 和两个独立 child。
+
+### 41.2 旧诊断权威的降级
+
+旧 terminal course slice 仍保留，供检查 course、高度、component 与 legacy region 血缘；它不再要求通过空间 overlap
+反查到最终 child。原因是两个 semantic Body 可能在高处汇入同一旧 slice，而生产合同已经明确禁止该 slice 再吞并
+child 身份。自动化只要求旧 slice 能指出对应的 authoritative region identity；最终几何正确性由 semantic-demand
+双射、continuous fit 和静态 DAG 分别负责。
+
+### 41.3 代表种子闭合结果与剩余停点
+
+fresh NullRHI 的 TipOver E6 固定种子结果为：
+
+- `710000`：3 main / 8 child / 8 demand，unmapped、ambiguous、outside、reused、orphan 均为 0，算法总计
+  `1424.48 ms`；
+- `730000`：3 main / 7 child / 7 demand，上述异常均为 0，算法总计 `1304.69 ms`；
+- `750000`：4 main / 8 child / 8 demand，上述异常均为 0，算法总计 `1644.62 ms`。Demand 4
+  (`BodySource=19`) 与 Demand 6 (`BodySource=27`) 分别绑定独立 Region 4/Child 8 与 Region 6/Child 10，且均位于
+  自己的 continuous fit 内；不再出现两个 Body 复用一个 child、另一个 child 孤立的假绿灯。
+
+`750000` 从 3 个 main 增为 4 个 main 是 semantic-demand 空间约束触发的联合重选结果，不是调参或特殊 Seed 分支。
+UE 5.8 ForceUnity Development Editor 全链接成功；合并屋顶夹具、基础/多 main/terminal split/710000 coverage 等
+5 项受影响回归均在 fresh NullRHI 中通过。日志启动阶段的既有 UnifiedError 噪声发生在目标测试入队前，目标项均明确
+发布 `Result={Success}`。本节完成代码与针对性静态证据后仍须在诊断层 3/9/10 做一次可见 Editor 复核；视觉批准前
+不运行 Stage 1-only 5×6、Stage 2、Beam-D1.5 或 Chaos。
+
+## 42. Terminal Body × Terminal Load Leaf 需求合同（2026-08-11）
+
+第 41 节把 semantic Body 提升为 child 权威后，仍隐含了“一个 terminal Body 只对应一个顶部荷载分支”的假设。
+`TipOver.E6/750000` 证明该假设不成立：左侧 `BodySource=14` 在 Body 层仍是一个连续支撑柱，但进入 Crown 后分成
+South 与 North 两条互不连通并分别终止的荷载支路。若按 Body 计数，只会得到一个 demand/child，Stage 7 的全图
+支撑线却会显示两个终端，因此出现用户看到的“图 2 有三个左侧终端、图 4 账本只剩两个”的差异。
+
+新的生产身份是 `(TerminalBodyNodeId, TerminalLoadNodeId)`：
+
+1. 从每个 terminal Body 沿 WFC support DAG 向上遍历全部可达图叶；
+2. 只有高出合法 coupled podium 至少两个 36 cm course、确实需要独立 `TowerChild` 的叶进入需求全集；低层叶仍保留
+   在支撑图中，但明确标记为 `MainCarried`，合法地形成零 TowerChild demand/province；
+3. 对每一个合格叶独立构造 Body→该叶的精确 lineage、branch bounds、逐 course source 与 continuous-fit，不得把同一
+   Body 上方的 sibling Crown 合回一个大 AABB；
+4. `Demand→HighRegion→TowerChild` 继续保持严格一对一，最终账本同时发布 Body 与 load-leaf 身份。独立重新遍历所得的
+   合格叶集合必须与 demand key 集合完全相等；任何漏叶、重复键、越界 child、复用或孤儿均 fail closed；
+5. support province 仍按 ground projection 分区。同一 Body 的多个顶部叶可以属于同一 province，但必须生成不同 child；
+   这是“共同下部支撑、独立上部荷载轨道”，不是重复主芯体。
+
+Stage 7 诊断层继续显示全部语义边，并分别标出 terminal Body、图末端 Crown 和实际 TowerChild load demand；Stage 10
+以 `TerminalLoadBounds` 绘制 demand plate，因此同一 Body 的多个顶部支路不再叠成一个标记。节点日志发布
+`GraphTerminal / TerminalBody / LoadBranches / DemandClassificationReason`，Stage 1 汇总发布
+`LoadBranches / MultiBranchBodies / UnrepresentedBranches`。
+
+固定 `TipOver.E6/750000` 现在识别 9 个合格顶部荷载叶、9 个 semantic demand、9 个 HighRegion 和 9 个 TowerChild；
+`BodySource=14` 精确生成 `LoadSource=16` 与 `LoadSource=18` 两个 demand，4 个 PodiumMain 保持不变。账本为
+`Unmapped=Ambiguous=Outside=Reused=Orphan=Unrepresented=0`；算法总计 `1329.90 ms`。fresh NullRHI
+`ABTS.M73DAG.BeamC3V3.Staged` 精确发现并通过 44/44，其中 5 Profile × 6 Tier 为 30/30；UE 5.8 ForceUnity
+Development Editor 全链接成功。证据日志为
+`BeamC3-EndpointClassification-Probe-20260811.log`、
+`BeamC3-TerminalLoadBranches-TipOverSeeds-20260811-214022.log` 与
+`BeamC3-TerminalLoadBranches-StagedRegression-Acceptance-20260811-220048.log`。
+
+本节仍属于 Stage 1 静态修复：`Physical=NotEvaluated`，未启动 GUI、可见 PIE、Stage 2 或 Chaos。下一停点是用户在
+`Core + Shared Rails` 与 `Demand / Child / Main Ledger` 中确认左侧第三个 child 的位置、粗细和全高路径；测试地图继续
+作为用户资产排除。

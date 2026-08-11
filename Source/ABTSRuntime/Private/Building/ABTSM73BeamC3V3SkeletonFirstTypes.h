@@ -250,6 +250,9 @@ namespace ABTSM73BeamC3V3
 	{
 		int32 RegionId = INDEX_NONE;
 		int32 ComponentId = INDEX_NONE;
+		/** Authoritative semantic support-column demand.  Several regions may
+		 * intentionally share one legacy terminal slice after a Crown merge. */
+		int32 SemanticDemandId = INDEX_NONE;
 		int32 PodiumTopCourse = 0;
 		/** Exclusive highest complete 36 cm course required by this branch. */
 		int32 RequiredTopCourse = 0;
@@ -274,6 +277,7 @@ namespace ABTSM73BeamC3V3
 	struct FFullHeightChildCandidateDiagnostic
 	{
 		int32 ComponentId = INDEX_NONE;
+		int32 SemanticDemandId = INDEX_NONE;
 		/** Stable index inside the component's demand list.  RegionId is later
 		 * remapped to the plan-global region identity and must not be used to
 		 * locate this row while siblings are being materialized. */
@@ -405,7 +409,16 @@ namespace ABTSM73BeamC3V3
 		bool bGrounded = false;
 		bool bSyntheticCoupledGround = false;
 		bool bSquareBody = false;
-		bool bTerminalBody = false;
+		/** True when the semantic support DAG node has no outgoing edge.  Crown
+		 * leaves are graph terminals but are not automatically Body demands. */
+	bool bGraphTerminal = false;
+	/** True only when this graph leaf rises far enough above the coupled podium
+	 * to require a distinct TowerChild rather than being carried by the main. */
+	bool bTowerChildLoadLeaf = false;
+	bool bTerminalBody = false;
+		/** Number of distinct terminal load leaves reachable from a terminal Body. */
+		int32 TerminalLoadBranchCount = 0;
+		FString DemandClassificationReason;
 	};
 
 	/** One connected bipartite transition at a semantic support plane.  A row
@@ -447,8 +460,13 @@ namespace ABTSM73BeamC3V3
 		int32 ComponentId = INDEX_NONE;
 		int32 TerminalBodyNodeId = INDEX_NONE;
 		int32 TerminalBodySourceVolumeId = INDEX_NONE;
+		/** The terminal load leaf that keeps this demand distinct from sibling
+		 * Crown branches sharing the same terminal Body. */
+		int32 TerminalLoadNodeId = INDEX_NONE;
+		int32 TerminalLoadSourceVolumeId = INDEX_NONE;
 		int32 RequiredTopCourse = 0;
 		FBox BodyBounds = FBox(EForceInit::ForceInit);
+		FBox TerminalLoadBounds = FBox(EForceInit::ForceInit);
 		FBox GroundProjectionBounds = FBox(EForceInit::ForceInit);
 		FBox ContinuousCoreFitBounds = FBox(EForceInit::ForceInit);
 		FBox LoadBranchBounds = FBox(EForceInit::ForceInit);
@@ -462,16 +480,19 @@ namespace ABTSM73BeamC3V3
 		bool bSharesMergedCrown = false;
 	};
 
-	/** Read-only correspondence witness from the semantic support authority to
-	 * the currently emitted Stage-1 hierarchy.  This ledger deliberately does
-	 * not repair or reject geometry: it exposes where the legacy HighRegion
-	 * consumer diverges from SemanticTerminalDemand. */
+	/** Authoritative correspondence witness from SemanticTerminalDemand to the
+	 * emitted Stage-1 hierarchy.  Generation assigns the identity directly and
+	 * fails closed unless every demand owns exactly one spatially valid child.
+	 * Direct child/main bearing remains diagnostic until Stage 2 defines the
+	 * coupling path. */
 	struct FSemanticDemandCoreBindingDiagnostic
 	{
 		int32 DemandId = INDEX_NONE;
 		int32 ComponentId = INDEX_NONE;
 		int32 SupportProvinceId = INDEX_NONE;
 		int32 TerminalBodySourceVolumeId = INDEX_NONE;
+		int32 TerminalLoadNodeId = INDEX_NONE;
+		int32 TerminalLoadSourceVolumeId = INDEX_NONE;
 		int32 CandidateRegionCount = 0;
 		int32 CandidateChildCount = 0;
 		int32 BoundHighProjectionRegionId = INDEX_NONE;
@@ -484,6 +505,7 @@ namespace ABTSM73BeamC3V3
 		bool bDirectMainCoupling = false;
 		bool bAmbiguousRegionMatch = false;
 		FBox DemandBodyBounds = FBox(EForceInit::ForceInit);
+		FBox TerminalLoadBounds = FBox(EForceInit::ForceInit);
 		FBox ContinuousFitBounds = FBox(EForceInit::ForceInit);
 		FBox ChildBounds = FBox(EForceInit::ForceInit);
 		FBox MainBounds = FBox(EForceInit::ForceInit);
@@ -539,6 +561,8 @@ namespace ABTSM73BeamC3V3
 		ECoreHierarchyRole HierarchyRole = ECoreHierarchyRole::Continuous;
 		/** Required for TowerChild and INDEX_NONE for every other role. */
 		int32 HighProjectionRegionId = INDEX_NONE;
+		/** Required for TowerChild and INDEX_NONE for every other role. */
+		int32 SemanticDemandId = INDEX_NONE;
 		/** Dedicated SharedEndpoint ownership; INDEX_NONE for ordinary cores. */
 		int32 SharedEndpointSpanVolumeId = INDEX_NONE;
 		bool bNegativeSharedEndpoint = false;
@@ -651,6 +675,9 @@ namespace ABTSM73BeamC3V3
 		int32 SemanticSupportSplitCount = 0;
 		int32 SemanticSupportMergeCount = 0;
 		int32 SemanticSupportCourseCount = 0;
+		int32 SemanticTerminalLoadBranchCount = 0;
+		int32 MultiBranchTerminalBodyCount = 0;
+		int32 UnrepresentedSemanticTerminalLoadBranchCount = 0;
 		int32 SemanticTerminalDemandCount = 0;
 		int32 SemanticTerminalDemandWithoutContinuousFitCount = 0;
 		int32 SemanticDemandCoreBindingCount = 0;

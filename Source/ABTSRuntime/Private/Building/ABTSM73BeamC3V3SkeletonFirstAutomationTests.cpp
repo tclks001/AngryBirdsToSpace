@@ -3074,6 +3074,8 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 		Plan.Summary.EnvelopeHash != 0
 			&& Plan.Summary.CorePlanHash != 0
 			&& Plan.Summary.FinalGeometryHash != 0);
+	const bool bHasTowerChildDemands =
+		Plan.Summary.SemanticTerminalDemandCount > 0;
 	Check(TEXT("publishes the independent semantic support-demand graph"),
 		Plan.Summary.SemanticSupportNodeCount
 			== Plan.SemanticSupportVolumeNodes.Num()
@@ -3085,15 +3087,22 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 				== Plan.SemanticTerminalDemands.Num()
 			&& Plan.Summary.SemanticSupportNodeCount > 0
 			&& Plan.Summary.SemanticSupportCourseCount > 0
-			&& Plan.Summary.SemanticTerminalDemandCount > 0
+			&& Plan.Summary.SemanticTerminalLoadBranchCount
+				== Plan.Summary.SemanticTerminalDemandCount
+			&& Plan.Summary.UnrepresentedSemanticTerminalLoadBranchCount == 0
 			&& Plan.Summary.SemanticSupportDemandHash != 0);
 	Check(TEXT("partitions semantic ground occupancy into support provinces"),
 		Plan.Summary.SupportProvinceCount == Plan.SupportProvinces.Num()
-			&& Plan.Summary.SupportProvinceCount > 0
+			&& (bHasTowerChildDemands
+				? Plan.Summary.SupportProvinceCount > 0
+				: Plan.Summary.SupportProvinceCount == 0)
 			&& Plan.Summary.BoundSupportProvinceCount
 				== Plan.Summary.SupportProvinceCount
-			&& Plan.Summary.DistinctProvinceGroundCoreCount > 0
-			&& Plan.Summary.SupportProvinceGroundCellCount > 0
+			&& (bHasTowerChildDemands
+				? Plan.Summary.DistinctProvinceGroundCoreCount > 0
+					&& Plan.Summary.SupportProvinceGroundCellCount > 0
+				: Plan.Summary.DistinctProvinceGroundCoreCount == 0
+					&& Plan.Summary.SupportProvinceGroundCellCount == 0)
 			&& Plan.Summary.SupportProvinceHash != 0
 			&& Plan.Summary.SupportProvinceMainBindingHash != 0
 			&& Algo::AllOf(Plan.SupportProvinces,
@@ -3119,7 +3128,8 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 			? Occupancy.OccupiedCellCount : 0;
 	}
 	Check(TEXT("support provinces exactly partition course-zero occupancy"),
-		Plan.Summary.SupportProvinceGroundCellCount == GroundCourseCellCount);
+		!bHasTowerChildDemands
+			|| Plan.Summary.SupportProvinceGroundCellCount == GroundCourseCellCount);
 	bool bSemanticOccupancyCloses = true;
 	for (const ABTSM73BeamC3V3::FSemanticSupportCourseOccupancyDiagnostic& Occupancy
 		: Plan.SemanticSupportCourseOccupancies)
@@ -3745,8 +3755,8 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 				== ABTSM73BeamC3V3::ECoreHierarchyRole::PodiumMain;
 		});
 	TestNotNull(TEXT("One coupled-podium main core is explicit"), Main);
-	TestEqual(TEXT("One podium main core is summarized"),
-		Plan.Summary.PodiumMainCoreCellCount, 1);
+	TestEqual(TEXT("Two terminal support provinces receive two podium mains"),
+		Plan.Summary.PodiumMainCoreCellCount, 2);
 	TestEqual(TEXT("Both upper branches receive child cores"),
 		Plan.Summary.TowerChildCoreCellCount, 2);
 	TestEqual(TEXT("Same semantic path still yields two XY projection regions"),
@@ -3762,13 +3772,21 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 	{
 		const ABTSM73BeamC3V3::FJointCoreSelectionDiagnostic& Joint =
 			Plan.JointCoreSelectionDiagnostics[0];
-		TestTrue(TEXT("Spatial main candidates cover every podium-entry demand"),
+		TestEqual(TEXT("Joint selection emits every selected podium main"),
+			Joint.SelectedPodiumMainCount,
+			Plan.Summary.PodiumMainCoreCellCount);
+		TestTrue(TEXT("Every semantic child demand has retained main coverage"),
 			Joint.PodiumCoverageMainCandidateCountByRegion.Num()
 				== Joint.HighProjectionRegionCount
 			&& Algo::AllOf(Joint.PodiumCoverageMainCandidateCountByRegion,
-				[](const int32 Count) { return Count > 0; })
-			&& Joint.MaximumCoveredRegionCount
-				== Joint.HighProjectionRegionCount);
+				[](const int32 Count) { return Count > 0; }));
+		TestTrue(TEXT("Every support province has retained main coverage"),
+			Joint.MainCandidateCountBySupportProvince.Num()
+				== Joint.SupportProvinceCount
+			&& Algo::AllOf(Joint.MainCandidateCountBySupportProvince,
+				[](const int32 Count) { return Count > 0; }));
+		TestTrue(TEXT("Joint selection covers every support province"),
+			Joint.bEverySupportProvinceCovered);
 		TestTrue(TEXT("Spatial main selection then admits every full-height child"),
 			Joint.bEveryRegionHasFullHeightChild
 				&& Joint.FullHeightFeasibleMainSelectionCount > 0);
@@ -3818,13 +3836,23 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 					Core.HighProjectionRegionId)
 				&& Plan.HighProjectionRegions[Core.HighProjectionRegionId]
 					.BoundCoreCellId == Core.CoreCellId);
-			TestEqual(TEXT("Child publishes its coupled podium lineage"),
-				Core.PodiumMainCoreCellId, Main->CoreCellId);
+			const ABTSM73BeamC3V3::FCoreCellPlan* ParentMain =
+				SkeletonV3TestFindCore(Plan, Core.PodiumMainCoreCellId);
+			TestNotNull(TEXT("Child publishes a valid podium-main lineage"),
+				ParentMain);
+			if (ParentMain == nullptr)
+			{
+				continue;
+			}
+			TestEqual(TEXT("Child parent has the podium-main role"),
+				ParentMain->HierarchyRole,
+				ABTSM73BeamC3V3::ECoreHierarchyRole::PodiumMain);
 			TestTrue(TEXT("Child continues above the podium"),
-				Core.TopCourseIndex > Main->TopCourseIndex);
+				Core.TopCourseIndex > ParentMain->TopCourseIndex);
 			TestTrue(TEXT("Main footprint is wider than each child on one axis"),
-				Main->LocalBounds.GetSize().X > Core.LocalBounds.GetSize().X
-					|| Main->LocalBounds.GetSize().Y > Core.LocalBounds.GetSize().Y);
+				ParentMain->LocalBounds.GetSize().X > Core.LocalBounds.GetSize().X
+					|| ParentMain->LocalBounds.GetSize().Y
+						> Core.LocalBounds.GetSize().Y);
 			TestTrue(TEXT("Each child is statically coupled to the main core"),
 				Core.CrossCoreBearingContactCount > 0);
 		}
@@ -4117,12 +4145,36 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			continue;
 		}
 		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+		if (Seed == 750000)
+		{
+			for (const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic& Node
+				: Plan.SemanticSupportVolumeNodes)
+			{
+				AddInfo(FString::Printf(
+					TEXT("TipOverE6SupportNode:Seed=%d:Node=%d:Source=%d:Role=%d:Primitive=%d:Grounded=%d:Synthetic=%d:SquareBody=%d:GraphTerminal=%d:TerminalBody=%d:LoadBranches=%d:Reason=%s:Parents=%s:Children=%s:Path=%s:Bounds=%s"),
+					Seed, Node.NodeId, Node.SourceVolumeId,
+					static_cast<int32>(Node.Role),
+					static_cast<int32>(Node.Primitive),
+					Node.bGrounded ? 1 : 0,
+					Node.bSyntheticCoupledGround ? 1 : 0,
+					Node.bSquareBody ? 1 : 0,
+					Node.bGraphTerminal ? 1 : 0,
+					Node.bTerminalBody ? 1 : 0,
+					Node.TerminalLoadBranchCount,
+					*Node.DemandClassificationReason,
+					*JoinIds(Node.ParentNodeIds), *JoinIds(Node.ChildNodeIds),
+					*Node.DerivationPath, *Node.LocalBounds.ToString()));
+			}
+		}
 		AddInfo(FString::Printf(
-			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
+			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
 			Seed, Plan.Summary.PodiumMainCoreCellCount,
 			Plan.Summary.TowerChildCoreCellCount,
 			Plan.Summary.RequiredTerminalBranchCount,
 			Plan.Summary.BoundTerminalBranchCount,
+			Plan.Summary.SemanticTerminalLoadBranchCount,
+			Plan.Summary.MultiBranchTerminalBodyCount,
+			Plan.Summary.UnrepresentedSemanticTerminalLoadBranchCount,
 			Plan.Summary.SemanticTerminalDemandCount,
 			Plan.Summary.SemanticDemandCoreBindingCount,
 			Plan.Summary.UnmappedSemanticDemandCount,
@@ -4149,6 +4201,11 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 		TestEqual(*FString::Printf(TEXT("Seed %d publishes one binding row per semantic demand"),
 			Seed), Plan.Summary.SemanticDemandCoreBindingCount,
 			Plan.Summary.SemanticTerminalDemandCount);
+		TestEqual(*FString::Printf(TEXT("Seed %d represents every terminal load branch"),
+			Seed), Plan.Summary.SemanticTerminalDemandCount,
+			Plan.Summary.SemanticTerminalLoadBranchCount);
+		TestEqual(*FString::Printf(TEXT("Seed %d leaves no support branch unrepresented"),
+			Seed), Plan.Summary.UnrepresentedSemanticTerminalLoadBranchCount, 0);
 		TestEqual(*FString::Printf(TEXT("Seed %d binding array closes with summary"),
 			Seed), Plan.SemanticDemandCoreBindings.Num(),
 			Plan.Summary.SemanticDemandCoreBindingCount);
@@ -4168,10 +4225,12 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			NoDirectMainCount += Binding.BoundTowerChildCoreCellId != INDEX_NONE
 				&& !Binding.bDirectMainCoupling ? 1 : 0;
 			AddInfo(FString::Printf(
-				TEXT("TipOverE6DemandCore:Seed=%d:Demand=%d:Component=%d:Province=%d:BodySource=%d:Candidates=%d/%d:Region=%d:Child=%d:Main=%d:Multiplicity=%d:Overlap=%.3f:Inside=%d:Fit=%d:Direct=%d:Ambiguous=%d:Reason=%s:Body=%s:ChildBounds=%s:MainBounds=%s"),
+				TEXT("TipOverE6DemandCore:Seed=%d:Demand=%d:Component=%d:Province=%d:BodySource=%d:LoadNode=%d:LoadSource=%d:Candidates=%d/%d:Region=%d:Child=%d:Main=%d:Multiplicity=%d:Overlap=%.3f:Inside=%d:Fit=%d:Direct=%d:Ambiguous=%d:Reason=%s:Body=%s:ChildBounds=%s:MainBounds=%s"),
 				Seed, Binding.DemandId, Binding.ComponentId,
 				Binding.SupportProvinceId,
 				Binding.TerminalBodySourceVolumeId,
+				Binding.TerminalLoadNodeId,
+				Binding.TerminalLoadSourceVolumeId,
 				Binding.CandidateRegionCount, Binding.CandidateChildCount,
 				Binding.BoundHighProjectionRegionId,
 				Binding.BoundTowerChildCoreCellId,
@@ -4224,6 +4283,52 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			Plan.Summary.ReusedTowerChildBindingCount);
 		TestEqual(TEXT("Orphan-child accounting closes"), OrphanChildCount,
 			Plan.Summary.UnreferencedTowerChildCount);
+		TestEqual(*FString::Printf(TEXT("Seed %d maps every semantic demand"), Seed),
+			Plan.Summary.UnmappedSemanticDemandCount, 0);
+		TestEqual(*FString::Printf(TEXT("Seed %d has no ambiguous demand binding"), Seed),
+			Plan.Summary.AmbiguousSemanticDemandCount, 0);
+		TestEqual(*FString::Printf(TEXT("Seed %d keeps every child inside its demand"), Seed),
+			Plan.Summary.SemanticDemandChildOutsideBodyCount, 0);
+		TestEqual(*FString::Printf(TEXT("Seed %d never reuses a child"), Seed),
+			Plan.Summary.ReusedTowerChildBindingCount, 0);
+		TestEqual(*FString::Printf(TEXT("Seed %d emits no orphan child"), Seed),
+			Plan.Summary.UnreferencedTowerChildCount, 0);
+		TestEqual(*FString::Printf(TEXT("Seed %d emits one child per semantic demand"),
+			Seed), Plan.Summary.TowerChildCoreCellCount,
+			Plan.Summary.SemanticTerminalDemandCount);
+		if (Seed == 750000)
+		{
+			TestEqual(TEXT("TipOver 750000 keeps all nine terminal load branches"),
+				Plan.Summary.SemanticTerminalLoadBranchCount, 9);
+			TestEqual(TEXT("TipOver 750000 emits all nine semantic demands"),
+				Plan.Summary.SemanticTerminalDemandCount, 9);
+			const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic* SplitBody =
+				Plan.SemanticSupportVolumeNodes.FindByPredicate(
+					[](const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic& Node)
+					{
+						return Node.SourceVolumeId == 14;
+					});
+			if (TestNotNull(TEXT("TipOver 750000 identifies the west split Body"),
+				SplitBody))
+			{
+				TestEqual(TEXT("West split Body publishes two terminal load branches"),
+					SplitBody->TerminalLoadBranchCount, 2);
+			}
+			TArray<int32> SplitLoadSources;
+			for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
+				: Plan.SemanticTerminalDemands)
+			{
+				if (Demand.TerminalBodySourceVolumeId == 14)
+				{
+					SplitLoadSources.Add(Demand.TerminalLoadSourceVolumeId);
+				}
+			}
+			SplitLoadSources.Sort();
+			TestEqual(TEXT("West split Body emits two demand identities"),
+				SplitLoadSources.Num(), 2);
+			TestTrue(TEXT("West split demands preserve South/North load leaves"),
+				SplitLoadSources == TArray<int32>({16, 18}));
+		}
 		TestTrue(*FString::Printf(TEXT("Seed %d passes the Stage 1 static DAG"), Seed),
 			Result.Summary.bStageStaticDAGEvaluated
 				&& Result.StaticDAG.Summary.bAccepted);
@@ -4283,8 +4388,8 @@ bool FABTSM73BeamC3SemanticSupportMergedRoofDemandTest::RunTest(
 		return false;
 	}
 	const ABTSM73BeamC3V3::FPlan& Plan = Result.Plan;
-	TestEqual(TEXT("One merged roof remains one current geometry terminal"),
-		Plan.Summary.RequiredTerminalBranchCount, 1);
+	TestEqual(TEXT("Two Body demands remain two authoritative child regions"),
+		Plan.Summary.RequiredTerminalBranchCount, 2);
 	TestEqual(TEXT("Two highest Body supports remain two semantic demands"),
 		Plan.Summary.SemanticTerminalDemandCount, 2);
 	TestEqual(TEXT("Semantic demand array closes its summary"),
@@ -4327,6 +4432,33 @@ bool FABTSM73BeamC3SemanticSupportMergedRoofDemandTest::RunTest(
 		Plan.Summary.SupportProvinceCount);
 	TestNotEqual(TEXT("Province/main assignment has a separate identity"),
 		Plan.Summary.SupportProvinceMainBindingHash, int64(0));
+	TestEqual(TEXT("Each merged-roof Body demand emits one child"),
+		Plan.Summary.TowerChildCoreCellCount, 2);
+	TestEqual(TEXT("Each semantic demand has one authoritative binding"),
+		Plan.Summary.SemanticDemandCoreBindingCount, 2);
+	TestEqual(TEXT("Merged-roof demands do not reuse a child"),
+		Plan.Summary.ReusedTowerChildBindingCount, 0);
+	TestEqual(TEXT("Merged-roof generation emits no orphan child"),
+		Plan.Summary.UnreferencedTowerChildCount, 0);
+	TestEqual(TEXT("Merged-roof children remain inside their Body demands"),
+		Plan.Summary.SemanticDemandChildOutsideBodyCount, 0);
+	TSet<int32> BoundChildIds;
+	for (const ABTSM73BeamC3V3::FSemanticDemandCoreBindingDiagnostic& Binding
+		: Plan.SemanticDemandCoreBindings)
+	{
+		BoundChildIds.Add(Binding.BoundTowerChildCoreCellId);
+		TestEqual(TEXT("Binding is selected by authoritative semantic identity"),
+			Binding.MappingReason, FString(TEXT("AuthoritativeSemanticDemandId")));
+	}
+	TestEqual(TEXT("Merged-roof demands bind distinct child identities"),
+		BoundChildIds.Num(), 2);
+	TestTrue(TEXT("One legacy terminal slice records both semantic regions"),
+		Plan.HighProjectionBranchBindingDiagnostics.ContainsByPredicate(
+			[](const ABTSM73BeamC3V3::FHighProjectionBranchBindingDiagnostic& Branch)
+			{
+				return Branch.bTerminal && Branch.bRequiresTowerChild
+					&& Branch.RequiredRegionIds.Num() == 2;
+			}));
 	return true;
 }
 

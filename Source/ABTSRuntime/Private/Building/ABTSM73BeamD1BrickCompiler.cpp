@@ -2854,7 +2854,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		TEXT("[ABTS][M7.3-Beam-C3V3][Stage1Stopped]")
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
 		TEXT(" GrammarHash=%lld WFCHash=%lld EnvelopeHash=%lld Stage1Hash=%lld")
-		TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+		TEXT(" Volumes=%d SupportNodes=%d LoadBranches=%d MultiBranchBodies=%d UnrepresentedBranches=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 		TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 		TEXT(" Provinces=%d MultiDemandProvinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceTies=%d ProvinceFallbacks=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
@@ -2866,6 +2866,9 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		OutResult.Silhouette.Summary.WFCHash, Stage1.EnvelopeHash,
 		Stage1.FinalGeometryHash, OutResult.Silhouette.Volumes.Num(),
 		Stage1.SemanticSupportNodeCount,
+		Stage1.SemanticTerminalLoadBranchCount,
+		Stage1.MultiBranchTerminalBodyCount,
+		Stage1.UnrepresentedSemanticTerminalLoadBranchCount,
 		Stage1.SemanticTerminalDemandCount,
 		Stage1.SemanticSupportLedgerCount,
 		Stage1.SemanticSupportDemandHash,

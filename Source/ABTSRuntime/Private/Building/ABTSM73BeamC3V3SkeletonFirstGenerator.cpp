@@ -346,6 +346,7 @@ namespace
 
 	struct FRequiredHighProjectionDemand
 	{
+		int32 SemanticDemandId = INDEX_NONE;
 		int32 TerminalSliceCourse = INDEX_NONE;
 		int32 TerminalSliceComponentId = INDEX_NONE;
 		int32 RequiredTopCourse = 0;
@@ -356,6 +357,152 @@ namespace
 		/** Absolute course index -> permitted semantic sources on this branch. */
 		TArray<TArray<int32>> CourseSourceVolumeIds;
 	};
+
+	/** Promotes one semantic terminal Body to one authoritative TowerChild
+	 * demand.  The legacy course-slice terminal is retained only as diagnostic
+	 * identity: two Body demands may therefore share its course/component after
+	 * a Crown merge without sharing a child. */
+	bool BuildSemanticChildProjectionDemands(
+		const FRoot& Root,
+		const int32 ComponentId,
+		const int32 PodiumTopCourse,
+		const FPlan& Plan,
+		const TArray<FRequiredHighProjectionDemand>& LegacyDemands,
+		TArray<FRequiredHighProjectionDemand>& OutDemands,
+		FString& OutError)
+	{
+		OutDemands.Reset();
+		const double PodiumTopZ = Root.GroundZCM
+			+ PodiumTopCourse * static_cast<double>(BlockUnitsCM);
+		for (const FSemanticTerminalDemandDiagnostic& Semantic
+			: Plan.SemanticTerminalDemands)
+		{
+			if (Semantic.ComponentId != ComponentId)
+			{
+				continue;
+			}
+			if (!Semantic.bHasContinuousCoreFit
+				|| !Semantic.ContinuousCoreFitBounds.IsValid
+				|| Semantic.RequiredTopCourse < PodiumTopCourse + 2)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SemanticChildDemandFitInvalid:Component=%d:Demand=%d:BodySource=%d:Fit=%d:Podium=%d:Top=%d"),
+					ComponentId, Semantic.DemandId,
+					Semantic.TerminalBodySourceVolumeId,
+					Semantic.bHasContinuousCoreFit ? 1 : 0,
+					PodiumTopCourse, Semantic.RequiredTopCourse);
+				return false;
+			}
+
+			const FRequiredHighProjectionDemand* Legacy = nullptr;
+			double BestLegacyOverlap = -1.0;
+			for (const FRequiredHighProjectionDemand& Candidate : LegacyDemands)
+			{
+				const bool bContainsTerminalBody = Candidate.SourceVolumeIds.Contains(
+					Semantic.TerminalBodySourceVolumeId);
+				const double Overlap = SkeletonV3OverlapLength(
+					Candidate.BranchBounds.Min.X, Candidate.BranchBounds.Max.X,
+					Semantic.BodyBounds.Min.X, Semantic.BodyBounds.Max.X)
+					* SkeletonV3OverlapLength(
+						Candidate.BranchBounds.Min.Y, Candidate.BranchBounds.Max.Y,
+						Semantic.BodyBounds.Min.Y, Semantic.BodyBounds.Max.Y);
+				if (bContainsTerminalBody
+					&& (Legacy == nullptr || Overlap > BestLegacyOverlap))
+				{
+					Legacy = &Candidate;
+					BestLegacyOverlap = Overlap;
+				}
+			}
+			if (Legacy == nullptr)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SemanticChildLegacySliceMissing:Component=%d:Demand=%d:BodySource=%d:Legacy=%d"),
+					ComponentId, Semantic.DemandId,
+					Semantic.TerminalBodySourceVolumeId, LegacyDemands.Num());
+				return false;
+			}
+
+			FRequiredHighProjectionDemand Demand;
+			Demand.SemanticDemandId = Semantic.DemandId;
+			Demand.TerminalSliceCourse = Legacy->TerminalSliceCourse;
+			Demand.TerminalSliceComponentId = Legacy->TerminalSliceComponentId;
+			Demand.RequiredTopCourse = Semantic.RequiredTopCourse;
+			Demand.EntryBounds = Semantic.GroundProjectionBounds;
+			Demand.EntryBounds.Min.Z = PodiumTopZ;
+			Demand.EntryBounds.Max.Z = PodiumTopZ + BlockUnitsCM;
+			Demand.TerminalBounds = Semantic.ContinuousCoreFitBounds;
+			Demand.BranchBounds = Semantic.LoadBranchBounds;
+			Demand.BranchBounds.Min.Z = PodiumTopZ;
+			Demand.CourseSourceVolumeIds.SetNum(Demand.RequiredTopCourse);
+
+			for (const int32 LineageNodeId : Semantic.LineageNodeIds)
+			{
+				if (!Plan.SemanticSupportVolumeNodes.IsValidIndex(LineageNodeId))
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SemanticChildLineageNodeInvalid:Demand=%d:Node=%d"),
+						Semantic.DemandId, LineageNodeId);
+					return false;
+				}
+				const FSemanticSupportVolumeNodeDiagnostic& Node =
+					Plan.SemanticSupportVolumeNodes[LineageNodeId];
+				if (Node.ComponentId != ComponentId || Node.bSyntheticCoupledGround
+					|| Node.LocalBounds.Max.Z < PodiumTopZ + WitnessToleranceCM)
+				{
+					continue;
+				}
+				Demand.SourceVolumeIds.AddUnique(Node.SourceVolumeId);
+				for (int32 Course = PodiumTopCourse;
+					Course < Demand.RequiredTopCourse; ++Course)
+				{
+					const double SampleZ = Root.GroundZCM
+						+ (Course + 0.5) * static_cast<double>(BlockUnitsCM);
+					if (SampleZ >= Node.LocalBounds.Min.Z - WitnessToleranceCM
+						&& SampleZ <= Node.LocalBounds.Max.Z + WitnessToleranceCM)
+					{
+						Demand.CourseSourceVolumeIds[Course].AddUnique(
+							Node.SourceVolumeId);
+					}
+				}
+			}
+			Demand.SourceVolumeIds.Sort();
+			for (int32 Course = PodiumTopCourse;
+				Course < Demand.RequiredTopCourse; ++Course)
+			{
+				Demand.CourseSourceVolumeIds[Course].Sort();
+				if (Demand.CourseSourceVolumeIds[Course].IsEmpty())
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SemanticChildCourseLineageEmpty:Component=%d:Demand=%d:Course=%d:Top=%d"),
+						ComponentId, Semantic.DemandId, Course,
+						Demand.RequiredTopCourse);
+					return false;
+				}
+			}
+			if (Demand.SourceVolumeIds.IsEmpty()
+				|| !Demand.EntryBounds.IsValid || !Demand.TerminalBounds.IsValid
+				|| !Demand.BranchBounds.IsValid)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SemanticChildDemandInvalid:Component=%d:Demand=%d:Sources=%d"),
+					ComponentId, Semantic.DemandId, Demand.SourceVolumeIds.Num());
+				return false;
+			}
+			OutDemands.Add(MoveTemp(Demand));
+		}
+		OutDemands.Sort([](const FRequiredHighProjectionDemand& A,
+			const FRequiredHighProjectionDemand& B)
+		{
+			return A.SemanticDemandId < B.SemanticDemandId;
+		});
+		if (OutDemands.IsEmpty())
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3SemanticChildDemandEmpty:Component=%d"), ComponentId);
+			return false;
+		}
+		return true;
+	}
 
 	struct FProjectionSliceNode
 	{
@@ -743,6 +890,29 @@ namespace
 			Plan.SemanticSupportVolumeNodes[*UpperNodeId]
 				.ParentNodeIds.AddUnique(*LowerNodeId);
 		}
+		int32 CoupledPodiumTopCourse = FMath::FloorToInt(
+			(Root.BodyTopCM - Root.GroundZCM)
+			/ static_cast<double>(BlockUnitsCM));
+		bool bHasDerivedCoupledPodium = false;
+		for (const FABTSM73DAG5BV2Volume* Volume : Root.BodyVolumes)
+		{
+			if (Volume != nullptr
+				&& Root.GroundSourceVolumeIds.Contains(Volume->VolumeId)
+				&& Volume->DerivationPath.StartsWith(TEXT("CoupledGround/")))
+			{
+				bHasDerivedCoupledPodium = true;
+				CoupledPodiumTopCourse = FMath::Min(CoupledPodiumTopCourse,
+					FMath::FloorToInt((Volume->LocalBounds.Max.Z - Root.GroundZCM)
+						/ static_cast<double>(BlockUnitsCM)));
+			}
+		}
+		const int32 BodyTopCourse = FMath::FloorToInt(
+			(Root.BodyTopCM - Root.GroundZCM)
+			/ static_cast<double>(BlockUnitsCM));
+		const bool bUsesTowerChildHierarchy = bHasDerivedCoupledPodium
+			&& CoupledPodiumTopCourse >= 2
+			&& CoupledPodiumTopCourse + 2 <= BodyTopCourse;
+
 		for (int32 NodeIndex = FirstNodeIndex;
 			NodeIndex < Plan.SemanticSupportVolumeNodes.Num(); ++NodeIndex)
 		{
@@ -750,6 +920,13 @@ namespace
 				Plan.SemanticSupportVolumeNodes[NodeIndex];
 			Node.ParentNodeIds.Sort();
 			Node.ChildNodeIds.Sort();
+			Node.bGraphTerminal = Node.ChildNodeIds.IsEmpty();
+			const int32 NodeTopCourse = FMath::FloorToInt(
+				(Node.LocalBounds.Max.Z - Root.GroundZCM)
+				/ static_cast<double>(BlockUnitsCM));
+			Node.bTowerChildLoadLeaf = Node.bGraphTerminal
+				&& bUsesTowerChildHierarchy
+				&& NodeTopCourse >= CoupledPodiumTopCourse + 2;
 			const bool bBodyNode = Node.Role != EABTSM73DAG5BV2VolumeRole::Crown
 				&& !Node.bSyntheticCoupledGround;
 			Node.bTerminalBody = bBodyNode
@@ -762,6 +939,77 @@ namespace
 							&& !Plan.SemanticSupportVolumeNodes[ChildNodeId]
 								.bSyntheticCoupledGround;
 					});
+			if (Node.bSyntheticCoupledGround)
+			{
+				Node.DemandClassificationReason = TEXT("SyntheticCoupledGround");
+			}
+			else if (Node.Role == EABTSM73DAG5BV2VolumeRole::Crown)
+			{
+				Node.DemandClassificationReason = Node.bGraphTerminal
+					? (Node.bTowerChildLoadLeaf
+						? TEXT("TowerChildCrownLoadLeaf")
+						: TEXT("MainCarriedCrownLoadLeaf"))
+					: TEXT("InteriorCrown");
+			}
+			else if (!Node.bTerminalBody)
+			{
+				Node.DemandClassificationReason = TEXT("BodyContinuation");
+			}
+		}
+
+		auto CollectTerminalLoadLeaves = [&Plan](const int32 StartNodeId)
+		{
+			TArray<int32> Leaves;
+			TArray<int32> Queue{StartNodeId};
+			TSet<int32> Visited;
+			for (int32 Head = 0; Head < Queue.Num(); ++Head)
+			{
+				const int32 NodeId = Queue[Head];
+				if (Visited.Contains(NodeId)
+					|| !Plan.SemanticSupportVolumeNodes.IsValidIndex(NodeId))
+				{
+					continue;
+				}
+				Visited.Add(NodeId);
+				const FSemanticSupportVolumeNodeDiagnostic& Node =
+					Plan.SemanticSupportVolumeNodes[NodeId];
+				if (Node.ChildNodeIds.IsEmpty())
+				{
+					Leaves.Add(NodeId);
+					continue;
+				}
+				Queue.Append(Node.ChildNodeIds);
+			}
+			Leaves.Sort();
+			return Leaves;
+		};
+		auto CollectTowerChildLoadLeaves = [&Plan, &CollectTerminalLoadLeaves](
+			const int32 StartNodeId)
+		{
+			TArray<int32> Leaves = CollectTerminalLoadLeaves(StartNodeId);
+			Leaves.RemoveAll([&Plan](const int32 NodeId)
+			{
+				return !Plan.SemanticSupportVolumeNodes.IsValidIndex(NodeId)
+					|| !Plan.SemanticSupportVolumeNodes[NodeId]
+						.bTowerChildLoadLeaf;
+			});
+			return Leaves;
+		};
+		for (int32 NodeIndex = FirstNodeIndex;
+			NodeIndex < Plan.SemanticSupportVolumeNodes.Num(); ++NodeIndex)
+		{
+			FSemanticSupportVolumeNodeDiagnostic& Node =
+				Plan.SemanticSupportVolumeNodes[NodeIndex];
+			if (!Node.bTerminalBody)
+			{
+				continue;
+			}
+			Node.TerminalLoadBranchCount =
+				CollectTowerChildLoadLeaves(Node.NodeId).Num();
+			Node.DemandClassificationReason = Node.TerminalLoadBranchCount > 0
+				? FString::Printf(TEXT("TerminalBodyTowerChildLoadBranches=%d"),
+					Node.TerminalLoadBranchCount)
+				: TEXT("TerminalBodyMainCarried");
 		}
 
 		TMap<int32, TArray<int32>> WitnessIndicesByContactCourse;
@@ -928,125 +1176,168 @@ namespace
 			{
 				continue;
 			}
-			FSemanticTerminalDemandDiagnostic& Demand =
-				Plan.SemanticTerminalDemands.AddDefaulted_GetRef();
-			Demand.DemandId = Plan.SemanticTerminalDemands.Num() - 1;
-			Demand.ComponentId = ComponentId;
-			Demand.TerminalBodyNodeId = TerminalBody.NodeId;
-			Demand.TerminalBodySourceVolumeId = TerminalBody.SourceVolumeId;
-			Demand.BodyBounds = TerminalBody.LocalBounds;
-			Demand.GroundProjectionBounds = FBox(
-				FVector(TerminalBody.LocalBounds.Min.X,
-					TerminalBody.LocalBounds.Min.Y, Root.GroundZCM),
-				FVector(TerminalBody.LocalBounds.Max.X,
-					TerminalBody.LocalBounds.Max.Y,
-					Root.GroundZCM + BlockUnitsCM));
-
-			TSet<int32> LineageNodeIds;
-			TArray<int32> AncestorQueue{TerminalBody.NodeId};
-			for (int32 Head = 0; Head < AncestorQueue.Num(); ++Head)
+			const TArray<int32> TerminalLoadNodeIds =
+				CollectTowerChildLoadLeaves(TerminalBody.NodeId);
+			if (TerminalLoadNodeIds.IsEmpty())
 			{
-				const int32 CurrentId = AncestorQueue[Head];
-				if (LineageNodeIds.Contains(CurrentId))
-				{
-					continue;
-				}
-				LineageNodeIds.Add(CurrentId);
-				const FSemanticSupportVolumeNodeDiagnostic& Current =
-					Plan.SemanticSupportVolumeNodes[CurrentId];
-				AncestorQueue.Append(Current.ParentNodeIds);
-				if (Current.bGrounded)
-				{
-					Demand.GroundSourceVolumeIds.AddUnique(Current.SourceVolumeId);
-				}
+				continue;
 			}
-			TArray<int32> DescendantQueue{TerminalBody.NodeId};
-			for (int32 Head = 0; Head < DescendantQueue.Num(); ++Head)
+			for (const int32 TerminalLoadNodeId : TerminalLoadNodeIds)
 			{
-				const int32 CurrentId = DescendantQueue[Head];
-				LineageNodeIds.Add(CurrentId);
-				const FSemanticSupportVolumeNodeDiagnostic& Current =
-					Plan.SemanticSupportVolumeNodes[CurrentId];
-				Demand.LoadBranchBounds += Current.LocalBounds;
-				if (Current.Role == EABTSM73DAG5BV2VolumeRole::Crown)
+				if (!Plan.SemanticSupportVolumeNodes.IsValidIndex(TerminalLoadNodeId))
 				{
-					Demand.CrownSourceVolumeIds.AddUnique(Current.SourceVolumeId);
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SemanticTerminalLoadNodeInvalid:Component=%d:BodyNode=%d:LoadNode=%d"),
+						ComponentId, TerminalBody.NodeId, TerminalLoadNodeId);
+					return false;
 				}
-				for (const int32 ChildId : Current.ChildNodeIds)
+				const FSemanticSupportVolumeNodeDiagnostic& TerminalLoad =
+					Plan.SemanticSupportVolumeNodes[TerminalLoadNodeId];
+				FSemanticTerminalDemandDiagnostic& Demand =
+					Plan.SemanticTerminalDemands.AddDefaulted_GetRef();
+				Demand.DemandId = Plan.SemanticTerminalDemands.Num() - 1;
+				Demand.ComponentId = ComponentId;
+				Demand.TerminalBodyNodeId = TerminalBody.NodeId;
+				Demand.TerminalBodySourceVolumeId = TerminalBody.SourceVolumeId;
+				Demand.TerminalLoadNodeId = TerminalLoad.NodeId;
+				Demand.TerminalLoadSourceVolumeId = TerminalLoad.SourceVolumeId;
+				Demand.BodyBounds = TerminalBody.LocalBounds;
+				Demand.TerminalLoadBounds = TerminalLoad.LocalBounds;
+				Demand.GroundProjectionBounds = FBox(
+					FVector(TerminalBody.LocalBounds.Min.X,
+						TerminalBody.LocalBounds.Min.Y, Root.GroundZCM),
+					FVector(TerminalBody.LocalBounds.Max.X,
+						TerminalBody.LocalBounds.Max.Y,
+						Root.GroundZCM + BlockUnitsCM));
+
+				TSet<int32> LineageNodeIds;
+				TArray<int32> AncestorQueue{TerminalBody.NodeId};
+				for (int32 Head = 0; Head < AncestorQueue.Num(); ++Head)
 				{
-					if (!DescendantQueue.Contains(ChildId))
+					const int32 CurrentId = AncestorQueue[Head];
+					if (LineageNodeIds.Contains(CurrentId))
 					{
-						DescendantQueue.Add(ChildId);
+						continue;
+					}
+					LineageNodeIds.Add(CurrentId);
+					const FSemanticSupportVolumeNodeDiagnostic& Current =
+						Plan.SemanticSupportVolumeNodes[CurrentId];
+					AncestorQueue.Append(Current.ParentNodeIds);
+					if (Current.bGrounded)
+					{
+						Demand.GroundSourceVolumeIds.AddUnique(Current.SourceVolumeId);
 					}
 				}
-			}
-			for (const int32 NodeId : LineageNodeIds)
-			{
-				Demand.LineageNodeIds.Add(NodeId);
-			}
-			Demand.LineageNodeIds.Sort();
-			Demand.CrownSourceVolumeIds.Sort();
-			Demand.GroundSourceVolumeIds.Sort();
-			Demand.RequiredTopCourse = FMath::FloorToInt(
-				(Demand.LoadBranchBounds.Max.Z - Root.GroundZCM)
-				/ static_cast<double>(BlockUnitsCM));
 
-			const int32 CandidateMinimumX = QMin(
-				TerminalBody.LocalBounds.Min.X + BlockUnitsCM * 0.5);
-			const int32 CandidateMaximumX = QMax(
-				TerminalBody.LocalBounds.Max.X - BlockUnitsCM * 0.5);
-			const int32 CandidateMinimumY = QMin(
-				TerminalBody.LocalBounds.Min.Y + BlockUnitsCM * 0.5);
-			const int32 CandidateMaximumY = QMax(
-				TerminalBody.LocalBounds.Max.Y - BlockUnitsCM * 0.5);
-			FBox FitXY(EForceInit::ForceInit);
-			for (int32 Y = CandidateMinimumY; Y <= CandidateMaximumY; ++Y)
-			{
-				for (int32 X = CandidateMinimumX; X <= CandidateMaximumX; ++X)
+				TSet<int32> DescendantsFromBody;
+				TArray<int32> DescendantQueue{TerminalBody.NodeId};
+				for (int32 Head = 0; Head < DescendantQueue.Num(); ++Head)
 				{
-					bool bContinuous = true;
-					for (int32 Course = 0;
-						Course < Demand.RequiredTopCourse; ++Course)
+					const int32 CurrentId = DescendantQueue[Head];
+					if (DescendantsFromBody.Contains(CurrentId))
 					{
-						const FVector Sample(
-							X * static_cast<double>(BlockUnitsCM),
-							Y * static_cast<double>(BlockUnitsCM),
-							Root.GroundZCM
-								+ (Course + 0.5) * BlockUnitsCM);
-						bContinuous = Demand.LineageNodeIds.ContainsByPredicate(
-							[&Plan, &Sample](const int32 LineageNodeId)
-							{
-								return Plan.SemanticSupportVolumeNodes
-									.IsValidIndex(LineageNodeId)
-									&& Plan.SemanticSupportVolumeNodes[LineageNodeId]
-										.LocalBounds.IsInsideOrOn(Sample);
-							});
-						if (!bContinuous)
+						continue;
+					}
+					DescendantsFromBody.Add(CurrentId);
+					DescendantQueue.Append(
+						Plan.SemanticSupportVolumeNodes[CurrentId].ChildNodeIds);
+				}
+				TSet<int32> AncestorsOfLoad;
+				TArray<int32> LoadAncestorQueue{TerminalLoadNodeId};
+				for (int32 Head = 0; Head < LoadAncestorQueue.Num(); ++Head)
+				{
+					const int32 CurrentId = LoadAncestorQueue[Head];
+					if (AncestorsOfLoad.Contains(CurrentId))
+					{
+						continue;
+					}
+					AncestorsOfLoad.Add(CurrentId);
+					LoadAncestorQueue.Append(
+						Plan.SemanticSupportVolumeNodes[CurrentId].ParentNodeIds);
+				}
+				for (const int32 CurrentId : DescendantsFromBody)
+				{
+					if (!AncestorsOfLoad.Contains(CurrentId))
+					{
+						continue;
+					}
+					LineageNodeIds.Add(CurrentId);
+					const FSemanticSupportVolumeNodeDiagnostic& Current =
+						Plan.SemanticSupportVolumeNodes[CurrentId];
+					Demand.LoadBranchBounds += Current.LocalBounds;
+					if (Current.Role == EABTSM73DAG5BV2VolumeRole::Crown)
+					{
+						Demand.CrownSourceVolumeIds.AddUnique(Current.SourceVolumeId);
+					}
+				}
+				for (const int32 LineageNodeId : LineageNodeIds)
+				{
+					Demand.LineageNodeIds.Add(LineageNodeId);
+				}
+				Demand.LineageNodeIds.Sort();
+				Demand.CrownSourceVolumeIds.Sort();
+				Demand.GroundSourceVolumeIds.Sort();
+				Demand.RequiredTopCourse = FMath::FloorToInt(
+					(Demand.LoadBranchBounds.Max.Z - Root.GroundZCM)
+					/ static_cast<double>(BlockUnitsCM));
+
+				const int32 CandidateMinimumX = QMin(
+					TerminalBody.LocalBounds.Min.X + BlockUnitsCM * 0.5);
+				const int32 CandidateMaximumX = QMax(
+					TerminalBody.LocalBounds.Max.X - BlockUnitsCM * 0.5);
+				const int32 CandidateMinimumY = QMin(
+					TerminalBody.LocalBounds.Min.Y + BlockUnitsCM * 0.5);
+				const int32 CandidateMaximumY = QMax(
+					TerminalBody.LocalBounds.Max.Y - BlockUnitsCM * 0.5);
+				FBox FitXY(EForceInit::ForceInit);
+				for (int32 Y = CandidateMinimumY; Y <= CandidateMaximumY; ++Y)
+				{
+					for (int32 X = CandidateMinimumX; X <= CandidateMaximumX; ++X)
+					{
+						bool bContinuous = true;
+						for (int32 Course = 0;
+							Course < Demand.RequiredTopCourse; ++Course)
 						{
-							break;
+							const FVector Sample(
+								X * static_cast<double>(BlockUnitsCM),
+								Y * static_cast<double>(BlockUnitsCM),
+								Root.GroundZCM
+									+ (Course + 0.5) * BlockUnitsCM);
+							bContinuous = Demand.LineageNodeIds.ContainsByPredicate(
+								[&Plan, &Sample](const int32 LineageNodeId)
+								{
+									return Plan.SemanticSupportVolumeNodes
+										.IsValidIndex(LineageNodeId)
+										&& Plan.SemanticSupportVolumeNodes[LineageNodeId]
+											.LocalBounds.IsInsideOrOn(Sample);
+								});
+							if (!bContinuous)
+							{
+								break;
+							}
+						}
+						if (bContinuous)
+						{
+							const FVector CellCenter(
+								X * static_cast<double>(BlockUnitsCM),
+								Y * static_cast<double>(BlockUnitsCM), 0.0);
+							FitXY += FBox(
+								CellCenter - FVector(BlockUnitsCM * 0.5,
+									BlockUnitsCM * 0.5, 0.0),
+								CellCenter + FVector(BlockUnitsCM * 0.5,
+									BlockUnitsCM * 0.5, 0.0));
 						}
 					}
-					if (bContinuous)
-					{
-						const FVector CellCenter(
-							X * static_cast<double>(BlockUnitsCM),
-							Y * static_cast<double>(BlockUnitsCM), 0.0);
-						FitXY += FBox(
-							CellCenter - FVector(BlockUnitsCM * 0.5,
-								BlockUnitsCM * 0.5, 0.0),
-							CellCenter + FVector(BlockUnitsCM * 0.5,
-								BlockUnitsCM * 0.5, 0.0));
-					}
 				}
-			}
-			Demand.bHasContinuousCoreFit = FitXY.IsValid != 0;
-			if (FitXY.IsValid)
-			{
-				Demand.ContinuousCoreFitBounds = FBox(
-					FVector(FitXY.Min.X, FitXY.Min.Y, Root.GroundZCM),
-					FVector(FitXY.Max.X, FitXY.Max.Y,
-						Root.GroundZCM
-							+ Demand.RequiredTopCourse * BlockUnitsCM));
+				Demand.bHasContinuousCoreFit = FitXY.IsValid != 0;
+				if (FitXY.IsValid)
+				{
+					Demand.ContinuousCoreFitBounds = FBox(
+						FVector(FitXY.Min.X, FitXY.Min.Y, Root.GroundZCM),
+						FVector(FitXY.Max.X, FitXY.Max.Y,
+							Root.GroundZCM
+								+ Demand.RequiredTopCourse * BlockUnitsCM));
+				}
 			}
 		}
 
@@ -1081,7 +1372,8 @@ namespace
 			}
 			Plan.SemanticTerminalDemands[AIndex].AdjacentDemandIds.Sort();
 		}
-		if (Plan.SemanticTerminalDemands.Num() == FirstDemandIndex)
+		if (Plan.SemanticTerminalDemands.Num() == FirstDemandIndex
+			&& bUsesTowerChildHierarchy)
 		{
 			OutError = FString::Printf(
 				TEXT("BeamC3V3SemanticTerminalDemandEmpty:Component=%d"),
@@ -1109,6 +1401,9 @@ namespace
 		}
 		Plan.Summary.SemanticSupportCourseCount =
 			Plan.SemanticSupportCourseOccupancies.Num();
+		Plan.Summary.SemanticTerminalLoadBranchCount = 0;
+		Plan.Summary.MultiBranchTerminalBodyCount = 0;
+		Plan.Summary.UnrepresentedSemanticTerminalLoadBranchCount = 0;
 		Plan.Summary.SemanticTerminalDemandCount =
 			Plan.SemanticTerminalDemands.Num();
 		Plan.Summary.SemanticTerminalDemandWithoutContinuousFitCount = 0;
@@ -1123,11 +1418,20 @@ namespace
 				OutError = TEXT("BeamC3V3SemanticSupportNodeInvalid");
 				return false;
 			}
+			if (Node.bTerminalBody)
+			{
+				Plan.Summary.SemanticTerminalLoadBranchCount +=
+					Node.TerminalLoadBranchCount;
+				Plan.Summary.MultiBranchTerminalBodyCount +=
+					Node.TerminalLoadBranchCount > 1 ? 1 : 0;
+			}
 			Canonical += FString::Printf(
-				TEXT("|N:%d:C=%d:V=%d:R=%d:P=%d:G=%d:S=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
+				TEXT("|N:%d:C=%d:V=%d:R=%d:P=%d:G=%d:L=%d:TL=%d:T=%d:LB=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
 				Node.NodeId, Node.ComponentId, Node.SourceVolumeId,
 				static_cast<int32>(Node.Role), static_cast<int32>(Node.Primitive),
-				Node.bGrounded ? 1 : 0, Node.bTerminalBody ? 1 : 0,
+				Node.bGrounded ? 1 : 0, Node.bGraphTerminal ? 1 : 0,
+				Node.bTowerChildLoadLeaf ? 1 : 0,
+				Node.bTerminalBody ? 1 : 0, Node.TerminalLoadBranchCount,
 				QHash(Node.LocalBounds.Min.X), QHash(Node.LocalBounds.Min.Y),
 				QHash(Node.LocalBounds.Min.Z), QHash(Node.LocalBounds.Max.X),
 				QHash(Node.LocalBounds.Max.Y), QHash(Node.LocalBounds.Max.Z));
@@ -1184,13 +1488,54 @@ namespace
 				Canonical += FString::Printf(TEXT(":%016llx"), Word);
 			}
 		}
+		TSet<uint64> ExpectedTerminalLoadBranchKeys;
+		for (const FSemanticSupportVolumeNodeDiagnostic& TerminalBody
+			: Plan.SemanticSupportVolumeNodes)
+		{
+			if (!TerminalBody.bTerminalBody)
+			{
+				continue;
+			}
+			TArray<int32> Queue{TerminalBody.NodeId};
+			TSet<int32> Visited;
+			for (int32 Head = 0; Head < Queue.Num(); ++Head)
+			{
+				const int32 NodeId = Queue[Head];
+				if (Visited.Contains(NodeId)
+					|| !Plan.SemanticSupportVolumeNodes.IsValidIndex(NodeId))
+				{
+					continue;
+				}
+				Visited.Add(NodeId);
+				const FSemanticSupportVolumeNodeDiagnostic& Node =
+					Plan.SemanticSupportVolumeNodes[NodeId];
+				if (Node.ChildNodeIds.IsEmpty())
+				{
+					if (Node.bTowerChildLoadLeaf)
+					{
+						ExpectedTerminalLoadBranchKeys.Add(
+							(static_cast<uint64>(static_cast<uint32>(TerminalBody.NodeId))
+								<< 32)
+							| static_cast<uint32>(NodeId));
+					}
+				}
+				else
+				{
+					Queue.Append(Node.ChildNodeIds);
+				}
+			}
+		}
+		TSet<uint64> RepresentedTerminalLoadBranchKeys;
 		for (const FSemanticTerminalDemandDiagnostic& Demand
 			: Plan.SemanticTerminalDemands)
 		{
 			if (!Plan.SemanticSupportVolumeNodes.IsValidIndex(
 					Demand.TerminalBodyNodeId)
+				|| !Plan.SemanticSupportVolumeNodes.IsValidIndex(
+					Demand.TerminalLoadNodeId)
 				|| Demand.RequiredTopCourse <= 0
 				|| !Demand.BodyBounds.IsValid
+				|| !Demand.TerminalLoadBounds.IsValid
 				|| !Demand.GroundProjectionBounds.IsValid
 				|| !Demand.LoadBranchBounds.IsValid)
 			{
@@ -1200,13 +1545,31 @@ namespace
 					Demand.RequiredTopCourse);
 				return false;
 			}
+			const uint64 BranchKey =
+				(static_cast<uint64>(static_cast<uint32>(Demand.TerminalBodyNodeId))
+					<< 32)
+				| static_cast<uint32>(Demand.TerminalLoadNodeId);
+			if (!ExpectedTerminalLoadBranchKeys.Contains(BranchKey)
+				|| RepresentedTerminalLoadBranchKeys.Contains(BranchKey))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SemanticTerminalLoadBranchIdentityInvalid:Demand=%d:BodyNode=%d:LoadNode=%d:Expected=%d:Duplicate=%d"),
+					Demand.DemandId, Demand.TerminalBodyNodeId,
+					Demand.TerminalLoadNodeId,
+					ExpectedTerminalLoadBranchKeys.Contains(BranchKey) ? 1 : 0,
+					RepresentedTerminalLoadBranchKeys.Contains(BranchKey) ? 1 : 0);
+				return false;
+			}
+			RepresentedTerminalLoadBranchKeys.Add(BranchKey);
 			Plan.Summary.SemanticTerminalDemandWithoutContinuousFitCount +=
 				Demand.bHasContinuousCoreFit ? 0 : 1;
 			Canonical += FString::Printf(
-				TEXT("|T:%d:C=%d:B=%d:V=%d:TOP=%d:FIT=%d:MERGED=%d:P=%lld,%lld,%lld,%lld"),
+				TEXT("|T:%d:C=%d:B=%d:V=%d:L=%d:LV=%d:TOP=%d:FIT=%d:MERGED=%d:P=%lld,%lld,%lld,%lld"),
 				Demand.DemandId, Demand.ComponentId,
 				Demand.TerminalBodyNodeId,
 				Demand.TerminalBodySourceVolumeId,
+				Demand.TerminalLoadNodeId,
+				Demand.TerminalLoadSourceVolumeId,
 				Demand.RequiredTopCourse,
 				Demand.bHasContinuousCoreFit ? 1 : 0,
 				Demand.bSharesMergedCrown ? 1 : 0,
@@ -1219,9 +1582,14 @@ namespace
 				Canonical += FString::Printf(TEXT(":N%d"), NodeId);
 			}
 		}
+		Plan.Summary.UnrepresentedSemanticTerminalLoadBranchCount =
+			ExpectedTerminalLoadBranchKeys.Num()
+			- RepresentedTerminalLoadBranchKeys.Num();
 		if (Plan.Summary.SemanticSupportNodeCount == 0
 			|| Plan.Summary.SemanticSupportCourseCount == 0
-			|| Plan.Summary.SemanticTerminalDemandCount == 0)
+			|| Plan.Summary.SemanticTerminalLoadBranchCount
+				!= Plan.Summary.SemanticTerminalDemandCount
+			|| Plan.Summary.UnrepresentedSemanticTerminalLoadBranchCount != 0)
 		{
 			OutError = TEXT("BeamC3V3SemanticSupportDiagnosticsIncomplete");
 			return false;
@@ -1253,6 +1621,12 @@ namespace
 		for (FSemanticTerminalDemandDiagnostic& Demand : Plan.SemanticTerminalDemands)
 		{
 			Demand.SupportProvinceId = INDEX_NONE;
+		}
+		if (Plan.SemanticTerminalDemands.IsEmpty())
+		{
+			Plan.Summary.SupportProvinceHash =
+				HashText(TEXT("NoTowerChildSupportProvinces"));
+			return Plan.Summary.SupportProvinceHash != 0;
 		}
 
 		TArray<int32> ComponentIds;
@@ -1747,6 +2121,12 @@ namespace
 		Plan.Summary.BoundSupportProvinceCount = 0;
 		Plan.Summary.DistinctProvinceGroundCoreCount = 0;
 		Plan.Summary.SupportProvinceMainBindingHash = 0;
+		if (Plan.SupportProvinces.IsEmpty())
+		{
+			Plan.Summary.SupportProvinceMainBindingHash =
+				HashText(TEXT("NoTowerChildSupportProvinceBindings"));
+			return Plan.Summary.SupportProvinceMainBindingHash != 0;
+		}
 		TSet<int32> DistinctGroundCoreIds;
 		FString Canonical;
 		for (FSupportProvinceDiagnostic& Province : Plan.SupportProvinces)
@@ -3506,12 +3886,10 @@ namespace
 							&& Branch.bTerminal && Branch.bRequiresTowerChild
 							&& Branch.RequiredRegionIds.Contains(Region.RegionId);
 					});
-			if (Terminal == nullptr
-				|| !Terminal->BoundTowerChildCoreCellIds.Contains(
-					Region.BoundCoreCellId))
+			if (Terminal == nullptr)
 			{
 				OutError = FString::Printf(
-					TEXT("BeamC3V3TerminalBranchBindingMissing:Region=%d:Component=%d:Course=%d:Slice=%d:Core=%d"),
+					TEXT("BeamC3V3TerminalBranchIdentityMissing:Region=%d:Component=%d:Course=%d:Slice=%d:Core=%d"),
 					Region.RegionId, Region.ComponentId,
 					Region.TerminalSliceCourse,
 					Region.TerminalSliceComponentId,
@@ -3530,6 +3908,7 @@ namespace
 			Plan.HighProjectionRegions.Num();
 		Plan.Summary.BoundTerminalBranchCount = 0;
 		TSet<int32> BoundCoreIds;
+		TSet<int32> BoundSemanticDemandIds;
 		for (int32 RegionIndex = 0;
 			RegionIndex < Plan.HighProjectionRegions.Num(); ++RegionIndex)
 		{
@@ -3537,6 +3916,10 @@ namespace
 				Plan.HighProjectionRegions[RegionIndex];
 			if (Region.RegionId != RegionIndex
 				|| !Plan.Components.IsValidIndex(Region.ComponentId)
+				|| !Plan.SemanticTerminalDemands.IsValidIndex(
+					Region.SemanticDemandId)
+				|| Plan.SemanticTerminalDemands[Region.SemanticDemandId]
+					.ComponentId != Region.ComponentId
 				|| Region.PodiumTopCourse < 2
 				|| Region.RequiredTopCourse < Region.PodiumTopCourse + 2
 				|| Region.TerminalSliceCourse < Region.PodiumTopCourse
@@ -3592,13 +3975,15 @@ namespace
 				|| Core.HierarchyRole != ECoreHierarchyRole::TowerChild
 				|| Core.ComponentId != Region.ComponentId
 				|| Core.HighProjectionRegionId != Region.RegionId
+				|| Core.SemanticDemandId != Region.SemanticDemandId
 				|| Core.PodiumMainCoreCellId != PodiumMain.CoreCellId
 				|| Core.TopCourseIndex != Region.RequiredTopCourse
 				|| CoreCenter.X < Region.TerminalBounds.Min.X - GeometryToleranceCM
 				|| CoreCenter.X > Region.TerminalBounds.Max.X + GeometryToleranceCM
 				|| CoreCenter.Y < Region.TerminalBounds.Min.Y - GeometryToleranceCM
 				|| CoreCenter.Y > Region.TerminalBounds.Max.Y + GeometryToleranceCM
-				|| BoundCoreIds.Contains(Core.CoreCellId))
+				|| BoundCoreIds.Contains(Core.CoreCellId)
+				|| BoundSemanticDemandIds.Contains(Region.SemanticDemandId))
 			{
 				OutError = FString::Printf(
 					TEXT("BeamC3V3HighProjectionRegionBindingInvalid:Region=%d:Component=%d:Main=%d:Core=%d:Role=%d:CoreRegion=%d:Top=%d:PodiumTop=%d"),
@@ -3610,6 +3995,7 @@ namespace
 				return false;
 			}
 			BoundCoreIds.Add(Core.CoreCellId);
+			BoundSemanticDemandIds.Add(Region.SemanticDemandId);
 			++Plan.Summary.BoundHighProjectionRegionCount;
 			++Plan.Summary.BoundTerminalBranchCount;
 		}
@@ -3621,7 +4007,11 @@ namespace
 				Core.HighProjectionRegionId)
 				|| (bTowerChild
 					&& Plan.HighProjectionRegions[Core.HighProjectionRegionId]
-						.BoundCoreCellId != Core.CoreCellId))
+						.BoundCoreCellId != Core.CoreCellId)
+				|| (bTowerChild
+					&& Core.SemanticDemandId == INDEX_NONE)
+				|| (!bTowerChild
+					&& Core.SemanticDemandId != INDEX_NONE))
 			{
 				OutError = FString::Printf(
 					TEXT("BeamC3V3TowerChildProjectionBindingInvalid:Core=%d:Role=%d:Region=%d"),
@@ -3633,12 +4023,16 @@ namespace
 		if (Plan.Summary.BoundHighProjectionRegionCount
 			!= Plan.Summary.HighProjectionRegionCount
 			|| Plan.Summary.BoundTerminalBranchCount
-				!= Plan.Summary.RequiredTerminalBranchCount)
+				!= Plan.Summary.RequiredTerminalBranchCount
+			|| BoundSemanticDemandIds.Num()
+				!= Plan.SemanticTerminalDemands.Num())
 		{
 			OutError = FString::Printf(
-				TEXT("BeamC3V3HighProjectionCoverageMismatch:Regions=%d:Bound=%d"),
+				TEXT("BeamC3V3HighProjectionCoverageMismatch:Regions=%d:Bound=%d:SemanticBound=%d:SemanticDemands=%d"),
 				Plan.Summary.HighProjectionRegionCount,
-				Plan.Summary.BoundHighProjectionRegionCount);
+				Plan.Summary.BoundHighProjectionRegionCount,
+				BoundSemanticDemandIds.Num(),
+				Plan.SemanticTerminalDemands.Num());
 			return false;
 		}
 		return true;
@@ -3678,15 +4072,6 @@ namespace
 				&& Inner.Max.Y <= Outer.Max.Y + GeometryToleranceCM;
 		};
 
-		struct FCandidate
-		{
-			const FHighProjectionRegionPlan* Region = nullptr;
-			const FCoreCellPlan* Child = nullptr;
-			bool bExactSource = false;
-			bool bCenterInside = false;
-			double OverlapAreaCM2 = 0.0;
-		};
-
 		for (const FSemanticTerminalDemandDiagnostic& Demand
 			: Plan.SemanticTerminalDemands)
 		{
@@ -3697,95 +4082,69 @@ namespace
 			Diagnostic.SupportProvinceId = Demand.SupportProvinceId;
 			Diagnostic.TerminalBodySourceVolumeId =
 				Demand.TerminalBodySourceVolumeId;
+			Diagnostic.TerminalLoadNodeId = Demand.TerminalLoadNodeId;
+			Diagnostic.TerminalLoadSourceVolumeId =
+				Demand.TerminalLoadSourceVolumeId;
 			Diagnostic.DemandBodyBounds = Demand.BodyBounds;
+			Diagnostic.TerminalLoadBounds = Demand.TerminalLoadBounds;
 			Diagnostic.ContinuousFitBounds = Demand.ContinuousCoreFitBounds;
 
-			TArray<FCandidate> Candidates;
+			TArray<const FHighProjectionRegionPlan*> CandidateRegions;
 			for (const FHighProjectionRegionPlan& Region
 				: Plan.HighProjectionRegions)
 			{
-				if (Region.ComponentId != Demand.ComponentId
-					|| !Plan.CoreCells.IsValidIndex(Region.BoundCoreCellId))
+				if (Region.ComponentId == Demand.ComponentId
+					&& Region.SemanticDemandId == Demand.DemandId)
 				{
-					continue;
+					CandidateRegions.Add(&Region);
 				}
-				const FCoreCellPlan& Child =
-					Plan.CoreCells[Region.BoundCoreCellId];
-				FBox ChildFootprint = Child.LocalBounds;
-				ChildFootprint.Min.X -= BlockUnitsCM * 0.5;
-				ChildFootprint.Min.Y -= BlockUnitsCM * 0.5;
-				ChildFootprint.Max.X += BlockUnitsCM * 0.5;
-				ChildFootprint.Max.Y += BlockUnitsCM * 0.5;
-				const bool bExactSource = Region.SourceVolumeIds.Contains(
-					Demand.TerminalBodySourceVolumeId);
-				const double OverlapArea = XYOverlapArea(
-					Demand.BodyBounds, ChildFootprint);
-				if (!bExactSource && OverlapArea <= GeometryToleranceCM)
-				{
-					continue;
-				}
-				FCandidate& Candidate = Candidates.AddDefaulted_GetRef();
-				Candidate.Region = &Region;
-				Candidate.Child = &Child;
-				Candidate.bExactSource = bExactSource;
-				Candidate.bCenterInside = ContainsXY(
-					Demand.BodyBounds, Child.LocalBounds.GetCenter());
-				Candidate.OverlapAreaCM2 = OverlapArea;
 			}
-			Diagnostic.CandidateRegionCount = Candidates.Num();
+			Diagnostic.CandidateRegionCount = CandidateRegions.Num();
 			TSet<int32> CandidateChildIds;
-			for (const FCandidate& Candidate : Candidates)
+			for (const FHighProjectionRegionPlan* Candidate : CandidateRegions)
 			{
-				CandidateChildIds.Add(Candidate.Child->CoreCellId);
+				if (Candidate != nullptr
+					&& Plan.CoreCells.IsValidIndex(Candidate->BoundCoreCellId))
+				{
+					CandidateChildIds.Add(Candidate->BoundCoreCellId);
+				}
 			}
 			Diagnostic.CandidateChildCount = CandidateChildIds.Num();
-			Candidates.Sort([](const FCandidate& A, const FCandidate& B)
-			{
-				if (A.bExactSource != B.bExactSource)
-				{
-					return A.bExactSource;
-				}
-				if (A.bCenterInside != B.bCenterInside)
-				{
-					return A.bCenterInside;
-				}
-				if (!FMath::IsNearlyEqual(A.OverlapAreaCM2, B.OverlapAreaCM2))
-				{
-					return A.OverlapAreaCM2 > B.OverlapAreaCM2;
-				}
-				return A.Region->RegionId < B.Region->RegionId;
-			});
 
-			if (Candidates.IsEmpty())
+			if (CandidateRegions.Num() != 1 || CandidateChildIds.Num() != 1)
 			{
-				Diagnostic.MappingReason = TEXT("NoSourceOrSpatialCandidate");
-				++Plan.Summary.UnmappedSemanticDemandCount;
+				Diagnostic.MappingReason = CandidateRegions.IsEmpty()
+					? TEXT("NoAuthoritativeSemanticRegion")
+					: TEXT("SemanticDemandNotBijective");
+				Plan.Summary.UnmappedSemanticDemandCount +=
+					CandidateRegions.IsEmpty() || CandidateChildIds.IsEmpty() ? 1 : 0;
+				Plan.Summary.AmbiguousSemanticDemandCount +=
+					CandidateRegions.Num() > 1 || CandidateChildIds.Num() > 1 ? 1 : 0;
+				Diagnostic.bAmbiguousRegionMatch = CandidateRegions.Num() > 1
+					|| CandidateChildIds.Num() > 1;
 				continue;
 			}
 
-			const FCandidate& Selected = Candidates[0];
-			Diagnostic.BoundHighProjectionRegionId = Selected.Region->RegionId;
-			Diagnostic.BoundTowerChildCoreCellId = Selected.Child->CoreCellId;
+			const FHighProjectionRegionPlan& Selected = *CandidateRegions[0];
+			const FCoreCellPlan& Child = Plan.CoreCells[Selected.BoundCoreCellId];
+			Diagnostic.BoundHighProjectionRegionId = Selected.RegionId;
+			Diagnostic.BoundTowerChildCoreCellId = Child.CoreCellId;
 			Diagnostic.AssignedPodiumMainCoreCellId =
-				Selected.Child->PodiumMainCoreCellId;
-			Diagnostic.BodyChildXYOverlapAreaCM2 = Selected.OverlapAreaCM2;
-			Diagnostic.bChildCenterInsideBodyXY = Selected.bCenterInside;
-			Diagnostic.ChildBounds = Selected.Child->LocalBounds;
-			FBox ChildFootprint = Selected.Child->LocalBounds;
+				Child.PodiumMainCoreCellId;
+			Diagnostic.ChildBounds = Child.LocalBounds;
+			FBox ChildFootprint = Child.LocalBounds;
 			ChildFootprint.Min.X -= BlockUnitsCM * 0.5;
 			ChildFootprint.Min.Y -= BlockUnitsCM * 0.5;
 			ChildFootprint.Max.X += BlockUnitsCM * 0.5;
 			ChildFootprint.Max.Y += BlockUnitsCM * 0.5;
+			Diagnostic.BodyChildXYOverlapAreaCM2 = XYOverlapArea(
+				Demand.BodyBounds, ChildFootprint);
+			Diagnostic.bChildCenterInsideBodyXY = ContainsXY(
+				Demand.BodyBounds, Child.LocalBounds.GetCenter());
 			Diagnostic.bChildInsideContinuousFitXY =
 				Demand.bHasContinuousCoreFit
 				&& BoundsContainXY(Demand.ContinuousCoreFitBounds, ChildFootprint);
-			Diagnostic.bAmbiguousRegionMatch = Candidates.Num() > 1
-				&& Candidates[1].bExactSource == Selected.bExactSource
-				&& Candidates[1].bCenterInside == Selected.bCenterInside
-				&& FMath::IsNearlyEqual(Candidates[1].OverlapAreaCM2,
-					Selected.OverlapAreaCM2, 1.0);
-			Diagnostic.MappingReason = Selected.bExactSource
-				? TEXT("TerminalBodySourceLineage") : TEXT("SpatialFallback");
+			Diagnostic.MappingReason = TEXT("AuthoritativeSemanticDemandId");
 			if (Plan.CoreCells.IsValidIndex(
 				Diagnostic.AssignedPodiumMainCoreCellId))
 			{
@@ -3793,13 +4152,12 @@ namespace
 					Diagnostic.AssignedPodiumMainCoreCellId];
 				Diagnostic.MainBounds = Main.LocalBounds;
 				Diagnostic.bDirectMainCoupling =
-					Selected.Child->CrossCoreBearingContactCount > 0;
+					Child.CrossCoreBearingContactCount > 0;
 			}
-			if (Diagnostic.bAmbiguousRegionMatch)
-			{
-				++Plan.Summary.AmbiguousSemanticDemandCount;
-			}
-			if (!Diagnostic.bChildCenterInsideBodyXY)
+			if (!Diagnostic.bChildCenterInsideBodyXY
+				|| !Diagnostic.bChildInsideContinuousFitXY
+				|| Child.SemanticDemandId != Demand.DemandId
+				|| Child.TopCourseIndex != Demand.RequiredTopCourse)
 			{
 				++Plan.Summary.SemanticDemandChildOutsideBodyCount;
 			}
@@ -3827,10 +4185,12 @@ namespace
 				DemandMultiplicityByChild.FindRef(
 					Diagnostic.BoundTowerChildCoreCellId);
 			Canonical += FString::Printf(
-				TEXT("D=%d:C=%d:P=%d:S=%d:R=%d:Child=%d:Main=%d:Mult=%d:Inside=%d:Fit=%d:Direct=%d:Ambiguous=%d:Reason=%s;"),
+				TEXT("D=%d:C=%d:P=%d:S=%d:L=%d:LS=%d:R=%d:Child=%d:Main=%d:Mult=%d:Inside=%d:Fit=%d:Direct=%d:Ambiguous=%d:Reason=%s;"),
 				Diagnostic.DemandId, Diagnostic.ComponentId,
 				Diagnostic.SupportProvinceId,
 				Diagnostic.TerminalBodySourceVolumeId,
+				Diagnostic.TerminalLoadNodeId,
+				Diagnostic.TerminalLoadSourceVolumeId,
 				Diagnostic.BoundHighProjectionRegionId,
 				Diagnostic.BoundTowerChildCoreCellId,
 				Diagnostic.AssignedPodiumMainCoreCellId,
@@ -3857,15 +4217,29 @@ namespace
 		}
 		Plan.Summary.SemanticDemandCoreBindingCount =
 			Plan.SemanticDemandCoreBindings.Num();
+		if (Canonical.IsEmpty())
+		{
+			Canonical = TEXT("NoTowerChildDemandCoreBindings");
+		}
 		Plan.Summary.SemanticDemandCoreBindingHash = HashText(Canonical);
 		if (Plan.Summary.SemanticDemandCoreBindingCount
 			!= Plan.Summary.SemanticTerminalDemandCount
-			|| Plan.Summary.SemanticDemandCoreBindingHash == 0)
+			|| Plan.Summary.SemanticDemandCoreBindingHash == 0
+			|| Plan.Summary.UnmappedSemanticDemandCount != 0
+			|| Plan.Summary.AmbiguousSemanticDemandCount != 0
+			|| Plan.Summary.SemanticDemandChildOutsideBodyCount != 0
+			|| Plan.Summary.ReusedTowerChildBindingCount != 0
+			|| Plan.Summary.UnreferencedTowerChildCount != 0)
 		{
 			OutError = FString::Printf(
-				TEXT("BeamC3V3SemanticDemandCoreDiagnosticInvalid:Rows=%d:Demands=%d:Hash=%lld"),
+				TEXT("BeamC3V3SemanticDemandCoreBijectionInvalid:Rows=%d:Demands=%d:Unmapped=%d:Ambiguous=%d:Outside=%d:Reused=%d:Orphan=%d:Hash=%lld"),
 				Plan.Summary.SemanticDemandCoreBindingCount,
 				Plan.Summary.SemanticTerminalDemandCount,
+				Plan.Summary.UnmappedSemanticDemandCount,
+				Plan.Summary.AmbiguousSemanticDemandCount,
+				Plan.Summary.SemanticDemandChildOutsideBodyCount,
+				Plan.Summary.ReusedTowerChildBindingCount,
+				Plan.Summary.UnreferencedTowerChildCount,
 				Plan.Summary.SemanticDemandCoreBindingHash);
 			return false;
 		}
@@ -10438,6 +10812,7 @@ namespace
 			TArray<FBox> RequiredHighProjectionTerminalBounds;
 			TArray<FBox> RequiredHighProjectionBranchBounds;
 			TArray<TArray<int32>> RequiredHighProjectionSourceVolumeIds;
+			TArray<int32> RequiredHighProjectionSemanticDemandIds;
 			TArray<TArray<TArray<int32>>>
 				RequiredHighProjectionCourseSourceVolumeIds;
 			TArray<int32> RequiredHighProjectionTopCourses;
@@ -10445,10 +10820,17 @@ namespace
 			{
 				FStage1PhaseTimer PhaseTimer(
 					OutPlan.Summary.TerminalDemandMilliseconds);
-				const bool bBuiltDemands = !bUseGroundedCoreHierarchy
+				TArray<FRequiredHighProjectionDemand> LegacyProjectionDemands;
+				const bool bBuiltLegacyDemands = !bUseGroundedCoreHierarchy
 					|| BuildRequiredHighProjectionDemands(
 						Root, PodiumTopCourse,
-						RequiredHighProjectionDemands, OutError);
+						LegacyProjectionDemands, OutError);
+				const bool bBuiltDemands = bBuiltLegacyDemands
+					&& (!bUseGroundedCoreHierarchy
+						|| BuildSemanticChildProjectionDemands(
+							Root, RootIndex, PodiumTopCourse, OutPlan,
+							LegacyProjectionDemands,
+							RequiredHighProjectionDemands, OutError));
 				PhaseTimer.Stop();
 				if (!bBuiltDemands)
 				{
@@ -10465,6 +10847,8 @@ namespace
 				for (const FRequiredHighProjectionDemand& Demand
 					: RequiredHighProjectionDemands)
 				{
+					RequiredHighProjectionSemanticDemandIds.Add(
+						Demand.SemanticDemandId);
 					RequiredHighProjectionEntryBounds.Add(Demand.EntryBounds);
 					RequiredHighProjectionTerminalBounds.Add(Demand.TerminalBounds);
 					RequiredHighProjectionBranchBounds.Add(Demand.BranchBounds);
@@ -10575,6 +10959,8 @@ namespace
 						OutPlan.FullHeightChildCandidateDiagnostics
 							.AddDefaulted_GetRef();
 					Diagnostic.ComponentId = RootIndex;
+					Diagnostic.SemanticDemandId =
+						RequiredHighProjectionSemanticDemandIds[ProjectionIndex];
 					Diagnostic.LocalProjectionIndex = ProjectionIndex;
 					Diagnostic.RegionId = ProjectionIndex;
 					Diagnostic.PodiumTopCourse = PodiumTopCourse;
@@ -14083,6 +14469,7 @@ namespace
 						OutPlan.HighProjectionRegions.AddDefaulted_GetRef();
 					Region.RegionId = OutPlan.HighProjectionRegions.Num() - 1;
 					Region.ComponentId = RootIndex;
+					Region.SemanticDemandId = Demand.SemanticDemandId;
 					Region.PodiumTopCourse = PodiumTopCourse;
 					Region.RequiredTopCourse = Demand.RequiredTopCourse;
 					Region.TerminalSliceCourse = Demand.TerminalSliceCourse;
@@ -14332,6 +14719,7 @@ namespace
 					Child.CoreMergeRegionId = Component.CoreMergeRegionId;
 					Child.HierarchyRole = ECoreHierarchyRole::TowerChild;
 					Child.HighProjectionRegionId = ProjectionRegion.RegionId;
+					Child.SemanticDemandId = ProjectionRegion.SemanticDemandId;
 					Child.PodiumMainCoreCellId = ChildPodiumMainCoreCellId;
 					Child.TopCourseIndex = ChildTopCourse;
 					Child.BodyTopCourseIndex = ChildBodyTopCourse;
