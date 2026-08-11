@@ -832,6 +832,32 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		1.0e-9);
 
 	FABTSM11FinaleCameraShotSettings M3ShotSettings;
+	FABTSM11FinaleCameraShotSettings AcceleratedM3ShotSettings;
+	TestTrue(
+		TEXT("M3 presentation durations convert to the playback clock"),
+		M3ShotSettings.BuildPlaybackClockSettings(
+			18.0,
+			AcceleratedM3ShotSettings));
+	TestEqual(
+		TEXT("Playback conversion scales bridge duration"),
+		AcceleratedM3ShotSettings.DualBodyBridgeSeconds,
+		M3ShotSettings.DualBodyBridgeSeconds * 18.0,
+		1.0e-9);
+	TestEqual(
+		TEXT("Playback conversion scales incoming track protection"),
+		AcceleratedM3ShotSettings.MinimumIncomingTrackSeconds,
+		M3ShotSettings.MinimumIncomingTrackSeconds * 18.0,
+		1.0e-9);
+	TestEqual(
+		TEXT("Playback conversion preserves the geometric clear gate"),
+		AcceleratedM3ShotSettings.ForegroundTransitClearProgress,
+		M3ShotSettings.ForegroundTransitClearProgress,
+		1.0e-9);
+	TestFalse(
+		TEXT("Playback conversion rejects a non-positive clock scale"),
+		M3ShotSettings.BuildPlaybackClockSettings(
+			0.0,
+			AcceleratedM3ShotSettings));
 	double ClearBirdX = 0.0;
 	double ClearTargetX = 0.0;
 	double ClearNormalizedSeparation = 0.0;

@@ -17,12 +17,14 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// Adds the centred-UFO, constant-screen-speed M4 terminal dolly.
-	static constexpr int32 ContractVersion = 13;
+	// Adds M5 renderer-independent telemetry and orthogonality digests.
+	static constexpr int32 ContractVersion = 14;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
 	bool bStylized = false;
+	/** Runs the real launch/playback but writes no JPG/AVI pixels. */
+	bool bTelemetryOnly = false;
 	bool bDirectorM2 = false;
 	bool bDirectorM3 = false;
 	bool bAutoExit = true;
@@ -113,11 +115,11 @@ enum class EABTSM11FinaleCameraCapturePhase : uint8
 };
 
 /**
- * M11-owned visual acceptance runner. In a command-line -game process it reads
- * the game viewport and writes deterministic JPEG frames while driving the
- * existing nominal launch and old flight camera, then muxes those frames to
- * MJPEG AVI before process exit. It never authors trajectory or camera data
- * and does not support PIE.
+ * M11-owned acceptance runner. In a command-line -game process it drives the
+ * nominal launch and production flight camera. Visual mode writes deterministic
+ * JPEG frames and an MJPEG AVI; M5 telemetry-only mode skips pixel capture and
+ * writes renderer-independent CSV/Manifest evidence. It never authors
+ * trajectory or camera data and does not support PIE.
  */
 UCLASS()
 class ABTSRUNTIME_API AABTSM11FinaleCameraCaptureRunner final : public AActor

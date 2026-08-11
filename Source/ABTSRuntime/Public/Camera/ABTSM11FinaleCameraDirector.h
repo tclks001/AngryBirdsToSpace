@@ -56,6 +56,13 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraShotSettings
 	double EntryMatchSeconds = 0.50;
 
 	bool IsUsable() const;
+	/**
+	 * Converts presentation-second shot durations to the trajectory playback
+	 * clock used by ResolveStage. The geometric progress gate is unchanged.
+	 */
+	bool BuildPlaybackClockSettings(
+		double PlaybackTimeScale,
+		FABTSM11FinaleCameraShotSettings& OutSettings) const;
 };
 
 /** Pure-data result of resolving one playback time against authority events. */

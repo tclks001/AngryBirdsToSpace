@@ -330,6 +330,29 @@ bool FABTSM11FinaleCameraShotSettings::IsUsable() const
 				+ EntryMatchSeconds;
 }
 
+bool FABTSM11FinaleCameraShotSettings::BuildPlaybackClockSettings(
+	const double PlaybackTimeScale,
+	FABTSM11FinaleCameraShotSettings& OutSettings) const
+{
+	if (!IsUsable()
+		|| !FMath::IsFinite(PlaybackTimeScale)
+		|| PlaybackTimeScale <= 0.0)
+	{
+		return false;
+	}
+
+	OutSettings = *this;
+	OutSettings.IncomingRevealLeadSeconds *= PlaybackTimeScale;
+	OutSettings.IncomingAcquireSeconds *= PlaybackTimeScale;
+	OutSettings.DualBodyBridgeSeconds *= PlaybackTimeScale;
+	OutSettings.MinimumDepartureHoldSeconds *= PlaybackTimeScale;
+	OutSettings.OutgoingReleaseSeconds *= PlaybackTimeScale;
+	OutSettings.MinimumOutgoingReleaseSeconds *= PlaybackTimeScale;
+	OutSettings.MinimumIncomingTrackSeconds *= PlaybackTimeScale;
+	OutSettings.EntryMatchSeconds *= PlaybackTimeScale;
+	return OutSettings.IsUsable();
+}
+
 bool FABTSM11FinaleCameraStageSelection::IsUsable() const
 {
 	return Stage != EABTSM11FinaleCameraStage::Unavailable

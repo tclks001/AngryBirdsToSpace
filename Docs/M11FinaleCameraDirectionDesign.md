@@ -268,9 +268,15 @@ M4 终端构图现不再让鸟/UFO 围绕对称质心漂移，而将 UFO 固定�
 
 ### M5：候选与渲染正交回归
 
-- 至少覆盖 Rank 0、Rank 11 × Stylized 0、1；再按需扩展 Rank 1–10；
-- 同一 Rank 两种渲染方式的轨迹、事件、阶段和相机数值 Hash 一致；
-- 三渲二像素质量由集成工作树验收，M11 只验镜头可读性和身份。
+- Rank 0、Rank 11 只在 Stylized 1 下制作正式视觉录屏；当前 Stylized 0 受原生大气散射影响为不可读蓝屏，不再重复生成无效视觉证据；
+- 同一 Rank 的 Stylized 0/1 仍须通过 renderer-independent Telemetry 比较 Released/Playback Plan、阶段序列和相机数值 Hash；
+- TelemetryOnly 仍启动 fresh `-game` 进程、真实发射并完整播放，但跳过 SceneCapture、JPG 和 AVI，只写 CSV/Manifest 后自动退出；
+- Rank 1–10 在 Rank 0/11 基础矩阵通过后按需扩展；
+- 三渲二像素质量和 Stylized 0 大气散射由集成工作树验收，M11 只验镜头可读性和逻辑身份。
+
+导演时长统一解释为呈现秒：认证 Rank0 的 `PlaybackTimeScale=18` 只加速轨迹钟，进入 Director 前会把拉远、桥接、取得、Track 与 Entry 的秒数字段同比换算到轨迹钟；候选倍率 1 和几何 Progress 门保持不变。生产相机与录屏观测共用该入口，防止认证路线把连续镜头压缩成 1–3 帧。
+
+2026-08-11 M5 基础矩阵完成：Rank0 和 Rank11 的 Stylized 0/1 同协议 Telemetry 分别得到完全相等的 Released、Playback Plan、Stage 与 Camera Hash；两条 Stylized 1 正式录像均 `Complete/TargetHit`、鸟丢失 0、空构图 0、M4 鸟/UFO 丢失 0、800 cm 接触与终端闭合通过。Rank0 时基修正前两个 Handoff 各连续丢鸟 10 帧，修正后归零；Rank11 倍率为 1，既有已验收构图不变。独立合同与产物清单见 [M5：候选与渲染正交回归](M11FinaleCameraM5RenderOrthogonality.md)。
 
 ### M6：四鸟编队扩展（依赖未来任务）
 

@@ -163,6 +163,8 @@ public:
 		GetFinaleRemotePreviewCaptureComponent() const;
 	EABTSStylizedViewClass GetFinaleRemotePreviewStylizedViewClass() const;
 	double GetPlaybackElapsedSeconds() const { return PlaybackElapsedSeconds; }
+	/** Trajectory seconds advanced per presentation second for this playback. */
+	double GetPlaybackPresentationTimeScale() const;
 	double GetFailureBlackoutAlpha() const
 	{
 		return FailureTimeline.GetBlackoutAlpha();

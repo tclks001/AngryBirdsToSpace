@@ -84,6 +84,8 @@ M4 首轮将录制合同升至 v11、CSV Schema 升至 7。逐帧新增 `endpoin
 
 v13 fresh Rank11 Stylized1 `M4CenteredDollyR9-20260811-160100` 的 TerminalTrack 共 123 帧：UFO 几何中心最大像素误差 `0.000011 px`，鸟视觉 Bounds 相对中央竖线最大偏差 `1.98 px`；相机到鸟距离由 `40014.64 cm` 收至 `5009.14 cm`，M4 位置/旋转/FOV 跳变为 `0/0/0`，最终 Authority 距离 `799.9999999999568 cm`。这组数据作为解析门映射到实际 SceneCapture 的首个基线；鸟 Y 的亚像素级非恒速变化来自动画 Bounds 中心，不改变 actor-origin 的线性 NDC 合同。
 
+M5 将录制合同升至 v14，CSV Schema 仍为 7。`-ABTSM11CaptureTelemetryOnly=1` 保留完整 fresh `-game` 发射、PlaybackPlan、固定 30 Hz 相机观测和自动退出，只跳过 RenderTarget、SceneCapture、JPG 与 AVI。Manifest 新增 `telemetryOnly`、`visualRecordingProduced`、`m5EvidenceMode`、`m5VisualAcceptanceEligible`、`m5StageSequenceHash`、`m5CameraNumericsHash`、`m5HashedFlightFrameCount`、摘要量化合同及有效性标志。摘要只从首个 `Launched` 样本起按飞行相对帧号计算；SceneCapture 负载造成的发射前等待帧差异保留在原始 CSV/总帧数中，但不得污染导演正交 Hash。Stylized 0 只允许作为数值正交证据；只有 Stylized 1 的正式 SceneCapture 录屏可承担视觉验收。同 Rank 的 Stylized 0/1 必须在同为 TelemetryOnly 的协议内比较；不能把 SceneCapture 与 NullRHI 的相机 Hash 直接比较，因为前者会改变 SkeletalMesh Bounds 更新时机。认证回放还必须把按呈现秒配置的镜头时长乘以有效 PlaybackTimeScale 后再交给以轨迹秒工作的 Stage Resolver，几何 Progress 门不缩放；生产相机与观测器使用同一换算结果。
+
 M2 A/B 使用：
 
 ```powershell
@@ -138,7 +140,7 @@ fresh 进程可能因渲染预热在发射前多等待一帧；呈现 Actor 在�
 2. `criteriaFingerprintSha256`：对同一飞行序列逐帧的鸟丢失、目标丢失、位置/旋转/FOV 跃变布尔判据哈希；
 3. `observationFingerprintSha256`：对飞行段原始世界位置和相机数值哈希，只用于追踪呈现浮点差异，不作为 M1 正交放行门。
 
-同一 Rank 的 Stylized 0/1 必须同时满足前两类指纹相等，才有 `allIdentityFingerprintsEqual=true`。发射前等待帧不同不会改变结论；阶段或任一阈值分类不同则必须失败。M5 在导演实现稳定后再收紧到轨迹、事件、阶段与相机数值 Hash 全等。
+同一 Rank 的 Stylized 0/1 必须同时满足前两类指纹相等，才有 `allIdentityFingerprintsEqual=true`。发射前等待帧不同不会改变结论；阶段或任一阈值分类不同则必须失败。M5 在导演实现稳定后，把同协议 TelemetryOnly 对收紧到轨迹、事件、阶段与相机数值 Hash 全等；视觉 SceneCapture 与 NullRHI Telemetry 不跨协议强求 Camera Hash 相等。
 
 ## 6. 2026-08-05 旧镜头四象限证据
 

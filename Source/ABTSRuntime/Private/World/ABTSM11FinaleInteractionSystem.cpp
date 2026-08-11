@@ -948,9 +948,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		ReleasedPlaybackPlan.Points[0].TimeSeconds,
 		ReleasedPlaybackPlan.DurationSeconds);
 	const double PresentationTimeScale =
-		FinaleSystem->IsEditorCandidateMode()
-			? 1.0
-			: FMath::Max(0.1, PlaybackTimeScale);
+		GetPlaybackPresentationTimeScale();
 	PlaybackElapsedSeconds = FMath::Min(
 		PresentationEndTime,
 		PlaybackElapsedSeconds
@@ -1031,8 +1029,16 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 	{
 		const FABTSM11TrajectoryResult* Prediction =
 			GetCurrentPrediction();
-		const FABTSM11FinaleCameraShotSettings M3ShotSettings =
+		const FABTSM11FinaleCameraShotSettings PresentationShotSettings =
 			FlightCamera->GetM3ShotSettings();
+		FABTSM11FinaleCameraShotSettings M3ShotSettings;
+		if (!PresentationShotSettings.BuildPlaybackClockSettings(
+			PresentationTimeScale,
+			M3ShotSettings))
+		{
+			FailInteraction(TEXT("FlightCameraShotClockInvalid"));
+			return;
+		}
 		DirectorSample.Selection =
 			ABTSM11FinaleCameraDirector::ResolveStage(
 				true,
@@ -1291,6 +1297,13 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 					CurrentClassification)));
 		}
 	}
+}
+
+double AABTSM11FinaleInteractionSystem::GetPlaybackPresentationTimeScale() const
+{
+	return IsValid(FinaleSystem) && FinaleSystem->IsEditorCandidateMode()
+		? 1.0
+		: FMath::Max(0.1, PlaybackTimeScale);
 }
 
 void AABTSM11FinaleInteractionSystem::UpdateFailurePresentation(
