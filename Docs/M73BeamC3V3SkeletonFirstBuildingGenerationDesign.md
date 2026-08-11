@@ -1563,3 +1563,24 @@ Chaos 或可见 PIE。第 33.2 节和 M7-BC-064 的 PodiumMain 重叠、四向�
 ### 36.2 冻结基线首轮性能证据
 
 `TipOver.E6/710000` 在新门下于 `10007.372 ms` 失败关闭，阶段为 `PodiumMainCandidate`。当时已落盘的部分计时为 `TerminalDemand=0.236 ms`、`ChildCandidate=1146.978 ms`、`PodiumMainCandidate=8860.000 ms`，Joint/Emission/DAG 尚未开始。这证明当前首要瓶颈不是 terminal demand 图构建或 Static DAG，而是主芯体候选枚举；下一步骤只能针对该阶段的数据结构与候选裁剪，不能先重写 joint solver 或提高 10 秒预算。
+
+### 36.3 第一轮等价优化与性能冻结证据
+
+本轮没有改变 Seed/Attempt 策略、36 cm 网格、720 cm 上限、轨数、间距、几何容差、WFC 包络、候选评分或静态 DAG 合同，只替换重复计算和不可能进入保留集的搜索路径：
+
+1. 轨道连续覆盖由“每个不同长区间重新切分语义盒并检查”改为按 course/axis/cross-station 建立 36 cm 原子单元的精确覆盖前缀表。长轨道是这些无缝原子固体的并集，因此区间查询与原 `SolidCoveredByBoxes` 连续覆盖合同等价；guard band 保留跨耦合 seam 的候选端点。
+2. 中心 source 查询按半格中心、course 和 Body/Core 选择器精确缓存；child、main 和 shared endpoint 的缓存作用域分别隔离，禁止不同 terminal branch 或不同 WFC 根共享 Crown 结果。
+3. PodiumMain 仍按 `CoverageMask + FullHeightCompatibilityMask` 每桶保留前 12 个合法候选。仅当已有 12 个候选均严格优于当前候选时，才跳过它的全高轨道验算；相等候选仍走原排序，最终保留集不变。
+4. 联合选择的存在性证明从较小、通常冲突更少的 child witness 开始，但最终发射仍使用原有视觉排序；该顺序只加速布尔可行性，不改变选中 child。
+5. 生产级 shared endpoint 复用同一套精确 source/原子轨道缓存；不改变 endpoint 的最小边、方正度、面积、桥口 inset、跨向中心和 main coupling 评分。
+6. `Stage1MainSearch` 和 `Stage1JointSearch` 日志发布枚举状态、完整验算数、缓存规模、terminal candidate 数及冲突探测数，使后续退化能在单叶内定位，而不是等待整轮矩阵结束。
+
+固定 `TipOver.E6/710000` 从基线超时降到 `1121.85 ms`，且保持 `Stage1Hash=6381458846136252022`、Main 3、Children 8、Terminal 8/8、Members 1464、Static DAG Accepted。`730000/750000` 分别为 `809.72/840.95 ms`，三种拓扑种子均通过。
+
+最终 fresh NullRHI `Stage1CoreAndSharedMatrix` 精确 Found=30、Passed=30、Failed=0。30 叶 Stage 1 算法计时合计 `32859.48 ms`，平均 `1095.32 ms`，中位 `956.73 ms`；最慢为 `SeamRelease.E6=3506.38 ms`，低于 10 秒硬门并留有约 6.49 秒余量。UE 5.8 ForceUnity Development Editor 全链接成功。日志：
+
+- `Saved/Logs/BeamC3V3-Optimize8-Stage1-5x6-20260811.log`；
+- `Saved/Logs/BeamC3V3-Optimize8-TipOverSeeds-20260811.log`；
+- `Saved/Logs/BeamC3V3-Optimize8-SeamReleaseE6-EndpointPrefix-20260811.log`。
+
+所有结果仍为 `Physical=NotEvaluated`；未运行 Stage 2+、Beam-D1.5、Chaos、Editor 或可见 PIE。本节只冻结 Stage 1 的性能实现和证据，不表示后续 support province、局部裙房高度或 TowerChild 一次收缩方案已经实现或视觉批准。

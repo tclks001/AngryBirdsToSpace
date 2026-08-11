@@ -2,6 +2,7 @@
 
 #include "ABTSM73BeamC3V3SkeletonFirstGenerator.h"
 
+#include "ABTSRuntime.h"
 #include "Algo/Unique.h"
 #include "HAL/PlatformTime.h"
 
@@ -53,6 +54,92 @@ namespace
 		double& DestinationMilliseconds;
 		double StartSeconds = 0.0;
 		bool bStopped = false;
+	};
+
+	struct FMainRailCoverageKey
+	{
+		int32 Course = 0;
+		int32 AlongMinimum = 0;
+		int32 AlongMaximum = 0;
+		int32 CrossStation = 0;
+		uint8 Axis = 0;
+		bool bBodyAllowedBoxes = false;
+
+		bool operator==(const FMainRailCoverageKey& Other) const
+		{
+			return Course == Other.Course
+				&& AlongMinimum == Other.AlongMinimum
+				&& AlongMaximum == Other.AlongMaximum
+				&& CrossStation == Other.CrossStation
+				&& Axis == Other.Axis
+				&& bBodyAllowedBoxes == Other.bBodyAllowedBoxes;
+		}
+
+		friend uint32 GetTypeHash(const FMainRailCoverageKey& Key)
+		{
+			uint32 Hash = GetTypeHash(Key.Course);
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.AlongMinimum));
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.AlongMaximum));
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.CrossStation));
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.Axis));
+			return HashCombineFast(Hash, GetTypeHash(Key.bBodyAllowedBoxes));
+		}
+	};
+
+	struct FMainRailCoverageRowKey
+	{
+		int32 Course = 0;
+		int32 CrossStation = 0;
+		uint8 Axis = 0;
+		bool bBodyAllowedBoxes = false;
+
+		bool operator==(const FMainRailCoverageRowKey& Other) const
+		{
+			return Course == Other.Course
+				&& CrossStation == Other.CrossStation
+				&& Axis == Other.Axis
+				&& bBodyAllowedBoxes == Other.bBodyAllowedBoxes;
+		}
+
+		friend uint32 GetTypeHash(const FMainRailCoverageRowKey& Key)
+		{
+			uint32 Hash = GetTypeHash(Key.Course);
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.CrossStation));
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.Axis));
+			return HashCombineFast(Hash, GetTypeHash(Key.bBodyAllowedBoxes));
+		}
+	};
+
+	struct FMainRailCoverageRow
+	{
+		int32 AlongMinimum = 0;
+		int32 AlongMaximum = -1;
+		TArray<int32> UncoveredPrefix;
+	};
+
+	struct FMainSourceProbeKey
+	{
+		// Twice-center grid coordinates preserve half-grid candidate centers exactly.
+		int32 CenterXTwiceUnits = 0;
+		int32 CenterYTwiceUnits = 0;
+		int32 Course = 0;
+		bool bAllowCrown = false;
+
+		bool operator==(const FMainSourceProbeKey& Other) const
+		{
+			return CenterXTwiceUnits == Other.CenterXTwiceUnits
+				&& CenterYTwiceUnits == Other.CenterYTwiceUnits
+				&& Course == Other.Course
+				&& bAllowCrown == Other.bAllowCrown;
+		}
+
+		friend uint32 GetTypeHash(const FMainSourceProbeKey& Key)
+		{
+			uint32 Hash = GetTypeHash(Key.CenterXTwiceUnits);
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.CenterYTwiceUnits));
+			Hash = HashCombineFast(Hash, GetTypeHash(Key.Course));
+			return HashCombineFast(Hash, GetTypeHash(Key.bAllowCrown));
+		}
 	};
 
 	bool ValidateStage1ElapsedBudget(
@@ -3426,6 +3513,8 @@ namespace
 			return false;
 		}
 		TArray<double> Cuts[3];
+		TArray<const FBox*> OverlappingBoxes;
+		OverlappingBoxes.Reserve(AllowedBoxes.Num());
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
 			Cuts[Axis] = {Solid.Min[Axis], Solid.Max[Axis]};
@@ -3442,6 +3531,7 @@ namespace
 			{
 				continue;
 			}
+			OverlappingBoxes.Add(&Box);
 			for (int32 Axis = 0; Axis < 3; ++Axis)
 			{
 				Cuts[Axis].Add(FMath::Clamp(Box.Min[Axis], Solid.Min[Axis], Solid.Max[Axis]));
@@ -3474,9 +3564,9 @@ namespace
 						(Cuts[0][X] + Cuts[0][X + 1]) * 0.5,
 						(Cuts[1][Y] + Cuts[1][Y + 1]) * 0.5,
 						(Cuts[2][Z] + Cuts[2][Z + 1]) * 0.5);
-					if (!AllowedBoxes.ContainsByPredicate([&Witness](const FBox& Box)
+					if (!OverlappingBoxes.ContainsByPredicate([&Witness](const FBox* Box)
 						{
-							return Box.IsInsideOrOn(Witness);
+							return Box != nullptr && Box->IsInsideOrOn(Witness);
 						}))
 					{
 						OutUncoveredPoint = Witness;
@@ -9030,6 +9120,28 @@ namespace
 			{
 				FStage1PhaseTimer ChildCandidateTimer(
 					OutPlan.Summary.ChildCandidateMilliseconds);
+				TMap<FMainSourceProbeKey, int32> ChildSourceProbeCache;
+				auto SelectCachedChildSource = [&Root, &ChildSourceProbeCache](
+					const int32 CenterXTwiceUnits,
+					const int32 CenterYTwiceUnits,
+					const int32 Course,
+					const bool bAllowCrown)
+				{
+					const FMainSourceProbeKey Key{
+						CenterXTwiceUnits, CenterYTwiceUnits, Course, bAllowCrown};
+					if (const int32* Cached = ChildSourceProbeCache.Find(Key))
+					{
+						return *Cached;
+					}
+					const double CenterX = CenterXTwiceUnits * 0.5 * BlockUnitsCM;
+					const double CenterY = CenterYTwiceUnits * 0.5 * BlockUnitsCM;
+					const double Z = Root.GroundZCM + (Course + 0.5) * BlockUnitsCM;
+					const int32 Source = bAllowCrown
+						? SelectCoreProjectionSourceVolume(Root, CenterX, CenterY, Z)
+						: SelectProjectionSourceVolume(Root, CenterX, CenterY, Z);
+					ChildSourceProbeCache.Add(Key, Source);
+					return Source;
+				};
 				FullHeightChildCandidatesByProjection.SetNum(
 					RequiredHighProjectionEntryBounds.Num());
 				RequiredFullHeightCourses.SetNumZeroed(
@@ -9094,6 +9206,49 @@ namespace
 							}
 						}
 					}
+					TMap<FMainRailCoverageKey, bool> ChildRailCoverageCache;
+					auto IsCachedChildRailCovered = [&Root, &BodyAllowedBoxes,
+						&CoreAllowedBoxes, &ProjectionAllowedBoxesByCourse,
+						PodiumTopCourse, &ChildRailCoverageCache](
+						const int32 Course,
+						const EABTSM73BeamAFrameAxis Axis,
+						const int32 AlongMinimum,
+						const int32 AlongMaximum,
+						const int32 CrossStation,
+						const bool bBodyAllowedBoxes)
+					{
+						const FMainRailCoverageKey Key{
+							Course, AlongMinimum, AlongMaximum, CrossStation,
+							static_cast<uint8>(Axis), bBodyAllowedBoxes};
+						if (const bool* Cached = ChildRailCoverageCache.Find(Key))
+						{
+							return *Cached;
+						}
+						const double Z = Root.GroundZCM
+							+ (Course + 0.5) * BlockUnitsCM;
+						FPlannedMember Probe;
+						Probe.Axis = Axis;
+						Probe.LocalStart = Axis == EABTSM73BeamAFrameAxis::X
+							? Position(AlongMinimum * BlockUnitsCM - BlockUnitsCM * 0.5,
+								CrossStation * BlockUnitsCM, Z)
+							: Position(CrossStation * BlockUnitsCM,
+								AlongMinimum * BlockUnitsCM - BlockUnitsCM * 0.5, Z);
+						Probe.LocalEnd = Axis == EABTSM73BeamAFrameAxis::X
+							? Position(AlongMaximum * BlockUnitsCM + BlockUnitsCM * 0.5,
+								CrossStation * BlockUnitsCM, Z)
+							: Position(CrossStation * BlockUnitsCM,
+								AlongMaximum * BlockUnitsCM + BlockUnitsCM * 0.5, Z);
+						const TArray<FBox>& AllowedBoxes = bBodyAllowedBoxes
+							? BodyAllowedBoxes
+							: Course >= PodiumTopCourse
+								? ProjectionAllowedBoxesByCourse[Course]
+								: CoreAllowedBoxes;
+						FVector UncoveredPoint;
+						const bool bCovered = SolidCoveredByBoxes(
+							PlannedMemberBounds(Probe), AllowedBoxes, UncoveredPoint);
+						ChildRailCoverageCache.Add(Key, bCovered);
+						return bCovered;
+					};
 					TArray<FJointChildFootprint> WFCFeasibleCandidates;
 					for (int32 SpanX = 1; SpanX <= MaximumSpanX; ++SpanX)
 					{
@@ -9126,13 +9281,14 @@ namespace
 										++Diagnostic.InvalidLatticeRejectCount;
 										continue;
 									}
-									const double CenterX = (MinimumX + MaximumX)
+									const int32 CenterXTwiceUnits = MinimumX + MaximumX;
+									const int32 CenterYTwiceUnits = MinimumY + MaximumY;
+									const double CenterX = CenterXTwiceUnits
 										* 0.5 * BlockUnitsCM;
-									const double CenterY = (MinimumY + MaximumY)
+									const double CenterY = CenterYTwiceUnits
 										* 0.5 * BlockUnitsCM;
-									const int32 BaseSource = SelectProjectionSourceVolume(
-										Root, CenterX, CenterY,
-										Root.GroundZCM + BlockUnitsCM * 0.5);
+									const int32 BaseSource = SelectCachedChildSource(
+										CenterXTwiceUnits, CenterYTwiceUnits, 0, false);
 									if (BaseSource == INDEX_NONE
 										|| !Root.GroundSourceVolumeIds.Contains(BaseSource))
 									{
@@ -9144,10 +9300,8 @@ namespace
 									for (int32 Course = 0;
 										Course < MaximumCandidateTopCourse; ++Course)
 									{
-										const double Z = Root.GroundZCM
-											+ (Course + 0.5) * BlockUnitsCM;
-										if (SelectCoreProjectionSourceVolume(
-											Root, CenterX, CenterY, Z) == INDEX_NONE)
+										if (SelectCachedChildSource(CenterXTwiceUnits,
+											CenterYTwiceUnits, Course, true) == INDEX_NONE)
 										{
 											break;
 										}
@@ -9159,44 +9313,28 @@ namespace
 											Axis == EABTSM73BeamAFrameAxis::X
 												? YStations : XStations;
 										bool bCourseCovered = true;
-										bool bBodyCourseCovered =
-											SelectProjectionSourceVolume(
-												Root, CenterX, CenterY, Z) != INDEX_NONE;
+										bool bBodyCourseCovered = SelectCachedChildSource(
+											CenterXTwiceUnits, CenterYTwiceUnits, Course, false)
+											!= INDEX_NONE;
 										for (const int32 CrossStation : CrossStations)
 										{
-											FPlannedMember Probe;
-											Probe.Axis = Axis;
-											Probe.LocalStart = Axis
-												== EABTSM73BeamAFrameAxis::X
-												? Position(MinimumX * BlockUnitsCM
-													- BlockUnitsCM * 0.5,
-													CrossStation * BlockUnitsCM, Z)
-												: Position(CrossStation * BlockUnitsCM,
-													MinimumY * BlockUnitsCM
-														- BlockUnitsCM * 0.5, Z);
-											Probe.LocalEnd = Axis
-												== EABTSM73BeamAFrameAxis::X
-												? Position(MaximumX * BlockUnitsCM
-													+ BlockUnitsCM * 0.5,
-													CrossStation * BlockUnitsCM, Z)
-												: Position(CrossStation * BlockUnitsCM,
-													MaximumY * BlockUnitsCM
-														+ BlockUnitsCM * 0.5, Z);
-										const TArray<FBox>& CourseAllowedBoxes =
-											Course >= PodiumTopCourse
-											? ProjectionAllowedBoxesByCourse[Course]
-											: CoreAllowedBoxes;
-											FVector UncoveredPoint;
-											if (!SolidCoveredByBoxes(PlannedMemberBounds(Probe),
-												CourseAllowedBoxes, UncoveredPoint))
+											if (!IsCachedChildRailCovered(Course, Axis,
+												Axis == EABTSM73BeamAFrameAxis::X
+													? MinimumX : MinimumY,
+												Axis == EABTSM73BeamAFrameAxis::X
+													? MaximumX : MaximumY,
+												CrossStation, false))
 											{
 												bCourseCovered = false;
 												break;
 											}
-											FVector BodyUncoveredPoint;
-											bBodyCourseCovered &= SolidCoveredByBoxes(
-												PlannedMemberBounds(Probe), BodyAllowedBoxes,
-												BodyUncoveredPoint);
+											bBodyCourseCovered &= IsCachedChildRailCovered(
+												Course, Axis,
+												Axis == EABTSM73BeamAFrameAxis::X
+													? MinimumX : MinimumY,
+												Axis == EABTSM73BeamAFrameAxis::X
+													? MaximumX : MaximumY,
+												CrossStation, true);
 										}
 										if (!bCourseCovered)
 										{
@@ -9312,6 +9450,128 @@ namespace
 			FStage1PhaseTimer MainCandidateTimer(
 				OutPlan.Summary.PodiumMainCandidateMilliseconds);
 			int64 MainCandidatePollCount = 0;
+			int64 MainRailCoverageCacheHitCount = 0;
+			int64 MainRailCoverageCacheMissCount = 0;
+			int64 MainSourceProbeCacheHitCount = 0;
+			int64 MainSourceProbeCacheMissCount = 0;
+			int64 MainCompleteStackCandidateCount = 0;
+			int64 MainChildCompatibilityProbeCount = 0;
+			TMap<FMainRailCoverageRowKey, FMainRailCoverageRow>
+				MainRailCoverageCache;
+			TMap<FMainSourceProbeKey, int32> MainSourceProbeCache;
+			auto AppendMainPerformanceEvidence = [&OutPlan, &OutError,
+				&MainCandidatePollCount, &MainRailCoverageCache,
+				&MainSourceProbeCache]()
+			{
+				OutError += FString::Printf(
+					TEXT(":MainStates=%lld:RailCache=%d:SourceCache=%d"),
+					MainCandidatePollCount, MainRailCoverageCache.Num(),
+					MainSourceProbeCache.Num());
+				OutPlan.Summary.RejectReason = OutError;
+			};
+			auto SelectCachedMainSource = [&Root, &MainSourceProbeCache,
+				&MainSourceProbeCacheHitCount, &MainSourceProbeCacheMissCount](
+				const int32 CenterXTwiceUnits,
+				const int32 CenterYTwiceUnits,
+				const int32 Course,
+				const bool bAllowCrown)
+			{
+				const FMainSourceProbeKey Key{
+					CenterXTwiceUnits, CenterYTwiceUnits, Course, bAllowCrown};
+				if (const int32* Cached = MainSourceProbeCache.Find(Key))
+				{
+					++MainSourceProbeCacheHitCount;
+					return *Cached;
+				}
+				++MainSourceProbeCacheMissCount;
+				const double CenterX = CenterXTwiceUnits * 0.5 * BlockUnitsCM;
+				const double CenterY = CenterYTwiceUnits * 0.5 * BlockUnitsCM;
+				const double Z = Root.GroundZCM + (Course + 0.5) * BlockUnitsCM;
+				const int32 Source = bAllowCrown
+					? SelectCoreProjectionSourceVolume(Root, CenterX, CenterY, Z)
+					: SelectProjectionSourceVolume(Root, CenterX, CenterY, Z);
+				MainSourceProbeCache.Add(Key, Source);
+				return Source;
+			};
+			auto IsCachedMainRailCovered = [&Root, &BodyAllowedBoxes,
+				&CoreAllowedBoxes, &MainRailCoverageCache,
+				&MainRailCoverageCacheHitCount,
+				&MainRailCoverageCacheMissCount](
+				const int32 Course,
+				const EABTSM73BeamAFrameAxis Axis,
+				const int32 AlongMinimum,
+				const int32 AlongMaximum,
+				const int32 CrossStation,
+				const bool bBodyAllowedBoxes)
+			{
+				const FMainRailCoverageRowKey Key{
+					Course, CrossStation, static_cast<uint8>(Axis),
+					bBodyAllowedBoxes};
+				FMainRailCoverageRow* Row = MainRailCoverageCache.Find(Key);
+				if (Row != nullptr)
+				{
+					++MainRailCoverageCacheHitCount;
+				}
+				else
+				{
+					++MainRailCoverageCacheMissCount;
+					FMainRailCoverageRow& NewRow =
+						MainRailCoverageCache.Add(Key);
+					Row = &NewRow;
+					Row->AlongMinimum = Axis == EABTSM73BeamAFrameAxis::X
+						? QMin(Root.Bounds.Min.X + BlockUnitsCM * 0.5)
+						: QMin(Root.Bounds.Min.Y + BlockUnitsCM * 0.5);
+					Row->AlongMaximum = Axis == EABTSM73BeamAFrameAxis::X
+						? QMax(Root.Bounds.Max.X - BlockUnitsCM * 0.5)
+						: QMax(Root.Bounds.Max.Y - BlockUnitsCM * 0.5);
+					// Component raster endpoints can intentionally extend through a
+					// coupled seam beyond Root.Bounds. Keep a bounded guard band so
+					// those exact candidate intervals are represented by the same
+					// atomic coverage table instead of being rejected by the cache.
+					Row->AlongMinimum -= MaximumHorizontalUnits;
+					Row->AlongMaximum += MaximumHorizontalUnits;
+					const int32 CellCount = Row->AlongMaximum
+						- Row->AlongMinimum + 1;
+					Row->UncoveredPrefix.SetNumZeroed(CellCount + 1);
+					const double Z = Root.GroundZCM
+						+ (Course + 0.5) * BlockUnitsCM;
+					const TArray<FBox>& AllowedBoxes = bBodyAllowedBoxes
+						? BodyAllowedBoxes : CoreAllowedBoxes;
+					for (int32 CellIndex = 0; CellIndex < CellCount; ++CellIndex)
+					{
+						const int32 AlongStation = Row->AlongMinimum + CellIndex;
+						FPlannedMember Probe;
+						Probe.Axis = Axis;
+						Probe.LocalStart = Axis == EABTSM73BeamAFrameAxis::X
+							? Position((AlongStation - 0.5) * BlockUnitsCM,
+								CrossStation * BlockUnitsCM, Z)
+							: Position(CrossStation * BlockUnitsCM,
+								(AlongStation - 0.5) * BlockUnitsCM, Z);
+						Probe.LocalEnd = Axis == EABTSM73BeamAFrameAxis::X
+							? Position((AlongStation + 0.5) * BlockUnitsCM,
+								CrossStation * BlockUnitsCM, Z)
+							: Position(CrossStation * BlockUnitsCM,
+								(AlongStation + 0.5) * BlockUnitsCM, Z);
+						FVector UncoveredPoint;
+						const bool bCellCovered = SolidCoveredByBoxes(
+							PlannedMemberBounds(Probe), AllowedBoxes,
+							UncoveredPoint);
+						Row->UncoveredPrefix[CellIndex + 1] =
+							Row->UncoveredPrefix[CellIndex]
+							+ (bCellCovered ? 0 : 1);
+					}
+				}
+				if (AlongMinimum < Row->AlongMinimum
+					|| AlongMaximum > Row->AlongMaximum
+					|| AlongMaximum < AlongMinimum)
+				{
+					return false;
+				}
+				const int32 PrefixMinimum = AlongMinimum - Row->AlongMinimum;
+				const int32 PrefixMaximum = AlongMaximum - Row->AlongMinimum + 1;
+				return Row->UncoveredPrefix[PrefixMaximum]
+					== Row->UncoveredPrefix[PrefixMinimum];
+			};
 			struct FPodiumMainCandidate
 			{
 				int32 MinimumX = INDEX_NONE;
@@ -9428,6 +9688,30 @@ namespace
 				MaximumCoreStationSpan, RasterMaximumX - RasterMinimumX);
 			const int32 MaximumCoreSpanY = FMath::Min(
 				MaximumCoreStationSpan, RasterMaximumY - RasterMinimumY);
+			struct FProjectionGridBounds
+			{
+				int32 MinimumX = 0;
+				int32 MaximumX = 0;
+				int32 MinimumY = 0;
+				int32 MaximumY = 0;
+			};
+			TArray<FProjectionGridBounds> ProjectionGridBounds;
+			ProjectionGridBounds.Reserve(RequiredHighProjectionEntryBounds.Num());
+			for (const FBox& ProjectionBounds : RequiredHighProjectionEntryBounds)
+			{
+				FProjectionGridBounds& GridBounds =
+					ProjectionGridBounds.AddDefaulted_GetRef();
+				GridBounds.MinimumX = QMin(
+					ProjectionBounds.Min.X + BlockUnitsCM * 0.5);
+				GridBounds.MaximumX = QMax(
+					ProjectionBounds.Max.X - BlockUnitsCM * 0.5);
+				GridBounds.MinimumY = QMin(
+					ProjectionBounds.Min.Y + BlockUnitsCM * 0.5);
+				GridBounds.MaximumY = QMax(
+					ProjectionBounds.Max.Y - BlockUnitsCM * 0.5);
+			}
+			const uint32 RequiredCoverageMask = ProjectionGridBounds.IsEmpty()
+				? 0u : (1u << ProjectionGridBounds.Num()) - 1u;
 				auto IsBetterPodiumCandidate = [](const FPodiumMainCandidate& A,
 				const FPodiumMainCandidate& B)
 			{
@@ -9609,6 +9893,7 @@ namespace
 											if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
 												TEXT("PodiumMainCandidate"), OutPlan, OutError))
 											{
+												AppendMainPerformanceEvidence();
 												return false;
 											}
 										}
@@ -9670,13 +9955,10 @@ namespace
 										{
 											continue;
 										}
-										const double CenterX = (MinimumX + MaximumX)
-											* 0.5 * BlockUnitsCM;
-										const double CenterY = (MinimumY + MaximumY)
-											* 0.5 * BlockUnitsCM;
-										const int32 BaseSource = SelectProjectionSourceVolume(
-											Root, CenterX, CenterY,
-											Root.GroundZCM + BlockUnitsCM * 0.5);
+										const int32 CenterXTwiceUnits = MinimumX + MaximumX;
+										const int32 CenterYTwiceUnits = MinimumY + MaximumY;
+										const int32 BaseSource = SelectCachedMainSource(
+											CenterXTwiceUnits, CenterYTwiceUnits, 0, false);
 										if (BaseSource == INDEX_NONE
 											|| !Root.GroundSourceVolumeIds.Contains(BaseSource))
 										{
@@ -9687,8 +9969,6 @@ namespace
 											Course < HighestIncidentCourse + 2 && bCovered;
 											++Course)
 										{
-											const double Z = Root.GroundZCM
-												+ (Course + 0.5) * BlockUnitsCM;
 											const EABTSM73BeamAFrameAxis Axis = (Course & 1) == 0
 												? EABTSM73BeamAFrameAxis::X
 												: EABTSM73BeamAFrameAxis::Y;
@@ -9697,24 +9977,12 @@ namespace
 													? YStations : XStations;
 											for (const int32 CrossStation : CourseCrossStations)
 											{
-												FPlannedMember Probe;
-												Probe.Axis = Axis;
-												Probe.LocalStart = Axis
-													== EABTSM73BeamAFrameAxis::X
-													? Position(PhysicalMinimumX,
-														CrossStation * BlockUnitsCM, Z)
-													: Position(CrossStation * BlockUnitsCM,
-														PhysicalMinimumY, Z);
-												Probe.LocalEnd = Axis
-													== EABTSM73BeamAFrameAxis::X
-													? Position(PhysicalMaximumX,
-														CrossStation * BlockUnitsCM, Z)
-													: Position(CrossStation * BlockUnitsCM,
-														PhysicalMaximumY, Z);
-												FVector UncoveredPoint;
-												if (!SolidCoveredByBoxes(
-													PlannedMemberBounds(Probe),
-													CoreAllowedBoxes, UncoveredPoint))
+												if (!IsCachedMainRailCovered(Course, Axis,
+													Axis == EABTSM73BeamAFrameAxis::X
+														? MinimumX : MinimumY,
+													Axis == EABTSM73BeamAFrameAxis::X
+														? MaximumX : MaximumY,
+													CrossStation, false))
 												{
 													bCovered = false;
 													break;
@@ -9746,12 +10014,10 @@ namespace
 				DesiredRailCount, bUseGroundedCoreHierarchy,
 				&SharedEndpointRequirements, &JointFootprintsConflict](
 				const int32 MinimumX, const int32 MaximumX,
-				const int32 MinimumY, const int32 MaximumY)
+				const int32 MinimumY, const int32 MaximumY,
+				const TArray<int32>& CandidateXStations,
+				const TArray<int32>& CandidateYStations)
 			{
-				const TArray<int32> CandidateXStations = MakeUniformStations(
-					MinimumX, MaximumX, DesiredRailCount);
-				const TArray<int32> CandidateYStations = MakeUniformStations(
-					MinimumY, MaximumY, DesiredRailCount);
 				if (CandidateXStations.Num() != DesiredRailCount
 					|| CandidateYStations.Num() != DesiredRailCount)
 				{
@@ -9875,6 +10141,7 @@ namespace
 								if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
 									TEXT("PodiumMainCandidate"), OutPlan, OutError))
 								{
+									AppendMainPerformanceEvidence();
 									return false;
 								}
 							}
@@ -9889,41 +10156,29 @@ namespace
 								ProjectionIndex < RequiredHighProjectionEntryBounds.Num();
 								++ProjectionIndex)
 							{
-								const FBox& ProjectionBounds =
-									RequiredHighProjectionEntryBounds[ProjectionIndex];
-								const int32 ProjectionMinimumX = QMin(
-									ProjectionBounds.Min.X + BlockUnitsCM * 0.5);
-								const int32 ProjectionMaximumX = QMax(
-									ProjectionBounds.Max.X - BlockUnitsCM * 0.5);
-								const int32 ProjectionMinimumY = QMin(
-									ProjectionBounds.Min.Y + BlockUnitsCM * 0.5);
-								const int32 ProjectionMaximumY = QMax(
-									ProjectionBounds.Max.Y - BlockUnitsCM * 0.5);
+								const FProjectionGridBounds& GridBounds =
+									ProjectionGridBounds[ProjectionIndex];
 								const bool bHasInteriorXStation =
 									CandidateXStations.ContainsByPredicate(
-										[ProjectionMinimumX, ProjectionMaximumX](
+										[&GridBounds](
 											const int32 Station)
 										{
-											return Station > ProjectionMinimumX
-												&& Station < ProjectionMaximumX;
+											return Station > GridBounds.MinimumX
+												&& Station < GridBounds.MaximumX;
 										});
 								const bool bHasInteriorYStation =
 									CandidateYStations.ContainsByPredicate(
-										[ProjectionMinimumY, ProjectionMaximumY](
+										[&GridBounds](
 											const int32 Station)
 										{
-											return Station > ProjectionMinimumY
-												&& Station < ProjectionMaximumY;
+											return Station > GridBounds.MinimumY
+												&& Station < GridBounds.MaximumY;
 										});
 								if (bHasInteriorXStation && bHasInteriorYStation)
 								{
 									HighProjectionCoverageMask |= 1u << ProjectionIndex;
 								}
 							}
-							const uint32 RequiredCoverageMask =
-								RequiredHighProjectionEntryBounds.IsEmpty()
-									? 0u
-									: (1u << RequiredHighProjectionEntryBounds.Num()) - 1u;
 							const bool bCoversPodiumSupportAnchor =
 								PodiumSupportAnchor.X
 									>= MinimumX * static_cast<double>(BlockUnitsCM)
@@ -9943,20 +10198,24 @@ namespace
 								continue;
 							}
 							if (!FitsIncidentSharedTraversal(
-								MinimumX, MaximumX, MinimumY, MaximumY))
+								MinimumX, MaximumX, MinimumY, MaximumY,
+								CandidateXStations, CandidateYStations))
 							{
 								continue;
 							}
-							const double CenterX = (MinimumX + MaximumX) * 0.5 * BlockUnitsCM;
-							const double CenterY = (MinimumY + MaximumY) * 0.5 * BlockUnitsCM;
-							const int32 BaseSource = SelectProjectionSourceVolume(
-								Root, CenterX, CenterY, Root.GroundZCM + BlockUnitsCM * 0.5);
+							const int32 CenterXTwiceUnits = MinimumX + MaximumX;
+							const int32 CenterYTwiceUnits = MinimumY + MaximumY;
+							const double CenterX = CenterXTwiceUnits * 0.5 * BlockUnitsCM;
+							const double CenterY = CenterYTwiceUnits * 0.5 * BlockUnitsCM;
+							const int32 BaseSource = SelectCachedMainSource(
+								CenterXTwiceUnits, CenterYTwiceUnits, 0, false);
 							if (BaseSource == INDEX_NONE
 								|| !Root.GroundSourceVolumeIds.Contains(BaseSource))
 							{
 								continue;
 							}
 							TSet<int32> FootprintGroundComponents;
+							bool bTouchesGroundComponent = false;
 							for (const FABTSM73DAG5BV2Volume* GroundVolume : Root.BodyVolumes)
 							{
 								if (GroundVolume == nullptr
@@ -9977,6 +10236,11 @@ namespace
 								if (XOverlap > GeometryToleranceCM
 									&& YOverlap > GeometryToleranceCM)
 								{
+									bTouchesGroundComponent = true;
+									if (bUseGroundedCoreHierarchy)
+									{
+										break;
+									}
 									if (const int32* OriginalComponent =
 										Root.SourceVolumeOriginalComponentIds.Find(
 											GroundVolume->VolumeId))
@@ -9989,57 +10253,7 @@ namespace
 									&& FootprintGroundComponents.Num()
 										!= Root.SourceGroundComponentIds.Num())
 								|| (bUseGroundedCoreHierarchy
-									&& FootprintGroundComponents.IsEmpty()))
-							{
-								continue;
-							}
-							bool bCompleteCoreStack = true;
-							for (int32 Course = 0;
-								Course < CoreTopCourse && bCompleteCoreStack; ++Course)
-							{
-								const double Z = Root.GroundZCM + (Course + 0.5) * BlockUnitsCM;
-								const int32 CourseSource = Course < BodyTopCourse
-									? SelectProjectionSourceVolume(Root, CenterX, CenterY, Z)
-									: SelectCoreProjectionSourceVolume(Root, CenterX, CenterY, Z);
-								if (CourseSource == INDEX_NONE)
-								{
-									bCompleteCoreStack = false;
-									break;
-								}
-								const EABTSM73BeamAFrameAxis Axis = (Course & 1) == 0
-									? EABTSM73BeamAFrameAxis::X : EABTSM73BeamAFrameAxis::Y;
-								const TArray<int32>& CrossStations =
-									Axis == EABTSM73BeamAFrameAxis::X
-										? CandidateYStations : CandidateXStations;
-								for (const int32 CrossStation : CrossStations)
-								{
-									FPlannedMember Probe;
-									Probe.Axis = Axis;
-									// Endpoints are physical end planes. Extending by half a
-									// section gives every alternating XY crossing a complete
-									// 36 x 36 bearing face instead of the old 18 x 18 quarter face.
-									Probe.LocalStart = Axis == EABTSM73BeamAFrameAxis::X
-										? Position(MinimumX * BlockUnitsCM - BlockUnitsCM * 0.5,
-											CrossStation * BlockUnitsCM, Z)
-										: Position(CrossStation * BlockUnitsCM,
-											MinimumY * BlockUnitsCM - BlockUnitsCM * 0.5, Z);
-									Probe.LocalEnd = Axis == EABTSM73BeamAFrameAxis::X
-										? Position(MaximumX * BlockUnitsCM + BlockUnitsCM * 0.5,
-											CrossStation * BlockUnitsCM, Z)
-										: Position(CrossStation * BlockUnitsCM,
-											MaximumY * BlockUnitsCM + BlockUnitsCM * 0.5, Z);
-									FVector UncoveredPoint;
-									const TArray<FBox>& AllowedBoxes = Course < BodyTopCourse
-										? BodyAllowedBoxes : CoreAllowedBoxes;
-									if (!SolidCoveredByBoxes(PlannedMemberBounds(Probe),
-										AllowedBoxes, UncoveredPoint))
-									{
-										bCompleteCoreStack = false;
-										break;
-									}
-								}
-							}
-							if (!bCompleteCoreStack)
+									&& !bTouchesGroundComponent))
 							{
 								continue;
 							}
@@ -10054,22 +10268,24 @@ namespace
 							const int32 Area = SpanX * SpanY;
 							const double Distance = FVector2D::DistSquared(
 								FVector2D(CenterX, CenterY), CoreTarget);
+							FPodiumMainCandidate GroundedCandidate;
+							uint64 GroundedRetentionKey = 0;
 							if (bUseGroundedCoreHierarchy)
 							{
-								FPodiumMainCandidate Candidate;
-								Candidate.MinimumX = MinimumX;
-								Candidate.MaximumX = MaximumX;
-								Candidate.MinimumY = MinimumY;
-								Candidate.MaximumY = MaximumY;
-								Candidate.BaseSource = BaseSource;
-								Candidate.MarginClass = MarginClass;
-								Candidate.MinimumSpan = MinimumSpan;
-								Candidate.SpanImbalance = SpanImbalance;
-								Candidate.Area = Area;
-								Candidate.Distance = Distance;
-								Candidate.CoverageMask = HighProjectionCoverageMask;
-								Candidate.XStations = CandidateXStations;
-								Candidate.YStations = CandidateYStations;
+								GroundedCandidate.MinimumX = MinimumX;
+								GroundedCandidate.MaximumX = MaximumX;
+								GroundedCandidate.MinimumY = MinimumY;
+								GroundedCandidate.MaximumY = MaximumY;
+								GroundedCandidate.BaseSource = BaseSource;
+								GroundedCandidate.MarginClass = MarginClass;
+								GroundedCandidate.MinimumSpan = MinimumSpan;
+								GroundedCandidate.SpanImbalance = SpanImbalance;
+								GroundedCandidate.Area = Area;
+								GroundedCandidate.Distance = Distance;
+								GroundedCandidate.CoverageMask =
+									HighProjectionCoverageMask;
+								GroundedCandidate.XStations = CandidateXStations;
+								GroundedCandidate.YStations = CandidateYStations;
 								for (int32 ProjectionIndex = 0;
 									ProjectionIndex
 										< FullHeightChildCandidatesByProjection.Num();
@@ -10078,37 +10294,91 @@ namespace
 									const bool bSupportsFullHeightChild =
 										FullHeightChildCandidatesByProjection[ProjectionIndex]
 											.ContainsByPredicate(
-											[&Candidate, &JointFootprintsConflict](
+											[&GroundedCandidate, &JointFootprintsConflict,
+												&MainChildCompatibilityProbeCount](
 												const FJointChildFootprint& Child)
 											{
+												++MainChildCompatibilityProbeCount;
 												return !JointFootprintsConflict(
-														Candidate.MinimumX, Candidate.MaximumX,
-														Candidate.MinimumY, Candidate.MaximumY,
-														Candidate.XStations, Candidate.YStations,
+													GroundedCandidate.MinimumX,
+													GroundedCandidate.MaximumX,
+													GroundedCandidate.MinimumY,
+													GroundedCandidate.MaximumY,
+													GroundedCandidate.XStations,
+													GroundedCandidate.YStations,
 													Child.MinimumX, Child.MaximumX,
 													Child.MinimumY, Child.MaximumY,
 													Child.XStations, Child.YStations);
-												});
+											});
 									if (bSupportsFullHeightChild)
 									{
-										Candidate.FullHeightCompatibilityMask
+										GroundedCandidate.FullHeightCompatibilityMask
 											|= 1u << ProjectionIndex;
 									}
 								}
-								Candidate.bCoversPodiumSupportAnchor =
+								GroundedCandidate.bCoversPodiumSupportAnchor =
 									bCoversPodiumSupportAnchor;
-								if (Candidate.FullHeightCompatibilityMask == 0u
-									&& !Candidate.bCoversPodiumSupportAnchor)
+								if (GroundedCandidate.FullHeightCompatibilityMask == 0u
+									&& !GroundedCandidate.bCoversPodiumSupportAnchor)
 								{
 									continue;
 								}
-								const uint64 RetentionKey =
-									(static_cast<uint64>(Candidate.CoverageMask) << 32)
-									| Candidate.FullHeightCompatibilityMask;
+								GroundedRetentionKey =
+									(static_cast<uint64>(GroundedCandidate.CoverageMask) << 32)
+									| GroundedCandidate.FullHeightCompatibilityMask;
+								constexpr int32 MaximumCandidatesPerCoverage = 12;
+								if (const TArray<FPodiumMainCandidate>* SameCoverage =
+									PodiumCandidatesByCoverage.Find(GroundedRetentionKey);
+									SameCoverage != nullptr
+									&& SameCoverage->Num() >= MaximumCandidatesPerCoverage
+									&& IsBetterPodiumCandidate(
+										SameCoverage->Last(), GroundedCandidate))
+								{
+									continue;
+								}
+							}
+							bool bCompleteCoreStack = true;
+							for (int32 Course = 0;
+								Course < CoreTopCourse && bCompleteCoreStack; ++Course)
+							{
+								const int32 CourseSource = SelectCachedMainSource(
+									CenterXTwiceUnits, CenterYTwiceUnits, Course,
+									Course >= BodyTopCourse);
+								if (CourseSource == INDEX_NONE)
+								{
+									bCompleteCoreStack = false;
+									break;
+								}
+								const EABTSM73BeamAFrameAxis Axis = (Course & 1) == 0
+									? EABTSM73BeamAFrameAxis::X : EABTSM73BeamAFrameAxis::Y;
+								const TArray<int32>& CrossStations =
+									Axis == EABTSM73BeamAFrameAxis::X
+										? CandidateYStations : CandidateXStations;
+								for (const int32 CrossStation : CrossStations)
+								{
+									if (!IsCachedMainRailCovered(Course, Axis,
+										Axis == EABTSM73BeamAFrameAxis::X
+											? MinimumX : MinimumY,
+										Axis == EABTSM73BeamAFrameAxis::X
+											? MaximumX : MaximumY,
+										CrossStation, Course < BodyTopCourse))
+									{
+										bCompleteCoreStack = false;
+										break;
+									}
+								}
+							}
+							if (!bCompleteCoreStack)
+							{
+								continue;
+							}
+							++MainCompleteStackCandidateCount;
+							if (bUseGroundedCoreHierarchy)
+							{
 								TArray<FPodiumMainCandidate>& SameCoverage =
 									PodiumCandidatesByCoverage.FindOrAdd(
-										RetentionKey);
-								SameCoverage.Add(MoveTemp(Candidate));
+										GroundedRetentionKey);
+								SameCoverage.Add(MoveTemp(GroundedCandidate));
 								SameCoverage.Sort(IsBetterPodiumCandidate);
 								constexpr int32 MaximumCandidatesPerCoverage = 12;
 								if (SameCoverage.Num() > MaximumCandidatesPerCoverage)
@@ -10159,9 +10429,18 @@ namespace
 				}
 			}
 			MainCandidateTimer.Stop();
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-Beam-C3V3][Stage1MainSearch] Component=%d States=%lld Complete=%lld RailCache=%d RailHit=%lld RailMiss=%lld SourceCache=%d SourceHit=%lld SourceMiss=%lld ChildCompatibilityProbes=%lld RetentionBuckets=%d"),
+				RootIndex, MainCandidatePollCount, MainCompleteStackCandidateCount,
+				MainRailCoverageCache.Num(), MainRailCoverageCacheHitCount,
+				MainRailCoverageCacheMissCount, MainSourceProbeCache.Num(),
+				MainSourceProbeCacheHitCount, MainSourceProbeCacheMissCount,
+				MainChildCompatibilityProbeCount,
+				PodiumCandidatesByCoverage.Num());
 			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
 				TEXT("PodiumMainCandidate"), OutPlan, OutError))
 			{
+				AppendMainPerformanceEvidence();
 				return false;
 			}
 			FStage1PhaseTimer JointSelectionTimer(
@@ -10263,12 +10542,21 @@ namespace
 						});
 				};
 				TMap<FString, bool> FullHeightSelectionCache;
+				int64 FullHeightFeasibilityCallCount = 0;
+				int64 FullHeightMainConflictProbeCount = 0;
+				int64 FullHeightSiblingConflictProbeCount = 0;
+				int64 FullHeightAssignmentCandidateVisitCount = 0;
 				auto SelectionSupportsAllFullHeightChildren = [
 					&AllCandidates, &FullHeightChildCandidatesByProjection,
 					&JointFootprintsConflict,
-					&MainSelectionKey, &FullHeightSelectionCache](
+					&MainSelectionKey, &FullHeightSelectionCache,
+					&FullHeightFeasibilityCallCount,
+					&FullHeightMainConflictProbeCount,
+					&FullHeightSiblingConflictProbeCount,
+					&FullHeightAssignmentCandidateVisitCount](
 						const TArray<int32>& MainSelection)
 				{
+					++FullHeightFeasibilityCallCount;
 					const FString SelectionKey = MainSelectionKey(MainSelection);
 					if (const bool* Cached = FullHeightSelectionCache.Find(SelectionKey))
 					{
@@ -10288,6 +10576,7 @@ namespace
 							bool bConflictsMain = false;
 							for (const int32 MainIndex : MainSelection)
 							{
+								++FullHeightMainConflictProbeCount;
 								if (!AllCandidates.IsValidIndex(MainIndex))
 								{
 									FullHeightSelectionCache.Add(SelectionKey, false);
@@ -10335,18 +10624,31 @@ namespace
 							return true;
 						}
 						const int32 ProjectionIndex = ProjectionOrder[OrderIndex];
-						for (const FJointChildFootprint* Child
-							: CompatibleChildrenByProjection[ProjectionIndex])
+						// FullHeightCandidates are ordered from largest/best-looking to
+						// smallest. This predicate only proves that an assignment exists;
+						// it does not choose the emitted child. Visit the least-conflicting
+						// (normally smallest) witnesses first so adjacent terminal regions
+						// do not enumerate a large Cartesian prefix before finding the same
+						// exact feasibility result.
+						const TArray<const FJointChildFootprint*>& CompatibleChildren =
+							CompatibleChildrenByProjection[ProjectionIndex];
+						for (int32 ChildIndex = CompatibleChildren.Num() - 1;
+							ChildIndex >= 0; --ChildIndex)
 						{
+							const FJointChildFootprint* Child =
+								CompatibleChildren[ChildIndex];
+							++FullHeightAssignmentCandidateVisitCount;
 							if (Child == nullptr)
 							{
 								continue;
 							}
 							const bool bConflictsSibling =
 								SelectedChildren.ContainsByPredicate(
-									[Child, &JointFootprintsConflict](
+									[Child, &JointFootprintsConflict,
+										&FullHeightSiblingConflictProbeCount](
 										const FJointChildFootprint* Sibling)
 									{
+										++FullHeightSiblingConflictProbeCount;
 										return Sibling != nullptr
 											&& JointFootprintsConflict(
 												Child->MinimumX, Child->MaximumX,
@@ -10529,6 +10831,19 @@ namespace
 					}
 				};
 				SearchCoverage(0u);
+				UE_LOG(LogABTSRuntime, Display,
+					TEXT("[ABTS][M7.3-Beam-C3V3][Stage1JointSearch] Component=%d Regions=%d CandidateCounts=%s MainSelections=%d FeasibilityCalls=%lld MainConflictProbes=%lld AssignmentVisits=%lld SiblingConflictProbes=%lld"),
+					RootIndex, FullHeightChildCandidatesByProjection.Num(),
+					*FString::JoinBy(FullHeightChildCandidatesByProjection, TEXT(","),
+						[](const TArray<FJointChildFootprint>& Candidates)
+						{
+							return FString::FromInt(Candidates.Num());
+						}),
+					JointDiagnostic.MainSelectionsVisited,
+					FullHeightFeasibilityCallCount,
+					FullHeightMainConflictProbeCount,
+					FullHeightAssignmentCandidateVisitCount,
+					FullHeightSiblingConflictProbeCount);
 				if (bJointSearchTimedOut)
 				{
 					return false;
@@ -10634,6 +10949,8 @@ namespace
 			{
 				return false;
 			}
+			FStage1PhaseTimer CorePlanEmissionTimer(
+				OutPlan.Summary.MemberEmissionMilliseconds);
 			if (SelectedCoreCandidates.IsEmpty())
 			{
 				OutError = FString::Printf(
@@ -10903,9 +11220,17 @@ namespace
 					PreviousCoreCourse = MoveTemp(CurrentCoreCourse);
 				}
 			}
+			CorePlanEmissionTimer.Stop();
+			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+				TEXT("MemberEmission"), OutPlan, OutError))
+			{
+				return false;
+			}
 
 			if (bUseGroundedCoreHierarchy)
 			{
+				FStage1PhaseTimer CompositePlanningTimer(
+					OutPlan.Summary.JointSelectionMilliseconds);
 				const TArray<int32> PodiumMainCoreCellIds = InitialCoreCellIds;
 				struct FReservedSharedEndpointCell
 				{
@@ -10957,7 +11282,13 @@ namespace
 					}
 					return false;
 				};
-				auto EvaluateSharedEndpointFootprint = [](
+				TMap<const FRoot*, TMap<FMainSourceProbeKey, int32>>
+					EndpointSourceProbeCaches;
+				TMap<const FRoot*,
+					TMap<FMainRailCoverageRowKey, FMainRailCoverageRow>>
+					EndpointRailCoverageCaches;
+				auto EvaluateSharedEndpointFootprint = [
+					&EndpointSourceProbeCaches, &EndpointRailCoverageCaches](
 					const FRoot& EndpointRoot,
 					const TArray<FBox>& EndpointAllowedBoxes,
 					const int32 MinimumX, const int32 MaximumX,
@@ -10982,13 +11313,112 @@ namespace
 					{
 						return false;
 					}
-					const double CenterX = (MinimumX + MaximumX)
-						* 0.5 * BlockUnitsCM;
-					const double CenterY = (MinimumY + MaximumY)
-						* 0.5 * BlockUnitsCM;
-					OutBaseSourceVolumeId = SelectProjectionSourceVolume(
-						EndpointRoot, CenterX, CenterY,
-						EndpointRoot.GroundZCM + BlockUnitsCM * 0.5);
+					const int32 CenterXTwiceUnits = MinimumX + MaximumX;
+					const int32 CenterYTwiceUnits = MinimumY + MaximumY;
+					TMap<FMainSourceProbeKey, int32>& SourceProbeCache =
+						EndpointSourceProbeCaches.FindOrAdd(&EndpointRoot);
+					auto SelectCachedEndpointSource = [
+						&EndpointRoot, &SourceProbeCache,
+						CenterXTwiceUnits, CenterYTwiceUnits](
+							const int32 Course, const bool bAllowCrown)
+					{
+						const FMainSourceProbeKey Key{CenterXTwiceUnits,
+							CenterYTwiceUnits, Course, bAllowCrown};
+						if (const int32* Cached = SourceProbeCache.Find(Key))
+						{
+							return *Cached;
+						}
+						const double CenterX = CenterXTwiceUnits
+							* 0.5 * BlockUnitsCM;
+						const double CenterY = CenterYTwiceUnits
+							* 0.5 * BlockUnitsCM;
+						const double Z = EndpointRoot.GroundZCM
+							+ (Course + 0.5) * BlockUnitsCM;
+						const int32 Source = bAllowCrown
+							? SelectCoreProjectionSourceVolume(
+								EndpointRoot, CenterX, CenterY, Z)
+							: SelectProjectionSourceVolume(
+								EndpointRoot, CenterX, CenterY, Z);
+						SourceProbeCache.Add(Key, Source);
+						return Source;
+					};
+					TMap<FMainRailCoverageRowKey, FMainRailCoverageRow>&
+						RailCoverageCache =
+							EndpointRailCoverageCaches.FindOrAdd(&EndpointRoot);
+					auto IsCachedEndpointRailCovered = [
+						&EndpointRoot, &EndpointAllowedBoxes,
+						&RailCoverageCache](
+							const int32 Course,
+							const EABTSM73BeamAFrameAxis Axis,
+							const int32 AlongMinimum,
+							const int32 AlongMaximum,
+							const int32 CrossStation)
+					{
+						const FMainRailCoverageRowKey Key{Course, CrossStation,
+							static_cast<uint8>(Axis), false};
+						FMainRailCoverageRow* Row = RailCoverageCache.Find(Key);
+						if (Row == nullptr)
+						{
+							Row = &RailCoverageCache.Add(Key);
+							Row->AlongMinimum = Axis == EABTSM73BeamAFrameAxis::X
+								? QMin(EndpointRoot.Bounds.Min.X
+									+ BlockUnitsCM * 0.5)
+								: QMin(EndpointRoot.Bounds.Min.Y
+									+ BlockUnitsCM * 0.5);
+							Row->AlongMaximum = Axis == EABTSM73BeamAFrameAxis::X
+								? QMax(EndpointRoot.Bounds.Max.X
+									- BlockUnitsCM * 0.5)
+								: QMax(EndpointRoot.Bounds.Max.Y
+									- BlockUnitsCM * 0.5);
+							Row->AlongMinimum -= MaximumHorizontalUnits;
+							Row->AlongMaximum += MaximumHorizontalUnits;
+							const int32 CellCount = Row->AlongMaximum
+								- Row->AlongMinimum + 1;
+							Row->UncoveredPrefix.SetNumZeroed(CellCount + 1);
+							const double Z = EndpointRoot.GroundZCM
+								+ (Course + 0.5) * BlockUnitsCM;
+							for (int32 CellIndex = 0;
+								CellIndex < CellCount; ++CellIndex)
+							{
+								const int32 AlongStation =
+									Row->AlongMinimum + CellIndex;
+								FPlannedMember Probe;
+								Probe.Axis = Axis;
+								Probe.LocalStart =
+									Axis == EABTSM73BeamAFrameAxis::X
+									? Position((AlongStation - 0.5) * BlockUnitsCM,
+										CrossStation * BlockUnitsCM, Z)
+									: Position(CrossStation * BlockUnitsCM,
+										(AlongStation - 0.5) * BlockUnitsCM, Z);
+								Probe.LocalEnd =
+									Axis == EABTSM73BeamAFrameAxis::X
+									? Position((AlongStation + 0.5) * BlockUnitsCM,
+										CrossStation * BlockUnitsCM, Z)
+									: Position(CrossStation * BlockUnitsCM,
+										(AlongStation + 0.5) * BlockUnitsCM, Z);
+								FVector UncoveredPoint;
+								const bool bCellCovered = SolidCoveredByBoxes(
+									PlannedMemberBounds(Probe), EndpointAllowedBoxes,
+									UncoveredPoint);
+								Row->UncoveredPrefix[CellIndex + 1] =
+									Row->UncoveredPrefix[CellIndex]
+									+ (bCellCovered ? 0 : 1);
+							}
+						}
+						if (AlongMinimum < Row->AlongMinimum
+							|| AlongMaximum > Row->AlongMaximum
+							|| AlongMaximum < AlongMinimum)
+						{
+							return false;
+						}
+						const int32 PrefixMinimum =
+							AlongMinimum - Row->AlongMinimum;
+						const int32 PrefixMaximum =
+							AlongMaximum - Row->AlongMinimum + 1;
+						return Row->UncoveredPrefix[PrefixMaximum]
+							== Row->UncoveredPrefix[PrefixMinimum];
+					};
+					OutBaseSourceVolumeId = SelectCachedEndpointSource(0, false);
 					if (OutBaseSourceVolumeId == INDEX_NONE
 						|| !EndpointRoot.GroundSourceVolumeIds.Contains(
 							OutBaseSourceVolumeId))
@@ -10997,10 +11427,7 @@ namespace
 					}
 					for (int32 Course = 0; Course < RequiredTopCourse; ++Course)
 					{
-						const double Z = EndpointRoot.GroundZCM
-							+ (Course + 0.5) * BlockUnitsCM;
-						if (SelectCoreProjectionSourceVolume(
-							EndpointRoot, CenterX, CenterY, Z) == INDEX_NONE)
+						if (SelectCachedEndpointSource(Course, true) == INDEX_NONE)
 						{
 							return false;
 						}
@@ -11012,25 +11439,12 @@ namespace
 								? YStations : XStations;
 						for (const int32 CrossStation : CrossStations)
 						{
-							FPlannedMember Probe;
-							Probe.Axis = Axis;
-							Probe.LocalStart = Axis == EABTSM73BeamAFrameAxis::X
-								? Position(MinimumX * BlockUnitsCM
-									- BlockUnitsCM * 0.5,
-									CrossStation * BlockUnitsCM, Z)
-								: Position(CrossStation * BlockUnitsCM,
-									MinimumY * BlockUnitsCM
-										- BlockUnitsCM * 0.5, Z);
-							Probe.LocalEnd = Axis == EABTSM73BeamAFrameAxis::X
-								? Position(MaximumX * BlockUnitsCM
-									+ BlockUnitsCM * 0.5,
-									CrossStation * BlockUnitsCM, Z)
-								: Position(CrossStation * BlockUnitsCM,
-									MaximumY * BlockUnitsCM
-										+ BlockUnitsCM * 0.5, Z);
-							FVector UncoveredPoint;
-							if (!SolidCoveredByBoxes(PlannedMemberBounds(Probe),
-								EndpointAllowedBoxes, UncoveredPoint))
+							if (!IsCachedEndpointRailCovered(Course, Axis,
+								Axis == EABTSM73BeamAFrameAxis::X
+									? MinimumX : MinimumY,
+								Axis == EABTSM73BeamAFrameAxis::X
+									? MaximumX : MaximumY,
+								CrossStation))
 							{
 								return false;
 							}
@@ -11705,8 +12119,6 @@ namespace
 					ComponentHighProjectionRegionIds.Add(Region.RegionId);
 				}
 
-				FStage1PhaseTimer FinalChildSelectionTimer(
-					OutPlan.Summary.JointSelectionMilliseconds);
 				int32 AddedChildCount = 0;
 				if (ComponentHighProjectionRegionIds.Num()
 					!= RequiredFullHeightCourses.Num())
@@ -11751,23 +12163,6 @@ namespace
 					}
 					FullHeightDiagnostic->RegionId = ProjectionRegionId;
 
-					const int32 SeedMinimumX = QMin(
-						ProjectionRegion.TerminalBounds.Min.X + BlockUnitsCM * 0.5);
-					const int32 SeedMaximumX = QMax(
-						ProjectionRegion.TerminalBounds.Max.X - BlockUnitsCM * 0.5);
-					const int32 SeedMinimumY = QMin(
-						ProjectionRegion.TerminalBounds.Min.Y + BlockUnitsCM * 0.5);
-					const int32 SeedMaximumY = QMax(
-						ProjectionRegion.TerminalBounds.Max.Y - BlockUnitsCM * 0.5);
-					const int32 MaximumSpanX = FMath::Min(
-						MaximumHorizontalUnits, SeedMaximumX - SeedMinimumX);
-					const int32 MaximumSpanY = FMath::Min(
-						MaximumHorizontalUnits, SeedMaximumY - SeedMinimumY);
-					if (MaximumSpanX < 1 || MaximumSpanY < 1)
-					{
-						continue;
-					}
-
 					int32 ChildMinimumX = INDEX_NONE;
 					int32 ChildMaximumX = INDEX_NONE;
 					int32 ChildMinimumY = INDEX_NONE;
@@ -11788,50 +12183,6 @@ namespace
 					int32 ChildNoDirectMainCouplingCount = 0;
 					int32 ChildBaseRejectCount = 0;
 					int32 ChildCoverageRejectCount = 0;
-					const FVector2D ChildTarget(
-						ProjectionRegion.TerminalBounds.GetCenter().X,
-						ProjectionRegion.TerminalBounds.GetCenter().Y);
-					const int32 MaximumCandidateTopCourse =
-						ProjectionRegion.RequiredTopCourse;
-					TArray<TArray<FBox>> ProjectionAllowedBoxesByCourse;
-					ProjectionAllowedBoxesByCourse.SetNum(MaximumCandidateTopCourse);
-					if (RequiredHighProjectionCourseSourceVolumeIds.IsValidIndex(
-						ProjectionLocalIndex))
-					{
-						for (int32 Course = PodiumTopCourse;
-							Course < MaximumCandidateTopCourse; ++Course)
-						{
-							if (!RequiredHighProjectionCourseSourceVolumeIds
-								[ProjectionLocalIndex].IsValidIndex(Course))
-							{
-								continue;
-							}
-							const TArray<int32>& AllowedSourceIds =
-								RequiredHighProjectionCourseSourceVolumeIds
-									[ProjectionLocalIndex][Course];
-							for (const FABTSM73DAG5BV2Volume* Volume : Root.BodyVolumes)
-							{
-								if (Volume != nullptr
-									&& AllowedSourceIds.Contains(Volume->VolumeId))
-								{
-									ProjectionAllowedBoxesByCourse[Course].Add(
-										Volume->LocalBounds.ExpandBy(
-											BlockUnitsCM * 0.5 + GeometryToleranceCM));
-								}
-							}
-							for (const FABTSM73DAG5BV2Volume* Volume : Root.CrownVolumes)
-							{
-								if (Volume != nullptr
-									&& AllowedSourceIds.Contains(Volume->VolumeId))
-								{
-									ProjectionAllowedBoxesByCourse[Course].Add(
-										Volume->LocalBounds.ExpandBy(
-											BlockUnitsCM * 0.5 + GeometryToleranceCM));
-								}
-							}
-						}
-					}
-
 					for (const FJointChildFootprint& FullHeightCandidate
 						: FullHeightChildCandidatesByProjection[ProjectionLocalIndex])
 					{
@@ -11839,22 +12190,20 @@ namespace
 						const int32 MaximumX = FullHeightCandidate.MaximumX;
 						const int32 MinimumY = FullHeightCandidate.MinimumY;
 						const int32 MaximumY = FullHeightCandidate.MaximumY;
-						const int32 SpanX = MaximumX - MinimumX;
-						const int32 SpanY = MaximumY - MinimumY;
 									++ChildCandidateCount;
 									if ((ChildCandidateCount & 0xFF) == 0)
 									{
-										FinalChildSelectionTimer.Checkpoint();
+										CompositePlanningTimer.Checkpoint();
 										if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
 											TEXT("JointSelection"), OutPlan, OutError))
 										{
 											return false;
 										}
 									}
-									const TArray<int32> XStations =
-										MakeUniformStations(MinimumX, MaximumX, 2);
-									const TArray<int32> YStations =
-										MakeUniformStations(MinimumY, MaximumY, 2);
+									const TArray<int32>& XStations =
+										FullHeightCandidate.XStations;
+									const TArray<int32>& YStations =
+										FullHeightCandidate.YStations;
 									if (XStations.Num() != 2 || YStations.Num() != 2)
 									{
 										++ChildLaneConflictRejectCount;
@@ -11917,13 +12266,7 @@ namespace
 											->NoDirectMainCouplingCandidateCount;
 									}
 
-									const double CenterX =
-										(MinimumX + MaximumX) * 0.5 * BlockUnitsCM;
-									const double CenterY =
-										(MinimumY + MaximumY) * 0.5 * BlockUnitsCM;
-									const int32 BaseSource = SelectProjectionSourceVolume(
-										Root, CenterX, CenterY,
-										Root.GroundZCM + BlockUnitsCM * 0.5);
+									const int32 BaseSource = FullHeightCandidate.BaseSource;
 									if (BaseSource == INDEX_NONE
 										|| !Root.GroundSourceVolumeIds.Contains(BaseSource))
 									{
@@ -11931,72 +12274,11 @@ namespace
 										continue;
 									}
 
-									int32 ContinuousTopCourse = 0;
-									int32 FirstNonBodyCourse = INDEX_NONE;
-									for (int32 Course = 0;
-										Course < MaximumCandidateTopCourse; ++Course)
-									{
-										const double Z = Root.GroundZCM
-											+ (Course + 0.5) * BlockUnitsCM;
-										if (SelectCoreProjectionSourceVolume(
-											Root, CenterX, CenterY, Z) == INDEX_NONE)
-										{
-											break;
-										}
-										const EABTSM73BeamAFrameAxis Axis = (Course & 1) == 0
-											? EABTSM73BeamAFrameAxis::X
-											: EABTSM73BeamAFrameAxis::Y;
-										const TArray<int32>& CrossStations =
-											Axis == EABTSM73BeamAFrameAxis::X
-												? YStations : XStations;
-										bool bCourseCovered = true;
-										bool bBodyCourseCovered =
-											SelectProjectionSourceVolume(
-												Root, CenterX, CenterY, Z) != INDEX_NONE;
-										for (const int32 CrossStation : CrossStations)
-										{
-											FPlannedMember Probe;
-											Probe.Axis = Axis;
-											Probe.LocalStart = Axis == EABTSM73BeamAFrameAxis::X
-												? Position(MinimumX * BlockUnitsCM
-													- BlockUnitsCM * 0.5,
-													CrossStation * BlockUnitsCM, Z)
-												: Position(CrossStation * BlockUnitsCM,
-													MinimumY * BlockUnitsCM
-													- BlockUnitsCM * 0.5, Z);
-											Probe.LocalEnd = Axis == EABTSM73BeamAFrameAxis::X
-												? Position(MaximumX * BlockUnitsCM
-													+ BlockUnitsCM * 0.5,
-													CrossStation * BlockUnitsCM, Z)
-												: Position(CrossStation * BlockUnitsCM,
-													MaximumY * BlockUnitsCM
-													+ BlockUnitsCM * 0.5, Z);
-											FVector UncoveredPoint;
-									const TArray<FBox>& CourseAllowedBoxes =
-										Course >= PodiumTopCourse
-										? ProjectionAllowedBoxesByCourse[Course]
-										: CoreAllowedBoxes;
-										if (!SolidCoveredByBoxes(PlannedMemberBounds(Probe),
-											CourseAllowedBoxes, UncoveredPoint))
-											{
-												bCourseCovered = false;
-												break;
-											}
-											FVector BodyUncoveredPoint;
-											bBodyCourseCovered &= SolidCoveredByBoxes(
-												PlannedMemberBounds(Probe), BodyAllowedBoxes,
-												BodyUncoveredPoint);
-										}
-										if (!bCourseCovered)
-										{
-											break;
-										}
-										if (!bBodyCourseCovered && FirstNonBodyCourse == INDEX_NONE)
-										{
-											FirstNonBodyCourse = Course;
-										}
-										ContinuousTopCourse = Course + 1;
-									}
+									// WFC/source/whole-rail coverage was proved before any main
+									// occupied a lane. Joint selection only adds lane, sibling and
+									// shared-reservation constraints; repeating the course sweep here
+									// is both redundant and a major interactive-time cost.
+									const int32 ContinuousTopCourse = FullHeightCandidate.TopCourse;
 									if (ContinuousTopCourse
 										!= RequiredFullHeightCourses[ProjectionLocalIndex])
 									{
@@ -12004,11 +12286,10 @@ namespace
 										continue;
 									}
 									++FullHeightDiagnostic->JointFeasibleCandidateCount;
-									const int32 MinimumSpan = FMath::Min(SpanX, SpanY);
-									const int32 Imbalance = FMath::Abs(SpanX - SpanY);
-									const int32 Area = SpanX * SpanY;
-									const double Distance = FVector2D::DistSquared(
-										FVector2D(CenterX, CenterY), ChildTarget);
+									const int32 MinimumSpan = FullHeightCandidate.MinimumSpan;
+									const int32 Imbalance = FullHeightCandidate.Imbalance;
+									const int32 Area = FullHeightCandidate.Area;
+									const double Distance = FullHeightCandidate.Distance;
 									bool bBetter = ContinuousTopCourse > ChildTopCourse;
 									if (ContinuousTopCourse == ChildTopCourse)
 									{
@@ -12036,8 +12317,7 @@ namespace
 										ChildMinimumY = MinimumY;
 										ChildMaximumY = MaximumY;
 										ChildTopCourse = ContinuousTopCourse;
-										ChildBodyTopCourse = FirstNonBodyCourse == INDEX_NONE
-											? ContinuousTopCourse : FirstNonBodyCourse;
+										ChildBodyTopCourse = FullHeightCandidate.BodyTopCourse;
 										ChildBaseSource = BaseSource;
 										ChildPodiumMainCoreCellId =
 											CandidatePodiumMainCoreCellId;
@@ -12177,7 +12457,7 @@ namespace
 						AddedChildCount, PodiumTopCourse);
 					return false;
 				}
-				FinalChildSelectionTimer.Stop();
+				CompositePlanningTimer.Checkpoint();
 				if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
 					TEXT("JointSelection"), OutPlan, OutError))
 				{
@@ -12357,6 +12637,12 @@ namespace
 						OutPlan.Summary.MaximumCoreRailCount, Endpoint.RailCount);
 					OutPlan.Summary.CoreBearingPatchCountPerInterface +=
 						Endpoint.RailCount * Endpoint.RailCount;
+				}
+				CompositePlanningTimer.Stop();
+				if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+					TEXT("JointSelection"), OutPlan, OutError))
+				{
+					return false;
 				}
 			}
 			if (Stage == EGenerationStage::CoreAndShared)

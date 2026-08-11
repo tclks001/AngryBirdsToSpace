@@ -4019,6 +4019,60 @@ bool FABTSM73BeamC3StagedTipOverE6Seed710000TerminalCoverageTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.TipOverE6OptimizationSeeds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	for (const int32 Seed : {710000, 730000, 750000})
+	{
+		FABTSM73BeamD1StagePreviewResult Result;
+		FString Error;
+		const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+			MakeD1Settings({TEXT("TipOver"), 5, Seed}),
+			EABTSM73BeamC3GenerationStage::CoreAndShared, Result, Error);
+		TestTrue(*FString::Printf(TEXT("TipOver E6 seed %d accepts: %s"),
+			Seed, *Error), bGenerated);
+		if (!bGenerated)
+		{
+			continue;
+		}
+		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+		AddInfo(FString::Printf(
+			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
+			Seed, Plan.Summary.PodiumMainCoreCellCount,
+			Plan.Summary.TowerChildCoreCellCount,
+			Plan.Summary.RequiredTerminalBranchCount,
+			Plan.Summary.BoundTerminalBranchCount,
+			Plan.Summary.TerminalDemandMilliseconds,
+			Plan.Summary.ChildCandidateMilliseconds,
+			Plan.Summary.PodiumMainCandidateMilliseconds,
+			Plan.Summary.JointSelectionMilliseconds,
+			Plan.Summary.MemberEmissionMilliseconds,
+			Plan.Summary.StaticDAGMilliseconds,
+			Plan.Summary.Stage1TotalMilliseconds));
+		TestEqual(*FString::Printf(TEXT("Seed %d binds every terminal branch"), Seed),
+			Plan.Summary.BoundTerminalBranchCount,
+			Plan.Summary.RequiredTerminalBranchCount);
+		TestEqual(*FString::Printf(TEXT("Seed %d emits one child per terminal branch"),
+			Seed), Plan.Summary.TowerChildCoreCellCount,
+			Plan.Summary.RequiredTerminalBranchCount);
+		TestTrue(*FString::Printf(TEXT("Seed %d passes the Stage 1 static DAG"), Seed),
+			Result.Summary.bStageStaticDAGEvaluated
+				&& Result.StaticDAG.Summary.bAccepted);
+		TestTrue(*FString::Printf(TEXT("Seed %d remains inside the Stage 1 budget"), Seed),
+			Plan.Summary.bStage1TimingEvaluated
+				&& Plan.Summary.bStage1WithinTimeBudget
+				&& Plan.Summary.Stage1TotalMilliseconds
+					<= Plan.Summary.Stage1TimeBudgetMilliseconds);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamC3StagedStage1TimingBudgetTest,
 	"ABTS.M73DAG.BeamC3V3.Staged.Stage1TimingBudget",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
