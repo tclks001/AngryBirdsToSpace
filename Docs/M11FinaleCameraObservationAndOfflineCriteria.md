@@ -76,6 +76,14 @@ Schema 5 保持列结构不变，扩展 `shotPhase` 合法值为 `IncomingReveal
 
 录制合同 v10、CSV Schema 6 新增 `DualBodyBridge` 以及上一/下一桥接行星各自的标签、屏幕坐标、像素半径和可见比例。`m3DualBodyBridgePassed` 要求桥接状态实际出现、每个桥接帧两颗行星均可见、跨行星叙事窗口不存在两颗行星同时不可见的帧、桥接全过程鸟不离框，且桥接远景中的鸟半径至少 2 px。该门只证明三主体远景桥和无空窗，不豁免 `m3HandoffPassed` 原有的相机位置、旋转与 FOV 连续性要求。
 
+M4 首轮将录制合同升至 v11、CSV Schema 升至 7。逐帧新增 `endpointAuthority=None|CandidateQualified|PhysicalContact`；`TerminalAcquire` 复用桥接列记录 Assist3 与 UFO 的取得过程。Manifest 新增 Acquire 帧/无叙事目标帧、`m4TerminalFrameCount`、鸟/UFO 丢失帧、终点身份缺失帧、M4 位姿/FOV 跳变帧和 `m4TerminalClosurePassed`。该门要求 Acquire 期间土星/UFO 至少一个持续可见，FinalApproach/Terminal 实际出现，鸟中心全程在画且投影半径至少 1 px、UFO 全程可读，终点身份明确且不存在既定单帧硬切。远景鸟依靠已验收的连续拖尾增强可读性，不恢复镜头阶段鸟体缩放。
+
+候选离线录屏加入可见终端转移后，录制合同升至 v12，CSV Schema 仍为 7。Manifest 新增 `visibleTerminalTransfer`、`terminalTransferStartSeconds`、`terminalTransferEndSeconds`、`m4FinalBirdToUFODistanceCM`、`m4PhysicalContactRadiusCM` 与 `m4PhysicalContactPassed`。候选的 `candidateQualifiedIntercept` 是原始轨迹资格历史，允许与转移后的 `physicalTargetHit` 同时为真；逐帧单值 `endpointAuthority` 则以最终终点为准取 `PhysicalContact`。`m4TerminalClosurePassed` 额外要求最终 PlaybackPlan Authority 点到 UFO 几何接触中心的距离命中 800 cm 接触半径。该距离必须从播放计划 Authority 点计算，不能用带动画摆动的 BirdVisual Bounds 中心代替。Released Trajectory Hash 必须保持不变，Playback Plan Hash 应因显式 `VisibleTerminalTransfer` 改变，候选 Authority 仍为 `UNCERTIFIED`。
+
+中央 UFO 终端 dolly 将录制合同升至 v13，CSV Schema 仍为 7。相机从 PlaybackPlan 的 Assist3 Exit 和最终播放时刻补齐 FinalApproach 的真实 `stageProgress/stageDurationSeconds`，而不是沿用事件解析器原先恒为 0 的占位进度。纯数学门要求 UFO NDC 全程为 `(0,0)`、鸟 X 为 0、鸟 Y 按进度线性从 `-0.42` 到 `-0.22`，并验证 0→0.5 与 0.5→1 的屏幕位移相等；相机到鸟距离则独立从 40000 cm 平滑降至 5000 cm。像素录屏仍须复核动画 Bounds 摆动、旋转连续性和接触帧可读性，不能只以解析 NDC 绿灯代替画面验收。
+
+v13 fresh Rank11 Stylized1 `M4CenteredDollyR9-20260811-160100` 的 TerminalTrack 共 123 帧：UFO 几何中心最大像素误差 `0.000011 px`，鸟视觉 Bounds 相对中央竖线最大偏差 `1.98 px`；相机到鸟距离由 `40014.64 cm` 收至 `5009.14 cm`，M4 位置/旋转/FOV 跳变为 `0/0/0`，最终 Authority 距离 `799.9999999999568 cm`。这组数据作为解析门映射到实际 SceneCapture 的首个基线；鸟 Y 的亚像素级非恒速变化来自动画 Bounds 中心，不改变 actor-origin 的线性 NDC 合同。
+
 M2 A/B 使用：
 
 ```powershell

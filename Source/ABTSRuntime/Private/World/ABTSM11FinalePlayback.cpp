@@ -353,6 +353,199 @@ namespace
 		return false;
 	}
 
+	bool BuildCandidateContactTransfer(
+		const FABTSM11FinaleLayoutPreset& Preset,
+		const FABTSM11TrajectoryResult& Released,
+		const FABTSM11TerminalTransferContract& Contract,
+		TArray<FABTSM11PlaybackPoint>& InOutPoints,
+		double& OutStartTime,
+		double& OutEndTime,
+		FString& OutFailure)
+	{
+		if (Released.Points.Num() < 2 || !Contract.IsValid())
+		{
+			OutFailure = TEXT("CandidateContactTransferMissingTrajectory");
+			return false;
+		}
+
+		const FABTSM11TrajectoryPoint& Source = Released.Points.Last();
+		const FVector3d SourceAcceleration = EstimateAcceleration(
+			Released.Points,
+			Released.Points.Num() - 1);
+		const FABTSM11TargetSpec& Target = Preset.CanonicalScenario.Target;
+		const FVector3d ContactCenter = Target.GetGeometricContactCenterCM();
+		const double ContactRadius = Target.GetGeometricContactRadiusCM();
+		const FVector3d ToContactCenter = ContactCenter - Source.PositionCM;
+		const double SourceDistance = ToContactCenter.Length();
+		if (!FMath::IsFinite(SourceDistance)
+			|| !FMath::IsFinite(ContactRadius)
+			|| ContactRadius <= 0.0
+			|| SourceDistance <= ContactRadius + 1.0e-3)
+		{
+			OutFailure = TEXT("CandidateContactTransferInvalidGeometry");
+			return false;
+		}
+
+		const FVector3d TravelDirection = ToContactCenter / SourceDistance;
+		const FVector3d ContactPosition =
+			ContactCenter - TravelDirection * ContactRadius;
+		const double SourceSpeed = Source.VelocityCMPerSec.Length();
+		const double InwardSpeed = FVector3d::DotProduct(
+			Source.VelocityCMPerSec,
+			TravelDirection);
+		if (!FMath::IsFinite(SourceSpeed)
+			|| !FMath::IsFinite(InwardSpeed)
+			|| SourceSpeed <= 1.0
+			|| InwardSpeed <= 1.0)
+		{
+			OutFailure = TEXT("CandidateContactTransferNotInbound");
+			return false;
+		}
+		const double ContactSpeed = FMath::Clamp(
+			InwardSpeed,
+			SourceSpeed * 0.25,
+			SourceSpeed);
+		const FVector3d ContactVelocity = TravelDirection * ContactSpeed;
+		constexpr double CandidateMinimumDurationSeconds = 0.5;
+		constexpr double CandidateMaximumDurationSeconds = 8.0;
+		constexpr double CandidateMaximumAccelerationCMPerSec2 = 60000.0;
+		constexpr double CandidateMaximumJerkCMPerSec3 = 300000.0;
+		const double RemainingDistance = SourceDistance - ContactRadius;
+		const double BallisticDuration = RemainingDistance / SourceSpeed;
+		const double MinimumDuration = FMath::Clamp(
+			BallisticDuration,
+			CandidateMinimumDurationSeconds,
+			CandidateMaximumDurationSeconds);
+		const double MaximumDuration = FMath::Clamp(
+			BallisticDuration * 3.0,
+			MinimumDuration,
+			CandidateMaximumDurationSeconds);
+		const double DurationStep = FMath::Max(
+			Contract.SampleStepSeconds,
+			1.0 / 60.0);
+
+		double BestScore = TNumericLimits<double>::Max();
+		double BestDuration = 0.0;
+		double BestAcceleration = TNumericLimits<double>::Max();
+		double BestJerk = TNumericLimits<double>::Max();
+		double BestClearance = -TNumericLimits<double>::Max();
+		for (double RequestedDuration = MinimumDuration;
+			RequestedDuration <= MaximumDuration + 1.0e-9;
+			RequestedDuration += DurationStep)
+		{
+			const double Duration = RequestedDuration;
+			FQuinticCurve Curve;
+			Curve.Build(
+				Source.PositionCM,
+				Source.VelocityCMPerSec,
+				SourceAcceleration,
+				ContactPosition,
+				ContactVelocity,
+				FVector3d::ZeroVector,
+				Duration);
+
+			double MaximumAcceleration = 0.0;
+			double MaximumJerk = 0.0;
+			double MinimumClearance = TNumericLimits<double>::Max();
+			double PreviousTargetDistance = SourceDistance;
+			bool bMonotonicContactApproach = true;
+			const int32 SampleCount = FMath::Max(
+				2,
+				FMath::CeilToInt(Duration / Contract.SampleStepSeconds));
+			for (int32 SampleIndex = 1;
+				SampleIndex <= SampleCount;
+				++SampleIndex)
+			{
+				const double T = Duration
+					* static_cast<double>(SampleIndex)
+					/ static_cast<double>(SampleCount);
+				const FVector3d Position = Curve.Position(T);
+				const double TargetDistance =
+					(Position - ContactCenter).Length();
+				MaximumAcceleration = FMath::Max(
+					MaximumAcceleration,
+					Curve.Acceleration(T).Length());
+				MaximumJerk = FMath::Max(
+					MaximumJerk,
+					Curve.Jerk(T).Length());
+				MinimumClearance = FMath::Min(
+					MinimumClearance,
+					MinimumBodyClearanceCM(Preset, Position));
+				bMonotonicContactApproach = bMonotonicContactApproach
+					&& FMath::IsFinite(TargetDistance)
+					&& TargetDistance <= PreviousTargetDistance + 1.0e-3
+					&& (SampleIndex == SampleCount
+						? FMath::IsNearlyEqual(
+							TargetDistance,
+							ContactRadius,
+							1.0e-3)
+						: TargetDistance > ContactRadius);
+				PreviousTargetDistance = TargetDistance;
+			}
+
+			const bool bValid = bMonotonicContactApproach
+				&& MaximumAcceleration
+					<= CandidateMaximumAccelerationCMPerSec2
+				&& MaximumJerk <= CandidateMaximumJerkCMPerSec3
+				&& MinimumClearance > Contract.BodyClearanceCM;
+			const double ClearanceScore =
+				MinimumClearance > Contract.BodyClearanceCM
+				? 0.0
+				: 1.0 + (Contract.BodyClearanceCM - MinimumClearance)
+					/ FMath::Max(1.0, Contract.BodyClearanceCM);
+			const double Score = FMath::Max3(
+				MaximumAcceleration
+					/ CandidateMaximumAccelerationCMPerSec2,
+				MaximumJerk / CandidateMaximumJerkCMPerSec3,
+				ClearanceScore) + (bMonotonicContactApproach ? 0.0 : 1000.0);
+			if (Score < BestScore)
+			{
+				BestScore = Score;
+				BestDuration = Duration;
+				BestAcceleration = MaximumAcceleration;
+				BestJerk = MaximumJerk;
+				BestClearance = MinimumClearance;
+			}
+			if (!bValid)
+			{
+				continue;
+			}
+
+			OutStartTime = Source.TimeSeconds;
+			OutEndTime = Source.TimeSeconds + Duration;
+			InOutPoints.Reserve(InOutPoints.Num() + SampleCount);
+			for (int32 SampleIndex = 1;
+				SampleIndex <= SampleCount;
+				++SampleIndex)
+			{
+				const double T = Duration
+					* static_cast<double>(SampleIndex)
+					/ static_cast<double>(SampleCount);
+				FABTSM11PlaybackPoint& Point =
+					InOutPoints.AddDefaulted_GetRef();
+				Point.TimeSeconds = Source.TimeSeconds + T;
+				Point.PositionCM = Curve.Position(T);
+				Point.VelocityCMPerSec = Curve.Velocity(T);
+				Point.SegmentKind =
+					EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+			}
+			OutFailure.Reset();
+			return true;
+		}
+
+		OutFailure = FString::Printf(
+			TEXT("NoValidCandidateContactTransfer:Distance=%.3f SourceSpeed=%.3f InwardSpeed=%.3f BestDuration=%.3f MaxAccel=%.3f MaxJerk=%.3f MinClearance=%.3f Score=%.6f"),
+			SourceDistance,
+			SourceSpeed,
+			InwardSpeed,
+			BestDuration,
+			BestAcceleration,
+			BestJerk,
+			BestClearance,
+			BestScore);
+		return false;
+	}
+
 	bool SameInitialState(
 		const FABTSM11TrajectoryResult& A,
 		const FABTSM11TrajectoryResult& B)
@@ -559,6 +752,52 @@ bool FABTSM11PlaybackPlan::BuildCandidateQualified(
 		Points);
 	DurationSeconds = Points.Last().TimeSeconds;
 	PlanHash = ComputePlanHash(*this);
+	return true;
+}
+
+bool FABTSM11PlaybackPlan::BuildCandidatePresentationContact(
+	const FABTSM11FinaleLayoutPreset& Preset,
+	const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
+	const FABTSM11PrefixClassification& Classification,
+	const FABTSM11TerminalTransferContract& TransferContract)
+{
+	if (!BuildCandidateQualified(
+		Preset,
+		ReleasedQualifiedResult,
+		Classification))
+	{
+		return false;
+	}
+	if (!bCandidateQualifiedIntercept || !TransferContract.IsValid())
+	{
+		Failure = TEXT("CandidatePresentationContactRequiresQualifiedF4");
+		Points.Reset();
+		return false;
+	}
+
+	FString TransferFailure;
+	if (!BuildCandidateContactTransfer(
+		Preset,
+		ReleasedQualifiedResult,
+		TransferContract,
+		Points,
+		TransferStartTimeSeconds,
+		TransferEndTimeSeconds,
+		TransferFailure))
+	{
+		Failure = TransferFailure.IsEmpty()
+			? TEXT("NoValidCandidatePresentationContact")
+			: MoveTemp(TransferFailure);
+		Points.Reset();
+		return false;
+	}
+
+	TransferContractVersion = TransferContract.ContractVersion;
+	bPhysicalTargetHit = true;
+	bUsesVisibleTerminalTransfer = true;
+	DurationSeconds = Points.Last().TimeSeconds;
+	PlanHash = ComputePlanHash(*this);
+	Failure.Reset();
 	return true;
 }
 

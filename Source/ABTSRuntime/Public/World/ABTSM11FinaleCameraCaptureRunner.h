@@ -17,8 +17,8 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// Adds dual-body bridge telemetry and the wide three-subject composition.
-	static constexpr int32 ContractVersion = 10;
+	// Adds the centred-UFO, constant-screen-speed M4 terminal dolly.
+	static constexpr int32 ContractVersion = 13;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -60,6 +60,7 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	FString CurrentTarget;
 	FString FramingTarget;
 	FString StageReason;
+	FString EndpointAuthority;
 	double StageProgress = 0.0;
 	double StageDurationSeconds = 0.0;
 	FString ShotPhase;

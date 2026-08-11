@@ -692,6 +692,156 @@ namespace
 
 }
 
+bool ABTSM11FinaleFlightCameraMath::BuildM4TerminalClosureFrame(
+	const FVector& BirdPosition,
+	const double BirdRadiusCM,
+	const FVector& TargetCenter,
+	const double TargetRadiusCM,
+	const FVector& PreferredViewUp,
+	const double HorizontalFovDegrees,
+	const double FitMargin,
+	const double ClosureProgress,
+	const double BirdStartNdcY,
+	const double BirdContactNdcY,
+	const double StartCameraToBirdDistanceCM,
+	const double ContactCameraToBirdDistanceCM,
+	FTransform& OutTransform)
+{
+	OutTransform = FTransform::Identity;
+	if (!IsFiniteFlightCameraVector(BirdPosition)
+		|| !IsFiniteFlightCameraVector(TargetCenter)
+		|| !IsFiniteFlightCameraVector(PreferredViewUp)
+		|| PreferredViewUp.IsNearlyZero()
+		|| !FMath::IsFinite(BirdRadiusCM)
+		|| BirdRadiusCM <= 0.0
+		|| !FMath::IsFinite(TargetRadiusCM)
+		|| TargetRadiusCM <= 0.0
+		|| !FMath::IsFinite(HorizontalFovDegrees)
+		|| HorizontalFovDegrees <= 0.0
+		|| !FMath::IsFinite(FitMargin)
+		|| FitMargin <= 1.0
+		|| !FMath::IsFinite(ClosureProgress)
+		|| !FMath::IsFinite(BirdStartNdcY)
+		|| !FMath::IsFinite(BirdContactNdcY)
+		|| BirdStartNdcY >= BirdContactNdcY
+		|| BirdContactNdcY >= 0.0
+		|| !FMath::IsFinite(StartCameraToBirdDistanceCM)
+		|| !FMath::IsFinite(ContactCameraToBirdDistanceCM)
+		|| StartCameraToBirdDistanceCM
+			<= ContactCameraToBirdDistanceCM
+		|| ContactCameraToBirdDistanceCM <= BirdRadiusCM)
+	{
+		return false;
+	}
+
+	const FVector ApproachAxis =
+		(TargetCenter - BirdPosition).GetSafeNormal();
+	const double SubjectDistance = FVector::Distance(
+		BirdPosition,
+		TargetCenter);
+	const FVector ViewPlaneReference = ResolveProjectedUp(
+		PreferredViewUp,
+		FVector::UpVector,
+		ApproachAxis);
+	const double TanHalfHorizontal = FMath::Tan(
+		FMath::DegreesToRadians(HorizontalFovDegrees * 0.5));
+	constexpr double AspectRatio = 16.0 / 9.0;
+	const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+	if (ApproachAxis.IsNearlyZero()
+		|| ViewPlaneReference.IsNearlyZero()
+		|| !FMath::IsFinite(SubjectDistance)
+		|| SubjectDistance <= UE_DOUBLE_SMALL_NUMBER
+		|| TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
+		|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const double Progress = FMath::Clamp(ClosureProgress, 0.0, 1.0);
+	// The NDC anchor deliberately remains linear. Equal playback-time steps
+	// therefore move the bird by equal screen-space steps toward the UFO.
+	const double DesiredBirdNdcY = FMath::Lerp(
+		BirdStartNdcY,
+		BirdContactNdcY,
+		Progress);
+	const double DesiredCameraToBirdDistance = FMath::Lerp(
+		StartCameraToBirdDistanceCM,
+		ContactCameraToBirdDistanceCM,
+		SmootherStep01(Progress));
+	const double BirdTangentY = DesiredBirdNdcY * TanHalfVertical;
+	const double BirdDepth = DesiredCameraToBirdDistance
+		/ FMath::Sqrt(1.0 + BirdTangentY * BirdTangentY);
+	const double BirdUpOffset = BirdTangentY * BirdDepth;
+	const double UpAxisFraction = -BirdUpOffset / SubjectDistance;
+	if (!FMath::IsFinite(BirdDepth)
+		|| BirdDepth <= BirdRadiusCM
+		|| !FMath::IsFinite(UpAxisFraction)
+		|| UpAxisFraction <= 0.0
+		|| UpAxisFraction >= 1.0 - 1.0e-6)
+	{
+		return false;
+	}
+
+	const double ForwardAxisFraction = FMath::Sqrt(
+		FMath::Max(0.0,
+			1.0 - UpAxisFraction * UpAxisFraction));
+	const FVector ViewForward = (
+		ApproachAxis * ForwardAxisFraction
+		- ViewPlaneReference * UpAxisFraction).GetSafeNormal();
+	const FVector ViewUp = (
+		ApproachAxis * UpAxisFraction
+		+ ViewPlaneReference * ForwardAxisFraction).GetSafeNormal();
+	const FQuat ViewRotation = FRotationMatrix::MakeFromXZ(
+		ViewForward,
+		ViewUp).ToQuat().GetNormalized();
+	const double TargetDepth = BirdDepth
+		+ SubjectDistance * ForwardAxisFraction;
+	const FVector CameraLocation = TargetCenter - ViewForward * TargetDepth;
+	if (ViewForward.IsNearlyZero()
+		|| ViewUp.IsNearlyZero()
+		|| !ViewRotation.IsNormalized()
+		|| !IsFiniteFlightCameraVector(CameraLocation))
+	{
+		return false;
+	}
+
+	const double SafeNdcLimit = 1.0 / FitMargin;
+	const auto SphereFits = [&] (
+		const FVector& Center,
+		const double Radius)
+	{
+		const FVector Relative = Center - CameraLocation;
+		const double Depth = FVector::DotProduct(Relative, ViewForward);
+		const double NearDepth = Depth - Radius;
+		if (NearDepth <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+		const double CenterNdcX = FVector::DotProduct(
+			Relative,
+			ViewRotation.GetRightVector()) / (Depth * TanHalfHorizontal);
+		const double CenterNdcY = FVector::DotProduct(
+			Relative,
+			ViewUp) / (Depth * TanHalfVertical);
+		const double RadiusNdcX = Radius
+			/ (NearDepth * TanHalfHorizontal);
+		const double RadiusNdcY = Radius
+			/ (NearDepth * TanHalfVertical);
+		return FMath::IsFinite(CenterNdcX)
+			&& FMath::IsFinite(CenterNdcY)
+			&& FMath::Abs(CenterNdcX) + RadiusNdcX <= SafeNdcLimit
+			&& FMath::Abs(CenterNdcY) + RadiusNdcY <= SafeNdcLimit;
+	};
+	if (!SphereFits(BirdPosition, BirdRadiusCM)
+		|| !SphereFits(TargetCenter, TargetRadiusCM))
+	{
+		return false;
+	}
+
+	OutTransform = FTransform(ViewRotation, CameraLocation);
+	return true;
+}
+
 bool FABTSM11FinaleFlightCameraFrame::IsUsable() const
 {
 	return IsFiniteFlightCameraVector(TrajectoryForward)
@@ -756,6 +906,21 @@ bool FABTSM11FinaleCameraM2Settings::IsUsable() const
 		&& DualBodyBridgeFitMargin > 1.0
 		&& FMath::IsFinite(DualBodyBridgeBirdNdcY)
 		&& FMath::Abs(DualBodyBridgeBirdNdcY) <= 0.5
+		&& FMath::IsFinite(TerminalFovDegrees)
+		&& TerminalFovDegrees >= 35.0
+		&& TerminalFovDegrees <= 85.0
+		&& FMath::IsFinite(TerminalFitMargin)
+		&& TerminalFitMargin > 1.0
+		&& TerminalFitMargin <= 1.5
+		&& FMath::IsFinite(TerminalBirdStartNdcY)
+		&& FMath::IsFinite(TerminalBirdContactNdcY)
+		&& TerminalBirdStartNdcY < TerminalBirdContactNdcY
+		&& TerminalBirdContactNdcY < 0.0
+		&& FMath::Abs(TerminalBirdStartNdcY) <= 0.8
+		&& FMath::IsFinite(TerminalStartBirdDistanceCM)
+		&& FMath::IsFinite(TerminalContactBirdDistanceCM)
+		&& TerminalStartBirdDistanceCM > TerminalContactBirdDistanceCM
+		&& TerminalContactBirdDistanceCM > 0.0
 		&& FMath::IsFinite(DualBodyBridgeSeconds)
 		&& DualBodyBridgeSeconds > 0.0
 		&& FMath::IsFinite(IncomingMatchEaseOutPower)
@@ -1009,7 +1174,8 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
 	OutDiagnostics = FABTSM11FinaleCameraM2Diagnostics();
 	if (!BaselineFrame.IsUsable()
 		|| !DirectorSample.IsUsable()
-		|| !DirectorSample.Selection.IsM3AssistWindow()
+		|| (!DirectorSample.Selection.IsM3AssistWindow()
+			&& !DirectorSample.Selection.IsM4TerminalWindow())
 		|| !IsFiniteFlightCameraVector(BirdPosition)
 		|| !Settings.IsUsable())
 	{
@@ -1017,7 +1183,9 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
 	}
 
 	const double Progress = DirectorSample.Selection.StageProgress;
-	if (DirectorSample.Selection.IsM3InterBodyTransition())
+	if (DirectorSample.Selection.IsM3InterBodyTransition()
+		|| (DirectorSample.Selection.IsM4TerminalWindow()
+			&& !DirectorSample.Selection.IsM4TerminalTransition()))
 	{
 		// Every inter-body phase is one deterministic composition chain. Blending
 		// any of it back toward the chase camera would create a second authority at
@@ -1149,6 +1317,148 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
 	OutDirectedTransform = FTransform(
 		DirectedRotation,
 		DirectedLocation);
+	if (DirectorSample.Selection.IsM4TerminalWindow())
+	{
+		const FTransform LucyTransform = OutDirectedTransform;
+		if (DirectorSample.Selection.IsM4TerminalTransition())
+		{
+			const double TerminalProgress = FMath::Clamp(
+				DirectorSample.Selection.ShotPhaseProgress,
+				0.0,
+				1.0);
+			const double AuthorityFovDegrees =
+				OutDiagnostics.DirectedFovDegrees;
+			const FVector BridgeRight = (
+				DirectorSample.TerminalTargetCenter
+					- DirectorSample.TargetCenter).GetSafeNormal();
+			const FVector BridgeUp = (
+				DirectorSample.TerminalScreenUp
+				- BridgeRight * FVector::DotProduct(
+					DirectorSample.TerminalScreenUp,
+					BridgeRight)).GetSafeNormal();
+			const FQuat BridgeRotation = FRotationMatrix::MakeFromYZ(
+				BridgeRight,
+				BridgeUp).ToQuat().GetNormalized();
+			if (BridgeRight.IsNearlyZero()
+				|| BridgeUp.IsNearlyZero()
+				|| !BridgeRotation.IsNormalized())
+			{
+				return false;
+			}
+			if (TerminalProgress <= 0.5)
+			{
+				const double Alpha = SmootherStep01(
+					TerminalProgress / 0.5);
+				OutDiagnostics.DirectedFovDegrees = FMath::Lerp(
+					AuthorityFovDegrees,
+					Settings.DualBodyBridgeFovDegrees,
+					Alpha);
+				const FQuat AcquireRotation = FQuat::Slerp(
+					LucyTransform.GetRotation(),
+					BridgeRotation,
+					Alpha).GetNormalized();
+				FTransform ThreeSubjectTransform;
+				if (!BuildM3FittedSubjectFrame(
+					AcquireRotation,
+					OutDiagnostics.DirectedFovDegrees,
+					Settings.DualBodyBridgeFitMargin,
+					BirdPosition,
+					DirectorSample.BirdRadiusCM,
+					DirectorSample.TerminalTargetCenter,
+					DirectorSample.TerminalTargetRadiusCM,
+					&DirectorSample.TargetCenter,
+					DirectorSample.TargetRadiusCM,
+					ThreeSubjectTransform))
+				{
+					return false;
+				}
+				OutDirectedTransform = FTransform(
+					AcquireRotation,
+					FMath::Lerp(
+						LucyTransform.GetLocation(),
+						ThreeSubjectTransform.GetLocation(),
+						Alpha));
+			}
+			else
+			{
+				const double Alpha = SmootherStep01(
+					(TerminalProgress - 0.5) / 0.5);
+				OutDiagnostics.DirectedFovDegrees = FMath::Lerp(
+					Settings.DualBodyBridgeFovDegrees,
+					Settings.TerminalFovDegrees,
+					Alpha);
+				FTransform TerminalClosureTransform;
+				if (!BuildM4TerminalClosureFrame(
+					BirdPosition,
+					DirectorSample.BirdRadiusCM,
+					DirectorSample.TerminalTargetCenter,
+					DirectorSample.TerminalTargetRadiusCM,
+					DirectorSample.TerminalScreenUp,
+					Settings.TerminalFovDegrees,
+					Settings.TerminalFitMargin,
+					0.0,
+					Settings.TerminalBirdStartNdcY,
+					Settings.TerminalBirdContactNdcY,
+					Settings.TerminalStartBirdDistanceCM,
+					Settings.TerminalContactBirdDistanceCM,
+					TerminalClosureTransform))
+				{
+					return false;
+				}
+				const FQuat AcquireRotation = FQuat::Slerp(
+					BridgeRotation,
+					TerminalClosureTransform.GetRotation(),
+					Alpha).GetNormalized();
+				FTransform ThreeSubjectTransform;
+				if (!BuildM3FittedSubjectFrame(
+					AcquireRotation,
+					OutDiagnostics.DirectedFovDegrees,
+					Settings.DualBodyBridgeFitMargin,
+					BirdPosition,
+					DirectorSample.BirdRadiusCM,
+					DirectorSample.TerminalTargetCenter,
+					DirectorSample.TerminalTargetRadiusCM,
+					&DirectorSample.TargetCenter,
+					DirectorSample.TargetRadiusCM,
+					ThreeSubjectTransform))
+				{
+					return false;
+				}
+				OutDirectedTransform = FTransform(
+					AcquireRotation,
+					FMath::Lerp(
+						ThreeSubjectTransform.GetLocation(),
+						TerminalClosureTransform.GetLocation(),
+						Alpha));
+			}
+		}
+		else
+		{
+			OutDiagnostics.DirectedFovDegrees = Settings.TerminalFovDegrees;
+			if (!BuildM4TerminalClosureFrame(
+				BirdPosition,
+				DirectorSample.BirdRadiusCM,
+				DirectorSample.TerminalTargetCenter,
+				DirectorSample.TerminalTargetRadiusCM,
+				DirectorSample.TerminalScreenUp,
+				Settings.TerminalFovDegrees,
+				Settings.TerminalFitMargin,
+				DirectorSample.Selection.StageProgress,
+				Settings.TerminalBirdStartNdcY,
+				Settings.TerminalBirdContactNdcY,
+				Settings.TerminalStartBirdDistanceCM,
+				Settings.TerminalContactBirdDistanceCM,
+				OutDirectedTransform))
+			{
+				return false;
+			}
+		}
+		OutDiagnostics.DirectorBlendAlpha = 1.0;
+		return IsFiniteFlightCameraVector(
+				OutDirectedTransform.GetLocation())
+			&& OutDirectedTransform.GetRotation().IsNormalized()
+			&& OutDiagnostics.IsUsable();
+	}
 	if (DirectorSample.Selection.IsM3InterBodyTransition())
 	{
 		const FTransform LucyTransform = OutDirectedTransform;
@@ -1516,7 +1826,8 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	double DesiredFovDegrees = BaselineFovDegrees;
 	const bool bM3Window = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
-		&& DirectorSample->Selection.IsM3AssistWindow();
+		&& (DirectorSample->Selection.IsM3AssistWindow()
+			|| DirectorSample->Selection.IsM4TerminalWindow());
 	const bool bM2Window = bM2DirectorFrozenEnabled
 		&& DirectorSample != nullptr
 		&& DirectorSample->Selection.IsM2Assist1Window();
@@ -1561,6 +1872,14 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 			M3DualBodyBridgeFitMargin;
 		Settings.DualBodyBridgeBirdNdcY =
 			M3DualBodyBridgeBirdNdcY;
+	Settings.TerminalFovDegrees = M4TerminalFovDegrees;
+	Settings.TerminalFitMargin = M4TerminalFitMargin;
+	Settings.TerminalBirdStartNdcY = M4TerminalBirdStartNdcY;
+	Settings.TerminalBirdContactNdcY = M4TerminalBirdContactNdcY;
+	Settings.TerminalStartBirdDistanceCM =
+		M4TerminalStartBirdDistanceCM;
+	Settings.TerminalContactBirdDistanceCM =
+		M4TerminalContactBirdDistanceCM;
 		Settings.DualBodyBridgeSeconds =
 			M3DualBodyBridgeHoldSeconds;
 		Settings.IncomingMatchEaseOutPower =
@@ -1645,7 +1964,8 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	{
 		OutRotation = DesiredTransform.GetRotation();
 		if (DirectorSample != nullptr
-			&& DirectorSample->Selection.IsM3InterBodyTransition())
+			&& (DirectorSample->Selection.IsM3InterBodyTransition()
+				|| DirectorSample->Selection.IsM4TerminalWindow()))
 		{
 			return true;
 		}
@@ -1706,6 +2026,9 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	const bool bM3InterBodyComposition = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
 		&& DirectorSample->Selection.IsM3InterBodyTransition();
+	const bool bM4TerminalComposition = bM3DirectorFrozenEnabled
+		&& DirectorSample != nullptr
+		&& DirectorSample->Selection.IsM4TerminalWindow();
 	const bool bM3DirectedEncounterComposition = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
 		&& DirectorSample->Selection.ShotPhase
@@ -1729,6 +2052,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		&& !bM3LaunchAnchoredIncomingComposition
 		&& LastM2BlendAlpha >= 1.0 - UE_DOUBLE_SMALL_NUMBER;
 	if (bM3InterBodyComposition
+		|| bM4TerminalComposition
 		|| bM3DirectedEncounterComposition
 		|| bM3FullyDirectedIncomingComposition)
 	{

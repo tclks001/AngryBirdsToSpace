@@ -160,6 +160,68 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		Periapsis.StageProgress,
 		0.5,
 		1.0e-9);
+	const FABTSM11FinaleCameraShotSettings M4ShotSettings;
+	const FABTSM11FinaleCameraStageSelection BeforeTerminalAcquire =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			32.40,
+			&EventResult,
+			true,
+			&M4ShotSettings);
+	TestEqual(
+		TEXT("Assist3 foreground transit retains Authority before clear"),
+		static_cast<uint8>(BeforeTerminalAcquire.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::Authority));
+	const FABTSM11FinaleCameraStageSelection DuringTerminalAcquire =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			33.0,
+			&EventResult,
+			true,
+			&M4ShotSettings);
+	TestTrue(
+		TEXT("Assist3 departure enters the M4 terminal acquire chain"),
+		DuringTerminalAcquire.IsM4TerminalTransition());
+	TestEqual(
+		TEXT("M4 acquire uses normalized Assist3 clearance-to-exit progress"),
+		DuringTerminalAcquire.ShotPhaseProgress,
+		(0.5 - M4ShotSettings.ForegroundTransitClearProgress)
+			/ (1.0 - M4ShotSettings.ForegroundTransitClearProgress),
+		1.0e-9);
+	FABTSM11FinaleCameraStageSelection M4FinalApproach =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			34.001,
+			&EventResult,
+			true,
+			&M4ShotSettings);
+	TestTrue(
+		TEXT("Assist3 exit hands directly to the UFO terminal window"),
+		M4FinalApproach.IsM4TerminalWindow());
+	TestEqual(
+		TEXT("FinalApproach retains the terminal two-subject solver"),
+		static_cast<uint8>(M4FinalApproach.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::TerminalTrack));
+	TestTrue(
+		TEXT("Playback plan supplies the M4 terminal closure timeline"),
+		ABTSM11FinaleCameraDirector::ApplyM4TerminalTimeline(
+			34.0,
+			34.0,
+			38.0,
+			M4FinalApproach));
+	TestEqual(
+		TEXT("M4 terminal closure starts at zero progress"),
+		M4FinalApproach.StageProgress,
+		0.0,
+		1.0e-9);
+	TestEqual(
+		TEXT("Candidate-qualified terminal authority has an explicit label"),
+		FString(ABTSM11FinaleCameraDirector::EndpointAuthorityLabel(
+			EABTSM11FinaleCameraEndpointAuthority::CandidateQualified)),
+		FString(TEXT("CandidateQualified")));
 	FVector EncounterScreenRight;
 	FVector EncounterScreenUp;
 	TestTrue(
@@ -189,6 +251,219 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 	FTransform DirectedTransform;
 	FABTSM11FinaleCameraM2Settings M2Settings;
 	FABTSM11FinaleCameraM2Diagnostics Diagnostics;
+	const FVector M4BirdPosition(1000.0, 0.0, 0.0);
+	const FVector M4PlanetCenter(5000.0, 0.0, 0.0);
+	const FVector M4TargetCenter(11000.0, 0.0, 0.0);
+	FABTSM11FinaleCameraDirectorSample M4AcquireSample;
+	M4AcquireSample.Selection = DuringTerminalAcquire;
+	M4AcquireSample.Selection.StageProgress =
+		M4ShotSettings.ForegroundTransitClearProgress;
+	M4AcquireSample.Selection.ShotProgress = 0.0;
+	M4AcquireSample.Selection.ShotPhaseProgress = 0.0;
+	M4AcquireSample.TargetCenter = M4PlanetCenter;
+	M4AcquireSample.TargetRadiusCM = 1000.0;
+	M4AcquireSample.BirdRadiusCM = 60.0;
+	M4AcquireSample.EncounterScreenRight = FVector::ForwardVector;
+	M4AcquireSample.EncounterScreenUp = FVector::UpVector;
+	M4AcquireSample.TerminalScreenRight = FVector::ForwardVector;
+	M4AcquireSample.TerminalScreenUp = FVector::UpVector;
+	M4AcquireSample.TerminalTargetCenter = M4TargetCenter;
+	M4AcquireSample.TerminalTargetRadiusCM = 800.0;
+	FABTSM11FinaleCameraDirectorSample M4AuthoritySample = M4AcquireSample;
+	M4AuthoritySample.Selection.ShotPhase =
+		EABTSM11FinaleCameraShotPhase::Authority;
+	M4AuthoritySample.Selection.ShotReason = TEXT("AuthorityStage");
+	M4AuthoritySample.Selection.bTerminalTransition = false;
+	FTransform M4AuthorityTransform;
+	FABTSM11FinaleCameraM2Diagnostics M4AuthorityDiagnostics;
+	FTransform M4AcquireStartTransform;
+	FABTSM11FinaleCameraM2Diagnostics M4AcquireStartDiagnostics;
+	TestTrue(
+		TEXT("M4 clearance Authority frame builds"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			M4BirdPosition,
+			M4AuthoritySample,
+			M2Settings,
+			M4AuthorityTransform,
+			M4AuthorityDiagnostics));
+	TestTrue(
+		TEXT("M4 terminal acquire start frame builds"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			M4BirdPosition,
+			M4AcquireSample,
+			M2Settings,
+			M4AcquireStartTransform,
+			M4AcquireStartDiagnostics));
+	TestTrue(
+		TEXT("Terminal acquire begins at the exact Lucy transform"),
+		M4AuthorityTransform.Equals(M4AcquireStartTransform, 1.0e-5));
+	TestEqual(
+		TEXT("Terminal acquire begins at the exact Lucy FOV"),
+		M4AcquireStartDiagnostics.DirectedFovDegrees,
+		M4AuthorityDiagnostics.DirectedFovDegrees,
+		1.0e-9);
+
+	M4AcquireSample.Selection.StageProgress = 1.0;
+	M4AcquireSample.Selection.ShotProgress = 1.0;
+	M4AcquireSample.Selection.ShotPhaseProgress = 1.0;
+	FABTSM11FinaleCameraDirectorSample M4TrackSample = M4AcquireSample;
+	M4TrackSample.Selection = M4FinalApproach;
+	M4TrackSample.TargetCenter = M4TargetCenter;
+	M4TrackSample.TargetRadiusCM = 800.0;
+	FTransform M4AcquireEndTransform;
+	FABTSM11FinaleCameraM2Diagnostics M4AcquireEndDiagnostics;
+	FTransform M4TrackTransform;
+	FABTSM11FinaleCameraM2Diagnostics M4TrackDiagnostics;
+	TestTrue(
+		TEXT("M4 terminal acquire end frame builds"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			M4BirdPosition,
+			M4AcquireSample,
+			M2Settings,
+			M4AcquireEndTransform,
+			M4AcquireEndDiagnostics));
+	TestTrue(
+		TEXT("M4 final approach frame builds"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			M4BirdPosition,
+			M4TrackSample,
+			M2Settings,
+			M4TrackTransform,
+			M4TrackDiagnostics));
+	TestTrue(
+		TEXT("Assist3 exit matches the exact FinalApproach transform"),
+		M4AcquireEndTransform.Equals(M4TrackTransform, 1.0e-5));
+	TestEqual(
+		TEXT("Assist3 exit matches the exact FinalApproach FOV"),
+		M4AcquireEndDiagnostics.DirectedFovDegrees,
+		M4TrackDiagnostics.DirectedFovDegrees,
+		1.0e-9);
+	const FVector M4Forward =
+		M4TrackTransform.GetRotation().GetForwardVector();
+	const FVector BirdRelative =
+		M4BirdPosition - M4TrackTransform.GetLocation();
+	const FVector TargetRelative =
+		M4TargetCenter - M4TrackTransform.GetLocation();
+	TestTrue(
+		TEXT("Terminal bird remains in front of the camera"),
+		FVector::DotProduct(BirdRelative, M4Forward) > 0.0);
+	TestTrue(
+		TEXT("Terminal UFO remains in front of the camera"),
+		FVector::DotProduct(TargetRelative, M4Forward) > 0.0);
+	const auto ProjectM4Ndc = [&] (
+		const FTransform& Transform,
+		const FVector& Position)
+	{
+		const FVector Relative = Position - Transform.GetLocation();
+		const double Depth = FVector::DotProduct(
+			Relative,
+			Transform.GetRotation().GetForwardVector());
+		const double TanHalfHorizontal = FMath::Tan(
+			FMath::DegreesToRadians(
+				M2Settings.TerminalFovDegrees * 0.5));
+		const double TanHalfVertical = TanHalfHorizontal / (16.0 / 9.0);
+		return FVector2D(
+			FVector::DotProduct(
+				Relative,
+				Transform.GetRotation().GetRightVector())
+				/ (Depth * TanHalfHorizontal),
+			FVector::DotProduct(
+				Relative,
+				Transform.GetRotation().GetUpVector())
+				/ (Depth * TanHalfVertical));
+	};
+	const FVector2D M4StartBirdNdc = ProjectM4Ndc(
+		M4TrackTransform,
+		M4BirdPosition);
+	const FVector2D M4StartTargetNdc = ProjectM4Ndc(
+		M4TrackTransform,
+		M4TargetCenter);
+	TestTrue(
+		TEXT("Terminal UFO begins exactly at screen centre"),
+		M4StartTargetNdc.IsNearlyZero(1.0e-6));
+	TestEqual(
+		TEXT("Terminal bird begins on the lower-screen anchor"),
+		M4StartBirdNdc.Y,
+		M2Settings.TerminalBirdStartNdcY,
+		1.0e-6);
+	TestEqual(
+		TEXT("Terminal bird shares the UFO vertical centreline"),
+		M4StartBirdNdc.X,
+		0.0,
+		1.0e-6);
+	TestEqual(
+		TEXT("Terminal dolly starts at the configured bird distance"),
+		FVector::Distance(
+			M4TrackTransform.GetLocation(),
+			M4BirdPosition),
+		M2Settings.TerminalStartBirdDistanceCM,
+		1.0e-3);
+
+	FABTSM11FinaleCameraDirectorSample M4MidTrackSample = M4TrackSample;
+	M4MidTrackSample.Selection.StageProgress = 0.5;
+	const FVector M4MidBirdPosition(6000.0, 0.0, 0.0);
+	FTransform M4MidTrackTransform;
+	FABTSM11FinaleCameraM2Diagnostics M4MidTrackDiagnostics;
+	TestTrue(
+		TEXT("M4 midpoint closure frame builds"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			M4MidBirdPosition,
+			M4MidTrackSample,
+			M2Settings,
+			M4MidTrackTransform,
+			M4MidTrackDiagnostics));
+	FABTSM11FinaleCameraDirectorSample M4ContactTrackSample = M4TrackSample;
+	M4ContactTrackSample.Selection.StageProgress = 1.0;
+	const FVector M4ContactBirdPosition(10200.0, 0.0, 0.0);
+	FTransform M4ContactTrackTransform;
+	FABTSM11FinaleCameraM2Diagnostics M4ContactTrackDiagnostics;
+	TestTrue(
+		TEXT("M4 800 cm contact closure frame builds"),
+		ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			M4ContactBirdPosition,
+			M4ContactTrackSample,
+			M2Settings,
+			M4ContactTrackTransform,
+			M4ContactTrackDiagnostics));
+	const FVector2D M4MidBirdNdc = ProjectM4Ndc(
+		M4MidTrackTransform,
+		M4MidBirdPosition);
+	const FVector2D M4ContactBirdNdc = ProjectM4Ndc(
+		M4ContactTrackTransform,
+		M4ContactBirdPosition);
+	const FVector2D M4MidTargetNdc = ProjectM4Ndc(
+		M4MidTrackTransform,
+		M4TargetCenter);
+	const FVector2D M4ContactTargetNdc = ProjectM4Ndc(
+		M4ContactTrackTransform,
+		M4TargetCenter);
+	TestTrue(
+		TEXT("UFO remains centred through the entire closure"),
+		M4MidTargetNdc.IsNearlyZero(1.0e-6)
+			&& M4ContactTargetNdc.IsNearlyZero(1.0e-6));
+	TestEqual(
+		TEXT("First half and second half have equal bird screen travel"),
+		M4MidBirdNdc.Y - M4StartBirdNdc.Y,
+		M4ContactBirdNdc.Y - M4MidBirdNdc.Y,
+		1.0e-6);
+	TestEqual(
+		TEXT("Bird remains below the UFO at physical contact"),
+		M4ContactBirdNdc.Y,
+		M2Settings.TerminalBirdContactNdcY,
+		1.0e-6);
+	TestEqual(
+		TEXT("Terminal dolly reaches the configured contact distance"),
+		FVector::Distance(
+			M4ContactTrackTransform.GetLocation(),
+			M4ContactBirdPosition),
+		M2Settings.TerminalContactBirdDistanceCM,
+		1.0e-3);
 	DirectorSample.Selection = Cruise;
 	DirectorSample.Selection.StageProgress = 0.15;
 	TestTrue(

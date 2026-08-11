@@ -262,6 +262,153 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 		FirstPlan.PlanHash,
 		SecondPlan.PlanHash);
 
+	FABTSM11PlaybackPlan FirstContactPlan;
+	FABTSM11PlaybackPlan SecondContactPlan;
+	const bool bFirstContactBuilt =
+		FirstContactPlan.BuildCandidatePresentationContact(
+			Preset,
+			Result,
+			Classification);
+	const bool bSecondContactBuilt =
+		SecondContactPlan.BuildCandidatePresentationContact(
+			Preset,
+			Result,
+			Classification);
+	TestTrue(
+		*FString::Printf(
+			TEXT("Candidate presentation appends a visible physical contact: %s"),
+			*FirstContactPlan.Failure),
+		bFirstContactBuilt);
+	TestTrue(
+		*FString::Printf(
+			TEXT("Candidate presentation contact rebuild is deterministic: %s"),
+			*SecondContactPlan.Failure),
+		bSecondContactBuilt);
+	if (!bFirstContactBuilt || !bSecondContactBuilt)
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Candidate source qualification remains explicit"),
+		FirstContactPlan.bCandidateQualifiedIntercept);
+	TestTrue(
+		TEXT("Candidate presentation reaches the 800 cm contact sphere"),
+		FirstContactPlan.bPhysicalTargetHit);
+	TestTrue(
+		TEXT("Candidate presentation explicitly types its transfer"),
+		FirstContactPlan.bUsesVisibleTerminalTransfer);
+	TestEqual(
+		TEXT("Candidate contact plan hash is deterministic"),
+		FirstContactPlan.PlanHash,
+		SecondContactPlan.PlanHash);
+	TestTrue(
+		TEXT("Candidate contact extends rather than rewrites the source"),
+		FirstContactPlan.TransferStartTimeSeconds
+			== FirstPlan.DurationSeconds);
+	TestTrue(
+		TEXT("Candidate contact duration is positive"),
+		FirstContactPlan.TransferEndTimeSeconds
+			> FirstContactPlan.TransferStartTimeSeconds);
+	const FVector3d PhysicalCenter =
+		Preset.CanonicalScenario.Target.GetGeometricContactCenterCM();
+	const double PhysicalRadius =
+		Preset.CanonicalScenario.Target.GetGeometricContactRadiusCM();
+	TestTrue(
+		TEXT("Candidate contact endpoint lies on the physical sphere"),
+		FMath::IsNearlyEqual(
+			(FirstContactPlan.Points.Last().PositionCM - PhysicalCenter)
+				.Length(),
+			PhysicalRadius,
+			1.0e-3));
+	bool bAuthoritativePrefixPreserved =
+		FirstContactPlan.Points.Num() >= FirstPlan.Points.Num();
+	for (int32 Index = 0;
+		Index < FirstPlan.Points.Num() && bAuthoritativePrefixPreserved;
+		++Index)
+	{
+		bAuthoritativePrefixPreserved =
+			FirstContactPlan.Points[Index].TimeSeconds
+				== FirstPlan.Points[Index].TimeSeconds
+				&& FirstContactPlan.Points[Index].PositionCM.Equals(
+					FirstPlan.Points[Index].PositionCM,
+					0.0)
+				&& FirstContactPlan.Points[Index].VelocityCMPerSec.Equals(
+					FirstPlan.Points[Index].VelocityCMPerSec,
+					0.0)
+				&& FirstContactPlan.Points[Index].SegmentKind
+					== FirstPlan.Points[Index].SegmentKind;
+	}
+	TestTrue(
+		TEXT("Candidate authoritative prefix is byte-for-byte preserved"),
+		bAuthoritativePrefixPreserved);
+
+	FABTSM11FinaleLayoutPreset Rank11Preset;
+	FABTSM11CandidateExperienceIdentity Rank11Identity;
+	TestTrue(
+		TEXT("Rank11 candidate rebuilds for terminal contact coverage"),
+		FABTSM11CandidateExperienceCatalog::BuildCandidate(
+			11,
+			Rank11Preset,
+			Rank11Identity,
+			&Failure));
+	FABTSM11TrajectoryRequest Rank11Request;
+	FABTSM11TrajectoryResult Rank11Result;
+	TestTrue(
+		TEXT("Rank11 nominal request builds"),
+		Rank11Preset.BuildRequest(
+			Rank11Preset.NominalInput,
+			0x7u,
+			Rank11Request,
+			&Failure));
+	TestTrue(
+		TEXT("Rank11 nominal request solves"),
+		FABTSM11GravityAssistSolver::Solve(
+			Rank11Request,
+			Rank11Result,
+			&Failure));
+	const FABTSM11PrefixClassification Rank11Classification =
+		FABTSM11PrefixClassifier::Classify(
+			Rank11Preset,
+			Rank11Result,
+			0x7u);
+	TestTrue(TEXT("Rank11 nominal input remains F4"), Rank11Classification.IsF(4));
+	FABTSM11PlaybackPlan Rank11ContactPlan;
+	const bool bRank11ContactBuilt =
+		Rank11ContactPlan.BuildCandidatePresentationContact(
+			Rank11Preset,
+			Rank11Result,
+			Rank11Classification);
+	TestTrue(
+		*FString::Printf(
+			TEXT("Rank11 appends a visible physical contact: %s"),
+			*Rank11ContactPlan.Failure),
+		bRank11ContactBuilt);
+	if (!bRank11ContactBuilt)
+	{
+		return false;
+	}
+	const FVector3d Rank11PhysicalCenter =
+		Rank11Preset.CanonicalScenario.Target
+			.GetGeometricContactCenterCM();
+	const double Rank11PhysicalRadius =
+		Rank11Preset.CanonicalScenario.Target
+			.GetGeometricContactRadiusCM();
+	TestTrue(
+		TEXT("Rank11 endpoint lies on the 800 cm contact sphere"),
+		FMath::IsNearlyEqual(
+			(Rank11ContactPlan.Points.Last().PositionCM
+				- Rank11PhysicalCenter).Length(),
+			Rank11PhysicalRadius,
+			1.0e-3));
+	TestTrue(
+		TEXT("Rank11 transfer duration remains cinematic"),
+		Rank11ContactPlan.TransferEndTimeSeconds
+			- Rank11ContactPlan.TransferStartTimeSeconds
+			>= 0.5
+			&& Rank11ContactPlan.TransferEndTimeSeconds
+				- Rank11ContactPlan.TransferStartTimeSeconds
+				<= 8.0);
+
 	FABTSM110FinaleLocalFrame IdentityFrame;
 	IdentityFrame.LayoutVersion = 1;
 	IdentityFrame.LaunchTaskId = 1;

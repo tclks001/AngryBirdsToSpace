@@ -355,6 +355,9 @@ bool FABTSM11FinaleCameraStageSelection::IsUsable() const
 		&& OutgoingAssistIndex <= FABTSM11GravityScenario::AssistCount
 		&& IncomingAssistIndex >= 0
 		&& IncomingAssistIndex <= FABTSM11GravityScenario::AssistCount
+		&& static_cast<uint8>(EndpointAuthority)
+			<= static_cast<uint8>(
+				EABTSM11FinaleCameraEndpointAuthority::PhysicalContact)
 		&& (OutgoingAssistIndex == 0
 			|| (IncomingAssistIndex > OutgoingAssistIndex
 				&& IncomingAssistIndex != OutgoingAssistIndex))
@@ -401,6 +404,20 @@ bool FABTSM11FinaleCameraStageSelection::IsM3TransitionShot() const
 	return ShotPhase != EABTSM11FinaleCameraShotPhase::Authority;
 }
 
+bool FABTSM11FinaleCameraStageSelection::IsM4TerminalWindow() const
+{
+	return bTerminalTransition
+		|| (bTargetIsUFO
+			&& (Stage == EABTSM11FinaleCameraStage::FinalApproach
+				|| Stage == EABTSM11FinaleCameraStage::Terminal));
+}
+
+bool FABTSM11FinaleCameraStageSelection::IsM4TerminalTransition() const
+{
+	return bTerminalTransition
+		&& ShotPhase == EABTSM11FinaleCameraShotPhase::TerminalAcquire;
+}
+
 bool FABTSM11FinaleCameraStageSelection::IsM3AssistWindow() const
 {
 	return FramingAssistIndex >= 1
@@ -445,6 +462,23 @@ bool FABTSM11FinaleCameraDirectorSample::IsUsable() const
 				&& IncomingTargetRadiusCM > 1.0))
 		&& FMath::IsFinite(BirdRadiusCM)
 		&& BirdRadiusCM > 1.0
+		&& (!Selection.IsM4TerminalWindow()
+			|| (FMath::IsFinite(TerminalTargetCenter.X)
+				&& FMath::IsFinite(TerminalTargetCenter.Y)
+				&& FMath::IsFinite(TerminalTargetCenter.Z)
+				&& FMath::IsFinite(TerminalTargetRadiusCM)
+				&& TerminalTargetRadiusCM > 1.0
+				&& FMath::IsFinite(TerminalScreenRight.X)
+				&& FMath::IsFinite(TerminalScreenRight.Y)
+				&& FMath::IsFinite(TerminalScreenRight.Z)
+				&& FMath::IsFinite(TerminalScreenUp.X)
+				&& FMath::IsFinite(TerminalScreenUp.Y)
+				&& FMath::IsFinite(TerminalScreenUp.Z)
+				&& !TerminalScreenRight.IsNearlyZero()
+				&& !TerminalScreenUp.IsNearlyZero()
+				&& FMath::Abs(FVector::DotProduct(
+					TerminalScreenRight.GetSafeNormal(),
+					TerminalScreenUp.GetSafeNormal())) <= 1.0e-3f))
 		&& FMath::IsFinite(EncounterScreenRight.X)
 		&& FMath::IsFinite(EncounterScreenRight.Y)
 		&& FMath::IsFinite(EncounterScreenRight.Z)
@@ -495,10 +529,28 @@ const TCHAR* ABTSM11FinaleCameraDirector::ShotPhaseLabel(
 		return TEXT("IncomingReveal");
 	case EABTSM11FinaleCameraShotPhase::IncomingTrack:
 		return TEXT("IncomingTrack");
+	case EABTSM11FinaleCameraShotPhase::TerminalAcquire:
+		return TEXT("TerminalAcquire");
+	case EABTSM11FinaleCameraShotPhase::TerminalTrack:
+		return TEXT("TerminalTrack");
 	case EABTSM11FinaleCameraShotPhase::IncomingEntryMatch:
 		return TEXT("IncomingEntryMatch");
 	default:
 		return TEXT("Authority");
+	}
+}
+
+const TCHAR* ABTSM11FinaleCameraDirector::EndpointAuthorityLabel(
+	const EABTSM11FinaleCameraEndpointAuthority EndpointAuthority)
+{
+	switch (EndpointAuthority)
+	{
+	case EABTSM11FinaleCameraEndpointAuthority::CandidateQualified:
+		return TEXT("CandidateQualified");
+	case EABTSM11FinaleCameraEndpointAuthority::PhysicalContact:
+		return TEXT("PhysicalContact");
+	default:
+		return TEXT("None");
 	}
 }
 
@@ -525,6 +577,8 @@ ABTSM11FinaleCameraDirector::ResolveStage(
 		Selection.TargetLabel = TEXT("UFO");
 		Selection.FramingTargetLabel = TEXT("UFO");
 		Selection.Reason = TEXT("TargetHit");
+		Selection.ShotPhase = EABTSM11FinaleCameraShotPhase::TerminalTrack;
+		Selection.ShotReason = TEXT("UFOTerminalHold");
 		Selection.bTargetIsUFO = true;
 		return Selection;
 	}
@@ -649,6 +703,28 @@ ABTSM11FinaleCameraDirector::ResolveStage(
 				Selection.Stage = EABTSM11FinaleCameraStage::Unavailable;
 				Selection.Reason = TEXT("M3ShotEventsIncomplete");
 			}
+			else if (ActiveM3ShotSettings != nullptr
+				&& AssistIndex == FABTSM11GravityScenario::AssistCount
+				&& Selection.StageProgress + UE_DOUBLE_SMALL_NUMBER
+					>= ActiveM3ShotSettings->ForegroundTransitClearProgress)
+			{
+				Selection.ShotPhase =
+					EABTSM11FinaleCameraShotPhase::TerminalAcquire;
+				Selection.ShotPhaseProgress = ResolveStageProgress(
+					Selection.StageProgress,
+					ActiveM3ShotSettings->ForegroundTransitClearProgress,
+					1.0);
+				Selection.ShotProgress = Selection.ShotPhaseProgress;
+				Selection.ShotPhaseDurationSeconds =
+					FMath::Max(0.0,
+						Exit->TimeSeconds - Closest->TimeSeconds)
+					* (1.0
+						- ActiveM3ShotSettings->ForegroundTransitClearProgress);
+				Selection.ShotDurationSeconds =
+					Selection.ShotPhaseDurationSeconds;
+				Selection.ShotReason = TEXT("Assist3ToUFOAcquire");
+				Selection.bTerminalTransition = true;
+			}
 			return Selection;
 		}
 		PreviousExitSeconds = Exit->TimeSeconds;
@@ -658,11 +734,45 @@ ABTSM11FinaleCameraDirector::ResolveStage(
 	Selection.AssistIndex = 0;
 	Selection.FramingAssistIndex = 0;
 	Selection.StageProgress = 0.0;
+	Selection.ShotPhase = EABTSM11FinaleCameraShotPhase::TerminalTrack;
+	Selection.ShotReason = TEXT("UFOFinalApproach");
 	Selection.TargetLabel = TEXT("UFO");
 	Selection.FramingTargetLabel = TEXT("UFO");
 	Selection.Reason = TEXT("Assist3Exit");
 	Selection.bTargetIsUFO = true;
+	Selection.bTerminalTransition = true;
 	return Selection;
+}
+
+bool ABTSM11FinaleCameraDirector::ApplyM4TerminalTimeline(
+	const double PlaybackSeconds,
+	const double TerminalStartSeconds,
+	const double TerminalEndSeconds,
+	FABTSM11FinaleCameraStageSelection& InOutSelection)
+{
+	if (!FMath::IsFinite(PlaybackSeconds)
+		|| !FMath::IsFinite(TerminalStartSeconds)
+		|| !FMath::IsFinite(TerminalEndSeconds)
+		|| TerminalEndSeconds <= TerminalStartSeconds
+		|| (InOutSelection.Stage
+				!= EABTSM11FinaleCameraStage::FinalApproach
+			&& InOutSelection.Stage
+				!= EABTSM11FinaleCameraStage::Terminal))
+	{
+		return false;
+	}
+	const double DurationSeconds = TerminalEndSeconds - TerminalStartSeconds;
+	const double Progress = ResolveStageProgress(
+		PlaybackSeconds,
+		TerminalStartSeconds,
+		TerminalEndSeconds);
+	InOutSelection.StageProgress = Progress;
+	InOutSelection.StageDurationSeconds = DurationSeconds;
+	InOutSelection.ShotProgress = Progress;
+	InOutSelection.ShotDurationSeconds = DurationSeconds;
+	InOutSelection.ShotPhaseProgress = Progress;
+	InOutSelection.ShotPhaseDurationSeconds = DurationSeconds;
+	return InOutSelection.IsUsable();
 }
 
 bool ABTSM11FinaleCameraDirector::BuildAssistEncounterBasis(

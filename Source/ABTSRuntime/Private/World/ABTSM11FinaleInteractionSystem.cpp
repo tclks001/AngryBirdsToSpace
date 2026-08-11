@@ -1041,6 +1041,22 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 				Prediction,
 				FlightCamera->IsM3DirectorFrozenEnabled(),
 				&M3ShotSettings);
+		DirectorSample.Selection.EndpointAuthority =
+			ReleasedPlaybackPlan.bPhysicalTargetHit
+				? EABTSM11FinaleCameraEndpointAuthority::PhysicalContact
+				: ReleasedPlaybackPlan.bCandidateQualifiedIntercept
+					? EABTSM11FinaleCameraEndpointAuthority::CandidateQualified
+					: EABTSM11FinaleCameraEndpointAuthority::None;
+		if (DirectorSample.Selection.Stage
+				== EABTSM11FinaleCameraStage::FinalApproach
+			|| DirectorSample.Selection.Stage
+				== EABTSM11FinaleCameraStage::Terminal)
+		{
+			DirectorSample.Selection.Reason = FString::Printf(
+				TEXT("%sEndpoint"),
+				ABTSM11FinaleCameraDirector::EndpointAuthorityLabel(
+					DirectorSample.Selection.EndpointAuthority));
+		}
 		const FABTSM11FinaleLayoutPreset& Preset =
 			FinaleSystem->GetLayoutPreset();
 		if (DirectorSample.Selection.bTargetIsUFO)
@@ -1051,6 +1067,59 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 				FVector(Target.GetGeometricContactCenterCM()));
 			DirectorSample.TargetRadiusCM =
 				Target.GetGeometricContactRadiusCM();
+		}
+		if (DirectorSample.Selection.IsM4TerminalWindow()
+			&& DirectorSample.Selection.bTargetIsUFO)
+		{
+			const FABTSM11TargetSpec& TerminalTarget =
+				Preset.CanonicalScenario.Target;
+			DirectorSample.TerminalTargetCenter =
+				Frame.TransformLocalPosition(FVector(
+					TerminalTarget.GetGeometricContactCenterCM()));
+			DirectorSample.TerminalTargetRadiusCM =
+				TerminalTarget.GetGeometricContactRadiusCM();
+			const FABTSM11TrajectoryEvent* Assist3Exit =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::AssistExit,
+						FABTSM11GravityScenario::AssistCount)
+					: nullptr;
+			if (Assist3Exit == nullptr)
+			{
+				FailInteraction(TEXT("FlightCameraTerminalBasisEventMissing"));
+				return;
+			}
+			if (!ABTSM11FinaleCameraDirector::ApplyM4TerminalTimeline(
+				PlaybackElapsedSeconds,
+				Assist3Exit->TimeSeconds,
+				ReleasedPlaybackPlan.DurationSeconds,
+				DirectorSample.Selection))
+			{
+				FailInteraction(TEXT("FlightCameraTerminalTimelineRejected"));
+				return;
+			}
+			const FVector ExitWorld = Frame.TransformLocalPosition(
+				FVector(Assist3Exit->PositionCM));
+			DirectorSample.TerminalScreenRight =
+				(DirectorSample.TerminalTargetCenter - ExitWorld)
+					.GetSafeNormal();
+			DirectorSample.TerminalScreenUp = (
+				Frame.GetUp()
+				- DirectorSample.TerminalScreenRight
+					* FVector::DotProduct(
+						Frame.GetUp(),
+						DirectorSample.TerminalScreenRight))
+				.GetSafeNormal();
+			if (DirectorSample.TerminalScreenRight.IsNearlyZero()
+				|| DirectorSample.TerminalScreenUp.IsNearlyZero())
+			{
+				FailInteraction(TEXT("FlightCameraTerminalBasisRejected"));
+				return;
+			}
+			DirectorSample.EncounterScreenRight =
+				DirectorSample.TerminalScreenRight;
+			DirectorSample.EncounterScreenUp =
+				DirectorSample.TerminalScreenUp;
 		}
 		else if (DirectorSample.Selection.FramingAssistIndex >= 1
 			&& DirectorSample.Selection.FramingAssistIndex
@@ -1092,6 +1161,46 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 					DirectorSample.EncounterScreenUp))
 			{
 				FailInteraction(TEXT("FlightCameraEncounterBasisRejected"));
+				return;
+			}
+		}
+		if (DirectorSample.Selection.IsM4TerminalWindow()
+			&& !DirectorSample.Selection.bTargetIsUFO)
+		{
+			const FABTSM11TargetSpec& TerminalTarget =
+				Preset.CanonicalScenario.Target;
+			DirectorSample.TerminalTargetCenter =
+				Frame.TransformLocalPosition(FVector(
+					TerminalTarget.GetGeometricContactCenterCM()));
+			DirectorSample.TerminalTargetRadiusCM =
+				TerminalTarget.GetGeometricContactRadiusCM();
+			const FABTSM11TrajectoryEvent* Assist3Exit =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::AssistExit,
+						FABTSM11GravityScenario::AssistCount)
+					: nullptr;
+			if (Assist3Exit == nullptr)
+			{
+				FailInteraction(TEXT("FlightCameraTerminalBasisEventMissing"));
+				return;
+			}
+			const FVector ExitWorld = Frame.TransformLocalPosition(
+				FVector(Assist3Exit->PositionCM));
+			DirectorSample.TerminalScreenRight =
+				(DirectorSample.TerminalTargetCenter - ExitWorld)
+					.GetSafeNormal();
+			DirectorSample.TerminalScreenUp = (
+				Frame.GetUp()
+				- DirectorSample.TerminalScreenRight
+					* FVector::DotProduct(
+						Frame.GetUp(),
+						DirectorSample.TerminalScreenRight))
+				.GetSafeNormal();
+			if (DirectorSample.TerminalScreenRight.IsNearlyZero()
+				|| DirectorSample.TerminalScreenUp.IsNearlyZero())
+			{
+				FailInteraction(TEXT("FlightCameraTerminalBasisRejected"));
 				return;
 			}
 		}
@@ -1149,7 +1258,19 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		{
 			InteractionState =
 				EABTSM11FinaleInteractionState::TargetHit;
-			if (ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
+			if (ReleasedPlaybackPlan.bPhysicalTargetHit)
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Log,
+					TEXT("[ABTS][M11-C][Playback] PhysicalTargetHit Plan=0x%016llx Transfer=%d CandidateSource=%d"),
+					ReleasedPlaybackPlan.PlanHash,
+					ReleasedPlaybackPlan
+						.bUsesVisibleTerminalTransfer ? 1 : 0,
+					ReleasedPlaybackPlan
+						.bCandidateQualifiedIntercept ? 1 : 0);
+			}
+			else if (ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 			{
 				UE_LOG(
 					LogABTSRuntime,
@@ -1160,16 +1281,6 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 					static_cast<unsigned long long>(
 						FinaleSystem->GetEditorCandidateIdentity()
 							.GlobalWorkIndex));
-			}
-			else
-			{
-				UE_LOG(
-					LogABTSRuntime,
-					Log,
-					TEXT("[ABTS][M11-C][Playback] PhysicalTargetHit Plan=0x%016llx Transfer=%d"),
-					ReleasedPlaybackPlan.PlanHash,
-					ReleasedPlaybackPlan
-						.bUsesVisibleTerminalTransfer ? 1 : 0);
 			}
 		}
 		else

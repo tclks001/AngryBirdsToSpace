@@ -259,8 +259,12 @@ M3 已开始实现，详细合同与阶段门见 [M3 三行星连续导演与 Ha
 ### M4：UFO 终端与镜头收束
 
 - FinalApproach 同时保持鸟与 UFO；
-- Candidate Qualified Endpoint 与生产 Physical Contact 在 Manifest/镜头状态中明确区分；
+- Candidate Qualified Endpoint 与 Physical Contact 在 Manifest/镜头状态中明确区分；候选离线录屏从合格点追加确定性可见转移并抵达 800 cm 接触球；
 - 本里程碑只处理镜头，不实现 UFO 破碎、救援和五鸟团聚。
+
+2026-08-11 已完成工程落地，独立合同见 [M4：UFO 终端与镜头收束](M11FinaleCameraM4UFOTerminalClosure.md)。旧版在 Assist3 Exit 后退出 M3 导演并恢复瞬时轨迹切线跟随，导致 UFO 在 FinalApproach/Terminal 全程出画且入口旋转跳变；首轮 M4 建立“土星 Lucy→鸟＋土星＋UFO 广角桥→冻结鸟＋UFO 双主体”的连续构图。R2 随后暴露未认证候选仍在 41,250 cm 合格包络结束，故候选离线播放现保留原 Released 前缀并追加显式 `VisibleTerminalTransfer`，沿确定性五次曲线抵达 UFO 800 cm 接触球。fresh Rank11 Stylized1 `M4PhysicalContactR4-20260811-133500` 为 1021 帧 `Complete/TargetHit`；最终 Authority 距离 800 cm，M4 鸟/UFO/身份丢失与位置/旋转/FOV 跳变均为 0，`m4PhysicalContactPassed=true`、`m4TerminalClosurePassed=true`。Rank11 仍为 `UNCERTIFIED`，Released Trajectory Hash 不变；可见接触只属于播放表现计划，不冒充候选认证。
+
+M4 终端构图现不再让鸟/UFO 围绕对称质心漂移，而将 UFO 固定在画面中心：鸟沿同一竖直中心线从 NDC Y `-0.42` 以恒定屏幕速度逼近至 `-0.22`，相机到鸟距离同时以零端斜率从 40000 cm 收至 5000 cm，55 度镜头保持不变。`TerminalAcquire` 直接匹配该解析构图的 progress 0；真实进度由 Assist3 Exit 与 PlaybackPlan 物理接触终点共同定义。该改造只改变 M11 导演与录屏合同 v13，不修改 Released 轨迹、接触曲线或渲染。fresh Rank11 Stylized1 `M4CenteredDollyR9-20260811-160100` 为 1021 帧 `Complete/TargetHit`：UFO 中心误差小于 `0.00002 px`，鸟相对中央竖线的动画 Bounds 摆动小于 `2 px`，相机到鸟距离约从 40015 cm 收至 5009 cm，最终仍精确命中 800 cm 接触球。
 
 ### M5：候选与渲染正交回归
 

@@ -349,7 +349,7 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 	const FABTSM11TrajectoryResult* Nominal =
 		bNominalPhysicalReady ? &NominalPhysicalResult : nullptr;
 	const bool bBuilt = FinaleSystem->IsEditorCandidateMode()
-		? PreviewPlaybackPlan.BuildCandidateQualified(
+		? PreviewPlaybackPlan.BuildCandidatePresentationContact(
 			FinaleSystem->GetLayoutPreset(),
 			LatestQualifiedResult,
 			CurrentClassification)
@@ -477,7 +477,8 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	if (CurrentClassification.IsF(4)
 		&& (!PreviewPlaybackPlan.bQualifiedF4
 			|| (FinaleSystem->IsEditorCandidateMode()
-				? !PreviewPlaybackPlan.bCandidateQualifiedIntercept
+				? (!PreviewPlaybackPlan.bCandidateQualifiedIntercept
+					|| !PreviewPlaybackPlan.bPhysicalTargetHit)
 				: !PreviewPlaybackPlan.bPhysicalTargetHit)))
 	{
 		return false;

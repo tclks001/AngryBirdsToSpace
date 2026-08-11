@@ -27,7 +27,17 @@ enum class EABTSM11FinaleCameraShotPhase : uint8
 	DualBodyBridge,
 	IncomingReveal,
 	IncomingTrack,
-	IncomingEntryMatch
+	IncomingEntryMatch,
+	TerminalAcquire,
+	TerminalTrack
+};
+
+/** Success authority represented by the terminal camera state. */
+enum class EABTSM11FinaleCameraEndpointAuthority : uint8
+{
+	None = 0,
+	CandidateQualified,
+	PhysicalContact
 };
 
 /** Deterministic timing policy used to schedule one inter-body shot. */
@@ -76,6 +86,9 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraStageSelection
 	FString Reason = TEXT("AwaitingLaunch");
 	FString ShotReason = TEXT("AuthorityStage");
 	bool bTargetIsUFO = false;
+	bool bTerminalTransition = false;
+	EABTSM11FinaleCameraEndpointAuthority EndpointAuthority =
+		EABTSM11FinaleCameraEndpointAuthority::None;
 
 	bool IsUsable() const;
 	bool IsM2Assist1Window() const;
@@ -85,6 +98,8 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraStageSelection
 	bool IsM3DualBodyBridge() const;
 	bool IsM3InterBodyTransition() const;
 	bool IsM3TransitionShot() const;
+	bool IsM4TerminalWindow() const;
+	bool IsM4TerminalTransition() const;
 };
 
 /** One renderer-independent director sample supplied by the interaction owner. */
@@ -103,6 +118,11 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraDirectorSample
 	FVector EncounterScreenRight = FVector::ForwardVector;
 	/** Frozen screen-up direction, normal to the closest-approach plane. */
 	FVector EncounterScreenUp = FVector::UpVector;
+	/** Frozen terminal composition: bird travels screen-left toward the UFO. */
+	FVector TerminalScreenRight = FVector::ForwardVector;
+	FVector TerminalScreenUp = FVector::UpVector;
+	FVector TerminalTargetCenter = FVector::ZeroVector;
+	double TerminalTargetRadiusCM = 0.0;
 
 	bool IsUsable() const;
 };
@@ -112,6 +132,8 @@ namespace ABTSM11FinaleCameraDirector
 	ABTSRUNTIME_API const TCHAR* StageLabel(EABTSM11FinaleCameraStage Stage);
 	ABTSRUNTIME_API const TCHAR* ShotPhaseLabel(
 		EABTSM11FinaleCameraShotPhase ShotPhase);
+	ABTSRUNTIME_API const TCHAR* EndpointAuthorityLabel(
+		EABTSM11FinaleCameraEndpointAuthority EndpointAuthority);
 
 	/**
 	 * Resolves stage only from frozen authority events and playback time.
@@ -124,6 +146,17 @@ namespace ABTSM11FinaleCameraDirector
 		const FABTSM11TrajectoryResult* Result,
 		bool bUseM3ShotPlan = false,
 		const FABTSM11FinaleCameraShotSettings* M3ShotSettings = nullptr);
+
+	/**
+	 * Applies the playback-plan terminal interval to an already resolved M4
+	 * FinalApproach/Terminal selection. The event-only resolver cannot know the
+	 * presentation tail duration, so the playback owner supplies it explicitly.
+	 */
+	ABTSRUNTIME_API bool ApplyM4TerminalTimeline(
+		double PlaybackSeconds,
+		double TerminalStartSeconds,
+		double TerminalEndSeconds,
+		FABTSM11FinaleCameraStageSelection& InOutSelection);
 
 	/**
 	 * Builds one stable planet-anchored encounter basis from authority events.

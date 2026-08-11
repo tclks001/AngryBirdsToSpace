@@ -41,6 +41,14 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 	double DualBodyBridgeFovDegrees = 85.0;
 	double DualBodyBridgeFitMargin = 1.15;
 	double DualBodyBridgeBirdNdcY = 0.05;
+	double TerminalFovDegrees = 55.0;
+	double TerminalFitMargin = 1.20;
+	/** Bird begins below the centred UFO and advances upward at constant NDC speed. */
+	double TerminalBirdStartNdcY = -0.42;
+	double TerminalBirdContactNdcY = -0.22;
+	/** Camera-to-bird distance envelope for the terminal dolly. */
+	double TerminalStartBirdDistanceCM = 40000.0;
+	double TerminalContactBirdDistanceCM = 5000.0;
 	double DualBodyBridgeSeconds = 0.60;
 	double IncomingMatchEaseOutPower = 1.0;
 	double IncomingEntryMatchSeconds = 0.50;
@@ -89,6 +97,25 @@ namespace ABTSM11FinaleFlightCameraMath
 		const FABTSM11FinaleCameraM2Settings& Settings,
 		FTransform& OutDirectedTransform,
 		FABTSM11FinaleCameraM2Diagnostics& OutDiagnostics);
+
+	/**
+	 * Centres the UFO, places the bird on a prescribed lower-screen NDC path,
+	 * and independently dollies toward the bird without changing authority.
+	 */
+	ABTSRUNTIME_API bool BuildM4TerminalClosureFrame(
+		const FVector& BirdPosition,
+		double BirdRadiusCM,
+		const FVector& TargetCenter,
+		double TargetRadiusCM,
+		const FVector& PreferredViewUp,
+		double HorizontalFovDegrees,
+		double FitMargin,
+		double ClosureProgress,
+		double BirdStartNdcY,
+		double BirdContactNdcY,
+		double StartCameraToBirdDistanceCM,
+		double ContactCameraToBirdDistanceCM,
+		FTransform& OutTransform);
 
 	/** Builds the same Lucy encounter envelope for any M3 assist/Handoff. */
 	ABTSRUNTIME_API bool BuildM3AssistFrame(
@@ -280,6 +307,36 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
 		meta = (ClampMin = "-0.5", ClampMax = "0.5", UIMin = "-0.2", UIMax = "0.2"))
 	double M3DualBodyBridgeBirdNdcY = 0.05;
+
+	/** Stable two-subject lens used for the bird-to-UFO closure. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "35.0", ClampMax = "85.0", UIMin = "45.0", UIMax = "65.0", Units = "deg"))
+	double M4TerminalFovDegrees = 55.0;
+
+	/** Projection margin around the bird and UFO terminal spheres. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "1.02", ClampMax = "1.5", UIMin = "1.05", UIMax = "1.3"))
+	double M4TerminalFitMargin = 1.20;
+
+	/** Bird screen-up NDC at Assist3 Exit; negative values are below centre. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "-0.8", ClampMax = "-0.05", UIMin = "-0.6", UIMax = "-0.1"))
+	double M4TerminalBirdStartNdcY = -0.42;
+
+	/** Bird screen-up NDC at physical contact; remains below the centred UFO. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "-0.6", ClampMax = "-0.02", UIMin = "-0.4", UIMax = "-0.08"))
+	double M4TerminalBirdContactNdcY = -0.22;
+
+	/** Camera-to-bird distance at the beginning of the UFO closure. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "1000.0", UIMin = "10000.0", UIMax = "80000.0", Units = "cm"))
+	double M4TerminalStartBirdDistanceCM = 40000.0;
+
+	/** Camera-to-bird distance at the 800 cm physical contact point. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "1000.0", UIMin = "3000.0", UIMax = "15000.0", Units = "cm"))
+	double M4TerminalContactBirdDistanceCM = 5000.0;
 
 	/** Ease-out power applied to the Track view-plane entry match. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
