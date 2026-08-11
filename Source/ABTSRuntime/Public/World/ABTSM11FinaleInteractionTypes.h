@@ -300,6 +300,11 @@ struct ABTSRUNTIME_API FABTSM11PlaybackPlan
 		const FABTSM11FinaleLayoutPreset& Preset,
 		const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
 		const FABTSM11PrefixClassification& Classification);
+	bool BuildCandidatePresentationContact(
+		const FABTSM11FinaleLayoutPreset& Preset,
+		const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
+		const FABTSM11PrefixClassification& Classification,
+		const FABTSM11TerminalTransferContract& TransferContract = {});
 	bool Sample(
 		double TimeSeconds,
 		FVector3d& OutPositionCM,

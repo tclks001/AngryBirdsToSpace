@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "World/ABTSM11FinaleLayoutTypes.h"
 #include "ABTSM11FinaleCameraCaptureRunner.generated.h"
 
 class AABTSM11FinaleInteractionSystem;
@@ -17,15 +18,20 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// First integrated contract that combines the T2-C1 runtime-state gate
-	// with M1/M2 camera observations and director telemetry.
-	static constexpr int32 ContractVersion = 6;
+	// Adds M5 renderer-independent telemetry and orthogonality digests.
+	static constexpr int32 ContractVersion = 15;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
 	bool bStylized = false;
+	/** Runs the real launch/playback but writes no JPG/AVI pixels. */
+	bool bTelemetryOnly = false;
 	bool bDirectorM2 = false;
+	bool bDirectorM3 = false;
 	bool bAutoExit = true;
+	/** Explicit player-authored launch; false preserves the nominal workflow. */
+	bool bCustomLaunchInput = false;
+	FABTSM11FinaleLaunchInput CustomLaunchInput;
 	int32 WarmupFrames = 30;
 	int32 TerminalHoldFrames = 24;
 	int32 FrameRate = 30;
@@ -58,10 +64,20 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	FString InteractionState;
 	FString Stage;
 	FString CurrentTarget;
+	FString FramingTarget;
 	FString StageReason;
+	FString EndpointAuthority;
+	double StageProgress = 0.0;
+	double StageDurationSeconds = 0.0;
+	FString ShotPhase;
+	FString ShotReason;
+	double ShotProgress = 0.0;
+	double ShotDurationSeconds = 0.0;
+	double ShotEndSlope = 0.0;
 	FString DirectorMode;
 	double DirectorBlendAlpha = 0.0;
 	bool bDirectorM2FrozenEnabled = false;
+	bool bDirectorM3FrozenEnabled = false;
 	FVector BirdWorld = FVector::ZeroVector;
 	FVector2D BirdScreen = FVector2D::ZeroVector;
 	double BirdDepthCM = 0.0;
@@ -72,6 +88,14 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	double TargetDepthCM = 0.0;
 	double TargetPixelRadius = 0.0;
 	double TargetVisibleRatio = 0.0;
+	FString BridgeOutgoingTarget;
+	FVector2D BridgeOutgoingScreen = FVector2D::ZeroVector;
+	double BridgeOutgoingPixelRadius = 0.0;
+	double BridgeOutgoingVisibleRatio = 0.0;
+	FString BridgeIncomingTarget;
+	FVector2D BridgeIncomingScreen = FVector2D::ZeroVector;
+	double BridgeIncomingPixelRadius = 0.0;
+	double BridgeIncomingVisibleRatio = 0.0;
 	FVector CameraWorld = FVector::ZeroVector;
 	FRotator CameraRotation = FRotator::ZeroRotator;
 	double CameraToBirdCM = 0.0;
@@ -95,11 +119,11 @@ enum class EABTSM11FinaleCameraCapturePhase : uint8
 };
 
 /**
- * M11-owned visual acceptance runner. In a command-line -game process it reads
- * the game viewport and writes deterministic JPEG frames while driving the
- * existing nominal launch and old flight camera, then muxes those frames to
- * MJPEG AVI before process exit. It never authors trajectory or camera data
- * and does not support PIE.
+ * M11-owned acceptance runner. In a command-line -game process it drives the
+ * nominal launch and production flight camera. Visual mode writes deterministic
+ * JPEG frames and an MJPEG AVI; M5 telemetry-only mode skips pixel capture and
+ * writes renderer-independent CSV/Manifest evidence. It never authors
+ * trajectory or camera data and does not support PIE.
  */
 UCLASS()
 class ABTSRUNTIME_API AABTSM11FinaleCameraCaptureRunner final : public AActor

@@ -135,13 +135,17 @@ namespace ABTSM11FinaleCameraCaptureRunnerPrivate
 	FABTSM11FinaleCameraStageSelection ResolveObservationTarget(
 		const EABTSM11FinaleInteractionState InteractionState,
 		const double PlaybackSeconds,
-		const FABTSM11TrajectoryResult* Result)
+		const FABTSM11TrajectoryResult* Result,
+		const bool bUseM3ShotPlan = false,
+		const FABTSM11FinaleCameraShotSettings* M3ShotSettings = nullptr)
 	{
 		return ABTSM11FinaleCameraDirector::ResolveStage(
 			InteractionState == EABTSM11FinaleInteractionState::Launched,
 			InteractionState == EABTSM11FinaleInteractionState::TargetHit,
 			PlaybackSeconds,
-			Result);
+			Result,
+			bUseM3ShotPlan,
+			M3ShotSettings);
 	}
 
 	bool WriteBytes(IFileHandle& File, const void* Data, const int64 Size)
@@ -244,6 +248,160 @@ namespace ABTSM11FinaleCameraCaptureRunnerPrivate
 		return FString::Printf(TEXT("0x%016llX"), Value);
 	}
 
+	struct FM5OrthogonalityDigests
+	{
+		uint64 StageSequenceHash = 0;
+		uint64 CameraNumericsHash = 0;
+		int32 FlightFrameCount = 0;
+
+		bool IsValid() const
+		{
+			return StageSequenceHash != 0 && CameraNumericsHash != 0
+				&& FlightFrameCount > 0;
+		}
+	};
+
+	constexpr uint64 M5FnvOffset = 14695981039346656037ull;
+	constexpr uint64 M5FnvPrime = 1099511628211ull;
+
+	void HashM5Byte(uint64& InOutHash, const uint8 Value)
+	{
+		InOutHash ^= Value;
+		InOutHash *= M5FnvPrime;
+	}
+
+	void HashM5UInt64(uint64& InOutHash, const uint64 Value)
+	{
+		for (int32 Shift = 0; Shift < 64; Shift += 8)
+		{
+			HashM5Byte(
+				InOutHash,
+				static_cast<uint8>((Value >> Shift) & 0xffull));
+		}
+	}
+
+	void HashM5Bool(uint64& InOutHash, const bool bValue)
+	{
+		HashM5Byte(InOutHash, bValue ? 1 : 0);
+	}
+
+	void HashM5String(uint64& InOutHash, const FString& Value)
+	{
+		const FTCHARToUTF8 Utf8(*Value);
+		HashM5UInt64(InOutHash, static_cast<uint64>(Utf8.Length()));
+		for (int32 Index = 0; Index < Utf8.Length(); ++Index)
+		{
+			HashM5Byte(InOutHash, static_cast<uint8>(Utf8.Get()[Index]));
+		}
+	}
+
+	void HashM5Quantized(
+		uint64& InOutHash,
+		const double Value,
+		const double Scale)
+	{
+		const int64 Quantized = FMath::IsFinite(Value)
+			&& FMath::IsFinite(Scale) && Scale > 0.0
+			? FMath::RoundToInt64(Value * Scale)
+			: MIN_int64;
+		HashM5UInt64(InOutHash, static_cast<uint64>(Quantized));
+	}
+
+	FM5OrthogonalityDigests ComputeM5OrthogonalityDigests(
+		const TArray<FABTSM11FinaleCameraObservationSample>& Samples)
+	{
+		FM5OrthogonalityDigests Result;
+		for (const FABTSM11FinaleCameraObservationSample& Sample : Samples)
+		{
+			Result.FlightFrameCount +=
+				Sample.InteractionState == TEXT("Launched")
+					|| Sample.InteractionState == TEXT("TargetHit")
+				? 1
+				: 0;
+		}
+		if (Result.FlightFrameCount <= 0)
+		{
+			return Result;
+		}
+		Result.StageSequenceHash = M5FnvOffset;
+		Result.CameraNumericsHash = M5FnvOffset;
+		HashM5String(Result.StageSequenceHash, TEXT("ABTS.M11.M5.Stage.v1"));
+		HashM5String(Result.CameraNumericsHash, TEXT("ABTS.M11.M5.Camera.v1"));
+		HashM5UInt64(Result.StageSequenceHash, Result.FlightFrameCount);
+		HashM5UInt64(Result.CameraNumericsHash, Result.FlightFrameCount);
+		int32 FlightFrameIndex = 0;
+		for (const FABTSM11FinaleCameraObservationSample& Sample : Samples)
+		{
+			if (Sample.InteractionState != TEXT("Launched")
+				&& Sample.InteractionState != TEXT("TargetHit"))
+			{
+				continue;
+			}
+			HashM5UInt64(Result.StageSequenceHash, FlightFrameIndex);
+			HashM5Quantized(
+				Result.StageSequenceHash, Sample.PlaybackSeconds, 1.0e9);
+			HashM5String(Result.StageSequenceHash, Sample.InteractionState);
+			HashM5String(Result.StageSequenceHash, Sample.Stage);
+			HashM5String(Result.StageSequenceHash, Sample.CurrentTarget);
+			HashM5String(Result.StageSequenceHash, Sample.FramingTarget);
+			HashM5String(Result.StageSequenceHash, Sample.StageReason);
+			HashM5String(Result.StageSequenceHash, Sample.EndpointAuthority);
+			HashM5Quantized(
+				Result.StageSequenceHash, Sample.StageProgress, 1.0e9);
+			HashM5Quantized(
+				Result.StageSequenceHash,
+				Sample.StageDurationSeconds,
+				1.0e9);
+			HashM5String(Result.StageSequenceHash, Sample.ShotPhase);
+			HashM5String(Result.StageSequenceHash, Sample.ShotReason);
+			HashM5Quantized(
+				Result.StageSequenceHash, Sample.ShotProgress, 1.0e9);
+			HashM5Quantized(
+				Result.StageSequenceHash,
+				Sample.ShotDurationSeconds,
+				1.0e9);
+			HashM5Quantized(
+				Result.StageSequenceHash, Sample.ShotEndSlope, 1.0e9);
+			HashM5String(Result.StageSequenceHash, Sample.DirectorMode);
+			HashM5Bool(
+				Result.StageSequenceHash,
+				Sample.bDirectorM2FrozenEnabled);
+			HashM5Bool(
+				Result.StageSequenceHash,
+				Sample.bDirectorM3FrozenEnabled);
+			HashM5Quantized(
+				Result.StageSequenceHash,
+				Sample.DirectorBlendAlpha,
+				1.0e9);
+
+			HashM5UInt64(Result.CameraNumericsHash, FlightFrameIndex);
+			HashM5Quantized(
+				Result.CameraNumericsHash, Sample.PlaybackSeconds, 1.0e9);
+			HashM5Quantized(
+				Result.CameraNumericsHash, Sample.CameraWorld.X, 1.0e3);
+			HashM5Quantized(
+				Result.CameraNumericsHash, Sample.CameraWorld.Y, 1.0e3);
+			HashM5Quantized(
+				Result.CameraNumericsHash, Sample.CameraWorld.Z, 1.0e3);
+			HashM5Quantized(
+				Result.CameraNumericsHash,
+				Sample.CameraRotation.Pitch,
+				1.0e6);
+			HashM5Quantized(
+				Result.CameraNumericsHash,
+				Sample.CameraRotation.Yaw,
+				1.0e6);
+			HashM5Quantized(
+				Result.CameraNumericsHash,
+				Sample.CameraRotation.Roll,
+				1.0e6);
+			HashM5Quantized(
+				Result.CameraNumericsHash, Sample.FovDegrees, 1.0e6);
+			++FlightFrameIndex;
+		}
+		return Result;
+	}
+
 	const TCHAR* StateLabel(const EABTSM11FinaleInteractionState State)
 	{
 		switch (State)
@@ -295,6 +453,26 @@ bool FABTSM11FinaleCameraCaptureConfig::Parse(
 		CommandLine,
 		TEXT("ABTSM11CaptureRank="),
 		OutConfig.CandidateRank);
+	const bool bHasYaw = FParse::Value(
+		CommandLine,
+		TEXT("ABTSM11CaptureYaw="),
+		OutConfig.CustomLaunchInput.YawDegrees);
+	const bool bHasPitch = FParse::Value(
+		CommandLine,
+		TEXT("ABTSM11CapturePitch="),
+		OutConfig.CustomLaunchInput.PitchDegrees);
+	const bool bHasPower = FParse::Value(
+		CommandLine,
+		TEXT("ABTSM11CapturePower="),
+		OutConfig.CustomLaunchInput.Power);
+	if ((bHasYaw || bHasPitch || bHasPower)
+		&& !(bHasYaw && bHasPitch && bHasPower))
+	{
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("ABTSM11CaptureYaw/Pitch/Power must be supplied together."));
+	}
+	OutConfig.bCustomLaunchInput = bHasYaw && bHasPitch && bHasPower;
 	if (!ParseBoolOption(
 		CommandLine,
 		TEXT("ABTSM11CaptureStylized="),
@@ -303,9 +481,21 @@ bool FABTSM11FinaleCameraCaptureConfig::Parse(
 		OutFailure)
 		|| !ParseBoolOption(
 			CommandLine,
+			TEXT("ABTSM11CaptureTelemetryOnly="),
+			false,
+			OutConfig.bTelemetryOnly,
+			OutFailure)
+		|| !ParseBoolOption(
+			CommandLine,
 			TEXT("ABTSM11CaptureDirectorM2="),
 			false,
 			OutConfig.bDirectorM2,
+			OutFailure)
+		|| !ParseBoolOption(
+			CommandLine,
+			TEXT("ABTSM11CaptureDirectorM3="),
+			false,
+			OutConfig.bDirectorM3,
 			OutFailure)
 		|| !ParseBoolOption(
 			CommandLine,
@@ -372,6 +562,18 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("ABTSM11CaptureRank must be in [0, 11]."));
+	}
+	if (bDirectorM2 && bDirectorM3)
+	{
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("M2 and M3 camera director modes are mutually exclusive."));
+	}
+	if (bCustomLaunchInput && !CustomLaunchInput.IsFinite())
+	{
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("Custom capture launch input must be finite."));
 	}
 	if (WarmupFrames < 0 || WarmupFrames > 600
 		|| TerminalHoldFrames < 0 || TerminalHoldFrames > 600)
@@ -503,6 +705,7 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	}
 	if (!IFileManager::Get().MakeDirectory(*Config.OutputDirectory, true)
 		|| Config.GetObservedFrameCount() > 0
+		|| IFileManager::Get().FileExists(*Config.GetExpectedVideoPath())
 		|| IFileManager::Get().FileExists(*Config.GetManifestPath())
 		|| IFileManager::Get().FileExists(*Config.GetObservationCsvPath()))
 	{
@@ -520,50 +723,64 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	bHasPreviousCameraObservation = false;
 	bObservationCsvWritten = false;
 	ABTSM11FinaleCameraDirector::SetM2Enabled(Config.bDirectorM2);
+	ABTSM11FinaleCameraDirector::SetM3Enabled(Config.bDirectorM3);
 	FABTSStylizedRenderingControl::SetEnabled(Config.bStylized);
 	FABTSStylizedRenderingControl::SetProfile(
 		EABTSStylizedRenderProfile::FinaleSpace);
 	FApp::SetUseFixedTimeStep(true);
 	FApp::SetFixedDeltaTime(1.0 / static_cast<double>(Config.FrameRate));
-	RecordingRenderTarget = NewObject<UTextureRenderTarget2D>(this);
-	if (!IsValid(RecordingRenderTarget) || !IsValid(RecordingCapture))
-	{
-		FailureReason = TEXT("RecordingRenderTargetAllocationFailed");
-		return false;
-	}
-	RecordingRenderTarget->ClearColor = FLinearColor::Black;
-	RecordingRenderTarget->InitCustomFormat(
-		Config.CaptureWidth,
-		Config.CaptureHeight,
-		PF_B8G8R8A8,
-		false);
-	RecordingRenderTarget->UpdateResourceImmediate(true);
-	RecordingCapture->TextureTarget = RecordingRenderTarget;
-	bStylizedViewRegistered = FABTSStylizedSceneCaptureRegistry::Register(
-		*RecordingCapture,
-		EABTSStylizedViewClass::FinaleCinematicCapture);
 	const FABTSStylizedViewPolicy CaptureViewPolicy =
 		FABTSStylizedRenderingContract::ResolveViewPolicy(
 			EABTSStylizedViewClass::FinaleCinematicCapture);
-	if (!bStylizedViewRegistered || !CaptureViewPolicy.IsValid())
+	if (!Config.bTelemetryOnly)
 	{
-		FailureReason = TEXT("RecordingStylizedViewRegistrationFailed");
+		RecordingRenderTarget = NewObject<UTextureRenderTarget2D>(this);
+		if (!IsValid(RecordingRenderTarget) || !IsValid(RecordingCapture))
+		{
+			FailureReason = TEXT("RecordingRenderTargetAllocationFailed");
+			return false;
+		}
+		RecordingRenderTarget->ClearColor = FLinearColor::Black;
+		RecordingRenderTarget->InitCustomFormat(
+			Config.CaptureWidth,
+			Config.CaptureHeight,
+			PF_B8G8R8A8,
+			false);
+		RecordingRenderTarget->UpdateResourceImmediate(true);
+		RecordingCapture->TextureTarget = RecordingRenderTarget;
+		bStylizedViewRegistered = FABTSStylizedSceneCaptureRegistry::Register(
+			*RecordingCapture,
+			EABTSStylizedViewClass::FinaleCinematicCapture);
+	}
+	if ((!Config.bTelemetryOnly && !bStylizedViewRegistered)
+		|| !CaptureViewPolicy.IsValid())
+	{
+		FailureReason = Config.bTelemetryOnly
+			? TEXT("TelemetryStylizedViewPolicyInvalid")
+			: TEXT("RecordingStylizedViewRegistrationFailed");
 		return false;
 	}
+	CapturedFrameSize = FIntPoint(
+		Config.CaptureWidth,
+		Config.CaptureHeight);
 	Phase = EABTSM11FinaleCameraCapturePhase::WarmingRenderMode;
 
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d DirectorM2=%d RenderVersion=%d ViewClass=FinaleCinematicCapture PolicyTone=%d PolicyOutline=%d PolicySelective=%d WarmupFrames=%d Frames=%s Video=%s"),
+		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d TelemetryOnly=%d DirectorM2=%d DirectorM3=%d RenderVersion=%d ViewClass=FinaleCinematicCapture PolicyTone=%d PolicyOutline=%d PolicySelective=%d WarmupFrames=%d Frames=%s Video=%s"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
 		static_cast<int32>(GetWorld()->WorldType),
-		TEXT("StandaloneSceneCaptureFrameCapture"),
+		Config.bTelemetryOnly
+			? TEXT("RendererIndependentTelemetry")
+			: TEXT("StandaloneSceneCaptureFrameCapture"),
 		*Config.MovieFormat,
 		Config.CandidateRank,
 		Config.CandidateRank == 0 ? TEXT("Certified") : TEXT("UNCERTIFIED"),
 		Config.bStylized ? 1 : 0,
+		Config.bTelemetryOnly ? 1 : 0,
 		Config.bDirectorM2 ? 1 : 0,
+		Config.bDirectorM3 ? 1 : 0,
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
 		CaptureViewPolicy.bApplyTone ? 1 : 0,
 		CaptureViewPolicy.bApplyOutline ? 1 : 0,
@@ -772,20 +989,28 @@ bool AABTSM11FinaleCameraCaptureRunner::TryBeginNominalAttempt()
 	{
 		return false;
 	}
-	if (!InteractionSystem->TryLaunchNominalCaptureAttempt(
-		*MatchingCord,
-		*Controller))
+	const FABTSM11FinaleLaunchInput Input = Config.bCustomLaunchInput
+		? Config.CustomLaunchInput
+		: FinaleSystem->GetLayoutPreset().NominalInput;
+	if (!FinaleSystem->GetLayoutPreset().LaunchModel.Contains(Input))
 	{
-		FailureReason = TEXT("NominalCaptureAttemptRejected");
+		FailureReason = TEXT("CaptureLaunchInputOutsidePresetDomain");
+		return false;
+	}
+	if (!InteractionSystem->TryLaunchCaptureAttempt(
+		*MatchingCord,
+		*Controller,
+		Input))
+	{
+		FailureReason = TEXT("CaptureAttemptRejected");
 		return false;
 	}
 
-	const FABTSM11FinaleLaunchInput& Input =
-		FinaleSystem->GetLayoutPreset().NominalInput;
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11][CameraCapture] NominalAttemptQueued Rank=%d Yaw=%.6f Pitch=%.6f Power=%.6f"),
+		TEXT("[ABTS][M11][CameraCapture] AttemptQueued Mode=%s Rank=%d Yaw=%.9f Pitch=%.9f Power=%.9f"),
+		Config.bCustomLaunchInput ? TEXT("CustomF4") : TEXT("Nominal"),
 		Config.CandidateRank,
 		Input.YawDegrees,
 		Input.PitchDegrees,
@@ -1007,8 +1232,9 @@ bool AABTSM11FinaleCameraCaptureRunner::CaptureCurrentFrame()
 	APlayerCameraManager* CameraManager =
 		UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0);
 	if (!IsValid(CameraManager)
-		|| !IsValid(RecordingCapture)
-		|| !IsValid(RecordingRenderTarget))
+		|| (!Config.bTelemetryOnly
+			&& (!IsValid(RecordingCapture)
+				|| !IsValid(RecordingRenderTarget))))
 	{
 		FailureReason = TEXT("RecordingCameraDependenciesUnavailable");
 		return false;
@@ -1017,6 +1243,14 @@ bool AABTSM11FinaleCameraCaptureRunner::CaptureCurrentFrame()
 	if (!RecordCameraObservation(View))
 	{
 		return false;
+	}
+	if (Config.bTelemetryOnly)
+	{
+		CapturedFrameSize = FIntPoint(
+			Config.CaptureWidth,
+			Config.CaptureHeight);
+		++CapturedFrameCount;
+		return true;
 	}
 	RecordingCapture->SetWorldLocationAndRotation(
 		View.Location,
@@ -1087,11 +1321,60 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	}
 	const double PlaybackSeconds =
 		InteractionSystem->GetPlaybackElapsedSeconds();
-	const FABTSM11FinaleCameraStageSelection ObservationTarget =
+	const AABTSM11FinaleFlightCamera* FlightCamera =
+		InteractionSystem->GetFlightCamera();
+	const FABTSM11FinaleCameraShotSettings PresentationShotSettings =
+		IsValid(FlightCamera)
+			? FlightCamera->GetM3ShotSettings()
+			: FABTSM11FinaleCameraShotSettings();
+	FABTSM11FinaleCameraShotSettings M3ShotSettings;
+	if (!PresentationShotSettings.BuildPlaybackClockSettings(
+		InteractionSystem->GetPlaybackPresentationTimeScale(),
+		M3ShotSettings))
+	{
+		FailureReason = TEXT("CameraObservationShotClockInvalid");
+		return false;
+	}
+	const FABTSM11TrajectoryResult* ObservationPrediction =
+		InteractionSystem->GetCurrentPrediction();
+	FABTSM11FinaleCameraStageSelection ObservationTarget =
 		ResolveObservationTarget(
-		InteractionState,
-		PlaybackSeconds,
-		InteractionSystem->GetCurrentPrediction());
+			InteractionState,
+			PlaybackSeconds,
+			ObservationPrediction,
+			Config.bDirectorM3,
+			&M3ShotSettings);
+	const FABTSM11PlaybackPlan& PlaybackPlan =
+		InteractionSystem->GetReleasedPlaybackPlan();
+	ObservationTarget.EndpointAuthority = PlaybackPlan.bPhysicalTargetHit
+		? EABTSM11FinaleCameraEndpointAuthority::PhysicalContact
+		: PlaybackPlan.bCandidateQualifiedIntercept
+			? EABTSM11FinaleCameraEndpointAuthority::CandidateQualified
+			: EABTSM11FinaleCameraEndpointAuthority::None;
+	if (ObservationTarget.Stage == EABTSM11FinaleCameraStage::FinalApproach
+		|| ObservationTarget.Stage == EABTSM11FinaleCameraStage::Terminal)
+	{
+		const FABTSM11TrajectoryEvent* Assist3Exit =
+			ObservationPrediction != nullptr
+				? ObservationPrediction->FindAssistEvent(
+					EABTSM11TrajectoryEventType::AssistExit,
+					FABTSM11GravityScenario::AssistCount)
+				: nullptr;
+		if (Assist3Exit == nullptr
+			|| !ABTSM11FinaleCameraDirector::ApplyM4TerminalTimeline(
+				PlaybackSeconds,
+				Assist3Exit->TimeSeconds,
+				PlaybackPlan.DurationSeconds,
+				ObservationTarget))
+		{
+			FailureReason = TEXT("CameraObservationTerminalTimelineInvalid");
+			return false;
+		}
+		ObservationTarget.Reason = FString::Printf(
+			TEXT("%sEndpoint"),
+			ABTSM11FinaleCameraDirector::EndpointAuthorityLabel(
+				ObservationTarget.EndpointAuthority));
+	}
 	if (ObservationTarget.Stage
 		== EABTSM11FinaleCameraStage::Unavailable)
 	{
@@ -1130,8 +1413,11 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	}
 	else
 	{
+		const int32 ObservedAssistIndex = Config.bDirectorM3
+			? ObservationTarget.FramingAssistIndex
+			: ObservationTarget.AssistIndex;
 		const FABTSM11GravityBodySpec& Body =
-			Preset.CanonicalScenario.GetAssist(ObservationTarget.AssistIndex);
+			Preset.CanonicalScenario.GetAssist(ObservedAssistIndex);
 		TargetCenter = Frame.TransformLocalPosition(FVector(Body.CenterCM));
 		TargetRadiusCM = Body.VisualRadiusCM;
 	}
@@ -1144,6 +1430,8 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	const FIntPoint Size(Config.CaptureWidth, Config.CaptureHeight);
 	FProjectedSphereObservation BirdProjection;
 	FProjectedSphereObservation TargetProjection;
+	FProjectedSphereObservation BridgeOutgoingProjection;
+	FProjectedSphereObservation BridgeIncomingProjection;
 	if ((IsValid(Bird) && !ProjectObservationSphere(
 				View,
 				Size,
@@ -1160,6 +1448,56 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 		FailureReason = TEXT("CameraObservationProjectionInvalid");
 		return false;
 	}
+	if (ObservationTarget.IsM3InterBodyTransition())
+	{
+		const FABTSM11GravityBodySpec& OutgoingBody =
+			Preset.CanonicalScenario.GetAssist(
+				ObservationTarget.OutgoingAssistIndex);
+		const FABTSM11GravityBodySpec& IncomingBody =
+			Preset.CanonicalScenario.GetAssist(
+				ObservationTarget.IncomingAssistIndex);
+		if (!ProjectObservationSphere(
+				View,
+				Size,
+				Frame.TransformLocalPosition(FVector(OutgoingBody.CenterCM)),
+				OutgoingBody.VisualRadiusCM,
+				BridgeOutgoingProjection)
+			|| !ProjectObservationSphere(
+				View,
+				Size,
+				Frame.TransformLocalPosition(FVector(IncomingBody.CenterCM)),
+				IncomingBody.VisualRadiusCM,
+				BridgeIncomingProjection))
+		{
+			FailureReason = TEXT("CameraObservationBridgeProjectionInvalid");
+			return false;
+		}
+	}
+	else if (ObservationTarget.IsM4TerminalTransition())
+	{
+		const FABTSM11GravityBodySpec& OutgoingBody =
+			Preset.CanonicalScenario.GetAssist(
+				FABTSM11GravityScenario::AssistCount);
+		const FABTSM11TargetSpec& IncomingTarget =
+			Preset.CanonicalScenario.Target;
+		if (!ProjectObservationSphere(
+			View,
+			Size,
+			Frame.TransformLocalPosition(FVector(OutgoingBody.CenterCM)),
+			OutgoingBody.VisualRadiusCM,
+			BridgeOutgoingProjection)
+			|| !ProjectObservationSphere(
+				View,
+				Size,
+				Frame.TransformLocalPosition(FVector(
+					IncomingTarget.GetGeometricContactCenterCM())),
+				IncomingTarget.GetGeometricContactRadiusCM(),
+				BridgeIncomingProjection))
+		{
+			FailureReason = TEXT("CameraObservationTerminalProjectionInvalid");
+			return false;
+		}
+	}
 
 	FABTSM11FinaleCameraObservationSample Sample;
 	Sample.FrameIndex = CapturedFrameCount;
@@ -1170,17 +1508,32 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	Sample.Stage = ABTSM11FinaleCameraDirector::StageLabel(
 		ObservationTarget.Stage);
 	Sample.CurrentTarget = ObservationTarget.TargetLabel;
+	Sample.FramingTarget = ObservationTarget.FramingTargetLabel;
 	Sample.StageReason = ObservationTarget.Reason;
-	if (const AABTSM11FinaleFlightCamera* FlightCamera =
-		InteractionSystem->GetFlightCamera(); IsValid(FlightCamera))
+	Sample.EndpointAuthority =
+		ABTSM11FinaleCameraDirector::EndpointAuthorityLabel(
+			ObservationTarget.EndpointAuthority);
+	Sample.StageProgress = ObservationTarget.StageProgress;
+	Sample.StageDurationSeconds = ObservationTarget.StageDurationSeconds;
+	Sample.ShotPhase = ABTSM11FinaleCameraDirector::ShotPhaseLabel(
+		ObservationTarget.ShotPhase);
+	Sample.ShotReason = ObservationTarget.ShotReason;
+	Sample.ShotProgress = ObservationTarget.ShotProgress;
+	Sample.ShotDurationSeconds = ObservationTarget.ShotDurationSeconds;
+	Sample.ShotEndSlope = ObservationTarget.ShotEndSlope;
+	if (IsValid(FlightCamera))
 	{
 		Sample.bDirectorM2FrozenEnabled =
 			FlightCamera->IsM2DirectorFrozenEnabled();
+		Sample.bDirectorM3FrozenEnabled =
+			FlightCamera->IsM3DirectorFrozenEnabled();
 		Sample.DirectorBlendAlpha = FlightCamera->GetLastM2BlendAlpha();
 	}
-	Sample.DirectorMode = Sample.bDirectorM2FrozenEnabled
-		? TEXT("M2Assist1")
-		: TEXT("Legacy");
+	Sample.DirectorMode = Sample.bDirectorM3FrozenEnabled
+		? TEXT("M3MultiAssist")
+		: Sample.bDirectorM2FrozenEnabled
+			? TEXT("M2Assist1")
+			: TEXT("Legacy");
 	Sample.BirdWorld = BirdCenter;
 	Sample.BirdScreen = BirdProjection.Screen;
 	Sample.BirdDepthCM = BirdProjection.DepthCM;
@@ -1191,6 +1544,43 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	Sample.TargetDepthCM = TargetProjection.DepthCM;
 	Sample.TargetPixelRadius = TargetProjection.PixelRadius;
 	Sample.TargetVisibleRatio = TargetProjection.VisibleRatio;
+	if (ObservationTarget.IsM3InterBodyTransition())
+	{
+		Sample.BridgeOutgoingTarget = FString::Printf(
+			TEXT("Assist%d"), ObservationTarget.OutgoingAssistIndex);
+		Sample.BridgeOutgoingScreen = BridgeOutgoingProjection.Screen;
+		Sample.BridgeOutgoingPixelRadius =
+			BridgeOutgoingProjection.PixelRadius;
+		Sample.BridgeOutgoingVisibleRatio =
+			BridgeOutgoingProjection.VisibleRatio;
+		Sample.BridgeIncomingTarget = FString::Printf(
+			TEXT("Assist%d"), ObservationTarget.IncomingAssistIndex);
+		Sample.BridgeIncomingScreen = BridgeIncomingProjection.Screen;
+		Sample.BridgeIncomingPixelRadius =
+			BridgeIncomingProjection.PixelRadius;
+		Sample.BridgeIncomingVisibleRatio =
+			BridgeIncomingProjection.VisibleRatio;
+	}
+	else if (ObservationTarget.IsM4TerminalTransition())
+	{
+		Sample.BridgeOutgoingTarget = TEXT("Assist3");
+		Sample.BridgeOutgoingScreen = BridgeOutgoingProjection.Screen;
+		Sample.BridgeOutgoingPixelRadius =
+			BridgeOutgoingProjection.PixelRadius;
+		Sample.BridgeOutgoingVisibleRatio =
+			BridgeOutgoingProjection.VisibleRatio;
+		Sample.BridgeIncomingTarget = TEXT("UFO");
+		Sample.BridgeIncomingScreen = BridgeIncomingProjection.Screen;
+		Sample.BridgeIncomingPixelRadius =
+			BridgeIncomingProjection.PixelRadius;
+		Sample.BridgeIncomingVisibleRatio =
+			BridgeIncomingProjection.VisibleRatio;
+	}
+	else
+	{
+		Sample.BridgeOutgoingTarget = TEXT("None");
+		Sample.BridgeIncomingTarget = TEXT("None");
+	}
 	Sample.CameraWorld = View.Location;
 	Sample.CameraRotation = View.Rotation;
 	Sample.CameraToBirdCM = IsValid(Bird)
@@ -1226,10 +1616,13 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 		return false;
 	}
 	FString Csv = TEXT(
-		"schemaVersion,frameIndex,captureSeconds,playbackSeconds,interactionState,stage,currentTarget,stageReason,"
-		"directorMode,directorM2FrozenEnabled,directorBlendAlpha,"
+		"schemaVersion,frameIndex,captureSeconds,playbackSeconds,interactionState,stage,currentTarget,framingTarget,stageReason,endpointAuthority,stageProgress,stageDurationSeconds,"
+		"shotPhase,shotReason,shotProgress,shotDurationSeconds,shotEndSlope,"
+		"directorMode,directorM2FrozenEnabled,directorM3FrozenEnabled,directorBlendAlpha,"
 		"birdWorldX,birdWorldY,birdWorldZ,birdScreenX,birdScreenY,birdDepthCM,birdPixelRadius,birdVisibleRatio,"
 		"targetWorldX,targetWorldY,targetWorldZ,targetScreenX,targetScreenY,targetDepthCM,targetPixelRadius,targetVisibleRatio,"
+		"bridgeOutgoingTarget,bridgeOutgoingScreenX,bridgeOutgoingScreenY,bridgeOutgoingPixelRadius,bridgeOutgoingVisibleRatio,"
+		"bridgeIncomingTarget,bridgeIncomingScreenX,bridgeIncomingScreenY,bridgeIncomingPixelRadius,bridgeIncomingVisibleRatio,"
 		"cameraWorldX,cameraWorldY,cameraWorldZ,cameraPitch,cameraYaw,cameraRoll,cameraToBirdCM,cameraToTargetCM,fovDegrees,"
 		"cameraPositionDeltaCM,cameraRotationDeltaDegrees,fovDeltaDegrees\n");
 	Csv.Reserve(ObservationSamples.Num() * 704);
@@ -1237,9 +1630,10 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 		: ObservationSamples)
 	{
 		Csv += FString::Printf(
-			TEXT("2,%d,%.9f,%.9f,%s,%s,%s,%s,%s,%d,%.9f,")
+			TEXT("7,%d,%.9f,%.9f,%s,%s,%s,%s,%s,%s,%.9f,%.9f,%s,%s,%.9f,%.9f,%.9f,%s,%d,%d,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f,")
+			TEXT("%s,%.6f,%.6f,%.6f,%.9f,%s,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,")
 			TEXT("%.6f,%.6f,%.6f\n"),
 			Sample.FrameIndex,
@@ -1248,9 +1642,19 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 			*Sample.InteractionState,
 			*Sample.Stage,
 			*Sample.CurrentTarget,
+			*Sample.FramingTarget,
 			*Sample.StageReason,
+			*Sample.EndpointAuthority,
+			Sample.StageProgress,
+			Sample.StageDurationSeconds,
+			*Sample.ShotPhase,
+			*Sample.ShotReason,
+			Sample.ShotProgress,
+			Sample.ShotDurationSeconds,
+			Sample.ShotEndSlope,
 			*Sample.DirectorMode,
 			Sample.bDirectorM2FrozenEnabled ? 1 : 0,
+			Sample.bDirectorM3FrozenEnabled ? 1 : 0,
 			Sample.DirectorBlendAlpha,
 			Sample.BirdWorld.X,
 			Sample.BirdWorld.Y,
@@ -1268,6 +1672,16 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 			Sample.TargetDepthCM,
 			Sample.TargetPixelRadius,
 			Sample.TargetVisibleRatio,
+			*Sample.BridgeOutgoingTarget,
+			Sample.BridgeOutgoingScreen.X,
+			Sample.BridgeOutgoingScreen.Y,
+			Sample.BridgeOutgoingPixelRadius,
+			Sample.BridgeOutgoingVisibleRatio,
+			*Sample.BridgeIncomingTarget,
+			Sample.BridgeIncomingScreen.X,
+			Sample.BridgeIncomingScreen.Y,
+			Sample.BridgeIncomingPixelRadius,
+			Sample.BridgeIncomingVisibleRatio,
 			Sample.CameraWorld.X,
 			Sample.CameraWorld.Y,
 			Sample.CameraWorld.Z,
@@ -1489,7 +1903,7 @@ void AABTSM11FinaleCameraCaptureRunner::StopRecording()
 		Finish(false, FailureReason);
 		return;
 	}
-	if (!MuxCapturedFramesToAvi())
+	if (!Config.bTelemetryOnly && !MuxCapturedFramesToAvi())
 	{
 		Finish(false, FailureReason);
 		return;
@@ -1517,10 +1931,11 @@ void AABTSM11FinaleCameraCaptureRunner::Finish(
 	}
 
 	const FString Summary = FString::Printf(
-		TEXT("[ABTS][M11][CameraCapture] Complete Success=%d Rank=%d Stylized=%d State=%s Frames=%d Manifest=%d Reason=%s Video=%s"),
+		TEXT("[ABTS][M11][CameraCapture] Complete Success=%d Rank=%d Stylized=%d TelemetryOnly=%d State=%s Frames=%d Manifest=%d Reason=%s Video=%s"),
 		bSuccess ? 1 : 0,
 		Config.CandidateRank,
 		Config.bStylized ? 1 : 0,
+		Config.bTelemetryOnly ? 1 : 0,
 		IsValid(InteractionSystem)
 			? ABTSM11FinaleCameraCaptureRunnerPrivate::StateLabel(
 				InteractionSystem->GetInteractionState())
@@ -1528,7 +1943,9 @@ void AABTSM11FinaleCameraCaptureRunner::Finish(
 		CapturedFrameCount,
 		bManifestWritten ? 1 : 0,
 		*Reason,
-		*Config.GetExpectedVideoPath());
+		Config.bTelemetryOnly
+			? TEXT("None")
+			: *Config.GetExpectedVideoPath());
 	if (bSuccess && bManifestWritten)
 	{
 		UE_LOG(LogABTSRuntime, Log, TEXT("%s"), *Summary);
@@ -1569,19 +1986,50 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 			: TEXT("Failed"));
 	Root->SetStringField(
 		TEXT("captureFinalization"),
-		TEXT("SynchronousFramesAndAviMuxComplete"));
+		Config.bTelemetryOnly
+			? TEXT("TelemetryCsvAndManifestComplete")
+			: TEXT("SynchronousFramesAndAviMuxComplete"));
 	Root->SetStringField(TEXT("reason"), Reason);
 	Root->SetStringField(TEXT("startUtc"), StartUtc.ToIso8601());
 	Root->SetStringField(TEXT("endUtc"), EndUtc.ToIso8601());
 	Root->SetNumberField(TEXT("rank"), Config.CandidateRank);
 	Root->SetStringField(
+		TEXT("launchInputMode"),
+		Config.bCustomLaunchInput ? TEXT("CustomF4") : TEXT("Nominal"));
+	const FABTSM11FinaleLaunchInput ManifestInput = Config.bCustomLaunchInput
+		? Config.CustomLaunchInput
+		: IsValid(FinaleSystem)
+			? FinaleSystem->GetLayoutPreset().NominalInput
+			: FABTSM11FinaleLaunchInput();
+	Root->SetNumberField(TEXT("launchYawDegrees"), ManifestInput.YawDegrees);
+	Root->SetNumberField(TEXT("launchPitchDegrees"), ManifestInput.PitchDegrees);
+	Root->SetNumberField(TEXT("launchPower"), ManifestInput.Power);
+	Root->SetStringField(
 		TEXT("authority"),
 		Config.CandidateRank == 0 ? TEXT("Certified") : TEXT("UNCERTIFIED"));
 	Root->SetBoolField(TEXT("stylizedEnabled"), Config.bStylized);
+	Root->SetBoolField(TEXT("telemetryOnly"), Config.bTelemetryOnly);
+	Root->SetBoolField(
+		TEXT("visualRecordingProduced"),
+		!Config.bTelemetryOnly);
 	Root->SetBoolField(TEXT("cameraDirectorM2Requested"), Config.bDirectorM2);
+	Root->SetBoolField(TEXT("cameraDirectorM3Requested"), Config.bDirectorM3);
+	Root->SetBoolField(
+		TEXT("m7AdaptiveShotCompression"),
+		IsValid(InteractionSystem)
+			&& InteractionSystem->GetReleasedCameraShotPlan()
+				.bUsesAdaptiveCompression);
+	Root->SetStringField(
+		TEXT("m7CameraPlanTrajectoryHash"),
+		IsValid(InteractionSystem)
+			? Hex64(InteractionSystem->GetReleasedCameraShotPlan()
+				.ReleasedTrajectoryHash)
+			: Hex64(0));
 	Root->SetStringField(
 		TEXT("cameraDirectorMode"),
-		Config.bDirectorM2 ? TEXT("M2Assist1") : TEXT("Legacy"));
+		Config.bDirectorM3
+			? TEXT("M3MultiAssist")
+			: Config.bDirectorM2 ? TEXT("M2Assist1") : TEXT("Legacy"));
 	Root->SetBoolField(
 		TEXT("captureFixtureCreated"),
 		bCaptureFixtureCreated);
@@ -1615,16 +2063,22 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		Config.bStylized && CaptureViewPolicy.bAllowSelectiveStencil);
 	Root->SetStringField(
 		TEXT("captureProtocol"),
-		TEXT("SceneCaptureJPG+MJPEGAVI"));
+		Config.bTelemetryOnly
+			? TEXT("RendererIndependentTelemetry")
+			: TEXT("SceneCaptureJPG+MJPEGAVI"));
 	Root->SetNumberField(
 		TEXT("stylizedImplementationVersion"),
 		FABTSStylizedRenderingControl::GetImplementationVersion());
-	Root->SetStringField(TEXT("videoPath"), Config.GetExpectedVideoPath());
-	Root->SetStringField(TEXT("frameWildcard"), Config.GetFrameWildcard());
+	Root->SetStringField(
+		TEXT("videoPath"),
+		Config.bTelemetryOnly ? FString() : Config.GetExpectedVideoPath());
+	Root->SetStringField(
+		TEXT("frameWildcard"),
+		Config.bTelemetryOnly ? FString() : Config.GetFrameWildcard());
 	Root->SetStringField(
 		TEXT("cameraObservationPath"),
 		Config.GetObservationCsvPath());
-	Root->SetNumberField(TEXT("cameraObservationSchemaVersion"), 2);
+	Root->SetNumberField(TEXT("cameraObservationSchemaVersion"), 7);
 	Root->SetNumberField(
 		TEXT("cameraObservationCount"),
 		ObservationSamples.Num());
@@ -1633,7 +2087,37 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		bObservationCsvWritten);
 	Root->SetStringField(
 		TEXT("cameraObservationAssessment"),
-		TEXT("OfflineDiagnosticRequired"));
+		Config.bTelemetryOnly
+			? TEXT("NumericalOrthogonalityEvidence")
+			: TEXT("OfflineDiagnosticRequired"));
+	const FM5OrthogonalityDigests M5Digests =
+		ComputeM5OrthogonalityDigests(ObservationSamples);
+	Root->SetStringField(
+		TEXT("m5EvidenceMode"),
+		Config.bTelemetryOnly
+			? TEXT("NumericalTelemetry")
+			: Config.bStylized
+				? TEXT("StylizedVisualRecording")
+				: TEXT("LegacyVisualDiagnostic"));
+	Root->SetBoolField(
+		TEXT("m5VisualAcceptanceEligible"),
+		!Config.bTelemetryOnly && Config.bStylized);
+	Root->SetBoolField(
+		TEXT("m5StylizedExcludedFromNumericalHashes"),
+		true);
+	Root->SetStringField(
+		TEXT("m5DigestQuantization"),
+		TEXT("StageTimeProgress=1e-9;CameraCM=1e-3;RotationFov=1e-6"));
+	Root->SetStringField(
+		TEXT("m5StageSequenceHash"),
+		Hex64(M5Digests.StageSequenceHash));
+	Root->SetStringField(
+		TEXT("m5CameraNumericsHash"),
+		Hex64(M5Digests.CameraNumericsHash));
+	Root->SetNumberField(
+		TEXT("m5HashedFlightFrameCount"),
+		M5Digests.FlightFrameCount);
+	Root->SetBoolField(TEXT("m5NumericalDigestValid"), M5Digests.IsValid());
 	Root->SetNumberField(
 		TEXT("frameCountObserved"),
 		CapturedFrameCount);
@@ -1644,8 +2128,10 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetBoolField(TEXT("videoPostprocessRequired"), false);
 	Root->SetNumberField(
 		TEXT("videoBytesObserved"),
-		static_cast<double>(IFileManager::Get().FileSize(
-			*Config.GetExpectedVideoPath())));
+		Config.bTelemetryOnly
+			? 0.0
+			: static_cast<double>(IFileManager::Get().FileSize(
+				*Config.GetExpectedVideoPath())));
 
 	int32 FlightFrameCount = 0;
 	int32 BirdLostFrameCount = 0;
@@ -1657,6 +2143,16 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	int32 StageTransitionCount = 0;
 	int32 DirectorM2BlendFrameCount = 0;
 	int32 DirectorM2LeakFrameCount = 0;
+	int32 M4TerminalFrameCount = 0;
+	int32 M4AcquireFrameCount = 0;
+	int32 M4AcquireNoTargetFrameCount = 0;
+	int32 M4BirdLostFrameCount = 0;
+	int32 M4TargetLostFrameCount = 0;
+	int32 M4EndpointMissingFrameCount = 0;
+	int32 M4PositionJumpCount = 0;
+	int32 M4RotationJumpCount = 0;
+	int32 M4FovJumpCount = 0;
+	double M4FinalBirdToUFODistanceCM = TNumericLimits<double>::Max();
 	int32 CurrentBirdLostRun = 0;
 	int32 CurrentTargetLostRun = 0;
 	int32 CurrentEmptyRun = 0;
@@ -1685,9 +2181,20 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 			&& (Sample.Stage == TEXT("CruiseToBody")
 				|| Sample.Stage == TEXT("Approach")
 				|| Sample.Stage == TEXT("Periapsis"));
+		const bool bM3Window =
+			(Sample.FramingTarget.StartsWith(TEXT("Assist"))
+				&& (Sample.Stage == TEXT("CruiseToBody")
+				|| Sample.Stage == TEXT("Handoff")
+				|| Sample.Stage == TEXT("Approach")
+				|| Sample.Stage == TEXT("Periapsis")))
+			|| Sample.Stage == TEXT("FinalApproach")
+			|| Sample.Stage == TEXT("Terminal");
+		const bool bExpectedDirectorWindow = Config.bDirectorM3
+			? bM3Window
+			: bM2Window;
 		DirectorM2BlendFrameCount += bDirectorBlended ? 1 : 0;
 		DirectorM2LeakFrameCount +=
-			bDirectorBlended && !bM2Window ? 1 : 0;
+			bDirectorBlended && !bExpectedDirectorWindow ? 1 : 0;
 		MaximumDirectorM2BlendAlpha = FMath::Max(
 			MaximumDirectorM2BlendAlpha,
 			Sample.DirectorBlendAlpha);
@@ -1695,6 +2202,38 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		const bool bTargetLost = Sample.TargetVisibleRatio <= 0.01
 			|| Sample.TargetPixelRadius < 4.0;
 		const bool bEmpty = bBirdLost && bTargetLost;
+		const bool bM4TerminalFrame =
+			Sample.Stage == TEXT("FinalApproach")
+			|| Sample.Stage == TEXT("Terminal");
+		if (Sample.ShotPhase == TEXT("TerminalAcquire"))
+		{
+			++M4AcquireFrameCount;
+			const bool bOutgoingVisible =
+				Sample.BridgeOutgoingVisibleRatio > 0.01
+				&& Sample.BridgeOutgoingPixelRadius >= 4.0;
+			const bool bIncomingVisible =
+				Sample.BridgeIncomingVisibleRatio > 0.01
+				&& Sample.BridgeIncomingPixelRadius >= 4.0;
+			M4AcquireNoTargetFrameCount +=
+				!bOutgoingVisible && !bIncomingVisible ? 1 : 0;
+		}
+		if (bM4TerminalFrame)
+		{
+			const bool bM4BirdUnreadable =
+				bBirdLost || Sample.BirdPixelRadius < 1.0;
+			++M4TerminalFrameCount;
+			M4BirdLostFrameCount += bM4BirdUnreadable ? 1 : 0;
+			M4TargetLostFrameCount += bTargetLost ? 1 : 0;
+			M4EndpointMissingFrameCount +=
+				Sample.EndpointAuthority == TEXT("None") ? 1 : 0;
+			M4PositionJumpCount +=
+				Sample.CameraPositionDeltaCM > 5000.0 ? 1 : 0;
+			M4RotationJumpCount +=
+				Sample.CameraRotationDeltaDegrees > 15.0 ? 1 : 0;
+			M4FovJumpCount += Sample.FovDeltaDegrees > 2.0 ? 1 : 0;
+			M4FinalBirdToUFODistanceCM =
+				(Sample.BirdWorld - Sample.TargetWorld).Length();
+		}
 		BirdLostFrameCount += bBirdLost ? 1 : 0;
 		TargetLostFrameCount += bTargetLost ? 1 : 0;
 		EmptyCompositionFrameCount += bEmpty ? 1 : 0;
@@ -1758,13 +2297,22 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		StageTransitionCount);
 	Root->SetNumberField(
 		TEXT("cameraDirectorM2BlendFrames"),
-		DirectorM2BlendFrameCount);
+		Config.bDirectorM2 ? DirectorM2BlendFrameCount : 0);
 	Root->SetNumberField(
 		TEXT("cameraDirectorM2LeakFrames"),
-		DirectorM2LeakFrameCount);
+		Config.bDirectorM2 ? DirectorM2LeakFrameCount : 0);
 	Root->SetNumberField(
 		TEXT("cameraDirectorM2MaximumBlendAlpha"),
-		MaximumDirectorM2BlendAlpha);
+		Config.bDirectorM2 ? MaximumDirectorM2BlendAlpha : 0.0);
+	Root->SetNumberField(
+		TEXT("cameraDirectorM3BlendFrames"),
+		Config.bDirectorM3 ? DirectorM2BlendFrameCount : 0);
+	Root->SetNumberField(
+		TEXT("cameraDirectorM3LeakFrames"),
+		Config.bDirectorM3 ? DirectorM2LeakFrameCount : 0);
+	Root->SetNumberField(
+		TEXT("cameraDirectorM3MaximumBlendAlpha"),
+		Config.bDirectorM3 ? MaximumDirectorM2BlendAlpha : 0.0);
 	Root->SetNumberField(
 		TEXT("cameraObservationMaximumPositionDeltaCM"),
 		MaximumCameraPositionDeltaCM);
@@ -1774,6 +2322,74 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetNumberField(
 		TEXT("cameraObservationMaximumFovDeltaDegrees"),
 		MaximumFovDeltaDegrees);
+	Root->SetNumberField(TEXT("m4TerminalFrameCount"), M4TerminalFrameCount);
+	Root->SetNumberField(TEXT("m4AcquireFrameCount"), M4AcquireFrameCount);
+	Root->SetNumberField(
+		TEXT("m4AcquireNoTargetFrames"),
+		M4AcquireNoTargetFrameCount);
+	Root->SetNumberField(TEXT("m4BirdLostFrames"), M4BirdLostFrameCount);
+	Root->SetNumberField(TEXT("m4UFOLostFrames"), M4TargetLostFrameCount);
+	Root->SetNumberField(
+		TEXT("m4EndpointMissingFrames"),
+		M4EndpointMissingFrameCount);
+	Root->SetNumberField(TEXT("m4PositionJumpFrames"), M4PositionJumpCount);
+	Root->SetNumberField(TEXT("m4RotationJumpFrames"), M4RotationJumpCount);
+	Root->SetNumberField(TEXT("m4FovJumpFrames"), M4FovJumpCount);
+	double M4PhysicalContactRadiusCM = 0.0;
+	if (IsValid(FinaleSystem))
+	{
+		M4PhysicalContactRadiusCM = FinaleSystem->GetLayoutPreset()
+			.CanonicalScenario.Target.GetGeometricContactRadiusCM();
+	}
+	const bool bM4PlanHasPhysicalContact = IsValid(InteractionSystem)
+		&& InteractionSystem->GetReleasedPlaybackPlan().bPhysicalTargetHit;
+	if (IsValid(FinaleSystem) && IsValid(InteractionSystem))
+	{
+		const FABTSM11PlaybackPlan& ContactPlan =
+			InteractionSystem->GetReleasedPlaybackPlan();
+		if (!ContactPlan.Points.IsEmpty())
+		{
+			const FABTSM110FinaleLocalFrame& Frame =
+				FinaleSystem->GetFinaleFrame();
+			const FVector AuthorityBirdWorld = Frame.TransformLocalPosition(
+				FVector(ContactPlan.Points.Last().PositionCM));
+			const FVector PhysicalTargetWorld = Frame.TransformLocalPosition(
+				FVector(FinaleSystem->GetLayoutPreset()
+					.CanonicalScenario.Target
+					.GetGeometricContactCenterCM()));
+			M4FinalBirdToUFODistanceCM =
+				(AuthorityBirdWorld - PhysicalTargetWorld).Length();
+		}
+	}
+	const bool bM4PhysicalContactPassed = bM4PlanHasPhysicalContact
+		&& FMath::IsFinite(M4FinalBirdToUFODistanceCM)
+		&& M4PhysicalContactRadiusCM > 0.0
+		&& FMath::Abs(
+			M4FinalBirdToUFODistanceCM - M4PhysicalContactRadiusCM)
+			<= FMath::Max(1.0, M4PhysicalContactRadiusCM * 0.01);
+	Root->SetNumberField(
+		TEXT("m4FinalBirdToUFODistanceCM"),
+		FMath::IsFinite(M4FinalBirdToUFODistanceCM)
+			? M4FinalBirdToUFODistanceCM
+			: -1.0);
+	Root->SetNumberField(
+		TEXT("m4PhysicalContactRadiusCM"),
+		M4PhysicalContactRadiusCM);
+	Root->SetBoolField(
+		TEXT("m4PhysicalContactPassed"),
+		bM4PhysicalContactPassed);
+	Root->SetBoolField(
+		TEXT("m4TerminalClosurePassed"),
+		M4TerminalFrameCount > 0
+			&& M4AcquireFrameCount > 0
+			&& M4AcquireNoTargetFrameCount == 0
+			&& M4BirdLostFrameCount == 0
+			&& M4TargetLostFrameCount == 0
+			&& M4EndpointMissingFrameCount == 0
+			&& M4PositionJumpCount == 0
+			&& M4RotationJumpCount == 0
+			&& M4FovJumpCount == 0
+			&& bM4PhysicalContactPassed);
 
 	if (IsValid(FinaleSystem))
 	{
@@ -1810,6 +2426,22 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 			TEXT("candidateQualifiedIntercept"),
 			Plan.bCandidateQualifiedIntercept);
 		Root->SetBoolField(TEXT("physicalTargetHit"), Plan.bPhysicalTargetHit);
+		Root->SetBoolField(
+			TEXT("visibleTerminalTransfer"),
+			Plan.bUsesVisibleTerminalTransfer);
+		Root->SetNumberField(
+			TEXT("terminalTransferStartSeconds"),
+			Plan.TransferStartTimeSeconds);
+		Root->SetNumberField(
+			TEXT("terminalTransferEndSeconds"),
+			Plan.TransferEndTimeSeconds);
+		Root->SetStringField(
+			TEXT("cameraEndpointAuthority"),
+			Plan.bPhysicalTargetHit
+				? TEXT("PhysicalContact")
+				: Plan.bCandidateQualifiedIntercept
+					? TEXT("CandidateQualified")
+					: TEXT("None"));
 	}
 
 	FString Json;
@@ -1834,9 +2466,9 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	const FString& Parameters)
 {
 	TestEqual(
-		TEXT("Capture contract version is integrated v6"),
+		TEXT("Capture contract version includes M7 custom F4 input v15"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
-		6);
+		15);
 
 	FABTSM11FinaleCameraCaptureConfig Config;
 	FString Failure;
@@ -1866,7 +2498,9 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestTrue(TEXT("Capture enabled"), Config.bEnabled);
 	TestEqual(TEXT("Rank preserved"), Config.CandidateRank, 11);
 	TestTrue(TEXT("Stylized preserved"), Config.bStylized);
+	TestFalse(TEXT("Visual capture is not telemetry-only"), Config.bTelemetryOnly);
 	TestTrue(TEXT("M2 director preserved"), Config.bDirectorM2);
+	TestFalse(TEXT("M3 director remains disabled"), Config.bDirectorM3);
 	TestFalse(TEXT("Auto-exit override preserved"), Config.bAutoExit);
 	TestEqual(
 		TEXT("JPG capture protocol preserved"),
@@ -1881,6 +2515,135 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 		TEXT("Camera observation filename is deterministic"),
 		FPaths::GetCleanFilename(Config.GetObservationCsvPath()),
 		FString(TEXT("Rank11_Stylized.camera-observations.csv")));
+
+	const FString TelemetryCommandLine = FString::Printf(
+		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=0 ")
+		TEXT("-ABTSM11CaptureStylized=0 ")
+		TEXT("-ABTSM11CaptureTelemetryOnly=1 ")
+		TEXT("-ABTSM11CaptureDirectorM3=1 ")
+		TEXT("-MovieFolder=\"%s\" -MovieName=Rank0_Numerical ")
+		TEXT("-MovieFormat=JPG"),
+		*Output);
+	TestTrue(
+		TEXT("Rank 0 non-stylized telemetry config parses"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			*TelemetryCommandLine,
+			Config,
+			&Failure));
+	TestEqual(TEXT("Telemetry Rank preserved"), Config.CandidateRank, 0);
+	TestFalse(TEXT("Telemetry style is disabled"), Config.bStylized);
+	TestTrue(TEXT("Telemetry-only mode preserved"), Config.bTelemetryOnly);
+	TestTrue(TEXT("Telemetry M3 director preserved"), Config.bDirectorM3);
+
+	const FString CustomCommandLine = FString::Printf(
+		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=11 ")
+		TEXT("-ABTSM11CaptureYaw=-1.5 -ABTSM11CapturePitch=26.5 ")
+		TEXT("-ABTSM11CapturePower=0.99 -MovieFolder=\"%s\" ")
+		TEXT("-MovieName=CustomF4 -MovieFormat=JPG"),
+		*Output);
+	TestTrue(
+		TEXT("Complete custom launch triplet parses"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			*CustomCommandLine, Config, &Failure));
+	TestTrue(TEXT("Custom launch mode preserved"), Config.bCustomLaunchInput);
+	TestEqual(TEXT("Custom yaw preserved"),
+		Config.CustomLaunchInput.YawDegrees, -1.5, 1.0e-12);
+	TestEqual(TEXT("Custom pitch preserved"),
+		Config.CustomLaunchInput.PitchDegrees, 26.5, 1.0e-12);
+	TestEqual(TEXT("Custom power preserved"),
+		Config.CustomLaunchInput.Power, 0.99, 1.0e-12);
+	TestFalse(
+		TEXT("Partial custom launch triplet fails closed"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureYaw=-1.5 ")
+			TEXT("-MovieFolder=C:/Capture -MovieName=PartialInput ")
+			TEXT("-MovieFormat=JPG"), Config, &Failure));
+
+	FABTSM11FinaleCameraObservationSample DigestSample;
+	DigestSample.FrameIndex = 7;
+	DigestSample.PlaybackSeconds = 1.25;
+	DigestSample.InteractionState = TEXT("Launched");
+	DigestSample.Stage = TEXT("Approach");
+	DigestSample.CurrentTarget = TEXT("Assist1");
+	DigestSample.FramingTarget = TEXT("Assist1");
+	DigestSample.StageReason = TEXT("Assist1Approach");
+	DigestSample.EndpointAuthority = TEXT("PhysicalContact");
+	DigestSample.StageProgress = 0.25;
+	DigestSample.StageDurationSeconds = 2.0;
+	DigestSample.ShotPhase = TEXT("Authority");
+	DigestSample.ShotReason = TEXT("LucyAuthority");
+	DigestSample.ShotProgress = 0.25;
+	DigestSample.ShotDurationSeconds = 2.0;
+	DigestSample.DirectorMode = TEXT("M3MultiAssist");
+	DigestSample.bDirectorM3FrozenEnabled = true;
+	DigestSample.DirectorBlendAlpha = 1.0;
+	DigestSample.CameraWorld = FVector(100.125, -20.5, 30.75);
+	DigestSample.CameraRotation = FRotator(5.0, 10.0, -2.0);
+	DigestSample.FovDegrees = 55.0;
+	TArray<FABTSM11FinaleCameraObservationSample> DigestSamples;
+	DigestSamples.Add(DigestSample);
+	const auto BaselineDigest =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::
+			ComputeM5OrthogonalityDigests(DigestSamples);
+	const auto RepeatDigest =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::
+			ComputeM5OrthogonalityDigests(DigestSamples);
+	TestTrue(TEXT("M5 baseline digest is valid"), BaselineDigest.IsValid());
+	TestEqual(
+		TEXT("M5 stage digest is deterministic"),
+		BaselineDigest.StageSequenceHash,
+		RepeatDigest.StageSequenceHash);
+	TestEqual(
+		TEXT("M5 camera digest is deterministic"),
+		BaselineDigest.CameraNumericsHash,
+		RepeatDigest.CameraNumericsHash);
+	FABTSM11FinaleCameraObservationSample PreflightSample = DigestSample;
+	PreflightSample.FrameIndex = 1;
+	PreflightSample.InteractionState = TEXT("Ready");
+	PreflightSample.Stage = TEXT("Unavailable");
+	PreflightSample.CameraWorld = FVector(999.0, 999.0, 999.0);
+	DigestSamples.Insert(PreflightSample, 0);
+	const auto PreflightDigest =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::
+			ComputeM5OrthogonalityDigests(DigestSamples);
+	TestEqual(
+		TEXT("Preflight timing does not alter stage digest"),
+		BaselineDigest.StageSequenceHash,
+		PreflightDigest.StageSequenceHash);
+	TestEqual(
+		TEXT("Preflight timing does not alter camera digest"),
+		BaselineDigest.CameraNumericsHash,
+		PreflightDigest.CameraNumericsHash);
+	TestEqual(
+		TEXT("Only launched/terminal frames are hashed"),
+		PreflightDigest.FlightFrameCount,
+		1);
+	DigestSamples.RemoveAt(0);
+	DigestSamples[0].CameraWorld.X += 0.002;
+	const auto CameraMutationDigest =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::
+			ComputeM5OrthogonalityDigests(DigestSamples);
+	TestEqual(
+		TEXT("Camera mutation does not alter stage digest"),
+		BaselineDigest.StageSequenceHash,
+		CameraMutationDigest.StageSequenceHash);
+	TestNotEqual(
+		TEXT("Camera mutation alters camera digest"),
+		BaselineDigest.CameraNumericsHash,
+		CameraMutationDigest.CameraNumericsHash);
+	DigestSamples[0] = DigestSample;
+	DigestSamples[0].ShotPhase = TEXT("OutgoingHold");
+	const auto StageMutationDigest =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::
+			ComputeM5OrthogonalityDigests(DigestSamples);
+	TestNotEqual(
+		TEXT("Stage mutation alters stage digest"),
+		BaselineDigest.StageSequenceHash,
+		StageMutationDigest.StageSequenceHash);
+	TestEqual(
+		TEXT("Stage mutation does not alter camera digest"),
+		BaselineDigest.CameraNumericsHash,
+		StageMutationDigest.CameraNumericsHash);
 
 	FMinimalViewInfo TestView;
 	TestView.Location = FVector::ZeroVector;
@@ -1947,6 +2710,56 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 		TEXT("Post-exit stage is Handoff"),
 		static_cast<uint8>(Handoff.Stage),
 		static_cast<uint8>(EABTSM11FinaleCameraStage::Handoff));
+	const auto M3EarlyHandoff =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveObservationTarget(
+			EABTSM11FinaleInteractionState::Launched,
+			14.25,
+			&EventResult,
+			true);
+	TestEqual(
+		TEXT("M3 CurrentBody switches at the Handoff boundary"),
+		M3EarlyHandoff.AssistIndex,
+		2);
+	TestEqual(
+		TEXT("M3 early Handoff still frames the outgoing body"),
+		M3EarlyHandoff.FramingAssistIndex,
+		1);
+	TestEqual(
+		TEXT("M3 early Handoff is an explicit outgoing hold"),
+		static_cast<uint8>(M3EarlyHandoff.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::OutgoingHold));
+	const auto M3LateHandoff =
+		ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveObservationTarget(
+			EABTSM11FinaleInteractionState::Launched,
+			15.0,
+			&EventResult,
+			true);
+	TestEqual(
+		TEXT("M3 CurrentBody switches inside Handoff"),
+		M3LateHandoff.AssistIndex,
+		2);
+	TestEqual(
+		TEXT("M3 dual-body bridge selects the incoming body before AssistEnter"),
+		M3LateHandoff.FramingAssistIndex,
+		2);
+	TestEqual(
+		TEXT("M3 Handoff has an explicit dual-body bridge phase"),
+		static_cast<uint8>(M3LateHandoff.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::DualBodyBridge));
+	TestEqual(
+		TEXT("M3 bridge identifies the outgoing body"),
+		M3LateHandoff.OutgoingAssistIndex,
+		1);
+	TestEqual(
+		TEXT("M3 bridge identifies the incoming body"),
+		M3LateHandoff.IncomingAssistIndex,
+		2);
+	TestEqual(
+		TEXT("M3 bridge exposes both bodies to observation"),
+		M3LateHandoff.FramingTargetLabel,
+		FString(TEXT("Assist1+Assist2")));
 
 	TestFalse(
 		TEXT("Out-of-range Rank fails closed"),
@@ -1962,6 +2775,23 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureDirectorM2=2 ")
 			TEXT("-MovieFolder=C:/Capture -MovieName=BadDirectorMode ")
 			TEXT("-MovieFormat=JPG"),
+			Config,
+			&Failure));
+	TestFalse(
+		TEXT("Non-boolean telemetry option fails closed"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			TEXT("-ABTSM11CameraCapture ")
+			TEXT("-ABTSM11CaptureTelemetryOnly=2 ")
+			TEXT("-MovieFolder=C:/Capture ")
+			TEXT("-MovieName=BadTelemetry -MovieFormat=JPG"),
+			Config,
+			&Failure));
+	TestFalse(
+		TEXT("M2 and M3 modes fail closed when both requested"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureDirectorM2=1 ")
+			TEXT("-ABTSM11CaptureDirectorM3=1 -MovieFolder=C:/Capture ")
+			TEXT("-MovieName=AmbiguousDirector -MovieFormat=JPG"),
 			Config,
 			&Failure));
 	TestFalse(

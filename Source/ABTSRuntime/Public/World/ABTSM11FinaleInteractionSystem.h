@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Async/Future.h"
+#include "Camera/ABTSM11FinaleCameraDirector.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "UI/ABTSM11FinaleHUDData.h"
@@ -16,6 +17,7 @@ class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
 class AABTSM6SlingshotCamera;
 class APlayerController;
+class UABTSM11FinaleBirdTrailComponent;
 class USceneCaptureComponent2D;
 class USceneComponent;
 class UTextureRenderTarget2D;
@@ -55,6 +57,11 @@ public:
 	bool TryLaunchNominalCaptureAttempt(
 		AABTSM51SlingshotCord& Cord,
 		APlayerController& Controller);
+	/** Acceptance-only entry that submits one explicit player launch input. */
+	bool TryLaunchCaptureAttempt(
+		AABTSM51SlingshotCord& Cord,
+		APlayerController& Controller,
+		const FABTSM11FinaleLaunchInput& Input);
 	bool BeginAimFromCursor(APlayerController& Controller);
 	bool UpdateAimFromCursor(APlayerController& Controller);
 	void AdjustAimPower(double WheelSteps);
@@ -145,6 +152,10 @@ public:
 	{
 		return ReleasedPlaybackPlan;
 	}
+	const FABTSM11FinaleCameraShotPlan& GetReleasedCameraShotPlan() const
+	{
+		return ReleasedCameraShotPlan;
+	}
 	const FABTSM11TrajectoryResult* GetCurrentPrediction() const;
 	/** Exact current result used by the selected target's PIP. */
 	const FABTSM11TrajectoryResult* GetTargetPreviewPrediction() const;
@@ -162,6 +173,8 @@ public:
 		GetFinaleRemotePreviewCaptureComponent() const;
 	EABTSStylizedViewClass GetFinaleRemotePreviewStylizedViewClass() const;
 	double GetPlaybackElapsedSeconds() const { return PlaybackElapsedSeconds; }
+	/** Trajectory seconds advanced per presentation second for this playback. */
+	double GetPlaybackPresentationTimeScale() const;
 	double GetFailureBlackoutAlpha() const
 	{
 		return FailureTimeline.GetBlackoutAlpha();
@@ -178,6 +191,10 @@ public:
 	AABTSM25BirdCharacter* GetAttemptBird() const
 	{
 		return AttemptBird;
+	}
+	const UABTSM11FinaleBirdTrailComponent* GetFinaleBirdTrail() const
+	{
+		return FinaleBirdTrail;
 	}
 	const AABTSM11FinaleSystem* GetFinaleSystem() const
 	{
@@ -247,6 +264,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11-C|Capture")
 	TObjectPtr<USceneCaptureComponent2D> TargetPreviewCapture;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11-C|Presentation")
+	TObjectPtr<UABTSM11FinaleBirdTrailComponent> FinaleBirdTrail;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> TargetPreviewRenderTarget;
@@ -325,6 +345,8 @@ private:
 	FABTSM11TrajectoryResult NominalPhysicalResult;
 	FABTSM11PlaybackPlan PreviewPlaybackPlan;
 	FABTSM11PlaybackPlan ReleasedPlaybackPlan;
+	FABTSM11TrajectoryResult ReleasedCameraTrajectoryResult;
+	FABTSM11FinaleCameraShotPlan ReleasedCameraShotPlan;
 	FABTSM11OrbitalDiagramSnapshot DiagramSnapshot;
 	FABTSM11FinaleControlPanelState HudControlPanel;
 	FABTSM11OverviewViewState HudOverviewView;
@@ -338,6 +360,7 @@ private:
 	FABTSM11FinaleLaunchInput LatestSolvedInput;
 	FABTSM11FinaleLaunchInput FrozenReleaseInput;
 	FTransform AttemptBirdOriginalTransform = FTransform::Identity;
+	FVector AttemptBirdOriginalVisualScale = FVector::OneVector;
 	TWeakObjectPtr<APlayerController> ActiveFinaleController;
 	FVector AimSlingCenter = FVector::ZeroVector;
 	FVector AimSlingForward = FVector::ForwardVector;
@@ -363,6 +386,7 @@ private:
 	bool bNominalPhysicalReady = false;
 	bool bLatestPhysicalResultAvailable = false;
 	bool bAttemptBirdInPouch = false;
+	bool bCameraDirectorFallbackLogged = false;
 	bool bTargetCaptureDirty = false;
 	bool bTargetCaptureInitialized = false;
 	bool bAimFrameValid = false;
