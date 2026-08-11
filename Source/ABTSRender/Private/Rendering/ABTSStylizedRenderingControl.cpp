@@ -223,7 +223,7 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 44;
+	return 47;
 }
 
 FABTSStylizedToneProfileParameters

@@ -33,6 +33,7 @@
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTST4LowPolyCloudPrototype.h"
 #include "Rendering/ABTSStylizedRenderingWorldSubsystem.h"
 #include "DynamicRHI.h"
@@ -1108,6 +1109,7 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			EnvironmentSnapshot.PlanetCenterWorld,
 			EnvironmentSnapshot.PlanetRadiusCM,
+			CloudEnvironmentParameters.StarSeed ^ 0xC10DF13Du,
 			EnvironmentSnapshot.SunDirectionToSunWorld,
 			CloudEnvironmentParameters.CloudBaseAltitudeCM,
 			CloudEnvironmentParameters.CloudLayerHeightCM);
@@ -1544,6 +1546,11 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		case EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal:
 		case EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp:
 		case EABTSToonVisualCaptureAnchor::CloudR0GroundZenith:
+		case EABTSToonVisualCaptureAnchor::CloudFieldGlobal:
+		case EABTSToonVisualCaptureAnchor::CloudFieldFusion:
+		case EABTSToonVisualCaptureAnchor::CloudFieldVariety:
+		case EABTSToonVisualCaptureAnchor::CloudFieldNight:
+		case EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega:
 		{
 			if (CloudDefinitions.Num()
 				!= FABTST4LowPolyCloudPrototype::IslandCount
@@ -1552,6 +1559,261 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				OutReason = TEXT("T4-A2R0 cloud layout is unavailable.");
 				return EWorldResolveResult::Failed;
 			}
+			const bool bCloudFieldDiagnostic = Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudFieldGlobal
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldFusion
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldVariety
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldNight
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega;
+			if (bCloudFieldDiagnostic)
+			{
+				const uint64 LogicalCloudHash =
+					FABTST4LowPolyCloudPrototype::
+						ComputeLogicalCloudLayoutHash(CloudDefinitions);
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldGlobal)
+				{
+					const FVector ViewDirection = (
+						EnvironmentSnapshot.SunDirectionToSunWorld * 0.62
+						+ CloudDefinitions[0].RadialUp * 0.38).GetSafeNormal();
+					const FVector CameraLocation =
+						EnvironmentSnapshot.PlanetCenterWorld
+						+ ViewDirection * EnvironmentSnapshot.PlanetRadiusCM * 3.25;
+					Point.LookAtWorld = EnvironmentSnapshot.PlanetCenterWorld;
+					FVector PreferredUp = FVector::VectorPlaneProject(
+						FVector::UpVector, ViewDirection).GetSafeNormal();
+					if (PreferredUp.IsNearlyZero())
+					{
+						FVector UnusedAxis;
+						ViewDirection.FindBestAxisVectors(PreferredUp, UnusedAxis);
+					}
+					if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+						CameraLocation,
+						Point.LookAtWorld,
+						PreferredUp,
+						Point.CameraWorldTransform,
+						&CameraFailure))
+					{
+						OutReason = CameraFailure;
+						return EWorldResolveResult::Failed;
+					}
+					Point.SemanticIdentityHash =
+						ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+							LogicalCloudHash,
+							static_cast<uint64>(Definition.Anchor));
+					break;
+				}
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldNight)
+				{
+					int32 NightCloudIndex = INDEX_NONE;
+					double MinimumSolarHeight = 2.0;
+					for (int32 CloudIndex = 0;
+						CloudIndex < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+						++CloudIndex)
+					{
+						const double SolarHeight = FVector::DotProduct(
+							CloudDefinitions[CloudIndex].RadialUp,
+							EnvironmentSnapshot.SunDirectionToSunWorld);
+						if (SolarHeight < MinimumSolarHeight)
+						{
+							MinimumSolarHeight = SolarHeight;
+							NightCloudIndex = CloudIndex;
+						}
+					}
+					if (!CloudDefinitions.IsValidIndex(NightCloudIndex))
+					{
+						OutReason = TEXT("Night-cloud diagnostic could not select a background cloud.");
+						return EWorldResolveResult::Failed;
+					}
+					const FABTST4LowPolyCloudIslandDefinition& NightCloud =
+						CloudDefinitions[NightCloudIndex];
+					const double SurfaceRadius =
+						Planet.GetSurfaceRadiusAtDirection(NightCloud.RadialUp);
+					const FVector CameraLocation =
+						EnvironmentSnapshot.PlanetCenterWorld
+						+ NightCloud.RadialUp * (SurfaceRadius + 175.0)
+						- NightCloud.TangentX * NightCloud.ExtentsCM.X * 2.55;
+					Point.LookAtWorld = NightCloud.CenterWorld
+						- NightCloud.RadialUp * NightCloud.ExtentsCM.Z * 0.08;
+					if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+						CameraLocation,
+						Point.LookAtWorld,
+						NightCloud.RadialUp,
+						Point.CameraWorldTransform,
+						&CameraFailure))
+					{
+						OutReason = CameraFailure;
+						return EWorldResolveResult::Failed;
+					}
+					Point.SemanticIdentityHash =
+						ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+							NightCloud.LogicalCloudIdentityHash,
+							static_cast<uint64>(Definition.Anchor));
+					break;
+				}
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega)
+				{
+					FVector ClusterDirectionSum = FVector::ZeroVector;
+					FVector ClusterCenterSum = FVector::ZeroVector;
+					int32 ClusterMemberCount = 0;
+					for (const FABTST4LowPolyCloudIslandDefinition& Cloud
+						: CloudDefinitions)
+					{
+						if (!Cloud.bTerminatorMegaCluster)
+						{
+							continue;
+						}
+						ClusterDirectionSum += Cloud.RadialUp;
+						ClusterCenterSum += Cloud.CenterWorld;
+						++ClusterMemberCount;
+					}
+					if (ClusterMemberCount
+						!= FABTST4LowPolyCloudPrototype::
+							TerminatorMegaClusterIslandCount)
+					{
+						OutReason = TEXT("Terminator mega-cluster diagnostic is incomplete.");
+						return EWorldResolveResult::Failed;
+					}
+					const FVector ClusterUp = ClusterDirectionSum.GetSafeNormal();
+					const FVector ClusterCenter = ClusterCenterSum
+						/ static_cast<double>(ClusterMemberCount);
+					FVector AlongTerminator = FVector::CrossProduct(
+						ClusterUp,
+						EnvironmentSnapshot.SunDirectionToSunWorld).GetSafeNormal();
+					if (AlongTerminator.IsNearlyZero())
+					{
+						FVector UnusedAxis;
+						ClusterUp.FindBestAxisVectors(AlongTerminator, UnusedAxis);
+					}
+					const double SpanDegrees = FABTST4LowPolyCloudPrototype::
+						ComputeTerminatorMegaClusterAngularSpanDegrees(
+							CloudDefinitions);
+					const double SpanRadiusCM = EnvironmentSnapshot.PlanetRadiusCM
+						* FMath::Sin(FMath::DegreesToRadians(SpanDegrees * 0.5));
+					const FVector CameraLocation = ClusterCenter
+						- AlongTerminator * SpanRadiusCM * 2.65
+						+ ClusterUp * SpanRadiusCM * 0.42;
+					Point.LookAtWorld = ClusterCenter;
+					if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+						CameraLocation,
+						Point.LookAtWorld,
+						ClusterUp,
+						Point.CameraWorldTransform,
+						&CameraFailure))
+					{
+						OutReason = CameraFailure;
+						return EWorldResolveResult::Failed;
+					}
+					Point.SemanticIdentityHash =
+						ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+							LogicalCloudHash,
+							static_cast<uint64>(Definition.Anchor));
+					break;
+				}
+
+				int32 FirstCloudIndex = 0;
+				int32 SecondCloudIndex = 1;
+				double BestAlignment = -2.0;
+				double BestVarietyRatio = 0.0;
+				for (int32 FirstIndex = 0;
+					FirstIndex < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+					++FirstIndex)
+				{
+					for (int32 SecondIndex = FirstIndex + 1;
+						SecondIndex < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+						++SecondIndex)
+					{
+						const double Alignment = FVector::DotProduct(
+							CloudDefinitions[FirstIndex].RadialUp,
+							CloudDefinitions[SecondIndex].RadialUp);
+						const double FirstArea =
+							CloudDefinitions[FirstIndex].ExtentsCM.X
+							* CloudDefinitions[FirstIndex].ExtentsCM.Y;
+						const double SecondArea =
+							CloudDefinitions[SecondIndex].ExtentsCM.X
+							* CloudDefinitions[SecondIndex].ExtentsCM.Y;
+						const double VarietyRatio = FMath::Max(
+							FirstArea, SecondArea) / FMath::Max(
+							1.0, FMath::Min(FirstArea, SecondArea));
+						const bool bPreferVariety = Definition.Anchor
+							== EABTSToonVisualCaptureAnchor::CloudFieldVariety;
+						const bool bAcceptVariety = bPreferVariety
+							&& Alignment >= FMath::Cos(
+								FMath::DegreesToRadians(38.0))
+							&& VarietyRatio > BestVarietyRatio;
+						const bool bAcceptFusion = !bPreferVariety
+							&& Alignment > BestAlignment;
+						if (bAcceptVariety || bAcceptFusion)
+						{
+							BestAlignment = Alignment;
+							BestVarietyRatio = VarietyRatio;
+							FirstCloudIndex = FirstIndex;
+							SecondCloudIndex = SecondIndex;
+						}
+					}
+				}
+				const FABTST4LowPolyCloudIslandDefinition& FirstCloud =
+					CloudDefinitions[FirstCloudIndex];
+				const FABTST4LowPolyCloudIslandDefinition& SecondCloud =
+					CloudDefinitions[SecondCloudIndex];
+				const FVector PairAxis = (SecondCloud.CenterWorld
+					- FirstCloud.CenterWorld).GetSafeNormal();
+				const FVector PairMidpoint = (FirstCloud.CenterWorld
+					+ SecondCloud.CenterWorld) * 0.5;
+				const FVector PairUp = (PairMidpoint
+					- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+				FVector PairSide = FVector::CrossProduct(
+					PairAxis, PairUp).GetSafeNormal();
+				if (PairSide.IsNearlyZero())
+				{
+					FVector UnusedFallbackAxis;
+					PairUp.FindBestAxisVectors(PairSide, UnusedFallbackAxis);
+				}
+				const double PairSpanCM = FVector::Distance(
+					FirstCloud.CenterWorld, SecondCloud.CenterWorld);
+				const double MaximumCloudDepthCM = FMath::Max(
+					FirstCloud.ExtentsCM.Z, SecondCloud.ExtentsCM.Z);
+				FVector CameraLocation = PairMidpoint;
+				const FVector PreferredUp = PairUp;
+				Point.LookAtWorld = PairMidpoint;
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldVariety)
+				{
+					CameraLocation = PairMidpoint
+						+ PairUp * PairSpanCM * 2.55
+						+ PairSide * PairSpanCM * 0.42;
+				}
+				else
+				{
+					CameraLocation = PairMidpoint
+						- PairAxis * PairSpanCM * 2.35
+						+ PairUp * MaximumCloudDepthCM * 0.85;
+					Point.LookAtWorld = PairMidpoint
+						+ PairUp * MaximumCloudDepthCM * 0.12;
+				}
+				if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+					CameraLocation,
+					Point.LookAtWorld,
+					PreferredUp,
+					Point.CameraWorldTransform,
+					&CameraFailure))
+				{
+					OutReason = CameraFailure;
+					return EWorldResolveResult::Failed;
+				}
+				Point.SemanticIdentityHash =
+					ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+						LogicalCloudHash,
+						static_cast<uint64>(Definition.Anchor));
+				break;
+			}
+
 			const int32 CloudIndex = Definition.Anchor
 				== EABTSToonVisualCaptureAnchor::CloudR0FlyThrough ? 1 : 0;
 			const FABTST4LowPolyCloudIslandDefinition& Cloud =
@@ -2534,11 +2796,44 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	{
 		return false;
 	}
+	TArray<FABTST4LowPolyCloudIslandDefinition> ManifestLogicalClouds;
+	uint64 ManifestLogicalCloudLayoutHash = 0;
+	int32 ManifestCloudFusionPairCount = 0;
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+		&& EnvironmentSnapshot.IsValid())
+	{
+		const FABTSStylizedEnvironmentParameters CloudPresentation =
+			FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+				EnvironmentSnapshot.PlanetCenterWorld,
+				EnvironmentSnapshot.PlanetRadiusCM,
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				EABTSStylizedRenderProfile::GroundDay);
+		ManifestLogicalClouds = FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			CloudPresentation.StarSeed ^ 0xC10DF13Du,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			CloudPresentation.CloudBaseAltitudeCM,
+			CloudPresentation.CloudLayerHeightCM);
+		ManifestLogicalCloudLayoutHash = FABTST4LowPolyCloudPrototype::
+			ComputeLogicalCloudLayoutHash(ManifestLogicalClouds);
+		ManifestCloudFusionPairCount = FABTST4LowPolyCloudPrototype::
+			CountCloudFusionPairs(ManifestLogicalClouds);
+	}
+	const int32 ManifestTerminatorMegaCloudCount =
+		FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
+			ManifestLogicalClouds);
+	const double ManifestTerminatorMegaSpanDegrees =
+		FABTST4LowPolyCloudPrototype::ComputeTerminatorMegaClusterAngularSpanDegrees(
+			ManifestLogicalClouds);
+	const bool bManifestTerminatorMegaConnected =
+		FABTST4LowPolyCloudPrototype::IsTerminatorMegaClusterEnvelopeConnected(
+			ManifestLogicalClouds);
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(
 		TEXT("schemaVersion"),
-		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 5 : 4);
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 7 : 4);
 	Root->SetStringField(
 		TEXT("suite"),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
@@ -2799,13 +3094,95 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
 			? TEXT("T4-A0 freezes six Tone/Outline/Shadow isolation variants without changing gameplay authority.")
 			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
-				? TEXT("T4-A2 captures ten A1 poses plus seven bounded low-poly cloud views, including orthogonal side and ground-up views, with reversible StyleOff/StyleOn and deterministic cloud-layout evidence.")
+				? TEXT("T4-A2 captures ten A1 poses, seven accepted A2.1 cloud views and five A2.2 global/night/terminator-cloud-field views with reversible StyleOff/StyleOn, deterministic logical cloud identity and one shared CloudComposite outline class.")
 				: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
 				? TEXT("T4-A1 freezes ten spherical-environment points with reversible StyleOff/StyleOn presentation and GPU evidence.")
 				: TEXT("Style implementation is versioned; Off bypasses project stylization."));
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+	{
+		Style->SetNumberField(
+			TEXT("logicalCloudCount"), ManifestLogicalClouds.Num());
+		Style->SetStringField(
+			TEXT("logicalCloudLayoutHash"),
+			ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+				ManifestLogicalCloudLayoutHash));
+		Style->SetNumberField(
+			TEXT("cloudCompositeStencilValue"),
+			FABTSStylizedRenderingContract::
+				ResolveCloudCompositeStencilValueForRenderer());
+		Style->SetBoolField(TEXT("cloudToCloudOutlineSuppression"), true);
+		Style->SetBoolField(TEXT("cloudToWorldOutlinePreserved"), true);
+		Style->SetBoolField(TEXT("cloudFieldGlobal"), true);
+		Style->SetNumberField(
+			TEXT("globalBackgroundLogicalCloudCount"),
+			FABTST4LowPolyCloudPrototype::GlobalIslandCount);
+		Style->SetNumberField(
+			TEXT("terminatorMegaClusterLogicalCloudCount"),
+			ManifestTerminatorMegaCloudCount);
+		Style->SetNumberField(
+			TEXT("terminatorMegaClusterAngularSpanDegrees"),
+			ManifestTerminatorMegaSpanDegrees);
+		Style->SetBoolField(
+			TEXT("terminatorMegaClusterConnected"),
+			bManifestTerminatorMegaConnected);
+		Style->SetBoolField(
+			TEXT("cloudGlobalBackgroundSunIndependentPlacement"), true);
+		Style->SetBoolField(
+			TEXT("cloudTerminatorMegaClusterSunRelativePlacement"), true);
+		Style->SetBoolField(TEXT("cloudLocalSolarHeightLighting"), true);
+		Style->SetBoolField(TEXT("cloudNightWhiteningGated"), true);
+		Style->SetNumberField(
+			TEXT("cloudNightBrightnessMultiplier"),
+			FABTST4LowPolyCloudPrototype::NightBrightness);
+		Style->SetNumberField(
+			TEXT("cloudDaylightBlendMinSolarHeight"),
+			FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight);
+		Style->SetNumberField(
+			TEXT("cloudDaylightBlendMaxSolarHeight"),
+			FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
+		Style->SetNumberField(
+			TEXT("cloudFusionPairCount"), ManifestCloudFusionPairCount);
+		Style->SetStringField(
+			TEXT("cloudOutlineIdentityPolicy"),
+			TEXT("LogicalCloudIdentitySeparatedFromSharedCloudCompositeStencil"));
+		TArray<TSharedPtr<FJsonValue>> LogicalCloudsJson;
+		LogicalCloudsJson.Reserve(ManifestLogicalClouds.Num());
+		for (const FABTST4LowPolyCloudIslandDefinition& LogicalCloud
+			: ManifestLogicalClouds)
+		{
+			TSharedRef<FJsonObject> CloudJson = MakeShared<FJsonObject>();
+			CloudJson->SetNumberField(
+				TEXT("logicalCloudIndex"), LogicalCloud.LogicalCloudIndex);
+			CloudJson->SetNumberField(
+				TEXT("sourceIslandIndex"), LogicalCloud.IslandIndex);
+			CloudJson->SetNumberField(
+				TEXT("seed"), LogicalCloud.Seed);
+			CloudJson->SetNumberField(
+				TEXT("cloudletCount"), LogicalCloud.CloudletCount);
+			CloudJson->SetStringField(
+				TEXT("role"),
+				LogicalCloud.bTerminatorMegaCluster
+					? TEXT("TerminatorMegaCluster")
+					: TEXT("GlobalBackground"));
+			CloudJson->SetBoolField(
+				TEXT("isTerminatorMegaCluster"),
+				LogicalCloud.bTerminatorMegaCluster);
+			CloudJson->SetNumberField(
+				TEXT("solarHeight"),
+				FVector::DotProduct(
+					LogicalCloud.RadialUp,
+					EnvironmentSnapshot.SunDirectionToSunWorld));
+			CloudJson->SetStringField(
+				TEXT("identityHash"),
+				ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+					LogicalCloud.LogicalCloudIdentityHash));
+			LogicalCloudsJson.Add(MakeShared<FJsonValueObject>(CloudJson));
+		}
+		Style->SetArrayField(TEXT("logicalClouds"), LogicalCloudsJson);
+	}
 	Root->SetObjectField(TEXT("style"), Style);
 
 	TArray<TSharedPtr<FJsonValue>> Records;
@@ -2878,8 +3255,18 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 				Presentation.FixedExposureBias);
 			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
 			{
-				RecordJson->SetStringField(TEXT("cloudRoute"), TEXT("InstancedCloudletsR1C2B3B6"));
-				RecordJson->SetNumberField(TEXT("cloudMacroClusters"), 18);
+				RecordJson->SetBoolField(
+					TEXT("cloudEnabled"),
+					Presentation.bCloudsEnabled != 0u);
+			}
+			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+				&& Presentation.bCloudsEnabled != 0u)
+			{
+				RecordJson->SetStringField(TEXT("cloudRoute"), TEXT("InstancedCloudletsA2_2NightMegaCluster"));
+				RecordJson->SetNumberField(
+					TEXT("cloudMacroClusters"),
+					FABTST4LowPolyCloudPrototype::IslandCount *
+						FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland);
 				RecordJson->SetBoolField(TEXT("cloudViewInvariantIslandField"), true);
 				RecordJson->SetBoolField(TEXT("cloudViewInvariantVolumeGradient"), true);
 				RecordJson->SetBoolField(TEXT("cloudCameraDependentLighting"), false);
@@ -2892,9 +3279,15 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 				RecordJson->SetBoolField(TEXT("cloudPlanarCoreClosure"), true);
 				RecordJson->SetBoolField(TEXT("cloudUndersideField"), true);
 				RecordJson->SetBoolField(TEXT("cloudCriticalPointFallbackToIslandUp"), true);
-				RecordJson->SetNumberField(TEXT("cloudBodyCloudlets"), 73);
-				RecordJson->SetNumberField(TEXT("cloudCrownCloudlets"), 116);
-				RecordJson->SetNumberField(TEXT("cloudEdgeCloudlets"), 63);
+				RecordJson->SetNumberField(
+					TEXT("cloudBodyCloudlets"),
+					FABTST4LowPolyCloudPrototype::TotalBodyCloudletCount);
+				RecordJson->SetNumberField(
+					TEXT("cloudCrownCloudlets"),
+					FABTST4LowPolyCloudPrototype::TotalCrownCloudletCount);
+				RecordJson->SetNumberField(
+					TEXT("cloudEdgeCloudlets"),
+					FABTST4LowPolyCloudPrototype::TotalEdgeCloudletCount);
 				RecordJson->SetBoolField(
 					TEXT("cloudSharedImplicitVolume"), false);
 				RecordJson->SetBoolField(
@@ -2923,14 +3316,51 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 					TEXT("cloudAzimuthalFootprintIsotropyMinimum"), 0.80);
 				RecordJson->SetNumberField(TEXT("cloudDetachedEdgeMaximum"), 0);
 				RecordJson->SetNumberField(
+					TEXT("logicalCloudCount"), ManifestLogicalClouds.Num());
+				RecordJson->SetStringField(
+					TEXT("logicalCloudLayoutHash"),
+					ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+						ManifestLogicalCloudLayoutHash));
+				RecordJson->SetNumberField(
 					TEXT("cloudCompositeStencilValue"),
 					FABTSStylizedRenderingContract::
 						ResolveCloudCompositeStencilValueForRenderer());
 				RecordJson->SetBoolField(
-					TEXT("cloudInternalOutlineSuppression"), true);
+					TEXT("cloudToCloudOutlineSuppression"), true);
 				RecordJson->SetBoolField(
-					TEXT("cloudEnabled"),
-					Presentation.bCloudsEnabled != 0u);
+					TEXT("cloudToWorldOutlinePreserved"), true);
+				RecordJson->SetBoolField(TEXT("cloudFieldGlobal"), true);
+				RecordJson->SetNumberField(
+					TEXT("globalBackgroundLogicalCloudCount"),
+					FABTST4LowPolyCloudPrototype::GlobalIslandCount);
+				RecordJson->SetNumberField(
+					TEXT("terminatorMegaClusterLogicalCloudCount"),
+					ManifestTerminatorMegaCloudCount);
+				RecordJson->SetNumberField(
+					TEXT("terminatorMegaClusterAngularSpanDegrees"),
+					ManifestTerminatorMegaSpanDegrees);
+				RecordJson->SetBoolField(
+					TEXT("terminatorMegaClusterConnected"),
+					bManifestTerminatorMegaConnected);
+				RecordJson->SetBoolField(
+					TEXT("cloudGlobalBackgroundSunIndependentPlacement"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTerminatorMegaClusterSunRelativePlacement"), true);
+				RecordJson->SetBoolField(TEXT("cloudLocalSolarHeightLighting"), true);
+				RecordJson->SetBoolField(TEXT("cloudNightWhiteningGated"), true);
+				RecordJson->SetNumberField(
+					TEXT("cloudNightBrightnessMultiplier"),
+					FABTST4LowPolyCloudPrototype::NightBrightness);
+				RecordJson->SetNumberField(
+					TEXT("cloudDaylightBlendMinSolarHeight"),
+					FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight);
+				RecordJson->SetNumberField(
+					TEXT("cloudDaylightBlendMaxSolarHeight"),
+					FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
+				RecordJson->SetNumberField(
+					TEXT("cloudFusionPairCount"), ManifestCloudFusionPairCount);
+				RecordJson->SetBoolField(
+					TEXT("cloudInternalOutlineSuppression"), true);
 				RecordJson->SetNumberField(TEXT("cloudBaseAltitudeCM"), Presentation.CloudBaseAltitudeCM);
 				RecordJson->SetNumberField(TEXT("cloudLayerHeightCM"), Presentation.CloudLayerHeightCM);
 				RecordJson->SetNumberField(TEXT("cloudGlobalScaleKM"), Presentation.CloudGlobalScaleKM);

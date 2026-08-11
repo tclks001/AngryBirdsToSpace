@@ -9,6 +9,21 @@ namespace ABTST4LowPolyCloudPrototypePrivate
 {
 	constexpr int32 LatitudeSegments = 6;
 	constexpr int32 LongitudeSegments = 12;
+	// Macro-cluster centres and radii occupy roughly 64% of the authoring
+	// extents. Using the raw island box made the data contract report a fused
+	// weather mass while the rendered cloudlets still had visible sky gaps.
+	constexpr double VisibleEnvelopeExtentScale = 0.64;
+
+	double ComputeVisibleAngularRadiusRadians(
+		const FABTST4LowPolyCloudIslandDefinition& Cloud)
+	{
+		const double CenterRadiusCM = FVector::Distance(
+			Cloud.CenterWorld, Cloud.PlanetCenterWorld);
+		return FMath::Atan2(
+			FMath::Max(Cloud.ExtentsCM.X, Cloud.ExtentsCM.Y)
+				* VisibleEnvelopeExtentScale,
+			FMath::Max(CenterRadiusCM, 1.0));
+	}
 
 	uint64 Mix64(uint64 A, uint64 B)
 	{
@@ -41,12 +56,9 @@ namespace ABTST4LowPolyCloudPrototypePrivate
 
 	int32 GetCloudletCount(const int32 IslandIndex)
 	{
-		constexpr int32 Counts[FABTST4LowPolyCloudPrototype::IslandCount] = {
-			96, 72, 84
-		};
 		return IslandIndex >= 0
 			&& IslandIndex < FABTST4LowPolyCloudPrototype::IslandCount
-			? Counts[IslandIndex]
+			? FABTST4LowPolyCloudPrototype::CloudletsPerIsland
 			: 0;
 	}
 
@@ -54,12 +66,6 @@ namespace ABTST4LowPolyCloudPrototypePrivate
 		const int32 IslandIndex,
 		const EABTST4CloudletLayer Layer)
 	{
-		constexpr int32 BodyCounts[
-			FABTST4LowPolyCloudPrototype::IslandCount] = { 28, 21, 24 };
-		constexpr int32 CrownCounts[
-			FABTST4LowPolyCloudPrototype::IslandCount] = { 44, 33, 39 };
-		constexpr int32 EdgeCounts[
-			FABTST4LowPolyCloudPrototype::IslandCount] = { 24, 18, 21 };
 		if (IslandIndex < 0
 			|| IslandIndex >= FABTST4LowPolyCloudPrototype::IslandCount)
 		{
@@ -68,11 +74,11 @@ namespace ABTST4LowPolyCloudPrototypePrivate
 		switch (Layer)
 		{
 		case EABTST4CloudletLayer::Body:
-			return BodyCounts[IslandIndex];
+			return FABTST4LowPolyCloudPrototype::BodyCloudletsPerIsland;
 		case EABTST4CloudletLayer::Crown:
-			return CrownCounts[IslandIndex];
+			return FABTST4LowPolyCloudPrototype::CrownCloudletsPerIsland;
 		case EABTST4CloudletLayer::Edge:
-			return EdgeCounts[IslandIndex];
+			return FABTST4LowPolyCloudPrototype::EdgeCloudletsPerIsland;
 		default:
 			return 0;
 		}
@@ -100,6 +106,9 @@ namespace ABTST4LowPolyCloudPrototypePrivate
 bool FABTST4LowPolyCloudIslandDefinition::IsValid() const
 {
 	return IslandIndex >= 0
+		&& LogicalCloudIndex >= 0
+		&& LogicalCloudIndex < FABTST4LowPolyCloudPrototype::IslandCount
+		&& CloudletCount == FABTST4LowPolyCloudPrototype::CloudletsPerIsland
 		&& Seed != 0
 		&& !PlanetCenterWorld.ContainsNaN()
 		&& !CenterWorld.ContainsNaN()
@@ -107,6 +116,7 @@ bool FABTST4LowPolyCloudIslandDefinition::IsValid() const
 		&& TangentX.IsNormalized()
 		&& TangentY.IsNormalized()
 		&& ExtentsCM.GetMin() > 100.0
+		&& LogicalCloudIdentityHash != 0
 		&& IdentityHash != 0;
 }
 
@@ -177,53 +187,49 @@ TArray<FABTST4LowPolyCloudIslandDefinition>
 FABTST4LowPolyCloudPrototype::BuildDefinitions(
 	const FVector& PlanetCenterWorld,
 	const double PlanetRadiusCM,
+	const uint32 CloudFieldSeed,
 	const FVector& SunDirectionToSunWorld,
 	const float CloudBaseAltitudeCM,
 	const float CloudLayerHeightCM)
 {
 	TArray<FABTST4LowPolyCloudIslandDefinition> Result;
-	const FVector Sun = SunDirectionToSunWorld.GetSafeNormal();
+	const FVector SunDirection = SunDirectionToSunWorld.GetSafeNormal();
 	if (PlanetCenterWorld.ContainsNaN()
 		|| !FMath::IsFinite(PlanetRadiusCM)
 		|| PlanetRadiusCM <= 100.0
-		|| Sun.IsNearlyZero()
+		|| CloudFieldSeed == 0
+		|| SunDirection.IsNearlyZero()
 		|| CloudBaseAltitudeCM <= 0.0f
 		|| CloudLayerHeightCM <= 0.0f)
 	{
 		return Result;
 	}
 
-	FVector AxisA;
-	FVector AxisB;
-	Sun.FindBestAxisVectors(AxisA, AxisB);
-	AxisA.Normalize();
-	AxisB = FVector::CrossProduct(Sun, AxisA).GetSafeNormal();
-
-	const FVector Directions[IslandCount] = {
-		(Sun * 0.82 + AxisA * 0.47 + AxisB * 0.32).GetSafeNormal(),
-		(Sun * 0.66 - AxisA * 0.69 + AxisB * 0.27).GetSafeNormal(),
-		(Sun * 0.48 + AxisA * 0.70 - AxisB * 0.53).GetSafeNormal()
-	};
-	const FVector ExtentScales[IslandCount] = {
-		FVector(1.80, 1.68, 0.78),
-		FVector(1.42, 1.34, 0.68),
-		FVector(2.05, 1.90, 0.84)
-	};
-	const float AltitudeScales[IslandCount] = { 1.20f, 1.90f, 2.70f };
-	const uint32 Seeds[IslandCount] = {
-		0xA2C10001u, 0xA2C10002u, 0xA2C10003u
-	};
-
 	Result.Reserve(IslandCount);
-	for (int32 Index = 0; Index < IslandCount; ++Index)
+	auto AppendDefinition = [&Result, &PlanetCenterWorld, PlanetRadiusCM,
+		CloudFieldSeed, CloudBaseAltitudeCM, CloudLayerHeightCM](
+		const int32 Index,
+		const FVector& Direction,
+		const double SizeScale,
+		const double Aspect,
+		const double VerticalScale,
+		const double AltitudeLayers,
+		const bool bTerminatorMegaCluster)
 	{
+		const uint32 Seed = CloudFieldSeed
+			^ (0x9e3779b9u * static_cast<uint32>(Index + 1));
 		FABTST4LowPolyCloudIslandDefinition Definition;
 		Definition.IslandIndex = Index;
-		Definition.Seed = Seeds[Index];
+		Definition.LogicalCloudIndex = Index;
+		Definition.CloudletCount =
+			ABTST4LowPolyCloudPrototypePrivate::GetCloudletCount(Index);
+		Definition.Seed = Seed;
 		Definition.PlanetCenterWorld = PlanetCenterWorld;
-		Definition.RadialUp = Directions[Index];
+		Definition.RadialUp = Direction.GetSafeNormal();
+		const FVector ReferenceAxis = FMath::Abs(Definition.RadialUp.Z) < 0.82
+			? FVector::UpVector : FVector::ForwardVector;
 		Definition.TangentX = FVector::VectorPlaneProject(
-			AxisA, Definition.RadialUp).GetSafeNormal();
+			ReferenceAxis, Definition.RadialUp).GetSafeNormal();
 		if (Definition.TangentX.IsNearlyZero())
 		{
 			Definition.RadialUp.FindBestAxisVectors(
@@ -233,23 +239,39 @@ FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Definition.RadialUp, Definition.TangentX).GetSafeNormal();
 		Definition.TangentX = FVector::CrossProduct(
 			Definition.TangentY, Definition.RadialUp).GetSafeNormal();
-
 		const double AltitudeCM = CloudBaseAltitudeCM
-			+ CloudLayerHeightCM * AltitudeScales[Index];
+			+ CloudLayerHeightCM * AltitudeLayers;
 		Definition.CenterWorld = PlanetCenterWorld
 			+ Definition.RadialUp * (PlanetRadiusCM + AltitudeCM);
 		const double HorizontalUnit = FMath::Clamp(
-			PlanetRadiusCM * 0.105, 650.0, 1250.0);
+			PlanetRadiusCM * 0.075, 520.0, 1000.0);
 		Definition.ExtentsCM = FVector(
-			HorizontalUnit * ExtentScales[Index].X,
-			HorizontalUnit * ExtentScales[Index].Y,
+			HorizontalUnit * SizeScale * Aspect,
+			HorizontalUnit * SizeScale / Aspect,
 			FMath::Max(
-				static_cast<double>(CloudLayerHeightCM)
-					* ExtentScales[Index].Z,
-				420.0));
+				static_cast<double>(CloudLayerHeightCM) * VerticalScale,
+				360.0));
+		Definition.bTerminatorMegaCluster = bTerminatorMegaCluster;
+		uint64 LogicalIdentity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			0xA22C1000ull,
+			static_cast<uint64>(Definition.LogicalCloudIndex + 1));
+		LogicalIdentity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			LogicalIdentity, static_cast<uint64>(Definition.Seed));
+		LogicalIdentity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			LogicalIdentity,
+			ABTST4LowPolyCloudPrototypePrivate::HashVector(
+				Definition.CenterWorld - PlanetCenterWorld));
+		if (bTerminatorMegaCluster)
+		{
+			LogicalIdentity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+				LogicalIdentity, 0x5445524d4d454741ull);
+		}
+		Definition.LogicalCloudIdentityHash = LogicalIdentity;
 		uint64 Identity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
 			static_cast<uint64>(Definition.Seed),
 			static_cast<uint64>(Index + 1));
+		Identity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			Identity, Definition.LogicalCloudIdentityHash);
 		Identity = ABTST4LowPolyCloudPrototypePrivate::Mix64(
 			Identity,
 			ABTST4LowPolyCloudPrototypePrivate::HashVector(
@@ -258,7 +280,168 @@ FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Identity,
 			ABTST4LowPolyCloudPrototypePrivate::HashVector(
 				Definition.ExtentsCM));
+		Definition.IdentityHash = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			Definition.IdentityHash,
+			static_cast<uint64>(Definition.CloudletCount));
 		Result.Add(Definition);
+	};
+
+	constexpr double GoldenRatioConjugate = 0.6180339887498948482;
+	for (int32 Index = 0; Index < GlobalIslandCount; ++Index)
+	{
+		const int32 WeatherSystemIndex = Index / 2;
+		const int32 MemberIndex = Index % 2;
+		const double Z = 1.0 - 2.0
+			* (static_cast<double>(WeatherSystemIndex) + 0.5)
+			/ static_cast<double>(WeatherSystemCount);
+		const double RadiusXY = FMath::Sqrt(FMath::Max(0.0, 1.0 - Z * Z));
+		const double Phase = ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			CloudFieldSeed, WeatherSystemIndex, 20) * 0.18;
+		const double Azimuth = UE_TWO_PI * FMath::Frac(
+			(static_cast<double>(WeatherSystemIndex) + 0.5)
+				* GoldenRatioConjugate + Phase);
+		const FVector SystemDirection(
+			RadiusXY * FMath::Cos(Azimuth),
+			RadiusXY * FMath::Sin(Azimuth),
+			Z);
+		FVector SystemTangentX;
+		FVector SystemTangentY;
+		SystemDirection.FindBestAxisVectors(SystemTangentX, SystemTangentY);
+		const double PairOrientation = UE_TWO_PI
+			* ABTST4LowPolyCloudPrototypePrivate::Hash01(
+				CloudFieldSeed, WeatherSystemIndex, 21);
+		const FVector PairAxis = (
+			SystemTangentX * FMath::Cos(PairOrientation)
+			+ SystemTangentY * FMath::Sin(PairOrientation)).GetSafeNormal();
+		const double PairHalfAngle = FMath::DegreesToRadians(FMath::Lerp(
+			7.5, 10.5,
+			static_cast<double>(ABTST4LowPolyCloudPrototypePrivate::Hash01(
+				CloudFieldSeed, WeatherSystemIndex, 22))));
+		const double PairSign = MemberIndex == 0 ? -1.0 : 1.0;
+		const FVector Direction = (
+			SystemDirection * FMath::Cos(PairHalfAngle)
+			+ PairAxis * (PairSign * FMath::Sin(PairHalfAngle))).GetSafeNormal();
+		const uint32 Seed = CloudFieldSeed
+			^ (0x9e3779b9u * static_cast<uint32>(Index + 1));
+		const double SizeSample = ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			Seed, Index, 23);
+		const double AspectSample = ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			Seed, Index, 24);
+		const double VerticalSample = ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			Seed, Index, 25);
+		const double AltitudeSample = ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			Seed, Index, 26);
+
+		const double SizeScale = FMath::Lerp(0.72, 1.68,
+			FMath::Pow(SizeSample, 1.15));
+		const double Aspect = FMath::Lerp(0.96, 1.04, AspectSample);
+		AppendDefinition(
+			Index,
+			Direction,
+			SizeScale,
+			Aspect,
+			FMath::Lerp(0.54, 1.08, VerticalSample),
+			FMath::Lerp(1.0, 2.8, AltitudeSample),
+			false);
+	}
+
+	// One dedicated acceptance cluster spans the terminator. It is deliberately
+	// separate from the 24 sun-independent background clouds: a central member
+	// and six overlapping members form a connected approximately 30-degree
+	// envelope. Four inner bridges prevent tangent-view gaps; two symmetric
+	// outer members provide the full weather-front span across day and night.
+	const FVector SeedReference(
+		ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			CloudFieldSeed, 0, 80) * 2.0f - 1.0f,
+		ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			CloudFieldSeed, 0, 81) * 2.0f - 1.0f,
+		ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			CloudFieldSeed, 0, 82) * 2.0f - 1.0f);
+	FVector TerminatorCenter = FVector::VectorPlaneProject(
+		SeedReference, SunDirection).GetSafeNormal();
+	if (TerminatorCenter.IsNearlyZero())
+	{
+		FVector UnusedAxis;
+		SunDirection.FindBestAxisVectors(TerminatorCenter, UnusedAxis);
+	}
+	const FVector AcrossTerminator = SunDirection;
+	const FVector AlongTerminator = FVector::CrossProduct(
+		TerminatorCenter, AcrossTerminator).GetSafeNormal();
+	const double ClusterPhase = UE_TWO_PI
+		* ABTST4LowPolyCloudPrototypePrivate::Hash01(
+			CloudFieldSeed, 0, 83);
+	for (int32 MemberIndex = 0;
+		MemberIndex < TerminatorMegaClusterIslandCount;
+		++MemberIndex)
+	{
+		const int32 Index = GlobalIslandCount + MemberIndex;
+		const uint32 Seed = CloudFieldSeed
+			^ (0x9e3779b9u * static_cast<uint32>(Index + 1));
+		FVector Direction = TerminatorCenter;
+		if (MemberIndex > 0)
+		{
+			double MemberAngle = 0.0;
+			double OffsetDegrees = 0.0;
+			if (MemberIndex <= 4)
+			{
+				const int32 InnerIndex = MemberIndex - 1;
+				MemberAngle = ClusterPhase
+					+ UE_HALF_PI * static_cast<double>(InnerIndex);
+				const int32 OppositePair = InnerIndex % 2;
+				OffsetDegrees = FMath::Lerp(
+					4.8,
+					5.2,
+					static_cast<double>(
+						ABTST4LowPolyCloudPrototypePrivate::Hash01(
+							CloudFieldSeed, OppositePair, 85)));
+			}
+			else
+			{
+				const bool bOpposite = MemberIndex == 6;
+				MemberAngle = ClusterPhase + 0.22
+					+ (bOpposite ? UE_PI : 0.0);
+				OffsetDegrees = FMath::Lerp(
+					9.4,
+					9.8,
+					static_cast<double>(
+						ABTST4LowPolyCloudPrototypePrivate::Hash01(
+							CloudFieldSeed, 0, 86)));
+			}
+			const double OffsetAngle = FMath::DegreesToRadians(OffsetDegrees);
+			const FVector RingTangent = (
+				AcrossTerminator * FMath::Cos(MemberAngle)
+					+ AlongTerminator * FMath::Sin(MemberAngle)).GetSafeNormal();
+			Direction = (
+				TerminatorCenter * FMath::Cos(OffsetAngle)
+				+ RingTangent * FMath::Sin(OffsetAngle)).GetSafeNormal();
+		}
+		const double SizeSample =
+			ABTST4LowPolyCloudPrototypePrivate::Hash01(
+				Seed, MemberIndex, 86);
+		const double AspectSample =
+			ABTST4LowPolyCloudPrototypePrivate::Hash01(
+				Seed, MemberIndex, 87);
+		const double VerticalSample =
+			ABTST4LowPolyCloudPrototypePrivate::Hash01(
+				Seed, MemberIndex, 88);
+		const double AltitudeSample =
+			ABTST4LowPolyCloudPrototypePrivate::Hash01(
+				Seed, MemberIndex, 89);
+		// The authoring extent is intentionally larger than the populated
+		// macro-cluster mask. These scales make the *visible* support overlap,
+		// while the bridged centres retain the approximately 30-degree weather
+		// footprint required by the terminator diagnostic.
+		const double SizeScale = MemberIndex == 0
+			? FMath::Lerp(2.30, 2.48, SizeSample)
+			: FMath::Lerp(2.08, 2.32, SizeSample);
+		AppendDefinition(
+			Index,
+			Direction,
+			SizeScale,
+			FMath::Lerp(0.97, 1.03, AspectSample),
+			FMath::Lerp(0.78, 1.14, VerticalSample),
+			FMath::Lerp(1.72, 1.88, AltitudeSample),
+			true);
 	}
 	return Result;
 }
@@ -313,10 +496,16 @@ FABTST4LowPolyCloudPrototype::BuildMacroClusters(
 				/ static_cast<double>(OuterClusterCount)
 				+ FMath::Lerp(-0.24, 0.24,
 					static_cast<double>(AngleSample));
-			Distance = FMath::Lerp(0.20, 0.32,
-				static_cast<double>(DistanceSample));
-			EquivalentRadius = FMath::Lerp(0.28, 0.35,
-				static_cast<double>(RadiusSample));
+			// Stratified low-frequency ranges keep every seed amorphous instead
+			// of relying on five random samples to accidentally span enough
+			// distance and size. The island phase and per-lobe jitter still
+			// remove any stable world-space direction.
+			const double DistanceBand = static_cast<double>(OuterIndex % 3);
+			const double RadiusBand = static_cast<double>((OuterIndex + 1) % 3);
+			Distance = 0.20 + DistanceBand * 0.035
+				+ static_cast<double>(DistanceSample) * 0.020;
+			EquivalentRadius = 0.28 + RadiusBand * 0.020
+				+ static_cast<double>(RadiusSample) * 0.012;
 		}
 		const double Aspect = FMath::Lerp(0.84, 1.18,
 			static_cast<double>(AspectSample));
@@ -968,6 +1157,181 @@ uint64 FABTST4LowPolyCloudPrototype::ComputeLayoutHash(
 			Hash, Definition.IdentityHash);
 	}
 	return Definitions.IsEmpty() ? 0 : Hash;
+}
+
+uint64 FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+	const TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions)
+{
+	uint64 Hash = 0xA22C600Dull;
+	TSet<int32> SeenLogicalClouds;
+	for (const FABTST4LowPolyCloudIslandDefinition& Definition : Definitions)
+	{
+		if (!Definition.IsValid()
+			|| SeenLogicalClouds.Contains(Definition.LogicalCloudIndex))
+		{
+			return 0;
+		}
+		SeenLogicalClouds.Add(Definition.LogicalCloudIndex);
+		Hash = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			Hash, static_cast<uint64>(Definition.LogicalCloudIndex + 1));
+		Hash = ABTST4LowPolyCloudPrototypePrivate::Mix64(
+			Hash, Definition.LogicalCloudIdentityHash);
+	}
+	return Definitions.IsEmpty() ? 0 : Hash;
+}
+
+int32 FABTST4LowPolyCloudPrototype::CountCloudFusionPairs(
+	const TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions)
+{
+	if (Definitions.IsEmpty())
+	{
+		return 0;
+	}
+	int32 PairCount = 0;
+	const double MinimumAlignment = FMath::Cos(FMath::DegreesToRadians(23.0));
+	for (int32 FirstIndex = 0; FirstIndex < Definitions.Num(); ++FirstIndex)
+	{
+		const FABTST4LowPolyCloudIslandDefinition& First =
+			Definitions[FirstIndex];
+		if (!First.IsValid())
+		{
+			return 0;
+		}
+		for (int32 SecondIndex = FirstIndex + 1;
+			SecondIndex < Definitions.Num(); ++SecondIndex)
+		{
+			const FABTST4LowPolyCloudIslandDefinition& Second =
+				Definitions[SecondIndex];
+			if (!Second.IsValid())
+			{
+				return 0;
+			}
+			if (FVector::DotProduct(First.RadialUp, Second.RadialUp)
+				>= MinimumAlignment)
+			{
+				++PairCount;
+			}
+		}
+	}
+	return PairCount;
+}
+
+int32 FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
+	const TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions)
+{
+	int32 Count = 0;
+	for (const FABTST4LowPolyCloudIslandDefinition& Definition : Definitions)
+	{
+		if (Definition.IsValid() && Definition.bTerminatorMegaCluster)
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+double FABTST4LowPolyCloudPrototype::
+	ComputeTerminatorMegaClusterAngularSpanDegrees(
+		const TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions)
+{
+	TArray<const FABTST4LowPolyCloudIslandDefinition*> Members;
+	for (const FABTST4LowPolyCloudIslandDefinition& Definition : Definitions)
+	{
+		if (Definition.IsValid() && Definition.bTerminatorMegaCluster)
+		{
+			Members.Add(&Definition);
+		}
+	}
+	if (Members.IsEmpty())
+	{
+		return 0.0;
+	}
+	double MaximumSpanRadians =
+		ABTST4LowPolyCloudPrototypePrivate::ComputeVisibleAngularRadiusRadians(
+			*Members[0]) * 2.0;
+	for (int32 FirstIndex = 0; FirstIndex < Members.Num(); ++FirstIndex)
+	{
+		for (int32 SecondIndex = FirstIndex + 1;
+			SecondIndex < Members.Num(); ++SecondIndex)
+		{
+			const double CenterAngle = FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(
+					Members[FirstIndex]->RadialUp,
+					Members[SecondIndex]->RadialUp),
+				-1.0,
+				1.0));
+			MaximumSpanRadians = FMath::Max(
+				MaximumSpanRadians,
+				CenterAngle
+					+ ABTST4LowPolyCloudPrototypePrivate::
+						ComputeVisibleAngularRadiusRadians(*Members[FirstIndex])
+					+ ABTST4LowPolyCloudPrototypePrivate::
+						ComputeVisibleAngularRadiusRadians(*Members[SecondIndex]));
+		}
+	}
+	return FMath::RadiansToDegrees(MaximumSpanRadians);
+}
+
+bool FABTST4LowPolyCloudPrototype::
+	IsTerminatorMegaClusterEnvelopeConnected(
+		const TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions)
+{
+	TArray<const FABTST4LowPolyCloudIslandDefinition*> Members;
+	for (const FABTST4LowPolyCloudIslandDefinition& Definition : Definitions)
+	{
+		if (Definition.IsValid() && Definition.bTerminatorMegaCluster)
+		{
+			Members.Add(&Definition);
+		}
+	}
+	if (Members.Num() != TerminatorMegaClusterIslandCount)
+	{
+		return false;
+	}
+	TArray<int32> Pending;
+	TBitArray<> Visited(false, Members.Num());
+	Pending.Add(0);
+	Visited[0] = true;
+	while (!Pending.IsEmpty())
+	{
+		const int32 FirstIndex = Pending.Pop(EAllowShrinking::No);
+		for (int32 SecondIndex = 0;
+			SecondIndex < Members.Num(); ++SecondIndex)
+		{
+			if (Visited[SecondIndex] || FirstIndex == SecondIndex)
+			{
+				continue;
+			}
+			const double CenterAngle = FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(
+					Members[FirstIndex]->RadialUp,
+					Members[SecondIndex]->RadialUp),
+				-1.0,
+				1.0));
+			const double ConnectedEnvelope = 1.02 * (
+				ABTST4LowPolyCloudPrototypePrivate::
+					ComputeVisibleAngularRadiusRadians(*Members[FirstIndex])
+					+ ABTST4LowPolyCloudPrototypePrivate::
+						ComputeVisibleAngularRadiusRadians(*Members[SecondIndex]));
+			if (CenterAngle <= ConnectedEnvelope)
+			{
+				Visited[SecondIndex] = true;
+				Pending.Add(SecondIndex);
+			}
+		}
+	}
+	return Visited.CountSetBits() == Members.Num();
+}
+
+float FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(
+	const float SolarHeight)
+{
+	const float Alpha = FMath::Clamp(
+		(SolarHeight - DaylightBlendMinSolarHeight)
+			/ (DaylightBlendMaxSolarHeight - DaylightBlendMinSolarHeight),
+		0.0f,
+		1.0f);
+	return Alpha * Alpha * (3.0f - 2.0f * Alpha);
 }
 
 uint64 FABTST4LowPolyCloudPrototype::ComputeCloudletLayoutHash(

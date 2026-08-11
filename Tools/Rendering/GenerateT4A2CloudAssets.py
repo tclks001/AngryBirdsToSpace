@@ -18,6 +18,10 @@ LIGHT_COLOR = "ABTS_CloudLightColor"
 BODY_COLOR = "ABTS_CloudBodyColor"
 SHADOW_COLOR = "ABTS_CloudShadowColor"
 SUN_DIRECTION = "ABTS_CloudSunDirection"
+PLANET_CENTER = "ABTS_CloudPlanetCenter"
+NIGHT_BRIGHTNESS = "ABTS_CloudNightBrightness"
+DAYLIGHT_BLEND_MIN = "ABTS_CloudDaylightBlendMinSolarHeight"
+DAYLIGHT_BLEND_MAX = "ABTS_CloudDaylightBlendMaxSolarHeight"
 LIGHT_CONTRAST = "ABTS_CloudLightContrast"
 LIGHT_BIAS = "ABTS_CloudLightBias"
 HEIGHT_LIFT = "ABTS_CloudHeightLift"
@@ -39,7 +43,7 @@ NOISE_FREQUENCY = "ABTS_CloudNoiseFrequency"
 NOISE_AMPLITUDE = "ABTS_CloudNoiseAmplitudeCM"
 
 MACRO_CLUSTER_COUNT = 6
-MACRO_CUSTOM_DESCRIPTION = "ABTS_T4A2R1C2B3B6_UndersideField"
+MACRO_CUSTOM_DESCRIPTION = "ABTS_T4A22_LocalSolarHeightNightCloud"
 
 
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -143,6 +147,10 @@ def build_macro_lighting_code():
         "float3 ABTSX = normalize(AxisX);",
         "float3 ABTSY = normalize(AxisY);",
         "float3 ABTSSun = normalize(SunDirection);",
+        "float3 ABTSPlanetRadial = normalize(WorldPos - PlanetCenter);",
+        "float ABTSSolarHeight = dot(ABTSPlanetRadial, ABTSSun);",
+        "float ABTSDaylightBlendMaximum = max(DaylightBlendMaxSolarHeight, DaylightBlendMinSolarHeight + 0.01);",
+        "float ABTSLocalDay = smoothstep(DaylightBlendMinSolarHeight, ABTSDaylightBlendMaximum, ABTSSolarHeight);",
         "float3 ABTSExtents = max(IslandExtents, float3(1.0, 1.0, 1.0));",
         "float3 ABTSRelative = WorldPos - IslandCenter;",
         "float3 ABTSP = float3(dot(ABTSRelative, ABTSX) / ABTSExtents.x, dot(ABTSRelative, ABTSY) / ABTSExtents.y, dot(ABTSRelative, ABTSUp) / ABTSExtents.z);",
@@ -225,15 +233,18 @@ def build_macro_lighting_code():
         "float ABTSDirectLight = lerp(saturate((ABTSHalfLambert - 0.5) * LightContrast + 0.5 + LightBias), 0.46, ABTSUndersideBlend);",
         "float ABTSShadowAmount = saturate(ContinuousOcclusionStrength * (0.72 * (1.0 - ABTSVertical01) + 0.52 * ABTSVolumeDensity01 + 0.58 * ABTSStableMacroJunction + 0.34 * (1.0 - ABTSDirectLight)));",
         "float ABTSBodyLight = saturate(0.06 + 0.42 * ABTSDirectLight + 0.14 * ABTSVertical01 + 0.34 * ABTSMacroRelief + HeightLift * (ABTSMacroHeight01 - 0.5) - 0.32 * ABTSShadowAmount);",
-        "float ABTSHighlight = smoothstep(0.60, 0.88, ABTSDirectLight) * smoothstep(0.30, 0.86, ABTSVertical01) * (0.10 + 0.22 * ABTSMacroRelief);",
-        "float ABTSSunWhite = smoothstep(0.46, 0.74, ABTSDirectLight) * lerp(0.72, 1.0, ABTSMacroRelief);",
+        "float ABTSHighlight = smoothstep(0.60, 0.88, ABTSDirectLight) * smoothstep(0.30, 0.86, ABTSVertical01) * (0.10 + 0.22 * ABTSMacroRelief) * ABTSLocalDay;",
+        "float ABTSSunWhite = smoothstep(0.46, 0.74, ABTSDirectLight) * lerp(0.72, 1.0, ABTSMacroRelief) * ABTSLocalDay;",
         "float ABTSThinDensityRange = max(ThinDensityEnd - ThinDensityStart, 0.01);",
         "float ABTSThinness = 1.0 - smoothstep(ThinDensityStart, ThinDensityStart + ABTSThinDensityRange, ABTSVolumeDensity01);",
-        "float ABTSThinWhite = ABTSThinness * lerp(0.42, 1.0, ABTSDirectLight);",
+        "float ABTSThinWhite = ABTSThinness * lerp(0.42, 1.0, ABTSDirectLight) * ABTSLocalDay;",
         "float ABTSWhiteWeight = saturate(SunWhiteStrength * ABTSSunWhite + ThinWhiteStrength * ABTSThinWhite);",
         "float3 ABTSCloudColor = lerp(ShadowColor, BodyColor, ABTSBodyLight);",
         "ABTSCloudColor = lerp(ABTSCloudColor, LightColor, ABTSHighlight);",
         "ABTSCloudColor = lerp(ABTSCloudColor, LightColor, ABTSWhiteWeight);",
+        "float ABTSNightRelief = saturate(0.78 + 0.22 * ABTSMacroRelief - 0.10 * ABTSShadowAmount);",
+        "float3 ABTSNightColor = ShadowColor * saturate(NightBrightness) * ABTSNightRelief;",
+        "ABTSCloudColor = lerp(ABTSNightColor, ABTSCloudColor, ABTSLocalDay);",
         "return saturate(ABTSCloudColor);",
     ])
     return "\n".join(lines)
@@ -295,6 +306,15 @@ def rebuild_material():
     sun = vector(
         material, SUN_DIRECTION,
         unreal.LinearColor(0.35, -0.45, 0.82, 0.0), -1700, -620)
+    planet_center = vector(
+        material, PLANET_CENTER,
+        unreal.LinearColor(0.0, 0.0, 0.0, 0.0), -1700, -1180)
+    night_brightness = scalar(
+        material, NIGHT_BRIGHTNESS, 0.42, -1700, -1120)
+    daylight_blend_min = scalar(
+        material, DAYLIGHT_BLEND_MIN, -0.16, -1700, -1060)
+    daylight_blend_max = scalar(
+        material, DAYLIGHT_BLEND_MAX, 0.14, -1700, -1000)
     # Keep the upward-facing cloud range below saturation.  A positive bias
     # erased the shared height-field normal before it reached the toon pass,
     # making the seam-free result read as a flat white card.
@@ -314,7 +334,7 @@ def rebuild_material():
     gradient_confidence_end = scalar(
         material, GRADIENT_CONFIDENCE_END, 0.34, -1700, 80)
     macro_version = scalar(
-        material, MACRO_LIGHTING_VERSION, 7.0, -1700, 140)
+        material, MACRO_LIGHTING_VERSION, 8.0, -1700, 140)
     del macro_version
     macro_strength = scalar(
         material, MACRO_NORMAL_STRENGTH, 0.84, -1700, 200)
@@ -372,6 +392,10 @@ def rebuild_material():
         ("BodyColor", body_color, ""),
         ("ShadowColor", shadow_color, ""),
         ("SunDirection", sun, ""),
+        ("PlanetCenter", planet_center, ""),
+        ("NightBrightness", night_brightness, ""),
+        ("DaylightBlendMinSolarHeight", daylight_blend_min, ""),
+        ("DaylightBlendMaxSolarHeight", daylight_blend_max, ""),
         ("MacroNormalStrength", macro_strength, ""),
         ("ContinuousOcclusionStrength", continuous_occlusion, ""),
         ("LightContrast", contrast, ""),
@@ -484,7 +508,9 @@ def validate():
     expected_inputs = [
         "WorldPos", "IslandCenter", "AxisX", "AxisY", "IslandUp",
         "IslandExtents", "LightColor", "BodyColor", "ShadowColor",
-        "SunDirection", "MacroNormalStrength",
+        "SunDirection", "PlanetCenter", "NightBrightness",
+        "DaylightBlendMinSolarHeight", "DaylightBlendMaxSolarHeight",
+        "MacroNormalStrength",
         "ContinuousOcclusionStrength", "LightContrast", "LightBias",
         "HeightLift", "SunWhiteStrength", "ThinWhiteStrength",
         "ThinDensityStart", "ThinDensityEnd",
@@ -509,7 +535,8 @@ def validate():
             "ABTSGradientConfidence", "ABTSNormalConfidence",
             "ABTSUnionVolumeDensity01", "ABTSCoreVolumeDensity01",
             "ABTSStableMacroJunction",
-            "ABTSStableNormalWeight", "ABTSCloudColor"):
+            "ABTSStableNormalWeight", "ABTSLocalDay", "ABTSSolarHeight",
+            "ABTSNightRelief", "ABTSNightColor", "ABTSCloudColor"):
         if marker not in macro_code:
             raise RuntimeError(
                 "Cloudlet view-invariant lighting marker is missing: {}".format(
@@ -547,7 +574,7 @@ def validate():
         "GenericObjectToneBypass=1 PixelLocalNormalWeight=0 "
         "PixelInstanceVariation=0 ThreeBandColor=1 SunwardWhitening=1 "
         "ThinDensityWhitening=1 ViewIndependentWhitening=1 "
-        "GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp "
+        "GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp LocalSolarHeight=1 NightWhiteningGate=1 "
         "Noise=1 BoundsExtension=30".format(MASTER_PATH, MESH_PATH))
 
 

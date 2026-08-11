@@ -404,6 +404,12 @@ uint ABTSSampleVisibleReservedStencil(float2 ViewportUV)
 	return Stencil >= 1u && Stencil <= 7u ? Stencil : 0u;
 }
 
+bool ABTSIsCloudCompositeStencil(uint Stencil)
+{
+	return CloudCompositeStencilValue != 0u
+		&& Stencil == CloudCompositeStencilValue;
+}
+
 // x: geometry-to-background silhouette, y: depth occlusion,
 // z: depth-continuous normal crease.
 float3 ABTSComputeNeighborEdgeLayers(
@@ -419,13 +425,12 @@ float3 ABTSComputeNeighborEdgeLayers(
 	}
 
 	const uint SampleStencil = ABTSSampleVisibleStencil(SampleUV);
-	if (CloudCompositeStencilValue != 0u
-		&& CenterStencil == CloudCompositeStencilValue
-		&& SampleStencil == CloudCompositeStencilValue)
+	if (CenterStencil == SampleStencil
+		&& ABTSIsCloudCompositeStencil(CenterStencil))
 	{
-		// All cloudlets in the transient composite share one stencil identity.
-		// Suppress their mutual depth and normal seams, but leave cloud-to-sky
-		// and cloud-to-world boundaries on the ordinary outline path.
+		// Logical cloud IDs stay outside the outline pass. Every cloud belongs to
+		// one visual composite, so overlapping islands fuse without a black
+		// cloud-cloud boundary while cloud-to-sky/world silhouettes remain.
 		return float3(0.0f, 0.0f, 0.0f);
 	}
 
@@ -592,12 +597,11 @@ void ABTSStylizedToneMainPS(
 	// The cloudlet material already produces its own continuous, low-frequency
 	// toon bands from a shared island field. Feeding those bands through the
 	// generic object luminance quantizer collapses the whole cloud into one
-	// highlight target and erases its relief. Stencil 8 is Integration-owned by
-	// the cloud composite, so preserve the material-authored result while the
-	// ordinary outline pass still owns the cloud silhouette.
+	// highlight target and erases its relief. The Integration-owned cloud
+	// composite stencil preserves the material-authored result while the
+	// ordinary outline pass still owns the cloud-to-world silhouette.
 	const uint ToneStencil = ABTSSampleVisibleStencil(ViewportUV);
-	const bool bCloudComposite = CloudCompositeStencilValue != 0u
-		&& ToneStencil == CloudCompositeStencilValue;
+	const bool bCloudComposite = ABTSIsCloudCompositeStencil(ToneStencil);
 	OutColor = bEnvironmentBackground
 		? SceneColor
 		: (bCloudComposite

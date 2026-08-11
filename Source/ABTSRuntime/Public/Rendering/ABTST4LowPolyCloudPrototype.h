@@ -9,6 +9,9 @@
 struct ABTSRUNTIME_API FABTST4LowPolyCloudIslandDefinition
 {
 	int32 IslandIndex = INDEX_NONE;
+	/** Stable logical identity used for generation, LOD, hashing and diagnostics. */
+	int32 LogicalCloudIndex = INDEX_NONE;
+	int32 CloudletCount = 0;
 	uint32 Seed = 0;
 	FVector PlanetCenterWorld = FVector::ZeroVector;
 	FVector CenterWorld = FVector::ZeroVector;
@@ -16,6 +19,9 @@ struct ABTSRUNTIME_API FABTST4LowPolyCloudIslandDefinition
 	FVector TangentX = FVector::ForwardVector;
 	FVector TangentY = FVector::RightVector;
 	FVector ExtentsCM = FVector::ZeroVector;
+	/** True only for the sun-relative 30-degree terminator acceptance cluster. */
+	bool bTerminatorMegaCluster = false;
+	uint64 LogicalCloudIdentityHash = 0;
 	uint64 IdentityHash = 0;
 
 	bool IsValid() const;
@@ -89,10 +95,28 @@ struct ABTSRUNTIME_API FABTST4InstancedCloudletDefinition
 class ABTSRUNTIME_API FABTST4LowPolyCloudPrototype
 {
 public:
-	static constexpr int32 IslandCount = 3;
+	static constexpr int32 WeatherSystemCount = 12;
+	static constexpr int32 GlobalIslandCount = WeatherSystemCount * 2;
+	static constexpr int32 TerminatorMegaClusterIslandCount = 7;
+	static constexpr int32 IslandCount =
+		GlobalIslandCount + TerminatorMegaClusterIslandCount;
+	static constexpr int32 CloudletsPerIsland = 84;
+	static constexpr int32 BodyCloudletsPerIsland = 24;
+	static constexpr int32 CrownCloudletsPerIsland = 39;
+	static constexpr int32 EdgeCloudletsPerIsland = 21;
 	static constexpr int32 CloudletCustomDataFloatCount = 5;
-	static constexpr int32 TotalCloudletCount = 252;
+	static constexpr int32 TotalCloudletCount =
+		IslandCount * CloudletsPerIsland;
+	static constexpr int32 TotalBodyCloudletCount =
+		IslandCount * BodyCloudletsPerIsland;
+	static constexpr int32 TotalCrownCloudletCount =
+		IslandCount * CrownCloudletsPerIsland;
+	static constexpr int32 TotalEdgeCloudletCount =
+		IslandCount * EdgeCloudletsPerIsland;
 	static constexpr int32 MacroClusterCountPerIsland = 6;
+	static constexpr float NightBrightness = 0.42f;
+	static constexpr float DaylightBlendMinSolarHeight = -0.16f;
+	static constexpr float DaylightBlendMaxSolarHeight = 0.14f;
 
 	static int32 GetCloudletLayerCount(
 		int32 IslandIndex,
@@ -101,6 +125,7 @@ public:
 	static TArray<FABTST4LowPolyCloudIslandDefinition> BuildDefinitions(
 		const FVector& PlanetCenterWorld,
 		double PlanetRadiusCM,
+		uint32 CloudFieldSeed,
 		const FVector& SunDirectionToSunWorld,
 		float CloudBaseAltitudeCM,
 		float CloudLayerHeightCM);
@@ -122,6 +147,29 @@ public:
 
 	static uint64 ComputeLayoutHash(
 		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/** A2.2 logical identity used by runtime logs and capture manifests. */
+	static uint64 ComputeLogicalCloudLayoutHash(
+		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/** Count deterministic neighbouring pairs used to prove cloud-field fusion. */
+	static int32 CountCloudFusionPairs(
+		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/** Count the dedicated sun-relative members of the terminator test cluster. */
+	static int32 CountTerminatorMegaClusterClouds(
+		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/** Full spherical span of the calibrated visible cloudlet support. */
+	static double ComputeTerminatorMegaClusterAngularSpanDegrees(
+		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/** True when the seven calibrated visible supports form one connected mass. */
+	static bool IsTerminatorMegaClusterEnvelopeConnected(
+		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/** Shared CPU oracle for the material's continuous local day/night blend. */
+	static float ComputeLocalDaylightBlend(float SolarHeight);
 
 	static uint64 ComputeCloudletLayoutHash(
 		TConstArrayView<FABTST4InstancedCloudletDefinition> Cloudlets);

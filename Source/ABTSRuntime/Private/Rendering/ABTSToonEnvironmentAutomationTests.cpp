@@ -382,8 +382,8 @@ bool FABTSToonT4A2CloudContractTest::RunTest(const FString& Parameters)
 		static_cast<int32>(EABTSToonVisualCaptureSuite::ToonT4A2));
 	const TArray<FABTSToonVisualCapturePointDefinition> CloudCatalogue =
 		FABTSToonVisualCaptureMath::BuildT4A2Catalogue();
-	TestEqual(TEXT("T4-A2 keeps ten atmosphere poses and adds seven cloud views"),
-		CloudCatalogue.Num(), 17);
+	TestEqual(TEXT("T4-A2 keeps ten atmosphere poses, seven A2.1 cloud views and five A2.2 field views"),
+		CloudCatalogue.Num(), 22);
 	TestTrue(TEXT("T4-A2 includes the gameplay-facing ground oblique-up view"),
 		CloudCatalogue.ContainsByPredicate(
 			[](const FABTSToonVisualCapturePointDefinition& Point)
@@ -397,6 +397,41 @@ bool FABTSToonT4A2CloudContractTest::RunTest(const FString& Parameters)
 			{
 				return Point.Anchor
 					== EABTSToonVisualCaptureAnchor::CloudR0GroundZenith;
+			}));
+	TestTrue(TEXT("T4-A2.2 includes the deterministic global field composition"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldGlobal;
+			}));
+	TestTrue(TEXT("T4-A2.2 includes the neighbouring-cloud fusion composition"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldFusion;
+			}));
+	TestTrue(TEXT("T4-A2.2 includes the size and silhouette variety composition"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldVariety;
+			}));
+	TestTrue(TEXT("T4-A2.2 includes a deep-night cloud-lighting diagnostic"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldNight;
+			}));
+	TestTrue(TEXT("T4-A2.2 includes the connected terminator mega-cluster view"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega;
 			}));
 	return true;
 }

@@ -57,12 +57,12 @@ public:
 	static uint8 ResolveStencilValueForRenderer(EABTSStylizedObjectClass ObjectClass);
 
 	/**
-	 * Integration-only stencil used by the cloud composite.  It is deliberately
-	 * outside the 1..7 selective gameplay allocation: matching cloud pixels
-	 * suppress only their mutual depth/normal seams while cloud-to-world
-	 * boundaries continue through the ordinary outline path.
+	 * Integration-only composite stencil outside the 1..7 selective gameplay
+	 * allocation. All logical clouds share this outline class, while generation,
+	 * LOD and diagnostics keep their logical identity entirely CPU-side.
 	 */
 	static uint8 ResolveCloudCompositeStencilValueForRenderer();
+	static bool IsCloudCompositeStencilValueForRenderer(uint8 StencilValue);
 	static bool ShouldSuppressInternalOutlineBetweenStencilValues(
 		uint8 CenterStencilValue,
 		uint8 SampleStencilValue);

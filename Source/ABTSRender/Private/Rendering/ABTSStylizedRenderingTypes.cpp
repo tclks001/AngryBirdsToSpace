@@ -76,14 +76,18 @@ uint8 FABTSStylizedRenderingContract::
 }
 
 bool FABTSStylizedRenderingContract::
+	IsCloudCompositeStencilValueForRenderer(const uint8 StencilValue)
+{
+	return StencilValue == ResolveCloudCompositeStencilValueForRenderer();
+}
+
+bool FABTSStylizedRenderingContract::
 	ShouldSuppressInternalOutlineBetweenStencilValues(
 		uint8 CenterStencilValue,
 		uint8 SampleStencilValue)
 {
-	const uint8 CloudStencil =
-		ResolveCloudCompositeStencilValueForRenderer();
-	return CenterStencilValue == CloudStencil
-		&& SampleStencilValue == CloudStencil;
+	return CenterStencilValue == SampleStencilValue
+		&& IsCloudCompositeStencilValueForRenderer(CenterStencilValue);
 }
 
 FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(

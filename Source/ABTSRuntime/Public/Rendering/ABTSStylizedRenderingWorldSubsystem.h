@@ -92,4 +92,6 @@ private:
 	uint64 LastEnvironmentDiagnosticHash = 0;
 	TWeakObjectPtr<AActor> LowPolyCloudPrototypeActor;
 	uint64 LowPolyCloudLayoutHash = 0;
+	uint64 LowPolyLogicalCloudLayoutHash = 0;
+	int32 LowPolyLogicalCloudCount = 0;
 };

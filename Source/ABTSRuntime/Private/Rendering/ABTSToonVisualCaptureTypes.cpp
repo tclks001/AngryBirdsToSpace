@@ -378,8 +378,9 @@ FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
 TArray<FABTSToonVisualCapturePointDefinition>
 FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 {
-	// Preserve all accepted A1 atmosphere poses, then add seven cloud-specific
-	// views. The orthogonal side pair prevents a long-axis-only cloud from
+	// Preserve all accepted A1 atmosphere poses, then add the seven accepted
+	// A2.1 cloud views and five A2.2 global/night/terminator compositions.
+	// The orthogonal side pair prevents a long-axis-only cloud from
 	// passing the visual gate; the two ground-up views make the gameplay-facing
 	// underside and lighting continuity first-class evidence.
 	TArray<FABTSToonVisualCapturePointDefinition> Result =
@@ -411,6 +412,16 @@ FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 		EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp, 68.0f);
 	AddCloudPoint(TEXT("CloudR0GroundZenith"),
 		EABTSToonVisualCaptureAnchor::CloudR0GroundZenith, 76.0f);
+	AddCloudPoint(TEXT("CloudFieldGlobal"),
+		EABTSToonVisualCaptureAnchor::CloudFieldGlobal, 52.0f);
+	AddCloudPoint(TEXT("CloudFieldFusion"),
+		EABTSToonVisualCaptureAnchor::CloudFieldFusion, 44.0f);
+	AddCloudPoint(TEXT("CloudFieldVariety"),
+		EABTSToonVisualCaptureAnchor::CloudFieldVariety, 50.0f);
+	AddCloudPoint(TEXT("CloudFieldNight"),
+		EABTSToonVisualCaptureAnchor::CloudFieldNight, 48.0f);
+	AddCloudPoint(TEXT("CloudFieldTerminatorMega"),
+		EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega, 58.0f);
 	return Result;
 }
 
@@ -699,6 +710,16 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 		return TEXT("CloudR0GroundObliqueUp");
 	case EABTSToonVisualCaptureAnchor::CloudR0GroundZenith:
 		return TEXT("CloudR0GroundZenith");
+	case EABTSToonVisualCaptureAnchor::CloudFieldGlobal:
+		return TEXT("CloudFieldGlobal");
+	case EABTSToonVisualCaptureAnchor::CloudFieldFusion:
+		return TEXT("CloudFieldFusion");
+	case EABTSToonVisualCaptureAnchor::CloudFieldVariety:
+		return TEXT("CloudFieldVariety");
+	case EABTSToonVisualCaptureAnchor::CloudFieldNight:
+		return TEXT("CloudFieldNight");
+	case EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega:
+		return TEXT("CloudFieldTerminatorMega");
 	default:
 		return TEXT("Unknown");
 	}

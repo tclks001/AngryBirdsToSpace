@@ -7,6 +7,7 @@
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
+#include "Rendering/ABTST4LowPolyCloudPrototype.h"
 #include "Rendering/ABTSToonVisualCaptureTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -198,9 +199,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports R1-C2-B3-B6 underside-field whitening"),
+		TEXT("Stylized renderer reports T4-A2.2 night-cloud and mega-cluster semantics"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		44);
+		47);
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -338,7 +339,7 @@ bool FABTSToonT4A2R1CCloudCompositeStencilContractTest::RunTest(
 	(void)Parameters;
 	const uint8 CloudStencil = FABTSStylizedRenderingContract::
 		ResolveCloudCompositeStencilValueForRenderer();
-	TestEqual(TEXT("R1-C freezes the cloud composite stencil"),
+	TestEqual(TEXT("CloudComposite uses stencil 8"),
 		CloudStencil, static_cast<uint8>(8));
 	for (int32 ClassIndex =
 		static_cast<int32>(EABTSStylizedObjectClass::None);
@@ -375,6 +376,196 @@ bool FABTSToonT4A2R1CCloudCompositeStencilContractTest::RunTest(
 		TEXT("Matching gameplay stencil does not suppress normal outlines"),
 		FABTSStylizedRenderingContract::
 			ShouldSuppressInternalOutlineBetweenStencilValues(1, 1));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A22GlobalCloudFieldContractTest,
+	"ABTS.Rendering.Toon.T4A2_2.GlobalCloudFieldContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A22GlobalCloudFieldContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const uint8 CloudCompositeStencil = FABTSStylizedRenderingContract::
+		ResolveCloudCompositeStencilValueForRenderer();
+	TestEqual(TEXT("Every logical cloud shares CloudComposite stencil 8"),
+		CloudCompositeStencil,
+		static_cast<uint8>(8));
+	TestTrue(TEXT("CloudComposite stencil is recognized as cloud"),
+		FABTSStylizedRenderingContract::
+			IsCloudCompositeStencilValueForRenderer(CloudCompositeStencil));
+	TestFalse(TEXT("Gameplay stencil is not classified as CloudComposite"),
+		FABTSStylizedRenderingContract::
+			IsCloudCompositeStencilValueForRenderer(1));
+
+	const FABTSStylizedEnvironmentParameters Environment =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(120.0, -340.0, 560.0),
+			10000.0,
+			FVector(0.3, -0.6, 0.7).GetSafeNormal(),
+			EABTSStylizedRenderProfile::GroundDay);
+	constexpr uint32 CloudFieldSeed = 0xA22C10D5u;
+	const TArray<FABTST4LowPolyCloudIslandDefinition> LogicalClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			CloudFieldSeed,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM);
+	TestEqual(TEXT("A2.2 publishes a global logical cloud field"),
+		LogicalClouds.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
+	const uint64 LogicalCloudHash =
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+			LogicalClouds);
+	TestTrue(TEXT("Logical cloud layout identity is non-zero"),
+		LogicalCloudHash != 0);
+	TestEqual(TEXT("Logical cloud layout identity is deterministic"),
+		LogicalCloudHash,
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+			FABTST4LowPolyCloudPrototype::BuildDefinitions(
+				Environment.PlanetCenterWorld,
+				Environment.PlanetRadiusCM,
+				CloudFieldSeed,
+				FVector(Environment.SunDirectionToSunWorld),
+				Environment.CloudBaseAltitudeCM,
+				Environment.CloudLayerHeightCM)));
+	const FVector AlternateSunDirection = FVector(
+		-0.72, 0.41, 0.56).GetSafeNormal();
+	const TArray<FABTST4LowPolyCloudIslandDefinition> AlternateSunClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			CloudFieldSeed,
+			AlternateSunDirection,
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM);
+	TestEqual(TEXT("Alternate sun keeps the complete field contract"),
+		AlternateSunClouds.Num(), LogicalClouds.Num());
+	for (int32 Index = 0;
+		Index < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+		++Index)
+	{
+		TestFalse(TEXT("Background cloud is not a terminator diagnostic member"),
+			LogicalClouds[Index].bTerminatorMegaCluster);
+		TestTrue(TEXT("Background placement is independent of the sun direction"),
+			LogicalClouds[Index].CenterWorld.Equals(
+				AlternateSunClouds[Index].CenterWorld, 0.01)
+			&& LogicalClouds[Index].ExtentsCM.Equals(
+				AlternateSunClouds[Index].ExtentsCM, 0.01)
+			&& LogicalClouds[Index].IdentityHash
+				== AlternateSunClouds[Index].IdentityHash);
+	}
+	bool bMegaClusterMovedWithSun = false;
+	for (int32 Index = FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+		Index < LogicalClouds.Num(); ++Index)
+	{
+		bMegaClusterMovedWithSun |= !LogicalClouds[Index].CenterWorld.Equals(
+			AlternateSunClouds[Index].CenterWorld, 1.0);
+	}
+	TestTrue(TEXT("The terminator acceptance cluster follows the sun-relative frame"),
+		bMegaClusterMovedWithSun);
+
+	TSet<int32> LogicalCloudIndices;
+	TSet<uint64> LogicalCloudIdentities;
+	uint8 OccupiedOctants = 0;
+	int32 CloudletCount = 0;
+	int32 TerminatorMegaCloudCount = 0;
+	FVector TerminatorDirectionSum = FVector::ZeroVector;
+	double MinimumMegaSolarHeight = 1.0;
+	double MaximumMegaSolarHeight = -1.0;
+	double MinimumHorizontalArea = TNumericLimits<double>::Max();
+	double MaximumHorizontalArea = 0.0;
+	for (const FABTST4LowPolyCloudIslandDefinition& LogicalCloud
+		: LogicalClouds)
+	{
+		LogicalCloudIndices.Add(LogicalCloud.LogicalCloudIndex);
+		LogicalCloudIdentities.Add(LogicalCloud.LogicalCloudIdentityHash);
+		CloudletCount += LogicalCloud.CloudletCount;
+		const double HorizontalArea = LogicalCloud.ExtentsCM.X
+			* LogicalCloud.ExtentsCM.Y;
+		MinimumHorizontalArea = FMath::Min(MinimumHorizontalArea, HorizontalArea);
+		MaximumHorizontalArea = FMath::Max(MaximumHorizontalArea, HorizontalArea);
+		const FVector Up = LogicalCloud.RadialUp;
+		if (!LogicalCloud.bTerminatorMegaCluster)
+		{
+			const uint8 Octant = (Up.X >= 0.0 ? 1u : 0u)
+				| (Up.Y >= 0.0 ? 2u : 0u)
+				| (Up.Z >= 0.0 ? 4u : 0u);
+			OccupiedOctants |= static_cast<uint8>(1u << Octant);
+		}
+		if (LogicalCloud.bTerminatorMegaCluster)
+		{
+			++TerminatorMegaCloudCount;
+			TerminatorDirectionSum += LogicalCloud.RadialUp;
+			const double SolarHeight = FVector::DotProduct(
+				LogicalCloud.RadialUp,
+				FVector(Environment.SunDirectionToSunWorld));
+			MinimumMegaSolarHeight = FMath::Min(
+				MinimumMegaSolarHeight, SolarHeight);
+			MaximumMegaSolarHeight = FMath::Max(
+				MaximumMegaSolarHeight, SolarHeight);
+			TestTrue(TEXT("Every mega-cluster centre remains close to the terminator"),
+				FMath::Abs(SolarHeight)
+					<= FMath::Sin(FMath::DegreesToRadians(10.0)));
+		}
+	}
+	TestEqual(TEXT("Logical cloud indices are unique"),
+		LogicalCloudIndices.Num(), LogicalClouds.Num());
+	TestEqual(TEXT("Logical cloud hashes are unique"),
+		LogicalCloudIdentities.Num(), LogicalClouds.Num());
+	TestEqual(TEXT("The accepted field publishes its total cloudlet budget"),
+		CloudletCount, FABTST4LowPolyCloudPrototype::TotalCloudletCount);
+	TestTrue(TEXT("Cloud islands have materially different sizes"),
+		MaximumHorizontalArea >= MinimumHorizontalArea * 2.0);
+	TestEqual(TEXT("The global field occupies all eight planet octants"),
+		OccupiedOctants, static_cast<uint8>(0xff));
+	TestTrue(TEXT("The global field includes nearby cloud pairs for fusion"),
+		FABTST4LowPolyCloudPrototype::CountCloudFusionPairs(LogicalClouds)
+			>= FABTST4LowPolyCloudPrototype::WeatherSystemCount);
+	TestEqual(TEXT("A2.2 appends seven logical members for the mega cluster"),
+		TerminatorMegaCloudCount,
+		FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount);
+	TestEqual(TEXT("The role helper observes the same mega-cluster count"),
+		FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
+			LogicalClouds),
+		TerminatorMegaCloudCount);
+	const FVector MeanTerminatorDirection = TerminatorDirectionSum.GetSafeNormal();
+	TestTrue(TEXT("The mega-cluster mean remains on the day/night boundary"),
+		FMath::Abs(FVector::DotProduct(
+			MeanTerminatorDirection,
+			FVector(Environment.SunDirectionToSunWorld))) <= 0.03);
+	TestTrue(TEXT("The mega cluster visibly straddles both day and night"),
+		MinimumMegaSolarHeight < -0.05 && MaximumMegaSolarHeight > 0.05);
+	const double MegaClusterSpanDegrees = FABTST4LowPolyCloudPrototype::
+		ComputeTerminatorMegaClusterAngularSpanDegrees(LogicalClouds);
+	TestTrue(
+		FString::Printf(
+			TEXT("The mega-cluster full envelope is approximately 30 degrees (Actual=%.2f)"),
+			MegaClusterSpanDegrees),
+		MegaClusterSpanDegrees >= 27.0 && MegaClusterSpanDegrees <= 33.0);
+	TestTrue(TEXT("The seven mega-cluster envelopes form one connected mass"),
+		FABTST4LowPolyCloudPrototype::
+			IsTerminatorMegaClusterEnvelopeConnected(LogicalClouds));
+	TestEqual(TEXT("Deep night completely gates daytime cloud whitening"),
+		FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(-1.0f),
+		0.0f);
+	TestEqual(TEXT("Full daylight retains the accepted cloud whitening"),
+		FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(1.0f),
+		1.0f);
+	TestTrue(TEXT("Twilight cloud lighting changes continuously and monotonically"),
+		FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(-0.05f)
+			< FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(0.05f));
+	TestTrue(TEXT("Any two logical clouds suppress their mutual outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudCompositeStencil, CloudCompositeStencil));
+	TestFalse(TEXT("Cloud-to-world outline remains visible"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudCompositeStencil, 1));
 	return true;
 }
 

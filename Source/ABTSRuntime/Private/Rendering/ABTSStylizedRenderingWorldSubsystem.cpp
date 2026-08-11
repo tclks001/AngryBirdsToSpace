@@ -1409,11 +1409,25 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][Rendering][T4-A2R1C2B3B6][CloudQuality] Route=InstancedCloudletsR1C2B3B6 Islands=3 MacroClusters=18 Cloudlets=%d Body=73 Crown=116 Edge=63 MacroMaskCoverageMin=0.98 HorizontalEnvelopeAspectMax=1.08 AzimuthalFootprintIsotropyMin=0.80 SeededAmorphous=1 OrthogonalSideDiagnostics=1 GroundObliqueUpDiagnostics=1 GroundZenithDiagnostics=1 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=Unlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 CompositeStencil=%d InternalOutlineSuppression=1 NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
+			TEXT("[ABTS][Rendering][T4-A2.2][CloudQuality] Route=InstancedCloudletsA2_2NightMegaCluster Islands=%d LogicalClouds=%d BackgroundClouds=%d TerminatorMegaClouds=%d WeatherSystems=%d MacroClusters=%d Cloudlets=%d Body=%d Crown=%d Edge=%d GlobalCoverage=1 BackgroundSunIndependentPlacement=1 TerminatorMegaSunRelative=1 TerminatorMegaConnected=1 SizeVariation=1 FusionDiagnostics=5 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=Unlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 LocalSolarHeight=1 NightWhiteningGate=1 NightBrightness=%.2f DayBlend=[%.2f,%.2f] GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 CloudCompositeStencil=%d CloudToCloudOutlineSuppression=1 CloudToWorldOutlinePreserved=1 LogicalHash=%llu NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
+			FABTST4LowPolyCloudPrototype::IslandCount,
+			LowPolyLogicalCloudCount,
+			FABTST4LowPolyCloudPrototype::GlobalIslandCount,
+			FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount,
+			FABTST4LowPolyCloudPrototype::WeatherSystemCount,
+			FABTST4LowPolyCloudPrototype::IslandCount
+				* FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland,
 			FABTST4LowPolyCloudPrototype::TotalCloudletCount,
+			FABTST4LowPolyCloudPrototype::TotalBodyCloudletCount,
+			FABTST4LowPolyCloudPrototype::TotalCrownCloudletCount,
+			FABTST4LowPolyCloudPrototype::TotalEdgeCloudletCount,
 			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount,
+			FABTST4LowPolyCloudPrototype::NightBrightness,
+			FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight,
+			FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight,
 			static_cast<int32>(FABTSStylizedRenderingContract::
 				ResolveCloudCompositeStencilValueForRenderer()),
+			static_cast<unsigned long long>(LowPolyLogicalCloudLayoutHash),
 			static_cast<unsigned long long>(LowPolyCloudLayoutHash),
 			Parameters.CloudBaseAltitudeCM,
 			Parameters.CloudLayerHeightCM);
@@ -1450,17 +1464,55 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Parameters.PlanetCenterWorld,
 			Parameters.PlanetRadiusCM,
+			Parameters.StarSeed ^ 0xC10DF13Du,
 			FVector(Parameters.SunDirectionToSunWorld),
 			Parameters.CloudBaseAltitudeCM,
 			Parameters.CloudLayerHeightCM);
 	if (Definitions.Num() != FABTST4LowPolyCloudPrototype::IslandCount)
 	{
-		OutFailure = TEXT("Cloud prototype layout did not produce three islands.");
+		OutFailure = TEXT("Global cloud field did not produce its frozen island count.");
+		return false;
+	}
+	const uint64 DesiredLogicalCloudHash =
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(Definitions);
+	if (DesiredLogicalCloudHash == 0)
+	{
+		OutFailure = TEXT("Logical cloud identity layout is invalid.");
+		return false;
+	}
+	if (FABTST4LowPolyCloudPrototype::CountCloudFusionPairs(Definitions)
+		< FABTST4LowPolyCloudPrototype::WeatherSystemCount)
+	{
+		OutFailure = TEXT("Global cloud field has insufficient neighbouring fusion pairs.");
+		return false;
+	}
+	if (FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
+		Definitions)
+		!= FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount)
+	{
+		OutFailure = TEXT("Terminator mega-cluster member count is incomplete.");
+		return false;
+	}
+	if (!FABTST4LowPolyCloudPrototype::
+		IsTerminatorMegaClusterEnvelopeConnected(Definitions))
+	{
+		OutFailure = TEXT("Terminator mega-cluster envelope is disconnected.");
+		return false;
+	}
+	const double TerminatorMegaSpanDegrees = FABTST4LowPolyCloudPrototype::
+		ComputeTerminatorMegaClusterAngularSpanDegrees(Definitions);
+	if (TerminatorMegaSpanDegrees < 27.0 || TerminatorMegaSpanDegrees > 33.0)
+	{
+		OutFailure = FString::Printf(
+			TEXT("Terminator mega-cluster span %.2f degrees is outside [27, 33]."),
+			TerminatorMegaSpanDegrees);
 		return false;
 	}
 	const uint64 DesiredLayoutHash =
 		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(Definitions);
 	uint64 DesiredCloudletHash = DesiredLayoutHash;
+	DesiredCloudletHash ^= DesiredLogicalCloudHash + 0x9e3779b97f4a7c15ull
+		+ (DesiredCloudletHash << 6) + (DesiredCloudletHash >> 2);
 	TArray<TArray<FABTST4InstancedCloudletDefinition>> IslandCloudlets;
 	IslandCloudlets.SetNum(Definitions.Num());
 	int32 TotalCloudlets = 0;
@@ -1498,6 +1550,8 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 	if (LowPolyCloudPrototypeActor.IsValid()
 		&& LowPolyCloudLayoutHash == DesiredCloudletHash)
 	{
+		LowPolyLogicalCloudLayoutHash = DesiredLogicalCloudHash;
+		LowPolyLogicalCloudCount = Definitions.Num();
 		return true;
 	}
 	DestroyLowPolyCloudPrototype();
@@ -1508,6 +1562,49 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 	if (!IsValid(BaseMaterial))
 	{
 		OutFailure = TEXT("T4-A2R1-B cloudlet material is unavailable.");
+		return false;
+	}
+	float MaterialMacroLightingVersion = 0.0f;
+	float MaterialNightBrightness = 0.0f;
+	float MaterialDaylightBlendMin = 0.0f;
+	float MaterialDaylightBlendMax = 0.0f;
+	FLinearColor MaterialPlanetCenter = FLinearColor::Transparent;
+	const bool bMaterialContractValid =
+		BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudMacroLightingVersion")),
+			MaterialMacroLightingVersion)
+		&& BaseMaterial->GetVectorParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudPlanetCenter")),
+			MaterialPlanetCenter)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudNightBrightness")),
+			MaterialNightBrightness)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudDaylightBlendMinSolarHeight")),
+			MaterialDaylightBlendMin)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudDaylightBlendMaxSolarHeight")),
+			MaterialDaylightBlendMax)
+		&& FMath::IsNearlyEqual(MaterialMacroLightingVersion, 8.0f)
+		&& FMath::IsNearlyEqual(
+			MaterialNightBrightness,
+			FABTST4LowPolyCloudPrototype::NightBrightness)
+		&& FMath::IsNearlyEqual(
+			MaterialDaylightBlendMin,
+			FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight)
+		&& FMath::IsNearlyEqual(
+			MaterialDaylightBlendMax,
+			FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
+	if (!bMaterialContractValid)
+	{
+		OutFailure = FString::Printf(
+			TEXT("T4-A2.2 cloud material contract mismatch (Version=%.2f Night=%.2f Blend=[%.2f,%.2f])."),
+			MaterialMacroLightingVersion,
+			MaterialNightBrightness,
+			MaterialDaylightBlendMin,
+			MaterialDaylightBlendMax);
 		return false;
 	}
 	UStaticMesh* CloudletMesh = LoadObject<UStaticMesh>(
@@ -1636,6 +1733,22 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 				SunDirection.Y,
 				SunDirection.Z,
 				0.0f));
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudPlanetCenter"),
+			FLinearColor(
+				Parameters.PlanetCenterWorld.X,
+				Parameters.PlanetCenterWorld.Y,
+				Parameters.PlanetCenterWorld.Z,
+				0.0f));
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudNightBrightness"),
+			FABTST4LowPolyCloudPrototype::NightBrightness);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudDaylightBlendMinSolarHeight"),
+			FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudDaylightBlendMaxSolarHeight"),
+			FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
 		const FLinearColor LightColor = Definition.IslandIndex == 1
 			? FLinearColor(0.86f, 0.89f, 0.94f, 1.0f)
 			: FLinearColor(0.92f, 0.93f, 0.96f, 1.0f);
@@ -1734,6 +1847,8 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 	}
 	LowPolyCloudPrototypeActor = Actor;
 	LowPolyCloudLayoutHash = DesiredCloudletHash;
+	LowPolyLogicalCloudLayoutHash = DesiredLogicalCloudHash;
+	LowPolyLogicalCloudCount = Definitions.Num();
 	return true;
 }
 
@@ -1745,6 +1860,8 @@ void UABTSStylizedRenderingWorldSubsystem::DestroyLowPolyCloudPrototype()
 	}
 	LowPolyCloudPrototypeActor.Reset();
 	LowPolyCloudLayoutHash = 0;
+	LowPolyLogicalCloudLayoutHash = 0;
+	LowPolyLogicalCloudCount = 0;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1987,6 +2104,7 @@ bool FABTSToonT4A2R0LowPolyCloudContractTest::RunTest(
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			First.PlanetCenterWorld,
 			First.PlanetRadiusCM,
+			First.StarSeed ^ 0xC10DF13Du,
 			FVector(First.SunDirectionToSunWorld),
 			First.CloudBaseAltitudeCM,
 			First.CloudLayerHeightCM);
@@ -1994,10 +2112,11 @@ bool FABTSToonT4A2R0LowPolyCloudContractTest::RunTest(
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Second.PlanetCenterWorld,
 			Second.PlanetRadiusCM,
+			Second.StarSeed ^ 0xC10DF13Du,
 			FVector(Second.SunDirectionToSunWorld),
 			Second.CloudBaseAltitudeCM,
 			Second.CloudLayerHeightCM);
-	TestEqual(TEXT("R0 fixes exactly three cloud islands"),
+	TestEqual(TEXT("A2.2 freezes the deterministic global cloud count"),
 		FirstLayout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
 	const uint64 FirstHash =
 		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(FirstLayout);
@@ -2037,10 +2156,11 @@ bool FABTSToonT4A2R1AInstancedCloudletContractTest::RunTest(
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Environment.PlanetCenterWorld,
 			Environment.PlanetRadiusCM,
+			Environment.StarSeed ^ 0xC10DF13Du,
 			FVector(Environment.SunDirectionToSunWorld),
 			Environment.CloudBaseAltitudeCM,
 			Environment.CloudLayerHeightCM);
-	TestEqual(TEXT("R1-A retains exactly three deterministic cloud islands"),
+	TestEqual(TEXT("R1-A produces the frozen global cloud field"),
 		Layout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
 
 	int32 TotalCloudlets = 0;
@@ -2117,14 +2237,48 @@ bool FABTSToonT4A2R1BCloudAssetContractTest::RunTest(
 		CloudMaterial->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes));
 	float MacroLightingVersion = 0.0f;
 	TestTrue(
-		TEXT("R1-C2-B3-B1 material exposes its guarded view-invariant whitening version"),
+		TEXT("A2.2 material exposes its local-solar-height night-cloud version"),
 		CloudMaterial->GetScalarParameterValue(
 			FMaterialParameterInfo(TEXT("ABTS_CloudMacroLightingVersion")),
 			MacroLightingVersion));
 	TestEqual(
-		TEXT("R1-C2-B3-B1 material version is current"),
+		TEXT("A2.2 material version is current"),
 		MacroLightingVersion,
-		7.0f);
+		8.0f);
+	FLinearColor PlanetCenterParameter = FLinearColor::Transparent;
+	TestTrue(
+		TEXT("A2.2 material consumes the accepted planet centre per pixel"),
+		CloudMaterial->GetVectorParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudPlanetCenter")),
+			PlanetCenterParameter));
+	float NightBrightness = 0.0f;
+	TestTrue(
+		TEXT("A2.2 material exposes a bounded night-cloud brightness"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudNightBrightness")),
+			NightBrightness));
+	TestTrue(TEXT("Night clouds remain readable without retaining daytime white"),
+		NightBrightness >= 0.35f && NightBrightness <= 0.65f);
+	float DaylightBlendMinSolarHeight = 0.0f;
+	float DaylightBlendMaxSolarHeight = 0.0f;
+	TestTrue(
+		TEXT("A2.2 material exposes the night-to-day blend start"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudDaylightBlendMinSolarHeight")),
+			DaylightBlendMinSolarHeight));
+	TestTrue(
+		TEXT("A2.2 material exposes the night-to-day blend end"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudDaylightBlendMaxSolarHeight")),
+			DaylightBlendMaxSolarHeight));
+	TestEqual(TEXT("The material and CPU oracle share the blend start"),
+		DaylightBlendMinSolarHeight,
+		FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight);
+	TestEqual(TEXT("The material and CPU oracle share the blend end"),
+		DaylightBlendMaxSolarHeight,
+		FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
 	FLinearColor CloudLightColor = FLinearColor::Transparent;
 	TestTrue(
 		TEXT("R1-C2-B3-B material exposes a neutral white light band"),
@@ -2218,10 +2372,11 @@ bool FABTSToonT4A2R1C2A4SeededAmorphousFootprintContractTest::RunTest(
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Environment.PlanetCenterWorld,
 			Environment.PlanetRadiusCM,
+			Environment.StarSeed ^ 0xC10DF13Du,
 			FVector(Environment.SunDirectionToSunWorld),
 			Environment.CloudBaseAltitudeCM,
 			Environment.CloudLayerHeightCM);
-	TestEqual(TEXT("R1-C2-A4 retains three cloud islands"),
+	TestEqual(TEXT("R1-C2-A4 retains the global cloud population"),
 		Layout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
 
 	int32 TotalBody = 0;
@@ -2551,11 +2706,19 @@ bool FABTSToonT4A2R1C2A4SeededAmorphousFootprintContractTest::RunTest(
 		TotalEdge += EdgeCount;
 	}
 	TestEqual(TEXT("R1-C2-A4 total macro-cluster budget"),
-		TotalMacroClusters, 18);
-	TestEqual(TEXT("R1-C2-A4 total body budget"), TotalBody, 73);
-	TestEqual(TEXT("R1-C2-A4 total crown budget"), TotalCrown, 116);
-	TestEqual(TEXT("R1-C2-A4 total edge budget"), TotalEdge, 63);
-	TestEqual(TEXT("R1-C2-A4 retains the 252-instance GPU budget"),
+		TotalMacroClusters,
+		FABTST4LowPolyCloudPrototype::IslandCount
+			* FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland);
+	TestEqual(TEXT("Global field total body budget"),
+		TotalBody,
+		FABTST4LowPolyCloudPrototype::TotalBodyCloudletCount);
+	TestEqual(TEXT("Global field total crown budget"),
+		TotalCrown,
+		FABTST4LowPolyCloudPrototype::TotalCrownCloudletCount);
+	TestEqual(TEXT("Global field total edge budget"),
+		TotalEdge,
+		FABTST4LowPolyCloudPrototype::TotalEdgeCloudletCount);
+	TestEqual(TEXT("A2.2 freezes the total instanced-cloudlet GPU budget"),
 		TotalBody + TotalCrown + TotalEdge,
 		FABTST4LowPolyCloudPrototype::TotalCloudletCount);
 	return true;

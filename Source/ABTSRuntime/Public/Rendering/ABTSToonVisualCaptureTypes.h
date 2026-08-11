@@ -31,7 +31,17 @@ enum class EABTSToonVisualCaptureAnchor : uint8
 	/** Ground-height camera looking diagonally into the cloud underside/side. */
 	CloudR0GroundObliqueUp,
 	/** Ground-height camera directly below the island looking radially upward. */
-	CloudR0GroundZenith
+	CloudR0GroundZenith,
+	/** A2.2 orbital composition proving deterministic global coverage. */
+	CloudFieldGlobal,
+	/** A2.2 neighbouring clouds visually fuse without an internal outline. */
+	CloudFieldFusion,
+	/** A2.2 composition proving cloud size and silhouette variety. */
+	CloudFieldVariety,
+	/** A2.2 deep-night cloud response with daytime whitening fully gated. */
+	CloudFieldNight,
+	/** A2.2 connected approximately 30-degree cluster spanning the terminator. */
+	CloudFieldTerminatorMega
 };
 
 enum class EABTSToonVisualCaptureSuite : uint8
