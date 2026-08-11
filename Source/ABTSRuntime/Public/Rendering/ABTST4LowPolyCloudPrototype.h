@@ -5,6 +5,38 @@
 #include "CoreMinimal.h"
 #include "ProceduralMeshComponent.h"
 
+/** Runtime-tunable A2.4 background weather-cluster population. */
+struct ABTSRUNTIME_API FABTST4CloudClusterDistributionParameters
+{
+	static constexpr int32 MinClusterCount = 1;
+	static constexpr int32 MaxClusterCount = 64;
+	static constexpr float MinCloudsPerClusterMean = 1.0f;
+	static constexpr float MaxCloudsPerClusterMean = 64.0f;
+	static constexpr float MaxCloudsPerClusterVariance = 1024.0f;
+	static constexpr int32 ProductionClusterCount = 24;
+	static constexpr float ProductionCloudsPerClusterMean = 10.0f;
+	static constexpr float ProductionCloudsPerClusterVariance = 64.0f;
+
+	/** Frozen production weather-cluster count; never derived from cloud size. */
+	int32 ClusterCount = ProductionClusterCount;
+	/** Requested logical-cloud count per global weather cluster. */
+	float CloudsPerClusterMean = ProductionCloudsPerClusterMean;
+	/** Variance of the truncated Gaussian member-count sampler. */
+	float CloudsPerClusterVariance = ProductionCloudsPerClusterVariance;
+
+	bool IsValid() const
+	{
+		return ClusterCount >= MinClusterCount
+			&& ClusterCount <= MaxClusterCount
+			&& FMath::IsFinite(CloudsPerClusterMean)
+			&& CloudsPerClusterMean >= MinCloudsPerClusterMean
+			&& CloudsPerClusterMean <= MaxCloudsPerClusterMean
+			&& FMath::IsFinite(CloudsPerClusterVariance)
+			&& CloudsPerClusterVariance >= 0.0f
+			&& CloudsPerClusterVariance <= MaxCloudsPerClusterVariance;
+	}
+};
+
 /** One deterministic, planet-relative cloud island used by T4-A2R0. */
 struct ABTSRUNTIME_API FABTST4LowPolyCloudIslandDefinition
 {
@@ -19,6 +51,10 @@ struct ABTSRUNTIME_API FABTST4LowPolyCloudIslandDefinition
 	FVector TangentX = FVector::ForwardVector;
 	FVector TangentY = FVector::RightVector;
 	FVector ExtentsCM = FVector::ZeroVector;
+	/** Deterministic global grouping metadata used by A2.4 diagnostics. */
+	int32 WeatherClusterIndex = INDEX_NONE;
+	int32 WeatherClusterMemberIndex = INDEX_NONE;
+	int32 WeatherClusterMemberCount = 0;
 	/** True only for the sun-relative 30-degree terminator acceptance cluster. */
 	bool bTerminatorMegaCluster = false;
 	uint64 LogicalCloudIdentityHash = 0;
@@ -131,11 +167,21 @@ struct ABTSRUNTIME_API FABTST4InstancedCloudletDefinition
 class ABTSRUNTIME_API FABTST4LowPolyCloudPrototype
 {
 public:
-	static constexpr int32 WeatherSystemCount = 12;
-	static constexpr int32 GlobalIslandCount = WeatherSystemCount * 2;
+	static constexpr int32 WeatherSystemCount =
+		FABTST4CloudClusterDistributionParameters::ProductionClusterCount;
+	/**
+	 * Frozen production background count for cloud seed 0xC1A5466C and the
+	 * accepted 24 / 10 / 64 distribution. Other PIE seeds remain dynamic.
+	 */
+	static constexpr int32 GlobalIslandCount = 277;
 	static constexpr int32 TerminatorMegaClusterIslandCount = 7;
+	/** Frozen production total; PIE tuning may produce a larger dynamic total. */
 	static constexpr int32 IslandCount =
 		GlobalIslandCount + TerminatorMegaClusterIslandCount;
+	/** Fail-closed A2.4 guard: 384 background HISM components / 32,256 instances. */
+	static constexpr int32 MaxGlobalIslandCount = 384;
+	static constexpr int32 MaxIslandCount =
+		MaxGlobalIslandCount + TerminatorMegaClusterIslandCount;
 	static constexpr int32 CloudletsPerIsland = 84;
 	static constexpr int32 BodyCloudletsPerIsland = 24;
 	static constexpr int32 CrownCloudletsPerIsland = 39;
@@ -166,6 +212,21 @@ public:
 		float CloudBaseAltitudeCM,
 		float CloudLayerHeightCM);
 
+	/** A2.4 overload used by PIE tuning with an explicit bounded population. */
+	static TArray<FABTST4LowPolyCloudIslandDefinition> BuildDefinitions(
+		const FVector& PlanetCenterWorld,
+		double PlanetRadiusCM,
+		uint32 CloudFieldSeed,
+		const FVector& SunDirectionToSunWorld,
+		float CloudBaseAltitudeCM,
+		float CloudLayerHeightCM,
+		const FABTST4CloudClusterDistributionParameters& Distribution);
+
+	/** Pure deterministic partition consumed by runtime, logs and automation. */
+	static TArray<int32> BuildGlobalClusterMemberCounts(
+		uint32 CloudFieldSeed,
+		const FABTST4CloudClusterDistributionParameters& Distribution);
+
 	/** Build the seeded amorphous, azimuth-balanced mask for one island. */
 	static TArray<FABTST4CloudMacroClusterDefinition> BuildMacroClusters(
 		const FABTST4LowPolyCloudIslandDefinition& Definition);
@@ -190,6 +251,13 @@ public:
 
 	/** Count deterministic neighbouring pairs used to prove cloud-field fusion. */
 	static int32 CountCloudFusionPairs(
+		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
+
+	/**
+	 * True when every non-terminator weather cluster forms one connected graph
+	 * under the calibrated visible cloud-envelope overlap relation.
+	 */
+	static bool AreBackgroundWeatherClusterEnvelopesConnected(
 		TConstArrayView<FABTST4LowPolyCloudIslandDefinition> Definitions);
 
 	/** Count the dedicated sun-relative members of the terminator test cluster. */

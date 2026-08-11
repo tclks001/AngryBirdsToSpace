@@ -3,6 +3,8 @@
 #include "Rendering/ABTSStylizedRenderingWorldSubsystem.h"
 
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -17,6 +19,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Math/RotationMatrix.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "ProceduralMeshComponent.h"
@@ -59,6 +62,275 @@ namespace ABTSStylizedRenderingWorldSubsystemPrivate
 {
 	constexpr float RefreshIntervalSeconds = 0.10f;
 	constexpr float ContinuousAtmosphereTraceSampleCountScale = 2.0f;
+
+	UABTSStylizedRenderingWorldSubsystem* ResolveTuningSubsystem(UWorld* World)
+	{
+		return World != nullptr
+			? World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>()
+			: nullptr;
+	}
+
+	void LogCloudTuningUsage(const TCHAR* Command)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Command=%s Accepted=0 Usage=\"ABTS.Toon.CloudField.SetDistribution <ClusterCount:1..64> <Mean:1..64> <Variance:0..1024> <Seed:uint32>\""),
+			Command);
+	}
+
+	void SetCloudDistributionCommand(
+		const TArray<FString>& Args,
+		UWorld* World)
+	{
+		int32 ClusterCount = 0;
+		float Mean = 0.0f;
+		float Variance = 0.0f;
+		uint32 Seed = 0;
+		if (Args.Num() != 4
+			|| !LexTryParseString(ClusterCount, *Args[0])
+			|| !LexTryParseString(Mean, *Args[1])
+			|| !LexTryParseString(Variance, *Args[2])
+			|| !LexTryParseString(Seed, *Args[3]))
+		{
+			LogCloudTuningUsage(TEXT("SetDistribution"));
+			return;
+		}
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		FString Failure;
+		if (Subsystem == nullptr
+			|| !Subsystem->ApplyCloudFieldTuningOverride(
+				ClusterCount, Mean, Variance, Seed, Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Command=SetDistribution Accepted=0 Reason=%s"),
+				Failure.IsEmpty() ? TEXT("SubsystemUnavailable") : *Failure);
+		}
+	}
+
+	void SetCloudClusterCountCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		int32 ClusterCount = 0;
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		if (Args.Num() != 1 || !LexTryParseString(ClusterCount, *Args[0])
+			|| Subsystem == nullptr)
+		{
+			LogCloudTuningUsage(TEXT("SetClusterCount"));
+			return;
+		}
+		const FABTST4CloudFieldTuningState Current =
+			Subsystem->GetCloudFieldTuningState();
+		FString Failure;
+		if (!Subsystem->ApplyCloudFieldTuningOverride(
+			ClusterCount,
+			Current.Distribution.CloudsPerClusterMean,
+			Current.Distribution.CloudsPerClusterVariance,
+			Current.Seed,
+			Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Command=SetClusterCount Accepted=0 Reason=%s"),
+				*Failure);
+		}
+	}
+
+	void SetCloudMeanCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		float Mean = 0.0f;
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		if (Args.Num() != 1 || !LexTryParseString(Mean, *Args[0])
+			|| Subsystem == nullptr)
+		{
+			LogCloudTuningUsage(TEXT("SetMean"));
+			return;
+		}
+		const FABTST4CloudFieldTuningState Current =
+			Subsystem->GetCloudFieldTuningState();
+		FString Failure;
+		if (!Subsystem->ApplyCloudFieldTuningOverride(
+			Current.Distribution.ClusterCount,
+			Mean,
+			Current.Distribution.CloudsPerClusterVariance,
+			Current.Seed,
+			Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Command=SetMean Accepted=0 Reason=%s"),
+				*Failure);
+		}
+	}
+
+	void SetCloudVarianceCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		float Variance = 0.0f;
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		if (Args.Num() != 1 || !LexTryParseString(Variance, *Args[0])
+			|| Subsystem == nullptr)
+		{
+			LogCloudTuningUsage(TEXT("SetVariance"));
+			return;
+		}
+		const FABTST4CloudFieldTuningState Current =
+			Subsystem->GetCloudFieldTuningState();
+		FString Failure;
+		if (!Subsystem->ApplyCloudFieldTuningOverride(
+			Current.Distribution.ClusterCount,
+			Current.Distribution.CloudsPerClusterMean,
+			Variance,
+			Current.Seed,
+			Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Command=SetVariance Accepted=0 Reason=%s"),
+				*Failure);
+		}
+	}
+
+	void SetCloudSeedCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		uint32 Seed = 0;
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		if (Args.Num() != 1 || !LexTryParseString(Seed, *Args[0])
+			|| Subsystem == nullptr)
+		{
+			LogCloudTuningUsage(TEXT("SetSeed"));
+			return;
+		}
+		const FABTST4CloudFieldTuningState Current =
+			Subsystem->GetCloudFieldTuningState();
+		FString Failure;
+		if (!Subsystem->ApplyCloudFieldTuningOverride(
+			Current.Distribution.ClusterCount,
+			Current.Distribution.CloudsPerClusterMean,
+			Current.Distribution.CloudsPerClusterVariance,
+			Seed,
+			Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Command=SetSeed Accepted=0 Reason=%s"),
+				*Failure);
+		}
+	}
+
+	void ClearCloudDistributionCommand(const TArray<FString>&, UWorld* World)
+	{
+		if (UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World))
+		{
+			Subsystem->ClearCloudFieldTuningOverride();
+		}
+	}
+
+	void CloudDistributionStatusCommand(const TArray<FString>&, UWorld* World)
+	{
+		if (UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World))
+		{
+			const FABTST4CloudFieldTuningState State =
+				Subsystem->GetCloudFieldTuningState();
+			const TArray<int32> Counts = FABTST4LowPolyCloudPrototype::
+				BuildGlobalClusterMemberCounts(State.Seed, State.Distribution);
+			FString CountText;
+			int32 BackgroundLogicalClouds = 0;
+			for (const int32 Count : Counts)
+			{
+				BackgroundLogicalClouds += Count;
+				CountText += CountText.IsEmpty()
+					? FString::FromInt(Count)
+					: FString::Printf(TEXT(",%d"), Count);
+			}
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Status Override=%d ClusterCount=%d Mean=%.3f Variance=%.3f Seed=%u BackgroundLogicalClouds=%d TotalLogicalClouds=%d Cloudlets=%d Members=[%s]"),
+				State.bOverrideActive ? 1 : 0,
+				State.Distribution.ClusterCount,
+				State.Distribution.CloudsPerClusterMean,
+				State.Distribution.CloudsPerClusterVariance,
+				State.Seed,
+				BackgroundLogicalClouds,
+				BackgroundLogicalClouds
+					+ FABTST4LowPolyCloudPrototype::
+						TerminatorMegaClusterIslandCount,
+				(BackgroundLogicalClouds
+					+ FABTST4LowPolyCloudPrototype::
+						TerminatorMegaClusterIslandCount)
+					* FABTST4LowPolyCloudPrototype::CloudletsPerIsland,
+				*CountText);
+		}
+	}
+
+	void CloudOverviewCommand(const TArray<FString>&, UWorld* World)
+	{
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		FString Failure;
+		if (Subsystem == nullptr || !Subsystem->EnterCloudFieldOverview(Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudOverview] Active=0 Reason=%s"),
+				Failure.IsEmpty() ? TEXT("SubsystemUnavailable") : *Failure);
+		}
+	}
+
+	void CloudOverviewRestoreCommand(const TArray<FString>&, UWorld* World)
+	{
+		UABTSStylizedRenderingWorldSubsystem* Subsystem =
+			ResolveTuningSubsystem(World);
+		FString Failure;
+		if (Subsystem == nullptr || !Subsystem->ExitCloudFieldOverview(Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][Rendering][T4-A2.4][CloudOverview] Restore=0 Reason=%s"),
+				Failure.IsEmpty() ? TEXT("SubsystemUnavailable") : *Failure);
+		}
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GSetCloudDistributionCommand(
+		TEXT("ABTS.Toon.CloudField.SetDistribution"),
+		TEXT("PIE only. Args: cluster-count mean variance seed."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			&SetCloudDistributionCommand));
+	FAutoConsoleCommandWithWorldAndArgs GSetCloudClusterCountCommand(
+		TEXT("ABTS.Toon.CloudField.SetClusterCount"),
+		TEXT("PIE only. Changes the explicit global weather-cluster count and rebuilds."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			&SetCloudClusterCountCommand));
+	FAutoConsoleCommandWithWorldAndArgs GSetCloudMeanCommand(
+		TEXT("ABTS.Toon.CloudField.SetMean"),
+		TEXT("PIE only. Changes cloud members-per-cluster mean and rebuilds."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetCloudMeanCommand));
+	FAutoConsoleCommandWithWorldAndArgs GSetCloudVarianceCommand(
+		TEXT("ABTS.Toon.CloudField.SetVariance"),
+		TEXT("PIE only. Changes cloud members-per-cluster variance and rebuilds."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			&SetCloudVarianceCommand));
+	FAutoConsoleCommandWithWorldAndArgs GSetCloudSeedCommand(
+		TEXT("ABTS.Toon.CloudField.SetSeed"),
+		TEXT("PIE only. Changes the deterministic cloud-field seed and rebuilds."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetCloudSeedCommand));
+	FAutoConsoleCommandWithWorldAndArgs GClearCloudDistributionCommand(
+		TEXT("ABTS.Toon.CloudField.ClearDistribution"),
+		TEXT("PIE only. Restores the frozen production cloud layout."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			&ClearCloudDistributionCommand));
+	FAutoConsoleCommandWithWorldAndArgs GCloudDistributionStatusCommand(
+		TEXT("ABTS.Toon.CloudField.Status"),
+		TEXT("Logs active A2.4 distribution and deterministic member counts."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			&CloudDistributionStatusCommand));
+	FAutoConsoleCommandWithWorldAndArgs GCloudOverviewCommand(
+		TEXT("ABTS.Toon.CloudField.Overview"),
+		TEXT("PIE only. Frames the whole planet and cloud field from radial north."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&CloudOverviewCommand));
+	FAutoConsoleCommandWithWorldAndArgs GCloudOverviewRestoreCommand(
+		TEXT("ABTS.Toon.CloudField.RestoreView"),
+		TEXT("PIE only. Restores the view target saved by CloudField.Overview."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			&CloudOverviewRestoreCommand));
 
 	/**
 	 * UE's sky defaults target an Earth-scale atmosphere. ABTS uses a five-
@@ -764,11 +1036,18 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
 	bEnvironmentSnapshotReady = false;
 	LastEnvironmentDiagnosticHash = 0;
+	CloudFieldTuningState = FABTST4CloudFieldTuningState();
 }
 
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 {
 	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	if (AActor* OverviewCamera = CloudFieldOverviewCamera.Get())
+	{
+		OverviewCamera->Destroy();
+	}
+	CloudFieldOverviewCamera.Reset();
+	CloudFieldOverviewPreviousViewTarget.Reset();
 	DestroyLowPolyCloudPrototype();
 	if (EnvironmentPresentation)
 	{
@@ -903,6 +1182,243 @@ int32 UABTSStylizedRenderingWorldSubsystem::GetRegisteredPrimitiveCount() const
 int32 UABTSStylizedRenderingWorldSubsystem::GetRegisteredMaterialSlotCount() const
 {
 	return MaterialRegistry ? MaterialRegistry->Num() : 0;
+}
+
+FABTST4CloudFieldTuningState
+UABTSStylizedRenderingWorldSubsystem::GetCloudFieldTuningState() const
+{
+	FABTST4CloudFieldTuningState Result = CloudFieldTuningState;
+	if (Result.Seed == 0 && bEnvironmentSnapshotReady)
+	{
+		const FABTSStylizedEnvironmentParameters Parameters =
+			FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+				EnvironmentSnapshot.PlanetCenterWorld,
+				EnvironmentSnapshot.PlanetRadiusCM,
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				EnvironmentSnapshot.Profile);
+		Result.Seed = Parameters.StarSeed ^ 0xC10DF13Du;
+	}
+	return Result;
+}
+
+bool UABTSStylizedRenderingWorldSubsystem::ApplyCloudFieldTuningOverride(
+	const int32 ClusterCount,
+	const float CloudsPerClusterMean,
+	const float CloudsPerClusterVariance,
+	const uint32 Seed,
+	FString& OutFailure)
+{
+	OutFailure.Reset();
+	UWorld* World = GetWorld();
+	FABTST4CloudClusterDistributionParameters Distribution;
+	Distribution.ClusterCount = ClusterCount;
+	Distribution.CloudsPerClusterMean = CloudsPerClusterMean;
+	Distribution.CloudsPerClusterVariance = CloudsPerClusterVariance;
+	if (World == nullptr || World->WorldType != EWorldType::PIE)
+	{
+		OutFailure = TEXT("Cloud distribution tuning is available only in PIE.");
+		return false;
+	}
+	if (!Distribution.IsValid() || Seed == 0)
+	{
+		OutFailure = TEXT("ClusterCount must be [1,64], mean [1,64], variance [0,1024], and seed non-zero.");
+		return false;
+	}
+	const TArray<int32> MemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			Seed, Distribution);
+	if (MemberCounts.IsEmpty())
+	{
+		OutFailure = FString::Printf(
+			TEXT("The sampled distribution is empty or exceeds the %d-background-cloud / %d-cloudlet PIE safety budget. Reduce cluster count, mean or variance."),
+			FABTST4LowPolyCloudPrototype::MaxGlobalIslandCount,
+			(FABTST4LowPolyCloudPrototype::MaxGlobalIslandCount
+				+ FABTST4LowPolyCloudPrototype::
+					TerminatorMegaClusterIslandCount)
+				* FABTST4LowPolyCloudPrototype::CloudletsPerIsland);
+		return false;
+	}
+	int32 BackgroundLogicalClouds = 0;
+	for (const int32 Count : MemberCounts)
+	{
+		BackgroundLogicalClouds += Count;
+	}
+
+	const FABTST4CloudFieldTuningState PreviousState = CloudFieldTuningState;
+	CloudFieldTuningState.Distribution = Distribution;
+	CloudFieldTuningState.Seed = Seed;
+	CloudFieldTuningState.bOverrideActive = true;
+	DestroyLowPolyCloudPrototype();
+	RefreshNow();
+	if (!LowPolyCloudPrototypeActor.IsValid())
+	{
+		CloudFieldTuningState = PreviousState;
+		DestroyLowPolyCloudPrototype();
+		RefreshNow();
+		OutFailure = TEXT("The tuned cloud layout failed the runtime cloud contract.");
+		return false;
+	}
+
+	FString MemberText;
+	for (const int32 Count : MemberCounts)
+	{
+		MemberText += MemberText.IsEmpty()
+			? FString::FromInt(Count)
+			: FString::Printf(TEXT(",%d"), Count);
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Accepted=1 ClusterCount=%d Mean=%.3f Variance=%.3f Seed=%u BackgroundLogicalClouds=%d TotalLogicalClouds=%d Cloudlets=%d Members=[%s] LayoutHash=0x%016llX"),
+		ClusterCount,
+		CloudsPerClusterMean,
+		CloudsPerClusterVariance,
+		Seed,
+		BackgroundLogicalClouds,
+		LowPolyLogicalCloudCount,
+		LowPolyLogicalCloudCount
+			* FABTST4LowPolyCloudPrototype::CloudletsPerIsland,
+		*MemberText,
+		static_cast<unsigned long long>(LowPolyLogicalCloudLayoutHash));
+	return true;
+}
+
+void UABTSStylizedRenderingWorldSubsystem::ClearCloudFieldTuningOverride()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || World->WorldType != EWorldType::PIE)
+	{
+		return;
+	}
+	CloudFieldTuningState = FABTST4CloudFieldTuningState();
+	DestroyLowPolyCloudPrototype();
+	RefreshNow();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Rendering][T4-A2.4][CloudTuning] Cleared=1 ProductionLayoutRestored=1"));
+}
+
+bool UABTSStylizedRenderingWorldSubsystem::EnterCloudFieldOverview(
+	FString& OutFailure)
+{
+	OutFailure.Reset();
+	UWorld* World = GetWorld();
+	if (World == nullptr || World->WorldType != EWorldType::PIE)
+	{
+		OutFailure = TEXT("Cloud overview is available only in PIE.");
+		return false;
+	}
+	if (!bEnvironmentSnapshotReady)
+	{
+		RefreshNow();
+	}
+	if (!bEnvironmentSnapshotReady || !EnvironmentSnapshot.IsValid())
+	{
+		OutFailure = TEXT("A valid primary-planet environment snapshot is unavailable.");
+		return false;
+	}
+	APlayerController* Controller = World->GetFirstPlayerController();
+	if (!IsValid(Controller))
+	{
+		OutFailure = TEXT("The local PIE player controller is unavailable.");
+		return false;
+	}
+
+	ACameraActor* OverviewCamera = CloudFieldOverviewCamera.Get();
+	if (!IsValid(OverviewCamera))
+	{
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.Name = MakeUniqueObjectName(
+			World, ACameraActor::StaticClass(), TEXT("ABTST4CloudFieldOverviewCamera"));
+		SpawnParameters.ObjectFlags |= RF_Transient;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		OverviewCamera = World->SpawnActor<ACameraActor>(
+			ACameraActor::StaticClass(), FTransform::Identity, SpawnParameters);
+		if (!IsValid(OverviewCamera))
+		{
+			OutFailure = TEXT("Unable to spawn the transient overview camera.");
+			return false;
+		}
+		CloudFieldOverviewCamera = OverviewCamera;
+	}
+	if (Controller->GetViewTarget() != OverviewCamera)
+	{
+		CloudFieldOverviewPreviousViewTarget = Controller->GetViewTarget();
+	}
+
+	const FABTSStylizedEnvironmentParameters Parameters =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			EnvironmentSnapshot.Profile);
+	int32 ViewportX = 0;
+	int32 ViewportY = 0;
+	Controller->GetViewportSize(ViewportX, ViewportY);
+	const double Aspect = ViewportX > 0 && ViewportY > 0
+		? static_cast<double>(ViewportX) / static_cast<double>(ViewportY)
+		: 16.0 / 9.0;
+	constexpr double HorizontalFovDegrees = 52.0;
+	const double HalfHorizontal = FMath::DegreesToRadians(
+		HorizontalFovDegrees * 0.5);
+	const double HalfVertical = FMath::Atan(
+		FMath::Tan(HalfHorizontal) / FMath::Max(Aspect, 0.1));
+	const double FramingRadiusCM = EnvironmentSnapshot.PlanetRadiusCM
+		+ Parameters.CloudBaseAltitudeCM
+		+ Parameters.CloudLayerHeightCM * 3.0
+		+ EnvironmentSnapshot.PlanetRadiusCM * 0.16;
+	const double CameraDistanceCM = FramingRadiusCM
+		/ FMath::Sin(FMath::Min(HalfHorizontal, HalfVertical)) * 1.08;
+	const FVector RadialNorth = FVector::UpVector;
+	const FVector CameraLocation = EnvironmentSnapshot.PlanetCenterWorld
+		+ RadialNorth * CameraDistanceCM;
+	const FVector ViewDirection = -RadialNorth;
+	const FRotator CameraRotation = FRotationMatrix::MakeFromXZ(
+		ViewDirection, FVector::ForwardVector).Rotator();
+	OverviewCamera->SetActorLocationAndRotation(
+		CameraLocation, CameraRotation, false, nullptr,
+		ETeleportType::TeleportPhysics);
+	OverviewCamera->GetCameraComponent()->SetFieldOfView(
+		static_cast<float>(HorizontalFovDegrees));
+	Controller->SetViewTarget(OverviewCamera);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Rendering][T4-A2.4][CloudOverview] Active=1 Center=%s RadiusCM=%.2f FramingRadiusCM=%.2f DistanceCM=%.2f FOV=%.2f Aspect=%.3f"),
+		*EnvironmentSnapshot.PlanetCenterWorld.ToCompactString(),
+		EnvironmentSnapshot.PlanetRadiusCM,
+		FramingRadiusCM,
+		CameraDistanceCM,
+		HorizontalFovDegrees,
+		Aspect);
+	return true;
+}
+
+bool UABTSStylizedRenderingWorldSubsystem::ExitCloudFieldOverview(
+	FString& OutFailure)
+{
+	OutFailure.Reset();
+	UWorld* World = GetWorld();
+	APlayerController* Controller = World != nullptr
+		? World->GetFirstPlayerController() : nullptr;
+	if (!IsValid(Controller))
+	{
+		OutFailure = TEXT("The local player controller is unavailable.");
+		return false;
+	}
+	AActor* PreviousViewTarget = CloudFieldOverviewPreviousViewTarget.Get();
+	if (!IsValid(PreviousViewTarget))
+	{
+		OutFailure = TEXT("No valid pre-overview view target was saved.");
+		return false;
+	}
+	Controller->SetViewTarget(PreviousViewTarget);
+	if (AActor* OverviewCamera = CloudFieldOverviewCamera.Get())
+	{
+		OverviewCamera->Destroy();
+	}
+	CloudFieldOverviewCamera.Reset();
+	CloudFieldOverviewPreviousViewTarget.Reset();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Rendering][T4-A2.4][CloudOverview] Active=0 Restored=%s"),
+		*GetNameSafe(PreviousViewTarget));
+	return true;
 }
 
 void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
@@ -1681,17 +2197,46 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 		OutFailure = TEXT("Cloud prototype world is unavailable.");
 		return false;
 	}
+	const FABTST4CloudFieldTuningState EffectiveTuning =
+		GetCloudFieldTuningState();
+	const uint32 EffectiveCloudSeed = EffectiveTuning.bOverrideActive
+		? EffectiveTuning.Seed
+		: Parameters.StarSeed ^ 0xC10DF13Du;
+	const TArray<int32> BackgroundClusterMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			EffectiveCloudSeed, EffectiveTuning.Distribution);
+	int32 ExpectedBackgroundClouds = 0;
+	for (const int32 MemberCount : BackgroundClusterMemberCounts)
+	{
+		ExpectedBackgroundClouds += MemberCount;
+	}
+	if (BackgroundClusterMemberCounts.IsEmpty()
+		|| ExpectedBackgroundClouds <= 0
+		|| ExpectedBackgroundClouds
+			> FABTST4LowPolyCloudPrototype::MaxGlobalIslandCount)
+	{
+		OutFailure = TEXT("Cloud distribution is empty or exceeds the PIE safety budget.");
+		return false;
+	}
+	const int32 ExpectedLogicalClouds = ExpectedBackgroundClouds
+		+ FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount;
 	const TArray<FABTST4LowPolyCloudIslandDefinition> Definitions =
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Parameters.PlanetCenterWorld,
 			Parameters.PlanetRadiusCM,
-			Parameters.StarSeed ^ 0xC10DF13Du,
+			EffectiveCloudSeed,
 			FVector(Parameters.SunDirectionToSunWorld),
 			Parameters.CloudBaseAltitudeCM,
-			Parameters.CloudLayerHeightCM);
-	if (Definitions.Num() != FABTST4LowPolyCloudPrototype::IslandCount)
+			Parameters.CloudLayerHeightCM,
+			EffectiveTuning.Distribution);
+	if (Definitions.Num() != ExpectedLogicalClouds)
 	{
-		OutFailure = TEXT("Global cloud field did not produce its frozen island count.");
+		OutFailure = FString::Printf(
+			TEXT("Global cloud field produced %d logical clouds; expected %d (%d background + %d terminator)."),
+			Definitions.Num(),
+			ExpectedLogicalClouds,
+			ExpectedBackgroundClouds,
+			FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount);
 		return false;
 	}
 	const uint64 DesiredLogicalCloudHash =
@@ -1701,10 +2246,10 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 		OutFailure = TEXT("Logical cloud identity layout is invalid.");
 		return false;
 	}
-	if (FABTST4LowPolyCloudPrototype::CountCloudFusionPairs(Definitions)
-		< FABTST4LowPolyCloudPrototype::WeatherSystemCount)
+	if (!FABTST4LowPolyCloudPrototype::
+		AreBackgroundWeatherClusterEnvelopesConnected(Definitions))
 	{
-		OutFailure = TEXT("Global cloud field has insufficient neighbouring fusion pairs.");
+		OutFailure = TEXT("One or more background weather clusters have a disconnected visible envelope.");
 		return false;
 	}
 	if (FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
@@ -1760,11 +2305,13 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 			+ (DesiredCloudletHash << 6) + (DesiredCloudletHash >> 2);
 		TotalCloudlets += IslandCloudlets[DefinitionIndex].Num();
 	}
-	if (TotalCloudlets != FABTST4LowPolyCloudPrototype::TotalCloudletCount)
+	const int32 ExpectedCloudlets = ExpectedLogicalClouds
+		* FABTST4LowPolyCloudPrototype::CloudletsPerIsland;
+	if (TotalCloudlets != ExpectedCloudlets)
 	{
 		OutFailure = FString::Printf(
 			TEXT("Cloudlet budget mismatch: expected %d, produced %d."),
-			FABTST4LowPolyCloudPrototype::TotalCloudletCount,
+			ExpectedCloudlets,
 			TotalCloudlets);
 		return false;
 	}
@@ -2403,7 +2950,7 @@ bool FABTSToonT4A2R0LowPolyCloudContractTest::RunTest(
 			FVector(Second.SunDirectionToSunWorld),
 			Second.CloudBaseAltitudeCM,
 			Second.CloudLayerHeightCM);
-	TestEqual(TEXT("A2.2 freezes the deterministic global cloud count"),
+	TestEqual(TEXT("A2.4 freezes the deterministic production cloud count"),
 		FirstLayout.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
 	const uint64 FirstHash =
 		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(FirstLayout);
@@ -3085,7 +3632,7 @@ bool FABTSToonT4A2R1C2A4SeededAmorphousFootprintContractTest::RunTest(
 	TestEqual(TEXT("Global field total edge budget"),
 		TotalEdge,
 		FABTST4LowPolyCloudPrototype::TotalEdgeCloudletCount);
-	TestEqual(TEXT("A2.2 freezes the total instanced-cloudlet GPU budget"),
+	TestEqual(TEXT("A2.4 freezes the production instanced-cloudlet GPU budget"),
 		TotalBody + TotalCrown + TotalEdge,
 		FABTST4LowPolyCloudPrototype::TotalCloudletCount);
 	return true;

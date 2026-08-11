@@ -223,7 +223,7 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 54;
+	return 58;
 }
 
 bool FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(

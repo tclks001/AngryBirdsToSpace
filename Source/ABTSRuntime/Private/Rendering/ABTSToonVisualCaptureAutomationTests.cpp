@@ -199,9 +199,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports T4-A2.3.1 crisp ground-cloud motion policy"),
+		TEXT("Stylized renderer reports the frozen T4-A2.4 cloud distribution"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		54);
+		58);
 	TestTrue(
 		TEXT("GroundDay clouds suppress motion blur to prevent moving night-cloud edge fringes"),
 		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
@@ -426,7 +426,26 @@ bool FABTSToonT4A22GlobalCloudFieldContractTest::RunTest(
 			10000.0,
 			FVector(0.3, -0.6, 0.7).GetSafeNormal(),
 			EABTSStylizedRenderProfile::GroundDay);
-	constexpr uint32 CloudFieldSeed = 0xA22C10D5u;
+	// Production star seed 0x00A8B751 xor the frozen cloud-field salt.
+	constexpr uint32 CloudFieldSeed = 0xC1A5466Cu;
+	const FABTST4CloudClusterDistributionParameters ProductionDistribution;
+	TestEqual(TEXT("A2.4 freezes twenty-four production weather clusters"),
+		ProductionDistribution.ClusterCount, 24);
+	TestEqual(TEXT("A2.4 freezes ten logical clouds per cluster on average"),
+		ProductionDistribution.CloudsPerClusterMean, 10.0f);
+	TestEqual(TEXT("A2.4 freezes the accepted member-count variance"),
+		ProductionDistribution.CloudsPerClusterVariance, 64.0f);
+	const TArray<int32> ProductionMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			CloudFieldSeed, ProductionDistribution);
+	int32 ProductionBackgroundClouds = 0;
+	for (const int32 Count : ProductionMemberCounts)
+	{
+		ProductionBackgroundClouds += Count;
+	}
+	TestEqual(TEXT("The production seed has the frozen background-cloud identity"),
+		ProductionBackgroundClouds,
+		FABTST4LowPolyCloudPrototype::GlobalIslandCount);
 	const TArray<FABTST4LowPolyCloudIslandDefinition> LogicalClouds =
 		FABTST4LowPolyCloudPrototype::BuildDefinitions(
 			Environment.PlanetCenterWorld,
@@ -545,6 +564,9 @@ bool FABTSToonT4A22GlobalCloudFieldContractTest::RunTest(
 	TestTrue(TEXT("The global field includes nearby cloud pairs for fusion"),
 		FABTST4LowPolyCloudPrototype::CountCloudFusionPairs(LogicalClouds)
 			>= FABTST4LowPolyCloudPrototype::WeatherSystemCount);
+	TestTrue(TEXT("Every default background weather cluster is one connected visible mass"),
+		FABTST4LowPolyCloudPrototype::
+			AreBackgroundWeatherClusterEnvelopesConnected(LogicalClouds));
 	TestEqual(TEXT("A2.2 appends seven logical members for the mega cluster"),
 		TerminatorMegaCloudCount,
 		FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount);
@@ -586,6 +608,79 @@ bool FABTSToonT4A22GlobalCloudFieldContractTest::RunTest(
 		FABTSStylizedRenderingContract::
 			ShouldSuppressInternalOutlineBetweenStencilValues(
 				CloudCompositeStencil, 1));
+
+	FABTST4CloudClusterDistributionParameters TunedDistribution;
+	TunedDistribution.ClusterCount = 18;
+	TunedDistribution.CloudsPerClusterMean = 8.0f;
+	TunedDistribution.CloudsPerClusterVariance = 36.0f;
+	const TArray<int32> TunedMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			0xA2401234u, TunedDistribution);
+	const TArray<int32> RepeatedMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			0xA2401234u, TunedDistribution);
+	int32 TunedMemberTotal = 0;
+	for (const int32 Count : TunedMemberCounts)
+	{
+		TunedMemberTotal += Count;
+		TestTrue(TEXT("Every tunable global cluster keeps 1..64 members"),
+			Count >= 1 && Count <= 64);
+	}
+	TestEqual(TEXT("Explicit cluster count is not derived from member size"),
+		TunedMemberCounts.Num(), TunedDistribution.ClusterCount);
+	TestTrue(TEXT("Tuning can exceed the legacy A2.2 24-cloud baseline"),
+		TunedMemberTotal > 24);
+	TestTrue(TEXT("Tuning remains inside the fail-closed background budget"),
+		TunedMemberTotal <= FABTST4LowPolyCloudPrototype::MaxGlobalIslandCount);
+	TestTrue(TEXT("Tunable grouping is deterministic for the same seed"),
+		TunedMemberCounts == RepeatedMemberCounts);
+	FABTST4CloudClusterDistributionParameters OverBudgetDistribution;
+	OverBudgetDistribution.ClusterCount = 64;
+	OverBudgetDistribution.CloudsPerClusterMean = 64.0f;
+	OverBudgetDistribution.CloudsPerClusterVariance = 1024.0f;
+	TestTrue(TEXT("Pathological input fails closed instead of flooding PIE"),
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			0xA2401234u, OverBudgetDistribution).IsEmpty());
+	const TArray<FABTST4LowPolyCloudIslandDefinition> TunedClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			0xA2401234u,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM,
+			TunedDistribution);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> RepeatedTunedClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			0xA2401234u,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM,
+			TunedDistribution);
+	TestEqual(TEXT("A2.4 total clouds follow explicit clusters and sampled members"),
+		TunedClouds.Num(), TunedMemberTotal
+			+ FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount);
+	TestEqual(TEXT("A2.4 tuned layout hash is deterministic"),
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(TunedClouds),
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+			RepeatedTunedClouds));
+	for (int32 Index = 0; Index < TunedMemberTotal; ++Index)
+	{
+		const FABTST4LowPolyCloudIslandDefinition& Cloud = TunedClouds[Index];
+		TestTrue(TEXT("Every tuned background cloud publishes grouping metadata"),
+			Cloud.WeatherClusterIndex >= 0
+			&& Cloud.WeatherClusterIndex < TunedMemberCounts.Num()
+			&& Cloud.WeatherClusterMemberCount
+				== TunedMemberCounts[Cloud.WeatherClusterIndex]
+			&& Cloud.WeatherClusterMemberIndex >= 0
+			&& Cloud.WeatherClusterMemberIndex
+				< Cloud.WeatherClusterMemberCount);
+	}
+	TestTrue(TEXT("Every tuned background weather cluster is one connected visible mass"),
+		FABTST4LowPolyCloudPrototype::
+			AreBackgroundWeatherClusterEnvelopesConnected(TunedClouds));
 	return true;
 }
 

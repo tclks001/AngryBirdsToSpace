@@ -13,8 +13,17 @@ class USceneCaptureComponent2D;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class AActor;
+class ACameraActor;
 class FABTSStylizedMaterialOverrideRegistry;
 class FABTSToonEnvironmentPresentationState;
+
+/** Frozen A2.4 production distribution plus an optional PIE-only override. */
+struct ABTSRUNTIME_API FABTST4CloudFieldTuningState
+{
+	FABTST4CloudClusterDistributionParameters Distribution;
+	uint32 Seed = 0;
+	bool bOverrideActive = false;
+};
 
 /**
  * Integration-owned T2-B1 consumer. Feature systems publish read-only semantic
@@ -65,6 +74,18 @@ public:
 		OutSnapshot = EnvironmentSnapshot;
 		return bEnvironmentSnapshotReady && OutSnapshot.IsValid();
 	}
+	/** Applies a deterministic PIE tuning override and immediately rebuilds clouds. */
+	bool ApplyCloudFieldTuningOverride(
+		int32 ClusterCount,
+		float CloudsPerClusterMean,
+		float CloudsPerClusterVariance,
+		uint32 Seed,
+		FString& OutFailure);
+	void ClearCloudFieldTuningOverride();
+	FABTST4CloudFieldTuningState GetCloudFieldTuningState() const;
+	/** Moves the local player to a transient whole-planet diagnostic view. */
+	bool EnterCloudFieldOverview(FString& OutFailure);
+	bool ExitCloudFieldOverview(FString& OutFailure);
 
 protected:
 	virtual bool DoesSupportWorldType(
@@ -104,4 +125,7 @@ private:
 	TArray<float> LowPolyCloudTraversalStrengths;
 	uint64 LastCloudTraversalDiagnosticHash = 0;
 	bool bHasPreviousCloudTraversalCamera = false;
+	FABTST4CloudFieldTuningState CloudFieldTuningState;
+	TWeakObjectPtr<ACameraActor> CloudFieldOverviewCamera;
+	TWeakObjectPtr<AActor> CloudFieldOverviewPreviousViewTarget;
 };

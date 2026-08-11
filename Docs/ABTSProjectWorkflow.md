@@ -6,7 +6,7 @@
 
 ## 1. 当前状态
 
-- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**和 **T4-A2.3 有界穿云表现**均为 `IntegrationAccepted`。A2.3 最终为实现版本 54、材质宏合同 11、manifest schema 12：永久删除会闪烁的全屏雾幕，保留镜头球、四个实际鸟体球、有限走廊和局部二维噪声清除；v53 修复真实 SM6 Custom HLSL 向量维度错误，v54 仅在 `GroundDay + CloudsEnabled` 禁用 Motion Blur。UE 5.8 ForceUnity、fresh Toon 26/26、真实 D3D12 26 点/52 条和用户连续运动 PIE 均已通过，逐鸟可见、雾幕闪烁及夜云动态亮边全部验收。当前进入 **A2.4 消费端与性能冻结**；最终合并验收前由 A2.4 提高超大型云簇占比并冻结数量/尺度分布，再重跑融合、消费端、时域与 GPU 门。R0/R1/B3B6/v44 仅作为技术历史与日志身份。排期与证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
+- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**和 **T4-A2.3 有界穿云表现**均为 `IntegrationAccepted`。A2.3 最终为实现版本 54、材质宏合同 11、manifest schema 12：永久删除会闪烁的全屏雾幕，保留镜头球、四个实际鸟体球、有限走廊和局部二维噪声清除；v53 修复真实 SM6 Custom HLSL 向量维度错误，v54 仅在 `GroundDay + CloudsEnabled` 禁用 Motion Blur。UE 5.8 ForceUnity、fresh Toon 26/26、真实 D3D12 26 点/52 条和用户连续运动 PIE 均已通过，逐鸟可见、雾幕闪烁及夜云动态亮边全部验收。当前 **A2.4 消费端与性能冻结**为 `InProgress`；实现版本 58 已把用户 PIE 验收的 `24` 个云簇、每簇均值 `10`、方差 `64` 冻结为生产分布，并以确定性父子生长和逐簇可见包络图保证同簇云朵连成一片。生产 Seed 下为 277 朵背景云、追加诊断簇后共 284 朵/23,856 个 cloudlet；fail-closed 上限同步提升为 384 朵背景云。分布子阶段已完成，后续继续 PIP/AVI、时域和 GPU 门。R0/R1/B3B6/v44 仅作为技术历史与日志身份。命令、范围和证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
 
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
