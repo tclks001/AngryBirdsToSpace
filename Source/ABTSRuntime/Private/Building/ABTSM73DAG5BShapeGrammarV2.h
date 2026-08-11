@@ -24,11 +24,44 @@ struct FABTSM73DAG5BV2Volume
 	FString DerivationPath;
 };
 
+/** One evaluated semantic podium split. Rejected candidates always carry the
+ * first fail-closed reason; the accepted row is the selected highest split. */
+struct FABTSM73DAG5BV2SemanticPodiumCandidateDiagnostic
+{
+	FString Scope;
+	double LegacyTopZ = 0.0;
+	double SemanticSeamZ = 0.0;
+	double QuantizedTopZ = 0.0;
+	double ProtectedSpanTopZ = 0.0;
+	bool bCandidateStartsCrown = false;
+	bool bAccepted = false;
+	FString RejectReason;
+};
+
+/** Completeness record for one applied podium plan or one observation-only
+ * building-wide common-seam probe. */
+struct FABTSM73DAG5BV2SemanticPodiumSelectionDiagnostic
+{
+	FString Scope;
+	int32 RootCount = 0;
+	int32 CandidateCount = 0;
+	double LegacyTopZ = 0.0;
+	double SelectedSemanticSeamZ = 0.0;
+	double SelectedTopZ = 0.0;
+	bool bUsesSemanticSeam = false;
+	bool bSelectedCandidateStartsCrown = false;
+	bool bAppliedToEnvelope = false;
+};
+
 struct FABTSM73DAG5BV2GenerationResult
 {
 	FABTSM73DAG5BV2PreviewSummary Summary;
 	TArray<FABTSM73DAG5BV2Volume> Volumes;
 	TArray<FString> GrammarTrace;
+	TArray<FABTSM73DAG5BV2SemanticPodiumCandidateDiagnostic>
+		SemanticPodiumCandidateDiagnostics;
+	TArray<FABTSM73DAG5BV2SemanticPodiumSelectionDiagnostic>
+		SemanticPodiumSelectionDiagnostics;
 };
 
 /** Pure-data, deterministic Shape Grammar + graph-WFC silhouette generator. */

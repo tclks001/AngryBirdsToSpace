@@ -172,6 +172,27 @@ bool FABTSM73BeamD15VisualComplexityLadderTest::RunTest(
 		Result.Summary.bVisualComplexityCertified);
 	TestTrue(TEXT("Assembly axis/contact quality is certified"),
 		Result.Summary.bAssemblyQualityCertified);
+	TestTrue(TEXT("Skeleton-first static certificate is present"),
+		Result.Summary.bSkeletonFirstCertified);
+	TestEqual(TEXT("One candidate-wide building group is certified"),
+		Result.Summary.SkeletonFirstBuildingGroupCount, 1);
+	TestTrue(TEXT("Candidate-wide common shell is non-empty"),
+		Result.Summary.SkeletonFirstCommonShellMemberCount > 0);
+	TestEqual(TEXT("Common shell reaches every planned core"),
+		Result.Summary.SkeletonFirstCommonShellConnectedCoreCount,
+		Result.Summary.SkeletonFirstExplicitCoreCellCount);
+	TestEqual(TEXT("Shared courses remain in their declared bands"),
+		Result.Summary.SkeletonFirstSharedCourseBandViolationCount, 0);
+	TestEqual(TEXT("Every shared rail replaces one slot in each endpoint core"),
+		Result.Summary.SkeletonFirstSharedCourseReplacementSlotCount,
+		Result.Summary.SkeletonFirstSharedCourseCount * 2);
+	TestEqual(TEXT("Shared rails form two-rail course pairs"),
+		Result.Summary.SkeletonFirstSharedCourseCount & 1, 0);
+	TestTrue(TEXT("Every supported span owns at least one shared rail pair"),
+		Result.Summary.SupportedSpanCount == 0
+			? Result.Summary.SkeletonFirstSharedCourseCount == 0
+			: Result.Summary.SkeletonFirstSharedCourseCount
+				>= Result.Summary.SupportedSpanCount * 2);
 	TestTrue(TEXT("Brick count reaches tier minimum"),
 		Result.Summary.BrickCount
 			>= Result.Summary.TargetMinimumBrickCount);
@@ -295,9 +316,9 @@ bool FABTSM73BeamD15ColumnHighTierClosureTest::RunTest(
 				Result.Summary.BrickCount >= Result.Summary.TargetMinimumBrickCount
 				&& Result.Summary.BrickCount <= Result.Summary.TargetMaximumBrickCount);
 			TestEqual(TEXT("Resolved lower Brick window is exact"),
-				Result.Summary.TargetMinimumBrickCount, Tier == 4 ? 1300 : 1500);
+				Result.Summary.TargetMinimumBrickCount, Tier == 4 ? 1600 : 2200);
 			TestEqual(TEXT("Resolved upper Brick window is exact"),
-				Result.Summary.TargetMaximumBrickCount, Tier == 4 ? 1499 : 3499);
+				Result.Summary.TargetMaximumBrickCount, Tier == 4 ? 2199 : 3499);
 			TestEqual(TEXT("Every emitted Brick is counted"),
 				Result.Bricks.Num(), Result.Summary.BrickCount);
 			TestEqual(TEXT("Every Member owns one Brick"),

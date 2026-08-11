@@ -10,9 +10,15 @@
 #include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "ProceduralMeshComponent.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
 
 namespace ABTSM73BeamD1Preview
 {
@@ -30,7 +36,290 @@ namespace ABTSM73BeamD1Preview
 		Component.SetHiddenInGame(true);
 		Component.SetCastShadow(true);
 	}
+
+	struct FMeshBuffers
+	{
+		TArray<FVector> Vertices;
+		TArray<int32> Triangles;
+		TArray<FVector> Normals;
+		TArray<FVector2D> UVs;
+		TArray<FLinearColor> Colors;
+		TArray<FProcMeshTangent> Tangents;
+	};
+
+	void AppendTriangle(
+		FMeshBuffers& Buffers, const FVector& A, const FVector& B, const FVector& C)
+	{
+		const FVector Normal = FVector::CrossProduct(B - A, C - A).GetSafeNormal();
+		const int32 BaseIndex = Buffers.Vertices.Num();
+		Buffers.Vertices.Append({A, B, C});
+		Buffers.Triangles.Append({BaseIndex, BaseIndex + 1, BaseIndex + 2});
+		Buffers.Normals.Append({Normal, Normal, Normal});
+		Buffers.UVs.Append({FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(0.5, 1.0)});
+		Buffers.Colors.Append({FLinearColor::White, FLinearColor::White, FLinearColor::White});
+	}
+
+	void AppendQuad(
+		FMeshBuffers& Buffers, const FVector& A, const FVector& B,
+		const FVector& C, const FVector& D)
+	{
+		AppendTriangle(Buffers, A, B, C);
+		AppendTriangle(Buffers, A, C, D);
+	}
+
+	void AppendBox(const FBox& Box, FMeshBuffers& Buffers)
+	{
+		const FVector P000(Box.Min.X, Box.Min.Y, Box.Min.Z);
+		const FVector P100(Box.Max.X, Box.Min.Y, Box.Min.Z);
+		const FVector P110(Box.Max.X, Box.Max.Y, Box.Min.Z);
+		const FVector P010(Box.Min.X, Box.Max.Y, Box.Min.Z);
+		const FVector P001(Box.Min.X, Box.Min.Y, Box.Max.Z);
+		const FVector P101(Box.Max.X, Box.Min.Y, Box.Max.Z);
+		const FVector P111(Box.Max.X, Box.Max.Y, Box.Max.Z);
+		const FVector P011(Box.Min.X, Box.Max.Y, Box.Max.Z);
+		AppendQuad(Buffers, P000, P010, P110, P100);
+		AppendQuad(Buffers, P001, P101, P111, P011);
+		AppendQuad(Buffers, P000, P001, P011, P010);
+		AppendQuad(Buffers, P100, P110, P111, P101);
+		AppendQuad(Buffers, P000, P100, P101, P001);
+		AppendQuad(Buffers, P010, P011, P111, P110);
+	}
+
+	void AppendPrismX(const FBox& Box, FMeshBuffers& Buffers)
+	{
+		const double MidX = (Box.Min.X + Box.Max.X) * 0.5;
+		const FVector A(Box.Min.X, Box.Min.Y, Box.Min.Z);
+		const FVector B(Box.Max.X, Box.Min.Y, Box.Min.Z);
+		const FVector C(MidX, Box.Min.Y, Box.Max.Z);
+		const FVector D(Box.Min.X, Box.Max.Y, Box.Min.Z);
+		const FVector E(Box.Max.X, Box.Max.Y, Box.Min.Z);
+		const FVector F(MidX, Box.Max.Y, Box.Max.Z);
+		AppendTriangle(Buffers, A, B, C);
+		AppendTriangle(Buffers, D, F, E);
+		AppendQuad(Buffers, A, D, E, B);
+		AppendQuad(Buffers, A, C, F, D);
+		AppendQuad(Buffers, B, E, F, C);
+	}
+
+	void AppendPrismY(const FBox& Box, FMeshBuffers& Buffers)
+	{
+		const double MidY = (Box.Min.Y + Box.Max.Y) * 0.5;
+		const FVector A(Box.Min.X, Box.Min.Y, Box.Min.Z);
+		const FVector B(Box.Min.X, Box.Max.Y, Box.Min.Z);
+		const FVector C(Box.Min.X, MidY, Box.Max.Z);
+		const FVector D(Box.Max.X, Box.Min.Y, Box.Min.Z);
+		const FVector E(Box.Max.X, Box.Max.Y, Box.Min.Z);
+		const FVector F(Box.Max.X, MidY, Box.Max.Z);
+		AppendTriangle(Buffers, A, C, B);
+		AppendTriangle(Buffers, D, E, F);
+		AppendQuad(Buffers, A, B, E, D);
+		AppendQuad(Buffers, A, D, F, C);
+		AppendQuad(Buffers, B, C, F, E);
+	}
+
+	void AppendPyramid(const FBox& Box, FMeshBuffers& Buffers)
+	{
+		const FVector A(Box.Min.X, Box.Min.Y, Box.Min.Z);
+		const FVector B(Box.Max.X, Box.Min.Y, Box.Min.Z);
+		const FVector C(Box.Max.X, Box.Max.Y, Box.Min.Z);
+		const FVector D(Box.Min.X, Box.Max.Y, Box.Min.Z);
+		const FVector Apex(
+			(Box.Min.X + Box.Max.X) * 0.5,
+			(Box.Min.Y + Box.Max.Y) * 0.5, Box.Max.Z);
+		AppendQuad(Buffers, A, D, C, B);
+		AppendTriangle(Buffers, A, B, Apex);
+		AppendTriangle(Buffers, B, C, Apex);
+		AppendTriangle(Buffers, C, D, Apex);
+		AppendTriangle(Buffers, D, A, Apex);
+	}
+
+	void AppendVolume(const FABTSM73DAG5BV2Volume& Volume, FMeshBuffers& Buffers)
+	{
+		switch (Volume.Primitive)
+		{
+		case EABTSM73DAG5BV2Primitive::TriangularPrismX:
+			AppendPrismX(Volume.LocalBounds, Buffers);
+			break;
+		case EABTSM73DAG5BV2Primitive::TriangularPrismY:
+			AppendPrismY(Volume.LocalBounds, Buffers);
+			break;
+		case EABTSM73DAG5BV2Primitive::Pyramid:
+			AppendPyramid(Volume.LocalBounds, Buffers);
+			break;
+		default:
+			AppendBox(Volume.LocalBounds, Buffers);
+			break;
+		}
+	}
+
+	int32 SectionForVolume(const FABTSM73DAG5BV2Volume& Volume)
+	{
+		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+		{
+			return 3;
+		}
+		switch (Volume.Primitive)
+		{
+		case EABTSM73DAG5BV2Primitive::TriangularPrismX:
+		case EABTSM73DAG5BV2Primitive::TriangularPrismY: return 1;
+		case EABTSM73DAG5BV2Primitive::Pyramid: return 2;
+		default: return 0;
+		}
+	}
+
+	enum EDiagnosticVisibility : uint8
+	{
+		SemanticEnvelopeVisibility = 1 << 0,
+		ProtectedVoidVisibility = 1 << 1,
+		CoreIntentVisibility = 1 << 2,
+		PairIntentVisibility = 1 << 3,
+		CoreAndSharedVisibility = 1 << 4,
+		CoreMergeRegionVisibility = 1 << 5,
+		CompositeCoreXVisibility = 1 << 6,
+		CompositeCoreYVisibility = 1 << 7
+	};
+
+	uint8 DiagnosticVisibilityMask(
+		const EABTSM73BeamC3Stage1DiagnosticLayer Layer)
+	{
+		switch (Layer)
+		{
+		case EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope:
+			return SemanticEnvelopeVisibility | ProtectedVoidVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::CorePlacementIntent:
+			return CoreIntentVisibility | PairIntentVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses:
+			return CoreAndSharedVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::CoreMergeRegions:
+			return CoreMergeRegionVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes:
+			return CompositeCoreXVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes:
+			return CompositeCoreYVisibility;
+		default:
+			return 0;
+		}
+	}
+
+	UMaterialInstanceDynamic* MakeDiagnosticMaterial(
+		UObject* Owner, UMaterialInterface* Parent, const FLinearColor& Color)
+	{
+		if (Parent == nullptr)
+		{
+			return nullptr;
+		}
+		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Parent, Owner);
+		if (MID != nullptr)
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), Color);
+			MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		}
+		return MID;
+	}
+
+	void AddBoxInstance(
+		UHierarchicalInstancedStaticMeshComponent* Component, const FBox& Box)
+	{
+		if (Component == nullptr || !Box.IsValid)
+		{
+			return;
+		}
+		Component->AddInstance(FTransform(
+			FQuat::Identity, Box.GetCenter(), Box.GetSize() / 100.0), false);
+	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3V3PreviewDiagnosticContractsTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.PreviewDiagnosticContracts",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Preview;
+	const uint8 WFCMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope);
+	const uint8 IntentMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::CorePlacementIntent);
+	const uint8 MembersMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses);
+	const uint8 MergeMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::CoreMergeRegions);
+	const uint8 XMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes);
+	const uint8 YMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes);
+	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
+		WFCMask, static_cast<uint8>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
+	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
+		IntentMask, static_cast<uint8>(CoreIntentVisibility | PairIntentVisibility));
+	TestEqual(TEXT("Member layer contains only actual core/shared members"),
+		MembersMask, static_cast<uint8>(CoreAndSharedVisibility));
+	TestEqual(TEXT("Merge layer contains only derived core merge regions"),
+		MergeMask, static_cast<uint8>(CoreMergeRegionVisibility));
+	TestEqual(TEXT("X lane layer contains only actual X core lanes"),
+		XMask, static_cast<uint8>(CompositeCoreXVisibility));
+	TestEqual(TEXT("Y lane layer contains only actual Y core lanes"),
+		YMask, static_cast<uint8>(CompositeCoreYVisibility));
+	TestEqual(TEXT("WFC and intent layers are disjoint"),
+		static_cast<uint8>(WFCMask & IntentMask), static_cast<uint8>(0));
+	TestEqual(TEXT("WFC and member layers are disjoint"),
+		static_cast<uint8>(WFCMask & MembersMask), static_cast<uint8>(0));
+	TestEqual(TEXT("Intent and member layers are disjoint"),
+		static_cast<uint8>(IntentMask & MembersMask), static_cast<uint8>(0));
+	TestEqual(TEXT("Merge layer is disjoint from WFC"),
+		static_cast<uint8>(MergeMask & WFCMask), static_cast<uint8>(0));
+	TestEqual(TEXT("Merge layer is disjoint from intent"),
+		static_cast<uint8>(MergeMask & IntentMask), static_cast<uint8>(0));
+	TestEqual(TEXT("Merge layer is disjoint from members"),
+		static_cast<uint8>(MergeMask & MembersMask), static_cast<uint8>(0));
+	TestEqual(TEXT("X and Y lane layers are disjoint"),
+		static_cast<uint8>(XMask & YMask), static_cast<uint8>(0));
+	TestEqual(TEXT("X lane layer is disjoint from full members"),
+		static_cast<uint8>(XMask & MembersMask), static_cast<uint8>(0));
+	TestEqual(TEXT("Y lane layer is disjoint from full members"),
+		static_cast<uint8>(YMask & MembersMask), static_cast<uint8>(0));
+
+	const FBox Bounds(FVector(-108.0, -72.0, 0.0), FVector(108.0, 72.0, 180.0));
+	auto TestOutwardWinding = [this, &Bounds](
+		const TCHAR* Label, const FMeshBuffers& Buffers, const int32 ExpectedTriangleCount)
+	{
+		TestEqual(FString::Printf(TEXT("%s triangle count"), Label),
+			Buffers.Triangles.Num() / 3, ExpectedTriangleCount);
+		for (int32 TriangleOffset = 0;
+			TriangleOffset + 2 < Buffers.Triangles.Num(); TriangleOffset += 3)
+		{
+			const int32 IA = Buffers.Triangles[TriangleOffset];
+			const int32 IB = Buffers.Triangles[TriangleOffset + 1];
+			const int32 IC = Buffers.Triangles[TriangleOffset + 2];
+			const FVector TriangleCenter =
+				(Buffers.Vertices[IA] + Buffers.Vertices[IB] + Buffers.Vertices[IC]) / 3.0;
+			const FVector GeometricNormal = FVector::CrossProduct(
+				Buffers.Vertices[IB] - Buffers.Vertices[IA],
+				Buffers.Vertices[IC] - Buffers.Vertices[IA]).GetSafeNormal();
+			TestTrue(FString::Printf(TEXT("%s triangle %d faces outward"),
+				Label, TriangleOffset / 3),
+				FVector::DotProduct(GeometricNormal,
+					TriangleCenter - Bounds.GetCenter()) > UE_DOUBLE_SMALL_NUMBER);
+		}
+	};
+
+	FMeshBuffers BoxBuffers;
+	AppendBox(Bounds, BoxBuffers);
+	TestOutwardWinding(TEXT("Box"), BoxBuffers, 12);
+	FMeshBuffers PrismXBuffers;
+	AppendPrismX(Bounds, PrismXBuffers);
+	TestOutwardWinding(TEXT("PrismX"), PrismXBuffers, 8);
+	FMeshBuffers PrismYBuffers;
+	AppendPrismY(Bounds, PrismYBuffers);
+	TestOutwardWinding(TEXT("PrismY"), PrismYBuffers, 8);
+	FMeshBuffers PyramidBuffers;
+	AppendPyramid(Bounds, PyramidBuffers);
+	TestOutwardWinding(TEXT("Pyramid"), PyramidBuffers, 6);
+	return true;
+}
+#endif
 
 AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 {
@@ -46,11 +335,31 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 		TEXT("IronBrickPreview"));
 	GlassPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
 		TEXT("GlassBrickPreview"));
+	CoreIntentPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("BeamC3CoreIntentPreview"));
+	TowerChildIntentPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("BeamC3TowerChildIntentPreview"));
+	CoreMergeRegionPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("BeamC3CoreMergeRegionPreview"));
+	SharedPairIntentPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("BeamC3SharedPairIntentPreview"));
+	ProtectedVoidPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("BeamC3ProtectedVoidPreview"));
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
-		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
+		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
 	{
 		ABTSM73BeamD1Preview::ConfigurePreview(*Preview, *Root);
 	}
+	SemanticEnvelopePreview = CreateDefaultSubobject<UProceduralMeshComponent>(
+		TEXT("BeamC3SemanticEnvelopePreview"));
+	SemanticEnvelopePreview->SetupAttachment(Root);
+	SemanticEnvelopePreview->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SemanticEnvelopePreview->SetGenerateOverlapEvents(false);
+	SemanticEnvelopePreview->SetCanEverAffectNavigation(false);
+	SemanticEnvelopePreview->SetHiddenInGame(true);
+	SemanticEnvelopePreview->bUseAsyncCooking = false;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -62,8 +371,12 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 		TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Steel.MI_Bricks_Steel"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Glass(
 		TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Glass.MI_Bricks_Glass"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Basic(
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
-		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
+		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
 	{
 		if (Cube.Succeeded())
 		{
@@ -74,6 +387,20 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 	if (Stone.Succeeded()) StonePreview->SetMaterial(0, Stone.Object);
 	if (Iron.Succeeded()) IronPreview->SetMaterial(0, Iron.Object);
 	if (Glass.Succeeded()) GlassPreview->SetMaterial(0, Glass.Object);
+	if (Glass.Succeeded())
+	{
+		SemanticEnvelopeMaterial = Glass.Object;
+		SemanticEnvelopePreview->SetMaterial(0, Glass.Object);
+	}
+	if (Basic.Succeeded())
+	{
+		DiagnosticSolidMaterial = Basic.Object;
+	}
+	if (Iron.Succeeded()) CoreIntentPreview->SetMaterial(0, Iron.Object);
+	if (Stone.Succeeded()) TowerChildIntentPreview->SetMaterial(0, Stone.Object);
+	if (Glass.Succeeded()) CoreMergeRegionPreview->SetMaterial(0, Glass.Object);
+	if (Stone.Succeeded()) SharedPairIntentPreview->SetMaterial(0, Stone.Object);
+	if (Glass.Succeeded()) ProtectedVoidPreview->SetMaterial(0, Glass.Object);
 }
 
 void AABTSM73BeamD1PreviewActor::OnConstruction(const FTransform& Transform)
@@ -175,6 +502,27 @@ void AABTSM73BeamD1PreviewActor::ClearPreview()
 			Preview->SetVisibility(bShowEditorPreview, true);
 		}
 	}
+	ClearStageDiagnostics();
+}
+
+void AABTSM73BeamD1PreviewActor::ClearStageDiagnostics()
+{
+	if (SemanticEnvelopePreview != nullptr)
+	{
+		SemanticEnvelopePreview->ClearAllMeshSections();
+		SemanticEnvelopePreview->SetVisibility(false, true);
+	}
+	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
+		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
+	{
+		if (Preview != nullptr)
+		{
+			Preview->ClearInstances();
+			Preview->SetVisibility(false, true);
+		}
+	}
+	StageDiagnosticMIDs.Reset();
 }
 
 UHierarchicalInstancedStaticMeshComponent* AABTSM73BeamD1PreviewActor::GetPreview(
@@ -194,9 +542,267 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 	ClearPreview();
 	CompiledBricks.Reset();
 	LastSummary = FABTSM73BeamD1Summary();
-	FABTSM73BeamD1GenerationResult Result;
 	FString Error;
 	FABTSM73BeamD1BrickCompiler Compiler;
+	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG)
+	{
+		FABTSM73BeamD1StagePreviewResult StageResult;
+		if (!Compiler.GenerateStagePreview(
+			Settings, GenerationStopStage, StageResult, Error))
+		{
+			LastSummary = StageResult.Summary;
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][StagePreviewRejected]")
+				TEXT(" Actor=%s Stage=%d Layer=%d Reason=%s"),
+				*GetName(), static_cast<int32>(GenerationStopStage),
+				static_cast<int32>(Stage1DiagnosticLayer), *Error);
+			return;
+		}
+		LastSummary = StageResult.Summary;
+		if (!bShowEditorPreview)
+		{
+			return;
+		}
+
+		const EABTSM73BeamC3Stage1DiagnosticLayer EffectiveLayer =
+			GenerationStopStage == EABTSM73BeamC3GenerationStage::SemanticEnvelope
+				? EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope
+				: Stage1DiagnosticLayer;
+		const uint8 VisibilityMask =
+			ABTSM73BeamD1Preview::DiagnosticVisibilityMask(EffectiveLayer);
+		const bool bShowEnvelope =
+			(VisibilityMask & ABTSM73BeamD1Preview::SemanticEnvelopeVisibility) != 0;
+		if (bShowEnvelope && SemanticEnvelopePreview != nullptr)
+		{
+			TArray<ABTSM73BeamD1Preview::FMeshBuffers> Sections;
+			Sections.SetNum(4);
+			for (const FABTSM73DAG5BV2Volume& Volume : StageResult.Silhouette.Volumes)
+			{
+				ABTSM73BeamD1Preview::AppendVolume(
+					Volume, Sections[ABTSM73BeamD1Preview::SectionForVolume(Volume)]);
+			}
+			for (int32 SectionIndex = 0; SectionIndex < Sections.Num(); ++SectionIndex)
+			{
+				ABTSM73BeamD1Preview::FMeshBuffers& Buffers = Sections[SectionIndex];
+				if (Buffers.Vertices.IsEmpty())
+				{
+					continue;
+				}
+				SemanticEnvelopePreview->CreateMeshSection_LinearColor(
+					SectionIndex, Buffers.Vertices, Buffers.Triangles,
+					Buffers.Normals, Buffers.UVs, Buffers.Colors,
+					Buffers.Tangents, false);
+				const FLinearColor Color = SectionIndex == 3
+					? FLinearColor(1.0f, 0.35f, 0.05f, 0.42f)
+					: SectionIndex == 2
+						? FLinearColor(0.9f, 0.18f, 0.42f, 0.24f)
+						: SectionIndex == 1
+							? FLinearColor(0.05f, 0.75f, 0.58f, 0.24f)
+							: FLinearColor(0.08f, 0.34f, 0.9f, 0.24f);
+				UMaterialInterface* Parent = SectionIndex == 3
+					? DiagnosticSolidMaterial.Get() : SemanticEnvelopeMaterial.Get();
+				UMaterialInstanceDynamic* MID =
+					ABTSM73BeamD1Preview::MakeDiagnosticMaterial(this, Parent, Color);
+				if (MID != nullptr)
+				{
+					StageDiagnosticMIDs.Add(MID);
+					SemanticEnvelopePreview->SetMaterial(SectionIndex, MID);
+				}
+			}
+			SemanticEnvelopePreview->SetVisibility(true, true);
+		}
+
+		if ((VisibilityMask & ABTSM73BeamD1Preview::ProtectedVoidVisibility) != 0)
+		{
+			if (!StageResult.Skeleton.Plan.ReservedSupportVoids.IsEmpty())
+			{
+				for (const FABTSM73BeamASupportVoid& Void :
+					StageResult.Skeleton.Plan.ReservedSupportVoids)
+				{
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						ProtectedVoidPreview, Void.Bounds);
+				}
+			}
+			else
+			{
+				for (const FABTSM73DAG5BV2Volume& Volume : StageResult.Silhouette.Volumes)
+				{
+					if (Volume.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan
+						|| (Volume.SpanAxisIndex != 0 && Volume.SpanAxisIndex != 1))
+					{
+						continue;
+					}
+					double GroundZ = Volume.LocalBounds.Min.Z;
+					for (const FABTSM73DAG5BV2Volume& Support : StageResult.Silhouette.Volumes)
+					{
+						if (Support.VolumeId == Volume.NegativeSupportVolumeId
+							|| Support.VolumeId == Volume.PositiveSupportVolumeId)
+						{
+							GroundZ = FMath::Min(GroundZ, Support.LocalBounds.Min.Z);
+						}
+					}
+					FVector Minimum = Volume.LocalBounds.Min;
+					FVector Maximum = Volume.LocalBounds.Max;
+					Minimum.Z = GroundZ;
+					Maximum.Z = Volume.LocalBounds.Min.Z;
+					Minimum[Volume.SpanAxisIndex] = Volume.SpanOpeningMinCM;
+					Maximum[Volume.SpanAxisIndex] = Volume.SpanOpeningMaxCM;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						ProtectedVoidPreview, FBox(Minimum, Maximum));
+				}
+			}
+			ProtectedVoidPreview->SetVisibility(
+				ProtectedVoidPreview->GetInstanceCount() > 0, true);
+		}
+
+		if ((VisibilityMask & ABTSM73BeamD1Preview::CoreMergeRegionVisibility) != 0)
+		{
+			for (const ABTSM73BeamC3V3::FCoreMergeRegionPlan& Region :
+				StageResult.Skeleton.Plan.CoreMergeRegions)
+			{
+				for (const FBox& SourceBase : Region.GroundSourceBounds)
+				{
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreMergeRegionPreview, SourceBase);
+				}
+			}
+			CoreMergeRegionPreview->SetVisibility(
+				CoreMergeRegionPreview->GetInstanceCount() > 0, true);
+		}
+		else if ((VisibilityMask & ABTSM73BeamD1Preview::CoreIntentVisibility) != 0)
+		{
+			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
+			{
+				UHierarchicalInstancedStaticMeshComponent* IntentPreview =
+					Core.HierarchyRole == ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+						? TowerChildIntentPreview.Get() : CoreIntentPreview.Get();
+				ABTSM73BeamD1Preview::AddBoxInstance(IntentPreview, Core.LocalBounds);
+			}
+			for (const ABTSM73BeamC3V3::FSharedCourseIntent& Intent :
+				Plan.SharedCourseIntents)
+			{
+				const ABTSM73BeamC3V3::FCoreCellPlan* Negative = Plan.CoreCells.FindByPredicate(
+					[&Intent](const ABTSM73BeamC3V3::FCoreCellPlan& Core)
+					{
+						return Core.CoreCellId == Intent.NegativeCoreCellId;
+					});
+				const ABTSM73BeamC3V3::FCoreCellPlan* Positive = Plan.CoreCells.FindByPredicate(
+					[&Intent](const ABTSM73BeamC3V3::FCoreCellPlan& Core)
+					{
+						return Core.CoreCellId == Intent.PositiveCoreCellId;
+					});
+				if (Negative == nullptr || Positive == nullptr || Intent.CourseIndices.IsEmpty())
+				{
+					continue;
+				}
+				const int32 AxisIndex = Intent.Axis == EABTSM73BeamAFrameAxis::X ? 0 : 1;
+				const int32 CrossAxisIndex = AxisIndex == 0 ? 1 : 0;
+				FVector Minimum = Negative->LocalBounds.GetCenter();
+				FVector Maximum = Positive->LocalBounds.GetCenter();
+				if (Minimum[AxisIndex] > Maximum[AxisIndex])
+				{
+					Swap(Minimum, Maximum);
+				}
+				const double GroundZ = Plan.Components.IsValidIndex(Negative->ComponentId)
+					? Plan.Components[Negative->ComponentId].GroundPlaneZCM : 0.0;
+				const double Z = GroundZ
+					+ (Intent.CourseIndices[0] + 0.5) * 36.0;
+				Minimum[CrossAxisIndex] -= 9.0;
+				Maximum[CrossAxisIndex] = Minimum[CrossAxisIndex] + 18.0;
+				Minimum.Z = Z - 9.0;
+				Maximum.Z = Z + 9.0;
+				ABTSM73BeamD1Preview::AddBoxInstance(
+					SharedPairIntentPreview, FBox(Minimum, Maximum));
+			}
+			CoreIntentPreview->SetVisibility(CoreIntentPreview->GetInstanceCount() > 0, true);
+			TowerChildIntentPreview->SetVisibility(
+				TowerChildIntentPreview->GetInstanceCount() > 0, true);
+			SharedPairIntentPreview->SetVisibility(
+				SharedPairIntentPreview->GetInstanceCount() > 0, true);
+		}
+		else if ((VisibilityMask & (ABTSM73BeamD1Preview::CoreAndSharedVisibility
+			| ABTSM73BeamD1Preview::CompositeCoreXVisibility
+			| ABTSM73BeamD1Preview::CompositeCoreYVisibility)) != 0)
+		{
+			const bool bXOnly =
+				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreXVisibility) != 0;
+			const bool bYOnly =
+				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreYVisibility) != 0;
+			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			for (const ABTSM73BeamC3V3::FPlannedMember& Member :
+				Plan.Members)
+			{
+				if ((bXOnly || bYOnly)
+					&& (Member.SkeletonKind
+							!= ABTSM73BeamC3V3::ESkeletonMemberKind::CoreCourse
+						|| (bXOnly && Member.Axis != EABTSM73BeamAFrameAxis::X)
+						|| (bYOnly && Member.Axis != EABTSM73BeamAFrameAxis::Y)))
+				{
+					continue;
+				}
+				const FVector Center = (Member.LocalStart + Member.LocalEnd) * 0.5;
+				FVector Dimensions(36.0, 36.0, 36.0);
+				Dimensions[static_cast<int32>(Member.Axis)] =
+					FVector::Distance(Member.LocalStart, Member.LocalEnd);
+				UHierarchicalInstancedStaticMeshComponent* Preview = nullptr;
+				if (bXOnly || bYOnly)
+				{
+					const ABTSM73BeamC3V3::FCoreCellPlan* OriginCore =
+						Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId)
+							? &Plan.CoreCells[Member.OriginCoreCellId] : nullptr;
+					Preview = OriginCore != nullptr
+						&& OriginCore->HierarchyRole
+							== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+						? StonePreview.Get() : WoodPreview.Get();
+				}
+				else
+				{
+					Preview = Member.SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::SharedCourse
+						? IronPreview.Get()
+						: Member.SkeletonKind
+							== ABTSM73BeamC3V3::ESkeletonMemberKind::BridgeDiaphragm
+							? StonePreview.Get() : WoodPreview.Get();
+				}
+				Preview->AddInstance(FTransform(
+					FQuat::Identity, Center, Dimensions / 100.0), false);
+			}
+		}
+		if (EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes)
+		{
+			for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+				WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
+			{
+				Preview->SetVisibility(false, true);
+			}
+		}
+
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewGenerated]")
+			TEXT(" Actor=%s Stage=%d Layer=%d Profile=%s Tier=%d")
+			TEXT(" Volumes=%d Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
+			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
+			*GetName(), static_cast<int32>(GenerationStopStage),
+			static_cast<int32>(EffectiveLayer),
+			*LastSummary.GameplayProfileId.ToString(), LastSummary.DifficultyTier,
+			StageResult.Silhouette.Volumes.Num(),
+			StageResult.Skeleton.Plan.CoreCells.Num(),
+			StageResult.Skeleton.Plan.Summary.PodiumMainCoreCellCount,
+			StageResult.Skeleton.Plan.Summary.TowerChildCoreCellCount,
+			StageResult.Skeleton.Plan.Summary.HighProjectionRegionCount,
+			StageResult.Skeleton.Plan.Summary.BoundHighProjectionRegionCount,
+			StageResult.Skeleton.Plan.SharedCourseIntents.Num(),
+			StageResult.Skeleton.Plan.Members.Num(),
+			LastSummary.SkeletonFirstEnvelopeHash,
+			LastSummary.SkeletonFirstFinalGeometryHash,
+			LastSummary.bStageStaticDAGEvaluated ? 1 : 0);
+		return;
+	}
+
+	FABTSM73BeamD1GenerationResult Result;
 	if (!Compiler.Generate(Settings, Result, Error))
 	{
 		LastSummary = Result.Summary;
@@ -262,6 +868,14 @@ bool AABTSM73BeamD1PreviewActor::InitializeRuntimeBuilding(
 {
 	if (MaterialSystem == nullptr || !RuntimeModules.IsEmpty())
 	{
+		return false;
+	}
+	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewRuntimeBlocked]")
+			TEXT(" Actor=%s Stage=%d Physical=NotEvaluated"),
+			*GetName(), static_cast<int32>(GenerationStopStage));
 		return false;
 	}
 	if (!LastSummary.bAccepted || CompiledBricks.IsEmpty())

@@ -1,5 +1,10 @@
 # M7.3-Beam-C3：井干式稳定芯体
 
+> **历史设计状态（2026-08-05）：** 本文记录的四柱闭环、Host/Portal/donor 与 post-C2 repair
+> 路线已冻结，不再作为新版实现入口。新的物理优先设计、预算下界、文献证据与 Stage-0 结果见
+> [M73BeamC3V2FrictionCoreDesign.md](M73BeamC3V2FrictionCoreDesign.md)。本文的旧静态证据继续保留，
+> 不能外推为 V2 或真实 Chaos 完成证据。
+
 > 父文档：[M7 建筑系统执行路线](M7BuildingDevelopmentRoadmap.md) · [Beam-C Load DAG 与静态代理](M73BeamCLoadDAGAndStaticProxyDesign.md)
 >
 > 上游：[Beam-B Motif WFC 与结构图语法](M73BeamBMotifWFCAndGraphGrammarDesign.md)

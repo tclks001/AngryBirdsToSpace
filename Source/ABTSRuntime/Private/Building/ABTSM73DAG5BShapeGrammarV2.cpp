@@ -470,7 +470,17 @@ namespace ABTSM73DAG5BV2
 			{
 				return EGrammarRule::Setback;
 			}
-			if (CanStack(Scope, Settings))
+			// The macro ladder ends after its explicit split/setback steps.  The old
+			// unconditional Stack here kept every later high-tier scope on one linear
+			// branch until MaxGrammarDepth, so a TargetVolumeCount of 72 could still
+			// only produce roughly twenty final semantic volumes.  Easy tiers retain
+			// one readable base stack; richer tiers now reach the weighted detail rules
+			// below after their deterministic macro silhouette is established.
+			const bool bPreserveSupportedSpanHierarchy = Settings.Archetype
+				== EABTSM73DAG5BV2Archetype::BridgedArcology;
+			if (((Tier < 2 && Scope.Depth == 0)
+					|| bPreserveSupportedSpanHierarchy)
+				&& CanStack(Scope, Settings))
 			{
 				return EGrammarRule::Stack;
 			}
@@ -956,6 +966,611 @@ namespace ABTSM73DAG5BV2
 		}
 		Volumes = MoveTemp(Accepted);
 		return true;
+	}
+
+	double GroundAxisGap(
+		const double AMin,
+		const double AMax,
+		const double BMin,
+		const double BMax)
+	{
+		return FMath::Max(
+			0.0,
+			FMath::Max(AMin - BMax, BMin - AMax));
+	}
+
+	bool GroundFootprintsTouch(const FBox& A, const FBox& B)
+	{
+		const double XOverlap = OverlapLength(
+			A.Min.X, A.Max.X, B.Min.X, B.Max.X);
+		const double YOverlap = OverlapLength(
+			A.Min.Y, A.Max.Y, B.Min.Y, B.Max.Y);
+		const double XGap = GroundAxisGap(
+			A.Min.X, A.Max.X, B.Min.X, B.Max.X);
+		const double YGap = GroundAxisGap(
+			A.Min.Y, A.Max.Y, B.Min.Y, B.Max.Y);
+		return (XOverlap > 1.0 && YGap <= 1.0)
+			|| (YOverlap > 1.0 && XGap <= 1.0)
+			|| (XOverlap > 1.0 && YOverlap > 1.0);
+	}
+
+	int32 CountGroundFootprintComponents(
+		const TArray<int32>& GroundIndices,
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes)
+	{
+		TArray<bool> Visited;
+		Visited.Init(false, GroundIndices.Num());
+		int32 ComponentCount = 0;
+		for (int32 Start = 0; Start < GroundIndices.Num(); ++Start)
+		{
+			if (Visited[Start])
+			{
+				continue;
+			}
+			++ComponentCount;
+			TArray<int32> Queue{Start};
+			Visited[Start] = true;
+			for (int32 Head = 0; Head < Queue.Num(); ++Head)
+			{
+				const FBox& Current =
+					Volumes[GroundIndices[Queue[Head]]].LocalBounds;
+				for (int32 Other = 0; Other < GroundIndices.Num(); ++Other)
+				{
+					if (!Visited[Other]
+						&& GroundFootprintsTouch(
+							Current,
+							Volumes[GroundIndices[Other]].LocalBounds))
+					{
+						Visited[Other] = true;
+						Queue.Add(Other);
+					}
+				}
+			}
+		}
+		return ComponentCount;
+	}
+
+	double DeriveCoupledPodiumTopZ(const double MinimumGroundTop)
+	{
+		// A podium contains complete adjacent X/Y course pairs and leaves another
+		// pair for the original branch above. Its height is derived from the
+		// shortest grounded WFC branch, never from a fixed centimetre preset.
+		const int32 AvailableCourses = FMath::FloorToInt(MinimumGroundTop / 36.0);
+		const int32 MaximumPodiumCourses = FMath::Max(0, (AvailableCourses - 2) & ~1);
+		const int32 HalfHeightCourses =
+			(FMath::FloorToInt(MinimumGroundTop * 0.5 / 36.0)) & ~1;
+		const int32 PodiumCourses = FMath::Min(
+			MaximumPodiumCourses, FMath::Max(2, HalfHeightCourses));
+		return PodiumCourses >= 2 ? PodiumCourses * 36.0 : 0.0;
+	}
+
+	struct FSemanticPodiumPlan
+	{
+		FString TraceRoot;
+		TArray<FString> RootPaths;
+		TArray<int32> GroundIndices;
+		FBox Bounds = FBox(EForceInit::ForceInit);
+		double LegacyTopZ = 0.0;
+		double SemanticSeamZ = 0.0;
+		double TopZ = 0.0;
+		bool bUsesSemanticSeam = false;
+		bool bSelectedCandidateStartsCrown = false;
+		int32 AddedCellVolumeId = INDEX_NONE;
+	};
+
+	double QuantizePodiumTopAtOrBelow(const double SemanticSeamZ)
+	{
+		const int32 SeamCourse = FMath::FloorToInt(SemanticSeamZ / 36.0);
+		return static_cast<double>(SeamCourse & ~1) * 36.0;
+	}
+
+	bool RootHasBodyContinuationAboveSemanticSeam(
+		const FString& RootPath,
+		const double SemanticSeamZ,
+		const double QuantizedTopZ,
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes)
+	{
+		// A semantic seam may fall between 36 cm courses. The upper leaf will be
+		// re-cut down to QuantizedTopZ, so require one real 36x36 Body column that
+		// starts at/crosses the seam and remains for a complete X/Y course pair.
+		for (const FABTSM73DAG5BV2Volume& Volume : Volumes)
+		{
+			if (IsSpanRole(Volume.Role)
+				|| Volume.Role == EABTSM73DAG5BV2VolumeRole::Crown
+				|| SemanticRootPath(Volume.DerivationPath) != RootPath
+				|| Volume.LocalBounds.Min.Z > SemanticSeamZ + 1.0
+				|| Volume.LocalBounds.Max.Z < QuantizedTopZ + 72.0 - 1.0)
+			{
+				continue;
+			}
+			const FVector Size = Volume.LocalBounds.GetSize();
+			if (Size.X >= 36.0 - 1.0 && Size.Y >= 36.0 - 1.0)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool RootWouldConsumeCrownBelowSemanticSeam(
+		const FString& RootPath,
+		const double SemanticSeamZ,
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes)
+	{
+		return Volumes.ContainsByPredicate(
+			[&RootPath, SemanticSeamZ](const FABTSM73DAG5BV2Volume& Volume)
+			{
+				return Volume.Role == EABTSM73DAG5BV2VolumeRole::Crown
+					&& SemanticRootPath(Volume.DerivationPath) == RootPath
+					&& Volume.LocalBounds.Min.Z < SemanticSeamZ - 1.0;
+			});
+	}
+
+	double SelectHighestLegalSemanticPodiumTop(
+		const FString& Scope,
+		const TArray<FString>& RootPaths,
+		const double LegacyTopZ,
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		const bool bAppliedToEnvelope,
+		TArray<FABTSM73DAG5BV2SemanticPodiumCandidateDiagnostic>&
+			OutCandidateDiagnostics,
+		TArray<FABTSM73DAG5BV2SemanticPodiumSelectionDiagnostic>&
+			OutSelectionDiagnostics,
+		double& OutSemanticSeamZ,
+		bool& bOutUsesSemanticSeam,
+		bool& bOutSelectedCandidateStartsCrown)
+	{
+		const int32 FirstCandidateIndex = OutCandidateDiagnostics.Num();
+		TArray<double> SemanticSeams;
+		double ProtectedSpanTopZ = TNumericLimits<double>::Max();
+		for (const FABTSM73DAG5BV2Volume& Volume : Volumes)
+		{
+			if (Volume.Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				const bool bIncidentRoot = RootPaths.ContainsByPredicate(
+					[&Volume, &Volumes](const FString& RootPath)
+					{
+						const bool bNegative = Volumes.IsValidIndex(
+							Volume.NegativeSupportVolumeId)
+							&& SemanticRootPath(Volumes[
+								Volume.NegativeSupportVolumeId].DerivationPath)
+								== RootPath;
+						const bool bPositive = Volumes.IsValidIndex(
+							Volume.PositiveSupportVolumeId)
+							&& SemanticRootPath(Volumes[
+								Volume.PositiveSupportVolumeId].DerivationPath)
+								== RootPath;
+						return bNegative || bPositive;
+					});
+				if (bIncidentRoot)
+				{
+					ProtectedSpanTopZ = FMath::Min(
+						ProtectedSpanTopZ, Volume.LocalBounds.Min.Z);
+				}
+				continue;
+			}
+			if (!RootPaths.Contains(SemanticRootPath(Volume.DerivationPath))
+				|| Volume.LocalBounds.Min.Z <= LegacyTopZ + 1.0)
+			{
+				continue;
+			}
+			SemanticSeams.AddUnique(Volume.LocalBounds.Min.Z);
+		}
+		SemanticSeams.Sort([](const double A, const double B)
+		{
+			return A > B;
+		});
+
+		for (const double SemanticSeamZ : SemanticSeams)
+		{
+			bool bHasBodyStart = false;
+			bool bHasCrownStart = false;
+			for (const FABTSM73DAG5BV2Volume& Volume : Volumes)
+			{
+				if (!RootPaths.Contains(SemanticRootPath(Volume.DerivationPath))
+					|| FMath::Abs(Volume.LocalBounds.Min.Z - SemanticSeamZ) > 1.0)
+				{
+					continue;
+				}
+				bHasCrownStart |= Volume.Role
+					== EABTSM73DAG5BV2VolumeRole::Crown;
+				bHasBodyStart |= Volume.Role
+					!= EABTSM73DAG5BV2VolumeRole::Crown;
+			}
+			const bool bCandidateStartsCrown = bHasCrownStart && !bHasBodyStart;
+			const double QuantizedTopZ = QuantizePodiumTopAtOrBelow(
+				SemanticSeamZ - (bCandidateStartsCrown ? 72.0 : 0.0));
+			FABTSM73DAG5BV2SemanticPodiumCandidateDiagnostic& Diagnostic =
+				OutCandidateDiagnostics.AddDefaulted_GetRef();
+			Diagnostic.Scope = Scope;
+			Diagnostic.LegacyTopZ = LegacyTopZ;
+			Diagnostic.SemanticSeamZ = SemanticSeamZ;
+			Diagnostic.QuantizedTopZ = QuantizedTopZ;
+			Diagnostic.ProtectedSpanTopZ = ProtectedSpanTopZ;
+			Diagnostic.bCandidateStartsCrown = bCandidateStartsCrown;
+			if (QuantizedTopZ <= LegacyTopZ + 1.0)
+			{
+				Diagnostic.RejectReason = TEXT("QuantizedNotAboveLegacy");
+				continue;
+			}
+			if (SemanticSeamZ > ProtectedSpanTopZ + 1.0)
+			{
+				Diagnostic.RejectReason = TEXT("AboveIncidentSupportedSpanUnderside");
+				continue;
+			}
+			for (const FString& RootPath : RootPaths)
+			{
+				if (RootWouldConsumeCrownBelowSemanticSeam(
+					RootPath, SemanticSeamZ, Volumes))
+				{
+					Diagnostic.RejectReason = FString::Printf(
+						TEXT("ConsumesCrown:%s"), *RootPath);
+					break;
+				}
+				if (!RootHasBodyContinuationAboveSemanticSeam(
+					RootPath, SemanticSeamZ, QuantizedTopZ, Volumes))
+				{
+					Diagnostic.RejectReason = FString::Printf(
+						TEXT("MissingTwoCourseBodyContinuation:%s"), *RootPath);
+					break;
+				}
+			}
+			if (Diagnostic.RejectReason.IsEmpty())
+			{
+				Diagnostic.bAccepted = true;
+				OutSemanticSeamZ = SemanticSeamZ;
+				bOutUsesSemanticSeam = true;
+				bOutSelectedCandidateStartsCrown = bCandidateStartsCrown;
+				FABTSM73DAG5BV2SemanticPodiumSelectionDiagnostic& Selection =
+					OutSelectionDiagnostics.AddDefaulted_GetRef();
+				Selection.Scope = Scope;
+				Selection.RootCount = RootPaths.Num();
+				Selection.CandidateCount = OutCandidateDiagnostics.Num()
+					- FirstCandidateIndex;
+				Selection.LegacyTopZ = LegacyTopZ;
+				Selection.SelectedSemanticSeamZ = SemanticSeamZ;
+				Selection.SelectedTopZ = QuantizedTopZ;
+				Selection.bUsesSemanticSeam = true;
+				Selection.bSelectedCandidateStartsCrown =
+					bCandidateStartsCrown;
+				Selection.bAppliedToEnvelope = bAppliedToEnvelope;
+				return QuantizedTopZ;
+			}
+		}
+
+		OutSemanticSeamZ = LegacyTopZ;
+		bOutUsesSemanticSeam = false;
+		bOutSelectedCandidateStartsCrown = false;
+		FABTSM73DAG5BV2SemanticPodiumSelectionDiagnostic& Selection =
+			OutSelectionDiagnostics.AddDefaulted_GetRef();
+		Selection.Scope = Scope;
+		Selection.RootCount = RootPaths.Num();
+		Selection.CandidateCount = OutCandidateDiagnostics.Num()
+			- FirstCandidateIndex;
+		Selection.LegacyTopZ = LegacyTopZ;
+		Selection.SelectedSemanticSeamZ = LegacyTopZ;
+		Selection.SelectedTopZ = LegacyTopZ;
+		Selection.bAppliedToEnvelope = bAppliedToEnvelope;
+		return LegacyTopZ;
+	}
+
+	bool ApplySemanticPodiumPlans(
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		TArray<FSemanticPodiumPlan>& Plans,
+		TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		TArray<FString>& Trace,
+		FString& OutError)
+	{
+		if (Plans.IsEmpty())
+		{
+			return true;
+		}
+
+		TMap<FString, int32> RootToPlan;
+		for (int32 PlanIndex = 0; PlanIndex < Plans.Num(); ++PlanIndex)
+		{
+			for (const FString& RootPath : Plans[PlanIndex].RootPaths)
+			{
+				if (RootToPlan.Contains(RootPath))
+				{
+					OutError = TEXT("DAG5BV2GroundCouplingRootAssignedTwice");
+					return false;
+				}
+				RootToPlan.Add(RootPath, PlanIndex);
+			}
+		}
+
+		TArray<bool> Keep;
+		Keep.Init(true, Volumes.Num());
+		TArray<FABTSM73DAG5BV2Volume> RecutVolumes = Volumes;
+		for (int32 VolumeIndex = 0; VolumeIndex < RecutVolumes.Num(); ++VolumeIndex)
+		{
+			FABTSM73DAG5BV2Volume& Volume = RecutVolumes[VolumeIndex];
+			if (IsSpanRole(Volume.Role))
+			{
+				continue;
+			}
+			const int32* PlanIndex = RootToPlan.Find(
+				SemanticRootPath(Volume.DerivationPath));
+			if (PlanIndex == nullptr || !Plans.IsValidIndex(*PlanIndex))
+			{
+				continue;
+			}
+			const FSemanticPodiumPlan& Plan = Plans[*PlanIndex];
+			const double RecutSeamZ = Plan.bSelectedCandidateStartsCrown
+				? Plan.TopZ : Plan.SemanticSeamZ;
+			if (Plan.bUsesSemanticSeam
+				&& Volume.LocalBounds.Max.Z <= RecutSeamZ + 1.0)
+			{
+				Keep[VolumeIndex] = false;
+				continue;
+			}
+			if (Volume.LocalBounds.Min.Z < Plan.TopZ + 1.0
+				|| (Plan.bUsesSemanticSeam
+					&& Volume.LocalBounds.Min.Z <= RecutSeamZ + 1.0))
+			{
+				Volume.LocalBounds.Min.Z = Plan.TopZ;
+			}
+			if (Volume.LocalBounds.Max.Z - Volume.LocalBounds.Min.Z <= 1.0)
+			{
+				OutError = FString::Printf(
+					TEXT("DAG5BV2GroundCouplingRecutVolumeInvalid:Volume=%d:Plan=%d:MinZ=%.3f:MaxZ=%.3f"),
+					VolumeIndex, *PlanIndex, Volume.LocalBounds.Min.Z,
+					Volume.LocalBounds.Max.Z);
+				return false;
+			}
+		}
+
+		TArray<int32> Remap;
+		Remap.Init(INDEX_NONE, RecutVolumes.Num());
+		TArray<FABTSM73DAG5BV2Volume> Accepted;
+		Accepted.Reserve(RecutVolumes.Num() + Plans.Num());
+		for (int32 OldId = 0; OldId < RecutVolumes.Num(); ++OldId)
+		{
+			if (!Keep[OldId])
+			{
+				continue;
+			}
+			Remap[OldId] = Accepted.Num();
+			FABTSM73DAG5BV2Volume Volume = RecutVolumes[OldId];
+			Volume.VolumeId = Accepted.Num();
+			Accepted.Add(MoveTemp(Volume));
+		}
+
+		for (int32 PlanIndex = 0; PlanIndex < Plans.Num(); ++PlanIndex)
+		{
+			FSemanticPodiumPlan& Plan = Plans[PlanIndex];
+			Plan.AddedCellVolumeId = Accepted.Num();
+			FABTSM73DAG5BV2Volume& Cell = Accepted.AddDefaulted_GetRef();
+			Cell.VolumeId = Plan.AddedCellVolumeId;
+			Cell.LocalBounds = Plan.Bounds;
+			Cell.LocalBounds.Min.Z = 0.0;
+			Cell.LocalBounds.Max.Z = Plan.TopZ;
+			Cell.Role = EABTSM73DAG5BV2VolumeRole::Foundation;
+			Cell.Primitive = EABTSM73DAG5BV2Primitive::Box;
+			Cell.DerivationPath = Plans.Num() == 1
+				&& Plan.TraceRoot == TEXT("AllGroundRoots")
+				? TEXT("CoupledGround/Cell/0")
+				: FString::Printf(
+					TEXT("CoupledGround/Root/%s/%d"),
+					*Plan.TraceRoot, PlanIndex);
+		}
+
+		auto ResolveSupportId = [&Volumes, &Remap, &RootToPlan, &Plans](
+			const int32 OldSupportId) -> int32
+		{
+			if (Remap.IsValidIndex(OldSupportId)
+				&& Remap[OldSupportId] != INDEX_NONE)
+			{
+				return Remap[OldSupportId];
+			}
+			if (!Volumes.IsValidIndex(OldSupportId))
+			{
+				return INDEX_NONE;
+			}
+			const int32* PlanIndex = RootToPlan.Find(SemanticRootPath(
+				Volumes[OldSupportId].DerivationPath));
+			return PlanIndex != nullptr && Plans.IsValidIndex(*PlanIndex)
+				? Plans[*PlanIndex].AddedCellVolumeId
+				: INDEX_NONE;
+		};
+		for (FABTSM73DAG5BV2Volume& Volume : Accepted)
+		{
+			if (Volume.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				continue;
+			}
+			Volume.NegativeSupportVolumeId = ResolveSupportId(
+				Volume.NegativeSupportVolumeId);
+			Volume.PositiveSupportVolumeId = ResolveSupportId(
+				Volume.PositiveSupportVolumeId);
+			if (Volume.NegativeSupportVolumeId == INDEX_NONE
+				|| Volume.PositiveSupportVolumeId == INDEX_NONE
+				|| Volume.NegativeSupportVolumeId
+					== Volume.PositiveSupportVolumeId)
+			{
+				OutError = FString::Printf(
+					TEXT("DAG5BV2GroundCouplingSpanSupportRemapInvalid:Span=%d"),
+					Volume.VolumeId);
+				return false;
+			}
+		}
+
+		if (Accepted.Num() > Settings.MaxVolumeCount)
+		{
+			OutError = TEXT("DAG5BV2GroundCouplingVolumeBudgetExceeded");
+			return false;
+		}
+		for (const FSemanticPodiumPlan& Plan : Plans)
+		{
+			Trace.Add(FString::Printf(
+				TEXT("%s -> CoupledGround SemanticSeam(%.3f) TopZ(%.3f) LegacyTopZ(%.3f) Selection(%s) Roots(%d)"),
+				*Plan.TraceRoot, Plan.SemanticSeamZ, Plan.TopZ,
+				Plan.LegacyTopZ,
+				Plan.bUsesSemanticSeam ? TEXT("HighestLegal") : TEXT("LegacyFallback"),
+				Plan.RootPaths.Num()));
+		}
+		Volumes = MoveTemp(Accepted);
+		return true;
+	}
+
+	bool CoupleGroundLayer(
+		const FABTSM73DAG5BV2PreviewSettings& Settings,
+		TArray<FABTSM73DAG5BV2Volume>& Volumes,
+		TArray<FString>& Trace,
+		TArray<FABTSM73DAG5BV2SemanticPodiumCandidateDiagnostic>&
+			OutCandidateDiagnostics,
+		TArray<FABTSM73DAG5BV2SemanticPodiumSelectionDiagnostic>&
+			OutSelectionDiagnostics,
+		FString& OutError)
+	{
+		TArray<int32> GroundIndices;
+		FBox GroundEnvelope(EForceInit::ForceInit);
+		double MinimumGroundTop = TNumericLimits<double>::Max();
+		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
+		{
+			const FABTSM73DAG5BV2Volume& Volume = Volumes[Index];
+			if (IsSpanRole(Volume.Role) || Volume.LocalBounds.Min.Z > 1.0)
+			{
+				continue;
+			}
+			GroundIndices.Add(Index);
+			GroundEnvelope += Volume.LocalBounds;
+			MinimumGroundTop = FMath::Min(
+				MinimumGroundTop, Volume.LocalBounds.Max.Z);
+		}
+		const bool bHasSupportedSpan = Volumes.ContainsByPredicate(
+			[](const FABTSM73DAG5BV2Volume& Volume)
+			{
+				return Volume.Role
+					== EABTSM73DAG5BV2VolumeRole::SupportedSpan;
+			});
+		TArray<FSemanticPodiumPlan> Plans;
+		if (bHasSupportedSpan)
+		{
+			struct FSemanticGroundGroup
+			{
+				FString RootPath;
+				TArray<int32> Indices;
+			};
+			TArray<FSemanticGroundGroup> Groups;
+			for (const int32 Index : GroundIndices)
+			{
+				const FString RootPath =
+					SemanticRootPath(Volumes[Index].DerivationPath);
+				FSemanticGroundGroup* Group = Groups.FindByPredicate(
+					[&RootPath](const FSemanticGroundGroup& Candidate)
+					{
+						return Candidate.RootPath == RootPath;
+					});
+				if (Group == nullptr)
+				{
+					FSemanticGroundGroup& Added =
+						Groups.AddDefaulted_GetRef();
+					Added.RootPath = RootPath;
+					Group = &Added;
+				}
+				Group->Indices.Add(Index);
+			}
+			Groups.Sort([](
+				const FSemanticGroundGroup& A,
+				const FSemanticGroundGroup& B)
+			{
+				return A.RootPath < B.RootPath;
+			});
+
+			for (const FSemanticGroundGroup& Group : Groups)
+			{
+				if (Group.Indices.Num() < 2
+					|| CountGroundFootprintComponents(
+						Group.Indices, Volumes) <= 1)
+				{
+					continue;
+				}
+				FSemanticPodiumPlan& Plan =
+					Plans.AddDefaulted_GetRef();
+				Plan.TraceRoot = Group.RootPath;
+				Plan.RootPaths.Add(Group.RootPath);
+				Plan.GroundIndices = Group.Indices;
+				double GroupMinimumTop = TNumericLimits<double>::Max();
+				for (const int32 Index : Group.Indices)
+				{
+					Plan.Bounds += Volumes[Index].LocalBounds;
+					GroupMinimumTop = FMath::Min(
+						GroupMinimumTop, Volumes[Index].LocalBounds.Max.Z);
+				}
+				Plan.LegacyTopZ = DeriveCoupledPodiumTopZ(GroupMinimumTop);
+				Plan.TopZ = SelectHighestLegalSemanticPodiumTop(
+					Plan.TraceRoot, Plan.RootPaths, Plan.LegacyTopZ, Volumes,
+					true, OutCandidateDiagnostics, OutSelectionDiagnostics,
+					Plan.SemanticSeamZ, Plan.bUsesSemanticSeam,
+					Plan.bSelectedCandidateStartsCrown);
+				Plan.Bounds.Min.Z = 0.0;
+				Plan.Bounds.Max.Z = Plan.TopZ;
+				if (!FMath::IsFinite(Plan.TopZ) || Plan.TopZ <= 1.0)
+				{
+					OutError = TEXT("DAG5BV2GroundCouplingHeightInvalid");
+					return false;
+				}
+			}
+			if (Plans.Num() > 1)
+			{
+				TArray<FString> CommonRoots;
+				double CommonLegacyTopZ = 0.0;
+				for (const FSemanticPodiumPlan& Plan : Plans)
+				{
+					for (const FString& RootPath : Plan.RootPaths)
+					{
+						CommonRoots.AddUnique(RootPath);
+					}
+					CommonLegacyTopZ = FMath::Max(
+						CommonLegacyTopZ, Plan.LegacyTopZ);
+				}
+				CommonRoots.Sort();
+				double DiagnosticSeamZ = CommonLegacyTopZ;
+				bool bDiagnosticUsesSeam = false;
+				bool bDiagnosticStartsCrown = false;
+				SelectHighestLegalSemanticPodiumTop(
+					TEXT("AllCoupledRootsCommonProbe"), CommonRoots,
+					CommonLegacyTopZ, Volumes, false,
+					OutCandidateDiagnostics, OutSelectionDiagnostics,
+					DiagnosticSeamZ, bDiagnosticUsesSeam,
+					bDiagnosticStartsCrown);
+			}
+			return ApplySemanticPodiumPlans(
+				Settings, Plans, Volumes, Trace, OutError);
+		}
+		if (GroundIndices.Num() < 2
+			|| CountGroundFootprintComponents(GroundIndices, Volumes) <= 1)
+		{
+			return true;
+		}
+
+		FSemanticPodiumPlan& Plan = Plans.AddDefaulted_GetRef();
+		Plan.TraceRoot = TEXT("AllGroundRoots");
+		Plan.GroundIndices = GroundIndices;
+		Plan.Bounds = GroundEnvelope;
+		for (const int32 Index : GroundIndices)
+		{
+			Plan.RootPaths.AddUnique(SemanticRootPath(
+				Volumes[Index].DerivationPath));
+		}
+		Plan.RootPaths.Sort();
+		Plan.LegacyTopZ = DeriveCoupledPodiumTopZ(MinimumGroundTop);
+		Plan.TopZ = SelectHighestLegalSemanticPodiumTop(
+			Plan.TraceRoot, Plan.RootPaths, Plan.LegacyTopZ, Volumes,
+			true, OutCandidateDiagnostics, OutSelectionDiagnostics,
+			Plan.SemanticSeamZ, Plan.bUsesSemanticSeam,
+			Plan.bSelectedCandidateStartsCrown);
+		Plan.Bounds.Min.Z = 0.0;
+		Plan.Bounds.Max.Z = Plan.TopZ;
+		if (!FMath::IsFinite(Plan.TopZ) || Plan.TopZ <= 1.0)
+		{
+			OutError = TEXT("DAG5BV2GroundCouplingHeightInvalid");
+			return false;
+		}
+		return ApplySemanticPodiumPlans(
+			Settings, Plans, Volumes, Trace, OutError);
 	}
 
 	void BuildAdjacency(
@@ -1899,6 +2514,17 @@ bool FABTSM73DAG5BShapeGrammarV2::Generate(
 		Settings, OutResult.Volumes, OutResult.GrammarTrace))
 	{
 		OutError = TEXT("DAG5BV2SupportedSpanResolutionFailed");
+		OutResult.Summary.RejectReason = OutError;
+		return false;
+	}
+	if (!CoupleGroundLayer(
+		Settings,
+		OutResult.Volumes,
+		OutResult.GrammarTrace,
+		OutResult.SemanticPodiumCandidateDiagnostics,
+		OutResult.SemanticPodiumSelectionDiagnostics,
+		OutError))
+	{
 		OutResult.Summary.RejectReason = OutError;
 		return false;
 	}

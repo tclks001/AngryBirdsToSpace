@@ -210,9 +210,11 @@ namespace ABTSM73BeamC
 	struct FStructuralSupportProposal
 	{
 		int32 AssemblyId = INDEX_NONE;
+		int32 UpperMemberId = INDEX_NONE;
 		FVector2D Station = FVector2D::ZeroVector;
 		double BottomZ = 0.0;
 		double TopZ = 0.0;
+		bool bUsesCertifiedCoreSupport = false;
 	};
 
 	struct FStructuralSupportPatch
@@ -832,19 +834,14 @@ namespace ABTSM73BeamC
 				{
 					continue;
 				}
-				if (Proposals.Num() >= RemainingPostBudget)
-				{
-					OutError = FString::Printf(
-						TEXT("BeamCStructuralSupportBudgetExceeded:Required=%d:Capacity=%d"),
-						Proposals.Num() + 1, RemainingPostBudget);
-					return false;
-				}
 				FStructuralSupportProposal& Proposal =
 					Proposals.AddDefaulted_GetRef();
 				Proposal.AssemblyId = OwnerId;
+				Proposal.UpperMemberId = Node.MemberId;
 				Proposal.Station = BestStation;
 				Proposal.BottomZ = BestTopZ;
 				Proposal.TopZ = TopZ;
+				Proposal.bUsesCertifiedCoreSupport = bBestIsCertifiedSupport;
 			}
 		}
 
@@ -854,6 +851,63 @@ namespace ABTSM73BeamC
 			// Beam-A reclose. Another direct post would be folded into the same lane,
 			// so discard equivalent proposals and switch once to explicit grillage.
 			Proposals.Reset();
+		}
+		// Proposal discovery is transactional. Enumerate the complete distinct set
+		// before applying the capacity gate so Required is an exact demand, not the
+		// first value one past Capacity. Truncated diagnostics previously made a
+		// large deficit look like an off-by-one and encouraged repeated cap tuning.
+		if (Proposals.Num() > RemainingPostBudget)
+		{
+			int32 CribOwnerCount = 0;
+			int32 CoreCourseCount = 0;
+			int32 BridgeRailCount = 0;
+			int32 RoofCourseCount = 0;
+			int32 OtherRoleCount = 0;
+			int32 CertifiedLowerCount = 0;
+			int32 GroundPostCount = 0;
+			for (const FStructuralSupportProposal& Proposal : Proposals)
+			{
+				if (Assembly.Assemblies.IsValidIndex(Proposal.AssemblyId)
+					&& Assembly.Assemblies[Proposal.AssemblyId].Type
+						== EABTSM73BeamAAssemblyType::CribCore)
+				{
+					++CribOwnerCount;
+				}
+				if (Assembly.Members.IsValidIndex(Proposal.UpperMemberId))
+				{
+					switch (Assembly.Members[Proposal.UpperMemberId].Role)
+					{
+					case EABTSM73BeamAMemberRole::CoreCourse:
+						++CoreCourseCount;
+						break;
+					case EABTSM73BeamAMemberRole::BridgeRail:
+						++BridgeRailCount;
+						break;
+					case EABTSM73BeamAMemberRole::RoofCourse:
+						++RoofCourseCount;
+						break;
+					default:
+						++OtherRoleCount;
+						break;
+					}
+				}
+				if (Proposal.bUsesCertifiedCoreSupport)
+				{
+					++CertifiedLowerCount;
+				}
+				if (Proposal.BottomZ <= Tolerance)
+				{
+					++GroundPostCount;
+				}
+			}
+			OutError = FString::Printf(
+				TEXT("BeamCStructuralSupportBudgetExceeded:Required=%d:Capacity=%d")
+				TEXT(":CribOwner=%d:CoreCourse=%d:BridgeRail=%d:RoofCourse=%d")
+				TEXT(":OtherRole=%d:CertifiedLower=%d:Ground=%d"),
+				Proposals.Num(), RemainingPostBudget, CribOwnerCount,
+				CoreCourseCount, BridgeRailCount, RoofCourseCount,
+				OtherRoleCount, CertifiedLowerCount, GroundPostCount);
+			return false;
 		}
 		for (const FStructuralSupportProposal& Proposal : Proposals)
 		{
@@ -1080,13 +1134,12 @@ namespace ABTSM73BeamC
 				}
 				const bool bRequiresPriorTwinAttempt =
 					BestVoid == nullptr && bForceRootedGrillage;
-				bool bParallelCap = false;
+				bool bResultantCrossBearing = false;
 				const int32 UpperAxis =
 					Upper.Axis == EABTSM73BeamAFrameAxis::X ? 0 : 1;
 				const int32 SpanAxis = BestVoid != nullptr
 					? BestVoid->SpanAxisIndex
-					: (bRequiresPriorTwinAttempt
-						? UpperAxis : (UpperAxis == 0 ? 1 : 0));
+					: (UpperAxis == 0 ? 1 : 0);
 				const int32 Perpendicular = SpanAxis == 0 ? 1 : 0;
 				double NegativeStation = 0.0;
 				double PositiveStation = 0.0;
@@ -1113,54 +1166,62 @@ namespace ABTSM73BeamC
 				}
 				else if (bRequiresPriorTwinAttempt)
 				{
-					// Reuse the exact 25/75 lanes attempted by the direct roots. Beam-A
-					// normalized those roots into existing segmented Z columns, so the
-					// missing physical element is their horizontal cap, not another Z
-					// lane. Keep the cap inside the failed course footprint and exactly
-					// one section below it; authoritative Beam-A reclose still decides
-					// whether the transaction creates a real bearing.
-					const double UsableMinimum =
-						UpperBounds.Min[SpanAxis] + HalfSection;
-					const double UsableMaximum =
-						UpperBounds.Max[SpanAxis] - HalfSection;
-					if (UsableMinimum > UsableMaximum + Tolerance)
+					// The direct 25/75 roots remain the evidence that this exact failed
+					// course has already consumed its one Z-only attempt. Do not cap
+					// those lanes with a member parallel to Upper: at the immediately
+					// lower alternating course that cap intersects the existing
+					// perpendicular layer, so Beam-A separation lifts it into Upper and
+					// disconnects it from both roots. Escalate instead to one short
+					// cross-bearing centred on the failed load resultant. It lies in the
+					// lower course direction and its two separated roots make the new
+					// seat itself a closed, friction-only load path.
+					const int32 PriorSpanAxis = UpperAxis;
+					const int32 PriorPerpendicular =
+						PriorSpanAxis == 0 ? 1 : 0;
+					const double PriorUsableMinimum =
+						UpperBounds.Min[PriorSpanAxis] + HalfSection;
+					const double PriorUsableMaximum =
+						UpperBounds.Max[PriorSpanAxis] - HalfSection;
+					if (PriorUsableMinimum > PriorUsableMaximum + Tolerance)
 					{
 						continue;
 					}
-					NegativeStation = FMath::Lerp(
-						UsableMinimum, UsableMaximum, 0.25);
-					PositiveStation = FMath::Lerp(
-						UsableMinimum, UsableMaximum, 0.75);
-					if (PositiveStation - NegativeStation < Section - Tolerance)
-					{
-						continue;
-					}
-					NegativePostStation = NegativeStation;
-					PositivePostStation = PositiveStation;
 					FRootedTwinLaneAttempt CandidateAttempt;
-					CandidateAttempt.SpanAxis = SpanAxis;
+					CandidateAttempt.SpanAxis = PriorSpanAxis;
 					CandidateAttempt.NegativeLane = FVector2D(
 						UpperBounds.GetCenter().X, UpperBounds.GetCenter().Y);
 					CandidateAttempt.PositiveLane = CandidateAttempt.NegativeLane;
-					CandidateAttempt.NegativeLane[SpanAxis] = NegativeStation;
-					CandidateAttempt.PositiveLane[SpanAxis] = PositiveStation;
-					CandidateAttempt.NegativeLane[Perpendicular] = FMath::Clamp(
-						Node.LoadResultant[Perpendicular],
-						PerpendicularMinimum, PerpendicularMaximum);
-					CandidateAttempt.PositiveLane[Perpendicular] =
-						CandidateAttempt.NegativeLane[Perpendicular];
+					CandidateAttempt.NegativeLane[PriorSpanAxis] = FMath::Lerp(
+						PriorUsableMinimum, PriorUsableMaximum, 0.25);
+					CandidateAttempt.PositiveLane[PriorSpanAxis] = FMath::Lerp(
+						PriorUsableMinimum, PriorUsableMaximum, 0.75);
+					CandidateAttempt.NegativeLane[PriorPerpendicular] = FMath::Clamp(
+						Node.LoadResultant[PriorPerpendicular],
+						UpperBounds.Min[PriorPerpendicular] + HalfSection,
+						UpperBounds.Max[PriorPerpendicular] - HalfSection);
+					CandidateAttempt.PositiveLane[PriorPerpendicular] =
+						CandidateAttempt.NegativeLane[PriorPerpendicular];
 					CandidateAttempt.SeatTopZ = UpperBounds.Min.Z;
-					bParallelCap = PriorTwinAttempts.ContainsByPredicate(
+					const bool bHasPriorTwinEvidence =
+						PriorTwinAttempts.ContainsByPredicate(
 						[&CandidateAttempt, Tolerance](
 							const FRootedTwinLaneAttempt& Prior)
 						{
 							return MatchesRootedTwinLaneAttempt(
 								Prior, CandidateAttempt, Tolerance);
 						});
-					if (!bParallelCap)
+					if (!bHasPriorTwinEvidence)
 					{
 						continue;
 					}
+					const double SeatLength = Section * 3.0;
+					const double SeatCenter =
+						UpperBounds.GetCenter()[SpanAxis];
+					NegativeStation = SeatCenter - SeatLength * 0.5;
+					PositiveStation = SeatCenter + SeatLength * 0.5;
+					NegativePostStation = NegativeStation;
+					PositivePostStation = PositiveStation;
+					bResultantCrossBearing = true;
 				}
 				else
 				{
@@ -1291,13 +1352,14 @@ namespace ABTSM73BeamC
 					TEXT("[ABTS][M7.3-Beam-C2][RootedGrillage]")
 					TEXT(" Upper=%d VoidSource=%d SpanAxis=%d SeatZ=%.2f")
 					TEXT(" Negative=%.2f Positive=%.2f Perpendicular=%.2f")
-					TEXT(" ParallelCap=%d"),
+					TEXT(" ResultantCrossBearing=%d"),
 					Node.MemberId,
 					BestVoid != nullptr
 						? BestVoid->SpanSourceVolumeId : INDEX_NONE,
 					SpanAxis,
 					SeatTopZ, NegativeStation, PositiveStation,
-					SeatStation[Perpendicular], bParallelCap ? 1 : 0);
+					SeatStation[Perpendicular],
+					bResultantCrossBearing ? 1 : 0);
 			}
 		}
 		if (OutAddedCount == 0)
