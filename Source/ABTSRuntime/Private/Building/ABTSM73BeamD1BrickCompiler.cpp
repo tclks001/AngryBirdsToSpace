@@ -2724,6 +2724,16 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SkeletonFirstStaticDAGMilliseconds = Stage1.StaticDAGMilliseconds;
 	Summary.SkeletonFirstTimeoutPhase = Stage1.Stage1TimeoutPhase;
 	Summary.SkeletonFirstGroundedComponentCount = Stage1.GroundedComponentCount;
+	Summary.SkeletonFirstSemanticSupportNodeCount =
+		Stage1.SemanticSupportNodeCount;
+	Summary.SkeletonFirstSemanticSupportLedgerCount =
+		Stage1.SemanticSupportLedgerCount;
+	Summary.SkeletonFirstSemanticTerminalDemandCount =
+		Stage1.SemanticTerminalDemandCount;
+	Summary.SkeletonFirstSemanticTerminalDemandWithoutContinuousFitCount =
+		Stage1.SemanticTerminalDemandWithoutContinuousFitCount;
+	Summary.SkeletonFirstSemanticSupportDemandHash =
+		Stage1.SemanticSupportDemandHash;
 	Summary.SkeletonFirstCoreCellCount = Stage1.CoreCellCount;
 	Summary.SkeletonFirstCoreMergeRegionCount = Stage1.CoreMergeRegionCount;
 	Summary.SkeletonFirstMergedGroundComponentCount =
@@ -2780,7 +2790,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		TEXT("[ABTS][M7.3-Beam-C3V3][Stage1Stopped]")
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
 		TEXT(" GrammarHash=%lld WFCHash=%lld EnvelopeHash=%lld Stage1Hash=%lld")
-		TEXT(" Volumes=%d Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
+		TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
 		TEXT(" StaticDAG=Accepted LoadDAGHash=%lld Physical=NotEvaluated")
 		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
 		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
@@ -2788,6 +2799,10 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		OutResult.Silhouette.Summary.GrammarHash,
 		OutResult.Silhouette.Summary.WFCHash, Stage1.EnvelopeHash,
 		Stage1.FinalGeometryHash, OutResult.Silhouette.Volumes.Num(),
+		Stage1.SemanticSupportNodeCount,
+		Stage1.SemanticTerminalDemandCount,
+		Stage1.SemanticSupportLedgerCount,
+		Stage1.SemanticSupportDemandHash,
 		Stage1.ExplicitCoreCellCount,
 		Stage1.PodiumMainCoreCellCount, Stage1.TowerChildCoreCellCount,
 		Stage1.HighProjectionRegionCount,

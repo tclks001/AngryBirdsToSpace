@@ -44,7 +44,8 @@ enum class EABTSM73BeamC3Stage1DiagnosticLayer : uint8
 	CoreAndSharedCourses UMETA(DisplayName = "3 - Core + Shared Courses"),
 	CoreMergeRegions UMETA(DisplayName = "4 - Core Merge Regions"),
 	CompositeCoreXLanes UMETA(DisplayName = "5 - Composite Core X Lanes"),
-	CompositeCoreYLanes UMETA(DisplayName = "6 - Composite Core Y Lanes")
+	CompositeCoreYLanes UMETA(DisplayName = "6 - Composite Core Y Lanes"),
+	SemanticSupportDemandDAG UMETA(DisplayName = "7 - Semantic Support Demand DAG")
 };
 
 USTRUCT(BlueprintType)
@@ -370,6 +371,21 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First")
 	int32 SkeletonFirstGroundedComponentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support")
+	int32 SkeletonFirstSemanticSupportNodeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support")
+	int32 SkeletonFirstSemanticSupportLedgerCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support")
+	int32 SkeletonFirstSemanticTerminalDemandCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support")
+	int32 SkeletonFirstSemanticTerminalDemandWithoutContinuousFitCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Identity")
+	int64 SkeletonFirstSemanticSupportDemandHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First")
 	int32 SkeletonFirstCoreCellCount = 0;

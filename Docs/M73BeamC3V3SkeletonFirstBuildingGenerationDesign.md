@@ -1584,3 +1584,69 @@ Chaos 或可见 PIE。第 33.2 节和 M7-BC-064 的 PodiumMain 重叠、四向�
 - `Saved/Logs/BeamC3V3-Optimize8-SeamReleaseE6-EndpointPrefix-20260811.log`。
 
 所有结果仍为 `Physical=NotEvaluated`；未运行 Stage 2+、Beam-D1.5、Chaos、Editor 或可见 PIE。本节只冻结 Stage 1 的性能实现和证据，不表示后续 support province、局部裙房高度或 TowerChild 一次收缩方案已经实现或视觉批准。
+
+## 37. 支撑需求图显式化（2026-08-11）
+
+本节落实第 36 节第二步，但严格停在“诊断权威”边界：新增的 `SemanticSupportDemandDAG` 不参与
+PodiumMain、TowerChild、shared endpoint、member emission 或 Static DAG 选型，也不进入原有
+`CorePlanHash / SupportPlanHash / FinalGeometryHash`。因此它可以揭示旧 terminal-demand 与真实 Body 支撑柱之间的
+差异，而不会在视觉验收前暗中改变芯体。
+
+### 37.1 图输入与稳定身份
+
+图直接消费 `CollectRoots` 已证明接地的 WFC Volume 和 `FVerticalSupportWitness`：
+
+1. 每个非 span WFC Volume 发布一个 `FSemanticSupportVolumeNodeDiagnostic`，保留 Volume ID、Role、Primitive、
+   DerivationPath、XYZ bounds、grounded/synthetic/square-body/terminal-body 标志以及父子 Node ID；
+2. `CoupledGround/*` 仍在图中承担基座根节点，但标为 synthetic，不冒充原始方形楼体；
+3. “支撑柱”由最高的非 synthetic Body 节点定义，而不是由 Crown/屋顶叶数量定义。两个 Body 即使共同支撑同一个
+   合并 Crown，也发布两个独立 `FSemanticTerminalDemandDiagnostic`；一个 Body 上方若继续分叉，分叉/合并关系由图
+   保留，后续 support province 可以再决定是否拆分 demand；
+4. 每个 demand 发布 Body bounds、接地投影、最高承重 course、全部祖先/后代 lineage、Crown sources、ground
+   sources、邻接 demand、是否共享合并 Crown，以及固定 XY 投影从地面贯通到顶的保守 `ContinuousCoreFitBounds`。
+   `bHasContinuousCoreFit=false` 目前是诊断，不触发几何回退或拒收。
+
+图使用独立 `SemanticSupportDemandHash`。该 Hash 覆盖节点、边、ledger、occupancy bitset 和 demand lineage；Actor
+日志、D1 Summary 与矩阵日志同时发布 Node/Demand/Ledger 数和 Hash，方便比较 Seed、Profile、Tier 与二进制身份。
+
+### 37.2 merge ledger 与逐 course occupancy
+
+同一 36 cm 接触面上的 `FVerticalSupportWitness` 先按接触 course 分组，再按共享端点形成独立二部连通分量。每个
+分量发布一条 `FSemanticSupportMergeLedgerDiagnostic`：`1→N` 是 split，`N→1` 是 merge，`N→M` 同时标记
+split/merge；不同位置恰好同高的独立楼体不会被合并成一条 ledger。
+
+每个接地 component 还发布 `FSemanticSupportCourseOccupancyDiagnostic`。XY 使用现行 36 cm lattice，bit index
+固定为 `Y * SizeX + X`，并记录网格原点、尺寸、occupied count、源 Volume ID 和 occupied bounds。该 bitset 只
+描述 WFC 语义占用，不是积木占用、Beam-C load DAG 或 Chaos 接触图；下一步 support province 和局部裙房 seam
+只能消费这份冻结输入，不得重新从屋顶终端数反推 Body 支撑柱。
+
+### 37.3 编辑器诊断层
+
+`AABTSM73BeamD1PreviewActor` 的 `Stage 1 Diagnostic Layer` 追加
+`7 - Semantic Support Demand DAG`，并保持与前六层互斥：
+
+- 玻璃色 Box：原始、非 synthetic 的方形 Body；
+- 石材色细连线：Body→Body/Crown 的真实 positive-area support witness；
+- 钢材色直立 Box：每个独立 demand 的 `ContinuousCoreFitBounds`；不存在连续固定 footprint 时只显示一层
+  `GroundProjectionBounds`，明确暴露缺口而不是伪造通顶芯体。
+
+该模式不显示 WFC 半透明包络、现有 Core Placement、真实 core/shared members 或其他诊断层。用户可在相同
+Profile/Tier/Seed 下依次切换第 1 层与第 7 层，核对“原始 WFC 体积 → 支撑 Body → Crown 荷载”的因果关系；
+切换层不会重新选择候选。
+
+### 37.4 自动化与当前结论
+
+纯数据 `SemanticSupportMergedRoofDemand` 固定反例：两个独立 Body 汇入一个 triangular-prism Crown。旧几何
+terminal 仍为 1，而新 semantic demand 必须为 2，并且 merge ledger 为 `2→1`；测试证明本轮只增加诊断，没有
+借机改变旧几何消费者。`PreviewDiagnosticContracts` 证明第 7 层与 WFC、core intent 和 member 层位掩码互斥。
+
+TipOver E6 710000/730000/750000 的原 `Stage1Hash` 分别保持
+`6381458846136252022 / 4360458529242908803 / 2446638802680686583`，Main/Children/Member 和静态 DAG 均未变。
+新增图把代表种子的 `TerminalDemand` 阶段提高到约 `1.74--1.76 ms`。fresh Stage 1-only 5×6 为 30/30；单叶
+算法总计 `38903.91 ms`、平均 `1296.80 ms`、中位 `1145.49 ms`，最慢 `SeamRelease E6=3788.97 ms`，仍低于
+10 秒发行硬门。ForceUnity Development Editor 全链接成功。
+
+当前阶段只能确认“显式需求图已建立且旧几何未变”，不能确认新 demand 数就是最终 TowerChild 数。当
+`SemanticDemands != HighRegions` 时应记录为下一步 support-province 输入：先结合逐 course occupancy、split/merge
+ledger 和视觉分区决定真实支撑省份，再修改芯体；禁止为了让两个计数相等而直接合并/拆分节点。Physical 仍为
+`NotEvaluated`，未运行 Stage 2+、Beam-D1.5、Chaos 或可见 PIE。

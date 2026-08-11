@@ -3070,6 +3070,31 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 		Plan.Summary.EnvelopeHash != 0
 			&& Plan.Summary.CorePlanHash != 0
 			&& Plan.Summary.FinalGeometryHash != 0);
+	Check(TEXT("publishes the independent semantic support-demand graph"),
+		Plan.Summary.SemanticSupportNodeCount
+			== Plan.SemanticSupportVolumeNodes.Num()
+			&& Plan.Summary.SemanticSupportLedgerCount
+				== Plan.SemanticSupportMergeLedger.Num()
+			&& Plan.Summary.SemanticSupportCourseCount
+				== Plan.SemanticSupportCourseOccupancies.Num()
+			&& Plan.Summary.SemanticTerminalDemandCount
+				== Plan.SemanticTerminalDemands.Num()
+			&& Plan.Summary.SemanticSupportNodeCount > 0
+			&& Plan.Summary.SemanticSupportCourseCount > 0
+			&& Plan.Summary.SemanticTerminalDemandCount > 0
+			&& Plan.Summary.SemanticSupportDemandHash != 0);
+	bool bSemanticOccupancyCloses = true;
+	for (const ABTSM73BeamC3V3::FSemanticSupportCourseOccupancyDiagnostic& Occupancy
+		: Plan.SemanticSupportCourseOccupancies)
+	{
+		bSemanticOccupancyCloses &= Occupancy.SizeX > 0
+			&& Occupancy.SizeY > 0
+			&& Occupancy.OccupiedCellCount > 0
+			&& Occupancy.OccupiedWords.Num()
+				== (Occupancy.SizeX * Occupancy.SizeY + 63) / 64;
+	}
+	Check(TEXT("closes every semantic course occupancy bitset"),
+		bSemanticOccupancyCloses);
 	Check(TEXT("keeps shared endpoint contracts clean"),
 		Plan.Summary.SharedCourseNonCoreEndpointViolationCount == 0
 			&& Plan.Summary.SharedCourseBandViolationCount == 0);
@@ -3473,8 +3498,13 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 	}
 
 	AddInfo(FString::Printf(
-		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
-		*Prefix, Result.Silhouette.Volumes.Num(), Plan.CoreCells.Num(),
+		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
+		*Prefix, Result.Silhouette.Volumes.Num(),
+		Plan.Summary.SemanticSupportNodeCount,
+		Plan.Summary.SemanticTerminalDemandCount,
+		Plan.Summary.SemanticSupportLedgerCount,
+		Plan.Summary.SemanticSupportDemandHash,
+		Plan.CoreCells.Num(),
 		Plan.Summary.PodiumMainCoreCellCount,
 		Plan.Summary.TowerChildCoreCellCount,
 		Plan.Summary.HighProjectionRegionCount,
@@ -4069,6 +4099,80 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				&& Plan.Summary.Stage1TotalMilliseconds
 					<= Plan.Summary.Stage1TimeBudgetMilliseconds);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3SemanticSupportMergedRoofDemandTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.SemanticSupportMergedRoofDemand",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3SemanticSupportMergedRoofDemandTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	FABTSM73BeamD0ResolvedProfile Profile;
+	FABTSM73DAG5BV2GenerationResult Silhouette;
+	FString Error;
+	if (!TestTrue(TEXT("Base profile resolves"), ResolveShape(
+		{TEXT("DropTrigger"), 2, 740000}, Profile, Silhouette, Error)))
+	{
+		return false;
+	}
+	Profile.VisualComplexity.MinimumBrickCount = 1;
+	Profile.VisualComplexity.MaximumBrickCount = 100000;
+	FABTSM73DAG5BV2Volume Podium = MakeBodyVolume(
+		0, FVector(-720.0, -360.0, 0.0), FVector(720.0, 360.0, 360.0),
+		TEXT("CoupledGround/Cell/0"));
+	Podium.Role = EABTSM73DAG5BV2VolumeRole::Foundation;
+	FABTSM73DAG5BV2Volume MergedCrown = MakeBodyVolume(
+		3, FVector(-540.0, -360.0, 1080.0),
+		FVector(540.0, 360.0, 1440.0), TEXT("Building0/MergedRoof"));
+	MergedCrown.Role = EABTSM73DAG5BV2VolumeRole::Crown;
+	MergedCrown.Primitive = EABTSM73DAG5BV2Primitive::TriangularPrismX;
+	Silhouette.Volumes = {
+		Podium,
+		MakeBodyVolume(1, FVector(-540.0, -360.0, 360.0),
+			FVector(-108.0, 360.0, 1080.0), TEXT("Building0/WestBody")),
+		MakeBodyVolume(2, FVector(108.0, -360.0, 360.0),
+			FVector(540.0, 360.0, 1080.0), TEXT("Building0/EastBody")),
+		MergedCrown};
+	Silhouette.Summary.bAccepted = true;
+
+	ABTSM73BeamC3V3::FGenerationResult Result;
+	const bool bGenerated = FABTSM73BeamC3V3SkeletonFirstGenerator().GenerateStage1(
+		Profile, Silhouette, Result, Error);
+	TestTrue(*FString::Printf(TEXT("Merged-roof diagnostic fixture generates: %s"),
+		*Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlan& Plan = Result.Plan;
+	TestEqual(TEXT("One merged roof remains one current geometry terminal"),
+		Plan.Summary.RequiredTerminalBranchCount, 1);
+	TestEqual(TEXT("Two highest Body supports remain two semantic demands"),
+		Plan.Summary.SemanticTerminalDemandCount, 2);
+	TestEqual(TEXT("Semantic demand array closes its summary"),
+		Plan.SemanticTerminalDemands.Num(), 2);
+	TestTrue(TEXT("Both Body demands explicitly record the shared merged Crown"),
+		Algo::AllOf(Plan.SemanticTerminalDemands,
+			[](const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand)
+			{
+				return Demand.bSharesMergedCrown
+					&& Demand.CrownSourceVolumeIds.Num() == 1
+					&& Demand.CrownSourceVolumeIds[0] == 3;
+			}));
+	TestTrue(TEXT("Merge ledger records the two-Body to one-Crown transition"),
+		Plan.SemanticSupportMergeLedger.ContainsByPredicate(
+			[](const ABTSM73BeamC3V3::FSemanticSupportMergeLedgerDiagnostic& Ledger)
+			{
+				return Ledger.bMerge
+					&& Ledger.LowerNodeIds.Num() == 2
+					&& Ledger.UpperNodeIds.Num() == 1;
+			}));
+	TestNotEqual(TEXT("Diagnostic graph has a stable independent identity"),
+		Plan.Summary.SemanticSupportDemandHash, int64(0));
 	return true;
 }
 

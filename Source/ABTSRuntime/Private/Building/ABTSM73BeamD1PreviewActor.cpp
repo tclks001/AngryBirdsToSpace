@@ -167,7 +167,7 @@ namespace ABTSM73BeamD1Preview
 		}
 	}
 
-	enum EDiagnosticVisibility : uint8
+	enum EDiagnosticVisibility : uint16
 	{
 		SemanticEnvelopeVisibility = 1 << 0,
 		ProtectedVoidVisibility = 1 << 1,
@@ -176,10 +176,11 @@ namespace ABTSM73BeamD1Preview
 		CoreAndSharedVisibility = 1 << 4,
 		CoreMergeRegionVisibility = 1 << 5,
 		CompositeCoreXVisibility = 1 << 6,
-		CompositeCoreYVisibility = 1 << 7
+		CompositeCoreYVisibility = 1 << 7,
+		SemanticSupportDemandVisibility = 1 << 8
 	};
 
-	uint8 DiagnosticVisibilityMask(
+	uint16 DiagnosticVisibilityMask(
 		const EABTSM73BeamC3Stage1DiagnosticLayer Layer)
 	{
 		switch (Layer)
@@ -196,6 +197,8 @@ namespace ABTSM73BeamD1Preview
 			return CompositeCoreXVisibility;
 		case EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes:
 			return CompositeCoreYVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::SemanticSupportDemandDAG:
+			return SemanticSupportDemandVisibility;
 		default:
 			return 0;
 		}
@@ -227,6 +230,29 @@ namespace ABTSM73BeamD1Preview
 		Component->AddInstance(FTransform(
 			FQuat::Identity, Box.GetCenter(), Box.GetSize() / 100.0), false);
 	}
+
+	void AddSegmentInstance(
+		UHierarchicalInstancedStaticMeshComponent* Component,
+		const FVector& Start,
+		const FVector& End,
+		const double ThicknessCM = 12.0)
+	{
+		if (Component == nullptr)
+		{
+			return;
+		}
+		const FVector Delta = End - Start;
+		const double LengthCM = Delta.Size();
+		if (LengthCM <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return;
+		}
+		const FQuat Rotation = FQuat::FindBetweenNormals(
+			FVector::ForwardVector, Delta / LengthCM);
+		Component->AddInstance(FTransform(
+			Rotation, (Start + End) * 0.5,
+			FVector(LengthCM, ThicknessCM, ThicknessCM) / 100.0), false);
+	}
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -238,48 +264,56 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Parameters)
 {
 	using namespace ABTSM73BeamD1Preview;
-	const uint8 WFCMask = DiagnosticVisibilityMask(
+	const uint16 WFCMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope);
-	const uint8 IntentMask = DiagnosticVisibilityMask(
+	const uint16 IntentMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CorePlacementIntent);
-	const uint8 MembersMask = DiagnosticVisibilityMask(
+	const uint16 MembersMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses);
-	const uint8 MergeMask = DiagnosticVisibilityMask(
+	const uint16 MergeMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CoreMergeRegions);
-	const uint8 XMask = DiagnosticVisibilityMask(
+	const uint16 XMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes);
-	const uint8 YMask = DiagnosticVisibilityMask(
+	const uint16 YMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes);
+	const uint16 SupportDemandMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::SemanticSupportDemandDAG);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
-		WFCMask, static_cast<uint8>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
+		WFCMask, static_cast<uint16>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
-		IntentMask, static_cast<uint8>(CoreIntentVisibility | PairIntentVisibility));
+		IntentMask, static_cast<uint16>(CoreIntentVisibility | PairIntentVisibility));
 	TestEqual(TEXT("Member layer contains only actual core/shared members"),
-		MembersMask, static_cast<uint8>(CoreAndSharedVisibility));
+		MembersMask, static_cast<uint16>(CoreAndSharedVisibility));
 	TestEqual(TEXT("Merge layer contains only derived core merge regions"),
-		MergeMask, static_cast<uint8>(CoreMergeRegionVisibility));
+		MergeMask, static_cast<uint16>(CoreMergeRegionVisibility));
 	TestEqual(TEXT("X lane layer contains only actual X core lanes"),
-		XMask, static_cast<uint8>(CompositeCoreXVisibility));
+		XMask, static_cast<uint16>(CompositeCoreXVisibility));
 	TestEqual(TEXT("Y lane layer contains only actual Y core lanes"),
-		YMask, static_cast<uint8>(CompositeCoreYVisibility));
+		YMask, static_cast<uint16>(CompositeCoreYVisibility));
+	TestEqual(TEXT("Support-demand layer contains only the semantic support graph"),
+		SupportDemandMask,
+		static_cast<uint16>(SemanticSupportDemandVisibility));
 	TestEqual(TEXT("WFC and intent layers are disjoint"),
-		static_cast<uint8>(WFCMask & IntentMask), static_cast<uint8>(0));
+		static_cast<uint16>(WFCMask & IntentMask), static_cast<uint16>(0));
 	TestEqual(TEXT("WFC and member layers are disjoint"),
-		static_cast<uint8>(WFCMask & MembersMask), static_cast<uint8>(0));
+		static_cast<uint16>(WFCMask & MembersMask), static_cast<uint16>(0));
 	TestEqual(TEXT("Intent and member layers are disjoint"),
-		static_cast<uint8>(IntentMask & MembersMask), static_cast<uint8>(0));
+		static_cast<uint16>(IntentMask & MembersMask), static_cast<uint16>(0));
 	TestEqual(TEXT("Merge layer is disjoint from WFC"),
-		static_cast<uint8>(MergeMask & WFCMask), static_cast<uint8>(0));
+		static_cast<uint16>(MergeMask & WFCMask), static_cast<uint16>(0));
 	TestEqual(TEXT("Merge layer is disjoint from intent"),
-		static_cast<uint8>(MergeMask & IntentMask), static_cast<uint8>(0));
+		static_cast<uint16>(MergeMask & IntentMask), static_cast<uint16>(0));
 	TestEqual(TEXT("Merge layer is disjoint from members"),
-		static_cast<uint8>(MergeMask & MembersMask), static_cast<uint8>(0));
+		static_cast<uint16>(MergeMask & MembersMask), static_cast<uint16>(0));
 	TestEqual(TEXT("X and Y lane layers are disjoint"),
-		static_cast<uint8>(XMask & YMask), static_cast<uint8>(0));
+		static_cast<uint16>(XMask & YMask), static_cast<uint16>(0));
 	TestEqual(TEXT("X lane layer is disjoint from full members"),
-		static_cast<uint8>(XMask & MembersMask), static_cast<uint8>(0));
+		static_cast<uint16>(XMask & MembersMask), static_cast<uint16>(0));
 	TestEqual(TEXT("Y lane layer is disjoint from full members"),
-		static_cast<uint8>(YMask & MembersMask), static_cast<uint8>(0));
+		static_cast<uint16>(YMask & MembersMask), static_cast<uint16>(0));
+	TestEqual(TEXT("Support-demand graph is disjoint from WFC, intent, and members"),
+		static_cast<uint16>(SupportDemandMask
+			& (WFCMask | IntentMask | MembersMask)), static_cast<uint16>(0));
 
 	const FBox Bounds(FVector(-108.0, -72.0, 0.0), FVector(108.0, 72.0, 180.0));
 	auto TestOutwardWinding = [this, &Bounds](
@@ -568,7 +602,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			GenerationStopStage == EABTSM73BeamC3GenerationStage::SemanticEnvelope
 				? EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope
 				: Stage1DiagnosticLayer;
-		const uint8 VisibilityMask =
+		const uint16 VisibilityMask =
 			ABTSM73BeamD1Preview::DiagnosticVisibilityMask(EffectiveLayer);
 		const bool bShowEnvelope =
 			(VisibilityMask & ABTSM73BeamD1Preview::SemanticEnvelopeVisibility) != 0;
@@ -655,7 +689,48 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				ProtectedVoidPreview->GetInstanceCount() > 0, true);
 		}
 
-		if ((VisibilityMask & ABTSM73BeamD1Preview::CoreMergeRegionVisibility) != 0)
+		if ((VisibilityMask
+			& ABTSM73BeamD1Preview::SemanticSupportDemandVisibility) != 0)
+		{
+			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			for (const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic& Node
+				: Plan.SemanticSupportVolumeNodes)
+			{
+				if (Node.bSquareBody)
+				{
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreMergeRegionPreview, Node.LocalBounds);
+				}
+				for (const int32 ChildNodeId : Node.ChildNodeIds)
+				{
+					if (!Plan.SemanticSupportVolumeNodes.IsValidIndex(ChildNodeId))
+					{
+						continue;
+					}
+					const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic& Child =
+						Plan.SemanticSupportVolumeNodes[ChildNodeId];
+					ABTSM73BeamD1Preview::AddSegmentInstance(
+						SharedPairIntentPreview,
+						Node.LocalBounds.GetCenter(), Child.LocalBounds.GetCenter());
+				}
+			}
+			for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
+				: Plan.SemanticTerminalDemands)
+			{
+				const FBox DemandBounds = Demand.bHasContinuousCoreFit
+					? Demand.ContinuousCoreFitBounds
+					: Demand.GroundProjectionBounds;
+				ABTSM73BeamD1Preview::AddBoxInstance(
+					CoreIntentPreview, DemandBounds);
+			}
+			CoreMergeRegionPreview->SetVisibility(
+				CoreMergeRegionPreview->GetInstanceCount() > 0, true);
+			CoreIntentPreview->SetVisibility(
+				CoreIntentPreview->GetInstanceCount() > 0, true);
+			SharedPairIntentPreview->SetVisibility(
+				SharedPairIntentPreview->GetInstanceCount() > 0, true);
+		}
+		else if ((VisibilityMask & ABTSM73BeamD1Preview::CoreMergeRegionVisibility) != 0)
 		{
 			for (const ABTSM73BeamC3V3::FCoreMergeRegionPlan& Region :
 				StageResult.Skeleton.Plan.CoreMergeRegions)
@@ -783,12 +858,17 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewGenerated]")
 			TEXT(" Actor=%s Stage=%d Layer=%d Profile=%s Tier=%d")
-			TEXT(" Volumes=%d Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
+			TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
 			static_cast<int32>(EffectiveLayer),
 			*LastSummary.GameplayProfileId.ToString(), LastSummary.DifficultyTier,
 			StageResult.Silhouette.Volumes.Num(),
+			StageResult.Skeleton.Plan.Summary.SemanticSupportNodeCount,
+			StageResult.Skeleton.Plan.Summary.SemanticTerminalDemandCount,
+			StageResult.Skeleton.Plan.Summary.SemanticSupportLedgerCount,
+			StageResult.Skeleton.Plan.Summary.SemanticSupportDemandHash,
 			StageResult.Skeleton.Plan.CoreCells.Num(),
 			StageResult.Skeleton.Plan.Summary.PodiumMainCoreCellCount,
 			StageResult.Skeleton.Plan.Summary.TowerChildCoreCellCount,

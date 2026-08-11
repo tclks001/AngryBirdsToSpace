@@ -383,6 +383,77 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> BoundTowerChildCoreCellIds;
 	};
 
+	/** One immutable WFC semantic volume in the diagnostic Body -> Crown graph.
+	 * Node ids are plan-global and never alias emitted core/member identities. */
+	struct FSemanticSupportVolumeNodeDiagnostic
+	{
+		int32 NodeId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 SourceVolumeId = INDEX_NONE;
+		EABTSM73DAG5BV2VolumeRole Role = EABTSM73DAG5BV2VolumeRole::Body;
+		EABTSM73DAG5BV2Primitive Primitive = EABTSM73DAG5BV2Primitive::Box;
+		FString DerivationPath;
+		FBox LocalBounds = FBox(EForceInit::ForceInit);
+		TArray<int32> ParentNodeIds;
+		TArray<int32> ChildNodeIds;
+		bool bGrounded = false;
+		bool bSyntheticCoupledGround = false;
+		bool bSquareBody = false;
+		bool bTerminalBody = false;
+	};
+
+	/** One connected bipartite transition at a semantic support plane.  A row
+	 * may be a continuation, split, merge, or simultaneous split/merge. */
+	struct FSemanticSupportMergeLedgerDiagnostic
+	{
+		int32 LedgerId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 ContactCourse = INDEX_NONE;
+		double ContactZCM = 0.0;
+		TArray<int32> LowerNodeIds;
+		TArray<int32> UpperNodeIds;
+		bool bSplit = false;
+		bool bMerge = false;
+	};
+
+	/** Exact 36 cm lattice occupancy for one semantic course.  Bit index is
+	 * (Y * SizeX + X), relative to MinimumXUnit/MinimumYUnit. */
+	struct FSemanticSupportCourseOccupancyDiagnostic
+	{
+		int32 ComponentId = INDEX_NONE;
+		int32 CourseIndex = INDEX_NONE;
+		int32 MinimumXUnit = 0;
+		int32 MinimumYUnit = 0;
+		int32 SizeX = 0;
+		int32 SizeY = 0;
+		int32 OccupiedCellCount = 0;
+		TArray<uint64> OccupiedWords;
+		TArray<int32> SourceVolumeIds;
+		FBox OccupiedBounds = FBox(EForceInit::ForceInit);
+	};
+
+	/** One independent support-column demand rooted in the highest Body volume,
+	 * not in a roof terminal.  Several demands may intentionally share Crown
+	 * descendants after a semantic roof merge. */
+	struct FSemanticTerminalDemandDiagnostic
+	{
+		int32 DemandId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 TerminalBodyNodeId = INDEX_NONE;
+		int32 TerminalBodySourceVolumeId = INDEX_NONE;
+		int32 RequiredTopCourse = 0;
+		FBox BodyBounds = FBox(EForceInit::ForceInit);
+		FBox GroundProjectionBounds = FBox(EForceInit::ForceInit);
+		FBox ContinuousCoreFitBounds = FBox(EForceInit::ForceInit);
+		FBox LoadBranchBounds = FBox(EForceInit::ForceInit);
+		TArray<int32> LineageNodeIds;
+		TArray<int32> CrownSourceVolumeIds;
+		TArray<int32> GroundSourceVolumeIds;
+		TArray<int32> AdjacentDemandIds;
+		bool bHasContinuousCoreFit = false;
+		bool bSharesMergedCrown = false;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -501,6 +572,13 @@ namespace ABTSM73BeamC3V3
 		int32 BoundHighProjectionRegionCount = 0;
 		int32 RequiredTerminalBranchCount = 0;
 		int32 BoundTerminalBranchCount = 0;
+		int32 SemanticSupportNodeCount = 0;
+		int32 SemanticSupportLedgerCount = 0;
+		int32 SemanticSupportSplitCount = 0;
+		int32 SemanticSupportMergeCount = 0;
+		int32 SemanticSupportCourseCount = 0;
+		int32 SemanticTerminalDemandCount = 0;
+		int32 SemanticTerminalDemandWithoutContinuousFitCount = 0;
 		int32 CoreMergeRegionCount = 0;
 		int32 MergedGroundComponentCount = 0;
 		int32 MaximumCoreRailCount = 0;
@@ -567,6 +645,8 @@ namespace ABTSM73BeamC3V3
 		int64 CoreMergeRegionHash = 0;
 		int64 CorePlanHash = 0;
 		int64 SupportPlanHash = 0;
+		/** Diagnostic identity only; deliberately excluded from Stage1 geometry hashes. */
+		int64 SemanticSupportDemandHash = 0;
 		int64 FinalGeometryHash = 0;
 		FString RejectReason;
 	};
@@ -598,6 +678,14 @@ namespace ABTSM73BeamC3V3
 		TArray<FHighProjectionSplitDiagnostic> HighProjectionSplitDiagnostics;
 		TArray<FHighProjectionBranchBindingDiagnostic>
 			HighProjectionBranchBindingDiagnostics;
+		TArray<FSemanticSupportVolumeNodeDiagnostic>
+			SemanticSupportVolumeNodes;
+		TArray<FSemanticSupportMergeLedgerDiagnostic>
+			SemanticSupportMergeLedger;
+		TArray<FSemanticSupportCourseOccupancyDiagnostic>
+			SemanticSupportCourseOccupancies;
+		TArray<FSemanticTerminalDemandDiagnostic>
+			SemanticTerminalDemands;
 		TArray<FCoreCellPlan> CoreCells;
 		TArray<FSharedEndpointReachabilityDiagnostic>
 			SharedEndpointReachabilityDiagnostics;
