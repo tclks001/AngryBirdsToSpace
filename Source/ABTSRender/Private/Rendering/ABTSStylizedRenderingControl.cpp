@@ -223,7 +223,15 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 47;
+	return 54;
+}
+
+bool FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+	EABTSStylizedRenderProfile Profile,
+	bool bCloudsEnabled)
+{
+	return bCloudsEnabled
+		&& Profile == EABTSStylizedRenderProfile::GroundDay;
 }
 
 FABTSStylizedToneProfileParameters

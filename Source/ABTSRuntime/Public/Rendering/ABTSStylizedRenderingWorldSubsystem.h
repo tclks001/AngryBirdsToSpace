@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Rendering/ABTST4LowPolyCloudPrototype.h"
 #include "Rendering/ABTSToonEnvironmentTypes.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "ABTSStylizedRenderingWorldSubsystem.generated.h"
@@ -10,6 +11,7 @@
 class UPrimitiveComponent;
 class USceneCaptureComponent2D;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class AActor;
 class FABTSStylizedMaterialOverrideRegistry;
 class FABTSToonEnvironmentPresentationState;
@@ -39,6 +41,8 @@ public:
 
 	/** Deterministic immediate refresh used by automation and diagnostics. */
 	void RefreshNow();
+	/** Re-evaluates A2.3 camera/bird/cloud visibility without rebuilding clouds. */
+	void RefreshCloudTraversalNow(bool bForceImmediate = false);
 	int32 GetRegisteredPrimitiveCount() const;
 	int32 GetRegisteredMaterialSlotCount() const;
 	int32 GetPreloadedSharedMaterialCount() const
@@ -73,6 +77,7 @@ private:
 		const struct FABTSStylizedEnvironmentParameters& Parameters,
 		FString& OutFailure);
 	void DestroyLowPolyCloudPrototype();
+	void UpdateCloudTraversalVisibility(float DeltaTime, bool bForceImmediate);
 
 	friend class FABTSToonT2B1PrimitiveRegistryTest;
 	class FPrimitiveOverrideRegistry;
@@ -94,4 +99,9 @@ private:
 	uint64 LowPolyCloudLayoutHash = 0;
 	uint64 LowPolyLogicalCloudLayoutHash = 0;
 	int32 LowPolyLogicalCloudCount = 0;
+	TArray<FABTST4LowPolyCloudIslandDefinition> LowPolyCloudDefinitions;
+	TArray<TWeakObjectPtr<UMaterialInstanceDynamic>> LowPolyCloudMaterials;
+	TArray<float> LowPolyCloudTraversalStrengths;
+	uint64 LastCloudTraversalDiagnosticHash = 0;
+	bool bHasPreviousCloudTraversalCamera = false;
 };

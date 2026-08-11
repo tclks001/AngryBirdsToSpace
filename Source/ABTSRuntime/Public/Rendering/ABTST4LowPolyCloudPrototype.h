@@ -27,6 +27,42 @@ struct ABTSRUNTIME_API FABTST4LowPolyCloudIslandDefinition
 	bool IsValid() const;
 };
 
+/** CPU-side relation used to activate the bounded A2.3 visibility corridor. */
+struct ABTSRUNTIME_API FABTST4CloudTraversalRelation
+{
+	bool bCameraInside = false;
+	bool bBirdInside = false;
+	bool bCloudBetweenCameraAndBird = false;
+	bool bTraversalActive = false;
+	/** Continuous envelope depths avoid a binary material/veil flip at cloud edges. */
+	float CameraInteriorWeight = 0.0f;
+	float BirdInteriorWeight = 0.0f;
+	float CorridorInteriorWeight = 0.0f;
+	float TraversalWeight = 0.0f;
+	float ClosestSegmentAlpha = 0.0f;
+
+	bool IsValid() const
+	{
+		return FMath::IsFinite(ClosestSegmentAlpha)
+			&& ClosestSegmentAlpha >= 0.0f
+			&& ClosestSegmentAlpha <= 1.0f
+			&& FMath::IsFinite(CameraInteriorWeight)
+			&& CameraInteriorWeight >= 0.0f
+			&& CameraInteriorWeight <= 1.0f
+			&& FMath::IsFinite(BirdInteriorWeight)
+			&& BirdInteriorWeight >= 0.0f
+			&& BirdInteriorWeight <= 1.0f
+			&& FMath::IsFinite(CorridorInteriorWeight)
+			&& CorridorInteriorWeight >= 0.0f
+			&& CorridorInteriorWeight <= 1.0f
+			&& FMath::IsFinite(TraversalWeight)
+			&& TraversalWeight >= 0.0f
+			&& TraversalWeight <= 1.0f
+			&& bTraversalActive == (bCameraInside || bBirdInside
+				|| bCloudBetweenCameraAndBird);
+	}
+};
+
 /** Flat-shaded closed mesh data; positions are relative to PlanetCenterWorld. */
 struct ABTSRUNTIME_API FABTST4LowPolyCloudMeshData
 {
@@ -170,6 +206,18 @@ public:
 
 	/** Shared CPU oracle for the material's continuous local day/night blend. */
 	static float ComputeLocalDaylightBlend(float SolarHeight);
+
+	/**
+	 * Camera-independent cloud envelope query. Padding starts the dissolve
+	 * before the opaque cloud reaches the camera/bird line, leaving enough
+	 * time for the bounded material corridor to open without a one-frame pop.
+	 */
+	static FABTST4CloudTraversalRelation EvaluateTraversalRelation(
+		const FABTST4LowPolyCloudIslandDefinition& Cloud,
+		const FVector& CameraWorld,
+		const FVector& BirdWorld,
+		float BirdRadiusCM,
+		float EnvelopePaddingScale = 1.12f);
 
 	static uint64 ComputeCloudletLayoutHash(
 		TConstArrayView<FABTST4InstancedCloudletDefinition> Cloudlets);

@@ -175,6 +175,93 @@ bool FABTST4InstancedCloudletDefinition::IsValid() const
 		&& IdentityHash != 0;
 }
 
+FABTST4CloudTraversalRelation
+FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+	const FABTST4LowPolyCloudIslandDefinition& Cloud,
+	const FVector& CameraWorld,
+	const FVector& BirdWorld,
+	const float BirdRadiusCM,
+	const float EnvelopePaddingScale)
+{
+	FABTST4CloudTraversalRelation Result;
+	if (!Cloud.IsValid()
+		|| CameraWorld.ContainsNaN()
+		|| BirdWorld.ContainsNaN()
+		|| !FMath::IsFinite(BirdRadiusCM)
+		|| !FMath::IsFinite(EnvelopePaddingScale)
+		|| EnvelopePaddingScale < 1.0f)
+	{
+		return Result;
+	}
+
+	const FVector VisibleExtents(
+		Cloud.ExtentsCM.X
+			* ABTST4LowPolyCloudPrototypePrivate::VisibleEnvelopeExtentScale,
+		Cloud.ExtentsCM.Y
+			* ABTST4LowPolyCloudPrototypePrivate::VisibleEnvelopeExtentScale,
+		Cloud.ExtentsCM.Z * 0.92);
+	const FVector PaddedExtents = VisibleExtents
+		* static_cast<double>(EnvelopePaddingScale)
+		+ FVector(FMath::Max(0.0f, BirdRadiusCM));
+	auto ToUnitEllipsoid = [&Cloud, &PaddedExtents](const FVector& World)
+	{
+		const FVector Relative = World - Cloud.CenterWorld;
+		return FVector(
+			FVector::DotProduct(Relative, Cloud.TangentX) / PaddedExtents.X,
+			FVector::DotProduct(Relative, Cloud.TangentY) / PaddedExtents.Y,
+			FVector::DotProduct(Relative, Cloud.RadialUp) / PaddedExtents.Z);
+	};
+
+	const FVector CameraLocal = ToUnitEllipsoid(CameraWorld);
+	const FVector BirdLocal = ToUnitEllipsoid(BirdWorld);
+	const double CameraRadius = CameraLocal.Size();
+	const double BirdRadius = BirdLocal.Size();
+	Result.bCameraInside = CameraRadius <= 1.0;
+	Result.bBirdInside = BirdRadius <= 1.0;
+	// The padded envelope already opens before visible cloud reaches either
+	// endpoint. Blend across its final 22% instead of toggling at radius 1.0.
+	// This remains a pure position query and therefore cannot pump with view
+	// direction, frame rate or logical-cloud identity.
+	auto ComputeInteriorWeight = [](const double UnitRadius)
+	{
+		return 1.0f - FMath::SmoothStep(
+			0.82f,
+			1.04f,
+			static_cast<float>(UnitRadius));
+	};
+	Result.CameraInteriorWeight = ComputeInteriorWeight(CameraRadius);
+	Result.BirdInteriorWeight = ComputeInteriorWeight(BirdRadius);
+
+	const FVector Segment = BirdLocal - CameraLocal;
+	const double SegmentSquared = Segment.SizeSquared();
+	Result.ClosestSegmentAlpha = SegmentSquared > UE_DOUBLE_SMALL_NUMBER
+		? static_cast<float>(FMath::Clamp(
+			-FVector::DotProduct(CameraLocal, Segment) / SegmentSquared,
+			0.0,
+			1.0))
+		: 0.0f;
+	const FVector Closest = CameraLocal
+		+ Segment * static_cast<double>(Result.ClosestSegmentAlpha);
+	const double ClosestRadius = Closest.Size();
+	Result.bCloudBetweenCameraAndBird =
+		Result.ClosestSegmentAlpha > 0.001f
+		&& Result.ClosestSegmentAlpha < 0.999f
+		&& ClosestRadius <= 1.0;
+	Result.CorridorInteriorWeight =
+		Result.ClosestSegmentAlpha > 0.001f
+		&& Result.ClosestSegmentAlpha < 0.999f
+		? ComputeInteriorWeight(ClosestRadius)
+		: 0.0f;
+	Result.TraversalWeight = FMath::Max3(
+		Result.CameraInteriorWeight,
+		Result.BirdInteriorWeight,
+		Result.CorridorInteriorWeight);
+	Result.bTraversalActive = Result.bCameraInside
+		|| Result.bBirdInside
+		|| Result.bCloudBetweenCameraAndBird;
+	return Result;
+}
+
 int32 FABTST4LowPolyCloudPrototype::GetCloudletLayerCount(
 	const int32 IslandIndex,
 	const EABTST4CloudletLayer Layer)

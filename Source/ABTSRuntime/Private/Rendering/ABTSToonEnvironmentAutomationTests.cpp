@@ -382,8 +382,8 @@ bool FABTSToonT4A2CloudContractTest::RunTest(const FString& Parameters)
 		static_cast<int32>(EABTSToonVisualCaptureSuite::ToonT4A2));
 	const TArray<FABTSToonVisualCapturePointDefinition> CloudCatalogue =
 		FABTSToonVisualCaptureMath::BuildT4A2Catalogue();
-	TestEqual(TEXT("T4-A2 keeps ten atmosphere poses, seven A2.1 cloud views and five A2.2 field views"),
-		CloudCatalogue.Num(), 22);
+	TestEqual(TEXT("T4-A2 keeps ten atmosphere poses, seven A2.1 views, five A2.2 field views and four A2.3 traversal views"),
+		CloudCatalogue.Num(), 26);
 	TestTrue(TEXT("T4-A2 includes the gameplay-facing ground oblique-up view"),
 		CloudCatalogue.ContainsByPredicate(
 			[](const FABTSToonVisualCapturePointDefinition& Point)
@@ -432,6 +432,34 @@ bool FABTSToonT4A2CloudContractTest::RunTest(const FString& Parameters)
 			{
 				return Point.Anchor
 					== EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega;
+			}));
+	TestTrue(TEXT("T4-A2.3 includes bird-inside-cloud visibility"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside;
+			}));
+	TestTrue(TEXT("T4-A2.3 includes camera-inside-cloud visibility"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside;
+			}));
+	TestTrue(TEXT("T4-A2.3 includes cloud-between-camera-and-bird visibility"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBetween;
+			}));
+	TestTrue(TEXT("T4-A2.3 includes camera-and-bird-both-inside visibility"),
+		CloudCatalogue.ContainsByPredicate(
+			[](const FABTSToonVisualCapturePointDefinition& Point)
+			{
+				return Point.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBothInside;
 			}));
 	return true;
 }

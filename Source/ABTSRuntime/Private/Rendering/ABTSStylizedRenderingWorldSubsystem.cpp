@@ -5,12 +5,15 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/VolumetricCloudComponent.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -863,6 +866,7 @@ void UABTSStylizedRenderingWorldSubsystem::PreloadSharedMaterials()
 
 void UABTSStylizedRenderingWorldSubsystem::Tick(const float DeltaTime)
 {
+	UpdateCloudTraversalVisibility(DeltaTime, false);
 	const bool bStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
 	if (bStyleEnabled != bLastObservedStyleEnabled)
 	{
@@ -1335,6 +1339,223 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	}
 }
 
+void UABTSStylizedRenderingWorldSubsystem::RefreshCloudTraversalNow(
+	const bool bForceImmediate)
+{
+	UpdateCloudTraversalVisibility(0.0f, bForceImmediate);
+}
+
+void UABTSStylizedRenderingWorldSubsystem::UpdateCloudTraversalVisibility(
+	const float DeltaTime,
+	const bool bForceImmediate)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr
+		|| !LowPolyCloudPrototypeActor.IsValid()
+		|| LowPolyCloudDefinitions.Num() != LowPolyCloudMaterials.Num()
+		|| LowPolyCloudDefinitions.Num() != LowPolyCloudTraversalStrengths.Num())
+	{
+		return;
+	}
+
+	APlayerController* Controller = World->GetFirstPlayerController();
+	APlayerCameraManager* CameraManager = IsValid(Controller)
+		? Controller->PlayerCameraManager
+		: nullptr;
+	AABTSBirdParty* Party = nullptr;
+	for (TActorIterator<AABTSBirdParty> It(World); It; ++It)
+	{
+		if (It->IsPartyReady())
+		{
+			Party = *It;
+			break;
+		}
+	}
+	AABTSM25BirdCharacter* ControlledBird = IsValid(Party)
+		? Party->GetControlledBird()
+		: nullptr;
+	if (!IsValid(CameraManager) || !IsValid(ControlledBird))
+	{
+		for (int32 Index = 0; Index < LowPolyCloudMaterials.Num(); ++Index)
+		{
+			LowPolyCloudTraversalStrengths[Index] = 0.0f;
+			if (UMaterialInstanceDynamic* Material =
+				LowPolyCloudMaterials[Index].Get())
+			{
+				Material->SetScalarParameterValue(
+					TEXT("ABTS_CloudTraversalActive"), 0.0f);
+				Material->SetScalarParameterValue(
+					TEXT("ABTS_CloudTraversalProtectionActive"), 0.0f);
+			}
+		}
+		return;
+	}
+
+	// Protect each rendered bird independently.  A single capped party sphere
+	// used to lose the formation endpoints, while actor/component bounds could
+	// be offset from the Chaos-driven skeletal mesh that is actually visible.
+	TArray<AABTSM25BirdCharacter*> ProtectedBirds;
+	ProtectedBirds.Reserve(4);
+	ProtectedBirds.Add(ControlledBird);
+	for (AABTSM25BirdCharacter* Bird : Party->GetPartyMembers())
+	{
+		if (IsValid(Bird) && ProtectedBirds.Num() < 4)
+		{
+			ProtectedBirds.AddUnique(Bird);
+		}
+	}
+	TArray<FSphere> BirdSpheres;
+	BirdSpheres.Reserve(4);
+	FBox BirdBounds(EForceInit::ForceInit);
+	float MaxMotionPaddingCM = 0.0f;
+	for (AABTSM25BirdCharacter* Bird : ProtectedBirds)
+	{
+		USkeletalMeshComponent* Visual = Bird->GetBirdVisual();
+		const FVector Center = IsValid(Visual)
+			? Visual->Bounds.Origin
+			: Bird->GetActorLocation();
+		const float VisualRadiusCM = IsValid(Visual)
+			? FMath::Clamp(static_cast<float>(Visual->Bounds.SphereRadius),
+				65.0f, 190.0f)
+			: 100.0f;
+		const float BirdSpeedCMPS = FMath::Max(
+			static_cast<float>(Bird->GetVelocity().Size()),
+			static_cast<float>(Bird->GetSlingshotVelocity().Size()));
+		// Two-frame conservative lead covers subsystem/visual tick ordering and
+		// high-speed slingshot motion without opening one giant party-sized hole.
+		const float MotionPaddingCM = FMath::Min(
+			BirdSpeedCMPS * FMath::Max(DeltaTime, 1.0f / 60.0f) * 2.0f,
+			260.0f);
+		MaxMotionPaddingCM = FMath::Max(MaxMotionPaddingCM, MotionPaddingCM);
+		const float RadiusCM = VisualRadiusCM + 70.0f + MotionPaddingCM;
+		BirdSpheres.Emplace(Center, RadiusCM);
+		const FVector Extent(RadiusCM);
+		BirdBounds += Center - Extent;
+		BirdBounds += Center + Extent;
+	}
+	check(BirdSpheres.Num() > 0);
+	const FVector BirdWorld = BirdBounds.GetCenter();
+	float BirdRadiusCM = 120.0f;
+	for (const FSphere& Sphere : BirdSpheres)
+	{
+		BirdRadiusCM = FMath::Max(
+			BirdRadiusCM,
+			static_cast<float>(FVector::Distance(BirdWorld, Sphere.Center)
+				+ Sphere.W));
+	}
+	const FVector CameraWorld = CameraManager->GetCameraLocation();
+	// High-speed slingshot travel is ordinary continuous camera motion. The old
+	// 1400 cm displacement heuristic classified it as a cut and snapped the
+	// traversal aperture between binary states.
+	const bool bCameraCut = bForceImmediate
+		|| !bHasPreviousCloudTraversalCamera
+		|| CameraManager->bGameCameraCutThisFrame;
+	bHasPreviousCloudTraversalCamera = true;
+
+	uint64 DiagnosticHash = 1469598103934665603ull;
+	int32 ActiveCloudCount = 0;
+	for (int32 Index = 0; Index < LowPolyCloudDefinitions.Num(); ++Index)
+	{
+		UMaterialInstanceDynamic* Material = LowPolyCloudMaterials[Index].Get();
+		if (!IsValid(Material))
+		{
+			continue;
+		}
+		const FABTST4CloudTraversalRelation Relation =
+			FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+				LowPolyCloudDefinitions[Index],
+				CameraWorld,
+				BirdWorld,
+				BirdRadiusCM);
+		const float TargetStrength = Relation.TraversalWeight;
+		float& Strength = LowPolyCloudTraversalStrengths[Index];
+		if (bCameraCut)
+		{
+			Strength = TargetStrength;
+		}
+		else
+		{
+			const float Speed = TargetStrength > Strength ? 10.0f : 6.0f;
+			Strength = FMath::FInterpTo(
+				Strength, TargetStrength, FMath::Max(0.0f, DeltaTime), Speed);
+		}
+		const float CameraRadiusCM = FMath::Clamp(
+			BirdRadiusCM * 1.20f, 250.0f, 500.0f);
+		const float CorridorRadiusCM = FMath::Clamp(
+			BirdRadiusCM * 0.72f, 145.0f, 310.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalActive"), Strength);
+		// Hard camera/bird protection is immediate.  Only the noisy outer
+		// corridor interpolates, so a newly-entered cloud cannot cover a bird for
+		// one or two frames while TraversalActive catches up.
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalProtectionActive"),
+			Relation.bTraversalActive ? 1.0f : 0.0f);
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudTraversalCameraWorld"),
+			FLinearColor(CameraWorld.X, CameraWorld.Y, CameraWorld.Z, 0.0f));
+		Material->SetVectorParameterValue(
+			TEXT("ABTS_CloudTraversalBirdWorld"),
+			FLinearColor(BirdWorld.X, BirdWorld.Y, BirdWorld.Z, 0.0f));
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalCameraRadiusCM"), CameraRadiusCM);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalBirdRadiusCM"), BirdRadiusCM + 65.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalBirdCount"),
+			static_cast<float>(BirdSpheres.Num()));
+		for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
+		{
+			const FSphere Sphere = BirdSpheres.IsValidIndex(BirdIndex)
+				? BirdSpheres[BirdIndex]
+				: FSphere(FVector::ZeroVector, 1.0);
+			Material->SetVectorParameterValue(
+				*FString::Printf(
+					TEXT("ABTS_CloudTraversalBirdSphere%d"), BirdIndex),
+				FLinearColor(
+					Sphere.Center.X,
+					Sphere.Center.Y,
+					Sphere.Center.Z,
+					Sphere.W));
+		}
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalCorridorRadiusCM"), CorridorRadiusCM);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalFeatherCM"), 95.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalRetainedCoverage"), 0.82f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalMaskFrequency"), 0.012f);
+		if (Relation.bTraversalActive)
+		{
+			++ActiveCloudCount;
+		}
+		DiagnosticHash = HashCombineFast(
+			DiagnosticHash,
+			GetTypeHash(
+				(Index + 1) * 17
+				+ (Relation.bCameraInside ? 1 : 0)
+				+ (Relation.bBirdInside ? 2 : 0)
+				+ (Relation.bCloudBetweenCameraAndBird ? 4 : 0)));
+	}
+	if (DiagnosticHash != LastCloudTraversalDiagnosticHash)
+	{
+		LastCloudTraversalDiagnosticHash = DiagnosticHash;
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T4-A2.3.1][Traversal] ActiveClouds=%d Camera=%s PartyCenter=%s PartyRadiusCM=%.1f ProtectedBirds=%d MaxMotionPaddingCM=%.1f Veil=Removed PixelAnimationTSR=1 CameraCut=%d RelationHash=0x%016llX"),
+			ActiveCloudCount,
+			*CameraWorld.ToCompactString(),
+			*BirdWorld.ToCompactString(),
+			BirdRadiusCM,
+			BirdSpheres.Num(),
+			MaxMotionPaddingCM,
+			bCameraCut ? 1 : 0,
+			static_cast<unsigned long long>(DiagnosticHash));
+	}
+}
+
 void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 {
 	if (!EnvironmentPresentation)
@@ -1409,7 +1630,7 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][Rendering][T4-A2.2][CloudQuality] Route=InstancedCloudletsA2_2NightMegaCluster Islands=%d LogicalClouds=%d BackgroundClouds=%d TerminatorMegaClouds=%d WeatherSystems=%d MacroClusters=%d Cloudlets=%d Body=%d Crown=%d Edge=%d GlobalCoverage=1 BackgroundSunIndependentPlacement=1 TerminatorMegaSunRelative=1 TerminatorMegaConnected=1 SizeVariation=1 FusionDiagnostics=5 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=Unlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 LocalSolarHeight=1 NightWhiteningGate=1 NightBrightness=%.2f DayBlend=[%.2f,%.2f] GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 CloudCompositeStencil=%d CloudToCloudOutlineSuppression=1 CloudToWorldOutlinePreserved=1 LogicalHash=%llu NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
+			TEXT("[ABTS][Rendering][T4-A2.3.1][CloudQuality] Route=InstancedCloudletsA2_3_1PerBirdTSRStable Islands=%d LogicalClouds=%d BackgroundClouds=%d TerminatorMegaClouds=%d WeatherSystems=%d MacroClusters=%d Cloudlets=%d Body=%d Crown=%d Edge=%d GlobalCoverage=1 BackgroundSunIndependentPlacement=1 TerminatorMegaSunRelative=1 TerminatorMegaConnected=1 SizeVariation=1 FusionDiagnostics=5 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=MaskedUnlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 LocalSolarHeight=1 NightWhiteningGate=1 NightBrightness=%.2f DayBlend=[%.2f,%.2f] GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 PixelAnimationTSR=1 CloudCompositeStencil=%d CloudToCloudOutlineSuppression=1 CloudToWorldOutlinePreserved=1 BoundedTraversal=1 CameraSphere=1 PerBirdVisualSpheres=4 ImmediateHardProtection=1 CameraBirdCorridor=1 StablePlanarNoiseCoverage=1 RetainedCoverage=0.82 MaskFrequency=0.012 FullScreenVeil=Removed FullTranslucency=0 TraversalAffectsLighting=0 LogicalHash=%llu NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
 			FABTST4LowPolyCloudPrototype::IslandCount,
 			LowPolyLogicalCloudCount,
 			FABTST4LowPolyCloudPrototype::GlobalIslandCount,
@@ -1568,6 +1789,10 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 	float MaterialNightBrightness = 0.0f;
 	float MaterialDaylightBlendMin = 0.0f;
 	float MaterialDaylightBlendMax = 0.0f;
+	float MaterialTraversalRetainedCoverage = 0.0f;
+	float MaterialTraversalMaskFrequency = 0.0f;
+	float MaterialTraversalProtectionActive = -1.0f;
+	float MaterialTraversalBirdCount = -1.0f;
 	FLinearColor MaterialPlanetCenter = FLinearColor::Transparent;
 	const bool bMaterialContractValid =
 		BaseMaterial->GetScalarParameterValue(
@@ -1587,7 +1812,27 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 			FMaterialParameterInfo(
 				TEXT("ABTS_CloudDaylightBlendMaxSolarHeight")),
 			MaterialDaylightBlendMax)
-		&& FMath::IsNearlyEqual(MaterialMacroLightingVersion, 8.0f)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudTraversalRetainedCoverage")),
+			MaterialTraversalRetainedCoverage)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudTraversalMaskFrequency")),
+			MaterialTraversalMaskFrequency)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudTraversalProtectionActive")),
+			MaterialTraversalProtectionActive)
+		&& BaseMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalBirdCount")),
+			MaterialTraversalBirdCount)
+		&& BaseMaterial->HasPixelAnimation()
+		&& FMath::IsNearlyEqual(MaterialMacroLightingVersion, 11.0f)
+		&& FMath::IsNearlyEqual(MaterialTraversalRetainedCoverage, 0.82f)
+		&& FMath::IsNearlyEqual(MaterialTraversalMaskFrequency, 0.012f)
+		&& FMath::IsNearlyZero(MaterialTraversalProtectionActive)
+		&& FMath::IsNearlyZero(MaterialTraversalBirdCount)
 		&& FMath::IsNearlyEqual(
 			MaterialNightBrightness,
 			FABTST4LowPolyCloudPrototype::NightBrightness)
@@ -1600,11 +1845,16 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 	if (!bMaterialContractValid)
 	{
 		OutFailure = FString::Printf(
-			TEXT("T4-A2.2 cloud material contract mismatch (Version=%.2f Night=%.2f Blend=[%.2f,%.2f])."),
+			TEXT("T4-A2.3.1 cloud material contract mismatch (Version=%.2f Night=%.2f Blend=[%.2f,%.2f] RetainedCoverage=%.2f MaskFrequency=%.3f PixelAnimation=%d Protection=%.1f BirdCount=%.1f)."),
 			MaterialMacroLightingVersion,
 			MaterialNightBrightness,
 			MaterialDaylightBlendMin,
-			MaterialDaylightBlendMax);
+			MaterialDaylightBlendMax,
+			MaterialTraversalRetainedCoverage,
+			MaterialTraversalMaskFrequency,
+			BaseMaterial->HasPixelAnimation() ? 1 : 0,
+			MaterialTraversalProtectionActive,
+			MaterialTraversalBirdCount);
 		return false;
 	}
 	UStaticMesh* CloudletMesh = LoadObject<UStaticMesh>(
@@ -1651,6 +1901,9 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+	LowPolyCloudDefinitions.Reset(Definitions.Num());
+	LowPolyCloudMaterials.Reset(Definitions.Num());
+	LowPolyCloudTraversalStrengths.Reset(Definitions.Num());
 
 	for (int32 DefinitionIndex = 0;
 		DefinitionIndex < Definitions.Num();
@@ -1811,6 +2064,31 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 				Definition.ExtentsCM.Y,
 				Definition.ExtentsCM.Z,
 				0.0f));
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalActive"), 0.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalProtectionActive"), 0.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalBirdCount"), 0.0f);
+		for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
+		{
+			Material->SetVectorParameterValue(
+				*FString::Printf(
+					TEXT("ABTS_CloudTraversalBirdSphere%d"), BirdIndex),
+				FLinearColor(0.0f, 0.0f, 0.0f, 1.0f));
+		}
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalCameraRadiusCM"), 280.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalBirdRadiusCM"), 220.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalCorridorRadiusCM"), 150.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalFeatherCM"), 95.0f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalRetainedCoverage"), 0.82f);
+		Material->SetScalarParameterValue(
+			TEXT("ABTS_CloudTraversalMaskFrequency"), 0.012f);
 		const TArray<FABTST4CloudMacroClusterDefinition> MacroClusters =
 			FABTST4LowPolyCloudPrototype::BuildMacroClusters(Definition);
 		if (MacroClusters.Num()
@@ -1844,11 +2122,15 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 				Cluster.HeightBias);
 		}
 		Component->SetMaterial(0, Material);
+		LowPolyCloudDefinitions.Add(Definition);
+		LowPolyCloudMaterials.Add(Material);
+		LowPolyCloudTraversalStrengths.Add(0.0f);
 	}
 	LowPolyCloudPrototypeActor = Actor;
 	LowPolyCloudLayoutHash = DesiredCloudletHash;
 	LowPolyLogicalCloudLayoutHash = DesiredLogicalCloudHash;
 	LowPolyLogicalCloudCount = Definitions.Num();
+	UpdateCloudTraversalVisibility(0.0f, true);
 	return true;
 }
 
@@ -1862,6 +2144,11 @@ void UABTSStylizedRenderingWorldSubsystem::DestroyLowPolyCloudPrototype()
 	LowPolyCloudLayoutHash = 0;
 	LowPolyLogicalCloudLayoutHash = 0;
 	LowPolyLogicalCloudCount = 0;
+	LowPolyCloudDefinitions.Reset();
+	LowPolyCloudMaterials.Reset();
+	LowPolyCloudTraversalStrengths.Reset();
+	bHasPreviousCloudTraversalCamera = false;
+	LastCloudTraversalDiagnosticHash = 0;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -2229,22 +2516,102 @@ bool FABTSToonT4A2R1BCloudAssetContractTest::RunTest(
 	TestTrue(
 		TEXT("R1-B cloudlet material is exclusively Unlit"),
 		CloudMaterial->GetShadingModels().HasOnlyShadingModel(MSM_Unlit));
+	TestEqual(
+		TEXT("A2.3 cloudlet material uses bounded masked visibility"),
+		static_cast<int32>(CloudMaterial->GetBlendMode()),
+		static_cast<int32>(BLEND_Masked));
 	TestTrue(
 		TEXT("R1-B cloudlet material is compiled for static meshes"),
 		CloudMaterial->GetUsageByFlag(MATUSAGE_StaticMesh));
 	TestTrue(
 		TEXT("R1-B cloudlet material is compiled for instanced static meshes"),
 		CloudMaterial->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes));
+	TestTrue(
+		TEXT("A2.3.1 masked/WPO cloud pixels reject stale TSR history"),
+		CloudMaterial->HasPixelAnimation());
 	float MacroLightingVersion = 0.0f;
 	TestTrue(
-		TEXT("A2.2 material exposes its local-solar-height night-cloud version"),
+		TEXT("A2.3 material exposes its bounded-traversal version"),
 		CloudMaterial->GetScalarParameterValue(
 			FMaterialParameterInfo(TEXT("ABTS_CloudMacroLightingVersion")),
 			MacroLightingVersion));
 	TestEqual(
-		TEXT("A2.2 material version is current"),
+		TEXT("A2.3.1 per-bird/TSR material version is current"),
 		MacroLightingVersion,
-		8.0f);
+		11.0f);
+	float TraversalActive = -1.0f;
+	float TraversalProtectionActive = -1.0f;
+	float TraversalBirdCount = -1.0f;
+	float TraversalCameraRadius = 0.0f;
+	float TraversalBirdRadius = 0.0f;
+	float TraversalCorridorRadius = 0.0f;
+	float TraversalRetainedCoverage = 0.0f;
+	float TraversalMaskFrequency = 0.0f;
+	TestTrue(TEXT("A2.3 material exposes a fail-closed traversal switch"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalActive")),
+			TraversalActive));
+	TestEqual(TEXT("Traversal is disabled outside a diagnosed relation"),
+		TraversalActive, 0.0f);
+	TestTrue(TEXT("A2.3.1 exposes an immediate hard-protection switch"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudTraversalProtectionActive")),
+			TraversalProtectionActive));
+	TestEqual(TEXT("Hard protection fails closed outside traversal"),
+		TraversalProtectionActive, 0.0f);
+	TestTrue(TEXT("A2.3.1 exposes a fixed-capacity per-bird sphere count"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalBirdCount")),
+			TraversalBirdCount));
+	TestEqual(TEXT("No stale bird spheres are active by default"),
+		TraversalBirdCount, 0.0f);
+	for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
+	{
+		FLinearColor BirdSphere = FLinearColor::Transparent;
+		TestTrue(
+			*FString::Printf(TEXT("Bird sphere %d is material-addressable"), BirdIndex),
+			CloudMaterial->GetVectorParameterValue(
+				FMaterialParameterInfo(*FString::Printf(
+					TEXT("ABTS_CloudTraversalBirdSphere%d"), BirdIndex)),
+				BirdSphere));
+		TestTrue(
+			*FString::Printf(TEXT("Bird sphere %d has a fail-safe radius"), BirdIndex),
+			BirdSphere.A >= 1.0f);
+	}
+	TestTrue(TEXT("A2.3 exposes a camera clearing radius"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalCameraRadiusCM")),
+			TraversalCameraRadius));
+	TestTrue(TEXT("A2.3 exposes a bird clearing radius"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalBirdRadiusCM")),
+			TraversalBirdRadius));
+	TestTrue(TEXT("A2.3 exposes a camera-to-bird corridor radius"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalCorridorRadiusCM")),
+			TraversalCorridorRadius));
+	TestTrue(TEXT("Every A2.3 clearing radius is positive and bounded"),
+		TraversalCameraRadius >= 200.0f
+			&& TraversalBirdRadius >= 120.0f
+			&& TraversalCorridorRadius >= 100.0f
+			&& TraversalCameraRadius <= 600.0f);
+	TestTrue(TEXT("A2.3.1 exposes a bounded retained cloud coverage"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudTraversalRetainedCoverage")),
+			TraversalRetainedCoverage));
+	TestTrue(TEXT("A2.3.1 retains visible cloud without becoming opaque"),
+		TraversalRetainedCoverage >= 0.76f
+			&& TraversalRetainedCoverage <= 0.88f);
+	TestTrue(TEXT("A2.3.1 exposes a stable planar cloud-mask scale"),
+		CloudMaterial->GetScalarParameterValue(
+			FMaterialParameterInfo(
+				TEXT("ABTS_CloudTraversalMaskFrequency")),
+			TraversalMaskFrequency));
+	TestTrue(TEXT("A2.3.1 mask cells remain cloud-like rather than pixel-sized"),
+		TraversalMaskFrequency >= 0.008f
+			&& TraversalMaskFrequency <= 0.020f);
 	FLinearColor PlanetCenterParameter = FLinearColor::Transparent;
 	TestTrue(
 		TEXT("A2.2 material consumes the accepted planet centre per pixel"),

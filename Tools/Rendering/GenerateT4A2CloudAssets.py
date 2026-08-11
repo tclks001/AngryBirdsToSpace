@@ -41,6 +41,23 @@ MACRO_NORMAL_STRENGTH = "ABTS_CloudMacroNormalStrength"
 CONTINUOUS_OCCLUSION_STRENGTH = "ABTS_CloudContinuousOcclusionStrength"
 NOISE_FREQUENCY = "ABTS_CloudNoiseFrequency"
 NOISE_AMPLITUDE = "ABTS_CloudNoiseAmplitudeCM"
+TRAVERSAL_ACTIVE = "ABTS_CloudTraversalActive"
+TRAVERSAL_PROTECTION_ACTIVE = "ABTS_CloudTraversalProtectionActive"
+TRAVERSAL_CAMERA = "ABTS_CloudTraversalCameraWorld"
+TRAVERSAL_BIRD = "ABTS_CloudTraversalBirdWorld"
+TRAVERSAL_BIRD_COUNT = "ABTS_CloudTraversalBirdCount"
+TRAVERSAL_BIRD_SPHERES = [
+    "ABTS_CloudTraversalBirdSphere{}".format(index) for index in range(4)]
+TRAVERSAL_BIRD_SPHERE_RADIUS_INPUTS = [
+    "TraversalBirdSphereRadius{}".format(index) for index in range(4)]
+TRAVERSAL_CAMERA_RADIUS = "ABTS_CloudTraversalCameraRadiusCM"
+TRAVERSAL_BIRD_RADIUS = "ABTS_CloudTraversalBirdRadiusCM"
+TRAVERSAL_CORRIDOR_RADIUS = "ABTS_CloudTraversalCorridorRadiusCM"
+TRAVERSAL_FEATHER = "ABTS_CloudTraversalFeatherCM"
+TRAVERSAL_RETAINED_COVERAGE = "ABTS_CloudTraversalRetainedCoverage"
+TRAVERSAL_MASK_FREQUENCY = "ABTS_CloudTraversalMaskFrequency"
+TRAVERSAL_CUSTOM_DESCRIPTION = (
+    "ABTS T4-A2.3.1 Multi-Bird Stable Planar Traversal Coverage")
 
 MACRO_CLUSTER_COUNT = 6
 MACRO_CUSTOM_DESCRIPTION = "ABTS_T4A22_LocalSolarHeightNightCloud"
@@ -267,6 +284,83 @@ def macro_lighting(material, input_specs, x, y):
     return node
 
 
+def build_traversal_opacity_code():
+    return "\n".join([
+        "float ABTSActive = saturate(TraversalActive);",
+        "float ABTSProtectionActive = saturate(TraversalProtectionActive);",
+        "if (ABTSActive <= 0.0001 && ABTSProtectionActive <= 0.0001) return 1.0;",
+        "float ABTSCameraRadius = max(TraversalCameraRadiusCM, 1.0);",
+        "float ABTSBirdRadius = max(TraversalBirdRadiusCM, 1.0);",
+        "float ABTSCorridorRadius = max(TraversalCorridorRadiusCM, 1.0);",
+        "float ABTSFeather = max(TraversalFeatherCM, 1.0);",
+        "float ABTSRetainedCoverage = saturate(TraversalRetainedCoverage);",
+        "float ABTSMaskFrequency = max(TraversalMaskFrequency, 0.0001);",
+        "float3 ABTSSegment = TraversalBirdWorld - TraversalCameraWorld;",
+        "float ABTSSegmentLengthSquared = max(dot(ABTSSegment, ABTSSegment), 1.0);",
+        "float ABTSSegmentAlpha = saturate(dot(WorldPos - TraversalCameraWorld, ABTSSegment) / ABTSSegmentLengthSquared);",
+        "float3 ABTSClosestSegmentPoint = TraversalCameraWorld + ABTSSegment * ABTSSegmentAlpha;",
+        "float ABTSCameraDistance = distance(WorldPos, TraversalCameraWorld);",
+        "float ABTSBirdDistance = distance(WorldPos, TraversalBirdWorld);",
+        "float ABTSCorridorDistance = distance(WorldPos, ABTSClosestSegmentPoint);",
+        "float ABTSCameraCoreClear = 1.0 - smoothstep(ABTSCameraRadius, ABTSCameraRadius + ABTSFeather, ABTSCameraDistance);",
+        "float ABTSBirdCoreClear = 0.0;",
+        "if (TraversalBirdCount > 0.5) ABTSBirdCoreClear = max(ABTSBirdCoreClear, 1.0 - smoothstep(max(TraversalBirdSphereRadius0, 1.0), max(TraversalBirdSphereRadius0, 1.0) + ABTSFeather, distance(WorldPos, TraversalBirdSphere0)));",
+        "if (TraversalBirdCount > 1.5) ABTSBirdCoreClear = max(ABTSBirdCoreClear, 1.0 - smoothstep(max(TraversalBirdSphereRadius1, 1.0), max(TraversalBirdSphereRadius1, 1.0) + ABTSFeather, distance(WorldPos, TraversalBirdSphere1)));",
+        "if (TraversalBirdCount > 2.5) ABTSBirdCoreClear = max(ABTSBirdCoreClear, 1.0 - smoothstep(max(TraversalBirdSphereRadius2, 1.0), max(TraversalBirdSphereRadius2, 1.0) + ABTSFeather, distance(WorldPos, TraversalBirdSphere2)));",
+        "if (TraversalBirdCount > 3.5) ABTSBirdCoreClear = max(ABTSBirdCoreClear, 1.0 - smoothstep(max(TraversalBirdSphereRadius3, 1.0), max(TraversalBirdSphereRadius3, 1.0) + ABTSFeather, distance(WorldPos, TraversalBirdSphere3)));",
+        "float ABTSCorridorInfluence = 1.0 - smoothstep(ABTSCorridorRadius, ABTSCorridorRadius + ABTSFeather, ABTSCorridorDistance);",
+        "float ABTSCoreClear = max(ABTSCameraCoreClear, ABTSBirdCoreClear);",
+		"float ABTSSightlineCore = 1.0 - smoothstep(ABTSCorridorRadius * 0.72, ABTSCorridorRadius, ABTSCorridorDistance);",
+		"ABTSCoreClear = max(ABTSCoreClear, ABTSSightlineCore);",
+        "float ABTSCameraEndpoint = 1.0 - smoothstep(ABTSCameraRadius + ABTSFeather, ABTSCameraRadius + 2.0 * ABTSFeather, ABTSCameraDistance);",
+        "float ABTSBirdEndpoint = 1.0 - smoothstep(ABTSBirdRadius + ABTSFeather, ABTSBirdRadius + 2.0 * ABTSFeather, ABTSBirdDistance);",
+        "float ABTSCorridorOnly = ABTSCorridorInfluence * (1.0 - max(ABTSCameraEndpoint, ABTSBirdEndpoint));",
+        "float ABTSPartialCoverage = lerp(1.0, ABTSRetainedCoverage, ABTSActive * ABTSCorridorOnly);",
+        "float ABTSCoverage = saturate(ABTSPartialCoverage * (1.0 - ABTSProtectionActive * ABTSCoreClear));",
+        "if (ABTSCoverage >= 0.9999) return 1.0;",
+        "if (ABTSCoverage <= 0.0001) return 0.0;",
+        "float3 ABTSLocal = WorldPos - IslandCenter;",
+        "float2 ABTSPlanarUV = float2(dot(ABTSLocal, AxisX), dot(ABTSLocal, AxisY)) * ABTSMaskFrequency;",
+        "float2 ABTSCell0 = floor(ABTSPlanarUV);",
+        "float2 ABTSFrac0 = frac(ABTSPlanarUV);",
+        "float2 ABTSSmooth0 = ABTSFrac0 * ABTSFrac0 * (3.0 - 2.0 * ABTSFrac0);",
+        "float ABTSH00 = frac(sin(dot(ABTSCell0, float2(127.1, 311.7))) * 43758.5453);",
+        "float ABTSH10 = frac(sin(dot(ABTSCell0 + float2(1.0, 0.0), float2(127.1, 311.7))) * 43758.5453);",
+        "float ABTSH01 = frac(sin(dot(ABTSCell0 + float2(0.0, 1.0), float2(127.1, 311.7))) * 43758.5453);",
+        "float ABTSH11 = frac(sin(dot(ABTSCell0 + float2(1.0, 1.0), float2(127.1, 311.7))) * 43758.5453);",
+        "float ABTSNoise0 = lerp(lerp(ABTSH00, ABTSH10, ABTSSmooth0.x), lerp(ABTSH01, ABTSH11, ABTSSmooth0.x), ABTSSmooth0.y);",
+        "float2 ABTSUV1 = ABTSPlanarUV * 2.07 + float2(19.31, 7.73);",
+        "float2 ABTSCell1 = floor(ABTSUV1);",
+        "float2 ABTSFrac1 = frac(ABTSUV1);",
+        "float2 ABTSSmooth1 = ABTSFrac1 * ABTSFrac1 * (3.0 - 2.0 * ABTSFrac1);",
+        "float ABTSG00 = frac(sin(dot(ABTSCell1, float2(269.5, 183.3))) * 43758.5453);",
+        "float ABTSG10 = frac(sin(dot(ABTSCell1 + float2(1.0, 0.0), float2(269.5, 183.3))) * 43758.5453);",
+        "float ABTSG01 = frac(sin(dot(ABTSCell1 + float2(0.0, 1.0), float2(269.5, 183.3))) * 43758.5453);",
+        "float ABTSG11 = frac(sin(dot(ABTSCell1 + float2(1.0, 1.0), float2(269.5, 183.3))) * 43758.5453);",
+        "float ABTSNoise1 = lerp(lerp(ABTSG00, ABTSG10, ABTSSmooth1.x), lerp(ABTSG01, ABTSG11, ABTSSmooth1.x), ABTSSmooth1.y);",
+        "float ABTSPlanarNoise = saturate(ABTSNoise0 * 0.68 + ABTSNoise1 * 0.32);",
+        "float ABTSCalibratedNoise = saturate((ABTSPlanarNoise - 0.16) / 0.68);",
+        "return step(1.0 - ABTSCoverage, ABTSCalibratedNoise);",
+    ])
+
+
+def traversal_opacity(material, input_specs, x, y):
+    node = expression(material, unreal.MaterialExpressionCustom, x, y)
+    node.set_editor_property("desc", TRAVERSAL_CUSTOM_DESCRIPTION)
+    node.set_editor_property(
+        "output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT1)
+    custom_inputs = []
+    for input_name, _, _ in input_specs:
+        custom_input = unreal.CustomInput()
+        custom_input.set_editor_property("input_name", input_name)
+        custom_inputs.append(custom_input)
+    node.set_editor_property("inputs", custom_inputs)
+    node.set_editor_property("code", build_traversal_opacity_code())
+    for input_name, source, source_pin in input_specs:
+        connect(source, source_pin, node, input_name)
+    return node
+
+
 def rebuild_material():
     material = unreal.load_asset(MASTER_PATH)
     if material is None:
@@ -282,11 +376,16 @@ def rebuild_material():
             unreal.MaterialEditingLibrary.get_material_expressions(material)):
         unreal.MaterialEditingLibrary.delete_material_expression(
             material, existing)
-    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_OPAQUE)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    material.set_editor_property("opacity_mask_clip_value", 0.35)
     material.set_editor_property(
         "shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     material.set_editor_property("used_with_static_mesh", True)
     material.set_editor_property("used_with_instanced_static_meshes", True)
+    # The masked traversal aperture and WPO are pixel animations not fully
+    # represented by the primitive transform.  Tell TSR to reject stale edge
+    # history instead of producing bright trails during fast night-side moves.
+    material.set_editor_property("has_pixel_animation", True)
 
     seed = custom_data(material, 0, 0.5, -1700, 420)
     height = custom_data(material, 1, 0.5, -1700, -340)
@@ -334,7 +433,7 @@ def rebuild_material():
     gradient_confidence_end = scalar(
         material, GRADIENT_CONFIDENCE_END, 0.34, -1700, 80)
     macro_version = scalar(
-        material, MACRO_LIGHTING_VERSION, 8.0, -1700, 140)
+        material, MACRO_LIGHTING_VERSION, 11.0, -1700, 140)
     del macro_version
     macro_strength = scalar(
         material, MACRO_NORMAL_STRENGTH, 0.84, -1700, 200)
@@ -356,6 +455,36 @@ def rebuild_material():
     island_extents = vector(
         material, ISLAND_EXTENTS,
         unreal.LinearColor(1000.0, 1000.0, 500.0, 0.0), -1480, -880)
+    traversal_active = scalar(
+        material, TRAVERSAL_ACTIVE, 0.0, -1480, -820)
+    traversal_protection_active = scalar(
+        material, TRAVERSAL_PROTECTION_ACTIVE, 0.0, -1480, -790)
+    traversal_camera = vector(
+        material, TRAVERSAL_CAMERA,
+        unreal.LinearColor(0.0, 0.0, 0.0, 0.0), -1480, -760)
+    traversal_bird = vector(
+        material, TRAVERSAL_BIRD,
+        unreal.LinearColor(0.0, 0.0, 0.0, 0.0), -1480, -700)
+    traversal_bird_count = scalar(
+        material, TRAVERSAL_BIRD_COUNT, 0.0, -1220, -700)
+    traversal_bird_spheres = []
+    for index, parameter_name in enumerate(TRAVERSAL_BIRD_SPHERES):
+        traversal_bird_spheres.append(vector(
+            material, parameter_name,
+            unreal.LinearColor(0.0, 0.0, 0.0, 1.0),
+            -1220, -640 + index * 60))
+    traversal_camera_radius = scalar(
+        material, TRAVERSAL_CAMERA_RADIUS, 280.0, -1480, -640)
+    traversal_bird_radius = scalar(
+        material, TRAVERSAL_BIRD_RADIUS, 220.0, -1480, -580)
+    traversal_corridor_radius = scalar(
+        material, TRAVERSAL_CORRIDOR_RADIUS, 150.0, -1480, -520)
+    traversal_feather = scalar(
+        material, TRAVERSAL_FEATHER, 90.0, -1480, -460)
+    traversal_retained_coverage = scalar(
+        material, TRAVERSAL_RETAINED_COVERAGE, 0.82, -1480, -400)
+    traversal_mask_frequency = scalar(
+        material, TRAVERSAL_MASK_FREQUENCY, 0.012, -1480, -340)
 
     macro_nodes = []
     shape_nodes = []
@@ -418,6 +547,40 @@ def rebuild_material():
     connect_property(
         cloud_color, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
+    traversal_mask = traversal_opacity(
+        material,
+        [
+            ("WorldPos", world_position, ""),
+            ("IslandCenter", island_center, ""),
+            ("AxisX", axis_x, ""),
+            ("AxisY", axis_y, ""),
+            ("TraversalActive", traversal_active, ""),
+            ("TraversalProtectionActive", traversal_protection_active, ""),
+            ("TraversalCameraWorld", traversal_camera, ""),
+            ("TraversalBirdWorld", traversal_bird, ""),
+            ("TraversalBirdCount", traversal_bird_count, ""),
+            ("TraversalBirdSphere0", traversal_bird_spheres[0], ""),
+            ("TraversalBirdSphere1", traversal_bird_spheres[1], ""),
+            ("TraversalBirdSphere2", traversal_bird_spheres[2], ""),
+            ("TraversalBirdSphere3", traversal_bird_spheres[3], ""),
+            (TRAVERSAL_BIRD_SPHERE_RADIUS_INPUTS[0],
+             traversal_bird_spheres[0], "A"),
+            (TRAVERSAL_BIRD_SPHERE_RADIUS_INPUTS[1],
+             traversal_bird_spheres[1], "A"),
+            (TRAVERSAL_BIRD_SPHERE_RADIUS_INPUTS[2],
+             traversal_bird_spheres[2], "A"),
+            (TRAVERSAL_BIRD_SPHERE_RADIUS_INPUTS[3],
+             traversal_bird_spheres[3], "A"),
+            ("TraversalCameraRadiusCM", traversal_camera_radius, ""),
+            ("TraversalBirdRadiusCM", traversal_bird_radius, ""),
+            ("TraversalCorridorRadiusCM", traversal_corridor_radius, ""),
+            ("TraversalFeatherCM", traversal_feather, ""),
+            ("TraversalRetainedCoverage", traversal_retained_coverage, ""),
+            ("TraversalMaskFrequency", traversal_mask_frequency, ""),
+        ], 760, -260)
+    connect_property(
+        traversal_mask, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+
     seed_offset_color = vector(
         material, "ABTS_CloudSeedOffset",
         unreal.LinearColor(137.0, 293.0, 419.0, 0.0), -1700, 260)
@@ -477,6 +640,12 @@ def validate():
     if material.get_editor_property("shading_model") != (
             unreal.MaterialShadingModel.MSM_UNLIT):
         raise RuntimeError("Cloudlet material is not Unlit")
+    if material.get_editor_property("blend_mode") != (
+            unreal.BlendMode.BLEND_MASKED):
+        raise RuntimeError("Cloudlet material is not Masked for A2.3")
+    if not material.get_editor_property("has_pixel_animation"):
+        raise RuntimeError(
+            "Cloudlet material must mark masked/WPO pixels as animated for TSR")
     for usage in (
             unreal.MaterialUsage.MATUSAGE_STATIC_MESH,
             unreal.MaterialUsage.MATUSAGE_INSTANCED_STATIC_MESHES):
@@ -502,6 +671,46 @@ def validate():
         raise RuntimeError(
             "Cloudlet continuous macro lighting node mismatch: {}".format(
                 len(macro_custom_nodes)))
+    traversal_nodes = [
+        node for node in expressions
+        if isinstance(node, unreal.MaterialExpressionCustom)
+        and node.get_editor_property("desc") == TRAVERSAL_CUSTOM_DESCRIPTION]
+    if len(traversal_nodes) != 1:
+        raise RuntimeError(
+            "Cloudlet bounded traversal node mismatch: {}".format(
+                len(traversal_nodes)))
+    traversal_inputs = [
+        str(custom_input.get_editor_property("input_name"))
+        for custom_input in traversal_nodes[0].get_editor_property("inputs")]
+    expected_traversal_inputs = [
+        "WorldPos", "IslandCenter", "AxisX", "AxisY",
+        "TraversalActive", "TraversalProtectionActive",
+        "TraversalCameraWorld", "TraversalBirdWorld",
+        "TraversalBirdCount", "TraversalBirdSphere0",
+        "TraversalBirdSphere1", "TraversalBirdSphere2",
+        "TraversalBirdSphere3", "TraversalBirdSphereRadius0",
+        "TraversalBirdSphereRadius1", "TraversalBirdSphereRadius2",
+        "TraversalBirdSphereRadius3", "TraversalCameraRadiusCM",
+        "TraversalBirdRadiusCM", "TraversalCorridorRadiusCM",
+        "TraversalFeatherCM", "TraversalRetainedCoverage",
+        "TraversalMaskFrequency"]
+    if traversal_inputs != expected_traversal_inputs:
+        raise RuntimeError(
+            "Cloudlet traversal inputs mismatch: {}".format(traversal_inputs))
+    traversal_code = traversal_nodes[0].get_editor_property("code")
+    if any("TraversalBirdSphere{}.w".format(index) in traversal_code
+           for index in range(4)):
+        raise RuntimeError(
+            "Cloudlet traversal must not read alpha from a float3 Custom input")
+    for marker in (
+            "ABTSProtectionActive", "ABTSCameraCoreClear", "ABTSBirdCoreClear",
+            "ABTSCorridorInfluence", "ABTSCoreClear",
+            "ABTSPartialCoverage", "ABTSCoverage",
+            "ABTSPlanarUV", "ABTSNoise0", "ABTSNoise1",
+            "ABTSPlanarNoise"):
+        if marker not in traversal_code:
+            raise RuntimeError(
+                "Cloudlet traversal marker is missing: {}".format(marker))
     macro_inputs = [
         str(custom_input.get_editor_property("input_name"))
         for custom_input in macro_custom_nodes[0].get_editor_property("inputs")]
@@ -575,7 +784,11 @@ def validate():
         "PixelInstanceVariation=0 ThreeBandColor=1 SunwardWhitening=1 "
         "ThinDensityWhitening=1 ViewIndependentWhitening=1 "
         "GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp LocalSolarHeight=1 NightWhiteningGate=1 "
-        "Noise=1 BoundsExtension=30".format(MASTER_PATH, MESH_PATH))
+        "Noise=1 BoundsExtension=30 BoundedTraversal=1 "
+        "StablePlanarNoiseCoverage=1 HardBirdCameraCore=1 "
+        "RetainedCoverage=0.82 MaskFrequency=0.012 "
+        "Blend=Masked"
+        .format(MASTER_PATH, MESH_PATH))
 
 
 def generate():

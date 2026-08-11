@@ -1551,6 +1551,10 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		case EABTSToonVisualCaptureAnchor::CloudFieldVariety:
 		case EABTSToonVisualCaptureAnchor::CloudFieldNight:
 		case EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalBetween:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalBothInside:
 		{
 			if (CloudDefinitions.Num()
 				!= FABTST4LowPolyCloudPrototype::IslandCount
@@ -1558,6 +1562,75 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 			{
 				OutReason = TEXT("T4-A2R0 cloud layout is unavailable.");
 				return EWorldResolveResult::Failed;
+			}
+			const bool bTraversalDiagnostic = Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBetween
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBothInside;
+			if (bTraversalDiagnostic)
+			{
+				const FABTST4LowPolyCloudIslandDefinition& Cloud =
+					CloudDefinitions[0];
+				FVector CameraLocation = Cloud.CenterWorld;
+				FVector BirdCenter = Cloud.CenterWorld;
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside)
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 1.55
+						+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.20;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.04;
+				}
+				else if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside)
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 0.10;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.TangentX * Cloud.ExtentsCM.X * 1.22;
+				}
+				else if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBetween)
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 1.32
+						+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.08;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.TangentX * Cloud.ExtentsCM.X * 1.28;
+				}
+				else
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 0.24
+						- Cloud.TangentY * Cloud.ExtentsCM.Y * 0.10;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.TangentX * Cloud.ExtentsCM.X * 0.26
+						+ Cloud.TangentY * Cloud.ExtentsCM.Y * 0.08;
+				}
+				Point.bRelocateBirdPartyForDiagnostic = true;
+				Point.DiagnosticBirdPartyCenterWorld = BirdCenter;
+				Point.DiagnosticBirdPartyUp = Cloud.RadialUp;
+				Point.LookAtWorld = BirdCenter;
+				if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+					CameraLocation,
+					Point.LookAtWorld,
+					Cloud.RadialUp,
+					Point.CameraWorldTransform,
+					&CameraFailure))
+				{
+					OutReason = CameraFailure;
+					return EWorldResolveResult::Failed;
+				}
+				Point.SemanticIdentityHash =
+					ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+						Cloud.LogicalCloudIdentityHash,
+						static_cast<uint64>(Definition.Anchor));
+				break;
 			}
 			const bool bCloudFieldDiagnostic = Definition.Anchor
 				== EABTSToonVisualCaptureAnchor::CloudFieldGlobal
@@ -2095,6 +2168,10 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 		return false;
 	}
 	bRuntimeStateCaptured = true;
+	if (!CaptureBirdPartyTransforms(OutFailure))
+	{
+		return false;
+	}
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.Name = MakeUniqueObjectName(
@@ -2179,6 +2256,122 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 	return true;
 }
 
+bool UABTSToonVisualCaptureSubsystem::CaptureBirdPartyTransforms(
+	FString& OutFailure)
+{
+	SavedBirdPartyTransforms.Reset();
+	bBirdPartyTransformsCaptured = false;
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		OutFailure = TEXT("World is unavailable while capturing bird transforms.");
+		return false;
+	}
+	AABTSBirdParty* Party = nullptr;
+	for (TActorIterator<AABTSBirdParty> It(World); It; ++It)
+	{
+		if (It->IsPartyReady())
+		{
+			Party = *It;
+			break;
+		}
+	}
+	if (!IsValid(Party))
+	{
+		OutFailure = TEXT("Bird party is unavailable for traversal diagnostics.");
+		return false;
+	}
+	FBox Bounds(EForceInit::ForceInit);
+	for (AABTSM25BirdCharacter* Bird : Party->GetPartyMembers())
+	{
+		if (!IsValid(Bird))
+		{
+			OutFailure = TEXT("Bird party contains an invalid member.");
+			return false;
+		}
+		FABTSToonSavedActorTransform Saved;
+		Saved.Actor = Bird;
+		Saved.Transform = Bird->GetActorTransform();
+		SavedBirdPartyTransforms.Add(Saved);
+		Bounds += Bird->GetComponentsBoundingBox(true);
+	}
+	if (SavedBirdPartyTransforms.IsEmpty() || !Bounds.IsValid)
+	{
+		OutFailure = TEXT("Bird party transform baseline is empty.");
+		return false;
+	}
+	SavedBirdPartyCenterWorld = Bounds.GetCenter();
+	SavedBirdPartyUp = EnvironmentSnapshot.IsValid()
+		? (SavedBirdPartyCenterWorld
+			- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal()
+		: FVector::UpVector;
+	if (SavedBirdPartyUp.IsNearlyZero())
+	{
+		SavedBirdPartyUp = FVector::UpVector;
+	}
+	bBirdPartyTransformsCaptured = true;
+	return true;
+}
+
+bool UABTSToonVisualCaptureSubsystem::ApplyCurrentDiagnosticBirdPartyPlacement(
+	FString& OutFailure)
+{
+	if (!bBirdPartyTransformsCaptured
+		|| !ResolvedPoints.IsValidIndex(CurrentPointIndex))
+	{
+		OutFailure = TEXT("Bird-party capture baseline is unavailable.");
+		return false;
+	}
+	const FABTSToonResolvedCapturePoint& Point =
+		ResolvedPoints[CurrentPointIndex];
+	const FVector TargetCenter = Point.bRelocateBirdPartyForDiagnostic
+		? Point.DiagnosticBirdPartyCenterWorld
+		: SavedBirdPartyCenterWorld;
+	const FVector TargetUp = Point.bRelocateBirdPartyForDiagnostic
+		? Point.DiagnosticBirdPartyUp
+		: SavedBirdPartyUp;
+	const FQuat FrameRotation = FQuat::FindBetweenNormals(
+		SavedBirdPartyUp, TargetUp);
+	for (const FABTSToonSavedActorTransform& Saved
+		: SavedBirdPartyTransforms)
+	{
+		AActor* Actor = Saved.Actor.Get();
+		if (!IsValid(Actor))
+		{
+			OutFailure = TEXT("A captured bird disappeared during diagnostics.");
+			return false;
+		}
+		FTransform Target = Saved.Transform;
+		Target.SetLocation(
+			TargetCenter
+			+ FrameRotation.RotateVector(
+				Saved.Transform.GetLocation() - SavedBirdPartyCenterWorld));
+		Target.SetRotation(FrameRotation * Saved.Transform.GetRotation());
+		Actor->SetActorTransform(
+			Target, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+	return true;
+}
+
+void UABTSToonVisualCaptureSubsystem::RestoreBirdPartyTransforms()
+{
+	if (!bBirdPartyTransformsCaptured)
+	{
+		return;
+	}
+	for (const FABTSToonSavedActorTransform& Saved
+		: SavedBirdPartyTransforms)
+	{
+		if (AActor* Actor = Saved.Actor.Get())
+		{
+			Actor->SetActorTransform(
+				Saved.Transform, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+	}
+	SavedBirdPartyTransforms.Reset();
+	bBirdPartyTransformsCaptured = false;
+}
+
 void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 {
 	if (!ResolvedPoints.IsValidIndex(CurrentPointIndex)
@@ -2197,6 +2390,12 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 	FABTSStylizedRenderingControl::SetProfile(Point.Definition.StyleProfile);
 	FABTSStylizedRenderingControl::SetDiagnosticPassMask(Variant.PassMask);
 	FABTSStylizedRenderingControl::SetEnabled(Variant.bStyleEnabled);
+	FString BirdPlacementFailure;
+	if (!ApplyCurrentDiagnosticBirdPartyPlacement(BirdPlacementFailure))
+	{
+		FinishCapture(false, BirdPlacementFailure);
+		return;
+	}
 	IConsoleVariable* ShadowQuality =
 		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
 	if (ShadowQuality == nullptr)
@@ -2250,6 +2449,14 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 			Controller->PlayerCameraManager->UpdateCamera(0.0f);
 			// Give Off and On the same temporal-history starting condition.
 			Controller->PlayerCameraManager->SetGameCameraCutThisFrame();
+		}
+	}
+	if (UWorld* World = GetWorld())
+	{
+		if (UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+			World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
+		{
+			StyleSubsystem->RefreshCloudTraversalNow(true);
 		}
 	}
 
@@ -2725,6 +2932,7 @@ void UABTSToonVisualCaptureSubsystem::RestoreRuntimeState()
 
 	if (bRuntimeStateCaptured)
 	{
+		RestoreBirdPartyTransforms();
 		if (bProfileGPUShowUIStateCaptured)
 		{
 			if (IConsoleVariable* ShowUI =
@@ -2833,7 +3041,7 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(
 		TEXT("schemaVersion"),
-		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 7 : 4);
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 12 : 4);
 	Root->SetStringField(
 		TEXT("suite"),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
@@ -3094,7 +3302,7 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
 			? TEXT("T4-A0 freezes six Tone/Outline/Shadow isolation variants without changing gameplay authority.")
 			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
-				? TEXT("T4-A2 captures ten A1 poses, seven accepted A2.1 cloud views and five A2.2 global/night/terminator-cloud-field views with reversible StyleOff/StyleOn, deterministic logical cloud identity and one shared CloudComposite outline class.")
+				? TEXT("T4-A2 captures ten A1 poses, seven A2.1 cloud views, five A2.2 field views and four A2.3.1 stable-planar-noise traversal relations with reversible StyleOff/StyleOn.")
 				: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
 				? TEXT("T4-A1 freezes ten spherical-environment points with reversible StyleOff/StyleOn presentation and GPU evidence.")
 				: TEXT("Style implementation is versioned; Off bypasses project stylization."));
@@ -3134,6 +3342,22 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			TEXT("cloudTerminatorMegaClusterSunRelativePlacement"), true);
 		Style->SetBoolField(TEXT("cloudLocalSolarHeightLighting"), true);
 		Style->SetBoolField(TEXT("cloudNightWhiteningGated"), true);
+		Style->SetBoolField(TEXT("cloudBoundedTraversalVisibility"), true);
+		Style->SetBoolField(TEXT("cloudTraversalCameraSphere"), true);
+		Style->SetBoolField(TEXT("cloudTraversalPerBirdVisualSpheres"), true);
+		Style->SetNumberField(TEXT("cloudTraversalBirdSphereCapacity"), 4.0);
+		Style->SetBoolField(TEXT("cloudTraversalImmediateHardProtection"), true);
+		Style->SetBoolField(TEXT("cloudTraversalTsrPixelAnimation"), true);
+		Style->SetBoolField(TEXT("cloudTraversalCameraBirdCorridor"), true);
+		Style->SetBoolField(TEXT("cloudTraversalStablePlanarNoiseCoverage"), true);
+		Style->SetBoolField(TEXT("cloudTraversalHardBirdCameraCore"), true);
+		Style->SetBoolField(TEXT("cloudTraversalFullTranslucency"), false);
+		Style->SetNumberField(TEXT("cloudTraversalRetainedCoverage"), 0.82);
+		Style->SetNumberField(TEXT("cloudTraversalMaskFrequency"), 0.012);
+		Style->SetBoolField(TEXT("cloudTraversalVeilPermanentlyRemoved"), true);
+		Style->SetBoolField(TEXT("cloudTraversalContinuousEnvelopeWeight"), true);
+		Style->SetBoolField(TEXT("cloudTraversalExplicitCameraCutOnly"), true);
+		Style->SetBoolField(TEXT("cloudTraversalAffectsLighting"), false);
 		Style->SetNumberField(
 			TEXT("cloudNightBrightnessMultiplier"),
 			FABTST4LowPolyCloudPrototype::NightBrightness);
@@ -3262,7 +3486,52 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
 				&& Presentation.bCloudsEnabled != 0u)
 			{
-				RecordJson->SetStringField(TEXT("cloudRoute"), TEXT("InstancedCloudletsA2_2NightMegaCluster"));
+				RecordJson->SetStringField(TEXT("cloudRoute"), TEXT("InstancedCloudletsA2_3_1PerBirdTSRStable"));
+				const bool bTraversalPoint = Record.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
+					|| Record.Anchor
+						== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside
+					|| Record.Anchor
+						== EABTSToonVisualCaptureAnchor::CloudTraversalBetween
+					|| Record.Anchor
+						== EABTSToonVisualCaptureAnchor::CloudTraversalBothInside;
+				RecordJson->SetBoolField(
+					TEXT("cloudBoundedTraversalVisibility"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalStablePlanarNoiseCoverage"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalHardBirdCameraCore"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalPerBirdVisualSpheres"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalImmediateHardProtection"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalTsrPixelAnimation"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalFullTranslucency"), false);
+				RecordJson->SetNumberField(
+					TEXT("cloudTraversalRetainedCoverage"), 0.82);
+				RecordJson->SetNumberField(
+					TEXT("cloudTraversalMaskFrequency"), 0.012);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalVeilPermanentlyRemoved"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalContinuousEnvelopeWeight"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalExplicitCameraCutOnly"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalDiagnosticPoint"), bTraversalPoint);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalCameraInside"),
+					Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside
+						|| Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBothInside);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalBirdInside"),
+					Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
+						|| Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBothInside);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalCloudBetween"),
+					Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBetween);
 				RecordJson->SetNumberField(
 					TEXT("cloudMacroClusters"),
 					FABTST4LowPolyCloudPrototype::IslandCount *

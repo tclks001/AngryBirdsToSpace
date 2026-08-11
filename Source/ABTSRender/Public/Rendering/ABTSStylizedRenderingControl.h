@@ -66,7 +66,6 @@ struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
 	float CloudCoverage = 0.0f;
 	float CloudDensity = 0.0f;
 	float CloudViewSampleCountScale = 0.0f;
-
 	bool IsValid() const;
 };
 
@@ -120,6 +119,16 @@ public:
 		EABTSStylizedRenderProfile Profile);
 	static FABTSStylizedOutlineProfileParameters GetOutlineProfileParameters(
 		EABTSStylizedRenderProfile Profile);
+	/**
+	 * Low-poly masked cloud silhouettes must remain temporally crisp in the
+	 * ground traversal profile.  Full-screen motion blur blends the bright sky
+	 * across the darker night-side cloud edge while the camera moves, so the
+	 * ground cloud route explicitly suppresses it.  Satellite/finale profiles
+	 * retain their own camera presentation policy.
+	 */
+	static bool ShouldSuppressMotionBlur(
+		EABTSStylizedRenderProfile Profile,
+		bool bCloudsEnabled);
 
 	static int32 GetImplementationVersion();
 	static bool IsProfileValid(EABTSStylizedRenderProfile Profile);

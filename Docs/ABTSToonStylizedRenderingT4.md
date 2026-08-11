@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-11 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**已在实现版本 44、路线 `InstancedCloudletsR1C2B3B6` 上通过 ForceUnity、fresh Toon 24/24、资产只读验证、D3D12 17 点/34 条及用户可见 PIE，状态为 `IntegrationAccepted`。**T4-A2.2 全球云场与融合语义**当前为实现版本 47、材质宏合同 8：保留 24 朵太阳无关的全球背景逻辑云，并追加 7 朵太阳相对、横跨晨昏线且联合可见包络为 `28.88°` 的连通超大云簇；云材质按每像素局部太阳高度连续门控夜面直射与薄层增白，夜面亮度乘数为 `0.42`。ForceUnity、fresh Toon 25/25、资产只读验证、真实 D3D12 22 点/44 条及用户可见 PIE 均已通过，状态为 `IntegrationAccepted`。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。下一步依次进入 **A2.3 有界穿云表现**、**A2.4 消费端与性能冻结**；A2.4 在最终合并验收前统一提高超大型云簇占比并冻结数量与尺度分布，只有 A2.1～A2.4 全部通过后才能宣布 T4-A2 冻结。T4-A3/B 尚未开始。
+> 状态：2026-08-11 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**和 **T4-A2.3 有界穿云表现**均为 `IntegrationAccepted`。A2.3 最终实现版本 54、材质宏合同 11、manifest schema 12：正式路线永久删除会闪烁的全屏薄云雾幕，保留镜头球、四个实际鸟体可见网格球、镜头—鸟群有限走廊及局部二维噪声清除；v53 修复真实 SM6 Velocity/Depth 排列暴露的 Custom HLSL 向量维度错误，v54 只在 `GroundDay + CloudsEnabled` 禁用 Motion Blur，消除夜面高速移动时亮天空卷入暗云轮廓的青白拖边。UE 5.8 ForceUnity、资产验证、fresh Toon 26/26、真实 D3D12 26 点/52 条和用户连续运动 PIE 均已通过。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。当前可以进入 **A2.4 消费端与性能冻结**；A2.4 在最终合并验收前统一提高超大型云簇占比并冻结数量与尺度分布，只有 A2.1～A2.4 全部通过后才能宣布 T4-A2 冻结。T4-A3/B 尚未开始。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -26,11 +26,11 @@ T4 不改变：
 | --- | --- | --- | --- |
 | **T4-A0 球面环境合同与诊断** | 主星中心/半径、太阳方向、Profile 的只读快照；五个固定环境截图点；Tone/Outline/Shadow 隔离矩阵 | 不改生产光照、雾云、曝光和最终参数 | ForceUnity；`ABTS.Rendering.Toon.T4A0`；30 张同姿态矩阵可生成；`TOON-T2A-002` 保持开放直至人工判读 |
 | **T4-A1 Sky Atmosphere 与程序化 HDR 星场** | 关闭生产全局 Z 高度雾；球心大气；唯一 Atmosphere Sun；固定曝光；昼夜/高度星空显隐 | 不做体积云，不回调 T3 最终材质 | 昼面→晨昏→夜面→高空→太空连续；主视图/PIP/AVI 身份一致；GPU 证据 |
-| **T4-A2 球面云** | **A2.1 云岛形态与表面基线** → **A2.2 全球云场与融合语义** → **A2.3 有界穿云表现** → **A2.4 消费端与性能冻结** | 不先开真实云影；不保留原生体积云与风格云双重消费；不以自动化绿灯覆盖可见 PIE 拒绝 | A2.1 已通过；A2.2～A2.4 分别通过全球云场/晨昏融合、穿云连续性以及 PIP/AVI/时域/GPU 正式门后，T4-A2 才能冻结 |
+| **T4-A2 球面云** | **A2.1 云岛形态与表面基线** → **A2.2 全球云场与融合语义** → **A2.3 有界穿云表现** → **A2.4 消费端与性能冻结** | 不先开真实云影；不保留原生体积云与风格云双重消费；不以自动化绿灯覆盖可见 PIE 拒绝 | A2.1～A2.3 已通过；A2.4 完成 PIP/AVI/时域/GPU 与最终内容密度门后，T4-A2 才能冻结 |
 | **T4-A3 环境 Profile** | `GroundDay`、`SatelliteGuide`、`FinaleSpace` 环境装配；M11 快照与失败恢复 | 不改变 M11 求解/轨迹 | 主视图、地面/月面/终局 PIP、Rank11 AVI 与退出终局恢复一致 |
 | **T4-B T3/T4 联合校色** | 回开并调整 Roughness、Specular、Rim、Tint；解决地形褶皱；形成非 M7 联合基线 | M7 未完成时不宣称全项目冻结 | `TOON-T2A-002` 关闭证据；T3/T4 视觉和 GPU 联合基线；M7 后补建筑材质/特效 |
 
-阶段必须按 A0→A1→A2→A3→B 前进。A2 的现行排期只使用 **A2.1→A2.2→A2.3→A2.4**；A2.1 已于 2026-08-10、A2.2 已于 2026-08-11 通过用户可见 PIE，当前从 A2.3 继续。`R0/R1-A/R1-C2-A4/B3B6/v44` 等名称只用于说明 A2.1 的技术演进、资产合同和日志身份，不再作为排期编号，也不得由它们推导新的后续阶段名。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
+阶段必须按 A0→A1→A2→A3→B 前进。A2 的现行排期只使用 **A2.1→A2.2→A2.3→A2.4**；A2.1 已于 2026-08-10、A2.2/A2.3 已于 2026-08-11 通过用户可见 PIE，当前进入 A2.4。`R0/R1-A/R1-C2-A4/B3B6/v44` 等名称只用于说明 A2.1 的技术演进、资产合同和日志身份，不再作为排期编号，也不得由它们推导新的后续阶段名。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
 
 ## 3. T4-A0：只读球面环境合同
 
@@ -244,7 +244,7 @@ $BuildId = 'T4A1-Visual-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 | --- | --- | --- | --- |
 | **T4-A2.1 云岛形态与表面基线** | 三座确定性球面云岛；252 个 HISM 云滴、18 个 Seed 驱动宏簇；专用低模网格/Unlit 材质；内部描边抑制；视角无关共享体场、向光/薄层变白和连续云底 | 不做多云团分组、相机入云效果、最终消费端/GPU 冻结 | **`IntegrationAccepted`**：ForceUnity、fresh Toon 24/24、资产只读验证、D3D12 17 点/34 条及用户 PIE 均通过；当前实现路线 `InstancedCloudletsR1C2B3B6`、版本 44 |
 | **T4-A2.2 全球云场与融合语义** | 保留 24 朵太阳无关全球背景逻辑云；追加 7 朵太阳相对、横跨晨昏线且联合角包络 27–33° 的连通超大云簇；所有云共享单一 `CloudComposite` stencil；按每像素局部太阳高度连续门控夜面直射/薄层增白 | 不给每朵云分配独立 stencil；不保留云—云内部描边；不以云编号切换光照，也不回退 A2.1 单云体场 | **`IntegrationAccepted`**：实现版本 47、材质宏合同 8；ForceUnity、fresh Toon 25/25、资产只读验证、D3D12 22 点/44 条、manifest schema 7 及用户可见 PIE 均已通过；夜面亮度、晨昏超大云簇融合与运动稳定性已验收 |
-| **T4-A2.3 有界穿云表现** | 相机进入具体云团包络时启用可恢复的局部遮蔽/雾，并连续处理进入、离开和 Camera Cut | 不恢复全屏球壳；不让云改变轨迹、碰撞或 WorldReady | 穿云短暂可读且不整屏灰；云上/云下连续；快速进出和 Camera Cut 不残留 |
+| **T4-A2.3 有界穿云表现** | A2.3 建立镜头球、逐鸟可见网格球和镜头—鸟群有限走廊；A2.3.1 在硬保护核心外围使用云岛局部二维噪声；全屏薄云雾幕已永久删除；GroundDay 云场禁用 Motion Blur 保持高速轮廓清晰 | 不恢复全屏球壳或全屏雾幕；不让相机参数进入云光照；不把全部云改为 Translucent；不让云改变轨迹、碰撞或 WorldReady | **`IntegrationAccepted`**：实现版本 54、材质宏合同 11、manifest schema 12；ForceUnity、资产验证、fresh Toon 26/26、真实 D3D12 26 点/52 条和用户连续运动 PIE 均已通过；逐鸟可见、无雾幕闪烁、无夜云动态亮边 |
 | **T4-A2.4 消费端与性能冻结** | 最终内容密度调参（提高超大型云簇占比并冻结数量/尺度分布）；主视图、地面/月面/终局 PIP、Rank11 AVI；50/75/100% SP、1080p/1440p、快速相机、时域稳定性和 GPU 增量 | 不回调 T3 材质和最终光照；不以单一截图代替消费端矩阵；不在缺少性能证据时直接复制当前诊断云簇 | 调参后全球分布、云簇融合、视觉、时域、SceneCapture/AVI 与 GPU 门全部通过；A2.1～A2.3 无回归后才宣布 T4-A2 冻结 |
 
 ### 7.3 A2.1 技术演进：R0 有限云岛（版本 25）
@@ -385,9 +385,33 @@ A2.2 将“逻辑云身份”和“描边身份”拆开。每朵云继续发布
 
 ### 7.10 T4-A2.3 有界穿云表现
 
-A2.3 只在相机进入某朵逻辑云或融合天气簇的有限包络时启用局部遮蔽/雾，并以连续权重处理接近、进入、离开和 Camera Cut。它不得恢复全屏球壳，不参与鸟的轨迹、碰撞、世界生成或 `WorldReady`。现有 `CloudR0FlyThrough` 只是观察姿态，不代表穿云效果已经实现。
+A2.3 采用“关系判定 + 局部可见走廊”，而不是重新引入全屏雾壳。CPU 以每朵逻辑云实际可见椭球包络判断四种关系：鸟群进入云内、镜头进入云内、云位于镜头与鸟群之间、镜头与鸟群同时位于云内。任一关系成立时，仅对对应云 MID 连续开启一个由镜头球、鸟群球和镜头—鸟群胶囊走廊组成的有界清除域；其他云和域外云体继续正常绘制。鸟群包络只吸收受控鸟附近的编队成员，避免离队成员把走廊无限拉长。进入和离开使用不同速度平滑，Camera Cut 或诊断传送则立即刷新，防止上一镜头的局部清除残留。
 
-正式门为云下、云内、云上连续；短暂穿越可读而不整屏灰；快速进入/离开与 Camera Cut 后无残留；Style Off、Profile 切换和子系统退出可完整恢复。
+云材质由 `Opaque/Unlit` 升级为 `Masked/Unlit`；局部清除只写 `Opacity Mask`，不改变 A2.1/A2.2 已验收的颜色、宏法线、薄层增白、昼夜过渡或 composite stencil。云光照继续禁止 `CameraPos`、View Ray 和 Fresnel，因而穿云可见性不会重新引入随观察方向发生的整体明暗跳变。Style Off、非 `GroundDay` Profile、Actor 销毁或无法取得有效镜头/鸟群时均 fail closed 到 `TraversalActive=0`；系统不写鸟的轨迹、碰撞、世界生成或 `WorldReady`。
+
+实现版本 48、材质宏合同 9 是 A2.3 的硬清除基线。其纯数据自动化 `ABTS.Rendering.Toon.T4A2_3.BoundedTraversalRelation` 分别验证上述四类遮挡关系与明确无关云；四个捕获点为 `CloudTraversalBirdInside`、`CloudTraversalCameraInside`、`CloudTraversalBetween`、`CloudTraversalBothInside`。基线证据仍保留在 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260811T041012Z_68332`，但不冒充 A2.3.1 的半透明感结果。
+
+A2.3.1 的时域修正版将实现版本提升为 50、材质宏合同保持 10、manifest schema 提升为 10。它不是把云切换为真正透明：鸟体、镜头与视线中心仍为完全清除的安全核心；外围以云岛局部切平面上的稳定二维噪声保留 `0.82` 云覆盖，尺度为 `0.012 cm⁻¹`，使清除边界保持云状且不会形成像素网格。Tone Pass 的最大 `0.20` 雾幕不再消费二值“相机在云内”开关，而是消费椭球包络末端 `22%` 的连续穿入深度并经过小死区和平滑响应；运行时只把 `bGameCameraCutThisFrame` 或显式强制刷新视为切镜，禁止再用单帧位移阈值把高速发射误判为 Camera Cut。方向稳定噪声改为更高角频率、近固定均值的小幅调制，防止镜头转向改变整屏平均遮罩亮度。该雾幕不写深度、不参与云光照，也不增加每朵云的透明 HISM overdraw。
+
+A2.3.1 当前自动证据：资产重建日志 `Saved/Logs/T4A231-RebuildAssets-DenseMask-20260811.log`；UE 5.8 ForceUnity 日志 `Saved/Logs/T4A231-ForceUnity-HybridVeil-Final-20260811.log`；fresh `ABTS.Rendering.Toon` 为 26/26，日志 `Saved/Logs/T4A231-ToonAutomation-HybridVeil-Final-20260811.log`；资产只读验证且 SHA-256 未变化，日志 `Saved/Logs/T4A231-ValidateAssets-HybridVeil-Final-20260811.log`。真实 D3D12 捕获为 `Succeeded`、26 点/52 条，日志 `Saved/Logs/T4A231-D3D12Capture-HybridVeilDenseMask-Final-20260811.log`，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260811T055358Z_29520`。四个 Style On 点均保持完整鸟群；`CloudTraversalBetween` 同时保留连续大云主体与明确视线核心。自动证据不替代连续运动：用户仍须在 PIE 中验证入云、穿越、离云、快速折返和 Camera Cut 时无硬跳、无噪声闪烁、无雾幕残留，完成后才可把本阶段晋升为 `IntegrationAccepted`。
+
+版本 50 的时域修正证据：UE 5.8 ForceUnity 为 `Saved/Logs/T4A231-FlickerFix-ForceUnity-Final-20260811.log`；fresh `ABTS.Rendering.Toon` 26/26 为 `Saved/Logs/T4A231-FlickerFix-ToonAutomation-20260811.log`，边界用例明确验证分数深度而非二值开关。真实 D3D12 manifest 为 `Succeeded`、schema 10、26 点/52 条，日志 `Saved/Logs/T4A231-FlickerFix-D3D12Capture-20260811.log`，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260811T074349Z_70144`；四个穿云 Style On 点均保持鸟群完整可见，manifest 记录 `cloudTraversalContinuousEnvelopeWeight=true`、`cloudTraversalExplicitCameraCutOnly=true` 和 `cloudTraversalLowMeanDriftVeilNoise=true`。静态截图与纯数据合同不能替代运动验收，用户仍须在 PIE 中复测“镜头在云内、鸟在云外”的持续飞行与边界折返。
+
+版本 51 为定位持续闪烁而增加雾幕隔离开关：Tone Pass 的 `CloudTraversalVeilStrength` 与 `CloudTraversalVeilOpacity` 在运行时均固定为 0，manifest schema 11 明确记录 `cloudTraversalCameraInsideVeil=false` 和 `cloudTraversalVeilOpacity=0`；云材质局部镜头球、鸟群球、镜头—鸟群走廊及二维噪声清除仍照常工作。用户在同一路径 PIE 中确认闪烁完全消失，因此根因归属于全屏薄云雾幕，该实验结论已成立；最终路线不再重加此雾幕。
+
+版本 51 自动证据：UE 5.8 ForceUnity 日志 `Saved/Logs/T4A231-NoVeil-ForceUnity-Final-20260811.log`，fresh `ABTS.Rendering.Toon` 26/26 日志 `Saved/Logs/T4A231-NoVeil-ToonAutomation-Final-20260811.log`；`BoundedTraversalRelation` 同时验证雾幕强度/不透明度为零，以及鸟内、镜头内、云在两者之间、两者均在云内和无关云五种局部几何关系。该自动证据只证明合同与回归，不替代 PIE 连续运动的闪烁判断。
+
+版本 52 把该实验结论落实为正式合同，并修复两项只能在运动中暴露的问题。第一，旧实现把受控鸟附近编队压缩为一个最多 `420 cm` 的 Actor/组件包围球；四鸟展开或 Chaos 视觉网格偏离 Actor 中心时，端部鸟会落在清除圈外。新实现按最多四个 `GetBirdVisual()->Bounds` 建立独立球体，加入 `70 cm` 安全边与最多 `260 cm` 的两帧速度前视；关系判定仍使用完整编队联合包络，但材质硬清除逐鸟计算，并以独立 `TraversalProtectionActive` 在进入首帧立即生效，外围噪声走廊才继续平滑。第二，Masked Opacity 与 WPO 会产生几何速度无法完整描述的像素动画；旧材质未声明这一点，TSR 在夜面高速镜头中复用陈旧边缘历史，形成亮边拖影。云母材质现固定 `Has Pixel Animation=true`，让 UE 5.8 为该 Masked 材质写入相应速度/历史拒绝身份，不全局关闭 TSR，也不改变云光照。
+
+版本 52 的自动门包括：UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译成功；命令行重建云材质后再次无写入验证成功；fresh `ABTS.Rendering.Toon` 26/26 通过。资产合同验证宏版本 11、四个逐鸟球参数、即时硬保护参数和 `HasPixelAnimation()`；关系测试额外用超过旧 `840 cm` 直径的四鸟展开队形证明旧单球无法覆盖端部而逐鸟球均可覆盖。上述数据门只能防止实现合同回退，不能替代动态像素验收：最终 PIE 必须连续执行“镜头在云内而鸟在云外”“云位于镜头和四鸟之间”“俯视展开队形高速穿云”“夜面高速横移/旋转”四条路径，并逐帧确认四鸟始终可见、无明暗闪烁、无夜云亮边拖影；单张截图不得作为本门通过证据。
+
+版本 53 修复了用户 PIE 发现的云材质回退。根因不是运行时绑定丢失，而是 v52 开启 `Has Pixel Animation` 后，真实 PCD3D_SM6 首次编译额外的 Velocity/Depth 材质排列：Custom 表达式的 `TraversalBirdSphere0..3` 由 Vector Parameter 的 RGB 输出推断为 `float3`，旧 HLSL 却读取 `.w` 半径，产生 `vector swizzle 'w' is out of bounds`，UE 因而按设计回退默认材质。v53 将每个鸟球拆成明确的 RGB 中心输入与连接同一 Vector Parameter A 通道的标量半径输入，运行时仍只写原有四个 `FLinearColor(Center, Radius)` 参数，不扩大参数同步面；资产验证同时禁止再次出现 `.w` 读取。UE 5.8 ForceUnity、资产重建与 SHA 不变的只读复验均通过；fresh `ABTS.Rendering.Toon` 为 26/26，日志 `Saved/Logs/T4A231-MaterialFallbackFix-ToonAutomation-v53-20260811.log`。真实 D3D12 离屏捕获为 `Succeeded`、26 点/52 条，日志 `Saved/Logs/T4A231-MaterialFallbackFix-D3D12-v53-20260811.log`，目录 `Saved/ToonT4A2MaterialFallbackFixV53/ToonT4A2_Screenshots_20260811T093424Z_38448`；日志中不再存在云材质编译错误、越界 swizzle 或云默认材质回退。此事故也固定了一条验证边界：NullRHI 数据/资产合同不能证明最终 SM6 材质排列可编译，凡修改 Custom HLSL、材质 Usage 或像素动画标志，必须追加真实 D3D12 shader 编译与捕获门。该静态门只关闭材质回退，不替代 v52 已列出的四条连续运动 PIE 验收。
+
+版本 54 继续处理用户在材质恢复后观察到的夜面移动亮边。根因是 GroundDay PIE 主相机仍消费默认 Motion Blur，而自动捕获相机一直显式使用 `MotionBlurAmount=0 / MotionBlurMax=0`，因此此前静态证据无法复现高速移动时亮天空被卷入暗云轮廓的青白拖边。`Has Pixel Animation` 在 UE 5.8 中会强制速度写入并改变 TSR 的部分反闪烁/历史策略，但不等价于禁用 Motion Blur；v54 因而把“清晰低模云轮廓”落实为显式 Profile 合同，只在风格化 `GroundDay && CloudsEnabled` 时覆盖 Motion Blur 为 0，`GroundDay` 无云、`SatelliteGuide` 与 `FinaleSpace` 均保持原镜头策略。UE 5.8 ForceUnity 日志为 `Saved/Logs/T4A231-V54-ForceUnity-20260811.log`；fresh `ABTS.Rendering.Toon` 为 26/26，日志 `Saved/Logs/T4A231-V54-Toon-Fresh-20260811.log`。真实 D3D12 manifest 为 `Succeeded`、实现版本 54、26 点/52 条，目录 `Saved/ABTSVisualCaptures/ToonT4A2/ToonT4A2_Screenshots_20260811T100733Z_50824`，日志 `Saved/Logs/T4A231-V54-D3D12-T4A231-V54-Static-20260811-180502.log`；云材质 shader 错误和 fallback 均为 0。该静态门只证明无回归；最终必须由用户在夜面连续高速横移、旋转与折返的 PIE 中确认亮边消失，并同时确认鸟体清除保持稳定。
+
+用户于 2026-08-11 完成最终连续运动 PIE：镜头入云、鸟在云外、云位于镜头与展开鸟群之间、镜头与鸟群同时入云、夜面高速横移/旋转/折返均保持鸟体可见；全屏雾幕闪烁未恢复，夜云青白动态亮边已经消失。至此 A2.3 的数据、资产、真实 RHI、静态像素和动态 PIE 证据层全部闭合，阶段晋升为 `IntegrationAccepted`，允许进入 A2.4；后续性能或消费端调整不得重新开启全屏雾幕、GroundDay Motion Blur 或改变逐鸟硬保护合同。
+
+正式门为云下、云内、云上连续；穿越期间鸟体始终可读且不整屏灰；快速进入/离开与 Camera Cut 后无残留；Style Off、Profile 切换和子系统退出可完整恢复。
 
 ### 7.11 T4-A2.4 消费端与性能冻结
 
@@ -428,6 +452,7 @@ M11 进入/退出、失败黑屏和重置必须保存并恢复环境 Profile，�
 | 地形粗褶皱仍在 | Tone、Outline、Shadow 尚未隔离或叠加 | 读取六变体矩阵，只在 T4-B 修改被证明的贡献层 |
 | 所有网格旁出现同方向浅色复制剪影 | Tone pass 用 SceneColor 输入 UV 直接采 SceneDepth，导致 ViewRect 映射执行两次，几何/天空遮罩在屏幕上错位 | SceneColor 继续用输入 UV；SceneDepth 必须从 `ScreenPosToViewportUV(UVAndScreenPos.zw)` 重建 Viewport UV；主视图和 SceneCapture 共用此路径 |
 | 暗蓝天空出现斜向连续等值带，增加 LUT/样本后仍存在 | 10-bit BackBuffer 身份令 Tonemapper 只施加约 `1/1023` 抖动，但 PNG 与常见 SDR 显示链最终按 8-bit 量化；低梯度暗蓝在末端转换时形成等值线。逐像素积分、768×416 LUT、64–128 样本、禁用云和 FloatRGBA 后处理均不能消除，排除瑞利/米氏采样、FastSky LUT、云和 R11G11B10 为主因 | 使用精确 `TerminatorSky` Transform/FOV 重跑；Style On 通过可逆引用计数覆盖使用 `r.BackbufferQuantizationDitheringOverride=8`，最后释放时恢复原值；10-bit/HDR 单独保持自身身份。不得用 6-bit 强抖动作为生产值。无云自动截图已通过，仍需可见 PIE 检查运动稳定性 |
+| 夜面云在高速移动时出现青白色外缘，静态 D3D12 截图却正常 | GroundDay PIE 主相机仍使用默认 Motion Blur；暗云与亮天空的高反差轮廓在运动模糊中跨边混合。`Has Pixel Animation` 只标记像素动画、强制速度写入并改变 TSR 的部分历史策略，不能关闭运动模糊，也不能单独保证轮廓邻域无拖边 | v54 将后处理策略限定为 `GroundDay && CloudsEnabled` 时把 `MotionBlurAmount/Max` 同时覆盖为 0；SatelliteGuide 与 FinaleSpace 不变。自动截图原本就是零 Motion Blur，所以静态图只承担无回归证据；最终必须用夜面高速横移、旋转和折返 PIE 验证动态边缘 |
 
 ## 11. 所有权与交接
 

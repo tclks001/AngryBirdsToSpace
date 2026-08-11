@@ -576,6 +576,8 @@ void ABTSStylizedToneMainPS(
 	// the geometry/background mask, which appears as a pale duplicate silhouette.
 	const float2 ViewportUV = ScreenPosToViewportUV(UVAndScreenPos.zw);
 	const float DeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
+	const float3 WorldViewDirection = normalize(
+		ScreenVectorFromScreenRect(float4(UVAndScreenPos.zw, 1.0f, 0.0f)));
 	// Atmosphere, sun, clouds and deterministic HDR stars are environment
 	// lighting layers. GroundDay replaces only the background with a continuous
 	// analytic atmosphere plus independently reconstructed sun/stars; geometry
@@ -585,8 +587,6 @@ void ABTSStylizedToneMainPS(
 		&& bHasEnvironmentParameters != 0u
 		&& EnvironmentProfile == 0u)
 	{
-		const float3 WorldViewDirection = normalize(
-			ScreenVectorFromScreenRect(float4(UVAndScreenPos.zw, 1.0f, 0.0f)));
 		float3 ContinuousSky = ABTSComposeContinuousGroundSky(
 			WorldViewDirection);
 		OutColor = float4(
@@ -602,11 +602,12 @@ void ABTSStylizedToneMainPS(
 	// ordinary outline pass still owns the cloud-to-world silhouette.
 	const uint ToneStencil = ABTSSampleVisibleStencil(ViewportUV);
 	const bool bCloudComposite = ABTSIsCloudCompositeStencil(ToneStencil);
-	OutColor = bEnvironmentBackground
+	const float4 ToneResult = bEnvironmentBackground
 		? SceneColor
 		: (bCloudComposite
 			? SceneColor
 			: float4(ABTSApplySoftToneBands(SceneColor.rgb), SceneColor.a));
+	OutColor = ToneResult;
 }
 
 void ABTSStylizedStarMainPS(

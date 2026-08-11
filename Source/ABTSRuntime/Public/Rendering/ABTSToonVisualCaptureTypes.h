@@ -41,7 +41,15 @@ enum class EABTSToonVisualCaptureAnchor : uint8
 	/** A2.2 deep-night cloud response with daytime whitening fully gated. */
 	CloudFieldNight,
 	/** A2.2 connected approximately 30-degree cluster spanning the terminator. */
-	CloudFieldTerminatorMega
+	CloudFieldTerminatorMega,
+	/** A2.3 bird/party body lies inside a cloud while the camera stays outside. */
+	CloudTraversalBirdInside,
+	/** A2.3 camera lies inside a cloud while the bird stays outside. */
+	CloudTraversalCameraInside,
+	/** A2.3 one cloud lies between an outside camera and outside bird. */
+	CloudTraversalBetween,
+	/** A2.3 camera and bird share the bounded interior of one cloud. */
+	CloudTraversalBothInside
 };
 
 enum class EABTSToonVisualCaptureSuite : uint8
@@ -122,6 +130,9 @@ struct ABTSRUNTIME_API FABTSToonResolvedCapturePoint
 	uint64 SemanticIdentityHash = 0;
 	uint64 CameraPoseHash = 0;
 	uint64 EnvironmentSnapshotHash = 0;
+	bool bRelocateBirdPartyForDiagnostic = false;
+	FVector DiagnosticBirdPartyCenterWorld = FVector::ZeroVector;
+	FVector DiagnosticBirdPartyUp = FVector::UpVector;
 
 	bool IsValid() const;
 };

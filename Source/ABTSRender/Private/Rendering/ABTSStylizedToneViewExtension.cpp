@@ -155,7 +155,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		"ABTSStylizedStarMainPS",
 		SF_Pixel);
 
-	void ApplyFixedExposure(FSceneView& View)
+	void ApplyStylizedPostProcessPolicy(FSceneView& View)
 	{
 		FABTSStylizedEnvironmentParameters Environment;
 		if (!FABTSStylizedRenderingControl::IsEnabledOnAnyThread()
@@ -171,6 +171,21 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		Settings.AutoExposureApplyPhysicalCameraExposure = false;
 		Settings.bOverride_AutoExposureBias = true;
 		Settings.AutoExposureBias = Environment.FixedExposureBias;
+
+		if (FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			Environment.Profile,
+			Environment.bCloudsEnabled != 0))
+		{
+			// Ground traversal uses masked, high-contrast low-poly cloud
+			// silhouettes.  Camera motion blur pulls the brighter sky into the
+			// darker night-side edge and produces a moving cyan/white fringe.
+			// The offline visual-capture camera already uses this crisp policy;
+			// apply it to the matching gameplay view as well.
+			Settings.bOverride_MotionBlurAmount = true;
+			Settings.MotionBlurAmount = 0.0f;
+			Settings.bOverride_MotionBlurMax = true;
+			Settings.MotionBlurMax = 0.0f;
+		}
 	}
 
 	class FABTSStylizedToneSceneViewExtension final
@@ -187,7 +202,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			FSceneView& InView) override
 		{
 			(void)InViewFamily;
-			ApplyFixedExposure(InView);
+			ApplyStylizedPostProcessPolicy(InView);
 		}
 
 		virtual void SubscribeToPostProcessingPass(
@@ -531,7 +546,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			FSceneView& InView) override
 		{
 			(void)InViewFamily;
-			ApplyFixedExposure(InView);
+			ApplyStylizedPostProcessPolicy(InView);
 		}
 
 		virtual void SubscribeToPostProcessingPass(

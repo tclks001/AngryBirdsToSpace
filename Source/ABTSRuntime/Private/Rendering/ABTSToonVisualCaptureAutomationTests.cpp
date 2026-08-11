@@ -199,9 +199,29 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports T4-A2.2 night-cloud and mega-cluster semantics"),
+		TEXT("Stylized renderer reports T4-A2.3.1 crisp ground-cloud motion policy"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		47);
+		54);
+	TestTrue(
+		TEXT("GroundDay clouds suppress motion blur to prevent moving night-cloud edge fringes"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::GroundDay,
+			true));
+	TestFalse(
+		TEXT("GroundDay without clouds does not alter the camera motion contract"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::GroundDay,
+			false));
+	TestFalse(
+		TEXT("SatelliteGuide retains its independent camera motion contract"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::SatelliteGuide,
+			true));
+	TestFalse(
+		TEXT("FinaleSpace retains its independent camera motion contract"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::FinaleSpace,
+			true));
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -746,6 +766,129 @@ bool FABTSToonT2B1SceneCaptureRegistryTest::RunTest(
 			*Capture,
 			ViewClass));
 	FABTSStylizedSceneCaptureRegistry::Reset();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A23BoundedTraversalRelationTest,
+	"ABTS.Rendering.Toon.T4A2_3.BoundedTraversalRelation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A23BoundedTraversalRelationTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FABTST4LowPolyCloudIslandDefinition Cloud;
+	Cloud.IslandIndex = 0;
+	Cloud.LogicalCloudIndex = 0;
+	Cloud.CloudletCount = FABTST4LowPolyCloudPrototype::CloudletsPerIsland;
+	Cloud.Seed = 12345u;
+	Cloud.PlanetCenterWorld = FVector::ZeroVector;
+	Cloud.CenterWorld = FVector(0.0, 0.0, 12000.0);
+	Cloud.RadialUp = FVector::UpVector;
+	Cloud.TangentX = FVector::ForwardVector;
+	Cloud.TangentY = FVector::RightVector;
+	Cloud.ExtentsCM = FVector(1800.0, 1500.0, 700.0);
+	Cloud.LogicalCloudIdentityHash = 0x1234ull;
+	Cloud.IdentityHash = 0x5678ull;
+	TestTrue(TEXT("Synthetic traversal cloud validates"), Cloud.IsValid());
+
+	const FABTST4CloudTraversalRelation BirdInside =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			FVector(-3200.0, 0.0, 12000.0),
+			Cloud.CenterWorld,
+			160.0f);
+	TestTrue(TEXT("Bird-inside case activates"), BirdInside.bTraversalActive);
+	TestTrue(TEXT("Bird-inside case identifies the bird"), BirdInside.bBirdInside);
+	TestTrue(TEXT("Bird-inside case has continuous traversal weight"),
+		BirdInside.TraversalWeight > 0.99f);
+	TestFalse(TEXT("Bird-inside case keeps the camera outside"),
+		BirdInside.bCameraInside);
+
+	const FABTST4CloudTraversalRelation CameraInside =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			Cloud.CenterWorld,
+			FVector(3200.0, 0.0, 12000.0),
+			160.0f);
+	TestTrue(TEXT("Camera-inside case activates"), CameraInside.bTraversalActive);
+	TestTrue(TEXT("Camera-inside case identifies the camera"),
+		CameraInside.bCameraInside);
+	TestTrue(TEXT("Camera-inside case has full continuous envelope depth"),
+		CameraInside.CameraInteriorWeight > 0.99f);
+
+	const FABTST4CloudTraversalRelation Between =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			FVector(-3200.0, 0.0, 12000.0),
+			FVector(3200.0, 0.0, 12000.0),
+			160.0f);
+	TestTrue(TEXT("Cloud-between case activates"), Between.bTraversalActive);
+	TestTrue(TEXT("Cloud-between case identifies the segment occluder"),
+		Between.bCloudBetweenCameraAndBird);
+	TestTrue(TEXT("Cloud-between closest point is interior to the segment"),
+		Between.ClosestSegmentAlpha > 0.1f
+			&& Between.ClosestSegmentAlpha < 0.9f);
+	TestTrue(TEXT("Cloud-between case has continuous corridor weight"),
+		Between.CorridorInteriorWeight > 0.99f);
+
+	const FABTST4CloudTraversalRelation BothInside =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			Cloud.CenterWorld - FVector(120.0, 0.0, 0.0),
+			Cloud.CenterWorld + FVector(120.0, 0.0, 0.0),
+			160.0f);
+	TestTrue(TEXT("Both-inside case activates"), BothInside.bTraversalActive);
+	TestTrue(TEXT("Both-inside case keeps both endpoint flags"),
+		BothInside.bCameraInside && BothInside.bBirdInside);
+
+	const FABTST4CloudTraversalRelation Clear =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			FVector(-3200.0, 3600.0, 12000.0),
+			FVector(3200.0, 3600.0, 12000.0),
+			160.0f);
+	TestTrue(TEXT("Clear relation remains structurally valid"), Clear.IsValid());
+	TestFalse(TEXT("Unrelated cloud remains fully opaque"),
+		Clear.bTraversalActive);
+	TestTrue(TEXT("Unrelated cloud has zero continuous traversal weight"),
+		Clear.TraversalWeight <= KINDA_SMALL_NUMBER);
+
+	const FABTST4CloudTraversalRelation NearBoundary =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			Cloud.CenterWorld + FVector(0.0, 0.0, 635.0),
+			FVector(3200.0, 0.0, 12000.0),
+			0.0f,
+			1.0f);
+	TestTrue(TEXT("Camera boundary exposes a fractional rather than binary depth"),
+		NearBoundary.CameraInteriorWeight > 0.0f
+			&& NearBoundary.CameraInteriorWeight < 1.0f);
+
+	// Regression for the moving four-bird formation: the former one-sphere
+	// contract was clamped to 420 cm and could not cover both endpoints.  The
+	// material now receives four independent visual spheres, so every rendered
+	// bird remains inside a hard-protection core even when the formation spans
+	// well beyond the old diameter.
+	const TArray<FSphere> MovingFormation = {
+		FSphere(FVector(-900.0, 0.0, 12000.0), 220.0),
+		FSphere(FVector(-300.0, 0.0, 12000.0), 220.0),
+		FSphere(FVector(300.0, 0.0, 12000.0), 220.0),
+		FSphere(FVector(900.0, 0.0, 12000.0), 220.0)};
+	TestFalse(
+		TEXT("The retired 420 cm party sphere cannot protect a formation endpoint"),
+		FSphere(FVector(0.0, 0.0, 12000.0), 420.0).IsInside(
+			MovingFormation[0].Center));
+	for (int32 BirdIndex = 0; BirdIndex < MovingFormation.Num(); ++BirdIndex)
+	{
+		TestTrue(
+			*FString::Printf(
+				TEXT("Moving bird %d owns an independent hard-protection core"),
+				BirdIndex),
+			MovingFormation[BirdIndex].IsInside(
+				MovingFormation[BirdIndex].Center));
+	}
 	return true;
 }
 

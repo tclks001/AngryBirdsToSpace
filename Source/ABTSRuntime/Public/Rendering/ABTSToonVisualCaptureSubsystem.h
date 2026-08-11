@@ -12,6 +12,12 @@ class AActor;
 class ACameraActor;
 class APlayerController;
 
+struct FABTSToonSavedActorTransform
+{
+	TWeakObjectPtr<AActor> Actor;
+	FTransform Transform = FTransform::Identity;
+};
+
 enum class EABTSToonVisualCapturePhase : uint8
 {
 	Inactive = 0,
@@ -94,6 +100,9 @@ private:
 	void AdvanceVariantOrFinish();
 	void FinishCapture(bool bSuccess, const FString& Reason);
 	void RestoreRuntimeState();
+	bool CaptureBirdPartyTransforms(FString& OutFailure);
+	bool ApplyCurrentDiagnosticBirdPartyPlacement(FString& OutFailure);
+	void RestoreBirdPartyTransforms();
 	bool WriteManifest(const TCHAR* Status, const FString& FailureReason);
 	FIntPoint GetActualViewportResolution() const;
 	FString MakeCurrentArtifactPath() const;
@@ -133,6 +142,10 @@ private:
 	FDelegateHandle ScreenshotProcessedHandle;
 	TWeakObjectPtr<APlayerController> CaptureController;
 	TWeakObjectPtr<AActor> SavedViewTarget;
+	TArray<FABTSToonSavedActorTransform> SavedBirdPartyTransforms;
+	FVector SavedBirdPartyCenterWorld = FVector::ZeroVector;
+	FVector SavedBirdPartyUp = FVector::UpVector;
+	bool bBirdPartyTransformsCaptured = false;
 
 	int32 ActualWorldSeed = 0;
 	int32 ActualGeneratorVersion = 0;

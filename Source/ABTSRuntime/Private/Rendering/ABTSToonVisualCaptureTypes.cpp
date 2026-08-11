@@ -245,7 +245,10 @@ bool FABTSToonResolvedCapturePoint::IsValid() const
 		&& !LookAtWorld.ContainsNaN()
 		&& SemanticIdentityHash != 0
 		&& CameraPoseHash != 0
-		&& EnvironmentSnapshotHash != 0;
+		&& EnvironmentSnapshotHash != 0
+		&& (!bRelocateBirdPartyForDiagnostic
+			|| (!DiagnosticBirdPartyCenterWorld.ContainsNaN()
+				&& DiagnosticBirdPartyUp.IsNormalized()));
 }
 
 TArray<FABTSToonVisualCapturePointDefinition>
@@ -379,7 +382,7 @@ TArray<FABTSToonVisualCapturePointDefinition>
 FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 {
 	// Preserve all accepted A1 atmosphere poses, then add the seven accepted
-	// A2.1 cloud views and five A2.2 global/night/terminator compositions.
+	// A2.1 views, five A2.2 field views and four A2.3 traversal relations.
 	// The orthogonal side pair prevents a long-axis-only cloud from
 	// passing the visual gate; the two ground-up views make the gameplay-facing
 	// underside and lighting continuity first-class evidence.
@@ -422,6 +425,14 @@ FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 		EABTSToonVisualCaptureAnchor::CloudFieldNight, 48.0f);
 	AddCloudPoint(TEXT("CloudFieldTerminatorMega"),
 		EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega, 58.0f);
+	AddCloudPoint(TEXT("CloudTraversalBirdInside"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside, 56.0f);
+	AddCloudPoint(TEXT("CloudTraversalCameraInside"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside, 62.0f);
+	AddCloudPoint(TEXT("CloudTraversalBetween"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalBetween, 54.0f);
+	AddCloudPoint(TEXT("CloudTraversalBothInside"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalBothInside, 66.0f);
 	return Result;
 }
 
@@ -720,6 +731,14 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 		return TEXT("CloudFieldNight");
 	case EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega:
 		return TEXT("CloudFieldTerminatorMega");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside:
+		return TEXT("CloudTraversalBirdInside");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside:
+		return TEXT("CloudTraversalCameraInside");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalBetween:
+		return TEXT("CloudTraversalBetween");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalBothInside:
+		return TEXT("CloudTraversalBothInside");
 	default:
 		return TEXT("Unknown");
 	}
