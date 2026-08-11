@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline M11 camera-observation criteria and orthogonality comparison.
 
-This tool consumes observation schema v1-v6 CSV from the M11 capture runner.
+This tool consumes observation schema v1-v7 CSV from the M11 capture runner.
 It never reads pixels and never changes a candidate, trajectory, camera, or UE
 asset. A criteria failure is a useful M1 result, so the default exit status is
 zero for a structurally valid report. Use --require-pass to gate later stages.
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6}
+SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7}
 M3_APPROACH_BACKWARD_JUMP_PX_MAX = 20.0
 M3_FIRST_BODY_BLEND_SECONDS_MAX = 0.10
 M3_FIRST_BODY_VISIBLE_SECONDS_MAX = 0.75
@@ -106,6 +106,14 @@ M3_BRIDGE_COLUMNS = {
     "bridgeIncomingPixelRadius",
     "bridgeIncomingVisibleRatio",
 }
+M4_TERMINAL_COLUMNS = {"endpointAuthority"}
+M4_ENDPOINT_AUTHORITIES = {
+    "None",
+    "CandidateQualified",
+    "PhysicalContact",
+}
+M4_TERMINAL_STAGES = {"FinalApproach", "Terminal"}
+M4_TERMINAL_SHOT_PHASES = {"TerminalAcquire", "TerminalTrack"}
 
 
 @dataclass(frozen=True)
@@ -209,6 +217,7 @@ def _fingerprint(
                 "stageReason",
                 "shotPhase",
                 "shotReason",
+                "endpointAuthority",
             }:
                 value = f"{float(value):.6f}"
             canonical.append(value)
@@ -223,6 +232,8 @@ def _criteria_fingerprint(
     position_jump: list[bool],
     rotation_jump: list[bool],
     fov_jump: list[bool],
+    m4_acquire_no_target: list[bool] | None = None,
+    m4_endpoint_missing: list[bool] | None = None,
 ) -> str:
     digest = hashlib.sha256()
     for index, row in enumerate(rows):
@@ -237,6 +248,11 @@ def _criteria_fingerprint(
             "1" if rotation_jump[index] else "0",
             "1" if fov_jump[index] else "0",
         )
+        if m4_acquire_no_target is not None and m4_endpoint_missing is not None:
+            canonical += (
+                "1" if m4_acquire_no_target[index] else "0",
+                "1" if m4_endpoint_missing[index] else "0",
+            )
         digest.update(("|".join(canonical) + "\n").encode("utf-8"))
     return digest.hexdigest().upper()
 
@@ -301,6 +317,18 @@ def read_rows(path: pathlib.Path) -> list[dict[str, str]]:
                 {"bridgeOutgoingTarget", "bridgeIncomingTarget"}
             ):
                 _finite(row, key)
+        if schema >= 7:
+            missing_terminal = M4_TERMINAL_COLUMNS.difference(row)
+            if missing_terminal:
+                raise ValueError(
+                    f"{path}: schema {schema} missing M4 columns: "
+                    f"{sorted(missing_terminal)}"
+                )
+            if row["endpointAuthority"] not in M4_ENDPOINT_AUTHORITIES:
+                raise ValueError(
+                    f"{path}: invalid endpointAuthority "
+                    f"{row['endpointAuthority']!r}"
+                )
         row.setdefault("framingTarget", row["currentTarget"])
         row.setdefault("directorM3FrozenEnabled", "0")
         row.setdefault("stageProgress", "0")
@@ -310,6 +338,7 @@ def read_rows(path: pathlib.Path) -> list[dict[str, str]]:
         row.setdefault("shotProgress", "0")
         row.setdefault("shotDurationSeconds", "0")
         row.setdefault("shotEndSlope", "0")
+        row.setdefault("endpointAuthority", "None")
         if frame_index != expected_index:
             raise ValueError(
                 f"{path}: non-contiguous frame {frame_index}; expected {expected_index}"
@@ -339,6 +368,8 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
     ]
     if not flight_rows:
         raise ValueError(f"{path}: no Launched/TargetHit observation rows")
+    observation_schema = int(_finite(flight_rows[0], "schemaVersion"))
+    has_m4_terminal_schema = observation_schema >= 7
 
     bird_lost = [
         _finite(row, "birdVisibleRatio") < thresholds.bird_visible_ratio
@@ -379,21 +410,35 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
         row["framingTarget"].startswith("Assist")
         and row["stage"]
         in {"CruiseToBody", "Handoff", "Approach", "Periapsis"}
+        and row["shotPhase"] not in M4_TERMINAL_SHOT_PHASES
+        for row in flight_rows
+    ]
+    m4_director_window = [
+        has_m4_terminal_schema
+        and (
+            row["stage"] in M4_TERMINAL_STAGES
+            or row["shotPhase"] in M4_TERMINAL_SHOT_PHASES
+        )
         for row in flight_rows
     ]
     director_blended = [blend > 1.0e-9 for blend in director_blends]
     director_leak = [
         blended
         and not (
-            m3 if row["directorMode"] == "M3MultiAssist" else m2
+            (m3 or m4)
+            if row["directorMode"] == "M3MultiAssist"
+            else m2
         )
-        for blended, m2, m3, row in zip(
-            director_blended, m2_window, m3_window, flight_rows
+        for blended, m2, m3, m4, row in zip(
+            director_blended,
+            m2_window,
+            m3_window,
+            m4_director_window,
+            flight_rows,
         )
     ]
     m2_indices = [index for index, value in enumerate(m2_window) if value]
     m3_indices = [index for index, value in enumerate(m3_window) if value]
-    observation_schema = int(_finite(flight_rows[0], "schemaVersion"))
     has_m3_shot_schema = observation_schema >= 4
     m3_shot_phase_counts = {
         phase: sum(row["shotPhase"] == phase for row in flight_rows)
@@ -590,6 +635,7 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
             if row["framingTarget"] == label
             and row["stage"]
             in {"CruiseToBody", "Handoff", "Approach", "Periapsis"}
+            and row["shotPhase"] not in M4_TERMINAL_SHOT_PHASES
         ]
         directed_indices = [
             index
@@ -608,6 +654,7 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
             for row in flight_rows
             if row["framingTarget"] == label
             and row["stage"] == "Periapsis"
+            and row["shotPhase"] not in M4_TERMINAL_SHOT_PHASES
             and _subjects_observable(row, thresholds)
         ]
         approach_x = [
@@ -768,7 +815,9 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
     bridge_transition_indices = [
         index
         for index, row in enumerate(flight_rows)
-        if observation_schema >= 6 and row["bridgeOutgoingTarget"] != "None"
+        if observation_schema >= 6
+        and row["bridgeOutgoingTarget"].startswith("Assist")
+        and row["bridgeIncomingTarget"].startswith("Assist")
     ]
     bridge_zero_planet_frames = sum(
         _finite(flight_rows[index], "bridgeOutgoingVisibleRatio") <= 0.01
@@ -803,6 +852,79 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
         and sum(position_jump[index] for index in m3_indices) == 0
         and sum(rotation_jump[index] for index in m3_indices) == 0
         and sum(fov_jump[index] for index in m3_indices) == 0
+    )
+    m4_terminal_indices = [
+        index
+        for index, row in enumerate(flight_rows)
+        if has_m4_terminal_schema and row["stage"] in M4_TERMINAL_STAGES
+    ]
+    m4_acquire_indices = [
+        index
+        for index, row in enumerate(flight_rows)
+        if has_m4_terminal_schema and row["shotPhase"] == "TerminalAcquire"
+    ]
+    m4_terminal_index_set = set(m4_terminal_indices)
+    m4_acquire_no_target = [False] * len(flight_rows)
+    for index in m4_acquire_indices:
+        row = flight_rows[index]
+        outgoing_visible = (
+            _finite(row, "bridgeOutgoingVisibleRatio") > 0.01
+            and _finite(row, "bridgeOutgoingPixelRadius")
+            >= thresholds.target_pixel_radius
+        )
+        incoming_visible = (
+            _finite(row, "bridgeIncomingVisibleRatio") > 0.01
+            and _finite(row, "bridgeIncomingPixelRadius")
+            >= thresholds.target_pixel_radius
+        )
+        m4_acquire_no_target[index] = not (
+            outgoing_visible or incoming_visible
+        )
+    m4_bird_lost = [
+        index in m4_terminal_index_set
+        and (bird_lost[index] or _finite(row, "birdPixelRadius") < 1.0)
+        for index, row in enumerate(flight_rows)
+    ]
+    m4_target_lost = [
+        index in m4_terminal_index_set and target_lost[index]
+        for index in range(len(flight_rows))
+    ]
+    m4_endpoint_missing = [
+        index in m4_terminal_index_set and row["endpointAuthority"] == "None"
+        for index, row in enumerate(flight_rows)
+    ]
+    m4_position_jump = [
+        index in m4_terminal_index_set and position_jump[index]
+        for index in range(len(flight_rows))
+    ]
+    m4_rotation_jump = [
+        index in m4_terminal_index_set and rotation_jump[index]
+        for index in range(len(flight_rows))
+    ]
+    m4_fov_jump = [
+        index in m4_terminal_index_set and fov_jump[index]
+        for index in range(len(flight_rows))
+    ]
+    m4_authorities = sorted(
+        {
+            flight_rows[index]["endpointAuthority"]
+            for index in m4_terminal_indices
+            if flight_rows[index]["endpointAuthority"] != "None"
+        }
+    )
+    m4_offline_camera_closure_passed = (
+        not has_m4_terminal_schema
+        or (
+            len(m4_terminal_indices) > 0
+            and len(m4_acquire_indices) > 0
+            and sum(m4_acquire_no_target) == 0
+            and sum(m4_bird_lost) == 0
+            and sum(m4_target_lost) == 0
+            and sum(m4_endpoint_missing) == 0
+            and sum(m4_position_jump) == 0
+            and sum(m4_rotation_jump) == 0
+            and sum(m4_fov_jump) == 0
+        )
     )
     approach_left_mean = _edge_mean(approach_relative_x, False)
     periapsis_right_mean = _edge_mean(periapsis_relative_x, True)
@@ -866,7 +988,13 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
         "cameraRotationJumpFrames": sum(rotation_jump),
         "fovJumpFrames": sum(fov_jump),
     }
-    passed = all(value == 0 for value in failures.values())
+    passed = (
+        all(value == 0 for value in failures.values())
+        and m4_offline_camera_closure_passed
+    )
+    decision_fingerprint_columns = DECISION_FINGERPRINT_COLUMNS
+    if has_m4_terminal_schema:
+        decision_fingerprint_columns += ("endpointAuthority",)
     return {
         "schemaVersion": 1,
         "observationSchemaVersion": int(_finite(rows[0], "schemaVersion")),
@@ -881,7 +1009,7 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
         # raw observation fingerprint keeps those diagnostics visible without
         # letting them masquerade as a stage-decision change.
         "decisionFingerprintSha256": _fingerprint(
-            flight_rows, DECISION_FINGERPRINT_COLUMNS
+            flight_rows, decision_fingerprint_columns
         ),
         "criteriaFingerprintSha256": _criteria_fingerprint(
             flight_rows,
@@ -890,6 +1018,8 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
             position_jump,
             rotation_jump,
             fov_jump,
+            m4_acquire_no_target if has_m4_terminal_schema else None,
+            m4_endpoint_missing if has_m4_terminal_schema else None,
         ),
         "observationFingerprintSha256": _fingerprint(
             flight_rows, OBSERVATION_FINGERPRINT_COLUMNS
@@ -915,6 +1045,25 @@ def analyze(path: pathlib.Path, thresholds: Thresholds) -> dict[str, object]:
         "maximumFovDeltaDegrees": max(
             _finite(row, "fovDeltaDegrees") for row in flight_rows
         ),
+        "m4Terminal": {
+            "schemaAvailable": has_m4_terminal_schema,
+            "terminalFrames": len(m4_terminal_indices),
+            "acquireFrames": len(m4_acquire_indices),
+            "acquireNoTargetFrames": sum(m4_acquire_no_target),
+            "birdLostFrames": sum(m4_bird_lost),
+            "ufoLostFrames": sum(m4_target_lost),
+            "endpointMissingFrames": sum(m4_endpoint_missing),
+            "positionJumpFrames": sum(m4_position_jump),
+            "rotationJumpFrames": sum(m4_rotation_jump),
+            "fovJumpFrames": sum(m4_fov_jump),
+            "endpointAuthorities": m4_authorities,
+            "offlineCameraClosurePassed": m4_offline_camera_closure_passed,
+            "physicalContactAssessment": (
+                "ManifestAuthorityRequired"
+                if has_m4_terminal_schema
+                else "SchemaUnavailable"
+            ),
+        },
         "director": {
             "schemaAvailable": has_director_schema,
             "m2FrozenEnabledFrames": sum(

@@ -80,6 +80,8 @@ M4 首轮将录制合同升至 v11、CSV Schema 升至 7。逐帧新增 `endpoin
 
 候选离线录屏加入可见终端转移后，录制合同升至 v12，CSV Schema 仍为 7。Manifest 新增 `visibleTerminalTransfer`、`terminalTransferStartSeconds`、`terminalTransferEndSeconds`、`m4FinalBirdToUFODistanceCM`、`m4PhysicalContactRadiusCM` 与 `m4PhysicalContactPassed`。候选的 `candidateQualifiedIntercept` 是原始轨迹资格历史，允许与转移后的 `physicalTargetHit` 同时为真；逐帧单值 `endpointAuthority` 则以最终终点为准取 `PhysicalContact`。`m4TerminalClosurePassed` 额外要求最终 PlaybackPlan Authority 点到 UFO 几何接触中心的距离命中 800 cm 接触半径。该距离必须从播放计划 Authority 点计算，不能用带动画摆动的 BirdVisual Bounds 中心代替。Released Trajectory Hash 必须保持不变，Playback Plan Hash 应因显式 `VisibleTerminalTransfer` 改变，候选 Authority 仍为 `UNCERTIFIED`。
 
+离线 Python 工具同步接受 Schema 1–7。Schema 7 读取时强制校验 `endpointAuthority` 列和合法枚举；`TerminalAcquire/TerminalTrack` 作为独立 M4 窗口，不计入 M3 双行星桥或导演越界。报告新增 `m4Terminal`：分别给出 Acquire 无叙事目标、终端鸟/UFO/Endpoint 丢失和位姿/FOV 跳变，并以 `offlineCameraClosurePassed` 汇总只由 CSV 能证明的镜头闭合门。物理接触距离仍以 Manifest 为权威：CSV 的 `birdWorld*` 来自带动画摆动的 BirdVisual Bounds 中心，不能冒充 PlaybackPlan Authority 点；因此离线报告将该项明确标为 `ManifestAuthorityRequired`，而不是从视觉 Bounds 反推一个假接触结论。
+
 中央 UFO 终端 dolly 将录制合同升至 v13，CSV Schema 仍为 7。相机从 PlaybackPlan 的 Assist3 Exit 和最终播放时刻补齐 FinalApproach 的真实 `stageProgress/stageDurationSeconds`，而不是沿用事件解析器原先恒为 0 的占位进度。纯数学门要求 UFO NDC 全程为 `(0,0)`、鸟 X 为 0、鸟 Y 按进度线性从 `-0.42` 到 `-0.22`，并验证 0→0.5 与 0.5→1 的屏幕位移相等；相机到鸟距离则独立从 40000 cm 平滑降至 5000 cm。像素录屏仍须复核动画 Bounds 摆动、旋转连续性和接触帧可读性，不能只以解析 NDC 绿灯代替画面验收。
 
 v13 fresh Rank11 Stylized1 `M4CenteredDollyR9-20260811-160100` 的 TerminalTrack 共 123 帧：UFO 几何中心最大像素误差 `0.000011 px`，鸟视觉 Bounds 相对中央竖线最大偏差 `1.98 px`；相机到鸟距离由 `40014.64 cm` 收至 `5009.14 cm`，M4 位置/旋转/FOV 跳变为 `0/0/0`，最终 Authority 距离 `799.9999999999568 cm`。这组数据作为解析门映射到实际 SceneCapture 的首个基线；鸟 Y 的亚像素级非恒速变化来自动画 Bounds 中心，不改变 actor-origin 的线性 NDC 合同。
