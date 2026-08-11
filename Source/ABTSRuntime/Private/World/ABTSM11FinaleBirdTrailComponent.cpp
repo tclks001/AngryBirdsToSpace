@@ -730,7 +730,7 @@ void UABTSM11FinaleBirdTrailComponent::BeginTrail(
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][M11-C][BirdTrail] Begin Mode=ArcLengthBlueNoise RenderMode=%d SpacingCM=%.1f Jitter=%.3f Lifetime=%.3f Lateral3SigmaFraction=%.3f OuterLifetimeScale=%.3f HaloPX=%.2f ContrastShellPX=%.2f CorePX=%.2f HaloIntensity=%.3f ContrastShellOpacity=%.3f CoreIntensity=%.3f CoreCompositeOpacity=%.3f Softness=%.3f Expansion=%.3f CoreFadeExp=%.3f HaloFadeExp=%.3f Texture=%dx%d MaxParticles=%d"),
+			TEXT("[ABTS][M11-C][BirdTrail] Begin Mode=ArcLengthBlueNoise RenderMode=%d SpacingCM=%.1f Jitter=%.3f Lifetime=%.3f Lateral3SigmaFraction=%.3f OuterLifetimeScale=%.3f HaloPX=%.2f ContrastShellPX=%.2f CorePX=%.2f HaloIntensity=%.3f ContrastShellOpacity=%.3f CoreIntensity=%.3f CoreCompositeOpacity=%.3f Softness=%.3f Expansion=%.3f CoreFadeExp=%.3f HaloFadeExp=%.3f Texture=%dx%d ResourceReady=%d MaxParticles=%d"),
 			ABTSM11ResolveTrailRenderModeGameThread(),
 			ABTSM11ResolveTrailNominalSpacingCM(),
 			ABTSM11ResolveTrailBlueNoiseJitterFraction(),
@@ -750,6 +750,7 @@ void UABTSM11FinaleBirdTrailComponent::BeginTrail(
 			ABTSM11ResolveTrailHaloFadeExponentGameThread(),
 			TrailSpriteTexture != nullptr ? TrailSpriteTexture->GetSizeX() : 0,
 			TrailSpriteTexture != nullptr ? TrailSpriteTexture->GetSizeY() : 0,
+			HasGeneratedSpriteTextureResource() ? 1 : 0,
 			MaximumTrailSampleCount);
 	}
 	NotifyTrailChanged();
@@ -1029,6 +1030,12 @@ bool UABTSM11FinaleBirdTrailComponent::HasGeneratedSpriteTexture() const
 	return TrailSpriteTexture != nullptr;
 }
 
+bool UABTSM11FinaleBirdTrailComponent::HasGeneratedSpriteTextureResource() const
+{
+	return TrailSpriteTexture != nullptr
+		&& TrailSpriteTexture->GetResource() != nullptr;
+}
+
 int32 UABTSM11FinaleBirdTrailComponent::GetGeneratedSpriteTextureSize() const
 {
 	return TrailSpriteTexture != nullptr ? TrailSpriteTexture->GetSizeX() : 0;
@@ -1190,12 +1197,16 @@ bool UABTSM11FinaleBirdTrailComponent::EnsureTrailSpriteTexture()
 		}
 	}
 
+	// The CreateTransient overload that receives image data calls
+	// UpdateResource internally. Configuring the texture and calling
+	// UpdateResource again would replace that resource asynchronously while a
+	// scene proxy can still hold its raw FTexture pointer. Create the CPU mip
+	// without image data, configure and fill it, then initialize exactly once.
 	UTexture2D* GeneratedTexture = UTexture2D::CreateTransient(
 		TrailSpriteTextureSize,
 		TrailSpriteTextureSize,
 		PF_B8G8R8A8,
-		NAME_None,
-		ImageData);
+		NAME_None);
 	if (GeneratedTexture == nullptr)
 	{
 		return false;
@@ -1206,7 +1217,27 @@ bool UABTSM11FinaleBirdTrailComponent::EnsureTrailSpriteTexture()
 	GeneratedTexture->AddressX = TA_Clamp;
 	GeneratedTexture->AddressY = TA_Clamp;
 	GeneratedTexture->LODGroup = TEXTUREGROUP_Effects;
+	FTexturePlatformData* PlatformData = GeneratedTexture->GetPlatformData();
+	if (PlatformData == nullptr || PlatformData->Mips.IsEmpty())
+	{
+		return false;
+	}
+	FTexture2DMipMap& Mip = PlatformData->Mips[0];
+	void* DestinationData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+	DestinationData = Mip.BulkData.Realloc(ImageData.Num());
+	if (DestinationData == nullptr)
+	{
+		Mip.BulkData.Unlock();
+		return false;
+	}
+	FMemory::Memcpy(DestinationData, ImageData.GetData(), ImageData.Num());
+	Mip.BulkData.Unlock();
 	GeneratedTexture->UpdateResource();
+	if (FApp::CanEverRender()
+		&& GeneratedTexture->GetResource() == nullptr)
+	{
+		return false;
+	}
 	TrailSpriteTexture = GeneratedTexture;
 	GeneratedSpriteSoftness = Softness;
 	return true;

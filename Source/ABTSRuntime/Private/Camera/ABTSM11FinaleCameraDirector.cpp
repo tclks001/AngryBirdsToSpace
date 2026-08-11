@@ -46,9 +46,11 @@ namespace
 		const int32 IncomingAssistIndex,
 		const int32 OutgoingAssistIndex,
 		const double RevealStartSeconds,
+		const double BridgeEndAbsoluteSeconds,
+		const double AcquireEndAbsoluteSeconds,
+		const double EntryStartAbsoluteSeconds,
 		const FABTSM11TrajectoryEvent& IncomingEnter,
 		const FABTSM11TrajectoryEvent& IncomingClosest,
-		const FABTSM11FinaleCameraShotSettings& Settings,
 		FABTSM11FinaleCameraStageSelection& Selection)
 	{
 		const double ShotDurationSeconds = FMath::Max(
@@ -58,17 +60,19 @@ namespace
 			PlaybackSeconds - RevealStartSeconds,
 			0.0,
 			ShotDurationSeconds);
-		const double RemainingSeconds =
-			IncomingEnter.TimeSeconds - PlaybackSeconds;
-		const double BridgeEndSeconds = OutgoingAssistIndex > 0
-			? Settings.DualBodyBridgeSeconds
-			: 0.0;
-		const double RevealEndSeconds = BridgeEndSeconds
-			+ Settings.IncomingAcquireSeconds;
-		const double EntryStartSeconds = FMath::Max(
+		const double BridgeEndSeconds = FMath::Clamp(
+			BridgeEndAbsoluteSeconds - RevealStartSeconds,
 			0.0,
-			ShotDurationSeconds - Settings.EntryMatchSeconds);
-		if (RemainingSeconds <= Settings.EntryMatchSeconds)
+			ShotDurationSeconds);
+		const double RevealEndSeconds = FMath::Clamp(
+			AcquireEndAbsoluteSeconds - RevealStartSeconds,
+			BridgeEndSeconds,
+			ShotDurationSeconds);
+		const double EntryStartSeconds = FMath::Clamp(
+			EntryStartAbsoluteSeconds - RevealStartSeconds,
+			RevealEndSeconds,
+			ShotDurationSeconds);
+		if (PlaybackSeconds >= EntryStartAbsoluteSeconds)
 		{
 			Selection.ShotPhase =
 				EABTSM11FinaleCameraShotPhase::IncomingEntryMatch;
@@ -76,9 +80,8 @@ namespace
 				ShotElapsedSeconds,
 				EntryStartSeconds,
 				ShotDurationSeconds);
-			Selection.ShotPhaseDurationSeconds = FMath::Min(
-				Settings.EntryMatchSeconds,
-				ShotDurationSeconds);
+			Selection.ShotPhaseDurationSeconds = FMath::Max(
+				0.0, ShotDurationSeconds - EntryStartSeconds);
 		}
 		else if (OutgoingAssistIndex > 0
 			&& ShotElapsedSeconds < BridgeEndSeconds)
@@ -99,8 +102,8 @@ namespace
 				ShotElapsedSeconds,
 				BridgeEndSeconds,
 				RevealEndSeconds);
-			Selection.ShotPhaseDurationSeconds =
-				Settings.IncomingAcquireSeconds;
+			Selection.ShotPhaseDurationSeconds = FMath::Max(
+				0.0, RevealEndSeconds - BridgeEndSeconds);
 		}
 		else
 		{
@@ -166,8 +169,23 @@ namespace
 		const double PlaybackSeconds,
 		const FABTSM11TrajectoryResult& Result,
 		const FABTSM11FinaleCameraShotSettings& Settings,
+		const FABTSM11FinaleCameraShotPlan* FrozenShotPlan,
 		FABTSM11FinaleCameraStageSelection& Selection)
 	{
+		FABTSM11FinaleCameraShotPlan LocalShotPlan;
+		const FABTSM11FinaleCameraShotPlan* ActiveShotPlan = FrozenShotPlan;
+		if (ActiveShotPlan == nullptr)
+		{
+			if (!LocalShotPlan.Build(Result, Settings))
+			{
+				return false;
+			}
+			ActiveShotPlan = &LocalShotPlan;
+		}
+		if (!ActiveShotPlan->IsUsableFor(Result))
+		{
+			return false;
+		}
 		const FABTSM11TrajectoryEvent* FirstEnter = Result.FindAssistEvent(
 			EABTSM11TrajectoryEventType::AssistEnter,
 			1);
@@ -188,9 +206,13 @@ namespace
 				1,
 				0,
 				0.0,
+				0.0,
+				FMath::Min(Settings.IncomingAcquireSeconds,
+					FirstEnter->TimeSeconds),
+				FMath::Max(0.0,
+					FirstEnter->TimeSeconds - Settings.EntryMatchSeconds),
 				*FirstEnter,
 				*FirstClosest,
-				Settings,
 				Selection);
 		}
 		for (int32 IncomingAssistIndex = 2;
@@ -220,58 +242,30 @@ namespace
 				return false;
 			}
 
-			const double ForegroundClearSeconds = FMath::Lerp(
-				OutgoingClosest->TimeSeconds,
-				OutgoingExit->TimeSeconds,
-				Settings.ForegroundTransitClearProgress);
-			const double MinimumIncomingShotSeconds =
-				Settings.DualBodyBridgeSeconds
-				+ Settings.IncomingAcquireSeconds
-				+ Settings.MinimumIncomingTrackSeconds
-				+ Settings.EntryMatchSeconds;
-			const double LatestRevealStartSeconds =
-				IncomingEnter->TimeSeconds - MinimumIncomingShotSeconds;
-			const double EarliestRevealStartSeconds = FMath::Max3(
-				OutgoingClosest->TimeSeconds
-					+ Settings.MinimumDepartureHoldSeconds,
-				IncomingEnter->TimeSeconds
-					- Settings.IncomingRevealLeadSeconds,
-				ForegroundClearSeconds);
-			if (LatestRevealStartSeconds
-					< ForegroundClearSeconds
-						+ Settings.MinimumOutgoingReleaseSeconds
-				|| EarliestRevealStartSeconds > LatestRevealStartSeconds)
+			const FABTSM11FinaleCameraTransitionTiming* Timing =
+				ActiveShotPlan->FindTransition(IncomingAssistIndex);
+			if (Timing == nullptr)
 			{
-				// Do not steal time from the foreground transit or collapse the
-				// incoming continuity chain for an over-compressed candidate.
 				return false;
 			}
-			const double PreferredRevealStartSeconds = FMath::Max(
-				EarliestRevealStartSeconds,
-				ForegroundClearSeconds + Settings.OutgoingReleaseSeconds);
-			const double RevealStartSeconds = FMath::Min(
-				PreferredRevealStartSeconds,
-				LatestRevealStartSeconds);
-			const double OutgoingStartSeconds = FMath::Max(
-				ForegroundClearSeconds,
-				RevealStartSeconds - Settings.OutgoingReleaseSeconds);
-			if (PlaybackSeconds < OutgoingStartSeconds
+			if (PlaybackSeconds < Timing->OutgoingStartSeconds
 				|| PlaybackSeconds >= IncomingEnter->TimeSeconds)
 			{
 				continue;
 			}
 
-			if (PlaybackSeconds < RevealStartSeconds)
+			if (PlaybackSeconds < Timing->RevealStartSeconds)
 			{
 				Selection.ShotPhase =
 					EABTSM11FinaleCameraShotPhase::OutgoingHold;
 				Selection.ShotProgress = ResolveStageProgress(
 					PlaybackSeconds,
-					OutgoingStartSeconds,
-					RevealStartSeconds);
+					Timing->OutgoingStartSeconds,
+					Timing->RevealStartSeconds);
 				Selection.ShotDurationSeconds = FMath::Max(
 					0.0,
-					RevealStartSeconds - OutgoingStartSeconds);
+					Timing->RevealStartSeconds
+						- Timing->OutgoingStartSeconds);
 				Selection.ShotPhaseProgress = Selection.ShotProgress;
 				Selection.ShotPhaseDurationSeconds =
 					Selection.ShotDurationSeconds;
@@ -290,10 +284,12 @@ namespace
 				PlaybackSeconds,
 				IncomingAssistIndex,
 				OutgoingAssistIndex,
-				RevealStartSeconds,
+				Timing->RevealStartSeconds,
+				Timing->BridgeEndSeconds,
+				Timing->AcquireEndSeconds,
+				Timing->EntryStartSeconds,
 				*IncomingEnter,
 				*IncomingClosest,
-				Settings,
 				Selection);
 		}
 		return true;
@@ -351,6 +347,195 @@ bool FABTSM11FinaleCameraShotSettings::BuildPlaybackClockSettings(
 	OutSettings.MinimumIncomingTrackSeconds *= PlaybackTimeScale;
 	OutSettings.EntryMatchSeconds *= PlaybackTimeScale;
 	return OutSettings.IsUsable();
+}
+
+bool FABTSM11FinaleCameraTransitionTiming::IsUsable() const
+{
+	return OutgoingAssistIndex >= 1
+		&& IncomingAssistIndex == OutgoingAssistIndex + 1
+		&& FMath::IsFinite(OutgoingStartSeconds)
+		&& FMath::IsFinite(RevealStartSeconds)
+		&& FMath::IsFinite(BridgeEndSeconds)
+		&& FMath::IsFinite(AcquireEndSeconds)
+		&& FMath::IsFinite(EntryStartSeconds)
+		&& FMath::IsFinite(IncomingEnterSeconds)
+		&& OutgoingStartSeconds < RevealStartSeconds
+		&& RevealStartSeconds < BridgeEndSeconds
+		&& BridgeEndSeconds < AcquireEndSeconds
+		&& AcquireEndSeconds < EntryStartSeconds
+		&& EntryStartSeconds < IncomingEnterSeconds;
+}
+
+void FABTSM11FinaleCameraShotPlan::Reset()
+{
+	ReleasedTrajectoryHash = 0;
+	bUsesAdaptiveCompression = false;
+	for (FABTSM11FinaleCameraTransitionTiming& Timing : Transitions)
+	{
+		Timing = FABTSM11FinaleCameraTransitionTiming();
+	}
+}
+
+bool FABTSM11FinaleCameraShotPlan::Build(
+	const FABTSM11TrajectoryResult& Result,
+	const FABTSM11FinaleCameraShotSettings& Settings,
+	FString* OutFailure)
+{
+	Reset();
+	const auto Reject = [OutFailure](const FString& Reason)
+	{
+		if (OutFailure != nullptr)
+		{
+			*OutFailure = Reason;
+		}
+		return false;
+	};
+	if (Result.ValidationHash == 0 || !Settings.IsUsable())
+	{
+		return Reject(TEXT("M7ShotPlanAuthorityInvalid"));
+	}
+
+	for (int32 IncomingAssistIndex = 2;
+		IncomingAssistIndex <= FABTSM11GravityScenario::AssistCount;
+		++IncomingAssistIndex)
+	{
+		const int32 OutgoingAssistIndex = IncomingAssistIndex - 1;
+		const FABTSM11TrajectoryEvent* OutgoingClosest =
+			Result.FindAssistEvent(
+				EABTSM11TrajectoryEventType::ClosestApproach,
+				OutgoingAssistIndex);
+		const FABTSM11TrajectoryEvent* OutgoingExit = Result.FindAssistEvent(
+			EABTSM11TrajectoryEventType::AssistExit,
+			OutgoingAssistIndex);
+		const FABTSM11TrajectoryEvent* IncomingEnter = Result.FindAssistEvent(
+			EABTSM11TrajectoryEventType::AssistEnter,
+			IncomingAssistIndex);
+		if (OutgoingClosest == nullptr || OutgoingExit == nullptr
+			|| IncomingEnter == nullptr)
+		{
+			return Reject(FString::Printf(
+				TEXT("M7Assist%dEventsIncomplete"), IncomingAssistIndex));
+		}
+
+		FABTSM11FinaleCameraTransitionTiming& Timing =
+			Transitions[IncomingAssistIndex - 2];
+		Timing.OutgoingAssistIndex = OutgoingAssistIndex;
+		Timing.IncomingAssistIndex = IncomingAssistIndex;
+		Timing.IncomingEnterSeconds = IncomingEnter->TimeSeconds;
+		const double ForegroundClearSeconds = FMath::Lerp(
+			OutgoingClosest->TimeSeconds,
+			OutgoingExit->TimeSeconds,
+			Settings.ForegroundTransitClearProgress);
+		const double MinimumTotalSeconds =
+			Settings.MinimumOutgoingReleaseSeconds
+				+ Settings.DualBodyBridgeSeconds
+				+ Settings.IncomingAcquireSeconds
+				+ Settings.MinimumIncomingTrackSeconds
+				+ Settings.EntryMatchSeconds;
+		const double AvailableSeconds =
+			IncomingEnter->TimeSeconds - ForegroundClearSeconds;
+		if (!FMath::IsFinite(AvailableSeconds)
+			|| AvailableSeconds <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return Reject(FString::Printf(
+				TEXT("M7Assist%dNoTransitionWindow"), IncomingAssistIndex));
+		}
+
+		double OutgoingDuration = 0.0;
+		double BridgeDuration = Settings.DualBodyBridgeSeconds;
+		double AcquireDuration = Settings.IncomingAcquireSeconds;
+		double TrackDuration = Settings.MinimumIncomingTrackSeconds;
+		double EntryDuration = Settings.EntryMatchSeconds;
+		if (AvailableSeconds + UE_DOUBLE_SMALL_NUMBER >= MinimumTotalSeconds)
+		{
+			const double LatestRevealStartSeconds =
+				IncomingEnter->TimeSeconds
+					- (BridgeDuration + AcquireDuration
+						+ TrackDuration + EntryDuration);
+			const double EarliestRevealStartSeconds = FMath::Max3(
+				OutgoingClosest->TimeSeconds
+					+ Settings.MinimumDepartureHoldSeconds,
+				IncomingEnter->TimeSeconds
+					- Settings.IncomingRevealLeadSeconds,
+				ForegroundClearSeconds
+					+ Settings.MinimumOutgoingReleaseSeconds);
+			const double RevealStartSeconds = FMath::Min(
+				FMath::Max(
+					EarliestRevealStartSeconds,
+					ForegroundClearSeconds
+						+ Settings.OutgoingReleaseSeconds),
+				LatestRevealStartSeconds);
+			Timing.OutgoingStartSeconds = FMath::Max(
+				ForegroundClearSeconds,
+				RevealStartSeconds - Settings.OutgoingReleaseSeconds);
+			OutgoingDuration =
+				RevealStartSeconds - Timing.OutgoingStartSeconds;
+		}
+		else
+		{
+			// A valid gameplay path must not fail because its presentation window
+			// is shorter than the preferred cut. Compress every protected phase
+			// proportionally while retaining strict phase ordering and continuity.
+			const double Compression = AvailableSeconds / MinimumTotalSeconds;
+			OutgoingDuration =
+				Settings.MinimumOutgoingReleaseSeconds * Compression;
+			BridgeDuration *= Compression;
+			AcquireDuration *= Compression;
+			TrackDuration *= Compression;
+			EntryDuration *= Compression;
+			Timing.OutgoingStartSeconds = ForegroundClearSeconds;
+			Timing.bAdaptiveCompression = true;
+			bUsesAdaptiveCompression = true;
+		}
+
+		Timing.RevealStartSeconds =
+			Timing.OutgoingStartSeconds + OutgoingDuration;
+		Timing.BridgeEndSeconds =
+			Timing.RevealStartSeconds + BridgeDuration;
+		Timing.AcquireEndSeconds =
+			Timing.BridgeEndSeconds + AcquireDuration;
+		Timing.EntryStartSeconds =
+			IncomingEnter->TimeSeconds - EntryDuration;
+		if (!Timing.IsUsable())
+		{
+			return Reject(FString::Printf(
+				TEXT("M7Assist%dScheduleRejected"), IncomingAssistIndex));
+		}
+	}
+	ReleasedTrajectoryHash = Result.ValidationHash;
+	return IsUsableFor(Result);
+}
+
+bool FABTSM11FinaleCameraShotPlan::IsUsableFor(
+	const FABTSM11TrajectoryResult& Result) const
+{
+	if (ReleasedTrajectoryHash == 0
+		|| ReleasedTrajectoryHash != Result.ValidationHash)
+	{
+		return false;
+	}
+	for (const FABTSM11FinaleCameraTransitionTiming& Timing : Transitions)
+	{
+		if (!Timing.IsUsable())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+const FABTSM11FinaleCameraTransitionTiming*
+FABTSM11FinaleCameraShotPlan::FindTransition(
+	const int32 IncomingAssistIndex) const
+{
+	for (const FABTSM11FinaleCameraTransitionTiming& Timing : Transitions)
+	{
+		if (Timing.IncomingAssistIndex == IncomingAssistIndex)
+		{
+			return &Timing;
+		}
+	}
+	return nullptr;
 }
 
 bool FABTSM11FinaleCameraStageSelection::IsUsable() const
@@ -584,7 +769,8 @@ ABTSM11FinaleCameraDirector::ResolveStage(
 	const double PlaybackSeconds,
 	const FABTSM11TrajectoryResult* Result,
 	const bool bUseM3ShotPlan,
-	const FABTSM11FinaleCameraShotSettings* M3ShotSettings)
+	const FABTSM11FinaleCameraShotSettings* M3ShotSettings,
+	const FABTSM11FinaleCameraShotPlan* FrozenShotPlan)
 {
 	FABTSM11FinaleCameraStageSelection Selection;
 	if (!bLaunched && !bTargetHit)
@@ -633,6 +819,7 @@ ABTSM11FinaleCameraDirector::ResolveStage(
 				PlaybackSeconds,
 				*Result,
 				*ActiveM3ShotSettings,
+				FrozenShotPlan,
 				Selection);
 	};
 

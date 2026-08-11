@@ -284,6 +284,37 @@ M4 终端构图现不再让鸟/UFO 围绕对称质心漂移，而将 UFO 固定�
 - 四鸟都在安全框，队形 Roll 连续；
 - 不改变 M0–M5 的 Rank、轨迹和渲染正交合同。
 
+### M7：玩家自定义 F4 实飞电影镜头（已完成）
+
+详细设计与验收合同见 [`M11FinaleCameraM7CustomLaunchDirection.md`](M11FinaleCameraM7CustomLaunchDirection.md)。本阶段把现有 Nominal 路线导演扩展到玩家在完整 `Yaw × Pitch × Power` 域内提交的任意 F4 可达路线：
+
+- 发射时冻结本次 Released Trajectory 与其 Hash，镜头不再读取随后可能变化的预览结果；
+- 由该 Released 事件流一次性建立两段跨行星镜头日程；标准窗口维持 M3 已验收节奏，短窗口按同一阶段顺序自适应压缩；
+- 镜头日程或构图失败只能降级到 authority follow 并记诊断，不得把合格 F4 玩法结果转成失败黑屏；
+- 独立录屏新增完整的 `Yaw/Pitch/Power` 三元输入，Manifest 冻结输入、Released Hash、Plan Hash 与导演证据；
+- 阶段验收至少随机选取两组彼此不同的 Rank 11 F4 输入，在 `Stylized=1` 下分别完成物理 UFO 接触录屏。Rank 11 仍是 `UNCERTIFIED`，两次录屏只证明导演泛用性。
+
+### PIE 实飞启用与冻结语义
+
+当前功能工作树不修改生产默认绑定；在 PIE 发射前使用控制台显式选择导演层：
+
+```text
+abts.M11.CameraDirector.M2.Enabled 0
+abts.M11.CameraDirector.M3.Enabled 1
+```
+
+`M2` 是仅覆盖 Assist1 的历史 A/B 开关；`M2=1, M3=0` 的预期表现就是第一颗行星使用 M2、后续行星回到旧镜头，并不等价于完整终局导演。`M3` 才覆盖三颗行星、双星桥接和 UFO 收束。两个值会在发射首帧冻结，本次飞行中途修改不生效；需要复测时应先结束本次飞行或重新进入 PIE，在下一次发射前设置。发射日志必须包含 `DirectorFrozen M2=0 M3=1 Mode=MultiAssistM3`；若误用 M2-only，日志会输出 `M2OnlyFirstAssist` 警告。
+
+### 终局接管期间的 FXAA 合同
+
+2026-08-11 可见 PIE A/B 已确认，Soft Sprite 尾迹在运动时变淡并不是运动模糊，也不是粒子出生后缓慢亮起：`r.MotionBlurQuality 0` 不改变现象，而关闭时域抗锯齿后立即恢复正常。M11 运行时生成的 PDI Sprite 没有可供 TSR/TAA 使用的可靠运动矢量与响应式历史标记，快速运动的细小半透明点会被时域历史抑制。因此终局 Flight Camera 的正式接管合同固定为 FXAA（`r.AntiAliasingMethod 1`）。
+
+- 只有 `BeginAuthorityFollow` 成功后才保存当前 AA 方法并切换 FXAA；瞄准和未发射阶段不受影响；
+- 接管期间每次权威相机更新都会校验 FXAA，防止后续 Profile/CVar 重写重新启用 TSR/TAA；
+- `ResetAuthorityFollow` 与 `EndPlay` 都恢复接管前的 AA 方法，失败、重置和 Actor 销毁均不会把 FXAA 泄漏到其他玩法阶段；
+- PIE 与独立离线录屏共用同一 Flight Camera 生命周期，因此不再依赖录制脚本额外设置 AA；
+- 该合同只改变终局演出的抗锯齿方式，不改变 Stylized Profile、尾迹采样、镜头构图、Released 轨迹或候选身份。
+
 ## 6. 性能预算
 
 - M0 Runner 是开发期验收工具：每帧新增一次 1280×720 SceneCapture、同步读回与 JPG 压缩，明确不纳入生产运行时预算；未显式传入 `-ABTSM11CameraCapture` 时零开销、零对象。

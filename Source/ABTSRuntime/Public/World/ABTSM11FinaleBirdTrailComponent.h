@@ -66,6 +66,7 @@ public:
 	float GetTrailCoreFadeExponent() const;
 	float GetTrailHaloFadeExponent() const;
 	bool HasGeneratedSpriteTexture() const;
+	bool HasGeneratedSpriteTextureResource() const;
 	int32 GetGeneratedSpriteTextureSize() const;
 	float GetDistanceUntilNextEmissionCM() const
 	{

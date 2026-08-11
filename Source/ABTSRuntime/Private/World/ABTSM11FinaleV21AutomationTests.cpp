@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "HAL/IConsoleManager.h"
+#include "Camera/ABTSM11FinaleCameraDirector.h"
 #include "World/ABTSM11CandidateExperienceCatalog.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
@@ -597,6 +598,87 @@ bool FABTSM11CV21FrozenV4CandidateCatalogTest::RunTest(
 				Classification.IsF(4));
 		}
 	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CM7RandomF4WitnessTest,
+	"ABTS.M11C.M7.RandomF4Witnesses",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CM7RandomF4WitnessTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSM11FinaleLayoutPreset Preset;
+	FABTSM11CandidateExperienceIdentity Identity;
+	FString Failure;
+	if (!FABTSM11CandidateExperienceCatalog::BuildCandidate(
+		11, Preset, Identity, &Failure))
+	{
+		AddError(FString::Printf(
+			TEXT("Rank11 rebuild failed: %s"), *Failure));
+		return false;
+	}
+
+	FRandomStream Random(0x4d3757a1);
+	TSet<uint64> WitnessHashes;
+	int32 WitnessCount = 0;
+	for (int32 Attempt = 0; Attempt < 96 && WitnessCount < 2; ++Attempt)
+	{
+		FABTSM11FinaleLaunchInput Input = Preset.NominalInput;
+		Input.YawDegrees += Random.FRandRange(-0.20f, 0.20f);
+		Input.PitchDegrees += Random.FRandRange(-0.20f, 0.20f);
+		Input.Power -= Random.FRandRange(0.00025f, 0.00450f);
+		if (!Preset.LaunchModel.Contains(Input))
+		{
+			continue;
+		}
+		FABTSM11TrajectoryRequest Request;
+		FABTSM11TrajectoryResult Result;
+		if (!Preset.BuildRequest(Input, 0x7u, Request, &Failure)
+			|| !FABTSM11GravityAssistSolver::Solve(Request, Result, &Failure))
+		{
+			continue;
+		}
+		const FABTSM11PrefixClassification Classification =
+			FABTSM11PrefixClassifier::Classify(Preset, Result, 0x7u);
+		if (!Classification.IsF(4)
+			|| WitnessHashes.Contains(Result.ValidationHash))
+		{
+			continue;
+		}
+		FABTSM11PlaybackPlan ContactPlan;
+		if (!ContactPlan.BuildCandidatePresentationContact(
+			Preset, Result, Classification))
+		{
+			continue;
+		}
+		FABTSM11FinaleCameraShotPlan CameraPlan;
+		if (!CameraPlan.Build(
+			Result, FABTSM11FinaleCameraShotSettings(), &Failure))
+		{
+			continue;
+		}
+		WitnessHashes.Add(Result.ValidationHash);
+		++WitnessCount;
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[ABTS][M11-C][M7] RandomF4Witness Seed=0x4d3757a1 Index=%d Attempt=%d Yaw=%.12f Pitch=%.12f Power=%.12f Result=0x%016llx Plan=0x%016llx Adaptive=%d"),
+			WitnessCount,
+			Attempt,
+			Input.YawDegrees,
+			Input.PitchDegrees,
+			Input.Power,
+			Result.ValidationHash,
+			ContactPlan.PlanHash,
+			CameraPlan.bUsesAdaptiveCompression ? 1 : 0);
+	}
+	TestEqual(
+		TEXT("Deterministic Rank11 neighborhood yields two distinct F4 recordings"),
+		WitnessCount,
+		2);
 	return !HasAnyErrors();
 }
 

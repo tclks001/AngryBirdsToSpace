@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "HAL/IConsoleManager.h"
+#include "Misc/App.h"
 #include "UObject/UObjectGlobals.h"
 #include "World/ABTSM11FinaleBirdTrailComponent.h"
 
@@ -46,6 +47,9 @@ bool FABTSM11FinaleBirdTrailHistoryTest::RunTest(
 		1);
 	TestTrue(TEXT("Begin creates the asset-free sprite texture"),
 		SingleStepTrail->HasGeneratedSpriteTexture());
+	TestTrue(TEXT("Renderable processes own the sprite resource before proxy creation"),
+		!FApp::CanEverRender()
+			|| SingleStepTrail->HasGeneratedSpriteTextureResource());
 	TestEqual(TEXT("Generated sprite texture has the frozen resolution"),
 		SingleStepTrail->GetGeneratedSpriteTextureSize(),
 		64);

@@ -453,6 +453,26 @@ bool FABTSM11FinaleCameraCaptureConfig::Parse(
 		CommandLine,
 		TEXT("ABTSM11CaptureRank="),
 		OutConfig.CandidateRank);
+	const bool bHasYaw = FParse::Value(
+		CommandLine,
+		TEXT("ABTSM11CaptureYaw="),
+		OutConfig.CustomLaunchInput.YawDegrees);
+	const bool bHasPitch = FParse::Value(
+		CommandLine,
+		TEXT("ABTSM11CapturePitch="),
+		OutConfig.CustomLaunchInput.PitchDegrees);
+	const bool bHasPower = FParse::Value(
+		CommandLine,
+		TEXT("ABTSM11CapturePower="),
+		OutConfig.CustomLaunchInput.Power);
+	if ((bHasYaw || bHasPitch || bHasPower)
+		&& !(bHasYaw && bHasPitch && bHasPower))
+	{
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("ABTSM11CaptureYaw/Pitch/Power must be supplied together."));
+	}
+	OutConfig.bCustomLaunchInput = bHasYaw && bHasPitch && bHasPower;
 	if (!ParseBoolOption(
 		CommandLine,
 		TEXT("ABTSM11CaptureStylized="),
@@ -548,6 +568,12 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("M2 and M3 camera director modes are mutually exclusive."));
+	}
+	if (bCustomLaunchInput && !CustomLaunchInput.IsFinite())
+	{
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("Custom capture launch input must be finite."));
 	}
 	if (WarmupFrames < 0 || WarmupFrames > 600
 		|| TerminalHoldFrames < 0 || TerminalHoldFrames > 600)
@@ -963,20 +989,28 @@ bool AABTSM11FinaleCameraCaptureRunner::TryBeginNominalAttempt()
 	{
 		return false;
 	}
-	if (!InteractionSystem->TryLaunchNominalCaptureAttempt(
-		*MatchingCord,
-		*Controller))
+	const FABTSM11FinaleLaunchInput Input = Config.bCustomLaunchInput
+		? Config.CustomLaunchInput
+		: FinaleSystem->GetLayoutPreset().NominalInput;
+	if (!FinaleSystem->GetLayoutPreset().LaunchModel.Contains(Input))
 	{
-		FailureReason = TEXT("NominalCaptureAttemptRejected");
+		FailureReason = TEXT("CaptureLaunchInputOutsidePresetDomain");
+		return false;
+	}
+	if (!InteractionSystem->TryLaunchCaptureAttempt(
+		*MatchingCord,
+		*Controller,
+		Input))
+	{
+		FailureReason = TEXT("CaptureAttemptRejected");
 		return false;
 	}
 
-	const FABTSM11FinaleLaunchInput& Input =
-		FinaleSystem->GetLayoutPreset().NominalInput;
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11][CameraCapture] NominalAttemptQueued Rank=%d Yaw=%.6f Pitch=%.6f Power=%.6f"),
+		TEXT("[ABTS][M11][CameraCapture] AttemptQueued Mode=%s Rank=%d Yaw=%.9f Pitch=%.9f Power=%.9f"),
+		Config.bCustomLaunchInput ? TEXT("CustomF4") : TEXT("Nominal"),
 		Config.CandidateRank,
 		Input.YawDegrees,
 		Input.PitchDegrees,
@@ -1960,6 +1994,17 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetStringField(TEXT("endUtc"), EndUtc.ToIso8601());
 	Root->SetNumberField(TEXT("rank"), Config.CandidateRank);
 	Root->SetStringField(
+		TEXT("launchInputMode"),
+		Config.bCustomLaunchInput ? TEXT("CustomF4") : TEXT("Nominal"));
+	const FABTSM11FinaleLaunchInput ManifestInput = Config.bCustomLaunchInput
+		? Config.CustomLaunchInput
+		: IsValid(FinaleSystem)
+			? FinaleSystem->GetLayoutPreset().NominalInput
+			: FABTSM11FinaleLaunchInput();
+	Root->SetNumberField(TEXT("launchYawDegrees"), ManifestInput.YawDegrees);
+	Root->SetNumberField(TEXT("launchPitchDegrees"), ManifestInput.PitchDegrees);
+	Root->SetNumberField(TEXT("launchPower"), ManifestInput.Power);
+	Root->SetStringField(
 		TEXT("authority"),
 		Config.CandidateRank == 0 ? TEXT("Certified") : TEXT("UNCERTIFIED"));
 	Root->SetBoolField(TEXT("stylizedEnabled"), Config.bStylized);
@@ -1969,6 +2014,17 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		!Config.bTelemetryOnly);
 	Root->SetBoolField(TEXT("cameraDirectorM2Requested"), Config.bDirectorM2);
 	Root->SetBoolField(TEXT("cameraDirectorM3Requested"), Config.bDirectorM3);
+	Root->SetBoolField(
+		TEXT("m7AdaptiveShotCompression"),
+		IsValid(InteractionSystem)
+			&& InteractionSystem->GetReleasedCameraShotPlan()
+				.bUsesAdaptiveCompression);
+	Root->SetStringField(
+		TEXT("m7CameraPlanTrajectoryHash"),
+		IsValid(InteractionSystem)
+			? Hex64(InteractionSystem->GetReleasedCameraShotPlan()
+				.ReleasedTrajectoryHash)
+			: Hex64(0));
 	Root->SetStringField(
 		TEXT("cameraDirectorMode"),
 		Config.bDirectorM3
@@ -2410,9 +2466,9 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	const FString& Parameters)
 {
 	TestEqual(
-		TEXT("Capture contract version is M5 orthogonality telemetry v14"),
+		TEXT("Capture contract version includes M7 custom F4 input v15"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
-		14);
+		15);
 
 	FABTSM11FinaleCameraCaptureConfig Config;
 	FString Failure;
@@ -2478,6 +2534,30 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestFalse(TEXT("Telemetry style is disabled"), Config.bStylized);
 	TestTrue(TEXT("Telemetry-only mode preserved"), Config.bTelemetryOnly);
 	TestTrue(TEXT("Telemetry M3 director preserved"), Config.bDirectorM3);
+
+	const FString CustomCommandLine = FString::Printf(
+		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=11 ")
+		TEXT("-ABTSM11CaptureYaw=-1.5 -ABTSM11CapturePitch=26.5 ")
+		TEXT("-ABTSM11CapturePower=0.99 -MovieFolder=\"%s\" ")
+		TEXT("-MovieName=CustomF4 -MovieFormat=JPG"),
+		*Output);
+	TestTrue(
+		TEXT("Complete custom launch triplet parses"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			*CustomCommandLine, Config, &Failure));
+	TestTrue(TEXT("Custom launch mode preserved"), Config.bCustomLaunchInput);
+	TestEqual(TEXT("Custom yaw preserved"),
+		Config.CustomLaunchInput.YawDegrees, -1.5, 1.0e-12);
+	TestEqual(TEXT("Custom pitch preserved"),
+		Config.CustomLaunchInput.PitchDegrees, 26.5, 1.0e-12);
+	TestEqual(TEXT("Custom power preserved"),
+		Config.CustomLaunchInput.Power, 0.99, 1.0e-12);
+	TestFalse(
+		TEXT("Partial custom launch triplet fails closed"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureYaw=-1.5 ")
+			TEXT("-MovieFolder=C:/Capture -MovieName=PartialInput ")
+			TEXT("-MovieFormat=JPG"), Config, &Failure));
 
 	FABTSM11FinaleCameraObservationSample DigestSample;
 	DigestSample.FrameIndex = 7;

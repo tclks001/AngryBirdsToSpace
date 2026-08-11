@@ -2,7 +2,10 @@
 
 #include "Camera/ABTSM11FinaleFlightCamera.h"
 
+#include "ABTSRuntime.h"
 #include "Camera/CameraComponent.h"
+#include "HAL/IConsoleManager.h"
+#include "SceneUtils.h"
 
 namespace
 {
@@ -1753,6 +1756,13 @@ AABTSM11FinaleFlightCamera::AABTSM11FinaleFlightCamera()
 		static_cast<float>(BaselineFovDegrees));
 }
 
+void AABTSM11FinaleFlightCamera::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	RestoreFinaleAntiAliasingOverride();
+	Super::EndPlay(EndPlayReason);
+}
+
 bool AABTSM11FinaleFlightCamera::BeginAuthorityFollow(
 	const FVector& TargetPosition,
 	const FVector& TrajectoryTangent,
@@ -1781,12 +1791,31 @@ bool AABTSM11FinaleFlightCamera::BeginAuthorityFollow(
 		ABTSM11FinaleCameraDirector::IsM2Enabled();
 	bM3DirectorFrozenEnabled =
 		ABTSM11FinaleCameraDirector::IsM3Enabled();
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][FlightCamera] DirectorFrozen M2=%d M3=%d Mode=%s"),
+		bM2DirectorFrozenEnabled ? 1 : 0,
+		bM3DirectorFrozenEnabled ? 1 : 0,
+		bM3DirectorFrozenEnabled
+			? TEXT("MultiAssistM3")
+			: bM2DirectorFrozenEnabled
+				? TEXT("Assist1OnlyM2")
+				: TEXT("Legacy"));
+	if (bM2DirectorFrozenEnabled && !bM3DirectorFrozenEnabled)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C][FlightCamera] M2OnlyFirstAssist: M2 directs Assist1 only; set abts.M11.CameraDirector.M2.Enabled 0 and abts.M11.CameraDirector.M3.Enabled 1 before release for the complete finale camera."));
+	}
 	LastM2BlendAlpha = 0.0;
 	LastM2RetreatAlpha = 0.0;
 	LastM2TransitScreenXInTargetRadii = -M2TransitCruiseFarOffsetRadii;
 	GetCameraComponent()->SetFieldOfView(
 		static_cast<float>(BaselineFovDegrees));
 	LastDirectorStage = EABTSM11FinaleCameraStage::PreLaunch;
+	ActivateFinaleAntiAliasingOverride();
 	bAuthorityFollowActive = true;
 	return true;
 }
@@ -1802,6 +1831,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	{
 		return false;
 	}
+	EnsureFinaleAntiAliasingOverride();
 	const FVector AuthorityTargetTranslation =
 		TargetPosition - LastAuthorityTargetPosition;
 	FABTSM11FinaleFlightCameraFrame Frame;
@@ -2200,6 +2230,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 
 void AABTSM11FinaleFlightCamera::ResetAuthorityFollow()
 {
+	RestoreFinaleAntiAliasingOverride();
 	bAuthorityFollowActive = false;
 	LastAuthorityForward = FVector::ForwardVector;
 	LastTransportedUp = FVector::UpVector;
@@ -2212,6 +2243,76 @@ void AABTSM11FinaleFlightCamera::ResetAuthorityFollow()
 	bM3DirectorFrozenEnabled = false;
 	GetCameraComponent()->SetFieldOfView(
 		static_cast<float>(BaselineFovDegrees));
+}
+
+void AABTSM11FinaleFlightCamera::ActivateFinaleAntiAliasingOverride()
+{
+	IConsoleVariable* AntiAliasingMethod =
+		IConsoleManager::Get().FindConsoleVariable(
+			TEXT("r.AntiAliasingMethod"));
+	if (AntiAliasingMethod == nullptr)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C][FlightCamera] AntiAliasingOverride unavailable: r.AntiAliasingMethod was not registered."));
+		return;
+	}
+
+	PreviousAntiAliasingMethod = AntiAliasingMethod->GetInt();
+	bFinaleAntiAliasingOverrideActive = true;
+	EnsureFinaleAntiAliasingOverride();
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][FlightCamera] AntiAliasingOverride Active=1 Previous=%d Current=%d Required=FXAA"),
+		PreviousAntiAliasingMethod,
+		AntiAliasingMethod->GetInt());
+}
+
+void AABTSM11FinaleFlightCamera::EnsureFinaleAntiAliasingOverride() const
+{
+	if (!bFinaleAntiAliasingOverrideActive)
+	{
+		return;
+	}
+	IConsoleVariable* AntiAliasingMethod =
+		IConsoleManager::Get().FindConsoleVariable(
+			TEXT("r.AntiAliasingMethod"));
+	if (AntiAliasingMethod != nullptr
+		&& AntiAliasingMethod->GetInt() != static_cast<int32>(AAM_FXAA))
+	{
+		AntiAliasingMethod->SetWithCurrentPriority(
+			static_cast<int32>(AAM_FXAA),
+			FName(TEXT("ABTSM11FinaleCamera")),
+			ECVF_SetByConsole,
+			ECVF_SetByScalability);
+	}
+}
+
+void AABTSM11FinaleFlightCamera::RestoreFinaleAntiAliasingOverride()
+{
+	if (!bFinaleAntiAliasingOverrideActive)
+	{
+		return;
+	}
+	IConsoleVariable* AntiAliasingMethod =
+		IConsoleManager::Get().FindConsoleVariable(
+			TEXT("r.AntiAliasingMethod"));
+	if (AntiAliasingMethod != nullptr)
+	{
+		AntiAliasingMethod->SetWithCurrentPriority(
+			PreviousAntiAliasingMethod,
+			FName(TEXT("ABTSM11FinaleCameraRestore")),
+			ECVF_SetByConsole,
+			ECVF_SetByScalability);
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-C][FlightCamera] AntiAliasingOverride Active=0 Restored=%d"),
+			AntiAliasingMethod->GetInt());
+	}
+	bFinaleAntiAliasingOverrideActive = false;
 }
 
 bool AABTSM11FinaleFlightCamera::BuildAuthorityFrame(

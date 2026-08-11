@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Async/Future.h"
+#include "Camera/ABTSM11FinaleCameraDirector.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "UI/ABTSM11FinaleHUDData.h"
@@ -56,6 +57,11 @@ public:
 	bool TryLaunchNominalCaptureAttempt(
 		AABTSM51SlingshotCord& Cord,
 		APlayerController& Controller);
+	/** Acceptance-only entry that submits one explicit player launch input. */
+	bool TryLaunchCaptureAttempt(
+		AABTSM51SlingshotCord& Cord,
+		APlayerController& Controller,
+		const FABTSM11FinaleLaunchInput& Input);
 	bool BeginAimFromCursor(APlayerController& Controller);
 	bool UpdateAimFromCursor(APlayerController& Controller);
 	void AdjustAimPower(double WheelSteps);
@@ -145,6 +151,10 @@ public:
 	const FABTSM11PlaybackPlan& GetReleasedPlaybackPlan() const
 	{
 		return ReleasedPlaybackPlan;
+	}
+	const FABTSM11FinaleCameraShotPlan& GetReleasedCameraShotPlan() const
+	{
+		return ReleasedCameraShotPlan;
 	}
 	const FABTSM11TrajectoryResult* GetCurrentPrediction() const;
 	/** Exact current result used by the selected target's PIP. */
@@ -335,6 +345,8 @@ private:
 	FABTSM11TrajectoryResult NominalPhysicalResult;
 	FABTSM11PlaybackPlan PreviewPlaybackPlan;
 	FABTSM11PlaybackPlan ReleasedPlaybackPlan;
+	FABTSM11TrajectoryResult ReleasedCameraTrajectoryResult;
+	FABTSM11FinaleCameraShotPlan ReleasedCameraShotPlan;
 	FABTSM11OrbitalDiagramSnapshot DiagramSnapshot;
 	FABTSM11FinaleControlPanelState HudControlPanel;
 	FABTSM11OverviewViewState HudOverviewView;
@@ -374,6 +386,7 @@ private:
 	bool bNominalPhysicalReady = false;
 	bool bLatestPhysicalResultAvailable = false;
 	bool bAttemptBirdInPouch = false;
+	bool bCameraDirectorFallbackLogged = false;
 	bool bTargetCaptureDirty = false;
 	bool bTargetCaptureInitialized = false;
 	bool bAimFrameValid = false;

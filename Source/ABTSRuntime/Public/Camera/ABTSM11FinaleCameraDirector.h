@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/StaticArray.h"
 
 struct FABTSM11TrajectoryResult;
 
@@ -63,6 +64,42 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraShotSettings
 	bool BuildPlaybackClockSettings(
 		double PlaybackTimeScale,
 		FABTSM11FinaleCameraShotSettings& OutSettings) const;
+};
+
+/** One release-frozen inter-body schedule, expressed in trajectory clock. */
+struct ABTSRUNTIME_API FABTSM11FinaleCameraTransitionTiming
+{
+	int32 OutgoingAssistIndex = 0;
+	int32 IncomingAssistIndex = 0;
+	double OutgoingStartSeconds = 0.0;
+	double RevealStartSeconds = 0.0;
+	double BridgeEndSeconds = 0.0;
+	double AcquireEndSeconds = 0.0;
+	double EntryStartSeconds = 0.0;
+	double IncomingEnterSeconds = 0.0;
+	bool bAdaptiveCompression = false;
+
+	bool IsUsable() const;
+};
+
+/**
+ * Per-release M7 shot schedule. It is built once from the released F4 event
+ * stream so later preview solves cannot retime a flight already in progress.
+ */
+struct ABTSRUNTIME_API FABTSM11FinaleCameraShotPlan
+{
+	uint64 ReleasedTrajectoryHash = 0;
+	TStaticArray<FABTSM11FinaleCameraTransitionTiming, 2> Transitions;
+	bool bUsesAdaptiveCompression = false;
+
+	bool Build(
+		const FABTSM11TrajectoryResult& Result,
+		const FABTSM11FinaleCameraShotSettings& Settings,
+		FString* OutFailure = nullptr);
+	bool IsUsableFor(const FABTSM11TrajectoryResult& Result) const;
+	const FABTSM11FinaleCameraTransitionTiming* FindTransition(
+		int32 IncomingAssistIndex) const;
+	void Reset();
 };
 
 /** Pure-data result of resolving one playback time against authority events. */
@@ -152,7 +189,8 @@ namespace ABTSM11FinaleCameraDirector
 		double PlaybackSeconds,
 		const FABTSM11TrajectoryResult* Result,
 		bool bUseM3ShotPlan = false,
-		const FABTSM11FinaleCameraShotSettings* M3ShotSettings = nullptr);
+		const FABTSM11FinaleCameraShotSettings* M3ShotSettings = nullptr,
+		const FABTSM11FinaleCameraShotPlan* FrozenShotPlan = nullptr);
 
 	/**
 	 * Applies the playback-plan terminal interval to an already resolved M4

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "World/ABTSM11FinaleLayoutTypes.h"
 #include "ABTSM11FinaleCameraCaptureRunner.generated.h"
 
 class AABTSM11FinaleInteractionSystem;
@@ -18,7 +19,7 @@ struct FMinimalViewInfo;
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
 	// Adds M5 renderer-independent telemetry and orthogonality digests.
-	static constexpr int32 ContractVersion = 14;
+	static constexpr int32 ContractVersion = 15;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -28,6 +29,9 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 	bool bDirectorM2 = false;
 	bool bDirectorM3 = false;
 	bool bAutoExit = true;
+	/** Explicit player-authored launch; false preserves the nominal workflow. */
+	bool bCustomLaunchInput = false;
+	FABTSM11FinaleLaunchInput CustomLaunchInput;
 	int32 WarmupFrames = 30;
 	int32 TerminalHoldFrames = 24;
 	int32 FrameRate = 30;

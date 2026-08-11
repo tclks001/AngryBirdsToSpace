@@ -5,6 +5,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Camera/ABTSM11FinaleFlightCamera.h"
+#include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
+#include "SceneUtils.h"
 #include "World/ABTSM11GravityAssistTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1538,10 +1541,29 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 			&EventResult,
 			true,
 			&ImpossibleBudgetSettings);
-	TestEqual(
-		TEXT("Insufficient transit and incoming budget fails closed"),
+	TestNotEqual(
+		TEXT("M7 keeps a valid gameplay path available under a short camera budget"),
 		static_cast<uint8>(ImpossibleBudget.Stage),
 		static_cast<uint8>(EABTSM11FinaleCameraStage::Unavailable));
+	FABTSM11FinaleCameraShotPlan AdaptivePlan;
+	FString AdaptivePlanFailure;
+	TestTrue(
+		TEXT("M7 prebuilds a release-frozen adaptive schedule"),
+		AdaptivePlan.Build(
+			EventResult,
+			ImpossibleBudgetSettings,
+			&AdaptivePlanFailure));
+	TestTrue(
+		TEXT("Short fixture records adaptive compression"),
+		AdaptivePlan.bUsesAdaptiveCompression);
+	TestTrue(
+		TEXT("Frozen schedule identity matches its released trajectory"),
+		AdaptivePlan.IsUsableFor(EventResult));
+	FABTSM11TrajectoryResult DifferentResult = EventResult;
+	DifferentResult.ValidationHash = 2;
+	TestFalse(
+		TEXT("Frozen schedule rejects a later trajectory identity"),
+		AdaptivePlan.IsUsableFor(DifferentResult));
 
 	FABTSM11FinaleCameraShotSettings BorrowedTimeSettings = M3ShotSettings;
 	BorrowedTimeSettings.IncomingRevealLeadSeconds = 7.0;
@@ -1731,6 +1753,105 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 			DirectedTransform,
 			Diagnostics));
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CFlightCameraScopedFXAATest,
+	"ABTS.M11C.Unit.FlightCameraScopedFXAA",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CFlightCameraScopedFXAATest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	IConsoleVariable* AntiAliasingMethod =
+		IConsoleManager::Get().FindConsoleVariable(
+			TEXT("r.AntiAliasingMethod"));
+	TestNotNull(
+		TEXT("Engine anti-aliasing console variable is registered"),
+		AntiAliasingMethod);
+	if (AntiAliasingMethod == nullptr)
+	{
+		return false;
+	}
+
+	TGuardConsoleVariable<int32> AntiAliasingGuard(
+		AntiAliasingMethod,
+		static_cast<int32>(AAM_TSR));
+	const UWorld::InitializationValues WorldValues =
+		UWorld::InitializationValues()
+			.InitializeScenes(false)
+			.AllowAudioPlayback(false)
+			.RequiresHitProxies(false)
+			.CreatePhysicsScene(false)
+			.CreateNavigation(false)
+			.CreateAISystem(false)
+			.ShouldSimulatePhysics(false)
+			.EnableTraceCollision(false)
+			.SetTransactional(false)
+			.CreateFXSystem(false);
+	UWorld* World = UWorld::CreateWorld(
+		EWorldType::Game,
+		false,
+		TEXT("ABTSM11CFlightCameraFXAAAutomationWorld"),
+		nullptr,
+		true,
+		ERHIFeatureLevel::Num,
+		&WorldValues);
+	TestNotNull(TEXT("Transient flight-camera World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM11FinaleFlightCamera* FlightCamera =
+		World->SpawnActor<AABTSM11FinaleFlightCamera>(
+			AABTSM11FinaleFlightCamera::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(TEXT("M11 finale flight camera spawns"), FlightCamera);
+	if (FlightCamera != nullptr)
+	{
+		TestTrue(
+			TEXT("Authority follow begins with a valid deterministic frame"),
+			FlightCamera->BeginAuthorityFollow(
+				FVector::ZeroVector,
+				FVector::ForwardVector,
+				FVector::UpVector,
+				FTransform::Identity));
+		TestEqual(
+			TEXT("M11 finale takeover selects FXAA"),
+			AntiAliasingMethod->GetInt(),
+			static_cast<int32>(AAM_FXAA));
+
+		AntiAliasingMethod->SetWithCurrentPriority(
+			static_cast<int32>(AAM_TSR));
+		TestTrue(
+			TEXT("Authority update accepts a valid follow sample"),
+			FlightCamera->UpdateAuthoritySample(
+				FVector(100.0, 0.0, 0.0),
+				FVector::ForwardVector,
+				FVector::UpVector,
+				nullptr,
+				1.0f / 60.0f));
+		TestEqual(
+			TEXT("Active finale camera repairs later temporal-AA changes"),
+			AntiAliasingMethod->GetInt(),
+			static_cast<int32>(AAM_FXAA));
+
+		FlightCamera->ResetAuthorityFollow();
+		TestEqual(
+			TEXT("Finale camera reset restores the pre-takeover AA method"),
+			AntiAliasingMethod->GetInt(),
+			static_cast<int32>(AAM_TSR));
+	}
+	World->DestroyWorld(false);
+	World->RemoveFromRoot();
+	return FlightCamera != nullptr;
 }
 
 #endif

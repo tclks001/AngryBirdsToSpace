@@ -228,7 +228,14 @@ public:
 		return Settings;
 	}
 
+protected:
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 private:
+	void ActivateFinaleAntiAliasingOverride();
+	void EnsureFinaleAntiAliasingOverride() const;
+	void RestoreFinaleAntiAliasingOverride();
+
 	bool BuildAuthorityFrame(
 		const FVector& TargetPosition,
 		const FVector& TrajectoryTangent,
@@ -467,4 +474,6 @@ private:
 	bool bAuthorityFollowActive = false;
 	bool bM2DirectorFrozenEnabled = false;
 	bool bM3DirectorFrozenEnabled = false;
+	bool bFinaleAntiAliasingOverrideActive = false;
+	int32 PreviousAntiAliasingMethod = 0;
 };
