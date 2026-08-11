@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Async/Async.h"
 #include "Components/CapsuleComponent.h"
+#include "Camera/ABTSM11FinaleFlightCamera.h"
 #include "HAL/PlatformTime.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
@@ -349,7 +350,7 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 	const FABTSM11TrajectoryResult* Nominal =
 		bNominalPhysicalReady ? &NominalPhysicalResult : nullptr;
 	const bool bBuilt = FinaleSystem->IsEditorCandidateMode()
-		? PreviewPlaybackPlan.BuildCandidateQualified(
+		? PreviewPlaybackPlan.BuildCandidatePresentationContact(
 			FinaleSystem->GetLayoutPreset(),
 			LatestQualifiedResult,
 			CurrentClassification)
@@ -477,7 +478,8 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	if (CurrentClassification.IsF(4)
 		&& (!PreviewPlaybackPlan.bQualifiedF4
 			|| (FinaleSystem->IsEditorCandidateMode()
-				? !PreviewPlaybackPlan.bCandidateQualifiedIntercept
+				? (!PreviewPlaybackPlan.bCandidateQualifiedIntercept
+					|| !PreviewPlaybackPlan.bPhysicalTargetHit)
 				: !PreviewPlaybackPlan.bPhysicalTargetHit)))
 	{
 		return false;
@@ -491,6 +493,35 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	}
 
 	ReleasedPlaybackPlan = PreviewPlaybackPlan;
+	ReleasedCameraTrajectoryResult = LatestQualifiedResult;
+	ReleasedCameraShotPlan.Reset();
+	bCameraDirectorFallbackLogged = false;
+	FABTSM11FinaleCameraShotSettings PlaybackShotSettings;
+	FString CameraScheduleFailure;
+	const double CameraPlaybackScale =
+		FinaleSystem->IsEditorCandidateMode()
+			? 1.0
+			: FMath::Max(0.1, PlaybackTimeScale);
+	const FABTSM11FinaleCameraShotSettings PresentationShotSettings =
+		IsValid(FlightCamera)
+			? FlightCamera->GetM3ShotSettings()
+			: FABTSM11FinaleCameraShotSettings();
+	const bool bCameraScheduleBuilt =
+		PresentationShotSettings.BuildPlaybackClockSettings(
+			CameraPlaybackScale,
+			PlaybackShotSettings)
+		&& ReleasedCameraShotPlan.Build(
+			ReleasedCameraTrajectoryResult,
+			PlaybackShotSettings,
+			&CameraScheduleFailure);
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][M7] ReleaseCameraPlan Source=0x%016llx Built=%d Adaptive=%d Failure=%s"),
+		ReleasedCameraTrajectoryResult.ValidationHash,
+		bCameraScheduleBuilt ? 1 : 0,
+		ReleasedCameraShotPlan.bUsesAdaptiveCompression ? 1 : 0,
+		CameraScheduleFailure.IsEmpty() ? TEXT("None") : *CameraScheduleFailure);
 	PlaybackElapsedSeconds =
 		ReleasedPlaybackPlan.Points[0].TimeSeconds;
 	double BirdClearanceCM = 50.0;

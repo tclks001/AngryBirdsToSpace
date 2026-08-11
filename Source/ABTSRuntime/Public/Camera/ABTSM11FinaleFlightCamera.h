@@ -23,6 +23,8 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 	double MaximumRetreatCM = 4500.0;
 	double CruiseLeadInStartFraction = 0.15;
 	double CruiseLeadInBlendFraction = 0.35;
+	double HandoffLeadInSeconds = 0.40;
+	bool bReleaseDirectorDuringPeriapsis = true;
 	double ApproachBrakeStartFraction = 0.65;
 	double ClosestRetreatFraction = 0.10;
 	double PeriapsisReleaseFraction = 0.80;
@@ -36,6 +38,20 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 	double BaselineFovDegrees = 50.0;
 	double ClosestFovDegrees = 30.0;
 	double PeriapsisFovRestoreFraction = 0.80;
+	double DualBodyBridgeFovDegrees = 85.0;
+	double DualBodyBridgeFitMargin = 1.15;
+	double DualBodyBridgeBirdNdcY = 0.05;
+	double TerminalFovDegrees = 55.0;
+	double TerminalFitMargin = 1.20;
+	/** Bird begins below the centred UFO and advances upward at constant NDC speed. */
+	double TerminalBirdStartNdcY = -0.42;
+	double TerminalBirdContactNdcY = -0.22;
+	/** Camera-to-bird distance envelope for the terminal dolly. */
+	double TerminalStartBirdDistanceCM = 40000.0;
+	double TerminalContactBirdDistanceCM = 5000.0;
+	double DualBodyBridgeSeconds = 0.60;
+	double IncomingMatchEaseOutPower = 1.0;
+	double IncomingEntryMatchSeconds = 0.50;
 
 	bool IsUsable() const;
 };
@@ -81,6 +97,50 @@ namespace ABTSM11FinaleFlightCameraMath
 		const FABTSM11FinaleCameraM2Settings& Settings,
 		FTransform& OutDirectedTransform,
 		FABTSM11FinaleCameraM2Diagnostics& OutDiagnostics);
+
+	/**
+	 * Centres the UFO, places the bird on a prescribed lower-screen NDC path,
+	 * and independently dollies toward the bird without changing authority.
+	 */
+	ABTSRUNTIME_API bool BuildM4TerminalClosureFrame(
+		const FVector& BirdPosition,
+		double BirdRadiusCM,
+		const FVector& TargetCenter,
+		double TargetRadiusCM,
+		const FVector& PreferredViewUp,
+		double HorizontalFovDegrees,
+		double FitMargin,
+		double ClosureProgress,
+		double BirdStartNdcY,
+		double BirdContactNdcY,
+		double StartCameraToBirdDistanceCM,
+		double ContactCameraToBirdDistanceCM,
+		FTransform& OutTransform);
+
+	/** Builds the same Lucy encounter envelope for any M3 assist/Handoff. */
+	ABTSRUNTIME_API bool BuildM3AssistFrame(
+		const FABTSM11FinaleFlightCameraFrame& BaselineFrame,
+		const FVector& BirdPosition,
+		const FABTSM11FinaleCameraDirectorSample& DirectorSample,
+		const FABTSM11FinaleCameraM2Settings& Settings,
+		FTransform& OutDirectedTransform,
+		FABTSM11FinaleCameraM2Diagnostics& OutDiagnostics);
+
+	/** Fits the bird and the outgoing/incoming planets into one wide bridge. */
+	ABTSRUNTIME_API bool BuildM3DualBodyBridgeFrame(
+		const FABTSM11FinaleFlightCameraFrame& BaselineFrame,
+		const FVector& BirdPosition,
+		const FABTSM11FinaleCameraDirectorSample& DirectorSample,
+		const FABTSM11FinaleCameraM2Settings& Settings,
+		FTransform& OutBridgeTransform);
+
+	/** Releases the launch carry limiter onto the exact directed location. */
+	ABTSRUNTIME_API bool BuildM3LaunchReleaseLocation(
+		const FVector& SafeLocation,
+		const FVector& BirdPosition,
+		const FVector& DirectedLocation,
+		double ReleaseAlpha,
+		FVector& OutLocation);
 
 	/** Keeps the planet anchored after the camera location has been smoothed. */
 	ABTSRUNTIME_API bool BuildM2PlanetAnchoredRotation(
@@ -133,6 +193,10 @@ public:
 	{
 		return bM2DirectorFrozenEnabled;
 	}
+	bool IsM3DirectorFrozenEnabled() const
+	{
+		return bM3DirectorFrozenEnabled;
+	}
 	double GetLastM2BlendAlpha() const { return LastM2BlendAlpha; }
 	double GetLastM2RetreatAlpha() const { return LastM2RetreatAlpha; }
 	double GetLastM2TransitScreenXInTargetRadii() const
@@ -143,8 +207,35 @@ public:
 	{
 		return LastDirectorStage;
 	}
+	FABTSM11FinaleCameraShotSettings GetM3ShotSettings() const
+	{
+		FABTSM11FinaleCameraShotSettings Settings;
+		Settings.IncomingRevealLeadSeconds =
+			M3IncomingRevealLeadSeconds;
+		Settings.IncomingAcquireSeconds = M3HandoffLeadInSeconds;
+		Settings.DualBodyBridgeSeconds = M3DualBodyBridgeHoldSeconds;
+		Settings.MinimumDepartureHoldSeconds =
+			M3MinimumDepartureHoldSeconds;
+		Settings.ForegroundTransitClearProgress =
+			M3ForegroundTransitClearProgress;
+		Settings.OutgoingReleaseSeconds =
+			M3OutgoingBridgePullbackSeconds;
+		Settings.MinimumOutgoingReleaseSeconds =
+			M3MinimumOutgoingBridgePullbackSeconds;
+		Settings.MinimumIncomingTrackSeconds =
+			M3MinimumIncomingTrackSeconds;
+		Settings.EntryMatchSeconds = M3HandoffReleaseSeconds;
+		return Settings;
+	}
+
+protected:
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	void ActivateFinaleAntiAliasingOverride();
+	void EnsureFinaleAntiAliasingOverride() const;
+	void RestoreFinaleAntiAliasingOverride();
+
 	bool BuildAuthorityFrame(
 		const FVector& TargetPosition,
 		const FVector& TrajectoryTangent,
@@ -195,6 +286,117 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M2",
 		meta = (ClampMin = "0.05", ClampMax = "0.9", UIMin = "0.1", UIMax = "0.6"))
 	double M2CruiseLeadInBlendFraction = 0.35;
+
+	/** Real-time duration used to establish the incoming M3 assist frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "2.0", UIMin = "0.2", UIMax = "1.0", Units = "s"))
+	double M3HandoffLeadInSeconds = 1.30;
+
+	/** Minimum time for which both planets own the bridge composition. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.2", ClampMax = "2.0", UIMin = "0.4", UIMax = "1.0", Units = "s"))
+	double M3DualBodyBridgeHoldSeconds = 0.60;
+
+	/** Wide lens used while the outgoing and incoming planets share the frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "50.0", ClampMax = "100.0", UIMin = "60.0", UIMax = "80.0", Units = "deg"))
+	double M3DualBodyBridgeFovDegrees = 85.0;
+
+	/** Projection margin around all three bridge subjects. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.02", ClampMax = "1.5", UIMin = "1.05", UIMax = "1.25"))
+	double M3DualBodyBridgeFitMargin = 1.15;
+
+	/**
+	 * Canonical vertical screen anchor for the bird while both planets share
+	 * the frame. Positive NDC is screen-up; 0.05 is slightly above centre.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "-0.5", ClampMax = "0.5", UIMin = "-0.2", UIMax = "0.2"))
+	double M3DualBodyBridgeBirdNdcY = 0.05;
+
+	/** Stable two-subject lens used for the bird-to-UFO closure. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "35.0", ClampMax = "85.0", UIMin = "45.0", UIMax = "65.0", Units = "deg"))
+	double M4TerminalFovDegrees = 55.0;
+
+	/** Projection margin around the bird and UFO terminal spheres. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "1.02", ClampMax = "1.5", UIMin = "1.05", UIMax = "1.3"))
+	double M4TerminalFitMargin = 1.20;
+
+	/** Bird screen-up NDC at Assist3 Exit; negative values are below centre. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "-0.8", ClampMax = "-0.05", UIMin = "-0.6", UIMax = "-0.1"))
+	double M4TerminalBirdStartNdcY = -0.42;
+
+	/** Bird screen-up NDC at physical contact; remains below the centred UFO. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "-0.6", ClampMax = "-0.02", UIMin = "-0.4", UIMax = "-0.08"))
+	double M4TerminalBirdContactNdcY = -0.22;
+
+	/** Camera-to-bird distance at the beginning of the UFO closure. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "1000.0", UIMin = "10000.0", UIMax = "80000.0", Units = "cm"))
+	double M4TerminalStartBirdDistanceCM = 40000.0;
+
+	/** Camera-to-bird distance at the 800 cm physical contact point. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M4",
+		meta = (ClampMin = "1000.0", UIMin = "3000.0", UIMax = "15000.0", Units = "cm"))
+	double M4TerminalContactBirdDistanceCM = 5000.0;
+
+	/** Ease-out power applied to the Track view-plane entry match. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.0", ClampMax = "4.0", UIMin = "1.0", UIMax = "3.0"))
+	double M3IncomingMatchEaseOutPower = 1.0;
+
+	/** Pull-back duration before the dual-body bridge becomes authoritative. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.2", ClampMax = "2.0", UIMin = "0.5", UIMax = "1.2", Units = "s"))
+	double M3OutgoingBridgePullbackSeconds = 2.00;
+
+	/** Minimum pullback time preserved after foreground silhouette clearance. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.2", ClampMax = "1.5", UIMin = "0.4", UIMax = "0.8", Units = "s"))
+	double M3MinimumOutgoingBridgePullbackSeconds = 0.50;
+
+	/** Lead time before AssistEnter at which the next body reveal begins. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.0", ClampMax = "6.0", UIMin = "2.0", UIMax = "4.5", Units = "s"))
+	double M3IncomingRevealLeadSeconds = 5.50;
+
+	/** Minimum outgoing-body hold after physical Closest before pre-reveal. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.0", ClampMax = "2.0", UIMin = "0.4", UIMax = "1.2", Units = "s"))
+	double M3MinimumDepartureHoldSeconds = 0.75;
+
+	/**
+	 * Normalized outgoing Periapsis progress required before pullback.
+	 * The default clears the current single-bird Lucy foreground chord.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.05", ClampMax = "0.8", UIMin = "0.1", UIMax = "0.4"))
+	double M3ForegroundTransitClearProgress = 0.23;
+
+	/** Minimum incoming Track interval protected from outgoing pullback. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.3", UIMax = "1.2", Units = "s"))
+	double M3MinimumIncomingTrackSeconds = 0.60;
+
+	/** Final interval already fully aligned to the incoming Lucy frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "2.0", UIMin = "0.25", UIMax = "1.0", Units = "s"))
+	double M3HandoffReleaseSeconds = 0.50;
+
+	/** Position step ceiling while Handoff changes the framing target. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "100.0", UIMin = "1000.0", UIMax = "4500.0", Units = "cm"))
+	double M3TransitionMaximumPositionStepCM = 1500.0;
+
+	/** Rotation step ceiling while M3 Handoff/Approach framing is active. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "14.0", UIMin = "2.0", UIMax = "12.0", Units = "deg"))
+	double M3TransitionMaximumRotationStepDegrees = 10.0;
 
 	/** Approach fraction at which the pull-out begins braking into Closest. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M2",
@@ -263,6 +465,7 @@ private:
 
 	FVector LastAuthorityForward = FVector::ForwardVector;
 	FVector LastTransportedUp = FVector::UpVector;
+	FVector LastAuthorityTargetPosition = FVector::ZeroVector;
 	double LastM2BlendAlpha = 0.0;
 	double LastM2RetreatAlpha = 0.0;
 	double LastM2TransitScreenXInTargetRadii = -3.00;
@@ -270,4 +473,7 @@ private:
 		EABTSM11FinaleCameraStage::PreLaunch;
 	bool bAuthorityFollowActive = false;
 	bool bM2DirectorFrozenEnabled = false;
+	bool bM3DirectorFrozenEnabled = false;
+	bool bFinaleAntiAliasingOverrideActive = false;
+	int32 PreviousAntiAliasingMethod = 0;
 };

@@ -1,7 +1,7 @@
 # M11 终局实飞镜头导演与独立验收设计
 
 > 编码：UTF-8，简体中文。  
-> 状态：M0 独立录制与 M1 导演观测/离线判据已完成；镜头导演尚未落地。
+> 状态：M0/M1/M2 已完成；M3 多行星导演迭代中；连续飞行拖尾 T2-R 已以纯 C++ 三层软 Sprite 替换默认 `DrawPoint`，完成亮面清晰核心增强、自动化与 Rank11 三渲二 fresh 录屏，并于 2026-08-10 通过用户主观验收。
 > 所有权：`feature/m11-finale`。本文只描述 M11 实飞镜头与其验收，不修改集成工作树拥有的三渲二实现、共享地图或稳定跨阶段契约。
 
 ## 1. 目标与本轮边界
@@ -223,23 +223,97 @@ CameraDistance  = clamp(FramingDistance, MinDistance, MaxDistance)
 - 切换前后相机位置、速度、朝向和 FOV 一阶连续；
 - Rank 0 与 Rank 11 全程无鸟离框、无目标空窗、无 Frenet 翻转。
 
+M3 已开始实现，详细合同与阶段门见 [M3 三行星连续导演与 Handoff](M11FinaleCameraM3MultiAssistHandoff.md)。2026-08-09 Rank11、Stylized 1 迭代已让 Assist1/2/3 进入同一套 Lucy 构图数学，两个 CurrentBody 切换均只发生在 Handoff，三颗左→右均成立，M3 窗口鸟丢失为 0、Approach 累计回撤为 0；但 Handoff 当前目标仍有 22 帧空窗，因此 `m3HandoffPassed=false`，M3 尚未完成。全局 FinalApproach 的鸟丢失与旋转跃变属于 M4，不混入本阶段放行结论。
+
+首轮在三颗 Approach 开始后 0.75 秒均出现一次屏幕方向回跳；初次交叉淡化虽消除了单帧跳变，却把问题摊成 230–242 帧一类的连续慢回摆。最终状态职责改为：鸟优先安全构图只在 Handoff 工作并于末尾 0.50 秒释放，Approach 从第一帧起只运行唯一的 Lucy 位置解算。离线门同时检查负向单帧跳变和历史最右位置后的累计回撤。fresh Rank11 三颗 Assist 的两类回撤均为 0、M3 鸟丢失为 0、三颗左→右均成立，`m3NoApproachReversal=true`；Handoff 22 帧目标空窗仍为独立开放项。
+
+后续节奏复核又确认，单用物理 `Periapsis/Handoff/Approach` 作为镜头状态会让不同候选、不同 Assist 的可用叙事时长失衡：木星没有足够盘外建立段，土星转轴则被压缩在 Handoff 尾部。现将权威 Stage 保持不变，在其上叠加 `OutgoingHold/IncomingReveal/IncomingTrack/IncomingEntryMatch`；下一行星按 AssistEnter 前 3.25 秒反向调度，并为上一行星保留 Closest 后至少 0.75 秒。Assist1 不再是旧 M2 百分比 Lead-in 特例，而把发射点视为虚拟 `LaunchAnchor`，从 playback 0 开始平滑获取火星，完成获取后进入稳定 Track。揭示曲线的末端位置和速度均与 Approach 入口匹配，从而把“何时开始讲下一颗行星”从物理作用域中解耦。该改造属于 M3 内部镜头导演，不改变候选、渲染或 PlaybackPlan。
+
+跨行星空窗现由显式 `DualBodyBridge` 处理：`OutgoingHold` 把镜头扩到 85°，桥接解同时拟合鸟、上一行星和下一行星，并保持上一颗在左、下一颗在右；随后 `IncomingTrack/IncomingEntryMatch` 改用鸟与下一行星的双主体拟合，直到物理 Enter 后 0.50 秒才把位置权威交还 Lucy 穿越解。Rank11 fresh 证据已消除两次“零行星帧”，但远景桥两端仍包含显式匹配切换，旧的严格单镜头位姿/FOV 连续门仍失败；因此本轮只关闭空窗问题，不宣称 M3-B/M3-C 完成。桥接期 `1×→10×→1×` 鸟体视觉倍率现已撤销，鸟体保持原始 Scale；远景运动可读性改由独立连续拖尾承担，不能再用改模型尺寸补偿构图。
+
+拖尾 T2-R 验收后，`M11-CAM-M3-007` 已按状态边界连续性契约完成重构。跨行星阶段现统一为 `OutgoingHold → DualBodyBridge → IncomingReveal → IncomingTrack → IncomingEntryMatch → Authority`：上一状态末姿态就是下一状态初姿态，Reveal 在三主体同框下预转到下一颗 Lucy 朝向，Track 再沿同一朝向从 85° 远景连续推入 50° Lucy 构图，EntryMatch 与 Authority 首帧使用同一个解。不可达的 Reveal 和 Enter 后重复远景的 PostEnterSettle 已消除，鸟体保持恒定 Scale。fresh Rank11 R5 的所有状态边界均低于 `1001 cm / 0.98°`，两次桥 36/36 帧双星同框，M3 鸟丢失 0，旧 `222→223` 倒退已变为单调前进。详细证据与旧离线门的已知语义差异见 M3 设计稿 7.5。
+
+后续 `M11-CAM-M3-008` 将“到下一行星后再回拉到穿越入口”收敛为双星退出即开始的单次构图转换。`IncomingReveal` 与 `IncomingTrack` 不再各自安排朝向、位置和镜头焦段，而从桥接退出首帧到 `IncomingEntryMatch` 入口共享一个前置 Ease-out Match Alpha，同时驱动桥接朝向→Lucy 朝向、三主体拟合→Lucy 位置以及 `85°→50°` FOV。该 Alpha 在起止端均保持平滑，EntryMatch/Authority 端点合同不变。Rank11 fresh 录制中，木星段旧 `431→439 = 706.30→526.65 px` 已变为 `525.75→526.65 px`；土星段旧 `712→730 = 639.58→525.86 px` 已变为 `534.28→525.79 px`，不再出现到达后重新置左的可见回拉。详细证据见 M3 设计稿 7.6。
+
+`M11-CAM-M3-009` 随后修正了上述统一 Alpha 引入的退场镜头回归：上一颗行星的离场保留在 `IncomingReveal` 的 85° 三主体宽景中；`IncomingTrack` 才在已经对齐下一颗 Lucy 朝向的同一视轴上，以独立的二维鸟屏幕锚包络和较慢的深度/FOV 包络推入 50° 穿越入口。由此“上一颗逐渐后退离场”与“鸟提前到达下一颗左侧入口”不再争用相机位置、朝向和焦段的同一权重。Rank11 fresh `M3EgressAnchorR5-20260810-222300` 中，火星在 413–420 帧、木星在 644–667 帧连续退场；鸟在两个交接窗口的最大单帧屏幕位移仅 `10.18/7.40 px`，且 `431→439` 与 `712→730` 均直接收敛到 Lucy 入口，没有二次回拉。详细证据见 M3 设计稿 7.7。
+
+`M11-CAM-M3-010` 又为上一颗行星的 Lucy 前景穿越增加了显式清轮廓合同：`OutgoingHold` 不再能从 `Closest` 首帧抢占相机，而必须等待 `Closest→Exit` 归一化 progress `0.23`；跨行星调度同时硬保留至少 `0.50 s` 拉远、`0.60 s` Bridge、`1.30 s` Reveal、`0.60 s` Track 和 `0.50 s` EntryMatch，时间不足则 fail closed。最终 Rank11 fresh 录屏中，旧问题帧 328/548 都仍是 Authority，分别到 348/568 才开始拉远；整个 Outgoing 段的最小投影轮廓净空为 `2.99/22.83 px`，两段此前验收的上一行星渐退和下一颗左侧直飞入口均未回退。详细算法和证据见 M3 设计稿 7.8。
+
+`M11-CAM-M3-011` 进一步把双星桥接期鸟的纵向位置从算术质心的偶然结果改为显式构图合同。`OutgoingHold → DualBodyBridge → IncomingReveal` 共享 `BirdNdcY=+0.05` 的 canonical 锚：Outgoing 从 Lucy 位置平滑获取，Bridge 固定持有，Reveal 平滑释放；只解 Camera Up，不改双星水平基线和鸟的 X 运动。锚定后重新检查鸟与两星的投影球 margin，必要时只沿镜头后方增加最小距离，因此不会以裁切换取鸟居中。Rank11 fresh `M3BridgeBirdAnchorR7-20260811-114000` 中，用户指出的 575–625 帧纵向范围从 `173.96 px` 降至 `65.70 px`，最大单帧上移从 `19.03 px` 降至 `2.31 px`，并保持单调；两次桥接仍 36/36 帧双星完整同框。详细求解、边界合同和证据见 M3 设计稿 7.9。
+
+`M11-CAM-M3-012` 关闭开局 `IncomingReveal→IncomingTrack` 的轻微回退。该现象早于 011，根因是 Reveal 末帧向 lag 相机位置释放，而 Track 首帧在权重到 1 时直接采用精确导演位置。现在 `LaunchAnchor→Assist1` 全段共用同一开局携带限制器，并把位置/旋转的释放终点明确定义为精确导演 Transform；跨行星链和双星锚不变。Rank11 fresh `M3LaunchBoundaryR8-20260811-134500` 中，40→41 鸟 X 回退从 `-11.540 px` 降为 `-0.069 px`，41 帧后与 R7 构图数值等价，222→223 进入 Authority 仍同向连续。详细合同和证据见 M3 设计稿 7.10。
+
+### M3-T：连续飞行拖尾与鸟体恒定尺寸（T2-R 三层软 Sprite 亮面增强完成）
+
+- 发射全程使用同一组世界空间点粒子，不按行星、镜头状态、Rank 或渲染风格切换；
+- 两帧鸟位置之间按世界弧长连续采样并跨帧保存距离余数；64 cm 名义分层采用确定性一维蓝噪声抖动，不再按帧生成同步粒子团；
+- 每站点一个粒子并赋亚帧年龄；粒子以轨迹法平面的二维正态速度横移，`3σ`/硬上限为鸟速 `1/5`，横移越快寿命越短，形成慢速密集核心和稀薄外逸层；
+- 默认表现由运行时生成的 `64×64` 径向纹理和 Halo/Contrast Shell/Core 三层 `DrawSprite` 构成；加性 Halo 保留暗背景辉光，预乘 AlphaComposite Shell/Core 在火星 319、木星 557、土星 812 附近建立亮面清晰核心；十二个外观 CVar 均可从命令行调整，`RenderMode=0` 只保留旧 `DrawPoint` A/B；
+- 拖尾采用世界深度遮挡和屏幕空间恒定 Sprite 直径，近星高屏幕速度自然形成更长尾迹；
+- `OutgoingHold/DualBodyBridge/IncomingTrack` 不再缩放 BirdVisual，重置/退出显式恢复原始 Scale；
+- 跨状态倒退、硬切和入口失配已由后续 `M11-CAM-M3-007` 连续性重构关闭；拖尾继续与镜头状态正交；
+- 不创建共享纹理/Niagara/材质/地图资产，不需要 Editor 操作。
+
+详细结构、生命周期、命令行 A/B 和逐步验收见 [M11 终局连续飞行拖尾演出设计](M11FinaleBirdTrailPresentationDesign.md)。
+
 ### M4：UFO 终端与镜头收束
 
 - FinalApproach 同时保持鸟与 UFO；
-- Candidate Qualified Endpoint 与生产 Physical Contact 在 Manifest/镜头状态中明确区分；
+- Candidate Qualified Endpoint 与 Physical Contact 在 Manifest/镜头状态中明确区分；候选离线录屏从合格点追加确定性可见转移并抵达 800 cm 接触球；
 - 本里程碑只处理镜头，不实现 UFO 破碎、救援和五鸟团聚。
+
+2026-08-11 已完成工程落地，独立合同见 [M4：UFO 终端与镜头收束](M11FinaleCameraM4UFOTerminalClosure.md)。旧版在 Assist3 Exit 后退出 M3 导演并恢复瞬时轨迹切线跟随，导致 UFO 在 FinalApproach/Terminal 全程出画且入口旋转跳变；首轮 M4 建立“土星 Lucy→鸟＋土星＋UFO 广角桥→冻结鸟＋UFO 双主体”的连续构图。R2 随后暴露未认证候选仍在 41,250 cm 合格包络结束，故候选离线播放现保留原 Released 前缀并追加显式 `VisibleTerminalTransfer`，沿确定性五次曲线抵达 UFO 800 cm 接触球。fresh Rank11 Stylized1 `M4PhysicalContactR4-20260811-133500` 为 1021 帧 `Complete/TargetHit`；最终 Authority 距离 800 cm，M4 鸟/UFO/身份丢失与位置/旋转/FOV 跳变均为 0，`m4PhysicalContactPassed=true`、`m4TerminalClosurePassed=true`。Rank11 仍为 `UNCERTIFIED`，Released Trajectory Hash 不变；可见接触只属于播放表现计划，不冒充候选认证。
+
+M4 终端构图现不再让鸟/UFO 围绕对称质心漂移，而将 UFO 固定在画面中心：鸟沿同一竖直中心线从 NDC Y `-0.42` 以恒定屏幕速度逼近至 `-0.22`，相机到鸟距离同时以零端斜率从 40000 cm 收至 5000 cm，55 度镜头保持不变。`TerminalAcquire` 直接匹配该解析构图的 progress 0；真实进度由 Assist3 Exit 与 PlaybackPlan 物理接触终点共同定义。该改造只改变 M11 导演与录屏合同 v13，不修改 Released 轨迹、接触曲线或渲染。fresh Rank11 Stylized1 `M4CenteredDollyR9-20260811-160100` 为 1021 帧 `Complete/TargetHit`：UFO 中心误差小于 `0.00002 px`，鸟相对中央竖线的动画 Bounds 摆动小于 `2 px`，相机到鸟距离约从 40015 cm 收至 5009 cm，最终仍精确命中 800 cm 接触球。
 
 ### M5：候选与渲染正交回归
 
-- 至少覆盖 Rank 0、Rank 11 × Stylized 0、1；再按需扩展 Rank 1–10；
-- 同一 Rank 两种渲染方式的轨迹、事件、阶段和相机数值 Hash 一致；
-- 三渲二像素质量由集成工作树验收，M11 只验镜头可读性和身份。
+- Rank 0、Rank 11 只在 Stylized 1 下制作正式视觉录屏；当前 Stylized 0 受原生大气散射影响为不可读蓝屏，不再重复生成无效视觉证据；
+- 同一 Rank 的 Stylized 0/1 仍须通过 renderer-independent Telemetry 比较 Released/Playback Plan、阶段序列和相机数值 Hash；
+- TelemetryOnly 仍启动 fresh `-game` 进程、真实发射并完整播放，但跳过 SceneCapture、JPG 和 AVI，只写 CSV/Manifest 后自动退出；
+- Rank 1–10 在 Rank 0/11 基础矩阵通过后按需扩展；
+- 三渲二像素质量和 Stylized 0 大气散射由集成工作树验收，M11 只验镜头可读性和逻辑身份。
+
+导演时长统一解释为呈现秒：认证 Rank0 的 `PlaybackTimeScale=18` 只加速轨迹钟，进入 Director 前会把拉远、桥接、取得、Track 与 Entry 的秒数字段同比换算到轨迹钟；候选倍率 1 和几何 Progress 门保持不变。生产相机与录屏观测共用该入口，防止认证路线把连续镜头压缩成 1–3 帧。
+
+2026-08-11 M5 基础矩阵完成：Rank0 和 Rank11 的 Stylized 0/1 同协议 Telemetry 分别得到完全相等的 Released、Playback Plan、Stage 与 Camera Hash；两条 Stylized 1 正式录像均 `Complete/TargetHit`、鸟丢失 0、空构图 0、M4 鸟/UFO 丢失 0、800 cm 接触与终端闭合通过。Rank0 时基修正前两个 Handoff 各连续丢鸟 10 帧，修正后归零；Rank11 倍率为 1，既有已验收构图不变。独立合同与产物清单见 [M5：候选与渲染正交回归](M11FinaleCameraM5RenderOrthogonality.md)。
 
 ### M6：四鸟编队扩展（依赖未来任务）
 
 - 用编队包围体替换单鸟包围体；
 - 四鸟都在安全框，队形 Roll 连续；
 - 不改变 M0–M5 的 Rank、轨迹和渲染正交合同。
+
+### M7：玩家自定义 F4 实飞电影镜头（已完成）
+
+详细设计与验收合同见 [`M11FinaleCameraM7CustomLaunchDirection.md`](M11FinaleCameraM7CustomLaunchDirection.md)。本阶段把现有 Nominal 路线导演扩展到玩家在完整 `Yaw × Pitch × Power` 域内提交的任意 F4 可达路线：
+
+- 发射时冻结本次 Released Trajectory 与其 Hash，镜头不再读取随后可能变化的预览结果；
+- 由该 Released 事件流一次性建立两段跨行星镜头日程；标准窗口维持 M3 已验收节奏，短窗口按同一阶段顺序自适应压缩；
+- 镜头日程或构图失败只能降级到 authority follow 并记诊断，不得把合格 F4 玩法结果转成失败黑屏；
+- 独立录屏新增完整的 `Yaw/Pitch/Power` 三元输入，Manifest 冻结输入、Released Hash、Plan Hash 与导演证据；
+- 阶段验收至少随机选取两组彼此不同的 Rank 11 F4 输入，在 `Stylized=1` 下分别完成物理 UFO 接触录屏。Rank 11 仍是 `UNCERTIFIED`，两次录屏只证明导演泛用性。
+
+### PIE 实飞启用与冻结语义
+
+当前功能工作树不修改生产默认绑定；在 PIE 发射前使用控制台显式选择导演层：
+
+```text
+abts.M11.CameraDirector.M2.Enabled 0
+abts.M11.CameraDirector.M3.Enabled 1
+```
+
+`M2` 是仅覆盖 Assist1 的历史 A/B 开关；`M2=1, M3=0` 的预期表现就是第一颗行星使用 M2、后续行星回到旧镜头，并不等价于完整终局导演。`M3` 才覆盖三颗行星、双星桥接和 UFO 收束。两个值会在发射首帧冻结，本次飞行中途修改不生效；需要复测时应先结束本次飞行或重新进入 PIE，在下一次发射前设置。发射日志必须包含 `DirectorFrozen M2=0 M3=1 Mode=MultiAssistM3`；若误用 M2-only，日志会输出 `M2OnlyFirstAssist` 警告。
+
+### 终局接管期间的 FXAA 合同
+
+2026-08-11 可见 PIE A/B 已确认，Soft Sprite 尾迹在运动时变淡并不是运动模糊，也不是粒子出生后缓慢亮起：`r.MotionBlurQuality 0` 不改变现象，而关闭时域抗锯齿后立即恢复正常。M11 运行时生成的 PDI Sprite 没有可供 TSR/TAA 使用的可靠运动矢量与响应式历史标记，快速运动的细小半透明点会被时域历史抑制。因此终局 Flight Camera 的正式接管合同固定为 FXAA（`r.AntiAliasingMethod 1`）。
+
+- 只有 `BeginAuthorityFollow` 成功后才保存当前 AA 方法并切换 FXAA；瞄准和未发射阶段不受影响；
+- 接管期间每次权威相机更新都会校验 FXAA，防止后续 Profile/CVar 重写重新启用 TSR/TAA；
+- `ResetAuthorityFollow` 与 `EndPlay` 都恢复接管前的 AA 方法，失败、重置和 Actor 销毁均不会把 FXAA 泄漏到其他玩法阶段；
+- PIE 与独立离线录屏共用同一 Flight Camera 生命周期，因此不再依赖录制脚本额外设置 AA；
+- 该合同只改变终局演出的抗锯齿方式，不改变 Stylized Profile、尾迹采样、镜头构图、Released 轨迹或候选身份。
 
 ## 6. 性能预算
 

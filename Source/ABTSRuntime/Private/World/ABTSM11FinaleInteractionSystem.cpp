@@ -20,6 +20,7 @@
 #include "Player/ABTSM25BirdCharacter.h"
 #include "UI/ABTSM11FinalePresentation.h"
 #include "World/ABTSM11FinaleActors.h"
+#include "World/ABTSM11FinaleBirdTrailComponent.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM51WorldActors.h"
 
@@ -96,6 +97,10 @@ AABTSM11FinaleInteractionSystem::AABTSM11FinaleInteractionSystem()
 	PrimaryActorTick.bCanEverTick = true;
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+	FinaleBirdTrail =
+		CreateDefaultSubobject<UABTSM11FinaleBirdTrailComponent>(
+			TEXT("FinaleBirdTrail"));
+	FinaleBirdTrail->SetupAttachment(SceneRoot);
 	TargetPreviewCapture = CreateDefaultSubobject<USceneCaptureComponent2D>(
 		TEXT("TargetPreviewCapture"));
 	TargetPreviewCapture->SetupAttachment(SceneRoot);
@@ -251,6 +256,12 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	AttemptBird = Bird;
 	ActiveCord = &Cord;
 	AttemptBirdOriginalTransform = Bird->GetActorTransform();
+	if (const USkeletalMeshComponent* BirdVisual = Bird->GetBirdVisual())
+	{
+		AttemptBirdOriginalVisualScale =
+			BirdVisual->GetRelativeScale3D();
+	}
+	FinaleBirdTrail->ClearTrail();
 	Party->SetSlingshotMode(true);
 	const FABTSM11FinaleLayoutPreset& Preset =
 		FinaleSystem->GetLayoutPreset();
@@ -339,6 +350,21 @@ bool AABTSM11FinaleInteractionSystem::TryLaunchNominalCaptureAttempt(
 	AABTSM51SlingshotCord& Cord,
 	APlayerController& Controller)
 {
+	if (!IsValid(FinaleSystem))
+	{
+		return false;
+	}
+	return TryLaunchCaptureAttempt(
+		Cord,
+		Controller,
+		FinaleSystem->GetLayoutPreset().NominalInput);
+}
+
+bool AABTSM11FinaleInteractionSystem::TryLaunchCaptureAttempt(
+	AABTSM51SlingshotCord& Cord,
+	APlayerController& Controller,
+	const FABTSM11FinaleLaunchInput& Input)
+{
 	if (!TryEnterFinale(Cord, Controller)
 		|| !IsValid(FinaleSystem)
 		|| InteractionState != EABTSM11FinaleInteractionState::Aiming)
@@ -346,16 +372,14 @@ bool AABTSM11FinaleInteractionSystem::TryLaunchNominalCaptureAttempt(
 		return false;
 	}
 
-	const FABTSM11FinaleLaunchInput NominalInput =
-		FinaleSystem->GetLayoutPreset().NominalInput;
-	if (!FinaleSystem->GetLayoutPreset().LaunchModel.Contains(NominalInput))
+	if (!FinaleSystem->GetLayoutPreset().LaunchModel.Contains(Input))
 	{
-		FailInteraction(TEXT("CaptureNominalInputOutsideLaunchDomain"));
+		FailInteraction(TEXT("CaptureInputOutsideLaunchDomain"));
 		return false;
 	}
 
 	Stabilizer.CancelProtection();
-	Stabilizer.Reset(NominalInput);
+	Stabilizer.Reset(Input);
 	++AimRevision;
 	bPreviewDirty = true;
 	LatestSolvedRevision = INDEX_NONE;
@@ -937,9 +961,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		ReleasedPlaybackPlan.Points[0].TimeSeconds,
 		ReleasedPlaybackPlan.DurationSeconds);
 	const double PresentationTimeScale =
-		FinaleSystem->IsEditorCandidateMode()
-			? 1.0
-			: FMath::Max(0.1, PlaybackTimeScale);
+		GetPlaybackPresentationTimeScale();
 	PlaybackElapsedSeconds = FMath::Min(
 		PresentationEndTime,
 		PlaybackElapsedSeconds
@@ -1012,18 +1034,57 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+	FinaleBirdTrail->AdvanceTrail(WorldPosition, DeltaSeconds);
 	FABTSM11FinaleCameraDirectorSample DirectorSample;
 	const FABTSM11FinaleCameraDirectorSample* DirectorSamplePtr = nullptr;
-	if (FlightCamera->IsM2DirectorFrozenEnabled())
+	if (FlightCamera->IsM2DirectorFrozenEnabled()
+		|| FlightCamera->IsM3DirectorFrozenEnabled())
 	{
+		FString DirectorFallbackReason;
+		const bool bDirectorSampleBuilt = [&]() -> bool
+		{
 		const FABTSM11TrajectoryResult* Prediction =
-			GetCurrentPrediction();
+			ReleasedCameraTrajectoryResult.ValidationHash != 0
+				? &ReleasedCameraTrajectoryResult
+				: nullptr;
+		const FABTSM11FinaleCameraShotSettings PresentationShotSettings =
+			FlightCamera->GetM3ShotSettings();
+		FABTSM11FinaleCameraShotSettings M3ShotSettings;
+		if (!PresentationShotSettings.BuildPlaybackClockSettings(
+			PresentationTimeScale,
+			M3ShotSettings))
+		{
+			DirectorFallbackReason = TEXT("ShotClockInvalid");
+			return false;
+		}
 		DirectorSample.Selection =
 			ABTSM11FinaleCameraDirector::ResolveStage(
 				true,
 				false,
 				PlaybackElapsedSeconds,
-				Prediction);
+				Prediction,
+				FlightCamera->IsM3DirectorFrozenEnabled(),
+				&M3ShotSettings,
+				ReleasedCameraShotPlan.IsUsableFor(
+					ReleasedCameraTrajectoryResult)
+					? &ReleasedCameraShotPlan
+					: nullptr);
+		DirectorSample.Selection.EndpointAuthority =
+			ReleasedPlaybackPlan.bPhysicalTargetHit
+				? EABTSM11FinaleCameraEndpointAuthority::PhysicalContact
+				: ReleasedPlaybackPlan.bCandidateQualifiedIntercept
+					? EABTSM11FinaleCameraEndpointAuthority::CandidateQualified
+					: EABTSM11FinaleCameraEndpointAuthority::None;
+		if (DirectorSample.Selection.Stage
+				== EABTSM11FinaleCameraStage::FinalApproach
+			|| DirectorSample.Selection.Stage
+				== EABTSM11FinaleCameraStage::Terminal)
+		{
+			DirectorSample.Selection.Reason = FString::Printf(
+				TEXT("%sEndpoint"),
+				ABTSM11FinaleCameraDirector::EndpointAuthorityLabel(
+					DirectorSample.Selection.EndpointAuthority));
+		}
 		const FABTSM11FinaleLayoutPreset& Preset =
 			FinaleSystem->GetLayoutPreset();
 		if (DirectorSample.Selection.bTargetIsUFO)
@@ -1035,13 +1096,66 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 			DirectorSample.TargetRadiusCM =
 				Target.GetGeometricContactRadiusCM();
 		}
-		else if (DirectorSample.Selection.AssistIndex >= 1
-			&& DirectorSample.Selection.AssistIndex
+		if (DirectorSample.Selection.IsM4TerminalWindow()
+			&& DirectorSample.Selection.bTargetIsUFO)
+		{
+			const FABTSM11TargetSpec& TerminalTarget =
+				Preset.CanonicalScenario.Target;
+			DirectorSample.TerminalTargetCenter =
+				Frame.TransformLocalPosition(FVector(
+					TerminalTarget.GetGeometricContactCenterCM()));
+			DirectorSample.TerminalTargetRadiusCM =
+				TerminalTarget.GetGeometricContactRadiusCM();
+			const FABTSM11TrajectoryEvent* Assist3Exit =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::AssistExit,
+						FABTSM11GravityScenario::AssistCount)
+					: nullptr;
+			if (Assist3Exit == nullptr)
+			{
+				DirectorFallbackReason = TEXT("TerminalBasisEventMissing");
+				return false;
+			}
+			if (!ABTSM11FinaleCameraDirector::ApplyM4TerminalTimeline(
+				PlaybackElapsedSeconds,
+				Assist3Exit->TimeSeconds,
+				ReleasedPlaybackPlan.DurationSeconds,
+				DirectorSample.Selection))
+			{
+				DirectorFallbackReason = TEXT("TerminalTimelineRejected");
+				return false;
+			}
+			const FVector ExitWorld = Frame.TransformLocalPosition(
+				FVector(Assist3Exit->PositionCM));
+			DirectorSample.TerminalScreenRight =
+				(DirectorSample.TerminalTargetCenter - ExitWorld)
+					.GetSafeNormal();
+			DirectorSample.TerminalScreenUp = (
+				Frame.GetUp()
+				- DirectorSample.TerminalScreenRight
+					* FVector::DotProduct(
+						Frame.GetUp(),
+						DirectorSample.TerminalScreenRight))
+				.GetSafeNormal();
+			if (DirectorSample.TerminalScreenRight.IsNearlyZero()
+				|| DirectorSample.TerminalScreenUp.IsNearlyZero())
+			{
+				DirectorFallbackReason = TEXT("TerminalBasisRejected");
+				return false;
+			}
+			DirectorSample.EncounterScreenRight =
+				DirectorSample.TerminalScreenRight;
+			DirectorSample.EncounterScreenUp =
+				DirectorSample.TerminalScreenUp;
+		}
+		else if (DirectorSample.Selection.FramingAssistIndex >= 1
+			&& DirectorSample.Selection.FramingAssistIndex
 				<= FABTSM11GravityScenario::AssistCount)
 		{
 			const FABTSM11GravityBodySpec& Body =
 				Preset.CanonicalScenario.GetAssist(
-					DirectorSample.Selection.AssistIndex);
+					DirectorSample.Selection.FramingAssistIndex);
 			DirectorSample.TargetCenter = Frame.TransformLocalPosition(
 				FVector(Body.CenterCM));
 			DirectorSample.TargetRadiusCM = Body.VisualRadiusCM;
@@ -1049,19 +1163,19 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 				Prediction != nullptr
 					? Prediction->FindAssistEvent(
 						EABTSM11TrajectoryEventType::AssistEnter,
-						DirectorSample.Selection.AssistIndex)
+						DirectorSample.Selection.FramingAssistIndex)
 					: nullptr;
 			const FABTSM11TrajectoryEvent* Closest =
 				Prediction != nullptr
 					? Prediction->FindAssistEvent(
 						EABTSM11TrajectoryEventType::ClosestApproach,
-						DirectorSample.Selection.AssistIndex)
+						DirectorSample.Selection.FramingAssistIndex)
 					: nullptr;
 			const FABTSM11TrajectoryEvent* Exit =
 				Prediction != nullptr
 					? Prediction->FindAssistEvent(
 						EABTSM11TrajectoryEventType::AssistExit,
-						DirectorSample.Selection.AssistIndex)
+						DirectorSample.Selection.FramingAssistIndex)
 					: nullptr;
 			if (Enter == nullptr || Closest == nullptr || Exit == nullptr
 				|| !ABTSM11FinaleCameraDirector::BuildAssistEncounterBasis(
@@ -1074,11 +1188,70 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 					DirectorSample.EncounterScreenRight,
 					DirectorSample.EncounterScreenUp))
 			{
-				FailInteraction(TEXT("FlightCameraEncounterBasisRejected"));
-				return;
+				DirectorFallbackReason = TEXT("EncounterBasisRejected");
+				return false;
 			}
 		}
-		const USkeletalMeshComponent* BirdVisual =
+		if (DirectorSample.Selection.IsM4TerminalWindow()
+			&& !DirectorSample.Selection.bTargetIsUFO)
+		{
+			const FABTSM11TargetSpec& TerminalTarget =
+				Preset.CanonicalScenario.Target;
+			DirectorSample.TerminalTargetCenter =
+				Frame.TransformLocalPosition(FVector(
+					TerminalTarget.GetGeometricContactCenterCM()));
+			DirectorSample.TerminalTargetRadiusCM =
+				TerminalTarget.GetGeometricContactRadiusCM();
+			const FABTSM11TrajectoryEvent* Assist3Exit =
+				Prediction != nullptr
+					? Prediction->FindAssistEvent(
+						EABTSM11TrajectoryEventType::AssistExit,
+						FABTSM11GravityScenario::AssistCount)
+					: nullptr;
+			if (Assist3Exit == nullptr)
+			{
+				DirectorFallbackReason = TEXT("TerminalBasisEventMissing");
+				return false;
+			}
+			const FVector ExitWorld = Frame.TransformLocalPosition(
+				FVector(Assist3Exit->PositionCM));
+			DirectorSample.TerminalScreenRight =
+				(DirectorSample.TerminalTargetCenter - ExitWorld)
+					.GetSafeNormal();
+			DirectorSample.TerminalScreenUp = (
+				Frame.GetUp()
+				- DirectorSample.TerminalScreenRight
+					* FVector::DotProduct(
+						Frame.GetUp(),
+						DirectorSample.TerminalScreenRight))
+				.GetSafeNormal();
+			if (DirectorSample.TerminalScreenRight.IsNearlyZero()
+				|| DirectorSample.TerminalScreenUp.IsNearlyZero())
+			{
+				DirectorFallbackReason = TEXT("TerminalBasisRejected");
+				return false;
+			}
+		}
+		if (DirectorSample.Selection.OutgoingAssistIndex >= 1
+			&& DirectorSample.Selection.IncomingAssistIndex
+				== DirectorSample.Selection.OutgoingAssistIndex + 1)
+		{
+			const FABTSM11GravityBodySpec& OutgoingBody =
+				Preset.CanonicalScenario.GetAssist(
+					DirectorSample.Selection.OutgoingAssistIndex);
+			const FABTSM11GravityBodySpec& IncomingBody =
+				Preset.CanonicalScenario.GetAssist(
+					DirectorSample.Selection.IncomingAssistIndex);
+			DirectorSample.OutgoingTargetCenter =
+				Frame.TransformLocalPosition(FVector(OutgoingBody.CenterCM));
+			DirectorSample.OutgoingTargetRadiusCM =
+				OutgoingBody.VisualRadiusCM;
+			DirectorSample.IncomingTargetCenter =
+				Frame.TransformLocalPosition(FVector(IncomingBody.CenterCM));
+			DirectorSample.IncomingTargetRadiusCM =
+				IncomingBody.VisualRadiusCM;
+		}
+		USkeletalMeshComponent* BirdVisual =
 			AttemptBird->GetBirdVisual();
 		if (IsValid(BirdVisual)
 			&& FMath::IsFinite(BirdVisual->Bounds.SphereRadius)
@@ -1089,10 +1262,26 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		}
 		if (!DirectorSample.IsUsable())
 		{
-			FailInteraction(TEXT("FlightCameraDirectorSampleRejected"));
-			return;
+			DirectorFallbackReason = TEXT("DirectorSampleRejected");
+			return false;
 		}
-		DirectorSamplePtr = &DirectorSample;
+		return true;
+		}();
+		if (bDirectorSampleBuilt)
+		{
+			DirectorSamplePtr = &DirectorSample;
+		}
+		else if (!bCameraDirectorFallbackLogged)
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Warning,
+				TEXT("[ABTS][M11-C][M7] CameraDirectorFallback Reason=%s Source=0x%016llx GameplayContinues=1"),
+				DirectorFallbackReason.IsEmpty()
+					? TEXT("Unknown") : *DirectorFallbackReason,
+				ReleasedPlaybackPlan.ReleasedTrajectoryHash);
+			bCameraDirectorFallbackLogged = true;
+		}
 	}
 	if (!FlightCamera->UpdateAuthoritySample(
 		WorldPosition,
@@ -1113,7 +1302,19 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		{
 			InteractionState =
 				EABTSM11FinaleInteractionState::TargetHit;
-			if (ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
+			if (ReleasedPlaybackPlan.bPhysicalTargetHit)
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Log,
+					TEXT("[ABTS][M11-C][Playback] PhysicalTargetHit Plan=0x%016llx Transfer=%d CandidateSource=%d"),
+					ReleasedPlaybackPlan.PlanHash,
+					ReleasedPlaybackPlan
+						.bUsesVisibleTerminalTransfer ? 1 : 0,
+					ReleasedPlaybackPlan
+						.bCandidateQualifiedIntercept ? 1 : 0);
+			}
+			else if (ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 			{
 				UE_LOG(
 					LogABTSRuntime,
@@ -1125,16 +1326,6 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 						FinaleSystem->GetEditorCandidateIdentity()
 							.GlobalWorkIndex));
 			}
-			else
-			{
-				UE_LOG(
-					LogABTSRuntime,
-					Log,
-					TEXT("[ABTS][M11-C][Playback] PhysicalTargetHit Plan=0x%016llx Transfer=%d"),
-					ReleasedPlaybackPlan.PlanHash,
-					ReleasedPlaybackPlan
-						.bUsesVisibleTerminalTransfer ? 1 : 0);
-			}
 		}
 		else
 		{
@@ -1144,6 +1335,13 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 					CurrentClassification)));
 		}
 	}
+}
+
+double AABTSM11FinaleInteractionSystem::GetPlaybackPresentationTimeScale() const
+{
+	return IsValid(FinaleSystem) && FinaleSystem->IsEditorCandidateMode()
+		? 1.0
+		: FMath::Max(0.1, PlaybackTimeScale);
 }
 
 void AABTSM11FinaleInteractionSystem::UpdateFailurePresentation(
@@ -1621,6 +1819,14 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	const bool bKeepFinaleMode)
 {
+	FinaleBirdTrail->ClearTrail();
+	if (IsValid(AttemptBird))
+	{
+		if (USkeletalMeshComponent* BirdVisual = AttemptBird->GetBirdVisual())
+		{
+			BirdVisual->SetRelativeScale3D(AttemptBirdOriginalVisualScale);
+		}
+	}
 	RestoreAimCameraView();
 	++AimRevision;
 	LatestSolvedRevision = INDEX_NONE;
@@ -1681,6 +1887,9 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	bAttemptBirdInPouch = true;
 	Stabilizer.Reset(Stabilizer.GetControlledInput());
 	ReleasedPlaybackPlan.Reset();
+	ReleasedCameraTrajectoryResult = FABTSM11TrajectoryResult();
+	ReleasedCameraShotPlan.Reset();
+	bCameraDirectorFallbackLogged = false;
 	PlaybackElapsedSeconds = 0.0;
 	PlaybackPresentationEndTimeSeconds = 0.0;
 	RuntimeFailure.Reset();
