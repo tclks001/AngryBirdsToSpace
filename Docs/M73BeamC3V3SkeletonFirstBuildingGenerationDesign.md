@@ -1711,3 +1711,92 @@ Static DAG Accepted、Physical NotEvaluated。
 当前分区仍是 Manhattan 汇水区，不是最终建筑美学边界；tie 边界、颜色循环、保守全格顶面都必须由用户在第 8 层
 视觉验收。批准后下一步才允许把省份提升为局部裙房候选，逐省份重跑 SupportedSpan/Crown/保护空洞合法性，并
 联合选择 PodiumMain/TowerChild；不得直接用 `ProposedPodiumTopCourse` 改写 WFC。
+
+## 39. 支撑省份约束的 PodiumMain 分配视觉停点（2026-08-11）
+
+本节落实第 36 节第三步的“均匀分布 PodiumMain”部分，但仍不消费逐省份 `ProposedPodiumTopCourse` 改写 WFC，
+也不进入 TowerChild 一次收缩。第 38 节的支撑省份从只读诊断提升为 PodiumMain 联合选择的硬输入；省份本身的
+course-0 位图、Demand 归属和独立 Hash 保持不变。
+
+### 39.1 规划顺序与覆盖合同
+
+1. `SemanticSupportDemandDAG`、逐 course occupancy 和 `SupportProvincePartition` 必须在任何 PodiumMain 候选枚举前
+   完成。main 不得再通过已生成 child、入口 region 或旧中心锚点反推需要覆盖的地面范围；
+2. 每个省份从自己的真实占用格中选择距省份质心最近的确定性 anchor cell。坐标允许为负数，存在性必须由独立
+   `bHasAnchorCell` 表达；禁止再用 `INDEX_NONE=-1` 冒充坐标哨兵，否则合法的 `X/Y=-1` 省份会被静默丢失；
+3. 每个 PodiumMain 候选发布 `ProvinceCoverageMask`。只有候选 footprint 包含省份 anchor，才声明覆盖该省份；
+   联合选择的硬需求同时包含全部 terminal/high-projection region 与全部省份，任一省份无候选时失败关闭；
+4. main 组合仍须满足全高固定-footprint TowerChild、main-main composite lane、sibling、shared endpoint 和旧 podium
+   support anchor 合同。省份只增加需求，不豁免任何既有几何、720 cm、DAG 或预算门；
+5. member 发射和静态验证完成后，逐省份反向绑定实际接地 core。使用层级芯体的 component 必须绑定一个真实
+   `PodiumMain`，且其 footprint 必须覆盖省份 anchor；非层级旧路径只允许绑定最近的非 TowerChild 接地 core。
+   Summary 发布 `BoundSupportProvinceCount`、`DistinctProvinceGroundCoreCount` 和独立
+   `SupportProvinceMainBindingHash`。诊断计划与实际 core 不闭合时失败关闭。
+
+这里的“均匀”是离散覆盖合同，而不是连续 CVT：一个较大的 main 可以覆盖相邻多个省份，但不能以两个彼此贴近、
+只覆盖同一批 anchor 的 main 冒充整个基座已经覆盖。最终 main 数首先最少；只有在覆盖全部省份、高层需求、中心
+anchor 且满足 child/shared 兼容后，才按冻结候选顺序决胜。本轮不最小化省份面积误差，也不把省份边界直接变成
+建筑切缝。
+
+### 39.2 联合选择的有界证明
+
+增加省份需求后，`DropTrigger.E6` 首次暴露联合选择退化：旧实现为 1678 个 retained main 预计算约 1897 万条
+main-child 关系，并在找到可行解后继续枚举 121246 个同数量组合，单叶于 10 秒门失败。修复不调整 Seed、Attempt、
+36 cm 网格、720 cm、轨距、候选桶容量或超时门，而把证明过程改为：
+
+1. 单个 main 若不兼容任一 terminal 的全部全高 child，或独自堵死某条 shared endpoint 的所有 witness，立即按
+   必要条件删除；
+2. main-child 精确兼容位集只在某个 retained main 真正进入完整组合时按需建立并缓存，不为未访问候选预计算；
+3. 确定性最大新增覆盖构造先寻找一个通过完整 child/sibling/shared 合同的可行解，只作为 branch-and-bound 上界；
+   它不能单独宣布通过；
+4. 把 `region coverage + province coverage + podium anchor` 压缩为唯一覆盖签名，在这些签名上做有限 BFS，求忽略
+   几何冲突后的最小 main 数。该值是实际问题的严格下界；只有可行上界数量等于该下界时，才可证明已经最优并
+   跳过剩余几何枚举。若两者不等、状态上限达到或无证明，继续原精确搜索并受 10 秒门约束；
+5. 搜索状态使用整数数组的精确相等/hash，而不是格式化字符串；Hash 只加速查找，容器仍比较完整候选 ID 数组，
+   不允许概率碰撞决定生成结果。
+
+固定 `DropTrigger.E6/740000` 的可行上界与覆盖下界均为 5，故 5 个 main 已证明为最少；8 个省份全部绑定到 5 个
+实际 PodiumMain，`StaticDAG=Accepted`，总计约 `2009.92 ms`，其中 JointSelection 约 `68.88 ms`。固定
+`ColumnBreak.E6/710000` 的两个 WFC component 各自得到 1 个 main，合计 4 个省份绑定到 2 个 main；shared course
+保留，Static DAG Accepted，总计约 `2488.63 ms`。合并屋顶夹具的两个省份绑定到两个 main，证明共用 Crown 不会
+再次吞并支撑需求。Physical 均为 `NotEvaluated`。
+
+### 39.3 编辑器诊断层与验收边界
+
+`Stage 1 Diagnostic Layer` 追加互斥的 `9 - Province / Main Assignment`：
+
+- 继续以省份颜色显示 course 0 和 `ProposedPodiumTopCourse` 位图；
+- 以薄钢材板显示最终选中的接地 PodiumMain footprint；
+- 从每个省份 anchor 向其实际绑定 main 顶面绘制石材色连线。
+
+该层不显示 WFC 包络、需求图 Body Box、原 core intent 或完整 member 层。视觉验收应核对：每个彩色省份恰有一条
+归属线；线端落在覆盖该 anchor 的真实 main 板内；多个省份可合理汇入同一较大 main；相隔较远的省份不能因共同
+DAG 根而全部汇入一侧。颜色仍只用于区分，不是稳定身份。
+
+本停点明确不代表逐省份裙房高度已生产化：上层彩色面仍是第 38 节的保守 proposal，实际 PodiumMain 仍使用当前
+component 统一高度。下一视觉批准后，才允许逐省份验证 local seam 的 SupportedSpan/Crown/ProtectedVoid 合法性；
+再下一步才进入“较粗主干 + 最多一次收缩”的 TowerChild。Stage 2、Beam-D1.5、Chaos、物理参数和可见 PIE 均不在
+本节证据范围。
+
+### 39.4 静态收口证据
+
+本停点取得 UE 5.8 ForceUnity Development Editor 全链接成功。fresh NullRHI 代表性证据包括：
+
+- `DropTrigger.E6/740000`：8 个省份绑定 5 个 PodiumMain，覆盖可行上界与严格下界均为 5，总计
+  `2009.92 ms`，JointSelection `68.88 ms`；
+- `ColumnBreak.E6/710000`：4 个省份绑定 2 个 PodiumMain，shared course 保留，总计 `2488.63 ms`；
+- 合并屋顶夹具：2 个 semantic Body demand、2 个省份、2 个实际 PodiumMain；
+- `TipOver.E6/710000、730000、750000`：分别为 `8→3`、`7→3`、`8→3` 个“省份→main”绑定，均取得
+  Static DAG Accepted；
+- Stage 1-only 5×6：30/30，单叶算法时间最小 `6.65 ms`、平均 `919.24 ms`、中位 `729.00 ms`、最大
+  `3536.32 ms`；最慢叶为 `SeamRelease.E6`，没有叶触发 `10000 ms` 超时门。各 Profile 最大值分别为
+  ColumnBreak `1830.17 ms`、DropTrigger `2125.94 ms`、SeamRelease `3536.32 ms`、SlideRelease
+  `1821.12 ms`、TipOver `737.50 ms`。
+
+证据日志为 `BeamC3V3-ProvinceMain-CoverageBound-DropTriggerE6-20260811-183206.log`、
+`BeamC3V3-ProvinceMain-ColumnBreakE6-20260811103703-0.log`、
+`BeamC3V3-ProvinceMain-MergedRoof-20260811103703-1.log`、
+`BeamC3V3-ProvinceMain-PreviewContracts-20260811104035-0.log`、
+`BeamC3V3-ProvinceMain-TipOverSeeds-20260811104035-1.log` 和
+`BeamC3V3-ProvinceMain-Stage1-5x6-20260811-184252.log`。所有结果均为 `Physical=NotEvaluated`；本轮未启动
+可见 Editor/PIE，`9 - Province / Main Assignment` 仍等待人工视觉批准。

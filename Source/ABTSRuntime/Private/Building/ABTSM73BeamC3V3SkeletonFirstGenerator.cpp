@@ -1246,7 +1246,10 @@ namespace
 		Plan.Summary.SupportProvinceBoundaryCount = 0;
 		Plan.Summary.SupportProvinceTieBreakCellCount = 0;
 		Plan.Summary.SupportProvinceNearestSeedFallbackCount = 0;
+		Plan.Summary.BoundSupportProvinceCount = 0;
+		Plan.Summary.DistinctProvinceGroundCoreCount = 0;
 		Plan.Summary.SupportProvinceHash = 0;
+		Plan.Summary.SupportProvinceMainBindingHash = 0;
 		for (FSemanticTerminalDemandDiagnostic& Demand : Plan.SemanticTerminalDemands)
 		{
 			Demand.SupportProvinceId = INDEX_NONE;
@@ -1525,6 +1528,39 @@ namespace
 				}
 				Province.GroundCentroid = CentroidSum
 					/ static_cast<double>(Province.GroundCellCount);
+				double BestAnchorDistanceSquared = DBL_MAX;
+				int32 BestAnchorBitIndex = INDEX_NONE;
+				for (const int32 BitIndex : ProvinceCells)
+				{
+					const int32 X = BitIndex % Province.SizeX;
+					const int32 Y = BitIndex / Province.SizeX;
+					const FVector2D Center(
+						(Province.MinimumXUnit + X) * BlockUnitsCM,
+						(Province.MinimumYUnit + Y) * BlockUnitsCM);
+					const double DistanceSquared = FVector2D::DistSquared(
+						Center, FVector2D(Province.GroundCentroid.X,
+							Province.GroundCentroid.Y));
+					if (DistanceSquared < BestAnchorDistanceSquared
+						|| (FMath::IsNearlyEqual(DistanceSquared,
+							BestAnchorDistanceSquared)
+							&& BitIndex < BestAnchorBitIndex))
+					{
+						BestAnchorDistanceSquared = DistanceSquared;
+						BestAnchorBitIndex = BitIndex;
+					}
+				}
+				if (BestAnchorBitIndex == INDEX_NONE)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SupportProvinceAnchorUnavailable:Province=%d"),
+						Province.ProvinceId);
+					return false;
+				}
+				Province.AnchorXUnit = Province.MinimumXUnit
+					+ BestAnchorBitIndex % Province.SizeX;
+				Province.AnchorYUnit = Province.MinimumYUnit
+					+ BestAnchorBitIndex / Province.SizeX;
+				Province.bHasAnchorCell = true;
 				Province.MinimumRequiredTopCourse = MAX_int32;
 				for (const int32 DemandIndex : Seeds[SeedIndex].DemandIndices)
 				{
@@ -1639,6 +1675,7 @@ namespace
 		{
 			if (Province.ProvinceId == INDEX_NONE || Province.ComponentId == INDEX_NONE
 				|| Province.GroundCellCount <= 0 || !Province.GroundBounds.IsValid
+				|| !Province.bHasAnchorCell
 				|| Province.DemandIds.IsEmpty()
 				|| Province.GroundCellWords.Num()
 					!= (Province.SizeX * Province.SizeY + 63) / 64
@@ -1658,7 +1695,7 @@ namespace
 			Plan.Summary.MultiDemandSupportProvinceCount +=
 				Province.DemandIds.Num() > 1 ? 1 : 0;
 			Canonical += FString::Printf(
-				TEXT("|P:%d:C=%d:S=%d:N=%d:TIE=%d:FULL=%d:TOP=%d:REQ=%d:FALL=%d:SYN=%d:X=%d:Y=%d:W=%d:H=%d"),
+				TEXT("|P:%d:C=%d:S=%d:N=%d:TIE=%d:FULL=%d:TOP=%d:REQ=%d:FALL=%d:SYN=%d:X=%d:Y=%d:W=%d:H=%d:AX=%d:AY=%d"),
 				Province.ProvinceId, Province.ComponentId,
 				Province.StableSeedDemandId, Province.GroundCellCount,
 				Province.TieBreakCellCount,
@@ -1668,7 +1705,8 @@ namespace
 				Province.bUsedNearestGroundSeed ? 1 : 0,
 				Province.bSyntheticGroundOnly ? 1 : 0,
 				Province.MinimumXUnit, Province.MinimumYUnit,
-				Province.SizeX, Province.SizeY);
+				Province.SizeX, Province.SizeY,
+				Province.AnchorXUnit, Province.AnchorYUnit);
 			for (const int32 DemandId : Province.DemandIds)
 			{
 				if (AssignedDemandIds.Contains(DemandId))
@@ -1702,6 +1740,97 @@ namespace
 		return Plan.Summary.SupportProvinceCount > 0
 			&& Plan.Summary.SupportProvinceGroundCellCount > 0
 			&& Plan.Summary.SupportProvinceHash != 0;
+	}
+
+	bool FinalizeSupportProvinceGroundCoreBindings(FPlan& Plan, FString& OutError)
+	{
+		Plan.Summary.BoundSupportProvinceCount = 0;
+		Plan.Summary.DistinctProvinceGroundCoreCount = 0;
+		Plan.Summary.SupportProvinceMainBindingHash = 0;
+		TSet<int32> DistinctGroundCoreIds;
+		FString Canonical;
+		for (FSupportProvinceDiagnostic& Province : Plan.SupportProvinces)
+		{
+			Province.BoundGroundCoreCellId = INDEX_NONE;
+			Province.bAnchorCoveredByBoundCore = false;
+			Province.bBoundToPodiumMain = false;
+			const bool bComponentHasPodiumMain = Plan.CoreCells.ContainsByPredicate(
+				[&Province](const FCoreCellPlan& Core)
+				{
+					return Core.ComponentId == Province.ComponentId
+						&& Core.HierarchyRole == ECoreHierarchyRole::PodiumMain;
+				});
+			const FVector2D Anchor(
+				Province.AnchorXUnit * BlockUnitsCM,
+				Province.AnchorYUnit * BlockUnitsCM);
+			double BestDistanceSquared = DBL_MAX;
+			bool bBestContainsAnchor = false;
+			for (const FCoreCellPlan& Core : Plan.CoreCells)
+			{
+				if (Core.ComponentId != Province.ComponentId
+					|| (bComponentHasPodiumMain
+						? Core.HierarchyRole != ECoreHierarchyRole::PodiumMain
+						: Core.HierarchyRole == ECoreHierarchyRole::TowerChild))
+				{
+					continue;
+				}
+				const bool bContainsAnchor =
+					Anchor.X >= Core.LocalBounds.Min.X - GeometryToleranceCM
+					&& Anchor.X <= Core.LocalBounds.Max.X + GeometryToleranceCM
+					&& Anchor.Y >= Core.LocalBounds.Min.Y - GeometryToleranceCM
+					&& Anchor.Y <= Core.LocalBounds.Max.Y + GeometryToleranceCM;
+				if (bBestContainsAnchor && !bContainsAnchor)
+				{
+					continue;
+				}
+				const FVector Center = Core.LocalBounds.GetCenter();
+				const double DistanceSquared = FVector2D::DistSquared(
+					Anchor, FVector2D(Center.X, Center.Y));
+				if (Province.BoundGroundCoreCellId == INDEX_NONE
+					|| (bContainsAnchor && !bBestContainsAnchor)
+					|| (bContainsAnchor == bBestContainsAnchor
+						&& (DistanceSquared < BestDistanceSquared
+							|| (FMath::IsNearlyEqual(DistanceSquared,
+								BestDistanceSquared)
+								&& Core.CoreCellId
+									< Province.BoundGroundCoreCellId))))
+				{
+					Province.BoundGroundCoreCellId = Core.CoreCellId;
+					Province.bAnchorCoveredByBoundCore = bContainsAnchor;
+					Province.bBoundToPodiumMain =
+						Core.HierarchyRole == ECoreHierarchyRole::PodiumMain;
+					BestDistanceSquared = DistanceSquared;
+					bBestContainsAnchor = bContainsAnchor;
+				}
+			}
+			if (Province.BoundGroundCoreCellId == INDEX_NONE
+				|| (bComponentHasPodiumMain
+					&& !Province.bAnchorCoveredByBoundCore))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SupportProvinceGroundCoreUnavailable:Province=%d:Component=%d:Anchor=%d,%d:HasPodiumMain=%d:Selected=%d:Covered=%d"),
+					Province.ProvinceId, Province.ComponentId,
+					Province.AnchorXUnit, Province.AnchorYUnit,
+					bComponentHasPodiumMain ? 1 : 0,
+					Province.BoundGroundCoreCellId,
+					Province.bAnchorCoveredByBoundCore ? 1 : 0);
+				return false;
+			}
+			++Plan.Summary.BoundSupportProvinceCount;
+			DistinctGroundCoreIds.Add(Province.BoundGroundCoreCellId);
+			Canonical += FString::Printf(
+				TEXT("|P:%d:C:%d:A=%d,%d:G=%d:COVER=%d:MAIN=%d"),
+				Province.ProvinceId, Province.ComponentId,
+				Province.AnchorXUnit, Province.AnchorYUnit,
+				Province.BoundGroundCoreCellId,
+				Province.bAnchorCoveredByBoundCore ? 1 : 0,
+				Province.bBoundToPodiumMain ? 1 : 0);
+		}
+		Plan.Summary.DistinctProvinceGroundCoreCount = DistinctGroundCoreIds.Num();
+		Plan.Summary.SupportProvinceMainBindingHash = HashText(Canonical);
+		return Plan.Summary.BoundSupportProvinceCount
+				== Plan.Summary.SupportProvinceCount
+			&& Plan.Summary.SupportProvinceMainBindingHash != 0;
 	}
 
 	double CellFaceAtOrAbove(const double Value)
@@ -9872,6 +10001,35 @@ namespace
 
 		TArray<TArray<FBandState>> ComponentBands;
 		ComponentBands.SetNum(Roots.Num());
+		if (Stage == EGenerationStage::CoreAndShared)
+		{
+			FStage1PhaseTimer PhaseTimer(
+				OutPlan.Summary.TerminalDemandMilliseconds);
+			for (int32 RootIndex = 0; RootIndex < Roots.Num(); ++RootIndex)
+			{
+				if (!BuildSemanticSupportDemandDiagnostics(
+					Roots[RootIndex], RootIndex, OutPlan, OutError))
+				{
+					PhaseTimer.Stop();
+					OutError = FString::Printf(
+						TEXT("BeamC3V3SemanticSupportDemandBuildFailed:Component=%d:%s"),
+						RootIndex, *OutError);
+					return false;
+				}
+			}
+			if (!FinalizeSemanticSupportDemandDiagnostics(OutPlan, OutError)
+				|| !BuildSupportProvinceDiagnostics(OutPlan, OutError))
+			{
+				PhaseTimer.Stop();
+				return false;
+			}
+			PhaseTimer.Stop();
+			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+				TEXT("TerminalDemand"), OutPlan, OutError))
+			{
+				return false;
+			}
+		}
 		for (int32 RootIndex = 0; RootIndex < Roots.Num(); ++RootIndex)
 		{
 			const FRoot& Root = Roots[RootIndex];
@@ -10059,15 +10217,6 @@ namespace
 			{
 				FStage1PhaseTimer PhaseTimer(
 					OutPlan.Summary.TerminalDemandMilliseconds);
-				if (!BuildSemanticSupportDemandDiagnostics(
-					Root, RootIndex, OutPlan, OutError))
-				{
-					PhaseTimer.Stop();
-					OutError = FString::Printf(
-						TEXT("BeamC3V3SemanticSupportDemandBuildFailed:Component=%d:%s"),
-						RootIndex, *OutError);
-					return false;
-				}
 				const bool bBuiltDemands = !bUseGroundedCoreHierarchy
 					|| BuildRequiredHighProjectionDemands(
 						Root, PodiumTopCourse,
@@ -10628,11 +10777,15 @@ namespace
 				double Distance = DBL_MAX;
 				uint32 CoverageMask = 0;
 				uint32 FullHeightCompatibilityMask = 0;
+				uint32 ProvinceCoverageMask = 0;
 				bool bCoversPodiumSupportAnchor = false;
 				TArray<int32> XStations;
 				TArray<int32> YStations;
+				/** Exact retained child compatibility, built only after retention. */
+				TArray<TArray<uint64>> CompatibleChildWordsByProjection;
 			};
-			TMap<uint64, TArray<FPodiumMainCandidate>> PodiumCandidatesByCoverage;
+			TMap<uint32, TMap<uint64, TArray<FPodiumMainCandidate>>>
+				PodiumCandidatesByProvinceAndCoverage;
 			TArray<FPodiumMainCandidate> SelectedCoreCandidates;
 			FVector2D CoreTarget(Root.Bounds.GetCenter().X, Root.Bounds.GetCenter().Y);
 			if (!bUseGroundedCoreHierarchy && !Root.CrownVolumes.IsEmpty())
@@ -10754,6 +10907,27 @@ namespace
 			}
 			const uint32 RequiredCoverageMask = ProjectionGridBounds.IsEmpty()
 				? 0u : (1u << ProjectionGridBounds.Num()) - 1u;
+			TArray<int32> RequiredSupportProvinceIds;
+			for (const FSupportProvinceDiagnostic& Province : OutPlan.SupportProvinces)
+			{
+				if (Province.ComponentId == RootIndex)
+				{
+					RequiredSupportProvinceIds.Add(Province.ProvinceId);
+				}
+			}
+			RequiredSupportProvinceIds.Sort();
+			if (bUseGroundedCoreHierarchy
+				&& (RequiredSupportProvinceIds.IsEmpty()
+					|| RequiredSupportProvinceIds.Num() > 30))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3SupportProvinceCoverageCardinalityInvalid:Component=%d:Provinces=%d"),
+					RootIndex, RequiredSupportProvinceIds.Num());
+				return false;
+			}
+			const uint32 RequiredProvinceCoverageMask =
+				RequiredSupportProvinceIds.IsEmpty()
+					? 0u : (1u << RequiredSupportProvinceIds.Num()) - 1u;
 				auto IsBetterPodiumCandidate = [](const FPodiumMainCandidate& A,
 				const FPodiumMainCandidate& B)
 			{
@@ -11326,6 +11500,26 @@ namespace
 								GroundedCandidate.Distance = Distance;
 								GroundedCandidate.CoverageMask =
 									HighProjectionCoverageMask;
+								for (int32 ProvinceIndex = 0;
+									ProvinceIndex < RequiredSupportProvinceIds.Num();
+									++ProvinceIndex)
+								{
+									const int32 ProvinceId =
+										RequiredSupportProvinceIds[ProvinceIndex];
+									if (OutPlan.SupportProvinces.IsValidIndex(ProvinceId))
+									{
+										const FSupportProvinceDiagnostic& Province =
+											OutPlan.SupportProvinces[ProvinceId];
+										if (Province.AnchorXUnit >= MinimumX
+											&& Province.AnchorXUnit <= MaximumX
+											&& Province.AnchorYUnit >= MinimumY
+											&& Province.AnchorYUnit <= MaximumY)
+										{
+											GroundedCandidate.ProvinceCoverageMask
+												|= 1u << ProvinceIndex;
+										}
+									}
+								}
 								GroundedCandidate.XStations = CandidateXStations;
 								GroundedCandidate.YStations = CandidateYStations;
 								for (int32 ProjectionIndex = 0;
@@ -11361,6 +11555,7 @@ namespace
 								GroundedCandidate.bCoversPodiumSupportAnchor =
 									bCoversPodiumSupportAnchor;
 								if (GroundedCandidate.FullHeightCompatibilityMask == 0u
+									&& GroundedCandidate.ProvinceCoverageMask == 0u
 									&& !GroundedCandidate.bCoversPodiumSupportAnchor)
 								{
 									continue;
@@ -11369,8 +11564,14 @@ namespace
 									(static_cast<uint64>(GroundedCandidate.CoverageMask) << 32)
 									| GroundedCandidate.FullHeightCompatibilityMask;
 								constexpr int32 MaximumCandidatesPerCoverage = 12;
+								const TMap<uint64, TArray<FPodiumMainCandidate>>*
+									SameProvinceCoverage =
+										PodiumCandidatesByProvinceAndCoverage.Find(
+											GroundedCandidate.ProvinceCoverageMask);
 								if (const TArray<FPodiumMainCandidate>* SameCoverage =
-									PodiumCandidatesByCoverage.Find(GroundedRetentionKey);
+									SameProvinceCoverage != nullptr
+										? SameProvinceCoverage->Find(GroundedRetentionKey)
+										: nullptr;
 									SameCoverage != nullptr
 									&& SameCoverage->Num() >= MaximumCandidatesPerCoverage
 									&& IsBetterPodiumCandidate(
@@ -11418,8 +11619,9 @@ namespace
 							if (bUseGroundedCoreHierarchy)
 							{
 								TArray<FPodiumMainCandidate>& SameCoverage =
-									PodiumCandidatesByCoverage.FindOrAdd(
-										GroundedRetentionKey);
+									PodiumCandidatesByProvinceAndCoverage.FindOrAdd(
+										GroundedCandidate.ProvinceCoverageMask).FindOrAdd(
+											GroundedRetentionKey);
 								SameCoverage.Add(MoveTemp(GroundedCandidate));
 								SameCoverage.Sort(IsBetterPodiumCandidate);
 								constexpr int32 MaximumCandidatesPerCoverage = 12;
@@ -11471,6 +11673,13 @@ namespace
 				}
 			}
 			MainCandidateTimer.Stop();
+			int32 MainRetentionBucketCount = 0;
+			for (const TPair<uint32,
+				TMap<uint64, TArray<FPodiumMainCandidate>>>& ProvincePair
+				: PodiumCandidatesByProvinceAndCoverage)
+			{
+				MainRetentionBucketCount += ProvincePair.Value.Num();
+			}
 			UE_LOG(LogABTSRuntime, Display,
 				TEXT("[ABTS][M7.3-Beam-C3V3][Stage1MainSearch] Component=%d States=%lld Complete=%lld RailCache=%d RailHit=%lld RailMiss=%lld SourceCache=%d SourceHit=%lld SourceMiss=%lld ChildCompatibilityProbes=%lld RetentionBuckets=%d"),
 				RootIndex, MainCandidatePollCount, MainCompleteStackCandidateCount,
@@ -11478,7 +11687,7 @@ namespace
 				MainRailCoverageCacheMissCount, MainSourceProbeCache.Num(),
 				MainSourceProbeCacheHitCount, MainSourceProbeCacheMissCount,
 				MainChildCompatibilityProbeCount,
-				PodiumCandidatesByCoverage.Num());
+				MainRetentionBucketCount);
 			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
 				TEXT("PodiumMainCandidate"), OutPlan, OutError))
 			{
@@ -11498,11 +11707,63 @@ namespace
 					return false;
 				}
 				TArray<FPodiumMainCandidate> AllCandidates;
-				for (const TPair<uint64, TArray<FPodiumMainCandidate>>& Pair
-					: PodiumCandidatesByCoverage)
+				for (const TPair<uint32,
+					TMap<uint64, TArray<FPodiumMainCandidate>>>& ProvincePair
+					: PodiumCandidatesByProvinceAndCoverage)
 				{
-					AllCandidates.Append(Pair.Value);
+					for (const TPair<uint64, TArray<FPodiumMainCandidate>>& Pair
+						: ProvincePair.Value)
+					{
+						AllCandidates.Append(Pair.Value);
+					}
 				}
+				const int32 RetainedMainCandidateCountBeforeCompatibilityPrune =
+					AllCandidates.Num();
+				AllCandidates.RemoveAll([RequiredCoverageMask](
+					const FPodiumMainCandidate& Candidate)
+				{
+					return (Candidate.FullHeightCompatibilityMask
+						& RequiredCoverageMask) != RequiredCoverageMask;
+				});
+				const int32 RejectedPartialCompatibilityMainCount =
+					RetainedMainCandidateCountBeforeCompatibilityPrune
+						- AllCandidates.Num();
+				int64 IndividualSharedEndpointCompatibilityProbeCount = 0;
+				const int32 MainCandidateCountBeforeSharedEndpointPrune =
+					AllCandidates.Num();
+				AllCandidates.RemoveAll([
+					&SharedEndpointRequirements, &JointFootprintsConflict,
+					&IndividualSharedEndpointCompatibilityProbeCount](
+						const FPodiumMainCandidate& Candidate)
+				{
+					for (const FJointSharedEndpointRequirement& Requirement
+						: SharedEndpointRequirements)
+					{
+						const bool bHasCompatibleEndpoint =
+							Requirement.Candidates.ContainsByPredicate(
+							[&Candidate, &JointFootprintsConflict,
+								&IndividualSharedEndpointCompatibilityProbeCount](
+								const FJointChildFootprint& Endpoint)
+							{
+								++IndividualSharedEndpointCompatibilityProbeCount;
+								return !JointFootprintsConflict(
+									Candidate.MinimumX, Candidate.MaximumX,
+									Candidate.MinimumY, Candidate.MaximumY,
+									Candidate.XStations, Candidate.YStations,
+									Endpoint.MinimumX, Endpoint.MaximumX,
+									Endpoint.MinimumY, Endpoint.MaximumY,
+									Endpoint.XStations, Endpoint.YStations);
+							});
+						if (!bHasCompatibleEndpoint)
+						{
+							return true;
+						}
+					}
+					return false;
+				});
+				const int32 RejectedIndividualSharedEndpointMainCount =
+					MainCandidateCountBeforeSharedEndpointPrune
+						- AllCandidates.Num();
 				AllCandidates.Sort([&IsBetterPodiumCandidate](
 					const FPodiumMainCandidate& A, const FPodiumMainCandidate& B)
 				{
@@ -11511,6 +11772,14 @@ namespace
 					if (ACoverage != BCoverage)
 					{
 						return ACoverage > BCoverage;
+					}
+					const int32 AProvinceCoverage = FPlatformMath::CountBits(
+						A.ProvinceCoverageMask);
+					const int32 BProvinceCoverage = FPlatformMath::CountBits(
+						B.ProvinceCoverageMask);
+					if (AProvinceCoverage != BProvinceCoverage)
+					{
+						return AProvinceCoverage > BProvinceCoverage;
 					}
 					const int32 ACompatibility = FPlatformMath::CountBits(
 						A.FullHeightCompatibilityMask);
@@ -11532,22 +11801,80 @@ namespace
 						B.MinimumX, B.MaximumX, B.MinimumY, B.MaximumY,
 						B.XStations, B.YStations);
 				};
-				const uint32 FullCoverageMask =
+				int64 PrecomputedMainChildCompatibilityProbeCount = 0;
+				for (FPodiumMainCandidate& Main : AllCandidates)
+				{
+					Main.CompatibleChildWordsByProjection.SetNum(
+						FullHeightChildCandidatesByProjection.Num());
+				}
+				auto EnsureMainChildCompatibilityWords = [
+					&AllCandidates, &FullHeightChildCandidatesByProjection,
+					&JointFootprintsConflict,
+					&PrecomputedMainChildCompatibilityProbeCount](
+						const int32 MainIndex, const int32 ProjectionIndex)
+						-> const TArray<uint64>*
+				{
+					if (!AllCandidates.IsValidIndex(MainIndex)
+						|| !FullHeightChildCandidatesByProjection.IsValidIndex(
+							ProjectionIndex))
+					{
+						return nullptr;
+					}
+					FPodiumMainCandidate& Main = AllCandidates[MainIndex];
+					if (!Main.CompatibleChildWordsByProjection.IsValidIndex(
+						ProjectionIndex))
+					{
+						return nullptr;
+					}
+					TArray<uint64>& CompatibleWords =
+						Main.CompatibleChildWordsByProjection[ProjectionIndex];
+					if (CompatibleWords.IsEmpty())
+					{
+						const TArray<FJointChildFootprint>& Children =
+							FullHeightChildCandidatesByProjection[ProjectionIndex];
+						CompatibleWords.SetNumZeroed((Children.Num() + 63) / 64);
+						for (int32 ChildIndex = 0; ChildIndex < Children.Num(); ++ChildIndex)
+						{
+							const FJointChildFootprint& Child = Children[ChildIndex];
+							++PrecomputedMainChildCompatibilityProbeCount;
+							if (!JointFootprintsConflict(
+								Main.MinimumX, Main.MaximumX,
+								Main.MinimumY, Main.MaximumY,
+								Main.XStations, Main.YStations,
+								Child.MinimumX, Child.MaximumX,
+								Child.MinimumY, Child.MaximumY,
+								Child.XStations, Child.YStations))
+							{
+								CompatibleWords[ChildIndex >> 6]
+									|= uint64(1) << (ChildIndex & 63);
+							}
+						}
+					}
+					return &CompatibleWords;
+				};
+				const uint32 FullRegionCoverageMask =
 					(1u << RequiredHighProjectionEntryBounds.Num()) - 1u;
+				const uint64 FullJointCoverageMask =
+					static_cast<uint64>(FullRegionCoverageMask)
+					| (static_cast<uint64>(RequiredProvinceCoverageMask) << 32);
 				FJointCoreSelectionDiagnostic& JointDiagnostic =
 					OutPlan.JointCoreSelectionDiagnostics.AddDefaulted_GetRef();
 				JointDiagnostic.ComponentId = RootIndex;
 				JointDiagnostic.HighProjectionRegionCount =
 					RequiredHighProjectionEntryBounds.Num();
+				JointDiagnostic.SupportProvinceCount =
+					RequiredSupportProvinceIds.Num();
 				JointDiagnostic.PodiumMainCandidateCount = AllCandidates.Num();
+				JointDiagnostic.MainCandidateWithoutFullHeightCompatibilityCount =
+					RejectedPartialCompatibilityMainCount;
 				JointDiagnostic.CompatibleMainCandidateCountByRegion.SetNumZeroed(
 					RequiredHighProjectionEntryBounds.Num());
 				JointDiagnostic.PodiumCoverageMainCandidateCountByRegion.SetNumZeroed(
 					RequiredHighProjectionEntryBounds.Num());
+				JointDiagnostic.MainCandidateCountBySupportProvince.SetNumZeroed(
+					RequiredSupportProvinceIds.Num());
 				for (const FPodiumMainCandidate& Candidate : AllCandidates)
 				{
-					JointDiagnostic.MainCandidateWithoutFullHeightCompatibilityCount +=
-						Candidate.FullHeightCompatibilityMask == 0u ? 1 : 0;
 					for (int32 ProjectionIndex = 0;
 						ProjectionIndex
 							< JointDiagnostic.CompatibleMainCandidateCountByRegion.Num();
@@ -11560,6 +11887,15 @@ namespace
 							+= (Candidate.CoverageMask
 								& (1u << ProjectionIndex)) != 0u ? 1 : 0;
 					}
+					for (int32 ProvinceIndex = 0;
+						ProvinceIndex
+							< JointDiagnostic.MainCandidateCountBySupportProvince.Num();
+						++ProvinceIndex)
+					{
+						JointDiagnostic.MainCandidateCountBySupportProvince[ProvinceIndex]
+							+= (Candidate.ProvinceCoverageMask
+								& (1u << ProvinceIndex)) != 0u ? 1 : 0;
+					}
 				}
 				TArray<int32> CurrentSelection;
 				TArray<int32> BestSelection;
@@ -11568,12 +11904,7 @@ namespace
 				{
 					TArray<int32> Canonical = MainSelection;
 					Canonical.Sort();
-					FString Key;
-					for (const int32 CandidateIndex : Canonical)
-					{
-						Key += FString::Printf(TEXT("%d,"), CandidateIndex);
-					}
-					return Key;
+					return Canonical;
 				};
 				auto JoinIntegerArray = [](const TArray<int32>& Values)
 				{
@@ -11583,7 +11914,7 @@ namespace
 							return FString::FromInt(Value);
 						});
 				};
-				TMap<FString, bool> FullHeightSelectionCache;
+				TMap<TArray<int32>, bool> FullHeightSelectionCache;
 				int64 FullHeightFeasibilityCallCount = 0;
 				int64 FullHeightMainConflictProbeCount = 0;
 				int64 FullHeightSiblingConflictProbeCount = 0;
@@ -11591,6 +11922,7 @@ namespace
 				auto SelectionSupportsAllFullHeightChildren = [
 					&AllCandidates, &FullHeightChildCandidatesByProjection,
 					&JointFootprintsConflict,
+					&EnsureMainChildCompatibilityWords,
 					&MainSelectionKey, &FullHeightSelectionCache,
 					&FullHeightFeasibilityCallCount,
 					&FullHeightMainConflictProbeCount,
@@ -11599,7 +11931,7 @@ namespace
 						const TArray<int32>& MainSelection)
 				{
 					++FullHeightFeasibilityCallCount;
-					const FString SelectionKey = MainSelectionKey(MainSelection);
+					const TArray<int32> SelectionKey = MainSelectionKey(MainSelection);
 					if (const bool* Cached = FullHeightSelectionCache.Find(SelectionKey))
 					{
 						return *Cached;
@@ -11612,30 +11944,49 @@ namespace
 						ProjectionIndex < FullHeightChildCandidatesByProjection.Num();
 						++ProjectionIndex)
 					{
-						for (const FJointChildFootprint& Child
-							: FullHeightChildCandidatesByProjection[ProjectionIndex])
+						TArray<uint64> CompatibleWords;
+						bool bInitializedWords = false;
+						for (const int32 MainIndex : MainSelection)
 						{
-							bool bConflictsMain = false;
-							for (const int32 MainIndex : MainSelection)
+							const TArray<uint64>* MainWordsPtr =
+								EnsureMainChildCompatibilityWords(
+									MainIndex, ProjectionIndex);
+							if (MainWordsPtr == nullptr)
 							{
-								++FullHeightMainConflictProbeCount;
-								if (!AllCandidates.IsValidIndex(MainIndex))
-								{
-									FullHeightSelectionCache.Add(SelectionKey, false);
-									return false;
-								}
-								const FPodiumMainCandidate& Main = AllCandidates[MainIndex];
-								bConflictsMain |= JointFootprintsConflict(
-									Main.MinimumX, Main.MaximumX,
-									Main.MinimumY, Main.MaximumY,
-									Main.XStations, Main.YStations,
-									Child.MinimumX, Child.MaximumX,
-									Child.MinimumY, Child.MaximumY,
-									Child.XStations, Child.YStations);
+								FullHeightSelectionCache.Add(SelectionKey, false);
+								return false;
 							}
-							if (!bConflictsMain)
+							const TArray<uint64>& MainWords = *MainWordsPtr;
+							if (!bInitializedWords)
 							{
-								CompatibleChildrenByProjection[ProjectionIndex].Add(&Child);
+								CompatibleWords = MainWords;
+								bInitializedWords = true;
+							}
+							else if (CompatibleWords.Num() != MainWords.Num())
+							{
+								FullHeightSelectionCache.Add(SelectionKey, false);
+								return false;
+							}
+							else
+							{
+								for (int32 WordIndex = 0;
+									WordIndex < CompatibleWords.Num(); ++WordIndex)
+								{
+									CompatibleWords[WordIndex] &= MainWords[WordIndex];
+									++FullHeightMainConflictProbeCount;
+								}
+							}
+						}
+						const TArray<FJointChildFootprint>& Children =
+							FullHeightChildCandidatesByProjection[ProjectionIndex];
+						for (int32 ChildIndex = 0; ChildIndex < Children.Num(); ++ChildIndex)
+						{
+							if (CompatibleWords.IsValidIndex(ChildIndex >> 6)
+								&& (CompatibleWords[ChildIndex >> 6]
+									& (uint64(1) << (ChildIndex & 63))) != 0)
+							{
+								CompatibleChildrenByProjection[ProjectionIndex].Add(
+									&Children[ChildIndex]);
 							}
 						}
 						if (CompatibleChildrenByProjection[ProjectionIndex].IsEmpty())
@@ -11758,9 +12109,320 @@ namespace
 					}
 					return true;
 				};
-				TSet<FString> VisitedMainSelectionStates;
+				TSet<TArray<int32>> VisitedMainSelectionStates;
+				TArray<uint64> CandidateJointCoverageMasks;
+				CandidateJointCoverageMasks.Reserve(AllCandidates.Num());
+				TArray<TArray<int32>> CandidateIndicesByRequirement;
+				CandidateIndicesByRequirement.SetNum(
+					RequiredHighProjectionEntryBounds.Num()
+					+ RequiredSupportProvinceIds.Num());
+				for (int32 CandidateIndex = 0;
+					CandidateIndex < AllCandidates.Num(); ++CandidateIndex)
+				{
+					const uint64 CandidateJointCoverage =
+						static_cast<uint64>(AllCandidates[CandidateIndex].CoverageMask)
+						| (static_cast<uint64>(
+							AllCandidates[CandidateIndex].ProvinceCoverageMask) << 32);
+					CandidateJointCoverageMasks.Add(CandidateJointCoverage);
+					for (int32 RegionIndex = 0;
+						RegionIndex < RequiredHighProjectionEntryBounds.Num();
+						++RegionIndex)
+					{
+						if ((CandidateJointCoverage & (1ull << RegionIndex)) != 0ull)
+						{
+							CandidateIndicesByRequirement[RegionIndex].Add(CandidateIndex);
+						}
+					}
+					for (int32 ProvinceIndex = 0;
+						ProvinceIndex < RequiredSupportProvinceIds.Num();
+						++ProvinceIndex)
+					{
+						if ((AllCandidates[CandidateIndex].ProvinceCoverageMask
+							& (1u << ProvinceIndex)) != 0u)
+						{
+							CandidateIndicesByRequirement[
+								RequiredHighProjectionEntryBounds.Num()
+									+ ProvinceIndex].Add(CandidateIndex);
+						}
+					}
+				}
+				// Seed branch-and-bound with a deterministic feasible witness. This does
+				// not replace the exact search below: it only gives that search an early
+				// cardinality upper bound. Every witness still passes the same full-height
+				// child, sibling and shared-endpoint contracts.
+				auto TryGreedyMainSelection = [
+					&AllCandidates, &CandidateJointCoverageMasks,
+					&CandidateIndicesByRequirement,
+					&RequiredHighProjectionEntryBounds,
+					FullJointCoverageMask, &CandidatesConflict,
+					&SelectionSupportsAllFullHeightChildren,
+					&SelectionSupportsAllSharedEndpoints,
+					&BestSelection, &bBestSelectionCoversPodiumSupportAnchor,
+					&JointDiagnostic](const int32 SeedCandidateIndex)
+				{
+					TArray<int32> GreedySelection;
+					uint64 GreedyCoveredMask = 0ull;
+					if (SeedCandidateIndex != INDEX_NONE)
+					{
+						if (!AllCandidates.IsValidIndex(SeedCandidateIndex))
+						{
+							return;
+						}
+						GreedySelection.Add(SeedCandidateIndex);
+						GreedyCoveredMask |=
+							CandidateJointCoverageMasks[SeedCandidateIndex];
+					}
+					while (GreedyCoveredMask != FullJointCoverageMask)
+					{
+						int32 RarestRequirementIndex = INDEX_NONE;
+						int32 RarestAvailableCount = MAX_int32;
+						for (int32 RequirementIndex = 0;
+							RequirementIndex < CandidateIndicesByRequirement.Num();
+							++RequirementIndex)
+						{
+							const int32 BitIndex = RequirementIndex
+								< RequiredHighProjectionEntryBounds.Num()
+								? RequirementIndex
+								: 32 + RequirementIndex
+									- RequiredHighProjectionEntryBounds.Num();
+							if ((GreedyCoveredMask & (1ull << BitIndex)) != 0ull)
+							{
+								continue;
+							}
+							int32 AvailableCount = 0;
+							for (const int32 CandidateIndex
+								: CandidateIndicesByRequirement[RequirementIndex])
+							{
+								if (!GreedySelection.Contains(CandidateIndex)
+									&& !GreedySelection.ContainsByPredicate(
+										[CandidateIndex, &AllCandidates,
+											&CandidatesConflict](const int32 SelectedIndex)
+										{
+											return CandidatesConflict(
+												AllCandidates[CandidateIndex],
+												AllCandidates[SelectedIndex]);
+										}))
+								{
+									++AvailableCount;
+								}
+							}
+							if (AvailableCount < RarestAvailableCount)
+							{
+								RarestRequirementIndex = RequirementIndex;
+								RarestAvailableCount = AvailableCount;
+							}
+						}
+						if (RarestRequirementIndex == INDEX_NONE
+							|| RarestAvailableCount <= 0)
+						{
+							return;
+						}
+						int32 BestCandidateIndex = INDEX_NONE;
+						int32 BestNewCoverageCount = -1;
+						const bool bGreedyAlreadyCoversAnchor =
+							GreedySelection.ContainsByPredicate(
+							[&AllCandidates](const int32 CandidateIndex)
+							{
+								return AllCandidates[CandidateIndex]
+									.bCoversPodiumSupportAnchor;
+							});
+						for (const int32 CandidateIndex
+							: CandidateIndicesByRequirement[RarestRequirementIndex])
+						{
+							if (GreedySelection.Contains(CandidateIndex)
+								|| GreedySelection.ContainsByPredicate(
+									[CandidateIndex, &AllCandidates,
+										&CandidatesConflict](const int32 SelectedIndex)
+									{
+										return CandidatesConflict(
+											AllCandidates[CandidateIndex],
+											AllCandidates[SelectedIndex]);
+									}))
+							{
+								continue;
+							}
+							const int32 NewCoverageCount = FPlatformMath::CountBits64(
+								CandidateJointCoverageMasks[CandidateIndex]
+									& ~GreedyCoveredMask);
+							if (NewCoverageCount > BestNewCoverageCount
+								|| (NewCoverageCount == BestNewCoverageCount
+									&& !bGreedyAlreadyCoversAnchor
+									&& AllCandidates[CandidateIndex]
+										.bCoversPodiumSupportAnchor
+									&& (BestCandidateIndex == INDEX_NONE
+										|| !AllCandidates[BestCandidateIndex]
+											.bCoversPodiumSupportAnchor)))
+							{
+								BestCandidateIndex = CandidateIndex;
+								BestNewCoverageCount = NewCoverageCount;
+							}
+						}
+						if (BestCandidateIndex == INDEX_NONE
+							|| BestNewCoverageCount <= 0)
+						{
+							return;
+						}
+						GreedySelection.Add(BestCandidateIndex);
+						GreedyCoveredMask |=
+							CandidateJointCoverageMasks[BestCandidateIndex];
+					}
+					if (!GreedySelection.ContainsByPredicate(
+						[&AllCandidates](const int32 CandidateIndex)
+						{
+							return AllCandidates[CandidateIndex]
+								.bCoversPodiumSupportAnchor;
+						}))
+					{
+						int32 AnchorCandidateIndex = INDEX_NONE;
+						for (int32 CandidateIndex = 0;
+							CandidateIndex < AllCandidates.Num(); ++CandidateIndex)
+						{
+							if (!AllCandidates[CandidateIndex].bCoversPodiumSupportAnchor
+								|| GreedySelection.Contains(CandidateIndex)
+								|| GreedySelection.ContainsByPredicate(
+									[CandidateIndex, &AllCandidates,
+										&CandidatesConflict](const int32 SelectedIndex)
+									{
+										return CandidatesConflict(
+											AllCandidates[CandidateIndex],
+											AllCandidates[SelectedIndex]);
+									}))
+							{
+								continue;
+							}
+							AnchorCandidateIndex = CandidateIndex;
+							break;
+						}
+						if (AnchorCandidateIndex == INDEX_NONE)
+						{
+							return;
+						}
+						GreedySelection.Add(AnchorCandidateIndex);
+					}
+					++JointDiagnostic.MainSelectionsVisited;
+					GreedySelection.Sort();
+					if (!SelectionSupportsAllFullHeightChildren(GreedySelection)
+						|| !SelectionSupportsAllSharedEndpoints(GreedySelection))
+					{
+						return;
+					}
+					++JointDiagnostic.FullHeightFeasibleMainSelectionCount;
+					const bool bCoversAnchor = GreedySelection.ContainsByPredicate(
+						[&AllCandidates](const int32 CandidateIndex)
+						{
+							return AllCandidates[CandidateIndex]
+								.bCoversPodiumSupportAnchor;
+						});
+					if (BestSelection.IsEmpty()
+						|| GreedySelection.Num() < BestSelection.Num()
+						|| (GreedySelection.Num() == BestSelection.Num()
+							&& bCoversAnchor
+							&& !bBestSelectionCoversPodiumSupportAnchor))
+					{
+						BestSelection = MoveTemp(GreedySelection);
+						bBestSelectionCoversPodiumSupportAnchor = bCoversAnchor;
+					}
+				};
+				TryGreedyMainSelection(INDEX_NONE);
+				int32 InitialRarestRequirement = INDEX_NONE;
+				int32 InitialRarestCount = MAX_int32;
+				for (int32 RequirementIndex = 0;
+					RequirementIndex < CandidateIndicesByRequirement.Num();
+					++RequirementIndex)
+				{
+					if (CandidateIndicesByRequirement[RequirementIndex].Num()
+						< InitialRarestCount)
+					{
+						InitialRarestRequirement = RequirementIndex;
+						InitialRarestCount =
+							CandidateIndicesByRequirement[RequirementIndex].Num();
+					}
+				}
+				if (InitialRarestRequirement != INDEX_NONE)
+				{
+					constexpr int32 MaximumGreedySeeds = 64;
+					const TArray<int32>& Seeds =
+						CandidateIndicesByRequirement[InitialRarestRequirement];
+					for (int32 SeedIndex = 0;
+						SeedIndex < FMath::Min(Seeds.Num(), MaximumGreedySeeds);
+						++SeedIndex)
+					{
+						TryGreedyMainSelection(Seeds[SeedIndex]);
+					}
+				}
+				constexpr uint64 PodiumAnchorRequirementBit = uint64(1) << 63;
+				const uint64 FullOptimizationCoverageMask =
+					FullJointCoverageMask | PodiumAnchorRequirementBit;
+				TSet<uint64> UniqueOptimizationCoverageSet;
+				for (int32 CandidateIndex = 0;
+					CandidateIndex < AllCandidates.Num(); ++CandidateIndex)
+				{
+					UniqueOptimizationCoverageSet.Add(
+						CandidateJointCoverageMasks[CandidateIndex]
+						| (AllCandidates[CandidateIndex].bCoversPodiumSupportAnchor
+							? PodiumAnchorRequirementBit : 0ull));
+				}
+				TArray<uint64> UniqueOptimizationCoverageMasks =
+					UniqueOptimizationCoverageSet.Array();
+				UniqueOptimizationCoverageMasks.Sort();
+				int32 CoverageOnlyMinimumMainCount = INDEX_NONE;
+				bool bCoverageLowerBoundStateCapReached = false;
+				TSet<uint64> CoverageVisited;
+				TSet<uint64> CoverageFrontier;
+				CoverageVisited.Add(0ull);
+				CoverageFrontier.Add(0ull);
+				constexpr int32 MaximumCoverageLowerBoundStates = 262144;
+				const int32 MaximumUsefulCoverageDepth = BestSelection.IsEmpty()
+					? CandidateIndicesByRequirement.Num() + 1
+					: BestSelection.Num();
+				for (int32 Depth = 1;
+					Depth <= MaximumUsefulCoverageDepth
+						&& CoverageOnlyMinimumMainCount == INDEX_NONE
+						&& !bCoverageLowerBoundStateCapReached;
+					++Depth)
+				{
+					TSet<uint64> NextFrontier;
+					for (const uint64 CoveredMask : CoverageFrontier)
+					{
+						for (const uint64 CandidateMask
+							: UniqueOptimizationCoverageMasks)
+						{
+							const uint64 NextMask = CoveredMask | CandidateMask;
+							if (NextMask == FullOptimizationCoverageMask)
+							{
+								CoverageOnlyMinimumMainCount = Depth;
+								break;
+							}
+							if (!CoverageVisited.Contains(NextMask))
+							{
+								CoverageVisited.Add(NextMask);
+								NextFrontier.Add(NextMask);
+								if (CoverageVisited.Num()
+									> MaximumCoverageLowerBoundStates)
+								{
+									bCoverageLowerBoundStateCapReached = true;
+									break;
+								}
+							}
+						}
+						if (CoverageOnlyMinimumMainCount != INDEX_NONE
+							|| bCoverageLowerBoundStateCapReached)
+						{
+							break;
+						}
+					}
+					CoverageFrontier = MoveTemp(NextFrontier);
+					if (CoverageFrontier.IsEmpty())
+					{
+						break;
+					}
+				}
+				const bool bCoverageCardinalityProven =
+					!BestSelection.IsEmpty()
+					&& CoverageOnlyMinimumMainCount != INDEX_NONE
+					&& BestSelection.Num() == CoverageOnlyMinimumMainCount;
 				bool bJointSearchTimedOut = false;
-				TFunction<void(uint32)> SearchCoverage = [&](const uint32 CoveredMask)
+				TFunction<void(uint64)> SearchCoverage = [&](const uint64 CoveredMask)
 				{
 					if ((JointDiagnostic.MainSelectionStateCount & 0xFF) == 0)
 					{
@@ -11774,23 +12436,37 @@ namespace
 						bJointSearchTimedOut = true;
 						return;
 					}
-					const FString StateKey = MainSelectionKey(CurrentSelection);
+					TArray<int32> StateKey = MainSelectionKey(CurrentSelection);
 					if (VisitedMainSelectionStates.Contains(StateKey))
 					{
 						return;
 					}
-					VisitedMainSelectionStates.Add(StateKey);
+					VisitedMainSelectionStates.Add(MoveTemp(StateKey));
 					++JointDiagnostic.MainSelectionStateCount;
+					const uint32 CoveredRegionMask =
+						static_cast<uint32>(CoveredMask & 0xFFFFFFFFull);
+					const uint32 CoveredProvinceMask =
+						static_cast<uint32>(CoveredMask >> 32);
 					const int32 CoveredRegionCount =
-						FPlatformMath::CountBits(CoveredMask);
+						FPlatformMath::CountBits(CoveredRegionMask);
 					if (CoveredRegionCount > JointDiagnostic.MaximumCoveredRegionCount)
 					{
 						JointDiagnostic.MaximumCoveredRegionCount = CoveredRegionCount;
-						JointDiagnostic.MaximumCoveredRegionMask = CoveredMask;
+						JointDiagnostic.MaximumCoveredRegionMask = CoveredRegionMask;
 						JointDiagnostic.BestPartialMainCandidateIndices = CurrentSelection;
 						JointDiagnostic.BestPartialMainCandidateIndices.Sort();
 					}
-					if (CoveredMask == FullCoverageMask)
+					const int32 CoveredProvinceCount =
+						FPlatformMath::CountBits(CoveredProvinceMask);
+					if (CoveredProvinceCount
+						> JointDiagnostic.MaximumCoveredSupportProvinceCount)
+					{
+						JointDiagnostic.MaximumCoveredSupportProvinceCount =
+							CoveredProvinceCount;
+						JointDiagnostic.MaximumCoveredSupportProvinceMask =
+							CoveredProvinceMask;
+					}
+					if (CoveredMask == FullJointCoverageMask)
 					{
 						++JointDiagnostic.MainSelectionsVisited;
 						TArray<int32> Canonical = CurrentSelection;
@@ -11809,27 +12485,11 @@ namespace
 										&& AllCandidates[CandidateIndex]
 											.bCoversPodiumSupportAnchor;
 								});
-						bool bLexicographicallyBetter = false;
-						if (Canonical.Num() == BestSelection.Num()
-							&& bCoversPodiumSupportAnchor
-								== bBestSelectionCoversPodiumSupportAnchor)
-						{
-							for (int32 Index = 0; Index < Canonical.Num(); ++Index)
-							{
-								if (Canonical[Index] != BestSelection[Index])
-								{
-									bLexicographicallyBetter =
-										Canonical[Index] < BestSelection[Index];
-									break;
-								}
-							}
-						}
 						if (BestSelection.IsEmpty()
 							|| Canonical.Num() < BestSelection.Num()
 							|| (Canonical.Num() == BestSelection.Num()
 								&& bCoversPodiumSupportAnchor
-								&& !bBestSelectionCoversPodiumSupportAnchor)
-							|| bLexicographicallyBetter)
+								&& !bBestSelectionCoversPodiumSupportAnchor))
 						{
 							BestSelection = MoveTemp(Canonical);
 							bBestSelectionCoversPodiumSupportAnchor =
@@ -11837,23 +12497,52 @@ namespace
 						}
 						return;
 					}
+					// Every incomplete state needs at least one more main. Candidate order is
+					// deterministic and already ranks coverage/shape quality, so once an
+					// equally small solution that also covers the legacy podium anchor exists,
+					// enumerating every other equal-cardinality set cannot improve a structural
+					// contract. Keep searching equal-cardinality sets only while an anchor-
+					// covering witness is still missing; always keep searching for fewer mains.
 					if (!BestSelection.IsEmpty()
-						&& CurrentSelection.Num() >= BestSelection.Num())
+						&& (CurrentSelection.Num() + 1 > BestSelection.Num()
+							|| (CurrentSelection.Num() + 1 == BestSelection.Num()
+								&& bBestSelectionCoversPodiumSupportAnchor)))
 					{
 						return;
 					}
-					uint32 NextBit = 1u;
-					while ((CoveredMask & NextBit) != 0u)
+					int32 NextRequirementIndex = INDEX_NONE;
+					int32 NextRequirementCandidateCount = MAX_int32;
+					for (int32 RequirementIndex = 0;
+						RequirementIndex < CandidateIndicesByRequirement.Num();
+						++RequirementIndex)
 					{
-						NextBit <<= 1u;
+						const int32 BitIndex = RequirementIndex
+							< RequiredHighProjectionEntryBounds.Num()
+							? RequirementIndex
+							: 32 + RequirementIndex
+								- RequiredHighProjectionEntryBounds.Num();
+						if ((CoveredMask & (1ull << BitIndex)) == 0ull
+							&& CandidateIndicesByRequirement[RequirementIndex].Num()
+								< NextRequirementCandidateCount)
+						{
+							NextRequirementIndex = RequirementIndex;
+							NextRequirementCandidateCount =
+								CandidateIndicesByRequirement[RequirementIndex].Num();
+						}
 					}
-					for (int32 CandidateIndex = 0;
-						CandidateIndex < AllCandidates.Num(); ++CandidateIndex)
+					if (NextRequirementIndex == INDEX_NONE
+						|| NextRequirementCandidateCount <= 0)
+					{
+						return;
+					}
+					for (const int32 CandidateIndex
+						: CandidateIndicesByRequirement[NextRequirementIndex])
 					{
 						const FPodiumMainCandidate& Candidate =
 							AllCandidates[CandidateIndex];
-						if ((Candidate.CoverageMask & NextBit) == 0u
-							|| CurrentSelection.Contains(CandidateIndex))
+						const uint64 CandidateJointCoverage =
+							CandidateJointCoverageMasks[CandidateIndex];
+						if (CurrentSelection.Contains(CandidateIndex))
 						{
 							continue;
 						}
@@ -11868,14 +12557,18 @@ namespace
 							continue;
 						}
 						CurrentSelection.Add(CandidateIndex);
-						SearchCoverage(CoveredMask | Candidate.CoverageMask);
+						SearchCoverage(CoveredMask | CandidateJointCoverage);
 						CurrentSelection.Pop(EAllowShrinking::No);
 					}
 				};
-				SearchCoverage(0u);
+				if (!bCoverageCardinalityProven)
+				{
+					SearchCoverage(0ull);
+				}
 				UE_LOG(LogABTSRuntime, Display,
-					TEXT("[ABTS][M7.3-Beam-C3V3][Stage1JointSearch] Component=%d Regions=%d CandidateCounts=%s MainSelections=%d FeasibilityCalls=%lld MainConflictProbes=%lld AssignmentVisits=%lld SiblingConflictProbes=%lld"),
+					TEXT("[ABTS][M7.3-Beam-C3V3][Stage1JointSearch] Component=%d Regions=%d Provinces=%d CandidateCounts=%s MainSelections=%d FeasibilityCalls=%lld LazyMainChild=%lld MainWordIntersections=%lld AssignmentVisits=%lld SiblingConflictProbes=%lld SharedIndividualRejected=%d SharedIndividualProbes=%lld GreedyBest=%d CoverageLowerBound=%d CardinalityProven=%d CoverageStates=%d CoverageStateCap=%d"),
 					RootIndex, FullHeightChildCandidatesByProjection.Num(),
+					RequiredSupportProvinceIds.Num(),
 					*FString::JoinBy(FullHeightChildCandidatesByProjection, TEXT(","),
 						[](const TArray<FJointChildFootprint>& Candidates)
 						{
@@ -11883,9 +12576,16 @@ namespace
 						}),
 					JointDiagnostic.MainSelectionsVisited,
 					FullHeightFeasibilityCallCount,
+					PrecomputedMainChildCompatibilityProbeCount,
 					FullHeightMainConflictProbeCount,
 					FullHeightAssignmentCandidateVisitCount,
-					FullHeightSiblingConflictProbeCount);
+					FullHeightSiblingConflictProbeCount,
+					RejectedIndividualSharedEndpointMainCount,
+					IndividualSharedEndpointCompatibilityProbeCount,
+					BestSelection.Num(), CoverageOnlyMinimumMainCount,
+					bCoverageCardinalityProven ? 1 : 0,
+					CoverageVisited.Num(),
+					bCoverageLowerBoundStateCapReached ? 1 : 0);
 				if (bJointSearchTimedOut)
 				{
 					return false;
@@ -11895,19 +12595,24 @@ namespace
 					JointDiagnostic.SelectionReason =
 						TEXT("NoMainSetSupportsEveryFullHeightChild");
 					OutError = FString::Printf(
-						TEXT("BeamC3V3JointCoreSelectionUnavailable:Component=%d:Regions=%d:MainCandidates=%d:NoCompatibility=%d:States=%d:MaximumCovered=%d:MaximumMask=0x%08x:BestPartial=%s:CompatibilityPerRegion=%s:PodiumCoveragePerRegion=%s:Visited=%d"),
+						TEXT("BeamC3V3JointCoreSelectionUnavailable:Component=%d:Regions=%d:Provinces=%d:MainCandidates=%d:NoCompatibility=%d:States=%d:MaximumCovered=%d:MaximumMask=0x%08x:MaximumProvinceCovered=%d:MaximumProvinceMask=0x%08x:BestPartial=%s:CompatibilityPerRegion=%s:PodiumCoveragePerRegion=%s:MainCoveragePerProvince=%s:Visited=%d"),
 						RootIndex, RequiredHighProjectionEntryBounds.Num(),
+						RequiredSupportProvinceIds.Num(),
 						AllCandidates.Num(),
 						JointDiagnostic
 							.MainCandidateWithoutFullHeightCompatibilityCount,
 						JointDiagnostic.MainSelectionStateCount,
 						JointDiagnostic.MaximumCoveredRegionCount,
 						JointDiagnostic.MaximumCoveredRegionMask,
+						JointDiagnostic.MaximumCoveredSupportProvinceCount,
+						JointDiagnostic.MaximumCoveredSupportProvinceMask,
 						*JoinIntegerArray(JointDiagnostic.BestPartialMainCandidateIndices),
 						*JoinIntegerArray(
 							JointDiagnostic.CompatibleMainCandidateCountByRegion),
 						*JoinIntegerArray(
 							JointDiagnostic.PodiumCoverageMainCandidateCountByRegion),
+						*JoinIntegerArray(
+							JointDiagnostic.MainCandidateCountBySupportProvince),
 						JointDiagnostic.MainSelectionsVisited);
 					return false;
 				}
@@ -11962,8 +12667,9 @@ namespace
 				}
 				JointDiagnostic.SelectedPodiumMainCount = BestSelection.Num();
 				JointDiagnostic.bEveryRegionHasFullHeightChild = true;
+				JointDiagnostic.bEverySupportProvinceCovered = true;
 				JointDiagnostic.SelectionReason =
-					TEXT("AllRegionsHaveWFCFullHeightCompatibleMain");
+					TEXT("AllRegionsHaveWFCFullHeightCompatibleMainAndProvinceAnchorCoverage");
 				SelectedCoreCandidates.Sort([](const FPodiumMainCandidate& A,
 					const FPodiumMainCandidate& B)
 				{
@@ -15108,6 +15814,10 @@ namespace
 			{
 				return false;
 			}
+			if (!FinalizeSupportProvinceGroundCoreBindings(OutPlan, OutError))
+			{
+				return false;
+			}
 			if (!BuildPodiumCoreCoverageDiagnostics(OutPlan, OutError))
 			{
 				return false;
@@ -15116,15 +15826,6 @@ namespace
 			{
 				return false;
 			}
-			if (!FinalizeSemanticSupportDemandDiagnostics(OutPlan, OutError))
-			{
-				return false;
-			}
-			if (!BuildSupportProvinceDiagnostics(OutPlan, OutError))
-			{
-				return false;
-			}
-
 			OutPlan.Summary.ExplicitCoreCellCount = OutPlan.CoreCells.Num();
 			OutPlan.Summary.CoreCellCount = OutPlan.CoreCells.Num();
 			OutPlan.Summary.PodiumMainCoreCellCount = 0;

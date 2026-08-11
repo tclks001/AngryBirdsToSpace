@@ -46,7 +46,8 @@ enum class EABTSM73BeamC3Stage1DiagnosticLayer : uint8
 	CompositeCoreXLanes UMETA(DisplayName = "5 - Composite Core X Lanes"),
 	CompositeCoreYLanes UMETA(DisplayName = "6 - Composite Core Y Lanes"),
 	SemanticSupportDemandDAG UMETA(DisplayName = "7 - Semantic Support Demand DAG"),
-	SupportProvincePartition UMETA(DisplayName = "8 - Support Province Partition")
+	SupportProvincePartition UMETA(DisplayName = "8 - Support Province Partition"),
+	SupportProvinceMainAssignment UMETA(DisplayName = "9 - Province / Main Assignment")
 };
 
 USTRUCT(BlueprintType)
@@ -406,8 +407,17 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
 	int32 SkeletonFirstSupportProvinceNearestSeedFallbackCount = 0;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstBoundSupportProvinceCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
+	int32 SkeletonFirstDistinctProvinceGroundCoreCount = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province|Identity")
 	int64 SkeletonFirstSupportProvinceHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province|Identity")
+	int64 SkeletonFirstSupportProvinceMainBindingHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First")
 	int32 SkeletonFirstCoreCellCount = 0;

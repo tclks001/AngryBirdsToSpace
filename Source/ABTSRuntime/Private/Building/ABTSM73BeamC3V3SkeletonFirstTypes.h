@@ -304,6 +304,7 @@ namespace ABTSM73BeamC3V3
 	{
 		int32 ComponentId = INDEX_NONE;
 		int32 HighProjectionRegionCount = 0;
+		int32 SupportProvinceCount = 0;
 		int32 PodiumMainCandidateCount = 0;
 		int32 MainCandidateWithoutFullHeightCompatibilityCount = 0;
 		/** Number of retained podium-main candidates that can host at least one
@@ -313,15 +314,20 @@ namespace ABTSM73BeamC3V3
 		 * demand's podium-entry footprint.  This drives main placement; child
 		 * compatibility is validated only after a spatial main set is chosen. */
 		TArray<int32> PodiumCoverageMainCandidateCountByRegion;
+		/** Retained main candidates whose footprint contains each province anchor. */
+		TArray<int32> MainCandidateCountBySupportProvince;
 		/** Number of unique conflict-free main-selection states searched. */
 		int32 MainSelectionStateCount = 0;
 		int32 MaximumCoveredRegionCount = 0;
 		uint32 MaximumCoveredRegionMask = 0u;
+		int32 MaximumCoveredSupportProvinceCount = 0;
+		uint32 MaximumCoveredSupportProvinceMask = 0u;
 		TArray<int32> BestPartialMainCandidateIndices;
 		int32 MainSelectionsVisited = 0;
 		int32 FullHeightFeasibleMainSelectionCount = 0;
 		int32 SelectedPodiumMainCount = 0;
 		bool bEveryRegionHasFullHeightChild = false;
+		bool bEverySupportProvinceCovered = false;
 		FString SelectionReason;
 	};
 
@@ -470,6 +476,10 @@ namespace ABTSM73BeamC3V3
 		int32 SizeY = 0;
 		int32 GroundCellCount = 0;
 		int32 TieBreakCellCount = 0;
+		/** Stable occupied lattice cell nearest the province centroid. */
+		int32 AnchorXUnit = 0;
+		int32 AnchorYUnit = 0;
+		bool bHasAnchorCell = false;
 		/** Exclusive highest course for which every assigned ground cell remains occupied. */
 		int32 HighestFullyOccupiedTopCourse = 0;
 		/** Conservative, diagnostic-only local podium proposal. */
@@ -482,6 +492,10 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> AdjacentProvinceIds;
 		FBox GroundBounds = FBox(EForceInit::ForceInit);
 		FVector GroundCentroid = FVector::ZeroVector;
+		/** Grounded core selected to serve this catchment after joint selection. */
+		int32 BoundGroundCoreCellId = INDEX_NONE;
+		bool bAnchorCoveredByBoundCore = false;
+		bool bBoundToPodiumMain = false;
 		bool bUsedNearestGroundSeed = false;
 		bool bSyntheticGroundOnly = false;
 	};
@@ -617,6 +631,8 @@ namespace ABTSM73BeamC3V3
 		int32 SupportProvinceBoundaryCount = 0;
 		int32 SupportProvinceTieBreakCellCount = 0;
 		int32 SupportProvinceNearestSeedFallbackCount = 0;
+		int32 BoundSupportProvinceCount = 0;
+		int32 DistinctProvinceGroundCoreCount = 0;
 		int32 CoreMergeRegionCount = 0;
 		int32 MergedGroundComponentCount = 0;
 		int32 MaximumCoreRailCount = 0;
@@ -687,6 +703,8 @@ namespace ABTSM73BeamC3V3
 		int64 SemanticSupportDemandHash = 0;
 		/** Diagnostic support-catchment identity; excluded from all geometry hashes. */
 		int64 SupportProvinceHash = 0;
+		/** Selected grounded-core assignment for every support province. */
+		int64 SupportProvinceMainBindingHash = 0;
 		int64 FinalGeometryHash = 0;
 		FString RejectReason;
 	};

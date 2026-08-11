@@ -178,7 +178,8 @@ namespace ABTSM73BeamD1Preview
 		CompositeCoreXVisibility = 1 << 6,
 		CompositeCoreYVisibility = 1 << 7,
 		SemanticSupportDemandVisibility = 1 << 8,
-		SupportProvinceVisibility = 1 << 9
+		SupportProvinceVisibility = 1 << 9,
+		SupportProvinceMainVisibility = 1 << 10
 	};
 
 	uint16 DiagnosticVisibilityMask(
@@ -202,6 +203,8 @@ namespace ABTSM73BeamD1Preview
 			return SemanticSupportDemandVisibility;
 		case EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition:
 			return SupportProvinceVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment:
+			return SupportProvinceMainVisibility;
 		default:
 			return 0;
 		}
@@ -295,6 +298,8 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage1DiagnosticLayer::SemanticSupportDemandDAG);
 	const uint16 SupportProvinceMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition);
+	const uint16 SupportProvinceMainMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint16>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -313,6 +318,9 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 	TestEqual(TEXT("Support-province layer contains only the province partition"),
 		SupportProvinceMask,
 		static_cast<uint16>(SupportProvinceVisibility));
+	TestEqual(TEXT("Province-main layer contains only the assignment plan"),
+		SupportProvinceMainMask,
+		static_cast<uint16>(SupportProvinceMainVisibility));
 	TestEqual(TEXT("WFC and intent layers are disjoint"),
 		static_cast<uint16>(WFCMask & IntentMask), static_cast<uint16>(0));
 	TestEqual(TEXT("WFC and member layers are disjoint"),
@@ -338,6 +346,10 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		static_cast<uint16>(SupportProvinceMask
 			& (WFCMask | IntentMask | MembersMask | MergeMask | XMask | YMask
 				| SupportDemandMask)), static_cast<uint16>(0));
+	TestEqual(TEXT("Province-main assignment is disjoint from all prior layers"),
+		static_cast<uint16>(SupportProvinceMainMask
+			& (WFCMask | IntentMask | MembersMask | MergeMask | XMask | YMask
+				| SupportDemandMask | SupportProvinceMask)), static_cast<uint16>(0));
 	TestTrue(TEXT("Support-demand volumes are visible by default"),
 		ShouldShowSemanticSupportDemandVolumes(false));
 	TestFalse(TEXT("Lines-only option hides support-demand volumes"),
@@ -767,6 +779,78 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				SharedPairIntentPreview->GetInstanceCount() > 0, true);
 		}
 		else if ((VisibilityMask
+			& ABTSM73BeamD1Preview::SupportProvinceMainVisibility) != 0)
+		{
+			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			TArray<UHierarchicalInstancedStaticMeshComponent*> ProvincePreviews{
+				WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()};
+			TSet<int32> DrawnGroundCoreIds;
+			for (const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province
+				: Plan.SupportProvinces)
+			{
+				UHierarchicalInstancedStaticMeshComponent* ProvincePreview =
+					ProvincePreviews[Province.ProvinceId % ProvincePreviews.Num()];
+				const double GroundZ = Province.GroundBounds.Min.Z;
+				const double ProposedTopZ = GroundZ
+					+ Province.ProposedPodiumTopCourse * 36.0;
+				for (int32 BitIndex = 0;
+					BitIndex < Province.SizeX * Province.SizeY; ++BitIndex)
+				{
+					if (!ABTSM73BeamD1Preview::PreviewSupportProvinceWordContains(
+						Province.GroundCellWords, BitIndex))
+					{
+						continue;
+					}
+					const int32 X = BitIndex % Province.SizeX;
+					const int32 Y = BitIndex / Province.SizeX;
+					const double CenterX = (Province.MinimumXUnit + X) * 36.0;
+					const double CenterY = (Province.MinimumYUnit + Y) * 36.0;
+					ABTSM73BeamD1Preview::AddBoxInstance(ProvincePreview, FBox(
+						FVector(CenterX - 16.0, CenterY - 16.0, GroundZ),
+						FVector(CenterX + 16.0, CenterY + 16.0, GroundZ + 4.0)));
+					ABTSM73BeamD1Preview::AddBoxInstance(ProvincePreview, FBox(
+						FVector(CenterX - 16.0, CenterY - 16.0, ProposedTopZ - 4.0),
+						FVector(CenterX + 16.0, CenterY + 16.0, ProposedTopZ)));
+				}
+				if (!Plan.CoreCells.IsValidIndex(Province.BoundGroundCoreCellId))
+				{
+					continue;
+				}
+				const ABTSM73BeamC3V3::FCoreCellPlan& GroundCore =
+					Plan.CoreCells[Province.BoundGroundCoreCellId];
+				if (!DrawnGroundCoreIds.Contains(GroundCore.CoreCellId))
+				{
+					FBox GroundPlate = GroundCore.LocalBounds;
+					GroundPlate.Max.Z = GroundPlate.Min.Z + 12.0;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview, GroundPlate);
+					FBox TopPlate = GroundCore.LocalBounds;
+					TopPlate.Min.Z = TopPlate.Max.Z - 12.0;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview, TopPlate);
+					DrawnGroundCoreIds.Add(GroundCore.CoreCellId);
+				}
+				const FVector ProvinceAnchor(
+					Province.AnchorXUnit * 36.0,
+					Province.AnchorYUnit * 36.0,
+					ProposedTopZ);
+				FVector CoreAnchor = GroundCore.LocalBounds.GetCenter();
+				CoreAnchor.Z = GroundCore.LocalBounds.Max.Z;
+				ABTSM73BeamD1Preview::AddSegmentInstance(
+					SharedPairIntentPreview, ProvinceAnchor, CoreAnchor, 8.0);
+			}
+			for (UHierarchicalInstancedStaticMeshComponent* ProvincePreview
+				: ProvincePreviews)
+			{
+				ProvincePreview->SetVisibility(
+					ProvincePreview->GetInstanceCount() > 0, true);
+			}
+			CoreIntentPreview->SetVisibility(
+				CoreIntentPreview->GetInstanceCount() > 0, true);
+			SharedPairIntentPreview->SetVisibility(
+				SharedPairIntentPreview->GetInstanceCount() > 0, true);
+		}
+		else if ((VisibilityMask
 			& ABTSM73BeamD1Preview::SupportProvinceVisibility) != 0)
 		{
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
@@ -945,7 +1029,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 		if (EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
-			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition)
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment)
 		{
 			for (UHierarchicalInstancedStaticMeshComponent* Preview : {
 				WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
@@ -958,7 +1043,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewGenerated]")
 			TEXT(" Actor=%s Stage=%d Layer=%d HideSupportDemandVolumes=%d Profile=%s Tier=%d")
 			TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
-			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld")
+			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
@@ -974,6 +1059,9 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.SupportProvinceGroundCellCount,
 			StageResult.Skeleton.Plan.Summary.SupportProvinceBoundaryCount,
 			StageResult.Skeleton.Plan.Summary.SupportProvinceHash,
+			StageResult.Skeleton.Plan.Summary.BoundSupportProvinceCount,
+			StageResult.Skeleton.Plan.Summary.DistinctProvinceGroundCoreCount,
+			StageResult.Skeleton.Plan.Summary.SupportProvinceMainBindingHash,
 			StageResult.Skeleton.Plan.CoreCells.Num(),
 			StageResult.Skeleton.Plan.Summary.PodiumMainCoreCellCount,
 			StageResult.Skeleton.Plan.Summary.TowerChildCoreCellCount,

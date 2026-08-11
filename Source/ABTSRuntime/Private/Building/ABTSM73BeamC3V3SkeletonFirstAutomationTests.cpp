@@ -2706,16 +2706,20 @@ bool FABTSM73BeamC3StagedStage1BoundaryTest::RunTest(const FString& Parameters)
 			: Result.Skeleton.Plan.JointCoreSelectionDiagnostics)
 		{
 			AddInfo(FString::Printf(
-				TEXT("Stage1MatrixJointFailure:Component=%d:Regions=%d:MainCandidates=%d:NoCompatibility=%d:States=%d:MaximumCovered=%d:MaximumMask=0x%08x:BestPartial=%s:CompatibilityPerRegion=%s:PodiumCoveragePerRegion=%s:Visited=%d:Reason=%s"),
+				TEXT("Stage1MatrixJointFailure:Component=%d:Regions=%d:Provinces=%d:MainCandidates=%d:NoCompatibility=%d:States=%d:MaximumCovered=%d:MaximumMask=0x%08x:MaximumProvinceCovered=%d:MaximumProvinceMask=0x%08x:BestPartial=%s:CompatibilityPerRegion=%s:PodiumCoveragePerRegion=%s:MainCoveragePerProvince=%s:Visited=%d:Reason=%s"),
 				Diagnostic.ComponentId, Diagnostic.HighProjectionRegionCount,
+				Diagnostic.SupportProvinceCount,
 				Diagnostic.PodiumMainCandidateCount,
 				Diagnostic.MainCandidateWithoutFullHeightCompatibilityCount,
 				Diagnostic.MainSelectionStateCount,
 				Diagnostic.MaximumCoveredRegionCount,
 				Diagnostic.MaximumCoveredRegionMask,
+				Diagnostic.MaximumCoveredSupportProvinceCount,
+				Diagnostic.MaximumCoveredSupportProvinceMask,
 				*JoinIds(Diagnostic.BestPartialMainCandidateIndices),
 				*JoinIds(Diagnostic.CompatibleMainCandidateCountByRegion),
 				*JoinIds(Diagnostic.PodiumCoverageMainCandidateCountByRegion),
+				*JoinIds(Diagnostic.MainCandidateCountBySupportProvince),
 				Diagnostic.MainSelectionsVisited, *Diagnostic.SelectionReason));
 		}
 		for (const FString& Trace : Result.Silhouette.GrammarTrace)
@@ -3086,8 +3090,20 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 	Check(TEXT("partitions semantic ground occupancy into support provinces"),
 		Plan.Summary.SupportProvinceCount == Plan.SupportProvinces.Num()
 			&& Plan.Summary.SupportProvinceCount > 0
+			&& Plan.Summary.BoundSupportProvinceCount
+				== Plan.Summary.SupportProvinceCount
+			&& Plan.Summary.DistinctProvinceGroundCoreCount > 0
 			&& Plan.Summary.SupportProvinceGroundCellCount > 0
 			&& Plan.Summary.SupportProvinceHash != 0
+			&& Plan.Summary.SupportProvinceMainBindingHash != 0
+			&& Algo::AllOf(Plan.SupportProvinces,
+				[&Plan](const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province)
+				{
+					return Plan.CoreCells.IsValidIndex(
+						Province.BoundGroundCoreCellId)
+						&& (!Province.bBoundToPodiumMain
+							|| Province.bAnchorCoveredByBoundCore);
+				})
 			&& Algo::AllOf(Plan.SemanticTerminalDemands,
 				[&Plan](const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand)
 				{
@@ -3519,13 +3535,16 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 	}
 
 	AddInfo(FString::Printf(
-		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Provinces=%d:ProvinceCells=%d:ProvinceBoundaries=%d:ProvinceTies=%d:ProvinceFallbacks=%d:ProvinceHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
+		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Provinces=%d:BoundProvinces=%d:ProvinceGroundCores=%d:ProvinceMainBindingHash=%lld:ProvinceCells=%d:ProvinceBoundaries=%d:ProvinceTies=%d:ProvinceFallbacks=%d:ProvinceHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
 		*Prefix, Result.Silhouette.Volumes.Num(),
 		Plan.Summary.SemanticSupportNodeCount,
 		Plan.Summary.SemanticTerminalDemandCount,
 		Plan.Summary.SemanticSupportLedgerCount,
 		Plan.Summary.SemanticSupportDemandHash,
 		Plan.Summary.SupportProvinceCount,
+		Plan.Summary.BoundSupportProvinceCount,
+		Plan.Summary.DistinctProvinceGroundCoreCount,
+		Plan.Summary.SupportProvinceMainBindingHash,
 		Plan.Summary.SupportProvinceGroundCellCount,
 		Plan.Summary.SupportProvinceBoundaryCount,
 		Plan.Summary.SupportProvinceTieBreakCellCount,
@@ -4215,6 +4234,11 @@ bool FABTSM73BeamC3SemanticSupportMergedRoofDemandTest::RunTest(
 			}));
 	TestNotEqual(TEXT("Support-province partition has a separate identity"),
 		Plan.Summary.SupportProvinceHash, int64(0));
+	TestEqual(TEXT("Every merged-roof province binds a grounded core"),
+		Plan.Summary.BoundSupportProvinceCount,
+		Plan.Summary.SupportProvinceCount);
+	TestNotEqual(TEXT("Province/main assignment has a separate identity"),
+		Plan.Summary.SupportProvinceMainBindingHash, int64(0));
 	return true;
 }
 
