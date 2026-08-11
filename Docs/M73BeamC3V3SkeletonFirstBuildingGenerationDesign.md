@@ -1529,3 +1529,37 @@ component 汇入全局 summary 时原地改写；`LocalProjectionIndex` 与全�
 `StaticDAG=Accepted`；五个 Profile 各 6/6，合计 30/30。所有叶仍为 `Physical=NotEvaluated`，没有运行 Stage 2、BeamD15、
 Chaos 或可见 PIE。第 33.2 节和 M7-BC-064 的 PodiumMain 重叠、四向缩进与均匀覆盖仍是独立视觉质量问题，不得把本节的全高闭合
 外推为该问题已解决。
+
+## 36. 十二小时 Stage 1 冻结排期与交互时限（2026-08-11）
+
+本轮以提交 `83b1ebc621ec4303908b039a0b0a5f323973edbe` 冻结当前可复现基线。后续十二小时不并行扩张 Stage 2 或 Chaos，而把性能证据与新的芯体选择算法合并为同一条短反馈链：
+
+1. `0:00--0:45`：冻结基线；增加 `TerminalDemand / ChildCandidate / PodiumMainCandidate / JointSelection / MemberEmission / StaticDAG` 六段计时，以及单叶 10 秒失败门。
+2. `0:45--3:00`：把 Body 支撑柱与 Crown 荷载分支显式化为图；建立 merge ledger 和逐 course 占用 bitset，避免用屋顶终端数替代支撑柱数。
+3. `3:00--5:30`：按接地连通性和高层需求划分 support province；每个 province 独立决定局部裙房高度，并用有限候选选择均匀分布的 PodiumMain，随即做一次视觉停点。
+4. `5:30--8:00`：每个终端先选“较粗主干 + 最多一次收缩”的 TowerChild，再与 main/shared reservation 联合求解；随即做第二次视觉停点。
+5. `8:00--9:30`：只跑 `TipOver E6/710000、730000、750000`、`ColumnBreak E6`、`DropTrigger E6` 五个代表叶，分别覆盖需求全集、正常基线、屋顶合并、裙房分隔和空间空洞。
+6. `9:30--10:30`：只优化六段计时中占主导的阶段并完成 ForceUnity Development Editor 全链接；不得在没有剖面证据时重写相邻阶段。
+7. `10:30--11:30`：先跑五个 Profile 的 E6，再只跑一次 Stage 1-only 5x6；任何叶超过 10 秒立即失败并发布阶段身份，不允许静默继续。
+8. `11:30--12:00`：更新设计稿、M7 排错账本和 checkpoint，提交冻结候选。若视觉或矩阵未通过，保持 Stage 1 未冻结并明确列出失败叶，不以延长运行时间换取绿灯。
+
+为满足十二小时上限，本轮主动限制算法面：TowerChild 只允许一次宽度转变；每个 support province 只允许一个局部 seam；不实现一般 CVT、全局连续优化器、任意多段 taper 或所有矩形穷举；候选仅来自语义分隔、最大可容纳矩形和 Pareto 前沿。禁止扫描 Seed/Attempt、放宽 720 cm、36 cm 网格、轨距或几何容差。Stage 2、Beam-D1.5、Chaos 和物理参数不在本轮冻结范围。
+
+### 36.1 六阶段计时合同
+
+计时从已选定 Shape Grammar/WFC 结果进入 Skeleton-First 规划开始，按单个 Profile/Tier/Seed 叶发布：
+
+- `TerminalDemand`：从 Body/Crown course-slice DAG 建立完整 terminal demand。
+- `ChildCandidate`：枚举尚未受 main 占位影响的接地全高子芯体候选。
+- `PodiumMainCandidate`：建立共享端点与 PodiumMain 的有限候选集合。
+- `JointSelection`：main set-cover、child assignment、sibling/shared lane 兼容与最终绑定。
+- `MemberEmission`：冻结计划转换为 Beam-A IR 的 bay/joint/member。
+- `StaticDAG`：Beam-C 对 Stage 1 IR 的只读静态承重审计。
+
+六段是关键路径剖面，不要求其和等于总时间；输入整理、哈希、接触重建和合同核验保留为可见的未归因开销。`Stage1TotalMilliseconds` 是权威墙钟值。`CoreAndShared` 单叶总时间预算固定为 `10000 ms`；候选枚举和组合搜索至少每 256 个状态轮询一次。超时必须以 `BeamC3V3Stage1Timeout:Phase=<Phase>:ElapsedMs=<...>:BudgetMs=10000` 失败关闭，并保留已完成阶段的部分计时。矩阵总时间、进程启动和资产加载不计入单叶预算，但必须另行记录。
+
+此门是开发与发行共同合同，不是测试专用阈值。暂时超过 10 秒的代表叶应先用六段证据定位并优化；不得通过提高门限、重采样种子或减少视觉/结构合同来制造通过结果。
+
+### 36.2 冻结基线首轮性能证据
+
+`TipOver.E6/710000` 在新门下于 `10007.372 ms` 失败关闭，阶段为 `PodiumMainCandidate`。当时已落盘的部分计时为 `TerminalDemand=0.236 ms`、`ChildCandidate=1146.978 ms`、`PodiumMainCandidate=8860.000 ms`，Joint/Emission/DAG 尚未开始。这证明当前首要瓶颈不是 terminal demand 图构建或 Static DAG，而是主芯体候选枚举；下一步骤只能针对该阶段的数据结构与候选裁剪，不能先重写 joint solver 或提高 10 秒预算。

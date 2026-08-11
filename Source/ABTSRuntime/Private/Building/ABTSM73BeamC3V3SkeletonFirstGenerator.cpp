@@ -3,6 +3,7 @@
 #include "ABTSM73BeamC3V3SkeletonFirstGenerator.h"
 
 #include "Algo/Unique.h"
+#include "HAL/PlatformTime.h"
 
 namespace
 {
@@ -12,6 +13,94 @@ namespace
 	constexpr double GeometryToleranceCM = 0.5;
 	constexpr double WitnessToleranceCM = 1.0;
 	constexpr double CoverageMachineEpsilon = DBL_EPSILON;
+
+	double ElapsedMilliseconds(const double StartSeconds)
+	{
+		return (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	}
+
+	struct FStage1PhaseTimer
+	{
+		explicit FStage1PhaseTimer(double& InDestinationMilliseconds)
+			: DestinationMilliseconds(InDestinationMilliseconds)
+			, StartSeconds(FPlatformTime::Seconds())
+		{
+		}
+
+		~FStage1PhaseTimer()
+		{
+			Stop();
+		}
+
+		void Stop()
+		{
+			if (!bStopped)
+			{
+				Checkpoint();
+				bStopped = true;
+			}
+		}
+
+		void Checkpoint()
+		{
+			if (!bStopped)
+			{
+				DestinationMilliseconds += ElapsedMilliseconds(StartSeconds);
+				StartSeconds = FPlatformTime::Seconds();
+			}
+		}
+
+		double& DestinationMilliseconds;
+		double StartSeconds = 0.0;
+		bool bStopped = false;
+	};
+
+	bool ValidateStage1ElapsedBudget(
+		const EGenerationStage Stage,
+		const double Elapsed,
+		const TCHAR* Phase,
+		FPlan& Plan,
+		FString& OutError)
+	{
+		if (Stage != EGenerationStage::CoreAndShared)
+		{
+			return true;
+		}
+		Plan.Summary.bStage1TimingEvaluated = true;
+		Plan.Summary.Stage1TotalMilliseconds = Elapsed;
+		Plan.Summary.Stage1TimeBudgetMilliseconds =
+			Stage1LeafTimeBudgetMilliseconds;
+		if (Elapsed <= Stage1LeafTimeBudgetMilliseconds)
+		{
+			Plan.Summary.bStage1WithinTimeBudget = true;
+			Plan.Summary.Stage1TimeoutPhase.Reset();
+			return true;
+		}
+		Plan.Summary.bStage1WithinTimeBudget = false;
+		Plan.Summary.Stage1TimeoutPhase = Phase;
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage1Timeout:Phase=%s:ElapsedMs=%.3f:BudgetMs=%.3f:TimingMs=Demand:%.3f,Child:%.3f,Main:%.3f,Joint:%.3f,Emission:%.3f,DAG:%.3f"),
+			Phase, Elapsed, Stage1LeafTimeBudgetMilliseconds,
+			Plan.Summary.TerminalDemandMilliseconds,
+			Plan.Summary.ChildCandidateMilliseconds,
+			Plan.Summary.PodiumMainCandidateMilliseconds,
+			Plan.Summary.JointSelectionMilliseconds,
+			Plan.Summary.MemberEmissionMilliseconds,
+			Plan.Summary.StaticDAGMilliseconds);
+		Plan.Summary.RejectReason = OutError;
+		return false;
+	}
+
+	bool CheckStage1TimeBudget(
+		const EGenerationStage Stage,
+		const double StageStartSeconds,
+		const TCHAR* Phase,
+		FPlan& Plan,
+		FString& OutError)
+	{
+		return ValidateStage1ElapsedBudget(Stage,
+			ElapsedMilliseconds(StageStartSeconds), Phase, Plan, OutError);
+	}
 
 	struct FRoot
 	{
@@ -8468,6 +8557,7 @@ namespace
 		const TArray<FRoot>& Roots,
 		const FDensityRecipe& Density,
 		const EGenerationStage Stage,
+		const double StageStartSeconds,
 		FPlan& OutPlan,
 		FString& OutError)
 	{
@@ -8484,6 +8574,8 @@ namespace
 		OutPlan.Summary.HorizontalCellUnits = Density.HorizontalUnits;
 		OutPlan.Summary.VerticalBandUnits = Density.VerticalUnits;
 		OutPlan.Summary.bPhysicalStabilityEvaluated = false;
+		OutPlan.Summary.Stage1TimeBudgetMilliseconds =
+			Stage1LeafTimeBudgetMilliseconds;
 
 		struct FSpanInput
 		{
@@ -8844,12 +8936,21 @@ namespace
 			TArray<int32> RequiredHighProjectionTopCourses;
 			if (bUseGroundedCoreHierarchy)
 			{
-				if (!BuildRequiredHighProjectionDemands(Root, PodiumTopCourse,
-					RequiredHighProjectionDemands, OutError))
+				FStage1PhaseTimer PhaseTimer(
+					OutPlan.Summary.TerminalDemandMilliseconds);
+				const bool bBuiltDemands = BuildRequiredHighProjectionDemands(
+					Root, PodiumTopCourse, RequiredHighProjectionDemands, OutError);
+				PhaseTimer.Stop();
+				if (!bBuiltDemands)
 				{
 					OutError = FString::Printf(
 						TEXT("BeamC3V3TerminalDemandBuildFailed:Component=%d:%s"),
 						RootIndex, *OutError);
+					return false;
+				}
+				if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+					TEXT("TerminalDemand"), OutPlan, OutError))
+				{
 					return false;
 				}
 				for (const FRequiredHighProjectionDemand& Demand
@@ -8927,6 +9028,8 @@ namespace
 			};
 			if (bUseGroundedCoreHierarchy)
 			{
+				FStage1PhaseTimer ChildCandidateTimer(
+					OutPlan.Summary.ChildCandidateMilliseconds);
 				FullHeightChildCandidatesByProjection.SetNum(
 					RequiredHighProjectionEntryBounds.Num());
 				RequiredFullHeightCourses.SetNumZeroed(
@@ -9003,6 +9106,15 @@ namespace
 									MinimumX + SpanX <= SeedMaximumX; ++MinimumX)
 								{
 									++Diagnostic.EnumeratedFootprintCount;
+									if ((Diagnostic.EnumeratedFootprintCount & 0xFF) == 0)
+									{
+										ChildCandidateTimer.Checkpoint();
+										if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+											TEXT("ChildCandidate"), OutPlan, OutError))
+										{
+											return false;
+										}
+									}
 									const int32 MaximumX = MinimumX + SpanX;
 									const int32 MaximumY = MinimumY + SpanY;
 									const TArray<int32> XStations = MakeUniformStations(
@@ -9180,6 +9292,12 @@ namespace
 						return false;
 					}
 				}
+				ChildCandidateTimer.Stop();
+				if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+					TEXT("ChildCandidate"), OutPlan, OutError))
+				{
+					return false;
+				}
 			}
 			int32 CoreMinimumXUnits = INDEX_NONE;
 			int32 CoreMaximumXUnits = INDEX_NONE;
@@ -9191,6 +9309,9 @@ namespace
 			int32 BestCoreSpanImbalance = MAX_int32;
 			int32 BestCoreArea = -1;
 			double BestCoreDistance = DBL_MAX;
+			FStage1PhaseTimer MainCandidateTimer(
+				OutPlan.Summary.PodiumMainCandidateMilliseconds);
+			int64 MainCandidatePollCount = 0;
 			struct FPodiumMainCandidate
 			{
 				int32 MinimumX = INDEX_NONE;
@@ -9481,6 +9602,16 @@ namespace
 									for (int32 MinimumX = CandidateMinimumX;
 										MinimumX + SpanX <= CandidateMaximumX; ++MinimumX)
 									{
+										++MainCandidatePollCount;
+										if ((MainCandidatePollCount & 0xFF) == 0)
+										{
+											MainCandidateTimer.Checkpoint();
+											if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+												TEXT("PodiumMainCandidate"), OutPlan, OutError))
+											{
+												return false;
+											}
+										}
 										const int32 MaximumX = MinimumX + SpanX;
 										const int32 MaximumY = MinimumY + SpanY;
 										const TArray<int32> XStations = MakeUniformStations(
@@ -9737,6 +9868,16 @@ namespace
 						for (int32 MinimumX = RasterMinimumX;
 							MinimumX + SpanX <= RasterMaximumX; ++MinimumX)
 						{
+							++MainCandidatePollCount;
+							if ((MainCandidatePollCount & 0xFF) == 0)
+							{
+								MainCandidateTimer.Checkpoint();
+								if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+									TEXT("PodiumMainCandidate"), OutPlan, OutError))
+								{
+									return false;
+								}
+							}
 							const int32 MaximumX = MinimumX + SpanX;
 							const int32 MaximumY = MinimumY + SpanY;
 							const TArray<int32> CandidateXStations = MakeUniformStations(
@@ -10017,6 +10158,14 @@ namespace
 					}
 				}
 			}
+			MainCandidateTimer.Stop();
+			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+				TEXT("PodiumMainCandidate"), OutPlan, OutError))
+			{
+				return false;
+			}
+			FStage1PhaseTimer JointSelectionTimer(
+				OutPlan.Summary.JointSelectionMilliseconds);
 			if (bUseGroundedCoreHierarchy)
 			{
 				if (RequiredHighProjectionEntryBounds.IsEmpty()
@@ -10266,8 +10415,21 @@ namespace
 					return true;
 				};
 				TSet<FString> VisitedMainSelectionStates;
+				bool bJointSearchTimedOut = false;
 				TFunction<void(uint32)> SearchCoverage = [&](const uint32 CoveredMask)
 				{
+					if ((JointDiagnostic.MainSelectionStateCount & 0xFF) == 0)
+					{
+						JointSelectionTimer.Checkpoint();
+					}
+					if (bJointSearchTimedOut
+						|| ((JointDiagnostic.MainSelectionStateCount & 0xFF) == 0
+							&& !CheckStage1TimeBudget(Stage, StageStartSeconds,
+								TEXT("JointSelection"), OutPlan, OutError)))
+					{
+						bJointSearchTimedOut = true;
+						return;
+					}
 					const FString StateKey = MainSelectionKey(CurrentSelection);
 					if (VisitedMainSelectionStates.Contains(StateKey))
 					{
@@ -10367,6 +10529,10 @@ namespace
 					}
 				};
 				SearchCoverage(0u);
+				if (bJointSearchTimedOut)
+				{
+					return false;
+				}
 				if (BestSelection.IsEmpty())
 				{
 					JointDiagnostic.SelectionReason =
@@ -10461,6 +10627,12 @@ namespace
 				Candidate.YStations = MakeUniformStations(
 					CoreMinimumYUnits, CoreMaximumYUnits, DesiredRailCount);
 				SelectedCoreCandidates.Add(MoveTemp(Candidate));
+			}
+			JointSelectionTimer.Stop();
+			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+				TEXT("JointSelection"), OutPlan, OutError))
+			{
+				return false;
 			}
 			if (SelectedCoreCandidates.IsEmpty())
 			{
@@ -11533,6 +11705,8 @@ namespace
 					ComponentHighProjectionRegionIds.Add(Region.RegionId);
 				}
 
+				FStage1PhaseTimer FinalChildSelectionTimer(
+					OutPlan.Summary.JointSelectionMilliseconds);
 				int32 AddedChildCount = 0;
 				if (ComponentHighProjectionRegionIds.Num()
 					!= RequiredFullHeightCourses.Num())
@@ -11668,6 +11842,15 @@ namespace
 						const int32 SpanX = MaximumX - MinimumX;
 						const int32 SpanY = MaximumY - MinimumY;
 									++ChildCandidateCount;
+									if ((ChildCandidateCount & 0xFF) == 0)
+									{
+										FinalChildSelectionTimer.Checkpoint();
+										if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+											TEXT("JointSelection"), OutPlan, OutError))
+										{
+											return false;
+										}
+									}
 									const TArray<int32> XStations =
 										MakeUniformStations(MinimumX, MaximumX, 2);
 									const TArray<int32> YStations =
@@ -11992,6 +12175,12 @@ namespace
 						TEXT("CompositeCoreLaneUnavailable:Component=%d:HighProjectionRegions=%d:Bound=%d:PodiumTop=%d"),
 						RootIndex, ComponentHighProjectionRegionIds.Num(),
 						AddedChildCount, PodiumTopCourse);
+					return false;
+				}
+				FinalChildSelectionTimer.Stop();
+				if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+					TEXT("JointSelection"), OutPlan, OutError))
+				{
 					return false;
 				}
 
@@ -14535,6 +14724,7 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildPlanForStage(
 	using namespace ABTSM73BeamC3V3;
 	OutPlan = FPlan();
 	OutError.Reset();
+	const double StageStartSeconds = FPlatformTime::Seconds();
 	if (!Profile.bAccepted || !Silhouette.Summary.bAccepted)
 	{
 		OutError = TEXT("BeamC3V3UpstreamRejected");
@@ -14564,7 +14754,8 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildPlanForStage(
 	}
 	const FDensityRecipe Density = ResolveDensityRecipe(Profile);
 	const bool bBuilt = BuildCandidate(
-		Profile, Silhouette, Roots, Density, Stage, OutPlan, OutError);
+		Profile, Silhouette, Roots, Density, Stage, StageStartSeconds,
+		OutPlan, OutError);
 	// BuildCandidate resets its output before planning. Restore the canonical
 	// envelope identity for both accepted and fail-closed structural results.
 	OutPlan.Summary.EnvelopeHash = EnvelopeHash;
@@ -14648,10 +14839,31 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildPlanForStage(
 		TEXT("%s:Core=%lld:Support=%lld:Geometry=%lld"), *Identity,
 		OutPlan.Summary.CorePlanHash, OutPlan.Summary.SupportPlanHash,
 		OutPlan.Summary.FinalGeometryHash));
+	if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+		TEXT("PlanFinalization"), OutPlan, OutError))
+	{
+		return false;
+	}
+	if (Stage == EGenerationStage::CoreAndShared)
+	{
+		OutPlan.Summary.bStage1WithinTimeBudget = true;
+	}
 	return true;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::ValidateStage1TimingBudgetForTesting(
+	const double Elapsed,
+	ABTSM73BeamC3V3::FPlan& InOutPlan,
+	FString& OutError) const
+{
+	InOutPlan = ABTSM73BeamC3V3::FPlan();
+	OutError.Reset();
+	return ValidateStage1ElapsedBudget(
+		ABTSM73BeamC3V3::EGenerationStage::CoreAndShared,
+		Elapsed, TEXT("AutomationFixture"), InOutPlan, OutError);
+}
+
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::EvaluateSharedEndpointReachabilityForTesting(
 	const FABTSM73DAG5BV2GenerationResult& Silhouette,
 	TArray<ABTSM73BeamC3V3::FSharedEndpointReachabilityDiagnostic>& OutDiagnostics,
@@ -14853,6 +15065,10 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateForStage(
 		return false;
 	}
 	FPlan& Plan = OutResult.Plan;
+	const double StageStartSeconds = FPlatformTime::Seconds()
+		- Plan.Summary.Stage1TotalMilliseconds / 1000.0;
+	FStage1PhaseTimer MemberEmissionTimer(
+		Plan.Summary.MemberEmissionMilliseconds);
 	FABTSM73BeamAGenerationResult& Assembly = OutResult.Assembly;
 	Assembly.ReservedSupportVoids = Plan.ReservedSupportVoids;
 	TMap<FString, int32> JointByPosition;
@@ -14935,6 +15151,15 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateForStage(
 	}
 	for (const FPlannedMember& Planned : Plan.Members)
 	{
+		if ((Assembly.Members.Num() & 0xFF) == 0)
+		{
+			MemberEmissionTimer.Checkpoint();
+			if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+				TEXT("MemberEmission"), Plan, OutError))
+			{
+				return false;
+			}
+		}
 		const int32 OwnerAssemblyId = Planned.OwnerKind == EOwnerKind::SupportedSpan
 			? SpanAssemblyByVolume.FindRef(Planned.OwnerId)
 			: Planned.OwnerKind == EOwnerKind::BuildingGroupShell
@@ -14972,6 +15197,12 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateForStage(
 	Assembly.Summary.SourceVolumeCount = Silhouette.Volumes.Num();
 	Assembly.Summary.BayGraphHash = Plan.Summary.CorePlanHash;
 	Assembly.Summary.BeamGraphHash = Plan.Summary.FinalGeometryHash;
+	MemberEmissionTimer.Stop();
+	if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+		TEXT("MemberEmission"), Plan, OutError))
+	{
+		return false;
+	}
 	if (!ABTSM73BeamA::RebuildBearingContacts(Profile.BeamSettings.BeamB.BeamA, Assembly, OutError))
 	{
 		return false;
@@ -15040,5 +15271,14 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateForStage(
 	RefreshAssemblySummary(Assembly);
 	Assembly.Summary.bAccepted = true;
 	Plan.Summary.EmittedMemberCount = Assembly.Members.Num();
+	if (!CheckStage1TimeBudget(Stage, StageStartSeconds,
+		TEXT("AssemblyValidation"), Plan, OutError))
+	{
+		return false;
+	}
+	if (Stage == EGenerationStage::CoreAndShared)
+	{
+		Plan.Summary.bStage1WithinTimeBudget = true;
+	}
 	return true;
 }

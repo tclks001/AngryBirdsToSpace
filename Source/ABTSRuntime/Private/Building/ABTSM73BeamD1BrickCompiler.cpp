@@ -1924,7 +1924,7 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 				return BeamC3V3Generator.Generate(
 					Profile, Silhouette, BeamC3V3, CandidateError);
 			});
-		const ABTSM73BeamC3V3::FPlanSummary& V3Summary =
+		ABTSM73BeamC3V3::FPlanSummary& V3Summary =
 			BeamC3V3.Plan.Summary;
 		LoggedV3Summary = V3Summary;
 		const FString V3PlanIdentity = FString::Printf(
@@ -1962,14 +1962,40 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 
 		FABTSM73BeamCGenerationResult BeamC;
 		FABTSM73BeamCGenerator BeamCGenerator;
-		if (!MeasureStage(BeamCMilliseconds, [&]()
+		const bool bBeamCGenerated = MeasureStage(BeamCMilliseconds, [&]()
 			{
 				// V3 owns the complete final geometry. Beam-C is a read-only static
 				// audit here and may not insert rescue posts or mutate the assembly.
 				return BeamCGenerator.Generate(
 					Profile.BeamSettings, BeamC3V3.Assembly, BeamC,
 					CandidateError);
-			}))
+			});
+		// CompleteStaticDAG contains later-stage work and is not a Stage-1 leaf.
+		// Only an explicitly Stage-1-timed result may consume this 10-second gate.
+		if (V3Summary.bStage1TimingEvaluated)
+		{
+			V3Summary.StaticDAGMilliseconds = BeamCMilliseconds;
+			V3Summary.Stage1TotalMilliseconds += BeamCMilliseconds;
+			if (V3Summary.Stage1TotalMilliseconds
+				> ABTSM73BeamC3V3::Stage1LeafTimeBudgetMilliseconds)
+			{
+				V3Summary.bStage1WithinTimeBudget = false;
+				V3Summary.Stage1TimeoutPhase = TEXT("StaticDAG");
+				CandidateError = FString::Printf(
+					TEXT("BeamC3V3Stage1Timeout:Phase=StaticDAG:ElapsedMs=%.3f:BudgetMs=%.3f:TimingMs=Demand:%.3f,Child:%.3f,Main:%.3f,Joint:%.3f,Emission:%.3f,DAG:%.3f"),
+					V3Summary.Stage1TotalMilliseconds,
+					ABTSM73BeamC3V3::Stage1LeafTimeBudgetMilliseconds,
+					V3Summary.TerminalDemandMilliseconds,
+					V3Summary.ChildCandidateMilliseconds,
+					V3Summary.PodiumMainCandidateMilliseconds,
+					V3Summary.JointSelectionMilliseconds,
+					V3Summary.MemberEmissionMilliseconds,
+					V3Summary.StaticDAGMilliseconds);
+				return ABTSM73BeamD1::Reject(OutResult, OutError, CandidateError);
+			}
+			V3Summary.bStage1WithinTimeBudget = true;
+		}
+		if (!bBeamCGenerated)
 		{
 			FString InvalidNodeDiagnostics;
 			int32 InvalidNodeCount = 0;
@@ -2202,6 +2228,28 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 		Candidate.Summary.bStageStaticDAGEvaluated = true;
 
 		Candidate.Summary.bSkeletonFirstCertified = bV3Certified;
+		Candidate.Summary.bSkeletonFirstTimingEvaluated =
+			V3Summary.bStage1TimingEvaluated;
+		Candidate.Summary.bSkeletonFirstWithinTimeBudget =
+			V3Summary.bStage1WithinTimeBudget;
+		Candidate.Summary.SkeletonFirstTimeBudgetMilliseconds =
+			V3Summary.Stage1TimeBudgetMilliseconds;
+		Candidate.Summary.SkeletonFirstTotalMilliseconds =
+			V3Summary.Stage1TotalMilliseconds;
+		Candidate.Summary.SkeletonFirstTerminalDemandMilliseconds =
+			V3Summary.TerminalDemandMilliseconds;
+		Candidate.Summary.SkeletonFirstChildCandidateMilliseconds =
+			V3Summary.ChildCandidateMilliseconds;
+		Candidate.Summary.SkeletonFirstPodiumMainCandidateMilliseconds =
+			V3Summary.PodiumMainCandidateMilliseconds;
+		Candidate.Summary.SkeletonFirstJointSelectionMilliseconds =
+			V3Summary.JointSelectionMilliseconds;
+		Candidate.Summary.SkeletonFirstMemberEmissionMilliseconds =
+			V3Summary.MemberEmissionMilliseconds;
+		Candidate.Summary.SkeletonFirstStaticDAGMilliseconds =
+			V3Summary.StaticDAGMilliseconds;
+		Candidate.Summary.SkeletonFirstTimeoutPhase =
+			V3Summary.Stage1TimeoutPhase;
 		Candidate.Summary.SkeletonFirstGroundedComponentCount =
 			V3Summary.GroundedComponentCount;
 		Candidate.Summary.SkeletonFirstCoreCellCount =
@@ -2361,11 +2409,20 @@ bool FABTSM73BeamD1BrickCompiler::Generate(
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7.3-Beam-D1][CandidateTiming]")
 			TEXT(" Profile=%s Tier=%d Attempt=%d")
-			TEXT(" TimingMs=Profile:%.2f,Shape:%.2f,C3V3:%.2f,BeamC:%.2f,Compile:%.2f,Total:%.2f"),
+			TEXT(" TimingMs=Profile:%.2f,Shape:%.2f,C3V3:%.2f,BeamC:%.2f,Compile:%.2f,Total:%.2f")
+			TEXT(" Stage1Ms=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
 			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
 			Attempt, ProfileMilliseconds, SilhouetteMilliseconds,
 			BeamC3V3Milliseconds, BeamCMilliseconds, CompileMilliseconds,
-			(FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0);
+			(FPlatformTime::Seconds() - AttemptStartSeconds) * 1000.0,
+			V3Summary.TerminalDemandMilliseconds,
+			V3Summary.ChildCandidateMilliseconds,
+			V3Summary.PodiumMainCandidateMilliseconds,
+			V3Summary.JointSelectionMilliseconds,
+			V3Summary.MemberEmissionMilliseconds,
+			V3Summary.StaticDAGMilliseconds,
+			V3Summary.Stage1TotalMilliseconds,
+			V3Summary.Stage1TimeBudgetMilliseconds);
 		Candidate.Summary.SemanticVolumeCount =
 			Silhouette.Summary.VolumeCount;
 		Candidate.Summary.SemanticBoxCount =
@@ -2591,15 +2648,40 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		OutError = FString::Printf(TEXT("BeamC3Stage1:%s"), *OutError);
 		return false;
 	}
-	if (!FABTSM73BeamCGenerator().Generate(
+	ABTSM73BeamC3V3::FPlanSummary& Stage1 =
+		OutResult.Skeleton.Plan.Summary;
+	const double StaticDAGStartSeconds = FPlatformTime::Seconds();
+	const bool bStaticDAGGenerated = FABTSM73BeamCGenerator().Generate(
 		SelectedProfile.BeamSettings, OutResult.Skeleton.Assembly,
-		OutResult.StaticDAG, OutError))
+		OutResult.StaticDAG, OutError);
+	Stage1.StaticDAGMilliseconds =
+		(FPlatformTime::Seconds() - StaticDAGStartSeconds) * 1000.0;
+	Stage1.Stage1TotalMilliseconds += Stage1.StaticDAGMilliseconds;
+	if (!bStaticDAGGenerated)
 	{
 		OutError = FString::Printf(TEXT("BeamC3Stage1StaticDAG:%s"), *OutError);
 		return false;
 	}
-	const ABTSM73BeamC3V3::FPlanSummary& Stage1 =
-		OutResult.Skeleton.Plan.Summary;
+	Stage1.bStage1TimingEvaluated = true;
+	if (Stage1.Stage1TotalMilliseconds
+		> ABTSM73BeamC3V3::Stage1LeafTimeBudgetMilliseconds)
+	{
+		Stage1.bStage1WithinTimeBudget = false;
+		Stage1.Stage1TimeoutPhase = TEXT("StaticDAG");
+		OutError = FString::Printf(
+			TEXT("BeamC3Stage1:BeamC3V3Stage1Timeout:Phase=StaticDAG:ElapsedMs=%.3f:BudgetMs=%.3f:TimingMs=Demand:%.3f,Child:%.3f,Main:%.3f,Joint:%.3f,Emission:%.3f,DAG:%.3f"),
+			Stage1.Stage1TotalMilliseconds,
+			ABTSM73BeamC3V3::Stage1LeafTimeBudgetMilliseconds,
+			Stage1.TerminalDemandMilliseconds,
+			Stage1.ChildCandidateMilliseconds,
+			Stage1.PodiumMainCandidateMilliseconds,
+			Stage1.JointSelectionMilliseconds,
+			Stage1.MemberEmissionMilliseconds,
+			Stage1.StaticDAGMilliseconds);
+		Stage1.RejectReason = OutError;
+		return false;
+	}
+	Stage1.bStage1WithinTimeBudget = true;
 	if (OutResult.StaticDAG.Summary.StructuralClosurePassCount != 0
 		|| OutResult.StaticDAG.Summary.AddedStructuralSupportPostCount != 0
 		|| OutResult.StaticDAG.Summary.SupportResultantAdvisoryCount != 0)
@@ -2625,6 +2707,22 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.StabilityCorePlanHash = Stage1.CorePlanHash;
 	Summary.StabilityRootedEvidenceHash = Stage1.SupportPlanHash;
 	Summary.bSkeletonFirstCertified = true;
+	Summary.bSkeletonFirstTimingEvaluated = Stage1.bStage1TimingEvaluated;
+	Summary.bSkeletonFirstWithinTimeBudget = Stage1.bStage1WithinTimeBudget;
+	Summary.SkeletonFirstTimeBudgetMilliseconds = Stage1.Stage1TimeBudgetMilliseconds;
+	Summary.SkeletonFirstTotalMilliseconds = Stage1.Stage1TotalMilliseconds;
+	Summary.SkeletonFirstTerminalDemandMilliseconds =
+		Stage1.TerminalDemandMilliseconds;
+	Summary.SkeletonFirstChildCandidateMilliseconds =
+		Stage1.ChildCandidateMilliseconds;
+	Summary.SkeletonFirstPodiumMainCandidateMilliseconds =
+		Stage1.PodiumMainCandidateMilliseconds;
+	Summary.SkeletonFirstJointSelectionMilliseconds =
+		Stage1.JointSelectionMilliseconds;
+	Summary.SkeletonFirstMemberEmissionMilliseconds =
+		Stage1.MemberEmissionMilliseconds;
+	Summary.SkeletonFirstStaticDAGMilliseconds = Stage1.StaticDAGMilliseconds;
+	Summary.SkeletonFirstTimeoutPhase = Stage1.Stage1TimeoutPhase;
 	Summary.SkeletonFirstGroundedComponentCount = Stage1.GroundedComponentCount;
 	Summary.SkeletonFirstCoreCellCount = Stage1.CoreCellCount;
 	Summary.SkeletonFirstCoreMergeRegionCount = Stage1.CoreMergeRegionCount;
@@ -2683,7 +2781,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
 		TEXT(" GrammarHash=%lld WFCHash=%lld EnvelopeHash=%lld Stage1Hash=%lld")
 		TEXT(" Volumes=%d Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
-		TEXT(" StaticDAG=Accepted LoadDAGHash=%lld Physical=NotEvaluated"),
+		TEXT(" StaticDAG=Accepted LoadDAGHash=%lld Physical=NotEvaluated")
+		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
 		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
 		Settings.BuildingSeed, SelectedAttempt, SelectedSeed,
 		OutResult.Silhouette.Summary.GrammarHash,
@@ -2695,7 +2794,15 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.BoundHighProjectionRegionCount,
 		OutResult.Skeleton.Plan.SharedCourseIntents.Num(),
 		Stage1.SharedCourseCount, Stage1.PlannedMemberCount,
-		OutResult.StaticDAG.Summary.LoadDAGHash);
+		OutResult.StaticDAG.Summary.LoadDAGHash,
+		Stage1.TerminalDemandMilliseconds,
+		Stage1.ChildCandidateMilliseconds,
+		Stage1.PodiumMainCandidateMilliseconds,
+		Stage1.JointSelectionMilliseconds,
+		Stage1.MemberEmissionMilliseconds,
+		Stage1.StaticDAGMilliseconds,
+		Stage1.Stage1TotalMilliseconds,
+		Stage1.Stage1TimeBudgetMilliseconds);
 	return true;
 }
 

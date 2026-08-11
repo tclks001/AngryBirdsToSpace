@@ -3989,6 +3989,18 @@ bool FABTSM73BeamC3StagedTipOverE6Seed710000TerminalCoverageTest::RunTest(
 	TestTrue(TEXT("Seed 710000 passes the Stage 1 static DAG"),
 		Result.Summary.bStageStaticDAGEvaluated
 			&& Result.StaticDAG.Summary.bAccepted);
+	TestTrue(TEXT("Seed 710000 publishes six-phase timing evidence"),
+		Plan.Summary.bStage1TimingEvaluated
+			&& Plan.Summary.TerminalDemandMilliseconds >= 0.0
+			&& Plan.Summary.ChildCandidateMilliseconds >= 0.0
+			&& Plan.Summary.PodiumMainCandidateMilliseconds >= 0.0
+			&& Plan.Summary.JointSelectionMilliseconds >= 0.0
+			&& Plan.Summary.MemberEmissionMilliseconds >= 0.0
+			&& Plan.Summary.StaticDAGMilliseconds >= 0.0);
+	TestTrue(TEXT("Seed 710000 remains inside the Stage 1 leaf budget"),
+		Plan.Summary.bStage1WithinTimeBudget
+			&& Plan.Summary.Stage1TotalMilliseconds
+				<= Plan.Summary.Stage1TimeBudgetMilliseconds);
 	for (const ABTSM73BeamC3V3::FHighProjectionRegionPlan& Region
 		: Plan.HighProjectionRegions)
 	{
@@ -4003,6 +4015,34 @@ bool FABTSM73BeamC3StagedTipOverE6Seed710000TerminalCoverageTest::RunTest(
 		TestTrue(TEXT("Seed 710000 child reaches the independent branch top"),
 			Child != nullptr && Child->TopCourseIndex == Region.RequiredTopCourse);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedStage1TimingBudgetTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.Stage1TimingBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3StagedStage1TimingBudgetTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM73BeamC3V3SkeletonFirstGenerator Generator;
+	ABTSM73BeamC3V3::FPlan Plan;
+	FString Error;
+	TestTrue(TEXT("An elapsed leaf at the limit is accepted"),
+		Generator.ValidateStage1TimingBudgetForTesting(
+			ABTSM73BeamC3V3::Stage1LeafTimeBudgetMilliseconds, Plan, Error));
+	TestTrue(TEXT("Accepted timing evidence is evaluated"),
+		Plan.Summary.bStage1TimingEvaluated && Error.IsEmpty());
+	TestFalse(TEXT("An elapsed leaf over the limit fails closed"),
+		Generator.ValidateStage1TimingBudgetForTesting(
+			ABTSM73BeamC3V3::Stage1LeafTimeBudgetMilliseconds + 1.0,
+			Plan, Error));
+	TestTrue(TEXT("Timeout identifies its phase and budget"),
+		!Plan.Summary.bStage1WithinTimeBudget
+			&& Plan.Summary.Stage1TimeoutPhase == TEXT("AutomationFixture")
+			&& Error.Contains(TEXT("BeamC3V3Stage1Timeout"))
+			&& Error.Contains(TEXT("Phase=AutomationFixture")));
 	return true;
 }
 

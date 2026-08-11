@@ -34,6 +34,12 @@ public:
 		FString& OutError) const;
 
 #if WITH_DEV_AUTOMATION_TESTS
+	/** Exercises the production 10-second Stage-1 fail-closed budget without waiting. */
+	bool ValidateStage1TimingBudgetForTesting(
+		double ElapsedMilliseconds,
+		ABTSM73BeamC3V3::FPlan& InOutPlan,
+		FString& OutError) const;
+
 	/** Stops at WFC semantics and enumerates minimum grounded bridge-endpoint
 	 * cells. It deliberately does not build cores, members, Beam-A IR or DAG. */
 	bool EvaluateSharedEndpointReachabilityForTesting(

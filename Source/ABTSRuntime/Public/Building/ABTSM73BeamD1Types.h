@@ -335,6 +335,39 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First")
 	bool bSkeletonFirstCertified = false;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance")
+	bool bSkeletonFirstTimingEvaluated = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance")
+	bool bSkeletonFirstWithinTimeBudget = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstTimeBudgetMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstTotalMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstTerminalDemandMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstChildCandidateMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstPodiumMainCandidateMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstJointSelectionMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstMemberEmissionMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance", meta = (Units = "ms"))
+	double SkeletonFirstStaticDAGMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Performance")
+	FString SkeletonFirstTimeoutPhase;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First")
 	int32 SkeletonFirstGroundedComponentCount = 0;
 

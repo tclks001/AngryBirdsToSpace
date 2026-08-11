@@ -8,6 +8,9 @@
 
 namespace ABTSM73BeamC3V3
 {
+	/** Stage-1 leaf work must remain interactive; matrices are timed per leaf. */
+	inline constexpr double Stage1LeafTimeBudgetMilliseconds = 10000.0;
+
 	enum class EGenerationStage : uint8
 	{
 		CoreAndShared,
@@ -476,6 +479,18 @@ namespace ABTSM73BeamC3V3
 		bool bAccepted = false;
 		/** Stage-1 is deliberately static-only. This value may never be inferred. */
 		bool bPhysicalStabilityEvaluated = false;
+		/** Six-phase performance evidence for one CoreAndShared leaf. */
+		bool bStage1TimingEvaluated = false;
+		bool bStage1WithinTimeBudget = false;
+		double Stage1TimeBudgetMilliseconds = Stage1LeafTimeBudgetMilliseconds;
+		double Stage1TotalMilliseconds = 0.0;
+		double TerminalDemandMilliseconds = 0.0;
+		double ChildCandidateMilliseconds = 0.0;
+		double PodiumMainCandidateMilliseconds = 0.0;
+		double JointSelectionMilliseconds = 0.0;
+		double MemberEmissionMilliseconds = 0.0;
+		double StaticDAGMilliseconds = 0.0;
+		FString Stage1TimeoutPhase;
 		int32 GroundedComponentCount = 0;
 		int32 VerticalWitnessCount = 0;
 		int32 UnreachableVolumeCount = 0;
