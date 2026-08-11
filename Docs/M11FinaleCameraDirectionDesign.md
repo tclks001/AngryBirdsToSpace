@@ -231,6 +231,18 @@ M3 已开始实现，详细合同与阶段门见 [M3 三行星连续导演与 Ha
 
 跨行星空窗现由显式 `DualBodyBridge` 处理：`OutgoingHold` 把镜头扩到 85°，桥接解同时拟合鸟、上一行星和下一行星，并保持上一颗在左、下一颗在右；随后 `IncomingTrack/IncomingEntryMatch` 改用鸟与下一行星的双主体拟合，直到物理 Enter 后 0.50 秒才把位置权威交还 Lucy 穿越解。Rank11 fresh 证据已消除两次“零行星帧”，但远景桥两端仍包含显式匹配切换，旧的严格单镜头位姿/FOV 连续门仍失败；因此本轮只关闭空窗问题，不宣称 M3-B/M3-C 完成。桥接期 `1×→10×→1×` 鸟体视觉倍率现已撤销，鸟体保持原始 Scale；远景运动可读性改由独立连续拖尾承担，不能再用改模型尺寸补偿构图。
 
+拖尾 T2-R 验收后，`M11-CAM-M3-007` 已按状态边界连续性契约完成重构。跨行星阶段现统一为 `OutgoingHold → DualBodyBridge → IncomingReveal → IncomingTrack → IncomingEntryMatch → Authority`：上一状态末姿态就是下一状态初姿态，Reveal 在三主体同框下预转到下一颗 Lucy 朝向，Track 再沿同一朝向从 85° 远景连续推入 50° Lucy 构图，EntryMatch 与 Authority 首帧使用同一个解。不可达的 Reveal 和 Enter 后重复远景的 PostEnterSettle 已消除，鸟体保持恒定 Scale。fresh Rank11 R5 的所有状态边界均低于 `1001 cm / 0.98°`，两次桥 36/36 帧双星同框，M3 鸟丢失 0，旧 `222→223` 倒退已变为单调前进。详细证据与旧离线门的已知语义差异见 M3 设计稿 7.5。
+
+后续 `M11-CAM-M3-008` 将“到下一行星后再回拉到穿越入口”收敛为双星退出即开始的单次构图转换。`IncomingReveal` 与 `IncomingTrack` 不再各自安排朝向、位置和镜头焦段，而从桥接退出首帧到 `IncomingEntryMatch` 入口共享一个前置 Ease-out Match Alpha，同时驱动桥接朝向→Lucy 朝向、三主体拟合→Lucy 位置以及 `85°→50°` FOV。该 Alpha 在起止端均保持平滑，EntryMatch/Authority 端点合同不变。Rank11 fresh 录制中，木星段旧 `431→439 = 706.30→526.65 px` 已变为 `525.75→526.65 px`；土星段旧 `712→730 = 639.58→525.86 px` 已变为 `534.28→525.79 px`，不再出现到达后重新置左的可见回拉。详细证据见 M3 设计稿 7.6。
+
+`M11-CAM-M3-009` 随后修正了上述统一 Alpha 引入的退场镜头回归：上一颗行星的离场保留在 `IncomingReveal` 的 85° 三主体宽景中；`IncomingTrack` 才在已经对齐下一颗 Lucy 朝向的同一视轴上，以独立的二维鸟屏幕锚包络和较慢的深度/FOV 包络推入 50° 穿越入口。由此“上一颗逐渐后退离场”与“鸟提前到达下一颗左侧入口”不再争用相机位置、朝向和焦段的同一权重。Rank11 fresh `M3EgressAnchorR5-20260810-222300` 中，火星在 413–420 帧、木星在 644–667 帧连续退场；鸟在两个交接窗口的最大单帧屏幕位移仅 `10.18/7.40 px`，且 `431→439` 与 `712→730` 均直接收敛到 Lucy 入口，没有二次回拉。详细证据见 M3 设计稿 7.7。
+
+`M11-CAM-M3-010` 又为上一颗行星的 Lucy 前景穿越增加了显式清轮廓合同：`OutgoingHold` 不再能从 `Closest` 首帧抢占相机，而必须等待 `Closest→Exit` 归一化 progress `0.23`；跨行星调度同时硬保留至少 `0.50 s` 拉远、`0.60 s` Bridge、`1.30 s` Reveal、`0.60 s` Track 和 `0.50 s` EntryMatch，时间不足则 fail closed。最终 Rank11 fresh 录屏中，旧问题帧 328/548 都仍是 Authority，分别到 348/568 才开始拉远；整个 Outgoing 段的最小投影轮廓净空为 `2.99/22.83 px`，两段此前验收的上一行星渐退和下一颗左侧直飞入口均未回退。详细算法和证据见 M3 设计稿 7.8。
+
+`M11-CAM-M3-011` 进一步把双星桥接期鸟的纵向位置从算术质心的偶然结果改为显式构图合同。`OutgoingHold → DualBodyBridge → IncomingReveal` 共享 `BirdNdcY=+0.05` 的 canonical 锚：Outgoing 从 Lucy 位置平滑获取，Bridge 固定持有，Reveal 平滑释放；只解 Camera Up，不改双星水平基线和鸟的 X 运动。锚定后重新检查鸟与两星的投影球 margin，必要时只沿镜头后方增加最小距离，因此不会以裁切换取鸟居中。Rank11 fresh `M3BridgeBirdAnchorR7-20260811-114000` 中，用户指出的 575–625 帧纵向范围从 `173.96 px` 降至 `65.70 px`，最大单帧上移从 `19.03 px` 降至 `2.31 px`，并保持单调；两次桥接仍 36/36 帧双星完整同框。详细求解、边界合同和证据见 M3 设计稿 7.9。
+
+`M11-CAM-M3-012` 关闭开局 `IncomingReveal→IncomingTrack` 的轻微回退。该现象早于 011，根因是 Reveal 末帧向 lag 相机位置释放，而 Track 首帧在权重到 1 时直接采用精确导演位置。现在 `LaunchAnchor→Assist1` 全段共用同一开局携带限制器，并把位置/旋转的释放终点明确定义为精确导演 Transform；跨行星链和双星锚不变。Rank11 fresh `M3LaunchBoundaryR8-20260811-134500` 中，40→41 鸟 X 回退从 `-11.540 px` 降为 `-0.069 px`，41 帧后与 R7 构图数值等价，222→223 进入 Authority 仍同向连续。详细合同和证据见 M3 设计稿 7.10。
+
 ### M3-T：连续飞行拖尾与鸟体恒定尺寸（T2-R 三层软 Sprite 亮面增强完成）
 
 - 发射全程使用同一组世界空间点粒子，不按行星、镜头状态、Rank 或渲染风格切换；
@@ -239,7 +251,7 @@ M3 已开始实现，详细合同与阶段门见 [M3 三行星连续导演与 Ha
 - 默认表现由运行时生成的 `64×64` 径向纹理和 Halo/Contrast Shell/Core 三层 `DrawSprite` 构成；加性 Halo 保留暗背景辉光，预乘 AlphaComposite Shell/Core 在火星 319、木星 557、土星 812 附近建立亮面清晰核心；十二个外观 CVar 均可从命令行调整，`RenderMode=0` 只保留旧 `DrawPoint` A/B；
 - 拖尾采用世界深度遮挡和屏幕空间恒定 Sprite 直径，近星高屏幕速度自然形成更长尾迹；
 - `OutgoingHold/DualBodyBridge/IncomingTrack` 不再缩放 BirdVisual，重置/退出显式恢复原始 Scale；
-- 当前跨状态倒退、硬切和入口失配统一记录为 `M11-CAM-M3-007`，本阶段不修改镜头状态机；
+- 跨状态倒退、硬切和入口失配已由后续 `M11-CAM-M3-007` 连续性重构关闭；拖尾继续与镜头状态正交；
 - 不创建共享纹理/Niagara/材质/地图资产，不需要 Editor 操作。
 
 详细结构、生命周期、命令行 A/B 和逐步验收见 [M11 终局连续飞行拖尾演出设计](M11FinaleBirdTrailPresentationDesign.md)。

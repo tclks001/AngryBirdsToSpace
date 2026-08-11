@@ -213,3 +213,49 @@ Rank11 的两次跨行星交接不能在原 50° Lucy 近景中同时容纳上�
 最终 fresh 录制为 `Saved/M11CameraCaptures/M3DualBodyBridgeFinal4-20260810-133000/Stylized1/`：Rank11、Stylized 1、`Complete/TargetHit`，JPG/CSV/AVI 均为 949 帧。两次桥共 36 帧，36/36 帧双行星同框，跨行星窗口零行星帧 0，Handoff 当前目标丢失 0，M3 窗口鸟丢失 0，三颗 Approach 累计回撤仍为 0，`m3DualBodyBridgePassed=true`、`m3ShotPlanPassed=true`。
 
 本轮没有把显式远景匹配伪装成严格连续单镜头。桥接两端的世界相机位姿仍超过旧 M3-B 的单帧阈值，报告继续为 `m3HandoffPassed=false`；全局 FinalApproach/UFO 的 8 帧鸟丢失仍归 M4。因而当前结论是“无行星空窗与三主体远景桥已实现”，不是“M3 整体验收完成”。
+
+### 7.5 跨状态连续性契约与入口匹配修复
+
+`M11-CAM-M3-007` 的根因不是单颗行星几何，而是旧状态机在 `OutgoingHold → DualBodyBridge → IncomingTrack → IncomingEntryMatch → Authority` 边界更换三套互不相容的相机基底。当前实现把跨行星过程重构为一条共享构图链：`OutgoingHold` 从上一颗 Lucy 构图连续扩展到鸟、上一颗和下一颗的三主体拟合；`DualBodyBridge` 保持同一个拟合解；`IncomingReveal` 在三主体仍同框时逐渐预转到下一颗 Lucy 朝向；`IncomingTrack` 沿该朝向从三主体远景连续推入下一颗 Lucy 构图；`IncomingEntryMatch` 与下一帧 `Authority/Approach` 使用完全相同的位置、旋转和 FOV 解。所有阶段使用自身局部进度，原先因判定顺序导致不可达的 `IncomingReveal` 已恢复，物理 Enter 后重复远景的 `PostEnterSettle` 已删除。
+
+运行时不再让各状态首帧释放累计相机跟随误差：跨行星构图直接消费完整约束 Transform，首颗行星在导演权重达到 1 后同样直接进入连续构图。桥接左右方向不再根据逐帧 BaselineView 翻转，而由平行运输 Up 与行星连线确定；鸟体视觉 Scale 全程保持 1 倍，远景可读性只由独立拖尾承担。
+
+fresh Rank11 Stylized1 离屏录制为 `Saved/M11CameraCaptures/M3StateContinuityR5-20260810-205922/Stylized1/`：合同 v10、RenderVersion 19、`Complete/TargetHit`、JPG/CSV/AVI 均为 949 帧，Released Trajectory Hash `0x505F3312AC8AE07F`、PlaybackPlan Hash `0x76B24AB41B6E8B63`，AVI SHA-256 `23C46A89B7C013932DE9CFFBBD6E58DCB42BDC5151EDF12A1D78AD53F21184F9`。三颗 Assist 的 M3 鸟丢失为 0、Approach 累计回撤均低于 1 px，两次 `DualBodyBridge` 共 36 帧且 36/36 双行星同框。旧问题帧 `222→223` 的鸟屏幕 X 现为 `516.52→517.44 px`，不再倒退；16 个状态边界的单帧相机变化全部低于 `1001 cm / 0.98°`，FOV 连续，其中两次桥接入口分别为 `575 cm / 0.16°` 与 `418 cm / 0.02°`，两次 EntryMatch→Authority 分别为 `746 cm / 0.35°` 与 `893 cm / 0.28°`。逐帧目检确认上一行星离场、双星远景、下一行星进场没有单帧硬切或鸟体消失。
+
+现有离线工具的总 `criteriaPassed` / `m3HandoffPassed` 仍为 `false`，不能伪报绿灯：全局 8 帧空构图和 4 个大旋转帧全部发生在未改动的 FinalApproach/UFO；M3 内的 15 帧 `targetLost` 来自旧工具在首目标获取时仍以物理 CurrentTarget 记账，而画面中的导演 FramingTarget 已可见。工具还用固定 `5000 cm` 世界位移阈值评价所有连续远景运动，因场景尺度而把平滑的同状态推拉标为跳变。M11 本轮没有越权修改集成工作树所有的离线工具；关闭 `M11-CAM-M3-007` 依据精确状态端点自动化、边界逐帧审计与像素目检，M4 和工具判据升级分别保留为后续事项。
+
+### 7.6 双星退出到穿越入口的屏幕锚提前匹配
+
+`M11-CAM-M3-008` 继续处理状态边界已经连续后暴露的同状态构图时序问题。旧实现虽然在 `IncomingTrack` 末端准确到达下一颗 Lucy 构图，却仅在 Track 内使用对称 SmoothStep 混合位置；鸟会先随物理轨迹移到下一行星右下侧，随后在最后约 8–18 帧被相机拉回左侧入口。修正后，下一颗 Lucy 构图匹配从 `DualBodyBridge` 退出首帧即开始，横跨完整 `IncomingReveal + IncomingTrack`，以二次 Ease-out 后接 SmoothStep 的确定性曲线前置主要构图变化。相机位置、桥到 Lucy 的朝向和 `85°→50°` FOV 共用同一个 Match Alpha；`IncomingEntryMatch` 仍保持精确 Lucy 端点，因此不引入新的状态边界切换。
+
+fresh Rank11 Stylized1 离屏录制为 `Saved/M11CameraCaptures/M3TrackMatchR5-20260810-213900/Stylized1/`：合同 v10、RenderVersion 19、`Complete/TargetHit`、JPG/CSV/AVI 均为 949 帧，Released Trajectory Hash `0x505F3312AC8AE07F`、PlaybackPlan Hash `0x76B24AB41B6E8B63`，AVI SHA-256 `2BAE60A3C47E26FA2E1336477372C613F48E54D709F5F31E3888ABF490251CCB`。旧木星段帧 431 的鸟屏幕 X 为 `706.30 px`、到 439 突然回到 `526.65 px`；新录制在 431 已为 `525.75 px`，439 为 `526.65 px`。土星段从旧 `712→730 = 639.58→525.86 px` 收敛为新 `534.28→525.79 px`。两段在用户指出的窗口内都已处于下一行星左侧穿越入口，不再先越过右侧再回拉；逐帧图像同时确认下一行星全程保留。fresh NullRHI `ABTS.M11C.Unit.FlightCameraAuthorityFrame` 精确 1/1 成功，日志为 `Saved/Logs/M11-CameraTrackMatch-R5-20260810-FreshAutomation.log`。
+
+### 7.7 上一行星退场与下一穿越入口的解耦
+
+7.6 的统一 Match Alpha 虽消除了晚回拉，却把相机位置、朝向和 FOV 一起前置，导致 `IncomingReveal` 刚离开双星桥接时就过早丢掉上一颗行星。最终方案不再让一个权重同时承担“上一颗退场”和“下一颗入场”两项职责：`IncomingReveal` 保持 85° 三主体宽景，并在该宽景中完成桥接朝向到下一颗 Lucy 朝向的预转；进入 `IncomingTrack` 后，朝向保持 Lucy 不变，另用两条独立包络求解相机。屏幕平面包络逐步把鸟的二维 NDC 锚点从三主体宽景位置移动到 Lucy 入口，深度/FOV 包络则较慢地从 85° 宽景推至 50° 近景。求解器直接解析相机 Right/Up 分量满足鸟的屏幕锚点，Forward 分量保持深度包络，因此不会退化为鸟与行星双锚点的病态求交。
+
+fresh Rank11 Stylized1 最终录制为 `Saved/M11CameraCaptures/M3EgressAnchorR5-20260810-222300/Stylized1/`：合同 v10、RenderVersion 19、`Complete/TargetHit`、JPG/CSV/AVI 均为 949 帧，Released Trajectory Hash `0x505F3312AC8AE07F`、PlaybackPlan Hash `0x76B24AB41B6E8B63`，AVI SHA-256 `7CAF922ABAC238EA67427A198FE27CED52033CA46C49E512E7F8F5F72165432A`。首个交接中火星在 413–420 帧连续向左上缩退并离场，鸟的 `431→439` 屏幕位置为 `(561.75, 401.94)→(526.65, 381.47) px`；第二个交接中木星在 644–667 帧连续向右下缩退并离场，鸟的 `712→730` 为 `(539.01, 366.53)→(525.79, 379.21) px`。两个交接窗口内鸟的最大单帧屏幕位移分别为 `10.18 px` 和 `7.40 px`，M3 导演窗口鸟丢失为 0，`m3NoApproachReversal=true`。逐帧目检确认上一颗行星退场、下一颗行星建立和鸟进入左侧穿越入口构成一个连续镜头。fresh NullRHI `ABTS.M11C.Unit.FlightCameraAuthorityFrame` 精确 1/1 成功，日志为 `Saved/Logs/M11-CameraEgressAnchor-R5-20260810-FreshAutomation.log`。离线总报告仍会受既有全局固定世界位移阈值和 M4 终段等历史门影响而标记 BaselineFailureObserved，本节只关闭 `M11-CAM-M3-009` 的交接构图回归，不将其冒充为整体 M3 绿灯。
+
+### 7.8 前景穿越清轮廓门与跨行星时间预算
+
+`M11-CAM-M3-010` 处理的不是单颗行星构图，而是镜头调度器允许 `OutgoingHold` 在物理 `Closest` 首帧立即接管的问题。旧 Rank11 录屏中，火星第 328 帧、木星第 548 帧刚进入 Periapsis，鸟心距行星中心仅约 `0.60 R`，轮廓仍深在盘内；此时 `OutgoingHold` 已开始把 FOV 和相机 Transform 拉向双星远景。`MinimumDepartureHoldSeconds` 只保护后续 Reveal 起点，无法约束更早的 Outgoing 起点，因此两颗行星稳定复现“尚未穿出就脱镜”。
+
+修正后，调度器首先在每段 `Closest→Exit` 上计算归一化前景清轮廓门，默认 progress 为 `0.23`；到达该门之前始终保持 Authority/Lucy 穿越构图。之后才允许 `OutgoingHold` 使用五次 SmootherStep 拉远。跨行星时间由硬预算倒排：固定保留 `0.60 s DualBodyBridge + 1.30 s IncomingReveal + 至少 0.60 s IncomingTrack + 0.50 s IncomingEntryMatch`，同时在清轮廓门后至少留出 `0.50 s` Outgoing 拉远；窗口充足时仍使用首选 `2.00 s` 拉远。若候选事件间隔无法同时满足清轮廓、拉远和下一颗入口链，ShotPlan 直接 fail closed，不通过压缩 Track 或提前抢占前景穿越来伪造可用镜头。
+
+fresh Rank11 Stylized1 离屏录制为 `Saved/M11CameraCaptures/M3TransitClearR6D-20260810-230300/Stylized1/`：合同 v10、RenderVersion 19、`Complete/TargetHit`，JPG/CSV/AVI 均为 949 帧，原生体积云关闭，AVI SHA-256 `5E18D6FA1EC598F4468E6E3CDBA944FF76F75AC90DE501B3DEB44D3BAFCA1B5D`。旧问题帧 328/548 均继续处于 Authority；火星和木星分别到第 348/568 帧才进入 `OutgoingHold`。以鸟与行星投影包围圆计算，两个 Outgoing 首帧净空为 `42.34 / 39.26 px`，整个拉远段最小净空为 `2.99 / 22.83 px`；逐帧图像确认两段都先完整穿出轮廓，再平滑拉远。两次桥仍为 36 帧且 36/36 双行星同框，M3 鸟丢失为 0、`m3NoApproachReversal=true`；火星 413–421 和木星 644–667 的渐退镜头以及后续 Lucy 左侧直飞入口均保留。Development Editor `-ForceUnity -DisableAdaptiveUnity -NoHotReloadFromIDE` 完整链接成功，fresh NullRHI `ABTS.M11C.Unit.FlightCameraAuthorityFrame` 精确 1/1 成功。离线总报告仍受既有全局/M4 固定阈值及远景鸟像素门影响而为 `BaselineFailureObserved`，本节只关闭过早脱镜，不把它写成整体 M3 放行。
+
+### 7.9 双星桥接鸟纵向锚与投影安全拟合
+
+`M11-CAM-M3-011` 处理 `OutgoingHold` 向双星桥接构图收敛时，鸟被无意抬到画面上部的问题。旧桥接只把两颗行星连线固定为 Camera Right，再用 transported Up 决定剩余旋转；位置求解把鸟与两颗行星的世界坐标做算术平均，并且只沿 Camera Forward 解一个包围距离。该解能保证三主体大致入画，却没有鸟的屏幕纵向合同。Rank11 木星→土星段中，鸟在行星连线的 Up 正侧很远，因此 575–625 帧随桥接旋转从 `436.54 px` 抬到 `276.23 px`，范围达 `173.96 px`，最大单帧上移 `19.03 px`；运动分解确认这是相机贡献，不是鸟的物理轨迹抬头。
+
+修正后，`OutgoingHold → DualBodyBridge → IncomingReveal` 共用一个 canonical 鸟纵向锚。默认 `DualBodyBridgeBirdNdcY=+0.05`，即 720p 的约 `342 px`；Outgoing 用五次 SmootherStep 从当前 Lucy 鸟 Y 获取该锚，Bridge 全段持有，Reveal 再以零端斜率释放到既有三主体/Track 起点。求解器只调整 Camera Up，不改变行星连线的 Camera Right、鸟的屏幕 X 或已验收的左→右轨迹。每次纵向平移后，以鸟和当前有效的两颗行星投影球重新校验 `1.15` margin；若任一球会裁切，只沿 `-Forward` 二分求最小补充距离，再重新满足同一鸟 Y 锚。Outgoing 的下一颗行星按原 IncomingFitAlpha 从零半径虚拟主体连续生长，避免安全校验提前把尚未叙事出现的行星强拉入画面。
+
+fresh Rank11 Stylized1 离屏证据为 `Saved/M11CameraCaptures/M3BridgeBirdAnchorR7-20260811-114000/`：合同 v10、RenderVersion 19、M3、`r.VolumetricCloud=0`，Manifest 为 `Complete/TargetHit`，JPG/CSV/AVI 均为 949 帧；AVI 171389442 bytes，SHA-256 `2838D7F9E23D9B6F77E04A53AACF69D477A20DFAD08F9626810A568775943C09`，ReleasedTrajectory/PlaybackPlan 仍为 `0x505F3312AC8AE07F / 0x76B24AB41B6E8B63`。575–625 帧鸟 Y 变为 `407.71→342.01 px`，范围降到 `65.70 px`，最大单帧上移降到 `2.31 px`，最大纵向二阶差分由 `6.99` 降到 `0.11 px/frame²`，且全段不再反向；568–627 整个第二 Outgoing 也单调收敛到 `342 px`。两次 Bridge 仍为 36/36 帧双星完整同框，两个 Outgoing 的鸟和离场行星 visible ratio 全程为 1；逐帧检查 575/592/616/628/646/684 确认木星拉远、土星入画和后续退场/直飞入口连续。fresh NullRHI `ABTS.M11C.Unit.FlightCameraAuthorityFrame` 精确 1/1 成功，并新增非共面三主体、鸟 Y 锚、两星水平基线、三投影球 margin 及既有五个状态边界连续断言。现有离线总报告中的全局/M4 与远景鸟像素门仍是独立问题，本节不据此宣称整体 M3 放行。
+
+### 7.10 开局 Reveal→Track 的限制器终点连续合同
+
+`M11-CAM-M3-012` 关闭发射后第一个状态边界上的轻微回退。该现象不是 7.9 鸟 Y 锚引入的回归：R7 第 40→41 帧由 `IncomingReveal` 进入 `IncomingTrack` 时，鸟屏幕 X 从 `523.37` 回到 `511.83 px`；R6D 同一边界数值一致，较早 R5 也有同类约 12 px 回退。根因是开局鸟携带限制器在 Reveal 末帧仍向“标准 lag 后的位置”释放，而 Track 首帧因导演权重精确到 1 立即绕过限制器，直接采用精确导演 Transform。近鸟约 4 千厘米、行星约 15.5 万厘米的视差把残余相机位置误差放大成鸟跳变，而行星球心只移动约 0.4 px。
+
+修正后，非跨行星的 `LaunchAnchor→Assist1` incoming 全段保持同一个开局限制器所有者；位置释放从安全携带位置沿绕鸟方向/距离包络收敛到精确 `DesiredTransform.Location`，不再以标准 lag 位置为终点。旋转的运行时响应也随同一 release alpha 从 lag 平滑收敛到 1，使 release 完成时同样消费精确导演朝向。跨行星连续链、Authority Approach/Periapsis、双星鸟 Y 锚和镜头 FOV 均不改。纯数学判据冻结 release alpha 0 精确等于安全位置、alpha 1 精确等于导演位置，防止未来再次出现“状态边界换解算器终点”。
+
+fresh Rank11 Stylized1 离屏证据为 `Saved/M11CameraCaptures/M3LaunchBoundaryR8-20260811-134500/`：合同 v10、RenderVersion 19、M3、`r.VolumetricCloud=0`，Manifest 为 `Complete/TargetHit`，JPG/CSV/AVI 均为 949 帧；AVI 171387250 bytes，SHA-256 `99967DB08C2CC3A2ADC97FAF40613C137BD2DAB0B037F7D61C1C2789298AB039`，ReleasedTrajectory/PlaybackPlan 仍为 `0x505F3312AC8AE07F / 0x76B24AB41B6E8B63`。旧 40→41 鸟 X 步长 `-11.540 px` 降为 `-0.069 px`，相机位置步长从约 `610.62 cm` 回到 `528.33 cm`，与相邻 `526.56/528.64 cm` 连续；41 帧之后相对 R7 的最大鸟投影差小于 `0.00004 px`、最大相机坐标差小于 `0.00012 cm`。222→223 的 EntryMatch→Authority 鸟 X 仍同向前进 `+0.925 px`，未把释放误差推迟到火星入口。Development Editor ForceUnity 完整链接成功，fresh NullRHI `ABTS.M11C.Unit.FlightCameraAuthorityFrame` 精确 1/1 成功（`Saved/Logs/M11-LaunchBoundary-R8-20260811-FreshAutomation.log`）。

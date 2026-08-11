@@ -47,6 +47,39 @@ namespace
 			* (Clamped * (Clamped * 6.0 - 15.0) + 10.0);
 	}
 
+	double SmoothStep01(const double Value)
+	{
+		const double Clamped = FMath::Clamp(Value, 0.0, 1.0);
+		return Clamped * Clamped * (3.0 - 2.0 * Clamped);
+	}
+
+	double ResolveIncomingEntryAnchorAlpha(
+		const FABTSM11FinaleCameraStageSelection& Selection,
+		const FABTSM11FinaleCameraM2Settings& Settings)
+	{
+		// Move the camera's view-plane position toward the Lucy entry early enough
+		// that the bird cannot overshoot and then be pulled back. Camera depth and
+		// lens deliberately use a slower envelope so the outgoing planet can leave
+		// the wide frame before the incoming flyby fills it.
+		const double MatchProgress = Selection.ShotPhase
+			== EABTSM11FinaleCameraShotPhase::IncomingTrack
+				? FMath::Clamp(Selection.ShotPhaseProgress, 0.0, 1.0)
+				: 0.0;
+		const double FrontLoaded = 1.0 - FMath::Pow(
+			1.0 - MatchProgress,
+			Settings.IncomingMatchEaseOutPower);
+		return SmoothStep01(FrontLoaded);
+	}
+
+	double ResolveIncomingDepthMatchAlpha(
+		const FABTSM11FinaleCameraStageSelection& Selection)
+	{
+		return Selection.ShotPhase
+			== EABTSM11FinaleCameraShotPhase::IncomingTrack
+				? SmoothStep01(Selection.ShotPhaseProgress)
+				: 0.0;
+	}
+
 	double Hermite01WithEndSlope(
 		const double Value,
 		const double EndSlope)
@@ -181,7 +214,23 @@ namespace
 			return FMath::Lerp(
 				AuthorityFovDegrees,
 				Settings.DualBodyBridgeFovDegrees,
-				FMath::Clamp(Selection.ShotProgress, 0.0, 1.0));
+				SmootherStep01(Selection.ShotPhaseProgress));
+		}
+		if (Selection.ShotPhase
+			== EABTSM11FinaleCameraShotPhase::DualBodyBridge)
+		{
+			return Settings.DualBodyBridgeFovDegrees;
+		}
+		if ((Selection.ShotPhase
+				== EABTSM11FinaleCameraShotPhase::IncomingReveal
+			|| Selection.ShotPhase
+				== EABTSM11FinaleCameraShotPhase::IncomingTrack)
+			&& Selection.IsM3InterBodyTransition())
+		{
+			return FMath::Lerp(
+				Settings.DualBodyBridgeFovDegrees,
+				Settings.BaselineFovDegrees,
+				ResolveIncomingDepthMatchAlpha(Selection));
 		}
 		if (Selection.IsM3IncomingShot())
 		{
@@ -204,23 +253,6 @@ namespace
 						/ Settings.PeriapsisFovRestoreFraction));
 		}
 		return Settings.BaselineFovDegrees;
-	}
-
-	FTransform BlendCameraTransforms(
-		const FTransform& From,
-		const FTransform& To,
-		const double Alpha)
-	{
-		const double SafeAlpha = FMath::Clamp(Alpha, 0.0, 1.0);
-		return FTransform(
-			FQuat::Slerp(
-				From.GetRotation(),
-				To.GetRotation(),
-				SafeAlpha).GetNormalized(),
-			FMath::Lerp(
-				From.GetLocation(),
-				To.GetLocation(),
-				SafeAlpha));
 	}
 
 	FVector SlerpDirection(
@@ -275,6 +307,387 @@ namespace
 			ViewDirection,
 			ViewUp).ToQuat();
 		return OutRotation.IsNormalized();
+	}
+
+	bool BuildM3FittedSubjectFrame(
+		const FQuat& ViewRotation,
+		const double HorizontalFovDegrees,
+		const double FitMargin,
+		const FVector& BirdPosition,
+		const double BirdRadiusCM,
+		const FVector& IncomingTargetCenter,
+		const double IncomingTargetRadiusCM,
+		const FVector* OutgoingTargetCenter,
+		const double OutgoingTargetRadiusCM,
+		FTransform& OutTransform)
+	{
+		if (!ViewRotation.IsNormalized()
+			|| !FMath::IsFinite(HorizontalFovDegrees)
+			|| HorizontalFovDegrees <= 0.0
+			|| !FMath::IsFinite(FitMargin)
+			|| FitMargin <= 1.0
+			|| !IsFiniteFlightCameraVector(BirdPosition)
+			|| !IsFiniteFlightCameraVector(IncomingTargetCenter)
+			|| (OutgoingTargetCenter != nullptr
+				&& !IsFiniteFlightCameraVector(*OutgoingTargetCenter)))
+		{
+			return false;
+		}
+		const int32 SubjectCount = OutgoingTargetCenter != nullptr ? 3 : 2;
+		FVector Origin = BirdPosition + IncomingTargetCenter;
+		if (OutgoingTargetCenter != nullptr)
+		{
+			Origin += *OutgoingTargetCenter;
+		}
+		Origin /= static_cast<double>(SubjectCount);
+		const FVector ViewForward = ViewRotation.GetForwardVector();
+		const FVector ViewRight = ViewRotation.GetRightVector();
+		const FVector ViewUp = ViewRotation.GetUpVector();
+		double MinRight = TNumericLimits<double>::Max();
+		double MaxRight = TNumericLimits<double>::Lowest();
+		double MinUp = TNumericLimits<double>::Max();
+		double MaxUp = TNumericLimits<double>::Lowest();
+		double MaximumAbsoluteDepth = 0.0;
+		const auto IncludeSphere = [&] (const FVector& Center, const double Radius)
+		{
+			const FVector Relative = Center - Origin;
+			const double SafeRadius = FMath::Max(0.0, Radius);
+			const double Right = FVector::DotProduct(Relative, ViewRight);
+			const double Up = FVector::DotProduct(Relative, ViewUp);
+			const double Depth = FVector::DotProduct(Relative, ViewForward);
+			MinRight = FMath::Min(MinRight, Right - SafeRadius);
+			MaxRight = FMath::Max(MaxRight, Right + SafeRadius);
+			MinUp = FMath::Min(MinUp, Up - SafeRadius);
+			MaxUp = FMath::Max(MaxUp, Up + SafeRadius);
+			MaximumAbsoluteDepth = FMath::Max(
+				MaximumAbsoluteDepth,
+				FMath::Abs(Depth) + SafeRadius);
+		};
+		IncludeSphere(BirdPosition, BirdRadiusCM);
+		IncludeSphere(IncomingTargetCenter, IncomingTargetRadiusCM);
+		if (OutgoingTargetCenter != nullptr)
+		{
+			IncludeSphere(*OutgoingTargetCenter, OutgoingTargetRadiusCM);
+		}
+		const double HalfWidth = FMath::Max(
+			FMath::Abs(MinRight),
+			FMath::Abs(MaxRight)) * FitMargin;
+		const double HalfHeight = FMath::Max(
+			FMath::Abs(MinUp),
+			FMath::Abs(MaxUp)) * FitMargin;
+		const double TanHalfHorizontal = FMath::Tan(
+			FMath::DegreesToRadians(HorizontalFovDegrees * 0.5));
+		constexpr double AspectRatio = 16.0 / 9.0;
+		const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+		if (!FMath::IsFinite(HalfWidth)
+			|| !FMath::IsFinite(HalfHeight)
+			|| TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
+			|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+		const double FitDistance = FMath::Max(
+			HalfWidth / TanHalfHorizontal,
+			HalfHeight / TanHalfVertical) + MaximumAbsoluteDepth;
+		const FVector CameraLocation = Origin - ViewForward * FitDistance;
+		OutTransform = FTransform(ViewRotation, CameraLocation);
+		return IsFiniteFlightCameraVector(CameraLocation);
+	}
+
+	bool ProjectSubjectToNdc(
+		const FTransform& ViewTransform,
+		const double HorizontalFovDegrees,
+		const FVector& SubjectPosition,
+		FVector2D& OutNdc)
+	{
+		OutNdc = FVector2D::ZeroVector;
+		if (!ViewTransform.GetRotation().IsNormalized()
+			|| !FMath::IsFinite(HorizontalFovDegrees)
+			|| HorizontalFovDegrees <= 0.0
+			|| !IsFiniteFlightCameraVector(SubjectPosition))
+		{
+			return false;
+		}
+		const FVector Relative =
+			SubjectPosition - ViewTransform.GetLocation();
+		const double Depth = FVector::DotProduct(
+			Relative,
+			ViewTransform.GetRotation().GetForwardVector());
+		const double TanHalfHorizontal = FMath::Tan(
+			FMath::DegreesToRadians(HorizontalFovDegrees * 0.5));
+		constexpr double AspectRatio = 16.0 / 9.0;
+		const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+		if (Depth <= UE_DOUBLE_SMALL_NUMBER
+			|| TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
+			|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+		OutNdc.X = FVector::DotProduct(
+			Relative,
+			ViewTransform.GetRotation().GetRightVector())
+			/ (Depth * TanHalfHorizontal);
+		OutNdc.Y = FVector::DotProduct(
+			Relative,
+			ViewTransform.GetRotation().GetUpVector())
+			/ (Depth * TanHalfVertical);
+		return FMath::IsFinite(OutNdc.X) && FMath::IsFinite(OutNdc.Y);
+	}
+
+	/**
+	 * Keeps the bird on a canonical vertical screen line without changing the
+	 * supplied rotation or horizontal camera coordinate. If that view-plane
+	 * shift would crop any active subject, the camera is moved only backward
+	 * until every projected sphere satisfies the requested fit margin.
+	 */
+	bool BuildM3BirdYAnchoredSubjectFrame(
+		const FTransform& BaseTransform,
+		const double HorizontalFovDegrees,
+		const double FitMargin,
+		const double DesiredBirdNdcY,
+		const FVector& BirdPosition,
+		const double BirdRadiusCM,
+		const FVector& PrimaryTargetCenter,
+		const double PrimaryTargetRadiusCM,
+		const FVector* SecondaryTargetCenter,
+		const double SecondaryTargetRadiusCM,
+		FTransform& OutTransform)
+	{
+		OutTransform = BaseTransform;
+		if (!BaseTransform.GetRotation().IsNormalized()
+			|| !FMath::IsFinite(HorizontalFovDegrees)
+			|| HorizontalFovDegrees <= 0.0
+			|| !FMath::IsFinite(FitMargin)
+			|| FitMargin <= 1.0
+			|| !FMath::IsFinite(DesiredBirdNdcY)
+			|| !IsFiniteFlightCameraVector(BirdPosition)
+			|| !IsFiniteFlightCameraVector(PrimaryTargetCenter)
+			|| (SecondaryTargetCenter != nullptr
+				&& !IsFiniteFlightCameraVector(*SecondaryTargetCenter)))
+		{
+			return false;
+		}
+
+		const FQuat ViewRotation = BaseTransform.GetRotation();
+		const FVector ViewForward = ViewRotation.GetForwardVector();
+		const FVector ViewRight = ViewRotation.GetRightVector();
+		const FVector ViewUp = ViewRotation.GetUpVector();
+		const double TanHalfHorizontal = FMath::Tan(
+			FMath::DegreesToRadians(HorizontalFovDegrees * 0.5));
+		constexpr double AspectRatio = 16.0 / 9.0;
+		const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+		if (TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
+			|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		const double BaseCameraForward = FVector::DotProduct(
+			BaseTransform.GetLocation(),
+			ViewForward);
+		const double BaseCameraRight = FVector::DotProduct(
+			BaseTransform.GetLocation(),
+			ViewRight);
+		const double BirdForward = FVector::DotProduct(
+			BirdPosition,
+			ViewForward);
+		const double BirdUp = FVector::DotProduct(BirdPosition, ViewUp);
+		const double BaseBirdDepth = BirdForward - BaseCameraForward;
+		if (BaseBirdDepth <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		const double SafeNdcLimit = 1.0 / FitMargin;
+		const auto EvaluateDistance = [&] (
+			const double ExtraDistance,
+			FTransform& CandidateTransform)
+		{
+			const double CameraForward = BaseCameraForward - ExtraDistance;
+			const double BirdDepth = BirdForward - CameraForward;
+			const double CameraUp = BirdUp
+				- DesiredBirdNdcY * BirdDepth * TanHalfVertical;
+			const FVector CameraLocation =
+				ViewForward * CameraForward
+				+ ViewRight * BaseCameraRight
+				+ ViewUp * CameraUp;
+			CandidateTransform = FTransform(ViewRotation, CameraLocation);
+			if (!IsFiniteFlightCameraVector(CameraLocation))
+			{
+				return false;
+			}
+
+			const auto SphereFits = [&] (
+				const FVector& Center,
+				const double Radius)
+			{
+				const FVector Relative = Center - CameraLocation;
+				const double SafeRadius = FMath::Max(0.0, Radius);
+				const double Depth = FVector::DotProduct(
+					Relative,
+					ViewForward);
+				const double NearDepth = Depth - SafeRadius;
+				if (NearDepth <= UE_DOUBLE_SMALL_NUMBER)
+				{
+					return false;
+				}
+				const double CenterNdcX = FVector::DotProduct(
+					Relative,
+					ViewRight) / (Depth * TanHalfHorizontal);
+				const double CenterNdcY = FVector::DotProduct(
+					Relative,
+					ViewUp) / (Depth * TanHalfVertical);
+				const double RadiusNdcX = SafeRadius
+					/ (NearDepth * TanHalfHorizontal);
+				const double RadiusNdcY = SafeRadius
+					/ (NearDepth * TanHalfVertical);
+				return FMath::IsFinite(CenterNdcX)
+					&& FMath::IsFinite(CenterNdcY)
+					&& FMath::Abs(CenterNdcX) + RadiusNdcX
+						<= SafeNdcLimit
+					&& FMath::Abs(CenterNdcY) + RadiusNdcY
+						<= SafeNdcLimit;
+			};
+
+			return SphereFits(BirdPosition, BirdRadiusCM)
+				&& SphereFits(
+					PrimaryTargetCenter,
+					PrimaryTargetRadiusCM)
+				&& (SecondaryTargetCenter == nullptr
+					|| SphereFits(
+						*SecondaryTargetCenter,
+						SecondaryTargetRadiusCM));
+		};
+
+		FTransform CandidateTransform;
+		if (EvaluateDistance(0.0, CandidateTransform))
+		{
+			OutTransform = CandidateTransform;
+			return true;
+		}
+
+		double LowDistance = 0.0;
+		double HighDistance = FMath::Max(100.0, BaseBirdDepth * 0.1);
+		bool bFoundFittingDistance = false;
+		for (int32 Iteration = 0; Iteration < 20; ++Iteration)
+		{
+			if (EvaluateDistance(HighDistance, CandidateTransform))
+			{
+				bFoundFittingDistance = true;
+				break;
+			}
+			LowDistance = HighDistance;
+			HighDistance *= 2.0;
+		}
+		if (!bFoundFittingDistance)
+		{
+			return false;
+		}
+
+		for (int32 Iteration = 0; Iteration < 24; ++Iteration)
+		{
+			const double MiddleDistance =
+				(LowDistance + HighDistance) * 0.5;
+			if (EvaluateDistance(MiddleDistance, CandidateTransform))
+			{
+				HighDistance = MiddleDistance;
+			}
+			else
+			{
+				LowDistance = MiddleDistance;
+			}
+		}
+		return EvaluateDistance(HighDistance, OutTransform);
+	}
+
+	bool BuildM3BirdAnchorLocation(
+		const FTransform& WideTransform,
+		const double WideProjectionFovDegrees,
+		const FTransform& LucyTransform,
+		const double LucyProjectionFovDegrees,
+		const double OutputFovDegrees,
+		const double EntryAnchorAlpha,
+		const double DepthMatchAlpha,
+		const FVector& BirdPosition,
+		FVector& OutLocation)
+	{
+		OutLocation = WideTransform.GetLocation();
+		if (!WideTransform.GetRotation().Equals(
+				LucyTransform.GetRotation(),
+				1.0e-6)
+			|| !FMath::IsFinite(OutputFovDegrees)
+			|| OutputFovDegrees <= 0.0)
+		{
+			return false;
+		}
+		FVector2D WideBirdNdc;
+		FVector2D LucyBirdNdc;
+		if (!ProjectSubjectToNdc(
+				WideTransform,
+				WideProjectionFovDegrees,
+				BirdPosition,
+				WideBirdNdc)
+			|| !ProjectSubjectToNdc(
+				LucyTransform,
+				LucyProjectionFovDegrees,
+				BirdPosition,
+				LucyBirdNdc))
+		{
+			return false;
+		}
+
+		const FVector2D DesiredBirdNdc = FMath::Lerp(
+			WideBirdNdc,
+			LucyBirdNdc,
+			FMath::Clamp(EntryAnchorAlpha, 0.0, 1.0));
+		const FQuat ViewRotation = WideTransform.GetRotation();
+		const FVector ViewForward = ViewRotation.GetForwardVector();
+		const FVector ViewRight = ViewRotation.GetRightVector();
+		const FVector ViewUp = ViewRotation.GetUpVector();
+		const double TanHalfHorizontal = FMath::Tan(
+			FMath::DegreesToRadians(OutputFovDegrees * 0.5));
+		constexpr double AspectRatio = 16.0 / 9.0;
+		const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+		const double BirdTangentX = DesiredBirdNdc.X * TanHalfHorizontal;
+		const double BirdTangentY = DesiredBirdNdc.Y * TanHalfVertical;
+		if (TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
+			|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		const FVector SlowLocation = FMath::Lerp(
+			WideTransform.GetLocation(),
+			LucyTransform.GetLocation(),
+			FMath::Clamp(DepthMatchAlpha, 0.0, 1.0));
+		const double BirdForward = FVector::DotProduct(
+			BirdPosition,
+			ViewForward);
+		const double BirdRight = FVector::DotProduct(
+			BirdPosition,
+			ViewRight);
+		const double BirdUp = FVector::DotProduct(
+			BirdPosition,
+			ViewUp);
+		const double CameraForward = FVector::DotProduct(
+			SlowLocation,
+			ViewForward);
+		const double CameraRight =
+			BirdRight - BirdTangentX * (BirdForward - CameraForward);
+		const double CameraUp =
+			BirdUp - BirdTangentY * (BirdForward - CameraForward);
+		const double BirdDepth = BirdForward - CameraForward;
+		if (!FMath::IsFinite(CameraForward)
+			|| !FMath::IsFinite(CameraRight)
+			|| !FMath::IsFinite(CameraUp)
+			|| BirdDepth <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+		OutLocation = ViewForward * CameraForward
+			+ ViewRight * CameraRight
+			+ ViewUp * CameraUp;
+		return IsFiniteFlightCameraVector(OutLocation);
 	}
 
 }
@@ -341,8 +754,15 @@ bool FABTSM11FinaleCameraM2Settings::IsUsable() const
 		&& DualBodyBridgeFovDegrees < 120.0
 		&& FMath::IsFinite(DualBodyBridgeFitMargin)
 		&& DualBodyBridgeFitMargin > 1.0
+		&& FMath::IsFinite(DualBodyBridgeBirdNdcY)
+		&& FMath::Abs(DualBodyBridgeBirdNdcY) <= 0.5
 		&& FMath::IsFinite(DualBodyBridgeSeconds)
-		&& DualBodyBridgeSeconds > 0.0;
+		&& DualBodyBridgeSeconds > 0.0
+		&& FMath::IsFinite(IncomingMatchEaseOutPower)
+		&& IncomingMatchEaseOutPower >= 1.0
+		&& IncomingMatchEaseOutPower <= 4.0
+		&& FMath::IsFinite(IncomingEntryMatchSeconds)
+		&& IncomingEntryMatchSeconds > 0.0;
 }
 
 bool FABTSM11FinaleCameraM2Diagnostics::IsUsable() const
@@ -507,15 +927,6 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3DualBodyBridgeFrame(
 		(DirectorSample.OutgoingTargetCenter
 			+ DirectorSample.IncomingTargetCenter
 			+ BirdPosition) / 3.0;
-	const FVector BaselineView =
-		(Origin - BaselineFrame.DesiredTransform.GetLocation()).GetSafeNormal();
-	if (!BaselineView.IsNearlyZero()
-		&& FVector::DotProduct(BridgeForward, BaselineView) < 0.0)
-	{
-		BridgeForward *= -1.0;
-		BridgeUp *= -1.0;
-	}
-
 	double MinRight = TNumericLimits<double>::Max();
 	double MaxRight = TNumericLimits<double>::Lowest();
 	double MinUp = TNumericLimits<double>::Max();
@@ -568,9 +979,22 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3DualBodyBridgeFrame(
 	const FQuat BridgeRotation = FRotationMatrix::MakeFromXZ(
 		BridgeForward,
 		BridgeUp).ToQuat();
-	OutBridgeTransform = FTransform(BridgeRotation, BridgeLocation);
-	return IsFiniteFlightCameraVector(BridgeLocation)
-		&& BridgeRotation.IsNormalized();
+	const FTransform UnanchoredBridgeTransform(
+		BridgeRotation,
+		BridgeLocation);
+	return BridgeRotation.IsNormalized()
+		&& BuildM3BirdYAnchoredSubjectFrame(
+			UnanchoredBridgeTransform,
+			Settings.DualBodyBridgeFovDegrees,
+			Settings.DualBodyBridgeFitMargin,
+			Settings.DualBodyBridgeBirdNdcY,
+			BirdPosition,
+			DirectorSample.BirdRadiusCM,
+			DirectorSample.OutgoingTargetCenter,
+			DirectorSample.OutgoingTargetRadiusCM,
+			&DirectorSample.IncomingTargetCenter,
+			DirectorSample.IncomingTargetRadiusCM,
+			OutBridgeTransform);
 }
 
 bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
@@ -593,13 +1017,11 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
 	}
 
 	const double Progress = DirectorSample.Selection.StageProgress;
-	if (DirectorSample.Selection.ShotPhase
-		== EABTSM11FinaleCameraShotPhase::OutgoingHold)
+	if (DirectorSample.Selection.IsM3InterBodyTransition())
 	{
-		// Keep the outgoing Lucy composition authoritative until the incoming
-		// reveal begins. Fading to the legacy chase frame loses both subjects on
-		// long inter-body arcs; the incoming bird-anchored transition already
-		// provides the safe bridge between the two planet frames.
+		// Every inter-body phase is one deterministic composition chain. Blending
+		// any of it back toward the chase camera would create a second authority at
+		// the exact boundaries this chain is designed to make continuous.
 		OutDiagnostics.DirectorBlendAlpha = 1.0;
 	}
 	else if (DirectorSample.Selection.IsM3IncomingShot())
@@ -727,10 +1149,9 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
 	OutDirectedTransform = FTransform(
 		DirectedRotation,
 		DirectedLocation);
-	if (DirectorSample.Selection.IsM3InterBodyTransition()
-		&& DirectorSample.Selection.ShotPhase
-			!= EABTSM11FinaleCameraShotPhase::OutgoingHold)
+	if (DirectorSample.Selection.IsM3InterBodyTransition())
 	{
+		const FTransform LucyTransform = OutDirectedTransform;
 		FTransform BridgeTransform;
 		if (!BuildM3DualBodyBridgeFrame(
 			BaselineFrame,
@@ -741,107 +1162,208 @@ bool ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
 		{
 			return false;
 		}
-		const auto BuildIncomingPairFrame = [&](
-			const double PairFovDegrees,
-			FTransform& OutPairTransform) -> bool
+		const double PhaseBlendAlpha =
+			DirectorSample.Selection.ShotPhase
+				== EABTSM11FinaleCameraShotPhase::OutgoingHold
+				? SmootherStep01(
+					DirectorSample.Selection.ShotPhaseProgress)
+				: SmoothStep01(
+					DirectorSample.Selection.ShotPhaseProgress);
+		if (DirectorSample.Selection.ShotPhase
+			== EABTSM11FinaleCameraShotPhase::OutgoingHold)
 		{
-			const FVector PairRight =
-				(DirectorSample.IncomingTargetCenter
-					- BirdPosition).GetSafeNormal();
-			FVector PairUp = FVector::VectorPlaneProject(
-				BaselineFrame.TransportedUp,
-				PairRight).GetSafeNormal();
-			FVector PairForward = FVector::CrossProduct(
-				PairRight,
-				PairUp).GetSafeNormal();
-			const FVector PairFocus = 0.5
-				* (BirdPosition + DirectorSample.IncomingTargetCenter);
-			const FVector BaselineView =
-				(PairFocus
-					- BaselineFrame.DesiredTransform.GetLocation()).GetSafeNormal();
-			if (PairRight.IsNearlyZero()
-				|| PairUp.IsNearlyZero()
-				|| PairForward.IsNearlyZero())
-			{
-				return false;
-			}
-			if (!BaselineView.IsNearlyZero()
-				&& FVector::DotProduct(PairForward, BaselineView) < 0.0)
-			{
-				PairForward *= -1.0;
-				PairUp *= -1.0;
-			}
-			const double HalfWidth =
-				(0.5 * FVector::Distance(
+			const FQuat PullbackRotation = FQuat::Slerp(
+				LucyTransform.GetRotation(),
+				BridgeTransform.GetRotation(),
+				PhaseBlendAlpha).GetNormalized();
+			FTransform OutgoingPairTransform;
+			FTransform ThreeSubjectTransform;
+			if (!BuildM3FittedSubjectFrame(
+				PullbackRotation,
+				OutDiagnostics.DirectedFovDegrees,
+				Settings.DualBodyBridgeFitMargin,
+				BirdPosition,
+				DirectorSample.BirdRadiusCM,
+				DirectorSample.OutgoingTargetCenter,
+				DirectorSample.OutgoingTargetRadiusCM,
+				nullptr,
+				0.0,
+				OutgoingPairTransform)
+				|| !BuildM3FittedSubjectFrame(
+					PullbackRotation,
+					OutDiagnostics.DirectedFovDegrees,
+					Settings.DualBodyBridgeFitMargin,
 					BirdPosition,
-					DirectorSample.IncomingTargetCenter)
-					+ FMath::Max(
-						DirectorSample.BirdRadiusCM,
-						DirectorSample.IncomingTargetRadiusCM))
-				* Settings.DualBodyBridgeFitMargin;
-			const double TanHalfHorizontal = FMath::Tan(
-				FMath::DegreesToRadians(PairFovDegrees * 0.5));
-			if (!FMath::IsFinite(HalfWidth)
-				|| TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER)
+					DirectorSample.BirdRadiusCM,
+					DirectorSample.IncomingTargetCenter,
+					DirectorSample.IncomingTargetRadiusCM,
+					&DirectorSample.OutgoingTargetCenter,
+					DirectorSample.OutgoingTargetRadiusCM,
+					ThreeSubjectTransform))
 			{
 				return false;
 			}
-			const double PairDistance = HalfWidth / TanHalfHorizontal;
-			const FVector PairLocation =
-				PairFocus - PairForward * PairDistance;
-			const FQuat PairRotation = FRotationMatrix::MakeFromXZ(
-				PairForward,
-				PairUp).ToQuat();
-			OutPairTransform = FTransform(PairRotation, PairLocation);
-			return IsFiniteFlightCameraVector(PairLocation)
-				&& PairRotation.IsNormalized();
-		};
-		if (DirectorSample.Selection.IsM3DualBodyBridge())
+			const FVector PairAnchoredLocation = FMath::Lerp(
+				LucyTransform.GetLocation(),
+				OutgoingPairTransform.GetLocation(),
+				PhaseBlendAlpha);
+			const double IncomingFitAlpha = SmoothStep01(
+				(DirectorSample.Selection.ShotPhaseProgress - 0.35) / 0.65);
+			const FTransform UnanchoredOutgoingTransform(
+				PullbackRotation,
+				FMath::Lerp(
+					PairAnchoredLocation,
+					ThreeSubjectTransform.GetLocation(),
+					IncomingFitAlpha));
+			FVector2D LucyBirdNdc;
+			if (!ProjectSubjectToNdc(
+				LucyTransform,
+				OutDiagnostics.DirectedFovDegrees,
+				BirdPosition,
+				LucyBirdNdc))
+			{
+				return false;
+			}
+			const double DesiredBirdNdcY = FMath::Lerp(
+				LucyBirdNdc.Y,
+				Settings.DualBodyBridgeBirdNdcY,
+				PhaseBlendAlpha);
+			// Introduce the incoming fit continuously. Before it is narratively
+			// present, a virtual zero-radius subject stays on the outgoing body;
+			// at the bridge boundary it has become the real incoming planet.
+			const FVector ActiveIncomingCenter = FMath::Lerp(
+				DirectorSample.OutgoingTargetCenter,
+				DirectorSample.IncomingTargetCenter,
+				IncomingFitAlpha);
+			const double ActiveIncomingRadius =
+				DirectorSample.IncomingTargetRadiusCM * IncomingFitAlpha;
+			if (!BuildM3BirdYAnchoredSubjectFrame(
+				UnanchoredOutgoingTransform,
+				OutDiagnostics.DirectedFovDegrees,
+				Settings.DualBodyBridgeFitMargin,
+				DesiredBirdNdcY,
+				BirdPosition,
+				DirectorSample.BirdRadiusCM,
+				DirectorSample.OutgoingTargetCenter,
+				DirectorSample.OutgoingTargetRadiusCM,
+				&ActiveIncomingCenter,
+				ActiveIncomingRadius,
+				OutDirectedTransform))
+			{
+				return false;
+			}
+		}
+		else if (DirectorSample.Selection.IsM3DualBodyBridge())
 		{
 			OutDirectedTransform = BridgeTransform;
-			OutDiagnostics.DirectedFovDegrees =
-				Settings.DualBodyBridgeFovDegrees;
+		}
+		else if (DirectorSample.Selection.ShotPhase
+			== EABTSM11FinaleCameraShotPhase::IncomingReveal)
+		{
+			const FQuat RevealRotation = FQuat::Slerp(
+				BridgeTransform.GetRotation(),
+				LucyTransform.GetRotation(),
+				PhaseBlendAlpha).GetNormalized();
+			FTransform UnanchoredRevealTransform;
+			if (!BuildM3FittedSubjectFrame(
+				RevealRotation,
+				Settings.DualBodyBridgeFovDegrees,
+				Settings.DualBodyBridgeFitMargin,
+				BirdPosition,
+				DirectorSample.BirdRadiusCM,
+				DirectorSample.IncomingTargetCenter,
+				DirectorSample.IncomingTargetRadiusCM,
+				&DirectorSample.OutgoingTargetCenter,
+				DirectorSample.OutgoingTargetRadiusCM,
+				UnanchoredRevealTransform))
+			{
+				return false;
+			}
+			FVector2D UnanchoredBirdNdc;
+			if (!ProjectSubjectToNdc(
+				UnanchoredRevealTransform,
+				Settings.DualBodyBridgeFovDegrees,
+				BirdPosition,
+				UnanchoredBirdNdc))
+			{
+				return false;
+			}
+			const double DesiredBirdNdcY = FMath::Lerp(
+				Settings.DualBodyBridgeBirdNdcY,
+				UnanchoredBirdNdc.Y,
+				PhaseBlendAlpha);
+			if (!BuildM3BirdYAnchoredSubjectFrame(
+				UnanchoredRevealTransform,
+				Settings.DualBodyBridgeFovDegrees,
+				Settings.DualBodyBridgeFitMargin,
+				DesiredBirdNdcY,
+				BirdPosition,
+				DirectorSample.BirdRadiusCM,
+				DirectorSample.IncomingTargetCenter,
+				DirectorSample.IncomingTargetRadiusCM,
+				&DirectorSample.OutgoingTargetCenter,
+				DirectorSample.OutgoingTargetRadiusCM,
+				OutDirectedTransform))
+			{
+				return false;
+			}
 		}
 		else if (DirectorSample.Selection.ShotPhase
 			== EABTSM11FinaleCameraShotPhase::IncomingTrack)
 		{
-			const double ShotElapsedSeconds =
-				DirectorSample.Selection.ShotProgress
-					* DirectorSample.Selection.ShotDurationSeconds;
-			const double CommitEndSeconds = FMath::Max(
-				Settings.DualBodyBridgeSeconds,
-				DirectorSample.Selection.ShotDurationSeconds
-					- Settings.HandoffLeadInSeconds);
-			const double CommitAlpha = SmootherStep01(
-				(ShotElapsedSeconds - Settings.DualBodyBridgeSeconds)
-					/ FMath::Max(
-						UE_DOUBLE_SMALL_NUMBER,
-						CommitEndSeconds
-							- Settings.DualBodyBridgeSeconds));
-			const double PairFovDegrees = FMath::Lerp(
+			const double EntryAnchorAlpha =
+				ResolveIncomingEntryAnchorAlpha(
+					DirectorSample.Selection,
+					Settings);
+			const double DepthMatchAlpha =
+				ResolveIncomingDepthMatchAlpha(
+					DirectorSample.Selection);
+			const FQuat TrackRotation = LucyTransform.GetRotation();
+			FTransform AlignedThreeSubjectTransform;
+			if (!BuildM3FittedSubjectFrame(
+				TrackRotation,
 				Settings.DualBodyBridgeFovDegrees,
-				Settings.BaselineFovDegrees,
-				CommitAlpha);
-			if (!BuildIncomingPairFrame(
-				PairFovDegrees,
-				OutDirectedTransform))
+				Settings.DualBodyBridgeFitMargin,
+				BirdPosition,
+				DirectorSample.BirdRadiusCM,
+				DirectorSample.IncomingTargetCenter,
+				DirectorSample.IncomingTargetRadiusCM,
+				&DirectorSample.OutgoingTargetCenter,
+				DirectorSample.OutgoingTargetRadiusCM,
+				AlignedThreeSubjectTransform))
 			{
 				return false;
 			}
-			OutDiagnostics.DirectedFovDegrees = PairFovDegrees;
-		}
-		else if (DirectorSample.Selection.ShotPhase
-			== EABTSM11FinaleCameraShotPhase::IncomingEntryMatch)
-		{
-			if (!BuildIncomingPairFrame(
+			const FVector LocationDelta =
+				LucyTransform.GetLocation()
+					- AlignedThreeSubjectTransform.GetLocation();
+			const FVector ForwardDelta = TrackRotation.GetForwardVector()
+				* FVector::DotProduct(
+					LocationDelta,
+					TrackRotation.GetForwardVector());
+			const FVector ViewPlaneDelta = LocationDelta - ForwardDelta;
+			FVector SplitAnchorLocation;
+			const bool bBuiltSplitAnchor = BuildM3BirdAnchorLocation(
+				AlignedThreeSubjectTransform,
+				OutDiagnostics.DirectedFovDegrees,
+				LucyTransform,
 				Settings.BaselineFovDegrees,
-				OutDirectedTransform))
-			{
-				return false;
-			}
-			OutDiagnostics.DirectedFovDegrees =
-				Settings.BaselineFovDegrees;
+				OutDiagnostics.DirectedFovDegrees,
+				EntryAnchorAlpha,
+				DepthMatchAlpha,
+				BirdPosition,
+				SplitAnchorLocation);
+			OutDirectedTransform = FTransform(
+				TrackRotation,
+				bBuiltSplitAnchor
+					? SplitAnchorLocation
+					: AlignedThreeSubjectTransform.GetLocation()
+						+ ViewPlaneDelta * EntryAnchorAlpha
+						+ ForwardDelta * DepthMatchAlpha);
 		}
+		// IncomingEntryMatch retains the exact Lucy transform. Authority/Approach
+		// starts from that same solver at entry, so the final boundary cannot switch
+		// basis or release accumulated lag.
 		OutDiagnostics.DirectorBlendAlpha = 1.0;
 	}
 	return IsFiniteFlightCameraVector(OutDirectedTransform.GetLocation())
@@ -880,6 +1402,38 @@ bool ABTSM11FinaleFlightCameraMath::BuildM2PlanetAnchoredRotation(
 		ViewDirection,
 		ViewUp).ToQuat();
 	return OutRotation.IsNormalized();
+}
+
+bool ABTSM11FinaleFlightCameraMath::BuildM3LaunchReleaseLocation(
+	const FVector& SafeLocation,
+	const FVector& BirdPosition,
+	const FVector& DirectedLocation,
+	const double ReleaseAlpha,
+	FVector& OutLocation)
+{
+	OutLocation = FVector::ZeroVector;
+	if (!IsFiniteFlightCameraVector(SafeLocation)
+		|| !IsFiniteFlightCameraVector(BirdPosition)
+		|| !IsFiniteFlightCameraVector(DirectedLocation)
+		|| !FMath::IsFinite(ReleaseAlpha))
+	{
+		return false;
+	}
+	const double ClampedReleaseAlpha = FMath::Clamp(
+		ReleaseAlpha,
+		0.0,
+		1.0);
+	const FVector ReleasedOffsetDirection = SlerpDirection(
+		SafeLocation - BirdPosition,
+		DirectedLocation - BirdPosition,
+		ClampedReleaseAlpha);
+	const double ReleasedOffsetDistance = FMath::Lerp(
+		FVector::Distance(SafeLocation, BirdPosition),
+		FVector::Distance(DirectedLocation, BirdPosition),
+		ClampedReleaseAlpha);
+	OutLocation = BirdPosition
+		+ ReleasedOffsetDirection * ReleasedOffsetDistance;
+	return IsFiniteFlightCameraVector(OutLocation);
 }
 
 AABTSM11FinaleFlightCamera::AABTSM11FinaleFlightCamera()
@@ -1005,8 +1559,13 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 			M3DualBodyBridgeFovDegrees;
 		Settings.DualBodyBridgeFitMargin =
 			M3DualBodyBridgeFitMargin;
+		Settings.DualBodyBridgeBirdNdcY =
+			M3DualBodyBridgeBirdNdcY;
 		Settings.DualBodyBridgeSeconds =
 			M3DualBodyBridgeHoldSeconds;
+		Settings.IncomingMatchEaseOutPower =
+			M3IncomingMatchEaseOutPower;
+		Settings.IncomingEntryMatchSeconds = M3HandoffReleaseSeconds;
 		FABTSM11FinaleCameraM2Diagnostics Diagnostics;
 		const bool bBuilt = bM3Window
 			? ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
@@ -1086,7 +1645,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	{
 		OutRotation = DesiredTransform.GetRotation();
 		if (DirectorSample != nullptr
-			&& DirectorSample->Selection.IsM3DualBodyBridge())
+			&& DirectorSample->Selection.IsM3InterBodyTransition())
 		{
 			return true;
 		}
@@ -1146,9 +1705,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	}
 	const bool bM3InterBodyComposition = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
-		&& DirectorSample->Selection.IsM3InterBodyTransition()
-		&& DirectorSample->Selection.ShotPhase
-			!= EABTSM11FinaleCameraShotPhase::OutgoingHold;
+		&& DirectorSample->Selection.IsM3InterBodyTransition();
 	const bool bM3DirectedEncounterComposition = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
 		&& DirectorSample->Selection.ShotPhase
@@ -1157,7 +1714,23 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 				== EABTSM11FinaleCameraStage::Approach
 			|| DirectorSample->Selection.Stage
 				== EABTSM11FinaleCameraStage::Periapsis);
-	if (bM3InterBodyComposition || bM3DirectedEncounterComposition)
+	const bool bM3LaunchAnchoredIncomingComposition =
+		bM3DirectorFrozenEnabled
+		&& DirectorSample != nullptr
+		&& DirectorSample->Selection.IsM3IncomingShot()
+		&& !DirectorSample->Selection.IsM3InterBodyTransition()
+		&& DirectorSample->Selection.FramingAssistIndex == 1
+		&& DirectorSample->Selection.Stage
+			== EABTSM11FinaleCameraStage::CruiseToBody;
+	const bool bM3FullyDirectedIncomingComposition =
+		bM3DirectorFrozenEnabled
+		&& DirectorSample != nullptr
+		&& DirectorSample->Selection.IsM3IncomingShot()
+		&& !bM3LaunchAnchoredIncomingComposition
+		&& LastM2BlendAlpha >= 1.0 - UE_DOUBLE_SMALL_NUMBER;
+	if (bM3InterBodyComposition
+		|| bM3DirectedEncounterComposition
+		|| bM3FullyDirectedIncomingComposition)
 	{
 		// Position and rotation are one constrained composition solution. Lagging
 		// or clipping them independently can keep the location from one frame and
@@ -1165,48 +1738,15 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		SmoothedLocation = DesiredTransform.GetLocation();
 		SmoothedRotation = DesiredTransform.GetRotation();
 	}
-	// Presentation transitions own the bird-safe bridge. Approach intentionally
-	// bypasses these branches so its screen-space path has one position authority.
-	const bool bM3OutgoingHold = bM3DirectorFrozenEnabled
-		&& DirectorSample != nullptr
-		&& DirectorSample->Selection.ShotPhase
-			== EABTSM11FinaleCameraShotPhase::OutgoingHold;
+	// Only the launch-to-first-planet reveal needs the legacy bird-carried
+	// limiter. Every inter-body transition is already a continuous, constrained
+	// composition and must not acquire a second runtime authority.
 	const bool bM3IncomingTransition = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
 		&& DirectorSample->Selection.IsM3IncomingShot()
-		&& !DirectorSample->Selection.IsM3InterBodyTransition();
-	if (bM3OutgoingHold)
-	{
-		// Before changing planet frames, move the outgoing composition from a
-		// planet-centred look to a bird-centred neutral look. The outgoing planet
-		// remains in frame, while the next shot can orbit around a bird that is
-		// already near screen centre instead of spending its first frames chasing
-		// the bird across (and beyond) the viewport.
-		FQuat BirdAnchoredRotation;
-		FQuat LocationAwareDesiredRotation;
-		if (!BuildBirdAnchoredRotation(
-			SmoothedLocation,
-			TargetPosition,
-			GetActorQuat().GetUpVector(),
-			BirdAnchoredRotation)
-			|| !BuildLocationAwareDesiredRotation(
-				SmoothedLocation,
-				LocationAwareDesiredRotation))
-		{
-			return false;
-		}
-		const double BirdCenteringAlpha = SmootherStep01(
-			DirectorSample->Selection.ShotProgress);
-		const FQuat BirdCenteredDesiredRotation = FQuat::Slerp(
-			LocationAwareDesiredRotation,
-			BirdAnchoredRotation,
-			BirdCenteringAlpha).GetNormalized();
-		SmoothedRotation = FQuat::Slerp(
-			GetActorQuat(),
-			BirdCenteredDesiredRotation,
-			Alpha).GetNormalized();
-	}
-	else if (bM3IncomingTransition)
+		&& !DirectorSample->Selection.IsM3InterBodyTransition()
+		&& !bM3FullyDirectedIncomingComposition;
+	if (bM3IncomingTransition)
 	{
 		// First carry the camera by the bird's authoritative translation. The
 		// transition limiter should constrain only the orbit around the bird, not
@@ -1256,11 +1796,8 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		const double ShotElapsedSeconds =
 			DirectorSample->Selection.ShotProgress
 				* DirectorSample->Selection.ShotDurationSeconds;
-		const bool bLaunchAnchoredIncoming =
-			DirectorSample->Selection.FramingAssistIndex == 1
-			&& DirectorSample->Selection.Stage
-				== EABTSM11FinaleCameraStage::CruiseToBody;
-		const double AlignmentDurationSeconds = bLaunchAnchoredIncoming
+		const double AlignmentDurationSeconds =
+			bM3LaunchAnchoredIncomingComposition
 			? M3HandoffLeadInSeconds
 			: FMath::Max(
 				M3HandoffLeadInSeconds,
@@ -1271,16 +1808,15 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 				/ FMath::Max(
 					AlignmentDurationSeconds,
 					UE_DOUBLE_SMALL_NUMBER));
-		const FVector ReleasedOffsetDirection = SlerpDirection(
-			SafeLocation - TargetPosition,
-			SmoothedLocation - TargetPosition,
-			ReleaseAlpha);
-		const double ReleasedOffsetDistance = FMath::Lerp(
-			FVector::Distance(SafeLocation, TargetPosition),
-			FVector::Distance(SmoothedLocation, TargetPosition),
-			ReleaseAlpha);
-		SmoothedLocation = TargetPosition
-			+ ReleasedOffsetDirection * ReleasedOffsetDistance;
+		if (!ABTSM11FinaleFlightCameraMath::BuildM3LaunchReleaseLocation(
+			SafeLocation,
+			TargetPosition,
+			DesiredTransform.GetLocation(),
+			ReleaseAlpha,
+			SmoothedLocation))
+		{
+			return false;
+		}
 
 		FQuat BirdAnchoredRotation;
 		FQuat LocationAwareDesiredRotation;
@@ -1299,14 +1835,19 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 			BirdAnchoredRotation,
 			LocationAwareDesiredRotation,
 			ReleaseAlpha).GetNormalized();
+		const double ReleasedRotationResponse = FMath::Lerp(
+			Alpha,
+			1.0,
+			ReleaseAlpha);
 		SmoothedRotation = FQuat::Slerp(
 			GetActorQuat(),
 			ReleasedDesiredRotation,
-			Alpha).GetNormalized();
+			ReleasedRotationResponse).GetNormalized();
 	}
 	if (bM3RotationSafetyEnvelope
 		&& !bM3InterBodyComposition
-		&& !bM3DirectedEncounterComposition)
+		&& !bM3DirectedEncounterComposition
+		&& !bM3FullyDirectedIncomingComposition)
 	{
 		const double FinalRotationDeltaRadians =
 			GetActorQuat().AngularDistance(SmoothedRotation);

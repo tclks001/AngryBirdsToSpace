@@ -33,11 +33,16 @@ enum class EABTSM11FinaleCameraShotPhase : uint8
 /** Deterministic timing policy used to schedule one inter-body shot. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraShotSettings
 {
-	double IncomingRevealLeadSeconds = 3.25;
-	double IncomingAcquireSeconds = 0.40;
+	double IncomingRevealLeadSeconds = 5.50;
+	double IncomingAcquireSeconds = 1.30;
 	double DualBodyBridgeSeconds = 0.60;
 	double MinimumDepartureHoldSeconds = 0.75;
-	double OutgoingReleaseSeconds = 0.40;
+	/** Periapsis progress that must elapse before the Lucy transit may pull out. */
+	double ForegroundTransitClearProgress = 0.23;
+	double OutgoingReleaseSeconds = 2.00;
+	double MinimumOutgoingReleaseSeconds = 0.50;
+	/** Track time protected after bridge/acquire and before entry matching. */
+	double MinimumIncomingTrackSeconds = 0.60;
 	double EntryMatchSeconds = 0.50;
 
 	bool IsUsable() const;
@@ -61,6 +66,9 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraStageSelection
 		EABTSM11FinaleCameraShotPhase::Authority;
 	double ShotProgress = 0.0;
 	double ShotDurationSeconds = 0.0;
+	/** Progress local to the active ShotPhase, independent of the full shot. */
+	double ShotPhaseProgress = 0.0;
+	double ShotPhaseDurationSeconds = 0.0;
 	/** Normalized end slope that matches IncomingReveal to Approach motion. */
 	double ShotEndSlope = 0.0;
 	FString TargetLabel = TEXT("Assist1");

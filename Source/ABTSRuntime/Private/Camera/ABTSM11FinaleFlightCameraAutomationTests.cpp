@@ -557,6 +557,25 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		1.0e-9);
 
 	FABTSM11FinaleCameraShotSettings M3ShotSettings;
+	double ClearBirdX = 0.0;
+	double ClearTargetX = 0.0;
+	double ClearNormalizedSeparation = 0.0;
+	bool bClearBirdIsForeground = false;
+	TestTrue(
+		TEXT("Foreground-clear scheduling threshold projects both subjects"),
+		ResolveSubjectProjection(
+			FVector(5000.0, 3000.0, 0.0),
+			EABTSM11FinaleCameraStage::Periapsis,
+			M3ShotSettings.ForegroundTransitClearProgress,
+			ClearBirdX,
+			ClearTargetX,
+			ClearNormalizedSeparation,
+			bClearBirdIsForeground));
+	TestTrue(
+		TEXT("Default scheduling threshold clears the foreground bird silhouette"),
+		ClearBirdX > ClearTargetX
+			&& ClearNormalizedSeparation > 1.22
+			&& bClearBirdIsForeground);
 	const FABTSM11FinaleCameraStageSelection M3LaunchAcquire =
 		ABTSM11FinaleCameraDirector::ResolveStage(
 			true,
@@ -589,7 +608,7 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		ABTSM11FinaleCameraDirector::ResolveStage(
 			true,
 			false,
-			1.0,
+			2.5,
 			&EventResult,
 			true,
 			&M3ShotSettings);
@@ -638,11 +657,38 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		0.5,
 		1.0e-9);
 
+	const FVector LaunchSafeLocation(1200.0, -350.0, 640.0);
+	const FVector LaunchBirdPosition(500.0, 100.0, 200.0);
+	const FVector LaunchDirectedLocation(-800.0, 950.0, 1100.0);
+	FVector LaunchReleaseLocation = FVector::ZeroVector;
+	TestTrue(
+		TEXT("Launch carry release builds a finite start location"),
+		ABTSM11FinaleFlightCameraMath::BuildM3LaunchReleaseLocation(
+			LaunchSafeLocation,
+			LaunchBirdPosition,
+			LaunchDirectedLocation,
+			0.0,
+			LaunchReleaseLocation));
+	TestTrue(
+		TEXT("Launch carry release starts at the limiter location"),
+		LaunchReleaseLocation.Equals(LaunchSafeLocation, 1.0e-6));
+	TestTrue(
+		TEXT("Launch carry release builds a finite terminal location"),
+		ABTSM11FinaleFlightCameraMath::BuildM3LaunchReleaseLocation(
+			LaunchSafeLocation,
+			LaunchBirdPosition,
+			LaunchDirectedLocation,
+			1.0,
+			LaunchReleaseLocation));
+	TestTrue(
+		TEXT("Launch carry release terminates at the exact directed location"),
+		LaunchReleaseLocation.Equals(LaunchDirectedLocation, 1.0e-6));
+
 	const FABTSM11FinaleCameraStageSelection M3OutgoingHold =
 		ABTSM11FinaleCameraDirector::ResolveStage(
 			true,
 			false,
-			15.0,
+			14.25,
 			&EventResult,
 			true,
 			&M3ShotSettings);
@@ -659,6 +705,11 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		static_cast<uint8>(M3OutgoingHold.ShotPhase),
 		static_cast<uint8>(
 			EABTSM11FinaleCameraShotPhase::OutgoingHold));
+	TestEqual(
+		TEXT("Outgoing hold exposes phase-local progress"),
+		M3OutgoingHold.ShotPhaseProgress,
+		M3OutgoingHold.ShotProgress,
+		1.0e-9);
 	TestTrue(
 		TEXT("M3 Handoff is a directed assist window"),
 		M3OutgoingHold.IsM3AssistWindow());
@@ -695,7 +746,7 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		ABTSM11FinaleCameraDirector::ResolveStage(
 			true,
 			false,
-			17.0,
+			14.75,
 			&EventResult,
 			true,
 			&M3ShotSettings);
@@ -712,6 +763,11 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		TEXT("Dual-body bridge keeps the full incoming shot budget"),
 		M3DualBodyBridge.ShotDurationSeconds,
 		M3ShotSettings.IncomingRevealLeadSeconds,
+		1.0e-9);
+	TestEqual(
+		TEXT("Dual-body bridge exposes its own phase duration"),
+		M3DualBodyBridge.ShotPhaseDurationSeconds,
+		M3ShotSettings.DualBodyBridgeSeconds,
 		1.0e-9);
 	TestEqual(
 		TEXT("Bridge identifies the outgoing assist"),
@@ -746,16 +802,151 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		Diagnostics.DirectorBlendAlpha,
 		1.0,
 		1.0e-9);
-	const FABTSM11FinaleCameraStageSelection M3IncomingTrack =
+
+	// Freeze a deliberately non-coplanar three-subject bridge. The planets
+	// still own the horizontal baseline, while the bird must retain a stable
+	// vertical narrative line and all projected spheres remain inside margin.
+	FABTSM11FinaleCameraDirectorSample VerticalBridgeSample = DirectorSample;
+	VerticalBridgeSample.Selection = M3DualBodyBridge;
+	VerticalBridgeSample.OutgoingTargetCenter = FVector(0.0, -6000.0, -2000.0);
+	VerticalBridgeSample.IncomingTargetCenter = FVector(0.0, 6000.0, -2000.0);
+	VerticalBridgeSample.TargetCenter =
+		VerticalBridgeSample.IncomingTargetCenter;
+	VerticalBridgeSample.OutgoingTargetRadiusCM = 1000.0;
+	VerticalBridgeSample.IncomingTargetRadiusCM = 1000.0;
+	VerticalBridgeSample.TargetRadiusCM = 1000.0;
+	VerticalBridgeSample.BirdRadiusCM = 120.0;
+	const FVector VerticalBridgeBird(6000.0, 0.0, 3000.0);
+	FTransform VerticalBridgeTransform;
+	TestTrue(
+		TEXT("Non-coplanar bridge builds a projection-safe anchored frame"),
+		ABTSM11FinaleFlightCameraMath::BuildM3DualBodyBridgeFrame(
+			Frame,
+			VerticalBridgeBird,
+			VerticalBridgeSample,
+			M2Settings,
+			VerticalBridgeTransform));
+	const auto ProjectBridgeNdc = [&] (
+		const FVector& SubjectCenter,
+		FVector2D& OutNdc,
+		double& OutDepth)
+	{
+		const FQuat Rotation = VerticalBridgeTransform.GetRotation();
+		const FVector Relative =
+			SubjectCenter - VerticalBridgeTransform.GetLocation();
+		OutDepth = FVector::DotProduct(Relative, Rotation.GetForwardVector());
+		const double TanHalfHorizontal = FMath::Tan(FMath::DegreesToRadians(
+			M2Settings.DualBodyBridgeFovDegrees * 0.5));
+		const double TanHalfVertical = TanHalfHorizontal / (16.0 / 9.0);
+		if (OutDepth <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return false;
+		}
+		OutNdc.X = FVector::DotProduct(Relative, Rotation.GetRightVector())
+			/ (OutDepth * TanHalfHorizontal);
+		OutNdc.Y = FVector::DotProduct(Relative, Rotation.GetUpVector())
+			/ (OutDepth * TanHalfVertical);
+		return FMath::IsFinite(OutNdc.X) && FMath::IsFinite(OutNdc.Y);
+	};
+	FVector2D VerticalBirdNdc = FVector2D::ZeroVector;
+	FVector2D VerticalOutgoingNdc = FVector2D::ZeroVector;
+	FVector2D VerticalIncomingNdc = FVector2D::ZeroVector;
+	double VerticalBirdDepth = 0.0;
+	double VerticalOutgoingDepth = 0.0;
+	double VerticalIncomingDepth = 0.0;
+	const bool bProjectedVerticalBridge = ProjectBridgeNdc(
+		VerticalBridgeBird,
+		VerticalBirdNdc,
+		VerticalBirdDepth)
+		&& ProjectBridgeNdc(
+			VerticalBridgeSample.OutgoingTargetCenter,
+			VerticalOutgoingNdc,
+			VerticalOutgoingDepth)
+		&& ProjectBridgeNdc(
+			VerticalBridgeSample.IncomingTargetCenter,
+			VerticalIncomingNdc,
+			VerticalIncomingDepth);
+	TestTrue(
+		TEXT("Anchored bridge projects all three subjects"),
+		bProjectedVerticalBridge);
+	if (bProjectedVerticalBridge)
+	{
+		TestEqual(
+			TEXT("Bridge holds the bird on the canonical vertical NDC anchor"),
+			VerticalBirdNdc.Y,
+			M2Settings.DualBodyBridgeBirdNdcY,
+			1.0e-6);
+		TestEqual(
+			TEXT("Vertical bird anchor preserves the two-planet horizontal baseline"),
+			VerticalOutgoingNdc.Y,
+			VerticalIncomingNdc.Y,
+			1.0e-6);
+		const double TanHalfHorizontal = FMath::Tan(FMath::DegreesToRadians(
+			M2Settings.DualBodyBridgeFovDegrees * 0.5));
+		const double TanHalfVertical = TanHalfHorizontal / (16.0 / 9.0);
+		const double SafeNdcLimit = 1.0 / M2Settings.DualBodyBridgeFitMargin;
+		const auto SphereFitsMargin = [&] (
+			const FVector2D& CenterNdc,
+			const double Depth,
+			const double Radius)
+		{
+			const double NearDepth = Depth - Radius;
+			return NearDepth > UE_DOUBLE_SMALL_NUMBER
+				&& FMath::Abs(CenterNdc.X)
+					+ Radius / (NearDepth * TanHalfHorizontal)
+					<= SafeNdcLimit + 1.0e-6
+				&& FMath::Abs(CenterNdc.Y)
+					+ Radius / (NearDepth * TanHalfVertical)
+					<= SafeNdcLimit + 1.0e-6;
+		};
+		TestTrue(
+			TEXT("Bridge bird sphere retains the projection margin"),
+			SphereFitsMargin(
+				VerticalBirdNdc,
+				VerticalBirdDepth,
+				VerticalBridgeSample.BirdRadiusCM));
+		TestTrue(
+			TEXT("Bridge outgoing planet retains the projection margin"),
+			SphereFitsMargin(
+				VerticalOutgoingNdc,
+				VerticalOutgoingDepth,
+				VerticalBridgeSample.OutgoingTargetRadiusCM));
+		TestTrue(
+			TEXT("Bridge incoming planet retains the projection margin"),
+			SphereFitsMargin(
+				VerticalIncomingNdc,
+				VerticalIncomingDepth,
+				VerticalBridgeSample.IncomingTargetRadiusCM));
+	}
+	const FABTSM11FinaleCameraStageSelection M3InterBodyReveal =
 		ABTSM11FinaleCameraDirector::ResolveStage(
 			true,
 			false,
-			17.5,
+			16.0,
 			&EventResult,
 			true,
 			&M3ShotSettings);
 	TestEqual(
-		TEXT("Incoming body enters Track after its acquisition interval"),
+		TEXT("Bridge hands off through a reachable incoming reveal"),
+		static_cast<uint8>(M3InterBodyReveal.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::IncomingReveal));
+	TestEqual(
+		TEXT("Incoming reveal uses phase-local progress after bridge hold"),
+		M3InterBodyReveal.ShotPhaseProgress,
+		(16.0 - (14.5 + M3ShotSettings.DualBodyBridgeSeconds))
+			/ M3ShotSettings.IncomingAcquireSeconds,
+		1.0e-9);
+	const FABTSM11FinaleCameraStageSelection M3IncomingTrack =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			18.5,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Incoming body enters Track after bridge and reveal"),
 		static_cast<uint8>(M3IncomingTrack.ShotPhase),
 		static_cast<uint8>(
 			EABTSM11FinaleCameraShotPhase::IncomingTrack));
@@ -773,6 +964,283 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		static_cast<uint8>(M3EntryMatch.ShotPhase),
 		static_cast<uint8>(
 			EABTSM11FinaleCameraShotPhase::IncomingEntryMatch));
+	const FABTSM11FinaleCameraStageSelection M3AfterEnter =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			20.1,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("AssistEnter does not replay EntryMatch as a post-enter settle"),
+		static_cast<uint8>(M3AfterEnter.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::Authority));
+
+	const FABTSM11FinaleCameraStageSelection M3AtEnter =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			20.0,
+			&EventResult,
+			true,
+			&M3ShotSettings);
+	auto BuildM3BoundaryFrame = [&] (
+		const FABTSM11FinaleCameraStageSelection& Selection,
+		const FVector& TargetCenter,
+		FTransform& OutTransform,
+		FABTSM11FinaleCameraM2Diagnostics& OutLocalDiagnostics)
+	{
+		DirectorSample.Selection = Selection;
+		DirectorSample.TargetCenter = TargetCenter;
+		return ABTSM11FinaleFlightCameraMath::BuildM3AssistFrame(
+			Frame,
+			Target,
+			DirectorSample,
+			M2Settings,
+			OutTransform,
+			OutLocalDiagnostics);
+	};
+	auto TestM3BoundaryContinuity = [&] (
+		const TCHAR* BoundaryLabel,
+		const FABTSM11FinaleCameraStageSelection& FromSelection,
+		const FVector& FromTargetCenter,
+		const FABTSM11FinaleCameraStageSelection& ToSelection,
+		const FVector& ToTargetCenter)
+	{
+		FTransform FromTransform;
+		FTransform ToTransform;
+		FABTSM11FinaleCameraM2Diagnostics FromDiagnostics;
+		FABTSM11FinaleCameraM2Diagnostics ToDiagnostics;
+		const bool bFromBuilt = BuildM3BoundaryFrame(
+			FromSelection,
+			FromTargetCenter,
+			FromTransform,
+			FromDiagnostics);
+		const bool bToBuilt = BuildM3BoundaryFrame(
+			ToSelection,
+			ToTargetCenter,
+			ToTransform,
+			ToDiagnostics);
+		TestTrue(
+			FString::Printf(TEXT("%s builds both endpoint frames"), BoundaryLabel),
+			bFromBuilt && bToBuilt);
+		if (!bFromBuilt || !bToBuilt)
+		{
+			return;
+		}
+		TestTrue(
+			FString::Printf(TEXT("%s keeps location continuous"), BoundaryLabel),
+			FromTransform.GetLocation().Equals(
+				ToTransform.GetLocation(),
+				1.0e-4));
+		TestTrue(
+			FString::Printf(TEXT("%s keeps rotation continuous"), BoundaryLabel),
+			FromTransform.GetRotation().AngularDistance(
+				ToTransform.GetRotation()) <= 1.0e-6);
+		TestEqual(
+			FString::Printf(TEXT("%s keeps FOV continuous"), BoundaryLabel),
+			FromDiagnostics.DirectedFovDegrees,
+			ToDiagnostics.DirectedFovDegrees,
+			1.0e-9);
+	};
+	FABTSM11FinaleCameraStageSelection OutgoingEnd = M3OutgoingHold;
+	OutgoingEnd.ShotProgress = 1.0;
+	OutgoingEnd.ShotPhaseProgress = 1.0;
+	FABTSM11FinaleCameraStageSelection BridgeStart = M3DualBodyBridge;
+	BridgeStart.ShotPhaseProgress = 0.0;
+	TestM3BoundaryContinuity(
+		TEXT("OutgoingHold to DualBodyBridge"),
+		OutgoingEnd,
+		DirectorSample.OutgoingTargetCenter,
+		BridgeStart,
+		DirectorSample.IncomingTargetCenter);
+
+	FABTSM11FinaleCameraStageSelection BridgeEnd = M3DualBodyBridge;
+	BridgeEnd.ShotPhaseProgress = 1.0;
+	FABTSM11FinaleCameraStageSelection RevealStart = M3InterBodyReveal;
+	RevealStart.ShotProgress = M3ShotSettings.DualBodyBridgeSeconds
+		/ RevealStart.ShotDurationSeconds;
+	RevealStart.ShotPhaseProgress = 0.0;
+	TestM3BoundaryContinuity(
+		TEXT("DualBodyBridge to IncomingReveal"),
+		BridgeEnd,
+		DirectorSample.IncomingTargetCenter,
+		RevealStart,
+		DirectorSample.IncomingTargetCenter);
+
+	FABTSM11FinaleCameraStageSelection RevealEnd = M3InterBodyReveal;
+	RevealEnd.ShotProgress =
+		(M3ShotSettings.DualBodyBridgeSeconds
+			+ M3ShotSettings.IncomingAcquireSeconds)
+		/ M3ShotSettings.IncomingRevealLeadSeconds;
+	RevealEnd.ShotPhaseProgress = 1.0;
+	FABTSM11FinaleCameraStageSelection TrackStart = M3IncomingTrack;
+	TrackStart.ShotProgress = RevealEnd.ShotProgress;
+	TrackStart.ShotPhaseProgress = 0.0;
+	TestM3BoundaryContinuity(
+		TEXT("IncomingReveal to IncomingTrack"),
+		RevealEnd,
+		DirectorSample.IncomingTargetCenter,
+		TrackStart,
+		DirectorSample.IncomingTargetCenter);
+
+	FABTSM11FinaleCameraStageSelection TrackEnd = M3IncomingTrack;
+	TrackEnd.ShotProgress = 1.0
+		- M3ShotSettings.EntryMatchSeconds
+			/ M3ShotSettings.IncomingRevealLeadSeconds;
+	TrackEnd.ShotPhaseProgress = 1.0;
+	FABTSM11FinaleCameraStageSelection EntryStart = M3EntryMatch;
+	EntryStart.ShotProgress = TrackEnd.ShotProgress;
+	EntryStart.ShotPhaseProgress = 0.0;
+	TestM3BoundaryContinuity(
+		TEXT("IncomingTrack to IncomingEntryMatch"),
+		TrackEnd,
+		DirectorSample.IncomingTargetCenter,
+		EntryStart,
+		DirectorSample.IncomingTargetCenter);
+
+	FTransform MidRevealTransform;
+	FABTSM11FinaleCameraM2Diagnostics MidRevealDiagnostics;
+	const bool bTrackCurveBuilt = BuildM3BoundaryFrame(
+		M3InterBodyReveal,
+		DirectorSample.IncomingTargetCenter,
+		MidRevealTransform,
+		MidRevealDiagnostics);
+	TestTrue(
+		TEXT("Incoming composition match builds a finite reveal sample"),
+		bTrackCurveBuilt);
+	if (bTrackCurveBuilt)
+	{
+		TestEqual(
+			TEXT("Incoming reveal retains the wide lens for outgoing-body egress"),
+			MidRevealDiagnostics.DirectedFovDegrees,
+			M2Settings.DualBodyBridgeFovDegrees,
+			1.0e-9);
+	}
+
+	FABTSM11FinaleCameraStageSelection MidTrack = TrackStart;
+	MidTrack.ShotProgress = 0.5
+		* (TrackStart.ShotProgress + TrackEnd.ShotProgress);
+	MidTrack.ShotPhaseProgress = 0.5;
+	FTransform MidTrackTransform;
+	FABTSM11FinaleCameraM2Diagnostics MidTrackDiagnostics;
+	const bool bMidTrackBuilt = BuildM3BoundaryFrame(
+		MidTrack,
+		DirectorSample.IncomingTargetCenter,
+		MidTrackTransform,
+		MidTrackDiagnostics);
+	TestTrue(
+		TEXT("Incoming track builds the split anchor/depth sample"),
+		bMidTrackBuilt);
+	if (bMidTrackBuilt)
+	{
+		TestTrue(
+			TEXT("Incoming track has started releasing the wide lens"),
+			MidTrackDiagnostics.DirectedFovDegrees
+				< M2Settings.DualBodyBridgeFovDegrees);
+		TestTrue(
+			TEXT("Incoming track has not reached the final Lucy lens early"),
+			MidTrackDiagnostics.DirectedFovDegrees
+				> M2Settings.BaselineFovDegrees);
+	}
+
+	FABTSM11FinaleCameraStageSelection EntryEnd = M3EntryMatch;
+	EntryEnd.ShotProgress = 1.0;
+	EntryEnd.ShotPhaseProgress = 1.0;
+	TestM3BoundaryContinuity(
+		TEXT("IncomingEntryMatch to Authority Approach"),
+		EntryEnd,
+		DirectorSample.IncomingTargetCenter,
+		M3AtEnter,
+		DirectorSample.IncomingTargetCenter);
+
+	FABTSM11FinaleCameraShotSettings TightBudgetSettings = M3ShotSettings;
+	TightBudgetSettings.IncomingRevealLeadSeconds = 7.0;
+	TightBudgetSettings.MinimumIncomingTrackSeconds = 3.6;
+	const FABTSM11FinaleCameraStageSelection BeforeForegroundClear =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			12.459,
+			&EventResult,
+			true,
+			&TightBudgetSettings);
+	TestEqual(
+		TEXT("Tight schedule keeps Authority until the foreground transit clears"),
+		static_cast<uint8>(BeforeForegroundClear.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::Authority));
+	TestEqual(
+		TEXT("Foreground-clear hold keeps framing the outgoing assist"),
+		BeforeForegroundClear.FramingAssistIndex,
+		1);
+	const FABTSM11FinaleCameraStageSelection AtForegroundClear =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			12.46,
+			&EventResult,
+			true,
+			&TightBudgetSettings);
+	TestEqual(
+		TEXT("Outgoing pullback may begin at the foreground-clear threshold"),
+		static_cast<uint8>(AtForegroundClear.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::OutgoingHold));
+	TestEqual(
+		TEXT("Foreground-clear threshold maps to the configured Periapsis progress"),
+		AtForegroundClear.StageProgress,
+		TightBudgetSettings.ForegroundTransitClearProgress,
+		1.0e-9);
+	const FABTSM11FinaleCameraStageSelection TightBudgetBridge =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			14.0,
+			&EventResult,
+			true,
+			&TightBudgetSettings);
+	TestEqual(
+		TEXT("Tight schedule yields to the bridge at its latest safe time"),
+		static_cast<uint8>(TightBudgetBridge.ShotPhase),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraShotPhase::DualBodyBridge));
+	const FABTSM11FinaleCameraStageSelection TightBudgetTrack =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			16.0,
+			&EventResult,
+			true,
+			&TightBudgetSettings);
+	TestEqual(
+		TEXT("Tight schedule retains an explicit incoming Track"),
+		static_cast<uint8>(TightBudgetTrack.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::IncomingTrack));
+	TestEqual(
+		TEXT("Tight schedule protects the configured minimum Track duration"),
+		TightBudgetTrack.ShotPhaseDurationSeconds,
+		TightBudgetSettings.MinimumIncomingTrackSeconds,
+		1.0e-9);
+
+	FABTSM11FinaleCameraShotSettings ImpossibleBudgetSettings =
+		M3ShotSettings;
+	ImpossibleBudgetSettings.IncomingRevealLeadSeconds = 8.0;
+	ImpossibleBudgetSettings.MinimumIncomingTrackSeconds = 5.0;
+	TestTrue(
+		TEXT("Impossible event budget fixture still uses individually valid settings"),
+		ImpossibleBudgetSettings.IsUsable());
+	const FABTSM11FinaleCameraStageSelection ImpossibleBudget =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			12.5,
+			&EventResult,
+			true,
+			&ImpossibleBudgetSettings);
+	TestEqual(
+		TEXT("Insufficient transit and incoming budget fails closed"),
+		static_cast<uint8>(ImpossibleBudget.Stage),
+		static_cast<uint8>(EABTSM11FinaleCameraStage::Unavailable));
 
 	FABTSM11FinaleCameraShotSettings BorrowedTimeSettings = M3ShotSettings;
 	BorrowedTimeSettings.IncomingRevealLeadSeconds = 7.0;
@@ -789,11 +1257,15 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 		static_cast<uint8>(BorrowedPeriapsis.Stage),
 		static_cast<uint8>(EABTSM11FinaleCameraStage::Periapsis));
 	TestEqual(
-		TEXT("Presentation can already frame the next assist"),
+		TEXT("Early lead cannot preempt the outgoing foreground transit"),
 		BorrowedPeriapsis.FramingAssistIndex,
-		2);
-	TestTrue(
-		TEXT("Early reveal borrows only presentation time"),
+		1);
+	TestEqual(
+		TEXT("Early lead remains an outgoing pullback after silhouette clearance"),
+		static_cast<uint8>(BorrowedPeriapsis.ShotPhase),
+		static_cast<uint8>(EABTSM11FinaleCameraShotPhase::OutgoingHold));
+	TestFalse(
+		TEXT("Early lead does not borrow protected foreground time"),
 		BorrowedPeriapsis.IsM3IncomingShot());
 
 	FABTSM11FinaleCameraStageSelection M3IncomingReveal = M3DualBodyBridge;

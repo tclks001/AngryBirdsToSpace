@@ -40,7 +40,10 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraM2Settings
 	double PeriapsisFovRestoreFraction = 0.80;
 	double DualBodyBridgeFovDegrees = 85.0;
 	double DualBodyBridgeFitMargin = 1.15;
+	double DualBodyBridgeBirdNdcY = 0.05;
 	double DualBodyBridgeSeconds = 0.60;
+	double IncomingMatchEaseOutPower = 1.0;
+	double IncomingEntryMatchSeconds = 0.50;
 
 	bool IsUsable() const;
 };
@@ -103,6 +106,14 @@ namespace ABTSM11FinaleFlightCameraMath
 		const FABTSM11FinaleCameraDirectorSample& DirectorSample,
 		const FABTSM11FinaleCameraM2Settings& Settings,
 		FTransform& OutBridgeTransform);
+
+	/** Releases the launch carry limiter onto the exact directed location. */
+	ABTSRUNTIME_API bool BuildM3LaunchReleaseLocation(
+		const FVector& SafeLocation,
+		const FVector& BirdPosition,
+		const FVector& DirectedLocation,
+		double ReleaseAlpha,
+		FVector& OutLocation);
 
 	/** Keeps the planet anchored after the camera location has been smoothed. */
 	ABTSRUNTIME_API bool BuildM2PlanetAnchoredRotation(
@@ -178,8 +189,14 @@ public:
 		Settings.DualBodyBridgeSeconds = M3DualBodyBridgeHoldSeconds;
 		Settings.MinimumDepartureHoldSeconds =
 			M3MinimumDepartureHoldSeconds;
+		Settings.ForegroundTransitClearProgress =
+			M3ForegroundTransitClearProgress;
 		Settings.OutgoingReleaseSeconds =
 			M3OutgoingBridgePullbackSeconds;
+		Settings.MinimumOutgoingReleaseSeconds =
+			M3MinimumOutgoingBridgePullbackSeconds;
+		Settings.MinimumIncomingTrackSeconds =
+			M3MinimumIncomingTrackSeconds;
 		Settings.EntryMatchSeconds = M3HandoffReleaseSeconds;
 		return Settings;
 	}
@@ -239,7 +256,7 @@ private:
 	/** Real-time duration used to establish the incoming M3 assist frame. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
 		meta = (ClampMin = "0.1", ClampMax = "2.0", UIMin = "0.2", UIMax = "1.0", Units = "s"))
-	double M3HandoffLeadInSeconds = 0.40;
+	double M3HandoffLeadInSeconds = 1.30;
 
 	/** Minimum time for which both planets own the bridge composition. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
@@ -256,20 +273,51 @@ private:
 		meta = (ClampMin = "1.02", ClampMax = "1.5", UIMin = "1.05", UIMax = "1.25"))
 	double M3DualBodyBridgeFitMargin = 1.15;
 
+	/**
+	 * Canonical vertical screen anchor for the bird while both planets share
+	 * the frame. Positive NDC is screen-up; 0.05 is slightly above centre.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "-0.5", ClampMax = "0.5", UIMin = "-0.2", UIMax = "0.2"))
+	double M3DualBodyBridgeBirdNdcY = 0.05;
+
+	/** Ease-out power applied to the Track view-plane entry match. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "1.0", ClampMax = "4.0", UIMin = "1.0", UIMax = "3.0"))
+	double M3IncomingMatchEaseOutPower = 1.0;
+
 	/** Pull-back duration before the dual-body bridge becomes authoritative. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
 		meta = (ClampMin = "0.2", ClampMax = "2.0", UIMin = "0.5", UIMax = "1.2", Units = "s"))
-	double M3OutgoingBridgePullbackSeconds = 0.90;
+	double M3OutgoingBridgePullbackSeconds = 2.00;
+
+	/** Minimum pullback time preserved after foreground silhouette clearance. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.2", ClampMax = "1.5", UIMin = "0.4", UIMax = "0.8", Units = "s"))
+	double M3MinimumOutgoingBridgePullbackSeconds = 0.50;
 
 	/** Lead time before AssistEnter at which the next body reveal begins. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
 		meta = (ClampMin = "1.0", ClampMax = "6.0", UIMin = "2.0", UIMax = "4.5", Units = "s"))
-	double M3IncomingRevealLeadSeconds = 3.25;
+	double M3IncomingRevealLeadSeconds = 5.50;
 
 	/** Minimum outgoing-body hold after physical Closest before pre-reveal. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
 		meta = (ClampMin = "0.0", ClampMax = "2.0", UIMin = "0.4", UIMax = "1.2", Units = "s"))
 	double M3MinimumDepartureHoldSeconds = 0.75;
+
+	/**
+	 * Normalized outgoing Periapsis progress required before pullback.
+	 * The default clears the current single-bird Lucy foreground chord.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.05", ClampMax = "0.8", UIMin = "0.1", UIMax = "0.4"))
+	double M3ForegroundTransitClearProgress = 0.23;
+
+	/** Minimum incoming Track interval protected from outgoing pullback. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
+		meta = (ClampMin = "0.1", ClampMax = "3.0", UIMin = "0.3", UIMax = "1.2", Units = "s"))
+	double M3MinimumIncomingTrackSeconds = 0.60;
 
 	/** Final interval already fully aligned to the incoming Lucy frame. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|Flight Camera|M3",
