@@ -36,3 +36,20 @@ struct ABTSRUNTIME_API FABTSM11FinaleFormationPath
 		FVector3d& OutVelocityCMPerSec) const;
 };
 
+namespace ABTSM11FinaleFormationMath
+{
+	/**
+	 * Builds the owning Actor rotation for one flying bird.
+	 *
+	 * Actor +X follows the released trajectory velocity. Actor +Z follows the
+	 * current view up projected onto the velocity normal plane. The bird mesh's
+	 * authored relative rotation remains untouched, so its default -90 degree
+	 * yaw axis correction is applied exactly once by the component hierarchy.
+	 */
+	ABTSRUNTIME_API bool BuildVelocityViewRotation(
+		const FVector& WorldVelocity,
+		const FVector& ViewUp,
+		const FVector& ViewRight,
+		const FQuat& PreviousActorRotation,
+		FQuat& OutActorRotation);
+}

@@ -53,5 +53,70 @@ bool FABTSM11M6FormationArcLengthTest::RunTest(
 	return true;
 }
 
-#endif
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11M6FormationViewRotationTest,
+	"ABTS.M11C.Unit.M6FormationViewRotation",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
 
+bool FABTSM11M6FormationViewRotationTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FVector Velocity(3.0, 4.0, 5.0);
+	const FVector ViewUp(-0.25, 0.50, 1.0);
+	const FVector ViewRight(1.0, 0.0, 0.0);
+	FQuat ActorRotation;
+	TestTrue(
+		TEXT("Velocity/view rotation resolves"),
+		ABTSM11FinaleFormationMath::BuildVelocityViewRotation(
+			Velocity,
+			ViewUp,
+			ViewRight,
+			FQuat::Identity,
+			ActorRotation));
+	const FVector ExpectedForward = Velocity.GetSafeNormal();
+	const FVector ExpectedUp = FVector::VectorPlaneProject(
+		ViewUp,
+		ExpectedForward).GetSafeNormal();
+	TestTrue(
+		TEXT("Actor forward follows trajectory velocity"),
+		ActorRotation.GetForwardVector().Equals(ExpectedForward, 1.0e-5));
+	TestTrue(
+		TEXT("Actor up follows projected current view up"),
+		ActorRotation.GetUpVector().Equals(ExpectedUp, 1.0e-5));
+
+	// The production bird mesh imports facing +Y and applies this authored
+	// relative correction. Keeping it on the component maps visible front to
+	// Actor +X without double-applying the correction in finale code.
+	const FQuat DefaultVisualAxisCorrection =
+		FRotator(0.0, -90.0, 0.0).Quaternion();
+	const FVector VisibleModelForward = ActorRotation.RotateVector(
+		DefaultVisualAxisCorrection.RotateVector(FVector::RightVector));
+	const FVector VisibleModelUp = ActorRotation.RotateVector(
+		DefaultVisualAxisCorrection.RotateVector(FVector::UpVector));
+	TestTrue(
+		TEXT("Default mesh correction faces visible bird along velocity"),
+		VisibleModelForward.Equals(ExpectedForward, 1.0e-5));
+	TestTrue(
+		TEXT("Default mesh correction preserves view-relative up"),
+		VisibleModelUp.Equals(ExpectedUp, 1.0e-5));
+
+	FQuat DegenerateRotation;
+	TestTrue(
+		TEXT("View-up parallel to velocity uses stable fallback"),
+		ABTSM11FinaleFormationMath::BuildVelocityViewRotation(
+			FVector::UpVector,
+			FVector::UpVector,
+			FVector::RightVector,
+			ActorRotation,
+			DegenerateRotation));
+	TestTrue(
+		TEXT("Degenerate fallback still preserves velocity forward"),
+		DegenerateRotation.GetForwardVector().Equals(
+			FVector::UpVector,
+			1.0e-5));
+	return true;
+}
+
+#endif

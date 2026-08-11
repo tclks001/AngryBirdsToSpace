@@ -4,6 +4,17 @@
 
 #include "Algo/BinarySearch.h"
 
+namespace
+{
+	bool IsFiniteFormationVector(const FVector& Value)
+	{
+		return !Value.ContainsNaN()
+			&& FMath::IsFinite(Value.X)
+			&& FMath::IsFinite(Value.Y)
+			&& FMath::IsFinite(Value.Z);
+	}
+}
+
 void FABTSM11FinaleFormationPath::Reset()
 {
 	Nodes.Reset();
@@ -189,4 +200,56 @@ bool FABTSM11FinaleFormationPath::SampleAtArcLength(
 	}
 	return !OutPositionCM.ContainsNaN()
 		&& !OutVelocityCMPerSec.ContainsNaN();
+}
+
+bool ABTSM11FinaleFormationMath::BuildVelocityViewRotation(
+	const FVector& WorldVelocity,
+	const FVector& ViewUp,
+	const FVector& ViewRight,
+	const FQuat& PreviousActorRotation,
+	FQuat& OutActorRotation)
+{
+	if (!IsFiniteFormationVector(WorldVelocity)
+		|| !IsFiniteFormationVector(ViewUp)
+		|| !IsFiniteFormationVector(ViewRight)
+		|| PreviousActorRotation.ContainsNaN())
+	{
+		return false;
+	}
+	const FVector Forward = WorldVelocity.GetSafeNormal();
+	if (Forward.IsNearlyZero())
+	{
+		return false;
+	}
+	FVector PresentationUp = FVector::VectorPlaneProject(
+		ViewUp,
+		Forward).GetSafeNormal();
+	if (PresentationUp.IsNearlyZero())
+	{
+		PresentationUp = FVector::VectorPlaneProject(
+			PreviousActorRotation.GetUpVector(),
+			Forward).GetSafeNormal();
+	}
+	if (PresentationUp.IsNearlyZero())
+	{
+		const FVector PresentationRight = FVector::VectorPlaneProject(
+			ViewRight,
+			Forward).GetSafeNormal();
+		if (PresentationRight.IsNearlyZero())
+		{
+			return false;
+		}
+		PresentationUp = FVector::CrossProduct(
+			Forward,
+			PresentationRight).GetSafeNormal();
+	}
+	const FQuat Resolved = FRotationMatrix::MakeFromXZ(
+		Forward,
+		PresentationUp).ToQuat().GetNormalized();
+	if (Resolved.ContainsNaN())
+	{
+		return false;
+	}
+	OutActorRotation = Resolved;
+	return true;
 }

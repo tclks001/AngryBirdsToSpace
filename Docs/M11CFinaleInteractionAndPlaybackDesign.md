@@ -456,11 +456,12 @@ Rank 1 的真实侧向偏转为 `+0.590804 / -0.306536 / +0.645047 rad`，发生
 ## 13. M6 已落实合同与 M11-D 交接清单
 
 1. M6 已把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的弧长标架，不复制积分器；M11-D 必须继续消费该结果；
-2. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
-3. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
-4. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
-5. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
-6. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
+2. 四鸟 Actor 前向由各自弧长样本速度唯一确定；上方向使用本帧导演相机 Up 的法平面投影。Mesh 的默认 `Yaw=-90°` 只保留为组件局部轴修正，不得在世界姿态中重复施加；
+3. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
+4. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
+5. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
+6. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
+7. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
 
 ## 14. 多工作树集成交接
 

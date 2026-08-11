@@ -151,3 +151,29 @@ Schema 8 报告都必须四鸟顺序稳定、主控一致、完全展开、间�
   沿同一路径排成单列；首版尾迹仍只有主控一条。
 
 这些证据只关闭 M11-owned M6-0～M6-5，不关闭 Integration 的 M6-6/M6-7。
+
+## 10. 飞行姿态合同
+
+四鸟进入飞行表现后，Actor `+X` 必须逐帧对齐各自在冻结 Playback Plan 上采样的
+世界速度。Actor `+Z` 对齐“本帧导演相机 Up 在速度法平面上的投影”，从而在满足
+速度前向的同时，让鸟体上方稳定朝向当前屏幕上方。导演必须先完成本帧相机求解，
+再写入鸟体旋转；不得继续使用 Finale Local Frame Up，也不得读取 Movement Component
+或 Actor 位移差分作为姿态权威。
+
+`BirdVisualRelativeRotation=(0,-90,0)` 是导入模型的既有局部轴修正：可见模型原始
+`+Y` 经该修正映射到 Actor `+X`。M11 从每个鸟类 CDO 冻结 authored Mesh 轴修正，
+禁止把这项 `-90°` 再乘入 Actor 世界旋转造成双重修正。Interaction System Tick
+显式依赖四只鸟 Tick；导演完成本帧相机求解后，最终写入
+`FlightActorRotation × AuthoredVisualAxisCorrection`。因此即使 Chaos 鸟自身先通过
+`UpdateChaosVisualFrame` 重写 Mesh 世界姿态，最终结果也不依赖未声明的 Tick 顺序。
+相机 Up 与速度近乎平行时，依次使用上一帧 Actor Up 和相机 Right 建立退化回退；
+任何非有限或零速度输入均 fail closed。
+
+2026-08-11 验证：Development Editor 完整链接成功；fresh NullRHI
+`ABTS.M11C.Unit` 11/11，通过新增 `M6FormationViewRotation` 的速度前向、视角 Up、
+默认 `Yaw=-90°` 可见模型轴与奇异角回退断言。Rank11 Stylized1 自定义 F4
+`M6ViewRotationR4-20260811` 为 1014 帧 `Complete/TargetHit`，Released/Plan Hash 仍为
+`0x668901FF090C69FE / 0x525966177CEBF5FF`，M6 丢失/顺序/间距失败均为 0，最终
+UFO 距离 `800.0000000000989 cm`；AVI SHA-256
+`C31C1E03F962ADF42F073C1793344FCBF86632539F93EF1B6B4876F29E93F9A9`。抽检
+319/557/812 帧确认四鸟可见模型的前方和上方在三次行星近景中保持一致。

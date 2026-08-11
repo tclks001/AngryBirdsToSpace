@@ -1035,8 +1035,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 	if (!UpdateFormationPlayback(
 		PlaybackElapsedSeconds,
 		Frame,
-		WorldPosition,
-		WorldVelocity))
+		WorldPosition))
 	{
 		FailInteraction(TEXT("FormationPlaybackSamplingFailed"));
 		return;
@@ -1324,6 +1323,18 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		FormationCameraSubjects))
 	{
 		FailInteraction(TEXT("FlightCameraAuthoritySampleRejected"));
+		return;
+	}
+	const UCameraComponent* CurrentViewCamera =
+		FlightCamera->GetCameraComponent();
+	if (!IsValid(CurrentViewCamera)
+		|| !UpdateFormationFlightRotations(
+			PlaybackElapsedSeconds,
+			Frame,
+			CameraTangent,
+			CurrentViewCamera->GetComponentQuat()))
+	{
+		FailInteraction(TEXT("FormationFlightRotationRejected"));
 		return;
 	}
 	if (PlaybackElapsedSeconds >= PresentationEndTime - 1.0e-9)
@@ -1669,6 +1680,7 @@ bool AABTSM11FinaleInteractionSystem::BuildAttemptFormation(
 	AttemptFormationBirds.Reset();
 	AttemptFormationOriginalTransforms.Reset();
 	AttemptFormationOriginalVisualScales.Reset();
+	AttemptFormationVisualAxisCorrections.Reset();
 	AttemptFormationPouchTransforms.Reset();
 	AttemptFormationInPouch.Reset();
 	FormationAdjacentArcSpacingCM.Reset();
@@ -1722,16 +1734,30 @@ bool AABTSM11FinaleInteractionSystem::BuildAttemptFormation(
 	double MaximumBirdRadiusCM = 1.0;
 	for (AABTSM25BirdCharacter* Member : AttemptFormationBirds)
 	{
-		AttemptFormationOriginalTransforms.Add(Member->GetActorTransform());
 		const USkeletalMeshComponent* Visual = Member->GetBirdVisual();
+		const AABTSM25BirdCharacter* DefaultBird =
+			Member->GetClass()->GetDefaultObject<AABTSM25BirdCharacter>();
+		const USkeletalMeshComponent* DefaultVisual = IsValid(DefaultBird)
+			? DefaultBird->GetBirdVisual()
+			: nullptr;
+		if (!IsValid(Visual) || !IsValid(DefaultVisual))
+		{
+			OutFailure = TEXT("M6FormationVisualMissing");
+			return false;
+		}
+		AttemptFormationOriginalTransforms.Add(Member->GetActorTransform());
 		AttemptFormationOriginalVisualScales.Add(
-			IsValid(Visual)
-				? Visual->GetRelativeScale3D()
-				: FVector::OneVector);
+			Visual->GetRelativeScale3D());
+		AttemptFormationVisualAxisCorrections.Add(
+			DefaultVisual->GetRelativeRotation().Quaternion());
 		MaximumBirdRadiusCM = FMath::Max(
 			MaximumBirdRadiusCM,
 			static_cast<double>(
 				Member->GetSlingshotTrajectoryCollisionRadiusCM()));
+	}
+	for (AABTSM25BirdCharacter* Member : AttemptFormationBirds)
+	{
+		AddTickPrerequisiteActor(Member);
 	}
 	AttemptBirdOriginalTransform = AttemptFormationOriginalTransforms[0];
 	AttemptBirdOriginalVisualScale = AttemptFormationOriginalVisualScales[0];
@@ -1795,8 +1821,7 @@ bool AABTSM11FinaleInteractionSystem::EnterAttemptFormationPouch(
 bool AABTSM11FinaleInteractionSystem::UpdateFormationPlayback(
 	const double PlaybackTimeSeconds,
 	const FABTSM110FinaleLocalFrame& Frame,
-	const FVector& PrimaryWorldPosition,
-	const FVector& PrimaryWorldVelocity)
+	const FVector& PrimaryWorldPosition)
 {
 	if (AttemptFormationBirds.Num() != 4
 		|| AttemptFormationPouchTransforms.Num() != 4
@@ -1825,7 +1850,6 @@ bool AABTSM11FinaleInteractionSystem::UpdateFormationPlayback(
 			return false;
 		}
 		FVector WorldPosition = PrimaryWorldPosition;
-		FVector WorldVelocity = PrimaryWorldVelocity;
 		double DeploymentAlpha = 1.0;
 		if (Index > 0)
 		{
@@ -1844,8 +1868,6 @@ bool AABTSM11FinaleInteractionSystem::UpdateFormationPlayback(
 				return false;
 			}
 			WorldPosition = Frame.TransformLocalPosition(FVector(LocalPosition));
-			WorldVelocity = Frame.WorldTransform.TransformVectorNoScale(
-				FVector(LocalVelocity));
 			const double DeploymentStartArcCM =
 				ResolvedFormationSpacingCM * Index - DeploymentWindowCM;
 			const double LinearAlpha = FMath::Clamp(
@@ -1860,18 +1882,8 @@ bool AABTSM11FinaleInteractionSystem::UpdateFormationPlayback(
 				WorldPosition,
 				DeploymentAlpha);
 		}
-		const FQuat FlightRotation = MakeFlightRotation(
-			WorldVelocity,
-			Frame.GetUp()).Quaternion();
-		const FQuat WorldRotation = Index > 0
-			? FQuat::Slerp(
-				AttemptFormationPouchTransforms[Index].GetRotation(),
-				FlightRotation,
-				DeploymentAlpha).GetNormalized()
-			: FlightRotation;
-		Member->SetActorLocationAndRotation(
+		Member->SetActorLocation(
 			WorldPosition,
-			WorldRotation,
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
@@ -1887,11 +1899,96 @@ bool AABTSM11FinaleInteractionSystem::UpdateFormationPlayback(
 	return true;
 }
 
+bool AABTSM11FinaleInteractionSystem::UpdateFormationFlightRotations(
+	const double PlaybackTimeSeconds,
+	const FABTSM110FinaleLocalFrame& Frame,
+	const FVector& PrimaryWorldVelocity,
+	const FQuat& CurrentViewRotation)
+{
+	if (AttemptFormationBirds.Num() != 4
+		|| AttemptFormationPouchTransforms.Num() != 4
+		|| AttemptFormationVisualAxisCorrections.Num() != 4
+		|| FormationPath.Nodes.IsEmpty()
+		|| CurrentViewRotation.ContainsNaN())
+	{
+		return false;
+	}
+	double PrimaryArcLengthCM = 0.0;
+	if (!FormationPath.ResolveArcLengthAtTime(
+		PlaybackTimeSeconds,
+		PrimaryArcLengthCM))
+	{
+		return false;
+	}
+	const FVector ViewUp = CurrentViewRotation.GetUpVector();
+	const FVector ViewRight = CurrentViewRotation.GetRightVector();
+	for (int32 Index = 0; Index < AttemptFormationBirds.Num(); ++Index)
+	{
+		AABTSM25BirdCharacter* Member = AttemptFormationBirds[Index];
+		if (!IsValid(Member))
+		{
+			return false;
+		}
+		FVector WorldVelocity = PrimaryWorldVelocity;
+		if (Index > 0)
+		{
+			const double TargetArcLengthCM = FMath::Max(
+				0.0,
+				PrimaryArcLengthCM
+					- ResolvedFormationSpacingCM * Index);
+			FVector3d LocalPosition;
+			FVector3d LocalVelocity;
+			if (!FormationPath.SampleAtArcLength(
+				TargetArcLengthCM,
+				LocalPosition,
+				LocalVelocity))
+			{
+				return false;
+			}
+			WorldVelocity = Frame.WorldTransform.TransformVectorNoScale(
+				FVector(LocalVelocity));
+		}
+		FQuat FlightRotation;
+		if (!ABTSM11FinaleFormationMath::BuildVelocityViewRotation(
+			WorldVelocity,
+			ViewUp,
+			ViewRight,
+			Member->GetActorQuat(),
+			FlightRotation))
+		{
+			return false;
+		}
+		Member->SetActorRotation(
+			FlightRotation,
+			ETeleportType::TeleportPhysics);
+		USkeletalMeshComponent* Visual = Member->GetBirdVisual();
+		if (!IsValid(Visual))
+		{
+			return false;
+		}
+		Visual->SetWorldRotation(
+			FlightRotation
+				* AttemptFormationVisualAxisCorrections[Index],
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+	}
+	return true;
+}
+
 void AABTSM11FinaleInteractionSystem::ResetFormationRuntime()
 {
+	for (AABTSM25BirdCharacter* Member : AttemptFormationBirds)
+	{
+		if (IsValid(Member))
+		{
+			RemoveTickPrerequisiteActor(Member);
+		}
+	}
 	AttemptFormationBirds.Reset();
 	AttemptFormationOriginalTransforms.Reset();
 	AttemptFormationOriginalVisualScales.Reset();
+	AttemptFormationVisualAxisCorrections.Reset();
 	AttemptFormationPouchTransforms.Reset();
 	AttemptFormationInPouch.Reset();
 	FormationAdjacentArcSpacingCM.Reset();
@@ -2143,6 +2240,14 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
+		if (AttemptFormationVisualAxisCorrections.IsValidIndex(Index))
+		{
+			if (USkeletalMeshComponent* Visual = Member->GetBirdVisual())
+			{
+				Visual->SetRelativeRotation(
+					AttemptFormationVisualAxisCorrections[Index]);
+			}
+		}
 		Member->FinishSlingshotReturn();
 		AttemptFormationInPouch[Index] = 0;
 	}

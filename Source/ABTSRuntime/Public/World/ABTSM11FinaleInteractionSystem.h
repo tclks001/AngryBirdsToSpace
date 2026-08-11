@@ -270,8 +270,12 @@ private:
 	bool UpdateFormationPlayback(
 		double PlaybackTimeSeconds,
 		const FABTSM110FinaleLocalFrame& Frame,
-		const FVector& PrimaryWorldPosition,
-		const FVector& PrimaryWorldVelocity);
+		const FVector& PrimaryWorldPosition);
+	bool UpdateFormationFlightRotations(
+		double PlaybackTimeSeconds,
+		const FABTSM110FinaleLocalFrame& Frame,
+		const FVector& PrimaryWorldVelocity,
+		const FQuat& CurrentViewRotation);
 	FTransform BuildFormationPouchTransform(
 		int32 FormationIndex,
 		const FVector& PouchLocation,
@@ -421,6 +425,7 @@ private:
 	FVector AttemptBirdOriginalVisualScale = FVector::OneVector;
 	TArray<FTransform> AttemptFormationOriginalTransforms;
 	TArray<FVector> AttemptFormationOriginalVisualScales;
+	TArray<FQuat> AttemptFormationVisualAxisCorrections;
 	TArray<FTransform> AttemptFormationPouchTransforms;
 	TArray<uint8> AttemptFormationInPouch;
 	FABTSM11FinaleFormationPath FormationPath;
