@@ -462,6 +462,34 @@ namespace ABTSM73BeamC3V3
 		bool bSharesMergedCrown = false;
 	};
 
+	/** Read-only correspondence witness from the semantic support authority to
+	 * the currently emitted Stage-1 hierarchy.  This ledger deliberately does
+	 * not repair or reject geometry: it exposes where the legacy HighRegion
+	 * consumer diverges from SemanticTerminalDemand. */
+	struct FSemanticDemandCoreBindingDiagnostic
+	{
+		int32 DemandId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 SupportProvinceId = INDEX_NONE;
+		int32 TerminalBodySourceVolumeId = INDEX_NONE;
+		int32 CandidateRegionCount = 0;
+		int32 CandidateChildCount = 0;
+		int32 BoundHighProjectionRegionId = INDEX_NONE;
+		int32 BoundTowerChildCoreCellId = INDEX_NONE;
+		int32 AssignedPodiumMainCoreCellId = INDEX_NONE;
+		int32 BoundChildDemandMultiplicity = 0;
+		double BodyChildXYOverlapAreaCM2 = 0.0;
+		bool bChildCenterInsideBodyXY = false;
+		bool bChildInsideContinuousFitXY = false;
+		bool bDirectMainCoupling = false;
+		bool bAmbiguousRegionMatch = false;
+		FBox DemandBodyBounds = FBox(EForceInit::ForceInit);
+		FBox ContinuousFitBounds = FBox(EForceInit::ForceInit);
+		FBox ChildBounds = FBox(EForceInit::ForceInit);
+		FBox MainBounds = FBox(EForceInit::ForceInit);
+		FString MappingReason;
+	};
+
 	/** A deterministic ground catchment for one or more overlapping terminal
 	 * demand seeds.  Provinces partition course-0 semantic occupancy exactly;
 	 * they do not yet alter podium/core geometry. */
@@ -625,6 +653,13 @@ namespace ABTSM73BeamC3V3
 		int32 SemanticSupportCourseCount = 0;
 		int32 SemanticTerminalDemandCount = 0;
 		int32 SemanticTerminalDemandWithoutContinuousFitCount = 0;
+		int32 SemanticDemandCoreBindingCount = 0;
+		int32 UnmappedSemanticDemandCount = 0;
+		int32 AmbiguousSemanticDemandCount = 0;
+		int32 SemanticDemandChildOutsideBodyCount = 0;
+		int32 SemanticDemandChildWithoutDirectMainCouplingCount = 0;
+		int32 ReusedTowerChildBindingCount = 0;
+		int32 UnreferencedTowerChildCount = 0;
 		int32 SupportProvinceCount = 0;
 		int32 MultiDemandSupportProvinceCount = 0;
 		int32 SupportProvinceGroundCellCount = 0;
@@ -701,6 +736,8 @@ namespace ABTSM73BeamC3V3
 		int64 SupportPlanHash = 0;
 		/** Diagnostic identity only; deliberately excluded from Stage1 geometry hashes. */
 		int64 SemanticSupportDemandHash = 0;
+		/** Diagnostic identity only; excluded from every geometry hash. */
+		int64 SemanticDemandCoreBindingHash = 0;
 		/** Diagnostic support-catchment identity; excluded from all geometry hashes. */
 		int64 SupportProvinceHash = 0;
 		/** Selected grounded-core assignment for every support province. */
@@ -744,6 +781,8 @@ namespace ABTSM73BeamC3V3
 			SemanticSupportCourseOccupancies;
 		TArray<FSemanticTerminalDemandDiagnostic>
 			SemanticTerminalDemands;
+		TArray<FSemanticDemandCoreBindingDiagnostic>
+			SemanticDemandCoreBindings;
 		TArray<FSupportProvinceDiagnostic> SupportProvinces;
 		TArray<FCoreCellPlan> CoreCells;
 		TArray<FSharedEndpointReachabilityDiagnostic>

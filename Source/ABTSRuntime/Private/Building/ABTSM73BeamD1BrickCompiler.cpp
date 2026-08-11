@@ -2734,6 +2734,22 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.SemanticTerminalDemandWithoutContinuousFitCount;
 	Summary.SkeletonFirstSemanticSupportDemandHash =
 		Stage1.SemanticSupportDemandHash;
+	Summary.SkeletonFirstSemanticDemandCoreBindingCount =
+		Stage1.SemanticDemandCoreBindingCount;
+	Summary.SkeletonFirstUnmappedSemanticDemandCount =
+		Stage1.UnmappedSemanticDemandCount;
+	Summary.SkeletonFirstAmbiguousSemanticDemandCount =
+		Stage1.AmbiguousSemanticDemandCount;
+	Summary.SkeletonFirstSemanticDemandChildOutsideBodyCount =
+		Stage1.SemanticDemandChildOutsideBodyCount;
+	Summary.SkeletonFirstSemanticDemandChildWithoutDirectMainCouplingCount =
+		Stage1.SemanticDemandChildWithoutDirectMainCouplingCount;
+	Summary.SkeletonFirstReusedTowerChildBindingCount =
+		Stage1.ReusedTowerChildBindingCount;
+	Summary.SkeletonFirstUnreferencedTowerChildCount =
+		Stage1.UnreferencedTowerChildCount;
+	Summary.SkeletonFirstSemanticDemandCoreBindingHash =
+		Stage1.SemanticDemandCoreBindingHash;
 	Summary.SkeletonFirstSupportProvinceCount = Stage1.SupportProvinceCount;
 	Summary.SkeletonFirstMultiDemandSupportProvinceCount =
 		Stage1.MultiDemandSupportProvinceCount;
@@ -2839,6 +2855,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
 		TEXT(" GrammarHash=%lld WFCHash=%lld EnvelopeHash=%lld Stage1Hash=%lld")
 		TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+		TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 		TEXT(" Provinces=%d MultiDemandProvinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceTies=%d ProvinceFallbacks=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
 		TEXT(" StaticDAG=Accepted LoadDAGHash=%lld Physical=NotEvaluated")
@@ -2852,6 +2869,14 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.SemanticTerminalDemandCount,
 		Stage1.SemanticSupportLedgerCount,
 		Stage1.SemanticSupportDemandHash,
+		Stage1.SemanticDemandCoreBindingCount,
+		Stage1.UnmappedSemanticDemandCount,
+		Stage1.AmbiguousSemanticDemandCount,
+		Stage1.SemanticDemandChildOutsideBodyCount,
+		Stage1.SemanticDemandChildWithoutDirectMainCouplingCount,
+		Stage1.ReusedTowerChildBindingCount,
+		Stage1.UnreferencedTowerChildCount,
+		Stage1.SemanticDemandCoreBindingHash,
 		Stage1.SupportProvinceCount,
 		Stage1.MultiDemandSupportProvinceCount,
 		Stage1.SupportProvinceGroundCellCount,

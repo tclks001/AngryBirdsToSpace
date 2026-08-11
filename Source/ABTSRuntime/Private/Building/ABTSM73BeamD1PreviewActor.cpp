@@ -179,7 +179,8 @@ namespace ABTSM73BeamD1Preview
 		CompositeCoreYVisibility = 1 << 7,
 		SemanticSupportDemandVisibility = 1 << 8,
 		SupportProvinceVisibility = 1 << 9,
-		SupportProvinceMainVisibility = 1 << 10
+		SupportProvinceMainVisibility = 1 << 10,
+		DemandCoreCouplingVisibility = 1 << 11
 	};
 
 	uint16 DiagnosticVisibilityMask(
@@ -205,6 +206,8 @@ namespace ABTSM73BeamD1Preview
 			return SupportProvinceVisibility;
 		case EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment:
 			return SupportProvinceMainVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger:
+			return DemandCoreCouplingVisibility;
 		default:
 			return 0;
 		}
@@ -300,6 +303,8 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition);
 	const uint16 SupportProvinceMainMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment);
+	const uint16 DemandCoreCouplingMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint16>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -321,6 +326,9 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 	TestEqual(TEXT("Province-main layer contains only the assignment plan"),
 		SupportProvinceMainMask,
 		static_cast<uint16>(SupportProvinceMainVisibility));
+	TestEqual(TEXT("Demand-core layer contains only the correspondence ledger"),
+		DemandCoreCouplingMask,
+		static_cast<uint16>(DemandCoreCouplingVisibility));
 	TestEqual(TEXT("WFC and intent layers are disjoint"),
 		static_cast<uint16>(WFCMask & IntentMask), static_cast<uint16>(0));
 	TestEqual(TEXT("WFC and member layers are disjoint"),
@@ -350,6 +358,11 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		static_cast<uint16>(SupportProvinceMainMask
 			& (WFCMask | IntentMask | MembersMask | MergeMask | XMask | YMask
 				| SupportDemandMask | SupportProvinceMask)), static_cast<uint16>(0));
+	TestEqual(TEXT("Demand-core ledger is disjoint from all prior layers"),
+		static_cast<uint16>(DemandCoreCouplingMask
+			& (WFCMask | IntentMask | MembersMask | MergeMask | XMask | YMask
+				| SupportDemandMask | SupportProvinceMask | SupportProvinceMainMask)),
+		static_cast<uint16>(0));
 	TestTrue(TEXT("Support-demand volumes are visible by default"),
 		ShouldShowSemanticSupportDemandVolumes(false));
 	TestFalse(TEXT("Lines-only option hides support-demand volumes"),
@@ -779,6 +792,69 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				SharedPairIntentPreview->GetInstanceCount() > 0, true);
 		}
 		else if ((VisibilityMask
+			& ABTSM73BeamD1Preview::DemandCoreCouplingVisibility) != 0)
+		{
+			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			TSet<int32> DrawnChildIds;
+			TSet<int32> DrawnMainIds;
+			for (const ABTSM73BeamC3V3::FSemanticDemandCoreBindingDiagnostic& Binding
+				: Plan.SemanticDemandCoreBindings)
+			{
+				FBox DemandPlate = Binding.DemandBodyBounds;
+				DemandPlate.Min.Z = DemandPlate.Max.Z - 8.0;
+				ABTSM73BeamD1Preview::AddBoxInstance(GlassPreview, DemandPlate);
+				FVector DemandAnchor = Binding.DemandBodyBounds.GetCenter();
+				DemandAnchor.Z = Binding.DemandBodyBounds.Max.Z;
+				if (!Plan.CoreCells.IsValidIndex(Binding.BoundTowerChildCoreCellId))
+				{
+					ABTSM73BeamD1Preview::AddSegmentInstance(
+						IronPreview, DemandAnchor,
+						DemandAnchor + FVector(0.0, 0.0, 144.0), 18.0);
+					continue;
+				}
+				const ABTSM73BeamC3V3::FCoreCellPlan& Child =
+					Plan.CoreCells[Binding.BoundTowerChildCoreCellId];
+				if (!DrawnChildIds.Contains(Child.CoreCellId))
+				{
+					FBox ChildTopPlate = Child.LocalBounds;
+					ChildTopPlate.Min.Z = ChildTopPlate.Max.Z - 12.0;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						TowerChildIntentPreview, ChildTopPlate);
+					DrawnChildIds.Add(Child.CoreCellId);
+				}
+				FVector ChildAnchor = Child.LocalBounds.GetCenter();
+				ChildAnchor.Z = Child.LocalBounds.Max.Z;
+				ABTSM73BeamD1Preview::AddSegmentInstance(
+					SharedPairIntentPreview, DemandAnchor, ChildAnchor, 8.0);
+				if (!Plan.CoreCells.IsValidIndex(Binding.AssignedPodiumMainCoreCellId))
+				{
+					continue;
+				}
+				const ABTSM73BeamC3V3::FCoreCellPlan& Main =
+					Plan.CoreCells[Binding.AssignedPodiumMainCoreCellId];
+				if (!DrawnMainIds.Contains(Main.CoreCellId))
+				{
+					FBox MainTopPlate = Main.LocalBounds;
+					MainTopPlate.Min.Z = MainTopPlate.Max.Z - 12.0;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview, MainTopPlate);
+					DrawnMainIds.Add(Main.CoreCellId);
+				}
+				FVector MainAnchor = Main.LocalBounds.GetCenter();
+				MainAnchor.Z = Main.LocalBounds.Max.Z;
+				ABTSM73BeamD1Preview::AddSegmentInstance(
+					Binding.bDirectMainCoupling ? WoodPreview.Get() : IronPreview.Get(),
+					ChildAnchor, MainAnchor, Binding.bDirectMainCoupling ? 8.0 : 16.0);
+			}
+			for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+				GlassPreview.Get(), WoodPreview.Get(), IronPreview.Get(),
+				CoreIntentPreview.Get(), TowerChildIntentPreview.Get(),
+				SharedPairIntentPreview.Get()})
+			{
+				Preview->SetVisibility(Preview->GetInstanceCount() > 0, true);
+			}
+		}
+		else if ((VisibilityMask
 			& ABTSM73BeamD1Preview::SupportProvinceMainVisibility) != 0)
 		{
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
@@ -1030,7 +1106,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition
-			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment)
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger)
 		{
 			for (UHierarchicalInstancedStaticMeshComponent* Preview : {
 				WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
@@ -1043,6 +1120,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewGenerated]")
 			TEXT(" Actor=%s Stage=%d Layer=%d HideSupportDemandVolumes=%d Profile=%s Tier=%d")
 			TEXT(" Volumes=%d SupportNodes=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
+			TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
@@ -1055,6 +1133,14 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.SemanticTerminalDemandCount,
 			StageResult.Skeleton.Plan.Summary.SemanticSupportLedgerCount,
 			StageResult.Skeleton.Plan.Summary.SemanticSupportDemandHash,
+			StageResult.Skeleton.Plan.Summary.SemanticDemandCoreBindingCount,
+			StageResult.Skeleton.Plan.Summary.UnmappedSemanticDemandCount,
+			StageResult.Skeleton.Plan.Summary.AmbiguousSemanticDemandCount,
+			StageResult.Skeleton.Plan.Summary.SemanticDemandChildOutsideBodyCount,
+			StageResult.Skeleton.Plan.Summary.SemanticDemandChildWithoutDirectMainCouplingCount,
+			StageResult.Skeleton.Plan.Summary.ReusedTowerChildBindingCount,
+			StageResult.Skeleton.Plan.Summary.UnreferencedTowerChildCount,
+			StageResult.Skeleton.Plan.Summary.SemanticDemandCoreBindingHash,
 			StageResult.Skeleton.Plan.Summary.SupportProvinceCount,
 			StageResult.Skeleton.Plan.Summary.SupportProvinceGroundCellCount,
 			StageResult.Skeleton.Plan.Summary.SupportProvinceBoundaryCount,

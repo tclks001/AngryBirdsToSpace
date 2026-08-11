@@ -47,7 +47,8 @@ enum class EABTSM73BeamC3Stage1DiagnosticLayer : uint8
 	CompositeCoreYLanes UMETA(DisplayName = "6 - Composite Core Y Lanes"),
 	SemanticSupportDemandDAG UMETA(DisplayName = "7 - Semantic Support Demand DAG"),
 	SupportProvincePartition UMETA(DisplayName = "8 - Support Province Partition"),
-	SupportProvinceMainAssignment UMETA(DisplayName = "9 - Province / Main Assignment")
+	SupportProvinceMainAssignment UMETA(DisplayName = "9 - Province / Main Assignment"),
+	DemandCoreCouplingLedger UMETA(DisplayName = "10 - Demand / Child / Main Ledger")
 };
 
 USTRUCT(BlueprintType)
@@ -388,6 +389,30 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Identity")
 	int64 SkeletonFirstSemanticSupportDemandHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstSemanticDemandCoreBindingCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstUnmappedSemanticDemandCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstAmbiguousSemanticDemandCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstSemanticDemandChildOutsideBodyCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstSemanticDemandChildWithoutDirectMainCouplingCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstReusedTowerChildBindingCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding")
+	int32 SkeletonFirstUnreferencedTowerChildCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Semantic Support|Core Binding|Identity")
+	int64 SkeletonFirstSemanticDemandCoreBindingHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Support Province")
 	int32 SkeletonFirstSupportProvinceCount = 0;

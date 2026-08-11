@@ -3644,6 +3644,234 @@ namespace
 		return true;
 	}
 
+	bool BuildSemanticDemandCoreBindingDiagnostics(FPlan& Plan, FString& OutError)
+	{
+		Plan.SemanticDemandCoreBindings.Reset();
+		Plan.Summary.SemanticDemandCoreBindingCount = 0;
+		Plan.Summary.UnmappedSemanticDemandCount = 0;
+		Plan.Summary.AmbiguousSemanticDemandCount = 0;
+		Plan.Summary.SemanticDemandChildOutsideBodyCount = 0;
+		Plan.Summary.SemanticDemandChildWithoutDirectMainCouplingCount = 0;
+		Plan.Summary.ReusedTowerChildBindingCount = 0;
+		Plan.Summary.UnreferencedTowerChildCount = 0;
+		Plan.Summary.SemanticDemandCoreBindingHash = 0;
+
+		auto XYOverlapArea = [](const FBox& A, const FBox& B)
+		{
+			return SkeletonV3OverlapLength(A.Min.X, A.Max.X, B.Min.X, B.Max.X)
+				* SkeletonV3OverlapLength(A.Min.Y, A.Max.Y, B.Min.Y, B.Max.Y);
+		};
+		auto ContainsXY = [](const FBox& Bounds, const FVector& Point)
+		{
+			return Bounds.IsValid
+				&& Point.X >= Bounds.Min.X - GeometryToleranceCM
+				&& Point.X <= Bounds.Max.X + GeometryToleranceCM
+				&& Point.Y >= Bounds.Min.Y - GeometryToleranceCM
+				&& Point.Y <= Bounds.Max.Y + GeometryToleranceCM;
+		};
+		auto BoundsContainXY = [](const FBox& Outer, const FBox& Inner)
+		{
+			return Outer.IsValid && Inner.IsValid
+				&& Inner.Min.X >= Outer.Min.X - GeometryToleranceCM
+				&& Inner.Max.X <= Outer.Max.X + GeometryToleranceCM
+				&& Inner.Min.Y >= Outer.Min.Y - GeometryToleranceCM
+				&& Inner.Max.Y <= Outer.Max.Y + GeometryToleranceCM;
+		};
+
+		struct FCandidate
+		{
+			const FHighProjectionRegionPlan* Region = nullptr;
+			const FCoreCellPlan* Child = nullptr;
+			bool bExactSource = false;
+			bool bCenterInside = false;
+			double OverlapAreaCM2 = 0.0;
+		};
+
+		for (const FSemanticTerminalDemandDiagnostic& Demand
+			: Plan.SemanticTerminalDemands)
+		{
+			FSemanticDemandCoreBindingDiagnostic& Diagnostic =
+				Plan.SemanticDemandCoreBindings.AddDefaulted_GetRef();
+			Diagnostic.DemandId = Demand.DemandId;
+			Diagnostic.ComponentId = Demand.ComponentId;
+			Diagnostic.SupportProvinceId = Demand.SupportProvinceId;
+			Diagnostic.TerminalBodySourceVolumeId =
+				Demand.TerminalBodySourceVolumeId;
+			Diagnostic.DemandBodyBounds = Demand.BodyBounds;
+			Diagnostic.ContinuousFitBounds = Demand.ContinuousCoreFitBounds;
+
+			TArray<FCandidate> Candidates;
+			for (const FHighProjectionRegionPlan& Region
+				: Plan.HighProjectionRegions)
+			{
+				if (Region.ComponentId != Demand.ComponentId
+					|| !Plan.CoreCells.IsValidIndex(Region.BoundCoreCellId))
+				{
+					continue;
+				}
+				const FCoreCellPlan& Child =
+					Plan.CoreCells[Region.BoundCoreCellId];
+				FBox ChildFootprint = Child.LocalBounds;
+				ChildFootprint.Min.X -= BlockUnitsCM * 0.5;
+				ChildFootprint.Min.Y -= BlockUnitsCM * 0.5;
+				ChildFootprint.Max.X += BlockUnitsCM * 0.5;
+				ChildFootprint.Max.Y += BlockUnitsCM * 0.5;
+				const bool bExactSource = Region.SourceVolumeIds.Contains(
+					Demand.TerminalBodySourceVolumeId);
+				const double OverlapArea = XYOverlapArea(
+					Demand.BodyBounds, ChildFootprint);
+				if (!bExactSource && OverlapArea <= GeometryToleranceCM)
+				{
+					continue;
+				}
+				FCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+				Candidate.Region = &Region;
+				Candidate.Child = &Child;
+				Candidate.bExactSource = bExactSource;
+				Candidate.bCenterInside = ContainsXY(
+					Demand.BodyBounds, Child.LocalBounds.GetCenter());
+				Candidate.OverlapAreaCM2 = OverlapArea;
+			}
+			Diagnostic.CandidateRegionCount = Candidates.Num();
+			TSet<int32> CandidateChildIds;
+			for (const FCandidate& Candidate : Candidates)
+			{
+				CandidateChildIds.Add(Candidate.Child->CoreCellId);
+			}
+			Diagnostic.CandidateChildCount = CandidateChildIds.Num();
+			Candidates.Sort([](const FCandidate& A, const FCandidate& B)
+			{
+				if (A.bExactSource != B.bExactSource)
+				{
+					return A.bExactSource;
+				}
+				if (A.bCenterInside != B.bCenterInside)
+				{
+					return A.bCenterInside;
+				}
+				if (!FMath::IsNearlyEqual(A.OverlapAreaCM2, B.OverlapAreaCM2))
+				{
+					return A.OverlapAreaCM2 > B.OverlapAreaCM2;
+				}
+				return A.Region->RegionId < B.Region->RegionId;
+			});
+
+			if (Candidates.IsEmpty())
+			{
+				Diagnostic.MappingReason = TEXT("NoSourceOrSpatialCandidate");
+				++Plan.Summary.UnmappedSemanticDemandCount;
+				continue;
+			}
+
+			const FCandidate& Selected = Candidates[0];
+			Diagnostic.BoundHighProjectionRegionId = Selected.Region->RegionId;
+			Diagnostic.BoundTowerChildCoreCellId = Selected.Child->CoreCellId;
+			Diagnostic.AssignedPodiumMainCoreCellId =
+				Selected.Child->PodiumMainCoreCellId;
+			Diagnostic.BodyChildXYOverlapAreaCM2 = Selected.OverlapAreaCM2;
+			Diagnostic.bChildCenterInsideBodyXY = Selected.bCenterInside;
+			Diagnostic.ChildBounds = Selected.Child->LocalBounds;
+			FBox ChildFootprint = Selected.Child->LocalBounds;
+			ChildFootprint.Min.X -= BlockUnitsCM * 0.5;
+			ChildFootprint.Min.Y -= BlockUnitsCM * 0.5;
+			ChildFootprint.Max.X += BlockUnitsCM * 0.5;
+			ChildFootprint.Max.Y += BlockUnitsCM * 0.5;
+			Diagnostic.bChildInsideContinuousFitXY =
+				Demand.bHasContinuousCoreFit
+				&& BoundsContainXY(Demand.ContinuousCoreFitBounds, ChildFootprint);
+			Diagnostic.bAmbiguousRegionMatch = Candidates.Num() > 1
+				&& Candidates[1].bExactSource == Selected.bExactSource
+				&& Candidates[1].bCenterInside == Selected.bCenterInside
+				&& FMath::IsNearlyEqual(Candidates[1].OverlapAreaCM2,
+					Selected.OverlapAreaCM2, 1.0);
+			Diagnostic.MappingReason = Selected.bExactSource
+				? TEXT("TerminalBodySourceLineage") : TEXT("SpatialFallback");
+			if (Plan.CoreCells.IsValidIndex(
+				Diagnostic.AssignedPodiumMainCoreCellId))
+			{
+				const FCoreCellPlan& Main = Plan.CoreCells[
+					Diagnostic.AssignedPodiumMainCoreCellId];
+				Diagnostic.MainBounds = Main.LocalBounds;
+				Diagnostic.bDirectMainCoupling =
+					Selected.Child->CrossCoreBearingContactCount > 0;
+			}
+			if (Diagnostic.bAmbiguousRegionMatch)
+			{
+				++Plan.Summary.AmbiguousSemanticDemandCount;
+			}
+			if (!Diagnostic.bChildCenterInsideBodyXY)
+			{
+				++Plan.Summary.SemanticDemandChildOutsideBodyCount;
+			}
+			if (!Diagnostic.bDirectMainCoupling)
+			{
+				++Plan.Summary.SemanticDemandChildWithoutDirectMainCouplingCount;
+			}
+		}
+
+		TMap<int32, int32> DemandMultiplicityByChild;
+		for (const FSemanticDemandCoreBindingDiagnostic& Diagnostic
+			: Plan.SemanticDemandCoreBindings)
+		{
+			if (Diagnostic.BoundTowerChildCoreCellId != INDEX_NONE)
+			{
+				++DemandMultiplicityByChild.FindOrAdd(
+					Diagnostic.BoundTowerChildCoreCellId);
+			}
+		}
+		FString Canonical;
+		for (FSemanticDemandCoreBindingDiagnostic& Diagnostic
+			: Plan.SemanticDemandCoreBindings)
+		{
+			Diagnostic.BoundChildDemandMultiplicity =
+				DemandMultiplicityByChild.FindRef(
+					Diagnostic.BoundTowerChildCoreCellId);
+			Canonical += FString::Printf(
+				TEXT("D=%d:C=%d:P=%d:S=%d:R=%d:Child=%d:Main=%d:Mult=%d:Inside=%d:Fit=%d:Direct=%d:Ambiguous=%d:Reason=%s;"),
+				Diagnostic.DemandId, Diagnostic.ComponentId,
+				Diagnostic.SupportProvinceId,
+				Diagnostic.TerminalBodySourceVolumeId,
+				Diagnostic.BoundHighProjectionRegionId,
+				Diagnostic.BoundTowerChildCoreCellId,
+				Diagnostic.AssignedPodiumMainCoreCellId,
+				Diagnostic.BoundChildDemandMultiplicity,
+				Diagnostic.bChildCenterInsideBodyXY ? 1 : 0,
+				Diagnostic.bChildInsideContinuousFitXY ? 1 : 0,
+				Diagnostic.bDirectMainCoupling ? 1 : 0,
+				Diagnostic.bAmbiguousRegionMatch ? 1 : 0,
+				*Diagnostic.MappingReason);
+		}
+		for (const TPair<int32, int32>& Pair : DemandMultiplicityByChild)
+		{
+			Plan.Summary.ReusedTowerChildBindingCount += Pair.Value > 1 ? 1 : 0;
+		}
+		for (const FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			if (Core.HierarchyRole == ECoreHierarchyRole::TowerChild
+				&& !DemandMultiplicityByChild.Contains(Core.CoreCellId))
+			{
+				++Plan.Summary.UnreferencedTowerChildCount;
+				Canonical += FString::Printf(TEXT("OrphanChild=%d;"),
+					Core.CoreCellId);
+			}
+		}
+		Plan.Summary.SemanticDemandCoreBindingCount =
+			Plan.SemanticDemandCoreBindings.Num();
+		Plan.Summary.SemanticDemandCoreBindingHash = HashText(Canonical);
+		if (Plan.Summary.SemanticDemandCoreBindingCount
+			!= Plan.Summary.SemanticTerminalDemandCount
+			|| Plan.Summary.SemanticDemandCoreBindingHash == 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3SemanticDemandCoreDiagnosticInvalid:Rows=%d:Demands=%d:Hash=%lld"),
+				Plan.Summary.SemanticDemandCoreBindingCount,
+				Plan.Summary.SemanticTerminalDemandCount,
+				Plan.Summary.SemanticDemandCoreBindingHash);
+			return false;
+		}
+		return true;
+	}
+
 	bool RebuildCoreLineage(FPlan& Plan, FString& OutError)
 	{
 		const int32 MemberCount = Plan.Members.Num();
@@ -15823,6 +16051,10 @@ namespace
 				return false;
 			}
 			if (!BuildHighProjectionDiagnostics(Roots, OutPlan, OutError))
+			{
+				return false;
+			}
+			if (!BuildSemanticDemandCoreBindingDiagnostics(OutPlan, OutError))
 			{
 				return false;
 			}

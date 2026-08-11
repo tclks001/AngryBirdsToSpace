@@ -1800,3 +1800,32 @@ component 统一高度。下一视觉批准后，才允许逐省份验证 local 
 `BeamC3V3-ProvinceMain-TipOverSeeds-20260811104035-1.log` 和
 `BeamC3V3-ProvinceMain-Stage1-5x6-20260811-184252.log`。所有结果均为 `Physical=NotEvaluated`；本轮未启动
 可见 Editor/PIE，`9 - Province / Main Assignment` 仍等待人工视觉批准。
+
+## 40. Semantic Demand / TowerChild / PodiumMain 对应账本（2026-08-11）
+
+第 39 节的省份→main 绑定解决了接地基座的离散覆盖，但没有取代旧的
+`HighProjectionRegion→TowerChild` 消费路径。`High==Bound==Children` 只证明旧 region 内部自洽，不能证明每个
+`SemanticTerminalDemand` 都拥有空间上对应的 child，也不能证明该 child 与分配的 main 有真实 bearing。因此新增
+只读 `SemanticDemandCoreBinding` 账本；本节不改变 PodiumMain、TowerChild、shared course、member、Static DAG 或
+任何几何 Hash，也不把诊断异常升级为生产拒绝。
+
+每个 semantic demand 发布：Demand/Component/Province/TerminalBodySource 身份，来源或空间候选 region/child 数，
+选中的 HighRegion、TowerChild 和 PodiumMain，Body 与 child 的 XY 重叠面积、child 中心是否位于 Body、child 是否
+完整位于 `ContinuousCoreFitBounds`、child/main 是否存在最终几何重建出的跨芯 bearing、同一 child 被多少 demand
+复用，以及确定性的映射理由。总账另发布：无候选 demand、等价歧义、child 在 Body 外、无直接 main 接触、被多个
+demand 复用的 child、完全未被 demand 引用的孤儿 child，以及独立 `SemanticDemandCoreBindingHash`。该 Hash 明确
+排除在 Core/Support/FinalGeometry Hash 外。
+
+Stage 1 诊断层追加互斥的 `10 - Demand / Child / Main Ledger`：玻璃薄板表示 terminal Body 顶面，石材薄板表示
+实际 TowerChild 顶面，钢材薄板表示逻辑分配的 PodiumMain 顶面；`demand→child` 与 `child→main` 分段绘制。后一段
+细线表示真实跨芯 bearing，加粗线表示只有逻辑归属、没有实际接触；没有任何 child 候选的 demand 显示竖直错误标记。
+
+固定 `TipOver.E6/750000` 保持原 `FinalGeometryHash=-5115885695694694918`，但明确发布：8 demand、8 old
+HighRegion、8 child 中，Demand 4 与 Demand 6 同时指向 Child 4；Demand 4 与该 child 的 XY 重叠为 0、中心在
+Body 外；另有 1 个 TowerChild 完全未被 semantic demand 引用，且 3 个 demand 所绑定 child 与 main 没有直接
+bearing。由此确认截图中的缺失不是计数错误，而是旧 HighRegion 血缘合并后的对应关系错误；现有静态门之所以
+通过，是因为它只审旧 region 的一对一绑定和各 child 独立接地，没有审 semantic-demand 空间双射或直接 main 耦合。
+
+本节仍是视觉/根因证据，不是修复。下一步应以该账本作为 replacement contract：先要求每个 semantic demand 获得
+唯一且位于 Body/continuous-fit 内的全高 child，再联合选择 main；是否允许无直接 main 接触应在 Stage 2 耦合路径
+明确后单独冻结。禁止通过删 demand、合并右侧 Body、调 Seed/Attempt/36 cm/720 cm/轨距或放宽空间容差让总账变绿。

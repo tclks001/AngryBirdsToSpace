@@ -4118,11 +4118,21 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 		}
 		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
 		AddInfo(FString::Printf(
-			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
+			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
 			Seed, Plan.Summary.PodiumMainCoreCellCount,
 			Plan.Summary.TowerChildCoreCellCount,
 			Plan.Summary.RequiredTerminalBranchCount,
 			Plan.Summary.BoundTerminalBranchCount,
+			Plan.Summary.SemanticTerminalDemandCount,
+			Plan.Summary.SemanticDemandCoreBindingCount,
+			Plan.Summary.UnmappedSemanticDemandCount,
+			Plan.Summary.AmbiguousSemanticDemandCount,
+			Plan.Summary.SemanticDemandChildOutsideBodyCount,
+			Plan.Summary.SemanticDemandChildWithoutDirectMainCouplingCount,
+			Plan.Summary.ReusedTowerChildBindingCount,
+			Plan.Summary.UnreferencedTowerChildCount,
+			Plan.Summary.SemanticDemandCoreBindingHash,
+			Plan.Summary.FinalGeometryHash,
 			Plan.Summary.TerminalDemandMilliseconds,
 			Plan.Summary.ChildCandidateMilliseconds,
 			Plan.Summary.PodiumMainCandidateMilliseconds,
@@ -4136,6 +4146,84 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 		TestEqual(*FString::Printf(TEXT("Seed %d emits one child per terminal branch"),
 			Seed), Plan.Summary.TowerChildCoreCellCount,
 			Plan.Summary.RequiredTerminalBranchCount);
+		TestEqual(*FString::Printf(TEXT("Seed %d publishes one binding row per semantic demand"),
+			Seed), Plan.Summary.SemanticDemandCoreBindingCount,
+			Plan.Summary.SemanticTerminalDemandCount);
+		TestEqual(*FString::Printf(TEXT("Seed %d binding array closes with summary"),
+			Seed), Plan.SemanticDemandCoreBindings.Num(),
+			Plan.Summary.SemanticDemandCoreBindingCount);
+		TestNotEqual(*FString::Printf(TEXT("Seed %d binding identity is nonzero"), Seed),
+			Plan.Summary.SemanticDemandCoreBindingHash, int64(0));
+		int32 UnmappedCount = 0;
+		int32 AmbiguousCount = 0;
+		int32 OutsideBodyCount = 0;
+		int32 NoDirectMainCount = 0;
+		for (const ABTSM73BeamC3V3::FSemanticDemandCoreBindingDiagnostic& Binding
+			: Plan.SemanticDemandCoreBindings)
+		{
+			UnmappedCount += Binding.BoundTowerChildCoreCellId == INDEX_NONE ? 1 : 0;
+			AmbiguousCount += Binding.bAmbiguousRegionMatch ? 1 : 0;
+			OutsideBodyCount += Binding.BoundTowerChildCoreCellId != INDEX_NONE
+				&& !Binding.bChildCenterInsideBodyXY ? 1 : 0;
+			NoDirectMainCount += Binding.BoundTowerChildCoreCellId != INDEX_NONE
+				&& !Binding.bDirectMainCoupling ? 1 : 0;
+			AddInfo(FString::Printf(
+				TEXT("TipOverE6DemandCore:Seed=%d:Demand=%d:Component=%d:Province=%d:BodySource=%d:Candidates=%d/%d:Region=%d:Child=%d:Main=%d:Multiplicity=%d:Overlap=%.3f:Inside=%d:Fit=%d:Direct=%d:Ambiguous=%d:Reason=%s:Body=%s:ChildBounds=%s:MainBounds=%s"),
+				Seed, Binding.DemandId, Binding.ComponentId,
+				Binding.SupportProvinceId,
+				Binding.TerminalBodySourceVolumeId,
+				Binding.CandidateRegionCount, Binding.CandidateChildCount,
+				Binding.BoundHighProjectionRegionId,
+				Binding.BoundTowerChildCoreCellId,
+				Binding.AssignedPodiumMainCoreCellId,
+				Binding.BoundChildDemandMultiplicity,
+				Binding.BodyChildXYOverlapAreaCM2,
+				Binding.bChildCenterInsideBodyXY ? 1 : 0,
+				Binding.bChildInsideContinuousFitXY ? 1 : 0,
+				Binding.bDirectMainCoupling ? 1 : 0,
+				Binding.bAmbiguousRegionMatch ? 1 : 0,
+				*Binding.MappingReason,
+				*Binding.DemandBodyBounds.ToString(),
+				*Binding.ChildBounds.ToString(),
+				*Binding.MainBounds.ToString()));
+		}
+		TestEqual(TEXT("Unmapped binding accounting closes"), UnmappedCount,
+			Plan.Summary.UnmappedSemanticDemandCount);
+		TestEqual(TEXT("Ambiguous binding accounting closes"), AmbiguousCount,
+			Plan.Summary.AmbiguousSemanticDemandCount);
+		TestEqual(TEXT("Outside-body binding accounting closes"), OutsideBodyCount,
+			Plan.Summary.SemanticDemandChildOutsideBodyCount);
+		TestEqual(TEXT("No-direct-main binding accounting closes"), NoDirectMainCount,
+			Plan.Summary.SemanticDemandChildWithoutDirectMainCouplingCount);
+		int32 ReusedChildCount = 0;
+		TSet<int32> ReferencedChildIds;
+		for (const ABTSM73BeamC3V3::FSemanticDemandCoreBindingDiagnostic& Binding
+			: Plan.SemanticDemandCoreBindings)
+		{
+			if (Binding.BoundTowerChildCoreCellId != INDEX_NONE)
+			{
+				ReferencedChildIds.Add(Binding.BoundTowerChildCoreCellId);
+				ReusedChildCount += Binding.BoundChildDemandMultiplicity > 1
+					&& !Plan.SemanticDemandCoreBindings.ContainsByPredicate(
+						[&Binding](const ABTSM73BeamC3V3::FSemanticDemandCoreBindingDiagnostic& Other)
+						{
+							return Other.DemandId < Binding.DemandId
+								&& Other.BoundTowerChildCoreCellId
+									== Binding.BoundTowerChildCoreCellId;
+						}) ? 1 : 0;
+			}
+		}
+		int32 OrphanChildCount = 0;
+		for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			OrphanChildCount += Core.HierarchyRole
+				== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+				&& !ReferencedChildIds.Contains(Core.CoreCellId) ? 1 : 0;
+		}
+		TestEqual(TEXT("Reused-child accounting closes"), ReusedChildCount,
+			Plan.Summary.ReusedTowerChildBindingCount);
+		TestEqual(TEXT("Orphan-child accounting closes"), OrphanChildCount,
+			Plan.Summary.UnreferencedTowerChildCount);
 		TestTrue(*FString::Printf(TEXT("Seed %d passes the Stage 1 static DAG"), Seed),
 			Result.Summary.bStageStaticDAGEvaluated
 				&& Result.StaticDAG.Summary.bAccepted);
