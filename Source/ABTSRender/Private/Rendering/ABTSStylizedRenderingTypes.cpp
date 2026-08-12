@@ -138,10 +138,10 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 
 EABTSStylizedRenderProfile
 FABTSStylizedRenderingContract::ResolveMainWorldProfile(
-	const bool bFinaleActive,
+	const bool bFinaleDeepSpace,
 	const EABTSStylizedRenderProfile ConfiguredProfile)
 {
-	if (bFinaleActive)
+	if (bFinaleDeepSpace)
 	{
 		return EABTSStylizedRenderProfile::FinaleSpace;
 	}

@@ -224,9 +224,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports the planet-occluded sun contract"),
+		TEXT("Stylized renderer reports the finale-stage profile routing contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		70);
+		71);
 	const FABTSStylizedEnvironmentProfilePolicy GroundEnvironment =
 		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
 			EABTSStylizedRenderProfile::GroundDay);
@@ -782,15 +782,15 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Main view keeps surface and environment profiles paired"),
 		static_cast<int32>(MainPolicy.EnvironmentProfile),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
-	TestEqual(TEXT("Inactive finale keeps the configured GroundDay profile"),
+	TestEqual(TEXT("A ground or atmospheric finale stage keeps GroundDay"),
 		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
 			false, EABTSStylizedRenderProfile::GroundDay)),
 		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
-	TestEqual(TEXT("Active finale overrides the configured profile"),
+	TestEqual(TEXT("Only a deep-space finale stage overrides the configured profile"),
 		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
 			true, EABTSStylizedRenderProfile::GroundDay)),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
-	TestEqual(TEXT("Leaving finale restores the configured profile deterministically"),
+	TestEqual(TEXT("Recovery restores the configured profile deterministically"),
 		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
 			false, EABTSStylizedRenderProfile::GroundDay)),
 		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));

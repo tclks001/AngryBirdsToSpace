@@ -228,7 +228,7 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 70;
+	return 71;
 }
 
 FABTSStylizedEnvironmentProfilePolicy

@@ -79,9 +79,9 @@ public:
 		EABTSStylizedViewClass ViewClass,
 		EABTSStylizedRenderProfile MainWorldProfile =
 			EABTSStylizedRenderProfile::GroundDay);
-	/** Finale activity has precedence without mutating the diagnostic CVar. */
+	/** M11's explicit deep-space stage has precedence without mutating the diagnostic CVar. */
 	static EABTSStylizedRenderProfile ResolveMainWorldProfile(
-		bool bFinaleActive,
+		bool bFinaleDeepSpace,
 		EABTSStylizedRenderProfile ConfiguredProfile);
 
 	/** T2-A deliberately renders only the final main view; previews are wired in T2-B. */

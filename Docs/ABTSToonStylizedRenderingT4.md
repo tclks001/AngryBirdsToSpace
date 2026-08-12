@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-12 更新。T4-A0/A1 与 T4-A2.1～A2.4 均为 `IntegrationAccepted`，A2 已冻结；历史版本、云场参数和证据保留在第 7 节。**T4-A3.1 高空连续星空过渡**实现版本 64 已通过自动化、真实 D3D12 捕获和实际飞行 PIE。当前进入 **T4-A3.2 三套环境 Profile 正式装配**：实现版本 65 将表面 Tone/Outline Profile 与环境背景 Profile 分离，普通主世界正式消费 `GroundDay`，月面画中画以 `GroundDay` 表面视觉消费 `SatelliteGuide` 深空背景，M11 终局活动期间主世界自动消费 `FinaleSpace` 并在活动结束后回到配置基线。A3.2 代码与自动化完成后仍需可见 PIE；A3.3 M11 环境快照/异常中断恢复和 T4-B 尚未开始。
+> 状态：2026-08-12 更新。T4-A0/A1 与 T4-A2.1～A2.4 均为 `IntegrationAccepted`，A2 已冻结；历史版本、云场参数和证据保留在第 7 节。**T4-A3.1 高空连续星空过渡**实现版本 64 已通过自动化、真实 D3D12 捕获和实际飞行 PIE。当前进入 **T4-A3.2 三套环境 Profile 正式装配**：实现版本 71 消费 M11 只读环境阶段，地面瞄准保持 `GroundDay`，发射初段继续使用按高度连续过渡，只有到达第一颗助推行星的冻结 `AssistEnter(1)` 后才切换 `FinaleSpace`，失败恢复回到配置基线。月面画中画仍以 `GroundDay` 表面视觉消费 `SatelliteGuide` 深空背景。A3.2 代码与自动化完成后仍需可见 PIE；A3.3 M11 环境快照/异常中断恢复和 T4-B 尚未开始。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -502,7 +502,7 @@ v70 修复太阳圆盘与地表局部半圆高光被误读为同一问题的缺�
 
 - `FABTSStylizedEnvironmentProfilePolicy` 冻结 Actor 表现：`GroundDay` 保留球心 `SkyAtmosphere` 和低模云场并继续关闭不相容的全局 Z 高度雾；`SatelliteGuide` 与 `FinaleSpace` 均隐藏地表大气、全局雾和地表云，背景由确定性 HDR 星场负责；Style Off、子系统退出和失败路径恢复原 Actor 可见性与原始参数；
 - `FABTSStylizedViewPolicy` 将 `Profile`（实体表面的 Tone、Outline、曝光）与 `EnvironmentProfile`（大气/星场背景）分开。月面 PIP 因而继续使用已验收的 `GroundDay` 表面视觉和世界光照，只把空背景交给 `SatelliteGuide`；地面 PIP 两者均为 `GroundDay`，终局 PIP/AVI 两者均为 `FinaleSpace`；
-- Integration 世界子系统每 `0.1 s` 只读查询 M11 公开的 `IsFinaleActive()`：普通世界选择配置基线（生产默认 `GroundDay`），终局活动优先选择 `FinaleSpace`；退出终局或失败时间线结束后，解析器重新得到配置基线。该装配不写 M11 私有状态，也不修改积分器、轨迹、镜头或演出；
+- Integration 世界子系统每 `0.1 s` 只读查询 M11 公开的 `GetFinaleEnvironmentStage()`：`GroundLaunch` 与 `AtmosphereTransition` 继续选择配置基线（生产默认 `GroundDay`），因此地面瞄准保留昼夜/云/大气，发射初段复用现有按相机高度计算的连续星空过渡；只有 `DeepSpace` 选择 `FinaleSpace`，`Recovering` 立即回到配置基线。M11 以冻结 Released Result 的 `AssistEnter(1)` 作为深空语义边界；缺事件、零 Hash 或非法时间保持过渡并 fail closed。该装配不写 M11 私有状态，也不修改积分器、轨迹、镜头、PIP 或演出；
 - 主视图后处理不再直接相信诊断 CVar，而优先消费世界子系统已经发布的环境快照 Profile，避免世界 Actor 已切终局而 Tone/Outline 仍留在地面档。诊断/捕获仍可在没有世界快照时使用显式 CVar。
 
 三套环境 Profile 只读消费同一球面快照：
@@ -513,7 +513,7 @@ v70 修复太阳圆盘与地表局部半圆高光被误读为同一问题的缺�
 
 A3.2 自动化必须冻结三套 Actor 策略、月面“表面/背景”双 Profile、终局优先级和结束后的确定性回切。可见 PIE 至少检查普通世界云/大气、月面 PIP 星空、进入终局后无地表云/蓝天、主动退出与失败恢复后的 GroundDay 回切，以及 Rank11 AVI。A3.3 再处理进程中断、Actor 销毁、地图切换等显式快照/恢复所有权；在 A3.3 完成前不得把 A3.2 的轮询回切写成完整异常恢复。
 
-A3.2 当前状态为 `ImplementationComplete（VisibleValidationPending）`。UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译已成功；fresh NullRHI `ABTS.Rendering.Toon` 为 28/28，新增 `ABTS.Rendering.Toon.T4A3_2.EnvironmentProfileAssemblyContract` 已通过，日志为 `Saved/Logs/T4A32-V65-Toon-Fresh-20260812-R2.log`。这些证据证明数据路由与旧阶段回归，不替代终局进入/退出、失败恢复、月面 PIP 和 Rank11 AVI 的真实 RHI/PIE 判读。
+A3.2 当前状态为 `ImplementationComplete（VisibleValidationPending）`。实现版本 71 已接入 M11 只读环境阶段；UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译成功，fresh NullRHI `ABTS.M11C.Unit.EnvironmentStageContract`、`ABTS.Rendering.Toon.T4A3_2.M11EnvironmentStageRouting` 分别为 1/1，完整 `ABTS.Rendering.Toon` 为 29/29，完整 `ABTS.M11C.Unit` 为 12/12。日志位于 `Saved/Logs/T4A32-V71-M11EnvironmentStage-20260812.log`、`Saved/Logs/T4A32-V71-StageRouting-Final-20260812.log`、`Saved/Logs/T4A32-V71-Toon-Fresh-20260812.log` 与 `Saved/Logs/T4A32-V71-M11CUnit-Fresh-20260812.log`。可见 PIE 至少检查地面瞄准仍有当地大气/云、发射升空连续过渡、第一颗助推行星入口后完整深空、远端 PIP 不受主世界阶段改变，以及失败/主动退出恢复 GroundDay；自动化不替代这些像素判读。
 
 A3 全部通过后进入 T4-B，重新看 T3 的 Roughness、Specular、Rim、Tint，并用 A0 矩阵关闭 `TOON-T2A-002`。M7 未完成时可以形成“非 M7 T3/T4 联合基线”，但不得宣布完整视觉冻结。
 

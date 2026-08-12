@@ -469,7 +469,7 @@ bool FABTSToonT4A32EnvironmentProfileAssemblyContractTest::RunTest(
 			FABTSStylizedRenderingContract::ResolveMainWorldProfile(
 				false, EABTSStylizedRenderProfile::GroundDay)),
 		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
-	TestEqual(TEXT("Finale activity has profile precedence"),
+	TestEqual(TEXT("Finale deep space has profile precedence"),
 		static_cast<int32>(
 			FABTSStylizedRenderingContract::ResolveMainWorldProfile(
 				true, EABTSStylizedRenderProfile::GroundDay)),

@@ -63,16 +63,74 @@ namespace ABTSStylizedRenderingWorldSubsystemPrivate
 	constexpr float RefreshIntervalSeconds = 0.10f;
 	constexpr float ContinuousAtmosphereTraceSampleCountScale = 2.0f;
 
-	bool IsFinaleEnvironmentActive(UWorld& World)
+	EABTSM11FinaleEnvironmentStage MergeFinaleEnvironmentStage(
+		const EABTSM11FinaleEnvironmentStage CurrentStage,
+		const EABTSM11FinaleEnvironmentStage CandidateStage)
 	{
+		if (CandidateStage == EABTSM11FinaleEnvironmentStage::DeepSpace ||
+			CurrentStage == EABTSM11FinaleEnvironmentStage::DeepSpace)
+		{
+			return EABTSM11FinaleEnvironmentStage::DeepSpace;
+		}
+		if (CandidateStage ==
+				EABTSM11FinaleEnvironmentStage::AtmosphereTransition ||
+			CurrentStage == EABTSM11FinaleEnvironmentStage::AtmosphereTransition)
+		{
+			return EABTSM11FinaleEnvironmentStage::AtmosphereTransition;
+		}
+		if (CandidateStage == EABTSM11FinaleEnvironmentStage::Recovering ||
+			CurrentStage == EABTSM11FinaleEnvironmentStage::Recovering)
+		{
+			return EABTSM11FinaleEnvironmentStage::Recovering;
+		}
+		return EABTSM11FinaleEnvironmentStage::GroundLaunch;
+	}
+
+	EABTSM11FinaleEnvironmentStage ResolveFinaleEnvironmentStage(UWorld& World)
+	{
+		EABTSM11FinaleEnvironmentStage ResolvedStage =
+			EABTSM11FinaleEnvironmentStage::GroundLaunch;
 		for (TActorIterator<AABTSM11FinaleInteractionSystem> It(&World); It; ++It)
 		{
-			if (IsValid(*It) && It->IsFinaleActive())
+			if (!IsValid(*It))
 			{
-				return true;
+				continue;
+			}
+
+			const EABTSM11FinaleEnvironmentStage CandidateStage =
+				It->GetFinaleEnvironmentStage();
+			ResolvedStage = MergeFinaleEnvironmentStage(
+				ResolvedStage,
+				CandidateStage);
+			if (ResolvedStage == EABTSM11FinaleEnvironmentStage::DeepSpace)
+			{
+				return ResolvedStage;
 			}
 		}
-		return false;
+		return ResolvedStage;
+	}
+
+	bool DoesFinaleEnvironmentStageRequireSpace(
+		const EABTSM11FinaleEnvironmentStage Stage)
+	{
+		return Stage == EABTSM11FinaleEnvironmentStage::DeepSpace;
+	}
+
+	const TCHAR* LexToString(const EABTSM11FinaleEnvironmentStage Stage)
+	{
+		switch (Stage)
+		{
+		case EABTSM11FinaleEnvironmentStage::GroundLaunch:
+			return TEXT("GroundLaunch");
+		case EABTSM11FinaleEnvironmentStage::AtmosphereTransition:
+			return TEXT("AtmosphereTransition");
+		case EABTSM11FinaleEnvironmentStage::DeepSpace:
+			return TEXT("DeepSpace");
+		case EABTSM11FinaleEnvironmentStage::Recovering:
+			return TEXT("Recovering");
+		default:
+			return TEXT("Unknown");
+		}
 	}
 
 	UABTSStylizedRenderingWorldSubsystem* ResolveTuningSubsystem(UWorld* World)
@@ -1461,11 +1519,13 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		return;
 	}
 	bLastObservedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
-	const bool bFinaleEnvironmentActive =
-		IsFinaleEnvironmentActive(*World);
+	const EABTSM11FinaleEnvironmentStage FinaleEnvironmentStage =
+		ResolveFinaleEnvironmentStage(*World);
+	const bool bFinaleDeepSpace = DoesFinaleEnvironmentStageRequireSpace(
+		FinaleEnvironmentStage);
 	const EABTSStylizedRenderProfile ActiveProfile =
 		FABTSStylizedRenderingContract::ResolveMainWorldProfile(
-			bFinaleEnvironmentActive,
+			bFinaleDeepSpace,
 			FABTSStylizedRenderingControl::GetProfile());
 
 	FABTSToonEnvironmentSnapshot ResolvedEnvironment;
@@ -1493,11 +1553,12 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			UE_LOG(
 				LogABTSRuntime,
 				Log,
-				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=1 Version=%d Profile=%d Source=%s Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
+				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=1 Version=%d Profile=%d FinaleStage=%s Source=%s Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
 				EnvironmentSnapshot.Version,
 				static_cast<int32>(EnvironmentSnapshot.Profile),
-				bFinaleEnvironmentActive
-					? TEXT("M11FinaleActive")
+				LexToString(FinaleEnvironmentStage),
+				bFinaleDeepSpace
+					? TEXT("M11DeepSpace")
 					: TEXT("ConfiguredGroundContext"),
 				EnvironmentSnapshot.WorldSeed,
 				EnvironmentSnapshot.GeneratorVersion,
@@ -3699,6 +3760,58 @@ bool FABTSToonT4A2R1C2A4SeededAmorphousFootprintContractTest::RunTest(
 	TestEqual(TEXT("A2.4 freezes the production instanced-cloudlet GPU budget"),
 		TotalBody + TotalCrown + TotalEdge,
 		FABTST4LowPolyCloudPrototype::TotalCloudletCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A3M11EnvironmentStageRoutingTest,
+	"ABTS.Rendering.Toon.T4A3_2.M11EnvironmentStageRouting",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A3M11EnvironmentStageRoutingTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSStylizedRenderingWorldSubsystemPrivate;
+	(void)Parameters;
+	const EABTSStylizedRenderProfile Baseline =
+		EABTSStylizedRenderProfile::GroundDay;
+	const auto ResolveStageProfile = [Baseline](
+		const EABTSM11FinaleEnvironmentStage Stage)
+	{
+		return FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			DoesFinaleEnvironmentStageRequireSpace(Stage),
+			Baseline);
+	};
+
+	TestEqual(
+		TEXT("Ground launch preserves the configured surface environment"),
+		ResolveStageProfile(EABTSM11FinaleEnvironmentStage::GroundLaunch),
+		EABTSStylizedRenderProfile::GroundDay);
+	TestEqual(
+		TEXT("Atmospheric launch preserves altitude-driven GroundDay presentation"),
+		ResolveStageProfile(
+			EABTSM11FinaleEnvironmentStage::AtmosphereTransition),
+		EABTSStylizedRenderProfile::GroundDay);
+	TestEqual(
+		TEXT("Only the explicit deep-space stage selects FinaleSpace"),
+		ResolveStageProfile(EABTSM11FinaleEnvironmentStage::DeepSpace),
+		EABTSStylizedRenderProfile::FinaleSpace);
+	TestEqual(
+		TEXT("Failure recovery returns to the configured surface environment"),
+		ResolveStageProfile(EABTSM11FinaleEnvironmentStage::Recovering),
+		EABTSStylizedRenderProfile::GroundDay);
+	TestEqual(
+		TEXT("Duplicate interaction actors cannot make routing iteration-order dependent"),
+		MergeFinaleEnvironmentStage(
+			EABTSM11FinaleEnvironmentStage::GroundLaunch,
+			EABTSM11FinaleEnvironmentStage::DeepSpace),
+		EABTSM11FinaleEnvironmentStage::DeepSpace);
+	TestEqual(
+		TEXT("Deep-space evidence remains authoritative if a stale ground actor follows"),
+		MergeFinaleEnvironmentStage(
+			EABTSM11FinaleEnvironmentStage::DeepSpace,
+			EABTSM11FinaleEnvironmentStage::GroundLaunch),
+		EABTSM11FinaleEnvironmentStage::DeepSpace);
 	return true;
 }
 
