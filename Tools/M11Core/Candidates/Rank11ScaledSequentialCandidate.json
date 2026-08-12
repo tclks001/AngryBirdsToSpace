@@ -1,8 +1,8 @@
 {
   "schema": "abts.m11b.v2_2.scaled_sequential_candidate.v1",
-  "status": "candidate_not_certified_editor_pie_bound",
+  "status": "frozen_unique_v22_certification_input",
   "editorCandidateRank": 11,
-  "baseScaleExperimentDiagnosticRank": 12,
+  "baseScaleExperimentDiagnosticRank": 13,
   "baseCandidateSourceHash": "0xf134ae0ff2c93467",
   "preNominalVariantSourceHash": "0xad7ccfe862d78a3f",
   "candidateSourceHash": "0xcb23499fc6f7c9d3",
@@ -57,7 +57,8 @@
   "acceptance": {
     "screenAimRatioGate": "passed_0.08_to_0.55",
     "maximumPowerLocalConnectivity": "passed_single_component_each_prefix",
-    "fullInputDomainCertification": "not_run",
+    "fullInputDomainCertification": "early_stopped_half_step_non_unique_f4_and_early_target_hit",
+    "certificationInputFreeze": "Tools/M11Core/Certification/Rank11V22CertificationInput.json",
     "editorPieBinding": "abts.M11.CandidateRank_11"
   }
 }
