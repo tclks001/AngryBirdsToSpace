@@ -2025,3 +2025,70 @@ fresh Preview 诊断合同通过。证据日志为：
 
 本节仍为 `Physical=NotEvaluated`，没有运行 Chaos、可见 PIE、Stage 2 或 5×6。下一停点是用户在第 2/3 层确认
 主芯体支腿到子芯体段的高度分界；通过后再开始从该分界发射 Stage 2 外伸耦合点。
+
+## 45. Stage 0 抬高主芯体语义预留与二遍生成（2026-08-12）
+
+第 44 节把既有 child course 登记成 main leg，只改变层级身份，没有生成用户要求的连续方形高主芯体。直接在原始 WFC
+之后延长原 PodiumMain 也不可行：其第一层新增 course 就可能落在已经收缩的 Body 外，或者与未来侧向耦合面没有放置
+空间。该失败不是轨距或高度参数问题，而是生成顺序错误；禁止继续在 post-hoc 延长路径上调容差。
+
+本轮把流程冻结为确定性的两遍 Stage 0/1 反馈：
+
+1. 原始 Shape Grammar/WFC 先生成基础语义包络；第一遍 Stage 1 只据此建立完整 demand、support province、
+   PodiumMain/TowerChild 联合选择和局部裙房高度计划，不向最终结果发射抬高 main；
+2. 对每个绑定至少一个 TowerChild 且需要抬高的 PodiumMain，建立 `RaisedMainReservation`。若第一遍 main 为矩形，低段
+   保持原接地 footprint，高段则在其内部居中取可容纳的最大 36 cm 量化正方形并重算高段 X/Y stations；批准顶面取该
+   方形正面积影响到的全部 child（包含其他 main 所属的 foreign child）的 `LocalPodiumTopCourseIndex` 最小值。因此一个
+   main 可以拥有多个 child，也不会跨过非直属但实际会被它包住的 child 合法分界；
+3. `CoreBounds` 是抬高主芯体的实际占用体，从原 main 顶面连续到批准顶面。`ClearanceBounds` 在 X/Y 四侧各扩张一个
+   36 cm 网格，作为 Stage 2 侧面外伸积木和外框耦合点的语义预留；Z 不扩张。二者都保留 36 cm 量化与 720 cm 单构件
+   上限，且不得侵入 protected void。合成 Body 只使用 `CoreBounds`；`ClearanceBounds` 是非实体 Stage 2 可用域，不能
+   在 Stage 0 被渲染成填满镂空的实体；
+4. reservation 的 `CoreBounds` 以合成 `Body/Box` 写回最终 WFC 语义包络，并进入 Stage 0 `WFC Semantic Envelope` 显示及
+   Grammar/WFC Hash。它只声明空间，不增加 terminal Body、terminal load、support demand 或 child 数；支撑需求构图必须
+   显式排除 `/RaisedMainReservation/` volume 及其见证边，避免反馈体被误判为新楼塔；
+5. 第二遍 Stage 1 消费带 reservation 的最终包络。对应 PodiumMain 必须以 reservation 的方形 X/Y stations、逐 course
+   X/Y 交错和原 rail count 从原 main 顶面连续发射到批准顶面；新增 course 的 source 必须是 reservation volume。main 的最终 TopCourse、实际 member
+   数、绑定 child 集、最低 child 分界、正方形 footprint 与四侧 36 cm clearance 全部闭合，否则 fail closed；
+6. `RaisedMainReservationCount` 与 `RaisedPodiumMainMemberCount` 写入摘要和预览日志。该阶段仍不生成 Stage 2 外伸构件；
+   clearance 只是可追溯的语义空间合同，不能冒充已完成的外框或物理加固。
+
+这一路径让视觉因果关系变为“原始 WFC → 局部裙房计划 → 带抬高 main/侧向净空的最终 WFC → 方形高 main”。它也明确
+取代第 44 节的纯身份着色解释：`LocalPodiumLegMemberIndices` 仍保留为 child 区域的归属证据，但真正的 PodiumMain 现在
+拥有独立、连续、方形的新增 course。Stage 0/1 是两遍计算，当前代表种子仍远低于单建筑 10 秒硬门；若后续性能回归，
+应缓存第一遍计划或增量重建，禁止通过删除 reservation 合同、降低 demand 数或放宽静态门提速。
+
+本停点仅接受 UE 5.8 全链接、fresh TipOver 710000/730000/750000 静态专项和 Preview 合同；Physical 继续为
+`NotEvaluated`，不运行 Chaos、可见 PIE或 5×6。用户应在 Stage 0 检查抬高包络和四侧净空，在 Stage 2/3 检查方形主芯体
+是否到达其所有 child 的最低批准分界；视觉通过后再决定是否运行完整 Stage 1-only 5×6。
+
+本轮 UE 5.8 ForceUnity Development Editor 全链接成功。fresh `TipOverE6OptimizationSeeds` 通过：710000/730000/750000
+分别生成 3/3/3 个 raised-main reservation 和 270/201/261 个新增 main course member；第二遍算法计时分别为
+`1425.16/1346.85/2033.46 ms`。730000 的右侧矩形低段在 course 40 以上收缩为 `396×396 cm` 方形高段并升至
+course 52，四侧净空后的语义轮廓为 `468×468 cm`。所有种子的 reservation 顶面均等于绑定 child 的最低分界，实际
+member 几何重建 seat DAG 后 Static DAG Accepted。fresh Preview 合同与标准 `TipOver.E6` 矩阵叶也通过；证据为：
+
+- `Saved/Logs/BeamC3-RaisedMainReservation-Build-12-20260812.log`；
+- `Saved/Logs/BeamC3-RaisedMainReservation-TipOverSeeds-SeatFinal-20260812.log`；
+- `Saved/Logs/BeamC3-RaisedMainReservation-Preview-Final-20260812.log`；
+- `Saved/Logs/BeamC3-RaisedMainReservation-TipOverE6Leaf-20260812.log`。
+
+### 45.1 空间影响闭包与非实体净空修正（2026-08-12）
+
+750000 的右侧证明“绑定 child 最低分界”仍不完整：`Main 1` 语义上只绑定 `Child 9/12`，但其居中方形高段同时正面积
+覆盖了属于 `Main 3` 的 `Child 10/11`。后两者的合法分界均为 course 32；旧算法没有把它们纳入高度决策，错误地把
+`Main 1` 抬到 course 52，于是子芯体被包进主芯体。自动化又只比较绑定集合，形成与错误规则完全一致的假绿灯。
+
+最终高度合同改为：
+
+1. `BoundTowerChildCoreCellIds` 继续表达语义归属；另以高段实际方形 footprint 对同组件全部 child 做正面积相交，形成
+   `InfluencedTowerChildCoreCellIds`。其中非本 main 所属者单列为 `ForeignTowerChildCoreCellIds`；
+2. 批准高度取完整 influence 集合的最低 `LocalPodiumTopCourseIndex`，而非只取 bound 集合最低值。若该高度等于原 main
+   顶面，则不发射 reservation，并记录 `RaisedMainSuppressed/SpatialInfluenceMinimum`；禁止为追求抬高而忽略 foreign child；
+3. `CoreBounds` 才是 WFC 中实际占用的合成 `Body`。`ClearanceBounds` 仍在四侧扩一格，但它是 Stage 2 可用域合同，不能
+   作为实心 Body 进入语义包络。否则支撑 DAG 会正确保留镂空分支，而 Stage 0 轮廓却把净空画成实体，两个权威表示互相矛盾；
+4. 自动化必须同时闭合 bound 数、influenced 数、foreign 身份和 influence 集合最低分界；750000 额外固定右侧重叠的
+   `Main 1/3` 不得抬高，并验证所有合成语义体严格等于 `CoreBounds` 而不等于 `ClearanceBounds`。
+
+该修正不改变 terminal demand、child 数、36 cm 网格、720 cm 上限或 Stage 2/Chaos。它只禁止主芯体跨过任何实际受其
+空间覆盖的子芯体分界，并把“占用”与“侧向可用净空”恢复为两个不同合同。

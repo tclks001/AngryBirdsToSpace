@@ -229,10 +229,40 @@ namespace
 		const TArray<FBox>& AllowedBoxes,
 		FVector& OutUncoveredPoint);
 
+	bool AddPlannedMember(
+		FPlan& Plan, EOwnerKind OwnerKind, ESkeletonMemberKind SkeletonKind,
+		int32 OwnerId, int32 ComponentId, int32 SourceVolumeId,
+		int32 OriginCoreCellId, int32 CourseIndex, int32 StationA,
+		int32 StationB, uint8 FaceMask, EABTSM73BeamAFrameAxis Axis,
+		EABTSM73BeamAMemberRole Role, const FVector& Start,
+		const FVector& End, FString& OutError);
+
+	void AddSeat(FPlan& Plan, int32 UpperIndex, int32 LowerIndex);
+
 	bool IsSpanRole(const EABTSM73DAG5BV2VolumeRole Role)
 	{
 		return Role == EABTSM73DAG5BV2VolumeRole::SupportedSpan
 			|| Role == EABTSM73DAG5BV2VolumeRole::Bridge;
+	}
+
+	bool IsRaisedMainReservationVolume(
+		const FABTSM73DAG5BV2Volume& Volume)
+	{
+		return Volume.DerivationPath.Contains(TEXT("/RaisedMainReservation/"));
+	}
+
+	bool IsRaisedMainReservationSource(
+		const FPlan& Plan,
+		const int32 ComponentId,
+		const int32 SourceVolumeId)
+	{
+		return Plan.RaisedMainReservations.ContainsByPredicate(
+			[ComponentId, SourceVolumeId](
+				const FABTSM73DAG5BV2RaisedMainReservation& Reservation)
+			{
+				return Reservation.ComponentId == ComponentId
+					&& Reservation.SourceVolumeId == SourceVolumeId;
+			});
 	}
 
 	FString RootPath(const FString& Path)
@@ -551,7 +581,8 @@ namespace
 		Volumes.RemoveAll([](const FABTSM73DAG5BV2Volume* Volume)
 		{
 			return Volume == nullptr
-				|| Volume->DerivationPath.StartsWith(TEXT("CoupledGround/"));
+				|| Volume->DerivationPath.StartsWith(TEXT("CoupledGround/"))
+				|| IsRaisedMainReservationVolume(*Volume);
 		});
 		if (Volumes.IsEmpty())
 		{
@@ -830,7 +861,7 @@ namespace
 		Volumes.Append(Root.CrownVolumes);
 		Volumes.RemoveAll([](const FABTSM73DAG5BV2Volume* Volume)
 		{
-			return Volume == nullptr;
+			return Volume == nullptr || IsRaisedMainReservationVolume(*Volume);
 		});
 		Volumes.Sort([](const FABTSM73DAG5BV2Volume& A,
 			const FABTSM73DAG5BV2Volume& B)
@@ -871,6 +902,28 @@ namespace
 
 		for (const FVerticalSupportWitness& Witness : Root.Witnesses)
 		{
+			auto FindBodyVolume = [&Root](const int32 VolumeId)
+			{
+				const FABTSM73DAG5BV2Volume* const* Found =
+					Root.BodyVolumes.FindByPredicate(
+						[VolumeId](const FABTSM73DAG5BV2Volume* Volume)
+						{
+							return Volume != nullptr
+								&& Volume->VolumeId == VolumeId;
+						});
+				return Found != nullptr ? *Found : nullptr;
+			};
+			const FABTSM73DAG5BV2Volume* LowerVolume =
+				FindBodyVolume(Witness.LowerSourceVolumeId);
+			const FABTSM73DAG5BV2Volume* UpperVolume =
+				FindBodyVolume(Witness.UpperSourceVolumeId);
+			if ((LowerVolume != nullptr
+					&& IsRaisedMainReservationVolume(*LowerVolume))
+				|| (UpperVolume != nullptr
+					&& IsRaisedMainReservationVolume(*UpperVolume)))
+			{
+				continue;
+			}
 			const int32* LowerNodeId =
 				NodeIdBySourceVolumeId.Find(Witness.LowerSourceVolumeId);
 			const int32* UpperNodeId =
@@ -1016,8 +1069,14 @@ namespace
 		for (int32 WitnessIndex = 0;
 			WitnessIndex < Root.Witnesses.Num(); ++WitnessIndex)
 		{
+			const FVerticalSupportWitness& Witness = Root.Witnesses[WitnessIndex];
+			if (!NodeIdBySourceVolumeId.Contains(Witness.LowerSourceVolumeId)
+				|| !NodeIdBySourceVolumeId.Contains(Witness.UpperSourceVolumeId))
+			{
+				continue;
+			}
 			const int32 ContactCourse = FMath::RoundToInt(
-				(Root.Witnesses[WitnessIndex].ContactZCM - Root.GroundZCM)
+				(Witness.ContactZCM - Root.GroundZCM)
 				/ static_cast<double>(BlockUnitsCM));
 			WitnessIndicesByContactCourse.FindOrAdd(ContactCourse)
 				.Add(WitnessIndex);
@@ -3247,6 +3306,8 @@ namespace
 	{
 		Plan.Summary.AppliedLocalPodiumHeightRegionCount = 0;
 		Plan.Summary.LocalPodiumLegMemberCount = 0;
+		Plan.Summary.RaisedPodiumMainReservationCount = 0;
+		Plan.Summary.RaisedPodiumMainMemberCount = 0;
 		const bool bHasTowerChild = Plan.CoreCells.ContainsByPredicate(
 			[](const FCoreCellPlan& Core)
 			{
@@ -3315,6 +3376,8 @@ namespace
 		int32 AppliedChildCount = 0;
 		for (FCoreCellPlan& Core : Plan.CoreCells)
 		{
+			Core.RaisedPodiumMainTopCourseIndex = Core.TopCourseIndex;
+			Core.RaisedPodiumMainReservationBounds = FBox(EForceInit::ForceInit);
 			Core.LocalPodiumHeightRegionId = INDEX_NONE;
 			Core.LocalPodiumTopCourseIndex = 0;
 			Core.LocalPodiumLegMemberIndices.Reset();
@@ -3411,6 +3474,116 @@ namespace
 				return false;
 			}
 			++Plan.Summary.AppliedLocalPodiumHeightRegionCount;
+		}
+
+		// The first pass owns only semantic intent. The second pass receives exact
+		// square reservations and is the only pass allowed to extend a main.
+		for (FCoreCellPlan& Main : Plan.CoreCells)
+		{
+			if (Main.HierarchyRole != ECoreHierarchyRole::PodiumMain)
+			{
+				continue;
+			}
+			const FABTSM73DAG5BV2RaisedMainReservation* Reservation =
+				Plan.RaisedMainReservations.FindByPredicate(
+					[&Main](const FABTSM73DAG5BV2RaisedMainReservation& Candidate)
+					{
+						return Candidate.ComponentId == Main.ComponentId
+							&& Candidate.PodiumMainCoreCellId == Main.CoreCellId;
+					});
+			if (Reservation == nullptr)
+			{
+				continue;
+			}
+			if (!Reservation->CoreBounds.IsValid
+				|| Reservation->OriginalTopCourse != Main.TopCourseIndex
+				|| Reservation->ApprovedTopCourse < Main.TopCourseIndex
+				|| Reservation->XStations.Num() != Main.RailCount
+				|| Reservation->YStations.Num() != Main.RailCount
+				|| Reservation->CoreBounds.Min.X
+					< Main.LocalBounds.Min.X - GeometryToleranceCM
+				|| Reservation->CoreBounds.Max.X
+					> Main.LocalBounds.Max.X + GeometryToleranceCM
+				|| Reservation->CoreBounds.Min.Y
+					< Main.LocalBounds.Min.Y - GeometryToleranceCM
+				|| Reservation->CoreBounds.Max.Y
+					> Main.LocalBounds.Max.Y + GeometryToleranceCM
+				|| FMath::Abs(Reservation->CoreBounds.GetSize().X
+					- Reservation->CoreBounds.GetSize().Y) > GeometryToleranceCM)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3RaisedMainReservationMismatch:Main=%d:Original=%d/%d:Approved=%d"),
+					Main.CoreCellId, Main.TopCourseIndex,
+					Reservation->OriginalTopCourse,
+					Reservation->ApprovedTopCourse);
+				return false;
+			}
+			Main.RaisedPodiumMainTopCourseIndex = Reservation->ApprovedTopCourse;
+			Main.RaisedPodiumMainReservationBounds = Reservation->CoreBounds;
+			if (Reservation->ApprovedTopCourse == Main.TopCourseIndex)
+			{
+				continue;
+			}
+			TArray<int32> PreviousCourse;
+			for (const int32 MemberIndex : Main.MemberIndices)
+			{
+				if (Plan.Members.IsValidIndex(MemberIndex)
+					&& Plan.Members[MemberIndex].CourseIndex == Main.TopCourseIndex - 1)
+				{
+					PreviousCourse.Add(MemberIndex);
+				}
+			}
+			if (PreviousCourse.Num() != Main.RailCount)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3RaisedMainTopCourseUnavailable:Main=%d:Expected=%d:Actual=%d"),
+					Main.CoreCellId, Main.RailCount, PreviousCourse.Num());
+				return false;
+			}
+			for (int32 Course = Main.TopCourseIndex;
+				Course < Reservation->ApprovedTopCourse; ++Course)
+			{
+				const EABTSM73BeamAFrameAxis Axis = (Course & 1) == 0
+					? EABTSM73BeamAFrameAxis::X : EABTSM73BeamAFrameAxis::Y;
+				const double Z = Reservation->CoreBounds.Min.Z
+					+ (Course - Main.TopCourseIndex + 0.5) * BlockUnitsCM;
+				TArray<int32> CurrentCourse;
+				const TArray<int32>& CrossStations = Axis == EABTSM73BeamAFrameAxis::X
+					? Reservation->YStations : Reservation->XStations;
+				for (int32 Rail = 0; Rail < CrossStations.Num(); ++Rail)
+				{
+					const FVector Start = Axis == EABTSM73BeamAFrameAxis::X
+						? Position(Reservation->CoreBounds.Min.X - BlockUnitsCM * 0.5,
+							CrossStations[Rail] * BlockUnitsCM, Z)
+						: Position(CrossStations[Rail] * BlockUnitsCM,
+							Reservation->CoreBounds.Min.Y - BlockUnitsCM * 0.5, Z);
+					const FVector End = Axis == EABTSM73BeamAFrameAxis::X
+						? Position(Reservation->CoreBounds.Max.X + BlockUnitsCM * 0.5,
+							CrossStations[Rail] * BlockUnitsCM, Z)
+						: Position(CrossStations[Rail] * BlockUnitsCM,
+							Reservation->CoreBounds.Max.Y + BlockUnitsCM * 0.5, Z);
+					const int32 MemberIndex = Plan.Members.Num();
+					if (!AddPlannedMember(Plan, EOwnerKind::CoreCell,
+						ESkeletonMemberKind::CoreCourse, Main.CoreCellId,
+						Main.ComponentId, Reservation->SourceVolumeId,
+						Main.CoreCellId, Course, Rail, INDEX_NONE, 0, Axis,
+						EABTSM73BeamAMemberRole::CoreCourse, Start, End, OutError))
+					{
+						return false;
+					}
+					for (const int32 Lower : PreviousCourse)
+					{
+						AddSeat(Plan, MemberIndex, Lower);
+					}
+					Main.MemberIndices.Add(MemberIndex);
+					CurrentCourse.Add(MemberIndex);
+					++Plan.Summary.RaisedPodiumMainMemberCount;
+				}
+				PreviousCourse = MoveTemp(CurrentCourse);
+			}
+			Main.TopCourseIndex = Reservation->ApprovedTopCourse;
+			Main.LocalBounds.Max.Z = Reservation->CoreBounds.Max.Z;
+			++Plan.Summary.RaisedPodiumMainReservationCount;
 		}
 		int32 TowerChildCount = 0;
 		for (const FCoreCellPlan& Core : Plan.CoreCells)
@@ -4159,6 +4332,7 @@ namespace
 		for (FCoreCellPlan& Core : Plan.CoreCells)
 		{
 			Remap(Core.MemberIndices);
+			Remap(Core.LocalPodiumLegMemberIndices);
 		}
 		for (FBuildingGroupPlan& Group : Plan.BuildingGroups)
 		{
@@ -5709,7 +5883,11 @@ namespace
 		double GroundZCM = DBL_MAX;
 		for (const FABTSM73DAG5BV2Volume& Volume : Silhouette.Volumes)
 		{
-			if (IsSpanRole(Volume.Role))
+			// A raised-main reservation is an envelope permission emitted by the
+			// first pass. It must not feed back into the second pass's support roots,
+			// course occupancy, podium boundary selection, or child demands.
+			if (IsSpanRole(Volume.Role)
+				|| IsRaisedMainReservationVolume(Volume))
 			{
 				continue;
 			}
@@ -6722,7 +6900,11 @@ namespace
 			else if (Roots.IsValidIndex(Member.ComponentId))
 			{
 				const FRoot& Root = Roots[Member.ComponentId];
-				if (!Root.SourceVolumeIds.Contains(Member.SourceVolumeId))
+				const bool bRaisedMainReservationSource =
+					IsRaisedMainReservationSource(
+						Plan, Member.ComponentId, Member.SourceVolumeId);
+				if (!Root.SourceVolumeIds.Contains(Member.SourceVolumeId)
+					&& !bRaisedMainReservationSource)
 				{
 					++Plan.Summary.EnvelopeViolationCount;
 					OutError = FString::Printf(
@@ -6785,6 +6967,16 @@ namespace
 					{
 						AllowedBoxes.Add(Volume->LocalBounds.ExpandBy(
 							BlockUnitsCM * 0.5 + GeometryToleranceCM));
+					}
+					if (bRaisedMainReservationSource)
+					{
+						const FABTSM73DAG5BV2Volume* ReservationVolume =
+							FindVolume(Silhouette, Member.SourceVolumeId);
+						if (ReservationVolume != nullptr)
+						{
+							AllowedBoxes.Add(ReservationVolume->LocalBounds.ExpandBy(
+								BlockUnitsCM * 0.5 + GeometryToleranceCM));
+						}
 					}
 					for (const FBuildingGroupPlan& Group : Plan.BuildingGroups)
 					{
@@ -7349,7 +7541,9 @@ namespace
 				}
 				if (bLocalCoreCourse
 					&& (!Root.SourceVolumeIds.Contains(Member.SourceVolumeId)
-					|| (Member.CourseIndex < BodyCourseCount
+						&& !IsRaisedMainReservationSource(
+							Plan, Member.ComponentId, Member.SourceVolumeId)
+						|| (Member.CourseIndex < BodyCourseCount
 						&& Root.CrownVolumeIds.Contains(Member.SourceVolumeId))))
 				{
 					OutError = FString::Printf(
@@ -11631,6 +11825,7 @@ namespace
 		OutPlan.ResolvedSettingsHash = Profile.ResolvedSettingsHash;
 		OutPlan.GrammarHash = Silhouette.Summary.GrammarHash;
 		OutPlan.WFCHash = Silhouette.Summary.WFCHash;
+		OutPlan.RaisedMainReservations = Silhouette.RaisedMainReservations;
 		OutPlan.Summary.MinimumBrickCount = Profile.VisualComplexity.MinimumBrickCount;
 		OutPlan.Summary.MaximumBrickCount = Profile.VisualComplexity.MaximumBrickCount;
 		OutPlan.Summary.DensityLevel = Density.RecipeId;
@@ -17653,6 +17848,15 @@ namespace
 			{
 				return false;
 			}
+			// A rectangular grounded main may contract to the largest centred square
+			// at its raised reservation. Rebuild every bearing edge from the final
+			// solids so that the transition cannot retain synthetic pre-reservation
+			// seat links.
+			if (!RebuildPlannedSeatDAG(OutPlan, OutError)
+				|| !ValidateCompositeCoreContract(OutPlan, OutError))
+			{
+				return false;
+			}
 			if (!BuildPodiumCoreCoverageDiagnostics(OutPlan, OutError))
 			{
 				return false;
@@ -18936,6 +19140,167 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage1(
 	return GenerateForStage(Profile, Silhouette,
 		ABTSM73BeamC3V3::EGenerationStage::CoreAndShared,
 		OutResult, OutError);
+}
+
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(
+	const FABTSM73BeamD0ResolvedProfile& Profile,
+	const FABTSM73DAG5BV2GenerationResult& Silhouette,
+	TArray<FABTSM73DAG5BV2RaisedMainReservation>& OutReservations,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamC3V3;
+	OutReservations.Reset();
+	FGenerationResult FirstPass;
+	if (!GenerateStage1(Profile, Silhouette, FirstPass, OutError))
+	{
+		return false;
+	}
+	const FPlan& Plan = FirstPass.Plan;
+	for (const FCoreCellPlan& Main : Plan.CoreCells)
+	{
+		if (Main.HierarchyRole != ECoreHierarchyRole::PodiumMain)
+		{
+			continue;
+		}
+		TArray<int32> BoundChildren;
+		for (const FCoreCellPlan& Child : Plan.CoreCells)
+		{
+			if (Child.HierarchyRole == ECoreHierarchyRole::TowerChild
+				&& Child.PodiumMainCoreCellId == Main.CoreCellId)
+			{
+				BoundChildren.Add(Child.CoreCellId);
+			}
+		}
+		if (BoundChildren.IsEmpty())
+		{
+			continue;
+		}
+		const int32 MainMinimumX = Main.XStations[0];
+		const int32 MainMaximumX = Main.XStations.Last();
+		const int32 MainMinimumY = Main.YStations[0];
+		const int32 MainMaximumY = Main.YStations.Last();
+		const int32 SquareSpanUnits = FMath::Min(
+			MainMaximumX - MainMinimumX, MainMaximumY - MainMinimumY);
+		auto CenteredSquareStations = [SquareSpanUnits](
+			const TArray<int32>& SourceStations)
+		{
+			const int32 Minimum = SourceStations[0];
+			const int32 Maximum = SourceStations.Last();
+			const int32 CenterTwice = Minimum + Maximum;
+			const int32 PreferredMinimum = FMath::FloorToInt(
+				0.5 * static_cast<double>(CenterTwice - SquareSpanUnits));
+			const int32 SquareMinimum = FMath::Clamp(
+				PreferredMinimum, Minimum, Maximum - SquareSpanUnits);
+			return MakeUniformStations(
+				SquareMinimum, SquareMinimum + SquareSpanUnits,
+				SourceStations.Num());
+		};
+		TArray<int32> SquareXStations = CenteredSquareStations(Main.XStations);
+		TArray<int32> SquareYStations = CenteredSquareStations(Main.YStations);
+		if (SquareSpanUnits < Main.RailCount - 1
+			|| SquareXStations.Num() != Main.RailCount
+			|| SquareYStations.Num() != Main.RailCount)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3RaisedMainSquareFootprintUnavailable:Main=%d:Span=%d:Rails=%d:X=%d:Y=%d"),
+				Main.CoreCellId, SquareSpanUnits, Main.RailCount,
+				MainMaximumX - MainMinimumX, MainMaximumY - MainMinimumY);
+			return false;
+		}
+
+		// Ownership alone is insufficient: overlapping mains can assign a child to
+		// one main while another main's raised square physically encloses it. Such
+		// foreign children must constrain the raise as well, otherwise their hollow
+		// branch is buried even though the semantic support DAG remains unchanged.
+		TArray<int32> InfluencedChildren = BoundChildren;
+		TArray<int32> ForeignChildren;
+		const FBox SquareFootprint(
+			Position(SquareXStations[0] * BlockUnitsCM,
+				SquareYStations[0] * BlockUnitsCM, 0.0),
+			Position(SquareXStations.Last() * BlockUnitsCM,
+				SquareYStations.Last() * BlockUnitsCM, 0.0));
+		for (const FCoreCellPlan& Child : Plan.CoreCells)
+		{
+			if (Child.HierarchyRole != ECoreHierarchyRole::TowerChild
+				|| Child.ComponentId != Main.ComponentId
+				|| Child.PodiumMainCoreCellId == Main.CoreCellId)
+			{
+				continue;
+			}
+			const double XOverlap = FMath::Min(
+				SquareFootprint.Max.X, Child.LocalBounds.Max.X)
+				- FMath::Max(SquareFootprint.Min.X, Child.LocalBounds.Min.X);
+			const double YOverlap = FMath::Min(
+				SquareFootprint.Max.Y, Child.LocalBounds.Max.Y)
+				- FMath::Max(SquareFootprint.Min.Y, Child.LocalBounds.Min.Y);
+			if (XOverlap > GeometryToleranceCM
+				&& YOverlap > GeometryToleranceCM)
+			{
+				InfluencedChildren.AddUnique(Child.CoreCellId);
+				ForeignChildren.Add(Child.CoreCellId);
+			}
+		}
+		InfluencedChildren.Sort();
+		ForeignChildren.Sort();
+		int32 ApprovedTop = MAX_int32;
+		for (const FCoreCellPlan& Child : Plan.CoreCells)
+		{
+			if (InfluencedChildren.Contains(Child.CoreCellId))
+			{
+				ApprovedTop = FMath::Min(
+					ApprovedTop, Child.LocalPodiumTopCourseIndex);
+			}
+		}
+		ApprovedTop = FMath::Max(Main.TopCourseIndex, ApprovedTop);
+		if (ApprovedTop == Main.TopCourseIndex)
+		{
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-Beam-C3V3][RaisedMainSuppressed]")
+				TEXT(" Component=%d Main=%d Original=%d Bound=%s Influenced=%s Foreign=%s Reason=SpatialInfluenceMinimum"),
+				Main.ComponentId, Main.CoreCellId, Main.TopCourseIndex,
+				*FString::JoinBy(BoundChildren, TEXT(","),
+					[](const int32 Value) { return FString::FromInt(Value); }),
+				*FString::JoinBy(InfluencedChildren, TEXT(","),
+					[](const int32 Value) { return FString::FromInt(Value); }),
+				*FString::JoinBy(ForeignChildren, TEXT(","),
+					[](const int32 Value) { return FString::FromInt(Value); }));
+			continue;
+		}
+
+		FABTSM73DAG5BV2RaisedMainReservation& Reservation =
+			OutReservations.AddDefaulted_GetRef();
+		Reservation.ComponentId = Main.ComponentId;
+		Reservation.PodiumMainCoreCellId = Main.CoreCellId;
+		Reservation.OriginalTopCourse = Main.TopCourseIndex;
+		Reservation.ApprovedTopCourse = ApprovedTop;
+		Reservation.SourceVolumeId = Main.BodySourceVolumeId;
+		Reservation.XStations = MoveTemp(SquareXStations);
+		Reservation.YStations = MoveTemp(SquareYStations);
+		Reservation.CoreBounds = FBox(
+			Position(Reservation.XStations[0] * BlockUnitsCM,
+				Reservation.YStations[0] * BlockUnitsCM, Main.LocalBounds.Max.Z),
+			Position(Reservation.XStations.Last() * BlockUnitsCM,
+				Reservation.YStations.Last() * BlockUnitsCM,
+				Plan.Components[Main.ComponentId].GroundPlaneZCM
+					+ ApprovedTop * BlockUnitsCM));
+		Reservation.CoreBounds.Min.Z = Main.LocalBounds.Max.Z;
+		Reservation.ClearanceBounds = Reservation.CoreBounds.ExpandBy(
+			FVector(BlockUnitsCM, BlockUnitsCM, 0.0));
+		Reservation.BoundTowerChildCoreCellIds = MoveTemp(BoundChildren);
+		Reservation.BoundTowerChildCoreCellIds.Sort();
+		Reservation.InfluencedTowerChildCoreCellIds =
+			MoveTemp(InfluencedChildren);
+		Reservation.ForeignTowerChildCoreCellIds = MoveTemp(ForeignChildren);
+	}
+	OutReservations.Sort([](
+		const FABTSM73DAG5BV2RaisedMainReservation& A,
+		const FABTSM73DAG5BV2RaisedMainReservation& B)
+	{
+		return A.ComponentId != B.ComponentId
+			? A.ComponentId < B.ComponentId
+			: A.PodiumMainCoreCellId < B.PodiumMainCoreCellId;
+	});
+	return true;
 }
 
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateForStage(

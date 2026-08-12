@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "ABTSM73BeamAGenerator.h"
+#include "ABTSM73DAG5BShapeGrammarV2.h"
 #include "Building/ABTSM73BeamD1Types.h"
 
 namespace ABTSM73BeamC3V3
@@ -640,6 +641,10 @@ namespace ABTSM73BeamC3V3
 		bool bNegativeSharedEndpoint = false;
 		/** Semantic lineage only; never interpreted as a suspended bearing seat. */
 		int32 PodiumMainCoreCellId = INDEX_NONE;
+		/** PodiumMain only: exclusive top of the Stage-0 reserved square section. */
+		int32 RaisedPodiumMainTopCourseIndex = 0;
+		/** PodiumMain only: semantic reservation consumed by the raised courses. */
+		FBox RaisedPodiumMainReservationBounds = FBox(EForceInit::ForceInit);
 		/** TowerChild only: the selected local podium region consumed by this
 		 * independently grounded cell. */
 		int32 LocalPodiumHeightRegionId = INDEX_NONE;
@@ -784,6 +789,8 @@ namespace ABTSM73BeamC3V3
 		int32 RaisedLocalPodiumHeightRegionCount = 0;
 		int32 AppliedLocalPodiumHeightRegionCount = 0;
 		int32 LocalPodiumLegMemberCount = 0;
+		int32 RaisedPodiumMainReservationCount = 0;
+		int32 RaisedPodiumMainMemberCount = 0;
 		int32 CoreMergeRegionCount = 0;
 		int32 MergedGroundComponentCount = 0;
 		int32 MaximumCoreRailCount = 0;
@@ -906,6 +913,7 @@ namespace ABTSM73BeamC3V3
 		TArray<FLocalPodiumHeightCandidateDiagnostic>
 			LocalPodiumHeightCandidates;
 		TArray<FLocalPodiumHeightRegionDiagnostic> LocalPodiumHeightRegions;
+		TArray<FABTSM73DAG5BV2RaisedMainReservation> RaisedMainReservations;
 		TArray<FCoreCellPlan> CoreCells;
 		TArray<FSharedEndpointReachabilityDiagnostic>
 			SharedEndpointReachabilityDiagnostics;

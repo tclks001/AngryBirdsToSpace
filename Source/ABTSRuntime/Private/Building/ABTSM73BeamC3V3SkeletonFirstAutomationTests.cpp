@@ -3237,6 +3237,79 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 				&& Plan.Summary.LocalPodiumLegMemberCount > 0
 			: Plan.Summary.AppliedLocalPodiumHeightRegionCount == 0
 				&& Plan.Summary.LocalPodiumLegMemberCount == 0);
+	bool bRaisedMainReservationsClose = true;
+	int32 CountedRaisedMembers = 0;
+	for (const FABTSM73DAG5BV2RaisedMainReservation& Reservation
+		: Plan.RaisedMainReservations)
+	{
+		const ABTSM73BeamC3V3::FCoreCellPlan* Main =
+			SkeletonV3TestFindCore(Plan, Reservation.PodiumMainCoreCellId);
+		int32 MinimumChildSplit = MAX_int32;
+		int32 BoundChildCount = 0;
+		int32 InfluencedChildCount = 0;
+		for (const ABTSM73BeamC3V3::FCoreCellPlan& Child : Plan.CoreCells)
+		{
+			if (Child.HierarchyRole
+					== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+				&& Reservation.InfluencedTowerChildCoreCellIds.Contains(
+					Child.CoreCellId))
+			{
+				MinimumChildSplit = FMath::Min(
+					MinimumChildSplit, Child.LocalPodiumTopCourseIndex);
+				++InfluencedChildCount;
+			}
+			BoundChildCount += Main != nullptr
+				&& Child.HierarchyRole
+					== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+				&& Child.PodiumMainCoreCellId == Main->CoreCellId ? 1 : 0;
+		}
+		const double CoreSpanX = Reservation.CoreBounds.GetSize().X;
+		const double CoreSpanY = Reservation.CoreBounds.GetSize().Y;
+		bRaisedMainReservationsClose &= Main != nullptr
+			&& Main->HierarchyRole
+				== ABTSM73BeamC3V3::ECoreHierarchyRole::PodiumMain
+			&& Main->ComponentId == Reservation.ComponentId
+			&& BoundChildCount == Reservation.BoundTowerChildCoreCellIds.Num()
+			&& InfluencedChildCount
+				== Reservation.InfluencedTowerChildCoreCellIds.Num()
+			&& MinimumChildSplit == Reservation.ApprovedTopCourse
+			&& Main->RaisedPodiumMainTopCourseIndex
+				== Reservation.ApprovedTopCourse
+			&& Main->TopCourseIndex == Reservation.ApprovedTopCourse
+			&& Main->RaisedPodiumMainReservationBounds.Equals(
+				Reservation.CoreBounds, KINDA_SMALL_NUMBER)
+			&& FMath::Abs(CoreSpanX - CoreSpanY) <= 36.0 + KINDA_SMALL_NUMBER
+			&& FMath::Abs(Reservation.ClearanceBounds.Min.X
+				- (Reservation.CoreBounds.Min.X - 36.0)) <= KINDA_SMALL_NUMBER
+			&& FMath::Abs(Reservation.ClearanceBounds.Max.X
+				- (Reservation.CoreBounds.Max.X + 36.0)) <= KINDA_SMALL_NUMBER
+			&& FMath::Abs(Reservation.ClearanceBounds.Min.Y
+				- (Reservation.CoreBounds.Min.Y - 36.0)) <= KINDA_SMALL_NUMBER
+			&& FMath::Abs(Reservation.ClearanceBounds.Max.Y
+				- (Reservation.CoreBounds.Max.Y + 36.0)) <= KINDA_SMALL_NUMBER
+			&& Main->MemberIndices.Num()
+				== Main->TopCourseIndex * Main->RailCount;
+		CountedRaisedMembers += Main != nullptr
+			? (Reservation.ApprovedTopCourse - Reservation.OriginalTopCourse)
+				* Main->RailCount : 0;
+		AddInfo(FString::Printf(
+			TEXT("Stage1RaisedMainReservation:%s:Component=%d:Main=%d:Original=%d:Approved=%d:Bound=%d:Influenced=%d:Foreign=%d:Core=%s:Clearance=%s"),
+			*Prefix, Reservation.ComponentId,
+			Reservation.PodiumMainCoreCellId,
+			Reservation.OriginalTopCourse,
+			Reservation.ApprovedTopCourse,
+			Reservation.BoundTowerChildCoreCellIds.Num(),
+			Reservation.InfluencedTowerChildCoreCellIds.Num(),
+			Reservation.ForeignTowerChildCoreCellIds.Num(),
+			*Reservation.CoreBounds.ToString(),
+			*Reservation.ClearanceBounds.ToString()));
+	}
+	Check(TEXT("materializes every raised-main reservation as a square core"),
+		bRaisedMainReservationsClose
+			&& Plan.Summary.RaisedPodiumMainReservationCount
+				== Plan.RaisedMainReservations.Num()
+			&& Plan.Summary.RaisedPodiumMainMemberCount
+				== CountedRaisedMembers);
 	for (const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region
 		: Plan.LocalPodiumHeightRegions)
 	{
@@ -4299,8 +4372,121 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			continue;
 		}
 		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+		TestTrue(*FString::Printf(
+			TEXT("Seed %d reserves at least one raised PodiumMain in Stage 0"), Seed),
+			!Plan.RaisedMainReservations.IsEmpty());
+		int32 CountedRaisedMembers = 0;
+		for (const FABTSM73DAG5BV2RaisedMainReservation& Reservation
+			: Plan.RaisedMainReservations)
+		{
+			const ABTSM73BeamC3V3::FCoreCellPlan* Main =
+				SkeletonV3TestFindCore(Plan, Reservation.PodiumMainCoreCellId);
+			int32 MinimumChildSplit = MAX_int32;
+			int32 BoundChildCount = 0;
+			int32 InfluencedChildCount = 0;
+			for (const ABTSM73BeamC3V3::FCoreCellPlan& Child : Plan.CoreCells)
+			{
+				if (Child.HierarchyRole
+						== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+					&& Reservation.InfluencedTowerChildCoreCellIds.Contains(
+						Child.CoreCellId))
+				{
+					MinimumChildSplit = FMath::Min(
+						MinimumChildSplit, Child.LocalPodiumTopCourseIndex);
+					++InfluencedChildCount;
+				}
+				BoundChildCount += Main != nullptr
+					&& Child.HierarchyRole
+						== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+					&& Child.PodiumMainCoreCellId == Main->CoreCellId ? 1 : 0;
+			}
+			const bool bReservationCloses = Main != nullptr
+				&& Main->TopCourseIndex == Reservation.ApprovedTopCourse
+				&& Main->RaisedPodiumMainTopCourseIndex
+					== Reservation.ApprovedTopCourse
+				&& Main->RaisedPodiumMainReservationBounds.Equals(
+					Reservation.CoreBounds, KINDA_SMALL_NUMBER)
+				&& MinimumChildSplit == Reservation.ApprovedTopCourse
+				&& BoundChildCount
+					== Reservation.BoundTowerChildCoreCellIds.Num()
+				&& InfluencedChildCount
+					== Reservation.InfluencedTowerChildCoreCellIds.Num()
+				&& FMath::Abs(Reservation.CoreBounds.GetSize().X
+					- Reservation.CoreBounds.GetSize().Y)
+					<= 36.0 + KINDA_SMALL_NUMBER
+				&& FMath::Abs(Reservation.ClearanceBounds.GetSize().X
+					- Reservation.CoreBounds.GetSize().X - 72.0)
+					<= KINDA_SMALL_NUMBER
+				&& FMath::Abs(Reservation.ClearanceBounds.GetSize().Y
+					- Reservation.CoreBounds.GetSize().Y - 72.0)
+					<= KINDA_SMALL_NUMBER;
+			AddInfo(FString::Printf(
+				TEXT("TipOverE6RaisedMain:Seed=%d:Main=%d:Reservation=%d->%d:FinalTop=%d:FinalRaisedTop=%d:MinimumInfluencedSplit=%d:Bound=%d/%d:Influenced=%d/%d:Foreign=%s:CoreSpan=%.3fx%.3f:ClearanceSpan=%.3fx%.3f"),
+				Seed, Reservation.PodiumMainCoreCellId,
+				Reservation.OriginalTopCourse, Reservation.ApprovedTopCourse,
+				Main != nullptr ? Main->TopCourseIndex : INDEX_NONE,
+				Main != nullptr ? Main->RaisedPodiumMainTopCourseIndex : INDEX_NONE,
+				MinimumChildSplit, BoundChildCount,
+				Reservation.BoundTowerChildCoreCellIds.Num(),
+				InfluencedChildCount,
+				Reservation.InfluencedTowerChildCoreCellIds.Num(),
+				*JoinIds(Reservation.ForeignTowerChildCoreCellIds),
+				Reservation.CoreBounds.GetSize().X,
+				Reservation.CoreBounds.GetSize().Y,
+				Reservation.ClearanceBounds.GetSize().X,
+				Reservation.ClearanceBounds.GetSize().Y));
+			TestTrue(*FString::Printf(
+				TEXT("Seed %d raises main %d to the minimum spatially influenced child split"),
+				Seed, Reservation.PodiumMainCoreCellId), bReservationCloses);
+			CountedRaisedMembers += Main != nullptr
+				? (Reservation.ApprovedTopCourse
+					- Reservation.OriginalTopCourse) * Main->RailCount : 0;
+		}
+		TestEqual(*FString::Printf(
+			TEXT("Seed %d materializes every Stage-0 raised-main reservation"), Seed),
+			Plan.Summary.RaisedPodiumMainReservationCount,
+			Plan.RaisedMainReservations.Num());
+		TestEqual(*FString::Printf(
+			TEXT("Seed %d accounts every raised-main course member"), Seed),
+			Plan.Summary.RaisedPodiumMainMemberCount, CountedRaisedMembers);
 		if (Seed == 750000)
 		{
+			const bool bHasIncorrectRightRaisedMain =
+				Plan.RaisedMainReservations.ContainsByPredicate(
+					[](const FABTSM73DAG5BV2RaisedMainReservation& Reservation)
+					{
+						return Reservation.PodiumMainCoreCellId == 1
+							|| Reservation.PodiumMainCoreCellId == 3;
+					});
+			TestFalse(TEXT("TipOver 750000 does not raise either overlapping east main above foreign children"),
+				bHasIncorrectRightRaisedMain);
+			TestEqual(TEXT("TipOver 750000 keeps only the two spatially legal raised mains"),
+				Plan.RaisedMainReservations.Num(), 2);
+			int32 RaisedSemanticVolumeCount = 0;
+			bool bRaisedSemanticVolumesMatchOccupiedCore = true;
+			for (const FABTSM73DAG5BV2Volume& Volume : Result.Silhouette.Volumes)
+			{
+				if (!Volume.DerivationPath.Contains(TEXT("/RaisedMainReservation/")))
+				{
+					continue;
+				}
+				++RaisedSemanticVolumeCount;
+				const FABTSM73DAG5BV2RaisedMainReservation* Reservation =
+					Plan.RaisedMainReservations.FindByPredicate(
+						[&Volume](const FABTSM73DAG5BV2RaisedMainReservation& Candidate)
+						{
+							return Candidate.SourceVolumeId == Volume.VolumeId;
+						});
+				bRaisedSemanticVolumesMatchOccupiedCore &= Reservation != nullptr
+					&& Volume.LocalBounds.Equals(
+						Reservation->CoreBounds, KINDA_SMALL_NUMBER)
+					&& !Volume.LocalBounds.Equals(
+						Reservation->ClearanceBounds, KINDA_SMALL_NUMBER);
+			}
+			TestEqual(TEXT("TipOver 750000 publishes one occupied semantic Body per legal raised main"),
+				RaisedSemanticVolumeCount, Plan.RaisedMainReservations.Num());
+			TestTrue(TEXT("TipOver 750000 keeps side clearance non-solid in the WFC envelope"),
+				bRaisedSemanticVolumesMatchOccupiedCore);
 			for (const ABTSM73BeamC3V3::FSemanticSupportVolumeNodeDiagnostic& Node
 				: Plan.SemanticSupportVolumeNodes)
 			{
@@ -4321,7 +4507,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			}
 		}
 		AddInfo(FString::Printf(
-			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:LocalPodiumCandidates=%d:RejectedLocalPodiumCandidates=%d:LocalPodiumRegions=%d:RaisedLocalPodiumRegions=%d:AppliedLocalPodiumRegions=%d:LocalPodiumLegMembers=%d:LocalPodiumHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
+			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:LocalPodiumCandidates=%d:RejectedLocalPodiumCandidates=%d:LocalPodiumRegions=%d:RaisedLocalPodiumRegions=%d:AppliedLocalPodiumRegions=%d:LocalPodiumLegMembers=%d:RaisedMainReservations=%d:RaisedMainMembers=%d:LocalPodiumHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
 			Seed, Plan.Summary.PodiumMainCoreCellCount,
 			Plan.Summary.TowerChildCoreCellCount,
 			Plan.Summary.RequiredTerminalBranchCount,
@@ -4344,6 +4530,8 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			Plan.Summary.RaisedLocalPodiumHeightRegionCount,
 			Plan.Summary.AppliedLocalPodiumHeightRegionCount,
 			Plan.Summary.LocalPodiumLegMemberCount,
+			Plan.Summary.RaisedPodiumMainReservationCount,
+			Plan.Summary.RaisedPodiumMainMemberCount,
 			Plan.Summary.LocalPodiumHeightPlanHash,
 			Plan.Summary.FinalGeometryHash,
 			Plan.Summary.TerminalDemandMilliseconds,

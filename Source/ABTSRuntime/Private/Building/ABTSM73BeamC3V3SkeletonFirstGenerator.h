@@ -33,6 +33,15 @@ public:
 		ABTSM73BeamC3V3::FGenerationResult& OutResult,
 		FString& OutError) const;
 
+	/** First pass for the Stage-0 feedback loop. It emits no new semantic volume
+	 * and no final result: only deterministic square main reservations derived
+	 * from the accepted local podium-height plan. */
+	bool BuildRaisedMainReservations(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		TArray<FABTSM73DAG5BV2RaisedMainReservation>& OutReservations,
+		FString& OutError) const;
+
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Exercises the production 10-second Stage-1 fail-closed budget without waiting. */
 	bool ValidateStage1TimingBudgetForTesting(

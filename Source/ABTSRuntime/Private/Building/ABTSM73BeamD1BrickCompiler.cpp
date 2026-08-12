@@ -50,6 +50,122 @@ namespace ABTSM73BeamD1
 			&& FMath::IsFinite(Box.Max.Z);
 	}
 
+	bool AppendRaisedMainReservations(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		FABTSM73DAG5BV2GenerationResult& Silhouette,
+		FString& OutError)
+	{
+		TArray<FABTSM73DAG5BV2RaisedMainReservation> Reservations;
+		if (!FABTSM73BeamC3V3SkeletonFirstGenerator()
+			.BuildRaisedMainReservations(
+				Profile, Silhouette, Reservations, OutError))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3RaisedMainReservationPlan:%s"), *OutError);
+			return false;
+		}
+		Silhouette.RaisedMainReservations = Reservations;
+		if (Reservations.IsEmpty())
+		{
+			return true;
+		}
+		int32 NextVolumeId = 0;
+		for (const FABTSM73DAG5BV2Volume& Volume : Silhouette.Volumes)
+		{
+			NextVolumeId = FMath::Max(NextVolumeId, Volume.VolumeId + 1);
+		}
+		FString ReservationCanonical;
+		for (FABTSM73DAG5BV2RaisedMainReservation& Reservation :
+			Silhouette.RaisedMainReservations)
+		{
+			const FABTSM73DAG5BV2Volume* Source =
+				Silhouette.Volumes.FindByPredicate(
+					[&Reservation](const FABTSM73DAG5BV2Volume& Volume)
+					{
+						return Volume.VolumeId == Reservation.SourceVolumeId;
+					});
+			if (Source == nullptr || !Reservation.CoreBounds.IsValid
+				|| !Reservation.ClearanceBounds.IsValid
+				|| Reservation.ApprovedTopCourse
+					<= Reservation.OriginalTopCourse)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3RaisedMainReservationInvalid:Component=%d:Main=%d:Source=%d:Original=%d:Approved=%d"),
+					Reservation.ComponentId,
+					Reservation.PodiumMainCoreCellId,
+					Reservation.SourceVolumeId,
+					Reservation.OriginalTopCourse,
+					Reservation.ApprovedTopCourse);
+				return false;
+			}
+			FABTSM73DAG5BV2Volume& Volume =
+				Silhouette.Volumes.AddDefaulted_GetRef();
+			Volume.VolumeId = NextVolumeId++;
+			Volume.GrammarDepth = Source->GrammarDepth;
+			// Only the square occupied by the raised main is a semantic Body.
+			// ClearanceBounds is a non-solid reservation for later side coupling;
+			// publishing it as Body erases intentional hollow branches in Stage 0.
+			Volume.LocalBounds = Reservation.CoreBounds;
+			Volume.Role = EABTSM73DAG5BV2VolumeRole::Body;
+			Volume.Primitive = EABTSM73DAG5BV2Primitive::Box;
+			Volume.DerivationPath = Source->DerivationPath
+				+ FString::Printf(TEXT("/RaisedMainReservation/C%dM%d"),
+					Reservation.ComponentId,
+					Reservation.PodiumMainCoreCellId);
+			Reservation.SourceVolumeId = Volume.VolumeId;
+			Silhouette.GrammarTrace.Add(FString::Printf(
+				TEXT("RaisedMainReservation C%d M%d %d->%d Occupied=%s Clearance=%s Influenced=%s Foreign=%s"),
+				Reservation.ComponentId, Reservation.PodiumMainCoreCellId,
+				Reservation.OriginalTopCourse,
+				Reservation.ApprovedTopCourse,
+				*Reservation.CoreBounds.ToString(),
+				*Reservation.ClearanceBounds.ToString(),
+				*FString::JoinBy(Reservation.InfluencedTowerChildCoreCellIds,
+					TEXT(","), [](const int32 Value)
+					{ return FString::FromInt(Value); }),
+				*FString::JoinBy(Reservation.ForeignTowerChildCoreCellIds,
+					TEXT(","), [](const int32 Value)
+					{ return FString::FromInt(Value); })));
+			ReservationCanonical += FString::Printf(
+				TEXT("|R=%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,C=%.3f,%.3f,%.3f,%.3f,I=%s,F=%s"),
+				Reservation.ComponentId,
+				Reservation.PodiumMainCoreCellId,
+				Reservation.OriginalTopCourse,
+				Reservation.ApprovedTopCourse,
+				Reservation.SourceVolumeId,
+				Reservation.CoreBounds.Min.X,
+				Reservation.CoreBounds.Min.Y,
+				Reservation.CoreBounds.Min.Z,
+				Reservation.CoreBounds.Max.X,
+				Reservation.CoreBounds.Max.Y,
+				Reservation.CoreBounds.Max.Z,
+				Reservation.ClearanceBounds.Min.X,
+				Reservation.ClearanceBounds.Min.Y,
+				Reservation.ClearanceBounds.Max.X,
+				Reservation.ClearanceBounds.Max.Y,
+				*FString::JoinBy(Reservation.InfluencedTowerChildCoreCellIds,
+					TEXT("."), [](const int32 Value)
+					{ return FString::FromInt(Value); }),
+				*FString::JoinBy(Reservation.ForeignTowerChildCoreCellIds,
+					TEXT("."), [](const int32 Value)
+					{ return FString::FromInt(Value); }));
+		}
+		Silhouette.Summary.VolumeCount = Silhouette.Volumes.Num();
+		Silhouette.Summary.BoxCount += Reservations.Num();
+		Silhouette.Summary.GrammarHash = static_cast<int64>(FCrc::StrCrc32(
+			*FString::Printf(TEXT("%lld%s"),
+				Silhouette.Summary.GrammarHash, *ReservationCanonical)));
+		Silhouette.Summary.WFCHash = static_cast<int64>(FCrc::StrCrc32(
+			*FString::Printf(TEXT("%lld%s"),
+				Silhouette.Summary.WFCHash, *ReservationCanonical)));
+		Silhouette.Summary.ResultHash = static_cast<int64>(FCrc::StrCrc32(
+			*FString::Printf(TEXT("Grammar=%lld|WFC=%lld|Volumes=%d"),
+				Silhouette.Summary.GrammarHash,
+				Silhouette.Summary.WFCHash,
+				Silhouette.Summary.VolumeCount)));
+		return true;
+	}
+
 	FString SemanticRootPath(const FString& Path)
 	{
 		TArray<FString> Parts;
@@ -2621,6 +2737,13 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SemanticPyramidCount = OutResult.Silhouette.Summary.PyramidCount;
 	Summary.SupportedSpanCount = OutResult.Silhouette.Summary.SupportedSpanCount;
 	Summary.bPhysicalStabilityEvaluated = false;
+	if (!ABTSM73BeamD1::AppendRaisedMainReservations(
+		SelectedProfile, OutResult.Silhouette, OutError))
+	{
+		return false;
+	}
+	Summary.SemanticVolumeCount = OutResult.Silhouette.Summary.VolumeCount;
+	Summary.SemanticBoxCount = OutResult.Silhouette.Summary.BoxCount;
 	if (StopStage == EABTSM73BeamC3GenerationStage::SemanticEnvelope)
 	{
 		Summary.SkeletonFirstEnvelopeHash =

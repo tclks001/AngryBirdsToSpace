@@ -1257,6 +1257,21 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
 			{
 				if (Core.HierarchyRole
+						== ABTSM73BeamC3V3::ECoreHierarchyRole::PodiumMain
+					&& Core.RaisedPodiumMainReservationBounds.IsValid
+					&& Core.RaisedPodiumMainTopCourseIndex
+						> Core.BodyTopCourseIndex)
+				{
+					FBox GroundMainBounds = Core.LocalBounds;
+					GroundMainBounds.Max.Z =
+						Core.RaisedPodiumMainReservationBounds.Min.Z;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview, GroundMainBounds);
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview,
+						Core.RaisedPodiumMainReservationBounds);
+				}
+				else if (Core.HierarchyRole
 						== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
 					&& Core.LocalPodiumHeightRegionId != INDEX_NONE
 					&& Core.LocalPodiumTopCourseIndex > 0
@@ -1399,7 +1414,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" Volumes=%d SupportNodes=%d LoadBranches=%d MultiBranchBodies=%d UnrepresentedBranches=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 			TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
-			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d AppliedLocalPodiumRegions=%d LocalPodiumLegMembers=%d LocalPodiumHash=%lld")
+			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d AppliedLocalPodiumRegions=%d LocalPodiumLegMembers=%d RaisedMainReservations=%d RaisedMainMembers=%d LocalPodiumHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
@@ -1437,6 +1452,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.RaisedLocalPodiumHeightRegionCount,
 			StageResult.Skeleton.Plan.Summary.AppliedLocalPodiumHeightRegionCount,
 			StageResult.Skeleton.Plan.Summary.LocalPodiumLegMemberCount,
+			StageResult.Skeleton.Plan.Summary.RaisedPodiumMainReservationCount,
+			StageResult.Skeleton.Plan.Summary.RaisedPodiumMainMemberCount,
 			StageResult.Skeleton.Plan.Summary.LocalPodiumHeightPlanHash,
 			StageResult.Skeleton.Plan.CoreCells.Num(),
 			StageResult.Skeleton.Plan.Summary.PodiumMainCoreCellCount,
