@@ -152,12 +152,10 @@ FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 	case EABTSStylizedRenderProfile::SatelliteGuide:
 		Parameters.StarCellProbability = 0.014f;
 		Parameters.StarHDRIntensity = 2.1f;
-		Parameters.FixedExposureBias = -0.10f;
 		break;
 	case EABTSStylizedRenderProfile::FinaleSpace:
 		Parameters.StarCellProbability = 0.016f;
 		Parameters.StarHDRIntensity = 2.5f;
-		Parameters.FixedExposureBias = -0.20f;
 		break;
 	case EABTSStylizedRenderProfile::GroundDay:
 	default:
@@ -165,7 +163,6 @@ FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 		// Manual 0 EV underexposes the authored ground lighting. Keep a modest,
 		// reproducible lift; sky scattering remains an independent environment
 		// layer and must not be compensated by washing out object albedo.
-		Parameters.FixedExposureBias = 0.75f;
 		// UE's Earth-scale VolumetricCloud material becomes either empty or a
 		// uniform grey veil at this gameplay planet scale. T4-A2R0 therefore uses
 		// three deterministic, bounded low-poly cloud islands. These values define
@@ -186,6 +183,7 @@ FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 		Parameters.CloudViewSampleCountScale = 1.0f;
 		break;
 	}
+	Parameters.FixedExposureBias = GetFixedExposureBias(Profile);
 	return Parameters;
 }
 
@@ -223,7 +221,22 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 58;
+	return 63;
+}
+
+float FABTSStylizedRenderingControl::GetFixedExposureBias(
+	const EABTSStylizedRenderProfile Profile)
+{
+	switch (Profile)
+	{
+	case EABTSStylizedRenderProfile::SatelliteGuide:
+		return -0.10f;
+	case EABTSStylizedRenderProfile::FinaleSpace:
+		return -0.20f;
+	case EABTSStylizedRenderProfile::GroundDay:
+	default:
+		return 0.75f;
+	}
 }
 
 bool FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(

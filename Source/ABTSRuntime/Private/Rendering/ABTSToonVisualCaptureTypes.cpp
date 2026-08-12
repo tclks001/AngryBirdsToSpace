@@ -48,6 +48,43 @@ namespace ABTSToonCaptureTypes
 		}
 		return false;
 	}
+
+	bool ParseNameList(
+		const TCHAR* CommandLine,
+		const TCHAR* Key,
+		TArray<FName>& OutNames,
+		FString* OutFailure)
+	{
+		OutNames.Reset();
+		FString Value;
+		if (!FParse::Value(CommandLine, Key, Value))
+		{
+			return true;
+		}
+		TArray<FString> Tokens;
+		// FParse::Value treats comma as a value terminator. '+' remains inside
+		// one command-line token on every supported launch path.
+		Value.ParseIntoArray(Tokens, TEXT("+"), false);
+		TSet<FName> UniqueNames;
+		for (FString& Token : Tokens)
+		{
+			Token.TrimStartAndEndInline();
+			const FName Name(*Token);
+			if (Name.IsNone() || UniqueNames.Contains(Name))
+			{
+				return Fail(
+					OutFailure,
+					TEXT("Capture filter contains an empty or duplicate name."));
+			}
+			UniqueNames.Add(Name);
+			OutNames.Add(Name);
+		}
+		if (OutNames.IsEmpty())
+		{
+			return Fail(OutFailure, TEXT("Capture filter is empty."));
+		}
+		return true;
+	}
 }
 
 bool FABTSToonVisualCaptureRunConfig::Parse(
@@ -142,6 +179,10 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		OutConfig.GPUProfileSamplesPerVariant);
 	FParse::Value(
 		CommandLine,
+		TEXT("ABTSToonT0ScreenPercentage="),
+		OutConfig.ExpectedScreenPercentage);
+	FParse::Value(
+		CommandLine,
 		TEXT("ABTSToonT0TimeoutSeconds="),
 		OutConfig.TimeoutSeconds);
 	FParse::Value(
@@ -159,6 +200,21 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		!FParse::Param(CommandLine, TEXT("ABTSToonT0KeepWorldRunning"));
 	OutConfig.bExitWhenComplete =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0ExitWhenDone"));
+	OutConfig.bDisableLowPolyCloudsForPerformanceBaseline =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A2DisableClouds"));
+	if (!ABTSToonCaptureTypes::ParseNameList(
+		CommandLine,
+		TEXT("ABTSToonT0PointIds="),
+		OutConfig.RequestedPointIds,
+		OutFailure)
+		|| !ABTSToonCaptureTypes::ParseNameList(
+			CommandLine,
+			TEXT("ABTSToonT0VariantIds="),
+			OutConfig.RequestedVariantIds,
+			OutFailure))
+	{
+		return false;
+	}
 
 	return OutConfig.IsValid(OutFailure);
 }
@@ -194,6 +250,13 @@ bool FABTSToonVisualCaptureRunConfig::IsValid(FString* OutFailure) const
 			OutFailure,
 			TEXT("GPUProfileSamplesPerVariant must be in [1, 10]."));
 	}
+	if (ExpectedScreenPercentage != 0
+		&& (ExpectedScreenPercentage < 25 || ExpectedScreenPercentage > 200))
+	{
+		return ABTSToonCaptureTypes::Fail(
+			OutFailure,
+			TEXT("ExpectedScreenPercentage must be in [25, 200]."));
+	}
 	if (!FMath::IsFinite(TimeoutSeconds)
 		|| TimeoutSeconds < 5.0
 		|| TimeoutSeconds > 1800.0)
@@ -214,6 +277,14 @@ bool FABTSToonVisualCaptureRunConfig::IsValid(FString* OutFailure) const
 		return ABTSToonCaptureTypes::Fail(
 			OutFailure,
 			TEXT("ToonT4A0 is a screenshot isolation suite; GPU profiling begins in T4-A1."));
+	}
+	if (bDisableLowPolyCloudsForPerformanceBaseline
+		&& (Suite != EABTSToonVisualCaptureSuite::ToonT4A2
+			|| Mode != EABTSToonVisualCaptureMode::GPUProfile))
+	{
+		return ABTSToonCaptureTypes::Fail(
+			OutFailure,
+			TEXT("The cloud-disabled baseline is restricted to ToonT4A2 GPUProfile."));
 	}
 	return true;
 }

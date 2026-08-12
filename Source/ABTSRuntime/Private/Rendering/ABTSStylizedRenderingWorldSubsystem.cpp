@@ -1868,8 +1868,9 @@ void UABTSStylizedRenderingWorldSubsystem::UpdateCloudTraversalVisibility(
 	UWorld* World = GetWorld();
 	if (World == nullptr
 		|| !LowPolyCloudPrototypeActor.IsValid()
-		|| LowPolyCloudDefinitions.Num() != LowPolyCloudMaterials.Num()
-		|| LowPolyCloudDefinitions.Num() != LowPolyCloudTraversalStrengths.Num())
+		|| LowPolyCloudDefinitions.IsEmpty()
+		|| LowPolyCloudMaterials.Num() != 1
+		|| LowPolyCloudTraversalStrengths.Num() != 1)
 	{
 		return;
 	}
@@ -1892,17 +1893,14 @@ void UABTSStylizedRenderingWorldSubsystem::UpdateCloudTraversalVisibility(
 		: nullptr;
 	if (!IsValid(CameraManager) || !IsValid(ControlledBird))
 	{
-		for (int32 Index = 0; Index < LowPolyCloudMaterials.Num(); ++Index)
+		LowPolyCloudTraversalStrengths[0] = 0.0f;
+		if (UMaterialInstanceDynamic* Material =
+			LowPolyCloudMaterials[0].Get())
 		{
-			LowPolyCloudTraversalStrengths[Index] = 0.0f;
-			if (UMaterialInstanceDynamic* Material =
-				LowPolyCloudMaterials[Index].Get())
-			{
-				Material->SetScalarParameterValue(
-					TEXT("ABTS_CloudTraversalActive"), 0.0f);
-				Material->SetScalarParameterValue(
-					TEXT("ABTS_CloudTraversalProtectionActive"), 0.0f);
-			}
+			Material->SetScalarParameterValue(
+				TEXT("ABTS_CloudTraversalActive"), 0.0f);
+			Material->SetScalarParameterValue(
+				TEXT("ABTS_CloudTraversalProtectionActive"), 0.0f);
 		}
 		return;
 	}
@@ -1970,78 +1968,23 @@ void UABTSStylizedRenderingWorldSubsystem::UpdateCloudTraversalVisibility(
 
 	uint64 DiagnosticHash = 1469598103934665603ull;
 	int32 ActiveCloudCount = 0;
+	float SharedTargetStrength = 0.0f;
+	bool bSharedProtectionActive = false;
+	const float CameraRadiusCM = FMath::Clamp(
+		BirdRadiusCM * 1.20f, 250.0f, 500.0f);
+	const float CorridorRadiusCM = FMath::Clamp(
+		BirdRadiusCM * 0.72f, 145.0f, 310.0f);
 	for (int32 Index = 0; Index < LowPolyCloudDefinitions.Num(); ++Index)
 	{
-		UMaterialInstanceDynamic* Material = LowPolyCloudMaterials[Index].Get();
-		if (!IsValid(Material))
-		{
-			continue;
-		}
 		const FABTST4CloudTraversalRelation Relation =
 			FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
 				LowPolyCloudDefinitions[Index],
 				CameraWorld,
 				BirdWorld,
 				BirdRadiusCM);
-		const float TargetStrength = Relation.TraversalWeight;
-		float& Strength = LowPolyCloudTraversalStrengths[Index];
-		if (bCameraCut)
-		{
-			Strength = TargetStrength;
-		}
-		else
-		{
-			const float Speed = TargetStrength > Strength ? 10.0f : 6.0f;
-			Strength = FMath::FInterpTo(
-				Strength, TargetStrength, FMath::Max(0.0f, DeltaTime), Speed);
-		}
-		const float CameraRadiusCM = FMath::Clamp(
-			BirdRadiusCM * 1.20f, 250.0f, 500.0f);
-		const float CorridorRadiusCM = FMath::Clamp(
-			BirdRadiusCM * 0.72f, 145.0f, 310.0f);
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalActive"), Strength);
-		// Hard camera/bird protection is immediate.  Only the noisy outer
-		// corridor interpolates, so a newly-entered cloud cannot cover a bird for
-		// one or two frames while TraversalActive catches up.
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalProtectionActive"),
-			Relation.bTraversalActive ? 1.0f : 0.0f);
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudTraversalCameraWorld"),
-			FLinearColor(CameraWorld.X, CameraWorld.Y, CameraWorld.Z, 0.0f));
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudTraversalBirdWorld"),
-			FLinearColor(BirdWorld.X, BirdWorld.Y, BirdWorld.Z, 0.0f));
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalCameraRadiusCM"), CameraRadiusCM);
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalBirdRadiusCM"), BirdRadiusCM + 65.0f);
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalBirdCount"),
-			static_cast<float>(BirdSpheres.Num()));
-		for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
-		{
-			const FSphere Sphere = BirdSpheres.IsValidIndex(BirdIndex)
-				? BirdSpheres[BirdIndex]
-				: FSphere(FVector::ZeroVector, 1.0);
-			Material->SetVectorParameterValue(
-				*FString::Printf(
-					TEXT("ABTS_CloudTraversalBirdSphere%d"), BirdIndex),
-				FLinearColor(
-					Sphere.Center.X,
-					Sphere.Center.Y,
-					Sphere.Center.Z,
-					Sphere.W));
-		}
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalCorridorRadiusCM"), CorridorRadiusCM);
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalFeatherCM"), 95.0f);
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalRetainedCoverage"), 0.82f);
-		Material->SetScalarParameterValue(
-			TEXT("ABTS_CloudTraversalMaskFrequency"), 0.012f);
+		SharedTargetStrength = FMath::Max(
+			SharedTargetStrength, Relation.TraversalWeight);
+		bSharedProtectionActive |= Relation.bTraversalActive;
 		if (Relation.bTraversalActive)
 		{
 			++ActiveCloudCount;
@@ -2054,6 +1997,66 @@ void UABTSStylizedRenderingWorldSubsystem::UpdateCloudTraversalVisibility(
 				+ (Relation.bBirdInside ? 2 : 0)
 				+ (Relation.bCloudBetweenCameraAndBird ? 4 : 0)));
 	}
+
+	UMaterialInstanceDynamic* SharedMaterial = LowPolyCloudMaterials[0].Get();
+	if (!IsValid(SharedMaterial))
+	{
+		return;
+	}
+	float& SharedStrength = LowPolyCloudTraversalStrengths[0];
+	if (bCameraCut)
+	{
+		SharedStrength = SharedTargetStrength;
+	}
+	else
+	{
+		const float Speed = SharedTargetStrength > SharedStrength ? 10.0f : 6.0f;
+		SharedStrength = FMath::FInterpTo(
+			SharedStrength,
+			SharedTargetStrength,
+			FMath::Max(0.0f, DeltaTime),
+			Speed);
+	}
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalActive"), SharedStrength);
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalProtectionActive"),
+		bSharedProtectionActive ? 1.0f : 0.0f);
+	SharedMaterial->SetVectorParameterValue(
+		TEXT("ABTS_CloudTraversalCameraWorld"),
+		FLinearColor(CameraWorld.X, CameraWorld.Y, CameraWorld.Z, 0.0f));
+	SharedMaterial->SetVectorParameterValue(
+		TEXT("ABTS_CloudTraversalBirdWorld"),
+		FLinearColor(BirdWorld.X, BirdWorld.Y, BirdWorld.Z, 0.0f));
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalCameraRadiusCM"), CameraRadiusCM);
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalBirdRadiusCM"), BirdRadiusCM + 65.0f);
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalBirdCount"),
+		static_cast<float>(BirdSpheres.Num()));
+	for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
+	{
+		const FSphere Sphere = BirdSpheres.IsValidIndex(BirdIndex)
+			? BirdSpheres[BirdIndex]
+			: FSphere(FVector::ZeroVector, 1.0);
+		SharedMaterial->SetVectorParameterValue(
+			*FString::Printf(
+				TEXT("ABTS_CloudTraversalBirdSphere%d"), BirdIndex),
+			FLinearColor(
+				Sphere.Center.X,
+				Sphere.Center.Y,
+				Sphere.Center.Z,
+				Sphere.W));
+	}
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalCorridorRadiusCM"), CorridorRadiusCM);
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalFeatherCM"), 95.0f);
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalRetainedCoverage"), 0.82f);
+	SharedMaterial->SetScalarParameterValue(
+		TEXT("ABTS_CloudTraversalMaskFrequency"), 0.012f);
 	if (DiagnosticHash != LastCloudTraversalDiagnosticHash)
 	{
 		LastCloudTraversalDiagnosticHash = DiagnosticHash;
@@ -2146,18 +2149,22 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][Rendering][T4-A2.3.1][CloudQuality] Route=InstancedCloudletsA2_3_1PerBirdTSRStable Islands=%d LogicalClouds=%d BackgroundClouds=%d TerminatorMegaClouds=%d WeatherSystems=%d MacroClusters=%d Cloudlets=%d Body=%d Crown=%d Edge=%d GlobalCoverage=1 BackgroundSunIndependentPlacement=1 TerminatorMegaSunRelative=1 TerminatorMegaConnected=1 SizeVariation=1 FusionDiagnostics=5 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=MaskedUnlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 LocalSolarHeight=1 NightWhiteningGate=1 NightBrightness=%.2f DayBlend=[%.2f,%.2f] GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 PixelAnimationTSR=1 CloudCompositeStencil=%d CloudToCloudOutlineSuppression=1 CloudToWorldOutlinePreserved=1 BoundedTraversal=1 CameraSphere=1 PerBirdVisualSpheres=4 ImmediateHardProtection=1 CameraBirdCorridor=1 StablePlanarNoiseCoverage=1 RetainedCoverage=0.82 MaskFrequency=0.012 FullScreenVeil=Removed FullTranslucency=0 TraversalAffectsLighting=0 LogicalHash=%llu NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
-			FABTST4LowPolyCloudPrototype::IslandCount,
+			TEXT("[ABTS][Rendering][T4-A2.4][CloudQuality] Route=SingleHISMBatchedIslandFields LogicalClouds=%d BackgroundClouds=%d TerminatorMegaClouds=%d WeatherSystems=%d MacroClusters=%d Cloudlets=%d Body=%d Crown=%d Edge=%d HISMComponents=1 MaterialBatches=1 GlobalCoverage=1 BackgroundSunIndependentPlacement=1 TerminatorMegaSunRelative=1 TerminatorMegaConnected=1 SizeVariation=1 FusionDiagnostics=5 SphericalConformal=1 DetachedEdges=0 CustomDataFloats=%d Deterministic=1 Material=MaskedUnlit ViewInvariantIslandField=1 ViewInvariantVolumeGradient=1 CameraDependentLighting=0 ContinuousMacroNormal=1 GradientCoherenceGuard=1 GradientJunctionGate=1 PlanarCoreClosure=1 UndersideField=1 CriticalPointFallback=IslandUp ThreeBandColor=1 SunwardWhitening=1 ThinDensityWhitening=1 ViewIndependentWhitening=1 LocalSolarHeight=1 NightWhiteningGate=1 NightBrightness=%.2f DayBlend=[%.2f,%.2f] GenericObjectToneBypass=1 MacroNormalStrength=0.84 PixelLocalNormalWeight=0 PixelInstanceVariation=0 VertexNoiseWPO=1 PixelAnimationTSR=1 CloudCompositeStencil=%d CloudToCloudOutlineSuppression=1 CloudToWorldOutlinePreserved=1 BoundedTraversal=1 SharedSpatialTraversalMask=1 CameraSphere=1 PerBirdVisualSpheres=4 ImmediateHardProtection=1 CameraBirdCorridor=1 StablePlanarNoiseCoverage=1 RetainedCoverage=0.82 MaskFrequency=0.012 FullScreenVeil=Removed FullTranslucency=0 TraversalAffectsLighting=0 LogicalHash=%llu NativeActorHidden=1 Collision=0 Shadows=0 LayoutHash=%llu BaseCM=%.1f HeightCM=%.1f"),
 			LowPolyLogicalCloudCount,
-			FABTST4LowPolyCloudPrototype::GlobalIslandCount,
+			LowPolyLogicalCloudCount
+				- FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount,
 			FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount,
 			FABTST4LowPolyCloudPrototype::WeatherSystemCount,
-			FABTST4LowPolyCloudPrototype::IslandCount
+			LowPolyLogicalCloudCount
 				* FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland,
-			FABTST4LowPolyCloudPrototype::TotalCloudletCount,
-			FABTST4LowPolyCloudPrototype::TotalBodyCloudletCount,
-			FABTST4LowPolyCloudPrototype::TotalCrownCloudletCount,
-			FABTST4LowPolyCloudPrototype::TotalEdgeCloudletCount,
+			LowPolyLogicalCloudCount
+				* FABTST4LowPolyCloudPrototype::CloudletsPerIsland,
+			LowPolyLogicalCloudCount
+				* FABTST4LowPolyCloudPrototype::BodyCloudletsPerIsland,
+			LowPolyLogicalCloudCount
+				* FABTST4LowPolyCloudPrototype::CrownCloudletsPerIsland,
+			LowPolyLogicalCloudCount
+				* FABTST4LowPolyCloudPrototype::EdgeCloudletsPerIsland,
 			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount,
 			FABTST4LowPolyCloudPrototype::NightBrightness,
 			FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight,
@@ -2188,6 +2195,16 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 	OutFailure.Reset();
 	if (Parameters.bCloudsEnabled == 0u)
 	{
+		DestroyLowPolyCloudPrototype();
+		return true;
+	}
+	if (FParse::Param(
+		FCommandLine::Get(),
+		TEXT("ABTSToonT4A2DisableClouds")))
+	{
+		// A2.4 performance baseline: EnvironmentPresentation has already hidden
+		// the native volumetric cloud, so this produces a true no-cloud scene
+		// without changing the accepted production profile or serialized assets.
 		DestroyLowPolyCloudPrototype();
 		return true;
 	}
@@ -2375,7 +2392,7 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 			FMaterialParameterInfo(TEXT("ABTS_CloudTraversalBirdCount")),
 			MaterialTraversalBirdCount)
 		&& BaseMaterial->HasPixelAnimation()
-		&& FMath::IsNearlyEqual(MaterialMacroLightingVersion, 11.0f)
+		&& FMath::IsNearlyEqual(MaterialMacroLightingVersion, 12.0f)
 		&& FMath::IsNearlyEqual(MaterialTraversalRetainedCoverage, 0.82f)
 		&& FMath::IsNearlyEqual(MaterialTraversalMaskFrequency, 0.012f)
 		&& FMath::IsNearlyZero(MaterialTraversalProtectionActive)
@@ -2449,47 +2466,63 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 		nullptr,
 		ETeleportType::TeleportPhysics);
 	LowPolyCloudDefinitions.Reset(Definitions.Num());
-	LowPolyCloudMaterials.Reset(Definitions.Num());
-	LowPolyCloudTraversalStrengths.Reset(Definitions.Num());
+	LowPolyCloudMaterials.Reset(1);
+	LowPolyCloudTraversalStrengths.Reset(1);
 
+	UHierarchicalInstancedStaticMeshComponent* Component =
+		NewObject<UHierarchicalInstancedStaticMeshComponent>(
+			Actor,
+			TEXT("CloudFieldInstances"),
+			RF_Transient);
+	if (!IsValid(Component))
+	{
+		Actor->Destroy();
+		OutFailure = TEXT("Unable to allocate the batched cloud-field component.");
+		return false;
+	}
+	Actor->AddInstanceComponent(Component);
+	Component->SetupAttachment(Root);
+	Component->SetMobility(EComponentMobility::Movable);
+	Component->SetStaticMesh(CloudletMesh);
+	Component->SetNumCustomDataFloats(
+		FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount);
+	Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Component->SetGenerateOverlapEvents(false);
+	Component->SetCanEverAffectNavigation(false);
+	Component->SetCastShadow(false);
+	Component->bCastDynamicShadow = false;
+	Component->bCastStaticShadow = false;
+	Component->SetCustomDepthStencilWriteMask(
+		ERendererStencilMask::ERSM_Default);
+	Component->SetCustomDepthStencilValue(
+		FABTSStylizedRenderingContract::
+			ResolveCloudCompositeStencilValueForRenderer());
+	Component->SetRenderCustomDepth(true);
+
+	auto SetVectorData = [](
+		TArray<float>& Data,
+		const int32 FirstIndex,
+		const FVector& Value)
+	{
+		Data[FirstIndex] = static_cast<float>(Value.X);
+		Data[FirstIndex + 1] = static_cast<float>(Value.Y);
+		Data[FirstIndex + 2] = static_cast<float>(Value.Z);
+	};
 	for (int32 DefinitionIndex = 0;
 		DefinitionIndex < Definitions.Num();
 		++DefinitionIndex)
 	{
 		const FABTST4LowPolyCloudIslandDefinition& Definition =
 			Definitions[DefinitionIndex];
-		UHierarchicalInstancedStaticMeshComponent* Component =
-			NewObject<UHierarchicalInstancedStaticMeshComponent>(
-				Actor,
-				*FString::Printf(
-					TEXT("CloudIslandInstances_%d"),
-					Definition.IslandIndex),
-				RF_Transient);
-		if (!IsValid(Component))
+		const TArray<FABTST4CloudMacroClusterDefinition> MacroClusters =
+			FABTST4LowPolyCloudPrototype::BuildMacroClusters(Definition);
+		if (MacroClusters.Num()
+			!= FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland)
 		{
 			Actor->Destroy();
-			OutFailure = TEXT("Unable to allocate a cloud island component.");
+			OutFailure = TEXT("A2.4 batched cloud macro-field data are incomplete.");
 			return false;
 		}
-		Actor->AddInstanceComponent(Component);
-		Component->SetupAttachment(Root);
-		Component->SetMobility(EComponentMobility::Movable);
-		Component->SetStaticMesh(CloudletMesh);
-		Component->SetNumCustomDataFloats(
-			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount);
-		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Component->SetGenerateOverlapEvents(false);
-		Component->SetCanEverAffectNavigation(false);
-		Component->SetCastShadow(false);
-		Component->bCastDynamicShadow = false;
-		Component->bCastStaticShadow = false;
-		Component->SetCustomDepthStencilWriteMask(
-			ERendererStencilMask::ERSM_Default);
-		Component->SetCustomDepthStencilValue(
-			FABTSStylizedRenderingContract::
-				ResolveCloudCompositeStencilValueForRenderer());
-		Component->SetRenderCustomDepth(true);
-		Component->RegisterComponent();
 		for (const FABTST4InstancedCloudletDefinition& Cloudlet
 			: IslandCloudlets[DefinitionIndex])
 		{
@@ -2501,32 +2534,88 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 				OutFailure = TEXT("Unable to add a cloudlet instance.");
 				return false;
 			}
-			Component->SetCustomDataValue(
-				InstanceIndex, 0, Cloudlet.Seed01, false);
-			Component->SetCustomDataValue(
-				InstanceIndex, 1, Cloudlet.NormalizedHeight, false);
-			Component->SetCustomDataValue(
-				InstanceIndex, 2, Cloudlet.FakeOcclusion, false);
-			Component->SetCustomDataValue(
-				InstanceIndex, 3, Cloudlet.SizeTier, false);
-			Component->SetCustomDataValue(
+			TArray<float> CustomData;
+			CustomData.SetNumZeroed(
+				FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount);
+			CustomData[0] = Cloudlet.Seed01;
+			CustomData[1] = Cloudlet.NormalizedHeight;
+			CustomData[2] = Cloudlet.FakeOcclusion;
+			CustomData[3] = Cloudlet.SizeTier;
+			CustomData[4] = static_cast<float>(Cloudlet.Layer) / 2.0f;
+			SetVectorData(
+				CustomData,
+				FABTST4LowPolyCloudPrototype::
+					CloudletIslandCenterCustomDataIndex,
+				Definition.CenterWorld);
+			SetVectorData(
+				CustomData,
+				FABTST4LowPolyCloudPrototype::
+					CloudletIslandAxisXCustomDataIndex,
+				Definition.TangentX);
+			SetVectorData(
+				CustomData,
+				FABTST4LowPolyCloudPrototype::
+					CloudletIslandAxisYCustomDataIndex,
+				Definition.TangentY);
+			SetVectorData(
+				CustomData,
+				FABTST4LowPolyCloudPrototype::
+					CloudletIslandUpCustomDataIndex,
+				Definition.RadialUp);
+			SetVectorData(
+				CustomData,
+				FABTST4LowPolyCloudPrototype::
+					CloudletIslandExtentsCustomDataIndex,
+				Definition.ExtentsCM);
+			for (const FABTST4CloudMacroClusterDefinition& Cluster
+				: MacroClusters)
+			{
+				const int32 FirstIndex =
+					FABTST4LowPolyCloudPrototype::CloudletMacroCustomDataIndex
+					+ Cluster.ClusterIndex
+						* FABTST4LowPolyCloudPrototype::
+							CloudletMacroCustomDataStride;
+				CustomData[FirstIndex] =
+					static_cast<float>(Cluster.NormalizedCenter.X);
+				CustomData[FirstIndex + 1] =
+					static_cast<float>(Cluster.NormalizedCenter.Y);
+				CustomData[FirstIndex + 2] =
+					static_cast<float>(Cluster.NormalizedRadii.X);
+				CustomData[FirstIndex + 3] =
+					static_cast<float>(Cluster.NormalizedRadii.Y);
+				CustomData[FirstIndex + 4] =
+					FMath::Cos(Cluster.OrientationRadians);
+				CustomData[FirstIndex + 5] =
+					FMath::Sin(Cluster.OrientationRadians);
+				CustomData[FirstIndex + 6] = Cluster.HeightBias;
+			}
+			CustomData[FABTST4LowPolyCloudPrototype::
+				CloudletColorVariantCustomDataIndex] =
+				Definition.IslandIndex == 1 ? 1.0f : 0.0f;
+			if (!Component->SetCustomData(
 				InstanceIndex,
-				4,
-				static_cast<float>(Cloudlet.Layer) / 2.0f,
-				false);
+				MakeArrayView(CustomData),
+				false))
+			{
+				Actor->Destroy();
+				OutFailure = TEXT("Unable to assign batched cloud instance data.");
+				return false;
+			}
 		}
-		Component->MarkRenderStateDirty();
-		UMaterialInstanceDynamic* Material =
-			UMaterialInstanceDynamic::Create(BaseMaterial, Component);
-		if (!IsValid(Material))
-		{
-			Actor->Destroy();
-			OutFailure = TEXT("Unable to allocate the T4-A2R1-B cloudlet material instance.");
-			return false;
-		}
-		const FVector SunDirection =
-			FVector(Parameters.SunDirectionToSunWorld).GetSafeNormal();
-		Material->SetVectorParameterValue(
+		LowPolyCloudDefinitions.Add(Definition);
+	}
+
+	UMaterialInstanceDynamic* Material =
+		UMaterialInstanceDynamic::Create(BaseMaterial, Component);
+	if (!IsValid(Material))
+	{
+		Actor->Destroy();
+		OutFailure = TEXT("Unable to allocate the A2.4 batched cloud material.");
+		return false;
+	}
+	const FVector SunDirection =
+		FVector(Parameters.SunDirectionToSunWorld).GetSafeNormal();
+	Material->SetVectorParameterValue(
 			TEXT("ABTS_CloudSunDirection"),
 			FLinearColor(
 				SunDirection.X,
@@ -2549,21 +2638,15 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 		Material->SetScalarParameterValue(
 			TEXT("ABTS_CloudDaylightBlendMaxSolarHeight"),
 			FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
-		const FLinearColor LightColor = Definition.IslandIndex == 1
-			? FLinearColor(0.86f, 0.89f, 0.94f, 1.0f)
-			: FLinearColor(0.92f, 0.93f, 0.96f, 1.0f);
-		const FLinearColor BodyColor = Definition.IslandIndex == 1
-			? FLinearColor(0.38f, 0.46f, 0.58f, 1.0f)
-			: FLinearColor(0.45f, 0.53f, 0.64f, 1.0f);
-		const FLinearColor ShadowColor = Definition.IslandIndex == 1
-			? FLinearColor(0.15f, 0.20f, 0.30f, 1.0f)
-			: FLinearColor(0.18f, 0.24f, 0.34f, 1.0f);
 		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudLightColor"), LightColor);
+			TEXT("ABTS_CloudLightColor"),
+			FLinearColor(0.92f, 0.93f, 0.96f, 1.0f));
 		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudBodyColor"), BodyColor);
+			TEXT("ABTS_CloudBodyColor"),
+			FLinearColor(0.45f, 0.53f, 0.64f, 1.0f));
 		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudShadowColor"), ShadowColor);
+			TEXT("ABTS_CloudShadowColor"),
+			FLinearColor(0.18f, 0.24f, 0.34f, 1.0f));
 		Material->SetScalarParameterValue(
 			TEXT("ABTS_CloudSunWhiteStrength"), 0.70f);
 		Material->SetScalarParameterValue(
@@ -2576,41 +2659,6 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 			TEXT("ABTS_CloudGradientConfidenceStart"), 0.10f);
 		Material->SetScalarParameterValue(
 			TEXT("ABTS_CloudGradientConfidenceEnd"), 0.34f);
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudIslandCenter"),
-			FLinearColor(
-				Definition.CenterWorld.X,
-				Definition.CenterWorld.Y,
-				Definition.CenterWorld.Z,
-				0.0f));
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudIslandAxisX"),
-			FLinearColor(
-				Definition.TangentX.X,
-				Definition.TangentX.Y,
-				Definition.TangentX.Z,
-				0.0f));
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudIslandAxisY"),
-			FLinearColor(
-				Definition.TangentY.X,
-				Definition.TangentY.Y,
-				Definition.TangentY.Z,
-				0.0f));
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudIslandUp"),
-			FLinearColor(
-				Definition.RadialUp.X,
-				Definition.RadialUp.Y,
-				Definition.RadialUp.Z,
-				0.0f));
-		Material->SetVectorParameterValue(
-			TEXT("ABTS_CloudIslandExtents"),
-			FLinearColor(
-				Definition.ExtentsCM.X,
-				Definition.ExtentsCM.Y,
-				Definition.ExtentsCM.Z,
-				0.0f));
 		Material->SetScalarParameterValue(
 			TEXT("ABTS_CloudTraversalActive"), 0.0f);
 		Material->SetScalarParameterValue(
@@ -2636,43 +2684,11 @@ bool UABTSStylizedRenderingWorldSubsystem::RefreshLowPolyCloudPrototype(
 			TEXT("ABTS_CloudTraversalRetainedCoverage"), 0.82f);
 		Material->SetScalarParameterValue(
 			TEXT("ABTS_CloudTraversalMaskFrequency"), 0.012f);
-		const TArray<FABTST4CloudMacroClusterDefinition> MacroClusters =
-			FABTST4LowPolyCloudPrototype::BuildMacroClusters(Definition);
-		if (MacroClusters.Num()
-			!= FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland)
-		{
-			Actor->Destroy();
-			OutFailure = TEXT("R1-C2-B3-B1 gradient-confidence island parameters are incomplete.");
-			return false;
-		}
-		for (const FABTST4CloudMacroClusterDefinition& Cluster : MacroClusters)
-		{
-			Material->SetVectorParameterValue(
-				*FString::Printf(
-					TEXT("ABTS_CloudMacroCluster%d"), Cluster.ClusterIndex),
-				FLinearColor(
-					Cluster.NormalizedCenter.X,
-					Cluster.NormalizedCenter.Y,
-					Cluster.NormalizedRadii.X,
-					0.0f));
-			Material->SetVectorParameterValue(
-				*FString::Printf(
-					TEXT("ABTS_CloudMacroShape%d"), Cluster.ClusterIndex),
-				FLinearColor(
-					Cluster.NormalizedRadii.Y,
-					FMath::Cos(Cluster.OrientationRadians),
-					FMath::Sin(Cluster.OrientationRadians),
-					0.0f));
-			Material->SetScalarParameterValue(
-				*FString::Printf(
-					TEXT("ABTS_CloudMacroHeight%d"), Cluster.ClusterIndex),
-				Cluster.HeightBias);
-		}
-		Component->SetMaterial(0, Material);
-		LowPolyCloudDefinitions.Add(Definition);
-		LowPolyCloudMaterials.Add(Material);
-		LowPolyCloudTraversalStrengths.Add(0.0f);
-	}
+	Component->SetMaterial(0, Material);
+	Component->RegisterComponent();
+	Component->MarkRenderStateDirty();
+	LowPolyCloudMaterials.Add(Material);
+	LowPolyCloudTraversalStrengths.Add(0.0f);
 	LowPolyCloudPrototypeActor = Actor;
 	LowPolyCloudLayoutHash = DesiredCloudletHash;
 	LowPolyLogicalCloudLayoutHash = DesiredLogicalCloudHash;
@@ -3034,8 +3050,16 @@ bool FABTSToonT4A2R1AInstancedCloudletContractTest::RunTest(
 		TotalCloudlets, FABTST4LowPolyCloudPrototype::TotalCloudletCount);
 	TestEqual(TEXT("Combined cloudlet identity is repeatable"),
 		CombinedHashA, CombinedHashB);
-	TestEqual(TEXT("R1-C2-B3-B1 retains five geometry custom-data channels"),
-		FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount, 5);
+	TestEqual(TEXT("A2.4 batches exact logical-cloud fields into one HISM"),
+		FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount, 63);
+	TestEqual(TEXT("A2.4 preserves the five geometry channels at the head"),
+		FABTST4LowPolyCloudPrototype::CloudletBaseCustomDataFloatCount, 5);
+	TestEqual(TEXT("A2.4 stores the island field after geometry data"),
+		FABTST4LowPolyCloudPrototype::CloudletIslandCenterCustomDataIndex, 5);
+	TestEqual(TEXT("A2.4 stores six exact macro fields after island extents"),
+		FABTST4LowPolyCloudPrototype::CloudletMacroCustomDataIndex, 20);
+	TestEqual(TEXT("A2.4 appends the legacy colour variant after macro fields"),
+		FABTST4LowPolyCloudPrototype::CloudletColorVariantCustomDataIndex, 62);
 	return true;
 }
 
@@ -3085,7 +3109,7 @@ bool FABTSToonT4A2R1BCloudAssetContractTest::RunTest(
 	TestEqual(
 		TEXT("A2.3.1 per-bird/TSR material version is current"),
 		MacroLightingVersion,
-		11.0f);
+		12.0f);
 	float TraversalActive = -1.0f;
 	float TraversalProtectionActive = -1.0f;
 	float TraversalBirdCount = -1.0f;

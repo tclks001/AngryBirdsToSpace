@@ -45,6 +45,7 @@ float StarCellProbability;
 float StarAngularRadiusScale;
 float StarHDRIntensity;
 uint EnvironmentProfile;
+uint bReplaceEnvironmentBackground;
 uint bHasEnvironmentParameters;
 
 uint ABTSStarHash(uint Value)
@@ -460,14 +461,6 @@ float3 ABTSComputeNeighborEdgeLayers(
 float3 ABTSComputeOutlineLayerCoverage(float2 ViewportUV)
 {
 	const float CenterDeviceDepth = ABTSSampleDeviceDepth(ViewportUV);
-	if (CenterDeviceDepth <= 1.0e-7f)
-	{
-		return float3(0.0f, 0.0f, 0.0f);
-	}
-
-	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
-	const float3 CenterNormal = ABTSSampleWorldNormal(ViewportUV);
-	const uint CenterStencil = ABTSSampleVisibleStencil(ViewportUV);
 	const float2 PixelOffset = ViewportInvSize * OutlineWidthPixels;
 	const float2 DiagonalOffset = PixelOffset * 0.70710678f;
 	const float2 Offsets[8] =
@@ -481,6 +474,30 @@ float3 ABTSComputeOutlineLayerCoverage(float2 ViewportUV)
 		float2(DiagonalOffset.x, -DiagonalOffset.y),
 		float2(-DiagonalOffset.x, -DiagonalOffset.y)
 	};
+	if (CenterDeviceDepth <= 1.0e-7f)
+	{
+		// The former geometry-only silhouette left an uncovered sky-side fringe.
+		// Under fast camera motion, temporal reconstruction exposed that bright
+		// sub-pixel strip as a jagged flashing horizon.  A symmetric sky-side mask
+		// makes the contour own both sides of the depth discontinuity and uses
+		// continuous multi-sample coverage instead of a binary one-frame edge.
+		float GeometryNeighborCoverage = 0.0f;
+		UNROLL
+		for (int SampleIndex = 0; SampleIndex < 8; ++SampleIndex)
+		{
+			const float SampleDeviceDepth = ABTSSampleDeviceDepth(
+				saturate(ViewportUV + Offsets[SampleIndex]));
+			GeometryNeighborCoverage += SampleDeviceDepth > 1.0e-7f ? 1.0f : 0.0f;
+		}
+		return float3(
+			smoothstep(0.08f, 0.72f, GeometryNeighborCoverage / 3.0f),
+			0.0f,
+			0.0f);
+	}
+
+	const float CenterDepth = ConvertFromDeviceZ(CenterDeviceDepth);
+	const float3 CenterNormal = ABTSSampleWorldNormal(ViewportUV);
+	const uint CenterStencil = ABTSSampleVisibleStencil(ViewportUV);
 
 	float3 AccumulatedEdgeLayers = float3(0.0f, 0.0f, 0.0f);
 	UNROLL
@@ -583,6 +600,14 @@ void ABTSStylizedToneMainPS(
 	// analytic atmosphere plus independently reconstructed sun/stars; geometry
 	// that owns a depth sample continues through the toon tone bands.
 	const bool bEnvironmentBackground = DeviceDepth <= 1.0e-7f;
+	if (bEnvironmentBackground && bReplaceEnvironmentBackground != 0u)
+	{
+		// The satellite preview's AfterDOF pass has already replaced the empty
+		// capture background with deterministic deep space. Preserve that result
+		// while still applying the GroundDay tone contract to moon geometry.
+		OutColor = SceneColor;
+		return;
+	}
 	if (bEnvironmentBackground
 		&& bHasEnvironmentParameters != 0u
 		&& EnvironmentProfile == 0u)
@@ -631,5 +656,15 @@ void ABTSStylizedStarMainPS(
 	const float3 Stars = ABTSEvaluateDeterministicHDRStars(
 		WorldViewDirection) * ABTSComputeStylizedStarVisibility(
 			WorldViewDirection);
+	if (bReplaceEnvironmentBackground != 0u)
+	{
+		// SatelliteLandingPreview is deliberately isolated from the ground
+		// atmosphere.  Replace the captured blue sky rather than adding stars on
+		// top of it; geometry still returns unchanged through the depth branch.
+		const float3 DeepSpace = float3(0.0025f, 0.0060f, 0.0180f);
+		const float3 DisplayStars = 1.0f - exp(-Stars * 0.46f);
+		OutColor = float4(saturate(DeepSpace + DisplayStars), SceneColor.a);
+		return;
+	}
 	OutColor = float4(SceneColor.rgb + Stars, SceneColor.a);
 }

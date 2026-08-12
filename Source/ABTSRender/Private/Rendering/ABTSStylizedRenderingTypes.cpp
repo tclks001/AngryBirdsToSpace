@@ -100,14 +100,16 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 	case EABTSStylizedViewClass::GroundLandingPreview:
 		Policy.Profile = EABTSStylizedRenderProfile::GroundDay;
 		Policy.bAllowSelectiveStencil = false;
+		Policy.bUseWorldLighting = true;
 		break;
 	case EABTSStylizedViewClass::SatelliteLandingPreview:
-		Policy.Profile = EABTSStylizedRenderProfile::SatelliteGuide;
-		// The lunar landing preview disables the SceneCapture lighting show flag
-		// so the far side remains a readable navigation instrument. Preserve that
-		// lighting-independent palette and only add its thin outline layer.
-		Policy.bApplyTone = false;
+		// Surface exposure/tone deliberately remain GroundDay-equivalent so the
+		// same lunar patch matches an equivalent gameplay camera. Deep space is an
+		// independent empty-background replacement, not a second lighting profile.
+		Policy.Profile = EABTSStylizedRenderProfile::GroundDay;
 		Policy.bAllowSelectiveStencil = true;
+		Policy.bUseWorldLighting = true;
+		Policy.bReplaceEnvironmentBackground = true;
 		break;
 	case EABTSStylizedViewClass::FinaleRemotePreview:
 	case EABTSStylizedViewClass::FinaleCinematicCapture:

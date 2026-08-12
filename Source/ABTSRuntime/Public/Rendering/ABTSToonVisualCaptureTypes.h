@@ -79,10 +79,17 @@ struct ABTSRUNTIME_API FABTSToonVisualCaptureRunConfig
 	int32 ExpectedResolutionY = 1080;
 	int32 WarmupFrames = 8;
 	int32 GPUProfileSamplesPerVariant = 3;
+	/** Zero preserves legacy suites; A2.4 formal runs always provide 50/75/100. */
+	int32 ExpectedScreenPercentage = 0;
 	double TimeoutSeconds = 180.0;
 	bool bRequireExactResolution = true;
 	bool bPauseWorldDuringCapture = true;
 	bool bExitWhenComplete = false;
+	/** A2.4-only same-pose GPU baseline. Native clouds remain suppressed. */
+	bool bDisableLowPolyCloudsForPerformanceBaseline = false;
+	/** Optional fail-closed subsets; empty means the complete catalogue. */
+	TArray<FName> RequestedPointIds;
+	TArray<FName> RequestedVariantIds;
 	FString OutputDirectory;
 	FString BuildIdentity;
 

@@ -4,6 +4,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
@@ -50,6 +51,30 @@ bool FABTSToonT0CommandLineContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Exit flag"), Config.bExitWhenComplete);
 	TestEqual(TEXT("Output root"), Config.OutputDirectory, FString(TEXT("VisualEvidence")));
 	TestEqual(TEXT("Build identity"), Config.BuildIdentity, FString(TEXT("deadbeef")));
+
+	Failure.Reset();
+	TestTrue(
+		TEXT("A2.4 subset and no-cloud GPU identity parse"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A2 -ABTSToonT0Mode=GPU -ABTSToonT0ScreenPercentage=75 -ABTSToonT0PointIds=GroundDay+CloudFieldGlobal -ABTSToonT0VariantIds=StyleOn -ABTSToonT4A2DisableClouds -ABTSToonT0BuildId=A24"),
+			Config,
+			&Failure));
+	TestEqual(TEXT("A2.4 screen percentage identity"), Config.ExpectedScreenPercentage, 75);
+	TestTrue(TEXT("A2.4 cloud-disabled baseline"),
+		Config.bDisableLowPolyCloudsForPerformanceBaseline);
+	TestEqual(TEXT("A2.4 requested point count"), Config.RequestedPointIds.Num(), 2);
+	TestEqual(TEXT("A2.4 first requested point"),
+		Config.RequestedPointIds[0], FName(TEXT("GroundDay")));
+	TestEqual(TEXT("A2.4 requested variant count"), Config.RequestedVariantIds.Num(), 1);
+
+	Failure.Reset();
+	TestFalse(
+		TEXT("Duplicate A2.4 filters fail closed"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A2 -ABTSToonT0PointIds=GroundDay+GroundDay -ABTSToonT0BuildId=A24"),
+			Config,
+			&Failure));
+	TestTrue(TEXT("Duplicate filters report a reason"), !Failure.IsEmpty());
 
 	Failure.Reset();
 	TestFalse(
@@ -199,9 +224,19 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports the frozen T4-A2.4 cloud distribution"),
+		TEXT("Stylized renderer reports the persistent parity PIP contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		58);
+		63);
+	TestEqual(
+		TEXT("Ground navigation exposure is frozen independently of the active world profile"),
+		FABTSStylizedRenderingControl::GetFixedExposureBias(
+			EABTSStylizedRenderProfile::GroundDay),
+		0.75f);
+	TestEqual(
+		TEXT("Satellite navigation exposure is frozen independently of the active world profile"),
+		FABTSStylizedRenderingControl::GetFixedExposureBias(
+			EABTSStylizedRenderProfile::SatelliteGuide),
+		-0.10f);
 	TestTrue(
 		TEXT("GroundDay clouds suppress motion blur to prevent moving night-cloud edge fringes"),
 		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
@@ -729,27 +764,81 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 		FABTSStylizedRenderingContract::IsViewClassImplemented(
 			EABTSStylizedViewClass::SatelliteLandingPreview));
 
+	const FABTSStylizedViewPolicy GroundPreviewPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::GroundLandingPreview);
 	TestEqual(
 		TEXT("Ground preview has a frozen ground profile"),
-		static_cast<int32>(
-			FABTSStylizedRenderingContract::ResolveViewPolicy(
-				EABTSStylizedViewClass::GroundLandingPreview).Profile),
+		static_cast<int32>(GroundPreviewPolicy.Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestTrue(
+		TEXT("Ground preview consumes the production world lighting"),
+		GroundPreviewPolicy.bUseWorldLighting);
+	TestFalse(
+		TEXT("Ground preview retains the analytic GroundDay background"),
+		GroundPreviewPolicy.bReplaceEnvironmentBackground);
 	TestEqual(
-		TEXT("Satellite preview has a frozen satellite profile"),
+		TEXT("Satellite preview surface uses the main GroundDay profile"),
 		static_cast<int32>(
 			FABTSStylizedRenderingContract::ResolveViewPolicy(
 				EABTSStylizedViewClass::SatelliteLandingPreview).Profile),
-		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
 	const FABTSStylizedViewPolicy SatellitePolicy =
 		FABTSStylizedRenderingContract::ResolveViewPolicy(
 			EABTSStylizedViewClass::SatelliteLandingPreview);
-	TestFalse(
-		TEXT("Satellite BaseColor preview does not re-quantize lighting"),
+	TestTrue(
+		TEXT("Satellite preview uses the same toon tone as the main ground view"),
 		SatellitePolicy.bApplyTone);
 	TestTrue(
-		TEXT("Satellite BaseColor preview keeps a thin outline layer"),
+		TEXT("Satellite preview keeps a thin outline layer"),
 		SatellitePolicy.bApplyOutline);
+	TestTrue(
+		TEXT("Satellite preview consumes the production world lighting"),
+		SatellitePolicy.bUseWorldLighting);
+	TestTrue(
+		TEXT("Satellite preview replaces the ground atmosphere with deep space"),
+		SatellitePolicy.bReplaceEnvironmentBackground);
+	const AABTSM101LandingPreviewCamera* PreviewCameraCDO =
+		GetDefault<AABTSM101LandingPreviewCamera>();
+	TestNotNull(TEXT("Landing preview camera CDO exists"), PreviewCameraCDO);
+	if (PreviewCameraCDO != nullptr)
+	{
+		const USceneCaptureComponent2D* Capture =
+			PreviewCameraCDO->GetSceneCaptureComponent();
+		TestNotNull(TEXT("Landing preview capture component exists"), Capture);
+		if (Capture != nullptr)
+		{
+			TestTrue(
+				TEXT("Landing preview preserves temporal rendering state"),
+				Capture->bAlwaysPersistRenderingState);
+			TestFalse(
+				TEXT("Landing preview remains bounded manual capture"),
+				Capture->bCaptureEveryFrame);
+		}
+	}
+	const FTransform StablePreviewPose(
+		FRotator(0.0f, 3.0f, 0.0f),
+		FVector(120.0f, 0.0f, 0.0f));
+	TestFalse(
+		TEXT("Small landing-preview aim changes preserve temporal history"),
+		AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+			FTransform::Identity,
+			StablePreviewPose,
+			1200.0f));
+	TestTrue(
+		TEXT("Large landing-preview target jumps reset temporal history"),
+		AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+			FTransform::Identity,
+			FTransform(
+				FRotator::ZeroRotator,
+				FVector(800.0f, 0.0f, 0.0f)),
+			1200.0f));
+	TestTrue(
+		TEXT("Large landing-preview orientation jumps reset temporal history"),
+		AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+			FTransform::Identity,
+			FTransform(FRotator(0.0f, 20.0f, 0.0f)),
+			1200.0f));
 	TestEqual(
 		TEXT("Finale preview has a frozen finale profile"),
 		static_cast<int32>(

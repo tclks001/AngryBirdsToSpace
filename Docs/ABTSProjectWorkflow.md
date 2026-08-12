@@ -6,7 +6,7 @@
 
 ## 1. 当前状态
 
-- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**和 **T4-A2.3 有界穿云表现**均为 `IntegrationAccepted`。A2.3 最终为实现版本 54、材质宏合同 11、manifest schema 12：永久删除会闪烁的全屏雾幕，保留镜头球、四个实际鸟体球、有限走廊和局部二维噪声清除；v53 修复真实 SM6 Custom HLSL 向量维度错误，v54 仅在 `GroundDay + CloudsEnabled` 禁用 Motion Blur。UE 5.8 ForceUnity、fresh Toon 26/26、真实 D3D12 26 点/52 条和用户连续运动 PIE 均已通过，逐鸟可见、雾幕闪烁及夜云动态亮边全部验收。当前 **A2.4 消费端与性能冻结**为 `InProgress`；实现版本 58 已把用户 PIE 验收的 `24` 个云簇、每簇均值 `10`、方差 `64` 冻结为生产分布，并以确定性父子生长和逐簇可见包络图保证同簇云朵连成一片。生产 Seed 下为 277 朵背景云、追加诊断簇后共 284 朵/23,856 个 cloudlet；fail-closed 上限同步提升为 384 朵背景云。分布子阶段已完成，后续继续 PIP/AVI、时域和 GPU 门。R0/R1/B3B6/v44 仅作为技术历史与日志身份。命令、范围和证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
+- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**、**T4-A2.3 有界穿云表现**和 **T4-A2.4 消费端与性能冻结**均为 `IntegrationAccepted`。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 保持已验收的 `24` 个云簇、每簇均值 `10`、方差 `64` 和穿云视觉合同，将生产 Seed 下 284 朵逻辑云/23,856 个 cloudlet 合批为一个 HISM 和一个材质批次，并以 63 个逐实例浮点保留精确云岛字段。UE 5.8 ForceUnity、fresh Toon 26/26、1080p/1440p × SP50/75/100、Rank11 AVI、隔离式 GPU 门以及用户可见 PIE 的高速绕云、夜面、穿云、地面/月面跨晨昏 PIP 对照均已通过；夜面和穿云玩法视角分别为 10.29 ms 与 13.41 ms。v63 保留地平线稳定轮廓和月面星空；两类 PIP 与主视图共用世界 Lighting、`GroundDay` 曝光/Tone 且不再施加捕获专用暗部托底，并以持久 SceneCapture 历史、真实跳变 Camera Cut、两帧隐藏预热后发布消除首帧阴影偏差。T4-A2 已冻结，R0/R1/B3B6/v44 仅作为技术历史与日志身份。命令、范围和证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
 
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。

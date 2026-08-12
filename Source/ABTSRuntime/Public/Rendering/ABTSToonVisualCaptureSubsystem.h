@@ -128,6 +128,9 @@ private:
 	bool bSavedProfileGPUShowUI = true;
 	uint32 SavedProfileGPUShowUISetBy = 0;
 	bool bProfileGPUShowUIStateCaptured = false;
+	float SavedScreenPercentage = 0.0f;
+	uint32 SavedScreenPercentageSetBy = 0;
+	bool bScreenPercentageStateCaptured = false;
 	bool bSavedStyleEnabled = false;
 	EABTSStylizedDiagnosticPassMask SavedDiagnosticPassMask =
 		EABTSStylizedDiagnosticPassMask::ToneAndOutline;

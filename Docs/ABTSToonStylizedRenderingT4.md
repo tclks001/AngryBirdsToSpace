@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-11 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**和 **T4-A2.3 有界穿云表现**均为 `IntegrationAccepted`。A2.3 最终实现版本 54、材质宏合同 11、manifest schema 12：正式路线永久删除会闪烁的全屏薄云雾幕，保留镜头球、四个实际鸟体可见网格球、镜头—鸟群有限走廊及局部二维噪声清除；v53 修复真实 SM6 Velocity/Depth 排列暴露的 Custom HLSL 向量维度错误，v54 只在 `GroundDay + CloudsEnabled` 禁用 Motion Blur，消除夜面高速移动时亮天空卷入暗云轮廓的青白拖边。UE 5.8 ForceUnity、资产验证、fresh Toon 26/26、真实 D3D12 26 点/52 条和用户连续运动 PIE 均已通过。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。当前 **A2.4 消费端与性能冻结**为 `InProgress`：实现版本 58 已将用户 PIE 验收的 `24` 个云簇、每簇均值 `10`、方差 `64` 冻结为生产默认值，并保留显式 Seed、连通生长合同、全星球总览及 fail-closed 实例预算。分布调参子阶段已完成，下一步进入消费端与 GPU 矩阵；只有 A2.1～A2.4 全部通过后才能宣布 T4-A2 冻结。T4-A3/B 尚未开始。
+> 状态：2026-08-12 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**、**T4-A2.3 有界穿云表现**和 **T4-A2.4 消费端与性能冻结**均为 `IntegrationAccepted`。A2.3 最终实现版本 54、材质宏合同 11、manifest schema 12：正式路线永久删除会闪烁的全屏薄云雾幕，保留镜头球、四个实际鸟体可见网格球、镜头—鸟群有限走廊及局部二维噪声清除；v53 修复真实 SM6 Velocity/Depth 排列暴露的 Custom HLSL 向量维度错误，v54 只在 `GroundDay + CloudsEnabled` 禁用 Motion Blur，消除夜面高速移动时亮天空卷入暗云轮廓的青白拖边。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 已冻结 `24 / 10 / 64` 分布，将生产 Seed 下 `284` 朵逻辑云的 `23,856` 个 cloudlet 合批为一个 HISM/一个材质批次，并用 `63` 个逐实例自定义浮点保持每朵云的精确岛场、宏场和颜色身份；1080p/1440p × 50/75/100% SP 共 36 张主视图截图、三档 PIP、Rank11 AVI、fresh Toon 26/26、隔离式 GPU 增量门，以及用户可见 PIE 的快速相机、夜面、穿云和同落点 PIP 对照均已通过。v63 统一地面/月面 PIP 与主视图的表面 Lighting、曝光、Tone 和时域历史，月面仅替换空背景为深空星场。T4-A2 已冻结；T4-A3/B 尚未开始。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -426,10 +426,10 @@ A2.4 的分布调参已完成。生产默认值冻结为 `ClusterCount=24`、`Cl
 - `CloudsPerClusterVariance`：成员数截断高斯采样的**方差**，范围 `0..1024`，不是标准差；
 - `Seed`：非零 `uint32`，同时驱动簇成员分配、球面位置、云岛尺寸与形态，用于重复生成和多 Seed 观察；
 - 每簇实际成员数截断到 `1..64`；同一云簇数、均值、方差和 Seed 的成员数组、逻辑布局 Hash 必须完全相同；
-- 为容纳冻结分布在生产 Seed 下的确定性采样，背景逻辑云硬上限提升为 `384`，对应追加晨昏簇后的最多 `391` 个 HISM 组件与 `32,844` 个 cloudlet；超过预算时拒绝本次输入并恢复上一个有效云场；
+- 为容纳冻结分布在生产 Seed 下的确定性采样，背景逻辑云硬上限提升为 `384`，对应追加晨昏簇后的最多 `391` 朵逻辑云与 `32,844` 个 cloudlet；A2.4 生产渲染仍只创建一个共享 HISM 和一个材质批次；超过预算时拒绝本次输入并恢复上一个有效云场；
 - 同一天气簇不再使用黄金角盘式独立散点。第一朵云作为中心，后续成员沿确定性三叉生长树连接到既有父云；父子中心间距由双方实际可见角半径计算，并保留足以覆盖不定形轮廓侵蚀的宽重叠。同簇成员共享高度基线，仅允许小幅径向扰动；因此云簇被读取为一片云体，而不是一圈彼此分离的小云；
 - 运行时按每簇逻辑 ID、成员索引、角向可见支撑与径向厚度建立重叠图。任意多成员云簇不是单一连通分量时，本次重建 fail closed；冻结的 `24 / 10 / 64` 默认值同样消费该连通合同；
-- 当前固定星场派生的生产云 Seed 为 `0xC1A5466C`，在冻结分布下确定性生成 `277` 朵背景逻辑云；追加 7 朵晨昏诊断云后共 `284` 个 HISM 组件与 `23,856` 个 cloudlet；
+- 当前固定星场派生的生产云 Seed 为 `0xC1A5466C`，在冻结分布下确定性生成 `277` 朵背景逻辑云；追加 7 朵晨昏诊断云后共 `284` 朵逻辑云与 `23,856` 个 cloudlet；这些逻辑身份全部写入同一个 HISM 的逐实例自定义数据，不再一云一组件；
 - PIE 命令仍可临时覆盖这组生产默认值，但停止 PIE 后不会写入 Config、Blueprint 或地图。`ClearDistribution` 会立刻恢复冻结的 `24 / 10 / 64` 生产分布及生产 Seed；恢复后的成员位置继续消费版本 58 的连通生长合同。
 
 PIE 控制台命令：
@@ -448,9 +448,35 @@ ABTS.Toon.CloudField.RestoreView
 
 `Overview` 在当前 PIE 世界生成 transient 诊断相机，以主星 `+Z` 径向北极为观察方向，按实际主星半径、云层高度、视口宽高比和 `52°` FOV 自动计算距离，使主星及云场完整位于画面中央；它不移动玩家、鸟群或生产 Party Camera。`RestoreView` 恢复进入总览前保存的 ViewTarget 并销毁诊断相机。每次成功调参都会立即重建云场，并输出 `ClusterCount/Mean/Variance/Seed/BackgroundLogicalClouds/TotalLogicalClouds/Cloudlets/Members/LayoutHash`；无效范围、超出安全预算、Seed 为零、非 PIE 世界或重建未通过现有云合同都会拒绝并恢复上一个有效布局。
 
-分布调参子阶段已通过用户 PIE 验收并冻结；上述入口保留为多 Seed 回归和后续视觉复核工具，不再作为生产默认值来源。A2.4 整体仍未冻结，后续还必须完成 PIP/AVI、快速相机、时域稳定性和 GPU 门。
+分布调参子阶段已通过用户 PIE 验收并冻结；上述入口保留为多 Seed 回归和后续视觉复核工具，不再作为生产默认值来源。PIP/AVI、静态多分辨率/多 SP 和 GPU 门已完成；A2.4 整体仍未冻结，后续只剩用户可见 PIE 的快速相机、夜面和穿云消费复核。
 
-实现版本 58 的冻结代码门使用 UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 与 fresh `ABTS.Rendering.Toon` 回归；最终日志分别记录在 `Saved/Logs/T4A24-FrozenDistribution-V58-ForceUnity-20260811.log` 和 `Saved/Logs/T4A24-FrozenDistribution-V58-Toon-Fresh-20260811.log`。自动化固定验证 `24 / 10 / 64` 三项生产默认值、生产 Seed 下 `277 + 7 = 284` 个逻辑云和 `23,856` 个 cloudlet、每个背景天气簇均为单一可见包络连通分量、显式云簇量与成员均值相互独立、超出 384 朵背景预算时 fail closed，以及 A2.1～A2.3 全回归。分布视觉已经用户 PIE 验收；消费端与 GPU 门仍待 A2.4 后续完成。
+实现版本 58 的冻结代码门使用 UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 与 fresh `ABTS.Rendering.Toon` 回归；最终日志分别记录在 `Saved/Logs/T4A24-FrozenDistribution-V58-ForceUnity-20260811.log` 和 `Saved/Logs/T4A24-FrozenDistribution-V58-Toon-Fresh-20260811.log`。自动化固定验证 `24 / 10 / 64` 三项生产默认值、生产 Seed 下 `277 + 7 = 284` 个逻辑云和 `23,856` 个 cloudlet、每个背景天气簇均为单一可见包络连通分量、显式云簇量与成员均值相互独立、超出 384 朵背景预算时 fail closed，以及 A2.1～A2.3 全回归。分布视觉已经用户 PIE 验收；其消费端与 GPU 后续由实现版本 60 的合同闭合。
+
+#### 7.11.2 单 HISM 合批、消费端与 GPU 合同（实现版本 60）
+
+A2.4 不改变已经验收的逻辑云分布、外形、局部太阳高度照明或穿云清除结果，只重构消费方式：
+
+- `284` 朵逻辑云不再创建 `284` 个 HISM 和 MID，而是由一个 HISM、一个 MID 承载全部 `23,856` 个实例；HISM 仍按内部空间簇执行视锥裁剪，因此“一个材质批次”不等于强制绘制整个星球的所有实例；
+- 每个实例的 `63` 个 Custom Data Float 保存基础扰动、云岛中心/局部轴/尺度、6 组宏场和颜色变体。材质直接读取这些数据，逻辑云 ID 不进入 stencil，故合批前后的形态、照明、云间融合和统一外轮廓语义保持一致；
+- 穿云关系仍由 CPU 对所有逻辑云逐帧求值，但只把最大穿云强度、硬保护状态、镜头球、四鸟球和镜头—鸟群走廊写入共享 MID。清除区域在 shader 中按世界空间局部化，不因共享材质而清空无关云；
+- manifest 只有在运行时云 Actor、单 HISM/单材质批次、`63` 浮点合同和布局身份均成立时才报告成功；关闭云的性能对照也必须真实销毁该消费路线，不能只改可见性描述字段；
+- 捕获脚本 `Scripts/ToonT4A24.ps1` 固定 6 个视觉点、1080p/1440p、50/75/100% SP，以及全球俯瞰、夜面和穿云三个云开/关 GPU 对照点。每个 GPU 点和开关状态使用独立 fresh UE 进程，避免连续 `stat GPU` 采样历史污染后续中位数。
+
+当前自动证据：
+
+- UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译成功；fresh NullRHI `ABTS.Rendering.Toon` 为 26/26，日志 `Saved/Logs/T4A24-V60-BatchedHISM-Toon-20260811.log`；
+- 36 张 D3D12 主视图矩阵位于 `Saved/ABTSVisualCaptures/ToonT4A24/T4A24-20260811-230742`；夜面、全球俯瞰和穿云构图均消费相同云资产，无默认材质回退；
+- 地面/月面预览的 SP50/75/100 证据分别位于 `Saved/ABTSVisualCaptures/ToonT2C1/T2C1-LandingPreviews-On-SP50-20260811-231355`、`...SP75-20260811-231430`、`...SP100-20260811-231505`；Rank11 远端预览及 1021 帧 AVI 位于 `Saved/ABTSVisualCaptures/ToonT2C1/T2C1-FinaleRemotePreview-On-SP100-20260811-231541`；
+- 隔离式 GPU 报告为 `Saved/ABTSVisualCaptures/ToonT4A24/T4A24-20260811-233224/gpu-increment-summary.json`。全球俯瞰为 `25.40 ms`、云增量 `11.64 ms`，通过开发诊断构图的 30 Hz 门；夜面玩法视角为 `10.29 ms`、云增量 `2.42 ms`，穿云玩法视角为 `13.41 ms`、云增量 `4.62 ms`，均通过 60 Hz 与各自增量门；
+- 全球俯瞰是刻意让整颗星球及全部云场入镜的开发诊断点，不代表正常玩法相机。不得为了让它达到 60 Hz 而破坏生产云量；A2.4 的正常玩法门由夜面和穿云局部视角承担。
+
+实现版本 61 在 A2.4 可见 PIE 前补齐三项消费端回归。地面落点画中画先以“光照无关的导航仪器”关闭 SceneCapture 直射光，避免夜面地表坠入黑场；月面落点画中画不再复用全局地面环境快照，而是按 `SatelliteGuide` 派生曝光与星场，并在空深度像素上用深空底色替换蓝色大气背景；主视图地平线轮廓则在天空侧增加对称的八邻域连续覆盖，吞掉高速运动时由时域重建暴露的亮色子像素锯齿。UE 5.8 ForceUnity 和 fresh `ABTS.Rendering.Toon` 26/26 已通过；真实 DX11 两类生产画中画捕获为 `Saved/ABTSVisualCaptures/ToonT2C1/T2C1-LandingPreviews-On-SP100-20260812-105133`。用户已在 PIE 确认地平线描边稳定，随后要求画中画恢复与主视图一致的晨昏光照，因此 v61 的光照无关 PIP 只保留为问题隔离基线，不作为最终 PIP 视觉合同。
+
+实现版本 62 将两种 Landing Preview 改为“同源世界光照 + 导航暗部托底”。SceneCapture 重新开启 Lighting，直接消费当前世界的太阳方向、阴影和材质响应，因而地面与月面在向光面、晨昏线和背光面的方向关系与主视图一致；AfterDOF 的导航分支只处理有深度且低于可靠亮度的几何像素，从 GBuffer BaseColor 保留色相并连续混入冷色最低可读亮度，亮度超过阈值后迅速归零，不改变向光面，也不使用自动曝光、相机方向或额外补光灯。地面继续使用 `GroundDay` 环境背景，月面继续以 `SatelliteGuide` 深空星场替换空深度的蓝色大气。UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 26/26 已通过；真实 DX11 两类生产捕获为 `Saved/ABTSVisualCaptures/ToonT2C1/T2C1-LandingPreviews-On-SP100-20260812-112256`，地面夹具重新出现定向阴影，月面夹具出现受光梯度且星空未回退。静态夹具不能覆盖落点连续跨晨昏线，用户仍须在 PIE 分别验证地面/月面向光、晨昏和背光落点，确认夜面可读、方向一致且无亮度跳变；因此阶段保持 `ImplementationComplete（VisibleValidationPending）`。
+
+实现版本 63 进一步把“方向一致”收紧为“对应表面视觉一致”。v62 仍有三个非等价条件：捕获组件不持久化 ViewState、每次 20 Hz 手动刷新都强制 `bCameraCutThisFrame`，并只给 PIP 施加主视图没有的暗部托底；因此主视图已积累的阴影、间接光和时域结果无法在 PIP 首帧成立。v63 删除画中画专用阴影抬升，地面和月面表面都使用与普通主视图相同的世界 Lighting、`GroundDay` 固定曝光、Tone 和 Outline；月面只在空深度像素替换深空星场，背景差异不再改变实体光照。SceneCapture 改为持久 ViewState；同一落点附近的小幅瞄准连续积累历史，只有位置超过 `max(400 cm, 0.5 × CameraDistance)`、旋转超过 `15°` 或地面/月面语义切换才 Camera Cut。真实跳变后先向隐藏的同尺寸 RT 捕获两帧，第三帧才发布到 HUD；同模式跳变期间保留上一张稳定画面，首次打开和语义切换则等新帧稳定后再显示，避免首帧黑场冒充正式 PIP。
+
+v63 的 UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 26/26 已通过；真实 DX11 两类生产捕获位于 `Saved/ABTSVisualCaptures/ToonT2C1/T2C1-LandingPreviews-On-SP100-20260812-115955`，manifest 为 `Succeeded`、实现版本 63、两条 512×288 记录。地面夹具阴影已恢复为稳定的冷绿色主视图色带；月面材质消费相同的 GroundDay 表面光照与色调，Tone Pass 同时保留 AfterDOF 已生成的确定性深空背景，不再回退为蓝天。该静态夹具仍不能证明玩家抵达同一落点后的逐像素对照；最终 PIE 应在地面向光/晨昏/背光和月面相同三档各保存一组“PIP—抵达后实地”画面，允许因观察角度造成镜面响应不同，但同一材质的阴影档、曝光和色相必须一致，且调整瞄准时不得闪回未预热首帧。
 
 只有 A2.1～A2.3 均无回归，真实 RHI 无云 shader fallback，SceneCapture/AVI 与主视图身份一致且 GPU 达到预算，才允许把 T4-A2 标记为冻结并进入 T4-A3。
 

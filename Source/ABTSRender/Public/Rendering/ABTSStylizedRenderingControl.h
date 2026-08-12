@@ -110,6 +110,7 @@ public:
 		FABTSStylizedEnvironmentParameters& OutParameters);
 	static FABTSStylizedToneProfileParameters GetToneProfileParameters(
 		EABTSStylizedRenderProfile Profile);
+	static float GetFixedExposureBias(EABTSStylizedRenderProfile Profile);
 	/**
 	 * Scene captures do not retain the main view's temporal lighting history.
 	 * Clamp tone normalization to this profile-specific floor so sub-visible

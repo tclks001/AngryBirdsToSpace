@@ -135,7 +135,7 @@ TargetCenter = SatelliteCenter
 
 M6 只读预测快照现在携带完整路径、最近卫星净空以及 `PrimarySurface / SatelliteBody / SatelliteE5` 终点类型。每个积分步必须先求 E5 OBB、所有卫星扩张球和主星表面的候选交点，再以全局最小 Alpha 截断；不能因代码检查顺序固定偏向卫星。标定 Rig 显式把练习卫星、E5 Actor、OBB 半边长以及认证用的 `0.04 s × 30 s` 积分域注册给 M6/M10，使标定 HUD 预览、成功岛认证与实际超时使用同一时间域；普通 M6/M9 未注册该 context 时继续使用既有预测预算。
 
-月面画中画只接受当前练习卫星的 `SatelliteBody` 或 `SatelliteE5` 权威终点；仅进入引力邻域、绕月飞走或落回主星都不得开启。镜头以 `TerminalWorldLocation` 为着陆焦点，距离直接复用地面画中画的 `LandingViewCameraDistanceCM`，不再按卫星半径或 E5 尺寸额外拉远；`SatelliteLandingViewPitchDegrees` 控制相对月面切平面的固定俯视角，默认 `45°`，屏幕 Up 始终由着陆点的卫星径向约束。捕获复用同一 SceneCapture/RenderTarget，只显示卫星、命中 E5（若适用）和末端局部轨迹，并使用无光照 `SCS_BaseColor` 指引视图避免背面全黑；它不等于修改了世界真实背面照明。
+月面画中画只接受当前练习卫星的 `SatelliteBody` 或 `SatelliteE5` 权威终点；仅进入引力邻域、绕月飞走或落回主星都不得开启。镜头以 `TerminalWorldLocation` 为着陆焦点，距离直接复用地面画中画的 `LandingViewCameraDistanceCM`，不再按卫星半径或 E5 尺寸额外拉远；`SatelliteLandingViewPitchDegrees` 控制相对月面切平面的固定俯视角，默认 `45°`，屏幕 Up 始终由着陆点的卫星径向约束。捕获复用同一 SceneCapture/RenderTarget，只显示卫星、命中 E5（若适用）和末端局部轨迹；T4-A2.4 v63 起不再使用无光照 BaseColor 指引，而是与主视图统一消费世界 Lighting、`GroundDay` 曝光/Tone 和持久化时域历史，仅将月面空背景替换为确定性深空星场。
 
 同一 M6 相机在实飞时按 `PrimaryFollow → SatelliteApproach → SatelliteOrbit → E5Approach → E5Impact` 过渡，以稳定轨道侧视法线避免近月翻转；Orbit 与 E5Approach 分别使用不同的进入/退出阈值，避免鸟在边界附近时来回刷阶段。E5 命中保持 `1.2 s` 后确定性回收，回收期间锁回主星 frame，直到下一次发射；这些表现仅在显式标定 context 中启用。
 

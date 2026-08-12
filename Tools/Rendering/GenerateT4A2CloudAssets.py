@@ -60,6 +60,16 @@ TRAVERSAL_CUSTOM_DESCRIPTION = (
     "ABTS T4-A2.3.1 Multi-Bird Stable Planar Traversal Coverage")
 
 MACRO_CLUSTER_COUNT = 6
+BASE_CUSTOM_DATA_COUNT = 5
+ISLAND_CENTER_DATA_INDEX = 5
+ISLAND_AXIS_X_DATA_INDEX = 8
+ISLAND_AXIS_Y_DATA_INDEX = 11
+ISLAND_UP_DATA_INDEX = 14
+ISLAND_EXTENTS_DATA_INDEX = 17
+MACRO_DATA_INDEX = 20
+MACRO_DATA_STRIDE = 7
+COLOR_VARIANT_DATA_INDEX = MACRO_DATA_INDEX + MACRO_CLUSTER_COUNT * MACRO_DATA_STRIDE
+CUSTOM_DATA_COUNT = COLOR_VARIANT_DATA_INDEX + 1
 MACRO_CUSTOM_DESCRIPTION = "ABTS_T4A22_LocalSolarHeightNightCloud"
 
 
@@ -107,6 +117,23 @@ def custom_data(material, index, default, x, y):
         material, unreal.MaterialExpressionPerInstanceCustomData, x, y)
     node.set_editor_property("data_index", int(index))
     return node
+
+
+def append_vector(material, a, a_pin, b, b_pin, x, y):
+    node = expression(material, unreal.MaterialExpressionAppendVector, x, y)
+    connect(a, a_pin, node, "A")
+    connect(b, b_pin, node, "B")
+    return node
+
+
+def custom_data_vector3(material, first_index, x, y):
+    component_x = custom_data(material, first_index, 0.0, x, y)
+    component_y = custom_data(material, first_index + 1, 0.0, x, y + 50)
+    component_z = custom_data(material, first_index + 2, 0.0, x, y + 100)
+    xy = append_vector(
+        material, component_x, "", component_y, "", x + 180, y + 20)
+    return append_vector(
+        material, xy, "", component_z, "", x + 360, y + 45)
 
 
 def connect(source, source_pin, target, target_pin):
@@ -169,6 +196,10 @@ def build_macro_lighting_code():
         "float ABTSDaylightBlendMaximum = max(DaylightBlendMaxSolarHeight, DaylightBlendMinSolarHeight + 0.01);",
         "float ABTSLocalDay = smoothstep(DaylightBlendMinSolarHeight, ABTSDaylightBlendMaximum, ABTSSolarHeight);",
         "float3 ABTSExtents = max(IslandExtents, float3(1.0, 1.0, 1.0));",
+		"float ABTSColorVariant = step(0.5, IslandColorVariant);",
+		"float3 ABTSResolvedLightColor = lerp(LightColor, float3(0.86, 0.89, 0.94), ABTSColorVariant);",
+		"float3 ABTSResolvedBodyColor = lerp(BodyColor, float3(0.38, 0.46, 0.58), ABTSColorVariant);",
+		"float3 ABTSResolvedShadowColor = lerp(ShadowColor, float3(0.15, 0.20, 0.30), ABTSColorVariant);",
         "float3 ABTSRelative = WorldPos - IslandCenter;",
         "float3 ABTSP = float3(dot(ABTSRelative, ABTSX) / ABTSExtents.x, dot(ABTSRelative, ABTSY) / ABTSExtents.y, dot(ABTSRelative, ABTSUp) / ABTSExtents.z);",
         "float ABTSPlanarDensity = 0.0;",
@@ -256,11 +287,11 @@ def build_macro_lighting_code():
         "float ABTSThinness = 1.0 - smoothstep(ThinDensityStart, ThinDensityStart + ABTSThinDensityRange, ABTSVolumeDensity01);",
         "float ABTSThinWhite = ABTSThinness * lerp(0.42, 1.0, ABTSDirectLight) * ABTSLocalDay;",
         "float ABTSWhiteWeight = saturate(SunWhiteStrength * ABTSSunWhite + ThinWhiteStrength * ABTSThinWhite);",
-        "float3 ABTSCloudColor = lerp(ShadowColor, BodyColor, ABTSBodyLight);",
-        "ABTSCloudColor = lerp(ABTSCloudColor, LightColor, ABTSHighlight);",
-        "ABTSCloudColor = lerp(ABTSCloudColor, LightColor, ABTSWhiteWeight);",
+        "float3 ABTSCloudColor = lerp(ABTSResolvedShadowColor, ABTSResolvedBodyColor, ABTSBodyLight);",
+        "ABTSCloudColor = lerp(ABTSCloudColor, ABTSResolvedLightColor, ABTSHighlight);",
+        "ABTSCloudColor = lerp(ABTSCloudColor, ABTSResolvedLightColor, ABTSWhiteWeight);",
         "float ABTSNightRelief = saturate(0.78 + 0.22 * ABTSMacroRelief - 0.10 * ABTSShadowAmount);",
-        "float3 ABTSNightColor = ShadowColor * saturate(NightBrightness) * ABTSNightRelief;",
+        "float3 ABTSNightColor = ABTSResolvedShadowColor * saturate(NightBrightness) * ABTSNightRelief;",
         "ABTSCloudColor = lerp(ABTSNightColor, ABTSCloudColor, ABTSLocalDay);",
         "return saturate(ABTSCloudColor);",
     ])
@@ -433,28 +464,25 @@ def rebuild_material():
     gradient_confidence_end = scalar(
         material, GRADIENT_CONFIDENCE_END, 0.34, -1700, 80)
     macro_version = scalar(
-        material, MACRO_LIGHTING_VERSION, 11.0, -1700, 140)
+        material, MACRO_LIGHTING_VERSION, 12.0, -1700, 140)
     del macro_version
     macro_strength = scalar(
         material, MACRO_NORMAL_STRENGTH, 0.84, -1700, 200)
     continuous_occlusion = scalar(
         material, CONTINUOUS_OCCLUSION_STRENGTH, 0.30, -1700, 260)
 
-    island_center = vector(
-        material, ISLAND_CENTER,
-        unreal.LinearColor(0.0, 0.0, 0.0, 0.0), -1480, -1120)
-    axis_x = vector(
-        material, ISLAND_AXIS_X,
-        unreal.LinearColor(1.0, 0.0, 0.0, 0.0), -1480, -1060)
-    axis_y = vector(
-        material, ISLAND_AXIS_Y,
-        unreal.LinearColor(0.0, 1.0, 0.0, 0.0), -1480, -1000)
-    island_up = vector(
-        material, ISLAND_UP,
-        unreal.LinearColor(0.0, 0.0, 1.0, 0.0), -1480, -940)
-    island_extents = vector(
-        material, ISLAND_EXTENTS,
-        unreal.LinearColor(1000.0, 1000.0, 500.0, 0.0), -1480, -880)
+    island_center = custom_data_vector3(
+        material, ISLAND_CENTER_DATA_INDEX, -1480, -1120)
+    axis_x = custom_data_vector3(
+        material, ISLAND_AXIS_X_DATA_INDEX, -1480, -940)
+    axis_y = custom_data_vector3(
+        material, ISLAND_AXIS_Y_DATA_INDEX, -1480, -760)
+    island_up = custom_data_vector3(
+        material, ISLAND_UP_DATA_INDEX, -1480, -580)
+    island_extents = custom_data_vector3(
+        material, ISLAND_EXTENTS_DATA_INDEX, -1480, -400)
+    island_color_variant = custom_data(
+        material, COLOR_VARIANT_DATA_INDEX, 0.0, -1480, -220)
     traversal_active = scalar(
         material, TRAVERSAL_ACTIVE, 0.0, -1480, -820)
     traversal_protection_active = scalar(
@@ -490,21 +518,13 @@ def rebuild_material():
     shape_nodes = []
     macro_height_nodes = []
     for index in range(MACRO_CLUSTER_COUNT):
-        angle = 6.28318530718 * float(index) / float(MACRO_CLUSTER_COUNT)
-        macro_nodes.append(vector(
-            material, "ABTS_CloudMacroCluster{}".format(index),
-            unreal.LinearColor(0.0, 0.0, 0.32, 0.0),
-            -1480, 820 + index * 60))
-        shape_nodes.append(vector(
-            material, "ABTS_CloudMacroShape{}".format(index),
-            unreal.LinearColor(
-                0.32,
-                float(__import__("math").cos(angle)),
-                float(__import__("math").sin(angle)), 0.0),
-            -1180, 820 + index * 60))
-        macro_height_nodes.append(scalar(
-            material, "ABTS_CloudMacroHeight{}".format(index),
-            0.5, -880, 820 + index * 60))
+        first_index = MACRO_DATA_INDEX + index * MACRO_DATA_STRIDE
+        macro_nodes.append(custom_data_vector3(
+            material, first_index, -1480, 820 + index * 180))
+        shape_nodes.append(custom_data_vector3(
+            material, first_index + 3, -920, 820 + index * 180))
+        macro_height_nodes.append(custom_data(
+            material, first_index + 6, 0.5, -360, 865 + index * 180))
 
     normal = expression(
         material, unreal.MaterialExpressionVertexNormalWS, -1160, -720)
@@ -517,6 +537,7 @@ def rebuild_material():
         ("AxisY", axis_y, ""),
         ("IslandUp", island_up, ""),
         ("IslandExtents", island_extents, ""),
+        ("IslandColorVariant", island_color_variant, ""),
         ("LightColor", light_color, ""),
         ("BodyColor", body_color, ""),
         ("ShadowColor", shadow_color, ""),
@@ -660,7 +681,7 @@ def validate():
         if isinstance(node, unreal.MaterialExpressionPerInstanceCustomData)]
     custom_indices = sorted(
         int(node.get_editor_property("data_index")) for node in custom_nodes)
-    if custom_indices != [0, 1, 2, 3, 4]:
+    if custom_indices != list(range(CUSTOM_DATA_COUNT)):
         raise RuntimeError(
             "Cloudlet material custom data mismatch: {}".format(custom_indices))
     macro_custom_nodes = [
@@ -716,7 +737,8 @@ def validate():
         for custom_input in macro_custom_nodes[0].get_editor_property("inputs")]
     expected_inputs = [
         "WorldPos", "IslandCenter", "AxisX", "AxisY", "IslandUp",
-        "IslandExtents", "LightColor", "BodyColor", "ShadowColor",
+        "IslandExtents", "IslandColorVariant",
+        "LightColor", "BodyColor", "ShadowColor",
         "SunDirection", "PlanetCenter", "NightBrightness",
         "DaylightBlendMinSolarHeight", "DaylightBlendMaxSolarHeight",
         "MacroNormalStrength",
@@ -777,7 +799,7 @@ def validate():
         raise RuntimeError("Cloudlet negative WPO bounds are insufficient")
     unreal.log(
         "[ABTS][Rendering][T4-A2R1C2B3B6][Validated] Material={} Mesh={} "
-        "Shading=Unlit StaticMeshUsage=1 InstancedUsage=1 CustomData=5 "
+        "Shading=Unlit StaticMeshUsage=1 InstancedUsage=1 CustomData={} "
         "MacroClusters=6 ViewInvariantIslandField=1 CameraDependentLighting=0 "
         "ViewInvariantVolumeGradient=1 ContinuousMacroNormal=1 "
         "GenericObjectToneBypass=1 PixelLocalNormalWeight=0 "
@@ -788,7 +810,7 @@ def validate():
         "StablePlanarNoiseCoverage=1 HardBirdCameraCore=1 "
         "RetainedCoverage=0.82 MaskFrequency=0.012 "
         "Blend=Masked"
-        .format(MASTER_PATH, MESH_PATH))
+        .format(MASTER_PATH, MESH_PATH, CUSTOM_DATA_COUNT))
 
 
 def generate():

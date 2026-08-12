@@ -83,6 +83,31 @@ public:
 		FString& OutFailure);
 	void ClearCloudFieldTuningOverride();
 	FABTST4CloudFieldTuningState GetCloudFieldTuningState() const;
+	/** Runtime truth used by A2.4 capture manifests; never rebuilds the field. */
+	bool IsLowPolyCloudPrototypeActive() const
+	{
+		return LowPolyCloudPrototypeActor.IsValid()
+			&& LowPolyLogicalCloudCount > 0
+			&& LowPolyLogicalCloudLayoutHash != 0;
+	}
+	int32 GetLowPolyLogicalCloudCount() const
+	{
+		return LowPolyLogicalCloudCount;
+	}
+	uint64 GetLowPolyLogicalCloudLayoutHash() const
+	{
+		return LowPolyLogicalCloudLayoutHash;
+	}
+	int32 GetLowPolyCloudMaterialBatchCount() const
+	{
+		int32 ValidCount = 0;
+		for (const TWeakObjectPtr<UMaterialInstanceDynamic>& Material
+			: LowPolyCloudMaterials)
+		{
+			ValidCount += Material.IsValid() ? 1 : 0;
+		}
+		return ValidCount;
+	}
 	/** Moves the local player to a transient whole-planet diagnostic view. */
 	bool EnterCloudFieldOverview(FString& OutFailure);
 	bool ExitCloudFieldOverview(FString& OutFailure);

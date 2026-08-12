@@ -475,8 +475,11 @@ bool UABTSToonT2C1CaptureSubsystem::BeginLandingSubject(FString& OutFailure)
 	}
 	else
 	{
+		// The lunar PIP replaces only empty background with deep space. Its
+		// geometry uses the same GroundDay exposure/tone as an equivalent main
+		// gameplay camera, so keep the shared runtime profile aligned as well.
 		FABTSStylizedRenderingControl::SetProfile(
-			EABTSStylizedRenderProfile::SatelliteGuide);
+			EABTSStylizedRenderProfile::GroundDay);
 		PreviewCamera->UpdateSatellitePreview(
 			SatellitePreview,
 			*SatelliteRuntime->GetRuntimeSatellite(),
@@ -487,6 +490,13 @@ bool UABTSToonT2C1CaptureSubsystem::BeginLandingSubject(FString& OutFailure)
 	{
 		OutFailure = TEXT("LandingPreviewDidNotActivate");
 		return false;
+	}
+	if (!PreviewCamera->HasPublishedPreviewFrame())
+	{
+		// The production PIP intentionally hides the two history-building frames.
+		// The offline fixture follows the same cadence instead of reading the
+		// hidden warmup target and falsely certifying a first-frame capture.
+		return true;
 	}
 	if (!IsValid(PreviewCamera->GetRenderTarget()))
 	{

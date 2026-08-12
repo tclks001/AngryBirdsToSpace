@@ -178,7 +178,7 @@ public:
 	/** Frozen production total; PIE tuning may produce a larger dynamic total. */
 	static constexpr int32 IslandCount =
 		GlobalIslandCount + TerminatorMegaClusterIslandCount;
-	/** Fail-closed A2.4 guard: 384 background HISM components / 32,256 instances. */
+	/** Fail-closed A2.4 guard: 384 background logical clouds / 32,256 instances. */
 	static constexpr int32 MaxGlobalIslandCount = 384;
 	static constexpr int32 MaxIslandCount =
 		MaxGlobalIslandCount + TerminatorMegaClusterIslandCount;
@@ -186,7 +186,25 @@ public:
 	static constexpr int32 BodyCloudletsPerIsland = 24;
 	static constexpr int32 CrownCloudletsPerIsland = 39;
 	static constexpr int32 EdgeCloudletsPerIsland = 21;
-	static constexpr int32 CloudletCustomDataFloatCount = 5;
+	static constexpr int32 MacroClusterCountPerIsland = 6;
+	// A2.4 batches every logical cloud into one HISM.  The first five values
+	// retain the A2.1 cloudlet contract; the remaining values carry the exact
+	// logical-island field that used to require one MID/draw submission per
+	// cloud.  Six macro clusters each consume center/radii (3), shape (3) and
+	// height (1), followed by one legacy colour-variant flag.
+	static constexpr int32 CloudletBaseCustomDataFloatCount = 5;
+	static constexpr int32 CloudletIslandCenterCustomDataIndex = 5;
+	static constexpr int32 CloudletIslandAxisXCustomDataIndex = 8;
+	static constexpr int32 CloudletIslandAxisYCustomDataIndex = 11;
+	static constexpr int32 CloudletIslandUpCustomDataIndex = 14;
+	static constexpr int32 CloudletIslandExtentsCustomDataIndex = 17;
+	static constexpr int32 CloudletMacroCustomDataIndex = 20;
+	static constexpr int32 CloudletMacroCustomDataStride = 7;
+	static constexpr int32 CloudletColorVariantCustomDataIndex =
+		CloudletMacroCustomDataIndex
+		+ MacroClusterCountPerIsland * CloudletMacroCustomDataStride;
+	static constexpr int32 CloudletCustomDataFloatCount =
+		CloudletColorVariantCustomDataIndex + 1;
 	static constexpr int32 TotalCloudletCount =
 		IslandCount * CloudletsPerIsland;
 	static constexpr int32 TotalBodyCloudletCount =
@@ -195,7 +213,6 @@ public:
 		IslandCount * CrownCloudletsPerIsland;
 	static constexpr int32 TotalEdgeCloudletCount =
 		IslandCount * EdgeCloudletsPerIsland;
-	static constexpr int32 MacroClusterCountPerIsland = 6;
 	static constexpr float NightBrightness = 0.42f;
 	static constexpr float DaylightBlendMinSolarHeight = -0.16f;
 	static constexpr float DaylightBlendMaxSolarHeight = 0.14f;

@@ -435,6 +435,20 @@ bool UABTSToonVisualCaptureSubsystem::DoesSupportWorldType(
 
 void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 {
+	if (RunConfig.ExpectedScreenPercentage != 0)
+	{
+		if (IConsoleVariable* ScreenPercentage =
+			IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
+		{
+			SavedScreenPercentage = ScreenPercentage->GetFloat();
+			SavedScreenPercentageSetBy =
+				ScreenPercentage->GetFlags() & ECVF_SetByMask;
+			ScreenPercentage->Set(
+				static_cast<float>(RunConfig.ExpectedScreenPercentage),
+				ECVF_SetByCode);
+			bScreenPercentageStateCaptured = true;
+		}
+	}
 	CaptureStartRealSeconds = FPlatformTime::Seconds();
 	Phase = EABTSToonVisualCapturePhase::WaitingForWorld;
 	RunId = FString::Printf(
@@ -819,7 +833,7 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		return EWorldResolveResult::Failed;
 	}
 
-	const TArray<FABTSToonVisualCapturePointDefinition> Definitions =
+	TArray<FABTSToonVisualCapturePointDefinition> Definitions =
 		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
 			? FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
@@ -829,6 +843,58 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				: FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
 	VariantDefinitions =
 		FABTSToonVisualCaptureMath::BuildVariantCatalogue(RunConfig.Suite);
+	auto ApplyNameFilter = [&OutReason](
+		auto& Values,
+		const TArray<FName>& Requested,
+		auto GetId,
+		const TCHAR* Label)
+	{
+		if (Requested.IsEmpty())
+		{
+			return true;
+		}
+		using ValueType = typename std::decay_t<decltype(Values)>::ElementType;
+		TArray<ValueType> Filtered;
+		Filtered.Reserve(Requested.Num());
+		for (const FName RequestedId : Requested)
+		{
+			const ValueType* Match = Values.FindByPredicate(
+				[RequestedId, &GetId](const ValueType& Value)
+				{
+					return GetId(Value) == RequestedId;
+				});
+			if (Match == nullptr)
+			{
+				OutReason = FString::Printf(
+					TEXT("Requested %s '%s' is not present in the suite catalogue."),
+					Label,
+					*RequestedId.ToString());
+				return false;
+			}
+			Filtered.Add(*Match);
+		}
+		Values = MoveTemp(Filtered);
+		return true;
+	};
+	if (!ApplyNameFilter(
+		Definitions,
+		RunConfig.RequestedPointIds,
+		[](const FABTSToonVisualCapturePointDefinition& Value)
+		{
+			return Value.PointId;
+		},
+		TEXT("capture point"))
+		|| !ApplyNameFilter(
+			VariantDefinitions,
+			RunConfig.RequestedVariantIds,
+			[](const FABTSToonDiagnosticVariantDefinition& Value)
+			{
+				return Value.VariantId;
+			},
+			TEXT("capture variant")))
+	{
+		return EWorldResolveResult::Failed;
+	}
 	if (Definitions.IsEmpty() || VariantDefinitions.IsEmpty())
 	{
 		OutReason = TEXT("Capture point or variant catalogue is empty.");
@@ -842,6 +908,23 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 			OutReason = TEXT("Capture variant catalogue contains an invalid entry.");
 			return EWorldResolveResult::Failed;
 		}
+	}
+	const IConsoleVariable* ScreenPercentage =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"));
+	if (RunConfig.ExpectedScreenPercentage != 0
+		&& (ScreenPercentage == nullptr
+		|| !FMath::IsNearlyEqual(
+			ScreenPercentage->GetFloat(),
+			static_cast<float>(RunConfig.ExpectedScreenPercentage),
+			0.01f)))
+	{
+		OutReason = FString::Printf(
+			TEXT("r.ScreenPercentage does not match the A2.4 identity: Actual=%s Expected=%d."),
+			ScreenPercentage != nullptr
+				? *FString::SanitizeFloat(ScreenPercentage->GetFloat())
+				: TEXT("Unavailable"),
+			RunConfig.ExpectedScreenPercentage);
+		return EWorldResolveResult::Failed;
 	}
 	CaptureCatalogueHash =
 		FABTSToonVisualCaptureMath::ComputeCatalogueHash(Definitions);
@@ -2867,6 +2950,27 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 			ManifestRecords.Num(),
 			ExpectedRecordCount);
 	}
+	if (bEffectiveSuccess
+		&& RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+	{
+		UWorld* World = GetWorld();
+		const UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+			World != nullptr
+				? World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>()
+				: nullptr;
+		const bool bRuntimeCloudActive = StyleSubsystem != nullptr
+			&& StyleSubsystem->IsLowPolyCloudPrototypeActive();
+		const bool bExpectedRuntimeCloudActive =
+			!RunConfig.bDisableLowPolyCloudsForPerformanceBaseline;
+		if (bRuntimeCloudActive != bExpectedRuntimeCloudActive)
+		{
+			bEffectiveSuccess = false;
+			EffectiveReason = FString::Printf(
+				TEXT("A2.4 runtime cloud baseline mismatch: Active=%d Expected=%d."),
+				bRuntimeCloudActive ? 1 : 0,
+				bExpectedRuntimeCloudActive ? 1 : 0);
+		}
+	}
 	const TCHAR* Status =
 		bEffectiveSuccess ? TEXT("Succeeded") : TEXT("Failed");
 	if (!WriteManifest(Status, EffectiveReason))
@@ -2988,6 +3092,18 @@ void UABTSToonVisualCaptureSubsystem::RestoreRuntimeState()
 			}
 		}
 	}
+	if (bScreenPercentageStateCaptured)
+	{
+		if (IConsoleVariable* ScreenPercentage =
+			IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
+		{
+			ScreenPercentage->Set(
+				SavedScreenPercentage,
+				static_cast<EConsoleVariableFlags>(
+					SavedScreenPercentageSetBy));
+		}
+		bScreenPercentageStateCaptured = false;
+	}
 	if (IsValid(CaptureCamera))
 	{
 		CaptureCamera->Destroy();
@@ -3037,11 +3153,29 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	const bool bManifestTerminatorMegaConnected =
 		FABTST4LowPolyCloudPrototype::IsTerminatorMegaClusterEnvelopeConnected(
 			ManifestLogicalClouds);
+	UWorld* ManifestWorld = GetWorld();
+	const UABTSStylizedRenderingWorldSubsystem* ManifestStyleSubsystem =
+		ManifestWorld != nullptr
+			? ManifestWorld->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>()
+			: nullptr;
+	const bool bRuntimeCloudPrototypeActive = ManifestStyleSubsystem != nullptr
+		&& ManifestStyleSubsystem->IsLowPolyCloudPrototypeActive();
+	const int32 RuntimeLogicalCloudCount = ManifestStyleSubsystem != nullptr
+		? ManifestStyleSubsystem->GetLowPolyLogicalCloudCount()
+		: 0;
+	const uint64 RuntimeLogicalCloudLayoutHash =
+		ManifestStyleSubsystem != nullptr
+			? ManifestStyleSubsystem->GetLowPolyLogicalCloudLayoutHash()
+			: 0;
+	const int32 RuntimeCloudMaterialBatchCount =
+		ManifestStyleSubsystem != nullptr
+			? ManifestStyleSubsystem->GetLowPolyCloudMaterialBatchCount()
+			: 0;
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(
 		TEXT("schemaVersion"),
-		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 12 : 4);
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 14 : 4);
 	Root->SetStringField(
 		TEXT("suite"),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
@@ -3089,6 +3223,9 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("screenPercentage"),
 		ABTSToonVisualCaptureSubsystemPrivate::ReadConsoleVariableIdentity(
 			TEXT("r.ScreenPercentage")));
+	Environment->SetNumberField(
+		TEXT("expectedScreenPercentage"),
+		RunConfig.ExpectedScreenPercentage);
 	Environment->SetStringField(
 		TEXT("dynamicResolutionOperationMode"),
 		ABTSToonVisualCaptureSubsystemPrivate::ReadConsoleVariableIdentity(
@@ -3309,6 +3446,35 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);
+	Style->SetBoolField(
+		TEXT("cloudPerformanceBaselineDisabled"),
+		RunConfig.bDisableLowPolyCloudsForPerformanceBaseline);
+	Style->SetBoolField(
+		TEXT("runtimeCloudPrototypeActive"),
+		bRuntimeCloudPrototypeActive);
+	Style->SetNumberField(
+		TEXT("runtimeLogicalCloudCount"),
+		RuntimeLogicalCloudCount);
+	Style->SetStringField(
+		TEXT("runtimeLogicalCloudLayoutHash"),
+		ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+			RuntimeLogicalCloudLayoutHash));
+	Style->SetNumberField(
+		TEXT("runtimeCloudMaterialBatchCount"),
+		RuntimeCloudMaterialBatchCount);
+	TArray<TSharedPtr<FJsonValue>> RequestedPointsJson;
+	for (const FName PointId : RunConfig.RequestedPointIds)
+	{
+		RequestedPointsJson.Add(MakeShared<FJsonValueString>(PointId.ToString()));
+	}
+	Style->SetArrayField(TEXT("requestedPointIds"), RequestedPointsJson);
+	TArray<TSharedPtr<FJsonValue>> RequestedVariantsJson;
+	for (const FName VariantId : RunConfig.RequestedVariantIds)
+	{
+		RequestedVariantsJson.Add(
+			MakeShared<FJsonValueString>(VariantId.ToString()));
+	}
+	Style->SetArrayField(TEXT("requestedVariantIds"), RequestedVariantsJson);
 	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
 	{
 		Style->SetNumberField(
@@ -3323,6 +3489,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 				ResolveCloudCompositeStencilValueForRenderer());
 		Style->SetBoolField(TEXT("cloudToCloudOutlineSuppression"), true);
 		Style->SetBoolField(TEXT("cloudToWorldOutlinePreserved"), true);
+		Style->SetBoolField(TEXT("cloudSingleHISMBatchedIslandFields"), true);
+		Style->SetNumberField(
+			TEXT("cloudPerInstanceCustomDataFloatCount"),
+			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount);
 		Style->SetBoolField(TEXT("cloudFieldGlobal"), true);
 		Style->SetNumberField(
 			TEXT("globalBackgroundLogicalCloudCount"),
@@ -3479,14 +3649,24 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 				Presentation.FixedExposureBias);
 			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
 			{
+				const bool bRuntimeCloudEnabledForRecord =
+					Record.bStyleEnabled
+					&& Presentation.bCloudsEnabled != 0u
+					&& !RunConfig.bDisableLowPolyCloudsForPerformanceBaseline
+					&& bRuntimeCloudPrototypeActive;
 				RecordJson->SetBoolField(
 					TEXT("cloudEnabled"),
-					Presentation.bCloudsEnabled != 0u);
+					bRuntimeCloudEnabledForRecord);
 			}
 			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
-				&& Presentation.bCloudsEnabled != 0u)
+				&& Record.bStyleEnabled
+				&& Presentation.bCloudsEnabled != 0u
+				&& !RunConfig.bDisableLowPolyCloudsForPerformanceBaseline
+				&& bRuntimeCloudPrototypeActive)
 			{
-				RecordJson->SetStringField(TEXT("cloudRoute"), TEXT("InstancedCloudletsA2_3_1PerBirdTSRStable"));
+				RecordJson->SetStringField(
+					TEXT("cloudRoute"),
+					TEXT("SingleHISMBatchedIslandFieldsA2_4"));
 				const bool bTraversalPoint = Record.Anchor
 					== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
 					|| Record.Anchor

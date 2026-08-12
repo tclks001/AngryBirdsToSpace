@@ -38,6 +38,10 @@ struct ABTSRENDER_API FABTSStylizedViewPolicy
 	bool bApplyTone = true;
 	bool bApplyOutline = true;
 	bool bAllowSelectiveStencil = false;
+	/** Capture the same world light/shadow direction as the main view. */
+	bool bUseWorldLighting = true;
+	/** Replaces an empty SceneCapture background with the profile sky. */
+	bool bReplaceEnvironmentBackground = false;
 
 	bool IsValid() const;
 };
