@@ -224,9 +224,9 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports the directional twilight-star contract"),
+		TEXT("Stylized renderer reports the planet-occluded sun contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		69);
+		70);
 	const FABTSStylizedEnvironmentProfilePolicy GroundEnvironment =
 		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
 			EABTSStylizedRenderProfile::GroundDay);

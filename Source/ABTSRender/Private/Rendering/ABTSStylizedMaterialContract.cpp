@@ -109,8 +109,11 @@ FABTSStylizedMaterialContract::ResolveDefaultParameters(
 	switch (Family)
 	{
 	case EABTSStylizedMaterialFamily::M3Surface:
-		Parameters.RoughnessFloor = 0.82f;
-		Parameters.SpecularScale = 0.18f;
+		// The continuous planetary surface must not read as a second sun near
+		// the horizon. Its shape remains readable from diffuse light, shadows
+		// and the terrain outline, so the stylized branch is deliberately matte.
+		Parameters.RoughnessFloor = 1.0f;
+		Parameters.SpecularScale = 0.0f;
 		break;
 	case EABTSStylizedMaterialFamily::M3BackgroundProp:
 		Parameters.RoughnessFloor = 0.76f;

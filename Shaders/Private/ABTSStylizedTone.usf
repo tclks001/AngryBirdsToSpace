@@ -374,24 +374,40 @@ float3 ABTSBuildContinuousGroundSky(float3 WorldViewDirection)
 	return lerp(DeepSpace, ContinuousAtmosphere, AtmosphereRetention);
 }
 
+float ABTSComputeGroundSkyPlanetVisibility(float3 WorldViewDirection)
+{
+	const float CameraRadius = max(
+		length(CameraFromPlanetCenterWorld),
+		1.0f);
+	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
+	const float SafeRadiusRatio = saturate(
+		PlanetRadiusCM / max(CameraRadius, PlanetRadiusCM));
+	// SceneDepth owns real SDF relief and arbitrary foreground occluders. This
+	// analytic tangent is the stable base-planet fallback for empty sky pixels.
+	const float TangentCos = sqrt(saturate(
+		1.0f - SafeRadiusRatio * SafeRadiusRatio));
+	const float ViewToPlanetCenter = dot(WorldViewDirection, -RadialUp);
+	const float Clearance = TangentCos - ViewToPlanetCenter;
+	const float AngularAA = max(fwidth(ViewToPlanetCenter) * 1.5f, 1.0e-5f);
+	return smoothstep(-AngularAA, AngularAA, Clearance);
+}
+
 float3 ABTSComposeContinuousGroundSky(float3 WorldViewDirection)
 {
 	float3 Sky = ABTSBuildContinuousGroundSky(WorldViewDirection);
 	const float3 SunDirection = normalize(SunDirectionToSunWorld);
-	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
-	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
-	const float SunHeight = dot(RadialUp, SunDirection);
 	const float ViewToSun = dot(WorldViewDirection, SunDirection);
 	const float SpaceBlend = ABTSComputeHighAltitudeSpaceBlend();
-	const float SunAboveHorizon = smoothstep(-0.055f, 0.015f, SunHeight);
+	const float PlanetVisibility = ABTSComputeGroundSkyPlanetVisibility(
+		WorldViewDirection);
 	const float SunDisc = smoothstep(
 		cos(radians(0.80f)),
 		cos(radians(0.32f)),
-		ViewToSun) * SunAboveHorizon;
+		ViewToSun) * PlanetVisibility;
 	const float SunHaloDegrees = lerp(4.0f, 1.45f, SpaceBlend);
 	const float SunHalo = pow(
 		smoothstep(cos(radians(SunHaloDegrees)), 1.0f, ViewToSun),
-		2.2f) * SunAboveHorizon;
+		2.2f) * PlanetVisibility;
 	Sky += SunHalo * lerp(
 		float3(0.14f, 0.12f, 0.09f),
 		float3(0.075f, 0.065f, 0.050f),

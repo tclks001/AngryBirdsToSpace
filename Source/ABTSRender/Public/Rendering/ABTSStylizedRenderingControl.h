@@ -167,6 +167,16 @@ public:
 		float ViewToSun);
 	/** Pure-data mirror of the near-horizon sky-ray visibility gate. */
 	static float ComputeGroundStarHorizonVisibility(float ViewRadialDot);
+	/**
+	 * Signed angular-cosine clearance of a ground-sky ray from the accepted
+	 * base planet. Positive is visible sky, zero is the spherical horizon and
+	 * negative is planet-occluded. SceneDepth remains authoritative for SDF
+	 * relief and arbitrary foreground geometry.
+	 */
+	static float ComputeGroundSkyRayPlanetClearance(
+		float CameraRadiusCM,
+		float PlanetRadiusCM,
+		float ViewToPlanetCenter);
 
 	static int32 GetImplementationVersion();
 	static bool IsProfileValid(EABTSStylizedRenderProfile Profile);

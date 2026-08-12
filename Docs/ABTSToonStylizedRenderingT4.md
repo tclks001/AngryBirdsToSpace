@@ -494,6 +494,8 @@ v67 星场可读性复核继续使用完全相同的五点相机构图与 `StarS
 
 v68/v69 修复晨昏线星点方向反转：GroundDay 星场不再只读相机位置的 `SunHeight`，而在晨昏带内复用天空的 `SunHeight + ViewToSun×0.42` 连续视线模型；v69 将接近水平的天空射线可见度从旧窄带提高到可读范围，避免正确的背阳方向权重再次被地平线项压没。朝阳天空压制星点，背阳天空显示星点，深昼/深夜和高空/终局仍保持原权威；地表几何继续由 SceneDepth 拒绝，不会透出星点。v69 的 UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 28/28 已通过，最终合同日志为 `Saved/Logs/T4A3-TerminatorStars-V69-Horizontal-Toon-Fresh-20260812.log`；真实 D3D12 `ToonT4A1` 20/20 位于 `Saved/ABTSVisualCaptures/ToonT4A1TerminatorStars/T4A1-TerminatorStars-V69-20260812-153234/ToonT4A1_Screenshots_20260812T073323Z_13520`，日志 `Saved/Logs/T4A1-TerminatorStars-V69-20260812-153234.log`，且无 shader 编译错误或材质 fallback。该真实捕获证明 shader 路线有效；两组历史固定诊断相机均向地表俯视，不能替代本轮用户所给“同一晨昏位置水平转身”的最终 PIE 门，故不再以其高频残差冒充水平星点验收。
 
+v70 修复太阳圆盘与地表局部半圆高光被误读为同一问题的缺口。太阳圆盘和 Halo 不再按观察者脚下的 `SunHeight` 整片提前关闭，而是对每个天空像素以相机半径、主星半径和世界视线求解析切线遮挡；命中真实 SDF 起伏或场景物体的像素继续由 SceneDepth 权威遮挡。地表的局部下半圆不是太阳贴图被切割，而是 M3 SDF Terrain 的镜面瓣，因此风格化 `M3Surface` 改为完全粗糙且无镜面响应（`RoughnessFloor=1.0`、`SpecularScale=0.0`）；白昼受光坡面仍由漫反射、阴影和轮廓保留，不用压暗整个向光面。UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 28/28 已通过；真实 D3D12 `ToonT4A1` 20/20 位于 `Saved/ABTSVisualCaptures/ToonT4A1SunDepth/V70-Matte-20260812-162408/ToonT4A1_Screenshots_20260812T082433Z_49596`，日志为 `Saved/Logs/T4-SunDepthHighlight-V70-Matte-20260812-162408.log`，无新 shader 编译错误。自动截图证明新 shader/材质参数被真实消费；用户已于 2026-08-12 在可见 PIE 中确认太阳贴近不规则地形时连续受遮挡、地表局部镜面太阳消失，v70 验收通过，暂不引入卡通太阳纹理。
+
 ### 8.2 T4-A3.2：三套环境 Profile 正式装配
 
 实现版本 65 把此前“存在参数但主要靠全局 CVar/捕获脚本选择”的三套 Profile 提升为正式消费合同：

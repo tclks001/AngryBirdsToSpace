@@ -259,6 +259,25 @@ bool FABTSM3StylizedSurfaceMaterialTest::RunTest(const FString& Parameters)
 			BaseColorTint));
 	TestTrue(TEXT("Default tint preserves LUT/road/river colors"),
 		BaseColorTint.Equals(FLinearColor::White));
+	const FABTSStylizedSurfaceParameters SurfaceDefaults =
+		FABTSStylizedMaterialContract::ResolveDefaultParameters(
+			EABTSStylizedMaterialFamily::M3Surface);
+	ReadScalar(
+		*this,
+		*Bridge,
+		FABTSStylizedMaterialContract::GetRoughnessFloorParameterName(),
+		ScalarValue);
+	TestTrue(TEXT("Terrain MID consumes the matte roughness floor"),
+		FMath::IsNearlyEqual(ScalarValue, SurfaceDefaults.RoughnessFloor)
+			&& FMath::IsNearlyEqual(ScalarValue, 1.0f));
+	ReadScalar(
+		*this,
+		*Bridge,
+		FABTSStylizedMaterialContract::GetSpecularScaleParameterName(),
+		ScalarValue);
+	TestTrue(TEXT("Terrain MID disables the reflected second sun"),
+		FMath::IsNearlyEqual(ScalarValue, SurfaceDefaults.SpecularScale)
+			&& FMath::IsNearlyEqual(ScalarValue, 0.0f));
 
 	TestTrue(TEXT("Runtime Style Off updates the same MID"),
 		Bridge->ApplyStylizedSurfaceParameters(false));

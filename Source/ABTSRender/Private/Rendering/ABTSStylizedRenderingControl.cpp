@@ -228,7 +228,7 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 69;
+	return 70;
 }
 
 FABTSStylizedEnvironmentProfilePolicy
@@ -308,6 +308,32 @@ float FABTSStylizedRenderingControl::ComputeGroundStarHorizonVisibility(
 	return FMath::IsFinite(ViewRadialDot)
 		? FMath::SmoothStep(-0.10f, 0.08f, ViewRadialDot)
 		: 0.0f;
+}
+
+float FABTSStylizedRenderingControl::ComputeGroundSkyRayPlanetClearance(
+	const float CameraRadiusCM,
+	const float PlanetRadiusCM,
+	const float ViewToPlanetCenter)
+{
+	if (!FMath::IsFinite(CameraRadiusCM)
+		|| !FMath::IsFinite(PlanetRadiusCM)
+		|| !FMath::IsFinite(ViewToPlanetCenter)
+		|| CameraRadiusCM <= 0.0f
+		|| PlanetRadiusCM <= 0.0f)
+	{
+		return -1.0f;
+	}
+	const float SafeRadiusRatio = FMath::Clamp(
+		PlanetRadiusCM / FMath::Max(CameraRadiusCM, PlanetRadiusCM),
+		0.0f,
+		1.0f);
+	const float TangentCos = FMath::Sqrt(FMath::Max(
+		1.0f - SafeRadiusRatio * SafeRadiusRatio,
+		0.0f));
+	return TangentCos - FMath::Clamp(
+		ViewToPlanetCenter,
+		-1.0f,
+		1.0f);
 }
 
 float FABTSStylizedRenderingControl::GetFixedExposureBias(

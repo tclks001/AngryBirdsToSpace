@@ -65,6 +65,12 @@ bool FABTSToonT3A0MaterialContractTest::RunTest(const FString& Parameters)
 		FABTSStylizedMaterialContract::ResolveAdoptionMode(
 			EABTSStylizedMaterialFamily::M3Surface),
 		EABTSStylizedMaterialAdoptionMode::InPlaceStyleParameter);
+	const FABTSStylizedSurfaceParameters M3SurfaceDefaults =
+		FABTSStylizedMaterialContract::ResolveDefaultParameters(
+			EABTSStylizedMaterialFamily::M3Surface);
+	TestTrue(TEXT("M3 terrain cannot form a reflected second sun"),
+		FMath::IsNearlyEqual(M3SurfaceDefaults.RoughnessFloor, 1.0f)
+			&& FMath::IsNearlyEqual(M3SurfaceDefaults.SpecularScale, 0.0f));
 	TestEqual(TEXT("Bird body uses reversible slot replacement"),
 		FABTSStylizedMaterialContract::ResolveAdoptionMode(
 			EABTSStylizedMaterialFamily::CuteBirdBody),

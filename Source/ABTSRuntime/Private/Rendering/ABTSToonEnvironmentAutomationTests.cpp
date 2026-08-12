@@ -368,6 +368,26 @@ bool FABTSToonT4A31HighAltitudeTransitionContractTest::RunTest(
 	TestTrue(TEXT("Deep night retains stars even when looking sunward"),
 		FABTSStylizedRenderingControl::ComputeGroundStarNightFactor(-0.90f, 1.0f)
 			> 0.99f);
+	const float CameraRadius = Ground.PlanetRadiusCM * 1.01f;
+	const float RadiusRatio = Ground.PlanetRadiusCM / CameraRadius;
+	const float HorizonCos = FMath::Sqrt(
+		1.0f - RadiusRatio * RadiusRatio);
+	TestTrue(TEXT("A ray away from the planet keeps the analytic sun visible"),
+		FABTSStylizedRenderingControl::ComputeGroundSkyRayPlanetClearance(
+			CameraRadius, Ground.PlanetRadiusCM, -1.0f) > 0.0f);
+	TestTrue(TEXT("A ray through the planet occludes the analytic sun"),
+		FABTSStylizedRenderingControl::ComputeGroundSkyRayPlanetClearance(
+			CameraRadius, Ground.PlanetRadiusCM, 1.0f) < 0.0f);
+	TestTrue(TEXT("The accepted base sphere defines a continuous tangent horizon"),
+		FMath::IsNearlyZero(
+			FABTSStylizedRenderingControl::ComputeGroundSkyRayPlanetClearance(
+				CameraRadius, Ground.PlanetRadiusCM, HorizonCos),
+			1.0e-5f));
+	TestTrue(TEXT("Sky-ray visibility is view dependent at one observer position"),
+		FABTSStylizedRenderingControl::ComputeGroundSkyRayPlanetClearance(
+			CameraRadius, Ground.PlanetRadiusCM, -0.20f)
+			> FABTSStylizedRenderingControl::ComputeGroundSkyRayPlanetClearance(
+				CameraRadius, Ground.PlanetRadiusCM, 0.20f));
 	float Previous = 0.0f;
 	for (int32 Step = 0; Step <= 32; ++Step)
 	{
