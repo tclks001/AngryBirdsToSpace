@@ -3130,6 +3130,112 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 	Check(TEXT("support provinces exactly partition course-zero occupancy"),
 		!bHasTowerChildDemands
 			|| Plan.Summary.SupportProvinceGroundCellCount == GroundCourseCellCount);
+	TSet<int32> LocalPodiumRegionProvinceIds;
+	bool bLocalPodiumCandidatesClose = true;
+	for (const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region
+		: Plan.LocalPodiumHeightRegions)
+	{
+		bLocalPodiumCandidatesClose &= !Region.ProvinceIds.IsEmpty()
+			&& Region.SelectedTopCourse >= Region.ActualPodiumTopCourse;
+		for (const int32 ProvinceId : Region.ProvinceIds)
+		{
+			const ABTSM73BeamC3V3::FSupportProvinceDiagnostic* Province =
+				Plan.SupportProvinces.FindByPredicate(
+					[ProvinceId](
+						const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Entry)
+					{
+						return Entry.ProvinceId == ProvinceId;
+					});
+			bLocalPodiumCandidatesClose &=
+				!LocalPodiumRegionProvinceIds.Contains(ProvinceId)
+				&& Province != nullptr
+				&& Region.StructuralPodiumMainCoreCellId != INDEX_NONE;
+			LocalPodiumRegionProvinceIds.Add(ProvinceId);
+			bLocalPodiumCandidatesClose &=
+				Plan.LocalPodiumHeightCandidates.ContainsByPredicate(
+					[ProvinceId, &Region](
+						const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate)
+					{
+						return Candidate.ProvinceId == ProvinceId
+							&& Candidate.StructuralPodiumMainCoreCellId
+								== Region.StructuralPodiumMainCoreCellId
+							&& Candidate.CandidateTopCourse
+								== Region.SelectedTopCourse
+							&& Candidate.bAccepted && Candidate.bSelected;
+					});
+		}
+	}
+	bLocalPodiumCandidatesClose &= Algo::AllOf(
+		Plan.LocalPodiumHeightCandidates,
+		[](const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate)
+		{
+			return !Candidate.bAccepted
+				|| (Candidate.CandidateTopCourse >= Candidate.ActualPodiumTopCourse
+					&& Candidate.BoundGroundCoreCellId != INDEX_NONE
+					&& Candidate.StructuralPodiumMainCoreCellId != INDEX_NONE
+					&& Candidate.bSharedPodiumMainSemanticEvent
+					&& Candidate.bCommonSemanticBoundary
+					&& Candidate.bFullyOccupiedThroughCandidate
+					&& Candidate.bCoversEveryDemandSeed
+					&& Candidate.bSingleConnectedFootprint
+					&& Candidate.PersistentCellCount > 0
+					&& Candidate.bLeavesTwoChildCourses
+					&& Candidate.bProtectedVoidClear);
+		});
+	Check(TEXT("publishes a complete read-only local podium height plan"),
+		Plan.Summary.LocalPodiumHeightCandidateCount
+			== Plan.LocalPodiumHeightCandidates.Num()
+			&& Plan.Summary.LocalPodiumHeightRegionCount
+				== Plan.LocalPodiumHeightRegions.Num()
+			&& Plan.Summary.LocalPodiumHeightPlanHash != 0
+			&& (bHasTowerChildDemands
+				? LocalPodiumRegionProvinceIds.Num()
+					== Plan.SupportProvinces.Num()
+					&& Plan.Summary.LocalPodiumHeightCandidateCount
+						>= Plan.Summary.SupportProvinceCount
+				: Plan.LocalPodiumHeightRegions.IsEmpty()
+					&& Plan.LocalPodiumHeightCandidates.IsEmpty())
+			&& bLocalPodiumCandidatesClose);
+	for (const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region
+		: Plan.LocalPodiumHeightRegions)
+	{
+		AddInfo(FString::Printf(
+			TEXT("Stage1LocalPodiumRegion:%s:Region=%d:Component=%d:StructuralMain=%d:Actual=%d:Selected=%d:Raised=%d:Provinces=%s"),
+			*Prefix, Region.RegionId, Region.ComponentId,
+			Region.StructuralPodiumMainCoreCellId,
+			Region.ActualPodiumTopCourse, Region.SelectedTopCourse,
+			Region.bRaisesActualPodium ? 1 : 0,
+			*JoinIds(Region.ProvinceIds)));
+	}
+	for (const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate
+		: Plan.LocalPodiumHeightCandidates)
+	{
+		AddInfo(FString::Printf(
+			TEXT("Stage1LocalPodiumCandidate:%s:Province=%d:Component=%d:GroundCore=%d:StructuralMain=%d:Course=%d:Actual=%d:Baseline=%d:OwnBoundary=%d:SharedEvent=%d:Boundary=%d:Continuous=%d:DemandSeeds=%d:Connected=%d:Cells=%d:SiblingGapUnits=%d:FirstRaisedCells=%d:RetainedPermille=%d:RetainsHalf=%d:BridgeWithin720=%d:BridgeVoidClear=%d:Clearance=%d:VoidClear=%d:Accepted=%d:Selected=%d:Reason=%s"),
+			*Prefix, Candidate.ProvinceId, Candidate.ComponentId,
+			Candidate.BoundGroundCoreCellId,
+			Candidate.StructuralPodiumMainCoreCellId,
+			Candidate.CandidateTopCourse, Candidate.ActualPodiumTopCourse,
+			Candidate.bActualBaseline ? 1 : 0,
+			Candidate.bOwnSemanticBoundary ? 1 : 0,
+			Candidate.bSharedPodiumMainSemanticEvent ? 1 : 0,
+			Candidate.bCommonSemanticBoundary ? 1 : 0,
+			Candidate.bFullyOccupiedThroughCandidate ? 1 : 0,
+			Candidate.bCoversEveryDemandSeed ? 1 : 0,
+			Candidate.bSingleConnectedFootprint ? 1 : 0,
+			Candidate.PersistentCellCount,
+			Candidate.MinimumSiblingFootprintGapUnits,
+			Candidate.FirstRaisedPersistentCellCount,
+			Candidate.RetainedFootprintPermille,
+			Candidate.bRetainsHalfFirstRaisedFootprint ? 1 : 0,
+			Candidate.bSiblingBridgeWithinMemberSpan ? 1 : 0,
+			Candidate.bSiblingBridgeVoidClear ? 1 : 0,
+			Candidate.bLeavesTwoChildCourses ? 1 : 0,
+			Candidate.bProtectedVoidClear ? 1 : 0,
+			Candidate.bAccepted ? 1 : 0,
+			Candidate.bSelected ? 1 : 0,
+			*Candidate.DecisionReason));
+	}
 	bool bSemanticOccupancyCloses = true;
 	for (const ABTSM73BeamC3V3::FSemanticSupportCourseOccupancyDiagnostic& Occupancy
 		: Plan.SemanticSupportCourseOccupancies)
@@ -3545,7 +3651,7 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 	}
 
 	AddInfo(FString::Printf(
-		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Provinces=%d:BoundProvinces=%d:ProvinceGroundCores=%d:ProvinceMainBindingHash=%lld:ProvinceCells=%d:ProvinceBoundaries=%d:ProvinceTies=%d:ProvinceFallbacks=%d:ProvinceHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
+		TEXT("Stage1MatrixLeaf:%s:Volumes=%d:SupportNodes=%d:SemanticDemands=%d:MergeLedger=%d:SupportDemandHash=%lld:Provinces=%d:BoundProvinces=%d:ProvinceGroundCores=%d:ProvinceMainBindingHash=%lld:ProvinceCells=%d:ProvinceBoundaries=%d:ProvinceTies=%d:ProvinceFallbacks=%d:ProvinceHash=%lld:LocalPodiumCandidates=%d:RejectedLocalPodiumCandidates=%d:LocalPodiumRegions=%d:RaisedLocalPodiumRegions=%d:LocalPodiumHash=%lld:Cores=%d:Main=%d:Children=%d:High=%d:Bound=%d:TerminalRequired=%d:TerminalBound=%d:Shared=%d:Members=%d:MaxMember=%.3f:PodiumAudits=%d:MinMainCoverage=%.6f:MinAnyCoverage=%.6f:Uncovered=%d:MaxHoleCM=%.3f:MaxCentroidGapCM=%.3f:StaticDAG=%s:Physical=NotEvaluated"),
 		*Prefix, Result.Silhouette.Volumes.Num(),
 		Plan.Summary.SemanticSupportNodeCount,
 		Plan.Summary.SemanticTerminalDemandCount,
@@ -3560,6 +3666,11 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 		Plan.Summary.SupportProvinceTieBreakCellCount,
 		Plan.Summary.SupportProvinceNearestSeedFallbackCount,
 		Plan.Summary.SupportProvinceHash,
+		Plan.Summary.LocalPodiumHeightCandidateCount,
+		Plan.Summary.RejectedLocalPodiumHeightCandidateCount,
+		Plan.Summary.LocalPodiumHeightRegionCount,
+		Plan.Summary.RaisedLocalPodiumHeightRegionCount,
+		Plan.Summary.LocalPodiumHeightPlanHash,
 		Plan.CoreCells.Num(),
 		Plan.Summary.PodiumMainCoreCellCount,
 		Plan.Summary.TowerChildCoreCellCount,
@@ -4167,7 +4278,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			}
 		}
 		AddInfo(FString::Printf(
-			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
+			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:LocalPodiumCandidates=%d:RejectedLocalPodiumCandidates=%d:LocalPodiumRegions=%d:RaisedLocalPodiumRegions=%d:LocalPodiumHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
 			Seed, Plan.Summary.PodiumMainCoreCellCount,
 			Plan.Summary.TowerChildCoreCellCount,
 			Plan.Summary.RequiredTerminalBranchCount,
@@ -4184,6 +4295,11 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			Plan.Summary.ReusedTowerChildBindingCount,
 			Plan.Summary.UnreferencedTowerChildCount,
 			Plan.Summary.SemanticDemandCoreBindingHash,
+			Plan.Summary.LocalPodiumHeightCandidateCount,
+			Plan.Summary.RejectedLocalPodiumHeightCandidateCount,
+			Plan.Summary.LocalPodiumHeightRegionCount,
+			Plan.Summary.RaisedLocalPodiumHeightRegionCount,
+			Plan.Summary.LocalPodiumHeightPlanHash,
 			Plan.Summary.FinalGeometryHash,
 			Plan.Summary.TerminalDemandMilliseconds,
 			Plan.Summary.ChildCandidateMilliseconds,
@@ -4192,6 +4308,65 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			Plan.Summary.MemberEmissionMilliseconds,
 			Plan.Summary.StaticDAGMilliseconds,
 			Plan.Summary.Stage1TotalMilliseconds));
+		for (const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region
+			: Plan.LocalPodiumHeightRegions)
+		{
+			AddInfo(FString::Printf(
+				TEXT("TipOverE6LocalPodiumRegion:Seed=%d:Region=%d:Component=%d:StructuralMain=%d:Actual=%d:Selected=%d:Raised=%d:Provinces=%s"),
+				Seed, Region.RegionId, Region.ComponentId,
+				Region.StructuralPodiumMainCoreCellId,
+				Region.ActualPodiumTopCourse, Region.SelectedTopCourse,
+				Region.bRaisesActualPodium ? 1 : 0,
+				*JoinIds(Region.ProvinceIds)));
+		}
+		for (const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate
+			: Plan.LocalPodiumHeightCandidates)
+		{
+			AddInfo(FString::Printf(
+				TEXT("TipOverE6LocalPodiumCandidate:Seed=%d:Province=%d:GroundCore=%d:StructuralMain=%d:Course=%d:Actual=%d:Baseline=%d:OwnBoundary=%d:SharedEvent=%d:Boundary=%d:Continuous=%d:DemandSeeds=%d:Connected=%d:Cells=%d:SiblingGapUnits=%d:FirstRaisedCells=%d:RetainedPermille=%d:RetainsHalf=%d:BridgeWithin720=%d:BridgeVoidClear=%d:Clearance=%d:VoidClear=%d:Accepted=%d:Selected=%d:Reason=%s"),
+				Seed, Candidate.ProvinceId, Candidate.BoundGroundCoreCellId,
+				Candidate.StructuralPodiumMainCoreCellId,
+				Candidate.CandidateTopCourse,
+				Candidate.ActualPodiumTopCourse,
+				Candidate.bActualBaseline ? 1 : 0,
+				Candidate.bOwnSemanticBoundary ? 1 : 0,
+				Candidate.bSharedPodiumMainSemanticEvent ? 1 : 0,
+				Candidate.bCommonSemanticBoundary ? 1 : 0,
+				Candidate.bFullyOccupiedThroughCandidate ? 1 : 0,
+				Candidate.bCoversEveryDemandSeed ? 1 : 0,
+				Candidate.bSingleConnectedFootprint ? 1 : 0,
+				Candidate.PersistentCellCount,
+				Candidate.MinimumSiblingFootprintGapUnits,
+				Candidate.FirstRaisedPersistentCellCount,
+				Candidate.RetainedFootprintPermille,
+				Candidate.bRetainsHalfFirstRaisedFootprint ? 1 : 0,
+				Candidate.bSiblingBridgeWithinMemberSpan ? 1 : 0,
+				Candidate.bSiblingBridgeVoidClear ? 1 : 0,
+				Candidate.bLeavesTwoChildCourses ? 1 : 0,
+				Candidate.bProtectedVoidClear ? 1 : 0,
+				Candidate.bAccepted ? 1 : 0,
+				Candidate.bSelected ? 1 : 0,
+				*Candidate.DecisionReason));
+		}
+		const int32 ExpectedStructuralMain = Seed == 710000 ? 1 : 0;
+		const int32 ExpectedRaisedTop = Seed == 710000
+			? 92 : Seed == 730000 ? 92 : 89;
+		TestTrue(*FString::Printf(
+			TEXT("Seed %d selects the morphology-bounded central podium height"), Seed),
+			Plan.LocalPodiumHeightRegions.ContainsByPredicate(
+				[ExpectedStructuralMain, ExpectedRaisedTop](
+					const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region)
+				{
+					return Region.StructuralPodiumMainCoreCellId == ExpectedStructuralMain
+						&& Region.SelectedTopCourse == ExpectedRaisedTop
+						&& Region.bRaisesActualPodium
+						&& Region.ProvinceIds.Num() >= 2;
+				}));
+		TestTrue(*FString::Printf(TEXT("Seed %d publishes a local podium plan"), Seed),
+			Plan.Summary.LocalPodiumHeightPlanHash != 0
+				&& Plan.Summary.LocalPodiumHeightRegionCount > 0
+				&& Plan.Summary.LocalPodiumHeightCandidateCount
+					>= Plan.Summary.SupportProvinceCount);
 		TestEqual(*FString::Printf(TEXT("Seed %d binds every terminal branch"), Seed),
 			Plan.Summary.BoundTerminalBranchCount,
 			Plan.Summary.RequiredTerminalBranchCount);

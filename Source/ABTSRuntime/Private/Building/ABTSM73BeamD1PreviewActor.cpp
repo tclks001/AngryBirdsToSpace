@@ -180,7 +180,8 @@ namespace ABTSM73BeamD1Preview
 		SemanticSupportDemandVisibility = 1 << 8,
 		SupportProvinceVisibility = 1 << 9,
 		SupportProvinceMainVisibility = 1 << 10,
-		DemandCoreCouplingVisibility = 1 << 11
+		DemandCoreCouplingVisibility = 1 << 11,
+		LocalPodiumHeightPlanVisibility = 1 << 12
 	};
 
 	uint16 DiagnosticVisibilityMask(
@@ -208,6 +209,8 @@ namespace ABTSM73BeamD1Preview
 			return SupportProvinceMainVisibility;
 		case EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger:
 			return DemandCoreCouplingVisibility;
+		case EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan:
+			return LocalPodiumHeightPlanVisibility;
 		default:
 			return 0;
 		}
@@ -305,6 +308,8 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment);
 	const uint16 DemandCoreCouplingMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger);
+	const uint16 LocalPodiumHeightPlanMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint16>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -329,6 +334,9 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 	TestEqual(TEXT("Demand-core layer contains only the correspondence ledger"),
 		DemandCoreCouplingMask,
 		static_cast<uint16>(DemandCoreCouplingVisibility));
+	TestEqual(TEXT("Local-podium layer contains only the height plan"),
+		LocalPodiumHeightPlanMask,
+		static_cast<uint16>(LocalPodiumHeightPlanVisibility));
 	TestEqual(TEXT("WFC and intent layers are disjoint"),
 		static_cast<uint16>(WFCMask & IntentMask), static_cast<uint16>(0));
 	TestEqual(TEXT("WFC and member layers are disjoint"),
@@ -363,6 +371,11 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 			& (WFCMask | IntentMask | MembersMask | MergeMask | XMask | YMask
 				| SupportDemandMask | SupportProvinceMask | SupportProvinceMainMask)),
 		static_cast<uint16>(0));
+	TestEqual(TEXT("Local-podium height plan is disjoint from all prior layers"),
+		static_cast<uint16>(LocalPodiumHeightPlanMask
+			& (WFCMask | IntentMask | MembersMask | MergeMask | XMask | YMask
+				| SupportDemandMask | SupportProvinceMask | SupportProvinceMainMask
+				| DemandCoreCouplingMask)), static_cast<uint16>(0));
 	TestTrue(TEXT("Support-demand volumes are visible by default"),
 		ShouldShowSemanticSupportDemandVolumes(false));
 	TestFalse(TEXT("Lines-only option hides support-demand volumes"),
@@ -815,6 +828,218 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			}
 		}
 		else if ((VisibilityMask
+			& ABTSM73BeamD1Preview::LocalPodiumHeightPlanVisibility) != 0)
+		{
+			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			TArray<UHierarchicalInstancedStaticMeshComponent*> RegionPreviews{
+				WoodPreview.Get(), StonePreview.Get(), GlassPreview.Get(),
+				TowerChildIntentPreview.Get()};
+			for (const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region
+				: Plan.LocalPodiumHeightRegions)
+			{
+				UHierarchicalInstancedStaticMeshComponent* RegionPreview =
+					RegionPreviews[Region.RegionId % RegionPreviews.Num()];
+				for (const int32 ProvinceId : Region.ProvinceIds)
+				{
+					const ABTSM73BeamC3V3::FSupportProvinceDiagnostic* Province =
+						Plan.SupportProvinces.FindByPredicate(
+							[ProvinceId](
+								const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Candidate)
+							{
+								return Candidate.ProvinceId == ProvinceId;
+							});
+					if (Province == nullptr)
+					{
+						continue;
+					}
+					const double GroundZ = Province->GroundBounds.Min.Z;
+					const double ActualTopZ = GroundZ
+						+ Region.ActualPodiumTopCourse * 36.0;
+					const double SelectedTopZ = GroundZ
+						+ Region.SelectedTopCourse * 36.0;
+					const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic*
+						SelectedCandidate = Plan.LocalPodiumHeightCandidates.FindByPredicate(
+							[ProvinceId, &Region](
+								const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate)
+							{
+								return Candidate.ProvinceId == ProvinceId
+									&& Candidate.CandidateTopCourse
+										== Region.SelectedTopCourse
+									&& Candidate.bAccepted && Candidate.bSelected;
+							});
+					if (SelectedCandidate == nullptr)
+					{
+						continue;
+					}
+					for (int32 BitIndex = 0;
+						BitIndex < Province->SizeX * Province->SizeY; ++BitIndex)
+					{
+						if (!ABTSM73BeamD1Preview::PreviewSupportProvinceWordContains(
+							SelectedCandidate->PersistentCellWords, BitIndex))
+						{
+							continue;
+						}
+						const int32 X = BitIndex % Province->SizeX;
+						const int32 Y = BitIndex / Province->SizeX;
+						const double CenterX =
+							(Province->MinimumXUnit + X) * 36.0;
+						const double CenterY =
+							(Province->MinimumYUnit + Y) * 36.0;
+						ABTSM73BeamD1Preview::AddBoxInstance(RegionPreview, FBox(
+							FVector(CenterX - 16.0, CenterY - 16.0,
+								SelectedTopZ - 5.0),
+							FVector(CenterX + 16.0, CenterY + 16.0,
+								SelectedTopZ)));
+						if (Region.bRaisesActualPodium)
+						{
+							ABTSM73BeamD1Preview::AddBoxInstance(
+								CoreIntentPreview, FBox(
+									FVector(CenterX - 14.0, CenterY - 14.0,
+										ActualTopZ - 3.0),
+									FVector(CenterX + 14.0, CenterY + 14.0,
+										ActualTopZ)));
+						}
+					}
+					const FVector ActualAnchor(
+						Province->GroundCentroid.X, Province->GroundCentroid.Y,
+						ActualTopZ);
+					const FVector SelectedAnchor(
+						Province->GroundCentroid.X, Province->GroundCentroid.Y,
+						SelectedTopZ);
+					ABTSM73BeamD1Preview::AddSegmentInstance(
+						SharedPairIntentPreview, ActualAnchor, SelectedAnchor, 8.0);
+				}
+				for (int32 FirstIndex = 0;
+					FirstIndex < Region.ProvinceIds.Num(); ++FirstIndex)
+				{
+					const int32 FirstProvinceId = Region.ProvinceIds[FirstIndex];
+					const ABTSM73BeamC3V3::FSupportProvinceDiagnostic* FirstProvince =
+						Plan.SupportProvinces.FindByPredicate(
+							[FirstProvinceId](
+								const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province)
+							{
+								return Province.ProvinceId == FirstProvinceId;
+							});
+					const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic* FirstCandidate =
+						Plan.LocalPodiumHeightCandidates.FindByPredicate(
+							[FirstProvinceId, &Region](
+								const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate)
+							{
+								return Candidate.ProvinceId == FirstProvinceId
+									&& Candidate.CandidateTopCourse == Region.SelectedTopCourse
+									&& Candidate.bSelected;
+							});
+					if (FirstProvince == nullptr || FirstCandidate == nullptr)
+					{
+						continue;
+					}
+					for (int32 SecondIndex = FirstIndex + 1;
+						SecondIndex < Region.ProvinceIds.Num(); ++SecondIndex)
+					{
+						const int32 SecondProvinceId = Region.ProvinceIds[SecondIndex];
+						if (!FirstProvince->AdjacentProvinceIds.Contains(SecondProvinceId))
+						{
+							continue;
+						}
+						const ABTSM73BeamC3V3::FSupportProvinceDiagnostic* SecondProvince =
+							Plan.SupportProvinces.FindByPredicate(
+								[SecondProvinceId](
+									const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province)
+								{
+									return Province.ProvinceId == SecondProvinceId;
+								});
+						const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic* SecondCandidate =
+							Plan.LocalPodiumHeightCandidates.FindByPredicate(
+								[SecondProvinceId, &Region](
+									const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate)
+								{
+									return Candidate.ProvinceId == SecondProvinceId
+										&& Candidate.CandidateTopCourse == Region.SelectedTopCourse
+										&& Candidate.bSelected;
+								});
+						if (SecondProvince == nullptr || SecondCandidate == nullptr)
+						{
+							continue;
+						}
+						int32 MinimumManhattan = MAX_int32;
+						FVector FirstCenter = FVector::ZeroVector;
+						FVector SecondCenter = FVector::ZeroVector;
+						const double Z = FirstProvince->GroundBounds.Min.Z
+							+ Region.SelectedTopCourse * 36.0;
+						for (int32 FirstBit = 0;
+							FirstBit < FirstProvince->SizeX * FirstProvince->SizeY;
+							++FirstBit)
+						{
+							if (!ABTSM73BeamD1Preview::PreviewSupportProvinceWordContains(
+								FirstCandidate->PersistentCellWords, FirstBit))
+							{
+								continue;
+							}
+							const int32 FirstX = FirstBit % FirstProvince->SizeX;
+							const int32 FirstY = FirstBit / FirstProvince->SizeX;
+							for (int32 SecondBit = 0;
+								SecondBit < SecondProvince->SizeX * SecondProvince->SizeY;
+								++SecondBit)
+							{
+								if (!ABTSM73BeamD1Preview::PreviewSupportProvinceWordContains(
+									SecondCandidate->PersistentCellWords, SecondBit))
+								{
+									continue;
+								}
+								const int32 SecondX = SecondBit % SecondProvince->SizeX;
+								const int32 SecondY = SecondBit / SecondProvince->SizeX;
+								const int32 Manhattan = FMath::Abs(FirstX - SecondX)
+									+ FMath::Abs(FirstY - SecondY);
+								if (Manhattan < MinimumManhattan)
+								{
+									MinimumManhattan = Manhattan;
+									FirstCenter = FVector(
+										(FirstProvince->MinimumXUnit + FirstX) * 36.0,
+										(FirstProvince->MinimumYUnit + FirstY) * 36.0, Z);
+									SecondCenter = FVector(
+										(SecondProvince->MinimumXUnit + SecondX) * 36.0,
+										(SecondProvince->MinimumYUnit + SecondY) * 36.0, Z);
+								}
+							}
+						}
+						if (MinimumManhattan > 1 && MinimumManhattan != MAX_int32)
+						{
+							ABTSM73BeamD1Preview::AddSegmentInstance(
+								SharedPairIntentPreview,
+								FirstCenter, SecondCenter, 12.0);
+						}
+					}
+				}
+			}
+			for (const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate
+				: Plan.LocalPodiumHeightCandidates)
+			{
+				if (Candidate.bAccepted
+					|| !Plan.SupportProvinces.IsValidIndex(Candidate.ProvinceId))
+				{
+					continue;
+				}
+				const ABTSM73BeamC3V3::FSupportProvinceDiagnostic& Province =
+					Plan.SupportProvinces[Candidate.ProvinceId];
+				const double Z = Province.GroundBounds.Min.Z
+					+ Candidate.CandidateTopCourse * 36.0;
+				const FVector Center(
+					Province.AnchorXUnit * 36.0,
+					Province.AnchorYUnit * 36.0, Z);
+				ABTSM73BeamD1Preview::AddBoxInstance(IronPreview, FBox(
+					Center - FVector(7.0), Center + FVector(7.0)));
+			}
+			for (UHierarchicalInstancedStaticMeshComponent* Preview : RegionPreviews)
+			{
+				Preview->SetVisibility(Preview->GetInstanceCount() > 0, true);
+			}
+			CoreIntentPreview->SetVisibility(
+				CoreIntentPreview->GetInstanceCount() > 0, true);
+			SharedPairIntentPreview->SetVisibility(
+				SharedPairIntentPreview->GetInstanceCount() > 0, true);
+			IronPreview->SetVisibility(IronPreview->GetInstanceCount() > 0, true);
+		}
+		else if ((VisibilityMask
 			& ABTSM73BeamD1Preview::DemandCoreCouplingVisibility) != 0)
 		{
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
@@ -1131,7 +1356,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment
-			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger)
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan)
 		{
 			for (UHierarchicalInstancedStaticMeshComponent* Preview : {
 				WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
@@ -1146,6 +1372,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" Volumes=%d SupportNodes=%d LoadBranches=%d MultiBranchBodies=%d UnrepresentedBranches=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 			TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
+			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d LocalPodiumHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
@@ -1176,6 +1403,12 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.BoundSupportProvinceCount,
 			StageResult.Skeleton.Plan.Summary.DistinctProvinceGroundCoreCount,
 			StageResult.Skeleton.Plan.Summary.SupportProvinceMainBindingHash,
+			StageResult.Skeleton.Plan.Summary.LocalPodiumHeightCandidateCount,
+			StageResult.Skeleton.Plan.Summary
+				.RejectedLocalPodiumHeightCandidateCount,
+			StageResult.Skeleton.Plan.Summary.LocalPodiumHeightRegionCount,
+			StageResult.Skeleton.Plan.Summary.RaisedLocalPodiumHeightRegionCount,
+			StageResult.Skeleton.Plan.Summary.LocalPodiumHeightPlanHash,
 			StageResult.Skeleton.Plan.CoreCells.Num(),
 			StageResult.Skeleton.Plan.Summary.PodiumMainCoreCellCount,
 			StageResult.Skeleton.Plan.Summary.TowerChildCoreCellCount,

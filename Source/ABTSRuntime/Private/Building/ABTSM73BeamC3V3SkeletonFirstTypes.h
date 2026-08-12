@@ -550,6 +550,73 @@ namespace ABTSM73BeamC3V3
 		bool bSyntheticGroundOnly = false;
 	};
 
+	/** One semantic separation-course decision for a support province.  This is
+	 * diagnostic-only until the local podium plan receives visual approval. */
+	struct FLocalPodiumHeightCandidateDiagnostic
+	{
+		int32 ProvinceId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		/** PodiumMain (or grounded fallback core) whose child-demand family owns
+		 * the province's ground anchor.  It may differ from the structural parent
+		 * and is retained to expose that distinction. */
+		int32 BoundGroundCoreCellId = INDEX_NONE;
+		/** Authoritative parent obtained from each demand's TowerChild.  Event
+		 * courses and raised groups are shared only inside this family. */
+		int32 StructuralPodiumMainCoreCellId = INDEX_NONE;
+		int32 CandidateTopCourse = 0;
+		int32 ActualPodiumTopCourse = 0;
+		bool bActualBaseline = false;
+		/** The course is a common semantic event on this province's own demand
+		 * lineages. */
+		bool bOwnSemanticBoundary = false;
+		/** The course is contributed by any province whose TowerChild has the same
+		 * structural PodiumMain parent.  This permits staggered WFC step events to be evaluated at a
+		 * common physical height without mixing unrelated mains. */
+		bool bSharedPodiumMainSemanticEvent = false;
+		bool bCommonSemanticBoundary = false;
+		bool bFullyOccupiedThroughCandidate = false;
+		bool bCoversEveryDemandSeed = false;
+		bool bSingleConnectedFootprint = false;
+		bool bLeavesTwoChildCourses = false;
+		bool bProtectedVoidClear = false;
+		bool bAccepted = false;
+		bool bSelected = false;
+		/** Empty 36 cm cells between the nearest face-adjacent lattice cells of
+		 * this candidate and any adjacent province in the same structural main
+		 * family at the same course.  INDEX_NONE means no sibling candidate. */
+		int32 MinimumSiblingFootprintGapUnits = INDEX_NONE;
+		/** Cell count at this province's first accepted raised semantic event. */
+		int32 FirstRaisedPersistentCellCount = 0;
+		/** Candidate footprint / first-raised footprint, in per-mille. */
+		int32 RetainedFootprintPermille = 0;
+		/** A podium plate must retain at least half of its first-raised section;
+		 * otherwise the semantic volume has become a tower neck. */
+		bool bRetainsHalfFirstRaisedFootprint = false;
+		/** The nearest sibling seam can be crossed without exceeding the 720 cm
+		 * member hard gate. */
+		bool bSiblingBridgeWithinMemberSpan = false;
+		bool bSiblingBridgeVoidClear = false;
+		int32 PersistentCellCount = 0;
+		/** Same lattice as the owning support province. */
+		TArray<uint64> PersistentCellWords;
+		FString DecisionReason;
+	};
+
+	/** A connected set of adjacent provinces which selected the same highest
+	 * legal common semantic separation course.  It is a read-only Stage-1
+	 * proposal and does not alter PodiumMain or emitted member geometry. */
+	struct FLocalPodiumHeightRegionDiagnostic
+	{
+		int32 RegionId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 StructuralPodiumMainCoreCellId = INDEX_NONE;
+		int32 ActualPodiumTopCourse = 0;
+		int32 SelectedTopCourse = 0;
+		TArray<int32> ProvinceIds;
+		FBox GroundBounds = FBox(EForceInit::ForceInit);
+		bool bRaisesActualPodium = false;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -695,6 +762,10 @@ namespace ABTSM73BeamC3V3
 		int32 SupportProvinceNearestSeedFallbackCount = 0;
 		int32 BoundSupportProvinceCount = 0;
 		int32 DistinctProvinceGroundCoreCount = 0;
+		int32 LocalPodiumHeightCandidateCount = 0;
+		int32 RejectedLocalPodiumHeightCandidateCount = 0;
+		int32 LocalPodiumHeightRegionCount = 0;
+		int32 RaisedLocalPodiumHeightRegionCount = 0;
 		int32 CoreMergeRegionCount = 0;
 		int32 MergedGroundComponentCount = 0;
 		int32 MaximumCoreRailCount = 0;
@@ -769,6 +840,8 @@ namespace ABTSM73BeamC3V3
 		int64 SupportProvinceHash = 0;
 		/** Selected grounded-core assignment for every support province. */
 		int64 SupportProvinceMainBindingHash = 0;
+		/** Read-only local podium height proposal; excluded from geometry hashes. */
+		int64 LocalPodiumHeightPlanHash = 0;
 		int64 FinalGeometryHash = 0;
 		FString RejectReason;
 	};
@@ -811,6 +884,9 @@ namespace ABTSM73BeamC3V3
 		TArray<FSemanticDemandCoreBindingDiagnostic>
 			SemanticDemandCoreBindings;
 		TArray<FSupportProvinceDiagnostic> SupportProvinces;
+		TArray<FLocalPodiumHeightCandidateDiagnostic>
+			LocalPodiumHeightCandidates;
+		TArray<FLocalPodiumHeightRegionDiagnostic> LocalPodiumHeightRegions;
 		TArray<FCoreCellPlan> CoreCells;
 		TArray<FSharedEndpointReachabilityDiagnostic>
 			SharedEndpointReachabilityDiagnostics;

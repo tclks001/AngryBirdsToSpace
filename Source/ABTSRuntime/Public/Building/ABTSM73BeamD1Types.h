@@ -48,7 +48,8 @@ enum class EABTSM73BeamC3Stage1DiagnosticLayer : uint8
 	SemanticSupportDemandDAG UMETA(DisplayName = "7 - Semantic Support Demand DAG"),
 	SupportProvincePartition UMETA(DisplayName = "8 - Support Province Partition"),
 	SupportProvinceMainAssignment UMETA(DisplayName = "9 - Province / Main Assignment"),
-	DemandCoreCouplingLedger UMETA(DisplayName = "10 - Demand / Child / Main Ledger")
+	DemandCoreCouplingLedger UMETA(DisplayName = "10 - Demand / Child / Main Ledger"),
+	LocalPodiumHeightPlan UMETA(DisplayName = "11 - Local Podium Height Plan")
 };
 
 USTRUCT(BlueprintType)

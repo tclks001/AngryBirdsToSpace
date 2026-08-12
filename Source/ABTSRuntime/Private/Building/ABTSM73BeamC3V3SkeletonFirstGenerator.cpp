@@ -2213,6 +2213,1034 @@ namespace
 			&& Plan.Summary.SupportProvinceMainBindingHash != 0;
 	}
 
+	bool BuildLocalPodiumHeightPlanDiagnostics(FPlan& Plan, FString& OutError)
+	{
+		Plan.LocalPodiumHeightCandidates.Reset();
+		Plan.LocalPodiumHeightRegions.Reset();
+		Plan.Summary.LocalPodiumHeightCandidateCount = 0;
+		Plan.Summary.RejectedLocalPodiumHeightCandidateCount = 0;
+		Plan.Summary.LocalPodiumHeightRegionCount = 0;
+		Plan.Summary.RaisedLocalPodiumHeightRegionCount = 0;
+		Plan.Summary.LocalPodiumHeightPlanHash = 0;
+		if (Plan.SupportProvinces.IsEmpty())
+		{
+			Plan.Summary.LocalPodiumHeightPlanHash =
+				HashText(TEXT("NoLocalPodiumHeightRegions"));
+			return Plan.Summary.LocalPodiumHeightPlanHash != 0;
+		}
+
+		TMap<int32, int32> SelectedTopByProvince;
+		TMap<int32, int32> ActualTopByProvince;
+		TMap<int32, TSet<int32>> OwnBoundaryCoursesByProvince;
+		TMap<int32, int32> StructuralPodiumMainByProvince;
+		TMap<int32, TSet<int32>> EventCoursesByStructuralPodiumMain;
+		FString Canonical;
+		for (const FSupportProvinceDiagnostic& Province : Plan.SupportProvinces)
+		{
+			TSet<int32> CommonBoundaryCourses;
+			bool bFirstDemand = true;
+			int32 StructuralPodiumMainCoreCellId = INDEX_NONE;
+			for (const int32 DemandId : Province.DemandIds)
+			{
+				const FCoreCellPlan* DemandChild = Plan.CoreCells.FindByPredicate(
+					[DemandId](const FCoreCellPlan& Core)
+					{
+						return Core.HierarchyRole == ECoreHierarchyRole::TowerChild
+							&& Core.SemanticDemandId == DemandId;
+					});
+				if (DemandChild == nullptr
+					|| DemandChild->PodiumMainCoreCellId == INDEX_NONE
+					|| (StructuralPodiumMainCoreCellId != INDEX_NONE
+						&& StructuralPodiumMainCoreCellId
+							!= DemandChild->PodiumMainCoreCellId))
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3LocalPodiumStructuralMainUnavailable:Province=%d:Demand=%d:ExistingMain=%d:Child=%d:ChildMain=%d"),
+						Province.ProvinceId, DemandId,
+						StructuralPodiumMainCoreCellId,
+						DemandChild != nullptr ? DemandChild->CoreCellId : INDEX_NONE,
+						DemandChild != nullptr
+							? DemandChild->PodiumMainCoreCellId : INDEX_NONE);
+					return false;
+				}
+				StructuralPodiumMainCoreCellId = DemandChild->PodiumMainCoreCellId;
+				const FSemanticTerminalDemandDiagnostic* Demand =
+					Plan.SemanticTerminalDemands.FindByPredicate(
+						[DemandId](const FSemanticTerminalDemandDiagnostic& Candidate)
+						{
+							return Candidate.DemandId == DemandId;
+						});
+				if (Demand == nullptr)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3LocalPodiumDemandUnavailable:Province=%d:Demand=%d"),
+						Province.ProvinceId, DemandId);
+					return false;
+				}
+				TSet<int32> DemandBoundaryCourses;
+				for (const FSemanticSupportMergeLedgerDiagnostic& Ledger
+					: Plan.SemanticSupportMergeLedger)
+				{
+					if (Ledger.ComponentId != Province.ComponentId)
+					{
+						continue;
+					}
+					const bool bTouchesLineage = Ledger.LowerNodeIds.ContainsByPredicate(
+						[Demand](const int32 NodeId)
+						{
+							return Demand->LineageNodeIds.Contains(NodeId);
+						}) || Ledger.UpperNodeIds.ContainsByPredicate(
+						[Demand](const int32 NodeId)
+						{
+							return Demand->LineageNodeIds.Contains(NodeId);
+						});
+					if (bTouchesLineage && Ledger.ContactCourse > 0)
+					{
+						DemandBoundaryCourses.Add(Ledger.ContactCourse);
+					}
+				}
+				if (bFirstDemand)
+				{
+					CommonBoundaryCourses = MoveTemp(DemandBoundaryCourses);
+					bFirstDemand = false;
+				}
+				else
+				{
+					for (auto It = CommonBoundaryCourses.CreateIterator(); It; ++It)
+					{
+						if (!DemandBoundaryCourses.Contains(*It))
+						{
+							It.RemoveCurrent();
+						}
+					}
+				}
+			}
+			OwnBoundaryCoursesByProvince.Add(
+				Province.ProvinceId, CommonBoundaryCourses);
+			StructuralPodiumMainByProvince.Add(
+				Province.ProvinceId, StructuralPodiumMainCoreCellId);
+			TSet<int32>& StructuralMainEvents =
+				EventCoursesByStructuralPodiumMain.FindOrAdd(
+					StructuralPodiumMainCoreCellId);
+			for (const int32 Course : CommonBoundaryCourses)
+			{
+				StructuralMainEvents.Add(Course);
+			}
+		}
+		for (const FSupportProvinceDiagnostic& Province : Plan.SupportProvinces)
+		{
+			const int32 StructuralPodiumMainCoreCellId =
+				StructuralPodiumMainByProvince.FindChecked(Province.ProvinceId);
+			const FCoreCellPlan* BoundGroundCore = Plan.CoreCells.FindByPredicate(
+				[&Province](const FCoreCellPlan& Core)
+				{
+					return Core.CoreCellId == Province.BoundGroundCoreCellId;
+				});
+			const FCoreCellPlan* StructuralPodiumMain = Plan.CoreCells.FindByPredicate(
+				[StructuralPodiumMainCoreCellId](const FCoreCellPlan& Core)
+				{
+					return Core.CoreCellId == StructuralPodiumMainCoreCellId;
+				});
+			if (BoundGroundCore == nullptr
+				|| BoundGroundCore->ComponentId != Province.ComponentId
+				|| StructuralPodiumMain == nullptr
+				|| StructuralPodiumMain->ComponentId != Province.ComponentId
+				|| StructuralPodiumMain->HierarchyRole
+					!= ECoreHierarchyRole::PodiumMain
+				|| StructuralPodiumMain->TopCourseIndex <= 0)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumBaselineUnavailable:Province=%d:Component=%d:GroundCore=%d:StructuralMain=%d"),
+					Province.ProvinceId, Province.ComponentId,
+					Province.BoundGroundCoreCellId,
+					StructuralPodiumMainCoreCellId);
+				return false;
+			}
+			const int32 ActualTopCourse = StructuralPodiumMain->TopCourseIndex;
+			ActualTopByProvince.Add(Province.ProvinceId, ActualTopCourse);
+
+			const TSet<int32>& CommonBoundaryCourses =
+				OwnBoundaryCoursesByProvince.FindChecked(Province.ProvinceId);
+			const TSet<int32>& StructuralMainEventCourses =
+				EventCoursesByStructuralPodiumMain.FindChecked(
+					StructuralPodiumMainCoreCellId);
+
+			TArray<int32> ContinuousTopByCell;
+			ContinuousTopByCell.Init(0, Province.SizeX * Province.SizeY);
+			for (int32 BitIndex = 0; BitIndex < ContinuousTopByCell.Num(); ++BitIndex)
+			{
+				if (!SkeletonV3SupportProvinceWordContains(
+					Province.GroundCellWords, BitIndex))
+				{
+					continue;
+				}
+				for (int32 Course = 0; ; ++Course)
+				{
+					const FSemanticSupportCourseOccupancyDiagnostic* Occupancy =
+						Plan.SemanticSupportCourseOccupancies.FindByPredicate(
+							[&Province, Course](
+								const FSemanticSupportCourseOccupancyDiagnostic& Candidate)
+							{
+								return Candidate.ComponentId == Province.ComponentId
+									&& Candidate.CourseIndex == Course;
+							});
+					if (Occupancy == nullptr
+						|| Occupancy->MinimumXUnit != Province.MinimumXUnit
+						|| Occupancy->MinimumYUnit != Province.MinimumYUnit
+						|| Occupancy->SizeX != Province.SizeX
+						|| Occupancy->SizeY != Province.SizeY
+						|| !SkeletonV3SupportProvinceWordContains(
+							Occupancy->OccupiedWords, BitIndex))
+					{
+						break;
+					}
+					ContinuousTopByCell[BitIndex] = Course + 1;
+				}
+			}
+
+			TSet<int32> CandidateCourses = StructuralMainEventCourses;
+			CandidateCourses.Add(ActualTopCourse);
+			CandidateCourses.Add(Province.ProposedPodiumTopCourse);
+			TArray<int32> SortedCandidates = CandidateCourses.Array();
+			SortedCandidates.Sort();
+			bool bHasLegalCandidate = false;
+			for (const int32 CandidateTopCourse : SortedCandidates)
+			{
+				if (CandidateTopCourse <= 0)
+				{
+					continue;
+				}
+				FLocalPodiumHeightCandidateDiagnostic& Candidate =
+					Plan.LocalPodiumHeightCandidates.AddDefaulted_GetRef();
+				Candidate.ProvinceId = Province.ProvinceId;
+				Candidate.ComponentId = Province.ComponentId;
+				Candidate.BoundGroundCoreCellId = Province.BoundGroundCoreCellId;
+				Candidate.StructuralPodiumMainCoreCellId =
+					StructuralPodiumMainCoreCellId;
+				Candidate.CandidateTopCourse = CandidateTopCourse;
+				Candidate.ActualPodiumTopCourse = ActualTopCourse;
+				Candidate.bActualBaseline = CandidateTopCourse == ActualTopCourse;
+				Candidate.bOwnSemanticBoundary = Candidate.bActualBaseline
+					|| CommonBoundaryCourses.Contains(CandidateTopCourse);
+				Candidate.bSharedPodiumMainSemanticEvent = Candidate.bActualBaseline
+					|| StructuralMainEventCourses.Contains(CandidateTopCourse);
+				Candidate.bCommonSemanticBoundary = Candidate.bActualBaseline
+					|| Candidate.bSharedPodiumMainSemanticEvent;
+				const int32 WordCount =
+					(Province.SizeX * Province.SizeY + 63) / 64;
+				TArray<uint64> RawPersistentWords;
+				RawPersistentWords.Init(0, WordCount);
+				int32 RawPersistentCellCount = 0;
+				for (int32 BitIndex = 0; BitIndex < ContinuousTopByCell.Num(); ++BitIndex)
+				{
+					const bool bPersistent = Candidate.bActualBaseline
+						? SkeletonV3SupportProvinceWordContains(
+							Province.GroundCellWords, BitIndex)
+						: ContinuousTopByCell[BitIndex] >= CandidateTopCourse;
+					if (bPersistent)
+					{
+						RawPersistentWords[BitIndex >> 6] |=
+							uint64(1) << (BitIndex & 63);
+						++RawPersistentCellCount;
+					}
+				}
+				TArray<int32> DemandSeedBits;
+				Candidate.bCoversEveryDemandSeed = RawPersistentCellCount > 0;
+				for (const int32 DemandId : Province.DemandIds)
+				{
+					const FSemanticTerminalDemandDiagnostic* Demand =
+						Plan.SemanticTerminalDemands.FindByPredicate(
+							[DemandId](const FSemanticTerminalDemandDiagnostic& Entry)
+							{
+								return Entry.DemandId == DemandId;
+							});
+					int32 SeedBit = INDEX_NONE;
+					if (Demand != nullptr)
+					{
+						for (int32 BitIndex = 0;
+							BitIndex < Province.SizeX * Province.SizeY; ++BitIndex)
+						{
+							if (!SkeletonV3SupportProvinceWordContains(
+								RawPersistentWords, BitIndex))
+							{
+								continue;
+							}
+							const int32 X = BitIndex % Province.SizeX;
+							const int32 Y = BitIndex / Province.SizeX;
+							const FVector2D Center(
+								(Province.MinimumXUnit + X) * BlockUnitsCM,
+								(Province.MinimumYUnit + Y) * BlockUnitsCM);
+							if (Center.X >= Demand->GroundProjectionBounds.Min.X
+								- GeometryToleranceCM
+								&& Center.X <= Demand->GroundProjectionBounds.Max.X
+									+ GeometryToleranceCM
+								&& Center.Y >= Demand->GroundProjectionBounds.Min.Y
+									- GeometryToleranceCM
+								&& Center.Y <= Demand->GroundProjectionBounds.Max.Y
+									+ GeometryToleranceCM)
+							{
+								SeedBit = BitIndex;
+								break;
+							}
+						}
+					}
+					Candidate.bCoversEveryDemandSeed &= SeedBit != INDEX_NONE;
+					if (SeedBit != INDEX_NONE)
+					{
+						DemandSeedBits.AddUnique(SeedBit);
+					}
+				}
+				Candidate.PersistentCellWords.Init(0, WordCount);
+				if (!DemandSeedBits.IsEmpty())
+				{
+					TArray<int32> PendingBits{DemandSeedBits[0]};
+					while (!PendingBits.IsEmpty())
+					{
+						const int32 BitIndex = PendingBits.Pop(EAllowShrinking::No);
+						if (!SkeletonV3SupportProvinceWordContains(
+							RawPersistentWords, BitIndex)
+							|| SkeletonV3SupportProvinceWordContains(
+								Candidate.PersistentCellWords, BitIndex))
+						{
+							continue;
+						}
+						Candidate.PersistentCellWords[BitIndex >> 6] |=
+							uint64(1) << (BitIndex & 63);
+						++Candidate.PersistentCellCount;
+						const int32 X = BitIndex % Province.SizeX;
+						const int32 Y = BitIndex / Province.SizeX;
+						for (const FIntPoint Delta : {
+							FIntPoint(-1, 0), FIntPoint(1, 0),
+							FIntPoint(0, -1), FIntPoint(0, 1)})
+						{
+							const int32 NX = X + Delta.X;
+							const int32 NY = Y + Delta.Y;
+							if (NX >= 0 && NX < Province.SizeX
+								&& NY >= 0 && NY < Province.SizeY)
+							{
+								PendingBits.Add(NY * Province.SizeX + NX);
+							}
+						}
+					}
+				}
+				for (const int32 SeedBit : DemandSeedBits)
+				{
+					Candidate.bCoversEveryDemandSeed &=
+						SkeletonV3SupportProvinceWordContains(
+							Candidate.PersistentCellWords, SeedBit);
+				}
+				Candidate.bSingleConnectedFootprint =
+					Candidate.PersistentCellCount > 0;
+				Candidate.bFullyOccupiedThroughCandidate =
+					Candidate.bSingleConnectedFootprint
+					&& Candidate.bCoversEveryDemandSeed;
+				Candidate.bLeavesTwoChildCourses = CandidateTopCourse + 2
+					<= Province.MinimumRequiredTopCourse;
+				Candidate.bProtectedVoidClear = true;
+				if (CandidateTopCourse > ActualTopCourse
+					&& Plan.Components.IsValidIndex(Province.ComponentId))
+				{
+					const double GroundZ =
+						Plan.Components[Province.ComponentId].GroundPlaneZCM;
+					const double AddedMinimumZ = GroundZ
+						+ ActualTopCourse * static_cast<double>(BlockUnitsCM);
+					const double AddedMaximumZ = GroundZ
+						+ CandidateTopCourse * static_cast<double>(BlockUnitsCM);
+					for (int32 BitIndex = 0;
+						BitIndex < Province.SizeX * Province.SizeY
+							&& Candidate.bProtectedVoidClear; ++BitIndex)
+					{
+						if (!SkeletonV3SupportProvinceWordContains(
+							Candidate.PersistentCellWords, BitIndex))
+						{
+							continue;
+						}
+						const int32 X = BitIndex % Province.SizeX;
+						const int32 Y = BitIndex / Province.SizeX;
+						const double CenterX =
+							(Province.MinimumXUnit + X) * BlockUnitsCM;
+						const double CenterY =
+							(Province.MinimumYUnit + Y) * BlockUnitsCM;
+						const FBox AddedColumn(
+							FVector(CenterX - BlockUnitsCM * 0.5,
+								CenterY - BlockUnitsCM * 0.5, AddedMinimumZ),
+							FVector(CenterX + BlockUnitsCM * 0.5,
+								CenterY + BlockUnitsCM * 0.5, AddedMaximumZ));
+						Candidate.bProtectedVoidClear =
+							!Plan.ReservedSupportVoids.ContainsByPredicate(
+								[&AddedColumn](const FABTSM73BeamASupportVoid& Void)
+								{
+									return AddedColumn.IsValid && Void.Bounds.IsValid
+										&& AddedColumn.Min.X
+											< Void.Bounds.Max.X - GeometryToleranceCM
+										&& AddedColumn.Max.X
+											> Void.Bounds.Min.X + GeometryToleranceCM
+										&& AddedColumn.Min.Y
+											< Void.Bounds.Max.Y - GeometryToleranceCM
+										&& AddedColumn.Max.Y
+											> Void.Bounds.Min.Y + GeometryToleranceCM
+										&& AddedColumn.Min.Z
+											< Void.Bounds.Max.Z - GeometryToleranceCM
+										&& AddedColumn.Max.Z
+											> Void.Bounds.Min.Z + GeometryToleranceCM;
+								});
+					}
+				}
+				const bool bNotBelowActual = CandidateTopCourse >= ActualTopCourse;
+				Candidate.bAccepted = bNotBelowActual
+					&& Candidate.bCommonSemanticBoundary
+					&& Candidate.bFullyOccupiedThroughCandidate
+					&& Candidate.bCoversEveryDemandSeed
+					&& Candidate.bSingleConnectedFootprint
+					&& Candidate.bLeavesTwoChildCourses
+					&& Candidate.bProtectedVoidClear;
+				if (Candidate.bAccepted)
+				{
+					Candidate.DecisionReason = Candidate.bActualBaseline
+						? TEXT("AcceptedFrozenActualBaseline")
+						: Candidate.bOwnSemanticBoundary
+							? TEXT("AcceptedOwnSemanticSeparation")
+							: TEXT("AcceptedSiblingPodiumMainSemanticEvent");
+					bHasLegalCandidate = true;
+				}
+				else
+				{
+					Candidate.DecisionReason = TEXT("Rejected");
+					Candidate.DecisionReason += bNotBelowActual
+						? TEXT("") : TEXT(":BelowActualPodium");
+					Candidate.DecisionReason += Candidate.bCommonSemanticBoundary
+						? TEXT("") : TEXT(":NotCommonSemanticBoundary");
+					Candidate.DecisionReason += Candidate.bFullyOccupiedThroughCandidate
+						? TEXT("") : TEXT(":NoContinuousLocalFootprint");
+					Candidate.DecisionReason += Candidate.bCoversEveryDemandSeed
+						? TEXT("") : TEXT(":DemandSeedUncovered");
+					Candidate.DecisionReason += Candidate.bSingleConnectedFootprint
+						? TEXT("") : TEXT(":DisconnectedLocalFootprint");
+					Candidate.DecisionReason += Candidate.bLeavesTwoChildCourses
+						? TEXT("") : TEXT(":InsufficientChildClearance");
+					Candidate.DecisionReason += Candidate.bProtectedVoidClear
+						? TEXT("") : TEXT(":ProtectedSpanVoid");
+					++Plan.Summary.RejectedLocalPodiumHeightCandidateCount;
+				}
+				Canonical += FString::Printf(
+					TEXT("|C:P=%d:G=%d:M=%d:K=%d:A=%d:OWN=%d:SHARED=%d:B=%d:F=%d:D=%d:N=%d:H=%d:V=%d:CELLS=%d:OK=%d:R=%s"),
+					Province.ProvinceId, Province.BoundGroundCoreCellId,
+					StructuralPodiumMainCoreCellId,
+					CandidateTopCourse,
+					Candidate.bActualBaseline ? 1 : 0,
+					Candidate.bOwnSemanticBoundary ? 1 : 0,
+					Candidate.bSharedPodiumMainSemanticEvent ? 1 : 0,
+					Candidate.bCommonSemanticBoundary ? 1 : 0,
+					Candidate.bFullyOccupiedThroughCandidate ? 1 : 0,
+					Candidate.bCoversEveryDemandSeed ? 1 : 0,
+					Candidate.bSingleConnectedFootprint ? 1 : 0,
+					Candidate.bLeavesTwoChildCourses ? 1 : 0,
+					Candidate.bProtectedVoidClear ? 1 : 0,
+					Candidate.PersistentCellCount,
+					Candidate.bAccepted ? 1 : 0,
+					*Candidate.DecisionReason);
+				for (const uint64 Word : Candidate.PersistentCellWords)
+				{
+					Canonical += FString::Printf(TEXT(":%016llx"), Word);
+				}
+			}
+			if (!bHasLegalCandidate)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumNoLegalHeight:Province=%d:Actual=%d:FullyOccupied=%d:Required=%d"),
+					Province.ProvinceId, ActualTopCourse,
+					Province.HighestFullyOccupiedTopCourse,
+					Province.MinimumRequiredTopCourse);
+				return false;
+			}
+		}
+
+		auto CandidateFootprintGapUnits = [&Plan](
+			const int32 FirstProvinceId,
+			const FLocalPodiumHeightCandidateDiagnostic& FirstCandidate,
+			const int32 SecondProvinceId,
+			const FLocalPodiumHeightCandidateDiagnostic& SecondCandidate) -> int32
+		{
+			const FSupportProvinceDiagnostic* FirstProvince =
+				Plan.SupportProvinces.FindByPredicate(
+					[FirstProvinceId](const FSupportProvinceDiagnostic& Province)
+					{
+						return Province.ProvinceId == FirstProvinceId;
+					});
+			const FSupportProvinceDiagnostic* SecondProvince =
+				Plan.SupportProvinces.FindByPredicate(
+					[SecondProvinceId](const FSupportProvinceDiagnostic& Province)
+					{
+						return Province.ProvinceId == SecondProvinceId;
+					});
+			if (FirstProvince == nullptr || SecondProvince == nullptr
+				|| FirstProvince->ComponentId != SecondProvince->ComponentId
+				|| FirstCandidate.StructuralPodiumMainCoreCellId
+					!= SecondCandidate.StructuralPodiumMainCoreCellId
+				|| FirstCandidate.CandidateTopCourse
+					!= SecondCandidate.CandidateTopCourse)
+			{
+				return INDEX_NONE;
+			}
+			int32 MinimumGapUnits = MAX_int32;
+			for (int32 BitIndex = 0;
+				BitIndex < FirstProvince->SizeX * FirstProvince->SizeY; ++BitIndex)
+			{
+				if (!SkeletonV3SupportProvinceWordContains(
+					FirstCandidate.PersistentCellWords, BitIndex))
+				{
+					continue;
+				}
+				const int32 X = BitIndex % FirstProvince->SizeX;
+				const int32 Y = BitIndex / FirstProvince->SizeX;
+				for (int32 SecondBitIndex = 0;
+					SecondBitIndex < SecondProvince->SizeX * SecondProvince->SizeY;
+					++SecondBitIndex)
+				{
+					if (!SkeletonV3SupportProvinceWordContains(
+						SecondCandidate.PersistentCellWords, SecondBitIndex))
+					{
+						continue;
+					}
+					const int32 SecondX = SecondBitIndex % SecondProvince->SizeX;
+					const int32 SecondY = SecondBitIndex / SecondProvince->SizeX;
+					const int32 GapUnits = FMath::Max(0,
+						FMath::Abs(X - SecondX) + FMath::Abs(Y - SecondY) - 1);
+					MinimumGapUnits = FMath::Min(MinimumGapUnits, GapUnits);
+					if (MinimumGapUnits == 0)
+					{
+						return 0;
+					}
+				}
+			}
+			return MinimumGapUnits == MAX_int32 ? INDEX_NONE : MinimumGapUnits;
+		};
+		auto CandidateBridgeVoidClear = [&Plan](
+			const int32 FirstProvinceId,
+			const FLocalPodiumHeightCandidateDiagnostic& FirstCandidate,
+			const int32 SecondProvinceId,
+			const FLocalPodiumHeightCandidateDiagnostic& SecondCandidate)
+		{
+			const FSupportProvinceDiagnostic* FirstProvince =
+				Plan.SupportProvinces.FindByPredicate(
+					[FirstProvinceId](const FSupportProvinceDiagnostic& Province)
+					{
+						return Province.ProvinceId == FirstProvinceId;
+					});
+			const FSupportProvinceDiagnostic* SecondProvince =
+				Plan.SupportProvinces.FindByPredicate(
+					[SecondProvinceId](const FSupportProvinceDiagnostic& Province)
+					{
+						return Province.ProvinceId == SecondProvinceId;
+					});
+			if (FirstProvince == nullptr || SecondProvince == nullptr
+				|| FirstCandidate.CandidateTopCourse
+					!= SecondCandidate.CandidateTopCourse
+				|| !Plan.Components.IsValidIndex(FirstProvince->ComponentId))
+			{
+				return false;
+			}
+			FIntPoint FirstCell = FIntPoint::ZeroValue;
+			FIntPoint SecondCell = FIntPoint::ZeroValue;
+			int32 MinimumManhattan = MAX_int32;
+			for (int32 FirstBit = 0;
+				FirstBit < FirstProvince->SizeX * FirstProvince->SizeY; ++FirstBit)
+			{
+				if (!SkeletonV3SupportProvinceWordContains(
+					FirstCandidate.PersistentCellWords, FirstBit))
+				{
+					continue;
+				}
+				const FIntPoint A(
+					FirstBit % FirstProvince->SizeX,
+					FirstBit / FirstProvince->SizeX);
+				for (int32 SecondBit = 0;
+					SecondBit < SecondProvince->SizeX * SecondProvince->SizeY;
+					++SecondBit)
+				{
+					if (!SkeletonV3SupportProvinceWordContains(
+						SecondCandidate.PersistentCellWords, SecondBit))
+					{
+						continue;
+					}
+					const FIntPoint B(
+						SecondBit % SecondProvince->SizeX,
+						SecondBit / SecondProvince->SizeX);
+					const int32 Manhattan = FMath::Abs(A.X - B.X)
+						+ FMath::Abs(A.Y - B.Y);
+					if (Manhattan < MinimumManhattan)
+					{
+						MinimumManhattan = Manhattan;
+						FirstCell = A;
+						SecondCell = B;
+					}
+				}
+			}
+			if (MinimumManhattan == MAX_int32 || MinimumManhattan <= 1)
+			{
+				return MinimumManhattan != MAX_int32;
+			}
+			const double GroundZ =
+				Plan.Components[FirstProvince->ComponentId].GroundPlaneZCM;
+			const double MinimumZ = GroundZ
+				+ FMath::Max(FirstCandidate.ActualPodiumTopCourse,
+					SecondCandidate.ActualPodiumTopCourse)
+					* static_cast<double>(BlockUnitsCM);
+			const double MaximumZ = GroundZ
+				+ FirstCandidate.CandidateTopCourse
+					* static_cast<double>(BlockUnitsCM);
+			const FVector2D A(
+				(FirstProvince->MinimumXUnit + FirstCell.X) * BlockUnitsCM,
+				(FirstProvince->MinimumYUnit + FirstCell.Y) * BlockUnitsCM);
+			const FVector2D B(
+				(SecondProvince->MinimumXUnit + SecondCell.X) * BlockUnitsCM,
+				(SecondProvince->MinimumYUnit + SecondCell.Y) * BlockUnitsCM);
+			auto SegmentClear = [&Plan, MinimumZ, MaximumZ](
+				const FVector2D& Start, const FVector2D& End)
+			{
+				const double HalfCell = BlockUnitsCM * 0.5;
+				const FBox Segment(
+					FVector(FMath::Min(Start.X, End.X) - HalfCell,
+						FMath::Min(Start.Y, End.Y) - HalfCell, MinimumZ),
+					FVector(FMath::Max(Start.X, End.X) + HalfCell,
+						FMath::Max(Start.Y, End.Y) + HalfCell, MaximumZ));
+				return !Plan.ReservedSupportVoids.ContainsByPredicate(
+					[&Segment](const FABTSM73BeamASupportVoid& Void)
+					{
+						return Segment.IsValid && Void.Bounds.IsValid
+							&& Segment.Min.X < Void.Bounds.Max.X - GeometryToleranceCM
+							&& Segment.Max.X > Void.Bounds.Min.X + GeometryToleranceCM
+							&& Segment.Min.Y < Void.Bounds.Max.Y - GeometryToleranceCM
+							&& Segment.Max.Y > Void.Bounds.Min.Y + GeometryToleranceCM
+							&& Segment.Min.Z < Void.Bounds.Max.Z - GeometryToleranceCM
+							&& Segment.Max.Z > Void.Bounds.Min.Z + GeometryToleranceCM;
+					});
+			};
+			const FVector2D XThenY(B.X, A.Y);
+			const FVector2D YThenX(A.X, B.Y);
+			return (SegmentClear(A, XThenY) && SegmentClear(XThenY, B))
+				|| (SegmentClear(A, YThenX) && SegmentClear(YThenX, B));
+		};
+
+		TMap<int32, int32> FirstRaisedCellCountByProvince;
+		for (const FLocalPodiumHeightCandidateDiagnostic& Candidate
+			: Plan.LocalPodiumHeightCandidates)
+		{
+			if (!Candidate.bAccepted || Candidate.bActualBaseline)
+			{
+				continue;
+			}
+			int32& FirstRaisedCount = FirstRaisedCellCountByProvince.FindOrAdd(
+				Candidate.ProvinceId, Candidate.PersistentCellCount);
+			const int32 ExistingFirstCourse = Plan.LocalPodiumHeightCandidates.IndexOfByPredicate(
+				[&Candidate](const FLocalPodiumHeightCandidateDiagnostic& Entry)
+				{
+					return Entry.ProvinceId == Candidate.ProvinceId
+						&& Entry.bAccepted && !Entry.bActualBaseline
+						&& Entry.CandidateTopCourse < Candidate.CandidateTopCourse;
+				});
+			if (ExistingFirstCourse != INDEX_NONE)
+			{
+				continue;
+			}
+			FirstRaisedCount = Candidate.PersistentCellCount;
+		}
+		for (FLocalPodiumHeightCandidateDiagnostic& Candidate
+			: Plan.LocalPodiumHeightCandidates)
+		{
+			if (!Candidate.bAccepted || Candidate.bActualBaseline)
+			{
+				continue;
+			}
+			Candidate.FirstRaisedPersistentCellCount =
+				FirstRaisedCellCountByProvince.FindRef(Candidate.ProvinceId);
+			Candidate.RetainedFootprintPermille =
+				Candidate.FirstRaisedPersistentCellCount > 0
+					? FMath::FloorToInt(1000.0
+						* static_cast<double>(Candidate.PersistentCellCount)
+						/ Candidate.FirstRaisedPersistentCellCount)
+					: 0;
+			Candidate.bRetainsHalfFirstRaisedFootprint =
+				Candidate.RetainedFootprintPermille >= 500;
+			const FSupportProvinceDiagnostic* Province =
+				Plan.SupportProvinces.FindByPredicate(
+					[&Candidate](const FSupportProvinceDiagnostic& Entry)
+					{
+						return Entry.ProvinceId == Candidate.ProvinceId;
+					});
+			if (Province == nullptr)
+			{
+				continue;
+			}
+			for (const int32 AdjacentId : Province->AdjacentProvinceIds)
+			{
+				const FLocalPodiumHeightCandidateDiagnostic* Sibling =
+					Plan.LocalPodiumHeightCandidates.FindByPredicate(
+						[AdjacentId, &Candidate](
+							const FLocalPodiumHeightCandidateDiagnostic& Entry)
+						{
+							return Entry.ProvinceId == AdjacentId
+								&& Entry.StructuralPodiumMainCoreCellId
+									== Candidate.StructuralPodiumMainCoreCellId
+								&& Entry.CandidateTopCourse
+									== Candidate.CandidateTopCourse
+								&& Entry.bAccepted;
+						});
+				if (Sibling == nullptr)
+				{
+					continue;
+				}
+				const int32 GapUnits = CandidateFootprintGapUnits(
+					Candidate.ProvinceId, Candidate, AdjacentId, *Sibling);
+				if (GapUnits != INDEX_NONE
+					&& (Candidate.MinimumSiblingFootprintGapUnits == INDEX_NONE
+						|| GapUnits < Candidate.MinimumSiblingFootprintGapUnits))
+				{
+					Candidate.MinimumSiblingFootprintGapUnits = GapUnits;
+					Candidate.bSiblingBridgeWithinMemberSpan =
+						(GapUnits + 1) * BlockUnitsCM
+							<= 720.0 + GeometryToleranceCM;
+					Candidate.bSiblingBridgeVoidClear = CandidateBridgeVoidClear(
+						Candidate.ProvinceId, Candidate, AdjacentId, *Sibling);
+				}
+			}
+		}
+		for (const FLocalPodiumHeightCandidateDiagnostic& Candidate
+			: Plan.LocalPodiumHeightCandidates)
+		{
+			Canonical += FString::Printf(
+				TEXT("|SEAM:P=%d:M=%d:K=%d:U=%d:FIRST=%d:KEEP=%d:HALF=%d:SPAN=%d:CLEAR=%d"),
+				Candidate.ProvinceId,
+				Candidate.StructuralPodiumMainCoreCellId,
+				Candidate.CandidateTopCourse,
+				Candidate.MinimumSiblingFootprintGapUnits,
+				Candidate.FirstRaisedPersistentCellCount,
+				Candidate.RetainedFootprintPermille,
+				Candidate.bRetainsHalfFirstRaisedFootprint ? 1 : 0,
+				Candidate.bSiblingBridgeWithinMemberSpan ? 1 : 0,
+				Candidate.bSiblingBridgeVoidClear ? 1 : 0);
+		}
+
+		struct FLocalPodiumGroupOpportunity
+		{
+			int32 ComponentId = INDEX_NONE;
+			int32 StructuralPodiumMainCoreCellId = INDEX_NONE;
+			int32 TopCourse = 0;
+			TArray<int32> ProvinceIds;
+		};
+		TArray<FLocalPodiumGroupOpportunity> Opportunities;
+		TSet<uint64> StructuralMainCourseKeys;
+		for (const FLocalPodiumHeightCandidateDiagnostic& Candidate
+			: Plan.LocalPodiumHeightCandidates)
+		{
+			if (Candidate.bAccepted && !Candidate.bActualBaseline)
+			{
+				StructuralMainCourseKeys.Add(
+					(static_cast<uint64>(static_cast<uint32>(
+						Candidate.StructuralPodiumMainCoreCellId)) << 32)
+					| static_cast<uint32>(Candidate.CandidateTopCourse));
+			}
+		}
+		TArray<uint64> SortedStructuralMainCourseKeys =
+			StructuralMainCourseKeys.Array();
+		SortedStructuralMainCourseKeys.Sort([](const uint64 A, const uint64 B)
+		{
+			const int32 CourseA = static_cast<int32>(A & 0xffffffffu);
+			const int32 CourseB = static_cast<int32>(B & 0xffffffffu);
+			return CourseA != CourseB ? CourseA > CourseB : A < B;
+		});
+		for (const uint64 StructuralMainCourseKey : SortedStructuralMainCourseKeys)
+		{
+			const int32 StructuralPodiumMainCoreCellId = static_cast<int32>(
+				StructuralMainCourseKey >> 32);
+			const int32 TopCourse = static_cast<int32>(
+				StructuralMainCourseKey & 0xffffffffu);
+			TSet<int32> EligibleProvinceIds;
+			for (const FLocalPodiumHeightCandidateDiagnostic& Candidate
+				: Plan.LocalPodiumHeightCandidates)
+			{
+				if (Candidate.StructuralPodiumMainCoreCellId
+						== StructuralPodiumMainCoreCellId
+					&& Candidate.CandidateTopCourse == TopCourse
+					&& Candidate.bAccepted && !Candidate.bActualBaseline)
+				{
+					EligibleProvinceIds.Add(Candidate.ProvinceId);
+				}
+			}
+			TSet<int32> VisitedAtCourse;
+			TArray<int32> SortedEligible = EligibleProvinceIds.Array();
+			SortedEligible.Sort();
+			for (const int32 StartProvinceId : SortedEligible)
+			{
+				if (VisitedAtCourse.Contains(StartProvinceId))
+				{
+					continue;
+				}
+				FLocalPodiumGroupOpportunity Opportunity;
+				Opportunity.StructuralPodiumMainCoreCellId =
+					StructuralPodiumMainCoreCellId;
+				Opportunity.TopCourse = TopCourse;
+				TArray<int32> Pending{StartProvinceId};
+				while (!Pending.IsEmpty())
+				{
+					const int32 ProvinceId = Pending.Pop(EAllowShrinking::No);
+					if (VisitedAtCourse.Contains(ProvinceId))
+					{
+						continue;
+					}
+					const FSupportProvinceDiagnostic* Province =
+						Plan.SupportProvinces.FindByPredicate(
+							[ProvinceId](const FSupportProvinceDiagnostic& Candidate)
+							{
+								return Candidate.ProvinceId == ProvinceId;
+							});
+					const FLocalPodiumHeightCandidateDiagnostic* Candidate =
+						Plan.LocalPodiumHeightCandidates.FindByPredicate(
+							[ProvinceId, TopCourse](
+								const FLocalPodiumHeightCandidateDiagnostic& Entry)
+							{
+								return Entry.ProvinceId == ProvinceId
+									&& Entry.CandidateTopCourse == TopCourse
+									&& Entry.bAccepted;
+							});
+					if (Province == nullptr || Candidate == nullptr)
+					{
+						continue;
+					}
+					VisitedAtCourse.Add(ProvinceId);
+					Opportunity.ComponentId = Province->ComponentId;
+					Opportunity.ProvinceIds.Add(ProvinceId);
+					for (const int32 AdjacentId : Province->AdjacentProvinceIds)
+					{
+						if (!EligibleProvinceIds.Contains(AdjacentId)
+							|| VisitedAtCourse.Contains(AdjacentId))
+						{
+							continue;
+						}
+						const FLocalPodiumHeightCandidateDiagnostic* AdjacentCandidate =
+							Plan.LocalPodiumHeightCandidates.FindByPredicate(
+								[AdjacentId, TopCourse](
+									const FLocalPodiumHeightCandidateDiagnostic& Entry)
+								{
+									return Entry.ProvinceId == AdjacentId
+										&& Entry.CandidateTopCourse == TopCourse
+										&& Entry.bAccepted;
+								});
+						const int32 GapUnits = AdjacentCandidate != nullptr
+							? CandidateFootprintGapUnits(
+								ProvinceId, *Candidate,
+								AdjacentId, *AdjacentCandidate)
+							: INDEX_NONE;
+						if (AdjacentCandidate != nullptr
+							&& GapUnits != INDEX_NONE
+							&& (GapUnits + 1) * BlockUnitsCM
+								<= 720.0 + GeometryToleranceCM
+							&& Candidate->bRetainsHalfFirstRaisedFootprint
+							&& AdjacentCandidate->bRetainsHalfFirstRaisedFootprint
+							&& CandidateBridgeVoidClear(
+								ProvinceId, *Candidate,
+								AdjacentId, *AdjacentCandidate))
+						{
+							Pending.AddUnique(AdjacentId);
+						}
+					}
+				}
+				Opportunity.ProvinceIds.Sort();
+				if (Opportunity.ProvinceIds.Num() >= 2)
+				{
+					Opportunities.Add(MoveTemp(Opportunity));
+				}
+			}
+		}
+		Opportunities.Sort([](
+			const FLocalPodiumGroupOpportunity& A,
+			const FLocalPodiumGroupOpportunity& B)
+		{
+			if (A.ProvinceIds.Num() != B.ProvinceIds.Num())
+			{
+				return A.ProvinceIds.Num() > B.ProvinceIds.Num();
+			}
+			if (A.TopCourse != B.TopCourse)
+			{
+				return A.TopCourse > B.TopCourse;
+			}
+			return A.ProvinceIds[0] < B.ProvinceIds[0];
+		});
+		TSet<int32> RaisedAssignedProvinceIds;
+		for (const FLocalPodiumGroupOpportunity& Opportunity : Opportunities)
+		{
+			if (Opportunity.ProvinceIds.ContainsByPredicate(
+				[&RaisedAssignedProvinceIds](const int32 ProvinceId)
+				{
+					return RaisedAssignedProvinceIds.Contains(ProvinceId);
+				}))
+			{
+				continue;
+			}
+			for (const int32 ProvinceId : Opportunity.ProvinceIds)
+			{
+				SelectedTopByProvince.Add(ProvinceId, Opportunity.TopCourse);
+				RaisedAssignedProvinceIds.Add(ProvinceId);
+			}
+		}
+		for (const FSupportProvinceDiagnostic& Province : Plan.SupportProvinces)
+		{
+			if (!SelectedTopByProvince.Contains(Province.ProvinceId))
+			{
+				SelectedTopByProvince.Add(Province.ProvinceId,
+					ActualTopByProvince.FindChecked(Province.ProvinceId));
+			}
+			FLocalPodiumHeightCandidateDiagnostic* SelectedCandidate =
+				Plan.LocalPodiumHeightCandidates.FindByPredicate(
+					[&Province, &SelectedTopByProvince](
+						const FLocalPodiumHeightCandidateDiagnostic& Candidate)
+					{
+						return Candidate.ProvinceId == Province.ProvinceId
+							&& Candidate.CandidateTopCourse
+								== SelectedTopByProvince.FindChecked(Province.ProvinceId)
+							&& Candidate.bAccepted;
+					});
+			if (SelectedCandidate == nullptr)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumSelectedCandidateUnavailable:Province=%d:Top=%d"),
+					Province.ProvinceId,
+					SelectedTopByProvince.FindChecked(Province.ProvinceId));
+				return false;
+			}
+			SelectedCandidate->bSelected = true;
+			Canonical += FString::Printf(TEXT("|S:P=%d:TOP=%d"),
+				Province.ProvinceId, SelectedCandidate->CandidateTopCourse);
+		}
+
+		TSet<int32> AssignedProvinceIds;
+		for (const FSupportProvinceDiagnostic& StartProvince : Plan.SupportProvinces)
+		{
+			if (AssignedProvinceIds.Contains(StartProvince.ProvinceId))
+			{
+				continue;
+			}
+			FLocalPodiumHeightRegionDiagnostic& Region =
+				Plan.LocalPodiumHeightRegions.AddDefaulted_GetRef();
+			Region.RegionId = Plan.LocalPodiumHeightRegions.Num() - 1;
+			Region.ComponentId = StartProvince.ComponentId;
+			Region.StructuralPodiumMainCoreCellId =
+				StructuralPodiumMainByProvince.FindChecked(StartProvince.ProvinceId);
+			Region.ActualPodiumTopCourse = ActualTopByProvince.FindChecked(
+				StartProvince.ProvinceId);
+			Region.SelectedTopCourse = SelectedTopByProvince.FindChecked(
+				StartProvince.ProvinceId);
+			TArray<int32> Pending{StartProvince.ProvinceId};
+			while (!Pending.IsEmpty())
+			{
+				const int32 ProvinceId = Pending.Pop(EAllowShrinking::No);
+				if (AssignedProvinceIds.Contains(ProvinceId))
+				{
+					continue;
+				}
+				const FSupportProvinceDiagnostic* Province =
+					Plan.SupportProvinces.FindByPredicate(
+						[ProvinceId](const FSupportProvinceDiagnostic& Candidate)
+						{
+							return Candidate.ProvinceId == ProvinceId;
+						});
+				if (Province == nullptr
+					|| Province->ComponentId != Region.ComponentId
+					|| StructuralPodiumMainByProvince.FindChecked(ProvinceId)
+						!= Region.StructuralPodiumMainCoreCellId
+					|| SelectedTopByProvince.FindChecked(ProvinceId)
+						!= Region.SelectedTopCourse
+					|| ActualTopByProvince.FindChecked(ProvinceId)
+						!= Region.ActualPodiumTopCourse)
+				{
+					continue;
+				}
+				AssignedProvinceIds.Add(ProvinceId);
+				Region.ProvinceIds.Add(ProvinceId);
+				Region.GroundBounds += Province->GroundBounds;
+				for (const int32 AdjacentId : Province->AdjacentProvinceIds)
+				{
+					if (!AssignedProvinceIds.Contains(AdjacentId)
+						&& SelectedTopByProvince.Contains(AdjacentId)
+						&& StructuralPodiumMainByProvince.Contains(AdjacentId)
+						&& StructuralPodiumMainByProvince.FindChecked(AdjacentId)
+							== Region.StructuralPodiumMainCoreCellId
+						&& SelectedTopByProvince.FindChecked(AdjacentId)
+							== Region.SelectedTopCourse
+						&& [&Plan, &CandidateFootprintGapUnits,
+							&CandidateBridgeVoidClear, ProvinceId, AdjacentId,
+							TopCourse = Region.SelectedTopCourse]()
+						{
+							const FLocalPodiumHeightCandidateDiagnostic* A =
+								Plan.LocalPodiumHeightCandidates.FindByPredicate(
+									[ProvinceId, TopCourse](
+										const FLocalPodiumHeightCandidateDiagnostic& Candidate)
+									{
+										return Candidate.ProvinceId == ProvinceId
+											&& Candidate.CandidateTopCourse == TopCourse
+											&& Candidate.bSelected;
+									});
+							const FLocalPodiumHeightCandidateDiagnostic* B =
+								Plan.LocalPodiumHeightCandidates.FindByPredicate(
+									[AdjacentId, TopCourse](
+										const FLocalPodiumHeightCandidateDiagnostic& Candidate)
+									{
+										return Candidate.ProvinceId == AdjacentId
+											&& Candidate.CandidateTopCourse == TopCourse
+											&& Candidate.bSelected;
+									});
+							const int32 GapUnits = A != nullptr && B != nullptr
+								? CandidateFootprintGapUnits(
+									ProvinceId, *A, AdjacentId, *B)
+								: INDEX_NONE;
+							return A != nullptr && B != nullptr
+								&& GapUnits != INDEX_NONE
+								&& (GapUnits + 1) * BlockUnitsCM
+									<= 720.0 + GeometryToleranceCM
+								&& A->bRetainsHalfFirstRaisedFootprint
+								&& B->bRetainsHalfFirstRaisedFootprint
+								&& CandidateBridgeVoidClear(
+									ProvinceId, *A, AdjacentId, *B);
+						}())
+					{
+						Pending.AddUnique(AdjacentId);
+					}
+				}
+			}
+			Region.ProvinceIds.Sort();
+			Region.bRaisesActualPodium = Region.SelectedTopCourse
+				> Region.ActualPodiumTopCourse;
+			Plan.Summary.RaisedLocalPodiumHeightRegionCount +=
+				Region.bRaisesActualPodium ? 1 : 0;
+			Canonical += FString::Printf(
+				TEXT("|R:%d:C=%d:M=%d:BASE=%d:TOP=%d:RAISE=%d"),
+				Region.RegionId, Region.ComponentId,
+				Region.StructuralPodiumMainCoreCellId,
+				Region.ActualPodiumTopCourse, Region.SelectedTopCourse,
+				Region.bRaisesActualPodium ? 1 : 0);
+			for (const int32 ProvinceId : Region.ProvinceIds)
+			{
+				Canonical += FString::Printf(TEXT(":P%d"), ProvinceId);
+			}
+		}
+		if (AssignedProvinceIds.Num() != Plan.SupportProvinces.Num())
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3LocalPodiumProvinceCoverageMismatch:Assigned=%d:Provinces=%d"),
+				AssignedProvinceIds.Num(), Plan.SupportProvinces.Num());
+			return false;
+		}
+		Plan.Summary.LocalPodiumHeightCandidateCount =
+			Plan.LocalPodiumHeightCandidates.Num();
+		Plan.Summary.LocalPodiumHeightRegionCount =
+			Plan.LocalPodiumHeightRegions.Num();
+		Plan.Summary.LocalPodiumHeightPlanHash = HashText(Canonical);
+		return Plan.Summary.LocalPodiumHeightRegionCount > 0
+			&& Plan.Summary.LocalPodiumHeightCandidateCount
+				>= Plan.Summary.SupportProvinceCount
+			&& Plan.Summary.LocalPodiumHeightPlanHash != 0;
+	}
+
 	double CellFaceAtOrAbove(const double Value)
 	{
 		const double FaceOffsetCM = BlockUnitsCM * 0.5;
@@ -16431,6 +17459,10 @@ namespace
 				return false;
 			}
 			if (!FinalizeSupportProvinceGroundCoreBindings(OutPlan, OutError))
+			{
+				return false;
+			}
+			if (!BuildLocalPodiumHeightPlanDiagnostics(OutPlan, OutError))
 			{
 				return false;
 			}

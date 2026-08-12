@@ -1918,3 +1918,78 @@ Development Editor 全链接成功。证据日志为
 本节仍属于 Stage 1 静态修复：`Physical=NotEvaluated`，未启动 GUI、可见 PIE、Stage 2 或 Chaos。下一停点是用户在
 `Core + Shared Rails` 与 `Demand / Child / Main Ledger` 中确认左侧第三个 child 的位置、粗细和全高路径；测试地图继续
 作为用户资产排除。
+
+## 43. 局部差异裙房高度只读计划（2026-08-11）
+
+本节是第 38 节 `ProposedPodiumTopCourse` 到生产 WFC/PodiumMain 改写之间的独立视觉停点。它只发布
+`LocalPodiumHeightPlan`，不改变现有 WFC volume、PodiumMain/TowerChild、shared course、member、Static DAG 或任何
+几何 Hash。视觉批准前禁止把计划高度直接写回生产结构。
+
+### 43.1 身份与候选合同
+
+局部裙房不能按“覆盖某个地面格的 core”分组。`BoundGroundCoreCellId` 只说明接地覆盖关系，不等于该 demand 的
+结构父节点。唯一有效的结构家族来自 `SemanticDemandId -> TowerChild -> PodiumMainCoreCellId`：
+
+1. 每个 support province 内的全部 demand 必须解析到同一个真实 `StructuralPodiumMainCoreCellId`；缺失或不一致立即
+   fail closed；
+2. 同一结构 main 家族汇总各省份 lineage 的 `SemanticSupportMergeLedger.ContactCourse`，让兄弟省份在同一组语义
+   事件面上接受检查。候选会同时记录该事件是否属于自身 lineage，防止把“共享可检查事件”误报为自身 merge；
+3. 当前真实结构 main 顶面是冻结 fallback。每个更高候选使用该省份从 course 0 连续存续到候选面的四邻域连通
+   footprint，必须覆盖全部 demand seed、给最矮 child 留至少两个 course，并避开 `ReservedSupportVoid`；
+4. 每条候选发布 GroundCore/StructuralMain、OwnBoundary/SharedEvent、连续性、seed 覆盖、child 余高、protected-void、
+   完整 bitset、拒绝原因和选择状态。计划 Hash 独立于生产几何 Hash。
+
+### 43.2 量化缝、承台截面与耦合合同
+
+第一版局部计划要求同一 course 的兄弟 footprint 直接面接触。这对 36 cm 离散轮廓过严：730000 的中间两省份在
+course 48/60 均合法，但最近距离为 3 格；750000 在 course 41 为 3 格；它们在透视轮廓上仍明显属于同一中部裙房。
+同时，随着高度上升，这条缝还可能继续扩大，因此也不能使用无限固定容差。
+
+第二轮曾把允许 gap 固定为第一层合法 raised event 的 gap。用户对 730000/750000 的侧视验收证明该约束仍过强：
+塔身正常退台会使 gap 从 3 格增加到 4–7 格，但两侧仍是大截面塔体，不代表共同承台应在第一处退台结束。
+
+最终合同改为：
+
+1. 找到每个省份第一层合法 raised semantic event，以该层 `PersistentCellCount` 作为承台截面基准；
+2. 候选必须保留该省份首层截面至少 50%。低于 50% 表示语义体已经收缩为塔颈，不再把它伪装成裙房；
+3. 两个候选 footprint 最近端点之间的实际桥跨不得超过 720 cm 硬门；
+4. 在最近端点间尝试 X-then-Y 与 Y-then-X 两条确定性 L 形桥，至少一条必须不穿过 protected void；
+5. 同一结构 main 内先选择覆盖省份/支撑需求最多的合法组，再在相同覆盖数下选择最高分隔面。这样完整的共同承台不会
+   被更高但偏侧的二元小组抢占；
+6. 未进入 raised group 的省份保持其真实结构 main baseline。
+
+该规则没有为 710000/730000/750000 写 Seed 特判，也没有修改 36 cm 网格、720 cm 上限、积木尺寸或生产 WFC。
+
+### 43.3 第 11 诊断层
+
+`Stage 1 Diagnostic Layer` 的 `11 - Local Podium Height Plan` 与其他层互斥：
+
+- 省份循环色薄板：最终选中 local footprint 的顶面；
+- 钢材色薄板：raised region 对应的当前真实结构 main 顶面；
+- 竖直细柱：同一省份从真实顶面到候选顶面的高度差；
+- 相邻选中 footprint 间的水平细线：计划中的最短 seam bridge，不是已经生成的积木；
+- 铁色小方块：被合同拒绝的候选高度；合法但未入选的单塔候选只记账，不伪装成共同裙房。
+
+视觉验收应比较第 1 层 WFC 包络、第 8/9 层省份/父 main 与第 11 层计划。日志可区分真实结构父 main、自己的事件、
+兄弟共享事件、当前 gap、首层/保留截面比例、720 cm 桥跨与 protected-void 状态。
+
+### 43.4 当前静态证据与下一停点
+
+fresh `TipOverE6OptimizationSeeds` 的目标中部结构 main 结果：
+
+- `710000`：实际 course 32，`StructuralMain=1` 的 provinces `0,1,2` 选择 course `92`；
+- `730000`：实际 course 40，`StructuralMain=0` 的 provinces `0,1` 选择 course `92`；
+- `750000`：实际 course 32，`StructuralMain=0` 的 provinces `0,1` 选择 course `89`。
+
+其他结构 main 也可形成自己的局部台阶，但不会跨父 main 合组。三种子保持原生产几何 Hash
+`8070591144232803120 / 3595832047213963210 / 7430148173544257172`，Static DAG Accepted，单叶总计约
+`1.11 / 1.03 / 1.20 s`，Physical NotEvaluated。Development Editor 全链接、fresh Preview 1/1、三种子专项 1/1 和
+真实 `Stage1CoreAndSharedMatrix.TipOver.E6` 1/1 通过。最终日志：
+
+- `Saved/Logs/BeamC3-LocalPodium-CoverageFirst-Final-TipOverSeeds-20260812.log`；
+- `Saved/Logs/BeamC3-LocalPodium-CoverageFirst-Final-Preview-20260812.log`；
+- `Saved/Logs/BeamC3-LocalPodium-CoverageFirst-Final-TipOverE6-MatrixLeaf-20260812.log`。
+
+本停点不运行 5×6：第 11 层仍是只读生产候选，应先由用户确认三种子局部顶面和水平 seam bridge 是否符合造型。
+视觉批准后，下一步才把逐区域高度作为输入重建局部 CoupledGround/PodiumMain，并重新验证 SupportedSpan、Crown、
+ProtectedVoid、全高 TowerChild、720 cm 与预算合同；任何一项不成立都必须失败关闭。
