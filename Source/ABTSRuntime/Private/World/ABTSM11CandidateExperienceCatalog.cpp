@@ -26,7 +26,7 @@ namespace
 		0,
 		TEXT("Editor-only M11 Candidate layout selection. ")
 		TEXT("0 keeps the production Certified v1 bundle; ")
-		TEXT("1..11 load the corresponding frozen, UNCERTIFIED ")
+		TEXT("1..12 load the corresponding frozen, UNCERTIFIED ")
 		TEXT("M11-B Candidate. Set before PIE and restart PIE after changing."),
 		ECVF_Default);
 
@@ -40,7 +40,7 @@ namespace
 		uint64 ScoreHash;
 	};
 
-	constexpr std::array<FFrozenCandidateIdentity, 11> FrozenCandidates = {{
+	constexpr std::array<FFrozenCandidateIdentity, 12> FrozenCandidates = {{
 		{
 			1,
 			2278ull,
@@ -117,7 +117,14 @@ namespace
 			0xcb23499fc6f7c9d3ull,
 			0x4f0e3c66a1a0a737ull,
 			0x505f3312ac8ae07full,
-			0xd71f1166493c07aaull}
+			0xd71f1166493c07aaull},
+		{
+			12,
+			25ull,
+			0x58840ee73ddd70f5ull,
+			0xf76a37a38221a425ull,
+			0xf746bbe4ca7b9748ull,
+			0xf364c0098bec8112ull}
 	}};
 
 	bool Reject(FString* OutFailure, const FString& Reason)

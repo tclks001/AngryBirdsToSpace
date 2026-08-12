@@ -167,7 +167,21 @@ set(ABTS_M11_SEARCH_TOOL_IDENTITY_FILES
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_target_offset_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_terminal_mapping_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_upstream_mapping_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_certify_rank11.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_target_offset_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_joint_mapping_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_assist2_similarity_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_assist2_basin_expansion.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_assist2_narrow_refinement.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_terminal_island_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_planet2_radial_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_diagnostic_promotion.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_terminal_radius_search.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_terminal_quality_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Candidates/Rank3UpstreamCandidate353.json"
+	"${CMAKE_CURRENT_LIST_DIR}/Candidates/Rank11ScaledSequentialCandidate.json"
+	"${CMAKE_CURRENT_LIST_DIR}/Candidates/Rank12Variant58840HandfeelCandidate.json"
+	"${CMAKE_CURRENT_LIST_DIR}/Certification/Rank11V22CertificationInput.json"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakePresets.json")
 
@@ -468,6 +482,9 @@ if(BUILD_TESTING)
 	find_program(POWERSHELL_EXECUTABLE
 		NAMES pwsh powershell
 		REQUIRED)
+	find_program(PYTHON_EXECUTABLE
+		NAMES python python3
+		REQUIRED)
 
 	add_test(NAME M11Core.PortableConformance
 		COMMAND ABTSM11CoreConformance --json)
@@ -532,14 +549,27 @@ if(BUILD_TESTING)
 	add_test(NAME M11V22.Rank10AssistScaleExperiment
 		COMMAND ABTSM11V22CertificationCLI
 			screen-aim
-			--rank 12
+			--rank 13
 			--output
-			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank12ScaleExperimentCTest"
+			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank13ScaleExperimentCTest"
 			--screen-aim-samples 5000)
 	set_tests_properties(M11V22.Rank10AssistScaleExperiment PROPERTIES
 		PASS_REGULAR_EXPRESSION
 			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=549,124,14,6"
 		LABELS "M11V22;Portable;Determinism;RejectedCandidateEvidence"
+		TIMEOUT 180)
+
+	add_test(NAME M11V22.Rank12Variant58840HandfeelCandidate
+		COMMAND ABTSM11V22CertificationCLI
+			screen-aim
+			--rank 12
+			--output
+			"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/Rank12HandfeelCandidateCTest"
+			--screen-aim-samples 5000)
+	set_tests_properties(M11V22.Rank12Variant58840HandfeelCandidate PROPERTIES
+		PASS_REGULAR_EXPRESSION
+			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=615,139,18,8"
+		LABELS "M11V22;Portable;Determinism;EditorCandidateEvidence;Uncertified"
 		TIMEOUT 180)
 
 	add_test(NAME M11V22.Rank11ScaledSequentialCandidate
@@ -554,6 +584,16 @@ if(BUILD_TESTING)
 			"\\[ABTS\\]\\[M11-B-v2.2\\]\\[ScreenAim\\] Samples=5000 Prefix=616,137,21,6"
 		LABELS "M11V22;Portable;Determinism;EditorCandidateEvidence"
 		TIMEOUT 180)
+
+	add_test(NAME M11V22.Rank11UniqueCertificationFreeze
+		COMMAND "${PYTHON_EXECUTABLE}"
+			"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_certify_rank11.py"
+			validate)
+	set_tests_properties(M11V22.Rank11UniqueCertificationFreeze PROPERTIES
+		PASS_REGULAR_EXPRESSION
+			"\"passed\": true"
+		LABELS "M11V22;Portable;Determinism;CertificationFreeze"
+		TIMEOUT 30)
 endif()
 
 message(STATUS

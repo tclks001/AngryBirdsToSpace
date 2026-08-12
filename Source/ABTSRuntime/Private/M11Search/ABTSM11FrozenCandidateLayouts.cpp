@@ -206,7 +206,33 @@ namespace ABTS::M11Search
 			Layout.NominalInput = LaunchInput{-1.75, 26.25, 1.0};
 		}
 
-		constexpr std::array<FrozenCandidateIdentity, 10> Identities = {{
+		void ApplyRank12Variant58840HandfeelCandidate(CandidateLayout& Layout)
+		{
+			M11Core::TargetSpec& Target = Layout.Scenario.Target;
+			const M11Core::Vec3d TargetOffset(-3300.0, 1000.0, 350.0);
+			Target.CenterCM += TargetOffset;
+			Target.GeometricContactCenterCM += TargetOffset;
+
+			M11Core::GravityBodySpec& Assist3 = Layout.Scenario.Bodies[3];
+			Assist3.CenterCM += M11Core::Vec3d(-550.0, -1250.0, -850.0);
+			Assist3.BPlaneTargetTCM += -700.0;
+			Assist3.BPlaneTargetRCM += 925.0;
+			Assist3.BPlaneSigmaTCM *= 0.833255;
+			Assist3.BPlaneSigmaRCM *= 0.833255;
+			Assist3.VirtualOrbitalVelocityCMPerSec +=
+				M11Core::Vec3d(-40.0, -450.0, -260.0);
+
+			M11Core::GravityBodySpec& Assist2 = Layout.Scenario.Bodies[2];
+			Assist2.CenterCM += M11Core::Vec3d(300.0, 925.0, 1400.0);
+			Assist2.BPlaneTargetTCM += -300.0;
+			Assist2.BPlaneTargetRCM += 675.0;
+			Assist2.BPlaneSigmaTCM *= 0.919211;
+			Assist2.BPlaneSigmaRCM *= 0.919211;
+			Assist2.VirtualOrbitalVelocityCMPerSec +=
+				M11Core::Vec3d(-150.0, -690.0, -370.0);
+		}
+
+		constexpr std::array<FrozenCandidateIdentity, 11> Identities = {{
 			{3, 20ull, 0xed74ffaf0de8028full, 0x19a6a15736704d7bull,
 				0x791c9a64b195b0d4ull, 0x938f4825be418ebeull},
 			{4, 20ull, 0xf22ad256fd791e07ull, 0xa8fdff5512fc4743ull,
@@ -238,9 +264,13 @@ namespace ABTS::M11Search
 			// carries its maximum-power local aggregate evidence hash.
 			{11, 25ull, 0xcb23499fc6f7c9d3ull, 0x4f0e3c66a1a0a737ull,
 				0x505f3312ac8ae07full, 0xd71f1166493c07aaull},
+			// User-approved manual handfeel comparison only. It preserves the
+			// frozen Rank 11 nominal input but is not a certification input.
+			{12, 25ull, 0x58840ee73ddd70f5ull, 0xf76a37a38221a425ull,
+				0xf746bbe4ca7b9748ull, 0xf364c0098bec8112ull},
 			// Rejected direct dimensional-similarity experiment retained as
 			// portable CLI evidence outside the PIE CandidateExperience catalog.
-			{12, 24ull, 0xf134ae0ff2c93467ull, 0x219034b512c47aaeull,
+			{13, 24ull, 0xf134ae0ff2c93467ull, 0x219034b512c47aaeull,
 				0x7d820ee8932d1fd9ull, 0x48d662cfd48c4f23ull},
 		}};
 	}
@@ -256,7 +286,7 @@ namespace ABTS::M11Search
 			*OutIdentity = FrozenCandidateIdentity();
 		}
 		const std::int32_t SourceRank =
-			Rank >= 7 && Rank <= 12 ? 3 : Rank;
+			Rank >= 7 && Rank <= 13 ? 3 : Rank;
 		if (!BuildFrozenV4Layout(SourceRank, OutLayout))
 		{
 			return false;
@@ -287,6 +317,14 @@ namespace ABTS::M11Search
 			ApplyRank11ScaledSequentialCandidate(OutLayout);
 		}
 		else if (Rank == 12)
+		{
+			ApplyRank3F3ExpansionCandidate21(OutLayout);
+			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);
+			ApplyRank10AssistScaleExperiment(OutLayout);
+			ApplyRank11ScaledSequentialCandidate(OutLayout);
+			ApplyRank12Variant58840HandfeelCandidate(OutLayout);
+		}
+		else if (Rank == 13)
 		{
 			ApplyRank3F3ExpansionCandidate21(OutLayout);
 			ApplyRank8Radial5900ConstrainedAngularCandidate1(OutLayout);

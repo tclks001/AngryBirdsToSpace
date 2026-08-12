@@ -493,6 +493,16 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	}
 
 	ReleasedPlaybackPlan = PreviewPlaybackPlan;
+	FString FormationPathFailure;
+	if (!FormationPath.Build(ReleasedPlaybackPlan, &FormationPathFailure))
+	{
+		ReleasedPlaybackPlan.Reset();
+		FailInteraction(
+			FormationPathFailure.IsEmpty()
+				? TEXT("FormationPathBuildRejected")
+				: FormationPathFailure);
+		return false;
+	}
 	ReleasedCameraTrajectoryResult = LatestQualifiedResult;
 	ReleasedCameraShotPlan.Reset();
 	bCameraDirectorFallbackLogged = false;

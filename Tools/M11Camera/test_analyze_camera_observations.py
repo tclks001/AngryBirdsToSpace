@@ -79,6 +79,21 @@ CSV_COLUMNS = (
     "cameraPositionDeltaCM",
     "cameraRotationDeltaDegrees",
     "fovDeltaDegrees",
+) + tuple(
+    f"formation{index}{suffix}"
+    for index in range(4)
+    for suffix in (
+        "BirdId", "Actor", "WorldX", "WorldY", "WorldZ",
+        "ScreenX", "ScreenY", "DepthCM", "PixelRadius", "VisibleRatio",
+    )
+) + (
+    "formationSpacing01CM",
+    "formationSpacing12CM",
+    "formationSpacing23CM",
+    "formationExpectedSpacingCM",
+    "formationOrderStable",
+    "formationPrimaryAnchored",
+    "formationFullyDeployed",
 )
 
 
@@ -125,6 +140,32 @@ def _row(frame_index: int, **overrides: object) -> dict[str, str]:
             "cameraToBirdCM": "1000",
             "cameraToTargetCM": "2000",
             "fovDegrees": "55",
+        }
+    )
+    for index in range(4):
+        row.update(
+            {
+                f"formation{index}BirdId": str(index),
+                f"formation{index}Actor": f"Bird{index}",
+                f"formation{index}WorldX": str(100 - index * 260),
+                f"formation{index}WorldY": "200",
+                f"formation{index}WorldZ": "300",
+                f"formation{index}ScreenX": str(500 - index * 20),
+                f"formation{index}ScreenY": "400",
+                f"formation{index}DepthCM": "1000",
+                f"formation{index}PixelRadius": "12",
+                f"formation{index}VisibleRatio": "1",
+            }
+        )
+    row.update(
+        {
+            "formationSpacing01CM": "260",
+            "formationSpacing12CM": "260",
+            "formationSpacing23CM": "260",
+            "formationExpectedSpacingCM": "260",
+            "formationOrderStable": "1",
+            "formationPrimaryAnchored": "1",
+            "formationFullyDeployed": "1",
         }
     )
     row.update({key: str(value) for key, value in overrides.items()})
@@ -245,6 +286,55 @@ class CameraObservationSchemaTest(unittest.TestCase):
             report["m4Terminal"]["offlineCameraClosurePassed"]
         )
         self.assertFalse(report["criteriaPassed"])
+
+    def test_schema_8_formation_metrics_pass(self) -> None:
+        rows = [
+            _row(
+                0,
+                schemaVersion="8",
+                shotPhase="TerminalAcquire",
+                bridgeOutgoingTarget="Assist3",
+                bridgeOutgoingPixelRadius="40",
+                bridgeOutgoingVisibleRatio="1",
+                bridgeIncomingTarget="UFO",
+            ),
+            _row(
+                1,
+                schemaVersion="8",
+                stage="FinalApproach",
+                currentTarget="UFO",
+                framingTarget="UFO",
+                shotPhase="TerminalTrack",
+            ),
+            _row(
+                2,
+                schemaVersion="8",
+                interactionState="TargetHit",
+                stage="Terminal",
+                currentTarget="UFO",
+                framingTarget="UFO",
+                shotPhase="TerminalTrack",
+            ),
+        ]
+        report = ANALYSIS.analyze(
+            self._write_csv(rows), ANALYSIS.Thresholds()
+        )
+
+        self.assertTrue(report["m6Formation"]["schemaAvailable"])
+        self.assertEqual(report["m6Formation"]["fullyDeployedFrames"], 3)
+        self.assertEqual(report["m6Formation"]["lostFrames"], 0)
+        self.assertTrue(report["m6Formation"]["passed"])
+        self.assertTrue(report["criteriaPassed"])
+
+    def test_schema_8_missing_formation_column_fails_closed(self) -> None:
+        columns = tuple(
+            column for column in CSV_COLUMNS
+            if column != "formation3VisibleRatio"
+        )
+        with self.assertRaisesRegex(ValueError, "missing M6 columns"):
+            ANALYSIS.read_rows(
+                self._write_csv([_row(0, schemaVersion="8")], columns)
+            )
 
 
 if __name__ == "__main__":

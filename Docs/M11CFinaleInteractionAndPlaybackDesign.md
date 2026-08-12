@@ -39,15 +39,18 @@ M11-C 把 M11-B 的冻结终局布局和 M11-A 的唯一积分器接入玩家操
 13. 目标选择几何按 Result Hash/目标身份缓存，Scene Capture 只在首次有效结果或目标切换时捕获；
 14. Development Editor 全链接、全新进程自动化和 PIE 验收清单。
 
-### 2.2 延期到 M11-D
+### 2.2 M6 四鸟扩展与仍延期到 M11-D 的内容
 
-- 四鸟同时进入弹珠袋及完整编队标架；
+- 2026-08-11，M6 已在 M11 内完成四鸟逻辑装袋、同一 Playback Plan 弧长单列、
+  四鸟事务恢复、镜头安全框和 Schema 8 观测；完整合同见
+  [M11 M6 四鸟终局编队设计](M11FinaleCameraM6FourBirdFormation.md)；
+- Space 袋/弦/桩共享视觉定型与正式 force-flight 动画 API 仍由 Integration 完成；
 - 星空材质切换、雾云关闭、曝光和环境状态快照；
 - 白鸟救援、UFO 破坏、接触后的局部 Chaos 演出；
 - 四鸟 Party、星空/雾云和剧情镜头共同参与的完整 Attempt Snapshot 与失败演出扩展；
 - 最终音频、镜头节奏和剧情收尾。
 
-M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M11-D 只能扩展四鸟/环境/剧情快照并消费这一条冻结播放计划，不能再建立第二套飞行模拟。
+M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M6 已把四只鸟映射到同一冻结播放计划。M11-D 后续只能扩展环境/剧情快照和接触后演出，不能再建立第二套飞行模拟。
 
 ## 3. 权威数据流
 
@@ -118,7 +121,32 @@ Locked -> Ready -> Aiming -> ReleasePending -> Launched -> TargetHit
 
 M11-D 可以在 `TargetHit` 后接救援演出，并扩展 `Failed/Recovering` 的四鸟、环境和剧情镜头；不得改变 M11-C 已冻结的轨迹结果或最小安全恢复时序。
 
-### 4.2 Space 与普通弹弓隔离
+### 4.2 只读终局环境阶段契约
+
+`IsFinaleActive()` 是 HUD、输入与终局交互租约，从 `Aiming` 起即为真；它不等价于
+主世界已经进入深空。M11 因此额外发布只读
+`EABTSM11FinaleEnvironmentStage`，但不设置渲染 Profile、天空、雾云、曝光、材质或
+Scene Capture：
+
+| 阶段 | M11 权威边界 | Integration 消费语义 |
+|---|---|---|
+| `GroundLaunch` | `Locked / Ready / Aiming / ReleasePending` | 主视图保持地表环境；瞄准和待发射不得因 `IsFinaleActive()` 切到太空 Profile |
+| `AtmosphereTransition` | `Launched` 且冻结 Released Result 尚未到达 `AssistEnter(1)` | 继续消费现有按相机高度连续过渡的大气/高空机制 |
+| `DeepSpace` | `Launched` 已到达冻结 `AssistEnter(1)`，或已进入 `TargetHit` | 主视图可以提交正式 `FinaleSpace` 演出 |
+| `Recovering` | `Failed / Recovering` | 撤销深空提交并恢复地表环境；回到 `Ready` 后阶段自然回到 `GroundLaunch` |
+
+首颗行星 `AssistEnter(1)` 取自发射时冻结的
+`ReleasedCameraTrajectoryResult`，而不是当前可变 Prediction、Actor 距离、渲染高度或
+相机 CVar。事件缺失、Hash 为零、时间非法或 playback 尚未到达边界时都保持
+`AtmosphereTransition`，禁止猜测式提前进入深空。该边界只负责“最晚何时正式提交
+DeepSpace”；发射点到首颗行星之间的大气淡出仍由 Integration 的连续高度合同负责。
+
+远端行星 PIP 的 `FinaleRemotePreview` 仍是独立视图语义，可始终使用
+`FinaleSpace`，不随主世界阶段切换。Integration 只能读取
+`GetFinaleEnvironmentStage()`，不得反向写 M11 状态、轨迹、事件或 Hash，也不得为此
+修改 `IsFinaleActive()`。
+
+### 4.3 Space 与普通弹弓隔离
 
 `AABTSM11PlayerController` 派生自 M6 Controller：
 
@@ -328,6 +356,16 @@ M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B Const
 
 ### 11.4 本次执行结果
 
+2026-08-12 追加只读环境阶段契约验证：UE 5.8 Development Editor
+`-ForceUnity -DisableAdaptiveUnity` 完整链接成功；fresh NullRHI
+`ABTS.M11C.Unit.EnvironmentStageContract` 为 `1/1`，完整
+`ABTS.M11C.Unit` 为 `12/12`。证据分别位于
+`Saved/Logs/M11-EnvironmentStage-ForceUnity-20260812.log`、
+`Saved/Logs/M11-EnvironmentStage-Contract-20260812.log` 与
+`Saved/Logs/M11-EnvironmentStage-M11CUnit-20260812.log`。这些门只证明 M11 只读状态与
+生命周期合同；Integration 的主视图 Profile、高度过渡、独立 PIP 和恢复像素仍需在其
+工作树完成接线与有渲染验收。
+
 下表保留 M11-C v1/前一轮 PIE 修复的归档基线证据。`21,025/558` 只证明 production v1 的 F4 接管闭包，不证明当前 Search v3 Candidate。
 
 | 门槛 | 结果 | 证据 |
@@ -450,14 +488,15 @@ Rank 1 的真实侧向偏转为 `+0.590804 / -0.306536 / +0.645047 rad`，发生
 
 任一 `InteractionContract`、`ReleasePreviewIdentityMismatch`、`PlaybackSamplingFailed` 或上游 M11-B Rejected 都是阻断错误。
 
-## 13. M11-D 交接清单
+## 13. M6 已落实合同与 M11-D 交接清单
 
-1. M11-D 只把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的切线/法线标架，不复制积分器；
-2. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
-3. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
-4. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
-5. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
-6. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
+1. M6 已把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的弧长标架，不复制积分器；M11-D 必须继续消费该结果；
+2. 四鸟 Actor 前向由各自弧长样本速度唯一确定；上方向使用本帧导演相机 Up 的法平面投影。Mesh 的默认 `Yaw=-90°` 只保留为组件局部轴修正，不得在世界姿态中重复施加；
+3. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
+4. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
+5. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
+6. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
+7. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
 
 ## 14. 多工作树集成交接
 

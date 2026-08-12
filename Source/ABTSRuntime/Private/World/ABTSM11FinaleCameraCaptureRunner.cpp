@@ -1399,6 +1399,16 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 		}
 	}
 
+	const TArray<TObjectPtr<AABTSM25BirdCharacter>>& FormationBirds =
+		InteractionSystem->GetAttemptFormationBirds();
+	if (bBirdRequired
+		&& FormationBirds.Num()
+			!= FABTSM11FinaleCameraObservationSample::M6FormationMemberCount)
+	{
+		FailureReason = TEXT("CameraObservationM6FormationUnavailable");
+		return false;
+	}
+
 	const FABTSM11FinaleLayoutPreset& Preset =
 		FinaleSystem->GetLayoutPreset();
 	const FABTSM110FinaleLocalFrame& Frame = FinaleSystem->GetFinaleFrame();
@@ -1432,6 +1442,9 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	FProjectedSphereObservation TargetProjection;
 	FProjectedSphereObservation BridgeOutgoingProjection;
 	FProjectedSphereObservation BridgeIncomingProjection;
+	TStaticArray<FProjectedSphereObservation,
+		FABTSM11FinaleCameraObservationSample::M6FormationMemberCount>
+		FormationProjections;
 	if ((IsValid(Bird) && !ProjectObservationSphere(
 				View,
 				Size,
@@ -1447,6 +1460,34 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 	{
 		FailureReason = TEXT("CameraObservationProjectionInvalid");
 		return false;
+	}
+	for (int32 Index = 0; Index < FormationBirds.Num(); ++Index)
+	{
+		AABTSM25BirdCharacter* FormationBird = FormationBirds[Index];
+		if (!IsValid(FormationBird))
+		{
+			FailureReason = TEXT("CameraObservationM6FormationMemberMissing");
+			return false;
+		}
+		FVector Center = FormationBird->GetActorLocation();
+		double RadiusCM = 60.0;
+		if (const USkeletalMeshComponent* Visual = FormationBird->GetBirdVisual())
+		{
+			Center = Visual->Bounds.Origin;
+			RadiusCM = FMath::Max(
+				1.0,
+				static_cast<double>(Visual->Bounds.SphereRadius));
+		}
+		if (!ProjectObservationSphere(
+			View,
+			Size,
+			Center,
+			RadiusCM,
+			FormationProjections[Index]))
+		{
+			FailureReason = TEXT("CameraObservationM6FormationProjectionInvalid");
+			return false;
+		}
 	}
 	if (ObservationTarget.IsM3InterBodyTransition())
 	{
@@ -1588,6 +1629,44 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 		: 0.0;
 	Sample.CameraToTargetCM = FVector::Distance(View.Location, TargetCenter);
 	Sample.FovDegrees = View.FOV;
+	Sample.FormationExpectedSpacingCM =
+		InteractionSystem->GetFinaleFormationSpacingCM();
+	Sample.bFormationFullyDeployed =
+		InteractionSystem->IsFinaleFormationFullyDeployed();
+	Sample.bFormationPrimaryAnchored = FormationBirds.Num()
+		== FABTSM11FinaleCameraObservationSample::M6FormationMemberCount
+		&& FormationBirds[0] == Bird;
+	Sample.bFormationOrderStable = Sample.bFormationPrimaryAnchored;
+	int32 PreviousFollowerBirdId = INDEX_NONE;
+	for (int32 Index = 0; Index < FormationBirds.Num(); ++Index)
+	{
+		AABTSM25BirdCharacter* FormationBird = FormationBirds[Index];
+		auto& Member = Sample.FormationMembers[Index];
+		Member.BirdId = static_cast<int32>(FormationBird->GetBirdId());
+		Member.ActorName = FormationBird->GetName();
+		Member.World = FormationBird->GetActorLocation();
+		Member.Screen = FormationProjections[Index].Screen;
+		Member.DepthCM = FormationProjections[Index].DepthCM;
+		Member.PixelRadius = FormationProjections[Index].PixelRadius;
+		Member.VisibleRatio = FormationProjections[Index].VisibleRatio;
+		if (Index > 0)
+		{
+			Sample.bFormationOrderStable &= PreviousFollowerBirdId == INDEX_NONE
+				|| Member.BirdId > PreviousFollowerBirdId;
+			PreviousFollowerBirdId = Member.BirdId;
+		}
+	}
+	const TArray<double>& AdjacentArcSpacing =
+		InteractionSystem->GetFormationAdjacentArcSpacingCM();
+	for (int32 Index = 0;
+		Index < Sample.FormationAdjacentArcSpacingCM.Num();
+		++Index)
+	{
+		Sample.FormationAdjacentArcSpacingCM[Index] =
+			AdjacentArcSpacing.IsValidIndex(Index)
+				? AdjacentArcSpacing[Index]
+				: 0.0;
+	}
 	if (bHasPreviousCameraObservation)
 	{
 		Sample.CameraPositionDeltaCM = FVector::Distance(
@@ -1624,18 +1703,23 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 		"bridgeOutgoingTarget,bridgeOutgoingScreenX,bridgeOutgoingScreenY,bridgeOutgoingPixelRadius,bridgeOutgoingVisibleRatio,"
 		"bridgeIncomingTarget,bridgeIncomingScreenX,bridgeIncomingScreenY,bridgeIncomingPixelRadius,bridgeIncomingVisibleRatio,"
 		"cameraWorldX,cameraWorldY,cameraWorldZ,cameraPitch,cameraYaw,cameraRoll,cameraToBirdCM,cameraToTargetCM,fovDegrees,"
-		"cameraPositionDeltaCM,cameraRotationDeltaDegrees,fovDeltaDegrees\n");
-	Csv.Reserve(ObservationSamples.Num() * 704);
+		"cameraPositionDeltaCM,cameraRotationDeltaDegrees,fovDeltaDegrees,"
+		"formation0BirdId,formation0Actor,formation0WorldX,formation0WorldY,formation0WorldZ,formation0ScreenX,formation0ScreenY,formation0DepthCM,formation0PixelRadius,formation0VisibleRatio,"
+		"formation1BirdId,formation1Actor,formation1WorldX,formation1WorldY,formation1WorldZ,formation1ScreenX,formation1ScreenY,formation1DepthCM,formation1PixelRadius,formation1VisibleRatio,"
+		"formation2BirdId,formation2Actor,formation2WorldX,formation2WorldY,formation2WorldZ,formation2ScreenX,formation2ScreenY,formation2DepthCM,formation2PixelRadius,formation2VisibleRatio,"
+		"formation3BirdId,formation3Actor,formation3WorldX,formation3WorldY,formation3WorldZ,formation3ScreenX,formation3ScreenY,formation3DepthCM,formation3PixelRadius,formation3VisibleRatio,"
+		"formationSpacing01CM,formationSpacing12CM,formationSpacing23CM,formationExpectedSpacingCM,formationOrderStable,formationPrimaryAnchored,formationFullyDeployed\n");
+	Csv.Reserve(ObservationSamples.Num() * 1280);
 	for (const FABTSM11FinaleCameraObservationSample& Sample
 		: ObservationSamples)
 	{
 		Csv += FString::Printf(
-			TEXT("7,%d,%.9f,%.9f,%s,%s,%s,%s,%s,%s,%.9f,%.9f,%s,%s,%.9f,%.9f,%.9f,%s,%d,%d,%.9f,")
+			TEXT("8,%d,%.9f,%.9f,%s,%s,%s,%s,%s,%s,%.9f,%.9f,%s,%s,%.9f,%.9f,%.9f,%s,%d,%d,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%s,%.6f,%.6f,%.6f,%.9f,%s,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,")
-			TEXT("%.6f,%.6f,%.6f\n"),
+			TEXT("%.6f,%.6f,%.6f"),
 			Sample.FrameIndex,
 			Sample.CaptureSeconds,
 			Sample.PlaybackSeconds,
@@ -1694,6 +1778,30 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 			Sample.CameraPositionDeltaCM,
 			Sample.CameraRotationDeltaDegrees,
 			Sample.FovDeltaDegrees);
+		for (const auto& Member : Sample.FormationMembers)
+		{
+			Csv += FString::Printf(
+				TEXT(",%d,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f"),
+				Member.BirdId,
+				*Member.ActorName,
+				Member.World.X,
+				Member.World.Y,
+				Member.World.Z,
+				Member.Screen.X,
+				Member.Screen.Y,
+				Member.DepthCM,
+				Member.PixelRadius,
+				Member.VisibleRatio);
+		}
+		Csv += FString::Printf(
+			TEXT(",%.6f,%.6f,%.6f,%.6f,%d,%d,%d\n"),
+			Sample.FormationAdjacentArcSpacingCM[0],
+			Sample.FormationAdjacentArcSpacingCM[1],
+			Sample.FormationAdjacentArcSpacingCM[2],
+			Sample.FormationExpectedSpacingCM,
+			Sample.bFormationOrderStable ? 1 : 0,
+			Sample.bFormationPrimaryAnchored ? 1 : 0,
+			Sample.bFormationFullyDeployed ? 1 : 0);
 	}
 	bObservationCsvWritten = FFileHelper::SaveStringToFile(
 		Csv,
@@ -2078,7 +2186,7 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetStringField(
 		TEXT("cameraObservationPath"),
 		Config.GetObservationCsvPath());
-	Root->SetNumberField(TEXT("cameraObservationSchemaVersion"), 7);
+	Root->SetNumberField(TEXT("cameraObservationSchemaVersion"), 8);
 	Root->SetNumberField(
 		TEXT("cameraObservationCount"),
 		ObservationSamples.Num());
@@ -2152,6 +2260,12 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	int32 M4PositionJumpCount = 0;
 	int32 M4RotationJumpCount = 0;
 	int32 M4FovJumpCount = 0;
+	int32 M6FormationLostFrameCount = 0;
+	int32 M6FormationOrderMismatchFrameCount = 0;
+	int32 M6FormationPrimaryMismatchFrameCount = 0;
+	int32 M6FormationSpacingMismatchFrameCount = 0;
+	int32 M6FormationFullyDeployedFrameCount = 0;
+	double M6MinimumAdjacentSpacingCM = TNumericLimits<double>::Max();
 	double M4FinalBirdToUFODistanceCM = TNumericLimits<double>::Max();
 	int32 CurrentBirdLostRun = 0;
 	int32 CurrentTargetLostRun = 0;
@@ -2202,6 +2316,31 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		const bool bTargetLost = Sample.TargetVisibleRatio <= 0.01
 			|| Sample.TargetPixelRadius < 4.0;
 		const bool bEmpty = bBirdLost && bTargetLost;
+		M6FormationOrderMismatchFrameCount +=
+			Sample.bFormationOrderStable ? 0 : 1;
+		M6FormationPrimaryMismatchFrameCount +=
+			Sample.bFormationPrimaryAnchored ? 0 : 1;
+		bool bAnyFormationBirdLost = false;
+		for (const auto& Member : Sample.FormationMembers)
+		{
+			bAnyFormationBirdLost |= Member.VisibleRatio < 0.5;
+		}
+		M6FormationLostFrameCount += bAnyFormationBirdLost ? 1 : 0;
+		if (Sample.bFormationFullyDeployed)
+		{
+			++M6FormationFullyDeployedFrameCount;
+			for (const double SpacingCM
+				: Sample.FormationAdjacentArcSpacingCM)
+			{
+				M6MinimumAdjacentSpacingCM = FMath::Min(
+					M6MinimumAdjacentSpacingCM,
+					SpacingCM);
+				M6FormationSpacingMismatchFrameCount +=
+					SpacingCM + 1.0e-3
+						< Sample.FormationExpectedSpacingCM * 0.95
+					? 1 : 0;
+			}
+		}
 		const bool bM4TerminalFrame =
 			Sample.Stage == TEXT("FinalApproach")
 			|| Sample.Stage == TEXT("Terminal");
@@ -2335,6 +2474,33 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetNumberField(TEXT("m4PositionJumpFrames"), M4PositionJumpCount);
 	Root->SetNumberField(TEXT("m4RotationJumpFrames"), M4RotationJumpCount);
 	Root->SetNumberField(TEXT("m4FovJumpFrames"), M4FovJumpCount);
+	Root->SetNumberField(
+		TEXT("m6FormationLostFrames"),
+		M6FormationLostFrameCount);
+	Root->SetNumberField(
+		TEXT("m6FormationOrderMismatchFrames"),
+		M6FormationOrderMismatchFrameCount);
+	Root->SetNumberField(
+		TEXT("m6FormationPrimaryMismatchFrames"),
+		M6FormationPrimaryMismatchFrameCount);
+	Root->SetNumberField(
+		TEXT("m6FormationSpacingMismatchCount"),
+		M6FormationSpacingMismatchFrameCount);
+	Root->SetNumberField(
+		TEXT("m6FormationFullyDeployedFrames"),
+		M6FormationFullyDeployedFrameCount);
+	Root->SetNumberField(
+		TEXT("m6FormationMinimumAdjacentSpacingCM"),
+		FMath::IsFinite(M6MinimumAdjacentSpacingCM)
+			? M6MinimumAdjacentSpacingCM : 0.0);
+	Root->SetBoolField(
+		TEXT("m6FormationPassed"),
+		FlightFrameCount > 0
+			&& M6FormationFullyDeployedFrameCount > 0
+			&& M6FormationLostFrameCount == 0
+			&& M6FormationOrderMismatchFrameCount == 0
+			&& M6FormationPrimaryMismatchFrameCount == 0
+			&& M6FormationSpacingMismatchFrameCount == 0);
 	double M4PhysicalContactRadiusCM = 0.0;
 	if (IsValid(FinaleSystem))
 	{
@@ -2466,9 +2632,9 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	const FString& Parameters)
 {
 	TestEqual(
-		TEXT("Capture contract version includes M7 custom F4 input v15"),
+		TEXT("Capture contract version includes M6 formation telemetry v16"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
-		15);
+		16);
 
 	FABTSM11FinaleCameraCaptureConfig Config;
 	FString Failure;

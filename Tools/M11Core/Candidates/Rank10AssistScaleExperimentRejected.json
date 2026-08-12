@@ -3,7 +3,7 @@
   "status": "rejected_not_pie_bound",
   "baseCandidateRank": 10,
   "baseCandidateSourceHash": "0x2b06db2cf348d75f",
-  "diagnosticCliRank": 12,
+  "diagnosticCliRank": 13,
   "scale": 6.875,
   "assistVisualRadiusCM": 5000.0,
   "assistCollisionRadiusCM": 5500.0,
