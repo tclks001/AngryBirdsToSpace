@@ -6,7 +6,7 @@
 
 ## 1. 当前状态
 
-- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**、**T4-A2.3 有界穿云表现**和 **T4-A2.4 消费端与性能冻结**均为 `IntegrationAccepted`。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 保持已验收的 `24` 个云簇、每簇均值 `10`、方差 `64` 和穿云视觉合同，将生产 Seed 下 284 朵逻辑云/23,856 个 cloudlet 合批为一个 HISM 和一个材质批次，并以 63 个逐实例浮点保留精确云岛字段。UE 5.8 ForceUnity、fresh Toon 26/26、1080p/1440p × SP50/75/100、Rank11 AVI、隔离式 GPU 门以及用户可见 PIE 的高速绕云、夜面、穿云、地面/月面跨晨昏 PIP 对照均已通过；夜面和穿云玩法视角分别为 10.29 ms 与 13.41 ms。v63 保留地平线稳定轮廓和月面星空；两类 PIP 与主视图共用世界 Lighting、`GroundDay` 曝光/Tone 且不再施加捕获专用暗部托底，并以持久 SceneCapture 历史、真实跳变 Camera Cut、两帧隐藏预热后发布消除首帧阴影偏差。T4-A2 已冻结，R0/R1/B3B6/v44 仅作为技术历史与日志身份。命令、范围和证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
+- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收，T4-A2.1～A2.4 均为 `IntegrationAccepted` 并已冻结。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 保持已验收的 `24 / 10 / 64` 全球云场、单 HISM/单材质批次、穿云可见性和地面/月面跨晨昏 PIP 同表面光照。T4-A3.1 实现版本 64 同样为 `IntegrationAccepted`：同一 `GroundDay` Profile 按每视图相机高度在 `0.22R～0.52R` 连续完成蓝色大气到程序星空的过渡，冻结卫星高度 `0.55R` 已是完整星空，并保留窄行星大气 Limb；自动化、真实 D3D12 捕获和用户实际飞行 PIE 均已通过，不以高度硬切 Gameplay Profile。命令、范围和证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
 
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
@@ -14,7 +14,7 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`；候选仍为 Preview/Test、`NOT CERTIFIED`，不能替换 v1 默认值。
-- 默认下一步：M6/M9 标定的弹弓曲线与卫星练习参数已完成可见 PIE，并以原生 V0 factory 冻结；普通 M6 已按 Twig/Simple/Reinforced 消费同一目录并公开只读身份，Space 仍由 M11 单独管理。三渲二 T0/T1/T2 以及 T3-A0/A1/A2/A3 当前范围均已通过；T3-A3 只通过了终局材质消费与 Rank11 AVI 轮廓门，环境光照仍后置。M7 在 Beam-C3 完成后补 T3-B，最终由 Integration 执行 T3-C 全量冻结。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 默认下一步：进入 T4-A3 其余 `GroundDay / SatelliteGuide / FinaleSpace` 环境装配和 M11 失败恢复；A3.1 已完成五高度真实 D3D12 与实际飞行 PIE，不再作为待验收项。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 仍需补实际 pouch/camera frame 与 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M3R-5.2/M11 集成验收](M3R52M11PreviewFinaleIntegrationDesign.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 

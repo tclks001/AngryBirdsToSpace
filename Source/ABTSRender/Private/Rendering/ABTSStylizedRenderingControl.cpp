@@ -141,6 +141,13 @@ FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 		PlanetRadiusCM * 0.60,
 		10000.0,
 		8000000.0));
+	// The practice satellite sits roughly 0.55 primary radii above the surface.
+	// Finish the atmosphere-to-space transition just before that height while
+	// retaining a broad spatial band that cannot read as a profile cut.
+	Parameters.HighAltitudeTransitionStartCM = static_cast<float>(
+		PlanetRadiusCM * 0.22);
+	Parameters.HighAltitudeTransitionEndCM = static_cast<float>(
+		PlanetRadiusCM * 0.52);
 	Parameters.SunDirectionToSunWorld = FVector3f(
 		SunDirectionToSunWorld.GetSafeNormal());
 	Parameters.Profile = Profile;
@@ -221,7 +228,25 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 63;
+	return 64;
+}
+
+float FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+	const float CameraAltitudeCM,
+	const float TransitionStartCM,
+	const float TransitionEndCM)
+{
+	if (!FMath::IsFinite(CameraAltitudeCM)
+		|| !FMath::IsFinite(TransitionStartCM)
+		|| !FMath::IsFinite(TransitionEndCM)
+		|| TransitionEndCM <= TransitionStartCM)
+	{
+		return 0.0f;
+	}
+	return FMath::SmoothStep(
+		TransitionStartCM,
+		TransitionEndCM,
+		FMath::Max(CameraAltitudeCM, 0.0f));
 }
 
 float FABTSStylizedRenderingControl::GetFixedExposureBias(
@@ -385,6 +410,11 @@ bool FABTSStylizedEnvironmentParameters::IsValid() const
 		&& PlanetRadiusCM > 0.0f
 		&& FMath::IsFinite(AtmosphereHeightCM)
 		&& AtmosphereHeightCM > 0.0f
+		&& FMath::IsFinite(HighAltitudeTransitionStartCM)
+		&& HighAltitudeTransitionStartCM > 0.0f
+		&& FMath::IsFinite(HighAltitudeTransitionEndCM)
+		&& HighAltitudeTransitionEndCM > HighAltitudeTransitionStartCM
+		&& HighAltitudeTransitionEndCM <= AtmosphereHeightCM
 		&& !SunDirectionToSunWorld.ContainsNaN()
 		&& FMath::Abs(SunDirectionToSunWorld.SizeSquared() - 1.0f) <= 1.0e-3f
 		&& FABTSStylizedRenderingControl::IsProfileValid(Profile)

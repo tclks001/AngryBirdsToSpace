@@ -226,7 +226,7 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Stylized renderer reports the persistent parity PIP contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		63);
+		64);
 	TestEqual(
 		TEXT("Ground navigation exposure is frozen independently of the active world profile"),
 		FABTSStylizedRenderingControl::GetFixedExposureBias(

@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-12 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**、**T4-A2.3 有界穿云表现**和 **T4-A2.4 消费端与性能冻结**均为 `IntegrationAccepted`。A2.3 最终实现版本 54、材质宏合同 11、manifest schema 12：正式路线永久删除会闪烁的全屏薄云雾幕，保留镜头球、四个实际鸟体可见网格球、镜头—鸟群有限走廊及局部二维噪声清除；v53 修复真实 SM6 Velocity/Depth 排列暴露的 Custom HLSL 向量维度错误，v54 只在 `GroundDay + CloudsEnabled` 禁用 Motion Blur，消除夜面高速移动时亮天空卷入暗云轮廓的青白拖边。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 已冻结 `24 / 10 / 64` 分布，将生产 Seed 下 `284` 朵逻辑云的 `23,856` 个 cloudlet 合批为一个 HISM/一个材质批次，并用 `63` 个逐实例自定义浮点保持每朵云的精确岛场、宏场和颜色身份；1080p/1440p × 50/75/100% SP 共 36 张主视图截图、三档 PIP、Rank11 AVI、fresh Toon 26/26、隔离式 GPU 增量门，以及用户可见 PIE 的快速相机、夜面、穿云和同落点 PIP 对照均已通过。v63 统一地面/月面 PIP 与主视图的表面 Lighting、曝光、Tone 和时域历史，月面仅替换空背景为深空星场。T4-A2 已冻结；T4-A3/B 尚未开始。
+> 状态：2026-08-12 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**、**T4-A2.3 有界穿云表现**和 **T4-A2.4 消费端与性能冻结**均为 `IntegrationAccepted`。A2.3 最终实现版本 54、材质宏合同 11、manifest schema 12：正式路线永久删除会闪烁的全屏薄云雾幕，保留镜头球、四个实际鸟体可见网格球、镜头—鸟群有限走廊及局部二维噪声清除；v53 修复真实 SM6 Velocity/Depth 排列暴露的 Custom HLSL 向量维度错误，v54 只在 `GroundDay + CloudsEnabled` 禁用 Motion Blur，消除夜面高速移动时亮天空卷入暗云轮廓的青白拖边。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 已冻结 `24 / 10 / 64` 分布，将生产 Seed 下 `284` 朵逻辑云的 `23,856` 个 cloudlet 合批为一个 HISM/一个材质批次，并用 `63` 个逐实例自定义浮点保持每朵云的精确岛场、宏场和颜色身份；1080p/1440p × 50/75/100% SP 共 36 张主视图截图、三档 PIP、Rank11 AVI、fresh Toon 26/26、隔离式 GPU 增量门，以及用户可见 PIE 的快速相机、夜面、穿云和同落点 PIP 对照均已通过。v63 统一地面/月面 PIP 与主视图的表面 Lighting、曝光、Tone 和时域历史，月面仅替换空背景为深空星场。T4-A2 已冻结。**T4-A3.1 高空连续星空过渡**实现版本 64：同一 `GroundDay` Profile 按每个视图相机高度在 `0.22R～0.52R` 连续淡出蓝色大气、增强确定性星场并收窄太阳光晕，`0.55R` 卫星练习高度已完整进入星空；只在行星切线附近保留窄蓝色大气边缘，不切 Gameplay Profile。自动化、真实 D3D12 捕获和用户实际飞行 PIE 均已通过，状态为 `IntegrationAccepted`；T4-A3 其余装配与 T4-B 尚未开始。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -27,7 +27,7 @@ T4 不改变：
 | **T4-A0 球面环境合同与诊断** | 主星中心/半径、太阳方向、Profile 的只读快照；五个固定环境截图点；Tone/Outline/Shadow 隔离矩阵 | 不改生产光照、雾云、曝光和最终参数 | ForceUnity；`ABTS.Rendering.Toon.T4A0`；30 张同姿态矩阵可生成；`TOON-T2A-002` 保持开放直至人工判读 |
 | **T4-A1 Sky Atmosphere 与程序化 HDR 星场** | 关闭生产全局 Z 高度雾；球心大气；唯一 Atmosphere Sun；固定曝光；昼夜/高度星空显隐 | 不做体积云，不回调 T3 最终材质 | 昼面→晨昏→夜面→高空→太空连续；主视图/PIP/AVI 身份一致；GPU 证据 |
 | **T4-A2 球面云** | **A2.1 云岛形态与表面基线** → **A2.2 全球云场与融合语义** → **A2.3 有界穿云表现** → **A2.4 消费端与性能冻结** | 不先开真实云影；不保留原生体积云与风格云双重消费；不以自动化绿灯覆盖可见 PIE 拒绝 | A2.1～A2.3 已通过；A2.4 完成 PIP/AVI/时域/GPU 与最终内容密度门后，T4-A2 才能冻结 |
-| **T4-A3 环境 Profile** | `GroundDay`、`SatelliteGuide`、`FinaleSpace` 环境装配；M11 快照与失败恢复 | 不改变 M11 求解/轨迹 | 主视图、地面/月面/终局 PIP、Rank11 AVI 与退出终局恢复一致 |
+| **T4-A3 环境 Profile** | **A3.1 高空连续星空过渡** → `GroundDay`、`SatelliteGuide`、`FinaleSpace` 环境装配 → M11 快照与失败恢复 | 不改变 M11 求解/轨迹；A3.1 不以高度硬切 Profile | 地面、云上、过渡中段、卫星高度、外大气五点连续；随后主视图、地面/月面/终局 PIP、Rank11 AVI 与退出终局恢复一致 |
 | **T4-B T3/T4 联合校色** | 回开并调整 Roughness、Specular、Rim、Tint；解决地形褶皱；形成非 M7 联合基线 | M7 未完成时不宣称全项目冻结 | `TOON-T2A-002` 关闭证据；T3/T4 视觉和 GPU 联合基线；M7 后补建筑材质/特效 |
 
 阶段必须按 A0→A1→A2→A3→B 前进。A2 的现行排期只使用 **A2.1→A2.2→A2.3→A2.4**；A2.1 已于 2026-08-10、A2.2/A2.3 已于 2026-08-11 通过用户可见 PIE，当前进入 A2.4。`R0/R1-A/R1-C2-A4/B3B6/v44` 等名称只用于说明 A2.1 的技术演进、资产合同和日志身份，不再作为排期编号，也不得由它们推导新的后续阶段名。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
@@ -481,6 +481,14 @@ v63 的 UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 26/26 已通过；真�
 只有 A2.1～A2.3 均无回归，真实 RHI 无云 shader fallback，SceneCapture/AVI 与主视图身份一致且 GPU 达到预算，才允许把 T4-A2 标记为冻结并进入 T4-A3。
 
 ## 8. T4-A3 与 T4-B
+
+### 8.1 T4-A3.1：高空连续星空过渡
+
+A3.1 先关闭“飞到卫星高度仍是蓝色天幕”的表示缺口。权威输入是每个渲染视图的 `CameraFromPlanetCenterWorld`，而不是鸟体位置、全局计时器或 Gameplay Profile：相机高度低于 `0.22R` 时保持完整地表大气；`0.22R～0.52R` 使用同一条 `smoothstep` 连续降低低频蓝色大气、提高程序 HDR 星场并把太阳 Halo 从 `4°` 收窄到 `1.45°`；到 `0.52R` 完整进入深空背景，冻结卫星高度 `0.55R` 因而不会再停留在地面蓝天。完全进入太空后仅在主星解析切线附近保留窄蓝色大气 Limb，避免退化为无大气裸岩球。
+
+不得在跨越阈值时切到 `SatelliteGuide`：主视图、PIP、AVI 可以处于不同高度，同一帧必须按各自相机独立计算；若用全局 Profile 或鸟体高度，会使仍在地表的 PIP/其他视图同步跳色。首版不增加时间平滑，宽空间过渡带已经连续且确定；若玩家 PIE 仍感觉过渡过快，只调整起止比例，不能引入随帧历史或 Camera Cut 依赖。
+
+正式自动视觉合同为 `ToonT4A3` / manifest schema 15，共五个固定 GroundDay 点：`AltitudeGround`、`AltitudeCloudTop`、`AltitudeTransitionMid`、`AltitudeSatellite`、`AltitudeSpace`；每点都有可逆 StyleOff/StyleOn，共 10 条记录。开发捕获脚本为本地 `Scripts/ToonT4A31.ps1`（`Scripts/*` 按仓库策略不纳入版本控制；正式命令参数由本段和 manifest 冻结）。自动证据必须证明高度与 `highAltitudeSpaceBlend` 单调、卫星/外大气为 1、五点始终仍为 GroundDay，并检查地面蓝天不回退、过渡中段无硬色带、卫星高度是星空、外大气只保留窄 Limb。UE 5.8 ForceUnity 已通过；fresh `ABTS.Rendering.Toon` 为 27/27，日志 `Saved/Logs/T4A31-Toon-20260812-123423.log`。真实 D3D12 manifest 为 `Succeeded`、schema 15、实现版本 64，目录 `Saved/ABTSVisualCaptures/ToonT4A3/T4A31-20260812-123752/ToonT4A3_Screenshots_20260812T043832Z_52848`，日志 `Saved/Logs/T4A31-20260812-123752.log`；10 条记录依次为 `0.04R/0`、`0.215R/0`、`0.37R/0.5`、`0.55R/1`、`0.72R/1`，真实 shader 无编译错误。Style On 图确认地面/云上保持蓝天，中段连续变为深蓝灰，卫星及外大气转为带星点的深空并只在行星切线附近保留窄蓝色 Limb。用户已于 2026-08-12 完成实际飞行 PIE，确认从地表上升至卫星/月球高度期间天空连续过渡、没有高度硬切，星场和切线大气边缘表现符合预期；A3.1 因而晋升为 `IntegrationAccepted`。
 
 三套环境 Profile 只读消费同一合同：
 

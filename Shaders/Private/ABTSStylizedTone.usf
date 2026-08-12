@@ -38,6 +38,8 @@ float3 OutlineColor;
 float3 CameraFromPlanetCenterWorld;
 float PlanetRadiusCM;
 float AtmosphereHeightCM;
+float HighAltitudeTransitionStartCM;
+float HighAltitudeTransitionEndCM;
 float3 SunDirectionToSunWorld;
 uint StarSeed;
 float StarGridResolution;
@@ -239,6 +241,16 @@ float3 ABTSQuantizeContinuousSkyForSDR(
 	return floor(saturate(EncodedColor) * 255.0f + Threshold) / 255.0f;
 }
 
+float ABTSComputeHighAltitudeSpaceBlend()
+{
+	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
+	const float AltitudeCM = max(CameraRadius - PlanetRadiusCM, 0.0f);
+	return smoothstep(
+		HighAltitudeTransitionStartCM,
+		HighAltitudeTransitionEndCM,
+		AltitudeCM);
+}
+
 float ABTSComputeStylizedStarVisibility(float3 WorldViewDirection)
 {
 	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
@@ -250,7 +262,8 @@ float ABTSComputeStylizedStarVisibility(float3 WorldViewDirection)
 		AtmosphereHeightCM * 0.18f,
 		AtmosphereHeightCM * 1.15f,
 		AltitudeCM);
-	float Visibility = max(NightFactor, AltitudeFactor);
+	const float SpaceBlend = ABTSComputeHighAltitudeSpaceBlend();
+	float Visibility = max(NightFactor, max(AltitudeFactor, SpaceBlend));
 	if (EnvironmentProfile == 1u)
 	{
 		Visibility = max(Visibility, AltitudeFactor * 0.72f);
@@ -314,11 +327,26 @@ float3 ABTSBuildContinuousGroundSky(float3 WorldViewDirection)
 	float3 DaySky = lerp(DayZenith, DayHorizon, Horizon);
 	DaySky = lerp(DaySky, DaySunward, Sunward * (0.18f + 0.42f * Horizon));
 	const float3 ContinuousAtmosphere = lerp(NightSky, DaySky, Day);
+	const float SpaceBlend = ABTSComputeHighAltitudeSpaceBlend();
+	const float3 DeepSpace = float3(0.0015f, 0.0040f, 0.0120f);
+	// Even once the camera has reached space, retain only a narrow blue limb at
+	// the tangent ray of the accepted spherical planet.  This prevents a blue
+	// half-dome from following the camera while preserving planetary scale.
+	const float SafeRadiusRatio = saturate(
+		PlanetRadiusCM / max(CameraRadius, PlanetRadiusCM + 1.0f));
+	const float TangentViewHeight = -sqrt(saturate(
+		1.0f - SafeRadiusRatio * SafeRadiusRatio));
+	const float LimbBand = 1.0f - smoothstep(
+		0.018f,
+		0.105f,
+		abs(ViewHeight - TangentViewHeight));
+	const float AtmosphereRetention = saturate(
+		(1.0f - SpaceBlend) + LimbBand * SpaceBlend * 0.82f);
 
 	// The low-frequency sky must never fall back to EngineSkyColor. The native
 	// small-planet atmosphere contains the coherent contour plateaus diagnosed by
 	// BrightSkyBanding; cloud/sun/star detail is reconstructed separately.
-	return ContinuousAtmosphere;
+	return lerp(DeepSpace, ContinuousAtmosphere, AtmosphereRetention);
 }
 
 float3 ABTSComposeContinuousGroundSky(float3 WorldViewDirection)
@@ -329,15 +357,20 @@ float3 ABTSComposeContinuousGroundSky(float3 WorldViewDirection)
 	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
 	const float SunHeight = dot(RadialUp, SunDirection);
 	const float ViewToSun = dot(WorldViewDirection, SunDirection);
+	const float SpaceBlend = ABTSComputeHighAltitudeSpaceBlend();
 	const float SunAboveHorizon = smoothstep(-0.055f, 0.015f, SunHeight);
 	const float SunDisc = smoothstep(
 		cos(radians(0.80f)),
 		cos(radians(0.32f)),
 		ViewToSun) * SunAboveHorizon;
+	const float SunHaloDegrees = lerp(4.0f, 1.45f, SpaceBlend);
 	const float SunHalo = pow(
-		smoothstep(cos(radians(4.0f)), 1.0f, ViewToSun),
+		smoothstep(cos(radians(SunHaloDegrees)), 1.0f, ViewToSun),
 		2.2f) * SunAboveHorizon;
-	Sky += SunHalo * float3(0.14f, 0.12f, 0.09f);
+	Sky += SunHalo * lerp(
+		float3(0.14f, 0.12f, 0.09f),
+		float3(0.075f, 0.065f, 0.050f),
+		SpaceBlend);
 	Sky = lerp(Sky, float3(1.0f, 0.95f, 0.82f), SunDisc);
 
 	const float3 HDRStars = ABTSEvaluateDeterministicHDRStars(

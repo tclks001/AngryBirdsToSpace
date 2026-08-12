@@ -259,6 +259,16 @@ bool FABTSToonT4A1EnvironmentControlTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Atmosphere height derives from the accepted radius"),
 		FMath::IsNearlyEqual(Ground.AtmosphereHeightCM, 300000.0f));
+	TestTrue(
+		TEXT("High-altitude transition starts at 0.22 primary radii"),
+		FMath::IsNearlyEqual(
+			Ground.HighAltitudeTransitionStartCM,
+			110000.0f));
+	TestTrue(
+		TEXT("High-altitude transition completes at 0.52 primary radii"),
+		FMath::IsNearlyEqual(
+			Ground.HighAltitudeTransitionEndCM,
+			260000.0f));
 
 	FABTSStylizedRenderingControl::SetEnvironmentParameters(Finale);
 	TestTrue(
@@ -274,6 +284,84 @@ bool FABTSToonT4A1EnvironmentControlTest::RunTest(const FString& Parameters)
 		TEXT("Clearing the contract disables the pass"),
 		FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 			Readback));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A31HighAltitudeTransitionContractTest,
+	"ABTS.Rendering.Toon.T4A3_1.HighAltitudeTransitionContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A31HighAltitudeTransitionContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSStylizedEnvironmentParameters Ground =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector::ZeroVector,
+			10000.0,
+			FVector::UpVector,
+			EABTSStylizedRenderProfile::GroundDay);
+	TestTrue(TEXT("A3.1 environment validates"), Ground.IsValid());
+	const float Start = Ground.HighAltitudeTransitionStartCM;
+	const float End = Ground.HighAltitudeTransitionEndCM;
+	const float Mid = 0.5f * (Start + End);
+	TestEqual(TEXT("Ground remains fully atmospheric"),
+		FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+			0.04f * Ground.PlanetRadiusCM, Start, End), 0.0f);
+	TestEqual(TEXT("Transition start is continuous at zero"),
+		FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+			Start, Start, End), 0.0f);
+	TestTrue(TEXT("Transition midpoint is half space"), FMath::IsNearlyEqual(
+		FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+			Mid, Start, End), 0.5f));
+	TestEqual(TEXT("Transition end is fully space"),
+		FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+			End, Start, End), 1.0f);
+	TestEqual(TEXT("Practice-satellite altitude is fully space"),
+		FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+			0.55f * Ground.PlanetRadiusCM, Start, End), 1.0f);
+	float Previous = 0.0f;
+	for (int32 Step = 0; Step <= 32; ++Step)
+	{
+		const float Altitude = End * static_cast<float>(Step) / 32.0f;
+		const float Blend =
+			FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+				Altitude, Start, End);
+		TestTrue(TEXT("Altitude blend remains finite"), FMath::IsFinite(Blend));
+		TestTrue(TEXT("Altitude blend is monotonic"), Blend + KINDA_SMALL_NUMBER >= Previous);
+		Previous = Blend;
+	}
+
+	FABTSToonVisualCaptureRunConfig Config;
+	FString Failure;
+	TestTrue(TEXT("T4-A3 capture suite parses"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A3 -ABTSToonT0BuildId=T4A3-Test"),
+			Config,
+			&Failure));
+	TestEqual(TEXT("Parser selects T4-A3"),
+		static_cast<int32>(Config.Suite),
+		static_cast<int32>(EABTSToonVisualCaptureSuite::ToonT4A3));
+	const TArray<FABTSToonVisualCapturePointDefinition> Points =
+		FABTSToonVisualCaptureMath::BuildT4A3Catalogue();
+	TestEqual(TEXT("A3.1 has five altitude points"), Points.Num(), 5);
+	const EABTSToonVisualCaptureAnchor ExpectedAnchors[] = {
+		EABTSToonVisualCaptureAnchor::HighAltitudeGround,
+		EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop,
+		EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid,
+		EABTSToonVisualCaptureAnchor::HighAltitudeSatellite,
+		EABTSToonVisualCaptureAnchor::HighAltitudeSpace
+	};
+	for (int32 Index = 0; Index < Points.Num(); ++Index)
+	{
+		TestEqual(TEXT("Altitude diagnostic order is frozen"),
+			static_cast<int32>(Points[Index].Anchor),
+			static_cast<int32>(ExpectedAnchors[Index]));
+		TestEqual(TEXT("Every altitude point retains GroundDay profile"),
+			static_cast<int32>(Points[Index].StyleProfile),
+			static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	}
 	return true;
 }
 

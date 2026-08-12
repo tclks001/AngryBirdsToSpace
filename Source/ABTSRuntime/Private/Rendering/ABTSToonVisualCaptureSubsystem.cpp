@@ -241,6 +241,7 @@ bool UABTSToonVisualCaptureSubsystem::ShouldCreateSubsystem(UObject* Outer) cons
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A3Capture"))
 		|| (FParse::Value(
 			CommandLine,
 			TEXT("ABTSVisualCaptureSuite="),
@@ -248,7 +249,8 @@ bool UABTSToonVisualCaptureSubsystem::ShouldCreateSubsystem(UObject* Outer) cons
 			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
 				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
 				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)
-				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)));
+				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A3"), ESearchCase::IgnoreCase)));
 	return bExplicitlyRequested && Super::ShouldCreateSubsystem(Outer);
 }
 
@@ -834,7 +836,9 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 	}
 
 	TArray<FABTSToonVisualCapturePointDefinition> Definitions =
-		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3
+			? FABTSToonVisualCaptureMath::BuildT4A3Catalogue()
+		: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
 			? FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
 			? FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
@@ -1610,6 +1614,89 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				CameraLocation,
 				Point.LookAtWorld,
 				HighUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::HighAltitudeGround:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeSatellite:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeSpace:
+		{
+			const FABTSStylizedEnvironmentParameters Presentation =
+				FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+					EnvironmentSnapshot.PlanetCenterWorld,
+					EnvironmentSnapshot.PlanetRadiusCM,
+					EnvironmentSnapshot.SunDirectionToSunWorld,
+					EABTSStylizedRenderProfile::GroundDay);
+			const double StartRatio =
+				Presentation.HighAltitudeTransitionStartCM
+				/ Presentation.PlanetRadiusCM;
+			const double EndRatio =
+				Presentation.HighAltitudeTransitionEndCM
+				/ Presentation.PlanetRadiusCM;
+			double AltitudeRatio = 0.04;
+			switch (Definition.Anchor)
+			{
+			case EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop:
+				AltitudeRatio = FMath::Min(
+					StartRatio,
+					(Presentation.CloudBaseAltitudeCM
+						+ Presentation.CloudLayerHeightCM)
+					/ Presentation.PlanetRadiusCM + 0.01);
+				break;
+			case EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid:
+				AltitudeRatio = 0.5 * (StartRatio + EndRatio);
+				break;
+			case EABTSToonVisualCaptureAnchor::HighAltitudeSatellite:
+				AltitudeRatio = 0.55;
+				break;
+			case EABTSToonVisualCaptureAnchor::HighAltitudeSpace:
+				AltitudeRatio = 0.72;
+				break;
+			default:
+				break;
+			}
+			const FVector RadialUp = (
+				EnvironmentSnapshot.SunDirectionToSunWorld
+				+ EnvironmentDawnUp * 0.28).GetSafeNormal();
+			const FVector Tangent =
+				ABTSToonVisualCaptureSubsystemPrivate::MakeStablePlanarDirection(
+					EnvironmentDawnUp,
+					RadialUp,
+					StartTransform.GetUnitAxis(EAxis::X));
+			const double CameraRadiusRatio = 1.0 + AltitudeRatio;
+			const double TangentViewHeight = -FMath::Sqrt(FMath::Max(
+				1.0 - 1.0 / (CameraRadiusRatio * CameraRadiusRatio),
+				0.0));
+			const double FramingViewHeight = FMath::Clamp(
+				TangentViewHeight + 0.055,
+				-0.96,
+				0.25);
+			const FVector ViewDirection = (
+				RadialUp * FramingViewHeight
+				+ Tangent * FMath::Sqrt(FMath::Max(
+					1.0 - FramingViewHeight * FramingViewHeight,
+					0.0))).GetSafeNormal();
+			const FVector CameraLocation =
+				EnvironmentSnapshot.PlanetCenterWorld
+				+ RadialUp * EnvironmentSnapshot.PlanetRadiusCM
+					* CameraRadiusRatio;
+			Point.LookAtWorld = CameraLocation
+				+ ViewDirection * EnvironmentSnapshot.PlanetRadiusCM * 2.0;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				RadialUp,
 				Point.CameraWorldTransform,
 				&CameraFailure))
 			{
@@ -3175,7 +3262,9 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(
 		TEXT("schemaVersion"),
-		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 14 : 4);
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3
+			? 15
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 14 : 4);
 	Root->SetStringField(
 		TEXT("suite"),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
@@ -3241,7 +3330,8 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	Environment->SetStringField(
 		TEXT("exposurePolicy"),
 		(RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
-			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
 			? TEXT("T4A1_StyleOnManualExposure_StyleOffSceneConfigured_PerVariantWarmup")
 			: TEXT("SceneConfiguredAutoExposure_CameraCut_PerVariantWarmup"));
 	Environment->SetNumberField(
@@ -3438,6 +3528,8 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("captureContract"),
 		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
 			? TEXT("T4-A0 freezes six Tone/Outline/Shadow isolation variants without changing gameplay authority.")
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3
+				? TEXT("T4-A3.1 captures five GroundDay-profile altitudes proving a continuous atmosphere-to-space transition without a gameplay profile cut.")
 			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
 				? TEXT("T4-A2 captures ten A1 poses, seven A2.1 cloud views, five A2.2 field views and four A2.3.1 stable-planar-noise traversal relations with reversible StyleOff/StyleOn.")
 				: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
@@ -3446,6 +3538,25 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+	{
+		const FABTSStylizedEnvironmentParameters Presentation =
+			FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+				EnvironmentSnapshot.PlanetCenterWorld,
+				EnvironmentSnapshot.PlanetRadiusCM,
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				EABTSStylizedRenderProfile::GroundDay);
+		Style->SetNumberField(TEXT("highAltitudeTransitionStartCM"),
+			Presentation.HighAltitudeTransitionStartCM);
+		Style->SetNumberField(TEXT("highAltitudeTransitionEndCM"),
+			Presentation.HighAltitudeTransitionEndCM);
+		Style->SetNumberField(TEXT("highAltitudeTransitionStartPrimaryRadiusRatio"),
+			Presentation.HighAltitudeTransitionStartCM / Presentation.PlanetRadiusCM);
+		Style->SetNumberField(TEXT("highAltitudeTransitionEndPrimaryRadiusRatio"),
+			Presentation.HighAltitudeTransitionEndCM / Presentation.PlanetRadiusCM);
+		Style->SetBoolField(TEXT("highAltitudePerViewCameraDriven"), true);
+		Style->SetBoolField(TEXT("highAltitudeGameplayProfileCut"), false);
+	}
 	Style->SetBoolField(
 		TEXT("cloudPerformanceBaselineDisabled"),
 		RunConfig.bDisableLowPolyCloudsForPerformanceBaseline);
@@ -3617,7 +3728,8 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			TEXT("styleImplementationVersion"),
 			Record.StyleImplementationVersion);
 		if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
-			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
 		{
 			const FABTSStylizedEnvironmentParameters Presentation =
 				FABTSStylizedRenderingControl::BuildEnvironmentParameters(
@@ -3647,6 +3759,22 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			RecordJson->SetNumberField(
 				TEXT("fixedExposureBias"),
 				Presentation.FixedExposureBias);
+			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+			{
+				const double CameraAltitudeCM = FMath::Max(
+					(Record.CameraWorldTransform.GetLocation()
+						- Presentation.PlanetCenterWorld).Length()
+						- Presentation.PlanetRadiusCM,
+					0.0);
+				RecordJson->SetNumberField(TEXT("cameraAltitudeCM"), CameraAltitudeCM);
+				RecordJson->SetNumberField(TEXT("cameraAltitudePrimaryRadiusRatio"),
+					CameraAltitudeCM / Presentation.PlanetRadiusCM);
+				RecordJson->SetNumberField(TEXT("highAltitudeSpaceBlend"),
+					FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+						static_cast<float>(CameraAltitudeCM),
+						Presentation.HighAltitudeTransitionStartCM,
+						Presentation.HighAltitudeTransitionEndCM));
+			}
 			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
 			{
 				const bool bRuntimeCloudEnabledForRecord =

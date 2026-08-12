@@ -47,6 +47,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(FVector3f, CameraFromPlanetCenterWorld)
 		SHADER_PARAMETER(float, PlanetRadiusCM)
 		SHADER_PARAMETER(float, AtmosphereHeightCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionStartCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionEndCM)
 		SHADER_PARAMETER(FVector3f, SunDirectionToSunWorld)
 		SHADER_PARAMETER(uint32, StarSeed)
 		SHADER_PARAMETER(float, StarGridResolution)
@@ -80,6 +82,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(FVector3f, CameraFromPlanetCenterWorld)
 		SHADER_PARAMETER(float, PlanetRadiusCM)
 		SHADER_PARAMETER(float, AtmosphereHeightCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionStartCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionEndCM)
 		SHADER_PARAMETER(FVector3f, SunDirectionToSunWorld)
 		SHADER_PARAMETER(uint32, StarSeed)
 		SHADER_PARAMETER(float, StarGridResolution)
@@ -361,6 +365,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 					- Environment.PlanetCenterWorld);
 			PassParameters->PlanetRadiusCM = Environment.PlanetRadiusCM;
 			PassParameters->AtmosphereHeightCM = Environment.AtmosphereHeightCM;
+			PassParameters->HighAltitudeTransitionStartCM =
+				Environment.HighAltitudeTransitionStartCM;
+			PassParameters->HighAltitudeTransitionEndCM =
+				Environment.HighAltitudeTransitionEndCM;
 			PassParameters->SunDirectionToSunWorld =
 				Environment.SunDirectionToSunWorld;
 			PassParameters->StarSeed = Environment.StarSeed;
@@ -509,6 +517,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 				View.ViewLocation - Environment.PlanetCenterWorld);
 			PassParameters->PlanetRadiusCM = Environment.PlanetRadiusCM;
 			PassParameters->AtmosphereHeightCM = Environment.AtmosphereHeightCM;
+			PassParameters->HighAltitudeTransitionStartCM =
+				Environment.HighAltitudeTransitionStartCM;
+			PassParameters->HighAltitudeTransitionEndCM =
+				Environment.HighAltitudeTransitionEndCM;
 			PassParameters->SunDirectionToSunWorld =
 				Environment.SunDirectionToSunWorld;
 			PassParameters->StarSeed = Environment.StarSeed;

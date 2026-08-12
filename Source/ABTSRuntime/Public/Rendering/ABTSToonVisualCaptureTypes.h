@@ -49,7 +49,17 @@ enum class EABTSToonVisualCaptureAnchor : uint8
 	/** A2.3 one cloud lies between an outside camera and outside bird. */
 	CloudTraversalBetween,
 	/** A2.3 camera and bird share the bounded interior of one cloud. */
-	CloudTraversalBothInside
+	CloudTraversalBothInside,
+	/** A3.1 ground-side baseline below the altitude transition. */
+	HighAltitudeGround,
+	/** A3.1 viewpoint immediately above the accepted cloud layer. */
+	HighAltitudeCloudTop,
+	/** A3.1 midpoint of the continuous atmosphere-to-space band. */
+	HighAltitudeTransitionMid,
+	/** A3.1 practice-satellite altitude where space presentation is complete. */
+	HighAltitudeSatellite,
+	/** A3.1 view beyond the accepted atmosphere height. */
+	HighAltitudeSpace
 };
 
 enum class EABTSToonVisualCaptureSuite : uint8
@@ -57,7 +67,8 @@ enum class EABTSToonVisualCaptureSuite : uint8
 	ToonT0 = 0,
 	ToonT4A0,
 	ToonT4A1,
-	ToonT4A2
+	ToonT4A2,
+	ToonT4A3
 };
 
 enum class EABTSToonVisualCaptureMode : uint8
@@ -156,6 +167,8 @@ public:
 		BuildT4A1Catalogue();
 	static TArray<FABTSToonVisualCapturePointDefinition>
 		BuildT4A2Catalogue();
+	static TArray<FABTSToonVisualCapturePointDefinition>
+		BuildT4A3Catalogue();
 	static TArray<FABTSToonDiagnosticVariantDefinition>
 		BuildVariantCatalogue(EABTSToonVisualCaptureSuite Suite);
 

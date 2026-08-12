@@ -108,15 +108,21 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
 		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A3Capture"))
 		|| (bNamedSuite
 			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
 				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
 				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)
-				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)));
+				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A3"), ESearchCase::IgnoreCase)));
 	if (!OutConfig.bEnabled)
 	{
 		return true;
 	}
+	const bool bT4A3Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A3Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A3"), ESearchCase::IgnoreCase));
 	const bool bT4A2Requested =
 		FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
 		|| (bNamedSuite
@@ -129,7 +135,9 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
 		|| (bNamedSuite
 			&& Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase));
-	OutConfig.Suite = bT4A2Requested
+	OutConfig.Suite = bT4A3Requested
+		? EABTSToonVisualCaptureSuite::ToonT4A3
+		: bT4A2Requested
 		? EABTSToonVisualCaptureSuite::ToonT4A2
 		: bT4A1Requested
 			? EABTSToonVisualCaptureSuite::ToonT4A1
@@ -507,6 +515,39 @@ FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
 	return Result;
 }
 
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A3Catalogue()
+{
+	TArray<FABTSToonVisualCapturePointDefinition> Result;
+	Result.Reserve(5);
+	auto Add = [&Result](
+		const TCHAR* Id,
+		const EABTSToonVisualCaptureAnchor Anchor,
+		const float Fov)
+	{
+		FABTSToonVisualCapturePointDefinition Point;
+		Point.PointId = Id;
+		Point.Anchor = Anchor;
+		// A3.1 intentionally proves that the regular ground profile reaches
+		// space continuously; using SatelliteGuide here would hide a hard cut.
+		Point.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+		Point.FieldOfViewDegrees = Fov;
+		Point.WarmupFrameOverride = 12;
+		Result.Add(Point);
+	};
+	Add(TEXT("AltitudeGround"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeGround, 68.0f);
+	Add(TEXT("AltitudeCloudTop"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop, 64.0f);
+	Add(TEXT("AltitudeTransitionMid"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid, 60.0f);
+	Add(TEXT("AltitudeSatellite"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeSatellite, 56.0f);
+	Add(TEXT("AltitudeSpace"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeSpace, 52.0f);
+	return Result;
+}
+
 TArray<FABTSToonDiagnosticVariantDefinition>
 FABTSToonVisualCaptureMath::BuildVariantCatalogue(
 	const EABTSToonVisualCaptureSuite Suite)
@@ -536,7 +577,8 @@ FABTSToonVisualCaptureMath::BuildVariantCatalogue(
 		return Result;
 	}
 	if (Suite == EABTSToonVisualCaptureSuite::ToonT4A1
-		|| Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+		|| Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+		|| Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
 	{
 		Result.Reserve(2);
 		Add(TEXT("StyleOff"), false,
@@ -735,6 +777,8 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 {
 	switch (Suite)
 	{
+	case EABTSToonVisualCaptureSuite::ToonT4A3:
+		return TEXT("ToonT4A3");
 	case EABTSToonVisualCaptureSuite::ToonT4A2:
 		return TEXT("ToonT4A2");
 	case EABTSToonVisualCaptureSuite::ToonT4A1:
@@ -810,6 +854,16 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 		return TEXT("CloudTraversalBetween");
 	case EABTSToonVisualCaptureAnchor::CloudTraversalBothInside:
 		return TEXT("CloudTraversalBothInside");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeGround:
+		return TEXT("HighAltitudeGround");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop:
+		return TEXT("HighAltitudeCloudTop");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid:
+		return TEXT("HighAltitudeTransitionMid");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeSatellite:
+		return TEXT("HighAltitudeSatellite");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeSpace:
+		return TEXT("HighAltitudeSpace");
 	default:
 		return TEXT("Unknown");
 	}

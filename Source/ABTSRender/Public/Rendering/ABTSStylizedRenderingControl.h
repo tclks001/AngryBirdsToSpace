@@ -49,6 +49,9 @@ struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
 	FVector PlanetCenterWorld = FVector::ZeroVector;
 	float PlanetRadiusCM = 0.0f;
 	float AtmosphereHeightCM = 0.0f;
+	/** Per-view altitude band where the ground atmosphere continuously yields to space. */
+	float HighAltitudeTransitionStartCM = 0.0f;
+	float HighAltitudeTransitionEndCM = 0.0f;
 	FVector3f SunDirectionToSunWorld = FVector3f::ZeroVector;
 	EABTSStylizedRenderProfile Profile =
 		EABTSStylizedRenderProfile::GroundDay;
@@ -130,6 +133,11 @@ public:
 	static bool ShouldSuppressMotionBlur(
 		EABTSStylizedRenderProfile Profile,
 		bool bCloudsEnabled);
+	/** Pure-data mirror of the shader transition, used by diagnostics and tests. */
+	static float ComputeHighAltitudeSpaceBlend(
+		float CameraAltitudeCM,
+		float TransitionStartCM,
+		float TransitionEndCM);
 
 	static int32 GetImplementationVersion();
 	static bool IsProfileValid(EABTSStylizedRenderProfile Profile);
