@@ -3287,7 +3287,11 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 			&& BoundChildCount == Reservation.BoundTowerChildCoreCellIds.Num()
 			&& InfluencedChildCount
 				== Reservation.InfluencedTowerChildCoreCellIds.Num()
-			&& MinimumChildSplit == Reservation.ApprovedTopCourse
+			// The second pass may expose more child trunk after the reserved Body is
+			// inserted.  That is conservative: the raised main must not overrun the
+			// final lowest split, but it need not equal a split recomputed from the
+			// richer second-pass silhouette.
+			&& MinimumChildSplit >= Reservation.ApprovedTopCourse
 			&& Main->RaisedPodiumMainTopCourseIndex
 				== Reservation.ApprovedTopCourse
 			&& Main->TopCourseIndex == Reservation.ApprovedTopCourse
@@ -3308,14 +3312,23 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 			? (Reservation.ApprovedTopCourse - Reservation.OriginalTopCourse)
 				* Main->RailCount : 0;
 		AddInfo(FString::Printf(
-			TEXT("Stage1RaisedMainReservation:%s:Component=%d:Main=%d:Original=%d:Approved=%d:Bound=%d:Influenced=%d:Foreign=%d:Core=%s:Clearance=%s"),
+			TEXT("Stage1RaisedMainReservation:%s:Component=%d:Main=%d:Original=%d:Approved=%d:Bound=%d/%d:Influenced=%d/%d:Foreign=%d:MinimumChildSplit=%d:MainTop=%d:RaisedTop=%d:Members=%d/%d:Summary=%d/%d:Core=%s:Clearance=%s"),
 			*Prefix, Reservation.ComponentId,
 			Reservation.PodiumMainCoreCellId,
 			Reservation.OriginalTopCourse,
 			Reservation.ApprovedTopCourse,
-			Reservation.BoundTowerChildCoreCellIds.Num(),
+			BoundChildCount, Reservation.BoundTowerChildCoreCellIds.Num(),
+			InfluencedChildCount,
 			Reservation.InfluencedTowerChildCoreCellIds.Num(),
 			Reservation.ForeignTowerChildCoreCellIds.Num(),
+			MinimumChildSplit,
+			Main != nullptr ? Main->TopCourseIndex : INDEX_NONE,
+			Main != nullptr
+				? Main->RaisedPodiumMainTopCourseIndex : INDEX_NONE,
+			Main != nullptr ? Main->MemberIndices.Num() : INDEX_NONE,
+			Main != nullptr ? Main->TopCourseIndex * Main->RailCount : INDEX_NONE,
+			Plan.Summary.RaisedPodiumMainReservationCount,
+			Plan.RaisedMainReservations.Num(),
 			*Reservation.CoreBounds.ToString(),
 			*Reservation.ClearanceBounds.ToString()));
 	}

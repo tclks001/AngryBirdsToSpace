@@ -274,3 +274,27 @@ NullRHI 只证明确定性几何、预算、静态接触与 Load DAG，不证明
 
 若静置仍失稳，应优先检查具体 Host 覆盖、柱段真实接触、摩擦参数与高重心宏体是否需要多个 Host；不得通过
 隐式锁定、全局冻结或放宽 IdleValidation 掩盖问题。
+
+## 9. 2026-08-12 Stage 1 冻结与 Stage 2 入口
+
+Stage 1（`CoreAndShared`）在用户完成 WFC、主/子芯体、shared course、差异裙房、raised main 与方形单收缩
+子芯体视觉验收后冻结。冻结合同为：
+
+1. `SemanticTerminalDemand -> HighProjectionRegion -> TowerChild` 继续保持空间双射、全高承载和接地；
+2. joint selection 的 `SupportProvince -> PodiumMain` 覆盖结果是语义父级权威，子芯体不得在发射阶段按几何距离
+   重新选择父级；同一省份的 sibling 必须进入同一主芯体家庭；
+3. 单收缩 child 的 lower/upper 都是 36 cm 格量化正方形；lower 只参与接地承载、座面与冲突，terminal 身份和
+   父级归属使用 demand-carrying upper；
+4. 两遍 raised-main 的第一遍批准高度是第二遍安全上限。第二遍允许因合成 Body 得到更高的 child 分界，但必须
+   满足 `FinalMinimumChildSplit >= ApprovedMainTop`，不得要求二者虚假相等；
+5. Stage 1 仍只发射 CoreCourse、shared rails 和 bridge diaphragm，Static DAG 必须 Accepted，
+   `Physical=NotEvaluated`；Stage 2 之前不运行 Chaos，也不把 roof/shell/完整生产失败算作 Stage 1 失败。
+
+冻结证据：UE 5.8 ForceUnity Development Editor 全链接成功；fresh
+`ABTS.M73DAG.BeamC3V3.Staged` 44/44（其中 5 Profile × 6 Tier 为 30/30），且完成标记和进程退出均为 0；
+Routing/M73A/M73B/M73B2 非未来阶段门 6/6。完整 `ABTS.M73DAG` 的 202/274 作为 Stage 2+ 负基线保留，
+72 项主要落在尚未实现的新 roof/shell/complete-production 路径及旧 Beam-A/B，不能通过删除或放宽来伪造冻结。
+
+Stage 2 下一入口保持原设计：只从 Stage 1 已冻结的 CoreCourse/shared 身份发射可追溯的外框耦合 course；
+暂不生成共同外框。每根新构件必须记录源 core、course、目标 WFC 外立面和前后 Hash，无法回溯到 Stage 1
+骨架的构件失败关闭。Stage 2 先做静态 DAG 与互斥诊断层视觉验收，不进入 Chaos。

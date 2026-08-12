@@ -5348,7 +5348,14 @@ namespace
 			const FCoreCellPlan& PodiumMain =
 				Plan.CoreCells[Region.BoundPodiumMainCoreCellId];
 			const FCoreCellPlan& Core = Plan.CoreCells[Region.BoundCoreCellId];
-			const FVector CoreCenter = Core.LocalBounds.GetCenter();
+			// Terminal binding belongs to the demand-carrying upper section.  A
+			// single-shrink TowerChild may deliberately widen and offset its grounded
+			// trunk inside the podium; validating that lower center against the
+			// terminal slice rejects an otherwise full-height legal child.
+			const FVector CoreCenter = Core.SingleShrinkCourseIndex > 0
+				&& Core.UpperLocalBounds.IsValid
+					? Core.UpperLocalBounds.GetCenter()
+					: Core.LocalBounds.GetCenter();
 			if (PodiumMain.HierarchyRole != ECoreHierarchyRole::PodiumMain
 				|| PodiumMain.ComponentId != Region.ComponentId
 				|| PodiumMain.CoreMergeRegionId != Component.CoreMergeRegionId
@@ -5371,9 +5378,11 @@ namespace
 				|| BoundSemanticDemandIds.Contains(Region.SemanticDemandId))
 			{
 				OutError = FString::Printf(
-					TEXT("BeamC3V3HighProjectionRegionBindingInvalid:Region=%d:Component=%d:Main=%d:Core=%d:Role=%d:CoreRegion=%d:Top=%d:PodiumTop=%d"),
+					TEXT("BeamC3V3HighProjectionRegionBindingInvalid:Region=%d:Component=%d:Main=%d:MainTop=%d:Core=%d:CoreMain=%d:Role=%d:CoreRegion=%d:Top=%d:PodiumTop=%d"),
 					Region.RegionId, Region.ComponentId, PodiumMain.CoreCellId,
+					PodiumMain.TopCourseIndex,
 					Core.CoreCellId,
+					Core.PodiumMainCoreCellId,
 					static_cast<int32>(Core.HierarchyRole),
 					Core.HighProjectionRegionId, Core.TopCourseIndex,
 					Region.PodiumTopCourse);
@@ -15250,6 +15259,48 @@ namespace
 				FStage1PhaseTimer CompositePlanningTimer(
 					OutPlan.Summary.JointSelectionMilliseconds);
 				const TArray<int32> PodiumMainCoreCellIds = InitialCoreCellIds;
+				// Joint selection already proves which selected podium-main candidate
+				// owns every semantic support province.  Freeze that result before
+				// choosing individual TowerChild footprints: selecting a parent again
+				// from geometric proximity lets siblings in one province drift to
+				// different mains and makes raised-main identities unstable between the
+				// reservation pass and the final Stage-1 pass.
+				TMap<int32, int32> PodiumMainCoreCellIdBySupportProvince;
+				for (int32 ProvinceIndex = 0;
+					ProvinceIndex < RequiredSupportProvinceIds.Num(); ++ProvinceIndex)
+				{
+					const uint32 ProvinceBit = 1u << ProvinceIndex;
+					int32 OwningMainCoreCellId = INDEX_NONE;
+					for (int32 SelectedIndex = 0;
+						SelectedIndex < SelectedCoreCandidates.Num(); ++SelectedIndex)
+					{
+						if ((SelectedCoreCandidates[SelectedIndex].ProvinceCoverageMask
+								& ProvinceBit) == 0u)
+						{
+							continue;
+						}
+						const int32 CandidateCoreCellId =
+							PodiumMainCoreCellIds.IsValidIndex(SelectedIndex)
+								? PodiumMainCoreCellIds[SelectedIndex] : INDEX_NONE;
+						if (CandidateCoreCellId != INDEX_NONE
+							&& (OwningMainCoreCellId == INDEX_NONE
+								|| CandidateCoreCellId < OwningMainCoreCellId))
+						{
+							OwningMainCoreCellId = CandidateCoreCellId;
+						}
+					}
+					if (OwningMainCoreCellId == INDEX_NONE)
+					{
+						OutError = FString::Printf(
+							TEXT("BeamC3V3SupportProvinceSelectedMainUnavailable:Component=%d:Province=%d:Selected=%d"),
+							RootIndex, RequiredSupportProvinceIds[ProvinceIndex],
+							SelectedCoreCandidates.Num());
+						return false;
+					}
+					PodiumMainCoreCellIdBySupportProvince.Add(
+						RequiredSupportProvinceIds[ProvinceIndex],
+						OwningMainCoreCellId);
+				}
 				struct FReservedSharedEndpointCell
 				{
 					int32 SpanVolumeId = INDEX_NONE;
@@ -16313,12 +16364,27 @@ namespace
 									const TArray<int32>& CouplingYStations = bHasShrink
 										? FullHeightCandidate.UpperYStations
 										: FullHeightCandidate.YStations;
-									const int32 CandidatePodiumMainCoreCellId =
+									const FSemanticTerminalDemandDiagnostic* SemanticDemand =
+										OutPlan.SemanticTerminalDemands.FindByPredicate(
+											[&ProjectionRegion](
+												const FSemanticTerminalDemandDiagnostic& Demand)
+											{
+												return Demand.DemandId
+													== ProjectionRegion.SemanticDemandId;
+											});
+									const int32* FrozenProvinceMain = SemanticDemand != nullptr
+										? PodiumMainCoreCellIdBySupportProvince.Find(
+											SemanticDemand->SupportProvinceId) : nullptr;
+									int32 CandidatePodiumMainCoreCellId =
 										FindBestCoupledPodiumMain(
 											CouplingMinimumX, CouplingMaximumX,
 											CouplingMinimumY, CouplingMaximumY,
 											CouplingXStations, CouplingYStations,
 											CouplingPatches);
+									if (FrozenProvinceMain != nullptr)
+									{
+										CandidatePodiumMainCoreCellId = *FrozenProvinceMain;
+									}
 									if (CouplingPatches <= 0)
 									{
 										++ChildNoDirectMainCouplingCount;

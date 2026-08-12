@@ -2127,3 +2127,37 @@ fresh `TipOverE6OptimizationSeeds` 验证：710000、730000、750000 均有 3 �
 `TipOverE6Seed710000TerminalCoverage` 全部 fresh 通过。该证据仍为 `Physical=NotEvaluated`，没有运行 Chaos、可见 PIE 或
 5×6。下一停点是在 Stage 1 `Core + Shared Rails` 中检查粗主干的高度、收缩位置和与高 main 的相对关系；视觉批准前
 不进入 Stage 2，也不以本静态合同宣称物理稳定。
+
+## 47. Stage 1 冻结：父级身份与两遍安全合同（2026-08-12）
+
+子芯体方形单收缩通过视觉验收后，冻结级 5×6 首轮暴露的并非新的几何无解，而是两个跨遍身份漏洞：同一 support
+province 的 sibling child 会在发射阶段按上段几何最近距离分别重选不同 main；第二遍加入合法 raised-main Body 后，
+最终 child 分界可能高于第一遍批准高度，旧测试却错误要求两者严格相等。另有单收缩 child 仍用 lower trunk 中心验证
+terminal slice，导致 `DropTrigger.E5` 假阴性。
+
+Stage 1 最终冻结合同如下：
+
+1. joint selection 的 `ProvinceCoverageMask` 决定 `SupportProvince -> PodiumMain` 权威父级。main 发射后建立冻结映射，
+   同一省份全部 child 必须消费同一父级；child footprint 搜索不得再次按几何距离改写语义归属；
+2. lower trunk 继续参与接地、bearing、lane/sibling/shared conflict 和候选排序，但 terminal region、父级归属与空间绑定
+   使用 demand-carrying `UpperLocalBounds`；没有收缩时仍使用固定 `LocalBounds`；
+3. 第一遍 `ApprovedMainTop` 是第二遍主芯体可达到的安全上限。第二遍必须满足
+   `FinalMinimumChildSplit >= ApprovedMainTop`；分界升高会露出更多 child trunk，是保守结果，不能误报为失败；
+4. reservation 的 main 身份、正方形、四侧 clearance、最终高度、member 数、摘要计数、bound/influenced/foreign 集合和
+   seat DAG 仍逐项严格闭合。任何主芯体越过最终最低分界、终端越界、需求复用或父级分裂均 fail closed；
+5. 失败诊断发布 bound/influenced 实际值、最终最低 split、main/raised top、member 与 summary 对账，避免只得到
+   “materializes reservation failed”后再盲猜参数。
+
+冻结证据为 UE 5.8 ForceUnity Development Editor 全链接成功；fresh
+`ABTS.M73DAG.BeamC3V3.Staged` 精确 44/44，其中 Stage 1-only 5 Profile × 6 Tier 为 30/30，完成标记和进程退出均为 0，
+日志 `Saved/Logs/BeamC3-Stage1-Freeze-Staged-Final-20260812.log`。Routing/M73A/M73B/M73B2 非未来阶段门 6/6，日志
+`Saved/Logs/BeamC3-Stage1-Freeze-UpstreamGates-20260812.log`。
+
+完整 `ABTS.M73DAG` 的结果为 202/274，日志 `Saved/Logs/BeamC3-Stage1-Freeze-M73DAG-Full-20260812.log`。72 项失败
+主要来自尚未实现的新 Stage 2+ roof/shell/complete-production 路径及旧 Beam-A/B，作为后续负基线保留，不得删除测试、
+放宽预算或用它们否定已明确早停的 Stage 1 合同。当前结论只冻结 DAG/视觉 Stage 1，`Physical=NotEvaluated`，没有运行
+Chaos 或可见 PIE。
+
+Stage 2 可以从该冻结点开始：仅从带稳定 core/demand/course 身份的 Stage 1 member 向外发射可追溯耦合 course，先不
+生成共同外框。每个新构件必须记录源 core、源 course、目标 WFC 外立面、输入/输出 Hash；无法回溯到 Stage 1 骨架的
+构件失败关闭。下一视觉停点只验收“芯体到外框耦合点”的因果路径，仍不进入 Chaos。
