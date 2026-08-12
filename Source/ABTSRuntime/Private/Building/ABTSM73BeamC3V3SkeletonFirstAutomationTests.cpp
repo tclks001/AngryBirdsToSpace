@@ -3136,7 +3136,9 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 		: Plan.LocalPodiumHeightRegions)
 	{
 		bLocalPodiumCandidatesClose &= !Region.ProvinceIds.IsEmpty()
-			&& Region.SelectedTopCourse >= Region.ActualPodiumTopCourse;
+			&& Region.SelectedTopCourse >= Region.ActualPodiumTopCourse
+			&& Region.bAppliedToProductionCoreHierarchy
+			&& !Region.AppliedTowerChildCoreCellIds.IsEmpty();
 		for (const int32 ProvinceId : Region.ProvinceIds)
 		{
 			const ABTSM73BeamC3V3::FSupportProvinceDiagnostic* Province =
@@ -3165,6 +3167,38 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 					});
 		}
 	}
+	bLocalPodiumCandidatesClose &= Algo::AllOf(Plan.CoreCells,
+		[&Plan](const ABTSM73BeamC3V3::FCoreCellPlan& Core)
+		{
+			if (Core.HierarchyRole
+				!= ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild)
+			{
+				return Core.LocalPodiumHeightRegionId == INDEX_NONE
+					&& Core.LocalPodiumTopCourseIndex == 0;
+			}
+			const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic* Region =
+				Plan.LocalPodiumHeightRegions.FindByPredicate(
+					[&Core](const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Entry)
+					{
+						return Entry.RegionId == Core.LocalPodiumHeightRegionId;
+					});
+			return Region != nullptr
+				&& Region->AppliedTowerChildCoreCellIds.Contains(Core.CoreCellId)
+				&& Region->StructuralPodiumMainCoreCellId
+					== Core.PodiumMainCoreCellId
+				&& Core.LocalPodiumTopCourseIndex == Region->SelectedTopCourse
+				&& Core.LocalPodiumTopCourseIndex <= Core.TopCourseIndex - 2
+				&& Core.LocalPodiumLegMemberIndices.Num()
+					== Core.LocalPodiumTopCourseIndex * Core.RailCount
+				&& Algo::AllOf(Core.LocalPodiumLegMemberIndices,
+					[&Plan, &Core](const int32 MemberIndex)
+					{
+						return Plan.Members.IsValidIndex(MemberIndex)
+							&& Core.MemberIndices.Contains(MemberIndex)
+							&& Plan.Members[MemberIndex].CourseIndex
+								< Core.LocalPodiumTopCourseIndex;
+					});
+		});
 	bLocalPodiumCandidatesClose &= Algo::AllOf(
 		Plan.LocalPodiumHeightCandidates,
 		[](const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate)
@@ -3182,7 +3216,7 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 					&& Candidate.bLeavesTwoChildCourses
 					&& Candidate.bProtectedVoidClear);
 		});
-	Check(TEXT("publishes a complete read-only local podium height plan"),
+	Check(TEXT("publishes a complete local podium height selection plan"),
 		Plan.Summary.LocalPodiumHeightCandidateCount
 			== Plan.LocalPodiumHeightCandidates.Num()
 			&& Plan.Summary.LocalPodiumHeightRegionCount
@@ -3196,15 +3230,24 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 				: Plan.LocalPodiumHeightRegions.IsEmpty()
 					&& Plan.LocalPodiumHeightCandidates.IsEmpty())
 			&& bLocalPodiumCandidatesClose);
+	Check(TEXT("applies every selected local podium region to production core legs"),
+		bHasTowerChildDemands
+			? Plan.Summary.AppliedLocalPodiumHeightRegionCount
+					== Plan.Summary.LocalPodiumHeightRegionCount
+				&& Plan.Summary.LocalPodiumLegMemberCount > 0
+			: Plan.Summary.AppliedLocalPodiumHeightRegionCount == 0
+				&& Plan.Summary.LocalPodiumLegMemberCount == 0);
 	for (const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region
 		: Plan.LocalPodiumHeightRegions)
 	{
 		AddInfo(FString::Printf(
-			TEXT("Stage1LocalPodiumRegion:%s:Region=%d:Component=%d:StructuralMain=%d:Actual=%d:Selected=%d:Raised=%d:Provinces=%s"),
+			TEXT("Stage1LocalPodiumRegion:%s:Region=%d:Component=%d:StructuralMain=%d:Actual=%d:Selected=%d:Raised=%d:Applied=%d:Children=%s:Provinces=%s"),
 			*Prefix, Region.RegionId, Region.ComponentId,
 			Region.StructuralPodiumMainCoreCellId,
 			Region.ActualPodiumTopCourse, Region.SelectedTopCourse,
 			Region.bRaisesActualPodium ? 1 : 0,
+			Region.bAppliedToProductionCoreHierarchy ? 1 : 0,
+			*JoinIds(Region.AppliedTowerChildCoreCellIds),
 			*JoinIds(Region.ProvinceIds)));
 	}
 	for (const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate
@@ -4278,7 +4321,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			}
 		}
 		AddInfo(FString::Printf(
-			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:LocalPodiumCandidates=%d:RejectedLocalPodiumCandidates=%d:LocalPodiumRegions=%d:RaisedLocalPodiumRegions=%d:LocalPodiumHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
+			TEXT("TipOverE6Optimization:Seed=%d:Main=%d:Children=%d:Required=%d:Bound=%d:LoadBranches=%d:MultiBranchBodies=%d:UnrepresentedBranches=%d:SemanticDemands=%d:DemandCoreRows=%d:Unmapped=%d:Ambiguous=%d:OutsideBody=%d:NoDirectMain=%d:ReusedChildren=%d:OrphanChildren=%d:DemandCoreHash=%lld:LocalPodiumCandidates=%d:RejectedLocalPodiumCandidates=%d:LocalPodiumRegions=%d:RaisedLocalPodiumRegions=%d:AppliedLocalPodiumRegions=%d:LocalPodiumLegMembers=%d:LocalPodiumHash=%lld:GeometryHash=%lld:TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
 			Seed, Plan.Summary.PodiumMainCoreCellCount,
 			Plan.Summary.TowerChildCoreCellCount,
 			Plan.Summary.RequiredTerminalBranchCount,
@@ -4299,6 +4342,8 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			Plan.Summary.RejectedLocalPodiumHeightCandidateCount,
 			Plan.Summary.LocalPodiumHeightRegionCount,
 			Plan.Summary.RaisedLocalPodiumHeightRegionCount,
+			Plan.Summary.AppliedLocalPodiumHeightRegionCount,
+			Plan.Summary.LocalPodiumLegMemberCount,
 			Plan.Summary.LocalPodiumHeightPlanHash,
 			Plan.Summary.FinalGeometryHash,
 			Plan.Summary.TerminalDemandMilliseconds,
@@ -4312,11 +4357,13 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			: Plan.LocalPodiumHeightRegions)
 		{
 			AddInfo(FString::Printf(
-				TEXT("TipOverE6LocalPodiumRegion:Seed=%d:Region=%d:Component=%d:StructuralMain=%d:Actual=%d:Selected=%d:Raised=%d:Provinces=%s"),
+				TEXT("TipOverE6LocalPodiumRegion:Seed=%d:Region=%d:Component=%d:StructuralMain=%d:Actual=%d:Selected=%d:Raised=%d:Applied=%d:Children=%s:Provinces=%s"),
 				Seed, Region.RegionId, Region.ComponentId,
 				Region.StructuralPodiumMainCoreCellId,
 				Region.ActualPodiumTopCourse, Region.SelectedTopCourse,
 				Region.bRaisesActualPodium ? 1 : 0,
+				Region.bAppliedToProductionCoreHierarchy ? 1 : 0,
+				*JoinIds(Region.AppliedTowerChildCoreCellIds),
 				*JoinIds(Region.ProvinceIds)));
 		}
 		for (const ABTSM73BeamC3V3::FLocalPodiumHeightCandidateDiagnostic& Candidate

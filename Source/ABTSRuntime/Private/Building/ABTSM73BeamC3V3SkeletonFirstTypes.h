@@ -603,8 +603,10 @@ namespace ABTSM73BeamC3V3
 	};
 
 	/** A connected set of adjacent provinces which selected the same highest
-	 * legal common semantic separation course.  It is a read-only Stage-1
-	 * proposal and does not alter PodiumMain or emitted member geometry. */
+	 * legal common semantic separation course.  Once applied, every bound
+	 * TowerChild consumes this height as the boundary between its lower
+	 * PodiumMain leg and its upper child-only courses.  Stage 2 remains the
+	 * authority which emits physical cross-leg coupling courses. */
 	struct FLocalPodiumHeightRegionDiagnostic
 	{
 		int32 RegionId = INDEX_NONE;
@@ -613,8 +615,11 @@ namespace ABTSM73BeamC3V3
 		int32 ActualPodiumTopCourse = 0;
 		int32 SelectedTopCourse = 0;
 		TArray<int32> ProvinceIds;
+		/** Production TowerChild cells whose lower courses consume this region. */
+		TArray<int32> AppliedTowerChildCoreCellIds;
 		FBox GroundBounds = FBox(EForceInit::ForceInit);
 		bool bRaisesActualPodium = false;
+		bool bAppliedToProductionCoreHierarchy = false;
 	};
 
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
@@ -635,6 +640,13 @@ namespace ABTSM73BeamC3V3
 		bool bNegativeSharedEndpoint = false;
 		/** Semantic lineage only; never interpreted as a suspended bearing seat. */
 		int32 PodiumMainCoreCellId = INDEX_NONE;
+		/** TowerChild only: the selected local podium region consumed by this
+		 * independently grounded cell. */
+		int32 LocalPodiumHeightRegionId = INDEX_NONE;
+		/** TowerChild only: courses below this exclusive boundary are the physical
+		 * legs of the owning local PodiumMain; courses at/above it remain child-only.
+		 * This changes production ownership, not bearing or Stage-2 coupling. */
+		int32 LocalPodiumTopCourseIndex = 0;
 		/** Exclusive upper course; members occupy [0, TopCourseIndex). */
 		int32 TopCourseIndex = 0;
 		/** Exclusive Body-only source range for this footprint. Courses at and
@@ -653,6 +665,10 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> YStations;
 		/** Complete ordered course membership, RailCount rails per course. */
 		TArray<int32> MemberIndices;
+		/** TowerChild only: exact physical slots below LocalPodiumTopCourseIndex.
+		 * These members remain ground-rooted child geometry, but are the production
+		 * legs consumed by the owning local PodiumMain hierarchy. */
+		TArray<int32> LocalPodiumLegMemberIndices;
 	};
 
 	/** A positive-area top/bottom witness which roots an upper semantic volume. */
@@ -766,6 +782,8 @@ namespace ABTSM73BeamC3V3
 		int32 RejectedLocalPodiumHeightCandidateCount = 0;
 		int32 LocalPodiumHeightRegionCount = 0;
 		int32 RaisedLocalPodiumHeightRegionCount = 0;
+		int32 AppliedLocalPodiumHeightRegionCount = 0;
+		int32 LocalPodiumLegMemberCount = 0;
 		int32 CoreMergeRegionCount = 0;
 		int32 MergedGroundComponentCount = 0;
 		int32 MaximumCoreRailCount = 0;
@@ -840,7 +858,8 @@ namespace ABTSM73BeamC3V3
 		int64 SupportProvinceHash = 0;
 		/** Selected grounded-core assignment for every support province. */
 		int64 SupportProvinceMainBindingHash = 0;
-		/** Read-only local podium height proposal; excluded from geometry hashes. */
+		/** Deterministic local podium selection identity.  The selected boundary is
+		 * also consumed by the production core hierarchy and CorePlanHash. */
 		int64 LocalPodiumHeightPlanHash = 0;
 		int64 FinalGeometryHash = 0;
 		FString RejectReason;

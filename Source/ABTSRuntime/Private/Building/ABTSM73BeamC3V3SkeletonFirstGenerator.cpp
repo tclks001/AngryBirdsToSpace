@@ -2221,6 +2221,8 @@ namespace
 		Plan.Summary.RejectedLocalPodiumHeightCandidateCount = 0;
 		Plan.Summary.LocalPodiumHeightRegionCount = 0;
 		Plan.Summary.RaisedLocalPodiumHeightRegionCount = 0;
+		Plan.Summary.AppliedLocalPodiumHeightRegionCount = 0;
+		Plan.Summary.LocalPodiumLegMemberCount = 0;
 		Plan.Summary.LocalPodiumHeightPlanHash = 0;
 		if (Plan.SupportProvinces.IsEmpty())
 		{
@@ -3239,6 +3241,187 @@ namespace
 			&& Plan.Summary.LocalPodiumHeightCandidateCount
 				>= Plan.Summary.SupportProvinceCount
 			&& Plan.Summary.LocalPodiumHeightPlanHash != 0;
+	}
+
+	bool ApplyLocalPodiumHeightPlanToCoreHierarchy(FPlan& Plan, FString& OutError)
+	{
+		Plan.Summary.AppliedLocalPodiumHeightRegionCount = 0;
+		Plan.Summary.LocalPodiumLegMemberCount = 0;
+		const bool bHasTowerChild = Plan.CoreCells.ContainsByPredicate(
+			[](const FCoreCellPlan& Core)
+			{
+				return Core.HierarchyRole == ECoreHierarchyRole::TowerChild;
+			});
+		if (!bHasTowerChild)
+		{
+			if (!Plan.LocalPodiumHeightRegions.IsEmpty())
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyUnexpectedRegionsWithoutChildren:Regions=%d"),
+					Plan.LocalPodiumHeightRegions.Num());
+				return false;
+			}
+			return true;
+		}
+		if (Plan.LocalPodiumHeightRegions.IsEmpty())
+		{
+			OutError = TEXT("BeamC3V3LocalPodiumApplyMissingRegionsForChildren");
+			return false;
+		}
+		TMap<int32, int32> RegionIdByProvinceId;
+		for (FLocalPodiumHeightRegionDiagnostic& Region
+			: Plan.LocalPodiumHeightRegions)
+		{
+			Region.AppliedTowerChildCoreCellIds.Reset();
+			Region.bAppliedToProductionCoreHierarchy = false;
+			if (!Plan.CoreCells.IsValidIndex(
+				Region.StructuralPodiumMainCoreCellId))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyMainInvalid:Region=%d:Main=%d"),
+					Region.RegionId, Region.StructuralPodiumMainCoreCellId);
+				return false;
+			}
+			const FCoreCellPlan& Main =
+				Plan.CoreCells[Region.StructuralPodiumMainCoreCellId];
+			if (Main.HierarchyRole != ECoreHierarchyRole::PodiumMain
+				|| Main.ComponentId != Region.ComponentId
+				|| Main.TopCourseIndex != Region.ActualPodiumTopCourse
+				|| Region.SelectedTopCourse < Region.ActualPodiumTopCourse)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyMainMismatch:Region=%d:Component=%d:Main=%d:Role=%d:MainComponent=%d:Actual=%d:MainTop=%d:Selected=%d"),
+					Region.RegionId, Region.ComponentId,
+					Region.StructuralPodiumMainCoreCellId,
+					static_cast<int32>(Main.HierarchyRole), Main.ComponentId,
+					Region.ActualPodiumTopCourse, Main.TopCourseIndex,
+					Region.SelectedTopCourse);
+				return false;
+			}
+			for (const int32 ProvinceId : Region.ProvinceIds)
+			{
+				if (RegionIdByProvinceId.Contains(ProvinceId))
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3LocalPodiumApplyProvinceReused:Province=%d:FirstRegion=%d:SecondRegion=%d"),
+						ProvinceId, RegionIdByProvinceId.FindChecked(ProvinceId),
+						Region.RegionId);
+					return false;
+				}
+				RegionIdByProvinceId.Add(ProvinceId, Region.RegionId);
+			}
+		}
+
+		int32 AppliedChildCount = 0;
+		for (FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			Core.LocalPodiumHeightRegionId = INDEX_NONE;
+			Core.LocalPodiumTopCourseIndex = 0;
+			Core.LocalPodiumLegMemberIndices.Reset();
+			if (Core.HierarchyRole != ECoreHierarchyRole::TowerChild)
+			{
+				continue;
+			}
+			const FSemanticTerminalDemandDiagnostic* Demand =
+				Plan.SemanticTerminalDemands.FindByPredicate(
+					[&Core](const FSemanticTerminalDemandDiagnostic& Candidate)
+					{
+						return Candidate.DemandId == Core.SemanticDemandId;
+					});
+			if (Demand == nullptr || Demand->SupportProvinceId == INDEX_NONE
+				|| !RegionIdByProvinceId.Contains(Demand->SupportProvinceId))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyRegionUnavailable:Child=%d:Demand=%d:Province=%d"),
+					Core.CoreCellId, Core.SemanticDemandId,
+					Demand != nullptr ? Demand->SupportProvinceId : INDEX_NONE);
+				return false;
+			}
+			const int32 RegionId =
+				RegionIdByProvinceId.FindChecked(Demand->SupportProvinceId);
+			FLocalPodiumHeightRegionDiagnostic* Region =
+				Plan.LocalPodiumHeightRegions.FindByPredicate(
+					[RegionId](const FLocalPodiumHeightRegionDiagnostic& Candidate)
+					{
+						return Candidate.RegionId == RegionId;
+					});
+			if (Region == nullptr
+				|| Core.ComponentId != Region->ComponentId
+				|| Core.PodiumMainCoreCellId
+					!= Region->StructuralPodiumMainCoreCellId
+				|| Region->SelectedTopCourse > Core.TopCourseIndex - 2)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyChildMismatch:Child=%d:Demand=%d:Province=%d:Region=%d:ChildComponent=%d:RegionComponent=%d:ChildMain=%d:RegionMain=%d:ChildTop=%d:Selected=%d"),
+					Core.CoreCellId, Core.SemanticDemandId,
+					Demand->SupportProvinceId, RegionId, Core.ComponentId,
+					Region != nullptr ? Region->ComponentId : INDEX_NONE,
+					Core.PodiumMainCoreCellId,
+					Region != nullptr
+						? Region->StructuralPodiumMainCoreCellId : INDEX_NONE,
+					Core.TopCourseIndex,
+					Region != nullptr ? Region->SelectedTopCourse : INDEX_NONE);
+				return false;
+			}
+			Core.LocalPodiumHeightRegionId = RegionId;
+			Core.LocalPodiumTopCourseIndex = Region->SelectedTopCourse;
+			for (const int32 MemberIndex : Core.MemberIndices)
+			{
+				if (!Plan.Members.IsValidIndex(MemberIndex))
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3LocalPodiumApplyMemberInvalid:Child=%d:Member=%d"),
+						Core.CoreCellId, MemberIndex);
+					return false;
+				}
+				const FPlannedMember& Member = Plan.Members[MemberIndex];
+				if (Member.CourseIndex < Core.LocalPodiumTopCourseIndex)
+				{
+					Core.LocalPodiumLegMemberIndices.Add(MemberIndex);
+				}
+			}
+			if (Core.LocalPodiumLegMemberIndices.Num()
+					!= Core.LocalPodiumTopCourseIndex * Core.RailCount)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyLegSlotMismatch:Child=%d:Region=%d:Top=%d:Rails=%d:Expected=%d:Actual=%d"),
+					Core.CoreCellId, RegionId, Core.LocalPodiumTopCourseIndex,
+					Core.RailCount,
+					Core.LocalPodiumTopCourseIndex * Core.RailCount,
+					Core.LocalPodiumLegMemberIndices.Num());
+				return false;
+			}
+			Region->AppliedTowerChildCoreCellIds.Add(Core.CoreCellId);
+			Plan.Summary.LocalPodiumLegMemberCount +=
+				Core.LocalPodiumLegMemberIndices.Num();
+			++AppliedChildCount;
+		}
+
+		for (FLocalPodiumHeightRegionDiagnostic& Region
+			: Plan.LocalPodiumHeightRegions)
+		{
+			Region.AppliedTowerChildCoreCellIds.Sort();
+			Region.bAppliedToProductionCoreHierarchy =
+				!Region.AppliedTowerChildCoreCellIds.IsEmpty();
+			if (!Region.bAppliedToProductionCoreHierarchy)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3LocalPodiumApplyRegionHasNoChild:Region=%d:Provinces=%d"),
+					Region.RegionId, Region.ProvinceIds.Num());
+				return false;
+			}
+			++Plan.Summary.AppliedLocalPodiumHeightRegionCount;
+		}
+		int32 TowerChildCount = 0;
+		for (const FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			TowerChildCount += Core.HierarchyRole
+				== ECoreHierarchyRole::TowerChild ? 1 : 0;
+		}
+		return AppliedChildCount == TowerChildCount
+			&& Plan.Summary.AppliedLocalPodiumHeightRegionCount
+				== Plan.Summary.LocalPodiumHeightRegionCount
+			&& Plan.Summary.LocalPodiumLegMemberCount > 0;
 	}
 
 	double CellFaceAtOrAbove(const double Value)
@@ -17466,6 +17649,10 @@ namespace
 			{
 				return false;
 			}
+			if (!ApplyLocalPodiumHeightPlanToCoreHierarchy(OutPlan, OutError))
+			{
+				return false;
+			}
 			if (!BuildPodiumCoreCoverageDiagnostics(OutPlan, OutError))
 			{
 				return false;
@@ -17746,11 +17933,13 @@ namespace
 			for (const FCoreCellPlan& Core : OutPlan.CoreCells)
 			{
 				CoreCanonical += FString::Printf(
-					TEXT("|CORE:%d:C=%d:R=%d:M=%d:S=%d:H=%d:HP=%d:P=%d:T=%d:BT=%d:G=%d:XB=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
+					TEXT("|CORE:%d:C=%d:R=%d:M=%d:S=%d:H=%d:HP=%d:P=%d:LP=%d@%d:T=%d:BT=%d:G=%d:XB=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
 					Core.CoreCellId, Core.ComponentId, Core.RailCount,
 					Core.CoreMergeRegionId, Core.BodySourceVolumeId,
 					static_cast<int32>(Core.HierarchyRole),
 					Core.HighProjectionRegionId, Core.PodiumMainCoreCellId,
+					Core.LocalPodiumHeightRegionId,
+					Core.LocalPodiumTopCourseIndex,
 					Core.TopCourseIndex,
 					Core.BodyTopCourseIndex, Core.CompositeCoreGroupId,
 					Core.CrossCoreBearingContactCount,
@@ -17764,6 +17953,10 @@ namespace
 				for (const int32 Station : Core.YStations)
 				{
 					CoreCanonical += FString::Printf(TEXT(":Y%d"), Station);
+				}
+				for (const int32 MemberIndex : Core.LocalPodiumLegMemberIndices)
+				{
+					CoreCanonical += FString::Printf(TEXT(":LM%d"), MemberIndex);
 				}
 			}
 			for (const FSharedCourseIntent& Intent : OutPlan.SharedCourseIntents)
@@ -18318,10 +18511,12 @@ namespace
 		for (const FCoreCellPlan& Core : OutPlan.CoreCells)
 		{
 			CoreCanonical += FString::Printf(
-				TEXT("|CORE:%d:C=%d:S=%d:H=%d:HP=%d:P=%d:T=%d:BT=%d:G=%d:XB=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
+				TEXT("|CORE:%d:C=%d:S=%d:H=%d:HP=%d:P=%d:LP=%d@%d:T=%d:BT=%d:G=%d:XB=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
 				Core.CoreCellId, Core.ComponentId, Core.BodySourceVolumeId,
 				static_cast<int32>(Core.HierarchyRole),
 				Core.HighProjectionRegionId, Core.PodiumMainCoreCellId,
+				Core.LocalPodiumHeightRegionId,
+				Core.LocalPodiumTopCourseIndex,
 				Core.TopCourseIndex,
 				Core.BodyTopCourseIndex, Core.CompositeCoreGroupId,
 				Core.CrossCoreBearingContactCount,
@@ -18335,6 +18530,10 @@ namespace
 			for (const int32 Station : Core.YStations)
 			{
 				CoreCanonical += FString::Printf(TEXT(":Y%d"), Station);
+			}
+			for (const int32 MemberIndex : Core.LocalPodiumLegMemberIndices)
+			{
+				CoreCanonical += FString::Printf(TEXT(":LM%d"), MemberIndex);
 			}
 		}
 		for (const FPlannedMember& Member : OutPlan.Members)

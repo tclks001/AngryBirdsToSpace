@@ -1993,3 +1993,35 @@ fresh `TipOverE6OptimizationSeeds` 的目标中部结构 main 结果：
 本停点不运行 5×6：第 11 层仍是只读生产候选，应先由用户确认三种子局部顶面和水平 seam bridge 是否符合造型。
 视觉批准后，下一步才把逐区域高度作为输入重建局部 CoupledGround/PodiumMain，并重新验证 SupportedSpan、Crown、
 ProtectedVoid、全高 TowerChild、720 cm 与预算合同；任何一项不成立都必须失败关闭。
+
+## 44. 局部主芯体高度生产分界（2026-08-12）
+
+第 43 节的第 11 诊断层已经通过用户视觉验收。生产落实不能把原有宽矩形 `PodiumMain` 整体拉到候选高度：WFC 在
+真实分隔面以上已收缩成多根独立塔身，宽矩形继续上升会穿出 Body/Crown 包络。也不能立即生成跨省份水平积木，因为
+该构件属于尚未视觉冻结的 Stage 2 `CouplingCourses`。本轮因此把批准高度落实为 Stage 1 生产芯体层级中的明确分界：
+
+1. 每个 `TowerChild` 通过 `SemanticDemandId -> SupportProvinceId -> LocalPodiumHeightRegionId` 唯一消费一个已选区域；
+2. 该区域的 `SelectedTopCourse` 写入 child 的 `LocalPodiumTopCourseIndex`。从接地 course 0 到该 exclusive course 的
+   真实 `CoreCourse` 全部登记为 `LocalPodiumLegMemberIndices`，是结构 main 在该省份内的物理支腿；
+3. 分界以上的同一接地芯体仍是 child-only 段。整个芯体继续保持独立接地、固定 footprint、逐层 X/Y 交错和全高
+   demand 绑定；本轮不拆 member、不伪造 suspended bearing，也不改变 WFC；
+4. 每个 region 必须至少消费一个 child，每个 child 恰好消费一个 region，支腿槽数必须精确等于
+   `LocalPodiumTopCourseIndex * RailCount`，且最上方仍须保留至少两个 child course；任何缺失、复用、父 main/组件不一致、
+   member 槽不闭合都 fail closed；
+5. `CorePlanHash / FinalGeometryHash` 纳入 region、分界 course 和精确 leg member 身份。第 2 层 `Core Placement / Pairing
+   Intent` 将 child box 在分界处分成 main-leg 与 child-only 两段；第 3 层 `Core + Shared Rails` 对真实 member 使用相同
+   配色边界。颜色只展示生产身份，承重仍由原静态 member DAG 证明；
+6. region 间的实际跨域 course 仍为 Stage 2 唯一职责。第 11 层的水平 seam 继续是其确定性输入，不得提前冒充已生成
+   bridge。这样 Stage 2 可以直接从 `LocalPodiumLegMemberIndices` 的顶部槽向外延伸，而不必从高度或颜色反推。
+
+fresh `TipOverE6OptimizationSeeds` 验证 710000/730000/750000 的中部计划仍为 course `92/92/89`，分别绑定 children
+`3,4,5`、`3,4`、`4,5`。全部 region 均 applied，精确生产 leg member 数分别为 `1012/852/944`；Demand、HighRegion、
+TowerChild 双射异常仍为零，Static DAG Accepted，单叶均低于 10 秒门。ForceUnity Development Editor 全链接成功，
+fresh Preview 诊断合同通过。证据日志为：
+
+- `Saved/Logs/BeamC3-LocalPodium-ProductionLegs-Final-TipOverSeeds-20260812.log`；
+- `Saved/Logs/BeamC3-LocalPodium-ProductionLegs-Final-PreviewContract-20260812.log`；
+- `Saved/Logs/BeamC3-LocalPodium-ProductionLegs-Final-E6Representatives-20260812.log`（ColumnBreak/DropTrigger E6 2/2）。
+
+本节仍为 `Physical=NotEvaluated`，没有运行 Chaos、可见 PIE、Stage 2 或 5×6。下一停点是用户在第 2/3 层确认
+主芯体支腿到子芯体段的高度分界；通过后再开始从该分界发射 Stage 2 外伸耦合点。

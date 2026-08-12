@@ -1256,10 +1256,32 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
 			for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
 			{
-				UHierarchicalInstancedStaticMeshComponent* IntentPreview =
-					Core.HierarchyRole == ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
-						? TowerChildIntentPreview.Get() : CoreIntentPreview.Get();
-				ABTSM73BeamD1Preview::AddBoxInstance(IntentPreview, Core.LocalBounds);
+				if (Core.HierarchyRole
+						== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+					&& Core.LocalPodiumHeightRegionId != INDEX_NONE
+					&& Core.LocalPodiumTopCourseIndex > 0
+					&& Plan.Components.IsValidIndex(Core.ComponentId))
+				{
+					const double SplitZ = Plan.Components[Core.ComponentId].GroundPlaneZCM
+						+ Core.LocalPodiumTopCourseIndex * 36.0;
+					FBox MainLegBounds = Core.LocalBounds;
+					FBox ChildOnlyBounds = Core.LocalBounds;
+					MainLegBounds.Max.Z = SplitZ;
+					ChildOnlyBounds.Min.Z = SplitZ;
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						CoreIntentPreview, MainLegBounds);
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						TowerChildIntentPreview, ChildOnlyBounds);
+				}
+				else
+				{
+					UHierarchicalInstancedStaticMeshComponent* IntentPreview =
+						Core.HierarchyRole
+							== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+								? TowerChildIntentPreview.Get() : CoreIntentPreview.Get();
+					ABTSM73BeamD1Preview::AddBoxInstance(
+						IntentPreview, Core.LocalBounds);
+				}
 			}
 			for (const ABTSM73BeamC3V3::FSharedCourseIntent& Intent :
 				Plan.SharedCourseIntents)
@@ -1328,14 +1350,18 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				Dimensions[static_cast<int32>(Member.Axis)] =
 					FVector::Distance(Member.LocalStart, Member.LocalEnd);
 				UHierarchicalInstancedStaticMeshComponent* Preview = nullptr;
+				const ABTSM73BeamC3V3::FCoreCellPlan* OriginCore =
+					Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId)
+						? &Plan.CoreCells[Member.OriginCoreCellId] : nullptr;
+				const bool bChildOnlyCourse = OriginCore != nullptr
+					&& OriginCore->HierarchyRole
+						== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+					&& (OriginCore->LocalPodiumHeightRegionId == INDEX_NONE
+						|| Member.CourseIndex
+							>= OriginCore->LocalPodiumTopCourseIndex);
 				if (bXOnly || bYOnly)
 				{
-					const ABTSM73BeamC3V3::FCoreCellPlan* OriginCore =
-						Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId)
-							? &Plan.CoreCells[Member.OriginCoreCellId] : nullptr;
-					Preview = OriginCore != nullptr
-						&& OriginCore->HierarchyRole
-							== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+					Preview = bChildOnlyCourse
 						? StonePreview.Get() : WoodPreview.Get();
 				}
 				else
@@ -1345,7 +1371,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 						? IronPreview.Get()
 						: Member.SkeletonKind
 							== ABTSM73BeamC3V3::ESkeletonMemberKind::BridgeDiaphragm
-							? StonePreview.Get() : WoodPreview.Get();
+							? StonePreview.Get()
+							: bChildOnlyCourse ? StonePreview.Get() : WoodPreview.Get();
 				}
 				Preview->AddInstance(FTransform(
 					FQuat::Identity, Center, Dimensions / 100.0), false);
@@ -1372,7 +1399,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" Volumes=%d SupportNodes=%d LoadBranches=%d MultiBranchBodies=%d UnrepresentedBranches=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 			TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
-			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d LocalPodiumHash=%lld")
+			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d AppliedLocalPodiumRegions=%d LocalPodiumLegMembers=%d LocalPodiumHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
@@ -1408,6 +1435,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				.RejectedLocalPodiumHeightCandidateCount,
 			StageResult.Skeleton.Plan.Summary.LocalPodiumHeightRegionCount,
 			StageResult.Skeleton.Plan.Summary.RaisedLocalPodiumHeightRegionCount,
+			StageResult.Skeleton.Plan.Summary.AppliedLocalPodiumHeightRegionCount,
+			StageResult.Skeleton.Plan.Summary.LocalPodiumLegMemberCount,
 			StageResult.Skeleton.Plan.Summary.LocalPodiumHeightPlanHash,
 			StageResult.Skeleton.Plan.CoreCells.Num(),
 			StageResult.Skeleton.Plan.Summary.PodiumMainCoreCellCount,
