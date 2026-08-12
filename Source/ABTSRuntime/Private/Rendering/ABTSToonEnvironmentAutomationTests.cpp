@@ -4,6 +4,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSToonEnvironmentTypes.h"
 #include "Rendering/ABTSToonVisualCaptureTypes.h"
 
@@ -241,6 +242,12 @@ bool FABTSToonT4A1EnvironmentControlTest::RunTest(const FString& Parameters)
 			500000.0,
 			FVector(10.0, 0.0, 0.0),
 			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentParameters Satellite =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(100.0, 200.0, -300.0),
+			500000.0,
+			FVector(10.0, 0.0, 0.0),
+			EABTSStylizedRenderProfile::SatelliteGuide);
 	const FABTSStylizedEnvironmentParameters Finale =
 		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 			FVector(100.0, 200.0, -300.0),
@@ -248,6 +255,7 @@ bool FABTSToonT4A1EnvironmentControlTest::RunTest(const FString& Parameters)
 			FVector(10.0, 0.0, 0.0),
 			EABTSStylizedRenderProfile::FinaleSpace);
 	TestTrue(TEXT("Ground parameters validate"), Ground.IsValid());
+	TestTrue(TEXT("Satellite parameters validate"), Satellite.IsValid());
 	TestTrue(TEXT("Finale parameters validate"), Finale.IsValid());
 	TestEqual(
 		TEXT("The art-directed star field seed is profile-independent"),
@@ -256,6 +264,15 @@ bool FABTSToonT4A1EnvironmentControlTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Finale stars are intentionally stronger"),
 		Finale.StarHDRIntensity > Ground.StarHDRIntensity);
+	TestTrue(
+		TEXT("Ground stars retain a stable pixel footprint at 1080p"),
+		Ground.StarAngularRadiusScale >= 0.120f);
+	TestTrue(
+		TEXT("Ground stars remain readable after SDR tone mapping"),
+		Ground.StarHDRIntensity >= 2.6f);
+	TestTrue(
+		TEXT("Satellite stars remain stronger than the ground field"),
+		Satellite.StarHDRIntensity > Ground.StarHDRIntensity);
 	TestTrue(
 		TEXT("Atmosphere height derives from the accepted radius"),
 		FMath::IsNearlyEqual(Ground.AtmosphereHeightCM, 300000.0f));
@@ -321,6 +338,36 @@ bool FABTSToonT4A31HighAltitudeTransitionContractTest::RunTest(
 	TestEqual(TEXT("Practice-satellite altitude is fully space"),
 		FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
 			0.55f * Ground.PlanetRadiusCM, Start, End), 1.0f);
+	const float TerminatorSunward =
+		FABTSStylizedRenderingControl::ComputeGroundStarNightFactor(0.0f, 1.0f);
+	const float TerminatorAntiSunward =
+		FABTSStylizedRenderingControl::ComputeGroundStarNightFactor(0.0f, -1.0f);
+	TestTrue(TEXT("Terminator sunward sky suppresses stars"),
+		TerminatorSunward < 0.20f);
+	TestTrue(TEXT("Terminator anti-sunward sky reveals stars"),
+		TerminatorAntiSunward > 0.80f);
+	TestTrue(TEXT("Terminator direction ordering is physically coherent"),
+		TerminatorAntiSunward > TerminatorSunward + 0.60f);
+	const float HorizontalSkyVisibility =
+		FABTSStylizedRenderingControl::ComputeGroundStarHorizonVisibility(0.0f);
+	TestTrue(TEXT("A horizontal sky ray retains readable star visibility"),
+		HorizontalSkyVisibility > 0.55f);
+	TestTrue(TEXT("Sunward horizontal twilight remains star-suppressed"),
+		TerminatorSunward * HorizontalSkyVisibility < 0.12f);
+	TestTrue(TEXT("Anti-sunward horizontal twilight remains star-readable"),
+		TerminatorAntiSunward * HorizontalSkyVisibility > 0.45f);
+	TestEqual(TEXT("Below-ground sky rays are rejected"),
+		FABTSStylizedRenderingControl::ComputeGroundStarHorizonVisibility(-0.10f),
+		0.0f);
+	TestEqual(TEXT("Clearly upward sky rays are fully visible"),
+		FABTSStylizedRenderingControl::ComputeGroundStarHorizonVisibility(0.08f),
+		1.0f);
+	TestTrue(TEXT("Deep day remains star-free even when looking anti-sunward"),
+		FABTSStylizedRenderingControl::ComputeGroundStarNightFactor(0.90f, -1.0f)
+			< 0.01f);
+	TestTrue(TEXT("Deep night retains stars even when looking sunward"),
+		FABTSStylizedRenderingControl::ComputeGroundStarNightFactor(-0.90f, 1.0f)
+			> 0.99f);
 	float Previous = 0.0f;
 	for (int32 Step = 0; Step <= 32; ++Step)
 	{
@@ -362,6 +409,65 @@ bool FABTSToonT4A31HighAltitudeTransitionContractTest::RunTest(
 			static_cast<int32>(Points[Index].StyleProfile),
 			static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A32EnvironmentProfileAssemblyContractTest,
+	"ABTS.Rendering.Toon.T4A3_2.EnvironmentProfileAssemblyContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A32EnvironmentProfileAssemblyContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSStylizedEnvironmentProfilePolicy Ground =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentProfilePolicy Satellite =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::SatelliteGuide);
+	const FABTSStylizedEnvironmentProfilePolicy Finale =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::FinaleSpace);
+	TestTrue(TEXT("GroundDay formal actor policy validates"), Ground.IsValid());
+	TestTrue(TEXT("SatelliteGuide formal actor policy validates"),
+		Satellite.IsValid());
+	TestTrue(TEXT("FinaleSpace formal actor policy validates"), Finale.IsValid());
+	TestTrue(TEXT("Only GroundDay retains spherical atmosphere and clouds"),
+		Ground.bSkyAtmosphereVisible && Ground.bLowPolyCloudsVisible
+			&& !Satellite.bSkyAtmosphereVisible
+			&& !Satellite.bLowPolyCloudsVisible
+			&& !Finale.bSkyAtmosphereVisible
+			&& !Finale.bLowPolyCloudsVisible);
+	TestTrue(TEXT("Global-Z height fog remains disabled in every profile"),
+		!Ground.bHeightFogVisible
+			&& !Satellite.bHeightFogVisible
+			&& !Finale.bHeightFogVisible);
+	TestEqual(TEXT("Normal world resolves GroundDay"),
+		static_cast<int32>(
+			FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+				false, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestEqual(TEXT("Finale activity has profile precedence"),
+		static_cast<int32>(
+			FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+				true, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("Finale exit returns to configured GroundDay"),
+		static_cast<int32>(
+			FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+				false, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	const FABTSStylizedViewPolicy SatellitePreview =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::SatelliteLandingPreview);
+	TestEqual(TEXT("Satellite preview preserves GroundDay surface profile"),
+		static_cast<int32>(SatellitePreview.Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestEqual(TEXT("Satellite preview consumes SatelliteGuide background"),
+		static_cast<int32>(SatellitePreview.EnvironmentProfile),
+		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
 	return true;
 }
 

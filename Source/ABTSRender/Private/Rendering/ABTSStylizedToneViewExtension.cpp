@@ -16,6 +16,15 @@
 
 namespace ABTSStylizedToneViewExtensionPrivate
 {
+	EABTSStylizedRenderProfile ResolveActiveMainWorldProfileOnAnyThread()
+	{
+		FABTSStylizedEnvironmentParameters Environment;
+		return FABTSStylizedRenderingControl::
+			TryGetEnvironmentParametersOnAnyThread(Environment)
+			? Environment.Profile
+			: FABTSStylizedRenderingControl::GetProfileOnAnyThread();
+	}
+
 	BEGIN_SHADER_PARAMETER_STRUCT(FABTSStylizedOutlinePassParameters, )
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_STRUCT_INCLUDE(FSceneTextureShaderParameters, SceneTextures)
@@ -225,7 +234,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			(void)InViewFamily;
 			ApplyStylizedPostProcessPolicy(
 				InView,
-				FABTSStylizedRenderingControl::GetProfileOnAnyThread());
+				ResolveActiveMainWorldProfileOnAnyThread());
 		}
 
 		virtual void SubscribeToPostProcessingPass(
@@ -246,7 +255,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			const FABTSStylizedViewPolicy ViewPolicy =
 				FABTSStylizedRenderingContract::ResolveViewPolicy(
 					EABTSStylizedViewClass::MainWorld,
-					FABTSStylizedRenderingControl::GetProfileOnAnyThread());
+					ResolveActiveMainWorldProfileOnAnyThread());
 			if (!ViewPolicy.IsValid()
 				|| !FABTSStylizedRenderingContract::IsViewClassImplemented(
 					EABTSStylizedViewClass::MainWorld))
@@ -620,7 +629,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 				bHasEnvironment
 					? ResolveEnvironmentForViewProfile(
 						SharedEnvironment,
-						ViewPolicy.Profile)
+						ViewPolicy.EnvironmentProfile)
 					: FABTSStylizedEnvironmentParameters();
 			if (Pass == EPostProcessingPass::AfterDOF && bHasEnvironment)
 			{

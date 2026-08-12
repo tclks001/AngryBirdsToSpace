@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-12 更新。T4-A0/A1 已完成用户截图与 PIE 验收。**T4-A2.1 云岛形态与表面基线**、**T4-A2.2 全球云场与融合语义**、**T4-A2.3 有界穿云表现**和 **T4-A2.4 消费端与性能冻结**均为 `IntegrationAccepted`。A2.3 最终实现版本 54、材质宏合同 11、manifest schema 12：正式路线永久删除会闪烁的全屏薄云雾幕，保留镜头球、四个实际鸟体可见网格球、镜头—鸟群有限走廊及局部二维噪声清除；v53 修复真实 SM6 Velocity/Depth 排列暴露的 Custom HLSL 向量维度错误，v54 只在 `GroundDay + CloudsEnabled` 禁用 Motion Blur，消除夜面高速移动时亮天空卷入暗云轮廓的青白拖边。原生 `VolumetricCloud`、全屏径向云壳、R0/R1/C2/B3 等均只保留为 A2.1 技术演进记录，不再充当排期编号。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 已冻结 `24 / 10 / 64` 分布，将生产 Seed 下 `284` 朵逻辑云的 `23,856` 个 cloudlet 合批为一个 HISM/一个材质批次，并用 `63` 个逐实例自定义浮点保持每朵云的精确岛场、宏场和颜色身份；1080p/1440p × 50/75/100% SP 共 36 张主视图截图、三档 PIP、Rank11 AVI、fresh Toon 26/26、隔离式 GPU 增量门，以及用户可见 PIE 的快速相机、夜面、穿云和同落点 PIP 对照均已通过。v63 统一地面/月面 PIP 与主视图的表面 Lighting、曝光、Tone 和时域历史，月面仅替换空背景为深空星场。T4-A2 已冻结。**T4-A3.1 高空连续星空过渡**实现版本 64：同一 `GroundDay` Profile 按每个视图相机高度在 `0.22R～0.52R` 连续淡出蓝色大气、增强确定性星场并收窄太阳光晕，`0.55R` 卫星练习高度已完整进入星空；只在行星切线附近保留窄蓝色大气边缘，不切 Gameplay Profile。自动化、真实 D3D12 捕获和用户实际飞行 PIE 均已通过，状态为 `IntegrationAccepted`；T4-A3 其余装配与 T4-B 尚未开始。
+> 状态：2026-08-12 更新。T4-A0/A1 与 T4-A2.1～A2.4 均为 `IntegrationAccepted`，A2 已冻结；历史版本、云场参数和证据保留在第 7 节。**T4-A3.1 高空连续星空过渡**实现版本 64 已通过自动化、真实 D3D12 捕获和实际飞行 PIE。当前进入 **T4-A3.2 三套环境 Profile 正式装配**：实现版本 65 将表面 Tone/Outline Profile 与环境背景 Profile 分离，普通主世界正式消费 `GroundDay`，月面画中画以 `GroundDay` 表面视觉消费 `SatelliteGuide` 深空背景，M11 终局活动期间主世界自动消费 `FinaleSpace` 并在活动结束后回到配置基线。A3.2 代码与自动化完成后仍需可见 PIE；A3.3 M11 环境快照/异常中断恢复和 T4-B 尚未开始。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -27,10 +27,10 @@ T4 不改变：
 | **T4-A0 球面环境合同与诊断** | 主星中心/半径、太阳方向、Profile 的只读快照；五个固定环境截图点；Tone/Outline/Shadow 隔离矩阵 | 不改生产光照、雾云、曝光和最终参数 | ForceUnity；`ABTS.Rendering.Toon.T4A0`；30 张同姿态矩阵可生成；`TOON-T2A-002` 保持开放直至人工判读 |
 | **T4-A1 Sky Atmosphere 与程序化 HDR 星场** | 关闭生产全局 Z 高度雾；球心大气；唯一 Atmosphere Sun；固定曝光；昼夜/高度星空显隐 | 不做体积云，不回调 T3 最终材质 | 昼面→晨昏→夜面→高空→太空连续；主视图/PIP/AVI 身份一致；GPU 证据 |
 | **T4-A2 球面云** | **A2.1 云岛形态与表面基线** → **A2.2 全球云场与融合语义** → **A2.3 有界穿云表现** → **A2.4 消费端与性能冻结** | 不先开真实云影；不保留原生体积云与风格云双重消费；不以自动化绿灯覆盖可见 PIE 拒绝 | A2.1～A2.3 已通过；A2.4 完成 PIP/AVI/时域/GPU 与最终内容密度门后，T4-A2 才能冻结 |
-| **T4-A3 环境 Profile** | **A3.1 高空连续星空过渡** → `GroundDay`、`SatelliteGuide`、`FinaleSpace` 环境装配 → M11 快照与失败恢复 | 不改变 M11 求解/轨迹；A3.1 不以高度硬切 Profile | 地面、云上、过渡中段、卫星高度、外大气五点连续；随后主视图、地面/月面/终局 PIP、Rank11 AVI 与退出终局恢复一致 |
+| **T4-A3 环境 Profile** | **A3.1 高空连续星空过渡** → **A3.2 三套环境 Profile 正式装配** → **A3.3 M11 环境快照与异常恢复** | 不改变 M11 求解/轨迹；A3.1 不以高度硬切 Profile；A3.2 不把月面表面改成独立补光 | 五高度连续；普通世界/月面 PIP/终局主视图与 AVI 消费正确 Profile；退出、失败、中断后恢复一致 |
 | **T4-B T3/T4 联合校色** | 回开并调整 Roughness、Specular、Rim、Tint；解决地形褶皱；形成非 M7 联合基线 | M7 未完成时不宣称全项目冻结 | `TOON-T2A-002` 关闭证据；T3/T4 视觉和 GPU 联合基线；M7 后补建筑材质/特效 |
 
-阶段必须按 A0→A1→A2→A3→B 前进。A2 的现行排期只使用 **A2.1→A2.2→A2.3→A2.4**；A2.1 已于 2026-08-10、A2.2/A2.3 已于 2026-08-11 通过用户可见 PIE，当前进入 A2.4。`R0/R1-A/R1-C2-A4/B3B6/v44` 等名称只用于说明 A2.1 的技术演进、资产合同和日志身份，不再作为排期编号，也不得由它们推导新的后续阶段名。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
+阶段必须按 A0→A1→A2→A3→B 前进。A2 的正式编号只使用 **A2.1→A2.2→A2.3→A2.4**，四项现已全部验收并冻结；`R0/R1-A/R1-C2-A4/B3B6/v44` 等只用于说明 A2.1 的技术演进、资产合同和日志身份。A3 的正式编号为 **A3.1→A3.2→A3.3**，当前推进 A3.2。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
 
 ## 3. T4-A0：只读球面环境合同
 
@@ -119,7 +119,7 @@ $BuildId = (git -C 'C:\workspace\AngryBirdsToSpace' rev-parse HEAD).Trim()
 - 普通世界仍只使用地图中唯一的 `SkyAtmosphere`，不生成或保存 `.uasset/.umap`；Style On 时运行时切换为 `PlanetCenterAtComponentTransform`，中心、半径和大气高度来自当次环境快照；Style Off、子系统退出或失败路径恢复 Actor 位置、Transform Mode 与全部被改参数；
 - 所有 `ExponentialHeightFogComponent` 只在 Style On 期间隐藏，原可见性被逐组件保存并恢复；找不到唯一 Sky Atmosphere 或环境快照无效时清空渲染线程参数并 fail soft，不阻断玩法 `WorldReady`；
 - 主视图与已登记的地面/月面/终局 SceneCapture 在 View Setup 阶段使用同一个手动曝光策略；未知 SceneCapture 继续被拒绝；
-- 星场由 `ABTSStylizedStarMainPS` 在 HDR 后处理阶段按世界观察方向生成。固定 `StarSeed`、六面方向网格、每像素固定 3×3 相邻单元、整数 Hash 和 `fwidth` 软圆盘保证成本不随可见星数线性增加；
+- 星场由 `ABTSStylizedStarMainPS` 在 HDR 后处理阶段按世界观察方向生成。固定 `StarSeed`、六面方向网格、每像素固定 3×3 相邻单元、整数 Hash 和 `fwidth` 软圆盘保证成本不随可见星数线性增加；v67 将基础角半径由 `0.055` 提高到 `0.120`，并让稀疏中星/亮星获得 `1.50/2.50` 倍解析足迹，GroundDay/SatelliteGuide/FinaleSpace 的 HDR 强度分别冻结为 `2.6/3.0/3.6`，以保证 1080p 高空主视图经 TSR 与 SDR 输出后仍可读，同时不改变 Seed 或方向分布；v68 让 GroundDay 晨昏星场复用连续天空的视线有效太阳高度，v69 同时放宽天空地平线的连续可见带：朝阳视线抑制星点、水平背阳视线显示星点，地表以下仍由 SceneDepth 与消隐带共同拒绝；深昼/深夜以及高空和 FinaleSpace 的完整星场不受该方向门控削弱；
 - `ToonT4A1` 保留 A0 五点并增加 `TerminatorSky`、`BrightSkyBanding`、`TerminatorSunwardSky`、`TerminatorAntiSunwardSky` 与 `BacklitBirdParty`，只保留 Style Off/On 两个变体，允许 Screenshots 与 GPUProfile；GroundDay 不移动既有相机位置，只把观察方向冻结为世界 +Z 在当地切平面上的正北方向，以长期比较白天天空色相和云际；四个天空点分别冻结用户在暗处色阶、亮处色阶、晨昏朝阳和晨昏背阳时的精确 Camera Transform/FOV；manifest schema 4 为每条记录写入大气高度、StarSeed、网格、密度、角半径、HDR 强度与曝光偏置。
 
 ### 6.1 大气与曝光
@@ -448,7 +448,7 @@ ABTS.Toon.CloudField.RestoreView
 
 `Overview` 在当前 PIE 世界生成 transient 诊断相机，以主星 `+Z` 径向北极为观察方向，按实际主星半径、云层高度、视口宽高比和 `52°` FOV 自动计算距离，使主星及云场完整位于画面中央；它不移动玩家、鸟群或生产 Party Camera。`RestoreView` 恢复进入总览前保存的 ViewTarget 并销毁诊断相机。每次成功调参都会立即重建云场，并输出 `ClusterCount/Mean/Variance/Seed/BackgroundLogicalClouds/TotalLogicalClouds/Cloudlets/Members/LayoutHash`；无效范围、超出安全预算、Seed 为零、非 PIE 世界或重建未通过现有云合同都会拒绝并恢复上一个有效布局。
 
-分布调参子阶段已通过用户 PIE 验收并冻结；上述入口保留为多 Seed 回归和后续视觉复核工具，不再作为生产默认值来源。PIP/AVI、静态多分辨率/多 SP 和 GPU 门已完成；A2.4 整体仍未冻结，后续只剩用户可见 PIE 的快速相机、夜面和穿云消费复核。
+分布调参子阶段已通过用户 PIE 验收并冻结；上述入口保留为多 Seed 回归和后续视觉复核工具，不再作为生产默认值来源。PIP/AVI、静态多分辨率/多 SP、GPU 门以及快速相机、夜面、穿云可见 PIE 均已完成，A2.4 与整个 T4-A2 已冻结。
 
 实现版本 58 的冻结代码门使用 UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 与 fresh `ABTS.Rendering.Toon` 回归；最终日志分别记录在 `Saved/Logs/T4A24-FrozenDistribution-V58-ForceUnity-20260811.log` 和 `Saved/Logs/T4A24-FrozenDistribution-V58-Toon-Fresh-20260811.log`。自动化固定验证 `24 / 10 / 64` 三项生产默认值、生产 Seed 下 `277 + 7 = 284` 个逻辑云和 `23,856` 个 cloudlet、每个背景天气簇均为单一可见包络连通分量、显式云簇量与成员均值相互独立、超出 384 朵背景预算时 fail closed，以及 A2.1～A2.3 全回归。分布视觉已经用户 PIE 验收；其消费端与 GPU 后续由实现版本 60 的合同闭合。
 
@@ -478,7 +478,7 @@ A2.4 不改变已经验收的逻辑云分布、外形、局部太阳高度照明
 
 v63 的 UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 26/26 已通过；真实 DX11 两类生产捕获位于 `Saved/ABTSVisualCaptures/ToonT2C1/T2C1-LandingPreviews-On-SP100-20260812-115955`，manifest 为 `Succeeded`、实现版本 63、两条 512×288 记录。地面夹具阴影已恢复为稳定的冷绿色主视图色带；月面材质消费相同的 GroundDay 表面光照与色调，Tone Pass 同时保留 AfterDOF 已生成的确定性深空背景，不再回退为蓝天。该静态夹具仍不能证明玩家抵达同一落点后的逐像素对照；最终 PIE 应在地面向光/晨昏/背光和月面相同三档各保存一组“PIP—抵达后实地”画面，允许因观察角度造成镜面响应不同，但同一材质的阴影档、曝光和色相必须一致，且调整瞄准时不得闪回未预热首帧。
 
-只有 A2.1～A2.3 均无回归，真实 RHI 无云 shader fallback，SceneCapture/AVI 与主视图身份一致且 GPU 达到预算，才允许把 T4-A2 标记为冻结并进入 T4-A3。
+A2.1～A2.4 已满足真实 RHI、SceneCapture/AVI、动态 PIE 与 GPU 门并冻结；后续 A3/T4-B 回归若发现云问题，应重新打开对应门，不再把本句当作待办。
 
 ## 8. T4-A3 与 T4-B
 
@@ -490,13 +490,30 @@ A3.1 先关闭“飞到卫星高度仍是蓝色天幕”的表示缺口。权威
 
 正式自动视觉合同为 `ToonT4A3` / manifest schema 15，共五个固定 GroundDay 点：`AltitudeGround`、`AltitudeCloudTop`、`AltitudeTransitionMid`、`AltitudeSatellite`、`AltitudeSpace`；每点都有可逆 StyleOff/StyleOn，共 10 条记录。开发捕获脚本为本地 `Scripts/ToonT4A31.ps1`（`Scripts/*` 按仓库策略不纳入版本控制；正式命令参数由本段和 manifest 冻结）。自动证据必须证明高度与 `highAltitudeSpaceBlend` 单调、卫星/外大气为 1、五点始终仍为 GroundDay，并检查地面蓝天不回退、过渡中段无硬色带、卫星高度是星空、外大气只保留窄 Limb。UE 5.8 ForceUnity 已通过；fresh `ABTS.Rendering.Toon` 为 27/27，日志 `Saved/Logs/T4A31-Toon-20260812-123423.log`。真实 D3D12 manifest 为 `Succeeded`、schema 15、实现版本 64，目录 `Saved/ABTSVisualCaptures/ToonT4A3/T4A31-20260812-123752/ToonT4A3_Screenshots_20260812T043832Z_52848`，日志 `Saved/Logs/T4A31-20260812-123752.log`；10 条记录依次为 `0.04R/0`、`0.215R/0`、`0.37R/0.5`、`0.55R/1`、`0.72R/1`，真实 shader 无编译错误。Style On 图确认地面/云上保持蓝天，中段连续变为深蓝灰，卫星及外大气转为带星点的深空并只在行星切线附近保留窄蓝色 Limb。用户已于 2026-08-12 完成实际飞行 PIE，确认从地表上升至卫星/月球高度期间天空连续过渡、没有高度硬切，星场和切线大气边缘表现符合预期；A3.1 因而晋升为 `IntegrationAccepted`。
 
-三套环境 Profile 只读消费同一合同：
+v67 星场可读性复核继续使用完全相同的五点相机构图与 `StarSeed`。UE 5.8 ForceUnity 和 fresh `ABTS.Rendering.Toon` 28/28 已通过，日志 `Saved/Logs/T4A3-StarReadability-V67-Toon-Fresh-20260812.log`；真实 D3D12 目录为 `Saved/ABTSVisualCaptures/ToonT4A3/T4A31-20260812-145622/ToonT4A3_Screenshots_20260812T065649Z_65500`，日志 `Saved/Logs/T4A31-20260812-145622.log`。在 `AltitudeSatellite` 固定空域裁剪中，可读星点像素由 v64 的 `5` 增至 `52`，亮星像素由 `0` 增至 `12`，峰值由 `29/255` 增至 `68/255`，而背景平均亮度仅由 `3.077` 增至 `3.092`；因此提升来自星点足迹/等级而不是抬灰深空背景。该组截图为自动视觉证据，仍保留真实 PIE 对星点密度、运动稳定性和主观层级的最终判读。
+
+v68/v69 修复晨昏线星点方向反转：GroundDay 星场不再只读相机位置的 `SunHeight`，而在晨昏带内复用天空的 `SunHeight + ViewToSun×0.42` 连续视线模型；v69 将接近水平的天空射线可见度从旧窄带提高到可读范围，避免正确的背阳方向权重再次被地平线项压没。朝阳天空压制星点，背阳天空显示星点，深昼/深夜和高空/终局仍保持原权威；地表几何继续由 SceneDepth 拒绝，不会透出星点。v69 的 UE 5.8 ForceUnity 与 fresh `ABTS.Rendering.Toon` 28/28 已通过，最终合同日志为 `Saved/Logs/T4A3-TerminatorStars-V69-Horizontal-Toon-Fresh-20260812.log`；真实 D3D12 `ToonT4A1` 20/20 位于 `Saved/ABTSVisualCaptures/ToonT4A1TerminatorStars/T4A1-TerminatorStars-V69-20260812-153234/ToonT4A1_Screenshots_20260812T073323Z_13520`，日志 `Saved/Logs/T4A1-TerminatorStars-V69-20260812-153234.log`，且无 shader 编译错误或材质 fallback。该真实捕获证明 shader 路线有效；两组历史固定诊断相机均向地表俯视，不能替代本轮用户所给“同一晨昏位置水平转身”的最终 PIE 门，故不再以其高频残差冒充水平星点验收。
+
+### 8.2 T4-A3.2：三套环境 Profile 正式装配
+
+实现版本 65 把此前“存在参数但主要靠全局 CVar/捕获脚本选择”的三套 Profile 提升为正式消费合同：
+
+- `FABTSStylizedEnvironmentProfilePolicy` 冻结 Actor 表现：`GroundDay` 保留球心 `SkyAtmosphere` 和低模云场并继续关闭不相容的全局 Z 高度雾；`SatelliteGuide` 与 `FinaleSpace` 均隐藏地表大气、全局雾和地表云，背景由确定性 HDR 星场负责；Style Off、子系统退出和失败路径恢复原 Actor 可见性与原始参数；
+- `FABTSStylizedViewPolicy` 将 `Profile`（实体表面的 Tone、Outline、曝光）与 `EnvironmentProfile`（大气/星场背景）分开。月面 PIP 因而继续使用已验收的 `GroundDay` 表面视觉和世界光照，只把空背景交给 `SatelliteGuide`；地面 PIP 两者均为 `GroundDay`，终局 PIP/AVI 两者均为 `FinaleSpace`；
+- Integration 世界子系统每 `0.1 s` 只读查询 M11 公开的 `IsFinaleActive()`：普通世界选择配置基线（生产默认 `GroundDay`），终局活动优先选择 `FinaleSpace`；退出终局或失败时间线结束后，解析器重新得到配置基线。该装配不写 M11 私有状态，也不修改积分器、轨迹、镜头或演出；
+- 主视图后处理不再直接相信诊断 CVar，而优先消费世界子系统已经发布的环境快照 Profile，避免世界 Actor 已切终局而 Tone/Outline 仍留在地面档。诊断/捕获仍可在没有世界快照时使用显式 CVar。
+
+三套环境 Profile 只读消费同一球面快照：
 
 - `GroundDay`：完整大气，地表昼夜连续，星空受大气/太阳高度抑制；
-- `SatelliteGuide`：弱大气背景、稀疏星场，月面导航和画中画优先可读；
+- `SatelliteGuide`：无地表云和蓝色天幕的稀疏深空星场；月面实体仍由 `GroundDay` 表面光照保证与实地一致；
 - `FinaleSpace`：完整星场，不使用不相容的地表高度雾/云，行星/UFO 保持轮廓和受控边缘光。
 
-M11 进入/退出、失败黑屏和重置必须保存并恢复环境 Profile，不能只切天空材质。A3 通过后进入 T4-B，重新看 T3 的 Roughness、Specular、Rim、Tint，并用 A0 矩阵关闭 `TOON-T2A-002`。M7 未完成时可以形成“非 M7 T3/T4 联合基线”，但不得宣布完整视觉冻结。
+A3.2 自动化必须冻结三套 Actor 策略、月面“表面/背景”双 Profile、终局优先级和结束后的确定性回切。可见 PIE 至少检查普通世界云/大气、月面 PIP 星空、进入终局后无地表云/蓝天、主动退出与失败恢复后的 GroundDay 回切，以及 Rank11 AVI。A3.3 再处理进程中断、Actor 销毁、地图切换等显式快照/恢复所有权；在 A3.3 完成前不得把 A3.2 的轮询回切写成完整异常恢复。
+
+A3.2 当前状态为 `ImplementationComplete（VisibleValidationPending）`。UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译已成功；fresh NullRHI `ABTS.Rendering.Toon` 为 28/28，新增 `ABTS.Rendering.Toon.T4A3_2.EnvironmentProfileAssemblyContract` 已通过，日志为 `Saved/Logs/T4A32-V65-Toon-Fresh-20260812-R2.log`。这些证据证明数据路由与旧阶段回归，不替代终局进入/退出、失败恢复、月面 PIP 和 Rank11 AVI 的真实 RHI/PIE 判读。
+
+A3 全部通过后进入 T4-B，重新看 T3 的 Roughness、Specular、Rim、Tint，并用 A0 矩阵关闭 `TOON-T2A-002`。M7 未完成时可以形成“非 M7 T3/T4 联合基线”，但不得宣布完整视觉冻结。
 
 ## 9. 验收与性能门
 

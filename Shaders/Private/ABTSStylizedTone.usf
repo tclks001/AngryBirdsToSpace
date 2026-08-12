@@ -141,8 +141,17 @@ float3 ABTSEvaluateDeterministicHDRStars(float3 WorldViewDirection)
 				(CandidateCell - BaseCell) + lerp(0.08f, 0.92f, InCellOffset);
 			const float DistanceInCells = length(LocalPosition - CandidatePosition);
 			const float SizeRandom = ABTSStarHash01(CellIdentity ^ 0x967a889bu);
+			const float MagnitudeRandom =
+				ABTSStarHash01(CellIdentity ^ 0xb5297a4du);
+			// Preserve a sparse hierarchy that remains legible after TSR and SDR
+			// output. Bright anchor stars need a larger analytic footprint, not
+			// merely more radiance inside the same sub-pixel disc.
+			const float MagnitudeRadiusScale = MagnitudeRandom > 0.995f
+				? 2.50f
+				: (MagnitudeRandom > 0.90f ? 1.50f : 1.0f);
 			const float Radius = StarAngularRadiusScale
-				* lerp(0.55f, 1.55f, SizeRandom * SizeRandom);
+				* lerp(0.62f, 1.55f, SizeRandom * SizeRandom)
+				* MagnitudeRadiusScale;
 			const float AntialiasWidth = max(fwidth(DistanceInCells), 0.004f);
 			const float Coverage = 1.0f - smoothstep(
 				Radius - AntialiasWidth,
@@ -153,8 +162,6 @@ float3 ABTSEvaluateDeterministicHDRStars(float3 WorldViewDirection)
 				continue;
 			}
 
-			const float MagnitudeRandom =
-				ABTSStarHash01(CellIdentity ^ 0xb5297a4du);
 			const float Magnitude = MagnitudeRandom > 0.995f
 				? 2.8f
 				: (MagnitudeRandom > 0.90f ? 0.8f : 0.18f);
@@ -256,8 +263,26 @@ float ABTSComputeStylizedStarVisibility(float3 WorldViewDirection)
 	const float CameraRadius = max(length(CameraFromPlanetCenterWorld), 1.0f);
 	const float3 RadialUp = CameraFromPlanetCenterWorld / CameraRadius;
 	const float AltitudeCM = max(CameraRadius - PlanetRadiusCM, 0.0f);
-	const float SunHeight = dot(RadialUp, normalize(SunDirectionToSunWorld));
-	const float NightFactor = 1.0f - smoothstep(-0.18f, 0.06f, SunHeight);
+	const float3 SunDirection = normalize(SunDirectionToSunWorld);
+	const float SunHeight = dot(RadialUp, SunDirection);
+	const float ViewToSun = dot(WorldViewDirection, SunDirection);
+	const float ObserverNight = 1.0f - smoothstep(-0.18f, 0.06f, SunHeight);
+	const float RayEffectiveSunHeight = SunHeight + ViewToSun * 0.42f;
+	const float RayNight = 1.0f - smoothstep(
+		-0.24f,
+		0.12f,
+		RayEffectiveSunHeight);
+	const float TerminatorInfluence = 1.0f - smoothstep(
+		0.20f,
+		0.65f,
+		abs(SunHeight));
+	// Match the continuous-sky direction model: at the terminator, sunlight
+	// along the viewed ray hides stars while the anti-sunward ray reveals them.
+	// Deep day and deep night remain observer-authoritative.
+	const float NightFactor = lerp(
+		ObserverNight,
+		RayNight,
+		0.82f * TerminatorInfluence);
 	const float AltitudeFactor = smoothstep(
 		AtmosphereHeightCM * 0.18f,
 		AtmosphereHeightCM * 1.15f,
@@ -273,8 +298,8 @@ float ABTSComputeStylizedStarVisibility(float3 WorldViewDirection)
 		Visibility = max(Visibility, 0.98f);
 	}
 	const float HorizonVisibility = smoothstep(
-		-0.06f,
-		0.16f,
+		-0.10f,
+		0.08f,
 		dot(WorldViewDirection, RadialUp));
 	return saturate(
 		Visibility * lerp(HorizonVisibility, 1.0f, AltitudeFactor));

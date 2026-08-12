@@ -63,6 +63,18 @@ namespace ABTSStylizedRenderingWorldSubsystemPrivate
 	constexpr float RefreshIntervalSeconds = 0.10f;
 	constexpr float ContinuousAtmosphereTraceSampleCountScale = 2.0f;
 
+	bool IsFinaleEnvironmentActive(UWorld& World)
+	{
+		for (TActorIterator<AABTSM11FinaleInteractionSystem> It(&World); It; ++It)
+		{
+			if (IsValid(*It) && It->IsFinaleActive())
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	UABTSStylizedRenderingWorldSubsystem* ResolveTuningSubsystem(UWorld* World)
 	{
 		return World != nullptr
@@ -684,6 +696,16 @@ public:
 			OutFailure = TEXT("The accepted environment snapshot is invalid.");
 			return false;
 		}
+		const FABTSStylizedEnvironmentProfilePolicy ProfilePolicy =
+			FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+				Parameters.Profile);
+		if (!ProfilePolicy.IsValid()
+			|| (Parameters.bCloudsEnabled != 0u)
+				!= ProfilePolicy.bLowPolyCloudsVisible)
+		{
+			OutFailure = TEXT("The formal environment profile policy is invalid or disagrees with its cloud parameters.");
+			return false;
+		}
 
 		TArray<ASkyAtmosphere*> Atmospheres;
 		for (TActorIterator<ASkyAtmosphere> It(&World); It; ++It)
@@ -778,13 +800,18 @@ public:
 			FMath::Max(AtmosphereHeightKM * 0.08f, 0.001f));
 		Atmosphere->SetHeightFogContribution(0.0f);
 		Atmosphere->SetAerialPerspectiveStartDepth(0.001f);
+		Atmosphere->SetVisibility(
+			ProfilePolicy.bSkyAtmosphereVisible,
+			true);
 		Atmosphere->MarkRenderStateDirty();
 
 		for (const FFogSavedState& Fog : SavedFogs)
 		{
 			if (UExponentialHeightFogComponent* Component = Fog.Component.Get())
 			{
-				Component->SetVisibility(false, true);
+				Component->SetVisibility(
+					ProfilePolicy.bHeightFogVisible && Fog.bVisible,
+					true);
 			}
 		}
 
@@ -794,7 +821,8 @@ public:
 		// reversible stylized presentation owns the world. T4-A2R0 supplies three
 		// bounded, deterministic low-poly cloud islands instead of a global shell.
 		Cloud->SetVisibility(false, true);
-		bLowPolyCloudPrototypeEnabled = Parameters.bCloudsEnabled != 0u;
+		bLowPolyCloudPrototypeEnabled =
+			ProfilePolicy.bLowPolyCloudsVisible;
 		bApplied = true;
 		return true;
 	}
@@ -841,6 +869,7 @@ public:
 				OriginalHeightFogContribution);
 			Atmosphere->SetAerialPerspectiveStartDepth(
 				OriginalAerialPerspectiveStartDepth);
+			Atmosphere->SetVisibility(bOriginalAtmosphereVisible, true);
 			Atmosphere->MarkRenderStateDirty();
 		}
 		for (const FFogSavedState& Fog : SavedFogs)
@@ -919,6 +948,7 @@ private:
 		OriginalHeightFogContribution = Atmosphere.HeightFogContribution;
 		OriginalAerialPerspectiveStartDepth =
 			Atmosphere.AerialPerspectiveStartDepth;
+		bOriginalAtmosphereVisible = Atmosphere.IsVisible();
 		SavedCloudComponent = &Cloud;
 		OriginalCloudLayerBottomAltitude = Cloud.LayerBottomAltitude;
 		OriginalCloudLayerHeight = Cloud.LayerHeight;
@@ -977,6 +1007,7 @@ private:
 	float OriginalMieExponentialDistribution = 0.0f;
 	float OriginalHeightFogContribution = 0.0f;
 	float OriginalAerialPerspectiveStartDepth = 0.0f;
+	bool bOriginalAtmosphereVisible = true;
 	float OriginalCloudLayerBottomAltitude = 0.0f;
 	float OriginalCloudLayerHeight = 0.0f;
 	float OriginalCloudTracingStartMaxDistance = 0.0f;
@@ -1430,13 +1461,19 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 		return;
 	}
 	bLastObservedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
+	const bool bFinaleEnvironmentActive =
+		IsFinaleEnvironmentActive(*World);
+	const EABTSStylizedRenderProfile ActiveProfile =
+		FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			bFinaleEnvironmentActive,
+			FABTSStylizedRenderingControl::GetProfile());
 
 	FABTSToonEnvironmentSnapshot ResolvedEnvironment;
 	FString EnvironmentFailure;
 	bEnvironmentSnapshotReady =
 		FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
 			*World,
-			FABTSStylizedRenderingControl::GetProfile(),
+			ActiveProfile,
 			ResolvedEnvironment,
 			&EnvironmentFailure);
 	EnvironmentSnapshot = bEnvironmentSnapshotReady
@@ -1456,9 +1493,12 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			UE_LOG(
 				LogABTSRuntime,
 				Log,
-				TEXT("[ABTS][Rendering][T4-A0][Environment] Ready=1 Version=%d Profile=%d Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
+				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=1 Version=%d Profile=%d Source=%s Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
 				EnvironmentSnapshot.Version,
 				static_cast<int32>(EnvironmentSnapshot.Profile),
+				bFinaleEnvironmentActive
+					? TEXT("M11FinaleActive")
+					: TEXT("ConfiguredGroundContext"),
 				EnvironmentSnapshot.WorldSeed,
 				EnvironmentSnapshot.GeneratorVersion,
 				EnvironmentSnapshot.GenerationAttempt,
@@ -1473,7 +1513,7 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			UE_LOG(
 				LogABTSRuntime,
 				Verbose,
-				TEXT("[ABTS][Rendering][T4-A0][Environment] Ready=0 Reason=%s"),
+				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=0 Reason=%s"),
 				EnvironmentFailure.IsEmpty()
 					? TEXT("Unknown")
 					: *EnvironmentFailure);

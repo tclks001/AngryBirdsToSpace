@@ -58,8 +58,8 @@ struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
 	uint32 StarSeed = 0;
 	float StarGridResolution = 256.0f;
 	float StarCellProbability = 0.012f;
-	float StarAngularRadiusScale = 0.055f;
-	float StarHDRIntensity = 1.8f;
+	float StarAngularRadiusScale = 0.120f;
+	float StarHDRIntensity = 2.6f;
 	float FixedExposureBias = 0.0f;
 	/** T4-A2 native radial cloud-shell route. Zero keeps non-ground profiles cloud-free. */
 	uint32 bCloudsEnabled = 0;
@@ -69,6 +69,23 @@ struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
 	float CloudCoverage = 0.0f;
 	float CloudDensity = 0.0f;
 	float CloudViewSampleCountScale = 0.0f;
+	bool IsValid() const;
+};
+
+/**
+ * Immutable actor-presentation policy for one formal T4-A3 environment
+ * profile. This stays separate from the surface tone/outline profile so a
+ * satellite landing preview can keep GroundDay surface lighting while its
+ * empty background consumes SatelliteGuide.
+ */
+struct ABTSRENDER_API FABTSStylizedEnvironmentProfilePolicy
+{
+	EABTSStylizedRenderProfile Profile =
+		EABTSStylizedRenderProfile::GroundDay;
+	bool bSkyAtmosphereVisible = true;
+	bool bHeightFogVisible = false;
+	bool bLowPolyCloudsVisible = true;
+
 	bool IsValid() const;
 };
 
@@ -106,6 +123,8 @@ public:
 		double PlanetRadiusCM,
 		const FVector& SunDirectionToSunWorld,
 		EABTSStylizedRenderProfile Profile);
+	static FABTSStylizedEnvironmentProfilePolicy GetEnvironmentProfilePolicy(
+		EABTSStylizedRenderProfile Profile);
 	static void SetEnvironmentParameters(
 		const FABTSStylizedEnvironmentParameters& Parameters);
 	static void ClearEnvironmentParameters();
@@ -138,6 +157,16 @@ public:
 		float CameraAltitudeCM,
 		float TransitionStartCM,
 		float TransitionEndCM);
+	/**
+	 * Pure-data mirror of the ground-profile twilight star visibility. Near
+	 * the terminator the viewed ray matters: sunward sky suppresses stars while
+	 * anti-sunward sky reveals them. Deep day/night remain observer-driven.
+	 */
+	static float ComputeGroundStarNightFactor(
+		float ObserverSunHeight,
+		float ViewToSun);
+	/** Pure-data mirror of the near-horizon sky-ray visibility gate. */
+	static float ComputeGroundStarHorizonVisibility(float ViewRadialDot);
 
 	static int32 GetImplementationVersion();
 	static bool IsProfileValid(EABTSStylizedRenderProfile Profile);

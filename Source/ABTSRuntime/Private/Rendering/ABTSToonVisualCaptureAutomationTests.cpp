@@ -224,9 +224,36 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("Stylized renderer reports the persistent parity PIP contract"),
+		TEXT("Stylized renderer reports the directional twilight-star contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		64);
+		69);
+	const FABTSStylizedEnvironmentProfilePolicy GroundEnvironment =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentProfilePolicy SatelliteEnvironment =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::SatelliteGuide);
+	const FABTSStylizedEnvironmentProfilePolicy FinaleEnvironment =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::FinaleSpace);
+	TestTrue(TEXT("GroundDay environment policy is valid"),
+		GroundEnvironment.IsValid());
+	TestTrue(TEXT("GroundDay owns spherical atmosphere and low-poly clouds"),
+		GroundEnvironment.bSkyAtmosphereVisible
+			&& GroundEnvironment.bLowPolyCloudsVisible
+			&& !GroundEnvironment.bHeightFogVisible);
+	TestTrue(TEXT("SatelliteGuide environment policy is valid"),
+		SatelliteEnvironment.IsValid());
+	TestTrue(TEXT("SatelliteGuide is a cloud-free deep-space environment"),
+		!SatelliteEnvironment.bSkyAtmosphereVisible
+			&& !SatelliteEnvironment.bLowPolyCloudsVisible
+			&& !SatelliteEnvironment.bHeightFogVisible);
+	TestTrue(TEXT("FinaleSpace environment policy is valid"),
+		FinaleEnvironment.IsValid());
+	TestTrue(TEXT("FinaleSpace is a cloud-free deep-space environment"),
+		!FinaleEnvironment.bSkyAtmosphereVisible
+			&& !FinaleEnvironment.bLowPolyCloudsVisible
+			&& !FinaleEnvironment.bHeightFogVisible);
 	TestEqual(
 		TEXT("Ground navigation exposure is frozen independently of the active world profile"),
 		FABTSStylizedRenderingControl::GetFixedExposureBias(
@@ -752,6 +779,21 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 		TEXT("Main view consumes the active runtime profile"),
 		static_cast<int32>(MainPolicy.Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("Main view keeps surface and environment profiles paired"),
+		static_cast<int32>(MainPolicy.EnvironmentProfile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("Inactive finale keeps the configured GroundDay profile"),
+		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			false, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestEqual(TEXT("Active finale overrides the configured profile"),
+		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			true, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("Leaving finale restores the configured profile deterministically"),
+		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			false, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
 	TestTrue(TEXT("Main view applies tone"), MainPolicy.bApplyTone);
 	TestTrue(TEXT("Main view applies outline"), MainPolicy.bApplyOutline);
 	TestTrue(TEXT("Main view permits selective stencil"), MainPolicy.bAllowSelectiveStencil);
@@ -798,6 +840,10 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Satellite preview replaces the ground atmosphere with deep space"),
 		SatellitePolicy.bReplaceEnvironmentBackground);
+	TestEqual(
+		TEXT("Satellite preview background formally consumes SatelliteGuide"),
+		static_cast<int32>(SatellitePolicy.EnvironmentProfile),
+		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
 	const AABTSM101LandingPreviewCamera* PreviewCameraCDO =
 		GetDefault<AABTSM101LandingPreviewCamera>();
 	TestNotNull(TEXT("Landing preview camera CDO exists"), PreviewCameraCDO);
@@ -851,6 +897,10 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Finale recording uses the frozen finale profile"),
 		static_cast<int32>(CinematicCapturePolicy.Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(
+		TEXT("Finale recording background uses the frozen finale environment"),
+		static_cast<int32>(CinematicCapturePolicy.EnvironmentProfile),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestTrue(
 		TEXT("Finale recording applies tone"),

@@ -158,11 +158,11 @@ FABTSStylizedRenderingControl::BuildEnvironmentParameters(
 	{
 	case EABTSStylizedRenderProfile::SatelliteGuide:
 		Parameters.StarCellProbability = 0.014f;
-		Parameters.StarHDRIntensity = 2.1f;
+		Parameters.StarHDRIntensity = 3.0f;
 		break;
 	case EABTSStylizedRenderProfile::FinaleSpace:
 		Parameters.StarCellProbability = 0.016f;
-		Parameters.StarHDRIntensity = 2.5f;
+		Parameters.StarHDRIntensity = 3.6f;
 		break;
 	case EABTSStylizedRenderProfile::GroundDay:
 	default:
@@ -228,7 +228,36 @@ bool FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
 
 int32 FABTSStylizedRenderingControl::GetImplementationVersion()
 {
-	return 64;
+	return 69;
+}
+
+FABTSStylizedEnvironmentProfilePolicy
+FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+	const EABTSStylizedRenderProfile Profile)
+{
+	FABTSStylizedEnvironmentProfilePolicy Policy;
+	Policy.Profile = IsProfileValid(Profile)
+		? Profile
+		: EABTSStylizedRenderProfile::GroundDay;
+	switch (Policy.Profile)
+	{
+	case EABTSStylizedRenderProfile::SatelliteGuide:
+	case EABTSStylizedRenderProfile::FinaleSpace:
+		Policy.bSkyAtmosphereVisible = false;
+		Policy.bHeightFogVisible = false;
+		Policy.bLowPolyCloudsVisible = false;
+		break;
+	case EABTSStylizedRenderProfile::GroundDay:
+	default:
+		Policy.bSkyAtmosphereVisible = true;
+		// The authored fog is global-Z and remains incompatible with a
+		// walkable sphere. GroundDay uses spherical atmosphere plus the
+		// bounded low-poly cloud field instead.
+		Policy.bHeightFogVisible = false;
+		Policy.bLowPolyCloudsVisible = true;
+		break;
+	}
+	return Policy;
 }
 
 float FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
@@ -247,6 +276,38 @@ float FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
 		TransitionStartCM,
 		TransitionEndCM,
 		FMath::Max(CameraAltitudeCM, 0.0f));
+}
+
+float FABTSStylizedRenderingControl::ComputeGroundStarNightFactor(
+	const float ObserverSunHeight,
+	const float ViewToSun)
+{
+	if (!FMath::IsFinite(ObserverSunHeight)
+		|| !FMath::IsFinite(ViewToSun))
+	{
+		return 0.0f;
+	}
+	const float ClampedViewToSun = FMath::Clamp(ViewToSun, -1.0f, 1.0f);
+	const float ObserverNight = 1.0f - FMath::SmoothStep(
+		-0.18f, 0.06f, ObserverSunHeight);
+	const float RayEffectiveSunHeight =
+		ObserverSunHeight + ClampedViewToSun * 0.42f;
+	const float RayNight = 1.0f - FMath::SmoothStep(
+		-0.24f, 0.12f, RayEffectiveSunHeight);
+	const float TerminatorInfluence = 1.0f - FMath::SmoothStep(
+		0.20f, 0.65f, FMath::Abs(ObserverSunHeight));
+	return FMath::Clamp(FMath::Lerp(
+		ObserverNight,
+		RayNight,
+		0.82f * TerminatorInfluence), 0.0f, 1.0f);
+}
+
+float FABTSStylizedRenderingControl::ComputeGroundStarHorizonVisibility(
+	const float ViewRadialDot)
+{
+	return FMath::IsFinite(ViewRadialDot)
+		? FMath::SmoothStep(-0.10f, 0.08f, ViewRadialDot)
+		: 0.0f;
 }
 
 float FABTSStylizedRenderingControl::GetFixedExposureBias(
@@ -445,4 +506,16 @@ bool FABTSStylizedEnvironmentParameters::IsValid() const
 				&& CloudDensity > 0.0f
 				&& FMath::IsFinite(CloudViewSampleCountScale)
 				&& CloudViewSampleCountScale >= 0.05f));
+}
+
+bool FABTSStylizedEnvironmentProfilePolicy::IsValid() const
+{
+	if (!FABTSStylizedRenderingControl::IsProfileValid(Profile)
+		|| bHeightFogVisible)
+	{
+		return false;
+	}
+	return Profile == EABTSStylizedRenderProfile::GroundDay
+		? bSkyAtmosphereVisible && bLowPolyCloudsVisible
+		: !bSkyAtmosphereVisible && !bLowPolyCloudsVisible;
 }

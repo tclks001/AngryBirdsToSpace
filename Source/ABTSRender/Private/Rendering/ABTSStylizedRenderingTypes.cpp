@@ -18,6 +18,8 @@ bool FABTSStylizedViewPolicy::IsValid() const
 {
 	return Profile >= EABTSStylizedRenderProfile::GroundDay
 		&& Profile <= EABTSStylizedRenderProfile::FinaleSpace
+		&& EnvironmentProfile >= EABTSStylizedRenderProfile::GroundDay
+		&& EnvironmentProfile <= EABTSStylizedRenderProfile::FinaleSpace
 		&& (bApplyTone || bApplyOutline);
 }
 
@@ -99,6 +101,7 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 	{
 	case EABTSStylizedViewClass::GroundLandingPreview:
 		Policy.Profile = EABTSStylizedRenderProfile::GroundDay;
+		Policy.EnvironmentProfile = EABTSStylizedRenderProfile::GroundDay;
 		Policy.bAllowSelectiveStencil = false;
 		Policy.bUseWorldLighting = true;
 		break;
@@ -107,6 +110,8 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 		// same lunar patch matches an equivalent gameplay camera. Deep space is an
 		// independent empty-background replacement, not a second lighting profile.
 		Policy.Profile = EABTSStylizedRenderProfile::GroundDay;
+		Policy.EnvironmentProfile =
+			EABTSStylizedRenderProfile::SatelliteGuide;
 		Policy.bAllowSelectiveStencil = true;
 		Policy.bUseWorldLighting = true;
 		Policy.bReplaceEnvironmentBackground = true;
@@ -114,6 +119,7 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 	case EABTSStylizedViewClass::FinaleRemotePreview:
 	case EABTSStylizedViewClass::FinaleCinematicCapture:
 		Policy.Profile = EABTSStylizedRenderProfile::FinaleSpace;
+		Policy.EnvironmentProfile = EABTSStylizedRenderProfile::FinaleSpace;
 		Policy.bAllowSelectiveStencil = true;
 		break;
 	case EABTSStylizedViewClass::MainWorld:
@@ -123,10 +129,26 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 				&& MainWorldProfile <= EABTSStylizedRenderProfile::FinaleSpace
 			? MainWorldProfile
 			: EABTSStylizedRenderProfile::GroundDay;
+		Policy.EnvironmentProfile = Policy.Profile;
 		Policy.bAllowSelectiveStencil = true;
 		break;
 	}
 	return Policy;
+}
+
+EABTSStylizedRenderProfile
+FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+	const bool bFinaleActive,
+	const EABTSStylizedRenderProfile ConfiguredProfile)
+{
+	if (bFinaleActive)
+	{
+		return EABTSStylizedRenderProfile::FinaleSpace;
+	}
+	return ConfiguredProfile >= EABTSStylizedRenderProfile::GroundDay
+		&& ConfiguredProfile <= EABTSStylizedRenderProfile::FinaleSpace
+		? ConfiguredProfile
+		: EABTSStylizedRenderProfile::GroundDay;
 }
 
 bool FABTSStylizedRenderingContract::IsViewClassImplemented(

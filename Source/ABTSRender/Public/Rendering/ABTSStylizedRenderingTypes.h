@@ -34,7 +34,11 @@ enum class EABTSStylizedViewClass : uint8
 /** Read-only rendering policy resolved by Integration from a semantic view class. */
 struct ABTSRENDER_API FABTSStylizedViewPolicy
 {
+	/** Tone, outline and fixed exposure used for visible geometry. */
 	EABTSStylizedRenderProfile Profile = EABTSStylizedRenderProfile::GroundDay;
+	/** Atmosphere/star background profile; may differ from the surface profile. */
+	EABTSStylizedRenderProfile EnvironmentProfile =
+		EABTSStylizedRenderProfile::GroundDay;
 	bool bApplyTone = true;
 	bool bApplyOutline = true;
 	bool bAllowSelectiveStencil = false;
@@ -75,6 +79,10 @@ public:
 		EABTSStylizedViewClass ViewClass,
 		EABTSStylizedRenderProfile MainWorldProfile =
 			EABTSStylizedRenderProfile::GroundDay);
+	/** Finale activity has precedence without mutating the diagnostic CVar. */
+	static EABTSStylizedRenderProfile ResolveMainWorldProfile(
+		bool bFinaleActive,
+		EABTSStylizedRenderProfile ConfiguredProfile);
 
 	/** T2-A deliberately renders only the final main view; previews are wired in T2-B. */
 	static bool IsViewClassImplemented(EABTSStylizedViewClass ViewClass);
