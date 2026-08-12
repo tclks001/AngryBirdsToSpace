@@ -2092,3 +2092,38 @@ member 几何重建 seat DAG 后 Static DAG Accepted。fresh Preview 合同与�
 
 该修正不改变 terminal demand、child 数、36 cm 网格、720 cm 上限或 Stage 2/Chaos。它只禁止主芯体跨过任何实际受其
 空间覆盖的子芯体分界，并把“占用”与“侧向可用净空”恢复为两个不同合同。
+
+## 46. TowerChild 粗主干与单次语义收缩（2026-08-12）
+
+第 45 节完成高 PodiumMain 后，一部分 TowerChild 的下段几乎全部埋入 main，只在顶部露出狭窄的固定 footprint。
+继续要求 child 从地面到顶保持同一 footprint，会为了穿过 Crown 收口而把整根支撑柱压缩到最窄截面；反过来简单降低
+main 只能增加相同细柱的可见长度，并不会增加下段承载截面。本轮把 child 候选改成“接地粗主干 + 最多一次收缩”：
+
+1. 终端分支内原有的全高固定 footprint 仍是上段权威见证。其 X/Y 边界必须位于原始 terminal Body 的逐层连续包络内，
+   达到 `RequiredTopCourse`，不能因为搜索域扩大而穿出所属 terminal；
+2. 另在 `ProjectionBounds ∪ EntryBounds ∪ BranchBounds` 中枚举接地候选。候选从 course 0 连续存在，第一次被 WFC
+   收口阻断的 course 作为唯一 `SingleShrinkCourseIndex`。上下两段都必须是 36 cm 格上的正方形，下段必须严格包含上段且
+   `MinimumSpan` 真正增大；禁止只扩大面积、弱轴不变的扁片。每个上段保留最多 4 个按最小边、方正度、面积和收缩高度
+   排序的下段候选进入联合选择，不能在联合冲突检查前只留一个局部最优；在 main 顶面以上仍须至少保留 4 个 course；
+3. 收缩前最后一个 course 是适配层：沿当前轴仍跨越粗主干全宽，但正交 station 改用上段 station，使下一 course 的
+   窄截面获得完整堆放座面。禁止在同一高度同时突变两轴而形成悬空角点，也禁止第二次收缩、悬挑分叉或非 WFC seam
+   的自由调参；
+4. 联合 main/child、兄弟 child 与 shared reservation 冲突检查使用上下两段 station 的并集。生产发射则按 course
+   选择下段、适配层或上段的真实 stations；Topology、Bearing、shared-course 端点和几何 Hash 都使用同一分段身份；
+5. RaisedMain 的空间影响闭包仍有效，但若某个受影响 child 有收缩面，main 顶面不得高于
+   `SingleShrinkCourseIndex - 4`。这 4 个可见 course 是粗主干的最小视觉/结构余量，不是 Chaos 强度结论；若语义裙房
+   分界更低，仍取两者较低值；
+6. `SelectedUpperChildBounds`、`SelectedShrinkCourse` 与 `SingleShrinkWitnessCount` 进入候选诊断；最终 Core 保存上下段
+   stations/bounds。自动化必须证明上段被下段包含、只有一个合法收缩面、至少一个代表种子实际选择该路径，并重新通过
+   Static DAG。`PodiumMainCoreCellId` 必须按承担 terminal demand 的上段判定；加粗下段只提供接地承载和冲突占用，不得因
+   靠近另一个 main 而改写已冻结的 demand/main 语义归属。没有合法粗主干时保留原全高固定 footprint，不允许为追求
+   变粗而穿出 WFC 或丢失终端需求。
+
+fresh `TipOverE6OptimizationSeeds` 验证：710000、730000、750000 均有 3 根 TowerChild 实际选择方形单次收缩；三种子
+均保持全部 semantic demand/child 双射、全高到顶和 `StaticDAG=Accepted`，单叶总计约 `1.15 / 1.30 / 1.60 s`，低于
+10 秒 Stage 1 门。750000 的 Demand 6 从原全高 72×72 cm 细柱改为下段约 216×216 cm、上段 72×72 cm，并在 course 45
+收缩；原 72×108 cm 扁形上段被方形合同拒绝。730000 的中央裙房仍保持视觉批准的 course 92，证明加粗下段没有改写
+上段所属 main。受影响回归 `Stage1CoreAndSharedBoundary`、`GroundedPodiumCoreHierarchy` 与
+`TipOverE6Seed710000TerminalCoverage` 全部 fresh 通过。该证据仍为 `Physical=NotEvaluated`，没有运行 Chaos、可见 PIE 或
+5×6。下一停点是在 Stage 1 `Core + Shared Rails` 中检查粗主干的高度、收缩位置和与高 main 的相对关系；视觉批准前
+不进入 Stage 2，也不以本静态合同宣称物理稳定。

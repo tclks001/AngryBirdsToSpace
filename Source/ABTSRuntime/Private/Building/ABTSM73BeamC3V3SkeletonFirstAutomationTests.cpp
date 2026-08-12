@@ -2810,8 +2810,23 @@ bool FABTSM73BeamC3StagedStage1BoundaryTest::RunTest(const FString& Parameters)
 			SkeletonV3TestFindCore(Plan, BoundChild->PodiumMainCoreCellId);
 		if (TestNotNull(TEXT("Bound child resolves its podium main"), Main))
 		{
-			TestEqual(TEXT("Podium main stops at the coupled-base top"),
-				Main->TopCourseIndex, Region.PodiumTopCourse);
+			const FABTSM73DAG5BV2RaisedMainReservation* Reservation =
+				Plan.RaisedMainReservations.FindByPredicate(
+					[Main](const FABTSM73DAG5BV2RaisedMainReservation& Candidate)
+					{
+						return Candidate.PodiumMainCoreCellId == Main->CoreCellId;
+					});
+			const int32 ExpectedMainTop = Reservation != nullptr
+				? Reservation->ApprovedTopCourse : Region.PodiumTopCourse;
+			TestEqual(TEXT("Podium main stops at its baseline or approved raised top"),
+				Main->TopCourseIndex, ExpectedMainTop);
+			if (Reservation != nullptr)
+			{
+				TestTrue(TEXT("Raised main starts from this region's baseline"),
+					Reservation->OriginalTopCourse == Region.PodiumTopCourse
+						&& Reservation->ApprovedTopCourse
+							== Main->RaisedPodiumMainTopCourseIndex);
+			}
 		}
 	}
 	TestTrue(TEXT("SeamRelease E6 has shared pairing intent"),
@@ -4358,6 +4373,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 	const FString& Parameters)
 {
 	using namespace ABTSM73BeamC3V3Tests;
+	int32 TotalSingleShrinkChildren = 0;
 	for (const int32 Seed : {710000, 730000, 750000})
 	{
 		FABTSM73BeamD1StagePreviewResult Result;
@@ -4372,6 +4388,98 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			continue;
 		}
 		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+		for (const ABTSM73BeamC3V3::FFullHeightChildCandidateDiagnostic& Diagnostic
+			: Plan.FullHeightChildCandidateDiagnostics)
+		{
+			AddInfo(FString::Printf(
+				TEXT("TipOverE6ShrinkCandidateLedger:Seed=%d:Demand=%d:Projection=%d:Enumerated=%d:FullHeight=%d:Shrink=%d:BalancedShrink=%d:AdapterReject=%d:JointFeasible=%d:MainReject=%d:SiblingReject=%d:ReservationReject=%d:SelectedMain=%d:SelectedShrink=%d:Reason=%s:Lower=%s:Upper=%s"),
+				Seed, Diagnostic.SemanticDemandId,
+				Diagnostic.LocalProjectionIndex,
+				Diagnostic.EnumeratedFootprintCount,
+				Diagnostic.WFCFullHeightWitnessCount,
+				Diagnostic.SingleShrinkWitnessCount,
+				Diagnostic.BalancedSingleShrinkWitnessCount,
+				Diagnostic.SingleShrinkAdapterRejectCount,
+				Diagnostic.JointFeasibleCandidateCount,
+				Diagnostic.MainLaneConflictRejectCount,
+				Diagnostic.SiblingLaneConflictRejectCount,
+				Diagnostic.SharedReservationRejectCount,
+				Diagnostic.SelectedPodiumMainCoreCellId,
+				Diagnostic.SelectedShrinkCourse,
+				*Diagnostic.SelectionReason,
+				*Diagnostic.SelectedChildBounds.ToString(),
+				*Diagnostic.SelectedUpperChildBounds.ToString()));
+		}
+		int32 SeedSingleShrinkChildren = 0;
+		for (const ABTSM73BeamC3V3::FCoreCellPlan& Child : Plan.CoreCells)
+		{
+			if (Child.HierarchyRole
+					!= ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+				|| Child.SingleShrinkCourseIndex <= 0)
+			{
+				continue;
+			}
+			++SeedSingleShrinkChildren;
+			++TotalSingleShrinkChildren;
+			const bool bSingleShrinkContractCloses =
+				Child.SingleShrinkCourseIndex < Child.TopCourseIndex
+				&& Child.UpperXStations.Num() == Child.RailCount
+				&& Child.UpperYStations.Num() == Child.RailCount
+				&& Child.UpperLocalBounds.IsValid
+				&& Child.LocalBounds.ExpandBy(KINDA_SMALL_NUMBER).IsInsideOrOn(
+					Child.UpperLocalBounds.Min)
+				&& Child.LocalBounds.ExpandBy(KINDA_SMALL_NUMBER).IsInsideOrOn(
+					Child.UpperLocalBounds.Max)
+				&& (Child.UpperLocalBounds.GetSize().X
+					< Child.LocalBounds.GetSize().X - KINDA_SMALL_NUMBER
+					|| Child.UpperLocalBounds.GetSize().Y
+						< Child.LocalBounds.GetSize().Y - KINDA_SMALL_NUMBER)
+				&& FMath::Abs(Child.LocalBounds.GetSize().X
+					- Child.LocalBounds.GetSize().Y)
+					<= KINDA_SMALL_NUMBER
+				&& FMath::Abs(Child.UpperLocalBounds.GetSize().X
+					- Child.UpperLocalBounds.GetSize().Y)
+					<= KINDA_SMALL_NUMBER
+				&& FMath::Min(Child.LocalBounds.GetSize().X,
+					Child.LocalBounds.GetSize().Y)
+					> FMath::Min(Child.UpperLocalBounds.GetSize().X,
+						Child.UpperLocalBounds.GetSize().Y)
+						+ KINDA_SMALL_NUMBER;
+			AddInfo(FString::Printf(
+				TEXT("TipOverE6SingleShrink:Seed=%d:Child=%d:Main=%d:Shrink=%d:Top=%d:Lower=%s:Upper=%s"),
+				Seed, Child.CoreCellId, Child.PodiumMainCoreCellId,
+				Child.SingleShrinkCourseIndex, Child.TopCourseIndex,
+				*Child.LocalBounds.ToString(),
+				*Child.UpperLocalBounds.ToString()));
+			TestTrue(*FString::Printf(
+				TEXT("Seed %d child %d has exactly one contained WFC shrink"),
+				Seed, Child.CoreCellId), bSingleShrinkContractCloses);
+		}
+		AddInfo(FString::Printf(
+			TEXT("TipOverE6SingleShrinkSummary:Seed=%d:Children=%d"),
+			Seed, SeedSingleShrinkChildren));
+		if (Seed == 750000)
+		{
+			const ABTSM73BeamC3V3::FCoreCellPlan* FormerThinChild =
+				Plan.CoreCells.FindByPredicate(
+					[](const ABTSM73BeamC3V3::FCoreCellPlan& Child)
+					{
+						return Child.HierarchyRole
+								== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
+							&& Child.SemanticDemandId == 6;
+					});
+			TestTrue(TEXT("TipOver 750000 former 72 cm child receives a balanced thicker trunk"),
+				FormerThinChild != nullptr
+					&& FormerThinChild->SingleShrinkCourseIndex > 0
+					&& FMath::Min(FormerThinChild->LocalBounds.GetSize().X,
+						FormerThinChild->LocalBounds.GetSize().Y) > 36.0
+					&& FMath::Abs(FormerThinChild->LocalBounds.GetSize().X
+						- FormerThinChild->LocalBounds.GetSize().Y)
+						<= KINDA_SMALL_NUMBER
+					&& FMath::Abs(FormerThinChild->UpperLocalBounds.GetSize().X
+						- FormerThinChild->UpperLocalBounds.GetSize().Y)
+						<= KINDA_SMALL_NUMBER);
+		}
 		TestTrue(*FString::Printf(
 			TEXT("Seed %d reserves at least one raised PodiumMain in Stage 0"), Seed),
 			!Plan.RaisedMainReservations.IsEmpty());
@@ -4382,6 +4490,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			const ABTSM73BeamC3V3::FCoreCellPlan* Main =
 				SkeletonV3TestFindCore(Plan, Reservation.PodiumMainCoreCellId);
 			int32 MinimumChildSplit = MAX_int32;
+			int32 MinimumApprovedMainTop = MAX_int32;
 			int32 BoundChildCount = 0;
 			int32 InfluencedChildCount = 0;
 			for (const ABTSM73BeamC3V3::FCoreCellPlan& Child : Plan.CoreCells)
@@ -4393,6 +4502,17 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				{
 					MinimumChildSplit = FMath::Min(
 						MinimumChildSplit, Child.LocalPodiumTopCourseIndex);
+					constexpr int32 MinimumVisibleChildTrunkCourses = 4;
+					const int32 ChildMainTopLimit =
+						Child.SingleShrinkCourseIndex > 0
+							? FMath::Max(Reservation.OriginalTopCourse,
+								Child.SingleShrinkCourseIndex
+									- MinimumVisibleChildTrunkCourses)
+							: Child.LocalPodiumTopCourseIndex;
+					MinimumApprovedMainTop = FMath::Min(
+						MinimumApprovedMainTop,
+						FMath::Min(Child.LocalPodiumTopCourseIndex,
+							ChildMainTopLimit));
 					++InfluencedChildCount;
 				}
 				BoundChildCount += Main != nullptr
@@ -4406,7 +4526,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 					== Reservation.ApprovedTopCourse
 				&& Main->RaisedPodiumMainReservationBounds.Equals(
 					Reservation.CoreBounds, KINDA_SMALL_NUMBER)
-				&& MinimumChildSplit == Reservation.ApprovedTopCourse
+				&& MinimumApprovedMainTop == Reservation.ApprovedTopCourse
 				&& BoundChildCount
 					== Reservation.BoundTowerChildCoreCellIds.Num()
 				&& InfluencedChildCount
@@ -4421,12 +4541,12 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 					- Reservation.CoreBounds.GetSize().Y - 72.0)
 					<= KINDA_SMALL_NUMBER;
 			AddInfo(FString::Printf(
-				TEXT("TipOverE6RaisedMain:Seed=%d:Main=%d:Reservation=%d->%d:FinalTop=%d:FinalRaisedTop=%d:MinimumInfluencedSplit=%d:Bound=%d/%d:Influenced=%d/%d:Foreign=%s:CoreSpan=%.3fx%.3f:ClearanceSpan=%.3fx%.3f"),
+				TEXT("TipOverE6RaisedMain:Seed=%d:Main=%d:Reservation=%d->%d:FinalTop=%d:FinalRaisedTop=%d:MinimumInfluencedSplit=%d:ShrinkLimitedTop=%d:Bound=%d/%d:Influenced=%d/%d:Foreign=%s:CoreSpan=%.3fx%.3f:ClearanceSpan=%.3fx%.3f"),
 				Seed, Reservation.PodiumMainCoreCellId,
 				Reservation.OriginalTopCourse, Reservation.ApprovedTopCourse,
 				Main != nullptr ? Main->TopCourseIndex : INDEX_NONE,
 				Main != nullptr ? Main->RaisedPodiumMainTopCourseIndex : INDEX_NONE,
-				MinimumChildSplit, BoundChildCount,
+				MinimumChildSplit, MinimumApprovedMainTop, BoundChildCount,
 				Reservation.BoundTowerChildCoreCellIds.Num(),
 				InfluencedChildCount,
 				Reservation.InfluencedTowerChildCoreCellIds.Num(),
@@ -4436,7 +4556,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				Reservation.ClearanceBounds.GetSize().X,
 				Reservation.ClearanceBounds.GetSize().Y));
 			TestTrue(*FString::Printf(
-				TEXT("Seed %d raises main %d to the minimum spatially influenced child split"),
+				TEXT("Seed %d raises main %d to the spatial child split limited by visible shrink trunk"),
 				Seed, Reservation.PodiumMainCoreCellId), bReservationCloses);
 			CountedRaisedMembers += Main != nullptr
 				? (Reservation.ApprovedTopCourse
@@ -4748,6 +4868,8 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				&& Plan.Summary.Stage1TotalMilliseconds
 					<= Plan.Summary.Stage1TimeBudgetMilliseconds);
 	}
+	TestTrue(TEXT("TipOver E6 optimization seeds exercise a selected one-shrink TowerChild"),
+		TotalSingleShrinkChildren > 0);
 	return true;
 }
 

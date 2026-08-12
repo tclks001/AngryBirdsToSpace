@@ -5516,8 +5516,11 @@ namespace
 			Diagnostic.BoundTowerChildCoreCellId = Child.CoreCellId;
 			Diagnostic.AssignedPodiumMainCoreCellId =
 				Child.PodiumMainCoreCellId;
+			const FBox& DemandCarryingChildBounds =
+				Child.SingleShrinkCourseIndex > 0
+					? Child.UpperLocalBounds : Child.LocalBounds;
 			Diagnostic.ChildBounds = Child.LocalBounds;
-			FBox ChildFootprint = Child.LocalBounds;
+			FBox ChildFootprint = DemandCarryingChildBounds;
 			ChildFootprint.Min.X -= BlockUnitsCM * 0.5;
 			ChildFootprint.Min.Y -= BlockUnitsCM * 0.5;
 			ChildFootprint.Max.X += BlockUnitsCM * 0.5;
@@ -5525,10 +5528,22 @@ namespace
 			Diagnostic.BodyChildXYOverlapAreaCM2 = XYOverlapArea(
 				Demand.BodyBounds, ChildFootprint);
 			Diagnostic.bChildCenterInsideBodyXY = ContainsXY(
-				Demand.BodyBounds, Child.LocalBounds.GetCenter());
+				Demand.BodyBounds, DemandCarryingChildBounds.GetCenter());
 			Diagnostic.bChildInsideContinuousFitXY =
 				Demand.bHasContinuousCoreFit
 				&& BoundsContainXY(Demand.ContinuousCoreFitBounds, ChildFootprint);
+			// The upper section was already proved course-by-course against this
+			// exact semantic demand lineage during candidate enumeration.  Synthetic
+			// raised-main Body volumes may conservatively clip the older aggregate
+			// ContinuousCoreFitBounds in the second pass; they must not invalidate
+			// that stronger rail-level witness.
+			if (Child.SingleShrinkCourseIndex > 0
+				&& Child.SemanticDemandId == Demand.DemandId
+				&& Child.TopCourseIndex == Demand.RequiredTopCourse)
+			{
+				Diagnostic.bChildCenterInsideBodyXY = true;
+				Diagnostic.bChildInsideContinuousFitXY = true;
+			}
 			Diagnostic.MappingReason = TEXT("AuthoritativeSemanticDemandId");
 			if (Plan.CoreCells.IsValidIndex(
 				Diagnostic.AssignedPodiumMainCoreCellId))
@@ -7431,6 +7446,32 @@ namespace
 					Core.MemberIndices.Num());
 				return false;
 			}
+			if (Core.SingleShrinkCourseIndex < 0
+				|| Core.SingleShrinkCourseIndex >= Core.TopCourseIndex
+				|| (Core.SingleShrinkCourseIndex == 0
+					&& (!Core.UpperXStations.IsEmpty()
+						|| !Core.UpperYStations.IsEmpty()
+						|| Core.UpperLocalBounds.IsValid))
+				|| (Core.SingleShrinkCourseIndex > 0
+					&& (Core.HierarchyRole != ECoreHierarchyRole::TowerChild
+						|| Core.UpperXStations.Num() != Core.RailCount
+						|| Core.UpperYStations.Num() != Core.RailCount
+						|| !Core.UpperLocalBounds.IsValid
+						|| Core.UpperLocalBounds.Min.X
+							< Core.LocalBounds.Min.X - GeometryToleranceCM
+						|| Core.UpperLocalBounds.Max.X
+							> Core.LocalBounds.Max.X + GeometryToleranceCM
+						|| Core.UpperLocalBounds.Min.Y
+							< Core.LocalBounds.Min.Y - GeometryToleranceCM
+						|| Core.UpperLocalBounds.Max.Y
+							> Core.LocalBounds.Max.Y + GeometryToleranceCM)))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3TowerChildSingleShrinkContractInvalid:Core=%d:Shrink=%d:Top=%d:UpperX=%d:UpperY=%d"),
+					Core.CoreCellId, Core.SingleShrinkCourseIndex, Core.TopCourseIndex,
+					Core.UpperXStations.Num(), Core.UpperYStations.Num());
+				return false;
+			}
 			const FVector BodySize = Component.BodyBounds.GetSize();
 			const FVector CoreSize = Core.LocalBounds.GetSize();
 			if ((BodySize.X + GeometryToleranceCM >= CoreSize.X + 2.0 * BlockUnitsCM
@@ -7516,17 +7557,22 @@ namespace
 					const FBox SharedBounds = PlannedMemberBounds(Member);
 					const int32 AxisIndex = static_cast<int32>(Member.Axis);
 					const int32 CrossAxisIndex = AxisIndex == 0 ? 1 : 0;
+					const bool bUpperCourse = Core.SingleShrinkCourseIndex > 0
+						&& Member.CourseIndex >= Core.SingleShrinkCourseIndex;
 					const TArray<int32>& ExpectedStations = AxisIndex == 0
-						? Core.YStations : Core.XStations;
+						? (bUpperCourse ? Core.UpperYStations : Core.YStations)
+						: (bUpperCourse ? Core.UpperXStations : Core.XStations);
+					const FBox& ExpectedBounds = bUpperCourse
+						? Core.UpperLocalBounds : Core.LocalBounds;
 					const int32 ActualStation = FMath::RoundToInt(
 						SharedBounds.GetCenter()[CrossAxisIndex] / BlockUnitsCM);
 					const FSharedCourseLanePlan* Lane = FindSharedLanePlan(Plan, Member);
 					if (!ExpectedStations.Contains(ActualStation) || Lane == nullptr
 						|| Lane->RequiredMinimumCM
-							> Core.LocalBounds.Min[AxisIndex]
+							> ExpectedBounds.Min[AxisIndex]
 								- BlockUnitsCM * 0.5 + GeometryToleranceCM
 						|| Lane->RequiredMaximumCM
-							< Core.LocalBounds.Max[AxisIndex]
+							< ExpectedBounds.Max[AxisIndex]
 								+ BlockUnitsCM * 0.5 - GeometryToleranceCM)
 					{
 						++Plan.Summary.SharedCourseBandViolationCount;
@@ -7535,7 +7581,7 @@ namespace
 							Core.CoreCellId, MemberIndex, ActualStation,
 							Lane != nullptr ? Lane->RequiredMinimumCM : DBL_MAX,
 							Lane != nullptr ? Lane->RequiredMaximumCM : -DBL_MAX,
-							Core.LocalBounds.Min[AxisIndex], Core.LocalBounds.Max[AxisIndex]);
+							ExpectedBounds.Min[AxisIndex], ExpectedBounds.Max[AxisIndex]);
 						return false;
 					}
 				}
@@ -12288,6 +12334,19 @@ namespace
 				double Distance = DBL_MAX;
 				TArray<int32> XStations;
 				TArray<int32> YStations;
+				/** Conservative lane union used only by joint conflict pruning. */
+				TArray<int32> ConflictXStations;
+				TArray<int32> ConflictYStations;
+				/** Optional narrower full-height section.  The primary bounds/stations
+				 * remain the grounded lower trunk so every existing lane-conflict test
+				 * continues to fail closed. */
+				int32 ShrinkCourse = 0;
+				int32 UpperMinimumX = INDEX_NONE;
+				int32 UpperMaximumX = INDEX_NONE;
+				int32 UpperMinimumY = INDEX_NONE;
+				int32 UpperMaximumY = INDEX_NONE;
+				TArray<int32> UpperXStations;
+				TArray<int32> UpperYStations;
 			};
 			TArray<TArray<FJointChildFootprint>>
 				FullHeightChildCandidatesByProjection;
@@ -12361,6 +12420,9 @@ namespace
 				{
 					const FBox& ProjectionBounds =
 						RequiredHighProjectionTerminalBounds[ProjectionIndex];
+					const FBox CandidateSearchBounds = ProjectionBounds
+						+ RequiredHighProjectionEntryBounds[ProjectionIndex]
+						+ RequiredHighProjectionBranchBounds[ProjectionIndex];
 					FFullHeightChildCandidateDiagnostic& Diagnostic =
 						OutPlan.FullHeightChildCandidateDiagnostics
 							.AddDefaulted_GetRef();
@@ -12371,12 +12433,20 @@ namespace
 					Diagnostic.RegionId = ProjectionIndex;
 					Diagnostic.PodiumTopCourse = PodiumTopCourse;
 					const int32 SeedMinimumX = QMin(
-						ProjectionBounds.Min.X + BlockUnitsCM * 0.5);
+						CandidateSearchBounds.Min.X + BlockUnitsCM * 0.5);
 					const int32 SeedMaximumX = QMax(
-						ProjectionBounds.Max.X - BlockUnitsCM * 0.5);
+						CandidateSearchBounds.Max.X - BlockUnitsCM * 0.5);
 					const int32 SeedMinimumY = QMin(
-						ProjectionBounds.Min.Y + BlockUnitsCM * 0.5);
+						CandidateSearchBounds.Min.Y + BlockUnitsCM * 0.5);
 					const int32 SeedMaximumY = QMax(
+						CandidateSearchBounds.Max.Y - BlockUnitsCM * 0.5);
+					const int32 UpperSeedMinimumX = QMin(
+						ProjectionBounds.Min.X + BlockUnitsCM * 0.5);
+					const int32 UpperSeedMaximumX = QMax(
+						ProjectionBounds.Max.X - BlockUnitsCM * 0.5);
+					const int32 UpperSeedMinimumY = QMin(
+						ProjectionBounds.Min.Y + BlockUnitsCM * 0.5);
+					const int32 UpperSeedMaximumY = QMax(
 						ProjectionBounds.Max.Y - BlockUnitsCM * 0.5);
 					const int32 MaximumSpanX = FMath::Min(
 						MaximumHorizontalUnits, SeedMaximumX - SeedMinimumX);
@@ -12461,6 +12531,7 @@ namespace
 						return bCovered;
 					};
 					TArray<FJointChildFootprint> WFCFeasibleCandidates;
+					TArray<FJointChildFootprint> LowerTrunkCandidates;
 					for (int32 SpanX = 1; SpanX <= MaximumSpanX; ++SpanX)
 					{
 						for (int32 SpanY = 1; SpanY <= MaximumSpanY; ++SpanY)
@@ -12558,11 +12629,6 @@ namespace
 										}
 										ContinuousTopCourse = Course + 1;
 									}
-									if (ContinuousTopCourse != MaximumCandidateTopCourse)
-									{
-										++Diagnostic.WFCEnvelopeRejectCount;
-										continue;
-									}
 									FJointChildFootprint Candidate;
 									Candidate.MinimumX = MinimumX;
 									Candidate.MaximumX = MaximumX;
@@ -12582,7 +12648,32 @@ namespace
 											ProjectionBounds.GetCenter().Y));
 									Candidate.XStations = XStations;
 									Candidate.YStations = YStations;
-									WFCFeasibleCandidates.Add(MoveTemp(Candidate));
+									Candidate.ConflictXStations = XStations;
+									Candidate.ConflictYStations = YStations;
+									if (ContinuousTopCourse == MaximumCandidateTopCourse)
+									{
+										if (MinimumX >= UpperSeedMinimumX
+											&& MaximumX <= UpperSeedMaximumX
+											&& MinimumY >= UpperSeedMinimumY
+											&& MaximumY <= UpperSeedMaximumY)
+										{
+											WFCFeasibleCandidates.Add(MoveTemp(Candidate));
+										}
+									}
+									else
+									{
+										++Diagnostic.WFCEnvelopeRejectCount;
+										// The first uncovered course is itself a semantic WFC
+										// narrowing seam.  Retain the widest useful grounded
+										// prefix as a possible single-shrink lower trunk.
+										constexpr int32 MinimumVisibleTrunkCourses = 4;
+										if (ContinuousTopCourse >= PodiumTopCourse
+											+ MinimumVisibleTrunkCourses
+											&& ContinuousTopCourse <= MaximumCandidateTopCourse - 2)
+										{
+											LowerTrunkCandidates.Add(MoveTemp(Candidate));
+										}
+									}
 								}
 							}
 						}
@@ -12600,9 +12691,51 @@ namespace
 					}
 					auto& FullHeightCandidates =
 						FullHeightChildCandidatesByProjection[ProjectionIndex];
-					FullHeightCandidates.Sort([](
-						const FJointChildFootprint& A,
-						const FJointChildFootprint& B)
+					// Keep the fixed upper witness authoritative. A retained prefix may
+					// widen only the grounded lower part, must geometrically contain the
+					// upper section, and introduces exactly one transition. Preserve a
+					// bounded group of robust alternatives: the former single "latest"
+					// lower witness could be a flat rectangle and could later conflict
+					// with a main, discarding an earlier square trunk that was legal.
+					// Both sections are square in lattice space. Allowing a one-interval
+					// imbalance still emits a visibly flat 72 x 108 cm core once member
+					// thickness is included, which violates the child-column contract.
+					FullHeightCandidates.RemoveAllSwap(
+						[](const FJointChildFootprint& Candidate)
+						{
+							return Candidate.Imbalance != 0;
+						}, EAllowShrinking::No);
+					const int32 FixedCandidateCount = FullHeightCandidates.Num();
+					constexpr int32 MaximumShrinkAlternativesPerUpper = 4;
+					for (int32 UpperIndex = 0; UpperIndex < FixedCandidateCount; ++UpperIndex)
+					{
+						const FJointChildFootprint& Upper = FullHeightCandidates[UpperIndex];
+						// A shrink must remain a column, not trade one weak direction for a
+						// long blade. One lattice interval accommodates quantized WFC seams.
+						if (Upper.Imbalance != 0)
+						{
+							continue;
+						}
+						TArray<const FJointChildFootprint*> CompatibleLowers;
+						for (const FJointChildFootprint& Lower : LowerTrunkCandidates)
+						{
+							const bool bContainsUpper = Lower.MinimumX <= Upper.MinimumX
+								&& Lower.MaximumX >= Upper.MaximumX
+								&& Lower.MinimumY <= Upper.MinimumY
+								&& Lower.MaximumY >= Upper.MaximumY;
+							const bool bStrengthensWeakAxis =
+								Lower.MinimumSpan > Upper.MinimumSpan;
+							const bool bBalancedLower = Lower.Imbalance == 0;
+							if (!bContainsUpper || !bStrengthensWeakAxis
+								|| !bBalancedLower)
+							{
+								continue;
+							}
+							CompatibleLowers.Add(&Lower);
+						}
+						CompatibleLowers.Sort([](
+							const FJointChildFootprint& A,
+							const FJointChildFootprint& B)
 						{
 							if (A.MinimumSpan != B.MinimumSpan)
 							{
@@ -12611,6 +12744,119 @@ namespace
 							if (A.Imbalance != B.Imbalance)
 							{
 								return A.Imbalance < B.Imbalance;
+							}
+							if (A.Area != B.Area)
+							{
+								return A.Area > B.Area;
+							}
+							if (A.TopCourse != B.TopCourse)
+							{
+								return A.TopCourse > B.TopCourse;
+							}
+							if (!FMath::IsNearlyEqual(A.Distance, B.Distance))
+							{
+								return A.Distance < B.Distance;
+							}
+							return A.MinimumY != B.MinimumY
+								? A.MinimumY < B.MinimumY : A.MinimumX < B.MinimumX;
+						});
+						int32 AddedAlternativeCount = 0;
+						for (const FJointChildFootprint* BestLower : CompatibleLowers)
+						{
+							if (BestLower == nullptr
+								|| AddedAlternativeCount
+									>= MaximumShrinkAlternativesPerUpper)
+							{
+								break;
+							}
+							const int32 AdapterCourse = BestLower->TopCourse - 1;
+							const EABTSM73BeamAFrameAxis AdapterAxis =
+								(AdapterCourse & 1) == 0
+									? EABTSM73BeamAFrameAxis::X
+									: EABTSM73BeamAFrameAxis::Y;
+							const TArray<int32>& AdapterCrossStations =
+								AdapterAxis == EABTSM73BeamAFrameAxis::X
+									? Upper.YStations : Upper.XStations;
+							const bool bAdapterCovered =
+								AdapterCrossStations.ContainsByPredicate(
+									[&](const int32 CrossStation)
+									{
+										return !IsCachedChildRailCovered(AdapterCourse,
+											AdapterAxis,
+											AdapterAxis == EABTSM73BeamAFrameAxis::X
+												? BestLower->MinimumX : BestLower->MinimumY,
+											AdapterAxis == EABTSM73BeamAFrameAxis::X
+												? BestLower->MaximumX : BestLower->MaximumY,
+											CrossStation, false);
+									}) == false;
+							if (!bAdapterCovered)
+							{
+								++Diagnostic.SingleShrinkAdapterRejectCount;
+								continue;
+							}
+							FJointChildFootprint Shrink = *BestLower;
+							Shrink.TopCourse = Upper.TopCourse;
+							Shrink.BodyTopCourse = Upper.BodyTopCourse;
+							Shrink.ShrinkCourse = BestLower->TopCourse;
+							Shrink.UpperMinimumX = Upper.MinimumX;
+							Shrink.UpperMaximumX = Upper.MaximumX;
+							Shrink.UpperMinimumY = Upper.MinimumY;
+							Shrink.UpperMaximumY = Upper.MaximumY;
+							Shrink.UpperXStations = Upper.XStations;
+							Shrink.UpperYStations = Upper.YStations;
+							Shrink.ConflictXStations.Append(Upper.XStations);
+							Shrink.ConflictYStations.Append(Upper.YStations);
+							Shrink.ConflictXStations.Sort();
+							Shrink.ConflictYStations.Sort();
+							for (int32 Index = Shrink.ConflictXStations.Num() - 1;
+								Index > 0; --Index)
+							{
+								if (Shrink.ConflictXStations[Index]
+									== Shrink.ConflictXStations[Index - 1])
+								{
+									Shrink.ConflictXStations.RemoveAt(Index);
+								}
+							}
+							for (int32 Index = Shrink.ConflictYStations.Num() - 1;
+								Index > 0; --Index)
+							{
+								if (Shrink.ConflictYStations[Index]
+									== Shrink.ConflictYStations[Index - 1])
+								{
+									Shrink.ConflictYStations.RemoveAt(Index);
+								}
+							}
+							FullHeightCandidates.Add(MoveTemp(Shrink));
+							++Diagnostic.SingleShrinkWitnessCount;
+							++Diagnostic.BalancedSingleShrinkWitnessCount;
+							++AddedAlternativeCount;
+						}
+					}
+					FullHeightCandidates.Sort([](
+						const FJointChildFootprint& A,
+						const FJointChildFootprint& B)
+						{
+							const bool bABalanced = A.Imbalance == 0;
+							const bool bBBalanced = B.Imbalance == 0;
+							if (bABalanced != bBBalanced)
+							{
+								return bABalanced;
+							}
+							if (A.MinimumSpan != B.MinimumSpan)
+							{
+								return A.MinimumSpan > B.MinimumSpan;
+							}
+							if (A.Imbalance != B.Imbalance)
+							{
+								return A.Imbalance < B.Imbalance;
+							}
+							if ((A.ShrinkCourse > 0) != (B.ShrinkCourse > 0))
+							{
+								return A.ShrinkCourse > 0;
+							}
+							if (A.ShrinkCourse != B.ShrinkCourse)
+							{
+								return A.ShrinkCourse > B.ShrinkCourse;
 							}
 							if (A.Area != B.Area)
 							{
@@ -13564,7 +13810,8 @@ namespace
 													GroundedCandidate.YStations,
 													Child.MinimumX, Child.MaximumX,
 													Child.MinimumY, Child.MaximumY,
-													Child.XStations, Child.YStations);
+											Child.ConflictXStations,
+											Child.ConflictYStations);
 											});
 									if (bSupportsFullHeightChild)
 									{
@@ -13863,7 +14110,8 @@ namespace
 								Main.XStations, Main.YStations,
 								Child.MinimumX, Child.MaximumX,
 								Child.MinimumY, Child.MaximumY,
-								Child.XStations, Child.YStations))
+								Child.ConflictXStations,
+								Child.ConflictYStations))
 							{
 								CompatibleWords[ChildIndex >> 6]
 									|= uint64(1) << (ChildIndex & 63);
@@ -14066,10 +14314,12 @@ namespace
 											&& JointFootprintsConflict(
 												Child->MinimumX, Child->MaximumX,
 												Child->MinimumY, Child->MaximumY,
-												Child->XStations, Child->YStations,
+											Child->ConflictXStations,
+											Child->ConflictYStations,
 												Sibling->MinimumX, Sibling->MaximumX,
 												Sibling->MinimumY, Sibling->MaximumY,
-												Sibling->XStations, Sibling->YStations);
+											Sibling->ConflictXStations,
+											Sibling->ConflictYStations);
 									});
 							if (bConflictsSibling)
 							{
@@ -15032,17 +15282,21 @@ namespace
 							(MaximumY + 0.5) * BlockUnitsCM,
 							Existing.LocalBounds.Min.Y - BlockUnitsCM * 0.5,
 							Existing.LocalBounds.Max.Y + BlockUnitsCM * 0.5);
+						TArray<int32> ExistingXStations = Existing.XStations;
+						TArray<int32> ExistingYStations = Existing.YStations;
+						ExistingXStations.Append(Existing.UpperXStations);
+						ExistingYStations.Append(Existing.UpperYStations);
 						if ((XOverlap > GeometryToleranceCM
 								&& YStations.ContainsByPredicate(
-									[&Existing](const int32 Station)
+									[&ExistingYStations](const int32 Station)
 									{
-										return Existing.YStations.Contains(Station);
+										return ExistingYStations.Contains(Station);
 									}))
 							|| (YOverlap > GeometryToleranceCM
 								&& XStations.ContainsByPredicate(
-									[&Existing](const int32 Station)
+									[&ExistingXStations](const int32 Station)
 									{
-										return Existing.XStations.Contains(Station);
+										return ExistingXStations.Contains(Station);
 									})))
 						{
 							return true;
@@ -15940,6 +16194,13 @@ namespace
 					int32 ChildBodyTopCourse = INDEX_NONE;
 					int32 ChildBaseSource = INDEX_NONE;
 					int32 ChildPodiumMainCoreCellId = INDEX_NONE;
+					int32 ChildShrinkCourse = 0;
+					int32 ChildUpperMinimumX = INDEX_NONE;
+					int32 ChildUpperMaximumX = INDEX_NONE;
+					int32 ChildUpperMinimumY = INDEX_NONE;
+					int32 ChildUpperMaximumY = INDEX_NONE;
+					TArray<int32> ChildUpperXStations;
+					TArray<int32> ChildUpperYStations;
 					int32 BestChildCouplingPatches = -1;
 					int32 BestChildMinimumSpan = -1;
 					int32 BestChildImbalance = MAX_int32;
@@ -15970,10 +16231,11 @@ namespace
 										}
 									}
 									const TArray<int32>& XStations =
-										FullHeightCandidate.XStations;
+										FullHeightCandidate.ConflictXStations;
 									const TArray<int32>& YStations =
-										FullHeightCandidate.YStations;
-									if (XStations.Num() != 2 || YStations.Num() != 2)
+										FullHeightCandidate.ConflictYStations;
+									if (FullHeightCandidate.XStations.Num() != 2
+										|| FullHeightCandidate.YStations.Num() != 2)
 									{
 										++ChildLaneConflictRejectCount;
 										continue;
@@ -15997,12 +16259,18 @@ namespace
 												Existing.LocalBounds.Min.Y / BlockUnitsCM);
 											const int32 ExistingMaximumY = FMath::RoundToInt(
 												Existing.LocalBounds.Max.Y / BlockUnitsCM);
+											TArray<int32> ExistingXStations =
+												Existing.XStations;
+											TArray<int32> ExistingYStations =
+												Existing.YStations;
+											ExistingXStations.Append(Existing.UpperXStations);
+											ExistingYStations.Append(Existing.UpperYStations);
 											if (JointFootprintsConflict(
 												MinimumX, MaximumX, MinimumY, MaximumY,
 												XStations, YStations,
 												ExistingMinimumX, ExistingMaximumX,
 												ExistingMinimumY, ExistingMaximumY,
-												Existing.XStations, Existing.YStations))
+												ExistingXStations, ExistingYStations))
 											{
 												bConflictsMain |= Existing.HierarchyRole
 													== ECoreHierarchyRole::PodiumMain;
@@ -16024,9 +16292,32 @@ namespace
 										continue;
 									}
 									int32 CouplingPatches = 0;
+									// Podium ownership follows the demand-carrying upper
+									// section.  A widened grounded trunk may overlap or
+									// approach several podium mains and is only a bearing
+									// optimization; letting it reassign semantic ownership
+									// changes an already-approved local podium partition.
+									const bool bHasShrink =
+										FullHeightCandidate.ShrinkCourse > 0;
+									const int32 CouplingMinimumX = bHasShrink
+										? FullHeightCandidate.UpperMinimumX : MinimumX;
+									const int32 CouplingMaximumX = bHasShrink
+										? FullHeightCandidate.UpperMaximumX : MaximumX;
+									const int32 CouplingMinimumY = bHasShrink
+										? FullHeightCandidate.UpperMinimumY : MinimumY;
+									const int32 CouplingMaximumY = bHasShrink
+										? FullHeightCandidate.UpperMaximumY : MaximumY;
+									const TArray<int32>& CouplingXStations = bHasShrink
+										? FullHeightCandidate.UpperXStations
+										: FullHeightCandidate.XStations;
+									const TArray<int32>& CouplingYStations = bHasShrink
+										? FullHeightCandidate.UpperYStations
+										: FullHeightCandidate.YStations;
 									const int32 CandidatePodiumMainCoreCellId =
-										FindBestCoupledPodiumMain(MinimumX, MaximumX,
-											MinimumY, MaximumY, XStations, YStations,
+										FindBestCoupledPodiumMain(
+											CouplingMinimumX, CouplingMaximumX,
+											CouplingMinimumY, CouplingMaximumY,
+											CouplingXStations, CouplingYStations,
 											CouplingPatches);
 									if (CouplingPatches <= 0)
 									{
@@ -16090,6 +16381,13 @@ namespace
 										ChildBaseSource = BaseSource;
 										ChildPodiumMainCoreCellId =
 											CandidatePodiumMainCoreCellId;
+										ChildShrinkCourse = FullHeightCandidate.ShrinkCourse;
+										ChildUpperMinimumX = FullHeightCandidate.UpperMinimumX;
+										ChildUpperMaximumX = FullHeightCandidate.UpperMaximumX;
+										ChildUpperMinimumY = FullHeightCandidate.UpperMinimumY;
+										ChildUpperMaximumY = FullHeightCandidate.UpperMaximumY;
+										ChildUpperXStations = FullHeightCandidate.UpperXStations;
+										ChildUpperYStations = FullHeightCandidate.UpperYStations;
 										BestChildCouplingPatches = CouplingPatches;
 										BestChildMinimumSpan = MinimumSpan;
 										BestChildImbalance = Imbalance;
@@ -16135,6 +16433,18 @@ namespace
 						ChildMinimumX, ChildMaximumX, Child.RailCount);
 					Child.YStations = MakeUniformStations(
 						ChildMinimumY, ChildMaximumY, Child.RailCount);
+					Child.SingleShrinkCourseIndex = ChildShrinkCourse;
+					if (ChildShrinkCourse > 0)
+					{
+						Child.UpperXStations = MoveTemp(ChildUpperXStations);
+						Child.UpperYStations = MoveTemp(ChildUpperYStations);
+						Child.UpperLocalBounds = FBox(
+							Position(ChildUpperMinimumX * BlockUnitsCM,
+								ChildUpperMinimumY * BlockUnitsCM, Root.GroundZCM),
+							Position(ChildUpperMaximumX * BlockUnitsCM,
+								ChildUpperMaximumY * BlockUnitsCM,
+								Root.GroundZCM + ChildTopCourse * BlockUnitsCM));
+					}
 					Child.LocalBounds = FBox(
 						Position(Child.XStations[0] * BlockUnitsCM,
 							Child.YStations[0] * BlockUnitsCM, Root.GroundZCM),
@@ -16144,8 +16454,14 @@ namespace
 					FullHeightDiagnostic->SelectedPodiumMainCoreCellId =
 						Child.PodiumMainCoreCellId;
 					FullHeightDiagnostic->SelectedChildBounds = Child.LocalBounds;
+					FullHeightDiagnostic->SelectedUpperChildBounds =
+						Child.UpperLocalBounds;
+					FullHeightDiagnostic->SelectedShrinkCourse =
+						Child.SingleShrinkCourseIndex;
 					FullHeightDiagnostic->SelectionReason =
-						TEXT("SelectedWFCFullHeightFixedFootprint");
+						Child.SingleShrinkCourseIndex > 0
+							? TEXT("SelectedWFCSingleShrinkFullHeightFootprint")
+							: TEXT("SelectedWFCFullHeightFixedFootprint");
 					TArray<int32> PreviousChildCourse;
 					for (int32 Course = 0; Course < ChildTopCourse; ++Course)
 					{
@@ -16154,10 +16470,22 @@ namespace
 							: EABTSM73BeamAFrameAxis::Y;
 						const double Z = Root.GroundZCM
 							+ (Course + 0.5) * BlockUnitsCM;
+						const bool bAdapterCourse = Child.SingleShrinkCourseIndex > 0
+							&& Course == Child.SingleShrinkCourseIndex - 1;
+						const bool bUpperCourse = Child.SingleShrinkCourseIndex > 0
+							&& Course >= Child.SingleShrinkCourseIndex;
+						const FBox& CourseBounds = bUpperCourse
+							? Child.UpperLocalBounds : Child.LocalBounds;
+						const TArray<int32>& CourseXStations = bUpperCourse
+							|| (bAdapterCourse && Axis == EABTSM73BeamAFrameAxis::Y)
+							? Child.UpperXStations : Child.XStations;
+						const TArray<int32>& CourseYStations = bUpperCourse
+							|| (bAdapterCourse && Axis == EABTSM73BeamAFrameAxis::X)
+							? Child.UpperYStations : Child.YStations;
 						const double CenterX =
-							(Child.LocalBounds.Min.X + Child.LocalBounds.Max.X) * 0.5;
+							(CourseBounds.Min.X + CourseBounds.Max.X) * 0.5;
 						const double CenterY =
-							(Child.LocalBounds.Min.Y + Child.LocalBounds.Max.Y) * 0.5;
+							(CourseBounds.Min.Y + CourseBounds.Max.Y) * 0.5;
 						const int32 Source = Course < Child.BodyTopCourseIndex
 							? SelectProjectionSourceVolume(Root, CenterX, CenterY, Z)
 							: SelectCoreProjectionSourceVolume(Root, CenterX, CenterY, Z);
@@ -16171,19 +16499,19 @@ namespace
 						TArray<int32> CurrentChildCourse;
 						const TArray<int32>& CrossStations =
 							Axis == EABTSM73BeamAFrameAxis::X
-								? Child.YStations : Child.XStations;
+								? CourseYStations : CourseXStations;
 						for (int32 Rail = 0; Rail < CrossStations.Num(); ++Rail)
 						{
 							const FVector Start = Axis == EABTSM73BeamAFrameAxis::X
-								? Position(Child.LocalBounds.Min.X - BlockUnitsCM * 0.5,
+								? Position(CourseBounds.Min.X - BlockUnitsCM * 0.5,
 									CrossStations[Rail] * BlockUnitsCM, Z)
 								: Position(CrossStations[Rail] * BlockUnitsCM,
-									Child.LocalBounds.Min.Y - BlockUnitsCM * 0.5, Z);
+									CourseBounds.Min.Y - BlockUnitsCM * 0.5, Z);
 							const FVector End = Axis == EABTSM73BeamAFrameAxis::X
-								? Position(Child.LocalBounds.Max.X + BlockUnitsCM * 0.5,
+								? Position(CourseBounds.Max.X + BlockUnitsCM * 0.5,
 									CrossStations[Rail] * BlockUnitsCM, Z)
 								: Position(CrossStations[Rail] * BlockUnitsCM,
-									Child.LocalBounds.Max.Y + BlockUnitsCM * 0.5, Z);
+									CourseBounds.Max.Y + BlockUnitsCM * 0.5, Z);
 							const int32 MemberIndex = OutPlan.Members.Num();
 							if (!AddPlannedMember(OutPlan, EOwnerKind::CoreCell,
 								ESkeletonMemberKind::CoreCourse, Child.CoreCellId,
@@ -18158,6 +18486,16 @@ namespace
 				{
 					CoreCanonical += FString::Printf(TEXT(":Y%d"), Station);
 				}
+				CoreCanonical += FString::Printf(TEXT(":SHRINK=%d"),
+					Core.SingleShrinkCourseIndex);
+				for (const int32 Station : Core.UpperXStations)
+				{
+					CoreCanonical += FString::Printf(TEXT(":UX%d"), Station);
+				}
+				for (const int32 Station : Core.UpperYStations)
+				{
+					CoreCanonical += FString::Printf(TEXT(":UY%d"), Station);
+				}
 				for (const int32 MemberIndex : Core.LocalPodiumLegMemberIndices)
 				{
 					CoreCanonical += FString::Printf(TEXT(":LM%d"), MemberIndex);
@@ -18735,6 +19073,16 @@ namespace
 			{
 				CoreCanonical += FString::Printf(TEXT(":Y%d"), Station);
 			}
+			CoreCanonical += FString::Printf(TEXT(":SHRINK=%d"),
+				Core.SingleShrinkCourseIndex);
+			for (const int32 Station : Core.UpperXStations)
+			{
+				CoreCanonical += FString::Printf(TEXT(":UX%d"), Station);
+			}
+			for (const int32 Station : Core.UpperYStations)
+			{
+				CoreCanonical += FString::Printf(TEXT(":UY%d"), Station);
+			}
 			for (const int32 MemberIndex : Core.LocalPodiumLegMemberIndices)
 			{
 				CoreCanonical += FString::Printf(TEXT(":LM%d"), MemberIndex);
@@ -19242,13 +19590,21 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(
 		}
 		InfluencedChildren.Sort();
 		ForeignChildren.Sort();
+		constexpr int32 MinimumVisibleChildTrunkCourses = 4;
 		int32 ApprovedTop = MAX_int32;
 		for (const FCoreCellPlan& Child : Plan.CoreCells)
 		{
 			if (InfluencedChildren.Contains(Child.CoreCellId))
 			{
-				ApprovedTop = FMath::Min(
-					ApprovedTop, Child.LocalPodiumTopCourseIndex);
+				const int32 ChildTransitionLimit =
+					Child.SingleShrinkCourseIndex > 0
+						? FMath::Max(Main.TopCourseIndex,
+							Child.SingleShrinkCourseIndex
+								- MinimumVisibleChildTrunkCourses)
+						: Child.LocalPodiumTopCourseIndex;
+				ApprovedTop = FMath::Min(ApprovedTop,
+					FMath::Min(Child.LocalPodiumTopCourseIndex,
+						ChildTransitionLimit));
 			}
 		}
 		ApprovedTop = FMath::Max(Main.TopCourseIndex, ApprovedTop);

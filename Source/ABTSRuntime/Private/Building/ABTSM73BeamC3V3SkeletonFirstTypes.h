@@ -291,6 +291,13 @@ namespace ABTSM73BeamC3V3
 		int32 GroundSourceRejectCount = 0;
 		int32 WFCEnvelopeRejectCount = 0;
 		int32 WFCFullHeightWitnessCount = 0;
+		/** Full-height upper witnesses for which a wider grounded lower trunk and
+		 * one semantic WFC transition were also proved. */
+		int32 SingleShrinkWitnessCount = 0;
+		/** Single-shrink witnesses whose lower and upper footprints are square in
+		 * the 36 cm lattice. */
+		int32 BalancedSingleShrinkWitnessCount = 0;
+		int32 SingleShrinkAdapterRejectCount = 0;
 		int32 MainLaneConflictRejectCount = 0;
 		/** Legal grounded candidates without direct alternating-course bearing
 		 * contact to a selected podium main.  This is diagnostic/preference data,
@@ -301,6 +308,10 @@ namespace ABTSM73BeamC3V3
 		int32 JointFeasibleCandidateCount = 0;
 		int32 SelectedPodiumMainCoreCellId = INDEX_NONE;
 		FBox SelectedChildBounds = FBox(EForceInit::ForceInit);
+		FBox SelectedUpperChildBounds = FBox(EForceInit::ForceInit);
+		/** Exclusive first course using SelectedUpperChildBounds; zero means the
+		 * selected child keeps one fixed footprint. */
+		int32 SelectedShrinkCourse = 0;
 		FString SelectionReason;
 	};
 
@@ -668,6 +679,12 @@ namespace ABTSM73BeamC3V3
 		/** The physical rail stations, in 36 cm lattice units. */
 		TArray<int32> XStations;
 		TArray<int32> YStations;
+		/** TowerChild only: at/above this exclusive lower-trunk boundary the
+		 * course emitter switches to UpperX/YStations. Zero means no shrink. */
+		int32 SingleShrinkCourseIndex = 0;
+		TArray<int32> UpperXStations;
+		TArray<int32> UpperYStations;
+		FBox UpperLocalBounds = FBox(EForceInit::ForceInit);
 		/** Complete ordered course membership, RailCount rails per course. */
 		TArray<int32> MemberIndices;
 		/** TowerChild only: exact physical slots below LocalPodiumTopCourseIndex.
