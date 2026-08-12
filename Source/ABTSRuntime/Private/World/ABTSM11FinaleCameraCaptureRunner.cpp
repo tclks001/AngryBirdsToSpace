@@ -35,6 +35,7 @@
 #include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleActors.h"
+#include "World/ABTSM11CandidateExperienceCatalog.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM51WorldActors.h"
 
@@ -426,6 +427,47 @@ namespace ABTSM11FinaleCameraCaptureRunnerPrivate
 			return TEXT("Unknown");
 		}
 	}
+
+	const TCHAR* EnvironmentStageLabel(
+		const EABTSM11FinaleEnvironmentStage Stage)
+	{
+		switch (Stage)
+		{
+		case EABTSM11FinaleEnvironmentStage::GroundLaunch:
+			return TEXT("GroundLaunch");
+		case EABTSM11FinaleEnvironmentStage::AtmosphereTransition:
+			return TEXT("AtmosphereTransition");
+		case EABTSM11FinaleEnvironmentStage::DeepSpace:
+			return TEXT("DeepSpace");
+		case EABTSM11FinaleEnvironmentStage::Recovering:
+			return TEXT("Recovering");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* StylizedProfileLabel(const EABTSStylizedRenderProfile Profile)
+	{
+		switch (Profile)
+		{
+		case EABTSStylizedRenderProfile::GroundDay:
+			return TEXT("GroundDay");
+		case EABTSStylizedRenderProfile::SatelliteGuide:
+			return TEXT("SatelliteGuide");
+		case EABTSStylizedRenderProfile::FinaleSpace:
+			return TEXT("FinaleSpace");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	EABTSStylizedViewClass ResolveCaptureViewClass(
+		const FABTSM11FinaleCameraCaptureConfig& Config)
+	{
+		return Config.bMirrorMainWorldEnvironment
+			? EABTSStylizedViewClass::FinaleGameplayMirrorCapture
+			: EABTSStylizedViewClass::FinaleCinematicCapture;
+	}
 }
 
 bool FABTSM11FinaleCameraCaptureConfig::Parse(
@@ -499,6 +541,12 @@ bool FABTSM11FinaleCameraCaptureConfig::Parse(
 			OutFailure)
 		|| !ParseBoolOption(
 			CommandLine,
+			TEXT("ABTSM11CaptureMirrorMainWorld="),
+			false,
+			OutConfig.bMirrorMainWorldEnvironment,
+			OutFailure)
+		|| !ParseBoolOption(
+			CommandLine,
 			TEXT("ABTSM11CaptureAutoExit="),
 			true,
 			OutConfig.bAutoExit,
@@ -557,11 +605,14 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 	{
 		return true;
 	}
-	if (CandidateRank < 0 || CandidateRank > 11)
+	if (CandidateRank < 0
+		|| CandidateRank > FABTSM11CandidateExperienceCatalog::LastCandidateRank)
 	{
 		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
-			TEXT("ABTSM11CaptureRank must be in [0, 11]."));
+			FString::Printf(
+				TEXT("ABTSM11CaptureRank must be in [0, %d]."),
+				FABTSM11CandidateExperienceCatalog::LastCandidateRank));
 	}
 	if (bDirectorM2 && bDirectorM3)
 	{
@@ -726,12 +777,15 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	ABTSM11FinaleCameraDirector::SetM3Enabled(Config.bDirectorM3);
 	FABTSStylizedRenderingControl::SetEnabled(Config.bStylized);
 	FABTSStylizedRenderingControl::SetProfile(
-		EABTSStylizedRenderProfile::FinaleSpace);
+		Config.bMirrorMainWorldEnvironment
+			? EABTSStylizedRenderProfile::GroundDay
+			: EABTSStylizedRenderProfile::FinaleSpace);
 	FApp::SetUseFixedTimeStep(true);
 	FApp::SetFixedDeltaTime(1.0 / static_cast<double>(Config.FrameRate));
 	const FABTSStylizedViewPolicy CaptureViewPolicy =
 		FABTSStylizedRenderingContract::ResolveViewPolicy(
-			EABTSStylizedViewClass::FinaleCinematicCapture);
+			ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveCaptureViewClass(Config),
+			FABTSStylizedRenderingControl::GetProfile());
 	if (!Config.bTelemetryOnly)
 	{
 		RecordingRenderTarget = NewObject<UTextureRenderTarget2D>(this);
@@ -750,7 +804,7 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 		RecordingCapture->TextureTarget = RecordingRenderTarget;
 		bStylizedViewRegistered = FABTSStylizedSceneCaptureRegistry::Register(
 			*RecordingCapture,
-			EABTSStylizedViewClass::FinaleCinematicCapture);
+			ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveCaptureViewClass(Config));
 	}
 	if ((!Config.bTelemetryOnly && !bStylizedViewRegistered)
 		|| !CaptureViewPolicy.IsValid())
@@ -768,7 +822,7 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d TelemetryOnly=%d DirectorM2=%d DirectorM3=%d RenderVersion=%d ViewClass=FinaleCinematicCapture PolicyTone=%d PolicyOutline=%d PolicySelective=%d WarmupFrames=%d Frames=%s Video=%s"),
+		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d TelemetryOnly=%d DirectorM2=%d DirectorM3=%d MirrorMainWorld=%d RenderVersion=%d ViewClass=%s PolicyTone=%d PolicyOutline=%d PolicySelective=%d WarmupFrames=%d Frames=%s Video=%s"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
 		static_cast<int32>(GetWorld()->WorldType),
 		Config.bTelemetryOnly
@@ -781,7 +835,11 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 		Config.bTelemetryOnly ? 1 : 0,
 		Config.bDirectorM2 ? 1 : 0,
 		Config.bDirectorM3 ? 1 : 0,
+		Config.bMirrorMainWorldEnvironment ? 1 : 0,
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
+		Config.bMirrorMainWorldEnvironment
+			? TEXT("FinaleGameplayMirrorCapture")
+			: TEXT("FinaleCinematicCapture"),
 		CaptureViewPolicy.bApplyTone ? 1 : 0,
 		CaptureViewPolicy.bApplyOutline ? 1 : 0,
 		CaptureViewPolicy.bAllowSelectiveStencil ? 1 : 0,
@@ -940,9 +998,13 @@ void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
 
 bool AABTSM11FinaleCameraCaptureRunner::HasExpectedStylizedRuntimeState() const
 {
+	const EABTSStylizedRenderProfile ExpectedProfile =
+		Config.bMirrorMainWorldEnvironment
+			? EABTSStylizedRenderProfile::GroundDay
+			: EABTSStylizedRenderProfile::FinaleSpace;
 	return FABTSStylizedRenderingControl::IsEnabled() == Config.bStylized
 		&& FABTSStylizedRenderingControl::GetProfile()
-			== EABTSStylizedRenderProfile::FinaleSpace;
+			== ExpectedProfile;
 }
 
 void AABTSM11FinaleCameraCaptureRunner::FailForStylizedRuntimeStateDrift()
@@ -950,10 +1012,11 @@ void AABTSM11FinaleCameraCaptureRunner::FailForStylizedRuntimeStateDrift()
 	bStylizedRuntimeStateMaintained = false;
 	StylizedRuntimeStateFailureFrame = CapturedFrameCount;
 	const FString Reason = FString::Printf(
-		TEXT("StylizedRuntimeStateDrift:Frame=%d ExpectedEnabled=%d ActualEnabled=%d ExpectedProfile=FinaleSpace ActualProfile=%d"),
+		TEXT("StylizedRuntimeStateDrift:Frame=%d ExpectedEnabled=%d ActualEnabled=%d ExpectedProfile=%s ActualProfile=%d"),
 		CapturedFrameCount,
 		Config.bStylized ? 1 : 0,
 		FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0,
+		Config.bMirrorMainWorldEnvironment ? TEXT("GroundDay") : TEXT("FinaleSpace"),
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()));
 	UE_LOG(
 		LogABTSRuntime,
@@ -1546,6 +1609,14 @@ bool AABTSM11FinaleCameraCaptureRunner::RecordCameraObservation(
 		/ static_cast<double>(Config.FrameRate);
 	Sample.PlaybackSeconds = PlaybackSeconds;
 	Sample.InteractionState = StateLabel(InteractionState);
+	Sample.EnvironmentStage = EnvironmentStageLabel(
+		InteractionSystem->GetFinaleEnvironmentStage());
+	FABTSStylizedEnvironmentParameters ActiveEnvironment;
+	Sample.EnvironmentProfile =
+		FABTSStylizedRenderingControl::TryGetEnvironmentParametersOnAnyThread(
+			ActiveEnvironment)
+			? StylizedProfileLabel(ActiveEnvironment.Profile)
+			: TEXT("Unavailable");
 	Sample.Stage = ABTSM11FinaleCameraDirector::StageLabel(
 		ObservationTarget.Stage);
 	Sample.CurrentTarget = ObservationTarget.TargetLabel;
@@ -1695,7 +1766,7 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 		return false;
 	}
 	FString Csv = TEXT(
-		"schemaVersion,frameIndex,captureSeconds,playbackSeconds,interactionState,stage,currentTarget,framingTarget,stageReason,endpointAuthority,stageProgress,stageDurationSeconds,"
+		"schemaVersion,frameIndex,captureSeconds,playbackSeconds,interactionState,environmentStage,environmentProfile,stage,currentTarget,framingTarget,stageReason,endpointAuthority,stageProgress,stageDurationSeconds,"
 		"shotPhase,shotReason,shotProgress,shotDurationSeconds,shotEndSlope,"
 		"directorMode,directorM2FrozenEnabled,directorM3FrozenEnabled,directorBlendAlpha,"
 		"birdWorldX,birdWorldY,birdWorldZ,birdScreenX,birdScreenY,birdDepthCM,birdPixelRadius,birdVisibleRatio,"
@@ -1714,7 +1785,7 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 		: ObservationSamples)
 	{
 		Csv += FString::Printf(
-			TEXT("8,%d,%.9f,%.9f,%s,%s,%s,%s,%s,%s,%.9f,%.9f,%s,%s,%.9f,%.9f,%.9f,%s,%d,%d,%.9f,")
+			TEXT("9,%d,%.9f,%.9f,%s,%s,%s,%s,%s,%s,%s,%s,%.9f,%.9f,%s,%s,%.9f,%.9f,%.9f,%s,%d,%d,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.9f,")
 			TEXT("%s,%.6f,%.6f,%.6f,%.9f,%s,%.6f,%.6f,%.6f,%.9f,")
@@ -1724,6 +1795,8 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteObservationCsv()
 			Sample.CaptureSeconds,
 			Sample.PlaybackSeconds,
 			*Sample.InteractionState,
+			*Sample.EnvironmentStage,
+			*Sample.EnvironmentProfile,
 			*Sample.Stage,
 			*Sample.CurrentTarget,
 			*Sample.FramingTarget,
@@ -2123,6 +2196,9 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetBoolField(TEXT("cameraDirectorM2Requested"), Config.bDirectorM2);
 	Root->SetBoolField(TEXT("cameraDirectorM3Requested"), Config.bDirectorM3);
 	Root->SetBoolField(
+		TEXT("mirrorMainWorldEnvironment"),
+		Config.bMirrorMainWorldEnvironment);
+	Root->SetBoolField(
 		TEXT("m7AdaptiveShotCompression"),
 		IsValid(InteractionSystem)
 			&& InteractionSystem->GetReleasedCameraShotPlan()
@@ -2141,13 +2217,20 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetBoolField(
 		TEXT("captureFixtureCreated"),
 		bCaptureFixtureCreated);
-	Root->SetStringField(TEXT("stylizedProfile"), TEXT("FinaleSpace"));
+	Root->SetStringField(
+		TEXT("stylizedProfile"),
+		Config.bMirrorMainWorldEnvironment
+			? TEXT("LiveMainWorldStage")
+			: TEXT("FinaleSpace"));
 	Root->SetStringField(
 		TEXT("stylizedViewClass"),
-		TEXT("FinaleCinematicCapture"));
+		Config.bMirrorMainWorldEnvironment
+			? TEXT("FinaleGameplayMirrorCapture")
+			: TEXT("FinaleCinematicCapture"));
 	const FABTSStylizedViewPolicy CaptureViewPolicy =
 		FABTSStylizedRenderingContract::ResolveViewPolicy(
-			EABTSStylizedViewClass::FinaleCinematicCapture);
+			ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveCaptureViewClass(Config),
+			FABTSStylizedRenderingControl::GetProfile());
 	Root->SetBoolField(
 		TEXT("stylizedViewRegistered"),
 		bStylizedViewRegistered);
@@ -2186,7 +2269,7 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetStringField(
 		TEXT("cameraObservationPath"),
 		Config.GetObservationCsvPath());
-	Root->SetNumberField(TEXT("cameraObservationSchemaVersion"), 8);
+	Root->SetNumberField(TEXT("cameraObservationSchemaVersion"), 9);
 	Root->SetNumberField(
 		TEXT("cameraObservationCount"),
 		ObservationSamples.Num());
@@ -2632,9 +2715,9 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	const FString& Parameters)
 {
 	TestEqual(
-		TEXT("Capture contract version includes M6 formation telemetry v16"),
+		TEXT("Capture contract version includes Rank12 MainWorld mirror v17"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
-		16);
+		17);
 
 	FABTSM11FinaleCameraCaptureConfig Config;
 	FString Failure;
@@ -2700,6 +2783,25 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestFalse(TEXT("Telemetry style is disabled"), Config.bStylized);
 	TestTrue(TEXT("Telemetry-only mode preserved"), Config.bTelemetryOnly);
 	TestTrue(TEXT("Telemetry M3 director preserved"), Config.bDirectorM3);
+
+	const FString Rank12MirrorCommandLine = FString::Printf(
+		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=12 ")
+		TEXT("-ABTSM11CaptureStylized=1 -ABTSM11CaptureDirectorM3=1 ")
+		TEXT("-ABTSM11CaptureMirrorMainWorld=1 ")
+		TEXT("-MovieFolder=\"%s\" -MovieName=Rank12_PIE_Mirror ")
+		TEXT("-MovieFormat=JPG"),
+		*Output);
+	TestTrue(
+		TEXT("Rank 12 PIE-equivalent MainWorld mirror parses"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			*Rank12MirrorCommandLine,
+			Config,
+			&Failure));
+	TestEqual(TEXT("Rank12 preserved"), Config.CandidateRank, 12);
+	TestTrue(TEXT("Rank12 uses M3 director"), Config.bDirectorM3);
+	TestTrue(
+		TEXT("Rank12 mirrors the live MainWorld environment"),
+		Config.bMirrorMainWorldEnvironment);
 
 	const FString CustomCommandLine = FString::Printf(
 		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=11 ")
@@ -2930,7 +3032,7 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestFalse(
 		TEXT("Out-of-range Rank fails closed"),
 		FABTSM11FinaleCameraCaptureConfig::Parse(
-			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=12 ")
+			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=13 ")
 			TEXT("-MovieFolder=C:/Capture -MovieName=BadRank ")
 			TEXT("-MovieFormat=JPG"),
 			Config,

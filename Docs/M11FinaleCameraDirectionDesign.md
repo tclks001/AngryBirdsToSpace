@@ -67,12 +67,15 @@ $Log = '<M11 工作树绝对路径>\Saved\Logs\<唯一运行名>.log'
   -NoSound "-AbsLog=$Log"
 ```
 
+若目标不是固定 `FinaleSpace` 的纯终局视觉证据，而是逐帧复现普通 PIE 主视图的环境阶段切换，则使用 Rank12、M3 导演并追加 `-ABTSM11CaptureMirrorMainWorld=1`。该模式注册 `FinaleGameplayMirrorCapture`，每帧动态消费主世界已发布的 Profile，而不是在录制开始时强制固定太空档；CSV schema 9 同时记录 `environmentStage/environmentProfile`。它用于诊断“同一路径在 PIE 的哪一帧换环境”，不能替代用户的可见 PIE 验收。
+
 命令返回即代表 JPG 序列和 AVI 已由该 UE 进程同步写完，但退出码本身不是充分证据；调用方仍须检查 AVI 存在且大于 4096 bytes、Manifest `status=Complete`、帧数连续，并确认日志包含唯一成功链路。M0 明确保留少量旧相机起始画面；录制先于发射至少两个落盘帧，满足“开启录屏 → 发射”。SceneCapture 只是验收相机：它复制旧相机最终 View，不成为玩家 ViewTarget，不修改权威相机、轨迹或演出。
 
 | 参数 | 含义 | 默认 / 限制 |
 | --- | --- | --- |
-| `-ABTSM11CaptureRank=<0..11>` | 本次布局。0 为生产 Certified v1；1–11 为冻结未认证候选。 | `0` |
+| `-ABTSM11CaptureRank=<0..12>` | 本次布局。0 为生产 Certified v1；1–12 为冻结未认证候选。 | `0` |
 | `-ABTSM11CaptureStylized=<0|1>` | `0` 原渲染；`1` 开启 `abts.Rendering.Stylized.Enabled` 并选择 `FinaleSpace` Profile。 | `0` |
+| `-ABTSM11CaptureMirrorMainWorld=<0|1>` | `1` 时不固定 FinaleSpace，改为逐帧镜像主世界环境 Profile；用于 PIE 同源诊断。 | `0` |
 | `-ABTSM11CaptureAutoExit=<0|1>` | AVI 完成写盘后退出本次 `-game` 进程；正式命令行录制必须为 `1`。 | `1` |
 | `-ABTSM11CaptureWarmupFrames=<n>` | 设置渲染方式后、进入发射前的预热帧。 | `30` |
 | `-ABTSM11CaptureTerminalHoldFrames=<n>` | `TargetHit` 后保留终帧的帧数。 | `24` |
@@ -84,7 +87,7 @@ $Log = '<M11 工作树绝对路径>\Saved\Logs\<唯一运行名>.log'
 | `-MovieQuality=<1..100>` | JPG 质量。 | `90` |
 | `-ResX/-ResY` | SceneCapture 与 AVI 分辨率。 | `1280×720` 验收基线 |
 
-同一 `-game` 进程启动后，Rank 和渲染方式被冻结；修改选项必须等待本次进程退出后重新启动。Rank 1–11 仅在显式 `-ABTSM11CameraCapture` 的 Editor Game World 或 PIE 诊断世界中启用，不会进入未显式启用工具的普通 Standalone、打包版本或生产默认路径。
+同一 `-game` 进程启动后，Rank、导演和是否镜像主世界被冻结；修改选项必须等待本次进程退出后重新启动。Rank 1–12 仅在显式 `-ABTSM11CameraCapture` 的 Editor Game World 或 PIE 诊断世界中启用，不会进入未显式启用工具的普通 Standalone、打包版本或生产默认路径。
 
 ### 3.2 状态机
 
@@ -122,7 +125,7 @@ Manifest 至少记录：
 
 AVI 是视觉证据；Manifest/日志是身份与流程证据。两者缺一不算完成。
 
-从录制合同版本 3 起，Manifest 还必须写出 `stylizedViewClass=FinaleCinematicCapture`、组件注册状态及 resolved policy。它们只证明录制组件已接入预期风格策略，不能单独证明 Tone/Outline 已进入最终像素；最终仍以从 AVI 本体解码的帧为准。
+从录制合同版本 3 起，Manifest 还必须写出 ViewClass、组件注册状态及 resolved policy。固定太空录制使用 `FinaleCinematicCapture`；合同 v17 的 PIE 同源模式使用 `FinaleGameplayMirrorCapture` 并写 `mirrorMainWorldEnvironment=true`。这些字段只证明录制组件已接入预期风格策略，不能单独证明 Tone/Outline 已进入最终像素；最终仍以从 AVI 本体解码的帧及逐帧环境遥测为准。
 
 M11 历史分支的录制合同 v4/v5 分别引入逐帧 `.camera-observations.csv` 与 M2 导演扩展；Manifest 记录其路径、Schema、行数和只读诊断摘要。CSV 缺失或行数与影像不一致时整个录制 fail closed。合并集成线独立占用的 T2-C1 v4 全程渲染状态门后，首个无歧义的完整合同为 v6；它同时要求 CSV Schema 2、导演遥测和 `stylizedRuntimeState*` 全程证据。字段、历史证据与离线判据见 [M1 观测设计](M11FinaleCameraObservationAndOfflineCriteria.md)。
 

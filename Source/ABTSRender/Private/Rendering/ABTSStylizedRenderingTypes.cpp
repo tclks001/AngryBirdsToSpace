@@ -34,7 +34,7 @@ bool FABTSStylizedRenderingContract::IsViewClassValid(
 	EABTSStylizedViewClass ViewClass)
 {
 	return ViewClass >= EABTSStylizedViewClass::MainWorld
-		&& ViewClass <= EABTSStylizedViewClass::FinaleCinematicCapture;
+		&& ViewClass <= EABTSStylizedViewClass::FinaleGameplayMirrorCapture;
 }
 
 bool FABTSStylizedRenderingContract::RequiresSelectiveStencil(
@@ -122,6 +122,7 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 		Policy.EnvironmentProfile = EABTSStylizedRenderProfile::FinaleSpace;
 		Policy.bAllowSelectiveStencil = true;
 		break;
+	case EABTSStylizedViewClass::FinaleGameplayMirrorCapture:
 	case EABTSStylizedViewClass::MainWorld:
 	default:
 		Policy.Profile =

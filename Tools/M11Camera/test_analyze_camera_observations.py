@@ -25,6 +25,8 @@ CSV_COLUMNS = (
     "captureSeconds",
     "playbackSeconds",
     "interactionState",
+    "environmentStage",
+    "environmentProfile",
     "stage",
     "currentTarget",
     "framingTarget",
@@ -106,6 +108,8 @@ def _row(frame_index: int, **overrides: object) -> dict[str, str]:
             "captureSeconds": f"{frame_index / 30.0:.9f}",
             "playbackSeconds": f"{frame_index / 30.0:.9f}",
             "interactionState": "Launched",
+            "environmentStage": "DeepSpace",
+            "environmentProfile": "FinaleSpace",
             "stage": "Periapsis",
             "currentTarget": "Assist3",
             "framingTarget": "Assist3",
@@ -334,6 +338,29 @@ class CameraObservationSchemaTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing M6 columns"):
             ANALYSIS.read_rows(
                 self._write_csv([_row(0, schemaVersion="8")], columns)
+            )
+
+    def test_schema_9_environment_telemetry_passes(self) -> None:
+        rows = [
+            _row(
+                0,
+                schemaVersion="9",
+                environmentStage="AtmosphereTransition",
+                environmentProfile="FinaleSpace",
+            )
+        ]
+        parsed = ANALYSIS.read_rows(self._write_csv(rows))
+        self.assertEqual(parsed[0]["environmentStage"], "AtmosphereTransition")
+        self.assertEqual(parsed[0]["environmentProfile"], "FinaleSpace")
+
+    def test_schema_9_missing_environment_column_fails_closed(self) -> None:
+        columns = tuple(
+            column for column in CSV_COLUMNS
+            if column != "environmentProfile"
+        )
+        with self.assertRaisesRegex(ValueError, "missing environment columns"):
+            ANALYSIS.read_rows(
+                self._write_csv([_row(0, schemaVersion="9")], columns)
             )
 
 

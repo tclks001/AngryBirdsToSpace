@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline M11 camera-observation criteria and orthogonality comparison.
 
-This tool consumes observation schema v1-v8 CSV from the M11 capture runner.
+This tool consumes observation schema v1-v9 CSV from the M11 capture runner.
 It never reads pixels and never changes a candidate, trajectory, camera, or UE
 asset. A criteria failure is a useful M1 result, so the default exit status is
 zero for a structurally valid report. Use --require-pass to gate later stages.
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8}
+SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9}
 M3_APPROACH_BACKWARD_JUMP_PX_MAX = 20.0
 M3_FIRST_BODY_BLEND_SECONDS_MAX = 0.10
 M3_FIRST_BODY_VISIBLE_SECONDS_MAX = 0.75
@@ -40,6 +40,10 @@ REQUIRED_COLUMNS = {
     "cameraPositionDeltaCM",
     "cameraRotationDeltaDegrees",
     "fovDeltaDegrees",
+}
+ENVIRONMENT_COLUMNS = {
+    "environmentStage",
+    "environmentProfile",
 }
 OBSERVATION_FINGERPRINT_COLUMNS = (
     "playbackSeconds",
@@ -361,6 +365,15 @@ def read_rows(path: pathlib.Path) -> list[dict[str, str]]:
                         raise ValueError(f"{path}: empty M6 actor identity {key}")
                 else:
                     _finite(row, key)
+        if schema >= 9:
+            missing_environment = ENVIRONMENT_COLUMNS.difference(row)
+            if missing_environment:
+                raise ValueError(
+                    f"{path}: schema {schema} missing environment columns: "
+                    f"{sorted(missing_environment)}"
+                )
+            if not row["environmentStage"] or not row["environmentProfile"]:
+                raise ValueError(f"{path}: empty environment stage/profile")
         row.setdefault("framingTarget", row["currentTarget"])
         row.setdefault("directorM3FrozenEnabled", "0")
         row.setdefault("stageProgress", "0")

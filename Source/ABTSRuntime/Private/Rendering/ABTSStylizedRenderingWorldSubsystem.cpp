@@ -111,9 +111,42 @@ namespace ABTSStylizedRenderingWorldSubsystemPrivate
 	}
 
 	bool DoesFinaleEnvironmentStageRequireSpace(
-		const EABTSM11FinaleEnvironmentStage Stage)
+		const EABTSM11FinaleEnvironmentStage Stage,
+		const bool bAtmosphereTransitionComplete = false)
 	{
-		return Stage == EABTSM11FinaleEnvironmentStage::DeepSpace;
+		return Stage == EABTSM11FinaleEnvironmentStage::DeepSpace
+			|| (Stage == EABTSM11FinaleEnvironmentStage::AtmosphereTransition
+				&& bAtmosphereTransitionComplete);
+	}
+
+	float ResolveFinaleHighAltitudeSpaceBlend(
+		UWorld& World,
+		const FABTSToonEnvironmentSnapshot& Environment)
+	{
+		APlayerController* Controller = World.GetFirstPlayerController();
+		APlayerCameraManager* CameraManager = IsValid(Controller)
+			? Controller->PlayerCameraManager
+			: nullptr;
+		if (!Environment.IsValid() || !IsValid(CameraManager))
+		{
+			return 0.0f;
+		}
+		const FABTSStylizedEnvironmentParameters Parameters =
+			FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+				Environment.PlanetCenterWorld,
+				Environment.PlanetRadiusCM,
+				Environment.SunDirectionToSunWorld,
+				EABTSStylizedRenderProfile::GroundDay);
+		const float CameraAltitudeCM = static_cast<float>(FMath::Max(
+			FVector::Distance(
+				CameraManager->GetCameraLocation(),
+				Environment.PlanetCenterWorld)
+				- Environment.PlanetRadiusCM,
+			0.0));
+		return FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+			CameraAltitudeCM,
+			Parameters.HighAltitudeTransitionStartCM,
+			Parameters.HighAltitudeTransitionEndCM);
 	}
 
 	const TCHAR* LexToString(const EABTSM11FinaleEnvironmentStage Stage)
@@ -1521,21 +1554,45 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	bLastObservedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
 	const EABTSM11FinaleEnvironmentStage FinaleEnvironmentStage =
 		ResolveFinaleEnvironmentStage(*World);
+	const EABTSStylizedRenderProfile ConfiguredProfile =
+		FABTSStylizedRenderingControl::GetProfile();
+	FABTSToonEnvironmentSnapshot BaselineEnvironment;
+	FString BaselineEnvironmentFailure;
+	const bool bBaselineEnvironmentReady =
+		FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+			*World,
+			ConfiguredProfile,
+			BaselineEnvironment,
+			&BaselineEnvironmentFailure);
+	const float FinaleHighAltitudeSpaceBlend =
+		bBaselineEnvironmentReady
+			? ResolveFinaleHighAltitudeSpaceBlend(
+				*World,
+				BaselineEnvironment)
+			: 0.0f;
+	const bool bAtmosphereTransitionComplete =
+		FinaleHighAltitudeSpaceBlend >= 1.0f - KINDA_SMALL_NUMBER;
 	const bool bFinaleDeepSpace = DoesFinaleEnvironmentStageRequireSpace(
-		FinaleEnvironmentStage);
+		FinaleEnvironmentStage,
+		bAtmosphereTransitionComplete);
 	const EABTSStylizedRenderProfile ActiveProfile =
 		FABTSStylizedRenderingContract::ResolveMainWorldProfile(
 			bFinaleDeepSpace,
-			FABTSStylizedRenderingControl::GetProfile());
+			ConfiguredProfile);
 
-	FABTSToonEnvironmentSnapshot ResolvedEnvironment;
-	FString EnvironmentFailure;
-	bEnvironmentSnapshotReady =
-		FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
-			*World,
-			ActiveProfile,
-			ResolvedEnvironment,
-			&EnvironmentFailure);
+	FABTSToonEnvironmentSnapshot ResolvedEnvironment = BaselineEnvironment;
+	FString EnvironmentFailure = BaselineEnvironmentFailure;
+	bEnvironmentSnapshotReady = bBaselineEnvironmentReady;
+	if (bBaselineEnvironmentReady
+		&& ActiveProfile != BaselineEnvironment.Profile)
+	{
+		bEnvironmentSnapshotReady =
+			FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+				*World,
+				ActiveProfile,
+				ResolvedEnvironment,
+				&EnvironmentFailure);
+	}
 	EnvironmentSnapshot = bEnvironmentSnapshotReady
 		? ResolvedEnvironment
 		: FABTSToonEnvironmentSnapshot();
@@ -1545,6 +1602,12 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	EnvironmentDiagnosticHash = HashCombineFast(
 		EnvironmentDiagnosticHash,
 		GetTypeHash(bEnvironmentSnapshotReady));
+	EnvironmentDiagnosticHash = HashCombineFast(
+		EnvironmentDiagnosticHash,
+		GetTypeHash(static_cast<uint8>(FinaleEnvironmentStage)));
+	EnvironmentDiagnosticHash = HashCombineFast(
+		EnvironmentDiagnosticHash,
+		GetTypeHash(bAtmosphereTransitionComplete));
 	if (EnvironmentDiagnosticHash != LastEnvironmentDiagnosticHash)
 	{
 		LastEnvironmentDiagnosticHash = EnvironmentDiagnosticHash;
@@ -1553,12 +1616,17 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 			UE_LOG(
 				LogABTSRuntime,
 				Log,
-				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=1 Version=%d Profile=%d FinaleStage=%s Source=%s Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
+				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=1 Version=%d Profile=%d FinaleStage=%s AtmosphereSpaceBlend=%.3f TransitionComplete=%d Source=%s Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
 				EnvironmentSnapshot.Version,
 				static_cast<int32>(EnvironmentSnapshot.Profile),
 				LexToString(FinaleEnvironmentStage),
+				FinaleHighAltitudeSpaceBlend,
+				bAtmosphereTransitionComplete ? 1 : 0,
 				bFinaleDeepSpace
-					? TEXT("M11DeepSpace")
+					? FinaleEnvironmentStage
+						== EABTSM11FinaleEnvironmentStage::DeepSpace
+						? TEXT("M11DeepSpace")
+						: TEXT("M11AtmosphereExit")
 					: TEXT("ConfiguredGroundContext"),
 				EnvironmentSnapshot.WorldSeed,
 				EnvironmentSnapshot.GeneratorVersion,
@@ -3788,10 +3856,20 @@ bool FABTSToonT4A3M11EnvironmentStageRoutingTest::RunTest(
 		ResolveStageProfile(EABTSM11FinaleEnvironmentStage::GroundLaunch),
 		EABTSStylizedRenderProfile::GroundDay);
 	TestEqual(
-		TEXT("Atmospheric launch preserves altitude-driven GroundDay presentation"),
+		TEXT("Atmospheric launch preserves GroundDay until the continuous altitude blend completes"),
 		ResolveStageProfile(
 			EABTSM11FinaleEnvironmentStage::AtmosphereTransition),
 		EABTSStylizedRenderProfile::GroundDay);
+	TestTrue(
+		TEXT("Incomplete atmosphere transition does not force space"),
+		!DoesFinaleEnvironmentStageRequireSpace(
+			EABTSM11FinaleEnvironmentStage::AtmosphereTransition,
+			false));
+	TestTrue(
+		TEXT("Completed altitude blend promotes atmosphere transition to space before Assist1"),
+		DoesFinaleEnvironmentStageRequireSpace(
+			EABTSM11FinaleEnvironmentStage::AtmosphereTransition,
+			true));
 	TestEqual(
 		TEXT("Only the explicit deep-space stage selects FinaleSpace"),
 		ResolveStageProfile(EABTSM11FinaleEnvironmentStage::DeepSpace),

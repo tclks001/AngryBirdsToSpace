@@ -25,6 +25,16 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			: FABTSStylizedRenderingControl::GetProfileOnAnyThread();
 	}
 
+	FABTSStylizedViewPolicy ResolveCaptureViewPolicy(
+		const EABTSStylizedViewClass ViewClass)
+	{
+		return ViewClass == EABTSStylizedViewClass::FinaleGameplayMirrorCapture
+			? FABTSStylizedRenderingContract::ResolveViewPolicy(
+				EABTSStylizedViewClass::MainWorld,
+				ResolveActiveMainWorldProfileOnAnyThread())
+			: FABTSStylizedRenderingContract::ResolveViewPolicy(ViewClass);
+	}
+
 	BEGIN_SHADER_PARAMETER_STRUCT(FABTSStylizedOutlinePassParameters, )
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_STRUCT_INCLUDE(FSceneTextureShaderParameters, SceneTextures)
@@ -594,7 +604,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		{
 			(void)InViewFamily;
 			const FABTSStylizedViewPolicy ViewPolicy =
-				FABTSStylizedRenderingContract::ResolveViewPolicy(ViewClass);
+				ResolveCaptureViewPolicy(ViewClass);
 			ApplyStylizedPostProcessPolicy(InView, ViewPolicy.Profile);
 		}
 
@@ -615,7 +625,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			}
 
 			const FABTSStylizedViewPolicy ViewPolicy =
-				FABTSStylizedRenderingContract::ResolveViewPolicy(ViewClass);
+				ResolveCaptureViewPolicy(ViewClass);
 			if (!ViewPolicy.IsValid())
 			{
 				return;

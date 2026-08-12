@@ -20,8 +20,8 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// Adds M6 four-bird formation identity, spacing and visibility telemetry.
-	static constexpr int32 ContractVersion = 16;
+	// Adds Rank12 and a live MainWorld environment mirror for PIE-equivalent AVI.
+	static constexpr int32 ContractVersion = 17;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
@@ -30,6 +30,8 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 	bool bTelemetryOnly = false;
 	bool bDirectorM2 = false;
 	bool bDirectorM3 = false;
+	/** Mirror the gameplay MainWorld profile/stage instead of forcing FinaleSpace. */
+	bool bMirrorMainWorldEnvironment = false;
 	bool bAutoExit = true;
 	/** Explicit player-authored launch; false preserves the nominal workflow. */
 	bool bCustomLaunchInput = false;
@@ -76,6 +78,8 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraObservationSample
 	double CaptureSeconds = 0.0;
 	double PlaybackSeconds = 0.0;
 	FString InteractionState;
+	FString EnvironmentStage;
+	FString EnvironmentProfile;
 	FString Stage;
 	FString CurrentTarget;
 	FString FramingTarget;

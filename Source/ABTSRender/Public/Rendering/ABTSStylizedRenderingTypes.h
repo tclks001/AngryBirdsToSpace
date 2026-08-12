@@ -28,7 +28,9 @@ enum class EABTSStylizedViewClass : uint8
 	SatelliteLandingPreview,
 	FinaleRemotePreview,
 	/** Main-world-equivalent offscreen view used only by the M11 AVI recorder. */
-	FinaleCinematicCapture
+	FinaleCinematicCapture,
+	/** PIE-equivalent M11 recorder view; resolves the live MainWorld profile per frame. */
+	FinaleGameplayMirrorCapture
 };
 
 /** Read-only rendering policy resolved by Integration from a semantic view class. */
