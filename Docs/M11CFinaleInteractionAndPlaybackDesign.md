@@ -121,7 +121,32 @@ Locked -> Ready -> Aiming -> ReleasePending -> Launched -> TargetHit
 
 M11-D 可以在 `TargetHit` 后接救援演出，并扩展 `Failed/Recovering` 的四鸟、环境和剧情镜头；不得改变 M11-C 已冻结的轨迹结果或最小安全恢复时序。
 
-### 4.2 Space 与普通弹弓隔离
+### 4.2 只读终局环境阶段契约
+
+`IsFinaleActive()` 是 HUD、输入与终局交互租约，从 `Aiming` 起即为真；它不等价于
+主世界已经进入深空。M11 因此额外发布只读
+`EABTSM11FinaleEnvironmentStage`，但不设置渲染 Profile、天空、雾云、曝光、材质或
+Scene Capture：
+
+| 阶段 | M11 权威边界 | Integration 消费语义 |
+|---|---|---|
+| `GroundLaunch` | `Locked / Ready / Aiming / ReleasePending` | 主视图保持地表环境；瞄准和待发射不得因 `IsFinaleActive()` 切到太空 Profile |
+| `AtmosphereTransition` | `Launched` 且冻结 Released Result 尚未到达 `AssistEnter(1)` | 继续消费现有按相机高度连续过渡的大气/高空机制 |
+| `DeepSpace` | `Launched` 已到达冻结 `AssistEnter(1)`，或已进入 `TargetHit` | 主视图可以提交正式 `FinaleSpace` 演出 |
+| `Recovering` | `Failed / Recovering` | 撤销深空提交并恢复地表环境；回到 `Ready` 后阶段自然回到 `GroundLaunch` |
+
+首颗行星 `AssistEnter(1)` 取自发射时冻结的
+`ReleasedCameraTrajectoryResult`，而不是当前可变 Prediction、Actor 距离、渲染高度或
+相机 CVar。事件缺失、Hash 为零、时间非法或 playback 尚未到达边界时都保持
+`AtmosphereTransition`，禁止猜测式提前进入深空。该边界只负责“最晚何时正式提交
+DeepSpace”；发射点到首颗行星之间的大气淡出仍由 Integration 的连续高度合同负责。
+
+远端行星 PIP 的 `FinaleRemotePreview` 仍是独立视图语义，可始终使用
+`FinaleSpace`，不随主世界阶段切换。Integration 只能读取
+`GetFinaleEnvironmentStage()`，不得反向写 M11 状态、轨迹、事件或 Hash，也不得为此
+修改 `IsFinaleActive()`。
+
+### 4.3 Space 与普通弹弓隔离
 
 `AABTSM11PlayerController` 派生自 M6 Controller：
 
@@ -330,6 +355,16 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B ConstructiveSearch/FullInputDomain；M11-C 自己仍必须执行第 11.2 节的 558 样本接管闭包。
 
 ### 11.4 本次执行结果
+
+2026-08-12 追加只读环境阶段契约验证：UE 5.8 Development Editor
+`-ForceUnity -DisableAdaptiveUnity` 完整链接成功；fresh NullRHI
+`ABTS.M11C.Unit.EnvironmentStageContract` 为 `1/1`，完整
+`ABTS.M11C.Unit` 为 `12/12`。证据分别位于
+`Saved/Logs/M11-EnvironmentStage-ForceUnity-20260812.log`、
+`Saved/Logs/M11-EnvironmentStage-Contract-20260812.log` 与
+`Saved/Logs/M11-EnvironmentStage-M11CUnit-20260812.log`。这些门只证明 M11 只读状态与
+生命周期合同；Integration 的主视图 Profile、高度过渡、独立 PIP 和恢复像素仍需在其
+工作树完成接线与有渲染验收。
 
 下表保留 M11-C v1/前一轮 PIE 修复的归档基线证据。`21,025/558` 只证明 production v1 的 F4 接管闭包，不证明当前 Search v3 Candidate。
 

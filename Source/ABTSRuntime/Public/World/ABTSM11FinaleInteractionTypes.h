@@ -18,6 +18,22 @@ enum class EABTSM11FinaleInteractionState : uint8
 	Recovering
 };
 
+/**
+ * Read-only M11 narrative fact consumed by Integration environment assembly.
+ *
+ * This is deliberately separate from IsFinaleActive(): aiming needs the
+ * finale HUD/input lease while the main world must still present its surface
+ * environment. M11 publishes only the phase; it never selects a rendering
+ * profile or changes remote-preview presentation through this contract.
+ */
+enum class EABTSM11FinaleEnvironmentStage : uint8
+{
+	GroundLaunch = 0,
+	AtmosphereTransition = 1,
+	DeepSpace = 2,
+	Recovering = 3
+};
+
 enum class EABTSM11PrefixStabilizerPhase : uint8
 {
 	Free = 0,
@@ -63,6 +79,19 @@ enum class EABTSM11FailureReason : uint8
 
 ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
 	EABTSM11FinaleInteractionState State);
+
+/**
+ * Pure resolver for the read-only finale environment stage.
+ *
+ * A launched attempt enters DeepSpace only after the immutable released
+ * trajectory reaches AssistEnter(1). Missing or invalid event evidence stays
+ * in AtmosphereTransition (fail closed) rather than selecting deep space.
+ */
+ABTSRUNTIME_API EABTSM11FinaleEnvironmentStage
+ABTSM11ResolveFinaleEnvironmentStage(
+	EABTSM11FinaleInteractionState State,
+	double PlaybackElapsedSeconds,
+	const FABTSM11TrajectoryResult* ReleasedTrajectoryResult);
 
 /** Frozen M11 copy of the existing M6 pull presentation/input constants. */
 struct ABTSRUNTIME_API FABTSM11M6InputParityProfile

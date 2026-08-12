@@ -130,6 +130,50 @@ bool ABTSM11IsResettableFinaleState(
 	}
 }
 
+EABTSM11FinaleEnvironmentStage ABTSM11ResolveFinaleEnvironmentStage(
+	const EABTSM11FinaleInteractionState State,
+	const double PlaybackElapsedSeconds,
+	const FABTSM11TrajectoryResult* ReleasedTrajectoryResult)
+{
+	switch (State)
+	{
+	case EABTSM11FinaleInteractionState::Launched:
+		if (FMath::IsFinite(PlaybackElapsedSeconds)
+			&& PlaybackElapsedSeconds >= 0.0
+			&& ReleasedTrajectoryResult != nullptr
+			&& ReleasedTrajectoryResult->ValidationHash != 0)
+		{
+			const FABTSM11TrajectoryEvent* DeepSpaceEntry =
+				ReleasedTrajectoryResult->FindAssistEvent(
+					EABTSM11TrajectoryEventType::AssistEnter,
+					1);
+			if (DeepSpaceEntry != nullptr
+				&& FMath::IsFinite(DeepSpaceEntry->TimeSeconds)
+				&& DeepSpaceEntry->TimeSeconds >= 0.0
+				&& PlaybackElapsedSeconds
+					>= DeepSpaceEntry->TimeSeconds)
+			{
+				return EABTSM11FinaleEnvironmentStage::DeepSpace;
+			}
+		}
+		return EABTSM11FinaleEnvironmentStage::AtmosphereTransition;
+
+	case EABTSM11FinaleInteractionState::TargetHit:
+		return EABTSM11FinaleEnvironmentStage::DeepSpace;
+
+	case EABTSM11FinaleInteractionState::Failed:
+	case EABTSM11FinaleInteractionState::Recovering:
+		return EABTSM11FinaleEnvironmentStage::Recovering;
+
+	case EABTSM11FinaleInteractionState::Locked:
+	case EABTSM11FinaleInteractionState::Ready:
+	case EABTSM11FinaleInteractionState::Aiming:
+	case EABTSM11FinaleInteractionState::ReleasePending:
+	default:
+		return EABTSM11FinaleEnvironmentStage::GroundLaunch;
+	}
+}
+
 bool ABTSM11MapLocalLaunchDirectionToInput(
 	const FABTSM11FinaleLaunchModel& LaunchModel,
 	const FVector3d& LocalLaunchDirection,

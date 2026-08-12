@@ -756,6 +756,19 @@ bool AABTSM11FinaleInteractionSystem::IsFinaleActive() const
 				|| bAttemptBirdInPouch));
 }
 
+EABTSM11FinaleEnvironmentStage
+AABTSM11FinaleInteractionSystem::GetFinaleEnvironmentStage() const
+{
+	const FABTSM11TrajectoryResult* ReleasedResult =
+		ReleasedCameraTrajectoryResult.ValidationHash != 0
+			? &ReleasedCameraTrajectoryResult
+			: nullptr;
+	return ABTSM11ResolveFinaleEnvironmentStage(
+		InteractionState,
+		PlaybackElapsedSeconds,
+		ReleasedResult);
+}
+
 bool AABTSM11FinaleInteractionSystem::IsAiming() const
 {
 	return InteractionState == EABTSM11FinaleInteractionState::Aiming;

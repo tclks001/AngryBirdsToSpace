@@ -93,6 +93,11 @@ public:
 	{
 		return InteractionState;
 	}
+	/**
+	 * Read-only main-world environment phase. Integration owns the actual
+	 * GroundDay/altitude-transition/FinaleSpace profile mapping.
+	 */
+	EABTSM11FinaleEnvironmentStage GetFinaleEnvironmentStage() const;
 	const FString& GetRuntimeFailure() const { return RuntimeFailure; }
 	const FABTSM11FinaleLaunchInput& GetCurrentInput() const
 	{

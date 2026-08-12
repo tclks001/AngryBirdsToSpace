@@ -155,6 +155,120 @@ namespace
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CEnvironmentStageContractTest,
+	"ABTS.M11C.Unit.EnvironmentStageContract",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CEnvironmentStageContractTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM11TrajectoryResult ReleasedResult;
+	ReleasedResult.ValidationHash = 0x11e70001ull;
+	FABTSM11TrajectoryEvent& FirstEnter =
+		ReleasedResult.Events.AddDefaulted_GetRef();
+	FirstEnter.Type = EABTSM11TrajectoryEventType::AssistEnter;
+	FirstEnter.AssistIndex = 1;
+	FirstEnter.TimeSeconds = 4.25;
+
+	TestEqual(
+		TEXT("Ready remains in the ground launch environment"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Ready,
+			0.0,
+			nullptr),
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	TestEqual(
+		TEXT("Aiming remains in the ground launch environment"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Aiming,
+			0.0,
+			nullptr),
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	TestEqual(
+		TEXT("Release pending remains in the ground launch environment"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::ReleasePending,
+			0.0,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	TestEqual(
+		TEXT("Launch begins in the altitude-driven transition"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Launched,
+			4.249,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::AtmosphereTransition);
+	TestEqual(
+		TEXT("First assist entry commits the deep-space presentation"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Launched,
+			4.25,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::DeepSpace);
+	TestEqual(
+		TEXT("Target completion remains in deep space"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::TargetHit,
+			0.0,
+			nullptr),
+		EABTSM11FinaleEnvironmentStage::DeepSpace);
+	TestEqual(
+		TEXT("Failure immediately requests recovery presentation"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Failed,
+			4.25,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::Recovering);
+	TestEqual(
+		TEXT("Recovery remains explicit until gameplay returns Ready"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Recovering,
+			4.25,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::Recovering);
+
+	TestEqual(
+		TEXT("Missing released evidence cannot enable deep space"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Launched,
+			100.0,
+			nullptr),
+		EABTSM11FinaleEnvironmentStage::AtmosphereTransition);
+	FABTSM11TrajectoryResult MissingFirstEnter;
+	FABTSM11TrajectoryEvent& SecondEnter =
+		MissingFirstEnter.Events.AddDefaulted_GetRef();
+	SecondEnter.Type = EABTSM11TrajectoryEventType::AssistEnter;
+	SecondEnter.AssistIndex = 2;
+	SecondEnter.TimeSeconds = 1.0;
+	TestEqual(
+		TEXT("A later assist cannot substitute for first-assist evidence"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Launched,
+			100.0,
+			&MissingFirstEnter),
+		EABTSM11FinaleEnvironmentStage::AtmosphereTransition);
+	FABTSM11TrajectoryResult UnhashedFirstEnter = ReleasedResult;
+	UnhashedFirstEnter.ValidationHash = 0;
+	TestEqual(
+		TEXT("An unhashed released result cannot enable deep space"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Launched,
+			100.0,
+			&UnhashedFirstEnter),
+		EABTSM11FinaleEnvironmentStage::AtmosphereTransition);
+	FirstEnter.TimeSeconds = -1.0;
+	TestEqual(
+		TEXT("Invalid first-assist time fails closed in transition"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Launched,
+			100.0,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::AtmosphereTransition);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11CStabilizerTest,
 	"ABTS.M11C.Unit.Stabilizer",
 	EAutomationTestFlags::EditorContext
