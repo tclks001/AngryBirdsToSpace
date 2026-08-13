@@ -302,7 +302,9 @@ private:
 	void MarkTargetCaptureDirty();
 	void FlushTargetCapture();
 	void RestoreAttemptToWorld(bool bKeepFinaleMode);
-	void BeginAttemptFailure(const FString& Reason);
+	void BeginAttemptFailure(
+		const FString& Reason,
+		bool bContinueReleasedFlight = false);
 	void FailInteraction(const FString& Reason);
 	bool DoesInputMatchLatestSolve() const;
 	AActor* ResolvePreviewTargetActor(
@@ -417,6 +419,7 @@ private:
 	FABTSM11PrefixStabilizer Stabilizer;
 	FABTSM11PreviewTargetSelector TargetSelector;
 	FABTSM11FailurePresentationTimeline FailureTimeline;
+	FABTSM11FailurePresentationConfig ReleasedFailurePresentationConfig;
 	FABTSM11PreviewSelection PreviewSelection;
 	FABTSM11PrefixClassification CurrentClassification;
 	FABTSM11TrajectoryResult LatestQualifiedResult;
@@ -461,6 +464,8 @@ private:
 	double LastPreviewSolveMilliseconds = 0.0;
 	double PlaybackElapsedSeconds = 0.0;
 	double PlaybackPresentationEndTimeSeconds = 0.0;
+	double FailurePresentationStartTimeSeconds = 0.0;
+	bool bFailureFlightContinuationActive = false;
 	uint64 DiscardedPreviewSolveCount = 0;
 	uint64 HudOverviewRevision = 0;
 	uint64 HudProbeRevision = 0;

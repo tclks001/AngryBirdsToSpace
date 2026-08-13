@@ -552,13 +552,13 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 			LatestQualifiedResult,
 			ReleasedPlaybackPlan,
 			BirdClearanceCM);
+	const double EffectivePlaybackTimeScale =
+		FinaleSystem->IsEditorCandidateMode()
+			? 1.0
+			: FMath::Max(0.1, PlaybackTimeScale);
 	if (!ReleasedPlaybackPlan.bPhysicalTargetHit
 		&& !ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 	{
-		const double EffectivePlaybackTimeScale =
-			FinaleSystem->IsEditorCandidateMode()
-				? 1.0
-				: FMath::Max(0.1, PlaybackTimeScale);
 		const double FailureDurationCap =
 			FMath::Max(1.0, MaximumFailureFlightDisplaySeconds)
 			* EffectivePlaybackTimeScale;
@@ -566,6 +566,30 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 			PlaybackPresentationEndTimeSeconds,
 			ReleasedPlaybackPlan.Points[0].TimeSeconds
 				+ FailureDurationCap);
+	}
+	FABTSM11FailurePresentationConfig DesiredFailureConfig;
+	DesiredFailureConfig.ReadableHoldSeconds =
+		FailureReadableHoldSeconds;
+	DesiredFailureConfig.FadeToBlackSeconds =
+		FailureFadeToBlackSeconds;
+	DesiredFailureConfig.BlackHoldSeconds = FailureBlackHoldSeconds;
+	DesiredFailureConfig.FadeFromBlackSeconds =
+		FailureFadeFromBlackSeconds;
+	ReleasedFailurePresentationConfig = DesiredFailureConfig;
+	FailurePresentationStartTimeSeconds =
+		PlaybackPresentationEndTimeSeconds;
+	if (!ReleasedPlaybackPlan.bPhysicalTargetHit
+		&& !ReleasedPlaybackPlan.bCandidateQualifiedIntercept
+		&& !ABTSM11ResolveFailurePresentationSchedule(
+			ReleasedPlaybackPlan.Points[0].TimeSeconds,
+			PlaybackPresentationEndTimeSeconds,
+			EffectivePlaybackTimeScale,
+			DesiredFailureConfig,
+			FailurePresentationStartTimeSeconds,
+			ReleasedFailurePresentationConfig))
+	{
+		FailInteraction(TEXT("FailurePresentationScheduleRejected"));
+		return false;
 	}
 	InteractionState = EABTSM11FinaleInteractionState::Launched;
 	if (IsValid(ActiveCord))
@@ -575,13 +599,14 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d CandidateQualified=%d Physical=%d Transfer=%d PresentationEnd=%.3f"),
+		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d CandidateQualified=%d Physical=%d Transfer=%d FailureStart=%.3f PresentationEnd=%.3f"),
 		ReleasedPlaybackPlan.ReleasedTrajectoryHash,
 		ReleasedPlaybackPlan.PlanHash,
 		ReleasedPlaybackPlan.bQualifiedF4 ? 1 : 0,
 		ReleasedPlaybackPlan.bCandidateQualifiedIntercept ? 1 : 0,
 		ReleasedPlaybackPlan.bPhysicalTargetHit ? 1 : 0,
 		ReleasedPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0,
+		FailurePresentationStartTimeSeconds,
 		PlaybackPresentationEndTimeSeconds);
 	return true;
 }

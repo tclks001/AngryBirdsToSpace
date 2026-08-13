@@ -83,9 +83,11 @@ ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
 /**
  * Pure resolver for the read-only finale environment stage.
  *
- * A launched attempt enters DeepSpace only after the immutable released
- * trajectory reaches AssistEnter(1). Missing or invalid event evidence stays
- * in AtmosphereTransition (fail closed) rather than selecting deep space.
+ * A launched or still-visible failed attempt enters DeepSpace only after the
+ * immutable released trajectory reaches AssistEnter(1). Missing or invalid
+ * event evidence stays in AtmosphereTransition (fail closed) rather than
+ * selecting deep space. The interaction state changes to Recovering exactly
+ * when the failure timeline reaches full black.
  */
 ABTSRUNTIME_API EABTSM11FinaleEnvironmentStage
 ABTSM11ResolveFinaleEnvironmentStage(
@@ -374,6 +376,7 @@ public:
 	bool IsActive() const;
 	bool IsComplete() const;
 	double GetBlackoutAlpha() const;
+	double GetSecondsUntilRestore() const;
 	EABTSM11FailurePresentationPhase GetPhase() const;
 
 private:
@@ -455,6 +458,19 @@ ABTSRUNTIME_API double ABTSM11ResolveFailurePresentationEndTime(
 	const FABTSM11TrajectoryResult& Result,
 	const FABTSM11PlaybackPlan& Plan,
 	double BirdClearanceCM);
+
+/**
+ * Schedules the failure fade so immutable route playback and its camera
+ * director reach the presentation endpoint on the exact full-black recovery
+ * boundary.
+ */
+ABTSRUNTIME_API bool ABTSM11ResolveFailurePresentationSchedule(
+	double PlaybackStartTimeSeconds,
+	double PlaybackEndTimeSeconds,
+	double PlaybackTimeScale,
+	const FABTSM11FailurePresentationConfig& DesiredConfig,
+	double& OutFailureStartTimeSeconds,
+	FABTSM11FailurePresentationConfig& OutScheduledConfig);
 
 /** Shared circular-panel clipping used by every M11 diagram primitive. */
 ABTSRUNTIME_API bool ABTSM11ClipDiagramSegmentToUnitCircle(
