@@ -186,8 +186,41 @@ namespace ABTSM73BeamD1Preview
 		Stage2ProvenanceVisibility = 1 << 14,
 		Stage2CoreAndCouplingVisibility = 1 << 15,
 		Stage2PerimeterCoreFacesVisibility = 1 << 16,
-		Stage2FacadePartitionsVisibility = 1 << 17
+		Stage2FacadePartitionsVisibility = 1 << 17,
+		Stage3ExteriorFramesVisibility = 1 << 18,
+		Stage3ExteriorColumnsVisibility = 1 << 19,
+		Stage3GroundSillVisibility = 1 << 20,
+		Stage3GroundExteriorColumnsVisibility = 1 << 21,
+		Stage3OverviewVisibility = 1 << 22
 	};
+
+	enum class EStage3OverviewBucket : uint8
+	{
+		None,
+		Stage1CoreAndShared,
+		Stage2Coupling,
+		Stage3Exterior
+	};
+
+	EStage3OverviewBucket Stage3OverviewBucket(
+		const EABTSM73BeamC3GenerationStage ProducedStage,
+		const bool bReusedAsStage3Exterior)
+	{
+		if (bReusedAsStage3Exterior
+			|| ProducedStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame)
+		{
+			return EStage3OverviewBucket::Stage3Exterior;
+		}
+		if (ProducedStage == EABTSM73BeamC3GenerationStage::CouplingCourses)
+		{
+			return EStage3OverviewBucket::Stage2Coupling;
+		}
+		if (ProducedStage == EABTSM73BeamC3GenerationStage::CoreAndShared)
+		{
+			return EStage3OverviewBucket::Stage1CoreAndShared;
+		}
+		return EStage3OverviewBucket::None;
+	}
 
 	uint32 DiagnosticVisibilityMask(
 		const EABTSM73BeamC3Stage1DiagnosticLayer Layer)
@@ -236,6 +269,26 @@ namespace ABTSM73BeamD1Preview
 			return Stage2PerimeterCoreFacesVisibility;
 		case EABTSM73BeamC3Stage2DiagnosticLayer::FacadePartitionsAndHeightAnchors:
 			return Stage2FacadePartitionsVisibility;
+		default:
+			return 0;
+		}
+	}
+
+	uint32 DiagnosticVisibilityMask(
+		const EABTSM73BeamC3Stage3DiagnosticLayer Layer)
+	{
+		switch (Layer)
+		{
+		case EABTSM73BeamC3Stage3DiagnosticLayer::ExteriorFramesOnly:
+			return Stage3ExteriorFramesVisibility;
+		case EABTSM73BeamC3Stage3DiagnosticLayer::GroundSillOnly:
+			return Stage3GroundSillVisibility;
+		case EABTSM73BeamC3Stage3DiagnosticLayer::GroundToFirstFrameColumns:
+			return Stage3GroundExteriorColumnsVisibility;
+		case EABTSM73BeamC3Stage3DiagnosticLayer::ExteriorColumnsOnly:
+			return Stage3ExteriorColumnsVisibility;
+		case EABTSM73BeamC3Stage3DiagnosticLayer::Stage123Overview:
+			return Stage3OverviewVisibility;
 		default:
 			return 0;
 		}
@@ -339,6 +392,16 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage2DiagnosticLayer::PerimeterCoreFaces);
 	const uint32 Stage2FacadePartitionMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage2DiagnosticLayer::FacadePartitionsAndHeightAnchors);
+	const uint32 Stage3FrameMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage3DiagnosticLayer::ExteriorFramesOnly);
+	const uint32 Stage3ColumnMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage3DiagnosticLayer::ExteriorColumnsOnly);
+	const uint32 Stage3GroundSillMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage3DiagnosticLayer::GroundSillOnly);
+	const uint32 Stage3GroundColumnMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage3DiagnosticLayer::GroundToFirstFrameColumns);
+	const uint32 Stage3OverviewMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage3DiagnosticLayer::Stage123Overview);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint32>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -375,6 +438,37 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 	TestEqual(TEXT("Stage-2 facade-partition layer is mutually exclusive"),
 		Stage2FacadePartitionMask,
 		static_cast<uint32>(Stage2FacadePartitionsVisibility));
+	TestEqual(TEXT("Stage-3 exterior-frame layer is mutually exclusive"),
+		Stage3FrameMask, static_cast<uint32>(Stage3ExteriorFramesVisibility));
+	TestEqual(TEXT("Stage-3 exterior-column layer is mutually exclusive"),
+		Stage3ColumnMask, static_cast<uint32>(Stage3ExteriorColumnsVisibility));
+	TestEqual(TEXT("Stage-3 ground-sill layer is mutually exclusive"),
+		Stage3GroundSillMask, static_cast<uint32>(Stage3GroundSillVisibility));
+	TestEqual(TEXT("Stage-3 ground-column layer is mutually exclusive"),
+		Stage3GroundColumnMask,
+		static_cast<uint32>(Stage3GroundExteriorColumnsVisibility));
+	TestEqual(TEXT("Stage-3 overview layer has one independent visibility bit"),
+		Stage3OverviewMask, static_cast<uint32>(Stage3OverviewVisibility));
+	TestEqual(TEXT("Stage-3 frame and column layers are disjoint"),
+		Stage3FrameMask & Stage3ColumnMask, static_cast<uint32>(0));
+	TestEqual(TEXT("Stage-3 sill and ground-column layers are disjoint"),
+		Stage3GroundSillMask & Stage3GroundColumnMask, static_cast<uint32>(0));
+	TestEqual(TEXT("Stage-3 overview and individual layers are disjoint"),
+		Stage3OverviewMask & (Stage3FrameMask | Stage3ColumnMask
+			| Stage3GroundSillMask | Stage3GroundColumnMask),
+		static_cast<uint32>(0));
+	TestEqual(TEXT("Overview classifies Stage 1 core/shared members"),
+		Stage3OverviewBucket(EABTSM73BeamC3GenerationStage::CoreAndShared, false),
+		EStage3OverviewBucket::Stage1CoreAndShared);
+	TestEqual(TEXT("Overview classifies Stage 2 coupling members"),
+		Stage3OverviewBucket(EABTSM73BeamC3GenerationStage::CouplingCourses, false),
+		EStage3OverviewBucket::Stage2Coupling);
+	TestEqual(TEXT("Overview classifies Stage 3 exterior members"),
+		Stage3OverviewBucket(EABTSM73BeamC3GenerationStage::CommonExteriorFrame, false),
+		EStage3OverviewBucket::Stage3Exterior);
+	TestEqual(TEXT("Overview gives a reused ground sill Stage 3 visual ownership"),
+		Stage3OverviewBucket(EABTSM73BeamC3GenerationStage::CoreAndShared, true),
+		EStage3OverviewBucket::Stage3Exterior);
 	TestEqual(TEXT("Province-main layer contains only the assignment plan"),
 		SupportProvinceMainMask,
 		static_cast<uint32>(SupportProvinceMainVisibility));
@@ -704,7 +798,10 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				*GetName(), static_cast<int32>(GenerationStopStage),
 				GenerationStopStage == EABTSM73BeamC3GenerationStage::CouplingCourses
 					? static_cast<int32>(Stage2DiagnosticLayer)
-					: static_cast<int32>(Stage1DiagnosticLayer), *Error);
+					: GenerationStopStage
+						== EABTSM73BeamC3GenerationStage::CommonExteriorFrame
+							? static_cast<int32>(Stage3DiagnosticLayer)
+							: static_cast<int32>(Stage1DiagnosticLayer), *Error);
 			return;
 		}
 		LastSummary = StageResult.Summary;
@@ -719,9 +816,13 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				: Stage1DiagnosticLayer;
 		const bool bStage2 = GenerationStopStage
 			== EABTSM73BeamC3GenerationStage::CouplingCourses;
-		const uint32 VisibilityMask = bStage2
-			? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage2DiagnosticLayer)
-			: ABTSM73BeamD1Preview::DiagnosticVisibilityMask(EffectiveLayer);
+		const bool bStage3 = GenerationStopStage
+			== EABTSM73BeamC3GenerationStage::CommonExteriorFrame;
+		const uint32 VisibilityMask = bStage3
+			? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage3DiagnosticLayer)
+			: bStage2
+				? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage2DiagnosticLayer)
+				: ABTSM73BeamD1Preview::DiagnosticVisibilityMask(EffectiveLayer);
 		const bool bShowEnvelope =
 			(VisibilityMask & ABTSM73BeamD1Preview::SemanticEnvelopeVisibility) != 0;
 		if (bShowEnvelope && SemanticEnvelopePreview != nullptr)
@@ -1399,7 +1500,12 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			| ABTSM73BeamD1Preview::Stage2ProvenanceVisibility
 			| ABTSM73BeamD1Preview::Stage2CoreAndCouplingVisibility
 			| ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility
-			| ABTSM73BeamD1Preview::Stage2FacadePartitionsVisibility)) != 0)
+			| ABTSM73BeamD1Preview::Stage2FacadePartitionsVisibility
+			| ABTSM73BeamD1Preview::Stage3ExteriorFramesVisibility
+			| ABTSM73BeamD1Preview::Stage3ExteriorColumnsVisibility
+			| ABTSM73BeamD1Preview::Stage3GroundSillVisibility
+			| ABTSM73BeamD1Preview::Stage3GroundExteriorColumnsVisibility
+			| ABTSM73BeamD1Preview::Stage3OverviewVisibility)) != 0)
 		{
 			const bool bXOnly =
 				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreXVisibility) != 0;
@@ -1415,12 +1521,41 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				(VisibilityMask & ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility) != 0;
 			const bool bFacadePartitions =
 				(VisibilityMask & ABTSM73BeamD1Preview::Stage2FacadePartitionsVisibility) != 0;
+			const bool bExteriorFrames =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage3ExteriorFramesVisibility) != 0;
+			const bool bExteriorColumns =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage3ExteriorColumnsVisibility) != 0;
+			const bool bGroundSill =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage3GroundSillVisibility) != 0;
+			const bool bGroundExteriorColumns =
+				(VisibilityMask
+					& ABTSM73BeamD1Preview::Stage3GroundExteriorColumnsVisibility) != 0;
+			const bool bStage3Overview =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage3OverviewVisibility) != 0;
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
 			for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
 			{
 				const ABTSM73BeamC3V3::FPlannedMember& Member = Plan.Members[MemberIndex];
+				const bool bGroundSillLedgerMember = (bGroundSill || bStage3Overview)
+					&& Plan.GroundSillSegments.ContainsByPredicate(
+						[MemberIndex](
+							const ABTSM73BeamC3V3::FGroundSillSegmentPlan& Segment)
+						{
+							return Segment.MemberIndex == MemberIndex;
+						});
+				const bool bExteriorFrameLedgerMember = (bExteriorFrames || bStage3Overview)
+					&& Plan.CommonExteriorFrames.ContainsByPredicate(
+						[MemberIndex](
+							const ABTSM73BeamC3V3::FCommonExteriorFramePlan& Frame)
+						{
+							return Frame.MemberIndex == MemberIndex;
+						});
 				const bool bCoupling = Member.ProducedStage
 					== EABTSM73BeamC3GenerationStage::CouplingCourses;
+				const ABTSM73BeamD1Preview::EStage3OverviewBucket OverviewBucket =
+					ABTSM73BeamD1Preview::Stage3OverviewBucket(
+						Member.ProducedStage,
+						bGroundSillLedgerMember || bExteriorFrameLedgerMember);
 				bool bProvenanceParent = false;
 				if (bProvenance)
 				{
@@ -1431,7 +1566,19 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 							&& Candidate.ParentStage1MemberIndex == MemberIndex;
 					}
 				}
-				if ((bCouplingOnly && !bCoupling)
+				if ((bExteriorFrames && Member.SkeletonKind
+						!= ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeCourse
+						&& !bExteriorFrameLedgerMember)
+					|| (bExteriorColumns && Member.SkeletonKind
+						!= ABTSM73BeamC3V3::ESkeletonMemberKind::ExteriorPost)
+					|| (bGroundSill && Member.SkeletonKind
+						!= ABTSM73BeamC3V3::ESkeletonMemberKind::GroundSillCourse
+						&& !bGroundSillLedgerMember)
+					|| (bGroundExteriorColumns && Member.SkeletonKind
+						!= ABTSM73BeamC3V3::ESkeletonMemberKind::GroundExteriorPost)
+					|| (bStage3Overview && OverviewBucket
+						== ABTSM73BeamD1Preview::EStage3OverviewBucket::None)
+					|| (bCouplingOnly && !bCoupling)
 					|| (bProvenance && !bCoupling && !bProvenanceParent)
 					|| (bCoreAndCoupling && !bCoupling
 						&& Member.ProducedStage
@@ -1464,10 +1611,35 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					&& (OriginCore->LocalPodiumHeightRegionId == INDEX_NONE
 						|| Member.CourseIndex
 							>= OriginCore->LocalPodiumTopCourseIndex);
-				if (bPerimeterFaces || bFacadePartitions)
+				if (bStage3Overview)
+				{
+					switch (OverviewBucket)
+					{
+					case ABTSM73BeamD1Preview::EStage3OverviewBucket::Stage1CoreAndShared:
+						Preview = WoodPreview.Get();
+						break;
+					case ABTSM73BeamD1Preview::EStage3OverviewBucket::Stage2Coupling:
+						Preview = GlassPreview.Get();
+						break;
+					case ABTSM73BeamD1Preview::EStage3OverviewBucket::Stage3Exterior:
+						Preview = IronPreview.Get();
+						break;
+					default:
+						continue;
+					}
+				}
+				else if (bPerimeterFaces || bFacadePartitions)
 				{
 					Preview = OriginCore != nullptr && OriginCore->PerimeterFaceMask != 0
 						? IronPreview.Get() : GlassPreview.Get();
+				}
+				else if (bExteriorFrames || bGroundSill)
+				{
+					Preview = IronPreview.Get();
+				}
+				else if (bExteriorColumns || bGroundExteriorColumns)
+				{
+					Preview = StonePreview.Get();
 				}
 				else if (bCoupling)
 				{
@@ -1612,7 +1784,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					SharedPairIntentPreview->GetInstanceCount() > 0, true);
 			}
 		}
-		const bool bShowsMembers = bStage2
+		const bool bShowsMembers = bStage2 || bStage3
 			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
 			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
 			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
@@ -1645,10 +1817,12 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d AppliedLocalPodiumRegions=%d LocalPodiumLegMembers=%d RaisedMainReservations=%d RaisedMainMembers=%d LocalPodiumHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
 			TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d FacadePartitions=%d PartitionPerimeter=%d PartitionAnchored=%d DeferredPartitions=%d HeightAnchorBands=%d PartitionBindingViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d")
+			TEXT(" ExteriorFrames=%d ExteriorFramesEmitted=%d ExteriorFramesReused=%d AnchorWithoutFrame=%d FrameWithoutDownward=%d CrossPartitionColumns=%d GroundSillLoops=%d GroundSillSegments=%d GroundSillEmitted=%d GroundSillReused=%d GroundSillConflictOmissions=%d ExteriorColumns=%d GroundExteriorColumns=%d ExteriorColumnSegments=%d GroundExteriorColumnSegments=%d GroundColumnConflictOmissions=%d Stage3ParentViolations=%d Stage3ClampViolations=%d Stage3ColumnFrameViolations=%d Stage3FacadeFitViolations=%d Stage3Hash=%lld")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
-			bStage2 ? static_cast<int32>(Stage2DiagnosticLayer)
-				: static_cast<int32>(EffectiveLayer),
+			bStage3 ? static_cast<int32>(Stage3DiagnosticLayer)
+				: bStage2 ? static_cast<int32>(Stage2DiagnosticLayer)
+					: static_cast<int32>(EffectiveLayer),
 			bHideSemanticSupportDemandVolumes ? 1 : 0,
 			*LastSummary.GameplayProfileId.ToString(), LastSummary.DifficultyTier,
 			StageResult.Silhouette.Volumes.Num(),
@@ -1705,6 +1879,29 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.PerimeterCoreCount,
 			StageResult.Skeleton.Plan.Summary.PerimeterCoreFaceCount,
 			StageResult.Skeleton.Plan.Summary.PerimeterFaceExposureSpanCount,
+			StageResult.Skeleton.Plan.Summary.CommonExteriorFrameCount,
+			StageResult.Skeleton.Plan.Summary.EmittedExteriorFrameCount,
+			StageResult.Skeleton.Plan.Summary.ReusedExteriorFrameCount,
+			StageResult.Skeleton.Plan.Summary.Stage3AnchorBandWithoutFrameCount,
+			StageResult.Skeleton.Plan.Summary
+				.Stage3FrameDownwardConnectionViolationCount,
+			StageResult.Skeleton.Plan.Summary.Stage3CrossPartitionColumnCount,
+			StageResult.Skeleton.Plan.Summary.GroundSillLoopCount,
+			StageResult.Skeleton.Plan.Summary.GroundSillSegmentCount,
+			StageResult.Skeleton.Plan.Summary.EmittedGroundSillSegmentCount,
+			StageResult.Skeleton.Plan.Summary.ReusedGroundSillSegmentCount,
+			StageResult.Skeleton.Plan.Summary.GroundSillConflictOmissionCount,
+			StageResult.Skeleton.Plan.Summary.ExteriorColumnCount,
+			StageResult.Skeleton.Plan.Summary.GroundExteriorColumnCount,
+			StageResult.Skeleton.Plan.Summary.ExteriorColumnSegmentCount,
+			StageResult.Skeleton.Plan.Summary.GroundExteriorColumnSegmentCount,
+			StageResult.Skeleton.Plan.Summary
+				.GroundExteriorColumnConflictOmissionCount,
+			StageResult.Skeleton.Plan.Summary.Stage3ParentViolationCount,
+			StageResult.Skeleton.Plan.Summary.Stage3ClampViolationCount,
+			StageResult.Skeleton.Plan.Summary.Stage3ColumnFrameViolationCount,
+			StageResult.Skeleton.Plan.Summary.Stage3FacadeFitViolationCount,
+			StageResult.Skeleton.Plan.Summary.Stage3PlanHash,
 			LastSummary.SkeletonFirstEnvelopeHash,
 			LastSummary.SkeletonFirstFinalGeometryHash,
 			LastSummary.bStageStaticDAGEvaluated ? 1 : 0);

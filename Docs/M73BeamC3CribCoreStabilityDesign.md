@@ -298,3 +298,100 @@ Routing/M73A/M73B/M73B2 非未来阶段门 6/6。完整 `ABTS.M73DAG` 的 202/27
 Stage 2 下一入口保持原设计：只从 Stage 1 已冻结的 CoreCourse/shared 身份发射可追溯的外框耦合 course；
 暂不生成共同外框。每根新构件必须记录源 core、course、目标 WFC 外立面和前后 Hash，无法回溯到 Stage 1
 骨架的构件失败关闭。Stage 2 先做静态 DAG 与互斥诊断层视觉验收，不进入 Chaos。
+## 18. Stage 3：共同外框与外柱生产合同（2026-08-13）
+
+Stage 3 只消费已经冻结的 Stage 2 `FacadePartition` 与
+`FacadeHeightAnchorBand`，不得重新选择芯体、重新搜索耦合点，或从全局轮廓直接补一套与
+Stage 2 无关的周边框架。本阶段仍不生成 Floor/Infill/Roof，也不运行 Chaos。
+
+### 18.1 外框
+
+1. 一个双层耦合锚带包含 course `B` 与 `B+2` 的两根同向
+   `ThroughCourse`。它只授权 course `B+1` 的一根 `FacadeCourse`。
+2. `FacadeCourse` 必须与两根 `ThroughCourse` 垂直：耦合方向为 X 时外框为 Y，耦合方向为
+   Y 时外框为 X；三者在 facade endpoint 形成完整 `36×36 cm` 十字承压面。
+3. 外框拟合该 course 上包含锚点的 WFC facade span。单根最大 648 cm；若整根候选被已有横轨截断，
+   必须保留包含锚点的合法最小段并向两侧无冲突扩展，或把已经占据夹持位置的真实水平构件登记为
+   Stage 3 复用外框；不得因一次整根碰撞而静默丢弃该锚带的外框。
+4. 外框必须记录 lower/upper Stage 2 member、anchor band、facade partition、source volume 和
+   Stage 2 输入 Hash。真实下座只引用 lower member；upper member 是夹持/来源证据，不伪造为下座。
+
+### 18.2 外柱
+
+1. 外柱在同一实际立面平面 `(ComponentId, FaceMask, FacadeCoordinate)` 的相邻外框之间建立网络，
+   方向严格为 Z；`FacadePartitionId` 和来源芯体不同不得把同一立面切成互不连接的小片。
+2. 外柱底面等于下方外框上表面，顶面等于上方外框下表面；水平站位必须在两根外框共同覆盖区内，
+   并保留完整 `36×36 cm` 承压面。
+3. 每对相邻外框优先在共同区间两端各放一根；不足 72 cm 时只放中间一根。竖向净跨超过
+   720 cm 时拆成若干真实相接的 Z member，每段以下一段为真实下座。
+4. facade 在两框之间任一 course 中断、构件穿透、void 冲突或没有共同切向区间时，该柱候选显式
+   deferred，不得越过退台或洞口补柱。
+
+### 18.3 诊断停点与验收
+
+`AABTSM73BeamD1PreviewActor` 在 `Stage 3 - Common Exterior Frame` 下提供互斥诊断层：
+
+- `Exterior Frames Only`：只显示本阶段 X/Y 外框；
+- `Ground Sill Only`：只显示 course 0 的接地底框；若底框格由既有接地芯体砖占据，则显示该复用砖，
+  不再叠放一根同层底框；
+- `Ground / First-Frame Columns`：只显示底框到各 facade partition 最低外框之间的 Z 柱；
+- `Inter-Frame Exterior Columns`：只显示相邻外框之间的 Z 柱；
+- `Stage 1 / 2 / 3 Overview`：只读叠加已生成的三个阶段。Stage 1 芯体与 shared course 固定为
+  木色，Stage 2 耦合构件固定为玻璃青色，Stage 3 外框、接地底框及两类外柱固定为钢色。被
+  Stage 3 底框账本复用的接地芯体构件按其最终外框职责显示为钢色；该显示不得修改 member、
+  Bearing、阶段哈希或生成结果。
+
+前四个单项层都不得混入 Stage 1 芯体、Stage 2 耦合构件或另一类 Stage 3 构件；总览层只允许上述
+三阶段的既有构件，不得混入 WFC 体块、intent 或其他诊断层。自动化至少验证阶段前缀
+不变、外框上下来源闭合、轴向垂直、真实 Bearing、外柱两端框身份、720 cm 分段、无穿透和确定性
+`Stage3PlanHash`。完整 Beam-C 合力门继续推迟到 Floor/Infill/Roof 闭合后；本阶段证据只能写为
+`StageLocalDAG=Accepted, CompleteBeamC=NotEvaluated, Physical=NotEvaluated`。
+
+### 18.4 接地底框与首层外柱
+
+1. 底框只消费最终 raised-podium facade authority 在 course 0 的真实外露轮廓；不得用全建筑 AABB
+   把凹口、分离基座或必须留空区填成矩形。
+2. 底框中心线与外框相同，位于 WFC 外表面向内 18 cm；X/Y 段都位于 ground course 并直接接地。
+   同层拐角采用确定性所有权：X 段拥有角部实体，Y 段把该格登记为复用，禁止两个方向正体积穿透。
+3. 若底框格已经被接地 `CoreCourse`/shared 等真实水平砖完整占据，账本记录该 member 为
+   `bReusesGroundedCoreMember`，不发射重复底框。非接地或不完整覆盖的冲突不得被冒充为可复用座面。
+4. 每个 facade partition 只从同方向、同 facade coordinate 的底框切向重叠区选择最多两个确定性站位，
+   连接到该 partition 的最低外框；没有投影重叠、途中穿过芯体/既有构件或高度不足一块时显式省略。
+5. 落地外柱按不超过 720 cm 的真实 Z brick 分段；首段以底框/复用芯体砖为下座，后续段以下一段为下座，
+   末段顶面必须抵达最低外框下表面。它建立静态 ground path，但仍不代表 Chaos 稳定性已经通过。
+
+### 18.5 共同外框闭合合同
+
+Stage 3 的验收对象是整栋建筑的共同立面网络，而不是按芯体或 `FacadePartitionId` 分割的局部薄片：
+
+1. 每个 `FacadeHeightAnchorBand` 必须恰好解析出一个逻辑 `CommonExteriorFrame`。已有芯体横轨、
+   Stage 2 耦合横轨、同 course 外框或立面转角节点占据夹持位置时，登记为物理构件复用，禁止重复发砖
+   或静默丢框。
+2. 多个锚带可以共享同一物理外框或转角节点，但各自的锚带身份必须保留。预览中被 Stage 3 复用的
+   Stage 1/2 构件按 Stage 3 外框着色。
+3. 相邻高度外框在实际立面平面的切向公共区间生成 Z 柱。对于裙房外扩、塔楼回退形成的内移立面，
+   向下路径可以落到同 XY 站位的较低外框、芯体横轨、Stage 2 横轨或接地底框；只要真实接触与无穿透
+   成立，不要求柱线在每个 course 都继续属于同一分区。
+4. 每个逻辑外框必须具有可追溯的向下路径。新发射外框仍要求完整 `36×36 cm` 双层夹持；复用的立面
+   转角节点要求上下锚带均有正面积真实接触。
+5. `CommonExteriorFrameCount != FacadeHeightAnchorBandCount`、
+   `Stage3AnchorBandWithoutFrameCount != 0` 或
+   `Stage3FrameDownwardConnectionViolationCount != 0` 均须使 Stage 3 fail closed。
+6. 本合同只证明静态 DAG 和视觉结构闭合，不替代后续 Chaos 稳定性验证。
+
+### 18.6 Stage 3 视觉批准与 Stage 4 顶面闭合待办
+
+Stage 3 视觉验收接受当前共同外框、接地底框和外柱网络，但以下两类构件只作为阶段性静态闭合，
+不得固化为最终建筑拓扑：
+
+1. 子芯体、塔楼回退或内院边缘存在并非建筑最外层的侧面。该侧面的耦合锚带和外框不应默认一路接到
+   ground sill；Stage 4 必须识别其上方可承接的 Floor/Roof 顶面，并将连接目标改为顶框或楼面边框。
+2. 某些内侧或回退立面的外框当前没有适合的向下外柱。Stage 4 不得将其静默忽略，也不得为了满足
+   数量门强行穿过内部空间补接地柱；应由顶面/楼面闭合构件提供可追溯的承载路径。
+3. Stage 4 必须为每个相关 facade/frame 发布明确的 `GroundSill` 或 `TopSurface` 连接意图，并验证二者
+   互斥且完整覆盖；只有真正的建筑外周立面允许保留接地外柱。
+4. Stage 4 视觉专项必须复查：内侧子芯体侧面不再生成无意义的通地长柱、缺少下向柱的局部外框已经
+   接入顶面、连接处具有真实 `36×36 cm` 接触、无穿透且静态 DAG 仍然闭合。
+
+因此 Stage 3 在 2026-08-13 以“共同外框形态通过、顶面归属延期到 Stage 4”的边界冻结；当前结果不代表
+内部立面的最终外柱去向已经批准，也不能以 Stage 3 的临时接地路径替代 Stage 4 验收。

@@ -2577,7 +2577,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	OutError.Reset();
 	if (StopStage != EABTSM73BeamC3GenerationStage::SemanticEnvelope
 		&& StopStage != EABTSM73BeamC3GenerationStage::CoreAndShared
-		&& StopStage != EABTSM73BeamC3GenerationStage::CouplingCourses)
+		&& StopStage != EABTSM73BeamC3GenerationStage::CouplingCourses
+		&& StopStage != EABTSM73BeamC3GenerationStage::CommonExteriorFrame)
 	{
 		OutError = FString::Printf(
 			TEXT("BeamC3StageNotImplemented:Stage=%d"),
@@ -2768,15 +2769,19 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 
 	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
 	const bool bSkeletonGenerated =
-		StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses
-			? SkeletonGenerator.GenerateStage2(SelectedProfile,
+		StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
+			? SkeletonGenerator.GenerateStage3(SelectedProfile,
 				OutResult.Silhouette, OutResult.Skeleton, OutError)
-			: SkeletonGenerator.GenerateStage1(SelectedProfile,
-				OutResult.Silhouette, OutResult.Skeleton, OutError);
+			: StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses
+				? SkeletonGenerator.GenerateStage2(SelectedProfile,
+					OutResult.Silhouette, OutResult.Skeleton, OutError)
+				: SkeletonGenerator.GenerateStage1(SelectedProfile,
+					OutResult.Silhouette, OutResult.Skeleton, OutError);
 	if (!bSkeletonGenerated)
 	{
 		OutError = FString::Printf(TEXT("BeamC3Stage%d:%s"),
-			StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses ? 2 : 1,
+			StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame ? 3
+				: StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses ? 2 : 1,
 			*OutError);
 		return false;
 	}
@@ -2784,7 +2789,9 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		OutResult.Skeleton.Plan.Summary;
 	const bool bStage2 = StopStage
 		== EABTSM73BeamC3GenerationStage::CouplingCourses;
-	if (!bStage2)
+	const bool bStage3 = StopStage
+		== EABTSM73BeamC3GenerationStage::CommonExteriorFrame;
+	if (!bStage2 && !bStage3)
 	{
 		const double StaticDAGStartSeconds = FPlatformTime::Seconds();
 		const bool bStaticDAGGenerated = FABTSM73BeamCGenerator().Generate(
@@ -2801,10 +2808,9 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	}
 	else
 	{
-		// Stage 2 intentionally stops before the common facade and exterior posts.
-		// Running Beam-C's complete-building resultant gate here would reject every
-		// legitimate coupling cantilever. GenerateStage2 has already rebuilt the
-		// real face contacts and proved the complete ground-reachable seat DAG.
+		// Stages 2/3 stop before floor/infill/roof. Their generators already rebuild
+		// real contacts and prove the stage-local ground-reachable seat DAG; complete
+		// Beam-C resultants remain deferred until the complete static building.
 		Stage1.StaticDAGMilliseconds = 0.0;
 	}
 	Stage1.bStage1TimingEvaluated = true;
@@ -2827,7 +2833,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		return false;
 	}
 	Stage1.bStage1WithinTimeBudget = true;
-	if (!bStage2
+	if (!bStage2 && !bStage3
 		&& (OutResult.StaticDAG.Summary.StructuralClosurePassCount != 0
 		|| OutResult.StaticDAG.Summary.AddedStructuralSupportPostCount != 0
 		|| OutResult.StaticDAG.Summary.SupportResultantAdvisoryCount != 0))

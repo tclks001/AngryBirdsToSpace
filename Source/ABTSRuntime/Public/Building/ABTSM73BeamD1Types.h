@@ -30,7 +30,7 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 	SemanticEnvelope UMETA(DisplayName = "Stage 0 - WFC Semantic Envelope"),
 	CoreAndShared UMETA(DisplayName = "Stage 1 - Core + Shared Courses"),
 	CouplingCourses UMETA(DisplayName = "Stage 2 - Core / Facade Coupling Courses"),
-	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame (Not Implemented)"),
+	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame"),
 	FloorInfillRoof UMETA(DisplayName = "Stage 4 - Floor / Infill / Roof (Not Implemented)"),
 	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)")
 };
@@ -44,6 +44,17 @@ enum class EABTSM73BeamC3Stage2DiagnosticLayer : uint8
 	CoreAndCouplingCourses UMETA(DisplayName = "3 - Core + Coupling Courses"),
 	PerimeterCoreFaces UMETA(DisplayName = "4 - Perimeter Cores / Touched Faces"),
 	FacadePartitionsAndHeightAnchors UMETA(DisplayName = "5 - Facade Partitions / Height Anchors")
+};
+
+/** Mutually exclusive Stage-3 production evidence layers. */
+UENUM(BlueprintType)
+enum class EABTSM73BeamC3Stage3DiagnosticLayer : uint8
+{
+	ExteriorFramesOnly UMETA(DisplayName = "1 - Exterior Frames Only"),
+	GroundSillOnly UMETA(DisplayName = "2 - Ground Sill Only"),
+	GroundToFirstFrameColumns UMETA(DisplayName = "3 - Ground / First-Frame Columns"),
+	ExteriorColumnsOnly UMETA(DisplayName = "4 - Inter-Frame Exterior Columns"),
+	Stage123Overview UMETA(DisplayName = "5 - Stage 1 / 2 / 3 Overview")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */

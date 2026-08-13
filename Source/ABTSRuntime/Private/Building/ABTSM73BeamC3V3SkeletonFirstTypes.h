@@ -36,7 +36,9 @@ namespace ABTSM73BeamC3V3
 		CoreCourse,
 		ThroughCourse,
 		FacadeCourse,
+		GroundSillCourse,
 		ExteriorPost,
+		GroundExteriorPost,
 		FloorCourse,
 		RoofCourse,
 		SharedCourse,
@@ -81,6 +83,16 @@ namespace ABTSM73BeamC3V3
 		int32 FacadePartitionId = INDEX_NONE;
 		/** Stage-2 only: semantic Body face reached by the outer endpoint. */
 		int32 TargetFacadeSourceVolumeId = INDEX_NONE;
+		/** Stage-3 only: immutable Stage-2 members which authorize this member. */
+		TArray<int32> ParentStage2MemberIndices;
+		/** Stage-3 only: stable facade-frame identity. */
+		int32 ExteriorFrameId = INDEX_NONE;
+		/** Stage-3 exterior-column lineage. */
+		int32 ExteriorColumnId = INDEX_NONE;
+		/** Stage-3 ground-sill lineage. Existing core members remain INDEX_NONE. */
+		int32 GroundSillSegmentId = INDEX_NONE;
+		int32 LowerExteriorFrameId = INDEX_NONE;
+		int32 UpperExteriorFrameId = INDEX_NONE;
 		int32 CourseIndex = INDEX_NONE;
 		int32 StationA = INDEX_NONE;
 		int32 StationB = INDEX_NONE;
@@ -735,6 +747,63 @@ namespace ABTSM73BeamC3V3
 		int32 UpperMemberIndex = INDEX_NONE;
 	};
 
+	/** One tangent X/Y frame physically clamped between a Stage-2 anchor pair. */
+	struct FCommonExteriorFramePlan
+	{
+		int32 ExteriorFrameId = INDEX_NONE;
+		int32 FacadePartitionId = INDEX_NONE;
+		int32 AnchorBandId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 CourseIndex = INDEX_NONE;
+		uint8 FaceMask = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		double FacadeCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+		int32 LowerStage2MemberIndex = INDEX_NONE;
+		int32 UpperStage2MemberIndex = INDEX_NONE;
+		int32 MemberIndex = INDEX_NONE;
+		/** True when an existing Stage-1/2 horizontal member, Stage-3 frame, or
+		 * facade-corner junction occupies the clamp station and is adopted instead
+		 * of emitting a penetrating duplicate. */
+		bool bReusesExistingMember = false;
+	};
+
+	/** One real ground-course segment of the WFC exposed contour. A segment can
+	 * reuse an already-grounded core rail instead of emitting overlapping brick. */
+	struct FGroundSillSegmentPlan
+	{
+		int32 GroundSillSegmentId = INDEX_NONE;
+		int32 GroundSillLoopId = INDEX_NONE;
+		int32 FacadePartitionId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		uint8 FaceMask = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		double FacadeCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+		int32 MemberIndex = INDEX_NONE;
+		bool bReusesGroundedCoreMember = false;
+	};
+
+	/** One logical Z column clamped between adjacent exterior frames. */
+	struct FExteriorColumnPlan
+	{
+		int32 ExteriorColumnId = INDEX_NONE;
+		int32 FacadePartitionId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		uint8 FaceMask = 0;
+		double FacadeCoordinateCM = 0.0;
+		double TangentCoordinateCM = 0.0;
+		int32 LowerExteriorFrameId = INDEX_NONE;
+		int32 UpperExteriorFrameId = INDEX_NONE;
+		/** True when this column begins on a ground sill/core substitute and ends
+		 * at the partition's first exterior frame. */
+		bool bGroundToFirstFrame = false;
+		int32 GroundSillSegmentId = INDEX_NONE;
+		TArray<int32> SegmentMemberIndices;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -1017,6 +1086,32 @@ namespace ABTSM73BeamC3V3
 		double Stage2MemberEmissionMilliseconds = 0.0;
 		double Stage2StaticDAGMilliseconds = 0.0;
 		double Stage2TotalMilliseconds = 0.0;
+		int64 Stage3InputGeometryHash = 0;
+		int32 CommonExteriorFrameCount = 0;
+		int32 GroundSillLoopCount = 0;
+		int32 GroundSillSegmentCount = 0;
+		int32 EmittedGroundSillSegmentCount = 0;
+		int32 ReusedGroundSillSegmentCount = 0;
+		int32 GroundSillConflictOmissionCount = 0;
+		int32 ExteriorColumnCount = 0;
+		int32 ExteriorColumnSegmentCount = 0;
+		int32 GroundExteriorColumnCount = 0;
+		int32 GroundExteriorColumnSegmentCount = 0;
+		int32 GroundExteriorColumnConflictOmissionCount = 0;
+		int32 EmittedExteriorFrameCount = 0;
+		int32 ReusedExteriorFrameCount = 0;
+		int32 Stage3AnchorBandWithoutFrameCount = 0;
+		int32 Stage3FrameDownwardConnectionViolationCount = 0;
+		int32 Stage3CrossPartitionColumnCount = 0;
+		int32 Stage3ParentViolationCount = 0;
+		int32 Stage3ClampViolationCount = 0;
+		int32 Stage3ColumnFrameViolationCount = 0;
+		int32 Stage3FacadeFitViolationCount = 0;
+		int64 Stage3PlanHash = 0;
+		double Stage3FrameMilliseconds = 0.0;
+		double Stage3ColumnMilliseconds = 0.0;
+		double Stage3StaticDAGMilliseconds = 0.0;
+		double Stage3TotalMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;
@@ -1104,6 +1199,9 @@ namespace ABTSM73BeamC3V3
 		TArray<FResolvedFacadeEnvelopeVolume> ResolvedFacadeEnvelopeVolumes;
 		TArray<FFacadePartitionPlan> FacadePartitions;
 		TArray<FFacadeHeightAnchorBand> FacadeHeightAnchorBands;
+		TArray<FCommonExteriorFramePlan> CommonExteriorFrames;
+		TArray<FGroundSillSegmentPlan> GroundSillSegments;
+		TArray<FExteriorColumnPlan> ExteriorColumns;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

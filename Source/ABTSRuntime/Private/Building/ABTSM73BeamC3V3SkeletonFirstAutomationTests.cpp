@@ -4257,12 +4257,195 @@ bool FABTSM73BeamC3StagedFutureStageFailClosedTest::RunTest(const FString& Param
 	using namespace ABTSM73BeamC3V3Tests;
 	FABTSM73BeamD1StagePreviewResult Result;
 	FString Error;
-	TestFalse(TEXT("Stage 3 is not silently routed to the legacy full generator"),
+	TestFalse(TEXT("Stage 4 is not silently routed to the legacy full generator"),
 		FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
 			MakeD1Settings({TEXT("ColumnBreak"), 0, 710000}),
-			EABTSM73BeamC3GenerationStage::CommonExteriorFrame, Result, Error));
+			EABTSM73BeamC3GenerationStage::FloorInfillRoof, Result, Error));
 	TestTrue(TEXT("Unimplemented stage reports stable failure identity"),
 		Error.StartsWith(TEXT("BeamC3StageNotImplemented")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedStage3BoundaryTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.Stage3Boundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3StagedStage3BoundaryTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	FABTSM73BeamD1StagePreviewResult Result;
+	FString Error;
+	const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+		MakeD1Settings({TEXT("TipOver"), 5, 750000}),
+		EABTSM73BeamC3GenerationStage::CommonExteriorFrame, Result, Error);
+	TestTrue(*FString::Printf(TEXT("Stage 3 generates: %s"), *Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+	TestTrue(TEXT("Stage 3 emits a non-empty common exterior frame"),
+		Plan.Summary.CommonExteriorFrameCount > 0
+			&& Plan.Summary.CommonExteriorFrameCount
+				== Plan.CommonExteriorFrames.Num());
+	TestEqual(TEXT("Every Stage-2 anchor band resolves one logical exterior frame"),
+		Plan.Summary.CommonExteriorFrameCount,
+		Plan.Summary.FacadeHeightAnchorBandCount);
+	TestEqual(TEXT("Every logical exterior frame is emitted or reuses a core rail"),
+		Plan.Summary.EmittedExteriorFrameCount
+			+ Plan.Summary.ReusedExteriorFrameCount,
+		Plan.Summary.CommonExteriorFrameCount);
+	TestEqual(TEXT("No Stage-2 anchor is left without an exterior frame"),
+		Plan.Summary.Stage3AnchorBandWithoutFrameCount, 0);
+	TestEqual(TEXT("Every exterior frame has a downward sill/frame path"),
+		Plan.Summary.Stage3FrameDownwardConnectionViolationCount, 0);
+	TestTrue(TEXT("Stage 3 emits or reuses a grounded sill along the real contour"),
+		Plan.Summary.GroundSillLoopCount > 0
+			&& Plan.Summary.GroundSillSegmentCount
+				== Plan.GroundSillSegments.Num()
+			&& Plan.Summary.EmittedGroundSillSegmentCount
+				+ Plan.Summary.ReusedGroundSillSegmentCount
+				== Plan.Summary.GroundSillSegmentCount);
+	TestTrue(TEXT("Stage 3 connects at least one lowest frame to its ground sill"),
+		Plan.Summary.GroundExteriorColumnCount > 0
+			&& Plan.Summary.GroundExteriorColumnSegmentCount
+				>= Plan.Summary.GroundExteriorColumnCount);
+	TestTrue(TEXT("Stage 3 emits columns between adjacent exterior frames"),
+		Plan.Summary.ExteriorColumnCount > 0
+			&& Plan.Summary.ExteriorColumnSegmentCount >=
+				Plan.Summary.ExteriorColumnCount);
+	TestEqual(TEXT("Every Stage-3 member has immutable Stage-2 provenance"),
+		Plan.Summary.Stage3ParentViolationCount, 0);
+	TestEqual(TEXT("Every frame is physically clamped by its Stage-2 band"),
+		Plan.Summary.Stage3ClampViolationCount, 0);
+	TestNotEqual(TEXT("Stage-3 input retains exact Stage-2 geometry identity"),
+		Plan.Summary.Stage3InputGeometryHash, int64(0));
+	TestNotEqual(TEXT("Stage-3 delta identity is published"),
+		Plan.Summary.Stage3PlanHash, int64(0));
+	for (const ABTSM73BeamC3V3::FGroundSillSegmentPlan& Sill
+		: Plan.GroundSillSegments)
+	{
+		TestTrue(TEXT("Every ground-sill ledger row resolves to a real grounded member"),
+			Plan.Members.IsValidIndex(Sill.MemberIndex)
+				&& Plan.Members[Sill.MemberIndex].bRequiresGroundSeat);
+		if (!Sill.bReusesGroundedCoreMember)
+		{
+			TestEqual(TEXT("Every emitted sill row owns a Stage-3 ground-sill member"),
+				Plan.Members[Sill.MemberIndex].SkeletonKind,
+				ABTSM73BeamC3V3::ESkeletonMemberKind::GroundSillCourse);
+		}
+	}
+	for (const ABTSM73BeamC3V3::FFacadeHeightAnchorBand& Band
+		: Plan.FacadeHeightAnchorBands)
+	{
+		TestEqual(TEXT("Every anchor-band id occurs exactly once in the exterior-frame ledger"),
+			Plan.CommonExteriorFrames.FilterByPredicate(
+				[&Band](const ABTSM73BeamC3V3::FCommonExteriorFramePlan& Frame)
+				{
+					return Frame.AnchorBandId == Band.AnchorBandId;
+				}).Num(), 1);
+	}
+	for (const ABTSM73BeamC3V3::FPlannedMember& Member : Plan.Members)
+	{
+		if (Member.ProducedStage
+			!= EABTSM73BeamC3GenerationStage::CommonExteriorFrame)
+		{
+			continue;
+		}
+		const bool bGroundSill = Member.SkeletonKind
+			== ABTSM73BeamC3V3::ESkeletonMemberKind::GroundSillCourse;
+		TestTrue(TEXT("Every Stage-3 member has either Stage-2 lineage or ground-contour authority"),
+			bGroundSill || !Member.ParentStage2MemberIndices.IsEmpty());
+		for (const int32 Parent : Member.ParentStage2MemberIndices)
+		{
+			TestTrue(TEXT("Every Stage-3 parent is a Stage-2 member"),
+				Plan.Members.IsValidIndex(Parent)
+					&& Plan.Members[Parent].ProducedStage
+						== EABTSM73BeamC3GenerationStage::CouplingCourses);
+		}
+		if (Member.SkeletonKind
+			== ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeCourse)
+		{
+			TestTrue(TEXT("Exterior frames remain horizontal"),
+				Member.Axis == EABTSM73BeamAFrameAxis::X
+					|| Member.Axis == EABTSM73BeamAFrameAxis::Y);
+		}
+		else if (bGroundSill)
+		{
+			TestTrue(TEXT("Every emitted ground sill is a horizontal ground seat"),
+				Member.bRequiresGroundSeat
+					&& Member.Axis != EABTSM73BeamAFrameAxis::Z
+					&& Member.CourseIndex == 0);
+		}
+		else
+		{
+			TestTrue(TEXT("Only inter-frame or ground exterior posts accompany Stage-3 frames"),
+				Member.SkeletonKind
+					== ABTSM73BeamC3V3::ESkeletonMemberKind::ExteriorPost
+				|| Member.SkeletonKind
+					== ABTSM73BeamC3V3::ESkeletonMemberKind::GroundExteriorPost);
+			TestEqual(TEXT("Exterior columns are Z members"),
+				Member.Axis, EABTSM73BeamAFrameAxis::Z);
+			TestTrue(TEXT("Every Z segment remains within 720 cm"),
+				FVector::Distance(Member.LocalStart, Member.LocalEnd)
+					<= 720.0 + KINDA_SMALL_NUMBER);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedStage3MatrixTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.Stage3ExteriorNetworkMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+void FABTSM73BeamC3StagedStage3MatrixTest::GetTests(
+	TArray<FString>& OutBeautifiedNames,
+	TArray<FString>& OutTestCommands) const
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	for (const FStage1Case& Case : MatrixCases())
+	{
+		OutBeautifiedNames.Add(FString::Printf(
+			TEXT("%s.E%d"), *Case.ProfileId.ToString(), Case.Tier + 1));
+		OutTestCommands.Add(CaseCommand(Case));
+	}
+}
+
+bool FABTSM73BeamC3StagedStage3MatrixTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	FStage1Case Case;
+	if (!ParseCase(Parameters, Case))
+	{
+		AddError(FString::Printf(TEXT("Invalid staged Stage 3 matrix case: %s"),
+			*Parameters));
+		return false;
+	}
+	FABTSM73BeamD1StagePreviewResult Result;
+	FString Error;
+	const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+		MakeD1Settings(Case), EABTSM73BeamC3GenerationStage::CommonExteriorFrame,
+		Result, Error);
+	const FString Prefix = FString::Printf(
+		TEXT("%s.E%d"), *Case.ProfileId.ToString(), Case.Tier + 1);
+	TestTrue(*FString::Printf(TEXT("%s Stage 3 accepts: %s"), *Prefix, *Error),
+		bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+	TestTrue(*FString::Printf(TEXT("%s every anchor has one exterior frame"), *Prefix),
+		Plan.Summary.CommonExteriorFrameCount
+			== Plan.Summary.FacadeHeightAnchorBandCount
+		&& Plan.Summary.Stage3AnchorBandWithoutFrameCount == 0);
+	TestTrue(*FString::Printf(TEXT("%s every exterior frame has a downward path"),
+		*Prefix), Plan.Summary.Stage3FrameDownwardConnectionViolationCount == 0);
+	TestTrue(*FString::Printf(TEXT("%s Stage 3 remains penetration-free static DAG"),
+		*Prefix), Result.Summary.bStageStaticDAGEvaluated
+		&& Plan.Summary.PenetrationCount == 0);
 	return true;
 }
 
