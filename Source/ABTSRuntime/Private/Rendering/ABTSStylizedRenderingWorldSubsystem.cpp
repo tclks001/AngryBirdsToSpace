@@ -63,51 +63,116 @@ namespace ABTSStylizedRenderingWorldSubsystemPrivate
 	constexpr float RefreshIntervalSeconds = 0.10f;
 	constexpr float ContinuousAtmosphereTraceSampleCountScale = 2.0f;
 
-	EABTSM11FinaleEnvironmentStage MergeFinaleEnvironmentStage(
-		const EABTSM11FinaleEnvironmentStage CurrentStage,
-		const EABTSM11FinaleEnvironmentStage CandidateStage)
+	struct FFinaleEnvironmentSourceCandidate
 	{
-		if (CandidateStage == EABTSM11FinaleEnvironmentStage::DeepSpace ||
-			CurrentStage == EABTSM11FinaleEnvironmentStage::DeepSpace)
+		TWeakObjectPtr<AABTSM11FinaleInteractionSystem> Source;
+		FString StableKey;
+		uint64 SourceIdentityHash = 0;
+		EABTSM11FinaleEnvironmentStage Stage =
+			EABTSM11FinaleEnvironmentStage::GroundLaunch;
+		bool bInitialized = false;
+		bool bEnvironmentRelevant = false;
+	};
+
+	struct FResolvedFinaleEnvironmentSource
+	{
+		TWeakObjectPtr<AABTSM11FinaleInteractionSystem> Source;
+		EABTSM11FinaleEnvironmentStage Stage =
+			EABTSM11FinaleEnvironmentStage::GroundLaunch;
+		uint64 SourceIdentityHash = 0;
+		uint64 CandidateSetHash = 0;
+		int32 RelevantSourceCount = 0;
+		bool bConflict = false;
+
+		bool HasUniqueSource() const
 		{
-			return EABTSM11FinaleEnvironmentStage::DeepSpace;
+			return RelevantSourceCount == 1
+				&& !bConflict
+				&& SourceIdentityHash != 0;
 		}
-		if (CandidateStage ==
-				EABTSM11FinaleEnvironmentStage::AtmosphereTransition ||
-			CurrentStage == EABTSM11FinaleEnvironmentStage::AtmosphereTransition)
+	};
+
+	FResolvedFinaleEnvironmentSource ResolveFinaleEnvironmentCandidates(
+		TArray<FFinaleEnvironmentSourceCandidate> Candidates)
+	{
+		FResolvedFinaleEnvironmentSource Result;
+		Candidates.RemoveAll([](const FFinaleEnvironmentSourceCandidate& Candidate)
 		{
-			return EABTSM11FinaleEnvironmentStage::AtmosphereTransition;
-		}
-		if (CandidateStage == EABTSM11FinaleEnvironmentStage::Recovering ||
-			CurrentStage == EABTSM11FinaleEnvironmentStage::Recovering)
+			return !Candidate.bInitialized
+				|| !Candidate.bEnvironmentRelevant
+				|| Candidate.SourceIdentityHash == 0;
+		});
+		Candidates.Sort([](
+			const FFinaleEnvironmentSourceCandidate& Left,
+			const FFinaleEnvironmentSourceCandidate& Right)
 		{
-			return EABTSM11FinaleEnvironmentStage::Recovering;
+			if (Left.StableKey != Right.StableKey)
+			{
+				return Left.StableKey < Right.StableKey;
+			}
+			return Left.SourceIdentityHash < Right.SourceIdentityHash;
+		});
+		Result.RelevantSourceCount = Candidates.Num();
+		for (const FFinaleEnvironmentSourceCandidate& Candidate : Candidates)
+		{
+			Result.CandidateSetHash = HashCombineFast(
+				Result.CandidateSetHash,
+				Candidate.SourceIdentityHash);
+			Result.CandidateSetHash = HashCombineFast(
+				Result.CandidateSetHash,
+				GetTypeHash(static_cast<uint8>(Candidate.Stage)));
 		}
-		return EABTSM11FinaleEnvironmentStage::GroundLaunch;
+		if (Candidates.Num() == 1)
+		{
+			Result.Source = Candidates[0].Source;
+			Result.Stage = Candidates[0].Stage;
+			Result.SourceIdentityHash = Candidates[0].SourceIdentityHash;
+		}
+		else if (Candidates.Num() > 1)
+		{
+			// Ambiguous sources are never merged.  A stale DeepSpace actor must
+			// not override a live ground source merely because iterator order or
+			// stage priority happens to favour it.
+			Result.bConflict = true;
+			Result.Stage = EABTSM11FinaleEnvironmentStage::GroundLaunch;
+		}
+		return Result;
 	}
 
-	EABTSM11FinaleEnvironmentStage ResolveFinaleEnvironmentStage(UWorld& World)
+	FResolvedFinaleEnvironmentSource ResolveFinaleEnvironmentSource(
+		UWorld& World)
 	{
-		EABTSM11FinaleEnvironmentStage ResolvedStage =
-			EABTSM11FinaleEnvironmentStage::GroundLaunch;
+		TArray<FFinaleEnvironmentSourceCandidate> Candidates;
 		for (TActorIterator<AABTSM11FinaleInteractionSystem> It(&World); It; ++It)
 		{
-			if (!IsValid(*It))
+			AABTSM11FinaleInteractionSystem* Interaction = *It;
+			if (!IsValid(Interaction) || Interaction->IsActorBeingDestroyed())
 			{
 				continue;
 			}
-
-			const EABTSM11FinaleEnvironmentStage CandidateStage =
-				It->GetFinaleEnvironmentStage();
-			ResolvedStage = MergeFinaleEnvironmentStage(
-				ResolvedStage,
-				CandidateStage);
-			if (ResolvedStage == EABTSM11FinaleEnvironmentStage::DeepSpace)
+			const AABTSM11FinaleSystem* FinaleSystem =
+				Interaction->GetFinaleSystem();
+			FFinaleEnvironmentSourceCandidate& Candidate =
+				Candidates.AddDefaulted_GetRef();
+			Candidate.Source = Interaction;
+			Candidate.StableKey = Interaction->GetPathName();
+			Candidate.SourceIdentityHash = HashCombineFast(
+				GetTypeHash(Candidate.StableKey),
+				GetTypeHash(GetPathNameSafe(FinaleSystem)));
+			if (Candidate.SourceIdentityHash == 0)
 			{
-				return ResolvedStage;
+				Candidate.SourceIdentityHash = 1;
 			}
+			Candidate.Stage = Interaction->GetFinaleEnvironmentStage();
+			Candidate.bInitialized = IsValid(FinaleSystem)
+				&& Interaction->GetInteractionState()
+					!= EABTSM11FinaleInteractionState::Locked;
+			Candidate.bEnvironmentRelevant = Candidate.bInitialized
+				&& (Interaction->IsFinaleActive()
+					|| Candidate.Stage
+						!= EABTSM11FinaleEnvironmentStage::GroundLaunch);
 		}
-		return ResolvedStage;
+		return ResolveFinaleEnvironmentCandidates(MoveTemp(Candidates));
 	}
 
 	bool DoesFinaleEnvironmentStageRequireSpace(
@@ -1157,23 +1222,36 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 	bSharedMaterialPreloadReady = false;
 	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
 	bEnvironmentSnapshotReady = false;
+	bWorldTearingDown = false;
+	bEnvironmentOwnershipActive = false;
+	EnvironmentOwnershipGeneration = 0;
+	EnvironmentRecoveryGeneration = 0;
+	EnvironmentSourceGeneration = 0;
+	ActiveFinaleEnvironmentSource.Reset();
+	ActiveFinaleEnvironmentSourceHash = 0;
 	LastEnvironmentDiagnosticHash = 0;
 	CloudFieldTuningState = FABTST4CloudFieldTuningState();
+	WorldBeginTearDownHandle = FWorldDelegates::OnWorldBeginTearDown.AddUObject(
+		this,
+		&UABTSStylizedRenderingWorldSubsystem::HandleWorldBeginTearDown);
+	WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddUObject(
+		this,
+		&UABTSStylizedRenderingWorldSubsystem::HandleWorldCleanup);
 }
 
 void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 {
-	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	bWorldTearingDown = true;
+	UnbindWorldLifecycleDelegates();
+	ReleaseEnvironmentOwnership(TEXT("SubsystemDeinitialize"), true);
 	if (AActor* OverviewCamera = CloudFieldOverviewCamera.Get())
 	{
 		OverviewCamera->Destroy();
 	}
 	CloudFieldOverviewCamera.Reset();
 	CloudFieldOverviewPreviousViewTarget.Reset();
-	DestroyLowPolyCloudPrototype();
 	if (EnvironmentPresentation)
 	{
-		EnvironmentPresentation->Restore();
 		EnvironmentPresentation.Reset();
 	}
 	if (MaterialRegistry)
@@ -1186,15 +1264,6 @@ void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 		PrimitiveRegistry->RestoreAll();
 		PrimitiveRegistry.Reset();
 	}
-	for (const TWeakObjectPtr<USceneCaptureComponent2D>& Capture
-		: RegisteredCaptures)
-	{
-		if (Capture.IsValid())
-		{
-			FABTSStylizedSceneCaptureRegistry::Unregister(*Capture.Get());
-		}
-	}
-	RegisteredCaptures.Reset();
 	PreloadedSharedMaterials.Reset();
 	bSharedMaterialPreloadReady = false;
 	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
@@ -1206,9 +1275,187 @@ void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 void UABTSStylizedRenderingWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
+	bWorldTearingDown = false;
+	BindWorldLifecycleDelegates(InWorld);
 	PreloadSharedMaterials();
 	bWorldBeganPlay = true;
 	RefreshNow();
+}
+
+void UABTSStylizedRenderingWorldSubsystem::BindWorldLifecycleDelegates(
+	UWorld& World)
+{
+	if (!ActorSpawnedHandle.IsValid())
+	{
+		ActorSpawnedHandle = World.AddOnActorSpawnedHandler(
+			FOnActorSpawned::FDelegate::CreateUObject(
+				this,
+				&UABTSStylizedRenderingWorldSubsystem::HandleActorSpawned));
+	}
+	if (!ActorDestroyedHandle.IsValid())
+	{
+		ActorDestroyedHandle = World.AddOnActorDestroyedHandler(
+			FOnActorDestroyed::FDelegate::CreateUObject(
+				this,
+				&UABTSStylizedRenderingWorldSubsystem::HandleActorDestroyed));
+	}
+}
+
+void UABTSStylizedRenderingWorldSubsystem::UnbindWorldLifecycleDelegates()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (ActorSpawnedHandle.IsValid())
+		{
+			World->RemoveOnActorSpawnedHandler(ActorSpawnedHandle);
+		}
+		if (ActorDestroyedHandle.IsValid())
+		{
+			World->RemoveOnActorDestroyedHandler(ActorDestroyedHandle);
+		}
+	}
+	ActorSpawnedHandle.Reset();
+	ActorDestroyedHandle.Reset();
+	if (WorldBeginTearDownHandle.IsValid())
+	{
+		FWorldDelegates::OnWorldBeginTearDown.Remove(
+			WorldBeginTearDownHandle);
+		WorldBeginTearDownHandle.Reset();
+	}
+	if (WorldCleanupHandle.IsValid())
+	{
+		FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
+		WorldCleanupHandle.Reset();
+	}
+}
+
+void UABTSStylizedRenderingWorldSubsystem::HandleActorSpawned(AActor* Actor)
+{
+	if (!bWorldTearingDown
+		&& IsValid(Actor)
+		&& Actor->IsA<AABTSM11FinaleInteractionSystem>())
+	{
+		// Finished spawning precedes the M11 Initialize call.  Mark the lease
+		// dirty now; the bounded fallback poll acquires it once initialization
+		// publishes a valid FinaleSystem and active state.
+		RefreshAccumulatorSeconds =
+			ABTSStylizedRenderingWorldSubsystemPrivate::RefreshIntervalSeconds;
+	}
+}
+
+void UABTSStylizedRenderingWorldSubsystem::UnregisterCapturesOwnedBy(
+	const AActor* Owner)
+{
+	if (Owner == nullptr)
+	{
+		return;
+	}
+	for (auto It = RegisteredCaptures.CreateIterator(); It; ++It)
+	{
+		USceneCaptureComponent2D* Capture = It->Get();
+		if (IsValid(Capture) && Capture->GetOwner() == Owner)
+		{
+			FABTSStylizedSceneCaptureRegistry::Unregister(*Capture);
+			It.RemoveCurrent();
+		}
+	}
+}
+
+void UABTSStylizedRenderingWorldSubsystem::HandleActorDestroyed(AActor* Actor)
+{
+	if (Actor == nullptr)
+	{
+		return;
+	}
+	UnregisterCapturesOwnedBy(Actor);
+	if (!Actor->IsA<AABTSM11FinaleInteractionSystem>())
+	{
+		return;
+	}
+
+	ReleaseEnvironmentOwnership(TEXT("M11SourceDestroyed"), false);
+	if (!bWorldTearingDown)
+	{
+		// IsActorBeingDestroyed is rejected by the resolver, so this immediate
+		// refresh cannot reacquire the dying source.  A surviving unique source
+		// is acquired atomically; otherwise GroundDay is restored fail closed.
+		RefreshNow();
+	}
+}
+
+void UABTSStylizedRenderingWorldSubsystem::HandleWorldBeginTearDown(
+	UWorld* World)
+{
+	if (World != GetWorld())
+	{
+		return;
+	}
+	bWorldTearingDown = true;
+	bWorldBeganPlay = false;
+	ReleaseEnvironmentOwnership(TEXT("WorldBeginTearDown"), true);
+}
+
+void UABTSStylizedRenderingWorldSubsystem::HandleWorldCleanup(
+	UWorld* World,
+	const bool bSessionEnded,
+	const bool bCleanupResources)
+{
+	(void)bSessionEnded;
+	(void)bCleanupResources;
+	if (World != GetWorld())
+	{
+		return;
+	}
+	bWorldTearingDown = true;
+	bWorldBeganPlay = false;
+	ReleaseEnvironmentOwnership(TEXT("WorldCleanup"), true);
+}
+
+void UABTSStylizedRenderingWorldSubsystem::ReleaseEnvironmentOwnership(
+	const TCHAR* Reason,
+	const bool bUnregisterAllCaptures)
+{
+	const bool bHadOwnership = bEnvironmentOwnershipActive
+		|| bEnvironmentSnapshotReady
+		|| ActiveFinaleEnvironmentSource.IsValid()
+		|| ActiveFinaleEnvironmentSourceHash != 0;
+	FABTSStylizedRenderingControl::ClearEnvironmentParameters();
+	DestroyLowPolyCloudPrototype();
+	if (EnvironmentPresentation)
+	{
+		EnvironmentPresentation->Restore();
+	}
+	if (bUnregisterAllCaptures)
+	{
+		for (const TWeakObjectPtr<USceneCaptureComponent2D>& Capture
+			: RegisteredCaptures)
+		{
+			if (Capture.IsValid())
+			{
+				FABTSStylizedSceneCaptureRegistry::Unregister(*Capture.Get());
+			}
+		}
+		RegisteredCaptures.Reset();
+	}
+	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
+	bEnvironmentSnapshotReady = false;
+	ActiveFinaleEnvironmentSource.Reset();
+	ActiveFinaleEnvironmentSourceHash = 0;
+	bEnvironmentOwnershipActive = false;
+	LastEnvironmentDiagnosticHash = 0;
+	if (bHadOwnership
+		&& EnvironmentRecoveryGeneration != EnvironmentOwnershipGeneration)
+	{
+		EnvironmentRecoveryGeneration = EnvironmentOwnershipGeneration;
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][Rendering][T4-A3.3][Recovery] Restored=1 Reason=%s OwnershipGeneration=%u SourceGeneration=%u CapturesRemaining=%d"),
+			Reason != nullptr ? Reason : TEXT("Unknown"),
+			EnvironmentOwnershipGeneration,
+			EnvironmentSourceGeneration,
+			RegisteredCaptures.Num());
+	}
 }
 
 void UABTSStylizedRenderingWorldSubsystem::PreloadSharedMaterials()
@@ -1267,6 +1514,10 @@ void UABTSStylizedRenderingWorldSubsystem::PreloadSharedMaterials()
 
 void UABTSStylizedRenderingWorldSubsystem::Tick(const float DeltaTime)
 {
+	if (bWorldTearingDown)
+	{
+		return;
+	}
 	UpdateCloudTraversalVisibility(DeltaTime, false);
 	const bool bStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
 	if (bStyleEnabled != bLastObservedStyleEnabled)
@@ -1547,108 +1798,152 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 {
 	using namespace ABTSStylizedRenderingWorldSubsystemPrivate;
 	UWorld* World = GetWorld();
-	if (World == nullptr || PrimitiveRegistry == nullptr || MaterialRegistry == nullptr)
+	if (bWorldTearingDown
+		|| World == nullptr
+		|| PrimitiveRegistry == nullptr
+		|| MaterialRegistry == nullptr)
 	{
 		return;
 	}
 	bLastObservedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
-	const EABTSM11FinaleEnvironmentStage FinaleEnvironmentStage =
-		ResolveFinaleEnvironmentStage(*World);
-	const EABTSStylizedRenderProfile ConfiguredProfile =
-		FABTSStylizedRenderingControl::GetProfile();
-	FABTSToonEnvironmentSnapshot BaselineEnvironment;
-	FString BaselineEnvironmentFailure;
-	const bool bBaselineEnvironmentReady =
-		FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
-			*World,
-			ConfiguredProfile,
-			BaselineEnvironment,
-			&BaselineEnvironmentFailure);
-	const float FinaleHighAltitudeSpaceBlend =
-		bBaselineEnvironmentReady
-			? ResolveFinaleHighAltitudeSpaceBlend(
-				*World,
-				BaselineEnvironment)
-			: 0.0f;
-	const bool bAtmosphereTransitionComplete =
-		FinaleHighAltitudeSpaceBlend >= 1.0f - KINDA_SMALL_NUMBER;
-	const bool bFinaleDeepSpace = DoesFinaleEnvironmentStageRequireSpace(
-		FinaleEnvironmentStage,
-		bAtmosphereTransitionComplete);
-	const EABTSStylizedRenderProfile ActiveProfile =
-		FABTSStylizedRenderingContract::ResolveMainWorldProfile(
-			bFinaleDeepSpace,
-			ConfiguredProfile);
-
-	FABTSToonEnvironmentSnapshot ResolvedEnvironment = BaselineEnvironment;
-	FString EnvironmentFailure = BaselineEnvironmentFailure;
-	bEnvironmentSnapshotReady = bBaselineEnvironmentReady;
-	if (bBaselineEnvironmentReady
-		&& ActiveProfile != BaselineEnvironment.Profile)
+	if (!bLastObservedStyleEnabled)
 	{
-		bEnvironmentSnapshotReady =
-			FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
-				*World,
-				ActiveProfile,
-				ResolvedEnvironment,
-				&EnvironmentFailure);
+		ReleaseEnvironmentOwnership(TEXT("StyleDisabled"), false);
 	}
-	EnvironmentSnapshot = bEnvironmentSnapshotReady
-		? ResolvedEnvironment
-		: FABTSToonEnvironmentSnapshot();
-	uint64 EnvironmentDiagnosticHash = bEnvironmentSnapshotReady
-		? EnvironmentSnapshot.IdentityHash
-		: GetTypeHash(EnvironmentFailure);
-	EnvironmentDiagnosticHash = HashCombineFast(
-		EnvironmentDiagnosticHash,
-		GetTypeHash(bEnvironmentSnapshotReady));
-	EnvironmentDiagnosticHash = HashCombineFast(
-		EnvironmentDiagnosticHash,
-		GetTypeHash(static_cast<uint8>(FinaleEnvironmentStage)));
-	EnvironmentDiagnosticHash = HashCombineFast(
-		EnvironmentDiagnosticHash,
-		GetTypeHash(bAtmosphereTransitionComplete));
-	if (EnvironmentDiagnosticHash != LastEnvironmentDiagnosticHash)
+	else
 	{
-		LastEnvironmentDiagnosticHash = EnvironmentDiagnosticHash;
-		if (bEnvironmentSnapshotReady)
+		const FResolvedFinaleEnvironmentSource FinaleSource =
+			ResolveFinaleEnvironmentSource(*World);
+		if (FinaleSource.HasUniqueSource())
 		{
-			UE_LOG(
-				LogABTSRuntime,
-				Log,
-				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=1 Version=%d Profile=%d FinaleStage=%s AtmosphereSpaceBlend=%.3f TransitionComplete=%d Source=%s Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
-				EnvironmentSnapshot.Version,
-				static_cast<int32>(EnvironmentSnapshot.Profile),
-				LexToString(FinaleEnvironmentStage),
-				FinaleHighAltitudeSpaceBlend,
-				bAtmosphereTransitionComplete ? 1 : 0,
-				bFinaleDeepSpace
-					? FinaleEnvironmentStage
-						== EABTSM11FinaleEnvironmentStage::DeepSpace
-						? TEXT("M11DeepSpace")
-						: TEXT("M11AtmosphereExit")
-					: TEXT("ConfiguredGroundContext"),
-				EnvironmentSnapshot.WorldSeed,
-				EnvironmentSnapshot.GeneratorVersion,
-				EnvironmentSnapshot.GenerationAttempt,
-				*EnvironmentSnapshot.PlanetCenterWorld.ToCompactString(),
-				EnvironmentSnapshot.PlanetRadiusCM,
-				*EnvironmentSnapshot.SunDirectionToSunWorld.ToCompactString(),
-				static_cast<unsigned long long>(
-					EnvironmentSnapshot.IdentityHash));
+			if (ActiveFinaleEnvironmentSource.Get()
+					!= FinaleSource.Source.Get()
+				|| ActiveFinaleEnvironmentSourceHash
+					!= FinaleSource.SourceIdentityHash)
+			{
+				ActiveFinaleEnvironmentSource = FinaleSource.Source;
+				ActiveFinaleEnvironmentSourceHash =
+					FinaleSource.SourceIdentityHash;
+				++EnvironmentSourceGeneration;
+			}
 		}
 		else
 		{
-			UE_LOG(
-				LogABTSRuntime,
-				Verbose,
-				TEXT("[ABTS][Rendering][T4-A3.2][Environment] Ready=0 Reason=%s"),
-				EnvironmentFailure.IsEmpty()
-					? TEXT("Unknown")
-					: *EnvironmentFailure);
+			ActiveFinaleEnvironmentSource.Reset();
+			ActiveFinaleEnvironmentSourceHash = 0;
 		}
+
+		const EABTSM11FinaleEnvironmentStage FinaleEnvironmentStage =
+			FinaleSource.Stage;
+		const EABTSStylizedRenderProfile ConfiguredProfile =
+			FABTSStylizedRenderingControl::GetProfile();
+		FABTSToonEnvironmentSnapshot BaselineEnvironment;
+		FString BaselineEnvironmentFailure;
+		const bool bBaselineEnvironmentReady =
+			FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+				*World,
+				ConfiguredProfile,
+				BaselineEnvironment,
+				&BaselineEnvironmentFailure);
+		const float FinaleHighAltitudeSpaceBlend =
+			bBaselineEnvironmentReady
+				? ResolveFinaleHighAltitudeSpaceBlend(
+					*World,
+					BaselineEnvironment)
+				: 0.0f;
+		const bool bAtmosphereTransitionComplete =
+			FinaleHighAltitudeSpaceBlend >= 1.0f - KINDA_SMALL_NUMBER;
+		const bool bFinaleDeepSpace = DoesFinaleEnvironmentStageRequireSpace(
+			FinaleEnvironmentStage,
+			bAtmosphereTransitionComplete);
+		const EABTSStylizedRenderProfile ActiveProfile =
+			FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+				bFinaleDeepSpace,
+				ConfiguredProfile);
+
+		FABTSToonEnvironmentSnapshot ResolvedEnvironment = BaselineEnvironment;
+		FString EnvironmentFailure = BaselineEnvironmentFailure;
+		bEnvironmentSnapshotReady = bBaselineEnvironmentReady;
+		if (bBaselineEnvironmentReady
+			&& ActiveProfile != BaselineEnvironment.Profile)
+		{
+			bEnvironmentSnapshotReady =
+				FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+					*World,
+					ActiveProfile,
+					ResolvedEnvironment,
+					&EnvironmentFailure);
+		}
+		EnvironmentSnapshot = bEnvironmentSnapshotReady
+			? ResolvedEnvironment
+			: FABTSToonEnvironmentSnapshot();
+		uint64 EnvironmentDiagnosticHash = bEnvironmentSnapshotReady
+			? EnvironmentSnapshot.IdentityHash
+			: GetTypeHash(EnvironmentFailure);
+		EnvironmentDiagnosticHash = HashCombineFast(
+			EnvironmentDiagnosticHash,
+			GetTypeHash(bEnvironmentSnapshotReady));
+		EnvironmentDiagnosticHash = HashCombineFast(
+			EnvironmentDiagnosticHash,
+			GetTypeHash(static_cast<uint8>(FinaleEnvironmentStage)));
+		EnvironmentDiagnosticHash = HashCombineFast(
+			EnvironmentDiagnosticHash,
+			GetTypeHash(bAtmosphereTransitionComplete));
+		EnvironmentDiagnosticHash = HashCombineFast(
+			EnvironmentDiagnosticHash,
+			FinaleSource.CandidateSetHash);
+		EnvironmentDiagnosticHash = HashCombineFast(
+			EnvironmentDiagnosticHash,
+			GetTypeHash(FinaleSource.bConflict));
+		if (EnvironmentDiagnosticHash != LastEnvironmentDiagnosticHash)
+		{
+			LastEnvironmentDiagnosticHash = EnvironmentDiagnosticHash;
+			if (bEnvironmentSnapshotReady)
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Log,
+					TEXT("[ABTS][Rendering][T4-A3.3][Environment] Ready=1 Version=%d Profile=%d FinaleStage=%s AtmosphereSpaceBlend=%.3f TransitionComplete=%d Source=%s SourceGeneration=%u SourceHash=0x%016llX RelevantSources=%d Conflict=%d FailClosed=%d Seed=%d Generator=%d Attempt=%d Center=%s RadiusCM=%.2f SunToSun=%s SnapshotHash=0x%016llX"),
+					EnvironmentSnapshot.Version,
+					static_cast<int32>(EnvironmentSnapshot.Profile),
+					LexToString(FinaleEnvironmentStage),
+					FinaleHighAltitudeSpaceBlend,
+					bAtmosphereTransitionComplete ? 1 : 0,
+					FinaleSource.HasUniqueSource()
+						? *GetNameSafe(FinaleSource.Source.Get())
+						: FinaleSource.bConflict
+							? TEXT("AmbiguousM11Sources")
+							: TEXT("ConfiguredGroundContext"),
+					EnvironmentSourceGeneration,
+					static_cast<unsigned long long>(
+						FinaleSource.SourceIdentityHash),
+					FinaleSource.RelevantSourceCount,
+					FinaleSource.bConflict ? 1 : 0,
+					FinaleSource.bConflict ? 1 : 0,
+					EnvironmentSnapshot.WorldSeed,
+					EnvironmentSnapshot.GeneratorVersion,
+					EnvironmentSnapshot.GenerationAttempt,
+					*EnvironmentSnapshot.PlanetCenterWorld.ToCompactString(),
+					EnvironmentSnapshot.PlanetRadiusCM,
+					*EnvironmentSnapshot.SunDirectionToSunWorld.ToCompactString(),
+					static_cast<unsigned long long>(
+						EnvironmentSnapshot.IdentityHash));
+			}
+			else
+			{
+				UE_LOG(
+					LogABTSRuntime,
+					Verbose,
+					TEXT("[ABTS][Rendering][T4-A3.3][Environment] Ready=0 RelevantSources=%d Conflict=%d Reason=%s"),
+					FinaleSource.RelevantSourceCount,
+					FinaleSource.bConflict ? 1 : 0,
+					EnvironmentFailure.IsEmpty()
+						? TEXT("Unknown")
+						: *EnvironmentFailure);
+			}
+		}
+		RefreshEnvironmentPresentation();
 	}
-	RefreshEnvironmentPresentation();
 
 	TMap<TWeakObjectPtr<UPrimitiveComponent>, EABTSStylizedObjectClass> Desired;
 	int32 M3SemanticCount = 0;
@@ -2248,17 +2543,20 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 {
 	if (!EnvironmentPresentation)
 	{
-		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
-		DestroyLowPolyCloudPrototype();
+		ReleaseEnvironmentOwnership(
+			TEXT("EnvironmentPresentationUnavailable"),
+			false);
 		return;
 	}
 
 	if (!FABTSStylizedRenderingControl::IsEnabled()
 		|| !bEnvironmentSnapshotReady)
 	{
-		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
-		DestroyLowPolyCloudPrototype();
-		EnvironmentPresentation->Restore();
+		ReleaseEnvironmentOwnership(
+			FABTSStylizedRenderingControl::IsEnabled()
+				? TEXT("EnvironmentSnapshotUnavailable")
+				: TEXT("StyleDisabled"),
+			false);
 		return;
 	}
 
@@ -2278,9 +2576,9 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 			Parameters,
 			Failure))
 	{
-		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
-		DestroyLowPolyCloudPrototype();
-		EnvironmentPresentation->Restore();
+		ReleaseEnvironmentOwnership(
+			TEXT("EnvironmentPresentationApplyFailed"),
+			false);
 		UE_LOG(
 			LogABTSRuntime,
 			Warning,
@@ -2290,9 +2588,9 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 	}
 	if (!RefreshLowPolyCloudPrototype(Parameters, Failure))
 	{
-		FABTSStylizedRenderingControl::ClearEnvironmentParameters();
-		DestroyLowPolyCloudPrototype();
-		EnvironmentPresentation->Restore();
+		ReleaseEnvironmentOwnership(
+			TEXT("CloudPrototypeApplyFailed"),
+			false);
 		UE_LOG(
 			LogABTSRuntime,
 			Warning,
@@ -2302,6 +2600,11 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 	}
 
 	FABTSStylizedRenderingControl::SetEnvironmentParameters(Parameters);
+	if (!bEnvironmentOwnershipActive)
+	{
+		bEnvironmentOwnershipActive = true;
+		++EnvironmentOwnershipGeneration;
+	}
 	if (!bWasApplied)
 	{
 		UE_LOG(
@@ -3878,18 +4181,109 @@ bool FABTSToonT4A3M11EnvironmentStageRoutingTest::RunTest(
 		TEXT("Failure recovery returns to the configured surface environment"),
 		ResolveStageProfile(EABTSM11FinaleEnvironmentStage::Recovering),
 		EABTSStylizedRenderProfile::GroundDay);
-	TestEqual(
-		TEXT("Duplicate interaction actors cannot make routing iteration-order dependent"),
-		MergeFinaleEnvironmentStage(
-			EABTSM11FinaleEnvironmentStage::GroundLaunch,
-			EABTSM11FinaleEnvironmentStage::DeepSpace),
+	TestFalse(
+		TEXT("Recovering never forces FinaleSpace"),
+		DoesFinaleEnvironmentStageRequireSpace(
+			EABTSM11FinaleEnvironmentStage::Recovering));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A3EnvironmentLifecycleContractTest,
+	"ABTS.Rendering.Toon.T4A3_3.EnvironmentLifecycleContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A3EnvironmentLifecycleContractTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSStylizedRenderingWorldSubsystemPrivate;
+	(void)Parameters;
+	const auto MakeCandidate = [](
+		const TCHAR* Key,
+		const uint64 Identity,
+		const EABTSM11FinaleEnvironmentStage Stage,
+		const bool bInitialized = true,
+		const bool bRelevant = true)
+	{
+		FFinaleEnvironmentSourceCandidate Candidate;
+		Candidate.StableKey = Key;
+		Candidate.SourceIdentityHash = Identity;
+		Candidate.Stage = Stage;
+		Candidate.bInitialized = bInitialized;
+		Candidate.bEnvironmentRelevant = bRelevant;
+		return Candidate;
+	};
+
+	const FResolvedFinaleEnvironmentSource Baseline =
+		ResolveFinaleEnvironmentCandidates({});
+	TestEqual(TEXT("No M11 source resolves to the safe ground stage"),
+		Baseline.Stage,
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	TestFalse(TEXT("No source is not a conflict"), Baseline.bConflict);
+	TestEqual(TEXT("No source has zero lease identity"),
+		Baseline.SourceIdentityHash, uint64(0));
+
+	const FResolvedFinaleEnvironmentSource UniqueDeepSpace =
+		ResolveFinaleEnvironmentCandidates({MakeCandidate(
+			TEXT("/World/FinaleA"),
+			0xA301ull,
+			EABTSM11FinaleEnvironmentStage::DeepSpace)});
+	TestTrue(TEXT("One relevant initialized source acquires the lease"),
+		UniqueDeepSpace.HasUniqueSource());
+	TestEqual(TEXT("Unique source publishes its exact stage"),
+		UniqueDeepSpace.Stage,
 		EABTSM11FinaleEnvironmentStage::DeepSpace);
-	TestEqual(
-		TEXT("Deep-space evidence remains authoritative if a stale ground actor follows"),
-		MergeFinaleEnvironmentStage(
+	TestEqual(TEXT("Unique source identity is preserved"),
+		UniqueDeepSpace.SourceIdentityHash, uint64(0xA301ull));
+
+	const FResolvedFinaleEnvironmentSource UninitializedIgnored =
+		ResolveFinaleEnvironmentCandidates({MakeCandidate(
+			TEXT("/World/Incomplete"),
+			0xA302ull,
 			EABTSM11FinaleEnvironmentStage::DeepSpace,
-			EABTSM11FinaleEnvironmentStage::GroundLaunch),
+			false,
+			true)});
+	TestEqual(TEXT("An uninitialized actor cannot own environment routing"),
+		UninitializedIgnored.RelevantSourceCount, 0);
+	TestEqual(TEXT("Uninitialized evidence fails closed to ground"),
+		UninitializedIgnored.Stage,
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+
+	const FFinaleEnvironmentSourceCandidate Ground = MakeCandidate(
+		TEXT("/World/FinaleGround"),
+		0xA303ull,
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	const FFinaleEnvironmentSourceCandidate Space = MakeCandidate(
+		TEXT("/World/FinaleSpace"),
+		0xA304ull,
 		EABTSM11FinaleEnvironmentStage::DeepSpace);
+	const FResolvedFinaleEnvironmentSource ConflictForward =
+		ResolveFinaleEnvironmentCandidates({Ground, Space});
+	const FResolvedFinaleEnvironmentSource ConflictReverse =
+		ResolveFinaleEnvironmentCandidates({Space, Ground});
+	TestTrue(TEXT("Two relevant sources are an explicit conflict"),
+		ConflictForward.bConflict);
+	TestEqual(TEXT("Conflicting sources fail closed to ground"),
+		ConflictForward.Stage,
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	TestEqual(TEXT("A conflict never leaks a winning source identity"),
+		ConflictForward.SourceIdentityHash, uint64(0));
+	TestEqual(TEXT("Conflict evidence hash is iterator-order independent"),
+		ConflictForward.CandidateSetHash,
+		ConflictReverse.CandidateSetHash);
+
+	const FResolvedFinaleEnvironmentSource AfterSourceDestroyed =
+		ResolveFinaleEnvironmentCandidates({MakeCandidate(
+			TEXT("/World/FinaleSpace"),
+			0xA304ull,
+			EABTSM11FinaleEnvironmentStage::DeepSpace,
+			true,
+			false)});
+	TestEqual(TEXT("Destroyed or inactive source releases to ground baseline"),
+		AfterSourceDestroyed.Stage,
+		EABTSM11FinaleEnvironmentStage::GroundLaunch);
+	TestFalse(TEXT("Released source cannot remain leased"),
+		AfterSourceDestroyed.HasUniqueSource());
 	return true;
 }
 
