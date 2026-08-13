@@ -568,6 +568,13 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !LaunchedBird.IsValid()) return;
 	const FVector Velocity = ComputeLaunchVelocity();
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->LockSatelliteFlightIntent(
+			bCurrentTrajectoryPreviewValid
+				? CurrentTrajectoryPreview
+				: FABTSM6TrajectoryPreview());
+	}
 	ClearCurrentTrajectoryPreview();
 	SetPouchVisualActive(false);
 	if (ActiveCord.IsValid()) ActiveCord->ResetPouchVisualToRest();
@@ -805,6 +812,12 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
+	LaunchedBird->NotifySlingshotPresentationImpact();
+	if (SlingshotCamera) SlingshotCamera->NotifyBirdImpact();
+	if (Hit.GetActor() == SatellitePracticeBody.Get() && SlingshotCamera)
+	{
+		SlingshotCamera->NotifySatelliteSurfaceContact();
+	}
 	// A real Chaos blocking contact is the strongest calibration evidence.
 	// The rig's swept centre-segment test remains a CCD/fallback path, while
 	// NotifyCalibrationTargetEvent de-duplicates both sources.

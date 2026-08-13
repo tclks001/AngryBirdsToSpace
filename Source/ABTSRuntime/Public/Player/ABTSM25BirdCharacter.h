@@ -72,6 +72,13 @@ public:
 	void FinishSlingshotReturn();
 	void SetSlingshotVelocity(const FVector& InVelocity);
 	FVector GetSlingshotVelocity() const;
+	/** Presentation-only radial frame used during the primary-to-satellite hand-off. */
+	void SetSlingshotPresentationUp(
+		const FVector& WorldUp,
+		float DeltaSeconds,
+		bool bLockFacingReversal = false);
+	void ClearSlingshotPresentationUp();
+	void NotifySlingshotPresentationImpact();
 	/** Conservative radius consumed by every slingshot predictor and swept target test. */
 	float GetSlingshotTrajectoryCollisionRadiusCM() const;
 	bool IsSlingshotFlightActive() const;
@@ -102,7 +109,8 @@ private:
 	bool IsControllerRoutedMovementInputExperimentEnabled() const;
 	bool IsClearMotionBeforePlayerJumpExperimentEnabled() const;
 	void ApplyClearMotionBeforeJumpExperiment();
-	void UpdateChaosVisualFrame();
+	void UpdateChaosVisualFrame(float DeltaSeconds);
+	void UpdateSlingshotPresentationFrame(float DeltaSeconds);
 	void UpdateBirdAnimationPresentation(float DeltaSeconds);
 	void ApplyCuteBirdMaterials();
 	FVector GetPresentationVelocity() const;
@@ -147,6 +155,15 @@ private:
 	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
 	bool bPlanarChaosMode = false;
 	bool bDeveloperWalkEnabled = false;
+	bool bSlingshotPresentationUpActive = false;
+	bool bSlingshotPresentationFrameInitialized = false;
+	bool bSlingshotPresentationLockFacingReversal = false;
+	FVector SlingshotPresentationUp = FVector::UpVector;
+	FQuat SlingshotPresentationFrame = FQuat::Identity;
+	FVector StableChaosPresentationForward = FVector::ZeroVector;
+	bool bChaosVisualRotationInitialized = false;
+	FQuat ChaosVisualRotation = FQuat::Identity;
+	float SlingshotImpactFacingLockRemainingSeconds = 0.0f;
 	/** Runtime-only helper avoids adding another serialized native Blueprint subobject. */
 	UPROPERTY(Transient)
 	TObjectPtr<UABTSBirdAnimationPresentationComponent> BirdAnimationPresentation;

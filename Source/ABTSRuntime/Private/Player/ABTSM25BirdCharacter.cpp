@@ -73,7 +73,17 @@ void AABTSM25BirdCharacter::BeginPlay()
 void AABTSM25BirdCharacter::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody) UpdateChaosVisualFrame();
+	SlingshotImpactFacingLockRemainingSeconds = FMath::Max(
+		0.0f,
+		SlingshotImpactFacingLockRemainingSeconds - DeltaSeconds);
+	if (bSlingshotPresentationUpActive && IsSlingshotFlightActive())
+	{
+		UpdateSlingshotPresentationFrame(DeltaSeconds);
+	}
+	else if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		UpdateChaosVisualFrame(DeltaSeconds);
+	}
 	UpdateBirdAnimationPresentation(DeltaSeconds);
 	if (ControlDiagnosticRemainingSeconds <= 0.0f) return;
 	ControlDiagnosticRemainingSeconds = FMath::Max(0.0f, ControlDiagnosticRemainingSeconds - DeltaSeconds);
@@ -284,6 +294,10 @@ bool AABTSM25BirdCharacter::CanUseSlingshotCapability(const EABTSBirdSlingshotCa
 
 void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, const FQuat& WorldRotation)
 {
+	StableChaosPresentationForward = FVector::ZeroVector;
+	bChaosVisualRotationInitialized = false;
+	SlingshotImpactFacingLockRemainingSeconds = 0.0f;
+	ClearSlingshotPresentationUp();
 	SavedCapsuleCollision = GetCapsuleComponent()->GetCollisionEnabled();
 	SavedChaosBodyCollision = ChaosPhysicsSphere ? ChaosPhysicsSphere->GetCollisionEnabled() : ECollisionEnabled::NoCollision;
 	SetLocomotionCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -299,6 +313,7 @@ void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, co
 
 void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, const float FlightAirDragPerSecond)
 {
+	ClearSlingshotPresentationUp();
 	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
@@ -313,6 +328,7 @@ void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, 
 
 void AABTSM25BirdCharacter::BeginSlingshotReturn()
 {
+	ClearSlingshotPresentationUp();
 	SetLocomotionCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
@@ -325,6 +341,7 @@ void AABTSM25BirdCharacter::BeginSlingshotReturn()
 
 void AABTSM25BirdCharacter::FinishSlingshotReturn()
 {
+	ClearSlingshotPresentationUp();
 	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
@@ -600,6 +617,43 @@ FVector AABTSM25BirdCharacter::GetPresentationVelocity() const
 	return ChaosMovement->GetVelocity();
 }
 
+void AABTSM25BirdCharacter::SetSlingshotPresentationUp(
+	const FVector& WorldUp,
+	const float DeltaSeconds,
+	const bool bLockFacingReversal)
+{
+	(void)DeltaSeconds;
+	const FVector SafeUp = WorldUp.GetSafeNormal();
+	if (SafeUp.IsNearlyZero()) return;
+	bSlingshotPresentationUpActive = true;
+	bSlingshotPresentationLockFacingReversal = bLockFacingReversal;
+	SlingshotPresentationUp = SafeUp;
+}
+
+void AABTSM25BirdCharacter::ClearSlingshotPresentationUp()
+{
+	if (bSlingshotPresentationUpActive)
+	{
+		if (const USkeletalMeshComponent* Visual = GetBirdVisual())
+		{
+			ChaosVisualRotation = Visual->GetComponentQuat().GetNormalized();
+			bChaosVisualRotationInitialized = true;
+		}
+	}
+	bSlingshotPresentationUpActive = false;
+	bSlingshotPresentationFrameInitialized = false;
+	bSlingshotPresentationLockFacingReversal = false;
+	SlingshotPresentationUp = FVector::UpVector;
+	SlingshotPresentationFrame = FQuat::Identity;
+}
+
+void AABTSM25BirdCharacter::NotifySlingshotPresentationImpact()
+{
+	SlingshotImpactFacingLockRemainingSeconds = FMath::Max(
+		SlingshotImpactFacingLockRemainingSeconds,
+		0.55f);
+}
+
 void AABTSM25BirdCharacter::ApplyCuteBirdMaterials()
 {
 	USkeletalMeshComponent* Visual = GetBirdVisual();
@@ -631,7 +685,7 @@ void AABTSM25BirdCharacter::RequestBirdPresentationAction(const EABTSBirdPresent
 	}
 }
 
-void AABTSM25BirdCharacter::UpdateChaosVisualFrame()
+void AABTSM25BirdCharacter::UpdateChaosVisualFrame(const float DeltaSeconds)
 {
 	USkeletalMeshComponent* Visual = GetBirdVisual();
 	if (Visual == nullptr) return;
@@ -644,13 +698,109 @@ void AABTSM25BirdCharacter::UpdateChaosVisualFrame()
 		: GetSphericalSurface()->GetActorForwardTangent();
 	const FVector Velocity = ChaosMovement->GetVelocity();
 	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
-	if (!TangentVelocity.IsNearlyZero(25.0f)) Forward = TangentVelocity.GetSafeNormal();
+	const FVector VelocityForward = TangentVelocity.Size() >= 120.0f
+		? TangentVelocity.GetSafeNormal()
+		: FVector::ZeroVector;
+	FVector PreviousForward = FVector::VectorPlaneProject(
+		StableChaosPresentationForward,
+		Up).GetSafeNormal();
+	const bool bImpactReverse = SlingshotImpactFacingLockRemainingSeconds > 0.0f
+		&& !PreviousForward.IsNearlyZero()
+		&& !VelocityForward.IsNearlyZero()
+		&& FVector::DotProduct(VelocityForward, PreviousForward) < 0.0f;
+	if (!VelocityForward.IsNearlyZero() && !bImpactReverse)
+	{
+		Forward = VelocityForward;
+	}
+	else if (!PreviousForward.IsNearlyZero())
+	{
+		Forward = PreviousForward;
+	}
 	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+	StableChaosPresentationForward = Forward;
 	const FQuat PhysicsFacing = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
+	const FQuat DesiredVisualRotation =
+		(PhysicsFacing * GetBirdVisualAxisCorrection()).GetNormalized();
+	if (!bChaosVisualRotationInitialized)
+	{
+		ChaosVisualRotation = Visual->GetComponentQuat().GetNormalized();
+		bChaosVisualRotationInitialized = true;
+	}
+	ChaosVisualRotation = DeltaSeconds > 0.0f
+		? FMath::QInterpTo(
+			ChaosVisualRotation,
+			DesiredVisualRotation,
+			DeltaSeconds,
+			8.0f).GetNormalized()
+		: DesiredVisualRotation;
 	const FVector CollisionCenter = ChaosPhysicsSphere ? ChaosPhysicsSphere->GetComponentLocation() : GetActorLocation();
 	const FVector SupportPoint = CollisionCenter - Up * SavedChaosCapsuleRadius;
 	const FVector VisualLocation = SupportPoint + PhysicsFacing.RotateVector(GetBirdVisualRelativeLocation());
-	Visual->SetWorldLocationAndRotation(VisualLocation, PhysicsFacing * GetBirdVisualAxisCorrection());
+	Visual->SetWorldLocationAndRotation(VisualLocation, ChaosVisualRotation);
+}
+
+void AABTSM25BirdCharacter::UpdateSlingshotPresentationFrame(
+	const float DeltaSeconds)
+{
+	USkeletalMeshComponent* Visual = GetBirdVisual();
+	if (Visual == nullptr || !bSlingshotPresentationUpActive) return;
+	const FVector Up = SlingshotPresentationUp.GetSafeNormal();
+	if (Up.IsNearlyZero()) return;
+	const FVector Velocity = GetSlingshotVelocity();
+	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
+	FVector Forward = TangentVelocity.Size() >= 120.0f
+		? TangentVelocity.GetSafeNormal()
+		: FVector::ZeroVector;
+	if (bSlingshotPresentationLockFacingReversal
+		&& bSlingshotPresentationFrameInitialized
+		&& !Forward.IsNearlyZero()
+		&& FVector::DotProduct(
+			Forward,
+			FVector::VectorPlaneProject(
+				SlingshotPresentationFrame.GetAxisX(),
+				Up).GetSafeNormal()) < 0.0f)
+	{
+		Forward = FVector::ZeroVector;
+	}
+	if (Forward.IsNearlyZero())
+	{
+		const FVector PreviousForward = bSlingshotPresentationFrameInitialized
+			? SlingshotPresentationFrame.GetAxisX()
+			: GetActorForwardVector();
+		Forward = FVector::VectorPlaneProject(PreviousForward, Up).GetSafeNormal();
+	}
+	if (Forward.IsNearlyZero())
+	{
+		const FVector Reference = FMath::Abs(Up.Z) < 0.9f
+			? FVector::UpVector
+			: FVector::ForwardVector;
+		Forward = FVector::CrossProduct(Reference, Up).GetSafeNormal();
+	}
+	const FQuat DesiredFrame = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
+	if (!bSlingshotPresentationFrameInitialized)
+	{
+		SlingshotPresentationFrame = GetActorQuat();
+		bSlingshotPresentationFrameInitialized = true;
+	}
+	SlingshotPresentationFrame = FMath::QInterpTo(
+		SlingshotPresentationFrame,
+		DesiredFrame,
+		DeltaSeconds,
+		6.0f).GetNormalized();
+	FVector FrameOrigin = GetActorLocation();
+	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
+	{
+		const FVector CollisionCenter = ChaosPhysicsSphere
+			? ChaosPhysicsSphere->GetComponentLocation()
+			: GetActorLocation();
+		FrameOrigin = CollisionCenter
+			- SlingshotPresentationFrame.GetAxisZ() * SavedChaosCapsuleRadius;
+	}
+	const FVector VisualLocation = FrameOrigin
+		+ SlingshotPresentationFrame.RotateVector(GetBirdVisualRelativeLocation());
+	Visual->SetWorldLocationAndRotation(
+		VisualLocation,
+		SlingshotPresentationFrame * GetBirdVisualAxisCorrection());
 }
 
 UPrimitiveComponent* AABTSM25BirdCharacter::GetChaosPhysicsBody() const

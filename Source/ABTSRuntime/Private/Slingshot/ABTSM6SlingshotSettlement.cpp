@@ -122,6 +122,7 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	}
 	LaunchedBird->BeginSlingshotReturn();
 	ReturnStartLocation = LaunchedBird->GetActorLocation();
+	ReturnStartRotation = LaunchedBird->GetActorQuat().GetNormalized();
 	const FVector ApproxTarget = SlingCenter - SlingForward * 230.0f;
 	if (bPlanarTestMode)
 	{
@@ -149,7 +150,17 @@ void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
 	{
 		const FVector Location = FMath::Lerp(ReturnStartLocation, ReturnTargetLocation, FMath::SmoothStep(0.0f, 1.0f, Alpha))
 			+ PlanarUp * (FMath::Sin(Alpha * PI) * 280.0f);
-		LaunchedBird->SetActorLocationAndRotation(Location, FRotationMatrix::MakeFromXZ(SlingForward, PlanarUp).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+		const FQuat TargetRotation = FRotationMatrix::MakeFromXZ(
+			SlingForward, PlanarUp).ToQuat();
+		LaunchedBird->SetActorLocationAndRotation(
+			Location,
+			FQuat::Slerp(
+				ReturnStartRotation,
+				TargetRotation,
+				FMath::SmoothStep(0.0f, 1.0f, Alpha)).GetNormalized(),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
 		if (Alpha >= 1.0f) FinishReturn();
 		return;
 	}
@@ -159,7 +170,17 @@ void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
 	const FQuat Arc = FQuat::FindBetweenNormals(StartOffset.GetSafeNormal(), EndOffset.GetSafeNormal());
 	const FVector Direction = FQuat::Slerp(FQuat::Identity, Arc, FMath::SmoothStep(0.0f, 1.0f, Alpha)).RotateVector(StartOffset.GetSafeNormal()).GetSafeNormal();
 	const float Radius = FMath::Lerp(StartOffset.Size(), EndOffset.Size(), Alpha) + FMath::Sin(Alpha * PI) * 280.0f;
-	LaunchedBird->SetActorLocationAndRotation(Center + Direction * Radius, FRotationMatrix::MakeFromXZ(SlingForward, Direction).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+	const FQuat TargetRotation = FRotationMatrix::MakeFromXZ(
+		SlingForward, Direction).ToQuat();
+	LaunchedBird->SetActorLocationAndRotation(
+		Center + Direction * Radius,
+		FQuat::Slerp(
+			ReturnStartRotation,
+			TargetRotation,
+			FMath::SmoothStep(0.0f, 1.0f, Alpha)).GetNormalized(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 	if (Alpha >= 1.0f) FinishReturn();
 }
 

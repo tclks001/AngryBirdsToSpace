@@ -42,6 +42,8 @@ void AABTSSlingshotSatelliteCalibrationGameMode::OnInitialPlayerPlaced(
 {
 	bCalibrationSmokeRequested =
 		FParse::Param(FCommandLine::Get(), TEXT("ABTSCalibrationSmoke"));
+	bSatelliteCameraCaptureRequested =
+		FParse::Param(FCommandLine::Get(), TEXT("ABTSM9CameraCapture"));
 	if (bCalibrationSmokeRequested)
 	{
 		CalibrationSmokeStartSeconds = FPlatformTime::Seconds();
@@ -246,6 +248,33 @@ void AABTSSlingshotSatelliteCalibrationGameMode::OnInitialPlayerPlaced(
 			&AABTSSlingshotSatelliteCalibrationGameMode::
 				TryCompleteCalibrationSmoke);
 	}
+	if (bSatelliteCameraCaptureRequested)
+	{
+		GetWorldTimerManager().SetTimerForNextTick(
+			this,
+			&AABTSSlingshotSatelliteCalibrationGameMode::
+				TryStartSatelliteCameraCapture);
+	}
+}
+
+void AABTSSlingshotSatelliteCalibrationGameMode::
+TryStartSatelliteCameraCapture()
+{
+	AABTSSlingshotSatelliteCalibrationRig* Rig = RuntimeCalibrationRig.Get();
+	if (Rig && Rig->IsReady())
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M9][CameraCapture] CalibrationRigReady=1"));
+		return;
+	}
+	FTimerHandle RetryHandle;
+	GetWorldTimerManager().SetTimer(
+		RetryHandle,
+		this,
+		&AABTSSlingshotSatelliteCalibrationGameMode::
+			TryStartSatelliteCameraCapture,
+		0.1f,
+		false);
 }
 
 void AABTSSlingshotSatelliteCalibrationGameMode::
