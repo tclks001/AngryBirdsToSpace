@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "ABTSM73BeamD1BrickCompiler.h"
+#include "Building/ABTSM73BeamDemoManifest.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -784,6 +785,29 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 	CompiledBricks.Reset();
 	LastSummary = FABTSM73BeamD1Summary();
 	FString Error;
+	if (DemoBuilding != EABTSM73BeamDemoBuilding::Custom)
+	{
+		FABTSM73BeamDemoManifestEntry DemoEntry;
+		if (!FABTSM73BeamDemoManifest::Resolve(DemoBuilding, DemoEntry, Error))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][DemoManifestRejected]")
+				TEXT(" Actor=%s Entry=%d ManifestVersion=%d Reason=%s"),
+				*GetName(), static_cast<int32>(DemoBuilding),
+				FABTSM73BeamDemoManifest::Version, *Error);
+			return;
+		}
+		Settings = DemoEntry.Settings;
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-Beam-D1][DemoManifestApplied]")
+			TEXT(" Actor=%s Entry=%s ManifestVersion=%d ManifestHash=%lld")
+			TEXT(" Profile=%s Tier=E%d Seed=%d"),
+			*GetName(), *DemoEntry.StableId.ToString(),
+			FABTSM73BeamDemoManifest::Version,
+			FABTSM73BeamDemoManifest::CalculateHash(),
+			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier + 1,
+			Settings.BuildingSeed);
+	}
 	FABTSM73BeamD1BrickCompiler Compiler;
 	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG)
 	{

@@ -16,6 +16,8 @@
 >
 > 检查点：[V3 Stage-1 2026-08-07](M73BeamC3V3Checkpoint_20260807.md)
 >
+> 当前冲刺入口：[M7 评委演示六栋垂直切片冲刺](M7JuryDemoVerticalSliceSprintPlan.md)
+>
 > 历史路线：[第一版四柱闭环](M73BeamC3CribCoreStabilityDesign.md) ·
 > [V2 分层芯体与后插外框](M73BeamC3V2FrictionCoreDesign.md) ·
 > [V2 停止检查点](M73BeamC3V2Checkpoint_20260806.md)
@@ -2356,3 +2358,22 @@ Stage 1 现在显式发布 `ResolvedFacadeEnvelopeVolumes`，其唯一组成是�
 UE 5.8 `-ForceUnity` Development Editor 全链接成功。最终 fresh 5×6 Stage 2 矩阵精确 30/30。当前复杂叶的 deferred 已能解释为多个真实约束的组合；例如 TipOver E6 有 `72` 个 deferred 分区，原因包括无空闲切向站、长度上限、非外向、外壳断口、其他芯体阻挡和已有成员碰撞，而不再只有一个无法追因的总数。矩阵中 Stage 2 本体为毫秒级：代表性 ColumnBreak E1 约 `0.33 ms`，TipOver E5/E6 约 `61.45/61.50 ms`；主要成本仍在 Stage 1 child/main 联合选择，不在本轮立面锚带。最终证据日志为 `Saved/Logs/M7-Stage2-Closure-Matrix-Final-20260813-143734.log`。
 
 完整 `Staged` 单进程首轮为 70/76，6 项均为进入 Stage 2 前触发既有 Stage 1 10 秒门；随后 fresh Stage 1 5×6 为 27/30，剩余 `ColumnBreak.E6 / DropTrigger.E3 / DropTrigger.E4` 各自在独立 fresh 进程中 1/1 通过，而单进程首轮的另外三项已经在该 27/30 中通过。故所有 76 个叶均有本轮 fresh 成功证据，但不得把长单进程套件记为 76/76；也未为凑绿放宽时间门。长套件与隔离日志分别为 `M7-Stage2-Closure-Staged-20260813-141832.log`、`M7-Stage2-Closure-Stage1Matrix-20260813-142849.log` 和 `M7-Stage2-Closure-Isolated-*.log`。本节仍为 `Physical=NotEvaluated`，不运行 Chaos 或可见 PIE；用户修改的测试地图继续排除。
+
+## 49. Stage 4 冲刺边界与首个停点（2026-08-13）
+
+用户已经在物理测试场逐项批准演示六栋清单 v1 的 WFC 轮廓和 Stage 3 总览。Stage 4 的完整时间盒、
+六个可停止点与诊断层定义以 [M7 评委演示六栋垂直切片冲刺设计](M7JuryDemoVerticalSliceSprintPlan.md)
+第 7 节为准。本阶段不再跑全 Seed 或 5×6 作为实现内循环，只消费固定六栋；Stage 1～3 几何与 Hash
+均视作冻结输入。
+
+首个停点只建立 `TopSurface` 归属账本，不发射 Floor/Infill/Roof member。它必须逐个审计 Stage 3 的
+facade/frame 向下路径：仍处于最终语义外壳真实外周者绑定 `GroundSill`；被更低或相邻 WFC Body 顶面
+承接的内侧、退台或局部回退立面绑定唯一 `TopSurface`。两类归属互斥且总数严格等于待审计对象数。
+每条记录至少冻结 facade/frame 身份、component、方向、切向区间、最低 course、目标 surface 的来源
+Volume、XY bounds、量化顶面 course、选择原因和稳定 signature。没有合法目标不得回退到最近 AABB、
+制造隐形楼面或保留临时长接地柱；必须以明确拒绝原因 fail closed。
+
+本停点提供独立 `TopSurface Intent` 诊断：GroundSill、TopSurface 和未解析项使用三种颜色，只显示归属线、
+目标面与来源 frame，不混入 WFC 实体、Floor 或 Roof。自动化至少证明六栋账本完整互斥、目标面来自
+`ResolvedFacadeEnvelope`、顶面 course 与 XY 区间真实覆盖、输入 Stage3 Hash 未变、Stage4IntentHash
+确定且没有 Stage 4 member。该停点通过后停下，由用户视觉检查内侧/退台归属，再开始顶面边框。

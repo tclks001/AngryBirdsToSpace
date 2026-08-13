@@ -35,6 +35,19 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)")
 };
 
+/** Frozen jury-demo selection. Custom preserves manually authored preview settings. */
+UENUM(BlueprintType)
+enum class EABTSM73BeamDemoBuilding : uint8
+{
+	Custom UMETA(DisplayName = "Custom Settings"),
+	E1ColumnBreak UMETA(DisplayName = "Demo 1 - E1 ColumnBreak / 710000"),
+	E2DropTrigger UMETA(DisplayName = "Demo 2 - E2 DropTrigger / 740000"),
+	E3SlideRelease UMETA(DisplayName = "Demo 3 - E3 SlideRelease / 750137"),
+	E4TipOver UMETA(DisplayName = "Demo 4 - E4 TipOver / 730000"),
+	E5SeamRelease UMETA(DisplayName = "Demo 5 - E5 SeamRelease / 720000"),
+	E6TipOver UMETA(DisplayName = "Demo 6 - E6 TipOver / 750000")
+};
+
 /** Mutually exclusive Stage-2 visual evidence layer on the D1 preview Actor. */
 UENUM(BlueprintType)
 enum class EABTSM73BeamC3Stage2DiagnosticLayer : uint8

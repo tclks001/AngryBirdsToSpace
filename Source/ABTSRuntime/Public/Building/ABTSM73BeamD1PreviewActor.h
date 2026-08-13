@@ -94,6 +94,12 @@ protected:
 		Category = "ABTS|M7.3-Beam-D1")
 	FABTSM73BeamD1Settings Settings;
 
+	/** Selects one immutable jury-demo building and overrides Settings on rebuild. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Jury Demo",
+		meta = (DisplayName = "Demo Six-Building Entry"))
+	EABTSM73BeamDemoBuilding DemoBuilding = EABTSM73BeamDemoBuilding::Custom;
+
 	/** This changes what is actually generated. It is not a visibility filter. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",

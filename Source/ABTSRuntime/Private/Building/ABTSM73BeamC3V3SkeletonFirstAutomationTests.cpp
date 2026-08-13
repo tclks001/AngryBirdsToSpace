@@ -9,6 +9,7 @@
 #include "ABTSM73BeamC3V3SkeletonFirstGenerator.h"
 #include "ABTSM73BeamD0ProfileCatalog.h"
 #include "ABTSM73BeamD1BrickCompiler.h"
+#include "Building/ABTSM73BeamDemoManifest.h"
 #include "ABTSM73DAG5BShapeGrammarV2.h"
 
 namespace ABTSM73BeamC3V3Tests
@@ -1219,6 +1220,118 @@ namespace ABTSM73BeamC3V3Tests
 		}
 		return bPassed;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3DemoSixBuildingManifestTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.SixBuildingManifest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3DemoSixBuildingManifestTest::RunTest(const FString& Parameters)
+{
+	const TArray<FABTSM73BeamDemoManifestEntry>& Entries =
+		FABTSM73BeamDemoManifest::GetEntries();
+	TestEqual(TEXT("The frozen demonstration contains exactly six buildings"),
+		Entries.Num(), 6);
+	TestEqual(TEXT("The jury-demo manifest contract is version one"),
+		FABTSM73BeamDemoManifest::Version, 1);
+	TestNotEqual(TEXT("The jury-demo manifest has a deterministic identity"),
+		FABTSM73BeamDemoManifest::CalculateHash(), int64(0));
+
+	TSet<EABTSM73BeamDemoBuilding> EntryIds;
+	TSet<FName> StableIds;
+	TSet<FName> ProfileIds;
+	TSet<int32> Tiers;
+	for (const FABTSM73BeamDemoManifestEntry& Entry : Entries)
+	{
+		EntryIds.Add(Entry.Id);
+		StableIds.Add(Entry.StableId);
+		ProfileIds.Add(Entry.Settings.GameplayProfileId);
+		Tiers.Add(Entry.Settings.DifficultyTier);
+		TestTrue(*FString::Printf(TEXT("%s has a positive frozen seed"),
+			*Entry.StableId.ToString()), Entry.Settings.BuildingSeed > 0);
+		FABTSM73BeamDemoManifestEntry Resolved;
+		FString Error;
+		TestTrue(*FString::Printf(TEXT("%s resolves: %s"),
+			*Entry.StableId.ToString(), *Error),
+			FABTSM73BeamDemoManifest::Resolve(Entry.Id, Resolved, Error));
+		TestEqual(TEXT("Resolved stable identity is exact"),
+			Resolved.StableId, Entry.StableId);
+	}
+	TestEqual(TEXT("All six enum entries are unique"), EntryIds.Num(), 6);
+	TestEqual(TEXT("All six stable identities are unique"), StableIds.Num(), 6);
+	TestEqual(TEXT("Every E1-E6 difficulty is represented once"), Tiers.Num(), 6);
+	TestEqual(TEXT("All five gameplay profiles are represented"), ProfileIds.Num(), 5);
+	for (int32 Tier = 0; Tier <= 5; ++Tier)
+	{
+		TestTrue(*FString::Printf(TEXT("E%d is present"), Tier + 1),
+			Tiers.Contains(Tier));
+	}
+	return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(
+	FABTSM73BeamC3DemoSixBuildingStage3Test,
+	"ABTS.M73DAG.BeamC3V3.Demo.Stage3FrozenEntries",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+void FABTSM73BeamC3DemoSixBuildingStage3Test::GetTests(
+	TArray<FString>& OutBeautifiedNames,
+	TArray<FString>& OutTestCommands) const
+{
+	for (const FABTSM73BeamDemoManifestEntry& Entry
+		: FABTSM73BeamDemoManifest::GetEntries())
+	{
+		OutBeautifiedNames.Add(Entry.StableId.ToString());
+		OutTestCommands.Add(FString::FromInt(static_cast<int32>(Entry.Id)));
+	}
+}
+
+bool FABTSM73BeamC3DemoSixBuildingStage3Test::RunTest(const FString& Parameters)
+{
+	const EABTSM73BeamDemoBuilding Id =
+		static_cast<EABTSM73BeamDemoBuilding>(FCString::Atoi(*Parameters));
+	FABTSM73BeamDemoManifestEntry Entry;
+	FString Error;
+	if (!FABTSM73BeamDemoManifest::Resolve(Id, Entry, Error))
+	{
+		AddError(Error);
+		return false;
+	}
+	FABTSM73BeamD1StagePreviewResult Result;
+	const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+		Entry.Settings, EABTSM73BeamC3GenerationStage::CommonExteriorFrame,
+		Result, Error);
+	TestTrue(*FString::Printf(TEXT("%s Stage 3 generates: %s"),
+		*Entry.StableId.ToString(), *Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlanSummary& Summary = Result.Skeleton.Plan.Summary;
+	AddInfo(FString::Printf(
+		TEXT("BeamDemo Entry=%s ManifestVersion=%d ManifestHash=%lld")
+		TEXT(" Profile=%s Tier=E%d Seed=%d WFC=%lld Stage3=%lld Members=%d")
+		TEXT(" Frames=%d Columns=%d GroundSills=%d Physical=NotEvaluated"),
+		*Entry.StableId.ToString(), FABTSM73BeamDemoManifest::Version,
+		FABTSM73BeamDemoManifest::CalculateHash(),
+		*Entry.Settings.GameplayProfileId.ToString(),
+		Entry.Settings.DifficultyTier + 1, Entry.Settings.BuildingSeed,
+		Result.Skeleton.Plan.WFCHash, Summary.Stage3PlanHash,
+		Summary.EmittedMemberCount, Summary.CommonExteriorFrameCount,
+		Summary.ExteriorColumnCount + Summary.GroundExteriorColumnCount,
+		Summary.GroundSillSegmentCount));
+	TestTrue(TEXT("Frozen entry passes the Stage 3 static DAG"),
+		Result.Summary.bStageStaticDAGEvaluated);
+	TestEqual(TEXT("Frozen entry has no positive-volume penetration"),
+		Summary.PenetrationCount, 0);
+	TestEqual(TEXT("Every Stage 2 anchor resolves a Stage 3 frame"),
+		Summary.Stage3AnchorBandWithoutFrameCount, 0);
+	TestEqual(TEXT("Every Stage 3 frame has a downward path"),
+		Summary.Stage3FrameDownwardConnectionViolationCount, 0);
+	TestNotEqual(TEXT("Frozen Stage 3 identity is non-zero"),
+		Summary.Stage3PlanHash, int64(0));
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
