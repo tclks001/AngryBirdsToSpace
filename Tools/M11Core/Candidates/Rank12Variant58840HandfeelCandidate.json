@@ -1,6 +1,6 @@
 {
   "schema": "abts.m11b.v2_2.handfeel_candidate.v1",
-  "status": "uncertified_editor_pie_handfeel_test_only",
+  "status": "frozen_unique_v3_certification_input_uncertified",
   "editorCandidateRank": 12,
   "baseCandidateRank": 11,
   "baseGlobalWorkIndex": 25,
@@ -46,8 +46,8 @@
   "acceptance": {
     "editorPieBinding": "abts.M11.CandidateRank_12",
     "manualHandfeelTest": "passed_user_evaluation_2026_08_12",
-    "fullInputDomainCertification": "failed_non_unique_six_neighbor_f4",
-    "certificationInput": false,
+    "fullInputDomainCertification": "v3_early_stopped_refinement_sample_budget_exceeded_after_bridge_closure_passed",
+    "certificationInput": true,
     "productionBinding": false
   }
 }

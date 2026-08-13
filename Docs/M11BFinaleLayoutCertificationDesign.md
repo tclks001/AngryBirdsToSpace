@@ -1190,6 +1190,37 @@ Scan Hash；`3x3x1` 对角样例保持 `3` 个六邻域分量、形成 `1` 个 1
 Hash。M11 工作树下一步可合并该 `master` 基线，负责 portable CLI、Python 调度和
 Rank12 fresh 实际桥区扫描；当前 Rank12 仍为 `UNCERTIFIED`。
 
+#### Rank 12 v3 fresh 认证早停结果（2026-08-13）
+
+M11 工作树合并上述稳定基线后，已经将 Rank12 冻结为新的唯一 v3 认证输入，并在
+`Intermediate/M11V3Certification/Rank12-20260813-03` 使用固定 MSVC 14.44 portable
+C++ 权威和 Python 纯调度层完成 fresh Nominal、base、half-step 与桥区闭包。身份门
+保持 `Source=0x58840ee73ddd70f5`、Nominal Request/Result
+`0xf76a37a38221a425 / 0xf746bbe4ca7b9748`、ScreenAim `615/139/18/8`。
+
+fresh base 为 `F=389/106/31/10`、六邻域分量 `3/1/3/5`、
+`Early/Bypass/Nesting=0/0/0`、聚合 Hash `0x85c1c1d517643be9`；fresh half-step
+精确复现 `F=3003/841/238/67`、六邻域分量 `3/1/6/4`、
+`Early/Bypass/Nesting=0/0/0`、聚合 Hash `0xf364c0098bec8112`。v3 发现计划把
+F4 的 `4` 个 face component 连成 `1` 个 18 邻域发现分量，确定性生成森林产生
+`3` 条必要桥，Plan Hash 为 `0xb4cc770aeda2ce17`。
+
+三条桥分别建立一个最终精度 halo 的局部桥区，每区 `845` 点；深度 `3` 后均找到
+`17` 点六邻域连续 F4 路径。桥证据为 `3/3`，最终分量为 `1`，Policy / Evidence
+Aggregate / Closure Result Hash 分别为 `0x40ccc25283f67c8c / 0x5e2c18f6fb5e733f /
+0x240d8b2055832d36`。因此“18 邻域初判＋桥区递归闭包”本身已经通过，但这仍不等于
+完整认证通过。
+
+随后按冻结 refinement policy，以 base 与 half-step 的 F3/终端证据并集建立最终精度
+闭包。原始证据范围为 Yaw `[-5,0]`、Pitch `[19.5,31.5]`、Power `[0.675,1]`；加入
+一个 base coarse-cell halo 并以 Nominal 对齐后，最终网格为
+`[-7,2] × [16.5,34.5] × [0.65,1]`，尺寸 `49×73×113=404,201`。该值超过稳定
+Scan Contract 的 `MaximumRefinementSampleCount=250,000`，所以在启动精化求解前按
+合同早停为 `RefinementSampleBudgetExceeded`。没有执行消融、差集/宽度、Trust、
+Certification/Suite/Bundle 或生产绑定；Rank12 保持唯一冻结认证输入但仍为
+`UNCERTIFIED`。若要继续，只能由集成工作树审批新的稳定精化预算/区域构造版本，或
+由 M11 产生新的物理候选以缩小 F3 证据包络；不得在本工作树静默提高预算后重签。
+
 本检查点提交前的最终 portable CTest 为 `10/10`，机器摘要 `passed=true`；
 `ProductionCoreHash=970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0`、
 `ConformanceToolHash=a953fb637dbe8cc67f2b536a7e9ff8ecbc92f05cc15cd8a1d69231e60ce4083e`、

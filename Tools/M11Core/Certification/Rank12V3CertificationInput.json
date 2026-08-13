@@ -1,0 +1,87 @@
+{
+  "schema": "abts.m11b.v3.certification_input_freeze.v1",
+  "status": "frozen_unique_certification_input",
+  "authority": "user_approved_rank12_v3_freeze_after_handfeel",
+  "frozenDate": "2026-08-13",
+  "candidateRank": 12,
+  "candidateManifest": "Tools/M11Core/Candidates/Rank12Variant58840HandfeelCandidate.json",
+  "candidateSourceHash": "0x58840ee73ddd70f5",
+  "nominalRequestHash": "0xf76a37a38221a425",
+  "nominalResultHash": "0xf746bbe4ca7b9748",
+  "scoreHash": "0xf364c0098bec8112",
+  "nominalInput": [-1.75, 26.25, 1.0],
+  "nominalGridPolicy": "independent_single_point_f4_then_allow_off_grid_in_discovery",
+  "scanContractVersion": 3,
+  "discoveryPolicyVersion": 2,
+  "adjacency": "face_and_edge_18_discovery_with_required_bridge_closure",
+  "bridgeClosurePolicy": {
+    "policyVersion": 1,
+    "regionConstructionVersion": 1,
+    "recursiveSubdivisionVersion": 1,
+    "visitOrderVersion": 1,
+    "evidenceHashSchemaVersion": 1,
+    "regionHaloFinalCells": 1,
+    "maximumRecursionDepth": 3,
+    "maximumSampleCountPerBridge": 32768,
+    "finalPrecision": [0.1875, 0.25, 0.003125]
+  },
+  "refinementPolicy": {
+    "regionSeed": "union_of_base_and_half_step_f3_or_target_evidence",
+    "gridAnchor": "nominal_input",
+    "refinementHaloCoarseCells": 1,
+    "maximumRefinementIterations": 3,
+    "maximumRefinementSampleCount": 250000,
+    "finalPrecision": [0.1875, 0.25, 0.003125]
+  },
+  "domain": {
+    "yawDegrees": [-18.0, 18.0],
+    "pitchDegrees": [0.0, 60.0],
+    "power": [0.0, 1.0]
+  },
+  "discoveryStages": [
+    {
+      "name": "base",
+      "steps": [2.0, 3.0, 0.025],
+      "expectedSampleCount": 16359
+    },
+    {
+      "name": "half_step",
+      "steps": [1.0, 1.5, 0.0125],
+      "expectedSampleCount": 122877
+    }
+  ],
+  "earlyStop": {
+    "baseHardFailures": [
+      "f4_empty",
+      "prefix_nesting_violation",
+      "early_target_hit",
+      "bypass_target_hit"
+    ],
+    "halfStepHardFailures": [
+      "f4_empty",
+      "f4_18_neighbor_discovery_not_single_component",
+      "prefix_nesting_violation",
+      "early_target_hit",
+      "bypass_target_hit"
+    ],
+    "bridgeFailures": [
+      "missing_bridge_evidence",
+      "bridge_not_continuous_at_frozen_precision",
+      "final_f4_component_count_not_one"
+    ],
+    "refinementFailures": [
+      "refinement_sample_budget_exceeded",
+      "refinement_closure_did_not_converge",
+      "refined_prefix_or_width_gate_failed"
+    ]
+  },
+  "postBridgeRequirements": [
+    "final_refinement_closure",
+    "prefix_difference_sets",
+    "minimum_widths",
+    "trust_f1_f2_f3",
+    "assist_ablations_and_bypass_exclusions",
+    "certification_suite_trust_playback_bundle_candidate_hashes",
+    "portable_ue_parity_and_fresh_nullrhi"
+  ]
+}
