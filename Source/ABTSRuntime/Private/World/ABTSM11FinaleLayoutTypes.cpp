@@ -377,6 +377,8 @@ FABTSM11LayoutScanContract FABTSM11LayoutScanContract::MakeBridgeClosureV3(
 	Contract.ScanContractVersion = 3;
 	Contract.Connectivity = 18;
 	Contract.DiscoveryPolicyVersion = 2;
+	Contract.MaximumRefinementSampleCount =
+		BridgeClosureV3MaximumRefinementSampleCount;
 	Contract.BridgeClosurePolicy = FABTSM11BridgeClosurePolicy::MakeV1(
 		Contract.FinalYawPrecisionDegrees,
 		Contract.FinalPitchPrecisionDegrees,

@@ -404,6 +404,8 @@ bool FABTSM11BConnectivityBridgeClosureV3Test::RunTest(
 		Legacy.ScanContract.Connectivity, 6);
 	TestTrue(TEXT("Frozen v2 contract has no bridge policy"),
 		Legacy.ScanContract.BridgeClosurePolicy.IsDisabled());
+	TestEqual(TEXT("Frozen v2 refinement ceiling remains byte-compatible"),
+		Legacy.ScanContract.MaximumRefinementSampleCount, 250000);
 	TestEqual(TEXT("Frozen v2 scan hash remains byte-compatible"),
 		FrozenV2Hash,
 		FABTSM11FinaleLayoutHash::ComputeScanContractHash(Legacy));
@@ -421,6 +423,22 @@ bool FABTSM11BConnectivityBridgeClosureV3Test::RunTest(
 			&Failure));
 	TestTrue(TEXT("v3 changes scan identity"),
 		CandidateV3.ScanContractHash != FrozenV2Hash);
+	TestEqual(TEXT("v3 freezes the expanded refinement ceiling"),
+		CandidateV3.ScanContract.MaximumRefinementSampleCount,
+		FABTSM11LayoutScanContract::
+			BridgeClosureV3MaximumRefinementSampleCount);
+	TestTrue(TEXT("v3 ceiling admits the Rank12 49x73x113 lattice"),
+		49 * 73 * 113
+			<= CandidateV3.ScanContract.MaximumRefinementSampleCount);
+	TestTrue(TEXT("v3 refinement remains bounded"),
+		CandidateV3.ScanContract.MaximumRefinementSampleCount
+			< TNumericLimits<int32>::Max());
+	FABTSM11FinaleLayoutPreset ChangedRefinementCeiling = CandidateV3;
+	--ChangedRefinementCeiling.ScanContract.MaximumRefinementSampleCount;
+	RefreshOfflineM11BIdentity(ChangedRefinementCeiling);
+	TestTrue(TEXT("Refinement ceiling is bound into the scan hash"),
+		ChangedRefinementCeiling.ScanContractHash
+			!= CandidateV3.ScanContractHash);
 
 	FABTSM11FinaleLayoutPreset ChangedBudget = CandidateV3;
 	++ChangedBudget.ScanContract.BridgeClosurePolicy.MaximumRecursionDepth;

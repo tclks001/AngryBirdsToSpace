@@ -1171,6 +1171,9 @@ Editor/PIE。2026-08-12 用户完成 Rank11/12 对照后确认 Rank12 手感没�
 没有替换或重签 v2。v3 固定为：
 
 - `ScanContractVersion=3 / DiscoveryPolicyVersion=2 / Connectivity=18`；
+- v2 的细化样本上限继续冻结为 `250000`，v3 的细化样本上限冻结为
+  `500000`；后者覆盖 Rank12 最终精化的 `49×73×113=404201` 点，同时保留
+  超预算早停与 fail-closed 行为；该字段继续进入 ScanContractHash；
 - 六邻域边直接构成 face component；只改变两个轴的斜边仅进入确定性
   `RequiredBridgeEdges`，三轴同时变化的角邻接永远不进入发现图；
 - 待证明桥边按样本扁平索引排序，并对六邻域分量商图建立唯一确定性生成森林；
