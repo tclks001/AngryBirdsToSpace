@@ -116,7 +116,7 @@ Manifest 与 Python 离线分析共同统计：四鸟丢失帧、顺序/主控�
 | M6-4 | 主控锚不变的四球镜头安全框 | 已落实 / M11 |
 | M6-5 | Schema 8、Manifest 与 Python 离线判据 | 已落实并完成 fresh 双路线证据 / M11 |
 | M6-6 | Space 袋、弦、桩、点击体积与轮廓资产定型 | `IntegrationAccepted`（2026-08-13） |
-| M6-7 | 合并后生产 PIE/Standalone 联合验收 | 待 Integration |
+| M6-7 | 合并后生产 PIE/Standalone 联合验收 | `IntegrationAccepted`（2026-08-13） |
 
 ## 7. Integration 唯一写入交接
 
@@ -156,6 +156,34 @@ Actor 的同一 `PouchVisual`，没有第二个延迟加载代理。该可见袋
 `ABTS.Rendering.Toon.T3A2.SharedMaterialAdapter` 1/1 和
 `ABTS.Integration.PreviewFinaleFrame` 2/2。以上只证明原生尺寸、旧默认迁移、
 装配、Steel 资产、可见袋点击体积和共享材质合同，不替代待执行的生产 PIE。
+
+### 7.2 M6-7 Integration 联合验收
+
+2026-08-13，基于已通过生产 PIE 的 M6-6 提交，Integration 使用唯一批准的
+UE 5.8 完成 `-ForceUnity -DisableAdaptiveUnity` Development Editor 全链接；
+fresh NullRHI 精确通过：
+
+- `ABTS.M6.SlingshotVisual.SpaceFourBirdFrame`：1/1；
+- `ABTS.M51.SlingshotAssembly`：2/2；
+- `ABTS.M11C.V2_1.InputParityAndLatestOnly`：1/1；
+- `ABTS.Rendering.Toon.T3A2.SharedMaterialAdapter`：1/1。
+
+普通三档随后在隔离 M6/M9 Standalone 中同时生成
+`Twig=1 Simple=1 Reinforced=1`，唯一运行终态为
+`Terminal=1 Passed=1 Failed=0`，且完整原因包含
+`Slingshots=3 Targets=7 Envelopes=3 Sweep=1 SimpleHits=0 OutsidePullHits=0 Gravity=1 ScoutMap=1 Buildings=0`。
+
+生产 `L_ABTS_M11` 再以 fresh D3D12、RenderOffscreen、60 FPS 运行：M5.1 报告
+`OrdinaryConfigured=1 FinaleConfigured=1`，M11 Finale Frame 为
+`Authority=Production CandidateRank=0`，三栋建筑均 `IdleValidation Accepted=1`，
+最终 `WorldReady=1 / BuildingAccepted=3 / BuildingRejected=0 / Expected=3 /
+Registered=3`，且零 `LogABTSRuntime: Error`。用户此前已在同一候选完成生产 PIE
+的 Space 四鸟容纳、朝向、净空、材质、轮廓和普通弹弓回归验收，因此 M6-7 正式
+关闭为 `IntegrationAccepted`。
+
+一次附加 NullRHI 全世界诊断曾因 B0 建筑 IdleValidation 超时触发既有 M7
+fail-closed；该结果被保留且没有当成成功。相同提交在正式要求的 D3D12 60 FPS
+实时路径下三栋建筑全部接受，证明该诊断不属于 M6 回归，也不能用来放宽 M7 门禁。
 
 ## 8. 验收门
 

@@ -14,7 +14,7 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`；候选仍为 Preview/Test、`NOT CERTIFIED`，不能替换 v1 默认值。
-- 当前下一步：T4-A3.2 的终局环境阶段已完成 Visible PIE；Integration P1 的 M11 M6-6 Space 四鸟视觉框架已于 2026-08-13 完成生产 PIE 验收：Space 袋原生尺寸为普通袋 2 倍并接通既有 Steel 资产、点击体积与风格化轮廓，四鸟统一朝向发射前方并具有 `25 cm` 附加前向净空。M6-6 为 `IntegrationAccepted`；M6-7 仍待基于该提交完成 fresh Standalone 与普通三档弹弓回归。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 后续仍需 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 当前下一步：T4-A3.2 的终局环境阶段已完成 Visible PIE；M11 M6-6/M6-7 已于 2026-08-13 完成 Integration 收口：Space 四鸟视觉框架、Steel 资产、点击/轮廓、统一朝前和 `25 cm` 附加前向净空通过生产 PIE，随后 UE 5.8 ForceUnity、fresh 自动化、Twig/Simple/Reinforced 三档隔离 Standalone 及 D3D12 60 FPS `L_ABTS_M11` 生产 Standalone 联合回归均通过，状态为 `IntegrationAccepted`。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 后续仍需 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M3R-5.2/M11 集成验收](M3R52M11PreviewFinaleIntegrationDesign.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
