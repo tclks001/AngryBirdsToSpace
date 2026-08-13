@@ -119,7 +119,7 @@ def validate_freeze(freeze_path: Path) -> tuple[dict[str, Any], Path, dict[str, 
         "gridAnchor": "nominal_input",
         "refinementHaloCoarseCells": 1,
         "maximumRefinementIterations": 3,
-        "maximumRefinementSampleCount": 250000,
+        "maximumRefinementSampleCount": 500000,
         "finalPrecision": [0.1875, 0.25, 0.003125],
     }:
         raise RuntimeError("RefinementPolicyMismatch")
@@ -340,6 +340,50 @@ def assess_refinement_budget(
     return result
 
 
+def run_final_refinement(
+    root: Path,
+    plan: dict[str, Any],
+    freeze: dict[str, Any],
+    refinement_budget: dict[str, Any],
+    resume: bool,
+) -> dict[str, Any]:
+    """Schedule the frozen final-precision grid through the C++ authority."""
+    bounds = refinement_budget["refinementGridBounds"]
+    counts = refinement_budget["refinementGridCounts"]
+    sample_count = int(refinement_budget["refinementSampleCount"])
+    if sample_count != counts[0] * counts[1] * counts[2]:
+        raise RuntimeError("RefinementGridCountMismatch")
+
+    refinement_freeze = dict(freeze)
+    refinement_freeze["domain"] = {
+        "yawDegrees": bounds[0],
+        "pitchDegrees": bounds[1],
+        "power": bounds[2],
+    }
+    stage = {
+        "name": "refinement",
+        "steps": freeze["refinementPolicy"]["finalPrecision"],
+        "expectedSampleCount": sample_count,
+    }
+    shard_plan = dict(plan)
+    shard_plan["executable"] = plan["scanExecutable"]
+    return legacy.run_stage(
+        shard_plan, refinement_freeze, root, stage, resume)
+
+
+def refinement_failure_reasons(summary: dict[str, Any]) -> list[str]:
+    reasons = hard_failure_reasons(summary)
+    prefix = summary.get("prefixCounts", [])
+    components = summary.get("componentCounts", [])
+    if len(components) != 4 or components[3] != 1:
+        reasons.append("final_f4_component_count_not_one")
+    if len(prefix) != 4 or not (prefix[0] > prefix[1] > prefix[2] > prefix[3] > 0):
+        reasons.append("refined_prefix_difference_set_empty")
+    if summary.get("nominalF4") is not True:
+        reasons.append("refined_nominal_not_in_f4")
+    return reasons
+
+
 def command_validate(args: argparse.Namespace) -> int:
     freeze, candidate_path, _ = validate_freeze(args.freeze.resolve())
     print(json.dumps({
@@ -407,9 +451,23 @@ def command_run(args: argparse.Namespace) -> int:
         }, indent=2))
         return 2
 
-    state = "refinement_budget_passed_requires_refinement_scanner"
-    write_status(root, state, "refinement_budget", [], summaries)
-    print(json.dumps({"state": state, "stage": "refinement_budget"}, indent=2))
+    summaries["refinement"] = run_final_refinement(
+        root, plan, freeze, refinement_budget, args.resume)
+    reasons = refinement_failure_reasons(summaries["refinement"])
+    if reasons:
+        write_status(root, "early_stopped", "refinement", reasons, summaries)
+        print(json.dumps({
+            "state": "early_stopped",
+            "stage": "refinement",
+            "reasons": reasons,
+            "prefixCounts": summaries["refinement"].get("prefixCounts"),
+            "componentCounts": summaries["refinement"].get("componentCounts"),
+        }, indent=2))
+        return 2
+
+    state = "refinement_passed_requires_width_trust_and_ablation"
+    write_status(root, state, "refinement", [], summaries)
+    print(json.dumps({"state": state, "stage": "refinement"}, indent=2))
     return 3
 
 

@@ -30,7 +30,7 @@
     "gridAnchor": "nominal_input",
     "refinementHaloCoarseCells": 1,
     "maximumRefinementIterations": 3,
-    "maximumRefinementSampleCount": 250000,
+    "maximumRefinementSampleCount": 500000,
     "finalPrecision": [0.1875, 0.25, 0.003125]
   },
   "domain": {
