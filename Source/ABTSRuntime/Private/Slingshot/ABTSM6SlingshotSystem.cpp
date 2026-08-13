@@ -603,6 +603,8 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 		bActiveLaunchCalibrationTelemetry = true;
 	}
 	CalibrationSuccessReturnRemainingSeconds = -1.0f;
+	bSatelliteLandingSettlementActive = false;
+	LastSatelliteSurfaceContactWorldTimeSeconds = -BIG_NUMBER;
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M6][Launch] Bird=%d Tier=%d Speed=%.1f Pull=%.2f Aim=(%.1f,%.1f,%.1f) LaunchProfileHash=%llu Calibration=%d"),
 		ABTSBirdIdToIndex(LaunchedBird->GetBirdId()),
@@ -814,22 +816,47 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
 	LaunchedBird->NotifySlingshotPresentationImpact();
 	if (SlingshotCamera) SlingshotCamera->NotifyBirdImpact();
-	if (Hit.GetActor() == SatellitePracticeBody.Get() && SlingshotCamera)
+	const bool bHitSatelliteBody =
+		Hit.GetActor() == SatellitePracticeBody.Get();
+	const bool bHitSatelliteTarget =
+		Hit.GetActor() == SatellitePracticeTarget.Get();
+	if ((bHitSatelliteBody || bHitSatelliteTarget) && SlingshotCamera)
 	{
 		SlingshotCamera->NotifySatelliteSurfaceContact();
+	}
+	if (bHitSatelliteBody || bHitSatelliteTarget)
+	{
+		LastSatelliteSurfaceContactWorldTimeSeconds = GetWorld()->GetTimeSeconds();
+		// A swept E5 witness can be finalized immediately before Chaos reports
+		// the real blocking contact. Once physical support exists, cancel that
+		// fixture-only short-return timer and let the shared settle monitor own
+		// the bird and any present/future E5 debris.
+		CalibrationSuccessReturnRemainingSeconds = -1.0f;
+		if (!bSatelliteLandingSettlementActive)
+		{
+			bSatelliteLandingSettlementActive = true;
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M9][Settle] SatelliteSupportAcquired Target=%s Body=%d"),
+				*GetNameSafe(Hit.GetActor()),
+				bHitSatelliteBody ? 1 : 0);
+			if (LaunchState == EABTSM6LaunchState::Flying)
+			{
+				BeginSettlement();
+			}
+		}
 	}
 	// A real Chaos blocking contact is the strongest calibration evidence.
 	// The rig's swept centre-segment test remains a CCD/fallback path, while
 	// NotifyCalibrationTargetEvent de-duplicates both sources.
 	if (bCalibrationModeEnabled)
 	{
-		if (Hit.GetActor() == SatellitePracticeTarget.Get())
+		if (bHitSatelliteTarget)
 		{
 			NotifyCalibrationTargetEvent(
 				TEXT("Satellite.Backside"),
 				false);
 		}
-		else if (Hit.GetActor() == SatellitePracticeBody.Get())
+		else if (bHitSatelliteBody)
 		{
 			NotifyCalibrationTargetEvent(
 				TEXT("Satellite.Body"),

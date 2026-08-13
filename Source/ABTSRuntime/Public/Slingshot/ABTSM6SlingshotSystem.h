@@ -249,6 +249,7 @@ private:
 	void BeginSettlement();
 	void UpdatePhysicsSettlement(float DeltaSeconds);
 	void CollectDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies);
+	bool IsSatelliteLandingSupported(float WorldTimeSeconds) const;
 	void MarkPhysicsActivity();
 	void BeginReturn();
 	void UpdateReturn(float DeltaSeconds);
@@ -365,6 +366,14 @@ private:
 	float SettleSampleIntervalSeconds = 0.1f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return", meta = (ClampMin = "0.1"))
 	float ReturnDurationSeconds = 1.15f;
+	/** Contact freshness used before a sleeping moon/E5 body is verified geometrically. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return|Satellite",
+		meta = (ClampMin = "0.05", ClampMax = "2.0", Units = "s"))
+	float SatelliteSupportContactGraceSeconds = 0.5f;
+	/** Radial tolerance for recognizing a bird resting on the satellite sphere. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return|Satellite",
+		meta = (ClampMin = "10.0", ClampMax = "500.0", Units = "cm"))
+	float SatelliteSupportRadialToleranceCM = 160.0f;
 
 	TWeakObjectPtr<AABTSBirdParty> Party;
 	TWeakObjectPtr<AABTSM3Planet> Planet;
@@ -404,6 +413,8 @@ private:
 	float PullAlpha = 0.55f;
 	float FlightElapsedSeconds = 0.0f;
 	float ReturnElapsedSeconds = 0.0f;
+	bool bSatelliteLandingSettlementActive = false;
+	float LastSatelliteSurfaceContactWorldTimeSeconds = -BIG_NUMBER;
 	float BlackFuseRemainingSeconds = -1.0f;
 	bool bBlackDetonated = false;
 	FABTSM6LaunchCompletedNative LaunchCompletedNative;

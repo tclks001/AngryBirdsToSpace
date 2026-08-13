@@ -691,10 +691,17 @@ void AABTSM6SlingshotSystem::NotifyCalibrationTargetEvent(
 		{
 			SlingshotCamera->NotifySatelliteE5Hit();
 		}
-		CalibrationSuccessReturnRemainingSeconds =
-			FMath::Max(
-				0.1f,
-				CalibrationE5ImpactHoldSeconds);
+		// A real moon/E5 contact now enters the ordinary physics settlement
+		// monitor so bird and building debris can finish moving. Retain the old
+		// short return only for swept calibration evidence without a physical
+		// support contact.
+		if (!bSatelliteLandingSettlementActive)
+		{
+			CalibrationSuccessReturnRemainingSeconds =
+				FMath::Max(
+					0.1f,
+					CalibrationE5ImpactHoldSeconds);
+		}
 	}
 }
 
