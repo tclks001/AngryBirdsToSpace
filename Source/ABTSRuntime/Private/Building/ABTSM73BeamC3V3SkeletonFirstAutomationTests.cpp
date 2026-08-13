@@ -392,6 +392,19 @@ namespace ABTSM73BeamC3V3Tests
 			return false;
 		}
 		TSet<int32> SeenBandIds;
+		int32 DeferredCount = 0;
+		auto CountDeferredReason = [&Plan](const uint16 Reason)
+		{
+			int32 Count = 0;
+			for (const ABTSM73BeamC3V3::FFacadePartitionPlan& Partition
+				: Plan.FacadePartitions)
+			{
+				Count += Partition.PerimeterCoreCellIds.IsEmpty()
+					&& Partition.AnchorBandIds.IsEmpty()
+					&& (Partition.DeferredReasonMask & Reason) != 0 ? 1 : 0;
+			}
+			return Count;
+		};
 		for (const ABTSM73BeamC3V3::FFacadePartitionPlan& Partition
 			: Plan.FacadePartitions)
 		{
@@ -400,6 +413,16 @@ namespace ABTSM73BeamC3V3Tests
 				|| Partition.LastCourseIndexExclusive <= Partition.FirstCourseIndex
 				|| Partition.TangentMaximumCM - Partition.TangentMinimumCM
 					<= SkeletonV3TestGeometryToleranceCM)
+			{
+				return false;
+			}
+			const bool bDeferred = Partition.PerimeterCoreCellIds.IsEmpty()
+				&& Partition.AnchorBandIds.IsEmpty();
+			DeferredCount += bDeferred ? 1 : 0;
+			if ((bDeferred && Partition.DeferredReasonMask
+					== ABTSM73BeamC3V3::FacadeDeferredNone)
+				|| (!bDeferred && Partition.DeferredReasonMask
+					!= ABTSM73BeamC3V3::FacadeDeferredNone))
 			{
 				return false;
 			}
@@ -426,7 +449,32 @@ namespace ABTSM73BeamC3V3Tests
 				SeenBandIds.Add(BandId);
 			}
 		}
-		return SeenBandIds.Num() == Plan.FacadeHeightAnchorBands.Num();
+		return SeenBandIds.Num() == Plan.FacadeHeightAnchorBands.Num()
+			&& DeferredCount == Plan.Summary.DeferredFacadePartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredNoCoursePair)
+				== Plan.Summary.DeferredNoCoursePairPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredNoEligibleCore)
+				== Plan.Summary.DeferredNoEligibleCorePartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredNoFreeCrossStation)
+				== Plan.Summary.DeferredNoFreeCrossStationPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredNoStage1Bearing)
+				== Plan.Summary.DeferredNoStage1BearingPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredNoFacadeTarget)
+				== Plan.Summary.DeferredNoFacadeTargetPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredLengthLimit)
+				== Plan.Summary.DeferredLengthLimitPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredNotOutward)
+				== Plan.Summary.DeferredNotOutwardPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredEnvelopeGap)
+				== Plan.Summary.DeferredEnvelopeGapPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredOtherCoreBlocked)
+				== Plan.Summary.DeferredOtherCoreBlockedPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredProtectedVoid)
+				== Plan.Summary.DeferredProtectedVoidPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredMemberCollision)
+				== Plan.Summary.DeferredMemberCollisionPartitionCount
+			&& CountDeferredReason(ABTSM73BeamC3V3::FacadeDeferredExhaustedCandidates)
+				== Plan.Summary.DeferredExhaustedCandidatePartitionCount;
 	}
 
 	bool Stage2ResolvedFacadeEnvelopeIsClosed(
@@ -4417,6 +4465,14 @@ bool FABTSM73BeamC3StagedStage2MatrixTest::RunTest(const FString& Parameters)
 			&& Stage2FacadePartitionLedgerIsClosed(Plan));
 	Check(TEXT("consumes the exact Stage-1 raised-podium facade envelope"),
 		Stage2ResolvedFacadeEnvelopeIsClosed(Plan));
+	Check(TEXT("publishes Stage-2-only phase timings"),
+		Plan.Summary.bStage2TimingEvaluated
+			&& Plan.Summary.Stage2FacadeEnvelopeMilliseconds >= 0.0
+			&& Plan.Summary.Stage2FacadeExtractionMilliseconds >= 0.0
+			&& Plan.Summary.Stage2AnchorSearchMilliseconds >= 0.0
+			&& Plan.Summary.Stage2MemberEmissionMilliseconds >= 0.0
+			&& Plan.Summary.Stage2StaticDAGMilliseconds >= 0.0
+			&& Plan.Summary.Stage2TotalMilliseconds > 0.0);
 	int32 CountedPerimeterCores = 0;
 	int32 CountedPerimeterFaces = 0;
 	for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)

@@ -678,6 +678,26 @@ namespace ABTSM73BeamC3V3
 		bool bRaisedPodiumBody = false;
 	};
 
+	/** Stable, additive reasons why one facade partition has neither a perimeter
+	 * core nor a Stage-2 height-anchor band. Several causes may apply because the
+	 * deterministic search records every rejected route before failing closed. */
+	enum EFacadeDeferredReason : uint16
+	{
+		FacadeDeferredNone = 0,
+		FacadeDeferredNoCoursePair = 1 << 0,
+		FacadeDeferredNoEligibleCore = 1 << 1,
+		FacadeDeferredNoFreeCrossStation = 1 << 2,
+		FacadeDeferredNoStage1Bearing = 1 << 3,
+		FacadeDeferredNoFacadeTarget = 1 << 4,
+		FacadeDeferredLengthLimit = 1 << 5,
+		FacadeDeferredNotOutward = 1 << 6,
+		FacadeDeferredEnvelopeGap = 1 << 7,
+		FacadeDeferredOtherCoreBlocked = 1 << 8,
+		FacadeDeferredProtectedVoid = 1 << 9,
+		FacadeDeferredMemberCollision = 1 << 10,
+		FacadeDeferredExhaustedCandidates = 1 << 11,
+	};
+
 	/** One vertically connected WFC exterior facade region. It is independent of
 	 * core placement and is the authority consumed by Stage-2 height anchors and
 	 * the later Stage-3 frame fitter. */
@@ -696,6 +716,9 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> AnchorBandIds;
 		/** Perimeter cores which can act as the facade directly on at least one span. */
 		TArray<int32> PerimeterCoreCellIds;
+		/** EFacadeDeferredReason bitmask. It must be zero for every partition already
+		 * served by a perimeter core or an emitted anchor band. */
+		uint16 DeferredReasonMask = FacadeDeferredNone;
 	};
 
 	/** One explicit two-course core-to-facade anchor bound to one WFC partition. */
@@ -968,12 +991,32 @@ namespace ABTSM73BeamC3V3
 		int32 FacadePartitionWithPerimeterCoreCount = 0;
 		int32 FacadePartitionWithHeightAnchorCount = 0;
 		int32 DeferredFacadePartitionCount = 0;
+		int32 DeferredNoCoursePairPartitionCount = 0;
+		int32 DeferredNoEligibleCorePartitionCount = 0;
+		int32 DeferredNoFreeCrossStationPartitionCount = 0;
+		int32 DeferredNoStage1BearingPartitionCount = 0;
+		int32 DeferredNoFacadeTargetPartitionCount = 0;
+		int32 DeferredLengthLimitPartitionCount = 0;
+		int32 DeferredNotOutwardPartitionCount = 0;
+		int32 DeferredEnvelopeGapPartitionCount = 0;
+		int32 DeferredOtherCoreBlockedPartitionCount = 0;
+		int32 DeferredProtectedVoidPartitionCount = 0;
+		int32 DeferredMemberCollisionPartitionCount = 0;
+		int32 DeferredExhaustedCandidatePartitionCount = 0;
 		int32 FacadeHeightAnchorBandCount = 0;
 		int32 FacadePartitionBindingViolationCount = 0;
 		int32 PerimeterCoreCount = 0;
 		int32 PerimeterCoreFaceCount = 0;
 		int32 PerimeterFaceExposureSpanCount = 0;
 		int64 Stage2PlanHash = 0;
+		/** Six-phase Stage-2 performance evidence. These timings exclude Stage 1. */
+		bool bStage2TimingEvaluated = false;
+		double Stage2FacadeEnvelopeMilliseconds = 0.0;
+		double Stage2FacadeExtractionMilliseconds = 0.0;
+		double Stage2AnchorSearchMilliseconds = 0.0;
+		double Stage2MemberEmissionMilliseconds = 0.0;
+		double Stage2StaticDAGMilliseconds = 0.0;
+		double Stage2TotalMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;

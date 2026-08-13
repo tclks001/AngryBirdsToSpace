@@ -2983,6 +2983,30 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.FacadePartitionWithHeightAnchorCount;
 	Summary.SkeletonFirstDeferredFacadePartitionCount =
 		Stage1.DeferredFacadePartitionCount;
+	Summary.SkeletonFirstDeferredNoCoursePairPartitionCount =
+		Stage1.DeferredNoCoursePairPartitionCount;
+	Summary.SkeletonFirstDeferredNoEligibleCorePartitionCount =
+		Stage1.DeferredNoEligibleCorePartitionCount;
+	Summary.SkeletonFirstDeferredNoFreeCrossStationPartitionCount =
+		Stage1.DeferredNoFreeCrossStationPartitionCount;
+	Summary.SkeletonFirstDeferredNoStage1BearingPartitionCount =
+		Stage1.DeferredNoStage1BearingPartitionCount;
+	Summary.SkeletonFirstDeferredNoFacadeTargetPartitionCount =
+		Stage1.DeferredNoFacadeTargetPartitionCount;
+	Summary.SkeletonFirstDeferredLengthLimitPartitionCount =
+		Stage1.DeferredLengthLimitPartitionCount;
+	Summary.SkeletonFirstDeferredNotOutwardPartitionCount =
+		Stage1.DeferredNotOutwardPartitionCount;
+	Summary.SkeletonFirstDeferredEnvelopeGapPartitionCount =
+		Stage1.DeferredEnvelopeGapPartitionCount;
+	Summary.SkeletonFirstDeferredOtherCoreBlockedPartitionCount =
+		Stage1.DeferredOtherCoreBlockedPartitionCount;
+	Summary.SkeletonFirstDeferredProtectedVoidPartitionCount =
+		Stage1.DeferredProtectedVoidPartitionCount;
+	Summary.SkeletonFirstDeferredMemberCollisionPartitionCount =
+		Stage1.DeferredMemberCollisionPartitionCount;
+	Summary.SkeletonFirstDeferredExhaustedCandidatePartitionCount =
+		Stage1.DeferredExhaustedCandidatePartitionCount;
 	Summary.SkeletonFirstFacadeHeightAnchorBandCount =
 		Stage1.FacadeHeightAnchorBandCount;
 	Summary.SkeletonFirstFacadePartitionBindingViolationCount =
@@ -2992,6 +3016,19 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SkeletonFirstPerimeterFaceExposureSpanCount =
 		Stage1.PerimeterFaceExposureSpanCount;
 	Summary.SkeletonFirstStage2PlanHash = Stage1.Stage2PlanHash;
+	Summary.bSkeletonFirstStage2TimingEvaluated = Stage1.bStage2TimingEvaluated;
+	Summary.SkeletonFirstStage2FacadeEnvelopeMilliseconds =
+		Stage1.Stage2FacadeEnvelopeMilliseconds;
+	Summary.SkeletonFirstStage2FacadeExtractionMilliseconds =
+		Stage1.Stage2FacadeExtractionMilliseconds;
+	Summary.SkeletonFirstStage2AnchorSearchMilliseconds =
+		Stage1.Stage2AnchorSearchMilliseconds;
+	Summary.SkeletonFirstStage2MemberEmissionMilliseconds =
+		Stage1.Stage2MemberEmissionMilliseconds;
+	Summary.SkeletonFirstStage2StaticDAGMilliseconds =
+		Stage1.Stage2StaticDAGMilliseconds;
+	Summary.SkeletonFirstStage2TotalMilliseconds =
+		Stage1.Stage2TotalMilliseconds;
 	Summary.StructuralClosurePassCount =
 		OutResult.StaticDAG.Summary.StructuralClosurePassCount;
 	Summary.AddedStructuralSupportPostCount =
@@ -3045,9 +3082,9 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 		TEXT(" Provinces=%d MultiDemandProvinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceTies=%d ProvinceFallbacks=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
-		TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOutwardViolations=%d CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d FacadeEnvelopeVolumes=%d RaisedFacadeVolumes=%d FacadeEnvelopeBindingViolations=%d FacadeEnvelopeHash=%lld Stage2FacadeInputHash=%lld FacadePartitions=%d PartitionPerimeter=%d PartitionAnchored=%d DeferredPartitions=%d HeightAnchorBands=%d PartitionBindingViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d Stage1InputHash=%lld Stage2Hash=%lld")
+		TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOutwardViolations=%d CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d FacadeEnvelopeVolumes=%d RaisedFacadeVolumes=%d FacadeEnvelopeBindingViolations=%d FacadeEnvelopeHash=%lld Stage2FacadeInputHash=%lld FacadePartitions=%d PartitionPerimeter=%d PartitionAnchored=%d DeferredPartitions=%d DeferredReasons=Course:%d,Core:%d,Station:%d,Bearing:%d,Target:%d,Length:%d,Outward:%d,Envelope:%d,OtherCore:%d,Void:%d,Collision:%d,Exhausted:%d HeightAnchorBands=%d PartitionBindingViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d Stage1InputHash=%lld Stage2Hash=%lld")
 		TEXT(" StageLocalDAG=Accepted CompleteBeamC=%s LoadDAGHash=%lld Physical=NotEvaluated")
-		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
+		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f Stage2TimingMs=Envelope:%.2f,Facade:%.2f,Search:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f"),
 		static_cast<int32>(StopStage),
 		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
 		Settings.BuildingSeed, SelectedAttempt, SelectedSeed,
@@ -3098,6 +3135,18 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.FacadePartitionWithPerimeterCoreCount,
 		Stage1.FacadePartitionWithHeightAnchorCount,
 		Stage1.DeferredFacadePartitionCount,
+		Stage1.DeferredNoCoursePairPartitionCount,
+		Stage1.DeferredNoEligibleCorePartitionCount,
+		Stage1.DeferredNoFreeCrossStationPartitionCount,
+		Stage1.DeferredNoStage1BearingPartitionCount,
+		Stage1.DeferredNoFacadeTargetPartitionCount,
+		Stage1.DeferredLengthLimitPartitionCount,
+		Stage1.DeferredNotOutwardPartitionCount,
+		Stage1.DeferredEnvelopeGapPartitionCount,
+		Stage1.DeferredOtherCoreBlockedPartitionCount,
+		Stage1.DeferredProtectedVoidPartitionCount,
+		Stage1.DeferredMemberCollisionPartitionCount,
+		Stage1.DeferredExhaustedCandidatePartitionCount,
 		Stage1.FacadeHeightAnchorBandCount,
 		Stage1.FacadePartitionBindingViolationCount,
 		Stage1.PerimeterCoreCount, Stage1.PerimeterCoreFaceCount,
@@ -3112,7 +3161,13 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.MemberEmissionMilliseconds,
 		Stage1.StaticDAGMilliseconds,
 		Stage1.Stage1TotalMilliseconds,
-		Stage1.Stage1TimeBudgetMilliseconds);
+		Stage1.Stage1TimeBudgetMilliseconds,
+		Stage1.Stage2FacadeEnvelopeMilliseconds,
+		Stage1.Stage2FacadeExtractionMilliseconds,
+		Stage1.Stage2AnchorSearchMilliseconds,
+		Stage1.Stage2MemberEmissionMilliseconds,
+		Stage1.Stage2StaticDAGMilliseconds,
+		Stage1.Stage2TotalMilliseconds);
 	return true;
 }
 

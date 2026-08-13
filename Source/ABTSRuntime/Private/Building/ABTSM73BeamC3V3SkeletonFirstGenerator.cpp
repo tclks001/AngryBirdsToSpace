@@ -8559,6 +8559,9 @@ namespace
 		FPlan& Plan,
 		FString& OutError)
 	{
+		const double Stage2StartSeconds = FPlatformTime::Seconds();
+		double Stage2PhaseStartSeconds = Stage2StartSeconds;
+		double Stage2MemberEmissionMilliseconds = 0.0;
 		TArray<FRoot> Roots;
 		int32 UnreachableVolumeCount = 0;
 		if (!CollectRoots(Silhouette, Roots, UnreachableVolumeCount, OutError))
@@ -8579,6 +8582,18 @@ namespace
 		Plan.Summary.FacadePartitionWithPerimeterCoreCount = 0;
 		Plan.Summary.FacadePartitionWithHeightAnchorCount = 0;
 		Plan.Summary.DeferredFacadePartitionCount = 0;
+		Plan.Summary.DeferredNoCoursePairPartitionCount = 0;
+		Plan.Summary.DeferredNoEligibleCorePartitionCount = 0;
+		Plan.Summary.DeferredNoFreeCrossStationPartitionCount = 0;
+		Plan.Summary.DeferredNoStage1BearingPartitionCount = 0;
+		Plan.Summary.DeferredNoFacadeTargetPartitionCount = 0;
+		Plan.Summary.DeferredLengthLimitPartitionCount = 0;
+		Plan.Summary.DeferredNotOutwardPartitionCount = 0;
+		Plan.Summary.DeferredEnvelopeGapPartitionCount = 0;
+		Plan.Summary.DeferredOtherCoreBlockedPartitionCount = 0;
+		Plan.Summary.DeferredProtectedVoidPartitionCount = 0;
+		Plan.Summary.DeferredMemberCollisionPartitionCount = 0;
+		Plan.Summary.DeferredExhaustedCandidatePartitionCount = 0;
 		Plan.Summary.FacadeHeightAnchorBandCount = 0;
 		Plan.Summary.FacadePartitionBindingViolationCount = 0;
 		Plan.Summary.PerimeterCoreCount = 0;
@@ -8586,6 +8601,13 @@ namespace
 		Plan.Summary.PerimeterFaceExposureSpanCount = 0;
 		Plan.Summary.Stage2PlanHash = 0;
 		Plan.Summary.Stage2InputFacadeEnvelopeHash = 0;
+		Plan.Summary.bStage2TimingEvaluated = false;
+		Plan.Summary.Stage2FacadeEnvelopeMilliseconds = 0.0;
+		Plan.Summary.Stage2FacadeExtractionMilliseconds = 0.0;
+		Plan.Summary.Stage2AnchorSearchMilliseconds = 0.0;
+		Plan.Summary.Stage2MemberEmissionMilliseconds = 0.0;
+		Plan.Summary.Stage2StaticDAGMilliseconds = 0.0;
+		Plan.Summary.Stage2TotalMilliseconds = 0.0;
 		Plan.FacadePartitions.Reset();
 		Plan.FacadeHeightAnchorBands.Reset();
 
@@ -8637,6 +8659,9 @@ namespace
 				return false;
 			}
 		}
+		Plan.Summary.Stage2FacadeEnvelopeMilliseconds =
+			ElapsedMilliseconds(Stage2PhaseStartSeconds);
+		Stage2PhaseStartSeconds = FPlatformTime::Seconds();
 
 		auto CoreCourseBounds = [&Roots](const FCoreCellPlan& Core, const int32 Course)
 		{
@@ -9096,6 +9121,9 @@ namespace
 			}
 		}
 		Plan.Summary.FacadePartitionCount = Plan.FacadePartitions.Num();
+		Plan.Summary.Stage2FacadeExtractionMilliseconds =
+			ElapsedMilliseconds(Stage2PhaseStartSeconds);
+		Stage2PhaseStartSeconds = FPlatformTime::Seconds();
 
 		auto MemberPenetratesPlan = [&Plan](const FPlannedMember& Probe)
 		{
@@ -9153,13 +9181,15 @@ namespace
 			&CouplingEntersOtherCore](
 			const FCoreCellPlan& Core, const int32 Course,
 			const int32 CrossStation, const uint8 FaceMask,
-			TArray<FStage2CourseCandidate>& OutCandidates)
+			TArray<FStage2CourseCandidate>& OutCandidates,
+			uint16& OutRejectMask)
 		{
 			OutCandidates.Reset();
 			if (!Roots.IsValidIndex(Core.ComponentId)
 				|| !Plan.Components.IsValidIndex(Core.ComponentId) || Course <= 0
 				|| Course >= Core.TopCourseIndex)
 			{
+				OutRejectMask |= FacadeDeferredNoEligibleCore;
 				return false;
 			}
 			const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
@@ -9167,6 +9197,7 @@ namespace
 				? EABTSM73BeamAFrameAxis::X : EABTSM73BeamAFrameAxis::Y;
 			if (((Course & 1) == 0) != bXAxis)
 			{
+				OutRejectMask |= FacadeDeferredNoCoursePair;
 				return false;
 			}
 			const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
@@ -9174,6 +9205,7 @@ namespace
 			const TArray<int32>& AlongStations = bXAxis ? Core.XStations : Core.YStations;
 			if (AlongStations.IsEmpty())
 			{
+				OutRejectMask |= FacadeDeferredNoEligibleCore;
 				return false;
 			}
 			const int32 AnchorStation = bPositive ? AlongStations.Last() : AlongStations[0];
@@ -9189,6 +9221,7 @@ namespace
 			if (DirectionSign * (CoreOuterFaceCM - ComponentCenterCM)
 				< -GeometryToleranceCM)
 			{
+				OutRejectMask |= FacadeDeferredNotOutward;
 				return false;
 			}
 			const double Z = Roots[Core.ComponentId].GroundZCM
@@ -9213,6 +9246,7 @@ namespace
 			}
 			if (Parent == INDEX_NONE)
 			{
+				OutRejectMask |= FacadeDeferredNoStage1Bearing;
 				return false;
 			}
 
@@ -9250,6 +9284,10 @@ namespace
 					? B.LocalBounds.Max[AxisIndex] : B.LocalBounds.Min[AxisIndex];
 				return bPositive ? AFace > BFace : AFace < BFace;
 			});
+			if (Targets.IsEmpty())
+			{
+				OutRejectMask |= FacadeDeferredNoFacadeTarget;
+			}
 
 			for (const FResolvedFacadeEnvelopeVolume* Target : Targets)
 			{
@@ -9262,12 +9300,17 @@ namespace
 				const double NetOutwardCM =
 					DirectionSign * (FacadeCM - CoreOuterFaceCM);
 				const double LengthCM = FMath::Abs(FacadeCM - InnerCM);
+				if (LengthCM > 720.0 + GeometryToleranceCM)
+				{
+					OutRejectMask |= FacadeDeferredLengthLimit;
+					continue;
+				}
 				if (LengthCM < BlockUnitsCM - GeometryToleranceCM
-					|| LengthCM > 720.0 + GeometryToleranceCM
 					|| NetOutwardCM < BlockUnitsCM - GeometryToleranceCM
 					|| (bPositive && FacadeCM <= InnerCM + GeometryToleranceCM)
 					|| (!bPositive && FacadeCM >= InnerCM - GeometryToleranceCM))
 				{
+					OutRejectMask |= FacadeDeferredNotOutward;
 					continue;
 				}
 				FStage2CourseCandidate Candidate;
@@ -9295,10 +9338,20 @@ namespace
 				Probe.LocalEnd = Candidate.End;
 				FVector UncoveredPoint;
 				if (!SolidCoveredByBoxes(PlannedMemberBounds(Probe), AllowedBoxes,
-					UncoveredPoint) || MemberPenetratesPlan(Probe)
-					|| CouplingEntersOtherCore(Probe, Core.CoreCellId, Course,
-						CoreOuterFaceCM, bPositive, AxisIndex))
+					UncoveredPoint))
 				{
+					OutRejectMask |= FacadeDeferredEnvelopeGap;
+					continue;
+				}
+				if (MemberPenetratesPlan(Probe))
+				{
+					OutRejectMask |= FacadeDeferredMemberCollision;
+					continue;
+				}
+				if (CouplingEntersOtherCore(Probe, Core.CoreCellId, Course,
+					CoreOuterFaceCM, bPositive, AxisIndex))
+				{
+					OutRejectMask |= FacadeDeferredOtherCoreBlocked;
 					continue;
 				}
 				bool bProtected = false;
@@ -9310,6 +9363,14 @@ namespace
 				{
 					OutCandidates.Add(Candidate);
 				}
+				else
+				{
+					OutRejectMask |= FacadeDeferredProtectedVoid;
+				}
+			}
+			if (OutCandidates.IsEmpty() && OutRejectMask == FacadeDeferredNone)
+			{
+				OutRejectMask |= FacadeDeferredExhaustedCandidates;
 			}
 			return !OutCandidates.IsEmpty();
 		};
@@ -9317,6 +9378,10 @@ namespace
 		int32 AnchorBandId = 0;
 		for (FFacadePartitionPlan& Partition : Plan.FacadePartitions)
 		{
+			uint16 PartitionRejectMask = FacadeDeferredNone;
+			bool bSawCoursePair = false;
+			bool bSawEligibleCore = false;
+			bool bSawFreeCrossStation = false;
 			const uint8 FaceMask = Partition.FaceMask;
 			const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
 			const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
@@ -9355,6 +9420,14 @@ namespace
 					const double DB = FMath::Abs(B - DesiredCourse);
 					return !FMath::IsNearlyEqual(DA, DB) ? DA < DB : A > B;
 				});
+				if (BaseCourseCandidates.IsEmpty())
+				{
+					PartitionRejectMask |= FacadeDeferredNoCoursePair;
+				}
+				else
+				{
+					bSawCoursePair = true;
+				}
 				bool bFound = false;
 				FStage2CourseCandidate Selected[2];
 				int32 SelectedBaseCourse = INDEX_NONE;
@@ -9380,6 +9453,7 @@ namespace
 							{
 								continue;
 							}
+							bSawEligibleCore = true;
 							const TArray<int32>& ExistingCrossStations =
 								bXAxis ? Core.YStations : Core.XStations;
 							const int32 CrossMinimum = bXAxis
@@ -9407,14 +9481,15 @@ namespace
 								const double DB = FMath::Abs(B - Center);
 								return !FMath::IsNearlyEqual(DA, DB) ? DA < DB : A < B;
 							});
+							bSawFreeCrossStation |= !CrossCandidates.IsEmpty();
 							for (const int32 CrossStation : CrossCandidates)
 							{
 								TArray<FStage2CourseCandidate> LowerCandidates;
 								TArray<FStage2CourseCandidate> UpperCandidates;
 								if (!BuildOneCourse(Core, BaseCourse, CrossStation, FaceMask,
-										LowerCandidates)
+										LowerCandidates, PartitionRejectMask)
 									|| !BuildOneCourse(Core, BaseCourse + 2, CrossStation, FaceMask,
-										UpperCandidates))
+										UpperCandidates, PartitionRejectMask))
 								{
 									continue;
 								}
@@ -9469,6 +9544,7 @@ namespace
 					* static_cast<double>(BlockUnitsCM);
 				for (int32 Offset = 0; Offset < 2; ++Offset)
 				{
+					const double EmissionStartSeconds = FPlatformTime::Seconds();
 					const FStage2CourseCandidate& Candidate = Selected[Offset];
 					const int32 MemberIndex = Plan.Members.Num();
 					if (!AddPlannedMember(Plan, EOwnerKind::CoreCell,
@@ -9484,6 +9560,8 @@ namespace
 					{
 						return false;
 					}
+					Stage2MemberEmissionMilliseconds +=
+						ElapsedMilliseconds(EmissionStartSeconds);
 					FPlannedMember& Member = Plan.Members[MemberIndex];
 					Member.ParentStage1MemberIndex = Candidate.ParentMemberIndex;
 					Member.AnchorBandId = AnchorBandId;
@@ -9503,8 +9581,27 @@ namespace
 				SelectedBaseCourses.Add(SelectedBaseCourse);
 				++AnchorBandId;
 			}
+			if (bSawCoursePair && !bSawEligibleCore)
+			{
+				PartitionRejectMask |= FacadeDeferredNoEligibleCore;
+			}
+			else if (!bSawFreeCrossStation)
+			{
+				PartitionRejectMask |= FacadeDeferredNoFreeCrossStation;
+			}
+			const bool bDeferred = Partition.PerimeterCoreCellIds.IsEmpty()
+				&& Partition.AnchorBandIds.IsEmpty();
+			Partition.DeferredReasonMask = bDeferred
+				? (PartitionRejectMask != FacadeDeferredNone
+					? PartitionRejectMask : FacadeDeferredExhaustedCandidates)
+				: FacadeDeferredNone;
 		}
 		Plan.Summary.FacadeHeightAnchorBandCount = Plan.FacadeHeightAnchorBands.Num();
+		Plan.Summary.Stage2MemberEmissionMilliseconds =
+			Stage2MemberEmissionMilliseconds;
+		Plan.Summary.Stage2AnchorSearchMilliseconds = FMath::Max(0.0,
+			ElapsedMilliseconds(Stage2PhaseStartSeconds)
+				- Stage2MemberEmissionMilliseconds);
 
 		TMap<int32, double> BandEndpointCoordinates;
 		TMap<int32, int32> BandMemberCounts;
@@ -9563,9 +9660,33 @@ namespace
 				Partition.PerimeterCoreCellIds.IsEmpty() ? 0 : 1;
 			Plan.Summary.FacadePartitionWithHeightAnchorCount +=
 				Partition.AnchorBandIds.IsEmpty() ? 0 : 1;
-			Plan.Summary.DeferredFacadePartitionCount +=
-				Partition.PerimeterCoreCellIds.IsEmpty()
-					&& Partition.AnchorBandIds.IsEmpty() ? 1 : 0;
+			const bool bDeferred = Partition.PerimeterCoreCellIds.IsEmpty()
+				&& Partition.AnchorBandIds.IsEmpty();
+			Plan.Summary.DeferredFacadePartitionCount += bDeferred ? 1 : 0;
+			Plan.Summary.DeferredNoCoursePairPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredNoCoursePair) ? 1 : 0;
+			Plan.Summary.DeferredNoEligibleCorePartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredNoEligibleCore) ? 1 : 0;
+			Plan.Summary.DeferredNoFreeCrossStationPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredNoFreeCrossStation) ? 1 : 0;
+			Plan.Summary.DeferredNoStage1BearingPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredNoStage1Bearing) ? 1 : 0;
+			Plan.Summary.DeferredNoFacadeTargetPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredNoFacadeTarget) ? 1 : 0;
+			Plan.Summary.DeferredLengthLimitPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredLengthLimit) ? 1 : 0;
+			Plan.Summary.DeferredNotOutwardPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredNotOutward) ? 1 : 0;
+			Plan.Summary.DeferredEnvelopeGapPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredEnvelopeGap) ? 1 : 0;
+			Plan.Summary.DeferredOtherCoreBlockedPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredOtherCoreBlocked) ? 1 : 0;
+			Plan.Summary.DeferredProtectedVoidPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredProtectedVoid) ? 1 : 0;
+			Plan.Summary.DeferredMemberCollisionPartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredMemberCollision) ? 1 : 0;
+			Plan.Summary.DeferredExhaustedCandidatePartitionCount += bDeferred
+				&& (Partition.DeferredReasonMask & FacadeDeferredExhaustedCandidates) ? 1 : 0;
 			for (const int32 BandId : Partition.AnchorBandIds)
 			{
 				const FFacadeHeightAnchorBand* Band =
@@ -9618,10 +9739,13 @@ namespace
 			return false;
 		}
 		Plan.Summary.PenetrationCount = 0;
+		const double Stage2DAGStartSeconds = FPlatformTime::Seconds();
 		if (!ValidateNoPenetration(Plan, OutError))
 		{
 			return false;
 		}
+		Plan.Summary.Stage2StaticDAGMilliseconds =
+			ElapsedMilliseconds(Stage2DAGStartSeconds);
 		TArray<bool> GroundedMembers;
 		if (!ResolveGroundedMemberMask(Plan, GroundedMembers, OutError)
 			|| !ValidatePreflightCaps(Profile.BeamSettings.BeamB.BeamA, Plan, OutError))
@@ -9652,11 +9776,11 @@ namespace
 		for (const FFacadePartitionPlan& Partition : Plan.FacadePartitions)
 		{
 			Stage2Canonical += FString::Printf(
-				TEXT(":F%d=%d,%u,%.3f,%.3f,%.3f,%d,%d"),
+				TEXT(":F%d=%d,%u,%.3f,%.3f,%.3f,%d,%d,R%u"),
 				Partition.PartitionId, Partition.ComponentId, Partition.FaceMask,
 				Partition.FacadeCoordinateCM, Partition.TangentMinimumCM,
 				Partition.TangentMaximumCM, Partition.FirstCourseIndex,
-				Partition.LastCourseIndexExclusive);
+				Partition.LastCourseIndexExclusive, Partition.DeferredReasonMask);
 			for (const int32 BandId : Partition.AnchorBandIds)
 			{
 				Stage2Canonical += FString::Printf(TEXT("/A%d"), BandId);
@@ -9677,6 +9801,9 @@ namespace
 		Plan.Summary.FinalGeometryHash = HashText(FString::Printf(
 			TEXT("Stage1Geometry=%lld:Stage2=%lld"),
 			Stage1GeometryHash, Plan.Summary.Stage2PlanHash));
+		Plan.Summary.Stage2TotalMilliseconds =
+			ElapsedMilliseconds(Stage2StartSeconds);
+		Plan.Summary.bStage2TimingEvaluated = true;
 		return true;
 	}
 

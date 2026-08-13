@@ -2342,3 +2342,17 @@ Stage 1 现在显式发布 `ResolvedFacadeEnvelopeVolumes`，其唯一组成是�
 因此两套权威各司其职：原始 WFC 继续决定“哪些楼体需要支撑”；Resolved Facade Envelope 决定“批准抬高后建筑的最终语义外皮在哪里”。Stage 2 的 component 中心也从该最终外壳联合边界计算，避免非对称抬高后仍按旧 Body 中心把内向构件误判为外向。该修改不生成 Stage 3 外框，不运行 Chaos，也不把 `ClearanceBounds` 填成实体。
 
 静态证据：UE 5.8 Development Editor 增量全链接通过；fresh `Stage2Boundary` 精确 1/1、Stage 2 5×6 精确 30/30，所有叶均满足 raised reservation 与最终外壳一一绑定、Stage 1/2 外壳哈希相等。另以 TipOver E6 730000/750000 专项 1/1 证明抬高 Body 在原裙房顶面之上实际贡献立面 course span，而非只进入摘要；最终 `ABTS.M73DAG.BeamC3V3.Staged` 精确 76/76。日志为 `M7-Stage2-RaisedFacadeEnvelope-Boundary-Final-20260813-132014.log`、`M7-Stage2-RaisedFacadeEnvelope-Matrix-20260813-131342.log`、`M7-Stage2-RaisedFacadeEnvelope-TipOverE6-20260813-132244.log` 与 `M7-Stage2-RaisedFacadeEnvelope-Staged-20260813-132441.log`。Physical/Chaos/可见 PIE 未评估，测试地图继续排除。
+
+### 48.6 Stage 2 冻结边界、deferred 原因账本与独立计时（2026-08-13）
+
+用户已经视觉批准当前立面分区、贴边芯体和高度锚带结果；批准版本先以提交 `f0dc520` 独立保存。Stage 2 的冻结含义是冻结因果接口与当前默认视觉基线，而不是宣称当前锚带密度是最终物理最优值：
+
+1. `ResolvedFacadeEnvelope -> FacadePartition -> PerimeterCore/FacadeHeightAnchorBand -> Stage-1 parent` 的身份和追溯关系冻结；不得在 Stage 3 重新猜测 WFC 外壳或补造无 Stage 1 来源的锚点；
+2. 当前每个立面分区按高度请求 `1～3` 组双层锚带，作为已批准的默认密度基线冻结；未来预算/Chaos 联调可以通过显式密度策略重新求解，但必须重新通过 5×6、预算、静态 DAG 和视觉验收，不得原地改写已发布结果或放宽合同；
+3. deferred 分区不是 Stage 2 的假失败，也不是可以静默忽略的需求。每个既无贴边芯体、又无锚带的分区必须发布非零 `DeferredReasonMask`；已由任一方式服务的分区该掩码必须为零。掩码可同时包含 `NoCoursePair / NoEligibleCore / NoFreeCrossStation / NoStage1Bearing / NoFacadeTarget / LengthLimit / NotOutward / EnvelopeGap / OtherCoreBlocked / ProtectedVoid / MemberCollision / ExhaustedCandidates`，汇总按“含该原因的分区数”计数，因此各原因数之和可以大于 deferred 总数；
+4. Stage 2 单独发布六段计时：最终外壳核验、立面/贴边提取、锚带搜索、成员发射、阶段内静态 DAG、Stage 2 总耗时。它们明确排除 Stage 1，用于进入 Stage 3 后识别真正新增成本，禁止再用包含 Stage 1 的整叶耗时误判 Stage 2；
+5. `Stage2PlanHash` 纳入每个分区的 deferred 原因掩码，使相同几何但失败解释发生变化时仍能被取证。原因账本和计时只增加诊断，不改变已批准的候选排序、构件长度、锚带数量或发射几何。
+
+UE 5.8 `-ForceUnity` Development Editor 全链接成功。最终 fresh 5×6 Stage 2 矩阵精确 30/30。当前复杂叶的 deferred 已能解释为多个真实约束的组合；例如 TipOver E6 有 `72` 个 deferred 分区，原因包括无空闲切向站、长度上限、非外向、外壳断口、其他芯体阻挡和已有成员碰撞，而不再只有一个无法追因的总数。矩阵中 Stage 2 本体为毫秒级：代表性 ColumnBreak E1 约 `0.33 ms`，TipOver E5/E6 约 `61.45/61.50 ms`；主要成本仍在 Stage 1 child/main 联合选择，不在本轮立面锚带。最终证据日志为 `Saved/Logs/M7-Stage2-Closure-Matrix-Final-20260813-143734.log`。
+
+完整 `Staged` 单进程首轮为 70/76，6 项均为进入 Stage 2 前触发既有 Stage 1 10 秒门；随后 fresh Stage 1 5×6 为 27/30，剩余 `ColumnBreak.E6 / DropTrigger.E3 / DropTrigger.E4` 各自在独立 fresh 进程中 1/1 通过，而单进程首轮的另外三项已经在该 27/30 中通过。故所有 76 个叶均有本轮 fresh 成功证据，但不得把长单进程套件记为 76/76；也未为凑绿放宽时间门。长套件与隔离日志分别为 `M7-Stage2-Closure-Staged-20260813-141832.log`、`M7-Stage2-Closure-Stage1Matrix-20260813-142849.log` 和 `M7-Stage2-Closure-Isolated-*.log`。本节仍为 `Physical=NotEvaluated`，不运行 Chaos 或可见 PIE；用户修改的测试地图继续排除。

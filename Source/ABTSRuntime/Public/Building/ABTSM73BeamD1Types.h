@@ -623,6 +623,43 @@ struct FABTSM73BeamD1Summary
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
 	int32 SkeletonFirstDeferredFacadePartitionCount = 0;
 
+	/** Deferred partitions may contribute to more than one reason count. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredNoCoursePairPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredNoEligibleCorePartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredNoFreeCrossStationPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredNoStage1BearingPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredNoFacadeTargetPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredLengthLimitPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredNotOutwardPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredEnvelopeGapPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredOtherCoreBlockedPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredProtectedVoidPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredMemberCollisionPartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredExhaustedCandidatePartitionCount = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
 	int32 SkeletonFirstFacadeHeightAnchorBandCount = 0;
 
@@ -642,4 +679,25 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
 	int64 SkeletonFirstStage2PlanHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	bool bSkeletonFirstStage2TimingEvaluated = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	double SkeletonFirstStage2FacadeEnvelopeMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	double SkeletonFirstStage2FacadeExtractionMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	double SkeletonFirstStage2AnchorSearchMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	double SkeletonFirstStage2MemberEmissionMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	double SkeletonFirstStage2StaticDAGMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
+	double SkeletonFirstStage2TotalMilliseconds = 0.0;
 };
