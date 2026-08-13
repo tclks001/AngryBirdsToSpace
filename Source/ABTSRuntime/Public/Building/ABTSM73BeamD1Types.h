@@ -31,7 +31,7 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 	CoreAndShared UMETA(DisplayName = "Stage 1 - Core + Shared Courses"),
 	CouplingCourses UMETA(DisplayName = "Stage 2 - Core / Facade Coupling Courses"),
 	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame"),
-	FloorInfillRoof UMETA(DisplayName = "Stage 4 - Floor / Infill / Roof (Not Implemented)"),
+	FloorInfillRoof UMETA(DisplayName = "Stage 4A - TopSurface Intent (No New Bricks)"),
 	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)")
 };
 
@@ -68,6 +68,14 @@ enum class EABTSM73BeamC3Stage3DiagnosticLayer : uint8
 	GroundToFirstFrameColumns UMETA(DisplayName = "3 - Ground / First-Frame Columns"),
 	ExteriorColumnsOnly UMETA(DisplayName = "4 - Inter-Frame Exterior Columns"),
 	Stage123Overview UMETA(DisplayName = "5 - Stage 1 / 2 / 3 Overview")
+};
+
+/** Stage-4 first-stop evidence. Later Stage-4 geometry layers are added only
+ * after this ownership ledger is visually accepted. */
+UENUM(BlueprintType)
+enum class EABTSM73BeamC3Stage4DiagnosticLayer : uint8
+{
+	TopSurfaceIntent UMETA(DisplayName = "1 - GroundSill / TopSurface Intent")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -724,4 +732,31 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2|Timing")
 	double SkeletonFirstStage2TotalMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4TopSurfaceIntentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4GroundSillIntentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4ResolvedTopSurfaceIntentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4ExposedSetbackTopIntentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4DirectStackSeatIntentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4UnresolvedIntentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4IntentBindingViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int64 SkeletonFirstStage4IntentHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
+	double SkeletonFirstStage4IntentMilliseconds = 0.0;
 };

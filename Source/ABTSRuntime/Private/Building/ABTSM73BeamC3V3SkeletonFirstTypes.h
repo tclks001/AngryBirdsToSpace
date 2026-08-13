@@ -804,6 +804,51 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> SegmentMemberIndices;
 	};
 
+	/** Stage-4 downward ownership for one immutable Stage-3 exterior frame. */
+	enum class EFacadeDownwardIntent : uint8
+	{
+		GroundSill,
+		TopSurface,
+		Unresolved
+	};
+
+	/** Semantic origin of a resolved TopSurface. */
+	enum class ETopSurfaceAuthorityKind : uint8
+	{
+		None,
+		ExposedSetbackTop,
+		DirectStackSeat
+	};
+
+	/** Read-only first-stop ledger for Stage 4. It classifies where an exterior
+	 * frame must ultimately close without emitting floor, infill, or roof members. */
+	struct FTopSurfaceIntentPlan
+	{
+		int32 IntentId = INDEX_NONE;
+		int32 ExteriorFrameId = INDEX_NONE;
+		int32 FacadePartitionId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		uint8 FaceMask = 0;
+		double FacadeCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+		int32 ExteriorFrameCourseIndex = INDEX_NONE;
+		int32 FacadeFirstCourseIndex = INDEX_NONE;
+		EFacadeDownwardIntent Intent = EFacadeDownwardIntent::Unresolved;
+		ETopSurfaceAuthorityKind TopSurfaceAuthority =
+			ETopSurfaceAuthorityKind::None;
+		/** Resolved-facade envelope identity for TopSurface; INDEX_NONE otherwise. */
+		int32 TargetEnvelopeVolumeId = INDEX_NONE;
+		int32 TargetSourceVolumeId = INDEX_NONE;
+		int32 TargetSurfaceCourseIndex = INDEX_NONE;
+		/** The exposed part of the source top which actually supports this frame.
+		 * It is clipped against every higher envelope volume in the same component. */
+		double TargetSupportTangentMinimumCM = 0.0;
+		double TargetSupportTangentMaximumCM = 0.0;
+		FBox TargetSurfaceBounds = FBox(EForceInit::ForceInit);
+		FString Reason;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -1112,6 +1157,16 @@ namespace ABTSM73BeamC3V3
 		double Stage3ColumnMilliseconds = 0.0;
 		double Stage3StaticDAGMilliseconds = 0.0;
 		double Stage3TotalMilliseconds = 0.0;
+		int64 Stage4InputStage3Hash = 0;
+		int32 Stage4TopSurfaceIntentCount = 0;
+		int32 Stage4GroundSillIntentCount = 0;
+		int32 Stage4ResolvedTopSurfaceIntentCount = 0;
+		int32 Stage4ExposedSetbackTopIntentCount = 0;
+		int32 Stage4DirectStackSeatIntentCount = 0;
+		int32 Stage4UnresolvedIntentCount = 0;
+		int32 Stage4IntentBindingViolationCount = 0;
+		int64 Stage4IntentHash = 0;
+		double Stage4IntentMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;
@@ -1202,6 +1257,7 @@ namespace ABTSM73BeamC3V3
 		TArray<FCommonExteriorFramePlan> CommonExteriorFrames;
 		TArray<FGroundSillSegmentPlan> GroundSillSegments;
 		TArray<FExteriorColumnPlan> ExteriorColumns;
+		TArray<FTopSurfaceIntentPlan> TopSurfaceIntents;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

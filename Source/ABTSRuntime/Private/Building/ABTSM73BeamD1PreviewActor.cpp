@@ -192,7 +192,8 @@ namespace ABTSM73BeamD1Preview
 		Stage3ExteriorColumnsVisibility = 1 << 19,
 		Stage3GroundSillVisibility = 1 << 20,
 		Stage3GroundExteriorColumnsVisibility = 1 << 21,
-		Stage3OverviewVisibility = 1 << 22
+		Stage3OverviewVisibility = 1 << 22,
+		Stage4TopSurfaceIntentVisibility = 1 << 23
 	};
 
 	enum class EStage3OverviewBucket : uint8
@@ -290,6 +291,18 @@ namespace ABTSM73BeamD1Preview
 			return Stage3ExteriorColumnsVisibility;
 		case EABTSM73BeamC3Stage3DiagnosticLayer::Stage123Overview:
 			return Stage3OverviewVisibility;
+		default:
+			return 0;
+		}
+	}
+
+	uint32 DiagnosticVisibilityMask(
+		const EABTSM73BeamC3Stage4DiagnosticLayer Layer)
+	{
+		switch (Layer)
+		{
+		case EABTSM73BeamC3Stage4DiagnosticLayer::TopSurfaceIntent:
+			return Stage4TopSurfaceIntentVisibility;
 		default:
 			return 0;
 		}
@@ -403,6 +416,8 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage3DiagnosticLayer::GroundToFirstFrameColumns);
 	const uint32 Stage3OverviewMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage3DiagnosticLayer::Stage123Overview);
+	const uint32 Stage4IntentMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage4DiagnosticLayer::TopSurfaceIntent);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint32>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -450,6 +465,10 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		static_cast<uint32>(Stage3GroundExteriorColumnsVisibility));
 	TestEqual(TEXT("Stage-3 overview layer has one independent visibility bit"),
 		Stage3OverviewMask, static_cast<uint32>(Stage3OverviewVisibility));
+	TestEqual(TEXT("Stage-4 TopSurface intent has one independent visibility bit"),
+		Stage4IntentMask, static_cast<uint32>(Stage4TopSurfaceIntentVisibility));
+	TestEqual(TEXT("Stage-4 intent is disjoint from the Stage-3 overview"),
+		Stage4IntentMask & Stage3OverviewMask, static_cast<uint32>(0));
 	TestEqual(TEXT("Stage-3 frame and column layers are disjoint"),
 		Stage3FrameMask & Stage3ColumnMask, static_cast<uint32>(0));
 	TestEqual(TEXT("Stage-3 sill and ground-column layers are disjoint"),
@@ -825,7 +844,10 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					: GenerationStopStage
 						== EABTSM73BeamC3GenerationStage::CommonExteriorFrame
 							? static_cast<int32>(Stage3DiagnosticLayer)
-							: static_cast<int32>(Stage1DiagnosticLayer), *Error);
+							: GenerationStopStage
+								== EABTSM73BeamC3GenerationStage::FloorInfillRoof
+									? static_cast<int32>(Stage4DiagnosticLayer)
+									: static_cast<int32>(Stage1DiagnosticLayer), *Error);
 			return;
 		}
 		LastSummary = StageResult.Summary;
@@ -842,7 +864,11 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			== EABTSM73BeamC3GenerationStage::CouplingCourses;
 		const bool bStage3 = GenerationStopStage
 			== EABTSM73BeamC3GenerationStage::CommonExteriorFrame;
-		const uint32 VisibilityMask = bStage3
+		const bool bStage4 = GenerationStopStage
+			== EABTSM73BeamC3GenerationStage::FloorInfillRoof;
+		const uint32 VisibilityMask = bStage4
+			? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage4DiagnosticLayer)
+			: bStage3
 			? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage3DiagnosticLayer)
 			: bStage2
 				? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage2DiagnosticLayer)
@@ -1529,7 +1555,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			| ABTSM73BeamD1Preview::Stage3ExteriorColumnsVisibility
 			| ABTSM73BeamD1Preview::Stage3GroundSillVisibility
 			| ABTSM73BeamD1Preview::Stage3GroundExteriorColumnsVisibility
-			| ABTSM73BeamD1Preview::Stage3OverviewVisibility)) != 0)
+			| ABTSM73BeamD1Preview::Stage3OverviewVisibility
+			| ABTSM73BeamD1Preview::Stage4TopSurfaceIntentVisibility)) != 0)
 		{
 			const bool bXOnly =
 				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreXVisibility) != 0;
@@ -1556,7 +1583,70 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					& ABTSM73BeamD1Preview::Stage3GroundExteriorColumnsVisibility) != 0;
 			const bool bStage3Overview =
 				(VisibilityMask & ABTSM73BeamD1Preview::Stage3OverviewVisibility) != 0;
+			const bool bStage4Intent =
+				(VisibilityMask
+					& ABTSM73BeamD1Preview::Stage4TopSurfaceIntentVisibility) != 0;
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
+			if (bStage4Intent)
+			{
+				for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
+					: Plan.TopSurfaceIntents)
+				{
+					const bool bNormalX = Intent.FaceMask == ABTSM73BeamC3V3::NegativeX
+						|| Intent.FaceMask == ABTSM73BeamC3V3::PositiveX;
+					const int32 NormalAxis = bNormalX ? 0 : 1;
+					const int32 TangentAxis = bNormalX ? 1 : 0;
+					const double GroundZ = Plan.Components.IsValidIndex(Intent.ComponentId)
+						? Plan.Components[Intent.ComponentId].GroundPlaneZCM : 0.0;
+					const double FrameZ = GroundZ
+						+ (Intent.ExteriorFrameCourseIndex + 0.5) * 36.0;
+					FVector From = FVector::ZeroVector;
+					From[NormalAxis] = Intent.FacadeCoordinateCM;
+					From[TangentAxis] = (Intent.TangentMinimumCM
+						+ Intent.TangentMaximumCM) * 0.5;
+					From.Z = FrameZ;
+					FVector To = From;
+					UHierarchicalInstancedStaticMeshComponent* TargetPreview = nullptr;
+					if (Intent.Intent
+						== ABTSM73BeamC3V3::EFacadeDownwardIntent::GroundSill)
+					{
+						To.Z = GroundZ;
+						TargetPreview = WoodPreview.Get();
+					}
+					else if (Intent.Intent
+						== ABTSM73BeamC3V3::EFacadeDownwardIntent::TopSurface)
+					{
+						To.Z = GroundZ + Intent.TargetSurfaceCourseIndex * 36.0;
+						const bool bSetback = Intent.TopSurfaceAuthority
+							== ABTSM73BeamC3V3::ETopSurfaceAuthorityKind::ExposedSetbackTop;
+						TargetPreview = bSetback ? IronPreview.Get() : GlassPreview.Get();
+						FBox Surface = Intent.TargetSurfaceBounds;
+						Surface.Min[TangentAxis] = Intent.TargetSupportTangentMinimumCM;
+						Surface.Max[TangentAxis] = Intent.TargetSupportTangentMaximumCM;
+						Surface.Min[NormalAxis] = FMath::Max(Surface.Min[NormalAxis],
+							From[NormalAxis] - 18.0);
+						Surface.Max[NormalAxis] = FMath::Min(Surface.Max[NormalAxis],
+							From[NormalAxis] + 18.0);
+						Surface.Min.Z = To.Z - 4.0;
+						Surface.Max.Z = To.Z + 4.0;
+						ABTSM73BeamD1Preview::AddBoxInstance(
+							bSetback ? GlassPreview.Get() : IronPreview.Get(), Surface);
+					}
+					else
+					{
+						To.Z = FMath::Max(GroundZ, FrameZ - 72.0);
+						TargetPreview = StonePreview.Get();
+					}
+					ABTSM73BeamD1Preview::AddSegmentInstance(
+						TargetPreview, From, To, 14.0);
+				}
+				for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+					WoodPreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+					StonePreview.Get()})
+				{
+					Preview->SetVisibility(Preview->GetInstanceCount() > 0, true);
+				}
+			}
 			for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
 			{
 				const ABTSM73BeamC3V3::FPlannedMember& Member = Plan.Members[MemberIndex];
@@ -1590,7 +1680,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 							&& Candidate.ParentStage1MemberIndex == MemberIndex;
 					}
 				}
-				if ((bExteriorFrames && Member.SkeletonKind
+				if (bStage4Intent
+					|| (bExteriorFrames && Member.SkeletonKind
 						!= ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeCourse
 						&& !bExteriorFrameLedgerMember)
 					|| (bExteriorColumns && Member.SkeletonKind
@@ -1808,7 +1899,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					SharedPairIntentPreview->GetInstanceCount() > 0, true);
 			}
 		}
-		const bool bShowsMembers = bStage2 || bStage3
+		const bool bShowsMembers = bStage2 || bStage3 || bStage4
 			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
 			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
 			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
@@ -1844,7 +1935,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" ExteriorFrames=%d ExteriorFramesEmitted=%d ExteriorFramesReused=%d AnchorWithoutFrame=%d FrameWithoutDownward=%d CrossPartitionColumns=%d GroundSillLoops=%d GroundSillSegments=%d GroundSillEmitted=%d GroundSillReused=%d GroundSillConflictOmissions=%d ExteriorColumns=%d GroundExteriorColumns=%d ExteriorColumnSegments=%d GroundExteriorColumnSegments=%d GroundColumnConflictOmissions=%d Stage3ParentViolations=%d Stage3ClampViolations=%d Stage3ColumnFrameViolations=%d Stage3FacadeFitViolations=%d Stage3Hash=%lld")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
-			bStage3 ? static_cast<int32>(Stage3DiagnosticLayer)
+			bStage4 ? static_cast<int32>(Stage4DiagnosticLayer)
+				: bStage3 ? static_cast<int32>(Stage3DiagnosticLayer)
 				: bStage2 ? static_cast<int32>(Stage2DiagnosticLayer)
 					: static_cast<int32>(EffectiveLayer),
 			bHideSemanticSupportDemandVolumes ? 1 : 0,

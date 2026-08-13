@@ -2578,7 +2578,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	if (StopStage != EABTSM73BeamC3GenerationStage::SemanticEnvelope
 		&& StopStage != EABTSM73BeamC3GenerationStage::CoreAndShared
 		&& StopStage != EABTSM73BeamC3GenerationStage::CouplingCourses
-		&& StopStage != EABTSM73BeamC3GenerationStage::CommonExteriorFrame)
+		&& StopStage != EABTSM73BeamC3GenerationStage::CommonExteriorFrame
+		&& StopStage != EABTSM73BeamC3GenerationStage::FloorInfillRoof)
 	{
 		OutError = FString::Printf(
 			TEXT("BeamC3StageNotImplemented:Stage=%d"),
@@ -2769,7 +2770,10 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 
 	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
 	const bool bSkeletonGenerated =
-		StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
+		StopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof
+			? SkeletonGenerator.GenerateStage4TopSurfaceIntent(SelectedProfile,
+				OutResult.Silhouette, OutResult.Skeleton, OutError)
+			: StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
 			? SkeletonGenerator.GenerateStage3(SelectedProfile,
 				OutResult.Silhouette, OutResult.Skeleton, OutError)
 			: StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses
@@ -2780,7 +2784,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	if (!bSkeletonGenerated)
 	{
 		OutError = FString::Printf(TEXT("BeamC3Stage%d:%s"),
-			StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame ? 3
+			StopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof ? 4
+				: StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame ? 3
 				: StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses ? 2 : 1,
 			*OutError);
 		return false;
@@ -2791,7 +2796,9 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		== EABTSM73BeamC3GenerationStage::CouplingCourses;
 	const bool bStage3 = StopStage
 		== EABTSM73BeamC3GenerationStage::CommonExteriorFrame;
-	if (!bStage2 && !bStage3)
+	const bool bStage4 = StopStage
+		== EABTSM73BeamC3GenerationStage::FloorInfillRoof;
+	if (!bStage2 && !bStage3 && !bStage4)
 	{
 		const double StaticDAGStartSeconds = FPlatformTime::Seconds();
 		const bool bStaticDAGGenerated = FABTSM73BeamCGenerator().Generate(
@@ -2808,7 +2815,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	}
 	else
 	{
-		// Stages 2/3 stop before floor/infill/roof. Their generators already rebuild
+		// Stages 2/3 and the Stage-4 intent stop before complete floor/infill/roof.
+		// Their generators already rebuild
 		// real contacts and prove the stage-local ground-reachable seat DAG; complete
 		// Beam-C resultants remain deferred until the complete static building.
 		Stage1.StaticDAGMilliseconds = 0.0;
@@ -3035,6 +3043,23 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.Stage2StaticDAGMilliseconds;
 	Summary.SkeletonFirstStage2TotalMilliseconds =
 		Stage1.Stage2TotalMilliseconds;
+	Summary.SkeletonFirstStage4TopSurfaceIntentCount =
+		Stage1.Stage4TopSurfaceIntentCount;
+	Summary.SkeletonFirstStage4GroundSillIntentCount =
+		Stage1.Stage4GroundSillIntentCount;
+	Summary.SkeletonFirstStage4ResolvedTopSurfaceIntentCount =
+		Stage1.Stage4ResolvedTopSurfaceIntentCount;
+	Summary.SkeletonFirstStage4ExposedSetbackTopIntentCount =
+		Stage1.Stage4ExposedSetbackTopIntentCount;
+	Summary.SkeletonFirstStage4DirectStackSeatIntentCount =
+		Stage1.Stage4DirectStackSeatIntentCount;
+	Summary.SkeletonFirstStage4UnresolvedIntentCount =
+		Stage1.Stage4UnresolvedIntentCount;
+	Summary.SkeletonFirstStage4IntentBindingViolationCount =
+		Stage1.Stage4IntentBindingViolationCount;
+	Summary.SkeletonFirstStage4IntentHash = Stage1.Stage4IntentHash;
+	Summary.SkeletonFirstStage4IntentMilliseconds =
+		Stage1.Stage4IntentMilliseconds;
 	Summary.StructuralClosurePassCount =
 		OutResult.StaticDAG.Summary.StructuralClosurePassCount;
 	Summary.AddedStructuralSupportPostCount =

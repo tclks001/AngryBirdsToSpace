@@ -2368,7 +2368,16 @@ UE 5.8 `-ForceUnity` Development Editor 全链接成功。最终 fresh 5×6 Stag
 
 首个停点只建立 `TopSurface` 归属账本，不发射 Floor/Infill/Roof member。它必须逐个审计 Stage 3 的
 facade/frame 向下路径：仍处于最终语义外壳真实外周者绑定 `GroundSill`；被更低或相邻 WFC Body 顶面
-承接的内侧、退台或局部回退立面绑定唯一 `TopSurface`。两类归属互斥且总数严格等于待审计对象数。
+承接的内侧、退台或局部回退立面绑定唯一 `TopSurface`。`TopSurface` 不是“裙房顶面”的同义词，而是
+最终 WFC/抬高外壳体积并集里能为该 frame 提供水平承托的任意真实面，分为：
+
+1. `ExposedSetbackTop`：裙房、塔楼肩部、局部回退或连续收缩形成的外露水平平台；必须扣除被更高体块
+   从上方覆盖的区间，并保留至少 36 cm 的真实切向承托；
+2. `DirectStackSeat`：上层立面与下层体块齐边、没有可见肩部时，位于 facade partition 根部的真实
+   Body-to-Body 水平叠置接缝。它可以被上层体块覆盖，但仍必须绑定实际来源 Volume，不能虚构楼面。
+
+选择顺序固定为：先取 frame 下方最近的 `ExposedSetbackTop`；不存在合法外露肩部时，才允许在分区根部
+取 `DirectStackSeat`。两类归属互斥且总数严格等于待审计对象数。
 每条记录至少冻结 facade/frame 身份、component、方向、切向区间、最低 course、目标 surface 的来源
 Volume、XY bounds、量化顶面 course、选择原因和稳定 signature。没有合法目标不得回退到最近 AABB、
 制造隐形楼面或保留临时长接地柱；必须以明确拒绝原因 fail closed。
@@ -2377,3 +2386,10 @@ Volume、XY bounds、量化顶面 course、选择原因和稳定 signature。没
 目标面与来源 frame，不混入 WFC 实体、Floor 或 Roof。自动化至少证明六栋账本完整互斥、目标面来自
 `ResolvedFacadeEnvelope`、顶面 course 与 XY 区间真实覆盖、输入 Stage3 Hash 未变、Stage4IntentHash
 确定且没有 Stage 4 member。该停点通过后停下，由用户视觉检查内侧/退台归属，再开始顶面边框。
+
+首版账本于 2026-08-13 落地为三态审计：`GroundSill`、已解析 `TopSurface`、`Unresolved`。第三态不是
+可交付归属，也不得参与后续发砖；它只用于暴露缺失目标面。首版把 SurfaceZ 错绑到整个 facade partition
+的 `FirstCourse`，E6 因此留下 8 条高层回退未解析。修复后改为上述体积并集水平面语义，并把自动化门
+收紧为演示六栋 `Unresolved=0`。最终 E6 为 `Ground=10 / Top=24`，其中
+`ExposedSetbackTop=19 / DirectStackSeat=5`；E1～E5 同样零未解析。当前“TopSurface 归属闭合”已通过
+静态合同，等待用户视觉批准后才开始发射顶面/楼面边框。

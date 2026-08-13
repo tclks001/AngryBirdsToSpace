@@ -22546,6 +22546,362 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage3(
 	return true;
 }
 
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
+	const FABTSM73BeamD0ResolvedProfile& Profile,
+	const FABTSM73DAG5BV2GenerationResult& Silhouette,
+	ABTSM73BeamC3V3::FGenerationResult& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamC3V3;
+	OutResult = FGenerationResult();
+	OutError.Reset();
+	if (!GenerateStage3(Profile, Silhouette, OutResult, OutError))
+	{
+		return false;
+	}
+	FPlan& Plan = OutResult.Plan;
+	const double StartSeconds = FPlatformTime::Seconds();
+	const int32 Stage3MemberCount = Plan.Members.Num();
+	const int64 Stage3Hash = Plan.Summary.Stage3PlanHash;
+	Plan.TopSurfaceIntents.Reset();
+	Plan.Summary.Stage4InputStage3Hash = Stage3Hash;
+	Plan.Summary.Stage4TopSurfaceIntentCount = 0;
+	Plan.Summary.Stage4GroundSillIntentCount = 0;
+	Plan.Summary.Stage4ResolvedTopSurfaceIntentCount = 0;
+	Plan.Summary.Stage4ExposedSetbackTopIntentCount = 0;
+	Plan.Summary.Stage4DirectStackSeatIntentCount = 0;
+	Plan.Summary.Stage4UnresolvedIntentCount = 0;
+	Plan.Summary.Stage4IntentBindingViolationCount = 0;
+	Plan.Summary.Stage4IntentHash = 0;
+
+	auto FindPartition = [&Plan](const int32 PartitionId)
+	{
+		return Plan.FacadePartitions.FindByPredicate(
+			[PartitionId](const FFacadePartitionPlan& Candidate)
+			{
+				return Candidate.PartitionId == PartitionId;
+			});
+	};
+	auto PositiveOverlap = [](const double AMinimum, const double AMaximum,
+		const double BMinimum, const double BMaximum)
+	{
+		return FMath::Min(AMaximum, BMaximum)
+			- FMath::Max(AMinimum, BMinimum) > GeometryToleranceCM;
+	};
+	for (const FCommonExteriorFramePlan& Frame : Plan.CommonExteriorFrames)
+	{
+		FTopSurfaceIntentPlan& Intent = Plan.TopSurfaceIntents.AddDefaulted_GetRef();
+		Intent.IntentId = Plan.TopSurfaceIntents.Num() - 1;
+		Intent.ExteriorFrameId = Frame.ExteriorFrameId;
+		Intent.FacadePartitionId = Frame.FacadePartitionId;
+		Intent.ComponentId = Frame.ComponentId;
+		Intent.FaceMask = Frame.FaceMask;
+		Intent.FacadeCoordinateCM = Frame.FacadeCoordinateCM;
+		Intent.TangentMinimumCM = Frame.TangentMinimumCM;
+		Intent.TangentMaximumCM = Frame.TangentMaximumCM;
+		Intent.ExteriorFrameCourseIndex = Frame.CourseIndex;
+		const FFacadePartitionPlan* Partition = FindPartition(Frame.FacadePartitionId);
+		if (Partition == nullptr)
+		{
+			Intent.Reason = TEXT("MissingFacadePartition");
+			++Plan.Summary.Stage4UnresolvedIntentCount;
+			++Plan.Summary.Stage4IntentBindingViolationCount;
+			continue;
+		}
+		Intent.FacadeFirstCourseIndex = Partition->FirstCourseIndex;
+		const bool bGroundContinuous = Partition->FirstCourseIndex == 0
+			|| Plan.FacadePartitions.ContainsByPredicate(
+				[&Frame, Partition, &PositiveOverlap](const FFacadePartitionPlan& Candidate)
+				{
+					return Candidate.ComponentId == Frame.ComponentId
+						&& Candidate.FaceMask == Frame.FaceMask
+						&& Candidate.FirstCourseIndex == 0
+						&& Candidate.LastCourseIndexExclusive
+							>= Partition->FirstCourseIndex
+						&& FMath::IsNearlyEqual(Candidate.FacadeCoordinateCM,
+							Frame.FacadeCoordinateCM, GeometryToleranceCM)
+						&& PositiveOverlap(Candidate.TangentMinimumCM,
+							Candidate.TangentMaximumCM, Frame.TangentMinimumCM,
+							Frame.TangentMaximumCM);
+				});
+		if (bGroundContinuous)
+		{
+			Intent.Intent = EFacadeDownwardIntent::GroundSill;
+			Intent.Reason = TEXT("FacadeContinuouslyReachesGroundContour");
+			++Plan.Summary.Stage4GroundSillIntentCount;
+			continue;
+		}
+
+		const bool bNormalX = Frame.FaceMask == NegativeX || Frame.FaceMask == PositiveX;
+		const bool bPositive = Frame.FaceMask == PositiveX || Frame.FaceMask == PositiveY;
+		const int32 NormalAxis = bNormalX ? 0 : 1;
+		const int32 TangentAxis = bNormalX ? 1 : 0;
+		const double GroundZ = Plan.Components.IsValidIndex(Frame.ComponentId)
+			? Plan.Components[Frame.ComponentId].GroundPlaneZCM : 0.0;
+		const double FrameBottomZ = GroundZ + Frame.CourseIndex * BlockUnitsCM;
+		// A setback shoulder lies immediately outside the upper facade. Sampling
+		// the inward half-block would remain inside the upper body and would
+		// incorrectly erase the very top surface that must receive the facade.
+		const double SupportNormal = Frame.FacadeCoordinateCM
+			+ (bPositive ? 1.0 : -1.0) * BlockUnitsCM * 0.5;
+		const FResolvedFacadeEnvelopeVolume* BestSurface = nullptr;
+		double BestSurfaceZ = -DBL_MAX;
+		double BestSupportMinimum = 0.0;
+		double BestSupportMaximum = 0.0;
+		const TCHAR* BestSurfaceReason = nullptr;
+		ETopSurfaceAuthorityKind BestAuthority = ETopSurfaceAuthorityKind::None;
+		for (const FResolvedFacadeEnvelopeVolume& Volume
+			: Plan.ResolvedFacadeEnvelopeVolumes)
+		{
+			const double SurfaceZ = Volume.LocalBounds.Max.Z;
+			if (Volume.ComponentId != Frame.ComponentId
+				|| SurfaceZ <= GroundZ + GeometryToleranceCM
+				|| SurfaceZ > FrameBottomZ + GeometryToleranceCM
+				|| SupportNormal < Volume.LocalBounds.Min[NormalAxis]
+					- GeometryToleranceCM
+				|| SupportNormal > Volume.LocalBounds.Max[NormalAxis]
+					+ GeometryToleranceCM
+				|| !PositiveOverlap(Volume.LocalBounds.Min[TangentAxis],
+					Volume.LocalBounds.Max[TangentAxis], Frame.TangentMinimumCM,
+					Frame.TangentMaximumCM))
+			{
+				continue;
+			}
+
+			// A semantic TopSurface is any horizontal part of the final envelope
+			// union which remains exposed from above.  This deliberately includes
+			// podiums, tower shoulders and every later WFC setback; it is not tied
+			// to FacadePartition.FirstCourseIndex.
+			TArray<FVector2D> ExposedRuns;
+			ExposedRuns.Emplace(
+				FMath::Max(Volume.LocalBounds.Min[TangentAxis],
+					Frame.TangentMinimumCM),
+				FMath::Min(Volume.LocalBounds.Max[TangentAxis],
+					Frame.TangentMaximumCM));
+			for (const FResolvedFacadeEnvelopeVolume& Cover
+				: Plan.ResolvedFacadeEnvelopeVolumes)
+			{
+				if (Cover.EnvelopeVolumeId == Volume.EnvelopeVolumeId
+					|| Cover.ComponentId != Frame.ComponentId
+					|| Cover.LocalBounds.Max.Z <= SurfaceZ + GeometryToleranceCM
+					|| Cover.LocalBounds.Min.Z > SurfaceZ + GeometryToleranceCM
+					|| SupportNormal < Cover.LocalBounds.Min[NormalAxis]
+						- GeometryToleranceCM
+					|| SupportNormal > Cover.LocalBounds.Max[NormalAxis]
+						+ GeometryToleranceCM)
+				{
+					continue;
+				}
+				const double CoverMinimum = Cover.LocalBounds.Min[TangentAxis];
+				const double CoverMaximum = Cover.LocalBounds.Max[TangentAxis];
+				TArray<FVector2D> RemainingRuns;
+				for (const FVector2D& Run : ExposedRuns)
+				{
+					if (!PositiveOverlap(Run.X, Run.Y, CoverMinimum, CoverMaximum))
+					{
+						RemainingRuns.Add(Run);
+						continue;
+					}
+					if (CoverMinimum > Run.X + GeometryToleranceCM)
+					{
+						RemainingRuns.Emplace(Run.X,
+							FMath::Min(Run.Y, CoverMinimum));
+					}
+					if (CoverMaximum < Run.Y - GeometryToleranceCM)
+					{
+						RemainingRuns.Emplace(FMath::Max(Run.X, CoverMaximum), Run.Y);
+					}
+				}
+				ExposedRuns = MoveTemp(RemainingRuns);
+				if (ExposedRuns.IsEmpty())
+				{
+					break;
+				}
+			}
+			for (const FVector2D& Run : ExposedRuns)
+			{
+				const double SupportLength = Run.Y - Run.X;
+				if (SupportLength < BlockUnitsCM - GeometryToleranceCM)
+				{
+					continue;
+				}
+				const double BestLength = BestSupportMaximum - BestSupportMinimum;
+				if (BestSurface == nullptr
+					|| SurfaceZ > BestSurfaceZ + GeometryToleranceCM
+					|| (FMath::IsNearlyEqual(SurfaceZ, BestSurfaceZ,
+						GeometryToleranceCM)
+						&& (SupportLength > BestLength + GeometryToleranceCM
+							|| (FMath::IsNearlyEqual(SupportLength, BestLength,
+								GeometryToleranceCM)
+								&& Volume.EnvelopeVolumeId
+									< BestSurface->EnvelopeVolumeId))))
+				{
+					BestSurface = &Volume;
+					BestSurfaceZ = SurfaceZ;
+					BestSupportMinimum = Run.X;
+					BestSupportMaximum = Run.Y;
+					BestSurfaceReason = TEXT("NearestExposedSetbackTopBelowFrame");
+					BestAuthority = ETopSurfaceAuthorityKind::ExposedSetbackTop;
+				}
+			}
+		}
+		if (BestSurface == nullptr)
+		{
+			// A facade may rise flush with one side of its lower body and therefore
+			// have no shoulder on that face.  Its partition root still owns a real
+			// horizontal WFC stacking seat.  This seam is intentionally allowed to
+			// be covered by the upper body; unlike a setback top it is an interface,
+			// not an externally visible terrace.
+			const double StackSeatZ = GroundZ
+				+ Partition->FirstCourseIndex * BlockUnitsCM;
+			const double InwardNormal = Frame.FacadeCoordinateCM
+				+ (bPositive ? -1.0 : 1.0) * BlockUnitsCM * 0.5;
+			for (const FResolvedFacadeEnvelopeVolume& Volume
+				: Plan.ResolvedFacadeEnvelopeVolumes)
+			{
+				const double SupportMinimum = FMath::Max(
+					Volume.LocalBounds.Min[TangentAxis], Frame.TangentMinimumCM);
+				const double SupportMaximum = FMath::Min(
+					Volume.LocalBounds.Max[TangentAxis], Frame.TangentMaximumCM);
+				if (Volume.ComponentId != Frame.ComponentId
+					|| !FMath::IsNearlyEqual(Volume.LocalBounds.Max.Z,
+						StackSeatZ, GeometryToleranceCM)
+					|| InwardNormal < Volume.LocalBounds.Min[NormalAxis]
+						- GeometryToleranceCM
+					|| InwardNormal > Volume.LocalBounds.Max[NormalAxis]
+						+ GeometryToleranceCM
+					|| SupportMaximum - SupportMinimum
+						< BlockUnitsCM - GeometryToleranceCM)
+				{
+					continue;
+				}
+				const double SupportLength = SupportMaximum - SupportMinimum;
+				const double BestLength = BestSupportMaximum - BestSupportMinimum;
+				if (BestSurface == nullptr
+					|| SupportLength > BestLength + GeometryToleranceCM
+					|| (FMath::IsNearlyEqual(SupportLength, BestLength,
+						GeometryToleranceCM)
+						&& Volume.EnvelopeVolumeId < BestSurface->EnvelopeVolumeId))
+				{
+					BestSurface = &Volume;
+					BestSurfaceZ = StackSeatZ;
+					BestSupportMinimum = SupportMinimum;
+					BestSupportMaximum = SupportMaximum;
+					BestSurfaceReason = TEXT("DirectStackSeatAtFacadePartitionRoot");
+					BestAuthority = ETopSurfaceAuthorityKind::DirectStackSeat;
+				}
+			}
+		}
+		if (BestSurface != nullptr)
+		{
+			Intent.Intent = EFacadeDownwardIntent::TopSurface;
+			Intent.TopSurfaceAuthority = BestAuthority;
+			Intent.TargetEnvelopeVolumeId = BestSurface->EnvelopeVolumeId;
+			Intent.TargetSourceVolumeId = BestSurface->SourceVolumeId;
+			Intent.TargetSurfaceCourseIndex = FMath::RoundToInt(
+				(BestSurfaceZ - GroundZ) / BlockUnitsCM);
+			Intent.TargetSupportTangentMinimumCM = BestSupportMinimum;
+			Intent.TargetSupportTangentMaximumCM = BestSupportMaximum;
+			Intent.TargetSurfaceBounds = BestSurface->LocalBounds;
+			Intent.Reason = BestSurfaceReason;
+			++Plan.Summary.Stage4ResolvedTopSurfaceIntentCount;
+			Plan.Summary.Stage4ExposedSetbackTopIntentCount += BestAuthority
+				== ETopSurfaceAuthorityKind::ExposedSetbackTop ? 1 : 0;
+			Plan.Summary.Stage4DirectStackSeatIntentCount += BestAuthority
+				== ETopSurfaceAuthorityKind::DirectStackSeat ? 1 : 0;
+		}
+		else
+		{
+			Intent.Reason = TEXT("NoExposedEnvelopeUnionTopBelowFrame");
+			++Plan.Summary.Stage4UnresolvedIntentCount;
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-C3V3][Stage4IntentUnresolved]")
+				TEXT(" Frame=%d Partition=%d Component=%d Face=%u")
+				TEXT(" FrameCourse=%d FacadeFirstCourse=%d Normal=%.3f")
+				TEXT(" Tangent=%.3f..%.3f Reason=%s"),
+				Intent.ExteriorFrameId, Intent.FacadePartitionId,
+				Intent.ComponentId, Intent.FaceMask,
+				Intent.ExteriorFrameCourseIndex,
+				Intent.FacadeFirstCourseIndex,
+				Intent.FacadeCoordinateCM, Intent.TangentMinimumCM,
+				Intent.TangentMaximumCM, *Intent.Reason);
+		}
+	}
+	Plan.Summary.Stage4TopSurfaceIntentCount = Plan.TopSurfaceIntents.Num();
+	TSet<int32> BoundFrameIds;
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		Plan.Summary.Stage4IntentBindingViolationCount +=
+			BoundFrameIds.Contains(Intent.ExteriorFrameId) ? 1 : 0;
+		BoundFrameIds.Add(Intent.ExteriorFrameId);
+		if (Intent.Intent == EFacadeDownwardIntent::TopSurface)
+		{
+			Plan.Summary.Stage4IntentBindingViolationCount +=
+				Intent.TargetEnvelopeVolumeId == INDEX_NONE
+				|| Intent.TopSurfaceAuthority == ETopSurfaceAuthorityKind::None
+				|| Intent.TargetSurfaceCourseIndex == INDEX_NONE
+				|| !Intent.TargetSurfaceBounds.IsValid
+				|| Intent.TargetSupportTangentMaximumCM
+					- Intent.TargetSupportTangentMinimumCM
+					< BlockUnitsCM - GeometryToleranceCM
+				|| Intent.TargetSurfaceCourseIndex
+					> Intent.ExteriorFrameCourseIndex ? 1 : 0;
+		}
+	}
+	Plan.Summary.Stage4IntentBindingViolationCount +=
+		FMath::Abs(Plan.CommonExteriorFrames.Num() - BoundFrameIds.Num());
+	if (Plan.Members.Num() != Stage3MemberCount
+		|| Plan.Summary.Stage3PlanHash != Stage3Hash
+		|| Plan.Summary.Stage4TopSurfaceIntentCount
+			!= Plan.Summary.Stage4GroundSillIntentCount
+				+ Plan.Summary.Stage4ResolvedTopSurfaceIntentCount
+				+ Plan.Summary.Stage4UnresolvedIntentCount
+		|| Plan.Summary.Stage4ResolvedTopSurfaceIntentCount
+			!= Plan.Summary.Stage4ExposedSetbackTopIntentCount
+				+ Plan.Summary.Stage4DirectStackSeatIntentCount
+		|| Plan.Summary.Stage4IntentBindingViolationCount != 0)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4IntentContractFailed:Intents=%d:Ground=%d:Top=%d:Unresolved=%d:BindingViolations=%d:Members=%d/%d:Stage3Hash=%lld/%lld"),
+			Plan.Summary.Stage4TopSurfaceIntentCount,
+			Plan.Summary.Stage4GroundSillIntentCount,
+			Plan.Summary.Stage4ResolvedTopSurfaceIntentCount,
+			Plan.Summary.Stage4UnresolvedIntentCount,
+			Plan.Summary.Stage4IntentBindingViolationCount,
+			Plan.Members.Num(), Stage3MemberCount,
+			Plan.Summary.Stage3PlanHash, Stage3Hash);
+		return false;
+	}
+	FString Canonical = FString::Printf(TEXT("Stage3=%lld"), Stage3Hash);
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		Canonical += FString::Printf(
+			TEXT("|TSI:%d:EF%d:F%d:C%d:M%u:N%lld:TA%lld:TB%lld:FQ%d:Q%d:I%d:A%d:EV%d:SV%d:TQ%d:SA%lld:SB%lld:B%s:R%s"),
+			Intent.IntentId, Intent.ExteriorFrameId, Intent.FacadePartitionId,
+			Intent.ComponentId, Intent.FaceMask, QHash(Intent.FacadeCoordinateCM),
+			QHash(Intent.TangentMinimumCM), QHash(Intent.TangentMaximumCM),
+			Intent.ExteriorFrameCourseIndex, Intent.FacadeFirstCourseIndex,
+			static_cast<int32>(Intent.Intent),
+			static_cast<int32>(Intent.TopSurfaceAuthority),
+			Intent.TargetEnvelopeVolumeId, Intent.TargetSourceVolumeId,
+			Intent.TargetSurfaceCourseIndex,
+			QHash(Intent.TargetSupportTangentMinimumCM),
+			QHash(Intent.TargetSupportTangentMaximumCM),
+			Intent.TargetSurfaceBounds.IsValid
+				? *FString::Printf(TEXT("%lld,%lld,%lld..%lld,%lld,%lld"),
+					QHash(Intent.TargetSurfaceBounds.Min.X),
+					QHash(Intent.TargetSurfaceBounds.Min.Y),
+					QHash(Intent.TargetSurfaceBounds.Min.Z),
+					QHash(Intent.TargetSurfaceBounds.Max.X),
+					QHash(Intent.TargetSurfaceBounds.Max.Y),
+					QHash(Intent.TargetSurfaceBounds.Max.Z))
+				: TEXT("Invalid"), *Intent.Reason);
+	}
+	Plan.Summary.Stage4IntentHash = HashText(Canonical);
+	Plan.Summary.Stage4IntentMilliseconds = ElapsedMilliseconds(StartSeconds);
+	return Plan.Summary.Stage4IntentHash != 0;
+}
+
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(
 	const FABTSM73BeamD0ResolvedProfile& Profile,
 	const FABTSM73DAG5BV2GenerationResult& Silhouette,

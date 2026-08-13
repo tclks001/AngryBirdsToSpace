@@ -4370,12 +4370,108 @@ bool FABTSM73BeamC3StagedFutureStageFailClosedTest::RunTest(const FString& Param
 	using namespace ABTSM73BeamC3V3Tests;
 	FABTSM73BeamD1StagePreviewResult Result;
 	FString Error;
-	TestFalse(TEXT("Stage 4 is not silently routed to the legacy full generator"),
+	TestFalse(TEXT("Stage 5 is not silently routed to the legacy full generator"),
 		FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
 			MakeD1Settings({TEXT("ColumnBreak"), 0, 710000}),
-			EABTSM73BeamC3GenerationStage::FloorInfillRoof, Result, Error));
+			EABTSM73BeamC3GenerationStage::StaticDAG, Result, Error));
 	TestTrue(TEXT("Unimplemented stage reports stable failure identity"),
 		Error.StartsWith(TEXT("BeamC3StageNotImplemented")));
+	return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(
+	FABTSM73BeamC3DemoStage4TopSurfaceIntentTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.Stage4TopSurfaceIntent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+void FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::GetTests(
+	TArray<FString>& OutBeautifiedNames,
+	TArray<FString>& OutTestCommands) const
+{
+	for (const FABTSM73BeamDemoManifestEntry& Entry
+		: FABTSM73BeamDemoManifest::GetEntries())
+	{
+		OutBeautifiedNames.Add(Entry.StableId.ToString());
+		OutTestCommands.Add(FString::FromInt(static_cast<int32>(Entry.Id)));
+	}
+}
+
+bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
+	const FString& Parameters)
+{
+	const EABTSM73BeamDemoBuilding Id =
+		static_cast<EABTSM73BeamDemoBuilding>(FCString::Atoi(*Parameters));
+	FABTSM73BeamDemoManifestEntry Entry;
+	FString Error;
+	if (!FABTSM73BeamDemoManifest::Resolve(Id, Entry, Error))
+	{
+		AddError(Error);
+		return false;
+	}
+	FABTSM73BeamD1StagePreviewResult Result;
+	const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+		Entry.Settings, EABTSM73BeamC3GenerationStage::FloorInfillRoof,
+		Result, Error);
+	TestTrue(*FString::Printf(TEXT("%s Stage 4 intent generates: %s"),
+		*Entry.StableId.ToString(), *Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+	const ABTSM73BeamC3V3::FPlanSummary& Summary = Plan.Summary;
+	int32 ExposedSetbackTopCount = 0;
+	int32 DirectStackSeatCount = 0;
+	TestEqual(TEXT("Every Stage-3 frame has exactly one downward intent"),
+		Summary.Stage4TopSurfaceIntentCount, Plan.CommonExteriorFrames.Num());
+	TestEqual(TEXT("The ownership buckets are mutually exhaustive"),
+		Summary.Stage4TopSurfaceIntentCount,
+		Summary.Stage4GroundSillIntentCount
+			+ Summary.Stage4ResolvedTopSurfaceIntentCount
+			+ Summary.Stage4UnresolvedIntentCount);
+	TestEqual(TEXT("TopSurface ledger has no identity binding violation"),
+		Summary.Stage4IntentBindingViolationCount, 0);
+	TestEqual(TEXT("Every demo frame resolves before top-frame emission"),
+		Summary.Stage4UnresolvedIntentCount, 0);
+	TestNotEqual(TEXT("TopSurface ledger has a stable identity"),
+		Summary.Stage4IntentHash, int64(0));
+	TestEqual(TEXT("Stage 4 first stop emits no member geometry"),
+		Plan.Members.Num(), Summary.EmittedMemberCount);
+	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
+		: Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent
+			== ABTSM73BeamC3V3::EFacadeDownwardIntent::TopSurface)
+		{
+			ExposedSetbackTopCount += Intent.TopSurfaceAuthority
+				== ABTSM73BeamC3V3::ETopSurfaceAuthorityKind::ExposedSetbackTop ? 1 : 0;
+			DirectStackSeatCount += Intent.TopSurfaceAuthority
+				== ABTSM73BeamC3V3::ETopSurfaceAuthorityKind::DirectStackSeat ? 1 : 0;
+			TestTrue(TEXT("TopSurface intent binds a valid authority volume"),
+				Intent.TargetEnvelopeVolumeId != INDEX_NONE
+					&& Intent.TargetSurfaceCourseIndex != INDEX_NONE
+					&& Intent.TargetSurfaceBounds.IsValid
+					&& Intent.TargetSurfaceCourseIndex
+						<= Intent.ExteriorFrameCourseIndex
+					&& Intent.TargetSupportTangentMaximumCM
+						- Intent.TargetSupportTangentMinimumCM >= 35.99);
+		}
+	}
+	TestEqual(TEXT("Every TopSurface has one explicit semantic subtype"),
+		Summary.Stage4ResolvedTopSurfaceIntentCount,
+		ExposedSetbackTopCount + DirectStackSeatCount);
+	AddInfo(FString::Printf(
+		TEXT("Stage4Intent Entry=%s Stage3=%lld IntentHash=%lld")
+		TEXT(" Frames=%d Ground=%d Top=%d Setback=%d Stack=%d")
+		TEXT(" Unresolved=%d Members=%d")
+		TEXT(" TimingMs=%.3f Physical=NotEvaluated"),
+		*Entry.StableId.ToString(), Summary.Stage3PlanHash,
+		Summary.Stage4IntentHash, Summary.Stage4TopSurfaceIntentCount,
+		Summary.Stage4GroundSillIntentCount,
+		Summary.Stage4ResolvedTopSurfaceIntentCount,
+		ExposedSetbackTopCount, DirectStackSeatCount,
+		Summary.Stage4UnresolvedIntentCount, Plan.Members.Num(),
+		Summary.Stage4IntentMilliseconds));
 	return true;
 }
 

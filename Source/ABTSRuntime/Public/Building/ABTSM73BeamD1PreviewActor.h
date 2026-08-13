@@ -129,6 +129,14 @@ protected:
 	EABTSM73BeamC3Stage3DiagnosticLayer Stage3DiagnosticLayer =
 		EABTSM73BeamC3Stage3DiagnosticLayer::ExteriorFramesOnly;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Stage 4 Diagnostic Layer",
+			EditCondition = "GenerationStopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof",
+			EditConditionHides))
+	EABTSM73BeamC3Stage4DiagnosticLayer Stage4DiagnosticLayer =
+		EABTSM73BeamC3Stage4DiagnosticLayer::TopSurfaceIntent;
+
 	/** Visualization only: hide support Body/core-fit volumes while retaining DAG edges. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",

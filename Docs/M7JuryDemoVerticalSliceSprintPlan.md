@@ -100,3 +100,11 @@ Floor/Infill/Roof 全积木几何；完整积木承重 DAG 仍由 Stage 5 负责
 
 止损规则保持不变：同一失败身份 30 分钟内不能定位时先补拒绝账本；不得扩大候选次数、扫描 Seed、
 放宽 720 cm/36 cm/接触合同或借用 legacy complete-production 凑绿。
+
+### 7.1 TopSurface 账本首停点状态（2026-08-13）
+
+已实现只读三态账本和独立诊断层，且不发射任何 Stage 4 brick。`TopSurface` 已拆成明确的
+`ExposedSetbackTop` 与 `DirectStackSeat`：前者覆盖裙房、肩部及任意高层回退的外露顶面，后者只处理
+没有外露肩部的真实齐边叠置接缝。两者都必须绑定最终 WFC/抬高外壳中的来源 Volume、量化 course 和
+至少 36 cm 支撑区间。六栋固定清单现在均 `Unresolved=0`；E6 为 `Ground=10 / Top=24`，其中
+`Setback=19 / Stack=5`。静态首停点已闭合，等待用户视觉批准后进入第 2 步发射顶面边框。
