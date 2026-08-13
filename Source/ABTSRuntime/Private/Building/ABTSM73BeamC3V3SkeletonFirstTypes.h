@@ -77,6 +77,8 @@ namespace ABTSM73BeamC3V3
 		int32 ParentStage1MemberIndex = INDEX_NONE;
 		/** Stage-2 only: stable pair/band identity within the origin core. */
 		int32 AnchorBandId = INDEX_NONE;
+		/** Stage-2 only: WFC exterior partition served by this band. */
+		int32 FacadePartitionId = INDEX_NONE;
 		/** Stage-2 only: semantic Body face reached by the outer endpoint. */
 		int32 TargetFacadeSourceVolumeId = INDEX_NONE;
 		int32 CourseIndex = INDEX_NONE;
@@ -654,6 +656,62 @@ namespace ABTSM73BeamC3V3
 		double TangentMaximumCM = 0.0;
 	};
 
+	/** One exact exposed horizontal interval of a semantic facade at one course. */
+	struct FFacadePartitionCourseSpan
+	{
+		int32 CourseIndex = INDEX_NONE;
+		int32 SourceVolumeId = INDEX_NONE;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+	};
+
+	/** One immutable Body box in the final Stage-1 facade authority. Original
+	 * WFC Body boxes and the explicitly published raised-main Body boxes share
+	 * this ledger, while support-demand extraction continues to use only the
+	 * original WFC support graph. */
+	struct FResolvedFacadeEnvelopeVolume
+	{
+		int32 EnvelopeVolumeId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 SourceVolumeId = INDEX_NONE;
+		FBox LocalBounds = FBox(EForceInit::ForceInit);
+		bool bRaisedPodiumBody = false;
+	};
+
+	/** One vertically connected WFC exterior facade region. It is independent of
+	 * core placement and is the authority consumed by Stage-2 height anchors and
+	 * the later Stage-3 frame fitter. */
+	struct FFacadePartitionPlan
+	{
+		int32 PartitionId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		uint8 FaceMask = 0;
+		double FacadeCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+		int32 FirstCourseIndex = INDEX_NONE;
+		int32 LastCourseIndexExclusive = INDEX_NONE;
+		TArray<FFacadePartitionCourseSpan> CourseSpans;
+		/** Explicit double-course height anchors emitted for this partition. */
+		TArray<int32> AnchorBandIds;
+		/** Perimeter cores which can act as the facade directly on at least one span. */
+		TArray<int32> PerimeterCoreCellIds;
+	};
+
+	/** One explicit two-course core-to-facade anchor bound to one WFC partition. */
+	struct FFacadeHeightAnchorBand
+	{
+		int32 AnchorBandId = INDEX_NONE;
+		int32 FacadePartitionId = INDEX_NONE;
+		int32 OriginCoreCellId = INDEX_NONE;
+		int32 BaseCourseIndex = INDEX_NONE;
+		uint8 FaceMask = 0;
+		double FacadeCoordinateCM = 0.0;
+		double TangentCoordinateCM = 0.0;
+		int32 LowerMemberIndex = INDEX_NONE;
+		int32 UpperMemberIndex = INDEX_NONE;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -899,6 +957,19 @@ namespace ABTSM73BeamC3V3
 		/** Double-course bands whose two members terminate on different facade
 		 * coordinates or otherwise do not form one coherent facade anchor. */
 		int32 CouplingBandEndpointViolationCount = 0;
+		int32 ResolvedFacadeEnvelopeVolumeCount = 0;
+		int32 ResolvedFacadeEnvelopeRaisedVolumeCount = 0;
+		int32 ResolvedFacadeEnvelopeBindingViolationCount = 0;
+		/** Stage-1-published final facade authority, independent of the support DAG. */
+		int64 ResolvedFacadeEnvelopeHash = 0;
+		/** Exact Stage-1 facade authority consumed by Stage 2. */
+		int64 Stage2InputFacadeEnvelopeHash = 0;
+		int32 FacadePartitionCount = 0;
+		int32 FacadePartitionWithPerimeterCoreCount = 0;
+		int32 FacadePartitionWithHeightAnchorCount = 0;
+		int32 DeferredFacadePartitionCount = 0;
+		int32 FacadeHeightAnchorBandCount = 0;
+		int32 FacadePartitionBindingViolationCount = 0;
 		int32 PerimeterCoreCount = 0;
 		int32 PerimeterCoreFaceCount = 0;
 		int32 PerimeterFaceExposureSpanCount = 0;
@@ -987,6 +1058,9 @@ namespace ABTSM73BeamC3V3
 		TArray<FSharedEndpointReachabilityDiagnostic>
 			SharedEndpointReachabilityDiagnostics;
 		TArray<FSharedCourseIntent> SharedCourseIntents;
+		TArray<FResolvedFacadeEnvelopeVolume> ResolvedFacadeEnvelopeVolumes;
+		TArray<FFacadePartitionPlan> FacadePartitions;
+		TArray<FFacadeHeightAnchorBand> FacadeHeightAnchorBands;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

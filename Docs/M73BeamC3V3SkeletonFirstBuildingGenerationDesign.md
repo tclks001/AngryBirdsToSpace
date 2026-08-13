@@ -2290,3 +2290,55 @@ UE 5.8 ForceUnity Development Editor 全链接通过。fresh boundary 与 previe
 `M7-Stage2-CoherentBand-Exposure-Matrix-20260812-211152.log`、
 `M7-Stage2-CoherentBand-Exposure-Preview-20260812.log` 与
 `M7-Stage2-CoherentBand-Exposure-Staged-20260812.log`。该修正不增加 Stage 2 密度、不生成 Stage 3 外框，也不评价 Chaos。
+
+### 48.4 立面分区与高度锚带扩展（2026-08-13）
+
+视觉批准首版稀疏耦合后，Stage 2 不再按全建筑四个方向各取一组，而先从 WFC Body 联合集合提取显式立面需求：
+
+1. 每个 course 对 `-X/+X/-Y/+Y` 逐面求真实外露切向区段；仅当相邻 course 的面向、facade 坐标相同且区段有正长度重叠时，
+   才归入同一 `FacadePartition`。退台、分塔、凹口和不同 facade 坐标因此保持不同身份；
+2. 分区冻结 Component、方向、立面坐标、切向总范围、首末 course 和逐 course span；它先于耦合构件存在。没有构件不能反推出
+   没有立面需求；
+3. 每个分区按垂直跨度请求 1～3 组高度锚带，目标高度在分区内均匀分布并遵守至少 6 course 间隔。实际落位仍必须满足
+   Stage 1 parent、正面积 Bearing、同端点双层带、WFC 连续覆盖、720 cm、ProtectedVoid、外向净长和其他芯体禁入；
+4. 搜索只允许起点 core 与分区属于同一 component，切向 station 落在分区范围内，且双层共同端点严格等于分区 facade 坐标。
+   优先 PodiumMain，无合法 main 才回退 TowerChild；
+5. `FacadeHeightAnchorBand` 冻结 partition、origin core、base course、切向位置及上下 member。双向 ledger、每带恰好两根、member
+   反向 partition ID 和端点一致都由自动化重算；
+6. 贴边 core 可直接服务分区，因此某分区即使没有普通外伸，也不等于 Stage 3 无法构墙。摘要分别记录贴边服务、锚带服务和
+   两者皆无的 deferred 分区；deferred 是下一轮覆盖策略的显式输入，不允许静默丢失或用向内构件凑数；
+7. Stage 2 新增互斥诊断层 `5 - Facade Partitions / Height Anchors`：有锚带分区用铁色、仅由贴边芯体直接服务的分区用石材色、
+   两者皆无而待后续闭合的分区用玻璃色，竖向短线标出每组双层带的共同外端。分区薄板逐 course 消费真实切向跨度，不能用
+   整体 AABB 填平退台或凹口；该层只显示分区与锚带关系，不混入 WFC 包络或完整外框。
+
+本轮仍停在 Stage 2：不生成外柱、楼层、屋顶或 Stage 3 共同外框，不运行完整 Beam-C 或 Chaos。先以 5×6 静态门证明每个
+形态都能发布稳定分区账本，并由编辑器检查分区是否对应可辨认的分塔/退台、锚带高度是否足以供下一阶段拟合外立面。
+
+代码停点证据为：UE 5.8 Development Editor 全链接成功；fresh Stage2 boundary 1/1、Preview diagnostic 1/1、5×6
+30/30，最终 `ABTS.M73DAG.BeamC3V3.Staged` 精确 75/75，完成标记与进程退出均为 0。5×6 的首版耦合增量由每叶
+4/8 根扩展为按轮廓约 4～100 根，所有 `FacadePartitionBindingViolationCount=0`；复杂 E5/E6 仍保留显式 deferred
+分区，证明需求没有随合法起点缺失而消失。日志：
+
+- `Saved/Logs/M7-Stage2-FacadePartitions-Boundary-20260813.log`；
+- `Saved/Logs/M7-Stage2-FacadePartitions-Matrix-Probe-20260813.log`；
+- `Saved/Logs/M7-Stage2-FacadePartitions-Preview-20260813.log`；
+- `Saved/Logs/M7-Stage2-FacadePartitions-Staged-Final-20260813.log`。
+
+该证据仅冻结代码、DAG 与诊断身份。第 5 层的视觉分区/锚带位置仍需用户在 fresh Editor 中批准，批准前不进入 Stage 3。
+
+### 48.5 抬高裙房作为 Stage 2 最终语义外壳（2026-08-13）
+
+Stage 2 不得重新从 `CollectRoots().BodyVolumes` 推断外壳。该集合会有意过滤
+`RaisedMainReservation`，以保证第二遍 Stage 1 的支撑需求 DAG 仍由原始 WFC 决定；若立面阶段也继续消费它，抬高裙房虽然已经在第 0/1 阶段成为可见语义 Body，立面分区、贴边判断和耦合端点却仍会退回初版等高裙房轮廓。
+
+Stage 1 现在显式发布 `ResolvedFacadeEnvelopeVolumes`，其唯一组成是：
+
+1. 原始 WFC 的全部 Body；
+2. 每个已批准 `RaisedMainReservation.CoreBounds` 对应的方形语义 Body。
+
+`ClearanceBounds` 仍然只是侧向预留空间，不是实心外壳，也不得进入支撑需求 DAG。每个 reservation 必须在最终外壳中恰好绑定一次；Stage 1 发布
+`ResolvedFacadeEnvelopeHash`，Stage 2 在任何贴边面识别、逐 course 外露区段切分、立面分区、目标端点排序及实体覆盖检查前重新核验，并记录完全相同的 `Stage2InputFacadeEnvelopeHash`。两者不同、绑定缺失/重复、组件无外壳均 fail closed。
+
+因此两套权威各司其职：原始 WFC 继续决定“哪些楼体需要支撑”；Resolved Facade Envelope 决定“批准抬高后建筑的最终语义外皮在哪里”。Stage 2 的 component 中心也从该最终外壳联合边界计算，避免非对称抬高后仍按旧 Body 中心把内向构件误判为外向。该修改不生成 Stage 3 外框，不运行 Chaos，也不把 `ClearanceBounds` 填成实体。
+
+静态证据：UE 5.8 Development Editor 增量全链接通过；fresh `Stage2Boundary` 精确 1/1、Stage 2 5×6 精确 30/30，所有叶均满足 raised reservation 与最终外壳一一绑定、Stage 1/2 外壳哈希相等。另以 TipOver E6 730000/750000 专项 1/1 证明抬高 Body 在原裙房顶面之上实际贡献立面 course span，而非只进入摘要；最终 `ABTS.M73DAG.BeamC3V3.Staged` 精确 76/76。日志为 `M7-Stage2-RaisedFacadeEnvelope-Boundary-Final-20260813-132014.log`、`M7-Stage2-RaisedFacadeEnvelope-Matrix-20260813-131342.log`、`M7-Stage2-RaisedFacadeEnvelope-TipOverE6-20260813-132244.log` 与 `M7-Stage2-RaisedFacadeEnvelope-Staged-20260813-132441.log`。Physical/Chaos/可见 PIE 未评估，测试地图继续排除。

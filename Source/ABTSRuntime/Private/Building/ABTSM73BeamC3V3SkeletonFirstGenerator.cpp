@@ -333,6 +333,111 @@ namespace
 		return FMath::RoundToInt64(Value * 1000.0);
 	}
 
+	int64 ComputeResolvedFacadeEnvelopeHash(const FPlan& Plan)
+	{
+		FString Canonical;
+		for (const FResolvedFacadeEnvelopeVolume& Volume
+			: Plan.ResolvedFacadeEnvelopeVolumes)
+		{
+			Canonical += FString::Printf(
+				TEXT("|E:%d:C=%d:S=%d:R=%d:B=%lld,%lld,%lld,%lld,%lld,%lld"),
+				Volume.EnvelopeVolumeId, Volume.ComponentId, Volume.SourceVolumeId,
+				Volume.bRaisedPodiumBody ? 1 : 0,
+				QHash(Volume.LocalBounds.Min.X), QHash(Volume.LocalBounds.Min.Y),
+				QHash(Volume.LocalBounds.Min.Z), QHash(Volume.LocalBounds.Max.X),
+				QHash(Volume.LocalBounds.Max.Y), QHash(Volume.LocalBounds.Max.Z));
+		}
+		return HashText(Canonical.IsEmpty()
+			? TEXT("NoResolvedFacadeEnvelope") : Canonical);
+	}
+
+	bool BuildResolvedFacadeEnvelopeAuthority(
+		const TArray<FRoot>& Roots, FPlan& Plan, FString& OutError)
+	{
+		Plan.ResolvedFacadeEnvelopeVolumes.Reset();
+		Plan.Summary.ResolvedFacadeEnvelopeVolumeCount = 0;
+		Plan.Summary.ResolvedFacadeEnvelopeRaisedVolumeCount = 0;
+		Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount = 0;
+		Plan.Summary.ResolvedFacadeEnvelopeHash = 0;
+		for (int32 ComponentId = 0; ComponentId < Roots.Num(); ++ComponentId)
+		{
+			for (const FABTSM73DAG5BV2Volume* Source : Roots[ComponentId].BodyVolumes)
+			{
+				if (Source == nullptr || !Source->LocalBounds.IsValid)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamC3V3ResolvedFacadeOriginalBodyInvalid:Component=%d"),
+						ComponentId);
+					return false;
+				}
+				FResolvedFacadeEnvelopeVolume& Volume =
+					Plan.ResolvedFacadeEnvelopeVolumes.AddDefaulted_GetRef();
+				Volume.EnvelopeVolumeId =
+					Plan.ResolvedFacadeEnvelopeVolumes.Num() - 1;
+				Volume.ComponentId = ComponentId;
+				Volume.SourceVolumeId = Source->VolumeId;
+				Volume.LocalBounds = Source->LocalBounds;
+			}
+		}
+		for (const FABTSM73DAG5BV2RaisedMainReservation& Reservation
+			: Plan.RaisedMainReservations)
+		{
+			if (!Roots.IsValidIndex(Reservation.ComponentId)
+				|| !Reservation.CoreBounds.IsValid
+				|| Reservation.ApprovedTopCourse <= Reservation.OriginalTopCourse)
+			{
+				++Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount;
+				continue;
+			}
+			FResolvedFacadeEnvelopeVolume& Volume =
+				Plan.ResolvedFacadeEnvelopeVolumes.AddDefaulted_GetRef();
+			Volume.EnvelopeVolumeId =
+				Plan.ResolvedFacadeEnvelopeVolumes.Num() - 1;
+			Volume.ComponentId = Reservation.ComponentId;
+			Volume.SourceVolumeId = Reservation.SourceVolumeId;
+			Volume.LocalBounds = Reservation.CoreBounds;
+			Volume.bRaisedPodiumBody = true;
+			++Plan.Summary.ResolvedFacadeEnvelopeRaisedVolumeCount;
+		}
+		Plan.Summary.ResolvedFacadeEnvelopeVolumeCount =
+			Plan.ResolvedFacadeEnvelopeVolumes.Num();
+		for (const FABTSM73DAG5BV2RaisedMainReservation& Reservation
+			: Plan.RaisedMainReservations)
+		{
+			int32 BindingCount = 0;
+			for (const FResolvedFacadeEnvelopeVolume& Volume
+				: Plan.ResolvedFacadeEnvelopeVolumes)
+			{
+				BindingCount += Volume.bRaisedPodiumBody
+					&& Volume.ComponentId == Reservation.ComponentId
+					&& Volume.SourceVolumeId == Reservation.SourceVolumeId
+					&& Volume.LocalBounds.Equals(
+						Reservation.CoreBounds, GeometryToleranceCM)
+					? 1 : 0;
+			}
+			Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount +=
+				BindingCount == 1 ? 0 : 1;
+		}
+		Plan.Summary.ResolvedFacadeEnvelopeHash =
+			ComputeResolvedFacadeEnvelopeHash(Plan);
+		if (Plan.ResolvedFacadeEnvelopeVolumes.IsEmpty()
+			|| Plan.Summary.ResolvedFacadeEnvelopeRaisedVolumeCount
+				!= Plan.RaisedMainReservations.Num()
+			|| Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount != 0
+			|| Plan.Summary.ResolvedFacadeEnvelopeHash == 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3ResolvedFacadeEnvelopeContractFailed:Volumes=%d:Raised=%d/%d:BindingViolations=%d:Hash=%lld"),
+				Plan.Summary.ResolvedFacadeEnvelopeVolumeCount,
+				Plan.Summary.ResolvedFacadeEnvelopeRaisedVolumeCount,
+				Plan.RaisedMainReservations.Num(),
+				Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount,
+				Plan.Summary.ResolvedFacadeEnvelopeHash);
+			return false;
+		}
+		return true;
+	}
+
 	int64 ComputeEnvelopeHash(const FABTSM73DAG5BV2GenerationResult& Silhouette)
 	{
 		TArray<FString> VolumeTokens;
@@ -8403,11 +8508,12 @@ namespace
 	void AppendMemberCanonical(FString& Text, const FPlannedMember& Member)
 	{
 		Text += FString::Printf(
-			TEXT("|M:%d:K=%d:%d:%d:%d:O=%d:P=%d:B=%d:T=%d:%d:%d:%d:%d:%d:R=%d:%lld:%lld:%lld:%lld:%lld:%lld:G=%d"),
+			TEXT("|M:%d:K=%d:%d:%d:%d:O=%d:P=%d:B=%d:F=%d:T=%d:%d:%d:%d:%d:%d:R=%d:%lld:%lld:%lld:%lld:%lld:%lld:G=%d"),
 			static_cast<int32>(Member.OwnerKind), static_cast<int32>(Member.SkeletonKind),
 			Member.OwnerId, Member.ComponentId, Member.SourceVolumeId,
 			Member.OriginCoreCellId, Member.ParentStage1MemberIndex,
-			Member.AnchorBandId, Member.TargetFacadeSourceVolumeId,
+			Member.AnchorBandId, Member.FacadePartitionId,
+			Member.TargetFacadeSourceVolumeId,
 			Member.CourseIndex, Member.StationA, Member.StationB,
 			Member.FaceMask, static_cast<int32>(Member.Axis), static_cast<int32>(Member.Role),
 			QHash(Member.LocalStart.X), QHash(Member.LocalStart.Y), QHash(Member.LocalStart.Z),
@@ -8469,10 +8575,68 @@ namespace
 		Plan.Summary.CouplingOutwardViolationCount = 0;
 		Plan.Summary.CouplingOtherCoreViolationCount = 0;
 		Plan.Summary.CouplingBandEndpointViolationCount = 0;
+		Plan.Summary.FacadePartitionCount = 0;
+		Plan.Summary.FacadePartitionWithPerimeterCoreCount = 0;
+		Plan.Summary.FacadePartitionWithHeightAnchorCount = 0;
+		Plan.Summary.DeferredFacadePartitionCount = 0;
+		Plan.Summary.FacadeHeightAnchorBandCount = 0;
+		Plan.Summary.FacadePartitionBindingViolationCount = 0;
 		Plan.Summary.PerimeterCoreCount = 0;
 		Plan.Summary.PerimeterCoreFaceCount = 0;
 		Plan.Summary.PerimeterFaceExposureSpanCount = 0;
 		Plan.Summary.Stage2PlanHash = 0;
+		Plan.Summary.Stage2InputFacadeEnvelopeHash = 0;
+		Plan.FacadePartitions.Reset();
+		Plan.FacadeHeightAnchorBands.Reset();
+
+		const int64 RecomputedFacadeEnvelopeHash =
+			ComputeResolvedFacadeEnvelopeHash(Plan);
+		if (Plan.ResolvedFacadeEnvelopeVolumes.IsEmpty()
+			|| Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount != 0
+			|| Plan.Summary.ResolvedFacadeEnvelopeHash == 0
+			|| RecomputedFacadeEnvelopeHash
+				!= Plan.Summary.ResolvedFacadeEnvelopeHash)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3Stage2ResolvedFacadeEnvelopeInvalid:Volumes=%d:BindingViolations=%d:Published=%lld:Recomputed=%lld"),
+				Plan.ResolvedFacadeEnvelopeVolumes.Num(),
+				Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount,
+				Plan.Summary.ResolvedFacadeEnvelopeHash,
+				RecomputedFacadeEnvelopeHash);
+			return false;
+		}
+		Plan.Summary.Stage2InputFacadeEnvelopeHash =
+			Plan.Summary.ResolvedFacadeEnvelopeHash;
+		TArray<TArray<const FResolvedFacadeEnvelopeVolume*>>
+			FacadeVolumesByComponent;
+		TArray<FBox> FacadeBoundsByComponent;
+		FacadeVolumesByComponent.SetNum(Roots.Num());
+		FacadeBoundsByComponent.Init(FBox(EForceInit::ForceInit), Roots.Num());
+		for (const FResolvedFacadeEnvelopeVolume& Volume
+			: Plan.ResolvedFacadeEnvelopeVolumes)
+		{
+			if (!Roots.IsValidIndex(Volume.ComponentId)
+				|| !Volume.LocalBounds.IsValid)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3Stage2FacadeEnvelopeVolumeInvalid:Envelope=%d:Component=%d"),
+					Volume.EnvelopeVolumeId, Volume.ComponentId);
+				return false;
+			}
+			FacadeVolumesByComponent[Volume.ComponentId].Add(&Volume);
+			FacadeBoundsByComponent[Volume.ComponentId] += Volume.LocalBounds;
+		}
+		for (int32 ComponentId = 0; ComponentId < Roots.Num(); ++ComponentId)
+		{
+			if (FacadeVolumesByComponent[ComponentId].IsEmpty()
+				|| !FacadeBoundsByComponent[ComponentId].IsValid)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamC3V3Stage2FacadeEnvelopeComponentEmpty:Component=%d"),
+					ComponentId);
+				return false;
+			}
+		}
 
 		auto CoreCourseBounds = [&Roots](const FCoreCellPlan& Core, const int32 Course)
 		{
@@ -8569,7 +8733,8 @@ namespace
 			{
 				continue;
 			}
-			const FRoot& Root = Roots[Core.ComponentId];
+			const TArray<const FResolvedFacadeEnvelopeVolume*>& FacadeVolumes =
+				FacadeVolumesByComponent[Core.ComponentId];
 			TArray<FPerimeterFaceExposure> PendingExposures;
 			for (int32 Course = 0; Course < Core.TopCourseIndex; ++Course)
 			{
@@ -8587,7 +8752,7 @@ namespace
 					const int32 TangentIndex = bXAxis ? 1 : 0;
 					const double FaceCM = bPositive
 						? CoreBox.Max[AxisIndex] : CoreBox.Min[AxisIndex];
-					for (const FABTSM73DAG5BV2Volume* Candidate : Root.BodyVolumes)
+					for (const FResolvedFacadeEnvelopeVolume* Candidate : FacadeVolumes)
 					{
 						if (Candidate == nullptr
 							|| Z < Candidate->LocalBounds.Min.Z - GeometryToleranceCM
@@ -8616,7 +8781,7 @@ namespace
 							continue;
 						}
 						TArray<double> Cuts = {TangentMinimum, TangentMaximum};
-						for (const FABTSM73DAG5BV2Volume* Volume : Root.BodyVolumes)
+						for (const FResolvedFacadeEnvelopeVolume* Volume : FacadeVolumes)
 						{
 							if (Volume != nullptr && Z >= Volume->LocalBounds.Min.Z
 								- GeometryToleranceCM && Z <= Volume->LocalBounds.Max.Z
@@ -8657,8 +8822,8 @@ namespace
 								+ (bPositive ? 1.0 : -1.0) * GeometryToleranceCM * 2.0;
 							Witness[TangentIndex] =
 								(Cuts[CutIndex] + Cuts[CutIndex + 1]) * 0.5;
-							const bool bOutsideEmpty = !Root.BodyVolumes.ContainsByPredicate(
-								[&Witness](const FABTSM73DAG5BV2Volume* Volume)
+							const bool bOutsideEmpty = !FacadeVolumes.ContainsByPredicate(
+								[&Witness](const FResolvedFacadeEnvelopeVolume* Volume)
 								{
 									return Volume != nullptr
 										&& Volume->LocalBounds.IsInsideOrOn(Witness);
@@ -8671,7 +8836,7 @@ namespace
 								FPerimeterFaceExposure& Exposure = PendingExposures.AddDefaulted_GetRef();
 								Exposure.CourseIndex = Course;
 								Exposure.FaceMask = FaceMask;
-								Exposure.SourceVolumeId = Candidate->VolumeId;
+								Exposure.SourceVolumeId = Candidate->SourceVolumeId;
 								Exposure.FacadeCoordinateCM = CandidateFace;
 								Exposure.TangentMinimumCM = Cuts[CutIndex];
 								Exposure.TangentMaximumCM = Cuts[CutIndex + 1];
@@ -8734,6 +8899,204 @@ namespace
 				Core.PerimeterFaceExposures.Num();
 		}
 
+		// Build facade partitions from the Stage-1 resolved facade envelope: the
+		// original WFC Body union plus every approved raised-podium semantic body.
+		// A partition is
+		// one vertically connected exterior sheet with a stable direction and
+		// facade coordinate.  It exists even when no core can yet reach it, so
+		// Stage 2 cannot silently equate "no generated anchor" with "no demand".
+		struct FRawFacadeSpan
+		{
+			int32 ComponentId = INDEX_NONE;
+			int32 CourseIndex = INDEX_NONE;
+			int32 SourceVolumeId = INDEX_NONE;
+			uint8 FaceMask = 0;
+			double FacadeCoordinateCM = 0.0;
+			double TangentMinimumCM = 0.0;
+			double TangentMaximumCM = 0.0;
+		};
+		TArray<FRawFacadeSpan> RawFacadeSpans;
+		for (int32 ComponentId = 0; ComponentId < Roots.Num(); ++ComponentId)
+		{
+			const FRoot& Root = Roots[ComponentId];
+			const TArray<const FResolvedFacadeEnvelopeVolume*>& FacadeVolumes =
+				FacadeVolumesByComponent[ComponentId];
+			for (const FResolvedFacadeEnvelopeVolume* Candidate : FacadeVolumes)
+			{
+				if (Candidate == nullptr)
+				{
+					continue;
+				}
+				const int32 FirstCourse = FMath::Max(0, FMath::FloorToInt(
+					(Candidate->LocalBounds.Min.Z - Root.GroundZCM) / BlockUnitsCM));
+				const int32 LastCourseExclusive = FMath::Max(FirstCourse,
+					FMath::CeilToInt((Candidate->LocalBounds.Max.Z - Root.GroundZCM)
+						/ BlockUnitsCM));
+				for (int32 Course = FirstCourse; Course < LastCourseExclusive; ++Course)
+				{
+					const double Z = Root.GroundZCM + (Course + 0.5) * BlockUnitsCM;
+					if (Z < Candidate->LocalBounds.Min.Z - GeometryToleranceCM
+						|| Z > Candidate->LocalBounds.Max.Z + GeometryToleranceCM)
+					{
+						continue;
+					}
+					for (const uint8 FaceMask : Stage2FaceBits)
+					{
+						const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
+						const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
+						const int32 AxisIndex = bXAxis ? 0 : 1;
+						const int32 TangentIndex = bXAxis ? 1 : 0;
+						const double FacadeCM = bPositive
+							? Candidate->LocalBounds.Max[AxisIndex]
+							: Candidate->LocalBounds.Min[AxisIndex];
+						const double TangentMinimum = Candidate->LocalBounds.Min[TangentIndex];
+						const double TangentMaximum = Candidate->LocalBounds.Max[TangentIndex];
+						TArray<double> Cuts = {TangentMinimum, TangentMaximum};
+						for (const FResolvedFacadeEnvelopeVolume* Other : FacadeVolumes)
+						{
+							if (Other != nullptr && Z >= Other->LocalBounds.Min.Z
+								- GeometryToleranceCM && Z <= Other->LocalBounds.Max.Z
+								+ GeometryToleranceCM)
+							{
+								Cuts.Add(FMath::Clamp(Other->LocalBounds.Min[TangentIndex],
+									TangentMinimum, TangentMaximum));
+								Cuts.Add(FMath::Clamp(Other->LocalBounds.Max[TangentIndex],
+									TangentMinimum, TangentMaximum));
+							}
+						}
+						SortUniqueCuts(Cuts);
+						for (int32 CutIndex = 0; CutIndex + 1 < Cuts.Num(); ++CutIndex)
+						{
+							if (Cuts[CutIndex + 1] - Cuts[CutIndex] <= GeometryToleranceCM)
+							{
+								continue;
+							}
+							FVector Witness = Candidate->LocalBounds.GetCenter();
+							Witness.Z = Z;
+							Witness[AxisIndex] = FacadeCM + (bPositive ? 1.0 : -1.0)
+								* GeometryToleranceCM * 2.0;
+							Witness[TangentIndex] = (Cuts[CutIndex] + Cuts[CutIndex + 1]) * 0.5;
+							const bool bOutsideEmpty = !FacadeVolumes.ContainsByPredicate(
+								[&Witness](const FResolvedFacadeEnvelopeVolume* Volume)
+								{
+									return Volume != nullptr
+										&& Volume->LocalBounds.IsInsideOrOn(Witness);
+								});
+							if (bOutsideEmpty)
+							{
+								FRawFacadeSpan& Span = RawFacadeSpans.AddDefaulted_GetRef();
+								Span.ComponentId = ComponentId;
+								Span.CourseIndex = Course;
+								Span.SourceVolumeId = Candidate->SourceVolumeId;
+								Span.FaceMask = FaceMask;
+								Span.FacadeCoordinateCM = FacadeCM;
+								Span.TangentMinimumCM = Cuts[CutIndex];
+								Span.TangentMaximumCM = Cuts[CutIndex + 1];
+							}
+						}
+					}
+				}
+			}
+		}
+		RawFacadeSpans.Sort([](const FRawFacadeSpan& A, const FRawFacadeSpan& B)
+		{
+			if (A.ComponentId != B.ComponentId) return A.ComponentId < B.ComponentId;
+			if (A.CourseIndex != B.CourseIndex) return A.CourseIndex < B.CourseIndex;
+			if (A.FaceMask != B.FaceMask) return A.FaceMask < B.FaceMask;
+			if (!FMath::IsNearlyEqual(A.FacadeCoordinateCM, B.FacadeCoordinateCM,
+				GeometryToleranceCM)) return A.FacadeCoordinateCM < B.FacadeCoordinateCM;
+			return A.TangentMinimumCM != B.TangentMinimumCM
+				? A.TangentMinimumCM < B.TangentMinimumCM
+				: A.TangentMaximumCM < B.TangentMaximumCM;
+		});
+		for (const FRawFacadeSpan& Raw : RawFacadeSpans)
+		{
+			FFacadePartitionPlan* SelectedPartition = nullptr;
+			double BestOverlap = 0.0;
+			for (FFacadePartitionPlan& Partition : Plan.FacadePartitions)
+			{
+				if (Partition.ComponentId != Raw.ComponentId
+					|| Partition.FaceMask != Raw.FaceMask
+					|| !FMath::IsNearlyEqual(Partition.FacadeCoordinateCM,
+						Raw.FacadeCoordinateCM, GeometryToleranceCM)
+					|| (Partition.LastCourseIndexExclusive != Raw.CourseIndex
+						&& Partition.LastCourseIndexExclusive != Raw.CourseIndex + 1))
+				{
+					continue;
+				}
+				double Overlap = 0.0;
+				for (const FFacadePartitionCourseSpan& Span : Partition.CourseSpans)
+				{
+					if (Span.CourseIndex == Raw.CourseIndex - 1
+						|| Span.CourseIndex == Raw.CourseIndex)
+					{
+						Overlap = FMath::Max(Overlap, FMath::Min(Span.TangentMaximumCM,
+							Raw.TangentMaximumCM) - FMath::Max(Span.TangentMinimumCM,
+							Raw.TangentMinimumCM));
+					}
+				}
+				if (Overlap > BestOverlap + GeometryToleranceCM)
+				{
+					BestOverlap = Overlap;
+					SelectedPartition = &Partition;
+				}
+			}
+			if (SelectedPartition == nullptr)
+			{
+				SelectedPartition = &Plan.FacadePartitions.AddDefaulted_GetRef();
+				SelectedPartition->PartitionId = Plan.FacadePartitions.Num() - 1;
+				SelectedPartition->ComponentId = Raw.ComponentId;
+				SelectedPartition->FaceMask = Raw.FaceMask;
+				SelectedPartition->FacadeCoordinateCM = Raw.FacadeCoordinateCM;
+				SelectedPartition->TangentMinimumCM = Raw.TangentMinimumCM;
+				SelectedPartition->TangentMaximumCM = Raw.TangentMaximumCM;
+				SelectedPartition->FirstCourseIndex = Raw.CourseIndex;
+				SelectedPartition->LastCourseIndexExclusive = Raw.CourseIndex;
+			}
+			SelectedPartition->TangentMinimumCM = FMath::Min(
+				SelectedPartition->TangentMinimumCM, Raw.TangentMinimumCM);
+			SelectedPartition->TangentMaximumCM = FMath::Max(
+				SelectedPartition->TangentMaximumCM, Raw.TangentMaximumCM);
+			SelectedPartition->LastCourseIndexExclusive = FMath::Max(
+				SelectedPartition->LastCourseIndexExclusive, Raw.CourseIndex + 1);
+			FFacadePartitionCourseSpan& Span =
+				SelectedPartition->CourseSpans.AddDefaulted_GetRef();
+			Span.CourseIndex = Raw.CourseIndex;
+			Span.SourceVolumeId = Raw.SourceVolumeId;
+			Span.TangentMinimumCM = Raw.TangentMinimumCM;
+			Span.TangentMaximumCM = Raw.TangentMaximumCM;
+		}
+		for (FFacadePartitionPlan& Partition : Plan.FacadePartitions)
+		{
+			for (const FCoreCellPlan& Core : Plan.CoreCells)
+			{
+				const bool bTouchesPartition = Core.PerimeterFaceExposures.ContainsByPredicate(
+					[&Partition](const FPerimeterFaceExposure& Exposure)
+					{
+						if (Exposure.FaceMask != Partition.FaceMask
+							|| !FMath::IsNearlyEqual(Exposure.FacadeCoordinateCM,
+								Partition.FacadeCoordinateCM, GeometryToleranceCM))
+						{
+							return false;
+						}
+						return Partition.CourseSpans.ContainsByPredicate(
+							[&Exposure](const FFacadePartitionCourseSpan& Span)
+							{
+								return Span.CourseIndex == Exposure.CourseIndex
+									&& FMath::Min(Span.TangentMaximumCM,
+										Exposure.TangentMaximumCM)
+										- FMath::Max(Span.TangentMinimumCM,
+											Exposure.TangentMinimumCM) > GeometryToleranceCM;
+							});
+					});
+				if (bTouchesPartition)
+				{
+					Partition.PerimeterCoreCellIds.AddUnique(Core.CoreCellId);
+				}
+			}
+		}
+		Plan.Summary.FacadePartitionCount = Plan.FacadePartitions.Num();
+
 		auto MemberPenetratesPlan = [&Plan](const FPlannedMember& Probe)
 		{
 			const FBox ProbeBounds = PlannedMemberBounds(Probe);
@@ -8785,7 +9148,8 @@ namespace
 			return false;
 		};
 
-		auto BuildOneCourse = [&Plan, &Roots, &MemberPenetratesPlan,
+		auto BuildOneCourse = [&Plan, &Roots, &FacadeVolumesByComponent,
+			&FacadeBoundsByComponent, &MemberPenetratesPlan,
 			&CouplingEntersOtherCore](
 			const FCoreCellPlan& Core, const int32 Course,
 			const int32 CrossStation, const uint8 FaceMask,
@@ -8819,7 +9183,7 @@ namespace
 			const double CoreOuterFaceCM = AnchorCM
 				+ DirectionSign * BlockUnitsCM * 0.5;
 			const double ComponentCenterCM =
-				Plan.Components[Core.ComponentId].BodyBounds.GetCenter()[AxisIndex];
+				FacadeBoundsByComponent[Core.ComponentId].GetCenter()[AxisIndex];
 			// A face label alone does not prove an outward coupling.  An origin core
 			// on the opposite half would first traverse the building interior.
 			if (DirectionSign * (CoreOuterFaceCM - ComponentCenterCM)
@@ -8853,13 +9217,15 @@ namespace
 			}
 
 			TArray<FBox> AllowedBoxes;
-			for (const FABTSM73DAG5BV2Volume* Volume : Roots[Core.ComponentId].BodyVolumes)
+			for (const FResolvedFacadeEnvelopeVolume* Volume
+				: FacadeVolumesByComponent[Core.ComponentId])
 			{
 				AllowedBoxes.Add(Volume->LocalBounds.ExpandBy(
 					BlockUnitsCM * 0.5 + GeometryToleranceCM));
 			}
-			TArray<const FABTSM73DAG5BV2Volume*> Targets;
-			for (const FABTSM73DAG5BV2Volume* Volume : Roots[Core.ComponentId].BodyVolumes)
+			TArray<const FResolvedFacadeEnvelopeVolume*> Targets;
+			for (const FResolvedFacadeEnvelopeVolume* Volume
+				: FacadeVolumesByComponent[Core.ComponentId])
 			{
 				if (Volume == nullptr
 					|| Z < Volume->LocalBounds.Min.Z - GeometryToleranceCM
@@ -8874,8 +9240,8 @@ namespace
 				Targets.Add(Volume);
 			}
 			Targets.Sort([bXAxis, bPositive](
-				const FABTSM73DAG5BV2Volume& A,
-				const FABTSM73DAG5BV2Volume& B)
+				const FResolvedFacadeEnvelopeVolume& A,
+				const FResolvedFacadeEnvelopeVolume& B)
 			{
 				const int32 AxisIndex = bXAxis ? 0 : 1;
 				const double AFace = bPositive
@@ -8885,7 +9251,7 @@ namespace
 				return bPositive ? AFace > BFace : AFace < BFace;
 			});
 
-			for (const FABTSM73DAG5BV2Volume* Target : Targets)
+			for (const FResolvedFacadeEnvelopeVolume* Target : Targets)
 			{
 				const double FacadeCM = bPositive
 					? Target->LocalBounds.Max[AxisIndex] : Target->LocalBounds.Min[AxisIndex];
@@ -8908,7 +9274,7 @@ namespace
 				Candidate.CoreCellId = Core.CoreCellId;
 				Candidate.CourseIndex = Course;
 				Candidate.ParentMemberIndex = Parent;
-				Candidate.TargetSourceVolumeId = Target->VolumeId;
+				Candidate.TargetSourceVolumeId = Target->SourceVolumeId;
 				Candidate.CrossStation = CrossStation;
 				Candidate.AnchorStation = AnchorStation;
 				Candidate.FaceMask = FaceMask;
@@ -8948,68 +9314,119 @@ namespace
 			return !OutCandidates.IsEmpty();
 		};
 
-		static constexpr uint8 FaceBits[] = {NegativeX, PositiveX, NegativeY, PositiveY};
 		int32 AnchorBandId = 0;
-		for (const uint8 FaceMask : FaceBits)
+		for (FFacadePartitionPlan& Partition : Plan.FacadePartitions)
 		{
+			const uint8 FaceMask = Partition.FaceMask;
 			const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
-			bool bFound = false;
-			FStage2CourseCandidate Selected[2];
-			for (int32 RolePass = 0; RolePass < 2 && !bFound; ++RolePass)
+			const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
+			const int32 AxisIndex = bXAxis ? 0 : 1;
+			const int32 HeightCourses = FMath::Max(1,
+				Partition.LastCourseIndexExclusive - Partition.FirstCourseIndex);
+			const int32 DesiredBandCount = FMath::Clamp(
+				FMath::DivideAndRoundUp(HeightCourses, 18), 1, 3);
+			TArray<int32> SelectedBaseCourses;
+			for (int32 DesiredIndex = 0; DesiredIndex < DesiredBandCount; ++DesiredIndex)
 			{
-				for (const FCoreCellPlan& Core : Plan.CoreCells)
+				const double DesiredCourse = Partition.FirstCourseIndex
+					+ (DesiredIndex + 1.0) * HeightCourses / (DesiredBandCount + 1.0);
+				TArray<int32> BaseCourseCandidates;
+				for (int32 Course = Partition.FirstCourseIndex;
+					Course + 2 < Partition.LastCourseIndexExclusive; ++Course)
 				{
-					const bool bPreferredMain = Core.HierarchyRole == ECoreHierarchyRole::PodiumMain;
-					if ((RolePass == 0) != bPreferredMain || Core.TopCourseIndex < 4)
+					if ((((Course & 1) == 0) == bXAxis)
+						&& Partition.CourseSpans.ContainsByPredicate(
+							[Course](const FFacadePartitionCourseSpan& Span)
+							{
+								return Span.CourseIndex == Course;
+							})
+						&& Partition.CourseSpans.ContainsByPredicate(
+							[Course](const FFacadePartitionCourseSpan& Span)
+							{
+								return Span.CourseIndex == Course + 2;
+							}))
+					{
+						BaseCourseCandidates.Add(Course);
+					}
+				}
+				BaseCourseCandidates.Sort([DesiredCourse](const int32 A, const int32 B)
+				{
+					const double DA = FMath::Abs(A - DesiredCourse);
+					const double DB = FMath::Abs(B - DesiredCourse);
+					return !FMath::IsNearlyEqual(DA, DB) ? DA < DB : A > B;
+				});
+				bool bFound = false;
+				FStage2CourseCandidate Selected[2];
+				int32 SelectedBaseCourse = INDEX_NONE;
+				for (const int32 BaseCourse : BaseCourseCandidates)
+				{
+					if (SelectedBaseCourses.ContainsByPredicate(
+						[BaseCourse](const int32 Existing)
+						{
+							return FMath::Abs(Existing - BaseCourse) < 6;
+						}))
 					{
 						continue;
 					}
-					const TArray<int32>& ExistingCrossStations =
-						bXAxis ? Core.YStations : Core.XStations;
-					const int32 CrossMinimum = bXAxis
-						? FMath::CeilToInt(Core.LocalBounds.Min.Y / BlockUnitsCM)
-						: FMath::CeilToInt(Core.LocalBounds.Min.X / BlockUnitsCM);
-					const int32 CrossMaximum = bXAxis
-						? FMath::FloorToInt(Core.LocalBounds.Max.Y / BlockUnitsCM)
-						: FMath::FloorToInt(Core.LocalBounds.Max.X / BlockUnitsCM);
-					TArray<int32> CrossCandidates;
-					for (int32 Station = CrossMinimum; Station <= CrossMaximum; ++Station)
+					for (int32 RolePass = 0; RolePass < 2 && !bFound; ++RolePass)
 					{
-						if (!ExistingCrossStations.Contains(Station))
+						for (const FCoreCellPlan& Core : Plan.CoreCells)
 						{
-							CrossCandidates.Add(Station);
-						}
-					}
-					CrossCandidates.Sort([CrossMinimum, CrossMaximum](const int32 A, const int32 B)
-					{
-						const int32 CenterTwice = CrossMinimum + CrossMaximum;
-						const int32 DA = FMath::Abs(A * 2 - CenterTwice);
-						const int32 DB = FMath::Abs(B * 2 - CenterTwice);
-						return DA != DB ? DA < DB : A < B;
-					});
-					for (const int32 CrossStation : CrossCandidates)
-					{
-						for (int32 BaseCourse = Core.TopCourseIndex - 3;
-							BaseCourse >= 1; --BaseCourse)
-						{
-							if (((BaseCourse & 1) == 0) != bXAxis)
+							const bool bPreferredMain = Core.HierarchyRole
+								== ECoreHierarchyRole::PodiumMain;
+							if ((RolePass == 0) != bPreferredMain
+								|| Core.ComponentId != Partition.ComponentId
+								|| Core.TopCourseIndex <= BaseCourse + 2)
 							{
 								continue;
 							}
-							TArray<FStage2CourseCandidate> LowerCandidates;
-							TArray<FStage2CourseCandidate> UpperCandidates;
-							if (BuildOneCourse(Core, BaseCourse, CrossStation, FaceMask,
-									LowerCandidates)
-								&& BuildOneCourse(Core, BaseCourse + 2, CrossStation, FaceMask,
-									UpperCandidates))
+							const TArray<int32>& ExistingCrossStations =
+								bXAxis ? Core.YStations : Core.XStations;
+							const int32 CrossMinimum = bXAxis
+								? FMath::CeilToInt(Core.LocalBounds.Min.Y / BlockUnitsCM)
+								: FMath::CeilToInt(Core.LocalBounds.Min.X / BlockUnitsCM);
+							const int32 CrossMaximum = bXAxis
+								? FMath::FloorToInt(Core.LocalBounds.Max.Y / BlockUnitsCM)
+								: FMath::FloorToInt(Core.LocalBounds.Max.X / BlockUnitsCM);
+							TArray<int32> CrossCandidates;
+							for (int32 Station = CrossMinimum; Station <= CrossMaximum; ++Station)
 							{
-								const int32 AxisIndex = bXAxis ? 0 : 1;
-								const bool bPositive = FaceMask == PositiveX
-									|| FaceMask == PositiveY;
+								const double CrossCM = Station * static_cast<double>(BlockUnitsCM);
+								if (!ExistingCrossStations.Contains(Station)
+									&& CrossCM >= Partition.TangentMinimumCM - GeometryToleranceCM
+									&& CrossCM <= Partition.TangentMaximumCM + GeometryToleranceCM)
+								{
+									CrossCandidates.Add(Station);
+								}
+							}
+							CrossCandidates.Sort([&Partition](const int32 A, const int32 B)
+							{
+								const double Center = (Partition.TangentMinimumCM
+									+ Partition.TangentMaximumCM) * 0.5 / BlockUnitsCM;
+								const double DA = FMath::Abs(A - Center);
+								const double DB = FMath::Abs(B - Center);
+								return !FMath::IsNearlyEqual(DA, DB) ? DA < DB : A < B;
+							});
+							for (const int32 CrossStation : CrossCandidates)
+							{
+								TArray<FStage2CourseCandidate> LowerCandidates;
+								TArray<FStage2CourseCandidate> UpperCandidates;
+								if (!BuildOneCourse(Core, BaseCourse, CrossStation, FaceMask,
+										LowerCandidates)
+									|| !BuildOneCourse(Core, BaseCourse + 2, CrossStation, FaceMask,
+										UpperCandidates))
+								{
+									continue;
+								}
 								for (const FStage2CourseCandidate& Lower : LowerCandidates)
 								{
 									const double LowerEndpoint = bPositive
 										? Lower.End[AxisIndex] : Lower.Start[AxisIndex];
+									if (!FMath::IsNearlyEqual(LowerEndpoint,
+										Partition.FacadeCoordinateCM, GeometryToleranceCM))
+									{
+										continue;
+									}
 									const FStage2CourseCandidate* Upper =
 										UpperCandidates.FindByPredicate(
 											[AxisIndex, bPositive, LowerEndpoint](
@@ -9025,58 +9442,72 @@ namespace
 									{
 										Selected[0] = Lower;
 										Selected[1] = *Upper;
+										SelectedBaseCourse = BaseCourse;
 										bFound = true;
 										break;
 									}
 								}
 								if (bFound) break;
 							}
+							if (bFound) break;
 						}
-						if (bFound) break;
 					}
 					if (bFound) break;
 				}
-			}
-			if (!bFound)
-			{
-				// A missing outward-facing origin is an honest sparse result at this
-				// first Stage-2 stop.  Filling the face from a core on the opposite
-				// building half would create the visually useless inward course which
-				// this boundary explicitly rejects.  Coverage expansion is a separate
-				// facade-demand pass and must not be faked here.
-				continue;
-			}
-			for (const FStage2CourseCandidate& Candidate : Selected)
-			{
-				const int32 MemberIndex = Plan.Members.Num();
-				if (!AddPlannedMember(Plan, EOwnerKind::CoreCell,
-					ESkeletonMemberKind::ThroughCourse, Candidate.CoreCellId,
-					Plan.CoreCells[Candidate.CoreCellId].ComponentId,
-					Candidate.TargetSourceVolumeId, Candidate.CoreCellId,
-					Candidate.CourseIndex, Candidate.CrossStation,
-					Candidate.AnchorStation, Candidate.FaceMask, Candidate.Axis,
-					Candidate.Axis == EABTSM73BeamAFrameAxis::X
-						? EABTSM73BeamAMemberRole::PrimaryBeam
-						: EABTSM73BeamAMemberRole::SecondaryBeam,
-					Candidate.Start, Candidate.End, OutError))
+				if (!bFound)
 				{
-					return false;
+					continue;
 				}
-				FPlannedMember& Member = Plan.Members[MemberIndex];
-				Member.ParentStage1MemberIndex = Candidate.ParentMemberIndex;
-				Member.AnchorBandId = AnchorBandId;
-				Member.TargetFacadeSourceVolumeId = Candidate.TargetSourceVolumeId;
-				Member.RequiredLowerMemberIndices.Add(Candidate.ParentMemberIndex);
-				Member.RequiredInwardMemberIndices.Add(Candidate.ParentMemberIndex);
-				++Plan.Summary.CouplingCourseCount;
-				Plan.Summary.CouplingFaceMask |= Candidate.FaceMask;
-				Plan.Summary.TotalMemberLengthCM += FVector::Distance(
-					Candidate.Start, Candidate.End);
+				FFacadeHeightAnchorBand Band;
+				Band.AnchorBandId = AnchorBandId;
+				Band.FacadePartitionId = Partition.PartitionId;
+				Band.OriginCoreCellId = Selected[0].CoreCellId;
+				Band.BaseCourseIndex = SelectedBaseCourse;
+				Band.FaceMask = FaceMask;
+				Band.FacadeCoordinateCM = Partition.FacadeCoordinateCM;
+				Band.TangentCoordinateCM = Selected[0].CrossStation
+					* static_cast<double>(BlockUnitsCM);
+				for (int32 Offset = 0; Offset < 2; ++Offset)
+				{
+					const FStage2CourseCandidate& Candidate = Selected[Offset];
+					const int32 MemberIndex = Plan.Members.Num();
+					if (!AddPlannedMember(Plan, EOwnerKind::CoreCell,
+						ESkeletonMemberKind::ThroughCourse, Candidate.CoreCellId,
+						Plan.CoreCells[Candidate.CoreCellId].ComponentId,
+						Candidate.TargetSourceVolumeId, Candidate.CoreCellId,
+						Candidate.CourseIndex, Candidate.CrossStation,
+						Candidate.AnchorStation, Candidate.FaceMask, Candidate.Axis,
+						Candidate.Axis == EABTSM73BeamAFrameAxis::X
+							? EABTSM73BeamAMemberRole::PrimaryBeam
+							: EABTSM73BeamAMemberRole::SecondaryBeam,
+						Candidate.Start, Candidate.End, OutError))
+					{
+						return false;
+					}
+					FPlannedMember& Member = Plan.Members[MemberIndex];
+					Member.ParentStage1MemberIndex = Candidate.ParentMemberIndex;
+					Member.AnchorBandId = AnchorBandId;
+					Member.FacadePartitionId = Partition.PartitionId;
+					Member.TargetFacadeSourceVolumeId = Candidate.TargetSourceVolumeId;
+					Member.RequiredLowerMemberIndices.Add(Candidate.ParentMemberIndex);
+					Member.RequiredInwardMemberIndices.Add(Candidate.ParentMemberIndex);
+					if (Offset == 0) Band.LowerMemberIndex = MemberIndex;
+					else Band.UpperMemberIndex = MemberIndex;
+					++Plan.Summary.CouplingCourseCount;
+					Plan.Summary.CouplingFaceMask |= Candidate.FaceMask;
+					Plan.Summary.TotalMemberLengthCM += FVector::Distance(
+						Candidate.Start, Candidate.End);
+				}
+				Partition.AnchorBandIds.Add(AnchorBandId);
+				Plan.FacadeHeightAnchorBands.Add(Band);
+				SelectedBaseCourses.Add(SelectedBaseCourse);
+				++AnchorBandId;
 			}
-			++AnchorBandId;
 		}
+		Plan.Summary.FacadeHeightAnchorBandCount = Plan.FacadeHeightAnchorBands.Num();
 
 		TMap<int32, double> BandEndpointCoordinates;
+		TMap<int32, int32> BandMemberCounts;
 		for (int32 MemberIndex = Stage1MemberCount; MemberIndex < Plan.Members.Num(); ++MemberIndex)
 		{
 			const FPlannedMember& Member = Plan.Members[MemberIndex];
@@ -9124,26 +9555,66 @@ namespace
 			{
 				BandEndpointCoordinates.Add(Member.AnchorBandId, Endpoint);
 			}
+			++BandMemberCounts.FindOrAdd(Member.AnchorBandId);
+		}
+		for (const FFacadePartitionPlan& Partition : Plan.FacadePartitions)
+		{
+			Plan.Summary.FacadePartitionWithPerimeterCoreCount +=
+				Partition.PerimeterCoreCellIds.IsEmpty() ? 0 : 1;
+			Plan.Summary.FacadePartitionWithHeightAnchorCount +=
+				Partition.AnchorBandIds.IsEmpty() ? 0 : 1;
+			Plan.Summary.DeferredFacadePartitionCount +=
+				Partition.PerimeterCoreCellIds.IsEmpty()
+					&& Partition.AnchorBandIds.IsEmpty() ? 1 : 0;
+			for (const int32 BandId : Partition.AnchorBandIds)
+			{
+				const FFacadeHeightAnchorBand* Band =
+					Plan.FacadeHeightAnchorBands.FindByPredicate(
+						[BandId, &Partition](const FFacadeHeightAnchorBand& Candidate)
+						{
+							return Candidate.AnchorBandId == BandId
+								&& Candidate.FacadePartitionId == Partition.PartitionId;
+						});
+				Plan.Summary.FacadePartitionBindingViolationCount += Band == nullptr
+					|| Band->LowerMemberIndex == INDEX_NONE
+					|| Band->UpperMemberIndex == INDEX_NONE ? 1 : 0;
+			}
+		}
+		for (const FFacadeHeightAnchorBand& Band : Plan.FacadeHeightAnchorBands)
+		{
+			const FFacadePartitionPlan* Partition = Plan.FacadePartitions.FindByPredicate(
+				[&Band](const FFacadePartitionPlan& Candidate)
+				{
+					return Candidate.PartitionId == Band.FacadePartitionId;
+				});
+			Plan.Summary.FacadePartitionBindingViolationCount += Partition == nullptr
+				|| !BandMemberCounts.Contains(Band.AnchorBandId)
+				|| BandMemberCounts[Band.AnchorBandId] != 2 ? 1 : 0;
 		}
 		if (Plan.Summary.CouplingCourseCount <= 0
 			|| (Plan.Summary.CouplingCourseCount & 1) != 0
 			|| Plan.Summary.CouplingCourseCount
-				!= FMath::CountBits(static_cast<uint32>(
-					Plan.Summary.CouplingFaceMask)) * 2
+				!= Plan.Summary.FacadeHeightAnchorBandCount * 2
 			|| Plan.Summary.CouplingParentViolationCount != 0
 			|| Plan.Summary.CouplingEndpointViolationCount != 0
 			|| Plan.Summary.CouplingOutwardViolationCount != 0
 			|| Plan.Summary.CouplingOtherCoreViolationCount != 0
-			|| Plan.Summary.CouplingBandEndpointViolationCount != 0)
+			|| Plan.Summary.CouplingBandEndpointViolationCount != 0
+			|| Plan.Summary.FacadePartitionCount <= 0
+			|| Plan.Summary.FacadePartitionBindingViolationCount != 0)
 		{
 			OutError = FString::Printf(
-				TEXT("BeamC3V3Stage2ContractFailed:Courses=%d:Faces=%u:ParentViolations=%d:EndpointViolations=%d:OutwardViolations=%d:OtherCoreViolations=%d:BandEndpointViolations=%d"),
+				TEXT("BeamC3V3Stage2ContractFailed:Courses=%d:Faces=%u:ParentViolations=%d:EndpointViolations=%d:OutwardViolations=%d:OtherCoreViolations=%d:BandEndpointViolations=%d:Partitions=%d:Anchors=%d:Deferred=%d:PartitionBindingViolations=%d"),
 				Plan.Summary.CouplingCourseCount, Plan.Summary.CouplingFaceMask,
 				Plan.Summary.CouplingParentViolationCount,
 				Plan.Summary.CouplingEndpointViolationCount,
 				Plan.Summary.CouplingOutwardViolationCount,
 				Plan.Summary.CouplingOtherCoreViolationCount,
-				Plan.Summary.CouplingBandEndpointViolationCount);
+				Plan.Summary.CouplingBandEndpointViolationCount,
+				Plan.Summary.FacadePartitionCount,
+				Plan.Summary.FacadeHeightAnchorBandCount,
+				Plan.Summary.DeferredFacadePartitionCount,
+				Plan.Summary.FacadePartitionBindingViolationCount);
 			return false;
 		}
 		Plan.Summary.PenetrationCount = 0;
@@ -9159,7 +9630,9 @@ namespace
 		}
 		Plan.Summary.PlannedMemberCount = Plan.Members.Num();
 		Plan.Summary.PlannedSeatCount += Plan.Summary.CouplingCourseCount;
-		FString Stage2Canonical = FString::Printf(TEXT("Stage1=%lld"), Stage1GeometryHash);
+		FString Stage2Canonical = FString::Printf(
+			TEXT("Stage1=%lld:FacadeEnvelope=%lld"), Stage1GeometryHash,
+			Plan.Summary.Stage2InputFacadeEnvelopeHash);
 		for (const FCoreCellPlan& Core : Plan.CoreCells)
 		{
 			Stage2Canonical += FString::Printf(TEXT(":P%d=%u"),
@@ -9174,6 +9647,23 @@ namespace
 					Exposure.CourseIndex, Exposure.FaceMask, Exposure.SourceVolumeId,
 					Exposure.FacadeCoordinateCM, Exposure.TangentMinimumCM,
 					Exposure.TangentMaximumCM);
+			}
+		}
+		for (const FFacadePartitionPlan& Partition : Plan.FacadePartitions)
+		{
+			Stage2Canonical += FString::Printf(
+				TEXT(":F%d=%d,%u,%.3f,%.3f,%.3f,%d,%d"),
+				Partition.PartitionId, Partition.ComponentId, Partition.FaceMask,
+				Partition.FacadeCoordinateCM, Partition.TangentMinimumCM,
+				Partition.TangentMaximumCM, Partition.FirstCourseIndex,
+				Partition.LastCourseIndexExclusive);
+			for (const int32 BandId : Partition.AnchorBandIds)
+			{
+				Stage2Canonical += FString::Printf(TEXT("/A%d"), BandId);
+			}
+			for (const int32 CoreId : Partition.PerimeterCoreCellIds)
+			{
+				Stage2Canonical += FString::Printf(TEXT("/C%d"), CoreId);
 			}
 		}
 		for (int32 MemberIndex = Stage1MemberCount; MemberIndex < Plan.Members.Num(); ++MemberIndex)
@@ -19023,6 +19513,14 @@ namespace
 			{
 				return false;
 			}
+			// Publish the only semantic shell authority Stage 2 may consume. Raised
+			// main reservations are intentionally excluded from CollectRoots so they
+			// cannot rewrite the original WFC support-demand DAG, but they are solid
+			// facade bodies after Stage 1 approves the local podium height plan.
+			if (!BuildResolvedFacadeEnvelopeAuthority(Roots, OutPlan, OutError))
+			{
+				return false;
+			}
 			OutPlan.Summary.ExplicitCoreCellCount = OutPlan.CoreCells.Num();
 			OutPlan.Summary.CoreCellCount = OutPlan.CoreCells.Num();
 			OutPlan.Summary.PodiumMainCoreCellCount = 0;
@@ -19855,8 +20353,10 @@ namespace
 			return false;
 		}
 
-		FString CoreCanonical = FString::Printf(TEXT("Recipe:%d:H=%d:V=%d"),
-			Density.RecipeId, Density.HorizontalUnits, Density.VerticalUnits);
+		FString CoreCanonical = FString::Printf(
+			TEXT("Recipe:%d:H=%d:V=%d:FacadeEnvelope=%lld"),
+			Density.RecipeId, Density.HorizontalUnits, Density.VerticalUnits,
+			OutPlan.Summary.ResolvedFacadeEnvelopeHash);
 		FString SupportCanonical;
 		FString FinalCanonical;
 		for (const FComponentPlan& Component : OutPlan.Components)

@@ -42,7 +42,8 @@ enum class EABTSM73BeamC3Stage2DiagnosticLayer : uint8
 	CouplingCoursesOnly UMETA(DisplayName = "1 - Coupling Courses Only"),
 	CouplingProvenance UMETA(DisplayName = "2 - Coupling Provenance"),
 	CoreAndCouplingCourses UMETA(DisplayName = "3 - Core + Coupling Courses"),
-	PerimeterCoreFaces UMETA(DisplayName = "4 - Perimeter Cores / Touched Faces")
+	PerimeterCoreFaces UMETA(DisplayName = "4 - Perimeter Cores / Touched Faces"),
+	FacadePartitionsAndHeightAnchors UMETA(DisplayName = "5 - Facade Partitions / Height Anchors")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -594,6 +595,39 @@ struct FABTSM73BeamD1Summary
 	/** Double-course bands whose two facade endpoints do not coincide. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
 	int32 SkeletonFirstCouplingBandEndpointViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstResolvedFacadeEnvelopeVolumeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstResolvedFacadeEnvelopeRaisedVolumeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstResolvedFacadeEnvelopeBindingViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int64 SkeletonFirstResolvedFacadeEnvelopeHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int64 SkeletonFirstStage2InputFacadeEnvelopeHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstFacadePartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstFacadePartitionWithPerimeterCoreCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstFacadePartitionWithHeightAnchorCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstDeferredFacadePartitionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstFacadeHeightAnchorBandCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstFacadePartitionBindingViolationCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
 	int32 SkeletonFirstPerimeterCoreCount = 0;

@@ -381,6 +381,91 @@ namespace ABTSM73BeamC3V3Tests
 		return true;
 	}
 
+	bool Stage2FacadePartitionLedgerIsClosed(
+		const ABTSM73BeamC3V3::FPlan& Plan)
+	{
+		if (Plan.FacadePartitions.IsEmpty()
+			|| Plan.Summary.FacadePartitionCount != Plan.FacadePartitions.Num()
+			|| Plan.Summary.FacadeHeightAnchorBandCount
+				!= Plan.FacadeHeightAnchorBands.Num())
+		{
+			return false;
+		}
+		TSet<int32> SeenBandIds;
+		for (const ABTSM73BeamC3V3::FFacadePartitionPlan& Partition
+			: Plan.FacadePartitions)
+		{
+			if (Partition.PartitionId < 0 || Partition.CourseSpans.IsEmpty()
+				|| Partition.FirstCourseIndex < 0
+				|| Partition.LastCourseIndexExclusive <= Partition.FirstCourseIndex
+				|| Partition.TangentMaximumCM - Partition.TangentMinimumCM
+					<= SkeletonV3TestGeometryToleranceCM)
+			{
+				return false;
+			}
+			for (const int32 BandId : Partition.AnchorBandIds)
+			{
+				const ABTSM73BeamC3V3::FFacadeHeightAnchorBand* Band =
+					Plan.FacadeHeightAnchorBands.FindByPredicate(
+						[BandId, &Partition](
+							const ABTSM73BeamC3V3::FFacadeHeightAnchorBand& Candidate)
+						{
+							return Candidate.AnchorBandId == BandId
+								&& Candidate.FacadePartitionId == Partition.PartitionId;
+						});
+				if (Band == nullptr || SeenBandIds.Contains(BandId)
+					|| !Plan.Members.IsValidIndex(Band->LowerMemberIndex)
+					|| !Plan.Members.IsValidIndex(Band->UpperMemberIndex)
+					|| Plan.Members[Band->LowerMemberIndex].FacadePartitionId
+						!= Partition.PartitionId
+					|| Plan.Members[Band->UpperMemberIndex].FacadePartitionId
+						!= Partition.PartitionId)
+				{
+					return false;
+				}
+				SeenBandIds.Add(BandId);
+			}
+		}
+		return SeenBandIds.Num() == Plan.FacadeHeightAnchorBands.Num();
+	}
+
+	bool Stage2ResolvedFacadeEnvelopeIsClosed(
+		const ABTSM73BeamC3V3::FPlan& Plan)
+	{
+		if (Plan.ResolvedFacadeEnvelopeVolumes.IsEmpty()
+			|| Plan.Summary.ResolvedFacadeEnvelopeVolumeCount
+				!= Plan.ResolvedFacadeEnvelopeVolumes.Num()
+			|| Plan.Summary.ResolvedFacadeEnvelopeRaisedVolumeCount
+				!= Plan.RaisedMainReservations.Num()
+			|| Plan.Summary.ResolvedFacadeEnvelopeBindingViolationCount != 0
+			|| Plan.Summary.ResolvedFacadeEnvelopeHash == 0
+			|| Plan.Summary.Stage2InputFacadeEnvelopeHash
+				!= Plan.Summary.ResolvedFacadeEnvelopeHash)
+		{
+			return false;
+		}
+		for (const FABTSM73DAG5BV2RaisedMainReservation& Reservation
+			: Plan.RaisedMainReservations)
+		{
+			int32 MatchCount = 0;
+			for (const ABTSM73BeamC3V3::FResolvedFacadeEnvelopeVolume& Volume
+				: Plan.ResolvedFacadeEnvelopeVolumes)
+			{
+				MatchCount += Volume.bRaisedPodiumBody
+					&& Volume.ComponentId == Reservation.ComponentId
+					&& Volume.SourceVolumeId == Reservation.SourceVolumeId
+					&& Volume.LocalBounds.Equals(Reservation.CoreBounds,
+						SkeletonV3TestGeometryToleranceCM)
+					? 1 : 0;
+			}
+			if (MatchCount != 1)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	double SkeletonV3TestOverlapLength(
 		const double MinimumA,
 		const double MaximumA,
@@ -4155,8 +4240,7 @@ bool FABTSM73BeamC3StagedStage2BoundaryTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Stage 2 appends only complete double-course outward bands"),
 		Plan.Summary.CouplingCourseCount > 0
 			&& Plan.Summary.CouplingCourseCount
-				== FMath::CountBits(static_cast<uint32>(
-					Plan.Summary.CouplingFaceMask)) * 2);
+				== Plan.Summary.FacadeHeightAnchorBandCount * 2);
 	TestEqual(TEXT("Every coupling retains an immutable Stage-1 parent"),
 		Plan.Summary.CouplingParentViolationCount, 0);
 	TestEqual(TEXT("Every coupling terminates on its declared WFC face"),
@@ -4175,6 +4259,11 @@ bool FABTSM73BeamC3StagedStage2BoundaryTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Perimeter ledger retains only unoccluded course intervals"),
 		Plan.Summary.PerimeterFaceExposureSpanCount > 0
 			&& Stage2PerimeterExposureLedgerIsUnoccluded(Plan));
+	TestTrue(TEXT("Facade partitions and height anchors close their identity ledger"),
+		Plan.Summary.FacadePartitionBindingViolationCount == 0
+			&& Stage2FacadePartitionLedgerIsClosed(Plan));
+	TestTrue(TEXT("Stage 2 consumes the exact Stage-1 raised-podium facade envelope"),
+		Stage2ResolvedFacadeEnvelopeIsClosed(Plan));
 	TestNotEqual(TEXT("Stage-1 input identity is retained"),
 		Plan.Summary.Stage1InputGeometryHash, int64(0));
 	TestNotEqual(TEXT("Stage-2 delta identity is published"),
@@ -4199,6 +4288,58 @@ bool FABTSM73BeamC3StagedStage2BoundaryTest::RunTest(const FString& Parameters)
 				static_cast<int32>(Member.ProducedStage)
 					<= static_cast<int32>(EABTSM73BeamC3GenerationStage::CoreAndShared));
 		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedStage2RaisedPodiumFacadeEnvelopeTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.Stage2RaisedPodiumFacadeEnvelope",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3StagedStage2RaisedPodiumFacadeEnvelopeTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	for (const int32 Seed : {730000, 750000})
+	{
+		FABTSM73BeamD1StagePreviewResult Result;
+		FString Error;
+		const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+			MakeD1Settings({TEXT("TipOver"), 5, Seed}),
+			EABTSM73BeamC3GenerationStage::CouplingCourses, Result, Error);
+		TestTrue(*FString::Printf(TEXT("TipOver E6 seed %d Stage 2 generates: %s"),
+			Seed, *Error), bGenerated);
+		if (!bGenerated)
+		{
+			continue;
+		}
+		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+		TestTrue(*FString::Printf(
+			TEXT("TipOver E6 seed %d closes the final facade-envelope identity"), Seed),
+			Stage2ResolvedFacadeEnvelopeIsClosed(Plan));
+		bool bRaisedBodyContributesFacadeAboveOriginalPodium = false;
+		for (const FABTSM73DAG5BV2RaisedMainReservation& Reservation
+			: Plan.RaisedMainReservations)
+		{
+			for (const ABTSM73BeamC3V3::FFacadePartitionPlan& Partition
+				: Plan.FacadePartitions)
+			{
+				bRaisedBodyContributesFacadeAboveOriginalPodium |=
+					Partition.ComponentId == Reservation.ComponentId
+					&& Partition.CourseSpans.ContainsByPredicate(
+						[&Reservation](
+							const ABTSM73BeamC3V3::FFacadePartitionCourseSpan& Span)
+						{
+							return Span.SourceVolumeId == Reservation.SourceVolumeId
+								&& Span.CourseIndex
+									>= Reservation.OriginalTopCourse;
+						});
+			}
+		}
+		TestTrue(*FString::Printf(
+			TEXT("TipOver E6 seed %d raised podium contributes an actual facade span above its original top"),
+			Seed), bRaisedBodyContributesFacadeAboveOriginalPodium);
 	}
 	return true;
 }
@@ -4263,8 +4404,7 @@ bool FABTSM73BeamC3StagedStage2MatrixTest::RunTest(const FString& Parameters)
 	Check(TEXT("emits only complete outward double-course facade anchors"),
 		Plan.Summary.CouplingCourseCount > 0
 			&& Plan.Summary.CouplingCourseCount
-				== FMath::CountBits(static_cast<uint32>(
-					Plan.Summary.CouplingFaceMask)) * 2);
+				== Plan.Summary.FacadeHeightAnchorBandCount * 2);
 	Check(TEXT("has no parent or endpoint provenance violation"),
 		Plan.Summary.CouplingParentViolationCount == 0
 			&& Plan.Summary.CouplingEndpointViolationCount == 0
@@ -4272,6 +4412,11 @@ bool FABTSM73BeamC3StagedStage2MatrixTest::RunTest(const FString& Parameters)
 			&& Plan.Summary.CouplingOtherCoreViolationCount == 0
 			&& Plan.Summary.CouplingBandEndpointViolationCount == 0
 			&& Stage2DoubleCourseBandsShareFacadeEndpoint(Plan));
+	Check(TEXT("facade partitions and height anchors have exact bidirectional bindings"),
+		Plan.Summary.FacadePartitionBindingViolationCount == 0
+			&& Stage2FacadePartitionLedgerIsClosed(Plan));
+	Check(TEXT("consumes the exact Stage-1 raised-podium facade envelope"),
+		Stage2ResolvedFacadeEnvelopeIsClosed(Plan));
 	int32 CountedPerimeterCores = 0;
 	int32 CountedPerimeterFaces = 0;
 	for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)

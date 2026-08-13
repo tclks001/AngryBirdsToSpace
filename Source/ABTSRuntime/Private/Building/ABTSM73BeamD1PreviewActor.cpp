@@ -185,7 +185,8 @@ namespace ABTSM73BeamD1Preview
 		Stage2CouplingOnlyVisibility = 1 << 13,
 		Stage2ProvenanceVisibility = 1 << 14,
 		Stage2CoreAndCouplingVisibility = 1 << 15,
-		Stage2PerimeterCoreFacesVisibility = 1 << 16
+		Stage2PerimeterCoreFacesVisibility = 1 << 16,
+		Stage2FacadePartitionsVisibility = 1 << 17
 	};
 
 	uint32 DiagnosticVisibilityMask(
@@ -233,6 +234,8 @@ namespace ABTSM73BeamD1Preview
 			return Stage2CoreAndCouplingVisibility;
 		case EABTSM73BeamC3Stage2DiagnosticLayer::PerimeterCoreFaces:
 			return Stage2PerimeterCoreFacesVisibility;
+		case EABTSM73BeamC3Stage2DiagnosticLayer::FacadePartitionsAndHeightAnchors:
+			return Stage2FacadePartitionsVisibility;
 		default:
 			return 0;
 		}
@@ -334,6 +337,8 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan);
 	const uint32 Stage2PerimeterMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage2DiagnosticLayer::PerimeterCoreFaces);
+	const uint32 Stage2FacadePartitionMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage2DiagnosticLayer::FacadePartitionsAndHeightAnchors);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint32>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -367,6 +372,9 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 	TestEqual(TEXT("Stage-2 perimeter layer is mutually exclusive"),
 		Stage2PerimeterMask,
 		static_cast<uint32>(Stage2PerimeterCoreFacesVisibility));
+	TestEqual(TEXT("Stage-2 facade-partition layer is mutually exclusive"),
+		Stage2FacadePartitionMask,
+		static_cast<uint32>(Stage2FacadePartitionsVisibility));
 	TestEqual(TEXT("Province-main layer contains only the assignment plan"),
 		SupportProvinceMainMask,
 		static_cast<uint32>(SupportProvinceMainVisibility));
@@ -1390,7 +1398,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			| ABTSM73BeamD1Preview::Stage2CouplingOnlyVisibility
 			| ABTSM73BeamD1Preview::Stage2ProvenanceVisibility
 			| ABTSM73BeamD1Preview::Stage2CoreAndCouplingVisibility
-			| ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility)) != 0)
+			| ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility
+			| ABTSM73BeamD1Preview::Stage2FacadePartitionsVisibility)) != 0)
 		{
 			const bool bXOnly =
 				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreXVisibility) != 0;
@@ -1404,6 +1413,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				(VisibilityMask & ABTSM73BeamD1Preview::Stage2CoreAndCouplingVisibility) != 0;
 			const bool bPerimeterFaces =
 				(VisibilityMask & ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility) != 0;
+			const bool bFacadePartitions =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage2FacadePartitionsVisibility) != 0;
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
 			for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
 			{
@@ -1425,6 +1436,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					|| (bCoreAndCoupling && !bCoupling
 						&& Member.ProducedStage
 							!= EABTSM73BeamC3GenerationStage::CoreAndShared)
+					|| bFacadePartitions
 					|| (bPerimeterFaces && (bCoupling
 						|| !Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId))))
 				{
@@ -1452,7 +1464,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					&& (OriginCore->LocalPodiumHeightRegionId == INDEX_NONE
 						|| Member.CourseIndex
 							>= OriginCore->LocalPodiumTopCourseIndex);
-				if (bPerimeterFaces)
+				if (bPerimeterFaces || bFacadePartitions)
 				{
 					Preview = OriginCore != nullptr && OriginCore->PerimeterFaceMask != 0
 						? IronPreview.Get() : GlassPreview.Get();
@@ -1528,6 +1540,70 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				SharedPairIntentPreview->SetVisibility(
 					SharedPairIntentPreview->GetInstanceCount() > 0, true);
 			}
+			if (bFacadePartitions)
+			{
+				for (const ABTSM73BeamC3V3::FFacadePartitionPlan& Partition
+					: Plan.FacadePartitions)
+				{
+					const bool bXAxis = Partition.FaceMask == ABTSM73BeamC3V3::NegativeX
+						|| Partition.FaceMask == ABTSM73BeamC3V3::PositiveX;
+					const bool bPositive = Partition.FaceMask == ABTSM73BeamC3V3::PositiveX
+						|| Partition.FaceMask == ABTSM73BeamC3V3::PositiveY;
+					const double GroundZ = Plan.Components.IsValidIndex(Partition.ComponentId)
+						? Plan.Components[Partition.ComponentId].GroundPlaneZCM : 0.0;
+					const int32 AxisIndex = bXAxis ? 0 : 1;
+					const int32 TangentIndex = bXAxis ? 1 : 0;
+					UHierarchicalInstancedStaticMeshComponent* PartitionPreview =
+						!Partition.AnchorBandIds.IsEmpty()
+							? IronPreview.Get()
+							: (!Partition.PerimeterCoreCellIds.IsEmpty()
+								? StonePreview.Get() : GlassPreview.Get());
+					for (const ABTSM73BeamC3V3::FFacadePartitionCourseSpan& Span
+						: Partition.CourseSpans)
+					{
+						FVector Minimum = FVector::ZeroVector;
+						FVector Maximum = FVector::ZeroVector;
+						Minimum[AxisIndex] = Maximum[AxisIndex] = Partition.FacadeCoordinateCM
+							+ (bPositive ? 10.0 : -10.0);
+						Minimum[AxisIndex] -= 4.0;
+						Maximum[AxisIndex] += 4.0;
+						Minimum[TangentIndex] = Span.TangentMinimumCM;
+						Maximum[TangentIndex] = Span.TangentMaximumCM;
+						Minimum.Z = GroundZ + Span.CourseIndex * 36.0;
+						Maximum.Z = Minimum.Z + 36.0;
+						ABTSM73BeamD1Preview::AddBoxInstance(
+							PartitionPreview, FBox(Minimum, Maximum));
+					}
+				}
+				for (const ABTSM73BeamC3V3::FFacadeHeightAnchorBand& Band
+					: Plan.FacadeHeightAnchorBands)
+				{
+					if (!Plan.Members.IsValidIndex(Band.LowerMemberIndex)
+						|| !Plan.Members.IsValidIndex(Band.UpperMemberIndex))
+					{
+						continue;
+					}
+					const ABTSM73BeamC3V3::FPlannedMember& Lower =
+						Plan.Members[Band.LowerMemberIndex];
+					const ABTSM73BeamC3V3::FPlannedMember& Upper =
+						Plan.Members[Band.UpperMemberIndex];
+					const int32 AxisIndex = static_cast<int32>(Lower.Axis);
+					const bool bPositive = (Band.FaceMask
+						& (ABTSM73BeamC3V3::PositiveX | ABTSM73BeamC3V3::PositiveY)) != 0;
+					FVector LowerEndpoint = bPositive ? Lower.LocalEnd : Lower.LocalStart;
+					FVector UpperEndpoint = bPositive ? Upper.LocalEnd : Upper.LocalStart;
+					LowerEndpoint[AxisIndex] = Band.FacadeCoordinateCM;
+					UpperEndpoint[AxisIndex] = Band.FacadeCoordinateCM;
+					ABTSM73BeamD1Preview::AddSegmentInstance(
+						SharedPairIntentPreview, LowerEndpoint, UpperEndpoint, 16.0);
+				}
+				for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+					GlassPreview.Get(), StonePreview.Get(), IronPreview.Get(),
+					SharedPairIntentPreview.Get()})
+				{
+					Preview->SetVisibility(Preview->GetInstanceCount() > 0, true);
+				}
+			}
 			if (bProvenance)
 			{
 				CoreIntentPreview->SetVisibility(
@@ -1568,7 +1644,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d AppliedLocalPodiumRegions=%d LocalPodiumLegMembers=%d RaisedMainReservations=%d RaisedMainMembers=%d LocalPodiumHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
-			TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d")
+			TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d FacadePartitions=%d PartitionPerimeter=%d PartitionAnchored=%d DeferredPartitions=%d HeightAnchorBands=%d PartitionBindingViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
 			bStage2 ? static_cast<int32>(Stage2DiagnosticLayer)
@@ -1620,6 +1696,12 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.CouplingFaceMask,
 			StageResult.Skeleton.Plan.Summary.CouplingOtherCoreViolationCount,
 			StageResult.Skeleton.Plan.Summary.CouplingBandEndpointViolationCount,
+			StageResult.Skeleton.Plan.Summary.FacadePartitionCount,
+			StageResult.Skeleton.Plan.Summary.FacadePartitionWithPerimeterCoreCount,
+			StageResult.Skeleton.Plan.Summary.FacadePartitionWithHeightAnchorCount,
+			StageResult.Skeleton.Plan.Summary.DeferredFacadePartitionCount,
+			StageResult.Skeleton.Plan.Summary.FacadeHeightAnchorBandCount,
+			StageResult.Skeleton.Plan.Summary.FacadePartitionBindingViolationCount,
 			StageResult.Skeleton.Plan.Summary.PerimeterCoreCount,
 			StageResult.Skeleton.Plan.Summary.PerimeterCoreFaceCount,
 			StageResult.Skeleton.Plan.Summary.PerimeterFaceExposureSpanCount,

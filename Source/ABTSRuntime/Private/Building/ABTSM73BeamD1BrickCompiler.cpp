@@ -2966,6 +2966,27 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.CouplingOtherCoreViolationCount;
 	Summary.SkeletonFirstCouplingBandEndpointViolationCount =
 		Stage1.CouplingBandEndpointViolationCount;
+	Summary.SkeletonFirstResolvedFacadeEnvelopeVolumeCount =
+		Stage1.ResolvedFacadeEnvelopeVolumeCount;
+	Summary.SkeletonFirstResolvedFacadeEnvelopeRaisedVolumeCount =
+		Stage1.ResolvedFacadeEnvelopeRaisedVolumeCount;
+	Summary.SkeletonFirstResolvedFacadeEnvelopeBindingViolationCount =
+		Stage1.ResolvedFacadeEnvelopeBindingViolationCount;
+	Summary.SkeletonFirstResolvedFacadeEnvelopeHash =
+		Stage1.ResolvedFacadeEnvelopeHash;
+	Summary.SkeletonFirstStage2InputFacadeEnvelopeHash =
+		Stage1.Stage2InputFacadeEnvelopeHash;
+	Summary.SkeletonFirstFacadePartitionCount = Stage1.FacadePartitionCount;
+	Summary.SkeletonFirstFacadePartitionWithPerimeterCoreCount =
+		Stage1.FacadePartitionWithPerimeterCoreCount;
+	Summary.SkeletonFirstFacadePartitionWithHeightAnchorCount =
+		Stage1.FacadePartitionWithHeightAnchorCount;
+	Summary.SkeletonFirstDeferredFacadePartitionCount =
+		Stage1.DeferredFacadePartitionCount;
+	Summary.SkeletonFirstFacadeHeightAnchorBandCount =
+		Stage1.FacadeHeightAnchorBandCount;
+	Summary.SkeletonFirstFacadePartitionBindingViolationCount =
+		Stage1.FacadePartitionBindingViolationCount;
 	Summary.SkeletonFirstPerimeterCoreCount = Stage1.PerimeterCoreCount;
 	Summary.SkeletonFirstPerimeterCoreFaceCount = Stage1.PerimeterCoreFaceCount;
 	Summary.SkeletonFirstPerimeterFaceExposureSpanCount =
@@ -3024,7 +3045,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 		TEXT(" Provinces=%d MultiDemandProvinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceTies=%d ProvinceFallbacks=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
-		TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOutwardViolations=%d CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d Stage1InputHash=%lld Stage2Hash=%lld")
+		TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOutwardViolations=%d CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d FacadeEnvelopeVolumes=%d RaisedFacadeVolumes=%d FacadeEnvelopeBindingViolations=%d FacadeEnvelopeHash=%lld Stage2FacadeInputHash=%lld FacadePartitions=%d PartitionPerimeter=%d PartitionAnchored=%d DeferredPartitions=%d HeightAnchorBands=%d PartitionBindingViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d Stage1InputHash=%lld Stage2Hash=%lld")
 		TEXT(" StageLocalDAG=Accepted CompleteBeamC=%s LoadDAGHash=%lld Physical=NotEvaluated")
 		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
 		static_cast<int32>(StopStage),
@@ -3068,6 +3089,17 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.CouplingOutwardViolationCount,
 		Stage1.CouplingOtherCoreViolationCount,
 		Stage1.CouplingBandEndpointViolationCount,
+		Stage1.ResolvedFacadeEnvelopeVolumeCount,
+		Stage1.ResolvedFacadeEnvelopeRaisedVolumeCount,
+		Stage1.ResolvedFacadeEnvelopeBindingViolationCount,
+		Stage1.ResolvedFacadeEnvelopeHash,
+		Stage1.Stage2InputFacadeEnvelopeHash,
+		Stage1.FacadePartitionCount,
+		Stage1.FacadePartitionWithPerimeterCoreCount,
+		Stage1.FacadePartitionWithHeightAnchorCount,
+		Stage1.DeferredFacadePartitionCount,
+		Stage1.FacadeHeightAnchorBandCount,
+		Stage1.FacadePartitionBindingViolationCount,
 		Stage1.PerimeterCoreCount, Stage1.PerimeterCoreFaceCount,
 		Stage1.PerimeterFaceExposureSpanCount,
 		Stage1.Stage1InputGeometryHash, Stage1.Stage2PlanHash,
