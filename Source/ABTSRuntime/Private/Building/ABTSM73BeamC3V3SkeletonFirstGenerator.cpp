@@ -3974,7 +3974,8 @@ namespace
 	{
 		const double Length = FVector::Distance(Start, End);
 		const bool bLongSpanMember = SkeletonKind == ESkeletonMemberKind::SharedCourse
-			|| SkeletonKind == ESkeletonMemberKind::CoreCourse;
+			|| SkeletonKind == ESkeletonMemberKind::CoreCourse
+			|| SkeletonKind == ESkeletonMemberKind::ThroughCourse;
 		const double Maximum = Axis == EABTSM73BeamAFrameAxis::Z || bLongSpanMember
 			? 720.0 : 648.0;
 		if (!FMath::IsFinite(Length)
@@ -8402,10 +8403,12 @@ namespace
 	void AppendMemberCanonical(FString& Text, const FPlannedMember& Member)
 	{
 		Text += FString::Printf(
-			TEXT("|M:%d:K=%d:%d:%d:%d:O=%d:%d:%d:%d:%d:%d:R=%d:%lld:%lld:%lld:%lld:%lld:%lld:G=%d"),
+			TEXT("|M:%d:K=%d:%d:%d:%d:O=%d:P=%d:B=%d:T=%d:%d:%d:%d:%d:%d:R=%d:%lld:%lld:%lld:%lld:%lld:%lld:G=%d"),
 			static_cast<int32>(Member.OwnerKind), static_cast<int32>(Member.SkeletonKind),
 			Member.OwnerId, Member.ComponentId, Member.SourceVolumeId,
-			Member.OriginCoreCellId, Member.CourseIndex, Member.StationA, Member.StationB,
+			Member.OriginCoreCellId, Member.ParentStage1MemberIndex,
+			Member.AnchorBandId, Member.TargetFacadeSourceVolumeId,
+			Member.CourseIndex, Member.StationA, Member.StationB,
 			Member.FaceMask, static_cast<int32>(Member.Axis), static_cast<int32>(Member.Role),
 			QHash(Member.LocalStart.X), QHash(Member.LocalStart.Y), QHash(Member.LocalStart.Z),
 			QHash(Member.LocalEnd.X), QHash(Member.LocalEnd.Y), QHash(Member.LocalEnd.Z),
@@ -8428,6 +8431,763 @@ namespace
 				Member.SharedLaneIndex, Member.SharedSegmentIndex,
 				Member.bSharedCrossCoreSegment ? 1 : 0);
 		}
+	}
+
+	struct FStage2CourseCandidate
+	{
+		int32 CoreCellId = INDEX_NONE;
+		int32 CourseIndex = INDEX_NONE;
+		int32 ParentMemberIndex = INDEX_NONE;
+		int32 TargetSourceVolumeId = INDEX_NONE;
+		int32 CrossStation = INDEX_NONE;
+		int32 AnchorStation = INDEX_NONE;
+		uint8 FaceMask = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		FVector Start = FVector::ZeroVector;
+		FVector End = FVector::ZeroVector;
+	};
+
+	bool AppendStage2CouplingCourses(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		FPlan& Plan,
+		FString& OutError)
+	{
+		TArray<FRoot> Roots;
+		int32 UnreachableVolumeCount = 0;
+		if (!CollectRoots(Silhouette, Roots, UnreachableVolumeCount, OutError))
+		{
+			return false;
+		}
+		const int32 Stage1MemberCount = Plan.Members.Num();
+		const int64 Stage1GeometryHash = Plan.Summary.FinalGeometryHash;
+		Plan.Summary.Stage1InputGeometryHash = Stage1GeometryHash;
+		Plan.Summary.CouplingCourseCount = 0;
+		Plan.Summary.CouplingFaceMask = 0;
+		Plan.Summary.CouplingParentViolationCount = 0;
+		Plan.Summary.CouplingEndpointViolationCount = 0;
+		Plan.Summary.CouplingOutwardViolationCount = 0;
+		Plan.Summary.CouplingOtherCoreViolationCount = 0;
+		Plan.Summary.CouplingBandEndpointViolationCount = 0;
+		Plan.Summary.PerimeterCoreCount = 0;
+		Plan.Summary.PerimeterCoreFaceCount = 0;
+		Plan.Summary.PerimeterFaceExposureSpanCount = 0;
+		Plan.Summary.Stage2PlanHash = 0;
+
+		auto CoreCourseBounds = [&Roots](const FCoreCellPlan& Core, const int32 Course)
+		{
+			if (!Roots.IsValidIndex(Core.ComponentId) || Course < 0
+				|| Course >= Core.TopCourseIndex)
+			{
+				return FBox(EForceInit::ForceInit);
+			}
+			const bool bUpper = Core.SingleShrinkCourseIndex > 0
+				&& Course >= Core.SingleShrinkCourseIndex
+				&& !Core.UpperXStations.IsEmpty() && !Core.UpperYStations.IsEmpty();
+			const TArray<int32>& XStations = bUpper
+				? Core.UpperXStations : Core.XStations;
+			const TArray<int32>& YStations = bUpper
+				? Core.UpperYStations : Core.YStations;
+			if (XStations.IsEmpty() || YStations.IsEmpty())
+			{
+				return FBox(EForceInit::ForceInit);
+			}
+			const double GroundZ = Roots[Core.ComponentId].GroundZCM;
+			return FBox(
+				Position(XStations[0] * BlockUnitsCM - BlockUnitsCM * 0.5,
+					YStations[0] * BlockUnitsCM - BlockUnitsCM * 0.5,
+					GroundZ + Course * BlockUnitsCM),
+				Position(XStations.Last() * BlockUnitsCM + BlockUnitsCM * 0.5,
+					YStations.Last() * BlockUnitsCM + BlockUnitsCM * 0.5,
+					GroundZ + (Course + 1) * BlockUnitsCM));
+		};
+
+		auto ExteriorFaceCorridorEntersOtherCore = [&Plan, &CoreCourseBounds](
+			const int32 OriginCoreCellId, const int32 Course, const uint8 FaceMask,
+			const double CoreFaceCM, const double FacadeCM,
+			const double TangentMinimumCM, const double TangentMaximumCM)
+		{
+			const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
+			const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
+			const int32 AxisIndex = bXAxis ? 0 : 1;
+			const int32 TangentIndex = bXAxis ? 1 : 0;
+			const FCoreCellPlan* OriginCore = Plan.CoreCells.FindByPredicate(
+				[OriginCoreCellId](const FCoreCellPlan& Candidate)
+				{
+					return Candidate.CoreCellId == OriginCoreCellId;
+				});
+			if (OriginCore == nullptr)
+			{
+				return true;
+			}
+			FBox Corridor = CoreCourseBounds(*OriginCore, Course);
+			if (!Corridor.IsValid)
+			{
+				return true;
+			}
+			Corridor.Min[TangentIndex] = TangentMinimumCM;
+			Corridor.Max[TangentIndex] = TangentMaximumCM;
+			if (bPositive)
+			{
+				Corridor.Min[AxisIndex] = FMath::Min(CoreFaceCM, FacadeCM);
+				Corridor.Max[AxisIndex] = FMath::Max(CoreFaceCM, FacadeCM)
+					+ GeometryToleranceCM * 2.0;
+			}
+			else
+			{
+				Corridor.Min[AxisIndex] = FMath::Min(CoreFaceCM, FacadeCM)
+					- GeometryToleranceCM * 2.0;
+				Corridor.Max[AxisIndex] = FMath::Max(CoreFaceCM, FacadeCM);
+			}
+			for (const FCoreCellPlan& OtherCore : Plan.CoreCells)
+			{
+				if (OtherCore.CoreCellId == OriginCoreCellId || Course < 0
+					|| Course >= OtherCore.TopCourseIndex)
+				{
+					continue;
+				}
+				const FBox OtherBounds = CoreCourseBounds(OtherCore, Course);
+				if (OtherBounds.IsValid && BoxesPenetrate(Corridor, OtherBounds))
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+
+		// Preserve the exact exposed interval at every course. A semantic-union
+		// boundary is not usable by Stage 3 when another core occupies the corridor
+		// from this core face to that facade.
+		static constexpr uint8 Stage2FaceBits[] = {
+			NegativeX, PositiveX, NegativeY, PositiveY};
+		for (FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			Core.PerimeterFaceMask = 0;
+			Core.PerimeterFaceFirstCourseIndices.Init(INDEX_NONE, 4);
+			Core.PerimeterFaceExposures.Reset();
+			if (!Roots.IsValidIndex(Core.ComponentId))
+			{
+				continue;
+			}
+			const FRoot& Root = Roots[Core.ComponentId];
+			TArray<FPerimeterFaceExposure> PendingExposures;
+			for (int32 Course = 0; Course < Core.TopCourseIndex; ++Course)
+			{
+				const FBox CoreBox = CoreCourseBounds(Core, Course);
+				if (!CoreBox.IsValid)
+				{
+					continue;
+				}
+				const double Z = CoreBox.GetCenter().Z;
+				for (const uint8 FaceMask : Stage2FaceBits)
+				{
+					const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
+					const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
+					const int32 AxisIndex = bXAxis ? 0 : 1;
+					const int32 TangentIndex = bXAxis ? 1 : 0;
+					const double FaceCM = bPositive
+						? CoreBox.Max[AxisIndex] : CoreBox.Min[AxisIndex];
+					for (const FABTSM73DAG5BV2Volume* Candidate : Root.BodyVolumes)
+					{
+						if (Candidate == nullptr
+							|| Z < Candidate->LocalBounds.Min.Z - GeometryToleranceCM
+							|| Z > Candidate->LocalBounds.Max.Z + GeometryToleranceCM)
+						{
+							continue;
+						}
+						const double CandidateFace = bPositive
+							? Candidate->LocalBounds.Max[AxisIndex]
+							: Candidate->LocalBounds.Min[AxisIndex];
+						const double TangentMinimum = FMath::Max(
+							CoreBox.Min[TangentIndex], Candidate->LocalBounds.Min[TangentIndex]);
+						const double TangentMaximum = FMath::Min(
+							CoreBox.Max[TangentIndex], Candidate->LocalBounds.Max[TangentIndex]);
+						const double OutwardClearanceCM = (bPositive ? 1.0 : -1.0)
+							* (CandidateFace - FaceCM);
+						// LocalBounds stores rail centre lines, while CoreBox includes the
+						// 18 cm physical half-width. A core is facade-adjacent when no full
+						// 36 cm side-wall course fits between that solid face and the exposed
+						// semantic boundary. The -18 cm lower allowance is the established
+						// WFC/core-fit expansion, not permission to escape the envelope.
+						if (OutwardClearanceCM < -BlockUnitsCM * 0.5 - GeometryToleranceCM
+							|| OutwardClearanceCM > BlockUnitsCM + GeometryToleranceCM
+							|| TangentMaximum - TangentMinimum <= GeometryToleranceCM)
+						{
+							continue;
+						}
+						TArray<double> Cuts = {TangentMinimum, TangentMaximum};
+						for (const FABTSM73DAG5BV2Volume* Volume : Root.BodyVolumes)
+						{
+							if (Volume != nullptr && Z >= Volume->LocalBounds.Min.Z
+								- GeometryToleranceCM && Z <= Volume->LocalBounds.Max.Z
+								+ GeometryToleranceCM)
+							{
+								Cuts.Add(FMath::Clamp(Volume->LocalBounds.Min[TangentIndex],
+									TangentMinimum, TangentMaximum));
+								Cuts.Add(FMath::Clamp(Volume->LocalBounds.Max[TangentIndex],
+									TangentMinimum, TangentMaximum));
+							}
+						}
+						for (const FCoreCellPlan& OtherCore : Plan.CoreCells)
+						{
+							if (OtherCore.CoreCellId == Core.CoreCellId || Course < 0
+								|| Course >= OtherCore.TopCourseIndex)
+							{
+								continue;
+							}
+							const FBox OtherBounds = CoreCourseBounds(OtherCore, Course);
+							if (OtherBounds.IsValid)
+							{
+								Cuts.Add(FMath::Clamp(OtherBounds.Min[TangentIndex],
+									TangentMinimum, TangentMaximum));
+								Cuts.Add(FMath::Clamp(OtherBounds.Max[TangentIndex],
+									TangentMinimum, TangentMaximum));
+							}
+						}
+						SortUniqueCuts(Cuts);
+						for (int32 CutIndex = 0; CutIndex + 1 < Cuts.Num(); ++CutIndex)
+						{
+							if (Cuts[CutIndex + 1] - Cuts[CutIndex]
+								<= GeometryToleranceCM)
+							{
+								continue;
+							}
+							FVector Witness = CoreBox.GetCenter();
+							Witness[AxisIndex] = CandidateFace
+								+ (bPositive ? 1.0 : -1.0) * GeometryToleranceCM * 2.0;
+							Witness[TangentIndex] =
+								(Cuts[CutIndex] + Cuts[CutIndex + 1]) * 0.5;
+							const bool bOutsideEmpty = !Root.BodyVolumes.ContainsByPredicate(
+								[&Witness](const FABTSM73DAG5BV2Volume* Volume)
+								{
+									return Volume != nullptr
+										&& Volume->LocalBounds.IsInsideOrOn(Witness);
+								});
+							if (bOutsideEmpty
+								&& !ExteriorFaceCorridorEntersOtherCore(Core.CoreCellId,
+									Course, FaceMask, FaceCM, CandidateFace,
+									Cuts[CutIndex], Cuts[CutIndex + 1]))
+							{
+								FPerimeterFaceExposure& Exposure = PendingExposures.AddDefaulted_GetRef();
+								Exposure.CourseIndex = Course;
+								Exposure.FaceMask = FaceMask;
+								Exposure.SourceVolumeId = Candidate->VolumeId;
+								Exposure.FacadeCoordinateCM = CandidateFace;
+								Exposure.TangentMinimumCM = Cuts[CutIndex];
+								Exposure.TangentMaximumCM = Cuts[CutIndex + 1];
+							}
+						}
+					}
+				}
+			}
+			PendingExposures.Sort([](const FPerimeterFaceExposure& A,
+				const FPerimeterFaceExposure& B)
+			{
+				if (A.CourseIndex != B.CourseIndex) return A.CourseIndex < B.CourseIndex;
+				if (A.FaceMask != B.FaceMask) return A.FaceMask < B.FaceMask;
+				if (!FMath::IsNearlyEqual(A.FacadeCoordinateCM, B.FacadeCoordinateCM,
+					GeometryToleranceCM))
+				{
+					return A.FacadeCoordinateCM < B.FacadeCoordinateCM;
+				}
+				return A.TangentMinimumCM != B.TangentMinimumCM
+					? A.TangentMinimumCM < B.TangentMinimumCM
+					: A.TangentMaximumCM < B.TangentMaximumCM;
+			});
+			for (const FPerimeterFaceExposure& Pending : PendingExposures)
+			{
+				FPerimeterFaceExposure* Previous = Core.PerimeterFaceExposures.IsEmpty()
+					? nullptr : &Core.PerimeterFaceExposures.Last();
+				if (Previous != nullptr && Previous->CourseIndex == Pending.CourseIndex
+					&& Previous->FaceMask == Pending.FaceMask
+					&& FMath::IsNearlyEqual(Previous->FacadeCoordinateCM,
+						Pending.FacadeCoordinateCM, GeometryToleranceCM)
+					&& Pending.TangentMinimumCM <= Previous->TangentMaximumCM
+						+ GeometryToleranceCM)
+				{
+					Previous->TangentMaximumCM = FMath::Max(
+						Previous->TangentMaximumCM, Pending.TangentMaximumCM);
+					Previous->SourceVolumeId = FMath::Min(
+						Previous->SourceVolumeId, Pending.SourceVolumeId);
+					continue;
+				}
+				Core.PerimeterFaceExposures.Add(Pending);
+			}
+			for (const FPerimeterFaceExposure& Exposure : Core.PerimeterFaceExposures)
+			{
+				Core.PerimeterFaceMask |= Exposure.FaceMask;
+				const int32 FaceIndex = Exposure.FaceMask == NegativeX ? 0
+					: Exposure.FaceMask == PositiveX ? 1
+					: Exposure.FaceMask == NegativeY ? 2 : 3;
+				if (Core.PerimeterFaceFirstCourseIndices[FaceIndex] == INDEX_NONE)
+				{
+					Core.PerimeterFaceFirstCourseIndices[FaceIndex] = Exposure.CourseIndex;
+				}
+			}
+			if (Core.PerimeterFaceMask != 0)
+			{
+				++Plan.Summary.PerimeterCoreCount;
+				Plan.Summary.PerimeterCoreFaceCount += FMath::CountBits(
+					static_cast<uint32>(Core.PerimeterFaceMask));
+			}
+			Plan.Summary.PerimeterFaceExposureSpanCount +=
+				Core.PerimeterFaceExposures.Num();
+		}
+
+		auto MemberPenetratesPlan = [&Plan](const FPlannedMember& Probe)
+		{
+			const FBox ProbeBounds = PlannedMemberBounds(Probe);
+			for (const FPlannedMember& Existing : Plan.Members)
+			{
+				if (BoxesPenetrate(ProbeBounds, PlannedMemberBounds(Existing)))
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+
+		auto CouplingEntersOtherCore = [&Plan, &CoreCourseBounds](
+			const FPlannedMember& Probe, const int32 OriginCoreCellId,
+			const int32 Course, const double OriginOuterFaceCM,
+			const bool bPositive, const int32 AxisIndex)
+		{
+			FBox ExteriorBounds = PlannedMemberBounds(Probe);
+			if (bPositive)
+			{
+				ExteriorBounds.Min[AxisIndex] = FMath::Max(
+					ExteriorBounds.Min[AxisIndex], OriginOuterFaceCM);
+			}
+			else
+			{
+				ExteriorBounds.Max[AxisIndex] = FMath::Min(
+					ExteriorBounds.Max[AxisIndex], OriginOuterFaceCM);
+			}
+			if (!ExteriorBounds.IsValid
+				|| ExteriorBounds.Max[AxisIndex] - ExteriorBounds.Min[AxisIndex]
+					<= GeometryToleranceCM)
+			{
+				return false;
+			}
+			for (const FCoreCellPlan& OtherCore : Plan.CoreCells)
+			{
+				if (OtherCore.CoreCellId == OriginCoreCellId
+					|| Course < 0 || Course >= OtherCore.TopCourseIndex)
+				{
+					continue;
+				}
+				const FBox OtherBounds = CoreCourseBounds(OtherCore, Course);
+				if (OtherBounds.IsValid && BoxesPenetrate(ExteriorBounds, OtherBounds))
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+
+		auto BuildOneCourse = [&Plan, &Roots, &MemberPenetratesPlan,
+			&CouplingEntersOtherCore](
+			const FCoreCellPlan& Core, const int32 Course,
+			const int32 CrossStation, const uint8 FaceMask,
+			TArray<FStage2CourseCandidate>& OutCandidates)
+		{
+			OutCandidates.Reset();
+			if (!Roots.IsValidIndex(Core.ComponentId)
+				|| !Plan.Components.IsValidIndex(Core.ComponentId) || Course <= 0
+				|| Course >= Core.TopCourseIndex)
+			{
+				return false;
+			}
+			const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
+			const EABTSM73BeamAFrameAxis Axis = bXAxis
+				? EABTSM73BeamAFrameAxis::X : EABTSM73BeamAFrameAxis::Y;
+			if (((Course & 1) == 0) != bXAxis)
+			{
+				return false;
+			}
+			const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
+			const double DirectionSign = bPositive ? 1.0 : -1.0;
+			const TArray<int32>& AlongStations = bXAxis ? Core.XStations : Core.YStations;
+			if (AlongStations.IsEmpty())
+			{
+				return false;
+			}
+			const int32 AnchorStation = bPositive ? AlongStations.Last() : AlongStations[0];
+			const double AnchorCM = AnchorStation * static_cast<double>(BlockUnitsCM);
+			const double CrossCM = CrossStation * static_cast<double>(BlockUnitsCM);
+			const int32 AxisIndex = bXAxis ? 0 : 1;
+			const double CoreOuterFaceCM = AnchorCM
+				+ DirectionSign * BlockUnitsCM * 0.5;
+			const double ComponentCenterCM =
+				Plan.Components[Core.ComponentId].BodyBounds.GetCenter()[AxisIndex];
+			// A face label alone does not prove an outward coupling.  An origin core
+			// on the opposite half would first traverse the building interior.
+			if (DirectionSign * (CoreOuterFaceCM - ComponentCenterCM)
+				< -GeometryToleranceCM)
+			{
+				return false;
+			}
+			const double Z = Roots[Core.ComponentId].GroundZCM
+				+ (Course + 0.5) * BlockUnitsCM;
+
+			int32 Parent = INDEX_NONE;
+			for (const int32 MemberIndex : Core.MemberIndices)
+			{
+				if (!Plan.Members.IsValidIndex(MemberIndex))
+				{
+					continue;
+				}
+				const FPlannedMember& Member = Plan.Members[MemberIndex];
+				if (Member.CourseIndex == Course - 1 && Member.Axis != Axis
+					&& Member.Axis != EABTSM73BeamAFrameAxis::Z
+					&& PointWithinHorizontalMember(Member,
+						bXAxis ? AnchorCM : CrossCM,
+						bXAxis ? CrossCM : AnchorCM))
+				{
+					Parent = Parent == INDEX_NONE ? MemberIndex : FMath::Min(Parent, MemberIndex);
+				}
+			}
+			if (Parent == INDEX_NONE)
+			{
+				return false;
+			}
+
+			TArray<FBox> AllowedBoxes;
+			for (const FABTSM73DAG5BV2Volume* Volume : Roots[Core.ComponentId].BodyVolumes)
+			{
+				AllowedBoxes.Add(Volume->LocalBounds.ExpandBy(
+					BlockUnitsCM * 0.5 + GeometryToleranceCM));
+			}
+			TArray<const FABTSM73DAG5BV2Volume*> Targets;
+			for (const FABTSM73DAG5BV2Volume* Volume : Roots[Core.ComponentId].BodyVolumes)
+			{
+				if (Volume == nullptr
+					|| Z < Volume->LocalBounds.Min.Z - GeometryToleranceCM
+					|| Z > Volume->LocalBounds.Max.Z + GeometryToleranceCM
+					|| CrossCM < Volume->LocalBounds.Min[bXAxis ? 1 : 0]
+						- BlockUnitsCM * 0.5 - GeometryToleranceCM
+					|| CrossCM > Volume->LocalBounds.Max[bXAxis ? 1 : 0]
+						+ BlockUnitsCM * 0.5 + GeometryToleranceCM)
+				{
+					continue;
+				}
+				Targets.Add(Volume);
+			}
+			Targets.Sort([bXAxis, bPositive](
+				const FABTSM73DAG5BV2Volume& A,
+				const FABTSM73DAG5BV2Volume& B)
+			{
+				const int32 AxisIndex = bXAxis ? 0 : 1;
+				const double AFace = bPositive
+					? A.LocalBounds.Max[AxisIndex] : A.LocalBounds.Min[AxisIndex];
+				const double BFace = bPositive
+					? B.LocalBounds.Max[AxisIndex] : B.LocalBounds.Min[AxisIndex];
+				return bPositive ? AFace > BFace : AFace < BFace;
+			});
+
+			for (const FABTSM73DAG5BV2Volume* Target : Targets)
+			{
+				const double FacadeCM = bPositive
+					? Target->LocalBounds.Max[AxisIndex] : Target->LocalBounds.Min[AxisIndex];
+				// Keep exactly one block of overlap over the Stage-1 orthogonal
+				// bearing, but require at least one complete block outside the core.
+				const double InnerCM = AnchorCM
+					- DirectionSign * BlockUnitsCM * 0.5;
+				const double NetOutwardCM =
+					DirectionSign * (FacadeCM - CoreOuterFaceCM);
+				const double LengthCM = FMath::Abs(FacadeCM - InnerCM);
+				if (LengthCM < BlockUnitsCM - GeometryToleranceCM
+					|| LengthCM > 720.0 + GeometryToleranceCM
+					|| NetOutwardCM < BlockUnitsCM - GeometryToleranceCM
+					|| (bPositive && FacadeCM <= InnerCM + GeometryToleranceCM)
+					|| (!bPositive && FacadeCM >= InnerCM - GeometryToleranceCM))
+				{
+					continue;
+				}
+				FStage2CourseCandidate Candidate;
+				Candidate.CoreCellId = Core.CoreCellId;
+				Candidate.CourseIndex = Course;
+				Candidate.ParentMemberIndex = Parent;
+				Candidate.TargetSourceVolumeId = Target->VolumeId;
+				Candidate.CrossStation = CrossStation;
+				Candidate.AnchorStation = AnchorStation;
+				Candidate.FaceMask = FaceMask;
+				Candidate.Axis = Axis;
+				if (bXAxis)
+				{
+					Candidate.Start = Position(FMath::Min(InnerCM, FacadeCM), CrossCM, Z);
+					Candidate.End = Position(FMath::Max(InnerCM, FacadeCM), CrossCM, Z);
+				}
+				else
+				{
+					Candidate.Start = Position(CrossCM, FMath::Min(InnerCM, FacadeCM), Z);
+					Candidate.End = Position(CrossCM, FMath::Max(InnerCM, FacadeCM), Z);
+				}
+				FPlannedMember Probe;
+				Probe.Axis = Axis;
+				Probe.LocalStart = Candidate.Start;
+				Probe.LocalEnd = Candidate.End;
+				FVector UncoveredPoint;
+				if (!SolidCoveredByBoxes(PlannedMemberBounds(Probe), AllowedBoxes,
+					UncoveredPoint) || MemberPenetratesPlan(Probe)
+					|| CouplingEntersOtherCore(Probe, Core.CoreCellId, Course,
+						CoreOuterFaceCM, bPositive, AxisIndex))
+				{
+					continue;
+				}
+				bool bProtected = false;
+				for (const FABTSM73BeamASupportVoid& Void : Plan.ReservedSupportVoids)
+				{
+					bProtected |= BoxesPenetrate(PlannedMemberBounds(Probe), Void.Bounds);
+				}
+				if (!bProtected)
+				{
+					OutCandidates.Add(Candidate);
+				}
+			}
+			return !OutCandidates.IsEmpty();
+		};
+
+		static constexpr uint8 FaceBits[] = {NegativeX, PositiveX, NegativeY, PositiveY};
+		int32 AnchorBandId = 0;
+		for (const uint8 FaceMask : FaceBits)
+		{
+			const bool bXAxis = FaceMask == NegativeX || FaceMask == PositiveX;
+			bool bFound = false;
+			FStage2CourseCandidate Selected[2];
+			for (int32 RolePass = 0; RolePass < 2 && !bFound; ++RolePass)
+			{
+				for (const FCoreCellPlan& Core : Plan.CoreCells)
+				{
+					const bool bPreferredMain = Core.HierarchyRole == ECoreHierarchyRole::PodiumMain;
+					if ((RolePass == 0) != bPreferredMain || Core.TopCourseIndex < 4)
+					{
+						continue;
+					}
+					const TArray<int32>& ExistingCrossStations =
+						bXAxis ? Core.YStations : Core.XStations;
+					const int32 CrossMinimum = bXAxis
+						? FMath::CeilToInt(Core.LocalBounds.Min.Y / BlockUnitsCM)
+						: FMath::CeilToInt(Core.LocalBounds.Min.X / BlockUnitsCM);
+					const int32 CrossMaximum = bXAxis
+						? FMath::FloorToInt(Core.LocalBounds.Max.Y / BlockUnitsCM)
+						: FMath::FloorToInt(Core.LocalBounds.Max.X / BlockUnitsCM);
+					TArray<int32> CrossCandidates;
+					for (int32 Station = CrossMinimum; Station <= CrossMaximum; ++Station)
+					{
+						if (!ExistingCrossStations.Contains(Station))
+						{
+							CrossCandidates.Add(Station);
+						}
+					}
+					CrossCandidates.Sort([CrossMinimum, CrossMaximum](const int32 A, const int32 B)
+					{
+						const int32 CenterTwice = CrossMinimum + CrossMaximum;
+						const int32 DA = FMath::Abs(A * 2 - CenterTwice);
+						const int32 DB = FMath::Abs(B * 2 - CenterTwice);
+						return DA != DB ? DA < DB : A < B;
+					});
+					for (const int32 CrossStation : CrossCandidates)
+					{
+						for (int32 BaseCourse = Core.TopCourseIndex - 3;
+							BaseCourse >= 1; --BaseCourse)
+						{
+							if (((BaseCourse & 1) == 0) != bXAxis)
+							{
+								continue;
+							}
+							TArray<FStage2CourseCandidate> LowerCandidates;
+							TArray<FStage2CourseCandidate> UpperCandidates;
+							if (BuildOneCourse(Core, BaseCourse, CrossStation, FaceMask,
+									LowerCandidates)
+								&& BuildOneCourse(Core, BaseCourse + 2, CrossStation, FaceMask,
+									UpperCandidates))
+							{
+								const int32 AxisIndex = bXAxis ? 0 : 1;
+								const bool bPositive = FaceMask == PositiveX
+									|| FaceMask == PositiveY;
+								for (const FStage2CourseCandidate& Lower : LowerCandidates)
+								{
+									const double LowerEndpoint = bPositive
+										? Lower.End[AxisIndex] : Lower.Start[AxisIndex];
+									const FStage2CourseCandidate* Upper =
+										UpperCandidates.FindByPredicate(
+											[AxisIndex, bPositive, LowerEndpoint](
+												const FStage2CourseCandidate& Candidate)
+											{
+												const double Endpoint = bPositive
+													? Candidate.End[AxisIndex]
+													: Candidate.Start[AxisIndex];
+												return FMath::IsNearlyEqual(Endpoint,
+													LowerEndpoint, GeometryToleranceCM);
+											});
+									if (Upper != nullptr)
+									{
+										Selected[0] = Lower;
+										Selected[1] = *Upper;
+										bFound = true;
+										break;
+									}
+								}
+								if (bFound) break;
+							}
+						}
+						if (bFound) break;
+					}
+					if (bFound) break;
+				}
+			}
+			if (!bFound)
+			{
+				// A missing outward-facing origin is an honest sparse result at this
+				// first Stage-2 stop.  Filling the face from a core on the opposite
+				// building half would create the visually useless inward course which
+				// this boundary explicitly rejects.  Coverage expansion is a separate
+				// facade-demand pass and must not be faked here.
+				continue;
+			}
+			for (const FStage2CourseCandidate& Candidate : Selected)
+			{
+				const int32 MemberIndex = Plan.Members.Num();
+				if (!AddPlannedMember(Plan, EOwnerKind::CoreCell,
+					ESkeletonMemberKind::ThroughCourse, Candidate.CoreCellId,
+					Plan.CoreCells[Candidate.CoreCellId].ComponentId,
+					Candidate.TargetSourceVolumeId, Candidate.CoreCellId,
+					Candidate.CourseIndex, Candidate.CrossStation,
+					Candidate.AnchorStation, Candidate.FaceMask, Candidate.Axis,
+					Candidate.Axis == EABTSM73BeamAFrameAxis::X
+						? EABTSM73BeamAMemberRole::PrimaryBeam
+						: EABTSM73BeamAMemberRole::SecondaryBeam,
+					Candidate.Start, Candidate.End, OutError))
+				{
+					return false;
+				}
+				FPlannedMember& Member = Plan.Members[MemberIndex];
+				Member.ParentStage1MemberIndex = Candidate.ParentMemberIndex;
+				Member.AnchorBandId = AnchorBandId;
+				Member.TargetFacadeSourceVolumeId = Candidate.TargetSourceVolumeId;
+				Member.RequiredLowerMemberIndices.Add(Candidate.ParentMemberIndex);
+				Member.RequiredInwardMemberIndices.Add(Candidate.ParentMemberIndex);
+				++Plan.Summary.CouplingCourseCount;
+				Plan.Summary.CouplingFaceMask |= Candidate.FaceMask;
+				Plan.Summary.TotalMemberLengthCM += FVector::Distance(
+					Candidate.Start, Candidate.End);
+			}
+			++AnchorBandId;
+		}
+
+		TMap<int32, double> BandEndpointCoordinates;
+		for (int32 MemberIndex = Stage1MemberCount; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+		{
+			const FPlannedMember& Member = Plan.Members[MemberIndex];
+			Plan.Summary.CouplingParentViolationCount +=
+				!Plan.Members.IsValidIndex(Member.ParentStage1MemberIndex)
+				|| Member.ParentStage1MemberIndex >= Stage1MemberCount ? 1 : 0;
+			const FABTSM73DAG5BV2Volume* Target = FindVolume(
+				Silhouette, Member.TargetFacadeSourceVolumeId);
+			const int32 AxisIndex = static_cast<int32>(Member.Axis);
+			const bool bPositive = (Member.FaceMask & (PositiveX | PositiveY)) != 0;
+			const double Endpoint = bPositive
+				? Member.LocalEnd[AxisIndex] : Member.LocalStart[AxisIndex];
+			Plan.Summary.CouplingEndpointViolationCount += Target == nullptr
+				|| FMath::Abs(Endpoint - (bPositive
+					? Target->LocalBounds.Max[AxisIndex]
+					: Target->LocalBounds.Min[AxisIndex])) > GeometryToleranceCM ? 1 : 0;
+			const FCoreCellPlan* OriginCore = Plan.CoreCells.IsValidIndex(
+				Member.OriginCoreCellId)
+				? &Plan.CoreCells[Member.OriginCoreCellId] : nullptr;
+			const FComponentPlan* Component = OriginCore != nullptr
+				&& Plan.Components.IsValidIndex(OriginCore->ComponentId)
+				? &Plan.Components[OriginCore->ComponentId] : nullptr;
+			const double DirectionSign = bPositive ? 1.0 : -1.0;
+			const double CoreOuterFaceCM = Member.StationB
+				* static_cast<double>(BlockUnitsCM)
+				+ DirectionSign * BlockUnitsCM * 0.5;
+			const double NetOutwardCM =
+				DirectionSign * (Endpoint - CoreOuterFaceCM);
+			Plan.Summary.CouplingOutwardViolationCount +=
+				OriginCore == nullptr || Component == nullptr
+				|| DirectionSign * (CoreOuterFaceCM
+					- Component->BodyBounds.GetCenter()[AxisIndex])
+					< -GeometryToleranceCM
+				|| NetOutwardCM < BlockUnitsCM - GeometryToleranceCM ? 1 : 0;
+			Plan.Summary.CouplingOtherCoreViolationCount += OriginCore == nullptr
+				|| CouplingEntersOtherCore(Member, Member.OriginCoreCellId,
+					Member.CourseIndex, CoreOuterFaceCM, bPositive, AxisIndex) ? 1 : 0;
+			if (const double* BandEndpoint = BandEndpointCoordinates.Find(
+				Member.AnchorBandId))
+			{
+				Plan.Summary.CouplingBandEndpointViolationCount +=
+					FMath::Abs(*BandEndpoint - Endpoint) > GeometryToleranceCM ? 1 : 0;
+			}
+			else
+			{
+				BandEndpointCoordinates.Add(Member.AnchorBandId, Endpoint);
+			}
+		}
+		if (Plan.Summary.CouplingCourseCount <= 0
+			|| (Plan.Summary.CouplingCourseCount & 1) != 0
+			|| Plan.Summary.CouplingCourseCount
+				!= FMath::CountBits(static_cast<uint32>(
+					Plan.Summary.CouplingFaceMask)) * 2
+			|| Plan.Summary.CouplingParentViolationCount != 0
+			|| Plan.Summary.CouplingEndpointViolationCount != 0
+			|| Plan.Summary.CouplingOutwardViolationCount != 0
+			|| Plan.Summary.CouplingOtherCoreViolationCount != 0
+			|| Plan.Summary.CouplingBandEndpointViolationCount != 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3Stage2ContractFailed:Courses=%d:Faces=%u:ParentViolations=%d:EndpointViolations=%d:OutwardViolations=%d:OtherCoreViolations=%d:BandEndpointViolations=%d"),
+				Plan.Summary.CouplingCourseCount, Plan.Summary.CouplingFaceMask,
+				Plan.Summary.CouplingParentViolationCount,
+				Plan.Summary.CouplingEndpointViolationCount,
+				Plan.Summary.CouplingOutwardViolationCount,
+				Plan.Summary.CouplingOtherCoreViolationCount,
+				Plan.Summary.CouplingBandEndpointViolationCount);
+			return false;
+		}
+		Plan.Summary.PenetrationCount = 0;
+		if (!ValidateNoPenetration(Plan, OutError))
+		{
+			return false;
+		}
+		TArray<bool> GroundedMembers;
+		if (!ResolveGroundedMemberMask(Plan, GroundedMembers, OutError)
+			|| !ValidatePreflightCaps(Profile.BeamSettings.BeamB.BeamA, Plan, OutError))
+		{
+			return false;
+		}
+		Plan.Summary.PlannedMemberCount = Plan.Members.Num();
+		Plan.Summary.PlannedSeatCount += Plan.Summary.CouplingCourseCount;
+		FString Stage2Canonical = FString::Printf(TEXT("Stage1=%lld"), Stage1GeometryHash);
+		for (const FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			Stage2Canonical += FString::Printf(TEXT(":P%d=%u"),
+				Core.CoreCellId, Core.PerimeterFaceMask);
+			for (const int32 Course : Core.PerimeterFaceFirstCourseIndices)
+			{
+				Stage2Canonical += FString::Printf(TEXT("/%d"), Course);
+			}
+			for (const FPerimeterFaceExposure& Exposure : Core.PerimeterFaceExposures)
+			{
+				Stage2Canonical += FString::Printf(TEXT("/E%d,%u,%d,%.3f,%.3f,%.3f"),
+					Exposure.CourseIndex, Exposure.FaceMask, Exposure.SourceVolumeId,
+					Exposure.FacadeCoordinateCM, Exposure.TangentMinimumCM,
+					Exposure.TangentMaximumCM);
+			}
+		}
+		for (int32 MemberIndex = Stage1MemberCount; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+		{
+			AppendMemberCanonical(Stage2Canonical, Plan.Members[MemberIndex]);
+		}
+		Plan.Summary.Stage2PlanHash = HashText(Stage2Canonical);
+		Plan.Summary.SupportPlanHash = HashText(FString::Printf(
+			TEXT("Stage1Support=%lld:Stage2=%lld"),
+			Plan.Summary.SupportPlanHash, Plan.Summary.Stage2PlanHash));
+		Plan.Summary.FinalGeometryHash = HashText(FString::Printf(
+			TEXT("Stage1Geometry=%lld:Stage2=%lld"),
+			Stage1GeometryHash, Plan.Summary.Stage2PlanHash));
+		return true;
 	}
 
 	bool BuildCandidateCommonFrame(
@@ -19554,6 +20314,151 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage1(
 	return GenerateForStage(Profile, Silhouette,
 		ABTSM73BeamC3V3::EGenerationStage::CoreAndShared,
 		OutResult, OutError);
+}
+
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage2(
+	const FABTSM73BeamD0ResolvedProfile& Profile,
+	const FABTSM73DAG5BV2GenerationResult& Silhouette,
+	ABTSM73BeamC3V3::FGenerationResult& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamC3V3;
+	OutResult = FGenerationResult();
+	OutError.Reset();
+	if (!GenerateStage1(Profile, Silhouette, OutResult, OutError))
+	{
+		return false;
+	}
+	FPlan& Plan = OutResult.Plan;
+	FABTSM73BeamAGenerationResult& Assembly = OutResult.Assembly;
+	const int32 Stage1MemberCount = Plan.Members.Num();
+	const int64 Stage1GeometryHash = Plan.Summary.FinalGeometryHash;
+	if (Assembly.Members.Num() != Stage1MemberCount
+		|| !AppendStage2CouplingCourses(Profile, Silhouette, Plan, OutError))
+	{
+		return false;
+	}
+	if (Plan.Summary.Stage1InputGeometryHash != Stage1GeometryHash)
+	{
+		OutError = TEXT("BeamC3V3Stage2InputIdentityDrift");
+		return false;
+	}
+
+	TMap<FString, int32> JointByPosition;
+	const double JointScale = 1.0 / FMath::Max(0.1,
+		static_cast<double>(Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+	for (const FABTSM73BeamAJoint& Joint : Assembly.Joints)
+	{
+		JointByPosition.Add(FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Joint.LocalPosition.X * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Y * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Z * JointScale)), Joint.JointId);
+	}
+	auto AddJoint = [&Assembly, &JointByPosition, JointScale](
+		const FVector& Point, const EABTSM73BeamAJointRole Role)
+	{
+		const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Point.X * JointScale),
+			FMath::RoundToInt64(Point.Y * JointScale),
+			FMath::RoundToInt64(Point.Z * JointScale));
+		if (const int32* Existing = JointByPosition.Find(Key))
+		{
+			return *Existing;
+		}
+		FABTSM73BeamAJoint& Joint = Assembly.Joints.AddDefaulted_GetRef();
+		Joint.JointId = Assembly.Joints.Num() - 1;
+		Joint.LocalPosition = Point;
+		Joint.Role = Role;
+		JointByPosition.Add(Key, Joint.JointId);
+		return Joint.JointId;
+	};
+
+	for (int32 PlannedIndex = Stage1MemberCount;
+		PlannedIndex < Plan.Members.Num(); ++PlannedIndex)
+	{
+		const FPlannedMember& Planned = Plan.Members[PlannedIndex];
+		if (!Assembly.Assemblies.IsValidIndex(Planned.ComponentId))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3Stage2InvalidOwner:Member=%d:Component=%d"),
+				PlannedIndex, Planned.ComponentId);
+			return false;
+		}
+		FABTSM73BeamAMember& Member = Assembly.Members.AddDefaulted_GetRef();
+		Member.MemberId = Assembly.Members.Num() - 1;
+		Member.JointA = AddJoint(Planned.LocalStart, EABTSM73BeamAJointRole::BeamEnd);
+		Member.JointB = AddJoint(Planned.LocalEnd, EABTSM73BeamAJointRole::CrossBearing);
+		Member.Axis = Planned.Axis;
+		Member.Role = Planned.Role;
+		Member.LengthCM = FVector::Distance(Planned.LocalStart, Planned.LocalEnd);
+		FABTSM73BeamAAssembly& Owner = Assembly.Assemblies[Planned.ComponentId];
+		Owner.MemberIds.Add(Member.MemberId);
+		Owner.JointIds.AddUnique(Member.JointA);
+		Owner.JointIds.AddUnique(Member.JointB);
+	}
+	if (Assembly.Members.Num() != Plan.Members.Num()
+		|| Assembly.Joints.Num() != Plan.Summary.PlannedJointCount)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage2PlannedEmittedIRMismatch:Joints=%d/%d:Members=%d/%d"),
+			Assembly.Joints.Num(), Plan.Summary.PlannedJointCount,
+			Assembly.Members.Num(), Plan.Members.Num());
+		return false;
+	}
+	if (!ABTSM73BeamA::RebuildBearingContacts(
+		Profile.BeamSettings.BeamB.BeamA, Assembly, OutError)
+		|| !ValidateActualBearingPairs(Profile.BeamSettings.BeamB.BeamA,
+			Plan, Assembly.BearingContacts, OutError))
+	{
+		return false;
+	}
+
+	TSet<uint64> ActualContacts;
+	for (const FABTSM73BeamABearingContact& Contact : Assembly.BearingContacts)
+	{
+		ActualContacts.Add(BearingPairKey(
+			Contact.LowerMemberId, Contact.UpperMemberId));
+	}
+	Plan.Summary.VerifiedSeatCount = 0;
+	Plan.Summary.SeatMismatchCount = 0;
+	for (int32 UpperIndex = 0; UpperIndex < Plan.Members.Num(); ++UpperIndex)
+	{
+		const FPlannedMember& Planned = Plan.Members[UpperIndex];
+		if (Planned.bRequiresGroundSeat)
+		{
+			const bool bGrounded = Plan.Components.IsValidIndex(Planned.ComponentId)
+				&& FMath::Abs(PlannedMemberBounds(Planned).Min.Z
+					- Plan.Components[Planned.ComponentId].GroundPlaneZCM)
+					<= GeometryToleranceCM;
+			Plan.Summary.VerifiedSeatCount += bGrounded ? 1 : 0;
+			Plan.Summary.SeatMismatchCount += bGrounded ? 0 : 1;
+		}
+		for (const int32 LowerIndex : Planned.RequiredLowerMemberIndices)
+		{
+			const bool bVerified = ActualContacts.Contains(
+				BearingPairKey(LowerIndex, UpperIndex));
+			Plan.Summary.VerifiedSeatCount += bVerified ? 1 : 0;
+			Plan.Summary.SeatMismatchCount += bVerified ? 0 : 1;
+		}
+	}
+	if (Plan.Summary.SeatMismatchCount != 0
+		|| Plan.Summary.VerifiedSeatCount
+			!= Plan.Summary.GroundSeatCount + Plan.Summary.PlannedSeatCount)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage2SeatVerificationFailed:Verified=%d:Expected=%d:Mismatch=%d"),
+			Plan.Summary.VerifiedSeatCount,
+			Plan.Summary.GroundSeatCount + Plan.Summary.PlannedSeatCount,
+			Plan.Summary.SeatMismatchCount);
+		return false;
+	}
+	Assembly.Summary.BayGraphHash = Plan.Summary.CorePlanHash;
+	Assembly.Summary.BeamGraphHash = Plan.Summary.FinalGeometryHash;
+	RefreshAssemblySummary(Assembly);
+	Assembly.Summary.bAccepted = true;
+	Plan.Summary.EmittedMemberCount = Assembly.Members.Num();
+	Plan.Summary.bAccepted = true;
+	return true;
 }
 
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(

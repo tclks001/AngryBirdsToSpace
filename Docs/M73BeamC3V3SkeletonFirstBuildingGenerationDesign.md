@@ -2161,3 +2161,132 @@ Chaos 或可见 PIE。
 Stage 2 可以从该冻结点开始：仅从带稳定 core/demand/course 身份的 Stage 1 member 向外发射可追溯耦合 course，先不
 生成共同外框。每个新构件必须记录源 core、源 course、目标 WFC 外立面、输入/输出 Hash；无法回溯到 Stage 1 骨架的
 构件失败关闭。下一视觉停点只验收“芯体到外框耦合点”的因果路径，仍不进入 Chaos。
+
+## 48. Stage 2 首个停点：芯体到外立面的可追溯耦合砖（2026-08-12）
+
+本轮只实现 `CouplingCourses`，继续把 Stage 1 计划当作不可变输入。Stage 2 不调用旧 complete-production 的
+`BuildCandidateCommonFrame`，不生成 building-group shell、外柱、楼板或屋顶，也不移动、缩短、替换任何 Stage 1 member。
+
+每个耦合候选按以下顺序产生：
+
+1. 只从已冻结 `PodiumMain` 的相邻同轴 course 对选择 anchor band；若某方向没有合法 main 候选，才允许同一 support
+   family 的接地 `TowerChild` 提供该方向候选；
+2. 耦合砖占用芯体本层未使用的 36 cm 轨道，下方必须是相邻 course 的正交 `CoreCourse/SharedCourse`，并形成真实
+   正面积 Bearing；禁止与本层既有芯体砖正体积重合；
+3. 从下座位置沿 `-X/+X/-Y/+Y` 在同一 WFC component 的连续 Body/Annex/Foundation 实体联合中向外求最远可达面。
+   不允许跨过 ProtectedVoid、语义断缝或只凭 component AABB 填平空洞；
+4. 每个目标面发射两个相隔两 course 的同轴 member，形成可辨认的竖向双层耦合带。每根 member 长度保持
+   `36..720 cm`；无法到达目标面的候选关闭，不分段制造无竖向支座的悬空链；
+5. 每根 member 冻结 `OriginCoreCellId`、`ParentStage1MemberIndex`、`AnchorBandId`、`TargetFacadeSourceVolumeId`、
+   `FaceMask`、course、端点和稳定 signature。`Stage2Hash = Hash(Stage1Hash, ordered coupling delta)`；
+6. 四个方向至少各有一个合法双层带；所有 Stage 2 member 必须有 Stage 1 parent、真实下座、外立面终点且
+   `ProducedStage=CouplingCourses`。任何 Stage 3+ kind 出现均失败关闭。
+
+Actor 在 `Generation Stop Stage = Stage 2` 时提供互斥诊断层：`Coupling Courses Only` 只显示新增耦合砖；
+`Core to Coupling Provenance` 只显示 parent、目标端点和来源线；`Core + Coupling Courses` 明确作为组合视图显示冻结芯体与
+Stage 2 delta。切换诊断层不得重新生成 Seed/Attempt/芯体或改变 Stage 1 Hash。
+
+本停点的代码门为：阶段边界/四面双层/父级与 Bearing/720 cm/ProtectedVoid/Hash 纯数据合同，代表种子 fresh NullRHI，
+再执行 UE 5.8 ForceUnity Development Editor 全链接。结果仍为 `Physical=NotEvaluated`；不运行 Chaos，不把本阶段当作
+共同外框、完整 Brick 预算或最终建筑静态门。代码通过后停下，由用户在 Editor 检查外伸方向、层位、与 WFC 轮廓的
+对应关系，再决定 Stage 3。
+
+Stage 2 的 `StageLocalDAG=Accepted` 仅表示新增耦合砖已从最终 member 几何重建真实 Bearing、预测/实际座面集合一致，
+并且能沿 Stage 1 parent 回溯到 ground；它不表示悬臂端合力已落入完整建筑支撑凸包。后者必须等 Stage 3 外框闭合并产生
+外柱/相邻支座后，才运行完整 Beam-C 合力与支撑范围门。若在本停点提前运行完整 Beam-C，四面尚未闭合的耦合砖会正确
+报告 `BeamCSupportResultantOutsideHull`；不得通过补隐形柱、放宽凸包或把该拒绝误作 Stage 2 几何失败。
+
+首轮实现把“可验收最小增量”冻结为全建筑四个方向各一组双层带，共 8 根 `ThroughCourse`。它不是最终外框密度：每个方向
+优先选择最高的合法 PodiumMain anchor，只有该方向没有合法 main 时才回退接地 TowerChild。后续若视觉需要更多耦合点，
+必须在本层身份、下座和 WFC 连续路径合同上扩展，而不能回用旧 shell/rail 或直接按 component AABB 铺满。
+
+本轮 UE 5.8 ForceUnity Development Editor 全链接成功；fresh `Stage2Boundary`、`PreviewDiagnosticContracts` 与
+`FutureStageFailsClosed` 各 1/1。Stage 2 的 5 Profile × 6 Tier 为 30/30，Stage 1 冻结矩阵复跑也为 30/30；Stage 2
+每叶保持 `Coupling=8`、`Faces=15`、父级/端点违规为 0，且 `Stage1InputGeometryHash` 与 Stage 2 输出 Hash 分离。
+最终 fresh `ABTS.M73DAG.BeamC3V3.Staged` 为 75/75，完成标记与进程退出均为 0。
+证据日志为 `Saved/Logs/M7-Stage2-Boundary-20260812.log`、`M7-Stage2-Diagnostics-20260812.log`、
+`M7-Stage2-FutureFailClosed-20260812.log`、`M7-Stage2-Matrix-20260812.log` 和
+`M7-Stage2-Stage1Regression-20260812.log`；完整阶段回归见 `M7-Stage2-Staged-Final-20260812.log`。
+本轮未运行 Chaos 或可见 PIE，用户修改的物理测试地图继续排除。
+
+### 48.1 首版方向合同修正：不以横穿内部换取四面齐全（2026-08-12）
+
+首轮视觉表明，`FaceMask` 与“目标 facade 位于 anchor 某一侧”只能证明坐标符号，不能证明构件真正从建筑外侧芯体向外生长。
+当某方向没有处于建筑相应外半区的合法 anchor 时，旧搜索会选反侧芯体并先穿过建筑内部；该构件虽然最终到达同名 facade，
+却不能作为未来外立面的有效耦合点。
+
+方向合同收紧为：
+
+1. origin core 的目标侧外表面必须位于所属 WFC component 的同侧半区；`-X/-Y` 不得从正侧芯体起步，`+X/+Y` 反之；
+2. 构件仍向芯体内保留一个完整 36 cm block 的搭接以形成 Stage 1 Bearing，但越过 origin core 外表面后的净外伸必须至少为
+   36 cm；仅在芯体内部或刚到芯体边界的短砖全部拒绝；
+3. 若首版某方向找不到合法双层带，则该方向显式缺席，`CouplingFaceMask` 只记录实际覆盖，且
+   `CouplingCourseCount == 2 × popcount(FaceMask)`。禁止从反侧芯体横穿内部凑足固定 8 根；
+4. `CouplingOutwardViolationCount` 写入计划、D1 摘要、日志和 5×6 门。每根构件还由自动化独立重算 origin core 外半区与
+   净外伸，不只信任汇总计数。
+
+该修正有意保持首版数量稀疏：低层形态可能从 8 根收缩为 4 根，表示只有两个方向存在合法 anchor。下一轮“立面分区 ×
+高度锚带”扩展负责补足覆盖；不得在本轮恢复向内构件，也不得把缺面当作 Stage 3 外框已可生成。UE 5.8 ForceUnity
+Development Editor 全链接成功且无新增警告；fresh Stage 2 5×6 为 30/30，所有叶的逐 member 外向断言和
+`CouplingOutwardViolationCount=0` 均通过，最终日志为 `Saved/Logs/M7-Stage2-Outward-Matrix-Final-20260812.log`。
+
+### 48.2 非起点芯体禁入与贴边面分类（2026-08-12）
+
+Stage 2 的“向外”还必须相对全部芯体成立，而不只是相对发射芯体成立。分层芯体是镂空的；若只做积木实体穿透检测，
+主芯体外伸 course 可以穿过另一个 TowerChild 的空腔或在它的两根 rail 之间终止，几何上没有正体积穿透，语义上却仍然
+是向建筑内部和另一芯体内部生长。修正后的路由合同为：
+
+1. 每个芯体按真实 course 建立占用包络：粗主干使用 `LocalBounds`，到 `SingleShrinkCourseIndex` 后切换
+   `UpperLocalBounds`，X/Y 四侧均包含积木 18 cm 半厚；
+2. 候选仅允许在 origin core 内保留一块 Bearing 搭接。越过 origin 外表面的部分若与任何非起点芯体的同层包络有正体积
+   相交，则候选直接拒绝。该规则故意把镂空内部也视作禁入区；真正的跨芯共享仍只能使用 Stage 1 `SharedCourse` 合同，
+   不能由普通 Stage 2 外伸冒充；
+3. 发射后再次逐 member 重算，发布 `CouplingOtherCoreViolationCount` 并要求严格为 0。该检查独立于已有积木穿透、
+   protected void、外向净长和 WFC 覆盖门；
+4. 每个芯体另发布 `PerimeterFaceMask`，低四位分别为 `-X,+X,-Y,+Y`。分类逐 course 对照 Body 联合集合的真实暴露面，
+   不使用 component AABB；若实体外表面到暴露语义面的净余量不足一整块 36 cm，则该面属于贴边面。同一芯体可以同时
+   标记多个面，另保存每面首次见证 course，适配上部单次收缩后才贴边的子芯体；
+5. Actor 新增互斥诊断层 `4 - Perimeter Cores / Touched Faces`：非贴边芯体以玻璃显示，贴边芯体以铁色显示；每个已置位
+   的面在其首次见证 course 外侧绘制一条石材色薄板。薄板位置直接表达是哪一面，不是生产积木。该分类是 Stage 3
+   “贴边芯体本身充当外墙”的输入，本轮不扩展耦合数量、不生成外框。
+
+UE 5.8 ForceUnity Development Editor 全链接通过。fresh boundary 与 preview diagnostic 为 2/2，ColumnBreak E1 记录
+`OtherCoreViolations=0, PerimeterCores=1, PerimeterFaces=2`。Stage 2 5×6 首轮为 29/30；唯一失败是既有 Stage 1
+`DropTrigger E5` 在 `ChildCandidate=9989.88 ms / Total=10012.69 ms` 越过 10 秒硬门，尚未进入 Stage 2；同叶 fresh
+隔离复跑以 `Child=6273.21 ms / Total=8115.07 ms` 通过。其余 29 叶及隔离叶均为
+`CouplingOtherCoreViolations=0`，贴边 ledger 非空。证据：
+
+- `Saved/Logs/M7-Stage2-OtherCore-Perimeter-Boundary-Final-20260812.log`；
+- `Saved/Logs/M7-Stage2-OtherCore-Perimeter-Matrix-20260812.log`；
+- `Saved/Logs/M7-Stage2-OtherCore-Perimeter-DropTrigger-E5-20260812.log`。
+
+本停点仍为 `Physical=NotEvaluated`，未运行 Chaos 或可见 PIE；用户地图继续排除。下一步先视觉确认贴边多面标记以及普通
+耦合 course 不再进入任何子芯体，再开始数量与立面覆盖扩展。
+
+### 48.3 双层带端点一致与贴边暴露区段（2026-08-12）
+
+视觉验收进一步暴露两个独立的数据粒度错误：同一 `AnchorBandId` 的上下两个 course 曾分别采用“第一个合法目标”，因而可在
+不同 WFC 体积或不同退台面终止，形成长短不一的伪双层带；贴边分类则把“某一 course、某一局部区段存在外露”压缩为整个
+芯体的一位面掩码，预览又把这一个见证膨胀成整面薄板，因此会在 TowerChild 与非贴边 PodiumMain 相交的内部区段误画石材板。
+
+修正合同为：
+
+1. 每个 course 不再只返回第一个合法目标，而是按稳定顺序发布完整候选表。双层带只从上下候选表中选择目标 facade 坐标
+   相同的一对；目标 WFC Volume ID 可以不同，因为竖向相邻体积可以共同定义同一立面，但几何端点必须相同；
+2. 发射后按 `AnchorBandId` 独立审计，每组必须恰有两根且外端坐标相同。任何差异进入
+   `CouplingBandEndpointViolationCount` 并使 Stage 2 fail closed；
+3. 贴边权威数据改为 `PerimeterFaceExposures`。每条记录冻结 course、面、来源 Volume、facade 坐标及切向
+   `[Minimum, Maximum]` 区段；它必须同时满足 WFC 外侧为空，且从芯体表面到 facade 的该段走廊不与任何其他芯体同层包络
+   正体积相交；
+4. 切向区段先按 WFC 与其他芯体边界切分，再只保留无遮挡片段；仅当 course、face、facade 坐标连续一致时才允许合并。
+   `PerimeterFaceMask` 与首次见证 course 只作为兼容摘要，Stage 3 和诊断显示不得再把摘要当作整面权威；
+5. 贴边诊断薄板逐条消费精确暴露区段。因此铁色芯体仍表示“至少有一处贴边”，石材板则只覆盖真实外露的 course/区段，
+   与玻璃色 main 相交或被其他 core 遮挡的内部位置不再绘制。
+
+自动化增加双层同端点审计及独立的无遮挡走廊重算；5×6 仍允许不同形态实际只有 4 或 8 根首版耦合砖，但不允许以长度不一
+冒充一组双层带。UE 5.8 Development Editor 增量全链接成功；fresh `Stage2Boundary` 1/1、Stage 2 5×6 30/30、
+`PreviewDiagnosticContracts` 1/1，最终完整 `ABTS.M73DAG.BeamC3V3.Staged` 精确 75/75，完成标记和进程退出均为 0。
+证据日志为 `Saved/Logs/M7-Stage2-CoherentBand-Exposure-Boundary-20260812-211025.log`、
+`M7-Stage2-CoherentBand-Exposure-Matrix-20260812-211152.log`、
+`M7-Stage2-CoherentBand-Exposure-Preview-20260812.log` 与
+`M7-Stage2-CoherentBand-Exposure-Staged-20260812.log`。该修正不增加 Stage 2 密度、不生成 Stage 3 外框，也不评价 Chaos。

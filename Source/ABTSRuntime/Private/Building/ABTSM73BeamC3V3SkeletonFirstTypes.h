@@ -73,6 +73,12 @@ namespace ABTSM73BeamC3V3
 		int32 SourceVolumeId = INDEX_NONE;
 		/** The grounded core from which a non-shared member was grown. */
 		int32 OriginCoreCellId = INDEX_NONE;
+		/** Stage-2 only: immutable Stage-1 member which authorizes this extension. */
+		int32 ParentStage1MemberIndex = INDEX_NONE;
+		/** Stage-2 only: stable pair/band identity within the origin core. */
+		int32 AnchorBandId = INDEX_NONE;
+		/** Stage-2 only: semantic Body face reached by the outer endpoint. */
+		int32 TargetFacadeSourceVolumeId = INDEX_NONE;
 		int32 CourseIndex = INDEX_NONE;
 		int32 StationA = INDEX_NONE;
 		int32 StationB = INDEX_NONE;
@@ -634,6 +640,20 @@ namespace ABTSM73BeamC3V3
 		bool bAppliedToProductionCoreHierarchy = false;
 	};
 
+	/** One actually usable exterior interval on one core face at one course.
+	 * Unlike PerimeterFaceMask, this ledger preserves the vertical course and
+	 * tangent interval and is emitted only when the route from the core face to
+	 * the semantic facade is not occluded by another core envelope. */
+	struct FPerimeterFaceExposure
+	{
+		int32 CourseIndex = INDEX_NONE;
+		uint8 FaceMask = 0;
+		int32 SourceVolumeId = INDEX_NONE;
+		double FacadeCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -685,6 +705,18 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> UpperXStations;
 		TArray<int32> UpperYStations;
 		FBox UpperLocalBounds = FBox(EForceInit::ForceInit);
+		/** Stage-2 classification of the core faces which coincide with an exposed
+		 * WFC semantic-union boundary at one or more occupied courses. The four low
+		 * bits use EGroundedFace (-X,+X,-Y,+Y). It is diagnostic input for the later
+		 * facade-fitting pass; Stage 1 deliberately leaves it zero. */
+		uint8 PerimeterFaceMask = 0;
+		/** First witnessing course for -X,+X,-Y,+Y, respectively. Stage 2 keeps
+		 * this aligned with PerimeterFaceMask so diagnostics mark the real facade
+		 * contact height instead of projecting every mark onto the ground floor. */
+		TArray<int32> PerimeterFaceFirstCourseIndices;
+		/** Authoritative per-course, unoccluded exterior intervals. The mask and
+		 * first-course array above are compatibility summaries derived from this. */
+		TArray<FPerimeterFaceExposure> PerimeterFaceExposures;
 		/** Complete ordered course membership, RailCount rails per course. */
 		TArray<int32> MemberIndices;
 		/** TowerChild only: exact physical slots below LocalPodiumTopCourseIndex.
@@ -851,6 +883,26 @@ namespace ABTSM73BeamC3V3
 		int32 PlannedJointCount = 0;
 		int32 PlannedBearingContactCount = 0;
 		int32 PlannedBearingPairCheckCount = 0;
+		int64 Stage1InputGeometryHash = 0;
+		int32 CouplingCourseCount = 0;
+		uint8 CouplingFaceMask = 0;
+		int32 CouplingParentViolationCount = 0;
+		int32 CouplingEndpointViolationCount = 0;
+		/** Coupling courses which do not start from the requested outer half of
+		 * the component or fail to extend at least one full block beyond the
+		 * origin core's outer face. */
+		int32 CouplingOutwardViolationCount = 0;
+		/** Coupling courses whose portion outside the origin core enters the
+		 * course-volume envelope of any other core. Hollow core interiors are
+		 * intentionally treated as occupied for this Stage-2 routing contract. */
+		int32 CouplingOtherCoreViolationCount = 0;
+		/** Double-course bands whose two members terminate on different facade
+		 * coordinates or otherwise do not form one coherent facade anchor. */
+		int32 CouplingBandEndpointViolationCount = 0;
+		int32 PerimeterCoreCount = 0;
+		int32 PerimeterCoreFaceCount = 0;
+		int32 PerimeterFaceExposureSpanCount = 0;
+		int64 Stage2PlanHash = 0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;

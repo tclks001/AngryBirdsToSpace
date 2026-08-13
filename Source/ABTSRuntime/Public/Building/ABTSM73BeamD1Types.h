@@ -29,10 +29,20 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 {
 	SemanticEnvelope UMETA(DisplayName = "Stage 0 - WFC Semantic Envelope"),
 	CoreAndShared UMETA(DisplayName = "Stage 1 - Core + Shared Courses"),
-	CouplingCourses UMETA(DisplayName = "Stage 2 - Coupling Courses (Not Implemented)"),
+	CouplingCourses UMETA(DisplayName = "Stage 2 - Core / Facade Coupling Courses"),
 	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame (Not Implemented)"),
 	FloorInfillRoof UMETA(DisplayName = "Stage 4 - Floor / Infill / Roof (Not Implemented)"),
 	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)")
+};
+
+/** Mutually exclusive Stage-2 visual evidence layer on the D1 preview Actor. */
+UENUM(BlueprintType)
+enum class EABTSM73BeamC3Stage2DiagnosticLayer : uint8
+{
+	CouplingCoursesOnly UMETA(DisplayName = "1 - Coupling Courses Only"),
+	CouplingProvenance UMETA(DisplayName = "2 - Coupling Provenance"),
+	CoreAndCouplingCourses UMETA(DisplayName = "3 - Core + Coupling Courses"),
+	PerimeterCoreFaces UMETA(DisplayName = "4 - Perimeter Cores / Touched Faces")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -554,4 +564,48 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Identity")
 	int64 SkeletonFirstFinalGeometryHash = 0;
+
+	/** Exact accepted Stage-1 geometry consumed as the immutable Stage-2 input. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int64 SkeletonFirstStage1InputGeometryHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstCouplingCourseCount = 0;
+
+	/** Four low bits are the Stage-2 -X,+X,-Y,+Y reached facade directions. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	uint8 SkeletonFirstCouplingFaceMask = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstCouplingParentViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstCouplingEndpointViolationCount = 0;
+
+	/** Courses on the wrong building half or without one full block of net
+	 * extension beyond the origin core face. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstCouplingOutwardViolationCount = 0;
+
+	/** Couplings whose outward-only segment enters a non-origin core envelope. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstCouplingOtherCoreViolationCount = 0;
+
+	/** Double-course bands whose two facade endpoints do not coincide. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstCouplingBandEndpointViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstPerimeterCoreCount = 0;
+
+	/** Sum of marked -X,+X,-Y,+Y face incidences across perimeter cores. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstPerimeterCoreFaceCount = 0;
+
+	/** Exact per-course unoccluded exterior intervals consumed by Stage 3. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int32 SkeletonFirstPerimeterFaceExposureSpanCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 2")
+	int64 SkeletonFirstStage2PlanHash = 0;
 };

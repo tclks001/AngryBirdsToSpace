@@ -36,7 +36,7 @@ public:
 		FABTSM73BeamD1GenerationResult& OutResult,
 		FString& OutError) const;
 
-	/** Runs a real Stage 0/1 early stop for editor diagnosis; later stages fail closed. */
+	/** Runs a real Stage 0/1/2 early stop for editor diagnosis; later stages fail closed. */
 	bool GenerateStagePreview(
 		const FABTSM73BeamD1Settings& Settings,
 		EABTSM73BeamC3GenerationStage StopStage,

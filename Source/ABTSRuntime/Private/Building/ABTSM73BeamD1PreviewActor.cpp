@@ -167,7 +167,7 @@ namespace ABTSM73BeamD1Preview
 		}
 	}
 
-	enum EDiagnosticVisibility : uint16
+	enum EDiagnosticVisibility : uint32
 	{
 		SemanticEnvelopeVisibility = 1 << 0,
 		ProtectedVoidVisibility = 1 << 1,
@@ -181,10 +181,14 @@ namespace ABTSM73BeamD1Preview
 		SupportProvinceVisibility = 1 << 9,
 		SupportProvinceMainVisibility = 1 << 10,
 		DemandCoreCouplingVisibility = 1 << 11,
-		LocalPodiumHeightPlanVisibility = 1 << 12
+		LocalPodiumHeightPlanVisibility = 1 << 12,
+		Stage2CouplingOnlyVisibility = 1 << 13,
+		Stage2ProvenanceVisibility = 1 << 14,
+		Stage2CoreAndCouplingVisibility = 1 << 15,
+		Stage2PerimeterCoreFacesVisibility = 1 << 16
 	};
 
-	uint16 DiagnosticVisibilityMask(
+	uint32 DiagnosticVisibilityMask(
 		const EABTSM73BeamC3Stage1DiagnosticLayer Layer)
 	{
 		switch (Layer)
@@ -211,6 +215,24 @@ namespace ABTSM73BeamD1Preview
 			return DemandCoreCouplingVisibility;
 		case EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan:
 			return LocalPodiumHeightPlanVisibility;
+		default:
+			return 0;
+		}
+	}
+
+	uint32 DiagnosticVisibilityMask(
+		const EABTSM73BeamC3Stage2DiagnosticLayer Layer)
+	{
+		switch (Layer)
+		{
+		case EABTSM73BeamC3Stage2DiagnosticLayer::CouplingCoursesOnly:
+			return Stage2CouplingOnlyVisibility;
+		case EABTSM73BeamC3Stage2DiagnosticLayer::CouplingProvenance:
+			return Stage2ProvenanceVisibility;
+		case EABTSM73BeamC3Stage2DiagnosticLayer::CoreAndCouplingCourses:
+			return Stage2CoreAndCouplingVisibility;
+		case EABTSM73BeamC3Stage2DiagnosticLayer::PerimeterCoreFaces:
+			return Stage2PerimeterCoreFacesVisibility;
 		default:
 			return 0;
 		}
@@ -288,55 +310,72 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Parameters)
 {
 	using namespace ABTSM73BeamD1Preview;
-	const uint16 WFCMask = DiagnosticVisibilityMask(
+	const uint32 WFCMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope);
-	const uint16 IntentMask = DiagnosticVisibilityMask(
+	const uint32 IntentMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CorePlacementIntent);
-	const uint16 MembersMask = DiagnosticVisibilityMask(
+	const uint32 MembersMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses);
-	const uint16 MergeMask = DiagnosticVisibilityMask(
+	const uint32 MergeMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CoreMergeRegions);
-	const uint16 XMask = DiagnosticVisibilityMask(
+	const uint32 XMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes);
-	const uint16 YMask = DiagnosticVisibilityMask(
+	const uint32 YMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes);
-	const uint16 SupportDemandMask = DiagnosticVisibilityMask(
+	const uint32 SupportDemandMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::SemanticSupportDemandDAG);
-	const uint16 SupportProvinceMask = DiagnosticVisibilityMask(
+	const uint32 SupportProvinceMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition);
-	const uint16 SupportProvinceMainMask = DiagnosticVisibilityMask(
+	const uint32 SupportProvinceMainMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment);
-	const uint16 DemandCoreCouplingMask = DiagnosticVisibilityMask(
+	const uint32 DemandCoreCouplingMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger);
-	const uint16 LocalPodiumHeightPlanMask = DiagnosticVisibilityMask(
+	const uint32 LocalPodiumHeightPlanMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan);
+	const uint32 Stage2PerimeterMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage2DiagnosticLayer::PerimeterCoreFaces);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
-		WFCMask, static_cast<uint16>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
+		WFCMask, static_cast<uint32>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
-		IntentMask, static_cast<uint16>(CoreIntentVisibility | PairIntentVisibility));
+		IntentMask, static_cast<uint32>(CoreIntentVisibility | PairIntentVisibility));
 	TestEqual(TEXT("Member layer contains only actual core/shared members"),
-		MembersMask, static_cast<uint16>(CoreAndSharedVisibility));
+		MembersMask, static_cast<uint32>(CoreAndSharedVisibility));
 	TestEqual(TEXT("Merge layer contains only derived core merge regions"),
-		MergeMask, static_cast<uint16>(CoreMergeRegionVisibility));
+		MergeMask, static_cast<uint32>(CoreMergeRegionVisibility));
 	TestEqual(TEXT("X lane layer contains only actual X core lanes"),
-		XMask, static_cast<uint16>(CompositeCoreXVisibility));
+		XMask, static_cast<uint32>(CompositeCoreXVisibility));
 	TestEqual(TEXT("Y lane layer contains only actual Y core lanes"),
-		YMask, static_cast<uint16>(CompositeCoreYVisibility));
+		YMask, static_cast<uint32>(CompositeCoreYVisibility));
 	TestEqual(TEXT("Support-demand layer contains only the semantic support graph"),
 		SupportDemandMask,
-		static_cast<uint16>(SemanticSupportDemandVisibility));
+		static_cast<uint32>(SemanticSupportDemandVisibility));
 	TestEqual(TEXT("Support-province layer contains only the province partition"),
 		SupportProvinceMask,
-		static_cast<uint16>(SupportProvinceVisibility));
+		static_cast<uint32>(SupportProvinceVisibility));
+	TestEqual(TEXT("Stage-2 coupling-only layer is mutually exclusive"),
+		DiagnosticVisibilityMask(
+			EABTSM73BeamC3Stage2DiagnosticLayer::CouplingCoursesOnly),
+		static_cast<uint32>(Stage2CouplingOnlyVisibility));
+	TestEqual(TEXT("Stage-2 provenance layer is mutually exclusive"),
+		DiagnosticVisibilityMask(
+			EABTSM73BeamC3Stage2DiagnosticLayer::CouplingProvenance),
+		static_cast<uint32>(Stage2ProvenanceVisibility));
+	TestEqual(TEXT("Stage-2 combined layer is mutually exclusive"),
+		DiagnosticVisibilityMask(
+			EABTSM73BeamC3Stage2DiagnosticLayer::CoreAndCouplingCourses),
+		static_cast<uint32>(Stage2CoreAndCouplingVisibility));
+	TestEqual(TEXT("Stage-2 perimeter layer is mutually exclusive"),
+		Stage2PerimeterMask,
+		static_cast<uint32>(Stage2PerimeterCoreFacesVisibility));
 	TestEqual(TEXT("Province-main layer contains only the assignment plan"),
 		SupportProvinceMainMask,
-		static_cast<uint16>(SupportProvinceMainVisibility));
+		static_cast<uint32>(SupportProvinceMainVisibility));
 	TestEqual(TEXT("Demand-core layer contains only the correspondence ledger"),
 		DemandCoreCouplingMask,
-		static_cast<uint16>(DemandCoreCouplingVisibility));
+		static_cast<uint32>(DemandCoreCouplingVisibility));
 	TestEqual(TEXT("Local-podium layer contains only the height plan"),
 		LocalPodiumHeightPlanMask,
-		static_cast<uint16>(LocalPodiumHeightPlanVisibility));
+		static_cast<uint32>(LocalPodiumHeightPlanVisibility));
 	TestEqual(TEXT("WFC and intent layers are disjoint"),
 		static_cast<uint16>(WFCMask & IntentMask), static_cast<uint16>(0));
 	TestEqual(TEXT("WFC and member layers are disjoint"),
@@ -655,7 +694,9 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				TEXT("[ABTS][M7.3-Beam-D1][StagePreviewRejected]")
 				TEXT(" Actor=%s Stage=%d Layer=%d Reason=%s"),
 				*GetName(), static_cast<int32>(GenerationStopStage),
-				static_cast<int32>(Stage1DiagnosticLayer), *Error);
+				GenerationStopStage == EABTSM73BeamC3GenerationStage::CouplingCourses
+					? static_cast<int32>(Stage2DiagnosticLayer)
+					: static_cast<int32>(Stage1DiagnosticLayer), *Error);
 			return;
 		}
 		LastSummary = StageResult.Summary;
@@ -668,8 +709,11 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			GenerationStopStage == EABTSM73BeamC3GenerationStage::SemanticEnvelope
 				? EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope
 				: Stage1DiagnosticLayer;
-		const uint16 VisibilityMask =
-			ABTSM73BeamD1Preview::DiagnosticVisibilityMask(EffectiveLayer);
+		const bool bStage2 = GenerationStopStage
+			== EABTSM73BeamC3GenerationStage::CouplingCourses;
+		const uint32 VisibilityMask = bStage2
+			? ABTSM73BeamD1Preview::DiagnosticVisibilityMask(Stage2DiagnosticLayer)
+			: ABTSM73BeamD1Preview::DiagnosticVisibilityMask(EffectiveLayer);
 		const bool bShowEnvelope =
 			(VisibilityMask & ABTSM73BeamD1Preview::SemanticEnvelopeVisibility) != 0;
 		if (bShowEnvelope && SemanticEnvelopePreview != nullptr)
@@ -1342,16 +1386,50 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 		}
 		else if ((VisibilityMask & (ABTSM73BeamD1Preview::CoreAndSharedVisibility
 			| ABTSM73BeamD1Preview::CompositeCoreXVisibility
-			| ABTSM73BeamD1Preview::CompositeCoreYVisibility)) != 0)
+			| ABTSM73BeamD1Preview::CompositeCoreYVisibility
+			| ABTSM73BeamD1Preview::Stage2CouplingOnlyVisibility
+			| ABTSM73BeamD1Preview::Stage2ProvenanceVisibility
+			| ABTSM73BeamD1Preview::Stage2CoreAndCouplingVisibility
+			| ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility)) != 0)
 		{
 			const bool bXOnly =
 				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreXVisibility) != 0;
 			const bool bYOnly =
 				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreYVisibility) != 0;
+			const bool bCouplingOnly =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage2CouplingOnlyVisibility) != 0;
+			const bool bProvenance =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage2ProvenanceVisibility) != 0;
+			const bool bCoreAndCoupling =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage2CoreAndCouplingVisibility) != 0;
+			const bool bPerimeterFaces =
+				(VisibilityMask & ABTSM73BeamD1Preview::Stage2PerimeterCoreFacesVisibility) != 0;
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
-			for (const ABTSM73BeamC3V3::FPlannedMember& Member :
-				Plan.Members)
+			for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
 			{
+				const ABTSM73BeamC3V3::FPlannedMember& Member = Plan.Members[MemberIndex];
+				const bool bCoupling = Member.ProducedStage
+					== EABTSM73BeamC3GenerationStage::CouplingCourses;
+				bool bProvenanceParent = false;
+				if (bProvenance)
+				{
+					for (const ABTSM73BeamC3V3::FPlannedMember& Candidate : Plan.Members)
+					{
+						bProvenanceParent |= Candidate.ProducedStage
+							== EABTSM73BeamC3GenerationStage::CouplingCourses
+							&& Candidate.ParentStage1MemberIndex == MemberIndex;
+					}
+				}
+				if ((bCouplingOnly && !bCoupling)
+					|| (bProvenance && !bCoupling && !bProvenanceParent)
+					|| (bCoreAndCoupling && !bCoupling
+						&& Member.ProducedStage
+							!= EABTSM73BeamC3GenerationStage::CoreAndShared)
+					|| (bPerimeterFaces && (bCoupling
+						|| !Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId))))
+				{
+					continue;
+				}
 				if ((bXOnly || bYOnly)
 					&& (Member.SkeletonKind
 							!= ABTSM73BeamC3V3::ESkeletonMemberKind::CoreCourse
@@ -1374,7 +1452,31 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					&& (OriginCore->LocalPodiumHeightRegionId == INDEX_NONE
 						|| Member.CourseIndex
 							>= OriginCore->LocalPodiumTopCourseIndex);
-				if (bXOnly || bYOnly)
+				if (bPerimeterFaces)
+				{
+					Preview = OriginCore != nullptr && OriginCore->PerimeterFaceMask != 0
+						? IronPreview.Get() : GlassPreview.Get();
+				}
+				else if (bCoupling)
+				{
+					Preview = IronPreview.Get();
+					if (bProvenance)
+					{
+						ABTSM73BeamD1Preview::AddBoxInstance(
+							CoreIntentPreview,
+							FBox(Member.LocalStart - FVector(12.0),
+								Member.LocalStart + FVector(12.0)));
+						ABTSM73BeamD1Preview::AddBoxInstance(
+							SharedPairIntentPreview,
+							FBox(Member.LocalEnd - FVector(12.0),
+								Member.LocalEnd + FVector(12.0)));
+					}
+				}
+				else if (bProvenanceParent)
+				{
+					Preview = GlassPreview.Get();
+				}
+				else if (bXOnly || bYOnly)
 				{
 					Preview = bChildOnlyCourse
 						? StonePreview.Get() : WoodPreview.Get();
@@ -1392,8 +1494,58 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 				Preview->AddInstance(FTransform(
 					FQuat::Identity, Center, Dimensions / 100.0), false);
 			}
+			if (bPerimeterFaces)
+			{
+				for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
+				{
+					const double GroundZ = Plan.Components.IsValidIndex(Core.ComponentId)
+						? Plan.Components[Core.ComponentId].GroundPlaneZCM : 0.0;
+					for (const ABTSM73BeamC3V3::FPerimeterFaceExposure& Exposure
+						: Core.PerimeterFaceExposures)
+					{
+						const uint8 FaceMask = Exposure.FaceMask;
+						const bool bXAxis = FaceMask == ABTSM73BeamC3V3::NegativeX
+							|| FaceMask == ABTSM73BeamC3V3::PositiveX;
+						const bool bPositive = FaceMask == ABTSM73BeamC3V3::PositiveX
+							|| FaceMask == ABTSM73BeamC3V3::PositiveY;
+						const double Z = GroundZ + (Exposure.CourseIndex + 0.5) * 36.0;
+						FVector Minimum = FVector::ZeroVector;
+						FVector Maximum = Minimum;
+						const int32 AxisIndex = bXAxis ? 0 : 1;
+						const int32 TangentIndex = bXAxis ? 1 : 0;
+						Minimum[AxisIndex] = Maximum[AxisIndex] = Exposure.FacadeCoordinateCM
+							+ (bPositive ? 6.0 : -6.0);
+						Minimum[TangentIndex] = Exposure.TangentMinimumCM;
+						Maximum[TangentIndex] = Exposure.TangentMaximumCM;
+						Minimum[AxisIndex] -= 6.0;
+						Maximum[AxisIndex] += 6.0;
+						Minimum.Z = Z - 12.0;
+						Maximum.Z = Z + 12.0;
+						ABTSM73BeamD1Preview::AddBoxInstance(
+							SharedPairIntentPreview, FBox(Minimum, Maximum));
+					}
+				}
+				SharedPairIntentPreview->SetVisibility(
+					SharedPairIntentPreview->GetInstanceCount() > 0, true);
+			}
+			if (bProvenance)
+			{
+				CoreIntentPreview->SetVisibility(
+					CoreIntentPreview->GetInstanceCount() > 0, true);
+				SharedPairIntentPreview->SetVisibility(
+					SharedPairIntentPreview->GetInstanceCount() > 0, true);
+			}
 		}
-		if (EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
+		const bool bShowsMembers = bStage2
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvinceMainAssignment
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::DemandCoreCouplingLedger
+			|| EffectiveLayer == EABTSM73BeamC3Stage1DiagnosticLayer::LocalPodiumHeightPlan;
+		if (!bShowsMembers
+			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CoreAndSharedCourses
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreXLanes
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::CompositeCoreYLanes
 			&& EffectiveLayer != EABTSM73BeamC3Stage1DiagnosticLayer::SupportProvincePartition
@@ -1416,9 +1568,11 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			TEXT(" Provinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 			TEXT(" LocalPodiumCandidates=%d RejectedLocalPodiumCandidates=%d LocalPodiumRegions=%d RaisedLocalPodiumRegions=%d AppliedLocalPodiumRegions=%d LocalPodiumLegMembers=%d RaisedMainReservations=%d RaisedMainMembers=%d LocalPodiumHash=%lld")
 			TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Members=%d")
+			TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d")
 			TEXT(" EnvelopeHash=%lld Stage1Hash=%lld StaticDAG=%d Physical=NotEvaluated"),
 			*GetName(), static_cast<int32>(GenerationStopStage),
-			static_cast<int32>(EffectiveLayer),
+			bStage2 ? static_cast<int32>(Stage2DiagnosticLayer)
+				: static_cast<int32>(EffectiveLayer),
 			bHideSemanticSupportDemandVolumes ? 1 : 0,
 			*LastSummary.GameplayProfileId.ToString(), LastSummary.DifficultyTier,
 			StageResult.Silhouette.Volumes.Num(),
@@ -1462,6 +1616,13 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			StageResult.Skeleton.Plan.Summary.BoundHighProjectionRegionCount,
 			StageResult.Skeleton.Plan.SharedCourseIntents.Num(),
 			StageResult.Skeleton.Plan.Members.Num(),
+			StageResult.Skeleton.Plan.Summary.CouplingCourseCount,
+			StageResult.Skeleton.Plan.Summary.CouplingFaceMask,
+			StageResult.Skeleton.Plan.Summary.CouplingOtherCoreViolationCount,
+			StageResult.Skeleton.Plan.Summary.CouplingBandEndpointViolationCount,
+			StageResult.Skeleton.Plan.Summary.PerimeterCoreCount,
+			StageResult.Skeleton.Plan.Summary.PerimeterCoreFaceCount,
+			StageResult.Skeleton.Plan.Summary.PerimeterFaceExposureSpanCount,
 			LastSummary.SkeletonFirstEnvelopeHash,
 			LastSummary.SkeletonFirstFinalGeometryHash,
 			LastSummary.bStageStaticDAGEvaluated ? 1 : 0);

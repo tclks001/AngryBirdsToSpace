@@ -33,6 +33,14 @@ public:
 		ABTSM73BeamC3V3::FGenerationResult& OutResult,
 		FString& OutError) const;
 
+	/** Preserves the accepted Stage-1 member prefix and appends only traceable
+	 * core-to-facade coupling courses. It emits no common frame or vertical post. */
+	bool GenerateStage2(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		ABTSM73BeamC3V3::FGenerationResult& OutResult,
+		FString& OutError) const;
+
 	/** First pass for the Stage-0 feedback loop. It emits no new semantic volume
 	 * and no final result: only deterministic square main reservations derived
 	 * from the accepted local podium-height plan. */

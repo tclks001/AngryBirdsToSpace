@@ -2576,7 +2576,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	OutResult = FABTSM73BeamD1StagePreviewResult();
 	OutError.Reset();
 	if (StopStage != EABTSM73BeamC3GenerationStage::SemanticEnvelope
-		&& StopStage != EABTSM73BeamC3GenerationStage::CoreAndShared)
+		&& StopStage != EABTSM73BeamC3GenerationStage::CoreAndShared
+		&& StopStage != EABTSM73BeamC3GenerationStage::CouplingCourses)
 	{
 		OutError = FString::Printf(
 			TEXT("BeamC3StageNotImplemented:Stage=%d"),
@@ -2765,25 +2766,46 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		return true;
 	}
 
-	if (!FABTSM73BeamC3V3SkeletonFirstGenerator().GenerateStage1(
-		SelectedProfile, OutResult.Silhouette, OutResult.Skeleton, OutError))
+	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
+	const bool bSkeletonGenerated =
+		StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses
+			? SkeletonGenerator.GenerateStage2(SelectedProfile,
+				OutResult.Silhouette, OutResult.Skeleton, OutError)
+			: SkeletonGenerator.GenerateStage1(SelectedProfile,
+				OutResult.Silhouette, OutResult.Skeleton, OutError);
+	if (!bSkeletonGenerated)
 	{
-		OutError = FString::Printf(TEXT("BeamC3Stage1:%s"), *OutError);
+		OutError = FString::Printf(TEXT("BeamC3Stage%d:%s"),
+			StopStage == EABTSM73BeamC3GenerationStage::CouplingCourses ? 2 : 1,
+			*OutError);
 		return false;
 	}
 	ABTSM73BeamC3V3::FPlanSummary& Stage1 =
 		OutResult.Skeleton.Plan.Summary;
-	const double StaticDAGStartSeconds = FPlatformTime::Seconds();
-	const bool bStaticDAGGenerated = FABTSM73BeamCGenerator().Generate(
-		SelectedProfile.BeamSettings, OutResult.Skeleton.Assembly,
-		OutResult.StaticDAG, OutError);
-	Stage1.StaticDAGMilliseconds =
-		(FPlatformTime::Seconds() - StaticDAGStartSeconds) * 1000.0;
-	Stage1.Stage1TotalMilliseconds += Stage1.StaticDAGMilliseconds;
-	if (!bStaticDAGGenerated)
+	const bool bStage2 = StopStage
+		== EABTSM73BeamC3GenerationStage::CouplingCourses;
+	if (!bStage2)
 	{
-		OutError = FString::Printf(TEXT("BeamC3Stage1StaticDAG:%s"), *OutError);
-		return false;
+		const double StaticDAGStartSeconds = FPlatformTime::Seconds();
+		const bool bStaticDAGGenerated = FABTSM73BeamCGenerator().Generate(
+			SelectedProfile.BeamSettings, OutResult.Skeleton.Assembly,
+			OutResult.StaticDAG, OutError);
+		Stage1.StaticDAGMilliseconds =
+			(FPlatformTime::Seconds() - StaticDAGStartSeconds) * 1000.0;
+		Stage1.Stage1TotalMilliseconds += Stage1.StaticDAGMilliseconds;
+		if (!bStaticDAGGenerated)
+		{
+			OutError = FString::Printf(TEXT("BeamC3Stage1StaticDAG:%s"), *OutError);
+			return false;
+		}
+	}
+	else
+	{
+		// Stage 2 intentionally stops before the common facade and exterior posts.
+		// Running Beam-C's complete-building resultant gate here would reject every
+		// legitimate coupling cantilever. GenerateStage2 has already rebuilt the
+		// real face contacts and proved the complete ground-reachable seat DAG.
+		Stage1.StaticDAGMilliseconds = 0.0;
 	}
 	Stage1.bStage1TimingEvaluated = true;
 	if (Stage1.Stage1TotalMilliseconds
@@ -2805,9 +2827,10 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		return false;
 	}
 	Stage1.bStage1WithinTimeBudget = true;
-	if (OutResult.StaticDAG.Summary.StructuralClosurePassCount != 0
+	if (!bStage2
+		&& (OutResult.StaticDAG.Summary.StructuralClosurePassCount != 0
 		|| OutResult.StaticDAG.Summary.AddedStructuralSupportPostCount != 0
-		|| OutResult.StaticDAG.Summary.SupportResultantAdvisoryCount != 0)
+		|| OutResult.StaticDAG.Summary.SupportResultantAdvisoryCount != 0))
 	{
 		OutError = FString::Printf(
 			TEXT("BeamC3Stage1StaticDAGMutatedOrAdvisory:Passes=%d:Added=%d:Advisory=%d"),
@@ -2929,6 +2952,25 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SkeletonFirstCorePlanHash = Stage1.CorePlanHash;
 	Summary.SkeletonFirstSupportPlanHash = Stage1.SupportPlanHash;
 	Summary.SkeletonFirstFinalGeometryHash = Stage1.FinalGeometryHash;
+	Summary.SkeletonFirstStage1InputGeometryHash =
+		Stage1.Stage1InputGeometryHash;
+	Summary.SkeletonFirstCouplingCourseCount = Stage1.CouplingCourseCount;
+	Summary.SkeletonFirstCouplingFaceMask = Stage1.CouplingFaceMask;
+	Summary.SkeletonFirstCouplingParentViolationCount =
+		Stage1.CouplingParentViolationCount;
+	Summary.SkeletonFirstCouplingEndpointViolationCount =
+		Stage1.CouplingEndpointViolationCount;
+	Summary.SkeletonFirstCouplingOutwardViolationCount =
+		Stage1.CouplingOutwardViolationCount;
+	Summary.SkeletonFirstCouplingOtherCoreViolationCount =
+		Stage1.CouplingOtherCoreViolationCount;
+	Summary.SkeletonFirstCouplingBandEndpointViolationCount =
+		Stage1.CouplingBandEndpointViolationCount;
+	Summary.SkeletonFirstPerimeterCoreCount = Stage1.PerimeterCoreCount;
+	Summary.SkeletonFirstPerimeterCoreFaceCount = Stage1.PerimeterCoreFaceCount;
+	Summary.SkeletonFirstPerimeterFaceExposureSpanCount =
+		Stage1.PerimeterFaceExposureSpanCount;
+	Summary.SkeletonFirstStage2PlanHash = Stage1.Stage2PlanHash;
 	Summary.StructuralClosurePassCount =
 		OutResult.StaticDAG.Summary.StructuralClosurePassCount;
 	Summary.AddedStructuralSupportPostCount =
@@ -2974,15 +3016,18 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 			Province.bUsedNearestGroundSeed ? 1 : 0);
 	}
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M7.3-Beam-C3V3][Stage1Stopped]")
+		TEXT("[ABTS][M7.3-Beam-C3V3][StageStopped]")
+		TEXT(" Stage=%d")
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d Attempt=%d CandidateSeed=%d")
 		TEXT(" GrammarHash=%lld WFCHash=%lld EnvelopeHash=%lld Stage1Hash=%lld")
 		TEXT(" Volumes=%d SupportNodes=%d LoadBranches=%d MultiBranchBodies=%d UnrepresentedBranches=%d SemanticDemands=%d MergeLedger=%d SupportDemandHash=%lld")
 		TEXT(" DemandCoreRows=%d UnmappedDemands=%d AmbiguousDemands=%d ChildOutsideBody=%d ChildWithoutDirectMain=%d ReusedChildren=%d OrphanChildren=%d DemandCoreHash=%lld")
 		TEXT(" Provinces=%d MultiDemandProvinces=%d ProvinceCells=%d ProvinceBoundaries=%d ProvinceTies=%d ProvinceFallbacks=%d ProvinceHash=%lld BoundProvinces=%d ProvinceGroundCores=%d ProvinceMainBindingHash=%lld")
 		TEXT(" Cores=%d Main=%d Children=%d HighRegions=%d BoundHigh=%d PairIntents=%d Shared=%d Members=%d")
-		TEXT(" StaticDAG=Accepted LoadDAGHash=%lld Physical=NotEvaluated")
+		TEXT(" CouplingCourses=%d CouplingFaces=%u CouplingOutwardViolations=%d CouplingOtherCoreViolations=%d CouplingBandEndpointViolations=%d PerimeterCores=%d PerimeterFaces=%d PerimeterExposureSpans=%d Stage1InputHash=%lld Stage2Hash=%lld")
+		TEXT(" StageLocalDAG=Accepted CompleteBeamC=%s LoadDAGHash=%lld Physical=NotEvaluated")
 		TEXT(" TimingMs=Demand:%.2f,Child:%.2f,Main:%.2f,Joint:%.2f,Emission:%.2f,DAG:%.2f,Total:%.2f,Budget:%.2f"),
+		static_cast<int32>(StopStage),
 		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
 		Settings.BuildingSeed, SelectedAttempt, SelectedSeed,
 		OutResult.Silhouette.Summary.GrammarHash,
@@ -3019,6 +3064,14 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.BoundHighProjectionRegionCount,
 		OutResult.Skeleton.Plan.SharedCourseIntents.Num(),
 		Stage1.SharedCourseCount, Stage1.PlannedMemberCount,
+		Stage1.CouplingCourseCount, Stage1.CouplingFaceMask,
+		Stage1.CouplingOutwardViolationCount,
+		Stage1.CouplingOtherCoreViolationCount,
+		Stage1.CouplingBandEndpointViolationCount,
+		Stage1.PerimeterCoreCount, Stage1.PerimeterCoreFaceCount,
+		Stage1.PerimeterFaceExposureSpanCount,
+		Stage1.Stage1InputGeometryHash, Stage1.Stage2PlanHash,
+		bStage2 ? TEXT("NotEvaluated") : TEXT("Accepted"),
 		OutResult.StaticDAG.Summary.LoadDAGHash,
 		Stage1.TerminalDemandMilliseconds,
 		Stage1.ChildCandidateMilliseconds,

@@ -146,6 +146,241 @@ namespace ABTSM73BeamC3V3Tests
 		return FBox(Minimum, Maximum);
 	}
 
+	bool IsStage2CouplingGeometricallyOutward(
+		const ABTSM73BeamC3V3::FPlan& Plan,
+		const ABTSM73BeamC3V3::FPlannedMember& Member)
+	{
+		if (Member.ProducedStage
+			!= EABTSM73BeamC3GenerationStage::CouplingCourses
+			|| !Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId))
+		{
+			return false;
+		}
+		const ABTSM73BeamC3V3::FCoreCellPlan& Core =
+			Plan.CoreCells[Member.OriginCoreCellId];
+		if (!Plan.Components.IsValidIndex(Core.ComponentId))
+		{
+			return false;
+		}
+		const bool bXAxis = Member.FaceMask == ABTSM73BeamC3V3::NegativeX
+			|| Member.FaceMask == ABTSM73BeamC3V3::PositiveX;
+		const bool bYAxis = Member.FaceMask == ABTSM73BeamC3V3::NegativeY
+			|| Member.FaceMask == ABTSM73BeamC3V3::PositiveY;
+		if ((!bXAxis && !bYAxis)
+			|| (bXAxis && Member.Axis != EABTSM73BeamAFrameAxis::X)
+			|| (bYAxis && Member.Axis != EABTSM73BeamAFrameAxis::Y))
+		{
+			return false;
+		}
+		const bool bPositive = Member.FaceMask == ABTSM73BeamC3V3::PositiveX
+			|| Member.FaceMask == ABTSM73BeamC3V3::PositiveY;
+		const double DirectionSign = bPositive ? 1.0 : -1.0;
+		const int32 AxisIndex = bXAxis ? 0 : 1;
+		const double CoreOuterFaceCM = Member.StationB
+			* SkeletonV3TestBlockUnitsCM
+			+ DirectionSign * SkeletonV3TestHalfBlockCM;
+		const double EndpointCM = bPositive
+			? Member.LocalEnd[AxisIndex] : Member.LocalStart[AxisIndex];
+		const double ComponentCenterCM =
+			Plan.Components[Core.ComponentId].BodyBounds.GetCenter()[AxisIndex];
+		return DirectionSign * (CoreOuterFaceCM - ComponentCenterCM)
+				>= -SkeletonV3TestGeometryToleranceCM
+			&& DirectionSign * (EndpointCM - CoreOuterFaceCM)
+				>= SkeletonV3TestBlockUnitsCM
+					- SkeletonV3TestGeometryToleranceCM;
+	}
+
+	FBox Stage2TestCoreCourseBounds(
+		const ABTSM73BeamC3V3::FPlan& Plan,
+		const ABTSM73BeamC3V3::FCoreCellPlan& Core,
+		const int32 Course)
+	{
+		if (!Plan.Components.IsValidIndex(Core.ComponentId) || Course < 0
+			|| Course >= Core.TopCourseIndex)
+		{
+			return FBox(EForceInit::ForceInit);
+		}
+		const bool bUpper = Core.SingleShrinkCourseIndex > 0
+			&& Course >= Core.SingleShrinkCourseIndex
+			&& !Core.UpperXStations.IsEmpty() && !Core.UpperYStations.IsEmpty();
+		const TArray<int32>& XStations = bUpper ? Core.UpperXStations : Core.XStations;
+		const TArray<int32>& YStations = bUpper ? Core.UpperYStations : Core.YStations;
+		if (XStations.IsEmpty() || YStations.IsEmpty())
+		{
+			return FBox(EForceInit::ForceInit);
+		}
+		const double GroundZ = Plan.Components[Core.ComponentId].GroundPlaneZCM;
+		return FBox(
+			FVector(XStations[0] * SkeletonV3TestBlockUnitsCM - SkeletonV3TestHalfBlockCM,
+				YStations[0] * SkeletonV3TestBlockUnitsCM - SkeletonV3TestHalfBlockCM,
+				GroundZ + Course * SkeletonV3TestBlockUnitsCM),
+			FVector(XStations.Last() * SkeletonV3TestBlockUnitsCM + SkeletonV3TestHalfBlockCM,
+				YStations.Last() * SkeletonV3TestBlockUnitsCM + SkeletonV3TestHalfBlockCM,
+				GroundZ + (Course + 1) * SkeletonV3TestBlockUnitsCM));
+	}
+
+	bool Stage2CouplingAvoidsOtherCoreVolumes(
+		const ABTSM73BeamC3V3::FPlan& Plan,
+		const ABTSM73BeamC3V3::FPlannedMember& Member)
+	{
+		if (Member.ProducedStage
+			!= EABTSM73BeamC3GenerationStage::CouplingCourses
+			|| !Plan.CoreCells.IsValidIndex(Member.OriginCoreCellId))
+		{
+			return false;
+		}
+		const bool bXAxis = Member.FaceMask == ABTSM73BeamC3V3::NegativeX
+			|| Member.FaceMask == ABTSM73BeamC3V3::PositiveX;
+		const bool bPositive = Member.FaceMask == ABTSM73BeamC3V3::PositiveX
+			|| Member.FaceMask == ABTSM73BeamC3V3::PositiveY;
+		const int32 AxisIndex = bXAxis ? 0 : 1;
+		const double DirectionSign = bPositive ? 1.0 : -1.0;
+		const double OriginOuterFace = Member.StationB * SkeletonV3TestBlockUnitsCM
+			+ DirectionSign * SkeletonV3TestHalfBlockCM;
+		FBox Exterior = SkeletonV3TestMemberBounds(Member);
+		if (bPositive)
+		{
+			Exterior.Min[AxisIndex] = FMath::Max(Exterior.Min[AxisIndex], OriginOuterFace);
+		}
+		else
+		{
+			Exterior.Max[AxisIndex] = FMath::Min(Exterior.Max[AxisIndex], OriginOuterFace);
+		}
+		for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			if (Core.CoreCellId == Member.OriginCoreCellId)
+			{
+				continue;
+			}
+			const FBox CoreBox = Stage2TestCoreCourseBounds(Plan, Core, Member.CourseIndex);
+			if (CoreBox.IsValid
+				&& FMath::Min(Exterior.Max.X, CoreBox.Max.X)
+					- FMath::Max(Exterior.Min.X, CoreBox.Min.X)
+					> SkeletonV3TestGeometryToleranceCM
+				&& FMath::Min(Exterior.Max.Y, CoreBox.Max.Y)
+					- FMath::Max(Exterior.Min.Y, CoreBox.Min.Y)
+					> SkeletonV3TestGeometryToleranceCM
+				&& FMath::Min(Exterior.Max.Z, CoreBox.Max.Z)
+					- FMath::Max(Exterior.Min.Z, CoreBox.Min.Z)
+					> SkeletonV3TestGeometryToleranceCM)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool Stage2DoubleCourseBandsShareFacadeEndpoint(
+		const ABTSM73BeamC3V3::FPlan& Plan)
+	{
+		TMap<int32, double> BandEndpoints;
+		TMap<int32, int32> BandCounts;
+		for (const ABTSM73BeamC3V3::FPlannedMember& Member : Plan.Members)
+		{
+			if (Member.ProducedStage
+				!= EABTSM73BeamC3GenerationStage::CouplingCourses)
+			{
+				continue;
+			}
+			const int32 AxisIndex = static_cast<int32>(Member.Axis);
+			const bool bPositive = Member.FaceMask == ABTSM73BeamC3V3::PositiveX
+				|| Member.FaceMask == ABTSM73BeamC3V3::PositiveY;
+			const double Endpoint = bPositive
+				? Member.LocalEnd[AxisIndex] : Member.LocalStart[AxisIndex];
+			if (const double* Existing = BandEndpoints.Find(Member.AnchorBandId))
+			{
+				if (!FMath::IsNearlyEqual(*Existing, Endpoint,
+					SkeletonV3TestGeometryToleranceCM))
+				{
+					return false;
+				}
+			}
+			else
+			{
+				BandEndpoints.Add(Member.AnchorBandId, Endpoint);
+			}
+			++BandCounts.FindOrAdd(Member.AnchorBandId);
+		}
+		return !BandCounts.IsEmpty() && Algo::AllOf(BandCounts,
+			[](const TPair<int32, int32>& Pair) { return Pair.Value == 2; });
+	}
+
+	bool Stage2PerimeterExposureLedgerIsUnoccluded(
+		const ABTSM73BeamC3V3::FPlan& Plan)
+	{
+		for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
+		{
+			uint8 DerivedMask = 0;
+			for (const ABTSM73BeamC3V3::FPerimeterFaceExposure& Exposure
+				: Core.PerimeterFaceExposures)
+			{
+				if (Exposure.CourseIndex < 0
+					|| Exposure.TangentMaximumCM - Exposure.TangentMinimumCM
+						<= SkeletonV3TestGeometryToleranceCM)
+				{
+					return false;
+				}
+				const FBox CoreBox = Stage2TestCoreCourseBounds(
+					Plan, Core, Exposure.CourseIndex);
+				if (!CoreBox.IsValid)
+				{
+					return false;
+				}
+				const bool bXAxis = Exposure.FaceMask == ABTSM73BeamC3V3::NegativeX
+					|| Exposure.FaceMask == ABTSM73BeamC3V3::PositiveX;
+				const bool bPositive = Exposure.FaceMask == ABTSM73BeamC3V3::PositiveX
+					|| Exposure.FaceMask == ABTSM73BeamC3V3::PositiveY;
+				const int32 AxisIndex = bXAxis ? 0 : 1;
+				const int32 TangentIndex = bXAxis ? 1 : 0;
+				const double CoreFace = bPositive
+					? CoreBox.Max[AxisIndex] : CoreBox.Min[AxisIndex];
+				FBox Corridor = CoreBox;
+				Corridor.Min[TangentIndex] = Exposure.TangentMinimumCM;
+				Corridor.Max[TangentIndex] = Exposure.TangentMaximumCM;
+				Corridor.Min[AxisIndex] = FMath::Min(
+					CoreFace, Exposure.FacadeCoordinateCM);
+				Corridor.Max[AxisIndex] = FMath::Max(
+					CoreFace, Exposure.FacadeCoordinateCM);
+				if (bPositive)
+				{
+					Corridor.Max[AxisIndex] += 2.0 * SkeletonV3TestGeometryToleranceCM;
+				}
+				else
+				{
+					Corridor.Min[AxisIndex] -= 2.0 * SkeletonV3TestGeometryToleranceCM;
+				}
+				for (const ABTSM73BeamC3V3::FCoreCellPlan& OtherCore : Plan.CoreCells)
+				{
+					if (OtherCore.CoreCellId == Core.CoreCellId)
+					{
+						continue;
+					}
+					const FBox OtherBox = Stage2TestCoreCourseBounds(
+						Plan, OtherCore, Exposure.CourseIndex);
+					if (OtherBox.IsValid
+						&& FMath::Min(Corridor.Max.X, OtherBox.Max.X)
+							- FMath::Max(Corridor.Min.X, OtherBox.Min.X)
+								> SkeletonV3TestGeometryToleranceCM
+						&& FMath::Min(Corridor.Max.Y, OtherBox.Max.Y)
+							- FMath::Max(Corridor.Min.Y, OtherBox.Min.Y)
+								> SkeletonV3TestGeometryToleranceCM
+						&& FMath::Min(Corridor.Max.Z, OtherBox.Max.Z)
+							- FMath::Max(Corridor.Min.Z, OtherBox.Min.Z)
+								> SkeletonV3TestGeometryToleranceCM)
+					{
+						return false;
+					}
+				}
+				DerivedMask |= Exposure.FaceMask;
+			}
+			if (DerivedMask != Core.PerimeterFaceMask)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	double SkeletonV3TestOverlapLength(
 		const double MinimumA,
 		const double MaximumA,
@@ -3889,13 +4124,192 @@ bool FABTSM73BeamC3StagedFutureStageFailClosedTest::RunTest(const FString& Param
 	using namespace ABTSM73BeamC3V3Tests;
 	FABTSM73BeamD1StagePreviewResult Result;
 	FString Error;
-	TestFalse(TEXT("Stage 2 is not silently routed to the legacy full generator"),
+	TestFalse(TEXT("Stage 3 is not silently routed to the legacy full generator"),
 		FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
 			MakeD1Settings({TEXT("ColumnBreak"), 0, 710000}),
-			EABTSM73BeamC3GenerationStage::CouplingCourses, Result, Error));
+			EABTSM73BeamC3GenerationStage::CommonExteriorFrame, Result, Error));
 	TestTrue(TEXT("Unimplemented stage reports stable failure identity"),
 		Error.StartsWith(TEXT("BeamC3StageNotImplemented")));
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedStage2BoundaryTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.Stage2Boundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamC3StagedStage2BoundaryTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	FABTSM73BeamD1StagePreviewResult Result;
+	FString Error;
+	const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+		MakeD1Settings({TEXT("ColumnBreak"), 0, 710000}),
+		EABTSM73BeamC3GenerationStage::CouplingCourses, Result, Error);
+	TestTrue(*FString::Printf(TEXT("Stage 2 generates: %s"), *Error), bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+	TestTrue(TEXT("Stage 2 appends only complete double-course outward bands"),
+		Plan.Summary.CouplingCourseCount > 0
+			&& Plan.Summary.CouplingCourseCount
+				== FMath::CountBits(static_cast<uint32>(
+					Plan.Summary.CouplingFaceMask)) * 2);
+	TestEqual(TEXT("Every coupling retains an immutable Stage-1 parent"),
+		Plan.Summary.CouplingParentViolationCount, 0);
+	TestEqual(TEXT("Every coupling terminates on its declared WFC face"),
+		Plan.Summary.CouplingEndpointViolationCount, 0);
+	TestEqual(TEXT("Every coupling has a full block of net outward extension"),
+		Plan.Summary.CouplingOutwardViolationCount, 0);
+	TestEqual(TEXT("No coupling enters another core course-volume"),
+		Plan.Summary.CouplingOtherCoreViolationCount, 0);
+	TestEqual(TEXT("Every double-course band shares one facade endpoint"),
+		Plan.Summary.CouplingBandEndpointViolationCount, 0);
+	TestTrue(TEXT("Every double-course band independently closes on one facade"),
+		Stage2DoubleCourseBandsShareFacadeEndpoint(Plan));
+	TestTrue(TEXT("Stage 2 classifies at least one WFC-perimeter core"),
+		Plan.Summary.PerimeterCoreCount > 0
+			&& Plan.Summary.PerimeterCoreFaceCount >= Plan.Summary.PerimeterCoreCount);
+	TestTrue(TEXT("Perimeter ledger retains only unoccluded course intervals"),
+		Plan.Summary.PerimeterFaceExposureSpanCount > 0
+			&& Stage2PerimeterExposureLedgerIsUnoccluded(Plan));
+	TestNotEqual(TEXT("Stage-1 input identity is retained"),
+		Plan.Summary.Stage1InputGeometryHash, int64(0));
+	TestNotEqual(TEXT("Stage-2 delta identity is published"),
+		Plan.Summary.Stage2PlanHash, int64(0));
+	for (const ABTSM73BeamC3V3::FPlannedMember& Member : Plan.Members)
+	{
+		if (Member.ProducedStage == EABTSM73BeamC3GenerationStage::CouplingCourses)
+		{
+			TestEqual(TEXT("Stage 2 emits only through coupling courses"),
+				Member.SkeletonKind,
+				ABTSM73BeamC3V3::ESkeletonMemberKind::ThroughCourse);
+			TestTrue(TEXT("Stage 2 never emits vertical posts"),
+				Member.Axis != EABTSM73BeamAFrameAxis::Z);
+			TestTrue(TEXT("Stage 2 member grows from an outer core half beyond its face"),
+				IsStage2CouplingGeometricallyOutward(Plan, Member));
+			TestTrue(TEXT("Stage 2 member does not route through another core volume"),
+				Stage2CouplingAvoidsOtherCoreVolumes(Plan, Member));
+		}
+		else
+		{
+			TestTrue(TEXT("Stage 2 contains no Stage-3+ member"),
+				static_cast<int32>(Member.ProducedStage)
+					<= static_cast<int32>(EABTSM73BeamC3GenerationStage::CoreAndShared));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(
+	FABTSM73BeamC3StagedStage2MatrixTest,
+	"ABTS.M73DAG.BeamC3V3.Staged.Stage2CouplingMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+void FABTSM73BeamC3StagedStage2MatrixTest::GetTests(
+	TArray<FString>& OutBeautifiedNames,
+	TArray<FString>& OutTestCommands) const
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	for (const FStage1Case& Case : MatrixCases())
+	{
+		OutBeautifiedNames.Add(FString::Printf(
+			TEXT("%s.E%d"), *Case.ProfileId.ToString(), Case.Tier + 1));
+		OutTestCommands.Add(CaseCommand(Case));
+	}
+}
+
+bool FABTSM73BeamC3StagedStage2MatrixTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamC3V3Tests;
+	FStage1Case Case;
+	if (!ParseCase(Parameters, Case))
+	{
+		AddError(FString::Printf(TEXT("Invalid staged Stage 2 matrix case: %s"),
+			*Parameters));
+		return false;
+	}
+	FABTSM73BeamD1StagePreviewResult Result;
+	FString Error;
+	const bool bGenerated = FABTSM73BeamD1BrickCompiler().GenerateStagePreview(
+		MakeD1Settings(Case), EABTSM73BeamC3GenerationStage::CouplingCourses,
+		Result, Error);
+	const FString Prefix = FString::Printf(
+		TEXT("%s.E%d"), *Case.ProfileId.ToString(), Case.Tier + 1);
+	TestTrue(*FString::Printf(TEXT("%s Stage 2 accepts: %s"), *Prefix, *Error),
+		bGenerated);
+	if (!bGenerated)
+	{
+		return false;
+	}
+	const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+	bool bPassed = true;
+	auto Check = [this, &Prefix, &bPassed](const TCHAR* Label, const bool bCondition)
+	{
+		bPassed &= TestTrue(*FString::Printf(TEXT("%s %s"), *Prefix, Label),
+			bCondition);
+	};
+	Check(TEXT("publishes Stage 2 identity"),
+		Result.Summary.GenerationStage
+			== EABTSM73BeamC3GenerationStage::CouplingCourses);
+	Check(TEXT("retains a nonzero Stage-1 input hash"),
+		Plan.Summary.Stage1InputGeometryHash != 0);
+	Check(TEXT("publishes a distinct Stage-2 hash"),
+		Plan.Summary.Stage2PlanHash != 0
+			&& Plan.Summary.FinalGeometryHash
+				!= Plan.Summary.Stage1InputGeometryHash);
+	Check(TEXT("emits only complete outward double-course facade anchors"),
+		Plan.Summary.CouplingCourseCount > 0
+			&& Plan.Summary.CouplingCourseCount
+				== FMath::CountBits(static_cast<uint32>(
+					Plan.Summary.CouplingFaceMask)) * 2);
+	Check(TEXT("has no parent or endpoint provenance violation"),
+		Plan.Summary.CouplingParentViolationCount == 0
+			&& Plan.Summary.CouplingEndpointViolationCount == 0
+			&& Plan.Summary.CouplingOutwardViolationCount == 0
+			&& Plan.Summary.CouplingOtherCoreViolationCount == 0
+			&& Plan.Summary.CouplingBandEndpointViolationCount == 0
+			&& Stage2DoubleCourseBandsShareFacadeEndpoint(Plan));
+	int32 CountedPerimeterCores = 0;
+	int32 CountedPerimeterFaces = 0;
+	for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
+	{
+		if (Core.PerimeterFaceMask != 0)
+		{
+			++CountedPerimeterCores;
+			CountedPerimeterFaces += FMath::CountBits(
+				static_cast<uint32>(Core.PerimeterFaceMask));
+		}
+	}
+	Check(TEXT("perimeter-core ledger exactly matches classified core masks"),
+		CountedPerimeterCores == Plan.Summary.PerimeterCoreCount
+			&& CountedPerimeterFaces == Plan.Summary.PerimeterCoreFaceCount
+			&& CountedPerimeterCores > 0
+			&& Plan.Summary.PerimeterFaceExposureSpanCount > 0
+			&& Stage2PerimeterExposureLedgerIsUnoccluded(Plan));
+	Check(TEXT("every emitted coupling is independently outward"),
+		Algo::AllOf(Plan.Members,
+			[&Plan](const ABTSM73BeamC3V3::FPlannedMember& Member)
+			{
+				return Member.ProducedStage
+					!= EABTSM73BeamC3GenerationStage::CouplingCourses
+					|| (IsStage2CouplingGeometricallyOutward(Plan, Member)
+						&& Stage2CouplingAvoidsOtherCoreVolumes(Plan, Member));
+			}));
+	Check(TEXT("emits no Stage-3 or later member"),
+		Algo::AllOf(Plan.Members,
+			[](const ABTSM73BeamC3V3::FPlannedMember& Member)
+			{
+				return static_cast<int32>(Member.ProducedStage)
+					<= static_cast<int32>(
+						EABTSM73BeamC3GenerationStage::CouplingCourses);
+			}));
+	Check(TEXT("keeps physical stability explicitly unevaluated"),
+		!Result.Summary.bPhysicalStabilityEvaluated
+			&& !Plan.Summary.bPhysicalStabilityEvaluated);
+	return bPassed;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
