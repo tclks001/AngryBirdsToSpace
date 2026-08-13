@@ -189,6 +189,26 @@ namespace ABTSM11FinaleLayoutHashPrivate
 		Hash.AddDouble(Scan.FinalPitchPrecisionDegrees);
 		Hash.AddDouble(Scan.FinalPowerPrecision);
 		Hash.AddInt32(Scan.Connectivity);
+		if (Scan.ScanContractVersion >= 3)
+		{
+			Hash.AddInt32(Scan.BridgeClosurePolicy.PolicyVersion);
+			Hash.AddInt32(
+				Scan.BridgeClosurePolicy.RegionConstructionVersion);
+			Hash.AddInt32(
+				Scan.BridgeClosurePolicy.RecursiveSubdivisionVersion);
+			Hash.AddInt32(Scan.BridgeClosurePolicy.VisitOrderVersion);
+			Hash.AddInt32(
+				Scan.BridgeClosurePolicy.EvidenceHashSchemaVersion);
+			Hash.AddInt32(Scan.BridgeClosurePolicy.RegionHaloFinalCells);
+			Hash.AddInt32(Scan.BridgeClosurePolicy.MaximumRecursionDepth);
+			Hash.AddInt32(
+				Scan.BridgeClosurePolicy.MaximumSampleCountPerBridge);
+			Hash.AddDouble(
+				Scan.BridgeClosurePolicy.FinalYawPrecisionDegrees);
+			Hash.AddDouble(
+				Scan.BridgeClosurePolicy.FinalPitchPrecisionDegrees);
+			Hash.AddDouble(Scan.BridgeClosurePolicy.FinalPowerPrecision);
+		}
 		Hash.AddInt32(Scan.MaximumCompletePrimaryOrbits);
 		Hash.AddDouble(Scan.MinimumF4YawWidthDegrees);
 		Hash.AddDouble(Scan.MinimumF4PitchWidthDegrees);

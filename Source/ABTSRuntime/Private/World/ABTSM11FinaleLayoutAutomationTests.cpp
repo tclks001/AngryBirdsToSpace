@@ -388,6 +388,174 @@ bool FABTSM11BConnectivityContractTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11BConnectivityBridgeClosureV3Test,
+	"ABTS.M11B.Unit.ConnectivityBridgeClosureV3",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11BConnectivityBridgeClosureV3Test::RunTest(
+	const FString& Parameters)
+{
+	FABTSM11FinaleLayoutPreset Legacy =
+		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();
+	const uint64 FrozenV2Hash = Legacy.ScanContractHash;
+	TestEqual(TEXT("Frozen production contract remains v2"),
+		Legacy.ScanContract.ScanContractVersion, 2);
+	TestEqual(TEXT("Frozen production connectivity remains six-neighbor"),
+		Legacy.ScanContract.Connectivity, 6);
+	TestTrue(TEXT("Frozen v2 contract has no bridge policy"),
+		Legacy.ScanContract.BridgeClosurePolicy.IsDisabled());
+	TestEqual(TEXT("Frozen v2 scan hash remains byte-compatible"),
+		FrozenV2Hash,
+		FABTSM11FinaleLayoutHash::ComputeScanContractHash(Legacy));
+
+	FABTSM11FinaleLayoutPreset CandidateV3 = Legacy;
+	CandidateV3.ScanContract =
+		FABTSM11LayoutScanContract::MakeBridgeClosureV3(
+			Legacy.ScanContract);
+	RefreshOfflineM11BIdentity(CandidateV3);
+	FString Failure;
+	TestTrue(
+		*FString::Printf(TEXT("Connectivity v3 contract is valid: %s"), *Failure),
+		CandidateV3.ScanContract.IsValid(
+			CandidateV3.LaunchModel,
+			&Failure));
+	TestTrue(TEXT("v3 changes scan identity"),
+		CandidateV3.ScanContractHash != FrozenV2Hash);
+
+	FABTSM11FinaleLayoutPreset ChangedBudget = CandidateV3;
+	++ChangedBudget.ScanContract.BridgeClosurePolicy.MaximumRecursionDepth;
+	RefreshOfflineM11BIdentity(ChangedBudget);
+	TestTrue(TEXT("Recursion budget is bound into the scan hash"),
+		ChangedBudget.ScanContractHash != CandidateV3.ScanContractHash);
+	FABTSM11FinaleLayoutPreset ChangedOrder = CandidateV3;
+	++ChangedOrder.ScanContract.BridgeClosurePolicy.VisitOrderVersion;
+	RefreshOfflineM11BIdentity(ChangedOrder);
+	TestTrue(TEXT("Visit-order version is bound into the scan hash"),
+		ChangedOrder.ScanContractHash != CandidateV3.ScanContractHash);
+
+	FABTSM11LayoutCertificationReport RejectedReport;
+	Failure.Reset();
+	TestFalse(TEXT("v3 cannot certify without bridge evidence"),
+		FABTSM11FinaleLayoutCertification::ScanRegularGrid(
+			CandidateV3,
+			0x7u,
+			RejectedReport,
+			&Failure));
+	TestEqual(TEXT("Missing v3 evidence fails closed"),
+		Failure,
+		FString(TEXT("BridgeClosureEvidenceRequired")));
+
+	FABTSM11ConnectivityGridShape Shape;
+	Shape.YawCount = 3;
+	Shape.PitchCount = 3;
+	Shape.PowerCount = 1;
+	TArray<uint8> DiagonalMask;
+	DiagonalMask.Init(0, Shape.GetSampleCount());
+	DiagonalMask[0] = 1;
+	DiagonalMask[4] = 1;
+	DiagonalMask[8] = 1;
+	FABTSM11ConnectivityDiscoveryPlan FirstPlan;
+	FABTSM11ConnectivityDiscoveryPlan SecondPlan;
+	Failure.Reset();
+	TestTrue(TEXT("18-neighbor discovery proposes deterministic bridges"),
+		FABTSM11ConnectivityClosure::BuildDiscoveryPlan18(
+			DiagonalMask, Shape, 4, FirstPlan, &Failure));
+	TestTrue(TEXT("Repeated discovery succeeds"),
+		FABTSM11ConnectivityClosure::BuildDiscoveryPlan18(
+			DiagonalMask, Shape, 4, SecondPlan, &Failure));
+	TestEqual(TEXT("Six-neighbor graph retains three components"),
+		FirstPlan.FaceComponentCount, 3);
+	TestEqual(TEXT("18-neighbor discovery graph is one component"),
+		FirstPlan.DiscoveryComponentCount, 1);
+	TestEqual(TEXT("A canonical spanning set has two pending bridges"),
+		FirstPlan.RequiredBridgeEdges.Num(), 2);
+	TestEqual(TEXT("Discovery plan is deterministic"),
+		FirstPlan.PlanHash, SecondPlan.PlanHash);
+
+	const FABTSM11BridgeClosurePolicy& Policy =
+		CandidateV3.ScanContract.BridgeClosurePolicy;
+	FABTSM11ConnectivityClosureResult Closure;
+	Failure.Reset();
+	TestFalse(TEXT("Discovery alone never certifies"),
+		FABTSM11ConnectivityClosure::CloseWithEvidence(
+			FirstPlan, Policy, {}, Closure, &Failure));
+	TestEqual(TEXT("Missing evidence has a stable failure"),
+		Failure,
+		FString(TEXT("MissingBridgeClosureEvidence")));
+	TestFalse(TEXT("Missing evidence result is not passed"), Closure.bPassed);
+
+	TArray<FABTSM11BridgeClosureEvidence> Evidence;
+	for (int32 Index = 0; Index < FirstPlan.RequiredBridgeEdges.Num(); ++Index)
+	{
+		FABTSM11BridgeClosureEvidence Item;
+		Item.EdgeHash = FirstPlan.RequiredBridgeEdges[Index].EdgeHash;
+		Item.PolicyHash = Policy.ComputePolicyHash();
+		Item.RecursionDepth = Policy.MaximumRecursionDepth;
+		Item.SampleCount = 16 + Index;
+		Item.PathSampleCount = 4 + Index;
+		Item.ReachedYawPrecisionDegrees =
+			Policy.FinalYawPrecisionDegrees;
+		Item.ReachedPitchPrecisionDegrees =
+			Policy.FinalPitchPrecisionDegrees;
+		Item.ReachedPowerPrecision = Policy.FinalPowerPrecision;
+		Item.VisitOrderHash = 0x100ull + Index;
+		Item.ContinuousPathHash = 0x200ull + Index;
+		Item.bReachedFinalPrecision = true;
+		Item.bProvenContinuousF4Path = true;
+		Item.EvidenceHash = Item.ComputeEvidenceHash();
+		Evidence.Add(Item);
+	}
+	Failure.Reset();
+	TestTrue(TEXT("Every required bridge proof closes to one component"),
+		FABTSM11ConnectivityClosure::CloseWithEvidence(
+			FirstPlan, Policy, Evidence, Closure, &Failure));
+	TestTrue(TEXT("Complete evidence result is passed"), Closure.bPassed);
+	TestEqual(TEXT("Closed graph is one component"),
+		Closure.FinalComponentCount, 1);
+	const uint64 PassedResultHash = Closure.ResultHash;
+
+	Evidence[0].ContinuousPathHash ^= 0x1ull;
+	Evidence[0].EvidenceHash = Evidence[0].ComputeEvidenceHash();
+	FABTSM11ConnectivityClosureResult ChangedEvidenceResult;
+	TestTrue(TEXT("A different valid bridge proof remains consumable"),
+		FABTSM11ConnectivityClosure::CloseWithEvidence(
+			FirstPlan,
+			Policy,
+			Evidence,
+			ChangedEvidenceResult,
+			&Failure));
+	TestTrue(TEXT("Bridge evidence changes the closure identity"),
+		ChangedEvidenceResult.ResultHash != PassedResultHash);
+
+	FABTSM11BridgeClosureEvidence Unexpected = Evidence[0];
+	Unexpected.EdgeHash ^= 0x1000ull;
+	Unexpected.EvidenceHash = Unexpected.ComputeEvidenceHash();
+	Evidence.Add(Unexpected);
+	FABTSM11ConnectivityClosureResult UnexpectedEvidenceResult;
+	Failure.Reset();
+	TestFalse(TEXT("Evidence for an unrequested edge fails closed"),
+		FABTSM11ConnectivityClosure::CloseWithEvidence(
+			FirstPlan,
+			Policy,
+			Evidence,
+			UnexpectedEvidenceResult,
+			&Failure));
+	TestEqual(TEXT("Unexpected evidence has a stable failure"),
+		Failure,
+		FString(TEXT("UnexpectedBridgeClosureEvidence")));
+	Evidence.Pop();
+
+	Evidence.RemoveAt(0);
+	FABTSM11ConnectivityClosureResult Incomplete;
+	Failure.Reset();
+	TestFalse(TEXT("Removing one required bridge fails closed"),
+		FABTSM11ConnectivityClosure::CloseWithEvidence(
+			FirstPlan, Policy, Evidence, Incomplete, &Failure));
+	TestFalse(TEXT("Incomplete closure cannot pass"), Incomplete.bPassed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11BCertificationHashCoverageTest,
 	"ABTS.M11B.Unit.CertificationHashCoverage",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

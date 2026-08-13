@@ -1346,6 +1346,17 @@ bool FABTSM11FinaleLayoutCertification::ScanGrid(
 		}
 		return false;
 	}
+	if (Preset.ScanContract.UsesBridgeClosureV3())
+	{
+		OutReport.Failure = TEXT("BridgeClosureEvidenceRequired");
+		OutReport.ReportHash =
+			FABTSM11FinaleLayoutHash::ComputeReportHash(OutReport);
+		if (OutFailure != nullptr)
+		{
+			*OutFailure = OutReport.Failure;
+		}
+		return false;
+	}
 
 	OutReport.YawCount = Grid.GetYawCount();
 	OutReport.PitchCount = Grid.GetPitchCount();

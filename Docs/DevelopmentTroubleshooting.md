@@ -329,3 +329,11 @@
 | 解析太阳在真实地平线遮挡前按观察者位置提前消失，同时地表出现独立的局部半圆白亮，读成“太阳不见但反光仍在” | 太阳圆盘/光晕使用脚下 `SunHeight` 做整片开关，没有按当前像素视线与主星求交；地表半圆则是 M3 SDF Terrain 的镜面高光，不是太阳被地形切成下半圆。继续移动太阳位置或添加贴图只能掩盖两条独立根因 | v70 让太阳圆盘和 Halo 逐像素消费解析主星遮挡，空背景之外继续由 SceneDepth 对真实 SDF 起伏和物体遮挡；删除位置阈值硬关闭。风格化 M3Surface 冻结为 `RoughnessFloor=1.0 / SpecularScale=0.0`，完全移除可读成第二太阳的镜面瓣，地形昼夜形体仍由漫反射、阴影与轮廓承担 | `TOON-T4A1-003`：纯函数验证背离主星可见、穿过主星遮挡、切线边界连续且同一位置随视线变化；M3 MID 必须实际消费 1.0/0.0。UE 5.8 ForceUnity、fresh Toon 28/28、D3D12 `ToonT4A1` 20/20 均通过且无 shader fallback；用户已于 2026-08-12 在太阳落下全过程的可见 PIE 中确认真实地形连续遮挡与局部半圆镜面太阳消失 |
 | 鸟进入普通或 Space 弹弓后仍保留进入前的侧向/背向姿态，四鸟又与放大的 Steel 袋相交 | 袋体为避免两根弦交叉，必须使用“局部 `+Z` 对齐发射、局部 `+Y` 对齐桩间”的网格姿态；旧 M6/M11 又把该袋体四元数原样赋给 Actor，而鸟 Actor 的前向轴是 `+X`。这不是动画或鸟蓝图朝向丢失；Space 四鸟沿发射轴仍只使用普通袋的 `20 cm` 偏移也不足以避开 2 倍袋体 | 抽出共享装袋姿态合同：鸟 Actor `+X` 对齐即时发射方向，`+Z` 采用与前向正交的局部球面上方向；普通和 Space 都不消费进入前朝向，也不复制袋轴约定。Space 四鸟保留共享 `20 cm`，另加 `25 cm` 前向净空（合计 `45 cm`），普通三档位置不变 | `M6-SLINGSHOT-VISUAL-002`：ForceUnity；`ABTS.M6.SlingshotVisual.SpaceFourBirdFrame` 验证轴合同、退化输入和 Space 默认净空，`ABTS.M11C.V2_1.InputParityAndLatestOnly` 冻结 25 cm。生产 PIE 从不同世界朝向分别进入普通三档和 Space，所有鸟均面向发射前方；上下左右改变瞄准时连续跟随；Space 四鸟不再穿入袋体，弦与袋姿态仍正确 |
 | 普通弹弓装袋朝向正确，但 Space 四鸟仍分别显示进入终局前的侧向/正向姿态 | M11 的编队 Actor Tick 显式晚于鸟组件 Tick；Chaos 鸟的 `UpdateChaosVisualFrame` 会先按旧物理方向写 `BirdVisual` 世界旋转，把不同旧朝向反算成不同组件相对旋转。M11 随后只统一 Actor 旋转，没有恢复 Mesh 的 authored 相对帧；普通单鸟 M6 不经过这条四鸟 Chaos 编队生命周期，所以不受影响 | M11 在 BuildAttemptFormation 时从每个实际鸟类 CDO 同时冻结 `BirdVisual` 相对位置和导入轴修正；初次入袋及每帧袋位更新在 Actor 重定位之后重新施加该相对帧，恢复时也使用同一冻结值。共享 M6 朝向数学保持不变 | `M6-SLINGSHOT-VISUAL-003`：`ABTS.M6.SlingshotVisual.SpaceFourBirdFrame` 先把组件写到任意旧世界姿态，再验证恢复接口准确复位 authored location/rotation；生产 Space PIE 要求四鸟无论进入前朝向和 MovementMode 如何，脸部均随当前发射方向一致，普通三档不得发生反向回归 |
+# M11 连通稳定合同
+
+## M11-CERT-V3-001：18 邻域发现被误当成连续性证明
+
+- 症状：half-step 样本在 18 邻域下显示单分量，容易被误报为认证通过。
+- 根因：两轴对角相邻只证明粗格中的候选联系，不能证明连续输入域内存在 F4 路径；若直接把 `Connectivity=6` 改为 `18`，还会静默重签旧 Scan/Certification/Bundle 身份。
+- 处理：保留生产 v2 六邻域语义和 Hash；v3 将六邻域 face component、18 邻域待证明桥边与递归闭包证据分层。只有全部必要桥到达冻结精度、未超预算且连续 F4 路径证据有效时才合并分量。
+- 防回归：`ABTS.M11B.Unit.ConnectivityBridgeClosureV3` 必须证明 v2 Hash 不变、v3 无证据 fail closed、策略/顺序/预算/证据均进入 Hash；功能工作树不得自行修改此稳定合同或把发现初判写成 Certified。

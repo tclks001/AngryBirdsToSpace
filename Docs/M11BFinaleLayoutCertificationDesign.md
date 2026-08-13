@@ -1164,6 +1164,32 @@ Editor/PIE。2026-08-12 用户完成 Rank11/12 对照后确认 Rank12 手感没�
 下一任务必须先由集成工作树完成稳定合同阶段；M11 工作树不得在此检查点上自行修改
 合同或把 half-step 18 邻域初判记为认证完成。
 
+#### 稳定连通合同 v3 已发布（2026-08-13）
+
+集成工作树已经完成上述稳定合同阶段，生产冻结的 Scan Contract v2 仍保持
+`Connectivity=6`、原字段 Hash 顺序和原 Certified Bundle 身份；v3 作为追加兼容面，
+没有替换或重签 v2。v3 固定为：
+
+- `ScanContractVersion=3 / DiscoveryPolicyVersion=2 / Connectivity=18`；
+- 六邻域边直接构成 face component；只改变两个轴的斜边仅进入确定性
+  `RequiredBridgeEdges`，三轴同时变化的角邻接永远不进入发现图；
+- 待证明桥边按样本扁平索引排序，并对六邻域分量商图建立唯一确定性生成森林；
+- `BridgeClosurePolicy v1` 冻结桥区构造、递归细分、访问顺序、证据 Hash Schema、
+  最终 Yaw/Pitch/Power 精度、递归深度和单桥样本预算；全部字段进入 Scan Hash；
+- 每条桥证据必须到达冻结最终精度，拥有非零访问顺序与连续 F4 路径 Hash，并在预算内；
+  缺失、重复、Hash 不符、超预算或任一必要桥未证明均 fail closed；
+- 桥证据聚合 Hash 和最终闭包结果 Hash 与证据内容绑定；发现图本身不能签发认证。
+
+共享实现位于 `Contracts/ABTSM11ConnectivityClosureContract.*`。现有 UE 认证入口在消费
+v3 但尚未获得 portable 桥证据时稳定拒绝为 `BridgeClosureEvidenceRequired`，所以不会
+把 half-step 的 `18-neighbor discovery precheck passed` 误写成 Certified。
+
+自动回归已经证明：冻结 v2 Scan Hash 原样重放；v3 策略、递归预算和访问顺序会改变
+Scan Hash；`3x3x1` 对角样例保持 `3` 个六邻域分量、形成 `1` 个 18 邻域发现分量和
+`2` 条必要桥；缺少任一桥证据失败，完整证据闭包为单分量，改变有效证据会改变结果
+Hash。M11 工作树下一步可合并该 `master` 基线，负责 portable CLI、Python 调度和
+Rank12 fresh 实际桥区扫描；当前 Rank12 仍为 `UNCERTIFIED`。
+
 本检查点提交前的最终 portable CTest 为 `10/10`，机器摘要 `passed=true`；
 `ProductionCoreHash=970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0`、
 `ConformanceToolHash=a953fb637dbe8cc67f2b536a7e9ff8ecbc92f05cc15cd8a1d69231e60ce4083e`、
