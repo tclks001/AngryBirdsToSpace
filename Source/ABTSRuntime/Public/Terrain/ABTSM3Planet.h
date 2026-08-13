@@ -342,7 +342,7 @@ public:
 	/** World-space spacing of the one terminal Space-slingshot slot pair. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
 		meta = (ClampMin = "100.0", ClampMax = "600.0", UIMin = "160.0", UIMax = "360.0", Units = "cm"))
-	float FinaleSpaceSlotSeparationCM = 210.0f;
+	float FinaleSpaceSlotSeparationCM = 320.0f;
 
 	/** Small lift that keeps the slot interaction mesh above the certified pad. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",

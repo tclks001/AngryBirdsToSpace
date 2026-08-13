@@ -7,7 +7,18 @@
 #include "ABTSSlingshotVisualTypes.generated.h"
 
 class UMaterialInterface;
+class USceneComponent;
 class UStaticMesh;
+
+/**
+ * Append-only native contract version for the four slingshot presentation
+ * presets. Version 2 gives the Finale-only Space tier its four-bird frame;
+ * Twig, Simple and Reinforced retain the version-1 geometry.
+ */
+inline constexpr int32 ABTSSlingshotVisualPresetContractVersion = 2;
+inline constexpr int32 ABTSSlingshotMountedBirdContractVersion = 1;
+inline constexpr float ABTSLegacyFinaleSpaceStakeSpacingCM = 210.0f;
+inline constexpr float ABTSFinaleSpaceStakeSpacingCM = 320.0f;
 
 /** Which geometric point of a mesh is aligned to the authored slingshot anchor. */
 enum class EABTSSlingshotVisualAnchor : uint8
@@ -102,8 +113,18 @@ struct FABTSSlingshotVisualPreset
 	FABTSSlingshotConnectionLayout ConnectionLayout;
 };
 
-/** Native defaults shared by all tiers. Blueprint subclasses may override any preset field afterwards. */
+/**
+ * Native defaults shared by all tiers. Blueprint subclasses may override any
+ * preset field afterwards. Space is the only tier with the larger finale
+ * frame; in particular, its PouchSizeCM is exactly twice the ordinary value.
+ */
 ABTSRUNTIME_API FABTSSlingshotVisualPreset ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier Tier);
+
+/**
+ * Migrates only the serialized M11.0 v1 spacing. Authored non-default values
+ * remain authoritative so designers can still tune the finale frame in PIE.
+ */
+ABTSRUNTIME_API float ABTSResolveFinaleSpaceStakeSpacingCM(float AuthoredSpacingCM);
 
 /**
  * Fits a visual mesh to an explicit world-space size and aligns one of its bounds anchors.
@@ -124,3 +145,28 @@ ABTSRUNTIME_API FTransform ABTSMakeSlingshotVisualTransform(
 ABTSRUNTIME_API FVector ABTSScaleSlingshotPouchConnectionOffset(
 	const FVector& AuthoredOffsetCM,
 	const FABTSSlingshotVisualSlot& PouchVisualSlot);
+
+/**
+ * Builds the actor-space pose for a bird mounted in any slingshot pouch.
+ *
+ * Pouch meshes use local +Z as their launch/clearance axis so their local +Y
+ * can remain attached to the two cord ends. Bird actors instead use local +X
+ * as forward. Keeping these frames separate prevents a bird's approach
+ * heading, or the pouch mesh's axis convention, from leaking into its mounted
+ * pose. The returned rotation is deterministic and finite for degenerate
+ * authored inputs.
+ */
+ABTSRUNTIME_API FQuat ABTSMakeSlingshotMountedBirdRotation(
+	const FVector& LaunchForward,
+	const FVector& PreferredUp);
+
+/**
+ * Restores a mounted bird's authored visual frame after a movement presenter
+ * has written the skeletal component in world space. M11's four-bird pouch
+ * consumes this after every Actor relocation; ordinary M6 does not need the
+ * extra lifecycle repair.
+ */
+ABTSRUNTIME_API void ABTSRestoreSlingshotMountedBirdVisualFrame(
+	USceneComponent& BirdVisual,
+	const FVector& AuthoredRelativeLocation,
+	const FQuat& AuthoredRelativeRotation);

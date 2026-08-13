@@ -40,6 +40,11 @@ class ABTSRUNTIME_API AABTSM11FinaleInteractionSystem : public AActor
 
 public:
 	AABTSM11FinaleInteractionSystem();
+
+	double GetM6PouchForwardClearanceCM() const
+	{
+		return M6PouchForwardClearanceCM;
+	}
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -285,6 +290,7 @@ private:
 		int32 FormationIndex,
 		const FVector& PouchLocation,
 		const FQuat& PouchRotation) const;
+	void ApplyFormationMountedVisualFrame(int32 FormationIndex);
 	void ResetFormationRuntime();
 	bool EnsureAimCamera();
 	bool EnsureFlightCamera();
@@ -359,6 +365,12 @@ private:
 		meta = (ClampMin = "20.0", ClampMax = "500.0", Units = "cm"))
 	double M6PouchVerticalSpacingCM = 100.0;
 
+	/** Extra Space-only separation between the large pouch and all four birds. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
+		meta = (ClampMin = "0.0", ClampMax = "200.0", Units = "cm"))
+	double M6PouchForwardClearanceCM =
+		FABTSM11M6InputParityProfile::SpaceFormationPouchForwardClearanceCM;
+
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-C|M6 Formation",
 		meta = (ClampMin = "50.0", ClampMax = "2000.0", Units = "cm"))
 	double M6MinimumFlightSpacingCM = 260.0;
@@ -430,6 +442,7 @@ private:
 	FVector AttemptBirdOriginalVisualScale = FVector::OneVector;
 	TArray<FTransform> AttemptFormationOriginalTransforms;
 	TArray<FVector> AttemptFormationOriginalVisualScales;
+	TArray<FVector> AttemptFormationVisualRelativeLocations;
 	TArray<FQuat> AttemptFormationVisualAxisCorrections;
 	TArray<FTransform> AttemptFormationPouchTransforms;
 	TArray<uint8> AttemptFormationInPouch;

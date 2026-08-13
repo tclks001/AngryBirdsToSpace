@@ -3,9 +3,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Crafting/ABTSCraftingSystem.h"
+#include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Inventory/ABTSInventoryComponent.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "World/ABTSM51OrdinarySlingshotSlotSnapshot.h"
 #include "World/ABTSM51WorldActors.h"
@@ -465,7 +469,7 @@ bool FABTSM51SlingshotAssemblyRuntimeTest::RunTest(
 			AABTSM51SlingshotStake* Right =
 				SpawnTestStake(
 					*World,
-					FVector(210.0, 0.0, 0.0),
+					FVector(ABTSFinaleSpaceStakeSpacingCM, 0.0, 0.0),
 					EABTSItemId::SpaceStake,
 					11);
 			Left->SetInstalledSlotIdentity(
@@ -508,7 +512,7 @@ bool FABTSM51SlingshotAssemblyRuntimeTest::RunTest(
 			AABTSM51SlingshotStake* WrongRight =
 				SpawnTestStake(
 					*World,
-					FVector(210.0, 0.0, 0.0),
+					FVector(ABTSFinaleSpaceStakeSpacingCM, 0.0, 0.0),
 					EABTSItemId::SpaceStake,
 					11);
 			Left->SetInstalledSlotIdentity(
@@ -540,6 +544,153 @@ bool FABTSM51SlingshotAssemblyRuntimeTest::RunTest(
 				!Left->HasCord()
 					&& !WrongRight->HasCord());
 		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6SpaceSlingshotVisualPresetTest,
+	"ABTS.M6.SlingshotVisual.SpaceFourBirdFrame",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6SpaceSlingshotVisualPresetTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FABTSSlingshotVisualPreset Twig =
+		ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Twig);
+	const FABTSSlingshotVisualPreset Simple =
+		ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Simple);
+	const FABTSSlingshotVisualPreset Reinforced =
+		ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Reinforced);
+	const FABTSSlingshotVisualPreset Space =
+		ABTSMakeDefaultSlingshotVisualPreset(EABTSSlingshotTier::Space);
+
+	TestEqual(TEXT("Visual preset contract is v2"),
+		ABTSSlingshotVisualPresetContractVersion, 2);
+	TestEqual(TEXT("Mounted bird orientation contract is v1"),
+		ABTSSlingshotMountedBirdContractVersion, 1);
+	const FVector TestLaunchForward = FVector(0.35, -0.82, 0.44).GetSafeNormal();
+	const FVector TestRadialUp = FVector(0.18, 0.51, 0.84).GetSafeNormal();
+	const FVector ExpectedMountedUp = FVector::VectorPlaneProject(
+		TestRadialUp,
+		TestLaunchForward).GetSafeNormal();
+	const FQuat MountedRotation = ABTSMakeSlingshotMountedBirdRotation(
+		TestLaunchForward,
+		TestRadialUp);
+	TestTrue(TEXT("Mounted bird actor +X faces the launch direction"),
+		MountedRotation.GetAxisX().Equals(TestLaunchForward, 1.0e-4));
+	TestTrue(TEXT("Mounted bird actor +Z uses the closest orthogonal radial up"),
+		MountedRotation.GetAxisZ().Equals(ExpectedMountedUp, 1.0e-4));
+	TestFalse(TEXT("Mounted bird orientation remains finite for degenerate input"),
+		ABTSMakeSlingshotMountedBirdRotation(
+			FVector::ZeroVector,
+			FVector::ZeroVector).ContainsNaN());
+	USceneComponent* MountedVisualFixture = NewObject<USceneComponent>();
+	const FVector AuthoredVisualLocation(3.0f, -5.0f, 7.0f);
+	const FQuat AuthoredVisualRotation = FRotator(0.0f, -90.0f, 0.0f).Quaternion();
+	MountedVisualFixture->SetWorldLocationAndRotation(
+		FVector(100.0f, 200.0f, 300.0f),
+		FRotator(21.0f, 67.0f, -13.0f));
+	ABTSRestoreSlingshotMountedBirdVisualFrame(
+		*MountedVisualFixture,
+		AuthoredVisualLocation,
+		AuthoredVisualRotation);
+	TestTrue(TEXT("Space formation repair restores authored visual location"),
+		MountedVisualFixture->GetRelativeLocation().Equals(
+			AuthoredVisualLocation,
+			1.0e-4));
+	TestTrue(TEXT("Space formation repair restores authored visual axis correction"),
+		MountedVisualFixture->GetRelativeRotation().Quaternion().Equals(
+			AuthoredVisualRotation,
+			1.0e-4));
+	TestEqual(TEXT("Twig geometry stays on the ordinary frame"),
+		Twig.PouchSizeCM, Simple.PouchSizeCM);
+	TestEqual(TEXT("Reinforced geometry stays on the ordinary frame"),
+		Reinforced.PouchSizeCM, Simple.PouchSizeCM);
+	TestEqual(TEXT("Ordinary pouch native size remains frozen"),
+		Simple.PouchSizeCM, FVector(42.0f, 60.0f, 12.0f));
+	TestEqual(TEXT("Space pouch is exactly twice the ordinary pouch"),
+		Space.PouchSizeCM, Simple.PouchSizeCM * 2.0f);
+	TestEqual(TEXT("Space stake spacing owns the finale frame"),
+		Space.BaseStakeSpacingCM, ABTSFinaleSpaceStakeSpacingCM);
+	TestTrue(TEXT("Space stakes are taller than ordinary stakes"),
+		Space.StakeHeightCM > Simple.StakeHeightCM);
+	TestTrue(TEXT("Space stakes are wider than ordinary stakes"),
+		Space.StakeDiameterCM > Simple.StakeDiameterCM);
+	TestTrue(TEXT("Space cords are thicker than ordinary cords"),
+		Space.CordThicknessCM > Simple.CordThicknessCM);
+	TestEqual(TEXT("Serialized v1 spacing migrates to the v2 finale frame"),
+		ABTSResolveFinaleSpaceStakeSpacingCM(
+			ABTSLegacyFinaleSpaceStakeSpacingCM),
+		ABTSFinaleSpaceStakeSpacingCM);
+	TestEqual(TEXT("Authored non-legacy spacing remains authoritative"),
+		ABTSResolveFinaleSpaceStakeSpacingCM(360.0f), 360.0f);
+
+	TestNotNull(TEXT("Space stake steel mesh is bound"), Space.StakeVisual.Mesh.Get());
+	TestNotNull(TEXT("Space stake steel material is bound"), Space.StakeVisual.Material.Get());
+	TestNotNull(TEXT("Space cord steel mesh is bound"), Space.CordVisual.Mesh.Get());
+	TestNotNull(TEXT("Space cord steel material is bound"), Space.CordVisual.Material.Get());
+	TestNotNull(TEXT("Space pouch steel mesh is bound"), Space.PouchVisual.Mesh.Get());
+	TestNotNull(TEXT("Space pouch steel material is bound"), Space.PouchVisual.Material.Get());
+	if (Space.PouchVisual.Mesh && Space.PouchVisual.Material)
+	{
+		TestEqual(TEXT("Space pouch consumes the Steel mesh"),
+			Space.PouchVisual.Mesh->GetPathName(),
+			FString(TEXT("/Game/StaticMesh/Pouch/Steel/SM_Pouch_Steel.SM_Pouch_Steel")));
+		TestEqual(TEXT("Space pouch consumes the Steel material"),
+			Space.PouchVisual.Material->GetPathName(),
+			FString(TEXT("/Game/StaticMesh/Pouch/Steel/MI_Pouch_Steel.MI_Pouch_Steel")));
+	}
+
+	FScopedM51SlingshotAssemblyWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	AABTSM51SlingshotStake* Left = World != nullptr
+		? SpawnTestStake(*World, FVector::ZeroVector,
+			EABTSItemId::SpaceStake, 100)
+		: nullptr;
+	AABTSM51SlingshotStake* Right = World != nullptr
+		? SpawnTestStake(*World, FVector(ABTSFinaleSpaceStakeSpacingCM, 0.0f, 0.0f),
+			EABTSItemId::SpaceStake, 101)
+		: nullptr;
+	AABTSM51SlingshotCord* Cord = World != nullptr
+		? SpawnTestActor<AABTSM51SlingshotCord>(*World, FVector::ZeroVector)
+		: nullptr;
+	TestNotNull(TEXT("Space left stake spawns"), Left);
+	TestNotNull(TEXT("Space right stake spawns"), Right);
+	TestNotNull(TEXT("Space cord spawns"), Cord);
+	if (Left && Right && Cord)
+	{
+		Cord->InitializeCordWithTier(
+			Left,
+			Right,
+			Left->GetVisualTopWorldLocation(),
+			Right->GetVisualTopWorldLocation(),
+			EABTSSlingshotTier::Space);
+		TestEqual(TEXT("Runtime cord consumes the Space pouch size"),
+			Cord->GetPouchSizeCM(), Space.PouchSizeCM);
+		TestEqual(TEXT("Runtime cord consumes the Space thickness"),
+			Cord->GetCordThicknessCM(), Space.CordThicknessCM);
+		const UStaticMeshComponent* Pouch = Cord->GetPouchVisualComponent();
+		TestNotNull(TEXT("Runtime Space pouch component exists"), Pouch);
+		if (Pouch)
+		{
+			TestEqual(TEXT("Visible pouch is the click volume"),
+				Pouch->GetCollisionEnabled(), ECollisionEnabled::QueryOnly);
+			TestEqual(TEXT("Visible pouch blocks the click trace"),
+				Pouch->GetCollisionResponseToChannel(ECC_Visibility), ECR_Block);
+			TestTrue(TEXT("Runtime pouch mesh stays Steel"),
+				Pouch->GetStaticMesh() == Space.PouchVisual.Mesh.Get());
+			TestTrue(TEXT("Runtime pouch material stays Steel"),
+				Pouch->GetMaterial(0) == Space.PouchVisual.Material.Get());
+		}
+		TestEqual(TEXT("Cord segment A remains presentation-only"),
+			Cord->GetCordSegmentAComponent()->GetCollisionEnabled(),
+			ECollisionEnabled::NoCollision);
+		TestEqual(TEXT("Cord segment B remains presentation-only"),
+			Cord->GetCordSegmentBComponent()->GetCollisionEnabled(),
+			ECollisionEnabled::NoCollision);
 	}
 	return true;
 }

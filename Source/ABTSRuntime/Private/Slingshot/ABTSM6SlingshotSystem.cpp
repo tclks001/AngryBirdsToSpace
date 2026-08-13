@@ -388,7 +388,11 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	Party->SetSlingshotMode(true);
 	ArrangeWaitingBirds();
 	const FQuat RestPouchRotation = Cord.GetRestPouchTransform().GetRotation();
-	Bird->EnterSlingshotPouch(GetBirdInPouchLocation(RestPouchRotation), RestPouchRotation);
+	const FQuat MountedBirdRotation =
+		ABTSMakeSlingshotMountedBirdRotation(SlingForward, SlingUp);
+	Bird->EnterSlingshotPouch(
+		GetBirdInPouchLocation(RestPouchRotation),
+		MountedBirdRotation);
 	if (Bird->GetSelectedMovementMode() == EABTSBirdMovementMode::ChaosRigidBody)
 	{
 		if (UABTSChaosBirdMovementComponent* Movement = Bird->GetChaosMovementComponent()) Movement->OnBlockingImpact().AddUObject(this, &AABTSM6SlingshotSystem::HandleBirdImpact);
@@ -512,8 +516,10 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
 	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
 	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
+	const FQuat MountedBirdRotation =
+		ABTSMakeSlingshotMountedBirdRotation(Direction, SlingUp);
 	LaunchedBird->SetActorLocationAndRotation(
-		GetBirdInPouchLocation(PouchRotation), PouchRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		GetBirdInPouchLocation(PouchRotation), MountedBirdRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	UpdatePouchVisual(PouchRotation);
 }
 

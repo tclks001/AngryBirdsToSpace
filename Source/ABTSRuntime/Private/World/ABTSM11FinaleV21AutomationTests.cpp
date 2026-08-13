@@ -5,6 +5,7 @@
 #include "Camera/ABTSM11FinaleCameraDirector.h"
 #include "World/ABTSM11CandidateExperienceCatalog.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
+#include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
 #include "World/ABTSM11GravityAssistSolver.h"
 
@@ -45,6 +46,23 @@ bool FABTSM11CV21InputParityAndLatestOnlyTest::RunTest(
 		TEXT("M6 parity bird pouch offset remains 20 cm"),
 		FABTSM11M6InputParityProfile::BirdInPouchOffsetCM,
 		20.0);
+	TestEqual(
+		TEXT("Space formation adds 25 cm of pouch-forward clearance"),
+		FABTSM11M6InputParityProfile::SpaceFormationPouchForwardClearanceCM,
+		25.0);
+	const AABTSM11FinaleInteractionSystem* InteractionDefaults =
+		GetDefault<AABTSM11FinaleInteractionSystem>();
+	TestNotNull(
+		TEXT("M11 interaction defaults are available"),
+		InteractionDefaults);
+	if (InteractionDefaults)
+	{
+		TestEqual(
+			TEXT("M11 consumes the 25 cm Space formation clearance by default"),
+			InteractionDefaults->GetM6PouchForwardClearanceCM(),
+			FABTSM11M6InputParityProfile::
+				SpaceFormationPouchForwardClearanceCM);
+	}
 
 	const FABTSM11FinaleLayoutPreset V1 =
 		FABTSM11FinaleLayoutPreset::MakeCertifiedV1();

@@ -102,6 +102,8 @@ struct ABTSRUNTIME_API FABTSM11M6InputParityProfile
 	static constexpr double MaximumAimPlaneOffsetCM = 260.0;
 	static constexpr double LaunchTargetLiftCM = 65.0;
 	static constexpr double BirdInPouchOffsetCM = 20.0;
+	/** Finale-only extra clearance along the pouch launch axis. */
+	static constexpr double SpaceFormationPouchForwardClearanceCM = 25.0;
 	static constexpr double PouchPickRadiusPixels = 125.0;
 };
 

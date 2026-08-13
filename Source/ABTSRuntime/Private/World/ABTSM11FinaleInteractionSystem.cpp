@@ -18,6 +18,7 @@
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "UI/ABTSM11FinalePresentation.h"
 #include "World/ABTSM11FinaleActors.h"
 #include "World/ABTSM11FinaleBirdTrailComponent.h"
@@ -1693,6 +1694,7 @@ bool AABTSM11FinaleInteractionSystem::BuildAttemptFormation(
 	AttemptFormationBirds.Reset();
 	AttemptFormationOriginalTransforms.Reset();
 	AttemptFormationOriginalVisualScales.Reset();
+	AttemptFormationVisualRelativeLocations.Reset();
 	AttemptFormationVisualAxisCorrections.Reset();
 	AttemptFormationPouchTransforms.Reset();
 	AttemptFormationInPouch.Reset();
@@ -1761,6 +1763,8 @@ bool AABTSM11FinaleInteractionSystem::BuildAttemptFormation(
 		AttemptFormationOriginalTransforms.Add(Member->GetActorTransform());
 		AttemptFormationOriginalVisualScales.Add(
 			Visual->GetRelativeScale3D());
+		AttemptFormationVisualRelativeLocations.Add(
+			DefaultVisual->GetRelativeLocation());
 		AttemptFormationVisualAxisCorrections.Add(
 			DefaultVisual->GetRelativeRotation().Quaternion());
 		MaximumBirdRadiusCM = FMath::Max(
@@ -1783,6 +1787,34 @@ bool AABTSM11FinaleInteractionSystem::BuildAttemptFormation(
 		&& ResolvedFormationSpacingCM > 0.0;
 }
 
+void AABTSM11FinaleInteractionSystem::ApplyFormationMountedVisualFrame(
+	const int32 FormationIndex)
+{
+	if (!AttemptFormationBirds.IsValidIndex(FormationIndex)
+		|| !AttemptFormationVisualRelativeLocations.IsValidIndex(FormationIndex)
+		|| !AttemptFormationVisualAxisCorrections.IsValidIndex(FormationIndex))
+	{
+		return;
+	}
+	AABTSM25BirdCharacter* Member = AttemptFormationBirds[FormationIndex];
+	USkeletalMeshComponent* Visual = IsValid(Member)
+		? Member->GetBirdVisual()
+		: nullptr;
+	if (!IsValid(Visual))
+	{
+		return;
+	}
+	// Chaos presentation writes the visual component in world space during the
+	// bird tick. The finale system ticks afterwards and owns the mounted pose,
+	// so restore the authored component frame after every pouch relocation.
+	// Without this step each member carries its pre-finale facing into the
+	// shared four-bird Actor rotation even though ordinary one-bird M6 is fine.
+	ABTSRestoreSlingshotMountedBirdVisualFrame(
+		*Visual,
+		AttemptFormationVisualRelativeLocations[FormationIndex],
+		AttemptFormationVisualAxisCorrections[FormationIndex]);
+}
+
 FTransform AABTSM11FinaleInteractionSystem::BuildFormationPouchTransform(
 	const int32 FormationIndex,
 	const FVector& PouchLocation,
@@ -1794,9 +1826,15 @@ FTransform AABTSM11FinaleInteractionSystem::BuildFormationPouchTransform(
 	const FVector LocalOffset(
 		VerticalSigns[SafeIndex] * M6PouchVerticalSpacingCM,
 		HorizontalSigns[SafeIndex] * M6PouchHorizontalSpacingCM,
-		FABTSM11M6InputParityProfile::BirdInPouchOffsetCM);
+		FABTSM11M6InputParityProfile::BirdInPouchOffsetCM
+			+ FMath::Max(0.0, M6PouchForwardClearanceCM));
+	const FVector LaunchForward = PouchRotation.GetAxisZ();
+	const FQuat MountedBirdRotation =
+		ABTSMakeSlingshotMountedBirdRotation(
+			LaunchForward,
+			AimSlingUp);
 	return FTransform(
-		PouchRotation,
+		MountedBirdRotation,
 		PouchLocation + PouchRotation.RotateVector(LocalOffset));
 }
 
@@ -1825,6 +1863,7 @@ bool AABTSM11FinaleInteractionSystem::EnterAttemptFormationPouch(
 		Member->EnterSlingshotPouch(
 			Slot.GetLocation(),
 			Slot.GetRotation());
+		ApplyFormationMountedVisualFrame(Index);
 		AttemptFormationInPouch[Index] = 1;
 	}
 	bAttemptBirdInPouch = true;
@@ -2001,6 +2040,7 @@ void AABTSM11FinaleInteractionSystem::ResetFormationRuntime()
 	AttemptFormationBirds.Reset();
 	AttemptFormationOriginalTransforms.Reset();
 	AttemptFormationOriginalVisualScales.Reset();
+	AttemptFormationVisualRelativeLocations.Reset();
 	AttemptFormationVisualAxisCorrections.Reset();
 	AttemptFormationPouchTransforms.Reset();
 	AttemptFormationInPouch.Reset();
@@ -2102,6 +2142,7 @@ void AABTSM11FinaleInteractionSystem::UpdatePouchPresentation()
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
+		ApplyFormationMountedVisualFrame(Index);
 	}
 }
 
@@ -2253,11 +2294,14 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
-		if (AttemptFormationVisualAxisCorrections.IsValidIndex(Index))
+		if (AttemptFormationVisualRelativeLocations.IsValidIndex(Index)
+			&& AttemptFormationVisualAxisCorrections.IsValidIndex(Index))
 		{
 			if (USkeletalMeshComponent* Visual = Member->GetBirdVisual())
 			{
-				Visual->SetRelativeRotation(
+				ABTSRestoreSlingshotMountedBirdVisualFrame(
+					*Visual,
+					AttemptFormationVisualRelativeLocations[Index],
 					AttemptFormationVisualAxisCorrections[Index]);
 			}
 		}

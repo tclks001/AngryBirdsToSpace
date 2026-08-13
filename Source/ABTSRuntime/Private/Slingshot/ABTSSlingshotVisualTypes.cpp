@@ -2,6 +2,7 @@
 
 #include "Slingshot/ABTSSlingshotVisualTypes.h"
 
+#include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 
@@ -64,6 +65,17 @@ FABTSSlingshotVisualPreset ABTSMakeDefaultSlingshotVisualPreset(const EABTSSling
 		PouchMaterialPath = TEXT("/Game/StaticMesh/Pouch/Reinforced/MI_Pouch_Reinforced.MI_Pouch_Reinforced");
 		break;
 	case EABTSSlingshotTier::Space:
+		// M11 M6-6 owns a visibly larger four-bird launch frame. Keep this
+		// override inside the Space case so the three ordinary tiers remain
+		// byte-for-byte compatible with the established M6 presentation.
+		Preset.BaseStakeSpacingCM = ABTSFinaleSpaceStakeSpacingCM;
+		Preset.StakeHeightCM = 285.0f;
+		Preset.StakeDiameterCM = 36.0f;
+		Preset.CordThicknessCM = 5.5f;
+		Preset.PouchSizeCM = FVector(84.0f, 120.0f, 24.0f);
+		Preset.ConnectionLayout.RestPouchOffsetCM = FVector(0.0f, 0.0f, -45.0f);
+		Preset.ConnectionLayout.PouchAConnectionOffsetCM = FVector(0.0f, -52.0f, 0.0f);
+		Preset.ConnectionLayout.PouchBConnectionOffsetCM = FVector(0.0f, 52.0f, 0.0f);
 		StakeMeshPath = TEXT("/Game/StaticMesh/Stake/Steel/SM_Stack_Steel.SM_Stack_Steel");
 		StakeMaterialPath = TEXT("/Game/StaticMesh/Stake/Steel/MI_Stack_Steel.MI_Stack_Steel");
 		CordMeshPath = TEXT("/Game/StaticMesh/Cord/Steel/SM_Cord_Steel.SM_Cord_Steel");
@@ -82,6 +94,20 @@ FABTSSlingshotVisualPreset ABTSMakeDefaultSlingshotVisualPreset(const EABTSSling
 	Preset.PouchVisual.Mesh = LoadSlingshotMesh(PouchMeshPath);
 	Preset.PouchVisual.Material = LoadSlingshotMaterial(PouchMaterialPath);
 	return Preset;
+}
+
+float ABTSResolveFinaleSpaceStakeSpacingCM(const float AuthoredSpacingCM)
+{
+	if (!FMath::IsFinite(AuthoredSpacingCM))
+	{
+		return ABTSFinaleSpaceStakeSpacingCM;
+	}
+	return FMath::IsNearlyEqual(
+			AuthoredSpacingCM,
+			ABTSLegacyFinaleSpaceStakeSpacingCM,
+			KINDA_SMALL_NUMBER)
+		? ABTSFinaleSpaceStakeSpacingCM
+		: FMath::Clamp(AuthoredSpacingCM, 100.0f, 600.0f);
 }
 
 FTransform ABTSMakeSlingshotVisualTransform(
@@ -126,4 +152,59 @@ FVector ABTSScaleSlingshotPouchConnectionOffset(
 		FMath::Max(0.001f, FMath::Abs(PouchVisualSlot.LocalScale.X)),
 		FMath::Max(0.001f, FMath::Abs(PouchVisualSlot.LocalScale.Y)),
 		FMath::Max(0.001f, FMath::Abs(PouchVisualSlot.LocalScale.Z)));
+}
+
+FQuat ABTSMakeSlingshotMountedBirdRotation(
+	const FVector& LaunchForward,
+	const FVector& PreferredUp)
+{
+	FVector SafeUp = PreferredUp.GetSafeNormal();
+	if (SafeUp.IsNearlyZero())
+	{
+		SafeUp = FVector::UpVector;
+	}
+
+	FVector SafeForward = LaunchForward.GetSafeNormal();
+	if (SafeForward.IsNearlyZero())
+	{
+		const FVector FallbackAxis = FMath::Abs(SafeUp.Z) < 0.9f
+			? FVector::UpVector
+			: FVector::ForwardVector;
+		SafeForward = FVector::VectorPlaneProject(
+			FallbackAxis,
+			SafeUp).GetSafeNormal();
+	}
+	if (SafeForward.IsNearlyZero())
+	{
+		SafeForward = FVector::ForwardVector;
+		SafeUp = FVector::UpVector;
+	}
+	else if (FMath::Abs(FVector::DotProduct(SafeForward, SafeUp)) > 0.999f)
+	{
+		SafeUp = FMath::Abs(SafeForward.Z) < 0.9f
+			? FVector::UpVector
+			: FVector::RightVector;
+	}
+
+	return FRotationMatrix::MakeFromXZ(
+		SafeForward,
+		SafeUp).ToQuat().GetNormalized();
+}
+
+void ABTSRestoreSlingshotMountedBirdVisualFrame(
+	USceneComponent& BirdVisual,
+	const FVector& AuthoredRelativeLocation,
+	const FQuat& AuthoredRelativeRotation)
+{
+	const FQuat SafeRotation = AuthoredRelativeRotation.ContainsNaN()
+		? FQuat::Identity
+		: AuthoredRelativeRotation.GetNormalized();
+	BirdVisual.SetRelativeLocationAndRotation(
+		AuthoredRelativeLocation.ContainsNaN()
+			? FVector::ZeroVector
+			: AuthoredRelativeLocation,
+		SafeRotation,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 }

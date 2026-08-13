@@ -104,6 +104,7 @@ public:
 	int32 GetInstalledSlotPairId() const { return InstalledSlotPairId; }
 	FVector GetVisualTopWorldLocation() const;
 	FVector GetVisualBottomWorldLocation() const;
+	const UStaticMeshComponent* GetVisualComponent() const { return Visual; }
 	float GetStakeObstructionRadiusCM() const { return StakeObstructionRadiusCM; }
 	bool HasCord() const { return bHasCord; }
 	void SetHasCord(bool bValue) { bHasCord = bValue; }
@@ -159,6 +160,12 @@ public:
 	FVector GetEndpointA() const { return EndpointA; }
 	FVector GetEndpointB() const { return EndpointB; }
 	float GetCordObstructionRadiusCM() const { return CordObstructionRadiusCM; }
+	float GetCordThicknessCM() const { return CordThicknessCM; }
+	const FVector& GetPouchSizeCM() const { return PouchSizeCM; }
+	const FABTSSlingshotConnectionLayout& GetConnectionLayout() const { return ConnectionLayout; }
+	const UStaticMeshComponent* GetCordSegmentAComponent() const { return CordSegmentA; }
+	const UStaticMeshComponent* GetCordSegmentBComponent() const { return CordSegmentB; }
+	const UStaticMeshComponent* GetPouchVisualComponent() const { return PouchVisual; }
 	EABTSItemId GetStakeItem() const;
 	EABTSSlingshotTier GetSlingshotTier() const { return SlingshotTier; }
 	AABTSM51SlingshotStake* GetStakeA() const { return StakeA.Get(); }

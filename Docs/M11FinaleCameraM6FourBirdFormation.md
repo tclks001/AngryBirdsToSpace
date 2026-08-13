@@ -34,9 +34,19 @@ fail closed；飞行期间不重排，也不响应主控切换。
 ### 2.2 袋内布局
 
 袋内使用紧凑 2×2 逻辑槽位。局部 Z 沿发射方向，X/Y 位于袋平面；默认中心
-间距为 110×100 cm，四个槽位共用现有 `BirdInPouchOffsetCM=20`。每帧瞄准只
+间距为 110×100 cm，四个槽位共用现有 `BirdInPouchOffsetCM=20`，并增加
+Space 专用 `M6PouchForwardClearanceCM=25`，使四鸟中心沿发射轴距袋中心
+`45 cm`，避免放大后的 Steel 袋与鸟体穿模。每帧瞄准只
 根据当前袋 Transform 重算槽位，不对 Character 建父子 Attach，因此不会污染
 根组件、Chaos 或恢复层级。
+
+袋 Transform 只负责槽位位置；四只鸟的 Actor 旋转统一由当前发射方向与终局
+局部上方向重建，使 Actor `+X` 朝前。不得继续复制袋体“局部 +Z 朝发射方向”的
+旋转，也不得保留鸟进入终局前的随机行走朝向。终局四鸟还必须在每次 Actor
+挂袋重定位后恢复各自 CDO 冻结的 `BirdVisual` 相对位置和导入轴修正：Chaos
+表现 Tick 可能先以进入终局前的物理朝向写 Mesh 世界旋转；只统一 Actor 而不恢复
+组件相对帧，会让四只鸟继续显示不同的旧朝向。普通单鸟 M6 不经过这条四鸟
+Chaos 编队更新链，因此无需增加该恢复步骤。
 
 这组数值是 M11 代码验收包络，不代表共享 Space 袋资产已经定型。Integration
 应按“最大鸟视觉直径 + 槽位中心距 + 弦/轮廓余量”重新定型 Space Tier。
@@ -105,7 +115,7 @@ Manifest 与 Python 离线分析共同统计：四鸟丢失帧、顺序/主控�
 | M6-3 | 四鸟事务恢复；首版单编队尾迹 | 已落实 / M11 |
 | M6-4 | 主控锚不变的四球镜头安全框 | 已落实 / M11 |
 | M6-5 | Schema 8、Manifest 与 Python 离线判据 | 已落实并完成 fresh 双路线证据 / M11 |
-| M6-6 | Space 袋、弦、桩、点击体积与轮廓资产定型 | 待 Integration |
+| M6-6 | Space 袋、弦、桩、点击体积与轮廓资产定型 | `IntegrationAccepted`（2026-08-13） |
 | M6-7 | 合并后生产 PIE/Standalone 联合验收 | 待 Integration |
 
 ## 7. Integration 唯一写入交接
@@ -119,6 +129,33 @@ Integration 必须处理：
    `LaunchFromSlingshot` 假装动画，因为它会重新开启物理和碰撞；
 3. 共享 Mesh/材质/纹理/动画/Niagara/Stencil/声音资产及生产地图绑定；
 4. 合并后的完整 Editor、生产 PIE、Standalone 与普通 M6 三档弹弓回归。
+
+### 7.1 M6-6 Integration 验收结果
+
+共享视觉合同 v2 已只对 Space 档装配四鸟框架：桩距 `320 cm`、桩高
+`285 cm`、桩径 `36 cm`、弦粗 `5.5 cm`、待机袋下移 `45 cm`，袋端连接点
+为局部 `Y=±52 cm`。Space 袋原生目标 Bounds 为 `(84,120,24) cm`，严格是普通
+三档 `(42,60,12) cm` 的 2 倍；三档普通弹弓参数和资产不变。既有 M11.0 地图中
+恰好为 `210 cm` 的旧默认桩距会兼容迁移至 `320 cm`，非旧默认的编辑器调参不会
+被覆盖。
+
+Space 桩、弦和袋分别消费既有 Steel Mesh/Material；发射模式继续复用 M5.1 弦
+Actor 的同一 `PouchVisual`，没有第二个延迟加载代理。该可见袋本身保持
+`QueryOnly + Visibility Block`，两段弦保持 `NoCollision`，所以放大后的几何同时
+就是放大后的点击体积。共享风格化适配器仍以 `Slingshot` stencil 和 Steel 资产
+映射提供轮廓。用户已于 2026-08-13 在生产 PIE 中确认四鸟容纳、统一朝前、
+`25 cm` 附加前向净空、弦端连接、点击、材质和轮廓，M6-6 因此关闭为
+`IntegrationAccepted`。fresh Standalone 与普通三档联合回归仍单独属于 M6-7，
+不得用本次可见验收替代。
+
+2026-08-12 集成候选已使用唯一批准的 UE 5.8 完成
+`-ForceUnity -DisableAdaptiveUnity` Development Editor 链接；fresh NullRHI 精确
+通过 `ABTS.M6.SlingshotVisual.SpaceFourBirdFrame` 1/1、
+`ABTS.M51.SlingshotAssembly` 2/2、`ABTS.M110.TaskGraphFinaleSeparation` 1/1、
+`ABTS.M3.Monthly.FinaleAnchor` 3/3、
+`ABTS.Rendering.Toon.T3A2.SharedMaterialAdapter` 1/1 和
+`ABTS.Integration.PreviewFinaleFrame` 2/2。以上只证明原生尺寸、旧默认迁移、
+装配、Steel 资产、可见袋点击体积和共享材质合同，不替代待执行的生产 PIE。
 
 ## 8. 验收门
 

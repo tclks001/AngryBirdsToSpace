@@ -62,7 +62,7 @@ struct ABTSRUNTIME_API FABTSM3MonthlyFinaleAnchorConfig
 	/** Requested world-space separation of the finale Space-slot pair. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Finale Anchor",
 		meta = (ClampMin = "100", ClampMax = "600", Units = "cm"))
-	float SlotSeparationCM = 210.0f;
+	float SlotSeparationCM = 320.0f;
 
 	/** Lift applied after the left and right slot positions are grounded independently. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Finale Anchor",

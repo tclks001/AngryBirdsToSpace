@@ -14,6 +14,7 @@
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
 #include "Rendering/ABTSStylizedMaterialContract.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
@@ -748,7 +749,8 @@ AABTSM3Planet::MakeResolvedMonthlyFinaleAnchorConfig() const
 		MonthlyFinaleAnchorConfig;
 	// M11.0's already serialized pair geometry remains the single Planet-side
 	// source while R-5.2 is only a Preview/Test producer.
-	Resolved.SlotSeparationCM = FinaleSpaceSlotSeparationCM;
+	Resolved.SlotSeparationCM = ABTSResolveFinaleSpaceStakeSpacingCM(
+		FinaleSpaceSlotSeparationCM);
 	Resolved.SurfaceOffsetCM = FinaleSpaceSlotSurfaceOffsetCM;
 	return Resolved;
 }
@@ -2419,7 +2421,8 @@ void AABTSM3Planet::BuildBuildingSpawnSites()
 
 		if (Site.TaskType == EABTSM3TaskType::LaunchSite)
 		{
-			const float SafeSeparationCM = FMath::Max(100.0f, FinaleSpaceSlotSeparationCM);
+			const float SafeSeparationCM = ABTSResolveFinaleSpaceStakeSpacingCM(
+				FinaleSpaceSlotSeparationCM);
 			const FVector SlotOrigin = Site.WorldTransform.GetLocation()
 				+ PadUp * FMath::Max(0.0f, FinaleSpaceSlotSurfaceOffsetCM);
 			FinaleLaunchFrame.LayoutVersion = 1;

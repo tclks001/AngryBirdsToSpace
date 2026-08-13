@@ -76,7 +76,8 @@ LeftSlot     = PairMidpoint - Right * 105cm
 RightSlot    = PairMidpoint + Right * 105cm
 ```
 
-首版 `FinaleSpaceSlotSeparationCM=210`、`SurfaceOffsetCM=4`。槽位对必须同时满足：
+首版曾使用 `FinaleSpaceSlotSeparationCM=210`；M11 M6-6 视觉合同 v2 将该旧默认值
+兼容迁移为 `320`，`SurfaceOffsetCM=4` 保持不变。槽位对必须同时满足：
 
 - Anchor Cell 属于 `LaunchSite`，并已通过平整、非水和净空认证；
 - 左右槽共享 `AnchorCellId + SlotPairId`，各自记录 `Side=Left/Right`；
@@ -290,7 +291,7 @@ AssistPlanet3
 ### 9.1 Task Graph 与建筑
 
 - [x] 固定 Seed 重建两次，`LaunchSite`、`SatelliteWindow`、共同 Anchor Cell、`SlotPairId` 和局部坐标系完全一致。
-- [x] 生成结果只有一个 `LaunchSite` 和一对 Space-only 槽；左右槽共享 Anchor/Pair，Side 分别为 Left/Right，世界中心距等于 `FinaleSpaceSlotSeparationCM=210`。
+- [x] 生成结果只有一个 `LaunchSite` 和一对 Space-only 槽；左右槽共享 Anchor/Pair，Side 分别为 Left/Right；v1 验收中心距为 `210 cm`，M6-6 v2 生产默认及旧默认迁移值为 `320 cm`。
 - [x] `SatelliteLaunchAngularSeparationDegrees >= 55°` 或当前配置值。
 - [x] 槽轴与指向卫星下点的切向夹角处于批准容差。
 - [x] `LaunchSite` 保留平整施工台和净空，但没有 Glass/TwinTowerBridge 或其他 M7 建筑。
