@@ -1,6 +1,6 @@
 # ABTS 三渲二 T4：球面环境、光照、云雾与程序化星空
 
-> 状态：2026-08-12 更新。T4-A0/A1 与 T4-A2.1～A2.4 均为 `IntegrationAccepted`，A2 已冻结；历史版本、云场参数和证据保留在第 7 节。**T4-A3.1 高空连续星空过渡**实现版本 64 已通过自动化、真实 D3D12 捕获和实际飞行 PIE。当前进入 **T4-A3.2 三套环境 Profile 正式装配**：实现版本 72 消费 M11 只读环境阶段，地面瞄准保持 `GroundDay`；发射后仍复用按相机高度连续过渡，并在既有高度空间混合完整到达 1 时进入 `FinaleSpace`，不再等到第一颗助推行星 `AssistEnter(1)` 才硬切。失败恢复回到配置基线。月面画中画仍以 `GroundDay` 表面视觉消费 `SatelliteGuide` 深空背景。A3.2 代码、自动化与 Rank12/M3 命令行可见证据完成后仍需玩家 PIE 复核；A3.3 M11 环境快照/异常中断恢复和 T4-B 尚未开始。
+> 状态：2026-08-13 更新。T4-A0/A1、T4-A2.1～A2.4 与 T4-A3.1/A3.2 均为 `IntegrationAccepted`。当前推进 **T4-A3.3 M11 环境快照与异常恢复**：集成世界子系统只租用唯一、已初始化且当前相关的 M11 环境来源；双来源歧义不再按阶段优先级合并，而是 fail closed 到配置的 `GroundDay` 基线。来源销毁、Style Off、世界 teardown/cleanup 和子系统退出均显式、幂等地释放大气、云场与离屏捕获所有权。UE 5.8 ForceUnity 与 fresh NullRHI 合同已通过；仍需玩家 PIE 验证主动退出、失败重置、来源销毁/地图退出的可见恢复，之后才可把 A3.3 晋升为 `IntegrationAccepted` 并进入 T4-B。
 >
 > 唯一验收地图：`/Game/Maps/L_ABTS_M11`。唯一引擎：`C:\Program Files\Epic Games\UE_5.8`。
 >
@@ -30,7 +30,7 @@ T4 不改变：
 | **T4-A3 环境 Profile** | **A3.1 高空连续星空过渡** → **A3.2 三套环境 Profile 正式装配** → **A3.3 M11 环境快照与异常恢复** | 不改变 M11 求解/轨迹；A3.1 不以高度硬切 Profile；A3.2 不把月面表面改成独立补光 | 五高度连续；普通世界/月面 PIP/终局主视图与 AVI 消费正确 Profile；退出、失败、中断后恢复一致 |
 | **T4-B T3/T4 联合校色** | 回开并调整 Roughness、Specular、Rim、Tint；解决地形褶皱；形成非 M7 联合基线 | M7 未完成时不宣称全项目冻结 | `TOON-T2A-002` 关闭证据；T3/T4 视觉和 GPU 联合基线；M7 后补建筑材质/特效 |
 
-阶段必须按 A0→A1→A2→A3→B 前进。A2 的正式编号只使用 **A2.1→A2.2→A2.3→A2.4**，四项现已全部验收并冻结；`R0/R1-A/R1-C2-A4/B3B6/v44` 等只用于说明 A2.1 的技术演进、资产合同和日志身份。A3 的正式编号为 **A3.1→A3.2→A3.3**，当前推进 A3.2。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
+阶段必须按 A0→A1→A2→A3→B 前进。A2 的正式编号只使用 **A2.1→A2.2→A2.3→A2.4**，四项现已全部验收并冻结；`R0/R1-A/R1-C2-A4/B3B6/v44` 等只用于说明 A2.1 的技术演进、资产合同和日志身份。A3 的正式编号为 **A3.1→A3.2→A3.3**，当前推进 A3.3。不得用任一中间阶段静态截图或自动化绿灯替代后续门槛。
 
 ## 3. T4-A0：只读球面环境合同
 
@@ -513,7 +513,15 @@ v70 修复太阳圆盘与地表局部半圆高光被误读为同一问题的缺�
 
 A3.2 自动化必须冻结三套 Actor 策略、月面“表面/背景”双 Profile、终局优先级和结束后的确定性回切。可见 PIE 至少检查普通世界云/大气、月面 PIP 星空、进入终局后无地表云/蓝天、主动退出与失败恢复后的 GroundDay 回切，以及 Rank11 AVI。A3.3 再处理进程中断、Actor 销毁、地图切换等显式快照/恢复所有权；在 A3.3 完成前不得把 A3.2 的轮询回切写成完整异常恢复。
 
-A3.2 当前状态为 `ImplementationComplete（VisibleValidationPending）`。实现版本 72 已接入“高度空间混合完成即晋升”的阶段路由；录制合同 v17 新增 Rank12 与 `FinaleGameplayMirrorCapture`，逐帧 CSV schema 9 记录 `environmentStage/environmentProfile`，使命令行 SceneCapture 能按当前主世界 Profile 得到与 PIE 同源的像素证据。UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译成功，fresh NullRHI `ABTS.M11C.CameraCapture.Config`、`ABTS.Rendering.Toon.T4A3_2.M11EnvironmentStageRouting` 均为 1/1，Python 离线 schema 回归 9/9。基线录屏在第 223 帧进入 `DeepSpace`、第 224 帧才由 GroundDay 切 FinaleSpace；修复后在第 23 帧、相机高度连续混合到 1 时已进入 FinaleSpace，第 218/223/224/230 帧经过火星均保持同一 Profile。最终 988 帧、180,159,344 bytes 的 AVI、schema 9 CSV 与 v17 Manifest 位于 `Saved/VideoCaptures/M11CameraCapture/Rank12-M3-PIEMirror-Final-20260812-190000`，日志为 `Saved/Logs/M11-Rank12-M3-PIEMirror-Final-20260812-190000.log`、`Saved/Logs/M11-Rank12-M3-CaptureConfig-V17-20260812.log` 与 `Saved/Logs/M11-Rank12-M3-EnvironmentRouting-V72-20260812.log`。可见 PIE 仍至少复核发射升空连续过渡、火星接近段无换档、远端 PIP 不受主世界阶段改变，以及失败/主动退出恢复 GroundDay；命令行录屏不替代玩家 PIE。
+A3.2 当前状态为 `IntegrationAccepted`。实现版本 72 已接入“高度空间混合完成即晋升”的阶段路由；录制合同 v17 新增 Rank12 与 `FinaleGameplayMirrorCapture`，逐帧 CSV schema 9 记录 `environmentStage/environmentProfile`，使命令行 SceneCapture 能按当前主世界 Profile 得到与 PIE 同源的像素证据。UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译成功，fresh NullRHI `ABTS.M11C.CameraCapture.Config`、`ABTS.Rendering.Toon.T4A3_2.M11EnvironmentStageRouting` 均为 1/1，Python 离线 schema 回归 9/9。基线录屏在第 223 帧进入 `DeepSpace`、第 224 帧才由 GroundDay 切 FinaleSpace；修复后在第 23 帧、相机高度连续混合到 1 时已进入 FinaleSpace，第 218/223/224/230 帧经过火星均保持同一 Profile。最终 988 帧、180,159,344 bytes 的 AVI、schema 9 CSV 与 v17 Manifest 位于 `Saved/VideoCaptures/M11CameraCapture/Rank12-M3-PIEMirror-Final-20260812-190000`，日志为 `Saved/Logs/M11-Rank12-M3-PIEMirror-Final-20260812-190000.log`、`Saved/Logs/M11-Rank12-M3-CaptureConfig-V17-20260812.log` 与 `Saved/Logs/M11-Rank12-M3-EnvironmentRouting-V72-20260812.log`。用户随后已在可见 PIE 中复核发射升空连续过渡、火星接近段无换档、远端 PIP 不受主世界阶段改变，以及失败/主动退出恢复 GroundDay，A3.2 验收闭合。
+
+### 8.3 T4-A3.3：M11 环境快照与异常恢复
+
+A3.3 把 A3.2 的“每 0.1 秒读取所有 Actor 后按最高阶段合并”替换为确定性的单来源租约：只有 `FinaleSystem` 已初始化，且交互 Actor 当前处于活动终局或显式非 `GroundLaunch` 恢复阶段时，才成为环境候选；恰好一个候选时发布该来源的阶段和来源身份 Hash。零候选使用配置基线；两个及以上候选视为生命周期歧义，禁止让遗留的 `DeepSpace` Actor 胜出，统一 fail closed 到 `GroundDay`，并记录相关来源数、候选集合 Hash、来源代数和冲突标志。稳定排序保证候选枚举顺序不影响诊断 Hash。
+
+世界子系统在 `OnWorldBeginPlay` 绑定 Actor spawn/destroy，在世界 `BeginTearDown`、`Cleanup` 和子系统退出时解绑；M11 来源销毁会立即注销其 SceneCapture，并在同一调用链排除 `IsActorBeingDestroyed` 的来源后重算基线。恢复操作集中为单个幂等入口：清空渲染线程环境参数、销毁低模云场、恢复 SkyAtmosphere/雾/原生云原值、按需要注销离屏捕获、清空已发布快照和来源租约；同一 ownership generation 只记录一次恢复，地图退出的重复 teardown/cleanup/deinitialize 不会二次覆盖原值。Style Off 复用同一入口，0.1 秒轮询只保留为 M11 初始化完成和正常阶段变化的有界兜底，不再承担 Actor 销毁或世界退出恢复。
+
+当前状态为 `ImplementationComplete（VisibleValidationPending）`。UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 编译成功；fresh NullRHI `ABTS.Rendering.Toon.T4A3_` 共 4/4，通过 A3.1、A3.2 Profile/阶段路由与新增 `ABTS.Rendering.Toon.T4A3_3.EnvironmentLifecycleContract`，日志 `Saved/Logs/T4A33-EnvironmentLifecycle-Final-20260813-133959.log`；完整 `ABTS.Rendering.Toon` 30/30 回归通过，日志 `Saved/Logs/T4A33-ToonFull-Passing-20260813-134500.log`。新合同覆盖无来源、唯一 DeepSpace、未初始化来源、双来源正反顺序冲突和来源消失，证明冲突/消失均回 GroundDay 且证据 Hash 与迭代顺序无关。可见 PIE 仍需验证：终局瞄准→升空→主动退出、发射失败→恢复、PIE Stop/地图退出期间不残留星空/隐藏大气/云场或远端 PIP；自动合同不替代这些生命周期画面。
 
 A3 全部通过后进入 T4-B，重新看 T3 的 Roughness、Specular、Rim、Tint，并用 A0 矩阵关闭 `TOON-T2A-002`。M7 未完成时可以形成“非 M7 T3/T4 联合基线”，但不得宣布完整视觉冻结。
 

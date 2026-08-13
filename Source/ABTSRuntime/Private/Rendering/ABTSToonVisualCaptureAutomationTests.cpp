@@ -226,7 +226,7 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Stylized renderer reports the finale-stage profile routing contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		71);
+		72);
 	const FABTSStylizedEnvironmentProfilePolicy GroundEnvironment =
 		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
 			EABTSStylizedRenderProfile::GroundDay);

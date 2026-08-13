@@ -118,6 +118,19 @@ protected:
 
 private:
 	void PreloadSharedMaterials();
+	void BindWorldLifecycleDelegates(UWorld& World);
+	void UnbindWorldLifecycleDelegates();
+	void HandleActorSpawned(AActor* Actor);
+	void HandleActorDestroyed(AActor* Actor);
+	void HandleWorldBeginTearDown(UWorld* World);
+	void HandleWorldCleanup(
+		UWorld* World,
+		bool bSessionEnded,
+		bool bCleanupResources);
+	void ReleaseEnvironmentOwnership(
+		const TCHAR* Reason,
+		bool bUnregisterAllCaptures);
+	void UnregisterCapturesOwnedBy(const AActor* Owner);
 	void RefreshEnvironmentPresentation();
 	bool RefreshLowPolyCloudPrototype(
 		const struct FABTSStylizedEnvironmentParameters& Parameters,
@@ -135,12 +148,23 @@ private:
 	TSet<TWeakObjectPtr<USceneCaptureComponent2D>> RegisteredCaptures;
 	float RefreshAccumulatorSeconds = 0.0f;
 	bool bWorldBeganPlay = false;
+	bool bWorldTearingDown = false;
 	bool bLastObservedStyleEnabled = false;
 	bool bSharedMaterialPreloadReady = false;
+	bool bEnvironmentOwnershipActive = false;
+	uint32 EnvironmentOwnershipGeneration = 0;
+	uint32 EnvironmentRecoveryGeneration = 0;
+	uint32 EnvironmentSourceGeneration = 0;
+	FDelegateHandle ActorSpawnedHandle;
+	FDelegateHandle ActorDestroyedHandle;
+	FDelegateHandle WorldBeginTearDownHandle;
+	FDelegateHandle WorldCleanupHandle;
 	uint64 LastDiagnosticSummaryHash = 0;
 	FABTSToonEnvironmentSnapshot EnvironmentSnapshot;
 	bool bEnvironmentSnapshotReady = false;
 	uint64 LastEnvironmentDiagnosticHash = 0;
+	TWeakObjectPtr<AActor> ActiveFinaleEnvironmentSource;
+	uint64 ActiveFinaleEnvironmentSourceHash = 0;
 	TWeakObjectPtr<AActor> LowPolyCloudPrototypeActor;
 	uint64 LowPolyCloudLayoutHash = 0;
 	uint64 LowPolyLogicalCloudLayoutHash = 0;

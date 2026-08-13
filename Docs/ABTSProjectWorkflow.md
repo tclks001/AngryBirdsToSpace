@@ -6,7 +6,7 @@
 
 ## 1. 当前状态
 
-- 三渲二非 M7 材质基线已形成；T4-A0/A1 已验收，T4-A2.1～A2.4 均为 `IntegrationAccepted` 并已冻结。A2.4 实现版本 63、材质宏合同 12、manifest schema 14 保持已验收的 `24 / 10 / 64` 全球云场、单 HISM/单材质批次、穿云可见性和地面/月面跨晨昏 PIP 同表面光照。T4-A3.1 实现版本 64 同样为 `IntegrationAccepted`：同一 `GroundDay` Profile 按每视图相机高度在 `0.22R～0.52R` 连续完成蓝色大气到程序星空的过渡，冻结卫星高度 `0.55R` 已是完整星空，并保留窄行星大气 Limb；自动化、真实 D3D12 捕获和用户实际飞行 PIE 均已通过，不以高度硬切 Gameplay Profile。命令、范围和证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
+- 三渲二非 M7 材质基线已形成；T4-A0/A1、T4-A2.1～A2.4 与 T4-A3.1/A3.2 均为 `IntegrationAccepted`。当前 T4-A3.3 已完成唯一 M11 环境来源租约、歧义 fail-closed、来源销毁与世界 teardown/cleanup 的幂等恢复；UE 5.8 ForceUnity 和 fresh NullRHI `T4A3_` 4/4 已通过，阶段保持 `ImplementationComplete（VisibleValidationPending）`，待终局退出/失败/PIE Stop 可见恢复验收后进入 T4-B。云场、PIP、高空星空与详细证据见 [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md)。
 
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
@@ -14,7 +14,7 @@
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`；候选仍为 Preview/Test、`NOT CERTIFIED`，不能替换 v1 默认值。
-- 当前下一步：T4-A3.2 的终局环境阶段已完成 Visible PIE；M11 M6-6/M6-7 已于 2026-08-13 完成 Integration 收口并为 `IntegrationAccepted`。同日集成工作树发布 M11 连通稳定合同 v3：生产 v2 六邻域 Bundle/Hash 保持不变，v3 追加“18 邻域发现＋待证明桥边＋桥区递归证据闭包”，缺证据一律 fail closed；UE 5.8 ForceUnity、M11-B Unit/Runtime、世界合同、M110 与 M11-C 消费回归通过。下一步由 M11 工作树同步新 `master`，实现 portable CLI/Python 的 Rank12 实际桥闭包与完整认证，Rank12 当前仍是 `UNCERTIFIED`。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 后续仍需 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- 当前下一步：先完成 T4-A3.3 的终局退出/失败/PIE Stop 可见恢复验收；通过后关闭 A3 并进入 T4-B。M11 M6-6/M6-7 已于 2026-08-13 完成 Integration 收口并为 `IntegrationAccepted`；同日集成工作树发布连通稳定合同 v3，生产 v2 六邻域 Bundle/Hash 保持不变，v3 追加“18 邻域发现＋待证明桥边＋桥区递归证据闭包”，缺证据一律 fail closed。下一步由 M11 工作树同步新 `master`，实现 portable CLI/Python 的 Rank12 实际桥闭包与完整认证，Rank12 当前仍是 `UNCERTIFIED`。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 后续仍需 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M3R-5.2/M11 集成验收](M3R52M11PreviewFinaleIntegrationDesign.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
