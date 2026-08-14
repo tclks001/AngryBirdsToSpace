@@ -26,6 +26,7 @@ public:
 	void SetStationType(EABTSCraftingStationType InStationType);
 	/** Reapplies the current temporary PIE scale/Z override without moving the gameplay anchor. */
 	void RefreshVisualTuning();
+	const UStaticMeshComponent* GetVisualComponent() const { return Visual; }
 	void SetCellId(int32 InCellId) { CellId = InCellId; }
 	int32 GetCellId() const { return CellId; }
 	float GetUseRangeCM() const { return UseRangeCM; }

@@ -6,6 +6,7 @@
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Crafting/ABTSCraftingStation.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -82,6 +83,12 @@ bool VisualAssetPathEndsWith(const UObject* Asset, const TCHAR* ExpectedSuffix)
 {
 	return Asset != nullptr && Asset->GetPathName().EndsWith(ExpectedSuffix);
 }
+
+bool IsUniformVisualScale(const FVector& Scale, const double Tolerance = KINDA_SMALL_NUMBER)
+{
+	return FMath::IsNearlyEqual(Scale.X, Scale.Y, Tolerance)
+		&& FMath::IsNearlyEqual(Scale.X, Scale.Z, Tolerance);
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -116,6 +123,35 @@ bool FABTSVisualTuningRuntimeTest::RunTest(const FString& Parameters)
 		TestNotNull(
 			FString::Printf(TEXT("Console command is registered: %s"), CommandName),
 			IConsoleManager::Get().FindConsoleObject(CommandName));
+	}
+
+	struct FFrozenTuningExpectation
+	{
+		EABTSVisualTuningTarget Target;
+		float Scale;
+		float LocalZ;
+	};
+	static const FFrozenTuningExpectation FrozenExpectations[] = {
+		{EABTSVisualTuningTarget::Workbench, 3.0f, -30.0f},
+		{EABTSVisualTuningTarget::Furnace, 3.0f, -25.0f},
+		{EABTSVisualTuningTarget::Bridge, 1.5f, 40.0f},
+		{EABTSVisualTuningTarget::StandardSlot, 2.0f, 0.0f},
+		{EABTSVisualTuningTarget::FinaleSlot, 3.0f, 0.0f},
+		{EABTSVisualTuningTarget::PickupBranch, 3.0f, -25.0f},
+		{EABTSVisualTuningTarget::PickupStone, 3.0f, -10.0f},
+		{EABTSVisualTuningTarget::PickupWood, 3.0f, 0.0f},
+		{EABTSVisualTuningTarget::PickupPlantFiber, 4.0f, -20.0f}};
+	for (const FFrozenTuningExpectation& Expectation : FrozenExpectations)
+	{
+		const FABTSVisualTuningValue& Value = ABTSGetVisualTuning(Expectation.Target);
+		TestEqual(
+			FString::Printf(TEXT("Frozen scale for %s"), ABTSGetVisualTuningTargetName(Expectation.Target)),
+			Value.ScaleMultiplier,
+			Expectation.Scale);
+		TestEqual(
+			FString::Printf(TEXT("Frozen local Z for %s"), ABTSGetVisualTuningTargetName(Expectation.Target)),
+			Value.LocalZOffsetCM,
+			Expectation.LocalZ);
 	}
 
 	AABTSM51PickupItem* Pickup =
@@ -182,6 +218,51 @@ bool FABTSVisualTuningRuntimeTest::RunTest(const FString& Parameters)
 		PickupVisual->GetRelativeLocation().Z,
 		25.0);
 
+	AABTSCraftingStation* Workbench =
+		SpawnVisualTuningTestActor<AABTSCraftingStation>(*World);
+	TestNotNull(TEXT("Workbench actor spawns"), Workbench);
+	if (Workbench == nullptr) return false;
+	const UStaticMeshComponent* WorkbenchVisual = Workbench->GetVisualComponent();
+	TestNotNull(TEXT("Workbench visual component exists"), WorkbenchVisual);
+	if (WorkbenchVisual == nullptr) return false;
+	TestTrue(
+		TEXT("Workbench authored proportions are preserved at base scale"),
+		WorkbenchVisual->GetRelativeScale3D().Equals(FVector(2.4), KINDA_SMALL_NUMBER));
+	TestEqual(
+		TEXT("Workbench frozen local Z is applied"),
+		WorkbenchVisual->GetRelativeLocation().Z,
+		-30.0);
+	TestTrue(
+		TEXT("Workbench tuning command executes"),
+		GEngine->Exec(World, TEXT("ABTS.M51.Visual.Workbench 1.25 8")));
+	TestTrue(
+		TEXT("Workbench remains uniformly scaled after tuning"),
+		WorkbenchVisual->GetRelativeScale3D().Equals(FVector(1.0), KINDA_SMALL_NUMBER));
+
+	AABTSCraftingStation* Furnace =
+		SpawnVisualTuningTestActor<AABTSCraftingStation>(*World);
+	TestNotNull(TEXT("Furnace actor spawns"), Furnace);
+	if (Furnace == nullptr) return false;
+	Furnace->SetStationType(EABTSCraftingStationType::Furnace);
+	const UStaticMeshComponent* FurnaceVisual = Furnace->GetVisualComponent();
+	TestTrue(
+		TEXT("Furnace authored proportions are preserved at base scale"),
+		FurnaceVisual != nullptr
+			&& FurnaceVisual->GetRelativeScale3D().Equals(
+				FVector(2.4), KINDA_SMALL_NUMBER));
+	TestEqual(
+		TEXT("Furnace frozen local Z is applied"),
+		FurnaceVisual != nullptr ? FurnaceVisual->GetRelativeLocation().Z : 0.0,
+		-25.0);
+	TestTrue(
+		TEXT("Furnace tuning command executes"),
+		GEngine->Exec(World, TEXT("ABTS.M51.Visual.Furnace 0.5 -6")));
+	TestTrue(
+		TEXT("Furnace remains uniformly scaled after tuning"),
+		FurnaceVisual != nullptr
+			&& FurnaceVisual->GetRelativeScale3D().Equals(
+				FVector(0.4), KINDA_SMALL_NUMBER));
+
 	AABTSM51SlingshotDirtHole* Slot =
 		SpawnVisualTuningTestActor<AABTSM51SlingshotDirtHole>(*World);
 	TestNotNull(TEXT("Slingshot slot actor spawns"), Slot);
@@ -198,6 +279,26 @@ bool FABTSVisualTuningRuntimeTest::RunTest(const FString& Parameters)
 		TEXT("Standard-slot local Z offset is applied"),
 		Slot->GetVisualComponent()->GetRelativeLocation().Z,
 		-12.0);
+	TestTrue(
+		TEXT("Standard slot remains uniformly scaled after tuning"),
+		Slot->GetVisualComponent()->GetRelativeScale3D().Equals(
+			FVector(0.44), KINDA_SMALL_NUMBER));
+
+	AABTSM51SlingshotDirtHole* FinaleSlot =
+		SpawnVisualTuningTestActor<AABTSM51SlingshotDirtHole>(*World);
+	TestNotNull(TEXT("Finale slot actor spawns"), FinaleSlot);
+	if (FinaleSlot == nullptr) return false;
+	FinaleSlot->InitializeFinaleSpaceSlot(
+		9,
+		3,
+		EABTSSlingshotSlotSide::Left);
+	TestTrue(
+		TEXT("Finale slot tuning command executes"),
+		GEngine->Exec(World, TEXT("ABTS.M51.Visual.FinaleSlot 1.2 4")));
+	TestTrue(
+		TEXT("Finale slot remains uniformly scaled after tuning"),
+		FinaleSlot->GetVisualComponent()->GetRelativeScale3D().Equals(
+			FVector(0.66), KINDA_SMALL_NUMBER));
 
 	AABTSM8BridgeActor* Bridge =
 		SpawnVisualTuningTestActor<AABTSM8BridgeActor>(*World);
@@ -233,6 +334,9 @@ bool FABTSVisualTuningRuntimeTest::RunTest(const FString& Parameters)
 		TEXT("Bridge collision remains unchanged by visual tuning"),
 		Bridge->GetCollisionComponent()->GetUnscaledBoxExtent(),
 		FVector(200.0f, 100.0f, 20.0f));
+	TestTrue(
+		TEXT("Bridge remains uniformly scaled after span fitting and tuning"),
+		IsUniformVisualScale(Bridge->GetDeckComponent()->GetRelativeScale3D()));
 
 	AABTSM3Planet* Planet = SpawnVisualTuningTestActor<AABTSM3Planet>(*World);
 	TestNotNull(TEXT("Showcase test planet spawns"), Planet);

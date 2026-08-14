@@ -2,7 +2,7 @@
 
 本指南用于在 PIE 中临时调整工作台、熔炉、桥、弹弓槽和四种掉落物的模型大小与贴地高度。弹弓主体沿用现有定值，不在本轮命令范围内。
 
-所有命令只修改模型视觉组件，不移动 Actor 的逻辑锚点，也不修改桥的碰撞盒。数值对当前 PIE 中已经生成的对象立即生效，之后新生成的同类对象也会使用同一数值。退出 Editor 进程后临时数值会恢复默认；确认结果后需要把状态命令输出交回开发侧冻结到代码。
+所有命令只修改模型视觉组件，不移动 Actor 的逻辑锚点，也不修改桥的碰撞盒。所有已挂载的美术模型都使用 XYZ 等比基础缩放；桥只按跨度轴计算一个统一适配比例，不会为贴合碰撞盒而压扁模型。数值对当前 PIE 中已经生成的对象立即生效，之后新生成的同类对象也会使用同一数值。退出 Editor 进程后临时数值会恢复到下表所列的冻结默认值。
 
 ## 参数约定
 
@@ -29,11 +29,11 @@ ABTS.M51.Pickup.SpawnShowcase 450
 ## 摆放物视觉命令
 
 ```text
-ABTS.M51.Visual.Workbench 1.0 0
-ABTS.M51.Visual.Furnace 1.0 0
-ABTS.M8.Visual.Bridge 1.0 0
-ABTS.M51.Visual.StandardSlot 1.0 0
-ABTS.M51.Visual.FinaleSlot 1.0 0
+ABTS.M51.Visual.Workbench 3.0 -30
+ABTS.M51.Visual.Furnace 3.0 -25
+ABTS.M8.Visual.Bridge 1.5 40
+ABTS.M51.Visual.StandardSlot 2.0 0
+ABTS.M51.Visual.FinaleSlot 3.0 0
 ```
 
 - `StandardSlot` 是普通弹弓槽。
@@ -43,10 +43,10 @@ ABTS.M51.Visual.FinaleSlot 1.0 0
 ## 掉落物视觉命令
 
 ```text
-ABTS.M51.Visual.Pickup.Branch 1.0 0
-ABTS.M51.Visual.Pickup.Stone 1.0 0
-ABTS.M51.Visual.Pickup.Wood 1.0 0
-ABTS.M51.Visual.Pickup.PlantFiber 1.0 0
+ABTS.M51.Visual.Pickup.Branch 3.0 -25
+ABTS.M51.Visual.Pickup.Stone 3.0 -10
+ABTS.M51.Visual.Pickup.Wood 3.0 0
+ABTS.M51.Visual.Pickup.PlantFiber 4.0 -20
 ```
 
 `Stone` 对应项目中的 `Gravel` 石头模型资产；命令仍使用游戏物品 ID 的名字 `Stone`。
@@ -58,9 +58,9 @@ ABTS.M51.Visual.Pickup.PlantFiber 1.0 0
 3. 逐条修改目标命令的缩放与局部 Z 值。命令会立即刷新场景中的同类对象。
 4. 对工作台、熔炉、桥、普通槽、太空槽和四种掉落物分别检查比例、贴地情况、遮挡与可辨识度。
 5. 执行 `ABTS.Visual.Status`。日志会为九个目标分别打印一条带 `FreezeCommand=` 的可复制结果。
-6. 把这九条 `FreezeCommand` 原样发回，即可把确认值冻结进代码默认值。
+6. 若要形成下一轮默认值，把这九条 `FreezeCommand` 原样发回即可再次冻结。
 
-需要撤销本次 PIE 中全部临时调节时执行：
+需要撤销本次 PIE 中全部临时调节、恢复上述冻结默认值时执行：
 
 ```text
 ABTS.Visual.ResetAll

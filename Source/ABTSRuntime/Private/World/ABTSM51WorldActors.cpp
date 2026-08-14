@@ -215,8 +215,7 @@ void AABTSM51SlingshotDirtHole::RefreshVisualTuning()
 		? EABTSVisualTuningTarget::FinaleSlot
 		: EABTSVisualTuningTarget::StandardSlot;
 	const FABTSVisualTuningValue& Tuning = ABTSGetVisualTuning(Target);
-	Visual->SetRelativeScale3D(
-		FVector(0.55f, 0.55f, 0.06f) * Tuning.ScaleMultiplier);
+	Visual->SetRelativeScale3D(FVector(0.55f * Tuning.ScaleMultiplier));
 	Visual->SetRelativeLocation(FVector(0.0f, 0.0f, Tuning.LocalZOffsetCM));
 }
 

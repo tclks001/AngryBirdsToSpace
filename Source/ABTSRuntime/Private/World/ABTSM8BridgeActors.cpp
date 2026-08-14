@@ -81,8 +81,11 @@ void AABTSM8BridgeActor::RefreshVisualTuning()
 		MeshSizeCM = (Bounds.BoxExtent * 2.0f).ComponentMax(FVector(1.0f));
 		MeshBoundsOrigin = Bounds.Origin;
 	}
-	const FVector BaseScale = BaseDimensionsCM / MeshSizeCM;
-	const FVector TunedScale = BaseScale * Tuning.ScaleMultiplier;
+	// The authored bridge's X axis is its span axis. Fit only that axis and
+	// carry the resulting scalar to Y/Z so the mesh keeps its authored shape.
+	const float TunedUniformScale =
+		(BaseDimensionsCM.X / MeshSizeCM.X) * Tuning.ScaleMultiplier;
+	const FVector TunedScale(TunedUniformScale);
 	Deck->SetRelativeScale3D(TunedScale);
 	Deck->SetRelativeLocation(
 		-MeshBoundsOrigin * TunedScale

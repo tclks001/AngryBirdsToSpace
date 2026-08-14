@@ -64,8 +64,7 @@ void AABTSCraftingStation::RefreshVisualTuning()
 			? EABTSVisualTuningTarget::Furnace
 			: EABTSVisualTuningTarget::Workbench;
 	const FABTSVisualTuningValue& Tuning = ABTSGetVisualTuning(Target);
-	Visual->SetRelativeScale3D(
-		FVector(0.8f, 0.8f, 0.45f) * Tuning.ScaleMultiplier);
+	Visual->SetRelativeScale3D(FVector(0.8f * Tuning.ScaleMultiplier));
 	Visual->SetRelativeLocation(FVector(0.0f, 0.0f, Tuning.LocalZOffsetCM));
 }
 

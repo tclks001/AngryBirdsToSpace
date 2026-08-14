@@ -16,9 +16,30 @@ namespace
 		FABTSVisualTuningValue,
 		static_cast<int32>(EABTSVisualTuningTarget::Count)>;
 
+	FABTSVisualTuningArray MakeFrozenVisualTuningValues()
+	{
+		FABTSVisualTuningArray Values;
+		Values[static_cast<int32>(EABTSVisualTuningTarget::Workbench)] = {3.0f, -30.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::Furnace)] = {3.0f, -25.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::Bridge)] = {1.5f, 40.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::StandardSlot)] = {2.0f, 0.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::FinaleSlot)] = {3.0f, 0.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::PickupBranch)] = {3.0f, -25.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::PickupStone)] = {3.0f, -10.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::PickupWood)] = {3.0f, 0.0f};
+		Values[static_cast<int32>(EABTSVisualTuningTarget::PickupPlantFiber)] = {4.0f, -20.0f};
+		return Values;
+	}
+
+	const FABTSVisualTuningArray& GetFrozenVisualTuningValues()
+	{
+		static const FABTSVisualTuningArray Values = MakeFrozenVisualTuningValues();
+		return Values;
+	}
+
 	FABTSVisualTuningArray& GetMutableVisualTuningValues()
 	{
-		static FABTSVisualTuningArray Values;
+		static FABTSVisualTuningArray Values = GetFrozenVisualTuningValues();
 		return Values;
 	}
 
@@ -199,13 +220,13 @@ namespace
 			Index < static_cast<int32>(EABTSVisualTuningTarget::Count);
 			++Index)
 		{
-			GetMutableVisualTuningValues()[Index] = FABTSVisualTuningValue();
+			GetMutableVisualTuningValues()[Index] = GetFrozenVisualTuningValues()[Index];
 			RefreshVisualTuningInWorld(
 				World,
 				static_cast<EABTSVisualTuningTarget>(Index));
 		}
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][VisualTuning] ResetAll=1 Scale=1.0 LocalZ=0.0"));
+			TEXT("[ABTS][VisualTuning] ResetAll=1 Target=FrozenDefaults"));
 	}
 
 	void SpawnPickupShowcaseCommand(const TArray<FString>& Args, UWorld* World)
@@ -294,7 +315,7 @@ namespace
 			&VisualTuningStatusCommand));
 	FAutoConsoleCommandWithWorldAndArgs GResetVisualTuningCommand(
 		TEXT("ABTS.Visual.ResetAll"),
-		TEXT("Restores every temporary visual override to Scale=1 and LocalZ=0."),
+		TEXT("Restores every temporary visual override to its frozen code default."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 			&ResetVisualTuningCommand));
 	FAutoConsoleCommandWithWorldAndArgs GSpawnPickupShowcaseCommand(
