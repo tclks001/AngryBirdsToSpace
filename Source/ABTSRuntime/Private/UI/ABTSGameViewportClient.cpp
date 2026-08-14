@@ -573,7 +573,12 @@ void UABTSGameViewportClient::DrawFrontOrPause(UCanvas& Canvas, const FVector2D&
 		}
 	}
 	Canvas.K2_DrawBox(Center - FVector2D(9.0f * Scale), FVector2D(18.0f * Scale), 3.0f * Scale, Theme.AccentPrimary);
-	DrawLabel(Canvas, TEXT("ESC  PAUSE     ARROWS  NAVIGATE     ENTER  CONFIRM"), MainBox.Min + FVector2D(60.0f, MainBox.GetSize().Y - 54.0f) * Scale, 0.62f * Scale, Theme.TextMuted);
+	DrawLabel(
+		Canvas,
+		TEXT("ESC  PAUSE     ARROWS  NAVIGATE     ENTER  CONFIRM"),
+		FVector2D(MainBox.Min.X + 60.0f * Scale, MainBox.Max.Y - 54.0f * Scale),
+		0.62f * Scale,
+		Theme.TextMuted);
 }
 
 void UABTSGameViewportClient::DrawSettings(UCanvas& Canvas, const FVector2D& ViewSize)

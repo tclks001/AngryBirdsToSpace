@@ -114,15 +114,17 @@ abts.Settings.Reset
 | 旧屏幕调试文字盖住菜单 | 菜单画在 SceneCanvas，DebugCanvas 更晚 | `Super::Draw()` 后在 Viewport DebugCanvas 绘制系统覆盖层 |
 | 离屏进程成功但没有图 | 只看进程码，没有核对截图 | 捕获 delegate 核对绝对路径文件大小并输出唯一 Complete 标记 |
 | PIE 点击 Quit 关闭了 Editor | 未区分 WorldType | PIE 隐藏 Quit；只有 Game/Standalone 显示 |
+| 720p Standalone 暂停页提示压住 Quit | 主面板像素高度又乘了一次 UI Scale | Footer 直接锚定 `MainBox.Max.Y`，只缩放安全边距 |
 
 ## 8. 集成候选 v1 证据
 
 - UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity -NoHotReload` 完整链接成功。
 - fresh NullRHI `ABTS.UI.SystemMenu.SettingsContract` 精确发现 1 项、1/1 成功并以 `TEST COMPLETE. EXIT CODE: 0` 结束；确认保护最终日志：`Saved/Logs/SystemMenu-ConfirmFinalContract-20260815-055235.log`。
-- shared UI 前缀回归精确发现并通过 3/3（Flight、SystemMenu、Theme），日志：`Saved/Logs/SystemMenu-SharedUIRegression-20260815-055704.log`；既有背包/HUD `ABTS.M5.UI.VisualLayout` 1/1 通过，日志：`Saved/Logs/SystemMenu-InventoryUIRegression-20260815-055749.log`。
+- shared UI 前缀回归精确发现并通过 3/3（Flight、SystemMenu、Theme），最终日志：`Saved/Logs/SystemMenu-FinalSharedUIRegression-20260815-060259.log`；既有背包/HUD `ABTS.M5.UI.VisualLayout` 1/1 通过，日志：`Saved/Logs/SystemMenu-InventoryUIRegression-20260815-055749.log`。
 - 既有 `ABTS.Audio.ReleaseAndMusicMapping` fresh NullRHI 1/1 成功；日志：`Saved/Logs/SystemSettings-AudioRegression-20260815-051131.log`。
 - fresh DX11 `-RenderOffscreen` 捕获均记录 `Complete Success=1 Reason=None`：
   - Front：`Saved/ABTSVisualCaptures/SystemMenu/20260815-052440/Front.png`；
+  - Pause：`Saved/ABTSVisualCaptures/SystemMenu/20260815-060154/Pause.png`；
   - SettingsAudio：`Saved/ABTSVisualCaptures/SystemMenu/20260815-053045/SettingsAudio.png`；
   - SettingsVideo：`Saved/ABTSVisualCaptures/SystemMenu/20260815-053240/SettingsVideo.png`；
   - SettingsAccessibility：`Saved/ABTSVisualCaptures/SystemMenu/20260815-052951/SettingsAccessibility.png`；
