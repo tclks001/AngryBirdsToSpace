@@ -20,14 +20,16 @@ struct FMinimalViewInfo;
 /** Explicit, process-start contract for one M11 camera acceptance recording. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 {
-	// Adds Rank12 and a live MainWorld environment mirror for PIE-equivalent AVI.
-	static constexpr int32 ContractVersion = 17;
+	// v18 adds a real GameViewport HUD screenshot mode to the v17 camera contract.
+	static constexpr int32 ContractVersion = 18;
 
 	bool bEnabled = false;
 	int32 CandidateRank = 0;
 	bool bStylized = false;
 	/** Runs the real launch/playback but writes no JPG/AVI pixels. */
 	bool bTelemetryOnly = false;
+	/** Captures the real GameViewport while held in Aiming; no launch or AVI. */
+	bool bHudScreenshotOnly = false;
 	bool bDirectorM2 = false;
 	bool bDirectorM3 = false;
 	/** Mirror the gameplay MainWorld profile/stage instead of forcing FinaleSpace. */
@@ -57,6 +59,7 @@ struct ABTSRUNTIME_API FABTSM11FinaleCameraCaptureConfig
 	int32 GetObservedFrameCount() const;
 	FString GetManifestPath() const;
 	FString GetObservationCsvPath() const;
+	FString GetHudScreenshotPath() const;
 };
 
 /** One frame of renderer-independent M1 camera/subject telemetry. */
@@ -138,6 +141,7 @@ enum class EABTSM11FinaleCameraCapturePhase : uint8
 	WarmingRenderMode,
 	WaitingForDependencies,
 	WaitingForLaunch,
+	WaitingForHudScreenshot,
 	Recording,
 	HoldingTerminalFrame,
 	Finalizing,
@@ -219,6 +223,7 @@ private:
 	double StartPlatformSeconds = 0.0;
 	int32 RemainingWarmupFrames = 0;
 	int32 RemainingTerminalHoldFrames = 0;
+	int32 RemainingHudSettleFrames = 0;
 	int32 CapturedFrameCount = 0;
 	FIntPoint CapturedFrameSize = FIntPoint::ZeroValue;
 	TArray<FABTSM11FinaleCameraObservationSample> ObservationSamples;
@@ -234,4 +239,5 @@ private:
 	int32 StylizedRuntimeStateFailureFrame = INDEX_NONE;
 	bool bHasPreviousCameraObservation = false;
 	bool bObservationCsvWritten = false;
+	bool bHudScreenshotRequested = false;
 };

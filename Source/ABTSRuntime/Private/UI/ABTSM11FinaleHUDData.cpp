@@ -904,6 +904,108 @@ FVector2D ABTSM11MapViewportPointToHudCanvas(
 		PlayerViewPoint.Y * HudCanvasSize.Y / PlayerViewSize.Y);
 }
 
+bool ABTSM11BuildFinaleHudVisualLayout(
+	const FVector2D& CanvasSize,
+	const float KnobRadiusViewportHeightFraction,
+	const float MinimumKnobRadiusPixels,
+	const float MaximumKnobRadiusPixels,
+	FABTSM11FinaleHudVisualLayout& OutLayout)
+{
+	OutLayout = FABTSM11FinaleHudVisualLayout();
+	if (CanvasSize.X < 640.0f
+		|| CanvasSize.Y < 480.0f
+		|| !FMath::IsFinite(KnobRadiusViewportHeightFraction)
+		|| MinimumKnobRadiusPixels <= 0.0f
+		|| MaximumKnobRadiusPixels < MinimumKnobRadiusPixels)
+	{
+		return false;
+	}
+
+	const float ShortSide = FMath::Min(CanvasSize.X, CanvasSize.Y);
+	const float Safe = FMath::Clamp(ShortSide * 0.018f, 10.0f, 24.0f);
+	const float Gap = FMath::Clamp(ShortSide * 0.016f, 9.0f, 18.0f);
+	const float TopHeight = FMath::Clamp(CanvasSize.Y * 0.068f, 44.0f, 66.0f);
+	OutLayout.MissionStrip = FBox2D(
+		FVector2D(Safe, Safe),
+		FVector2D(CanvasSize.X - Safe, Safe + TopHeight));
+
+	const float AvailableWidth = CanvasSize.X - Safe * 2.0f - Gap * 2.0f;
+	const float LeftWidth = FMath::Clamp(AvailableWidth * 0.26f, 230.0f, 420.0f);
+	const float RightWidth = FMath::Clamp(AvailableWidth * 0.28f, 245.0f, 450.0f);
+	const float MiddleAvailable = AvailableWidth - LeftWidth - RightWidth;
+	if (MiddleAvailable < 360.0f)
+	{
+		return false;
+	}
+	const float DeckWidth = FMath::Min(MiddleAvailable, 700.0f);
+	const float OrbitHeight = FMath::Clamp(CanvasSize.Y * 0.44f, 278.0f, 430.0f);
+	const float DeckHeight = FMath::Clamp(CanvasSize.Y * 0.285f, 194.0f, 252.0f);
+	const float PreviewHeight = FMath::Clamp(RightWidth / 1.58f, 170.0f, 300.0f);
+
+	OutLayout.OrbitPanel = FBox2D(
+		FVector2D(Safe, CanvasSize.Y - Safe - OrbitHeight),
+		FVector2D(Safe + LeftWidth, CanvasSize.Y - Safe));
+	const float DeckMinX = Safe + LeftWidth + Gap
+		+ (MiddleAvailable - DeckWidth) * 0.5f;
+	OutLayout.ControlDeck = FBox2D(
+		FVector2D(DeckMinX, CanvasSize.Y - Safe - DeckHeight),
+		FVector2D(DeckMinX + DeckWidth, CanvasSize.Y - Safe));
+	OutLayout.PreviewBay = FBox2D(
+		FVector2D(CanvasSize.X - Safe - RightWidth,
+			CanvasSize.Y - Safe - PreviewHeight),
+		FVector2D(CanvasSize.X - Safe, CanvasSize.Y - Safe));
+
+	OutLayout.KnobRadius = FMath::Clamp(
+		CanvasSize.Y * KnobRadiusViewportHeightFraction,
+		MinimumKnobRadiusPixels,
+		MaximumKnobRadiusPixels);
+	const FVector2D DeckCenter = OutLayout.ControlDeck.GetCenter();
+	const float KnobSpacing = FMath::Min(
+		OutLayout.KnobRadius * 2.75f,
+		(DeckWidth - 120.0f) / 3.0f);
+	const float KnobY = OutLayout.ControlDeck.Min.Y
+		+ FMath::Max(76.0f, OutLayout.KnobRadius + 39.0f);
+	for (int32 Index = 0; Index < OutLayout.KnobCenters.Num(); ++Index)
+	{
+		OutLayout.KnobCenters[Index] = FVector2D(
+			DeckCenter.X + (Index - 1) * KnobSpacing,
+			KnobY);
+	}
+
+	const auto Box = [](const float X, const float Y, const float W, const float H)
+	{
+		return FBox2D(FVector2D(X, Y), FVector2D(X + W, Y + H));
+	};
+	const float GearY = OutLayout.ControlDeck.Max.Y - 43.0f;
+	const float GearStartX = DeckCenter.X - 184.0f;
+	OutLayout.GearCoarse = Box(GearStartX, GearY, 62.0f, 28.0f);
+	OutLayout.GearFine = Box(GearStartX + 68.0f, GearY, 62.0f, 28.0f);
+	OutLayout.GearUltraFine = Box(GearStartX + 136.0f, GearY, 62.0f, 28.0f);
+	OutLayout.LaunchButton = Box(DeckCenter.X + 38.0f, GearY - 4.0f, 146.0f, 36.0f);
+
+	const float ModeWidth = FMath::Clamp(LeftWidth * 0.255f, 68.0f, 88.0f);
+	const float ModeX = OutLayout.OrbitPanel.Max.X - ModeWidth - 10.0f;
+	const float ModeY = OutLayout.OrbitPanel.Min.Y + 50.0f;
+	OutLayout.SelectButton = Box(ModeX, ModeY, ModeWidth, 27.0f);
+	OutLayout.MoveButton = Box(ModeX, ModeY + 33.0f, ModeWidth, 27.0f);
+	OutLayout.ResetViewButton = Box(ModeX, ModeY + 66.0f, ModeWidth, 27.0f);
+	OutLayout.RebasePipButton = Box(ModeX, ModeY + 99.0f, ModeWidth, 27.0f);
+	OutLayout.FollowAutoButton = Box(ModeX, ModeY + 132.0f, ModeWidth, 27.0f);
+
+	const float DiagramAvailableWidth = ModeX - OutLayout.OrbitPanel.Min.X - 15.0f;
+	OutLayout.DiagramRadius = FMath::Max(
+		72.0f,
+		FMath::Min(
+			(OrbitHeight - 58.0f) * 0.5f,
+			DiagramAvailableWidth * 0.5f));
+	OutLayout.DiagramCenter = FVector2D(
+		OutLayout.OrbitPanel.Min.X + 9.0f + OutLayout.DiagramRadius,
+		OutLayout.OrbitPanel.GetCenter().Y + 11.0f);
+	OutLayout.bCompact = CanvasSize.X < 1180.0f || CanvasSize.Y < 700.0f;
+	OutLayout.bValid = true;
+	return true;
+}
+
 bool FABTSM11TrajectorySemanticSegment::IsValid(
 	const int32 PointCount) const
 {

@@ -3,18 +3,33 @@
 #include "UI/ABTSM11FinaleHUD.h"
 
 #include "CanvasItem.h"
-#include "Camera/PlayerCameraManager.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Game/ABTSM11GameMode.h"
 #include "GameFramework/PlayerController.h"
 #include "SceneView.h"
+#include "UObject/ConstructorHelpers.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleSystem.h"
 
 namespace
 {
+	enum class EM11FinaleButtonIcon : int32
+	{
+		Select,
+		Move,
+		ResetView,
+		Rebase,
+		AutoPip,
+		Coarse,
+		Fine,
+		UltraFine,
+		Launch,
+		Count
+	};
+
 	FVector2D ToScreen(
 		const FVector2D& Center,
 		const float Radius,
@@ -108,26 +123,62 @@ namespace
 	}
 }
 
+AABTSM11FinaleHUD::AABTSM11FinaleHUD()
+{
+	static ConstructorHelpers::FObjectFinder<UTexture2D> SelectIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_Select.T_M11_Button_Select"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> MoveIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_Move.T_M11_Button_Move"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> ResetViewIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_ResetView.T_M11_Button_ResetView"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> RebaseIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_Rebase.T_M11_Button_Rebase"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> AutoPipIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_AutoPip.T_M11_Button_AutoPip"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> CoarseIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_Coarse.T_M11_Button_Coarse"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> FineIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_Fine.T_M11_Button_Fine"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> UltraFineIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_UltraFine.T_M11_Button_UltraFine"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> LaunchIcon(
+		TEXT("/Game/M11/UI/Buttons/T_M11_Button_Launch.T_M11_Button_Launch"));
+
+	ButtonIcons = {
+		SelectIcon.Object,
+		MoveIcon.Object,
+		ResetViewIcon.Object,
+		RebaseIcon.Object,
+		AutoPipIcon.Object,
+		CoarseIcon.Object,
+		FineIcon.Object,
+		UltraFineIcon.Object,
+		LaunchIcon.Object
+	};
+}
+
 void AABTSM11FinaleHUD::DrawHUD()
 {
 	AABTSM11FinaleInteractionSystem* System =
 		FindInteractionSystem();
-	if (System != nullptr && System->IsFinaleActive())
+	const bool bFinaleActive = System != nullptr && System->IsFinaleActive();
+	if (bFinaleActive)
 	{
 		DrawFinaleLayer(*System);
 	}
 	else
 	{
 		CachedPipTrajectory.Reset();
-		TargetWedgeTracker.Reset();
 		CancelFinaleHudCapture();
 		bHudLayoutValid = false;
+		// Inventory, party and earlier milestone HUD remain unchanged outside
+		// the finale interaction.
+		Super::DrawHUD();
 	}
-	// Inventory, party and modal UI remain the top layer.
-	Super::DrawHUD();
-	// The deterministic failure fade is the final compositing layer so no
-	// inherited inventory or party widget can remain visible through black.
-	if (System != nullptr && System->IsFinaleActive())
+	// M11 owns the complete finale HUD. Earlier hotbar/party layers would cover
+	// the launch console and are deliberately suppressed while it is active.
+	// The deterministic failure fade remains the final compositing layer.
+	if (bFinaleActive)
 	{
 		DrawFailureOverlay(*System);
 	}
@@ -150,40 +201,35 @@ void AABTSM11FinaleHUD::UpdateFinaleHudLayout(
 	const float Height)
 {
 	HudCanvasSize = FVector2D(Width, Height);
-	HudDiagramRadius = FMath::Min(170.0f, Height * 0.18f);
-	HudDiagramCenter = FVector2D(
-		HudDiagramRadius + 22.0f,
-		Height - HudDiagramRadius - 110.0f);
-	HudKnobRadius = FMath::Clamp(
-		Height * KnobRadiusViewportHeightFraction,
+	FABTSM11FinaleHudVisualLayout Layout;
+	bHudLayoutValid = ABTSM11BuildFinaleHudVisualLayout(
+		HudCanvasSize,
+		KnobRadiusViewportHeightFraction,
 		MinimumKnobRadiusPixels,
-		FMath::Max(MinimumKnobRadiusPixels, MaximumKnobRadiusPixels));
-	const float KnobY = Height - 180.0f;
-	const float KnobSpacing = HudKnobRadius * 2.75f;
-	const float KnobStartX = Width * 0.5f - KnobSpacing;
-	for (int32 Index = 0; Index < HudKnobCenters.Num(); ++Index)
+		FMath::Max(MinimumKnobRadiusPixels, MaximumKnobRadiusPixels),
+		Layout);
+	if (!bHudLayoutValid)
 	{
-		HudKnobCenters[Index] = FVector2D(
-			KnobStartX + KnobSpacing * Index,
-			KnobY);
+		return;
 	}
-	const auto Box = [](const float X, const float Y, const float W, const float H)
-	{
-		return FBox2D(FVector2D(X, Y), FVector2D(X + W, Y + H));
-	};
-	const float GearY = Height - 118.0f;
-	HudGearCoarse = Box(Width * 0.5f - 185.0f, GearY, 62.0f, 28.0f);
-	HudGearFine = Box(Width * 0.5f - 117.0f, GearY, 62.0f, 28.0f);
-	HudGearUltraFine = Box(Width * 0.5f - 49.0f, GearY, 62.0f, 28.0f);
-	HudLaunchButton = Box(Width * 0.5f + 38.0f, GearY - 4.0f, 148.0f, 36.0f);
-	const float ModeX = HudDiagramCenter.X + HudDiagramRadius + 12.0f;
-	const float ModeY = HudDiagramCenter.Y - HudDiagramRadius + 18.0f;
-	HudSelectButton = Box(ModeX, ModeY, 82.0f, 27.0f);
-	HudMoveButton = Box(ModeX, ModeY + 33.0f, 82.0f, 27.0f);
-	HudResetViewButton = Box(ModeX, ModeY + 66.0f, 82.0f, 27.0f);
-	HudRebasePipButton = Box(ModeX, ModeY + 99.0f, 82.0f, 27.0f);
-	HudFollowAutoButton = Box(ModeX, ModeY + 132.0f, 82.0f, 27.0f);
-	bHudLayoutValid = Width > 1.0f && Height > 1.0f;
+	HudMissionStrip = Layout.MissionStrip;
+	HudOrbitPanel = Layout.OrbitPanel;
+	HudControlDeck = Layout.ControlDeck;
+	HudPreviewBay = Layout.PreviewBay;
+	HudDiagramCenter = Layout.DiagramCenter;
+	HudDiagramRadius = Layout.DiagramRadius;
+	HudKnobCenters = Layout.KnobCenters;
+	HudKnobRadius = Layout.KnobRadius;
+	HudGearCoarse = Layout.GearCoarse;
+	HudGearFine = Layout.GearFine;
+	HudGearUltraFine = Layout.GearUltraFine;
+	HudLaunchButton = Layout.LaunchButton;
+	HudSelectButton = Layout.SelectButton;
+	HudMoveButton = Layout.MoveButton;
+	HudResetViewButton = Layout.ResetViewButton;
+	HudRebasePipButton = Layout.RebasePipButton;
+	HudFollowAutoButton = Layout.FollowAutoButton;
+	bHudCompactLayout = Layout.bCompact;
 }
 
 FVector2D AABTSM11FinaleHUD::ToHudCanvasPosition(
@@ -592,21 +638,168 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 	}
 	// ClipX/ClipY are the logical Canvas extent after any Canvas DPI scale.
 	UpdateFinaleHudLayout(Canvas->ClipX, Canvas->ClipY);
+	if (!bHudLayoutValid)
+	{
+		return;
+	}
+	HudTheme = FABTSUITheme::Get();
+	DrawMissionStrip(System);
+	DrawFacetedPanel(
+		HudOrbitPanel,
+		HudTheme.PanelPrimary,
+		HudTheme.PanelBorder,
+		TEXT("ORBITAL SOLUTION"),
+		HudTheme.AccentSecondary);
+	if (System.IsAiming())
+	{
+		DrawFacetedPanel(
+			HudControlDeck,
+			HudTheme.PanelPrimary,
+			HudTheme.PanelBorder,
+			TEXT("FINAL APPROACH CONTROL"),
+			HudTheme.AccentPrimary);
+		DrawFacetedPanel(
+			HudPreviewBay,
+			HudTheme.PortraitBacking,
+			HudTheme.PanelBorder,
+			TEXT("TARGET MONITOR"),
+			HudTheme.AccentSecondary);
+	}
 	DrawOrbitalDiagram(System, HudDiagramCenter, HudDiagramRadius);
 	if (System.IsAiming())
 	{
 		DrawTargetPreview(System);
-		DrawTargetWedge(System);
 		DrawFinaleControlConsole(System);
 	}
 	else
 	{
-		// The PIP and Wedge are aiming aids. Once the release gesture has
-		// completed, the authority flight camera owns spatial guidance.
+		// The PIP is an aiming aid. Once the release gesture has completed,
+		// the authority flight camera owns spatial guidance.
 		CachedPipTrajectory.Reset();
-		TargetWedgeTracker.Reset();
 	}
 	DrawStatus(System, HudDiagramCenter, HudDiagramRadius);
+}
+
+void AABTSM11FinaleHUD::DrawFacetedPanel(
+	const FBox2D& Box,
+	const FLinearColor& Fill,
+	const FLinearColor& Border,
+	const FString& SectionLabel,
+	const FLinearColor& Accent)
+{
+	if (Canvas == nullptr || !Box.bIsValid)
+	{
+		return;
+	}
+	const FVector2D Size = Box.Max - Box.Min;
+	const float Cut = FMath::Clamp(FMath::Min(Size.X, Size.Y) * 0.055f, 8.0f, 16.0f);
+	const FVector2D P[8] = {
+		FVector2D(Box.Min.X + Cut, Box.Min.Y),
+		FVector2D(Box.Max.X - Cut, Box.Min.Y),
+		FVector2D(Box.Max.X, Box.Min.Y + Cut),
+		FVector2D(Box.Max.X, Box.Max.Y - Cut),
+		FVector2D(Box.Max.X - Cut, Box.Max.Y),
+		FVector2D(Box.Min.X + Cut, Box.Max.Y),
+		FVector2D(Box.Min.X, Box.Max.Y - Cut),
+		FVector2D(Box.Min.X, Box.Min.Y + Cut)};
+
+	// Fill the same octagon that the border traces. Drawing a full rectangle
+	// first would leave its square corners visible outside the diagonal cuts.
+	const FVector2D PanelCenter = Box.GetCenter();
+	const FLinearColor PanelFill = HudTheme.ApplyOpacity(Fill);
+	TArray<FCanvasUVTri> FillTriangles;
+	FillTriangles.Reserve(UE_ARRAY_COUNT(P));
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(P); ++Index)
+	{
+		FCanvasUVTri& Triangle = FillTriangles.AddDefaulted_GetRef();
+		Triangle.V0_Pos = PanelCenter;
+		Triangle.V1_Pos = P[Index];
+		Triangle.V2_Pos = P[(Index + 1) % UE_ARRAY_COUNT(P)];
+		Triangle.V0_UV = FVector2D::ZeroVector;
+		Triangle.V1_UV = FVector2D::ZeroVector;
+		Triangle.V2_UV = FVector2D::ZeroVector;
+		Triangle.V0_Color = PanelFill;
+		Triangle.V1_Color = PanelFill;
+		Triangle.V2_Color = PanelFill;
+	}
+	const FTexture* FillTexture = Canvas->DefaultTexture != nullptr
+		? Canvas->DefaultTexture->GetResource()
+		: nullptr;
+	if (FillTexture != nullptr)
+	{
+		FCanvasTriangleItem FillItem(FillTriangles, FillTexture);
+		FillItem.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(FillItem);
+	}
+
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(P); ++Index)
+	{
+		const FVector2D& A = P[Index];
+		const FVector2D& B = P[(Index + 1) % UE_ARRAY_COUNT(P)];
+		DrawLine(A.X, A.Y, B.X, B.Y,
+			HudTheme.ApplyOpacity(Border), HudTheme.BorderThicknessPx);
+	}
+	DrawLine(
+		Box.Min.X + Cut + 5.0f,
+		Box.Min.Y + 26.0f,
+		FMath::Min(Box.Max.X - Cut, Box.Min.X + 128.0f),
+		Box.Min.Y + 26.0f,
+		HudTheme.ApplyOpacity(Accent),
+		2.0f);
+	DrawText(
+		SectionLabel,
+		HudTheme.ApplyOpacity(HudTheme.TextMuted),
+		Box.Min.X + Cut + 5.0f,
+		Box.Min.Y + 8.0f,
+		GEngine->GetSmallFont(),
+		0.60f * HudTheme.TextScale,
+		false);
+}
+
+void AABTSM11FinaleHUD::DrawMissionStrip(
+	AABTSM11FinaleInteractionSystem& System)
+{
+	DrawFacetedPanel(
+		HudMissionStrip,
+		HudTheme.PanelPrimary,
+		HudTheme.PanelBorder,
+		TEXT("FINAL GRAVITY-ASSIST SEQUENCE"),
+		HudTheme.AccentPrimary);
+	const FABTSM11PrefixClassification& Classification =
+		System.GetClassification();
+	const AABTSM11FinaleSystem* FinaleSystem = System.GetFinaleSystem();
+	const bool bCandidate = FinaleSystem != nullptr
+		&& FinaleSystem->IsEditorCandidateMode();
+	const FString Chain = FString::Printf(
+		TEXT("F1 %s   F2 %s   F3 %s   F4 %s"),
+		Classification.IsF(1) ? TEXT("LOCK") : TEXT("--"),
+		Classification.IsF(2) ? TEXT("LOCK") : TEXT("--"),
+		Classification.IsF(3) ? TEXT("LOCK") : TEXT("--"),
+		Classification.IsF(4) ? TEXT("READY") : TEXT("--"));
+	DrawText(
+		Chain,
+		HudTheme.ApplyOpacity(
+			Classification.IsF(4) ? HudTheme.Success : HudTheme.TextPrimary),
+		HudMissionStrip.GetCenter().X - (bHudCompactLayout ? 112.0f : 145.0f),
+		HudMissionStrip.Min.Y + 15.0f,
+		GEngine->GetSmallFont(),
+		(bHudCompactLayout ? 0.68f : 0.78f) * HudTheme.TextScale,
+		false);
+	const FString State = bCandidate
+		? TEXT("EDITOR CANDIDATE / NOT CERTIFIED")
+		: System.IsReleasePending()
+			? TEXT("FREEZING EXACT RELEASE")
+			: System.IsAiming() ? TEXT("AIMING") : TEXT("FLIGHT");
+	DrawText(
+		State,
+		HudTheme.ApplyOpacity(bCandidate
+			? HudTheme.Warning
+			: Classification.IsF(4) ? HudTheme.Success : HudTheme.AccentSecondary),
+		HudMissionStrip.Max.X - (bHudCompactLayout ? 218.0f : 272.0f),
+		HudMissionStrip.Min.Y + 15.0f,
+		GEngine->GetSmallFont(),
+		(bHudCompactLayout ? 0.62f : 0.72f) * HudTheme.TextScale,
+		false);
 }
 
 void AABTSM11FinaleHUD::DrawOrbitalDiagram(
@@ -620,14 +813,14 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		Center,
 		FVector2D(Radius, Radius),
 		48,
-		FLinearColor(0.008f, 0.018f, 0.035f, 0.82f));
+		HudTheme.ApplyOpacity(HudTheme.PortraitBacking.CopyWithNewOpacity(0.88f)));
 	Background.BlendMode = SE_BLEND_Translucent;
 	Canvas->DrawItem(Background);
 	DrawCircleOutline(
 		Center,
 		Radius,
-		FLinearColor(0.50f, 0.78f, 0.92f, 0.9f),
-		2.0f);
+		HudTheme.ApplyOpacity(HudTheme.AccentSecondary),
+		HudTheme.BorderThicknessPx);
 	const FABTSM11OverviewProjection& HudProjection =
 		System.GetHudOverviewProjection();
 	const FABTSM11OrbitalSceneSnapshot& HudScene =
@@ -1036,6 +1229,7 @@ void AABTSM11FinaleHUD::DrawFailureOverlay(
 void AABTSM11FinaleHUD::DrawConsoleButton(
 	const FBox2D& Box,
 	const FString& Label,
+	UTexture2D* Icon,
 	const bool bActive,
 	const FLinearColor& Accent)
 {
@@ -1046,8 +1240,8 @@ void AABTSM11FinaleHUD::DrawConsoleButton(
 	const FVector2D Size = Box.Max - Box.Min;
 	DrawRect(
 		bActive
-			? Accent.CopyWithNewOpacity(0.72f)
-			: FLinearColor(0.025f, 0.055f, 0.09f, 0.88f),
+			? HudTheme.ApplyOpacity(Accent.CopyWithNewOpacity(0.82f))
+			: HudTheme.ApplyOpacity(HudTheme.SlotNormal),
 		Box.Min.X,
 		Box.Min.Y,
 		Size.X,
@@ -1062,16 +1256,47 @@ void AABTSM11FinaleHUD::DrawConsoleButton(
 			: Edge == 1 ? Box.Max
 			: Edge == 2 ? FVector2D(Box.Min.X, Box.Max.Y)
 			: Box.Min;
-		DrawLine(A.X, A.Y, B.X, B.Y, Accent, bActive ? 2.0f : 1.0f);
+		DrawLine(
+			A.X, A.Y, B.X, B.Y,
+			HudTheme.ApplyOpacity(
+				bActive ? Accent : Accent.CopyWithNewOpacity(0.68f)),
+			bActive ? HudTheme.BorderThicknessPx : 1.0f);
 	}
-	DrawText(
-		Label,
-		bActive ? FLinearColor::White : Accent,
-		Box.Min.X + 7.0f,
-		Box.Min.Y + 6.0f,
-		GEngine->GetSmallFont(),
-		0.68f,
-		false);
+	if (Icon != nullptr && Icon->GetResource() != nullptr)
+	{
+		const float IconExtent = FMath::Max(
+			12.0f,
+			FMath::Min(Size.X - 4.0f, Size.Y));
+		const FVector2D IconSize(IconExtent, IconExtent);
+		const FVector2D IconPosition = Box.Min + (Size - IconSize) * 0.5f;
+		const bool bMuted = Accent.Equals(HudTheme.Disabled, 0.02f);
+		FCanvasTileItem IconTile(
+			IconPosition,
+			Icon->GetResource(),
+			IconSize,
+			HudTheme.ApplyOpacity(
+				bMuted
+					? FLinearColor(0.62f, 0.68f, 0.74f, 0.62f)
+					: FLinearColor::White));
+		IconTile.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(IconTile);
+	}
+	else
+	{
+		DrawText(
+			Label,
+			HudTheme.ApplyOpacity(HudTheme.TextPrimary),
+			Box.Min.X + 7.0f,
+			Box.Min.Y + 6.0f,
+			GEngine->GetSmallFont(),
+			0.68f * HudTheme.TextScale,
+			false);
+	}
+}
+
+UTexture2D* AABTSM11FinaleHUD::GetButtonIcon(const int32 IconIndex) const
+{
+	return ButtonIcons.IsValidIndex(IconIndex) ? ButtonIcons[IconIndex] : nullptr;
 }
 
 void AABTSM11FinaleHUD::DrawKnob(
@@ -1082,68 +1307,226 @@ void AABTSM11FinaleHUD::DrawKnob(
 	const FString& ValueText,
 	const bool bCaptured,
 	const EABTSM11F4GuidanceDirection GuidanceDirection,
+	const double GuidanceTargetAlpha,
 	const FString& GuidanceTargetText,
 	const bool bHorizontalGuidance,
 	const bool bStrictF4)
 {
+	const double ClampedValueAlpha = FMath::Clamp(ValueAlpha, 0.0, 1.0);
+	constexpr double DialMinimumAngle = -135.0;
+	constexpr double DialMaximumAngle = 135.0;
+	constexpr int32 DialArcSegments = 36;
+	constexpr int32 DialTickCount = 11;
+	const auto DialDirection = [](const double AngleRadians)
+	{
+		return FVector2D(
+			static_cast<float>(FMath::Cos(AngleRadians)),
+			static_cast<float>(FMath::Sin(AngleRadians)));
+	};
+
+	// A nested bezel, inset face and double outline read as one physical
+	// instrument without changing the original interaction radius.
+	FCanvasNGonItem Bezel(
+		Center,
+		FVector2D(Radius + 2.0f, Radius + 2.0f),
+		48,
+		HudTheme.ApplyOpacity(
+			bCaptured
+				? HudTheme.AccentSecondary.CopyWithNewOpacity(0.64f)
+				: HudTheme.PanelBorder.CopyWithNewOpacity(0.86f)));
+	Bezel.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(Bezel);
+
 	FCanvasNGonItem Fill(
 		Center,
-		FVector2D(Radius, Radius),
-		40,
+		FVector2D(Radius - 2.0f, Radius - 2.0f),
+		48,
 		bCaptured
-			? FLinearColor(0.12f, 0.34f, 0.50f, 0.94f)
-			: FLinearColor(0.025f, 0.07f, 0.12f, 0.92f));
+			? HudTheme.ApplyOpacity(HudTheme.SlotSelected.CopyWithNewOpacity(0.96f))
+			: HudTheme.ApplyOpacity(HudTheme.SlotNormal.CopyWithNewOpacity(0.96f)));
 	Fill.BlendMode = SE_BLEND_Translucent;
 	Canvas->DrawItem(Fill);
+
 	DrawCircleOutline(
 		Center,
-		Radius,
+		Radius - 2.0f,
 		bCaptured
-			? FLinearColor(0.35f, 1.0f, 0.84f)
-			: FLinearColor(0.48f, 0.78f, 0.96f),
-		bCaptured ? 2.4f : 1.5f,
-		40);
+			? HudTheme.ApplyOpacity(HudTheme.AccentSecondary)
+			: HudTheme.ApplyOpacity(HudTheme.SlotBorder),
+		bCaptured ? HudTheme.BorderThicknessPx : 1.2f,
+		48);
+	DrawCircleOutline(
+		Center,
+		Radius - 6.0f,
+		HudTheme.ApplyOpacity(HudTheme.PanelBorder.CopyWithNewOpacity(0.46f)),
+		1.0f,
+		48);
+
+	const float ArcRadius = Radius * 0.80f;
+	for (int32 SegmentIndex = 0; SegmentIndex < DialArcSegments; ++SegmentIndex)
+	{
+		const double SegmentStartAlpha =
+			static_cast<double>(SegmentIndex) / DialArcSegments;
+		const double SegmentEndAlpha =
+			static_cast<double>(SegmentIndex + 1) / DialArcSegments;
+		const double StartAngle = FMath::DegreesToRadians(FMath::Lerp(
+			DialMinimumAngle,
+			DialMaximumAngle,
+			SegmentStartAlpha));
+		const double EndAngle = FMath::DegreesToRadians(FMath::Lerp(
+			DialMinimumAngle,
+			DialMaximumAngle,
+			SegmentEndAlpha));
+		const FVector2D Start = Center + DialDirection(StartAngle) * ArcRadius;
+		const FVector2D End = Center + DialDirection(EndAngle) * ArcRadius;
+		const bool bProgressSegment = SegmentEndAlpha <= ClampedValueAlpha + 0.001;
+		DrawLine(
+			Start.X,
+			Start.Y,
+			End.X,
+			End.Y,
+			HudTheme.ApplyOpacity(
+				bProgressSegment
+					? HudTheme.AccentSecondary.CopyWithNewOpacity(0.92f)
+					: HudTheme.SlotBorder.CopyWithNewOpacity(0.42f)),
+			bProgressSegment ? 3.1f : 2.0f);
+	}
+
+	for (int32 TickIndex = 0; TickIndex < DialTickCount; ++TickIndex)
+	{
+		const double TickAlpha =
+			static_cast<double>(TickIndex) / (DialTickCount - 1);
+		const double TickAngle = FMath::DegreesToRadians(FMath::Lerp(
+			DialMinimumAngle,
+			DialMaximumAngle,
+			TickAlpha));
+		const FVector2D Direction = DialDirection(TickAngle);
+		const bool bMajorTick = TickIndex == 0
+			|| TickIndex == DialTickCount / 2
+			|| TickIndex == DialTickCount - 1;
+		const FVector2D TickInner = Center + Direction * Radius
+			* (bMajorTick ? 0.60f : 0.66f);
+		const FVector2D TickOuter = Center + Direction * Radius * 0.71f;
+		DrawLine(
+			TickInner.X,
+			TickInner.Y,
+			TickOuter.X,
+			TickOuter.Y,
+			HudTheme.ApplyOpacity(
+				HudTheme.TextMuted.CopyWithNewOpacity(
+					bMajorTick ? 0.78f : 0.48f)),
+			bMajorTick ? 1.8f : 1.0f);
+	}
+
+	if (GuidanceTargetAlpha >= 0.0 && GuidanceTargetAlpha <= 1.0)
+	{
+		const double TargetAngle = FMath::DegreesToRadians(FMath::Lerp(
+			DialMinimumAngle,
+			DialMaximumAngle,
+			GuidanceTargetAlpha));
+		const FVector2D TargetDirection = DialDirection(TargetAngle);
+		const FVector2D TargetInner =
+			Center + TargetDirection * Radius * 0.68f;
+		const FVector2D TargetOuter =
+			Center + TargetDirection * Radius * 0.94f;
+		DrawLine(
+			TargetInner.X,
+			TargetInner.Y,
+			TargetOuter.X,
+			TargetOuter.Y,
+			HudTheme.ApplyOpacity(HudTheme.Success),
+			2.6f);
+	}
+
 	const double Angle = FMath::Lerp(
-		FMath::DegreesToRadians(-135.0),
-		FMath::DegreesToRadians(135.0),
-		FMath::Clamp(ValueAlpha, 0.0, 1.0));
-	const FVector2D Needle(
-		static_cast<float>(FMath::Cos(Angle)),
-		static_cast<float>(FMath::Sin(Angle)));
-				DrawLine(
+		FMath::DegreesToRadians(DialMinimumAngle),
+		FMath::DegreesToRadians(DialMaximumAngle),
+		ClampedValueAlpha);
+	const FVector2D Needle = DialDirection(Angle);
+	const FVector2D NeedleEnd = Center + Needle * Radius * 0.67f;
+	DrawLine(
+		Center.X + 1.0f,
+		Center.Y + 1.0f,
+		NeedleEnd.X + 1.0f,
+		NeedleEnd.Y + 1.0f,
+		HudTheme.ApplyOpacity(HudTheme.PanelPrimary.CopyWithNewOpacity(0.92f)),
+		5.0f);
+	DrawLine(
 		Center.X,
 		Center.Y,
-		Center.X + Needle.X * Radius * 0.72f,
-		Center.Y + Needle.Y * Radius * 0.72f,
-		FLinearColor(1.0f, 0.74f, 0.22f),
+		NeedleEnd.X,
+		NeedleEnd.Y,
+		HudTheme.ApplyOpacity(HudTheme.AccentPrimary),
 		2.8f);
-	DrawText(
+
+	FCanvasNGonItem HubOuter(
+		Center,
+		FVector2D(4.8f, 4.8f),
+		20,
+		HudTheme.ApplyOpacity(HudTheme.PanelPrimary));
+	HubOuter.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(HubOuter);
+	FCanvasNGonItem HubCore(
+		Center,
+		FVector2D(2.6f, 2.6f),
+		16,
+		HudTheme.ApplyOpacity(HudTheme.AccentPrimary));
+	HubCore.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(HubCore);
+
+	const auto DrawCenteredDialText = [this, &Center](
+		const FString& Text,
+		const float Y,
+		const float Scale,
+		const FLinearColor& Color)
+	{
+		float TextWidth = 0.0f;
+		float TextHeight = 0.0f;
+		Canvas->StrLen(
+			GEngine->GetSmallFont(),
+			Text,
+			TextWidth,
+			TextHeight,
+			true);
+		const float X = Center.X - TextWidth * Scale * 0.5f;
+		DrawText(
+			Text,
+			HudTheme.ApplyOpacity(HudTheme.PanelPrimary.CopyWithNewOpacity(0.88f)),
+			X + 1.0f,
+			Y + 1.0f,
+			GEngine->GetSmallFont(),
+			Scale,
+			false);
+		DrawText(
+			Text,
+			HudTheme.ApplyOpacity(Color),
+			X,
+			Y,
+			GEngine->GetSmallFont(),
+			Scale,
+			false);
+	};
+	DrawCenteredDialText(
 		Label,
-		FLinearColor(0.76f, 0.91f, 1.0f),
-		Center.X - Radius * 0.55f,
-		Center.Y - 8.0f,
-		GEngine->GetSmallFont(),
-		0.72f,
-		false);
-	DrawText(
+		Center.Y - Radius - 10.0f,
+		0.64f * HudTheme.TextScale,
+		HudTheme.TextMuted);
+	DrawCenteredDialText(
 		ValueText,
-		FLinearColor::White,
-		Center.X - Radius * 0.62f,
-		Center.Y + 11.0f,
-		GEngine->GetSmallFont(),
-		0.62f,
-		false);
+		Center.Y + Radius + 4.0f,
+		0.62f * HudTheme.TextScale,
+		HudTheme.TextPrimary);
 	if (!GuidanceTargetText.IsEmpty())
 	{
 		DrawText(
 			GuidanceTargetText,
 			bStrictF4
-				? FLinearColor(0.34f, 1.0f, 0.55f)
-				: FLinearColor(0.45f, 0.92f, 1.0f),
+				? HudTheme.ApplyOpacity(HudTheme.Success)
+				: HudTheme.ApplyOpacity(HudTheme.AccentSecondary),
 			Center.X - Radius * 0.72f,
-			Center.Y + Radius + 3.0f,
+			Center.Y + Radius + 15.0f,
 			GEngine->GetSmallFont(),
-			0.54f,
+			0.54f * HudTheme.TextScale,
 			false);
 	}
 	if (bStrictF4)
@@ -1151,7 +1534,7 @@ void AABTSM11FinaleHUD::DrawKnob(
 		DrawCircleOutline(
 			Center,
 			Radius + 5.0f,
-			FLinearColor(0.28f, 1.0f, 0.48f, 0.95f),
+			HudTheme.ApplyOpacity(HudTheme.Success),
 			2.4f,
 			40);
 		return;
@@ -1173,7 +1556,7 @@ void AABTSM11FinaleHUD::DrawKnob(
 	const FVector2D ShaftStart = Center + Direction * (Radius + 2.0f);
 	const FVector2D Tip = Center + Direction * (Radius + 19.0f);
 	const FVector2D HeadBase = Tip - Direction * 8.0f;
-	const FLinearColor GuidanceColor(0.32f, 1.0f, 0.58f, 1.0f);
+	const FLinearColor GuidanceColor = HudTheme.ApplyOpacity(HudTheme.Success);
 	DrawLine(
 		ShaftStart.X,
 		ShaftStart.Y,
@@ -1286,6 +1669,12 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 			? Guidance.GetDirection(Input, EABTSM11FinaleControlAxis::Yaw)
 			: EABTSM11F4GuidanceDirection::Aligned,
 		bGuidanceValid
+			? Alpha(
+				Guidance.Input.YawDegrees,
+				Model.MinimumYawDegrees,
+				Model.MaximumYawDegrees)
+			: -1.0,
+		bGuidanceValid
 			? FString::Printf(
 				TEXT("TGT %+.3f"), Guidance.Input.YawDegrees)
 			: FString(),
@@ -1301,6 +1690,12 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 		bGuidanceValid
 			? Guidance.GetDirection(Input, EABTSM11FinaleControlAxis::Pitch)
 			: EABTSM11F4GuidanceDirection::Aligned,
+		bGuidanceValid
+			? Alpha(
+				Guidance.Input.PitchDegrees,
+				Model.MinimumPitchDegrees,
+				Model.MaximumPitchDegrees)
+			: -1.0,
 		bGuidanceValid
 			? FString::Printf(
 				TEXT("TGT %+.3f"), Guidance.Input.PitchDegrees)
@@ -1318,6 +1713,12 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 			? Guidance.GetDirection(Input, EABTSM11FinaleControlAxis::Power)
 			: EABTSM11F4GuidanceDirection::Aligned,
 		bGuidanceValid
+			? Alpha(
+				Guidance.Input.Power,
+				Model.MinimumPower,
+				Model.MaximumPower)
+			: -1.0,
+		bGuidanceValid
 			? FString::Printf(TEXT("TGT %.4f"), Guidance.Input.Power)
 			: FString(),
 		false,
@@ -1333,44 +1734,55 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 	DrawText(
 		GuidanceStatus,
 		bStrictF4
-			? FLinearColor(0.32f, 1.0f, 0.52f)
+			? HudTheme.ApplyOpacity(HudTheme.Success)
 			: bGuidanceValid || System.IsF4GuidanceInFlight()
-				? FLinearColor(0.50f, 0.92f, 1.0f)
-				: FLinearColor(1.0f, 0.34f, 0.24f),
+				? HudTheme.ApplyOpacity(HudTheme.AccentSecondary)
+				: HudTheme.ApplyOpacity(HudTheme.Danger),
 		HudKnobCenters[1].X - 138.0f,
 		HudKnobCenters[1].Y - HudKnobRadius - 32.0f,
 		GEngine->GetSmallFont(),
-		0.66f,
+		0.66f * HudTheme.TextScale,
 		false);
 
-	const FLinearColor Accent(0.42f, 0.86f, 1.0f);
+	const FLinearColor Accent = HudTheme.AccentSecondary;
 	DrawConsoleButton(HudGearCoarse, TEXT("1x"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::Coarse)),
 		HudSpeedGear == EABTSM11ControlSpeedGear::Coarse, Accent);
 	DrawConsoleButton(HudGearFine, TEXT("0.1x"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::Fine)),
 		HudSpeedGear == EABTSM11ControlSpeedGear::Fine, Accent);
 	DrawConsoleButton(HudGearUltraFine, TEXT("0.01x"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::UltraFine)),
 		HudSpeedGear == EABTSM11ControlSpeedGear::UltraFine, Accent);
 	DrawConsoleButton(
 		HudLaunchButton,
 		TEXT("LAUNCH"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::Launch)),
 		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::LaunchButton,
-		FLinearColor(1.0f, 0.48f, 0.16f));
+		System.IsCurrentInputStrictF4()
+			? HudTheme.Success
+			: HudTheme.AccentPrimary);
 	DrawConsoleButton(HudSelectButton, TEXT("SELECT"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::Select)),
 		OverviewMode == EABTSM11OverviewInteractionMode::Select, Accent);
 	DrawConsoleButton(HudMoveButton, TEXT("MOVE"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::Move)),
 		OverviewMode == EABTSM11OverviewInteractionMode::Move, Accent);
 	DrawConsoleButton(
 		HudResetViewButton,
 		TEXT("RESET VIEW"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::ResetView)),
 		false,
 		OverviewMode == EABTSM11OverviewInteractionMode::Move
 			? Accent
-			: FLinearColor(0.35f, 0.42f, 0.48f));
-	DrawConsoleButton(HudRebasePipButton, TEXT("REBASE"), false,
+			: HudTheme.Disabled);
+	DrawConsoleButton(HudRebasePipButton, TEXT("REBASE"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::Rebase)), false,
 		System.HasHudTrajectoryProbe()
-			? FLinearColor(0.42f, 1.0f, 0.72f)
-			: FLinearColor(0.35f, 0.42f, 0.48f));
+			? HudTheme.Success
+			: HudTheme.Disabled);
 	DrawConsoleButton(HudFollowAutoButton, TEXT("AUTO PIP"),
+		GetButtonIcon(static_cast<int32>(EM11FinaleButtonIcon::AutoPip)),
 		!System.HasHudTrajectoryProbe(), Accent);
 }
 
@@ -1389,13 +1801,22 @@ bool AABTSM11FinaleHUD::ResolveTargetPreviewLayout(
 	const float RenderAspect =
 		static_cast<float>(RenderTarget.SizeX)
 		/ static_cast<float>(RenderTarget.SizeY);
-	float PreviewWidth = FMath::Min(
+	const float BayInset = FMath::Max(6.0f, HudTheme.CellInsetPx * 2.0f);
+	constexpr float BayHeaderHeight = 28.0f;
+	const FBox2D PreviewContentBox(
+		HudPreviewBay.Min + FVector2D(BayInset, BayHeaderHeight + BayInset),
+		HudPreviewBay.Max - FVector2D(BayInset, BayInset));
+	const FVector2D PreviewContentSize =
+		PreviewContentBox.Max - PreviewContentBox.Min;
+	float PreviewWidth = FMath::Min3<float>(
 		PipMaximumWidthPixels,
-		Canvas->SizeX * PipViewportWidthFraction);
+		static_cast<float>(Canvas->SizeX) * PipViewportWidthFraction,
+		FMath::Max(0.0f, static_cast<float>(PreviewContentSize.X)));
 	float PreviewHeight = PreviewWidth / RenderAspect;
-	const float MaximumHeight = FMath::Min(
+	const float MaximumHeight = FMath::Min3<float>(
 		PipMaximumHeightPixels,
-		Canvas->SizeY * PipViewportHeightFraction);
+		static_cast<float>(Canvas->SizeY) * PipViewportHeightFraction,
+		FMath::Max(0.0f, static_cast<float>(PreviewContentSize.Y)));
 	if (PreviewHeight > MaximumHeight)
 	{
 		PreviewHeight = MaximumHeight;
@@ -1407,9 +1828,10 @@ bool AABTSM11FinaleHUD::ResolveTargetPreviewLayout(
 	}
 
 	OutSize = FVector2D(PreviewWidth, PreviewHeight);
-	OutPosition = FVector2D(
-		(Canvas->SizeX - OutSize.X) * 0.5f,
-		PipTopMarginPixels);
+	// Aspect-ratio clamping can leave spare room on either axis. Center the
+	// preview in the body below the panel header instead of pinning that spare
+	// room to the left/top with a bottom-right anchor.
+	OutPosition = PreviewContentBox.GetCenter() - OutSize * 0.5f;
 	return true;
 }
 
@@ -1425,26 +1847,26 @@ void AABTSM11FinaleHUD::DrawTargetPreviewFrame(
 	}
 
 	DrawRect(
-		FLinearColor(0.02f, 0.06f, 0.11f, 0.80f),
+		HudTheme.ApplyOpacity(HudTheme.PanelSecondary),
 		Position.X,
 		Position.Y,
 		Size.X,
 		26.0f);
 	DrawText(
 		Title,
-		FLinearColor(0.78f, 0.94f, 1.0f),
+		HudTheme.ApplyOpacity(HudTheme.TextPrimary),
 		Position.X + 8.0f,
 		Position.Y + 6.0f,
 		GEngine->GetSmallFont(),
-		0.72f,
+		0.72f * HudTheme.TextScale,
 		false);
 	DrawText(
 		Subtitle,
-		FLinearColor(0.68f, 0.84f, 0.92f),
+		HudTheme.ApplyOpacity(HudTheme.TextMuted),
 		Position.X + 8.0f,
 		Position.Y + Size.Y - 18.0f,
 		GEngine->GetSmallFont(),
-		0.58f,
+		0.58f * HudTheme.TextScale,
 		false);
 	for (int32 Edge = 0; Edge < 4; ++Edge)
 	{
@@ -1462,8 +1884,8 @@ void AABTSM11FinaleHUD::DrawTargetPreviewFrame(
 			A.Y,
 			B.X,
 			B.Y,
-			FLinearColor(0.48f, 0.82f, 0.98f),
-			1.5f);
+			HudTheme.ApplyOpacity(HudTheme.AccentSecondary),
+			HudTheme.BorderThicknessPx);
 	}
 }
 
@@ -1912,120 +2334,6 @@ void AABTSM11FinaleHUD::DrawProbeTargetPreview(
 			Current.bValid ? Current.ContextDistanceCM : 0.0));
 }
 
-void AABTSM11FinaleHUD::DrawTargetWedge(
-	AABTSM11FinaleInteractionSystem& System)
-{
-	if (Canvas == nullptr)
-	{
-		return;
-	}
-	const AABTSM11FinaleSystem* FinaleSystem =
-		System.GetFinaleSystem();
-	APlayerController* Controller = GetOwningPlayerController();
-	APlayerCameraManager* CameraManager =
-		Controller != nullptr
-		? Controller->PlayerCameraManager
-		: nullptr;
-	if (FinaleSystem == nullptr
-		|| CameraManager == nullptr
-		|| System.GetTargetPreviewPrediction() == nullptr)
-	{
-		TargetWedgeTracker.Reset();
-		return;
-	}
-
-	const FABTSM110FinaleLocalFrame& Frame =
-		FinaleSystem->GetFinaleFrame();
-	EABTSM11PreviewTarget WedgeTarget =
-		System.GetPreviewSelection().Target;
-	FVector3d WedgeTargetLocal =
-		System.GetPreviewSelection().TargetCenterCM;
-	if (System.HasHudTrajectoryProbe())
-	{
-		const FABTSM11TrajectoryProbe& Probe =
-			System.GetHudTrajectoryProbe();
-		if (Probe.bContextIsTarget)
-		{
-			WedgeTarget = EABTSM11PreviewTarget::UFO;
-			WedgeTargetLocal = System.GetHudOrbitalScene().TargetCenterCM;
-		}
-		else if (Probe.ContextBodyIndex >= 1
-			&& Probe.ContextBodyIndex
-				<= FABTSM11GravityScenario::AssistCount)
-		{
-			WedgeTarget = static_cast<EABTSM11PreviewTarget>(
-				Probe.ContextBodyIndex - 1);
-			WedgeTargetLocal = System.GetHudOrbitalScene()
-				.Bodies[Probe.ContextBodyIndex].CenterCM;
-		}
-	}
-	const FVector TargetWorld = Frame.TransformLocalPosition(
-		FVector(WedgeTargetLocal));
-	const FRotator CameraRotation =
-		CameraManager->GetCameraRotation();
-	const FRotationMatrix CameraBasis(CameraRotation);
-	const FVector2D ViewportSize(Canvas->SizeX, Canvas->SizeY);
-	const FABTSM11TargetWedgeProjection Projection =
-		ABTSM11ProjectTargetForWedge(
-			FVector3d(TargetWorld),
-			FVector3d(CameraManager->GetCameraLocation()),
-			FVector3d(
-				CameraBasis.GetScaledAxis(EAxis::X)),
-			FVector3d(
-				CameraBasis.GetScaledAxis(EAxis::Y)),
-			FVector3d(
-				CameraBasis.GetScaledAxis(EAxis::Z)),
-			CameraManager->GetFOVAngle(),
-			ViewportSize);
-	const FABTSM11TargetWedgeOutput Wedge =
-		TargetWedgeTracker.Update(
-			GetWorld() != nullptr
-				? GetWorld()->GetDeltaSeconds()
-				: 0.0,
-			WedgeTarget,
-			Projection,
-			ViewportSize);
-	if (!Wedge.bVisible)
-	{
-		return;
-	}
-
-	const FLinearColor Color = M11TargetColor(Wedge.Target);
-	const FVector2D Perpendicular(
-		-Wedge.Direction.Y,
-		Wedge.Direction.X);
-	const FVector2D Tip = Wedge.Anchor;
-	const FVector2D Base =
-		Tip - Wedge.Direction * 19.0f;
-	const FVector2D Left = Base + Perpendicular * 8.0f;
-	const FVector2D Right = Base - Perpendicular * 8.0f;
-	DrawLine(Tip.X, Tip.Y, Left.X, Left.Y, Color, 3.0f);
-	DrawLine(Tip.X, Tip.Y, Right.X, Right.Y, Color, 3.0f);
-	DrawLine(Left.X, Left.Y, Right.X, Right.Y, Color, 2.0f);
-	DrawCircleOutline(Base, 4.0f, Color, 1.4f, 16);
-
-	const FVector2D RawLabelPosition =
-		Base - Wedge.Direction * 16.0f
-			+ Perpendicular * 9.0f;
-	const FVector2D LabelPosition(
-		FMath::Clamp(
-			RawLabelPosition.X,
-			12.0f,
-			ViewportSize.X - 92.0f),
-		FMath::Clamp(
-			RawLabelPosition.Y,
-			12.0f,
-			ViewportSize.Y - 28.0f));
-	DrawText(
-		TargetLabel(Wedge.Target),
-		Color,
-		LabelPosition.X,
-		LabelPosition.Y,
-		GEngine->GetSmallFont(),
-		0.72f,
-		false);
-}
-
 void AABTSM11FinaleHUD::DrawStatus(
 	AABTSM11FinaleInteractionSystem& System,
 	const FVector2D& DiagramCenter,
@@ -2033,14 +2341,14 @@ void AABTSM11FinaleHUD::DrawStatus(
 {
 	const FABTSM11PrefixClassification& Classification =
 		System.GetClassification();
-	const float X = DiagramCenter.X - DiagramRadius;
-	const float Y = DiagramCenter.Y - DiagramRadius - 48.0f;
+	const float X = HudOrbitPanel.Min.X + 10.0f;
+	const float Y = HudOrbitPanel.Min.Y + 31.0f;
 	const AABTSM11FinaleSystem* FinaleSystem =
 		System.GetFinaleSystem();
 	const bool bEditorCandidate =
 		FinaleSystem != nullptr
 		&& FinaleSystem->IsEditorCandidateMode();
-	if (bEditorCandidate)
+	if (bEditorCandidate && HudTheme.bDebugOverlay)
 	{
 		const FABTSM11CandidateExperienceIdentity& Identity =
 			FinaleSystem->GetEditorCandidateIdentity();
@@ -2160,17 +2468,17 @@ void AABTSM11FinaleHUD::DrawStatus(
 			Classification.IsF(4) ? TEXT("[LOCK]") : TEXT(""));
 	DrawText(
 		Chain,
-		FLinearColor(0.76f, 0.91f, 1.0f),
+		HudTheme.ApplyOpacity(HudTheme.TextPrimary),
 		X,
 		Y,
 		GEngine->GetSmallFont(),
-		0.72f,
+		0.62f * HudTheme.TextScale,
 		false);
 
 	const FABTSM11PrefixStabilizer& Stabilizer =
 		System.GetStabilizer();
 	FString StabilizerText = TEXT("FREE AIM");
-	FLinearColor StabilizerColor(0.72f, 0.78f, 0.84f);
+	FLinearColor StabilizerColor = HudTheme.ApplyOpacity(HudTheme.TextMuted);
 	if (Stabilizer.GetNearPrefixLevel() > 0)
 	{
 		StabilizerText = bEditorCandidate
@@ -2180,7 +2488,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 			: FString::Printf(
 				TEXT("PRECISION MODE: F%d"),
 				Stabilizer.GetNearPrefixLevel());
-		StabilizerColor = FLinearColor(0.95f, 0.75f, 0.22f);
+		StabilizerColor = HudTheme.ApplyOpacity(HudTheme.Warning);
 	}
 	else if (Stabilizer.GetStablePrefixLevel() > 0)
 	{
@@ -2192,7 +2500,7 @@ void AABTSM11FinaleHUD::DrawStatus(
 				TEXT("CORRIDOR %d STABLE / %d OF 3"),
 				Stabilizer.GetStablePrefixLevel(),
 				Stabilizer.GetStablePrefixLevel());
-		StabilizerColor = FLinearColor(0.32f, 1.0f, 0.58f);
+		StabilizerColor = HudTheme.ApplyOpacity(HudTheme.Success);
 	}
 	DrawText(
 		StabilizerText,
@@ -2200,9 +2508,11 @@ void AABTSM11FinaleHUD::DrawStatus(
 		X,
 		Y + 18.0f,
 		GEngine->GetSmallFont(),
-		0.75f,
+		0.64f * HudTheme.TextScale,
 		false);
 
+	if (HudTheme.bDebugOverlay)
+	{
 	const double LastSolveMilliseconds =
 		System.GetLastPreviewSolveMilliseconds();
 	const double LastLatencyMilliseconds =
@@ -2266,17 +2576,19 @@ void AABTSM11FinaleHUD::DrawStatus(
 		GEngine->GetSmallFont(),
 		0.55f,
 		false);
+	}
 
 	const float BarWidth = DiagramRadius * 1.25f;
-	const float BarY = DiagramCenter.Y + DiagramRadius + 12.0f;
+	const float BarY = HudOrbitPanel.Max.Y
+		- (bHudCompactLayout ? 40.0f : 48.0f);
 	DrawRect(
-		FLinearColor(0.03f, 0.05f, 0.08f, 0.8f),
+		HudTheme.ApplyOpacity(HudTheme.SlotBorder),
 		X,
 		BarY,
 		BarWidth,
 		9.0f);
 	DrawRect(
-		FLinearColor(0.95f, 0.63f, 0.16f, 0.95f),
+		HudTheme.ApplyOpacity(HudTheme.AccentPrimary),
 		X,
 		BarY,
 		BarWidth * static_cast<float>(
@@ -2284,36 +2596,41 @@ void AABTSM11FinaleHUD::DrawStatus(
 		9.0f);
 	DrawText(
 		TEXT("LAUNCH POWER"),
-		FLinearColor(0.76f, 0.82f, 0.90f),
+		HudTheme.ApplyOpacity(HudTheme.TextMuted),
 		X + BarWidth + 8.0f,
 		BarY - 4.0f,
 		GEngine->GetSmallFont(),
-		0.68f,
+		0.60f * HudTheme.TextScale,
 		false);
 
 	const FString Status = System.IsReleasePending()
 		? TEXT("FREEZING EXACT RELEASE...")
-		: System.GetRuntimeFailure();
+		: ((System.GetInteractionState() == EABTSM11FinaleInteractionState::Failed
+				|| HudTheme.bDebugOverlay)
+			? System.GetRuntimeFailure()
+			: FString());
 	if (!Status.IsEmpty())
 	{
 		DrawText(
 			Status,
 			Classification.IsF(4)
-				? FLinearColor(0.35f, 1.0f, 0.62f)
-				: FLinearColor(1.0f, 0.55f, 0.28f),
+				? HudTheme.ApplyOpacity(HudTheme.Success)
+				: HudTheme.ApplyOpacity(HudTheme.Danger),
 			X,
 			BarY + 16.0f,
 			GEngine->GetSmallFont(),
-			0.72f,
+			0.64f * HudTheme.TextScale,
 			false);
 	}
 	DrawText(
-		TEXT("Drag knob: adjust  |  Wheel over knob: trim  |  MOVE: LMB pan / RMB orbit  |  LAUNCH only: release  |  R: reset"),
-		FLinearColor(0.66f, 0.72f, 0.80f),
+		bHudCompactLayout
+			? TEXT("KNOBS: DRAG / WHEEL   MOVE: PAN / ORBIT   R: RESET")
+			: TEXT("Drag knob: adjust  |  Wheel: trim  |  MOVE: pan/orbit  |  LAUNCH only: release  |  R: reset"),
+		HudTheme.ApplyOpacity(HudTheme.TextMuted),
 		X,
 		BarY + 34.0f,
 		GEngine->GetSmallFont(),
-		0.62f,
+		(bHudCompactLayout ? 0.48f : 0.54f) * HudTheme.TextScale,
 		false);
 }
 

@@ -192,6 +192,40 @@ ABTSRUNTIME_API FVector2D ABTSM11MapViewportPointToHudCanvas(
 	const FVector2D& PlayerViewSize,
 	const FVector2D& HudCanvasSize);
 
+/**
+ * Pure-data M11-D four-zone layout. The same boxes drive Canvas drawing and
+ * hit testing so DPI scaling and compact viewports cannot desynchronise them.
+ */
+struct ABTSRUNTIME_API FABTSM11FinaleHudVisualLayout
+{
+	FBox2D MissionStrip;
+	FBox2D OrbitPanel;
+	FBox2D ControlDeck;
+	FBox2D PreviewBay;
+	FVector2D DiagramCenter = FVector2D::ZeroVector;
+	float DiagramRadius = 1.0f;
+	TStaticArray<FVector2D, 3> KnobCenters;
+	float KnobRadius = 30.0f;
+	FBox2D GearCoarse;
+	FBox2D GearFine;
+	FBox2D GearUltraFine;
+	FBox2D LaunchButton;
+	FBox2D SelectButton;
+	FBox2D MoveButton;
+	FBox2D ResetViewButton;
+	FBox2D RebasePipButton;
+	FBox2D FollowAutoButton;
+	bool bCompact = false;
+	bool bValid = false;
+};
+
+ABTSRUNTIME_API bool ABTSM11BuildFinaleHudVisualLayout(
+	const FVector2D& CanvasSize,
+	float KnobRadiusViewportHeightFraction,
+	float MinimumKnobRadiusPixels,
+	float MaximumKnobRadiusPixels,
+	FABTSM11FinaleHudVisualLayout& OutLayout);
+
 struct ABTSRUNTIME_API FABTSM11OrbitalScenePoint
 {
 	double TimeSeconds = 0.0;

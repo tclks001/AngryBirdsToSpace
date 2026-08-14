@@ -705,6 +705,57 @@ bool FABTSM11HudInputCaptureTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11HudVisualLayoutTest,
+	"ABTS.M11D.HUD.Unit.VisualLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11HudVisualLayoutTest::RunTest(const FString& Parameters)
+{
+	const auto Overlaps = [](const FBox2D& A, const FBox2D& B)
+	{
+		return A.Min.X < B.Max.X && A.Max.X > B.Min.X
+			&& A.Min.Y < B.Max.Y && A.Max.Y > B.Min.Y;
+	};
+	for (const FVector2D Viewport : {
+		FVector2D(1024.0f, 768.0f),
+		FVector2D(1280.0f, 720.0f),
+		FVector2D(1600.0f, 900.0f),
+		FVector2D(1920.0f, 1080.0f)})
+	{
+		FABTSM11FinaleHudVisualLayout Layout;
+		TestTrue(
+			*FString::Printf(TEXT("Layout builds for %.0fx%.0f"), Viewport.X, Viewport.Y),
+			ABTSM11BuildFinaleHudVisualLayout(
+				Viewport, 0.044f, 30.0f, 42.0f, Layout));
+		TestTrue(TEXT("Layout publishes a valid result"), Layout.bValid);
+		TestFalse(TEXT("Orbit and controls remain separate"),
+			Overlaps(Layout.OrbitPanel, Layout.ControlDeck));
+		TestFalse(TEXT("Controls and target monitor remain separate"),
+			Overlaps(Layout.ControlDeck, Layout.PreviewBay));
+		TestFalse(TEXT("Orbit and target monitor remain separate"),
+			Overlaps(Layout.OrbitPanel, Layout.PreviewBay));
+		TestTrue(TEXT("Mission strip remains in the viewport"),
+			Layout.MissionStrip.Min.X >= 0.0f
+			&& Layout.MissionStrip.Min.Y >= 0.0f
+			&& Layout.MissionStrip.Max.X <= Viewport.X
+			&& Layout.MissionStrip.Max.Y <= Viewport.Y);
+		TestTrue(TEXT("All knobs remain inside the control deck"),
+			Layout.ControlDeck.IsInside(Layout.KnobCenters[0])
+			&& Layout.ControlDeck.IsInside(Layout.KnobCenters[1])
+			&& Layout.ControlDeck.IsInside(Layout.KnobCenters[2]));
+		TestTrue(TEXT("Launch button remains inside the control deck"),
+			Layout.ControlDeck.IsInside(Layout.LaunchButton.Min)
+			&& Layout.ControlDeck.IsInside(Layout.LaunchButton.Max));
+	}
+
+	FABTSM11FinaleHudVisualLayout Rejected;
+	TestFalse(TEXT("Unsupported tiny viewports fail closed"),
+		ABTSM11BuildFinaleHudVisualLayout(
+			FVector2D(640.0f, 480.0f), 0.044f, 30.0f, 42.0f, Rejected));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11HudPipEdgeIndicatorTest,
 	"ABTS.M11C.HUD.Unit.PipEdgeIndicator",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
