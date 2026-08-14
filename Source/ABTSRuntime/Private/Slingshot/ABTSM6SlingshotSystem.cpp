@@ -45,6 +45,9 @@ namespace
 	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryEndpointScale(
 		TEXT("abts.UI.Flight.WorldTrajectory.EndpointScale"), 1.35f,
 		TEXT("Predicted endpoint scale relative to M6 point size [1, 2.5]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryForegroundDepthBiasCM(
+		TEXT("abts.UI.Flight.WorldTrajectory.ForegroundDepthBiasCM"), 0.5f,
+		TEXT("Camera-facing world-space bias for the cyan/amber foreground point [0.05, 3] cm."));
 
 	/** Keeps pouch local +Y on the stable stake-to-stake side while local +Z follows launch. */
 	FQuat MakePulledPouchRotation(const FVector& LaunchDirection, const FVector& PreferredRight)
@@ -595,9 +598,19 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 		CVarFlightWorldTrajectoryCoreScale.GetValueOnGameThread(), 0.25f, 1.0f);
 	const float EndpointSize = TrajectoryPointSize * FMath::Clamp(
 		CVarFlightWorldTrajectoryEndpointScale.GetValueOnGameThread(), 1.0f, 2.5f);
+	const float ForegroundDepthBiasCM = FMath::Clamp(
+		CVarFlightWorldTrajectoryForegroundDepthBiasCM.GetValueOnGameThread(), 0.05f, 3.0f);
 	const FColor UnderlayColor = Theme.SlotBorder.ToFColorSRGB();
 	const FColor CoreColor = Theme.AccentSecondary.ToFColorSRGB();
 	const FColor EndpointColor = Theme.AccentPrimary.ToFColorSRGB();
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	const APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+	const bool bHasPlayerView = PlayerController != nullptr;
+	if (bHasPlayerView)
+	{
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
 	const int32 VisiblePointCount = FMath::Min(
 		FMath::Clamp(TrajectorySampleCount, 8, 128),
 		CurrentTrajectoryPreview.WorldPoints.Num());
@@ -607,9 +620,12 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 		if ((Index & 1) == 0)
 		{
 			const FVector& Point = CurrentTrajectoryPreview.WorldPoints[Index];
+			const FVector ForegroundPoint = bHasPlayerView
+				? Point + (ViewLocation - Point).GetSafeNormal() * ForegroundDepthBiasCM
+				: Point;
 			DrawDebugPoint(GetWorld(), Point, UnderlaySize, UnderlayColor, false, 0.0f,
 				FlightTrajectoryWorldDepthPriority);
-			DrawDebugPoint(GetWorld(), Point,
+			DrawDebugPoint(GetWorld(), ForegroundPoint,
 				Index == LastVisibleIndex ? EndpointSize : CoreSize,
 				Index == LastVisibleIndex ? EndpointColor : CoreColor,
 				false, 0.0f, FlightTrajectoryWorldDepthPriority);

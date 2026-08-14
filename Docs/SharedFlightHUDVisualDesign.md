@@ -20,9 +20,9 @@
 全部控件实时读取冻结的共享 `FABTSUITheme`：深海军蓝是承载层，青色表示信息、轨迹和信号有效，琥珀表示当前控制鸟及预测终点，红色仍保留给真正危险/失败语义。
 
 - 画中画从“图片上直接压文字的矩形框”改为独立标题轨、截角外框、内层图像边框和四角取景标；RenderTarget 仍保持 `BLEND_Opaque`，避免桌面 Tonemapper 的零 Alpha 丢掉有效 RGB。Capture 内的轨迹实例改为 Theme 青色，并用第二个仅对该 Capture 可见的无碰撞球表现琥珀终点。
-- 小地图保留其球面圆盘语义，但外部增加截角仪表卡片和底部状态标签；环境查询和圆盘投影不变。
+- 小地图保留其球面圆盘语义，但外部增加截角仪表卡片和底部状态标签；与轨迹全览共同按完整面板边界纵向排布，在 16:9 矮屏上优先响应式缩小小地图，保留轨迹全览尺寸并避开底部物品栏；环境查询和圆盘投影不变。
 - 二维轨道图保留圆形裁剪与遮挡虚线，在外部增加同族仪表卡片。轨迹使用深色衬底加青色主体，起点/终点使用琥珀焦点语义。
-- 主世界预测点同样改为深色大点＋青色小点，最后一个可见预测点使用琥珀色；衬底、核心和终点统一使用 `DrawDebugPoint` 的世界深度优先级 `0`，由场景几何按世界深度遮挡；最多仍只消费 128 个预测采样，隔点显示后每帧最多 128 次 `DrawDebugPoint`，没有新增预测计算或 SceneCapture。
+- 主世界预测点同样改为深色大点＋青色小点，最后一个可见预测点使用琥珀色；衬底、核心和终点统一使用 `DrawDebugPoint` 的世界深度优先级 `0`，由场景几何按世界深度遮挡，彩色前景点沿相机方向使用极小的世界空间偏移以稳定覆盖深色衬底；最多仍只消费 128 个预测采样，隔点显示后每帧最多 128 次 `DrawDebugPoint`，没有新增预测计算或 SceneCapture。
 
 ## 3. 鸟头像资产合同
 
@@ -59,6 +59,7 @@
 | `abts.UI.Flight.WorldTrajectory.CoreScale` | `0.62` | 世界轨迹青色内点倍率 |
 | `abts.UI.Flight.WorldTrajectory.UnderlayScale` | `1.24` | 世界轨迹深色外点倍率 |
 | `abts.UI.Flight.WorldTrajectory.EndpointScale` | `1.35` | 世界轨迹琥珀终点倍率 |
+| `abts.UI.Flight.WorldTrajectory.ForegroundDepthBiasCM` | `0.5` | 青色/琥珀前景点朝相机偏移，消除同深度冲突 |
 
 运行 `abts.UI.Flight.Dump`、`abts.UI.Flight.M10.Dump` 和 `abts.UI.Flight.PIP.Dump` 可把当前解析值写入 Output Log。颜色继续通过 `abts.UI.Theme.*` 调整，不建立第二份调色板。
 

@@ -74,6 +74,56 @@ void AABTSM10ScoutMapHUD::DrawHUD()
 	Super::DrawHUD();
 }
 
+AABTSM10ScoutMapHUD::FFlightInstrumentLayout AABTSM10ScoutMapHUD::ResolveFlightInstrumentLayout(
+	const AABTSM10ScoutMapSystem& System) const
+{
+	FFlightInstrumentLayout Layout;
+	if (Canvas == nullptr) return Layout;
+
+	const FABTSM10ScoutMapSettings& Settings = System.GetSettings();
+	constexpr float MinimumDiameterPx = 120.0f;
+	constexpr float PanelFooterHeightPx = 34.0f;
+	constexpr float OrbitalPanelTopInsetPx = 8.0f;
+	Layout.Margin = FMath::Clamp(Settings.TopLeftMarginPx, 0.0f, 200.0f);
+	const float RequestedScoutDiameter = FMath::Clamp(Settings.MapDiameterPx, MinimumDiameterPx, 700.0f);
+	Layout.ScoutDiameter = RequestedScoutDiameter;
+	if (!System.IsOrbitalOverviewActive()) return Layout;
+
+	const float RequestedOrbitalDiameter = FMath::Clamp(
+		Settings.OrbitalDiagramDiameterPx, MinimumDiameterPx, 700.0f);
+	const float PanelGap = FMath::Clamp(Settings.OrbitalDiagramScoutMapGapPx, 0.0f, 200.0f);
+	const float BottomReserved = FMath::Clamp(
+		Settings.OrbitalDiagramBottomReservedPx, 80.0f, 300.0f);
+	const float SafeBottom = FMath::Max(0.0f, Canvas->ClipY - BottomReserved);
+	const float MinimumCombinedBottom = Layout.Margin
+		+ MinimumDiameterPx + PanelFooterHeightPx + OrbitalPanelTopInsetPx + PanelGap
+		+ MinimumDiameterPx + PanelFooterHeightPx;
+	if (SafeBottom < MinimumCombinedBottom)
+	{
+		Layout.ScoutDiameter = FMath::Min(RequestedScoutDiameter,
+			FMath::Max(MinimumDiameterPx,
+				SafeBottom - Layout.Margin - PanelFooterHeightPx));
+		return Layout;
+	}
+
+	// Preserve the trajectory overview at its requested size. The scout map is
+	// the flexible instrument and shrinks only enough for both complete faceted
+	// panels, including their footer rails, to fit above the inventory hotbar.
+	const float MaximumScoutDiameter = SafeBottom - Layout.Margin
+		- PanelFooterHeightPx - OrbitalPanelTopInsetPx - PanelGap
+		- RequestedOrbitalDiameter - PanelFooterHeightPx;
+	Layout.ScoutDiameter = FMath::Clamp(
+		FMath::Min(RequestedScoutDiameter, MaximumScoutDiameter),
+		MinimumDiameterPx,
+		RequestedScoutDiameter);
+	Layout.OrbitalTop = Layout.Margin + Layout.ScoutDiameter
+		+ PanelFooterHeightPx + OrbitalPanelTopInsetPx + PanelGap;
+	Layout.OrbitalDiameter = FMath::Min(
+		RequestedOrbitalDiameter,
+		SafeBottom - Layout.OrbitalTop - PanelFooterHeightPx);
+	return Layout;
+}
+
 void AABTSM10ScoutMapHUD::UpdateOffscreenFlightUICapture(AABTSM10ScoutMapSystem* System)
 {
 	if (bFlightCaptureFinished || Canvas == nullptr) return;
@@ -278,8 +328,8 @@ void AABTSM10ScoutMapHUD::DrawLandingPreview(AABTSM10ScoutMapSystem& System)
 	float ScaleToFit = FMath::Min(1.0f, FMath::Min(
 		MaxFrameWidth / FMath::Max(RequestedFrameWidth, 1.0f),
 		MaxFrameHeight / FMath::Max(RequestedFrameHeight, 1.0f)));
-	const float ScoutRight = FMath::Clamp(Settings.TopLeftMarginPx, 0.0f, 200.0f)
-		+ FMath::Clamp(Settings.MapDiameterPx, 120.0f, 700.0f) + 12.0f;
+	const FFlightInstrumentLayout InstrumentLayout = ResolveFlightInstrumentLayout(System);
+	const float ScoutRight = InstrumentLayout.Margin + InstrumentLayout.ScoutDiameter + 12.0f;
 	const float PreferredWidth = RequestedFrameWidth * ScaleToFit;
 	const float RightSideWidth = FMath::Max(0.0f, Canvas->ClipX - ScoutRight);
 	if (RightSideWidth > FramePadding * 2.0f && PreferredWidth > RightSideWidth)
@@ -341,8 +391,9 @@ void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)
 	UTexture2D* TerrainTexture = System.GetTerrainTexture();
 	if (Canvas == nullptr || TerrainTexture == nullptr) return;
 	const FABTSM10ScoutMapSettings& Settings = System.GetSettings();
-	const float Diameter = FMath::Clamp(Settings.MapDiameterPx, 120.0f, 700.0f);
-	const float Margin = FMath::Clamp(Settings.TopLeftMarginPx, 0.0f, 200.0f);
+	const FFlightInstrumentLayout InstrumentLayout = ResolveFlightInstrumentLayout(System);
+	const float Diameter = InstrumentLayout.ScoutDiameter;
+	const float Margin = InstrumentLayout.Margin;
 	const FVector2D Origin(Margin, Margin);
 	const FVector2D Center = Origin + FVector2D(Diameter * 0.5f);
 	const float Radius = Diameter * 0.5f;

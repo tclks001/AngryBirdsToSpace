@@ -225,18 +225,12 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 	const FABTSM101OrbitalOverviewSnapshot& Snapshot = System.GetOrbitalOverviewSnapshot();
 	if (!Snapshot.bValid || Snapshot.ContentRadiusCM <= 1.0f) return;
 	const FABTSM10ScoutMapSettings& Settings = System.GetSettings();
-
-	const float Left = FMath::Clamp(Settings.TopLeftMarginPx, 0.0f, 200.0f);
-	const float Top = Left
-		+ FMath::Clamp(Settings.MapDiameterPx, 120.0f, 700.0f)
-		+ FMath::Clamp(Settings.OrbitalDiagramScoutMapGapPx, 0.0f, 200.0f);
-	const float RequestedDiameter = FMath::Clamp(Settings.OrbitalDiagramDiameterPx, 120.0f, 700.0f);
-	const float BottomReserved = FMath::Clamp(
-		Settings.OrbitalDiagramBottomReservedPx, 80.0f, 300.0f);
-	const float MaximumDiameter = FMath::Min(
-		Canvas->ClipX - Left - 8.0f,
-		Canvas->ClipY - BottomReserved - Top);
-	const float Diameter = FMath::Min(RequestedDiameter, MaximumDiameter);
+	const FFlightInstrumentLayout InstrumentLayout = ResolveFlightInstrumentLayout(System);
+	const float Left = InstrumentLayout.Margin;
+	const float Top = InstrumentLayout.OrbitalTop;
+	const float Diameter = FMath::Min(
+		InstrumentLayout.OrbitalDiameter,
+		Canvas->ClipX - Left - 8.0f);
 	if (Diameter < 120.0f) return;
 
 	const float Radius = Diameter * 0.5f;

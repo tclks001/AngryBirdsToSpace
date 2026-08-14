@@ -187,7 +187,7 @@ struct FABTSM10ScoutMapSettings
 		meta = (ClampMin = "120.0", ClampMax = "700.0"))
 	float OrbitalDiagramDiameterPx = 250.0f;
 
-	/** Vertical gap from the scout-map top edge plus its diameter to the overview top edge. */
+	/** Vertical gap between the complete scout-map panel and orbital-overview panel. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbital Overview|Layout",
 		meta = (ClampMin = "0.0", ClampMax = "200.0"))
 	float OrbitalDiagramScoutMapGapPx = 32.0f;

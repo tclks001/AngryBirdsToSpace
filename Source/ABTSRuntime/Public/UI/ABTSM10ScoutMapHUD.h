@@ -20,6 +20,16 @@ public:
 	virtual void DrawHUD() override;
 
 private:
+	struct FFlightInstrumentLayout
+	{
+		float Margin = 0.0f;
+		float ScoutDiameter = 0.0f;
+		float OrbitalTop = 0.0f;
+		float OrbitalDiameter = 0.0f;
+	};
+
+	FFlightInstrumentLayout ResolveFlightInstrumentLayout(
+		const AABTSM10ScoutMapSystem& System) const;
 	void DrawScoutMap(AABTSM10ScoutMapSystem& System);
 	void DrawLandingPreview(AABTSM10ScoutMapSystem& System);
 	void DrawOrbitalOverview(AABTSM10ScoutMapSystem& System);
