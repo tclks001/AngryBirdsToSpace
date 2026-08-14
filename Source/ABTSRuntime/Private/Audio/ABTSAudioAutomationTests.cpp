@@ -24,6 +24,29 @@ bool FABTSAudioMappingTest::RunTest(const FString& Parameters)
 		< UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(0.5f)
 		&& UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(0.5f)
 		< UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(1.0f));
+	TestTrue(TEXT("Faster movement shortens the distance between footsteps"),
+		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(100.0f)
+		> UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(600.0f));
+	TestEqual(TEXT("Footstep cadence is one quarter of the original low-speed rate"),
+		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(60.0f), 440.0f);
+	TestEqual(TEXT("Footstep cadence is one quarter of the original high-speed rate"),
+		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(680.0f), 272.0f);
+	TestTrue(TEXT("Faster movement raises footstep volume"),
+		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(100.0f)
+		< UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(600.0f));
+	TestEqual(TEXT("Low-speed footstep volume is reduced by half"),
+		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(60.0f), 0.12f);
+	TestEqual(TEXT("High-speed footstep volume is reduced by half"),
+		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(680.0f), 0.27f);
+	TestTrue(TEXT("Harder landings are louder"),
+		UABTSAudioWorldSubsystem::ComputeLandingVolumeMultiplier(200.0f)
+		< UABTSAudioWorldSubsystem::ComputeLandingVolumeMultiplier(800.0f));
+	TestTrue(TEXT("Bridge semantics select wood footsteps"),
+		UABTSAudioWorldSubsystem::ResolveFootstepSurfaceFromSemanticName(TEXT("ABTSM8BridgeActor"))
+		== EABTSFootstepSurface::Wood);
+	TestTrue(TEXT("Unclassified terrain defaults to grass footsteps"),
+		UABTSAudioWorldSubsystem::ResolveFootstepSurfaceFromSemanticName(TEXT("ABTSM3PlanetTerrain"))
+		== EABTSFootstepSurface::Grass);
 
 	float Bass = 0.0f;
 	float Harmony = 0.0f;
@@ -46,8 +69,31 @@ bool FABTSAudioMappingTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Slingshot pull loop loads"), Settings->PullLoop.LoadSynchronous());
 	TestNotNull(TEXT("Slingshot release snap loads"), Settings->ReleaseSnap.LoadSynchronous());
 	TestNotNull(TEXT("Slingshot release resonance loads"), Settings->ReleaseResonance.LoadSynchronous());
+	TestNotNull(TEXT("Red bird chirp loads"), Settings->RedBirdChirp.LoadSynchronous());
+	TestNotNull(TEXT("Blue bird chirp loads"), Settings->BlueBirdChirp.LoadSynchronous());
+	TestNotNull(TEXT("Yellow bird chirp loads"), Settings->YellowBirdChirp.LoadSynchronous());
+	TestNotNull(TEXT("Black bird chirp loads"), Settings->BlackBirdChirp.LoadSynchronous());
+	TestTrue(TEXT("Red bird uses licensed 404729 chirp"),
+		Settings->RedBirdChirp.ToSoftObjectPath().ToString().Contains(TEXT("404729")));
+	TestTrue(TEXT("Blue bird uses licensed 404725 chirp"),
+		Settings->BlueBirdChirp.ToSoftObjectPath().ToString().Contains(TEXT("404725")));
+	TestTrue(TEXT("Yellow bird uses licensed 404726 chirp"),
+		Settings->YellowBirdChirp.ToSoftObjectPath().ToString().Contains(TEXT("404726")));
+	TestTrue(TEXT("Black bird uses licensed 404724 chirp"),
+		Settings->BlackBirdChirp.ToSoftObjectPath().ToString().Contains(TEXT("404724")));
+	TestNotNull(TEXT("Pickup sound loads"), Settings->Pickup.LoadSynchronous());
 	TestNotNull(TEXT("Music Sound Class loads"), Settings->MusicSoundClass.LoadSynchronous());
 	TestNotNull(TEXT("Master Sound Mix loads"), Settings->MasterSoundMix.LoadSynchronous());
+	TestEqual(TEXT("Grass footsteps have three variants"), Settings->GrassFootsteps.Num(), 3);
+	TestEqual(TEXT("Wood footsteps have three variants"), Settings->WoodFootsteps.Num(), 3);
+	for (const TSoftObjectPtr<USoundBase>& Footstep : Settings->GrassFootsteps)
+	{
+		TestNotNull(TEXT("Grass footstep loads"), Footstep.LoadSynchronous());
+	}
+	for (const TSoftObjectPtr<USoundBase>& Footstep : Settings->WoodFootsteps)
+	{
+		TestNotNull(TEXT("Wood footstep loads"), Footstep.LoadSynchronous());
+	}
 	TestEqual(TEXT("Each core material has three variants"), Settings->WoodImpacts.Num(), 3);
 	TestEqual(TEXT("Each core material has three variants"), Settings->StoneImpacts.Num(), 3);
 	TestEqual(TEXT("Each core material has three variants"), Settings->MetalImpacts.Num(), 3);

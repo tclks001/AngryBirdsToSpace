@@ -3,6 +3,7 @@
 #include "Party/ABTSBirdParty.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -504,6 +505,12 @@ bool AABTSBirdParty::SwitchControlledBird(const EABTSBirdId NewBirdId)
 	ControlledBirdId = NewBirdId;
 	RebuildQueue(NewBirdId);
 	FollowerUpdatePauseRemainingSeconds = 0.05f;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()
+		? GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>()
+		: nullptr)
+	{
+		Audio->PlayBirdChirp(NewBird->GetActorLocation(), NewBirdId, 0.72f);
+	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M4][Switch] Controlled=%d Queue=%d,%d,%d,%d NewLeaderGroundAligned=1 CacheClearExperiment=%d PartyTickBeforeMovement=1 Pause=%.2f Authority=Possession"),
 		ABTSBirdIdToIndex(ControlledBirdId),
 		ABTSBirdIdToIndex(QueueOrder[0]),

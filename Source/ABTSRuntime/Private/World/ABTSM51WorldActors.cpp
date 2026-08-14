@@ -6,6 +6,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Player/ABTSM51PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSVisualTuning.h"
 
 namespace
 {
@@ -82,12 +83,36 @@ namespace
 AABTSM51PickupItem::AABTSM51PickupItem()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("PickupRoot"));
+	SetRootComponent(Root);
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PickupVisual"));
-	SetRootComponent(Visual);
+	Visual->SetupAttachment(Root);
 	ConfigureInteractionMesh(*Visual);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (Sphere.Succeeded()) Visual->SetStaticMesh(Sphere.Object);
-	Visual->SetRelativeScale3D(FVector(0.18f));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> BranchMeshFinder(
+		TEXT("/Game/StaticMesh/Pickup/Branch/SM_Pickup_Branch.SM_Pickup_Branch"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BranchMaterialFinder(
+		TEXT("/Game/StaticMesh/Pickup/Branch/MI_Pickup_Branch.MI_Pickup_Branch"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> StoneMeshFinder(
+		TEXT("/Game/StaticMesh/Pickup/Gravel/SM_Pickup_Gravel.SM_Pickup_Gravel"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneMaterialFinder(
+		TEXT("/Game/StaticMesh/Pickup/Gravel/MI_Pickup_Gravel.MI_Pickup_Gravel"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> WoodMeshFinder(
+		TEXT("/Game/StaticMesh/Pickup/Wood/SM_Pickup_Wood.SM_Pickup_Wood"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WoodMaterialFinder(
+		TEXT("/Game/StaticMesh/Pickup/Wood/MI_Pickup_Wood.MI_Pickup_Wood"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlantFiberMeshFinder(
+		TEXT("/Game/StaticMesh/Pickup/PlantFiber/SM_Pickup_PlantFiber.SM_Pickup_PlantFiber"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PlantFiberMaterialFinder(
+		TEXT("/Game/StaticMesh/Pickup/PlantFiber/MI_Pickup_PlantFiber.MI_Pickup_PlantFiber"));
+	BranchMesh = BranchMeshFinder.Object;
+	BranchMaterial = BranchMaterialFinder.Object;
+	StoneMesh = StoneMeshFinder.Object;
+	StoneMaterial = StoneMaterialFinder.Object;
+	WoodMesh = WoodMeshFinder.Object;
+	WoodMaterial = WoodMaterialFinder.Object;
+	PlantFiberMesh = PlantFiberMeshFinder.Object;
+	PlantFiberMaterial = PlantFiberMaterialFinder.Object;
+	ApplyItemVisual();
 }
 
 void AABTSM51PickupItem::InitializePickup(const EABTSItemId InItemId, const int32 InQuantity, const int32 InCellId)
@@ -95,13 +120,66 @@ void AABTSM51PickupItem::InitializePickup(const EABTSItemId InItemId, const int3
 	ItemId = InItemId;
 	Quantity = FMath::Max(1, InQuantity);
 	CellId = InCellId;
+	ApplyItemVisual();
+}
+
+void AABTSM51PickupItem::ApplyItemVisual()
+{
+	if (Visual == nullptr) return;
+	UStaticMesh* Mesh = BranchMesh;
+	UMaterialInterface* Material = BranchMaterial;
+	switch (ItemId)
+	{
+	case EABTSItemId::Stone:
+		Mesh = StoneMesh;
+		Material = StoneMaterial;
+		break;
+	case EABTSItemId::Wood:
+		Mesh = WoodMesh;
+		Material = WoodMaterial;
+		break;
+	case EABTSItemId::PlantFiber:
+		Mesh = PlantFiberMesh;
+		Material = PlantFiberMaterial;
+		break;
+	default:
+		break;
+	}
+	Visual->SetStaticMesh(Mesh);
+	Visual->SetMaterial(0, Material);
+	RefreshVisualTuning();
+}
+
+void AABTSM51PickupItem::RefreshVisualTuning()
+{
+	if (Visual == nullptr) return;
+	EABTSVisualTuningTarget Target = EABTSVisualTuningTarget::PickupBranch;
+	switch (ItemId)
+	{
+	case EABTSItemId::Stone:
+		Target = EABTSVisualTuningTarget::PickupStone;
+		break;
+	case EABTSItemId::Wood:
+		Target = EABTSVisualTuningTarget::PickupWood;
+		break;
+	case EABTSItemId::PlantFiber:
+		Target = EABTSVisualTuningTarget::PickupPlantFiber;
+		break;
+	default:
+		break;
+	}
+	const FABTSVisualTuningValue& Tuning = ABTSGetVisualTuning(Target);
+	Visual->SetRelativeScale3D(FVector(0.18f * Tuning.ScaleMultiplier));
+	Visual->SetRelativeLocation(FVector(0.0f, 0.0f, Tuning.LocalZOffsetCM));
 }
 
 AABTSM51SlingshotDirtHole::AABTSM51SlingshotDirtHole()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("DirtHoleRoot"));
+	SetRootComponent(Root);
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DirtHoleVisual"));
-	SetRootComponent(Visual);
+	Visual->SetupAttachment(Root);
 	ConfigureInteractionMesh(*Visual);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> DirtHole(TEXT("/Game/StaticMesh/SlingshotDirtHole/SM_SlingshotDitHole.SM_SlingshotDitHole"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DirtHoleMaterial(TEXT("/Game/StaticMesh/SlingshotDirtHole/MI_SlingshotDitHole.MI_SlingshotDitHole"));
@@ -116,7 +194,6 @@ AABTSM51SlingshotDirtHole::AABTSM51SlingshotDirtHole()
 		? SteelHoleMaterial.Object
 		: nullptr;
 	ApplySlotVisual(EABTSSlingshotSlotKind::Standard);
-	Visual->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.06f));
 }
 
 void AABTSM51SlingshotDirtHole::ApplySlotVisual(
@@ -128,6 +205,18 @@ void AABTSM51SlingshotDirtHole::ApplySlotVisual(
 	Visual->SetMaterial(
 		0,
 		bFinale ? FinaleSlotMaterial : StandardSlotMaterial);
+	RefreshVisualTuning();
+}
+
+void AABTSM51SlingshotDirtHole::RefreshVisualTuning()
+{
+	if (Visual == nullptr) return;
+	const EABTSVisualTuningTarget Target = IsFinaleSpaceSlot()
+		? EABTSVisualTuningTarget::FinaleSlot
+		: EABTSVisualTuningTarget::StandardSlot;
+	const FABTSVisualTuningValue& Tuning = ABTSGetVisualTuning(Target);
+	Visual->SetRelativeScale3D(FVector(0.55f * Tuning.ScaleMultiplier));
+	Visual->SetRelativeLocation(FVector(0.0f, 0.0f, Tuning.LocalZOffsetCM));
 }
 
 void AABTSM51SlingshotDirtHole::InitializeHole(const int32 InCellId)

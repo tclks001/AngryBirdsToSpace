@@ -1,11 +1,11 @@
 # AngryBirdsToSpace 音乐与音效设计稿
 
-> 状态：2026-08-14，首版 UE 运行时代码与核心事件接线完成；四轨音乐、首批音效、Looping 属性、四个 Sound Class 与空 Sound Mix 均已就绪，待按第 7.3 节完成可听 PIE 验收。
+> 状态：2026-08-15，首版 UE 运行时代码、核心事件与当前可接 P0 音效已完成；四轨音乐、鸟叫、脚步/落地、拾取、首批物理/UI 音效、Looping 属性、四个 Sound Class 与空 Sound Mix 均已就绪，待按第 7.3 节完成新增部分的可听 PIE 验收。
 > 目标：用轻快、可读、具有空间感的声音，把「小队探索 → 采集制作 → 弹弓瞄准 → 物理连锁破坏 → 引力弹弓 → 救援终局」串成清晰的情绪曲线；音效优先提供操作和物理结果的信息，而不是持续堆叠噪声。
 
 ## 1. 当前玩法依据
 
-项目已有四轨音乐与 53 个首批 SoundWave。`UABTSAudioWorldSubsystem` 在每个 Game/PIE World 自动创建，统一持有音乐轨、弹弓循环、3D 单发与 2D UI 音效；默认资产路径集中在 `UABTSAudioSettings`，无需在地图、GameMode 或蓝图上挂组件。当前接线以下列已实现玩法为准：
+项目已有四轨音乐与 57 个首批 SoundWave。`UABTSAudioWorldSubsystem` 在每个 Game/PIE World 自动创建，统一持有音乐轨、弹弓循环、3D 单发与 2D UI 音效；默认资产路径集中在 `UABTSAudioSettings`，无需在地图、GameMode 或蓝图上挂组件。当前接线以下列已实现玩法为准：
 
 - 红、蓝、黄、黑四鸟的小队移动、跳跃、切换、跟随与自动归队；
 - 在球面小行星上探索，拾取树枝/石料，使用工作台和熔炉制作；
@@ -119,6 +119,11 @@ releaseResonance= Lerp(0.55, 0.90, PullPowerAlpha)
 - `pluck_001` 是不变调的 Snap；`Elastic_band_c_note` 按同一 `RestCordLengthCM` 设置共鸣音高；两者在 `ReleaseLaunch()` 同帧触发，响度分别随本次拉力从 0.72→1.00、0.55→0.90。两层组件同样在世界启动时预建并复用，首音频块提前请求；Snap/共鸣分别用 8/12 ms 去点击淡入，避免源文件非零首样本形成尖锐瞬态，但不改变音高；
 - 木、石、铁、玻璃/建筑撞击按 `EABTSM6ImpactMaterial` 选 3 个确定性轮换变体，法向速度控制触发、音量和轻微音高，并按每材质 80 ms 限声；
 - 黑鸟爆炸同帧播放主体和低频尾部；背包/制作界面已接入开、关、选择、数量 tick、制作成功和失败音。
+- 四个 OwlStorm CC0 鸟叫按红/蓝/黄/黑固定映射；有效切鸟后播放对应短叫，主控鸟的已接受跳跃只有真正从 Grounded 转为 Airborne 时才播放，输入失败或走下边缘不会误响；每只鸟有 180 ms 限声；
+- 主控鸟脚步按实际球面切向位移累计，速度从 60→680 cm/s 时步距由 440→272 cm、响度由 0.12→0.27；相对首版频率为 25%、响度为 50%。跟随鸟、弹弓飞行、传送和控制权交接会重置累计值，不会四鸟齐响或传送补播；
+- 落地记录本次空中阶段的最大向下速度，160 cm/s 以下静音，160→900 cm/s 映射到 0.30→0.95 响度，并复用当前地表脚步变体的低音高版本；
+- 地表射线优先从 Physical Material、命中 Actor/Component 与材质语义识别 `wood/bridge/plank` 为木面，其余安全回退草地；当前无需新建 Physical Surface 配置；
+- 拾取只在物品成功 `AddItem` 后、Pickup Actor 销毁前播放一次 3D `confirmation_001`，数量只轻微影响响度和音高。
 
 该实现把资产目录、混音和组件生命周期留在 Audio World Subsystem，M6/M5 只在已有状态变化点调用语义事件。以后替换为 MetaSound 时，事件入口不需要改变。
 
@@ -147,7 +152,7 @@ flowchart LR
 
 1. 多选 `/Game/Audio/Music/Bass`、`Harmony`、`Melody`、`Percussion`，在 Details 中启用 `Looping`。四者保持相同导入/压缩策略，不要单独裁剪、加首尾静音或改采样起点。
 2. 打开 `/Game/SoundEffects/Looped_Rubber-y_Stretch`，启用 `Looping`。不要给 `Elastic_band_c_note` 或 `pluck_001` 开循环。
-3. `Save All`。到此即可直接 PIE 听到音乐、弹弓、碰撞、爆炸和已接线 UI 音效。
+3. `Save All`。鸟叫、脚步和拾取 SoundWave 不需要改 Looping、Sound Class 或其他资产属性；到此即可直接 PIE 听到音乐、弹弓、碰撞、爆炸、鸟叫、脚步/落地、拾取和已接线 UI 音效。
 
 ### 7.2 已完成：5 个空基础设施资产
 
@@ -169,19 +174,23 @@ Music/SFX/UI/Ambience 四类独立音量所需资产已经位于 `/Game/Audio/In
 
 ### 7.3 PIE 验收顺序
 
-1. 进入 PIE 后停留探索态至少一个循环：应只有 Harmony 可闻；四轨均从同一时刻运行，状态淡变不重启。
+1. 进入 PIE 后检查启动日志含 `BirdChirps=4 Footsteps=(3,3) Pickup=1`，再停留探索态至少一个循环：应只有 Harmony 可闻；四轨均从同一时刻运行，状态淡变不重启。
 2. fresh PIE 启动日志应有 `SlingshotPrepared=3 PrimeRequested=3`。进入同一把弹弓：第一次开始拉弓不能出现尖锐瞬态；日志应有 `SlingshotPull ... Preconfigured=1 Prepared=1 PrimeRequested=1 AttackMS=12.0`。0/25/50/75/100% 音高保持不变、音量单调上升；首次松开帧听到 Snap + 共鸣但不得出现额外高音，日志应有 `SlingshotRelease ... Prepared=1 PrimeRequested=1 AttackMS=(8.0,12.0)`。再比较两把固有弦长不同的弹弓：短弦的持续声和释放共鸣都应更高。
 3. 分别撞木、石、铁、玻璃：材质可区分，连续倒塌不会在 80 ms 内同材质爆量；黑鸟爆炸有主体和低频尾部。
 4. 打开/关闭背包，选择物品/配方，增减制作数量，并分别测试成功与材料不足；每个动作只出现一次对应 UI 音。
-5. 若创建了 5 个基础设施资产，从调试蓝图或后续设置菜单调用 `SetCategoryVolumes`，分别把四类置 0，确认各类可独立静音。
+5. 依次切换红、蓝、黄、黑鸟：每次有效切换只播放目标鸟对应的短叫；对同一目标的无效重复切换不响。四个映射为 `404729/404725/404726/404724`。
+6. 只控制当前主鸟在草地连续移动、停止、再次移动并跳跃：脚步随真实位移而不是按键播放；停止后无残留脚步；成功离地时有一次对应鸟叫，空中无脚步，落地只有一次且重落明显比轻落响。跟随鸟不得叠加脚步。
+7. 走上 M8 木桥：脚步应从草地组切换为木质组；如果桥命名和材质被后续改名而回退成草地，检查命中 Actor/Component/Material 是否仍含 `Bridge/Wood/Plank`，或后续改用明确 Physical Surface。
+8. 拾取树枝、石料、木材或植物纤维：只有库存实际增加时出现一次空间拾取音；站在展示物旁但未进入拾取半径时不响。
+9. 若创建了 5 个基础设施资产，从调试蓝图或后续设置菜单调用 `SetCategoryVolumes`，分别把四类置 0，确认各类可独立静音。
 
 ## 8. 当前完成范围与后续接线
 
 | 状态 | 内容 |
 | --- | --- |
-| 已接线 | 四轨同步启动；Explore/Aim/Destruction/Satellite 音乐状态；弹弓拉伸和释放；木石铁玻璃撞击；黑鸟爆炸；制作界面开关、选择、数量、成功/失败。 |
-| 已提供公共入口 | `SetMusicState`、`PlayImpact`、`PlayExplosion`、`PlayUIEvent`、`SetCategoryVolumes`，可供后续 M7/M11 事件直接调用。 |
+| 已接线 | 四轨同步启动；Explore/Aim/Destruction/Satellite 音乐状态；弹弓拉伸和释放；木石铁玻璃撞击；黑鸟爆炸；制作界面开关、选择、数量、成功/失败；四鸟切换/起跳短叫；主控鸟草/木脚步与轻重落地；成功拾取。 |
+| 已提供公共入口 | `SetMusicState`、`PlayImpact`、`PlayExplosion`、`PlayBirdChirp`、`PlayFootstep`、`PlayLanding`、`PlayPickup`、`PlayUIEvent`、`SetCategoryVolumes`，可供后续稳定语义事件直接调用。 |
 | 等 M7/M11 合入后接线 | M7 建筑断裂/模块机关/倒塌完成事件；M11 Rank12/终局的 `Finale`、UFO 命中与救援事件。当前不修改两棵正在运行的功能工作树。 |
-| 仍需后续制作 | 鸟叫、脚步/落地、飞行风切、拾取、桥梁、熔炉/工作台环境、卫星距离环境、侦察、暂停与正式设置菜单。现有 SoundWave 可复用，但对应稳定玩法事件尚未全部存在。 |
+| 仍需后续制作 | 发射/碰撞/回收等扩展鸟叫、飞行风切、桥梁建成提示、熔炉/工作台环境、卫星距离环境、侦察、暂停与正式设置菜单。现有 SoundWave 可复用，但对应稳定玩法事件尚未全部存在。 |
 
 验收关键点：四条音乐任意组合无节拍漂移；同一把弹弓在 0/25/50/75/100% 拉力下音高不变、音量单调上升；不同弹弓按固有弦长满足“短弦高、长弦低”；释放恰在鼠标松开帧触发；低端机器上连续倒塌不出现音效爆量或卡顿；玩家关闭 Music/SFX/UI/Ambience 中任一类后对应声音完全静音；所有外部素材的授权和署名可追溯。

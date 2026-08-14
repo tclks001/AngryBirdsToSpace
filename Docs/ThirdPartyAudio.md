@@ -1,7 +1,7 @@
 # 第三方音频与关联素材清单及许可
 
-> 状态：2026-08-14，首批 53 个音效、4 个音乐 SoundWave 与“也字工厂小石头”字体已导入 Unreal。
-> 音效源素材暂存根目录：`C:\workspace\SoundEffects`；音乐许可证位于 `C:\workspace\Media\License.txt`，字体声明位于 `C:\workspace\也字工厂小石头字体使用声明.txt`。本文件是导入筛选表与发布许可记录，原始许可证/声明仍须保留在工作区外归档中。
+> 状态：2026-08-15，57 个音效、4 个音乐 SoundWave 与“也字工厂小石头”字体已导入 Unreal。
+> 音效源素材暂存根目录：`C:\workspace\SoundEffects`；鸟叫许可证位于 `C:\workspace\Birds\License.txt`，音乐许可证位于 `C:\workspace\Media\License.txt`，字体声明位于 `C:\workspace\也字工厂小石头字体使用声明.txt`。本文件是导入筛选表与发布许可记录，原始许可证/声明仍须保留在工作区外归档中。
 
 ## 使用与归档规则
 
@@ -34,6 +34,10 @@ Owlish Media Sound Effects — OwlishMedia
 https://opengameart.org/content/sound-effects-pack
 CC0 / Public Domain dedication
 
+Retro video game sfx — Bird chirps 2/3/4/5 — OwlStorm
+https://freesound.org/people/OwlStorm/
+CC0 / Public Domain dedication
+
 16 RPG-like procedural generated music tracks — messersm
 https://opengameart.org/content/16-rpg-like-procedural-generated-music-tracks
 CC0 / Public Domain dedication
@@ -43,7 +47,7 @@ CC0 / Public Domain dedication
 https://www.yefont.com/fontDetails/172
 ```
 
-## 音乐与字体许可证原文登记
+## 音乐、鸟叫与字体许可证原文登记
 
 `C:\workspace\Media\License.txt` 内容：
 
@@ -58,6 +62,22 @@ License(s): CC0
 ```
 
 对应已导入资产为 `/Game/Audio/Music/Bass`、`Harmony`、`Melody`、`Percussion`。四轨是用户基于该 CC0 来源所做的 MIDI 重编曲/混音；发布鸣谢建议同时保留原作者、来源和用户重编曲说明。
+
+`C:\workspace\Birds\License.txt` 内容：
+
+```text
+Retro video game sfx - Bird chirp 4 by OwlStorm -- https://freesound.org/s/404724/ -- License: Creative Commons 0
+Retro video game sfx - Bird chirp 3 by OwlStorm -- https://freesound.org/s/404725/ -- License: Creative Commons 0
+Retro video game sfx - Bird chirp 2 by OwlStorm -- https://freesound.org/s/404726/ -- License: Creative Commons 0
+Retro video game sfx - Bird chirp 5 by OwlStorm -- https://freesound.org/s/404729/ -- License: Creative Commons 0
+
+404724 for black bird
+404725 for blue bird
+404726 for yellow bird
+404729 for red bird
+```
+
+对应已导入资产位于 `/Game/SoundEffects/Birds`。运行时固定映射为：`404729` 红鸟、`404725` 蓝鸟、`404726` 黄鸟、`404724` 黑鸟。四项均为 OwlStorm 发布的 `Creative Commons 0 / CC0`，可商用且不强制署名；项目仍保留作者、Freesound 单项 URL 和角色映射以便追溯。
 
 `C:\workspace\也字工厂小石头字体使用声明.txt` 内容：
 
@@ -82,12 +102,13 @@ License(s): CC0
 | `kenney_sci-fi-sounds`（73 个音频） | `kenney_sci-fi-sounds\License.txt` | Kenney；<https://kenney.nl/assets/sci-fi-sounds> | `Creative Commons Zero, CC0` | 可商用；署名可选。 |
 | `kenney_ui-audio`（52 个音频） | `kenney_ui-audio\License.txt` | Kenney Vleugels；<https://kenney.nl/assets/ui-audio> | `Creative Commons Zero, CC0` | 可商用；署名可选。 |
 | `Owlish Media Sound Effects`（161 个音频） | `Owlish Media Sound Effects\License.txt` | OwlishMedia；<https://opengameart.org/content/sound-effects-pack> | `CC0` | 可商用；署名可选。 |
+| OwlStorm `Bird chirp 2/3/4/5` | `C:\workspace\Birds\License.txt` | OwlStorm；<https://freesound.org/people/OwlStorm/> | `Creative Commons 0` | 可商用；署名可选；保留四个单项 URL 与鸟角色映射。 |
 | `16 RPG-like procedural generated music tracks` | `C:\workspace\Media\License.txt` | messersm；<https://opengameart.org/content/16-rpg-like-procedural-generated-music-tracks> | `CC0` | 可商用；署名可选；项目仍保留来源与重编曲说明。 |
 | `也字工厂小石头` | `C:\workspace\也字工厂小石头字体使用声明.txt` | 也字工厂；<https://www.yefont.com/fontDetails/172> | `可免费商用` | 仅按声明记录游戏内嵌使用；保留原始声明，不推定未写明的修改/再分发权。 |
 
 ## 当前导入清单与用途
 
-截至本次核对，以下 53 个 SoundWave 已存在于 `Content\SoundEffects\`，其中包括 `Tiny_Hammer_on_Stone`。四轨音乐位于 `Content\Audio\Music\`。其余下载文件当前均不纳入游戏。
+截至本次核对，以下 57 个 SoundWave 已存在于 `Content\SoundEffects\`，其中包括 `Tiny_Hammer_on_Stone` 和 `Birds` 目录下四个鸟叫。四轨音乐位于 `Content\Audio\Music\`。其余下载文件当前均不纳入游戏。
 
 | UE 资产 / 待导入源文件 | 来源文件 | 本游戏中的唯一用途 | 播放规则 |
 | --- | --- | --- | --- |
@@ -96,6 +117,10 @@ License(s): CC0
 | `pluck_001` | `kenney_interface-sounds\Audio\pluck_001.ogg` | 弹弓释放的短促 Snap 瞬态。 | 与 `Elastic_band_c_note` 同帧叠加，不循环。 |
 | `footstep_grass_000–002` | `kenney_impact-sounds\Audio\footstep_grass_000–002.ogg` | 草地、软土地表移动。 | 主控鸟落脚时随机选一个；跟随鸟不重复播放。 |
 | `footstep_wood_000–002` | `kenney_impact-sounds\Audio\footstep_wood_000–002.ogg` | 木桥、木质建筑/工作台地表移动。 | 主控鸟落脚时随机选一个。 |
+| `Birds/404729...chirp-5` | `404729` | 红鸟非语言短叫。 | 有效切换到红鸟、主控红鸟成功起跳时播放；按鸟限声。CC0。 |
+| `Birds/404725...chirp-3` | `404725` | 蓝鸟非语言短叫。 | 有效切换到蓝鸟、主控蓝鸟成功起跳时播放；按鸟限声。CC0。 |
+| `Birds/404726...chirp-2` | `404726` | 黄鸟非语言短叫。 | 有效切换到黄鸟、主控黄鸟成功起跳时播放；按鸟限声。CC0。 |
+| `Birds/404724...chirp-4` | `404724` | 黑鸟非语言短叫。 | 有效切换到黑鸟、主控黑鸟成功起跳时播放；按鸟限声。CC0。 |
 | `impactWood_light_000–002` | `kenney_impact-sounds\Audio\impactWood_light_000–002.ogg` | 轻质木结构的撞击。 | 这里的 `light` 表示**被撞物体较轻**，不是撞击力度；由物体材质/质量选择。 |
 | `impactWood_medium_000–002` | `kenney_impact-sounds\Audio\impactWood_medium_000–002.ogg` | 中等质量木结构的撞击。 | `medium` 表示被撞物体中等质量、音色更低沉。 |
 | `impactWood_heavy_000–002` | `kenney_impact-sounds\Audio\impactWood_heavy_000–002.ogg` | 重型木结构的撞击和倒塌。 | `heavy` 表示被撞物体较重、音色更低沉；仍以法向速度控制音量，不把档位当作力度档位。 |
@@ -127,5 +152,6 @@ License(s): CC0
 - [ ] 木、石、玻璃和金属的 `light/medium/heavy` 均按被撞物体质量选择；撞击速度只控制响度/触发阈值。
 - [ ] `Looped Rubber-y Stretch.wav` 在 Credits 中保留 CC BY 4.0 署名文本；如果不愿承担署名义务，则不要导入它，应改用 CC0 拉伸声或自制版本。
 - [x] `Elastic band c note.wav` 已作为基础音高层导入，最终音高由弹弓固有弦长驱动，释放 `PullAlpha` 只控制响度。
+- [x] OwlStorm 四个鸟叫已按许可证映射导入并由自动化验证均可加载；不需要额外 SoundWave 或 Blueprint 配置。
 - [ ] `select_002`、`switch7`、`rollover1` 和 `tick_001` 只在表内指定的 UI/安装事件触发。
 - [ ] 通过 Music、SFX、UI、Ambience 四个独立音量滑杆测试静音与混音。

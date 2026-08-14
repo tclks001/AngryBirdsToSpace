@@ -8,6 +8,9 @@
 #include "ABTSCraftingStation.generated.h"
 
 class UStaticMeshComponent;
+class UStaticMesh;
+class UMaterialInterface;
+class USceneComponent;
 
 /** M5 station query/click contract. M5.1 replaces placement and presentation. */
 UCLASS(BlueprintType)
@@ -21,6 +24,9 @@ public:
 	EABTSCraftingStationType GetStationType() const { return StationType; }
 	/** Used by the M5 runtime spawn owner before the station begins gameplay. */
 	void SetStationType(EABTSCraftingStationType InStationType);
+	/** Reapplies the current temporary PIE scale/Z override without moving the gameplay anchor. */
+	void RefreshVisualTuning();
+	const UStaticMeshComponent* GetVisualComponent() const { return Visual; }
 	void SetCellId(int32 InCellId) { CellId = InCellId; }
 	int32 GetCellId() const { return CellId; }
 	float GetUseRangeCM() const { return UseRangeCM; }
@@ -29,7 +35,23 @@ public:
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M5|Station")
+	TObjectPtr<USceneComponent> Root;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M5|Station")
 	TObjectPtr<UStaticMeshComponent> Visual;
+
+	/** Hard asset references resolved on the class default object during construction. */
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> WorkbenchMeshAsset;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> WorkbenchMaterialAsset;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> FurnaceMeshAsset;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> FurnaceMaterialAsset;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5|Station")
 	EABTSCraftingStationType StationType = EABTSCraftingStationType::Workbench;

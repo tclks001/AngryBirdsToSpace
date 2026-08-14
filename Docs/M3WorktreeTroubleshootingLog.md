@@ -17,7 +17,7 @@
 3. 只写已经实际遇到的问题或已经证明必要的诊断边界。尚未实现的功能、纯设计风险和普通开发进度不冒充故障。
 4. 每条记录注明修复归属。若问题属于 M7、M11 或 Integration，M3 只记录如何识别、如何同步修复，不越权修改共享契约。
 5. 验收证据必须来自本次修改后的 fresh 进程、唯一日志或可见 PIE；旧日志、Editor 已加载的 CDO 和单纯“编译了某个 `.cpp`”都不是闭环证据。
-6. 新条目使用第 10 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
+6. 新条目使用第 13 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
 
 ## 2. 快速索引
 
@@ -41,6 +41,7 @@
 | M3-X-001 | 建筑日志显示已生成，随后建筑消失，容易误判为 M3 漏生成 | 已建立 M7 Idle Reject 分诊规则 | M7；M3 只分诊 |
 | M3-T2B-001 | 风格语义若按名字、地图或位置识别，会随预览与生产身份漂移 | 已改为权威 Actor/组件/结果只读适配 | M3 |
 | M3-T2B-002 | M10 落点预览的 SceneCapture 没有跨模块稳定只读入口 | 已记录共享类型接线需求；M3 不越界绕过 | Integration/M10 |
+| M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化已通过；待可见 PIE | M3 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
 
 ## 3. 工作树、同步与构建
@@ -549,7 +550,35 @@ Material Graph 的连接身份同时包含源表达式和输出名。只保存�
 - 两项树石材质必须保持 `Used with Instanced Static Meshes=True`；
 - 资产生成失败时不得保存半张材质图，必须核对 `git status --short` 后修正并从唯一基线重试。
 
-## 11. 自动化与性能证据
+## 11. 阻断河连续几何
+
+### M3-RIVER-001：主线阻断河继承 Cell 级高频折角
+
+**现象**
+
+主线阻断河虽然语义上由一个理想球面大圆切面生成，画面却沿 350 条左右的 Voronoi dual 短边逐段左右摆动；DeepRiver 的粗线 SDF 把转角进一步放大成连续的“鼓包—收窄—鼓包”。M8 在任意河段架桥时忠实读取鼠标附近的单条可见河段，所以桥也跟随局部折角倾斜。
+
+**根因**
+
+Hydrology 只把“哪些 Cell 边跨越大圆切面”保存在 `FABTSM3CellEdgeState`，没有保留生成该割集的切面法线。`FABTSM3RiverVisualBuilder` 随后只能直接连接每条 Cell 边的两个 dual corner；闭合拓扑正确，但不规则 Cell 网格的离散误差成为可见中心线高频噪声。仅在材质端做模糊会让水面与 CPU SDF/M8 桥位再次分裂，不能作为最终修复。
+
+**修复**
+
+- Hydrology 为每条阻断河边记录同一个单位 `WaterBarrierPlaneNormal`，自然下游河段保持零向量；
+- 河段构建器保留原 dual corner 的共享拓扑和 `SourceEdgeKey`，再把两端确定性投影到该大圆切面；
+- Material LUT、CPU 地形/物理 SDF 与最新版 M8 单边语义桥位继续调用同一个 `BuildSegments()`，因此全量构建和单边查询得到同一条平滑线；
+- 不改变 `bBlocksOnFoot`、Crossing、RequiredKey、WaterType、河宽、BridgeEdge、可达性或冻结 Compatibility Snapshot Hash。
+
+**防回归验证**
+
+- fresh `ABTS.M3.RiverVisual.BarrierGreatCircleSmoothing` 要求每条水边保留唯一 Source Edge 映射，每条阻断边的起终点都落在同一大圆，且全量/单边构建结果相同；
+- `[ABTS][M3][RiverSDF]` 要求 `SmoothedBarrierSegments=BarrierDuals`、`BarrierSmoothingVersion=1`、`DroppedLocalRefs=0`；
+- `ABTS.Contracts.WorldGeneration` 与 `ABTS.M110.TaskGraphFinaleSeparation` 必须保持通过，证明稳定导出和 M9/Finale 分离未变；
+- 可见 `L_ABTS_M3` PIE 中，固定 Seed `312503` 的主线阻断河应呈连续低频大弧线，不再逐 Cell 左右摆动；桥面仍垂直跨河、两端落在不同河岸。NullRHI 不替代该视觉门。
+
+2026-08-14 fresh 证据：河流平滑 `1/1`、M8 语义桥位 `1/1`、Week One 确定性 `1/1`、世界生成契约 `2/2`、M9/Finale 分离 `1/1`；`L_ABTS_M3` NullRHI 为 `Segments=436 / FlowCenterlines=86 / BarrierDuals=350 / SmoothedBarrierSegments=350 / DroppedLocalRefs=0`。代码与数据门已通过，视觉状态仍明确保留为待用户 PIE。
+
+## 12. 自动化与性能证据
 
 ### M3-TEST-001：单次性能门越线不能被简单忽略或直接定性回归
 
@@ -571,7 +600,7 @@ Material Graph 的连接身份同时包含源表达式和输出名。只保存�
 - 不用完整测试中的第二次缓存运行替换 fresh 首次数据；
 - 重型构建、慢速认证和可见 PIE 按多工作树规范串行执行。
 
-## 12. 新条目模板
+## 13. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>

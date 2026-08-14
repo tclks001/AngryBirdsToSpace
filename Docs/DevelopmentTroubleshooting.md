@@ -21,6 +21,7 @@
 | --- | --- | --- | --- |
 | 添加 M1/M2 C++ 类后编辑器找不到类 | `.uproject` 未注册 Runtime 模块，或 Editor 使用旧 DLL。 | 在 `.uproject` 注册 `ABTSRuntime`，主模块明确依赖它；关闭编辑器后完整编译 `AngryBirdsToSpaceEditor Win64 Development`。 | 启动新 Editor 后在 Class Viewer 搜索 `ABTSM1GameMode`、`ABTSM2Planet`。 |
 | UE 5.8 编译 HUD 准星时报 `UCanvas` 没有 `DrawLine` | 调用了错误的绘制对象接口。 | 使用 `AHUD::DrawLine`，而不是 `UCanvas::DrawLine`。 | Development Editor 编译成功；PIE 有中心准星。 |
+| PIE 放置熔炉时在 `FObjectFinders can't be used outside of constructors` 处 Fatal | `AABTSCraftingStation::SetStationType` 在玩家点击后的运行时路径创建 `ConstructorHelpers::FObjectFinder`；该 API 只允许 UObject 构造阶段使用，因此工作台构造正常而熔炉首次切换必崩 | 在 `AABTSCraftingStation` 构造函数中一次性解析工作台/熔炉 Mesh 与 Material，并以 `UPROPERTY` 硬引用保存；`SetStationType` 只切换已经解析的对象，不做字符串加载或 ConstructorHelpers 调用 | UE 5.8 Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 全链接成功；fresh NullRHI `ABTS.M51.CraftingStation.RuntimeVisualSelection` 1/1，通过构造后的 Workbench → Furnace → Workbench 切换并核对实际资源路径；最终仍由用户在 PIE 放置 FurnaceKit 验证输入与画面层 |
 | 源文件职责膨胀 | 入口 GameMode 被当作玩法总线。 | 保持 `Game / Player / Planet / UI` 分目录；新玩法以独立组件或模块加入。 | 每个文件保持小于 600 行；M1/M2 不把 PCG、库存或鸟群实现塞进 GameMode。 |
 | 为注册项目 Global Shader，把整个 `ABTSRuntime` 改为 `PostConfigInit` 后 fresh Editor 在动画 CDO 构造阶段断言 `AnimationDataController` 未加载；同时 Scene View Extension 报 `GEngine` 尚未建立 | Global Shader 类型确实必须在引擎 Shader 初始化前注册，但 Gameplay Runtime 含大量 UObject 和内容构造链，不能整体提前加载；`PostConfigInit` 时也尚不满足 View Extension 的引擎生命周期前置条件 | 拆出不依赖 Gameplay/UObject 的轻量 `ABTSRender` 早加载模块，只在其中注册 Global Shader；`ABTSRuntime` 恢复 `Default`。View Extension 延迟到 `GetOnPostEngineInit()` 创建，关停时解绑委托并释放扩展 | UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 全链接；fresh `UnrealEditor-Cmd -NullRHI` 无 GEngine ensure、模块断言或 Critical Error；fresh D3D12 能编译项目 Shader 并完成 T0 A/B 截图与 ProfileGPU |
 | 日志显示四条音乐和 Sound Class/Sound Mix 均已加载、其他 SFX 可闻，但音乐始终静音 | 音乐组件先被 `SetVolumeMultiplier(0)` 设为基础静音，后续 `AdjustVolume` 调整的是独立 ActiveSound fader；两者相乘后仍为 0。音乐 SoundWave 的 `Restart` 虚拟化模式也无法保证静音轨持续推进 | 基础音量保持 1，用 `FadeIn(0, InitialTarget)` 启动各 stem；运行时将四轨设为 `PlayWhenSilent`，后续状态只用 `AdjustVolume` 淡变，并在 Ready 日志记录 Loaded/Components/Active/Targets | UE 5.8 ForceUnity 编译；`ABTS.Audio.ReleaseAndMusicMapping` fresh NullRHI 通过；资产只读检查确认四轨等长、Looping 开启且路径可加载。可听 PIE 仍须确认 Explore 首帧有 Harmony、状态切换不重启且循环无漂移；NullRHI 不替代听感门 |
@@ -100,6 +101,8 @@
 | --- | --- |
 | 简易弹弓配方锁死木材来源 | 简易弹弓只消耗树枝和石料；棱喙砍树才提供木材。 |
 | 河网纯视觉、主线被随机阻断或绕过 | 河段、道路与桥梁全部是 CellTopo 边状态；生成后按 Key 阶段运行可达性验证。 |
+| 河上点击架桥却因逻辑边中点与可见河段错位而反复拒绝 | 不用 CellA/CellB 中点代表所有河流。M8 复用 M3 河流表现语义：自然水流取中心流向线，阻断河取 Voronoi 对偶边，桥在鼠标对应的最近线段点垂直跨河。所有 `Water != None` 边均可选；唯一 `BridgeSite` 只保留为生成器认证主线，`BridgeBuilt` 契约不变。F7 以绿色显示认证点、黄色/橙色显示当前语义候选；日志记录 `Semantic`、瞄准距离/容差和可达距离。 |
+| 鸟能先走进河道才被中央空气墙挡住；建桥后只有桥中央窄缝可通行，跟随鸟会撞上相邻墙段 | 旧墙体以河流中心线为中心，但横向半厚度固定仅 `35 cm`，没有覆盖可见河宽；建桥又只关闭所选 Edge 的整块墙，相邻 Edge 的 `1.35x` 延长盒仍会侵入桥面。墙体横向范围改为 `VisibleWaterHalfWidth + BankSafetyMargin`，使 Pawn 在岸边即被阻止；建桥时以桥面有向矩形加鸟体/队形余量裁切所有相交墙段，把每段剩余碰撞重建为左右盒体，桥面上方整列放行而桥外河道继续阻挡。 | `ABTS.M8.BridgePlacement.WaterBarrierCoverage` 冻结岸边覆盖、桥宽加余量、相邻墙段共同裁切与桥外继续阻挡；2026-08-14 用户可见 PIE 已确认河岸阻挡位置正确，桥面及四鸟跟随队形均可连续通过。 |
 | 建筑在球面随意倾斜或相邻判定依赖世界距离 | 建筑固定于平缓 Cell 中心；朝向使用局部径向 Up；熔炉/工作台等联动只用 `NeighborCellIds`。 |
 | 青翎跨河采集绕过桥梁门 | 初版允许短时侦察、自动回归与信息解锁；不允许携带主线资源、建桥或完成关键配方。 |
 ### 河道呈六边形拼接
@@ -200,7 +203,7 @@
 | --- | --- | --- |
 | [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `20cceaeaa1069a8b1b2f12c71e4740890b989006`（2026-08-07，含 `M3-T3A1-001/002`） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
-| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `b3140451d4d8072008110ca645eb10a8f85574c6`（2026-08-07，含 `M11-T3A3-MAT-001/002`） |
+| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
 ### 13.2 跨阶段统一诊断顺序
 
@@ -255,6 +258,10 @@
 | 轨迹最终到达 UFO，但 `TargetHit` 早于第三次引力弹弓退出 | 事件顺序是认证语义的一部分，不能只检查“曾进入所有包络”。 | Core/CLI/Runtime 统一要求 `Assist3 Exit → TargetApproach → TargetHit`，错序命中归为失败。 |
 | 放大模型后出现视觉穿模，或统一缩放后候选失效 | `VisualRadius`、解析 `CollisionRadius`、`InfluenceRadius` 职责不同；离散积分、角域、步长、事件阈值和评分也破坏简单相似缩放。 | 尺度变化后重新跑 Core parity、扫掠、事件、Hull 和完整域认证；最小近掠距离包含鸟体净空，候选 Hash 改变。 |
 | HUD 控件绘制位置与点击热区偏移，或全览图元溢出圆框 | 输入必须依次转换 raw viewport、`UnscaledViewRect` origin/size、DPI 和 Canvas logical space；所有线、圆、文本和 hit test 共用变换与圆裁剪。 | 自动化覆盖 DPI≠1、非零 viewport origin 和线宽/文本 bounds；可见 PIE 改窗口尺寸后仍像素对齐。 |
+| 终局 HUD 被继承热栏覆盖，或布局、绘制与命中盒各自维护坐标后逐渐漂移 | 独占交互状态应独占 HUD 合成；退出后再恢复父 HUD。顶部任务条、轨道盘、控制台和目标监视器由同一个纯数据布局结果驱动绘制与 hit test，颜色只消费共享 Theme，诊断 Hash/延迟由 Debug Overlay 显式开启。 | `ABTS.M11C.HUD.Unit` 与 `ABTS.M11D.HUD.Unit` 覆盖多分辨率安全区、面板不相交和命中盒一致性；含真实 AHUD 的 GameViewport 离屏截图只作像素诊断，正式点击、拖动与手感仍由可见 PIE 验收。详见 `M11-UI-001/002`、`M11-CAP-HUD-001`。 |
+| Canvas 截角面板仍露出矩形方角，或三角扇在真实 RHI 触发纹理断言 | 描边不会裁剪先画出的矩形底色；填充必须使用与描边相同的凸多边形顶点，并给 `FCanvasTriangleItem` 提供有效的 `Canvas->DefaultTexture`。资源异常时跳过填充并保留描边，不能让运行时崩溃。 | ForceUnity 与 NullRHI 只能证明编译和合同；还须 fresh 真实 RHI 截图检查全部截角，并保留失败轮次。详见 `M11-UI-005`。 |
+| 生成式 UI 图标直接作为 Atlas/透明图导入后出现绿边、串格、缩放噪点或运行时风格漂移 | 生成式图表只作为 SourceArt；先用统一色键生成互不接触的单元，再去色键、裁主体、等比放入统一透明画布，每个图标独立导入。运行时按钮框、状态色与禁用态仍由共享 Theme 绘制，位图只承担象形内容，失载时文字 fail soft。 | 源 PNG 检查 RGBA、透明角和主体包围盒；UE 二次重载检查 Texture2D 为统一尺寸、`TEXTUREGROUP_UI`、无 Mip、sRGB、NeverStream/合适采样，并用真实 HUD 截图排除绿边和错误映射。详见 `M11-UI-003`、`M11-ASSET-001`。 |
+| 子系统接管滚轮或拖拽时出现方向反转，松开后光标被旧父级绑定送回历史位置 | 输入符号只在具体消费分支转换，禁止控制器和 HUD 双重取反；独占状态期间应临时挂起同动作的继承 Release 绑定，只安装本系统处理，退出时按原顺序恢复。不得只删除本地 `SetMouseLocation` 而忽略父级释放链。 | 纯函数断言滚轮正负倍率；绑定自动化断言 Press/无关绑定保持、冲突 Release 隔离且退出后恢复；最终由可见 PIE 验证拖拽释放位置和滚轮手感。详见 `M11-UI-008/009`。 |
 | T2-B 按名称、模型、距离或当前 PIP 目标推断终局类别，或 M11 自行给远端捕获应用风格 | 终局语义只来自当前已提交布局及系统实际持有的表现 Actor：Assist1/2/3 为 `FinalePlanet`，Target 为 `FinaleUFO`；主星、普通卫星、候选辅助物和二维图元均 fail closed。M11 只以 const 入口暴露既有远端 SceneCapture 并声明 `FinaleRemotePreview`，不消费 Profile、Stencil 或后处理。 | `ABTS.M11B.Runtime.StylizedSemanticAdapter` 覆盖生产 3+1、候选兼容、未知对象、销毁重建、Core Result/事件/认证 Hash 不变，以及捕获接口不改变相机和生命周期；Integration 后续负责实际 Profile/PIP 像素门。详见 `M11-T2B-RO-001`。 |
 | 发射后鸟/UFO 在远景中不可读 | 当前仅确认可能由 Flight Camera lag 和共享雾/云叠加造成，仍是开放项；不得把推断写成已修复。 | 分别做无 lag、无雾云和同时修改的 fresh 可见 PIE A/B；共享天空/地图修改仍由集成工作树执行。 |
 

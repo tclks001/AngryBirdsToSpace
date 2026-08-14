@@ -59,6 +59,27 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Assets|Explosion")
 	TSoftObjectPtr<USoundBase> ExplosionLowTail;
 
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Bird")
+	TSoftObjectPtr<USoundBase> RedBirdChirp;
+
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Bird")
+	TSoftObjectPtr<USoundBase> BlueBirdChirp;
+
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Bird")
+	TSoftObjectPtr<USoundBase> YellowBirdChirp;
+
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Bird")
+	TSoftObjectPtr<USoundBase> BlackBirdChirp;
+
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Locomotion")
+	TArray<TSoftObjectPtr<USoundBase>> GrassFootsteps;
+
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Locomotion")
+	TArray<TSoftObjectPtr<USoundBase>> WoodFootsteps;
+
+	UPROPERTY(Config, EditAnywhere, Category="Assets|Pickup")
+	TSoftObjectPtr<USoundBase> Pickup;
+
 	UPROPERTY(Config, EditAnywhere, Category="Assets|UI")
 	TSoftObjectPtr<USoundBase> UIOpen;
 
@@ -115,4 +136,7 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category="Impact", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float ImpactCooldownSeconds = 0.08f;
+
+	UPROPERTY(Config, EditAnywhere, Category="Bird", meta=(ClampMin="0.0", ClampMax="2.0"))
+	float BirdChirpCooldownSeconds = 0.18f;
 };

@@ -3,7 +3,9 @@
 #include "Player/ABTSM25BirdCharacter.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -16,6 +18,7 @@
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSRadialSurfaceSuspensionComponent.h"
 #include "Planet/ABTSM2SphericalSurfaceComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Presentation/ABTSBirdAnimationPresentationComponent.h"
 #include "Player/ABTSM4PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
@@ -68,6 +71,7 @@ void AABTSM25BirdCharacter::BeginPlay()
 	}
 	ApplyCuteBirdMaterials();
 	UpdateBirdAnimationPresentation(0.0f);
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 }
 
 void AABTSM25BirdCharacter::Tick(const float DeltaSeconds)
@@ -85,6 +89,7 @@ void AABTSM25BirdCharacter::Tick(const float DeltaSeconds)
 		UpdateChaosVisualFrame(DeltaSeconds);
 	}
 	UpdateBirdAnimationPresentation(DeltaSeconds);
+	UpdateBirdLocomotionAudio(DeltaSeconds);
 	if (ControlDiagnosticRemainingSeconds <= 0.0f) return;
 	ControlDiagnosticRemainingSeconds = FMath::Max(0.0f, ControlDiagnosticRemainingSeconds - DeltaSeconds);
 	ControlDiagnosticLogAccumulator += DeltaSeconds;
@@ -98,6 +103,7 @@ void AABTSM25BirdCharacter::Tick(const float DeltaSeconds)
 void AABTSM25BirdCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 	UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M4][HandoffDiag][Possessed] Bird=%d Controller=%s Pawn=%s Flag=%d"),
 		ABTSBirdIdToIndex(BirdId), *GetNameSafe(NewController), *GetNameSafe(NewController ? NewController->GetPawn() : nullptr), bPartyControlled ? 1 : 0);
 }
@@ -107,6 +113,7 @@ void AABTSM25BirdCharacter::UnPossessed()
 	UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M4][HandoffDiag][UnPossessed] Bird=%d Controller=%s Flag=%d"),
 		ABTSBirdIdToIndex(BirdId), *GetNameSafe(Controller), bPartyControlled ? 1 : 0);
 	Super::UnPossessed();
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 }
 
 void AABTSM25BirdCharacter::ConfigureMovementMode()
@@ -309,6 +316,7 @@ void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, co
 	ForceMovement->EndBallisticFlight(true);
 	ForceMovement->SetComponentTickEnabled(false);
 	SetActorLocationAndRotation(WorldLocation, WorldRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 }
 
 void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, const float FlightAirDragPerSecond)
@@ -320,10 +328,12 @@ void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, 
 		ChaosMovement->SetChaosEnabled(true);
 		ChaosMovement->SetComponentTickEnabled(true);
 		ChaosMovement->BeginBallisticFlight(InitialVelocity, FlightAirDragPerSecond);
+		ResetBirdLocomotionAudio(IsRadiallyGrounded());
 		return;
 	}
 	ForceMovement->SetComponentTickEnabled(true);
 	ForceMovement->BeginBallisticFlight(InitialVelocity, FlightAirDragPerSecond);
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 }
 
 void AABTSM25BirdCharacter::BeginSlingshotReturn()
@@ -337,6 +347,7 @@ void AABTSM25BirdCharacter::BeginSlingshotReturn()
 	}
 	ForceMovement->EndBallisticFlight(true);
 	ForceMovement->SetComponentTickEnabled(false);
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 }
 
 void AABTSM25BirdCharacter::FinishSlingshotReturn()
@@ -348,10 +359,12 @@ void AABTSM25BirdCharacter::FinishSlingshotReturn()
 		ChaosMovement->SetChaosEnabled(true);
 		ChaosMovement->SetComponentTickEnabled(true);
 		ChaosMovement->EndBallisticFlight(true);
+		ResetBirdLocomotionAudio(IsRadiallyGrounded());
 		return;
 	}
 	ForceMovement->SetComponentTickEnabled(true);
 	ForceMovement->EndBallisticFlight(true);
+	ResetBirdLocomotionAudio(IsRadiallyGrounded());
 }
 
 void AABTSM25BirdCharacter::SetSlingshotVelocity(const FVector& InVelocity)
@@ -595,6 +608,7 @@ void AABTSM25BirdCharacter::ProcessRadialJump(const bool bControllerRouted)
 	const bool bAccepted = Controller != nullptr && IsLocallyControlled();
 	if (IsControlHandoffDiagnosticsActive()) UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M4][HandoffDiag][%sJump] Bird=%d Accepted=%d Controller=%s Grounded=%d"), bControllerRouted ? TEXT("ControllerRouted") : TEXT("Player"), ABTSBirdIdToIndex(BirdId), bAccepted ? 1 : 0, *GetNameSafe(Controller), IsRadiallyGrounded() ? 1 : 0);
 	if (!bAccepted) return;
+	const bool bAudioEligibleJump = IsRadiallyGrounded();
 	if (IsClearMotionBeforePlayerJumpExperimentEnabled())
 	{
 		ApplyClearMotionBeforeJumpExperiment();
@@ -608,6 +622,10 @@ void AABTSM25BirdCharacter::ProcessRadialJump(const bool bControllerRouted)
 		RadialMovement->QueueJump();
 	}
 	else ChaosMovement->QueueJump();
+	if (bAudioEligibleJump)
+	{
+		PendingPlayerJumpAudioSeconds = 0.35f;
+	}
 }
 
 FVector AABTSM25BirdCharacter::GetPresentationVelocity() const
@@ -774,6 +792,146 @@ void AABTSM25BirdCharacter::UpdateBirdAnimationPresentation(const float DeltaSec
 	Snapshot.bForceFlight = IsSlingshotFlightActive();
 	Snapshot.TangentialSpeedCMPerSecond = FVector::VectorPlaneProject(Velocity, Up).Size();
 	BirdAnimationPresentation->UpdatePresentation(Snapshot, DeltaSeconds);
+}
+
+void AABTSM25BirdCharacter::ResetBirdLocomotionAudio(const bool bGrounded)
+{
+	bLocomotionAudioInitialized = true;
+	bLocomotionAudioWasGrounded = bGrounded;
+	PreviousLocomotionAudioLocation = GetActorLocation();
+	AccumulatedFootstepDistanceCM = 0.0f;
+	PeakAirborneDownwardSpeedCMPerSec = 0.0f;
+	PendingPlayerJumpAudioSeconds = 0.0f;
+}
+
+EABTSFootstepSurface AABTSM25BirdCharacter::ResolveFootstepSurface(const FVector& WorldUp) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr) return EABTSFootstepSurface::Grass;
+	const FVector SafeUp = WorldUp.IsNearlyZero() ? GetActorUpVector() : WorldUp.GetSafeNormal();
+	const float TraceDepthCM = (GetCapsuleComponent()
+		? GetCapsuleComponent()->GetScaledCapsuleHalfHeight()
+		: 60.0f) + 140.0f;
+	FHitResult Hit;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ABTSBirdFootstepSurface), false, this);
+	QueryParams.bReturnPhysicalMaterial = true;
+	if (!World->LineTraceSingleByChannel(
+		Hit,
+		GetActorLocation() + SafeUp * 20.0f,
+		GetActorLocation() - SafeUp * TraceDepthCM,
+		ECC_Visibility,
+		QueryParams))
+	{
+		return EABTSFootstepSurface::Grass;
+	}
+
+	FString SemanticName;
+	if (const UPhysicalMaterial* PhysicalMaterial = Hit.PhysMaterial.Get())
+	{
+		SemanticName += PhysicalMaterial->GetName();
+	}
+	if (const UPrimitiveComponent* HitComponent = Hit.GetComponent())
+	{
+		SemanticName += TEXT(" ") + HitComponent->GetName();
+		SemanticName += TEXT(" ") + HitComponent->GetClass()->GetName();
+		for (int32 MaterialIndex = 0; MaterialIndex < HitComponent->GetNumMaterials(); ++MaterialIndex)
+		{
+			if (const UMaterialInterface* Material = HitComponent->GetMaterial(MaterialIndex))
+			{
+				SemanticName += TEXT(" ") + Material->GetName();
+			}
+		}
+	}
+	if (const AActor* HitActor = Hit.GetActor())
+	{
+		SemanticName += TEXT(" ") + HitActor->GetName();
+		SemanticName += TEXT(" ") + HitActor->GetClass()->GetName();
+	}
+	return UABTSAudioWorldSubsystem::ResolveFootstepSurfaceFromSemanticName(SemanticName);
+}
+
+void AABTSM25BirdCharacter::UpdateBirdLocomotionAudio(const float DeltaSeconds)
+{
+	const bool bGrounded = IsRadiallyGrounded();
+	const FVector CurrentLocation = GetActorLocation();
+	const bool bEligible = Controller != nullptr
+		&& IsLocallyControlled()
+		&& !IsSlingshotFlightActive();
+	if (!bLocomotionAudioInitialized || !bEligible)
+	{
+		ResetBirdLocomotionAudio(bGrounded);
+		return;
+	}
+
+	PendingPlayerJumpAudioSeconds = FMath::Max(
+		0.0f,
+		PendingPlayerJumpAudioSeconds - FMath::Max(0.0f, DeltaSeconds));
+	const FVector WorldUp = bPlanarChaosMode
+		? ChaosMovement->GetMovementUpAt(CurrentLocation)
+		: GetSphericalSurface()->GetRadialUp();
+	const FVector Velocity = GetPresentationVelocity();
+	const float TangentialSpeedCMPerSec = FVector::VectorPlaneProject(Velocity, WorldUp).Size();
+	const float DownwardSpeedCMPerSec = FMath::Max(0.0f, -FVector::DotProduct(Velocity, WorldUp));
+	UABTSAudioWorldSubsystem* Audio = GetWorld()
+		? GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>()
+		: nullptr;
+
+	if (!bGrounded)
+	{
+		PeakAirborneDownwardSpeedCMPerSec = FMath::Max(
+			PeakAirborneDownwardSpeedCMPerSec,
+			DownwardSpeedCMPerSec);
+	}
+	if (bLocomotionAudioWasGrounded && !bGrounded)
+	{
+		AccumulatedFootstepDistanceCM = 0.0f;
+		if (Audio && PendingPlayerJumpAudioSeconds > 0.0f)
+		{
+			Audio->PlayBirdChirp(CurrentLocation, BirdId, 0.62f);
+		}
+		PendingPlayerJumpAudioSeconds = 0.0f;
+	}
+	else if (!bLocomotionAudioWasGrounded && bGrounded)
+	{
+		if (Audio)
+		{
+			Audio->PlayLanding(
+				CurrentLocation,
+				ResolveFootstepSurface(WorldUp),
+				PeakAirborneDownwardSpeedCMPerSec);
+		}
+		AccumulatedFootstepDistanceCM = 0.0f;
+		PeakAirborneDownwardSpeedCMPerSec = 0.0f;
+	}
+	else if (bGrounded)
+	{
+		const float TangentialTravelCM = FVector::VectorPlaneProject(
+			CurrentLocation - PreviousLocomotionAudioLocation,
+			WorldUp).Size();
+		if (TangentialSpeedCMPerSec >= 60.0f && TangentialTravelCM <= 220.0f)
+		{
+			AccumulatedFootstepDistanceCM += TangentialTravelCM;
+			const float StepSpacingCM = UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(
+				TangentialSpeedCMPerSec);
+			if (Audio && AccumulatedFootstepDistanceCM >= StepSpacingCM)
+			{
+				Audio->PlayFootstep(
+					CurrentLocation,
+					ResolveFootstepSurface(WorldUp),
+					TangentialSpeedCMPerSec);
+				AccumulatedFootstepDistanceCM = FMath::Fmod(
+					AccumulatedFootstepDistanceCM,
+					StepSpacingCM);
+			}
+		}
+		else if (TangentialSpeedCMPerSec < 60.0f || TangentialTravelCM > 220.0f)
+		{
+			AccumulatedFootstepDistanceCM = 0.0f;
+		}
+	}
+
+	bLocomotionAudioWasGrounded = bGrounded;
+	PreviousLocomotionAudioLocation = CurrentLocation;
 }
 
 void AABTSM25BirdCharacter::RequestBirdPresentationAction(const EABTSBirdPresentationAction Action)
