@@ -14,12 +14,16 @@ struct FABTSM3RiverVisualSegment
 	float HalfWidthCM = 0.0f;
 	EABTSM3WaterEdgeType WaterType = EABTSM3WaterEdgeType::None;
 	EABTSM3TransportType TransportType = EABTSM3TransportType::None;
+	FABTSM3CellEdgeKey SourceEdgeKey;
+	bool bBarrierCenterlineProjected = false;
 };
 
 /** Converts logical water edges into presentation centerlines without changing gameplay data. */
 class ABTSRUNTIME_API FABTSM3RiverVisualBuilder
 {
 public:
+	static constexpr int32 BarrierSmoothingVersion = 1;
+
 	static void BuildSegments(
 		const TArray<FABTSM2Cell>& Cells,
 		const TArray<FABTSM3CellEdgeState>& EdgeStates,

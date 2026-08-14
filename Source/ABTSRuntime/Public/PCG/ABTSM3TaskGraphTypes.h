@@ -175,6 +175,15 @@ struct FABTSM3CellEdgeState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	float FlowAccumulation = 0.0f;
 
+	/**
+	 * Unit normal of the ideal great-circle cut used by a blocking river edge.
+	 * It remains zero for ordinary downstream flow edges. Presentation, surface
+	 * queries and semantic bridge placement project the edge's dual corners onto
+	 * this plane so every consumer uses the same low-frequency centerline.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
+	FVector WaterBarrierPlaneNormal = FVector::ZeroVector;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	bool bBlocksOnFoot = false;
 };

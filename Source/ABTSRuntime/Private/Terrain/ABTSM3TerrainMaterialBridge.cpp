@@ -171,6 +171,11 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 	FABTSM3RiverVisualBuilder::BuildSegments(Cells, EdgeStates, StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM, RiverSegments);
 	int32 FlowCenterlineSegments = 0;
 	int32 BarrierDualSegments = 0;
+	int32 SmoothedBarrierSegments = 0;
+	for (const FABTSM3RiverVisualSegment& Segment : RiverSegments)
+	{
+		SmoothedBarrierSegments += Segment.bBarrierCenterlineProjected ? 1 : 0;
+	}
 	for (const FABTSM3CellEdgeState& Edge : EdgeStates)
 	{
 		if (Edge.Water == EABTSM3WaterEdgeType::None) continue;
@@ -250,8 +255,8 @@ bool UABTSM3TerrainMaterialBridge::Initialize(
 			*GetNameSafe(SourceMaterial));
 	}
 	Surface->SetMaterial(0, TerrainMID);
-	UE_LOG(LogTemp, Log, TEXT("[ABTS][M3][RiverSDF] Segments=%d FlowCenterlines=%d BarrierDuals=%d TextureWidth=%d DroppedLocalRefs=%d StreamHalfWidth=%.1f ShallowHalfWidth=%.1f DeepHalfWidth=%.1f"),
-		RiverSegments.Num(), FlowCenterlineSegments, BarrierDualSegments, RiverTextureWidth, DroppedRiverReferences,
+	UE_LOG(LogTemp, Log, TEXT("[ABTS][M3][RiverSDF] Segments=%d FlowCenterlines=%d BarrierDuals=%d SmoothedBarrierSegments=%d BarrierSmoothingVersion=%d TextureWidth=%d DroppedLocalRefs=%d StreamHalfWidth=%.1f ShallowHalfWidth=%.1f DeepHalfWidth=%.1f"),
+		RiverSegments.Num(), FlowCenterlineSegments, BarrierDualSegments, SmoothedBarrierSegments, FABTSM3RiverVisualBuilder::BarrierSmoothingVersion, RiverTextureWidth, DroppedRiverReferences,
 		StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM);
 	UE_LOG(LogTemp, Log, TEXT("[ABTS][M3][LinearSDF] RoadSegments=%d TerrainFeatures=%d RoadTextureWidth=%d TerrainTextureWidth=%d DroppedRoadRefs=%d PrunedTerrainRefs=%d TerrainRings=3 TerrainSlots=32"),
 		RoadSegments.Num(), TerrainFeatures.Num(), RoadTextureWidth, BoundaryTextureWidth,

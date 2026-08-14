@@ -12,6 +12,30 @@ float ResolveHalfWidthCM(const EABTSM3WaterEdgeType Type, const float Stream, co
 	if (Type == EABTSM3WaterEdgeType::DeepRiver || Type == EABTSM3WaterEdgeType::LakeShore) return Deep;
 	return Stream;
 }
+
+bool ProjectABTSM3BarrierDualOntoGreatCircle(
+	const FVector& BarrierPlaneNormal,
+	FVector& InOutStartUnit,
+	FVector& InOutEndUnit)
+{
+	const FVector UnitPlaneNormal = BarrierPlaneNormal.GetSafeNormal();
+	if (UnitPlaneNormal.IsNearlyZero()) return false;
+	const FVector ProjectedStart = FVector::VectorPlaneProject(
+		InOutStartUnit,
+		UnitPlaneNormal).GetSafeNormal();
+	const FVector ProjectedEnd = FVector::VectorPlaneProject(
+		InOutEndUnit,
+		UnitPlaneNormal).GetSafeNormal();
+	if (ProjectedStart.IsNearlyZero()
+		|| ProjectedEnd.IsNearlyZero()
+		|| ProjectedStart.Equals(ProjectedEnd, KINDA_SMALL_NUMBER))
+	{
+		return false;
+	}
+	InOutStartUnit = ProjectedStart;
+	InOutEndUnit = ProjectedEnd;
+	return true;
+}
 }
 
 void FABTSM3RiverVisualBuilder::BuildSegments(
@@ -30,6 +54,7 @@ void FABTSM3RiverVisualBuilder::BuildSegments(
 		FABTSM3RiverVisualSegment Segment;
 		Segment.HalfWidthCM = ResolveHalfWidthCM(Edge.Water, StreamHalfWidthCM, ShallowRiverHalfWidthCM, DeepRiverHalfWidthCM);
 		Segment.WaterType = Edge.Water;
+		Segment.SourceEdgeKey = Edge.Key;
 
 		if (Edge.DownstreamCellId != INDEX_NONE && !Edge.bBlocksOnFoot)
 		{
@@ -50,6 +75,11 @@ void FABTSM3RiverVisualBuilder::BuildSegments(
 			if (CommonNeighbors.Num() != 2) continue;
 			Segment.StartUnit = (Cells[Edge.Key.CellA].UnitCenter + Cells[Edge.Key.CellB].UnitCenter + Cells[CommonNeighbors[0]].UnitCenter).GetSafeNormal();
 			Segment.EndUnit = (Cells[Edge.Key.CellA].UnitCenter + Cells[Edge.Key.CellB].UnitCenter + Cells[CommonNeighbors[1]].UnitCenter).GetSafeNormal();
+			Segment.bBarrierCenterlineProjected =
+				ProjectABTSM3BarrierDualOntoGreatCircle(
+					Edge.WaterBarrierPlaneNormal,
+					Segment.StartUnit,
+					Segment.EndUnit);
 		}
 		OutSegments.Add(Segment);
 	}
@@ -67,6 +97,7 @@ void FABTSM3RiverVisualBuilder::BuildRoadSegments(
 	{
 		if (Edge.Transport == EABTSM3TransportType::None || !Cells.IsValidIndex(Edge.Key.CellA) || !Cells.IsValidIndex(Edge.Key.CellB)) continue;
 		FABTSM3RiverVisualSegment& Segment = OutSegments.AddDefaulted_GetRef();
+		Segment.SourceEdgeKey = Edge.Key;
 		Segment.StartUnit = Cells[Edge.Key.CellA].UnitCenter;
 		Segment.EndUnit = Cells[Edge.Key.CellB].UnitCenter;
 		Segment.HalfWidthCM = Edge.Transport == EABTSM3TransportType::MainRoad ? MainRoadHalfWidthCM : TrailHalfWidthCM;
