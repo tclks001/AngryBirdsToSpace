@@ -22,11 +22,6 @@ namespace
 	const FName QuantityPlusTen(TEXT("ABTS_M5_QtyPlus10"));
 	const FName QuantityCraft(TEXT("ABTS_M5_QtyCraft"));
 	const FName QuantityCancel(TEXT("ABTS_M5_QtyCancel"));
-	constexpr float HotbarSlotSize = 78.0f;
-	constexpr float InventoryRowHeight = 46.0f;
-	constexpr float InventoryCellHeight = 42.0f;
-	constexpr float RecipeRowHeight = 66.0f;
-
 	int32 EvaluationSortRank(const FABTSCraftingEvaluation& Value)
 	{
 		// Red-bird ownership is a global crafting permission and must not destroy
@@ -42,6 +37,7 @@ void AABTSM5InventoryHUD::DrawHUD()
 	Super::DrawHUD();
 	AABTSCraftingSystem* System = FindCraftingSystem();
 	if (Canvas == nullptr || System == nullptr) return;
+	ActiveTheme = FABTSUITheme::Get();
 	DrawHotbar(*System);
 	if (const AABTSM5PlayerController* Controller = GetM5Controller(); Controller && Controller->IsCraftingInterfaceOpen())
 	{
@@ -51,15 +47,21 @@ void AABTSM5InventoryHUD::DrawHUD()
 
 void AABTSM5InventoryHUD::DrawPanel(const FVector2D& Origin, const FVector2D& Size, const FLinearColor& Color) const
 {
-	Canvas->K2_DrawTexture(Canvas->DefaultTexture, Origin, Size, FVector2D::ZeroVector, FVector2D::UnitVector, Color);
+	Canvas->K2_DrawTexture(Canvas->DefaultTexture, Origin, Size, FVector2D::ZeroVector, FVector2D::UnitVector,
+		ActiveTheme.ApplyOpacity(Color));
 }
 
 void AABTSM5InventoryHUD::DrawCell(const FVector2D& Origin, const FVector2D& Size, const FLinearColor& Color) const
 {
 	Canvas->K2_DrawTexture(Canvas->DefaultTexture, Origin, Size, FVector2D::ZeroVector, FVector2D::UnitVector,
-		FLinearColor(0.035f, 0.035f, 0.045f, 0.96f));
-	Canvas->K2_DrawTexture(Canvas->DefaultTexture, Origin + FVector2D(3.0f), Size - FVector2D(6.0f),
-		FVector2D::ZeroVector, FVector2D::UnitVector, Color);
+		ActiveTheme.ApplyOpacity(ActiveTheme.SlotBorder));
+	const float MaxInset = FMath::Min(Size.X, Size.Y) * 0.25f;
+	const float BorderInset = FMath::Min(ActiveTheme.BorderThicknessPx, MaxInset);
+	Canvas->K2_DrawTexture(Canvas->DefaultTexture, Origin + FVector2D(BorderInset), Size - FVector2D(BorderInset * 2.0f),
+		FVector2D::ZeroVector, FVector2D::UnitVector, ActiveTheme.ApplyOpacity(ActiveTheme.PanelBorder));
+	const float FillInset = FMath::Min(BorderInset + ActiveTheme.CellInsetPx, MaxInset);
+	Canvas->K2_DrawTexture(Canvas->DefaultTexture, Origin + FVector2D(FillInset), Size - FVector2D(FillInset * 2.0f),
+		FVector2D::ZeroVector, FVector2D::UnitVector, ActiveTheme.ApplyOpacity(Color));
 }
 
 FName AABTSM5InventoryHUD::MakeHotbarName(const int32 Slot) const
@@ -82,6 +84,7 @@ void AABTSM5InventoryHUD::DrawHotbar(AABTSCraftingSystem& System)
 	const UABTSInventoryComponent* Inventory = System.GetInventory();
 	if (Inventory == nullptr || GEngine == nullptr) return;
 	const int32 SlotCount = Inventory->GetHotbarSlotCount();
+	const float HotbarSlotSize = ActiveTheme.HotbarSlotSizePx;
 	const float SlotStripWidth = SlotCount * HotbarSlotSize;
 	const float BagWidth = 76.0f;
 	const float HeldGap = 18.0f;
@@ -89,56 +92,56 @@ void AABTSM5InventoryHUD::DrawHotbar(AABTSCraftingSystem& System)
 	const FVector2D BarOrigin((Canvas->ClipX - TotalWidth) * 0.5f, Canvas->ClipY - HotbarSlotSize - 20.0f);
 	const FVector2D BagOrigin = BarOrigin;
 	const FVector2D Origin = BagOrigin + FVector2D(BagWidth + 8.0f, 0.0f);
-	DrawCell(BagOrigin, FVector2D(BagWidth, HotbarSlotSize), FLinearColor(0.12f, 0.16f, 0.25f, 0.96f));
-	DrawText(TEXT("BAG"), FLinearColor::White, BagOrigin.X + 18.0f, BagOrigin.Y + 26.0f,
-		GEngine->GetSmallFont(), 1.0f, false);
+	DrawCell(BagOrigin, FVector2D(BagWidth, HotbarSlotSize), ActiveTheme.PanelSecondary);
+	DrawText(TEXT("BAG"), ActiveTheme.TextPrimary, BagOrigin.X + 18.0f, BagOrigin.Y + 26.0f,
+		GEngine->GetSmallFont(), ActiveTheme.TextScale, false);
 	AddHitBox(BagOrigin, FVector2D(BagWidth, HotbarSlotSize), InventoryHitBox, true, 25);
 	for (int32 Slot = 0; Slot < SlotCount; ++Slot)
 	{
 		const FVector2D CellOrigin = Origin + FVector2D(Slot * HotbarSlotSize, 0.0f);
-		DrawCell(CellOrigin, FVector2D(HotbarSlotSize), FLinearColor(0.16f, 0.17f, 0.20f, 0.96f));
+		DrawCell(CellOrigin, FVector2D(HotbarSlotSize), ActiveTheme.SlotNormal);
 		EABTSItemId ItemId;
 		if (Inventory->GetHotbarItemAt(Slot, ItemId))
 		{
-			DrawText(ABTSGetItemFallbackLabel(ItemId), FLinearColor::White,
-				CellOrigin.X + 7.0f, CellOrigin.Y + 12.0f, GEngine->GetSmallFont(), 0.82f, false);
-			DrawText(FString::FromInt(Inventory->GetQuantity(ItemId)), FLinearColor(1.0f, 0.9f, 0.32f),
-				CellOrigin.X + 55.0f, CellOrigin.Y + 52.0f, GEngine->GetSmallFont(), 0.9f, false);
+			DrawText(ABTSGetItemFallbackLabel(ItemId), ActiveTheme.TextPrimary,
+				CellOrigin.X + 7.0f, CellOrigin.Y + 12.0f, GEngine->GetSmallFont(), 0.82f * ActiveTheme.TextScale, false);
+			DrawText(FString::FromInt(Inventory->GetQuantity(ItemId)), ActiveTheme.CountAccent,
+				CellOrigin.X + HotbarSlotSize - 23.0f, CellOrigin.Y + HotbarSlotSize - 26.0f, GEngine->GetSmallFont(), 0.9f * ActiveTheme.TextScale, false);
 		}
 		AddHitBox(CellOrigin, FVector2D(HotbarSlotSize), MakeHotbarName(Slot), true, 20);
 	}
 	const FVector2D HeldOrigin = Origin + FVector2D(SlotStripWidth + HeldGap, 0.0f);
-	DrawCell(HeldOrigin, FVector2D(HotbarSlotSize), FLinearColor(0.28f, 0.19f, 0.08f, 0.98f));
+	DrawCell(HeldOrigin, FVector2D(HotbarSlotSize), ActiveTheme.SlotHeld);
 	EABTSItemId HeldItemId;
 	if (Inventory->GetHeldItem(HeldItemId))
 	{
-		DrawText(ABTSGetItemFallbackLabel(HeldItemId), FLinearColor::White,
-			HeldOrigin.X + 7.0f, HeldOrigin.Y + 12.0f, GEngine->GetSmallFont(), 0.78f, false);
-		DrawText(FString::FromInt(Inventory->GetQuantity(HeldItemId)), FLinearColor(1.0f, 0.9f, 0.32f),
-			HeldOrigin.X + 55.0f, HeldOrigin.Y + 52.0f, GEngine->GetSmallFont(), 0.9f, false);
+		DrawText(ABTSGetItemFallbackLabel(HeldItemId), ActiveTheme.TextPrimary,
+			HeldOrigin.X + 7.0f, HeldOrigin.Y + 12.0f, GEngine->GetSmallFont(), 0.78f * ActiveTheme.TextScale, false);
+		DrawText(FString::FromInt(Inventory->GetQuantity(HeldItemId)), ActiveTheme.CountAccent,
+			HeldOrigin.X + HotbarSlotSize - 23.0f, HeldOrigin.Y + HotbarSlotSize - 26.0f, GEngine->GetSmallFont(), 0.9f * ActiveTheme.TextScale, false);
 	}
 	else
 	{
-		DrawText(TEXT("HELD"), FLinearColor(0.7f, 0.7f, 0.74f), HeldOrigin.X + 18.0f, HeldOrigin.Y + 27.0f,
-			GEngine->GetSmallFont(), 0.86f, false);
+		DrawText(TEXT("HELD"), ActiveTheme.TextMuted, HeldOrigin.X + 18.0f, HeldOrigin.Y + 27.0f,
+			GEngine->GetSmallFont(), 0.86f * ActiveTheme.TextScale, false);
 	}
 	AddHitBox(HeldOrigin, FVector2D(HotbarSlotSize), HeldItemHitBox, true, 25);
-	DrawText(TEXT("K/BAG: Crafting | Click item: Hold | Click HELD: Clear"), FLinearColor::White,
-		BarOrigin.X, BarOrigin.Y - 22.0f, GEngine->GetSmallFont(), 0.82f, false);
+	DrawText(TEXT("K/BAG: Crafting | Click item: Hold | Click HELD: Clear"), ActiveTheme.TextPrimary,
+		BarOrigin.X, BarOrigin.Y - 22.0f, GEngine->GetSmallFont(), 0.82f * ActiveTheme.TextScale, false);
 }
 
 void AABTSM5InventoryHUD::DrawCraftingInterface(AABTSCraftingSystem& System)
 {
 	const FVector2D Origin(58.0f, 44.0f);
 	const FVector2D Size(Canvas->ClipX - 116.0f, Canvas->ClipY - 104.0f);
-	DrawPanel(Origin, Size, FLinearColor(0.045f, 0.05f, 0.065f, 0.985f));
-	DrawText(TEXT("PARTY BACKPACK"), FLinearColor::White, Origin.X + 22.0f, Origin.Y + 14.0f, GEngine->GetMediumFont(), 1.0f, false);
+	DrawPanel(Origin, Size, ActiveTheme.PanelPrimary);
+	DrawText(TEXT("PARTY BACKPACK"), ActiveTheme.TextPrimary, Origin.X + 22.0f, Origin.Y + 14.0f, GEngine->GetMediumFont(), ActiveTheme.TextScale, false);
 	DrawText(System.IsRedBirdControlled() ? TEXT("Red bird: crafting enabled") : TEXT("RED BIRD REQUIRED TO CRAFT"),
-		System.IsRedBirdControlled() ? FLinearColor(0.4f, 1.0f, 0.52f) : FLinearColor(1.0f, 0.18f, 0.14f),
+		System.IsRedBirdControlled() ? ActiveTheme.Success : ActiveTheme.Danger,
 		Origin.X + Size.X * 0.52f, Origin.Y + 18.0f, GEngine->GetSmallFont(), 0.95f, false);
 	const FVector2D CloseOrigin(Origin.X + Size.X - 48.0f, Origin.Y + 10.0f);
-	DrawCell(CloseOrigin, FVector2D(34.0f), FLinearColor(0.55f, 0.12f, 0.12f, 1.0f));
-	DrawText(TEXT("X"), FLinearColor::White, CloseOrigin.X + 10.0f, CloseOrigin.Y + 5.0f, GEngine->GetSmallFont(), 1.0f, false);
+	DrawCell(CloseOrigin, FVector2D(34.0f), ActiveTheme.Danger);
+	DrawText(TEXT("X"), ActiveTheme.TextPrimary, CloseOrigin.X + 10.0f, CloseOrigin.Y + 5.0f, GEngine->GetSmallFont(), ActiveTheme.TextScale, false);
 	AddHitBox(CloseOrigin, FVector2D(34.0f), CloseHitBox, true, 100);
 
 	const float ContentTop = Origin.Y + 58.0f;
@@ -155,29 +158,31 @@ void AABTSM5InventoryHUD::DrawInventoryPanel(
 	const FVector2D& Origin,
 	const FVector2D& Size)
 {
-	DrawPanel(Origin, Size, FLinearColor(0.08f, 0.085f, 0.105f, 0.98f));
+	DrawPanel(Origin, Size, ActiveTheme.PanelSecondary);
 	TArray<const FABTSItemStack*> NonEmptyStacks;
 	for (const FABTSItemStack& Stack : Inventory.GetOrderedStacks())
 	{
 		if (Stack.Quantity > 0) NonEmptyStacks.Add(&Stack);
 	}
+	const float InventoryRowHeight = ActiveTheme.InventoryRowHeightPx;
+	const float InventoryCellHeight = ActiveTheme.InventoryCellHeightPx;
 	const int32 VisibleRowCount = FMath::Max(1, FMath::FloorToInt((Size.Y - 48.0f) / InventoryRowHeight));
 	MaxInventoryScrollRowOffset = FMath::Max(0, NonEmptyStacks.Num() - VisibleRowCount);
 	InventoryScrollRowOffset = FMath::Clamp(InventoryScrollRowOffset, 0, MaxInventoryScrollRowOffset);
 	DrawText(FString::Printf(TEXT("Owned items  %d/%d"),
 		FMath::Min(NonEmptyStacks.Num(), InventoryScrollRowOffset + VisibleRowCount), NonEmptyStacks.Num()),
-		FLinearColor(0.92f, 0.93f, 1.0f), Origin.X + 12.0f, Origin.Y + 10.0f, GEngine->GetSmallFont(), 0.92f, false);
+		ActiveTheme.TextPrimary, Origin.X + 12.0f, Origin.Y + 10.0f, GEngine->GetSmallFont(), 0.92f * ActiveTheme.TextScale, false);
 	if (MaxInventoryScrollRowOffset > 0)
 	{
-		DrawText(TEXT("WHEEL"), FLinearColor(0.72f, 0.76f, 0.88f), Origin.X + Size.X - 58.0f, Origin.Y + 10.0f,
+		DrawText(TEXT("WHEEL"), ActiveTheme.TextMuted, Origin.X + Size.X - 58.0f, Origin.Y + 10.0f,
 			GEngine->GetSmallFont(), 0.7f, false);
 		const float TrackTop = Origin.Y + 42.0f;
 		const float TrackHeight = Size.Y - 52.0f;
 		const float ThumbHeight = FMath::Max(20.0f, TrackHeight * static_cast<float>(VisibleRowCount) / NonEmptyStacks.Num());
 		const float ThumbAlpha = static_cast<float>(InventoryScrollRowOffset) / MaxInventoryScrollRowOffset;
-		DrawPanel(FVector2D(Origin.X + Size.X - 8.0f, TrackTop), FVector2D(4.0f, TrackHeight), FLinearColor(0.18f, 0.20f, 0.26f, 0.9f));
+		DrawPanel(FVector2D(Origin.X + Size.X - 8.0f, TrackTop), FVector2D(4.0f, TrackHeight), ActiveTheme.SlotNormal);
 		DrawPanel(FVector2D(Origin.X + Size.X - 8.0f, TrackTop + (TrackHeight - ThumbHeight) * ThumbAlpha),
-			FVector2D(4.0f, ThumbHeight), FLinearColor(0.72f, 0.77f, 0.9f, 0.95f));
+			FVector2D(4.0f, ThumbHeight), ActiveTheme.AccentSecondary);
 	}
 	VisibleInventoryItemIds.Reset();
 	float Y = Origin.Y + 40.0f;
@@ -191,10 +196,10 @@ void AABTSM5InventoryHUD::DrawInventoryPanel(
 			return Inventory.GetHeldItem(HeldItemId) && HeldItemId == Stack.ItemId;
 		}();
 		DrawCell(FVector2D(Origin.X + 10.0f, Y), FVector2D(Size.X - 24.0f, InventoryCellHeight),
-			bHeld ? FLinearColor(0.34f, 0.23f, 0.08f, 1.0f) : FLinearColor(0.13f, 0.14f, 0.17f, 1.0f));
-		DrawText(ABTSGetItemFallbackLabel(Stack.ItemId), FLinearColor::White,
+			bHeld ? ActiveTheme.SlotHeld : ActiveTheme.SlotNormal);
+		DrawText(ABTSGetItemFallbackLabel(Stack.ItemId), ActiveTheme.TextPrimary,
 			Origin.X + 20.0f, Y + 9.0f, GEngine->GetSmallFont(), 0.92f, false);
-		DrawText(FString::Printf(TEXT("x%d"), Stack.Quantity), FLinearColor(1.0f, 0.9f, 0.32f),
+		DrawText(FString::Printf(TEXT("x%d"), Stack.Quantity), ActiveTheme.CountAccent,
 			Origin.X + Size.X - 68.0f, Y + 9.0f, GEngine->GetSmallFont(), 0.92f, false);
 		VisibleInventoryItemIds.Add(Stack.ItemId);
 		AddHitBox(FVector2D(Origin.X + 10.0f, Y), FVector2D(Size.X - 24.0f, InventoryCellHeight),
@@ -208,8 +213,8 @@ void AABTSM5InventoryHUD::DrawRecipePanel(
 	const FVector2D& Origin,
 	const FVector2D& Size)
 {
-	DrawPanel(Origin, Size, FLinearColor(0.075f, 0.08f, 0.095f, 0.98f));
-	DrawText(TEXT("RECIPES: craftable / missing materials / missing station"), FLinearColor::White,
+	DrawPanel(Origin, Size, ActiveTheme.PanelSecondary);
+	DrawText(TEXT("RECIPES: craftable / missing materials / missing station"), ActiveTheme.TextPrimary,
 		Origin.X + 12.0f, Origin.Y + 10.0f, GEngine->GetSmallFont(), 0.88f, false);
 	UABTSCraftingCatalog* Catalog = System.GetCatalog();
 	UABTSInventoryComponent* Inventory = System.GetInventory();
@@ -226,6 +231,7 @@ void AABTSM5InventoryHUD::DrawRecipePanel(
 		return EvaluationSortRank(A) < EvaluationSortRank(B);
 	});
 	VisibleRecipeIds.Reset();
+	const float RecipeRowHeight = ActiveTheme.RecipeRowHeightPx;
 	float Y = Origin.Y + 38.0f;
 	const double Now = GetWorld() ? GetWorld()->GetRealTimeSeconds() : 0.0;
 	for (int32 Index = 0; Index < Evaluations.Num(); ++Index)
@@ -235,16 +241,16 @@ void AABTSM5InventoryHUD::DrawRecipePanel(
 		VisibleRecipeIds.Add(Recipe.RecipeId);
 		const bool bFlash = Recipe.RecipeId == InvalidHighlightRecipeId && Now < InvalidHighlightUntilSeconds;
 		const FLinearColor RowColor = Evaluation.IsCraftable()
-			? FLinearColor(0.11f, 0.30f, 0.16f, 1.0f)
-			: (bFlash ? FLinearColor(0.68f, 0.03f, 0.03f, 1.0f) : FLinearColor(0.22f, 0.12f, 0.13f, 1.0f));
+			? ActiveTheme.Success
+			: (bFlash ? ActiveTheme.DangerFlash : ActiveTheme.Danger);
 		DrawCell(FVector2D(Origin.X + 8.0f, Y), FVector2D(Size.X - 16.0f, RecipeRowHeight - 4.0f), RowColor);
-		DrawText(Recipe.DisplayName.ToString(), FLinearColor::White, Origin.X + 18.0f, Y + 7.0f,
+		DrawText(Recipe.DisplayName.ToString(), ActiveTheme.TextPrimary, Origin.X + 18.0f, Y + 7.0f,
 			GEngine->GetSmallFont(), 0.94f, false);
 		float MaterialX = Origin.X + 18.0f;
 		for (const FABTSCraftingIngredient& Required : Recipe.Ingredients)
 		{
 			const int32 Owned = Inventory->GetQuantity(Required.ItemId);
-			const FLinearColor CountColor = Owned < Required.Quantity ? FLinearColor(1.0f, 0.18f, 0.14f) : FLinearColor(0.78f, 0.92f, 0.82f);
+			const FLinearColor CountColor = Owned < Required.Quantity ? ActiveTheme.DangerFlash : ActiveTheme.TextPrimary;
 			DrawText(FString::Printf(TEXT("%s %d/%d"), *ABTSGetItemFallbackLabel(Required.ItemId), Owned, Required.Quantity),
 				CountColor, MaterialX, Y + 34.0f, GEngine->GetSmallFont(), 0.76f, false);
 			MaterialX += 118.0f;
@@ -258,7 +264,7 @@ void AABTSM5InventoryHUD::DrawRecipePanel(
 		if (!RequirementLabels.IsEmpty())
 		{
 			DrawText(FString::Printf(TEXT("Need: %s"), *FString::Join(RequirementLabels, TEXT(" + "))),
-				FLinearColor(1.0f, 0.12f, 0.1f), Origin.X + Size.X - 190.0f, Y + 7.0f,
+				ActiveTheme.DangerFlash, Origin.X + Size.X - 190.0f, Y + 7.0f,
 				GEngine->GetSmallFont(), 0.72f, false);
 		}
 		AddHitBox(FVector2D(Origin.X + 8.0f, Y), FVector2D(Size.X - 16.0f, RecipeRowHeight - 4.0f), MakeRecipeName(Index), true, 50);
@@ -277,27 +283,27 @@ void AABTSM5InventoryHUD::DrawQuantityModal(AABTSCraftingSystem& System)
 	PendingCraftCount = FMath::Clamp(PendingCraftCount, 0, Evaluation.MaxCraftCount);
 	const FVector2D Size(460.0f, 210.0f);
 	const FVector2D Origin((Canvas->ClipX - Size.X) * 0.5f, (Canvas->ClipY - Size.Y) * 0.5f);
-	DrawPanel(Origin, Size, FLinearColor(0.025f, 0.028f, 0.038f, 1.0f));
-	DrawText(FString::Printf(TEXT("Craft %s"), *Recipe->DisplayName.ToString()), FLinearColor::White,
+	DrawPanel(Origin, Size, ActiveTheme.PanelPrimary);
+	DrawText(FString::Printf(TEXT("Craft %s"), *Recipe->DisplayName.ToString()), ActiveTheme.TextPrimary,
 		Origin.X + 24.0f, Origin.Y + 20.0f, GEngine->GetMediumFont(), 1.0f, false);
-	DrawText(FString::Printf(TEXT("Quantity: %d / max %d"), PendingCraftCount, Evaluation.MaxCraftCount), FLinearColor(1.0f, 0.9f, 0.3f),
+	DrawText(FString::Printf(TEXT("Quantity: %d / max %d"), PendingCraftCount, Evaluation.MaxCraftCount), ActiveTheme.CountAccent,
 		Origin.X + 150.0f, Origin.Y + 72.0f, GEngine->GetSmallFont(), 1.0f, false);
 	const TCHAR* Labels[] = { TEXT("--"), TEXT("-"), TEXT("+"), TEXT("++") };
 	const FName Names[] = { QuantityMinusTen, QuantityMinusOne, QuantityPlusOne, QuantityPlusTen };
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		const FVector2D ButtonOrigin(Origin.X + 46.0f + Index * 92.0f, Origin.Y + 108.0f);
-		DrawCell(ButtonOrigin, FVector2D(76.0f, 40.0f), FLinearColor(0.18f, 0.20f, 0.27f, 1.0f));
-		DrawText(Labels[Index], FLinearColor::White, ButtonOrigin.X + 28.0f, ButtonOrigin.Y + 8.0f,
+		DrawCell(ButtonOrigin, FVector2D(76.0f, 40.0f), ActiveTheme.SlotNormal);
+		DrawText(Labels[Index], ActiveTheme.TextPrimary, ButtonOrigin.X + 28.0f, ButtonOrigin.Y + 8.0f,
 			GEngine->GetSmallFont(), 1.0f, false);
 		AddHitBox(ButtonOrigin, FVector2D(76.0f, 40.0f), Names[Index], true, 120);
 	}
 	const FVector2D CraftOrigin(Origin.X + 100.0f, Origin.Y + 162.0f);
 	const FVector2D CancelOrigin(Origin.X + 250.0f, Origin.Y + 162.0f);
-	DrawCell(CraftOrigin, FVector2D(120.0f, 36.0f), PendingCraftCount > 0 ? FLinearColor(0.10f, 0.42f, 0.18f, 1.0f) : FLinearColor(0.18f, 0.18f, 0.18f, 1.0f));
-	DrawCell(CancelOrigin, FVector2D(120.0f, 36.0f), FLinearColor(0.42f, 0.12f, 0.12f, 1.0f));
-	DrawText(TEXT("CRAFT"), FLinearColor::White, CraftOrigin.X + 34.0f, CraftOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.9f, false);
-	DrawText(TEXT("CANCEL"), FLinearColor::White, CancelOrigin.X + 30.0f, CancelOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.9f, false);
+	DrawCell(CraftOrigin, FVector2D(120.0f, 36.0f), PendingCraftCount > 0 ? ActiveTheme.Success : ActiveTheme.Disabled);
+	DrawCell(CancelOrigin, FVector2D(120.0f, 36.0f), ActiveTheme.Danger);
+	DrawText(TEXT("CRAFT"), ActiveTheme.TextPrimary, CraftOrigin.X + 34.0f, CraftOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.9f * ActiveTheme.TextScale, false);
+	DrawText(TEXT("CANCEL"), ActiveTheme.TextPrimary, CancelOrigin.X + 30.0f, CancelOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.9f * ActiveTheme.TextScale, false);
 	AddHitBox(CraftOrigin, FVector2D(120.0f, 36.0f), QuantityCraft, true, 120);
 	AddHitBox(CancelOrigin, FVector2D(120.0f, 36.0f), QuantityCancel, true, 120);
 }
@@ -337,8 +343,8 @@ void AABTSM5InventoryHUD::DrawTooltip(AABTSCraftingSystem& System)
 	float MouseX = 0.0f;
 	float MouseY = 0.0f;
 	if (PlayerOwner == nullptr || !PlayerOwner->GetMousePosition(MouseX, MouseY)) return;
-	DrawPanel(FVector2D(MouseX + 14.0f, MouseY + 14.0f), FVector2D(390.0f, 38.0f), FLinearColor(0.02f, 0.02f, 0.025f, 0.98f));
-	DrawText(Message, Evaluation.IsCraftable() ? FLinearColor::White : FLinearColor(1.0f, 0.28f, 0.20f),
+	DrawPanel(FVector2D(MouseX + 14.0f, MouseY + 14.0f), FVector2D(390.0f, 38.0f), ActiveTheme.PanelPrimary);
+	DrawText(Message, Evaluation.IsCraftable() ? ActiveTheme.TextPrimary : ActiveTheme.DangerFlash,
 		MouseX + 23.0f, MouseY + 23.0f, GEngine->GetSmallFont(), 0.78f, false);
 }
 

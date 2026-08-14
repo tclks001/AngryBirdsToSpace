@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Crafting/ABTSCraftingTypes.h"
 #include "UI/ABTSM4PartyHUD.h"
+#include "UI/ABTSUITheme.h"
 #include "ABTSM5InventoryHUD.generated.h"
 
 class AABTSCraftingSystem;
@@ -52,5 +53,6 @@ private:
 	double InvalidHighlightUntilSeconds = 0.0;
 	TArray<EABTSItemId> VisibleInventoryItemIds;
 	TArray<FName> VisibleRecipeIds;
+	FABTSUIThemeSnapshot ActiveTheme;
 };
 
