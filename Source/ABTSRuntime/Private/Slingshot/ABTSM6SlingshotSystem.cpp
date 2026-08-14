@@ -30,6 +30,12 @@
 
 namespace
 {
+	// DrawDebugPoint depth priority 0 maps to the world depth group. Every visual
+	// layer of the prediction must share it so occlusion remains spatially honest.
+	constexpr uint8 FlightTrajectoryWorldDepthPriority = 0;
+	static_assert(FlightTrajectoryWorldDepthPriority == 0,
+		"World trajectory layers must remain world-depth tested.");
+
 	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryCoreScale(
 		TEXT("abts.UI.Flight.WorldTrajectory.CoreScale"), 0.62f,
 		TEXT("World trajectory cyan core scale relative to M6 point size [0.25, 1]."));
@@ -601,11 +607,12 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 		if ((Index & 1) == 0)
 		{
 			const FVector& Point = CurrentTrajectoryPreview.WorldPoints[Index];
-			DrawDebugPoint(GetWorld(), Point, UnderlaySize, UnderlayColor, false, 0.0f, 0);
+			DrawDebugPoint(GetWorld(), Point, UnderlaySize, UnderlayColor, false, 0.0f,
+				FlightTrajectoryWorldDepthPriority);
 			DrawDebugPoint(GetWorld(), Point,
 				Index == LastVisibleIndex ? EndpointSize : CoreSize,
 				Index == LastVisibleIndex ? EndpointColor : CoreColor,
-				false, 0.0f, 1);
+				false, 0.0f, FlightTrajectoryWorldDepthPriority);
 		}
 	}
 }
