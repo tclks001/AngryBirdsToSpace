@@ -459,3 +459,25 @@ intent 已绑定、deferred 已消费、构件跨度不超过 720 cm、无未知
 
 本统一只改变结构构件的量化边界，不改变已经批准的芯体、耦合带、外框、TopSurface 与 Facade-to-Top
 拓扑，也不构成完整生产 DAG 或 Chaos 已通过的证据。
+
+### 19.5 Floor / StyleInfill 停点合同
+
+Floor / StyleInfill 只消费已经认证的水平承托面，不从建筑 AABB、未解析 WFC 空间或任意高度重新猜测楼层：
+
+1. 合法平面来自 Stage 3 `CommonExteriorFrame` course 与 Stage 4 `TopSurfaceFrameSegment` surface course。
+   候选支座必须属于同一 component、同一下层 course 和同一方向；只连接沿目标轴相邻、切向覆盖至少
+   一个完整 36 cm lane 的两条真实水平支座。
+2. 新楼面位于支座上方一层，并按层奇偶选择 X/Y 方向，保持分层芯体的交错 course 合同。每个主
+   `FloorInfillCourse` 必须记录两个不同的 `RequiredLowerMemberIndices`；仅有语义包络但没有两端真实
+   Bearing 的行不得生成。
+3. 楼面端点落在支座中心线上以形成正面积承压。若一条候选行被冻结的芯体、外框或竖柱占据，则该行
+   明确 deferred；只有至少一条通过语义包含、void 与 immutable-prefix 冲突检查的行，才建立“本支座对
+   必须生成一根主 Floor”的绑定义务。不得为满足数量门穿透已有构件。
+4. 主 Floor 优先于装饰。`StyleInfillCourse` 只能在同一对已认证支座之间追加；E1 不追加，E2～E6 以
+   确定性步长逐档增密。达到预算上限时只允许省略 StyleInfill，不能省略已经建立绑定义务的主 Floor。
+5. Floor / StyleInfill 发射前先按 Pyramid/Prism 语义数量预留 Roof/Crown member 预算；预留量、deferred
+   数、复用数、绑定违规、冲突数、耗时与独立 Hash 都进入结果摘要。密度参数仍是后续预算/承重联调旋钮，
+   本停点不把当前数值冻结为最终平衡值。
+6. `Floor / StyleInfill` 诊断层与其他层互斥：玻璃色显示两端支座或既有复用行，铁色显示主 Floor，石材色
+   显示 StyleInfill。该层只证明已认证平面间的静态楼面路径和 36 cm 单位化；Roof/Crown、压实生产 DAG、
+   Chaos 与可见 PIE 仍为 `NotEvaluated`。

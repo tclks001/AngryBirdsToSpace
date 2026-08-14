@@ -40,6 +40,8 @@ namespace ABTSM73BeamC3V3
 		ExteriorPost,
 		GroundExteriorPost,
 		FloorCourse,
+		FloorInfillCourse,
+		StyleInfillCourse,
 		FacadeToTopSeat,
 		FacadeToTopPost,
 		RoofCourse,
@@ -93,6 +95,8 @@ namespace ABTSM73BeamC3V3
 		int32 TopSurfaceFrameSegmentId = INDEX_NONE;
 		/** Stage-4 only: Facade-to-Top closure identity. */
 		int32 FacadeToTopConnectionId = INDEX_NONE;
+		/** Stage-4 only: certified adjacent-support floor/infill span identity. */
+		int32 FloorStyleInfillSpanId = INDEX_NONE;
 		/** Stage-3 exterior-column lineage. */
 		int32 ExteriorColumnId = INDEX_NONE;
 		/** Stage-3 ground-sill lineage. Existing core members remain INDEX_NONE. */
@@ -919,6 +923,28 @@ namespace ABTSM73BeamC3V3
 		bool bReusesGroundedAlias = false;
 	};
 
+	/** One horizontal Stage-4 run seated on two adjacent, parallel lower members.
+	 * Main floor runs are mandatory structural visual closure; StyleInfill runs
+	 * are deterministic, tier/profile-controlled additions which may be omitted
+	 * to preserve the reserved Roof budget. */
+	struct FFloorStyleInfillSpanPlan
+	{
+		int32 SpanId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 SourceVolumeId = INDEX_NONE;
+		int32 LowerCourseIndex = INDEX_NONE;
+		int32 CourseIndex = INDEX_NONE;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		double TangentCoordinateCM = 0.0;
+		double MinimumCM = 0.0;
+		double MaximumCM = 0.0;
+		int32 NegativeSupportMemberIndex = INDEX_NONE;
+		int32 PositiveSupportMemberIndex = INDEX_NONE;
+		int32 MemberIndex = INDEX_NONE;
+		bool bStyleInfill = false;
+		bool bReusesExistingMember = false;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -1254,6 +1280,16 @@ namespace ABTSM73BeamC3V3
 		int32 Stage4FacadeToTopConflictCount = 0;
 		int64 Stage4FacadeToTopHash = 0;
 		double Stage4FacadeToTopMilliseconds = 0.0;
+		int32 Stage4FloorSupportPairCount = 0;
+		int32 Stage4FloorSpanCount = 0;
+		int32 Stage4StyleInfillSpanCount = 0;
+		int32 Stage4ReusedFloorSpanCount = 0;
+		int32 Stage4DeferredFloorSpanCount = 0;
+		int32 Stage4FloorBindingViolationCount = 0;
+		int32 Stage4FloorConflictCount = 0;
+		int32 Stage4RoofReservedMemberCount = 0;
+		int64 Stage4FloorStyleInfillHash = 0;
+		double Stage4FloorStyleInfillMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;
@@ -1349,6 +1385,7 @@ namespace ABTSM73BeamC3V3
 		TArray<FTopSurfaceFrameDeferredJunctionPlan>
 			TopSurfaceFrameDeferredJunctions;
 		TArray<FFacadeToTopConnectionPlan> FacadeToTopConnections;
+		TArray<FFloorStyleInfillSpanPlan> FloorStyleInfillSpans;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

@@ -2806,7 +2806,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
 	const bool bSkeletonGenerated =
 		StopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof
-			? SkeletonGenerator.GenerateStage4FacadeToTopConnections(SelectedProfile,
+			? SkeletonGenerator.GenerateStage4FloorStyleInfill(SelectedProfile,
 				OutResult.Silhouette, OutResult.Skeleton, OutError)
 			: StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
 			? SkeletonGenerator.GenerateStage3(SelectedProfile,
@@ -3125,6 +3125,25 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.Stage4FacadeToTopHash;
 	Summary.SkeletonFirstStage4FacadeToTopMilliseconds =
 		Stage1.Stage4FacadeToTopMilliseconds;
+	Summary.SkeletonFirstStage4FloorSupportPairCount =
+		Stage1.Stage4FloorSupportPairCount;
+	Summary.SkeletonFirstStage4FloorSpanCount = Stage1.Stage4FloorSpanCount;
+	Summary.SkeletonFirstStage4StyleInfillSpanCount =
+		Stage1.Stage4StyleInfillSpanCount;
+	Summary.SkeletonFirstStage4ReusedFloorSpanCount =
+		Stage1.Stage4ReusedFloorSpanCount;
+	Summary.SkeletonFirstStage4DeferredFloorSpanCount =
+		Stage1.Stage4DeferredFloorSpanCount;
+	Summary.SkeletonFirstStage4FloorBindingViolationCount =
+		Stage1.Stage4FloorBindingViolationCount;
+	Summary.SkeletonFirstStage4FloorConflictCount =
+		Stage1.Stage4FloorConflictCount;
+	Summary.SkeletonFirstStage4RoofReservedMemberCount =
+		Stage1.Stage4RoofReservedMemberCount;
+	Summary.SkeletonFirstStage4FloorStyleInfillHash =
+		Stage1.Stage4FloorStyleInfillHash;
+	Summary.SkeletonFirstStage4FloorStyleInfillMilliseconds =
+		Stage1.Stage4FloorStyleInfillMilliseconds;
 	Summary.SkeletonFirstStage4TopFrameHash = Stage1.Stage4TopFrameHash;
 	Summary.SkeletonFirstStage4TopFrameMilliseconds =
 		Stage1.Stage4TopFrameMilliseconds;

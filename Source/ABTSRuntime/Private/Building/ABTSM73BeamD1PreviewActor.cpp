@@ -195,7 +195,8 @@ namespace ABTSM73BeamD1Preview
 		Stage3OverviewVisibility = 1 << 22,
 		Stage4TopSurfaceIntentVisibility = 1 << 23,
 		Stage4FloorTopFramesVisibility = 1 << 24,
-		Stage4FacadeToTopVisibility = 1 << 25
+		Stage4FacadeToTopVisibility = 1 << 25,
+		Stage4FloorStyleInfillVisibility = 1 << 26
 	};
 
 	enum class EStage3OverviewBucket : uint8
@@ -309,6 +310,8 @@ namespace ABTSM73BeamD1Preview
 			return Stage4FloorTopFramesVisibility;
 		case EABTSM73BeamC3Stage4DiagnosticLayer::FacadeToTopConnections:
 			return Stage4FacadeToTopVisibility;
+		case EABTSM73BeamC3Stage4DiagnosticLayer::FloorStyleInfill:
+			return Stage4FloorStyleInfillVisibility;
 		default:
 			return 0;
 		}
@@ -428,6 +431,8 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		EABTSM73BeamC3Stage4DiagnosticLayer::FloorTopFrames);
 	const uint32 Stage4FacadeToTopMask = DiagnosticVisibilityMask(
 		EABTSM73BeamC3Stage4DiagnosticLayer::FacadeToTopConnections);
+	const uint32 Stage4FloorStyleInfillMask = DiagnosticVisibilityMask(
+		EABTSM73BeamC3Stage4DiagnosticLayer::FloorStyleInfill);
 	TestEqual(TEXT("WFC layer contains only envelope and protected void"),
 		WFCMask, static_cast<uint32>(SemanticEnvelopeVisibility | ProtectedVoidVisibility));
 	TestEqual(TEXT("Intent layer contains only core and pairing intent"),
@@ -481,10 +486,17 @@ bool FABTSM73BeamC3V3PreviewDiagnosticContractsTest::RunTest(const FString& Para
 		Stage4FramesMask, static_cast<uint32>(Stage4FloorTopFramesVisibility));
 	TestEqual(TEXT("Stage-4 Facade-to-Top has one independent visibility bit"),
 		Stage4FacadeToTopMask, static_cast<uint32>(Stage4FacadeToTopVisibility));
+	TestEqual(TEXT("Stage-4 Floor / StyleInfill has one independent visibility bit"),
+		Stage4FloorStyleInfillMask,
+		static_cast<uint32>(Stage4FloorStyleInfillVisibility));
 	TestEqual(TEXT("Stage-4 diagnostic layers are mutually exclusive"),
 		(Stage4IntentMask & Stage4FramesMask)
 			| (Stage4IntentMask & Stage4FacadeToTopMask)
-			| (Stage4FramesMask & Stage4FacadeToTopMask), static_cast<uint32>(0));
+			| (Stage4IntentMask & Stage4FloorStyleInfillMask)
+			| (Stage4FramesMask & Stage4FacadeToTopMask)
+			| (Stage4FramesMask & Stage4FloorStyleInfillMask)
+			| (Stage4FacadeToTopMask & Stage4FloorStyleInfillMask),
+		static_cast<uint32>(0));
 	TestEqual(TEXT("Stage-4 intent is disjoint from the Stage-3 overview"),
 		Stage4IntentMask & Stage3OverviewMask, static_cast<uint32>(0));
 	TestEqual(TEXT("Stage-3 frame and column layers are disjoint"),
@@ -1576,7 +1588,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			| ABTSM73BeamD1Preview::Stage3OverviewVisibility
 			| ABTSM73BeamD1Preview::Stage4TopSurfaceIntentVisibility
 			| ABTSM73BeamD1Preview::Stage4FloorTopFramesVisibility
-			| ABTSM73BeamD1Preview::Stage4FacadeToTopVisibility)) != 0)
+			| ABTSM73BeamD1Preview::Stage4FacadeToTopVisibility
+			| ABTSM73BeamD1Preview::Stage4FloorStyleInfillVisibility)) != 0)
 		{
 			const bool bXOnly =
 				(VisibilityMask & ABTSM73BeamD1Preview::CompositeCoreXVisibility) != 0;
@@ -1612,6 +1625,9 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			const bool bStage4FacadeToTop =
 				(VisibilityMask
 					& ABTSM73BeamD1Preview::Stage4FacadeToTopVisibility) != 0;
+			const bool bStage4FloorStyleInfill =
+				(VisibilityMask
+					& ABTSM73BeamD1Preview::Stage4FloorStyleInfillVisibility) != 0;
 			const ABTSM73BeamC3V3::FPlan& Plan = StageResult.Skeleton.Plan;
 			if (bStage4Intent)
 			{
@@ -1719,6 +1735,22 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 							== ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeToTopSeat
 						|| Member.SkeletonKind
 							== ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeToTopPost);
+				const ABTSM73BeamC3V3::FFloorStyleInfillSpanPlan* FloorInfillSpan =
+					bStage4FloorStyleInfill
+					? Plan.FloorStyleInfillSpans.FindByPredicate(
+						[MemberIndex](const ABTSM73BeamC3V3::
+							FFloorStyleInfillSpanPlan& Span)
+						{
+							return Span.MemberIndex == MemberIndex;
+						}) : nullptr;
+				const bool bFloorInfillSupportMember = bStage4FloorStyleInfill
+					&& Plan.FloorStyleInfillSpans.ContainsByPredicate(
+						[MemberIndex](const ABTSM73BeamC3V3::
+							FFloorStyleInfillSpanPlan& Span)
+						{
+							return Span.NegativeSupportMemberIndex == MemberIndex
+								|| Span.PositiveSupportMemberIndex == MemberIndex;
+						});
 				const bool bCoupling = Member.ProducedStage
 					== EABTSM73BeamC3GenerationStage::CouplingCourses;
 				const ABTSM73BeamD1Preview::EStage3OverviewBucket OverviewBucket =
@@ -1741,6 +1773,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 						&& !bDeferredStage4Junction)
 					|| (bStage4FacadeToTop && !bFacadeToTopSourceMember
 						&& !bFacadeToTopClosureMember)
+					|| (bStage4FloorStyleInfill && FloorInfillSpan == nullptr
+						&& !bFloorInfillSupportMember)
 					|| (bExteriorFrames && Member.SkeletonKind
 						!= ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeCourse
 						&& !bExteriorFrameLedgerMember)
@@ -1786,7 +1820,16 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 					&& (OriginCore->LocalPodiumHeightRegionId == INDEX_NONE
 						|| Member.CourseIndex
 							>= OriginCore->LocalPodiumTopCourseIndex);
-				if (bStage4FacadeToTop)
+				if (bStage4FloorStyleInfill)
+				{
+					Preview = FloorInfillSpan == nullptr
+						? GlassPreview.Get()
+						: FloorInfillSpan->bStyleInfill
+							? StonePreview.Get()
+							: FloorInfillSpan->bReusesExistingMember
+								? GlassPreview.Get() : IronPreview.Get();
+				}
+				else if (bStage4FacadeToTop)
 				{
 					Preview = bFacadeToTopClosureMember
 						? (Member.Axis == EABTSM73BeamAFrameAxis::Z

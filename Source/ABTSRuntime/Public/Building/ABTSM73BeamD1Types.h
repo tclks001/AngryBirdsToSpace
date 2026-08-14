@@ -77,7 +77,8 @@ enum class EABTSM73BeamC3Stage4DiagnosticLayer : uint8
 {
 	TopSurfaceIntent UMETA(DisplayName = "1 - GroundSill / TopSurface Intent"),
 	FloorTopFrames UMETA(DisplayName = "2 - Floor / Top Frames"),
-	FacadeToTopConnections UMETA(DisplayName = "3 - Facade-to-Top Connections")
+	FacadeToTopConnections UMETA(DisplayName = "3 - Facade-to-Top Connections"),
+	FloorStyleInfill UMETA(DisplayName = "4 - Floor / StyleInfill")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -806,6 +807,36 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
 	double SkeletonFirstStage4FacadeToTopMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FloorSupportPairCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FloorSpanCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4StyleInfillSpanCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4ReusedFloorSpanCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4DeferredFloorSpanCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FloorBindingViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FloorConflictCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofReservedMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int64 SkeletonFirstStage4FloorStyleInfillHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
+	double SkeletonFirstStage4FloorStyleInfillMilliseconds = 0.0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
 	int64 SkeletonFirstStage4TopFrameHash = 0;

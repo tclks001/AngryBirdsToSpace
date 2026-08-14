@@ -4501,6 +4501,17 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4FacadeToTopConflictCount, 0);
 	TestNotEqual(TEXT("Facade-to-Top plan has a stable identity"),
 		Summary.Stage4FacadeToTopHash, int64(0));
+	TestEqual(TEXT("Floor / StyleInfill ledger count matches its summary"),
+		Plan.FloorStyleInfillSpans.Num(),
+		Summary.Stage4FloorSpanCount + Summary.Stage4StyleInfillSpanCount);
+	TestEqual(TEXT("Floor / StyleInfill has no binding violation"),
+		Summary.Stage4FloorBindingViolationCount, 0);
+	TestEqual(TEXT("Floor / StyleInfill has no unresolved conflict"),
+		Summary.Stage4FloorConflictCount, 0);
+	TestNotEqual(TEXT("Floor / StyleInfill plan has a stable identity"),
+		Summary.Stage4FloorStyleInfillHash, int64(0));
+	TestTrue(TEXT("Floor / StyleInfill preserves a Roof / Crown budget reserve"),
+		Summary.Stage4RoofReservedMemberCount > 0);
 	TestEqual(TEXT("Every deferred Stage-3 junction is replaced in Stage 4"),
 		Summary.Stage4ResolvedDeferredJunctionCount,
 		Plan.TopSurfaceFrameDeferredJunctions.Num());
@@ -4598,6 +4609,37 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 					&& Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop);
 		}
 	}
+	for (const ABTSM73BeamC3V3::FFloorStyleInfillSpanPlan& Span
+		: Plan.FloorStyleInfillSpans)
+	{
+		TestTrue(TEXT("Every Floor / StyleInfill span binds two distinct supports"),
+			Plan.Members.IsValidIndex(Span.NegativeSupportMemberIndex)
+				&& Plan.Members.IsValidIndex(Span.PositiveSupportMemberIndex)
+				&& Span.NegativeSupportMemberIndex
+					!= Span.PositiveSupportMemberIndex);
+		TestTrue(TEXT("Every Floor / StyleInfill span binds a horizontal member"),
+			Plan.Members.IsValidIndex(Span.MemberIndex)
+				&& Plan.Members[Span.MemberIndex].Axis == Span.Axis
+				&& Span.Axis != EABTSM73BeamAFrameAxis::Z
+				&& Span.CourseIndex == Span.LowerCourseIndex + 1);
+		if (!Span.bReusesExistingMember && Plan.Members.IsValidIndex(Span.MemberIndex))
+		{
+			const ABTSM73BeamC3V3::FPlannedMember& Member =
+				Plan.Members[Span.MemberIndex];
+			TestEqual(TEXT("New Floor / StyleInfill member owns its ledger identity"),
+				Member.FloorStyleInfillSpanId, Span.SpanId);
+			TestEqual(TEXT("New Floor / StyleInfill member has the expected kind"),
+				Member.SkeletonKind,
+				Span.bStyleInfill
+					? ABTSM73BeamC3V3::ESkeletonMemberKind::StyleInfillCourse
+					: ABTSM73BeamC3V3::ESkeletonMemberKind::FloorInfillCourse);
+			TestTrue(TEXT("New Floor / StyleInfill member names both lower seats"),
+				Member.RequiredLowerMemberIndices.Contains(
+					Span.NegativeSupportMemberIndex)
+				&& Member.RequiredLowerMemberIndices.Contains(
+					Span.PositiveSupportMemberIndex));
+		}
+	}
 	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
 		: Plan.TopSurfaceIntents)
 	{
@@ -4623,7 +4665,8 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		TEXT(" Frames=%d Ground=%d Top=%d Setback=%d Stack=%d")
 		TEXT(" Unresolved=%d TopFrames=%d Emitted=%d Reused=%d DeferredJunctions=%d Members=%d")
 		TEXT(" FacadeToTop=%d Seats=%d Posts=%d Suppressed=%d ResolvedDeferred=%d")
-		TEXT(" TimingMs=%.3f/%.3f/%.3f Physical=NotEvaluated"),
+		TEXT(" FloorPairs=%d Floor=%d Style=%d FloorReused=%d FloorDeferred=%d RoofReserve=%d")
+		TEXT(" FloorHash=%lld TimingMs=%.3f/%.3f/%.3f/%.3f Physical=NotEvaluated"),
 		*Entry.StableId.ToString(), Summary.Stage3PlanHash,
 		Summary.Stage4IntentHash, Summary.Stage4TopSurfaceIntentCount,
 		Summary.Stage4GroundSillIntentCount,
@@ -4639,9 +4682,17 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4FacadeToTopPostSegmentCount,
 		Summary.Stage4SuppressedStage3ColumnMemberCount,
 		Summary.Stage4ResolvedDeferredJunctionCount,
+		Summary.Stage4FloorSupportPairCount,
+		Summary.Stage4FloorSpanCount,
+		Summary.Stage4StyleInfillSpanCount,
+		Summary.Stage4ReusedFloorSpanCount,
+		Summary.Stage4DeferredFloorSpanCount,
+		Summary.Stage4RoofReservedMemberCount,
+		Summary.Stage4FloorStyleInfillHash,
 		Summary.Stage4IntentMilliseconds,
 		Summary.Stage4TopFrameMilliseconds,
-		Summary.Stage4FacadeToTopMilliseconds));
+		Summary.Stage4FacadeToTopMilliseconds,
+		Summary.Stage4FloorStyleInfillMilliseconds));
 	return true;
 }
 
