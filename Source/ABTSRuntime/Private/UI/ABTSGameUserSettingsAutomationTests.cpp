@@ -50,6 +50,8 @@ bool FABTSGameUserSettingsContractTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Fallback resolutions do not exceed the desktop"), Resolutions.Contains(FIntPoint(3840, 2160)));
 	TestEqual(TEXT("Unlimited frame cap has a readable label"), UABTSGameViewportClient::FormatFrameRateLimit(0.0f), FString(TEXT("UNLIMITED")));
 	TestEqual(TEXT("Finite frame cap has a readable label"), UABTSGameViewportClient::FormatFrameRateLimit(120.0f), FString(TEXT("120 FPS")));
+	TestEqual(TEXT("Confirmation countdown rounds up"), UABTSGameViewportClient::ComputeConfirmationSecondsRemaining(12.0, 0.1), 12);
+	TestEqual(TEXT("Confirmation countdown clamps at zero"), UABTSGameViewportClient::ComputeConfirmationSecondsRemaining(12.0, 13.0), 0);
 	TestNotNull(TEXT("Engine constructed the configured ABTS settings class"), UABTSGameUserSettings::Get());
 	FString ViewportClass;
 	GConfig->GetString(TEXT("/Script/Engine.Engine"), TEXT("GameViewportClientClassName"), ViewportClass, GEngineIni);

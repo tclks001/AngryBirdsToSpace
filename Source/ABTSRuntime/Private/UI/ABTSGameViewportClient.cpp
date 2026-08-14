@@ -33,6 +33,7 @@ namespace
 	constexpr int32 VideoRowCount = 6;
 	constexpr int32 AccessibilityRowCount = 6;
 	constexpr float SettingStep = 0.05f;
+	constexpr double VideoConfirmationDurationSeconds = 12.0;
 
 	const TCHAR* QualityLabels[] = { TEXT("LOW"), TEXT("MEDIUM"), TEXT("HIGH"), TEXT("EPIC"), TEXT("CINEMATIC") };
 	const TCHAR* ModeLabels[] = { TEXT("WINDOWED"), TEXT("BORDERLESS"), TEXT("FULLSCREEN") };
@@ -136,6 +137,16 @@ void UABTSGameViewportClient::Init(
 			if (CapturePage.Contains(TEXT("Video"))) SettingsSection = EABTSSettingsSection::Video;
 			else if (CapturePage.Contains(TEXT("Accessibility"))) SettingsSection = EABTSSettingsSection::Accessibility;
 			else SettingsSection = EABTSSettingsSection::Audio;
+			if (CapturePage.Contains(TEXT("ResetConfirm")))
+			{
+				ActiveDialog = EABTSSystemMenuDialog::ConfirmReset;
+				SelectedDialogAction = 1;
+			}
+			else if (CapturePage.Contains(TEXT("VideoConfirm")))
+			{
+				ActiveDialog = EABTSSystemMenuDialog::ConfirmVideo;
+				VideoConfirmationDeadlineSeconds = FPlatformTime::Seconds() + VideoConfirmationDurationSeconds;
+			}
 		}
 		else
 		{
@@ -164,6 +175,12 @@ void UABTSGameViewportClient::Tick(const float DeltaTime)
 	Super::Tick(DeltaTime);
 	EnsureInitialMenuState();
 	if (bMenuVisible) ApplyMenuInputMode();
+	if (ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo
+		&& FPlatformTime::Seconds() >= VideoConfirmationDeadlineSeconds
+		&& !bCaptureMode)
+	{
+		RevertVideoSettings(TEXT("Timeout"));
+	}
 	if (bCaptureMode && !bScreenshotRequested && FPlatformTime::Seconds() - CaptureStartSeconds > 45.0)
 	{
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][SystemMenuCapture] Complete Success=0 Reason=Timeout Output=%s"), *CaptureOutputPath);
@@ -219,6 +236,37 @@ bool UABTSGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
 	}
 	if (!bPressed) return true;
 	if (EventArgs.Key == EKeys::LeftMouseButton) return HandlePointerClick(EventArgs.Viewport ? EventArgs.Viewport : Viewport);
+	if (ActiveDialog != EABTSSystemMenuDialog::None)
+	{
+		if (EventArgs.Key == EKeys::Left || EventArgs.Key == EKeys::Right
+			|| EventArgs.Key == EKeys::A || EventArgs.Key == EKeys::D
+			|| EventArgs.Key == EKeys::Up || EventArgs.Key == EKeys::Down
+			|| EventArgs.Key == EKeys::Gamepad_DPad_Left || EventArgs.Key == EKeys::Gamepad_DPad_Right)
+		{
+			SelectedDialogAction = 1 - SelectedDialogAction;
+			PlayUIFeedback(false);
+			return true;
+		}
+		if (EventArgs.Key == EKeys::Enter || EventArgs.Key == EKeys::SpaceBar || EventArgs.Key == EKeys::Gamepad_FaceButton_Bottom)
+		{
+			if (ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo)
+			{
+				if (SelectedDialogAction == 0) KeepVideoSettings(); else RevertVideoSettings(TEXT("User"));
+			}
+			else
+			{
+				if (SelectedDialogAction == 0) ResetSettingsToDefaults(); else CancelDialog();
+			}
+			return true;
+		}
+		if (EventArgs.Key == EKeys::Escape || EventArgs.Key == EKeys::Gamepad_FaceButton_Right)
+		{
+			if (ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo) RevertVideoSettings(TEXT("Cancel"));
+			else CancelDialog();
+			return true;
+		}
+		return true;
+	}
 	if (EventArgs.Key == EKeys::Up || EventArgs.Key == EKeys::W || EventArgs.Key == EKeys::Gamepad_DPad_Up) { Navigate(-1); return true; }
 	if (EventArgs.Key == EKeys::Down || EventArgs.Key == EKeys::S || EventArgs.Key == EKeys::Gamepad_DPad_Down) { Navigate(1); return true; }
 	if (EventArgs.Key == EKeys::Left || EventArgs.Key == EKeys::A || EventArgs.Key == EKeys::Gamepad_DPad_Left)
@@ -418,12 +466,20 @@ FString UABTSGameViewportClient::FormatFrameRateLimit(const float Limit)
 	return Limit <= 1.0f ? FString(TEXT("UNLIMITED")) : FString::Printf(TEXT("%.0f FPS"), Limit);
 }
 
+int32 UABTSGameViewportClient::ComputeConfirmationSecondsRemaining(
+	const double DeadlineSeconds,
+	const double NowSeconds)
+{
+	return FMath::Max(0, FMath::CeilToInt(DeadlineSeconds - NowSeconds));
+}
+
 void UABTSGameViewportClient::DrawMenu(UCanvas& Canvas, const FVector2D& ViewSize)
 {
 	HitTargets.Reset();
 	DrawBackdrop(Canvas, ViewSize);
 	if (MenuPage == EABTSSystemMenuPage::Settings) DrawSettings(Canvas, ViewSize);
 	else DrawFrontOrPause(Canvas, ViewSize);
+	if (ActiveDialog != EABTSSystemMenuDialog::None) DrawDialog(Canvas, ViewSize);
 }
 
 void UABTSGameViewportClient::DrawBackdrop(UCanvas& Canvas, const FVector2D& ViewSize)
@@ -576,6 +632,42 @@ void UABTSGameViewportClient::DrawSettings(UCanvas& Canvas, const FVector2D& Vie
 	DrawLabel(Canvas, TEXT("Q / E  SWITCH TAB     LEFT / RIGHT  ADJUST"), FVector2D(Panel.GetCenter().X, Panel.Max.Y - 24.0f * Scale), 0.58f * Scale, Theme.TextMuted, false, true);
 }
 
+void UABTSGameViewportClient::DrawDialog(UCanvas& Canvas, const FVector2D& ViewSize)
+{
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
+	// Remove underlying page hit targets while a confirmation owns input.
+	HitTargets.Reset();
+	FLinearColor Scrim = Theme.SlotBorder;
+	Scrim.A = 0.72f;
+	Canvas.K2_DrawTexture(Canvas.DefaultTexture, FVector2D::ZeroVector, ViewSize, FVector2D::ZeroVector, FVector2D::UnitVector, Scrim, BLEND_Translucent);
+	const FVector2D DialogSize(FMath::Min(680.0f, ViewSize.X - 96.0f), FMath::Min(310.0f, ViewSize.Y - 96.0f));
+	const FBox2D Dialog(ViewSize * 0.5f - DialogSize * 0.5f, ViewSize * 0.5f + DialogSize * 0.5f);
+	FABTSCanvasUI::DrawFacetedBox(Canvas, Theme, Dialog, Theme.PanelPrimary, Theme.AccentPrimary, 22.0f, 4.0f);
+	FABTSCanvasUI::DrawCornerBrackets(Canvas, Theme, Dialog, Theme.AccentSecondary, 32.0f, 10.0f, 3.0f);
+	const bool bVideo = ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo;
+	DrawLabel(Canvas, bVideo ? TEXT("KEEP THESE DISPLAY SETTINGS?") : TEXT("RESET ALL SETTINGS?"), Dialog.GetCenter() - FVector2D(0.0f, 88.0f), 0.92f, Theme.TextPrimary, true, true);
+	if (bVideo)
+	{
+		// Map startup can legitimately exceed the interactive timeout. Capture mode freezes the
+		// reference state so visual evidence is deterministic instead of showing a stale "0".
+		const int32 Seconds = bCaptureMode
+			? static_cast<int32>(VideoConfirmationDurationSeconds)
+			: ComputeConfirmationSecondsRemaining(VideoConfirmationDeadlineSeconds, FPlatformTime::Seconds());
+		DrawLabel(Canvas, FString::Printf(TEXT("REVERTING AUTOMATICALLY IN %d SECONDS"), Seconds), Dialog.GetCenter() - FVector2D(0.0f, 38.0f), 0.68f, Theme.Warning, false, true);
+	}
+	else
+	{
+		DrawLabel(Canvas, TEXT("AUDIO, VIDEO AND ACCESSIBILITY VALUES WILL RETURN TO DEFAULTS"), Dialog.GetCenter() - FVector2D(0.0f, 38.0f), 0.58f, Theme.TextMuted, false, true);
+	}
+	const float ButtonY = Dialog.Max.Y - 92.0f;
+	const float ButtonWidth = 240.0f;
+	const float ButtonHeight = 56.0f;
+	const FBox2D Primary(FVector2D(Dialog.Min.X + 58.0f, ButtonY), FVector2D(Dialog.Min.X + 58.0f + ButtonWidth, ButtonY + ButtonHeight));
+	const FBox2D Secondary(FVector2D(Dialog.Max.X - 58.0f - ButtonWidth, ButtonY), FVector2D(Dialog.Max.X - 58.0f, ButtonY + ButtonHeight));
+	DrawButton(Canvas, Primary, bVideo ? TEXT("KEEP") : TEXT("RESET"), bVideo ? EHitAction::KeepVideo : EHitAction::ConfirmReset, SelectedDialogAction == 0 ? SelectedIndex : INDEX_NONE);
+	DrawButton(Canvas, Secondary, bVideo ? TEXT("REVERT") : TEXT("CANCEL"), bVideo ? EHitAction::RevertVideo : EHitAction::CancelDialog, SelectedDialogAction == 1 ? SelectedIndex : INDEX_NONE);
+}
+
 void UABTSGameViewportClient::DrawButton(
 	UCanvas& Canvas,
 	const FBox2D& Box,
@@ -684,11 +776,15 @@ void UABTSGameViewportClient::HandleAction(const EHitAction Action, const int32 
 		SelectedIndex = 0;
 		PlayUIFeedback(false);
 		break;
-	case EHitAction::ResetDefaults: ResetSettingsToDefaults(); break;
+	case EHitAction::ResetDefaults: ShowResetConfirmation(); break;
 	case EHitAction::TabAudio: SettingsSection = EABTSSettingsSection::Audio; SelectedIndex = 0; PlayUIFeedback(false); break;
 	case EHitAction::TabVideo: SettingsSection = EABTSSettingsSection::Video; SelectedIndex = 0; PlayUIFeedback(false); break;
 	case EHitAction::TabAccessibility: SettingsSection = EABTSSettingsSection::Accessibility; SelectedIndex = 0; PlayUIFeedback(false); break;
 	case EHitAction::AdjustSetting: SelectedIndex = Row; AdjustSetting(Row, Delta); break;
+	case EHitAction::KeepVideo: KeepVideoSettings(); break;
+	case EHitAction::RevertVideo: RevertVideoSettings(TEXT("User")); break;
+	case EHitAction::ConfirmReset: ResetSettingsToDefaults(); break;
+	case EHitAction::CancelDialog: CancelDialog(); break;
 	}
 }
 
@@ -707,7 +803,7 @@ void UABTSGameViewportClient::ActivateSelection()
 	{
 		const int32 Rows = GetSettingsRowCount();
 		if (SelectedIndex < Rows) AdjustSetting(SelectedIndex, 1);
-		else if (SelectedIndex == Rows) ResetSettingsToDefaults();
+		else if (SelectedIndex == Rows) ShowResetConfirmation();
 		else HandleAction(EHitAction::Back);
 		return;
 	}
@@ -807,6 +903,56 @@ void UABTSGameViewportClient::AdjustSetting(const int32 Row, const int32 Delta)
 		}
 	}
 	Settings->ApplyAndSave(GetWorld(), bApplyResolution);
+	if (bApplyResolution) BeginVideoConfirmation();
+	PlayUIFeedback(false);
+}
+
+void UABTSGameViewportClient::ShowResetConfirmation()
+{
+	ActiveDialog = EABTSSystemMenuDialog::ConfirmReset;
+	SelectedDialogAction = 1;
+	PlayUIFeedback(false);
+}
+
+void UABTSGameViewportClient::BeginVideoConfirmation()
+{
+	ActiveDialog = EABTSSystemMenuDialog::ConfirmVideo;
+	SelectedDialogAction = 0;
+	VideoConfirmationDeadlineSeconds = FPlatformTime::Seconds() + VideoConfirmationDurationSeconds;
+	UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][Settings] VideoConfirmation Started Seconds=%.0f"), VideoConfirmationDurationSeconds);
+}
+
+void UABTSGameViewportClient::KeepVideoSettings()
+{
+	if (ActiveDialog != EABTSSystemMenuDialog::ConfirmVideo) return;
+	if (UABTSGameUserSettings* Settings = UABTSGameUserSettings::Get())
+	{
+		Settings->ConfirmVideoMode();
+		Settings->SaveSettings();
+		UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][Settings] VideoConfirmation Kept %s"), *Settings->BuildDiagnosticSummary());
+	}
+	ActiveDialog = EABTSSystemMenuDialog::None;
+	PlayUIFeedback(true);
+}
+
+void UABTSGameViewportClient::RevertVideoSettings(const TCHAR* Reason)
+{
+	if (ActiveDialog != EABTSSystemMenuDialog::ConfirmVideo) return;
+	if (UABTSGameUserSettings* Settings = UABTSGameUserSettings::Get())
+	{
+		Settings->RevertVideoMode();
+		Settings->ApplyResolutionSettings(false);
+		Settings->SaveSettings();
+		RebuildResolutionOptions();
+		UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][Settings] VideoConfirmation Reverted Reason=%s %s"), Reason, *Settings->BuildDiagnosticSummary());
+	}
+	ActiveDialog = EABTSSystemMenuDialog::None;
+	PlayUIFeedback(false);
+}
+
+void UABTSGameViewportClient::CancelDialog()
+{
+	ActiveDialog = EABTSSystemMenuDialog::None;
 	PlayUIFeedback(false);
 }
 
@@ -908,6 +1054,7 @@ void UABTSGameViewportClient::ResetSettingsToDefaults()
 		Settings->ApplyAndSave(GetWorld(), true, 0.12f);
 		RebuildResolutionOptions();
 		SelectedIndex = 0;
+		ActiveDialog = EABTSSystemMenuDialog::None;
 		PlayUIFeedback(true);
 	}
 }

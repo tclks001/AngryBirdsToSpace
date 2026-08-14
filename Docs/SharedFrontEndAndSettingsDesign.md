@@ -54,6 +54,8 @@
 - Gamma、字幕、后台音量和 Motion Blur 即时更新；
 - 最终统一保存。
 
+Resolution 与 Window Mode 应用后进入 12 秒独占确认层。玩家选择 `KEEP` 后才调用 `ConfirmVideoMode()`；选择 `REVERT`、按 Esc 或倒计时结束均调用 `RevertVideoMode()` 并重新应用上一份已确认显示设置。Reset Defaults 同样要求二次确认，默认焦点放在 `CANCEL`，避免误触。
+
 Schema 变化必须提升 `SettingsSchemaVersion`。未知旧 Schema fail closed 到本版默认值。
 
 ## 5. 控制台与命令行
@@ -79,6 +81,8 @@ abts.Settings.Reset
 | `-ABTSMenuCapture=SettingsAudio` | 强制音频设置页截图 |
 | `-ABTSMenuCapture=SettingsVideo` | 强制视频设置页截图 |
 | `-ABTSMenuCapture=SettingsAccessibility` | 强制可访问性设置页截图 |
+| `-ABTSMenuCapture=SettingsVideoConfirm` | 强制显示视频设置确认层截图 |
+| `-ABTSMenuCapture=SettingsResetConfirm` | 强制恢复默认值确认层截图 |
 | `-ABTSMenuCaptureOutput=<abs.png>` | 指定唯一输出；缺省写入 `Saved/ABTSVisualCaptures/SystemMenu` |
 
 捕获器拥有 45 秒硬超时；截图文件不存在时以非零状态退出并记录 `Success=0`，禁止只凭进程返回值宣称视觉通过。
@@ -114,12 +118,14 @@ abts.Settings.Reset
 ## 8. 集成候选 v1 证据
 
 - UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity -NoHotReload` 完整链接成功。
-- fresh NullRHI `ABTS.UI.SystemMenu.SettingsContract` 精确发现 1 项、1/1 成功并以 `TEST COMPLETE. EXIT CODE: 0` 结束；日志：`Saved/Logs/SystemMenu-FinalContract-20260815-052911.log`。
+- fresh NullRHI `ABTS.UI.SystemMenu.SettingsContract` 精确发现 1 项、1/1 成功并以 `TEST COMPLETE. EXIT CODE: 0` 结束；确认保护最终日志：`Saved/Logs/SystemMenu-ConfirmFinalContract-20260815-055235.log`。
 - 既有 `ABTS.Audio.ReleaseAndMusicMapping` fresh NullRHI 1/1 成功；日志：`Saved/Logs/SystemSettings-AudioRegression-20260815-051131.log`。
 - fresh DX11 `-RenderOffscreen` 捕获均记录 `Complete Success=1 Reason=None`：
   - Front：`Saved/ABTSVisualCaptures/SystemMenu/20260815-052440/Front.png`；
   - SettingsAudio：`Saved/ABTSVisualCaptures/SystemMenu/20260815-053045/SettingsAudio.png`；
   - SettingsVideo：`Saved/ABTSVisualCaptures/SystemMenu/20260815-053240/SettingsVideo.png`；
-  - SettingsAccessibility：`Saved/ABTSVisualCaptures/SystemMenu/20260815-052951/SettingsAccessibility.png`。
+  - SettingsAccessibility：`Saved/ABTSVisualCaptures/SystemMenu/20260815-052951/SettingsAccessibility.png`；
+  - Video Confirmation：`Saved/ABTSVisualCaptures/SystemMenu/20260815-054315/SettingsVideoConfirm.png`；
+  - Reset Confirmation：`Saved/ABTSVisualCaptures/SystemMenu/20260815-054813/SettingsResetConfirm.png`。
 - 1280×720 像素复核通过：标题和设置值无裁切，Footer 按钮不溢出，截角填充无直角底板，阶段 HUD 不穿过主面板，音量/Gamma 进度轨与对应数值一致。
 - 离屏截图只证明布局和像素合成；首次进入、ESC 恢复、点击热区、实际可听音量及窗口模式切换仍需一次用户可见 PIE 验收。
