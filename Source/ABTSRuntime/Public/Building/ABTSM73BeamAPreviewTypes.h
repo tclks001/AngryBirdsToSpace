@@ -37,7 +37,11 @@ enum class EABTSM73BeamAMemberRole : uint8
 	/** Longitudinal load rail of an intentional SupportedSpan bridge. */
 	BridgeRail,
 	/** Local Z post carrying an elevated endpoint module above a bridge rail. */
-	BridgePost
+	BridgePost,
+	/** X/Y course deliberately assigned to the friction-only crib core. */
+	CoreCourse,
+	/** Z pier segmented by crib courses; never selected as a gameplay weakness. */
+	CorePost
 };
 
 UENUM(BlueprintType)
@@ -48,7 +52,9 @@ enum class EABTSM73BeamAAssemblyType : uint8
 	RoofFrameBay,
 	BridgeFrameBay,
 	StackedFrameBay,
-	LayeredRoofBay
+	LayeredRoofBay,
+	/** Alternating X/Y courses and their short Z piers form one stability core. */
+	CribCore
 };
 
 /** Physical support semantics between two block surfaces. */
@@ -73,6 +79,11 @@ struct FABTSM73BeamAPreviewSettings
 		meta = (ClampMin = "120.0", ClampMax = "3000.0", Units = "cm"))
 	float TargetBaySpanCM = 480.0f;
 
+	/** Maximum clear Z distance between two real alternating XY floor rings. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bay|Stability",
+		meta = (ClampMin = "144.0", ClampMax = "3000.0", Units = "cm"))
+	float MaximumVerticalSupportSpanCM = 720.0f;
+
 	/** All preview blocks have this fixed square cross-section. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",
 		meta = (ClampMin = "12.0", ClampMax = "120.0", Units = "cm"))
@@ -82,6 +93,11 @@ struct FABTSM73BeamAPreviewSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",
 		meta = (ClampMin = "2", ClampMax = "16"))
 	int32 MaxParallelBlocksPerCourse = 3;
+
+	/** Parallel lanes used by non-roof frame courses; low tiers reserve Brick budget for C3. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block|Stability",
+		meta = (ClampMin = "1", ClampMax = "16"))
+	int32 MaxFrameParallelBlocksPerCourse = 3;
 
 	/** Minimum clear side gap retained between parallel blocks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Block",

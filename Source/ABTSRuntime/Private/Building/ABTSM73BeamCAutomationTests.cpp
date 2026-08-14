@@ -194,6 +194,137 @@ bool FABTSM73BeamCMultiSupportReactionTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamCStructuralClosureLedgerTest,
+	"ABTS.M73DAG.BeamC.StructuralClosureLedger",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamCStructuralClosureLedgerTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamCTests;
+	FABTSM73BeamCPreviewSettings Settings;
+	Settings.bRequireBidirectionalLateralTies = false;
+	FABTSM73BeamAGenerationResult Assembly = MakeTwoSupportAssembly();
+	FABTSM73BeamCGenerationResult Result;
+	FString Error;
+	FABTSM73BeamCGenerator Generator;
+	TestTrue(TEXT("A valid prior closure ledger is preserved"),
+		Generator.GenerateWithStructuralClosure(
+			Settings, Assembly, Result, Error, MAX_int32, false, 2, 3));
+	TestEqual(TEXT("Closure passes remain cumulative"),
+		Result.Summary.StructuralClosurePassCount, 2);
+	TestEqual(TEXT("Added posts remain cumulative"),
+		Result.Summary.AddedStructuralSupportPostCount, 3);
+
+	Assembly = MakeTwoSupportAssembly();
+	Error.Reset();
+	TestFalse(TEXT("An exhausted closure ledger fails closed"),
+		Generator.GenerateWithStructuralClosure(
+			Settings, Assembly, Result, Error, MAX_int32, false,
+			Settings.MaximumStructuralClosurePasses + 1, 0));
+	TestEqual(TEXT("Ledger rejection is stable"), Error,
+		FString(TEXT("BeamCStructuralClosureLedgerInvalid")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamCRootedGrillageNoProgressTest,
+	"ABTS.M73DAG.BeamC.RootedGrillageNoProgress",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamCRootedGrillageNoProgressTest::RunTest(
+	const FString& Parameters)
+{
+	TSet<uint32> SeenHashes;
+	TOptional<uint32> PreviousHash;
+	bool bImmediateRepeat = false;
+	FString Error;
+	TestTrue(TEXT("A first failed DAG identity is observed"),
+		ABTSM73BeamC::TryObserveStructuralClosureFailure(
+			0x11111111u, PreviousHash, SeenHashes, bImmediateRepeat, Error));
+	TestFalse(TEXT("A first observation is not an immediate repeat"),
+		bImmediateRepeat);
+	PreviousHash = 0x11111111u;
+	TestTrue(TEXT("One adjacent repeat may enter the evidence phase"),
+		ABTSM73BeamC::TryObserveStructuralClosureFailure(
+			0x11111111u, PreviousHash, SeenHashes, bImmediateRepeat, Error));
+	TestTrue(TEXT("The adjacent repeat is identified"), bImmediateRepeat);
+
+	SeenHashes.Reset();
+	PreviousHash.Reset();
+	TestTrue(TEXT("Cycle fixture observes H1"),
+		ABTSM73BeamC::TryObserveStructuralClosureFailure(
+			0x11111111u, PreviousHash, SeenHashes, bImmediateRepeat, Error));
+	PreviousHash = 0x11111111u;
+	TestTrue(TEXT("Cycle fixture observes H2"),
+		ABTSM73BeamC::TryObserveStructuralClosureFailure(
+			0x22222222u, PreviousHash, SeenHashes, bImmediateRepeat, Error));
+	PreviousHash = 0x22222222u;
+	TestFalse(TEXT("A non-adjacent H1-H2-H1 cycle fails closed"),
+		ABTSM73BeamC::TryObserveStructuralClosureFailure(
+			0x11111111u, PreviousHash, SeenHashes, bImmediateRepeat, Error));
+	TestEqual(TEXT("Cycle rejection uses the stable no-progress reason"), Error,
+		FString(TEXT("BeamCStructuralClosureNoProgress")));
+
+	TestFalse(TEXT("A first failure cannot force a prior-lane cap"),
+		ABTSM73BeamC::ShouldForceRootedGrillageRepair(false, 1));
+	TestFalse(TEXT("A repeated failure without twin evidence cannot force a cap"),
+		ABTSM73BeamC::ShouldForceRootedGrillageRepair(true, 0));
+	TestTrue(TEXT("A repeated failure with prior twin evidence may force a cap"),
+		ABTSM73BeamC::ShouldForceRootedGrillageRepair(true, 1));
+
+	TSet<uint32> AttemptedHashes;
+	Error.Reset();
+	TestTrue(TEXT("First failed DAG may begin one rooted-grillage transaction"),
+		ABTSM73BeamC::TryBeginRootedGrillageRepair(
+			0x12345678u, AttemptedHashes, Error));
+	TestEqual(TEXT("First transaction records one DAG identity"),
+		AttemptedHashes.Num(), 1);
+	TestTrue(TEXT("First transaction clears stale errors"), Error.IsEmpty());
+
+	TestFalse(TEXT("The same failed DAG may not begin a second transaction"),
+		ABTSM73BeamC::TryBeginRootedGrillageRepair(
+			0x12345678u, AttemptedHashes, Error));
+	TestEqual(TEXT("Repeated-DAG rejection is stable"), Error,
+		FString(TEXT("BeamCStructuralClosureNoProgress")));
+	TestEqual(TEXT("Rejected duplicate does not grow the ledger"),
+		AttemptedHashes.Num(), 1);
+
+	TestTrue(TEXT("A different failed DAG retains one bounded opportunity"),
+		ABTSM73BeamC::TryBeginRootedGrillageRepair(
+			0x87654321u, AttemptedHashes, Error));
+	TestEqual(TEXT("Distinct DAG identities remain independently bounded"),
+		AttemptedHashes.Num(), 2);
+
+	AttemptedHashes.Reset();
+	Error = TEXT("StaleError");
+	TestTrue(TEXT("A pass without physical grillage does not consume a DAG token"),
+		ABTSM73BeamC::TryCommitAddedRootedGrillageRepair(
+			0xabcdef01u, false, AttemptedHashes, Error));
+	TestEqual(TEXT("A non-grillage pass leaves the transaction ledger empty"),
+		AttemptedHashes.Num(), 0);
+	TestTrue(TEXT("A non-grillage pass clears stale errors"), Error.IsEmpty());
+	TestTrue(TEXT("An actually added void grillage consumes one DAG token"),
+		ABTSM73BeamC::TryCommitAddedRootedGrillageRepair(
+			0xabcdef01u, true, AttemptedHashes, Error));
+	TestEqual(TEXT("The added grillage records its failed DAG identity"),
+		AttemptedHashes.Num(), 1);
+	TestFalse(TEXT("The same DAG is rejected before a second repair invocation"),
+		ABTSM73BeamC::TryCheckRootedGrillageRepairAvailable(
+			0xabcdef01u, AttemptedHashes, Error));
+	TestEqual(TEXT("Pre-repair rejection uses the stable no-progress reason"),
+		Error, FString(TEXT("BeamCStructuralClosureNoProgress")));
+	TestFalse(TEXT("The same failed DAG cannot commit a second added grillage"),
+		ABTSM73BeamC::TryCommitAddedRootedGrillageRepair(
+			0xabcdef01u, true, AttemptedHashes, Error));
+	TestEqual(TEXT("Added-grillage duplicate uses the stable no-progress reason"),
+		Error, FString(TEXT("BeamCStructuralClosureNoProgress")));
+	TestEqual(TEXT("Rejected added-grillage duplicate does not grow the ledger"),
+		AttemptedHashes.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamCCycleRejectTest,
 	"ABTS.M73DAG.BeamC.CycleReject",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

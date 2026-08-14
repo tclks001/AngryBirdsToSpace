@@ -132,7 +132,21 @@ public:
 	int32 GetDAG3BAffectedDebugInstanceCount() const;
 	int32 GetDAG3BDirectionDebugInstanceCount() const;
 
-	EABTSM73IdleValidationState GetIdleValidationState() const { return IdleValidationState; }
+	EABTSM73IdleValidationState GetIdleValidationState() const
+	{
+		return bParticipateInSlingshotValidationGate
+			? IdleValidationState
+			: EABTSM73IdleValidationState::NotRequired;
+	}
+	EABTSM73IdleValidationState GetRawIdleValidationStateForValidation() const
+	{
+		return IdleValidationState;
+	}
+	bool ShouldParticipateInPIERuntime() const { return bParticipateInPIERuntime; }
+	bool ShouldParticipateInSlingshotValidationGate() const
+	{
+		return bParticipateInSlingshotValidationGate;
+	}
 	bool IsIdleValidationTerminal() const
 	{
 		return IdleValidationState == EABTSM73IdleValidationState::Accepted
@@ -210,6 +224,16 @@ private:
 	TObjectPtr<UStaticMeshComponent> FoundationCap;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M7.3-A|Foundation")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> FoundationFeet;
+
+	/** Off keeps this editor fixture preview-only: PIE spawns no real Modules and runs no Chaos validation. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|PIE",
+		meta = (DisplayName = "Participate in PIE Runtime"))
+	bool bParticipateInPIERuntime = true;
+
+	/** Off still permits PIE physics, but this Actor reports NotRequired to the slingshot startup gate. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|PIE",
+		meta = (DisplayName = "Participate in Slingshot Validation Gate"))
+	bool bParticipateInSlingshotValidationGate = true;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7.3-A|Generation")
 	EABTSM73GroundMode GroundMode = EABTSM73GroundMode::Auto;

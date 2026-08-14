@@ -14,22 +14,29 @@ namespace ABTSM73BeamD0
 		switch (Tier)
 		{
 		case 0:
+			Recipe.MaximumCandidateAttempts = 12;
 			Recipe.MinimumBrickCount = 20;
-			Recipe.MaximumBrickCount = 49;
+			// Skeleton-first V3 adds a non-negotiable grounded core to the
+			// four-face frame. The canonical five-profile E1 range is 84..110;
+			// retain a coarse guard instead of density-searching away the core.
+			Recipe.MaximumBrickCount = 149;
 			Recipe.BoundsScale = 0.50f;
 			Recipe.BaySpanScale = 1.70f;
 			Recipe.ShapeGrammarDepth = 2;
 			Recipe.MotifGrammarDepth = 1;
 			Recipe.TargetShapeVolumeCount = 12;
-			Recipe.MaximumBaysPerVolume = 2;
+			// Keep the macro silhouette and full-height roof, but spend the easy
+			// tier's scarce Brick budget on one stable core instead of duplicate
+			// long-post frame bays inside the same semantic volume.
+			Recipe.MaximumBaysPerVolume = 1;
 			Recipe.MaximumParallelBlocksPerCourse = 2;
 			Recipe.MaximumRoofCourseCount = 64;
 			Recipe.SingleTerminalRoofCourseCount = 8;
 			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		case 1:
-			Recipe.MinimumBrickCount = 60;
-			Recipe.MaximumBrickCount = 199;
+			Recipe.MinimumBrickCount = 150;
+			Recipe.MaximumBrickCount = 349;
 			Recipe.BoundsScale = 0.82f;
 			Recipe.BaySpanScale = 1.30f;
 			Recipe.ShapeGrammarDepth = 2;
@@ -42,7 +49,7 @@ namespace ABTSM73BeamD0
 			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		case 2:
-			Recipe.MinimumBrickCount = 300;
+			Recipe.MinimumBrickCount = 350;
 			Recipe.MaximumBrickCount = 799;
 			Recipe.BoundsScale = 0.96f;
 			Recipe.BaySpanScale = 1.00f;
@@ -57,7 +64,7 @@ namespace ABTSM73BeamD0
 			break;
 		case 3:
 			Recipe.MinimumBrickCount = 800;
-			Recipe.MaximumBrickCount = 1499;
+			Recipe.MaximumBrickCount = 2099;
 			Recipe.BoundsScale = 1.10f;
 			Recipe.BaySpanScale = 0.80f;
 			Recipe.ShapeGrammarDepth = 4;
@@ -71,8 +78,8 @@ namespace ABTSM73BeamD0
 			break;
 		case 4:
 			Recipe.MaximumCandidateAttempts = 10;
-			Recipe.MinimumBrickCount = 1500;
-			Recipe.MaximumBrickCount = 2499;
+			Recipe.MinimumBrickCount = 2100;
+			Recipe.MaximumBrickCount = 3399;
 			Recipe.BoundsScale = 1.22f;
 			Recipe.BaySpanScale = 0.72f;
 			Recipe.ShapeGrammarDepth = 5;
@@ -86,8 +93,8 @@ namespace ABTSM73BeamD0
 			break;
 		default:
 			Recipe.MaximumCandidateAttempts = 12;
-			Recipe.MinimumBrickCount = 2500;
-			Recipe.MaximumBrickCount = 4999;
+			Recipe.MinimumBrickCount = 3400;
+			Recipe.MaximumBrickCount = 5499;
 			Recipe.BoundsScale = 1.36f;
 			Recipe.BaySpanScale = 0.58f;
 			Recipe.ShapeGrammarDepth = 6;
@@ -101,6 +108,81 @@ namespace ABTSM73BeamD0
 			break;
 		}
 		return Recipe;
+	}
+
+	FABTSM73BeamC3CribCoreSettings StabilityCoreRecipe(
+		const int32 Tier,
+		const int32 MaximumFinalMemberCount)
+	{
+		FABTSM73BeamC3CribCoreSettings Settings;
+		Settings.MaximumFinalMemberCount = MaximumFinalMemberCount;
+		// Safety geometry is height-driven. Difficulty must not make an easy
+		// building less stable or add decorative belts to a hard one.
+		Settings.TargetBeltCount = 1;
+		Settings.MaximumHostCount =
+			Tier == 0 ? 1
+			: Tier == 1 ? 4
+			: Tier == 2 ? 16
+			: Tier == 3 ? 32
+			: Tier == 4 ? 64 : 96;
+		Settings.MaximumNetMemberIncrease =
+			Tier == 0 ? 12
+			// A rooted C3 tie is one horizontal course plus the two real
+			// contact splits at its Z-post endpoints. Keep E2's allowance on
+			// that three-member quantum instead of forcing an unsafe whole-frame
+			// deletion when the cumulative C2+C3 delta is exactly 33.
+			: Tier == 1 ? 33
+			: Tier == 2 ? 64
+			: Tier == 3 ? 128
+			: Tier == 4 ? 256 : 384;
+		Settings.BeamC2MemberReserve =
+			Tier == 0 ? 2
+			: Tier == 1 ? 8
+			: Tier == 2 ? 16
+			: Tier == 3 ? 32
+			: Tier == 4 ? 64 : 96;
+		// Stability geometry wins over one protected interior roof lane at every
+		// tier. The donor selector preserves eaves and the unique ridge, so this is
+		// a bounded silhouette-neutral fallback rather than a difficulty reduction.
+		Settings.bAllowRoofLaneBudgetReallocation = true;
+		return Settings;
+	}
+
+	FABTSM73BeamC3V2CoupledExteriorFrameSettings CoupledExteriorFrameRecipe(
+		const int32 Tier,
+		const int32 MaximumFinalMemberCount)
+	{
+		FABTSM73BeamC3V2CoupledExteriorFrameSettings Settings;
+		Settings.MaximumFinalMemberCount = MaximumFinalMemberCount;
+
+		// These are topology identities, not search ranges. The course sequence
+		// preserves complete X/Y pairs and the rail ladder is the Stage-1 contract.
+		static constexpr int32 CourseCounts[] = {8, 16, 30, 44, 60, 76};
+		static constexpr int32 MinimumCourseCounts[] = {8, 8, 22, 36, 52, 68};
+		static constexpr int32 RailCounts[] = {2, 2, 3, 3, 4, 5};
+		static constexpr int32 MaximumCellCounts[] = {1, 1, 2, 2, 3, 4};
+		static constexpr int32 MaximumMacroBandCounts[] = {1, 1, 2, 2, 3, 4};
+		static constexpr int32 MinimumStructuralBudgets[] = {28, 28, 82, 140, 268, 436};
+		static constexpr int32 MaximumStructuralCounts[] = {28, 44, 244, 328, 900, 1904};
+
+		const int32 ClampedTier = FMath::Clamp(Tier, 0, 5);
+		Settings.CourseCount = CourseCounts[ClampedTier];
+		Settings.MinimumCourseCount = MinimumCourseCounts[ClampedTier];
+		Settings.RailCount = RailCounts[ClampedTier];
+		Settings.MaximumCellCount = MaximumCellCounts[ClampedTier];
+		Settings.MaximumMacroBandCount = MaximumMacroBandCounts[ClampedTier];
+		Settings.MinimumStructuralMemberBudget =
+			MinimumStructuralBudgets[ClampedTier];
+		Settings.MaximumStructuralMemberCount =
+			MaximumStructuralCounts[ClampedTier];
+
+		// E1 has no lower valid topology. E2-E6 expose exactly two registered
+		// reductions: four courses (and, where available, one cell) per level.
+		Settings.MaximumFallbackLevel = ClampedTier == 0 ? 0 : 2;
+		Settings.CourseReductionPerFallbackLevel = ClampedTier == 0 ? 0 : 4;
+		Settings.CellReductionPerFallbackLevel =
+			ClampedTier >= 4 ? 1 : 0;
+		return Settings;
 	}
 
 	bool IsFinitePositive(const float Value)
@@ -296,9 +378,11 @@ namespace ABTSM73BeamD0
 			TEXT("Metrics=%.6f:%.6f:%.6f:%d:%.6f:%d|")
 			TEXT("Shape=%d:%.6f:%.6f:%.6f:%d:%d:%d:%d:%.6f:")
 			TEXT("%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f|")
-			TEXT("Beam=%.6f:%d:%d|")
+			TEXT("Beam=%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d:%d:%d:%d:%d:%d:%d|")
 			TEXT("Visual=%d:%d:%d:%d:%.6f:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%d|")
-			TEXT("C2=%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d"),
+			TEXT("C2=%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d|")
+			TEXT("C3V2=%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%d|")
+			TEXT("C3V1=%d:%.6f:%.6f:%d:%d:%d:%d:%d:%d"),
 			Profile.ProfileCatalogHash,
 			*Profile.ResolvedM7ProfileId.ToString(),
 			Profile.DifficultyTier,
@@ -331,8 +415,18 @@ namespace ABTSM73BeamD0
 			Shape.PyramidPreferredMaxAspectRatio,
 			Shape.PrismPreferredMinAspectRatio,
 			Profile.BeamSettings.BeamB.BeamA.TargetBaySpanCM,
+			Profile.BeamSettings.BeamB.BeamA.MaximumVerticalSupportSpanCM,
+			Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM,
+			Profile.BeamSettings.BeamB.BeamA.MinimumParallelBlockGapCM,
+			Profile.BeamSettings.BeamB.BeamA.TwoBlockMergeGapCM,
 			Profile.BeamSettings.BeamB.BeamA.MaxParallelBlocksPerCourse,
+			Profile.BeamSettings.BeamB.BeamA.MaxFrameParallelBlocksPerCourse,
 			Profile.BeamSettings.BeamB.bRequireMotifVariety ? 1 : 0,
+			Profile.BeamSettings.BeamB.BeamA.MaxBayCount,
+			Profile.BeamSettings.BeamB.BeamA.MaxJointCount,
+			Profile.BeamSettings.BeamB.BeamA.MaxMemberCount,
+			Profile.BeamSettings.BeamB.BeamA.MaxBearingContactCount,
+			Profile.BeamSettings.BeamB.BeamA.MaxBearingPairChecks,
 			Profile.VisualComplexity.MilestoneTier,
 			Profile.VisualComplexity.MinimumBrickCount,
 			Profile.VisualComplexity.MaximumBrickCount,
@@ -355,7 +449,32 @@ namespace ABTSM73BeamD0
 			Profile.BeamSettings.MinimumSeparatedSupportSpanRatio,
 			Profile.BeamSettings.SupportResultantMarginCM,
 			Profile.BeamSettings.MaximumStructuralClosurePasses,
-			Profile.BeamSettings.MaximumStructuralSupportPosts);
+			Profile.BeamSettings.MaximumStructuralSupportPosts,
+			Profile.CoupledExteriorFrame.bEnabled ? 1 : 0,
+			Profile.CoupledExteriorFrame.CourseCount,
+			Profile.CoupledExteriorFrame.RailCount,
+			Profile.CoupledExteriorFrame.MaximumCellCount,
+			Profile.CoupledExteriorFrame.MaximumMacroBandCount,
+			Profile.CoupledExteriorFrame.MaximumMemberLengthCM,
+			Profile.CoupledExteriorFrame.MaximumPostSegmentSpanCM,
+			Profile.CoupledExteriorFrame.MinimumCourseCount,
+			Profile.CoupledExteriorFrame.MinimumStructuralMemberBudget,
+			Profile.CoupledExteriorFrame.MaximumStructuralMemberCount,
+			Profile.CoupledExteriorFrame.MaximumFinalMemberCount,
+			Profile.CoupledExteriorFrame.MaximumFallbackLevel,
+			Profile.CoupledExteriorFrame.CourseReductionPerFallbackLevel,
+			Profile.CoupledExteriorFrame.CellReductionPerFallbackLevel,
+			Profile.CoupledExteriorFrame.MinimumMacroBandStrideCourses,
+			Profile.CoupledExteriorFrame.MaximumMacroBandStrideCourses,
+			Profile.StabilityCore.bEnabled ? 1 : 0,
+			Profile.StabilityCore.MaximumUnbracedCorePostSpanCM,
+			Profile.StabilityCore.MinimumCoreArmSpanCM,
+			Profile.StabilityCore.TargetBeltCount,
+			Profile.StabilityCore.MaximumHostCount,
+			Profile.StabilityCore.MaximumNetMemberIncrease,
+			Profile.StabilityCore.MaximumFinalMemberCount,
+			Profile.StabilityCore.BeamC2MemberReserve,
+			Profile.StabilityCore.bAllowRoofLaneBudgetReallocation ? 1 : 0);
 		return static_cast<int64>(FCrc::StrCrc32(*Canonical));
 	}
 
@@ -407,6 +526,60 @@ namespace ABTSM73BeamD0
 		}
 		return Profile.DifficultyCurve.Validate(OutError);
 	}
+}
+
+bool FABTSM73BeamC3V2CoupledExteriorFrameSettings::Validate(
+	FString& OutError) const
+{
+	const int32 MaximumFallbackCourseReduction =
+		MaximumFallbackLevel * CourseReductionPerFallbackLevel;
+	const int32 MaximumFallbackCellReduction =
+		MaximumFallbackLevel * CellReductionPerFallbackLevel;
+	const int32 RequiredMacroBandCount =
+		1 + (FMath::Max(0, CourseCount - 22) + 21) / 22;
+	const int32 MinimumMacroBandCount =
+		1 + (FMath::Max(0, MinimumCourseCount - 22) + 21) / 22;
+	const int32 MinimumStructuralCount =
+		RailCount * MinimumCourseCount
+			+ 4 * MinimumMacroBandCount * (RailCount + 1);
+	const int32 MaximumStructuralCount = MaximumCellCount
+		* (RailCount * CourseCount
+			+ 4 * MaximumMacroBandCount * (RailCount + 1));
+	if (CourseCount < 8
+		|| CourseCount % 2 != 0
+		|| RailCount < 2 || RailCount > 5
+		|| MaximumCellCount < 1 || MaximumCellCount > 16
+		|| MaximumMacroBandCount < 1
+		|| MaximumMacroBandCount > 32
+		|| MaximumMacroBandCount != RequiredMacroBandCount
+		|| !ABTSM73BeamD0::IsFinitePositive(MaximumMemberLengthCM)
+		|| !ABTSM73BeamD0::IsFinitePositive(MaximumPostSegmentSpanCM)
+		|| MaximumMemberLengthCM > 720.0f
+		|| MaximumPostSegmentSpanCM > MaximumMemberLengthCM
+		|| MinimumCourseCount < 8
+		|| MinimumCourseCount > CourseCount
+		|| MinimumCourseCount % 2 != 0
+		|| MinimumStructuralMemberBudget != MinimumStructuralCount
+		|| MaximumStructuralMemberCount != MaximumStructuralCount
+		|| MaximumFinalMemberCount < MaximumStructuralMemberCount
+		|| MaximumFallbackLevel < 0 || MaximumFallbackLevel > 2
+		|| CourseReductionPerFallbackLevel < 0
+		|| CourseReductionPerFallbackLevel % 2 != 0
+		|| CellReductionPerFallbackLevel < 0
+		|| CourseCount - MaximumFallbackCourseReduction
+			< MinimumCourseCount
+		|| MaximumCellCount - MaximumFallbackCellReduction < 1
+		|| MinimumMacroBandStrideCourses < 6
+		|| MinimumMacroBandStrideCourses % 2 != 0
+		|| MaximumMacroBandStrideCourses < MinimumMacroBandStrideCourses
+		|| MaximumMacroBandStrideCourses > 22
+		|| MaximumMacroBandStrideCourses % 2 != 0)
+	{
+		OutError = TEXT("BeamD0InvalidCoupledExteriorFrameRecipe");
+		return false;
+	}
+	OutError.Reset();
+	return true;
 }
 
 bool FABTSM73BeamD0VisualComplexityRecipe::Validate(FString& OutError) const
@@ -521,7 +694,7 @@ FABTSM73BeamD0ProfileCatalog::FABTSM73BeamD0ProfileCatalog(
 const FABTSM73BeamD0ProfileCatalog& FABTSM73BeamD0ProfileCatalog::GetDefault()
 {
 	static const FABTSM73BeamD0ProfileCatalog Catalog(
-		ABTSM73BeamD0::BuildDefaultDefinitions(), 6);
+		ABTSM73BeamD0::BuildDefaultDefinitions(), 11);
 	return Catalog;
 }
 
@@ -605,18 +778,15 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 	}
 	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier == 3)
 	{
-		// Reserve a non-overlapping E4 ceiling for the certified light-frame
-		// E5 step below. The fixed E4 matrix remains inside this window.
-		OutProfile.VisualComplexity.MaximumBrickCount = 1299;
+		// V3 skeleton-first canonical counts are separated by hundreds of
+		// members (E4/E5/E6 = 1348/1951/2515). Keep coarse hundred-scale
+		// guards; never fit a boundary to one emitted count by +/- one.
+		OutProfile.VisualComplexity.MaximumBrickCount = 1599;
 	}
 	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier == 4)
 	{
-		// The light-frame TwinTower profile reaches the same E5 silhouette
-		// milestone with fewer long bearing courses than masonry profiles.
-		// Keep its per-profile step above the certified E4 fixture while
-		// avoiding forced over-fragmentation solely to hit a global count.
-		OutProfile.VisualComplexity.MinimumBrickCount = 1300;
-		OutProfile.VisualComplexity.MaximumBrickCount = 1499;
+		OutProfile.VisualComplexity.MinimumBrickCount = 1600;
+		OutProfile.VisualComplexity.MaximumBrickCount = 2199;
 	}
 	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier == 5)
 	{
@@ -625,10 +795,25 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 		// over-fragments TwinTower closure without adding a new readable macro milestone.
 		OutProfile.VisualComplexity.ShapeGrammarDepth = 4;
 		OutProfile.VisualComplexity.BoundsScale = 1.22f;
-		OutProfile.VisualComplexity.MinimumBrickCount = 1500;
+		OutProfile.VisualComplexity.MinimumBrickCount = 2200;
 		OutProfile.VisualComplexity.MaximumBrickCount = 3499;
 	}
 	if (!OutProfile.VisualComplexity.Validate(OutError))
+	{
+		OutProfile.RejectReason = OutError;
+		return false;
+	}
+	OutProfile.StabilityCore = ABTSM73BeamD0::StabilityCoreRecipe(
+		DifficultyTier, OutProfile.VisualComplexity.MaximumBrickCount);
+	if (!OutProfile.StabilityCore.Validate(OutError))
+	{
+		OutProfile.RejectReason = OutError;
+		return false;
+	}
+	OutProfile.CoupledExteriorFrame =
+		ABTSM73BeamD0::CoupledExteriorFrameRecipe(
+			DifficultyTier, OutProfile.VisualComplexity.MaximumBrickCount);
+	if (!OutProfile.CoupledExteriorFrame.Validate(OutError))
 	{
 		OutProfile.RejectReason = OutError;
 		return false;
@@ -704,21 +889,50 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 
 	Settings.BeamB.BeamA.TargetBaySpanCM = FMath::Max(
 		220.0f, Definition->BaseTargetBaySpanCM * Visual.BaySpanScale);
+	// Density prototype: keep the 36 cm section and the final two-lane merge
+	// contract, but require a 40 cm clear gap before a third/fourth parallel
+	// lane is admitted. The first 72 cm probe proved the budget margin but
+	// collapsed three-lane sections to two lanes and stalled Beam-C closure;
+	// this registered value only compresses the dense four-lane case while
+	// preserving the intermediate three-lane bearing pattern. It is one global
+	// production value, not a per-Profile search range or Candidate fallback.
+	Settings.BeamB.BeamA.MinimumParallelBlockGapCM = 40.0f;
+	Settings.BeamB.BeamA.MaximumVerticalSupportSpanCM =
+		OutProfile.StabilityCore.MaximumUnbracedCorePostSpanCM;
 	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier >= 4)
 	{
+		// E5 needs one wider bay to leave enough final-member capacity for the
+		// physical C2 support cap. E6 keeps its denser certified four-lane frame.
 		Settings.BeamB.BeamA.TargetBaySpanCM = FMath::Max(
 			Settings.BeamB.BeamA.TargetBaySpanCM,
-			420.0f);
+			DifficultyTier == 4 ? 473.0f : 420.0f);
 	}
 	Settings.BeamB.BeamA.MaxBaysPerVolume = Visual.MaximumBaysPerVolume;
 	Settings.BeamB.BeamA.MaxParallelBlocksPerCourse =
 		Visual.MaximumParallelBlocksPerCourse;
+	Settings.BeamB.BeamA.MaxFrameParallelBlocksPerCourse =
+		DifficultyTier == 0
+			? 1
+			: Visual.MaximumParallelBlocksPerCourse;
 	Settings.BeamB.BeamA.MaxRoofCourseCount =
 		Visual.MaximumRoofCourseCount;
 	Settings.BeamB.GrammarDepth = Visual.MotifGrammarDepth;
 	Settings.BeamB.bRequireMotifVariety = Visual.bRequireMotifVariety;
 	Settings.BeamB.bAllowCantilever = false;
 	Settings.BeamB.bAllowBracedBay = false;
+
+	// The Stage-1 shell is downstream of Beam-B, but Beam-B must first be able
+	// to publish its high-tier IR. These deterministic caps remove the E6
+	// 8192-joint hard stop without changing the 36 cm section or visual window.
+	if (DifficultyTier >= 4)
+	{
+		FABTSM73BeamAPreviewSettings& BeamA = Settings.BeamB.BeamA;
+		BeamA.MaxJointCount = DifficultyTier == 4 ? 16384 : 32768;
+		BeamA.MaxMemberCount = DifficultyTier == 4 ? 32768 : 65536;
+		BeamA.MaxBearingContactCount = DifficultyTier == 4 ? 32768 : 65536;
+		BeamA.MaxBearingPairChecks =
+			DifficultyTier == 4 ? 524288 : 1048576;
+	}
 
 	OutProfile.ResolvedSettingsHash =
 		ABTSM73BeamD0::CalculateResolvedHash(OutProfile, DeterministicSeed);

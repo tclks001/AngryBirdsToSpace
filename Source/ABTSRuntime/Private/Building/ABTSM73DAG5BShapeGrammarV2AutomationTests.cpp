@@ -90,6 +90,78 @@ namespace ABTSM73DAG5BV2Tests
 		}
 		return false;
 	}
+
+	bool GroundFootprintsTouch(
+		const FABTSM73DAG5BV2Volume& A,
+		const FABTSM73DAG5BV2Volume& B)
+	{
+		const double XOverlap = OverlapLength(
+			A.LocalBounds.Min.X,
+			A.LocalBounds.Max.X,
+			B.LocalBounds.Min.X,
+			B.LocalBounds.Max.X);
+		const double YOverlap = OverlapLength(
+			A.LocalBounds.Min.Y,
+			A.LocalBounds.Max.Y,
+			B.LocalBounds.Min.Y,
+			B.LocalBounds.Max.Y);
+		const double XGap = FMath::Max(
+			0.0,
+			FMath::Max(
+				A.LocalBounds.Min.X - B.LocalBounds.Max.X,
+				B.LocalBounds.Min.X - A.LocalBounds.Max.X));
+		const double YGap = FMath::Max(
+			0.0,
+			FMath::Max(
+				A.LocalBounds.Min.Y - B.LocalBounds.Max.Y,
+				B.LocalBounds.Min.Y - A.LocalBounds.Max.Y));
+		return (XOverlap > 1.0 && YGap <= 1.0)
+			|| (YOverlap > 1.0 && XGap <= 1.0)
+			|| (XOverlap > 1.0 && YOverlap > 1.0);
+	}
+
+	int32 CountGroundComponents(
+		const TArray<FABTSM73DAG5BV2Volume>& Volumes)
+	{
+		TArray<int32> GroundIndices;
+		for (int32 Index = 0; Index < Volumes.Num(); ++Index)
+		{
+			if (Volumes[Index].LocalBounds.Min.Z <= 1.0
+				&& Volumes[Index].Role
+					!= EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				GroundIndices.Add(Index);
+			}
+		}
+		TArray<bool> Visited;
+		Visited.Init(false, GroundIndices.Num());
+		int32 Count = 0;
+		for (int32 Start = 0; Start < GroundIndices.Num(); ++Start)
+		{
+			if (Visited[Start])
+			{
+				continue;
+			}
+			++Count;
+			TArray<int32> Queue{Start};
+			Visited[Start] = true;
+			for (int32 Head = 0; Head < Queue.Num(); ++Head)
+			{
+				for (int32 Other = 0; Other < GroundIndices.Num(); ++Other)
+				{
+					if (!Visited[Other]
+						&& GroundFootprintsTouch(
+							Volumes[GroundIndices[Queue[Head]]],
+							Volumes[GroundIndices[Other]]))
+					{
+						Visited[Other] = true;
+						Queue.Add(Other);
+					}
+				}
+			}
+		}
+		return Count;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -446,6 +518,139 @@ bool FABTSM73DAG5BV2SupportedSpanContractTest::RunTest(
 	}
 	TestTrue(TEXT("Archetype matrix contains an intentional span"),
 		SpanCount > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73DAG5BV2CoupledGroundLayerTest,
+	"ABTS.M73DAG.DAG5Bv2.CoupledGroundLayer",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73DAG5BV2CoupledGroundLayerTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73DAG5BV2Tests;
+	int32 HighestSemanticSeamArchetypeCount = 0;
+	for (int32 ArchetypeValue = static_cast<int32>(
+		EABTSM73DAG5BV2Archetype::TerracedCitadel);
+		ArchetypeValue <= static_cast<int32>(
+			EABTSM73DAG5BV2Archetype::SpiredCampus); ++ArchetypeValue)
+	{
+		FABTSM73DAG5BV2PreviewSettings Settings = MakeSettings();
+		Settings.Archetype =
+			static_cast<EABTSM73DAG5BV2Archetype>(ArchetypeValue);
+		Settings.BuildingSeed = 970000 + ArchetypeValue * 401;
+		FABTSM73DAG5BV2GenerationResult Result;
+		FString Error;
+		const bool bGenerated = Generate(Settings, Result, Error);
+		TestTrue(
+			FString::Printf(
+				TEXT("Archetype %d coupled silhouette succeeds: %s"),
+				ArchetypeValue,
+				*Error),
+			bGenerated);
+		if (!bGenerated)
+		{
+			continue;
+		}
+
+		int32 CoupledGroundCellCount = 0;
+		bool bUsesHighestSemanticSeam = false;
+		for (const FString& Trace : Result.GrammarTrace)
+		{
+			bUsesHighestSemanticSeam |=
+				Trace.Contains(TEXT("Selection(HighestLegal)"));
+		}
+		HighestSemanticSeamArchetypeCount += bUsesHighestSemanticSeam ? 1 : 0;
+		for (const FABTSM73DAG5BV2Volume& Volume : Result.Volumes)
+		{
+			TestEqual(
+				FString::Printf(TEXT("Volume %d keeps dense stable identity"),
+					Volume.VolumeId),
+				Volume.VolumeId,
+				static_cast<int32>(&Volume - Result.Volumes.GetData()));
+			TestTrue(
+				FString::Printf(TEXT("Volume %d remains positive after semantic recut"),
+					Volume.VolumeId),
+				Volume.LocalBounds.IsValid
+					&& Volume.LocalBounds.GetSize().GetMin() > 1.0);
+			CoupledGroundCellCount +=
+				Volume.DerivationPath.StartsWith(TEXT("CoupledGround/"))
+					? 1
+					: 0;
+			if (Volume.DerivationPath.StartsWith(TEXT("CoupledGround/")))
+			{
+				const double CoursePairs = Volume.LocalBounds.Max.Z / 72.0;
+				TestTrue(
+					FString::Printf(
+						TEXT("Coupled ground %d top is a 72 cm course pair"),
+						Volume.VolumeId),
+					FMath::IsNearlyEqual(
+						CoursePairs, FMath::RoundToDouble(CoursePairs), 0.001));
+			}
+		}
+		TestTrue(
+			FString::Printf(
+				TEXT("Archetype %d publishes coupled ground cells"),
+				ArchetypeValue),
+			CoupledGroundCellCount > 0);
+		const int32 GroundComponentCount =
+			CountGroundComponents(Result.Volumes);
+		if (Result.Summary.SupportedSpanCount == 0)
+		{
+			TestEqual(
+				FString::Printf(
+					TEXT("Archetype %d has one coupled ground component"),
+					ArchetypeValue),
+				GroundComponentCount,
+				1);
+		}
+		else
+		{
+			TestTrue(
+				FString::Printf(
+					TEXT("Archetype %d retains an intentional ground seam"),
+					ArchetypeValue),
+				GroundComponentCount > 1);
+		}
+
+		for (const FABTSM73DAG5BV2Volume& Span : Result.Volumes)
+		{
+			if (Span.Role != EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+			{
+				continue;
+			}
+			for (const FABTSM73DAG5BV2Volume& Ground : Result.Volumes)
+			{
+				if (Ground.LocalBounds.Min.Z > 1.0
+					|| Ground.Role
+						== EABTSM73DAG5BV2VolumeRole::SupportedSpan)
+				{
+					continue;
+				}
+				const int32 Axis = Span.SpanAxisIndex;
+				const int32 Perpendicular = Axis == 0 ? 1 : 0;
+				const double OpeningOverlap = OverlapLength(
+					Span.SpanOpeningMinCM,
+					Span.SpanOpeningMaxCM,
+					Ground.LocalBounds.Min[Axis],
+					Ground.LocalBounds.Max[Axis]);
+				const double WidthOverlap = OverlapLength(
+					Span.LocalBounds.Min[Perpendicular],
+					Span.LocalBounds.Max[Perpendicular],
+					Ground.LocalBounds.Min[Perpendicular],
+					Ground.LocalBounds.Max[Perpendicular]);
+				TestFalse(
+					FString::Printf(
+						TEXT("Span %d protected undercroft remains empty"),
+						Span.VolumeId),
+					OpeningOverlap > 1.0 && WidthOverlap > 1.0);
+			}
+		}
+	}
+	TestTrue(TEXT("Archetype matrix exercises a raised highest semantic seam"),
+		HighestSemanticSeamArchetypeCount > 0);
 	return true;
 }
 
