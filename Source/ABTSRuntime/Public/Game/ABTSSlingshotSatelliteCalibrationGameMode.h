@@ -33,6 +33,7 @@ protected:
 
 private:
 	void TryCompleteCalibrationSmoke();
+	void TryStartSatelliteCameraCapture();
 	void FinishCalibrationSmoke(bool bPassed, const FString& Reason);
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|Calibration")
@@ -59,4 +60,5 @@ private:
 	double CalibrationSmokeStartSeconds = 0.0;
 	bool bCalibrationSmokeRequested = false;
 	bool bCalibrationSmokeFinished = false;
+	bool bSatelliteCameraCaptureRequested = false;
 };

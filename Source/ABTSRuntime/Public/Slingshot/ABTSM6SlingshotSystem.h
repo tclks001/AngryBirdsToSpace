@@ -21,6 +21,8 @@ class AABTSM7BuildingMaterialSystem;
 class AABTSM73StableBuildingActor;
 class AABTSM71PlaceableSlingshotActor;
 class AABTSM9Satellite;
+enum class EABTSM9SatelliteFlightCameraIntent : uint8;
+enum class EABTSM9SatelliteFlightCameraPhase : uint8;
 class UHierarchicalInstancedStaticMeshComponent;
 class USceneComponent;
 class UStaticMeshComponent;
@@ -171,6 +173,26 @@ public:
 	void GatherLiveDestructibleProxies(TArray<AABTSM6DestructibleProxy*>& OutProxies) const;
 	/** Copies the same prediction currently drawn by M6. Valid only while the pouch is being pulled. */
 	bool CopyCurrentTrajectoryPreview(FABTSM6TrajectoryPreview& OutPreview) const;
+	/** Explicit Preview/Test seam used only by the unattended M9 camera recorder. */
+	bool StartSatelliteCameraCaptureLaunch(
+		AABTSM51SlingshotCord& Cord,
+		float PullAlphaOverride,
+		float AimInPlaneCM,
+		float AimOutOfPlaneCM);
+	/**
+	 * Preview/Test-only near-satellite fixture for the unattended camera recorder.
+	 * It starts from an already flying M6 bird, then stages a deterministic M9
+	 * gravity pass without changing any production launch or calibration data.
+	 */
+	bool StageSatelliteCameraCaptureNearPass();
+	bool CopySatelliteCameraCaptureState(
+		AABTSM25BirdCharacter*& OutBird,
+		AABTSM9Satellite*& OutSatellite,
+		AActor*& OutE5Target,
+		EABTSM9SatelliteFlightCameraIntent& OutIntent,
+		EABTSM9SatelliteFlightCameraPhase& OutPhase,
+		float* OutSurfaceFrameAlpha = nullptr,
+		bool* OutSurfaceFrameCommitted = nullptr) const;
 	/**
 	 * Read-only Integration seam for the currently selected cord, its two stakes
 	 * and the runtime pouch. Empty outside launch mode; it never exposes M6 state.
@@ -227,6 +249,7 @@ private:
 	void BeginSettlement();
 	void UpdatePhysicsSettlement(float DeltaSeconds);
 	void CollectDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies);
+	bool IsSatelliteLandingSupported(float WorldTimeSeconds) const;
 	void MarkPhysicsActivity();
 	void BeginReturn();
 	void UpdateReturn(float DeltaSeconds);
@@ -343,6 +366,14 @@ private:
 	float SettleSampleIntervalSeconds = 0.1f;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return", meta = (ClampMin = "0.1"))
 	float ReturnDurationSeconds = 1.15f;
+	/** Contact freshness used before a sleeping moon/E5 body is verified geometrically. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return|Satellite",
+		meta = (ClampMin = "0.05", ClampMax = "2.0", Units = "s"))
+	float SatelliteSupportContactGraceSeconds = 0.5f;
+	/** Radial tolerance for recognizing a bird resting on the satellite sphere. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Return|Satellite",
+		meta = (ClampMin = "10.0", ClampMax = "500.0", Units = "cm"))
+	float SatelliteSupportRadialToleranceCM = 160.0f;
 
 	TWeakObjectPtr<AABTSBirdParty> Party;
 	TWeakObjectPtr<AABTSM3Planet> Planet;
@@ -377,10 +408,13 @@ private:
 	bool bCurrentTrajectoryPreviewValid = false;
 	uint64 LastTrajectoryPreviewGravityHash = 0;
 	FVector ReturnStartLocation = FVector::ZeroVector;
+	FQuat ReturnStartRotation = FQuat::Identity;
 	FVector ReturnTargetLocation = FVector::ZeroVector;
 	float PullAlpha = 0.55f;
 	float FlightElapsedSeconds = 0.0f;
 	float ReturnElapsedSeconds = 0.0f;
+	bool bSatelliteLandingSettlementActive = false;
+	float LastSatelliteSurfaceContactWorldTimeSeconds = -BIG_NUMBER;
 	float BlackFuseRemainingSeconds = -1.0f;
 	bool bBlackDetonated = false;
 	FABTSM6LaunchCompletedNative LaunchCompletedNative;

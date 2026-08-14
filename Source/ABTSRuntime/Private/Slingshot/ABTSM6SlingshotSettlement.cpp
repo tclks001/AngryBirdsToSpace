@@ -14,6 +14,7 @@
 #include "Player/ABTSM6PlayerController.h"
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "World/ABTSM9Satellite.h"
 
 void AABTSM6SlingshotSystem::BeginSettlement()
 {
@@ -50,6 +51,57 @@ void AABTSM6SlingshotSystem::CollectDynamicPhysicsBodies(TArray<UPrimitiveCompon
 		if (Body != nullptr && Body->IsSimulatingPhysics()) OutBodies.Add(Body);
 	}
 	if (BuildingMaterialSystem.IsValid()) BuildingMaterialSystem->AppendDynamicPhysicsBodies(OutBodies);
+	if (bSatelliteLandingSettlementActive && LaunchedBird.IsValid())
+	{
+		UPrimitiveComponent* BirdBody = LaunchedBird->GetChaosPhysicsBody();
+		if (BirdBody != nullptr && BirdBody->IsSimulatingPhysics())
+		{
+			OutBodies.AddUnique(BirdBody);
+		}
+	}
+}
+
+bool AABTSM6SlingshotSystem::IsSatelliteLandingSupported(const float WorldTimeSeconds) const
+{
+	if (!bSatelliteLandingSettlementActive || !LaunchedBird.IsValid()
+		|| !SatellitePracticeBody.IsValid())
+	{
+		return false;
+	}
+	if (WorldTimeSeconds - LastSatelliteSurfaceContactWorldTimeSeconds
+		<= FMath::Max(0.05f, SatelliteSupportContactGraceSeconds))
+	{
+		return true;
+	}
+
+	const UPrimitiveComponent* BirdBody = LaunchedBird->GetChaosPhysicsBody();
+	const FVector BirdCenter = BirdBody != nullptr
+		? BirdBody->GetComponentLocation()
+		: LaunchedBird->GetActorLocation();
+	const float BirdRadiusCM = FMath::Max(
+		1.0f,
+		LaunchedBird->GetSlingshotTrajectoryCollisionRadiusCM());
+	const FVector SatelliteCenter = SatellitePracticeBody->GetPlanetCenterWorld();
+	const float ExpectedSurfaceDistanceCM =
+		FMath::Max(1.0f, SatellitePracticeBody->GetPlanetRadiusCM()) + BirdRadiusCM;
+	if (FMath::Abs(FVector::Distance(BirdCenter, SatelliteCenter)
+		- ExpectedSurfaceDistanceCM)
+		<= FMath::Max(10.0f, SatelliteSupportRadialToleranceCM))
+	{
+		return true;
+	}
+
+	if (SatellitePracticeTarget.IsValid())
+	{
+		const FBox TargetBounds = SatellitePracticeTarget->GetComponentsBoundingBox(true);
+		if (TargetBounds.IsValid)
+		{
+			const float BoundsPaddingCM = BirdRadiusCM
+				+ FMath::Max(10.0f, SatelliteSupportRadialToleranceCM);
+			return TargetBounds.ExpandBy(BoundsPaddingCM).IsInsideOrOn(BirdCenter);
+		}
+	}
+	return false;
 }
 
 void AABTSM6SlingshotSystem::MarkPhysicsActivity()
@@ -61,7 +113,10 @@ void AABTSM6SlingshotSystem::UpdatePhysicsSettlement(const float DeltaSeconds)
 {
 	if (LaunchState != EABTSM6LaunchState::Settling || !LaunchedBird.IsValid()) return;
 	const float Now = GetWorld()->GetTimeSeconds();
-	if (!LaunchedBird->IsRadiallyGrounded()) PhysicsSettleMonitor.MarkActivity(Now);
+	const bool bLandingSupported = bSatelliteLandingSettlementActive
+		? IsSatelliteLandingSupported(Now)
+		: LaunchedBird->IsRadiallyGrounded();
+	if (!bLandingSupported) PhysicsSettleMonitor.MarkActivity(Now);
 	if (BuildingMaterialSystem.IsValid()) PhysicsSettleMonitor.MarkActivityAtLeast(BuildingMaterialSystem->GetLastPhysicsActivityTimeSeconds());
 	TArray<UPrimitiveComponent*> Bodies;
 	CollectDynamicPhysicsBodies(Bodies);
@@ -75,9 +130,9 @@ void AABTSM6SlingshotSystem::UpdatePhysicsSettlement(const float DeltaSeconds)
 			Summary.ActiveBodyCount, Summary.MovingBodyCount, Summary.AwakeBodyCount,
 			Summary.MaximumLinearSpeedCMPerSec, Summary.MaximumAngularSpeedDegPerSec,
 			Summary.StableElapsedSeconds, Summary.SecondsSinceLastActivity,
-			Summary.SettlementElapsedSeconds, LaunchedBird->IsRadiallyGrounded() ? 1 : 0);
+			Summary.SettlementElapsedSeconds, bLandingSupported ? 1 : 0);
 	}
-	if (Result == EABTSM6PhysicsSettleResult::Settled && LaunchedBird->IsRadiallyGrounded())
+	if (Result == EABTSM6PhysicsSettleResult::Settled && bLandingSupported)
 	{
 		UE_LOG(LogABTSRuntime, Log,
 			TEXT("[ABTS][M6][Settle] Settled Bodies=%d Stable=%.2f SinceActivity=%.2f Elapsed=%.2f"),
@@ -91,7 +146,7 @@ void AABTSM6SlingshotSystem::UpdatePhysicsSettlement(const float DeltaSeconds)
 			TEXT("[ABTS][M6][Settle] ForcedTimeout Bodies=%d Moving=%d Awake=%d MaxLinear=%.1f MaxAngular=%.1f Elapsed=%.2f Grounded=%d"),
 			Summary.ActiveBodyCount, Summary.MovingBodyCount, Summary.AwakeBodyCount,
 			Summary.MaximumLinearSpeedCMPerSec, Summary.MaximumAngularSpeedDegPerSec,
-			Summary.SettlementElapsedSeconds, LaunchedBird->IsRadiallyGrounded() ? 1 : 0);
+			Summary.SettlementElapsedSeconds, bLandingSupported ? 1 : 0);
 		BeginReturn();
 	}
 }
@@ -122,6 +177,7 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	}
 	LaunchedBird->BeginSlingshotReturn();
 	ReturnStartLocation = LaunchedBird->GetActorLocation();
+	ReturnStartRotation = LaunchedBird->GetActorQuat().GetNormalized();
 	const FVector ApproxTarget = SlingCenter - SlingForward * 230.0f;
 	if (bPlanarTestMode)
 	{
@@ -149,7 +205,17 @@ void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
 	{
 		const FVector Location = FMath::Lerp(ReturnStartLocation, ReturnTargetLocation, FMath::SmoothStep(0.0f, 1.0f, Alpha))
 			+ PlanarUp * (FMath::Sin(Alpha * PI) * 280.0f);
-		LaunchedBird->SetActorLocationAndRotation(Location, FRotationMatrix::MakeFromXZ(SlingForward, PlanarUp).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+		const FQuat TargetRotation = FRotationMatrix::MakeFromXZ(
+			SlingForward, PlanarUp).ToQuat();
+		LaunchedBird->SetActorLocationAndRotation(
+			Location,
+			FQuat::Slerp(
+				ReturnStartRotation,
+				TargetRotation,
+				FMath::SmoothStep(0.0f, 1.0f, Alpha)).GetNormalized(),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
 		if (Alpha >= 1.0f) FinishReturn();
 		return;
 	}
@@ -159,7 +225,17 @@ void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
 	const FQuat Arc = FQuat::FindBetweenNormals(StartOffset.GetSafeNormal(), EndOffset.GetSafeNormal());
 	const FVector Direction = FQuat::Slerp(FQuat::Identity, Arc, FMath::SmoothStep(0.0f, 1.0f, Alpha)).RotateVector(StartOffset.GetSafeNormal()).GetSafeNormal();
 	const float Radius = FMath::Lerp(StartOffset.Size(), EndOffset.Size(), Alpha) + FMath::Sin(Alpha * PI) * 280.0f;
-	LaunchedBird->SetActorLocationAndRotation(Center + Direction * Radius, FRotationMatrix::MakeFromXZ(SlingForward, Direction).ToQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+	const FQuat TargetRotation = FRotationMatrix::MakeFromXZ(
+		SlingForward, Direction).ToQuat();
+	LaunchedBird->SetActorLocationAndRotation(
+		Center + Direction * Radius,
+		FQuat::Slerp(
+			ReturnStartRotation,
+			TargetRotation,
+			FMath::SmoothStep(0.0f, 1.0f, Alpha)).GetNormalized(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 	if (Alpha >= 1.0f) FinishReturn();
 }
 
@@ -195,6 +271,8 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	CalibrationSatelliteE5HitFrame = MAX_uint64;
 	CalibrationSatelliteDecisionFrame = MAX_uint64;
 	CalibrationSuccessReturnRemainingSeconds = -1.0f;
+	bSatelliteLandingSettlementActive = false;
+	LastSatelliteSurfaceContactWorldTimeSeconds = -BIG_NUMBER;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Complete StaticProxies=%d"), DynamicProxies.Num());
 	if (bShouldBroadcastCompletion)
 	{
