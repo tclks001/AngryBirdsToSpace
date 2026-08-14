@@ -126,6 +126,48 @@ bool FABTSM5InventoryHUDData::FitAspectRatio(
 	return OutBox.bIsValid;
 }
 
+bool FABTSM5InventoryHUDData::ResolveCountBadgeLayout(
+	const FBox2D& CardBox,
+	const FVector2D& ScaledTextSize,
+	const float RequestedHeightPx,
+	const float RequestedPaddingXPx,
+	const float RequestedEdgeInsetPx,
+	FABTSM5CountBadgeLayout& OutLayout)
+{
+	OutLayout = FABTSM5CountBadgeLayout();
+	if (!CardBox.bIsValid
+		|| !FMath::IsFinite(ScaledTextSize.X)
+		|| !FMath::IsFinite(ScaledTextSize.Y)
+		|| ScaledTextSize.X <= 0.0f
+		|| ScaledTextSize.Y <= 0.0f
+		|| !FMath::IsFinite(RequestedHeightPx)
+		|| !FMath::IsFinite(RequestedPaddingXPx)
+		|| !FMath::IsFinite(RequestedEdgeInsetPx))
+	{
+		return false;
+	}
+
+	const FVector2D CardSize = CardBox.GetSize();
+	const float EdgeInset = FMath::Clamp(RequestedEdgeInsetPx, 0.0f, FMath::Min(CardSize.X, CardSize.Y) * 0.20f);
+	const float MaximumHeight = CardSize.Y - EdgeInset * 2.0f;
+	if (MaximumHeight < 12.0f) return false;
+	const float Height = FMath::Clamp(RequestedHeightPx, 12.0f, MaximumHeight);
+	const float PaddingX = FMath::Clamp(RequestedPaddingXPx, 2.0f, 16.0f);
+	const float MaximumWidth = CardSize.X - EdgeInset * 2.0f;
+	const float Width = FMath::Min(FMath::Max(Height, ScaledTextSize.X + PaddingX * 2.0f), MaximumWidth);
+	if (Width < ScaledTextSize.X + 2.0f) return false;
+
+	const FVector2D BadgeMax = CardBox.Max - FVector2D(EdgeInset);
+	const FVector2D BadgeMin = BadgeMax - FVector2D(Width, Height);
+	OutLayout.BadgeBox = FBox2D(BadgeMin, BadgeMax);
+	OutLayout.TextOrigin = BadgeMin + FVector2D(
+		(Width - ScaledTextSize.X) * 0.5f,
+		(Height - ScaledTextSize.Y) * 0.5f);
+	return OutLayout.BadgeBox.bIsValid
+		&& CardBox.IsInsideOrOn(OutLayout.BadgeBox.Min)
+		&& CardBox.IsInsideOrOn(OutLayout.BadgeBox.Max);
+}
+
 const TCHAR* FABTSM5InventoryHUDData::GetItemIconAssetPath(const EABTSItemId ItemId)
 {
 	switch (ItemId)

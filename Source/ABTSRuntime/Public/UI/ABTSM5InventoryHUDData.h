@@ -33,6 +33,13 @@ struct ABTSRUNTIME_API FABTSM5InventoryUILayout
 	bool bCompact = false;
 };
 
+/** Pure-data result for a count plate embedded into an item card's lower-right corner. */
+struct ABTSRUNTIME_API FABTSM5CountBadgeLayout
+{
+	FBox2D BadgeBox;
+	FVector2D TextOrigin = FVector2D::ZeroVector;
+};
+
 /** Deterministic layout and asset-path contract for the shared inventory HUD. */
 class ABTSRUNTIME_API FABTSM5InventoryHUDData
 {
@@ -54,6 +61,15 @@ public:
 		const FBox2D& Bounds,
 		const FVector2D& SourceSize,
 		FBox2D& OutBox);
+
+	/** Resolves a measured count label into a lower-right badge without leaving the card bounds. */
+	static bool ResolveCountBadgeLayout(
+		const FBox2D& CardBox,
+		const FVector2D& ScaledTextSize,
+		float RequestedHeightPx,
+		float RequestedPaddingXPx,
+		float RequestedEdgeInsetPx,
+		FABTSM5CountBadgeLayout& OutLayout);
 
 	static const TCHAR* GetItemIconAssetPath(EABTSItemId ItemId);
 

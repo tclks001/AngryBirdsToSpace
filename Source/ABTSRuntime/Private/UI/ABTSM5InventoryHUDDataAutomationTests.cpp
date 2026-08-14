@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "HAL/IConsoleManager.h"
 #include "Misc/AutomationTest.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -85,6 +86,35 @@ bool FABTSM5InventoryHUDVisualLayoutTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Tall-card fit is centered"), FittedBox.GetCenter().Equals(FVector2D(40.0f, 60.0f)));
 	TestFalse(TEXT("Invalid source dimensions fail closed"), FABTSM5InventoryHUDData::FitAspectRatio(
 		FBox2D(FVector2D(0.0f), FVector2D(80.0f)), FVector2D(0.0f, 64.0f), FittedBox));
+
+	FABTSM5CountBadgeLayout BadgeLayout;
+	const FBox2D CardBox(FVector2D(10.0f, 20.0f), FVector2D(122.0f, 118.0f));
+	TestTrue(TEXT("Measured count resolves to an embedded corner badge"),
+		FABTSM5InventoryHUDData::ResolveCountBadgeLayout(
+			CardBox, FVector2D(17.0f, 10.0f), 21.0f, 6.0f, 6.0f, BadgeLayout));
+	TestTrue(TEXT("Count badge stays inside the item card"),
+		CardBox.IsInsideOrOn(BadgeLayout.BadgeBox.Min)
+		&& CardBox.IsInsideOrOn(BadgeLayout.BadgeBox.Max));
+	TestTrue(TEXT("Count badge is anchored to the lower-right inset"),
+		BadgeLayout.BadgeBox.Max.Equals(CardBox.Max - FVector2D(6.0f)));
+	TestTrue(TEXT("Measured count text is centered in the badge"),
+		(BadgeLayout.TextOrigin + FVector2D(8.5f, 5.0f)).Equals(BadgeLayout.BadgeBox.GetCenter()));
+	TestFalse(TEXT("Invalid measured text fails closed"),
+		FABTSM5InventoryHUDData::ResolveCountBadgeLayout(
+			CardBox, FVector2D(0.0f, 10.0f), 21.0f, 6.0f, 6.0f, BadgeLayout));
+
+	for (const TCHAR* CVarName : {
+		TEXT("abts.UI.M5.CountBadge.HeightPx"),
+		TEXT("abts.UI.M5.CountBadge.PaddingXPx"),
+		TEXT("abts.UI.M5.CountBadge.InsetPx"),
+		TEXT("abts.UI.M5.CountBadge.FontScale"),
+		TEXT("abts.UI.M5.CountBadge.Opacity"),
+		TEXT("abts.UI.M5.CountBadge.BorderPx"),
+		TEXT("abts.UI.M5.CountBadge.ShowSingle") })
+	{
+		TestNotNull(TEXT("Live count-badge CVar is registered"),
+			IConsoleManager::Get().FindConsoleVariable(CVarName));
+	}
 	return true;
 }
 

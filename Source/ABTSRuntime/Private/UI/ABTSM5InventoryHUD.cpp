@@ -12,6 +12,7 @@
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HighResScreenshot.h"
 #include "Inventory/ABTSInventoryComponent.h"
@@ -34,6 +35,46 @@ namespace
 	const FName QuantityCancel(TEXT("ABTS_M5_QtyCancel"));
 	constexpr int32 M5CaptureWarmupFrames = 36;
 	constexpr int32 M5CaptureTimeoutFrames = 600;
+
+	TAutoConsoleVariable<float> CVarM5CountBadgeHeightPx(
+		TEXT("abts.UI.M5.CountBadge.HeightPx"), 21.0f,
+		TEXT("Embedded item-count badge height in pixels [14, 32]."));
+	TAutoConsoleVariable<float> CVarM5CountBadgePaddingXPx(
+		TEXT("abts.UI.M5.CountBadge.PaddingXPx"), 6.0f,
+		TEXT("Horizontal padding around the measured count text [2, 16]."));
+	TAutoConsoleVariable<float> CVarM5CountBadgeInsetPx(
+		TEXT("abts.UI.M5.CountBadge.InsetPx"), 6.0f,
+		TEXT("Distance from the card's lower-right edge [0, 16]."));
+	TAutoConsoleVariable<float> CVarM5CountBadgeFontScale(
+		TEXT("abts.UI.M5.CountBadge.FontScale"), 0.76f,
+		TEXT("Count-label font scale before the shared TextScale [0.5, 1.25]."));
+	TAutoConsoleVariable<float> CVarM5CountBadgeOpacity(
+		TEXT("abts.UI.M5.CountBadge.Opacity"), 0.94f,
+		TEXT("Embedded badge background opacity [0.2, 1]."));
+	TAutoConsoleVariable<float> CVarM5CountBadgeBorderPx(
+		TEXT("abts.UI.M5.CountBadge.BorderPx"), 1.0f,
+		TEXT("Top/left separator thickness [0.5, 3]."));
+	TAutoConsoleVariable<int32> CVarM5CountBadgeShowSingle(
+		TEXT("abts.UI.M5.CountBadge.ShowSingle"), 0,
+		TEXT("Show a count badge for a stack of one. 0=hide, 1=show."));
+
+	void DumpM5CountBadgeSettings()
+	{
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M5UI][CountBadge] HeightPx=%.2f PaddingXPx=%.2f InsetPx=%.2f FontScale=%.3f Opacity=%.3f BorderPx=%.2f ShowSingle=%d"),
+			CVarM5CountBadgeHeightPx.GetValueOnGameThread(),
+			CVarM5CountBadgePaddingXPx.GetValueOnGameThread(),
+			CVarM5CountBadgeInsetPx.GetValueOnGameThread(),
+			CVarM5CountBadgeFontScale.GetValueOnGameThread(),
+			CVarM5CountBadgeOpacity.GetValueOnGameThread(),
+			CVarM5CountBadgeBorderPx.GetValueOnGameThread(),
+			CVarM5CountBadgeShowSingle.GetValueOnGameThread());
+	}
+
+	FAutoConsoleCommand DumpM5CountBadgeCommand(
+		TEXT("abts.UI.M5.CountBadge.Dump"),
+		TEXT("Print the live embedded count-badge settings."),
+		FConsoleCommandDelegate::CreateStatic(&DumpM5CountBadgeSettings));
 
 	int32 EvaluationSortRank(const FABTSCraftingEvaluation& Value)
 	{
@@ -226,17 +267,101 @@ void AABTSM5InventoryHUD::DrawActionIcon(
 	Canvas->DrawItem(Tile);
 }
 
-void AABTSM5InventoryHUD::DrawCountBadge(const int32 Quantity, const FBox2D& Box)
+void AABTSM5InventoryHUD::DrawEmbeddedCountBadgeBox(
+	const FBox2D& Box,
+	const FLinearColor& Fill,
+	const FLinearColor& Accent,
+	const float CutPx,
+	const float BorderPx)
 {
-	if (Quantity <= 0 || !Box.bIsValid) return;
+	if (Canvas == nullptr || !Box.bIsValid) return;
+	const FVector2D Size = Box.GetSize();
+	const float Cut = FMath::Clamp(CutPx, 0.0f, FMath::Min(Size.X, Size.Y) * 0.40f);
+	const float CornerCut = FMath::Min(2.0f, Cut);
+	const TStaticArray<FVector2D, 6> Vertices = {
+		FVector2D(Box.Min.X + Cut, Box.Min.Y),
+		FVector2D(Box.Max.X, Box.Min.Y),
+		FVector2D(Box.Max.X, Box.Max.Y - CornerCut),
+		FVector2D(Box.Max.X - CornerCut, Box.Max.Y),
+		FVector2D(Box.Min.X, Box.Max.Y),
+		FVector2D(Box.Min.X, Box.Min.Y + Cut) };
+	const FTexture* FillTexture = Canvas->DefaultTexture != nullptr ? Canvas->DefaultTexture->GetResource() : nullptr;
+	if (FillTexture != nullptr)
+	{
+		TArray<FCanvasUVTri> Triangles;
+		Triangles.Reserve(Vertices.Num());
+		const FVector2D Center = Box.GetCenter();
+		const FLinearColor ResolvedFill = ActiveTheme.ApplyOpacity(Fill);
+		for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+		{
+			FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
+			Triangle.V0_Pos = Center;
+			Triangle.V1_Pos = Vertices[Index];
+			Triangle.V2_Pos = Vertices[(Index + 1) % Vertices.Num()];
+			Triangle.V0_UV = FVector2D::ZeroVector;
+			Triangle.V1_UV = FVector2D::ZeroVector;
+			Triangle.V2_UV = FVector2D::ZeroVector;
+			Triangle.V0_Color = ResolvedFill;
+			Triangle.V1_Color = ResolvedFill;
+			Triangle.V2_Color = ResolvedFill;
+		}
+		FCanvasTriangleItem FillItem(Triangles, FillTexture);
+		FillItem.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(FillItem);
+	}
+	const FLinearColor ResolvedAccent = ActiveTheme.ApplyOpacity(Accent);
+	DrawLine(Vertices[0].X, Vertices[0].Y, Vertices[1].X, Vertices[1].Y, ResolvedAccent, BorderPx);
+	DrawLine(Vertices[5].X, Vertices[5].Y, Vertices[0].X, Vertices[0].Y, ResolvedAccent, BorderPx);
+	DrawLine(Vertices[4].X, Vertices[4].Y, Vertices[5].X, Vertices[5].Y, ResolvedAccent, BorderPx);
+}
+
+void AABTSM5InventoryHUD::DrawCountBadge(
+	const int32 Quantity,
+	const FBox2D& Box,
+	const bool bEmphasized)
+{
+	if (Quantity <= 0 || !Box.bIsValid || Canvas == nullptr || GEngine == nullptr
+		|| GEngine->GetSmallFont() == nullptr)
+	{
+		return;
+	}
+	if (Quantity == 1 && CVarM5CountBadgeShowSingle.GetValueOnGameThread() == 0) return;
+
 	const FString Count = Quantity > 999 ? TEXT("999+") : FString::FromInt(Quantity);
-	const float Width = Count.Len() >= 3 ? 38.0f : Count.Len() == 2 ? 30.0f : 24.0f;
-	const FBox2D Badge(
-		FVector2D(Box.Max.X - Width - 5.0f, Box.Max.Y - 24.0f),
-		FVector2D(Box.Max.X - 5.0f, Box.Max.Y - 5.0f));
-	DrawFacetedBox(Badge, ActiveTheme.PanelPrimary, ActiveTheme.AccentPrimary, 4.0f, 1.0f);
-	DrawText(Count, ActiveTheme.ApplyOpacity(ActiveTheme.CountAccent), Badge.Min.X + 5.0f, Badge.Min.Y + 1.0f,
-		GEngine->GetSmallFont(), 0.68f * ActiveTheme.TextScale, false);
+	const float FontScale = FMath::Clamp(CVarM5CountBadgeFontScale.GetValueOnGameThread(), 0.5f, 1.25f)
+		* ActiveTheme.TextScale;
+	float UnscaledTextWidth = 0.0f;
+	float UnscaledTextHeight = 0.0f;
+	Canvas->StrLen(GEngine->GetSmallFont(), Count, UnscaledTextWidth, UnscaledTextHeight, true);
+	const FVector2D ScaledTextSize(UnscaledTextWidth * FontScale, UnscaledTextHeight * FontScale);
+	FABTSM5CountBadgeLayout Layout;
+	if (!FABTSM5InventoryHUDData::ResolveCountBadgeLayout(
+		Box,
+		ScaledTextSize,
+		FMath::Clamp(CVarM5CountBadgeHeightPx.GetValueOnGameThread(), 14.0f, 32.0f),
+		FMath::Clamp(CVarM5CountBadgePaddingXPx.GetValueOnGameThread(), 2.0f, 16.0f),
+		FMath::Clamp(CVarM5CountBadgeInsetPx.GetValueOnGameThread(), 0.0f, 16.0f),
+		Layout))
+	{
+		return;
+	}
+
+	const float Opacity = FMath::Clamp(CVarM5CountBadgeOpacity.GetValueOnGameThread(), 0.2f, 1.0f);
+	const float BorderPx = FMath::Clamp(CVarM5CountBadgeBorderPx.GetValueOnGameThread(), 0.5f, 3.0f);
+	DrawEmbeddedCountBadgeBox(
+		Layout.BadgeBox,
+		ActiveTheme.PanelPrimary.CopyWithNewOpacity(Opacity),
+		bEmphasized ? ActiveTheme.AccentPrimary : ActiveTheme.PanelBorder.CopyWithNewOpacity(0.82f),
+		5.0f,
+		BorderPx);
+	DrawText(
+		Count,
+		ActiveTheme.ApplyOpacity(bEmphasized ? ActiveTheme.CountAccent : ActiveTheme.TextPrimary),
+		Layout.TextOrigin.X,
+		Layout.TextOrigin.Y - 1.0f,
+		GEngine->GetSmallFont(),
+		FontScale,
+		false);
 }
 
 void AABTSM5InventoryHUD::DrawItemCard(
@@ -256,7 +381,7 @@ void AABTSM5InventoryHUD::DrawItemCard(
 		DrawText(Label, ActiveTheme.ApplyOpacity(bHeld ? ActiveTheme.AccentPrimary : ActiveTheme.TextPrimary),
 			Box.Min.X + 8.0f, Box.Max.Y - 21.0f, GEngine->GetSmallFont(), 0.62f * ActiveTheme.TextScale, false);
 	}
-	DrawCountBadge(Quantity, Box);
+	DrawCountBadge(Quantity, Box, bHeld);
 }
 
 FName AABTSM5InventoryHUD::MakeHotbarName(const int32 Slot) const
@@ -337,7 +462,7 @@ void AABTSM5InventoryHUD::DrawHotbar(AABTSCraftingSystem& System)
 			ActiveLayout.HeldSlot.Min + FVector2D(12.0f, 18.0f),
 			ActiveLayout.HeldSlot.Max - FVector2D(12.0f, 8.0f));
 		DrawItemIcon(HeldItemId, IconBox);
-		DrawCountBadge(Inventory->GetQuantity(HeldItemId), ActiveLayout.HeldSlot);
+		DrawCountBadge(Inventory->GetQuantity(HeldItemId), ActiveLayout.HeldSlot, true);
 	}
 	AddHitBox(ActiveLayout.HeldSlot.Min, ActiveLayout.HeldSlot.Max - ActiveLayout.HeldSlot.Min,
 		HeldItemHitBox, true, 25);

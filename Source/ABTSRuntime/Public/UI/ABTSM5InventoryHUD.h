@@ -45,7 +45,9 @@ private:
 	void DrawItemIcon(EABTSItemId ItemId, const FBox2D& Box, const FLinearColor& Tint = FLinearColor::White);
 	void DrawActionIcon(EABTSM5ActionIcon Icon, const FBox2D& Box,
 		const FLinearColor& Tint = FLinearColor::White, float Scale = 1.0f);
-	void DrawCountBadge(int32 Quantity, const FBox2D& Box);
+	void DrawCountBadge(int32 Quantity, const FBox2D& Box, bool bEmphasized = false);
+	void DrawEmbeddedCountBadgeBox(const FBox2D& Box, const FLinearColor& Fill,
+		const FLinearColor& Accent, float CutPx, float BorderPx);
 	void DrawItemCard(EABTSItemId ItemId, int32 Quantity, const FBox2D& Box, bool bHeld,
 		const FString& Label, bool bShowLabel);
 	UTexture2D* GetItemIcon(EABTSItemId ItemId) const;
