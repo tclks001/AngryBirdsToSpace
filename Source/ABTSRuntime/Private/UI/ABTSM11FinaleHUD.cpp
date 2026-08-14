@@ -955,6 +955,21 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 		for (const FABTSM11OverviewHitProxy& Proxy
 			: HudProjection.HitProxies)
 		{
+			const bool bTerminalExtension = Proxy.SegmentKind
+				!= EABTSM11PlaybackSegmentKind::PlayerAuthoritative;
+			if (bTerminalExtension)
+			{
+				DrawDiagramSegment(
+					Center,
+					Radius,
+					Proxy.Start,
+					Proxy.End,
+					SegmentColor(
+						EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer),
+					2.2f,
+					false);
+				continue;
+			}
 			DrawDiagramSegment(
 				Center,
 				Radius,
@@ -962,7 +977,9 @@ void AABTSM11FinaleHUD::DrawOrbitalDiagram(
 				Proxy.End,
 				FLinearColor(0.88f, 0.96f, 1.0f, 1.0f),
 				1.8f,
-				Proxy.bHiddenByBody);
+				ABTSM11ShouldDashOverviewTrajectorySegment(
+					Proxy.SegmentKind,
+					Proxy.bHiddenByBody));
 		}
 		const FABTSM11TrajectoryHit& ActiveHit =
 			PendingTrajectoryHit.bValid
@@ -2645,7 +2662,8 @@ void AABTSM11FinaleHUD::DrawDiagramSegment(
 	const FVector2d& NormalizedEnd,
 	const FLinearColor& Color,
 	const float Thickness,
-	const bool bDashed)
+	const bool bDashed,
+	const float DashPhasePixels)
 {
 	FVector2d Start = NormalizedStart;
 	FVector2d End = NormalizedEnd;
@@ -2686,11 +2704,23 @@ void AABTSM11FinaleHUD::DrawDiagramSegment(
 	const FVector2D Direction = Delta / Length;
 	constexpr float Dash = 6.0f;
 	constexpr float Gap = 4.0f;
-	for (float Distance = 0.0f; Distance < Length; Distance += Dash + Gap)
+	const float Pattern = Dash + Gap;
+	const float Phase = FMath::Fmod(
+		FMath::Max(0.0f, DashPhasePixels),
+		Pattern);
+	for (float Distance = -Phase;
+		Distance < Length;
+		Distance += Pattern)
 	{
-		const FVector2D A = ScreenStart + Direction * Distance;
+		const float DashStart = FMath::Max(0.0f, Distance);
+		const float DashEnd = FMath::Min(Length, Distance + Dash);
+		if (DashEnd <= DashStart)
+		{
+			continue;
+		}
+		const FVector2D A = ScreenStart + Direction * DashStart;
 		const FVector2D B = ScreenStart
-			+ Direction * FMath::Min(Length, Distance + Dash);
+			+ Direction * DashEnd;
 		DrawLine(A.X, A.Y, B.X, B.Y, Color, Thickness);
 	}
 }

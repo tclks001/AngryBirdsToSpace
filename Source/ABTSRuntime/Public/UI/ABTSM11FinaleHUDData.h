@@ -295,6 +295,7 @@ struct ABTSRUNTIME_API FABTSM11OrbitalSceneSnapshot
 	double TargetRadiusCM = 0.0;
 	FABTSM11TrajectorySemanticMap SemanticMap;
 	uint64 SourceTrajectoryHash = 0;
+	uint64 SourcePlaybackPlanHash = 0;
 	bool bValid = false;
 
 	bool GetContextGeometry(
@@ -314,6 +315,11 @@ public:
 		const FABTSM11TrajectoryResult& Result,
 		FABTSM11OrbitalSceneSnapshot& OutSnapshot,
 		int32 MaximumTrajectoryPointCount = 900);
+	static bool AppendPlaybackExtension(
+		const FABTSM11PlaybackPlan& PlaybackPlan,
+		FABTSM11OrbitalSceneSnapshot& InOutSnapshot,
+		int32 MaximumExtensionPointCount = 360,
+		double MaximumChordErrorCM = 0.0);
 };
 
 /** Attempt-frozen overview projection. Aim changes do not alter this state. */
@@ -368,8 +374,14 @@ struct ABTSRUNTIME_API FABTSM11OverviewHitProxy
 	double StartPhase = 0.0;
 	double EndPhase = 0.0;
 	EABTSM11TrajectorySemanticLeg Leg = EABTSM11TrajectorySemanticLeg::Invalid;
+	EABTSM11PlaybackSegmentKind SegmentKind =
+		EABTSM11PlaybackSegmentKind::PlayerAuthoritative;
 	bool bHiddenByBody = false;
 };
+
+ABTSRUNTIME_API bool ABTSM11ShouldDashOverviewTrajectorySegment(
+	EABTSM11PlaybackSegmentKind SegmentKind,
+	bool bHiddenByBody);
 
 struct ABTSRUNTIME_API FABTSM11OverviewProjection
 {
@@ -380,6 +392,7 @@ struct ABTSRUNTIME_API FABTSM11OverviewProjection
 	double TargetRadius = 0.0;
 	TArray<FABTSM11OverviewHitProxy> HitProxies;
 	uint64 SourceTrajectoryHash = 0;
+	uint64 SourcePlaybackPlanHash = 0;
 	bool bValid = false;
 };
 

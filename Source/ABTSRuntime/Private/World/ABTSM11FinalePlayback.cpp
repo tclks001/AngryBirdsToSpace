@@ -166,6 +166,111 @@ namespace
 		}
 	};
 
+	struct FCircularContactGuidance
+	{
+		FVector3d CircleCenterCM = FVector3d::ZeroVector;
+		FVector3d StartNormal = FVector3d::ZeroVector;
+		FVector3d StartTangent = FVector3d::ZeroVector;
+		FVector3d TargetCenterCM = FVector3d::ZeroVector;
+		double RadiusCM = 0.0;
+		double ContactSweepRadians = 0.0;
+
+		FVector3d Position(const double SweepRadians) const
+		{
+			return CircleCenterCM
+				- StartNormal * (RadiusCM * FMath::Cos(SweepRadians))
+				+ StartTangent * (RadiusCM * FMath::Sin(SweepRadians));
+		}
+
+		FVector3d Tangent(const double SweepRadians) const
+		{
+			return StartNormal * FMath::Sin(SweepRadians)
+				+ StartTangent * FMath::Cos(SweepRadians);
+		}
+
+		FVector3d Acceleration(
+			const double SweepRadians,
+			const double SpeedCMPerSec) const
+		{
+			return (CircleCenterCM - Position(SweepRadians))
+				* (FMath::Square(SpeedCMPerSec) / FMath::Square(RadiusCM));
+		}
+
+		bool Build(
+			const FVector3d& StartPositionCM,
+			const FVector3d& StartVelocityCMPerSec,
+			const FVector3d& InTargetCenterCM,
+			const double ContactRadiusCM)
+		{
+			const double Speed = StartVelocityCMPerSec.Length();
+			if (!FMath::IsFinite(Speed) || Speed <= 1.0
+				|| !FMath::IsFinite(ContactRadiusCM)
+				|| ContactRadiusCM <= 0.0)
+			{
+				return false;
+			}
+
+			StartTangent = StartVelocityCMPerSec / Speed;
+			TargetCenterCM = InTargetCenterCM;
+			const FVector3d ToTarget = TargetCenterCM - StartPositionCM;
+			const double TargetDistance = ToTarget.Length();
+			const double ForwardDistance = FVector3d::DotProduct(
+				ToTarget,
+				StartTangent);
+			const FVector3d SideOffset =
+				ToTarget - StartTangent * ForwardDistance;
+			const double SideDistance = SideOffset.Length();
+			if (!FMath::IsFinite(TargetDistance)
+				|| TargetDistance <= ContactRadiusCM + 1.0e-3
+				|| ForwardDistance <= 1.0
+				|| SideDistance <= 1.0e-3)
+			{
+				return false;
+			}
+
+			StartNormal = SideOffset / SideDistance;
+			RadiusCM = FMath::Square(TargetDistance)
+				/ (2.0 * SideDistance);
+			if (!FMath::IsFinite(RadiusCM) || RadiusCM <= ContactRadiusCM)
+			{
+				return false;
+			}
+
+			CircleCenterCM = StartPositionCM + StartNormal * RadiusCM;
+			const double TargetSweep = 2.0 * FMath::Atan2(
+				SideDistance,
+				ForwardDistance);
+			if (!FMath::IsFinite(TargetSweep)
+				|| TargetSweep <= 1.0e-5
+				|| TargetSweep >= PI - 1.0e-3)
+			{
+				return false;
+			}
+
+			double LowSweep = 0.0;
+			double HighSweep = TargetSweep;
+			for (int32 Iteration = 0; Iteration < 64; ++Iteration)
+			{
+				const double MiddleSweep = (LowSweep + HighSweep) * 0.5;
+				if ((Position(MiddleSweep) - TargetCenterCM).Length()
+					> ContactRadiusCM)
+				{
+					LowSweep = MiddleSweep;
+				}
+				else
+				{
+					HighSweep = MiddleSweep;
+				}
+			}
+			ContactSweepRadians = HighSweep;
+			return ContactSweepRadians > 1.0e-5
+				&& FMath::IsNearlyEqual(
+					(Position(ContactSweepRadians) - TargetCenterCM).Length(),
+					ContactRadiusCM,
+					1.0e-3);
+		}
+	};
+
 	double MinimumBodyClearanceCM(
 		const FABTSM11FinaleLayoutPreset& Preset,
 		const FVector3d& Position)
@@ -367,181 +472,326 @@ namespace
 			OutFailure = TEXT("CandidateContactTransferMissingTrajectory");
 			return false;
 		}
-
-		const FABTSM11TrajectoryPoint& Source = Released.Points.Last();
-		const FVector3d SourceAcceleration = EstimateAcceleration(
-			Released.Points,
-			Released.Points.Num() - 1);
 		const FABTSM11TargetSpec& Target = Preset.CanonicalScenario.Target;
 		const FVector3d ContactCenter = Target.GetGeometricContactCenterCM();
 		const double ContactRadius = Target.GetGeometricContactRadiusCM();
-		const FVector3d ToContactCenter = ContactCenter - Source.PositionCM;
-		const double SourceDistance = ToContactCenter.Length();
-		if (!FMath::IsFinite(SourceDistance)
-			|| !FMath::IsFinite(ContactRadius)
-			|| ContactRadius <= 0.0
-			|| SourceDistance <= ContactRadius + 1.0e-3)
+		if (!FMath::IsFinite(ContactRadius) || ContactRadius <= 0.0)
 		{
 			OutFailure = TEXT("CandidateContactTransferInvalidGeometry");
 			return false;
 		}
 
-		const FVector3d TravelDirection = ToContactCenter / SourceDistance;
-		const FVector3d ContactPosition =
-			ContactCenter - TravelDirection * ContactRadius;
-		const double SourceSpeed = Source.VelocityCMPerSec.Length();
-		const double InwardSpeed = FVector3d::DotProduct(
-			Source.VelocityCMPerSec,
-			TravelDirection);
-		if (!FMath::IsFinite(SourceSpeed)
-			|| !FMath::IsFinite(InwardSpeed)
-			|| SourceSpeed <= 1.0
-			|| InwardSpeed <= 1.0)
-		{
-			OutFailure = TEXT("CandidateContactTransferNotInbound");
-			return false;
-		}
-		const double ContactSpeed = FMath::Clamp(
-			InwardSpeed,
-			SourceSpeed * 0.25,
-			SourceSpeed);
-		const FVector3d ContactVelocity = TravelDirection * ContactSpeed;
-		constexpr double CandidateMinimumDurationSeconds = 0.5;
-		constexpr double CandidateMaximumDurationSeconds = 8.0;
+		/*
+		 * The terminal presentation is also the authoritative playback path.
+		 * Pick the latest usable state on the released F4 trajectory, construct
+		 * the unique 3D circle tangent there and passing through the UFO centre,
+		 * then stop at the first intersection with the physical contact sphere.
+		 * A short quintic replaces the first part of that circle so acceleration
+		 * changes continuously from the solver trajectory into constant-radius
+		 * guidance. This prevents the old single-quintic hairpin while keeping
+		 * position, velocity and acceleration continuous at both joins.
+		 */
+		constexpr double CandidateMaximumDurationSeconds = 12.0;
 		constexpr double CandidateMaximumAccelerationCMPerSec2 = 60000.0;
 		constexpr double CandidateMaximumJerkCMPerSec3 = 300000.0;
-		const double RemainingDistance = SourceDistance - ContactRadius;
-		const double BallisticDuration = RemainingDistance / SourceSpeed;
-		const double MinimumDuration = FMath::Clamp(
-			BallisticDuration,
-			CandidateMinimumDurationSeconds,
-			CandidateMaximumDurationSeconds);
-		const double MaximumDuration = FMath::Clamp(
-			BallisticDuration * 3.0,
-			MinimumDuration,
-			CandidateMaximumDurationSeconds);
-		const double DurationStep = FMath::Max(
-			Contract.SampleStepSeconds,
-			1.0 / 60.0);
+		constexpr double MaximumHeadingStepRadians = PI / 24.0;
+		constexpr double MinimumSignedTurn = -1.0e-5;
+		constexpr double MaximumLookbackSeconds = 6.0;
+		constexpr double MinimumHandoffSpacingSeconds = 0.10;
+		const double GuidanceSampleStepSeconds =
+			Contract.SampleStepSeconds / 8.0;
+		const double EntryFractions[] = { 0.20, 0.30, 0.40, 0.50 };
+		const double DurationScales[] = { 1.0, 1.20, 1.50, 2.0 };
 
 		double BestScore = TNumericLimits<double>::Max();
-		double BestDuration = 0.0;
-		double BestAcceleration = TNumericLimits<double>::Max();
-		double BestJerk = TNumericLimits<double>::Max();
-		double BestClearance = -TNumericLimits<double>::Max();
-		for (double RequestedDuration = MinimumDuration;
-			RequestedDuration <= MaximumDuration + 1.0e-9;
-			RequestedDuration += DurationStep)
+		FString BestDetail = TEXT("NoGeometricCandidate");
+		double LastTestedTime = TNumericLimits<double>::Max();
+		const double LatestTime = Released.Points.Last().TimeSeconds;
+		for (int32 SourceIndex = Released.Points.Num() - 1;
+			SourceIndex >= 1;
+			--SourceIndex)
 		{
-			const double Duration = RequestedDuration;
-			FQuinticCurve Curve;
-			Curve.Build(
+			const FABTSM11TrajectoryPoint& Source =
+				Released.Points[SourceIndex];
+			if (LatestTime - Source.TimeSeconds > MaximumLookbackSeconds)
+			{
+				break;
+			}
+			if (SourceIndex != Released.Points.Num() - 1
+				&& LastTestedTime - Source.TimeSeconds
+					< MinimumHandoffSpacingSeconds)
+			{
+				continue;
+			}
+			LastTestedTime = Source.TimeSeconds;
+
+			FCircularContactGuidance Circle;
+			if (!Circle.Build(
 				Source.PositionCM,
 				Source.VelocityCMPerSec,
-				SourceAcceleration,
-				ContactPosition,
-				ContactVelocity,
-				FVector3d::ZeroVector,
-				Duration);
-
-			double MaximumAcceleration = 0.0;
-			double MaximumJerk = 0.0;
-			double MinimumClearance = TNumericLimits<double>::Max();
-			double PreviousTargetDistance = SourceDistance;
-			bool bMonotonicContactApproach = true;
-			const int32 SampleCount = FMath::Max(
-				2,
-				FMath::CeilToInt(Duration / Contract.SampleStepSeconds));
-			for (int32 SampleIndex = 1;
-				SampleIndex <= SampleCount;
-				++SampleIndex)
-			{
-				const double T = Duration
-					* static_cast<double>(SampleIndex)
-					/ static_cast<double>(SampleCount);
-				const FVector3d Position = Curve.Position(T);
-				const double TargetDistance =
-					(Position - ContactCenter).Length();
-				MaximumAcceleration = FMath::Max(
-					MaximumAcceleration,
-					Curve.Acceleration(T).Length());
-				MaximumJerk = FMath::Max(
-					MaximumJerk,
-					Curve.Jerk(T).Length());
-				MinimumClearance = FMath::Min(
-					MinimumClearance,
-					MinimumBodyClearanceCM(Preset, Position));
-				bMonotonicContactApproach = bMonotonicContactApproach
-					&& FMath::IsFinite(TargetDistance)
-					&& TargetDistance <= PreviousTargetDistance + 1.0e-3
-					&& (SampleIndex == SampleCount
-						? FMath::IsNearlyEqual(
-							TargetDistance,
-							ContactRadius,
-							1.0e-3)
-						: TargetDistance > ContactRadius);
-				PreviousTargetDistance = TargetDistance;
-			}
-
-			const bool bValid = bMonotonicContactApproach
-				&& MaximumAcceleration
-					<= CandidateMaximumAccelerationCMPerSec2
-				&& MaximumJerk <= CandidateMaximumJerkCMPerSec3
-				&& MinimumClearance > Contract.BodyClearanceCM;
-			const double ClearanceScore =
-				MinimumClearance > Contract.BodyClearanceCM
-				? 0.0
-				: 1.0 + (Contract.BodyClearanceCM - MinimumClearance)
-					/ FMath::Max(1.0, Contract.BodyClearanceCM);
-			const double Score = FMath::Max3(
-				MaximumAcceleration
-					/ CandidateMaximumAccelerationCMPerSec2,
-				MaximumJerk / CandidateMaximumJerkCMPerSec3,
-				ClearanceScore) + (bMonotonicContactApproach ? 0.0 : 1000.0);
-			if (Score < BestScore)
-			{
-				BestScore = Score;
-				BestDuration = Duration;
-				BestAcceleration = MaximumAcceleration;
-				BestJerk = MaximumJerk;
-				BestClearance = MinimumClearance;
-			}
-			if (!bValid)
+				ContactCenter,
+				ContactRadius))
 			{
 				continue;
 			}
 
-			OutStartTime = Source.TimeSeconds;
-			OutEndTime = Source.TimeSeconds + Duration;
-			InOutPoints.Reserve(InOutPoints.Num() + SampleCount);
-			for (int32 SampleIndex = 1;
-				SampleIndex <= SampleCount;
-				++SampleIndex)
+			const double SourceSpeed = Source.VelocityCMPerSec.Length();
+			const double AccelerationLimitedSpeed = FMath::Sqrt(
+				CandidateMaximumAccelerationCMPerSec2 * Circle.RadiusCM * 0.80);
+			const double GuidanceSpeed = FMath::Clamp(
+				AccelerationLimitedSpeed,
+				SourceSpeed * 0.50,
+				SourceSpeed);
+			const FVector3d SourceAcceleration = EstimateAcceleration(
+				Released.Points,
+				SourceIndex);
+			const FVector3d CircleAxis = FVector3d::CrossProduct(
+				Circle.StartTangent,
+				Circle.StartNormal).GetSafeNormal();
+
+			for (const double EntryFraction : EntryFractions)
 			{
-				const double T = Duration
-					* static_cast<double>(SampleIndex)
-					/ static_cast<double>(SampleCount);
-				FABTSM11PlaybackPoint& Point =
-					InOutPoints.AddDefaulted_GetRef();
-				Point.TimeSeconds = Source.TimeSeconds + T;
-				Point.PositionCM = Curve.Position(T);
-				Point.VelocityCMPerSec = Curve.Velocity(T);
-				Point.SegmentKind =
-					EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+				const double EntrySweep = FMath::Min(
+					Circle.ContactSweepRadians * EntryFraction,
+					FMath::DegreesToRadians(15.0));
+				if (EntrySweep <= 1.0e-5
+					|| EntrySweep >= Circle.ContactSweepRadians - 1.0e-5)
+				{
+					continue;
+				}
+
+				const FVector3d EntryPosition = Circle.Position(EntrySweep);
+				const FVector3d EntryVelocity =
+					Circle.Tangent(EntrySweep) * GuidanceSpeed;
+				const FVector3d EntryAcceleration = Circle.Acceleration(
+					EntrySweep,
+					GuidanceSpeed);
+				const double IdealTransitionDuration =
+					Circle.RadiusCM * EntrySweep * 2.0
+					/ FMath::Max(1.0, SourceSpeed + GuidanceSpeed);
+
+				for (const double DurationScale : DurationScales)
+				{
+					const double TransitionDuration = FMath::Max(
+						GuidanceSampleStepSeconds * 2.0,
+						IdealTransitionDuration * DurationScale);
+					const double ArcDuration = Circle.RadiusCM
+						* (Circle.ContactSweepRadians - EntrySweep)
+						/ GuidanceSpeed;
+					const double TotalDuration = TransitionDuration + ArcDuration;
+					if (!FMath::IsFinite(TotalDuration)
+						|| TotalDuration > CandidateMaximumDurationSeconds)
+					{
+						continue;
+					}
+
+					FQuinticCurve Transition;
+					Transition.Build(
+						Source.PositionCM,
+						Source.VelocityCMPerSec,
+						SourceAcceleration,
+						EntryPosition,
+						EntryVelocity,
+						EntryAcceleration,
+						TransitionDuration);
+
+					TArray<FABTSM11PlaybackPoint> CandidatePoints;
+					const int32 TransitionSampleCount = FMath::Max(
+						2,
+						FMath::CeilToInt(
+							TransitionDuration / GuidanceSampleStepSeconds));
+					const int32 ArcSampleCount = FMath::Max(
+						2,
+						FMath::CeilToInt(
+							ArcDuration / GuidanceSampleStepSeconds));
+					CandidatePoints.Reserve(
+						TransitionSampleCount + ArcSampleCount);
+
+					double MaximumAcceleration = 0.0;
+					double MaximumJerk = 0.0;
+					double MinimumClearance = TNumericLimits<double>::Max();
+					double MinimumSpeed = TNumericLimits<double>::Max();
+					double MaximumHeadingStep = 0.0;
+					double MinimumObservedSignedTurn = 1.0;
+					double PreviousTargetDistance =
+						(Source.PositionCM - ContactCenter).Length();
+					FVector3d PreviousVelocity = Source.VelocityCMPerSec;
+					bool bValidShape = true;
+
+					const auto AppendCheckedPoint = [&CandidatePoints,
+						&Preset,
+						&ContactCenter,
+						&ContactRadius,
+						&PreviousTargetDistance,
+						&PreviousVelocity,
+						&MaximumAcceleration,
+						&MaximumJerk,
+						&MinimumClearance,
+						&MinimumSpeed,
+						&MaximumHeadingStep,
+						&MinimumObservedSignedTurn,
+						&CircleAxis,
+						&bValidShape](
+							const double TimeSeconds,
+							const FVector3d& Position,
+							const FVector3d& Velocity,
+							const FVector3d& Acceleration,
+							const FVector3d& Jerk,
+							const bool bFinal)
+					{
+						const double TargetDistance =
+							(Position - ContactCenter).Length();
+						const double Speed = Velocity.Length();
+						const double PreviousSpeed = PreviousVelocity.Length();
+						double HeadingStep = 0.0;
+						double SignedTurn = 0.0;
+						if (Speed > 1.0 && PreviousSpeed > 1.0)
+						{
+							const FVector3d PreviousDirection =
+								PreviousVelocity / PreviousSpeed;
+							const FVector3d Direction = Velocity / Speed;
+							HeadingStep = FMath::Acos(FMath::Clamp(
+								FVector3d::DotProduct(Direction, PreviousDirection),
+								-1.0,
+								1.0));
+							SignedTurn = FVector3d::DotProduct(
+								FVector3d::CrossProduct(
+									PreviousDirection,
+									Direction),
+								CircleAxis);
+						}
+						MaximumAcceleration = FMath::Max(
+							MaximumAcceleration,
+							Acceleration.Length());
+						MaximumJerk = FMath::Max(
+							MaximumJerk,
+							Jerk.Length());
+						MinimumClearance = FMath::Min(
+							MinimumClearance,
+							MinimumBodyClearanceCM(Preset, Position));
+						MinimumSpeed = FMath::Min(MinimumSpeed, Speed);
+						MaximumHeadingStep = FMath::Max(
+							MaximumHeadingStep,
+							HeadingStep);
+						MinimumObservedSignedTurn = FMath::Min(
+							MinimumObservedSignedTurn,
+							SignedTurn);
+						bValidShape = bValidShape
+							&& FMath::IsFinite(TargetDistance)
+							&& FMath::IsFinite(Speed)
+							&& SignedTurn >= MinimumSignedTurn
+							&& TargetDistance <= PreviousTargetDistance + 1.0e-3
+							&& (bFinal
+								? FMath::IsNearlyEqual(
+									TargetDistance,
+									ContactRadius,
+									1.0e-3)
+								: TargetDistance > ContactRadius);
+						FABTSM11PlaybackPoint& Point =
+							CandidatePoints.AddDefaulted_GetRef();
+						Point.TimeSeconds = TimeSeconds;
+						Point.PositionCM = Position;
+						Point.VelocityCMPerSec = Velocity;
+						Point.SegmentKind =
+							EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+						PreviousTargetDistance = TargetDistance;
+						PreviousVelocity = Velocity;
+					};
+
+					for (int32 SampleIndex = 1;
+						SampleIndex <= TransitionSampleCount;
+						++SampleIndex)
+					{
+						const double T = TransitionDuration
+							* static_cast<double>(SampleIndex)
+							/ static_cast<double>(TransitionSampleCount);
+						AppendCheckedPoint(
+							Source.TimeSeconds + T,
+							Transition.Position(T),
+							Transition.Velocity(T),
+							Transition.Acceleration(T),
+							Transition.Jerk(T),
+							false);
+					}
+
+					const double AngularSpeed = GuidanceSpeed / Circle.RadiusCM;
+					const double ArcJerkMagnitude = FMath::Pow(GuidanceSpeed, 3.0)
+						/ FMath::Square(Circle.RadiusCM);
+					for (int32 SampleIndex = 1;
+						SampleIndex <= ArcSampleCount;
+						++SampleIndex)
+					{
+						const double ArcTime = ArcDuration
+							* static_cast<double>(SampleIndex)
+							/ static_cast<double>(ArcSampleCount);
+						const double Sweep = EntrySweep + AngularSpeed * ArcTime;
+						const FVector3d Tangent = Circle.Tangent(Sweep);
+						const FVector3d Acceleration = Circle.Acceleration(
+							Sweep,
+							GuidanceSpeed);
+						AppendCheckedPoint(
+							Source.TimeSeconds + TransitionDuration + ArcTime,
+							Circle.Position(Sweep),
+							Tangent * GuidanceSpeed,
+							Acceleration,
+							-Tangent * ArcJerkMagnitude,
+							SampleIndex == ArcSampleCount);
+					}
+
+					const double ClearanceScore =
+						MinimumClearance > Contract.BodyClearanceCM
+							? 0.0
+							: 1.0 + (Contract.BodyClearanceCM - MinimumClearance)
+								/ FMath::Max(1.0, Contract.BodyClearanceCM);
+					const double Score = FMath::Max3(
+						MaximumAcceleration / CandidateMaximumAccelerationCMPerSec2,
+						MaximumJerk / CandidateMaximumJerkCMPerSec3,
+						ClearanceScore)
+						+ (bValidShape ? 0.0 : 1000.0)
+						+ (MaximumHeadingStep <= MaximumHeadingStepRadians
+							? 0.0 : 1000.0);
+					if (Score < BestScore)
+					{
+						BestScore = Score;
+						BestDetail = FString::Printf(
+							TEXT("Index=%d Radius=%.3f SweepDeg=%.3f Duration=%.3f MaxAccel=%.3f MaxJerk=%.3f MinClearance=%.3f MinSpeed=%.3f MaxHeadingDeg=%.3f MinSignedTurn=%.6f"),
+							SourceIndex,
+							Circle.RadiusCM,
+							FMath::RadiansToDegrees(Circle.ContactSweepRadians),
+							TotalDuration,
+							MaximumAcceleration,
+							MaximumJerk,
+							MinimumClearance,
+							MinimumSpeed,
+							FMath::RadiansToDegrees(MaximumHeadingStep),
+							MinimumObservedSignedTurn);
+					}
+
+					const bool bValid = bValidShape
+						&& MinimumSpeed > 1.0
+						&& MaximumHeadingStep <= MaximumHeadingStepRadians
+						&& MaximumAcceleration
+							<= CandidateMaximumAccelerationCMPerSec2
+						&& MaximumJerk <= CandidateMaximumJerkCMPerSec3
+						&& MinimumClearance > Contract.BodyClearanceCM;
+					if (!bValid)
+					{
+						continue;
+					}
+
+					OutStartTime = Source.TimeSeconds;
+					OutEndTime = Source.TimeSeconds + TotalDuration;
+					InOutPoints.SetNum(SourceIndex + 1, EAllowShrinking::No);
+					InOutPoints.Append(CandidatePoints);
+					OutFailure.Reset();
+					return true;
+				}
 			}
-			OutFailure.Reset();
-			return true;
 		}
 
 		OutFailure = FString::Printf(
-			TEXT("NoValidCandidateContactTransfer:Distance=%.3f SourceSpeed=%.3f InwardSpeed=%.3f BestDuration=%.3f MaxAccel=%.3f MaxJerk=%.3f MinClearance=%.3f Score=%.6f"),
-			SourceDistance,
-			SourceSpeed,
-			InwardSpeed,
-			BestDuration,
-			BestAcceleration,
-			BestJerk,
-			BestClearance,
+			TEXT("NoValidCandidateCircularContactTransfer:%s Score=%.6f"),
+			*BestDetail,
 			BestScore);
 		return false;
 	}

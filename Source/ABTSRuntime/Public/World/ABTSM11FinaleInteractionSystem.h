@@ -64,6 +64,11 @@ public:
 	bool TryLaunchNominalCaptureAttempt(
 		AABTSM51SlingshotCord& Cord,
 		APlayerController& Controller);
+	/** Acceptance-only entry that holds one explicit input in Aiming. */
+	bool TryEnterCaptureAim(
+		AABTSM51SlingshotCord& Cord,
+		APlayerController& Controller,
+		const FABTSM11FinaleLaunchInput& Input);
 	/** Acceptance-only entry that submits one explicit player launch input. */
 	bool TryLaunchCaptureAttempt(
 		AABTSM51SlingshotCord& Cord,
