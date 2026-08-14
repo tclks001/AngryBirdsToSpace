@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Containers/StaticArray.h"
+#include "Contracts/ABTSM11ConnectivityClosureContract.h"
 #include "World/ABTSM11GravityAssistTypes.h"
 
 struct FABTSM11CertificationSuiteReport;
@@ -68,6 +69,10 @@ struct ABTSRUNTIME_API FABTSM11PrefixTrustRegion
 /** Frozen full-domain sampling and connectivity policy. */
 struct ABTSRUNTIME_API FABTSM11LayoutScanContract
 {
+	/** Frozen v3 ceiling; covers the Rank12 49x73x113 refinement lattice. */
+	static constexpr int32 BridgeClosureV3MaximumRefinementSampleCount =
+		500000;
+
 	int32 ScanContractVersion = 2;
 	double YawStepDegrees = 1.5;
 	double PitchStepDegrees = 2.0;
@@ -77,13 +82,15 @@ struct ABTSRUNTIME_API FABTSM11LayoutScanContract
 	int32 DiscoveryPolicyVersion = 1;
 	int32 RefinementHaloCoarseCells = 1;
 	int32 MaximumRefinementIterations = 3;
+	/** Legacy v2 default. MakeBridgeClosureV3 replaces it with the v3 ceiling. */
 	int32 MaximumRefinementSampleCount = 250000;
 	double FinalYawPrecisionDegrees = 0.1875;
 	double FinalPitchPrecisionDegrees = 0.25;
 	double FinalPowerPrecision = 0.003125;
 
-	/** Version 1 always means face-adjacent cells in the regular 3-D grid. */
+	/** v2 is face-only; v3 discovery is 18-neighbor with proven bridges only. */
 	int32 Connectivity = 6;
+	FABTSM11BridgeClosurePolicy BridgeClosurePolicy;
 	int32 MaximumCompletePrimaryOrbits = 1;
 
 	double MinimumF4YawWidthDegrees = 0.1875;
@@ -104,6 +111,9 @@ struct ABTSRUNTIME_API FABTSM11LayoutScanContract
 	bool IsValid(
 		const FABTSM11FinaleLaunchModel& LaunchModel,
 		FString* OutFailure = nullptr) const;
+	bool UsesBridgeClosureV3() const;
+	static FABTSM11LayoutScanContract MakeBridgeClosureV3(
+		const FABTSM11LayoutScanContract& LegacyV2);
 	int32 GetYawCount(const FABTSM11FinaleLaunchModel& LaunchModel) const;
 	int32 GetPitchCount(const FABTSM11FinaleLaunchModel& LaunchModel) const;
 	int32 GetPowerCount(const FABTSM11FinaleLaunchModel& LaunchModel) const;

@@ -39,15 +39,18 @@ M11-C 把 M11-B 的冻结终局布局和 M11-A 的唯一积分器接入玩家操
 13. 目标选择几何按 Result Hash/目标身份缓存，Scene Capture 只在首次有效结果或目标切换时捕获；
 14. Development Editor 全链接、全新进程自动化和 PIE 验收清单。
 
-### 2.2 延期到 M11-D
+### 2.2 M6 四鸟扩展与仍延期到 M11-D 的内容
 
-- 四鸟同时进入弹珠袋及完整编队标架；
+- 2026-08-11，M6 已在 M11 内完成四鸟逻辑装袋、同一 Playback Plan 弧长单列、
+  四鸟事务恢复、镜头安全框和 Schema 8 观测；完整合同见
+  [M11 M6 四鸟终局编队设计](M11FinaleCameraM6FourBirdFormation.md)；
+- Space 袋/弦/桩共享视觉定型与正式 force-flight 动画 API 仍由 Integration 完成；
 - 星空材质切换、雾云关闭、曝光和环境状态快照；
 - 白鸟救援、UFO 破坏、接触后的局部 Chaos 演出；
 - 四鸟 Party、星空/雾云和剧情镜头共同参与的完整 Attempt Snapshot 与失败演出扩展；
 - 最终音频、镜头节奏和剧情收尾。
 
-M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M11-D 只能扩展四鸟/环境/剧情快照并消费这一条冻结播放计划，不能再建立第二套飞行模拟。
+M11-C 先用当前受控鸟证明瞄准、预演、轨迹权威、连续实飞、接管合同和最小失败恢复；M6 已把四只鸟映射到同一冻结播放计划。M11-D 后续只能扩展环境/剧情快照和接触后演出，不能再建立第二套飞行模拟。
 
 ## 3. 权威数据流
 
@@ -118,7 +121,47 @@ Locked -> Ready -> Aiming -> ReleasePending -> Launched -> TargetHit
 
 M11-D 可以在 `TargetHit` 后接救援演出，并扩展 `Failed/Recovering` 的四鸟、环境和剧情镜头；不得改变 M11-C 已冻结的轨迹结果或最小安全恢复时序。
 
-### 4.2 Space 与普通弹弓隔离
+### 4.2 只读终局环境阶段契约
+
+`IsFinaleActive()` 是 HUD、输入与终局交互租约，从 `Aiming` 起即为真；它不等价于
+主世界已经进入深空。M11 因此额外发布只读
+`EABTSM11FinaleEnvironmentStage`，但不设置渲染 Profile、天空、雾云、曝光、材质或
+Scene Capture：
+
+| 阶段 | M11 权威边界 | Integration 消费语义 |
+|---|---|---|
+| `GroundLaunch` | `Locked / Ready / Aiming / ReleasePending` | 主视图保持地表环境；瞄准和待发射不得因 `IsFinaleActive()` 切到太空 Profile |
+| `AtmosphereTransition` | `Launched` 且冻结 Released Result 尚未到达 `AssistEnter(1)` | 继续消费现有按相机高度连续过渡的大气/高空机制 |
+| `DeepSpace` | `Launched / Failed` 已到达冻结 `AssistEnter(1)`，或已进入 `TargetHit` | 主视图可以提交正式 `FinaleSpace` 演出；可见失败停留与淡黑期间不得提前撤销 |
+| `Recovering` | 失败时间线到达全黑并把交互态切为 `Recovering` | 在不可见的全黑帧撤销深空提交并恢复地表环境；回到 `Ready` 后阶段自然回到 `GroundLaunch` |
+
+首颗行星 `AssistEnter(1)` 取自发射时冻结的
+`ReleasedCameraTrajectoryResult`，而不是当前可变 Prediction、Actor 距离、渲染高度或
+相机 CVar。事件缺失、Hash 为零、时间非法或 playback 尚未到达边界时都保持
+`AtmosphereTransition`，禁止猜测式提前进入深空。该边界只负责“最晚何时正式提交
+DeepSpace”；发射点到首颗行星之间的大气淡出仍由 Integration 的连续高度合同负责。
+
+失败开始只会把交互态切到 `Failed`，此时鸟、镜头与背景仍对玩家可见；环境阶段继续按
+冻结 Released Result 与当前 playback time 解析为原来的 `AtmosphereTransition` 或
+`DeepSpace`。`FailureTimeline` 在 `ReadableHold + FadeToBlack` 完成时钳制一个全黑恢复
+帧，恢复世界并把交互态切到 `Recovering`；只有从该帧起才发布恢复环境。这样天空、
+光照和鸟体明暗不会在可见失败停留开始时突变。
+
+失败表现也不能在 `Failed` 首帧冻结飞行。对正常错误轨迹，Release 时根据冻结的
+Playback Presentation End、播放倍率以及 `ReadableHold + FadeToBlack` 反算失败时间线的
+起点；到点后提前进入 `Failed`，但在全黑恢复脉冲前仍调用完整的 `UpdatePlayback()`。
+因此鸟、四鸟编队、尾迹、鸟体朝向和导演相机继续消费同一条已有轨迹，背景星空也通过
+真实视角变化保持相对运动。全黑恢复脉冲应与 Playback Presentation End 精确重合，随后
+原子恢复世界；短于默认淡黑预算的错误轨迹按比例压缩可读停留和淡黑时长，不延拓轨迹、
+不冻结相机，也不让恢复越过轨迹末端。本机制不追加 Playback Point、不改事件时间、
+Plan/Result Hash 或认证身份；依赖丢失等非正常播放失败不启用续航，继续 fail closed。
+
+远端行星 PIP 的 `FinaleRemotePreview` 仍是独立视图语义，可始终使用
+`FinaleSpace`，不随主世界阶段切换。Integration 只能读取
+`GetFinaleEnvironmentStage()`，不得反向写 M11 状态、轨迹、事件或 Hash，也不得为此
+修改 `IsFinaleActive()`。
+
+### 4.3 Space 与普通弹弓隔离
 
 `AABTSM11PlayerController` 派生自 M6 Controller：
 
@@ -231,6 +274,7 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 - 期望位置位于切线后方并沿 transported Up 抬高，位置和旋转做指数平滑；传入相机的表现时间与轨迹播放倍率一致，避免 production 18× 播放时镜头滞后于鸟；
 - 切换到飞行相机时继承当前瞄准相机的 transform 与 FOV，避免 Blueprint 调整过视场角后在 Release 帧发生构图跳变；
 - 相机仅消费已经发布的播放样本，不反向改变 Bird Transform、Playback Plan、分类或 Hash；
+- M7 ShotPlan 的公共 `Build()` 入口只接受 `CompletedAssistCount == 3` 的完整三助推路线；即使不完整路线已经出现 `Assist3 Enter`，也不得建立冻结计划或现场计划，而应保持无 ShotPlan 的普通追尾与黑场恢复路线；
 - 失败可读停帧和 `TargetHit` 保持最后的飞行镜头；退出、黑屏恢复或重置时先切回 Aim Camera，再由既有 Controller 生命周期恢复 Party Camera；
 - 飞行相机是 M11-only transient Actor，不新增或迁移 Blueprint、地图实例和 Native Default Subobject。
 
@@ -327,6 +371,54 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 M11-A Solver 和 M11-B 布局/Hash 未改变时，不重复昂贵的 M11-B ConstructiveSearch/FullInputDomain；M11-C 自己仍必须执行第 11.2 节的 558 样本接管闭包。
 
 ### 11.4 本次执行结果
+
+2026-08-12 追加只读环境阶段契约验证：UE 5.8 Development Editor
+`-ForceUnity -DisableAdaptiveUnity` 完整链接成功；fresh NullRHI
+`ABTS.M11C.Unit.EnvironmentStageContract` 为 `1/1`，完整
+`ABTS.M11C.Unit` 为 `12/12`。证据分别位于
+`Saved/Logs/M11-EnvironmentStage-ForceUnity-20260812.log`、
+`Saved/Logs/M11-EnvironmentStage-Contract-20260812.log` 与
+`Saved/Logs/M11-EnvironmentStage-M11CUnit-20260812.log`。这些门只证明 M11 只读状态与
+生命周期合同；Integration 的主视图 Profile、高度过渡、独立 PIP 和恢复像素仍需在其
+工作树完成接线与有渲染验收。
+
+2026-08-13 修正失败可见期边界：`Failed` 继续按冻结 Released Result 解析
+`AtmosphereTransition / DeepSpace`，只在失败时间线全黑恢复帧进入 `Recovering`。
+UE 5.8 ForceUnity 完整链接成功；fresh NullRHI 专项
+`ABTS.M11C.Unit.EnvironmentStageContract` 为 `1/1`、完整 `ABTS.M11C.Unit` 为
+`12/12`、Integration 消费侧
+`ABTS.Rendering.Toon.T4A3_2.M11EnvironmentStageRouting` 为 `1/1`。证据为
+`Saved/Logs/M11-FailureEnvironmentHold-ForceUnity-20260813.log`、
+`M11-FailureEnvironmentHold-Contract-20260813.log`、
+`M11-FailureEnvironmentHold-M11CUnit-20260813.log` 与
+`M11-FailureEnvironmentHold-IntegrationRouting-20260813.log`。可见天空连续性和鸟体
+Visual Rotation 是否仍跳变，仍需用户 PIE 复验；本轮自动门不冒充像素证据。
+
+同日对失败飞行续航作第二次修正：首版把鸟与相机做相同世界位移，虽然日志显示
+`ContinueFlight=1`，相机与星空的相对姿态却被冻结，画面仍像停止。最终合同改为提前启动
+失败淡黑，并在全黑前继续运行原 `UpdatePlayback()` 与完整导演；全黑恢复边界精确对齐
+已有错误轨迹的 Presentation End，不再使用末端切线或相机等量平移。UE 5.8 Development
+Editor 最终增量 4/4 编译成功；fresh NullRHI `ABTS.M11C.Unit` 为 `12/12`、
+`ABTS.M11C.Runtime` 为 `2/2`、Integration 环境路由专项为 `1/1`。证据为
+`Saved/Logs/M11-FailurePlaybackAlignment-20260813-Build.log`、
+`M11-FailurePlaybackAlignment-20260813-M11CUnit.log`、
+`M11-FailurePlaybackAlignment-20260813-M11CRuntime.log` 与
+`M11-FailurePlaybackAlignment-20260813-IntegrationRouting.log`。纯调度门覆盖正常窗口、短轨迹
+按比例压缩、全黑精确对齐与零时长 fail closed；可见的星空相对运动和全黑边界仍需用户
+PIE 验收。
+
+2026-08-14 对齐 Integration 新增的 `PresentationAccepted` 路由合同：M7 ShotPlan
+公共 `Build()` 入口要求 `CompletedAssistCount == 3`，不完整 Assist3 路线即使已有
+`Assist3 Enter` 也不能取得冻结计划或现场重建计划，统一保持普通追尾与黑场恢复。
+UE 5.8 Development Editor 编译成功；fresh NullRHI 导演专项为 `1/1`、完整
+`ABTS.M11C.Unit` 为 `12/12`、`ABTS.M11C.Runtime` 为 `2/2`，新合同
+`ABTS.Contracts.M11PresentationAcceptance` 为 `3/3`。证据为
+`Saved/Logs/M11-ShotPlanEligibility-20260814-Build.log`、
+`M11-ShotPlanEligibility-20260814-FlightCamera.log`、
+`M11-ShotPlanEligibility-20260814-M11CUnit.log`、
+`M11-ShotPlanEligibility-20260814-M11CRuntime.log` 与
+`M11-ShotPlanEligibility-20260814-PresentationContract.log`。本轮只验证导演资格合同，
+不重新声明 Rank11 或 Rank12 已 `PresentationAccepted`；候选全域状态仍须独立重跑。
 
 下表保留 M11-C v1/前一轮 PIE 修复的归档基线证据。`21,025/558` 只证明 production v1 的 F4 接管闭包，不证明当前 Search v3 Candidate。
 
@@ -439,25 +531,26 @@ Rank 1 的真实侧向偏转为 `+0.590804 / -0.306536 / +0.645047 rad`，发生
 ```text
 [ABTS][M11-C][GameMode] Entry Ready=1 StartCell=...
 [ABTS][M11-C][Interaction] Ready ...
-[ABTS][M11-C][Release] Source=0x... Plan=0x... F4=... Physical=... Transfer=...
+[ABTS][M11-C][Release] Source=0x... Plan=0x... F4=... Physical=... Transfer=... FailureStart=... PresentationEnd=...
 [ABTS][M11-C][FlightCamera] FollowStarted Camera=... Bird=...
 [ABTS][M11-C][FlightCamera] RestoredAim Camera=...
-[ABTS][M11-C][Failure] Begin Reason=... Hold=... FadeIn=... Black=... FadeOut=...
-[ABTS][M11-C][Failure] RestoredAtBlack Reason=...
+[ABTS][M11-C][Failure] Begin Reason=... Hold=... FadeIn=... Black=... FadeOut=... ContinueFlight=1 FailureStart=... PlaybackEnd=...
+[ABTS][M11-C][Failure] RestoredAtBlack Reason=... ContinuedFlight=1 Playback=... PlaybackEnd=...
 [ABTS][M11-C][Failure] RecoveryComplete Reason=...
 [ABTS][M11-C][Playback] TargetHit Plan=0x... Transfer=...
 ```
 
 任一 `InteractionContract`、`ReleasePreviewIdentityMismatch`、`PlaybackSamplingFailed` 或上游 M11-B Rejected 都是阻断错误。
 
-## 13. M11-D 交接清单
+## 13. M6 已落实合同与 M11-D 交接清单
 
-1. M11-D 只把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的切线/法线标架，不复制积分器；
-2. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
-3. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
-4. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
-5. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
-6. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
+1. M6 已把四鸟编队映射到同一 `FABTSM11PlaybackPlan` 的弧长标架，不复制积分器；M11-D 必须继续消费该结果；
+2. 四鸟 Actor 前向由各自弧长样本速度唯一确定；上方向使用本帧导演相机 Up 的法平面投影。Mesh 的默认 `Yaw=-90°` 只保留为组件局部轴修正，不得在世界姿态中重复施加；
+3. 环境切换和完整 Attempt Snapshot 必须扩展 M11-C 已有的鸟/弹弓/输入最小恢复原语，在进入终局前保存，并在同一全黑恢复点原位恢复；
+4. `TargetHit` 是 800 cm UFO 接触，之后才允许白鸟救援、UFO 局部 Chaos 和剧情；
+5. M11-C 的 `VisibleTerminalTransfer` 必须继续明确呈现，不得被镜头剪辑伪装成普通求解器轨迹；
+6. 失败镜头使用 M11-C 已分类的最早可证原因及冻结 Presentation End；没有公开证据时使用通用 miss，不在表现层重算物理或延长到未裁剪的求解器全时长；
+7. M11-D 不改变 Preset、Scenario、Trust、Transfer Contract 或 Plan Hash；如需改变，必须回到 M11-C 重新跑 558 样本闭包。
 
 ## 14. 多工作树集成交接
 

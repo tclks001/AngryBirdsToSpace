@@ -93,6 +93,11 @@
 - `PouchAConnectionOffsetCM`、`PouchBConnectionOffsetCM`：袋局部左右弦端，默认 `(0,-18,0)` 与 `(0,18,0)`。
 - `BirdInPouchOffsetCM`：位于 `AABTSM6SlingshotSystem / ABTS|M6|Visual`，默认 `20 cm`；表示鸟 Actor 相对袋中心沿袋体局部 `+Z` 的偏移，四只鸟共享该参数。
 
+袋体姿态与鸟体姿态属于两个独立坐标合同：袋体继续用局部 `+Z` 对齐发射方向、
+局部 `+Y` 对齐桩间侧向；装袋鸟 Actor 则统一用 `+X` 对齐即时发射方向，并以局部
+球面上方向稳定 `+Z`。因此进入普通或 Space 弹弓时不会继承鸟进入前的世界朝向，
+也不会把袋模型的轴约定误当成鸟 Actor 朝向。
+
 连接参数不随网格源 Bounds 变化；但会随 `PouchVisual.LocalScale` 成比例变化，使弦端与袋体视觉缩放同步。更换模型时，先保持布局参数不变并确认三个模型协议，再只微调连接点。
 
 ## 6. 编辑器配置步骤
@@ -116,6 +121,17 @@ PouchAConnectionOffsetCM = (0, -18, 0)
 PouchBConnectionOffsetCM = (0, 18, 0)
 BirdInPouchOffsetCM = 20
 ```
+
+以上仍是 Twig/Simple/Reinforced 三档的普通框架。M11 M6-6 从视觉合同 v2 起只为
+Space 档使用四鸟框架：`BaseStakeSpacingCM=320`、`StakeHeightCM=285`、
+`StakeDiameterCM=36`、`CordThicknessCM=5.5`、
+`PouchSizeCM=(84,120,24)`、`RestPouchOffsetCM=(0,0,-45)`、袋端连接点
+`Y=±52`。因此 Space 袋的原生三轴尺寸严格等于普通袋的 2 倍；共享
+`PouchVisual.LocalScale` 不变，最终可见 Bounds 仍保持同样的 2 倍比例。旧地图中
+恰好为 `210 cm` 的 M11.0 序列化桩距迁移至 `320 cm`，其他设计师自定义值保持权威。
+Space 四鸟槽另在共享 `BirdInPouchOffsetCM=20` 之外增加默认 `25 cm` 前向净空，
+即鸟体中心距袋中心的发射轴距离为 `45 cm`；该附加值只属于终局四鸟编队，不改变
+Twig/Simple/Reinforced 的普通单鸟装袋距离。
 
 ## 7. 无模型回退协议
 
@@ -146,7 +162,8 @@ BirdInPouchOffsetCM = 20
 6. 调整 `PouchVisual.LocalScale.Y` 时，两根弦的袋端沿 Y 等比例移动；预览和 PIE 中一致。
 7. 向任意方向拉伸时，袋体本地 `+Z` 对齐即时发射方向，本地 `+Y` 保持桩间侧向；两根弦不得交叉连接。
 8. `BirdInPouchOffsetCM=20` 时，鸟体中心始终位于袋中心沿当前袋体局部 `+Z` 的 20 cm 位置；改变发射方向后偏移随袋体旋转。
-9. M6 拉动期间只有袋移动，两根弦持续连接四个端点，松手与回归后恢复待机状态。
+9. 鸟在进入任意弹弓前无论面向何处，装袋后 Actor `+X` 都必须统一朝向当前发射方向；改变瞄准俯仰时随发射方向连续更新，不得侧身或背向发射。
+10. M6 拉动期间只有袋移动，两根弦持续连接四个端点，松手与回归后恢复待机状态。
 
 ## 10. 排错
 

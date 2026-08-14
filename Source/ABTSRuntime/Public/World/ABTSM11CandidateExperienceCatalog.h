@@ -37,7 +37,7 @@ class ABTSRUNTIME_API FABTSM11CandidateExperienceCatalog final
 {
 public:
 	static constexpr int32 FirstCandidateRank = 1;
-	static constexpr int32 LastCandidateRank = 11;
+	static constexpr int32 LastCandidateRank = 12;
 
 #if WITH_EDITOR
 	/**

@@ -16,6 +16,7 @@ class AABTSM51PickupItem;
 class AABTSM51SlingshotCord;
 class AABTSM51SlingshotDirtHole;
 class AABTSM51SlingshotStake;
+class APawn;
 class UABTSInventoryComponent;
 
 /** CellTopo-driven M5.1 pickup, placement and slingshot assembly owner. */
@@ -30,6 +31,10 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	bool PlaceHeldToolAtAim(APlayerController& Controller);
+	/** PIE visual-calibration helper. Atomically spawns all four raw pickups outside auto-pickup range. */
+	bool SpawnPickupShowcase(float RequestedDistanceCM = 450.0f);
+	/** Explicit-pawn core used by the console entry and isolated runtime validation. */
+	bool SpawnPickupShowcaseAroundPawn(const APawn& Pawn, float RequestedDistanceCM = 450.0f);
 	/** Debug placement path: a held stake can be installed at any unoccupied CellTopo cell without a DirtHole. */
 	bool PlaceHeldStakeAtAim(APlayerController& Controller);
 	bool InstallHeldStake(AABTSM51SlingshotDirtHole& Hole);

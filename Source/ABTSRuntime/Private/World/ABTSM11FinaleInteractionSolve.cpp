@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Async/Async.h"
 #include "Components/CapsuleComponent.h"
+#include "Camera/ABTSM11FinaleFlightCamera.h"
 #include "HAL/PlatformTime.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM11FinaleLayoutCertification.h"
@@ -41,6 +42,14 @@ struct FABTSM11PreviewSolvePayload
 struct FABTSM11NominalSolvePayload
 {
 	FABTSM11TrajectoryResult Result;
+	bool bSolved = false;
+	FString Failure;
+};
+
+struct FABTSM11F4GuidanceSolvePayload
+{
+	FABTSM11F4GuidanceTarget Target;
+	double SolveDurationMilliseconds = 0.0;
 	bool bSolved = false;
 	FString Failure;
 };
@@ -177,6 +186,35 @@ void AABTSM11FinaleInteractionSystem::QueueNominalPhysicalSolve()
 		});
 }
 
+void AABTSM11FinaleInteractionSystem::QueueF4GuidanceSolve()
+{
+	if (bF4GuidanceInFlight
+		|| F4GuidanceTarget.bValid
+		|| !IsValid(FinaleSystem))
+	{
+		return;
+	}
+	const FABTSM11FinaleLayoutPreset Preset =
+		FinaleSystem->GetLayoutPreset();
+	F4GuidanceFailure.Reset();
+	bF4GuidanceInFlight = true;
+	F4GuidanceFuture = Async(
+		EAsyncExecution::ThreadPool,
+		[Preset]()
+		{
+			const double StartSeconds = FPlatformTime::Seconds();
+			TSharedPtr<FABTSM11F4GuidanceSolvePayload> Payload =
+				MakeShared<FABTSM11F4GuidanceSolvePayload>();
+			Payload->bSolved = FABTSM11F4GuidanceBuilder::Build(
+				Preset,
+				Payload->Target,
+				&Payload->Failure);
+			Payload->SolveDurationMilliseconds =
+				(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+			return Payload;
+		});
+}
+
 void AABTSM11FinaleInteractionSystem::DrainCompletedSolves()
 {
 	check(IsInGameThread());
@@ -189,12 +227,55 @@ void AABTSM11FinaleInteractionSystem::DrainCompletedSolves()
 		HandleNominalSolveCompleted(
 			NominalSolveFuture.Consume());
 	}
+	if (F4GuidanceFuture.IsValid()
+		&& F4GuidanceFuture.IsReady())
+	{
+		HandleF4GuidanceSolveCompleted(
+			F4GuidanceFuture.Consume());
+	}
 	if (PreviewSolveFuture.IsValid()
 		&& PreviewSolveFuture.IsReady())
 	{
 		HandlePreviewSolveCompleted(
 			PreviewSolveFuture.Consume());
 	}
+}
+
+void AABTSM11FinaleInteractionSystem::HandleF4GuidanceSolveCompleted(
+	TSharedPtr<FABTSM11F4GuidanceSolvePayload> Payload)
+{
+	check(IsInGameThread());
+	bF4GuidanceInFlight = false;
+	if (!Payload.IsValid()
+		|| !Payload->bSolved
+		|| !IsValid(FinaleSystem)
+		|| !Payload->Target.IsValid(
+			FinaleSystem->GetLayoutPreset().LaunchModel))
+	{
+		F4GuidanceTarget = FABTSM11F4GuidanceTarget();
+		F4GuidanceFailure = Payload.IsValid()
+			? Payload->Failure
+			: TEXT("MissingF4GuidancePayload");
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C][F4Guide] Unavailable Failure=%s"),
+			*F4GuidanceFailure);
+		return;
+	}
+	F4GuidanceTarget = Payload->Target;
+	F4GuidanceFailure.Reset();
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][F4Guide] Ready Yaw=%.6f Pitch=%.6f Power=%.6f Samples=%d F4=%d Truncated=%d DurationMS=%.3f"),
+		F4GuidanceTarget.Input.YawDegrees,
+		F4GuidanceTarget.Input.PitchDegrees,
+		F4GuidanceTarget.Input.Power,
+		F4GuidanceTarget.SampleCount,
+		F4GuidanceTarget.F4SampleCount,
+		F4GuidanceTarget.bSearchTruncated ? 1 : 0,
+		Payload->SolveDurationMilliseconds);
 }
 
 void AABTSM11FinaleInteractionSystem::HandlePreviewSolveCompleted(
@@ -349,7 +430,7 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 	const FABTSM11TrajectoryResult* Nominal =
 		bNominalPhysicalReady ? &NominalPhysicalResult : nullptr;
 	const bool bBuilt = FinaleSystem->IsEditorCandidateMode()
-		? PreviewPlaybackPlan.BuildCandidateQualified(
+		? PreviewPlaybackPlan.BuildCandidatePresentationContact(
 			FinaleSystem->GetLayoutPreset(),
 			LatestQualifiedResult,
 			CurrentClassification)
@@ -477,7 +558,8 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	if (CurrentClassification.IsF(4)
 		&& (!PreviewPlaybackPlan.bQualifiedF4
 			|| (FinaleSystem->IsEditorCandidateMode()
-				? !PreviewPlaybackPlan.bCandidateQualifiedIntercept
+				? (!PreviewPlaybackPlan.bCandidateQualifiedIntercept
+					|| !PreviewPlaybackPlan.bPhysicalTargetHit)
 				: !PreviewPlaybackPlan.bPhysicalTargetHit)))
 	{
 		return false;
@@ -491,6 +573,45 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	}
 
 	ReleasedPlaybackPlan = PreviewPlaybackPlan;
+	FString FormationPathFailure;
+	if (!FormationPath.Build(ReleasedPlaybackPlan, &FormationPathFailure))
+	{
+		ReleasedPlaybackPlan.Reset();
+		FailInteraction(
+			FormationPathFailure.IsEmpty()
+				? TEXT("FormationPathBuildRejected")
+				: FormationPathFailure);
+		return false;
+	}
+	ReleasedCameraTrajectoryResult = LatestQualifiedResult;
+	ReleasedCameraShotPlan.Reset();
+	bCameraDirectorFallbackLogged = false;
+	FABTSM11FinaleCameraShotSettings PlaybackShotSettings;
+	FString CameraScheduleFailure;
+	const double CameraPlaybackScale =
+		FinaleSystem->IsEditorCandidateMode()
+			? 1.0
+			: FMath::Max(0.1, PlaybackTimeScale);
+	const FABTSM11FinaleCameraShotSettings PresentationShotSettings =
+		IsValid(FlightCamera)
+			? FlightCamera->GetM3ShotSettings()
+			: FABTSM11FinaleCameraShotSettings();
+	const bool bCameraScheduleBuilt =
+		PresentationShotSettings.BuildPlaybackClockSettings(
+			CameraPlaybackScale,
+			PlaybackShotSettings)
+		&& ReleasedCameraShotPlan.Build(
+			ReleasedCameraTrajectoryResult,
+			PlaybackShotSettings,
+			&CameraScheduleFailure);
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][M7] ReleaseCameraPlan Source=0x%016llx Built=%d Adaptive=%d Failure=%s"),
+		ReleasedCameraTrajectoryResult.ValidationHash,
+		bCameraScheduleBuilt ? 1 : 0,
+		ReleasedCameraShotPlan.bUsesAdaptiveCompression ? 1 : 0,
+		CameraScheduleFailure.IsEmpty() ? TEXT("None") : *CameraScheduleFailure);
 	PlaybackElapsedSeconds =
 		ReleasedPlaybackPlan.Points[0].TimeSeconds;
 	double BirdClearanceCM = 50.0;
@@ -511,13 +632,13 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 			LatestQualifiedResult,
 			ReleasedPlaybackPlan,
 			BirdClearanceCM);
+	const double EffectivePlaybackTimeScale =
+		FinaleSystem->IsEditorCandidateMode()
+			? 1.0
+			: FMath::Max(0.1, PlaybackTimeScale);
 	if (!ReleasedPlaybackPlan.bPhysicalTargetHit
 		&& !ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 	{
-		const double EffectivePlaybackTimeScale =
-			FinaleSystem->IsEditorCandidateMode()
-				? 1.0
-				: FMath::Max(0.1, PlaybackTimeScale);
 		const double FailureDurationCap =
 			FMath::Max(1.0, MaximumFailureFlightDisplaySeconds)
 			* EffectivePlaybackTimeScale;
@@ -525,6 +646,30 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 			PlaybackPresentationEndTimeSeconds,
 			ReleasedPlaybackPlan.Points[0].TimeSeconds
 				+ FailureDurationCap);
+	}
+	FABTSM11FailurePresentationConfig DesiredFailureConfig;
+	DesiredFailureConfig.ReadableHoldSeconds =
+		FailureReadableHoldSeconds;
+	DesiredFailureConfig.FadeToBlackSeconds =
+		FailureFadeToBlackSeconds;
+	DesiredFailureConfig.BlackHoldSeconds = FailureBlackHoldSeconds;
+	DesiredFailureConfig.FadeFromBlackSeconds =
+		FailureFadeFromBlackSeconds;
+	ReleasedFailurePresentationConfig = DesiredFailureConfig;
+	FailurePresentationStartTimeSeconds =
+		PlaybackPresentationEndTimeSeconds;
+	if (!ReleasedPlaybackPlan.bPhysicalTargetHit
+		&& !ReleasedPlaybackPlan.bCandidateQualifiedIntercept
+		&& !ABTSM11ResolveFailurePresentationSchedule(
+			ReleasedPlaybackPlan.Points[0].TimeSeconds,
+			PlaybackPresentationEndTimeSeconds,
+			EffectivePlaybackTimeScale,
+			DesiredFailureConfig,
+			FailurePresentationStartTimeSeconds,
+			ReleasedFailurePresentationConfig))
+	{
+		FailInteraction(TEXT("FailurePresentationScheduleRejected"));
+		return false;
 	}
 	InteractionState = EABTSM11FinaleInteractionState::Launched;
 	if (IsValid(ActiveCord))
@@ -534,13 +679,14 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d CandidateQualified=%d Physical=%d Transfer=%d PresentationEnd=%.3f"),
+		TEXT("[ABTS][M11-C][Release] Source=0x%016llx Plan=0x%016llx F4=%d CandidateQualified=%d Physical=%d Transfer=%d FailureStart=%.3f PresentationEnd=%.3f"),
 		ReleasedPlaybackPlan.ReleasedTrajectoryHash,
 		ReleasedPlaybackPlan.PlanHash,
 		ReleasedPlaybackPlan.bQualifiedF4 ? 1 : 0,
 		ReleasedPlaybackPlan.bCandidateQualifiedIntercept ? 1 : 0,
 		ReleasedPlaybackPlan.bPhysicalTargetHit ? 1 : 0,
 		ReleasedPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0,
+		FailurePresentationStartTimeSeconds,
 		PlaybackPresentationEndTimeSeconds);
 	return true;
 }

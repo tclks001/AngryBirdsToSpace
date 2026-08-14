@@ -9,6 +9,7 @@
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "Terrain/ABTSM3TerrainVisualField.h"
 
 namespace ABTSM3R5PresentationTests
 {
@@ -501,6 +502,78 @@ bool CheckCandidate(
 	}
 	return bPassed;
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM3TerrainBasePaletteTest,
+	"ABTS.M3.Monthly.Biome.BaseTerrainPalette",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM3TerrainBasePaletteTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM3R5PresentationTests;
+	(void)Parameters;
+
+	const TArray<FABTSM2Cell> Cells = BuildLogicalCells(1);
+	TArray<FABTSM3CellState> CellStates;
+	CellStates.SetNum(Cells.Num());
+	const EABTSM3TerrainType TerrainTypes[] =
+	{
+		EABTSM3TerrainType::Plain,
+		EABTSM3TerrainType::Forest,
+		EABTSM3TerrainType::Highland,
+		EABTSM3TerrainType::Mountain
+	};
+	for (int32 TypeIndex = 0; TypeIndex < UE_ARRAY_COUNT(TerrainTypes); ++TypeIndex)
+	{
+		FABTSM3CellState& LowState = CellStates[TypeIndex * 2];
+		FABTSM3CellState& HighState = CellStates[TypeIndex * 2 + 1];
+		LowState.TerrainType = TerrainTypes[TypeIndex];
+		LowState.LogicalHeight01 = 0.05f;
+		LowState.Moisture01 = 0.05f;
+		HighState.TerrainType = TerrainTypes[TypeIndex];
+		HighState.LogicalHeight01 = 0.95f;
+		HighState.Moisture01 = 0.95f;
+	}
+
+	FABTSM3TerrainVisualField VisualField;
+	VisualField.Initialize(
+		10000.0f,
+		900.0f,
+		80.0f,
+		160.0f,
+		240.0f,
+		160.0f,
+		Cells,
+		CellStates,
+		TArray<FABTSM3CellEdgeState>(),
+		80.0f,
+		180.0f,
+		70.0f,
+		120.0f,
+		180.0f);
+	TestTrue(TEXT("Base-palette visual field is ready"), VisualField.IsReady());
+	for (int32 TypeIndex = 0; TypeIndex < UE_ARRAY_COUNT(TerrainTypes); ++TypeIndex)
+	{
+		const FLinearColor Expected =
+			FABTSM3TerrainVisualField::GetTerrainBaseColor(
+				TerrainTypes[TypeIndex]);
+		TestTrue(
+			*FString::Printf(
+				TEXT("TerrainType %d ignores Cell scalar variation"),
+				TypeIndex),
+			VisualField.GetCellBaseLandColor(TypeIndex * 2)
+				.Equals(Expected));
+		TestTrue(
+			*FString::Printf(
+				TEXT("TerrainType %d has one base color"),
+				TypeIndex),
+			VisualField.GetCellBaseLandColor(TypeIndex * 2 + 1)
+				.Equals(Expected));
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

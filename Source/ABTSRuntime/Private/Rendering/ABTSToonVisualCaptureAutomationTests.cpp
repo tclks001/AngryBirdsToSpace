@@ -4,9 +4,11 @@
 
 #include "Misc/AutomationTest.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
+#include "Rendering/ABTST4LowPolyCloudPrototype.h"
 #include "Rendering/ABTSToonVisualCaptureTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -49,6 +51,30 @@ bool FABTSToonT0CommandLineContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Exit flag"), Config.bExitWhenComplete);
 	TestEqual(TEXT("Output root"), Config.OutputDirectory, FString(TEXT("VisualEvidence")));
 	TestEqual(TEXT("Build identity"), Config.BuildIdentity, FString(TEXT("deadbeef")));
+
+	Failure.Reset();
+	TestTrue(
+		TEXT("A2.4 subset and no-cloud GPU identity parse"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A2 -ABTSToonT0Mode=GPU -ABTSToonT0ScreenPercentage=75 -ABTSToonT0PointIds=GroundDay+CloudFieldGlobal -ABTSToonT0VariantIds=StyleOn -ABTSToonT4A2DisableClouds -ABTSToonT0BuildId=A24"),
+			Config,
+			&Failure));
+	TestEqual(TEXT("A2.4 screen percentage identity"), Config.ExpectedScreenPercentage, 75);
+	TestTrue(TEXT("A2.4 cloud-disabled baseline"),
+		Config.bDisableLowPolyCloudsForPerformanceBaseline);
+	TestEqual(TEXT("A2.4 requested point count"), Config.RequestedPointIds.Num(), 2);
+	TestEqual(TEXT("A2.4 first requested point"),
+		Config.RequestedPointIds[0], FName(TEXT("GroundDay")));
+	TestEqual(TEXT("A2.4 requested variant count"), Config.RequestedVariantIds.Num(), 1);
+
+	Failure.Reset();
+	TestFalse(
+		TEXT("Duplicate A2.4 filters fail closed"),
+		FABTSToonVisualCaptureRunConfig::Parse(
+			TEXT("-ABTSVisualCaptureSuite=ToonT4A2 -ABTSToonT0PointIds=GroundDay+GroundDay -ABTSToonT0BuildId=A24"),
+			Config,
+			&Failure));
+	TestTrue(TEXT("Duplicate filters report a reason"), !Failure.IsEmpty());
 
 	Failure.Reset();
 	TestFalse(
@@ -198,9 +224,66 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		static_cast<int32>(FABTSStylizedRenderingControl::GetProfile()),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
 	TestEqual(
-		TEXT("T2-B1 reports the capture dark-noise stabilization implementation"),
+		TEXT("Stylized renderer reports the finale-stage profile routing contract"),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
-		5);
+		72);
+	const FABTSStylizedEnvironmentProfilePolicy GroundEnvironment =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::GroundDay);
+	const FABTSStylizedEnvironmentProfilePolicy SatelliteEnvironment =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::SatelliteGuide);
+	const FABTSStylizedEnvironmentProfilePolicy FinaleEnvironment =
+		FABTSStylizedRenderingControl::GetEnvironmentProfilePolicy(
+			EABTSStylizedRenderProfile::FinaleSpace);
+	TestTrue(TEXT("GroundDay environment policy is valid"),
+		GroundEnvironment.IsValid());
+	TestTrue(TEXT("GroundDay owns spherical atmosphere and low-poly clouds"),
+		GroundEnvironment.bSkyAtmosphereVisible
+			&& GroundEnvironment.bLowPolyCloudsVisible
+			&& !GroundEnvironment.bHeightFogVisible);
+	TestTrue(TEXT("SatelliteGuide environment policy is valid"),
+		SatelliteEnvironment.IsValid());
+	TestTrue(TEXT("SatelliteGuide is a cloud-free deep-space environment"),
+		!SatelliteEnvironment.bSkyAtmosphereVisible
+			&& !SatelliteEnvironment.bLowPolyCloudsVisible
+			&& !SatelliteEnvironment.bHeightFogVisible);
+	TestTrue(TEXT("FinaleSpace environment policy is valid"),
+		FinaleEnvironment.IsValid());
+	TestTrue(TEXT("FinaleSpace is a cloud-free deep-space environment"),
+		!FinaleEnvironment.bSkyAtmosphereVisible
+			&& !FinaleEnvironment.bLowPolyCloudsVisible
+			&& !FinaleEnvironment.bHeightFogVisible);
+	TestEqual(
+		TEXT("Ground navigation exposure is frozen independently of the active world profile"),
+		FABTSStylizedRenderingControl::GetFixedExposureBias(
+			EABTSStylizedRenderProfile::GroundDay),
+		0.75f);
+	TestEqual(
+		TEXT("Satellite navigation exposure is frozen independently of the active world profile"),
+		FABTSStylizedRenderingControl::GetFixedExposureBias(
+			EABTSStylizedRenderProfile::SatelliteGuide),
+		-0.10f);
+	TestTrue(
+		TEXT("GroundDay clouds suppress motion blur to prevent moving night-cloud edge fringes"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::GroundDay,
+			true));
+	TestFalse(
+		TEXT("GroundDay without clouds does not alter the camera motion contract"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::GroundDay,
+			false));
+	TestFalse(
+		TEXT("SatelliteGuide retains its independent camera motion contract"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::SatelliteGuide,
+			true));
+	TestFalse(
+		TEXT("FinaleSpace retains its independent camera motion contract"),
+		FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			EABTSStylizedRenderProfile::FinaleSpace,
+			true));
 	TestTrue(
 		TEXT("Any-thread switch mirrors the game-thread switch"),
 		FABTSStylizedRenderingControl::IsEnabledOnAnyThread());
@@ -238,6 +321,13 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 			FABTSStylizedRenderingControl::GetOutlineProfileParameters(
 				static_cast<EABTSStylizedRenderProfile>(ProfileIndex));
 		TestTrue(TEXT("Every T2-A outline profile is valid"), OutlineProfile.IsValid());
+		TestTrue(
+			TEXT("Background silhouettes remain stronger than depth occlusions"),
+			OutlineProfile.Strength > OutlineProfile.OcclusionStrength);
+		TestTrue(
+			TEXT("Depth occlusions remain stronger than normal creases"),
+			OutlineProfile.OcclusionStrength
+				> OutlineProfile.NormalCreaseStrength);
 		OutlineProfiles.Add(OutlineProfile);
 	}
 	TestNotEqual(
@@ -252,6 +342,13 @@ bool FABTSToonT0StyleSwitchSeamTest::RunTest(const FString& Parameters)
 		TEXT("Ground and finale outline widths differ"),
 		OutlineProfiles[0].WidthPixels,
 		OutlineProfiles[2].WidthPixels);
+	FABTSStylizedOutlineProfileParameters InvalidOutlineHierarchy =
+		OutlineProfiles[0];
+	InvalidOutlineHierarchy.NormalCreaseStrength =
+		InvalidOutlineHierarchy.OcclusionStrength + 0.01f;
+	TestFalse(
+		TEXT("An inverted outline hierarchy is rejected"),
+		InvalidOutlineHierarchy.IsValid());
 	TestFalse(
 		TEXT("Out-of-range profiles are rejected"),
 		FABTSStylizedRenderingControl::IsProfileValid(
@@ -314,6 +411,342 @@ bool FABTSToonT2ASharedRenderingContractTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A2R1CCloudCompositeStencilContractTest,
+	"ABTS.Rendering.Toon.T4A2R1C.CloudCompositeStencilContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A2R1CCloudCompositeStencilContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const uint8 CloudStencil = FABTSStylizedRenderingContract::
+		ResolveCloudCompositeStencilValueForRenderer();
+	TestEqual(TEXT("CloudComposite uses stencil 8"),
+		CloudStencil, static_cast<uint8>(8));
+	for (int32 ClassIndex =
+		static_cast<int32>(EABTSStylizedObjectClass::None);
+		ClassIndex <= static_cast<int32>(EABTSStylizedObjectClass::FinaleUFO);
+		++ClassIndex)
+	{
+		TestNotEqual(
+			TEXT("Cloud composite stencil never aliases gameplay semantics"),
+			FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
+				static_cast<EABTSStylizedObjectClass>(ClassIndex)),
+			CloudStencil);
+	}
+	TestTrue(
+		TEXT("Two visible cloud pixels suppress their mutual outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudStencil, CloudStencil));
+	TestFalse(
+		TEXT("Cloud-to-background boundary retains the ordinary outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudStencil, 0));
+	TestFalse(
+		TEXT("Background-to-cloud boundary retains the ordinary outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				0, CloudStencil));
+	TestFalse(
+		TEXT("Cloud-to-gameplay boundary retains the ordinary outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudStencil, 1));
+	TestFalse(
+		TEXT("Matching gameplay stencil does not suppress normal outlines"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(1, 1));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A22GlobalCloudFieldContractTest,
+	"ABTS.Rendering.Toon.T4A2_2.GlobalCloudFieldContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A22GlobalCloudFieldContractTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const uint8 CloudCompositeStencil = FABTSStylizedRenderingContract::
+		ResolveCloudCompositeStencilValueForRenderer();
+	TestEqual(TEXT("Every logical cloud shares CloudComposite stencil 8"),
+		CloudCompositeStencil,
+		static_cast<uint8>(8));
+	TestTrue(TEXT("CloudComposite stencil is recognized as cloud"),
+		FABTSStylizedRenderingContract::
+			IsCloudCompositeStencilValueForRenderer(CloudCompositeStencil));
+	TestFalse(TEXT("Gameplay stencil is not classified as CloudComposite"),
+		FABTSStylizedRenderingContract::
+			IsCloudCompositeStencilValueForRenderer(1));
+
+	const FABTSStylizedEnvironmentParameters Environment =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			FVector(120.0, -340.0, 560.0),
+			10000.0,
+			FVector(0.3, -0.6, 0.7).GetSafeNormal(),
+			EABTSStylizedRenderProfile::GroundDay);
+	// Production star seed 0x00A8B751 xor the frozen cloud-field salt.
+	constexpr uint32 CloudFieldSeed = 0xC1A5466Cu;
+	const FABTST4CloudClusterDistributionParameters ProductionDistribution;
+	TestEqual(TEXT("A2.4 freezes twenty-four production weather clusters"),
+		ProductionDistribution.ClusterCount, 24);
+	TestEqual(TEXT("A2.4 freezes ten logical clouds per cluster on average"),
+		ProductionDistribution.CloudsPerClusterMean, 10.0f);
+	TestEqual(TEXT("A2.4 freezes the accepted member-count variance"),
+		ProductionDistribution.CloudsPerClusterVariance, 64.0f);
+	const TArray<int32> ProductionMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			CloudFieldSeed, ProductionDistribution);
+	int32 ProductionBackgroundClouds = 0;
+	for (const int32 Count : ProductionMemberCounts)
+	{
+		ProductionBackgroundClouds += Count;
+	}
+	TestEqual(TEXT("The production seed has the frozen background-cloud identity"),
+		ProductionBackgroundClouds,
+		FABTST4LowPolyCloudPrototype::GlobalIslandCount);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> LogicalClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			CloudFieldSeed,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM);
+	TestEqual(TEXT("A2.2 publishes a global logical cloud field"),
+		LogicalClouds.Num(), FABTST4LowPolyCloudPrototype::IslandCount);
+	const uint64 LogicalCloudHash =
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+			LogicalClouds);
+	TestTrue(TEXT("Logical cloud layout identity is non-zero"),
+		LogicalCloudHash != 0);
+	TestEqual(TEXT("Logical cloud layout identity is deterministic"),
+		LogicalCloudHash,
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+			FABTST4LowPolyCloudPrototype::BuildDefinitions(
+				Environment.PlanetCenterWorld,
+				Environment.PlanetRadiusCM,
+				CloudFieldSeed,
+				FVector(Environment.SunDirectionToSunWorld),
+				Environment.CloudBaseAltitudeCM,
+				Environment.CloudLayerHeightCM)));
+	const FVector AlternateSunDirection = FVector(
+		-0.72, 0.41, 0.56).GetSafeNormal();
+	const TArray<FABTST4LowPolyCloudIslandDefinition> AlternateSunClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			CloudFieldSeed,
+			AlternateSunDirection,
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM);
+	TestEqual(TEXT("Alternate sun keeps the complete field contract"),
+		AlternateSunClouds.Num(), LogicalClouds.Num());
+	for (int32 Index = 0;
+		Index < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+		++Index)
+	{
+		TestFalse(TEXT("Background cloud is not a terminator diagnostic member"),
+			LogicalClouds[Index].bTerminatorMegaCluster);
+		TestTrue(TEXT("Background placement is independent of the sun direction"),
+			LogicalClouds[Index].CenterWorld.Equals(
+				AlternateSunClouds[Index].CenterWorld, 0.01)
+			&& LogicalClouds[Index].ExtentsCM.Equals(
+				AlternateSunClouds[Index].ExtentsCM, 0.01)
+			&& LogicalClouds[Index].IdentityHash
+				== AlternateSunClouds[Index].IdentityHash);
+	}
+	bool bMegaClusterMovedWithSun = false;
+	for (int32 Index = FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+		Index < LogicalClouds.Num(); ++Index)
+	{
+		bMegaClusterMovedWithSun |= !LogicalClouds[Index].CenterWorld.Equals(
+			AlternateSunClouds[Index].CenterWorld, 1.0);
+	}
+	TestTrue(TEXT("The terminator acceptance cluster follows the sun-relative frame"),
+		bMegaClusterMovedWithSun);
+
+	TSet<int32> LogicalCloudIndices;
+	TSet<uint64> LogicalCloudIdentities;
+	uint8 OccupiedOctants = 0;
+	int32 CloudletCount = 0;
+	int32 TerminatorMegaCloudCount = 0;
+	FVector TerminatorDirectionSum = FVector::ZeroVector;
+	double MinimumMegaSolarHeight = 1.0;
+	double MaximumMegaSolarHeight = -1.0;
+	double MinimumHorizontalArea = TNumericLimits<double>::Max();
+	double MaximumHorizontalArea = 0.0;
+	for (const FABTST4LowPolyCloudIslandDefinition& LogicalCloud
+		: LogicalClouds)
+	{
+		LogicalCloudIndices.Add(LogicalCloud.LogicalCloudIndex);
+		LogicalCloudIdentities.Add(LogicalCloud.LogicalCloudIdentityHash);
+		CloudletCount += LogicalCloud.CloudletCount;
+		const double HorizontalArea = LogicalCloud.ExtentsCM.X
+			* LogicalCloud.ExtentsCM.Y;
+		MinimumHorizontalArea = FMath::Min(MinimumHorizontalArea, HorizontalArea);
+		MaximumHorizontalArea = FMath::Max(MaximumHorizontalArea, HorizontalArea);
+		const FVector Up = LogicalCloud.RadialUp;
+		if (!LogicalCloud.bTerminatorMegaCluster)
+		{
+			const uint8 Octant = (Up.X >= 0.0 ? 1u : 0u)
+				| (Up.Y >= 0.0 ? 2u : 0u)
+				| (Up.Z >= 0.0 ? 4u : 0u);
+			OccupiedOctants |= static_cast<uint8>(1u << Octant);
+		}
+		if (LogicalCloud.bTerminatorMegaCluster)
+		{
+			++TerminatorMegaCloudCount;
+			TerminatorDirectionSum += LogicalCloud.RadialUp;
+			const double SolarHeight = FVector::DotProduct(
+				LogicalCloud.RadialUp,
+				FVector(Environment.SunDirectionToSunWorld));
+			MinimumMegaSolarHeight = FMath::Min(
+				MinimumMegaSolarHeight, SolarHeight);
+			MaximumMegaSolarHeight = FMath::Max(
+				MaximumMegaSolarHeight, SolarHeight);
+			TestTrue(TEXT("Every mega-cluster centre remains close to the terminator"),
+				FMath::Abs(SolarHeight)
+					<= FMath::Sin(FMath::DegreesToRadians(10.0)));
+		}
+	}
+	TestEqual(TEXT("Logical cloud indices are unique"),
+		LogicalCloudIndices.Num(), LogicalClouds.Num());
+	TestEqual(TEXT("Logical cloud hashes are unique"),
+		LogicalCloudIdentities.Num(), LogicalClouds.Num());
+	TestEqual(TEXT("The accepted field publishes its total cloudlet budget"),
+		CloudletCount, FABTST4LowPolyCloudPrototype::TotalCloudletCount);
+	TestTrue(TEXT("Cloud islands have materially different sizes"),
+		MaximumHorizontalArea >= MinimumHorizontalArea * 2.0);
+	TestEqual(TEXT("The global field occupies all eight planet octants"),
+		OccupiedOctants, static_cast<uint8>(0xff));
+	TestTrue(TEXT("The global field includes nearby cloud pairs for fusion"),
+		FABTST4LowPolyCloudPrototype::CountCloudFusionPairs(LogicalClouds)
+			>= FABTST4LowPolyCloudPrototype::WeatherSystemCount);
+	TestTrue(TEXT("Every default background weather cluster is one connected visible mass"),
+		FABTST4LowPolyCloudPrototype::
+			AreBackgroundWeatherClusterEnvelopesConnected(LogicalClouds));
+	TestEqual(TEXT("A2.2 appends seven logical members for the mega cluster"),
+		TerminatorMegaCloudCount,
+		FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount);
+	TestEqual(TEXT("The role helper observes the same mega-cluster count"),
+		FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
+			LogicalClouds),
+		TerminatorMegaCloudCount);
+	const FVector MeanTerminatorDirection = TerminatorDirectionSum.GetSafeNormal();
+	TestTrue(TEXT("The mega-cluster mean remains on the day/night boundary"),
+		FMath::Abs(FVector::DotProduct(
+			MeanTerminatorDirection,
+			FVector(Environment.SunDirectionToSunWorld))) <= 0.03);
+	TestTrue(TEXT("The mega cluster visibly straddles both day and night"),
+		MinimumMegaSolarHeight < -0.05 && MaximumMegaSolarHeight > 0.05);
+	const double MegaClusterSpanDegrees = FABTST4LowPolyCloudPrototype::
+		ComputeTerminatorMegaClusterAngularSpanDegrees(LogicalClouds);
+	TestTrue(
+		FString::Printf(
+			TEXT("The mega-cluster full envelope is approximately 30 degrees (Actual=%.2f)"),
+			MegaClusterSpanDegrees),
+		MegaClusterSpanDegrees >= 27.0 && MegaClusterSpanDegrees <= 33.0);
+	TestTrue(TEXT("The seven mega-cluster envelopes form one connected mass"),
+		FABTST4LowPolyCloudPrototype::
+			IsTerminatorMegaClusterEnvelopeConnected(LogicalClouds));
+	TestEqual(TEXT("Deep night completely gates daytime cloud whitening"),
+		FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(-1.0f),
+		0.0f);
+	TestEqual(TEXT("Full daylight retains the accepted cloud whitening"),
+		FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(1.0f),
+		1.0f);
+	TestTrue(TEXT("Twilight cloud lighting changes continuously and monotonically"),
+		FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(-0.05f)
+			< FABTST4LowPolyCloudPrototype::ComputeLocalDaylightBlend(0.05f));
+	TestTrue(TEXT("Any two logical clouds suppress their mutual outline"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudCompositeStencil, CloudCompositeStencil));
+	TestFalse(TEXT("Cloud-to-world outline remains visible"),
+		FABTSStylizedRenderingContract::
+			ShouldSuppressInternalOutlineBetweenStencilValues(
+				CloudCompositeStencil, 1));
+
+	FABTST4CloudClusterDistributionParameters TunedDistribution;
+	TunedDistribution.ClusterCount = 18;
+	TunedDistribution.CloudsPerClusterMean = 8.0f;
+	TunedDistribution.CloudsPerClusterVariance = 36.0f;
+	const TArray<int32> TunedMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			0xA2401234u, TunedDistribution);
+	const TArray<int32> RepeatedMemberCounts =
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			0xA2401234u, TunedDistribution);
+	int32 TunedMemberTotal = 0;
+	for (const int32 Count : TunedMemberCounts)
+	{
+		TunedMemberTotal += Count;
+		TestTrue(TEXT("Every tunable global cluster keeps 1..64 members"),
+			Count >= 1 && Count <= 64);
+	}
+	TestEqual(TEXT("Explicit cluster count is not derived from member size"),
+		TunedMemberCounts.Num(), TunedDistribution.ClusterCount);
+	TestTrue(TEXT("Tuning can exceed the legacy A2.2 24-cloud baseline"),
+		TunedMemberTotal > 24);
+	TestTrue(TEXT("Tuning remains inside the fail-closed background budget"),
+		TunedMemberTotal <= FABTST4LowPolyCloudPrototype::MaxGlobalIslandCount);
+	TestTrue(TEXT("Tunable grouping is deterministic for the same seed"),
+		TunedMemberCounts == RepeatedMemberCounts);
+	FABTST4CloudClusterDistributionParameters OverBudgetDistribution;
+	OverBudgetDistribution.ClusterCount = 64;
+	OverBudgetDistribution.CloudsPerClusterMean = 64.0f;
+	OverBudgetDistribution.CloudsPerClusterVariance = 1024.0f;
+	TestTrue(TEXT("Pathological input fails closed instead of flooding PIE"),
+		FABTST4LowPolyCloudPrototype::BuildGlobalClusterMemberCounts(
+			0xA2401234u, OverBudgetDistribution).IsEmpty());
+	const TArray<FABTST4LowPolyCloudIslandDefinition> TunedClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			0xA2401234u,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM,
+			TunedDistribution);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> RepeatedTunedClouds =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			Environment.PlanetCenterWorld,
+			Environment.PlanetRadiusCM,
+			0xA2401234u,
+			FVector(Environment.SunDirectionToSunWorld),
+			Environment.CloudBaseAltitudeCM,
+			Environment.CloudLayerHeightCM,
+			TunedDistribution);
+	TestEqual(TEXT("A2.4 total clouds follow explicit clusters and sampled members"),
+		TunedClouds.Num(), TunedMemberTotal
+			+ FABTST4LowPolyCloudPrototype::TerminatorMegaClusterIslandCount);
+	TestEqual(TEXT("A2.4 tuned layout hash is deterministic"),
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(TunedClouds),
+		FABTST4LowPolyCloudPrototype::ComputeLogicalCloudLayoutHash(
+			RepeatedTunedClouds));
+	for (int32 Index = 0; Index < TunedMemberTotal; ++Index)
+	{
+		const FABTST4LowPolyCloudIslandDefinition& Cloud = TunedClouds[Index];
+		TestTrue(TEXT("Every tuned background cloud publishes grouping metadata"),
+			Cloud.WeatherClusterIndex >= 0
+			&& Cloud.WeatherClusterIndex < TunedMemberCounts.Num()
+			&& Cloud.WeatherClusterMemberCount
+				== TunedMemberCounts[Cloud.WeatherClusterIndex]
+			&& Cloud.WeatherClusterMemberIndex >= 0
+			&& Cloud.WeatherClusterMemberIndex
+				< Cloud.WeatherClusterMemberCount);
+	}
+	TestTrue(TEXT("Every tuned background weather cluster is one connected visible mass"),
+		FABTST4LowPolyCloudPrototype::
+			AreBackgroundWeatherClusterEnvelopesConnected(TunedClouds));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSToonT2AViewPolicyTest,
 	"ABTS.Rendering.Toon.T2A.ViewPolicy",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -322,7 +755,8 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 	for (int32 ViewIndex = static_cast<int32>(EABTSStylizedViewClass::MainWorld);
-		ViewIndex <= static_cast<int32>(EABTSStylizedViewClass::FinaleRemotePreview);
+		ViewIndex <= static_cast<int32>(
+			EABTSStylizedViewClass::FinaleCinematicCapture);
 		++ViewIndex)
 	{
 		const EABTSStylizedViewClass ViewClass =
@@ -345,6 +779,21 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 		TEXT("Main view consumes the active runtime profile"),
 		static_cast<int32>(MainPolicy.Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("Main view keeps surface and environment profiles paired"),
+		static_cast<int32>(MainPolicy.EnvironmentProfile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("A ground or atmospheric finale stage keeps GroundDay"),
+		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			false, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestEqual(TEXT("Only a deep-space finale stage overrides the configured profile"),
+		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			true, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(TEXT("Recovery restores the configured profile deterministically"),
+		static_cast<int32>(FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+			false, EABTSStylizedRenderProfile::GroundDay)),
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
 	TestTrue(TEXT("Main view applies tone"), MainPolicy.bApplyTone);
 	TestTrue(TEXT("Main view applies outline"), MainPolicy.bApplyOutline);
 	TestTrue(TEXT("Main view permits selective stencil"), MainPolicy.bAllowSelectiveStencil);
@@ -357,33 +806,111 @@ bool FABTSToonT2AViewPolicyTest::RunTest(const FString& Parameters)
 		FABTSStylizedRenderingContract::IsViewClassImplemented(
 			EABTSStylizedViewClass::SatelliteLandingPreview));
 
+	const FABTSStylizedViewPolicy GroundPreviewPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::GroundLandingPreview);
 	TestEqual(
 		TEXT("Ground preview has a frozen ground profile"),
-		static_cast<int32>(
-			FABTSStylizedRenderingContract::ResolveViewPolicy(
-				EABTSStylizedViewClass::GroundLandingPreview).Profile),
+		static_cast<int32>(GroundPreviewPolicy.Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
+	TestTrue(
+		TEXT("Ground preview consumes the production world lighting"),
+		GroundPreviewPolicy.bUseWorldLighting);
+	TestFalse(
+		TEXT("Ground preview retains the analytic GroundDay background"),
+		GroundPreviewPolicy.bReplaceEnvironmentBackground);
 	TestEqual(
-		TEXT("Satellite preview has a frozen satellite profile"),
+		TEXT("Satellite preview surface uses the main GroundDay profile"),
 		static_cast<int32>(
 			FABTSStylizedRenderingContract::ResolveViewPolicy(
 				EABTSStylizedViewClass::SatelliteLandingPreview).Profile),
-		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
+		static_cast<int32>(EABTSStylizedRenderProfile::GroundDay));
 	const FABTSStylizedViewPolicy SatellitePolicy =
 		FABTSStylizedRenderingContract::ResolveViewPolicy(
 			EABTSStylizedViewClass::SatelliteLandingPreview);
-	TestFalse(
-		TEXT("Satellite BaseColor preview does not re-quantize lighting"),
+	TestTrue(
+		TEXT("Satellite preview uses the same toon tone as the main ground view"),
 		SatellitePolicy.bApplyTone);
 	TestTrue(
-		TEXT("Satellite BaseColor preview keeps a thin outline layer"),
+		TEXT("Satellite preview keeps a thin outline layer"),
 		SatellitePolicy.bApplyOutline);
+	TestTrue(
+		TEXT("Satellite preview consumes the production world lighting"),
+		SatellitePolicy.bUseWorldLighting);
+	TestTrue(
+		TEXT("Satellite preview replaces the ground atmosphere with deep space"),
+		SatellitePolicy.bReplaceEnvironmentBackground);
+	TestEqual(
+		TEXT("Satellite preview background formally consumes SatelliteGuide"),
+		static_cast<int32>(SatellitePolicy.EnvironmentProfile),
+		static_cast<int32>(EABTSStylizedRenderProfile::SatelliteGuide));
+	const AABTSM101LandingPreviewCamera* PreviewCameraCDO =
+		GetDefault<AABTSM101LandingPreviewCamera>();
+	TestNotNull(TEXT("Landing preview camera CDO exists"), PreviewCameraCDO);
+	if (PreviewCameraCDO != nullptr)
+	{
+		const USceneCaptureComponent2D* Capture =
+			PreviewCameraCDO->GetSceneCaptureComponent();
+		TestNotNull(TEXT("Landing preview capture component exists"), Capture);
+		if (Capture != nullptr)
+		{
+			TestTrue(
+				TEXT("Landing preview preserves temporal rendering state"),
+				Capture->bAlwaysPersistRenderingState);
+			TestFalse(
+				TEXT("Landing preview remains bounded manual capture"),
+				Capture->bCaptureEveryFrame);
+		}
+	}
+	const FTransform StablePreviewPose(
+		FRotator(0.0f, 3.0f, 0.0f),
+		FVector(120.0f, 0.0f, 0.0f));
+	TestFalse(
+		TEXT("Small landing-preview aim changes preserve temporal history"),
+		AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+			FTransform::Identity,
+			StablePreviewPose,
+			1200.0f));
+	TestTrue(
+		TEXT("Large landing-preview target jumps reset temporal history"),
+		AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+			FTransform::Identity,
+			FTransform(
+				FRotator::ZeroRotator,
+				FVector(800.0f, 0.0f, 0.0f)),
+			1200.0f));
+	TestTrue(
+		TEXT("Large landing-preview orientation jumps reset temporal history"),
+		AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+			FTransform::Identity,
+			FTransform(FRotator(0.0f, 20.0f, 0.0f)),
+			1200.0f));
 	TestEqual(
 		TEXT("Finale preview has a frozen finale profile"),
 		static_cast<int32>(
 			FABTSStylizedRenderingContract::ResolveViewPolicy(
 				EABTSStylizedViewClass::FinaleRemotePreview).Profile),
 		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	const FABTSStylizedViewPolicy CinematicCapturePolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::FinaleCinematicCapture);
+	TestEqual(
+		TEXT("Finale recording uses the frozen finale profile"),
+		static_cast<int32>(CinematicCapturePolicy.Profile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestEqual(
+		TEXT("Finale recording background uses the frozen finale environment"),
+		static_cast<int32>(CinematicCapturePolicy.EnvironmentProfile),
+		static_cast<int32>(EABTSStylizedRenderProfile::FinaleSpace));
+	TestTrue(
+		TEXT("Finale recording applies tone"),
+		CinematicCapturePolicy.bApplyTone);
+	TestTrue(
+		TEXT("Finale recording applies outline"),
+		CinematicCapturePolicy.bApplyOutline);
+	TestTrue(
+		TEXT("Finale recording permits selective stencil"),
+		CinematicCapturePolicy.bAllowSelectiveStencil);
 	TestFalse(
 		TEXT("Unknown view classes fail closed"),
 		FABTSStylizedRenderingContract::IsViewClassValid(
@@ -443,6 +970,25 @@ bool FABTSToonT2B1SceneCaptureRegistryTest::RunTest(
 		TEXT("Replacement does not accumulate extensions"),
 		Capture->SceneViewExtensions.Num(),
 		1);
+	TestTrue(
+		TEXT("Finale cinematic capture registers explicitly"),
+		FABTSStylizedSceneCaptureRegistry::Register(
+			*Capture,
+			EABTSStylizedViewClass::FinaleCinematicCapture));
+	TestTrue(
+		TEXT("Finale cinematic class can be diagnosed"),
+		FABTSStylizedSceneCaptureRegistry::TryGetViewClass(
+			*Capture,
+			ViewClass));
+	TestEqual(
+		TEXT("Finale cinematic class is preserved"),
+		static_cast<int32>(ViewClass),
+		static_cast<int32>(
+			EABTSStylizedViewClass::FinaleCinematicCapture));
+	TestEqual(
+		TEXT("Second replacement still owns one extension"),
+		Capture->SceneViewExtensions.Num(),
+		1);
 	FABTSStylizedSceneCaptureRegistry::Unregister(*Capture);
 	TestEqual(
 		TEXT("Unregister removes the Integration extension"),
@@ -454,6 +1000,129 @@ bool FABTSToonT2B1SceneCaptureRegistryTest::RunTest(
 			*Capture,
 			ViewClass));
 	FABTSStylizedSceneCaptureRegistry::Reset();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSToonT4A23BoundedTraversalRelationTest,
+	"ABTS.Rendering.Toon.T4A2_3.BoundedTraversalRelation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSToonT4A23BoundedTraversalRelationTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FABTST4LowPolyCloudIslandDefinition Cloud;
+	Cloud.IslandIndex = 0;
+	Cloud.LogicalCloudIndex = 0;
+	Cloud.CloudletCount = FABTST4LowPolyCloudPrototype::CloudletsPerIsland;
+	Cloud.Seed = 12345u;
+	Cloud.PlanetCenterWorld = FVector::ZeroVector;
+	Cloud.CenterWorld = FVector(0.0, 0.0, 12000.0);
+	Cloud.RadialUp = FVector::UpVector;
+	Cloud.TangentX = FVector::ForwardVector;
+	Cloud.TangentY = FVector::RightVector;
+	Cloud.ExtentsCM = FVector(1800.0, 1500.0, 700.0);
+	Cloud.LogicalCloudIdentityHash = 0x1234ull;
+	Cloud.IdentityHash = 0x5678ull;
+	TestTrue(TEXT("Synthetic traversal cloud validates"), Cloud.IsValid());
+
+	const FABTST4CloudTraversalRelation BirdInside =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			FVector(-3200.0, 0.0, 12000.0),
+			Cloud.CenterWorld,
+			160.0f);
+	TestTrue(TEXT("Bird-inside case activates"), BirdInside.bTraversalActive);
+	TestTrue(TEXT("Bird-inside case identifies the bird"), BirdInside.bBirdInside);
+	TestTrue(TEXT("Bird-inside case has continuous traversal weight"),
+		BirdInside.TraversalWeight > 0.99f);
+	TestFalse(TEXT("Bird-inside case keeps the camera outside"),
+		BirdInside.bCameraInside);
+
+	const FABTST4CloudTraversalRelation CameraInside =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			Cloud.CenterWorld,
+			FVector(3200.0, 0.0, 12000.0),
+			160.0f);
+	TestTrue(TEXT("Camera-inside case activates"), CameraInside.bTraversalActive);
+	TestTrue(TEXT("Camera-inside case identifies the camera"),
+		CameraInside.bCameraInside);
+	TestTrue(TEXT("Camera-inside case has full continuous envelope depth"),
+		CameraInside.CameraInteriorWeight > 0.99f);
+
+	const FABTST4CloudTraversalRelation Between =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			FVector(-3200.0, 0.0, 12000.0),
+			FVector(3200.0, 0.0, 12000.0),
+			160.0f);
+	TestTrue(TEXT("Cloud-between case activates"), Between.bTraversalActive);
+	TestTrue(TEXT("Cloud-between case identifies the segment occluder"),
+		Between.bCloudBetweenCameraAndBird);
+	TestTrue(TEXT("Cloud-between closest point is interior to the segment"),
+		Between.ClosestSegmentAlpha > 0.1f
+			&& Between.ClosestSegmentAlpha < 0.9f);
+	TestTrue(TEXT("Cloud-between case has continuous corridor weight"),
+		Between.CorridorInteriorWeight > 0.99f);
+
+	const FABTST4CloudTraversalRelation BothInside =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			Cloud.CenterWorld - FVector(120.0, 0.0, 0.0),
+			Cloud.CenterWorld + FVector(120.0, 0.0, 0.0),
+			160.0f);
+	TestTrue(TEXT("Both-inside case activates"), BothInside.bTraversalActive);
+	TestTrue(TEXT("Both-inside case keeps both endpoint flags"),
+		BothInside.bCameraInside && BothInside.bBirdInside);
+
+	const FABTST4CloudTraversalRelation Clear =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			FVector(-3200.0, 3600.0, 12000.0),
+			FVector(3200.0, 3600.0, 12000.0),
+			160.0f);
+	TestTrue(TEXT("Clear relation remains structurally valid"), Clear.IsValid());
+	TestFalse(TEXT("Unrelated cloud remains fully opaque"),
+		Clear.bTraversalActive);
+	TestTrue(TEXT("Unrelated cloud has zero continuous traversal weight"),
+		Clear.TraversalWeight <= KINDA_SMALL_NUMBER);
+
+	const FABTST4CloudTraversalRelation NearBoundary =
+		FABTST4LowPolyCloudPrototype::EvaluateTraversalRelation(
+			Cloud,
+			Cloud.CenterWorld + FVector(0.0, 0.0, 635.0),
+			FVector(3200.0, 0.0, 12000.0),
+			0.0f,
+			1.0f);
+	TestTrue(TEXT("Camera boundary exposes a fractional rather than binary depth"),
+		NearBoundary.CameraInteriorWeight > 0.0f
+			&& NearBoundary.CameraInteriorWeight < 1.0f);
+
+	// Regression for the moving four-bird formation: the former one-sphere
+	// contract was clamped to 420 cm and could not cover both endpoints.  The
+	// material now receives four independent visual spheres, so every rendered
+	// bird remains inside a hard-protection core even when the formation spans
+	// well beyond the old diameter.
+	const TArray<FSphere> MovingFormation = {
+		FSphere(FVector(-900.0, 0.0, 12000.0), 220.0),
+		FSphere(FVector(-300.0, 0.0, 12000.0), 220.0),
+		FSphere(FVector(300.0, 0.0, 12000.0), 220.0),
+		FSphere(FVector(900.0, 0.0, 12000.0), 220.0)};
+	TestFalse(
+		TEXT("The retired 420 cm party sphere cannot protect a formation endpoint"),
+		FSphere(FVector(0.0, 0.0, 12000.0), 420.0).IsInside(
+			MovingFormation[0].Center));
+	for (int32 BirdIndex = 0; BirdIndex < MovingFormation.Num(); ++BirdIndex)
+	{
+		TestTrue(
+			*FString::Printf(
+				TEXT("Moving bird %d owns an independent hard-protection core"),
+				BirdIndex),
+			MovingFormation[BirdIndex].IsInside(
+				MovingFormation[BirdIndex].Center));
+	}
 	return true;
 }
 

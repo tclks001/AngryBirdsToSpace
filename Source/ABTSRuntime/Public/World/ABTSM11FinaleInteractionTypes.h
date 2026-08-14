@@ -18,6 +18,22 @@ enum class EABTSM11FinaleInteractionState : uint8
 	Recovering
 };
 
+/**
+ * Read-only M11 narrative fact consumed by Integration environment assembly.
+ *
+ * This is deliberately separate from IsFinaleActive(): aiming needs the
+ * finale HUD/input lease while the main world must still present its surface
+ * environment. M11 publishes only the phase; it never selects a rendering
+ * profile or changes remote-preview presentation through this contract.
+ */
+enum class EABTSM11FinaleEnvironmentStage : uint8
+{
+	GroundLaunch = 0,
+	AtmosphereTransition = 1,
+	DeepSpace = 2,
+	Recovering = 3
+};
+
 enum class EABTSM11PrefixStabilizerPhase : uint8
 {
 	Free = 0,
@@ -64,6 +80,21 @@ enum class EABTSM11FailureReason : uint8
 ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
 	EABTSM11FinaleInteractionState State);
 
+/**
+ * Pure resolver for the read-only finale environment stage.
+ *
+ * A launched or still-visible failed attempt enters DeepSpace only after the
+ * immutable released trajectory reaches AssistEnter(1). Missing or invalid
+ * event evidence stays in AtmosphereTransition (fail closed) rather than
+ * selecting deep space. The interaction state changes to Recovering exactly
+ * when the failure timeline reaches full black.
+ */
+ABTSRUNTIME_API EABTSM11FinaleEnvironmentStage
+ABTSM11ResolveFinaleEnvironmentStage(
+	EABTSM11FinaleInteractionState State,
+	double PlaybackElapsedSeconds,
+	const FABTSM11TrajectoryResult* ReleasedTrajectoryResult);
+
 /** Frozen M11 copy of the existing M6 pull presentation/input constants. */
 struct ABTSRUNTIME_API FABTSM11M6InputParityProfile
 {
@@ -73,6 +104,8 @@ struct ABTSRUNTIME_API FABTSM11M6InputParityProfile
 	static constexpr double MaximumAimPlaneOffsetCM = 260.0;
 	static constexpr double LaunchTargetLiftCM = 65.0;
 	static constexpr double BirdInPouchOffsetCM = 20.0;
+	/** Finale-only extra clearance along the pouch launch axis. */
+	static constexpr double SpaceFormationPouchForwardClearanceCM = 25.0;
 	static constexpr double PouchPickRadiusPixels = 125.0;
 };
 
@@ -300,6 +333,11 @@ struct ABTSRUNTIME_API FABTSM11PlaybackPlan
 		const FABTSM11FinaleLayoutPreset& Preset,
 		const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
 		const FABTSM11PrefixClassification& Classification);
+	bool BuildCandidatePresentationContact(
+		const FABTSM11FinaleLayoutPreset& Preset,
+		const FABTSM11TrajectoryResult& ReleasedQualifiedResult,
+		const FABTSM11PrefixClassification& Classification,
+		const FABTSM11TerminalTransferContract& TransferContract = {});
 	bool Sample(
 		double TimeSeconds,
 		FVector3d& OutPositionCM,
@@ -338,6 +376,7 @@ public:
 	bool IsActive() const;
 	bool IsComplete() const;
 	double GetBlackoutAlpha() const;
+	double GetSecondsUntilRestore() const;
 	EABTSM11FailurePresentationPhase GetPhase() const;
 
 private:
@@ -419,6 +458,19 @@ ABTSRUNTIME_API double ABTSM11ResolveFailurePresentationEndTime(
 	const FABTSM11TrajectoryResult& Result,
 	const FABTSM11PlaybackPlan& Plan,
 	double BirdClearanceCM);
+
+/**
+ * Schedules the failure fade so immutable route playback and its camera
+ * director reach the presentation endpoint on the exact full-black recovery
+ * boundary.
+ */
+ABTSRUNTIME_API bool ABTSM11ResolveFailurePresentationSchedule(
+	double PlaybackStartTimeSeconds,
+	double PlaybackEndTimeSeconds,
+	double PlaybackTimeScale,
+	const FABTSM11FailurePresentationConfig& DesiredConfig,
+	double& OutFailureStartTimeSeconds,
+	FABTSM11FailurePresentationConfig& OutScheduledConfig);
 
 /** Shared circular-panel clipping used by every M11 diagram primitive. */
 ABTSRUNTIME_API bool ABTSM11ClipDiagramSegmentToUnitCircle(

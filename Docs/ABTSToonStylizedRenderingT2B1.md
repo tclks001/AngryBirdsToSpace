@@ -1,6 +1,6 @@
 # ABTS 三渲二 T2-B1 选择性语义与画中画接线
 
-> 状态：2026-08-05 已通过自动门、真实 RHI 与用户可见 PIE 验收；M3、M11 及共享鸟/当前弹弓已接入。首次 PIE 发现的地面 PIP 暗部噪点已由实现版本 5 的低信号稳定修复消除并通过复验。M7 因 `Beam-C3` 长任务仍在独立工作树中，本阶段明确保持 fail closed，建筑暂时只消费 T2-A 的全局 Depth/Normal 描边。
+> 状态：2026-08-05 已通过自动门、真实 RHI 与用户可见 PIE 验收；M3、M11 及共享鸟/当前弹弓已接入。首次 PIE 发现的地面 PIP 暗部噪点已由实现版本 5 的低信号稳定修复消除并通过复验；实现版本 6 又为 M11 命令行录制器增加了显式 `FinaleCinematicCapture` 视图。M7 因 `Beam-C3` 长任务仍在独立工作树中，本阶段明确保持 fail closed，建筑暂时只消费 T2-A 的全局 Depth/Normal 描边。
 >
 > 上游：[三渲二总设计](ABTSToonStylizedRenderingDesign.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T0 自动视觉基线](ABTSToonVisualCaptureT0.md)
 
@@ -40,8 +40,11 @@ M7 ── 无适配器，fail closed
 | 主星落点 | `GroundLandingPreview` | `GroundDay` | Tone + Outline + 选择性 Stencil |
 | 月面落点 | `SatelliteLandingPreview` | `SatelliteGuide` | Outline + 选择性 Stencil；保留既有 `SCS_BaseColor`，不重复色调量化 |
 | 终局远端预览 | `FinaleRemotePreview` | `FinaleSpace` | Tone + Outline + 选择性 Stencil |
+| 终局命令行录制 | `FinaleCinematicCapture` | `FinaleSpace` | Tone + Outline + 选择性 Stencil；仅由显式 M11 录制 Runner 注册 |
 
-主视图的全局扩展仍拒绝所有 Scene Capture；上述效果只来自对应捕获组件的直接注册。未知捕获、反射捕获和 Planar Reflection 不会被风格系统自动接管。月面 PIP 继续使用此前为背光可读性确定的 BaseColor 路径，因此本阶段只叠加轮廓，不把它强制改回最终光照颜色。
+主视图的全局扩展仍拒绝所有 Scene Capture；上述四类效果只来自对应捕获组件的直接注册。未知捕获、反射捕获和 Planar Reflection 不会被风格系统自动接管。月面 PIP 继续使用此前为背光可读性确定的 BaseColor 路径，因此本阶段只叠加轮廓，不把它强制改回最终光照颜色。
+
+`FinaleCinematicCapture` 不放宽全局 `bIsSceneCapture` 门，也不复用 `FinaleRemotePreview` 猜测录制器身份。M11 Runner 在首帧捕获前对自己持有的组件直接注册，在完成、失败或 `EndPlay` 时注销；未传入 `-ABTSM11CameraCapture` 时不会创建该视图。
 
 落点相机在切换 Preview Subject 时立即注册/注销视图，避免“首帧先捕获、下一 Tick 才接线”的闪帧；M11 在主动 `CaptureScene` 前同样确保远端视图已注册。
 

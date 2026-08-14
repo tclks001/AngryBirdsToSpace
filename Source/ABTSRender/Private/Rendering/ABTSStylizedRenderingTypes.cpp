@@ -11,12 +11,15 @@ namespace ABTSStylizedStencilAllocation
 	constexpr uint8 SatelliteTarget = 5;
 	constexpr uint8 FinalePlanet = 6;
 	constexpr uint8 FinaleUFO = 7;
+	constexpr uint8 CloudComposite = 8;
 }
 
 bool FABTSStylizedViewPolicy::IsValid() const
 {
 	return Profile >= EABTSStylizedRenderProfile::GroundDay
 		&& Profile <= EABTSStylizedRenderProfile::FinaleSpace
+		&& EnvironmentProfile >= EABTSStylizedRenderProfile::GroundDay
+		&& EnvironmentProfile <= EABTSStylizedRenderProfile::FinaleSpace
 		&& (bApplyTone || bApplyOutline);
 }
 
@@ -31,7 +34,7 @@ bool FABTSStylizedRenderingContract::IsViewClassValid(
 	EABTSStylizedViewClass ViewClass)
 {
 	return ViewClass >= EABTSStylizedViewClass::MainWorld
-		&& ViewClass <= EABTSStylizedViewClass::FinaleRemotePreview;
+		&& ViewClass <= EABTSStylizedViewClass::FinaleGameplayMirrorCapture;
 }
 
 bool FABTSStylizedRenderingContract::RequiresSelectiveStencil(
@@ -68,6 +71,27 @@ uint8 FABTSStylizedRenderingContract::ResolveStencilValueForRenderer(
 	}
 }
 
+uint8 FABTSStylizedRenderingContract::
+	ResolveCloudCompositeStencilValueForRenderer()
+{
+	return ABTSStylizedStencilAllocation::CloudComposite;
+}
+
+bool FABTSStylizedRenderingContract::
+	IsCloudCompositeStencilValueForRenderer(const uint8 StencilValue)
+{
+	return StencilValue == ResolveCloudCompositeStencilValueForRenderer();
+}
+
+bool FABTSStylizedRenderingContract::
+	ShouldSuppressInternalOutlineBetweenStencilValues(
+		uint8 CenterStencilValue,
+		uint8 SampleStencilValue)
+{
+	return CenterStencilValue == SampleStencilValue
+		&& IsCloudCompositeStencilValueForRenderer(CenterStencilValue);
+}
+
 FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 	EABTSStylizedViewClass ViewClass,
 	EABTSStylizedRenderProfile MainWorldProfile)
@@ -77,20 +101,28 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 	{
 	case EABTSStylizedViewClass::GroundLandingPreview:
 		Policy.Profile = EABTSStylizedRenderProfile::GroundDay;
+		Policy.EnvironmentProfile = EABTSStylizedRenderProfile::GroundDay;
 		Policy.bAllowSelectiveStencil = false;
+		Policy.bUseWorldLighting = true;
 		break;
 	case EABTSStylizedViewClass::SatelliteLandingPreview:
-		Policy.Profile = EABTSStylizedRenderProfile::SatelliteGuide;
-		// The lunar landing preview intentionally captures BaseColor so the
-		// far side remains a readable navigation instrument.  Preserve that
-		// lighting-independent palette and only add its thin outline layer.
-		Policy.bApplyTone = false;
+		// Surface exposure/tone deliberately remain GroundDay-equivalent so the
+		// same lunar patch matches an equivalent gameplay camera. Deep space is an
+		// independent empty-background replacement, not a second lighting profile.
+		Policy.Profile = EABTSStylizedRenderProfile::GroundDay;
+		Policy.EnvironmentProfile =
+			EABTSStylizedRenderProfile::SatelliteGuide;
 		Policy.bAllowSelectiveStencil = true;
+		Policy.bUseWorldLighting = true;
+		Policy.bReplaceEnvironmentBackground = true;
 		break;
 	case EABTSStylizedViewClass::FinaleRemotePreview:
+	case EABTSStylizedViewClass::FinaleCinematicCapture:
 		Policy.Profile = EABTSStylizedRenderProfile::FinaleSpace;
+		Policy.EnvironmentProfile = EABTSStylizedRenderProfile::FinaleSpace;
 		Policy.bAllowSelectiveStencil = true;
 		break;
+	case EABTSStylizedViewClass::FinaleGameplayMirrorCapture:
 	case EABTSStylizedViewClass::MainWorld:
 	default:
 		Policy.Profile =
@@ -98,10 +130,26 @@ FABTSStylizedViewPolicy FABTSStylizedRenderingContract::ResolveViewPolicy(
 				&& MainWorldProfile <= EABTSStylizedRenderProfile::FinaleSpace
 			? MainWorldProfile
 			: EABTSStylizedRenderProfile::GroundDay;
+		Policy.EnvironmentProfile = Policy.Profile;
 		Policy.bAllowSelectiveStencil = true;
 		break;
 	}
 	return Policy;
+}
+
+EABTSStylizedRenderProfile
+FABTSStylizedRenderingContract::ResolveMainWorldProfile(
+	const bool bFinaleDeepSpace,
+	const EABTSStylizedRenderProfile ConfiguredProfile)
+{
+	if (bFinaleDeepSpace)
+	{
+		return EABTSStylizedRenderProfile::FinaleSpace;
+	}
+	return ConfiguredProfile >= EABTSStylizedRenderProfile::GroundDay
+		&& ConfiguredProfile <= EABTSStylizedRenderProfile::FinaleSpace
+		? ConfiguredProfile
+		: EABTSStylizedRenderProfile::GroundDay;
 }
 
 bool FABTSStylizedRenderingContract::IsViewClassImplemented(

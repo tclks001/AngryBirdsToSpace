@@ -13,6 +13,8 @@
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
+#include "Rendering/ABTSStylizedMaterialContract.h"
+#include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
@@ -166,6 +168,16 @@ AABTSM3Planet::AABTSM3Planet()
 		TEXT("/Game/StaticMesh/Tree/M_PineTree.M_PineTree"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockAssetMaterial(
 		TEXT("/Game/StaticMesh/Stone/M_Stone.M_Stone"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ForestStylizedMaterialAsset(
+		TEXT("/Game/M3/Toon/Trees/M_ABTS_M3_ToonPine.M_ABTS_M3_ToonPine"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockStylizedMaterialAsset(
+		TEXT("/Game/M3/Toon/Stones/M_ABTS_M3_ToonStone.M_ABTS_M3_ToonStone"));
+	ForestStylizedMaterial = ForestStylizedMaterialAsset.Succeeded()
+		? ForestStylizedMaterialAsset.Object
+		: nullptr;
+	RockStylizedMaterial = RockStylizedMaterialAsset.Succeeded()
+		? RockStylizedMaterialAsset.Object
+		: nullptr;
 
 	ForestHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("ForestHISM"));
 	ForestHISM->SetupAttachment(ContinuousSurface);
@@ -190,20 +202,37 @@ AABTSM3Planet::AABTSM3Planet()
 	if (RockAssetMaterial.Succeeded()) RockHISM->SetMaterial(0, RockAssetMaterial.Object);
 }
 
+bool AABTSM3Planet::ApplyStylizedSurfaceStyle(const bool bStyleEnabled)
+{
+	return TerrainMaterialBridge != nullptr
+		&& TerrainMaterialBridge->ApplyStylizedSurfaceParameters(bStyleEnabled);
+}
+
+bool AABTSM3Planet::TryGetStylizedSurfaceStyleEnabled(float& OutValue) const
+{
+	return TerrainMaterialBridge != nullptr
+		&& TerrainMaterialBridge->TryGetScalarParameterValue(
+			FABTSStylizedMaterialContract::GetStyleEnabledParameterName(),
+			OutValue);
+}
+
 bool AABTSM3Planet::RebuildPlanet()
 {
 	const double RebuildStartSeconds =
 		FPlatformTime::Seconds();
 	LastM3RebuildDurationMS = 0.0;
 	LastMonthlyPresentationBuildDurationMS = 0.0;
-	bMonthlyMaterialRhythmApplied = false;
-	MonthlyMaterialRhythmCellCount = 0;
+	bTerrainBasePaletteApplied = false;
+	TerrainBasePaletteCellCount = 0;
 	MonthlyDecorAccent0InstanceCount = 0;
 	MonthlyDecorAccent1InstanceCount = 0;
 	bM3PresentationReady = false;
 	bMonthlyPresentationPreviewActive = false;
 	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
 	ActiveMonthlyPresentationPreviewCandidateHash = 0;
+	MonthlyPresentationPreviewCellStates.Reset();
+	MonthlyPresentationPreviewEdgeStates.Reset();
+	MonthlyPresentationPreviewVisualField.Reset();
 	ActiveMonthlyFinaleAnchorPreview =
 		FABTSM3MonthlyFinaleAnchorPreview();
 	MonthlyPresentationResult =
@@ -273,19 +302,18 @@ bool AABTSM3Planet::RebuildPlanet()
 			*SatellitePreviewFailure);
 	}
 	BuildM3ContinuousSurface();
-	TArray<FABTSM3CellState> PresentationCellStates;
-	TArray<FABTSM3CellEdgeState> PresentationEdgeStates;
 	const FABTSM3MonthlyCandidatePresentation*
 		PresentationCandidate = nullptr;
-	const bool bPreviewDataReady =
+	bool bPreviewDataReady =
 		TryBuildMonthlyPresentationPreviewData(
-			PresentationCellStates,
-			PresentationEdgeStates,
+			MonthlyPresentationPreviewCellStates,
+			MonthlyPresentationPreviewEdgeStates,
 			PresentationCandidate);
-	FABTSM3TerrainVisualField PresentationVisualField;
 	if (bPreviewDataReady)
 	{
-		PresentationVisualField.Initialize(
+		MonthlyPresentationPreviewVisualField =
+			MakeUnique<FABTSM3TerrainVisualField>();
+		MonthlyPresentationPreviewVisualField->Initialize(
 			PlanetRadiusCM,
 			ResolvedHeightScaleCM,
 			ResolvedWaterDepthCM,
@@ -293,13 +321,27 @@ bool AABTSM3Planet::RebuildPlanet()
 			TerrainBlendWidthCM,
 			SurfaceNormalSmoothingDistanceCM,
 			LogicalCells,
-			PresentationCellStates,
-			PresentationEdgeStates,
+			MonthlyPresentationPreviewCellStates,
+			MonthlyPresentationPreviewEdgeStates,
 			TrailVisualHalfWidthCM,
 			MainRoadVisualHalfWidthCM,
 			StreamVisualHalfWidthCM,
 			ShallowRiverVisualHalfWidthCM,
 			DeepRiverVisualHalfWidthCM);
+		if (!MonthlyPresentationPreviewVisualField->IsReady())
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3R5][Preview] Rejected Candidate=%d Reason=PresentationVisualFieldUnavailable CompatibilityWorldPreserved=1 MonthlyAccepted=0"),
+				ActiveMonthlyPresentationPreviewCandidateId);
+			MonthlyPresentationPreviewCellStates.Reset();
+			MonthlyPresentationPreviewEdgeStates.Reset();
+			MonthlyPresentationPreviewVisualField.Reset();
+			bMonthlyPresentationPreviewActive = false;
+			ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
+			ActiveMonthlyPresentationPreviewCandidateHash = 0;
+			bPreviewDataReady = false;
+			PresentationCandidate = nullptr;
+		}
 	}
 	bool bMaterialReady = false;
 	bool bPresentationReady = bFinaleFrameReady;
@@ -311,25 +353,25 @@ bool AABTSM3Planet::RebuildPlanet()
 			RiverColor, StreamVisualHalfWidthCM, ShallowRiverVisualHalfWidthCM, DeepRiverVisualHalfWidthCM,
 			LogicalCells,
 			bPreviewDataReady
-				? PresentationCellStates
+				? MonthlyPresentationPreviewCellStates
 				: GeneratedCellStates,
 			bPreviewDataReady
-				? PresentationEdgeStates
+				? MonthlyPresentationPreviewEdgeStates
 				: GeneratedEdgeStates,
 			bPreviewDataReady
-				? PresentationVisualField
+				? *MonthlyPresentationPreviewVisualField
 				: *TerrainVisualField,
 			bPreviewDataReady
 				? PresentationCandidate
 				: nullptr);
-		bMonthlyMaterialRhythmApplied =
+		bTerrainBasePaletteApplied =
 			bMaterialReady
 			&& TerrainMaterialBridge->
-				IsMonthlyPresentationRhythmApplied();
-		MonthlyMaterialRhythmCellCount =
+				IsTerrainBasePaletteApplied();
+		TerrainBasePaletteCellCount =
 			bMaterialReady
 			? TerrainMaterialBridge->
-				GetMonthlyPresentationRhythmCellCount()
+				GetTerrainBasePaletteCellCount()
 			: 0;
 		if (!bMaterialReady)
 		{
@@ -338,7 +380,9 @@ bool AABTSM3Planet::RebuildPlanet()
 		}
 	}
 	BuildDecorInstances(
-		bPreviewDataReady ? &PresentationCellStates : nullptr,
+		bPreviewDataReady
+			? &MonthlyPresentationPreviewCellStates
+			: nullptr,
 		bPreviewDataReady ? PresentationCandidate : nullptr);
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M5.2][Collision] ForestHISM=%s RockHISM=%s StaticPhysics=1 DestroyableOutsideLaunch=0 PhysicsBlend=%.1f"),
@@ -705,7 +749,8 @@ AABTSM3Planet::MakeResolvedMonthlyFinaleAnchorConfig() const
 		MonthlyFinaleAnchorConfig;
 	// M11.0's already serialized pair geometry remains the single Planet-side
 	// source while R-5.2 is only a Preview/Test producer.
-	Resolved.SlotSeparationCM = FinaleSpaceSlotSeparationCM;
+	Resolved.SlotSeparationCM = ABTSResolveFinaleSpaceStakeSpacingCM(
+		FinaleSpaceSlotSeparationCM);
 	Resolved.SurfaceOffsetCM = FinaleSpaceSlotSurfaceOffsetCM;
 	return Resolved;
 }
@@ -1836,9 +1881,18 @@ bool AABTSM3Planet::QueryScoutMapTerrainColor(
 	int32* OutCellId) const
 {
 	OutColor = FLinearColor::Black;
-	if (!TerrainVisualField || !TerrainVisualField->IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FABTSM3TerrainVisualField* PresentedVisualField =
+		bMonthlyPresentationPreviewActive
+			? MonthlyPresentationPreviewVisualField.Get()
+			: TerrainVisualField.Get();
+	if (PresentedVisualField == nullptr
+		|| !PresentedVisualField->IsReady()
+		|| UnitDirection.IsNearlyZero())
+	{
+		return false;
+	}
 	int32 ResolvedCellId = INDEX_NONE;
-	const bool bResult = TerrainVisualField->QueryScoutMapColor(
+	const bool bResult = PresentedVisualField->QueryScoutMapColor(
 		UnitDirection, RoadColor, RiverColor, StartCellHint, ResolvedCellId, OutColor);
 	if (OutCellId) *OutCellId = ResolvedCellId;
 	return bResult;
@@ -2367,7 +2421,8 @@ void AABTSM3Planet::BuildBuildingSpawnSites()
 
 		if (Site.TaskType == EABTSM3TaskType::LaunchSite)
 		{
-			const float SafeSeparationCM = FMath::Max(100.0f, FinaleSpaceSlotSeparationCM);
+			const float SafeSeparationCM = ABTSResolveFinaleSpaceStakeSpacingCM(
+				FinaleSpaceSlotSeparationCM);
 			const FVector SlotOrigin = Site.WorldTransform.GetLocation()
 				+ PadUp * FMath::Max(0.0f, FinaleSpaceSlotSurfaceOffsetCM);
 			FinaleLaunchFrame.LayoutVersion = 1;

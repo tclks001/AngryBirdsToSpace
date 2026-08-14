@@ -48,6 +48,43 @@ namespace ABTSToonCaptureTypes
 		}
 		return false;
 	}
+
+	bool ParseNameList(
+		const TCHAR* CommandLine,
+		const TCHAR* Key,
+		TArray<FName>& OutNames,
+		FString* OutFailure)
+	{
+		OutNames.Reset();
+		FString Value;
+		if (!FParse::Value(CommandLine, Key, Value))
+		{
+			return true;
+		}
+		TArray<FString> Tokens;
+		// FParse::Value treats comma as a value terminator. '+' remains inside
+		// one command-line token on every supported launch path.
+		Value.ParseIntoArray(Tokens, TEXT("+"), false);
+		TSet<FName> UniqueNames;
+		for (FString& Token : Tokens)
+		{
+			Token.TrimStartAndEndInline();
+			const FName Name(*Token);
+			if (Name.IsNone() || UniqueNames.Contains(Name))
+			{
+				return Fail(
+					OutFailure,
+					TEXT("Capture filter contains an empty or duplicate name."));
+			}
+			UniqueNames.Add(Name);
+			OutNames.Add(Name);
+		}
+		if (OutNames.IsEmpty())
+		{
+			return Fail(OutFailure, TEXT("Capture filter is empty."));
+		}
+		return true;
+	}
 }
 
 bool FABTSToonVisualCaptureRunConfig::Parse(
@@ -68,11 +105,45 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		FParse::Value(CommandLine, TEXT("ABTSVisualCaptureSuite="), Suite);
 	OutConfig.bEnabled =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0Capture"))
-		|| (bNamedSuite && Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase));
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A3Capture"))
+		|| (bNamedSuite
+			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A3"), ESearchCase::IgnoreCase)));
 	if (!OutConfig.bEnabled)
 	{
 		return true;
 	}
+	const bool bT4A3Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A3Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A3"), ESearchCase::IgnoreCase));
+	const bool bT4A2Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase));
+	const bool bT4A1Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase));
+	const bool bT4A0Requested =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
+		|| (bNamedSuite
+			&& Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase));
+	OutConfig.Suite = bT4A3Requested
+		? EABTSToonVisualCaptureSuite::ToonT4A3
+		: bT4A2Requested
+		? EABTSToonVisualCaptureSuite::ToonT4A2
+		: bT4A1Requested
+			? EABTSToonVisualCaptureSuite::ToonT4A1
+		: bT4A0Requested
+			? EABTSToonVisualCaptureSuite::ToonT4A0
+			: EABTSToonVisualCaptureSuite::ToonT0;
 
 	FString ModeText;
 	if (FParse::Value(CommandLine, TEXT("ABTSToonT0Mode="), ModeText))
@@ -116,6 +187,10 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		OutConfig.GPUProfileSamplesPerVariant);
 	FParse::Value(
 		CommandLine,
+		TEXT("ABTSToonT0ScreenPercentage="),
+		OutConfig.ExpectedScreenPercentage);
+	FParse::Value(
+		CommandLine,
 		TEXT("ABTSToonT0TimeoutSeconds="),
 		OutConfig.TimeoutSeconds);
 	FParse::Value(
@@ -133,6 +208,21 @@ bool FABTSToonVisualCaptureRunConfig::Parse(
 		!FParse::Param(CommandLine, TEXT("ABTSToonT0KeepWorldRunning"));
 	OutConfig.bExitWhenComplete =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0ExitWhenDone"));
+	OutConfig.bDisableLowPolyCloudsForPerformanceBaseline =
+		FParse::Param(CommandLine, TEXT("ABTSToonT4A2DisableClouds"));
+	if (!ABTSToonCaptureTypes::ParseNameList(
+		CommandLine,
+		TEXT("ABTSToonT0PointIds="),
+		OutConfig.RequestedPointIds,
+		OutFailure)
+		|| !ABTSToonCaptureTypes::ParseNameList(
+			CommandLine,
+			TEXT("ABTSToonT0VariantIds="),
+			OutConfig.RequestedVariantIds,
+			OutFailure))
+	{
+		return false;
+	}
 
 	return OutConfig.IsValid(OutFailure);
 }
@@ -168,6 +258,13 @@ bool FABTSToonVisualCaptureRunConfig::IsValid(FString* OutFailure) const
 			OutFailure,
 			TEXT("GPUProfileSamplesPerVariant must be in [1, 10]."));
 	}
+	if (ExpectedScreenPercentage != 0
+		&& (ExpectedScreenPercentage < 25 || ExpectedScreenPercentage > 200))
+	{
+		return ABTSToonCaptureTypes::Fail(
+			OutFailure,
+			TEXT("ExpectedScreenPercentage must be in [25, 200]."));
+	}
 	if (!FMath::IsFinite(TimeoutSeconds)
 		|| TimeoutSeconds < 5.0
 		|| TimeoutSeconds > 1800.0)
@@ -182,7 +279,33 @@ bool FABTSToonVisualCaptureRunConfig::IsValid(FString* OutFailure) const
 			OutFailure,
 			TEXT("ABTSToonT0BuildId is required for source/binary evidence identity."));
 	}
+	if (Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+		&& Mode != EABTSToonVisualCaptureMode::Screenshots)
+	{
+		return ABTSToonCaptureTypes::Fail(
+			OutFailure,
+			TEXT("ToonT4A0 is a screenshot isolation suite; GPU profiling begins in T4-A1."));
+	}
+	if (bDisableLowPolyCloudsForPerformanceBaseline
+		&& (Suite != EABTSToonVisualCaptureSuite::ToonT4A2
+			|| Mode != EABTSToonVisualCaptureMode::GPUProfile))
+	{
+		return ABTSToonCaptureTypes::Fail(
+			OutFailure,
+			TEXT("The cloud-disabled baseline is restricted to ToonT4A2 GPUProfile."));
+	}
 	return true;
+}
+
+bool FABTSToonDiagnosticVariantDefinition::IsValid() const
+{
+	const int32 Mask = static_cast<int32>(PassMask);
+	return !VariantId.IsNone()
+		&& Mask >= static_cast<int32>(EABTSStylizedDiagnosticPassMask::None)
+		&& Mask <= static_cast<int32>(
+			EABTSStylizedDiagnosticPassMask::ToneAndOutline)
+		&& (bStyleEnabled
+			|| PassMask == EABTSStylizedDiagnosticPassMask::None);
 }
 
 bool FABTSToonVisualCapturePointDefinition::IsValid() const
@@ -200,7 +323,11 @@ bool FABTSToonResolvedCapturePoint::IsValid() const
 		&& !CameraWorldTransform.ContainsNaN()
 		&& !LookAtWorld.ContainsNaN()
 		&& SemanticIdentityHash != 0
-		&& CameraPoseHash != 0;
+		&& CameraPoseHash != 0
+		&& EnvironmentSnapshotHash != 0
+		&& (!bRelocateBirdPartyForDiagnostic
+			|| (!DiagnosticBirdPartyCenterWorld.ContainsNaN()
+				&& DiagnosticBirdPartyUp.IsNormalized()));
 }
 
 TArray<FABTSToonVisualCapturePointDefinition>
@@ -237,6 +364,243 @@ FABTSToonVisualCaptureMath::BuildDefaultCatalogue()
 	Finale.FieldOfViewDegrees = 50.0f;
 	Result.Add(Finale);
 
+	return Result;
+}
+
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A0Catalogue()
+{
+	TArray<FABTSToonVisualCapturePointDefinition> Result;
+	Result.Reserve(5);
+
+	auto Add = [&Result](
+		const TCHAR* Id,
+		const EABTSToonVisualCaptureAnchor Anchor,
+		const EABTSStylizedRenderProfile Profile,
+		const float Fov)
+	{
+		FABTSToonVisualCapturePointDefinition Point;
+		Point.PointId = Id;
+		Point.Anchor = Anchor;
+		Point.StyleProfile = Profile;
+		Point.FieldOfViewDegrees = Fov;
+		Result.Add(Point);
+	};
+
+	Add(TEXT("GroundDay"),
+		EABTSToonVisualCaptureAnchor::EnvironmentGroundDay,
+		EABTSStylizedRenderProfile::GroundDay,
+		68.0f);
+	Add(TEXT("GroundDawn"),
+		EABTSToonVisualCaptureAnchor::EnvironmentGroundDawn,
+		EABTSStylizedRenderProfile::GroundDay,
+		68.0f);
+	Add(TEXT("GroundNight"),
+		EABTSToonVisualCaptureAnchor::EnvironmentGroundNight,
+		EABTSStylizedRenderProfile::GroundDay,
+		68.0f);
+	Add(TEXT("HighAltitude"),
+		EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude,
+		EABTSStylizedRenderProfile::SatelliteGuide,
+		54.0f);
+	Add(TEXT("FinaleSpace"),
+		EABTSToonVisualCaptureAnchor::FinaleLayout,
+		EABTSStylizedRenderProfile::FinaleSpace,
+		50.0f);
+	return Result;
+}
+
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
+{
+	TArray<FABTSToonVisualCapturePointDefinition> Result =
+		BuildT4A0Catalogue();
+	FABTSToonVisualCapturePointDefinition TerminatorSky;
+	TerminatorSky.PointId = TEXT("TerminatorSky");
+	TerminatorSky.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSky;
+	TerminatorSky.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	TerminatorSky.FieldOfViewDegrees = 52.0f;
+	Result.Insert(TerminatorSky, 2);
+
+	FABTSToonVisualCapturePointDefinition BrightSkyBanding;
+	BrightSkyBanding.PointId = TEXT("BrightSkyBanding");
+	BrightSkyBanding.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentBrightSkyBanding;
+	BrightSkyBanding.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	BrightSkyBanding.FieldOfViewDegrees = 52.0f;
+	Result.Insert(BrightSkyBanding, 3);
+
+	FABTSToonVisualCapturePointDefinition TerminatorSunwardSky;
+	TerminatorSunwardSky.PointId = TEXT("TerminatorSunwardSky");
+	TerminatorSunwardSky.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSunwardSky;
+	TerminatorSunwardSky.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	TerminatorSunwardSky.FieldOfViewDegrees = 52.0f;
+	Result.Insert(TerminatorSunwardSky, 4);
+
+	FABTSToonVisualCapturePointDefinition TerminatorAntiSunwardSky;
+	TerminatorAntiSunwardSky.PointId = TEXT("TerminatorAntiSunwardSky");
+	TerminatorAntiSunwardSky.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentTerminatorAntiSunwardSky;
+	TerminatorAntiSunwardSky.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	TerminatorAntiSunwardSky.FieldOfViewDegrees = 52.0f;
+	Result.Insert(TerminatorAntiSunwardSky, 5);
+
+	FABTSToonVisualCapturePointDefinition BacklitParty;
+	BacklitParty.PointId = TEXT("BacklitBirdParty");
+	BacklitParty.Anchor =
+		EABTSToonVisualCaptureAnchor::EnvironmentBacklitBirdParty;
+	BacklitParty.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+	BacklitParty.FieldOfViewDegrees = 56.0f;
+	Result.Insert(BacklitParty, 7);
+	return Result;
+}
+
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
+{
+	// Preserve all accepted A1 atmosphere poses, then add the seven accepted
+	// A2.1 views, five A2.2 field views and four A2.3 traversal relations.
+	// The orthogonal side pair prevents a long-axis-only cloud from
+	// passing the visual gate; the two ground-up views make the gameplay-facing
+	// underside and lighting continuity first-class evidence.
+	TArray<FABTSToonVisualCapturePointDefinition> Result =
+		BuildT4A1Catalogue();
+	auto AddCloudPoint = [&Result](
+		const TCHAR* Id,
+		const EABTSToonVisualCaptureAnchor Anchor,
+		const float Fov)
+	{
+		FABTSToonVisualCapturePointDefinition Point;
+		Point.PointId = Id;
+		Point.Anchor = Anchor;
+		Point.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+		Point.FieldOfViewDegrees = Fov;
+		Point.WarmupFrameOverride = 12;
+		Result.Add(Point);
+	};
+	AddCloudPoint(TEXT("CloudR0Ground"),
+		EABTSToonVisualCaptureAnchor::CloudR0Ground, 62.0f);
+	AddCloudPoint(TEXT("CloudR0Side"),
+		EABTSToonVisualCaptureAnchor::CloudR0Side, 58.0f);
+	AddCloudPoint(TEXT("CloudR0SideOrthogonal"),
+		EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal, 58.0f);
+	AddCloudPoint(TEXT("CloudR0Above"),
+		EABTSToonVisualCaptureAnchor::CloudR0Above, 58.0f);
+	AddCloudPoint(TEXT("CloudR0FlyThrough"),
+		EABTSToonVisualCaptureAnchor::CloudR0FlyThrough, 68.0f);
+	AddCloudPoint(TEXT("CloudR0GroundObliqueUp"),
+		EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp, 68.0f);
+	AddCloudPoint(TEXT("CloudR0GroundZenith"),
+		EABTSToonVisualCaptureAnchor::CloudR0GroundZenith, 76.0f);
+	AddCloudPoint(TEXT("CloudFieldGlobal"),
+		EABTSToonVisualCaptureAnchor::CloudFieldGlobal, 52.0f);
+	AddCloudPoint(TEXT("CloudFieldFusion"),
+		EABTSToonVisualCaptureAnchor::CloudFieldFusion, 44.0f);
+	AddCloudPoint(TEXT("CloudFieldVariety"),
+		EABTSToonVisualCaptureAnchor::CloudFieldVariety, 50.0f);
+	AddCloudPoint(TEXT("CloudFieldNight"),
+		EABTSToonVisualCaptureAnchor::CloudFieldNight, 48.0f);
+	AddCloudPoint(TEXT("CloudFieldTerminatorMega"),
+		EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega, 58.0f);
+	AddCloudPoint(TEXT("CloudTraversalBirdInside"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside, 56.0f);
+	AddCloudPoint(TEXT("CloudTraversalCameraInside"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside, 62.0f);
+	AddCloudPoint(TEXT("CloudTraversalBetween"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalBetween, 54.0f);
+	AddCloudPoint(TEXT("CloudTraversalBothInside"),
+		EABTSToonVisualCaptureAnchor::CloudTraversalBothInside, 66.0f);
+	return Result;
+}
+
+TArray<FABTSToonVisualCapturePointDefinition>
+FABTSToonVisualCaptureMath::BuildT4A3Catalogue()
+{
+	TArray<FABTSToonVisualCapturePointDefinition> Result;
+	Result.Reserve(5);
+	auto Add = [&Result](
+		const TCHAR* Id,
+		const EABTSToonVisualCaptureAnchor Anchor,
+		const float Fov)
+	{
+		FABTSToonVisualCapturePointDefinition Point;
+		Point.PointId = Id;
+		Point.Anchor = Anchor;
+		// A3.1 intentionally proves that the regular ground profile reaches
+		// space continuously; using SatelliteGuide here would hide a hard cut.
+		Point.StyleProfile = EABTSStylizedRenderProfile::GroundDay;
+		Point.FieldOfViewDegrees = Fov;
+		Point.WarmupFrameOverride = 12;
+		Result.Add(Point);
+	};
+	Add(TEXT("AltitudeGround"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeGround, 68.0f);
+	Add(TEXT("AltitudeCloudTop"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop, 64.0f);
+	Add(TEXT("AltitudeTransitionMid"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid, 60.0f);
+	Add(TEXT("AltitudeSatellite"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeSatellite, 56.0f);
+	Add(TEXT("AltitudeSpace"),
+		EABTSToonVisualCaptureAnchor::HighAltitudeSpace, 52.0f);
+	return Result;
+}
+
+TArray<FABTSToonDiagnosticVariantDefinition>
+FABTSToonVisualCaptureMath::BuildVariantCatalogue(
+	const EABTSToonVisualCaptureSuite Suite)
+{
+	TArray<FABTSToonDiagnosticVariantDefinition> Result;
+	auto Add = [&Result](
+		const TCHAR* Id,
+		const bool bStyleEnabled,
+		const EABTSStylizedDiagnosticPassMask Mask,
+		const bool bShadowsEnabled)
+	{
+		FABTSToonDiagnosticVariantDefinition Variant;
+		Variant.VariantId = Id;
+		Variant.bStyleEnabled = bStyleEnabled;
+		Variant.PassMask = Mask;
+		Variant.bShadowsEnabled = bShadowsEnabled;
+		Result.Add(Variant);
+	};
+
+	if (Suite == EABTSToonVisualCaptureSuite::ToonT0)
+	{
+		Result.Reserve(2);
+		Add(TEXT("StyleOff"), false,
+			EABTSStylizedDiagnosticPassMask::None, true);
+		Add(TEXT("StyleOn"), true,
+			EABTSStylizedDiagnosticPassMask::ToneAndOutline, true);
+		return Result;
+	}
+	if (Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+		|| Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+		|| Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+	{
+		Result.Reserve(2);
+		Add(TEXT("StyleOff"), false,
+			EABTSStylizedDiagnosticPassMask::None, true);
+		Add(TEXT("StyleOn"), true,
+			EABTSStylizedDiagnosticPassMask::ToneAndOutline, true);
+		return Result;
+	}
+
+	Result.Reserve(6);
+	Add(TEXT("StyleOff"), false,
+		EABTSStylizedDiagnosticPassMask::None, true);
+	Add(TEXT("ToneOnly"), true,
+		EABTSStylizedDiagnosticPassMask::Tone, true);
+	Add(TEXT("OutlineOnly"), true,
+		EABTSStylizedDiagnosticPassMask::Outline, true);
+	Add(TEXT("ToneOutline"), true,
+		EABTSStylizedDiagnosticPassMask::ToneAndOutline, true);
+	Add(TEXT("ShadowOff"), true,
+		EABTSStylizedDiagnosticPassMask::None, false);
+	Add(TEXT("LightingOnly"), true,
+		EABTSStylizedDiagnosticPassMask::None, true);
 	return Result;
 }
 
@@ -347,6 +711,23 @@ uint64 FABTSToonVisualCaptureMath::ComputeCatalogueHash(
 	return Hash;
 }
 
+uint64 FABTSToonVisualCaptureMath::ComputeVariantCatalogueHash(
+	TConstArrayView<FABTSToonDiagnosticVariantDefinition> Definitions)
+{
+	uint64 Hash = ABTSToonCaptureTypes::FnvOffset;
+	const int32 Count = Definitions.Num();
+	ABTSToonCaptureTypes::HashValue(Hash, Count);
+	for (const FABTSToonDiagnosticVariantDefinition& Definition : Definitions)
+	{
+		ABTSToonCaptureTypes::HashString(Hash, Definition.VariantId.ToString());
+		ABTSToonCaptureTypes::HashValue(Hash, Definition.bStyleEnabled);
+		const uint8 Mask = static_cast<uint8>(Definition.PassMask);
+		ABTSToonCaptureTypes::HashValue(Hash, Mask);
+		ABTSToonCaptureTypes::HashValue(Hash, Definition.bShadowsEnabled);
+	}
+	return Hash;
+}
+
 uint64 FABTSToonVisualCaptureMath::ComputeCameraPoseHash(
 	const FTransform& CameraWorldTransform,
 	const FVector& LookAtWorld,
@@ -392,6 +773,25 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 }
 
 const TCHAR* FABTSToonVisualCaptureMath::LexToString(
+	EABTSToonVisualCaptureSuite Suite)
+{
+	switch (Suite)
+	{
+	case EABTSToonVisualCaptureSuite::ToonT4A3:
+		return TEXT("ToonT4A3");
+	case EABTSToonVisualCaptureSuite::ToonT4A2:
+		return TEXT("ToonT4A2");
+	case EABTSToonVisualCaptureSuite::ToonT4A1:
+		return TEXT("ToonT4A1");
+	case EABTSToonVisualCaptureSuite::ToonT4A0:
+		return TEXT("ToonT4A0");
+	case EABTSToonVisualCaptureSuite::ToonT0:
+	default:
+		return TEXT("ToonT0");
+	}
+}
+
+const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 	EABTSToonVisualCaptureAnchor Anchor)
 {
 	switch (Anchor)
@@ -404,6 +804,66 @@ const TCHAR* FABTSToonVisualCaptureMath::LexToString(
 		return TEXT("SatelliteE5");
 	case EABTSToonVisualCaptureAnchor::FinaleLayout:
 		return TEXT("FinaleLayout");
+	case EABTSToonVisualCaptureAnchor::EnvironmentGroundDay:
+		return TEXT("EnvironmentGroundDay");
+	case EABTSToonVisualCaptureAnchor::EnvironmentGroundDawn:
+		return TEXT("EnvironmentGroundDawn");
+	case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSky:
+		return TEXT("EnvironmentTerminatorSky");
+	case EABTSToonVisualCaptureAnchor::EnvironmentBrightSkyBanding:
+		return TEXT("EnvironmentBrightSkyBanding");
+	case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSunwardSky:
+		return TEXT("EnvironmentTerminatorSunwardSky");
+	case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorAntiSunwardSky:
+		return TEXT("EnvironmentTerminatorAntiSunwardSky");
+	case EABTSToonVisualCaptureAnchor::EnvironmentGroundNight:
+		return TEXT("EnvironmentGroundNight");
+	case EABTSToonVisualCaptureAnchor::EnvironmentBacklitBirdParty:
+		return TEXT("EnvironmentBacklitBirdParty");
+	case EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude:
+		return TEXT("EnvironmentHighAltitude");
+	case EABTSToonVisualCaptureAnchor::CloudR0Ground:
+		return TEXT("CloudR0Ground");
+	case EABTSToonVisualCaptureAnchor::CloudR0Side:
+		return TEXT("CloudR0Side");
+	case EABTSToonVisualCaptureAnchor::CloudR0Above:
+		return TEXT("CloudR0Above");
+	case EABTSToonVisualCaptureAnchor::CloudR0FlyThrough:
+		return TEXT("CloudR0FlyThrough");
+	case EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal:
+		return TEXT("CloudR0SideOrthogonal");
+	case EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp:
+		return TEXT("CloudR0GroundObliqueUp");
+	case EABTSToonVisualCaptureAnchor::CloudR0GroundZenith:
+		return TEXT("CloudR0GroundZenith");
+	case EABTSToonVisualCaptureAnchor::CloudFieldGlobal:
+		return TEXT("CloudFieldGlobal");
+	case EABTSToonVisualCaptureAnchor::CloudFieldFusion:
+		return TEXT("CloudFieldFusion");
+	case EABTSToonVisualCaptureAnchor::CloudFieldVariety:
+		return TEXT("CloudFieldVariety");
+	case EABTSToonVisualCaptureAnchor::CloudFieldNight:
+		return TEXT("CloudFieldNight");
+	case EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega:
+		return TEXT("CloudFieldTerminatorMega");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside:
+		return TEXT("CloudTraversalBirdInside");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside:
+		return TEXT("CloudTraversalCameraInside");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalBetween:
+		return TEXT("CloudTraversalBetween");
+	case EABTSToonVisualCaptureAnchor::CloudTraversalBothInside:
+		return TEXT("CloudTraversalBothInside");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeGround:
+		return TEXT("HighAltitudeGround");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop:
+		return TEXT("HighAltitudeCloudTop");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid:
+		return TEXT("HighAltitudeTransitionMid");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeSatellite:
+		return TEXT("HighAltitudeSatellite");
+	case EABTSToonVisualCaptureAnchor::HighAltitudeSpace:
+		return TEXT("HighAltitudeSpace");
 	default:
 		return TEXT("Unknown");
 	}

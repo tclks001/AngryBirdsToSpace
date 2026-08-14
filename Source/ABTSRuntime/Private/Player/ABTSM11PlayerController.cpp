@@ -5,10 +5,62 @@
 #include "EngineUtils.h"
 #include "Game/ABTSM11GameMode.h"
 #include "InputCoreTypes.h"
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "UI/ABTSM11FinaleHUD.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM51WorldActors.h"
+
+namespace
+{
+	const FName M11OrbitAction(TEXT("ABTS_CameraOrbitHold"));
+
+	void SuspendM11OrbitReleaseBindings(
+		UInputComponent& Input,
+		TArray<FInputActionBinding>& OutSuspendedBindings)
+	{
+		OutSuspendedBindings.Reset();
+		for (int32 BindingIndex = Input.GetNumActionBindings() - 1;
+			BindingIndex >= 0;
+			--BindingIndex)
+		{
+			const FInputActionBinding& Binding =
+				Input.GetActionBinding(BindingIndex);
+			if (Binding.GetActionName() != M11OrbitAction
+				|| Binding.KeyEvent != IE_Released)
+			{
+				continue;
+			}
+			OutSuspendedBindings.Insert(Binding, 0);
+			Input.RemoveActionBinding(BindingIndex);
+		}
+	}
+
+	void RestoreM11OrbitReleaseBindings(
+		UInputComponent& Input,
+		TArray<FInputActionBinding>& SuspendedBindings)
+	{
+		for (int32 BindingIndex = Input.GetNumActionBindings() - 1;
+			BindingIndex >= 0;
+			--BindingIndex)
+		{
+			const FInputActionBinding& Binding =
+				Input.GetActionBinding(BindingIndex);
+			if (Binding.GetActionName() == M11OrbitAction
+				&& Binding.KeyEvent == IE_Released)
+			{
+				Input.RemoveActionBinding(BindingIndex);
+			}
+		}
+		for (FInputActionBinding& Binding : SuspendedBindings)
+		{
+			Input.AddActionBinding(MoveTemp(Binding));
+		}
+		SuspendedBindings.Reset();
+	}
+}
 
 void AABTSM11PlayerController::SetupInputComponent()
 {
@@ -51,20 +103,7 @@ void AABTSM11PlayerController::PlayerTick(const float DeltaTime)
 		FindM11Interaction();
 	const bool bActive =
 		Interaction != nullptr && Interaction->IsFinaleActive();
-	const bool bRestoreOrbitCursorThisFrame =
-		bActive
-		&& bRestoreM11CursorAfterOrbitRelease
-		&& bM11OrbitCursorSaved;
-	if (bRestoreOrbitCursorThisFrame)
-	{
-		SetMouseLocation(
-			FMath::RoundToInt(M11OrbitCursorX),
-			FMath::RoundToInt(M11OrbitCursorY));
-		bRestoreM11CursorAfterOrbitRelease = false;
-	}
-	if (bActive
-		&& !bRestoreOrbitCursorThisFrame
-		&& Interaction->IsAiming())
+	if (bActive && Interaction->IsAiming())
 	{
 		float MouseX = 0.0f;
 		float MouseY = 0.0f;
@@ -98,8 +137,6 @@ void AABTSM11PlayerController::FlushPressedKeys()
 {
 	// Focus loss may synthesize a release. Disarm before the base class
 	// flushes keys so an inherited/synthetic release can never launch.
-	bM11OrbitCursorSaved = false;
-	bRestoreM11CursorAfterOrbitRelease = false;
 	if (AABTSM11FinaleHUD* FinaleHud =
 		Cast<AABTSM11FinaleHUD>(GetHUD()))
 	{
@@ -252,7 +289,7 @@ void AABTSM11PlayerController::M11Power(const float Value)
 					FinaleHud->HandleFinaleWheel(
 						*Interaction,
 						FVector2D(MouseX, MouseY),
-						-Value);
+						Value);
 				}
 			}
 		}
@@ -275,18 +312,17 @@ void AABTSM11PlayerController::M11OrbitPressed()
 		FindM11Interaction();
 		Interaction != nullptr && Interaction->IsFinaleActive())
 	{
-		bM11OrbitCursorSaved = GetMousePosition(
-			M11OrbitCursorX,
-			M11OrbitCursorY);
-		bRestoreM11CursorAfterOrbitRelease = false;
-		if (bM11OrbitCursorSaved && Interaction->IsAiming())
+		float MouseX = 0.0f;
+		float MouseY = 0.0f;
+		if (Interaction->IsAiming()
+			&& GetMousePosition(MouseX, MouseY))
 		{
 			if (AABTSM11FinaleHUD* FinaleHud =
 				Cast<AABTSM11FinaleHUD>(GetHUD()))
 			{
 				FinaleHud->HandleFinaleSecondaryPressed(
 					*Interaction,
-					FVector2D(M11OrbitCursorX, M11OrbitCursorY));
+					FVector2D(MouseX, MouseY));
 			}
 		}
 	}
@@ -310,11 +346,6 @@ void AABTSM11PlayerController::M11OrbitReleased()
 					FVector2D(MouseX, MouseY));
 			}
 		}
-		// M4's release handler restores its historical orbit cursor even when
-		// finale input blocked the matching press. Restore the M11 cursor
-		// after all input delegates have run, in PlayerTick.
-		bRestoreM11CursorAfterOrbitRelease =
-			bM11OrbitCursorSaved;
 	}
 }
 
@@ -322,6 +353,7 @@ void AABTSM11PlayerController::SetM11FinaleInputMode(
 	const bool bActive)
 {
 	SetLaunchModeInputBlocked(bActive);
+	SetM11OrbitReleaseBindingIsolation(bActive);
 	if (bActive)
 	{
 		if (!bM11SavedPointerEventFlags)
@@ -341,12 +373,35 @@ void AABTSM11PlayerController::SetM11FinaleInputMode(
 		bEnableMouseOverEvents = bSavedMouseOverEvents;
 		bM11SavedPointerEventFlags = false;
 	}
-	if (!bActive)
-	{
-		bM11OrbitCursorSaved = false;
-		bRestoreM11CursorAfterOrbitRelease = false;
-	}
 	ApplyM11PointerMode(bActive);
+}
+
+void AABTSM11PlayerController::SetM11OrbitReleaseBindingIsolation(
+	const bool bIsolated)
+{
+	if (InputComponent == nullptr
+		|| bM11OrbitReleaseBindingsIsolated == bIsolated)
+	{
+		return;
+	}
+	if (bIsolated)
+	{
+		SuspendM11OrbitReleaseBindings(
+			*InputComponent,
+			SuspendedM11OrbitReleaseBindings);
+		InputComponent->BindAction(
+			M11OrbitAction,
+			IE_Released,
+			this,
+			&AABTSM11PlayerController::M11OrbitReleased);
+		bM11OrbitReleaseBindingsIsolated = true;
+		return;
+	}
+
+	RestoreM11OrbitReleaseBindings(
+		*InputComponent,
+		SuspendedM11OrbitReleaseBindings);
+	bM11OrbitReleaseBindingsIsolated = false;
 }
 
 void AABTSM11PlayerController::ApplyM11PointerMode(
@@ -395,3 +450,62 @@ AABTSM11PlayerController::FindOrdinarySlingshotSystem()
 	}
 	return nullptr;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11FinaleOrbitReleaseBindingIsolationTest,
+	"ABTS.M11C.HUD.Unit.CursorReleaseBinding",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11FinaleOrbitReleaseBindingIsolationTest::RunTest(
+	const FString& Parameters)
+{
+	UInputComponent* Input = NewObject<UInputComponent>();
+	Input->AddActionBinding(FInputActionBinding(M11OrbitAction, IE_Pressed));
+	Input->AddActionBinding(FInputActionBinding(M11OrbitAction, IE_Released));
+	Input->AddActionBinding(FInputActionBinding(M11OrbitAction, IE_Released));
+	Input->AddActionBinding(FInputActionBinding(TEXT("ABTS_Other"), IE_Released));
+
+	TArray<FInputActionBinding> Suspended;
+	SuspendM11OrbitReleaseBindings(*Input, Suspended);
+	TestEqual(TEXT("Both inherited and M11 releases are suspended"),
+		Suspended.Num(), 2);
+	TestEqual(TEXT("Only unrelated and press bindings remain"),
+		Input->GetNumActionBindings(), 2);
+	for (int32 BindingIndex = 0;
+		BindingIndex < Input->GetNumActionBindings();
+		++BindingIndex)
+	{
+		const FInputActionBinding& Binding =
+			Input->GetActionBinding(BindingIndex);
+		TestFalse(TEXT("No orbit release can warp the finale cursor"),
+			Binding.GetActionName() == M11OrbitAction
+				&& Binding.KeyEvent == IE_Released);
+	}
+
+	Input->AddActionBinding(
+		FInputActionBinding(M11OrbitAction, IE_Released));
+	Input->AddActionBinding(
+		FInputActionBinding(M11OrbitAction, IE_Released));
+	RestoreM11OrbitReleaseBindings(*Input, Suspended);
+	int32 RestoredReleaseCount = 0;
+	for (int32 BindingIndex = 0;
+		BindingIndex < Input->GetNumActionBindings();
+		++BindingIndex)
+	{
+		const FInputActionBinding& Binding =
+			Input->GetActionBinding(BindingIndex);
+		if (Binding.GetActionName() == M11OrbitAction
+			&& Binding.KeyEvent == IE_Released)
+		{
+			++RestoredReleaseCount;
+		}
+	}
+	TestEqual(TEXT("Ordinary orbit releases return after finale exit"),
+		RestoredReleaseCount, 2);
+	TestEqual(TEXT("Suspended storage is drained after restoration"),
+		Suspended.Num(), 0);
+	return true;
+}
+#endif

@@ -82,12 +82,15 @@ bool AABTSM10ScoutMapSystem::TryGetQualifiedReinforcedLandingPreview(
 
 bool AABTSM10ScoutMapSystem::IsLandingPreviewActive() const
 {
-	return LandingPreviewCamera != nullptr && LandingPreviewCamera->IsPreviewActive();
+	return LandingPreviewCamera != nullptr
+		&& LandingPreviewCamera->IsPreviewActive()
+		&& LandingPreviewCamera->HasPublishedPreviewFrame();
 }
 
 bool AABTSM10ScoutMapSystem::IsSatelliteLandingPreviewActive() const
 {
 	return LandingPreviewCamera != nullptr
+		&& LandingPreviewCamera->HasPublishedPreviewFrame()
 		&& LandingPreviewCamera->IsSatellitePreviewActive();
 }
 

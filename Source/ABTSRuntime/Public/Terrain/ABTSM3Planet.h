@@ -92,6 +92,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3TaskLink>& GetGeneratedTaskLinks() const { return GeneratedTaskLinks; }
 
+	/** Integration-owned rendering refresh calls this without rebuilding M3. */
+	bool ApplyStylizedSurfaceStyle(bool bStyleEnabled);
+	bool TryGetStylizedSurfaceStyleEnabled(float& OutValue) const;
+
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellEdgeState>& GetGeneratedEdgeStates() const { return GeneratedEdgeStates; }
 
@@ -232,14 +236,14 @@ public:
 		return LastMonthlyPresentationBuildDurationMS;
 	}
 
-	bool IsMonthlyMaterialRhythmApplied() const
+	bool IsTerrainBasePaletteApplied() const
 	{
-		return bMonthlyMaterialRhythmApplied;
+		return bTerrainBasePaletteApplied;
 	}
 
-	int32 GetMonthlyMaterialRhythmCellCount() const
+	int32 GetTerrainBasePaletteCellCount() const
 	{
-		return MonthlyMaterialRhythmCellCount;
+		return TerrainBasePaletteCellCount;
 	}
 
 	int32 GetMonthlyDecorAccent0InstanceCount() const
@@ -338,7 +342,7 @@ public:
 	/** World-space spacing of the one terminal Space-slingshot slot pair. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
 		meta = (ClampMin = "100.0", ClampMax = "600.0", UIMin = "160.0", UIMax = "360.0", Units = "cm"))
-	float FinaleSpaceSlotSeparationCM = 210.0f;
+	float FinaleSpaceSlotSeparationCM = 320.0f;
 
 	/** Small lift that keeps the slot interaction mesh above the certified pad. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
@@ -434,6 +438,14 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> RockHISM;
+
+	/** M3-owned T3-A1 material; published read-only to Integration. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM|Stylized")
+	TObjectPtr<UMaterialInterface> ForestStylizedMaterial;
+
+	/** M3-owned T3-A1 material; published read-only to Integration. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM|Stylized")
+	TObjectPtr<UMaterialInterface> RockStylizedMaterial;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|PCG")
 	TArray<FABTSM3TaskNode> GeneratedTasks;
@@ -556,11 +568,20 @@ private:
 #endif
 
 	TUniquePtr<FABTSM3TerrainVisualField> TerrainVisualField;
+	/**
+	 * Persistent preview-owned inputs and field used by every color consumer.
+	 * The field stores pointers to these arrays, so all three must share the
+	 * Planet lifetime rather than a RebuildPlanet() stack frame.
+	 */
+	TArray<FABTSM3CellState> MonthlyPresentationPreviewCellStates;
+	TArray<FABTSM3CellEdgeState> MonthlyPresentationPreviewEdgeStates;
+	TUniquePtr<FABTSM3TerrainVisualField>
+		MonthlyPresentationPreviewVisualField;
 	bool bM3PresentationReady = false;
 	double LastM3RebuildDurationMS = 0.0;
 	double LastMonthlyPresentationBuildDurationMS = 0.0;
-	bool bMonthlyMaterialRhythmApplied = false;
-	int32 MonthlyMaterialRhythmCellCount = 0;
+	bool bTerrainBasePaletteApplied = false;
+	int32 TerrainBasePaletteCellCount = 0;
 	int32 MonthlyDecorAccent0InstanceCount = 0;
 	int32 MonthlyDecorAccent1InstanceCount = 0;
 	bool bMonthlyPresentationPreviewActive = false;

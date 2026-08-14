@@ -16,6 +16,25 @@
 
 namespace ABTSStylizedToneViewExtensionPrivate
 {
+	EABTSStylizedRenderProfile ResolveActiveMainWorldProfileOnAnyThread()
+	{
+		FABTSStylizedEnvironmentParameters Environment;
+		return FABTSStylizedRenderingControl::
+			TryGetEnvironmentParametersOnAnyThread(Environment)
+			? Environment.Profile
+			: FABTSStylizedRenderingControl::GetProfileOnAnyThread();
+	}
+
+	FABTSStylizedViewPolicy ResolveCaptureViewPolicy(
+		const EABTSStylizedViewClass ViewClass)
+	{
+		return ViewClass == EABTSStylizedViewClass::FinaleGameplayMirrorCapture
+			? FABTSStylizedRenderingContract::ResolveViewPolicy(
+				EABTSStylizedViewClass::MainWorld,
+				ResolveActiveMainWorldProfileOnAnyThread())
+			: FABTSStylizedRenderingContract::ResolveViewPolicy(ViewClass);
+	}
+
 	BEGIN_SHADER_PARAMETER_STRUCT(FABTSStylizedOutlinePassParameters, )
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_STRUCT_INCLUDE(FSceneTextureShaderParameters, SceneTextures)
@@ -28,16 +47,37 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(float, OutlineNormalThreshold)
 		SHADER_PARAMETER(float, OutlineNormalSoftness)
 		SHADER_PARAMETER(float, OutlineStrength)
+		SHADER_PARAMETER(float, OutlineOcclusionStrength)
+		SHADER_PARAMETER(float, OutlineNormalCreaseStrength)
 		SHADER_PARAMETER(float, SelectiveOutlineStrength)
 		SHADER_PARAMETER(float, SelectiveOutlineWidthScale)
 		SHADER_PARAMETER(uint32, bAllowSelectiveStencil)
+		SHADER_PARAMETER(uint32, CloudCompositeStencilValue)
 		SHADER_PARAMETER(FVector3f, OutlineColor)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FABTSStylizedTonePassParameters, )
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER_STRUCT_INCLUDE(FSceneTextureShaderParameters, SceneTextures)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColorTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
+		SHADER_PARAMETER(FVector2f, ViewportInvSize)
+		SHADER_PARAMETER(FVector3f, CameraFromPlanetCenterWorld)
+		SHADER_PARAMETER(float, PlanetRadiusCM)
+		SHADER_PARAMETER(float, AtmosphereHeightCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionStartCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionEndCM)
+		SHADER_PARAMETER(FVector3f, SunDirectionToSunWorld)
+		SHADER_PARAMETER(uint32, StarSeed)
+		SHADER_PARAMETER(float, StarGridResolution)
+		SHADER_PARAMETER(float, StarCellProbability)
+		SHADER_PARAMETER(float, StarAngularRadiusScale)
+		SHADER_PARAMETER(float, StarHDRIntensity)
+		SHADER_PARAMETER(uint32, EnvironmentProfile)
+		SHADER_PARAMETER(uint32, bReplaceEnvironmentBackground)
+		SHADER_PARAMETER(uint32, bHasEnvironmentParameters)
+		SHADER_PARAMETER(uint32, CloudCompositeStencilValue)
 		SHADER_PARAMETER(float, ShadowThreshold)
 		SHADER_PARAMETER(float, ToneNormalizationFloor)
 		SHADER_PARAMETER(float, HighlightThreshold)
@@ -50,6 +90,27 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		SHADER_PARAMETER(FVector3f, ShadowTint)
 		SHADER_PARAMETER(FVector3f, MidTint)
 		SHADER_PARAMETER(FVector3f, HighlightTint)
+		RENDER_TARGET_BINDING_SLOTS()
+	END_SHADER_PARAMETER_STRUCT()
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FABTSStylizedStarPassParameters, )
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER_STRUCT_INCLUDE(FSceneTextureShaderParameters, SceneTextures)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColorTexture)
+		SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
+		SHADER_PARAMETER(FVector3f, CameraFromPlanetCenterWorld)
+		SHADER_PARAMETER(float, PlanetRadiusCM)
+		SHADER_PARAMETER(float, AtmosphereHeightCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionStartCM)
+		SHADER_PARAMETER(float, HighAltitudeTransitionEndCM)
+		SHADER_PARAMETER(FVector3f, SunDirectionToSunWorld)
+		SHADER_PARAMETER(uint32, StarSeed)
+		SHADER_PARAMETER(float, StarGridResolution)
+		SHADER_PARAMETER(float, StarCellProbability)
+		SHADER_PARAMETER(float, StarAngularRadiusScale)
+		SHADER_PARAMETER(float, StarHDRIntensity)
+		SHADER_PARAMETER(uint32, EnvironmentProfile)
+		SHADER_PARAMETER(uint32, bReplaceEnvironmentBackground)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -85,6 +146,22 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		}
 	};
 
+	class FABTSStylizedStarPS final : public FGlobalShader
+	{
+	public:
+		DECLARE_GLOBAL_SHADER(FABTSStylizedStarPS);
+		SHADER_USE_PARAMETER_STRUCT(FABTSStylizedStarPS, FGlobalShader);
+		using FParameters = FABTSStylizedStarPassParameters;
+
+		static bool ShouldCompilePermutation(
+			const FGlobalShaderPermutationParameters& Parameters)
+		{
+			return IsFeatureLevelSupported(
+				Parameters.Platform,
+				ERHIFeatureLevel::SM5);
+		}
+	};
+
 	IMPLEMENT_GLOBAL_SHADER(
 		FABTSStylizedOutlinePS,
 		"/Project/Private/ABTSStylizedTone.usf",
@@ -97,6 +174,60 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		"ABTSStylizedToneMainPS",
 		SF_Pixel);
 
+	IMPLEMENT_GLOBAL_SHADER(
+		FABTSStylizedStarPS,
+		"/Project/Private/ABTSStylizedTone.usf",
+		"ABTSStylizedStarMainPS",
+		SF_Pixel);
+
+	FABTSStylizedEnvironmentParameters ResolveEnvironmentForViewProfile(
+		const FABTSStylizedEnvironmentParameters& SharedEnvironment,
+		const EABTSStylizedRenderProfile ViewProfile)
+	{
+		return FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			SharedEnvironment.PlanetCenterWorld,
+			SharedEnvironment.PlanetRadiusCM,
+			FVector(SharedEnvironment.SunDirectionToSunWorld),
+			ViewProfile);
+	}
+
+	void ApplyStylizedPostProcessPolicy(
+		FSceneView& View,
+		const EABTSStylizedRenderProfile ViewProfile)
+	{
+		FABTSStylizedEnvironmentParameters SharedEnvironment;
+		if (!FABTSStylizedRenderingControl::IsEnabledOnAnyThread()
+			|| !FABTSStylizedRenderingControl::
+				TryGetEnvironmentParametersOnAnyThread(SharedEnvironment))
+		{
+			return;
+		}
+		const FABTSStylizedEnvironmentParameters ViewEnvironment =
+			ResolveEnvironmentForViewProfile(SharedEnvironment, ViewProfile);
+		FPostProcessSettings& Settings = View.FinalPostProcessSettings;
+		Settings.bOverride_AutoExposureMethod = true;
+		Settings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+		Settings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+		Settings.AutoExposureApplyPhysicalCameraExposure = false;
+		Settings.bOverride_AutoExposureBias = true;
+		Settings.AutoExposureBias = ViewEnvironment.FixedExposureBias;
+
+		if (FABTSStylizedRenderingControl::ShouldSuppressMotionBlur(
+			ViewEnvironment.Profile,
+			ViewEnvironment.bCloudsEnabled != 0))
+		{
+			// Ground traversal uses masked, high-contrast low-poly cloud
+			// silhouettes.  Camera motion blur pulls the brighter sky into the
+			// darker night-side edge and produces a moving cyan/white fringe.
+			// The offline visual-capture camera already uses this crisp policy;
+			// apply it to the matching gameplay view as well.
+			Settings.bOverride_MotionBlurAmount = true;
+			Settings.MotionBlurAmount = 0.0f;
+			Settings.bOverride_MotionBlurMax = true;
+			Settings.MotionBlurMax = 0.0f;
+		}
+	}
+
 	class FABTSStylizedToneSceneViewExtension final
 		: public FSceneViewExtensionBase
 	{
@@ -104,6 +235,16 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		FABTSStylizedToneSceneViewExtension(const FAutoRegister& AutoRegister)
 			: FSceneViewExtensionBase(AutoRegister)
 		{
+		}
+
+		virtual void SetupView(
+			FSceneViewFamily& InViewFamily,
+			FSceneView& InView) override
+		{
+			(void)InViewFamily;
+			ApplyStylizedPostProcessPolicy(
+				InView,
+				ResolveActiveMainWorldProfileOnAnyThread());
 		}
 
 		virtual void SubscribeToPostProcessingPass(
@@ -124,7 +265,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			const FABTSStylizedViewPolicy ViewPolicy =
 				FABTSStylizedRenderingContract::ResolveViewPolicy(
 					EABTSStylizedViewClass::MainWorld,
-					FABTSStylizedRenderingControl::GetProfileOnAnyThread());
+					ResolveActiveMainWorldProfileOnAnyThread());
 			if (!ViewPolicy.IsValid()
 				|| !FABTSStylizedRenderingContract::IsViewClassImplemented(
 					EABTSStylizedViewClass::MainWorld))
@@ -132,8 +273,29 @@ namespace ABTSStylizedToneViewExtensionPrivate
 				return;
 			}
 
+			FABTSStylizedEnvironmentParameters Environment;
+			const bool bHasEnvironment =
+				FABTSStylizedRenderingControl::
+					TryGetEnvironmentParametersOnAnyThread(Environment);
+			if (Pass == EPostProcessingPass::AfterDOF && bHasEnvironment)
+			{
+				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
+					[Environment](
+						FRDGBuilder& GraphBuilder,
+						const FSceneView& View,
+						const FPostProcessMaterialInputs& Inputs)
+					{
+						return AddStarPass(
+							GraphBuilder,
+							View,
+							Inputs,
+							Environment);
+					});
+			}
+
 			if (Pass == EPostProcessingPass::AfterDOF
-				&& ViewPolicy.bApplyOutline)
+				&& ViewPolicy.bApplyOutline
+				&& FABTSStylizedRenderingControl::IsOutlinePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedOutlineProfileParameters OutlineProfile =
 					FABTSStylizedRenderingControl::GetOutlineProfileParameters(
@@ -154,14 +316,19 @@ namespace ABTSStylizedToneViewExtensionPrivate
 							bAllowSelectiveStencil);
 					});
 			}
-			else if (Pass == EPostProcessingPass::Tonemap
-				&& ViewPolicy.bApplyTone)
+			if (Pass == EPostProcessingPass::Tonemap
+				&& ViewPolicy.bApplyTone
+				&& FABTSStylizedRenderingControl::IsTonePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedToneProfileParameters ToneProfile =
 					FABTSStylizedRenderingControl::GetToneProfileParameters(
 						ViewPolicy.Profile);
+				const float ToneNormalizationFloor =
+					FABTSStylizedRenderingControl::
+						GetSceneCaptureToneNormalizationFloor(
+							ViewPolicy.Profile);
 				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
-					[ToneProfile](
+					[ToneProfile, ToneNormalizationFloor, Environment, bHasEnvironment](
 						FRDGBuilder& GraphBuilder,
 						const FSceneView& View,
 						const FPostProcessMaterialInputs& Inputs)
@@ -170,12 +337,86 @@ namespace ABTSStylizedToneViewExtensionPrivate
 							GraphBuilder,
 							View,
 							Inputs,
-							ToneProfile);
+							ToneProfile,
+							ToneNormalizationFloor,
+							Environment,
+							bHasEnvironment,
+							false);
 					});
 			}
 		}
 
 	public:
+		static FScreenPassTexture AddStarPass(
+			FRDGBuilder& GraphBuilder,
+			const FSceneView& View,
+			const FPostProcessMaterialInputs& Inputs,
+			const FABTSStylizedEnvironmentParameters& Environment,
+			const bool bReplaceEnvironmentBackground = false)
+		{
+			const FScreenPassTexture SceneColor(
+				Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
+			check(SceneColor.IsValid());
+
+			FScreenPassRenderTarget Output = Inputs.OverrideOutput;
+			if (!Output.IsValid())
+			{
+				Output = FScreenPassRenderTarget::CreateFromInput(
+					GraphBuilder,
+					SceneColor,
+					ERenderTargetLoadAction::ENoAction,
+					TEXT("ABTSStylizedHDRStars"));
+			}
+
+			FABTSStylizedStarPassParameters* PassParameters =
+				GraphBuilder.AllocParameters<FABTSStylizedStarPassParameters>();
+			PassParameters->View = View.ViewUniformBuffer;
+			PassParameters->SceneTextures = GetSceneTextureShaderParameters(View);
+			PassParameters->SceneColorTexture = SceneColor.Texture;
+			PassParameters->SceneColorSampler =
+				TStaticSamplerState<
+					SF_Bilinear,
+					AM_Clamp,
+					AM_Clamp,
+					AM_Clamp>::GetRHI();
+			PassParameters->CameraFromPlanetCenterWorld = FVector3f(
+				View.ViewMatrices.GetViewOrigin()
+					- Environment.PlanetCenterWorld);
+			PassParameters->PlanetRadiusCM = Environment.PlanetRadiusCM;
+			PassParameters->AtmosphereHeightCM = Environment.AtmosphereHeightCM;
+			PassParameters->HighAltitudeTransitionStartCM =
+				Environment.HighAltitudeTransitionStartCM;
+			PassParameters->HighAltitudeTransitionEndCM =
+				Environment.HighAltitudeTransitionEndCM;
+			PassParameters->SunDirectionToSunWorld =
+				Environment.SunDirectionToSunWorld;
+			PassParameters->StarSeed = Environment.StarSeed;
+			PassParameters->StarGridResolution = Environment.StarGridResolution;
+			PassParameters->StarCellProbability = Environment.StarCellProbability;
+			PassParameters->StarAngularRadiusScale =
+				Environment.StarAngularRadiusScale;
+			PassParameters->StarHDRIntensity = Environment.StarHDRIntensity;
+			PassParameters->EnvironmentProfile =
+				static_cast<uint32>(Environment.Profile);
+			PassParameters->bReplaceEnvironmentBackground =
+				bReplaceEnvironmentBackground ? 1u : 0u;
+			PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
+
+			const FScreenPassTextureViewport InputViewport(SceneColor);
+			const FScreenPassTextureViewport OutputViewport(Output);
+			const TShaderMapRef<FABTSStylizedStarPS> PixelShader(
+				GetGlobalShaderMap(View.GetFeatureLevel()));
+			AddDrawScreenPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("ABTS Deterministic HDR Stars"),
+				View,
+				OutputViewport,
+				InputViewport,
+				PixelShader,
+				PassParameters);
+			return MoveTemp(Output);
+		}
+
 		static FScreenPassTexture AddOutlinePass(
 			FRDGBuilder& GraphBuilder,
 			const FSceneView& View,
@@ -225,10 +466,17 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			PassParameters->OutlineNormalThreshold = OutlineProfile.NormalThreshold;
 			PassParameters->OutlineNormalSoftness = OutlineProfile.NormalSoftness;
 			PassParameters->OutlineStrength = OutlineProfile.Strength;
+			PassParameters->OutlineOcclusionStrength =
+				OutlineProfile.OcclusionStrength;
+			PassParameters->OutlineNormalCreaseStrength =
+				OutlineProfile.NormalCreaseStrength;
 			PassParameters->SelectiveOutlineStrength = 0.96f;
 			PassParameters->SelectiveOutlineWidthScale = 1.45f;
 			PassParameters->bAllowSelectiveStencil =
 				bAllowSelectiveStencil ? 1u : 0u;
+			PassParameters->CloudCompositeStencilValue =
+				FABTSStylizedRenderingContract::
+					ResolveCloudCompositeStencilValueForRenderer();
 			PassParameters->OutlineColor = OutlineProfile.Color;
 			PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 
@@ -250,7 +498,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			const FSceneView& View,
 			const FPostProcessMaterialInputs& Inputs,
 			const FABTSStylizedToneProfileParameters& ToneProfile,
-			const float ToneNormalizationFloor = 1.0e-4f)
+			const float ToneNormalizationFloor,
+			const FABTSStylizedEnvironmentParameters& Environment,
+			const bool bHasEnvironment,
+			const bool bReplaceEnvironmentBackground)
 		{
 			const FScreenPassTexture SceneColor(
 				Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
@@ -268,6 +519,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 
 			FABTSStylizedTonePassParameters* PassParameters =
 				GraphBuilder.AllocParameters<FABTSStylizedTonePassParameters>();
+			PassParameters->View = View.ViewUniformBuffer;
+			PassParameters->SceneTextures = GetSceneTextureShaderParameters(View);
 			PassParameters->SceneColorTexture = SceneColor.Texture;
 			PassParameters->SceneColorSampler =
 				TStaticSamplerState<
@@ -275,6 +528,35 @@ namespace ABTSStylizedToneViewExtensionPrivate
 					AM_Clamp,
 					AM_Clamp,
 					AM_Clamp>::GetRHI();
+			const FIntPoint ViewportSize = SceneColor.ViewRect.Size();
+			PassParameters->ViewportInvSize = FVector2f(
+				1.0f / FMath::Max(ViewportSize.X, 1),
+				1.0f / FMath::Max(ViewportSize.Y, 1));
+			PassParameters->CameraFromPlanetCenterWorld = FVector3f(
+				View.ViewLocation - Environment.PlanetCenterWorld);
+			PassParameters->PlanetRadiusCM = Environment.PlanetRadiusCM;
+			PassParameters->AtmosphereHeightCM = Environment.AtmosphereHeightCM;
+			PassParameters->HighAltitudeTransitionStartCM =
+				Environment.HighAltitudeTransitionStartCM;
+			PassParameters->HighAltitudeTransitionEndCM =
+				Environment.HighAltitudeTransitionEndCM;
+			PassParameters->SunDirectionToSunWorld =
+				Environment.SunDirectionToSunWorld;
+			PassParameters->StarSeed = Environment.StarSeed;
+			PassParameters->StarGridResolution = Environment.StarGridResolution;
+			PassParameters->StarCellProbability = Environment.StarCellProbability;
+			PassParameters->StarAngularRadiusScale =
+				Environment.StarAngularRadiusScale;
+			PassParameters->StarHDRIntensity = Environment.StarHDRIntensity;
+			PassParameters->EnvironmentProfile =
+				static_cast<uint32>(Environment.Profile);
+			PassParameters->bReplaceEnvironmentBackground =
+				bReplaceEnvironmentBackground ? 1u : 0u;
+			PassParameters->bHasEnvironmentParameters =
+				bHasEnvironment ? 1u : 0u;
+			PassParameters->CloudCompositeStencilValue =
+				FABTSStylizedRenderingContract::
+					ResolveCloudCompositeStencilValueForRenderer();
 			PassParameters->ShadowThreshold = ToneProfile.ShadowThreshold;
 			PassParameters->ToneNormalizationFloor = FMath::Max(
 				ToneNormalizationFloor,
@@ -316,6 +598,16 @@ namespace ABTSStylizedToneViewExtensionPrivate
 		{
 		}
 
+		virtual void SetupView(
+			FSceneViewFamily& InViewFamily,
+			FSceneView& InView) override
+		{
+			(void)InViewFamily;
+			const FABTSStylizedViewPolicy ViewPolicy =
+				ResolveCaptureViewPolicy(ViewClass);
+			ApplyStylizedPostProcessPolicy(InView, ViewPolicy.Profile);
+		}
+
 		virtual void SubscribeToPostProcessingPass(
 			EPostProcessingPass Pass,
 			const FSceneView& InView,
@@ -333,14 +625,44 @@ namespace ABTSStylizedToneViewExtensionPrivate
 			}
 
 			const FABTSStylizedViewPolicy ViewPolicy =
-				FABTSStylizedRenderingContract::ResolveViewPolicy(ViewClass);
+				ResolveCaptureViewPolicy(ViewClass);
 			if (!ViewPolicy.IsValid())
 			{
 				return;
 			}
 
+			FABTSStylizedEnvironmentParameters SharedEnvironment;
+			const bool bHasEnvironment =
+				FABTSStylizedRenderingControl::
+					TryGetEnvironmentParametersOnAnyThread(SharedEnvironment);
+			const FABTSStylizedEnvironmentParameters Environment =
+				bHasEnvironment
+					? ResolveEnvironmentForViewProfile(
+						SharedEnvironment,
+						ViewPolicy.EnvironmentProfile)
+					: FABTSStylizedEnvironmentParameters();
+			if (Pass == EPostProcessingPass::AfterDOF && bHasEnvironment)
+			{
+				const bool bReplaceEnvironmentBackground =
+					ViewPolicy.bReplaceEnvironmentBackground;
+				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
+					[Environment, bReplaceEnvironmentBackground](
+						FRDGBuilder& GraphBuilder,
+						const FSceneView& View,
+						const FPostProcessMaterialInputs& Inputs)
+					{
+						return FABTSStylizedToneSceneViewExtension::AddStarPass(
+							GraphBuilder,
+							View,
+							Inputs,
+							Environment,
+							bReplaceEnvironmentBackground);
+					});
+			}
+
 			if (Pass == EPostProcessingPass::AfterDOF
-				&& ViewPolicy.bApplyOutline)
+				&& ViewPolicy.bApplyOutline
+				&& FABTSStylizedRenderingControl::IsOutlinePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedOutlineProfileParameters OutlineProfile =
 					FABTSStylizedRenderingControl::GetOutlineProfileParameters(
@@ -361,8 +683,9 @@ namespace ABTSStylizedToneViewExtensionPrivate
 							bAllowSelectiveStencil);
 					});
 			}
-			else if (Pass == EPostProcessingPass::Tonemap
-				&& ViewPolicy.bApplyTone)
+			if (Pass == EPostProcessingPass::Tonemap
+				&& ViewPolicy.bApplyTone
+				&& FABTSStylizedRenderingControl::IsTonePassEnabledOnAnyThread())
 			{
 				const FABTSStylizedToneProfileParameters ToneProfile =
 					FABTSStylizedRenderingControl::GetToneProfileParameters(
@@ -372,7 +695,8 @@ namespace ABTSStylizedToneViewExtensionPrivate
 						GetSceneCaptureToneNormalizationFloor(
 							ViewPolicy.Profile);
 				InOutPassCallbacks.AddDefaulted_GetRef().BindLambda(
-					[ToneProfile, ToneNormalizationFloor](
+					[ToneProfile, ToneNormalizationFloor, Environment, bHasEnvironment,
+						bReplaceEnvironmentBackground = ViewPolicy.bReplaceEnvironmentBackground](
 						FRDGBuilder& GraphBuilder,
 						const FSceneView& View,
 						const FPostProcessMaterialInputs& Inputs)
@@ -382,7 +706,10 @@ namespace ABTSStylizedToneViewExtensionPrivate
 							View,
 							Inputs,
 							ToneProfile,
-							ToneNormalizationFloor);
+							ToneNormalizationFloor,
+							Environment,
+							bHasEnvironment,
+							bReplaceEnvironmentBackground);
 					});
 			}
 		}
@@ -402,6 +729,7 @@ namespace ABTSStylizedToneViewExtensionPrivate
 
 	TSharedPtr<FABTSStylizedToneSceneViewExtension, ESPMode::ThreadSafe>
 		GViewExtension;
+
 }
 
 void ABTSStylizedToneViewExtension::Initialize()

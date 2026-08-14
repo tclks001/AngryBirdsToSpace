@@ -1,10 +1,10 @@
 # ABTS 三渲二与全局风格化渲染设计
 
-> 状态：调研与方案冻结稿；2026-08-04 建立。T0 自动视觉/GPU 基线、T1 全局色调、T2-A 主视图描边与共享语义契约及 T2-B1 的 M3/M11、共享鸟/当前弹弓和三类画中画接线均已通过自动门、真实 RHI 与用户可见 PIE 验收。M7 在 Beam-C3 完成前保持 fail closed，后续以 T2-B2 补入。详见 [T2-B1 设计](ABTSToonStylizedRenderingT2B1.md)。
+> 状态：调研与方案冻结稿；2026-08-12 更新。T0～T2 的非 M7 路线、T3-A0/A1/A2/A3 非 M7 材质基线、T4-A0/A1 和 T4-A2.1～A2.4 均已完成，其中 T4-A2 已冻结；M7 继续 fail closed。T4-A3.1 高空连续星空过渡已通过用户实际飞行 PIE，当前推进 A3.2 三套环境 Profile 正式装配，随后为 A3.3 M11 异常恢复；T4-B 联合校色尚未开始。
 >
 > 适用版本：Unreal Engine 5.8，项目唯一引擎路径为 `C:\Program Files\Epic Games\UE_5.8`。
 >
-> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
+> 相关文档：[T0 自动视觉基线](ABTSToonVisualCaptureT0.md) · [T1 全局色调](ABTSToonStylizedRenderingT1.md) · [T2-A 主视图描边与契约](ABTSToonStylizedRenderingT2A.md) · [T2-B1 选择性语义与画中画](ABTSToonStylizedRenderingT2B1.md) · [T2-C1 无 M7 动态与画中画回归](ABTSToonStylizedRenderingT2C1.md) · [T3-A0 共享材质契约](ABTSToonStylizedRenderingT3A0.md) · [T4 球面环境与光照](ABTSToonStylizedRenderingT4.md) · [主设计稿](AngryBirdsToSpaceGameDesign.md) · [低模资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [M3 地形表现](M3TaskGraphTerrainPresentationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [M11 v2 终局优化](M11V2FinaleOptimizationDesign.md)
 
 ## 1. 结论先行
 
@@ -311,16 +311,33 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 
 ### Phase T3：材质族迁移
 
-- M3：只适配地表与自有 HISM 材质，保留 LUT/MID 契约；
-- M7：只适配建筑木/石/钢/玻璃材质及破坏表现；
-- M11：只适配助推行星、UFO 与终局专有表现；
-- Integration：CuteBird、弹弓共享材质、PP/MPC、公共地图、默认绑定和最终 Profile。
+T3 不再把“所有材质族同时完成”作为开工条件。M7 Beam-C3 长期开发期间，非 M7 材质族按下列切片推进；阶段名代表所有权和验收范围，不代表可以绕过最终全量门：
+
+| 切片 | 唯一写入者 | 内容 | 当前准入/退出条件 |
+| --- | --- | --- | --- |
+| T3-A0 共享契约 | Integration | 材质族 ID、参数名、所有权、可逆 Style Off、诊断与自动化 | 不创建或绑定风格材质；契约与恢复测试通过后退出 |
+| [T3-A1 地形与自然物](M3ToonStylizedRenderingT3A1.md) | M3 | SDF 地表、树木、岩石 HISM | 保留全部 `M3_*` LUT/MID 注入；只写 M3 自有代码/资产 |
+| [T3-A2 鸟与弹弓](ABTSToonStylizedRenderingT3A2.md) | Integration | CuteBird 身体/脸部、四档弹弓桩/弦/袋 | 不改变鸟槽位、M6 标定档、碰撞或物理材质 |
+| [T3-A3 终局资产](M11ToonStylizedRenderingT3A3.md) | M11 | 三颗助推行星、UFO、终局专有表面 | 只写 `Content/M11/**`、`Content/StaticMesh/UFO/**` 及 M11 自有适配器 |
+| T3-B 建筑材质 | M7 | 木/石/钢/玻璃、弱点、破坏后砖块与碎片 | Beam-C3 形成干净提交后才开始；其他工作树不得代写 |
+| T3-C 全量冻结 | Integration | 汇合全部材质族、最终 Profile、GPU 与可见 PIE | T2-B2/T2-C2 和 T3-B 均已接入；完整视觉/确定性/性能门通过 |
+
+调度约束：
+
+- T3-A0/A1/A2/A3 可以先于 M7 接入完成独立验收，但不得据此宣布“完整 T3 通过”或冻结最终 GPU 基线；
+- T2-B2/T2-C2 仍是完整 T2 和 T3-C 的正式前置门，M7 不在位时继续 fail closed，不使用默认建筑材质冒充已适配；
+- T3-A1 与 T3-A3 只能消费 T3-A0 的公共头文件，不得修改共享注册表；Integration 串行接收各自的只读绑定；
+- 每个新增 `.uasset/.umap` 继续执行唯一写入者规则。优先在 `Content/M3/Toon/**`、`Content/M11/Toon/**` 和 Integration 自有 `Content/Toon/Shared/**` 新建资产，避免多工作树覆盖既有二进制；
+- `TOON-T2A-002` 的地形远端粗褶皱仍属于 T4 光照/阴影隔离。T3 改变 Roughness/Specular 后即使症状暂时减轻，也不得关闭该问题或继续用轮廓阈值补偿。
 
 ### Phase T4：环境与光照
 
-- 先冻结 T1–T3 的风格基线，再由 Integration 处理光照、球面雾云与高空星空；
-- 环境改造不得与 M3 世界生成、M11 轨迹或镜头优化混为同一提交；
-- 自定义 Shading Model 只有在 T3 验收明确失败、且项目允许改为源码引擎后才能立项。
+- **T4-A0**：建立主星中心/半径、太阳方向和 Profile 的只读快照；固定白昼、晨昏、夜面、高空和终局五点；完成 `TOON-T2A-002` 的六变体 Tone/Outline/Shadow 隔离矩阵，但不调最终参数；
+- **T4-A1**：关闭不相容的全局 Z 高度雾，接入球心 Sky Atmosphere、唯一 Atmosphere Sun、固定曝光，以及不使用 EXR/逐星循环的确定性程序化 HDR 星场；
+- **T4-A2**：原生 Volumetric Cloud 与双层全屏云壳已退役；A2.1～A2.4 的低模全球云场、有界穿云、PIP/AVI 与性能路线均已验收冻结；R0/R1/B3B6/v44 只作为技术历史和实现身份；
+- **T4-A3**：A3.1 高空连续过渡已验收；A3.2 将 `GroundDay`、`SatelliteGuide`、`FinaleSpace` 装配到普通世界、月面环境背景与 M11 终局，A3.3 再完成异常中断快照恢复；
+- **T4-B**：回开 T3 参数联合校色，解决地形褶皱；M7 仍可延后，但不得在缺失 T3-B 时宣布全项目冻结；
+- 环境改造不得与 M3 世界生成、M11 轨迹或镜头优化混为同一提交；自定义 Shading Model 只有在安装版路线明确失败且项目允许源码引擎后才能立项。完整合同、星场算法、门槛与命令见 [T4 详稿](ABTSToonStylizedRenderingT4.md)。
 
 ## 10. 正式验收门槛
 
@@ -339,6 +356,7 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 - 不改变碰撞、Custom Depth 以外的 Gameplay Trace、物理材质或 Tick 顺序；
 - 不因风格化隐藏落点、弱点、槽位、资源、道路边界或轨迹偏转信息；
 - 风格资源缺失时 fail soft：回退原渲染，不阻断 WorldReady 或玩法流程。
+- T3-A 系列的 `Style Off` 必须恢复进入 T3 前的精确材质接口；外部系统已接管同一材质槽时，风格注册表记录冲突并放弃覆盖，禁止“恢复”掉外部改动。
 
 ### 10.3 性能与工程门槛
 
@@ -357,7 +375,7 @@ GroundDay Profile 保持明亮；Satellite Profile 可看到稀疏星空但仍�
 4. T2-A 增加最终主视图的 1–2 像素 Depth/Normal 轮廓，并冻结对象/视图语义及 Stencil 保留区，但不产生 Custom Depth；
 5. T2-B1 先给当前鸟、弹弓、卫星目标和终局目标接入选择性 Stencil，并显式接通地面/月面/终局 PIP；M7 未就绪时不猜测建筑语义；
 6. T2-B2 在 M7 稳定后补建筑主体/弱点，T2-C 再增加瞄准/PIP、破坏过程和动态截图；
-7. 达到稳定性与性能门槛后，再决定是否迁移第一批材质族。
+7. 达到稳定性与性能门槛后，先实施 [T3-A0 共享材质契约](ABTSToonStylizedRenderingT3A0.md)，再按 T3-A1/A2/A3 独立迁移非 M7 材质族；M7 在 Beam-C3 完成后补 T3-B，最终由 T3-C 联合冻结。
 
 这一步完成后应进行一次明确的美术决策：保留原渲染、采用柔和三渲二、或停止全局描边只保留色板/材质风格化。没有通过这道决策门，不进入引擎源码分叉。
 

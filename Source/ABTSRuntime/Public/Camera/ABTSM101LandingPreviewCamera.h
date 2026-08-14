@@ -64,8 +64,15 @@ public:
 		FVector& OutCameraWorld,
 		FVector& OutLookDirection,
 		FVector& OutScreenUp);
+	/** Pure discontinuity contract shared by the runtime capture and automation. */
+	static bool DoesPreviewPoseRequireCameraCut(
+		const FTransform& PreviousTransform,
+		const FTransform& CurrentTransform,
+		float CameraDistanceCM);
 
 	bool IsPreviewActive() const { return bPreviewActive; }
+	/** True only after the persistent capture history has produced a publishable frame. */
+	bool HasPublishedPreviewFrame() const { return bHasPublishedCapture; }
 	bool IsSatellitePreviewActive() const
 	{
 		return PreviewSubject == EABTSM101PreviewSubject::SatelliteLanding;
@@ -92,6 +99,7 @@ private:
 		const FABTSM6TrajectoryPreview& Preview,
 		int32 CenterSegmentStartIndex);
 	void SetPreviewSubject(EABTSM101PreviewSubject NewSubject);
+	void CaptureWithPersistentHistory(const FTransform& CaptureTransform);
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M10.1|Landing Preview")
 	TObjectPtr<USceneComponent> Root;
@@ -106,6 +114,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> RenderTarget;
 
+	/** Hidden same-size target used while temporal lighting/shadow history settles. */
+	UPROPERTY(Transient)
+	TObjectPtr<UTextureRenderTarget2D> WarmupRenderTarget;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TrajectoryMaterial;
 
@@ -114,4 +126,8 @@ private:
 	EABTSM101PreviewSubject PreviewSubject =
 		EABTSM101PreviewSubject::None;
 	bool bPreviewActive = false;
+	bool bHasPublishedCapture = false;
+	bool bHasLastCaptureTransform = false;
+	int32 RemainingWarmupCaptures = 0;
+	FTransform LastCaptureTransform = FTransform::Identity;
 };

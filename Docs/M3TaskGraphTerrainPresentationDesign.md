@@ -69,7 +69,7 @@ R-2 Pool 不替换首周 `GeneratedCellStates`、`GeneratedEdgeStates`、`PCGSum
 
 树石散布既在源 Cell 上检查保护标记，也在偏移后的最终落点重新解析 Cell 并复查。道路、ActiveRole、Target Footprint、NoRoad、攻击走廊和水体禁止装饰侵入。完整实现状态、100 Seed 证据与待集成门禁见 [M3R-5](M3PCGMapImprovementPlan.md#148-m3r-5实现-biomedistrict-与-playable-envelope-表现)。
 
-显式预览时，材质桥按 `VisualBeatId/AccentVariantId/ThemeVariantId` 对 Cell LUT 做低幅明暗调制；HISM 用相同字段调整树石疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell、全部实际树石实例均经过 Beat 消费路径，因而 20–45 m 节拍不是只存在于数据快照。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
+地表材质不再消费 `VisualBeatId/AccentVariantId/ThemeVariantId`。`CellVisualLUT` 对每个有效陆地 `TerrainType` 只写入一套固定基础色，且不在 Cell 中心预先采样边界混色；同色区域内部因此没有 Beat/Theme 深浅块，异色区域仍完全复用 TerrainType 线段 SDF 的平滑分界。候选预览的 Cell/Edge/VisualField 由 Planet 持久持有，材质桥和 M10 小地图颜色查询在 PreviewAuthority 生效时消费同一个活动 VisualField；关闭预览时共同回到兼容 VisualField。该表现颜色切换不改变仍由兼容世界负责的 `QuerySurface`、物理或稳定合同。月度 DTO、Hash 和 Visual Beat 调试边界继续保留，供 HISM 等非地表表现消费；当前树石 HISM 仍用这些字段调整疏密、随机序列和尺度。Runtime 必须证明全部材质 Cell 已走固定色板路径并明确报告 `VisualBeatConsumed=0/ThemeVariantConsumed=0`，同时证明全部实际树石实例经过 HISM Beat 消费路径。Editor Debug Overlay 可分别显示 Biome 点、Envelope 边界、Visual Beat 边界以及 ActiveRole/DeepWild 覆盖。PIE 中按 `F7` 可独立切换逻辑区域快捷叠层：Target Footprint 使用红色球点，Attack Corridor 使用橙色点线；叠层只读取显式选择的预览 Candidate，不存在精确 Candidate 时 fail closed 并显示启动参数提示。命令行 `-ABTSM3R5LogicRegions` 可让该叠层随 PIE 启动。
 
 ### 2.5 M3R-5.1 卫星与 E5 预览叠层
 
@@ -312,11 +312,13 @@ M3 不生成建筑 Actor，也不把 HISM 当施工台。`BuildingSpawnSites` �
 
 水体的逻辑标记仍来自 `FABTSM3CellEdgeState::Water`，但表现层不得把 `bWater` 当作整块 Cell 的填充区域。`UABTSM3TerrainMaterialBridge` 为每条水边生成 `M3_RiverSegmentLUT`，每个局部槽的第一像素存起点方向与半宽，第二像素存终点方向与水体类型。
 
-线段端点必须根据 Edge 的语义决定：具有 `DownstreamCellId` 且不承担阻断职责的自然水文边，中心线连接 `CellA.UnitCenter -> CellB.UnitCenter`，相邻下游边因此共享 Cell 中心并形成连续水道；`bBlocksOnFoot` 的 Gameplay 割集边则用 A/B 两侧共同邻居构造的两个 dual corner，因为这些公共边首尾相接后才形成连续的阻断水带。不可把自然水文边也转换成 dual edge——dual edge 与 A→B 流向近似垂直，会让连续河网变成一排横向短条纹。
+线段端点必须根据 Edge 的语义决定：具有 `DownstreamCellId` 且不承担阻断职责的自然水文边，中心线连接 `CellA.UnitCenter -> CellB.UnitCenter`，相邻下游边因此共享 Cell 中心并形成连续水道；`bBlocksOnFoot` 的 Gameplay 割集边先用 A/B 两侧共同邻居构造两个共享 dual corner，再把两个端点投影到 Hydrology 生成该割集时记录的 `WaterBarrierPlaneNormal` 大圆切面。投影只消除不规则 Cell 网格带来的高频左右摆动，不改变闭合图割、`CellEdgeKey`、桥点、水体类型或半宽；每条平滑段仍保存其 `SourceEdgeKey`，材质、CPU SDF 和 M8 单边桥位查询因此获得完全相同的中心线。不可把自然水文边也转换成或投影为割集 dual edge——dual edge 与 A→B 流向近似垂直，会让连续河网变成一排横向短条纹。
 
 材质 Custom 节点查询当前 Cell 的固定 24 个局部河段槽位，使用 `saturate(dot(P-A,B-A)/|B-A|²)` 将垂足限制在线段内，计算像素到线段的最近距离；距离小于半宽时混合 `M3_RiverColor`。C++ 按“河段半宽 + 颜色 BlendWidth + Cell 外接半径”计算每个 Cell 必须持有的河段，并按距离保留最近 24 条；运行日志中的 `DroppedLocalRefs` 必须为 0。这样不会在 LUT Cell 行切换处把宽河硬裁成一截一截，同时也避免每像素遍历全图河网。`M3_BoundarySegmentLUT` 仍只负责地形/道路边界，不能承担河流主体。
 
 几何高度同样按到最近河流线段的距离局部下凹，`GetCellHeightCM()` 不再依据 `bWater` 对整个 Cell 降低半径，避免产生六边形凹陷。
+
+`[ABTS][M3][RiverSDF]` 必须同时报告 `BarrierDuals`、`SmoothedBarrierSegments` 与 `BarrierSmoothingVersion`。当前版本要求所有生成出来的阻断河 dual 段都成功投影，且 `DroppedLocalRefs=0`；自然汇流河数量与几何不属于本轮平滑范围。该处理不新增 LUT 槽、纹理或逐像素采样，只在 Rebuild 时对每个阻断河段执行两次向量平面投影。
 
 ### 道路中心线与地形轮廓 SDF
 

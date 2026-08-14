@@ -130,6 +130,50 @@ bool ABTSM11IsResettableFinaleState(
 	}
 }
 
+EABTSM11FinaleEnvironmentStage ABTSM11ResolveFinaleEnvironmentStage(
+	const EABTSM11FinaleInteractionState State,
+	const double PlaybackElapsedSeconds,
+	const FABTSM11TrajectoryResult* ReleasedTrajectoryResult)
+{
+	switch (State)
+	{
+	case EABTSM11FinaleInteractionState::Launched:
+	case EABTSM11FinaleInteractionState::Failed:
+		if (FMath::IsFinite(PlaybackElapsedSeconds)
+			&& PlaybackElapsedSeconds >= 0.0
+			&& ReleasedTrajectoryResult != nullptr
+			&& ReleasedTrajectoryResult->ValidationHash != 0)
+		{
+			const FABTSM11TrajectoryEvent* DeepSpaceEntry =
+				ReleasedTrajectoryResult->FindAssistEvent(
+					EABTSM11TrajectoryEventType::AssistEnter,
+					1);
+			if (DeepSpaceEntry != nullptr
+				&& FMath::IsFinite(DeepSpaceEntry->TimeSeconds)
+				&& DeepSpaceEntry->TimeSeconds >= 0.0
+				&& PlaybackElapsedSeconds
+					>= DeepSpaceEntry->TimeSeconds)
+			{
+				return EABTSM11FinaleEnvironmentStage::DeepSpace;
+			}
+		}
+		return EABTSM11FinaleEnvironmentStage::AtmosphereTransition;
+
+	case EABTSM11FinaleInteractionState::TargetHit:
+		return EABTSM11FinaleEnvironmentStage::DeepSpace;
+
+	case EABTSM11FinaleInteractionState::Recovering:
+		return EABTSM11FinaleEnvironmentStage::Recovering;
+
+	case EABTSM11FinaleInteractionState::Locked:
+	case EABTSM11FinaleInteractionState::Ready:
+	case EABTSM11FinaleInteractionState::Aiming:
+	case EABTSM11FinaleInteractionState::ReleasePending:
+	default:
+		return EABTSM11FinaleEnvironmentStage::GroundLaunch;
+	}
+}
+
 bool ABTSM11MapLocalLaunchDirectionToInput(
 	const FABTSM11FinaleLaunchModel& LaunchModel,
 	const FVector3d& LocalLaunchDirection,
@@ -665,6 +709,17 @@ double FABTSM11FailurePresentationTimeline::GetBlackoutAlpha() const
 		1.0);
 }
 
+double FABTSM11FailurePresentationTimeline::GetSecondsUntilRestore() const
+{
+	if (!bStarted || bRestoreWorldIssued)
+	{
+		return 0.0;
+	}
+	const double RestoreTime =
+		Config.ReadableHoldSeconds + Config.FadeToBlackSeconds;
+	return FMath::Max(0.0, RestoreTime - ElapsedSeconds);
+}
+
 EABTSM11FailurePresentationPhase
 FABTSM11FailurePresentationTimeline::GetPhase() const
 {
@@ -857,6 +912,50 @@ double ABTSM11ResolveFailurePresentationEndTime(
 			OutsideAlpha);
 	}
 	return Plan.DurationSeconds;
+}
+
+bool ABTSM11ResolveFailurePresentationSchedule(
+	const double PlaybackStartTimeSeconds,
+	const double PlaybackEndTimeSeconds,
+	const double PlaybackTimeScale,
+	const FABTSM11FailurePresentationConfig& DesiredConfig,
+	double& OutFailureStartTimeSeconds,
+	FABTSM11FailurePresentationConfig& OutScheduledConfig)
+{
+	if (!FMath::IsFinite(PlaybackStartTimeSeconds)
+		|| !FMath::IsFinite(PlaybackEndTimeSeconds)
+		|| !FMath::IsFinite(PlaybackTimeScale)
+		|| PlaybackEndTimeSeconds <= PlaybackStartTimeSeconds
+		|| PlaybackTimeScale <= 0.0
+		|| !DesiredConfig.IsValid())
+	{
+		return false;
+	}
+	const double DesiredRestoreLeadSeconds =
+		DesiredConfig.ReadableHoldSeconds
+		+ DesiredConfig.FadeToBlackSeconds;
+	const double AvailablePresentationSeconds =
+		(PlaybackEndTimeSeconds - PlaybackStartTimeSeconds)
+		/ PlaybackTimeScale;
+	const double ScheduledRestoreLeadSeconds = FMath::Min(
+		DesiredRestoreLeadSeconds,
+		AvailablePresentationSeconds);
+	if (!FMath::IsFinite(ScheduledRestoreLeadSeconds)
+		|| ScheduledRestoreLeadSeconds <= 0.0)
+	{
+		return false;
+	}
+	const double LeadScale = ScheduledRestoreLeadSeconds
+		/ DesiredRestoreLeadSeconds;
+	OutScheduledConfig = DesiredConfig;
+	OutScheduledConfig.ReadableHoldSeconds *= LeadScale;
+	OutScheduledConfig.FadeToBlackSeconds *= LeadScale;
+	OutFailureStartTimeSeconds = PlaybackEndTimeSeconds
+		- ScheduledRestoreLeadSeconds * PlaybackTimeScale;
+	return OutScheduledConfig.IsValid()
+		&& FMath::IsFinite(OutFailureStartTimeSeconds)
+		&& OutFailureStartTimeSeconds >= PlaybackStartTimeSeconds
+		&& OutFailureStartTimeSeconds < PlaybackEndTimeSeconds;
 }
 
 bool ABTSM11ClipDiagramSegmentToUnitCircle(

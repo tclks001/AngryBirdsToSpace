@@ -26,16 +26,28 @@ enum class EABTSStylizedViewClass : uint8
 	MainWorld = 0,
 	GroundLandingPreview,
 	SatelliteLandingPreview,
-	FinaleRemotePreview
+	FinaleRemotePreview,
+	/** Main-world-equivalent offscreen view used only by the M11 AVI recorder. */
+	FinaleCinematicCapture,
+	/** PIE-equivalent M11 recorder view; resolves the live MainWorld profile per frame. */
+	FinaleGameplayMirrorCapture
 };
 
 /** Read-only rendering policy resolved by Integration from a semantic view class. */
 struct ABTSRENDER_API FABTSStylizedViewPolicy
 {
+	/** Tone, outline and fixed exposure used for visible geometry. */
 	EABTSStylizedRenderProfile Profile = EABTSStylizedRenderProfile::GroundDay;
+	/** Atmosphere/star background profile; may differ from the surface profile. */
+	EABTSStylizedRenderProfile EnvironmentProfile =
+		EABTSStylizedRenderProfile::GroundDay;
 	bool bApplyTone = true;
 	bool bApplyOutline = true;
 	bool bAllowSelectiveStencil = false;
+	/** Capture the same world light/shadow direction as the main view. */
+	bool bUseWorldLighting = true;
+	/** Replaces an empty SceneCapture background with the profile sky. */
+	bool bReplaceEnvironmentBackground = false;
 
 	bool IsValid() const;
 };
@@ -54,10 +66,25 @@ public:
 	static bool RequiresSelectiveStencil(EABTSStylizedObjectClass ObjectClass);
 	static uint8 ResolveStencilValueForRenderer(EABTSStylizedObjectClass ObjectClass);
 
+	/**
+	 * Integration-only composite stencil outside the 1..7 selective gameplay
+	 * allocation. All logical clouds share this outline class, while generation,
+	 * LOD and diagnostics keep their logical identity entirely CPU-side.
+	 */
+	static uint8 ResolveCloudCompositeStencilValueForRenderer();
+	static bool IsCloudCompositeStencilValueForRenderer(uint8 StencilValue);
+	static bool ShouldSuppressInternalOutlineBetweenStencilValues(
+		uint8 CenterStencilValue,
+		uint8 SampleStencilValue);
+
 	static FABTSStylizedViewPolicy ResolveViewPolicy(
 		EABTSStylizedViewClass ViewClass,
 		EABTSStylizedRenderProfile MainWorldProfile =
 			EABTSStylizedRenderProfile::GroundDay);
+	/** M11's explicit deep-space stage has precedence without mutating the diagnostic CVar. */
+	static EABTSStylizedRenderProfile ResolveMainWorldProfile(
+		bool bFinaleDeepSpace,
+		EABTSStylizedRenderProfile ConfiguredProfile);
 
 	/** T2-A deliberately renders only the final main view; previews are wired in T2-B. */
 	static bool IsViewClassImplemented(EABTSStylizedViewClass ViewClass);

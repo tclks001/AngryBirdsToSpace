@@ -33,6 +33,9 @@
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
+#include "Rendering/ABTSStylizedRenderingTypes.h"
+#include "Rendering/ABTST4LowPolyCloudPrototype.h"
+#include "Rendering/ABTSStylizedRenderingWorldSubsystem.h"
 #include "DynamicRHI.h"
 #include "GPUProfiler.h"
 #include "RHIGlobals.h"
@@ -235,11 +238,19 @@ bool UABTSToonVisualCaptureSubsystem::ShouldCreateSubsystem(UObject* Outer) cons
 	FString Suite;
 	const bool bExplicitlyRequested =
 		FParse::Param(CommandLine, TEXT("ABTSToonT0Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A0Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A1Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A2Capture"))
+		|| FParse::Param(CommandLine, TEXT("ABTSToonT4A3Capture"))
 		|| (FParse::Value(
 			CommandLine,
 			TEXT("ABTSVisualCaptureSuite="),
 			Suite)
-			&& Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase));
+			&& (Suite.Equals(TEXT("ToonT0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A0"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A1"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A2"), ESearchCase::IgnoreCase)
+				|| Suite.Equals(TEXT("ToonT4A3"), ESearchCase::IgnoreCase)));
 	return bExplicitlyRequested && Super::ShouldCreateSubsystem(Outer);
 }
 
@@ -426,10 +437,25 @@ bool UABTSToonVisualCaptureSubsystem::DoesSupportWorldType(
 
 void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 {
+	if (RunConfig.ExpectedScreenPercentage != 0)
+	{
+		if (IConsoleVariable* ScreenPercentage =
+			IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
+		{
+			SavedScreenPercentage = ScreenPercentage->GetFloat();
+			SavedScreenPercentageSetBy =
+				ScreenPercentage->GetFlags() & ECVF_SetByMask;
+			ScreenPercentage->Set(
+				static_cast<float>(RunConfig.ExpectedScreenPercentage),
+				ECVF_SetByCode);
+			bScreenPercentageStateCaptured = true;
+		}
+	}
 	CaptureStartRealSeconds = FPlatformTime::Seconds();
 	Phase = EABTSToonVisualCapturePhase::WaitingForWorld;
 	RunId = FString::Printf(
-		TEXT("%s_%s_%u"),
+		TEXT("%s_%s_%s_%u"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 		*FDateTime::UtcNow().ToString(TEXT("%Y%m%dT%H%M%SZ")),
 		FPlatformProcess::GetCurrentProcessId());
@@ -440,7 +466,7 @@ void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 		Root = FPaths::Combine(
 			FPaths::ProjectSavedDir(),
 			TEXT("ABTSVisualCaptures"),
-			TEXT("ToonT0"));
+			FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
 	}
 	else if (FPaths::IsRelative(Root))
 	{
@@ -463,7 +489,8 @@ void UABTSToonVisualCaptureSubsystem::BeginCapture(UWorld& World)
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][ToonT0][Begin] Map=%s Mode=%s Build=%s ExpectedSeed=%d Resolution=%dx%d ExactResolution=%d GPUSamples=%d Output=%s"),
+		TEXT("[ABTS][%s][Begin] Map=%s Mode=%s Build=%s ExpectedSeed=%d Resolution=%dx%d ExactResolution=%d GPUSamples=%d Output=%s"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 		*World.GetMapName(),
 		FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 		*RunConfig.BuildIdentity,
@@ -808,10 +835,120 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		return EWorldResolveResult::Failed;
 	}
 
-	const TArray<FABTSToonVisualCapturePointDefinition> Definitions =
-		FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
+	TArray<FABTSToonVisualCapturePointDefinition> Definitions =
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3
+			? FABTSToonVisualCaptureMath::BuildT4A3Catalogue()
+		: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+			? FABTSToonVisualCaptureMath::BuildT4A2Catalogue()
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+			? FABTSToonVisualCaptureMath::BuildT4A1Catalogue()
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+				? FABTSToonVisualCaptureMath::BuildT4A0Catalogue()
+				: FABTSToonVisualCaptureMath::BuildDefaultCatalogue();
+	VariantDefinitions =
+		FABTSToonVisualCaptureMath::BuildVariantCatalogue(RunConfig.Suite);
+	auto ApplyNameFilter = [&OutReason](
+		auto& Values,
+		const TArray<FName>& Requested,
+		auto GetId,
+		const TCHAR* Label)
+	{
+		if (Requested.IsEmpty())
+		{
+			return true;
+		}
+		using ValueType = typename std::decay_t<decltype(Values)>::ElementType;
+		TArray<ValueType> Filtered;
+		Filtered.Reserve(Requested.Num());
+		for (const FName RequestedId : Requested)
+		{
+			const ValueType* Match = Values.FindByPredicate(
+				[RequestedId, &GetId](const ValueType& Value)
+				{
+					return GetId(Value) == RequestedId;
+				});
+			if (Match == nullptr)
+			{
+				OutReason = FString::Printf(
+					TEXT("Requested %s '%s' is not present in the suite catalogue."),
+					Label,
+					*RequestedId.ToString());
+				return false;
+			}
+			Filtered.Add(*Match);
+		}
+		Values = MoveTemp(Filtered);
+		return true;
+	};
+	if (!ApplyNameFilter(
+		Definitions,
+		RunConfig.RequestedPointIds,
+		[](const FABTSToonVisualCapturePointDefinition& Value)
+		{
+			return Value.PointId;
+		},
+		TEXT("capture point"))
+		|| !ApplyNameFilter(
+			VariantDefinitions,
+			RunConfig.RequestedVariantIds,
+			[](const FABTSToonDiagnosticVariantDefinition& Value)
+			{
+				return Value.VariantId;
+			},
+			TEXT("capture variant")))
+	{
+		return EWorldResolveResult::Failed;
+	}
+	if (Definitions.IsEmpty() || VariantDefinitions.IsEmpty())
+	{
+		OutReason = TEXT("Capture point or variant catalogue is empty.");
+		return EWorldResolveResult::Failed;
+	}
+	for (const FABTSToonDiagnosticVariantDefinition& Variant
+		: VariantDefinitions)
+	{
+		if (!Variant.IsValid())
+		{
+			OutReason = TEXT("Capture variant catalogue contains an invalid entry.");
+			return EWorldResolveResult::Failed;
+		}
+	}
+	const IConsoleVariable* ScreenPercentage =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"));
+	if (RunConfig.ExpectedScreenPercentage != 0
+		&& (ScreenPercentage == nullptr
+		|| !FMath::IsNearlyEqual(
+			ScreenPercentage->GetFloat(),
+			static_cast<float>(RunConfig.ExpectedScreenPercentage),
+			0.01f)))
+	{
+		OutReason = FString::Printf(
+			TEXT("r.ScreenPercentage does not match the A2.4 identity: Actual=%s Expected=%d."),
+			ScreenPercentage != nullptr
+				? *FString::SanitizeFloat(ScreenPercentage->GetFloat())
+				: TEXT("Unavailable"),
+			RunConfig.ExpectedScreenPercentage);
+		return EWorldResolveResult::Failed;
+	}
 	CaptureCatalogueHash =
 		FABTSToonVisualCaptureMath::ComputeCatalogueHash(Definitions);
+	VariantCatalogueHash =
+		FABTSToonVisualCaptureMath::ComputeVariantCatalogueHash(
+			VariantDefinitions);
+	FString EnvironmentFailure;
+	if (!FABTSToonEnvironmentResolver::ResolveWorldSnapshot(
+		*World,
+		EABTSStylizedRenderProfile::GroundDay,
+		EnvironmentSnapshot,
+		&EnvironmentFailure))
+	{
+		OutReason = FString::Printf(
+			TEXT("T4 environment contract is unavailable: %s"),
+			EnvironmentFailure.IsEmpty()
+				? TEXT("Unknown")
+				: *EnvironmentFailure);
+		return EWorldResolveResult::Failed;
+	}
 	ResolvedPoints.Reset();
 	ResolvedPoints.Reserve(Definitions.Num());
 
@@ -824,6 +961,25 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 	{
 		OutReason = TEXT("Unable to resolve the semantic Start-road frame.");
 		return EWorldResolveResult::Failed;
+	}
+	const FVector EnvironmentReferenceUp =
+		(StartTransform.GetLocation()
+			- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+	FVector EnvironmentDawnUp = FVector::VectorPlaneProject(
+		EnvironmentReferenceUp,
+		EnvironmentSnapshot.SunDirectionToSunWorld).GetSafeNormal();
+	if (EnvironmentDawnUp.IsNearlyZero())
+	{
+		FVector AxisA;
+		FVector AxisB;
+		EnvironmentSnapshot.SunDirectionToSunWorld.FindBestAxisVectors(
+			AxisA,
+			AxisB);
+		EnvironmentDawnUp = AxisA;
+	}
+	if (FVector::DotProduct(EnvironmentDawnUp, EnvironmentReferenceUp) < 0.0)
+	{
+		EnvironmentDawnUp *= -1.0;
 	}
 
 	const FABTSGeneratedBuildingSite* SelectedSite = nullptr;
@@ -968,6 +1124,84 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		OutReason = TEXT("Finale local frame is unusable.");
 		return EWorldResolveResult::Failed;
 	}
+
+	auto BuildEnvironmentSurfacePoint = [
+		this,
+		&Planet,
+		&EnvironmentDawnUp](
+		const FVector& RequestedUp,
+		const FABTSToonVisualCapturePointDefinition& Definition,
+		FABTSToonResolvedCapturePoint& OutPoint,
+		FString& OutFailure)
+	{
+		const FVector Up = RequestedUp.GetSafeNormal();
+		if (Up.IsNearlyZero())
+		{
+			OutFailure = TEXT("Environment surface radial direction is degenerate.");
+			return false;
+		}
+		FVector Forward = FVector::VectorPlaneProject(
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			Up).GetSafeNormal();
+		if (Forward.IsNearlyZero())
+		{
+			Forward = FVector::VectorPlaneProject(
+				EnvironmentDawnUp,
+				Up).GetSafeNormal();
+		}
+		if (Forward.IsNearlyZero())
+		{
+			FVector FallbackRight;
+			Up.FindBestAxisVectors(Forward, FallbackRight);
+		}
+		const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
+		if (Forward.IsNearlyZero() || Right.IsNearlyZero())
+		{
+			OutFailure = TEXT("Environment surface tangent frame is degenerate.");
+			return false;
+		}
+		const double SurfaceRadiusCM =
+			Planet.GetSurfaceRadiusAtDirection(Up);
+		const FVector SurfaceLocation =
+			EnvironmentSnapshot.PlanetCenterWorld + Up * SurfaceRadiusCM;
+		OutPoint.LookAtWorld = SurfaceLocation
+			+ Forward * 320.0
+			+ Up * 120.0;
+		const FVector CameraLocation = OutPoint.LookAtWorld
+			- Forward * 1450.0
+			+ Right * 420.0
+			+ Up * 560.0;
+		if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+			CameraLocation,
+			OutPoint.LookAtWorld,
+			Up,
+			OutPoint.CameraWorldTransform,
+			&OutFailure))
+		{
+			return false;
+		}
+		OutPoint.SemanticIdentityHash =
+			ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+				EnvironmentSnapshot.IdentityHash,
+				static_cast<uint64>(Definition.Anchor));
+		return true;
+	};
+	const FABTSStylizedEnvironmentParameters CloudEnvironmentParameters =
+		FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			EABTSStylizedRenderProfile::GroundDay);
+	const TArray<FABTST4LowPolyCloudIslandDefinition> CloudDefinitions =
+		FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			CloudEnvironmentParameters.StarSeed ^ 0xC10DF13Du,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			CloudEnvironmentParameters.CloudBaseAltitudeCM,
+			CloudEnvironmentParameters.CloudLayerHeightCM);
+	const uint64 CloudLayoutHash =
+		FABTST4LowPolyCloudPrototype::ComputeLayoutHash(CloudDefinitions);
 
 	for (const FABTSToonVisualCapturePointDefinition& Definition : Definitions)
 	{
@@ -1146,6 +1380,776 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 					static_cast<uint64>(SatelliteSnapshot.TrajectoryCertificationHash));
 			break;
 		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentGroundDay:
+			if (!BuildEnvironmentSurfacePoint(
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				Definition,
+				Point,
+				CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			// Preserve the accepted deterministic camera position, but face due
+			// north on the spherical surface: project world +Z into the local
+			// tangent plane so the frame includes the daytime cloud horizon.
+			const FVector GroundDayCameraLocation =
+				Point.CameraWorldTransform.GetLocation();
+			const FVector GroundDayRadialUp = (GroundDayCameraLocation
+				- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+			FVector GroundDayNorth = FVector::VectorPlaneProject(
+				FVector::UpVector,
+				GroundDayRadialUp).GetSafeNormal();
+			if (GroundDayNorth.IsNearlyZero())
+			{
+				GroundDayNorth = EnvironmentDawnUp;
+			}
+			Point.LookAtWorld = GroundDayCameraLocation
+				+ GroundDayNorth * 10000.0;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				GroundDayCameraLocation,
+				Point.LookAtWorld,
+				GroundDayRadialUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentGroundDawn:
+			if (!BuildEnvironmentSurfacePoint(
+				EnvironmentDawnUp,
+				Definition,
+				Point,
+				CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSky:
+		{
+			// Frozen repro supplied by the T4-A1 PIE visual gate. Unlike a derived
+			// terminator approximation, this pose observes the exact sky sector that
+			// exposed the remaining staircase. UE's Details panel reports rotation
+			// as X=Roll, Y=Pitch, Z=Yaw; FRotator stores Pitch, Yaw, Roll.
+			const FVector ReportedCameraLocation(
+				7330.839531,
+				-8195.326369,
+				-2132.005920);
+			const FRotator ReportedCameraRotation(
+				41.294936,
+				59.050687,
+				-87.010167);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentBrightSkyBanding:
+		{
+			// Frozen bright-side repro supplied by the T4-A1 PIE visual gate.
+			// Details reports X=Roll, Y=Pitch, Z=Yaw; FRotator stores
+			// Pitch, Yaw, Roll.
+			const FVector ReportedCameraLocation(
+				5055.549427,
+				-9511.377996,
+				-4376.699690);
+			const FRotator ReportedCameraRotation(
+				82.960042,
+				151.889451,
+				35.775644);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorSunwardSky:
+		{
+			// Frozen PIE repro: the camera is on the night-side edge of the
+			// terminator and looks almost exactly toward the accepted sun vector.
+			// Details reports X=Roll, Y=Pitch, Z=Yaw.
+			const FVector ReportedCameraLocation(
+				8174.509529,
+				-7018.140929,
+				4234.994413);
+			const FRotator ReportedCameraRotation(
+				39.625340,
+				161.729072,
+				23.100288);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentTerminatorAntiSunwardSky:
+		{
+			// Frozen PIE repro: the camera is on the day-side edge of the
+			// terminator and looks almost exactly away from the accepted sun vector.
+			// Details reports X=Roll, Y=Pitch, Z=Yaw.
+			const FVector ReportedCameraLocation(
+				4378.023910,
+				-6442.873313,
+				8680.170513);
+			const FRotator ReportedCameraRotation(
+				-57.560810,
+				5.318501,
+				-41.056320);
+			Point.CameraWorldTransform = FTransform(
+				ReportedCameraRotation,
+				ReportedCameraLocation);
+			Point.LookAtWorld = ReportedCameraLocation
+				+ ReportedCameraRotation.Vector() * 10000.0;
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentGroundNight:
+			if (!BuildEnvironmentSurfacePoint(
+				-EnvironmentSnapshot.SunDirectionToSunWorld,
+				Definition,
+				Point,
+				CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			break;
+		case EABTSToonVisualCaptureAnchor::EnvironmentBacklitBirdParty:
+		{
+			FBox PartyBounds(EForceInit::ForceInit);
+			uint64 PartyIdentity = EnvironmentSnapshot.IdentityHash;
+			for (const AABTSM25BirdCharacter* Bird
+				: Parties[0]->GetPartyMembers())
+			{
+				if (!IsValid(Bird))
+				{
+					OutReason = TEXT("Backlit bird-party member is invalid.");
+					return EWorldResolveResult::Failed;
+				}
+				PartyBounds += Bird->GetComponentsBoundingBox(true);
+				PartyIdentity = ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					PartyIdentity,
+					static_cast<uint64>(Bird->GetBirdId()));
+			}
+			if (!PartyBounds.IsValid)
+			{
+				OutReason = TEXT("Backlit bird-party bounds are invalid.");
+				return EWorldResolveResult::Failed;
+			}
+			const FVector PartyCenter = PartyBounds.GetCenter();
+			const FVector RadialUp = (PartyCenter
+				- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+			FVector SunTangent = FVector::VectorPlaneProject(
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				RadialUp).GetSafeNormal();
+			if (SunTangent.IsNearlyZero())
+			{
+				SunTangent = ABTSToonVisualCaptureSubsystemPrivate::
+					MakeStablePlanarDirection(
+						StartTransform.GetUnitAxis(EAxis::X),
+						RadialUp,
+						EnvironmentDawnUp);
+			}
+			Point.LookAtWorld = PartyCenter + RadialUp * 65.0;
+			const double FitDistance = FMath::Clamp(
+				FABTSToonVisualCaptureMath::ComputePerspectiveFitDistanceCM(
+					PartyBounds.GetExtent().Size(),
+					Definition.FieldOfViewDegrees,
+					static_cast<double>(ActualResolution.X) / ActualResolution.Y,
+					1.35),
+				700.0,
+				1800.0);
+			const FVector CameraLocation = Point.LookAtWorld
+				- SunTangent * FitDistance
+				+ RadialUp * FitDistance * 0.20;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				RadialUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash = ABTSToonVisualCaptureSubsystemPrivate::
+				Mix64(PartyIdentity, static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::EnvironmentHighAltitude:
+		{
+			const FVector HighUp = (
+				EnvironmentSnapshot.SunDirectionToSunWorld
+				+ EnvironmentDawnUp * 0.55).GetSafeNormal();
+			const FVector CameraLocation =
+				EnvironmentSnapshot.PlanetCenterWorld
+				+ HighUp * EnvironmentSnapshot.PlanetRadiusCM * 3.2
+				+ EnvironmentDawnUp
+					* EnvironmentSnapshot.PlanetRadiusCM * 0.35;
+			Point.LookAtWorld = EnvironmentSnapshot.PlanetCenterWorld
+				+ HighUp * EnvironmentSnapshot.PlanetRadiusCM * 0.15;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				HighUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::HighAltitudeGround:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeSatellite:
+		case EABTSToonVisualCaptureAnchor::HighAltitudeSpace:
+		{
+			const FABTSStylizedEnvironmentParameters Presentation =
+				FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+					EnvironmentSnapshot.PlanetCenterWorld,
+					EnvironmentSnapshot.PlanetRadiusCM,
+					EnvironmentSnapshot.SunDirectionToSunWorld,
+					EABTSStylizedRenderProfile::GroundDay);
+			const double StartRatio =
+				Presentation.HighAltitudeTransitionStartCM
+				/ Presentation.PlanetRadiusCM;
+			const double EndRatio =
+				Presentation.HighAltitudeTransitionEndCM
+				/ Presentation.PlanetRadiusCM;
+			double AltitudeRatio = 0.04;
+			switch (Definition.Anchor)
+			{
+			case EABTSToonVisualCaptureAnchor::HighAltitudeCloudTop:
+				AltitudeRatio = FMath::Min(
+					StartRatio,
+					(Presentation.CloudBaseAltitudeCM
+						+ Presentation.CloudLayerHeightCM)
+					/ Presentation.PlanetRadiusCM + 0.01);
+				break;
+			case EABTSToonVisualCaptureAnchor::HighAltitudeTransitionMid:
+				AltitudeRatio = 0.5 * (StartRatio + EndRatio);
+				break;
+			case EABTSToonVisualCaptureAnchor::HighAltitudeSatellite:
+				AltitudeRatio = 0.55;
+				break;
+			case EABTSToonVisualCaptureAnchor::HighAltitudeSpace:
+				AltitudeRatio = 0.72;
+				break;
+			default:
+				break;
+			}
+			const FVector RadialUp = (
+				EnvironmentSnapshot.SunDirectionToSunWorld
+				+ EnvironmentDawnUp * 0.28).GetSafeNormal();
+			const FVector Tangent =
+				ABTSToonVisualCaptureSubsystemPrivate::MakeStablePlanarDirection(
+					EnvironmentDawnUp,
+					RadialUp,
+					StartTransform.GetUnitAxis(EAxis::X));
+			const double CameraRadiusRatio = 1.0 + AltitudeRatio;
+			const double TangentViewHeight = -FMath::Sqrt(FMath::Max(
+				1.0 - 1.0 / (CameraRadiusRatio * CameraRadiusRatio),
+				0.0));
+			const double FramingViewHeight = FMath::Clamp(
+				TangentViewHeight + 0.055,
+				-0.96,
+				0.25);
+			const FVector ViewDirection = (
+				RadialUp * FramingViewHeight
+				+ Tangent * FMath::Sqrt(FMath::Max(
+					1.0 - FramingViewHeight * FramingViewHeight,
+					0.0))).GetSafeNormal();
+			const FVector CameraLocation =
+				EnvironmentSnapshot.PlanetCenterWorld
+				+ RadialUp * EnvironmentSnapshot.PlanetRadiusCM
+					* CameraRadiusRatio;
+			Point.LookAtWorld = CameraLocation
+				+ ViewDirection * EnvironmentSnapshot.PlanetRadiusCM * 2.0;
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				RadialUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					EnvironmentSnapshot.IdentityHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
+		case EABTSToonVisualCaptureAnchor::CloudR0Ground:
+		case EABTSToonVisualCaptureAnchor::CloudR0Side:
+		case EABTSToonVisualCaptureAnchor::CloudR0Above:
+		case EABTSToonVisualCaptureAnchor::CloudR0FlyThrough:
+		case EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal:
+		case EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp:
+		case EABTSToonVisualCaptureAnchor::CloudR0GroundZenith:
+		case EABTSToonVisualCaptureAnchor::CloudFieldGlobal:
+		case EABTSToonVisualCaptureAnchor::CloudFieldFusion:
+		case EABTSToonVisualCaptureAnchor::CloudFieldVariety:
+		case EABTSToonVisualCaptureAnchor::CloudFieldNight:
+		case EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalBetween:
+		case EABTSToonVisualCaptureAnchor::CloudTraversalBothInside:
+		{
+			if (CloudDefinitions.Num()
+				!= FABTST4LowPolyCloudPrototype::IslandCount
+				|| CloudLayoutHash == 0)
+			{
+				OutReason = TEXT("T4-A2R0 cloud layout is unavailable.");
+				return EWorldResolveResult::Failed;
+			}
+			const bool bTraversalDiagnostic = Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBetween
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBothInside;
+			if (bTraversalDiagnostic)
+			{
+				const FABTST4LowPolyCloudIslandDefinition& Cloud =
+					CloudDefinitions[0];
+				FVector CameraLocation = Cloud.CenterWorld;
+				FVector BirdCenter = Cloud.CenterWorld;
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside)
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 1.55
+						+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.20;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.04;
+				}
+				else if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside)
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 0.10;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.TangentX * Cloud.ExtentsCM.X * 1.22;
+				}
+				else if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBetween)
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 1.32
+						+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.08;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.TangentX * Cloud.ExtentsCM.X * 1.28;
+				}
+				else
+				{
+					CameraLocation = Cloud.CenterWorld
+						- Cloud.TangentX * Cloud.ExtentsCM.X * 0.24
+						- Cloud.TangentY * Cloud.ExtentsCM.Y * 0.10;
+					BirdCenter = Cloud.CenterWorld
+						+ Cloud.TangentX * Cloud.ExtentsCM.X * 0.26
+						+ Cloud.TangentY * Cloud.ExtentsCM.Y * 0.08;
+				}
+				Point.bRelocateBirdPartyForDiagnostic = true;
+				Point.DiagnosticBirdPartyCenterWorld = BirdCenter;
+				Point.DiagnosticBirdPartyUp = Cloud.RadialUp;
+				Point.LookAtWorld = BirdCenter;
+				if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+					CameraLocation,
+					Point.LookAtWorld,
+					Cloud.RadialUp,
+					Point.CameraWorldTransform,
+					&CameraFailure))
+				{
+					OutReason = CameraFailure;
+					return EWorldResolveResult::Failed;
+				}
+				Point.SemanticIdentityHash =
+					ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+						Cloud.LogicalCloudIdentityHash,
+						static_cast<uint64>(Definition.Anchor));
+				break;
+			}
+			const bool bCloudFieldDiagnostic = Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudFieldGlobal
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldFusion
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldVariety
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldNight
+				|| Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega;
+			if (bCloudFieldDiagnostic)
+			{
+				const uint64 LogicalCloudHash =
+					FABTST4LowPolyCloudPrototype::
+						ComputeLogicalCloudLayoutHash(CloudDefinitions);
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldGlobal)
+				{
+					const FVector ViewDirection = (
+						EnvironmentSnapshot.SunDirectionToSunWorld * 0.62
+						+ CloudDefinitions[0].RadialUp * 0.38).GetSafeNormal();
+					const FVector CameraLocation =
+						EnvironmentSnapshot.PlanetCenterWorld
+						+ ViewDirection * EnvironmentSnapshot.PlanetRadiusCM * 3.25;
+					Point.LookAtWorld = EnvironmentSnapshot.PlanetCenterWorld;
+					FVector PreferredUp = FVector::VectorPlaneProject(
+						FVector::UpVector, ViewDirection).GetSafeNormal();
+					if (PreferredUp.IsNearlyZero())
+					{
+						FVector UnusedAxis;
+						ViewDirection.FindBestAxisVectors(PreferredUp, UnusedAxis);
+					}
+					if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+						CameraLocation,
+						Point.LookAtWorld,
+						PreferredUp,
+						Point.CameraWorldTransform,
+						&CameraFailure))
+					{
+						OutReason = CameraFailure;
+						return EWorldResolveResult::Failed;
+					}
+					Point.SemanticIdentityHash =
+						ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+							LogicalCloudHash,
+							static_cast<uint64>(Definition.Anchor));
+					break;
+				}
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldNight)
+				{
+					int32 NightCloudIndex = INDEX_NONE;
+					double MinimumSolarHeight = 2.0;
+					for (int32 CloudIndex = 0;
+						CloudIndex < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+						++CloudIndex)
+					{
+						const double SolarHeight = FVector::DotProduct(
+							CloudDefinitions[CloudIndex].RadialUp,
+							EnvironmentSnapshot.SunDirectionToSunWorld);
+						if (SolarHeight < MinimumSolarHeight)
+						{
+							MinimumSolarHeight = SolarHeight;
+							NightCloudIndex = CloudIndex;
+						}
+					}
+					if (!CloudDefinitions.IsValidIndex(NightCloudIndex))
+					{
+						OutReason = TEXT("Night-cloud diagnostic could not select a background cloud.");
+						return EWorldResolveResult::Failed;
+					}
+					const FABTST4LowPolyCloudIslandDefinition& NightCloud =
+						CloudDefinitions[NightCloudIndex];
+					const double SurfaceRadius =
+						Planet.GetSurfaceRadiusAtDirection(NightCloud.RadialUp);
+					const FVector CameraLocation =
+						EnvironmentSnapshot.PlanetCenterWorld
+						+ NightCloud.RadialUp * (SurfaceRadius + 175.0)
+						- NightCloud.TangentX * NightCloud.ExtentsCM.X * 2.55;
+					Point.LookAtWorld = NightCloud.CenterWorld
+						- NightCloud.RadialUp * NightCloud.ExtentsCM.Z * 0.08;
+					if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+						CameraLocation,
+						Point.LookAtWorld,
+						NightCloud.RadialUp,
+						Point.CameraWorldTransform,
+						&CameraFailure))
+					{
+						OutReason = CameraFailure;
+						return EWorldResolveResult::Failed;
+					}
+					Point.SemanticIdentityHash =
+						ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+							NightCloud.LogicalCloudIdentityHash,
+							static_cast<uint64>(Definition.Anchor));
+					break;
+				}
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldTerminatorMega)
+				{
+					FVector ClusterDirectionSum = FVector::ZeroVector;
+					FVector ClusterCenterSum = FVector::ZeroVector;
+					int32 ClusterMemberCount = 0;
+					for (const FABTST4LowPolyCloudIslandDefinition& Cloud
+						: CloudDefinitions)
+					{
+						if (!Cloud.bTerminatorMegaCluster)
+						{
+							continue;
+						}
+						ClusterDirectionSum += Cloud.RadialUp;
+						ClusterCenterSum += Cloud.CenterWorld;
+						++ClusterMemberCount;
+					}
+					if (ClusterMemberCount
+						!= FABTST4LowPolyCloudPrototype::
+							TerminatorMegaClusterIslandCount)
+					{
+						OutReason = TEXT("Terminator mega-cluster diagnostic is incomplete.");
+						return EWorldResolveResult::Failed;
+					}
+					const FVector ClusterUp = ClusterDirectionSum.GetSafeNormal();
+					const FVector ClusterCenter = ClusterCenterSum
+						/ static_cast<double>(ClusterMemberCount);
+					FVector AlongTerminator = FVector::CrossProduct(
+						ClusterUp,
+						EnvironmentSnapshot.SunDirectionToSunWorld).GetSafeNormal();
+					if (AlongTerminator.IsNearlyZero())
+					{
+						FVector UnusedAxis;
+						ClusterUp.FindBestAxisVectors(AlongTerminator, UnusedAxis);
+					}
+					const double SpanDegrees = FABTST4LowPolyCloudPrototype::
+						ComputeTerminatorMegaClusterAngularSpanDegrees(
+							CloudDefinitions);
+					const double SpanRadiusCM = EnvironmentSnapshot.PlanetRadiusCM
+						* FMath::Sin(FMath::DegreesToRadians(SpanDegrees * 0.5));
+					const FVector CameraLocation = ClusterCenter
+						- AlongTerminator * SpanRadiusCM * 2.65
+						+ ClusterUp * SpanRadiusCM * 0.42;
+					Point.LookAtWorld = ClusterCenter;
+					if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+						CameraLocation,
+						Point.LookAtWorld,
+						ClusterUp,
+						Point.CameraWorldTransform,
+						&CameraFailure))
+					{
+						OutReason = CameraFailure;
+						return EWorldResolveResult::Failed;
+					}
+					Point.SemanticIdentityHash =
+						ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+							LogicalCloudHash,
+							static_cast<uint64>(Definition.Anchor));
+					break;
+				}
+
+				int32 FirstCloudIndex = 0;
+				int32 SecondCloudIndex = 1;
+				double BestAlignment = -2.0;
+				double BestVarietyRatio = 0.0;
+				for (int32 FirstIndex = 0;
+					FirstIndex < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+					++FirstIndex)
+				{
+					for (int32 SecondIndex = FirstIndex + 1;
+						SecondIndex < FABTST4LowPolyCloudPrototype::GlobalIslandCount;
+						++SecondIndex)
+					{
+						const double Alignment = FVector::DotProduct(
+							CloudDefinitions[FirstIndex].RadialUp,
+							CloudDefinitions[SecondIndex].RadialUp);
+						const double FirstArea =
+							CloudDefinitions[FirstIndex].ExtentsCM.X
+							* CloudDefinitions[FirstIndex].ExtentsCM.Y;
+						const double SecondArea =
+							CloudDefinitions[SecondIndex].ExtentsCM.X
+							* CloudDefinitions[SecondIndex].ExtentsCM.Y;
+						const double VarietyRatio = FMath::Max(
+							FirstArea, SecondArea) / FMath::Max(
+							1.0, FMath::Min(FirstArea, SecondArea));
+						const bool bPreferVariety = Definition.Anchor
+							== EABTSToonVisualCaptureAnchor::CloudFieldVariety;
+						const bool bAcceptVariety = bPreferVariety
+							&& Alignment >= FMath::Cos(
+								FMath::DegreesToRadians(38.0))
+							&& VarietyRatio > BestVarietyRatio;
+						const bool bAcceptFusion = !bPreferVariety
+							&& Alignment > BestAlignment;
+						if (bAcceptVariety || bAcceptFusion)
+						{
+							BestAlignment = Alignment;
+							BestVarietyRatio = VarietyRatio;
+							FirstCloudIndex = FirstIndex;
+							SecondCloudIndex = SecondIndex;
+						}
+					}
+				}
+				const FABTST4LowPolyCloudIslandDefinition& FirstCloud =
+					CloudDefinitions[FirstCloudIndex];
+				const FABTST4LowPolyCloudIslandDefinition& SecondCloud =
+					CloudDefinitions[SecondCloudIndex];
+				const FVector PairAxis = (SecondCloud.CenterWorld
+					- FirstCloud.CenterWorld).GetSafeNormal();
+				const FVector PairMidpoint = (FirstCloud.CenterWorld
+					+ SecondCloud.CenterWorld) * 0.5;
+				const FVector PairUp = (PairMidpoint
+					- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal();
+				FVector PairSide = FVector::CrossProduct(
+					PairAxis, PairUp).GetSafeNormal();
+				if (PairSide.IsNearlyZero())
+				{
+					FVector UnusedFallbackAxis;
+					PairUp.FindBestAxisVectors(PairSide, UnusedFallbackAxis);
+				}
+				const double PairSpanCM = FVector::Distance(
+					FirstCloud.CenterWorld, SecondCloud.CenterWorld);
+				const double MaximumCloudDepthCM = FMath::Max(
+					FirstCloud.ExtentsCM.Z, SecondCloud.ExtentsCM.Z);
+				FVector CameraLocation = PairMidpoint;
+				const FVector PreferredUp = PairUp;
+				Point.LookAtWorld = PairMidpoint;
+				if (Definition.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudFieldVariety)
+				{
+					CameraLocation = PairMidpoint
+						+ PairUp * PairSpanCM * 2.55
+						+ PairSide * PairSpanCM * 0.42;
+				}
+				else
+				{
+					CameraLocation = PairMidpoint
+						- PairAxis * PairSpanCM * 2.35
+						+ PairUp * MaximumCloudDepthCM * 0.85;
+					Point.LookAtWorld = PairMidpoint
+						+ PairUp * MaximumCloudDepthCM * 0.12;
+				}
+				if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+					CameraLocation,
+					Point.LookAtWorld,
+					PreferredUp,
+					Point.CameraWorldTransform,
+					&CameraFailure))
+				{
+					OutReason = CameraFailure;
+					return EWorldResolveResult::Failed;
+				}
+				Point.SemanticIdentityHash =
+					ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+						LogicalCloudHash,
+						static_cast<uint64>(Definition.Anchor));
+				break;
+			}
+
+			const int32 CloudIndex = Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0FlyThrough ? 1 : 0;
+			const FABTST4LowPolyCloudIslandDefinition& Cloud =
+				CloudDefinitions[CloudIndex];
+			FVector CameraLocation = Cloud.CenterWorld;
+			Point.LookAtWorld = Cloud.CenterWorld;
+			FVector PreferredUp = Cloud.RadialUp;
+			if (Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0Ground)
+			{
+				const double SurfaceRadius =
+					Planet.GetSurfaceRadiusAtDirection(Cloud.RadialUp);
+				CameraLocation = EnvironmentSnapshot.PlanetCenterWorld
+					+ Cloud.RadialUp * (SurfaceRadius + 180.0)
+					- Cloud.TangentX * Cloud.ExtentsCM.X * 2.65;
+				Point.LookAtWorld = Cloud.CenterWorld
+					+ Cloud.TangentX * Cloud.ExtentsCM.X * 0.08;
+				PreferredUp = Cloud.TangentY;
+			}
+			else if (Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0Side)
+			{
+				CameraLocation = Cloud.CenterWorld
+					- Cloud.TangentX * Cloud.ExtentsCM.X * 2.80
+					+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.18;
+			}
+			else if (Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0SideOrthogonal)
+			{
+				CameraLocation = Cloud.CenterWorld
+					- Cloud.TangentY * Cloud.ExtentsCM.Y * 2.80
+					+ Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.18;
+			}
+			else if (Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0Above)
+			{
+				CameraLocation = Cloud.CenterWorld
+					+ Cloud.RadialUp * Cloud.ExtentsCM.X * 3.0
+					+ Cloud.TangentY * Cloud.ExtentsCM.Y * 0.18;
+				PreferredUp = Cloud.TangentY;
+			}
+			else if (Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0GroundObliqueUp)
+			{
+				const double SurfaceRadius =
+					Planet.GetSurfaceRadiusAtDirection(Cloud.RadialUp);
+				CameraLocation = EnvironmentSnapshot.PlanetCenterWorld
+					+ Cloud.RadialUp * (SurfaceRadius + 165.0)
+					- Cloud.TangentX * Cloud.ExtentsCM.X * 2.10
+					- Cloud.TangentY * Cloud.ExtentsCM.Y * 0.24;
+				Point.LookAtWorld = Cloud.CenterWorld
+					+ Cloud.TangentX * Cloud.ExtentsCM.X * 0.08
+					- Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.10;
+				PreferredUp = Cloud.RadialUp;
+			}
+			else if (Definition.Anchor
+				== EABTSToonVisualCaptureAnchor::CloudR0GroundZenith)
+			{
+				const double SurfaceRadius =
+					Planet.GetSurfaceRadiusAtDirection(Cloud.RadialUp);
+				CameraLocation = EnvironmentSnapshot.PlanetCenterWorld
+					+ Cloud.RadialUp * (SurfaceRadius + 165.0);
+				Point.LookAtWorld = Cloud.CenterWorld
+					- Cloud.RadialUp * Cloud.ExtentsCM.Z * 0.04;
+				PreferredUp = Cloud.TangentY;
+			}
+			else
+			{
+				// R0 freezes the entry-side view of a path that crosses the second
+				// island. R1 adds the bounded interior-fog response and moving
+				// temporal gate after the exterior silhouette is accepted.
+				CameraLocation = Cloud.CenterWorld
+					- Cloud.TangentY * Cloud.ExtentsCM.Y * 1.75;
+				Point.LookAtWorld = Cloud.CenterWorld
+					+ Cloud.TangentY * Cloud.ExtentsCM.Y * 2.0;
+				PreferredUp = Cloud.RadialUp;
+			}
+			if (!FABTSToonVisualCaptureMath::BuildLookAtCameraTransform(
+				CameraLocation,
+				Point.LookAtWorld,
+				PreferredUp,
+				Point.CameraWorldTransform,
+				&CameraFailure))
+			{
+				OutReason = CameraFailure;
+				return EWorldResolveResult::Failed;
+			}
+			Point.SemanticIdentityHash =
+				ABTSToonVisualCaptureSubsystemPrivate::Mix64(
+					CloudLayoutHash,
+					static_cast<uint64>(Definition.Anchor));
+			break;
+		}
 		case EABTSToonVisualCaptureAnchor::FinaleLayout:
 		{
 			FBox Bounds(EForceInit::ForceInit);
@@ -1212,6 +2216,27 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 			OutReason = TEXT("Capture catalogue contains an unsupported anchor.");
 			return EWorldResolveResult::Failed;
 		}
+
+		FABTSToonEnvironmentSnapshot PointEnvironment;
+		FString PointEnvironmentFailure;
+		if (!FABTSToonEnvironmentResolver::BuildSnapshot(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			Definition.StyleProfile,
+			EnvironmentSnapshot.WorldSeed,
+			EnvironmentSnapshot.GeneratorVersion,
+			EnvironmentSnapshot.GenerationAttempt,
+			EnvironmentSnapshot.bSourceWorldAccepted,
+			PointEnvironment,
+			&PointEnvironmentFailure))
+		{
+			OutReason = FString::Printf(
+				TEXT("Capture point environment identity failed: %s"),
+				*PointEnvironmentFailure);
+			return EWorldResolveResult::Failed;
+		}
+		Point.EnvironmentSnapshotHash = PointEnvironment.IdentityHash;
 
 		Point.CameraPoseHash =
 			FABTSToonVisualCaptureMath::ComputeCameraPoseHash(
@@ -1292,7 +2317,31 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 	bSavedScreenMessagesEnabled = GAreScreenMessagesEnabled;
 	bSavedStyleEnabled = FABTSStylizedRenderingControl::IsEnabled();
 	SavedStyleProfile = FABTSStylizedRenderingControl::GetProfile();
+	SavedDiagnosticPassMask =
+		FABTSStylizedRenderingControl::GetDiagnosticPassMask();
+	IConsoleVariable* ShadowQuality =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
+	if (ShadowQuality == nullptr)
+	{
+		OutFailure = TEXT("r.ShadowQuality is unavailable for T4 isolation.");
+		return false;
+	}
+	SavedShadowQuality = ShadowQuality->GetInt();
+	SavedShadowQualitySetBy =
+		static_cast<uint32>(ShadowQuality->GetFlags())
+		& static_cast<uint32>(ECVF_SetByMask);
+	bShadowQualityStateCaptured = true;
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+		&& SavedShadowQuality <= 0)
+	{
+		OutFailure = TEXT("ToonT4A0 requires a shadow-enabled source baseline.");
+		return false;
+	}
 	bRuntimeStateCaptured = true;
+	if (!CaptureBirdPartyTransforms(OutFailure))
+	{
+		return false;
+	}
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.Name = MakeUniqueObjectName(
@@ -1377,9 +2426,126 @@ bool UABTSToonVisualCaptureSubsystem::PrepareCaptureCamera(
 	return true;
 }
 
+bool UABTSToonVisualCaptureSubsystem::CaptureBirdPartyTransforms(
+	FString& OutFailure)
+{
+	SavedBirdPartyTransforms.Reset();
+	bBirdPartyTransformsCaptured = false;
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		OutFailure = TEXT("World is unavailable while capturing bird transforms.");
+		return false;
+	}
+	AABTSBirdParty* Party = nullptr;
+	for (TActorIterator<AABTSBirdParty> It(World); It; ++It)
+	{
+		if (It->IsPartyReady())
+		{
+			Party = *It;
+			break;
+		}
+	}
+	if (!IsValid(Party))
+	{
+		OutFailure = TEXT("Bird party is unavailable for traversal diagnostics.");
+		return false;
+	}
+	FBox Bounds(EForceInit::ForceInit);
+	for (AABTSM25BirdCharacter* Bird : Party->GetPartyMembers())
+	{
+		if (!IsValid(Bird))
+		{
+			OutFailure = TEXT("Bird party contains an invalid member.");
+			return false;
+		}
+		FABTSToonSavedActorTransform Saved;
+		Saved.Actor = Bird;
+		Saved.Transform = Bird->GetActorTransform();
+		SavedBirdPartyTransforms.Add(Saved);
+		Bounds += Bird->GetComponentsBoundingBox(true);
+	}
+	if (SavedBirdPartyTransforms.IsEmpty() || !Bounds.IsValid)
+	{
+		OutFailure = TEXT("Bird party transform baseline is empty.");
+		return false;
+	}
+	SavedBirdPartyCenterWorld = Bounds.GetCenter();
+	SavedBirdPartyUp = EnvironmentSnapshot.IsValid()
+		? (SavedBirdPartyCenterWorld
+			- EnvironmentSnapshot.PlanetCenterWorld).GetSafeNormal()
+		: FVector::UpVector;
+	if (SavedBirdPartyUp.IsNearlyZero())
+	{
+		SavedBirdPartyUp = FVector::UpVector;
+	}
+	bBirdPartyTransformsCaptured = true;
+	return true;
+}
+
+bool UABTSToonVisualCaptureSubsystem::ApplyCurrentDiagnosticBirdPartyPlacement(
+	FString& OutFailure)
+{
+	if (!bBirdPartyTransformsCaptured
+		|| !ResolvedPoints.IsValidIndex(CurrentPointIndex))
+	{
+		OutFailure = TEXT("Bird-party capture baseline is unavailable.");
+		return false;
+	}
+	const FABTSToonResolvedCapturePoint& Point =
+		ResolvedPoints[CurrentPointIndex];
+	const FVector TargetCenter = Point.bRelocateBirdPartyForDiagnostic
+		? Point.DiagnosticBirdPartyCenterWorld
+		: SavedBirdPartyCenterWorld;
+	const FVector TargetUp = Point.bRelocateBirdPartyForDiagnostic
+		? Point.DiagnosticBirdPartyUp
+		: SavedBirdPartyUp;
+	const FQuat FrameRotation = FQuat::FindBetweenNormals(
+		SavedBirdPartyUp, TargetUp);
+	for (const FABTSToonSavedActorTransform& Saved
+		: SavedBirdPartyTransforms)
+	{
+		AActor* Actor = Saved.Actor.Get();
+		if (!IsValid(Actor))
+		{
+			OutFailure = TEXT("A captured bird disappeared during diagnostics.");
+			return false;
+		}
+		FTransform Target = Saved.Transform;
+		Target.SetLocation(
+			TargetCenter
+			+ FrameRotation.RotateVector(
+				Saved.Transform.GetLocation() - SavedBirdPartyCenterWorld));
+		Target.SetRotation(FrameRotation * Saved.Transform.GetRotation());
+		Actor->SetActorTransform(
+			Target, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+	return true;
+}
+
+void UABTSToonVisualCaptureSubsystem::RestoreBirdPartyTransforms()
+{
+	if (!bBirdPartyTransformsCaptured)
+	{
+		return;
+	}
+	for (const FABTSToonSavedActorTransform& Saved
+		: SavedBirdPartyTransforms)
+	{
+		if (AActor* Actor = Saved.Actor.Get())
+		{
+			Actor->SetActorTransform(
+				Saved.Transform, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+	}
+	SavedBirdPartyTransforms.Reset();
+	bBirdPartyTransformsCaptured = false;
+}
+
 void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 {
 	if (!ResolvedPoints.IsValidIndex(CurrentPointIndex)
+		|| !VariantDefinitions.IsValidIndex(CurrentVariantIndex)
 		|| !IsValid(CaptureCamera)
 		|| CaptureCamera->GetCameraComponent() == nullptr)
 	{
@@ -1389,16 +2555,47 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	FABTSStylizedRenderingControl::SetProfile(Point.Definition.StyleProfile);
-	FABTSStylizedRenderingControl::SetEnabled(bCurrentStyleEnabled);
+	FABTSStylizedRenderingControl::SetDiagnosticPassMask(Variant.PassMask);
+	FABTSStylizedRenderingControl::SetEnabled(Variant.bStyleEnabled);
+	FString BirdPlacementFailure;
+	if (!ApplyCurrentDiagnosticBirdPartyPlacement(BirdPlacementFailure))
+	{
+		FinishCapture(false, BirdPlacementFailure);
+		return;
+	}
+	IConsoleVariable* ShadowQuality =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
+	if (ShadowQuality == nullptr)
+	{
+		FinishCapture(false, TEXT("r.ShadowQuality disappeared during capture."));
+		return;
+	}
+	ShadowQuality->Set(
+		Variant.bShadowsEnabled ? SavedShadowQuality : 0,
+		ECVF_SetByCode);
+	if (UWorld* World = GetWorld())
+	{
+		if (UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+			World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
+		{
+			StyleSubsystem->RefreshNow();
+		}
+	}
 	if (FABTSStylizedRenderingControl::GetProfile()
 			!= Point.Definition.StyleProfile
 		|| FABTSStylizedRenderingControl::IsEnabled()
-			!= bCurrentStyleEnabled)
+			!= Variant.bStyleEnabled
+		|| FABTSStylizedRenderingControl::GetDiagnosticPassMask()
+			!= Variant.PassMask
+		|| ShadowQuality->GetInt()
+			!= (Variant.bShadowsEnabled ? SavedShadowQuality : 0))
 	{
 		FinishCapture(
 			false,
-			TEXT("The stylized rendering seam did not retain the requested Style/Profile state."));
+			TEXT("The stylized rendering seam did not retain the requested Style/Profile/pass/shadow state."));
 		return;
 	}
 	CaptureCamera->SetActorTransform(
@@ -1424,6 +2621,14 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 			Controller->PlayerCameraManager->SetGameCameraCutThisFrame();
 		}
 	}
+	if (UWorld* World = GetWorld())
+	{
+		if (UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+			World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
+		{
+			StyleSubsystem->RefreshCloudTraversalNow(true);
+		}
+	}
 
 	RemainingWarmupFrames = Point.Definition.WarmupFrameOverride >= 0
 		? Point.Definition.WarmupFrameOverride
@@ -1434,16 +2639,25 @@ void UABTSToonVisualCaptureSubsystem::BeginCurrentVariant()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][ToonT0][Variant] Point=%s Anchor=%s Style=%s Profile=%s StyleImplementation=%d PoseHash=%s SemanticHash=%s Warmup=%d"),
+		TEXT("[ABTS][%s][Variant] Point=%s Anchor=%s Variant=%s Style=%s Tone=%d Outline=%d Shadows=%d Profile=%s StyleImplementation=%d PoseHash=%s SemanticHash=%s EnvironmentHash=%s Warmup=%d"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 		*Point.Definition.PointId.ToString(),
 		FABTSToonVisualCaptureMath::LexToString(Point.Definition.Anchor),
-		bCurrentStyleEnabled ? TEXT("On") : TEXT("Off"),
+		*Variant.VariantId.ToString(),
+		Variant.bStyleEnabled ? TEXT("On") : TEXT("Off"),
+		(static_cast<uint8>(Variant.PassMask)
+			& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Tone)) != 0,
+		(static_cast<uint8>(Variant.PassMask)
+			& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Outline)) != 0,
+		Variant.bShadowsEnabled ? 1 : 0,
 		FABTSToonVisualCaptureMath::LexToString(
 			Point.Definition.StyleProfile),
 		FABTSStylizedRenderingControl::GetImplementationVersion(),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(Point.CameraPoseHash),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 			Point.SemanticIdentityHash),
+		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+			Point.EnvironmentSnapshotHash),
 		RemainingWarmupFrames);
 }
 
@@ -1467,12 +2681,26 @@ bool UABTSToonVisualCaptureSubsystem::ValidateEffectiveCamera(
 
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	if (!VariantDefinitions.IsValidIndex(CurrentVariantIndex))
+	{
+		OutFailure = TEXT("The requested diagnostic variant is unavailable.");
+		return false;
+	}
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
+	const IConsoleVariable* ShadowQuality =
+		IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
 	if (FABTSStylizedRenderingControl::GetProfile()
 			!= Point.Definition.StyleProfile
 		|| FABTSStylizedRenderingControl::IsEnabled()
-			!= bCurrentStyleEnabled)
+			!= Variant.bStyleEnabled
+		|| FABTSStylizedRenderingControl::GetDiagnosticPassMask()
+			!= Variant.PassMask
+		|| ShadowQuality == nullptr
+		|| ShadowQuality->GetInt()
+			!= (Variant.bShadowsEnabled ? SavedShadowQuality : 0))
 	{
-		OutFailure = TEXT("Style/Profile state changed during camera warmup.");
+		OutFailure = TEXT("Style/Profile/pass/shadow state changed during camera warmup.");
 		return false;
 	}
 
@@ -1524,7 +2752,7 @@ bool UABTSToonVisualCaptureSubsystem::ValidateEffectiveCamera(
 				!= CurrentEffectiveCameraPoseHash)
 		{
 			OutFailure = FString::Printf(
-				TEXT("Style Off/On effective camera identity diverged at %s."),
+				TEXT("Diagnostic variants have divergent effective camera identity at %s."),
 				*Point.Definition.PointId.ToString());
 			return false;
 		}
@@ -1628,10 +2856,15 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentScreenshot()
 	}
 
 	FABTSToonVisualCaptureManifestRecord Record;
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	Record.PointId = Point.Definition.PointId;
 	Record.Anchor = Point.Definition.Anchor;
 	Record.Profile = Point.Definition.StyleProfile;
-	Record.bStyleEnabled = bCurrentStyleEnabled;
+	Record.VariantId = Variant.VariantId;
+	Record.bStyleEnabled = Variant.bStyleEnabled;
+	Record.PassMask = Variant.PassMask;
+	Record.bShadowsEnabled = Variant.bShadowsEnabled;
 	Record.StyleImplementationVersion =
 		FABTSStylizedRenderingControl::GetImplementationVersion();
 	Record.CameraWorldTransform = Point.CameraWorldTransform;
@@ -1640,6 +2873,7 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentScreenshot()
 	Record.SemanticIdentityHash = Point.SemanticIdentityHash;
 	Record.CameraPoseHash = Point.CameraPoseHash;
 	Record.EffectiveCameraPoseHash = CurrentEffectiveCameraPoseHash;
+	Record.EnvironmentSnapshotHash = Point.EnvironmentSnapshotHash;
 	Record.Resolution = PngResolution;
 	Record.ArtifactPath = ActiveScreenshotPath;
 	Record.ArtifactMD5 =
@@ -1681,13 +2915,15 @@ void UABTSToonVisualCaptureSubsystem::DispatchCurrentGPUProfile()
 	}
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
 		TEXT("[ABTS][ToonT0][GPUProfileMarker] Run=%s Point=%s Style=%s PoseHash=%s EffectivePoseHash=%s Sample=%d/%d"),
 		*RunId,
 		*Point.Definition.PointId.ToString(),
-		bCurrentStyleEnabled ? TEXT("On") : TEXT("Off"),
+		*Variant.VariantId.ToString(),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(Point.CameraPoseHash),
 		*ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 			CurrentEffectiveCameraPoseHash),
@@ -1728,11 +2964,16 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentGPUProfile()
 
 	const FABTSToonResolvedCapturePoint& Point =
 		ResolvedPoints[CurrentPointIndex];
+	const FABTSToonDiagnosticVariantDefinition& Variant =
+		VariantDefinitions[CurrentVariantIndex];
 	FABTSToonVisualCaptureManifestRecord Record;
 	Record.PointId = Point.Definition.PointId;
 	Record.Anchor = Point.Definition.Anchor;
 	Record.Profile = Point.Definition.StyleProfile;
-	Record.bStyleEnabled = bCurrentStyleEnabled;
+	Record.VariantId = Variant.VariantId;
+	Record.bStyleEnabled = Variant.bStyleEnabled;
+	Record.PassMask = Variant.PassMask;
+	Record.bShadowsEnabled = Variant.bShadowsEnabled;
 	Record.StyleImplementationVersion =
 		FABTSStylizedRenderingControl::GetImplementationVersion();
 	Record.CameraWorldTransform = Point.CameraWorldTransform;
@@ -1741,6 +2982,7 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentGPUProfile()
 	Record.SemanticIdentityHash = Point.SemanticIdentityHash;
 	Record.CameraPoseHash = Point.CameraPoseHash;
 	Record.EffectiveCameraPoseHash = CurrentEffectiveCameraPoseHash;
+	Record.EnvironmentSnapshotHash = Point.EnvironmentSnapshotHash;
 	Record.Resolution = GetActualViewportResolution();
 	Record.bGPUProfileCommandAccepted = true;
 	Record.GPUProfileSampleCount = CurrentGPUProfileSampleIndex;
@@ -1755,14 +2997,14 @@ void UABTSToonVisualCaptureSubsystem::CompleteCurrentGPUProfile()
 
 void UABTSToonVisualCaptureSubsystem::AdvanceVariantOrFinish()
 {
-	if (!bCurrentStyleEnabled)
+	++CurrentVariantIndex;
+	if (CurrentVariantIndex < VariantDefinitions.Num())
 	{
-		bCurrentStyleEnabled = true;
 		BeginCurrentVariant();
 		return;
 	}
 
-	bCurrentStyleEnabled = false;
+	CurrentVariantIndex = 0;
 	++CurrentPointIndex;
 	if (CurrentPointIndex >= ResolvedPoints.Num())
 	{
@@ -1784,7 +3026,8 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 	}
 	bool bEffectiveSuccess = bSuccess;
 	FString EffectiveReason = Reason;
-	const int32 ExpectedRecordCount = ResolvedPoints.Num() * 2;
+	const int32 ExpectedRecordCount =
+		ResolvedPoints.Num() * VariantDefinitions.Num();
 	if (bEffectiveSuccess
 		&& ManifestRecords.Num() != ExpectedRecordCount)
 	{
@@ -1793,6 +3036,27 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 			TEXT("Record count mismatch: actual=%d expected=%d."),
 			ManifestRecords.Num(),
 			ExpectedRecordCount);
+	}
+	if (bEffectiveSuccess
+		&& RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+	{
+		UWorld* World = GetWorld();
+		const UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+			World != nullptr
+				? World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>()
+				: nullptr;
+		const bool bRuntimeCloudActive = StyleSubsystem != nullptr
+			&& StyleSubsystem->IsLowPolyCloudPrototypeActive();
+		const bool bExpectedRuntimeCloudActive =
+			!RunConfig.bDisableLowPolyCloudsForPerformanceBaseline;
+		if (bRuntimeCloudActive != bExpectedRuntimeCloudActive)
+		{
+			bEffectiveSuccess = false;
+			EffectiveReason = FString::Printf(
+				TEXT("A2.4 runtime cloud baseline mismatch: Active=%d Expected=%d."),
+				bRuntimeCloudActive ? 1 : 0,
+				bExpectedRuntimeCloudActive ? 1 : 0);
+		}
 	}
 	const TCHAR* Status =
 		bEffectiveSuccess ? TEXT("Succeeded") : TEXT("Failed");
@@ -1813,7 +3077,8 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][ToonT0][Terminal] Success=1 Mode=%s Records=%d Expected=%d Output=%s Reason=None"),
+			TEXT("[ABTS][%s][Terminal] Success=1 Mode=%s Records=%d Expected=%d Output=%s Reason=None"),
+			FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 			FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 			ManifestRecords.Num(),
 			ExpectedRecordCount,
@@ -1824,7 +3089,8 @@ void UABTSToonVisualCaptureSubsystem::FinishCapture(
 		UE_LOG(
 			LogABTSRuntime,
 			Error,
-			TEXT("[ABTS][ToonT0][Terminal] Success=0 Mode=%s Records=%d Expected=%d Output=%s Reason=%s"),
+			TEXT("[ABTS][%s][Terminal] Success=0 Mode=%s Records=%d Expected=%d Output=%s Reason=%s"),
+			FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite),
 			FABTSToonVisualCaptureMath::LexToString(RunConfig.Mode),
 			ManifestRecords.Num(),
 			ExpectedRecordCount,
@@ -1857,6 +3123,7 @@ void UABTSToonVisualCaptureSubsystem::RestoreRuntimeState()
 
 	if (bRuntimeStateCaptured)
 	{
+		RestoreBirdPartyTransforms();
 		if (bProfileGPUShowUIStateCaptured)
 		{
 			if (IConsoleVariable* ShowUI =
@@ -1872,9 +3139,29 @@ void UABTSToonVisualCaptureSubsystem::RestoreRuntimeState()
 		}
 		GAreScreenMessagesEnabled = bSavedScreenMessagesEnabled;
 		FABTSStylizedRenderingControl::SetProfile(SavedStyleProfile);
+		FABTSStylizedRenderingControl::SetDiagnosticPassMask(
+			SavedDiagnosticPassMask);
 		FABTSStylizedRenderingControl::SetEnabled(bSavedStyleEnabled);
+		if (bShadowQualityStateCaptured)
+		{
+			if (IConsoleVariable* ShadowQuality =
+				IConsoleManager::Get().FindConsoleVariable(
+					TEXT("r.ShadowQuality")))
+			{
+				ShadowQuality->Set(
+					SavedShadowQuality,
+					static_cast<EConsoleVariableFlags>(
+						SavedShadowQualitySetBy));
+			}
+			bShadowQualityStateCaptured = false;
+		}
 		if (UWorld* World = GetWorld())
 		{
+			if (UABTSStylizedRenderingWorldSubsystem* StyleSubsystem =
+				World->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>())
+			{
+				StyleSubsystem->RefreshNow();
+			}
 			if (UGameplayStatics::IsGamePaused(World) != bWorldWasPaused)
 			{
 				UGameplayStatics::SetGamePaused(World, bWorldWasPaused);
@@ -1892,6 +3179,18 @@ void UABTSToonVisualCaptureSubsystem::RestoreRuntimeState()
 			}
 		}
 	}
+	if (bScreenPercentageStateCaptured)
+	{
+		if (IConsoleVariable* ScreenPercentage =
+			IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
+		{
+			ScreenPercentage->Set(
+				SavedScreenPercentage,
+				static_cast<EConsoleVariableFlags>(
+					SavedScreenPercentageSetBy));
+		}
+		bScreenPercentageStateCaptured = false;
+	}
 	if (IsValid(CaptureCamera))
 	{
 		CaptureCamera->Destroy();
@@ -1908,10 +3207,67 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 	{
 		return false;
 	}
+	TArray<FABTST4LowPolyCloudIslandDefinition> ManifestLogicalClouds;
+	uint64 ManifestLogicalCloudLayoutHash = 0;
+	int32 ManifestCloudFusionPairCount = 0;
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+		&& EnvironmentSnapshot.IsValid())
+	{
+		const FABTSStylizedEnvironmentParameters CloudPresentation =
+			FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+				EnvironmentSnapshot.PlanetCenterWorld,
+				EnvironmentSnapshot.PlanetRadiusCM,
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				EABTSStylizedRenderProfile::GroundDay);
+		ManifestLogicalClouds = FABTST4LowPolyCloudPrototype::BuildDefinitions(
+			EnvironmentSnapshot.PlanetCenterWorld,
+			EnvironmentSnapshot.PlanetRadiusCM,
+			CloudPresentation.StarSeed ^ 0xC10DF13Du,
+			EnvironmentSnapshot.SunDirectionToSunWorld,
+			CloudPresentation.CloudBaseAltitudeCM,
+			CloudPresentation.CloudLayerHeightCM);
+		ManifestLogicalCloudLayoutHash = FABTST4LowPolyCloudPrototype::
+			ComputeLogicalCloudLayoutHash(ManifestLogicalClouds);
+		ManifestCloudFusionPairCount = FABTST4LowPolyCloudPrototype::
+			CountCloudFusionPairs(ManifestLogicalClouds);
+	}
+	const int32 ManifestTerminatorMegaCloudCount =
+		FABTST4LowPolyCloudPrototype::CountTerminatorMegaClusterClouds(
+			ManifestLogicalClouds);
+	const double ManifestTerminatorMegaSpanDegrees =
+		FABTST4LowPolyCloudPrototype::ComputeTerminatorMegaClusterAngularSpanDegrees(
+			ManifestLogicalClouds);
+	const bool bManifestTerminatorMegaConnected =
+		FABTST4LowPolyCloudPrototype::IsTerminatorMegaClusterEnvelopeConnected(
+			ManifestLogicalClouds);
+	UWorld* ManifestWorld = GetWorld();
+	const UABTSStylizedRenderingWorldSubsystem* ManifestStyleSubsystem =
+		ManifestWorld != nullptr
+			? ManifestWorld->GetSubsystem<UABTSStylizedRenderingWorldSubsystem>()
+			: nullptr;
+	const bool bRuntimeCloudPrototypeActive = ManifestStyleSubsystem != nullptr
+		&& ManifestStyleSubsystem->IsLowPolyCloudPrototypeActive();
+	const int32 RuntimeLogicalCloudCount = ManifestStyleSubsystem != nullptr
+		? ManifestStyleSubsystem->GetLowPolyLogicalCloudCount()
+		: 0;
+	const uint64 RuntimeLogicalCloudLayoutHash =
+		ManifestStyleSubsystem != nullptr
+			? ManifestStyleSubsystem->GetLowPolyLogicalCloudLayoutHash()
+			: 0;
+	const int32 RuntimeCloudMaterialBatchCount =
+		ManifestStyleSubsystem != nullptr
+			? ManifestStyleSubsystem->GetLowPolyCloudMaterialBatchCount()
+			: 0;
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetNumberField(TEXT("schemaVersion"), 2);
-	Root->SetStringField(TEXT("suite"), TEXT("ToonT0"));
+	Root->SetNumberField(
+		TEXT("schemaVersion"),
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3
+			? 15
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2 ? 14 : 4);
+	Root->SetStringField(
+		TEXT("suite"),
+		FABTSToonVisualCaptureMath::LexToString(RunConfig.Suite));
 	Root->SetStringField(TEXT("runId"), RunId);
 	Root->SetStringField(TEXT("buildIdentity"), RunConfig.BuildIdentity);
 	Root->SetStringField(TEXT("status"), Status);
@@ -1956,6 +3312,9 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("screenPercentage"),
 		ABTSToonVisualCaptureSubsystemPrivate::ReadConsoleVariableIdentity(
 			TEXT("r.ScreenPercentage")));
+	Environment->SetNumberField(
+		TEXT("expectedScreenPercentage"),
+		RunConfig.ExpectedScreenPercentage);
 	Environment->SetStringField(
 		TEXT("dynamicResolutionOperationMode"),
 		ABTSToonVisualCaptureSubsystemPrivate::ReadConsoleVariableIdentity(
@@ -1970,7 +3329,25 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			TEXT("r.ProfileGPU.ShowUI")));
 	Environment->SetStringField(
 		TEXT("exposurePolicy"),
-		TEXT("SceneConfiguredAutoExposure_CameraCut_PerVariantWarmup"));
+		(RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+			? TEXT("T4A1_StyleOnManualExposure_StyleOffSceneConfigured_PerVariantWarmup")
+			: TEXT("SceneConfiguredAutoExposure_CameraCut_PerVariantWarmup"));
+	Environment->SetNumberField(
+		TEXT("snapshotContractVersion"),
+		EnvironmentSnapshot.Version);
+	Environment->SetObjectField(
+		TEXT("planetCenterWorld"),
+		ABTSToonVisualCaptureSubsystemPrivate::VectorToJson(
+			EnvironmentSnapshot.PlanetCenterWorld));
+	Environment->SetNumberField(
+		TEXT("planetRadiusCM"),
+		EnvironmentSnapshot.PlanetRadiusCM);
+	Environment->SetObjectField(
+		TEXT("sunDirectionToSunWorld"),
+		ABTSToonVisualCaptureSubsystemPrivate::VectorToJson(
+			EnvironmentSnapshot.SunDirectionToSunWorld));
 	const Scalability::FQualityLevels Quality =
 		Scalability::GetQualityLevels();
 	TSharedRef<FJsonObject> ScalabilityJson = MakeShared<FJsonObject>();
@@ -2122,6 +3499,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("captureCatalogueHash"),
 		ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 			CaptureCatalogueHash));
+	WorldIdentity->SetStringField(
+		TEXT("variantCatalogueHash"),
+		ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+			VariantCatalogueHash));
 	Root->SetObjectField(TEXT("worldIdentity"), WorldIdentity);
 
 	const FIntPoint ActualResolution = GetActualViewportResolution();
@@ -2144,11 +3525,169 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		TEXT("implementationVersion"),
 		FABTSStylizedRenderingControl::GetImplementationVersion());
 	Style->SetStringField(
-		TEXT("t0Contract"),
-		TEXT("Style implementation is versioned; Off bypasses project stylization."));
+		TEXT("captureContract"),
+		RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A0
+			? TEXT("T4-A0 freezes six Tone/Outline/Shadow isolation variants without changing gameplay authority.")
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3
+				? TEXT("T4-A3.1 captures five GroundDay-profile altitudes proving a continuous atmosphere-to-space transition without a gameplay profile cut.")
+			: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+				? TEXT("T4-A2 captures ten A1 poses, seven A2.1 cloud views, five A2.2 field views and four A2.3.1 stable-planar-noise traversal relations with reversible StyleOff/StyleOn.")
+				: RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+				? TEXT("T4-A1 freezes ten spherical-environment points with reversible StyleOff/StyleOn presentation and GPU evidence.")
+				: TEXT("Style implementation is versioned; Off bypasses project stylization."));
 	Style->SetNumberField(
 		TEXT("gpuProfileSamplesPerVariant"),
 		RunConfig.GPUProfileSamplesPerVariant);
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+	{
+		const FABTSStylizedEnvironmentParameters Presentation =
+			FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+				EnvironmentSnapshot.PlanetCenterWorld,
+				EnvironmentSnapshot.PlanetRadiusCM,
+				EnvironmentSnapshot.SunDirectionToSunWorld,
+				EABTSStylizedRenderProfile::GroundDay);
+		Style->SetNumberField(TEXT("highAltitudeTransitionStartCM"),
+			Presentation.HighAltitudeTransitionStartCM);
+		Style->SetNumberField(TEXT("highAltitudeTransitionEndCM"),
+			Presentation.HighAltitudeTransitionEndCM);
+		Style->SetNumberField(TEXT("highAltitudeTransitionStartPrimaryRadiusRatio"),
+			Presentation.HighAltitudeTransitionStartCM / Presentation.PlanetRadiusCM);
+		Style->SetNumberField(TEXT("highAltitudeTransitionEndPrimaryRadiusRatio"),
+			Presentation.HighAltitudeTransitionEndCM / Presentation.PlanetRadiusCM);
+		Style->SetBoolField(TEXT("highAltitudePerViewCameraDriven"), true);
+		Style->SetBoolField(TEXT("highAltitudeGameplayProfileCut"), false);
+	}
+	Style->SetBoolField(
+		TEXT("cloudPerformanceBaselineDisabled"),
+		RunConfig.bDisableLowPolyCloudsForPerformanceBaseline);
+	Style->SetBoolField(
+		TEXT("runtimeCloudPrototypeActive"),
+		bRuntimeCloudPrototypeActive);
+	Style->SetNumberField(
+		TEXT("runtimeLogicalCloudCount"),
+		RuntimeLogicalCloudCount);
+	Style->SetStringField(
+		TEXT("runtimeLogicalCloudLayoutHash"),
+		ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+			RuntimeLogicalCloudLayoutHash));
+	Style->SetNumberField(
+		TEXT("runtimeCloudMaterialBatchCount"),
+		RuntimeCloudMaterialBatchCount);
+	TArray<TSharedPtr<FJsonValue>> RequestedPointsJson;
+	for (const FName PointId : RunConfig.RequestedPointIds)
+	{
+		RequestedPointsJson.Add(MakeShared<FJsonValueString>(PointId.ToString()));
+	}
+	Style->SetArrayField(TEXT("requestedPointIds"), RequestedPointsJson);
+	TArray<TSharedPtr<FJsonValue>> RequestedVariantsJson;
+	for (const FName VariantId : RunConfig.RequestedVariantIds)
+	{
+		RequestedVariantsJson.Add(
+			MakeShared<FJsonValueString>(VariantId.ToString()));
+	}
+	Style->SetArrayField(TEXT("requestedVariantIds"), RequestedVariantsJson);
+	if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+	{
+		Style->SetNumberField(
+			TEXT("logicalCloudCount"), ManifestLogicalClouds.Num());
+		Style->SetStringField(
+			TEXT("logicalCloudLayoutHash"),
+			ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+				ManifestLogicalCloudLayoutHash));
+		Style->SetNumberField(
+			TEXT("cloudCompositeStencilValue"),
+			FABTSStylizedRenderingContract::
+				ResolveCloudCompositeStencilValueForRenderer());
+		Style->SetBoolField(TEXT("cloudToCloudOutlineSuppression"), true);
+		Style->SetBoolField(TEXT("cloudToWorldOutlinePreserved"), true);
+		Style->SetBoolField(TEXT("cloudSingleHISMBatchedIslandFields"), true);
+		Style->SetNumberField(
+			TEXT("cloudPerInstanceCustomDataFloatCount"),
+			FABTST4LowPolyCloudPrototype::CloudletCustomDataFloatCount);
+		Style->SetBoolField(TEXT("cloudFieldGlobal"), true);
+		Style->SetNumberField(
+			TEXT("globalBackgroundLogicalCloudCount"),
+			FABTST4LowPolyCloudPrototype::GlobalIslandCount);
+		Style->SetNumberField(
+			TEXT("terminatorMegaClusterLogicalCloudCount"),
+			ManifestTerminatorMegaCloudCount);
+		Style->SetNumberField(
+			TEXT("terminatorMegaClusterAngularSpanDegrees"),
+			ManifestTerminatorMegaSpanDegrees);
+		Style->SetBoolField(
+			TEXT("terminatorMegaClusterConnected"),
+			bManifestTerminatorMegaConnected);
+		Style->SetBoolField(
+			TEXT("cloudGlobalBackgroundSunIndependentPlacement"), true);
+		Style->SetBoolField(
+			TEXT("cloudTerminatorMegaClusterSunRelativePlacement"), true);
+		Style->SetBoolField(TEXT("cloudLocalSolarHeightLighting"), true);
+		Style->SetBoolField(TEXT("cloudNightWhiteningGated"), true);
+		Style->SetBoolField(TEXT("cloudBoundedTraversalVisibility"), true);
+		Style->SetBoolField(TEXT("cloudTraversalCameraSphere"), true);
+		Style->SetBoolField(TEXT("cloudTraversalPerBirdVisualSpheres"), true);
+		Style->SetNumberField(TEXT("cloudTraversalBirdSphereCapacity"), 4.0);
+		Style->SetBoolField(TEXT("cloudTraversalImmediateHardProtection"), true);
+		Style->SetBoolField(TEXT("cloudTraversalTsrPixelAnimation"), true);
+		Style->SetBoolField(TEXT("cloudTraversalCameraBirdCorridor"), true);
+		Style->SetBoolField(TEXT("cloudTraversalStablePlanarNoiseCoverage"), true);
+		Style->SetBoolField(TEXT("cloudTraversalHardBirdCameraCore"), true);
+		Style->SetBoolField(TEXT("cloudTraversalFullTranslucency"), false);
+		Style->SetNumberField(TEXT("cloudTraversalRetainedCoverage"), 0.82);
+		Style->SetNumberField(TEXT("cloudTraversalMaskFrequency"), 0.012);
+		Style->SetBoolField(TEXT("cloudTraversalVeilPermanentlyRemoved"), true);
+		Style->SetBoolField(TEXT("cloudTraversalContinuousEnvelopeWeight"), true);
+		Style->SetBoolField(TEXT("cloudTraversalExplicitCameraCutOnly"), true);
+		Style->SetBoolField(TEXT("cloudTraversalAffectsLighting"), false);
+		Style->SetNumberField(
+			TEXT("cloudNightBrightnessMultiplier"),
+			FABTST4LowPolyCloudPrototype::NightBrightness);
+		Style->SetNumberField(
+			TEXT("cloudDaylightBlendMinSolarHeight"),
+			FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight);
+		Style->SetNumberField(
+			TEXT("cloudDaylightBlendMaxSolarHeight"),
+			FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
+		Style->SetNumberField(
+			TEXT("cloudFusionPairCount"), ManifestCloudFusionPairCount);
+		Style->SetStringField(
+			TEXT("cloudOutlineIdentityPolicy"),
+			TEXT("LogicalCloudIdentitySeparatedFromSharedCloudCompositeStencil"));
+		TArray<TSharedPtr<FJsonValue>> LogicalCloudsJson;
+		LogicalCloudsJson.Reserve(ManifestLogicalClouds.Num());
+		for (const FABTST4LowPolyCloudIslandDefinition& LogicalCloud
+			: ManifestLogicalClouds)
+		{
+			TSharedRef<FJsonObject> CloudJson = MakeShared<FJsonObject>();
+			CloudJson->SetNumberField(
+				TEXT("logicalCloudIndex"), LogicalCloud.LogicalCloudIndex);
+			CloudJson->SetNumberField(
+				TEXT("sourceIslandIndex"), LogicalCloud.IslandIndex);
+			CloudJson->SetNumberField(
+				TEXT("seed"), LogicalCloud.Seed);
+			CloudJson->SetNumberField(
+				TEXT("cloudletCount"), LogicalCloud.CloudletCount);
+			CloudJson->SetStringField(
+				TEXT("role"),
+				LogicalCloud.bTerminatorMegaCluster
+					? TEXT("TerminatorMegaCluster")
+					: TEXT("GlobalBackground"));
+			CloudJson->SetBoolField(
+				TEXT("isTerminatorMegaCluster"),
+				LogicalCloud.bTerminatorMegaCluster);
+			CloudJson->SetNumberField(
+				TEXT("solarHeight"),
+				FVector::DotProduct(
+					LogicalCloud.RadialUp,
+					EnvironmentSnapshot.SunDirectionToSunWorld));
+			CloudJson->SetStringField(
+				TEXT("identityHash"),
+				ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+					LogicalCloud.LogicalCloudIdentityHash));
+			LogicalCloudsJson.Add(MakeShared<FJsonValueObject>(CloudJson));
+		}
+		Style->SetArrayField(TEXT("logicalClouds"), LogicalCloudsJson);
+	}
 	Root->SetObjectField(TEXT("style"), Style);
 
 	TArray<TSharedPtr<FJsonValue>> Records;
@@ -2165,12 +3704,248 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 		RecordJson->SetStringField(
 			TEXT("profile"),
 			FABTSToonVisualCaptureMath::LexToString(Record.Profile));
+		RecordJson->SetStringField(
+			TEXT("variantId"),
+			Record.VariantId.ToString());
 		RecordJson->SetBoolField(
 			TEXT("styleEnabled"),
 			Record.bStyleEnabled);
 		RecordJson->SetNumberField(
+			TEXT("diagnosticPassMask"),
+			static_cast<int32>(Record.PassMask));
+		RecordJson->SetBoolField(
+			TEXT("toneEnabled"),
+			(static_cast<uint8>(Record.PassMask)
+				& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Tone)) != 0);
+		RecordJson->SetBoolField(
+			TEXT("outlineEnabled"),
+			(static_cast<uint8>(Record.PassMask)
+				& static_cast<uint8>(EABTSStylizedDiagnosticPassMask::Outline)) != 0);
+		RecordJson->SetBoolField(
+			TEXT("shadowsEnabled"),
+			Record.bShadowsEnabled);
+		RecordJson->SetNumberField(
 			TEXT("styleImplementationVersion"),
 			Record.StyleImplementationVersion);
+		if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A1
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+			|| RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+		{
+			const FABTSStylizedEnvironmentParameters Presentation =
+				FABTSStylizedRenderingControl::BuildEnvironmentParameters(
+					EnvironmentSnapshot.PlanetCenterWorld,
+					EnvironmentSnapshot.PlanetRadiusCM,
+					EnvironmentSnapshot.SunDirectionToSunWorld,
+					Record.Profile);
+			RecordJson->SetBoolField(
+				TEXT("environmentPresentationEnabled"),
+				Record.bStyleEnabled);
+			RecordJson->SetNumberField(
+				TEXT("atmosphereHeightCM"),
+				Presentation.AtmosphereHeightCM);
+			RecordJson->SetNumberField(TEXT("starSeed"), Presentation.StarSeed);
+			RecordJson->SetNumberField(
+				TEXT("starGridResolution"),
+				Presentation.StarGridResolution);
+			RecordJson->SetNumberField(
+				TEXT("starCellProbability"),
+				Presentation.StarCellProbability);
+			RecordJson->SetNumberField(
+				TEXT("starAngularRadiusScale"),
+				Presentation.StarAngularRadiusScale);
+			RecordJson->SetNumberField(
+				TEXT("starHDRIntensity"),
+				Presentation.StarHDRIntensity);
+			RecordJson->SetNumberField(
+				TEXT("fixedExposureBias"),
+				Presentation.FixedExposureBias);
+			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A3)
+			{
+				const double CameraAltitudeCM = FMath::Max(
+					(Record.CameraWorldTransform.GetLocation()
+						- Presentation.PlanetCenterWorld).Length()
+						- Presentation.PlanetRadiusCM,
+					0.0);
+				RecordJson->SetNumberField(TEXT("cameraAltitudeCM"), CameraAltitudeCM);
+				RecordJson->SetNumberField(TEXT("cameraAltitudePrimaryRadiusRatio"),
+					CameraAltitudeCM / Presentation.PlanetRadiusCM);
+				RecordJson->SetNumberField(TEXT("highAltitudeSpaceBlend"),
+					FABTSStylizedRenderingControl::ComputeHighAltitudeSpaceBlend(
+						static_cast<float>(CameraAltitudeCM),
+						Presentation.HighAltitudeTransitionStartCM,
+						Presentation.HighAltitudeTransitionEndCM));
+			}
+			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2)
+			{
+				const bool bRuntimeCloudEnabledForRecord =
+					Record.bStyleEnabled
+					&& Presentation.bCloudsEnabled != 0u
+					&& !RunConfig.bDisableLowPolyCloudsForPerformanceBaseline
+					&& bRuntimeCloudPrototypeActive;
+				RecordJson->SetBoolField(
+					TEXT("cloudEnabled"),
+					bRuntimeCloudEnabledForRecord);
+			}
+			if (RunConfig.Suite == EABTSToonVisualCaptureSuite::ToonT4A2
+				&& Record.bStyleEnabled
+				&& Presentation.bCloudsEnabled != 0u
+				&& !RunConfig.bDisableLowPolyCloudsForPerformanceBaseline
+				&& bRuntimeCloudPrototypeActive)
+			{
+				RecordJson->SetStringField(
+					TEXT("cloudRoute"),
+					TEXT("SingleHISMBatchedIslandFieldsA2_4"));
+				const bool bTraversalPoint = Record.Anchor
+					== EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
+					|| Record.Anchor
+						== EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside
+					|| Record.Anchor
+						== EABTSToonVisualCaptureAnchor::CloudTraversalBetween
+					|| Record.Anchor
+						== EABTSToonVisualCaptureAnchor::CloudTraversalBothInside;
+				RecordJson->SetBoolField(
+					TEXT("cloudBoundedTraversalVisibility"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalStablePlanarNoiseCoverage"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalHardBirdCameraCore"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalPerBirdVisualSpheres"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalImmediateHardProtection"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalTsrPixelAnimation"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalFullTranslucency"), false);
+				RecordJson->SetNumberField(
+					TEXT("cloudTraversalRetainedCoverage"), 0.82);
+				RecordJson->SetNumberField(
+					TEXT("cloudTraversalMaskFrequency"), 0.012);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalVeilPermanentlyRemoved"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalContinuousEnvelopeWeight"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalExplicitCameraCutOnly"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalDiagnosticPoint"), bTraversalPoint);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalCameraInside"),
+					Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalCameraInside
+						|| Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBothInside);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalBirdInside"),
+					Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBirdInside
+						|| Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBothInside);
+				RecordJson->SetBoolField(
+					TEXT("cloudTraversalCloudBetween"),
+					Record.Anchor == EABTSToonVisualCaptureAnchor::CloudTraversalBetween);
+				RecordJson->SetNumberField(
+					TEXT("cloudMacroClusters"),
+					FABTST4LowPolyCloudPrototype::IslandCount *
+						FABTST4LowPolyCloudPrototype::MacroClusterCountPerIsland);
+				RecordJson->SetBoolField(TEXT("cloudViewInvariantIslandField"), true);
+				RecordJson->SetBoolField(TEXT("cloudViewInvariantVolumeGradient"), true);
+				RecordJson->SetBoolField(TEXT("cloudCameraDependentLighting"), false);
+				RecordJson->SetBoolField(TEXT("cloudBypassGenericObjectTone"), true);
+				RecordJson->SetBoolField(TEXT("cloudSunwardWhitening"), true);
+				RecordJson->SetBoolField(TEXT("cloudThinDensityWhitening"), true);
+				RecordJson->SetBoolField(TEXT("cloudViewIndependentWhitening"), true);
+				RecordJson->SetBoolField(TEXT("cloudGradientCoherenceGuard"), true);
+				RecordJson->SetBoolField(TEXT("cloudGradientJunctionGate"), true);
+				RecordJson->SetBoolField(TEXT("cloudPlanarCoreClosure"), true);
+				RecordJson->SetBoolField(TEXT("cloudUndersideField"), true);
+				RecordJson->SetBoolField(TEXT("cloudCriticalPointFallbackToIslandUp"), true);
+				RecordJson->SetNumberField(
+					TEXT("cloudBodyCloudlets"),
+					FABTST4LowPolyCloudPrototype::TotalBodyCloudletCount);
+				RecordJson->SetNumberField(
+					TEXT("cloudCrownCloudlets"),
+					FABTST4LowPolyCloudPrototype::TotalCrownCloudletCount);
+				RecordJson->SetNumberField(
+					TEXT("cloudEdgeCloudlets"),
+					FABTST4LowPolyCloudPrototype::TotalEdgeCloudletCount);
+				RecordJson->SetBoolField(
+					TEXT("cloudSharedImplicitVolume"), false);
+				RecordJson->SetBoolField(
+					TEXT("cloudAnalyticRaySurface"), false);
+				RecordJson->SetBoolField(
+					TEXT("cloudContinuousVolumeNormal"), false);
+				RecordJson->SetBoolField(
+					TEXT("cloudOpticalDepth"), false);
+				RecordJson->SetBoolField(
+					TEXT("cloudContinuousMacroNormal"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudThreeBandColor"), true);
+				RecordJson->SetNumberField(
+					TEXT("cloudMacroNormalStrength"), 0.84);
+				RecordJson->SetNumberField(
+					TEXT("cloudPixelLocalNormalWeight"), 0.0);
+				RecordJson->SetNumberField(
+					TEXT("cloudPixelInstanceVariation"), 0.0);
+				RecordJson->SetBoolField(
+					TEXT("cloudContinuousMacroRelief"), true);
+				RecordJson->SetNumberField(TEXT("cloudMacroMaskCoverageMinimum"), 0.98);
+				RecordJson->SetBoolField(TEXT("cloudSphericalConformal"), true);
+				RecordJson->SetNumberField(
+					TEXT("cloudHorizontalEnvelopeAspectMaximum"), 1.08);
+				RecordJson->SetNumberField(
+					TEXT("cloudAzimuthalFootprintIsotropyMinimum"), 0.80);
+				RecordJson->SetNumberField(TEXT("cloudDetachedEdgeMaximum"), 0);
+				RecordJson->SetNumberField(
+					TEXT("logicalCloudCount"), ManifestLogicalClouds.Num());
+				RecordJson->SetStringField(
+					TEXT("logicalCloudLayoutHash"),
+					ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+						ManifestLogicalCloudLayoutHash));
+				RecordJson->SetNumberField(
+					TEXT("cloudCompositeStencilValue"),
+					FABTSStylizedRenderingContract::
+						ResolveCloudCompositeStencilValueForRenderer());
+				RecordJson->SetBoolField(
+					TEXT("cloudToCloudOutlineSuppression"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudToWorldOutlinePreserved"), true);
+				RecordJson->SetBoolField(TEXT("cloudFieldGlobal"), true);
+				RecordJson->SetNumberField(
+					TEXT("globalBackgroundLogicalCloudCount"),
+					FABTST4LowPolyCloudPrototype::GlobalIslandCount);
+				RecordJson->SetNumberField(
+					TEXT("terminatorMegaClusterLogicalCloudCount"),
+					ManifestTerminatorMegaCloudCount);
+				RecordJson->SetNumberField(
+					TEXT("terminatorMegaClusterAngularSpanDegrees"),
+					ManifestTerminatorMegaSpanDegrees);
+				RecordJson->SetBoolField(
+					TEXT("terminatorMegaClusterConnected"),
+					bManifestTerminatorMegaConnected);
+				RecordJson->SetBoolField(
+					TEXT("cloudGlobalBackgroundSunIndependentPlacement"), true);
+				RecordJson->SetBoolField(
+					TEXT("cloudTerminatorMegaClusterSunRelativePlacement"), true);
+				RecordJson->SetBoolField(TEXT("cloudLocalSolarHeightLighting"), true);
+				RecordJson->SetBoolField(TEXT("cloudNightWhiteningGated"), true);
+				RecordJson->SetNumberField(
+					TEXT("cloudNightBrightnessMultiplier"),
+					FABTST4LowPolyCloudPrototype::NightBrightness);
+				RecordJson->SetNumberField(
+					TEXT("cloudDaylightBlendMinSolarHeight"),
+					FABTST4LowPolyCloudPrototype::DaylightBlendMinSolarHeight);
+				RecordJson->SetNumberField(
+					TEXT("cloudDaylightBlendMaxSolarHeight"),
+					FABTST4LowPolyCloudPrototype::DaylightBlendMaxSolarHeight);
+				RecordJson->SetNumberField(
+					TEXT("cloudFusionPairCount"), ManifestCloudFusionPairCount);
+				RecordJson->SetBoolField(
+					TEXT("cloudInternalOutlineSuppression"), true);
+				RecordJson->SetNumberField(TEXT("cloudBaseAltitudeCM"), Presentation.CloudBaseAltitudeCM);
+				RecordJson->SetNumberField(TEXT("cloudLayerHeightCM"), Presentation.CloudLayerHeightCM);
+				RecordJson->SetNumberField(TEXT("cloudGlobalScaleKM"), Presentation.CloudGlobalScaleKM);
+				RecordJson->SetNumberField(TEXT("cloudCoverage"), Presentation.CloudCoverage);
+				RecordJson->SetNumberField(TEXT("cloudDensity"), Presentation.CloudDensity);
+				RecordJson->SetNumberField(TEXT("cloudViewSampleCountScale"), Presentation.CloudViewSampleCountScale);
+			}
+		}
 		RecordJson->SetObjectField(
 			TEXT("cameraWorldTransform"),
 			ABTSToonVisualCaptureSubsystemPrivate::TransformToJson(
@@ -2194,6 +3969,10 @@ bool UABTSToonVisualCaptureSubsystem::WriteManifest(
 			TEXT("effectiveCameraPoseHash"),
 			ABTSToonVisualCaptureSubsystemPrivate::Hex64(
 				Record.EffectiveCameraPoseHash));
+		RecordJson->SetStringField(
+			TEXT("environmentSnapshotHash"),
+			ABTSToonVisualCaptureSubsystemPrivate::Hex64(
+				Record.EnvironmentSnapshotHash));
 		RecordJson->SetNumberField(TEXT("resolutionX"), Record.Resolution.X);
 		RecordJson->SetNumberField(TEXT("resolutionY"), Record.Resolution.Y);
 		RecordJson->SetStringField(TEXT("artifactPath"), Record.ArtifactPath);
@@ -2250,11 +4029,22 @@ FString UABTSToonVisualCaptureSubsystem::MakeCurrentArtifactPath() const
 	{
 		return FString();
 	}
-	return FPaths::Combine(
-		OutputDirectory,
-		FString::Printf(
-			TEXT("%02d_%s_Style%s.png"),
+	if (!VariantDefinitions.IsValidIndex(CurrentVariantIndex))
+	{
+		return FString();
+	}
+	const FString Filename = RunConfig.Suite
+		== EABTSToonVisualCaptureSuite::ToonT0
+		? FString::Printf(
+			TEXT("%02d_%s_%s.png"),
 			CurrentPointIndex + 1,
 			*ResolvedPoints[CurrentPointIndex].Definition.PointId.ToString(),
-			bCurrentStyleEnabled ? TEXT("On") : TEXT("Off")));
+			*VariantDefinitions[CurrentVariantIndex].VariantId.ToString())
+		: FString::Printf(
+			TEXT("%02d_%s_%02d_%s.png"),
+			CurrentPointIndex + 1,
+			*ResolvedPoints[CurrentPointIndex].Definition.PointId.ToString(),
+			CurrentVariantIndex + 1,
+			*VariantDefinitions[CurrentVariantIndex].VariantId.ToString());
+	return FPaths::Combine(OutputDirectory, Filename);
 }

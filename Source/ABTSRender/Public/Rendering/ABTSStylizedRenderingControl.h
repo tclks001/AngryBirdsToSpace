@@ -29,10 +29,77 @@ struct ABTSRENDER_API FABTSStylizedOutlineProfileParameters
 	float DepthSoftness = 0.018f;
 	float NormalThreshold = 0.16f;
 	float NormalSoftness = 0.18f;
-	float Strength = 0.78f;
+	/** Geometry-to-background silhouette strength. */
+	float Strength = 0.92f;
+	/** Visible geometry-to-geometry depth discontinuity strength. */
+	float OcclusionStrength = 0.64f;
+	/** Same-depth normal crease strength; kept subordinate to silhouettes. */
+	float NormalCreaseStrength = 0.22f;
 	FVector3f Color = FVector3f(0.035f, 0.050f, 0.075f);
 
 	bool IsValid() const;
+};
+
+/**
+ * Immutable render-thread value snapshot for T4 spherical atmosphere and
+ * deterministic HDR stars. It contains no UObject references.
+ */
+struct ABTSRENDER_API FABTSStylizedEnvironmentParameters
+{
+	FVector PlanetCenterWorld = FVector::ZeroVector;
+	float PlanetRadiusCM = 0.0f;
+	float AtmosphereHeightCM = 0.0f;
+	/** Per-view altitude band where the ground atmosphere continuously yields to space. */
+	float HighAltitudeTransitionStartCM = 0.0f;
+	float HighAltitudeTransitionEndCM = 0.0f;
+	FVector3f SunDirectionToSunWorld = FVector3f::ZeroVector;
+	EABTSStylizedRenderProfile Profile =
+		EABTSStylizedRenderProfile::GroundDay;
+	uint32 StarSeed = 0;
+	float StarGridResolution = 256.0f;
+	float StarCellProbability = 0.012f;
+	float StarAngularRadiusScale = 0.120f;
+	float StarHDRIntensity = 2.6f;
+	float FixedExposureBias = 0.0f;
+	/** T4-A2 native radial cloud-shell route. Zero keeps non-ground profiles cloud-free. */
+	uint32 bCloudsEnabled = 0;
+	float CloudBaseAltitudeCM = 0.0f;
+	float CloudLayerHeightCM = 0.0f;
+	float CloudGlobalScaleKM = 0.0f;
+	float CloudCoverage = 0.0f;
+	float CloudDensity = 0.0f;
+	float CloudViewSampleCountScale = 0.0f;
+	bool IsValid() const;
+};
+
+/**
+ * Immutable actor-presentation policy for one formal T4-A3 environment
+ * profile. This stays separate from the surface tone/outline profile so a
+ * satellite landing preview can keep GroundDay surface lighting while its
+ * empty background consumes SatelliteGuide.
+ */
+struct ABTSRENDER_API FABTSStylizedEnvironmentProfilePolicy
+{
+	EABTSStylizedRenderProfile Profile =
+		EABTSStylizedRenderProfile::GroundDay;
+	bool bSkyAtmosphereVisible = true;
+	bool bHeightFogVisible = false;
+	bool bLowPolyCloudsVisible = true;
+
+	bool IsValid() const;
+};
+
+/**
+ * Integration-owned diagnostic mask.  Production uses ToneAndOutline; the
+ * other values exist so the T4 capture runner can isolate rendering layers
+ * without changing material families or gameplay state.
+ */
+enum class EABTSStylizedDiagnosticPassMask : uint8
+{
+	None = 0,
+	Tone = 1 << 0,
+	Outline = 1 << 1,
+	ToneAndOutline = 3
 };
 
 /** Stable Integration-owned switch and profile seam for stylized rendering. */
@@ -46,8 +113,26 @@ public:
 	static EABTSStylizedRenderProfile GetProfile();
 	static EABTSStylizedRenderProfile GetProfileOnAnyThread();
 	static void SetProfile(EABTSStylizedRenderProfile Profile);
+	static EABTSStylizedDiagnosticPassMask GetDiagnosticPassMask();
+	static EABTSStylizedDiagnosticPassMask GetDiagnosticPassMaskOnAnyThread();
+	static void SetDiagnosticPassMask(EABTSStylizedDiagnosticPassMask Mask);
+	static bool IsTonePassEnabledOnAnyThread();
+	static bool IsOutlinePassEnabledOnAnyThread();
+	static FABTSStylizedEnvironmentParameters BuildEnvironmentParameters(
+		const FVector& PlanetCenterWorld,
+		double PlanetRadiusCM,
+		const FVector& SunDirectionToSunWorld,
+		EABTSStylizedRenderProfile Profile);
+	static FABTSStylizedEnvironmentProfilePolicy GetEnvironmentProfilePolicy(
+		EABTSStylizedRenderProfile Profile);
+	static void SetEnvironmentParameters(
+		const FABTSStylizedEnvironmentParameters& Parameters);
+	static void ClearEnvironmentParameters();
+	static bool TryGetEnvironmentParametersOnAnyThread(
+		FABTSStylizedEnvironmentParameters& OutParameters);
 	static FABTSStylizedToneProfileParameters GetToneProfileParameters(
 		EABTSStylizedRenderProfile Profile);
+	static float GetFixedExposureBias(EABTSStylizedRenderProfile Profile);
 	/**
 	 * Scene captures do not retain the main view's temporal lighting history.
 	 * Clamp tone normalization to this profile-specific floor so sub-visible
@@ -57,6 +142,41 @@ public:
 		EABTSStylizedRenderProfile Profile);
 	static FABTSStylizedOutlineProfileParameters GetOutlineProfileParameters(
 		EABTSStylizedRenderProfile Profile);
+	/**
+	 * Low-poly masked cloud silhouettes must remain temporally crisp in the
+	 * ground traversal profile.  Full-screen motion blur blends the bright sky
+	 * across the darker night-side cloud edge while the camera moves, so the
+	 * ground cloud route explicitly suppresses it.  Satellite/finale profiles
+	 * retain their own camera presentation policy.
+	 */
+	static bool ShouldSuppressMotionBlur(
+		EABTSStylizedRenderProfile Profile,
+		bool bCloudsEnabled);
+	/** Pure-data mirror of the shader transition, used by diagnostics and tests. */
+	static float ComputeHighAltitudeSpaceBlend(
+		float CameraAltitudeCM,
+		float TransitionStartCM,
+		float TransitionEndCM);
+	/**
+	 * Pure-data mirror of the ground-profile twilight star visibility. Near
+	 * the terminator the viewed ray matters: sunward sky suppresses stars while
+	 * anti-sunward sky reveals them. Deep day/night remain observer-driven.
+	 */
+	static float ComputeGroundStarNightFactor(
+		float ObserverSunHeight,
+		float ViewToSun);
+	/** Pure-data mirror of the near-horizon sky-ray visibility gate. */
+	static float ComputeGroundStarHorizonVisibility(float ViewRadialDot);
+	/**
+	 * Signed angular-cosine clearance of a ground-sky ray from the accepted
+	 * base planet. Positive is visible sky, zero is the spherical horizon and
+	 * negative is planet-occluded. SceneDepth remains authoritative for SDF
+	 * relief and arbitrary foreground geometry.
+	 */
+	static float ComputeGroundSkyRayPlanetClearance(
+		float CameraRadiusCM,
+		float PlanetRadiusCM,
+		float ViewToPlanetCenter);
 
 	static int32 GetImplementationVersion();
 	static bool IsProfileValid(EABTSStylizedRenderProfile Profile);

@@ -14,6 +14,7 @@ class UABTSRadialSurfaceSuspensionComponent;
 class UABTSChaosBirdMovementComponent;
 class UPrimitiveComponent;
 class UMaterialInterface;
+enum class EABTSFootstepSurface : uint8;
 
 /** Editor-selectable player movement implementation. */
 UENUM(BlueprintType)
@@ -72,6 +73,27 @@ public:
 	void FinishSlingshotReturn();
 	void SetSlingshotVelocity(const FVector& InVelocity);
 	FVector GetSlingshotVelocity() const;
+	/** Presentation-only radial frame used during the primary-to-satellite hand-off. */
+	void SetSlingshotPresentationUp(
+		const FVector& WorldUp,
+		float DeltaSeconds,
+		bool bLockFacingReversal = false,
+		const FVector& ViewStableWorldForward = FVector::ZeroVector);
+	/**
+	 * Parallel-transports the previous visual forward into a new radial frame,
+	 * then consumes a camera-stable presentation anchor directly, or applies
+	 * only a bounded, reliable velocity-facing correction when no anchor exists.
+	 */
+	static FVector ComputeRotationMinimizedSlingshotForward(
+		const FVector& PreviousForward,
+		const FVector& PreviousUp,
+		const FVector& NewUp,
+		const FVector& Velocity,
+		const FVector& ViewStableWorldForward,
+		float MaximumVelocityCorrectionDegrees,
+		bool bLockFacingReversal = false);
+	void ClearSlingshotPresentationUp();
+	void NotifySlingshotPresentationImpact();
 	/** Conservative radius consumed by every slingshot predictor and swept target test. */
 	float GetSlingshotTrajectoryCollisionRadiusCM() const;
 	bool IsSlingshotFlightActive() const;
@@ -102,8 +124,12 @@ private:
 	bool IsControllerRoutedMovementInputExperimentEnabled() const;
 	bool IsClearMotionBeforePlayerJumpExperimentEnabled() const;
 	void ApplyClearMotionBeforeJumpExperiment();
-	void UpdateChaosVisualFrame();
+	void UpdateChaosVisualFrame(float DeltaSeconds);
+	void UpdateSlingshotPresentationFrame(float DeltaSeconds);
 	void UpdateBirdAnimationPresentation(float DeltaSeconds);
+	void UpdateBirdLocomotionAudio(float DeltaSeconds);
+	void ResetBirdLocomotionAudio(bool bGrounded);
+	EABTSFootstepSurface ResolveFootstepSurface(const FVector& WorldUp) const;
 	void ApplyCuteBirdMaterials();
 	FVector GetPresentationVelocity() const;
 	void ConfigureChaosPhysicsBody(bool bEnable);
@@ -147,6 +173,26 @@ private:
 	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
 	bool bPlanarChaosMode = false;
 	bool bDeveloperWalkEnabled = false;
+	bool bSlingshotPresentationUpActive = false;
+	bool bSlingshotPresentationFrameInitialized = false;
+	bool bSlingshotPresentationLockFacingReversal = false;
+	FVector SlingshotPresentationUp = FVector::UpVector;
+	FVector SlingshotPresentationViewForward = FVector::ZeroVector;
+	FQuat SlingshotPresentationFrame = FQuat::Identity;
+	/** Maximum presentation-only yaw correction toward flight velocity. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "10.0", ClampMax = "180.0", Units = "deg/s"))
+	float SlingshotPresentationForwardCorrectionDegreesPerSecond = 90.0f;
+	FVector StableChaosPresentationForward = FVector::ZeroVector;
+	bool bChaosVisualRotationInitialized = false;
+	FQuat ChaosVisualRotation = FQuat::Identity;
+	float SlingshotImpactFacingLockRemainingSeconds = 0.0f;
+	FVector PreviousLocomotionAudioLocation = FVector::ZeroVector;
+	float AccumulatedFootstepDistanceCM = 0.0f;
+	float PeakAirborneDownwardSpeedCMPerSec = 0.0f;
+	float PendingPlayerJumpAudioSeconds = 0.0f;
+	bool bLocomotionAudioInitialized = false;
+	bool bLocomotionAudioWasGrounded = true;
 	/** Runtime-only helper avoids adding another serialized native Blueprint subobject. */
 	UPROPERTY(Transient)
 	TObjectPtr<UABTSBirdAnimationPresentationComponent> BirdAnimationPresentation;

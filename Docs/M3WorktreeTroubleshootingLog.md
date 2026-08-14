@@ -17,7 +17,7 @@
 3. 只写已经实际遇到的问题或已经证明必要的诊断边界。尚未实现的功能、纯设计风险和普通开发进度不冒充故障。
 4. 每条记录注明修复归属。若问题属于 M7、M11 或 Integration，M3 只记录如何识别、如何同步修复，不越权修改共享契约。
 5. 验收证据必须来自本次修改后的 fresh 进程、唯一日志或可见 PIE；旧日志、Editor 已加载的 CDO 和单纯“编译了某个 `.cpp`”都不是闭环证据。
-6. 新条目使用第 10 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
+6. 新条目使用第 13 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
 
 ## 2. 快速索引
 
@@ -30,6 +30,8 @@
 | M3-R3-002 | 同一弹弓阶段的建筑距离全部退化为同一个舒适射程 | 已改为逐关递增射程窗口 | M3 |
 | M3-R5-001 | 逻辑 Target/Attack Corridor 已生成但画面无法辨认 | 已增加 F7 只读叠层 | M3 |
 | M3-R5-002 | 候选预览正确，却被误认为生产世界已经移动 | 已明确 Preview/Test 权威边界 | M3 + Integration |
+| M3-R5-003 | 同一 TerrainType 出现深浅块，且块边界与真实地貌分界错位 | 已取消地表 Beat/Theme 调色并改为固定基础色板 | M3 |
+| M3-R5-004 | 小地图显示兼容世界颜色，而落点实拍显示当前候选颜色 | 已让材质与小地图共享持久的活动候选 VisualField | M3 |
 | M3-R51-001 | 强化弹弓落入地表或两桩悬空/下沉 | 已改为两槽分别查询真实地表 | M3 |
 | M3-R51-002 | 强化弹弓没有朝向卫星 | 已改为真实 Pouch 发射帧并加 `<=5°` 门 | M3 |
 | M3-R51-003 | `SatelliteGravity=1` 但预览和真实飞行无可见偏转 | 已完成生产档位、真实地表、共享引力链闭环 | M3 + Integration/M6/M9 |
@@ -39,6 +41,7 @@
 | M3-X-001 | 建筑日志显示已生成，随后建筑消失，容易误判为 M3 漏生成 | 已建立 M7 Idle Reject 分诊规则 | M7；M3 只分诊 |
 | M3-T2B-001 | 风格语义若按名字、地图或位置识别，会随预览与生产身份漂移 | 已改为权威 Actor/组件/结果只读适配 | M3 |
 | M3-T2B-002 | M10 落点预览的 SceneCapture 没有跨模块稳定只读入口 | 已记录共享类型接线需求；M3 不越界绕过 | Integration/M10 |
+| M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化已通过；待可见 PIE | M3 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
 
 ## 3. 工作树、同步与构建
@@ -222,6 +225,53 @@ R-3/R-5 同时保留多个候选。显式预览只消费指定 Candidate，不�
 **防回归验证**
 
 分别运行“无预览参数”和“显式 Candidate 预览”两条路径：前者保持兼容世界，后者必须打印指定 Candidate 与完整来源 Hash；两者都不得把未决候选发布为月度正式布局。
+
+### M3-R5-003：同色深浅块与真实 TerrainType 分界错位
+
+**现象**
+
+月度表现预览开启后，同一片绿色、土黄色或灰色地貌中出现规则或不规则的深浅区块；这些色块边缘按 Cell/Beat 身份变化，与真正的 TerrainType 线段边界不重合。
+
+**根因**
+
+材质桥曾先在每个 Cell 中心调用带边界插值的 `GetDebugLandColor()`，再按 `VisualBeatId/AccentVariantId/ThemeVariantId` 乘以两级明暗系数，最后把结果写进 `CellVisualLUT`。材质 HLSL 随后仍使用 TerrainType 线段 SDF 选择和混合这些 Cell 颜色。于是 LUT 中同时烘入了“Cell 中心的边界混色”和“月度 Beat/Theme 调色”，而 GPU 分界几何只认识 TerrainType 线段；两套分区来源不同，必然出现同色深浅块及错位边缘。
+
+**修复**
+
+- 地表材质桥不再读取月度 `VisualBeatId`、`AccentVariantId` 或 `ThemeVariantId`，也不再做亮度乘法；
+- `CellVisualLUT` 改为读取 Cell 的有效陆地 TerrainType 固定基础色，不在 Cell 中心预先采样或烘焙边界混色；
+- TerrainType 异色分界继续使用既有线段 SDF，未修改材质资产；
+- 月度 DTO、Visual Beat、ThemeVariant 与 Hash 保留，供 HISM 等非地表表现以后独立消费；运行时门由 `MaterialRhythm` 改为 `MaterialBasePalette`。
+
+**防回归验证**
+
+- `Saved/Logs/M3BasePalette-20260805-182627.log` 中 `ABTS.M3.Monthly.Biome.BaseTerrainPalette` fresh NullRHI 精确 `1/1 Success`，验证 Plain/Forest/Highland/Mountain 各自只有一套基础色，Cell 的高度和湿度标量不会改变同类色；
+- fresh runtime 必须输出 `[ABTS][M3R5][MaterialBasePalette] Applied=1 ... VisualBeatConsumed=0 ThemeVariantConsumed=0`，且 Palette Cell 数等于预览 Cell 数；
+- 可见 PIE 分别在 Lit/Unlit 检查：同一 TerrainType 内不得再出现深浅块，异色过渡必须贴合 TerrainType 线段 SDF；道路与河流的独立 SDF 不受影响。
+
+### M3-R5-004：小地图采样到兼容世界而非当前候选
+
+**现象**
+
+显式候选预览中，落点远端实拍已经显示当前 Candidate 的地表颜色，但同一落点在小地图上仍显示另一套地貌颜色。取消地表 Beat/Theme 亮度后问题保持不变，说明它不是节拍调色残留。
+
+**根因**
+
+候选预览重建时，材质桥消费的是 `RebuildPlanet()` 栈内临时创建的候选 `PresentationCellStates/PresentationEdgeStates/PresentationVisualField`；`QueryScoutMapTerrainColor()` 却始终查询由兼容 `GeneratedCellStates/GeneratedEdgeStates` 初始化的成员 `TerrainVisualField`。落点红叉与远端实拍使用同一世界位置，投影公式没有错；分叉发生在地表表现权威选择处。基础色函数和 sRGB 转换也不是根因。
+
+**修复**
+
+- 将候选预览的 CellStates、EdgeStates 和 VisualField 一并持久保存在 `AABTSM3Planet`，避免 VisualField 持有 `RebuildPlanet()` 栈数组指针；
+- 地表材质桥与 `QueryScoutMapTerrainColor()` 在 PreviewAuthority 生效时消费同一个持久候选 VisualField；关闭预览时两者仍共同消费兼容 `TerrainVisualField`；
+- PreviewAuthority 已生效但候选 VisualField 不可用时 fail closed，不静默回退到兼容候选；
+- `QuerySurface`、物理、TaskGraph 与稳定合同继续使用兼容世界，不把 Preview/Test 候选误晋升为正式生成结果。
+
+**防回归验证**
+
+- `Saved/Logs/M3ScoutMapPresentationAuthority-20260806-162927.log` 中 `ABTS.M3.Monthly.SatellitePreview.04ScoutMapPresentationAuthority` fresh NullRHI 精确 `1/1 Success`；Candidate 4 共发现 `6064` 个候选/兼容地貌不同的判别样本，其中 `4636` 个 Cell 中心采样明确命中候选基础色而非兼容基础色；
+- `Saved/Logs/M3SatellitePreview-20260806-163013.log` 中完整 `ABTS.M3.Monthly.SatellitePreview` fresh NullRHI 精确 `4/4 Success`；
+- `Saved/Logs/M3BasePalette-20260806-163059.log` 中固定基础色板 fresh NullRHI 精确 `1/1 Success`；
+- 可见 PIE 待用户在同一显式 Candidate 下复查：红叉附近小地图地貌分类必须与落点实拍采用的地表分类一致；真实光照、SceneCapture 和 Toon 后处理造成的像素亮度差异不算分类错误。
 
 ## 6. R-5.1 卫星练习链路
 
@@ -456,7 +506,79 @@ Integration 接线必须在 owner/component 不存在、Subject 为 `None` 或�
 - Integration 定向测试应验证两个 Preview Subject 映射到固定视图类，`None` 不接线，且接线前后 M3 Candidate/Result Hash、M9 引力、轨迹、碰撞均不变；
 - SceneCapture 的 Profile、后处理与 Custom Depth 消费只由 Integration 验证，不能用 M3 NullRHI 语义测试替代像素门。
 
-## 10. 自动化与性能证据
+## 10. T3-A1 材质族适配
+
+### M3-T3A1-001：用空材质测试“风格参数缺失”会制造 MID 假错误
+
+**现象**
+
+`ABTS.M3.StylizedMaterials` 最初虽为 `2/2 Success`，日志却在测试期间出现多条 `LogAutomationTest: Error: Condition failed`。最小复现是把完全无参数的 transient `UMaterial` 传给 TerrainMaterialBridge，试图模拟只缺少 `ABTS_*` 风格参数。
+
+**根因**
+
+该 fixture 同时缺少全部既有 `M3_*` Texture/Scalar/Vector 参数。TerrainMaterialBridge 按冻结契约继续注入原 LUT、道路、河流和半径参数时，MID 会对每个不存在的原参数触发引擎诊断；这与“原地形材质仍完整、仅 T3 风格参数缺失”的产品场景不同。仅看 Automation Result 会形成假绿灯。
+
+**修复**
+
+- 生产桥先只读检查八个公共风格参数；缺任一个时 `ApplyStylizedSurfaceParameters()` 返回 false，保留原地形 MID，不阻断生成；
+- 自动化不再用破坏原 M3 参数契约的空材质冒充合法地形，改为验证未就绪桥安全拒绝，以及树石风格资产缺失时不发布非法绑定；
+- 完整地形 fixture 继续验证全部原 `M3_*` 参数与 `ABTS_*` 参数由同一 MID 消费。
+
+**防回归验证**
+
+- fresh `ABTS.M3.StylizedMaterials` 必须精确 `2/2 Success`、项目 `LogABTSRuntime/LogAutomationController Error=0`；
+- 不得用测试成功数掩盖测试期间的项目 Error；UE 初始化期自带的 `UnifiedErrorTest` 噪声需按时间和类别与项目测试区分；
+- 风格缺失只允许影响表现，PlanetReady、TaskGraph、实例数、LayoutHash 和月度 ResultHash 必须保持。
+
+### M3-T3A1-002：无 GUI 材质接线必须保留原表达式输出名
+
+**现象**
+
+地形 Custom 节点的 BaseColor 使用默认输出名，而树石 TextureSample 的 BaseColor 使用命名输出 `RGB`。首轮 headless 材质脚本将所有原节点都按空输出名处理，并在发现 `RGB` 时保守中止；未保存任何资产。
+
+**根因**
+
+Material Graph 的连接身份同时包含源表达式和输出名。只保存表达式指针、不保存 `GetMaterialPropertyInputNodeOutputName()` 会让复制后的树石接线丢失准确通道，可能静默改用错误输出。
+
+**修复**
+
+资产脚本先读取 BaseColor 的源节点与实际输出名，再把二者原样连接到 Tint/Lerp 分支；只在所有节点创建和编译成功后保存三个 M3 资产。原共享树石材质不写入。
+
+**防回归验证**
+
+- UE 5.8 只读反射确认地形和两项新材质的 BaseColor/Roughness/Specular/Metallic/Emissive 均有预期节点；
+- 两项树石材质必须保持 `Used with Instanced Static Meshes=True`；
+- 资产生成失败时不得保存半张材质图，必须核对 `git status --short` 后修正并从唯一基线重试。
+
+## 11. 阻断河连续几何
+
+### M3-RIVER-001：主线阻断河继承 Cell 级高频折角
+
+**现象**
+
+主线阻断河虽然语义上由一个理想球面大圆切面生成，画面却沿 350 条左右的 Voronoi dual 短边逐段左右摆动；DeepRiver 的粗线 SDF 把转角进一步放大成连续的“鼓包—收窄—鼓包”。M8 在任意河段架桥时忠实读取鼠标附近的单条可见河段，所以桥也跟随局部折角倾斜。
+
+**根因**
+
+Hydrology 只把“哪些 Cell 边跨越大圆切面”保存在 `FABTSM3CellEdgeState`，没有保留生成该割集的切面法线。`FABTSM3RiverVisualBuilder` 随后只能直接连接每条 Cell 边的两个 dual corner；闭合拓扑正确，但不规则 Cell 网格的离散误差成为可见中心线高频噪声。仅在材质端做模糊会让水面与 CPU SDF/M8 桥位再次分裂，不能作为最终修复。
+
+**修复**
+
+- Hydrology 为每条阻断河边记录同一个单位 `WaterBarrierPlaneNormal`，自然下游河段保持零向量；
+- 河段构建器保留原 dual corner 的共享拓扑和 `SourceEdgeKey`，再把两端确定性投影到该大圆切面；
+- Material LUT、CPU 地形/物理 SDF 与最新版 M8 单边语义桥位继续调用同一个 `BuildSegments()`，因此全量构建和单边查询得到同一条平滑线；
+- 不改变 `bBlocksOnFoot`、Crossing、RequiredKey、WaterType、河宽、BridgeEdge、可达性或冻结 Compatibility Snapshot Hash。
+
+**防回归验证**
+
+- fresh `ABTS.M3.RiverVisual.BarrierGreatCircleSmoothing` 要求每条水边保留唯一 Source Edge 映射，每条阻断边的起终点都落在同一大圆，且全量/单边构建结果相同；
+- `[ABTS][M3][RiverSDF]` 要求 `SmoothedBarrierSegments=BarrierDuals`、`BarrierSmoothingVersion=1`、`DroppedLocalRefs=0`；
+- `ABTS.Contracts.WorldGeneration` 与 `ABTS.M110.TaskGraphFinaleSeparation` 必须保持通过，证明稳定导出和 M9/Finale 分离未变；
+- 可见 `L_ABTS_M3` PIE 中，固定 Seed `312503` 的主线阻断河应呈连续低频大弧线，不再逐 Cell 左右摆动；桥面仍垂直跨河、两端落在不同河岸。NullRHI 不替代该视觉门。
+
+2026-08-14 fresh 证据：河流平滑 `1/1`、M8 语义桥位 `1/1`、Week One 确定性 `1/1`、世界生成契约 `2/2`、M9/Finale 分离 `1/1`；`L_ABTS_M3` NullRHI 为 `Segments=436 / FlowCenterlines=86 / BarrierDuals=350 / SmoothedBarrierSegments=350 / DroppedLocalRefs=0`。代码与数据门已通过，视觉状态仍明确保留为待用户 PIE。
+
+## 12. 自动化与性能证据
 
 ### M3-TEST-001：单次性能门越线不能被简单忽略或直接定性回归
 
@@ -478,7 +600,7 @@ Integration 接线必须在 owner/component 不存在、Subject 为 `None` 或�
 - 不用完整测试中的第二次缓存运行替换 fresh 首次数据；
 - 重型构建、慢速认证和可见 PIE 按多工作树规范串行执行。
 
-## 11. 新条目模板
+## 13. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>

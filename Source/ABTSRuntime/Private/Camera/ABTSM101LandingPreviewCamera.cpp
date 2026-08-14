@@ -18,6 +18,8 @@
 namespace
 {
 	constexpr float BasicShapeSphereDiameterCM = 100.0f;
+	constexpr int32 LandingPreviewHistoryWarmupCaptureCount = 2;
+	constexpr float LandingPreviewCameraCutRotationDegrees = 15.0f;
 
 	FVector ResolveStableScreenUp(const FVector& LandingUp, const FVector& Look)
 	{
@@ -46,11 +48,10 @@ AABTSM101LandingPreviewCamera::AABTSM101LandingPreviewCamera()
 	SceneCapture->SetupAttachment(Root);
 	SceneCapture->bCaptureEveryFrame = false;
 	SceneCapture->bCaptureOnMovement = false;
-	// The capture is manually updated at a low cadence while aim changes can
-	// move it a long distance. Treat every manual capture as a camera cut so
-	// temporal history from the prior predicted landing never ghosts into the
-	// new frame.
-	SceneCapture->bAlwaysPersistRenderingState = false;
+	// The main view keeps temporal lighting, shadow and AA histories. Preserve
+	// the SceneCapture view state as well; genuine discontinuities are handled by
+	// a bounded hidden warmup instead of treating every aim refresh as a cut.
+	SceneCapture->bAlwaysPersistRenderingState = true;
 	SceneCapture->bExcludeFromSceneTextureExtents = true;
 	SceneCapture->CaptureSource = SCS_FinalColorLDR;
 
@@ -185,6 +186,9 @@ void AABTSM101LandingPreviewCamera::DeactivatePreview()
 		return;
 	}
 	bPreviewActive = false;
+	bHasPublishedCapture = false;
+	bHasLastCaptureTransform = false;
+	RemainingWarmupCaptures = 0;
 	SetPreviewSubject(EABTSM101PreviewSubject::None);
 	CaptureAccumulatorSeconds = 0.0f;
 	if (TrajectoryPointInstances)
@@ -193,6 +197,7 @@ void AABTSM101LandingPreviewCamera::DeactivatePreview()
 	}
 	if (SceneCapture)
 	{
+		SceneCapture->TextureTarget = RenderTarget;
 		SceneCapture->ClearShowOnlyComponents();
 	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M10.1][LandingPreview] Hidden"));
@@ -204,6 +209,11 @@ void AABTSM101LandingPreviewCamera::SetPreviewSubject(
 	if (PreviewSubject == NewSubject) return;
 	const EABTSM101PreviewSubject PreviousSubject = PreviewSubject;
 	PreviewSubject = NewSubject;
+	// A semantic view-class transition changes the background/profile contract.
+	// Never publish the prior subject under the new HUD label.
+	bHasPublishedCapture = false;
+	bHasLastCaptureTransform = false;
+	RemainingWarmupCaptures = 0;
 	if (SceneCapture)
 	{
 		switch (NewSubject)
@@ -320,7 +330,10 @@ void AABTSM101LandingPreviewCamera::EnsureRenderTarget()
 	if (SceneCapture == nullptr) return;
 	const int32 Width = FMath::Clamp(Settings.LandingViewRenderTargetWidth, 128, 2048);
 	const int32 Height = FMath::Clamp(Settings.LandingViewRenderTargetHeight, 72, 2048);
-	if (RenderTarget && RenderTarget->SizeX == Width && RenderTarget->SizeY == Height)
+	if (RenderTarget && WarmupRenderTarget
+		&& RenderTarget->SizeX == Width && RenderTarget->SizeY == Height
+		&& WarmupRenderTarget->SizeX == Width
+		&& WarmupRenderTarget->SizeY == Height)
 	{
 		SceneCapture->TextureTarget = RenderTarget;
 		SceneCapture->FOVAngle = FMath::Clamp(Settings.LandingViewFieldOfViewDegrees, 10.0f, 120.0f);
@@ -338,6 +351,23 @@ void AABTSM101LandingPreviewCamera::EnsureRenderTarget()
 	RenderTarget->TargetGamma = 2.2f;
 	RenderTarget->InitCustomFormat(Width, Height, PF_B8G8R8A8, false);
 	RenderTarget->UpdateResourceImmediate(true);
+	WarmupRenderTarget = NewObject<UTextureRenderTarget2D>(
+		this,
+		NAME_None,
+		RF_Transient);
+	if (WarmupRenderTarget == nullptr)
+	{
+		RenderTarget = nullptr;
+		return;
+	}
+	WarmupRenderTarget->ClearColor = RenderTarget->ClearColor;
+	WarmupRenderTarget->TargetGamma = RenderTarget->TargetGamma;
+	WarmupRenderTarget->InitCustomFormat(
+		Width,
+		Height,
+		PF_B8G8R8A8,
+		false);
+	WarmupRenderTarget->UpdateResourceImmediate(true);
 	SceneCapture->TextureTarget = RenderTarget;
 	SceneCapture->FOVAngle = FMath::Clamp(Settings.LandingViewFieldOfViewDegrees, 10.0f, 120.0f);
 
@@ -367,6 +397,12 @@ void AABTSM101LandingPreviewCamera::RefreshCapture(
 		ESceneCapturePrimitiveRenderMode::PRM_RenderScenePrimitives;
 	SceneCapture->CaptureSource =
 		ESceneCaptureSource::SCS_FinalColorLDR;
+	// Capture the same production world lighting and GroundDay post-process
+	// policy as the main view. There is intentionally no PIP-only shadow lift.
+	const FABTSStylizedViewPolicy GroundPreviewPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::GroundLandingPreview);
+	SceneCapture->ShowFlags.SetLighting(GroundPreviewPolicy.bUseWorldLighting);
 	SceneCapture->ClearShowOnlyComponents();
 	const FVector Landing = Preview.PrimarySurfaceLandingWorld;
 	// Gameplay's stable surface frame is radial.  Do not use the rendered terrain
@@ -387,11 +423,11 @@ void AABTSM101LandingPreviewCamera::RefreshCapture(
 
 	// Keep Root at identity so prior AddInstance(..., true) world transforms do
 	// not get reinterpreted when this camera moves to the next predicted landing.
+	const FTransform CaptureTransform(Rotation, CameraLocation);
 	SceneCapture->SetWorldLocationAndRotation(CameraLocation, Rotation);
 	SceneCapture->FOVAngle = FMath::Clamp(Settings.LandingViewFieldOfViewDegrees, 10.0f, 120.0f);
 	RebuildTrajectoryPoints(Preview);
-	SceneCapture->bCameraCutThisFrame = true;
-	SceneCapture->CaptureScene();
+	CaptureWithPersistentHistory(CaptureTransform);
 }
 
 void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
@@ -420,10 +456,15 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 
 	SceneCapture->PrimitiveRenderMode =
 		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
-	// BaseColor is deliberate: the E5 hemisphere may face away from the world
-	// directional light, but this guidance view must remain readable.
+	// Use final color so the satellite surface consumes the same world lighting,
+	// GroundDay exposure/tone and outline as the gameplay camera. The registered
+	// view class replaces only empty background pixels with deep space.
 	SceneCapture->CaptureSource =
-		ESceneCaptureSource::SCS_BaseColor;
+		ESceneCaptureSource::SCS_FinalColorLDR;
+	const FABTSStylizedViewPolicy SatellitePreviewPolicy =
+		FABTSStylizedRenderingContract::ResolveViewPolicy(
+			EABTSStylizedViewClass::SatelliteLandingPreview);
+	SceneCapture->ShowFlags.SetLighting(SatellitePreviewPolicy.bUseWorldLighting);
 	SceneCapture->ClearShowOnlyComponents();
 	SceneCapture->ShowOnlyActorComponents(&Satellite);
 	if (Preview.TerminalType
@@ -432,9 +473,10 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 		SceneCapture->ShowOnlyActorComponents(&E5Target);
 	}
 	SceneCapture->ShowOnlyComponent(TrajectoryPointInstances);
-	SceneCapture->SetWorldLocationAndRotation(
-		CameraLocation,
-		FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat());
+	const FQuat CaptureRotation =
+		FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
+	const FTransform CaptureTransform(CaptureRotation, CameraLocation);
+	SceneCapture->SetWorldLocationAndRotation(CameraLocation, CaptureRotation);
 	SceneCapture->FOVAngle =
 		FMath::Clamp(
 			Settings.LandingViewFieldOfViewDegrees,
@@ -443,8 +485,73 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	RebuildTrajectoryPointsAround(
 		Preview,
 		TerminalSegmentStartIndex);
-	SceneCapture->bCameraCutThisFrame = true;
+	CaptureWithPersistentHistory(CaptureTransform);
+}
+
+bool AABTSM101LandingPreviewCamera::DoesPreviewPoseRequireCameraCut(
+	const FTransform& PreviousTransform,
+	const FTransform& CurrentTransform,
+	const float CameraDistanceCM)
+{
+	if (PreviousTransform.ContainsNaN()
+		|| CurrentTransform.ContainsNaN()
+		|| !FMath::IsFinite(CameraDistanceCM))
+	{
+		return true;
+	}
+	const float TranslationThresholdCM = FMath::Max(
+		400.0f,
+		FMath::Clamp(
+			CameraDistanceCM,
+			100.0f,
+			100000.0f) * 0.5f);
+	const double TranslationDeltaCM = FVector::Distance(
+		PreviousTransform.GetLocation(),
+		CurrentTransform.GetLocation());
+	const double RotationDeltaDegrees = FMath::RadiansToDegrees(
+		PreviousTransform.GetRotation().AngularDistance(
+			CurrentTransform.GetRotation()));
+	return TranslationDeltaCM > TranslationThresholdCM
+		|| RotationDeltaDegrees > LandingPreviewCameraCutRotationDegrees;
+}
+
+void AABTSM101LandingPreviewCamera::CaptureWithPersistentHistory(
+	const FTransform& CaptureTransform)
+{
+	if (SceneCapture == nullptr
+		|| RenderTarget == nullptr
+		|| WarmupRenderTarget == nullptr)
+	{
+		return;
+	}
+
+	const bool bRequiresCut = !bHasLastCaptureTransform
+		|| DoesPreviewPoseRequireCameraCut(
+			LastCaptureTransform,
+			CaptureTransform,
+			Settings.LandingViewCameraDistanceCM);
+	if (bRequiresCut)
+	{
+		RemainingWarmupCaptures = LandingPreviewHistoryWarmupCaptureCount;
+	}
+	LastCaptureTransform = CaptureTransform;
+	bHasLastCaptureTransform = true;
+
+	if (RemainingWarmupCaptures > 0)
+	{
+		SceneCapture->TextureTarget = WarmupRenderTarget;
+		SceneCapture->bCameraCutThisFrame = bRequiresCut;
+		SceneCapture->CaptureScene();
+		--RemainingWarmupCaptures;
+		return;
+	}
+
+	// Publish only a frame rendered after two distinct history-building captures.
+	// On a same-subject jump the old public target remains visible until here.
+	SceneCapture->TextureTarget = RenderTarget;
+	SceneCapture->bCameraCutThisFrame = false;
 	SceneCapture->CaptureScene();
+	bHasPublishedCapture = true;
 }
 
 FVector AABTSM101LandingPreviewCamera::ResolveIncidenceDirection(

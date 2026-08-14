@@ -2067,13 +2067,13 @@ void AABTSM3GameMode::TryCompleteM3R5Smoke()
 			TEXT("HISMInstanceBudgetMismatch"));
 		return;
 	}
-	if (!Planet->IsMonthlyMaterialRhythmApplied()
-		|| Planet->GetMonthlyMaterialRhythmCellCount()
+	if (!Planet->IsTerrainBasePaletteApplied()
+		|| Planet->GetTerrainBasePaletteCellCount()
 			!= Preview->Cells.Num())
 	{
 		FinishM3R5Smoke(
 			false,
-			TEXT("MaterialVisualRhythmNotConsumed"));
+			TEXT("MaterialBasePaletteNotApplied"));
 		return;
 	}
 	if (Planet->GetMonthlyDecorAccent0InstanceCount() <= 0
@@ -2215,7 +2215,7 @@ void AABTSM3GameMode::FinishM3R5Smoke(
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][M3R5][RuntimeCertification] ManifestHash=%016llX Entries=%d Terminal=1 Passed=1 Failed=0 M3LocalAccepted=1 PreviewAuthority=1 IntegrationPending=1 MonthlyWorldAccepted=0 SourceR3Frozen=1 SourceCandidates=%d PreviewCandidateId=%d SourceSpatialHash=%016llX PresentationConfigHash=%016llX PresentationResultHash=%016llX PreviewCandidateHash=%016llX Districts=%d CoveredCells=%d TotalCells=%d ActiveCoveragePermille=%d DeepWildPermille=%d EncounterThemes=%d VisualBeats=%d BeatMinCM=%d BeatMaxCM=%d MergedLogicalSingletons=%d MergedSmallFragments=%d SingletonComponents=%d MinVisualComponentCells=%d VisualBoundaryPermille=%d ProtectedCells=%d PlannedInstanceQuota=%d MaterialRhythmApplied=1 RhythmCells=%d ForestInstances=%d RockInstances=%d Accent0Instances=%d Accent1Instances=%d ForestCollision=QueryAndPhysics RockCollision=QueryAndPhysics ObstacleChannel=%d ForestSimulatePhysics=0 RockSimulatePhysics=0 QuerySurfaceHash=%016llX PlannerMS=%.3f RebuildMS=%.3f PeakPhysicalMB=%.1f ElapsedSeconds=%.3f"),
+			TEXT("[ABTS][M3R5][RuntimeCertification] ManifestHash=%016llX Entries=%d Terminal=1 Passed=1 Failed=0 M3LocalAccepted=1 PreviewAuthority=1 IntegrationPending=1 MonthlyWorldAccepted=0 SourceR3Frozen=1 SourceCandidates=%d PreviewCandidateId=%d SourceSpatialHash=%016llX PresentationConfigHash=%016llX PresentationResultHash=%016llX PreviewCandidateHash=%016llX Districts=%d CoveredCells=%d TotalCells=%d ActiveCoveragePermille=%d DeepWildPermille=%d EncounterThemes=%d VisualBeats=%d BeatMinCM=%d BeatMaxCM=%d MergedLogicalSingletons=%d MergedSmallFragments=%d SingletonComponents=%d MinVisualComponentCells=%d VisualBoundaryPermille=%d ProtectedCells=%d PlannedInstanceQuota=%d MaterialBasePaletteApplied=1 PaletteCells=%d MaterialVisualBeatConsumed=0 MaterialThemeVariantConsumed=0 ForestInstances=%d RockInstances=%d Accent0Instances=%d Accent1Instances=%d ForestCollision=QueryAndPhysics RockCollision=QueryAndPhysics ObstacleChannel=%d ForestSimulatePhysics=0 RockSimulatePhysics=0 QuerySurfaceHash=%016llX PlannerMS=%.3f RebuildMS=%.3f PeakPhysicalMB=%.1f ElapsedSeconds=%.3f"),
 			static_cast<unsigned long long>(
 				FABTSM3R5AcceptanceManifest::
 					ComputeManifestHash()),
@@ -2293,7 +2293,7 @@ void AABTSM3GameMode::FinishM3R5Smoke(
 				: 0,
 			Planet != nullptr
 				? Planet->
-					GetMonthlyMaterialRhythmCellCount()
+					GetTerrainBasePaletteCellCount()
 				: 0,
 			ForestInstances,
 			RockInstances,

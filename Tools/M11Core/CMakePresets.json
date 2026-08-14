@@ -26,7 +26,8 @@
       "targets": [
         "ABTSM11CoreConformance",
         "ABTSM11SearchCLI",
-        "ABTSM11V22CertificationCLI"
+        "ABTSM11V22CertificationCLI",
+        "ABTSM11V3BridgeClosureCLI"
       ]
     }
   ],

@@ -7,6 +7,7 @@
 #include "ABTSM4PartyHUD.generated.h"
 
 class AABTSBirdParty;
+struct FABTSUIThemeSnapshot;
 
 /** Asset-optional fixed-order four-bird portrait HUD. */
 UCLASS()
@@ -21,6 +22,7 @@ public:
 private:
 	AABTSBirdParty* FindParty();
 	FName MakeBirdHitBoxName(int32 BirdIndex) const;
+	void DrawThemeDebugOverlay(const FABTSUIThemeSnapshot& Theme);
 
 	TWeakObjectPtr<AABTSBirdParty> Party;
 };

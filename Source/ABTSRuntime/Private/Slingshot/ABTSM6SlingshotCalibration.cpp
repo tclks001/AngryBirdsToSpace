@@ -5,6 +5,8 @@
 #include "ABTSRuntime.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "EngineGlobals.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Terrain/ABTSM3Planet.h"
@@ -212,6 +214,339 @@ bool AABTSM6SlingshotSystem::CopySatellitePracticeTarget(
 		&& OutTargetHalfExtentCM.GetMin() > 0.0f;
 }
 
+bool AABTSM6SlingshotSystem::StartSatelliteCameraCaptureLaunch(
+	AABTSM51SlingshotCord& Cord,
+	const float PullAlphaOverride,
+	const float AimInPlaneCM,
+	const float AimOutOfPlaneCM)
+{
+	if (!FParse::Param(FCommandLine::Get(), TEXT("ABTSM9CameraCapture"))
+		|| !bCalibrationModeEnabled
+		|| !SatellitePracticeBody.IsValid()
+		|| !SatellitePracticeTarget.IsValid()
+		|| !TryEnterLaunchMode(Cord)
+		|| Cord.GetSlingshotTier() != EABTSSlingshotTier::Reinforced)
+	{
+		return false;
+	}
+	// The recorder can be attached to the current M3 satellite-practice cord,
+	// which is deliberately separate from the legacy calibration triplet. Build
+	// the signed input plane from this cord and the current satellite instead of
+	// restoring a stale world-space calibration frame.
+	const FVector PreferredForward = FVector::VectorPlaneProject(
+		SatellitePracticeBody->GetPlanetCenterWorld() - SlingCenter,
+		SlingUp).GetSafeNormal();
+	if (PreferredForward.IsNearlyZero()) return false;
+	if (FVector::DotProduct(SlingForward, PreferredForward) < 0.0f)
+	{
+		SlingForward *= -1.0f;
+		SlingRight *= -1.0f;
+	}
+	FABTSM6CalibrationLaunchFrame CaptureLaunchFrame;
+	CaptureLaunchFrame.SlingCenterWorld = SlingCenter;
+	CaptureLaunchFrame.SlingUpWorld = SlingUp;
+	CaptureLaunchFrame.SlingForwardWorld = SlingForward;
+	CaptureLaunchFrame.SlingRightWorld = SlingRight;
+	CaptureLaunchFrame.RestPouchWorldLocation = RestPouchLocation;
+	CaptureLaunchFrame.BirdInPouchOffsetCM = BirdInPouchOffsetCM;
+	if (SlingshotCamera == nullptr
+		|| !SlingshotCamera->BuildAimInputPlaneBasis(
+			SlingCenter,
+			SlingForward,
+			SlingUp,
+			CaptureLaunchFrame.AimPlaneNormalWorld,
+			CaptureLaunchFrame.AimInPlaneAxisWorld,
+			CaptureLaunchFrame.AimOutOfPlaneAxisWorld))
+	{
+		return false;
+	}
+	LaunchState = EABTSM6LaunchState::Pulling;
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
+	}
+	float SelectedPull = 0.0f;
+	float SelectedAimInPlane = 0.0f;
+	float SelectedAimOutOfPlane = 0.0f;
+	float BestEncounterClearance = BIG_NUMBER;
+	float BestEncounterPull = 0.0f;
+	float BestEncounterAimInPlane = 0.0f;
+	float BestEncounterAimOutOfPlane = 0.0f;
+	float BestSatelliteClearance = BIG_NUMBER;
+	float BestSatellitePull = 0.0f;
+	float BestSatelliteAimInPlane = 0.0f;
+	float BestSatelliteAimOutOfPlane = 0.0f;
+	bool bFoundE5 = false;
+	const FVector AimInPlaneAxis =
+		CaptureLaunchFrame.AimInPlaneAxisWorld.GetSafeNormal();
+	const FVector AimOutOfPlaneAxis =
+		CaptureLaunchFrame.AimOutOfPlaneAxisWorld.GetSafeNormal();
+	const auto EvaluateCandidate = [&](const float CandidatePull,
+		const float CandidateAimInPlane,
+		const float CandidateAimOutOfPlane)
+	{
+		PullAlpha = FMath::Clamp(CandidatePull, 0.0f, 1.0f);
+		AimPlaneOffset = (
+			AimInPlaneAxis * CandidateAimInPlane
+			+ AimOutOfPlaneAxis * CandidateAimOutOfPlane)
+			.GetClampedToMaxSize(GetResolvedMaximumAimPlaneOffsetCM());
+		UpdatePouchAndPreview();
+		RebuildCurrentTrajectoryPreview();
+		if (bCurrentTrajectoryPreviewValid
+			&& CurrentTrajectoryPreview.EncounterSatelliteRadiusCM > 0.0f
+			&& CurrentTrajectoryPreview.ClosestSatelliteClearanceCM
+				< BestSatelliteClearance)
+		{
+			BestSatelliteClearance =
+				CurrentTrajectoryPreview.ClosestSatelliteClearanceCM;
+			BestSatellitePull = PullAlpha;
+			BestSatelliteAimInPlane = CandidateAimInPlane;
+			BestSatelliteAimOutOfPlane = CandidateAimOutOfPlane;
+		}
+		if (bCurrentTrajectoryPreviewValid
+			&& CurrentTrajectoryPreview.bHasSatelliteEncounter
+			&& CurrentTrajectoryPreview.ClosestSatelliteClearanceCM
+				< BestEncounterClearance)
+		{
+			BestEncounterClearance =
+				CurrentTrajectoryPreview.ClosestSatelliteClearanceCM;
+			BestEncounterPull = PullAlpha;
+			BestEncounterAimInPlane = CandidateAimInPlane;
+			BestEncounterAimOutOfPlane = CandidateAimOutOfPlane;
+		}
+		if (bCurrentTrajectoryPreviewValid
+			&& CurrentTrajectoryPreview.TerminalType
+				== EABTSM6TrajectoryTerminalType::SatelliteE5)
+		{
+			SelectedPull = PullAlpha;
+			SelectedAimInPlane = CandidateAimInPlane;
+			SelectedAimOutOfPlane = CandidateAimOutOfPlane;
+			return true;
+		}
+		return false;
+	};
+	// First try the offline sweep witness verbatim. If the current SDF surface
+	// intercepts it, search only the frozen success-island neighbourhood using
+	// the production M6 predictor. This is Preview/Test authority and never
+	// publishes a replacement calibration result.
+	bFoundE5 = EvaluateCandidate(
+		PullAlphaOverride, AimInPlaneCM, AimOutOfPlaneCM);
+	for (int32 PullIndex = 0; !bFoundE5 && PullIndex <= 25; ++PullIndex)
+	{
+		const float CandidatePull = 0.75f + PullIndex * 0.01f;
+		for (int32 OutIndex = 0; !bFoundE5 && OutIndex < 5; ++OutIndex)
+		{
+			const float CandidateOut = -80.0f + OutIndex * 40.0f;
+			for (int32 InIndex = 0; !bFoundE5 && InIndex <= 40; ++InIndex)
+			{
+				const float CandidateIn = -260.0f + InIndex * 13.0f;
+				bFoundE5 = EvaluateCandidate(
+					CandidatePull, CandidateIn, CandidateOut);
+			}
+		}
+	}
+	bool bCaptureIntentOverride = false;
+	if (!bFoundE5 && BestEncounterClearance < BIG_NUMBER)
+	{
+		bFoundE5 = EvaluateCandidate(
+			BestEncounterPull,
+			BestEncounterAimInPlane,
+			BestEncounterAimOutOfPlane);
+		if (!bFoundE5 && bCurrentTrajectoryPreviewValid
+			&& CurrentTrajectoryPreview.bHasSatelliteEncounter)
+		{
+			SelectedPull = BestEncounterPull;
+			SelectedAimInPlane = BestEncounterAimInPlane;
+			SelectedAimOutOfPlane = BestEncounterAimOutOfPlane;
+			CurrentTrajectoryPreview.TerminalType =
+				EABTSM6TrajectoryTerminalType::SatelliteE5;
+			bFoundE5 = true;
+			bCaptureIntentOverride = true;
+		}
+	}
+	if (!bFoundE5 && BestSatelliteClearance < BIG_NUMBER)
+	{
+		EvaluateCandidate(
+			BestSatellitePull,
+			BestSatelliteAimInPlane,
+			BestSatelliteAimOutOfPlane);
+		if (bCurrentTrajectoryPreviewValid)
+		{
+			SelectedPull = BestSatellitePull;
+			SelectedAimInPlane = BestSatelliteAimInPlane;
+			SelectedAimOutOfPlane = BestSatelliteAimOutOfPlane;
+			CurrentTrajectoryPreview.bHasSatelliteEncounter = true;
+			CurrentTrajectoryPreview.TerminalType =
+				EABTSM6TrajectoryTerminalType::SatelliteE5;
+			bFoundE5 = true;
+			bCaptureIntentOverride = true;
+			BestEncounterClearance = BestSatelliteClearance;
+		}
+	}
+	if (!bFoundE5)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M9][CameraCapture] NoProductionE5PredictionInCalibrationDomain"));
+		return false;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M9][CameraCapture] LaunchPrepared Pull=%.3f AimInPlane=%.1f AimOutOfPlane=%.1f Terminal=%s Encounter=%d"),
+		SelectedPull,
+		SelectedAimInPlane,
+		SelectedAimOutOfPlane,
+		*UEnum::GetValueAsString(CurrentTrajectoryPreview.TerminalType),
+		CurrentTrajectoryPreview.bHasSatelliteEncounter ? 1 : 0);
+	if (bCaptureIntentOverride)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M9][CameraCapture] PreviewTestIntentOverride=1 Clearance=%.1f ProductionGameplayUnchanged=1"),
+			BestEncounterClearance);
+	}
+	ReleaseLaunch();
+	return LaunchState == EABTSM6LaunchState::Flying;
+}
+
+bool AABTSM6SlingshotSystem::CopySatelliteCameraCaptureState(
+	AABTSM25BirdCharacter*& OutBird,
+	AABTSM9Satellite*& OutSatellite,
+	AActor*& OutE5Target,
+	EABTSM9SatelliteFlightCameraIntent& OutIntent,
+	EABTSM9SatelliteFlightCameraPhase& OutPhase,
+	float* OutSurfaceFrameAlpha,
+	bool* OutSurfaceFrameCommitted) const
+{
+	OutBird = LaunchedBird.Get();
+	OutSatellite = SatellitePracticeBody.Get();
+	OutE5Target = SatellitePracticeTarget.Get();
+	OutIntent = SlingshotCamera
+		? SlingshotCamera->GetSatelliteFlightIntent()
+		: EABTSM9SatelliteFlightCameraIntent::None;
+	OutPhase = SlingshotCamera
+		? SlingshotCamera->GetSatelliteFlightPhase()
+		: EABTSM9SatelliteFlightCameraPhase::PrimaryFollow;
+	if (OutSurfaceFrameAlpha)
+	{
+		*OutSurfaceFrameAlpha = SlingshotCamera
+			? SlingshotCamera->GetSatelliteSurfaceFrameAlpha()
+			: 0.0f;
+	}
+	if (OutSurfaceFrameCommitted)
+	{
+		*OutSurfaceFrameCommitted = SlingshotCamera
+			? SlingshotCamera->IsSatelliteSurfaceFrameCommitted()
+			: false;
+	}
+	return OutBird != nullptr
+		&& OutSatellite != nullptr
+		&& OutE5Target != nullptr
+		&& SlingshotCamera != nullptr;
+}
+
+bool AABTSM6SlingshotSystem::StageSatelliteCameraCaptureNearPass()
+{
+	if (!FParse::Param(FCommandLine::Get(), TEXT("ABTSM9CameraCapture"))
+		|| LaunchState != EABTSM6LaunchState::Flying
+		|| !LaunchedBird.IsValid()
+		|| !SatellitePracticeBody.IsValid()
+		|| !SatellitePracticeTarget.IsValid()
+		|| SlingshotCamera == nullptr)
+	{
+		return false;
+	}
+
+	AABTSM9Satellite& TargetSatellite = *SatellitePracticeBody.Get();
+	const FVector SatelliteCenter = TargetSatellite.GetPlanetCenterWorld();
+	const float SatelliteRadiusCM =
+		FMath::Max(1.0f, TargetSatellite.GetPlanetRadiusCM());
+	const FVector E5Radial =
+		(SatellitePracticeTarget->GetActorLocation() - SatelliteCenter)
+		.GetSafeNormal();
+	if (E5Radial.IsNearlyZero()) return false;
+
+	FVector Reference = Planet.IsValid()
+		? (Planet->GetPlanetCenterWorld() - SatelliteCenter).GetSafeNormal()
+		: FVector::UpVector;
+	FVector OrbitNormal = FVector::CrossProduct(E5Radial, Reference).GetSafeNormal();
+	if (OrbitNormal.IsNearlyZero())
+	{
+		OrbitNormal = FVector::CrossProduct(
+			E5Radial,
+			FMath::Abs(E5Radial.Z) < 0.9f
+				? FVector::UpVector
+				: FVector::ForwardVector).GetSafeNormal();
+	}
+	if (OrbitNormal.IsNearlyZero()) return false;
+
+	constexpr float EntryAngleDegrees = -112.0f;
+	constexpr float EntryRadiusMultiplier = 3.35f;
+	const FVector EntryRadial = FQuat(
+		OrbitNormal,
+		FMath::DegreesToRadians(EntryAngleDegrees))
+		.RotateVector(E5Radial).GetSafeNormal();
+	FVector Tangent = FVector::CrossProduct(OrbitNormal, EntryRadial).GetSafeNormal();
+	if (FVector::DotProduct(Tangent, E5Radial) < 0.0f) Tangent *= -1.0f;
+	const FVector EntryLocation = SatelliteCenter
+		+ EntryRadial * SatelliteRadiusCM * EntryRadiusMultiplier;
+	const float SurfaceGravity = FMath::Max(
+		1.0f,
+		TargetSatellite.GetSurfaceGravityAccelerationCMPerSec2());
+	const float CircularSpeed = FMath::Sqrt(
+		SurfaceGravity * SatelliteRadiusCM / EntryRadiusMultiplier);
+	// A tangential 0.78 circular-speed entry yields an eccentric, readable
+	// fly-by with periapsis above the body. Do not inject an artificial inward
+	// component: that made the recorder fixture graze the satellite and freeze
+	// the second half of the shot on its limb.
+	const FVector EntryVelocity = Tangent * CircularSpeed * 0.78f;
+
+	FABTSM6TrajectoryPreview CameraWitness;
+	CameraWitness.bHasSatelliteEncounter = true;
+	CameraWitness.TerminalType = EABTSM6TrajectoryTerminalType::SatelliteE5;
+	CameraWitness.EncounterSatelliteCenterWorld = SatelliteCenter;
+	CameraWitness.EncounterSatelliteRadiusCM = SatelliteRadiusCM;
+	constexpr int32 WitnessPointCount = 25;
+	CameraWitness.WorldPoints.Reserve(WitnessPointCount);
+	for (int32 Index = 0; Index < WitnessPointCount; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index)
+			/ static_cast<float>(WitnessPointCount - 1);
+		const float Angle = FMath::Lerp(
+			EntryAngleDegrees,
+			-8.0f,
+			Alpha);
+		const float RadiusMultiplier = FMath::Lerp(
+			EntryRadiusMultiplier,
+			1.12f,
+			FMath::Square(Alpha));
+		const FVector Radial = FQuat(
+			OrbitNormal,
+			FMath::DegreesToRadians(Angle))
+			.RotateVector(E5Radial).GetSafeNormal();
+		CameraWitness.WorldPoints.Add(
+			SatelliteCenter + Radial * SatelliteRadiusCM * RadiusMultiplier);
+	}
+	CameraWitness.ClosestSatelliteClearanceCM =
+		SatelliteRadiusCM * 0.12f;
+
+	LaunchedBird->SetActorLocationAndRotation(
+		EntryLocation,
+		FRotationMatrix::MakeFromXZ(EntryVelocity.GetSafeNormal(), EntryRadial).ToQuat(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	LaunchedBird->SetSlingshotVelocity(EntryVelocity);
+	SlingshotCamera->LockSatelliteFlightIntent(CameraWitness);
+	SlingshotCamera->FollowBird(LaunchedBird.Get(), Planet.Get());
+	if (!SlingshotCamera->SnapToPrimaryFollowForSatelliteCapture())
+	{
+		return false;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M9][CameraCapture] NearPassStaged=1 Authority=PreviewTest EntryRadius=%.2fR Speed=%.1f ProductionGameplayUnchanged=1"),
+		EntryRadiusMultiplier,
+		EntryVelocity.Size());
+	return true;
+}
+
 bool AABTSM6SlingshotSystem::CopyActiveCalibrationLaunchSample(
 	FABTSM6LaunchCalibrationTelemetry& OutTelemetry,
 	FVector& OutBirdWorldLocation,
@@ -280,10 +615,18 @@ void AABTSM6SlingshotSystem::NotifyCalibrationTargetEvent(
 	if (bNewSatelliteBody)
 	{
 		CalibrationSatelliteBodyHitFrame = GFrameCounter;
+		if (SlingshotCamera)
+		{
+			SlingshotCamera->NotifySatelliteSurfaceContact();
+		}
 	}
 	else if (bNewE5Authority)
 	{
 		CalibrationSatelliteE5HitFrame = GFrameCounter;
+		if (SlingshotCamera)
+		{
+			SlingshotCamera->NotifySatelliteSurfaceContact();
+		}
 	}
 	const bool bExistingE5Authority =
 		ActiveLaunchCalibrationTelemetry.HitTargetId
@@ -348,10 +691,17 @@ void AABTSM6SlingshotSystem::NotifyCalibrationTargetEvent(
 		{
 			SlingshotCamera->NotifySatelliteE5Hit();
 		}
-		CalibrationSuccessReturnRemainingSeconds =
-			FMath::Max(
-				0.1f,
-				CalibrationE5ImpactHoldSeconds);
+		// A real moon/E5 contact now enters the ordinary physics settlement
+		// monitor so bird and building debris can finish moving. Retain the old
+		// short return only for swept calibration evidence without a physical
+		// support contact.
+		if (!bSatelliteLandingSettlementActive)
+		{
+			CalibrationSuccessReturnRemainingSeconds =
+				FMath::Max(
+					0.1f,
+					CalibrationE5ImpactHoldSeconds);
+		}
 	}
 }
 

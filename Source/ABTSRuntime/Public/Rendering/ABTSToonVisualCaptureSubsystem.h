@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Rendering/ABTSToonEnvironmentTypes.h"
 #include "Rendering/ABTSToonVisualCaptureTypes.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "ABTSToonVisualCaptureSubsystem.generated.h"
@@ -10,6 +11,12 @@
 class AActor;
 class ACameraActor;
 class APlayerController;
+
+struct FABTSToonSavedActorTransform
+{
+	TWeakObjectPtr<AActor> Actor;
+	FTransform Transform = FTransform::Identity;
+};
 
 enum class EABTSToonVisualCapturePhase : uint8
 {
@@ -28,7 +35,11 @@ struct FABTSToonVisualCaptureManifestRecord
 		EABTSToonVisualCaptureAnchor::GroundStart;
 	EABTSStylizedRenderProfile Profile =
 		EABTSStylizedRenderProfile::GroundDay;
+	FName VariantId = NAME_None;
 	bool bStyleEnabled = false;
+	EABTSStylizedDiagnosticPassMask PassMask =
+		EABTSStylizedDiagnosticPassMask::ToneAndOutline;
+	bool bShadowsEnabled = true;
 	int32 StyleImplementationVersion = 0;
 	FTransform CameraWorldTransform = FTransform::Identity;
 	FVector LookAtWorld = FVector::ZeroVector;
@@ -36,6 +47,7 @@ struct FABTSToonVisualCaptureManifestRecord
 	uint64 SemanticIdentityHash = 0;
 	uint64 CameraPoseHash = 0;
 	uint64 EffectiveCameraPoseHash = 0;
+	uint64 EnvironmentSnapshotHash = 0;
 	FIntPoint Resolution = FIntPoint::ZeroValue;
 	FString ArtifactPath;
 	FString ArtifactMD5;
@@ -88,6 +100,9 @@ private:
 	void AdvanceVariantOrFinish();
 	void FinishCapture(bool bSuccess, const FString& Reason);
 	void RestoreRuntimeState();
+	bool CaptureBirdPartyTransforms(FString& OutFailure);
+	bool ApplyCurrentDiagnosticBirdPartyPlacement(FString& OutFailure);
+	void RestoreBirdPartyTransforms();
 	bool WriteManifest(const TCHAR* Status, const FString& FailureReason);
 	FIntPoint GetActualViewportResolution() const;
 	FString MakeCurrentArtifactPath() const;
@@ -96,9 +111,10 @@ private:
 	EABTSToonVisualCapturePhase Phase =
 		EABTSToonVisualCapturePhase::Inactive;
 	TArray<FABTSToonResolvedCapturePoint> ResolvedPoints;
+	TArray<FABTSToonDiagnosticVariantDefinition> VariantDefinitions;
 	TArray<FABTSToonVisualCaptureManifestRecord> ManifestRecords;
 	int32 CurrentPointIndex = 0;
-	bool bCurrentStyleEnabled = false;
+	int32 CurrentVariantIndex = 0;
 	int32 RemainingWarmupFrames = 0;
 	int32 RemainingGPUCooldownFrames = 0;
 	int32 CurrentGPUProfileSampleIndex = 0;
@@ -112,7 +128,15 @@ private:
 	bool bSavedProfileGPUShowUI = true;
 	uint32 SavedProfileGPUShowUISetBy = 0;
 	bool bProfileGPUShowUIStateCaptured = false;
+	float SavedScreenPercentage = 0.0f;
+	uint32 SavedScreenPercentageSetBy = 0;
+	bool bScreenPercentageStateCaptured = false;
 	bool bSavedStyleEnabled = false;
+	EABTSStylizedDiagnosticPassMask SavedDiagnosticPassMask =
+		EABTSStylizedDiagnosticPassMask::ToneAndOutline;
+	int32 SavedShadowQuality = 0;
+	uint32 SavedShadowQualitySetBy = 0;
+	bool bShadowQualityStateCaptured = false;
 	EABTSStylizedRenderProfile SavedStyleProfile =
 		EABTSStylizedRenderProfile::GroundDay;
 	FString OutputDirectory;
@@ -121,12 +145,18 @@ private:
 	FDelegateHandle ScreenshotProcessedHandle;
 	TWeakObjectPtr<APlayerController> CaptureController;
 	TWeakObjectPtr<AActor> SavedViewTarget;
+	TArray<FABTSToonSavedActorTransform> SavedBirdPartyTransforms;
+	FVector SavedBirdPartyCenterWorld = FVector::ZeroVector;
+	FVector SavedBirdPartyUp = FVector::UpVector;
+	bool bBirdPartyTransformsCaptured = false;
 
 	int32 ActualWorldSeed = 0;
 	int32 ActualGeneratorVersion = 0;
 	int32 ActualGenerationAttempt = INDEX_NONE;
 	bool bActualSourceWorldAccepted = false;
 	uint64 CaptureCatalogueHash = 0;
+	uint64 VariantCatalogueHash = 0;
+	FABTSToonEnvironmentSnapshot EnvironmentSnapshot;
 	uint64 CurrentEffectiveCameraPoseHash = 0;
 	int32 MonthlyPresentationCandidateId = INDEX_NONE;
 	int64 MonthlyPresentationCandidateHash = 0;

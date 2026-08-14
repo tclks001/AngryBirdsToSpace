@@ -9,6 +9,7 @@
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UProceduralMeshComponent;
+class UTexture;
 class UTexture2D;
 struct FABTSM2Cell;
 struct FABTSM3CellState;
@@ -40,17 +41,44 @@ public:
 		const TArray<FABTSM3CellState>& CellStates,
 		const TArray<FABTSM3CellEdgeState>& EdgeStates,
 		const FABTSM3TerrainVisualField& VisualField,
+		/** Preview identity is diagnostic-only; ground colors never consume monthly variants. */
 		const FABTSM3MonthlyCandidatePresentation*
 			MonthlyPresentation = nullptr);
 
-	bool IsMonthlyPresentationRhythmApplied() const
+	bool IsTerrainBasePaletteApplied() const
 	{
-		return bMonthlyPresentationRhythmApplied;
+		return bTerrainBasePaletteApplied;
 	}
 
-	int32 GetMonthlyPresentationRhythmCellCount() const
+	int32 GetTerrainBasePaletteCellCount() const
 	{
-		return MonthlyPresentationRhythmCellCount;
+		return TerrainBasePaletteCellCount;
+	}
+
+	/**
+	 * Updates the T3-A1 parameters on the existing terrain MID. Integration may
+	 * call this repeatedly when the global runtime style switch changes.
+	 * Missing material parameters fail soft and leave the pre-T3 surface active.
+	 */
+	bool ApplyStylizedSurfaceParameters(bool bStyleEnabled);
+
+	bool IsStylizedSurfaceContractAvailable() const
+	{
+		return bStylizedSurfaceContractAvailable;
+	}
+
+	bool TryGetScalarParameterValue(
+		const FName& ParameterName,
+		float& OutValue) const;
+	bool TryGetVectorParameterValue(
+		const FName& ParameterName,
+		FLinearColor& OutValue) const;
+	bool TryGetTextureParameterValue(
+		const FName& ParameterName,
+		UTexture*& OutValue) const;
+	const UMaterialInstanceDynamic* GetTerrainMIDForDiagnostics() const
+	{
+		return TerrainMID;
 	}
 
 private:
@@ -74,6 +102,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TerrainMID;
 
-	bool bMonthlyPresentationRhythmApplied = false;
-	int32 MonthlyPresentationRhythmCellCount = 0;
+	bool bStylizedSurfaceContractAvailable = false;
+	bool bLastStyleEnabled = false;
+	bool bHasAppliedStyleState = false;
+	bool bTerrainBasePaletteApplied = false;
+	int32 TerrainBasePaletteCellCount = 0;
 };

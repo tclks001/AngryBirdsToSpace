@@ -260,8 +260,26 @@ bool FABTSM11LayoutScanContract::IsValid(
 	const FABTSM11FinaleLaunchModel& LaunchModel,
 	FString* OutFailure) const
 {
-	if (ScanContractVersion != 2
-		|| Connectivity != 6
+	const bool bLegacyV2 = ScanContractVersion == 2
+		&& Connectivity == 6
+		&& BridgeClosurePolicy.IsDisabled();
+	const bool bBridgeV3 = ScanContractVersion == 3
+		&& Connectivity == 18
+		&& DiscoveryPolicyVersion == 2
+		&& BridgeClosurePolicy.IsValid(OutFailure)
+		&& FMath::IsNearlyEqual(
+			BridgeClosurePolicy.FinalYawPrecisionDegrees,
+			FinalYawPrecisionDegrees,
+			1.0e-12)
+		&& FMath::IsNearlyEqual(
+			BridgeClosurePolicy.FinalPitchPrecisionDegrees,
+			FinalPitchPrecisionDegrees,
+			1.0e-12)
+		&& FMath::IsNearlyEqual(
+			BridgeClosurePolicy.FinalPowerPrecision,
+			FinalPowerPrecision,
+			1.0e-12);
+	if ((!bLegacyV2 && !bBridgeV3)
 		|| !bIncludeHalfCellOffsetPass)
 	{
 		return Reject(OutFailure, TEXT("UnsupportedScanContract"));
@@ -282,7 +300,7 @@ bool FABTSM11LayoutScanContract::IsValid(
 	}
 	if (BoundaryRefinementDepth < 0
 		|| BoundaryRefinementDepth > 10
-		|| DiscoveryPolicyVersion != 1
+		|| DiscoveryPolicyVersion != (bBridgeV3 ? 2 : 1)
 		|| RefinementHaloCoarseCells < 1
 		|| MaximumRefinementIterations < 1
 		|| MaximumRefinementIterations > 16
@@ -343,6 +361,29 @@ bool FABTSM11LayoutScanContract::IsValid(
 		return Reject(OutFailure, TEXT("InvalidDisplayMapping"));
 	}
 	return true;
+}
+
+bool FABTSM11LayoutScanContract::UsesBridgeClosureV3() const
+{
+	return ScanContractVersion == 3
+		&& Connectivity == 18
+		&& !BridgeClosurePolicy.IsDisabled();
+}
+
+FABTSM11LayoutScanContract FABTSM11LayoutScanContract::MakeBridgeClosureV3(
+	const FABTSM11LayoutScanContract& LegacyV2)
+{
+	FABTSM11LayoutScanContract Contract = LegacyV2;
+	Contract.ScanContractVersion = 3;
+	Contract.Connectivity = 18;
+	Contract.DiscoveryPolicyVersion = 2;
+	Contract.MaximumRefinementSampleCount =
+		BridgeClosureV3MaximumRefinementSampleCount;
+	Contract.BridgeClosurePolicy = FABTSM11BridgeClosurePolicy::MakeV1(
+		Contract.FinalYawPrecisionDegrees,
+		Contract.FinalPitchPrecisionDegrees,
+		Contract.FinalPowerPrecision);
+	return Contract;
 }
 
 int32 FABTSM11LayoutScanContract::GetYawCount(

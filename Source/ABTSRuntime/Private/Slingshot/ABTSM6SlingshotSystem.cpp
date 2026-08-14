@@ -3,6 +3,7 @@
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
@@ -219,6 +220,13 @@ void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 		UpdatePouchAndPreview();
 		if (LaunchState == EABTSM6LaunchState::Pulling)
 		{
+			if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+			{
+				Audio->UpdateSlingshotPull(
+					PouchLocation,
+					ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
+					PullAlpha);
+			}
 			RebuildCurrentTrajectoryPreview();
 			DrawPredictedTrajectory();
 		}
@@ -388,7 +396,11 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	Party->SetSlingshotMode(true);
 	ArrangeWaitingBirds();
 	const FQuat RestPouchRotation = Cord.GetRestPouchTransform().GetRotation();
-	Bird->EnterSlingshotPouch(GetBirdInPouchLocation(RestPouchRotation), RestPouchRotation);
+	const FQuat MountedBirdRotation =
+		ABTSMakeSlingshotMountedBirdRotation(SlingForward, SlingUp);
+	Bird->EnterSlingshotPouch(
+		GetBirdInPouchLocation(RestPouchRotation),
+		MountedBirdRotation);
 	if (Bird->GetSelectedMovementMode() == EABTSBirdMovementMode::ChaosRigidBody)
 	{
 		if (UABTSChaosBirdMovementComponent* Movement = Bird->GetChaosMovementComponent()) Movement->OnBlockingImpact().AddUObject(this, &AABTSM6SlingshotSystem::HandleBirdImpact);
@@ -405,6 +417,10 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	PullAlpha = GetResolvedInitialPullAlpha();
 	AimPlaneOffset = FVector::ZeroVector;
 	LaunchState = EABTSM6LaunchState::Ready;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->SetMusicState(EABTSMusicState::Aim);
+	}
 	if (SlingshotCamera) SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Enter] Bird=%d Reinforced=%d"), ABTSBirdIdToIndex(Bird->GetBirdId()), Cord.GetStakeItem() == EABTSItemId::ReinforcedStake ? 1 : 0);
 	return true;
@@ -466,6 +482,13 @@ bool AABTSM6SlingshotSystem::BeginPull(APlayerController& Controller)
 		|| FVector2D::Distance(PouchScreen, FVector2D(MouseX, MouseY)) > 125.0f) return false;
 	LaunchState = EABTSM6LaunchState::Pulling;
 	UpdateAimFromCursor(Controller);
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->UpdateSlingshotPull(
+			PouchLocation,
+			ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
+			PullAlpha);
+	}
 	return true;
 }
 
@@ -512,8 +535,10 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
 	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
 	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
+	const FQuat MountedBirdRotation =
+		ABTSMakeSlingshotMountedBirdRotation(Direction, SlingUp);
 	LaunchedBird->SetActorLocationAndRotation(
-		GetBirdInPouchLocation(PouchRotation), PouchRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		GetBirdInPouchLocation(PouchRotation), MountedBirdRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	UpdatePouchVisual(PouchRotation);
 }
 
@@ -562,6 +587,20 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !LaunchedBird.IsValid()) return;
 	const FVector Velocity = ComputeLaunchVelocity();
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlaySlingshotRelease(
+			PouchLocation,
+			ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
+			PullAlpha);
+	}
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->LockSatelliteFlightIntent(
+			bCurrentTrajectoryPreviewValid
+				? CurrentTrajectoryPreview
+				: FABTSM6TrajectoryPreview());
+	}
 	ClearCurrentTrajectoryPreview();
 	SetPouchVisualActive(false);
 	if (ActiveCord.IsValid()) ActiveCord->ResetPouchVisualToRest();
@@ -590,6 +629,8 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 		bActiveLaunchCalibrationTelemetry = true;
 	}
 	CalibrationSuccessReturnRemainingSeconds = -1.0f;
+	bSatelliteLandingSettlementActive = false;
+	LastSatelliteSurfaceContactWorldTimeSeconds = -BIG_NUMBER;
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M6][Launch] Bird=%d Tier=%d Speed=%.1f Pull=%.2f Aim=(%.1f,%.1f,%.1f) LaunchProfileHash=%llu Calibration=%d"),
 		ABTSBirdIdToIndex(LaunchedBird->GetBirdId()),
@@ -799,18 +840,49 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
+	LaunchedBird->NotifySlingshotPresentationImpact();
+	if (SlingshotCamera) SlingshotCamera->NotifyBirdImpact();
+	const bool bHitSatelliteBody =
+		Hit.GetActor() == SatellitePracticeBody.Get();
+	const bool bHitSatelliteTarget =
+		Hit.GetActor() == SatellitePracticeTarget.Get();
+	if ((bHitSatelliteBody || bHitSatelliteTarget) && SlingshotCamera)
+	{
+		SlingshotCamera->NotifySatelliteSurfaceContact();
+	}
+	if (bHitSatelliteBody || bHitSatelliteTarget)
+	{
+		LastSatelliteSurfaceContactWorldTimeSeconds = GetWorld()->GetTimeSeconds();
+		// A swept E5 witness can be finalized immediately before Chaos reports
+		// the real blocking contact. Once physical support exists, cancel that
+		// fixture-only short-return timer and let the shared settle monitor own
+		// the bird and any present/future E5 debris.
+		CalibrationSuccessReturnRemainingSeconds = -1.0f;
+		if (!bSatelliteLandingSettlementActive)
+		{
+			bSatelliteLandingSettlementActive = true;
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M9][Settle] SatelliteSupportAcquired Target=%s Body=%d"),
+				*GetNameSafe(Hit.GetActor()),
+				bHitSatelliteBody ? 1 : 0);
+			if (LaunchState == EABTSM6LaunchState::Flying)
+			{
+				BeginSettlement();
+			}
+		}
+	}
 	// A real Chaos blocking contact is the strongest calibration evidence.
 	// The rig's swept centre-segment test remains a CCD/fallback path, while
 	// NotifyCalibrationTargetEvent de-duplicates both sources.
 	if (bCalibrationModeEnabled)
 	{
-		if (Hit.GetActor() == SatellitePracticeTarget.Get())
+		if (bHitSatelliteTarget)
 		{
 			NotifyCalibrationTargetEvent(
 				TEXT("Satellite.Backside"),
 				false);
 		}
-		else if (Hit.GetActor() == SatellitePracticeBody.Get())
+		else if (bHitSatelliteBody)
 		{
 			NotifyCalibrationTargetEvent(
 				TEXT("Satellite.Body"),
@@ -819,6 +891,11 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 	}
 	if (NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec) MarkPhysicsActivity();
 	const EABTSM6ImpactMaterial Material = ResolveMaterial(Hit.GetComponent());
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayImpact(Hit.ImpactPoint, Material, NormalSpeedCMPerSec);
+		if (bHitSatelliteBody || bHitSatelliteTarget) Audio->SetMusicState(EABTSMusicState::Satellite);
+	}
 	const FABTSM6BirdImpactProfile& BirdProfile = GetBirdProfile(LaunchedBird->GetBirdId());
 	const FABTSM6MaterialImpactProfile& MaterialProfile = GetMaterialProfile(Material);
 	const float KnockThreshold = BirdProfile.KnockSpeedCMPerSec * MaterialProfile.KnockThresholdMultiplier;
@@ -897,6 +974,10 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 {
 	if (!LaunchedBird.IsValid() || bBlackDetonated) return;
 	bBlackDetonated = true;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayExplosion(LaunchedBird->GetActorLocation(), true);
+	}
 	MarkPhysicsActivity();
 	int32 BrokenInstances = 0;
 	int32 ImpulsedInstances = 0;

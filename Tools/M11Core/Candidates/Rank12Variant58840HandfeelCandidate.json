@@ -1,0 +1,66 @@
+{
+  "schema": "abts.m11b.v2_2.handfeel_candidate.v1",
+  "status": "frozen_unique_v3_certification_input_uncertified",
+  "editorCandidateRank": 12,
+  "baseCandidateRank": 11,
+  "baseGlobalWorkIndex": 25,
+  "baseCandidateSourceHash": "0xcb23499fc6f7c9d3",
+  "variantSourceHash": "0x58840ee73ddd70f5",
+  "nominalInput": [-1.75, 26.25, 1.0],
+  "nominalRequestHash": "0xf76a37a38221a425",
+  "nominalResultHash": "0xf746bbe4ca7b9748",
+  "diagnosticEvidenceHash": "0xf364c0098bec8112",
+  "construction": {
+    "assist2OffsetCM": [300.0, 925.0, 1400.0],
+    "assist2BPlaneDeltaCM": [-300.0, 675.0],
+    "assist2BPlaneSigmaScale": 0.919211,
+    "assist2VelocityDeltaCMPerSec": [-150.0, -690.0, -370.0],
+    "assist3OffsetCM": [-550.0, -1250.0, -850.0],
+    "assist3BPlaneDeltaCM": [-700.0, 925.0],
+    "assist3BPlaneSigmaScale": 0.833255,
+    "assist3VelocityDeltaCMPerSec": [-40.0, -450.0, -260.0],
+    "targetOffsetCM": [-3300.0, 1000.0, 350.0]
+  },
+  "screenAimEvidence": {
+    "sampleCount": 5000,
+    "seed": 4750135298,
+    "power": 1.0,
+    "prefixCounts": [615, 139, 18, 8]
+  },
+  "fullInputDomainDiagnostic": {
+    "grid": "half_step_1deg_1.5deg_0.0125",
+    "prefixCounts": [3003, 841, 238, 67],
+    "sixNeighborComponentCounts": [3, 1, 6, 4],
+    "largestF4ComponentSize": 56,
+    "earlyTargetHitCount": 0,
+    "bypassTargetHitCount": 0,
+    "nestingViolations": 0,
+    "aggregateSampleHash": "0xf364c0098bec8112"
+  },
+  "v3FinalRefinementEvidence": {
+    "grid": "yaw_-7_to_2_pitch_16.5_to_34.5_power_0.65_to_1_final_precision",
+    "gridCounts": [49, 73, 113],
+    "sampleCount": 404201,
+    "prefixCounts": [199316, 92749, 29580, 9225],
+    "sixNeighborComponentCounts": [1, 1, 23, 30],
+    "largestF4ComponentSize": 9096,
+    "earlyTargetHitCount": 305,
+    "bypassTargetHitCount": 0,
+    "nestingViolations": 0,
+    "nominalF4": true,
+    "aggregateSampleHash": "0x45f9e5508f5a4f66"
+  },
+  "handfeelComparisonToRank11": {
+    "passedDiagnosticGate": true,
+    "deflectionRelativeErrors": [0.0, 0.06025446757991088, 0.0923412502145293],
+    "durationRelativeErrors": [0.0, 0.025265823269642326, 0.06369550670719575],
+    "flightTimeRelativeError": 0.0003810894948301046
+  },
+  "acceptance": {
+    "editorPieBinding": "abts.M11.CandidateRank_12",
+    "manualHandfeelTest": "passed_user_evaluation_2026_08_12",
+    "fullInputDomainCertification": "v3_early_stopped_final_refinement_f4_non_unique_and_early_target_hit",
+    "certificationInput": true,
+    "productionBinding": false
+  }
+}

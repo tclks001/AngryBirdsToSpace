@@ -2,7 +2,7 @@
 
 > 状态：M11.0 与 M11-A 已完成；M11-B C++、Development Editor 编译、全新进程 Unit/Runtime/ConstructiveSearch/FullInputDomain 自动认证和用户 PIE 均已完成，v1 预设与认证 Hash 已冻结；现已正式交接至 [M11-C](M11CFinaleInteractionAndPlaybackDesign.md)。
 >
-> v2 说明：本文以下数值和 Hash 仍是已验收的 v1 权威；M11-B v2.1 已生成 4 个未认证候选并完成快速同源重放，详见 [M11-B v2.1 候选搜索子稿](M11B21CandidateSearchDesign.md)。强助推、非共线、60 秒节奏和三维域重认证的总边界见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)；完整输入域认证仍留到体验冻结后的 M11-B v2.2。
+> v2 说明：本文以下数值和 Hash 仍是已验收的 v1 权威；M11-B v2.1 已生成 4 个未认证候选并完成快速同源重放，详见 [M11-B v2.1 候选搜索子稿](M11B21CandidateSearchDesign.md)。强助推、非共线、60 秒节奏和三维域重认证的总边界见 [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md)。2026-08-11 用户已将 Editor Rank 11 批准并冻结为唯一 v2.2 认证输入；fresh 全输入域认证在 half-step 发现非唯一 F4 与提前命中后按合同早停，Rank 11 保持 `Candidate / NOT CERTIFIED`。
 >
 > 父级：[M11 终局三重引力弹弓算法预演](M11GravityAssistAlgorithmPrevisualization.md)。
 >
@@ -898,6 +898,365 @@ Result=0x505f3312ac8ae07f / Score=0xd71f1166493c07aa`。它尚未执行全 Power
 `ABTS.M11C.V2_1` 为 `3/3`，覆盖 Catalog 最后一项 Rank 11 的 Source/Result、
 nominal F4 与未知 Rank fail-closed。日志为
 `Saved/Logs/M11Rank11PIEList-20260802-215012.log`。
+
+### Rank 11 唯一认证输入冻结与 v2.2 启动（2026-08-11）
+
+用户在完成 Rank11 名义路线、两条不同自定义 F4 路线、终端物理接触、镜头和四鸟
+表现取证后，批准将 Rank11 冻结为本轮唯一 v2.2 认证输入。冻结身份为：
+
+```text
+Rank=11
+CandidateSourceHash=0xcb23499fc6f7c9d3
+NominalRequestHash=0x4f0e3c66a1a0a737
+NominalResultHash=0x505f3312ac8ae07f
+ScoreHash=0xd71f1166493c07aa
+```
+
+机器可读冻结入口为
+`Tools/M11Core/Certification/Rank11V22CertificationInput.json`；原候选 Manifest
+状态同步改为 `frozen_unique_v22_certification_input`，但认证 Authority 仍为
+`Candidate / NOT CERTIFIED`。冻结不删除 Rank 0–10/13 的历史诊断或 Editor 比较数据，
+只规定正式 v2.2 调度不得选择其他 Rank、不得注入天体位移、命中半径、到达锥或
+NominalInput 覆盖。
+
+`Tools/M11Core/Python/m11_v22_certify_rank11.py` 是唯一正式调度入口。Python 只负责
+冻结 Manifest 校验、不可变计划、分片/线程调度、检查点恢复、日志与早停路由；每个
+轨迹、前缀分类、Hash、六邻域连通和合并结论仍由标准 C++
+`ABTSM11V22CertificationCLI` 产生。首轮顺序冻结为：
+
+1. 重放 5000 点满功率 ScreenAim，并核对上述 Source/Request/Result Hash 与
+   `616→137→21→6`；
+2. 对不落在发现网格节点上的 Nominal `(-1.75°,26.25°,1)` 独立执行单点 F4
+   重放；完整域合并显式使用 `allow-off-grid-nominal`，不得把网格未采到 Nominal
+   误报为候选失败；随后运行 base `2° × 3° × 0.025`，共 `16,359` 点；
+3. 若 base 只有粗网格 F4 多岛而没有身份、嵌套、错序或旁路硬失败，继续完整域
+   half-step `1° × 1.5° × 0.0125`，共 `122,877` 点；
+4. half-step 的 F4 不唯一、为空、嵌套违规、提前命中或旁路任一出现
+   即按合同早停；通过后才继续边界递归、消融、旁路和 Trust Region/Bundle。
+
+冻结本身不声称认证通过；正式状态只读取本次新输出中的
+`certification_status.json` 和 C++ merged summaries，不读取 8 月 2 日的旧扫描目录
+冒充 fresh 证据。
+
+#### Rank 11 fresh 全输入域认证结果（2026-08-11）
+
+修复离网格 Nominal 的调度假早停后，fresh 运行先以单点网格验证
+`(-1.75°,26.25°,1)`：`F1/F2/F3/F4=1/1/1/1`、四级分量均为 `1`，
+`NominalF4=true`。同次 5000 点 ScreenAim 继续得到 `616/137/21/6`，且
+Source/Request/Result Hash 与冻结输入完全一致。
+
+完整闭区间 `Yaw=[-18°,18°] / Pitch=[0°,60°] / Power=[0,1]` 的发现结果为：
+
+| 层级 | 步长 | 样本 | `F1/F2/F3/F4` | 六邻域分量 | Early / Bypass / Nesting | Aggregate Sample Hash |
+| --- | --- | ---: | --- | --- | --- | --- |
+| base | `2° / 3° / 0.025` | 16,359 | `389/101/30/9` | `3/1/3/3` | `0 / 0 / 0` | `0x12588609d360fc8c` |
+| half-step | `1° / 1.5° / 0.0125` | 122,877 | `3014/827/229/54` | `3/1/5/9` | `1 / 0 / 0` | `0x23416df242cb995a` |
+
+因此 half-step 同时命中 `f4_component_count_not_one` 与 `early_target_hit` 两项
+硬停止条件。认证器按设计没有继续边界递归、三助推消融、Trust Region 或 Certified
+Bundle；这不是性能中断，也不能用最大分量占比替代“恰好一个 F4 六邻域分量”门槛。
+Rank 11 仍是本轮唯一冻结输入，但认证结果为早停失败，不能进入 M11-C v2.2 生产绑定。
+最终可复核输出根为
+`Intermediate/M11V22Certification/Rank11-Final-20260811-234958`，计划 SHA-256 为
+`DC8F356646CD078CA471F683E3A71CA5258D8A77EA46A2125DA054026840EB16`，状态 SHA-256 为
+`3E7C617B8F955AF22951A10DAF6541133D245C348E3E7FC4A46478910C9C939A`。计划捕获的
+Candidate Manifest SHA-256
+`CBA1B821ABA560382E59A4B1180B18C118A0F805939D2D1F27F9F416CA5FAA1E`
+与当前文件一致；最终 portable CTest 为 `9/9`，SearchToolHash 为
+`93ee056ec837c0ffe754da4dc7e58dfc77905a1dd6757b7f6a54cddc99c5944b`。
+
+#### Rank 11 小偏移诊断搜索（2026-08-12）
+
+冻结 Rank11 及其 Source/Request/Result/Score Hash 保持不变。为验证“略微移动终端
+目标或微调 Assist3 出口映射能否消除额外 F4 分量”，新增两个只生成诊断 Variant 的
+确定性 Python 调度器。它们仍调用标准 C++ CLI 求解、分类、连通与 Hash；Python 仅
+负责候选生成、进程调度、结果核对、晋级和早停。每个变体都有独立
+`VariantSourceHash`，不得覆盖冻结 Manifest；只有同时保留独立 Nominal F4、满足
+`Early/Bypass/Nesting=0/0/0` 且显著收敛 F4 六邻域分量的变体，才允许晋级 fresh
+base/half-step 全域扫描。
+
+第一阶段固定全部行星和 Assist3 映射，只在 Target 三轴 `±2000 cm` 窗内执行 143 个
+确定性初始点及围绕前四名的 104 个 `500 cm` 自适应细化点，共 247 个变体。其中
+193 个保留独立 Nominal F4；全部 247 个都存在 EarlyTargetHit，也没有一个把 F4
+分量数从 `9` 降低。最佳诊断点为 Target Offset `(-950,-2300,-850) cm`：局部
+half-step 闭包
+`F1/F2/F3/F4=1518/739/229/51`、分量 `1/1/5/9`、最大 F4 分量 `10`、
+`Early/Bypass/Nesting=1/0/0`。因此 `eligible/promoted/full=0/0/0`，按
+`target_only_early_stopped_no_promoted_variant_passed` 早停。报告为
+`Intermediate/M11V22TargetOffset/Rank11-20260812-104005/search_report.json`，
+SHA-256 为 `0B70A1850D3736BA26E7304C40E4CDC8FE45B5B6568E091B87364901EED1B9C8`。
+
+第二阶段只开放 Target Offset、Assist3 出口 B-plane `T/R=±600 cm` 和
+`SigmaScale=0.90–1.10`，不移动 Assist3 可见中心；固定网格与 128 个六维 Halton 点
+合计 182 个联合变体。其中 138 个保留独立 Nominal F4；全部变体均为 F4
+`51–54`、分量 `1/1/5/9`、`Early/Bypass/Nesting=1/0/0`；最佳仍是 Target Offset
+`(-950,-2300,-850) cm`，Assist3 B-plane `(0,0) cm`、Sigma `0.94`，其局部闭包
+`F1/F2/F3/F4=1823/778/229/51`，最大 F4 分量仍为 `10`。同样
+`eligible/promoted/full=0/0/0`，以
+`joint_early_stopped_no_promoted_variant_passed` 结束。报告为
+`Intermediate/M11V22JointMapping/Rank11-20260812-105558/search_report.json`，
+SHA-256 为 `C234BD581912D93C5FB3CA56A2E47ED0FCC40D8FA6C04B9D4EAA04AE4CBC288F`。
+
+两阶段都没有候选达到全域晋级门，所以没有启动新的 base/half-step 正式扫描，也没有
+产生可冻结的新候选。结论仅限于上述“小偏移”窗口：Target 位移和小幅 Assist3 出口
+重映射能改变 F4 点数，却没有形成连接九个 F4 岛所需的 F3/F4 桥，并且无法消除同一
+局部域内的提前命中。若继续探索，应升级为 Assist3 几何/出口映射的局部重构并产生
+新的 Candidate 身份，而不能扩大当前冻结输入的认证声明。
+
+本轮调度工具的 pinned portable CTest 为 `9/9`；最终
+`ProductionCoreHash=970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0`、
+`ConformanceToolHash=7cfd567f14ba7426b53e7e2ce12a219a7b5ec6e70133cec35d402019e3301513`、
+`SearchToolHash=d2c752758d58f04e9870203aaf051e0e8e1fd977e77810d7b0a24838553f18e1`；
+日志为 `Saved/Logs/M11-Rank11-JointMapping-Portable-20260812-105349.log`。本轮没有
+启动 Editor/PIE，也没有修改地图、Blueprint 或二进制资产。
+
+### 7.3 Rank11 从行星2重开后的相似手感候选搜索（2026-08-12）
+
+冻结 Rank11 继续保持唯一认证输入，Source/Request/Result/Score Hash 仍为
+`0xcb23499fc6f7c9d3 / 0x4f0e3c66a1a0a737 / 0x505f3312ac8ae07f /
+0xd71f1166493c07aa`，本轮没有覆盖冻结 Manifest。所有搜索点均由
+`ABTSM11V22CertificationCLI` 求解、分类、做六邻域连通和生成
+`VariantSourceHash`；Python 只负责确定性采样、最多 `4×2` 的轻量调度、门控与晋级。
+名义输入固定为 `(-1.75°,26.25°,1)`。手感硬门要求三段偏转和持续时间相对冻结
+Rank11 的逐项误差不超过 `18%`，总飞行时间误差不超过 `12%`；候选同时必须满足
+独立 Nominal F4、`Early/Bypass/Nesting=0/0/0` 和完整域 F4 六邻域唯一分量。
+
+搜索按证据逐层扩大，而不是直接运行昂贵认证：
+
+1. Assist2 映射保守搜索 `508` 点，将冻结基线的 F4 `9` 分量、Early `1`
+   改善为最少 `7` 分量、Early `0`；报告
+   `Intermediate/M11V22Assist2Similarity/Rank11-20260812-113018/search_report.json`
+   （SHA-256 `765C54A0...D874DEE`）。
+2. 扩展 Assist2 位置/B-plane/Sigma/虚拟速度并补偿 Assist3/Target，共 `522`
+   点；开始出现 `4` 分量结果，但安全且通过手感的主盆地随后稳定在 `5–6` 分量。
+   报告 `.../M11V22Assist2Expansion/Rank11-20260812-120120/search_report.json`
+   （SHA-256 `80F05AD8...7AD8DE`）。
+3. 围绕最优盆地做 21 维窄域、坐标探针和盆地插值，再做 35% 步长精修，共
+   `599` 点；得到安全的 `4` 分量结果。随后 Target 小立方体与 Assist3 末端补偿
+   `374` 点仍停在 `4` 分量。报告分别为
+   `.../M11V22Assist2Narrow/Rank11-20260812-123518/search_report.json`
+   （SHA-256 `5E3BDD0E...6A8235`）和
+   `.../M11V22TerminalIsland/Rank11-20260812-131224/search_report.json`
+   （SHA-256 `6D06B303...C1BE45`）。
+4. 为严格落实“从行星2开始”，另行开放真实 `--assist2-radial-delta`，并允许
+   Assist3/Target 小幅径向重对准。共 `312` 点，其中 `21` 点因
+   `OverlappingAssistInfluenceSpheres` 合法 fail closed，`291` 点有效；有效点仍无
+   低于 `4` 分量的结果。报告
+   `.../M11V22Planet2Radial/Rank11-20260812-133431/search_report.json`
+   （SHA-256 `D03A8EDD...BA426E`）。
+5. 对 `4` 个近连通变体绕过局部单分量预门，直接做 fresh 完整 base/half-step
+   诊断提升。half-step 分别为 F4 `67/72/70/69`、均 `4` 分量且 Early `0`，证明
+   它们不会经局部窗口外路径重新连接；报告
+   `.../M11V22DiagnosticPromotion/Rank11-20260812-135047/promotion_report.json`
+   （SHA-256 `FE9CE4C6...25683A1`）。
+6. `targetMinimumCorridorQuality=0.05–0.50` 的 `152` 点扫描全部有效，但拓扑仍为
+   最少 `4` 分量，说明三个小岛不是低质量旁瓣。报告
+   `.../M11V22TerminalQuality/Rank11-20260812-140000/search_report.json`
+   （SHA-256 `20B334CF...A8BEAA`）。
+
+当前最近的诊断变体为 `VariantSourceHash=0x58840ee73ddd70f5`：Assist2 Offset
+`(300,925,1400) cm`、B-plane `(-300,675) cm`、Sigma `0.919211`、速度增量
+`(-150,-690,-370) cm/s`；Assist3 Offset `(-550,-1250,-850) cm`、B-plane
+`(-700,925) cm`、Sigma `0.833255`、速度增量 `(-40,-450,-260) cm/s`；Target
+Offset `(-3300,1000,350) cm`。其 half-step 为
+`F1/F2/F3/F4=1841/790/238/67`、分量 `1/1/6/4`、最大 F4 分量 `56`、
+`Early/Bypass/Nesting=0/0/0`。三段偏转相对误差为
+`0/6.03%/9.23%`，持续时间误差为 `0/2.53%/6.37%`，总时长误差 `0.04%`，
+因此手感门通过，但唯一连通门失败；搜索结论中它不能写入认证 Candidate handoff、
+不能冻结，也不能进入边界递归、消融、Trust Region 或 Bundle 验收。
+
+累计 `2446` 个有效局部变体中没有任何 F4 分量数低于 `4`。因此本轮按
+`no_single_f4_component_in_declared_planet2_and_downstream_search_domains` 早停，结论是：
+在保持当前 Rank11 手感和既有终端资格合同的前提下，已声明的小幅/中幅行星2及下游
+调整范围内没有找到符合条件的新候选。若继续，不应重复扩大随机预算；需要集成工作树
+先决定是否扩宽 `TargetHitRadius` 诊断覆盖合同或重新设计终端资格/方向锥，这已经超出本
+功能工作树可单方面改变的稳定合同范围。本轮未启动 Editor/PIE，未修改地图、Blueprint
+或二进制资产。
+
+最终 pinned portable CTest 为 `9/9`，机器摘要 `passed=true`；
+`ProductionCoreHash=970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0`、
+`ConformanceToolHash=b789c5990c4e010ff93fc04973f6b09d1835ed6515942ef46a5b0b8a0716c91a`、
+`SearchToolHash=85ce5069321110ae15c691d5625cb616f7e7e7b0844f1970a928368667db8157`；
+日志为 `Saved/Logs/M11-Rank11-Planet2Search-Final-Portable-20260812-141100.log`。
+
+#### Rank 12 手感对照临时绑定（2026-08-12）
+
+经用户明确要求，诊断变体 `0x58840ee73ddd70f5` 作为列表末尾的 Editor-only 手感
+对照项绑定到 `abts.M11.CandidateRank=12`。这次绑定只允许人工比较 Rank11 与该变体的
+操控、节奏和镜头感受，不改变它的认证结论：Rank12 仍为
+`UNCERTIFIED / handfeel test only`，不得成为生产默认、v2.2 认证输入或 Certified
+Bundle。冻结文件 `Rank11V22CertificationInput.json` 及 Rank11 的四项身份 Hash 均未
+修改。
+
+Rank12 的运行时身份为 `Source=0x58840ee73ddd70f5 / Request=0xf76a37a38221a425 /
+Result=0xf746bbe4ca7b9748 / Evidence=0xf364c0098bec8112`；固定 5000 点 ScreenAim 为
+`615/139/18/8`。原来只供 CLI 保留的失败尺度实验从诊断 Rank12 平移到 Rank13，布局
+与历史身份 Hash 不变。机器可读清单为
+`Tools/M11Core/Candidates/Rank12Variant58840HandfeelCandidate.json`。
+
+落地验证为 pinned portable CTest `10/10`，其中 Rank12 的 5000 点回放和 Rank11
+唯一冻结校验分别独立通过；UE 5.8 Development Editor 完整链接 `Succeeded`。fresh
+NullRHI 精确发现并通过 `ABTS.M11C.V2_1.FrozenV4CandidateCatalog` `1/1`。日志分别为
+`Saved/Logs/M11-Rank12-HandfeelCandidate-Portable-20260812.log`、
+`Saved/Logs/M11-Rank12-HandfeelCandidate-DevelopmentEditor-20260812.log` 与
+`Saved/Logs/M11-Rank12-HandfeelCandidate-FreshNullRHI-20260812.log`。本次未启动可见
+Editor/PIE。2026-08-12 用户完成 Rank11/12 对照后确认 Rank12 手感没有问题；该结论
+关闭人工体验门，但不替代数值认证。
+
+#### Rank 12“18 邻域初判＋桥区递归闭包”交接检查点（2026-08-12）
+
+用户批准下一版连通合同采用“18 邻域初判＋桥区递归闭包”。现有 half-step 原始样本
+只读复核得到：六邻域 F4 为 `4` 个分量，大小 `56/5/4/2`；18 邻域与 26 邻域均把
+全部 `67` 个 F4 样本连为 `1` 个分量；`Early/Bypass/Nesting=0/0/0`。因此 Rank12
+已经满足拟议合同的 **18 邻域发现初判**，但尚未执行桥区递归闭包，也没有执行后续
+消融、旁路、可玩宽度、Trust Region、CertificationHash 或 CertifiedBundle 验收，
+状态必须保持 `UNCERTIFIED`。
+
+拟议合同语义固定为以下交接需求，最终版本号与 Hash Schema 由集成工作树批准：
+
+1. base/half-step 的发现图允许三维 18 邻域，即每步最多改变两个轴；三轴同时变化的
+   角邻接仍禁止。
+2. 六邻域边直接进入发现图；仅靠“两轴同时变化”成立的斜边只标记为待证明桥边，
+   不得直接产生认证通过结论。
+3. 每条影响 F4 总连通性的待证明桥边都按固定索引顺序建立局部桥区，并递归细分到
+   Scan Contract 冻结的最终 Yaw/Pitch/Power 精度。
+4. 桥边只有在最终细化格上存在连续 F4 路径时才保留；闭包失败的斜边必须删除并重新
+   计算 F4 分量。最终仍多于一个分量时 fail closed。
+5. 邻接模式、桥区构造、递归深度、最终精度、访问顺序和桥证据 Hash 必须进入
+   ScanContract/Certification/Suite 身份；旧六邻域报告不得重签或改判。
+
+当前提交的职责边界如下。
+
+**原始集成工作树负责：**
+
+1. 审批上述稳定连通语义，分配新的 ScanContract/认证合同与 Hash Schema 版本；
+2. 修改稳定的 `FABTSM11LayoutScanContract` 验证、序列化/Hash 覆盖和合同自动化，
+   同时保留旧 v1 六邻域 Bundle 的兼容与 fail-closed 边界；
+3. 决定桥区最终连续性判据、批准精度/递归预算及资源上限，禁止半套新合同进入
+   `master`；
+4. 在合并本 M11 检查点后发布更新后的共同基线，并由集成工作树最终切换生产默认、
+   冻结 manifest/Certified Bundle 和共享工作流状态；在 Rank12 完成认证前不得切换；
+5. 跑共同门禁：Development Editor、Contracts、M11-B 合同/Hash 篡改回归及所有
+   M3/M7/M11 消费者兼容测试。
+
+**M11 功能工作树负责（合并集成工作树的新基线后执行）：**
+
+1. 让 portable C++ CLI 与 Python 调度消费新合同，输出六邻域、18 邻域、待证明桥边、
+   桥区递归及最终分量的完整机器证据；
+2. 将 Rank12 冻结为新的唯一认证输入，核对 `Source=0x58840ee73ddd70f5`、Nominal
+   Request/Result、ScreenAim `615/139/18/8`，不得覆盖 Rank11 历史冻结证据；
+3. 在新输出根 fresh 重跑 nominal、base、half-step；旧 TSV 只能作对照，不能作为
+   新合同签发依据；
+4. 对所有必要斜边执行桥区递归。任一必要桥失败或最终 F4 非唯一即早停；通过后才
+   进入最终精化闭包；
+5. 验证 `F4 ⊂ F3 ⊂ F2 ⊂ F1`、三个差集、三轴最小内宽，并构造/逐边重放
+   `TrustF1/F2/F3`；
+6. 完整重跑 `0b110/0b101/0b011/0b000` 消融，以及低功率、错误侧、跳星、错序、
+   重复助推、多圈重入、提前命中、GeometricContact 和 Bypass；
+7. 生成新的 Certification/Suite/Trust/PhysicalPlayback/Bundle 候选 Hash，运行
+   portable、UE parity、fresh NullRHI Unit/Runtime/FullInputDomain 和确定性复跑；
+8. 把完整 M11 证据提交给集成工作树，由集成工作树完成生产冻结/默认绑定。若认证
+   通过后权威布局未再变化，当前已通过的手感反馈可作为体验证据；生产绑定后仍需一次
+   可见 PIE 复核身份、轨迹、镜头和终端接触。
+
+当前可恢复起点是本节所述 Rank12 清单、搜索调度器和
+`Intermediate/M11V22DiagnosticPromotion/Rank11-20260812-135047/full/promoted_00`。
+下一任务必须先由集成工作树完成稳定合同阶段；M11 工作树不得在此检查点上自行修改
+合同或把 half-step 18 邻域初判记为认证完成。
+
+#### 稳定连通合同 v3 已发布（2026-08-13）
+
+集成工作树已经完成上述稳定合同阶段，生产冻结的 Scan Contract v2 仍保持
+`Connectivity=6`、原字段 Hash 顺序和原 Certified Bundle 身份；v3 作为追加兼容面，
+没有替换或重签 v2。v3 固定为：
+
+- `ScanContractVersion=3 / DiscoveryPolicyVersion=2 / Connectivity=18`；
+- v2 的细化样本上限继续冻结为 `250000`，v3 的细化样本上限冻结为
+  `500000`；后者覆盖 Rank12 最终精化的 `49×73×113=404201` 点，同时保留
+  超预算早停与 fail-closed 行为；该字段继续进入 ScanContractHash；
+- 六邻域边直接构成 face component；只改变两个轴的斜边仅进入确定性
+  `RequiredBridgeEdges`，三轴同时变化的角邻接永远不进入发现图；
+- 待证明桥边按样本扁平索引排序，并对六邻域分量商图建立唯一确定性生成森林；
+- `BridgeClosurePolicy v1` 冻结桥区构造、递归细分、访问顺序、证据 Hash Schema、
+  最终 Yaw/Pitch/Power 精度、递归深度和单桥样本预算；全部字段进入 Scan Hash；
+- 每条桥证据必须到达冻结最终精度，拥有非零访问顺序与连续 F4 路径 Hash，并在预算内；
+  缺失、重复、Hash 不符、超预算或任一必要桥未证明均 fail closed；
+- 桥证据聚合 Hash 和最终闭包结果 Hash 与证据内容绑定；发现图本身不能签发认证。
+
+共享实现位于 `Contracts/ABTSM11ConnectivityClosureContract.*`。现有 UE 认证入口在消费
+v3 但尚未获得 portable 桥证据时稳定拒绝为 `BridgeClosureEvidenceRequired`，所以不会
+把 half-step 的 `18-neighbor discovery precheck passed` 误写成 Certified。
+
+自动回归已经证明：冻结 v2 Scan Hash 原样重放；v3 策略、递归预算和访问顺序会改变
+Scan Hash；`3x3x1` 对角样例保持 `3` 个六邻域分量、形成 `1` 个 18 邻域发现分量和
+`2` 条必要桥；缺少任一桥证据失败，完整证据闭包为单分量，改变有效证据会改变结果
+Hash。M11 工作树下一步可合并该 `master` 基线，负责 portable CLI、Python 调度和
+Rank12 fresh 实际桥区扫描；当前 Rank12 仍为 `UNCERTIFIED`。
+
+#### Rank 12 v3 fresh 认证早停结果（2026-08-13）
+
+M11 工作树合并上述稳定基线后，已经将 Rank12 冻结为新的唯一 v3 认证输入，并在
+`Intermediate/M11V3Certification/Rank12-20260813-03` 使用固定 MSVC 14.44 portable
+C++ 权威和 Python 纯调度层完成 fresh Nominal、base、half-step 与桥区闭包。身份门
+保持 `Source=0x58840ee73ddd70f5`、Nominal Request/Result
+`0xf76a37a38221a425 / 0xf746bbe4ca7b9748`、ScreenAim `615/139/18/8`。
+
+fresh base 为 `F=389/106/31/10`、六邻域分量 `3/1/3/5`、
+`Early/Bypass/Nesting=0/0/0`、聚合 Hash `0x85c1c1d517643be9`；fresh half-step
+精确复现 `F=3003/841/238/67`、六邻域分量 `3/1/6/4`、
+`Early/Bypass/Nesting=0/0/0`、聚合 Hash `0xf364c0098bec8112`。v3 发现计划把
+F4 的 `4` 个 face component 连成 `1` 个 18 邻域发现分量，确定性生成森林产生
+`3` 条必要桥，Plan Hash 为 `0xb4cc770aeda2ce17`。
+
+三条桥分别建立一个最终精度 halo 的局部桥区，每区 `845` 点；深度 `3` 后均找到
+`17` 点六邻域连续 F4 路径。桥证据为 `3/3`，最终分量为 `1`，Policy / Evidence
+Aggregate / Closure Result Hash 分别为 `0x40ccc25283f67c8c / 0x5e2c18f6fb5e733f /
+0x240d8b2055832d36`。因此“18 邻域初判＋桥区递归闭包”本身已经通过，但这仍不等于
+完整认证通过。
+
+随后按冻结 refinement policy，以 base 与 half-step 的 F3/终端证据并集建立最终精度
+闭包。原始证据范围为 Yaw `[-5,0]`、Pitch `[19.5,31.5]`、Power `[0.675,1]`；加入
+一个 base coarse-cell halo 并以 Nominal 对齐后，最终网格为
+`[-7,2] × [16.5,34.5] × [0.65,1]`，尺寸 `49×73×113=404,201`。该值超过稳定
+Scan Contract 的 `MaximumRefinementSampleCount=250,000`，所以在启动精化求解前按
+合同早停为 `RefinementSampleBudgetExceeded`。没有执行消融、差集/宽度、Trust、
+Certification/Suite/Bundle 或生产绑定；Rank12 保持唯一冻结认证输入但仍为
+`UNCERTIFIED`。若要继续，只能由集成工作树审批新的稳定精化预算/区域构造版本，或
+由 M11 产生新的物理候选以缩小 F3 证据包络；不得在本工作树静默提高预算后重签。
+
+集成工作树随后以稳定合同提交 `41f34ce` 将 v3 专属精化上限提高到 `500000`，v2
+仍保持 `250000`。M11 合并该基线后在新输出根重新执行相同冻结输入，预算门以
+`404201 <= 500000` 通过，继而实际完成全部 `49×73×113` 最终精度求解。最终精化
+得到 `F1/F2/F3/F4=199316/92749/29580/9225`，六邻域分量
+`1/1/23/30`，最大 F4 分量为 `9096`，Nominal 仍在 F4 内；但同时出现 `305` 个
+EarlyTargetHit，Aggregate Sample Hash 为 `0x45f9e5508f5a4f66`。因此正式早停原因
+更新为 `early_target_hit + final_f4_component_count_not_one`。桥闭包只证明 half-step
+发现图中的三条指定斜桥，并不能证明更细网格中的全部 F4 单连通；本轮不进入宽度、
+Trust、消融、Certification/Suite/Bundle 或生产绑定。
+
+canonical 可复核输出根为
+`Intermediate/M11V3Certification/Rank12-20260813-05`；Plan SHA-256 为
+`34526D0BC4DFEDF1B0A216671D33FE27490D9359CF66E1C120F9B2B78E86D7F7`，Status
+SHA-256 为 `38F1183C8D5BE95ED882D7131042B567726BE9301EF8D657197412D0F52983FC`，
+SearchToolHash 为
+`e21ea96dce03d8531ca2cfde27bfc1f1fde1e9e7e034bf6632aba6f21f6bbc5f`。前一
+fresh 根 `Rank12-20260813-04` 在显示标签修正前已经得到完全相同的 base、half-step、
+桥闭包与精化 Hash；`-05` 作为最终同源审计证据。
+
+合并后固定 MSVC 14.44 portable CTest 为 `13/13`；UE 5.8 Development Editor 全链接
+成功，日志为 `Saved/Logs/M11-Rank12-V3-BudgetMerge-DevelopmentEditor-20260813.log`。
+fresh NullRHI `ABTS.M11B.Unit` 为 `9/9`，候选目录为 `1/1`，日志分别为
+`Saved/Logs/M11-Rank12-V3-BudgetMerge-Unit-20260813-FreshAutomation.log` 与
+`Saved/Logs/M11-Rank12-V3-BudgetMerge-CandidateCatalog-20260813-FreshAutomation.log`。
+这些绿色门证明合同与实现一致，不改变 Rank12 已在最终精化早停、不可生产绑定的结论。
+
+本检查点提交前的最终 portable CTest 为 `10/10`，机器摘要 `passed=true`；
+`ProductionCoreHash=970656c1734da37f26ea9a45be4adb4befb95394cb50c6cb412c8b5e5b9fc3a0`、
+`ConformanceToolHash=a953fb637dbe8cc67f2b536a7e9ff8ecbc92f05cc15cd8a1d69231e60ce4083e`、
+`SearchToolHash=1e32297ea29f144d55247fab1309667f0fc8b0b953849d3e42353321f42aebd8`；
+日志为 `Saved/Logs/M11-Rank12-HandoffCheckpoint-Portable-20260812.log`。此前同一源码
+增量的 UE 5.8 Development Editor 完整链接和 fresh NullRHI 候选目录 `1/1` 已通过；
+本次仅追加文档和清单中的用户手感结论，未改变运行时代码。
 
 ## 8. 完整输入域认证
 
