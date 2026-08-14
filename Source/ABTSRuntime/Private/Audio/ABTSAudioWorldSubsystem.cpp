@@ -9,6 +9,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/PackageName.h"
 #include "Sound/SoundWave.h"
+#include "UI/ABTSGameUserSettings.h"
 
 namespace
 {
@@ -94,6 +95,13 @@ void UABTSAudioWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	if (MasterMix)
 	{
 		UGameplayStatics::PushSoundMixModifier(&InWorld, MasterMix);
+	}
+	if (const UABTSGameUserSettings* UserSettings = UABTSGameUserSettings::Get())
+	{
+		RuntimeMusicVolume = UserSettings->GetMasterVolume() * UserSettings->GetMusicVolume();
+		RuntimeSFXVolume = UserSettings->GetMasterVolume() * UserSettings->GetSFXVolume();
+		RuntimeUIVolume = UserSettings->GetMasterVolume() * UserSettings->GetUIVolume();
+		RuntimeAmbienceVolume = UserSettings->GetMasterVolume() * UserSettings->GetAmbienceVolume();
 	}
 	SetCategoryVolumes(RuntimeMusicVolume, RuntimeSFXVolume, RuntimeUIVolume, RuntimeAmbienceVolume, 0.0f);
 
