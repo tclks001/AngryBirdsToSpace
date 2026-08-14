@@ -8,6 +8,8 @@
 #include "ABTSCraftingStation.generated.h"
 
 class UStaticMeshComponent;
+class UStaticMesh;
+class UMaterialInterface;
 
 /** M5 station query/click contract. M5.1 replaces placement and presentation. */
 UCLASS(BlueprintType)
@@ -30,6 +32,19 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M5|Station")
 	TObjectPtr<UStaticMeshComponent> Visual;
+
+	/** Hard asset references resolved on the class default object during construction. */
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> WorkbenchMeshAsset;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> WorkbenchMaterialAsset;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> FurnaceMeshAsset;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> FurnaceMaterialAsset;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5|Station")
 	EABTSCraftingStationType StationType = EABTSCraftingStationType::Workbench;
