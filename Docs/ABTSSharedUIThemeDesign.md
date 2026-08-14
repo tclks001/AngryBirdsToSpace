@@ -38,7 +38,7 @@ Saved/ABTSVisualCaptures/UIThemeBaseline/20260814-160508/
 ## 3. 视觉语言
 
 - 基底：深海军蓝、分层半透明、深色双层描边；必须在浅色行星和黑色太空上都可读。
-- 形状：大轮廓、轻切角、低多边形倒角感。当前 Canvas 阶段使用双层矩形近似，不能为追求圆角引入临时二进制资产。
+- 形状：大轮廓、轻切角、低多边形倒角感。M5 与 M11 的现行 Canvas 组件使用真实截角多边形填充和双层轮廓；不能为追求圆角引入临时二进制资产，也不能在多边形后铺完整直角底板。
 - 主操作/选中：暖琥珀；同一画面只允许一个主要视觉焦点。
 - 信息/轨道/焦点：青色；不把整个界面做成高亮霓虹。
 - 危险：红色；只用于失败、破坏性操作和短暂错误闪烁。
@@ -194,3 +194,9 @@ abts.UI.Theme.Dump
 - fresh D3D12 离屏视觉验证精确 `1/1` 成功；调试板完整可见，普通热栏格同帧变为洋红且边框变为 8 px，截图：`Saved/ABTSVisualCaptures/ToonT0/ToonT0_Screenshots_20260814T085120Z_4040/01_GroundStart_StyleOn.png`，日志：`Saved/Logs/UITheme-LiveOverlay-20260814-165054-Offscreen.log`。
 - 冻结前 live-setter 自动化 `ABTS.UI.Theme.CandidateContract` 精确 `1/1` 成功并带 `TEST COMPLETE. EXIT CODE: 0`，日志：`Saved/Logs/UITheme-LivePIE-20260814-164755-FreshAutomation.log`（历史 Candidate v0 证据）。
 - Frozen Theme v1 使用 UE 5.8 `-ForceUnity -DisableAdaptiveUnity -NoHotReload` 完整链接成功；fresh NullRHI `ABTS.UI.Theme.FrozenContract` 精确 `1/1` 成功并带 `TEST COMPLETE. EXIT CODE: 0`，日志：`Saved/Logs/UITheme-FrozenV1-20260814-170828-FreshAutomation.log`。
+
+## 10. M5 截角组件消费记录
+
+- M5 热栏、背包、配方和数量弹窗已改为消费 Frozen Theme v1 的真实截角组件；默认 Token 和 `ThemeVersion=1` 均未改变。
+- 16 类现行物品统一绑定 `/Game/Icons/Items` 的低多边形图标，产物、材料、库存和手持格消费同一 C++ 映射；缺图继续 fail soft 到 ASCII 名称。
+- 1280×720 的 `hotbar/backpack/quantity` 三种 fresh D3D11 离屏截图已完成像素检查，详细布局、命令和冻结门见 [共享背包、合成与物品栏 HUD 视觉设计](SharedInventoryCraftingHUDVisualDesign.md)。
