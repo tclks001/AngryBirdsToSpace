@@ -2,11 +2,13 @@
 
 > 文档定位：维护整个项目的玩家可见 UI 规则与信息层级，不记录某个里程碑的 C++ 文件、类拆分或具体工程落地。当前覆盖 M4 小队头像 HUD、M5 物品栏/背包/加工界面与 M10 青翎侦察小地图。
 >
-> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [M4 鸟群与头像 HUD 落地](M4BirdPartyImplementationDesign.md) · [M5 背包/加工落地](M5InventoryCraftingImplementationDesign.md) · [M5.1 手持栏与世界物品](M51WorldItemsPlacementSlingshotDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md)
+> 导航：[主设计稿](AngryBirdsToSpaceGameDesign.md) · [共享首屏/暂停/设置](SharedFrontEndAndSettingsDesign.md) · [M4 鸟群与头像 HUD 落地](M4BirdPartyImplementationDesign.md) · [M5 背包/加工落地](M5InventoryCraftingImplementationDesign.md) · [M5.1 手持栏与世界物品](M51WorldItemsPlacementSlingshotDesign.md) · [M10 青翎侦察小地图](M10ScoutMinimapDesign.md)
 
 ## 1. UI 总原则
 
 UI 应优先回答四个问题：当前控制谁、拥有什么、现在能做什么、为什么不能做。常驻信息保持轻量，复杂操作进入模态界面；所有关键状态不能只依赖颜色表达，还需要文字、数量或轮廓提示。
+
+首屏、暂停和系统设置属于共享最高模态层，由全局 GameViewportClient 绘制并覆盖各阶段 HUD。所有地图必须消费同一份持久设置，不能在功能 GameMode 中复制音量、画质或窗口模式菜单；详细运行时、输入、离屏捕获和验收见 [共享首屏、暂停与系统设置设计](SharedFrontEndAndSettingsDesign.md)。
 
 M5 的 16 类现行物品已经绑定 `/Game/Icons/Items` 下同一套低多边形图标；库存格、手持格、配方产物与材料必须消费同一映射，不能分别维护图标路径。图标缺失或退休物品仍以稳定的 ASCII 英文名称回退，避免 UE 默认 Canvas 字体缺少中文字形而显示方框；头像与小地图标记继续使用具有固定语义的纯色圆形回退。中文显示名仍保留在数据层。未来替换字体或纹理时不改变布局、点击热区、排序和信息语义。
 
