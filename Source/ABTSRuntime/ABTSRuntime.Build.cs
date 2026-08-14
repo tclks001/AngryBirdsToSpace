@@ -13,6 +13,7 @@ public class ABTSRuntime : ModuleRules
 			"Core",
 			"ABTSRender",
 			"CoreUObject",
+			"DeveloperSettings",
 			"Engine",
 			"InputCore",
 			"PhysicsCore",

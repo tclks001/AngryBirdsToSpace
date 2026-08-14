@@ -3,6 +3,7 @@
 #include "Player/ABTSM5PlayerController.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Crafting/ABTSCraftingStation.h"
 #include "Crafting/ABTSCraftingSystem.h"
 #include "EngineUtils.h"
@@ -34,6 +35,10 @@ void AABTSM5PlayerController::OpenCraftingInterface()
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
 	bShowMouseCursor = true;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayUIEvent(EABTSUIAudioEvent::Open);
+	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5][UI] Crafting opened. Red=%d"),
 		FindCraftingSystem() && FindCraftingSystem()->IsRedBirdControlled() ? 1 : 0);
 }
@@ -48,6 +53,10 @@ void AABTSM5PlayerController::CloseCraftingInterface()
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockOnCapture);
 	SetInputMode(InputMode);
 	bShowMouseCursor = true;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayUIEvent(EABTSUIAudioEvent::Close);
+	}
 	if (AABTSM5InventoryHUD* InventoryHUD = Cast<AABTSM5InventoryHUD>(GetHUD())) InventoryHUD->ResetCraftingSelection();
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5][UI] Crafting closed."));
 }

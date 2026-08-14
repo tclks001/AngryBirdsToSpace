@@ -3,6 +3,7 @@
 #include "Crafting/ABTSCraftingSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Crafting/ABTSCraftingCatalog.h"
 #include "Crafting/ABTSCraftingStation.h"
 #include "EngineUtils.h"
@@ -77,6 +78,10 @@ bool AABTSCraftingSystem::Craft(const FName RecipeId, const int32 CraftCount)
 	const bool bFurnace = IsStationAvailable(EABTSCraftingStationType::Furnace);
 	const bool bSuccess = Catalog->Craft(
 		RecipeId, CraftCount, *Inventory, IsRedBirdControlled(), bWorkbench, bFurnace);
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayUIEvent(bSuccess ? EABTSUIAudioEvent::Confirm : EABTSUIAudioEvent::Error);
+	}
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M5][Craft] Recipe=%s Count=%d Success=%d Red=%d Workbench=%d Furnace=%d"),
 		*RecipeId.ToString(), CraftCount, bSuccess ? 1 : 0, IsRedBirdControlled() ? 1 : 0,

@@ -10,6 +10,7 @@
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
+#include "UI/ABTSUITheme.h"
 #include "World/ABTSM10ScoutMapSystem.h"
 
 void AABTSM10ScoutMapHUD::DrawHUD()
@@ -68,24 +69,25 @@ void AABTSM10ScoutMapHUD::DrawLandingPreview(AABTSM10ScoutMapSystem& System)
 	const float ScaledPadding = FramePadding * ScaleToFit;
 	const FVector2D ImageOrigin = OuterOrigin + FVector2D(ScaledPadding, ScaledPadding);
 	const FVector2D ImageSize(FrameWidth - ScaledPadding * 2.0f, FrameHeight - ScaledPadding * 2.0f);
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
 
 	Canvas->K2_DrawTexture(Canvas->DefaultTexture, OuterOrigin, OuterSize, FVector2D::ZeroVector,
-		FVector2D::UnitVector, FLinearColor(0.006f, 0.012f, 0.023f, 0.94f));
-	Canvas->K2_DrawBox(OuterOrigin, OuterSize, 2.0f, FLinearColor(0.60f, 0.82f, 1.0f, 0.96f));
+		FVector2D::UnitVector, Theme.ApplyOpacity(Theme.PanelPrimary));
+	Canvas->K2_DrawBox(OuterOrigin, OuterSize, Theme.BorderThicknessPx, Theme.ApplyOpacity(Theme.AccentSecondary));
 	// FinalColorLDR guarantees the captured image in RGB, but its alpha is zero
 	// on the default desktop tonemapper path when alpha propagation is disabled.
 	// Canvas defaults to translucent blending, which would discard that valid RGB.
 	Canvas->K2_DrawTexture(RenderTarget, ImageOrigin, ImageSize, FVector2D::ZeroVector,
 		FVector2D::UnitVector, FLinearColor::White, BLEND_Opaque);
-	Canvas->K2_DrawBox(ImageOrigin, ImageSize, 1.0f, FLinearColor(0.05f, 0.08f, 0.14f, 0.95f));
+	Canvas->K2_DrawBox(ImageOrigin, ImageSize, 1.0f, Theme.ApplyOpacity(Theme.PanelBorder));
 	if (GEngine)
 	{
 		const FString PreviewLabel =
 			System.IsSatelliteLandingPreviewActive()
 				? TEXT("SATELLITE LANDING PREVIEW")
 				: TEXT("LANDING PREVIEW");
-		DrawText(PreviewLabel, FLinearColor(0.89f, 0.95f, 1.0f),
-			OuterOrigin.X + 10.0f, OuterOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.82f, false);
+		DrawText(PreviewLabel, Theme.ApplyOpacity(Theme.TextPrimary),
+			OuterOrigin.X + 10.0f, OuterOrigin.Y + 7.0f, GEngine->GetSmallFont(), 0.82f * Theme.TextScale, false);
 	}
 }
 
@@ -99,11 +101,12 @@ void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)
 	const FVector2D Origin(Margin, Margin);
 	const FVector2D Center = Origin + FVector2D(Diameter * 0.5f);
 	const float Radius = Diameter * 0.5f;
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
 
 	Canvas->K2_DrawPolygon(Canvas->DefaultTexture, Center, FVector2D(Radius + 6.0f), 96,
-		FLinearColor(0.82f, 0.90f, 1.0f, 0.96f));
+		Theme.ApplyOpacity(Theme.AccentSecondary));
 	Canvas->K2_DrawPolygon(Canvas->DefaultTexture, Center, FVector2D(Radius + 2.0f), 96,
-		FLinearColor(0.018f, 0.022f, 0.032f, 0.98f));
+		Theme.ApplyOpacity(Theme.PortraitBacking));
 	Canvas->K2_DrawTexture(TerrainTexture, Origin, FVector2D(Diameter), FVector2D::ZeroVector,
 		FVector2D::UnitVector, FLinearColor::White);
 
@@ -151,7 +154,7 @@ void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)
 			if (Presentation == nullptr) continue;
 			const FVector2D BirdCenter = Center + MapPosition * Radius;
 			Canvas->K2_DrawPolygon(Canvas->DefaultTexture, BirdCenter, FVector2D(BirdSize * 0.58f), 36,
-				FLinearColor(0.015f, 0.015f, 0.02f, 0.96f));
+				Theme.ApplyOpacity(Theme.PortraitBacking));
 			if (Presentation->PortraitTexture)
 			{
 				Canvas->K2_DrawPolygon(Presentation->PortraitTexture, BirdCenter, FVector2D(BirdSize * 0.48f), 36,
@@ -167,8 +170,8 @@ void AABTSM10ScoutMapHUD::DrawScoutMap(AABTSM10ScoutMapSystem& System)
 
 	if (GEngine)
 	{
-		DrawText(TEXT("SCOUT MAP"), FLinearColor(0.88f, 0.94f, 1.0f), Origin.X + 10.0f,
-			Origin.Y + Diameter + 8.0f, GEngine->GetSmallFont(), 0.88f, false);
+		DrawText(TEXT("SCOUT MAP"), Theme.ApplyOpacity(Theme.TextPrimary), Origin.X + 10.0f,
+			Origin.Y + Diameter + 8.0f, GEngine->GetSmallFont(), 0.88f * Theme.TextScale, false);
 	}
 }
 
@@ -180,6 +183,7 @@ void AABTSM10ScoutMapHUD::DrawTrajectoryPreview(
 	if (Canvas == nullptr) return;
 	const FABTSM10ScoutMapSettings& Settings = System.GetSettings();
 	if (!Settings.bShowReinforcedTrajectoryPreview) return;
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
 
 	FABTSM6TrajectoryPreview Preview;
 	if (!System.CopyCurrentTrajectoryPreview(Preview)
@@ -214,7 +218,7 @@ void AABTSM10ScoutMapHUD::DrawTrajectoryPreview(
 			if (bContinuousProjection)
 			{
 				DrawDashedMapSegment(PreviousScreenPosition, ScreenPosition,
-					FLinearColor(0.96f, 0.98f, 1.0f, 0.95f), Thickness, DashLength, GapLength,
+					Theme.ApplyOpacity(Theme.TextPrimary), Thickness, DashLength, GapLength,
 					DashPatternDistance);
 			}
 			else
@@ -240,10 +244,10 @@ void AABTSM10ScoutMapHUD::DrawTrajectoryPreview(
 		FLinearColor(0.02f, 0.01f, 0.01f, 0.95f), CrossThickness + 2.0f);
 	DrawLine(LandingScreenPosition.X - DownRight.X, LandingScreenPosition.Y - DownRight.Y,
 		LandingScreenPosition.X + DownRight.X, LandingScreenPosition.Y + DownRight.Y,
-		FLinearColor(1.0f, 0.035f, 0.025f, 1.0f), CrossThickness);
+		Theme.ApplyOpacity(Theme.DangerFlash), CrossThickness);
 	DrawLine(LandingScreenPosition.X - UpRight.X, LandingScreenPosition.Y - UpRight.Y,
 		LandingScreenPosition.X + UpRight.X, LandingScreenPosition.Y + UpRight.Y,
-		FLinearColor(1.0f, 0.035f, 0.025f, 1.0f), CrossThickness);
+		Theme.ApplyOpacity(Theme.DangerFlash), CrossThickness);
 }
 
 void AABTSM10ScoutMapHUD::DrawDashedMapSegment(

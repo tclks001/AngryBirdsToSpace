@@ -4,6 +4,7 @@
 
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "UI/ABTSUITheme.h"
 #include "World/ABTSM101OrbitalOverviewTypes.h"
 #include "World/ABTSM10ScoutMapSystem.h"
 
@@ -242,19 +243,20 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 		Settings.OrbitalDiagramContentPaddingPx, 4.0f, Radius * 0.35f);
 	const float ContentScreenRadius = FMath::Max(8.0f, FrameRadius - ContentPadding - 5.0f);
 	const float PixelsPerCM = ContentScreenRadius / Snapshot.ContentRadiusCM;
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
 
 	Canvas->K2_DrawPolygon(
 		Canvas->DefaultTexture,
 		Center,
 		FVector2D(Radius + 3.0f),
 		96,
-		FLinearColor(0.68f, 0.84f, 0.98f, 0.90f));
+		Theme.ApplyOpacity(Theme.AccentSecondary));
 	Canvas->K2_DrawPolygon(
 		Canvas->DefaultTexture,
 		Center,
 		FVector2D(FrameRadius),
 		96,
-		FLinearColor(0.008f, 0.016f, 0.030f, 0.93f));
+		Theme.ApplyOpacity(Theme.PortraitBacking));
 
 	const float GridDashLength = 3.5f;
 	const float GridGapLength = 4.0f;
@@ -344,11 +346,11 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 	{
 		DrawText(
 			TEXT("ORBIT OVERVIEW"),
-			FLinearColor(0.78f, 0.89f, 1.0f, 0.82f),
+			Theme.ApplyOpacity(Theme.TextPrimary),
 			Left + 12.0f,
 			Top + 8.0f,
 			GEngine->GetSmallFont(),
-			0.72f,
+			0.72f * Theme.TextScale,
 			false);
 	}
 }
