@@ -467,6 +467,7 @@ bool AreEdgeStatesSemanticallyEqual(
 		&& A.RequiredKey == B.RequiredKey
 		&& A.DownstreamCellId == B.DownstreamCellId
 		&& A.FlowAccumulation == B.FlowAccumulation
+		&& A.WaterBarrierPlaneNormal == B.WaterBarrierPlaneNormal
 		&& A.bBlocksOnFoot == B.bBlocksOnFoot;
 }
 

@@ -109,6 +109,7 @@ bool FHydrologyGenerator::Generate(
 			const float GateDistance = 1.0f - FVector::DotProduct((Cells[CellA].UnitCenter + Cells[CellB].UnitCenter).GetSafeNormal(), GateUp);
 			FABTSM3CellEdgeState& Edge = FindOrAddEdge(FABTSM3CellEdgeKey(CellA, CellB));
 			Edge.Water = GateDistance < 0.12f + BarrierHalfWidthCells * 0.02f ? EABTSM3WaterEdgeType::ShallowRiver : EABTSM3WaterEdgeType::DeepRiver;
+			Edge.WaterBarrierPlaneNormal = BarrierNormal;
 			Edge.bBlocksOnFoot = true;
 			BarrierEdges.Add(Edge.Key);
 			MarkWaterCell(CellStates, CellA);
