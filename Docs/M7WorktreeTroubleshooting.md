@@ -264,6 +264,12 @@ Chaos 夹具证伪，静态代理和生产实现先被做深；候选搜索、do
 
 ## 12. Beam-C3 V3 Stage 1 空间覆盖补充
 
+### Stage 5 active DAG 压实补充
+
+| ID | 现象 | 根因 | 修复方向 | 证据/状态 |
+| --- | --- | --- | --- | --- |
+| M7-BC-112 | Stage 5 从冻结 Stage 4 中移除 `bSuppressedByStage4FacadeToTop` 临时柱并重建真实接触后，固定演示六栋仅 E1 通过，E2～E6 稳定报 `BeamCGroundUnreachable`；若继续信任 Stage 4 局部门或在 Stage 5 补隐藏支柱，会把不可达楼面误发布为生产积木 | Stage 4 为保持索引稳定，只把被 Facade-to-Top 替换的 Stage 3 临时外柱标为 suppressed，却仍在包含这些柱的原 Assembly 上重建接触并验证局部 DAG；这些不可见临时柱为新 `FloorCourse` 提供了假接地路径。Stage 4.5 只在 placement/hash/penetration 中过滤 suppressed member，没有对压实后的 active assembly 重跑完整 ground reachability。Stage 5 的 dense compaction 正确移除了假支撑，因此首先暴露真实悬空根；诊断显示根为无 `RequiredLower` 的 Stage 4 `FloorCourse`，其上的 `FacadeToTopSeat/Post` 只是继续传递不可达分量 | 禁止调 Seed、预算、密度、容差或在 Stage 5 添加救援柱。窄范围重开 Stage 4 Facade-to-Top：suppression 后构建 active component root ledger；每个浮空 `FloorCourse` 必须复用真实 active lower member，或发射 36 cm 单位化、可追溯至 TopSurface/芯体的垂直闭合；随后在 active compact assembly 上重跑完整 ground reachability，并更新 Stage 4/4.5 六栋几何 Hash 与必要视觉证据，再恢复 Stage 5 六栋门 | UE 5.8 ForceUnity Development Editor 全链接成功。fresh E1 为 1/1，`52 member = 52 brick = 52 node`、`96 contact = 96 edge`、Unreachable/Cycle=0；固定六栋为 1/6，E2～E6 active/suppressed/unreachable 分别 `230/4/10`、`387/12/22`、`877/38/12`、`1894/41/40`、`2316/53/40`。日志 `M7-Stage5-E1-20260815.log`、`M7-Stage5-SixBuildings-Diagnostic-20260815.log`；Checkpoint `M73BeamStage5Checkpoint_20260815_ActiveDAGCompaction.md`。Stage 4 几何尚未重开，Chaos/可见 PIE 未运行，用户地图继续排除 |
+
 | ID | 现象 | 根因 | 修复方向 | 证据/状态 |
 | --- | --- | --- | --- | --- |
 | M7-BC-064 | `TipOver.E6` 静态门为 `High=Bound=Children=7`，PIE 仍看到基座右侧空缺和高柱无全高芯体；若只看入口计数会再次形成假绿灯 | PodiumMain 规划是“最少数量覆盖全部入口投影”的 set-cover，只附加单个中心 anchor，不含联合覆盖、重叠面积、最大未覆盖岛、四向缩进或子芯体全高 lane 余量。逐层诊断还证明 7 个高层分区在 `1440 cm` 裙房顶面已经彼此独立，没有一分三；真正缺口是固定 footprint 的 west child 3 在收缩 Crown 起点受完整 rail 覆盖和 composite lane conflict 限制，于 `3240 cm` 终止，而 WFC 分支持续到 `3876 cm`。旧合同只证明入口绑定，不证明 terminal branch 持续到顶 | 先保留每个原始接地来源覆盖、未覆盖岛、main 四向缩进/两两重叠/选择理由、seed/邻接/逐 course 连通分区/split/terminal binding 诊断。下一步先建立“最终分支到最高完整 course 均有接地 child”的合同，再定义有限的 main 联合覆盖与重叠目标，同时保护 child 可用 lane。禁止调 Seed/Attempt/轨距/预算/720 cm/容差 | Development Editor 全链接成功；fresh `TipOver.E6` 1/1 Success，Static DAG Accepted、Physical NotEvaluated。基座 1680 格中 main 921、any 951、uncovered 729；main 重叠 `44064 + 22032 cm^2`；west child `3240 < 3876 cm`。日志 `BeamC3V3-TipOver-E6-RootCause-Final-20260810.log`。主芯体耦合/均匀覆盖明确登记为待解决，本轮未修改生成算法、未跑 5x6/Chaos/可见 PIE，未触碰用户地图 |

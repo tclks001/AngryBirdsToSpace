@@ -151,3 +151,14 @@ AABB/结构行分别形成几何与结构 Hash，因此不是手写六组尺寸�
 [Stage 4.5 建筑放置冻结设计](M73BeamStage45PlacementFreezeDesign.md)。本门通过后 M3 可只等待集成工作树
 消费该目录，不再等待 M7 的 Stage 5/Chaos/破坏/弱点/六栋动态并发/完整 PIE；这些未完成项的证据身份保持
 `NotEvaluated`，不得由 Stage 4.5 推断。
+
+## 8. Stage 5：生产积木与承重 DAG
+
+详细生成顺序、fail-closed 合同和第一停点验收见
+[M73BeamStage5ProductionDAGDesign.md](M73BeamStage5ProductionDAGDesign.md)。Stage 5 只消费冻结 Stage 4 的
+active member：先过滤并压缩 suppression，再重建实际 BearingContacts，运行只读 Load DAG，最后形成
+`BrickId == MemberId == LoadNodeId` 的一对一绑定。禁止回到旧 `CompleteStaticDAG`、禁止结构失败后换 Seed、
+禁止由 Beam-C 插入修复柱改变已批准外观。
+
+验证仍按 E1 单栋首停，再跑固定六栋；不恢复 5×6 或全 Seed 门。Chaos、弱点、绳索、炸药桶及活塞装配
+保持 `NotEvaluated`，待 Stage 5 静态和视觉验收后另行进入。

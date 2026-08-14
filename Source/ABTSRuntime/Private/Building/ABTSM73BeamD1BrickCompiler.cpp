@@ -3487,3 +3487,476 @@ bool FABTSM73BeamD1BrickCompiler::CompileResolvedAssembly(
 	OutError.Reset();
 	return true;
 }
+
+namespace ABTSM73BeamStage5
+{
+	constexpr double SectionCM = 36.0;
+	constexpr double GeometryToleranceCM = 0.01;
+	constexpr uint64 FnvOffsetBasis = 14695981039346656037ull;
+	constexpr uint64 FnvPrime = 1099511628211ull;
+
+	uint64 HashUtf8(const FString& Text)
+	{
+		FTCHARToUTF8 Utf8(*Text);
+		uint64 Hash = FnvOffsetBasis;
+		for (int32 Index = 0; Index < Utf8.Length(); ++Index)
+		{
+			Hash ^= static_cast<uint8>(Utf8.Get()[Index]);
+			Hash *= FnvPrime;
+		}
+		return Hash;
+	}
+
+	int64 QuantizeCM(const double Value)
+	{
+		return FMath::RoundToInt64(Value * 100.0);
+	}
+
+	FBox PlannedBounds(const ABTSM73BeamC3V3::FPlannedMember& Member)
+	{
+		FVector Minimum(
+			FMath::Min(Member.LocalStart.X, Member.LocalEnd.X),
+			FMath::Min(Member.LocalStart.Y, Member.LocalEnd.Y),
+			FMath::Min(Member.LocalStart.Z, Member.LocalEnd.Z));
+		FVector Maximum(
+			FMath::Max(Member.LocalStart.X, Member.LocalEnd.X),
+			FMath::Max(Member.LocalStart.Y, Member.LocalEnd.Y),
+			FMath::Max(Member.LocalStart.Z, Member.LocalEnd.Z));
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			if (Axis == static_cast<int32>(Member.Axis))
+			{
+				continue;
+			}
+			const double Center =
+				(Member.LocalStart[Axis] + Member.LocalEnd[Axis]) * 0.5;
+			Minimum[Axis] = Center - SectionCM * 0.5;
+			Maximum[Axis] = Center + SectionCM * 0.5;
+		}
+		return FBox(Minimum, Maximum);
+	}
+
+	uint64 HashActiveGeometry(
+		const TArray<ABTSM73BeamC3V3::FPlannedMember>& Members)
+	{
+		TArray<FString> Rows;
+		for (const ABTSM73BeamC3V3::FPlannedMember& Member : Members)
+		{
+			if (Member.bSuppressedByStage4FacadeToTop)
+			{
+				continue;
+			}
+			const FBox B = PlannedBounds(Member);
+			Rows.Add(FString::Printf(TEXT("%lld,%lld,%lld,%lld,%lld,%lld"),
+				QuantizeCM(B.Min.X), QuantizeCM(B.Min.Y), QuantizeCM(B.Min.Z),
+				QuantizeCM(B.Max.X), QuantizeCM(B.Max.Y), QuantizeCM(B.Max.Z)));
+		}
+		Rows.Sort();
+		return HashUtf8(FString::Join(Rows, TEXT("|")));
+	}
+
+	uint64 HashBearingDAG(const FABTSM73BeamAGenerationResult& Assembly)
+	{
+		FString Canonical;
+		Canonical.Reserve(Assembly.BearingContacts.Num() * 96);
+		for (const FABTSM73BeamABearingContact& Contact : Assembly.BearingContacts)
+		{
+			Canonical += FString::Printf(
+				TEXT("%d:%d:%d:%lld:%lld:%lld:%lld|"),
+				Contact.ContactId, Contact.LowerMemberId, Contact.UpperMemberId,
+				QuantizeCM(Contact.LocalPosition.X),
+				QuantizeCM(Contact.LocalPosition.Y),
+				QuantizeCM(Contact.LocalPosition.Z),
+				QuantizeCM(Contact.ContactAreaCM2));
+		}
+		return HashUtf8(Canonical);
+	}
+
+	bool BuildCompactAssembly(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const ABTSM73BeamC3V3::FGenerationResult& Stage4,
+		FABTSM73BeamAGenerationResult& OutAssembly,
+		TArray<int32>& OutStage4ToCompact,
+		int32& OutSuppressedCount,
+		FString& OutError)
+	{
+		const ABTSM73BeamC3V3::FPlan& Plan = Stage4.Plan;
+		if (!Plan.Summary.bAccepted
+			|| Plan.Summary.Stage4RoofCrownHash == 0
+			|| Stage4.Assembly.Members.Num() != Plan.Members.Num())
+		{
+			OutError = TEXT("BeamD1Stage5Stage4NotFrozen");
+			return false;
+		}
+
+		TArray<int32> OwnerByOldMember;
+		OwnerByOldMember.Init(INDEX_NONE, Stage4.Assembly.Members.Num());
+		for (int32 OwnerIndex = 0;
+			OwnerIndex < Stage4.Assembly.Assemblies.Num(); ++OwnerIndex)
+		{
+			for (const int32 OldMemberId
+				: Stage4.Assembly.Assemblies[OwnerIndex].MemberIds)
+			{
+				if (OwnerByOldMember.IsValidIndex(OldMemberId))
+				{
+					OwnerByOldMember[OldMemberId] = OwnerIndex;
+				}
+			}
+		}
+
+		OutAssembly = Stage4.Assembly;
+		OutAssembly.Joints.Reset();
+		OutAssembly.Members.Reset();
+		OutAssembly.BearingContacts.Reset();
+		for (FABTSM73BeamAAssembly& Owner : OutAssembly.Assemblies)
+		{
+			Owner.JointIds.Reset();
+			Owner.MemberIds.Reset();
+		}
+		OutStage4ToCompact.Init(INDEX_NONE, Plan.Members.Num());
+		OutSuppressedCount = 0;
+
+		TMap<FString, int32> JointByPosition;
+		const double JointScale = 1.0 / FMath::Max(
+			0.1, static_cast<double>(
+				Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+		auto AddJoint = [&OutAssembly, &JointByPosition, JointScale](
+			const FVector& Point, const EABTSM73BeamAJointRole Role)
+		{
+			const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+				FMath::RoundToInt64(Point.X * JointScale),
+				FMath::RoundToInt64(Point.Y * JointScale),
+				FMath::RoundToInt64(Point.Z * JointScale));
+			if (const int32* Existing = JointByPosition.Find(Key))
+			{
+				return *Existing;
+			}
+			FABTSM73BeamAJoint& Joint = OutAssembly.Joints.AddDefaulted_GetRef();
+			Joint.JointId = OutAssembly.Joints.Num() - 1;
+			Joint.LocalPosition = Point;
+			Joint.Role = Role;
+			JointByPosition.Add(Key, Joint.JointId);
+			return Joint.JointId;
+		};
+
+		for (int32 OldIndex = 0; OldIndex < Plan.Members.Num(); ++OldIndex)
+		{
+			const ABTSM73BeamC3V3::FPlannedMember& Planned = Plan.Members[OldIndex];
+			if (Planned.bSuppressedByStage4FacadeToTop)
+			{
+				++OutSuppressedCount;
+				continue;
+			}
+			const int32 OwnerIndex = OwnerByOldMember[OldIndex];
+			if (!OutAssembly.Assemblies.IsValidIndex(OwnerIndex))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamD1Stage5ActiveMemberOwnerMissing:Stage4=%d"), OldIndex);
+				return false;
+			}
+			FABTSM73BeamAMember& Member = OutAssembly.Members.AddDefaulted_GetRef();
+			Member.MemberId = OutAssembly.Members.Num() - 1;
+			Member.JointA = AddJoint(Planned.LocalStart,
+				Planned.bRequiresGroundSeat
+					? EABTSM73BeamAJointRole::GroundFoot
+					: EABTSM73BeamAJointRole::BeamEnd);
+			Member.JointB = AddJoint(Planned.LocalEnd,
+				Planned.Role == EABTSM73BeamAMemberRole::RoofCourse
+					? EABTSM73BeamAJointRole::RoofNode
+					: Planned.Axis == EABTSM73BeamAFrameAxis::Z
+						? EABTSM73BeamAJointRole::ColumnHead
+						: EABTSM73BeamAJointRole::CrossBearing);
+			Member.Axis = Planned.Axis;
+			Member.Role = Planned.Role;
+			Member.LengthCM = FVector::Distance(
+				Planned.LocalStart, Planned.LocalEnd);
+			OutStage4ToCompact[OldIndex] = Member.MemberId;
+			FABTSM73BeamAAssembly& Owner = OutAssembly.Assemblies[OwnerIndex];
+			Owner.MemberIds.Add(Member.MemberId);
+			Owner.JointIds.AddUnique(Member.JointA);
+			Owner.JointIds.AddUnique(Member.JointB);
+		}
+
+		OutAssembly.Summary.JointCount = OutAssembly.Joints.Num();
+		OutAssembly.Summary.MemberCount = OutAssembly.Members.Num();
+		OutAssembly.Summary.AssemblyCount = OutAssembly.Assemblies.Num();
+		OutAssembly.Summary.BayCount = OutAssembly.Bays.Num();
+		OutAssembly.Summary.XMemberCount = 0;
+		OutAssembly.Summary.YMemberCount = 0;
+		OutAssembly.Summary.ZMemberCount = 0;
+		OutAssembly.Summary.DiagonalMemberCount = 0;
+		for (const FABTSM73BeamAMember& Member : OutAssembly.Members)
+		{
+			OutAssembly.Summary.XMemberCount +=
+				Member.Axis == EABTSM73BeamAFrameAxis::X ? 1 : 0;
+			OutAssembly.Summary.YMemberCount +=
+				Member.Axis == EABTSM73BeamAFrameAxis::Y ? 1 : 0;
+			OutAssembly.Summary.ZMemberCount +=
+				Member.Axis == EABTSM73BeamAFrameAxis::Z ? 1 : 0;
+			OutAssembly.Summary.DiagonalMemberCount +=
+				Member.Axis == EABTSM73BeamAFrameAxis::Diagonal ? 1 : 0;
+		}
+		OutAssembly.Summary.BeamGraphHash = Plan.Summary.FinalGeometryHash;
+		OutAssembly.Summary.RemainingPenetrationCount = 0;
+		OutAssembly.Summary.UnsupportedMemberCount = 0;
+		OutAssembly.Summary.bAccepted = true;
+		OutAssembly.Summary.RejectReason.Reset();
+		if (!ABTSM73BeamA::RebuildBearingContacts(
+			Profile.BeamSettings.BeamB.BeamA, OutAssembly, OutError))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamD1Stage5BearingRebuild:%s"), *OutError);
+			return false;
+		}
+		OutAssembly.Summary.BearingContactCount =
+			OutAssembly.BearingContacts.Num();
+		return true;
+	}
+
+	bool CompileBricks(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73BeamAGenerationResult& Assembly,
+		FABTSM73BeamD1Summary& Summary,
+		TArray<FABTSM73BeamD1BrickBinding>& OutBricks,
+		FString& OutError)
+	{
+		OutBricks.Reset();
+		Summary.LocalBounds = FBox(EForceInit::ForceInit);
+		for (const FABTSM73BeamAMember& Member : Assembly.Members)
+		{
+			if (Member.MemberId != OutBricks.Num()
+				|| !Assembly.Joints.IsValidIndex(Member.JointA)
+				|| !Assembly.Joints.IsValidIndex(Member.JointB)
+				|| Member.Axis == EABTSM73BeamAFrameAxis::Diagonal)
+			{
+				OutError = TEXT("BeamD1Stage5InvalidCompactMember");
+				return false;
+			}
+			const FVector Dimensions = ABTSM73BeamD1::DimensionsFor(
+				Member, SectionCM);
+			if (!ABTSM73BeamD1::IsUnitizedBrickGeometry(Member.Axis, Dimensions))
+			{
+				OutError = FString::Printf(
+					TEXT("BeamD1Stage5NonUnitizedBrick:Member=%d"), Member.MemberId);
+				return false;
+			}
+			const FVector A = Assembly.Joints[Member.JointA].LocalPosition;
+			const FVector B = Assembly.Joints[Member.JointB].LocalPosition;
+			FABTSM73BeamD1BrickBinding& Brick = OutBricks.AddDefaulted_GetRef();
+			Brick.BrickId = Member.MemberId;
+			Brick.MemberId = Member.MemberId;
+			Brick.Axis = Member.Axis;
+			Brick.StructuralRole = ABTSM73BeamD1::StructuralRole(Member.Role);
+			Brick.bWeaknessCandidate = false;
+			Brick.DeviceRole = EABTSM73BeamD1DeviceRole::None;
+			Brick.BrickSpec.Material = ABTSM73BeamD1::BaseMaterial(
+				Profile.MaterialPalette, Brick.StructuralRole);
+			Brick.BrickSpec.DimensionsCM = Dimensions;
+			Brick.LocalTransform = FTransform(FQuat::Identity, (A + B) * 0.5);
+			const FVector Half = Dimensions * 0.5;
+			Brick.LocalBounds = FBox(
+				Brick.LocalTransform.GetLocation() - Half,
+				Brick.LocalTransform.GetLocation() + Half);
+			Summary.LocalBounds += Brick.LocalBounds;
+			Summary.RoofCourseBrickCount +=
+				Member.Role == EABTSM73BeamAMemberRole::RoofCourse ? 1 : 0;
+			switch (Brick.BrickSpec.Material)
+			{
+			case EABTSM7BuildingMaterial::Wood: ++Summary.WoodBrickCount; break;
+			case EABTSM7BuildingMaterial::Stone: ++Summary.StoneBrickCount; break;
+			case EABTSM7BuildingMaterial::Iron: ++Summary.IronBrickCount; break;
+			case EABTSM7BuildingMaterial::Glass: ++Summary.GlassBrickCount; break;
+			}
+		}
+		Summary.MemberCount = Assembly.Members.Num();
+		Summary.BrickCount = OutBricks.Num();
+		Summary.CompleteReferenceCount = OutBricks.Num();
+		Summary.StrictPenetrationCount = ABTSM73BeamD1::CountStrictPenetrations(
+			OutBricks, FMath::Max(0.01,
+				Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM + 0.01));
+		if (Summary.MemberCount != Summary.BrickCount
+			|| Summary.StrictPenetrationCount != 0)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamD1Stage5BrickContract:Members=%d:Bricks=%d:Penetrations=%d"),
+				Summary.MemberCount, Summary.BrickCount,
+				Summary.StrictPenetrationCount);
+			return false;
+		}
+		Summary.BrickGeometryHash = ABTSM73BeamD1::HashBricks(Summary, OutBricks);
+		return true;
+	}
+}
+
+bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
+	const FABTSM73BeamD1Settings& Settings,
+	FABTSM73BeamD1Stage5Result& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamStage5;
+	OutResult = FABTSM73BeamD1Stage5Result();
+	OutError.Reset();
+
+	FABTSM73BeamD1StagePreviewResult Stage4Preview;
+	if (!GenerateStagePreview(Settings,
+		EABTSM73BeamC3GenerationStage::FloorInfillRoof,
+		Stage4Preview, OutError))
+	{
+		OutError = FString::Printf(TEXT("BeamD1Stage5Stage4:%s"), *OutError);
+		return false;
+	}
+	const int32 SelectedSeed = ABTSM73BeamD1::CandidateSeed(
+		Settings.BuildingSeed, Stage4Preview.Summary.VisualCandidateAttempt);
+	FABTSM73BeamD0ResolvedProfile Profile;
+	if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
+		Settings.GameplayProfileId, Settings.DifficultyTier,
+		SelectedSeed, Profile, OutError))
+	{
+		OutError = FString::Printf(TEXT("BeamD1Stage5Profile:%s"), *OutError);
+		return false;
+	}
+
+	OutResult.Silhouette = MoveTemp(Stage4Preview.Silhouette);
+	OutResult.Stage4 = MoveTemp(Stage4Preview.Skeleton);
+	if (!BuildCompactAssembly(Profile, OutResult.Stage4,
+		OutResult.CompactAssembly, OutResult.Stage4ToCompactMember,
+		OutResult.SuppressedStage4MemberCount, OutError))
+	{
+		return false;
+	}
+	OutResult.ActiveGeometryHash = HashActiveGeometry(
+		OutResult.Stage4.Plan.Members);
+	OutResult.BearingDAGHash = HashBearingDAG(OutResult.CompactAssembly);
+
+	if (!FABTSM73BeamCGenerator().Generate(Profile.BeamSettings,
+		OutResult.CompactAssembly, OutResult.LoadDAG, OutError))
+	{
+		int32 Logged = 0;
+		for (const FABTSM73BeamCLoadNode& Node : OutResult.LoadDAG.Nodes)
+		{
+			if (Node.bGroundReachable || Logged >= 16)
+			{
+				continue;
+			}
+			const int32 OldIndex = OutResult.Stage4ToCompactMember.IndexOfByKey(
+				Node.MemberId);
+			const ABTSM73BeamC3V3::FPlannedMember* Planned =
+				OutResult.Stage4.Plan.Members.IsValidIndex(OldIndex)
+					? &OutResult.Stage4.Plan.Members[OldIndex] : nullptr;
+			const FBox Bounds = Planned != nullptr
+				? PlannedBounds(*Planned) : FBox(EForceInit::ForceInit);
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][Stage5Unreachable]")
+				TEXT(" Compact=%d Stage4=%d ProducedStage=%d Kind=%d Role=%d Axis=%d")
+				TEXT(" OwnerKind=%d Owner=%d Component=%d Course=%d")
+				TEXT(" Bounds=%s RequiredLower=%s"),
+				Node.MemberId, OldIndex,
+				Planned != nullptr ? static_cast<int32>(Planned->ProducedStage) : INDEX_NONE,
+				Planned != nullptr ? static_cast<int32>(Planned->SkeletonKind) : INDEX_NONE,
+				Planned != nullptr ? static_cast<int32>(Planned->Role) : INDEX_NONE,
+				Planned != nullptr ? static_cast<int32>(Planned->Axis) : INDEX_NONE,
+				Planned != nullptr ? static_cast<int32>(Planned->OwnerKind) : INDEX_NONE,
+				Planned != nullptr ? Planned->OwnerId : INDEX_NONE,
+				Planned != nullptr ? Planned->ComponentId : INDEX_NONE,
+				Planned != nullptr ? Planned->CourseIndex : INDEX_NONE,
+				*Bounds.ToString(),
+				Planned != nullptr
+					? *FString::JoinBy(Planned->RequiredLowerMemberIndices,
+						TEXT(","), [](const int32 Value)
+						{ return FString::FromInt(Value); })
+					: TEXT("None"));
+			++Logged;
+		}
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M7.3-Beam-D1][Stage5LoadDAGRejected]")
+			TEXT(" Profile=%s Tier=%d Seed=%d Reason=%s")
+			TEXT(" Active=%d Suppressed=%d Contacts=%d Nodes=%d Edges=%d")
+			TEXT(" Ground=%d Unreachable=%d Cycles=%d"),
+			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+			Settings.BuildingSeed, *OutError,
+			OutResult.CompactAssembly.Members.Num(),
+			OutResult.SuppressedStage4MemberCount,
+			OutResult.CompactAssembly.BearingContacts.Num(),
+			OutResult.LoadDAG.Nodes.Num(), OutResult.LoadDAG.Edges.Num(),
+			OutResult.LoadDAG.Summary.GroundNodeCount,
+			OutResult.LoadDAG.Summary.GroundUnreachableNodeCount,
+			OutResult.LoadDAG.Summary.CycleNodeCount);
+		OutError = FString::Printf(TEXT("BeamD1Stage5LoadDAG:%s"), *OutError);
+		return false;
+	}
+
+	FABTSM73BeamD1Summary& Summary = OutResult.Summary;
+	Summary.GenerationStage = EABTSM73BeamC3GenerationStage::StaticDAG;
+	Summary.bStageStaticDAGEvaluated = true;
+	Summary.GameplayProfileId = Profile.GameplayProfileId;
+	Summary.DifficultyTier = Profile.DifficultyTier;
+	Summary.ResolvedM7ProfileId = Profile.ResolvedM7ProfileId;
+	Summary.ResolvedSettingsHash = Profile.ResolvedSettingsHash;
+	Summary.UpstreamBeamHash = OutResult.Stage4.Plan.Summary.FinalGeometryHash;
+	Summary.VisualCandidateAttempt = Stage4Preview.Summary.VisualCandidateAttempt;
+	Summary.SemanticVolumeCount = OutResult.Silhouette.Summary.VolumeCount;
+	Summary.SemanticBoxCount = OutResult.Silhouette.Summary.BoxCount;
+	Summary.SemanticPrismCount = OutResult.Silhouette.Summary.PrismCount;
+	Summary.SemanticPyramidCount = OutResult.Silhouette.Summary.PyramidCount;
+	Summary.SupportedSpanCount = OutResult.Silhouette.Summary.SupportedSpanCount;
+	Summary.RealContactMismatchCount =
+		OutResult.LoadDAG.Summary.RealContactMismatchCount;
+	Summary.RemainingSupportViolationCount =
+		OutResult.LoadDAG.Summary.SupportResultantViolationCount
+		+ OutResult.LoadDAG.Summary.SupportSpreadViolationCount
+		+ OutResult.LoadDAG.Summary.SpanViolationCount
+		+ OutResult.LoadDAG.Summary.CantileverViolationCount;
+	Summary.SupportResultantAdvisoryCount =
+		OutResult.LoadDAG.Summary.SupportResultantAdvisoryCount;
+	Summary.bPhysicalStabilityEvaluated = false;
+	if (!CompileBricks(Profile, OutResult.CompactAssembly,
+		Summary, OutResult.Bricks, OutError))
+	{
+		return false;
+	}
+	if (Summary.MemberCount != OutResult.LoadDAG.Nodes.Num()
+		|| OutResult.CompactAssembly.BearingContacts.Num()
+			!= OutResult.LoadDAG.Edges.Num()
+		|| OutResult.LoadDAG.Summary.GroundUnreachableNodeCount != 0
+		|| OutResult.LoadDAG.Summary.CycleNodeCount != 0)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamD1Stage5IdentityOrReachability:Members=%d:Bricks=%d:Nodes=%d:Contacts=%d:Edges=%d:Unreachable=%d:Cycles=%d"),
+			Summary.MemberCount, Summary.BrickCount,
+			OutResult.LoadDAG.Nodes.Num(),
+			OutResult.CompactAssembly.BearingContacts.Num(),
+			OutResult.LoadDAG.Edges.Num(),
+			OutResult.LoadDAG.Summary.GroundUnreachableNodeCount,
+			OutResult.LoadDAG.Summary.CycleNodeCount);
+		return false;
+	}
+	OutResult.ProductionIdentityHash = HashUtf8(FString::Printf(
+		TEXT("Stage4=%lld|Geometry=%llu|Bearing=%llu|Load=%lld|Brick=%lld|Members=%d"),
+		OutResult.Stage4.Plan.Summary.FinalGeometryHash,
+		OutResult.ActiveGeometryHash, OutResult.BearingDAGHash,
+		OutResult.LoadDAG.Summary.LoadDAGHash,
+		Summary.BrickGeometryHash, Summary.MemberCount));
+	Summary.bAccepted = true;
+	Summary.RejectReason.Reset();
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7.3-Beam-D1][Stage5Accepted]")
+		TEXT(" Profile=%s Tier=%d BaseSeed=%d CandidateSeed=%d")
+		TEXT(" Stage4Members=%d Suppressed=%d Active=%d Bricks=%d")
+		TEXT(" Contacts=%d LoadEdges=%d Ground=%d Unreachable=%d")
+		TEXT(" Stage4Hash=%lld GeometryHash=%llu BearingHash=%llu LoadHash=%lld ProductionHash=%llu")
+		TEXT(" Chaos=NotEvaluated"),
+		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+		Settings.BuildingSeed, SelectedSeed,
+		OutResult.Stage4.Plan.Members.Num(),
+		OutResult.SuppressedStage4MemberCount,
+		OutResult.CompactAssembly.Members.Num(), OutResult.Bricks.Num(),
+		OutResult.CompactAssembly.BearingContacts.Num(),
+		OutResult.LoadDAG.Edges.Num(),
+		OutResult.LoadDAG.Summary.GroundNodeCount,
+		OutResult.LoadDAG.Summary.GroundUnreachableNodeCount,
+		OutResult.Stage4.Plan.Summary.FinalGeometryHash,
+		OutResult.ActiveGeometryHash, OutResult.BearingDAGHash,
+		OutResult.LoadDAG.Summary.LoadDAGHash,
+		OutResult.ProductionIdentityHash);
+	return true;
+}

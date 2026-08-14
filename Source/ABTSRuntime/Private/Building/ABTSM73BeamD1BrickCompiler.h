@@ -27,6 +27,25 @@ struct FABTSM73BeamD1StagePreviewResult
 	FABTSM73BeamCGenerationResult StaticDAG;
 };
 
+/** Stage-5 production payload built only from the frozen active Stage-4 plan. */
+struct FABTSM73BeamD1Stage5Result
+{
+	FABTSM73BeamD1Summary Summary;
+	FABTSM73DAG5BV2GenerationResult Silhouette;
+	ABTSM73BeamC3V3::FGenerationResult Stage4;
+	FABTSM73BeamAGenerationResult CompactAssembly;
+	FABTSM73BeamCGenerationResult LoadDAG;
+	TArray<FABTSM73BeamD1BrickBinding> Bricks;
+
+	/** Stage-4 planned member index -> compact Member/Brick id; suppressed rows are INDEX_NONE. */
+	TArray<int32> Stage4ToCompactMember;
+	int32 SuppressedStage4MemberCount = 0;
+	uint64 ActiveGeometryHash = 0;
+	uint64 BearingDAGHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	bool bPhysicalStabilityEvaluated = false;
+};
+
 /** Pure-data Beam-D1 profile-to-real-Brick compiler. */
 class FABTSM73BeamD1BrickCompiler
 {
@@ -41,6 +60,12 @@ public:
 		const FABTSM73BeamD1Settings& Settings,
 		EABTSM73BeamC3GenerationStage StopStage,
 		FABTSM73BeamD1StagePreviewResult& OutResult,
+		FString& OutError) const;
+
+	/** Compiles the accepted Stage-4 active plan into one brick per member and a real-contact load DAG. */
+	bool GenerateStage5(
+		const FABTSM73BeamD1Settings& Settings,
+		FABTSM73BeamD1Stage5Result& OutResult,
 		FString& OutError) const;
 
 	bool CompileResolved(
