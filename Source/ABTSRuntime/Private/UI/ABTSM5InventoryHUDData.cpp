@@ -102,6 +102,30 @@ void FABTSM5InventoryHUDData::BuildFacetedVertices(
 		FVector2D(Box.Min.X, Box.Min.Y + Cut)};
 }
 
+bool FABTSM5InventoryHUDData::FitAspectRatio(
+	const FBox2D& Bounds,
+	const FVector2D& SourceSize,
+	FBox2D& OutBox)
+{
+	OutBox = FBox2D();
+	if (!Bounds.bIsValid
+		|| !FMath::IsFinite(SourceSize.X)
+		|| !FMath::IsFinite(SourceSize.Y)
+		|| SourceSize.X <= 0.0f
+		|| SourceSize.Y <= 0.0f)
+	{
+		return false;
+	}
+
+	const FVector2D AvailableSize = Bounds.Max - Bounds.Min;
+	if (AvailableSize.X <= 0.0f || AvailableSize.Y <= 0.0f) return false;
+	const float Scale = FMath::Min(AvailableSize.X / SourceSize.X, AvailableSize.Y / SourceSize.Y);
+	const FVector2D FittedSize = SourceSize * Scale;
+	const FVector2D FittedMin = Bounds.GetCenter() - FittedSize * 0.5f;
+	OutBox = FBox2D(FittedMin, FittedMin + FittedSize);
+	return OutBox.bIsValid;
+}
+
 const TCHAR* FABTSM5InventoryHUDData::GetItemIconAssetPath(const EABTSItemId ItemId)
 {
 	switch (ItemId)

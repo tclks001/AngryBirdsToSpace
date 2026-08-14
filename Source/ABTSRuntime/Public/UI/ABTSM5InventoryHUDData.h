@@ -35,5 +35,11 @@ public:
 		float RequestedCutPx,
 		TStaticArray<FVector2D, 8>& OutVertices);
 
+	/** Centers a source rectangle inside the bounds without cropping or changing its aspect ratio. */
+	static bool FitAspectRatio(
+		const FBox2D& Bounds,
+		const FVector2D& SourceSize,
+		FBox2D& OutBox);
+
 	static const TCHAR* GetItemIconAssetPath(EABTSItemId ItemId);
 };

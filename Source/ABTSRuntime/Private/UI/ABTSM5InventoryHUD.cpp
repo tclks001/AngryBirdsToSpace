@@ -174,7 +174,19 @@ void AABTSM5InventoryHUD::DrawItemIcon(
 {
 	UTexture2D* Icon = GetItemIcon(ItemId);
 	if (Canvas == nullptr || Icon == nullptr || Icon->GetResource() == nullptr || !Box.bIsValid) return;
-	FCanvasTileItem Tile(Box.Min, Icon->GetResource(), Box.Max - Box.Min, ActiveTheme.ApplyOpacity(Tint));
+	FBox2D FittedBox;
+	if (!FABTSM5InventoryHUDData::FitAspectRatio(
+		Box,
+		FVector2D(static_cast<float>(Icon->GetSizeX()), static_cast<float>(Icon->GetSizeY())),
+		FittedBox))
+	{
+		return;
+	}
+	FCanvasTileItem Tile(
+		FittedBox.Min,
+		Icon->GetResource(),
+		FittedBox.Max - FittedBox.Min,
+		ActiveTheme.ApplyOpacity(Tint));
 	Tile.BlendMode = SE_BLEND_Translucent;
 	Canvas->DrawItem(Tile);
 }

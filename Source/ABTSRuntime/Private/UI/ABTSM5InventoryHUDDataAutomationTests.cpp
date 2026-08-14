@@ -44,6 +44,25 @@ bool FABTSM5InventoryHUDVisualLayoutTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("All live item icons are mapped"), IconPaths.Num(), ABTSGetAllItemIds().Num());
 	TestNull(TEXT("Retired item has no production icon contract"),
 		FABTSM5InventoryHUDData::GetItemIconAssetPath(EABTSItemId::SpaceSlingshotPart));
+
+	FBox2D FittedBox;
+	TestTrue(TEXT("Square icon fits a wide card"), FABTSM5InventoryHUDData::FitAspectRatio(
+		FBox2D(FVector2D(10.0f, 20.0f), FVector2D(130.0f, 100.0f)),
+		FVector2D(64.0f, 64.0f),
+		FittedBox));
+	TestTrue(TEXT("Wide-card fit remains square"), FMath::IsNearlyEqual(
+		FittedBox.GetSize().X / FittedBox.GetSize().Y, 1.0f));
+	TestTrue(TEXT("Wide-card fit is centered"), FittedBox.GetCenter().Equals(FVector2D(70.0f, 60.0f)));
+
+	TestTrue(TEXT("Wide icon fits a tall card"), FABTSM5InventoryHUDData::FitAspectRatio(
+		FBox2D(FVector2D(0.0f), FVector2D(80.0f, 120.0f)),
+		FVector2D(128.0f, 64.0f),
+		FittedBox));
+	TestTrue(TEXT("Wide icon preserves source aspect"), FMath::IsNearlyEqual(
+		FittedBox.GetSize().X / FittedBox.GetSize().Y, 2.0f));
+	TestTrue(TEXT("Tall-card fit is centered"), FittedBox.GetCenter().Equals(FVector2D(40.0f, 60.0f)));
+	TestFalse(TEXT("Invalid source dimensions fail closed"), FABTSM5InventoryHUDData::FitAspectRatio(
+		FBox2D(FVector2D(0.0f), FVector2D(80.0f)), FVector2D(0.0f, 64.0f), FittedBox));
 	return true;
 }
 
