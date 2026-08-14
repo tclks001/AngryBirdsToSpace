@@ -47,6 +47,11 @@ public:
 		const FVector& AimUnitDirection,
 		FABTSM8BridgePlacementGeometry& OutGeometry);
 
+	/** Covers the visible water from bank to bank, plus a dry-side safety margin. */
+	static float ComputeWaterBarrierHalfWidthCM(
+		float VisibleWaterHalfWidthCM,
+		float BankSafetyMarginCM);
+
 private:
 	bool InitializeRuntime();
 	void SubscribeToMaterialRecovery();
@@ -78,7 +83,8 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M8|Water Barrier", meta = (ClampMin = "0.5", ClampMax = "3.0"))
 	float BarrierLengthMultiplier = 1.35f;
 
-	UPROPERTY(EditAnywhere, Category = "ABTS|M8|Water Barrier", meta = (ClampMin = "10.0", UIMax = "200.0", Units = "cm"))
+	/** Extra dry-side coverage beyond the visible river edge. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M8|Water Barrier", meta = (ClampMin = "0.0", UIMax = "200.0", Units = "cm"))
 	float BarrierHalfThicknessCM = 35.0f;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M8|Water Barrier", meta = (ClampMin = "100.0", UIMax = "1500.0", Units = "cm"))
@@ -104,6 +110,10 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M8|Bridge", meta = (ClampMin = "0.0", UIMax = "500.0", Units = "cm"))
 	float BridgeDeckSurfaceOffsetCM = 85.0f;
+
+	/** Additional opening on each side of the bridge deck for bird capsules and party formation. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M8|Bridge", meta = (ClampMin = "0.0", UIMax = "300.0", Units = "cm"))
+	float BridgeBarrierSideClearanceCM = 80.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M8|Classes")
 	TSubclassOf<AABTSM8WaterBarrierActor> WaterBarrierClass;

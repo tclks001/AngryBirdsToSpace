@@ -21,13 +21,28 @@ public:
 	AABTSM8WaterBarrierActor();
 	void InitializeBarrier(const FABTSM3CellEdgeKey& InEdge, const FTransform& Transform, const FVector& HalfExtentCM);
 	void OpenPassage();
+	bool OpenPassage(
+		const FTransform& PassageTransform,
+		const FVector& PassageDimensionsCM,
+		float SideClearanceCM);
 	const FABTSM3CellEdgeKey& GetEdgeKey() const { return EdgeKey; }
+	const FVector& GetBaseHalfExtentCM() const { return BaseHalfExtentCM; }
+	bool IsBlockingAtLocalAlongDistance(float LocalAlongDistanceCM) const;
+	int32 GetBlockingPieceCount() const { return BlockingAlongIntervalsCM.Num(); }
 
 private:
+	void ClearCollisionPieces();
+	void RebuildCollisionPieces();
+
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M8|Water")
 	TObjectPtr<UBoxComponent> Collision;
 
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBoxComponent>> CollisionPieces;
+
 	FABTSM3CellEdgeKey EdgeKey;
+	FVector BaseHalfExtentCM = FVector(1.0f);
+	TArray<FVector2D> BlockingAlongIntervalsCM;
 };
 
 /** A simple collision bridge. Its dimensions and transform are resolved from the same CellTopo edge as its air-wall opening. */

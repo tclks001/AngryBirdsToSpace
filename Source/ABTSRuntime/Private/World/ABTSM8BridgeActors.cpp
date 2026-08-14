@@ -27,13 +27,138 @@ void AABTSM8WaterBarrierActor::InitializeBarrier(const FABTSM3CellEdgeKey& InEdg
 	EdgeKey = InEdge;
 	Collision->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	SetActorTransform(Transform, false, nullptr, ETeleportType::TeleportPhysics);
-	Collision->SetBoxExtent(HalfExtentCM.ComponentMax(FVector(1.0f)), true);
+	BaseHalfExtentCM = HalfExtentCM.ComponentMax(FVector(1.0f));
+	BlockingAlongIntervalsCM.Reset();
+	BlockingAlongIntervalsCM.Emplace(-BaseHalfExtentCM.X, BaseHalfExtentCM.X);
+	ClearCollisionPieces();
+	Collision->SetBoxExtent(BaseHalfExtentCM, true);
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
 void AABTSM8WaterBarrierActor::OpenPassage()
 {
+	BlockingAlongIntervalsCM.Reset();
+	ClearCollisionPieces();
 	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SetActorHiddenInGame(true);
+}
+
+bool AABTSM8WaterBarrierActor::OpenPassage(
+	const FTransform& PassageTransform,
+	const FVector& PassageDimensionsCM,
+	const float SideClearanceCM)
+{
+	if (BlockingAlongIntervalsCM.IsEmpty()) return false;
+
+	const FVector PassageHalfExtentCM =
+		PassageDimensionsCM.ComponentMax(FVector(1.0f)) * 0.5f;
+	const FVector BarrierCenterToPassageLocal =
+		GetActorTransform().InverseTransformPosition(PassageTransform.GetLocation());
+	const FVector BarrierAlong = GetActorTransform().GetUnitAxis(EAxis::X);
+	const FVector BarrierAcross = GetActorTransform().GetUnitAxis(EAxis::Y);
+	const FVector BarrierUp = GetActorTransform().GetUnitAxis(EAxis::Z);
+	const FVector PassageSpan = PassageTransform.GetUnitAxis(EAxis::X);
+	const FVector PassageAlong = PassageTransform.GetUnitAxis(EAxis::Y);
+	const FVector PassageUp = PassageTransform.GetUnitAxis(EAxis::Z);
+	const auto ProjectedHalfExtent = [
+		&PassageHalfExtentCM,
+		&PassageSpan,
+		&PassageAlong,
+		&PassageUp](const FVector& Axis)
+	{
+		return FMath::Abs(FVector::DotProduct(Axis, PassageSpan))
+				* PassageHalfExtentCM.X
+			+ FMath::Abs(FVector::DotProduct(Axis, PassageAlong))
+				* PassageHalfExtentCM.Y
+			+ FMath::Abs(FVector::DotProduct(Axis, PassageUp))
+				* PassageHalfExtentCM.Z;
+	};
+	const float PassageAcrossHalfExtentCM = ProjectedHalfExtent(BarrierAcross);
+	const float PassageUpHalfExtentCM = ProjectedHalfExtent(BarrierUp);
+	if (FMath::Abs(BarrierCenterToPassageLocal.Y)
+			> BaseHalfExtentCM.Y + PassageAcrossHalfExtentCM
+		|| FMath::Abs(BarrierCenterToPassageLocal.Z)
+			> BaseHalfExtentCM.Z + PassageUpHalfExtentCM)
+	{
+		return false;
+	}
+
+	const float PassageAlongHalfExtentCM =
+		ProjectedHalfExtent(BarrierAlong) + FMath::Max(0.0f, SideClearanceCM);
+	const float PassageMinCM = BarrierCenterToPassageLocal.X - PassageAlongHalfExtentCM;
+	const float PassageMaxCM = BarrierCenterToPassageLocal.X + PassageAlongHalfExtentCM;
+	TArray<FVector2D> RemainingIntervals;
+	bool bCarved = false;
+	for (const FVector2D& Interval : BlockingAlongIntervalsCM)
+	{
+		if (PassageMaxCM <= Interval.X || PassageMinCM >= Interval.Y)
+		{
+			RemainingIntervals.Add(Interval);
+			continue;
+		}
+		bCarved = true;
+		if (PassageMinCM > Interval.X + 1.0f)
+		{
+			RemainingIntervals.Emplace(Interval.X, FMath::Min(PassageMinCM, Interval.Y));
+		}
+		if (PassageMaxCM < Interval.Y - 1.0f)
+		{
+			RemainingIntervals.Emplace(FMath::Max(PassageMaxCM, Interval.X), Interval.Y);
+		}
+	}
+	if (!bCarved) return false;
+
+	BlockingAlongIntervalsCM = MoveTemp(RemainingIntervals);
+	RebuildCollisionPieces();
+	return true;
+}
+
+bool AABTSM8WaterBarrierActor::IsBlockingAtLocalAlongDistance(
+	const float LocalAlongDistanceCM) const
+{
+	for (const FVector2D& Interval : BlockingAlongIntervalsCM)
+	{
+		if (LocalAlongDistanceCM >= Interval.X
+			&& LocalAlongDistanceCM <= Interval.Y)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void AABTSM8WaterBarrierActor::ClearCollisionPieces()
+{
+	for (UBoxComponent* Piece : CollisionPieces)
+	{
+		if (IsValid(Piece)) Piece->DestroyComponent();
+	}
+	CollisionPieces.Reset();
+}
+
+void AABTSM8WaterBarrierActor::RebuildCollisionPieces()
+{
+	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ClearCollisionPieces();
+	for (const FVector2D& Interval : BlockingAlongIntervalsCM)
+	{
+		const float HalfLengthCM = (Interval.Y - Interval.X) * 0.5f;
+		if (HalfLengthCM <= 0.5f) continue;
+		UBoxComponent* Piece = NewObject<UBoxComponent>(this, NAME_None, RF_Transient);
+		if (Piece == nullptr) continue;
+		Piece->SetupAttachment(Collision);
+		Piece->SetCollisionProfileName(TEXT("BlockAll"));
+		Piece->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+		Piece->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Piece->SetGenerateOverlapEvents(false);
+		Piece->SetBoxExtent(
+			FVector(HalfLengthCM, BaseHalfExtentCM.Y, BaseHalfExtentCM.Z),
+			false);
+		Piece->SetRelativeLocation(FVector((Interval.X + Interval.Y) * 0.5f, 0.0f, 0.0f));
+		AddInstanceComponent(Piece);
+		Piece->RegisterComponent();
+		CollisionPieces.Add(Piece);
+	}
 }
 
 AABTSM8BridgeActor::AABTSM8BridgeActor()

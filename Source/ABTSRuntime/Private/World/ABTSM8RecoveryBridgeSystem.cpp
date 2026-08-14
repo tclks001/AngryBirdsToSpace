@@ -101,11 +101,13 @@ bool AABTSM8RecoveryBridgeSystem::InitializeRuntime()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M8] Ready Barriers=%d WaterEdges=%d CertifiedBridgeSites=%d BridgeAuthority=GeneratedEdgeStates PreviewAuthority=%d"),
+		TEXT("[ABTS][M8] Ready Barriers=%d WaterEdges=%d CertifiedBridgeSites=%d BridgeAuthority=GeneratedEdgeStates PreviewAuthority=%d BarrierCoverage=VisibleWaterPlusMargin BankMarginCM=%.1f BridgePassageSideClearanceCM=%.1f"),
 		WaterBarriers.Num(),
 		WaterEdgeCount,
 		BridgeSiteCount,
-		Planet->IsMonthlyPresentationPreviewActive() ? 1 : 0);
+		Planet->IsMonthlyPresentationPreviewActive() ? 1 : 0,
+		BarrierHalfThicknessCM,
+		BridgeBarrierSideClearanceCM);
 	return true;
 }
 
@@ -160,10 +162,20 @@ void AABTSM8RecoveryBridgeSystem::SpawnWaterBarriers()
 			Transform,
 			FVector(
 				Geometry.RiverSegmentLengthCM * BarrierLengthMultiplier * 0.5f,
-				BarrierHalfThicknessCM,
+				ComputeWaterBarrierHalfWidthCM(
+					Geometry.WaterHalfWidthCM,
+					BarrierHalfThicknessCM),
 				BarrierHeightCM * 0.5f));
 		WaterBarriers.Add(Edge.Key, Barrier);
 	}
+}
+
+float AABTSM8RecoveryBridgeSystem::ComputeWaterBarrierHalfWidthCM(
+	const float VisibleWaterHalfWidthCM,
+	const float BankSafetyMarginCM)
+{
+	return FMath::Max(1.0f, VisibleWaterHalfWidthCM)
+		+ FMath::Max(0.0f, BankSafetyMarginCM);
 }
 
 bool AABTSM8RecoveryBridgeSystem::ResolveSemanticBridgeGeometry(
@@ -454,20 +466,32 @@ bool AABTSM8RecoveryBridgeSystem::PlaceHeldBridgeAtAim(APlayerController& Contro
 	const float BridgeSpanCM = FMath::Max(
 		300.0f,
 		2.0f * (Geometry.WaterHalfWidthCM + BridgeBankOverlapCM));
+	const FVector BridgeDimensionsCM(
+		BridgeSpanCM,
+		BridgeDeckWidthCM,
+		BridgeDeckThicknessCM);
 	Bridge->InitializeBridge(
 		EdgeState.Key,
 		EdgeTransform,
-		FVector(BridgeSpanCM, BridgeDeckWidthCM, BridgeDeckThicknessCM));
+		BridgeDimensionsCM);
 	BuiltBridgeEdges.Add(EdgeState.Key);
-	if (TWeakObjectPtr<AABTSM8WaterBarrierActor>* Barrier = WaterBarriers.Find(EdgeState.Key))
+	int32 CarvedBarrierCount = 0;
+	for (const TPair<FABTSM3CellEdgeKey, TWeakObjectPtr<AABTSM8WaterBarrierActor>>& Pair : WaterBarriers)
 	{
-		if (Barrier->IsValid()) Barrier->Get()->OpenPassage();
+		if (Pair.Value.IsValid()
+			&& Pair.Value->OpenPassage(
+				EdgeTransform,
+				BridgeDimensionsCM,
+				BridgeBarrierSideClearanceCM))
+		{
+			++CarvedBarrierCount;
+		}
 	}
 	Inventory->RemoveItem(EABTSItemId::BridgeKit, 1);
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M8][Bridge] Built CellA=%d CellB=%d WaterType=%d Semantic=%s CertifiedSite=%d AimDistanceCM=%.1f Span=%.1fcm BarrierOpened=%d"),
+		TEXT("[ABTS][M8][Bridge] Built CellA=%d CellB=%d WaterType=%d Semantic=%s CertifiedSite=%d AimDistanceCM=%.1f Span=%.1fcm DeckWidth=%.1fcm PassageSideClearance=%.1fcm BarrierSegmentsCarved=%d BarrierOpened=%d"),
 		EdgeState.Key.CellA,
 		EdgeState.Key.CellB,
 		static_cast<int32>(EdgeState.Water),
@@ -475,7 +499,10 @@ bool AABTSM8RecoveryBridgeSystem::PlaceHeldBridgeAtAim(APlayerController& Contro
 		Geometry.bCertifiedBridgeSite ? 1 : 0,
 		Geometry.AimDistanceCM,
 		BridgeSpanCM,
-		WaterBarriers.Contains(EdgeState.Key) ? 1 : 0);
+		BridgeDeckWidthCM,
+		BridgeBarrierSideClearanceCM,
+		CarvedBarrierCount,
+		CarvedBarrierCount > 0 ? 1 : 0);
 	return true;
 }
 
