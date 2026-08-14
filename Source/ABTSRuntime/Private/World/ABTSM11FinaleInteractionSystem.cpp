@@ -210,6 +210,7 @@ bool AABTSM11FinaleInteractionSystem::Initialize(
 
 	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Ready;
+	QueueF4GuidanceSolve();
 	QueueNominalPhysicalSolve();
 	UE_LOG(
 		LogABTSRuntime,

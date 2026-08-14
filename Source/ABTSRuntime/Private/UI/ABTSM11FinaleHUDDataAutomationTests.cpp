@@ -5,6 +5,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "UI/ABTSM11FinaleHUDData.h"
+#include "World/ABTSM11CandidateExperienceCatalog.h"
+#include "World/ABTSM11FinaleLayoutCertification.h"
 #include "World/ABTSM11GravityAssistSolver.h"
 
 namespace ABTSM11FinaleHudDataTests
@@ -125,6 +127,154 @@ bool FABTSM11HudControlKnobsTest::RunTest(const FString& Parameters)
 		FMath::IsNearlyEqual(State.GetInput().YawDegrees, Fixture.Preset.NominalInput.YawDegrees)
 		&& FMath::IsNearlyEqual(State.GetInput().PitchDegrees, Fixture.Preset.NominalInput.PitchDegrees)
 		&& FMath::IsNearlyEqual(State.GetInput().Power, Fixture.Preset.NominalInput.Power));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11HudF4GuidanceTest,
+	"ABTS.M11C.HUD.Unit.F4Guidance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11HudF4GuidanceTest::RunTest(const FString& Parameters)
+{
+	FABTSM11F4GuidanceTarget DirectionFixture;
+	DirectionFixture.bValid = true;
+	DirectionFixture.Input = FABTSM11FinaleLaunchInput{-2.5, 25.0, 1.0};
+	DirectionFixture.YawToleranceDegrees = 0.1;
+	DirectionFixture.PitchToleranceDegrees = 0.1;
+	DirectionFixture.PowerTolerance = 0.001;
+	DirectionFixture.SampleCount = 1;
+	DirectionFixture.F4SampleCount = 1;
+	const FABTSM11FinaleLaunchInput Current{0.0, 20.0, 0.9};
+	TestTrue(
+		TEXT("Yaw guidance points toward a lower value"),
+		DirectionFixture.GetDirection(
+			Current,
+			EABTSM11FinaleControlAxis::Yaw)
+			== EABTSM11F4GuidanceDirection::Decrease);
+	TestTrue(
+		TEXT("Pitch guidance points toward a higher value"),
+		DirectionFixture.GetDirection(
+			Current,
+			EABTSM11FinaleControlAxis::Pitch)
+			== EABTSM11F4GuidanceDirection::Increase);
+	TestTrue(
+		TEXT("Power guidance points toward a higher value"),
+		DirectionFixture.GetDirection(
+			Current,
+			EABTSM11FinaleControlAxis::Power)
+			== EABTSM11F4GuidanceDirection::Increase);
+
+	FABTSM11F4GuidanceSearchConfig Config;
+	Config.MinimumYawStepDegrees = 0.5;
+	Config.MinimumPitchStepDegrees = 0.75;
+	Config.MinimumPowerStep = 0.01;
+	Config.MaximumSampleCount = 1024;
+	for (int32 Rank = FABTSM11CandidateExperienceCatalog::FirstCandidateRank;
+		Rank <= FABTSM11CandidateExperienceCatalog::LastCandidateRank;
+		++Rank)
+	{
+		FABTSM11FinaleLayoutPreset Preset;
+		FABTSM11CandidateExperienceIdentity Identity;
+		FString Failure;
+		const FString RankContext = FString::Printf(TEXT("Rank%d"), Rank);
+		if (!TestTrue(
+			*FString::Printf(TEXT("%s candidate builds"), *RankContext),
+			FABTSM11CandidateExperienceCatalog::BuildCandidate(
+				Rank,
+				Preset,
+				Identity,
+				&Failure)))
+		{
+			AddError(FString::Printf(
+				TEXT("%s build failure: %s"),
+				*RankContext,
+				*Failure));
+			continue;
+		}
+
+		FABTSM11F4GuidanceTarget Target;
+		Failure.Reset();
+		if (!TestTrue(
+			*FString::Printf(TEXT("%s guidance resolves"), *RankContext),
+			FABTSM11F4GuidanceBuilder::Build(
+				Preset,
+				Target,
+				&Failure,
+				Config)))
+		{
+			AddError(FString::Printf(
+				TEXT("%s guidance failure: %s"),
+				*RankContext,
+				*Failure));
+			continue;
+		}
+
+		FABTSM11TrajectoryRequest Request;
+		FABTSM11TrajectoryResult Result;
+		const bool bTargetF4 = Preset.BuildRequest(
+			Target.Input,
+			0x7u,
+			Request,
+			&Failure)
+			&& FABTSM11GravityAssistSolver::Solve(
+				Request,
+				Result,
+				&Failure)
+			&& FABTSM11PrefixClassifier::Classify(
+				Preset,
+				Result,
+				0x7u).IsF(4);
+		TestTrue(
+			*FString::Printf(
+				TEXT("%s guidance target is verified F4"),
+				*RankContext),
+			bTargetF4);
+		AddInfo(FString::Printf(
+			TEXT("%s F4Guide=(%.6f,%.6f,%.6f) Samples=%d F4=%d Truncated=%d"),
+			*RankContext,
+			Target.Input.YawDegrees,
+			Target.Input.PitchDegrees,
+			Target.Input.Power,
+			Target.SampleCount,
+			Target.F4SampleCount,
+			Target.bSearchTruncated ? 1 : 0));
+
+		if (Rank == 11 || Rank == 12)
+		{
+			FABTSM11F4GuidanceTarget RuntimeTarget;
+			Failure.Reset();
+			const bool bRuntimeTargetBuilt =
+				FABTSM11F4GuidanceBuilder::Build(
+					Preset,
+					RuntimeTarget,
+					&Failure);
+			TestTrue(
+				*FString::Printf(
+					TEXT("%s runtime-resolution guidance resolves"),
+					*RankContext),
+				bRuntimeTargetBuilt);
+			if (bRuntimeTargetBuilt)
+			{
+				AddInfo(FString::Printf(
+					TEXT("%s RuntimeF4Guide=(%.6f,%.6f,%.6f) Samples=%d F4=%d Truncated=%d"),
+					*RankContext,
+					RuntimeTarget.Input.YawDegrees,
+					RuntimeTarget.Input.PitchDegrees,
+					RuntimeTarget.Input.Power,
+					RuntimeTarget.SampleCount,
+					RuntimeTarget.F4SampleCount,
+					RuntimeTarget.bSearchTruncated ? 1 : 0));
+			}
+			else
+			{
+				AddError(FString::Printf(
+					TEXT("%s runtime guidance failure: %s"),
+					*RankContext,
+					*Failure));
+			}
+		}
+	}
 	return true;
 }
 

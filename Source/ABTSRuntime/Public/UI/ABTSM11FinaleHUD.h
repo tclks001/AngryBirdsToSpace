@@ -143,7 +143,11 @@ private:
 		const FString& Label,
 		double ValueAlpha,
 		const FString& ValueText,
-		bool bCaptured);
+		bool bCaptured,
+		EABTSM11F4GuidanceDirection GuidanceDirection,
+		const FString& GuidanceTargetText,
+		bool bHorizontalGuidance,
+		bool bStrictF4);
 	void DrawPipEdgeIndicator(
 		const FVector2D& Position,
 		const FVector2D& Size,

@@ -2,6 +2,9 @@
 
 #include "UI/ABTSM11FinaleHUDData.h"
 
+#include "World/ABTSM11FinaleLayoutCertification.h"
+#include "World/ABTSM11GravityAssistSolver.h"
+
 namespace
 {
 	bool IsFiniteFinaleHudVector(const FVector3d& Value)
@@ -80,6 +83,47 @@ namespace
 			break;
 		default:
 			break;
+		}
+	}
+
+	bool RejectF4Guidance(FString* OutFailure, const FString& Reason)
+	{
+		if (OutFailure != nullptr)
+		{
+			*OutFailure = Reason;
+		}
+		return false;
+	}
+
+	struct FF4GuidanceSample
+	{
+		FIntVector Offset = FIntVector::ZeroValue;
+		FABTSM11FinaleLaunchInput Input;
+		bool bF4 = false;
+	};
+
+	void VisitF4GuidanceNeighbors(
+		const FIntVector& Center,
+		TFunctionRef<void(const FIntVector&)> Visitor)
+	{
+		for (int32 YawOffset = -1; YawOffset <= 1; ++YawOffset)
+		{
+			for (int32 PitchOffset = -1; PitchOffset <= 1; ++PitchOffset)
+			{
+				for (int32 PowerOffset = -1; PowerOffset <= 1; ++PowerOffset)
+				{
+					if (YawOffset == 0
+						&& PitchOffset == 0
+						&& PowerOffset == 0)
+					{
+						continue;
+					}
+					Visitor(Center + FIntVector(
+						YawOffset,
+						PitchOffset,
+						PowerOffset));
+				}
+			}
 		}
 	}
 
@@ -406,6 +450,251 @@ namespace
 			&& OutView.HalfExtentCM > 0.0;
 		return OutView.bValid;
 	}
+}
+
+bool FABTSM11F4GuidanceSearchConfig::IsValid() const
+{
+	return FMath::IsFinite(MinimumYawStepDegrees)
+		&& MinimumYawStepDegrees > 0.0
+		&& FMath::IsFinite(MinimumPitchStepDegrees)
+		&& MinimumPitchStepDegrees > 0.0
+		&& FMath::IsFinite(MinimumPowerStep)
+		&& MinimumPowerStep > 0.0
+		&& MaximumSampleCount >= 27;
+}
+
+bool FABTSM11F4GuidanceTarget::IsValid(
+	const FABTSM11FinaleLaunchModel& LaunchModel) const
+{
+	return bValid
+		&& Input.IsFinite()
+		&& LaunchModel.Contains(Input)
+		&& FMath::IsFinite(YawToleranceDegrees)
+		&& YawToleranceDegrees > 0.0
+		&& FMath::IsFinite(PitchToleranceDegrees)
+		&& PitchToleranceDegrees > 0.0
+		&& FMath::IsFinite(PowerTolerance)
+		&& PowerTolerance > 0.0
+		&& SampleCount > 0
+		&& F4SampleCount > 0
+		&& F4SampleCount <= SampleCount;
+}
+
+EABTSM11F4GuidanceDirection FABTSM11F4GuidanceTarget::GetDirection(
+	const FABTSM11FinaleLaunchInput& Current,
+	const EABTSM11FinaleControlAxis Axis) const
+{
+	double Tolerance = 0.0;
+	switch (Axis)
+	{
+	case EABTSM11FinaleControlAxis::Yaw:
+		Tolerance = YawToleranceDegrees;
+		break;
+	case EABTSM11FinaleControlAxis::Pitch:
+		Tolerance = PitchToleranceDegrees;
+		break;
+	case EABTSM11FinaleControlAxis::Power:
+		Tolerance = PowerTolerance;
+		break;
+	default:
+		return EABTSM11F4GuidanceDirection::Aligned;
+	}
+	const double Delta = GetAxisValue(Input, Axis)
+		- GetAxisValue(Current, Axis);
+	if (!bValid || !FMath::IsFinite(Delta) || FMath::Abs(Delta) <= Tolerance)
+	{
+		return EABTSM11F4GuidanceDirection::Aligned;
+	}
+	return Delta > 0.0
+		? EABTSM11F4GuidanceDirection::Increase
+		: EABTSM11F4GuidanceDirection::Decrease;
+}
+
+bool FABTSM11F4GuidanceBuilder::Build(
+	const FABTSM11FinaleLayoutPreset& Preset,
+	FABTSM11F4GuidanceTarget& OutTarget,
+	FString* OutFailure,
+	const FABTSM11F4GuidanceSearchConfig& Config)
+{
+	OutTarget = FABTSM11F4GuidanceTarget();
+	if (!Config.IsValid())
+	{
+		return RejectF4Guidance(OutFailure, TEXT("InvalidSearchConfig"));
+	}
+	FString PresetFailure;
+	if (!Preset.IsValid(&PresetFailure))
+	{
+		return RejectF4Guidance(
+			OutFailure,
+			FString::Printf(TEXT("InvalidPreset:%s"), *PresetFailure));
+	}
+	const double YawStep = FMath::Max(
+		Preset.ScanContract.FinalYawPrecisionDegrees,
+		Config.MinimumYawStepDegrees);
+	const double PitchStep = FMath::Max(
+		Preset.ScanContract.FinalPitchPrecisionDegrees,
+		Config.MinimumPitchStepDegrees);
+	const double PowerStep = FMath::Max(
+		Preset.ScanContract.FinalPowerPrecision,
+		Config.MinimumPowerStep);
+	if (!FMath::IsFinite(YawStep) || YawStep <= 0.0
+		|| !FMath::IsFinite(PitchStep) || PitchStep <= 0.0
+		|| !FMath::IsFinite(PowerStep) || PowerStep <= 0.0)
+	{
+		return RejectF4Guidance(OutFailure, TEXT("InvalidResolvedStep"));
+	}
+
+	TArray<FIntVector> Open;
+	TSet<FIntVector> Enqueued;
+	TMap<FIntVector, int32> SampleByOffset;
+	TArray<FF4GuidanceSample> Samples;
+	TArray<int32> F4Indices;
+	Open.Reserve(Config.MaximumSampleCount);
+	Samples.Reserve(Config.MaximumSampleCount);
+	Enqueued.Reserve(Config.MaximumSampleCount);
+	SampleByOffset.Reserve(Config.MaximumSampleCount);
+	Open.Add(FIntVector::ZeroValue);
+	Enqueued.Add(FIntVector::ZeroValue);
+
+	int32 OpenIndex = 0;
+	bool bF4SeedFound = false;
+	while (OpenIndex < Open.Num()
+		&& Samples.Num() < Config.MaximumSampleCount)
+	{
+		const FIntVector Offset = Open[OpenIndex++];
+		FABTSM11FinaleLaunchInput Input = Preset.NominalInput;
+		Input.YawDegrees += static_cast<double>(Offset.X) * YawStep;
+		Input.PitchDegrees += static_cast<double>(Offset.Y) * PitchStep;
+		Input.Power += static_cast<double>(Offset.Z) * PowerStep;
+		if (!Preset.LaunchModel.Contains(Input))
+		{
+			continue;
+		}
+
+		FF4GuidanceSample Sample;
+		Sample.Offset = Offset;
+		Sample.Input = Input;
+		FABTSM11TrajectoryRequest Request;
+		FABTSM11TrajectoryResult Result;
+		FString SampleFailure;
+		const bool bSolved = Preset.BuildRequest(
+			Input,
+			0x7u,
+			Request,
+			&SampleFailure)
+			&& FABTSM11GravityAssistSolver::Solve(
+				Request,
+				Result,
+				&SampleFailure);
+		Sample.bF4 = bSolved
+			&& FABTSM11PrefixClassifier::Classify(
+				Preset,
+				Result,
+				0x7u).IsF(4);
+		const int32 SampleIndex = Samples.Add(MoveTemp(Sample));
+		SampleByOffset.Add(Offset, SampleIndex);
+		if (!Samples[SampleIndex].bF4)
+		{
+			if (!bF4SeedFound)
+			{
+				VisitF4GuidanceNeighbors(
+					Offset,
+					[&Open, &Enqueued](const FIntVector& Neighbor)
+					{
+						if (!Enqueued.Contains(Neighbor))
+						{
+							Enqueued.Add(Neighbor);
+							Open.Add(Neighbor);
+						}
+					});
+			}
+			continue;
+		}
+
+		if (!bF4SeedFound)
+		{
+			// Discard the remaining discovery shell. From this point onward only
+			// the verified F4 component is allowed to grow the frontier.
+			bF4SeedFound = true;
+			Open.Reset();
+			Enqueued.Reset();
+			OpenIndex = 0;
+		}
+		F4Indices.Add(SampleIndex);
+		VisitF4GuidanceNeighbors(
+			Offset,
+			[&Open, &Enqueued, &SampleByOffset](
+				const FIntVector& Neighbor)
+			{
+				if (!SampleByOffset.Contains(Neighbor)
+					&& !Enqueued.Contains(Neighbor))
+				{
+					Enqueued.Add(Neighbor);
+					Open.Add(Neighbor);
+				}
+			});
+	}
+
+	if (F4Indices.IsEmpty())
+	{
+		return RejectF4Guidance(OutFailure, TEXT("NoF4Samples"));
+	}
+
+	FVector3d OffsetCentroid = FVector3d::ZeroVector;
+	for (const int32 Index : F4Indices)
+	{
+		const FIntVector& Offset = Samples[Index].Offset;
+		OffsetCentroid += FVector3d(Offset.X, Offset.Y, Offset.Z);
+	}
+	OffsetCentroid /= static_cast<double>(F4Indices.Num());
+
+	int32 BestIndex = F4Indices[0];
+	int32 BestF4NeighborCount = -1;
+	double BestCentroidDistanceSquared = TNumericLimits<double>::Max();
+	for (const int32 Index : F4Indices)
+	{
+		const FIntVector& Offset = Samples[Index].Offset;
+		int32 F4NeighborCount = 0;
+		VisitF4GuidanceNeighbors(
+			Offset,
+			[&SampleByOffset, &Samples, &F4NeighborCount](
+				const FIntVector& Neighbor)
+			{
+				const int32* NeighborIndex = SampleByOffset.Find(Neighbor);
+				if (NeighborIndex != nullptr
+					&& Samples[*NeighborIndex].bF4)
+				{
+					++F4NeighborCount;
+				}
+			});
+		const FVector3d OffsetVector(Offset.X, Offset.Y, Offset.Z);
+		const double CentroidDistanceSquared =
+			(OffsetVector - OffsetCentroid).SquaredLength();
+		if (F4NeighborCount > BestF4NeighborCount
+			|| (F4NeighborCount == BestF4NeighborCount
+				&& CentroidDistanceSquared
+					< BestCentroidDistanceSquared))
+		{
+			BestIndex = Index;
+			BestF4NeighborCount = F4NeighborCount;
+			BestCentroidDistanceSquared = CentroidDistanceSquared;
+		}
+	}
+
+	OutTarget.Input = Samples[BestIndex].Input;
+	OutTarget.YawToleranceDegrees = YawStep * 0.5;
+	OutTarget.PitchToleranceDegrees = PitchStep * 0.5;
+	OutTarget.PowerTolerance = PowerStep * 0.5;
+	OutTarget.SampleCount = Samples.Num();
+	OutTarget.F4SampleCount = F4Indices.Num();
+	OutTarget.bSearchTruncated = OpenIndex < Open.Num();
+	OutTarget.bValid = true;
+	if (!OutTarget.IsValid(Preset.LaunchModel))
+	{
+		OutTarget = FABTSM11F4GuidanceTarget();
+		return RejectF4Guidance(OutFailure, TEXT("ResolvedTargetInvalid"));
+	}
+	return true;
 }
 
 bool FABTSM11FinaleControlPanelConfig::IsValid() const

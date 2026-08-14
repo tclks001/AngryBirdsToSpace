@@ -13,6 +13,57 @@ enum class EABTSM11FinaleControlAxis : uint8
 	Power
 };
 
+enum class EABTSM11F4GuidanceDirection : int8
+{
+	Decrease = -1,
+	Aligned = 0,
+	Increase = 1
+};
+
+/** Bounded deterministic search used to select a safe interior F4 aim. */
+struct ABTSRUNTIME_API FABTSM11F4GuidanceSearchConfig
+{
+	double MinimumYawStepDegrees = 0.5;
+	double MinimumPitchStepDegrees = 0.75;
+	double MinimumPowerStep = 0.01;
+	int32 MaximumSampleCount = 4096;
+
+	bool IsValid() const;
+};
+
+/**
+ * One verified F4 sample chosen from the centre of the nearest component
+ * discovered outward from nominal. The target itself is always reclassified
+ * as F4 before publish.
+ */
+struct ABTSRUNTIME_API FABTSM11F4GuidanceTarget
+{
+	FABTSM11FinaleLaunchInput Input;
+	double YawToleranceDegrees = 0.0;
+	double PitchToleranceDegrees = 0.0;
+	double PowerTolerance = 0.0;
+	int32 SampleCount = 0;
+	int32 F4SampleCount = 0;
+	bool bSearchTruncated = false;
+	bool bValid = false;
+
+	bool IsValid(const FABTSM11FinaleLaunchModel& LaunchModel) const;
+	EABTSM11F4GuidanceDirection GetDirection(
+		const FABTSM11FinaleLaunchInput& Current,
+		EABTSM11FinaleControlAxis Axis) const;
+};
+
+/** Pure-data F4 guidance search; safe to execute on a worker thread. */
+class ABTSRUNTIME_API FABTSM11F4GuidanceBuilder final
+{
+public:
+	static bool Build(
+		const FABTSM11FinaleLayoutPreset& Preset,
+		FABTSM11F4GuidanceTarget& OutTarget,
+		FString* OutFailure = nullptr,
+		const FABTSM11F4GuidanceSearchConfig& Config = {});
+};
+
 enum class EABTSM11ControlSpeedGear : uint8
 {
 	Coarse = 0,

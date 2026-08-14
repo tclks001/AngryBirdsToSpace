@@ -1080,7 +1080,11 @@ void AABTSM11FinaleHUD::DrawKnob(
 	const FString& Label,
 	const double ValueAlpha,
 	const FString& ValueText,
-	const bool bCaptured)
+	const bool bCaptured,
+	const EABTSM11F4GuidanceDirection GuidanceDirection,
+	const FString& GuidanceTargetText,
+	const bool bHorizontalGuidance,
+	const bool bStrictF4)
 {
 	FCanvasNGonItem Fill(
 		Center,
@@ -1129,6 +1133,68 @@ void AABTSM11FinaleHUD::DrawKnob(
 		GEngine->GetSmallFont(),
 		0.62f,
 		false);
+	if (!GuidanceTargetText.IsEmpty())
+	{
+		DrawText(
+			GuidanceTargetText,
+			bStrictF4
+				? FLinearColor(0.34f, 1.0f, 0.55f)
+				: FLinearColor(0.45f, 0.92f, 1.0f),
+			Center.X - Radius * 0.72f,
+			Center.Y + Radius + 3.0f,
+			GEngine->GetSmallFont(),
+			0.54f,
+			false);
+	}
+	if (bStrictF4)
+	{
+		DrawCircleOutline(
+			Center,
+			Radius + 5.0f,
+			FLinearColor(0.28f, 1.0f, 0.48f, 0.95f),
+			2.4f,
+			40);
+		return;
+	}
+	if (GuidanceDirection == EABTSM11F4GuidanceDirection::Aligned)
+	{
+		return;
+	}
+
+	const float Sign = GuidanceDirection
+		== EABTSM11F4GuidanceDirection::Increase
+		? 1.0f
+		: -1.0f;
+	// Positive drag is right for Yaw and up for Pitch/Power.
+	const FVector2D Direction = bHorizontalGuidance
+		? FVector2D(Sign, 0.0f)
+		: FVector2D(0.0f, -Sign);
+	const FVector2D Perpendicular(-Direction.Y, Direction.X);
+	const FVector2D ShaftStart = Center + Direction * (Radius + 2.0f);
+	const FVector2D Tip = Center + Direction * (Radius + 19.0f);
+	const FVector2D HeadBase = Tip - Direction * 8.0f;
+	const FLinearColor GuidanceColor(0.32f, 1.0f, 0.58f, 1.0f);
+	DrawLine(
+		ShaftStart.X,
+		ShaftStart.Y,
+		Tip.X,
+		Tip.Y,
+		GuidanceColor,
+		3.4f);
+	DrawLine(
+		Tip.X,
+		Tip.Y,
+		HeadBase.X + Perpendicular.X * 5.5f,
+		HeadBase.Y + Perpendicular.Y * 5.5f,
+		GuidanceColor,
+		3.0f);
+	DrawLine(
+		Tip.X,
+		Tip.Y,
+		HeadBase.X - Perpendicular.X * 5.5f,
+		HeadBase.Y - Perpendicular.Y * 5.5f,
+		GuidanceColor,
+		3.0f);
 }
 
 void AABTSM11FinaleHUD::DrawPipEdgeIndicator(
@@ -1199,6 +1265,10 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 	const FABTSM11FinaleLaunchModel& Model =
 		System.GetFinaleSystem()->GetLayoutPreset().LaunchModel;
 	const FABTSM11FinaleLaunchInput& Input = System.GetCurrentInput();
+	const FABTSM11F4GuidanceTarget& Guidance =
+		System.GetF4GuidanceTarget();
+	const bool bGuidanceValid = Guidance.IsValid(Model);
+	const bool bStrictF4 = System.IsCurrentInputStrictF4();
 	const auto Alpha = [](const double Value, const double Minimum, const double Maximum)
 	{
 		return Maximum > Minimum
@@ -1211,21 +1281,67 @@ void AABTSM11FinaleHUD::DrawFinaleControlConsole(
 		TEXT("YAW"),
 		Alpha(Input.YawDegrees, Model.MinimumYawDegrees, Model.MaximumYawDegrees),
 		FString::Printf(TEXT("%+.3f deg"), Input.YawDegrees),
-		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustYaw);
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustYaw,
+		bGuidanceValid
+			? Guidance.GetDirection(Input, EABTSM11FinaleControlAxis::Yaw)
+			: EABTSM11F4GuidanceDirection::Aligned,
+		bGuidanceValid
+			? FString::Printf(
+				TEXT("TGT %+.3f"), Guidance.Input.YawDegrees)
+			: FString(),
+		true,
+		bStrictF4);
 	DrawKnob(
 		HudKnobCenters[1],
 		HudKnobRadius,
 		TEXT("PITCH"),
 		Alpha(Input.PitchDegrees, Model.MinimumPitchDegrees, Model.MaximumPitchDegrees),
 		FString::Printf(TEXT("%+.3f deg"), Input.PitchDegrees),
-		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustPitch);
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustPitch,
+		bGuidanceValid
+			? Guidance.GetDirection(Input, EABTSM11FinaleControlAxis::Pitch)
+			: EABTSM11F4GuidanceDirection::Aligned,
+		bGuidanceValid
+			? FString::Printf(
+				TEXT("TGT %+.3f"), Guidance.Input.PitchDegrees)
+			: FString(),
+		false,
+		bStrictF4);
 	DrawKnob(
 		HudKnobCenters[2],
 		HudKnobRadius,
 		TEXT("POWER"),
 		Alpha(Input.Power, Model.MinimumPower, Model.MaximumPower),
 		FString::Printf(TEXT("%.4f"), Input.Power),
-		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustPower);
+		HudCapture.GetCapture() == EABTSM11FinaleHudCapture::AdjustPower,
+		bGuidanceValid
+			? Guidance.GetDirection(Input, EABTSM11FinaleControlAxis::Power)
+			: EABTSM11F4GuidanceDirection::Aligned,
+		bGuidanceValid
+			? FString::Printf(TEXT("TGT %.4f"), Guidance.Input.Power)
+			: FString(),
+		false,
+		bStrictF4);
+
+	const FString GuidanceStatus = bStrictF4
+		? TEXT("F4 LOCKED - READY TO LAUNCH")
+		: bGuidanceValid
+			? TEXT("FOLLOW GREEN ARROWS TO THE F4 CENTRE")
+			: System.IsF4GuidanceInFlight()
+				? TEXT("CALCULATING F4 GUIDANCE...")
+				: TEXT("F4 GUIDANCE UNAVAILABLE");
+	DrawText(
+		GuidanceStatus,
+		bStrictF4
+			? FLinearColor(0.32f, 1.0f, 0.52f)
+			: bGuidanceValid || System.IsF4GuidanceInFlight()
+				? FLinearColor(0.50f, 0.92f, 1.0f)
+				: FLinearColor(1.0f, 0.34f, 0.24f),
+		HudKnobCenters[1].X - 138.0f,
+		HudKnobCenters[1].Y - HudKnobRadius - 32.0f,
+		GEngine->GetSmallFont(),
+		0.66f,
+		false);
 
 	const FLinearColor Accent(0.42f, 0.86f, 1.0f);
 	DrawConsoleButton(HudGearCoarse, TEXT("1x"),

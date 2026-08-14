@@ -46,6 +46,14 @@ struct FABTSM11NominalSolvePayload
 	FString Failure;
 };
 
+struct FABTSM11F4GuidanceSolvePayload
+{
+	FABTSM11F4GuidanceTarget Target;
+	double SolveDurationMilliseconds = 0.0;
+	bool bSolved = false;
+	FString Failure;
+};
+
 void AABTSM11FinaleInteractionSystem::QueuePreviewSolveIfNeeded()
 {
 	if (!ABTSM11CanStartLatestOnlyPreview(
@@ -178,6 +186,35 @@ void AABTSM11FinaleInteractionSystem::QueueNominalPhysicalSolve()
 		});
 }
 
+void AABTSM11FinaleInteractionSystem::QueueF4GuidanceSolve()
+{
+	if (bF4GuidanceInFlight
+		|| F4GuidanceTarget.bValid
+		|| !IsValid(FinaleSystem))
+	{
+		return;
+	}
+	const FABTSM11FinaleLayoutPreset Preset =
+		FinaleSystem->GetLayoutPreset();
+	F4GuidanceFailure.Reset();
+	bF4GuidanceInFlight = true;
+	F4GuidanceFuture = Async(
+		EAsyncExecution::ThreadPool,
+		[Preset]()
+		{
+			const double StartSeconds = FPlatformTime::Seconds();
+			TSharedPtr<FABTSM11F4GuidanceSolvePayload> Payload =
+				MakeShared<FABTSM11F4GuidanceSolvePayload>();
+			Payload->bSolved = FABTSM11F4GuidanceBuilder::Build(
+				Preset,
+				Payload->Target,
+				&Payload->Failure);
+			Payload->SolveDurationMilliseconds =
+				(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+			return Payload;
+		});
+}
+
 void AABTSM11FinaleInteractionSystem::DrainCompletedSolves()
 {
 	check(IsInGameThread());
@@ -190,12 +227,55 @@ void AABTSM11FinaleInteractionSystem::DrainCompletedSolves()
 		HandleNominalSolveCompleted(
 			NominalSolveFuture.Consume());
 	}
+	if (F4GuidanceFuture.IsValid()
+		&& F4GuidanceFuture.IsReady())
+	{
+		HandleF4GuidanceSolveCompleted(
+			F4GuidanceFuture.Consume());
+	}
 	if (PreviewSolveFuture.IsValid()
 		&& PreviewSolveFuture.IsReady())
 	{
 		HandlePreviewSolveCompleted(
 			PreviewSolveFuture.Consume());
 	}
+}
+
+void AABTSM11FinaleInteractionSystem::HandleF4GuidanceSolveCompleted(
+	TSharedPtr<FABTSM11F4GuidanceSolvePayload> Payload)
+{
+	check(IsInGameThread());
+	bF4GuidanceInFlight = false;
+	if (!Payload.IsValid()
+		|| !Payload->bSolved
+		|| !IsValid(FinaleSystem)
+		|| !Payload->Target.IsValid(
+			FinaleSystem->GetLayoutPreset().LaunchModel))
+	{
+		F4GuidanceTarget = FABTSM11F4GuidanceTarget();
+		F4GuidanceFailure = Payload.IsValid()
+			? Payload->Failure
+			: TEXT("MissingF4GuidancePayload");
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C][F4Guide] Unavailable Failure=%s"),
+			*F4GuidanceFailure);
+		return;
+	}
+	F4GuidanceTarget = Payload->Target;
+	F4GuidanceFailure.Reset();
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][F4Guide] Ready Yaw=%.6f Pitch=%.6f Power=%.6f Samples=%d F4=%d Truncated=%d DurationMS=%.3f"),
+		F4GuidanceTarget.Input.YawDegrees,
+		F4GuidanceTarget.Input.PitchDegrees,
+		F4GuidanceTarget.Input.Power,
+		F4GuidanceTarget.SampleCount,
+		F4GuidanceTarget.F4SampleCount,
+		F4GuidanceTarget.bSearchTruncated ? 1 : 0,
+		Payload->SolveDurationMilliseconds);
 }
 
 void AABTSM11FinaleInteractionSystem::HandlePreviewSolveCompleted(
