@@ -36,9 +36,18 @@ private:
 		float GapLength,
 		float& InOutPatternDistance);
 	void DrawEnvironmentMarker(const FVector2D& Center, UTexture2D* Texture, float SizePx, const FLinearColor& FallbackColor) const;
+	void DrawFlightUIReferencePreview();
+	void UpdateOffscreenFlightUICapture(AABTSM10ScoutMapSystem* System);
 	AABTSM10ScoutMapSystem* FindScoutMapSystem();
 	AABTSBirdParty* FindScoutParty();
 
 	TWeakObjectPtr<AABTSM10ScoutMapSystem> ScoutMapSystem;
 	TWeakObjectPtr<AABTSBirdParty> ScoutParty;
+	bool bFlightCaptureParsed = false;
+	bool bFlightCaptureInitialized = false;
+	bool bFlightCaptureRequested = false;
+	bool bFlightCaptureFinished = false;
+	int32 FlightCaptureFrame = 0;
+	FString FlightCaptureMode;
+	FString FlightCaptureOutputPath;
 };

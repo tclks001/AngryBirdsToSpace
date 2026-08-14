@@ -4,6 +4,7 @@
 
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "UI/ABTSCanvasUI.h"
 #include "UI/ABTSUITheme.h"
 #include "World/ABTSM101OrbitalOverviewTypes.h"
 #include "World/ABTSM10ScoutMapSystem.h"
@@ -132,14 +133,14 @@ namespace
 		const FABTSM101OrbitalOverviewSnapshot& Snapshot,
 		const FVector2D& ScreenCenter,
 		const float PixelsPerCM,
-		const float ClipRadius)
+		const float ClipRadius,
+		const FABTSUIThemeSnapshot& Theme)
 	{
 		const FVector2D BodyCenter = ToScreen(Body.Center, Snapshot, ScreenCenter, PixelsPerCM);
 		const float BodyRadius = Body.RadiusCM * PixelsPerCM;
 		if (FVector2D::Distance(BodyCenter, ScreenCenter) - BodyRadius > ClipRadius) return;
-		const FLinearColor Color = Body.bPrimary
-			? FLinearColor(0.58f, 0.76f, 0.92f, 0.82f)
-			: FLinearColor(0.72f, 0.62f, 0.92f, 0.88f);
+		const FLinearColor Color = Theme.ApplyOpacity(
+			Body.bPrimary ? Theme.TextMuted : Theme.AccentSecondary);
 		const float Thickness = Body.bPrimary ? 1.35f : 1.6f;
 		constexpr int32 CircleSegments = 96;
 		FVector2D Previous = BodyCenter + FVector2D(BodyRadius, 0.0f);
@@ -160,12 +161,13 @@ namespace
 		const FVector2D& Position,
 		const FVector2D& ClipCenter,
 		const float ClipRadius,
-		const float HalfSize)
+		const float HalfSize,
+		const FABTSUIThemeSnapshot& Theme)
 	{
 		if (FVector2D::DistSquared(Position, ClipCenter)
 			> FMath::Square(FMath::Max(0.0f, ClipRadius - HalfSize))) return;
-		const FLinearColor Underlay(0.02f, 0.01f, 0.01f, 0.96f);
-		const FLinearColor Red(1.0f, 0.045f, 0.025f, 1.0f);
+		const FLinearColor Underlay = Theme.ApplyOpacity(Theme.SlotBorder);
+		const FLinearColor Focus = Theme.ApplyOpacity(Theme.AccentPrimary);
 		Canvas.K2_DrawLine(
 			Position - FVector2D(HalfSize, HalfSize),
 			Position + FVector2D(HalfSize, HalfSize),
@@ -180,23 +182,24 @@ namespace
 			Position - FVector2D(HalfSize, HalfSize),
 			Position + FVector2D(HalfSize, HalfSize),
 			2.0f,
-			Red);
+			Focus);
 		Canvas.K2_DrawLine(
 			Position + FVector2D(-HalfSize, HalfSize),
 			Position + FVector2D(HalfSize, -HalfSize),
 			2.0f,
-			Red);
+			Focus);
 	}
 
 	void DrawLaunchMarker(
 		UCanvas& Canvas,
 		const FVector2D& Position,
 		const FVector2D& ClipCenter,
-		const float ClipRadius)
+		const float ClipRadius,
+		const FABTSUIThemeSnapshot& Theme)
 	{
 		if (FVector2D::DistSquared(Position, ClipCenter)
 			> FMath::Square(FMath::Max(0.0f, ClipRadius - 8.0f))) return;
-		const FLinearColor Color(1.0f, 0.71f, 0.20f, 1.0f);
+		const FLinearColor Color = Theme.ApplyOpacity(Theme.AccentPrimary);
 		Canvas.K2_DrawPolygon(
 			Canvas.DefaultTexture,
 			Position,
@@ -244,6 +247,14 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 	const float ContentScreenRadius = FMath::Max(8.0f, FrameRadius - ContentPadding - 5.0f);
 	const float PixelsPerCM = ContentScreenRadius / Snapshot.ContentRadiusCM;
 	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
+	const FBox2D PanelBox(
+		FVector2D(Left - 8.0f, Top - 8.0f),
+		FVector2D(Left + Diameter + 8.0f, Top + Diameter + 34.0f));
+	FABTSCanvasUI::DrawFacetedBox(*Canvas, Theme, PanelBox, Theme.PanelPrimary,
+		Theme.PanelBorder, 13.0f, 2.0f);
+	DrawLine(PanelBox.Min.X + 13.0f, PanelBox.Min.Y + 3.0f,
+		PanelBox.Min.X + 69.0f, PanelBox.Min.Y + 3.0f,
+		Theme.ApplyOpacity(Theme.AccentSecondary), 3.0f);
 
 	Canvas->K2_DrawPolygon(
 		Canvas->DefaultTexture,
@@ -273,7 +284,7 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 			0.65f,
 			GridDashLength,
 			GridGapLength,
-			FLinearColor(0.36f, 0.53f, 0.70f, 0.22f),
+			Theme.ApplyOpacity(FLinearColor(Theme.PanelBorder.R, Theme.PanelBorder.G, Theme.PanelBorder.B, 0.34f)),
 			GridPatternDistance);
 	}
 	for (const FABTSM101OrbitalLineSegment& Segment : Snapshot.PrimaryGridSegments)
@@ -286,11 +297,11 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 			Center,
 			FrameRadius,
 			0.85f,
-			FLinearColor(0.53f, 0.72f, 0.88f, 0.52f));
+			Theme.ApplyOpacity(FLinearColor(Theme.TextMuted.R, Theme.TextMuted.G, Theme.TextMuted.B, 0.48f)));
 	}
 	for (const FABTSM101OrbitalBody& Body : Snapshot.Bodies)
 	{
-		DrawBodyOutline(*Canvas, Body, Snapshot, Center, PixelsPerCM, FrameRadius);
+		DrawBodyOutline(*Canvas, Body, Snapshot, Center, PixelsPerCM, FrameRadius, Theme);
 	}
 
 	const float TrajectoryThickness = FMath::Clamp(
@@ -303,6 +314,18 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 	for (const FABTSM101OrbitalLineSegment& Segment : Snapshot.TrajectorySegments)
 	{
 		if (!Segment.bDashed) continue;
+		float UnderlayPatternDistance = TrajectoryPatternDistance;
+		DrawDashedClipped(
+			*Canvas,
+			ToScreen(Segment.Start, Snapshot, Center, PixelsPerCM),
+			ToScreen(Segment.End, Snapshot, Center, PixelsPerCM),
+			Center,
+			FrameRadius,
+			TrajectoryThickness + 2.0f,
+			DashLength,
+			GapLength,
+			Theme.ApplyOpacity(Theme.SlotBorder),
+			UnderlayPatternDistance);
 		DrawDashedClipped(
 			*Canvas,
 			ToScreen(Segment.Start, Snapshot, Center, PixelsPerCM),
@@ -312,7 +335,8 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 			TrajectoryThickness,
 			DashLength,
 			GapLength,
-			FLinearColor(0.69f, 0.88f, 1.0f, 0.56f),
+			Theme.ApplyOpacity(FLinearColor(
+				Theme.AccentSecondary.R, Theme.AccentSecondary.G, Theme.AccentSecondary.B, 0.58f)),
 			TrajectoryPatternDistance);
 	}
 	for (const FABTSM101OrbitalLineSegment& Segment : Snapshot.TrajectorySegments)
@@ -324,15 +348,24 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 			ToScreen(Segment.End, Snapshot, Center, PixelsPerCM),
 			Center,
 			FrameRadius,
+			TrajectoryThickness + 2.0f,
+			Theme.ApplyOpacity(Theme.SlotBorder));
+		DrawSolidClipped(
+			*Canvas,
+			ToScreen(Segment.Start, Snapshot, Center, PixelsPerCM),
+			ToScreen(Segment.End, Snapshot, Center, PixelsPerCM),
+			Center,
+			FrameRadius,
 			TrajectoryThickness,
-			FLinearColor(0.74f, 0.92f, 1.0f, 0.98f));
+			Theme.ApplyOpacity(Theme.AccentSecondary));
 	}
 
 	DrawLaunchMarker(
 		*Canvas,
 		ToScreen(Snapshot.LaunchPoint, Snapshot, Center, PixelsPerCM),
 		Center,
-		FrameRadius);
+		FrameRadius,
+		Theme);
 	if (Snapshot.bHasLandingPoint)
 	{
 		DrawCrossMarker(
@@ -340,15 +373,16 @@ void AABTSM10ScoutMapHUD::DrawOrbitalOverview(AABTSM10ScoutMapSystem& System)
 			ToScreen(Snapshot.LandingPoint, Snapshot, Center, PixelsPerCM),
 			Center,
 			FrameRadius,
-			5.5f);
+			5.5f,
+			Theme);
 	}
 	if (GEngine)
 	{
 		DrawText(
-			TEXT("ORBIT OVERVIEW"),
-			Theme.ApplyOpacity(Theme.TextPrimary),
+			TEXT("ORBIT OVERVIEW  //  PREDICTED"),
+			Theme.ApplyOpacity(Theme.TextMuted),
 			Left + 12.0f,
-			Top + 8.0f,
+			Top + Diameter + 8.0f,
 			GEngine->GetSmallFont(),
 			0.72f * Theme.TextScale,
 			false);
