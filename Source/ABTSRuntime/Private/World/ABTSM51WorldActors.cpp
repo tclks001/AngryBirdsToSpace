@@ -421,6 +421,21 @@ FTransform AABTSM51SlingshotCord::GetRestPouchTransform() const
 	return FTransform(LayoutRotation, Center, FVector::OneVector);
 }
 
+float AABTSM51SlingshotCord::GetRestCordLengthCM() const
+{
+	const FQuat LayoutRotation = BuildSlingshotVisualRotation(EndpointA, EndpointB, StakeA.Get(), StakeB.Get());
+	const FVector StakeAnchorA = EndpointA + LayoutRotation.RotateVector(ConnectionLayout.StakeAConnectionOffsetCM);
+	const FVector StakeAnchorB = EndpointB + LayoutRotation.RotateVector(ConnectionLayout.StakeBConnectionOffsetCM);
+	const FTransform RestPouchTransform = GetRestPouchTransform();
+	FVector PouchAnchorA = RestPouchTransform.TransformPosition(
+		ABTSScaleSlingshotPouchConnectionOffset(ConnectionLayout.PouchAConnectionOffsetCM, PouchVisualSlot));
+	FVector PouchAnchorB = RestPouchTransform.TransformPosition(
+		ABTSScaleSlingshotPouchConnectionOffset(ConnectionLayout.PouchBConnectionOffsetCM, PouchVisualSlot));
+	MatchCordEndpointsToPouchSides(StakeAnchorA, StakeAnchorB, PouchAnchorA, PouchAnchorB);
+	return FVector::Distance(StakeAnchorA, PouchAnchorA)
+		+ FVector::Distance(StakeAnchorB, PouchAnchorB);
+}
+
 void AABTSM51SlingshotCord::ResetPouchVisualToRest()
 {
 	UpdatePulledPouchVisual(GetRestPouchTransform().GetLocation(), GetRestPouchTransform().GetRotation());

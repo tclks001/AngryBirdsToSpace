@@ -3,6 +3,7 @@
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
@@ -219,6 +220,13 @@ void AABTSM6SlingshotSystem::Tick(const float DeltaSeconds)
 		UpdatePouchAndPreview();
 		if (LaunchState == EABTSM6LaunchState::Pulling)
 		{
+			if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+			{
+				Audio->UpdateSlingshotPull(
+					PouchLocation,
+					ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
+					PullAlpha);
+			}
 			RebuildCurrentTrajectoryPreview();
 			DrawPredictedTrajectory();
 		}
@@ -409,6 +417,10 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	PullAlpha = GetResolvedInitialPullAlpha();
 	AimPlaneOffset = FVector::ZeroVector;
 	LaunchState = EABTSM6LaunchState::Ready;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->SetMusicState(EABTSMusicState::Aim);
+	}
 	if (SlingshotCamera) SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Enter] Bird=%d Reinforced=%d"), ABTSBirdIdToIndex(Bird->GetBirdId()), Cord.GetStakeItem() == EABTSItemId::ReinforcedStake ? 1 : 0);
 	return true;
@@ -470,6 +482,13 @@ bool AABTSM6SlingshotSystem::BeginPull(APlayerController& Controller)
 		|| FVector2D::Distance(PouchScreen, FVector2D(MouseX, MouseY)) > 125.0f) return false;
 	LaunchState = EABTSM6LaunchState::Pulling;
 	UpdateAimFromCursor(Controller);
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->UpdateSlingshotPull(
+			PouchLocation,
+			ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
+			PullAlpha);
+	}
 	return true;
 }
 
@@ -568,6 +587,13 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !LaunchedBird.IsValid()) return;
 	const FVector Velocity = ComputeLaunchVelocity();
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlaySlingshotRelease(
+			PouchLocation,
+			ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
+			PullAlpha);
+	}
 	if (SlingshotCamera)
 	{
 		SlingshotCamera->LockSatelliteFlightIntent(
@@ -865,6 +891,11 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 	}
 	if (NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec) MarkPhysicsActivity();
 	const EABTSM6ImpactMaterial Material = ResolveMaterial(Hit.GetComponent());
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayImpact(Hit.ImpactPoint, Material, NormalSpeedCMPerSec);
+		if (bHitSatelliteBody || bHitSatelliteTarget) Audio->SetMusicState(EABTSMusicState::Satellite);
+	}
 	const FABTSM6BirdImpactProfile& BirdProfile = GetBirdProfile(LaunchedBird->GetBirdId());
 	const FABTSM6MaterialImpactProfile& MaterialProfile = GetMaterialProfile(Material);
 	const float KnockThreshold = BirdProfile.KnockSpeedCMPerSec * MaterialProfile.KnockThresholdMultiplier;
@@ -943,6 +974,10 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 {
 	if (!LaunchedBird.IsValid() || bBlackDetonated) return;
 	bBlackDetonated = true;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->PlayExplosion(LaunchedBird->GetActorLocation(), true);
+	}
 	MarkPhysicsActivity();
 	int32 BrokenInstances = 0;
 	int32 ImpulsedInstances = 0;

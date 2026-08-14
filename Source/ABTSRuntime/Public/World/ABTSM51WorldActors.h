@@ -157,6 +157,8 @@ public:
 	void UpdatePulledPouchVisual(const FVector& WorldLocation, const FQuat& WorldRotation);
 	void ResetPouchVisualToRest();
 	FTransform GetRestPouchTransform() const;
+	/** Total length of both visible cord legs in the unloaded/rest pose. */
+	float GetRestCordLengthCM() const;
 	FVector GetEndpointA() const { return EndpointA; }
 	FVector GetEndpointB() const { return EndpointB; }
 	float GetCordObstructionRadiusCM() const { return CordObstructionRadiusCM; }

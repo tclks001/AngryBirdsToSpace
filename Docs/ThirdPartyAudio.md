@@ -1,7 +1,7 @@
-# 第三方音频素材清单与许可
+# 第三方音频与关联素材清单及许可
 
-> 状态：已下载、尚未导入 Unreal。  
-> 素材暂存根目录：`C:\workspace\SoundEffects`。此文件是导入筛选表与发布时的音频许可记录；只有标为“建议导入”的文件才应进入 `Content/SoundEffects/`，未列入的下载文件保留在原始归档中，不默认进入游戏包。
+> 状态：2026-08-14，首批 53 个音效、4 个音乐 SoundWave 与“也字工厂小石头”字体已导入 Unreal。
+> 音效源素材暂存根目录：`C:\workspace\SoundEffects`；音乐许可证位于 `C:\workspace\Media\License.txt`，字体声明位于 `C:\workspace\也字工厂小石头字体使用声明.txt`。本文件是导入筛选表与发布许可记录，原始许可证/声明仍须保留在工作区外归档中。
 
 ## 使用与归档规则
 
@@ -33,7 +33,41 @@ CC0 / Public Domain dedication
 Owlish Media Sound Effects — OwlishMedia
 https://opengameart.org/content/sound-effects-pack
 CC0 / Public Domain dedication
+
+16 RPG-like procedural generated music tracks — messersm
+https://opengameart.org/content/16-rpg-like-procedural-generated-music-tracks
+CC0 / Public Domain dedication
+
+字体：也字工厂小石头
+可免费商用
+https://www.yefont.com/fontDetails/172
 ```
+
+## 音乐与字体许可证原文登记
+
+`C:\workspace\Media\License.txt` 内容：
+
+```text
+https://opengameart.org/content/16-rpg-like-procedural-generated-music-tracks
+
+Author: messersm
+Saturday, April 18, 2015 - 02:49
+Art Type: Music
+Tags: RPG procedural
+License(s): CC0
+```
+
+对应已导入资产为 `/Game/Audio/Music/Bass`、`Harmony`、`Melody`、`Percussion`。四轨是用户基于该 CC0 来源所做的 MIDI 重编曲/混音；发布鸣谢建议同时保留原作者、来源和用户重编曲说明。
+
+`C:\workspace\也字工厂小石头字体使用声明.txt` 内容：
+
+```text
+字体：也字工厂小石头
+可免费商用
+网址：https://www.yefont.com/fontDetails/172
+```
+
+对应已导入资产为 `/Game/Font/YeZiGongChangXiaoShiTou` 与 `/Game/Font/YeZiGongChangXiaoShiTou_Font`。该声明只明确“可免费商用”，未给出标准许可证名称，也未在本地声明中明确修改、再分发或单独转授权条款；项目只按游戏内嵌字体用途登记，不把声明扩展解释为其他权利，原始声明须随发布证据归档保留。
 
 ## 素材来源与许可证登记
 
@@ -48,15 +82,17 @@ CC0 / Public Domain dedication
 | `kenney_sci-fi-sounds`（73 个音频） | `kenney_sci-fi-sounds\License.txt` | Kenney；<https://kenney.nl/assets/sci-fi-sounds> | `Creative Commons Zero, CC0` | 可商用；署名可选。 |
 | `kenney_ui-audio`（52 个音频） | `kenney_ui-audio\License.txt` | Kenney Vleugels；<https://kenney.nl/assets/ui-audio> | `Creative Commons Zero, CC0` | 可商用；署名可选。 |
 | `Owlish Media Sound Effects`（161 个音频） | `Owlish Media Sound Effects\License.txt` | OwlishMedia；<https://opengameart.org/content/sound-effects-pack> | `CC0` | 可商用；署名可选。 |
+| `16 RPG-like procedural generated music tracks` | `C:\workspace\Media\License.txt` | messersm；<https://opengameart.org/content/16-rpg-like-procedural-generated-music-tracks> | `CC0` | 可商用；署名可选；项目仍保留来源与重编曲说明。 |
+| `也字工厂小石头` | `C:\workspace\也字工厂小石头字体使用声明.txt` | 也字工厂；<https://www.yefont.com/fontDetails/172> | `可免费商用` | 仅按声明记录游戏内嵌使用；保留原始声明，不推定未写明的修改/再分发权。 |
 
 ## 当前导入清单与用途
 
-截至本次核对，以下 52 个 SoundWave 已存在于 `Content\SoundEffects\`；`Tiny Hammer on Stone.wav` 已有来源文件和许可证，但仍待通过 Content Browser 导入。其余下载的文件当前均不纳入游戏。
+截至本次核对，以下 53 个 SoundWave 已存在于 `Content\SoundEffects\`，其中包括 `Tiny_Hammer_on_Stone`。四轨音乐位于 `Content\Audio\Music\`。其余下载文件当前均不纳入游戏。
 
 | UE 资产 / 待导入源文件 | 来源文件 | 本游戏中的唯一用途 | 播放规则 |
 | --- | --- | --- | --- |
-| `Looped_Rubber-y_Stretch` | `Looped Rubber-y Stretch.wav` | 弹弓拉伸循环。 | `PullAlpha` 发生变化时启用同一个循环组件；以拉力调整音高/滤波，释放或取消时 150 ms 淡出；**不使用 tick 音**。CC BY 4.0。 |
-| `Elastic_band_c_note` | `Elastic band c note.wav` | 弹弓释放的基础音调/共鸣。 | 在 `ReleaseLaunch()` 同帧播放；以释放时的原始拉伸长度设定音高。 |
+| `Looped_Rubber-y_Stretch` | `Looped Rubber-y Stretch.wav` | 弹弓拉伸循环。 | 拉弓时启用同一个循环组件；音高只由弹弓未拉动时的固有弦长决定且拉动中保持不变，拉得越用力音量越高；释放或取消时 150 ms 淡出；**不使用 tick 音**。CC BY 4.0。 |
+| `Elastic_band_c_note` | `Elastic band c note.wav` | 弹弓释放的基础音调/共鸣。 | 在 `ReleaseLaunch()` 同帧播放；按弹弓未拉动时的固有弦长使用“短弦高、长弦低”的固定音高，本次拉力只控制响度。 |
 | `pluck_001` | `kenney_interface-sounds\Audio\pluck_001.ogg` | 弹弓释放的短促 Snap 瞬态。 | 与 `Elastic_band_c_note` 同帧叠加，不循环。 |
 | `footstep_grass_000–002` | `kenney_impact-sounds\Audio\footstep_grass_000–002.ogg` | 草地、软土地表移动。 | 主控鸟落脚时随机选一个；跟随鸟不重复播放。 |
 | `footstep_wood_000–002` | `kenney_impact-sounds\Audio\footstep_wood_000–002.ogg` | 木桥、木质建筑/工作台地表移动。 | 主控鸟落脚时随机选一个。 |
@@ -78,18 +114,18 @@ CC0 / Public Domain dedication
 | `spaceEngineLow_001` | `kenney_sci-fi-sounds\Audio\spaceEngineLow_001.ogg` | 卫星附近的低频空间环境循环。 | 3D loop，按与卫星距离淡入淡出；先确认循环接缝。 |
 | `forceField_001` | `kenney_sci-fi-sounds\Audio\forceField_001.ogg` | 空间弹道预测或实际发射时受到引力偏转。 | 仅在进入/显著改变引力偏转阶段时触发，不能每帧重复。 |
 | `thrusterFire_000` | `kenney_sci-fi-sounds\Audio\thrusterFire_000.ogg` | 终局太空发射；熔炉环境持续声。 | 终局为 3D 发射声；熔炉为低音量循环，二者分开配置衰减/音量。 |
-| **待导入：`Tiny Hammer on Stone.wav`** | `Tiny Hammer on Stone.wav` | 工作台环境持续声。 | 导入后命名 `AMB_Workbench_TinyHammerOnStone`；低音量循环，仅在工作台附近或制作界面活动时播放。CC0。 |
+| `Tiny_Hammer_on_Stone` | `Tiny Hammer on Stone.wav` | 工作台环境持续声。 | 低音量循环，仅在工作台附近或制作界面活动时播放；正式接线前确认循环接缝。CC0。 |
 
 ## 当前不使用的已下载文件
 
-除上表资产及待导入的 `Tiny Hammer on Stone.wav` 外，`C:\workspace\SoundEffects` 内的其余下载音频暂不导入、不绑定玩法，也不列为首版候选。`Preview.ogg`、`.url`、`desktop.ini`、`.pkf` 和所有 `License.txt` 同样不导入游戏，但须继续保留在原始下载归档中。
+除上表资产外，`C:\workspace\SoundEffects` 内的其余下载音频暂不导入、不绑定玩法，也不列为首版候选。`Preview.ogg`、`.url`、`desktop.ini`、`.pkf` 和所有 `License.txt` 同样不导入游戏，但须继续保留在原始下载归档中。
 
 ## 导入前验收
 
-- [ ] `Tiny Hammer on Stone.wav` 已导入 `Content\SoundEffects\` 并创建工作台环境 SoundWave / loop 配置。
+- [x] `Tiny Hammer on Stone.wav` 已导入 `Content\SoundEffects\`；工作台环境 loop 属性与玩法接线仍待配置。
 - [ ] 每个循环（拉伸、卫星、熔炉、工作台）在 Unreal 中试听并确认无明显爆音、过长静音或循环接缝。
 - [ ] 木、石、玻璃和金属的 `light/medium/heavy` 均按被撞物体质量选择；撞击速度只控制响度/触发阈值。
 - [ ] `Looped Rubber-y Stretch.wav` 在 Credits 中保留 CC BY 4.0 署名文本；如果不愿承担署名义务，则不要导入它，应改用 CC0 拉伸声或自制版本。
-- [ ] `Elastic band c note.wav` 作为基础音高层导入，最终音高由释放时 `PullAlpha` / 拉伸长度驱动。
+- [x] `Elastic band c note.wav` 已作为基础音高层导入，最终音高由弹弓固有弦长驱动，释放 `PullAlpha` 只控制响度。
 - [ ] `select_002`、`switch7`、`rollover1` 和 `tick_001` 只在表内指定的 UI/安装事件触发。
 - [ ] 通过 Music、SFX、UI、Ambience 四个独立音量滑杆测试静音与混音。

@@ -3,6 +3,7 @@
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
@@ -262,6 +263,11 @@ void AABTSM6SlingshotSystem::FinishReturn()
 		PC->RestorePartyCameraView();
 	}
 	LaunchState = EABTSM6LaunchState::Inactive;
+	if (UABTSAudioWorldSubsystem* Audio = GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>())
+	{
+		Audio->StopSlingshotPull(0.0f);
+		Audio->SetMusicState(EABTSMusicState::Explore);
+	}
 	ClearCurrentTrajectoryPreview();
 	ActiveCord.Reset();
 	LaunchedBird.Reset();

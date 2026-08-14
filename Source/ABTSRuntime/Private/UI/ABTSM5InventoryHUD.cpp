@@ -2,6 +2,7 @@
 
 #include "UI/ABTSM5InventoryHUD.h"
 
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Crafting/ABTSCraftingCatalog.h"
 #include "Crafting/ABTSCraftingSystem.h"
 #include "Engine/Canvas.h"
@@ -347,6 +348,7 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 	AABTSM5PlayerController* Controller = GetM5Controller();
 	AABTSCraftingSystem* System = FindCraftingSystem();
 	if (Controller == nullptr || System == nullptr) return;
+	UABTSAudioWorldSubsystem* Audio = GetWorld() ? GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>() : nullptr;
 	if (BoxName == InventoryHitBox)
 	{
 		Controller->OpenCraftingInterface();
@@ -355,6 +357,7 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 	if (BoxName == HeldItemHitBox)
 	{
 		System->GetInventory()->ClearHeldItem();
+		if (Audio) Audio->PlayUIEvent(EABTSUIAudioEvent::Select);
 		return;
 	}
 	const FString Name = BoxName.ToString();
@@ -365,6 +368,7 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 		if (VisibleInventoryItemIds.IsValidIndex(VisibleItemIndex))
 		{
 			System->GetInventory()->SetHeldItem(VisibleInventoryItemIds[VisibleItemIndex]);
+			if (Audio) Audio->PlayUIEvent(EABTSUIAudioEvent::Select);
 		}
 		return;
 	}
@@ -373,12 +377,21 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 		const FString Prefix(TEXT("ABTS_M5_Hotbar_"));
 		const int32 Slot = FCString::Atoi(*BoxName.ToString().RightChop(Prefix.Len()));
 		EABTSItemId ItemId;
-		if (System->GetInventory()->GetHotbarItemAt(Slot, ItemId)) System->GetInventory()->SetHeldItem(ItemId);
+		if (System->GetInventory()->GetHotbarItemAt(Slot, ItemId))
+		{
+			System->GetInventory()->SetHeldItem(ItemId);
+			if (Audio) Audio->PlayUIEvent(EABTSUIAudioEvent::Select);
+		}
 		else Controller->OpenCraftingInterface();
 		return;
 	}
 	if (BoxName == CloseHitBox) { Controller->CloseCraftingInterface(); return; }
-	if (BoxName == QuantityCancel) { ResetCraftingSelection(); return; }
+	if (BoxName == QuantityCancel)
+	{
+		ResetCraftingSelection();
+		if (Audio) Audio->PlayUIEvent(EABTSUIAudioEvent::Select);
+		return;
+	}
 	const FABTSCraftingRecipe* SelectedRecipe = System->GetCatalog()->FindRecipe(SelectedRecipeId);
 	if (SelectedRecipe)
 	{
@@ -392,6 +405,11 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 		else if (BoxName == QuantityCraft && PendingCraftCount > 0)
 		{
 			if (System->Craft(SelectedRecipeId, PendingCraftCount)) ResetCraftingSelection();
+		}
+		if ((BoxName == QuantityMinusTen || BoxName == QuantityMinusOne
+			|| BoxName == QuantityPlusOne || BoxName == QuantityPlusTen) && Audio)
+		{
+			Audio->PlayUIEvent(EABTSUIAudioEvent::Tick);
 		}
 		return;
 	}
@@ -407,11 +425,13 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 	{
 		SelectedRecipeId = Recipe->RecipeId;
 		PendingCraftCount = 1;
+		if (Audio) Audio->PlayUIEvent(EABTSUIAudioEvent::Select);
 	}
 	else
 	{
 		InvalidHighlightRecipeId = Recipe->RecipeId;
 		InvalidHighlightUntilSeconds = GetWorld() ? GetWorld()->GetRealTimeSeconds() + 0.5 : 0.0;
+		if (Audio) Audio->PlayUIEvent(EABTSUIAudioEvent::Error);
 	}
 }
 
