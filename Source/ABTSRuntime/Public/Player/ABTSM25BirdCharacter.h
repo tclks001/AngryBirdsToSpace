@@ -14,6 +14,7 @@ class UABTSRadialSurfaceSuspensionComponent;
 class UABTSChaosBirdMovementComponent;
 class UPrimitiveComponent;
 class UMaterialInterface;
+enum class EABTSFootstepSurface : uint8;
 
 /** Editor-selectable player movement implementation. */
 UENUM(BlueprintType)
@@ -126,6 +127,9 @@ private:
 	void UpdateChaosVisualFrame(float DeltaSeconds);
 	void UpdateSlingshotPresentationFrame(float DeltaSeconds);
 	void UpdateBirdAnimationPresentation(float DeltaSeconds);
+	void UpdateBirdLocomotionAudio(float DeltaSeconds);
+	void ResetBirdLocomotionAudio(bool bGrounded);
+	EABTSFootstepSurface ResolveFootstepSurface(const FVector& WorldUp) const;
 	void ApplyCuteBirdMaterials();
 	FVector GetPresentationVelocity() const;
 	void ConfigureChaosPhysicsBody(bool bEnable);
@@ -183,6 +187,12 @@ private:
 	bool bChaosVisualRotationInitialized = false;
 	FQuat ChaosVisualRotation = FQuat::Identity;
 	float SlingshotImpactFacingLockRemainingSeconds = 0.0f;
+	FVector PreviousLocomotionAudioLocation = FVector::ZeroVector;
+	float AccumulatedFootstepDistanceCM = 0.0f;
+	float PeakAirborneDownwardSpeedCMPerSec = 0.0f;
+	float PendingPlayerJumpAudioSeconds = 0.0f;
+	bool bLocomotionAudioInitialized = false;
+	bool bLocomotionAudioWasGrounded = true;
 	/** Runtime-only helper avoids adding another serialized native Blueprint subobject. */
 	UPROPERTY(Transient)
 	TObjectPtr<UABTSBirdAnimationPresentationComponent> BirdAnimationPresentation;

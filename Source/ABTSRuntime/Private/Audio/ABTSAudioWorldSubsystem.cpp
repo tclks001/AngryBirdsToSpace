@@ -15,6 +15,8 @@ namespace
 	constexpr float PullAttackSeconds = 0.012f;
 	constexpr float ReleaseSnapAttackSeconds = 0.008f;
 	constexpr float ReleaseResonanceAttackSeconds = 0.012f;
+	constexpr float FootstepCadenceScale = 0.25f;
+	constexpr float FootstepVolumeScale = 0.50f;
 
 	template <typename T>
 	T* Load(const TSoftObjectPtr<T>& Asset)
@@ -132,7 +134,7 @@ void UABTSAudioWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		+ (IsValid(ReleaseResonanceComponent) ? 1 : 0);
 	bAudioReady = true;
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][Audio] Ready MusicLoaded=%d MusicComponents=%d MusicActive=%d State=%d Targets=(%.2f,%.2f,%.2f,%.2f) SoundClasses=%d MasterMix=%d SlingshotPrepared=%d PrimeRequested=%d"),
+		TEXT("[ABTS][Audio] Ready MusicLoaded=%d MusicComponents=%d MusicActive=%d State=%d Targets=(%.2f,%.2f,%.2f,%.2f) SoundClasses=%d MasterMix=%d SlingshotPrepared=%d PrimeRequested=%d BirdChirps=%d Footsteps=(%d,%d) Pickup=%d"),
 		LoadedMusicStemCount,
 		MusicComponents.Num(),
 		ActiveMusicStemCount,
@@ -141,7 +143,11 @@ void UABTSAudioWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		MusicClass && SFXClass && UIClass && AmbienceClass ? 4 : 0,
 		MasterMix ? 1 : 0,
 		PreparedSlingshotComponentCount,
-		SlingshotPrimeRequestCount);
+		SlingshotPrimeRequestCount,
+		BirdChirpSounds.Num(),
+		GrassFootstepSounds.Num(),
+		WoodFootstepSounds.Num(),
+		PickupSound ? 1 : 0);
 }
 
 void UABTSAudioWorldSubsystem::Deinitialize()
@@ -176,6 +182,14 @@ void UABTSAudioWorldSubsystem::LoadCatalog()
 	LoadArray(Settings->GlassImpacts, GlassImpactSounds);
 	ExplosionBodySound = Load(Settings->ExplosionBody);
 	ExplosionTailSound = Load(Settings->ExplosionLowTail);
+	BirdChirpSounds = {
+		Load(Settings->RedBirdChirp),
+		Load(Settings->BlueBirdChirp),
+		Load(Settings->YellowBirdChirp),
+		Load(Settings->BlackBirdChirp)};
+	LoadArray(Settings->GrassFootsteps, GrassFootstepSounds);
+	LoadArray(Settings->WoodFootsteps, WoodFootstepSounds);
+	PickupSound = Load(Settings->Pickup);
 	UISounds = {Load(Settings->UIOpen), Load(Settings->UIClose), Load(Settings->UISelect), Load(Settings->UIConfirm), Load(Settings->UIError), Load(Settings->UITick)};
 	MusicClass = LoadOptional(Settings->MusicSoundClass);
 	SFXClass = LoadOptional(Settings->SFXSoundClass);
@@ -274,6 +288,36 @@ float UABTSAudioWorldSubsystem::ComputeCordPitchMultiplier(const float RestCordL
 float UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(const float PullPowerAlpha)
 {
 	return FMath::Lerp(0.10f, 0.32f, FMath::Clamp(PullPowerAlpha, 0.0f, 1.0f));
+}
+
+float UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(const float TangentialSpeedCMPerSec)
+{
+	const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(60.0f, 680.0f), FVector2D(0.0f, 1.0f), TangentialSpeedCMPerSec);
+	return FMath::Lerp(110.0f, 68.0f, SpeedAlpha) / FootstepCadenceScale;
+}
+
+float UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(const float TangentialSpeedCMPerSec)
+{
+	const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(60.0f, 680.0f), FVector2D(0.0f, 1.0f), TangentialSpeedCMPerSec);
+	return FMath::Lerp(0.24f, 0.54f, SpeedAlpha) * FootstepVolumeScale;
+}
+
+float UABTSAudioWorldSubsystem::ComputeLandingVolumeMultiplier(const float DownwardSpeedCMPerSec)
+{
+	return FMath::GetMappedRangeValueClamped(
+		FVector2D(160.0f, 900.0f), FVector2D(0.30f, 0.95f), DownwardSpeedCMPerSec);
+}
+
+EABTSFootstepSurface UABTSAudioWorldSubsystem::ResolveFootstepSurfaceFromSemanticName(
+	const FString& SemanticName)
+{
+	return SemanticName.Contains(TEXT("wood"), ESearchCase::IgnoreCase)
+		|| SemanticName.Contains(TEXT("bridge"), ESearchCase::IgnoreCase)
+		|| SemanticName.Contains(TEXT("plank"), ESearchCase::IgnoreCase)
+		? EABTSFootstepSurface::Wood
+		: EABTSFootstepSurface::Grass;
 }
 
 void UABTSAudioWorldSubsystem::UpdateSlingshotPull(
@@ -402,6 +446,92 @@ void UABTSAudioWorldSubsystem::PlayExplosion(const FVector& WorldLocation, const
 	const float DirectCategoryVolume = MasterMix && SFXClass ? 1.0f : RuntimeSFXVolume;
 	PlayOneShot(ExplosionBodySound, SFXClass, WorldLocation, true, Settings->SFXVolume * DirectCategoryVolume, bLarge ? 0.92f : 1.0f);
 	if (bLarge) PlayOneShot(ExplosionTailSound, SFXClass, WorldLocation, true, Settings->SFXVolume * DirectCategoryVolume * 0.72f, 0.88f);
+}
+
+void UABTSAudioWorldSubsystem::PlayBirdChirp(
+	const FVector& WorldLocation,
+	const EABTSBirdId BirdId,
+	const float VolumeMultiplier)
+{
+	const int32 BirdIndex = ABTSBirdIdToIndex(BirdId);
+	if (!bAudioReady || !BirdChirpSounds.IsValidIndex(BirdIndex) || GetWorld() == nullptr) return;
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (const double* LastTime = LastBirdChirpTimeByBird.Find(BirdId))
+	{
+		if (Now - *LastTime < GetDefault<UABTSAudioSettings>()->BirdChirpCooldownSeconds) return;
+	}
+	LastBirdChirpTimeByBird.Add(BirdId, Now);
+	const float DirectCategoryVolume = MasterMix && SFXClass ? 1.0f : RuntimeSFXVolume;
+	PlayOneShot(
+		BirdChirpSounds[BirdIndex],
+		SFXClass,
+		WorldLocation,
+		true,
+		GetDefault<UABTSAudioSettings>()->SFXVolume * DirectCategoryVolume
+			* FMath::Clamp(VolumeMultiplier, 0.0f, 1.5f));
+}
+
+USoundBase* UABTSAudioWorldSubsystem::SelectFootstep(const EABTSFootstepSurface Surface)
+{
+	TArray<TObjectPtr<USoundBase>>* Candidates = Surface == EABTSFootstepSurface::Wood
+		? &WoodFootstepSounds
+		: &GrassFootstepSounds;
+	if (Candidates->IsEmpty()) return nullptr;
+	uint32& Counter = Surface == EABTSFootstepSurface::Wood
+		? WoodFootstepVariantCounter
+		: GrassFootstepVariantCounter;
+	return (*Candidates)[Counter++ % Candidates->Num()];
+}
+
+void UABTSAudioWorldSubsystem::PlayFootstep(
+	const FVector& WorldLocation,
+	const EABTSFootstepSurface Surface,
+	const float TangentialSpeedCMPerSec)
+{
+	if (!bAudioReady || TangentialSpeedCMPerSec < 60.0f) return;
+	const float DirectCategoryVolume = MasterMix && SFXClass ? 1.0f : RuntimeSFXVolume;
+	const float Pitch = FMath::GetMappedRangeValueClamped(
+		FVector2D(60.0f, 680.0f), FVector2D(0.96f, 1.04f), TangentialSpeedCMPerSec);
+	PlayOneShot(
+		SelectFootstep(Surface),
+		SFXClass,
+		WorldLocation,
+		true,
+		GetDefault<UABTSAudioSettings>()->SFXVolume * DirectCategoryVolume
+			* ComputeFootstepVolumeMultiplier(TangentialSpeedCMPerSec),
+		Pitch);
+}
+
+void UABTSAudioWorldSubsystem::PlayLanding(
+	const FVector& WorldLocation,
+	const EABTSFootstepSurface Surface,
+	const float DownwardSpeedCMPerSec)
+{
+	if (!bAudioReady || DownwardSpeedCMPerSec < 160.0f) return;
+	const float DirectCategoryVolume = MasterMix && SFXClass ? 1.0f : RuntimeSFXVolume;
+	const float Strength = ComputeLandingVolumeMultiplier(DownwardSpeedCMPerSec);
+	PlayOneShot(
+		SelectFootstep(Surface),
+		SFXClass,
+		WorldLocation,
+		true,
+		GetDefault<UABTSAudioSettings>()->SFXVolume * DirectCategoryVolume * Strength,
+		FMath::Lerp(0.92f, 0.78f, Strength));
+}
+
+void UABTSAudioWorldSubsystem::PlayPickup(const FVector& WorldLocation, const int32 Quantity)
+{
+	if (!bAudioReady) return;
+	const float DirectCategoryVolume = MasterMix && SFXClass ? 1.0f : RuntimeSFXVolume;
+	const float QuantityAlpha = FMath::Clamp(static_cast<float>(FMath::Max(1, Quantity) - 1) / 4.0f, 0.0f, 1.0f);
+	PlayOneShot(
+		PickupSound,
+		SFXClass,
+		WorldLocation,
+		true,
+		GetDefault<UABTSAudioSettings>()->SFXVolume * DirectCategoryVolume
+			* FMath::Lerp(0.52f, 0.72f, QuantityAlpha),
+		FMath::Lerp(1.0f, 1.08f, QuantityAlpha));
 }
 
 void UABTSAudioWorldSubsystem::PlayUIEvent(const EABTSUIAudioEvent Event)

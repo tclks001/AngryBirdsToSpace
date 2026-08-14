@@ -3,6 +3,7 @@
 #include "World/ABTSM51WorldSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Crafting/ABTSCraftingStation.h"
 #include "Crafting/ABTSCraftingSystem.h"
 #include "EngineUtils.h"
@@ -351,6 +352,12 @@ void AABTSM51WorldSystem::CollectNearbyPickups()
 		if (Pickup == nullptr) { Pickups.RemoveAtSwap(Index); continue; }
 		if (FVector::DistSquared(Bird->GetActorLocation(), Pickup->GetActorLocation()) > FMath::Square(AutoPickupRadiusCM)) continue;
 		Inventory->AddItem(Pickup->GetItemId(), Pickup->GetQuantity());
+		if (UABTSAudioWorldSubsystem* Audio = GetWorld()
+			? GetWorld()->GetSubsystem<UABTSAudioWorldSubsystem>()
+			: nullptr)
+		{
+			Audio->PlayPickup(Pickup->GetActorLocation(), Pickup->GetQuantity());
+		}
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][Pickup] Item=%s Qty=%d Cell=%d"),
 			*ABTSGetItemFallbackLabel(Pickup->GetItemId()), Pickup->GetQuantity(), Pickup->GetCellId());
 		Pickup->Destroy();

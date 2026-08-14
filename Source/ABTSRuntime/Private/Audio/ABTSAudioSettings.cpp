@@ -41,6 +41,19 @@ UABTSAudioSettings::UABTSAudioSettings()
 
 	ExplosionBody = Asset<USoundBase>(TEXT("/Game/SoundEffects/explosionCrunch_000.explosionCrunch_000"));
 	ExplosionLowTail = Asset<USoundBase>(TEXT("/Game/SoundEffects/lowFrequency_explosion_000.lowFrequency_explosion_000"));
+	RedBirdChirp = Asset<USoundBase>(TEXT("/Game/SoundEffects/Birds/404729__owlstorm__retro-video-game-sfx-bird-chirp-5.404729__owlstorm__retro-video-game-sfx-bird-chirp-5"));
+	BlueBirdChirp = Asset<USoundBase>(TEXT("/Game/SoundEffects/Birds/404725__owlstorm__retro-video-game-sfx-bird-chirp-3.404725__owlstorm__retro-video-game-sfx-bird-chirp-3"));
+	YellowBirdChirp = Asset<USoundBase>(TEXT("/Game/SoundEffects/Birds/404726__owlstorm__retro-video-game-sfx-bird-chirp-2.404726__owlstorm__retro-video-game-sfx-bird-chirp-2"));
+	BlackBirdChirp = Asset<USoundBase>(TEXT("/Game/SoundEffects/Birds/404724__owlstorm__retro-video-game-sfx-bird-chirp-4.404724__owlstorm__retro-video-game-sfx-bird-chirp-4"));
+	GrassFootsteps = {
+		Asset<USoundBase>(TEXT("/Game/SoundEffects/footstep_grass_000.footstep_grass_000")),
+		Asset<USoundBase>(TEXT("/Game/SoundEffects/footstep_grass_001.footstep_grass_001")),
+		Asset<USoundBase>(TEXT("/Game/SoundEffects/footstep_grass_002.footstep_grass_002"))};
+	WoodFootsteps = {
+		Asset<USoundBase>(TEXT("/Game/SoundEffects/footstep_wood_000.footstep_wood_000")),
+		Asset<USoundBase>(TEXT("/Game/SoundEffects/footstep_wood_001.footstep_wood_001")),
+		Asset<USoundBase>(TEXT("/Game/SoundEffects/footstep_wood_002.footstep_wood_002"))};
+	Pickup = Asset<USoundBase>(TEXT("/Game/SoundEffects/confirmation_001.confirmation_001"));
 	UIOpen = Asset<USoundBase>(TEXT("/Game/SoundEffects/open_001.open_001"));
 	UIClose = Asset<USoundBase>(TEXT("/Game/SoundEffects/close_001.close_001"));
 	UISelect = Asset<USoundBase>(TEXT("/Game/SoundEffects/select_002.select_002"));
