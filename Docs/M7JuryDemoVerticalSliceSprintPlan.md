@@ -137,3 +137,17 @@ ForceUnity Development Editor 全链接及 fresh 固定演示六栋 6/6；自动
 `M7-Stage4-CrownVoxel-Parity-Demo6-20260815.log`。用户随后完成 `Roof / Crown` 与 Stage 1～4 总览视觉
 验收，因此 Stage 4 正式冻结。冻结不包含生产积木承重 DAG、Beam-C 合力门或 Chaos；这些从 Stage 5
 开始实施。
+
+### 7.4 Stage 4.5 放置描述冻结（2026-08-15）
+
+Stage 4 视觉冻结后新增一个不扩大动态完成定义的交接点：从六栋真实 Stage 4 active 静态 member 提取
+Bounds、XY 占地、原点 Pivot、`Z=0` 地面、方向与 36 cm Pad 安全边，并发布只读目录。提取时排除已经由
+Facade-to-Top 替换的 suppressed Stage 3 临时柱，对 active AABB 全体执行正体积相交检查和落地检查；排序
+AABB/结构行分别形成几何与结构 Hash，因此不是手写六组尺寸，也不依赖 member 数组索引。
+
+冻结身份为 Schema `1`、Manifest Version `1`、Manifest Hash `2324068295`、Catalog Hash
+`13889440156022460967`。过滤器 `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze` 重新生成六栋并逐字段
+反验提交目录；完整字段与集成使用约定见
+[Stage 4.5 建筑放置冻结设计](M73BeamStage45PlacementFreezeDesign.md)。本门通过后 M3 可只等待集成工作树
+消费该目录，不再等待 M7 的 Stage 5/Chaos/破坏/弱点/六栋动态并发/完整 PIE；这些未完成项的证据身份保持
+`NotEvaluated`，不得由 Stage 4.5 推断。
