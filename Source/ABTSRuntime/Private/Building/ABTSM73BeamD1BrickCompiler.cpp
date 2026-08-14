@@ -2771,7 +2771,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
 	const bool bSkeletonGenerated =
 		StopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof
-			? SkeletonGenerator.GenerateStage4TopSurfaceIntent(SelectedProfile,
+			? SkeletonGenerator.GenerateStage4FloorTopFrames(SelectedProfile,
 				OutResult.Silhouette, OutResult.Skeleton, OutError)
 			: StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
 			? SkeletonGenerator.GenerateStage3(SelectedProfile,
@@ -3060,6 +3060,21 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SkeletonFirstStage4IntentHash = Stage1.Stage4IntentHash;
 	Summary.SkeletonFirstStage4IntentMilliseconds =
 		Stage1.Stage4IntentMilliseconds;
+	Summary.SkeletonFirstStage4TopFrameSegmentCount =
+		Stage1.Stage4TopFrameSegmentCount;
+	Summary.SkeletonFirstStage4EmittedTopFrameSegmentCount =
+		Stage1.Stage4EmittedTopFrameSegmentCount;
+	Summary.SkeletonFirstStage4ReusedTopFrameSegmentCount =
+		Stage1.Stage4ReusedTopFrameSegmentCount;
+	Summary.SkeletonFirstStage4TopFrameBindingViolationCount =
+		Stage1.Stage4TopFrameBindingViolationCount;
+	Summary.SkeletonFirstStage4TopFrameConflictCount =
+		Stage1.Stage4TopFrameConflictCount;
+	Summary.SkeletonFirstStage4DeferredFacadeColumnJunctionCount =
+		Stage1.Stage4DeferredFacadeColumnJunctionCount;
+	Summary.SkeletonFirstStage4TopFrameHash = Stage1.Stage4TopFrameHash;
+	Summary.SkeletonFirstStage4TopFrameMilliseconds =
+		Stage1.Stage4TopFrameMilliseconds;
 	Summary.StructuralClosurePassCount =
 		OutResult.StaticDAG.Summary.StructuralClosurePassCount;
 	Summary.AddedStructuralSupportPostCount =

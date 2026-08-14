@@ -2393,3 +2393,30 @@ Volume、XY bounds、量化顶面 course、选择原因和稳定 signature。没
 收紧为演示六栋 `Unresolved=0`。最终 E6 为 `Ground=10 / Top=24`，其中
 `ExposedSetbackTop=19 / DirectStackSeat=5`；E1～E5 同样零未解析。当前“TopSurface 归属闭合”已通过
 静态合同，等待用户视觉批准后才开始发射顶面/楼面边框。
+
+### 49.1 顶面/楼面边框停点（2026-08-13）
+
+用户视觉批准 TopSurface 语义后，Stage 4 第二停点只沿已登记的 `TopSurface` 支撑区间发射水平边框；
+`GroundSill` 不重复发射顶框，未解析意图仍禁止消费。边框合同为：
+
+1. `ExposedSetbackTop` 的边框中心位于 facade 外侧半格，沿真实外露肩部的切向区间铺设；
+   `DirectStackSeat` 的边框中心位于 facade 内侧半格，沿真实 Body-to-Body 叠置接缝铺设。二者都位于目标
+   surface 上方第一个 36 cm course，不得从建筑总 AABB 推导闭合矩形；
+2. 切向区间按 36 cm 栅格裁剪、去重并合并，单根水平砖不超过 648 cm。多个 intent 可以共享同一物理段，
+   但每个 intent 必须在 `TopSurfaceFrameSegment` 账本中至少出现一次；
+3. 同层已有水平 core/frame member 覆盖或穿过目标 36 cm 节点时登记复用，不重复发砖。若占位者是 Stage 3
+   临时 `ExteriorPost/GroundExteriorPost`，则把该单元登记为下一停点必须替换的 facade junction，并让本轮水平段
+   在柱两侧停止；不得把竖柱冒充水平顶框。部分重叠、ProtectedVoid 或其他无法解释的正体积碰撞仍 fail closed；
+4. 每段冻结来源 intent、component、目标 envelope/source、surface course、face、轴向、法向与切向区间、
+   物理 member 及复用状态，并发布独立 `Stage4TopFrameHash` 和耗时。Stage 1～3 member 与 Hash 保持只读；
+5. 独立 `Floor / Top Frames` 诊断层只显示本账本中的物理构件：钢色为本停点新增边框，玻璃色为既有构件/
+   节点复用，石材色为待 Facade-to-Top 替换的 Stage 3 临时柱。该停点尚未生成 Facade-to-Top 竖向闭合、楼面填充或屋顶，因此只声明顶框局部几何合同，
+   不声明完整 Stage 4 DAG 或 Chaos 稳定性。
+
+UE 5.8 `-ForceUnity` Development Editor 全链接成功；fresh 演示六栋专项精确 6/6。E1 没有 TopSurface，
+因此合法地保持 0 顶框；E2～E6 分别生成 `3/6/4/15/18` 个物理顶框段。SlideRelease E3 另发布 1 个
+deferred facade junction，其 blocker 精确为 Stage 3 `GroundExteriorPost`；其余五栋为 0。全部六栋未知冲突、
+绑定违规和未解析 intent 均为 0。fresh `PreviewDiagnosticContracts` 1/1。证据日志为
+`Saved/Logs/M7-Stage4-FloorTopFrames-Demo-Acceptance-20260813.log` 与
+`Saved/Logs/M7-Stage4-FloorTopFrames-Preview-Acceptance-20260813.log`。Physical/Chaos/可见 PIE 未运行；
+用户地图继续排除。

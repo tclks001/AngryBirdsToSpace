@@ -87,6 +87,8 @@ namespace ABTSM73BeamC3V3
 		TArray<int32> ParentStage2MemberIndices;
 		/** Stage-3 only: stable facade-frame identity. */
 		int32 ExteriorFrameId = INDEX_NONE;
+		/** Stage-4 only: top/floor perimeter segment emitted by or reused for this member. */
+		int32 TopSurfaceFrameSegmentId = INDEX_NONE;
 		/** Stage-3 exterior-column lineage. */
 		int32 ExteriorColumnId = INDEX_NONE;
 		/** Stage-3 ground-sill lineage. Existing core members remain INDEX_NONE. */
@@ -849,6 +851,41 @@ namespace ABTSM73BeamC3V3
 		FString Reason;
 	};
 
+	/** One quantized X/Y segment on a resolved semantic TopSurface. Multiple
+	 * facade intents may consume the same physical segment; the ledger preserves
+	 * that many-to-one provenance rather than emitting overlapping bricks. */
+	struct FTopSurfaceFrameSegmentPlan
+	{
+		int32 TopSurfaceFrameSegmentId = INDEX_NONE;
+		TArray<int32> SourceIntentIds;
+		int32 ComponentId = INDEX_NONE;
+		int32 TargetEnvelopeVolumeId = INDEX_NONE;
+		int32 TargetSourceVolumeId = INDEX_NONE;
+		int32 SurfaceCourseIndex = INDEX_NONE;
+		uint8 FaceMask = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		double NormalCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+		int32 MemberIndex = INDEX_NONE;
+		bool bReusesExistingMember = false;
+	};
+
+	/** One Stage-3 facade-column cell deliberately deferred to Facade-to-Top closure. */
+	struct FTopSurfaceFrameDeferredJunctionPlan
+	{
+		int32 DeferredJunctionId = INDEX_NONE;
+		TArray<int32> SourceIntentIds;
+		int32 ComponentId = INDEX_NONE;
+		int32 SurfaceCourseIndex = INDEX_NONE;
+		uint8 FaceMask = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		double NormalCoordinateCM = 0.0;
+		double TangentMinimumCM = 0.0;
+		double TangentMaximumCM = 0.0;
+		int32 BlockingStage3ColumnMemberIndex = INDEX_NONE;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -1167,6 +1204,14 @@ namespace ABTSM73BeamC3V3
 		int32 Stage4IntentBindingViolationCount = 0;
 		int64 Stage4IntentHash = 0;
 		double Stage4IntentMilliseconds = 0.0;
+		int32 Stage4TopFrameSegmentCount = 0;
+		int32 Stage4EmittedTopFrameSegmentCount = 0;
+		int32 Stage4ReusedTopFrameSegmentCount = 0;
+		int32 Stage4TopFrameBindingViolationCount = 0;
+		int32 Stage4TopFrameConflictCount = 0;
+		int32 Stage4DeferredFacadeColumnJunctionCount = 0;
+		int64 Stage4TopFrameHash = 0;
+		double Stage4TopFrameMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;
@@ -1258,6 +1303,9 @@ namespace ABTSM73BeamC3V3
 		TArray<FGroundSillSegmentPlan> GroundSillSegments;
 		TArray<FExteriorColumnPlan> ExteriorColumns;
 		TArray<FTopSurfaceIntentPlan> TopSurfaceIntents;
+		TArray<FTopSurfaceFrameSegmentPlan> TopSurfaceFrameSegments;
+		TArray<FTopSurfaceFrameDeferredJunctionPlan>
+			TopSurfaceFrameDeferredJunctions;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

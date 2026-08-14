@@ -4435,8 +4435,27 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4UnresolvedIntentCount, 0);
 	TestNotEqual(TEXT("TopSurface ledger has a stable identity"),
 		Summary.Stage4IntentHash, int64(0));
-	TestEqual(TEXT("Stage 4 first stop emits no member geometry"),
+	TestEqual(TEXT("Every emitted top-frame run appends one Stage-4 member"),
+		Plan.Members.FilterByPredicate(
+			[](const ABTSM73BeamC3V3::FPlannedMember& Member)
+			{
+				return Member.ProducedStage
+					== EABTSM73BeamC3GenerationStage::FloorInfillRoof;
+			}).Num(), Summary.Stage4EmittedTopFrameSegmentCount);
+	TestEqual(TEXT("Every planned member is emitted to the preview IR"),
 		Plan.Members.Num(), Summary.EmittedMemberCount);
+	TestEqual(TEXT("Top-frame ledger count matches its summary"),
+		Plan.TopSurfaceFrameSegments.Num(), Summary.Stage4TopFrameSegmentCount);
+	TestEqual(TEXT("Top-frame rows are emitted or reuse existing material"),
+		Summary.Stage4TopFrameSegmentCount,
+		Summary.Stage4EmittedTopFrameSegmentCount
+			+ Summary.Stage4ReusedTopFrameSegmentCount);
+	TestEqual(TEXT("Top-frame ledger has no binding violation"),
+		Summary.Stage4TopFrameBindingViolationCount, 0);
+	TestEqual(TEXT("Top-frame emission has no unresolved collision"),
+		Summary.Stage4TopFrameConflictCount, 0);
+	TestNotEqual(TEXT("Top-frame plan has a stable identity"),
+		Summary.Stage4TopFrameHash, int64(0));
 	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
 		: Plan.TopSurfaceIntents)
 	{
@@ -4457,21 +4476,78 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 						- Intent.TargetSupportTangentMinimumCM >= 35.99);
 		}
 	}
+	for (const ABTSM73BeamC3V3::FTopSurfaceFrameSegmentPlan& Segment
+		: Plan.TopSurfaceFrameSegments)
+	{
+		TestTrue(TEXT("Every top-frame row resolves a real horizontal member"),
+			Plan.Members.IsValidIndex(Segment.MemberIndex)
+				&& Plan.Members[Segment.MemberIndex].Axis
+					!= EABTSM73BeamAFrameAxis::Z
+				&& !Segment.SourceIntentIds.IsEmpty());
+		if (!Segment.bReusesExistingMember)
+		{
+			TestEqual(TEXT("Every emitted top-frame row owns a floor course"),
+				Plan.Members[Segment.MemberIndex].SkeletonKind,
+				ABTSM73BeamC3V3::ESkeletonMemberKind::FloorCourse);
+		}
+	}
+	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
+		: Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent
+			!= ABTSM73BeamC3V3::EFacadeDownwardIntent::TopSurface)
+		{
+			continue;
+		}
+		TestTrue(TEXT("Every resolved TopSurface intent owns a frame row or deferred facade junction"),
+			Plan.TopSurfaceFrameSegments.ContainsByPredicate(
+				[&Intent](
+					const ABTSM73BeamC3V3::FTopSurfaceFrameSegmentPlan& Segment)
+				{
+					return Segment.SourceIntentIds.Contains(Intent.IntentId);
+				})
+			|| Plan.TopSurfaceFrameDeferredJunctions.ContainsByPredicate(
+				[&Intent](const ABTSM73BeamC3V3::
+					FTopSurfaceFrameDeferredJunctionPlan& Junction)
+				{
+					return Junction.SourceIntentIds.Contains(Intent.IntentId);
+				}));
+	}
+	for (const ABTSM73BeamC3V3::FTopSurfaceFrameDeferredJunctionPlan& Junction
+		: Plan.TopSurfaceFrameDeferredJunctions)
+	{
+		TestTrue(TEXT("Deferred junction names a Stage-3 facade column"),
+			Plan.Members.IsValidIndex(Junction.BlockingStage3ColumnMemberIndex)
+				&& Plan.Members[Junction.BlockingStage3ColumnMemberIndex].Axis
+					== EABTSM73BeamAFrameAxis::Z
+				&& (Plan.Members[Junction.BlockingStage3ColumnMemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::ExteriorPost
+					|| Plan.Members[Junction.BlockingStage3ColumnMemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::GroundExteriorPost));
+	}
+	TestEqual(TEXT("Deferred facade junction count matches its ledger"),
+		Summary.Stage4DeferredFacadeColumnJunctionCount,
+		Plan.TopSurfaceFrameDeferredJunctions.Num());
 	TestEqual(TEXT("Every TopSurface has one explicit semantic subtype"),
 		Summary.Stage4ResolvedTopSurfaceIntentCount,
 		ExposedSetbackTopCount + DirectStackSeatCount);
 	AddInfo(FString::Printf(
 		TEXT("Stage4Intent Entry=%s Stage3=%lld IntentHash=%lld")
 		TEXT(" Frames=%d Ground=%d Top=%d Setback=%d Stack=%d")
-		TEXT(" Unresolved=%d Members=%d")
-		TEXT(" TimingMs=%.3f Physical=NotEvaluated"),
+		TEXT(" Unresolved=%d TopFrames=%d Emitted=%d Reused=%d DeferredJunctions=%d Members=%d")
+		TEXT(" TimingMs=%.3f/%.3f Physical=NotEvaluated"),
 		*Entry.StableId.ToString(), Summary.Stage3PlanHash,
 		Summary.Stage4IntentHash, Summary.Stage4TopSurfaceIntentCount,
 		Summary.Stage4GroundSillIntentCount,
 		Summary.Stage4ResolvedTopSurfaceIntentCount,
 		ExposedSetbackTopCount, DirectStackSeatCount,
-		Summary.Stage4UnresolvedIntentCount, Plan.Members.Num(),
-		Summary.Stage4IntentMilliseconds));
+		Summary.Stage4UnresolvedIntentCount,
+		Summary.Stage4TopFrameSegmentCount,
+		Summary.Stage4EmittedTopFrameSegmentCount,
+		Summary.Stage4ReusedTopFrameSegmentCount,
+		Summary.Stage4DeferredFacadeColumnJunctionCount, Plan.Members.Num(),
+		Summary.Stage4IntentMilliseconds,
+		Summary.Stage4TopFrameMilliseconds));
 	return true;
 }
 

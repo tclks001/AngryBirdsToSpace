@@ -31,7 +31,7 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 	CoreAndShared UMETA(DisplayName = "Stage 1 - Core + Shared Courses"),
 	CouplingCourses UMETA(DisplayName = "Stage 2 - Core / Facade Coupling Courses"),
 	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame"),
-	FloorInfillRoof UMETA(DisplayName = "Stage 4A - TopSurface Intent (No New Bricks)"),
+	FloorInfillRoof UMETA(DisplayName = "Stage 4 - Floor / Top Frames"),
 	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)")
 };
 
@@ -75,7 +75,8 @@ enum class EABTSM73BeamC3Stage3DiagnosticLayer : uint8
 UENUM(BlueprintType)
 enum class EABTSM73BeamC3Stage4DiagnosticLayer : uint8
 {
-	TopSurfaceIntent UMETA(DisplayName = "1 - GroundSill / TopSurface Intent")
+	TopSurfaceIntent UMETA(DisplayName = "1 - GroundSill / TopSurface Intent"),
+	FloorTopFrames UMETA(DisplayName = "2 - Floor / Top Frames")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -759,4 +760,28 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
 	double SkeletonFirstStage4IntentMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4TopFrameSegmentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4EmittedTopFrameSegmentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4ReusedTopFrameSegmentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4TopFrameBindingViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4TopFrameConflictCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "M7.3|Beam-C3|Stage 4")
+	int32 SkeletonFirstStage4DeferredFacadeColumnJunctionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int64 SkeletonFirstStage4TopFrameHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
+	double SkeletonFirstStage4TopFrameMilliseconds = 0.0;
 };

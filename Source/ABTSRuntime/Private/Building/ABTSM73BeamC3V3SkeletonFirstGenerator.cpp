@@ -22902,6 +22902,508 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 	return Plan.Summary.Stage4IntentHash != 0;
 }
 
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FloorTopFrames(
+	const FABTSM73BeamD0ResolvedProfile& Profile,
+	const FABTSM73DAG5BV2GenerationResult& Silhouette,
+	ABTSM73BeamC3V3::FGenerationResult& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamC3V3;
+	if (!GenerateStage4TopSurfaceIntent(Profile, Silhouette, OutResult, OutError))
+	{
+		return false;
+	}
+	FPlan& Plan = OutResult.Plan;
+	FABTSM73BeamAGenerationResult& Assembly = OutResult.Assembly;
+	const double StartSeconds = FPlatformTime::Seconds();
+	const int32 Stage3MemberCount = Plan.Members.Num();
+	Plan.TopSurfaceFrameSegments.Reset();
+	Plan.TopSurfaceFrameDeferredJunctions.Reset();
+	Plan.Summary.Stage4TopFrameSegmentCount = 0;
+	Plan.Summary.Stage4EmittedTopFrameSegmentCount = 0;
+	Plan.Summary.Stage4ReusedTopFrameSegmentCount = 0;
+	Plan.Summary.Stage4TopFrameBindingViolationCount = 0;
+	Plan.Summary.Stage4TopFrameConflictCount = 0;
+	Plan.Summary.Stage4DeferredFacadeColumnJunctionCount = 0;
+	Plan.Summary.Stage4TopFrameHash = 0;
+	Plan.Summary.Stage4TopFrameMilliseconds = 0.0;
+
+	struct FTopFrameCell
+	{
+		int32 ComponentId = INDEX_NONE;
+		int32 EnvelopeVolumeId = INDEX_NONE;
+		int32 SourceVolumeId = INDEX_NONE;
+		int32 SurfaceCourse = INDEX_NONE;
+		uint8 FaceMask = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		double NormalCM = 0.0;
+		double MinimumCM = 0.0;
+		double MaximumCM = 0.0;
+		TArray<int32> IntentIds;
+	};
+	TMap<FString, FTopFrameCell> CellsByKey;
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent != EFacadeDownwardIntent::TopSurface)
+		{
+			continue;
+		}
+		const bool bNormalX = Intent.FaceMask == NegativeX
+			|| Intent.FaceMask == PositiveX;
+		const bool bPositive = Intent.FaceMask == PositiveX
+			|| Intent.FaceMask == PositiveY;
+		const EABTSM73BeamAFrameAxis Axis = bNormalX
+			? EABTSM73BeamAFrameAxis::Y : EABTSM73BeamAFrameAxis::X;
+		const double Normal = Intent.FacadeCoordinateCM
+			+ (bPositive ? 1.0 : -1.0) * BlockUnitsCM * 0.5
+				* (Intent.TopSurfaceAuthority
+					== ETopSurfaceAuthorityKind::ExposedSetbackTop ? 1.0 : -1.0);
+		const double Minimum = CellFaceAtOrAbove(
+			Intent.TargetSupportTangentMinimumCM);
+		const double Maximum = CellFaceAtOrBelow(
+			Intent.TargetSupportTangentMaximumCM);
+		if (Intent.TargetSurfaceCourseIndex == INDEX_NONE
+			|| Maximum - Minimum < BlockUnitsCM - GeometryToleranceCM)
+		{
+			++Plan.Summary.Stage4TopFrameBindingViolationCount;
+			continue;
+		}
+		for (double CellMinimum = Minimum;
+			CellMinimum < Maximum - GeometryToleranceCM;
+			CellMinimum += BlockUnitsCM)
+		{
+			const double CellMaximum = FMath::Min(
+				CellMinimum + BlockUnitsCM, Maximum);
+			const FString Key = FString::Printf(
+				TEXT("%d:%d:%d:%lld:%lld"), Intent.ComponentId,
+				Intent.TargetSurfaceCourseIndex, static_cast<int32>(Axis),
+				QHash(Normal), QHash(CellMinimum));
+			FTopFrameCell& Cell = CellsByKey.FindOrAdd(Key);
+			if (Cell.ComponentId == INDEX_NONE)
+			{
+				Cell.ComponentId = Intent.ComponentId;
+				Cell.EnvelopeVolumeId = Intent.TargetEnvelopeVolumeId;
+				Cell.SourceVolumeId = Intent.TargetSourceVolumeId;
+				Cell.SurfaceCourse = Intent.TargetSurfaceCourseIndex;
+				Cell.FaceMask = Intent.FaceMask;
+				Cell.Axis = Axis;
+				Cell.NormalCM = Normal;
+				Cell.MinimumCM = CellMinimum;
+				Cell.MaximumCM = CellMaximum;
+			}
+			else
+			{
+				Cell.FaceMask |= Intent.FaceMask;
+				if (Intent.TargetEnvelopeVolumeId < Cell.EnvelopeVolumeId)
+				{
+					Cell.EnvelopeVolumeId = Intent.TargetEnvelopeVolumeId;
+					Cell.SourceVolumeId = Intent.TargetSourceVolumeId;
+				}
+			}
+			Cell.IntentIds.AddUnique(Intent.IntentId);
+		}
+	}
+	TArray<FTopFrameCell> Cells;
+	CellsByKey.GenerateValueArray(Cells);
+	Cells.Sort([](const FTopFrameCell& A, const FTopFrameCell& B)
+	{
+		if (A.ComponentId != B.ComponentId) return A.ComponentId < B.ComponentId;
+		if (A.SurfaceCourse != B.SurfaceCourse) return A.SurfaceCourse < B.SurfaceCourse;
+		if (A.Axis != B.Axis) return A.Axis == EABTSM73BeamAFrameAxis::X;
+		if (!FMath::IsNearlyEqual(A.NormalCM, B.NormalCM, GeometryToleranceCM))
+		{
+			return A.NormalCM < B.NormalCM;
+		}
+		return A.MinimumCM < B.MinimumCM;
+	});
+
+	auto AddLedger = [&Plan](const FTopFrameCell& Cell,
+		const double Minimum, const double Maximum, const int32 MemberIndex,
+		const bool bReused)
+	{
+		FTopSurfaceFrameSegmentPlan& Segment =
+			Plan.TopSurfaceFrameSegments.AddDefaulted_GetRef();
+		Segment.TopSurfaceFrameSegmentId =
+			Plan.TopSurfaceFrameSegments.Num() - 1;
+		Segment.SourceIntentIds = Cell.IntentIds;
+		Segment.SourceIntentIds.Sort();
+		Segment.ComponentId = Cell.ComponentId;
+		Segment.TargetEnvelopeVolumeId = Cell.EnvelopeVolumeId;
+		Segment.TargetSourceVolumeId = Cell.SourceVolumeId;
+		Segment.SurfaceCourseIndex = Cell.SurfaceCourse;
+		Segment.FaceMask = Cell.FaceMask;
+		Segment.Axis = Cell.Axis;
+		Segment.NormalCoordinateCM = Cell.NormalCM;
+		Segment.TangentMinimumCM = Minimum;
+		Segment.TangentMaximumCM = Maximum;
+		Segment.MemberIndex = MemberIndex;
+		Segment.bReusesExistingMember = bReused;
+	};
+	auto MakeMember = [&Plan](const FTopFrameCell& Cell,
+		const double Minimum, const double Maximum)
+	{
+		const double GroundZ = Plan.Components.IsValidIndex(Cell.ComponentId)
+			? Plan.Components[Cell.ComponentId].GroundPlaneZCM : 0.0;
+		const double Z = GroundZ + (Cell.SurfaceCourse + 0.5) * BlockUnitsCM;
+		FPlannedMember Member;
+		Member.Axis = Cell.Axis;
+		Member.LocalStart = Cell.Axis == EABTSM73BeamAFrameAxis::X
+			? Position(Minimum, Cell.NormalCM, Z)
+			: Position(Cell.NormalCM, Minimum, Z);
+		Member.LocalEnd = Cell.Axis == EABTSM73BeamAFrameAxis::X
+			? Position(Maximum, Cell.NormalCM, Z)
+			: Position(Cell.NormalCM, Maximum, Z);
+		return Member;
+	};
+	auto FindCoverOrConflict = [&Plan](const FPlannedMember& Probe,
+		int32& OutCoveringMember)
+	{
+		OutCoveringMember = INDEX_NONE;
+		const FBox Bounds = PlannedMemberBounds(Probe);
+		for (int32 ExistingIndex = 0; ExistingIndex < Plan.Members.Num(); ++ExistingIndex)
+		{
+			const FPlannedMember& Existing = Plan.Members[ExistingIndex];
+			const FBox ExistingBounds = PlannedMemberBounds(Existing);
+			if (!BoxesPenetrate(Bounds, ExistingBounds))
+			{
+				continue;
+			}
+			const bool bSameSlab = Existing.Axis != EABTSM73BeamAFrameAxis::Z
+				&& FMath::Abs(ExistingBounds.Min.Z - Bounds.Min.Z)
+					<= GeometryToleranceCM
+				&& FMath::Abs(ExistingBounds.Max.Z - Bounds.Max.Z)
+					<= GeometryToleranceCM;
+			const bool bCoversInSlab = bSameSlab
+				&& ExistingBounds.Min.X <= Bounds.Min.X + GeometryToleranceCM
+				&& ExistingBounds.Max.X >= Bounds.Max.X - GeometryToleranceCM
+				&& ExistingBounds.Min.Y <= Bounds.Min.Y + GeometryToleranceCM
+				&& ExistingBounds.Max.Y >= Bounds.Max.Y - GeometryToleranceCM;
+			// A perpendicular horizontal member which already crosses the same
+			// 36 cm cell is the real corner/junction material. Adopt it just like
+			// Stage 3 does; emitting a duplicate would create positive volume.
+			if (bCoversInSlab || bSameSlab)
+			{
+				OutCoveringMember = ExistingIndex;
+				return false;
+			}
+			OutCoveringMember = ExistingIndex;
+			return true;
+		}
+		return false;
+	};
+
+	int32 Cursor = 0;
+	while (Cursor < Cells.Num())
+	{
+		const FTopFrameCell& First = Cells[Cursor];
+		int32 End = Cursor + 1;
+		while (End < Cells.Num()
+			&& Cells[End].ComponentId == First.ComponentId
+			&& Cells[End].SurfaceCourse == First.SurfaceCourse
+			&& Cells[End].Axis == First.Axis
+			&& FMath::IsNearlyEqual(Cells[End].NormalCM, First.NormalCM,
+				GeometryToleranceCM)
+			&& FMath::IsNearlyEqual(Cells[End].MinimumCM,
+				Cells[End - 1].MaximumCM, GeometryToleranceCM))
+		{
+			++End;
+		}
+		double FreeMinimum = 0.0;
+		double FreeMaximum = 0.0;
+		bool bHasFreeRun = false;
+		FTopFrameCell FreeCell = First;
+		auto FlushFreeRun = [&]() -> bool
+		{
+			if (!bHasFreeRun)
+			{
+				return true;
+			}
+			double RunCursor = FreeMinimum;
+			while (RunCursor < FreeMaximum - GeometryToleranceCM)
+			{
+				const double RunEnd = FMath::Min(RunCursor
+					+ MaximumHorizontalUnits * static_cast<double>(BlockUnitsCM),
+					FreeMaximum);
+				const FPlannedMember Probe = MakeMember(FreeCell, RunCursor, RunEnd);
+				const FBox Bounds = PlannedMemberBounds(Probe);
+				if (Plan.ReservedSupportVoids.ContainsByPredicate(
+					[&Bounds](const FABTSM73BeamASupportVoid& Void)
+					{
+						return BoxesPenetrate(Bounds, Void.Bounds);
+					}))
+				{
+					++Plan.Summary.Stage4TopFrameConflictCount;
+					OutError = FString::Printf(
+						TEXT("BeamC3V3Stage4TopFrameProtectedVoid:Component=%d:Course=%d:Axis=%d:Normal=%.3f:Run=%.3f..%.3f"),
+						FreeCell.ComponentId, FreeCell.SurfaceCourse,
+						static_cast<int32>(FreeCell.Axis), FreeCell.NormalCM,
+						RunCursor, RunEnd);
+					return false;
+				}
+				const int32 SegmentId = Plan.TopSurfaceFrameSegments.Num();
+				const int32 MemberIndex = Plan.Members.Num();
+				if (!AddPlannedMember(Plan, EOwnerKind::Floor,
+					ESkeletonMemberKind::FloorCourse, FreeCell.ComponentId,
+					FreeCell.ComponentId, FreeCell.SourceVolumeId, INDEX_NONE,
+					FreeCell.SurfaceCourse,
+					FMath::RoundToInt(RunCursor / BlockUnitsCM),
+					FMath::RoundToInt(RunEnd / BlockUnitsCM), FreeCell.FaceMask,
+					FreeCell.Axis, FreeCell.Axis == EABTSM73BeamAFrameAxis::X
+						? EABTSM73BeamAMemberRole::PrimaryBeam
+						: EABTSM73BeamAMemberRole::SecondaryBeam,
+					Probe.LocalStart, Probe.LocalEnd, OutError))
+				{
+					return false;
+				}
+				Plan.Members[MemberIndex].OwnerId = FreeCell.ComponentId;
+				AddLedger(FreeCell, RunCursor, RunEnd, MemberIndex, false);
+				Plan.Members[MemberIndex].OwnerId = FreeCell.ComponentId;
+				Plan.Members[MemberIndex].TargetFacadeSourceVolumeId =
+					FreeCell.SourceVolumeId;
+				Plan.Members[MemberIndex].TopSurfaceFrameSegmentId = SegmentId;
+				Plan.Summary.TotalMemberLengthCM += RunEnd - RunCursor;
+				++Plan.Summary.Stage4EmittedTopFrameSegmentCount;
+				RunCursor = RunEnd;
+			}
+			bHasFreeRun = false;
+			return true;
+		};
+		for (int32 CellIndex = Cursor; CellIndex < End; ++CellIndex)
+		{
+			const FTopFrameCell& Cell = Cells[CellIndex];
+			const FPlannedMember Probe = MakeMember(
+				Cell, Cell.MinimumCM, Cell.MaximumCM);
+			const FBox Bounds = PlannedMemberBounds(Probe);
+			if (Plan.ReservedSupportVoids.ContainsByPredicate(
+				[&Bounds](const FABTSM73BeamASupportVoid& Void)
+				{
+					return BoxesPenetrate(Bounds, Void.Bounds);
+				}))
+			{
+				++Plan.Summary.Stage4TopFrameConflictCount;
+				OutError = FString::Printf(
+					TEXT("BeamC3V3Stage4TopFrameProtectedVoidCell:Component=%d:Course=%d:Axis=%d:Normal=%.3f:Cell=%.3f..%.3f"),
+					Cell.ComponentId, Cell.SurfaceCourse,
+					static_cast<int32>(Cell.Axis), Cell.NormalCM,
+					Cell.MinimumCM, Cell.MaximumCM);
+				return false;
+			}
+			int32 CoveringMember = INDEX_NONE;
+			if (FindCoverOrConflict(Probe, CoveringMember))
+			{
+				const FPlannedMember* Blocker =
+					Plan.Members.IsValidIndex(CoveringMember)
+						? &Plan.Members[CoveringMember] : nullptr;
+				const bool bDeferredStage3FacadeColumn = Blocker != nullptr
+					&& Blocker->Axis == EABTSM73BeamAFrameAxis::Z
+					&& (Blocker->SkeletonKind == ESkeletonMemberKind::ExteriorPost
+						|| Blocker->SkeletonKind
+							== ESkeletonMemberKind::GroundExteriorPost);
+				if (bDeferredStage3FacadeColumn)
+				{
+					if (!FlushFreeRun()) return false;
+					FTopSurfaceFrameDeferredJunctionPlan& Junction =
+						Plan.TopSurfaceFrameDeferredJunctions.AddDefaulted_GetRef();
+					Junction.DeferredJunctionId =
+						Plan.TopSurfaceFrameDeferredJunctions.Num() - 1;
+					Junction.SourceIntentIds = Cell.IntentIds;
+					Junction.SourceIntentIds.Sort();
+					Junction.ComponentId = Cell.ComponentId;
+					Junction.SurfaceCourseIndex = Cell.SurfaceCourse;
+					Junction.FaceMask = Cell.FaceMask;
+					Junction.Axis = Cell.Axis;
+					Junction.NormalCoordinateCM = Cell.NormalCM;
+					Junction.TangentMinimumCM = Cell.MinimumCM;
+					Junction.TangentMaximumCM = Cell.MaximumCM;
+					Junction.BlockingStage3ColumnMemberIndex = CoveringMember;
+					++Plan.Summary.Stage4DeferredFacadeColumnJunctionCount;
+					continue;
+				}
+				++Plan.Summary.Stage4TopFrameConflictCount;
+				OutError = FString::Printf(
+					TEXT("BeamC3V3Stage4TopFrameMemberConflict:Component=%d:Course=%d:Axis=%d:Normal=%.3f:Cell=%.3f..%.3f:Blocker=%d:Kind=%d:BlockerAxis=%d:BlockerCourse=%d"),
+					Cell.ComponentId, Cell.SurfaceCourse,
+					static_cast<int32>(Cell.Axis), Cell.NormalCM,
+					Cell.MinimumCM, Cell.MaximumCM, CoveringMember,
+					Blocker != nullptr ? static_cast<int32>(Blocker->SkeletonKind)
+						: INDEX_NONE,
+					Blocker != nullptr ? static_cast<int32>(Blocker->Axis) : INDEX_NONE,
+					Blocker != nullptr ? Blocker->CourseIndex : INDEX_NONE);
+				return false;
+			}
+			if (CoveringMember != INDEX_NONE)
+			{
+				if (!FlushFreeRun()) return false;
+				AddLedger(Cell, Cell.MinimumCM, Cell.MaximumCM,
+					CoveringMember, true);
+				++Plan.Summary.Stage4ReusedTopFrameSegmentCount;
+				continue;
+			}
+			if (!bHasFreeRun)
+			{
+				FreeMinimum = Cell.MinimumCM;
+				FreeCell = Cell;
+				bHasFreeRun = true;
+			}
+			FreeMaximum = Cell.MaximumCM;
+			for (const int32 IntentId : Cell.IntentIds)
+			{
+				FreeCell.IntentIds.AddUnique(IntentId);
+			}
+		}
+		if (!FlushFreeRun()) return false;
+		Cursor = End;
+	}
+
+	Plan.Summary.Stage4TopFrameSegmentCount =
+		Plan.TopSurfaceFrameSegments.Num();
+	TSet<int32> BoundIntentIds;
+	FString Canonical = FString::Printf(TEXT("Intent=%lld"),
+		Plan.Summary.Stage4IntentHash);
+	for (const FTopSurfaceFrameSegmentPlan& Segment
+		: Plan.TopSurfaceFrameSegments)
+	{
+		const bool bValid = Plan.Members.IsValidIndex(Segment.MemberIndex)
+			&& !Segment.SourceIntentIds.IsEmpty()
+			&& Segment.SurfaceCourseIndex != INDEX_NONE
+			&& Segment.TangentMaximumCM - Segment.TangentMinimumCM
+				>= BlockUnitsCM - GeometryToleranceCM;
+		Plan.Summary.Stage4TopFrameBindingViolationCount += bValid ? 0 : 1;
+		for (const int32 IntentId : Segment.SourceIntentIds)
+		{
+			BoundIntentIds.Add(IntentId);
+		}
+		Canonical += FString::Printf(
+			TEXT("|TF:%d:C%d:E%d:S%d:Q%d:M%u:A%d:N%lld:TA%lld:TB%lld:R%d:I"),
+			Segment.TopSurfaceFrameSegmentId, Segment.ComponentId,
+			Segment.TargetEnvelopeVolumeId, Segment.TargetSourceVolumeId,
+			Segment.SurfaceCourseIndex, Segment.FaceMask,
+			static_cast<int32>(Segment.Axis), QHash(Segment.NormalCoordinateCM),
+			QHash(Segment.TangentMinimumCM), QHash(Segment.TangentMaximumCM),
+			Segment.bReusesExistingMember ? Segment.MemberIndex
+				: -Segment.MemberIndex - 1);
+		for (const int32 IntentId : Segment.SourceIntentIds)
+		{
+			Canonical += FString::Printf(TEXT(",%d"), IntentId);
+		}
+	}
+	for (const FTopSurfaceFrameDeferredJunctionPlan& Junction
+		: Plan.TopSurfaceFrameDeferredJunctions)
+	{
+		Canonical += FString::Printf(
+			TEXT("|DJ:%d:C%d:Q%d:M%u:A%d:N%lld:TA%lld:TB%lld:B%d:I"),
+			Junction.DeferredJunctionId, Junction.ComponentId,
+			Junction.SurfaceCourseIndex, Junction.FaceMask,
+			static_cast<int32>(Junction.Axis), QHash(Junction.NormalCoordinateCM),
+			QHash(Junction.TangentMinimumCM), QHash(Junction.TangentMaximumCM),
+			Junction.BlockingStage3ColumnMemberIndex);
+		for (const int32 IntentId : Junction.SourceIntentIds)
+		{
+			Canonical += FString::Printf(TEXT(",%d"), IntentId);
+			BoundIntentIds.Add(IntentId);
+		}
+	}
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent == EFacadeDownwardIntent::TopSurface
+			&& !BoundIntentIds.Contains(Intent.IntentId))
+		{
+			++Plan.Summary.Stage4TopFrameBindingViolationCount;
+		}
+	}
+	if (Plan.Summary.Stage4ResolvedTopSurfaceIntentCount > 0
+		&& (Plan.Summary.Stage4TopFrameSegmentCount <= 0
+			|| Plan.Summary.Stage4TopFrameBindingViolationCount != 0
+			|| Plan.Summary.Stage4TopFrameConflictCount != 0))
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4TopFrameContractFailed:Top=%d:Segments=%d:Emitted=%d:Reused=%d:BindingViolations=%d:Conflicts=%d"),
+			Plan.Summary.Stage4ResolvedTopSurfaceIntentCount,
+			Plan.Summary.Stage4TopFrameSegmentCount,
+			Plan.Summary.Stage4EmittedTopFrameSegmentCount,
+			Plan.Summary.Stage4ReusedTopFrameSegmentCount,
+			Plan.Summary.Stage4TopFrameBindingViolationCount,
+			Plan.Summary.Stage4TopFrameConflictCount);
+		return false;
+	}
+	Plan.Summary.Stage4TopFrameHash = HashText(Canonical);
+	Plan.Summary.FinalGeometryHash = HashText(FString::Printf(
+		TEXT("Stage3=%lld:Stage4TopFrames=%lld"),
+		Plan.Summary.Stage3PlanHash, Plan.Summary.Stage4TopFrameHash));
+	Plan.Summary.PlannedMemberCount = Plan.Members.Num();
+	if (!ValidatePreflightCaps(Profile.BeamSettings.BeamB.BeamA, Plan, OutError))
+	{
+		return false;
+	}
+
+	TMap<FString, int32> JointByPosition;
+	const double JointScale = 1.0 / FMath::Max(0.1,
+		static_cast<double>(Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+	for (const FABTSM73BeamAJoint& Joint : Assembly.Joints)
+	{
+		JointByPosition.Add(FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Joint.LocalPosition.X * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Y * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Z * JointScale)), Joint.JointId);
+	}
+	auto AddJoint = [&Assembly, &JointByPosition, JointScale](
+		const FVector& Point, const EABTSM73BeamAJointRole Role)
+	{
+		const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Point.X * JointScale),
+			FMath::RoundToInt64(Point.Y * JointScale),
+			FMath::RoundToInt64(Point.Z * JointScale));
+		if (const int32* Existing = JointByPosition.Find(Key)) return *Existing;
+		FABTSM73BeamAJoint& Joint = Assembly.Joints.AddDefaulted_GetRef();
+		Joint.JointId = Assembly.Joints.Num() - 1;
+		Joint.LocalPosition = Point;
+		Joint.Role = Role;
+		JointByPosition.Add(Key, Joint.JointId);
+		return Joint.JointId;
+	};
+	for (int32 MemberIndex = Stage3MemberCount;
+		MemberIndex < Plan.Members.Num(); ++MemberIndex)
+	{
+		const FPlannedMember& Planned = Plan.Members[MemberIndex];
+		if (!Assembly.Assemblies.IsValidIndex(Planned.ComponentId))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3Stage4TopFrameInvalidOwner:Member=%d:Component=%d"),
+				MemberIndex, Planned.ComponentId);
+			return false;
+		}
+		FABTSM73BeamAMember& Member = Assembly.Members.AddDefaulted_GetRef();
+		Member.MemberId = Assembly.Members.Num() - 1;
+		Member.JointA = AddJoint(Planned.LocalStart,
+			EABTSM73BeamAJointRole::BeamEnd);
+		Member.JointB = AddJoint(Planned.LocalEnd,
+			EABTSM73BeamAJointRole::CrossBearing);
+		Member.Axis = Planned.Axis;
+		Member.Role = Planned.Role;
+		Member.LengthCM = FVector::Distance(Planned.LocalStart, Planned.LocalEnd);
+		FABTSM73BeamAAssembly& Owner = Assembly.Assemblies[Planned.ComponentId];
+		Owner.MemberIds.Add(Member.MemberId);
+		Owner.JointIds.AddUnique(Member.JointA);
+		Owner.JointIds.AddUnique(Member.JointB);
+	}
+	if (Assembly.Members.Num() != Plan.Members.Num()
+		|| Assembly.Joints.Num() != Plan.Summary.PlannedJointCount)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4TopFrameIRMismatch:Joints=%d/%d:Members=%d/%d"),
+			Assembly.Joints.Num(), Plan.Summary.PlannedJointCount,
+			Assembly.Members.Num(), Plan.Members.Num());
+		return false;
+	}
+	Assembly.Summary.BeamGraphHash = Plan.Summary.FinalGeometryHash;
+	RefreshAssemblySummary(Assembly);
+	Assembly.Summary.bAccepted = true;
+	Plan.Summary.EmittedMemberCount = Assembly.Members.Num();
+	Plan.Summary.bAccepted = true;
+	Plan.Summary.Stage4TopFrameMilliseconds = ElapsedMilliseconds(StartSeconds);
+	return Plan.Summary.Stage4TopFrameHash != 0;
+}
+
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(
 	const FABTSM73BeamD0ResolvedProfile& Profile,
 	const FABTSM73DAG5BV2GenerationResult& Silhouette,
