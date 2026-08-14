@@ -112,6 +112,8 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 
 	FABTSM11TrajectoryResult EventResult;
 	EventResult.ValidationHash = 1;
+	EventResult.CompletedAssistCount =
+		FABTSM11GravityScenario::AssistCount;
 	for (int32 AssistIndex = 1;
 		AssistIndex <= FABTSM11GravityScenario::AssistCount;
 		++AssistIndex)
@@ -1564,6 +1566,37 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 	TestFalse(
 		TEXT("Frozen schedule rejects a later trajectory identity"),
 		AdaptivePlan.IsUsableFor(DifferentResult));
+
+	FABTSM11TrajectoryResult IncompleteAssistResult = EventResult;
+	IncompleteAssistResult.CompletedAssistCount =
+		FABTSM11GravityScenario::AssistCount - 1;
+	FABTSM11FinaleCameraShotPlan IncompleteAssistPlan;
+	FString IncompleteAssistFailure;
+	TestFalse(
+		TEXT("M7 rejects a shot plan when the released route did not complete every assist"),
+		IncompleteAssistPlan.Build(
+			IncompleteAssistResult,
+			M3ShotSettings,
+			&IncompleteAssistFailure));
+	TestEqual(
+		TEXT("Incomplete assist rejection has a stable diagnostic"),
+		IncompleteAssistFailure,
+		FString(TEXT("M7ShotPlanRequiresAllAssistsCompleted")));
+	TestFalse(
+		TEXT("Rejected incomplete route cannot retain a frozen shot plan"),
+		IncompleteAssistPlan.IsUsableFor(IncompleteAssistResult));
+	const FABTSM11FinaleCameraStageSelection IncompleteAssistLiveRebuild =
+		ABTSM11FinaleCameraDirector::ResolveStage(
+			true,
+			false,
+			5.0,
+			&IncompleteAssistResult,
+			true,
+			&M3ShotSettings);
+	TestEqual(
+		TEXT("Live director rebuild also fails closed for an incomplete route"),
+		static_cast<uint8>(IncompleteAssistLiveRebuild.Stage),
+		static_cast<uint8>(EABTSM11FinaleCameraStage::Unavailable));
 
 	FABTSM11FinaleCameraShotSettings BorrowedTimeSettings = M3ShotSettings;
 	BorrowedTimeSettings.IncomingRevealLeadSeconds = 7.0;

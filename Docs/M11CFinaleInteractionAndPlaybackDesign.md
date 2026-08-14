@@ -274,6 +274,7 @@ M11-C 在 M11 自有实现中冻结并复现 M10.1-C 的投影语义，避免修
 - 期望位置位于切线后方并沿 transported Up 抬高，位置和旋转做指数平滑；传入相机的表现时间与轨迹播放倍率一致，避免 production 18× 播放时镜头滞后于鸟；
 - 切换到飞行相机时继承当前瞄准相机的 transform 与 FOV，避免 Blueprint 调整过视场角后在 Release 帧发生构图跳变；
 - 相机仅消费已经发布的播放样本，不反向改变 Bird Transform、Playback Plan、分类或 Hash；
+- M7 ShotPlan 的公共 `Build()` 入口只接受 `CompletedAssistCount == 3` 的完整三助推路线；即使不完整路线已经出现 `Assist3 Enter`，也不得建立冻结计划或现场计划，而应保持无 ShotPlan 的普通追尾与黑场恢复路线；
 - 失败可读停帧和 `TargetHit` 保持最后的飞行镜头；退出、黑屏恢复或重置时先切回 Aim Camera，再由既有 Controller 生命周期恢复 Party Camera；
 - 飞行相机是 M11-only transient Actor，不新增或迁移 Blueprint、地图实例和 Native Default Subobject。
 
@@ -405,6 +406,19 @@ Editor 最终增量 4/4 编译成功；fresh NullRHI `ABTS.M11C.Unit` 为 `12/12
 `M11-FailurePlaybackAlignment-20260813-IntegrationRouting.log`。纯调度门覆盖正常窗口、短轨迹
 按比例压缩、全黑精确对齐与零时长 fail closed；可见的星空相对运动和全黑边界仍需用户
 PIE 验收。
+
+2026-08-14 对齐 Integration 新增的 `PresentationAccepted` 路由合同：M7 ShotPlan
+公共 `Build()` 入口要求 `CompletedAssistCount == 3`，不完整 Assist3 路线即使已有
+`Assist3 Enter` 也不能取得冻结计划或现场重建计划，统一保持普通追尾与黑场恢复。
+UE 5.8 Development Editor 编译成功；fresh NullRHI 导演专项为 `1/1`、完整
+`ABTS.M11C.Unit` 为 `12/12`、`ABTS.M11C.Runtime` 为 `2/2`，新合同
+`ABTS.Contracts.M11PresentationAcceptance` 为 `3/3`。证据为
+`Saved/Logs/M11-ShotPlanEligibility-20260814-Build.log`、
+`M11-ShotPlanEligibility-20260814-FlightCamera.log`、
+`M11-ShotPlanEligibility-20260814-M11CUnit.log`、
+`M11-ShotPlanEligibility-20260814-M11CRuntime.log` 与
+`M11-ShotPlanEligibility-20260814-PresentationContract.log`。本轮只验证导演资格合同，
+不重新声明 Rank11 或 Rank12 已 `PresentationAccepted`；候选全域状态仍须独立重跑。
 
 下表保留 M11-C v1/前一轮 PIE 修复的归档基线证据。`21,025/558` 只证明 production v1 的 F4 接管闭包，不证明当前 Search v3 Candidate。
 
