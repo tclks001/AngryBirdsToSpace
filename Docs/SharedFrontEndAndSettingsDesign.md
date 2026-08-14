@@ -119,6 +119,7 @@ abts.Settings.Reset
 
 - UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity -NoHotReload` 完整链接成功。
 - fresh NullRHI `ABTS.UI.SystemMenu.SettingsContract` 精确发现 1 项、1/1 成功并以 `TEST COMPLETE. EXIT CODE: 0` 结束；确认保护最终日志：`Saved/Logs/SystemMenu-ConfirmFinalContract-20260815-055235.log`。
+- shared UI 前缀回归精确发现并通过 3/3（Flight、SystemMenu、Theme），日志：`Saved/Logs/SystemMenu-SharedUIRegression-20260815-055704.log`；既有背包/HUD `ABTS.M5.UI.VisualLayout` 1/1 通过，日志：`Saved/Logs/SystemMenu-InventoryUIRegression-20260815-055749.log`。
 - 既有 `ABTS.Audio.ReleaseAndMusicMapping` fresh NullRHI 1/1 成功；日志：`Saved/Logs/SystemSettings-AudioRegression-20260815-051131.log`。
 - fresh DX11 `-RenderOffscreen` 捕获均记录 `Complete Success=1 Reason=None`：
   - Front：`Saved/ABTSVisualCaptures/SystemMenu/20260815-052440/Front.png`；

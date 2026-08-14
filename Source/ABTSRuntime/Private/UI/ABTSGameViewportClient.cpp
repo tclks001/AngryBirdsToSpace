@@ -340,6 +340,17 @@ void UABTSGameViewportClient::CloseSystemMenu()
 
 void UABTSGameViewportClient::SetMenuVisible(const bool bVisible, const EABTSSystemMenuPage NewPage)
 {
+	// Console commands remain available while the menu owns input. Resolve any exclusive
+	// confirmation before an explicit page transition so a hidden dialog cannot keep a
+	// newly applied display mode alive or leak stale hit targets into the next page.
+	if (ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo)
+	{
+		RevertVideoSettings(TEXT("MenuNavigation"));
+	}
+	else if (ActiveDialog == EABTSSystemMenuDialog::ConfirmReset)
+	{
+		CancelDialog();
+	}
 	MenuPage = NewPage;
 	if (bVisible && !bMenuVisible)
 	{
@@ -911,6 +922,7 @@ void UABTSGameViewportClient::ShowResetConfirmation()
 {
 	ActiveDialog = EABTSSystemMenuDialog::ConfirmReset;
 	SelectedDialogAction = 1;
+	HitTargets.Reset();
 	PlayUIFeedback(false);
 }
 
@@ -919,6 +931,7 @@ void UABTSGameViewportClient::BeginVideoConfirmation()
 	ActiveDialog = EABTSSystemMenuDialog::ConfirmVideo;
 	SelectedDialogAction = 0;
 	VideoConfirmationDeadlineSeconds = FPlatformTime::Seconds() + VideoConfirmationDurationSeconds;
+	HitTargets.Reset();
 	UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][Settings] VideoConfirmation Started Seconds=%.0f"), VideoConfirmationDurationSeconds);
 }
 
