@@ -214,14 +214,54 @@ bool FABTSM11CEnvironmentStageContractTest::RunTest(
 			nullptr),
 		EABTSM11FinaleEnvironmentStage::DeepSpace);
 	TestEqual(
-		TEXT("Failure immediately requests recovery presentation"),
+		TEXT("A visible failed flight keeps its deep-space presentation"),
 		ABTSM11ResolveFinaleEnvironmentStage(
 			EABTSM11FinaleInteractionState::Failed,
 			4.25,
 			&ReleasedResult),
-		EABTSM11FinaleEnvironmentStage::Recovering);
+		EABTSM11FinaleEnvironmentStage::DeepSpace);
 	TestEqual(
-		TEXT("Recovery remains explicit until gameplay returns Ready"),
+		TEXT("An early visible failure preserves the altitude transition"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Failed,
+			4.249,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::AtmosphereTransition);
+	TestEqual(
+		TEXT("Only the full-black recovery state requests surface recovery"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Recovering,
+			4.25,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::Recovering);
+
+	FABTSM11FailurePresentationConfig FailureConfig;
+	FailureConfig.ReadableHoldSeconds = 0.30;
+	FailureConfig.FadeToBlackSeconds = 0.20;
+	FailureConfig.BlackHoldSeconds = 0.10;
+	FailureConfig.FadeFromBlackSeconds = 0.15;
+	FABTSM11FailurePresentationTimeline FailureTimeline;
+	TestTrue(
+		TEXT("Environment boundary fixture starts a valid failure timeline"),
+		FailureTimeline.Begin(FailureConfig));
+	bool bRestoreWorld = false;
+	FailureTimeline.Advance(0.49, bRestoreWorld);
+	TestFalse(
+		TEXT("Partially visible fade does not restore the world"),
+		bRestoreWorld);
+	TestEqual(
+		TEXT("Partially visible fade remains in deep space"),
+		ABTSM11ResolveFinaleEnvironmentStage(
+			EABTSM11FinaleInteractionState::Failed,
+			4.25,
+			&ReleasedResult),
+		EABTSM11FinaleEnvironmentStage::DeepSpace);
+	FailureTimeline.Advance(0.02, bRestoreWorld);
+	TestTrue(
+		TEXT("Failure timeline emits restoration exactly at full black"),
+		bRestoreWorld);
+	TestEqual(
+		TEXT("Full-black restoration frame publishes recovery"),
 		ABTSM11ResolveFinaleEnvironmentStage(
 			EABTSM11FinaleInteractionState::Recovering,
 			4.25,
@@ -731,11 +771,23 @@ bool FABTSM11CPIERegressionContractsTest::RunTest(
 	TestTrue(
 		TEXT("Failure presentation accepts a deterministic timing contract"),
 		FailureTimeline.Begin(FailureConfig));
+	TestTrue(
+		TEXT("Failure flight initially owns the full visible interval"),
+		FMath::IsNearlyEqual(
+			FailureTimeline.GetSecondsUntilRestore(),
+			0.30,
+			1.0e-9));
 	bool bRestoreWorld = false;
 	FailureTimeline.Advance(0.29, bRestoreWorld);
 	TestFalse(
 		TEXT("World is not restored before full black"),
 		bRestoreWorld);
+	TestTrue(
+		TEXT("Failure flight budget reaches the exact remaining fade time"),
+		FMath::IsNearlyEqual(
+			FailureTimeline.GetSecondsUntilRestore(),
+			0.01,
+			1.0e-9));
 	FailureTimeline.Advance(0.02, bRestoreWorld);
 	TestTrue(
 		TEXT("World restoration is emitted at full black"),
@@ -745,6 +797,11 @@ bool FABTSM11CPIERegressionContractsTest::RunTest(
 		FMath::IsNearlyEqual(
 			FailureTimeline.GetBlackoutAlpha(),
 			1.0,
+			1.0e-9));
+	TestTrue(
+		TEXT("No failed-flight time remains after full-black restoration"),
+		FMath::IsNearlyZero(
+			FailureTimeline.GetSecondsUntilRestore(),
 			1.0e-9));
 	FailureTimeline.Advance(0.01, bRestoreWorld);
 	TestFalse(
@@ -772,6 +829,62 @@ bool FABTSM11CPIERegressionContractsTest::RunTest(
 	TestTrue(
 		TEXT("The clamped hitch resumes and completes normally"),
 		FailureTimeline.IsComplete());
+
+	double FailureStartTimeSeconds = 0.0;
+	FABTSM11FailurePresentationConfig ScheduledFailureConfig;
+	TestTrue(
+		TEXT("Failure presentation can start early enough to consume the remaining playback"),
+		ABTSM11ResolveFailurePresentationSchedule(
+			2.0,
+			8.0,
+			2.0,
+			FailureConfig,
+			FailureStartTimeSeconds,
+			ScheduledFailureConfig));
+	TestTrue(
+		TEXT("Normal failure schedule preserves the requested hold and fade"),
+		FMath::IsNearlyEqual(FailureStartTimeSeconds, 7.4, 1.0e-9)
+			&& FMath::IsNearlyEqual(
+				ScheduledFailureConfig.ReadableHoldSeconds,
+				FailureConfig.ReadableHoldSeconds,
+				1.0e-9)
+			&& FMath::IsNearlyEqual(
+				ScheduledFailureConfig.FadeToBlackSeconds,
+				FailureConfig.FadeToBlackSeconds,
+				1.0e-9));
+	TestTrue(
+		TEXT("Full-black restoration aligns exactly with the playback endpoint"),
+		FMath::IsNearlyEqual(
+			FailureStartTimeSeconds
+				+ (ScheduledFailureConfig.ReadableHoldSeconds
+					+ ScheduledFailureConfig.FadeToBlackSeconds)
+					* 2.0,
+			8.0,
+			1.0e-9));
+	TestTrue(
+		TEXT("A short failed route scales only the pre-black interval instead of overshooting the route"),
+		ABTSM11ResolveFailurePresentationSchedule(
+			0.0,
+			0.2,
+			2.0,
+			FailureConfig,
+			FailureStartTimeSeconds,
+			ScheduledFailureConfig)
+			&& FMath::IsNearlyZero(FailureStartTimeSeconds, 1.0e-9)
+			&& FMath::IsNearlyEqual(
+				ScheduledFailureConfig.ReadableHoldSeconds
+					+ ScheduledFailureConfig.FadeToBlackSeconds,
+				0.1,
+				1.0e-9));
+	TestFalse(
+		TEXT("A zero-duration failed route cannot publish a misleading schedule"),
+		ABTSM11ResolveFailurePresentationSchedule(
+			1.0,
+			1.0,
+			2.0,
+			FailureConfig,
+			FailureStartTimeSeconds,
+			ScheduledFailureConfig));
 
 	const FABTSM11GravityBodySpec& Primary =
 		Preset.CanonicalScenario.Bodies[0];

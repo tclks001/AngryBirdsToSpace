@@ -162,12 +162,16 @@ set(ABTS_M11_SEARCH_TOOL_IDENTITY_FILES
 	"${ABTS_M11_SEARCH_SOURCE_ROOT}/ABTSM11FrozenV4CandidateData.inl"
 	"${CMAKE_CURRENT_LIST_DIR}/M11SearchMain.cpp"
 	"${CMAKE_CURRENT_LIST_DIR}/M11V22CertificationMain.cpp"
+	"${CMAKE_CURRENT_LIST_DIR}/M11V3ConnectivityClosure.h"
+	"${CMAKE_CURRENT_LIST_DIR}/M11V3ConnectivityClosure.cpp"
+	"${CMAKE_CURRENT_LIST_DIR}/M11V3BridgeClosureMain.cpp"
 	"${CMAKE_CURRENT_LIST_DIR}/GenerateFrozenCandidateCatalogData.mjs"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_target_offset_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_terminal_mapping_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_upstream_mapping_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_certify_rank11.py"
+	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v3_certify_rank12.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_target_offset_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_joint_mapping_search.py"
 	"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v22_rank11_assist2_similarity_search.py"
@@ -182,6 +186,7 @@ set(ABTS_M11_SEARCH_TOOL_IDENTITY_FILES
 	"${CMAKE_CURRENT_LIST_DIR}/Candidates/Rank11ScaledSequentialCandidate.json"
 	"${CMAKE_CURRENT_LIST_DIR}/Candidates/Rank12Variant58840HandfeelCandidate.json"
 	"${CMAKE_CURRENT_LIST_DIR}/Certification/Rank11V22CertificationInput.json"
+	"${CMAKE_CURRENT_LIST_DIR}/Certification/Rank12V3CertificationInput.json"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt"
 	"${CMAKE_CURRENT_LIST_DIR}/CMakePresets.json")
 
@@ -365,6 +370,12 @@ add_executable(ABTSM11V22CertificationCLI
 	${ABTS_M11_SEARCH_SOURCES}
 	"${CMAKE_CURRENT_LIST_DIR}/M11V22CertificationMain.cpp")
 
+add_executable(ABTSM11V3BridgeClosureCLI
+	${ABTS_M11_PRODUCTION_CORE_SOURCES}
+	${ABTS_M11_SEARCH_SOURCES}
+	"${CMAKE_CURRENT_LIST_DIR}/M11V3ConnectivityClosure.cpp"
+	"${CMAKE_CURRENT_LIST_DIR}/M11V3BridgeClosureMain.cpp")
+
 target_include_directories(ABTSM11SearchCLI PRIVATE
 	"${ABTS_M11_GENERATED_INCLUDE_DIRECTORY}"
 	"${ABTS_RUNTIME_PUBLIC_ROOT}"
@@ -424,6 +435,38 @@ target_compile_options(ABTSM11V22CertificationCLI PRIVATE
 	/GR-
 	/Zp8)
 target_link_options(ABTSM11V22CertificationCLI PRIVATE
+	/INCREMENTAL:NO
+	/OPT:REF
+	/OPT:ICF)
+
+target_include_directories(ABTSM11V3BridgeClosureCLI PRIVATE
+	"${ABTS_M11_GENERATED_INCLUDE_DIRECTORY}"
+	"${ABTS_RUNTIME_PUBLIC_ROOT}"
+	"${ABTS_RUNTIME_PRIVATE_ROOT}"
+	"${CMAKE_CURRENT_LIST_DIR}")
+target_compile_features(ABTSM11V3BridgeClosureCLI PRIVATE cxx_std_20)
+set_target_properties(ABTSM11V3BridgeClosureCLI PROPERTIES
+	CXX_EXTENSIONS OFF
+	MSVC_RUNTIME_LIBRARY "MultiThreadedDLL"
+	RUNTIME_OUTPUT_DIRECTORY
+		"${ABTS_REPOSITORY_ROOT}/Intermediate/M11CoreStandalone/bin")
+target_compile_definitions(ABTSM11V3BridgeClosureCLI PRIVATE
+	WIN32_LEAN_AND_MEAN
+	NOMINMAX)
+target_compile_options(ABTSM11V3BridgeClosureCLI PRIVATE
+	/permissive-
+	/Zc:__cplusplus
+	/Zc:preprocessor
+	/Zc:inline
+	/utf-8
+	/fp:precise
+	/Ox
+	/Ot
+	/Oi
+	/Ob2
+	/GR-
+	/Zp8)
+target_link_options(ABTSM11V3BridgeClosureCLI PRIVATE
 	/INCREMENTAL:NO
 	/OPT:REF
 	/OPT:ICF)
@@ -546,6 +589,25 @@ if(BUILD_TESTING)
 		PASS_REGULAR_EXPRESSION "\"passed\":true"
 		LABELS "M11V22;Portable;Dependencies")
 
+	add_test(NAME M11V3.ConnectivityContractParity
+		COMMAND ABTSM11V3BridgeClosureCLI self-test)
+	set_tests_properties(M11V3.ConnectivityContractParity PROPERTIES
+		PASS_REGULAR_EXPRESSION "\"passed\":true"
+		LABELS "M11V3;Portable;ContractParity")
+
+	add_test(NAME M11V3.NoUnrealEditorDependencies
+		COMMAND "${POWERSHELL_EXECUTABLE}"
+			-NoLogo
+			-NoProfile
+			-ExecutionPolicy Bypass
+			-File
+			"${CMAKE_CURRENT_LIST_DIR}/TestNoUnrealDependencies.ps1"
+			-Executable
+			"$<TARGET_FILE:ABTSM11V3BridgeClosureCLI>")
+	set_tests_properties(M11V3.NoUnrealEditorDependencies PROPERTIES
+		PASS_REGULAR_EXPRESSION "\"passed\":true"
+		LABELS "M11V3;Portable;Dependencies")
+
 	add_test(NAME M11V22.Rank10AssistScaleExperiment
 		COMMAND ABTSM11V22CertificationCLI
 			screen-aim
@@ -593,6 +655,15 @@ if(BUILD_TESTING)
 		PASS_REGULAR_EXPRESSION
 			"\"passed\": true"
 		LABELS "M11V22;Portable;Determinism;CertificationFreeze"
+		TIMEOUT 30)
+
+	add_test(NAME M11V3.Rank12UniqueCertificationFreeze
+		COMMAND "${PYTHON_EXECUTABLE}"
+			"${CMAKE_CURRENT_LIST_DIR}/Python/m11_v3_certify_rank12.py"
+			validate)
+	set_tests_properties(M11V3.Rank12UniqueCertificationFreeze PROPERTIES
+		PASS_REGULAR_EXPRESSION "\"passed\": true"
+		LABELS "M11V3;Portable;Determinism;CertificationFreeze"
 		TIMEOUT 30)
 endif()
 

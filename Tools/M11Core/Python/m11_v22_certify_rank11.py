@@ -414,7 +414,7 @@ def run_stage(plan: dict[str, Any], freeze: dict[str, Any], root: Path, stage: d
         for future in concurrent.futures.as_completed(futures):
             index, code, diagnostic = future.result()
             print(
-                f"[M11-B-v2.2][Rank11][{stage['name']}] "
+                f"[M11-B-v2.2][Rank{EXPECTED_RANK}][{stage['name']}] "
                 f"shard={index + 1}/{plan['shardCount']} returnCode={code}",
                 flush=True,
             )

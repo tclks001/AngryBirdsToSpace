@@ -17,6 +17,7 @@
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
+#include "HighResScreenshot.h"
 #include "Kismet/GameplayStatics.h"
 #include "Inventory/ABTSInventoryTypes.h"
 #include "Player/ABTSM25BirdCharacter.h"
@@ -529,6 +530,12 @@ bool FABTSM11FinaleCameraCaptureConfig::Parse(
 			OutFailure)
 		|| !ParseBoolOption(
 			CommandLine,
+			TEXT("ABTSM11CaptureHudScreenshot="),
+			false,
+			OutConfig.bHudScreenshotOnly,
+			OutFailure)
+		|| !ParseBoolOption(
+			CommandLine,
 			TEXT("ABTSM11CaptureDirectorM2="),
 			false,
 			OutConfig.bDirectorM2,
@@ -619,6 +626,12 @@ bool FABTSM11FinaleCameraCaptureConfig::IsValid(
 		return RejectFinaleCameraCaptureConfig(
 			OutFailure,
 			TEXT("M2 and M3 camera director modes are mutually exclusive."));
+	}
+	if (bHudScreenshotOnly && bTelemetryOnly)
+	{
+		return RejectFinaleCameraCaptureConfig(
+			OutFailure,
+			TEXT("HUD screenshot and telemetry-only modes are mutually exclusive."));
 	}
 	if (bCustomLaunchInput && !CustomLaunchInput.IsFinite())
 	{
@@ -711,6 +724,11 @@ FString FABTSM11FinaleCameraCaptureConfig::GetObservationCsvPath() const
 		MovieName + TEXT(".camera-observations.csv"));
 }
 
+FString FABTSM11FinaleCameraCaptureConfig::GetHudScreenshotPath() const
+{
+	return FPaths::Combine(OutputDirectory, MovieName + TEXT(".png"));
+}
+
 AABTSM11FinaleCameraCaptureRunner::AABTSM11FinaleCameraCaptureRunner()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -757,6 +775,7 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	if (!IFileManager::Get().MakeDirectory(*Config.OutputDirectory, true)
 		|| Config.GetObservedFrameCount() > 0
 		|| IFileManager::Get().FileExists(*Config.GetExpectedVideoPath())
+		|| IFileManager::Get().FileExists(*Config.GetHudScreenshotPath())
 		|| IFileManager::Get().FileExists(*Config.GetManifestPath())
 		|| IFileManager::Get().FileExists(*Config.GetObservationCsvPath()))
 	{
@@ -786,7 +805,7 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 		FABTSStylizedRenderingContract::ResolveViewPolicy(
 			ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveCaptureViewClass(Config),
 			FABTSStylizedRenderingControl::GetProfile());
-	if (!Config.bTelemetryOnly)
+	if (!Config.bTelemetryOnly && !Config.bHudScreenshotOnly)
 	{
 		RecordingRenderTarget = NewObject<UTextureRenderTarget2D>(this);
 		if (!IsValid(RecordingRenderTarget) || !IsValid(RecordingCapture))
@@ -806,7 +825,9 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 			*RecordingCapture,
 			ABTSM11FinaleCameraCaptureRunnerPrivate::ResolveCaptureViewClass(Config));
 	}
-	if ((!Config.bTelemetryOnly && !bStylizedViewRegistered)
+	if ((!Config.bTelemetryOnly
+			&& !Config.bHudScreenshotOnly
+			&& !bStylizedViewRegistered)
 		|| !CaptureViewPolicy.IsValid())
 	{
 		FailureReason = Config.bTelemetryOnly
@@ -825,7 +846,9 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 		TEXT("[ABTS][M11][CameraCapture] Initialized Contract=%d WorldType=%d Mode=%s Format=%s Rank=%d Authority=%s Stylized=%d TelemetryOnly=%d DirectorM2=%d DirectorM3=%d MirrorMainWorld=%d RenderVersion=%d ViewClass=%s PolicyTone=%d PolicyOutline=%d PolicySelective=%d WarmupFrames=%d Frames=%s Video=%s"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
 		static_cast<int32>(GetWorld()->WorldType),
-		Config.bTelemetryOnly
+		Config.bHudScreenshotOnly
+			? TEXT("GameViewportHudScreenshot")
+			: Config.bTelemetryOnly
 			? TEXT("RendererIndependentTelemetry")
 			: TEXT("StandaloneSceneCaptureFrameCapture"),
 		*Config.MovieFormat,
@@ -915,25 +938,77 @@ void AABTSM11FinaleCameraCaptureRunner::Tick(const float DeltaSeconds)
 			--RemainingWarmupFrames;
 			return;
 		}
-		bMovieCaptureStarted = true;
+		bMovieCaptureStarted = !Config.bHudScreenshotOnly;
 		Phase = EABTSM11FinaleCameraCapturePhase::WaitingForDependencies;
 		break;
 
 	case EABTSM11FinaleCameraCapturePhase::WaitingForDependencies:
 		// Preserve an observable "recording started, then launch" order and
 		// prove the post-render callback is producing real files before input.
-		if (CapturedFrameCount < 2)
+		if (!Config.bHudScreenshotOnly && CapturedFrameCount < 2)
 		{
 			break;
 		}
 		FailureReason.Reset();
 		if (TryBeginNominalAttempt())
 		{
-			Phase = EABTSM11FinaleCameraCapturePhase::WaitingForLaunch;
+			RemainingHudSettleFrames = Config.TerminalHoldFrames;
+			Phase = Config.bHudScreenshotOnly
+				? EABTSM11FinaleCameraCapturePhase::WaitingForHudScreenshot
+				: EABTSM11FinaleCameraCapturePhase::WaitingForLaunch;
 		}
 		else if (!FailureReason.IsEmpty())
 		{
 			Finish(false, FailureReason);
+		}
+		break;
+
+	case EABTSM11FinaleCameraCapturePhase::WaitingForHudScreenshot:
+		if (InteractionSystem->GetInteractionState()
+			== EABTSM11FinaleInteractionState::Failed)
+		{
+			Finish(false, TEXT("HudPreviewAttemptFailed:")
+				+ InteractionSystem->GetRuntimeFailure());
+			break;
+		}
+		if (!InteractionSystem->IsAiming())
+		{
+			break;
+		}
+		if (!bHudScreenshotRequested)
+		{
+			if (RemainingHudSettleFrames > 0
+				|| InteractionSystem->GetTargetPreviewPrediction() == nullptr)
+			{
+				RemainingHudSettleFrames = FMath::Max(0, RemainingHudSettleFrames - 1);
+				break;
+			}
+			if (FScreenshotRequest::IsScreenshotRequested())
+			{
+				Finish(false, TEXT("AnotherScreenshotRequestIsActive"));
+				break;
+			}
+			// Preserve the real HUD while excluding transient startup diagnostics
+			// from the visual-design artifact.
+			GAreScreenMessagesEnabled = false;
+			FScreenshotRequest::RequestScreenshot(
+				Config.GetHudScreenshotPath(),
+				true,
+				false,
+				false,
+				FIntRect(),
+				true);
+			bHudScreenshotRequested = FScreenshotRequest::IsScreenshotRequested();
+			if (!bHudScreenshotRequested)
+			{
+				Finish(false, TEXT("HudScreenshotRequestRejected"));
+			}
+			break;
+		}
+		if (!FScreenshotRequest::IsScreenshotRequested()
+			&& IFileManager::Get().FileExists(*Config.GetHudScreenshotPath()))
+		{
+			Finish(true, TEXT("HudScreenshotComplete"));
 		}
 		break;
 
@@ -1060,10 +1135,13 @@ bool AABTSM11FinaleCameraCaptureRunner::TryBeginNominalAttempt()
 		FailureReason = TEXT("CaptureLaunchInputOutsidePresetDomain");
 		return false;
 	}
-	if (!InteractionSystem->TryLaunchCaptureAttempt(
-		*MatchingCord,
-		*Controller,
-		Input))
+	const bool bAttemptAccepted = Config.bHudScreenshotOnly
+		? InteractionSystem->TryEnterFinale(*MatchingCord, *Controller)
+		: InteractionSystem->TryLaunchCaptureAttempt(
+			*MatchingCord,
+			*Controller,
+			Input);
+	if (!bAttemptAccepted)
 	{
 		FailureReason = TEXT("CaptureAttemptRejected");
 		return false;
@@ -1073,7 +1151,9 @@ bool AABTSM11FinaleCameraCaptureRunner::TryBeginNominalAttempt()
 		LogABTSRuntime,
 		Log,
 		TEXT("[ABTS][M11][CameraCapture] AttemptQueued Mode=%s Rank=%d Yaw=%.9f Pitch=%.9f Power=%.9f"),
-		Config.bCustomLaunchInput ? TEXT("CustomF4") : TEXT("Nominal"),
+		Config.bHudScreenshotOnly
+			? TEXT("HudAiming")
+			: Config.bCustomLaunchInput ? TEXT("CustomF4") : TEXT("Nominal"),
 		Config.CandidateRank,
 		Input.YawDegrees,
 		Input.PitchDegrees,
@@ -2112,11 +2192,12 @@ void AABTSM11FinaleCameraCaptureRunner::Finish(
 	}
 
 	const FString Summary = FString::Printf(
-		TEXT("[ABTS][M11][CameraCapture] Complete Success=%d Rank=%d Stylized=%d TelemetryOnly=%d State=%s Frames=%d Manifest=%d Reason=%s Video=%s"),
+		TEXT("[ABTS][M11][CameraCapture] Complete Success=%d Rank=%d Stylized=%d TelemetryOnly=%d HudScreenshot=%d State=%s Frames=%d Manifest=%d Reason=%s Artifact=%s"),
 		bSuccess ? 1 : 0,
 		Config.CandidateRank,
 		Config.bStylized ? 1 : 0,
 		Config.bTelemetryOnly ? 1 : 0,
+		Config.bHudScreenshotOnly ? 1 : 0,
 		IsValid(InteractionSystem)
 			? ABTSM11FinaleCameraCaptureRunnerPrivate::StateLabel(
 				InteractionSystem->GetInteractionState())
@@ -2124,9 +2205,11 @@ void AABTSM11FinaleCameraCaptureRunner::Finish(
 		CapturedFrameCount,
 		bManifestWritten ? 1 : 0,
 		*Reason,
-		Config.bTelemetryOnly
-			? TEXT("None")
-			: *Config.GetExpectedVideoPath());
+		Config.bHudScreenshotOnly
+			? *Config.GetHudScreenshotPath()
+			: Config.bTelemetryOnly
+				? TEXT("None")
+				: *Config.GetExpectedVideoPath());
 	if (bSuccess && bManifestWritten)
 	{
 		UE_LOG(LogABTSRuntime, Log, TEXT("%s"), *Summary);
@@ -2167,7 +2250,9 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 			: TEXT("Failed"));
 	Root->SetStringField(
 		TEXT("captureFinalization"),
-		Config.bTelemetryOnly
+		Config.bHudScreenshotOnly
+			? TEXT("GameViewportHudScreenshotComplete")
+			: Config.bTelemetryOnly
 			? TEXT("TelemetryCsvAndManifestComplete")
 			: TEXT("SynchronousFramesAndAviMuxComplete"));
 	Root->SetStringField(TEXT("reason"), Reason);
@@ -2190,9 +2275,12 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		Config.CandidateRank == 0 ? TEXT("Certified") : TEXT("UNCERTIFIED"));
 	Root->SetBoolField(TEXT("stylizedEnabled"), Config.bStylized);
 	Root->SetBoolField(TEXT("telemetryOnly"), Config.bTelemetryOnly);
+	Root->SetBoolField(TEXT("hudScreenshotOnly"), Config.bHudScreenshotOnly);
+	Root->SetStringField(TEXT("hudScreenshotPath"),
+		Config.bHudScreenshotOnly ? Config.GetHudScreenshotPath() : TEXT(""));
 	Root->SetBoolField(
 		TEXT("visualRecordingProduced"),
-		!Config.bTelemetryOnly);
+		!Config.bTelemetryOnly && !Config.bHudScreenshotOnly);
 	Root->SetBoolField(TEXT("cameraDirectorM2Requested"), Config.bDirectorM2);
 	Root->SetBoolField(TEXT("cameraDirectorM3Requested"), Config.bDirectorM3);
 	Root->SetBoolField(
@@ -2254,7 +2342,9 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		Config.bStylized && CaptureViewPolicy.bAllowSelectiveStencil);
 	Root->SetStringField(
 		TEXT("captureProtocol"),
-		Config.bTelemetryOnly
+		Config.bHudScreenshotOnly
+			? TEXT("GameViewportPNGWithHUD")
+			: Config.bTelemetryOnly
 			? TEXT("RendererIndependentTelemetry")
 			: TEXT("SceneCaptureJPG+MJPEGAVI"));
 	Root->SetNumberField(
@@ -2262,10 +2352,12 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		FABTSStylizedRenderingControl::GetImplementationVersion());
 	Root->SetStringField(
 		TEXT("videoPath"),
-		Config.bTelemetryOnly ? FString() : Config.GetExpectedVideoPath());
+		Config.bTelemetryOnly || Config.bHudScreenshotOnly
+			? FString() : Config.GetExpectedVideoPath());
 	Root->SetStringField(
 		TEXT("frameWildcard"),
-		Config.bTelemetryOnly ? FString() : Config.GetFrameWildcard());
+		Config.bTelemetryOnly || Config.bHudScreenshotOnly
+			? FString() : Config.GetFrameWildcard());
 	Root->SetStringField(
 		TEXT("cameraObservationPath"),
 		Config.GetObservationCsvPath());
@@ -2278,21 +2370,25 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 		bObservationCsvWritten);
 	Root->SetStringField(
 		TEXT("cameraObservationAssessment"),
-		Config.bTelemetryOnly
+		Config.bHudScreenshotOnly
+			? TEXT("NotApplicableToHudScreenshot")
+			: Config.bTelemetryOnly
 			? TEXT("NumericalOrthogonalityEvidence")
 			: TEXT("OfflineDiagnosticRequired"));
 	const FM5OrthogonalityDigests M5Digests =
 		ComputeM5OrthogonalityDigests(ObservationSamples);
 	Root->SetStringField(
 		TEXT("m5EvidenceMode"),
-		Config.bTelemetryOnly
+		Config.bHudScreenshotOnly
+			? TEXT("HudVisualDiagnostic")
+			: Config.bTelemetryOnly
 			? TEXT("NumericalTelemetry")
 			: Config.bStylized
 				? TEXT("StylizedVisualRecording")
 				: TEXT("LegacyVisualDiagnostic"));
 	Root->SetBoolField(
 		TEXT("m5VisualAcceptanceEligible"),
-		!Config.bTelemetryOnly && Config.bStylized);
+		!Config.bTelemetryOnly && !Config.bHudScreenshotOnly && Config.bStylized);
 	Root->SetBoolField(
 		TEXT("m5StylizedExcludedFromNumericalHashes"),
 		true);
@@ -2319,7 +2415,7 @@ bool AABTSM11FinaleCameraCaptureRunner::WriteManifest(
 	Root->SetBoolField(TEXT("videoPostprocessRequired"), false);
 	Root->SetNumberField(
 		TEXT("videoBytesObserved"),
-		Config.bTelemetryOnly
+		Config.bTelemetryOnly || Config.bHudScreenshotOnly
 			? 0.0
 			: static_cast<double>(IFileManager::Get().FileSize(
 				*Config.GetExpectedVideoPath())));
@@ -2715,9 +2811,9 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	const FString& Parameters)
 {
 	TestEqual(
-		TEXT("Capture contract version includes Rank12 MainWorld mirror v17"),
+		TEXT("Capture contract version includes GameViewport HUD screenshots v18"),
 		FABTSM11FinaleCameraCaptureConfig::ContractVersion,
-		17);
+		18);
 
 	FABTSM11FinaleCameraCaptureConfig Config;
 	FString Failure;
@@ -2802,6 +2898,25 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestTrue(
 		TEXT("Rank12 mirrors the live MainWorld environment"),
 		Config.bMirrorMainWorldEnvironment);
+
+	const FString HudCommandLine = FString::Printf(
+		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=11 ")
+		TEXT("-ABTSM11CaptureStylized=1 -ABTSM11CaptureHudScreenshot=1 ")
+		TEXT("-MovieFolder=\"%s\" -MovieName=Rank11_Hud ")
+		TEXT("-MovieFormat=JPG"),
+		*Output);
+	TestTrue(
+		TEXT("GameViewport HUD screenshot config parses"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			*HudCommandLine,
+			Config,
+			&Failure));
+	TestTrue(TEXT("HUD screenshot mode preserved"), Config.bHudScreenshotOnly);
+	TestFalse(TEXT("HUD screenshot is not telemetry-only"), Config.bTelemetryOnly);
+	TestEqual(
+		TEXT("HUD screenshot filename is deterministic"),
+		FPaths::GetCleanFilename(Config.GetHudScreenshotPath()),
+		FString(TEXT("Rank11_Hud.png")));
 
 	const FString CustomCommandLine = FString::Printf(
 		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=11 ")
@@ -3081,6 +3196,47 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 		FABTSM11FinaleCameraCaptureConfig::Parse(
 			TEXT("-ABTSM11CameraCapture -MovieFolder=C:/Capture ")
 			TEXT("-MovieName=NativeAvi"),
+			Config,
+			&Failure));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11FinaleHudScreenshotConfigTest,
+	"ABTS.M11D.HUD.Unit.CaptureConfig",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11FinaleHudScreenshotConfigTest::RunTest(
+	const FString& Parameters)
+{
+	const FString Output = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("M11HudCaptureTest")));
+	const FString CommandLine = FString::Printf(
+		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=11 ")
+		TEXT("-ABTSM11CaptureStylized=1 -ABTSM11CaptureHudScreenshot=1 ")
+		TEXT("-MovieFolder=\"%s\" -MovieName=M11D_Hud ")
+		TEXT("-MovieFormat=JPG"),
+		*Output);
+	FABTSM11FinaleCameraCaptureConfig Config;
+	FString Failure;
+	TestTrue(TEXT("HUD screenshot config parses independently"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			*CommandLine, Config, &Failure));
+	TestTrue(TEXT("HUD screenshot mode is enabled"), Config.bHudScreenshotOnly);
+	TestFalse(TEXT("HUD screenshot mode does not launch telemetry"),
+		Config.bTelemetryOnly);
+	TestEqual(TEXT("HUD screenshot uses Contract v18"),
+		FABTSM11FinaleCameraCaptureConfig::ContractVersion, 18);
+	TestEqual(TEXT("HUD PNG path is deterministic"),
+		FPaths::GetCleanFilename(Config.GetHudScreenshotPath()),
+		FString(TEXT("M11D_Hud.png")));
+
+	TestFalse(TEXT("HUD and telemetry modes fail closed together"),
+		FABTSM11FinaleCameraCaptureConfig::Parse(
+			TEXT("-ABTSM11CameraCapture -ABTSM11CaptureHudScreenshot=1 ")
+			TEXT("-ABTSM11CaptureTelemetryOnly=1 -MovieFolder=C:/Capture ")
+			TEXT("-MovieName=AmbiguousHud -MovieFormat=JPG"),
 			Config,
 			&Failure));
 	return true;

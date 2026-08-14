@@ -489,9 +489,13 @@ bool FABTSM11BConnectivityBridgeClosureV3Test::RunTest(
 		FirstPlan.RequiredBridgeEdges.Num(), 2);
 	TestEqual(TEXT("Discovery plan is deterministic"),
 		FirstPlan.PlanHash, SecondPlan.PlanHash);
+	TestEqual(TEXT("Discovery plan matches the portable v3 byte contract"),
+		FirstPlan.PlanHash, 0xa84e0b6460214b23ull);
 
 	const FABTSM11BridgeClosurePolicy& Policy =
 		CandidateV3.ScanContract.BridgeClosurePolicy;
+	TestEqual(TEXT("Bridge policy matches the portable v3 byte contract"),
+		Policy.ComputePolicyHash(), 0x40ccc25283f67c8cull);
 	FABTSM11ConnectivityClosureResult Closure;
 	Failure.Reset();
 	TestFalse(TEXT("Discovery alone never certifies"),

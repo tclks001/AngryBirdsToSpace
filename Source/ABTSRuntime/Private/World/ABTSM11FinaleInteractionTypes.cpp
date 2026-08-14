@@ -138,6 +138,7 @@ EABTSM11FinaleEnvironmentStage ABTSM11ResolveFinaleEnvironmentStage(
 	switch (State)
 	{
 	case EABTSM11FinaleInteractionState::Launched:
+	case EABTSM11FinaleInteractionState::Failed:
 		if (FMath::IsFinite(PlaybackElapsedSeconds)
 			&& PlaybackElapsedSeconds >= 0.0
 			&& ReleasedTrajectoryResult != nullptr
@@ -161,7 +162,6 @@ EABTSM11FinaleEnvironmentStage ABTSM11ResolveFinaleEnvironmentStage(
 	case EABTSM11FinaleInteractionState::TargetHit:
 		return EABTSM11FinaleEnvironmentStage::DeepSpace;
 
-	case EABTSM11FinaleInteractionState::Failed:
 	case EABTSM11FinaleInteractionState::Recovering:
 		return EABTSM11FinaleEnvironmentStage::Recovering;
 
@@ -709,6 +709,17 @@ double FABTSM11FailurePresentationTimeline::GetBlackoutAlpha() const
 		1.0);
 }
 
+double FABTSM11FailurePresentationTimeline::GetSecondsUntilRestore() const
+{
+	if (!bStarted || bRestoreWorldIssued)
+	{
+		return 0.0;
+	}
+	const double RestoreTime =
+		Config.ReadableHoldSeconds + Config.FadeToBlackSeconds;
+	return FMath::Max(0.0, RestoreTime - ElapsedSeconds);
+}
+
 EABTSM11FailurePresentationPhase
 FABTSM11FailurePresentationTimeline::GetPhase() const
 {
@@ -901,6 +912,50 @@ double ABTSM11ResolveFailurePresentationEndTime(
 			OutsideAlpha);
 	}
 	return Plan.DurationSeconds;
+}
+
+bool ABTSM11ResolveFailurePresentationSchedule(
+	const double PlaybackStartTimeSeconds,
+	const double PlaybackEndTimeSeconds,
+	const double PlaybackTimeScale,
+	const FABTSM11FailurePresentationConfig& DesiredConfig,
+	double& OutFailureStartTimeSeconds,
+	FABTSM11FailurePresentationConfig& OutScheduledConfig)
+{
+	if (!FMath::IsFinite(PlaybackStartTimeSeconds)
+		|| !FMath::IsFinite(PlaybackEndTimeSeconds)
+		|| !FMath::IsFinite(PlaybackTimeScale)
+		|| PlaybackEndTimeSeconds <= PlaybackStartTimeSeconds
+		|| PlaybackTimeScale <= 0.0
+		|| !DesiredConfig.IsValid())
+	{
+		return false;
+	}
+	const double DesiredRestoreLeadSeconds =
+		DesiredConfig.ReadableHoldSeconds
+		+ DesiredConfig.FadeToBlackSeconds;
+	const double AvailablePresentationSeconds =
+		(PlaybackEndTimeSeconds - PlaybackStartTimeSeconds)
+		/ PlaybackTimeScale;
+	const double ScheduledRestoreLeadSeconds = FMath::Min(
+		DesiredRestoreLeadSeconds,
+		AvailablePresentationSeconds);
+	if (!FMath::IsFinite(ScheduledRestoreLeadSeconds)
+		|| ScheduledRestoreLeadSeconds <= 0.0)
+	{
+		return false;
+	}
+	const double LeadScale = ScheduledRestoreLeadSeconds
+		/ DesiredRestoreLeadSeconds;
+	OutScheduledConfig = DesiredConfig;
+	OutScheduledConfig.ReadableHoldSeconds *= LeadScale;
+	OutScheduledConfig.FadeToBlackSeconds *= LeadScale;
+	OutFailureStartTimeSeconds = PlaybackEndTimeSeconds
+		- ScheduledRestoreLeadSeconds * PlaybackTimeScale;
+	return OutScheduledConfig.IsValid()
+		&& FMath::IsFinite(OutFailureStartTimeSeconds)
+		&& OutFailureStartTimeSeconds >= PlaybackStartTimeSeconds
+		&& OutFailureStartTimeSeconds < PlaybackEndTimeSeconds;
 }
 
 bool ABTSM11ClipDiagramSegmentToUnitCircle(

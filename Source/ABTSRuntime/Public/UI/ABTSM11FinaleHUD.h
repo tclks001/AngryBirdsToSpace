@@ -6,10 +6,12 @@
 #include "UI/ABTSM10ScoutMapHUD.h"
 #include "UI/ABTSM11FinaleHUDData.h"
 #include "UI/ABTSM11FinalePresentation.h"
+#include "UI/ABTSUITheme.h"
 #include "ABTSM11FinaleHUD.generated.h"
 
 class AABTSM11FinaleInteractionSystem;
 class UTextureRenderTarget2D;
+class UTexture2D;
 
 /** M10 HUD plus M11-C orbital explanation and target approach preview. */
 UCLASS()
@@ -18,6 +20,7 @@ class ABTSRUNTIME_API AABTSM11FinaleHUD : public AABTSM10ScoutMapHUD
 	GENERATED_BODY()
 
 public:
+	AABTSM11FinaleHUD();
 	virtual void DrawHUD() override;
 	bool HandleFinalePrimaryPressed(
 		AABTSM11FinaleInteractionSystem& System,
@@ -50,6 +53,13 @@ public:
 private:
 	AABTSM11FinaleInteractionSystem* FindInteractionSystem() const;
 	void DrawFinaleLayer(AABTSM11FinaleInteractionSystem& System);
+	void DrawMissionStrip(AABTSM11FinaleInteractionSystem& System);
+	void DrawFacetedPanel(
+		const FBox2D& Box,
+		const FLinearColor& Fill,
+		const FLinearColor& Border,
+		const FString& SectionLabel,
+		const FLinearColor& Accent);
 	void DrawFinaleControlConsole(
 		AABTSM11FinaleInteractionSystem& System);
 	void DrawOrbitalDiagram(
@@ -70,8 +80,6 @@ private:
 		const FVector2D& Size,
 		const FString& Title,
 		const FString& Subtitle);
-	void DrawTargetWedge(
-		AABTSM11FinaleInteractionSystem& System);
 	void DrawFailureOverlay(
 		AABTSM11FinaleInteractionSystem& System);
 	void DrawStatus(
@@ -135,15 +143,22 @@ private:
 	void DrawConsoleButton(
 		const FBox2D& Box,
 		const FString& Label,
+		UTexture2D* Icon,
 		bool bActive,
 		const FLinearColor& Accent);
+	UTexture2D* GetButtonIcon(int32 IconIndex) const;
 	void DrawKnob(
 		const FVector2D& Center,
 		float Radius,
 		const FString& Label,
 		double ValueAlpha,
 		const FString& ValueText,
-		bool bCaptured);
+		bool bCaptured,
+		EABTSM11F4GuidanceDirection GuidanceDirection,
+		double GuidanceTargetAlpha,
+		const FString& GuidanceTargetText,
+		bool bHorizontalGuidance,
+		bool bStrictF4);
 	void DrawPipEdgeIndicator(
 		const FVector2D& Position,
 		const FVector2D& Size,
@@ -165,7 +180,7 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
 		meta = (ClampMin = "20.0", ClampMax = "80.0"))
-	float MinimumKnobRadiusPixels = 30.0f;
+	float MinimumKnobRadiusPixels = 34.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11-C|HUD-1C|Controls",
 		meta = (ClampMin = "20.0", ClampMax = "100.0"))
@@ -227,8 +242,10 @@ private:
 		meta = (ClampMin = "0.0", ClampMax = "240.0"))
 	float PipTopMarginPixels = 24.0f;
 
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTexture2D>> ButtonIcons;
+
 	FABTSM11TargetPipTrajectory CachedPipTrajectory;
-	FABTSM11TargetWedgeTracker TargetWedgeTracker;
 	FABTSM11FinaleHudCaptureState HudCapture;
 	EABTSM11ControlSpeedGear HudSpeedGear =
 		EABTSM11ControlSpeedGear::Coarse;
@@ -250,8 +267,14 @@ private:
 	FBox2D HudResetViewButton;
 	FBox2D HudRebasePipButton;
 	FBox2D HudFollowAutoButton;
+	FBox2D HudMissionStrip;
+	FBox2D HudOrbitPanel;
+	FBox2D HudControlDeck;
+	FBox2D HudPreviewBay;
 	FVector2D HudPlayerViewOrigin = FVector2D::ZeroVector;
 	FVector2D HudPlayerViewSize = FVector2D::ZeroVector;
 	FVector2D HudCanvasSize = FVector2D::ZeroVector;
+	FABTSUIThemeSnapshot HudTheme;
+	bool bHudCompactLayout = false;
 	bool bHudLayoutValid = false;
 };

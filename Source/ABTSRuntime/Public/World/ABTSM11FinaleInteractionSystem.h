@@ -25,6 +25,7 @@ class UTextureRenderTarget2D;
 enum class EABTSStylizedViewClass : uint8;
 struct FABTSM11NominalSolvePayload;
 struct FABTSM11PreviewSolvePayload;
+struct FABTSM11F4GuidanceSolvePayload;
 
 /**
  * M11-C gameplay boundary.
@@ -115,6 +116,23 @@ public:
 	const FABTSM11PrefixStabilizer& GetStabilizer() const
 	{
 		return Stabilizer;
+	}
+	const FABTSM11F4GuidanceTarget& GetF4GuidanceTarget() const
+	{
+		return F4GuidanceTarget;
+	}
+	const FString& GetF4GuidanceFailure() const
+	{
+		return F4GuidanceFailure;
+	}
+	bool IsF4GuidanceInFlight() const
+	{
+		return bF4GuidanceInFlight;
+	}
+	bool IsCurrentInputStrictF4() const
+	{
+		return DoesInputMatchLatestSolve()
+			&& CurrentClassification.IsF(4);
 	}
 	const FABTSM11PreviewSelection& GetPreviewSelection() const
 	{
@@ -257,10 +275,13 @@ public:
 private:
 	void QueuePreviewSolveIfNeeded();
 	void QueueNominalPhysicalSolve();
+	void QueueF4GuidanceSolve();
 	void HandlePreviewSolveCompleted(
 		TSharedPtr<FABTSM11PreviewSolvePayload> Payload);
 	void HandleNominalSolveCompleted(
 		TSharedPtr<FABTSM11NominalSolvePayload> Payload);
+	void HandleF4GuidanceSolveCompleted(
+		TSharedPtr<FABTSM11F4GuidanceSolvePayload> Payload);
 	void DrainCompletedSolves();
 	void RebuildPublishedPreview();
 	void RebuildHudPublishedData();
@@ -302,7 +323,9 @@ private:
 	void MarkTargetCaptureDirty();
 	void FlushTargetCapture();
 	void RestoreAttemptToWorld(bool bKeepFinaleMode);
-	void BeginAttemptFailure(const FString& Reason);
+	void BeginAttemptFailure(
+		const FString& Reason,
+		bool bContinueReleasedFlight = false);
 	void FailInteraction(const FString& Reason);
 	bool DoesInputMatchLatestSolve() const;
 	AActor* ResolvePreviewTargetActor(
@@ -417,8 +440,11 @@ private:
 	FABTSM11PrefixStabilizer Stabilizer;
 	FABTSM11PreviewTargetSelector TargetSelector;
 	FABTSM11FailurePresentationTimeline FailureTimeline;
+	FABTSM11FailurePresentationConfig ReleasedFailurePresentationConfig;
 	FABTSM11PreviewSelection PreviewSelection;
 	FABTSM11PrefixClassification CurrentClassification;
+	FABTSM11F4GuidanceTarget F4GuidanceTarget;
+	FString F4GuidanceFailure;
 	FABTSM11TrajectoryResult LatestQualifiedResult;
 	FABTSM11TrajectoryResult LatestSameInputPhysicalResult;
 	FABTSM11TrajectoryResult NominalPhysicalResult;
@@ -461,6 +487,8 @@ private:
 	double LastPreviewSolveMilliseconds = 0.0;
 	double PlaybackElapsedSeconds = 0.0;
 	double PlaybackPresentationEndTimeSeconds = 0.0;
+	double FailurePresentationStartTimeSeconds = 0.0;
+	bool bFailureFlightContinuationActive = false;
 	uint64 DiscardedPreviewSolveCount = 0;
 	uint64 HudOverviewRevision = 0;
 	uint64 HudProbeRevision = 0;
@@ -469,9 +497,11 @@ private:
 	int64 LatestSolvedRevision = INDEX_NONE;
 	TFuture<TSharedPtr<FABTSM11PreviewSolvePayload>> PreviewSolveFuture;
 	TFuture<TSharedPtr<FABTSM11NominalSolvePayload>> NominalSolveFuture;
+	TFuture<TSharedPtr<FABTSM11F4GuidanceSolvePayload>> F4GuidanceFuture;
 	bool bPreviewDirty = false;
 	bool bPreviewSolveInFlight = false;
 	bool bNominalSolveInFlight = false;
+	bool bF4GuidanceInFlight = false;
 	bool bNominalPhysicalReady = false;
 	bool bLatestPhysicalResultAvailable = false;
 	bool bAttemptBirdInPouch = false;

@@ -210,6 +210,7 @@ bool AABTSM11FinaleInteractionSystem::Initialize(
 
 	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Ready;
+	QueueF4GuidanceSolve();
 	QueueNominalPhysicalSolve();
 	UE_LOG(
 		LogABTSRuntime,
@@ -306,6 +307,10 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	FailureTimeline.Reset();
 	PlaybackElapsedSeconds = 0.0;
 	PlaybackPresentationEndTimeSeconds = 0.0;
+	FailurePresentationStartTimeSeconds = 0.0;
+	ReleasedFailurePresentationConfig =
+		FABTSM11FailurePresentationConfig();
+	bFailureFlightContinuationActive = false;
 	++AimRevision;
 	bPreviewDirty = true;
 	TargetSelector.Reset();
@@ -980,10 +985,27 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		ReleasedPlaybackPlan.DurationSeconds);
 	const double PresentationTimeScale =
 		GetPlaybackPresentationTimeScale();
+	const double RequestedPresentationDeltaSeconds =
+		FMath::Max(0.0f, DeltaSeconds);
+	const double PreviousPlaybackSeconds = PlaybackElapsedSeconds;
+	const bool bFailurePlan =
+		!ReleasedPlaybackPlan.bPhysicalTargetHit
+		&& !ReleasedPlaybackPlan.bCandidateQualifiedIntercept;
+	const bool bShouldStartFailurePresentation =
+		bFailurePlan
+		&& InteractionState
+			== EABTSM11FinaleInteractionState::Launched;
+	const double ActivePresentationEndTime =
+		bShouldStartFailurePresentation
+			? FMath::Clamp(
+				FailurePresentationStartTimeSeconds,
+				ReleasedPlaybackPlan.Points[0].TimeSeconds,
+				PresentationEndTime)
+			: PresentationEndTime;
 	PlaybackElapsedSeconds = FMath::Min(
-		PresentationEndTime,
+		ActivePresentationEndTime,
 		PlaybackElapsedSeconds
-			+ FMath::Max(0.0f, DeltaSeconds)
+			+ RequestedPresentationDeltaSeconds
 				* PresentationTimeScale);
 	FVector3d LocalPosition;
 	FVector3d LocalVelocity;
@@ -1351,6 +1373,32 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		FailInteraction(TEXT("FormationFlightRotationRejected"));
 		return;
 	}
+	if (bShouldStartFailurePresentation
+		&& PlaybackElapsedSeconds
+			>= FailurePresentationStartTimeSeconds - 1.0e-9)
+	{
+		BeginAttemptFailure(
+			ABTSM11FailureReasonLabel(
+				ABTSM11ClassifyFailure(
+					LatestQualifiedResult,
+					CurrentClassification)),
+			true);
+		const double ConsumedPresentationSeconds =
+			(PlaybackElapsedSeconds - PreviousPlaybackSeconds)
+			/ PresentationTimeScale;
+		const double RemainingPresentationSeconds = FMath::Max(
+			0.0,
+			RequestedPresentationDeltaSeconds
+				- ConsumedPresentationSeconds);
+		if (InteractionState
+				== EABTSM11FinaleInteractionState::Failed
+			&& RemainingPresentationSeconds > 0.0)
+		{
+			UpdateFailurePresentation(
+				static_cast<float>(RemainingPresentationSeconds));
+		}
+		return;
+	}
 	if (PlaybackElapsedSeconds >= PresentationEndTime - 1.0e-9)
 	{
 		if (ReleasedPlaybackPlan.bPhysicalTargetHit
@@ -1383,12 +1431,14 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 							.GlobalWorkIndex));
 			}
 		}
-		else
+		else if (InteractionState
+			== EABTSM11FinaleInteractionState::Launched)
 		{
 			BeginAttemptFailure(ABTSM11FailureReasonLabel(
 				ABTSM11ClassifyFailure(
 					LatestQualifiedResult,
-					CurrentClassification)));
+					CurrentClassification)),
+				true);
 		}
 	}
 }
@@ -1403,20 +1453,38 @@ double AABTSM11FinaleInteractionSystem::GetPlaybackPresentationTimeScale() const
 void AABTSM11FinaleInteractionSystem::UpdateFailurePresentation(
 	const float DeltaSeconds)
 {
+	const double SafeDeltaSeconds = FMath::Max(0.0f, DeltaSeconds);
+	if (InteractionState == EABTSM11FinaleInteractionState::Failed
+		&& bFailureFlightContinuationActive)
+	{
+		const double ContinuationDeltaSeconds = FMath::Min(
+			SafeDeltaSeconds,
+			FailureTimeline.GetSecondsUntilRestore());
+		if (ContinuationDeltaSeconds > 0.0)
+		{
+			UpdatePlayback(static_cast<float>(ContinuationDeltaSeconds));
+		}
+	}
 	bool bShouldRestoreWorld = false;
 	FailureTimeline.Advance(
-		FMath::Max(0.0f, DeltaSeconds),
+		SafeDeltaSeconds,
 		bShouldRestoreWorld);
 	if (bShouldRestoreWorld)
 	{
+		const bool bContinuedFlight =
+			bFailureFlightContinuationActive;
+		const double RestorePlaybackSeconds = PlaybackElapsedSeconds;
 		RestoreAttemptToWorld(false);
 		InteractionState =
 			EABTSM11FinaleInteractionState::Recovering;
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][M11-C][Failure] RestoredAtBlack Reason=%s"),
-			*RuntimeFailure);
+			TEXT("[ABTS][M11-C][Failure] RestoredAtBlack Reason=%s ContinuedFlight=%d Playback=%.3f PlaybackEnd=%.3f"),
+			*RuntimeFailure,
+			bContinuedFlight ? 1 : 0,
+			RestorePlaybackSeconds,
+			PlaybackPresentationEndTimeSeconds);
 	}
 	if (FailureTimeline.IsComplete())
 	{
@@ -2249,6 +2317,7 @@ void AABTSM11FinaleInteractionSystem::FlushTargetCapture()
 void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	const bool bKeepFinaleMode)
 {
+	bFailureFlightContinuationActive = false;
 	FinaleBirdTrail->ClearTrail();
 	for (int32 Index = 0; Index < AttemptFormationBirds.Num(); ++Index)
 	{
@@ -2359,20 +2428,31 @@ void AABTSM11FinaleInteractionSystem::RestoreAttemptToWorld(
 	bCameraDirectorFallbackLogged = false;
 	PlaybackElapsedSeconds = 0.0;
 	PlaybackPresentationEndTimeSeconds = 0.0;
+	FailurePresentationStartTimeSeconds = 0.0;
+	ReleasedFailurePresentationConfig =
+		FABTSM11FailurePresentationConfig();
 	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Aiming;
 	UpdatePouchPresentation();
 }
 
 void AABTSM11FinaleInteractionSystem::BeginAttemptFailure(
-	const FString& Reason)
+	const FString& Reason,
+	const bool bContinueReleasedFlight)
 {
 	RuntimeFailure = Reason;
-	FABTSM11FailurePresentationConfig Config;
-	Config.ReadableHoldSeconds = FailureReadableHoldSeconds;
-	Config.FadeToBlackSeconds = FailureFadeToBlackSeconds;
-	Config.BlackHoldSeconds = FailureBlackHoldSeconds;
-	Config.FadeFromBlackSeconds = FailureFadeFromBlackSeconds;
+	bFailureFlightContinuationActive = false;
+	FABTSM11FailurePresentationConfig Config =
+		bContinueReleasedFlight
+			? ReleasedFailurePresentationConfig
+			: FABTSM11FailurePresentationConfig();
+	if (!bContinueReleasedFlight)
+	{
+		Config.ReadableHoldSeconds = FailureReadableHoldSeconds;
+		Config.FadeToBlackSeconds = FailureFadeToBlackSeconds;
+		Config.BlackHoldSeconds = FailureBlackHoldSeconds;
+		Config.FadeFromBlackSeconds = FailureFadeFromBlackSeconds;
+	}
 	if (!FailureTimeline.Begin(Config))
 	{
 		UE_LOG(
@@ -2384,16 +2464,29 @@ void AABTSM11FinaleInteractionSystem::BeginAttemptFailure(
 		InteractionState = EABTSM11FinaleInteractionState::Ready;
 		return;
 	}
+	bFailureFlightContinuationActive = bContinueReleasedFlight
+		&& IsValid(FinaleSystem)
+		&& IsValid(AttemptBird)
+		&& IsValid(FlightCamera)
+		&& AttemptFormationBirds.Num() == 4
+		&& !ReleasedPlaybackPlan.Points.IsEmpty()
+		&& PlaybackElapsedSeconds
+			>= FailurePresentationStartTimeSeconds - 1.0e-6
+		&& PlaybackElapsedSeconds
+			< PlaybackPresentationEndTimeSeconds - 1.0e-9;
 	InteractionState = EABTSM11FinaleInteractionState::Failed;
 	UE_LOG(
 		LogABTSRuntime,
 		Warning,
-		TEXT("[ABTS][M11-C][Failure] Begin Reason=%s Hold=%.2f FadeIn=%.2f Black=%.2f FadeOut=%.2f"),
+		TEXT("[ABTS][M11-C][Failure] Begin Reason=%s Hold=%.2f FadeIn=%.2f Black=%.2f FadeOut=%.2f ContinueFlight=%d FailureStart=%.3f PlaybackEnd=%.3f"),
 		*Reason,
 		Config.ReadableHoldSeconds,
 		Config.FadeToBlackSeconds,
 		Config.BlackHoldSeconds,
-		Config.FadeFromBlackSeconds);
+		Config.FadeFromBlackSeconds,
+		bFailureFlightContinuationActive ? 1 : 0,
+		FailurePresentationStartTimeSeconds,
+		PlaybackPresentationEndTimeSeconds);
 }
 
 void AABTSM11FinaleInteractionSystem::FailInteraction(

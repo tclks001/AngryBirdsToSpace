@@ -1,6 +1,6 @@
 {
   "schema": "abts.m11b.v2_2.handfeel_candidate.v1",
-  "status": "uncertified_editor_pie_handfeel_test_only",
+  "status": "frozen_unique_v3_certification_input_uncertified",
   "editorCandidateRank": 12,
   "baseCandidateRank": 11,
   "baseGlobalWorkIndex": 25,
@@ -37,6 +37,19 @@
     "nestingViolations": 0,
     "aggregateSampleHash": "0xf364c0098bec8112"
   },
+  "v3FinalRefinementEvidence": {
+    "grid": "yaw_-7_to_2_pitch_16.5_to_34.5_power_0.65_to_1_final_precision",
+    "gridCounts": [49, 73, 113],
+    "sampleCount": 404201,
+    "prefixCounts": [199316, 92749, 29580, 9225],
+    "sixNeighborComponentCounts": [1, 1, 23, 30],
+    "largestF4ComponentSize": 9096,
+    "earlyTargetHitCount": 305,
+    "bypassTargetHitCount": 0,
+    "nestingViolations": 0,
+    "nominalF4": true,
+    "aggregateSampleHash": "0x45f9e5508f5a4f66"
+  },
   "handfeelComparisonToRank11": {
     "passedDiagnosticGate": true,
     "deflectionRelativeErrors": [0.0, 0.06025446757991088, 0.0923412502145293],
@@ -46,8 +59,8 @@
   "acceptance": {
     "editorPieBinding": "abts.M11.CandidateRank_12",
     "manualHandfeelTest": "passed_user_evaluation_2026_08_12",
-    "fullInputDomainCertification": "failed_non_unique_six_neighbor_f4",
-    "certificationInput": false,
+    "fullInputDomainCertification": "v3_early_stopped_final_refinement_f4_non_unique_and_early_target_hit",
+    "certificationInput": true,
     "productionBinding": false
   }
 }

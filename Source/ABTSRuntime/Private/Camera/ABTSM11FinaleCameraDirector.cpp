@@ -394,6 +394,11 @@ bool FABTSM11FinaleCameraShotPlan::Build(
 	{
 		return Reject(TEXT("M7ShotPlanAuthorityInvalid"));
 	}
+	if (Result.CompletedAssistCount
+		!= FABTSM11GravityScenario::AssistCount)
+	{
+		return Reject(TEXT("M7ShotPlanRequiresAllAssistsCompleted"));
+	}
 
 	for (int32 IncomingAssistIndex = 2;
 		IncomingAssistIndex <= FABTSM11GravityScenario::AssistCount;
