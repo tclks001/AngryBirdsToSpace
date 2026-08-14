@@ -1,6 +1,7 @@
 # M7 评委演示六栋垂直切片冲刺设计
 
-> 状态：2026-08-13 建立；Stage 1～3 与演示六栋清单 v1 已通过用户视觉验收并冻结，开始 Stage 4。
+> 状态：2026-08-15；Stage 1～4 与演示六栋清单 v1 已通过用户视觉验收并冻结，下一步进入 Stage 5
+> 生产积木承重 DAG。
 >
 > 上游：[Beam-C3 V3 骨架优先生成](M73BeamC3V3SkeletonFirstBuildingGenerationDesign.md)
 >
@@ -118,3 +119,21 @@ TopSurface 视觉验收通过后，第二停点已进入实现：逐个已解析
 无账本来源继续失败关闭。独立 `Floor / Top Frames` 层以钢色显示新增段、玻璃色显示水平复用节点、石材色显示
 待替换临时柱。当前六栋静态门 6/6、预览合同 1/1；E3 有 1 个显式待替换 junction，其他五栋为 0。
 现交由用户视觉批准，批准前不进入 Facade-to-Top 闭合。
+
+### 7.3 Roof / Crown 与总览冻结（2026-08-15）
+
+Floor / StyleInfill 已通过用户视觉验收。Roof / Crown 最终不再拟合 WFC Crown 高度，而只消费其
+Pyramid/TriangularPrism 语义，在真实 Crown 基座上生成逐层相邻的确定性 36 cm 阶梯屋顶。X/Y course
+严格交替；Pyramid 在相应方向每次从两侧各内缩一格，Prism 只收缩 taper 轴。奇数宽度终止于 1，偶数
+宽度终止于 2，禁止 `2 -> 1`，从而避免 18 cm 半格相位。`RoofPost`、deferred、occluded、unsupported
+均必须为零。互斥诊断层为：
+
+- `5 - Roof / Crown`：玻璃色确定性 voxel course，铁色 RoofPost（冻结结果必须为零），石材色其他 Stage 4 构件；
+- `6 - Stage 1 / 2 / 3 / 4 Overview`：木/玻璃/铁/石材分别表示 Stage 1/2/3/4。
+
+旧梳齿、逐 course 百叶、稀疏门架和居中 `2 -> 1` 均保留为失败基线，不再重复。最终候选已通过 UE 5.8
+ForceUnity Development Editor 全链接及 fresh 固定演示六栋 6/6；自动化逐屋顶验证相邻 course、X/Y
+交替、footprint 奇偶性、最终宽度、36 cm 单位化以及零 RoofPost/deferred/occluded/unsupported。证据为
+`M7-Stage4-CrownVoxel-Parity-Demo6-20260815.log`。用户随后完成 `Roof / Crown` 与 Stage 1～4 总览视觉
+验收，因此 Stage 4 正式冻结。冻结不包含生产积木承重 DAG、Beam-C 合力门或 Chaos；这些从 Stage 5
+开始实施。

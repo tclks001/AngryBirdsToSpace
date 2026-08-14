@@ -78,7 +78,9 @@ enum class EABTSM73BeamC3Stage4DiagnosticLayer : uint8
 	TopSurfaceIntent UMETA(DisplayName = "1 - GroundSill / TopSurface Intent"),
 	FloorTopFrames UMETA(DisplayName = "2 - Floor / Top Frames"),
 	FacadeToTopConnections UMETA(DisplayName = "3 - Facade-to-Top Connections"),
-	FloorStyleInfill UMETA(DisplayName = "4 - Floor / StyleInfill")
+	FloorStyleInfill UMETA(DisplayName = "4 - Floor / StyleInfill"),
+	RoofCrown UMETA(DisplayName = "5 - Roof / Crown"),
+	Stage14Overview UMETA(DisplayName = "6 - Stage 1 / 2 / 3 / 4 Overview")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -837,6 +839,45 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
 	double SkeletonFirstStage4FloorStyleInfillMilliseconds = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofCrownVolumeCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofBandCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofCourseCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4EmittedRoofMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofPostMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4ReusedRoofCarrierCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4DeferredRoofCandidateCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4OccludedRoofCourseCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4UnsupportedRoofMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofBindingViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4RoofConflictCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int64 SkeletonFirstStage4RoofCrownHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
+	double SkeletonFirstStage4RoofCrownMilliseconds = 0.0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
 	int64 SkeletonFirstStage4TopFrameHash = 0;

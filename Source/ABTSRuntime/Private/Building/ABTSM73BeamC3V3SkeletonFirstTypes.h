@@ -44,6 +44,7 @@ namespace ABTSM73BeamC3V3
 		StyleInfillCourse,
 		FacadeToTopSeat,
 		FacadeToTopPost,
+		RoofPost,
 		RoofCourse,
 		SharedCourse,
 		BridgeDiaphragm
@@ -97,6 +98,8 @@ namespace ABTSM73BeamC3V3
 		int32 FacadeToTopConnectionId = INDEX_NONE;
 		/** Stage-4 only: certified adjacent-support floor/infill span identity. */
 		int32 FloorStyleInfillSpanId = INDEX_NONE;
+		/** Stage-4 only: WFC Crown course extended from a seated core carrier. */
+		int32 RoofCrownCourseId = INDEX_NONE;
 		/** Stage-3 exterior-column lineage. */
 		int32 ExteriorColumnId = INDEX_NONE;
 		/** Stage-3 ground-sill lineage. Existing core members remain INDEX_NONE. */
@@ -277,7 +280,8 @@ namespace ABTSM73BeamC3V3
 
 	/** One persistent terminal upper-load branch above a coupled podium.
 	 * EntryBounds records the diagnostic podium-seam footprint, while
-	 * TerminalBounds and RequiredTopCourse are the independent load demand.
+	 * TerminalBounds and RequiredTopCourse are the independent semantic load
+	 * demand. PhysicalChildTopCourse is the exclusive geometry handoff to Crown.
 	 * Every region must bind exactly one independently grounded TowerChild. */
 	struct FHighProjectionRegionPlan
 	{
@@ -287,8 +291,11 @@ namespace ABTSM73BeamC3V3
 		 * intentionally share one legacy terminal slice after a Crown merge. */
 		int32 SemanticDemandId = INDEX_NONE;
 		int32 PodiumTopCourse = 0;
-		/** Exclusive highest complete 36 cm course required by this branch. */
+		/** Exclusive highest complete 36 cm semantic load course, including Crown. */
 		int32 RequiredTopCourse = 0;
+		/** Exclusive physical TowerChild top. It is the earliest Crown base on this
+		 * demand lineage, or RequiredTopCourse when the branch has no Crown. */
+		int32 PhysicalChildTopCourse = 0;
 		/** Raw terminal course/component in the course-slice branch DAG. */
 		int32 TerminalSliceCourse = INDEX_NONE;
 		int32 TerminalSliceComponentId = INDEX_NONE;
@@ -508,7 +515,10 @@ namespace ABTSM73BeamC3V3
 		 * Crown branches sharing the same terminal Body. */
 		int32 TerminalLoadNodeId = INDEX_NONE;
 		int32 TerminalLoadSourceVolumeId = INDEX_NONE;
+		/** Exclusive semantic load top, including all Crown descendants. */
 		int32 RequiredTopCourse = 0;
+		/** Exclusive physical TowerChild top and Stage-1/Stage-4 ownership seam. */
+		int32 PhysicalChildTopCourse = 0;
 		FBox BodyBounds = FBox(EForceInit::ForceInit);
 		FBox TerminalLoadBounds = FBox(EForceInit::ForceInit);
 		FBox GroundProjectionBounds = FBox(EForceInit::ForceInit);
@@ -821,6 +831,9 @@ namespace ABTSM73BeamC3V3
 	{
 		GroundSill,
 		TopSurface,
+		/** The Stage-3 frame is already carried by its exact two-course Stage-2
+		 * anchor into a ground-rooted core. No second facade post may be invented. */
+		GroundedCoreAnchor,
 		Unresolved
 	};
 
@@ -945,6 +958,58 @@ namespace ABTSM73BeamC3V3
 		bool bReusesExistingMember = false;
 	};
 
+	/** One deterministic adjacent 36 cm Crown voxel course. A reused
+	 * TopSurface/roof carrier or a newly emitted rail must be seated on the
+	 * immediately preceding perpendicular course. */
+	struct FRoofCrownCoursePlan
+	{
+		int32 RoofCourseId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 CrownVolumeId = INDEX_NONE;
+		/** Physical core whose top course seeds this deterministic roof target.
+		 * CrownVolumeId is semantic source identity and is not unique when one
+		 * coupled WFC Crown is borne by several terminal cores. */
+		int32 RoofTargetCoreCellId = INDEX_NONE;
+		EABTSM73DAG5BV2Primitive Primitive = EABTSM73DAG5BV2Primitive::Box;
+		int32 CourseIndex = INDEX_NONE;
+		int32 CrownCourseOrdinal = INDEX_NONE;
+		int32 CrownBandOrdinal = INDEX_NONE;
+		/** Quantized footprint diagnostics.  Even base widths terminate at two
+		 * cells; odd base widths terminate at one, so tapering never changes the
+		 * target core's 36 cm lattice phase. */
+		int32 RoofBaseFootprintUnitsX = 0;
+		int32 RoofBaseFootprintUnitsY = 0;
+		int32 FootprintUnitsX = 0;
+		int32 FootprintUnitsY = 0;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		int32 CarrierMemberIndex = INDEX_NONE;
+		TArray<int32> CarrierLowerSeatMemberIndices;
+		/** Legacy diagnostic field; adjacent voxel Crown generation keeps it empty. */
+		TArray<int32> SupportPostMemberIndices;
+		/** Additional independently seated rails on the same semantic course. */
+		TArray<int32> ClosureMemberIndices;
+		double SemanticMinimumCM = 0.0;
+		double SemanticMaximumCM = 0.0;
+		bool bCarrierReused = false;
+		/** The first Crown row reused the already closed TopSurface perimeter. */
+		bool bTopSurfaceBootstrap = false;
+	};
+
+	/** A semantic Crown course whose candidate lanes are already occupied by
+	 * immutable Stage 1-3 structure or a reserved support void.  This is explicit
+	 * shared coverage/opening preservation, not a missing roof course and not
+	 * permission to penetrate the blocker. */
+	struct FRoofCrownOccludedCoursePlan
+	{
+		int32 ComponentId = INDEX_NONE;
+		int32 CrownVolumeId = INDEX_NONE;
+		int32 CourseIndex = INDEX_NONE;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		TArray<int32> LowerSeatMemberIndices;
+		TArray<int32> BlockingMemberIndices;
+		TArray<int32> BlockingSupportVoidIndices;
+	};
+
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
 	struct FCoreCellPlan
 	{
@@ -976,9 +1041,10 @@ namespace ABTSM73BeamC3V3
 		int32 LocalPodiumTopCourseIndex = 0;
 		/** Exclusive upper course; members occupy [0, TopCourseIndex). */
 		int32 TopCourseIndex = 0;
-		/** Exclusive Body-only source range for this footprint. Courses at and
-		 * above this boundary may use Crown sources. This is deliberately local
-		 * to the core, not the maximum Body height of the merged component. */
+		/** Exclusive Body-only source range for this footprint. TowerChild geometry
+		 * must stop at this boundary; Crown owns all courses at and above it. This is
+		 * deliberately local to the core, not the maximum Body height of the merged
+		 * component. */
 		int32 BodyTopCourseIndex = 0;
 		/** All overlapping ground-rooted cores coordinated on one lane lattice
 		 * publish the same non-negative group identity. */
@@ -1257,6 +1323,7 @@ namespace ABTSM73BeamC3V3
 		int32 Stage4TopSurfaceIntentCount = 0;
 		int32 Stage4GroundSillIntentCount = 0;
 		int32 Stage4ResolvedTopSurfaceIntentCount = 0;
+		int32 Stage4GroundedCoreAnchorIntentCount = 0;
 		int32 Stage4ExposedSetbackTopIntentCount = 0;
 		int32 Stage4DirectStackSeatIntentCount = 0;
 		int32 Stage4UnresolvedIntentCount = 0;
@@ -1290,6 +1357,19 @@ namespace ABTSM73BeamC3V3
 		int32 Stage4RoofReservedMemberCount = 0;
 		int64 Stage4FloorStyleInfillHash = 0;
 		double Stage4FloorStyleInfillMilliseconds = 0.0;
+		int32 Stage4RoofCrownVolumeCount = 0;
+		int32 Stage4RoofBandCount = 0;
+		int32 Stage4RoofCourseCount = 0;
+		int32 Stage4EmittedRoofMemberCount = 0;
+		int32 Stage4RoofPostMemberCount = 0;
+		int32 Stage4ReusedRoofCarrierCount = 0;
+		int32 Stage4DeferredRoofCandidateCount = 0;
+		int32 Stage4OccludedRoofCourseCount = 0;
+		int32 Stage4UnsupportedRoofMemberCount = 0;
+		int32 Stage4RoofBindingViolationCount = 0;
+		int32 Stage4RoofConflictCount = 0;
+		int64 Stage4RoofCrownHash = 0;
+		double Stage4RoofCrownMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;
@@ -1386,6 +1466,8 @@ namespace ABTSM73BeamC3V3
 			TopSurfaceFrameDeferredJunctions;
 		TArray<FFacadeToTopConnectionPlan> FacadeToTopConnections;
 		TArray<FFloorStyleInfillSpanPlan> FloorStyleInfillSpans;
+		TArray<FRoofCrownCoursePlan> RoofCrownCourses;
+		TArray<FRoofCrownOccludedCoursePlan> RoofCrownOccludedCourses;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

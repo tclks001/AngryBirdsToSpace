@@ -280,7 +280,11 @@ NullRHI 只证明确定性几何、预算、静态接触与 Load DAG，不证明
 Stage 1（`CoreAndShared`）在用户完成 WFC、主/子芯体、shared course、差异裙房、raised main 与方形单收缩
 子芯体视觉验收后冻结。冻结合同为：
 
-1. `SemanticTerminalDemand -> HighProjectionRegion -> TowerChild` 继续保持空间双射、全高承载和接地；
+1. `SemanticTerminalDemand -> HighProjectionRegion -> TowerChild` 继续保持空间双射和接地；其中“全高承载”
+   拆成两个不可混淆的高度：`RequiredTopCourse` 是包括 Crown 的语义荷载顶，`PhysicalChildTopCourse`
+   是最早 Crown 基部的独占几何交接面。TowerChild 只占用
+   `[0, PhysicalChildTopCourse)`，不得再把 Crown 内部 course 伪装成芯体；Crown 必须从该交接面开始以
+   自己的 carrier/post 账本承载到 `RequiredTopCourse`。没有 Crown 的 demand 才允许两者相等；
 2. joint selection 的 `SupportProvince -> PodiumMain` 覆盖结果是语义父级权威，子芯体不得在发射阶段按几何距离
    重新选择父级；同一省份的 sibling 必须进入同一主芯体家庭；
 3. 单收缩 child 的 lower/upper 都是 36 cm 格量化正方形；lower 只参与接地承载、座面与冲突，terminal 身份和
@@ -481,3 +485,66 @@ Floor / StyleInfill 只消费已经认证的水平承托面，不从建筑 AABB�
 6. `Floor / StyleInfill` 诊断层与其他层互斥：玻璃色显示两端支座或既有复用行，铁色显示主 Floor，石材色
    显示 StyleInfill。该层只证明已认证平面间的静态楼面路径和 36 cm 单位化；Roof/Crown、压实生产 DAG、
    Chaos 与可见 PIE 仍为 `NotEvaluated`。
+
+### 19.6 Roof / Crown 与 Stage 1～4 总览合同
+
+Roof / Crown 只消费固定 WFC `Crown` 的 primitive 类型、芯体在 Crown 基部留下的真实水平承载网以及前一
+Crown course，不得重新选择芯体或改变 WFC。WFC 只决定该分支是棱锥还是沿 X/Y 保持屋脊的棱柱；屋顶
+高度、坡度和逐层 footprint 不再拟合 WFC Crown 包络，而由以下确定性 36 cm 体素规则生成：
+
+1. Crown 从最高真实芯体/TopSurface 水平承载族上方的相邻 course 起步；之后每个 course 恰好升高 36 cm，
+   X/Y 方向严格交替。禁止抽取稀疏高度带，也禁止用长 `RoofPost` 跨越失败或省略的 course。
+2. 每个 course 最多生成位于当前 footprint 两侧的两根平行积木。奇数基宽最终收敛为一个 36 cm
+   单元的单根脊线/顶盖；偶数基宽最终保留两个 36 cm 单元，不再向上生成居中的单格。新积木的长度只跨
+   前一层垂直积木的真实站位，保持 `36×36×36n` 且不超过 720 cm。
+3. `Pyramid` 在每次换向后，将新积木横向的两侧各内缩一个 36 cm 单元。因此典型序列为
+   `5×5 X -> 5×3 Y -> 3×3 X -> 3×1 Y -> 1×1 X`。每个收缩方向保持初始宽度奇偶性：奇数序列
+   终止于 1，偶数序列终止于 2，例如 `6 -> 4 -> 2`。禁止 `2 -> 1`，因为居中的单格会相对原
+   36 cm lattice 产生 18 cm 半格偏移。
+4. `TriangularPrismX` 只收缩 X，Y 始终保持基部跨度，最终形成 Y 向屋脊；`TriangularPrismY` 对称地只
+   收缩 Y 并形成 X 向屋脊。非收缩方向虽然仍参与 X/Y 交错承托，但不得随 WFC AABB 高度再次扩张或收缩。
+5. 生成站位以芯体交接面的实际 footprint 中心和量化尺寸为权威，不追随 WFC Crown 外轮廓，不向语义
+   AABB 端部补齐水平梳齿。任一 course 缺少紧邻下层的垂直真实下座，或被 immutable member/
+   `ReservedSupportVoid` 阻挡时，必须记录 deferred/occlusion 并 fail closed；不得搜索更低下座后补 Z 柱。
+6. `Roof / Crown` 诊断层与其余层互斥：玻璃色显示确定性 voxel course carrier；铁色 `RoofPost` 在本合同
+   下必须为零；石材色只显示其他 Stage 4 新增屋顶段。
+   `Stage 1 / 2 / 3 / 4 Overview` 只读显示最终计划，Stage 1 木色、Stage 2 玻璃色、Stage 3 铁色、
+   Stage 4 石材色；总览不得新增、删除或重新归类任何实体成员。
+7. 自动化必须验证 Crown voxel ordinal 连续、course 逐层相邻、轴向严格交替、`RoofPost=0`、每根新增
+   水平构件的独立下座、`UnsupportedRoofMemberCount=0`、绑定与冲突、独立 Roof Hash、36 cm 单位化和
+   确定性。当前门仍是 `StageLocalGeometry`；压实后的积木承重 DAG、Beam-C 合力门、Chaos 与可见 PIE
+   留给 Stage 5 及后续物理阶段。
+8. Stage 1/Stage 4 的所有权缝必须显式验证：每个含 Crown 的 terminal demand 都满足
+   `TowerChild.TopCourseIndex == BodyTopCourseIndex == PhysicalChildTopCourse < RequiredTopCourse`，且不存在
+   `CourseIndex >= PhysicalChildTopCourse` 的 `CoreCourse`。Crown 的第一带可复用交接面真实水平构件，但
+   交接面以上只允许 `RoofCourse/RoofPost`。若某个 Stage 3 frame 已由精确两层 Stage 2 anchor 接入仍在
+   Body 范围内的接地芯体，则以 `GroundedCoreAnchor` 记录既有承重链，不得为满足 TopSurface 计数再造
+   一根下向外柱；该豁免必须同时验证 anchor band、两根 anchor member、inward core member、component、
+   course 和 core Body 顶，任何缺项仍保持 `Unresolved`。
+
+2026-08-14 的首版 fresh 固定演示六栋曾 6/6 通过，但编辑器视觉检查发现其向语义边界延伸的石材色段形成
+无下座梳齿，因此该证据已经失效。support-first 修复现已通过 UE 5.8 ForceUnity、fresh 固定六栋 6/6 与
+预览合同 1/1；日志为 `M7-Stage4-RoofCrown-SupportFirst-Final6-20260814.log`、
+`M7-Stage4-RoofCrown-SupportFirst-Preview-20260814.log`。视觉复验又证明逐 36 cm course 虽有下座但层数
+过密，因此上述证据只保留为 support-first 基线。后续稀疏高度带虽通过 UE 5.8 ForceUnity、fresh 固定
+六栋 6/6 和预览合同 1/1，但编辑器视觉再次证明长 `RoofPost` 加稀疏水平带形成的是门架而非棱锥/棱柱
+屋顶，该证据同样撤销为失败基线。当前候选改用不拟合 WFC 高度的确定性 36 cm 阶梯屋顶。UE 5.8
+ForceUnity Development Editor 全链接成功，fresh 固定演示六栋为 6/6；六栋合计均为相邻 course、X/Y
+交替、`RoofPost=0`、无 deferred/occluded/unsupported。随后发现居中 `2 -> 1` 虽保持积木尺寸单位化，
+却改变 36 cm lattice 相位，因此该轮六栋证据只保留为几何基线。当前奇数终止于 1、偶数终止于 2 的
+候选已通过 UE 5.8 ForceUnity Development Editor 全链接与 fresh 固定演示六栋 6/6；自动化逐屋顶验证
+基部/当前 footprint 奇偶性不变和最终宽度，且 `RoofPost/Deferred/Occluded/Unsupported=0`。日志
+`M7-Stage4-CrownVoxel-Parity-Demo6-20260815.log`。按冲刺范围不再用多 Seed/多样式矩阵替代演示清单验收；
+用户已于 2026-08-15 在 `Roof / Crown` 与 Stage 1～4 总览完成视觉批准，Stage 4 自此冻结。冻结对象包括
+TopSurface 归属、顶面/楼面边框、Facade-to-Top、Floor/StyleInfill、确定性 Crown、36 cm 单位化与六栋
+Stage 4 Hash/诊断口径；后续只允许针对 Stage 5 生产压实、承重 DAG 或明确回归故障形成独立修复，不再以
+调参方式改变已批准外观。Stage 4 冻结不批准生产积木 DAG、Beam-C 合力门或 Chaos，这些仍属于 Stage 5
+及后续物理阶段。
+
+2026-08-14 的 Body/Crown 所有权修订进一步把 TowerChild 截止到最早 Crown 基部；固定 E6 的语义
+`LoadTop/ChildTop` 已出现明确分离，Roof occluded course 从旧芯体占位基线的 21 降为 2。新的联合选择在
+E6 暴露两条已有 `Stage2 anchor -> grounded TowerChild` 路径，现以严格 `GroundedCoreAnchor` 账本承接，
+结果为 `Ground=10/TopSurface=18/CoreAnchor=2/Unresolved=0`。fresh 固定六栋 Stage 4 为 6/6，完整
+`ABTS.M73DAG.BeamC3V3.Staged` 为 107/107；日志 `M7-CrownHandoff-Stage4-Demo6-20260814.log`、
+`M7-CrownHandoff-Staged-Final-20260814.log`。这些是 NullRHI/StageLocalGeometry 证据；其对应视觉层
+现已由用户批准并纳入 Stage 4 冻结。Chaos 尚未运行。

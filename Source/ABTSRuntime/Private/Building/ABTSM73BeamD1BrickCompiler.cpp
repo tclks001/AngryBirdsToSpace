@@ -2806,7 +2806,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
 	const bool bSkeletonGenerated =
 		StopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof
-			? SkeletonGenerator.GenerateStage4FloorStyleInfill(SelectedProfile,
+			? SkeletonGenerator.GenerateStage4RoofCrown(SelectedProfile,
 				OutResult.Silhouette, OutResult.Skeleton, OutError)
 			: StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
 			? SkeletonGenerator.GenerateStage3(SelectedProfile,
@@ -3144,6 +3144,30 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.Stage4FloorStyleInfillHash;
 	Summary.SkeletonFirstStage4FloorStyleInfillMilliseconds =
 		Stage1.Stage4FloorStyleInfillMilliseconds;
+	Summary.SkeletonFirstStage4RoofCrownVolumeCount =
+		Stage1.Stage4RoofCrownVolumeCount;
+	Summary.SkeletonFirstStage4RoofBandCount = Stage1.Stage4RoofBandCount;
+	Summary.SkeletonFirstStage4RoofCourseCount =
+		Stage1.Stage4RoofCourseCount;
+	Summary.SkeletonFirstStage4EmittedRoofMemberCount =
+		Stage1.Stage4EmittedRoofMemberCount;
+	Summary.SkeletonFirstStage4RoofPostMemberCount =
+		Stage1.Stage4RoofPostMemberCount;
+	Summary.SkeletonFirstStage4ReusedRoofCarrierCount =
+		Stage1.Stage4ReusedRoofCarrierCount;
+	Summary.SkeletonFirstStage4DeferredRoofCandidateCount =
+		Stage1.Stage4DeferredRoofCandidateCount;
+	Summary.SkeletonFirstStage4OccludedRoofCourseCount =
+		Stage1.Stage4OccludedRoofCourseCount;
+	Summary.SkeletonFirstStage4UnsupportedRoofMemberCount =
+		Stage1.Stage4UnsupportedRoofMemberCount;
+	Summary.SkeletonFirstStage4RoofBindingViolationCount =
+		Stage1.Stage4RoofBindingViolationCount;
+	Summary.SkeletonFirstStage4RoofConflictCount =
+		Stage1.Stage4RoofConflictCount;
+	Summary.SkeletonFirstStage4RoofCrownHash = Stage1.Stage4RoofCrownHash;
+	Summary.SkeletonFirstStage4RoofCrownMilliseconds =
+		Stage1.Stage4RoofCrownMilliseconds;
 	Summary.SkeletonFirstStage4TopFrameHash = Stage1.Stage4TopFrameHash;
 	Summary.SkeletonFirstStage4TopFrameMilliseconds =
 		Stage1.Stage4TopFrameMilliseconds;

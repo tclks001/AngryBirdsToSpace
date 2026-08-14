@@ -11,6 +11,7 @@ namespace
 	using namespace ABTSM73BeamC3V3;
 	constexpr int32 BlockUnitsCM = 36;
 	constexpr int32 MaximumHorizontalUnits = 18; // 648 cm, below the 720 cm hard gate.
+	constexpr int32 MaximumRoofHorizontalUnits = 20; // Crown may consume the full 720 cm hard gate.
 	constexpr double GeometryToleranceCM = 0.5;
 	constexpr double WitnessToleranceCM = 1.0;
 	constexpr double CoverageMachineEpsilon = DBL_EPSILON;
@@ -484,7 +485,10 @@ namespace
 		int32 SemanticDemandId = INDEX_NONE;
 		int32 TerminalSliceCourse = INDEX_NONE;
 		int32 TerminalSliceComponentId = INDEX_NONE;
+		/** Semantic load top, including Crown. */
 		int32 RequiredTopCourse = 0;
+		/** Physical TowerChild top; Crown owns [this, RequiredTopCourse). */
+		int32 PhysicalChildTopCourse = 0;
 		FBox EntryBounds = FBox(EForceInit::ForceInit);
 		FBox TerminalBounds = FBox(EForceInit::ForceInit);
 		FBox BranchBounds = FBox(EForceInit::ForceInit);
@@ -518,14 +522,16 @@ namespace
 			}
 			if (!Semantic.bHasContinuousCoreFit
 				|| !Semantic.ContinuousCoreFitBounds.IsValid
-				|| Semantic.RequiredTopCourse < PodiumTopCourse + 2)
+				|| Semantic.PhysicalChildTopCourse < PodiumTopCourse + 2
+				|| Semantic.RequiredTopCourse < Semantic.PhysicalChildTopCourse)
 			{
 				OutError = FString::Printf(
-					TEXT("BeamC3V3SemanticChildDemandFitInvalid:Component=%d:Demand=%d:BodySource=%d:Fit=%d:Podium=%d:Top=%d"),
+					TEXT("BeamC3V3SemanticChildDemandFitInvalid:Component=%d:Demand=%d:BodySource=%d:Fit=%d:Podium=%d:ChildTop=%d:LoadTop=%d"),
 					ComponentId, Semantic.DemandId,
 					Semantic.TerminalBodySourceVolumeId,
 					Semantic.bHasContinuousCoreFit ? 1 : 0,
-					PodiumTopCourse, Semantic.RequiredTopCourse);
+					PodiumTopCourse, Semantic.PhysicalChildTopCourse,
+					Semantic.RequiredTopCourse);
 				return false;
 			}
 
@@ -562,13 +568,14 @@ namespace
 			Demand.TerminalSliceCourse = Legacy->TerminalSliceCourse;
 			Demand.TerminalSliceComponentId = Legacy->TerminalSliceComponentId;
 			Demand.RequiredTopCourse = Semantic.RequiredTopCourse;
+			Demand.PhysicalChildTopCourse = Semantic.PhysicalChildTopCourse;
 			Demand.EntryBounds = Semantic.GroundProjectionBounds;
 			Demand.EntryBounds.Min.Z = PodiumTopZ;
 			Demand.EntryBounds.Max.Z = PodiumTopZ + BlockUnitsCM;
 			Demand.TerminalBounds = Semantic.ContinuousCoreFitBounds;
 			Demand.BranchBounds = Semantic.LoadBranchBounds;
 			Demand.BranchBounds.Min.Z = PodiumTopZ;
-			Demand.CourseSourceVolumeIds.SetNum(Demand.RequiredTopCourse);
+			Demand.CourseSourceVolumeIds.SetNum(Demand.PhysicalChildTopCourse);
 
 			for (const int32 LineageNodeId : Semantic.LineageNodeIds)
 			{
@@ -588,7 +595,7 @@ namespace
 				}
 				Demand.SourceVolumeIds.AddUnique(Node.SourceVolumeId);
 				for (int32 Course = PodiumTopCourse;
-					Course < Demand.RequiredTopCourse; ++Course)
+					Course < Demand.PhysicalChildTopCourse; ++Course)
 				{
 					const double SampleZ = Root.GroundZCM
 						+ (Course + 0.5) * static_cast<double>(BlockUnitsCM);
@@ -602,7 +609,7 @@ namespace
 			}
 			Demand.SourceVolumeIds.Sort();
 			for (int32 Course = PodiumTopCourse;
-				Course < Demand.RequiredTopCourse; ++Course)
+				Course < Demand.PhysicalChildTopCourse; ++Course)
 			{
 				Demand.CourseSourceVolumeIds[Course].Sort();
 				if (Demand.CourseSourceVolumeIds[Course].IsEmpty())
@@ -610,7 +617,7 @@ namespace
 					OutError = FString::Printf(
 						TEXT("BeamC3V3SemanticChildCourseLineageEmpty:Component=%d:Demand=%d:Course=%d:Top=%d"),
 						ComponentId, Semantic.DemandId, Course,
-						Demand.RequiredTopCourse);
+						Demand.PhysicalChildTopCourse);
 					return false;
 				}
 			}
@@ -1367,6 +1374,7 @@ namespace
 				Demand.TerminalLoadSourceVolumeId = TerminalLoad.SourceVolumeId;
 				Demand.BodyBounds = TerminalBody.LocalBounds;
 				Demand.TerminalLoadBounds = TerminalLoad.LocalBounds;
+				Demand.PhysicalChildTopCourse = MAX_int32;
 				Demand.GroundProjectionBounds = FBox(
 					FVector(TerminalBody.LocalBounds.Min.X,
 						TerminalBody.LocalBounds.Min.Y, Root.GroundZCM),
@@ -1432,6 +1440,10 @@ namespace
 					if (Current.Role == EABTSM73DAG5BV2VolumeRole::Crown)
 					{
 						Demand.CrownSourceVolumeIds.AddUnique(Current.SourceVolumeId);
+						Demand.PhysicalChildTopCourse = FMath::Min(
+							Demand.PhysicalChildTopCourse,
+							QRelativeFloor(Current.LocalBounds.Min.Z,
+								Root.GroundZCM));
 					}
 				}
 				for (const int32 LineageNodeId : LineageNodeIds)
@@ -1444,6 +1456,12 @@ namespace
 				Demand.RequiredTopCourse = FMath::FloorToInt(
 					(Demand.LoadBranchBounds.Max.Z - Root.GroundZCM)
 					/ static_cast<double>(BlockUnitsCM));
+				if (Demand.PhysicalChildTopCourse == MAX_int32)
+				{
+					Demand.PhysicalChildTopCourse = Demand.RequiredTopCourse;
+				}
+				Demand.PhysicalChildTopCourse = FMath::Clamp(
+					Demand.PhysicalChildTopCourse, 1, Demand.RequiredTopCourse);
 
 				const int32 CandidateMinimumX = QMin(
 					TerminalBody.LocalBounds.Min.X + BlockUnitsCM * 0.5);
@@ -1460,7 +1478,7 @@ namespace
 					{
 						bool bContinuous = true;
 						for (int32 Course = 0;
-							Course < Demand.RequiredTopCourse; ++Course)
+							Course < Demand.PhysicalChildTopCourse; ++Course)
 						{
 							const FVector Sample(
 								X * static_cast<double>(BlockUnitsCM),
@@ -1500,7 +1518,7 @@ namespace
 						FVector(FitXY.Min.X, FitXY.Min.Y, Root.GroundZCM),
 						FVector(FitXY.Max.X, FitXY.Max.Y,
 							Root.GroundZCM
-								+ Demand.RequiredTopCourse * BlockUnitsCM));
+								+ Demand.PhysicalChildTopCourse * BlockUnitsCM));
 				}
 			}
 		}
@@ -1698,6 +1716,8 @@ namespace
 				|| !Plan.SemanticSupportVolumeNodes.IsValidIndex(
 					Demand.TerminalLoadNodeId)
 				|| Demand.RequiredTopCourse <= 0
+				|| Demand.PhysicalChildTopCourse <= 0
+				|| Demand.PhysicalChildTopCourse > Demand.RequiredTopCourse
 				|| !Demand.BodyBounds.IsValid
 				|| !Demand.TerminalLoadBounds.IsValid
 				|| !Demand.GroundProjectionBounds.IsValid
@@ -1728,13 +1748,14 @@ namespace
 			Plan.Summary.SemanticTerminalDemandWithoutContinuousFitCount +=
 				Demand.bHasContinuousCoreFit ? 0 : 1;
 			Canonical += FString::Printf(
-				TEXT("|T:%d:C=%d:B=%d:V=%d:L=%d:LV=%d:TOP=%d:FIT=%d:MERGED=%d:P=%lld,%lld,%lld,%lld"),
+				TEXT("|T:%d:C=%d:B=%d:V=%d:L=%d:LV=%d:TOP=%d:CHILD=%d:FIT=%d:MERGED=%d:P=%lld,%lld,%lld,%lld"),
 				Demand.DemandId, Demand.ComponentId,
 				Demand.TerminalBodyNodeId,
 				Demand.TerminalBodySourceVolumeId,
 				Demand.TerminalLoadNodeId,
 				Demand.TerminalLoadSourceVolumeId,
 				Demand.RequiredTopCourse,
+				Demand.PhysicalChildTopCourse,
 				Demand.bHasContinuousCoreFit ? 1 : 0,
 				Demand.bSharesMergedCrown ? 1 : 0,
 				QHash(Demand.GroundProjectionBounds.Min.X),
@@ -2110,7 +2131,8 @@ namespace
 					Province.GroundSourceVolumeIds.Append(
 						Demand.GroundSourceVolumeIds);
 					Province.MinimumRequiredTopCourse = FMath::Min(
-						Province.MinimumRequiredTopCourse, Demand.RequiredTopCourse);
+						Province.MinimumRequiredTopCourse,
+						Demand.PhysicalChildTopCourse);
 				}
 				Province.DemandIds.Sort();
 				Province.TerminalBodyNodeIds.Sort();
@@ -4130,7 +4152,8 @@ namespace
 		const double Length = FVector::Distance(Start, End);
 		const bool bLongSpanMember = SkeletonKind == ESkeletonMemberKind::SharedCourse
 			|| SkeletonKind == ESkeletonMemberKind::CoreCourse
-			|| SkeletonKind == ESkeletonMemberKind::ThroughCourse;
+			|| SkeletonKind == ESkeletonMemberKind::ThroughCourse
+			|| SkeletonKind == ESkeletonMemberKind::RoofCourse;
 		const double Maximum = Axis == EABTSM73BeamAFrameAxis::Z || bLongSpanMember
 			? 720.0 : 648.0;
 		FString UnitizedDiagnostic;
@@ -4168,6 +4191,7 @@ namespace
 		case ESkeletonMemberKind::StyleInfillCourse:
 		case ESkeletonMemberKind::FacadeToTopSeat:
 		case ESkeletonMemberKind::FacadeToTopPost:
+		case ESkeletonMemberKind::RoofPost:
 		case ESkeletonMemberKind::RoofCourse:
 			Member.ProducedStage = EABTSM73BeamC3GenerationStage::FloorInfillRoof;
 			break;
@@ -5472,7 +5496,8 @@ namespace
 				|| Plan.SemanticTerminalDemands[Region.SemanticDemandId]
 					.ComponentId != Region.ComponentId
 				|| Region.PodiumTopCourse < 2
-				|| Region.RequiredTopCourse < Region.PodiumTopCourse + 2
+				|| Region.PhysicalChildTopCourse < Region.PodiumTopCourse + 2
+				|| Region.RequiredTopCourse < Region.PhysicalChildTopCourse
 				|| Region.TerminalSliceCourse < Region.PodiumTopCourse
 				|| Region.TerminalSliceComponentId == INDEX_NONE
 				|| Region.SourceVolumeIds.IsEmpty()
@@ -5535,7 +5560,8 @@ namespace
 				|| Core.HighProjectionRegionId != Region.RegionId
 				|| Core.SemanticDemandId != Region.SemanticDemandId
 				|| Core.PodiumMainCoreCellId != PodiumMain.CoreCellId
-				|| Core.TopCourseIndex != Region.RequiredTopCourse
+				|| Core.TopCourseIndex != Region.PhysicalChildTopCourse
+				|| Core.BodyTopCourseIndex != Region.PhysicalChildTopCourse
 				|| CoreCenter.X < Region.TerminalBounds.Min.X - GeometryToleranceCM
 				|| CoreCenter.X > Region.TerminalBounds.Max.X + GeometryToleranceCM
 				|| CoreCenter.Y < Region.TerminalBounds.Min.Y - GeometryToleranceCM
@@ -5544,13 +5570,14 @@ namespace
 				|| BoundSemanticDemandIds.Contains(Region.SemanticDemandId))
 			{
 				OutError = FString::Printf(
-					TEXT("BeamC3V3HighProjectionRegionBindingInvalid:Region=%d:Component=%d:Main=%d:MainTop=%d:Core=%d:CoreMain=%d:Role=%d:CoreRegion=%d:Top=%d:PodiumTop=%d"),
+					TEXT("BeamC3V3HighProjectionRegionBindingInvalid:Region=%d:Component=%d:Main=%d:MainTop=%d:Core=%d:CoreMain=%d:Role=%d:CoreRegion=%d:Top=%d:ChildTop=%d:LoadTop=%d:PodiumTop=%d"),
 					Region.RegionId, Region.ComponentId, PodiumMain.CoreCellId,
 					PodiumMain.TopCourseIndex,
 					Core.CoreCellId,
 					Core.PodiumMainCoreCellId,
 					static_cast<int32>(Core.HierarchyRole),
 					Core.HighProjectionRegionId, Core.TopCourseIndex,
+					Region.PhysicalChildTopCourse, Region.RequiredTopCourse,
 					Region.PodiumTopCourse);
 				return false;
 			}
@@ -5714,7 +5741,7 @@ namespace
 			// that stronger rail-level witness.
 			if (Child.SingleShrinkCourseIndex > 0
 				&& Child.SemanticDemandId == Demand.DemandId
-				&& Child.TopCourseIndex == Demand.RequiredTopCourse)
+				&& Child.TopCourseIndex == Demand.PhysicalChildTopCourse)
 			{
 				Diagnostic.bChildCenterInsideBodyXY = true;
 				Diagnostic.bChildInsideContinuousFitXY = true;
@@ -5732,7 +5759,7 @@ namespace
 			if (!Diagnostic.bChildCenterInsideBodyXY
 				|| !Diagnostic.bChildInsideContinuousFitXY
 				|| Child.SemanticDemandId != Demand.DemandId
-				|| Child.TopCourseIndex != Demand.RequiredTopCourse)
+				|| Child.TopCourseIndex != Demand.PhysicalChildTopCourse)
 			{
 				++Plan.Summary.SemanticDemandChildOutsideBodyCount;
 			}
@@ -15066,7 +15093,7 @@ namespace
 			TArray<int32> RequiredHighProjectionSemanticDemandIds;
 			TArray<TArray<TArray<int32>>>
 				RequiredHighProjectionCourseSourceVolumeIds;
-			TArray<int32> RequiredHighProjectionTopCourses;
+			TArray<int32> RequiredHighProjectionPhysicalChildTopCourses;
 			if (Stage == EGenerationStage::CoreAndShared)
 			{
 				FStage1PhaseTimer PhaseTimer(
@@ -15106,7 +15133,8 @@ namespace
 					RequiredHighProjectionSourceVolumeIds.Add(Demand.SourceVolumeIds);
 					RequiredHighProjectionCourseSourceVolumeIds.Add(
 						Demand.CourseSourceVolumeIds);
-					RequiredHighProjectionTopCourses.Add(Demand.RequiredTopCourse);
+					RequiredHighProjectionPhysicalChildTopCourses.Add(
+						Demand.PhysicalChildTopCourse);
 				}
 			}
 			if (bUseGroundedCoreHierarchy
@@ -15252,7 +15280,7 @@ namespace
 					const int32 MaximumSpanY = FMath::Min(
 						MaximumHorizontalUnits, SeedMaximumY - SeedMinimumY);
 					const int32 MaximumCandidateTopCourse =
-						RequiredHighProjectionTopCourses[ProjectionIndex];
+						RequiredHighProjectionPhysicalChildTopCourses[ProjectionIndex];
 					TArray<TArray<FBox>> ProjectionAllowedBoxesByCourse;
 					ProjectionAllowedBoxesByCourse.SetNum(MaximumCandidateTopCourse);
 					for (int32 Course = PodiumTopCourse;
@@ -18973,6 +19001,7 @@ namespace
 					Region.SemanticDemandId = Demand.SemanticDemandId;
 					Region.PodiumTopCourse = PodiumTopCourse;
 					Region.RequiredTopCourse = Demand.RequiredTopCourse;
+					Region.PhysicalChildTopCourse = Demand.PhysicalChildTopCourse;
 					Region.TerminalSliceCourse = Demand.TerminalSliceCourse;
 					Region.TerminalSliceComponentId =
 						Demand.TerminalSliceComponentId;
@@ -21309,9 +21338,10 @@ namespace
 				: OutPlan.HighProjectionRegions)
 			{
 				CoreCanonical += FString::Printf(
-					TEXT("|HIGH:%d:C=%d:P=%d:T=%d:TS=%d,%d:MAIN=%d:CORE=%d:B=%lld,%lld,%lld,%lld,%lld,%lld:E=%lld,%lld,%lld,%lld:Z=%lld,%lld,%lld,%lld"),
+					TEXT("|HIGH:%d:C=%d:P=%d:T=%d:CT=%d:TS=%d,%d:MAIN=%d:CORE=%d:B=%lld,%lld,%lld,%lld,%lld,%lld:E=%lld,%lld,%lld,%lld:Z=%lld,%lld,%lld,%lld"),
 					Region.RegionId, Region.ComponentId, Region.PodiumTopCourse,
-					Region.RequiredTopCourse, Region.TerminalSliceCourse,
+					Region.RequiredTopCourse, Region.PhysicalChildTopCourse,
+					Region.TerminalSliceCourse,
 					Region.TerminalSliceComponentId,
 					Region.BoundPodiumMainCoreCellId, Region.BoundCoreCellId,
 					QHash(Region.LocalBounds.Min.X), QHash(Region.LocalBounds.Min.Y),
@@ -22672,6 +22702,7 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 	Plan.Summary.Stage4TopSurfaceIntentCount = 0;
 	Plan.Summary.Stage4GroundSillIntentCount = 0;
 	Plan.Summary.Stage4ResolvedTopSurfaceIntentCount = 0;
+	Plan.Summary.Stage4GroundedCoreAnchorIntentCount = 0;
 	Plan.Summary.Stage4ExposedSetbackTopIntentCount = 0;
 	Plan.Summary.Stage4DirectStackSeatIntentCount = 0;
 	Plan.Summary.Stage4UnresolvedIntentCount = 0;
@@ -22896,6 +22927,52 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 				}
 			}
 		}
+		const FFacadeHeightAnchorBand* AnchorBand =
+			Plan.FacadeHeightAnchorBands.FindByPredicate(
+				[&Frame](const FFacadeHeightAnchorBand& Candidate)
+				{
+					return Candidate.AnchorBandId == Frame.AnchorBandId;
+				});
+		const FCoreCellPlan* AnchorCore = AnchorBand != nullptr
+			? Plan.CoreCells.FindByPredicate(
+				[AnchorBand](const FCoreCellPlan& Candidate)
+				{
+					return Candidate.CoreCellId == AnchorBand->OriginCoreCellId;
+				})
+			: nullptr;
+		auto IsCertifiedAnchorMember = [&Plan, AnchorBand, AnchorCore](
+			const int32 MemberIndex)
+		{
+			if (AnchorBand == nullptr || AnchorCore == nullptr
+				|| !Plan.Members.IsValidIndex(MemberIndex))
+			{
+				return false;
+			}
+			const FPlannedMember& Member = Plan.Members[MemberIndex];
+			return Member.ProducedStage == EABTSM73BeamC3GenerationStage::CouplingCourses
+				&& Member.AnchorBandId == AnchorBand->AnchorBandId
+				&& Member.OriginCoreCellId == AnchorCore->CoreCellId
+				&& !Member.RequiredInwardMemberIndices.IsEmpty()
+				&& Member.RequiredInwardMemberIndices.ContainsByPredicate(
+					[&Plan, AnchorCore](const int32 InwardMemberIndex)
+					{
+						return Plan.Members.IsValidIndex(InwardMemberIndex)
+							&& Plan.Members[InwardMemberIndex].OwnerKind
+								== EOwnerKind::CoreCell
+							&& Plan.Members[InwardMemberIndex].OwnerId
+								== AnchorCore->CoreCellId;
+					});
+		};
+		const bool bGroundedCoreAnchor = BestSurface == nullptr
+			&& AnchorBand != nullptr && AnchorCore != nullptr
+			&& AnchorCore->ComponentId == Frame.ComponentId
+			&& AnchorCore->TopCourseIndex > Frame.CourseIndex
+			&& AnchorCore->BodyTopCourseIndex > Frame.CourseIndex
+			&& AnchorBand->BaseCourseIndex + 1 == Frame.CourseIndex
+			&& Frame.LowerStage2MemberIndex == AnchorBand->LowerMemberIndex
+			&& Frame.UpperStage2MemberIndex == AnchorBand->UpperMemberIndex
+			&& IsCertifiedAnchorMember(AnchorBand->LowerMemberIndex)
+			&& IsCertifiedAnchorMember(AnchorBand->UpperMemberIndex);
 		if (BestSurface != nullptr)
 		{
 			Intent.Intent = EFacadeDownwardIntent::TopSurface;
@@ -22914,6 +22991,12 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 			Plan.Summary.Stage4DirectStackSeatIntentCount += BestAuthority
 				== ETopSurfaceAuthorityKind::DirectStackSeat ? 1 : 0;
 		}
+		else if (bGroundedCoreAnchor)
+		{
+			Intent.Intent = EFacadeDownwardIntent::GroundedCoreAnchor;
+			Intent.Reason = TEXT("CertifiedStage2AnchorIntoGroundedBodyCore");
+			++Plan.Summary.Stage4GroundedCoreAnchorIntentCount;
+		}
 		else
 		{
 			Intent.Reason = TEXT("NoExposedEnvelopeUnionTopBelowFrame");
@@ -22922,13 +23005,23 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 				TEXT("[ABTS][M7.3-Beam-C3V3][Stage4IntentUnresolved]")
 				TEXT(" Frame=%d Partition=%d Component=%d Face=%u")
 				TEXT(" FrameCourse=%d FacadeFirstCourse=%d Normal=%.3f")
-				TEXT(" Tangent=%.3f..%.3f Reason=%s"),
+				TEXT(" Tangent=%.3f..%.3f AnchorBand=%d AnchorBase=%d")
+				TEXT(" Core=%d Role=%d CoreTop=%d BodyTop=%d")
+				TEXT(" CoreBounds=%s Reason=%s"),
 				Intent.ExteriorFrameId, Intent.FacadePartitionId,
 				Intent.ComponentId, Intent.FaceMask,
 				Intent.ExteriorFrameCourseIndex,
 				Intent.FacadeFirstCourseIndex,
 				Intent.FacadeCoordinateCM, Intent.TangentMinimumCM,
-				Intent.TangentMaximumCM, *Intent.Reason);
+				Intent.TangentMaximumCM, Frame.AnchorBandId,
+				AnchorBand != nullptr ? AnchorBand->BaseCourseIndex : INDEX_NONE,
+				AnchorCore != nullptr ? AnchorCore->CoreCellId : INDEX_NONE,
+				AnchorCore != nullptr
+					? static_cast<int32>(AnchorCore->HierarchyRole) : INDEX_NONE,
+				AnchorCore != nullptr ? AnchorCore->TopCourseIndex : INDEX_NONE,
+				AnchorCore != nullptr ? AnchorCore->BodyTopCourseIndex : INDEX_NONE,
+				AnchorCore != nullptr ? *AnchorCore->LocalBounds.ToString()
+					: TEXT("Missing"), *Intent.Reason);
 		}
 	}
 	Plan.Summary.Stage4TopSurfaceIntentCount = Plan.TopSurfaceIntents.Num();
@@ -22959,6 +23052,7 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 		|| Plan.Summary.Stage4TopSurfaceIntentCount
 			!= Plan.Summary.Stage4GroundSillIntentCount
 				+ Plan.Summary.Stage4ResolvedTopSurfaceIntentCount
+				+ Plan.Summary.Stage4GroundedCoreAnchorIntentCount
 				+ Plan.Summary.Stage4UnresolvedIntentCount
 		|| Plan.Summary.Stage4ResolvedTopSurfaceIntentCount
 			!= Plan.Summary.Stage4ExposedSetbackTopIntentCount
@@ -22966,10 +23060,11 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4TopSurfaceIntent(
 		|| Plan.Summary.Stage4IntentBindingViolationCount != 0)
 	{
 		OutError = FString::Printf(
-			TEXT("BeamC3V3Stage4IntentContractFailed:Intents=%d:Ground=%d:Top=%d:Unresolved=%d:BindingViolations=%d:Members=%d/%d:Stage3Hash=%lld/%lld"),
+			TEXT("BeamC3V3Stage4IntentContractFailed:Intents=%d:Ground=%d:Top=%d:CoreAnchor=%d:Unresolved=%d:BindingViolations=%d:Members=%d/%d:Stage3Hash=%lld/%lld"),
 			Plan.Summary.Stage4TopSurfaceIntentCount,
 			Plan.Summary.Stage4GroundSillIntentCount,
 			Plan.Summary.Stage4ResolvedTopSurfaceIntentCount,
+			Plan.Summary.Stage4GroundedCoreAnchorIntentCount,
 			Plan.Summary.Stage4UnresolvedIntentCount,
 			Plan.Summary.Stage4IntentBindingViolationCount,
 			Plan.Members.Num(), Stage3MemberCount,
@@ -25044,6 +25139,1306 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FloorStyleInfill(
 	Plan.Summary.Stage4FloorStyleInfillMilliseconds =
 		ElapsedMilliseconds(StartSeconds);
 	return Plan.Summary.Stage4FloorStyleInfillHash != 0;
+}
+
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4RoofCrown(
+	const FABTSM73BeamD0ResolvedProfile& Profile,
+	const FABTSM73DAG5BV2GenerationResult& Silhouette,
+	ABTSM73BeamC3V3::FGenerationResult& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamC3V3;
+	const double StartSeconds = FPlatformTime::Seconds();
+	if (!GenerateStage4FloorStyleInfill(Profile, Silhouette, OutResult, OutError))
+	{
+		return false;
+	}
+	FPlan& Plan = OutResult.Plan;
+	FABTSM73BeamAGenerationResult& Assembly = OutResult.Assembly;
+	const int32 InputMemberCount = Plan.Members.Num();
+	Plan.RoofCrownCourses.Reset();
+	Plan.RoofCrownOccludedCourses.Reset();
+	Plan.Summary.Stage4RoofCrownVolumeCount = 0;
+	Plan.Summary.Stage4RoofBandCount = 0;
+	Plan.Summary.Stage4RoofCourseCount = 0;
+	Plan.Summary.Stage4EmittedRoofMemberCount = 0;
+	Plan.Summary.Stage4RoofPostMemberCount = 0;
+	Plan.Summary.Stage4ReusedRoofCarrierCount = 0;
+	Plan.Summary.Stage4DeferredRoofCandidateCount = 0;
+	Plan.Summary.Stage4OccludedRoofCourseCount = 0;
+	Plan.Summary.Stage4UnsupportedRoofMemberCount = 0;
+	Plan.Summary.Stage4RoofBindingViolationCount = 0;
+	Plan.Summary.Stage4RoofConflictCount = 0;
+	Plan.Summary.Stage4RoofCrownHash = 0;
+	Plan.Summary.Stage4RoofCrownMilliseconds = 0.0;
+
+	TMap<int32, int32> ComponentBySourceVolume;
+	for (const FSemanticSupportVolumeNodeDiagnostic& Node
+		: Plan.SemanticSupportVolumeNodes)
+	{
+		ComponentBySourceVolume.FindOrAdd(Node.SourceVolumeId) = Node.ComponentId;
+	}
+	TMap<int32, const FABTSM73DAG5BV2Volume*> CrownByVolumeId;
+	for (const FABTSM73DAG5BV2Volume& Volume : Silhouette.Volumes)
+	{
+		if (Volume.Role == EABTSM73DAG5BV2VolumeRole::Crown
+			&& Volume.LocalBounds.IsValid
+			&& ComponentBySourceVolume.Contains(Volume.VolumeId))
+		{
+			CrownByVolumeId.Add(Volume.VolumeId, &Volume);
+		}
+	}
+	struct FCrownVoxelTarget
+	{
+		int32 DemandId = INDEX_NONE;
+		int32 ComponentId = INDEX_NONE;
+		int32 CoreCellId = INDEX_NONE;
+		const FABTSM73DAG5BV2Volume* Crown = nullptr;
+	};
+	TArray<FCrownVoxelTarget> CrownTargets;
+	TSet<int32> TargetedCoreCellIds;
+	for (const FSemanticDemandCoreBindingDiagnostic& Binding
+		: Plan.SemanticDemandCoreBindings)
+	{
+		const int32 RoofCoreCellId = Binding.BoundTowerChildCoreCellId != INDEX_NONE
+			? Binding.BoundTowerChildCoreCellId
+			: Binding.AssignedPodiumMainCoreCellId;
+		if (RoofCoreCellId == INDEX_NONE
+			|| TargetedCoreCellIds.Contains(RoofCoreCellId))
+		{
+			continue;
+		}
+		const FSemanticTerminalDemandDiagnostic* Demand =
+			Plan.SemanticTerminalDemands.FindByPredicate(
+				[&Binding](const FSemanticTerminalDemandDiagnostic& Candidate)
+				{
+					return Candidate.DemandId == Binding.DemandId;
+				});
+		if (Demand == nullptr || Demand->CrownSourceVolumeIds.IsEmpty())
+		{
+			continue;
+		}
+		const FABTSM73DAG5BV2Volume* Representative = nullptr;
+		for (const int32 CrownVolumeId : Demand->CrownSourceVolumeIds)
+		{
+			const FABTSM73DAG5BV2Volume* const* Found =
+				CrownByVolumeId.Find(CrownVolumeId);
+			if (Found == nullptr) continue;
+			if (Representative == nullptr
+				|| (*Found)->LocalBounds.Min.Z
+					> Representative->LocalBounds.Min.Z + GeometryToleranceCM
+				|| (FMath::IsNearlyEqual((*Found)->LocalBounds.Min.Z,
+						Representative->LocalBounds.Min.Z, GeometryToleranceCM)
+					&& (*Found)->VolumeId < Representative->VolumeId))
+			{
+				Representative = *Found;
+			}
+		}
+		if (Representative == nullptr) continue;
+		FCrownVoxelTarget& Target = CrownTargets.AddDefaulted_GetRef();
+		Target.DemandId = Demand->DemandId;
+		Target.ComponentId = Demand->ComponentId;
+		Target.CoreCellId = RoofCoreCellId;
+		Target.Crown = Representative;
+		TargetedCoreCellIds.Add(Target.CoreCellId);
+	}
+	// Very low tiers can collapse the semantic demand hierarchy directly into a
+	// grounded main and therefore publish no TowerChild demand binding.  Preserve
+	// the same one-roof-per-physical-core rule by selecting the highest overlapping
+	// core under each Crown, rather than falling back to one roof per WFC volume.
+	if (CrownTargets.IsEmpty())
+	{
+		TArray<const FABTSM73DAG5BV2Volume*> FallbackCrowns;
+		CrownByVolumeId.GenerateValueArray(FallbackCrowns);
+		FallbackCrowns.Sort([&ComponentBySourceVolume](
+			const FABTSM73DAG5BV2Volume& A,
+			const FABTSM73DAG5BV2Volume& B)
+		{
+			const int32 ComponentA = ComponentBySourceVolume.FindChecked(A.VolumeId);
+			const int32 ComponentB = ComponentBySourceVolume.FindChecked(B.VolumeId);
+			if (ComponentA != ComponentB) return ComponentA < ComponentB;
+			if (!FMath::IsNearlyEqual(A.LocalBounds.Min.Z, B.LocalBounds.Min.Z,
+				GeometryToleranceCM)) return A.LocalBounds.Min.Z < B.LocalBounds.Min.Z;
+			return A.VolumeId < B.VolumeId;
+		});
+		for (const FABTSM73DAG5BV2Volume* Crown : FallbackCrowns)
+		{
+			const int32 ComponentId = ComponentBySourceVolume.FindChecked(
+				Crown->VolumeId);
+			const FCoreCellPlan* BestCore = nullptr;
+			double BestOverlapArea = 0.0;
+			for (const FCoreCellPlan& Core : Plan.CoreCells)
+			{
+				if (Core.ComponentId != ComponentId
+					|| TargetedCoreCellIds.Contains(Core.CoreCellId))
+				{
+					continue;
+				}
+				const FBox& CoreBounds = Core.UpperLocalBounds.IsValid
+					? Core.UpperLocalBounds : Core.LocalBounds;
+				const double OverlapX = SkeletonV3OverlapLength(CoreBounds.Min.X,
+					CoreBounds.Max.X, Crown->LocalBounds.Min.X, Crown->LocalBounds.Max.X);
+				const double OverlapY = SkeletonV3OverlapLength(CoreBounds.Min.Y,
+					CoreBounds.Max.Y, Crown->LocalBounds.Min.Y, Crown->LocalBounds.Max.Y);
+				const double Area = OverlapX * OverlapY;
+				if (Area > BestOverlapArea + GeometryToleranceCM)
+				{
+					BestCore = &Core;
+					BestOverlapArea = Area;
+				}
+			}
+			if (BestCore == nullptr) continue;
+			FCrownVoxelTarget& Target = CrownTargets.AddDefaulted_GetRef();
+			Target.ComponentId = ComponentId;
+			Target.CoreCellId = BestCore->CoreCellId;
+			Target.Crown = Crown;
+			TargetedCoreCellIds.Add(Target.CoreCellId);
+		}
+	}
+	CrownTargets.Sort([](const FCrownVoxelTarget& A, const FCrownVoxelTarget& B)
+	{
+		if (A.ComponentId != B.ComponentId) return A.ComponentId < B.ComponentId;
+		if (A.DemandId != B.DemandId) return A.DemandId < B.DemandId;
+		return A.CoreCellId < B.CoreCellId;
+	});
+	Plan.Summary.Stage4RoofCrownVolumeCount = CrownTargets.Num();
+
+	auto IsBlocked = [&Plan](const FPlannedMember& Probe,
+		const int32 AllowedTouchMemberIndex, int32* OutBlockingMemberIndex,
+		int32* OutBlockingSupportVoidIndex)
+	{
+		if (OutBlockingMemberIndex != nullptr) *OutBlockingMemberIndex = INDEX_NONE;
+		if (OutBlockingSupportVoidIndex != nullptr)
+		{
+			*OutBlockingSupportVoidIndex = INDEX_NONE;
+		}
+		const FBox ProbeBounds = PlannedMemberBounds(Probe);
+		for (int32 VoidIndex = 0; VoidIndex < Plan.ReservedSupportVoids.Num(); ++VoidIndex)
+		{
+			if (BoxesPenetrate(ProbeBounds,
+				Plan.ReservedSupportVoids[VoidIndex].Bounds))
+			{
+				if (OutBlockingSupportVoidIndex != nullptr)
+				{
+					*OutBlockingSupportVoidIndex = VoidIndex;
+				}
+				return true;
+			}
+		}
+		for (int32 ExistingIndex = 0; ExistingIndex < Plan.Members.Num(); ++ExistingIndex)
+		{
+			if (ExistingIndex == AllowedTouchMemberIndex
+				|| Plan.Members[ExistingIndex].bSuppressedByStage4FacadeToTop)
+			{
+				continue;
+			}
+			if (BoxesPenetrate(ProbeBounds,
+				PlannedMemberBounds(Plan.Members[ExistingIndex])))
+			{
+				if (OutBlockingMemberIndex != nullptr)
+				{
+					*OutBlockingMemberIndex = ExistingIndex;
+				}
+				return true;
+			}
+		}
+		return false;
+	};
+
+	FString Canonical = FString::Printf(TEXT("Floor=%lld"),
+		Plan.Summary.Stage4FloorStyleInfillHash);
+	FString BindingDiagnostics;
+	struct FCompletedCrownBand
+	{
+		int32 CourseIndex = INDEX_NONE;
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		TArray<int32> CarrierMemberIndices;
+	};
+	TMap<int32, TArray<FCompletedCrownBand>> CompletedBandsByComponent;
+	for (const FCrownVoxelTarget& Target : CrownTargets)
+	{
+		const FABTSM73DAG5BV2Volume* Crown = Target.Crown;
+		const int32 ComponentId = Target.ComponentId;
+		if (!Plan.Components.IsValidIndex(ComponentId))
+		{
+			++Plan.Summary.Stage4RoofBindingViolationCount;
+			BindingDiagnostics += FString::Printf(TEXT("|V%d:InvalidComponent%d"),
+				Crown->VolumeId, ComponentId);
+			continue;
+		}
+		const double GroundZ = Plan.Components[ComponentId].GroundPlaneZCM;
+		const int32 FirstCourse = QRelativeFloor(Crown->LocalBounds.Min.Z, GroundZ);
+		TArray<int32> InheritedBandCarriers;
+		int32 InheritedBandCourse = INDEX_NONE;
+		EABTSM73BeamAFrameAxis InheritedBandAxis = EABTSM73BeamAFrameAxis::X;
+		if (Plan.CoreCells.IsValidIndex(Target.CoreCellId))
+		{
+			const FCoreCellPlan& Core = Plan.CoreCells[Target.CoreCellId];
+			InheritedBandCourse = Core.TopCourseIndex - 1;
+			for (const int32 MemberIndex : Core.MemberIndices)
+			{
+				if (!Plan.Members.IsValidIndex(MemberIndex)) continue;
+				const FPlannedMember& Member = Plan.Members[MemberIndex];
+				if (!Member.bSuppressedByStage4FacadeToTop
+					&& Member.CourseIndex == InheritedBandCourse
+					&& Member.Axis != EABTSM73BeamAFrameAxis::Z)
+				{
+					InheritedBandCarriers.Add(MemberIndex);
+					InheritedBandAxis = Member.Axis;
+				}
+			}
+			if (InheritedBandCarriers.IsEmpty())
+			{
+				InheritedBandCourse = INDEX_NONE;
+			}
+		}
+		if (InheritedBandCourse == INDEX_NONE)
+		{
+			if (const TArray<FCompletedCrownBand>* CompletedBands =
+				CompletedBandsByComponent.Find(ComponentId))
+			{
+				for (const FCompletedCrownBand& CompletedBand : *CompletedBands)
+				{
+					if (CompletedBand.CourseIndex >= FirstCourse
+						|| CompletedBand.CourseIndex <= InheritedBandCourse)
+					{
+						continue;
+					}
+					TArray<int32> OverlappingCarriers;
+					for (const int32 CarrierIndex : CompletedBand.CarrierMemberIndices)
+					{
+						if (!Plan.Members.IsValidIndex(CarrierIndex)) continue;
+						const FBox CarrierBounds = PlannedMemberBounds(
+							Plan.Members[CarrierIndex]);
+						if (SkeletonV3OverlapLength(CarrierBounds.Min.X,
+								CarrierBounds.Max.X, Crown->LocalBounds.Min.X,
+								Crown->LocalBounds.Max.X) > GeometryToleranceCM
+							&& SkeletonV3OverlapLength(CarrierBounds.Min.Y,
+								CarrierBounds.Max.Y, Crown->LocalBounds.Min.Y,
+								Crown->LocalBounds.Max.Y) > GeometryToleranceCM)
+						{
+							OverlappingCarriers.Add(CarrierIndex);
+						}
+					}
+					if (!OverlappingCarriers.IsEmpty())
+					{
+						InheritedBandCarriers = MoveTemp(OverlappingCarriers);
+						InheritedBandCourse = CompletedBand.CourseIndex;
+						InheritedBandAxis = CompletedBand.Axis;
+					}
+				}
+			}
+		}
+		// A Crown branch may start directly above a core, setback top frame or
+		// floor frame rather than above another Crown volume.  When no completed
+		// Crown course overlaps, bind the first voxel course to the highest existing
+		// horizontal support family inside this Crown footprint.
+		if (InheritedBandCourse == INDEX_NONE)
+		{
+			int32 HighestSeatCourse = INDEX_NONE;
+			TArray<int32> HighestXSeats;
+			TArray<int32> HighestYSeats;
+			for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+			{
+				const FPlannedMember& Member = Plan.Members[MemberIndex];
+				if (Member.ComponentId != ComponentId
+					|| Member.bSuppressedByStage4FacadeToTop
+					|| Member.Axis == EABTSM73BeamAFrameAxis::Z
+					|| Member.CourseIndex >= FirstCourse)
+				{
+					continue;
+				}
+				const FBox MemberBounds = PlannedMemberBounds(Member);
+				if (SkeletonV3OverlapLength(MemberBounds.Min.X, MemberBounds.Max.X,
+						Crown->LocalBounds.Min.X, Crown->LocalBounds.Max.X)
+						<= GeometryToleranceCM
+					|| SkeletonV3OverlapLength(MemberBounds.Min.Y, MemberBounds.Max.Y,
+						Crown->LocalBounds.Min.Y, Crown->LocalBounds.Max.Y)
+						<= GeometryToleranceCM)
+				{
+					continue;
+				}
+				if (Member.CourseIndex > HighestSeatCourse)
+				{
+					HighestSeatCourse = Member.CourseIndex;
+					HighestXSeats.Reset();
+					HighestYSeats.Reset();
+				}
+				if (Member.CourseIndex == HighestSeatCourse)
+				{
+					(Member.Axis == EABTSM73BeamAFrameAxis::X
+						? HighestXSeats : HighestYSeats).Add(MemberIndex);
+				}
+			}
+			if (HighestSeatCourse != INDEX_NONE)
+			{
+				InheritedBandCourse = HighestSeatCourse;
+				if (HighestXSeats.Num() >= HighestYSeats.Num())
+				{
+					InheritedBandAxis = EABTSM73BeamAFrameAxis::X;
+					InheritedBandCarriers = MoveTemp(HighestXSeats);
+				}
+				else
+				{
+					InheritedBandAxis = EABTSM73BeamAFrameAxis::Y;
+					InheritedBandCarriers = MoveTemp(HighestYSeats);
+				}
+			}
+		}
+		const EABTSM73BeamAFrameAxis BaseBandAxis =
+			InheritedBandCourse != INDEX_NONE
+				? (InheritedBandAxis == EABTSM73BeamAFrameAxis::X
+					? EABTSM73BeamAFrameAxis::Y
+					: EABTSM73BeamAFrameAxis::X)
+				: (FirstCourse & 1) == 0
+					? EABTSM73BeamAFrameAxis::X
+					: EABTSM73BeamAFrameAxis::Y;
+		// Crown geometry is a deterministic 36 cm crib roof rooted in the actual
+		// highest support family, not a fit to the WFC Crown height.  Every adjacent
+		// course changes axis.  A pyramid insets the new pair by one cell on both
+		// sides of its cross axis; a triangular prism only insets its semantic
+		// taper axis and keeps the ridge axis unchanged.
+		FBox RoofBaseBounds(EForceInit::ForceInit);
+		if (Plan.CoreCells.IsValidIndex(Target.CoreCellId))
+		{
+			const FCoreCellPlan& Core = Plan.CoreCells[Target.CoreCellId];
+			const bool bUsesUpperFootprint = Core.SingleShrinkCourseIndex > 0
+				&& Core.TopCourseIndex > Core.SingleShrinkCourseIndex
+				&& Core.UpperLocalBounds.IsValid;
+			RoofBaseBounds = bUsesUpperFootprint
+				? Core.UpperLocalBounds : Core.LocalBounds;
+			RoofBaseBounds.Min.X -= BlockUnitsCM * 0.5;
+			RoofBaseBounds.Max.X += BlockUnitsCM * 0.5;
+			RoofBaseBounds.Min.Y -= BlockUnitsCM * 0.5;
+			RoofBaseBounds.Max.Y += BlockUnitsCM * 0.5;
+		}
+		if (!RoofBaseBounds.IsValid)
+		{
+			for (const int32 CarrierIndex : InheritedBandCarriers)
+			{
+				if (Plan.Members.IsValidIndex(CarrierIndex))
+				{
+					RoofBaseBounds += PlannedMemberBounds(Plan.Members[CarrierIndex]);
+				}
+			}
+		}
+		if (!RoofBaseBounds.IsValid)
+		{
+			RoofBaseBounds = Crown->LocalBounds;
+		}
+		const int32 RoofBaseUnitsX = FMath::Max(1, FMath::RoundToInt(
+			RoofBaseBounds.GetSize().X / BlockUnitsCM));
+		const int32 RoofBaseUnitsY = FMath::Max(1, FMath::RoundToInt(
+			RoofBaseBounds.GetSize().Y / BlockUnitsCM));
+		int32 RemainingUnitsX = RoofBaseUnitsX;
+		int32 RemainingUnitsY = RoofBaseUnitsY;
+		const int32 TerminalUnitsX = (RoofBaseUnitsX & 1) == 0 ? 2 : 1;
+		const int32 TerminalUnitsY = (RoofBaseUnitsY & 1) == 0 ? 2 : 1;
+		const bool bPyramid = Crown->Primitive
+			== EABTSM73DAG5BV2Primitive::Pyramid;
+		const int32 PrismShrinkAxis = Crown->Primitive
+			== EABTSM73DAG5BV2Primitive::TriangularPrismX ? 0
+			: Crown->Primitive == EABTSM73DAG5BV2Primitive::TriangularPrismY ? 1
+				: INDEX_NONE;
+		const int32 RoofFirstCourse = InheritedBandCourse != INDEX_NONE
+			? InheritedBandCourse + 1 : FirstCourse;
+		TArray<int32> BandCourses;
+		TArray<EABTSM73BeamAFrameAxis> BandAxes;
+		TArray<FBox> BandFootprints;
+		TArray<FIntPoint> BandFootprintUnits;
+		for (int32 BandOrdinal = 0; BandOrdinal < MaximumRoofHorizontalUnits * 2;
+			++BandOrdinal)
+		{
+			const EABTSM73BeamAFrameAxis Axis = (BandOrdinal & 1) == 0
+				? BaseBandAxis
+				: (BaseBandAxis == EABTSM73BeamAFrameAxis::X
+					? EABTSM73BeamAFrameAxis::Y : EABTSM73BeamAFrameAxis::X);
+			const int32 CrossAxisIndex = Axis == EABTSM73BeamAFrameAxis::X ? 1 : 0;
+			int32& CrossUnits = CrossAxisIndex == 0
+				? RemainingUnitsX : RemainingUnitsY;
+			const int32 CrossTerminalUnits = CrossAxisIndex == 0
+				? TerminalUnitsX : TerminalUnitsY;
+			const bool bShrinkThisCourse = bPyramid
+				|| CrossAxisIndex == PrismShrinkAxis;
+			if (bShrinkThisCourse && CrossUnits > CrossTerminalUnits)
+			{
+				// Remove exactly one 36 cm cell from each side.  Width parity is
+				// invariant: odd footprints converge to one cell, while even
+				// footprints converge to two.  In particular 2 -> 1 is forbidden,
+				// because a centered one-cell cap would shift by half a voxel.
+				CrossUnits -= 2;
+			}
+			BandCourses.Add(RoofFirstCourse + BandOrdinal);
+			BandAxes.Add(Axis);
+			FBox Footprint = RoofBaseBounds;
+			const FVector Center = RoofBaseBounds.GetCenter();
+			Footprint.Min.X = Center.X - RemainingUnitsX * BlockUnitsCM * 0.5;
+			Footprint.Max.X = Center.X + RemainingUnitsX * BlockUnitsCM * 0.5;
+			Footprint.Min.Y = Center.Y - RemainingUnitsY * BlockUnitsCM * 0.5;
+			Footprint.Max.Y = Center.Y + RemainingUnitsY * BlockUnitsCM * 0.5;
+			BandFootprints.Add(Footprint);
+			BandFootprintUnits.Emplace(RemainingUnitsX, RemainingUnitsY);
+			const bool bComplete = bPyramid
+				? RemainingUnitsX == TerminalUnitsX
+					&& RemainingUnitsY == TerminalUnitsY
+				: PrismShrinkAxis == 0 ? RemainingUnitsX == TerminalUnitsX
+					: PrismShrinkAxis == 1 ? RemainingUnitsY == TerminalUnitsY : true;
+			if (bComplete)
+			{
+				break;
+			}
+		}
+		if (BandCourses.IsEmpty())
+		{
+			BandCourses.Add(RoofFirstCourse);
+			BandAxes.Add(BaseBandAxis);
+			BandFootprints.Add(RoofBaseBounds);
+			BandFootprintUnits.Emplace(RoofBaseUnitsX, RoofBaseUnitsY);
+		}
+		if (!BandAxes.IsEmpty())
+		{
+			// The first voxel course needs a perpendicular physical seat. Rebind only
+			// the base seat when the initially inherited family is parallel.
+			const bool bInheritedProvidesTransverseSeat =
+				InheritedBandCarriers.ContainsByPredicate(
+					[&Plan, &BandAxes](const int32 MemberIndex)
+					{
+						return Plan.Members.IsValidIndex(MemberIndex)
+							&& Plan.Members[MemberIndex].Axis != BandAxes[0]
+							&& Plan.Members[MemberIndex].Axis
+								!= EABTSM73BeamAFrameAxis::Z;
+					});
+			if (InheritedBandCourse != INDEX_NONE
+				&& !bInheritedProvidesTransverseSeat)
+			{
+				InheritedBandCarriers.Reset();
+				InheritedBandCourse = INDEX_NONE;
+				if (const TArray<FCompletedCrownBand>* CompletedBands =
+					CompletedBandsByComponent.Find(ComponentId))
+				{
+					for (const FCompletedCrownBand& CompletedBand : *CompletedBands)
+					{
+						if (CompletedBand.Axis == BandAxes[0]
+							|| CompletedBand.CourseIndex >= FirstCourse
+							|| CompletedBand.CourseIndex <= InheritedBandCourse)
+						{
+							continue;
+						}
+						TArray<int32> OverlappingCarriers;
+						for (const int32 CarrierIndex : CompletedBand.CarrierMemberIndices)
+						{
+							if (!Plan.Members.IsValidIndex(CarrierIndex)) continue;
+							const FBox CarrierBounds = PlannedMemberBounds(
+								Plan.Members[CarrierIndex]);
+							if (SkeletonV3OverlapLength(CarrierBounds.Min.X,
+									CarrierBounds.Max.X, RoofBaseBounds.Min.X,
+									RoofBaseBounds.Max.X) > GeometryToleranceCM
+								&& SkeletonV3OverlapLength(CarrierBounds.Min.Y,
+									CarrierBounds.Max.Y, RoofBaseBounds.Min.Y,
+									RoofBaseBounds.Max.Y) > GeometryToleranceCM)
+							{
+								OverlappingCarriers.Add(CarrierIndex);
+							}
+						}
+						if (!OverlappingCarriers.IsEmpty())
+						{
+							InheritedBandCarriers = MoveTemp(OverlappingCarriers);
+							InheritedBandCourse = CompletedBand.CourseIndex;
+							InheritedBandAxis = CompletedBand.Axis;
+						}
+					}
+				}
+				if (InheritedBandCourse == INDEX_NONE)
+				{
+					for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+					{
+						const FPlannedMember& Member = Plan.Members[MemberIndex];
+						if (Member.ComponentId != ComponentId
+							|| Member.bSuppressedByStage4FacadeToTop
+							|| Member.Axis == EABTSM73BeamAFrameAxis::Z
+							|| Member.Axis == BandAxes[0]
+							|| Member.CourseIndex >= FirstCourse)
+						{
+							continue;
+						}
+						const FBox MemberBounds = PlannedMemberBounds(Member);
+						if (SkeletonV3OverlapLength(MemberBounds.Min.X,
+								MemberBounds.Max.X, RoofBaseBounds.Min.X,
+								RoofBaseBounds.Max.X) <= GeometryToleranceCM
+							|| SkeletonV3OverlapLength(MemberBounds.Min.Y,
+								MemberBounds.Max.Y, RoofBaseBounds.Min.Y,
+								RoofBaseBounds.Max.Y) <= GeometryToleranceCM)
+						{
+							continue;
+						}
+						if (Member.CourseIndex > InheritedBandCourse)
+						{
+							InheritedBandCarriers.Reset();
+							InheritedBandCourse = Member.CourseIndex;
+							InheritedBandAxis = Member.Axis;
+						}
+						if (Member.CourseIndex == InheritedBandCourse)
+						{
+							InheritedBandCarriers.Add(MemberIndex);
+						}
+					}
+				}
+			}
+		}
+		Plan.Summary.Stage4RoofBandCount += BandCourses.Num();
+		int32 CrownLedgerCount = 0;
+		TArray<int32> PreviousBandCarriers = InheritedBandCarriers;
+		int32 PreviousBandCourse = InheritedBandCourse;
+		for (int32 BandOrdinal = 0; BandOrdinal < BandCourses.Num(); ++BandOrdinal)
+		{
+			const int32 Course = BandCourses[BandOrdinal];
+			const int32 Ordinal = BandOrdinal;
+			const EABTSM73BeamAFrameAxis ExpectedAxis = BandAxes[BandOrdinal];
+			const FBox& SemanticBounds = BandFootprints[BandOrdinal];
+			const FIntPoint FootprintUnits = BandFootprintUnits[BandOrdinal];
+			TArray<int32> CarrierCandidates;
+			for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+			{
+				const FPlannedMember& Member = Plan.Members[MemberIndex];
+				const bool bTopSurfaceBootstrap = Ordinal == 0
+					&& Member.TopSurfaceFrameSegmentId != INDEX_NONE
+					&& Plan.FacadeToTopConnections.ContainsByPredicate(
+						[MemberIndex](const FFacadeToTopConnectionPlan& Connection)
+						{
+							return Connection.TopSurfaceFrameMemberIndex == MemberIndex;
+						});
+				const bool bExistingStage4Roof = Member.SkeletonKind
+						== ESkeletonMemberKind::RoofCourse
+					&& Member.RoofCrownCourseId != INDEX_NONE;
+				if (Member.ComponentId != ComponentId
+					|| (!bTopSurfaceBootstrap && !bExistingStage4Roof)
+					|| Member.CourseIndex != Course || Member.Axis != ExpectedAxis)
+				{
+					continue;
+				}
+				const FBox Bounds = PlannedMemberBounds(Member);
+				if (SkeletonV3OverlapLength(Bounds.Min.X, Bounds.Max.X,
+						SemanticBounds.Min.X, SemanticBounds.Max.X)
+						> GeometryToleranceCM
+					&& SkeletonV3OverlapLength(Bounds.Min.Y, Bounds.Max.Y,
+						SemanticBounds.Min.Y, SemanticBounds.Max.Y)
+						> GeometryToleranceCM)
+				{
+					CarrierCandidates.Add(MemberIndex);
+				}
+			}
+			const int32 CrossAxisIndex = ExpectedAxis == EABTSM73BeamAFrameAxis::X
+				? 1 : 0;
+			CarrierCandidates.Sort([&Plan, CrossAxisIndex](const int32 A, const int32 B)
+			{
+				const double StationA = PlannedMemberBounds(Plan.Members[A])
+					.GetCenter()[CrossAxisIndex];
+				const double StationB = PlannedMemberBounds(Plan.Members[B])
+					.GetCenter()[CrossAxisIndex];
+				return !FMath::IsNearlyEqual(StationA, StationB, GeometryToleranceCM)
+					? StationA < StationB : A < B;
+			});
+			TArray<int32> SelectedCarriers;
+			if (!CarrierCandidates.IsEmpty())
+			{
+				SelectedCarriers.Add(CarrierCandidates[0]);
+				if (CarrierCandidates.Num() > 1)
+				{
+					const int32 Last = CarrierCandidates.Last();
+					const double FirstStation = PlannedMemberBounds(
+						Plan.Members[SelectedCarriers[0]]).GetCenter()[CrossAxisIndex];
+					const double LastStation = PlannedMemberBounds(
+						Plan.Members[Last]).GetCenter()[CrossAxisIndex];
+					if (Last != SelectedCarriers[0]
+						&& FMath::Abs(LastStation - FirstStation)
+							>= BlockUnitsCM - GeometryToleranceCM)
+					{
+						SelectedCarriers.Add(Last);
+					}
+				}
+			}
+			TSet<int32> GeneratedCarriers;
+			TMap<int32, TArray<int32>> GeneratedCarrierPosts;
+			TSet<int32> CourseBlockingMembers;
+			TSet<int32> CourseBlockingSupportVoids;
+			if (SelectedCarriers.Num() < 2)
+			{
+				const int32 AxisIndex = static_cast<int32>(ExpectedAxis);
+				int32 LowerRejectInvalid = 0;
+				int32 LowerRejectComponent = 0;
+				int32 LowerRejectSuppressed = 0;
+				int32 LowerRejectCourse = 0;
+				int32 LowerRejectAxis = 0;
+				int32 LowerRejectOverlap = 0;
+				struct FLowerRoofSeat
+				{
+					int32 MemberIndex = INDEX_NONE;
+					double FixedAxisStationCM = 0.0;
+					double CrossMinimumCM = 0.0;
+					double CrossMaximumCM = 0.0;
+				};
+				TArray<FLowerRoofSeat> LowerSeats;
+				TArray<int32> LowerCandidateIndices;
+				int32 LowerSourceCourse = PreviousBandCourse;
+				const bool bPreviousBandHasTransverseCarrier =
+					PreviousBandCarriers.ContainsByPredicate(
+						[&Plan, &RoofBaseBounds, ComponentId, ExpectedAxis](
+							const int32 MemberIndex)
+						{
+							if (!Plan.Members.IsValidIndex(MemberIndex)) return false;
+							const FPlannedMember& Member = Plan.Members[MemberIndex];
+							if (Member.ComponentId != ComponentId
+								|| Member.bSuppressedByStage4FacadeToTop
+								|| Member.Axis == ExpectedAxis
+								|| Member.Axis == EABTSM73BeamAFrameAxis::Z)
+							{
+								return false;
+							}
+							const FBox Bounds = PlannedMemberBounds(Member);
+							return SkeletonV3OverlapLength(Bounds.Min.X, Bounds.Max.X,
+									RoofBaseBounds.Min.X, RoofBaseBounds.Max.X)
+									> GeometryToleranceCM
+								&& SkeletonV3OverlapLength(Bounds.Min.Y, Bounds.Max.Y,
+									RoofBaseBounds.Min.Y, RoofBaseBounds.Max.Y)
+									> GeometryToleranceCM;
+						});
+				if (LowerSourceCourse != INDEX_NONE
+					&& bPreviousBandHasTransverseCarrier)
+				{
+					LowerCandidateIndices = PreviousBandCarriers;
+				}
+				else
+				{
+					// Deterministic Crown courses are adjacent.  A failed/deferred course
+					// cannot be skipped and later repaired with a long Z post, because
+					// that would turn the roof back into a vertical gate frame.
+					LowerSourceCourse = Course - 1;
+					for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+					{
+						const FPlannedMember& Candidate = Plan.Members[MemberIndex];
+						if (Candidate.ComponentId != ComponentId
+							|| Candidate.bSuppressedByStage4FacadeToTop
+							|| Candidate.Axis == ExpectedAxis
+							|| Candidate.Axis == EABTSM73BeamAFrameAxis::Z
+							|| Candidate.CourseIndex != LowerSourceCourse)
+						{
+							continue;
+						}
+						const FBox CandidateBounds = PlannedMemberBounds(Candidate);
+						if (SkeletonV3OverlapLength(CandidateBounds.Min.X,
+								CandidateBounds.Max.X, RoofBaseBounds.Min.X,
+								RoofBaseBounds.Max.X) <= GeometryToleranceCM
+							|| SkeletonV3OverlapLength(CandidateBounds.Min.Y,
+								CandidateBounds.Max.Y, RoofBaseBounds.Min.Y,
+								RoofBaseBounds.Max.Y) <= GeometryToleranceCM)
+						{
+							continue;
+						}
+						LowerCandidateIndices.Add(MemberIndex);
+					}
+				}
+				for (const int32 MemberIndex : LowerCandidateIndices)
+				{
+					if (!Plan.Members.IsValidIndex(MemberIndex))
+					{
+						++LowerRejectInvalid;
+						continue;
+					}
+					const FPlannedMember& Member = Plan.Members[MemberIndex];
+					if (Member.ComponentId != ComponentId)
+					{
+						++LowerRejectComponent;
+						continue;
+					}
+					if (Member.bSuppressedByStage4FacadeToTop)
+					{
+						++LowerRejectSuppressed;
+						continue;
+					}
+					if (LowerSourceCourse == INDEX_NONE
+						|| Member.CourseIndex != LowerSourceCourse)
+					{
+						++LowerRejectCourse;
+						continue;
+					}
+					if (Member.Axis == ExpectedAxis
+						|| Member.Axis == EABTSM73BeamAFrameAxis::Z)
+					{
+						++LowerRejectAxis;
+						continue;
+					}
+					const FBox Bounds = PlannedMemberBounds(Member);
+					// Select actual perpendicular seats; the deterministic footprint below
+					// decides the new course's inset stations.
+					if (SkeletonV3OverlapLength(Bounds.Min.X, Bounds.Max.X,
+							RoofBaseBounds.Min.X, RoofBaseBounds.Max.X)
+							<= GeometryToleranceCM
+						|| SkeletonV3OverlapLength(Bounds.Min.Y, Bounds.Max.Y,
+							RoofBaseBounds.Min.Y, RoofBaseBounds.Max.Y)
+							<= GeometryToleranceCM)
+					{
+						++LowerRejectOverlap;
+						continue;
+					}
+					FLowerRoofSeat& Seat = LowerSeats.AddDefaulted_GetRef();
+					Seat.MemberIndex = MemberIndex;
+					Seat.FixedAxisStationCM = Bounds.GetCenter()[AxisIndex];
+					Seat.CrossMinimumCM = Bounds.Min[CrossAxisIndex];
+					Seat.CrossMaximumCM = Bounds.Max[CrossAxisIndex];
+				}
+				const FLowerRoofSeat* BestA = nullptr;
+				const FLowerRoofSeat* BestB = nullptr;
+				double BestOverlapMinimum = 0.0;
+				double BestOverlapMaximum = 0.0;
+				double BestSpread = -1.0;
+				for (int32 AIndex = 0; AIndex < LowerSeats.Num(); ++AIndex)
+				{
+					for (int32 BIndex = AIndex + 1; BIndex < LowerSeats.Num(); ++BIndex)
+					{
+						const FLowerRoofSeat& A = LowerSeats[AIndex];
+						const FLowerRoofSeat& B = LowerSeats[BIndex];
+						const double Spread = FMath::Abs(
+							A.FixedAxisStationCM - B.FixedAxisStationCM);
+						const double OverlapMinimum = FMath::Max(
+							A.CrossMinimumCM, B.CrossMinimumCM);
+						const double OverlapMaximum = FMath::Min(
+							A.CrossMaximumCM, B.CrossMaximumCM);
+						if (Spread < BlockUnitsCM - GeometryToleranceCM
+							|| Spread + BlockUnitsCM
+								> MaximumRoofHorizontalUnits * BlockUnitsCM
+									+ GeometryToleranceCM
+							|| OverlapMaximum - OverlapMinimum
+								< BlockUnitsCM - GeometryToleranceCM)
+						{
+							continue;
+						}
+						if (Spread > BestSpread + GeometryToleranceCM)
+						{
+							BestA = &A;
+							BestB = &B;
+							BestOverlapMinimum = OverlapMinimum;
+							BestOverlapMaximum = OverlapMaximum;
+							BestSpread = Spread;
+						}
+					}
+				}
+				// A tapered Crown can legitimately converge to one ridge rail.  Keep
+				// the two-seat/two-rail lattice whenever it fits, but allow the
+				// bottom-up chain to continue from one lower rail once the semantic
+				// section (or an already occupied adjoining Crown) leaves no pair.
+				if (BestA == nullptr && !LowerSeats.IsEmpty())
+				{
+					BestA = &LowerSeats[0];
+					BestB = BestA;
+					BestOverlapMinimum = BestA->CrossMinimumCM;
+					BestOverlapMaximum = BestA->CrossMaximumCM;
+					BestSpread = 0.0;
+				}
+				if (BestA != nullptr && BestB != nullptr)
+				{
+					const double SeatMinimum = FMath::Min(
+						BestA->FixedAxisStationCM, BestB->FixedAxisStationCM);
+					const double SeatMaximum = FMath::Max(
+						BestA->FixedAxisStationCM, BestB->FixedAxisStationCM);
+					const double RequiredCarrierLength =
+						SeatMaximum - SeatMinimum + BlockUnitsCM;
+					const int32 CarrierUnits = FMath::Max(1, FMath::CeilToInt(
+						(RequiredCarrierLength - GeometryToleranceCM) / BlockUnitsCM));
+					const double CarrierCenter = (SeatMinimum + SeatMaximum) * 0.5;
+					double AxisMinimum = CarrierCenter
+						- CarrierUnits * BlockUnitsCM * 0.5;
+					double AxisMaximum = CarrierCenter
+						+ CarrierUnits * BlockUnitsCM * 0.5;
+					// The new rail spans the previous course's two transverse seat
+					// stations. Its pair stations come from the deterministic voxel
+					// footprint, not from the WFC Crown envelope.
+					if (AxisMaximum - AxisMinimum
+						<= MaximumRoofHorizontalUnits * BlockUnitsCM + GeometryToleranceCM)
+					{
+						double CrossMinimum = FMath::Max(
+							SemanticBounds.Min[CrossAxisIndex] + BlockUnitsCM * 0.5,
+							BestOverlapMinimum + BlockUnitsCM * 0.5);
+						double CrossMaximum = FMath::Min(
+							SemanticBounds.Max[CrossAxisIndex] - BlockUnitsCM * 0.5,
+							BestOverlapMaximum - BlockUnitsCM * 0.5);
+						TArray<double> DesiredCrossStations;
+						if (CrossMaximum >= CrossMinimum - GeometryToleranceCM)
+						{
+							DesiredCrossStations.Add(CrossMinimum);
+							DesiredCrossStations.AddUnique(CrossMaximum);
+						}
+						const int32 DesiredCarrierCount = FMath::IsNearlyEqual(
+							CrossMinimum, CrossMaximum, GeometryToleranceCM) ? 1 : 2;
+						for (const double CrossStation : DesiredCrossStations)
+						{
+							if (SelectedCarriers.Num() >= DesiredCarrierCount) break;
+							const bool bAlreadyRepresented = SelectedCarriers.ContainsByPredicate(
+								[&Plan, CrossAxisIndex, CrossStation](const int32 ExistingIndex)
+								{
+									return FMath::IsNearlyEqual(PlannedMemberBounds(
+										Plan.Members[ExistingIndex]).GetCenter()[CrossAxisIndex],
+										CrossStation, GeometryToleranceCM);
+								});
+							if (bAlreadyRepresented) continue;
+							FVector NewStart = FVector::ZeroVector;
+							FVector NewEnd = FVector::ZeroVector;
+							NewStart[AxisIndex] = AxisMinimum;
+							NewEnd[AxisIndex] = AxisMaximum;
+							NewStart[CrossAxisIndex] = NewEnd[CrossAxisIndex] = CrossStation;
+							NewStart.Z = NewEnd.Z = GroundZ
+								+ (Course + 0.5) * BlockUnitsCM;
+							FPlannedMember Probe;
+							Probe.Axis = ExpectedAxis;
+							Probe.LocalStart = NewStart;
+							Probe.LocalEnd = NewEnd;
+							int32 BlockingMemberIndex = INDEX_NONE;
+							int32 BlockingSupportVoidIndex = INDEX_NONE;
+							if (IsBlocked(Probe, INDEX_NONE, &BlockingMemberIndex,
+								&BlockingSupportVoidIndex))
+							{
+								if (BlockingMemberIndex != INDEX_NONE)
+								{
+									CourseBlockingMembers.Add(BlockingMemberIndex);
+								}
+								if (BlockingSupportVoidIndex != INDEX_NONE)
+								{
+									CourseBlockingSupportVoids.Add(
+										BlockingSupportVoidIndex);
+								}
+								++Plan.Summary.Stage4DeferredRoofCandidateCount;
+								continue;
+							}
+							TArray<int32> PostSeatIndices;
+							TArray<TPair<FVector, FVector>> PostSegments;
+							if (LowerSourceCourse != INDEX_NONE
+								&& Course > LowerSourceCourse + 1)
+							{
+								TArray<const FLowerRoofSeat*> UniquePostSeats;
+								UniquePostSeats.Add(BestA);
+								if (BestB != BestA) UniquePostSeats.Add(BestB);
+								const double PostMinimumZ = GroundZ
+									+ (LowerSourceCourse + 1) * BlockUnitsCM;
+								const double PostMaximumZ = GroundZ
+									+ Course * BlockUnitsCM;
+								bool bPostPathBlocked = false;
+								for (const FLowerRoofSeat* Seat : UniquePostSeats)
+								{
+									FVector PostStart = FVector::ZeroVector;
+									FVector PostEnd = FVector::ZeroVector;
+									PostStart[AxisIndex] = PostEnd[AxisIndex] =
+										Seat->FixedAxisStationCM;
+									PostStart[CrossAxisIndex] = PostEnd[CrossAxisIndex] =
+										CrossStation;
+									PostStart.Z = PostMinimumZ;
+									PostEnd.Z = PostMaximumZ;
+									FPlannedMember PostProbe;
+									PostProbe.Axis = EABTSM73BeamAFrameAxis::Z;
+									PostProbe.LocalStart = PostStart;
+									PostProbe.LocalEnd = PostEnd;
+									int32 PostBlockingMember = INDEX_NONE;
+									int32 PostBlockingVoid = INDEX_NONE;
+									if (IsBlocked(PostProbe, Seat->MemberIndex,
+										&PostBlockingMember, &PostBlockingVoid))
+									{
+										if (PostBlockingMember != INDEX_NONE)
+										{
+											CourseBlockingMembers.Add(PostBlockingMember);
+										}
+										if (PostBlockingVoid != INDEX_NONE)
+										{
+											CourseBlockingSupportVoids.Add(PostBlockingVoid);
+										}
+										bPostPathBlocked = true;
+										break;
+									}
+									PostSeatIndices.Add(Seat->MemberIndex);
+									PostSegments.Emplace(PostStart, PostEnd);
+								}
+								if (bPostPathBlocked)
+								{
+									++Plan.Summary.Stage4DeferredRoofCandidateCount;
+									continue;
+								}
+							}
+							const int32 RequiredNewMembers = 1 + PostSegments.Num();
+							if (Plan.Members.Num() + RequiredNewMembers
+								> Profile.BeamSettings.BeamB.BeamA.MaxMemberCount)
+							{
+								break;
+							}
+							TArray<int32> NewPostIndices;
+							for (int32 PostOrdinal = 0;
+								PostOrdinal < PostSegments.Num(); ++PostOrdinal)
+							{
+								const int32 PostIndex = Plan.Members.Num();
+								if (!AddPlannedMember(Plan, EOwnerKind::Roof,
+									ESkeletonMemberKind::RoofPost, INDEX_NONE,
+									ComponentId, Crown->VolumeId,
+									Plan.Members[BestA->MemberIndex].OriginCoreCellId,
+									Course, PostOrdinal, 0, 0,
+									EABTSM73BeamAFrameAxis::Z,
+									EABTSM73BeamAMemberRole::RoofCourse,
+									PostSegments[PostOrdinal].Key,
+									PostSegments[PostOrdinal].Value, OutError))
+								{
+									return false;
+								}
+								AddSeat(Plan, PostIndex, PostSeatIndices[PostOrdinal]);
+								NewPostIndices.Add(PostIndex);
+								++Plan.Summary.Stage4EmittedRoofMemberCount;
+								++Plan.Summary.Stage4RoofPostMemberCount;
+								++Plan.Summary.RoofMemberCount;
+							}
+							const int32 NewCarrierIndex = Plan.Members.Num();
+							if (!AddPlannedMember(Plan, EOwnerKind::Roof,
+								ESkeletonMemberKind::RoofCourse, INDEX_NONE,
+								ComponentId, Crown->VolumeId,
+								Plan.Members[BestA->MemberIndex].OriginCoreCellId,
+								Course, 0, 0, 0, ExpectedAxis,
+								EABTSM73BeamAMemberRole::RoofCourse,
+								NewStart, NewEnd, OutError))
+							{
+								return false;
+							}
+							if (NewPostIndices.IsEmpty())
+							{
+								AddSeat(Plan, NewCarrierIndex, BestA->MemberIndex);
+								AddSeat(Plan, NewCarrierIndex, BestB->MemberIndex);
+							}
+							else
+							{
+								for (const int32 PostIndex : NewPostIndices)
+								{
+									AddSeat(Plan, NewCarrierIndex, PostIndex);
+								}
+								GeneratedCarrierPosts.Add(NewCarrierIndex,
+									NewPostIndices);
+							}
+							SelectedCarriers.Add(NewCarrierIndex);
+							GeneratedCarriers.Add(NewCarrierIndex);
+							++Plan.Summary.Stage4EmittedRoofMemberCount;
+							++Plan.Summary.RoofMemberCount;
+						}
+					}
+				}
+				if (SelectedCarriers.IsEmpty()
+					&& (!CourseBlockingMembers.IsEmpty()
+						|| !CourseBlockingSupportVoids.IsEmpty()))
+				{
+					FRoofCrownOccludedCoursePlan& Occluded =
+						Plan.RoofCrownOccludedCourses.AddDefaulted_GetRef();
+					Occluded.ComponentId = ComponentId;
+					Occluded.CrownVolumeId = Crown->VolumeId;
+					Occluded.CourseIndex = Course;
+					Occluded.Axis = ExpectedAxis;
+					for (const FLowerRoofSeat& Seat : LowerSeats)
+					{
+						Occluded.LowerSeatMemberIndices.AddUnique(Seat.MemberIndex);
+					}
+					Occluded.BlockingMemberIndices = CourseBlockingMembers.Array();
+					Occluded.BlockingMemberIndices.Sort();
+					Occluded.BlockingSupportVoidIndices =
+						CourseBlockingSupportVoids.Array();
+					Occluded.BlockingSupportVoidIndices.Sort();
+					++Plan.Summary.Stage4OccludedRoofCourseCount;
+					++CrownLedgerCount;
+					Canonical += FString::Printf(TEXT("|RO:C%d:V%d:L%d:A%d:B%d:Void%d"),
+						ComponentId, Crown->VolumeId, Course,
+						static_cast<int32>(ExpectedAxis),
+						Occluded.BlockingMemberIndices.Num(),
+						Occluded.BlockingSupportVoidIndices.Num());
+					continue;
+				}
+				if (SelectedCarriers.IsEmpty())
+				{
+					FString LowerSeatDiagnostic;
+					for (const FLowerRoofSeat& Seat : LowerSeats)
+					{
+						LowerSeatDiagnostic += FString::Printf(TEXT("%d@%.1f[%.1f..%.1f],"),
+							Seat.MemberIndex, Seat.FixedAxisStationCM,
+							Seat.CrossMinimumCM, Seat.CrossMaximumCM);
+					}
+					int32 BaseSeatBelowCount = 0;
+					int32 BaseSeatSameCourseCount = 0;
+					int32 BaseSeatSuppressedCount = 0;
+					int32 BaseSeatHighestCourse = INDEX_NONE;
+					for (const FPlannedMember& Candidate : Plan.Members)
+					{
+						if (Candidate.ComponentId != ComponentId
+							|| Candidate.Axis == EABTSM73BeamAFrameAxis::Z)
+						{
+							continue;
+						}
+						const FBox CandidateBounds = PlannedMemberBounds(Candidate);
+						if (SkeletonV3OverlapLength(CandidateBounds.Min.X,
+								CandidateBounds.Max.X, RoofBaseBounds.Min.X,
+								RoofBaseBounds.Max.X) <= GeometryToleranceCM
+							|| SkeletonV3OverlapLength(CandidateBounds.Min.Y,
+								CandidateBounds.Max.Y, RoofBaseBounds.Min.Y,
+								RoofBaseBounds.Max.Y) <= GeometryToleranceCM)
+						{
+							continue;
+						}
+						if (Candidate.bSuppressedByStage4FacadeToTop)
+						{
+							++BaseSeatSuppressedCount;
+							continue;
+						}
+						if (Candidate.CourseIndex < FirstCourse)
+						{
+							++BaseSeatBelowCount;
+							BaseSeatHighestCourse = FMath::Max(BaseSeatHighestCourse,
+								Candidate.CourseIndex);
+						}
+						else if (Candidate.CourseIndex == FirstCourse)
+						{
+							++BaseSeatSameCourseCount;
+						}
+					}
+					++Plan.Summary.Stage4RoofBindingViolationCount;
+					BindingDiagnostics += FString::Printf(
+						TEXT("|V%d:C%d:L%d:Carriers=%d:LowerSeats=%d:Spread=%.1f")
+						TEXT(":BaseBelow=%d:BaseSame=%d:BaseSuppressed=%d:BaseHighest=%d")
+						TEXT(":Inherited=%d:A%d:N%d:Reject=%d/%d/%d/%d/%d/%d")
+						TEXT(":Sem=%.1f..%.1f:Overlap=%.1f..%.1f:Seat=%s"),
+						Crown->VolumeId, ComponentId, Course,
+						SelectedCarriers.Num(), LowerSeats.Num(), BestSpread,
+						BaseSeatBelowCount, BaseSeatSameCourseCount,
+						BaseSeatSuppressedCount, BaseSeatHighestCourse,
+						PreviousBandCourse, static_cast<int32>(InheritedBandAxis),
+						PreviousBandCarriers.Num(), LowerRejectInvalid,
+						LowerRejectComponent, LowerRejectSuppressed,
+						LowerRejectCourse, LowerRejectAxis, LowerRejectOverlap,
+						SemanticBounds.Min[CrossAxisIndex],
+						SemanticBounds.Max[CrossAxisIndex], BestOverlapMinimum,
+						BestOverlapMaximum, *LowerSeatDiagnostic);
+					continue;
+				}
+			}
+
+			for (const int32 CarrierIndex : SelectedCarriers)
+			{
+				FPlannedMember& Carrier = Plan.Members[CarrierIndex];
+				const FBox CarrierBounds = PlannedMemberBounds(Carrier);
+				// Stage 1 may already have emitted a valid Crown rail without an
+				// explicit lower-seat edge: that stage only needed the core itself,
+				// whereas Stage 4 needs a complete roof ledger.  Reuse the geometry
+				// and recover every perpendicular member immediately below it rather
+				// than attempting to lay a duplicate rail through the same space.
+				if (Carrier.RequiredLowerMemberIndices.IsEmpty())
+				{
+					for (int32 LowerIndex = 0; LowerIndex < Plan.Members.Num(); ++LowerIndex)
+					{
+						if (LowerIndex == CarrierIndex) continue;
+						const FPlannedMember& Lower = Plan.Members[LowerIndex];
+						if (Lower.ComponentId != ComponentId
+							|| Lower.bSuppressedByStage4FacadeToTop
+							|| Lower.CourseIndex != Course - 1
+							|| Lower.Axis == ExpectedAxis
+							|| Lower.Axis == EABTSM73BeamAFrameAxis::Z)
+						{
+							continue;
+						}
+						const FBox LowerBounds = PlannedMemberBounds(Lower);
+						if (FMath::Abs(LowerBounds.Max.Z - CarrierBounds.Min.Z)
+							<= GeometryToleranceCM
+							&& SkeletonV3OverlapLength(CarrierBounds.Min.X,
+								CarrierBounds.Max.X, LowerBounds.Min.X,
+								LowerBounds.Max.X) > GeometryToleranceCM
+							&& SkeletonV3OverlapLength(CarrierBounds.Min.Y,
+								CarrierBounds.Max.Y, LowerBounds.Min.Y,
+								LowerBounds.Max.Y) > GeometryToleranceCM)
+						{
+							AddSeat(Plan, CarrierIndex, LowerIndex);
+						}
+					}
+				}
+				const int32 AxisIndex = static_cast<int32>(ExpectedAxis);
+				FRoofCrownCoursePlan& Roof = Plan.RoofCrownCourses.AddDefaulted_GetRef();
+				Roof.RoofCourseId = Plan.RoofCrownCourses.Num() - 1;
+				Roof.ComponentId = ComponentId;
+				Roof.CrownVolumeId = Crown->VolumeId;
+				Roof.RoofTargetCoreCellId = Target.CoreCellId;
+				Roof.Primitive = Crown->Primitive;
+				Roof.CourseIndex = Course;
+				Roof.CrownCourseOrdinal = Ordinal;
+				Roof.CrownBandOrdinal = BandOrdinal;
+				Roof.RoofBaseFootprintUnitsX = RoofBaseUnitsX;
+				Roof.RoofBaseFootprintUnitsY = RoofBaseUnitsY;
+				Roof.FootprintUnitsX = FootprintUnits.X;
+				Roof.FootprintUnitsY = FootprintUnits.Y;
+				Roof.Axis = ExpectedAxis;
+				Roof.CarrierMemberIndex = CarrierIndex;
+				Roof.CarrierLowerSeatMemberIndices = Carrier.RequiredLowerMemberIndices;
+				Roof.SupportPostMemberIndices = GeneratedCarrierPosts.FindRef(CarrierIndex);
+				// The ledger records the actually supported span.  The previous
+				// implementation recorded the whole semantic Crown reach here and
+				// filled the difference with inward-linked horizontal chains.  Those
+				// chains had no lower bearing and produced the unsupported combs seen
+				// in the Stage 1-4 overview.
+				Roof.SemanticMinimumCM = CarrierBounds.Min[AxisIndex];
+				Roof.SemanticMaximumCM = CarrierBounds.Max[AxisIndex];
+				Roof.bCarrierReused = !GeneratedCarriers.Contains(CarrierIndex);
+				Roof.bTopSurfaceBootstrap =
+					Carrier.TopSurfaceFrameSegmentId != INDEX_NONE
+					&& Plan.FacadeToTopConnections.ContainsByPredicate(
+						[CarrierIndex](const FFacadeToTopConnectionPlan& Connection)
+						{
+							return Connection.TopSurfaceFrameMemberIndex == CarrierIndex;
+						});
+				if (!Roof.bCarrierReused)
+				{
+					Plan.Members[CarrierIndex].RoofCrownCourseId = Roof.RoofCourseId;
+					Plan.Members[CarrierIndex].OwnerId = Roof.RoofCourseId;
+					for (const int32 PostIndex : Roof.SupportPostMemberIndices)
+					{
+						if (Plan.Members.IsValidIndex(PostIndex))
+						{
+							Plan.Members[PostIndex].RoofCrownCourseId =
+								Roof.RoofCourseId;
+							Plan.Members[PostIndex].OwnerId = Roof.RoofCourseId;
+						}
+					}
+				}
+				++Plan.Summary.Stage4RoofCourseCount;
+				Plan.Summary.Stage4ReusedRoofCarrierCount +=
+					Roof.bCarrierReused ? 1 : 0;
+				++CrownLedgerCount;
+				const bool bHasIndependentBearing =
+					!Roof.CarrierLowerSeatMemberIndices.IsEmpty()
+					|| Roof.bTopSurfaceBootstrap;
+				if (!bHasIndependentBearing)
+				{
+					++Plan.Summary.Stage4UnsupportedRoofMemberCount;
+					++Plan.Summary.Stage4RoofBindingViolationCount;
+					BindingDiagnostics += FString::Printf(
+						TEXT("|V%d:C%d:L%d:UnsupportedCarrier%d"),
+						Crown->VolumeId, ComponentId, Course, CarrierIndex);
+				}
+				Canonical += FString::Printf(
+					TEXT("|RC:%d:C%d:V%d:K%d:P%d:L%d:O%d:B%d:F%d,%d/%d,%d:A%d:Carrier%d:S%d:Z%d:C%d:T%d:R%lld..%lld"),
+					Roof.RoofCourseId, ComponentId, Crown->VolumeId,
+					Target.CoreCellId,
+					static_cast<int32>(Crown->Primitive), Course, Ordinal,
+					BandOrdinal, RoofBaseUnitsX, RoofBaseUnitsY,
+					FootprintUnits.X, FootprintUnits.Y,
+					static_cast<int32>(ExpectedAxis), CarrierIndex,
+					Roof.CarrierLowerSeatMemberIndices.Num(),
+					Roof.SupportPostMemberIndices.Num(),
+					Roof.ClosureMemberIndices.Num(), Roof.bTopSurfaceBootstrap ? 1 : 0,
+					QHash(Roof.SemanticMinimumCM),
+					QHash(Roof.SemanticMaximumCM));
+			}
+			PreviousBandCarriers = SelectedCarriers;
+			PreviousBandCourse = Course;
+			FCompletedCrownBand& CompletedBand =
+				CompletedBandsByComponent.FindOrAdd(ComponentId)
+					.AddDefaulted_GetRef();
+			CompletedBand.CourseIndex = Course;
+			CompletedBand.Axis = ExpectedAxis;
+			CompletedBand.CarrierMemberIndices = SelectedCarriers;
+		}
+		if (CrownLedgerCount == 0)
+		{
+			++Plan.Summary.Stage4RoofBindingViolationCount;
+			BindingDiagnostics += FString::Printf(TEXT("|V%d:NoRoofCourse"),
+				Crown->VolumeId);
+		}
+	}
+	if (Plan.Summary.Stage4RoofBindingViolationCount != 0
+		|| Plan.Summary.Stage4UnsupportedRoofMemberCount != 0
+		|| Plan.Summary.Stage4RoofConflictCount != 0
+		|| Plan.RoofCrownCourses.IsEmpty())
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4RoofCrownContractFailed:Crowns=%d:Courses=%d:Emitted=%d:Reused=%d:Deferred=%d:Unsupported=%d:Binding=%d:Conflicts=%d:Diagnostics=%s"),
+			Plan.Summary.Stage4RoofCrownVolumeCount,
+			Plan.Summary.Stage4RoofCourseCount,
+			Plan.Summary.Stage4EmittedRoofMemberCount,
+			Plan.Summary.Stage4ReusedRoofCarrierCount,
+			Plan.Summary.Stage4DeferredRoofCandidateCount,
+			Plan.Summary.Stage4UnsupportedRoofMemberCount,
+			Plan.Summary.Stage4RoofBindingViolationCount,
+			Plan.Summary.Stage4RoofConflictCount, *BindingDiagnostics);
+		return false;
+	}
+	Plan.Summary.Stage4RoofCrownHash = HashText(Canonical);
+	Plan.Summary.FinalGeometryHash = HashText(FString::Printf(
+		TEXT("Floor=%lld:Roof=%lld"),
+		Plan.Summary.Stage4FloorStyleInfillHash,
+		Plan.Summary.Stage4RoofCrownHash));
+	Plan.Summary.PlannedMemberCount = Plan.Members.Num();
+	if (!ValidatePreflightCaps(Profile.BeamSettings.BeamB.BeamA, Plan, OutError))
+	{
+		return false;
+	}
+
+	TMap<FString, int32> JointByPosition;
+	const double JointScale = 1.0 / FMath::Max(0.1,
+		static_cast<double>(Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+	for (const FABTSM73BeamAJoint& Joint : Assembly.Joints)
+	{
+		JointByPosition.Add(FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Joint.LocalPosition.X * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Y * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Z * JointScale)), Joint.JointId);
+	}
+	auto AddJoint = [&Assembly, &JointByPosition, JointScale](
+		const FVector& Point, const EABTSM73BeamAJointRole Role)
+	{
+		const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Point.X * JointScale),
+			FMath::RoundToInt64(Point.Y * JointScale),
+			FMath::RoundToInt64(Point.Z * JointScale));
+		if (const int32* Existing = JointByPosition.Find(Key)) return *Existing;
+		FABTSM73BeamAJoint& Joint = Assembly.Joints.AddDefaulted_GetRef();
+		Joint.JointId = Assembly.Joints.Num() - 1;
+		Joint.LocalPosition = Point;
+		Joint.Role = Role;
+		JointByPosition.Add(Key, Joint.JointId);
+		return Joint.JointId;
+	};
+	for (int32 MemberIndex = InputMemberCount;
+		MemberIndex < Plan.Members.Num(); ++MemberIndex)
+	{
+		const FPlannedMember& Planned = Plan.Members[MemberIndex];
+		if (!Assembly.Assemblies.IsValidIndex(Planned.ComponentId))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3Stage4RoofInvalidOwner:Member=%d:Component=%d"),
+				MemberIndex, Planned.ComponentId);
+			return false;
+		}
+		FABTSM73BeamAMember& Member = Assembly.Members.AddDefaulted_GetRef();
+		Member.MemberId = Assembly.Members.Num() - 1;
+		Member.JointA = AddJoint(Planned.LocalStart,
+			EABTSM73BeamAJointRole::RoofNode);
+		Member.JointB = AddJoint(Planned.LocalEnd,
+			EABTSM73BeamAJointRole::RoofNode);
+		Member.Axis = Planned.Axis;
+		Member.Role = Planned.Role;
+		Member.LengthCM = FVector::Distance(Planned.LocalStart, Planned.LocalEnd);
+		FABTSM73BeamAAssembly& Owner = Assembly.Assemblies[Planned.ComponentId];
+		Owner.MemberIds.Add(Member.MemberId);
+		Owner.JointIds.AddUnique(Member.JointA);
+		Owner.JointIds.AddUnique(Member.JointB);
+	}
+	if (Assembly.Members.Num() != Plan.Members.Num()
+		|| Assembly.Joints.Num() != Plan.Summary.PlannedJointCount)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4RoofIRMismatch:Joints=%d/%d:Members=%d/%d"),
+			Assembly.Joints.Num(), Plan.Summary.PlannedJointCount,
+			Assembly.Members.Num(), Plan.Members.Num());
+		return false;
+	}
+	Assembly.Summary.BeamGraphHash = Plan.Summary.FinalGeometryHash;
+	RefreshAssemblySummary(Assembly);
+	Assembly.Summary.bAccepted = true;
+	Plan.Summary.EmittedMemberCount = Assembly.Members.Num();
+	Plan.Summary.bAccepted = true;
+	Plan.Summary.Stage4RoofCrownMilliseconds = ElapsedMilliseconds(StartSeconds);
+	return Plan.Summary.Stage4RoofCrownHash != 0;
 }
 
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(

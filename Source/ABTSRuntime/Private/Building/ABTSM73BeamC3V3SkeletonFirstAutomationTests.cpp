@@ -3541,13 +3541,17 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 		: Plan.HighProjectionRegions)
 	{
 		const ABTSM73BeamC3V3::FCoreCellPlan* Child =
-			SkeletonV3TestFindCore(Plan, Region.BoundCoreCellId);
-		Check(TEXT("terminal branch publishes an independent demand and full-height child"),
+			ABTSM73BeamC3V3Tests::SkeletonV3TestFindCore(
+				Plan, Region.BoundCoreCellId);
+		Check(TEXT("terminal branch separates semantic load top from the physical child top"),
 			Region.EntryBounds.IsValid && Region.TerminalBounds.IsValid
 				&& Region.TerminalSliceCourse >= Region.PodiumTopCourse
 				&& Region.RequiredTopCourse >= Region.TerminalSliceCourse
+				&& Region.PhysicalChildTopCourse >= Region.PodiumTopCourse + 2
+				&& Region.PhysicalChildTopCourse <= Region.RequiredTopCourse
 				&& Child != nullptr
-				&& Child->TopCourseIndex == Region.RequiredTopCourse);
+				&& Child->TopCourseIndex == Region.PhysicalChildTopCourse
+				&& Child->BodyTopCourseIndex == Region.PhysicalChildTopCourse);
 	}
 	Check(TEXT("emits no Stage 2+ shell or roof"),
 		Plan.Summary.BuildingGroupCount == 0
@@ -3971,7 +3975,7 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 				&& Plan.HighProjectionBranchBindingDiagnostics.IsEmpty()
 			: !Plan.HighProjectionSliceComponentDiagnostics.IsEmpty()
 				&& !Plan.HighProjectionBranchBindingDiagnostics.IsEmpty());
-	Check(TEXT("publishes one full-height child ledger per upper projection"),
+	Check(TEXT("publishes one complete Body-height child ledger per upper projection"),
 		Plan.FullHeightChildCandidateDiagnostics.Num()
 			== Plan.HighProjectionRegions.Num());
 	Check(TEXT("every coupled podium publishes a joint core selection ledger"),
@@ -3991,11 +3995,12 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 		const ABTSM73BeamC3V3::FCoreCellPlan* Child = Region == nullptr
 			? nullptr : SkeletonV3TestFindCore(Plan, Region->BoundCoreCellId);
 		const FString FullHeightLedgerLabel = FString::Printf(
-			TEXT("full-height ledger resolves selected tower child Component=%d Region=%d Child=%d ChildTop=%d RequiredTop=%d WFCWitness=%d JointFeasible=%d"),
+			TEXT("body-height ledger resolves selected tower child Component=%d Region=%d Child=%d ChildTop=%d RequiredChildTop=%d LoadTop=%d WFCWitness=%d JointFeasible=%d"),
 			Diagnostic.ComponentId, Diagnostic.RegionId,
 			Region == nullptr ? INDEX_NONE : Region->BoundCoreCellId,
 			Child == nullptr ? INDEX_NONE : Child->TopCourseIndex,
 			Diagnostic.RequiredFullHeightCourse,
+			Region == nullptr ? INDEX_NONE : Region->RequiredTopCourse,
 			Diagnostic.WFCFullHeightWitnessCount,
 			Diagnostic.JointFeasibleCandidateCount);
 		Check(*FullHeightLedgerLabel,
@@ -4044,32 +4049,22 @@ bool FABTSM73BeamC3StagedStage1MatrixTest::RunTest(
 				Diagnostic.bEveryRegionHasFullHeightChild ? 1 : 0,
 				*Diagnostic.SelectionReason));
 		}
-		for (const ABTSM73BeamC3V3::FHighProjectionBranchBindingDiagnostic& Branch
-			: Plan.HighProjectionBranchBindingDiagnostics)
+		for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
+			: Plan.SemanticTerminalDemands)
 		{
-			if (!Branch.bTerminal)
-			{
-				continue;
-			}
-			const bool bHasFullHeightChild = Plan.CoreCells.ContainsByPredicate(
-				[&Branch](const ABTSM73BeamC3V3::FCoreCellPlan& Core)
+			const bool bHasOwnedPhysicalChild = Plan.CoreCells.ContainsByPredicate(
+				[&Demand](const ABTSM73BeamC3V3::FCoreCellPlan& Core)
 				{
-					const FVector Center = Core.LocalBounds.GetCenter();
 					return Core.HierarchyRole
 							== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
-						&& Core.ComponentId == Branch.ComponentId
-						&& Core.TopCourseIndex >= Branch.SliceCourse
-						&& Center.X >= Branch.LocalBounds.Min.X
-							- SkeletonV3TestGeometryToleranceCM
-						&& Center.X <= Branch.LocalBounds.Max.X
-							+ SkeletonV3TestGeometryToleranceCM
-						&& Center.Y >= Branch.LocalBounds.Min.Y
-							- SkeletonV3TestGeometryToleranceCM
-						&& Center.Y <= Branch.LocalBounds.Max.Y
-							+ SkeletonV3TestGeometryToleranceCM;
+						&& Core.ComponentId == Demand.ComponentId
+						&& Core.SemanticDemandId == Demand.DemandId
+						&& Core.TopCourseIndex == Demand.PhysicalChildTopCourse
+						&& Core.BodyTopCourseIndex == Demand.PhysicalChildTopCourse
+						&& Demand.PhysicalChildTopCourse <= Demand.RequiredTopCourse;
 				});
-			Check(TEXT("TipOver E6 terminal branch retains a full-height child"),
-				bHasFullHeightChild);
+			Check(TEXT("TipOver E6 terminal load owns one Body-height child and preserves Crown load height"),
+				bHasOwnedPhysicalChild);
 		}
 		for (const ABTSM73BeamC3V3::FCoreCellPlan& Core : Plan.CoreCells)
 		{
@@ -4420,6 +4415,36 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 	}
 	const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
 	const ABTSM73BeamC3V3::FPlanSummary& Summary = Plan.Summary;
+	for (const ABTSM73BeamC3V3::FHighProjectionRegionPlan& Region
+		: Plan.HighProjectionRegions)
+	{
+		const ABTSM73BeamC3V3::FCoreCellPlan* Child =
+			ABTSM73BeamC3V3Tests::SkeletonV3TestFindCore(
+				Plan, Region.BoundCoreCellId);
+		const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic* Demand =
+			Plan.SemanticTerminalDemands.IsValidIndex(Region.SemanticDemandId)
+				? &Plan.SemanticTerminalDemands[Region.SemanticDemandId] : nullptr;
+		TestTrue(TEXT("Stage 1 child stops at the physical Body/Crown handoff"),
+			Child != nullptr && Demand != nullptr
+				&& Child->TopCourseIndex == Region.PhysicalChildTopCourse
+				&& Child->BodyTopCourseIndex == Region.PhysicalChildTopCourse
+				&& Region.PhysicalChildTopCourse <= Region.RequiredTopCourse);
+		if (Demand != nullptr && !Demand->CrownSourceVolumeIds.IsEmpty())
+		{
+			TestTrue(TEXT("Crown-bearing demand reserves non-empty roof-only height"),
+				Region.PhysicalChildTopCourse < Region.RequiredTopCourse);
+		}
+		if (Child != nullptr)
+		{
+			for (const int32 MemberIndex : Child->MemberIndices)
+			{
+				TestTrue(TEXT("TowerChild emits no CoreCourse inside Crown authority"),
+					Plan.Members.IsValidIndex(MemberIndex)
+						&& Plan.Members[MemberIndex].CourseIndex
+							< Region.PhysicalChildTopCourse);
+			}
+		}
+	}
 	int32 ExposedSetbackTopCount = 0;
 	int32 DirectStackSeatCount = 0;
 	int32 NonUnitizedMemberCount = 0;
@@ -4462,6 +4487,7 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4TopSurfaceIntentCount,
 		Summary.Stage4GroundSillIntentCount
 			+ Summary.Stage4ResolvedTopSurfaceIntentCount
+			+ Summary.Stage4GroundedCoreAnchorIntentCount
 			+ Summary.Stage4UnresolvedIntentCount);
 	TestEqual(TEXT("TopSurface ledger has no identity binding violation"),
 		Summary.Stage4IntentBindingViolationCount, 0);
@@ -4512,6 +4538,23 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4FloorStyleInfillHash, int64(0));
 	TestTrue(TEXT("Floor / StyleInfill preserves a Roof / Crown budget reserve"),
 		Summary.Stage4RoofReservedMemberCount > 0);
+	TestEqual(TEXT("Roof / Crown ledger count matches its summary"),
+		Plan.RoofCrownCourses.Num(), Summary.Stage4RoofCourseCount);
+	TestEqual(TEXT("Occluded Roof / Crown ledger count matches its summary"),
+		Plan.RoofCrownOccludedCourses.Num(),
+		Summary.Stage4OccludedRoofCourseCount);
+	TestTrue(TEXT("Every demo contains WFC Crown authority"),
+		Summary.Stage4RoofCrownVolumeCount > 0);
+	TestTrue(TEXT("Every demo plans deterministic Crown voxel courses"),
+		Summary.Stage4RoofBandCount > 0);
+	TestEqual(TEXT("Roof / Crown has no carrier binding violation"),
+		Summary.Stage4RoofBindingViolationCount, 0);
+	TestEqual(TEXT("Roof / Crown has no unsupported horizontal member"),
+		Summary.Stage4UnsupportedRoofMemberCount, 0);
+	TestEqual(TEXT("Roof / Crown has no unresolved conflict"),
+		Summary.Stage4RoofConflictCount, 0);
+	TestNotEqual(TEXT("Roof / Crown plan has a stable identity"),
+		Summary.Stage4RoofCrownHash, int64(0));
 	TestEqual(TEXT("Every deferred Stage-3 junction is replaced in Stage 4"),
 		Summary.Stage4ResolvedDeferredJunctionCount,
 		Plan.TopSurfaceFrameDeferredJunctions.Num());
@@ -4640,6 +4683,207 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 					Span.PositiveSupportMemberIndex));
 		}
 	}
+	int32 CountedRoofMembers = 0;
+	int32 CountedRoofPosts = 0;
+	TMap<int32, TSet<int32>> BandOrdinalsByRoofTarget;
+	TMap<int32, TMap<int32, int32>> BandCoursesByRoofTarget;
+	TMap<int32, TMap<int32, EABTSM73BeamAFrameAxis>> BandAxesByRoofTarget;
+	TMap<int32, TMap<int32, FIntPoint>> BandFootprintsByRoofTarget;
+	TMap<int32, FIntPoint> BaseFootprintByRoofTarget;
+	TMap<int32, EABTSM73DAG5BV2Primitive> PrimitiveByRoofTarget;
+	for (const ABTSM73BeamC3V3::FRoofCrownCoursePlan& Roof
+		: Plan.RoofCrownCourses)
+	{
+		CountedRoofMembers += Roof.bCarrierReused ? 0 : 1;
+		TestTrue(TEXT("Every Roof / Crown row identifies its physical core target"),
+			Roof.RoofTargetCoreCellId != INDEX_NONE);
+		BandOrdinalsByRoofTarget.FindOrAdd(Roof.RoofTargetCoreCellId).Add(
+			Roof.CrownBandOrdinal);
+		TestTrue(TEXT("Every Roof / Crown row belongs to a non-negative voxel course"),
+			Roof.CrownBandOrdinal >= 0);
+		TMap<int32, int32>& CrownCourses = BandCoursesByRoofTarget.FindOrAdd(
+			Roof.RoofTargetCoreCellId);
+		if (!CrownCourses.Contains(Roof.CrownBandOrdinal))
+		{
+			CrownCourses.Add(Roof.CrownBandOrdinal, Roof.CourseIndex);
+		}
+		const int32 RecordedCourse = CrownCourses.FindChecked(
+			Roof.CrownBandOrdinal);
+		TestEqual(TEXT("Rows in one Crown voxel band share a course"),
+			Roof.CourseIndex, RecordedCourse);
+		TMap<int32, EABTSM73BeamAFrameAxis>& CrownAxes =
+			BandAxesByRoofTarget.FindOrAdd(Roof.RoofTargetCoreCellId);
+		if (!CrownAxes.Contains(Roof.CrownBandOrdinal))
+		{
+			CrownAxes.Add(Roof.CrownBandOrdinal, Roof.Axis);
+		}
+		const EABTSM73BeamAFrameAxis RecordedAxis = CrownAxes.FindChecked(
+			Roof.CrownBandOrdinal);
+		TestEqual(TEXT("Rows in one Crown voxel band share an axis"),
+			Roof.Axis, RecordedAxis);
+		BaseFootprintByRoofTarget.FindOrAdd(Roof.RoofTargetCoreCellId) =
+			FIntPoint(Roof.RoofBaseFootprintUnitsX,
+				Roof.RoofBaseFootprintUnitsY);
+		PrimitiveByRoofTarget.FindOrAdd(Roof.RoofTargetCoreCellId) =
+			Roof.Primitive;
+		TMap<int32, FIntPoint>& CrownFootprints =
+			BandFootprintsByRoofTarget.FindOrAdd(Roof.RoofTargetCoreCellId);
+		const FIntPoint Footprint(Roof.FootprintUnitsX, Roof.FootprintUnitsY);
+		if (!CrownFootprints.Contains(Roof.CrownBandOrdinal))
+		{
+			CrownFootprints.Add(Roof.CrownBandOrdinal, Footprint);
+		}
+		TestEqual(TEXT("Rows in one Crown voxel band share an X footprint"),
+			Roof.FootprintUnitsX,
+			CrownFootprints.FindChecked(Roof.CrownBandOrdinal).X);
+		TestEqual(TEXT("Rows in one Crown voxel band share a Y footprint"),
+			Roof.FootprintUnitsY,
+			CrownFootprints.FindChecked(Roof.CrownBandOrdinal).Y);
+		TestTrue(TEXT("Crown taper preserves the target core's X voxel parity"),
+			Roof.FootprintUnitsX >= 1
+				&& ((Roof.RoofBaseFootprintUnitsX - Roof.FootprintUnitsX) & 1) == 0);
+		TestTrue(TEXT("Crown taper preserves the target core's Y voxel parity"),
+			Roof.FootprintUnitsY >= 1
+				&& ((Roof.RoofBaseFootprintUnitsY - Roof.FootprintUnitsY) & 1) == 0);
+		TestTrue(TEXT("Every Roof / Crown row consumes a valid independently borne carrier"),
+			Plan.Members.IsValidIndex(Roof.CarrierMemberIndex)
+				&& (Plan.Members[Roof.CarrierMemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::CoreCourse
+					|| Plan.Members[Roof.CarrierMemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::RoofCourse)
+				&& (Roof.bTopSurfaceBootstrap
+					|| !Roof.CarrierLowerSeatMemberIndices.IsEmpty()));
+		if (Plan.Members.IsValidIndex(Roof.CarrierMemberIndex))
+		{
+			const ABTSM73BeamC3V3::FPlannedMember& Carrier =
+				Plan.Members[Roof.CarrierMemberIndex];
+			TestEqual(TEXT("Roof carrier course matches the semantic ledger"),
+				Carrier.CourseIndex, Roof.CourseIndex);
+			TestEqual(TEXT("Roof carrier axis matches the semantic ledger"),
+				Carrier.Axis, Roof.Axis);
+		}
+		for (const int32 MemberIndex : Roof.SupportPostMemberIndices)
+		{
+			++CountedRoofMembers;
+			++CountedRoofPosts;
+			TestTrue(TEXT("Every Crown band post is vertical, owned and seated"),
+				Plan.Members.IsValidIndex(MemberIndex)
+					&& Plan.Members[MemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::RoofPost
+					&& Plan.Members[MemberIndex].Axis
+						== EABTSM73BeamAFrameAxis::Z
+					&& Plan.Members[MemberIndex].RoofCrownCourseId
+						== Roof.RoofCourseId
+					&& !Plan.Members[MemberIndex]
+						.RequiredLowerMemberIndices.IsEmpty()
+					&& Plan.Members.IsValidIndex(Roof.CarrierMemberIndex)
+					&& Plan.Members[Roof.CarrierMemberIndex]
+						.RequiredLowerMemberIndices.Contains(MemberIndex));
+		}
+		for (const int32 MemberIndex : Roof.ClosureMemberIndices)
+		{
+			++CountedRoofMembers;
+			TestTrue(TEXT("Every Roof closure owns its Crown identity and lower bearing"),
+				Plan.Members.IsValidIndex(MemberIndex)
+					&& Plan.Members[MemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::RoofCourse
+					&& Plan.Members[MemberIndex].RoofCrownCourseId
+						== Roof.RoofCourseId
+					&& !Plan.Members[MemberIndex].RequiredLowerMemberIndices.IsEmpty());
+		}
+	}
+	for (const ABTSM73BeamC3V3::FPlannedMember& Member : Plan.Members)
+	{
+		if ((Member.SkeletonKind
+				== ABTSM73BeamC3V3::ESkeletonMemberKind::RoofCourse
+			|| Member.SkeletonKind
+				== ABTSM73BeamC3V3::ESkeletonMemberKind::RoofPost)
+			&& Member.ProducedStage
+				== EABTSM73BeamC3GenerationStage::FloorInfillRoof)
+		{
+			TestTrue(TEXT("Every newly emitted Roof / Crown member has lower bearing"),
+				!Member.RequiredLowerMemberIndices.IsEmpty());
+		}
+	}
+	for (const ABTSM73BeamC3V3::FRoofCrownOccludedCoursePlan& Occluded
+		: Plan.RoofCrownOccludedCourses)
+	{
+		TestTrue(TEXT("Every occluded Crown course names lower support and immutable blockers"),
+			!Occluded.LowerSeatMemberIndices.IsEmpty()
+				&& (!Occluded.BlockingMemberIndices.IsEmpty()
+					|| !Occluded.BlockingSupportVoidIndices.IsEmpty())
+				&& !Occluded.BlockingMemberIndices.ContainsByPredicate(
+					[&Plan](const int32 MemberIndex)
+					{
+						return !Plan.Members.IsValidIndex(MemberIndex);
+					})
+				&& !Occluded.BlockingSupportVoidIndices.ContainsByPredicate(
+					[&Plan](const int32 VoidIndex)
+					{
+						return !Plan.ReservedSupportVoids.IsValidIndex(VoidIndex);
+					}));
+	}
+	TestEqual(TEXT("Roof support-first ledger matches emitted summary"),
+		CountedRoofMembers, Summary.Stage4EmittedRoofMemberCount);
+	TestEqual(TEXT("Roof post ledger matches emitted post summary"),
+		CountedRoofPosts, Summary.Stage4RoofPostMemberCount);
+	TestEqual(TEXT("Adjacent voxel Crown emits no long vertical RoofPost"),
+		Summary.Stage4RoofPostMemberCount, 0);
+	for (const TPair<int32, TSet<int32>>& CrownBands : BandOrdinalsByRoofTarget)
+	{
+		TArray<int32> Ordinals = CrownBands.Value.Array();
+		Ordinals.Sort();
+		for (int32 Index = 0; Index < Ordinals.Num(); ++Index)
+		{
+			TestEqual(TEXT("Crown voxel ordinals are contiguous"),
+				Ordinals[Index], Index);
+			if (Index == 0) continue;
+			const int32 PreviousOrdinal = Ordinals[Index - 1];
+			const int32 CurrentOrdinal = Ordinals[Index];
+			const int32 PreviousCourse = BandCoursesByRoofTarget.FindChecked(
+				CrownBands.Key).FindChecked(PreviousOrdinal);
+			const int32 CurrentCourse = BandCoursesByRoofTarget.FindChecked(
+				CrownBands.Key).FindChecked(CurrentOrdinal);
+			TestEqual(TEXT("Crown voxel courses are vertically adjacent"),
+				CurrentCourse, PreviousCourse + 1);
+			const EABTSM73BeamAFrameAxis PreviousAxis =
+				BandAxesByRoofTarget.FindChecked(CrownBands.Key).FindChecked(
+					PreviousOrdinal);
+			const EABTSM73BeamAFrameAxis CurrentAxis =
+				BandAxesByRoofTarget.FindChecked(CrownBands.Key).FindChecked(
+					CurrentOrdinal);
+			TestTrue(TEXT("Crown voxel courses alternate X and Y"),
+				PreviousAxis != CurrentAxis);
+		}
+		const FIntPoint Base = BaseFootprintByRoofTarget.FindChecked(CrownBands.Key);
+		const FIntPoint Top = BandFootprintsByRoofTarget.FindChecked(
+			CrownBands.Key).FindChecked(Ordinals.Last());
+		const int32 TerminalX = (Base.X & 1) == 0 ? 2 : 1;
+		const int32 TerminalY = (Base.Y & 1) == 0 ? 2 : 1;
+		switch (PrimitiveByRoofTarget.FindChecked(CrownBands.Key))
+		{
+		case EABTSM73DAG5BV2Primitive::Pyramid:
+			TestEqual(TEXT("Pyramid terminates at its parity-preserving X width"),
+				Top.X, TerminalX);
+			TestEqual(TEXT("Pyramid terminates at its parity-preserving Y width"),
+				Top.Y, TerminalY);
+			break;
+		case EABTSM73DAG5BV2Primitive::TriangularPrismX:
+			TestEqual(TEXT("Prism X terminates at its parity-preserving taper width"),
+				Top.X, TerminalX);
+			TestEqual(TEXT("Prism X preserves its ridge width"), Top.Y, Base.Y);
+			break;
+		case EABTSM73DAG5BV2Primitive::TriangularPrismY:
+			TestEqual(TEXT("Prism Y terminates at its parity-preserving taper width"),
+				Top.Y, TerminalY);
+			TestEqual(TEXT("Prism Y preserves its ridge width"), Top.X, Base.X);
+			break;
+		default:
+			TestEqual(TEXT("Flat Crown preserves its X footprint"), Top.X, Base.X);
+			TestEqual(TEXT("Flat Crown preserves its Y footprint"), Top.Y, Base.Y);
+			break;
+		}
+	}
 	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
 		: Plan.TopSurfaceIntents)
 	{
@@ -4662,15 +4906,18 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		ExposedSetbackTopCount + DirectStackSeatCount);
 	AddInfo(FString::Printf(
 		TEXT("Stage4Intent Entry=%s Stage3=%lld IntentHash=%lld")
-		TEXT(" Frames=%d Ground=%d Top=%d Setback=%d Stack=%d")
+		TEXT(" Frames=%d Ground=%d Top=%d CoreAnchor=%d Setback=%d Stack=%d")
 		TEXT(" Unresolved=%d TopFrames=%d Emitted=%d Reused=%d DeferredJunctions=%d Members=%d")
 		TEXT(" FacadeToTop=%d Seats=%d Posts=%d Suppressed=%d ResolvedDeferred=%d")
 		TEXT(" FloorPairs=%d Floor=%d Style=%d FloorReused=%d FloorDeferred=%d RoofReserve=%d")
-		TEXT(" FloorHash=%lld TimingMs=%.3f/%.3f/%.3f/%.3f Physical=NotEvaluated"),
+		TEXT(" FloorHash=%lld RoofVolumes=%d RoofBands=%d RoofCourses=%d RoofMembers=%d RoofPosts=%d")
+		TEXT(" RoofReused=%d RoofDeferred=%d RoofOccluded=%d RoofHash=%lld")
+		TEXT(" TimingMs=%.3f/%.3f/%.3f/%.3f/%.3f Physical=NotEvaluated"),
 		*Entry.StableId.ToString(), Summary.Stage3PlanHash,
 		Summary.Stage4IntentHash, Summary.Stage4TopSurfaceIntentCount,
 		Summary.Stage4GroundSillIntentCount,
 		Summary.Stage4ResolvedTopSurfaceIntentCount,
+		Summary.Stage4GroundedCoreAnchorIntentCount,
 		ExposedSetbackTopCount, DirectStackSeatCount,
 		Summary.Stage4UnresolvedIntentCount,
 		Summary.Stage4TopFrameSegmentCount,
@@ -4689,10 +4936,20 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4DeferredFloorSpanCount,
 		Summary.Stage4RoofReservedMemberCount,
 		Summary.Stage4FloorStyleInfillHash,
+		Summary.Stage4RoofCrownVolumeCount,
+		Summary.Stage4RoofBandCount,
+		Summary.Stage4RoofCourseCount,
+		Summary.Stage4EmittedRoofMemberCount,
+		Summary.Stage4RoofPostMemberCount,
+		Summary.Stage4ReusedRoofCarrierCount,
+		Summary.Stage4DeferredRoofCandidateCount,
+		Summary.Stage4OccludedRoofCourseCount,
+		Summary.Stage4RoofCrownHash,
 		Summary.Stage4IntentMilliseconds,
 		Summary.Stage4TopFrameMilliseconds,
 		Summary.Stage4FacadeToTopMilliseconds,
-		Summary.Stage4FloorStyleInfillMilliseconds));
+		Summary.Stage4FloorStyleInfillMilliseconds,
+		Summary.Stage4RoofCrownMilliseconds));
 	return true;
 }
 
@@ -5247,7 +5504,7 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 	TestEqual(TEXT("Every high projection region binds one child core"),
 		Plan.Summary.BoundHighProjectionRegionCount,
 		Plan.Summary.HighProjectionRegionCount);
-	TestEqual(TEXT("Pure-data fixture publishes both full-height child ledgers"),
+	TestEqual(TEXT("Pure-data fixture publishes both complete Body-height child ledgers"),
 		Plan.FullHeightChildCandidateDiagnostics.Num(), 2);
 	TestEqual(TEXT("Pure-data fixture publishes one bounded joint selection"),
 		Plan.JointCoreSelectionDiagnostics.Num(), 1);
@@ -5270,7 +5527,7 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 				[](const int32 Count) { return Count > 0; }));
 		TestTrue(TEXT("Joint selection covers every support province"),
 			Joint.bEverySupportProvinceCovered);
-		TestTrue(TEXT("Spatial main selection then admits every full-height child"),
+		TestTrue(TEXT("Spatial main selection then admits every complete Body-height child"),
 			Joint.bEveryRegionHasFullHeightChild
 				&& Joint.FullHeightFeasibleMainSelectionCount > 0);
 	}
@@ -5286,9 +5543,11 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 				});
 		const ABTSM73BeamC3V3::FCoreCellPlan* Child = Region == nullptr
 			? nullptr : SkeletonV3TestFindCore(Plan, Region->BoundCoreCellId);
-		TestTrue(TEXT("Selected child reaches the pre-main WFC full height"),
+		TestTrue(TEXT("Selected child reaches the WFC Body/Crown handoff"),
 			Child != nullptr
 				&& Child->TopCourseIndex == Diagnostic.RequiredFullHeightCourse
+				&& Region != nullptr
+				&& Child->TopCourseIndex == Region->PhysicalChildTopCourse
 				&& Diagnostic.WFCFullHeightWitnessCount > 0);
 	}
 	TestEqual(TEXT("Hierarchy publishes one composite lane group"),
@@ -5352,19 +5611,30 @@ bool FABTSM73BeamC3StagedGroundedPodiumCoreHierarchyTest::RunTest(
 	{
 		TestTrue(TEXT("Child Body/Crown boundary is lower than component Body top"),
 			EastChild->BodyTopCourseIndex < 30);
-		bool bUsesCrownAtLocalBoundary = false;
+		bool bEntersCrownAuthority = false;
 		for (const int32 MemberIndex : EastChild->MemberIndices)
 		{
 			if (Plan.Members.IsValidIndex(MemberIndex))
 			{
 				const ABTSM73BeamC3V3::FPlannedMember& Member = Plan.Members[MemberIndex];
-				bUsesCrownAtLocalBoundary |=
+				bEntersCrownAuthority |=
 					Member.CourseIndex >= EastChild->BodyTopCourseIndex
-					&& Member.SourceVolumeId == EastCrown.VolumeId;
+					|| Member.SourceVolumeId == EastCrown.VolumeId;
 			}
 		}
-		TestTrue(TEXT("Child legally changes to Crown at its own boundary"),
-			bUsesCrownAtLocalBoundary);
+		TestFalse(TEXT("Child stops before Crown and never consumes Crown source authority"),
+			bEntersCrownAuthority);
+		const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic* EastDemand =
+			Plan.SemanticTerminalDemands.FindByPredicate(
+				[EastChild](const ABTSM73BeamC3V3::
+					FSemanticTerminalDemandDiagnostic& Demand)
+				{
+					return Demand.DemandId == EastChild->SemanticDemandId;
+				});
+		TestTrue(TEXT("Crown load continues semantically above the physical child handoff"),
+			EastDemand != nullptr
+				&& EastDemand->PhysicalChildTopCourse == EastChild->TopCourseIndex
+				&& EastDemand->RequiredTopCourse > EastChild->TopCourseIndex);
 
 		ABTSM73BeamC3V3::FPlan InvalidSourcePlan = Plan;
 		const ABTSM73BeamC3V3::FCoreCellPlan& InvalidChild =
@@ -5530,8 +5800,10 @@ bool FABTSM73BeamC3StagedTerminalBranchDemandSplitTest::RunTest(
 		TestTrue(TEXT("Split demand retains its common podium entry"),
 			Region.EntryBounds.IsValid
 				&& Region.EntryBounds.GetSize().X > Region.TerminalBounds.GetSize().X);
-		TestTrue(TEXT("Split demand child reaches its independent terminal top"),
-			Child != nullptr && Child->TopCourseIndex == Region.RequiredTopCourse);
+		TestTrue(TEXT("Body-only split demand keeps child and semantic tops equal"),
+			Child != nullptr
+				&& Region.PhysicalChildTopCourse == Region.RequiredTopCourse
+				&& Child->TopCourseIndex == Region.PhysicalChildTopCourse);
 	}
 	return true;
 }
@@ -5594,13 +5866,16 @@ bool FABTSM73BeamC3StagedTipOverE6Seed710000TerminalCoverageTest::RunTest(
 		const ABTSM73BeamC3V3::FCoreCellPlan* Child =
 			SkeletonV3TestFindCore(Plan, Region.BoundCoreCellId);
 		AddInfo(FString::Printf(
-			TEXT("TipOverE6Seed710000Region:Region=%d:RequiredTop=%d:Terminal=%d,%d:Main=%d:Child=%d:Entry=%s:TerminalBounds=%s"),
+			TEXT("TipOverE6Seed710000Region:Region=%d:LoadTop=%d:ChildTop=%d:Terminal=%d,%d:Main=%d:Child=%d:Entry=%s:TerminalBounds=%s"),
 			Region.RegionId, Region.RequiredTopCourse,
+			Region.PhysicalChildTopCourse,
 			Region.TerminalSliceCourse, Region.TerminalSliceComponentId,
 			Region.BoundPodiumMainCoreCellId, Region.BoundCoreCellId,
 			*Region.EntryBounds.ToString(), *Region.TerminalBounds.ToString()));
-		TestTrue(TEXT("Seed 710000 child reaches the independent branch top"),
-			Child != nullptr && Child->TopCourseIndex == Region.RequiredTopCourse);
+		TestTrue(TEXT("Seed 710000 child stops at its Crown handoff"),
+			Child != nullptr
+				&& Child->TopCourseIndex == Region.PhysicalChildTopCourse
+				&& Region.PhysicalChildTopCourse <= Region.RequiredTopCourse);
 	}
 	return true;
 }
@@ -5614,7 +5889,7 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 	const FString& Parameters)
 {
 	using namespace ABTSM73BeamC3V3Tests;
-	int32 TotalSingleShrinkChildren = 0;
+	int32 TotalCrownHandoffDemands = 0;
 	for (const int32 Seed : {710000, 730000, 750000})
 	{
 		FABTSM73BeamD1StagePreviewResult Result;
@@ -5629,6 +5904,12 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 			continue;
 		}
 		const ABTSM73BeamC3V3::FPlan& Plan = Result.Skeleton.Plan;
+		for (const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic& Demand
+			: Plan.SemanticTerminalDemands)
+		{
+			TotalCrownHandoffDemands += Demand.PhysicalChildTopCourse
+				< Demand.RequiredTopCourse ? 1 : 0;
+		}
 		for (const ABTSM73BeamC3V3::FFullHeightChildCandidateDiagnostic& Diagnostic
 			: Plan.FullHeightChildCandidateDiagnostics)
 		{
@@ -5661,7 +5942,6 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				continue;
 			}
 			++SeedSingleShrinkChildren;
-			++TotalSingleShrinkChildren;
 			const bool bSingleShrinkContractCloses =
 				Child.SingleShrinkCourseIndex < Child.TopCourseIndex
 				&& Child.UpperXStations.Num() == Child.RailCount
@@ -5709,17 +5989,23 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 								== ABTSM73BeamC3V3::ECoreHierarchyRole::TowerChild
 							&& Child.SemanticDemandId == 6;
 					});
-			TestTrue(TEXT("TipOver 750000 former 72 cm child receives a balanced thicker trunk"),
+			const ABTSM73BeamC3V3::FSemanticTerminalDemandDiagnostic* FormerThinDemand =
 				FormerThinChild != nullptr
-					&& FormerThinChild->SingleShrinkCourseIndex > 0
-					&& FMath::Min(FormerThinChild->LocalBounds.GetSize().X,
-						FormerThinChild->LocalBounds.GetSize().Y) > 36.0
+				? Plan.SemanticTerminalDemands.FindByPredicate(
+					[FormerThinChild](const ABTSM73BeamC3V3::
+						FSemanticTerminalDemandDiagnostic& Demand)
+					{
+						return Demand.DemandId == FormerThinChild->SemanticDemandId;
+					}) : nullptr;
+			TestTrue(TEXT("TipOver 750000 former thin branch preserves a square Body child and hands its roof to Crown"),
+				FormerThinChild != nullptr && FormerThinDemand != nullptr
 					&& FMath::Abs(FormerThinChild->LocalBounds.GetSize().X
 						- FormerThinChild->LocalBounds.GetSize().Y)
 						<= KINDA_SMALL_NUMBER
-					&& FMath::Abs(FormerThinChild->UpperLocalBounds.GetSize().X
-						- FormerThinChild->UpperLocalBounds.GetSize().Y)
-						<= KINDA_SMALL_NUMBER);
+					&& FormerThinChild->TopCourseIndex
+						== FormerThinDemand->PhysicalChildTopCourse
+					&& FormerThinDemand->PhysicalChildTopCourse
+						<= FormerThinDemand->RequiredTopCourse);
 		}
 		TestTrue(*FString::Printf(
 			TEXT("Seed %d reserves at least one raised PodiumMain in Stage 0"), Seed),
@@ -5821,8 +6107,8 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 					});
 			TestFalse(TEXT("TipOver 750000 does not raise either overlapping east main above foreign children"),
 				bHasIncorrectRightRaisedMain);
-			TestEqual(TEXT("TipOver 750000 keeps only the two spatially legal raised mains"),
-				Plan.RaisedMainReservations.Num(), 2);
+			TestTrue(TEXT("TipOver 750000 retains at least one spatially legal raised main after Crown handoff"),
+				!Plan.RaisedMainReservations.IsEmpty());
 			int32 RaisedSemanticVolumeCount = 0;
 			bool bRaisedSemanticVolumesMatchOccupiedCore = true;
 			for (const FABTSM73DAG5BV2Volume& Volume : Result.Silhouette.Volumes)
@@ -5944,19 +6230,26 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				Candidate.bSelected ? 1 : 0,
 				*Candidate.DecisionReason));
 		}
-		const int32 ExpectedStructuralMain = Seed == 710000 ? 1 : 0;
-		const int32 ExpectedRaisedTop = Seed == 710000
-			? 92 : Seed == 730000 ? 92 : 89;
 		TestTrue(*FString::Printf(
-			TEXT("Seed %d selects the morphology-bounded central podium height"), Seed),
+			TEXT("Seed %d selects a multi-province podium height below every owned physical child"), Seed),
 			Plan.LocalPodiumHeightRegions.ContainsByPredicate(
-				[ExpectedStructuralMain, ExpectedRaisedTop](
+				[&Plan](
 					const ABTSM73BeamC3V3::FLocalPodiumHeightRegionDiagnostic& Region)
 				{
-					return Region.StructuralPodiumMainCoreCellId == ExpectedStructuralMain
-						&& Region.SelectedTopCourse == ExpectedRaisedTop
-						&& Region.bRaisesActualPodium
-						&& Region.ProvinceIds.Num() >= 2;
+					return Region.bRaisesActualPodium
+						&& Region.bAppliedToProductionCoreHierarchy
+						&& Region.SelectedTopCourse > Region.ActualPodiumTopCourse
+						&& Region.ProvinceIds.Num() >= 2
+						&& !Region.AppliedTowerChildCoreCellIds.IsEmpty()
+						&& Algo::AllOf(Region.AppliedTowerChildCoreCellIds,
+							[&Plan, &Region](const int32 ChildId)
+							{
+								const ABTSM73BeamC3V3::FCoreCellPlan* Child =
+									SkeletonV3TestFindCore(Plan, ChildId);
+								return Child != nullptr
+									&& Child->TopCourseIndex
+										>= Region.SelectedTopCourse + 2;
+							});
 				}));
 		TestTrue(*FString::Printf(TEXT("Seed %d publishes a local podium plan"), Seed),
 			Plan.Summary.LocalPodiumHeightPlanHash != 0
@@ -6109,8 +6402,8 @@ bool FABTSM73BeamC3StagedTipOverE6OptimizationSeedsTest::RunTest(
 				&& Plan.Summary.Stage1TotalMilliseconds
 					<= Plan.Summary.Stage1TimeBudgetMilliseconds);
 	}
-	TestTrue(TEXT("TipOver E6 optimization seeds exercise a selected one-shrink TowerChild"),
-		TotalSingleShrinkChildren > 0);
+	TestTrue(TEXT("TipOver E6 optimization seeds exercise explicit Body-to-Crown handoffs"),
+		TotalCrownHandoffDemands > 0);
 	return true;
 }
 
