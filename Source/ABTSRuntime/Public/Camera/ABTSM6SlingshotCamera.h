@@ -40,6 +40,7 @@ class ABTSRUNTIME_API AABTSM6SlingshotCamera : public ACameraActor
 public:
 	AABTSM6SlingshotCamera();
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 	void SetAimFrame(const FVector& InCenter, const FVector& InForward, const FVector& InUp);
 	/** Copies the authored camera-class defaults used by player input and calibration certification. */
 	bool CopyAimFraming(
@@ -97,6 +98,21 @@ public:
 		const FQuat& CurrentRotation,
 		const FQuat& DesiredRotation,
 		float MaximumStepDegrees);
+	/** Experimental M9 composition: preserves candidate direction while enforcing exact bird distance. */
+	static FVector ConstrainCameraToBirdDistance(
+		const FVector& CandidateLocation,
+		const FVector& BirdLocation,
+		float DistanceCM,
+		const FVector& FallbackDirection = -FVector::ForwardVector);
+	/** Moves a fixed-radius camera only as far around the bird as needed to include the lunar limb. */
+	static FVector ConstrainFixedDistanceCameraForSatelliteVisibility(
+		const FVector& CandidateLocation,
+		const FVector& BirdLocation,
+		const FVector& SatelliteCenter,
+		float SatelliteRadiusCM,
+		float DistanceCM,
+		float HorizontalFovDegrees,
+		float AspectRatio);
 	void ClearSatelliteFlightPresentation();
 	void NotifySatelliteE5Hit();
 	/** Real collision is stronger than prediction and guarantees a moon-frame hand-off. */
@@ -145,7 +161,6 @@ private:
 		FVector& OutLocation,
 		FVector& OutLook,
 		FVector& OutScreenUp) const;
-
 	TWeakObjectPtr<AABTSM25BirdCharacter> Bird;
 	TWeakObjectPtr<AABTSM2Planet> Planet;
 	FVector AimCenter = FVector::ZeroVector;
@@ -272,6 +287,13 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
 		meta = (ClampMin = "0.1", ClampMax = "20.0"))
 	float SatelliteFieldOfViewBlendSpeed = 3.5f;
+	/** Candidate experiment: keep bird angular size invariant during the cinematic lunar hand-off. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight")
+	bool bSatelliteConstantBirdScaleExperiment = true;
+	/** Fixed lens used with the constant bird-distance experiment. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "35.0", ClampMax = "70.0", Units = "deg"))
+	float SatelliteConstantBirdScaleFieldOfViewDegrees = 50.0f;
 	/** Small look-ahead preserves the ground strike grammar while revealing E5. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
 		meta = (ClampMin = "0.0", ClampMax = "0.35"))

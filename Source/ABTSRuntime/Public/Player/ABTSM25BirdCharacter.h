@@ -76,6 +76,20 @@ public:
 	void SetSlingshotPresentationUp(
 		const FVector& WorldUp,
 		float DeltaSeconds,
+		bool bLockFacingReversal = false,
+		const FVector& ViewStableWorldForward = FVector::ZeroVector);
+	/**
+	 * Parallel-transports the previous visual forward into a new radial frame,
+	 * then consumes a camera-stable presentation anchor directly, or applies
+	 * only a bounded, reliable velocity-facing correction when no anchor exists.
+	 */
+	static FVector ComputeRotationMinimizedSlingshotForward(
+		const FVector& PreviousForward,
+		const FVector& PreviousUp,
+		const FVector& NewUp,
+		const FVector& Velocity,
+		const FVector& ViewStableWorldForward,
+		float MaximumVelocityCorrectionDegrees,
 		bool bLockFacingReversal = false);
 	void ClearSlingshotPresentationUp();
 	void NotifySlingshotPresentationImpact();
@@ -159,7 +173,12 @@ private:
 	bool bSlingshotPresentationFrameInitialized = false;
 	bool bSlingshotPresentationLockFacingReversal = false;
 	FVector SlingshotPresentationUp = FVector::UpVector;
+	FVector SlingshotPresentationViewForward = FVector::ZeroVector;
 	FQuat SlingshotPresentationFrame = FQuat::Identity;
+	/** Maximum presentation-only yaw correction toward flight velocity. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
+		meta = (ClampMin = "10.0", ClampMax = "180.0", Units = "deg/s"))
+	float SlingshotPresentationForwardCorrectionDegreesPerSecond = 90.0f;
 	FVector StableChaosPresentationForward = FVector::ZeroVector;
 	bool bChaosVisualRotationInitialized = false;
 	FQuat ChaosVisualRotation = FQuat::Identity;

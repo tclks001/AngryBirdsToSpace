@@ -620,7 +620,8 @@ FVector AABTSM25BirdCharacter::GetPresentationVelocity() const
 void AABTSM25BirdCharacter::SetSlingshotPresentationUp(
 	const FVector& WorldUp,
 	const float DeltaSeconds,
-	const bool bLockFacingReversal)
+	const bool bLockFacingReversal,
+	const FVector& ViewStableWorldForward)
 {
 	(void)DeltaSeconds;
 	const FVector SafeUp = WorldUp.GetSafeNormal();
@@ -628,6 +629,103 @@ void AABTSM25BirdCharacter::SetSlingshotPresentationUp(
 	bSlingshotPresentationUpActive = true;
 	bSlingshotPresentationLockFacingReversal = bLockFacingReversal;
 	SlingshotPresentationUp = SafeUp;
+	SlingshotPresentationViewForward = ViewStableWorldForward.GetSafeNormal();
+}
+
+FVector AABTSM25BirdCharacter::ComputeRotationMinimizedSlingshotForward(
+	const FVector& PreviousForward,
+	const FVector& PreviousUp,
+	const FVector& NewUp,
+	const FVector& Velocity,
+	const FVector& ViewStableWorldForward,
+	const float MaximumVelocityCorrectionDegrees,
+	const bool bLockFacingReversal)
+{
+	const FVector FromUp = PreviousUp.GetSafeNormal();
+	const FVector ToUp = NewUp.GetSafeNormal();
+	if (ToUp.IsNearlyZero()) return FVector::ZeroVector;
+
+	FVector SourceForward = FVector::VectorPlaneProject(
+		PreviousForward,
+		FromUp.IsNearlyZero() ? ToUp : FromUp).GetSafeNormal();
+	if (SourceForward.IsNearlyZero())
+	{
+		const FVector Reference = FMath::Abs(ToUp.Z) < 0.9f
+			? FVector::UpVector
+			: FVector::ForwardVector;
+		SourceForward = FVector::CrossProduct(Reference, ToUp).GetSafeNormal();
+	}
+
+	FVector TransportedForward = SourceForward;
+	if (!FromUp.IsNearlyZero())
+	{
+		const float UpDot = FMath::Clamp(
+			FVector::DotProduct(FromUp, ToUp), -1.0f, 1.0f);
+		FVector RotationAxis = FVector::CrossProduct(FromUp, ToUp).GetSafeNormal();
+		if (RotationAxis.IsNearlyZero() && UpDot < 0.0f)
+		{
+			RotationAxis = FVector::VectorPlaneProject(
+				SourceForward, FromUp).GetSafeNormal();
+			if (RotationAxis.IsNearlyZero())
+			{
+				const FVector Reference = FMath::Abs(FromUp.Z) < 0.9f
+					? FVector::UpVector
+					: FVector::ForwardVector;
+				RotationAxis = FVector::CrossProduct(
+					FromUp, Reference).GetSafeNormal();
+			}
+		}
+		if (!RotationAxis.IsNearlyZero())
+		{
+			TransportedForward = FQuat(
+				RotationAxis,
+				FMath::Acos(UpDot)).RotateVector(SourceForward);
+		}
+	}
+	TransportedForward = FVector::VectorPlaneProject(
+		TransportedForward, ToUp).GetSafeNormal();
+	if (TransportedForward.IsNearlyZero()) return SourceForward;
+
+	const FVector ViewStableForward = FVector::VectorPlaneProject(
+		ViewStableWorldForward, ToUp).GetSafeNormal();
+	if (!ViewStableForward.IsNearlyZero())
+	{
+		// The follow camera and the presentation Up are driven by the same
+		// continuously blended primary-to-satellite frame.  Consume that view
+		// anchor directly: applying the physical velocity correction budget here
+		// makes the mesh lag behind the camera basis and reads as an extra roll.
+		// This changes only the visual mesh frame; actor/Chaos authority remains
+		// free to rotate in world space.
+		if (bLockFacingReversal
+			&& FVector::DotProduct(TransportedForward, ViewStableForward) < 0.0f)
+		{
+			return TransportedForward;
+		}
+		return ViewStableForward;
+	}
+
+	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, ToUp);
+	const float VelocitySize = Velocity.Size();
+	const bool bVelocityDirectionReliable = TangentVelocity.Size() >= 120.0f
+		&& (VelocitySize <= KINDA_SMALL_NUMBER
+			|| TangentVelocity.Size() / VelocitySize >= 0.25f);
+	if (!bVelocityDirectionReliable) return TransportedForward;
+	const FVector VelocityForward = TangentVelocity.GetSafeNormal();
+	const float ForwardDot = FMath::Clamp(
+		FVector::DotProduct(TransportedForward, VelocityForward), -1.0f, 1.0f);
+	if (bLockFacingReversal && ForwardDot < 0.0f) return TransportedForward;
+
+	const float SignedCorrectionRadians = FMath::Atan2(
+		FVector::DotProduct(
+			FVector::CrossProduct(TransportedForward, VelocityForward),
+			ToUp),
+		ForwardDot);
+	const float LimitedCorrectionRadians = FMath::Clamp(
+		SignedCorrectionRadians,
+		-FMath::DegreesToRadians(FMath::Max(0.0f, MaximumVelocityCorrectionDegrees)),
+		FMath::DegreesToRadians(FMath::Max(0.0f, MaximumVelocityCorrectionDegrees)));
+	return FQuat(ToUp, LimitedCorrectionRadians)
+		.RotateVector(TransportedForward).GetSafeNormal();
 }
 
 void AABTSM25BirdCharacter::ClearSlingshotPresentationUp()
@@ -644,6 +742,7 @@ void AABTSM25BirdCharacter::ClearSlingshotPresentationUp()
 	bSlingshotPresentationFrameInitialized = false;
 	bSlingshotPresentationLockFacingReversal = false;
 	SlingshotPresentationUp = FVector::UpVector;
+	SlingshotPresentationViewForward = FVector::ZeroVector;
 	SlingshotPresentationFrame = FQuat::Identity;
 }
 
@@ -746,47 +845,28 @@ void AABTSM25BirdCharacter::UpdateSlingshotPresentationFrame(
 	if (Visual == nullptr || !bSlingshotPresentationUpActive) return;
 	const FVector Up = SlingshotPresentationUp.GetSafeNormal();
 	if (Up.IsNearlyZero()) return;
-	const FVector Velocity = GetSlingshotVelocity();
-	const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
-	FVector Forward = TangentVelocity.Size() >= 120.0f
-		? TangentVelocity.GetSafeNormal()
-		: FVector::ZeroVector;
-	if (bSlingshotPresentationLockFacingReversal
-		&& bSlingshotPresentationFrameInitialized
-		&& !Forward.IsNearlyZero()
-		&& FVector::DotProduct(
-			Forward,
-			FVector::VectorPlaneProject(
-				SlingshotPresentationFrame.GetAxisX(),
-				Up).GetSafeNormal()) < 0.0f)
-	{
-		Forward = FVector::ZeroVector;
-	}
-	if (Forward.IsNearlyZero())
-	{
-		const FVector PreviousForward = bSlingshotPresentationFrameInitialized
-			? SlingshotPresentationFrame.GetAxisX()
-			: GetActorForwardVector();
-		Forward = FVector::VectorPlaneProject(PreviousForward, Up).GetSafeNormal();
-	}
-	if (Forward.IsNearlyZero())
-	{
-		const FVector Reference = FMath::Abs(Up.Z) < 0.9f
-			? FVector::UpVector
-			: FVector::ForwardVector;
-		Forward = FVector::CrossProduct(Reference, Up).GetSafeNormal();
-	}
-	const FQuat DesiredFrame = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
 	if (!bSlingshotPresentationFrameInitialized)
 	{
-		SlingshotPresentationFrame = GetActorQuat();
+		SlingshotPresentationFrame = (
+			Visual->GetComponentQuat()
+			* GetBirdVisualAxisCorrection().Inverse()).GetNormalized();
 		bSlingshotPresentationFrameInitialized = true;
 	}
-	SlingshotPresentationFrame = FMath::QInterpTo(
-		SlingshotPresentationFrame,
-		DesiredFrame,
-		DeltaSeconds,
-		6.0f).GetNormalized();
+	const FVector Forward = ComputeRotationMinimizedSlingshotForward(
+		SlingshotPresentationFrame.GetAxisX(),
+		SlingshotPresentationFrame.GetAxisZ(),
+		Up,
+		GetSlingshotVelocity(),
+		SlingshotPresentationViewForward,
+		FMath::Max(0.0f, SlingshotPresentationForwardCorrectionDegreesPerSecond)
+			* FMath::Max(0.0f, DeltaSeconds),
+		bSlingshotPresentationLockFacingReversal);
+	if (Forward.IsNearlyZero()) return;
+	// The camera already rate-limits Up. Applying the rotation-minimizing frame
+	// directly avoids a second quaternion filter that can turn radial hand-off
+	// into visible roll in camera space.
+	SlingshotPresentationFrame = FRotationMatrix::MakeFromXZ(
+		Forward, Up).ToQuat().GetNormalized();
 	FVector FrameOrigin = GetActorLocation();
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{

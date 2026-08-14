@@ -80,10 +80,25 @@ private:
 	int32 FirstSurfaceFrameCommittedFrame = INDEX_NONE;
 	float MaximumSurfaceFrameAlpha = 0.0f;
 	float MaximumBirdVisualFrameDeltaDegrees = 0.0f;
+	int32 MaximumBirdVisualFrameDeltaFrame = INDEX_NONE;
+	float MaximumSurfaceFrameBirdVisualDeltaDegrees = 0.0f;
+	int32 MaximumSurfaceFrameBirdVisualDeltaFrame = INDEX_NONE;
+	float MaximumSurfaceFrameCameraRelativeBirdDeltaDegrees = 0.0f;
+	int32 MaximumSurfaceFrameCameraRelativeBirdDeltaFrame = INDEX_NONE;
+	float MaximumHandoffCameraRelativeBirdDeltaDegrees = 0.0f;
+	int32 MaximumHandoffCameraRelativeBirdDeltaFrame = INDEX_NONE;
+	float MaximumHandoffBirdScreenMotionPixelsPerFrame = 0.0f;
+	int32 MaximumHandoffBirdScreenMotionFrame = INDEX_NONE;
+	float MaximumHandoffBirdScreenAccelerationPixelsPerFrameSquared = 0.0f;
+	int32 MaximumHandoffBirdScreenAccelerationFrame = INDEX_NONE;
 	int32 SuddenBirdHalfTurnFrames = 0;
 	float MaximumCameraRotationFrameDeltaDegrees = 0.0f;
 	float MaximumCameraPhaseTransitionDeltaDegrees = 0.0f;
 	int32 SuddenCameraPhaseCutFrames = 0;
+	float MinimumIntentCameraBirdDistanceCM = TNumericLimits<float>::Max();
+	float MaximumIntentCameraBirdDistanceCM = 0.0f;
+	float MinimumIntentFieldOfViewDegrees = TNumericLimits<float>::Max();
+	float MaximumIntentFieldOfViewDegrees = 0.0f;
 	bool bHasPreviousCameraRotation = false;
 	FQuat PreviousCameraRotation = FQuat::Identity;
 	bool bHasPreviousCameraPhase = false;
@@ -91,6 +106,12 @@ private:
 		EABTSM9SatelliteFlightCameraPhase::PrimaryFollow;
 	bool bHasPreviousBirdVisualRotation = false;
 	FQuat PreviousBirdVisualRotation = FQuat::Identity;
+	bool bHasPreviousCameraRelativeBirdRotation = false;
+	FQuat PreviousCameraRelativeBirdRotation = FQuat::Identity;
+	bool bHasPreviousHandoffBirdScreen = false;
+	FVector2D PreviousHandoffBirdScreen = FVector2D::ZeroVector;
+	bool bHasPreviousHandoffBirdScreenVelocity = false;
+	FVector2D PreviousHandoffBirdScreenVelocity = FVector2D::ZeroVector;
 	double MinimumBirdVisibleRatio = 1.0;
 
 	UPROPERTY(Transient)

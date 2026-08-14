@@ -11,6 +11,13 @@
 
 namespace ABTSM9SatelliteCameraPrivate
 {
+	float ComputeGroundFollowBirdDistanceCM(
+		const float FlightDistanceCM,
+		const float FlightHeightCM)
+	{
+		return FVector(FlightDistanceCM, 0.0f, FlightHeightCM).Size();
+	}
+
 	FVector KeepSatelliteLimbVisible(
 		const FVector& CameraLocation,
 		const FVector& PrimaryFocus,
@@ -73,6 +80,98 @@ namespace ABTSM9SatelliteCameraPrivate
 		return FQuat(RotationAxis, CorrectionRadians)
 			.RotateVector(PrimaryDirection).GetSafeNormal();
 	}
+}
+
+FVector AABTSM6SlingshotCamera::ConstrainCameraToBirdDistance(
+	const FVector& CandidateLocation,
+	const FVector& BirdLocation,
+	const float DistanceCM,
+	const FVector& FallbackDirection)
+{
+	FVector Direction = (CandidateLocation - BirdLocation).GetSafeNormal();
+	if (Direction.IsNearlyZero())
+	{
+		Direction = FallbackDirection.GetSafeNormal();
+	}
+	if (Direction.IsNearlyZero()) Direction = -FVector::ForwardVector;
+	return BirdLocation + Direction * FMath::Max(1.0f, DistanceCM);
+}
+
+FVector AABTSM6SlingshotCamera::ConstrainFixedDistanceCameraForSatelliteVisibility(
+	const FVector& CandidateLocation,
+	const FVector& BirdLocation,
+	const FVector& SatelliteCenter,
+	const float SatelliteRadiusCM,
+	const float DistanceCM,
+	const float HorizontalFovDegrees,
+	const float AspectRatio)
+{
+	const float RadiusCM = FMath::Max(1.0f, DistanceCM);
+	FVector CandidateDirection = (CandidateLocation - BirdLocation).GetSafeNormal();
+	const FVector BirdToSatellite = SatelliteCenter - BirdLocation;
+	const FVector IdealDirection = -BirdToSatellite.GetSafeNormal();
+	if (CandidateDirection.IsNearlyZero()) CandidateDirection = IdealDirection;
+	if (CandidateDirection.IsNearlyZero()) return CandidateLocation;
+	if (IdealDirection.IsNearlyZero())
+	{
+		return BirdLocation + CandidateDirection * RadiusCM;
+	}
+
+	auto FitsView = [&](const FVector& CameraDirection)
+	{
+		const FVector CameraLocation = BirdLocation + CameraDirection * RadiusCM;
+		const FVector BirdDirection = (BirdLocation - CameraLocation).GetSafeNormal();
+		const FVector CameraToSatellite = SatelliteCenter - CameraLocation;
+		const float SatelliteDistanceCM = CameraToSatellite.Size();
+		if (BirdDirection.IsNearlyZero() || SatelliteDistanceCM <= KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+		const FVector SatelliteDirection = CameraToSatellite / SatelliteDistanceCM;
+		const float SeparationRadians = FMath::Acos(FMath::Clamp(
+			FVector::DotProduct(BirdDirection, SatelliteDirection), -1.0f, 1.0f));
+		const float AngularRadiusRadians = FMath::Asin(FMath::Clamp(
+			SatelliteRadiusCM / SatelliteDistanceCM, 0.0f, 0.999f));
+		const float HorizontalHalfFovRadians = FMath::DegreesToRadians(
+			FMath::Clamp(HorizontalFovDegrees, 10.0f, 170.0f) * 0.5f);
+		const float VerticalHalfFovRadians = FMath::Atan(
+			FMath::Tan(HorizontalHalfFovRadians) / FMath::Max(0.1f, AspectRatio));
+		const float VisibleLimbMarginRadians = FMath::DegreesToRadians(3.0f);
+		const float MaximumMoonCenterOffsetRadians = FMath::Max(
+			VerticalHalfFovRadians * 0.92f,
+			VerticalHalfFovRadians + AngularRadiusRadians - VisibleLimbMarginRadians);
+		const float MaximumBirdOffsetRadians = VerticalHalfFovRadians * 0.82f;
+		return SeparationRadians
+			<= MaximumMoonCenterOffsetRadians + MaximumBirdOffsetRadians;
+	};
+
+	if (FitsView(CandidateDirection))
+	{
+		return BirdLocation + CandidateDirection * RadiusCM;
+	}
+	FVector PreferredTangent = FVector::CrossProduct(
+		CandidateDirection,
+		IdealDirection).GetSafeNormal();
+	if (PreferredTangent.IsNearlyZero()) PreferredTangent = FVector::UpVector;
+	float LowerAlpha = 0.0f;
+	float UpperAlpha = 1.0f;
+	for (int32 Iteration = 0; Iteration < 10; ++Iteration)
+	{
+		const float Alpha = (LowerAlpha + UpperAlpha) * 0.5f;
+		const FVector Direction = BlendSurfaceUpStable(
+			CandidateDirection,
+			IdealDirection,
+			PreferredTangent,
+			Alpha);
+		if (FitsView(Direction)) UpperAlpha = Alpha;
+		else LowerAlpha = Alpha;
+	}
+	const FVector ConstrainedDirection = BlendSurfaceUpStable(
+		CandidateDirection,
+		IdealDirection,
+		PreferredTangent,
+		UpperAlpha);
+	return BirdLocation + ConstrainedDirection * RadiusCM;
 }
 
 AABTSM6SlingshotCamera::AABTSM6SlingshotCamera()
@@ -590,6 +689,81 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 	SetActorLocationAndRotation(Location, Rotation);
 }
 
+void AABTSM6SlingshotCamera::CalcCamera(
+	const float DeltaTime,
+	FMinimalViewInfo& OutResult)
+{
+	Super::CalcCamera(DeltaTime, OutResult);
+	if (!bSatelliteConstantBirdScaleExperiment
+		|| (SatelliteFlightIntent
+			!= EABTSM9SatelliteFlightCameraIntent::CinematicE5
+			&& SatelliteFlightIntent
+				!= EABTSM9SatelliteFlightCameraIntent::SurfaceLanding))
+	{
+		return;
+	}
+	AABTSM25BirdCharacter* TargetBird = Bird.Get();
+	AABTSM9Satellite* TargetSatellite = Satellite.Get();
+	if (TargetBird == nullptr || TargetSatellite == nullptr) return;
+	const FVector BirdLocation = TargetBird->GetActorLocation();
+	const float BirdDistanceCM =
+		ABTSM9SatelliteCameraPrivate::ComputeGroundFollowBirdDistanceCM(
+			FlightDistanceCM,
+			FlightHeightCM);
+	OutResult.Location = ConstrainCameraToBirdDistance(
+		OutResult.Location,
+		BirdLocation,
+		BirdDistanceCM,
+		GetActorLocation() - BirdLocation);
+	OutResult.FOV = FMath::Clamp(
+		SatelliteConstantBirdScaleFieldOfViewDegrees,
+		35.0f,
+		70.0f);
+	OutResult.Location = ConstrainFixedDistanceCameraForSatelliteVisibility(
+		OutResult.Location,
+		BirdLocation,
+		TargetSatellite->GetPlanetCenterWorld(),
+		TargetSatellite->GetPlanetRadiusCM(),
+		BirdDistanceCM,
+		OutResult.FOV,
+		OutResult.AspectRatio);
+
+	FVector PresentationUp = StableSatellitePresentationUp.GetSafeNormal();
+	if (PresentationUp.IsNearlyZero())
+	{
+		PresentationUp = (BirdLocation
+			- TargetSatellite->GetPlanetCenterWorld()).GetSafeNormal();
+	}
+	if (PresentationUp.IsNearlyZero()) PresentationUp = FVector::UpVector;
+	FVector Focus = BirdLocation + PresentationUp * 80.0f;
+	if (E5Target.IsValid()
+		&& (SatelliteFlightPhase == EABTSM9SatelliteFlightCameraPhase::E5Approach
+			|| SatelliteFlightPhase == EABTSM9SatelliteFlightCameraPhase::E5Impact))
+	{
+		Focus = FMath::Lerp(
+			Focus,
+			E5Target->GetActorLocation(),
+			FMath::Clamp(SatelliteE5LookAheadBias, 0.0f, 0.35f)
+				* FMath::SmoothStep(0.0f, 1.0f, SatelliteE5CompositionAlpha));
+	}
+	const FVector Look = ABTSM9SatelliteCameraPrivate::KeepSatelliteLimbVisible(
+		OutResult.Location,
+		Focus,
+		TargetSatellite->GetPlanetCenterWorld(),
+		TargetSatellite->GetPlanetRadiusCM(),
+		OutResult.FOV,
+		OutResult.AspectRatio);
+	const FVector ScreenUp = FVector::VectorPlaneProject(
+		PresentationUp,
+		Look).GetSafeNormal();
+	if (!Look.IsNearlyZero() && !ScreenUp.IsNearlyZero())
+	{
+		OutResult.Rotation = FRotationMatrix::MakeFromXZ(
+			Look,
+			ScreenUp).Rotator();
+	}
+}
+
 bool AABTSM6SlingshotCamera::BuildPrimaryFollowPose(
 	AABTSM25BirdCharacter& TargetBird,
 	FVector& OutLocation,
@@ -804,7 +978,8 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 		TargetBird.SetSlingshotPresentationUp(
 			PresentationUp,
 			DeltaSeconds,
-			bSatelliteSurfaceContact || bSatelliteE5Hit);
+			bSatelliteSurfaceContact || bSatelliteE5Hit,
+			BirdLocation - GetActorLocation());
 	}
 	else
 	{
@@ -839,11 +1014,14 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 		SatelliteFlightIntent == EABTSM9SatelliteFlightCameraIntent::CinematicE5
 		&& !bSatelliteE5ApproachLatched
 		&& SatelliteDistanceCM > SatelliteRadiusCM * 1.45f;
+	const float TargetFieldOfViewDegrees = bSatelliteConstantBirdScaleExperiment
+		? FMath::Clamp(SatelliteConstantBirdScaleFieldOfViewDegrees, 35.0f, 70.0f)
+		: (bUseTransitionFieldOfView
+			? FMath::Max(50.0f, SatelliteTransitionFieldOfViewDegrees)
+			: 50.0f);
 	GetCameraComponent()->SetFieldOfView(FMath::FInterpTo(
 		GetCameraComponent()->FieldOfView,
-		bUseTransitionFieldOfView
-			? FMath::Max(50.0f, SatelliteTransitionFieldOfViewDegrees)
-			: 50.0f,
+		TargetFieldOfViewDegrees,
 		DeltaSeconds,
 		FMath::Max(0.1f, SatelliteFieldOfViewBlendSpeed)));
 
@@ -853,6 +1031,10 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 			!= EABTSM9SatelliteFlightCameraIntent::SubtleAssist
 		&& SatelliteDistanceCM > EnterDistanceCM)
 	{
+		// Keep the incoming fixed-radius state synchronized with the ordinary
+		// ground-follow pose. The first SatelliteApproach frame can therefore
+		// continue from the exact previous direction instead of snapping to a
+		// freshly reconstructed moon-relative endpoint.
 		return false;
 	}
 	if (SatelliteFlightIntent
@@ -1104,7 +1286,9 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 		}
 		if (MoonForward.IsNearlyZero()) return false;
 		StableFollowForward = MoonForward;
-		const float SideBlend = FMath::SmoothStep(
+		const float SideBlend = bSatelliteConstantBirdScaleExperiment
+			? 0.0f
+			: FMath::SmoothStep(
 			0.0f,
 			1.0f,
 			FMath::Clamp(
@@ -1141,14 +1325,57 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 		{
 			return false;
 		}
-		const FVector DesiredLocation = FMath::Lerp(
+		FVector DesiredLocation = FMath::Lerp(
 			PrimaryDesiredLocation,
 			MoonDesiredLocation,
 			ApproachCompositionBlend);
+		if (bSatelliteConstantBirdScaleExperiment)
+		{
+			const float BirdDistanceCM =
+				ABTSM9SatelliteCameraPrivate::ComputeGroundFollowBirdDistanceCM(
+					FlightDistanceCM,
+					FlightHeightCM);
+			const FVector PrimaryDirection =
+				(PrimaryDesiredLocation - BirdLocation).GetSafeNormal();
+			const FVector MoonDirection =
+				(MoonDesiredLocation - BirdLocation).GetSafeNormal();
+			const FVector BlendedDirection = BlendSurfaceUpStable(
+				PrimaryDirection,
+				MoonDirection,
+				PresentationUp,
+				ApproachCompositionBlend);
+			if (BlendedDirection.IsNearlyZero()) return false;
+			// Both endpoints are directions on the same bird-centred sphere.
+			// Interpolating their world positions and normalizing afterwards made
+			// angular speed surge mid-transition. SmoothStep + spherical direction
+			// interpolation has zero endpoint velocity and joins the orbit pose
+			// without the visible 61-75 frame arc.
+			DesiredLocation = BirdLocation + BlendedDirection * BirdDistanceCM;
+		}
 		const FVector TransitionFocus = BirdLocation + PresentationUp * 80.0f;
 		const float BlendSpeed = FMath::Max(0.1f, SatelliteFollowBlendSpeed);
-		const FVector Location = FMath::VInterpTo(
+		FVector Location = FMath::VInterpTo(
 			GetActorLocation(), DesiredLocation, DeltaSeconds, BlendSpeed);
+		if (bSatelliteConstantBirdScaleExperiment)
+		{
+			const float BirdDistanceCM =
+				ABTSM9SatelliteCameraPrivate::ComputeGroundFollowBirdDistanceCM(
+					FlightDistanceCM,
+					FlightHeightCM);
+			Location = ConstrainCameraToBirdDistance(
+				Location,
+				BirdLocation,
+				BirdDistanceCM,
+				HorizontalDirection);
+			Location = ConstrainFixedDistanceCameraForSatelliteVisibility(
+				Location,
+				BirdLocation,
+				SatelliteCenter,
+				SatelliteRadiusCM,
+				BirdDistanceCM,
+				SatelliteConstantBirdScaleFieldOfViewDegrees,
+				GetCameraComponent()->AspectRatio);
+		}
 		const FVector BirdLook =
 			(TransitionFocus - Location).GetSafeNormal();
 		const FVector MoonConstrainedLook =
@@ -1196,6 +1423,12 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 			PresentationUp).GetSafeNormal();
 	}
 	if (LocalForward.IsNearlyZero()) return false;
+	const FVector GroundStyleFocus = BirdLocation + PresentationUp * 80.0f;
+	const FVector Focus = FMath::Lerp(
+		GroundStyleFocus,
+		E5Location,
+		FMath::Clamp(SatelliteE5LookAheadBias, 0.0f, 0.35f)
+			* E5CompositionBlend);
 	FVector GroundHorizontal = -LocalForward;
 	FVector SideHorizontal = SatelliteOrbitViewNormal.GetSafeNormal();
 	if (SideHorizontal.IsNearlyZero()) SideHorizontal = GroundHorizontal;
@@ -1211,7 +1444,9 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 					/ FMath::Max(1.0f, OrbitDistanceCM - SatelliteRadiusCM * 1.45f),
 				0.0f,
 				1.0f));
-	const float OrbitSideBlend = FMath::Lerp(
+	const float OrbitSideBlend = bSatelliteConstantBirdScaleExperiment
+		? 0.0f
+		: FMath::Lerp(
 		BaseOrbitSideBlend,
 		0.0f,
 		E5CompositionBlend);
@@ -1227,19 +1462,33 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 		+ HorizontalDirection
 			* FMath::Lerp(FlightDistanceCM, SideDistanceCM, OrbitSideBlend)
 		+ PresentationUp * FlightHeightCM;
-	const FVector GroundStyleFocus = BirdLocation + PresentationUp * 80.0f;
-	const FVector Focus = FMath::Lerp(
-		GroundStyleFocus,
-		E5Location,
-		FMath::Clamp(SatelliteE5LookAheadBias, 0.0f, 0.35f)
-			* E5CompositionBlend);
 	const float BlendSpeed =
 		FMath::Max(0.1f, SatelliteFollowBlendSpeed);
-	const FVector Location = FMath::VInterpTo(
+	FVector Location = FMath::VInterpTo(
 		GetActorLocation(),
 		DesiredLocation,
 		DeltaSeconds,
 		BlendSpeed);
+	if (bSatelliteConstantBirdScaleExperiment)
+	{
+		const float BirdDistanceCM =
+			ABTSM9SatelliteCameraPrivate::ComputeGroundFollowBirdDistanceCM(
+				FlightDistanceCM,
+				FlightHeightCM);
+		Location = ConstrainCameraToBirdDistance(
+			Location,
+			BirdLocation,
+			BirdDistanceCM,
+			HorizontalDirection);
+		Location = ConstrainFixedDistanceCameraForSatelliteVisibility(
+			Location,
+			BirdLocation,
+			SatelliteCenter,
+			SatelliteRadiusCM,
+			BirdDistanceCM,
+			SatelliteConstantBirdScaleFieldOfViewDegrees,
+			GetCameraComponent()->AspectRatio);
+	}
 	const FVector Look = ABTSM9SatelliteCameraPrivate::KeepSatelliteLimbVisible(
 		Location,
 		Focus,

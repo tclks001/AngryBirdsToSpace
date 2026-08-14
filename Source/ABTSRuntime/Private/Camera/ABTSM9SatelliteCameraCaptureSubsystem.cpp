@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationRig.h"
+#include "Camera/ABTSM6SlingshotCamera.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -159,8 +160,10 @@ void UABTSM9SatelliteCameraCaptureSubsystem::Tick(const float DeltaTime)
 			LockedIntent == EABTSM9SatelliteFlightCameraIntent::CinematicE5
 				&& IntentVisibleFrames > 0
 				&& BirdVisibleFrames > 0
+				&& SatelliteMissingIntentFrames == 0
 				&& SurfaceFrameBlendFrames > 0
 				&& MaximumSurfaceFrameAlpha >= 0.9f
+				&& MaximumHandoffCameraRelativeBirdDeltaDegrees <= 8.0f
 				&& SuddenBirdHalfTurnFrames == 0,
 			TEXT("RecordingDurationComplete"));
 	}
@@ -321,7 +324,13 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::CaptureFrame(FString& OutFailure)
 		return false;
 	}
 	const FMinimalViewInfo& View = CameraManager->GetCameraCacheView();
-	const FQuat CurrentCameraRotation = View.Rotation.Quaternion().GetNormalized();
+	FMinimalViewInfo CaptureView = View;
+	if (AABTSM6SlingshotCamera* FlightCamera =
+		Cast<AABTSM6SlingshotCamera>(PC->GetViewTarget()))
+	{
+		FlightCamera->CalcCamera(0.0f, CaptureView);
+	}
+	const FQuat CurrentCameraRotation = CaptureView.Rotation.Quaternion().GetNormalized();
 	float CameraFrameDeltaDegrees = 0.0f;
 	if (bHasPreviousCameraRotation)
 	{
@@ -333,10 +342,10 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::CaptureFrame(FString& OutFailure)
 	}
 	PreviousCameraRotation = CurrentCameraRotation;
 	bHasPreviousCameraRotation = true;
-	RecordingCapture->SetWorldLocationAndRotation(View.Location, View.Rotation);
-	RecordingCapture->FOVAngle = View.FOV;
-	RecordingCapture->PostProcessSettings = View.PostProcessSettings;
-	RecordingCapture->PostProcessBlendWeight = View.PostProcessBlendWeight;
+	RecordingCapture->SetWorldLocationAndRotation(CaptureView.Location, CaptureView.Rotation);
+	RecordingCapture->FOVAngle = CaptureView.FOV;
+	RecordingCapture->PostProcessSettings = CaptureView.PostProcessSettings;
+	RecordingCapture->PostProcessBlendWeight = CaptureView.PostProcessBlendWeight;
 	RecordingCapture->CaptureScene();
 	FTextureRenderTargetResource* Resource =
 		RecordingRenderTarget->GameThread_GetRenderTargetResource();
@@ -360,31 +369,46 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::CaptureFrame(FString& OutFailure)
 	}
 	FVector2D BirdScreen;
 	const bool bBirdOnScreen = ABTSM9SatelliteCameraCapturePrivate::ProjectPoint(
-		View, FIntPoint(CaptureWidth, CaptureHeight), Bird->GetActorLocation(), BirdScreen)
+		CaptureView, FIntPoint(CaptureWidth, CaptureHeight), Bird->GetActorLocation(), BirdScreen)
 		&& BirdScreen.X >= 0.0 && BirdScreen.X <= CaptureWidth
 		&& BirdScreen.Y >= 0.0 && BirdScreen.Y <= CaptureHeight;
 	if (bBirdOnScreen) ++BirdVisibleFrames;
+	float BirdVisualFrameDeltaDegrees = 0.0f;
+	float CameraRelativeBirdFrameDeltaDegrees = 0.0f;
 	if (const USkeletalMeshComponent* BirdVisual = Bird->GetBirdVisual())
 	{
 		const FQuat CurrentVisualRotation = BirdVisual->GetComponentQuat().GetNormalized();
 		if (bHasPreviousBirdVisualRotation)
 		{
-			const float FrameDeltaDegrees = FMath::RadiansToDegrees(
+			BirdVisualFrameDeltaDegrees = FMath::RadiansToDegrees(
 				PreviousBirdVisualRotation.AngularDistance(CurrentVisualRotation));
-			MaximumBirdVisualFrameDeltaDegrees = FMath::Max(
-				MaximumBirdVisualFrameDeltaDegrees,
-				FrameDeltaDegrees);
-			if (FrameDeltaDegrees >= 90.0f)
+			if (BirdVisualFrameDeltaDegrees > MaximumBirdVisualFrameDeltaDegrees)
+			{
+				MaximumBirdVisualFrameDeltaDegrees = BirdVisualFrameDeltaDegrees;
+				MaximumBirdVisualFrameDeltaFrame = CapturedFrameCount;
+			}
+			if (BirdVisualFrameDeltaDegrees >= 90.0f)
 			{
 				++SuddenBirdHalfTurnFrames;
 				UE_LOG(LogABTSRuntime, Error,
 					TEXT("[ABTS][M9][CameraCapture] SuddenBirdHalfTurn Frame=%d DeltaDegrees=%.2f"),
 					CapturedFrameCount,
-					FrameDeltaDegrees);
+					BirdVisualFrameDeltaDegrees);
 			}
 		}
 		PreviousBirdVisualRotation = CurrentVisualRotation;
 		bHasPreviousBirdVisualRotation = true;
+
+		const FQuat CameraRelativeBirdRotation = (
+			CurrentCameraRotation.Inverse() * CurrentVisualRotation).GetNormalized();
+		if (bHasPreviousCameraRelativeBirdRotation)
+		{
+			CameraRelativeBirdFrameDeltaDegrees = FMath::RadiansToDegrees(
+				PreviousCameraRelativeBirdRotation.AngularDistance(
+					CameraRelativeBirdRotation));
+		}
+		PreviousCameraRelativeBirdRotation = CameraRelativeBirdRotation;
+		bHasPreviousCameraRelativeBirdRotation = true;
 	}
 	EABTSM9SatelliteFlightCameraPhase CameraPhase;
 	EABTSM9SatelliteFlightCameraIntent CurrentIntent;
@@ -399,10 +423,25 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::CaptureFrame(FString& OutFailure)
 		&& CameraPhase != EABTSM9SatelliteFlightCameraPhase::PrimaryFollow)
 	{
 		++IntentVisibleFrames;
+		const float CameraBirdDistanceCM = FVector::Distance(
+			CaptureView.Location,
+			CurrentBird->GetActorLocation());
+		MinimumIntentCameraBirdDistanceCM = FMath::Min(
+			MinimumIntentCameraBirdDistanceCM,
+			CameraBirdDistanceCM);
+		MaximumIntentCameraBirdDistanceCM = FMath::Max(
+			MaximumIntentCameraBirdDistanceCM,
+			CameraBirdDistanceCM);
+		MinimumIntentFieldOfViewDegrees = FMath::Min(
+			MinimumIntentFieldOfViewDegrees,
+			CaptureView.FOV);
+		MaximumIntentFieldOfViewDegrees = FMath::Max(
+			MaximumIntentFieldOfViewDegrees,
+			CaptureView.FOV);
 		const FVector CameraToSatellite =
-			CurrentSatellite->GetPlanetCenterWorld() - View.Location;
+			CurrentSatellite->GetPlanetCenterWorld() - CaptureView.Location;
 		const FVector LocalSatellite =
-			View.Rotation.Quaternion().UnrotateVector(CameraToSatellite);
+			CaptureView.Rotation.Quaternion().UnrotateVector(CameraToSatellite);
 		const float DistanceCM = CameraToSatellite.Size();
 		const float AngularRadius = DistanceCM > KINDA_SMALL_NUMBER
 			? FMath::Asin(FMath::Clamp(
@@ -411,7 +450,7 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::CaptureFrame(FString& OutFailure)
 				0.999f))
 			: HALF_PI;
 		const float HorizontalHalfFov =
-			FMath::DegreesToRadians(View.FOV * 0.5f);
+			FMath::DegreesToRadians(CaptureView.FOV * 0.5f);
 		const float VerticalHalfFov = FMath::Atan(
 			FMath::Tan(HorizontalHalfFov)
 				/ FMath::Max(0.1f, static_cast<float>(CaptureWidth) / CaptureHeight));
@@ -455,6 +494,66 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::CaptureFrame(FString& OutFailure)
 	MaximumSurfaceFrameAlpha = FMath::Max(
 		MaximumSurfaceFrameAlpha,
 		SurfaceFrameAlpha);
+	if (SurfaceFrameAlpha > 0.01f)
+	{
+		if (BirdVisualFrameDeltaDegrees > MaximumSurfaceFrameBirdVisualDeltaDegrees)
+		{
+			MaximumSurfaceFrameBirdVisualDeltaDegrees = BirdVisualFrameDeltaDegrees;
+			MaximumSurfaceFrameBirdVisualDeltaFrame = CapturedFrameCount;
+		}
+		if (CameraRelativeBirdFrameDeltaDegrees
+			> MaximumSurfaceFrameCameraRelativeBirdDeltaDegrees)
+		{
+			MaximumSurfaceFrameCameraRelativeBirdDeltaDegrees =
+				CameraRelativeBirdFrameDeltaDegrees;
+			MaximumSurfaceFrameCameraRelativeBirdDeltaFrame = CapturedFrameCount;
+		}
+		if (!bSurfaceFrameCommitted
+			&& CameraRelativeBirdFrameDeltaDegrees
+				> MaximumHandoffCameraRelativeBirdDeltaDegrees)
+		{
+			MaximumHandoffCameraRelativeBirdDeltaDegrees =
+				CameraRelativeBirdFrameDeltaDegrees;
+			MaximumHandoffCameraRelativeBirdDeltaFrame = CapturedFrameCount;
+		}
+	}
+	if (SurfaceFrameAlpha > 0.01f
+		&& !bSurfaceFrameCommitted
+		&& bBirdOnScreen)
+	{
+		if (bHasPreviousHandoffBirdScreen)
+		{
+			const FVector2D ScreenVelocity =
+				BirdScreen - PreviousHandoffBirdScreen;
+			const float Motion = static_cast<float>(ScreenVelocity.Size());
+			if (Motion > MaximumHandoffBirdScreenMotionPixelsPerFrame)
+			{
+				MaximumHandoffBirdScreenMotionPixelsPerFrame = Motion;
+				MaximumHandoffBirdScreenMotionFrame = CapturedFrameCount;
+			}
+			if (bHasPreviousHandoffBirdScreenVelocity)
+			{
+				const float Acceleration = static_cast<float>(
+					(ScreenVelocity - PreviousHandoffBirdScreenVelocity).Size());
+				if (Acceleration
+					> MaximumHandoffBirdScreenAccelerationPixelsPerFrameSquared)
+				{
+					MaximumHandoffBirdScreenAccelerationPixelsPerFrameSquared =
+						Acceleration;
+					MaximumHandoffBirdScreenAccelerationFrame = CapturedFrameCount;
+				}
+			}
+			PreviousHandoffBirdScreenVelocity = ScreenVelocity;
+			bHasPreviousHandoffBirdScreenVelocity = true;
+		}
+		PreviousHandoffBirdScreen = BirdScreen;
+		bHasPreviousHandoffBirdScreen = true;
+	}
+	else
+	{
+		bHasPreviousHandoffBirdScreen = false;
+		bHasPreviousHandoffBirdScreenVelocity = false;
+	}
 	if (SurfaceFrameAlpha > 0.01f) ++SurfaceFrameBlendFrames;
 	if (bSurfaceFrameCommitted)
 	{
@@ -503,7 +602,7 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::WriteManifest(
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("status"), bSuccess ? TEXT("Complete") : TEXT("Failed"));
 	Root->SetStringField(TEXT("reason"), Reason);
-	Root->SetNumberField(TEXT("contractVersion"), 6);
+	Root->SetNumberField(TEXT("contractVersion"), 9);
 	Root->SetStringField(TEXT("authority"), TEXT("PreviewTest"));
 	Root->SetStringField(TEXT("cameraIntent"), UEnum::GetValueAsString(LockedIntent));
 	Root->SetNumberField(TEXT("frameCount"), CapturedFrameCount);
@@ -524,6 +623,42 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::WriteManifest(
 	Root->SetNumberField(
 		TEXT("maximumBirdVisualFrameDeltaDegrees"),
 		MaximumBirdVisualFrameDeltaDegrees);
+	Root->SetNumberField(
+		TEXT("maximumBirdVisualFrameDeltaFrame"),
+		MaximumBirdVisualFrameDeltaFrame);
+	Root->SetNumberField(
+		TEXT("maximumSurfaceFrameBirdVisualDeltaDegrees"),
+		MaximumSurfaceFrameBirdVisualDeltaDegrees);
+	Root->SetNumberField(
+		TEXT("maximumSurfaceFrameBirdVisualDeltaFrame"),
+		MaximumSurfaceFrameBirdVisualDeltaFrame);
+	Root->SetNumberField(
+		TEXT("maximumSurfaceFrameCameraRelativeBirdDeltaDegrees"),
+		MaximumSurfaceFrameCameraRelativeBirdDeltaDegrees);
+	Root->SetNumberField(
+		TEXT("maximumSurfaceFrameCameraRelativeBirdDeltaFrame"),
+		MaximumSurfaceFrameCameraRelativeBirdDeltaFrame);
+	Root->SetNumberField(
+		TEXT("maximumHandoffCameraRelativeBirdDeltaDegrees"),
+		MaximumHandoffCameraRelativeBirdDeltaDegrees);
+	Root->SetNumberField(
+		TEXT("maximumHandoffCameraRelativeBirdDeltaFrame"),
+		MaximumHandoffCameraRelativeBirdDeltaFrame);
+	Root->SetNumberField(
+		TEXT("maximumHandoffBirdScreenMotionPixelsPerFrame"),
+		MaximumHandoffBirdScreenMotionPixelsPerFrame);
+	Root->SetNumberField(
+		TEXT("maximumHandoffBirdScreenMotionFrame"),
+		MaximumHandoffBirdScreenMotionFrame);
+	Root->SetNumberField(
+		TEXT("maximumHandoffBirdScreenAccelerationPixelsPerFrameSquared"),
+		MaximumHandoffBirdScreenAccelerationPixelsPerFrameSquared);
+	Root->SetNumberField(
+		TEXT("maximumHandoffBirdScreenAccelerationFrame"),
+		MaximumHandoffBirdScreenAccelerationFrame);
+	Root->SetBoolField(TEXT("sphericalApproachDirectionBlend"), true);
+	Root->SetBoolField(TEXT("fixedRadiusPoseFinalizedInCalcCamera"), true);
+	Root->SetBoolField(TEXT("rotationMinimizedBirdPresentation"), true);
 	Root->SetNumberField(TEXT("suddenBirdHalfTurnFrames"), SuddenBirdHalfTurnFrames);
 	Root->SetNumberField(
 		TEXT("maximumCameraRotationFrameDeltaDegrees"),
@@ -534,6 +669,29 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::WriteManifest(
 	Root->SetNumberField(
 		TEXT("suddenCameraPhaseCutFrames"),
 		SuddenCameraPhaseCutFrames);
+	Root->SetBoolField(TEXT("constantBirdScaleExperiment"), true);
+	Root->SetNumberField(
+		TEXT("minimumIntentCameraBirdDistanceCM"),
+		IntentVisibleFrames > 0 ? MinimumIntentCameraBirdDistanceCM : 0.0f);
+	Root->SetNumberField(
+		TEXT("maximumIntentCameraBirdDistanceCM"),
+		MaximumIntentCameraBirdDistanceCM);
+	Root->SetNumberField(
+		TEXT("intentCameraBirdDistanceRangeCM"),
+		IntentVisibleFrames > 0
+			? MaximumIntentCameraBirdDistanceCM - MinimumIntentCameraBirdDistanceCM
+			: 0.0f);
+	Root->SetNumberField(
+		TEXT("minimumIntentFieldOfViewDegrees"),
+		IntentVisibleFrames > 0 ? MinimumIntentFieldOfViewDegrees : 0.0f);
+	Root->SetNumberField(
+		TEXT("maximumIntentFieldOfViewDegrees"),
+		MaximumIntentFieldOfViewDegrees);
+	Root->SetNumberField(
+		TEXT("intentFieldOfViewRangeDegrees"),
+		IntentVisibleFrames > 0
+			? MaximumIntentFieldOfViewDegrees - MinimumIntentFieldOfViewDegrees
+			: 0.0f);
 	Root->SetStringField(TEXT("frameWildcard"), FPaths::Combine(
 		OutputDirectory, MovieName + TEXT(".*.jpg")));
 	FString Json;

@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Camera/ABTSM6SlingshotCamera.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "Slingshot/ABTSM6Types.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -132,6 +133,96 @@ bool FABTSM9SatelliteFlightCameraIntentTest::RunTest(
 			FMath::RadiansToDegrees(
 				FQuat::Identity.AngularDistance(LimitedCameraRotation)),
 			1.5f,
+			0.01f));
+
+	const FVector BirdLocation(120.0f, -340.0f, 75.0f);
+	const FVector CandidateLocation = BirdLocation + FVector(900.0f, 300.0f, 450.0f);
+	const FVector ConstrainedLocation =
+		AABTSM6SlingshotCamera::ConstrainCameraToBirdDistance(
+			CandidateLocation,
+			BirdLocation,
+			970.0f);
+	TestTrue(
+		TEXT("Constant-scale camera keeps the exact authored bird distance"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(ConstrainedLocation, BirdLocation),
+			970.0f,
+			0.01f));
+	TestTrue(
+		TEXT("Constant-scale camera preserves the candidate composition direction"),
+		FVector::DotProduct(
+			(ConstrainedLocation - BirdLocation).GetSafeNormal(),
+			(CandidateLocation - BirdLocation).GetSafeNormal()) > 0.9999f);
+	const FVector SatelliteCenter = BirdLocation + FVector(0.0f, 6000.0f, 0.0f);
+	const FVector VisibilityConstrainedLocation =
+		AABTSM6SlingshotCamera::ConstrainFixedDistanceCameraForSatelliteVisibility(
+			BirdLocation + FVector(970.0f, 0.0f, 0.0f),
+			BirdLocation,
+			SatelliteCenter,
+			1250.0f,
+			970.0f,
+			50.0f,
+			16.0f / 9.0f);
+	TestTrue(
+		TEXT("Lunar visibility composition does not change bird distance"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(VisibilityConstrainedLocation, BirdLocation),
+			970.0f,
+			0.01f));
+	TestTrue(
+		TEXT("Lunar visibility composition moves the camera toward the shared-view hemisphere"),
+		FVector::DotProduct(
+			(VisibilityConstrainedLocation - BirdLocation).GetSafeNormal(),
+			-(SatelliteCenter - BirdLocation).GetSafeNormal()) > 0.0f);
+
+	const FVector TransportedForward =
+		AABTSM25BirdCharacter::ComputeRotationMinimizedSlingshotForward(
+			FVector::ForwardVector,
+			FVector::UpVector,
+			FVector::RightVector,
+			FVector::RightVector * 1000.0f,
+			FVector::ZeroVector,
+			2.0f);
+	TestTrue(
+		TEXT("An unreliable radial velocity cannot twist the transported bird frame"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(TransportedForward, FVector::ForwardVector),
+			1.0f,
+			0.001f));
+	const FVector LimitedVelocityCorrection =
+		AABTSM25BirdCharacter::ComputeRotationMinimizedSlingshotForward(
+			FVector::ForwardVector,
+			FVector::UpVector,
+			FVector::UpVector,
+			FVector::RightVector * 1000.0f,
+			FVector::ZeroVector,
+			2.0f);
+	const float CorrectionDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(
+			FVector::DotProduct(
+				FVector::ForwardVector,
+				LimitedVelocityCorrection),
+			-1.0f,
+			1.0f)));
+	TestTrue(
+		TEXT("Velocity facing cannot exceed the authored per-frame correction budget"),
+		FMath::IsNearlyEqual(CorrectionDegrees, 2.0f, 0.01f));
+	const FVector ViewStableCorrection =
+		AABTSM25BirdCharacter::ComputeRotationMinimizedSlingshotForward(
+			FVector::ForwardVector,
+			FVector::UpVector,
+			FVector::UpVector,
+			-FVector::ForwardVector * 1000.0f,
+			FVector::RightVector,
+			3.0f);
+	TestTrue(
+		TEXT("The camera-relative presentation anchor is consumed without velocity-facing lag"),
+		FMath::IsNearlyEqual(
+			FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(FVector::ForwardVector, ViewStableCorrection),
+				-1.0f,
+				1.0f))),
+			90.0f,
 			0.01f));
 
 	return true;
