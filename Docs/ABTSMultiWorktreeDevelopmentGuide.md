@@ -38,6 +38,10 @@ Codex 默认把托管工作树放在 `%CODEX_HOME%\worktrees`；当前 Windows �
 - `Source/ABTSRuntime/Public/Contracts/ABTSWorldGenerationContracts.h`
 - `Source/ABTSRuntime/Private/Contracts/ABTSWorldGenerationContracts.cpp`
 - `Source/ABTSRuntime/Private/Contracts/ABTSWorldGenerationContractAutomationTests.cpp`
+- `Source/ABTSRuntime/Public/Contracts/ABTSM11PresentationAcceptanceContract.h`
+- `Source/ABTSRuntime/Private/Contracts/ABTSM11PresentationAcceptanceContract.cpp`
+- `Source/ABTSRuntime/Private/Contracts/ABTSM11PresentationAcceptanceManifest.cpp`
+- `Source/ABTSRuntime/Private/Contracts/ABTSM11PresentationAcceptanceContractAutomationTests.cpp`
 - M3 的只读契约导出适配器
 - M7/M11 的契约消费入口
 - 本规范及项目工作流中的入口链接
@@ -257,12 +261,17 @@ M11 不得修改 M3 世界坐标或生成规则来适配终局，不得扫描 M9
 - `Source/ABTSRuntime/Public/World/ABTSM110FinaleTypes.h`
 - `Source/ABTSRuntime/Private/World/ABTSM110FinaleTypes.cpp`
 - `Source/ABTSRuntime/Private/World/ABTSM110AutomationTests.cpp`
+- `Source/ABTSRuntime/Public/Contracts/ABTSM11PresentationAcceptanceContract.h`
+- `Source/ABTSRuntime/Private/Contracts/ABTSM11PresentationAcceptanceContract.cpp`
+- `Source/ABTSRuntime/Private/Contracts/ABTSM11PresentationAcceptanceManifest.cpp`
+- `Source/ABTSRuntime/Private/Contracts/ABTSM11PresentationAcceptanceContractAutomationTests.cpp`
 - `.uproject`、`Config/**`、`*.Build.cs`、`*.Target.cs`
 - `AGENTS.md`
 - `Docs/ABTSProjectWorkflow.md`
 - `Docs/ABTSMultiWorktreeDevelopmentGuide.md`
 - `Docs/AngryBirdsToSpaceGameDesign.md`
 - `Docs/M110PreFinaleClosureDesign.md`
+- `Docs/M110PresentationAcceptanceContract.md`
 - `Docs/DevelopmentTroubleshooting.md`
 - `Docs/OpeningAndFinaleCinematicDirection.md`
 - `Content/Maps/Test.umap`
@@ -531,7 +540,7 @@ M3 / M7 / M11 各自编码并形成 checkpoint
 | --- | --- | --- |
 | M3 | `ABTS.Contracts.WorldGeneration`、`ABTS.M110.TaskGraphFinaleSeparation` | `L_ABTS_M3`：确定性重生成、道路/任务间距、施工台、M9/Finale 分离 |
 | M7 | `ABTS.M7.TaskGraphDAG23ProfileRouting`、`ABTS.M73A`、`ABTS.M73B`、`ABTS.M73B2`、`ABTS.M73DAG` | `L_ABTS_M7` 与 `PlanarPhysicsTestMap`；正式门还需当前 canonical `L_ABTS_M10` 的实时 D3D12/PIE |
-| M11 快速 | `ABTS.Contracts.WorldGeneration`、`ABTS.M110`、`ABTS.M11A`、`ABTS.M11B.Unit`、`ABTS.M11B.Runtime` | `L_ABTS_M11`：三行星/UFO、局部坐标、M9 排除、重复进入与 fail closed |
+| M11 快速 | `ABTS.Contracts.WorldGeneration`、`ABTS.Contracts.M11PresentationAcceptance`、`ABTS.M110`、`ABTS.M11A`、`ABTS.M11B.Unit`、`ABTS.M11B.Runtime` | `L_ABTS_M11`：三行星/UFO、局部坐标、M9 排除、重复进入与 fail closed |
 | M11 慢速 | `ABTS.M11B.ConstructiveSearch`、`ABTS.M11B.Certification.FullInputDomain` | 仅在冻结参数/求解器/认证身份变化或阶段交接时运行 |
 
 M7 的 `-benchmark` 固定时间步只作为算法回归。正式建筑门禁仍要求在当前 canonical `L_ABTS_M10` 上进行不带 `-benchmark` 的 D3D12 fresh game 30/60/120 FPS 三档运行，以及一次可见 PIE/hitch soak。每档日志至少满足：
@@ -615,12 +624,13 @@ git -C $IntegrationRoot push origin master
 
 1. Development Editor 全量构建。
 2. `ABTS.Contracts.WorldGeneration`。
-3. M3 的 103 Seed 生成与 M9/Finale 分离。
-4. M7 DAG2.3 全套自动化与生产建筑实时门禁。
-5. M11-A、M11-B Unit/Runtime；阶段交接时包含两项慢速认证。
-6. 当前 canonical `Content/Maps/L_ABTS_M10.umap` 的全新进程运行；本批次若修改 `Test.umap`，还必须额外验证它，不能二选一。
-7. 一次可见 PIE 联合验收：在 `L_ABTS_M10` 验证地图引导 → 建筑 → 太空弹弓入口，并在 `L_ABTS_M11` 验证终局入口与 3+1 表现。
-8. 比较 M3/M7/M11 排错账本自上次摘录基线以来的增量，将已稳定的共性结论提炼进 `DevelopmentTroubleshooting.md`；保留原账本并更新摘录基线。
+3. `ABTS.Contracts.M11PresentationAcceptance`；它只证明表现状态机安全，不得替代 M11-B StrictCertified。
+4. M3 的 103 Seed 生成与 M9/Finale 分离。
+5. M7 DAG2.3 全套自动化与生产建筑实时门禁。
+6. M11-A、M11-B Unit/Runtime；阶段交接时包含两项慢速认证。
+7. 当前 canonical `Content/Maps/L_ABTS_M10.umap` 的全新进程运行；本批次若修改 `Test.umap`，还必须额外验证它，不能二选一。
+8. 一次可见 PIE 联合验收：在 `L_ABTS_M10` 验证地图引导 → 建筑 → 太空弹弓入口，并在 `L_ABTS_M11` 验证终局入口与 3+1 表现。
+9. 比较 M3/M7/M11 排错账本自上次摘录基线以来的增量，将已稳定的共性结论提炼进 `DevelopmentTroubleshooting.md`；保留原账本并更新摘录基线。
 
 ## 11. 冲突处理
 
@@ -689,4 +699,4 @@ git merge --abort
 - 返回：[ABTS 项目工作流与开发入口](ABTSProjectWorkflow.md)
 - M3：[Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [PCG 地图改进方案](M3PCGMapImprovementPlan.md)
 - M7：[球面 DAG2.3 生产集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [DAG2.3 联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md)
-- M11：[算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md)
+- M11：[算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11-A](M11AGravityAssistSolverDesign.md) · [M11-B](M11BFinaleLayoutCertificationDesign.md) · [PresentationAccepted 稳定合同](M110PresentationAcceptanceContract.md)

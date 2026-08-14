@@ -13,8 +13,8 @@
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
 - M3：M3R-0 已完成集成 PIE；M3R-1/2/3/3.1 的 M3 侧实现与自动验收已进入 `master`。R-3.1 的通用 M5.1 槽快照消费接缝、M6 三维连弦和失败原子状态已通过自动化与兼容世界 PIE；阶段仍为 `IntegrationPending`，因为 R4/R6 尚未选出可导出的唯一 Candidate，月度实体槽不能从未决数组生成。
 - M7：DAG3-A/B/C、DAG-4 与 DAG5-A 已进入 `master` 并完成各阶段验收；普通 TaskGraph 建筑的生产默认仍是 DAG2.3。DAG5-A 继续默认关闭，当前入口是 DAG5-B/C 的复杂轮廓与六栋联合选择。
-- M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`；候选仍为 Preview/Test、`NOT CERTIFIED`，不能替换 v1 默认值。
-- 当前下一步：先完成 T4-A3.3 的终局退出/失败/PIE Stop 可见恢复验收；通过后关闭 A3 并进入 T4-B。M11 M6-6/M6-7 已于 2026-08-13 完成 Integration 收口并为 `IntegrationAccepted`；同日集成工作树发布连通稳定合同 v3，生产 v2 六邻域 Bundle/Hash 保持不变，v3 追加“18 邻域发现＋待证明桥边＋桥区递归证据闭包”，缺证据一律 fail closed。下一步由 M11 工作树同步新 `master`，实现 portable CLI/Python 的 Rank12 实际桥闭包与完整认证，Rank12 当前仍是 `UNCERTIFIED`。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 后续仍需 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
+- M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`。集成工作树已新增独立的 `PresentationAccepted v1` 稳定合同；它明确不等于 M11-B `StrictCertified`，当前冻结生产绑定仍为 `Unbound`，所以 Rank12 仍不能替换 v1 默认值。
+- 当前下一步：先完成 T4-A3.3 的终局退出/失败/PIE Stop 可见恢复验收；通过后关闭 A3 并进入 T4-B。M11 工作树合并最新 `master` 后，按 [PresentationAccepted 稳定合同](M110PresentationAcceptanceContract.md) 实现 Rank12 全输入域镜头兼容扫描，重放 F4 与 EarlyPhysicalContact，核验 ShotPlan/终端/失败恢复及 30/60/120 Hz；在 M11 证据提交、Integration 联合构建和最终可见 PIE 全部通过前，生产绑定保持 `Unbound`。严格拓扑认证仍可继续使用 v3“18 邻域发现＋待证明桥边＋桥区递归证据闭包”，Rank12 标记保持 `PresentationPending / StrictUncertified`。玩法侧 M7 并行推进 DAG5-B/C，M3 可推进 R-5；Integration 后续仍需 M9 引力查询适配器，配合 M7 目录由 M3R-4 选出唯一 Candidate，随后接通 R-3.1 月度实体槽与 R-6 六栋世界。
 
 当前入口：[M6/M9 标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M3R 月度地图](M3PCGMapImprovementPlan.md) · [M3R-5.2/M11 集成验收](M3R52M11PreviewFinaleIntegrationDesign.md) · [M7 DAG-5](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
@@ -49,7 +49,7 @@
 | 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [M6/M9 弹弓与卫星标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 球面生产集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG3-C 可玩候选](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 动态认证](M73DAG4SettledContactAndAttackRolloutDesign.md) · [DAG-5 六栋路线](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) |
 | 卫星、侦察与超视距发射 | [M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1 发射界面总设计](M101BeyondHorizonLaunchInterfaceDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) |
-| 终局轨道谜题 | [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md) · [M3R-5.2/M11 Preview 集成](M3R52M11PreviewFinaleIntegrationDesign.md) · [M11-A/Core](M11AGravityAssistSolverDesign.md) · [M11-B v1 认证](M11BFinaleLayoutCertificationDesign.md) · [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) · [M11-C 交互与实飞](M11CFinaleInteractionAndPlaybackDesign.md) |
+| 终局轨道谜题 | [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11 v2 优化总设计](M11V2FinaleOptimizationDesign.md) · [M3R-5.2/M11 Preview 集成](M3R52M11PreviewFinaleIntegrationDesign.md) · [M11-A/Core](M11AGravityAssistSolverDesign.md) · [M11-B v1 认证](M11BFinaleLayoutCertificationDesign.md) · [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) · [M11-C 交互与实飞](M11CFinaleInteractionAndPlaybackDesign.md) · [PresentationAccepted 稳定合同](M110PresentationAcceptanceContract.md) |
 | 视觉风格、资产与排错 | [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [T2-A 主视图描边与共享语义契约](ABTSToonStylizedRenderingT2A.md) · [Low Poly/AI 资产流程](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md) |
 
 ## 5. 当前验收与跨工作树交接基线
@@ -68,7 +68,7 @@
 | M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间；Integration 已冻结 M6/M9 Launch/Preset V0，普通 M6 三档实飞已消费同一目录并公开非零 `LaunchProfileHash`，生产消费 1/1 与标定 6/6 已通过 | Integration 继续提供实际 pouch/camera frame 与 M9 引力查询适配器；M7 提供已认证 ProfileDescriptor 目录 | 标定积分器不是生产 Witness 权威；只有 Launch/Preset 身份可跨 Seed，`GravitySnapshotHash` 仅为场景实例证据。实际 frame/M9 适配器或 M7 目录任一未就绪时，M3 仍为 `IntegrationPending` |
 | M3R-6 六栋实体建筑 | M3 已有六站点逻辑；M7 已完成 DAG5-A 搜索骨架 | M7 先完成 DAG5-B/C；Integration 建立向后兼容 vNext 建筑合同；随后 M7 完成 DAG5-D/E | 当前 v1 合同没有精确 `ResolvedM7ProfileId/ProfileCatalogHash/AttackFace`，生产仍固定三栋 DAG2.3，不能提前改 `Expected=6` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
-| M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成；Rank 3 已冻结并完成 v2.2 稀疏/半步预认证，但因 F4 六邻域多分量早停 | 返回 B v2.1 修复成功族连通性或以局部递归消除采样断带，重新通过 B v2.2 后再做 C v2.2；M11-D 的 Party、环境和共享资产由 Integration 接线 | Rank 3 仍是 Candidate/NOT CERTIFIED；未认证候选不得进入生产；M11-D 不得越权修改共享鸟群、天空/雾云或默认资产 |
+| M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成；Integration 已建立 `PresentationAccepted v1` 稳定合同，Rank12 的严格 v3 扫描已有早停证据 | M11 先实现完整表现兼容扫描并提交 Rank12 Manifest；严格拓扑认证可独立继续；M11-D 的 Party、环境和共享资产由 Integration 接线 | `PresentationAccepted` 不授予 `StrictCertified`；当前生产 Binding 为 `Unbound`，未完成全域证据、联合构建和可见 PIE 前不得进入生产 |
 
 ### 5.3 固定交接顺序
 
