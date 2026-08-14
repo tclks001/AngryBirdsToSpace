@@ -203,7 +203,7 @@
 | --- | --- | --- |
 | [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `20cceaeaa1069a8b1b2f12c71e4740890b989006`（2026-08-07，含 `M3-T3A1-001/002`） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
-| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `b3140451d4d8072008110ca645eb10a8f85574c6`（2026-08-07，含 `M11-T3A3-MAT-001/002`） |
+| [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
 ### 13.2 跨阶段统一诊断顺序
 
@@ -258,6 +258,10 @@
 | 轨迹最终到达 UFO，但 `TargetHit` 早于第三次引力弹弓退出 | 事件顺序是认证语义的一部分，不能只检查“曾进入所有包络”。 | Core/CLI/Runtime 统一要求 `Assist3 Exit → TargetApproach → TargetHit`，错序命中归为失败。 |
 | 放大模型后出现视觉穿模，或统一缩放后候选失效 | `VisualRadius`、解析 `CollisionRadius`、`InfluenceRadius` 职责不同；离散积分、角域、步长、事件阈值和评分也破坏简单相似缩放。 | 尺度变化后重新跑 Core parity、扫掠、事件、Hull 和完整域认证；最小近掠距离包含鸟体净空，候选 Hash 改变。 |
 | HUD 控件绘制位置与点击热区偏移，或全览图元溢出圆框 | 输入必须依次转换 raw viewport、`UnscaledViewRect` origin/size、DPI 和 Canvas logical space；所有线、圆、文本和 hit test 共用变换与圆裁剪。 | 自动化覆盖 DPI≠1、非零 viewport origin 和线宽/文本 bounds；可见 PIE 改窗口尺寸后仍像素对齐。 |
+| 终局 HUD 被继承热栏覆盖，或布局、绘制与命中盒各自维护坐标后逐渐漂移 | 独占交互状态应独占 HUD 合成；退出后再恢复父 HUD。顶部任务条、轨道盘、控制台和目标监视器由同一个纯数据布局结果驱动绘制与 hit test，颜色只消费共享 Theme，诊断 Hash/延迟由 Debug Overlay 显式开启。 | `ABTS.M11C.HUD.Unit` 与 `ABTS.M11D.HUD.Unit` 覆盖多分辨率安全区、面板不相交和命中盒一致性；含真实 AHUD 的 GameViewport 离屏截图只作像素诊断，正式点击、拖动与手感仍由可见 PIE 验收。详见 `M11-UI-001/002`、`M11-CAP-HUD-001`。 |
+| Canvas 截角面板仍露出矩形方角，或三角扇在真实 RHI 触发纹理断言 | 描边不会裁剪先画出的矩形底色；填充必须使用与描边相同的凸多边形顶点，并给 `FCanvasTriangleItem` 提供有效的 `Canvas->DefaultTexture`。资源异常时跳过填充并保留描边，不能让运行时崩溃。 | ForceUnity 与 NullRHI 只能证明编译和合同；还须 fresh 真实 RHI 截图检查全部截角，并保留失败轮次。详见 `M11-UI-005`。 |
+| 生成式 UI 图标直接作为 Atlas/透明图导入后出现绿边、串格、缩放噪点或运行时风格漂移 | 生成式图表只作为 SourceArt；先用统一色键生成互不接触的单元，再去色键、裁主体、等比放入统一透明画布，每个图标独立导入。运行时按钮框、状态色与禁用态仍由共享 Theme 绘制，位图只承担象形内容，失载时文字 fail soft。 | 源 PNG 检查 RGBA、透明角和主体包围盒；UE 二次重载检查 Texture2D 为统一尺寸、`TEXTUREGROUP_UI`、无 Mip、sRGB、NeverStream/合适采样，并用真实 HUD 截图排除绿边和错误映射。详见 `M11-UI-003`、`M11-ASSET-001`。 |
+| 子系统接管滚轮或拖拽时出现方向反转，松开后光标被旧父级绑定送回历史位置 | 输入符号只在具体消费分支转换，禁止控制器和 HUD 双重取反；独占状态期间应临时挂起同动作的继承 Release 绑定，只安装本系统处理，退出时按原顺序恢复。不得只删除本地 `SetMouseLocation` 而忽略父级释放链。 | 纯函数断言滚轮正负倍率；绑定自动化断言 Press/无关绑定保持、冲突 Release 隔离且退出后恢复；最终由可见 PIE 验证拖拽释放位置和滚轮手感。详见 `M11-UI-008/009`。 |
 | T2-B 按名称、模型、距离或当前 PIP 目标推断终局类别，或 M11 自行给远端捕获应用风格 | 终局语义只来自当前已提交布局及系统实际持有的表现 Actor：Assist1/2/3 为 `FinalePlanet`，Target 为 `FinaleUFO`；主星、普通卫星、候选辅助物和二维图元均 fail closed。M11 只以 const 入口暴露既有远端 SceneCapture 并声明 `FinaleRemotePreview`，不消费 Profile、Stencil 或后处理。 | `ABTS.M11B.Runtime.StylizedSemanticAdapter` 覆盖生产 3+1、候选兼容、未知对象、销毁重建、Core Result/事件/认证 Hash 不变，以及捕获接口不改变相机和生命周期；Integration 后续负责实际 Profile/PIP 像素门。详见 `M11-T2B-RO-001`。 |
 | 发射后鸟/UFO 在远景中不可读 | 当前仅确认可能由 Flight Camera lag 和共享雾/云叠加造成，仍是开放项；不得把推断写成已修复。 | 分别做无 lag、无雾云和同时修改的 fresh 可见 PIE A/B；共享天空/地图修改仍由集成工作树执行。 |
 
