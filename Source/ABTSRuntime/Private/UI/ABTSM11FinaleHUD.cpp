@@ -593,16 +593,20 @@ bool AABTSM11FinaleHUD::HandleFinaleWheel(
 	const int32 KnobIndex = FindKnobAt(HudPosition);
 	if (KnobIndex != INDEX_NONE)
 	{
+		// Preserve the established knob trim direction while overview zoom
+		// consumes the raw wheel sign (up = zoom in).
 		return System.ApplyHudControlWheel(
 			static_cast<EABTSM11FinaleControlAxis>(KnobIndex),
-			WheelSteps * KnobWheelSensitivity,
+			-WheelSteps * KnobWheelSensitivity,
 			HudSpeedGear);
 	}
 	if (IsInsideDiagram(HudPosition)
 		&& OverviewMode == EABTSM11OverviewInteractionMode::Move)
 	{
 		return System.ZoomHudOverview(
-			FMath::Pow(OverviewZoomPerWheelStep, WheelSteps));
+			ABTSM11ResolveOverviewWheelZoomMultiplier(
+				OverviewZoomPerWheelStep,
+				WheelSteps));
 	}
 	return true;
 }

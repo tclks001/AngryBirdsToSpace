@@ -192,6 +192,11 @@ ABTSRUNTIME_API FVector2D ABTSM11MapViewportPointToHudCanvas(
 	const FVector2D& PlayerViewSize,
 	const FVector2D& HudCanvasSize);
 
+/** Positive wheel steps zoom the overview in; negative steps zoom it out. */
+ABTSRUNTIME_API double ABTSM11ResolveOverviewWheelZoomMultiplier(
+	double ZoomPerWheelStep,
+	double WheelSteps);
+
 /**
  * Pure-data M11-D four-zone layout. The same boxes drive Canvas drawing and
  * hit testing so DPI scaling and compact viewports cannot desynchronise them.

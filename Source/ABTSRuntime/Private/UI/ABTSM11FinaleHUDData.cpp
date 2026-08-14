@@ -904,6 +904,19 @@ FVector2D ABTSM11MapViewportPointToHudCanvas(
 		PlayerViewPoint.Y * HudCanvasSize.Y / PlayerViewSize.Y);
 }
 
+double ABTSM11ResolveOverviewWheelZoomMultiplier(
+	const double ZoomPerWheelStep,
+	const double WheelSteps)
+{
+	if (!FMath::IsFinite(ZoomPerWheelStep)
+		|| ZoomPerWheelStep <= 1.0
+		|| !FMath::IsFinite(WheelSteps))
+	{
+		return 1.0;
+	}
+	return FMath::Pow(ZoomPerWheelStep, WheelSteps);
+}
+
 bool ABTSM11BuildFinaleHudVisualLayout(
 	const FVector2D& CanvasSize,
 	const float KnobRadiusViewportHeightFraction,

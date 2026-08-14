@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/InputComponent.h"
 #include "Player/ABTSM6PlayerController.h"
 #include "ABTSM11PlayerController.generated.h"
 
@@ -34,6 +35,7 @@ private:
 	void M11OrbitReleased();
 	void SetM11FinaleInputMode(bool bActive);
 	void ApplyM11PointerMode(bool bFinaleActive);
+	void SetM11OrbitReleaseBindingIsolation(bool bIsolated);
 	AABTSM11FinaleInteractionSystem* FindM11Interaction() const;
 	AABTSM6SlingshotSystem* FindOrdinarySlingshotSystem();
 
@@ -42,8 +44,6 @@ private:
 	bool bM11SavedPointerEventFlags = false;
 	bool bSavedClickEvents = true;
 	bool bSavedMouseOverEvents = true;
-	bool bM11OrbitCursorSaved = false;
-	bool bRestoreM11CursorAfterOrbitRelease = false;
-	float M11OrbitCursorX = 0.0f;
-	float M11OrbitCursorY = 0.0f;
+	bool bM11OrbitReleaseBindingsIsolated = false;
+	TArray<FInputActionBinding> SuspendedM11OrbitReleaseBindings;
 };

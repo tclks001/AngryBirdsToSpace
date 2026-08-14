@@ -376,6 +376,14 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Overview zoom is explicit and bounded"), View.ApplyZoom(1.5));
 	TestTrue(TEXT("Zoom multiplier is applied"),
 		FMath::IsNearlyEqual(View.Zoom, ZoomBefore * 1.5));
+	TestTrue(TEXT("Wheel up resolves to overview zoom in"),
+		ABTSM11ResolveOverviewWheelZoomMultiplier(1.12, 1.0) > 1.0);
+	TestTrue(TEXT("Wheel down resolves to overview zoom out"),
+		ABTSM11ResolveOverviewWheelZoomMultiplier(1.12, -1.0) < 1.0);
+	TestTrue(TEXT("Invalid wheel zoom configuration is neutral"),
+		FMath::IsNearlyEqual(
+			ABTSM11ResolveOverviewWheelZoomMultiplier(1.0, 1.0),
+			1.0));
 	return true;
 }
 
