@@ -817,6 +817,138 @@ void AABTSM73BeamD1PreviewActor::ClearPreview()
 	ClearStageDiagnostics();
 }
 
+bool AABTSM73BeamD1PreviewActor::ConfigureForAutomatedCapture(
+	const EABTSM73BeamDemoBuilding InDemoBuilding,
+	const EABTSM73BeamC3Stage4DiagnosticLayer InLayer,
+	FString& OutError)
+{
+	DemoBuilding = InDemoBuilding;
+	GenerationStopStage = EABTSM73BeamC3GenerationStage::FloorInfillRoof;
+	Stage4DiagnosticLayer = InLayer;
+	bShowEditorPreview = true;
+	bSpawnRuntimeModulesInPIE = false;
+	RegeneratePreview();
+	if (!LastSummary.bAccepted)
+	{
+		OutError = FString::Printf(
+			TEXT("Stage4PreviewRejected:Demo=%d:Layer=%d"),
+			static_cast<int32>(InDemoBuilding), static_cast<int32>(InLayer));
+		return false;
+	}
+
+	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
+		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
+	{
+		if (Preview != nullptr)
+		{
+			Preview->SetHiddenInGame(false);
+			Preview->MarkRenderStateDirty();
+		}
+	}
+	if (SemanticEnvelopePreview != nullptr)
+	{
+		SemanticEnvelopePreview->SetHiddenInGame(false);
+		SemanticEnvelopePreview->MarkRenderStateDirty();
+	}
+	OutError.Reset();
+	return true;
+}
+
+bool AABTSM73BeamD1PreviewActor::ConfigureStage5ProductionForAutomatedCapture(
+	const EABTSM73BeamDemoBuilding InDemoBuilding,
+	const bool bAdditionsOnly,
+	FString& OutError)
+{
+	ClearPreview();
+	CompiledBricks.Reset();
+	LastSummary = FABTSM73BeamD1Summary();
+	DemoBuilding = InDemoBuilding;
+	bShowEditorPreview = true;
+	bSpawnRuntimeModulesInPIE = false;
+
+	FABTSM73BeamDemoManifestEntry DemoEntry;
+	if (!FABTSM73BeamDemoManifest::Resolve(InDemoBuilding, DemoEntry, OutError))
+	{
+		return false;
+	}
+	Settings = DemoEntry.Settings;
+
+	FABTSM73BeamD1BrickCompiler Compiler;
+	FABTSM73BeamD1Stage5Result Result;
+	if (!Compiler.GenerateStage5(Settings, Result, OutError))
+	{
+		LastSummary = Result.Summary;
+		return false;
+	}
+
+	LastSummary = Result.Summary;
+	CompiledBricks = Result.Bricks;
+	const int32 ReachabilityEnd = Result.Stage4ActiveMemberCount
+		+ Result.ReachabilitySupportPostCount;
+	for (const FABTSM73BeamD1BrickBinding& Brick : CompiledBricks)
+	{
+		if (bAdditionsOnly && Brick.BrickId < Result.Stage4ActiveMemberCount)
+		{
+			continue;
+		}
+		UHierarchicalInstancedStaticMeshComponent* Preview =
+			Brick.BrickId < Result.Stage4ActiveMemberCount
+				? WoodPreview.Get()
+				: Brick.BrickId < ReachabilityEnd
+					? IronPreview.Get() : StonePreview.Get();
+		if (Preview == nullptr)
+		{
+			continue;
+		}
+		FTransform InstanceTransform = Brick.LocalTransform;
+		InstanceTransform.SetScale3D(Brick.BrickSpec.DimensionsCM / 100.0f);
+		Preview->AddInstance(InstanceTransform, false);
+	}
+
+	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
+	{
+		if (Preview != nullptr)
+		{
+			Preview->SetVisibility(Preview->GetInstanceCount() > 0, true);
+			Preview->SetHiddenInGame(false);
+			Preview->MarkRenderStateDirty();
+		}
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7.3-Beam-D1][Stage5ProductionCapturePrepared]")
+		TEXT(" Demo=%s AdditionsOnly=%d Stage4=%d Reachability=%d Closure=%d Bricks=%d"),
+		*DemoEntry.StableId.ToString(), bAdditionsOnly ? 1 : 0,
+		Result.Stage4ActiveMemberCount, Result.ReachabilitySupportPostCount,
+		Result.StructuralClosureMemberCount, Result.Bricks.Num());
+	OutError.Reset();
+	return true;
+}
+
+FBox AABTSM73BeamD1PreviewActor::GetAutomatedCaptureBounds() const
+{
+	FBox Bounds(EForceInit::ForceInit);
+	for (const UHierarchicalInstancedStaticMeshComponent* Preview : {
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
+		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
+	{
+		if (Preview != nullptr && Preview->IsVisible()
+			&& Preview->GetInstanceCount() > 0)
+		{
+			Bounds += Preview->CalcBounds(Preview->GetComponentTransform()).GetBox();
+		}
+	}
+	if (SemanticEnvelopePreview != nullptr && SemanticEnvelopePreview->IsVisible())
+	{
+		Bounds += SemanticEnvelopePreview->CalcBounds(
+			SemanticEnvelopePreview->GetComponentTransform()).GetBox();
+	}
+	return Bounds;
+}
+
 void AABTSM73BeamD1PreviewActor::ClearStageDiagnostics()
 {
 	if (SemanticEnvelopePreview != nullptr)

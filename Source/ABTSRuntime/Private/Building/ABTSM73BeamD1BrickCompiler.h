@@ -27,7 +27,9 @@ struct FABTSM73BeamD1StagePreviewResult
 	FABTSM73BeamCGenerationResult StaticDAG;
 };
 
-/** Stage-5 production payload built only from the frozen active Stage-4 plan. */
+/** Stage-5 production payload. The frozen Stage-4 plan remains an immutable
+ * prefix; explicit production support members may be appended and are compiled
+ * into ordinary visible bricks and load-DAG nodes. */
 struct FABTSM73BeamD1Stage5Result
 {
 	FABTSM73BeamD1Summary Summary;
@@ -40,6 +42,11 @@ struct FABTSM73BeamD1Stage5Result
 	/** Stage-4 planned member index -> compact Member/Brick id; suppressed rows are INDEX_NONE. */
 	TArray<int32> Stage4ToCompactMember;
 	int32 SuppressedStage4MemberCount = 0;
+	int32 Stage4ActiveMemberCount = 0;
+	/** Explicit Z members appended to connect floating Stage-4 top frames. */
+	int32 ReachabilitySupportPostCount = 0;
+	/** Additional visible members emitted by bounded Beam-C structural closure. */
+	int32 StructuralClosureMemberCount = 0;
 	uint64 ActiveGeometryHash = 0;
 	uint64 BearingDAGHash = 0;
 	uint64 ProductionIdentityHash = 0;

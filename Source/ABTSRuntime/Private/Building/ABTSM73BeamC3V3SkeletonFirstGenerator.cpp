@@ -23643,6 +23643,7 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 	{
 		const FTopSurfaceFrameSegmentPlan* Best = nullptr;
 		double BestDistance = DBL_MAX;
+		double BestCenterDistance = DBL_MAX;
 		for (const FTopSurfaceFrameSegmentPlan& Segment : Plan.TopSurfaceFrameSegments)
 		{
 			if (!Segment.SourceIntentIds.Contains(IntentId)
@@ -23654,13 +23655,20 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 				? Segment.TangentMinimumCM - PreferredStation
 				: PreferredStation > Segment.TangentMaximumCM
 					? PreferredStation - Segment.TangentMaximumCM : 0.0;
+			const double CenterDistance = FMath::Abs(PreferredStation
+				- (Segment.TangentMinimumCM + Segment.TangentMaximumCM) * 0.5);
 			if (Best == nullptr || Distance < BestDistance - GeometryToleranceCM
 				|| (FMath::IsNearlyEqual(Distance, BestDistance, GeometryToleranceCM)
-					&& Segment.TopSurfaceFrameSegmentId
-						< Best->TopSurfaceFrameSegmentId))
+					&& (CenterDistance
+						< BestCenterDistance - GeometryToleranceCM
+						|| (FMath::IsNearlyEqual(CenterDistance,
+							BestCenterDistance, GeometryToleranceCM)
+							&& Segment.TopSurfaceFrameSegmentId
+								< Best->TopSurfaceFrameSegmentId))))
 			{
 				Best = &Segment;
 				BestDistance = Distance;
+				BestCenterDistance = CenterDistance;
 			}
 		}
 		return Best;
@@ -23678,10 +23686,18 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 		}
 	}
 
+	struct FPreservedTopSurfaceColumnPlan
+	{
+		int32 OriginalMemberIndex = INDEX_NONE;
+		double CutoffZCM = 0.0;
+	};
+	TMap<int32, double> TopSurfaceCutoffByColumnMember;
+
 	// Stage 3 deliberately connected every facade frame downward before Stage 4
-	// knew whether the real receiver was ground or a setback top.  Mark only the
-	// TopSurface-owned temporary paths as superseded; indices remain stable so the
-	// stage-local ledger can be inspected without corrupting older provenance.
+	// knew whether the real receiver was ground or a setback top.  Only the part
+	// above the owned TopSurface is temporary.  The lower part remains the real
+	// bearing path for the TopSurface frame; suppressing the whole column leaves
+	// that frame floating once Stage 5 compacts the active geometry.
 	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
 	{
 		if (Intent.Intent != EFacadeDownwardIntent::TopSurface)
@@ -23701,13 +23717,51 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 			}
 			for (const int32 MemberIndex : Column.SegmentMemberIndices)
 			{
-				if (Plan.Members.IsValidIndex(MemberIndex)
-					&& !Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop)
+				if (!Plan.Members.IsValidIndex(MemberIndex))
 				{
-					Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop = true;
-					++Plan.Summary.Stage4SuppressedStage3ColumnMemberCount;
+					continue;
 				}
+				const double GroundZ = Plan.Components.IsValidIndex(Intent.ComponentId)
+					? Plan.Components[Intent.ComponentId].GroundPlaneZCM : 0.0;
+				const double CutoffZ = GroundZ
+					+ FMath::Max(0, Intent.TargetSurfaceCourseIndex - 1)
+						* BlockUnitsCM;
+				double& ExistingCutoff = TopSurfaceCutoffByColumnMember.FindOrAdd(
+					MemberIndex, CutoffZ);
+				ExistingCutoff = FMath::Min(ExistingCutoff, CutoffZ);
 			}
+		}
+	}
+	TArray<FPreservedTopSurfaceColumnPlan> PreservedColumnPlans;
+	TMap<int32, int32> PreservedLowerMemberByOriginal;
+	for (const TPair<int32, double>& Entry : TopSurfaceCutoffByColumnMember)
+	{
+		if (!Plan.Members.IsValidIndex(Entry.Key))
+		{
+			continue;
+		}
+		FPlannedMember& Member = Plan.Members[Entry.Key];
+		const FBox Bounds = PlannedMemberBounds(Member);
+		if (Bounds.Max.Z <= Entry.Value + GeometryToleranceCM)
+		{
+			// The segment is entirely below the setback top and remains active.
+			if (FMath::Abs(Bounds.Max.Z - Entry.Value) <= GeometryToleranceCM)
+			{
+				PreservedLowerMemberByOriginal.Add(Entry.Key, Entry.Key);
+			}
+			continue;
+		}
+		if (!Member.bSuppressedByStage4FacadeToTop)
+		{
+			Member.bSuppressedByStage4FacadeToTop = true;
+			++Plan.Summary.Stage4SuppressedStage3ColumnMemberCount;
+		}
+		if (Bounds.Min.Z < Entry.Value - GeometryToleranceCM)
+		{
+			FPreservedTopSurfaceColumnPlan& Preserved =
+				PreservedColumnPlans.AddDefaulted_GetRef();
+			Preserved.OriginalMemberIndex = Entry.Key;
+			Preserved.CutoffZCM = Entry.Value;
 		}
 	}
 
@@ -23768,9 +23822,51 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 		return true;
 	};
 
-	// Once the obsolete column is suppressed, every deferred one-cell top-frame
-	// junction becomes real material.  It remains a separate segment so the exact
-	// replacement is visible in the ledger.
+	// A 720 cm Stage-3 post segment can straddle the TopSurface seam.  Replace
+	// only its below-surface portion so the horizontal TopSurface frame has a real
+	// bearing contact while the obsolete facade path above the setback stays gone.
+	PreservedColumnPlans.Sort([](const FPreservedTopSurfaceColumnPlan& A,
+		const FPreservedTopSurfaceColumnPlan& B)
+	{
+		return A.OriginalMemberIndex < B.OriginalMemberIndex;
+	});
+	for (const FPreservedTopSurfaceColumnPlan& Preserved : PreservedColumnPlans)
+	{
+		if (!Plan.Members.IsValidIndex(Preserved.OriginalMemberIndex))
+		{
+			continue;
+		}
+		const FPlannedMember Original = Plan.Members[Preserved.OriginalMemberIndex];
+		const FBox OriginalBounds = PlannedMemberBounds(Original);
+		const FVector Start = Original.LocalStart.Z <= Original.LocalEnd.Z
+			? Original.LocalStart : Original.LocalEnd;
+		FVector End = Start;
+		End.Z = Preserved.CutoffZCM;
+		int32 MemberIndex = INDEX_NONE;
+		if (!AddConnectionMember(ESkeletonMemberKind::FacadeToTopPost,
+			INDEX_NONE, Original.ComponentId, Original.SourceVolumeId,
+			FMath::FloorToInt((OriginalBounds.Min.Z
+				- (Plan.Components.IsValidIndex(Original.ComponentId)
+					? Plan.Components[Original.ComponentId].GroundPlaneZCM : 0.0))
+				/ BlockUnitsCM), Original.StationA, Original.StationB,
+			Original.FaceMask, EABTSM73BeamAFrameAxis::Z,
+			Start, End, MemberIndex))
+		{
+			return false;
+		}
+		Plan.Members[MemberIndex].RequiredLowerMemberIndices =
+			Original.RequiredLowerMemberIndices;
+		PreservedLowerMemberByOriginal.Add(
+			Preserved.OriginalMemberIndex, MemberIndex);
+		++Plan.Summary.Stage4FacadeToTopPostSegmentCount;
+	}
+
+	// A deferred cell is the lattice crossing occupied by the Stage-3 vertical
+	// column.  X/Y and Z bricks cannot both own that voxel.  Resolve the ledger by
+	// leaving the horizontal frame split at the crossing; the preserved lower
+	// post and the Stage-4 upper closure own the vertical route on either side of
+	// the seam.  Emitting a one-cell horizontal "replacement" here creates a
+	// floating root (and would overlap the physically correct vertical route).
 	for (FTopSurfaceFrameDeferredJunctionPlan& Junction
 		: Plan.TopSurfaceFrameDeferredJunctions)
 	{
@@ -23780,50 +23876,13 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 		{
 			continue;
 		}
-		const double GroundZ = Plan.Components.IsValidIndex(Junction.ComponentId)
-			? Plan.Components[Junction.ComponentId].GroundPlaneZCM : 0.0;
-		const double Z = GroundZ
-			+ (Junction.SurfaceCourseIndex + 0.5) * BlockUnitsCM;
-		const FVector Start = Junction.Axis == EABTSM73BeamAFrameAxis::X
-			? Position(Junction.TangentMinimumCM, Junction.NormalCoordinateCM, Z)
-			: Position(Junction.NormalCoordinateCM, Junction.TangentMinimumCM, Z);
-		const FVector End = Junction.Axis == EABTSM73BeamAFrameAxis::X
-			? Position(Junction.TangentMaximumCM, Junction.NormalCoordinateCM, Z)
-			: Position(Junction.NormalCoordinateCM, Junction.TangentMaximumCM, Z);
-		int32 MemberIndex = INDEX_NONE;
-		const int32 SegmentId = Plan.TopSurfaceFrameSegments.Num();
-		const int32 SourceVolumeId = Junction.SourceIntentIds.IsEmpty()
-			? INDEX_NONE : Plan.TopSurfaceIntents[Junction.SourceIntentIds[0]]
-				.TargetSourceVolumeId;
-		if (!AddConnectionMember(ESkeletonMemberKind::FloorCourse, INDEX_NONE,
-			Junction.ComponentId, SourceVolumeId, Junction.SurfaceCourseIndex,
-			FMath::RoundToInt(Junction.TangentMinimumCM / BlockUnitsCM),
-			FMath::RoundToInt(Junction.TangentMaximumCM / BlockUnitsCM),
-			Junction.FaceMask, Junction.Axis, Start, End, MemberIndex))
-		{
-			return false;
-		}
-		Plan.Members[MemberIndex].TopSurfaceFrameSegmentId = SegmentId;
-		FTopSurfaceFrameSegmentPlan& Segment =
-			Plan.TopSurfaceFrameSegments.AddDefaulted_GetRef();
-		Segment.TopSurfaceFrameSegmentId = SegmentId;
-		Segment.SourceIntentIds = Junction.SourceIntentIds;
-		Segment.ComponentId = Junction.ComponentId;
-		Segment.SurfaceCourseIndex = Junction.SurfaceCourseIndex;
-		Segment.FaceMask = Junction.FaceMask;
-		Segment.Axis = Junction.Axis;
-		Segment.NormalCoordinateCM = Junction.NormalCoordinateCM;
-		Segment.TangentMinimumCM = Junction.TangentMinimumCM;
-		Segment.TangentMaximumCM = Junction.TangentMaximumCM;
-		Segment.MemberIndex = MemberIndex;
-		Junction.ReplacementTopFrameMemberIndex = MemberIndex;
+		Junction.ReplacementTopFrameMemberIndex = INDEX_NONE;
 		Junction.bResolvedByFacadeToTop = true;
 		++Plan.Summary.Stage4ResolvedDeferredJunctionCount;
-		++Plan.Summary.Stage4TopFrameSegmentCount;
-		++Plan.Summary.Stage4EmittedTopFrameSegmentCount;
 	}
 
 	TSet<FString> EmittedConnectionKeys;
+	TSet<FString> SupportedTopFramePostPairs;
 	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
 	{
 		if (Intent.Intent != EFacadeDownwardIntent::TopSurface)
@@ -23880,6 +23939,111 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 					TEXT("|MissingTopFrameIntent%d:Frame=%d:Station=%.1f"),
 					Intent.IntentId, Intent.ExteriorFrameId, PreferredStation);
 				continue;
+			}
+
+			// Close the lower half of the TopSurface seam before building upward.
+			// The Stage-3 column station is one cell inward from the outer frame in
+			// the common setback case, so the preserved post alone cannot bear the
+			// outer horizontal rail.  A perpendicular course immediately below the
+			// rail transfers it onto that preserved post without reintroducing the
+			// obsolete column above the semantic top.
+			if (SourceColumn != nullptr)
+			{
+				const double GroundZ = Plan.Components.IsValidIndex(Intent.ComponentId)
+					? Plan.Components[Intent.ComponentId].GroundPlaneZCM : 0.0;
+				const double TopFrameBottomZ = GroundZ
+					+ Intent.TargetSurfaceCourseIndex * BlockUnitsCM;
+				const double LowerPostTopZ = TopFrameBottomZ - BlockUnitsCM;
+				int32 LowerPostMemberIndex = INDEX_NONE;
+				for (const int32 OriginalMemberIndex
+					: SourceColumn->SegmentMemberIndices)
+				{
+					const int32* PreservedMember =
+						PreservedLowerMemberByOriginal.Find(OriginalMemberIndex);
+					if (PreservedMember == nullptr
+						|| !Plan.Members.IsValidIndex(*PreservedMember))
+					{
+						continue;
+					}
+					const FBox PreservedBounds = PlannedMemberBounds(
+						Plan.Members[*PreservedMember]);
+					if (FMath::Abs(PreservedBounds.Max.Z - LowerPostTopZ)
+						<= GeometryToleranceCM)
+					{
+						LowerPostMemberIndex = *PreservedMember;
+						break;
+					}
+				}
+				if (LowerPostMemberIndex != INDEX_NONE)
+				{
+					const FBox LowerPostBounds = PlannedMemberBounds(
+						Plan.Members[LowerPostMemberIndex]);
+					const FString BearingKey = FString::Printf(TEXT("%d:%d"),
+						TopFrame->MemberIndex, LowerPostMemberIndex);
+					const bool bTopFrameAxisX =
+						TopFrame->Axis == EABTSM73BeamAFrameAxis::X;
+					const FBox TopFrameBounds = PlannedMemberBounds(
+						Plan.Members[TopFrame->MemberIndex]);
+					const double TangentOverlap = bTopFrameAxisX
+						? SkeletonV3OverlapLength(PreferredStation - BlockUnitsCM * 0.5,
+							PreferredStation + BlockUnitsCM * 0.5,
+							TopFrameBounds.Min.X, TopFrameBounds.Max.X)
+						: SkeletonV3OverlapLength(PreferredStation - BlockUnitsCM * 0.5,
+							PreferredStation + BlockUnitsCM * 0.5,
+							TopFrameBounds.Min.Y, TopFrameBounds.Max.Y);
+					if (!SupportedTopFramePostPairs.Contains(BearingKey)
+						&& TangentOverlap > GeometryToleranceCM)
+					{
+						const double PostNormal = bTopFrameAxisX
+							? LowerPostBounds.GetCenter().Y
+							: LowerPostBounds.GetCenter().X;
+						const double SeatMinimum = FMath::Min(
+							PostNormal, TopFrame->NormalCoordinateCM)
+							- BlockUnitsCM * 0.5;
+						const double SeatMaximum = FMath::Max(
+							PostNormal, TopFrame->NormalCoordinateCM)
+							+ BlockUnitsCM * 0.5;
+						const double SeatZ = TopFrameBottomZ - BlockUnitsCM * 0.5;
+						FPlannedMember SeatProbe;
+						SeatProbe.Axis = bTopFrameAxisX
+						? EABTSM73BeamAFrameAxis::Y
+						: EABTSM73BeamAFrameAxis::X;
+						SeatProbe.LocalStart = bTopFrameAxisX
+						? Position(PreferredStation, SeatMinimum, SeatZ)
+						: Position(SeatMinimum, PreferredStation, SeatZ);
+						SeatProbe.LocalEnd = bTopFrameAxisX
+						? Position(PreferredStation, SeatMaximum, SeatZ)
+						: Position(SeatMaximum, PreferredStation, SeatZ);
+						TSet<int32> Allowed = {
+						LowerPostMemberIndex, TopFrame->MemberIndex};
+						int32 Blocker = INDEX_NONE;
+						if (PenetratesActiveMember(SeatProbe, Allowed, Blocker))
+						{
+							++Plan.Summary.Stage4FacadeToTopConflictCount;
+							OutError = FString::Printf(
+							TEXT("BeamC3V3Stage4TopFrameLowerSeatConflict:Intent=%d:Frame=%d:TopFrame=%d:Post=%d:Blocker=%d"),
+							Intent.IntentId, Intent.ExteriorFrameId,
+							TopFrame->MemberIndex, LowerPostMemberIndex, Blocker);
+							return false;
+						}
+						int32 LowerSeatMemberIndex = INDEX_NONE;
+						if (!AddConnectionMember(
+						ESkeletonMemberKind::FacadeToTopSeat, INDEX_NONE,
+						Intent.ComponentId, Intent.TargetSourceVolumeId,
+						Intent.TargetSurfaceCourseIndex - 1,
+						FMath::RoundToInt(SeatMinimum / BlockUnitsCM),
+						FMath::RoundToInt(SeatMaximum / BlockUnitsCM),
+						Intent.FaceMask, SeatProbe.Axis, SeatProbe.LocalStart,
+						SeatProbe.LocalEnd, LowerSeatMemberIndex))
+						{
+							return false;
+						}
+						AddSeat(Plan, LowerSeatMemberIndex, LowerPostMemberIndex);
+						AddSeat(Plan, TopFrame->MemberIndex, LowerSeatMemberIndex);
+						++Plan.Summary.Stage4FacadeToTopSeatCount;
+						SupportedTopFramePostPairs.Add(BearingKey);
+					}
+				}
 			}
 			// Preserve the Stage-3 column station exactly.  Core lanes use the same
 			// 36 cm lattice but are not necessarily cell-centred relative to world
@@ -24093,8 +24257,17 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnection
 			Connection.TangentStationCM = Station;
 			if (SourceColumn != nullptr)
 			{
-				Connection.SuppressedStage3ColumnMemberIndices =
-					SourceColumn->SegmentMemberIndices;
+				for (const int32 SourceMemberIndex
+					: SourceColumn->SegmentMemberIndices)
+				{
+					if (Plan.Members.IsValidIndex(SourceMemberIndex)
+						&& Plan.Members[SourceMemberIndex]
+							.bSuppressedByStage4FacadeToTop)
+					{
+						Connection.SuppressedStage3ColumnMemberIndices.Add(
+							SourceMemberIndex);
+					}
+				}
 			}
 			if (!PreexistingSupportChain.IsEmpty())
 			{

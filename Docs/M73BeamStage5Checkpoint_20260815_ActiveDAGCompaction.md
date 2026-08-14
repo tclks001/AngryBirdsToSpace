@@ -29,7 +29,7 @@ Stage 5 的首个停止点只验证冻结 Stage 4 几何能否压实为生产级
 - E1 `ActiveGeometryHash=16780849829317489644`，与冻结 Stage 4.5 几何身份一致；`PhysicalStability=NotEvaluated`。
 - 日志：`Saved/Logs/M7-Stage5-E1-20260815.log`。
 
-## 4. 固定六栋暴露的阻塞
+## 4. 固定六栋暴露的阻塞（历史证据，已由第 6 节关闭）
 
 固定六栋测试为 1/6：E1 通过，E2～E6 均以 `BeamCGroundUnreachable` fail closed。
 
@@ -58,3 +58,25 @@ Stage 5 的首个停止点只验证冻结 Stage 4 几何能否压实为生产级
 5. 随后重跑 Stage 5 E1 与固定六栋，要求 6/6、零 unreachable、零 cycle。
 
 该修复会改变已经批准的 Stage 4 几何身份，必须由用户明确同意重开冻结范围后再实施。测试地图继续作为用户改动排除。
+
+## 6. 重开结果与根因关闭
+
+用户授权继续推进 Stage 5 后，压实 DAG、逐成员诊断和离屏截图共同确认了两层问题：
+
+1. Stage 4 抑制了横跨 TopSurface 的整根 Stage 3 临时柱，连同 TopSurface 以下仍应保留的真实承托段一起删除；deferred junction 又在同一体素发射水平替代块，导致生产压实后出现浮空根。
+2. 即使修正该 seam，完整全建筑荷载仍会产生少量不可达根和支座 resultant 缺口；Stage-local DAG 不能代表最终压实后的全建筑 DAG。
+
+Stage 4 窄修复只保留临时柱的 TopSurface 以下部分，取消同体素水平替代块，并为 TopSurface frame 选择最近的真实柱站及必要的下座。Stage 4.5 随后从真实 active geometry 重新发布六项冻结描述，Catalog Hash 更新为 `2538906766243156379`。
+
+Stage 5 不再添加隐藏构件，而是把闭合项作为普通 production member 追加：先补不可达水平根的 36 cm 单位化 Z 路径，再运行预算内的有界结构闭合。所有新增项都编译为可见 brick、进入 Bearing/Load DAG，并计入最终 Production Hash。
+
+## 7. 最终证据
+
+- ForceUnity Development Editor 全链接通过。
+- fresh Stage 4.5 Placement Freeze：1/1。
+- fresh 固定六栋 Stage 5：6/6；E1～E6 Production 分别为 `52/263/412/930/2057/2433`。
+- 六栋均为零 unreachable、零 cycle，且 member=brick=node、contact=edge。
+- E5/E6 离屏取证包含 Stage 1～4 总览、完整 Stage 5、仅新增构件的等轴与侧视图；新增项位于轮廓内部的真实承托链，没有轮廓外支撑林或跨越保留开口。
+- 日志：`M7-Stage45-Refreeze-Final-20260815.log`、`M7-Stage5-SixBuildings-Final-20260815.log`、`M7-Stage5-Offscreen-E5-ExplicitClosure-20260815.log`、`M7-Stage5-Offscreen-E6-ExplicitClosure-20260815.log`。
+- 截图：`Saved/ABTSVisualCaptures/M73Stage5/E5-ExplicitClosure`、`E6-ExplicitClosure`。
+- Chaos、爆炸物、活塞、破坏行为和可见 PIE 尚未评估；测试地图继续排除。

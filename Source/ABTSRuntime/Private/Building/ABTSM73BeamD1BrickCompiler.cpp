@@ -2774,6 +2774,10 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	Summary.SemanticPrismCount = OutResult.Silhouette.Summary.PrismCount;
 	Summary.SemanticPyramidCount = OutResult.Silhouette.Summary.PyramidCount;
 	Summary.SupportedSpanCount = OutResult.Silhouette.Summary.SupportedSpanCount;
+	Summary.TargetMinimumBrickCount =
+		SelectedProfile.VisualComplexity.MinimumBrickCount;
+	Summary.TargetMaximumBrickCount =
+		SelectedProfile.VisualComplexity.MaximumBrickCount;
 	Summary.bPhysicalStabilityEvaluated = false;
 	if (!ABTSM73BeamD1::AppendRaisedMainReservations(
 		SelectedProfile, OutResult.Silhouette, OutError))
@@ -3713,6 +3717,267 @@ namespace ABTSM73BeamStage5
 		return true;
 	}
 
+	FBox CompactMemberBounds(
+		const FABTSM73BeamAGenerationResult& Assembly,
+		const FABTSM73BeamAMember& Member)
+	{
+		if (!Assembly.Joints.IsValidIndex(Member.JointA)
+			|| !Assembly.Joints.IsValidIndex(Member.JointB))
+		{
+			return FBox(EForceInit::ForceInit);
+		}
+		const FVector A = Assembly.Joints[Member.JointA].LocalPosition;
+		const FVector B = Assembly.Joints[Member.JointB].LocalPosition;
+		FVector Minimum = A.ComponentMin(B);
+		FVector Maximum = A.ComponentMax(B);
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			if (Axis == static_cast<int32>(Member.Axis))
+			{
+				continue;
+			}
+			const double Center = (A[Axis] + B[Axis]) * 0.5;
+			Minimum[Axis] = Center - SectionCM * 0.5;
+			Maximum[Axis] = Center + SectionCM * 0.5;
+		}
+		return FBox(Minimum, Maximum);
+	}
+
+	/**
+	 * Stage 4 deliberately freezes semantic facade/top geometry before whole-
+	 * building reachability exists.  Stage 5 may therefore discover a horizontal
+	 * top-frame root after suppressed preview columns are removed.  Fill an
+	 * explicit 36 cm voxel column below that root. Existing horizontal cells are
+	 * retained as cross-bearings and existing Z cells are reused; only empty runs
+	 * become new, visible Post bricks. Reserved semantic voids remain inviolate.
+	 */
+	bool AddReachabilitySupportColumns(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73BeamCGenerationResult& FailedDAG,
+		FABTSM73BeamAGenerationResult& Assembly,
+		int32& OutAddedPostCount,
+		FString& OutError)
+	{
+		OutAddedPostCount = 0;
+		TArray<int32> OwnerByMember;
+		OwnerByMember.Init(INDEX_NONE, Assembly.Members.Num());
+		for (int32 OwnerIndex = 0; OwnerIndex < Assembly.Assemblies.Num(); ++OwnerIndex)
+		{
+			for (const int32 MemberId : Assembly.Assemblies[OwnerIndex].MemberIds)
+			{
+				if (OwnerByMember.IsValidIndex(MemberId))
+				{
+					OwnerByMember[MemberId] = OwnerIndex;
+				}
+			}
+		}
+
+		TMap<FString, int32> JointByPosition;
+		const double JointScale = 1.0 / FMath::Max(0.1,
+			static_cast<double>(Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+		for (const FABTSM73BeamAJoint& Joint : Assembly.Joints)
+		{
+			JointByPosition.Add(FString::Printf(TEXT("%lld:%lld:%lld"),
+				FMath::RoundToInt64(Joint.LocalPosition.X * JointScale),
+				FMath::RoundToInt64(Joint.LocalPosition.Y * JointScale),
+				FMath::RoundToInt64(Joint.LocalPosition.Z * JointScale)), Joint.JointId);
+		}
+		auto AddJoint = [&Assembly, &JointByPosition, JointScale](
+			const FVector& Point, const EABTSM73BeamAJointRole Role)
+		{
+			const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+				FMath::RoundToInt64(Point.X * JointScale),
+				FMath::RoundToInt64(Point.Y * JointScale),
+				FMath::RoundToInt64(Point.Z * JointScale));
+			if (const int32* Existing = JointByPosition.Find(Key))
+			{
+				return *Existing;
+			}
+			FABTSM73BeamAJoint& Joint = Assembly.Joints.AddDefaulted_GetRef();
+			Joint.JointId = Assembly.Joints.Num() - 1;
+			Joint.LocalPosition = Point;
+			Joint.Role = Role;
+			JointByPosition.Add(Key, Joint.JointId);
+			return Joint.JointId;
+		};
+
+		TArray<int32> RootMemberIds;
+		for (const FABTSM73BeamCLoadNode& Node : FailedDAG.Nodes)
+		{
+			if (!Node.bGroundReachable && Node.SupportCount == 0
+				&& Assembly.Members.IsValidIndex(Node.MemberId)
+				&& (Assembly.Members[Node.MemberId].Axis == EABTSM73BeamAFrameAxis::X
+					|| Assembly.Members[Node.MemberId].Axis == EABTSM73BeamAFrameAxis::Y))
+			{
+				RootMemberIds.Add(Node.MemberId);
+			}
+		}
+		RootMemberIds.Sort();
+		for (const int32 RootMemberId : RootMemberIds)
+		{
+			if (!Assembly.Members.IsValidIndex(RootMemberId)
+				|| !OwnerByMember.IsValidIndex(RootMemberId)
+				|| !Assembly.Assemblies.IsValidIndex(OwnerByMember[RootMemberId]))
+			{
+				continue;
+			}
+			const FABTSM73BeamAMember Root = Assembly.Members[RootMemberId];
+			const FBox RootBounds = CompactMemberBounds(Assembly, Root);
+			const int32 OwnerIndex = OwnerByMember[RootMemberId];
+			double GroundZ = DBL_MAX;
+			for (const int32 MemberId : Assembly.Assemblies[OwnerIndex].MemberIds)
+			{
+				if (Assembly.Members.IsValidIndex(MemberId))
+				{
+					GroundZ = FMath::Min(GroundZ,
+						CompactMemberBounds(Assembly, Assembly.Members[MemberId]).Min.Z);
+				}
+			}
+			if (!FMath::IsFinite(GroundZ)
+				|| RootBounds.Min.Z <= GroundZ + GeometryToleranceCM)
+			{
+				continue;
+			}
+
+			TArray<FVector2D> CandidateStations;
+			const bool bAxisX = Root.Axis == EABTSM73BeamAFrameAxis::X;
+			const double TangentMinimum = bAxisX ? RootBounds.Min.X : RootBounds.Min.Y;
+			const double TangentMaximum = bAxisX ? RootBounds.Max.X : RootBounds.Max.Y;
+			const double Normal = bAxisX ? RootBounds.GetCenter().Y : RootBounds.GetCenter().X;
+			for (double Tangent = TangentMinimum + SectionCM * 0.5;
+				Tangent <= TangentMaximum - SectionCM * 0.5 + GeometryToleranceCM;
+				Tangent += SectionCM)
+			{
+				CandidateStations.Add(bAxisX
+					? FVector2D(Tangent, Normal) : FVector2D(Normal, Tangent));
+			}
+			CandidateStations.Sort([&RootBounds, bAxisX](const FVector2D& A,
+				const FVector2D& B)
+			{
+				const double Center = bAxisX ? RootBounds.GetCenter().X : RootBounds.GetCenter().Y;
+				const double DA = FMath::Abs((bAxisX ? A.X : A.Y) - Center);
+				const double DB = FMath::Abs((bAxisX ? B.X : B.Y) - Center);
+				return !FMath::IsNearlyEqual(DA, DB, GeometryToleranceCM)
+					? DA < DB : (A.X != B.X ? A.X < B.X : A.Y < B.Y);
+			});
+
+			bool bRootClosed = false;
+			for (const FVector2D Station : CandidateStations)
+			{
+				const FBox ColumnBounds(
+					FVector(Station.X - SectionCM * 0.5,
+						Station.Y - SectionCM * 0.5, GroundZ),
+					FVector(Station.X + SectionCM * 0.5,
+						Station.Y + SectionCM * 0.5, RootBounds.Min.Z));
+				const bool bHitsReservedVoid = Assembly.ReservedSupportVoids.ContainsByPredicate(
+					[&ColumnBounds](const FABTSM73BeamASupportVoid& Void)
+					{
+						return Void.Bounds.IsValid
+							&& ColumnBounds.Intersect(Void.Bounds);
+					});
+				if (bHitsReservedVoid)
+				{
+					continue;
+				}
+
+				const int32 CourseCount = FMath::RoundToInt(
+					(RootBounds.Min.Z - GroundZ) / SectionCM);
+				TArray<bool> Occupied;
+				Occupied.Init(false, CourseCount);
+				for (const FABTSM73BeamAMember& Existing : Assembly.Members)
+				{
+					const FBox ExistingBounds = CompactMemberBounds(Assembly, Existing);
+					if (Station.X < ExistingBounds.Min.X - GeometryToleranceCM
+						|| Station.X > ExistingBounds.Max.X + GeometryToleranceCM
+						|| Station.Y < ExistingBounds.Min.Y - GeometryToleranceCM
+						|| Station.Y > ExistingBounds.Max.Y + GeometryToleranceCM)
+					{
+						continue;
+					}
+					for (int32 Course = 0; Course < CourseCount; ++Course)
+					{
+						const double CellBottom = GroundZ + Course * SectionCM;
+						const double CellTop = CellBottom + SectionCM;
+						if (ExistingBounds.Min.Z < CellTop - GeometryToleranceCM
+							&& ExistingBounds.Max.Z > CellBottom + GeometryToleranceCM)
+						{
+							Occupied[Course] = true;
+						}
+					}
+				}
+
+				struct FRun { int32 First = 0; int32 LastExclusive = 0; };
+				TArray<FRun> Runs;
+				for (int32 Course = 0; Course < CourseCount;)
+				{
+					if (Occupied[Course]) { ++Course; continue; }
+					const int32 First = Course;
+					while (Course < CourseCount && !Occupied[Course]
+						&& Course - First < 20)
+					{
+						++Course;
+					}
+					Runs.Add({First, Course});
+				}
+				if (Runs.IsEmpty())
+				{
+					continue;
+				}
+				if (Assembly.Members.Num() + Runs.Num()
+					> Profile.VisualComplexity.MaximumBrickCount)
+				{
+					OutError = FString::Printf(
+						TEXT("BeamD1Stage5ReachabilitySupportBudget:%d+%d>%d"),
+						Assembly.Members.Num(), Runs.Num(),
+						Profile.VisualComplexity.MaximumBrickCount);
+					return false;
+				}
+				for (const FRun& Run : Runs)
+				{
+					const FVector Start(Station.X, Station.Y,
+						GroundZ + Run.First * SectionCM);
+					const FVector End(Station.X, Station.Y,
+						GroundZ + Run.LastExclusive * SectionCM);
+					FABTSM73BeamAMember& Post = Assembly.Members.AddDefaulted_GetRef();
+					Post.MemberId = Assembly.Members.Num() - 1;
+					Post.JointA = AddJoint(Start, Run.First == 0
+						? EABTSM73BeamAJointRole::GroundFoot
+						: EABTSM73BeamAJointRole::BeamEnd);
+					Post.JointB = AddJoint(End, EABTSM73BeamAJointRole::ColumnHead);
+					Post.Axis = EABTSM73BeamAFrameAxis::Z;
+					Post.Role = EABTSM73BeamAMemberRole::Post;
+					Post.LengthCM = FVector::Distance(Start, End);
+					Assembly.Assemblies[OwnerIndex].MemberIds.Add(Post.MemberId);
+					Assembly.Assemblies[OwnerIndex].JointIds.AddUnique(Post.JointA);
+					Assembly.Assemblies[OwnerIndex].JointIds.AddUnique(Post.JointB);
+					++OutAddedPostCount;
+				}
+				bRootClosed = true;
+				break;
+			}
+			if (!bRootClosed)
+			{
+				UE_LOG(LogABTSRuntime, Warning,
+					TEXT("[ABTS][M7.3-Beam-D1][Stage5ReachabilitySupportDeferred]")
+					TEXT(" Root=%d Bounds=%s Candidates=%d"),
+					RootMemberId, *RootBounds.ToString(), CandidateStations.Num());
+			}
+		}
+		if (OutAddedPostCount == 0)
+		{
+			OutError = TEXT("BeamD1Stage5ReachabilitySupportNoProgress");
+			return false;
+		}
+		if (!ABTSM73BeamA::RebuildBearingContacts(
+			Profile.BeamSettings.BeamB.BeamA, Assembly, OutError))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamD1Stage5ReachabilityBearingRebuild:%s"), *OutError);
+			return false;
+		}
+		return true;
+	}
+
 	bool CompileBricks(
 		const FABTSM73BeamD0ResolvedProfile& Profile,
 		const FABTSM73BeamAGenerationResult& Assembly,
@@ -3826,10 +4091,40 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 	}
 	OutResult.ActiveGeometryHash = HashActiveGeometry(
 		OutResult.Stage4.Plan.Members);
-	OutResult.BearingDAGHash = HashBearingDAG(OutResult.CompactAssembly);
+	OutResult.Stage4ActiveMemberCount = OutResult.CompactAssembly.Members.Num();
 
-	if (!FABTSM73BeamCGenerator().Generate(Profile.BeamSettings,
-		OutResult.CompactAssembly, OutResult.LoadDAG, OutError))
+	FABTSM73BeamCGenerator BeamCGenerator;
+	for (int32 ReachabilityPass = 0; ReachabilityPass < 8; ++ReachabilityPass)
+	{
+		FString AnalysisError;
+		if (BeamCGenerator.Generate(Profile.BeamSettings,
+			OutResult.CompactAssembly, OutResult.LoadDAG, AnalysisError)
+			|| OutResult.LoadDAG.Summary.GroundUnreachableNodeCount == 0)
+		{
+			break;
+		}
+		int32 AddedThisPass = 0;
+		if (!ABTSM73BeamStage5::AddReachabilitySupportColumns(
+			Profile, OutResult.LoadDAG, OutResult.CompactAssembly,
+			AddedThisPass, OutError))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamD1Stage5ReachabilityClosure:%s"), *OutError);
+			return false;
+		}
+		OutResult.ReachabilitySupportPostCount += AddedThisPass;
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-Beam-D1][Stage5ReachabilityClosure]")
+			TEXT(" Pass=%d Added=%d Total=%d Members=%d"),
+			ReachabilityPass + 1, AddedThisPass,
+			OutResult.ReachabilitySupportPostCount,
+			OutResult.CompactAssembly.Members.Num());
+	}
+
+	const int32 BeforeStructuralClosure = OutResult.CompactAssembly.Members.Num();
+	if (!BeamCGenerator.GenerateWithStructuralClosure(Profile.BeamSettings,
+		OutResult.CompactAssembly, OutResult.LoadDAG, OutError,
+		Profile.VisualComplexity.MaximumBrickCount, false))
 	{
 		int32 Logged = 0;
 		for (const FABTSM73BeamCLoadNode& Node : OutResult.LoadDAG.Nodes)
@@ -3867,6 +4162,45 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 					: TEXT("None"));
 			++Logged;
 		}
+		int32 ResultantLogged = 0;
+		for (const FABTSM73BeamCLoadNode& Node : OutResult.LoadDAG.Nodes)
+		{
+			if (Node.bSupportResultantValid || ResultantLogged >= 16)
+			{
+				continue;
+			}
+			double SupportMinimum = DBL_MAX;
+			double SupportMaximum = -DBL_MAX;
+			const int32 AxisIndex = Node.Axis == EABTSM73BeamAFrameAxis::X ? 0 : 1;
+			for (const FABTSM73BeamCLoadEdge& Edge : OutResult.LoadDAG.Edges)
+			{
+				if (Edge.UpperMemberId != Node.MemberId)
+				{
+					continue;
+				}
+				SupportMinimum = FMath::Min(SupportMinimum,
+					AxisIndex == 0 ? Edge.ContactMinXY.X : Edge.ContactMinXY.Y);
+				SupportMaximum = FMath::Max(SupportMaximum,
+					AxisIndex == 0 ? Edge.ContactMaxXY.X : Edge.ContactMaxXY.Y);
+			}
+			const int32 OldIndex = OutResult.Stage4ToCompactMember.IndexOfByKey(
+				Node.MemberId);
+			const ABTSM73BeamC3V3::FPlannedMember* Planned =
+				OutResult.Stage4.Plan.Members.IsValidIndex(OldIndex)
+					? &OutResult.Stage4.Plan.Members[OldIndex] : nullptr;
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][Stage5ResultantViolation]")
+				TEXT(" Compact=%d Stage4=%d Kind=%d Axis=%d Course=%d")
+				TEXT(" Resultant=%.1f Support=%.1f..%.1f Count=%d"),
+				Node.MemberId, OldIndex,
+				Planned != nullptr
+					? static_cast<int32>(Planned->SkeletonKind) : INDEX_NONE,
+				static_cast<int32>(Node.Axis),
+				Planned != nullptr ? Planned->CourseIndex : INDEX_NONE,
+				Node.LoadResultant[AxisIndex], SupportMinimum, SupportMaximum,
+				Node.SupportCount);
+			++ResultantLogged;
+		}
 		UE_LOG(LogABTSRuntime, Warning,
 			TEXT("[ABTS][M7.3-Beam-D1][Stage5LoadDAGRejected]")
 			TEXT(" Profile=%s Tier=%d Seed=%d Reason=%s")
@@ -3884,6 +4218,9 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 		OutError = FString::Printf(TEXT("BeamD1Stage5LoadDAG:%s"), *OutError);
 		return false;
 	}
+	OutResult.StructuralClosureMemberCount =
+		OutResult.CompactAssembly.Members.Num() - BeforeStructuralClosure;
+	OutResult.BearingDAGHash = HashBearingDAG(OutResult.CompactAssembly);
 
 	FABTSM73BeamD1Summary& Summary = OutResult.Summary;
 	Summary.GenerationStage = EABTSM73BeamC3GenerationStage::StaticDAG;
@@ -3899,6 +4236,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 	Summary.SemanticPrismCount = OutResult.Silhouette.Summary.PrismCount;
 	Summary.SemanticPyramidCount = OutResult.Silhouette.Summary.PyramidCount;
 	Summary.SupportedSpanCount = OutResult.Silhouette.Summary.SupportedSpanCount;
+	Summary.TargetMinimumBrickCount = Profile.VisualComplexity.MinimumBrickCount;
+	Summary.TargetMaximumBrickCount = Profile.VisualComplexity.MaximumBrickCount;
 	Summary.RealContactMismatchCount =
 		OutResult.LoadDAG.Summary.RealContactMismatchCount;
 	Summary.RemainingSupportViolationCount =
@@ -3908,6 +4247,11 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 		+ OutResult.LoadDAG.Summary.CantileverViolationCount;
 	Summary.SupportResultantAdvisoryCount =
 		OutResult.LoadDAG.Summary.SupportResultantAdvisoryCount;
+	Summary.StructuralClosurePassCount =
+		OutResult.LoadDAG.Summary.StructuralClosurePassCount;
+	Summary.AddedStructuralSupportPostCount =
+		OutResult.ReachabilitySupportPostCount
+		+ OutResult.LoadDAG.Summary.AddedStructuralSupportPostCount;
 	Summary.bPhysicalStabilityEvaluated = false;
 	if (!CompileBricks(Profile, OutResult.CompactAssembly,
 		Summary, OutResult.Bricks, OutError))
@@ -3931,17 +4275,20 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 		return false;
 	}
 	OutResult.ProductionIdentityHash = HashUtf8(FString::Printf(
-		TEXT("Stage4=%lld|Geometry=%llu|Bearing=%llu|Load=%lld|Brick=%lld|Members=%d"),
+		TEXT("Stage4=%lld|Geometry=%llu|Bearing=%llu|Load=%lld|Brick=%lld|Members=%d|Reach=%d|Closure=%d"),
 		OutResult.Stage4.Plan.Summary.FinalGeometryHash,
 		OutResult.ActiveGeometryHash, OutResult.BearingDAGHash,
 		OutResult.LoadDAG.Summary.LoadDAGHash,
-		Summary.BrickGeometryHash, Summary.MemberCount));
+		Summary.BrickGeometryHash, Summary.MemberCount,
+		OutResult.ReachabilitySupportPostCount,
+		OutResult.StructuralClosureMemberCount));
 	Summary.bAccepted = true;
 	Summary.RejectReason.Reset();
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7.3-Beam-D1][Stage5Accepted]")
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d CandidateSeed=%d")
-		TEXT(" Stage4Members=%d Suppressed=%d Active=%d Bricks=%d")
+		TEXT(" Stage4Members=%d Suppressed=%d Stage4Active=%d Production=%d Bricks=%d")
+		TEXT(" ReachabilityPosts=%d ClosureMembers=%d ClosurePasses=%d ResultantAdvisories=%d")
 		TEXT(" Contacts=%d LoadEdges=%d Ground=%d Unreachable=%d")
 		TEXT(" Stage4Hash=%lld GeometryHash=%llu BearingHash=%llu LoadHash=%lld ProductionHash=%llu")
 		TEXT(" Chaos=NotEvaluated"),
@@ -3949,7 +4296,12 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 		Settings.BuildingSeed, SelectedSeed,
 		OutResult.Stage4.Plan.Members.Num(),
 		OutResult.SuppressedStage4MemberCount,
+		OutResult.Stage4ActiveMemberCount,
 		OutResult.CompactAssembly.Members.Num(), OutResult.Bricks.Num(),
+		OutResult.ReachabilitySupportPostCount,
+		OutResult.StructuralClosureMemberCount,
+		OutResult.LoadDAG.Summary.StructuralClosurePassCount,
+		OutResult.LoadDAG.Summary.SupportResultantAdvisoryCount,
 		OutResult.CompactAssembly.BearingContacts.Num(),
 		OutResult.LoadDAG.Edges.Num(),
 		OutResult.LoadDAG.Summary.GroundNodeCount,

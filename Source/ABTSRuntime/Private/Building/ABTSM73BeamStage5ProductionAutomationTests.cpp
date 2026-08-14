@@ -41,12 +41,19 @@ namespace ABTSM73BeamStage5Tests
 			Result.bPhysicalStabilityEvaluated);
 		Test.TestEqual(*(Prefix + TEXT(" active geometry hash")),
 			Result.ActiveGeometryHash, Frozen.StaticGeometryHash);
-		Test.TestEqual(*(Prefix + TEXT(" compact member count")),
-			Result.CompactAssembly.Members.Num(), Frozen.ActiveMemberCount);
+		Test.TestEqual(*(Prefix + TEXT(" frozen Stage4 prefix count")),
+			Result.Stage4ActiveMemberCount, Frozen.ActiveMemberCount);
+		const int32 ExpectedProductionCount = Result.Stage4ActiveMemberCount
+			+ Result.ReachabilitySupportPostCount
+			+ Result.StructuralClosureMemberCount;
+		Test.TestEqual(*(Prefix + TEXT(" explicit production count")),
+			Result.CompactAssembly.Members.Num(), ExpectedProductionCount);
 		Test.TestEqual(*(Prefix + TEXT(" brick count")),
-			Result.Bricks.Num(), Frozen.ActiveMemberCount);
+			Result.Bricks.Num(), ExpectedProductionCount);
 		Test.TestEqual(*(Prefix + TEXT(" load node count")),
-			Result.LoadDAG.Nodes.Num(), Frozen.ActiveMemberCount);
+			Result.LoadDAG.Nodes.Num(), ExpectedProductionCount);
+		Test.TestTrue(*(Prefix + TEXT(" production remains in profile budget")),
+			Result.Bricks.Num() <= Result.Summary.TargetMaximumBrickCount);
 		Test.TestEqual(*(Prefix + TEXT(" bearing/load edge parity")),
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Edges.Num());
@@ -84,12 +91,16 @@ namespace ABTSM73BeamStage5Tests
 			SuppressedMappingCount, Result.SuppressedStage4MemberCount);
 		Test.AddInfo(FString::Printf(
 			TEXT("Stage5:%s:Profile=%s:Tier=%d:Seed=%d:Stage4=%d:Suppressed=%d")
-			TEXT(":Active=%d:Contacts=%d:Ground=%d:Geometry=%llu:Bearing=%llu:Load=%lld:Production=%llu:Chaos=NotEvaluated"),
+			TEXT(":Stage4Active=%d:Reachability=%d:StructuralClosure=%d")
+			TEXT(":Production=%d:Contacts=%d:Ground=%d:Geometry=%llu:Bearing=%llu:Load=%lld:ProductionHash=%llu:Chaos=NotEvaluated"),
 			*Entry.StableId.ToString(),
 			*Entry.Settings.GameplayProfileId.ToString(),
 			Entry.Settings.DifficultyTier, Entry.Settings.BuildingSeed,
 			Result.Stage4.Plan.Members.Num(),
 			Result.SuppressedStage4MemberCount,
+			Result.Stage4ActiveMemberCount,
+			Result.ReachabilitySupportPostCount,
+			Result.StructuralClosureMemberCount,
 			Result.CompactAssembly.Members.Num(),
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Summary.GroundNodeCount,
