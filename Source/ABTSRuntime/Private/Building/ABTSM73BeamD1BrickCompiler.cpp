@@ -1770,6 +1770,41 @@ namespace ABTSM73BeamD1
 		}
 	}
 
+	bool IsUnitizedBrickDimension(const double Value)
+	{
+		constexpr double VoxelCM = 36.0;
+		const double Units = Value / VoxelCM;
+		return FMath::IsFinite(Value) && Value >= VoxelCM - 0.1
+			&& FMath::IsNearlyEqual(Units, FMath::RoundToDouble(Units), 0.1 / VoxelCM);
+	}
+
+	bool IsUnitizedBrickGeometry(
+		const EABTSM73BeamAFrameAxis Axis,
+		const FVector& Dimensions)
+	{
+		constexpr double VoxelCM = 36.0;
+		if (!IsUnitizedBrickDimension(Dimensions.X)
+			|| !IsUnitizedBrickDimension(Dimensions.Y)
+			|| !IsUnitizedBrickDimension(Dimensions.Z))
+		{
+			return false;
+		}
+		switch (Axis)
+		{
+		case EABTSM73BeamAFrameAxis::X:
+			return FMath::IsNearlyEqual(Dimensions.Y, VoxelCM, 0.1)
+				&& FMath::IsNearlyEqual(Dimensions.Z, VoxelCM, 0.1);
+		case EABTSM73BeamAFrameAxis::Y:
+			return FMath::IsNearlyEqual(Dimensions.X, VoxelCM, 0.1)
+				&& FMath::IsNearlyEqual(Dimensions.Z, VoxelCM, 0.1);
+		case EABTSM73BeamAFrameAxis::Z:
+			return FMath::IsNearlyEqual(Dimensions.X, VoxelCM, 0.1)
+				&& FMath::IsNearlyEqual(Dimensions.Y, VoxelCM, 0.1);
+		default:
+			return false;
+		}
+	}
+
 	int32 CountStrictPenetrations(
 		const TArray<FABTSM73BeamD1BrickBinding>& Bricks,
 		const double ToleranceCM)
@@ -2771,7 +2806,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 	FABTSM73BeamC3V3SkeletonFirstGenerator SkeletonGenerator;
 	const bool bSkeletonGenerated =
 		StopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof
-			? SkeletonGenerator.GenerateStage4FloorTopFrames(SelectedProfile,
+			? SkeletonGenerator.GenerateStage4FacadeToTopConnections(SelectedProfile,
 				OutResult.Silhouette, OutResult.Skeleton, OutError)
 			: StopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame
 			? SkeletonGenerator.GenerateStage3(SelectedProfile,
@@ -3072,6 +3107,24 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		Stage1.Stage4TopFrameConflictCount;
 	Summary.SkeletonFirstStage4DeferredFacadeColumnJunctionCount =
 		Stage1.Stage4DeferredFacadeColumnJunctionCount;
+	Summary.SkeletonFirstStage4FacadeToTopConnectionCount =
+		Stage1.Stage4FacadeToTopConnectionCount;
+	Summary.SkeletonFirstStage4FacadeToTopSeatCount =
+		Stage1.Stage4FacadeToTopSeatCount;
+	Summary.SkeletonFirstStage4FacadeToTopPostSegmentCount =
+		Stage1.Stage4FacadeToTopPostSegmentCount;
+	Summary.SkeletonFirstStage4SuppressedStage3ColumnMemberCount =
+		Stage1.Stage4SuppressedStage3ColumnMemberCount;
+	Summary.SkeletonFirstStage4ResolvedDeferredJunctionCount =
+		Stage1.Stage4ResolvedDeferredJunctionCount;
+	Summary.SkeletonFirstStage4FacadeToTopBindingViolationCount =
+		Stage1.Stage4FacadeToTopBindingViolationCount;
+	Summary.SkeletonFirstStage4FacadeToTopConflictCount =
+		Stage1.Stage4FacadeToTopConflictCount;
+	Summary.SkeletonFirstStage4FacadeToTopHash =
+		Stage1.Stage4FacadeToTopHash;
+	Summary.SkeletonFirstStage4FacadeToTopMilliseconds =
+		Stage1.Stage4FacadeToTopMilliseconds;
 	Summary.SkeletonFirstStage4TopFrameHash = Stage1.Stage4TopFrameHash;
 	Summary.SkeletonFirstStage4TopFrameMilliseconds =
 		Stage1.Stage4TopFrameMilliseconds;
@@ -3273,9 +3326,11 @@ bool FABTSM73BeamD1BrickCompiler::CompileResolvedAssembly(
 		return Reject(OutResult, OutError, TEXT("BeamD1EmptyAssembly"));
 	}
 	const double Section = Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM;
-	if (!FMath::IsFinite(Section) || Section <= 0.0)
+	if (!FMath::IsFinite(Section) || !FMath::IsNearlyEqual(Section, 36.0, 0.1))
 	{
-		return Reject(OutResult, OutError, TEXT("BeamD1InvalidCrossSection"));
+		return Reject(OutResult, OutError,
+			FString::Printf(TEXT("BeamD1NonUnitizedCrossSection:Section=%.3f"),
+				Section));
 	}
 
 	const int32 CandidateId = SelectCandidate(Profile, Assembly, BeamC);
@@ -3294,6 +3349,13 @@ bool FABTSM73BeamD1BrickCompiler::CompileResolvedAssembly(
 		const FVector Dimensions = DimensionsFor(Member, Section);
 		const FVector A = Assembly.Joints[Member.JointA].LocalPosition;
 		const FVector B = Assembly.Joints[Member.JointB].LocalPosition;
+		if (!IsUnitizedBrickGeometry(Member.Axis, Dimensions))
+		{
+			return Reject(OutResult, OutError, FString::Printf(
+				TEXT("BeamD1NonUnitizedBrickGeometry:Member=%d:Axis=%d:Dimensions=%.3f,%.3f,%.3f"),
+				Member.MemberId, static_cast<int32>(Member.Axis),
+				Dimensions.X, Dimensions.Y, Dimensions.Z));
+		}
 		if (Dimensions.GetMin() <= 0.0f || Dimensions.ContainsNaN()
 			|| A.ContainsNaN() || B.ContainsNaN()
 			|| !FMath::IsNearlyEqual(FVector::Distance(A, B), Member.LengthCM, 0.1f))

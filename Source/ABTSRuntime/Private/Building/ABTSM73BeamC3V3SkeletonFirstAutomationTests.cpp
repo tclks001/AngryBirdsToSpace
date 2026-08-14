@@ -4422,6 +4422,40 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 	const ABTSM73BeamC3V3::FPlanSummary& Summary = Plan.Summary;
 	int32 ExposedSetbackTopCount = 0;
 	int32 DirectStackSeatCount = 0;
+	int32 NonUnitizedMemberCount = 0;
+	FString NonUnitizedMemberDiagnostics;
+	for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+	{
+		const ABTSM73BeamC3V3::FPlannedMember& Member = Plan.Members[MemberIndex];
+		const double Length = FVector::Distance(Member.LocalStart, Member.LocalEnd);
+		const double Units = Length / 36.0;
+		const bool bAxisAligned =
+			(Member.Axis == EABTSM73BeamAFrameAxis::X
+				&& FMath::IsNearlyEqual(Member.LocalStart.Y, Member.LocalEnd.Y, 0.1)
+				&& FMath::IsNearlyEqual(Member.LocalStart.Z, Member.LocalEnd.Z, 0.1))
+			|| (Member.Axis == EABTSM73BeamAFrameAxis::Y
+				&& FMath::IsNearlyEqual(Member.LocalStart.X, Member.LocalEnd.X, 0.1)
+				&& FMath::IsNearlyEqual(Member.LocalStart.Z, Member.LocalEnd.Z, 0.1))
+			|| (Member.Axis == EABTSM73BeamAFrameAxis::Z
+				&& FMath::IsNearlyEqual(Member.LocalStart.X, Member.LocalEnd.X, 0.1)
+				&& FMath::IsNearlyEqual(Member.LocalStart.Y, Member.LocalEnd.Y, 0.1));
+		if (!bAxisAligned || !FMath::IsNearlyEqual(
+			Units, FMath::RoundToDouble(Units), 0.1 / 36.0))
+		{
+			++NonUnitizedMemberCount;
+			if (NonUnitizedMemberCount <= 8)
+			{
+				NonUnitizedMemberDiagnostics += FString::Printf(
+					TEXT("|M%d:A%d:L%.3f:%s..%s"), MemberIndex,
+					static_cast<int32>(Member.Axis), Length,
+					*Member.LocalStart.ToCompactString(),
+					*Member.LocalEnd.ToCompactString());
+			}
+		}
+	}
+	TestEqual(*FString::Printf(
+		TEXT("Every Stage 1-4 member is a 36x36x36n brick%s"),
+		*NonUnitizedMemberDiagnostics), NonUnitizedMemberCount, 0);
 	TestEqual(TEXT("Every Stage-3 frame has exactly one downward intent"),
 		Summary.Stage4TopSurfaceIntentCount, Plan.CommonExteriorFrames.Num());
 	TestEqual(TEXT("The ownership buckets are mutually exhaustive"),
@@ -4440,7 +4474,9 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 			[](const ABTSM73BeamC3V3::FPlannedMember& Member)
 			{
 				return Member.ProducedStage
-					== EABTSM73BeamC3GenerationStage::FloorInfillRoof;
+						== EABTSM73BeamC3GenerationStage::FloorInfillRoof
+					&& Member.SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::FloorCourse;
 			}).Num(), Summary.Stage4EmittedTopFrameSegmentCount);
 	TestEqual(TEXT("Every planned member is emitted to the preview IR"),
 		Plan.Members.Num(), Summary.EmittedMemberCount);
@@ -4456,6 +4492,18 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4TopFrameConflictCount, 0);
 	TestNotEqual(TEXT("Top-frame plan has a stable identity"),
 		Summary.Stage4TopFrameHash, int64(0));
+	TestEqual(TEXT("Facade-to-Top ledger count matches its summary"),
+		Plan.FacadeToTopConnections.Num(),
+		Summary.Stage4FacadeToTopConnectionCount);
+	TestEqual(TEXT("Facade-to-Top has no binding violation"),
+		Summary.Stage4FacadeToTopBindingViolationCount, 0);
+	TestEqual(TEXT("Facade-to-Top has no unresolved conflict"),
+		Summary.Stage4FacadeToTopConflictCount, 0);
+	TestNotEqual(TEXT("Facade-to-Top plan has a stable identity"),
+		Summary.Stage4FacadeToTopHash, int64(0));
+	TestEqual(TEXT("Every deferred Stage-3 junction is replaced in Stage 4"),
+		Summary.Stage4ResolvedDeferredJunctionCount,
+		Plan.TopSurfaceFrameDeferredJunctions.Num());
 	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
 		: Plan.TopSurfaceIntents)
 	{
@@ -4525,6 +4573,45 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 					|| Plan.Members[Junction.BlockingStage3ColumnMemberIndex].SkeletonKind
 						== ABTSM73BeamC3V3::ESkeletonMemberKind::GroundExteriorPost));
 	}
+	for (const ABTSM73BeamC3V3::FFacadeToTopConnectionPlan& Connection
+		: Plan.FacadeToTopConnections)
+	{
+		TestTrue(TEXT("Every closure names a real upper facade frame"),
+			Plan.Members.IsValidIndex(Connection.UpperExteriorFrameMemberIndex)
+				&& !Connection.SourceIntentIds.IsEmpty());
+		for (const int32 MemberIndex : Connection.PostSegmentMemberIndices)
+		{
+			TestTrue(TEXT("Every closure post is a bounded Stage-4 Z member"),
+				Plan.Members.IsValidIndex(MemberIndex)
+					&& Plan.Members[MemberIndex].SkeletonKind
+						== ABTSM73BeamC3V3::ESkeletonMemberKind::FacadeToTopPost
+					&& Plan.Members[MemberIndex].Axis
+						== EABTSM73BeamAFrameAxis::Z
+					&& FVector::Distance(Plan.Members[MemberIndex].LocalStart,
+						Plan.Members[MemberIndex].LocalEnd) <= 720.01);
+		}
+		for (const int32 MemberIndex
+			: Connection.SuppressedStage3ColumnMemberIndices)
+		{
+			TestTrue(TEXT("Every replaced Stage-3 column is explicitly suppressed"),
+				Plan.Members.IsValidIndex(MemberIndex)
+					&& Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop);
+		}
+	}
+	for (const ABTSM73BeamC3V3::FTopSurfaceIntentPlan& Intent
+		: Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent == ABTSM73BeamC3V3::EFacadeDownwardIntent::TopSurface)
+		{
+			TestTrue(TEXT("Every TopSurface intent owns a Facade-to-Top closure"),
+				Plan.FacadeToTopConnections.ContainsByPredicate(
+					[&Intent](const ABTSM73BeamC3V3::
+						FFacadeToTopConnectionPlan& Connection)
+					{
+						return Connection.SourceIntentIds.Contains(Intent.IntentId);
+					}));
+		}
+	}
 	TestEqual(TEXT("Deferred facade junction count matches its ledger"),
 		Summary.Stage4DeferredFacadeColumnJunctionCount,
 		Plan.TopSurfaceFrameDeferredJunctions.Num());
@@ -4535,7 +4622,8 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		TEXT("Stage4Intent Entry=%s Stage3=%lld IntentHash=%lld")
 		TEXT(" Frames=%d Ground=%d Top=%d Setback=%d Stack=%d")
 		TEXT(" Unresolved=%d TopFrames=%d Emitted=%d Reused=%d DeferredJunctions=%d Members=%d")
-		TEXT(" TimingMs=%.3f/%.3f Physical=NotEvaluated"),
+		TEXT(" FacadeToTop=%d Seats=%d Posts=%d Suppressed=%d ResolvedDeferred=%d")
+		TEXT(" TimingMs=%.3f/%.3f/%.3f Physical=NotEvaluated"),
 		*Entry.StableId.ToString(), Summary.Stage3PlanHash,
 		Summary.Stage4IntentHash, Summary.Stage4TopSurfaceIntentCount,
 		Summary.Stage4GroundSillIntentCount,
@@ -4546,8 +4634,14 @@ bool FABTSM73BeamC3DemoStage4TopSurfaceIntentTest::RunTest(
 		Summary.Stage4EmittedTopFrameSegmentCount,
 		Summary.Stage4ReusedTopFrameSegmentCount,
 		Summary.Stage4DeferredFacadeColumnJunctionCount, Plan.Members.Num(),
+		Summary.Stage4FacadeToTopConnectionCount,
+		Summary.Stage4FacadeToTopSeatCount,
+		Summary.Stage4FacadeToTopPostSegmentCount,
+		Summary.Stage4SuppressedStage3ColumnMemberCount,
+		Summary.Stage4ResolvedDeferredJunctionCount,
 		Summary.Stage4IntentMilliseconds,
-		Summary.Stage4TopFrameMilliseconds));
+		Summary.Stage4TopFrameMilliseconds,
+		Summary.Stage4FacadeToTopMilliseconds));
 	return true;
 }
 

@@ -40,6 +40,8 @@ namespace ABTSM73BeamC3V3
 		ExteriorPost,
 		GroundExteriorPost,
 		FloorCourse,
+		FacadeToTopSeat,
+		FacadeToTopPost,
 		RoofCourse,
 		SharedCourse,
 		BridgeDiaphragm
@@ -89,6 +91,8 @@ namespace ABTSM73BeamC3V3
 		int32 ExteriorFrameId = INDEX_NONE;
 		/** Stage-4 only: top/floor perimeter segment emitted by or reused for this member. */
 		int32 TopSurfaceFrameSegmentId = INDEX_NONE;
+		/** Stage-4 only: Facade-to-Top closure identity. */
+		int32 FacadeToTopConnectionId = INDEX_NONE;
 		/** Stage-3 exterior-column lineage. */
 		int32 ExteriorColumnId = INDEX_NONE;
 		/** Stage-3 ground-sill lineage. Existing core members remain INDEX_NONE. */
@@ -105,6 +109,8 @@ namespace ABTSM73BeamC3V3
 		FVector LocalEnd = FVector::ZeroVector;
 		/** True only when the member's lower face is seated on the real ground plane. */
 		bool bRequiresGroundSeat = false;
+		/** Stage-3 temporary member replaced by a Stage-4 TopSurface path. */
+		bool bSuppressedByStage4FacadeToTop = false;
 		/** Planned member indices which provide the immediately lower seat. */
 		TArray<int32> RequiredLowerMemberIndices;
 		/** Deterministic core-to-shell lineage; unlike lower seats, this need not touch vertically. */
@@ -884,6 +890,33 @@ namespace ABTSM73BeamC3V3
 		double TangentMinimumCM = 0.0;
 		double TangentMaximumCM = 0.0;
 		int32 BlockingStage3ColumnMemberIndex = INDEX_NONE;
+		int32 ReplacementTopFrameMemberIndex = INDEX_NONE;
+		bool bResolvedByFacadeToTop = false;
+	};
+
+	/** One final Stage-4 path from a semantic top frame to its Stage-3 facade frame. */
+	struct FFacadeToTopConnectionPlan
+	{
+		int32 ConnectionId = INDEX_NONE;
+		TArray<int32> SourceIntentIds;
+		int32 ComponentId = INDEX_NONE;
+		int32 UpperExteriorFrameId = INDEX_NONE;
+		int32 UpperExteriorFrameMemberIndex = INDEX_NONE;
+		int32 TopSurfaceFrameSegmentId = INDEX_NONE;
+		int32 TopSurfaceFrameMemberIndex = INDEX_NONE;
+		ETopSurfaceAuthorityKind TopSurfaceAuthority =
+			ETopSurfaceAuthorityKind::None;
+		double TangentStationCM = 0.0;
+		int32 SeatMemberIndex = INDEX_NONE;
+		bool bReusesExistingSeat = false;
+		TArray<int32> PostSegmentMemberIndices;
+		/** Existing layered-core cells consumed between emitted post runs. */
+		TArray<int32> ReusedSupportMemberIndices;
+		TArray<int32> SuppressedStage3ColumnMemberIndices;
+		bool bDirectFrameContact = false;
+		/** The inward cell is already occupied on every course by the layered core. */
+		bool bReusesExistingSupportChain = false;
+		bool bReusesGroundedAlias = false;
 	};
 
 	/** One compact, ground-rooted, pure-XY layered core selected inside a body union. */
@@ -1212,6 +1245,15 @@ namespace ABTSM73BeamC3V3
 		int32 Stage4DeferredFacadeColumnJunctionCount = 0;
 		int64 Stage4TopFrameHash = 0;
 		double Stage4TopFrameMilliseconds = 0.0;
+		int32 Stage4FacadeToTopConnectionCount = 0;
+		int32 Stage4FacadeToTopSeatCount = 0;
+		int32 Stage4FacadeToTopPostSegmentCount = 0;
+		int32 Stage4SuppressedStage3ColumnMemberCount = 0;
+		int32 Stage4ResolvedDeferredJunctionCount = 0;
+		int32 Stage4FacadeToTopBindingViolationCount = 0;
+		int32 Stage4FacadeToTopConflictCount = 0;
+		int64 Stage4FacadeToTopHash = 0;
+		double Stage4FacadeToTopMilliseconds = 0.0;
 		int32 MinimumBrickCount = 0;
 		int32 MaximumBrickCount = 0;
 		int32 BudgetMargin = 0;
@@ -1306,6 +1348,7 @@ namespace ABTSM73BeamC3V3
 		TArray<FTopSurfaceFrameSegmentPlan> TopSurfaceFrameSegments;
 		TArray<FTopSurfaceFrameDeferredJunctionPlan>
 			TopSurfaceFrameDeferredJunctions;
+		TArray<FFacadeToTopConnectionPlan> FacadeToTopConnections;
 		TArray<FBuildingGroupPlan> BuildingGroups;
 		TArray<FPlannedMember> Members;
 		TArray<FABTSM73BeamASupportVoid> ReservedSupportVoids;

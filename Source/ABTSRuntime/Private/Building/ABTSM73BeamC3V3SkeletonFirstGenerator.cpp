@@ -3975,6 +3975,56 @@ namespace
 		return FBox(Center - Extent, Center + Extent);
 	}
 
+	bool IsIntegerMultipleOfBlock(const double Value)
+	{
+		const double Units = Value / static_cast<double>(BlockUnitsCM);
+		return FMath::IsNearlyEqual(Units, FMath::RoundToDouble(Units),
+			GeometryToleranceCM / static_cast<double>(BlockUnitsCM));
+	}
+
+	bool ValidateUnitizedMemberGeometry(
+		const FPlan& Plan,
+		const int32 ComponentId,
+		const EABTSM73BeamAFrameAxis Axis,
+		const FVector& Start,
+		const FVector& End,
+		FString& OutDiagnostic)
+	{
+		(void)Plan;
+		(void)ComponentId;
+		FPlannedMember Probe;
+		Probe.Axis = Axis;
+		Probe.LocalStart = Start;
+		Probe.LocalEnd = End;
+		const FBox Bounds = PlannedMemberBounds(Probe);
+		const FVector Dimensions = Bounds.GetSize();
+		const bool bAxisAligned =
+			(Axis == EABTSM73BeamAFrameAxis::X
+				&& FMath::IsNearlyEqual(Start.Y, End.Y, GeometryToleranceCM)
+				&& FMath::IsNearlyEqual(Start.Z, End.Z, GeometryToleranceCM))
+			|| (Axis == EABTSM73BeamAFrameAxis::Y
+				&& FMath::IsNearlyEqual(Start.X, End.X, GeometryToleranceCM)
+				&& FMath::IsNearlyEqual(Start.Z, End.Z, GeometryToleranceCM))
+			|| (Axis == EABTSM73BeamAFrameAxis::Z
+				&& FMath::IsNearlyEqual(Start.X, End.X, GeometryToleranceCM)
+				&& FMath::IsNearlyEqual(Start.Y, End.Y, GeometryToleranceCM));
+		const bool bDimensions = IsIntegerMultipleOfBlock(Dimensions.X)
+			&& IsIntegerMultipleOfBlock(Dimensions.Y)
+			&& IsIntegerMultipleOfBlock(Dimensions.Z);
+		if (bAxisAligned && bDimensions)
+		{
+			return true;
+		}
+		OutDiagnostic = FString::Printf(
+			TEXT("Axis=%d:Start=%.3f,%.3f,%.3f:End=%.3f,%.3f,%.3f:Bounds=%.3f,%.3f,%.3f..%.3f,%.3f,%.3f:Dimensions=%.3f,%.3f,%.3f:AxisAligned=%d:DimensionsValid=%d"),
+			static_cast<int32>(Axis), Start.X, Start.Y, Start.Z,
+			End.X, End.Y, End.Z, Bounds.Min.X, Bounds.Min.Y, Bounds.Min.Z,
+			Bounds.Max.X, Bounds.Max.Y, Bounds.Max.Z, Dimensions.X,
+			Dimensions.Y, Dimensions.Z, bAxisAligned ? 1 : 0,
+			bDimensions ? 1 : 0);
+		return false;
+	}
+
 	const FSharedCourseLanePlan* FindSharedLanePlan(
 		const FPlan& Plan, const FPlannedMember& Member)
 	{
@@ -4083,13 +4133,17 @@ namespace
 			|| SkeletonKind == ESkeletonMemberKind::ThroughCourse;
 		const double Maximum = Axis == EABTSM73BeamAFrameAxis::Z || bLongSpanMember
 			? 720.0 : 648.0;
+		FString UnitizedDiagnostic;
 		if (!FMath::IsFinite(Length)
 			|| Length + KINDA_SMALL_NUMBER < BlockUnitsCM
-			|| Length > Maximum + KINDA_SMALL_NUMBER)
+			|| Length > Maximum + KINDA_SMALL_NUMBER
+			|| !ValidateUnitizedMemberGeometry(Plan, ComponentId, Axis,
+				Start, End, UnitizedDiagnostic))
 		{
 			OutError = FString::Printf(
-				TEXT("BeamC3V3MemberSpanExceeded:Axis=%d:Length=%.3f"),
-				static_cast<int32>(Axis), Length);
+				TEXT("BeamC3V3MemberGeometryInvalid:Kind=%d:Axis=%d:Length=%.3f:Maximum=%.3f:%s"),
+				static_cast<int32>(SkeletonKind), static_cast<int32>(Axis),
+				Length, Maximum, *UnitizedDiagnostic);
 			return false;
 		}
 		FPlannedMember& Member = Plan.Members.AddDefaulted_GetRef();
@@ -4110,6 +4164,8 @@ namespace
 			Member.ProducedStage = EABTSM73BeamC3GenerationStage::CommonExteriorFrame;
 			break;
 		case ESkeletonMemberKind::FloorCourse:
+		case ESkeletonMemberKind::FacadeToTopSeat:
+		case ESkeletonMemberKind::FacadeToTopPost:
 		case ESkeletonMemberKind::RoofCourse:
 			Member.ProducedStage = EABTSM73BeamC3GenerationStage::FloorInfillRoof;
 			break;
@@ -8981,9 +9037,12 @@ namespace
 						const bool bPositive = FaceMask == PositiveX || FaceMask == PositiveY;
 						const int32 AxisIndex = bXAxis ? 0 : 1;
 						const int32 TangentIndex = bXAxis ? 1 : 0;
-						const double FacadeCM = bPositive
+						const double RawFacadeCM = bPositive
 							? Candidate->LocalBounds.Max[AxisIndex]
 							: Candidate->LocalBounds.Min[AxisIndex];
+						const double FacadeCM = bPositive
+							? CellFaceAtOrBelow(RawFacadeCM)
+							: CellFaceAtOrAbove(RawFacadeCM);
 						const double TangentMinimum = Candidate->LocalBounds.Min[TangentIndex];
 						const double TangentMaximum = Candidate->LocalBounds.Max[TangentIndex];
 						TArray<double> Cuts = {TangentMinimum, TangentMaximum};
@@ -9008,7 +9067,7 @@ namespace
 							}
 							FVector Witness = Candidate->LocalBounds.GetCenter();
 							Witness.Z = Z;
-							Witness[AxisIndex] = FacadeCM + (bPositive ? 1.0 : -1.0)
+							Witness[AxisIndex] = RawFacadeCM + (bPositive ? 1.0 : -1.0)
 								* GeometryToleranceCM * 2.0;
 							Witness[TangentIndex] = (Cuts[CutIndex] + Cuts[CutIndex + 1]) * 0.5;
 							const bool bOutsideEmpty = !FacadeVolumes.ContainsByPredicate(
@@ -9019,14 +9078,23 @@ namespace
 								});
 							if (bOutsideEmpty)
 							{
+								const double QuantizedTangentMinimum =
+									CellFaceAtOrAbove(Cuts[CutIndex]);
+								const double QuantizedTangentMaximum =
+									CellFaceAtOrBelow(Cuts[CutIndex + 1]);
+								if (QuantizedTangentMaximum - QuantizedTangentMinimum
+									< BlockUnitsCM - GeometryToleranceCM)
+								{
+									continue;
+								}
 								FRawFacadeSpan& Span = RawFacadeSpans.AddDefaulted_GetRef();
 								Span.ComponentId = ComponentId;
 								Span.CourseIndex = Course;
 								Span.SourceVolumeId = Candidate->SourceVolumeId;
 								Span.FaceMask = FaceMask;
 								Span.FacadeCoordinateCM = FacadeCM;
-								Span.TangentMinimumCM = Cuts[CutIndex];
-								Span.TangentMaximumCM = Cuts[CutIndex + 1];
+								Span.TangentMinimumCM = QuantizedTangentMinimum;
+								Span.TangentMaximumCM = QuantizedTangentMaximum;
 							}
 						}
 					}
@@ -9301,8 +9369,14 @@ namespace
 
 			for (const FResolvedFacadeEnvelopeVolume* Target : Targets)
 			{
-				const double FacadeCM = bPositive
+				const double RawFacadeCM = bPositive
 					? Target->LocalBounds.Max[AxisIndex] : Target->LocalBounds.Min[AxisIndex];
+				// Structural members use an inscribed 36 cm lattice even when the
+				// semantic WFC envelope carries continuous bounds.  The outer member
+				// face must never be rounded through the authored silhouette.
+				const double FacadeCM = bPositive
+					? CellFaceAtOrBelow(RawFacadeCM)
+					: CellFaceAtOrAbove(RawFacadeCM);
 				// Keep exactly one block of overlap over the Stage-1 orthogonal
 				// bearing, but require at least one complete block outside the core.
 				const double InnerCM = AnchorCM
@@ -9627,10 +9701,13 @@ namespace
 			const bool bPositive = (Member.FaceMask & (PositiveX | PositiveY)) != 0;
 			const double Endpoint = bPositive
 				? Member.LocalEnd[AxisIndex] : Member.LocalStart[AxisIndex];
+			const double ExpectedEndpoint = Target == nullptr ? 0.0
+				: bPositive
+					? CellFaceAtOrBelow(Target->LocalBounds.Max[AxisIndex])
+					: CellFaceAtOrAbove(Target->LocalBounds.Min[AxisIndex]);
 			Plan.Summary.CouplingEndpointViolationCount += Target == nullptr
-				|| FMath::Abs(Endpoint - (bPositive
-					? Target->LocalBounds.Max[AxisIndex]
-					: Target->LocalBounds.Min[AxisIndex])) > GeometryToleranceCM ? 1 : 0;
+				|| FMath::Abs(Endpoint - ExpectedEndpoint)
+					> GeometryToleranceCM ? 1 : 0;
 			const FCoreCellPlan* OriginCore = Plan.CoreCells.IsValidIndex(
 				Member.OriginCoreCellId)
 				? &Plan.CoreCells[Member.OriginCoreCellId] : nullptr;
@@ -9934,17 +10011,23 @@ namespace
 			{
 				SyntheticSpan.CourseIndex = FrameCourse;
 				SyntheticSpan.SourceVolumeId = Lower.TargetFacadeSourceVolumeId;
-				SyntheticSpan.TangentMinimumCM = Band.TangentCoordinateCM;
-				SyntheticSpan.TangentMaximumCM = Band.TangentCoordinateCM;
+				// The paired Stage-2 courses are physical proof of one complete
+				// clamp cell even when the semantic face ledger has no middle-course
+				// span.  Materialize that exact voxel instead of representing it as a
+				// zero-width point that later requires an off-lattice expansion.
+				SyntheticSpan.TangentMinimumCM = Band.TangentCoordinateCM
+					- BlockUnitsCM * 0.5;
+				SyntheticSpan.TangentMaximumCM = Band.TangentCoordinateCM
+					+ BlockUnitsCM * 0.5;
 				Span = &SyntheticSpan;
 			}
-			// Course spans describe semantic face planes. A real 36 cm brick centred
-			// on a span endpoint needs one half-section beyond that tangent endpoint,
-			// exactly like its half-section on the inward normal side.
-			const double AvailableMinimum = Span->TangentMinimumCM
-				- BlockUnitsCM * 0.5;
-			const double AvailableMaximum = Span->TangentMaximumCM
-				+ BlockUnitsCM * 0.5;
+			// Stage 2 has already reduced semantic spans to complete 36 cm cells.
+			// Consume only those physical cells here; a synthetic middle-course span
+			// above materializes the one proven clamp cell explicitly.
+			const double AvailableMinimum = CellFaceAtOrAbove(
+				Span->TangentMinimumCM);
+			const double AvailableMaximum = CellFaceAtOrBelow(
+				Span->TangentMaximumCM);
 			const double AvailableLength = AvailableMaximum - AvailableMinimum;
 			if (AvailableLength < BlockUnitsCM - GeometryToleranceCM)
 			{
@@ -9972,6 +10055,13 @@ namespace
 					Band.TangentCoordinateCM + BlockUnitsCM * 0.5);
 				RunMinimum = RunMaximum - FrameLength;
 			}
+			RunMinimum = CellFaceAtOrAbove(RunMinimum);
+			if (RunMinimum + FrameLength
+				> AvailableMaximum + GeometryToleranceCM)
+			{
+				RunMinimum = AvailableMaximum - FrameLength;
+			}
+			RunMaximum = RunMinimum + FrameLength;
 
 			const bool bNormalX = Lower.Axis == EABTSM73BeamAFrameAxis::X;
 			const bool bPositiveFace = Band.FaceMask == PositiveX
@@ -10147,6 +10237,18 @@ namespace
 			const int32 FrameId = Plan.CommonExteriorFrames.Num();
 			if (!bReusesExistingMember)
 			{
+				// Every collision/fallback branch converges here.  Preserve the lane
+				// phase, but discard any fractional tail before a physical member is
+				// admitted to the unitized plan.
+				ResolvedRunMinimum = CellFaceAtOrAbove(ResolvedRunMinimum);
+				ResolvedRunMaximum = CellFaceAtOrBelow(ResolvedRunMaximum);
+				if (ResolvedRunMaximum - ResolvedRunMinimum
+					< BlockUnitsCM - GeometryToleranceCM)
+				{
+					++Plan.Summary.Stage3FacadeFitViolationCount;
+					++Plan.Summary.Stage3AnchorBandWithoutFrameCount;
+					continue;
+				}
 				const FVector ResolvedStart = bNormalX
 					? Position(FrameNormalCoordinate, ResolvedRunMinimum, Z)
 					: Position(ResolvedRunMinimum, FrameNormalCoordinate, Z);
@@ -23402,6 +23504,934 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FloorTopFrames(
 	Plan.Summary.bAccepted = true;
 	Plan.Summary.Stage4TopFrameMilliseconds = ElapsedMilliseconds(StartSeconds);
 	return Plan.Summary.Stage4TopFrameHash != 0;
+}
+
+bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FacadeToTopConnections(
+	const FABTSM73BeamD0ResolvedProfile& Profile,
+	const FABTSM73DAG5BV2GenerationResult& Silhouette,
+	ABTSM73BeamC3V3::FGenerationResult& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamC3V3;
+	if (!GenerateStage4FloorTopFrames(Profile, Silhouette, OutResult, OutError))
+	{
+		return false;
+	}
+	FPlan& Plan = OutResult.Plan;
+	FABTSM73BeamAGenerationResult& Assembly = OutResult.Assembly;
+	const double StartSeconds = FPlatformTime::Seconds();
+	const int32 InputMemberCount = Plan.Members.Num();
+	Plan.FacadeToTopConnections.Reset();
+	Plan.Summary.Stage4FacadeToTopConnectionCount = 0;
+	Plan.Summary.Stage4FacadeToTopSeatCount = 0;
+	Plan.Summary.Stage4FacadeToTopPostSegmentCount = 0;
+	Plan.Summary.Stage4SuppressedStage3ColumnMemberCount = 0;
+	Plan.Summary.Stage4ResolvedDeferredJunctionCount = 0;
+	Plan.Summary.Stage4FacadeToTopBindingViolationCount = 0;
+	Plan.Summary.Stage4FacadeToTopConflictCount = 0;
+	Plan.Summary.Stage4FacadeToTopHash = 0;
+	Plan.Summary.Stage4FacadeToTopMilliseconds = 0.0;
+	FString BindingDiagnostics;
+
+	auto FindFrame = [&Plan](const int32 ExteriorFrameId)
+	{
+		return Plan.CommonExteriorFrames.FindByPredicate(
+			[ExteriorFrameId](const FCommonExteriorFramePlan& Frame)
+			{
+				return Frame.ExteriorFrameId == ExteriorFrameId;
+			});
+	};
+	auto FindTopFrameForIntent = [&Plan](const int32 IntentId,
+		const double PreferredStation)
+	{
+		const FTopSurfaceFrameSegmentPlan* Best = nullptr;
+		double BestDistance = DBL_MAX;
+		for (const FTopSurfaceFrameSegmentPlan& Segment : Plan.TopSurfaceFrameSegments)
+		{
+			if (!Segment.SourceIntentIds.Contains(IntentId)
+				|| !Plan.Members.IsValidIndex(Segment.MemberIndex))
+			{
+				continue;
+			}
+			const double Distance = PreferredStation < Segment.TangentMinimumCM
+				? Segment.TangentMinimumCM - PreferredStation
+				: PreferredStation > Segment.TangentMaximumCM
+					? PreferredStation - Segment.TangentMaximumCM : 0.0;
+			if (Best == nullptr || Distance < BestDistance - GeometryToleranceCM
+				|| (FMath::IsNearlyEqual(Distance, BestDistance, GeometryToleranceCM)
+					&& Segment.TopSurfaceFrameSegmentId
+						< Best->TopSurfaceFrameSegmentId))
+			{
+				Best = &Segment;
+				BestDistance = Distance;
+			}
+		}
+		return Best;
+	};
+
+	TSet<int32> GroundedFrameMemberIndices;
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent == EFacadeDownwardIntent::GroundSill)
+		{
+			if (const FCommonExteriorFramePlan* Frame = FindFrame(Intent.ExteriorFrameId))
+			{
+				GroundedFrameMemberIndices.Add(Frame->MemberIndex);
+			}
+		}
+	}
+
+	// Stage 3 deliberately connected every facade frame downward before Stage 4
+	// knew whether the real receiver was ground or a setback top.  Mark only the
+	// TopSurface-owned temporary paths as superseded; indices remain stable so the
+	// stage-local ledger can be inspected without corrupting older provenance.
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent != EFacadeDownwardIntent::TopSurface)
+		{
+			continue;
+		}
+		const FCommonExteriorFramePlan* Frame = FindFrame(Intent.ExteriorFrameId);
+		if (Frame == nullptr || GroundedFrameMemberIndices.Contains(Frame->MemberIndex))
+		{
+			continue;
+		}
+		for (const FExteriorColumnPlan& Column : Plan.ExteriorColumns)
+		{
+			if (Column.UpperExteriorFrameId != Intent.ExteriorFrameId)
+			{
+				continue;
+			}
+			for (const int32 MemberIndex : Column.SegmentMemberIndices)
+			{
+				if (Plan.Members.IsValidIndex(MemberIndex)
+					&& !Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop)
+				{
+					Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop = true;
+					++Plan.Summary.Stage4SuppressedStage3ColumnMemberCount;
+				}
+			}
+		}
+	}
+
+	auto PenetratesActiveMember = [&Plan](const FPlannedMember& Probe,
+		const TSet<int32>& AllowedMembers, int32& OutBlocker)
+	{
+		OutBlocker = INDEX_NONE;
+		const FBox Bounds = PlannedMemberBounds(Probe);
+		double NearestBlockerZ = DBL_MAX;
+		for (int32 MemberIndex = 0; MemberIndex < Plan.Members.Num(); ++MemberIndex)
+		{
+			if (AllowedMembers.Contains(MemberIndex)
+				|| Plan.Members[MemberIndex].bSuppressedByStage4FacadeToTop)
+			{
+				continue;
+			}
+			if (BoxesPenetrate(Bounds, PlannedMemberBounds(Plan.Members[MemberIndex])))
+			{
+				const double CandidateZ = PlannedMemberBounds(
+					Plan.Members[MemberIndex]).Min.Z;
+				if (Probe.Axis != EABTSM73BeamAFrameAxis::Z)
+				{
+					OutBlocker = MemberIndex;
+					return true;
+				}
+				if (CandidateZ < NearestBlockerZ - GeometryToleranceCM
+					|| (FMath::IsNearlyEqual(CandidateZ, NearestBlockerZ,
+						GeometryToleranceCM) && MemberIndex < OutBlocker))
+				{
+					OutBlocker = MemberIndex;
+					NearestBlockerZ = CandidateZ;
+				}
+			}
+		}
+		return OutBlocker != INDEX_NONE;
+	};
+	auto AddConnectionMember = [&Plan, &OutError](
+		const ESkeletonMemberKind Kind, const int32 ConnectionId,
+		const int32 ComponentId, const int32 SourceVolumeId,
+		const int32 CourseIndex, const int32 StationA, const int32 StationB,
+		const uint8 FaceMask, const EABTSM73BeamAFrameAxis Axis,
+		const FVector& Start, const FVector& End, int32& OutMemberIndex)
+	{
+		OutMemberIndex = Plan.Members.Num();
+		if (!AddPlannedMember(Plan, EOwnerKind::Floor, Kind, ConnectionId,
+			ComponentId, SourceVolumeId, INDEX_NONE, CourseIndex, StationA,
+			StationB, FaceMask, Axis,
+			Axis == EABTSM73BeamAFrameAxis::Z
+				? EABTSM73BeamAMemberRole::Post
+				: EABTSM73BeamAMemberRole::PrimaryBeam,
+			Start, End, OutError))
+		{
+			OutMemberIndex = INDEX_NONE;
+			return false;
+		}
+		Plan.Members[OutMemberIndex].FacadeToTopConnectionId = ConnectionId;
+		Plan.Summary.TotalMemberLengthCM += FVector::Distance(Start, End);
+		return true;
+	};
+
+	// Once the obsolete column is suppressed, every deferred one-cell top-frame
+	// junction becomes real material.  It remains a separate segment so the exact
+	// replacement is visible in the ledger.
+	for (FTopSurfaceFrameDeferredJunctionPlan& Junction
+		: Plan.TopSurfaceFrameDeferredJunctions)
+	{
+		if (!Plan.Members.IsValidIndex(Junction.BlockingStage3ColumnMemberIndex)
+			|| !Plan.Members[Junction.BlockingStage3ColumnMemberIndex]
+				.bSuppressedByStage4FacadeToTop)
+		{
+			continue;
+		}
+		const double GroundZ = Plan.Components.IsValidIndex(Junction.ComponentId)
+			? Plan.Components[Junction.ComponentId].GroundPlaneZCM : 0.0;
+		const double Z = GroundZ
+			+ (Junction.SurfaceCourseIndex + 0.5) * BlockUnitsCM;
+		const FVector Start = Junction.Axis == EABTSM73BeamAFrameAxis::X
+			? Position(Junction.TangentMinimumCM, Junction.NormalCoordinateCM, Z)
+			: Position(Junction.NormalCoordinateCM, Junction.TangentMinimumCM, Z);
+		const FVector End = Junction.Axis == EABTSM73BeamAFrameAxis::X
+			? Position(Junction.TangentMaximumCM, Junction.NormalCoordinateCM, Z)
+			: Position(Junction.NormalCoordinateCM, Junction.TangentMaximumCM, Z);
+		int32 MemberIndex = INDEX_NONE;
+		const int32 SegmentId = Plan.TopSurfaceFrameSegments.Num();
+		const int32 SourceVolumeId = Junction.SourceIntentIds.IsEmpty()
+			? INDEX_NONE : Plan.TopSurfaceIntents[Junction.SourceIntentIds[0]]
+				.TargetSourceVolumeId;
+		if (!AddConnectionMember(ESkeletonMemberKind::FloorCourse, INDEX_NONE,
+			Junction.ComponentId, SourceVolumeId, Junction.SurfaceCourseIndex,
+			FMath::RoundToInt(Junction.TangentMinimumCM / BlockUnitsCM),
+			FMath::RoundToInt(Junction.TangentMaximumCM / BlockUnitsCM),
+			Junction.FaceMask, Junction.Axis, Start, End, MemberIndex))
+		{
+			return false;
+		}
+		Plan.Members[MemberIndex].TopSurfaceFrameSegmentId = SegmentId;
+		FTopSurfaceFrameSegmentPlan& Segment =
+			Plan.TopSurfaceFrameSegments.AddDefaulted_GetRef();
+		Segment.TopSurfaceFrameSegmentId = SegmentId;
+		Segment.SourceIntentIds = Junction.SourceIntentIds;
+		Segment.ComponentId = Junction.ComponentId;
+		Segment.SurfaceCourseIndex = Junction.SurfaceCourseIndex;
+		Segment.FaceMask = Junction.FaceMask;
+		Segment.Axis = Junction.Axis;
+		Segment.NormalCoordinateCM = Junction.NormalCoordinateCM;
+		Segment.TangentMinimumCM = Junction.TangentMinimumCM;
+		Segment.TangentMaximumCM = Junction.TangentMaximumCM;
+		Segment.MemberIndex = MemberIndex;
+		Junction.ReplacementTopFrameMemberIndex = MemberIndex;
+		Junction.bResolvedByFacadeToTop = true;
+		++Plan.Summary.Stage4ResolvedDeferredJunctionCount;
+		++Plan.Summary.Stage4TopFrameSegmentCount;
+		++Plan.Summary.Stage4EmittedTopFrameSegmentCount;
+	}
+
+	TSet<FString> EmittedConnectionKeys;
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent != EFacadeDownwardIntent::TopSurface)
+		{
+			continue;
+		}
+		const FCommonExteriorFramePlan* UpperFrame = FindFrame(Intent.ExteriorFrameId);
+		if (UpperFrame == nullptr || !Plan.Members.IsValidIndex(UpperFrame->MemberIndex))
+		{
+			++Plan.Summary.Stage4FacadeToTopBindingViolationCount;
+			BindingDiagnostics += FString::Printf(
+				TEXT("|MissingUpperIntent%d:Frame=%d"), Intent.IntentId,
+				Intent.ExteriorFrameId);
+			continue;
+		}
+		if (GroundedFrameMemberIndices.Contains(UpperFrame->MemberIndex))
+		{
+			FFacadeToTopConnectionPlan& Connection =
+				Plan.FacadeToTopConnections.AddDefaulted_GetRef();
+			Connection.ConnectionId = Plan.FacadeToTopConnections.Num() - 1;
+			Connection.SourceIntentIds.Add(Intent.IntentId);
+			Connection.ComponentId = Intent.ComponentId;
+			Connection.UpperExteriorFrameId = Intent.ExteriorFrameId;
+			Connection.UpperExteriorFrameMemberIndex = UpperFrame->MemberIndex;
+			Connection.TopSurfaceAuthority = Intent.TopSurfaceAuthority;
+			Connection.bReusesGroundedAlias = true;
+			continue;
+		}
+
+		TArray<const FExteriorColumnPlan*> SourceColumns;
+		for (const FExteriorColumnPlan& Column : Plan.ExteriorColumns)
+		{
+			if (Column.UpperExteriorFrameId == Intent.ExteriorFrameId)
+			{
+				SourceColumns.Add(&Column);
+			}
+		}
+		if (SourceColumns.IsEmpty())
+		{
+			SourceColumns.Add(nullptr);
+		}
+		for (const FExteriorColumnPlan* SourceColumn : SourceColumns)
+		{
+			const double PreferredStation = SourceColumn != nullptr
+				? SourceColumn->TangentCoordinateCM
+				: (Intent.TargetSupportTangentMinimumCM
+					+ Intent.TargetSupportTangentMaximumCM) * 0.5;
+			const FTopSurfaceFrameSegmentPlan* TopFrame =
+				FindTopFrameForIntent(Intent.IntentId, PreferredStation);
+			if (TopFrame == nullptr)
+			{
+				++Plan.Summary.Stage4FacadeToTopBindingViolationCount;
+				BindingDiagnostics += FString::Printf(
+					TEXT("|MissingTopFrameIntent%d:Frame=%d:Station=%.1f"),
+					Intent.IntentId, Intent.ExteriorFrameId, PreferredStation);
+				continue;
+			}
+			// Preserve the Stage-3 column station exactly.  Core lanes use the same
+			// 36 cm lattice but are not necessarily cell-centred relative to world
+			// zero; re-snapping here can move a previously legal facade post into a
+			// ThroughCourse.
+			double Station = FMath::Clamp(PreferredStation,
+				TopFrame->TangentMinimumCM + BlockUnitsCM * 0.5,
+				TopFrame->TangentMaximumCM - BlockUnitsCM * 0.5);
+			int32 SeatLiftCourseCount = 1;
+			int32 ReusedSeatMemberIndex = INDEX_NONE;
+			TArray<int32> PreexistingSupportChain;
+			const bool bZeroClearanceSetback = Intent.TopSurfaceAuthority
+				== ETopSurfaceAuthorityKind::ExposedSetbackTop
+				&& Intent.ExteriorFrameCourseIndex
+					<= Intent.TargetSurfaceCourseIndex + 1;
+			if (!bZeroClearanceSetback && Intent.TopSurfaceAuthority
+				== ETopSurfaceAuthorityKind::ExposedSetbackTop)
+			{
+				const bool bNormalX = Intent.FaceMask == NegativeX
+					|| Intent.FaceMask == PositiveX;
+				const bool bPositive = Intent.FaceMask == PositiveX
+					|| Intent.FaceMask == PositiveY;
+				const double PostNormal = Intent.FacadeCoordinateCM
+					+ (bPositive ? -1.0 : 1.0) * BlockUnitsCM * 0.5;
+				const double SeatMinimum = FMath::Min(
+					PostNormal, TopFrame->NormalCoordinateCM) - BlockUnitsCM * 0.5;
+				const double SeatMaximum = FMath::Max(
+					PostNormal, TopFrame->NormalCoordinateCM) + BlockUnitsCM * 0.5;
+				const double GroundZ = Plan.Components.IsValidIndex(Intent.ComponentId)
+					? Plan.Components[Intent.ComponentId].GroundPlaneZCM : 0.0;
+				TArray<double> CandidateStations = {Station};
+				for (double Candidate = TopFrame->TangentMinimumCM
+						+ BlockUnitsCM * 0.5;
+					Candidate <= TopFrame->TangentMaximumCM
+						- BlockUnitsCM * 0.5 + GeometryToleranceCM;
+					Candidate += BlockUnitsCM)
+				{
+					CandidateStations.AddUnique(Candidate);
+				}
+				bool bFoundSeatStation = false;
+				FString SeatDiagnostics;
+				const int32 MaximumLift = FMath::Clamp(
+					Intent.ExteriorFrameCourseIndex
+						- Intent.TargetSurfaceCourseIndex - 1, 1, 20);
+				for (int32 Lift = 1; Lift <= MaximumLift && !bFoundSeatStation; ++Lift)
+				{
+					const double SeatZ = GroundZ
+						+ (Intent.TargetSurfaceCourseIndex + Lift + 0.5)
+							* BlockUnitsCM;
+					for (const double Candidate : CandidateStations)
+					{
+						FPlannedMember SeatProbe;
+						SeatProbe.Axis = bNormalX ? EABTSM73BeamAFrameAxis::X
+							: EABTSM73BeamAFrameAxis::Y;
+						SeatProbe.LocalStart = bNormalX
+							? Position(SeatMinimum, Candidate, SeatZ)
+							: Position(Candidate, SeatMinimum, SeatZ);
+						SeatProbe.LocalEnd = bNormalX
+							? Position(SeatMaximum, Candidate, SeatZ)
+							: Position(Candidate, SeatMaximum, SeatZ);
+						TSet<int32> Allowed = {
+							TopFrame->MemberIndex, UpperFrame->MemberIndex};
+						int32 Blocker = INDEX_NONE;
+						if (!PenetratesActiveMember(SeatProbe, Allowed, Blocker))
+						{
+							Station = Candidate;
+							SeatLiftCourseCount = Lift;
+							bFoundSeatStation = true;
+							break;
+						}
+						if (Plan.Members.IsValidIndex(Blocker)
+							&& Plan.Members[Blocker].SkeletonKind
+								== ESkeletonMemberKind::FacadeToTopSeat
+							&& Plan.Members[Blocker].Axis == SeatProbe.Axis)
+						{
+							const FBox ExistingBounds = PlannedMemberBounds(
+								Plan.Members[Blocker]);
+							const FBox ProbeBounds = PlannedMemberBounds(SeatProbe);
+							if (ExistingBounds.Min.X
+									<= ProbeBounds.Min.X + GeometryToleranceCM
+								&& ExistingBounds.Max.X
+									>= ProbeBounds.Max.X - GeometryToleranceCM
+								&& ExistingBounds.Min.Y
+									<= ProbeBounds.Min.Y + GeometryToleranceCM
+								&& ExistingBounds.Max.Y
+									>= ProbeBounds.Max.Y - GeometryToleranceCM
+								&& ExistingBounds.Min.Z
+									<= ProbeBounds.Min.Z + GeometryToleranceCM
+								&& ExistingBounds.Max.Z
+									>= ProbeBounds.Max.Z - GeometryToleranceCM)
+							{
+								Station = Candidate;
+								SeatLiftCourseCount = Lift;
+								ReusedSeatMemberIndex = Blocker;
+								bFoundSeatStation = true;
+								break;
+							}
+						}
+						if (SeatDiagnostics.Len() < 1200
+							&& Plan.Members.IsValidIndex(Blocker))
+						{
+							const FBox BlockerBounds = PlannedMemberBounds(
+								Plan.Members[Blocker]);
+							SeatDiagnostics += FString::Printf(
+								TEXT("|L%d:T%.1f:B%d:K%d:A%d:Q%d:%.1f,%.1f..%.1f,%.1f"),
+								Lift, Candidate, Blocker,
+								static_cast<int32>(Plan.Members[Blocker].SkeletonKind),
+								static_cast<int32>(Plan.Members[Blocker].Axis),
+								Plan.Members[Blocker].CourseIndex,
+								BlockerBounds.Min.X, BlockerBounds.Min.Y,
+								BlockerBounds.Max.X, BlockerBounds.Max.Y);
+						}
+					}
+				}
+				if (!bFoundSeatStation)
+				{
+					const double ChainStartZ = GroundZ
+						+ (Intent.TargetSurfaceCourseIndex + 1) * BlockUnitsCM;
+					const double ChainEndZ = GroundZ
+						+ Intent.ExteriorFrameCourseIndex * BlockUnitsCM;
+					for (const double Candidate : CandidateStations)
+					{
+						TArray<int32> CandidateChain;
+						bool bComplete = true;
+						for (double CellBottomZ = ChainStartZ;
+							CellBottomZ < ChainEndZ - GeometryToleranceCM;
+							CellBottomZ += BlockUnitsCM)
+						{
+							const double SampleZ = CellBottomZ + BlockUnitsCM * 0.5;
+							const double X = bNormalX ? PostNormal : Candidate;
+							const double Y = bNormalX ? Candidate : PostNormal;
+							int32 CoveringMemberIndex = INDEX_NONE;
+							for (int32 MemberIndex = 0;
+								MemberIndex < Plan.Members.Num(); ++MemberIndex)
+							{
+								const FPlannedMember& Member = Plan.Members[MemberIndex];
+								if (Member.ComponentId != Intent.ComponentId
+									|| Member.bSuppressedByStage4FacadeToTop
+									|| Member.Axis == EABTSM73BeamAFrameAxis::Z)
+								{
+									continue;
+								}
+								const FBox Bounds = PlannedMemberBounds(Member);
+								if (X >= Bounds.Min.X - GeometryToleranceCM
+									&& X <= Bounds.Max.X + GeometryToleranceCM
+									&& Y >= Bounds.Min.Y - GeometryToleranceCM
+									&& Y <= Bounds.Max.Y + GeometryToleranceCM
+									&& SampleZ >= Bounds.Min.Z - GeometryToleranceCM
+									&& SampleZ <= Bounds.Max.Z + GeometryToleranceCM)
+								{
+									CoveringMemberIndex = MemberIndex;
+									break;
+								}
+							}
+							if (CoveringMemberIndex == INDEX_NONE)
+							{
+								bComplete = false;
+								break;
+							}
+							CandidateChain.AddUnique(CoveringMemberIndex);
+						}
+						if (bComplete && !CandidateChain.IsEmpty())
+						{
+							Station = Candidate;
+							PreexistingSupportChain = MoveTemp(CandidateChain);
+							break;
+						}
+					}
+					if (PreexistingSupportChain.IsEmpty())
+					{
+						++Plan.Summary.Stage4FacadeToTopConflictCount;
+						OutError = FString::Printf(
+							TEXT("BeamC3V3Stage4FacadeToTopSeatStationUnavailable:Intent=%d:Frame=%d:Range=%.3f..%.3f:Diagnostics=%s"),
+							Intent.IntentId, Intent.ExteriorFrameId,
+							TopFrame->TangentMinimumCM,
+							TopFrame->TangentMaximumCM, *SeatDiagnostics);
+						return false;
+					}
+				}
+			}
+			const FString Key = FString::Printf(TEXT("%d:%lld"),
+				UpperFrame->MemberIndex, QHash(Station));
+			if (EmittedConnectionKeys.Contains(Key))
+			{
+				if (FFacadeToTopConnectionPlan* ExistingConnection =
+					Plan.FacadeToTopConnections.FindByPredicate(
+						[UpperFrame, Station](const FFacadeToTopConnectionPlan& Candidate)
+						{
+							return Candidate.UpperExteriorFrameMemberIndex
+								== UpperFrame->MemberIndex
+								&& FMath::IsNearlyEqual(Candidate.TangentStationCM,
+									Station, GeometryToleranceCM);
+						}))
+				{
+					ExistingConnection->SourceIntentIds.AddUnique(Intent.IntentId);
+				}
+				continue;
+			}
+			EmittedConnectionKeys.Add(Key);
+			FFacadeToTopConnectionPlan& Connection =
+				Plan.FacadeToTopConnections.AddDefaulted_GetRef();
+			Connection.ConnectionId = Plan.FacadeToTopConnections.Num() - 1;
+			Connection.SourceIntentIds.Add(Intent.IntentId);
+			Connection.ComponentId = Intent.ComponentId;
+			Connection.UpperExteriorFrameId = Intent.ExteriorFrameId;
+			Connection.UpperExteriorFrameMemberIndex = UpperFrame->MemberIndex;
+			Connection.TopSurfaceFrameSegmentId =
+				TopFrame->TopSurfaceFrameSegmentId;
+			Connection.TopSurfaceFrameMemberIndex = TopFrame->MemberIndex;
+			Connection.TopSurfaceAuthority = Intent.TopSurfaceAuthority;
+			Connection.TangentStationCM = Station;
+			if (SourceColumn != nullptr)
+			{
+				Connection.SuppressedStage3ColumnMemberIndices =
+					SourceColumn->SegmentMemberIndices;
+			}
+			if (!PreexistingSupportChain.IsEmpty())
+			{
+				Connection.ReusedSupportMemberIndices =
+					MoveTemp(PreexistingSupportChain);
+				Connection.bReusesExistingSupportChain = true;
+				continue;
+			}
+			if (bZeroClearanceSetback)
+			{
+				// There is no free 36 cm course between the exposed shoulder and
+				// the facade frame.  The frame bears directly on the semantic top;
+				// inserting a perpendicular seat would overlap the frame's own cell.
+				Connection.bDirectFrameContact = true;
+				continue;
+			}
+
+			const bool bNormalX = Intent.FaceMask == NegativeX
+				|| Intent.FaceMask == PositiveX;
+			const bool bPositive = Intent.FaceMask == PositiveX
+				|| Intent.FaceMask == PositiveY;
+			const int32 NormalAxis = bNormalX ? 0 : 1;
+			const double GroundZ = Plan.Components.IsValidIndex(Intent.ComponentId)
+				? Plan.Components[Intent.ComponentId].GroundPlaneZCM : 0.0;
+			const double UpperBottomZ = GroundZ
+				+ Intent.ExteriorFrameCourseIndex * BlockUnitsCM;
+			double PostStartZ = GroundZ
+				+ (Intent.TargetSurfaceCourseIndex + 1) * BlockUnitsCM;
+			double PostNormal = TopFrame->NormalCoordinateCM;
+			int32 LowerMemberIndex = TopFrame->MemberIndex;
+			if (Intent.TopSurfaceAuthority
+				== ETopSurfaceAuthorityKind::ExposedSetbackTop)
+			{
+				PostNormal = Intent.FacadeCoordinateCM
+					+ (bPositive ? -1.0 : 1.0) * BlockUnitsCM * 0.5;
+				const double OuterNormal = TopFrame->NormalCoordinateCM;
+				const double SeatMinimum = FMath::Min(PostNormal, OuterNormal)
+					- BlockUnitsCM * 0.5;
+				const double SeatMaximum = FMath::Max(PostNormal, OuterNormal)
+					+ BlockUnitsCM * 0.5;
+				const double SeatZ = GroundZ
+					+ (Intent.TargetSurfaceCourseIndex
+						+ SeatLiftCourseCount + 0.5) * BlockUnitsCM;
+				FPlannedMember SeatProbe;
+				SeatProbe.Axis = bNormalX ? EABTSM73BeamAFrameAxis::X
+					: EABTSM73BeamAFrameAxis::Y;
+				SeatProbe.LocalStart = bNormalX
+					? Position(SeatMinimum, Station, SeatZ)
+					: Position(Station, SeatMinimum, SeatZ);
+				SeatProbe.LocalEnd = bNormalX
+					? Position(SeatMaximum, Station, SeatZ)
+					: Position(Station, SeatMaximum, SeatZ);
+				TSet<int32> Allowed = {TopFrame->MemberIndex,
+					UpperFrame->MemberIndex, ReusedSeatMemberIndex};
+				int32 Blocker = INDEX_NONE;
+				if (PenetratesActiveMember(SeatProbe, Allowed, Blocker))
+				{
+					++Plan.Summary.Stage4FacadeToTopConflictCount;
+					OutError = FString::Printf(
+						TEXT("BeamC3V3Stage4FacadeToTopSeatConflict:Intent=%d:Frame=%d:Station=%.3f:Blocker=%d"),
+						Intent.IntentId, Intent.ExteriorFrameId, Station, Blocker);
+					return false;
+				}
+				if (ReusedSeatMemberIndex == INDEX_NONE
+					&& SeatLiftCourseCount > 1)
+				{
+					const double RiserStartZ = GroundZ
+						+ (Intent.TargetSurfaceCourseIndex + 1) * BlockUnitsCM;
+					const double RiserEndZ = GroundZ
+						+ (Intent.TargetSurfaceCourseIndex + SeatLiftCourseCount)
+							* BlockUnitsCM;
+					FPlannedMember RiserProbe;
+					RiserProbe.Axis = EABTSM73BeamAFrameAxis::Z;
+					RiserProbe.LocalStart = bNormalX
+						? Position(OuterNormal, Station, RiserStartZ)
+						: Position(Station, OuterNormal, RiserStartZ);
+					RiserProbe.LocalEnd = RiserProbe.LocalStart
+						+ FVector(0.0, 0.0, RiserEndZ - RiserStartZ);
+					TSet<int32> RiserAllowed = {
+						TopFrame->MemberIndex, UpperFrame->MemberIndex};
+					int32 RiserBlocker = INDEX_NONE;
+					if (PenetratesActiveMember(RiserProbe, RiserAllowed, RiserBlocker))
+					{
+						++Plan.Summary.Stage4FacadeToTopConflictCount;
+						OutError = FString::Printf(
+							TEXT("BeamC3V3Stage4FacadeToTopOuterRiserConflict:Intent=%d:Frame=%d:Station=%.3f:Blocker=%d"),
+							Intent.IntentId, Intent.ExteriorFrameId,
+							Station, RiserBlocker);
+						return false;
+					}
+					int32 RiserMemberIndex = INDEX_NONE;
+					if (!AddConnectionMember(ESkeletonMemberKind::FacadeToTopPost,
+						Connection.ConnectionId, Intent.ComponentId,
+						Intent.TargetSourceVolumeId,
+						Intent.TargetSurfaceCourseIndex + 1,
+						FMath::RoundToInt(Station / BlockUnitsCM), INDEX_NONE,
+						Intent.FaceMask, EABTSM73BeamAFrameAxis::Z,
+						RiserProbe.LocalStart, RiserProbe.LocalEnd,
+						RiserMemberIndex))
+					{
+						return false;
+					}
+					AddSeat(Plan, RiserMemberIndex, TopFrame->MemberIndex);
+					Connection.PostSegmentMemberIndices.Add(RiserMemberIndex);
+					LowerMemberIndex = RiserMemberIndex;
+					++Plan.Summary.Stage4FacadeToTopPostSegmentCount;
+				}
+				if (ReusedSeatMemberIndex != INDEX_NONE)
+				{
+					Connection.SeatMemberIndex = ReusedSeatMemberIndex;
+					Connection.bReusesExistingSeat = true;
+					LowerMemberIndex = ReusedSeatMemberIndex;
+				}
+				else
+				{
+					if (!AddConnectionMember(ESkeletonMemberKind::FacadeToTopSeat,
+						Connection.ConnectionId, Intent.ComponentId,
+						Intent.TargetSourceVolumeId,
+						Intent.TargetSurfaceCourseIndex + SeatLiftCourseCount,
+						FMath::RoundToInt(SeatMinimum / BlockUnitsCM),
+						FMath::RoundToInt(SeatMaximum / BlockUnitsCM), Intent.FaceMask,
+						SeatProbe.Axis, SeatProbe.LocalStart, SeatProbe.LocalEnd,
+						Connection.SeatMemberIndex))
+					{
+						return false;
+					}
+					AddSeat(Plan, Connection.SeatMemberIndex, LowerMemberIndex);
+					LowerMemberIndex = Connection.SeatMemberIndex;
+					++Plan.Summary.Stage4FacadeToTopSeatCount;
+				}
+				PostStartZ = GroundZ + (Intent.TargetSurfaceCourseIndex
+					+ SeatLiftCourseCount + 1) * BlockUnitsCM;
+			}
+
+			if (PostStartZ > UpperBottomZ + GeometryToleranceCM)
+			{
+				if (Intent.TopSurfaceAuthority
+					== ETopSurfaceAuthorityKind::DirectStackSeat
+					&& Intent.TargetSurfaceCourseIndex
+						>= Intent.ExteriorFrameCourseIndex)
+				{
+					// The partition-root frame already occupies the stacking seam;
+					// there is no positive-height gap in which a post could exist.
+					Connection.bDirectFrameContact = true;
+					continue;
+				}
+				++Plan.Summary.Stage4FacadeToTopBindingViolationCount;
+				BindingDiagnostics += FString::Printf(
+					TEXT("|InvertedGapIntent%d:Authority=%d:Surface=%d:Lift=%d:Frame=%d"),
+					Intent.IntentId, static_cast<int32>(Intent.TopSurfaceAuthority),
+					Intent.TargetSurfaceCourseIndex, SeatLiftCourseCount,
+					Intent.ExteriorFrameCourseIndex);
+				continue;
+			}
+			if (FMath::IsNearlyEqual(PostStartZ, UpperBottomZ,
+				GeometryToleranceCM))
+			{
+				Connection.bDirectFrameContact = true;
+				continue;
+			}
+			double SegmentStartZ = PostStartZ;
+			while (SegmentStartZ < UpperBottomZ - GeometryToleranceCM)
+			{
+				double SegmentEndZ = FMath::Min(
+					UpperBottomZ, SegmentStartZ + 720.0);
+				FPlannedMember PostProbe;
+				PostProbe.Axis = EABTSM73BeamAFrameAxis::Z;
+				PostProbe.LocalStart = bNormalX
+					? Position(PostNormal, Station, SegmentStartZ)
+					: Position(Station, PostNormal, SegmentStartZ);
+				PostProbe.LocalEnd = PostProbe.LocalStart
+					+ FVector(0.0, 0.0, SegmentEndZ - SegmentStartZ);
+				TSet<int32> Allowed = {LowerMemberIndex, UpperFrame->MemberIndex};
+				int32 Blocker = INDEX_NONE;
+				if (PenetratesActiveMember(PostProbe, Allowed, Blocker))
+				{
+					const FPlannedMember* BlockingMember =
+						Plan.Members.IsValidIndex(Blocker) ? &Plan.Members[Blocker] : nullptr;
+					const FBox BlockingBounds = BlockingMember != nullptr
+						? PlannedMemberBounds(*BlockingMember)
+						: FBox(EForceInit::ForceInit);
+					const double X = bNormalX ? PostNormal : Station;
+					const double Y = bNormalX ? Station : PostNormal;
+					const bool bReusableHorizontalCell = BlockingMember != nullptr
+						&& BlockingMember->ComponentId == Intent.ComponentId
+						&& BlockingMember->Axis != EABTSM73BeamAFrameAxis::Z
+						&& X >= BlockingBounds.Min.X - GeometryToleranceCM
+						&& X <= BlockingBounds.Max.X + GeometryToleranceCM
+						&& Y >= BlockingBounds.Min.Y - GeometryToleranceCM
+						&& Y <= BlockingBounds.Max.Y + GeometryToleranceCM
+						&& BlockingBounds.Min.Z
+							>= SegmentStartZ - GeometryToleranceCM
+						&& BlockingBounds.Max.Z
+							<= UpperBottomZ + GeometryToleranceCM;
+					const bool bReusableClosurePost = BlockingMember != nullptr
+						&& BlockingMember->ComponentId == Intent.ComponentId
+						&& BlockingMember->SkeletonKind
+							== ESkeletonMemberKind::FacadeToTopPost
+						&& BlockingMember->Axis == EABTSM73BeamAFrameAxis::Z
+						&& X >= BlockingBounds.Min.X - GeometryToleranceCM
+						&& X <= BlockingBounds.Max.X + GeometryToleranceCM
+						&& Y >= BlockingBounds.Min.Y - GeometryToleranceCM
+						&& Y <= BlockingBounds.Max.Y + GeometryToleranceCM
+						&& BlockingBounds.Min.Z
+							<= SegmentStartZ + GeometryToleranceCM
+						&& BlockingBounds.Max.Z
+							> SegmentStartZ + GeometryToleranceCM;
+					if (bReusableHorizontalCell || bReusableClosurePost)
+					{
+						if (BlockingBounds.Min.Z
+							> SegmentStartZ + GeometryToleranceCM)
+						{
+							SegmentEndZ = BlockingBounds.Min.Z;
+							PostProbe.LocalEnd = PostProbe.LocalStart
+								+ FVector(0.0, 0.0,
+									SegmentEndZ - SegmentStartZ);
+						}
+						else
+						{
+							Connection.ReusedSupportMemberIndices.AddUnique(Blocker);
+							Connection.bReusesExistingSupportChain = true;
+							LowerMemberIndex = Blocker;
+							SegmentStartZ = FMath::Min(
+								BlockingBounds.Max.Z, UpperBottomZ);
+							continue;
+						}
+					}
+					else
+					{
+					++Plan.Summary.Stage4FacadeToTopConflictCount;
+					OutError = FString::Printf(
+						TEXT("BeamC3V3Stage4FacadeToTopPostConflict:Intent=%d:Frame=%d:Station=%.3f:Z=%.3f..%.3f:Blocker=%d:Kind=%d:Axis=%d:Course=%d:ExteriorFrame=%d:ExteriorColumn=%d:TopFrame=%d"),
+						Intent.IntentId, Intent.ExteriorFrameId, Station,
+						SegmentStartZ, SegmentEndZ, Blocker,
+						Plan.Members.IsValidIndex(Blocker)
+							? static_cast<int32>(Plan.Members[Blocker].SkeletonKind)
+							: INDEX_NONE,
+						Plan.Members.IsValidIndex(Blocker)
+							? static_cast<int32>(Plan.Members[Blocker].Axis) : INDEX_NONE,
+						Plan.Members.IsValidIndex(Blocker)
+							? Plan.Members[Blocker].CourseIndex : INDEX_NONE,
+						Plan.Members.IsValidIndex(Blocker)
+							? Plan.Members[Blocker].ExteriorFrameId : INDEX_NONE,
+						Plan.Members.IsValidIndex(Blocker)
+							? Plan.Members[Blocker].ExteriorColumnId : INDEX_NONE,
+						Plan.Members.IsValidIndex(Blocker)
+							? Plan.Members[Blocker].TopSurfaceFrameSegmentId : INDEX_NONE);
+					return false;
+					}
+				}
+				int32 MemberIndex = INDEX_NONE;
+				if (!AddConnectionMember(ESkeletonMemberKind::FacadeToTopPost,
+					Connection.ConnectionId, Intent.ComponentId,
+					Intent.TargetSourceVolumeId,
+					FMath::FloorToInt((SegmentStartZ - GroundZ) / BlockUnitsCM),
+					FMath::RoundToInt(Station / BlockUnitsCM), INDEX_NONE,
+					Intent.FaceMask, EABTSM73BeamAFrameAxis::Z,
+					PostProbe.LocalStart, PostProbe.LocalEnd, MemberIndex))
+				{
+					return false;
+				}
+				AddSeat(Plan, MemberIndex, LowerMemberIndex);
+				Connection.PostSegmentMemberIndices.Add(MemberIndex);
+				LowerMemberIndex = MemberIndex;
+				SegmentStartZ = SegmentEndZ;
+				++Plan.Summary.Stage4FacadeToTopPostSegmentCount;
+			}
+		}
+	}
+
+	TSet<int32> BoundIntentIds;
+	FString Canonical = FString::Printf(TEXT("TopFrames=%lld"),
+		Plan.Summary.Stage4TopFrameHash);
+	for (const FFacadeToTopConnectionPlan& Connection : Plan.FacadeToTopConnections)
+	{
+		const bool bHasPhysicalPath = Connection.bReusesGroundedAlias
+			|| Connection.bDirectFrameContact
+			|| Connection.bReusesExistingSupportChain
+			|| Connection.SeatMemberIndex != INDEX_NONE
+			|| !Connection.PostSegmentMemberIndices.IsEmpty();
+		const bool bValidUpper =
+			Plan.Members.IsValidIndex(Connection.UpperExteriorFrameMemberIndex);
+		if (!bValidUpper || !bHasPhysicalPath)
+		{
+			++Plan.Summary.Stage4FacadeToTopBindingViolationCount;
+			BindingDiagnostics += FString::Printf(
+				TEXT("|Connection%d:Upper=%d:Valid=%d:Path=%d:Intents="),
+				Connection.ConnectionId, Connection.UpperExteriorFrameMemberIndex,
+				bValidUpper ? 1 : 0, bHasPhysicalPath ? 1 : 0);
+			for (const int32 IntentId : Connection.SourceIntentIds)
+			{
+				BindingDiagnostics += FString::Printf(TEXT("%d,"), IntentId);
+			}
+		}
+		Canonical += FString::Printf(
+			TEXT("|FT:%d:C%d:EF%d:EM%d:TF%d:TM%d:A%d:T%lld:S%d:SR%d:D%d:R%d:G%d:I"),
+			Connection.ConnectionId, Connection.ComponentId,
+			Connection.UpperExteriorFrameId,
+			Connection.UpperExteriorFrameMemberIndex,
+			Connection.TopSurfaceFrameSegmentId,
+			Connection.TopSurfaceFrameMemberIndex,
+			static_cast<int32>(Connection.TopSurfaceAuthority),
+			QHash(Connection.TangentStationCM), Connection.SeatMemberIndex,
+			Connection.bReusesExistingSeat ? 1 : 0,
+			Connection.bDirectFrameContact ? 1 : 0,
+			Connection.bReusesExistingSupportChain ? 1 : 0,
+			Connection.bReusesGroundedAlias ? 1 : 0);
+		for (const int32 IntentId : Connection.SourceIntentIds)
+		{
+			BoundIntentIds.Add(IntentId);
+			Canonical += FString::Printf(TEXT(",%d"), IntentId);
+		}
+		for (const int32 MemberIndex : Connection.PostSegmentMemberIndices)
+		{
+			Canonical += FString::Printf(TEXT(":P%d"), MemberIndex);
+		}
+		for (const int32 MemberIndex : Connection.ReusedSupportMemberIndices)
+		{
+			Canonical += FString::Printf(TEXT(":R%d"), MemberIndex);
+		}
+		for (const int32 MemberIndex
+			: Connection.SuppressedStage3ColumnMemberIndices)
+		{
+			Canonical += FString::Printf(TEXT(":X%d"), MemberIndex);
+		}
+	}
+	for (const FTopSurfaceIntentPlan& Intent : Plan.TopSurfaceIntents)
+	{
+		if (Intent.Intent == EFacadeDownwardIntent::TopSurface
+			&& !BoundIntentIds.Contains(Intent.IntentId))
+		{
+			++Plan.Summary.Stage4FacadeToTopBindingViolationCount;
+			BindingDiagnostics += FString::Printf(
+				TEXT("|UnboundIntent%d:Frame=%d"), Intent.IntentId,
+				Intent.ExteriorFrameId);
+		}
+	}
+	Plan.Summary.Stage4FacadeToTopConnectionCount =
+		Plan.FacadeToTopConnections.Num();
+	if (Plan.Summary.Stage4FacadeToTopBindingViolationCount != 0
+		|| Plan.Summary.Stage4FacadeToTopConflictCount != 0)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4FacadeToTopContractFailed:Top=%d:Connections=%d:Seats=%d:Posts=%d:Suppressed=%d:ResolvedDeferred=%d:BindingViolations=%d:Conflicts=%d:Diagnostics=%s"),
+			Plan.Summary.Stage4ResolvedTopSurfaceIntentCount,
+			Plan.Summary.Stage4FacadeToTopConnectionCount,
+			Plan.Summary.Stage4FacadeToTopSeatCount,
+			Plan.Summary.Stage4FacadeToTopPostSegmentCount,
+			Plan.Summary.Stage4SuppressedStage3ColumnMemberCount,
+			Plan.Summary.Stage4ResolvedDeferredJunctionCount,
+			Plan.Summary.Stage4FacadeToTopBindingViolationCount,
+			Plan.Summary.Stage4FacadeToTopConflictCount,
+			*BindingDiagnostics);
+		return false;
+	}
+	Plan.Summary.Stage4FacadeToTopHash = HashText(Canonical);
+	Plan.Summary.FinalGeometryHash = HashText(FString::Printf(
+		TEXT("Stage3=%lld:Stage4TopFrames=%lld:FacadeToTop=%lld"),
+		Plan.Summary.Stage3PlanHash, Plan.Summary.Stage4TopFrameHash,
+		Plan.Summary.Stage4FacadeToTopHash));
+	Plan.Summary.PlannedMemberCount = Plan.Members.Num();
+	if (!ValidatePreflightCaps(Profile.BeamSettings.BeamB.BeamA, Plan, OutError))
+	{
+		return false;
+	}
+
+	TMap<FString, int32> JointByPosition;
+	const double JointScale = 1.0 / FMath::Max(0.1,
+		static_cast<double>(Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+	for (const FABTSM73BeamAJoint& Joint : Assembly.Joints)
+	{
+		JointByPosition.Add(FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Joint.LocalPosition.X * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Y * JointScale),
+			FMath::RoundToInt64(Joint.LocalPosition.Z * JointScale)), Joint.JointId);
+	}
+	auto AddJoint = [&Assembly, &JointByPosition, JointScale](
+		const FVector& Point, const EABTSM73BeamAJointRole Role)
+	{
+		const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+			FMath::RoundToInt64(Point.X * JointScale),
+			FMath::RoundToInt64(Point.Y * JointScale),
+			FMath::RoundToInt64(Point.Z * JointScale));
+		if (const int32* Existing = JointByPosition.Find(Key)) return *Existing;
+		FABTSM73BeamAJoint& Joint = Assembly.Joints.AddDefaulted_GetRef();
+		Joint.JointId = Assembly.Joints.Num() - 1;
+		Joint.LocalPosition = Point;
+		Joint.Role = Role;
+		JointByPosition.Add(Key, Joint.JointId);
+		return Joint.JointId;
+	};
+	for (int32 MemberIndex = InputMemberCount;
+		MemberIndex < Plan.Members.Num(); ++MemberIndex)
+	{
+		const FPlannedMember& Planned = Plan.Members[MemberIndex];
+		if (!Assembly.Assemblies.IsValidIndex(Planned.ComponentId))
+		{
+			OutError = FString::Printf(
+				TEXT("BeamC3V3Stage4FacadeToTopInvalidOwner:Member=%d:Component=%d"),
+				MemberIndex, Planned.ComponentId);
+			return false;
+		}
+		FABTSM73BeamAMember& Member = Assembly.Members.AddDefaulted_GetRef();
+		Member.MemberId = Assembly.Members.Num() - 1;
+		Member.JointA = AddJoint(Planned.LocalStart,
+			Planned.Axis == EABTSM73BeamAFrameAxis::Z
+				? EABTSM73BeamAJointRole::CrossBearing
+				: EABTSM73BeamAJointRole::BeamEnd);
+		Member.JointB = AddJoint(Planned.LocalEnd,
+			EABTSM73BeamAJointRole::CrossBearing);
+		Member.Axis = Planned.Axis;
+		Member.Role = Planned.Role;
+		Member.LengthCM = FVector::Distance(Planned.LocalStart, Planned.LocalEnd);
+		FABTSM73BeamAAssembly& Owner = Assembly.Assemblies[Planned.ComponentId];
+		Owner.MemberIds.Add(Member.MemberId);
+		Owner.JointIds.AddUnique(Member.JointA);
+		Owner.JointIds.AddUnique(Member.JointB);
+	}
+	if (Assembly.Members.Num() != Plan.Members.Num()
+		|| Assembly.Joints.Num() != Plan.Summary.PlannedJointCount)
+	{
+		OutError = FString::Printf(
+			TEXT("BeamC3V3Stage4FacadeToTopIRMismatch:Joints=%d/%d:Members=%d/%d"),
+			Assembly.Joints.Num(), Plan.Summary.PlannedJointCount,
+			Assembly.Members.Num(), Plan.Members.Num());
+		return false;
+	}
+	Assembly.Summary.BeamGraphHash = Plan.Summary.FinalGeometryHash;
+	RefreshAssemblySummary(Assembly);
+	Assembly.Summary.bAccepted = true;
+	Plan.Summary.EmittedMemberCount = Assembly.Members.Num();
+	Plan.Summary.bAccepted = true;
+	Plan.Summary.Stage4FacadeToTopMilliseconds = ElapsedMilliseconds(StartSeconds);
+	return Plan.Summary.Stage4FacadeToTopHash != 0;
 }
 
 bool FABTSM73BeamC3V3SkeletonFirstGenerator::BuildRaisedMainReservations(

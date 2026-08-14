@@ -76,7 +76,8 @@ UENUM(BlueprintType)
 enum class EABTSM73BeamC3Stage4DiagnosticLayer : uint8
 {
 	TopSurfaceIntent UMETA(DisplayName = "1 - GroundSill / TopSurface Intent"),
-	FloorTopFrames UMETA(DisplayName = "2 - Floor / Top Frames")
+	FloorTopFrames UMETA(DisplayName = "2 - Floor / Top Frames"),
+	FacadeToTopConnections UMETA(DisplayName = "3 - Facade-to-Top Connections")
 };
 
 /** Mutually exclusive Stage-1 visual evidence layer on the D1 preview Actor. */
@@ -778,6 +779,33 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "M7.3|Beam-C3|Stage 4")
 	int32 SkeletonFirstStage4DeferredFacadeColumnJunctionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FacadeToTopConnectionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FacadeToTopSeatCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FacadeToTopPostSegmentCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4SuppressedStage3ColumnMemberCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4ResolvedDeferredJunctionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FacadeToTopBindingViolationCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int32 SkeletonFirstStage4FacadeToTopConflictCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
+	int64 SkeletonFirstStage4FacadeToTopHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
+	double SkeletonFirstStage4FacadeToTopMilliseconds = 0.0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4")
 	int64 SkeletonFirstStage4TopFrameHash = 0;

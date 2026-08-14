@@ -395,3 +395,67 @@ Stage 3 视觉验收接受当前共同外框、接地底框和外柱网络，但
 
 因此 Stage 3 在 2026-08-13 以“共同外框形态通过、顶面归属延期到 Stage 4”的边界冻结；当前结果不代表
 内部立面的最终外柱去向已经批准，也不能以 Stage 3 的临时接地路径替代 Stage 4 验收。
+
+## 19. Stage 4：Facade-to-Top 闭合合同（2026-08-14）
+
+Facade-to-Top 只消费已经批准的 `TopSurfaceIntent` 与 `TopSurfaceFrameSegment`，不得重新选择 WFC 顶面、
+立面分区或 Stage 3 外框。每条 `TopSurface` 意图必须生成或复用一条可追溯的物理路径，把对应立面框
+闭合到同一意图指定的顶面边框；`GroundSill` 意图保持原有接地路径，不进入本轮替换。
+
+### 19.1 两类闭合路径
+
+1. `ExposedSetbackTop`：在外露退台顶框上生成一根与立面法向一致的水平 `FacadeToTopSeat`，再从座面
+   内侧站位生成分段 `FacadeToTopPost` 接到上方立面框。座面不得越过 intent 的裁剪后切向区间；首选层
+   被已有真实横轨占据时，可以确定性上移到首个合法 course，并补齐外侧短立柱，但不得穿透 void 或
+   未知构件。
+2. `DirectStackSeat`：立面框与下方顶框处在齐边叠置接缝时，优先以同站位竖柱或真实接缝直接闭合，
+   不为了统一外观强行插入没有 36 cm 净空的垂直水平座。
+3. 竖向净跨超过 720 cm 时必须拆成若干真实相接的 Z member；竖柱途中遇到同层真实水平轨道时，
+   应在轨道上下分段并复用该交叉节点，禁止穿透，也禁止因单个交叉点丢弃整条闭合路径。
+
+### 19.2 替换、共享与身份
+
+1. 属于 `TopSurface` 的 Stage 3 临时 `GroundExteriorPost`/`ExteriorPost` 必须标记
+   `bSuppressedByStage4FacadeToTop`；Stage 4 预览不得继续显示这些通地长柱。
+2. `TopSurfaceFrameDeferredJunctionPlan` 必须由闭合路径消费，并记录替代顶框 member；未解析 deferred、
+   未绑定 intent、未知冲突或穿透均 fail closed。
+3. 多条语义 intent 可以共享同一物理座面、竖柱或完整闭合路径，但每条 intent 的 ID、来源 facade、
+   顶框与支撑面身份必须保留在 `SourceIntentIds` 中。不得因物理去重丢失语义需求，也不得为相同路径
+   叠放重复砖。
+4. Stage 4 当前保留稳定 member 索引：被替换的 Stage 3 member 仍留在计划数组中并以 suppression 标志
+   排除预览和本阶段有效几何。完整生产装配必须在 Stage 5 静态 DAG 前按该标志重建/压实，不能把
+   “预览隐藏”冒充最终 brick 已删除。
+
+### 19.3 诊断停点与证据边界
+
+`Facade-to-Top Connections` 诊断层与其他 Stage 4 层互斥：玻璃色显示来源顶框和上方立面框，铁色显示
+水平 seat，石材色显示新竖柱；被替换的 Stage 3 临时柱不显示。视觉验收必须确认每个非接地立面框都
+通过 direct、seat+post 或共享路径闭合到正确 TopSurface，且没有重复路径、无意义通地长柱或悬空框。
+
+当前自动化证明的是 `StageLocalGeometry=Accepted`：演示六栋 6/6、预览合同 1/1、全部 TopSurface
+intent 已绑定、deferred 已消费、构件跨度不超过 720 cm、无未知冲突。完整 Floor/Infill/Roof、压实后的
+生产积木 DAG、Beam-C 合力门与 Chaos 均为 `NotEvaluated`；必须等待本诊断层视觉批准后再冻结并进入
+下一停点。
+
+### 19.4 全阶段 36 cm 结构体素合同
+
+从 Stage 1 到 Stage 4 的所有真实结构 member 都必须能严格分解为
+`36 cm × 36 cm × 36 cm` 结构体素。WFC 语义包络仍可保留连续坐标，但它只能提供“可容纳范围”；结构
+长度必须向内量化，禁止为了贴合连续表面而把实体端面推出语义轮廓。
+
+1. X member 的积木尺寸只能是 `36n × 36 × 36`，Y member 只能是 `36 × 36n × 36`，Z member 只能是
+   `36 × 36 × 36n`，其中 `n` 为正整数；既有 648/720 cm 最大跨度门保持不变。
+2. 体素相位属于 member 的结构 lane，而不是强制绑定到世界坐标原点。不同芯体、立面或垂直层可以
+   保留已经批准的 0/18 cm lane 偏移；同一 member 内的体素必须连续、同轴、同相位。Stage 2 连续
+   facade 法向坐标可保留，但实体长度与切向区间必须量化为完整 36 cm 单元。
+3. `AddPlannedMember` 是规划层硬门：非轴对齐或任一尺寸不是 36 cm 整数倍时立即 fail closed。Brick
+   Compiler 是生产层第二道硬门：截面必须为 36 cm，且一根 member 只能编译为上述三种
+   `36×36×36n` 方向积木。
+4. Stage 5 的压实生产 DAG 以及后续 Beam-C 接触分析以结构体素身份
+   `(ComponentId, MemberId, LaneOrigin, SegmentIndex)` 为基本单元。接地、面接触、承压面积、穿透与
+   空洞由体素的精确 AABB 面关系和整数区间推导，不再以未量化长方体或浮点“近似相交”作为结构事实。
+5. 语义账本、member 身份、来源 intent 和 36 cm 体素占用必须同时保留；体素去重只合并物理占用，
+   不得丢失多个 `SourceIntentIds` 或 Stage 1→4 的因果路径。
+
+本统一只改变结构构件的量化边界，不改变已经批准的芯体、耦合带、外框、TopSurface 与 Facade-to-Top
+拓扑，也不构成完整生产 DAG 或 Chaos 已通过的证据。
