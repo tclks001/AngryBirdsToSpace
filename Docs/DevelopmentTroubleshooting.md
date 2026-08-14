@@ -203,7 +203,7 @@
 | 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
 | [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `20cceaeaa1069a8b1b2f12c71e4740890b989006`（2026-08-07，含 `M3-T3A1-001/002`） |
-| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `fdf45d4875b7a9b30967f961d5f4acd00d4a07f9` |
+| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `9f1634cb68dfa11e9960962e1ab3bc98bd512b5e`（2026-08-15，含 `M7-BC-004`～`111` 与 Stage 4.5 放置冻结） |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
 ### 13.2 跨阶段统一诊断顺序
@@ -245,6 +245,11 @@
 | Port/WFC/DAG 通过但积木悬空、重叠或桥端留缝 | 语义兼容、中心线 Joint 或 authored Bearing 都不是最终物理接触。所有 Motif 必须编译回统一 Assembly IR，并做全建筑闭合；桥端按每根梁、每一端审计 Bearing。 | `RemainingPenetrationCount=0`、`UnsupportedMemberCount=0`、桥端逐梁承托、跨中无补救地柱。详见 `M7-BA-*`、`M7-BB-*`。 |
 | Load DAG 通过但最终 Brick 有旁路或局部倾覆 | 最终 Brick AABB 重建的 Real Contact 才是权威；承重层还要检查累计合力是否落入联合支撑区域，不能只证明存在 Ground 可达路径。 | `RealContactMismatchCount=0`、支撑违规为 0；补柱后重新运行接触和 Load DAG。详见 `M7-BC-002/003`。 |
 | 屋顶分层够不到、裂成多个小屋顶或闭合循环耗时失控 | 屋顶要逐层直接 Bearing；相邻同标高终端先聚合 Crown，Prism 屋脊沿长轴；每轮闭合记录违规签名，无进展则转入明确补支撑、裁剪或 fail closed。 | 固定种子屋顶无补救长柱，聚合不跨大空洞，闭合轮数有界且最终穿透/悬空为 0。详见 `M7-D1-003`～`007`。 |
+| 修复分支反复执行，但最终 Member、DAG 或失败 Hash 不变 | “进入过修复代码”不等于权威状态发生变化。每轮实验必须保存 first/best/last 失败、实际求值数和重闭合后的身份；同一失败签名与 Hash 连续两次不变即停止该路线，不得用宽套件继续撞运气。 | 单一假设先过最小夹具和单叶；`Enumerated = Evaluated + PrecheckRejected`，每个实际修改都有 pre/post 身份。详见 `M7-BC-019/021/022/023`。 |
+| 静态合同与 NullRHI 均通过，却据此宣称建筑具备真实物理稳定性 | 静态 DAG、闭合矩形和接触数量不能模拟摩擦滑移、剪切、偏心与实时 Chaos。独立物理夹具必须证明自定义重力、碰撞尺寸、自动质量、物性、扰动确实生效，并同时门控峰值和最终值。 | 记录 Geometry/Fixture CRC、binary identity、完整观察窗、扰动首帧响应及 peak/final 漂移；仍不得替代生产 Palette、攻击门和可见 PIE。详见 `M7-BC-018/025/026`。 |
+| 同一 Profile/Seed 在两个 fresh 进程生成不同数量或 Hash，或单位积木出现半格相位 | `FName` 进程内索引不能作为确定性种子；36 cm 截面也不自动保证长度和 lattice 相位。稳定种子使用字符串 CRC，所有阶段和 Brick Compiler 同时验证 `36×36×36n` 及各结构 lane 的奇偶/相位合同。 | 两个独立 fresh 进程逐项比较数量与 Hash；编译器拒绝非单位化尺寸，偶数 footprint 禁止通过居中 `2→1` 产生半格漂移。详见 `M7-BC-101/104/110`。 |
+| 自动化全绿但屋顶出现悬空梳齿、百叶塔或门架长柱 | 语义包络、inward 可追溯或每层 36 cm course 都不是实际下座。每根新增 RoofCourse 必须有真实 lower bearing；坡屋顶按 footprint 相邻 course 收缩，视觉假绿会撤销旧几何通过证据。 | `UnsupportedRoofMemberCount=0`、RoofPost/Deferred/Occluded 有明确权威；固定六栋自动化之外仍保留阶段视觉验收。详见 `M7-BC-107/108/110`。 |
+| 集成/M3 需要建筑占地，却直接手填宽高或对含 suppressed 临时柱的数组求 Bounds | Stage 4.5 放置目录必须从冻结 Manifest 重新运行真实 Stage 4，只对 active member 的排序实体 AABB 求 Bounds/结构/描述 Hash；Pivot、地面、局部基和 Pad 一并冻结。该目录只证明静态放置，不证明 Stage 5、Chaos、破坏或完整建筑可验收。 | `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze` 在两个 fresh 进程逐字段重放一致；Manifest `2324068295`、目录 Hash `13889440156022460967`。详见 `M7-BC-111`。 |
 | Chaos 固定时间步通过，实时 PIE 仍漂移或拒绝 | 静态几何正确不等于变步长接触稳定。保留严格空间门、quiet window、硬上限和事务回滚；`-benchmark` 只用于算法回归。 | fresh 实时运行记录 Drift/Settlement/Rotation、速度、Awake、TimedOut 和合同封口；失败后无模块或隐形 Foundation。 |
 
 ### 13.5 M11：唯一 Core、认证与表现消费
