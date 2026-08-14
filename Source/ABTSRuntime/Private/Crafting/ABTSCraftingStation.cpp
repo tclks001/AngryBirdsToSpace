@@ -2,17 +2,21 @@
 
 #include "Crafting/ABTSCraftingStation.h"
 
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Materials/MaterialInterface.h"
 #include "Player/ABTSM5PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/ABTSVisualTuning.h"
 
 AABTSCraftingStation::AABTSCraftingStation()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("StationRoot"));
+	SetRootComponent(Root);
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StationVisual"));
-	SetRootComponent(Visual);
+	Visual->SetupAttachment(Root);
 	// M5 stations are interaction placeholders, not gameplay obstacles. The
 	// force-driven bird mover sweeps on the Pawn channel; a BlockAllDynamic
 	// cube traps the capsule in repeated substep collisions. Keep only the
@@ -29,7 +33,6 @@ AABTSCraftingStation::AABTSCraftingStation()
 	FurnaceMeshAsset = Furnace.Object;
 	FurnaceMaterialAsset = FurnaceMaterial.Object;
 	SetStationType(StationType);
-	Visual->SetRelativeScale3D(FVector(0.8f, 0.8f, 0.45f));
 }
 
 void AABTSCraftingStation::SetStationType(const EABTSCraftingStationType InStationType)
@@ -50,6 +53,20 @@ void AABTSCraftingStation::SetStationType(const EABTSCraftingStationType InStati
 	default:
 		break;
 	}
+	RefreshVisualTuning();
+}
+
+void AABTSCraftingStation::RefreshVisualTuning()
+{
+	if (Visual == nullptr) return;
+	const EABTSVisualTuningTarget Target =
+		StationType == EABTSCraftingStationType::Furnace
+			? EABTSVisualTuningTarget::Furnace
+			: EABTSVisualTuningTarget::Workbench;
+	const FABTSVisualTuningValue& Tuning = ABTSGetVisualTuning(Target);
+	Visual->SetRelativeScale3D(
+		FVector(0.8f, 0.8f, 0.45f) * Tuning.ScaleMultiplier);
+	Visual->SetRelativeLocation(FVector(0.0f, 0.0f, Tuning.LocalZOffsetCM));
 }
 
 bool AABTSCraftingStation::IsWithinUseRange(const FVector& WorldLocation) const

@@ -3,10 +3,13 @@
 #include "World/ABTSM8BridgeActors.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSCollisionChannels.h"
+#include "World/ABTSVisualTuning.h"
 
 AABTSM8WaterBarrierActor::AABTSM8WaterBarrierActor()
 {
@@ -36,18 +39,52 @@ void AABTSM8WaterBarrierActor::OpenPassage()
 AABTSM8BridgeActor::AABTSM8BridgeActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("BridgeRoot"));
+	SetRootComponent(Root);
+	Collision = CreateDefaultSubobject<UBoxComponent>(TEXT("BridgeCollision"));
+	Collision->SetupAttachment(Root);
+	Collision->SetCollisionProfileName(TEXT("BlockAll"));
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Collision->SetGenerateOverlapEvents(false);
 	Deck = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BridgeDeck"));
-	SetRootComponent(Deck);
-	Deck->SetCollisionProfileName(TEXT("BlockAll"));
-	Deck->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Deck->SetupAttachment(Root);
+	Deck->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Deck->SetGenerateOverlapEvents(false);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (Cube.Succeeded()) Deck->SetStaticMesh(Cube.Object);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> BridgeMesh(
+		TEXT("/Game/StaticMesh/Bridge/SM_Bridge.SM_Bridge"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BridgeMaterial(
+		TEXT("/Game/StaticMesh/Bridge/MI_Bridge.MI_Bridge"));
+	if (BridgeMesh.Succeeded()) Deck->SetStaticMesh(BridgeMesh.Object);
+	if (BridgeMaterial.Succeeded()) Deck->SetMaterial(0, BridgeMaterial.Object);
+	RefreshVisualTuning();
 }
 
 void AABTSM8BridgeActor::InitializeBridge(const FABTSM3CellEdgeKey& InEdge, const FTransform& Transform, const FVector& DimensionsCM)
 {
 	EdgeKey = InEdge;
 	SetActorTransform(Transform, false, nullptr, ETeleportType::TeleportPhysics);
-	Deck->SetRelativeScale3D(DimensionsCM.ComponentMax(FVector(1.0f)) / 100.0f);
+	BaseDimensionsCM = DimensionsCM.ComponentMax(FVector(1.0f));
+	Collision->SetBoxExtent(BaseDimensionsCM * 0.5f, true);
+	RefreshVisualTuning();
+}
+
+void AABTSM8BridgeActor::RefreshVisualTuning()
+{
+	if (Deck == nullptr) return;
+	const FABTSVisualTuningValue& Tuning = ABTSGetVisualTuning(
+		EABTSVisualTuningTarget::Bridge);
+	FVector MeshSizeCM(100.0f);
+	FVector MeshBoundsOrigin = FVector::ZeroVector;
+	if (const UStaticMesh* Mesh = Deck->GetStaticMesh())
+	{
+		const FBoxSphereBounds Bounds = Mesh->GetBounds();
+		MeshSizeCM = (Bounds.BoxExtent * 2.0f).ComponentMax(FVector(1.0f));
+		MeshBoundsOrigin = Bounds.Origin;
+	}
+	const FVector BaseScale = BaseDimensionsCM / MeshSizeCM;
+	const FVector TunedScale = BaseScale * Tuning.ScaleMultiplier;
+	Deck->SetRelativeScale3D(TunedScale);
+	Deck->SetRelativeLocation(
+		-MeshBoundsOrigin * TunedScale
+			+ FVector(0.0f, 0.0f, Tuning.LocalZOffsetCM));
 }

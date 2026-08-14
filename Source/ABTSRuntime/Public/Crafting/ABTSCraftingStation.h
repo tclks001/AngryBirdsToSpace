@@ -10,6 +10,7 @@
 class UStaticMeshComponent;
 class UStaticMesh;
 class UMaterialInterface;
+class USceneComponent;
 
 /** M5 station query/click contract. M5.1 replaces placement and presentation. */
 UCLASS(BlueprintType)
@@ -23,6 +24,8 @@ public:
 	EABTSCraftingStationType GetStationType() const { return StationType; }
 	/** Used by the M5 runtime spawn owner before the station begins gameplay. */
 	void SetStationType(EABTSCraftingStationType InStationType);
+	/** Reapplies the current temporary PIE scale/Z override without moving the gameplay anchor. */
+	void RefreshVisualTuning();
 	void SetCellId(int32 InCellId) { CellId = InCellId; }
 	int32 GetCellId() const { return CellId; }
 	float GetUseRangeCM() const { return UseRangeCM; }
@@ -30,6 +33,9 @@ public:
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M5|Station")
+	TObjectPtr<USceneComponent> Root;
+
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M5|Station")
 	TObjectPtr<UStaticMeshComponent> Visual;
 

@@ -22,13 +22,37 @@ class ABTSRUNTIME_API AABTSM51PickupItem : public AActor
 public:
 	AABTSM51PickupItem();
 	void InitializePickup(EABTSItemId InItemId, int32 InQuantity, int32 InCellId);
+	void RefreshVisualTuning();
 	EABTSItemId GetItemId() const { return ItemId; }
 	int32 GetQuantity() const { return Quantity; }
 	int32 GetCellId() const { return CellId; }
+	const UStaticMeshComponent* GetVisualComponent() const { return Visual; }
 
 private:
+	void ApplyItemVisual();
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<USceneComponent> Root;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Visual;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> BranchMesh;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> BranchMaterial;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> StoneMesh;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> StoneMaterial;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> WoodMesh;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> WoodMaterial;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> PlantFiberMesh;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> PlantFiberMaterial;
 
 	EABTSItemId ItemId = EABTSItemId::Branch;
 	int32 Quantity = 1;
@@ -52,10 +76,15 @@ public:
 	EABTSSlingshotSlotSide GetSlotSide() const { return SlotSide; }
 	int32 GetSlotPairId() const { return SlotPairId; }
 	bool IsFinaleSpaceSlot() const { return SlotKind == EABTSSlingshotSlotKind::FinaleSpace; }
+	void RefreshVisualTuning();
+	const UStaticMeshComponent* GetVisualComponent() const { return Visual; }
 	virtual void NotifyActorOnClicked(FKey ButtonPressed) override;
 
 private:
 	void ApplySlotVisual(EABTSSlingshotSlotKind InSlotKind);
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<USceneComponent> Root;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Visual;

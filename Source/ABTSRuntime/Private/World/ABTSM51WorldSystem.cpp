@@ -156,6 +156,188 @@ void AABTSM51WorldSystem::SpawnSdfPickups()
 		ResourcePatchRadiusRadians, ResourceCellStride, MaxPickupActorCount);
 }
 
+bool AABTSM51WorldSystem::SpawnPickupShowcase(const float RequestedDistanceCM)
+{
+	if (GetWorld() == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=WorldUnavailable"));
+		return false;
+	}
+	const APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+	const APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+	if (Pawn == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=PlayerPawnUnavailable"));
+		return false;
+	}
+	return SpawnPickupShowcaseAroundPawn(*Pawn, RequestedDistanceCM);
+}
+
+bool AABTSM51WorldSystem::SpawnPickupShowcaseAroundPawn(
+	const APawn& Pawn,
+	const float RequestedDistanceCM)
+{
+	if (GetWorld() == nullptr || Pawn.GetWorld() != GetWorld())
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=InvalidPawnWorld"));
+		return false;
+	}
+	if (!Planet.IsValid())
+	{
+		for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+		{
+			if (It->IsPlanetReady())
+			{
+				Planet = *It;
+				break;
+			}
+		}
+	}
+	if (!Planet.IsValid())
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=PlanetUnavailable"));
+		return false;
+	}
+
+	const FVector PlanetCenter = Planet->GetPlanetCenterWorld();
+	const FVector PlayerUp = (Pawn.GetActorLocation() - PlanetCenter).GetSafeNormal();
+	const float PlayerRadiusCM = FVector::Distance(Pawn.GetActorLocation(), PlanetCenter);
+	if (PlayerUp.IsNearlyZero() || PlayerRadiusCM <= KINDA_SMALL_NUMBER)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=InvalidPlayerFrame"));
+		return false;
+	}
+	FVector PlayerForward = FVector::VectorPlaneProject(
+		Pawn.GetActorForwardVector(), PlayerUp).GetSafeNormal();
+	if (PlayerForward.IsNearlyZero())
+	{
+		PlayerForward = FVector::VectorPlaneProject(
+			FVector::ForwardVector, PlayerUp).GetSafeNormal();
+	}
+	if (PlayerForward.IsNearlyZero())
+	{
+		PlayerForward = FVector::VectorPlaneProject(
+			FVector::RightVector, PlayerUp).GetSafeNormal();
+	}
+	const FVector PlayerRight = FVector::CrossProduct(
+		PlayerUp, PlayerForward).GetSafeNormal();
+	const float EffectiveDistanceCM = FMath::Max(
+		RequestedDistanceCM,
+		AutoPickupRadiusCM + 250.0f);
+	const float AngularDistanceRadians = FMath::Clamp(
+		EffectiveDistanceCM / PlayerRadiusCM,
+		0.01f,
+		PI / 3.0f);
+
+	TSet<int32> ReservedCells;
+	for (const TWeakObjectPtr<AABTSM51PickupItem>& ExistingPickup : Pickups)
+	{
+		if (ExistingPickup.IsValid()) ReservedCells.Add(ExistingPickup->GetCellId());
+	}
+	const TArray<FABTSM3CellState>& States = Planet->GetGeneratedCellStates();
+	static const float FanYawDegrees[4] = {-54.0f, -18.0f, 18.0f, 54.0f};
+	static const EABTSItemId ShowcaseItems[4] = {
+		EABTSItemId::Branch,
+		EABTSItemId::Stone,
+		EABTSItemId::Wood,
+		EABTSItemId::PlantFiber};
+	int32 CellIds[4] = {INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE};
+	FTransform Transforms[4];
+	float MinimumResolvedDistanceCM = TNumericLimits<float>::Max();
+	for (int32 ItemIndex = 0; ItemIndex < 4; ++ItemIndex)
+	{
+		const float FanYawRadians = FMath::DegreesToRadians(FanYawDegrees[ItemIndex]);
+		const FVector TangentDirection =
+			PlayerForward * FMath::Cos(FanYawRadians)
+			+ PlayerRight * FMath::Sin(FanYawRadians);
+		const FVector DesiredDirection =
+			(PlayerUp * FMath::Cos(AngularDistanceRadians)
+				+ TangentDirection * FMath::Sin(AngularDistanceRadians)).GetSafeNormal();
+		float BestDot = -1.0f;
+		for (int32 CellId = 0; CellId < States.Num(); ++CellId)
+		{
+			const FABTSM3CellState& State = States[CellId];
+			if (State.bWater
+				|| State.bBuildingAnchor
+				|| IsCellOccupied(CellId)
+				|| ReservedCells.Contains(CellId))
+			{
+				continue;
+			}
+			const float Dot = FVector::DotProduct(
+				DesiredDirection,
+				Planet->LogicalCells[CellId].UnitCenter);
+			if (Dot > BestDot)
+			{
+				BestDot = Dot;
+				CellIds[ItemIndex] = CellId;
+			}
+		}
+		if (CellIds[ItemIndex] == INDEX_NONE
+			|| !QueryCellTransform(CellIds[ItemIndex], 24.0f, Transforms[ItemIndex]))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=SafeCellUnavailable Item=%s"),
+				*ABTSGetItemFallbackLabel(ShowcaseItems[ItemIndex]));
+			return false;
+		}
+		const float ResolvedDistanceCM = FVector::Distance(
+			Pawn.GetActorLocation(),
+			Transforms[ItemIndex].GetLocation());
+		if (ResolvedDistanceCM <= AutoPickupRadiusCM + 50.0f)
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=InsideAutoPickupRange Item=%s Distance=%.1f AutoRadius=%.1f"),
+				*ABTSGetItemFallbackLabel(ShowcaseItems[ItemIndex]),
+				ResolvedDistanceCM,
+				AutoPickupRadiusCM);
+			return false;
+		}
+		MinimumResolvedDistanceCM = FMath::Min(
+			MinimumResolvedDistanceCM,
+			ResolvedDistanceCM);
+		ReservedCells.Add(CellIds[ItemIndex]);
+	}
+
+	TArray<AABTSM51PickupItem*> SpawnedPickups;
+	for (int32 ItemIndex = 0; ItemIndex < 4; ++ItemIndex)
+	{
+		AABTSM51PickupItem* Pickup = GetWorld()->SpawnActor<AABTSM51PickupItem>(
+			PickupClass,
+			Transforms[ItemIndex]);
+		if (Pickup == nullptr)
+		{
+			for (AABTSM51PickupItem* SpawnedPickup : SpawnedPickups)
+			{
+				SpawnedPickup->Destroy();
+			}
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=SpawnFailed RolledBack=%d"),
+				SpawnedPickups.Num());
+			return false;
+		}
+		Pickup->InitializePickup(ShowcaseItems[ItemIndex], 1, CellIds[ItemIndex]);
+		SpawnedPickups.Add(Pickup);
+	}
+	for (AABTSM51PickupItem* Pickup : SpawnedPickups)
+	{
+		Pickups.Add(Pickup);
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M5.1][PickupShowcase] Accepted=1 Spawned=4 RequestedDistance=%.1f EffectiveDistance=%.1f MinimumResolvedDistance=%.1f AutoRadius=%.1f Cells=[%d,%d,%d,%d]"),
+		RequestedDistanceCM,
+		EffectiveDistanceCM,
+		MinimumResolvedDistanceCM,
+		AutoPickupRadiusCM,
+		CellIds[0], CellIds[1], CellIds[2], CellIds[3]);
+	return true;
+}
+
 void AABTSM51WorldSystem::CollectNearbyPickups()
 {
 	AABTSCraftingSystem* System = FindCraftingSystem();
