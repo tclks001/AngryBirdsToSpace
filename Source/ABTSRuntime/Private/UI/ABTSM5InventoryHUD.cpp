@@ -47,6 +47,13 @@ namespace
 
 AABTSM5InventoryHUD::AABTSM5InventoryHUD()
 {
+	ConstructorHelpers::FObjectFinder<UTexture2D> ActionAtlasFinder(
+		FABTSM5InventoryHUDData::GetActionIconAtlasAssetPath());
+	if (ActionAtlasFinder.Succeeded())
+	{
+		ActionIconAtlas = ActionAtlasFinder.Object;
+	}
+
 	ItemIcons.SetNum(static_cast<int32>(EABTSItemId::SpaceCord) + 1);
 	for (const EABTSItemId ItemId : ABTSGetAllItemIds())
 	{
@@ -191,6 +198,34 @@ void AABTSM5InventoryHUD::DrawItemIcon(
 	Canvas->DrawItem(Tile);
 }
 
+void AABTSM5InventoryHUD::DrawActionIcon(
+	const EABTSM5ActionIcon Icon,
+	const FBox2D& Box,
+	const FLinearColor& Tint,
+	const float Scale)
+{
+	if (Canvas == nullptr || ActionIconAtlas == nullptr || ActionIconAtlas->GetResource() == nullptr || !Box.bIsValid)
+	{
+		return;
+	}
+
+	FBox2D UV;
+	if (!FABTSM5InventoryHUDData::GetActionIconUV(Icon, UV)) return;
+	const FVector2D AvailableSize = Box.GetSize();
+	const float IconSize = FMath::Max(1.0f, FMath::Min(AvailableSize.X, AvailableSize.Y) * FMath::Clamp(Scale, 0.1f, 1.0f));
+	const FVector2D DrawSize(IconSize);
+	const FVector2D DrawOrigin = Box.GetCenter() - DrawSize * 0.5f;
+	FCanvasTileItem Tile(
+		DrawOrigin,
+		ActionIconAtlas->GetResource(),
+		DrawSize,
+		UV.Min,
+		UV.Max,
+		ActiveTheme.ApplyOpacity(Tint));
+	Tile.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(Tile);
+}
+
 void AABTSM5InventoryHUD::DrawCountBadge(const int32 Quantity, const FBox2D& Box)
 {
 	if (Quantity <= 0 || !Box.bIsValid) return;
@@ -258,9 +293,8 @@ void AABTSM5InventoryHUD::DrawHotbar(AABTSCraftingSystem& System)
 		1.5f);
 
 	DrawCell(ActiveLayout.BagButton.Min, ActiveLayout.BagButton.Max - ActiveLayout.BagButton.Min, ActiveTheme.PanelSecondary);
-	DrawText(TEXT("BAG"), ActiveTheme.ApplyOpacity(ActiveTheme.TextPrimary),
-		ActiveLayout.BagButton.Min.X + 16.0f, ActiveLayout.BagButton.Min.Y + 24.0f,
-		GEngine->GetSmallFont(), 0.82f * ActiveTheme.TextScale, false);
+	DrawActionIcon(EABTSM5ActionIcon::Backpack, ActiveLayout.BagButton,
+		FLinearColor::White, 0.78f);
 	DrawText(TEXT("K"), ActiveTheme.ApplyOpacity(ActiveTheme.AccentSecondary),
 		ActiveLayout.BagButton.Min.X + 7.0f, ActiveLayout.BagButton.Min.Y + 6.0f,
 		GEngine->GetSmallFont(), 0.58f * ActiveTheme.TextScale, false);
@@ -345,12 +379,8 @@ void AABTSM5InventoryHUD::DrawCraftingInterface(AABTSCraftingSystem& System)
 		GEngine->GetSmallFont(), 0.66f * ActiveTheme.TextScale, false);
 
 	DrawCell(ActiveLayout.CloseButton.Min, ActiveLayout.CloseButton.Max - ActiveLayout.CloseButton.Min, ActiveTheme.Danger);
-	DrawLine(ActiveLayout.CloseButton.Min.X + 11.0f, ActiveLayout.CloseButton.Min.Y + 11.0f,
-		ActiveLayout.CloseButton.Max.X - 11.0f, ActiveLayout.CloseButton.Max.Y - 11.0f,
-		ActiveTheme.ApplyOpacity(ActiveTheme.TextPrimary), 2.5f);
-	DrawLine(ActiveLayout.CloseButton.Max.X - 11.0f, ActiveLayout.CloseButton.Min.Y + 11.0f,
-		ActiveLayout.CloseButton.Min.X + 11.0f, ActiveLayout.CloseButton.Max.Y - 11.0f,
-		ActiveTheme.ApplyOpacity(ActiveTheme.TextPrimary), 2.5f);
+	DrawActionIcon(EABTSM5ActionIcon::Close, ActiveLayout.CloseButton,
+		FLinearColor::White, 0.76f);
 	AddHitBox(ActiveLayout.CloseButton.Min, ActiveLayout.CloseButton.Max - ActiveLayout.CloseButton.Min,
 		CloseHitBox, true, 100);
 
@@ -528,25 +558,29 @@ void AABTSM5InventoryHUD::DrawQuantityModal(AABTSCraftingSystem& System)
 	DrawText(FString::Printf(TEXT("%d selected  //  %d maximum"), PendingCraftCount, Evaluation.MaxCraftCount),
 		ActiveTheme.ApplyOpacity(ActiveTheme.CountAccent), Origin.X + 140.0f, Origin.Y + 96.0f,
 		GEngine->GetSmallFont(), 0.76f * ActiveTheme.TextScale, false);
-	const TCHAR* Labels[] = { TEXT("--"), TEXT("-"), TEXT("+"), TEXT("++") };
 	const FName Names[] = { QuantityMinusTen, QuantityMinusOne, QuantityPlusOne, QuantityPlusTen };
+	const EABTSM5ActionIcon Icons[] = {
+		EABTSM5ActionIcon::DecreaseLarge,
+		EABTSM5ActionIcon::DecreaseOne,
+		EABTSM5ActionIcon::IncreaseOne,
+		EABTSM5ActionIcon::IncreaseLarge };
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		const FVector2D ButtonOrigin(Origin.X + 138.0f + Index * 84.0f, Origin.Y + 126.0f);
-		DrawCell(ButtonOrigin, FVector2D(70.0f, 42.0f), ActiveTheme.SlotNormal);
-		DrawText(Labels[Index], ActiveTheme.ApplyOpacity(ActiveTheme.TextPrimary),
-			ButtonOrigin.X + 25.0f, ButtonOrigin.Y + 8.0f,
-			GEngine->GetSmallFont(), 0.90f * ActiveTheme.TextScale, false);
-		AddHitBox(ButtonOrigin, FVector2D(70.0f, 42.0f), Names[Index], true, 120);
+		const FBox2D ButtonBox(ButtonOrigin, ButtonOrigin + FVector2D(70.0f, 42.0f));
+		DrawCell(ButtonBox.Min, ButtonBox.GetSize(), ActiveTheme.SlotNormal);
+		DrawActionIcon(Icons[Index], ButtonBox, FLinearColor::White, 0.72f);
+		AddHitBox(ButtonBox.Min, ButtonBox.GetSize(), Names[Index], true, 120);
 	}
 	const FVector2D CancelOrigin(Origin.X + 138.0f, Origin.Y + 202.0f);
 	const FVector2D CraftOrigin(Origin.X + 310.0f, Origin.Y + 202.0f);
 	DrawCell(CancelOrigin, FVector2D(142.0f, 44.0f), ActiveTheme.SlotNormal);
 	DrawCell(CraftOrigin, FVector2D(180.0f, 44.0f), PendingCraftCount > 0 ? ActiveTheme.Warning : ActiveTheme.Disabled);
-	DrawText(TEXT("CANCEL"), ActiveTheme.ApplyOpacity(ActiveTheme.TextMuted), CancelOrigin.X + 43.0f, CancelOrigin.Y + 9.0f,
-		GEngine->GetSmallFont(), 0.78f * ActiveTheme.TextScale, false);
-	DrawText(TEXT("ASSEMBLE"), ActiveTheme.ApplyOpacity(ActiveTheme.TextPrimary), CraftOrigin.X + 50.0f, CraftOrigin.Y + 9.0f,
-		GEngine->GetSmallFont(), 0.82f * ActiveTheme.TextScale, false);
+	DrawActionIcon(EABTSM5ActionIcon::Cancel,
+		FBox2D(CancelOrigin, CancelOrigin + FVector2D(142.0f, 44.0f)), ActiveTheme.TextMuted, 0.78f);
+	DrawActionIcon(EABTSM5ActionIcon::Craft,
+		FBox2D(CraftOrigin, CraftOrigin + FVector2D(180.0f, 44.0f)),
+		PendingCraftCount > 0 ? FLinearColor::White : ActiveTheme.TextMuted, 0.82f);
 	AddHitBox(CraftOrigin, FVector2D(180.0f, 44.0f), QuantityCraft, true, 120);
 	AddHitBox(CancelOrigin, FVector2D(142.0f, 44.0f), QuantityCancel, true, 120);
 }

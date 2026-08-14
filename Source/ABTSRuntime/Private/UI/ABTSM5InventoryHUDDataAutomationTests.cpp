@@ -45,6 +45,28 @@ bool FABTSM5InventoryHUDVisualLayoutTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("Retired item has no production icon contract"),
 		FABTSM5InventoryHUDData::GetItemIconAssetPath(EABTSItemId::SpaceSlingshotPart));
 
+	TestEqual(TEXT("Action icon atlas path is frozen"),
+		FString(FABTSM5InventoryHUDData::GetActionIconAtlasAssetPath()),
+		FString(TEXT("/Game/UI/Icons/T_ABTS_ActionIconAtlas_v001.T_ABTS_ActionIconAtlas_v001")));
+	TSet<FString> ActionIconUVs;
+	for (int32 IconIndex = 0; IconIndex < static_cast<int32>(EABTSM5ActionIcon::Count); ++IconIndex)
+	{
+		FBox2D UV;
+		TestTrue(TEXT("Every action icon resolves"), FABTSM5InventoryHUDData::GetActionIconUV(
+			static_cast<EABTSM5ActionIcon>(IconIndex), UV));
+		TestTrue(TEXT("Action icon UV stays in atlas"), UV.bIsValid
+			&& UV.Min.X >= 0.0f && UV.Min.Y >= 0.0f
+			&& UV.Max.X <= 1.0f && UV.Max.Y <= 1.0f);
+		const FString UVKey = FString::Printf(TEXT("%.3f,%.3f,%.3f,%.3f"), UV.Min.X, UV.Min.Y, UV.Max.X, UV.Max.Y);
+		TestTrue(TEXT("Action icon UV is unique"), !ActionIconUVs.Contains(UVKey));
+		ActionIconUVs.Add(UVKey);
+	}
+	TestEqual(TEXT("All action icon cells are mapped"), ActionIconUVs.Num(),
+		static_cast<int32>(EABTSM5ActionIcon::Count));
+	FBox2D InvalidActionUV;
+	TestFalse(TEXT("Unknown action icon fails closed"), FABTSM5InventoryHUDData::GetActionIconUV(
+		static_cast<EABTSM5ActionIcon>(255), InvalidActionUV));
+
 	FBox2D FittedBox;
 	TestTrue(TEXT("Square icon fits a wide card"), FABTSM5InventoryHUDData::FitAspectRatio(
 		FBox2D(FVector2D(10.0f, 20.0f), FVector2D(130.0f, 100.0f)),

@@ -149,3 +149,27 @@ const TCHAR* FABTSM5InventoryHUDData::GetItemIconAssetPath(const EABTSItemId Ite
 	default: return nullptr;
 	}
 }
+
+const TCHAR* FABTSM5InventoryHUDData::GetActionIconAtlasAssetPath()
+{
+	return TEXT("/Game/UI/Icons/T_ABTS_ActionIconAtlas_v001.T_ABTS_ActionIconAtlas_v001");
+}
+
+bool FABTSM5InventoryHUDData::GetActionIconUV(const EABTSM5ActionIcon Icon, FBox2D& OutUV)
+{
+	OutUV = FBox2D();
+	const int32 IconIndex = static_cast<int32>(Icon);
+	if (IconIndex < 0 || IconIndex >= static_cast<int32>(EABTSM5ActionIcon::Count))
+	{
+		return false;
+	}
+
+	constexpr int32 ColumnCount = 4;
+	constexpr int32 RowCount = 2;
+	const int32 Column = IconIndex % ColumnCount;
+	const int32 Row = IconIndex / ColumnCount;
+	const FVector2D CellSize(1.0f / ColumnCount, 1.0f / RowCount);
+	const FVector2D UVMin(Column * CellSize.X, Row * CellSize.Y);
+	OutUV = FBox2D(UVMin, UVMin + CellSize);
+	return true;
+}

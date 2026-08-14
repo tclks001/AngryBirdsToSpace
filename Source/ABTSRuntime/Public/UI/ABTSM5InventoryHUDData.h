@@ -5,6 +5,20 @@
 #include "CoreMinimal.h"
 #include "Inventory/ABTSInventoryTypes.h"
 
+/** Fixed semantic cells in the shared 4x2 action-icon atlas. */
+enum class EABTSM5ActionIcon : uint8
+{
+	Backpack = 0,
+	Craft,
+	Cancel,
+	DecreaseOne,
+	IncreaseOne,
+	DecreaseLarge,
+	IncreaseLarge,
+	Close,
+	Count
+};
+
 /** Pure-data geometry shared by M5 HUD drawing, hit testing and automation. */
 struct ABTSRUNTIME_API FABTSM5InventoryUILayout
 {
@@ -42,4 +56,9 @@ public:
 		FBox2D& OutBox);
 
 	static const TCHAR* GetItemIconAssetPath(EABTSItemId ItemId);
+
+	static const TCHAR* GetActionIconAtlasAssetPath();
+
+	/** Resolves a semantic action to normalized UVs in the shared 4x2 atlas. */
+	static bool GetActionIconUV(EABTSM5ActionIcon Icon, FBox2D& OutUV);
 };

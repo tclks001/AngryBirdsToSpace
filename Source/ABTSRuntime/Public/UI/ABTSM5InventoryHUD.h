@@ -14,7 +14,7 @@ class AABTSM5PlayerController;
 class UABTSInventoryComponent;
 class UTexture2D;
 
-/** Asset-free M5 hotbar, inventory, recipe list and craft-quantity modal. */
+/** Shared-theme M5 hotbar, inventory, recipe list and craft-quantity modal. */
 UCLASS()
 class ABTSRUNTIME_API AABTSM5InventoryHUD : public AABTSM4PartyHUD
 {
@@ -43,6 +43,8 @@ private:
 		float CutPx, float BorderPx);
 	void DrawSectionFrame(const FBox2D& Box, const FString& Label, const FLinearColor& Accent);
 	void DrawItemIcon(EABTSItemId ItemId, const FBox2D& Box, const FLinearColor& Tint = FLinearColor::White);
+	void DrawActionIcon(EABTSM5ActionIcon Icon, const FBox2D& Box,
+		const FLinearColor& Tint = FLinearColor::White, float Scale = 1.0f);
 	void DrawCountBadge(int32 Quantity, const FBox2D& Box);
 	void DrawItemCard(EABTSItemId ItemId, int32 Quantity, const FBox2D& Box, bool bHeld,
 		const FString& Label, bool bShowLabel);
@@ -67,6 +69,8 @@ private:
 	TArray<FName> VisibleRecipeIds;
 	UPROPERTY()
 	TArray<TObjectPtr<UTexture2D>> ItemIcons;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> ActionIconAtlas;
 	FABTSUIThemeSnapshot ActiveTheme;
 	FABTSM5InventoryUILayout ActiveLayout;
 	bool bCaptureParsed = false;
