@@ -375,6 +375,21 @@ bool AABTSM11FinaleInteractionSystem::TryLaunchCaptureAttempt(
 	APlayerController& Controller,
 	const FABTSM11FinaleLaunchInput& Input)
 {
+	if (!TryEnterCaptureAim(Cord, Controller, Input))
+	{
+		return false;
+	}
+	RequestRelease();
+	return InteractionState
+		== EABTSM11FinaleInteractionState::ReleasePending
+		|| InteractionState == EABTSM11FinaleInteractionState::Launched;
+}
+
+bool AABTSM11FinaleInteractionSystem::TryEnterCaptureAim(
+	AABTSM51SlingshotCord& Cord,
+	APlayerController& Controller,
+	const FABTSM11FinaleLaunchInput& Input)
+{
 	if (!TryEnterFinale(Cord, Controller)
 		|| !IsValid(FinaleSystem)
 		|| InteractionState != EABTSM11FinaleInteractionState::Aiming)
@@ -394,10 +409,7 @@ bool AABTSM11FinaleInteractionSystem::TryLaunchCaptureAttempt(
 	bPreviewDirty = true;
 	LatestSolvedRevision = INDEX_NONE;
 	UpdatePouchPresentation();
-	RequestRelease();
-	return InteractionState
-		== EABTSM11FinaleInteractionState::ReleasePending
-		|| InteractionState == EABTSM11FinaleInteractionState::Launched;
+	return true;
 }
 
 void AABTSM11FinaleInteractionSystem::Tick(const float DeltaSeconds)

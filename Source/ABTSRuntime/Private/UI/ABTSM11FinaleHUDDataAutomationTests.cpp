@@ -67,6 +67,22 @@ namespace ABTSM11FinaleHudDataTests
 	{
 		return (A - B).Length() <= Tolerance;
 	}
+
+	double PointSegmentDistanceSquared(
+		const FVector2d& Point,
+		const FVector2d& Start,
+		const FVector2d& End)
+	{
+		const FVector2d Segment = End - Start;
+		const double SegmentLengthSquared = Segment.SquaredLength();
+		const double Alpha = SegmentLengthSquared > UE_DOUBLE_SMALL_NUMBER
+			? FMath::Clamp(
+				(Point - Start).Dot(Segment) / SegmentLengthSquared,
+				0.0,
+				1.0)
+			: 0.0;
+		return (Point - (Start + Segment * Alpha)).SquaredLength();
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -388,6 +404,613 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11HudTerminalTransferOverviewTest,
+	"ABTS.M11C.HUD.Unit.TerminalTransferOverview",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11HudTerminalTransferOverviewTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM11FinaleLayoutPreset Preset;
+	FABTSM11CandidateExperienceIdentity Identity;
+	FString Failure;
+	if (!TestTrue(
+		TEXT("Rank11 candidate builds for terminal overview"),
+		FABTSM11CandidateExperienceCatalog::BuildCandidate(
+			11,
+			Preset,
+			Identity,
+			&Failure)))
+	{
+		AddError(Failure);
+		return false;
+	}
+
+	FABTSM11TrajectoryRequest Request;
+	FABTSM11TrajectoryResult Result;
+	if (!TestTrue(
+		TEXT("Rank11 nominal trajectory solves"),
+		Preset.BuildRequest(
+			Preset.NominalInput,
+			0x7u,
+			Request,
+			&Failure)
+			&& FABTSM11GravityAssistSolver::Solve(
+				Request,
+				Result,
+				&Failure)))
+	{
+		AddError(Failure);
+		return false;
+	}
+	const FABTSM11PrefixClassification Classification =
+		FABTSM11PrefixClassifier::Classify(Preset, Result, 0x7u);
+	TestTrue(TEXT("Rank11 nominal trajectory is F4"), Classification.IsF(4));
+
+	FABTSM11PlaybackPlan Plan;
+	if (!TestTrue(
+		TEXT("Rank11 presentation plan reaches physical contact"),
+		Plan.BuildCandidatePresentationContact(
+			Preset,
+			Result,
+			Classification)))
+	{
+		AddError(Plan.Failure);
+		return false;
+	}
+
+	FABTSM11OrbitalSceneSnapshot Scene;
+	if (!TestTrue(
+		TEXT("Authoritative overview scene builds"),
+		FABTSM11OrbitalSceneBuilder::Build(
+			Preset,
+			Result,
+			Scene,
+			96)))
+	{
+		return false;
+	}
+	const TArray<FABTSM11OrbitalScenePoint> OriginalTrajectory =
+		Scene.Trajectory;
+	FABTSM110FinaleLocalFrame IdentityFrame;
+	IdentityFrame.LayoutVersion = 1;
+	IdentityFrame.LaunchTaskId = 1;
+	IdentityFrame.AnchorCellId = 2;
+	IdentityFrame.SlotPairId = 3;
+	IdentityFrame.WorldTransform = FTransform::Identity;
+	IdentityFrame.LeftSlotWorldLocation = FVector(0.0, -105.0, 0.0);
+	IdentityFrame.RightSlotWorldLocation = FVector(0.0, 105.0, 0.0);
+	IdentityFrame.bValid = true;
+	FABTSM11OrbitalDiagramSnapshot Diagram;
+	TestTrue(
+		TEXT("Runtime orbital diagram basis builds for terminal diagnostic"),
+		FABTSM11OrbitalDiagramBuilder::Build(
+			Preset,
+			IdentityFrame,
+			Plan.Points,
+			Plan.ReleasedTrajectoryHash,
+			Diagram));
+	FABTSM11OverviewViewState View;
+	TestTrue(
+		TEXT("Base overview view initializes before terminal simplification"),
+		View.InitializeFromScene(
+			Scene,
+			Diagram.PlaneAxisX,
+			Diagram.PlaneAxisY));
+	constexpr double MaximumCurveErrorPixels = 0.35;
+	constexpr double DiagnosticDiagramRadiusPixels = 512.0;
+	constexpr double MaximumOverviewZoom = 4.0;
+	const double MaximumChordErrorCM = MaximumCurveErrorPixels
+		* View.ProjectionScaleCM
+		/ (DiagnosticDiagramRadiusPixels * MaximumOverviewZoom);
+	TestTrue(
+		TEXT("Visible terminal transfer appends to overview"),
+		FABTSM11OrbitalSceneBuilder::AppendPlaybackExtension(
+			Plan,
+			Scene,
+			720,
+			MaximumChordErrorCM));
+	TestTrue(
+		TEXT("Overview replaces only the released suffix after guidance handoff"),
+		Scene.Trajectory.Num() >= 3);
+	int32 OriginalPrefixCount = 0;
+	while (OriginalTrajectory.IsValidIndex(OriginalPrefixCount)
+		&& OriginalTrajectory[OriginalPrefixCount].TimeSeconds
+			< Plan.TransferStartTimeSeconds - 1.0e-8)
+	{
+		++OriginalPrefixCount;
+	}
+	bool bOverviewPrefixPreserved =
+		Scene.Trajectory.Num() > OriginalPrefixCount;
+	for (int32 Index = 0;
+		Index < OriginalPrefixCount && bOverviewPrefixPreserved;
+		++Index)
+	{
+		bOverviewPrefixPreserved =
+			Scene.Trajectory[Index].TimeSeconds
+				== OriginalTrajectory[Index].TimeSeconds
+			&& Scene.Trajectory[Index].PositionCM.Equals(
+				OriginalTrajectory[Index].PositionCM,
+				0.0)
+			&& Scene.Trajectory[Index].VelocityCMPerSec.Equals(
+				OriginalTrajectory[Index].VelocityCMPerSec,
+				0.0);
+	}
+	TestTrue(
+		TEXT("Authoritative overview prefix before handoff remains unchanged"),
+		bOverviewPrefixPreserved);
+	TestTrue(
+		TEXT("Overview white anchor equals the circular-guidance handoff"),
+		FMath::IsNearlyEqual(
+			Scene.Trajectory[OriginalPrefixCount].TimeSeconds,
+			Plan.TransferStartTimeSeconds,
+			1.0e-8)
+			&& Scene.Trajectory[OriginalPrefixCount].SegmentKind
+				== EABTSM11PlaybackSegmentKind::PlayerAuthoritative);
+	TestEqual(
+		TEXT("Overview records the exact playback-plan identity"),
+		Scene.SourcePlaybackPlanHash,
+		Plan.PlanHash);
+	TestEqual(
+		TEXT("Candidate extension remains explicitly presentation-only"),
+		Scene.Trajectory.Last().SegmentKind,
+		EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer);
+	TestTrue(
+		TEXT("Overview extension ends on the physical UFO contact sphere"),
+		FMath::IsNearlyEqual(
+			(Scene.Trajectory.Last().PositionCM - Scene.TargetCenterCM).Length(),
+			Scene.TargetRadiusCM,
+			1.0e-3));
+
+	FABTSM11OverviewProjection Projection;
+	TestTrue(
+		TEXT("Extended overview projects"),
+		FABTSM11OverviewProjector::Build(Scene, View, Projection));
+	TestTrue(
+		TEXT("Projected overview retains terminal transfer typing"),
+		Projection.HitProxies.ContainsByPredicate(
+			[](const FABTSM11OverviewHitProxy& Proxy)
+			{
+				return Proxy.SegmentKind
+					== EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+			}));
+	TestEqual(
+		TEXT("Every adjacent overview point remains connected after handoff clipping"),
+		Projection.HitProxies.Num(),
+		Scene.Trajectory.Num() - 1);
+	const bool bHasWhiteSegmentIntoHandoff =
+		Projection.HitProxies.ContainsByPredicate(
+			[&Plan](const FABTSM11OverviewHitProxy& Proxy)
+			{
+				return Proxy.SegmentKind
+						== EABTSM11PlaybackSegmentKind::PlayerAuthoritative
+					&& FMath::IsNearlyEqual(
+						Proxy.EndTimeSeconds,
+						Plan.TransferStartTimeSeconds,
+						1.0e-8);
+			});
+	const bool bHasAmberSegmentOutOfHandoff =
+		Projection.HitProxies.ContainsByPredicate(
+			[&Plan](const FABTSM11OverviewHitProxy& Proxy)
+			{
+				return Proxy.SegmentKind
+						== EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer
+					&& FMath::IsNearlyEqual(
+						Proxy.StartTimeSeconds,
+						Plan.TransferStartTimeSeconds,
+						1.0e-8);
+			});
+	TestTrue(
+		TEXT("White overview stroke reaches the exact playback handoff"),
+		bHasWhiteSegmentIntoHandoff);
+	TestTrue(
+		TEXT("Amber overview stroke leaves from the same playback handoff"),
+		bHasAmberSegmentOutOfHandoff);
+	TestFalse(
+		TEXT("Visible terminal transfer uses a continuous solid stroke"),
+		ABTSM11ShouldDashOverviewTrajectorySegment(
+			EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer,
+			false));
+	TestFalse(
+		TEXT("Certified nominal tail uses the same continuous solid stroke"),
+		ABTSM11ShouldDashOverviewTrajectorySegment(
+			EABTSM11PlaybackSegmentKind::CertifiedNominalTail,
+			false));
+	TestFalse(
+		TEXT("Terminal extension remains solid even if depth classification changes"),
+		ABTSM11ShouldDashOverviewTrajectorySegment(
+			EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer,
+			true));
+	TestTrue(
+		TEXT("Hidden authoritative trajectory retains its depth dash cue"),
+		ABTSM11ShouldDashOverviewTrajectorySegment(
+			EABTSM11PlaybackSegmentKind::PlayerAuthoritative,
+			true));
+
+	int32 PlaybackAnchorIndex = INDEX_NONE;
+	for (int32 Index = 0; Index < Plan.Points.Num(); ++Index)
+	{
+		if (Plan.Points[Index].SegmentKind
+				== EABTSM11PlaybackSegmentKind::PlayerAuthoritative
+			&& FMath::IsNearlyEqual(
+				Plan.Points[Index].TimeSeconds,
+				Plan.TransferStartTimeSeconds,
+				1.0e-8)
+			&& Plan.Points[Index].PositionCM.Equals(
+				Scene.Trajectory[OriginalPrefixCount].PositionCM,
+				1.0e-6))
+		{
+			PlaybackAnchorIndex = Index;
+		}
+	}
+	TestTrue(
+		TEXT("Diagnostic finds the exact playback anchor"),
+		PlaybackAnchorIndex != INDEX_NONE);
+	TArray<FVector2d> RawProjectedPoints;
+	if (PlaybackAnchorIndex != INDEX_NONE)
+	{
+		RawProjectedPoints.Add(View.Project(
+			Plan.Points[PlaybackAnchorIndex].PositionCM));
+		constexpr int32 PresentationSubstepsPerPlaybackInterval = 8;
+		for (int32 SourceIndex = PlaybackAnchorIndex + 1;
+			SourceIndex < Plan.Points.Num();
+			++SourceIndex)
+		{
+			const FABTSM11PlaybackPoint& SourceA = Plan.Points[SourceIndex - 1];
+			const FABTSM11PlaybackPoint& SourceB = Plan.Points[SourceIndex];
+			for (int32 Substep = 1;
+				Substep <= PresentationSubstepsPerPlaybackInterval;
+				++Substep)
+			{
+				const double Alpha = static_cast<double>(Substep)
+					/ static_cast<double>(
+						PresentationSubstepsPerPlaybackInterval);
+				const double SampleTime = FMath::Lerp(
+					SourceA.TimeSeconds,
+					SourceB.TimeSeconds,
+					Alpha);
+				FVector3d PositionCM;
+				FVector3d VelocityCMPerSec;
+				EABTSM11PlaybackSegmentKind SegmentKind =
+					EABTSM11PlaybackSegmentKind::PlayerAuthoritative;
+				if (Plan.Sample(
+						SampleTime,
+						PositionCM,
+						VelocityCMPerSec,
+						&SegmentKind))
+				{
+					RawProjectedPoints.Add(View.Project(PositionCM));
+				}
+			}
+		}
+	}
+
+	double MaximumHudDeviationNormalized = 0.0;
+	for (const FVector2d& RawPoint : RawProjectedPoints)
+	{
+		double BestDistanceSquared = TNumericLimits<double>::Max();
+		for (int32 Index = OriginalPrefixCount + 1;
+			Index < Scene.Trajectory.Num();
+			++Index)
+		{
+			BestDistanceSquared = FMath::Min(
+				BestDistanceSquared,
+				ABTSM11FinaleHudDataTests::PointSegmentDistanceSquared(
+					RawPoint,
+					View.Project(Scene.Trajectory[Index - 1].PositionCM),
+					View.Project(Scene.Trajectory[Index].PositionCM)));
+		}
+		MaximumHudDeviationNormalized = FMath::Max(
+			MaximumHudDeviationNormalized,
+			FMath::Sqrt(BestDistanceSquared));
+	}
+	const double MaximumHudDeviationPixels = MaximumHudDeviationNormalized
+		* DiagnosticDiagramRadiusPixels * MaximumOverviewZoom;
+	AddInfo(FString::Printf(
+		TEXT("Terminal diagnostic: raw-to-HUD max deviation %.4f px at 512 px / 4x"),
+		MaximumHudDeviationPixels));
+	TestTrue(
+		TEXT("Deletion-only HUD polyline stays within its screen-space error limit"),
+		MaximumHudDeviationPixels <= MaximumCurveErrorPixels + 1.0e-6);
+
+	int32 ForwardReversalCount = 0;
+	double MinimumForwardDelta = TNumericLimits<double>::Max();
+	double MinimumConsecutiveDirectionDot = 1.0;
+	if (RawProjectedPoints.Num() >= 3)
+	{
+		const FVector2d OverallDirection =
+			(RawProjectedPoints.Last() - RawProjectedPoints[0]).GetSafeNormal();
+		FVector2d PreviousDirection = FVector2d::ZeroVector;
+		for (int32 Index = 1; Index < RawProjectedPoints.Num(); ++Index)
+		{
+			const FVector2d Delta =
+				RawProjectedPoints[Index] - RawProjectedPoints[Index - 1];
+			const double ForwardDelta = Delta.Dot(OverallDirection);
+			MinimumForwardDelta = FMath::Min(MinimumForwardDelta, ForwardDelta);
+			if (ForwardDelta < -1.0e-9)
+			{
+				++ForwardReversalCount;
+			}
+			const FVector2d Direction = Delta.GetSafeNormal();
+			if (!Direction.IsNearlyZero() && !PreviousDirection.IsNearlyZero())
+			{
+				MinimumConsecutiveDirectionDot = FMath::Min(
+					MinimumConsecutiveDirectionDot,
+					Direction.Dot(PreviousDirection));
+			}
+			if (!Direction.IsNearlyZero())
+			{
+				PreviousDirection = Direction;
+			}
+		}
+	}
+	const double MaximumLocalTurnDegrees = FMath::RadiansToDegrees(
+		FMath::Acos(FMath::Clamp(
+			MinimumConsecutiveDirectionDot,
+			-1.0,
+			1.0)));
+	AddInfo(FString::Printf(
+		TEXT("Terminal diagnostic: raw playback forward reversals %d, min forward delta %.9f, max local turn %.3f deg"),
+		ForwardReversalCount,
+		MinimumForwardDelta,
+		MaximumLocalTurnDegrees));
+	TestEqual(
+		TEXT("Raw terminal playback never reverses toward physical contact"),
+		ForwardReversalCount,
+		0);
+	TestTrue(
+		TEXT("Raw terminal playback has no abrupt local heading change"),
+		MaximumLocalTurnDegrees <= 5.0);
+
+	FABTSM11OrbitalSceneSnapshot AdaptiveScene;
+	TestTrue(
+		TEXT("Third authoritative scene builds for adaptive sampling"),
+		FABTSM11OrbitalSceneBuilder::Build(
+			Preset,
+			Result,
+			AdaptiveScene,
+			96));
+	const int32 AdaptiveAuthoritativePointCount =
+		AdaptiveScene.Trajectory.Num();
+	const FABTSM11OrbitalScenePoint AdaptiveAnchor =
+		AdaptiveScene.Trajectory.Last();
+	FABTSM11PlaybackPlan AdaptivePlan;
+	AdaptivePlan.ReleasedTrajectoryHash = AdaptiveScene.SourceTrajectoryHash;
+	AdaptivePlan.PlanHash = 0xAB75A11u;
+	AdaptivePlan.bPhysicalTargetHit = true;
+	AdaptivePlan.bUsesVisibleTerminalTransfer = true;
+	FABTSM11PlaybackPoint& AdaptivePlaybackAnchor =
+		AdaptivePlan.Points.AddDefaulted_GetRef();
+	AdaptivePlaybackAnchor.TimeSeconds = AdaptiveAnchor.TimeSeconds;
+	AdaptivePlaybackAnchor.PositionCM = AdaptiveAnchor.PositionCM;
+	AdaptivePlaybackAnchor.VelocityCMPerSec = AdaptiveAnchor.VelocityCMPerSec;
+	AdaptivePlaybackAnchor.SegmentKind =
+		EABTSM11PlaybackSegmentKind::PlayerAuthoritative;
+
+	FVector3d ContactDirection =
+		(AdaptiveAnchor.PositionCM - AdaptiveScene.TargetCenterCM)
+		.GetSafeNormal();
+	if (ContactDirection.IsNearlyZero())
+	{
+		ContactDirection = FVector3d::ForwardVector;
+	}
+	const FVector3d ContactPosition = AdaptiveScene.TargetCenterCM
+		+ ContactDirection * AdaptiveScene.TargetRadiusCM;
+	const FVector3d ToContact = ContactPosition - AdaptiveAnchor.PositionCM;
+	FVector3d CurveSide = ToContact.GetSafeNormal()
+		.Cross(FVector3d::UpVector).GetSafeNormal();
+	if (CurveSide.IsNearlyZero())
+	{
+		CurveSide = ToContact.GetSafeNormal()
+			.Cross(FVector3d::RightVector).GetSafeNormal();
+	}
+	const FVector3d TransferEnd = AdaptiveAnchor.PositionCM
+		+ ToContact * 0.3;
+	const double CurveAmplitudeCM = ToContact.Length() * 0.12;
+	constexpr int32 CurvedTransferSampleCount = 120;
+	constexpr double CurvedTransferDurationSeconds = 4.0;
+	for (int32 Index = 1; Index <= CurvedTransferSampleCount; ++Index)
+	{
+		const double Alpha = static_cast<double>(Index)
+			/ static_cast<double>(CurvedTransferSampleCount);
+		FABTSM11PlaybackPoint& Point =
+			AdaptivePlan.Points.AddDefaulted_GetRef();
+		Point.TimeSeconds = AdaptiveAnchor.TimeSeconds
+			+ CurvedTransferDurationSeconds * Alpha;
+		Point.PositionCM = FMath::Lerp(
+			AdaptiveAnchor.PositionCM,
+			TransferEnd,
+			Alpha)
+			+ CurveSide * (CurveAmplitudeCM * FMath::Sin(UE_PI * Alpha));
+		Point.VelocityCMPerSec =
+			(TransferEnd - AdaptiveAnchor.PositionCM)
+				/ CurvedTransferDurationSeconds
+			+ CurveSide
+				* (CurveAmplitudeCM * UE_PI * FMath::Cos(UE_PI * Alpha)
+					/ CurvedTransferDurationSeconds);
+		Point.SegmentKind =
+			EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+	}
+	constexpr int32 StraightTailSampleCount = 480;
+	constexpr double StraightTailDurationSeconds = 16.0;
+	for (int32 Index = 1; Index <= StraightTailSampleCount; ++Index)
+	{
+		const double Alpha = static_cast<double>(Index)
+			/ static_cast<double>(StraightTailSampleCount);
+		FABTSM11PlaybackPoint& Point =
+			AdaptivePlan.Points.AddDefaulted_GetRef();
+		Point.TimeSeconds = AdaptiveAnchor.TimeSeconds
+			+ CurvedTransferDurationSeconds
+			+ StraightTailDurationSeconds * Alpha;
+		Point.PositionCM = FMath::Lerp(TransferEnd, ContactPosition, Alpha);
+		Point.VelocityCMPerSec =
+			(ContactPosition - TransferEnd) / StraightTailDurationSeconds;
+		Point.SegmentKind =
+			EABTSM11PlaybackSegmentKind::CertifiedNominalTail;
+	}
+	AdaptivePlan.DurationSeconds = AdaptivePlan.Points.Last().TimeSeconds;
+	constexpr int32 AdaptiveExtensionBudget = 24;
+	TestTrue(
+		TEXT("Adaptive overview sampling accepts curved transfer and straight tail"),
+		FABTSM11OrbitalSceneBuilder::AppendPlaybackExtension(
+			AdaptivePlan,
+			AdaptiveScene,
+			AdaptiveExtensionBudget));
+	const int32 AdaptiveExtensionPointCount =
+		AdaptiveScene.Trajectory.Num() - AdaptiveAuthoritativePointCount;
+	int32 AdaptiveCurvedPointCount = 0;
+	int32 AdaptiveTailPointCount = 0;
+	for (int32 Index = AdaptiveAuthoritativePointCount;
+		Index < AdaptiveScene.Trajectory.Num();
+		++Index)
+	{
+		if (AdaptiveScene.Trajectory[Index].SegmentKind
+			== EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer)
+		{
+			++AdaptiveCurvedPointCount;
+		}
+		else if (AdaptiveScene.Trajectory[Index].SegmentKind
+			== EABTSM11PlaybackSegmentKind::CertifiedNominalTail)
+		{
+			++AdaptiveTailPointCount;
+		}
+	}
+	TestTrue(
+		TEXT("Adaptive overview stays within its extension point budget"),
+		AdaptiveExtensionPointCount <= AdaptiveExtensionBudget);
+	TestTrue(
+		TEXT("Curved transfer receives most of the adaptive point budget"),
+		AdaptiveCurvedPointCount > AdaptiveExtensionPointCount / 2);
+	TestTrue(
+		TEXT("Straight nominal tail and its semantic boundary remain present"),
+		AdaptiveTailPointCount >= 2);
+	TestTrue(
+		TEXT("Adaptive overview still ends at exact physical contact"),
+		AdaptiveScene.Trajectory.Last().PositionCM.Equals(
+			ContactPosition,
+			1.0e-6));
+
+	FABTSM11OrbitalSceneSnapshot SparseCurveScene;
+	TestTrue(
+		TEXT("Fourth authoritative scene builds for Hermite presentation sampling"),
+		FABTSM11OrbitalSceneBuilder::Build(
+			Preset,
+			Result,
+			SparseCurveScene,
+			96));
+	const int32 SparseAuthoritativePointCount =
+		SparseCurveScene.Trajectory.Num();
+	const FABTSM11OrbitalScenePoint SparseAnchor =
+		SparseCurveScene.Trajectory.Last();
+	FVector3d SparseContactDirection =
+		(SparseAnchor.PositionCM - SparseCurveScene.TargetCenterCM)
+		.GetSafeNormal();
+	if (SparseContactDirection.IsNearlyZero())
+	{
+		SparseContactDirection = FVector3d::ForwardVector;
+	}
+	const FVector3d SparseContactPosition =
+		SparseCurveScene.TargetCenterCM
+		+ SparseContactDirection * SparseCurveScene.TargetRadiusCM;
+	const FVector3d SparseToContact =
+		SparseContactPosition - SparseAnchor.PositionCM;
+	FVector3d SparseSide = SparseToContact.GetSafeNormal()
+		.Cross(FVector3d::UpVector).GetSafeNormal();
+	if (SparseSide.IsNearlyZero())
+	{
+		SparseSide = SparseToContact.GetSafeNormal()
+			.Cross(FVector3d::RightVector).GetSafeNormal();
+	}
+
+	FABTSM11PlaybackPlan SparseCurvePlan;
+	SparseCurvePlan.ReleasedTrajectoryHash =
+		SparseCurveScene.SourceTrajectoryHash;
+	SparseCurvePlan.PlanHash = 0xAB75A12u;
+	SparseCurvePlan.bPhysicalTargetHit = true;
+	SparseCurvePlan.bUsesVisibleTerminalTransfer = true;
+	FABTSM11PlaybackPoint& SparsePlaybackAnchor =
+		SparseCurvePlan.Points.AddDefaulted_GetRef();
+	SparsePlaybackAnchor.TimeSeconds = SparseAnchor.TimeSeconds;
+	SparsePlaybackAnchor.PositionCM = SparseAnchor.PositionCM;
+	SparsePlaybackAnchor.VelocityCMPerSec = SparseAnchor.VelocityCMPerSec;
+	SparsePlaybackAnchor.SegmentKind =
+		EABTSM11PlaybackSegmentKind::PlayerAuthoritative;
+	FABTSM11PlaybackPoint& SparseMidpoint =
+		SparseCurvePlan.Points.AddDefaulted_GetRef();
+	SparseMidpoint.TimeSeconds = SparseAnchor.TimeSeconds + 1.0;
+	SparseMidpoint.PositionCM = FMath::Lerp(
+		SparseAnchor.PositionCM,
+		SparseContactPosition,
+		0.5);
+	SparseMidpoint.VelocityCMPerSec = SparseToContact * 0.5
+		+ SparseSide * (SparseToContact.Length() * 0.8);
+	SparseMidpoint.SegmentKind =
+		EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+	FABTSM11PlaybackPoint& SparseContact =
+		SparseCurvePlan.Points.AddDefaulted_GetRef();
+	SparseContact.TimeSeconds = SparseAnchor.TimeSeconds + 2.0;
+	SparseContact.PositionCM = SparseContactPosition;
+	SparseContact.VelocityCMPerSec = SparseToContact * 0.5
+		- SparseSide * (SparseToContact.Length() * 0.8);
+	SparseContact.SegmentKind =
+		EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+	SparseCurvePlan.DurationSeconds = SparseContact.TimeSeconds;
+	TestTrue(
+		TEXT("Sparse playback cache is expanded through playback Hermite sampling"),
+		FABTSM11OrbitalSceneBuilder::AppendPlaybackExtension(
+			SparseCurvePlan,
+			SparseCurveScene,
+			64));
+	const int32 SparseExtensionPointCount =
+		SparseCurveScene.Trajectory.Num() - SparseAuthoritativePointCount;
+	double MaximumSparseHermiteOffsetCM = 0.0;
+	for (int32 Index = SparseAuthoritativePointCount;
+		Index < SparseCurveScene.Trajectory.Num();
+		++Index)
+	{
+		MaximumSparseHermiteOffsetCM = FMath::Max(
+			MaximumSparseHermiteOffsetCM,
+			FMath::Abs(
+				(SparseCurveScene.Trajectory[Index].PositionCM
+					- SparseAnchor.PositionCM).Dot(SparseSide)));
+	}
+	TestTrue(
+		TEXT("HUD presentation contains points between sparse playback cache samples"),
+		SparseExtensionPointCount > SparseCurvePlan.Points.Num() - 1);
+	TestTrue(
+		TEXT("HUD presentation follows Hermite curvature instead of raw point chords"),
+		MaximumSparseHermiteOffsetCM > SparseToContact.Length() * 0.01);
+	TestTrue(
+		TEXT("Hermite presentation still ends at exact physical contact"),
+		SparseCurveScene.Trajectory.Last().PositionCM.Equals(
+			SparseContactPosition,
+			1.0e-6));
+
+	FABTSM11PlaybackPlan WrongPlan = Plan;
+	++WrongPlan.ReleasedTrajectoryHash;
+	FABTSM11OrbitalSceneSnapshot UnchangedScene;
+	TestTrue(
+		TEXT("Second authoritative scene builds for mismatch rejection"),
+		FABTSM11OrbitalSceneBuilder::Build(
+			Preset,
+			Result,
+			UnchangedScene,
+			96));
+	const int32 UnchangedPointCount = UnchangedScene.Trajectory.Num();
+	TestFalse(
+		TEXT("Mismatched playback identity fails closed"),
+		FABTSM11OrbitalSceneBuilder::AppendPlaybackExtension(
+			WrongPlan,
+			UnchangedScene,
+			180));
+	TestEqual(
+		TEXT("Rejected extension does not mutate the authoritative scene"),
+		UnchangedScene.Trajectory.Num(),
+		UnchangedPointCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11HudTrajectoryHitTest,
 	"ABTS.M11C.HUD.Unit.TrajectoryHitTest",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -411,6 +1034,15 @@ bool FABTSM11HudTrajectoryHitTest::RunTest(const FString& Parameters)
 	Visible.StartPhase = 0.25;
 	Visible.EndPhase = 0.75;
 	Visible.Leg = EABTSM11TrajectorySemanticLeg::Assist2Encounter;
+	FABTSM11OverviewHitProxy& Terminal =
+		Projection.HitProxies.AddDefaulted_GetRef();
+	Terminal.Start = FVector2d(-0.4, 0.75);
+	Terminal.End = FVector2d(0.4, 0.75);
+	Terminal.StartTimeSeconds = 5.0;
+	Terminal.EndTimeSeconds = 6.0;
+	Terminal.Leg = EABTSM11TrajectorySemanticLeg::TargetApproach;
+	Terminal.SegmentKind =
+		EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
 
 	FABTSM11TrajectoryHit Hit;
 	TestTrue(TEXT("Crossing trajectory can be selected"),
@@ -429,6 +1061,14 @@ bool FABTSM11HudTrajectoryHitTest::RunTest(const FString& Parameters)
 		ABTSM11HitTestOverviewTrajectory(
 			Projection,
 			FVector2d(500.0, 500.0),
+			FVector2d(200.0, 200.0),
+			160.0,
+			8.0,
+			Hit));
+	TestFalse(TEXT("Presentation-only terminal transfer is not selectable"),
+		ABTSM11HitTestOverviewTrajectory(
+			Projection,
+			FVector2d(200.0, 320.0),
 			FVector2d(200.0, 200.0),
 			160.0,
 			8.0,

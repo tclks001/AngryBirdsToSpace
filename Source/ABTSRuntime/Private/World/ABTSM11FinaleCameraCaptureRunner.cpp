@@ -1136,7 +1136,10 @@ bool AABTSM11FinaleCameraCaptureRunner::TryBeginNominalAttempt()
 		return false;
 	}
 	const bool bAttemptAccepted = Config.bHudScreenshotOnly
-		? InteractionSystem->TryEnterFinale(*MatchingCord, *Controller)
+		? InteractionSystem->TryEnterCaptureAim(
+			*MatchingCord,
+			*Controller,
+			Input)
 		: InteractionSystem->TryLaunchCaptureAttempt(
 			*MatchingCord,
 			*Controller,
@@ -3060,6 +3063,7 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 
 	FABTSM11TrajectoryResult EventResult;
 	EventResult.ValidationHash = 1;
+	EventResult.CompletedAssistCount = FABTSM11GravityScenario::AssistCount;
 	for (int32 AssistIndex = 1;
 		AssistIndex <= FABTSM11GravityScenario::AssistCount;
 		++AssistIndex)

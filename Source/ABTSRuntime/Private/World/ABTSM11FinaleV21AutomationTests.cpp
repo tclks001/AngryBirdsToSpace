@@ -11,6 +11,100 @@
 
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 
+namespace
+{
+	struct FTerminalGuidanceMetrics
+	{
+		double MaximumHeadingStepDegrees = 0.0;
+		double MinimumSignedTurn = 1.0;
+		int32 OppositeTurnCount = 0;
+		bool bMonotonicTargetApproach = true;
+	};
+
+	bool MeasureTerminalGuidance(
+		const FABTSM11PlaybackPlan& Plan,
+		const FVector3d& TargetCenterCM,
+		FTerminalGuidanceMetrics& OutMetrics)
+	{
+		if (!Plan.bUsesVisibleTerminalTransfer
+			|| Plan.TransferEndTimeSeconds <= Plan.TransferStartTimeSeconds)
+		{
+			return false;
+		}
+
+		FVector3d StartPosition;
+		FVector3d StartVelocity;
+		if (!Plan.Sample(
+			Plan.TransferStartTimeSeconds,
+			StartPosition,
+			StartVelocity))
+		{
+			return false;
+		}
+		const FVector3d StartDirection = StartVelocity.GetSafeNormal();
+		const FVector3d ToTarget = TargetCenterCM - StartPosition;
+		const FVector3d SideOffset = ToTarget
+			- StartDirection * FVector3d::DotProduct(ToTarget, StartDirection);
+		const FVector3d CircleAxis = FVector3d::CrossProduct(
+			StartDirection,
+			SideOffset.GetSafeNormal()).GetSafeNormal();
+		if (CircleAxis.IsNearlyZero())
+		{
+			return false;
+		}
+
+		constexpr double SampleStepSeconds = 1.0 / 240.0;
+		double PreviousDistance = ToTarget.Length();
+		FVector3d PreviousDirection = StartDirection;
+		const int32 SampleCount = FMath::Max(
+			2,
+			FMath::CeilToInt(
+				(Plan.TransferEndTimeSeconds - Plan.TransferStartTimeSeconds)
+					/ SampleStepSeconds));
+		for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
+		{
+			const double TimeSeconds = FMath::Lerp(
+				Plan.TransferStartTimeSeconds,
+				Plan.TransferEndTimeSeconds,
+				static_cast<double>(SampleIndex)
+					/ static_cast<double>(SampleCount));
+			FVector3d Position;
+			FVector3d Velocity;
+			if (!Plan.Sample(TimeSeconds, Position, Velocity))
+			{
+				return false;
+			}
+			const FVector3d Direction = Velocity.GetSafeNormal();
+			if (Direction.IsNearlyZero())
+			{
+				return false;
+			}
+			const double HeadingStep = FMath::Acos(FMath::Clamp(
+				FVector3d::DotProduct(PreviousDirection, Direction),
+				-1.0,
+				1.0));
+			const double SignedTurn = FVector3d::DotProduct(
+				FVector3d::CrossProduct(PreviousDirection, Direction),
+				CircleAxis);
+			const double TargetDistance =
+				(Position - TargetCenterCM).Length();
+			OutMetrics.MaximumHeadingStepDegrees = FMath::Max(
+				OutMetrics.MaximumHeadingStepDegrees,
+				FMath::RadiansToDegrees(HeadingStep));
+			OutMetrics.MinimumSignedTurn = FMath::Min(
+				OutMetrics.MinimumSignedTurn,
+				SignedTurn);
+			OutMetrics.OppositeTurnCount += SignedTurn < -1.0e-4 ? 1 : 0;
+			OutMetrics.bMonotonicTargetApproach =
+				OutMetrics.bMonotonicTargetApproach
+				&& TargetDistance <= PreviousDistance + 1.0e-2;
+			PreviousDistance = TargetDistance;
+			PreviousDirection = Direction;
+		}
+		return true;
+	}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11CV21InputParityAndLatestOnlyTest,
 	"ABTS.M11C.V2_1.InputParityAndLatestOnly",
@@ -321,9 +415,11 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 		FirstContactPlan.PlanHash,
 		SecondContactPlan.PlanHash);
 	TestTrue(
-		TEXT("Candidate contact extends rather than rewrites the source"),
+		TEXT("Candidate guidance hands off within the released trajectory"),
 		FirstContactPlan.TransferStartTimeSeconds
-			== FirstPlan.DurationSeconds);
+			<= FirstPlan.DurationSeconds
+			&& FirstContactPlan.TransferStartTimeSeconds
+				>= FirstPlan.Points[1].TimeSeconds);
 	TestTrue(
 		TEXT("Candidate contact duration is positive"),
 		FirstContactPlan.TransferEndTimeSeconds
@@ -339,10 +435,17 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 				.Length(),
 			PhysicalRadius,
 			1.0e-3));
+	int32 PreservedPrefixCount = 0;
+	while (FirstPlan.Points.IsValidIndex(PreservedPrefixCount)
+		&& FirstPlan.Points[PreservedPrefixCount].TimeSeconds
+			<= FirstContactPlan.TransferStartTimeSeconds + 1.0e-9)
+	{
+		++PreservedPrefixCount;
+	}
 	bool bAuthoritativePrefixPreserved =
-		FirstContactPlan.Points.Num() >= FirstPlan.Points.Num();
+		FirstContactPlan.Points.Num() >= PreservedPrefixCount;
 	for (int32 Index = 0;
-		Index < FirstPlan.Points.Num() && bAuthoritativePrefixPreserved;
+		Index < PreservedPrefixCount && bAuthoritativePrefixPreserved;
 		++Index)
 	{
 		bAuthoritativePrefixPreserved =
@@ -358,8 +461,25 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 					== FirstPlan.Points[Index].SegmentKind;
 	}
 	TestTrue(
-		TEXT("Candidate authoritative prefix is byte-for-byte preserved"),
+		TEXT("Candidate prefix before the guidance handoff is byte-for-byte preserved"),
 		bAuthoritativePrefixPreserved);
+	FTerminalGuidanceMetrics CandidateGuidanceMetrics;
+	TestTrue(
+		TEXT("Candidate terminal guidance can be densely sampled"),
+		MeasureTerminalGuidance(
+			FirstContactPlan,
+			PhysicalCenter,
+			CandidateGuidanceMetrics));
+	TestTrue(
+		TEXT("Candidate terminal guidance approaches the UFO monotonically"),
+		CandidateGuidanceMetrics.bMonotonicTargetApproach);
+	TestEqual(
+		TEXT("Candidate terminal guidance never reverses its circle turn"),
+		CandidateGuidanceMetrics.OppositeTurnCount,
+		0);
+	TestTrue(
+		TEXT("Candidate terminal guidance has no dense-sample corner"),
+		CandidateGuidanceMetrics.MaximumHeadingStepDegrees <= 1.0);
 
 	FABTSM11FinaleLayoutPreset Rank11Preset;
 	FABTSM11CandidateExperienceIdentity Rank11Identity;
@@ -426,7 +546,32 @@ bool FABTSM11CV21CandidateExperienceTest::RunTest(
 			>= 0.5
 			&& Rank11ContactPlan.TransferEndTimeSeconds
 				- Rank11ContactPlan.TransferStartTimeSeconds
-				<= 8.0);
+				<= 12.0);
+	FTerminalGuidanceMetrics Rank11GuidanceMetrics;
+	TestTrue(
+		TEXT("Rank11 circular terminal guidance can be densely sampled"),
+		MeasureTerminalGuidance(
+			Rank11ContactPlan,
+			Rank11PhysicalCenter,
+			Rank11GuidanceMetrics));
+	TestTrue(
+		TEXT("Rank11 circular terminal guidance approaches monotonically"),
+		Rank11GuidanceMetrics.bMonotonicTargetApproach);
+	TestEqual(
+		TEXT("Rank11 circular terminal guidance has no opposite-turn hook"),
+		Rank11GuidanceMetrics.OppositeTurnCount,
+		0);
+	TestTrue(
+		TEXT("Rank11 circular terminal guidance has no dense-sample corner"),
+		Rank11GuidanceMetrics.MaximumHeadingStepDegrees <= 1.0);
+	AddInfo(FString::Printf(
+		TEXT("Rank11 circular guidance handoff=%.6f rawEnd=%.6f duration=%.6f maxHeadingStepDeg=%.6f minSignedTurn=%.9f"),
+		Rank11ContactPlan.TransferStartTimeSeconds,
+		Rank11Result.Points.Last().TimeSeconds,
+		Rank11ContactPlan.TransferEndTimeSeconds
+			- Rank11ContactPlan.TransferStartTimeSeconds,
+		Rank11GuidanceMetrics.MaximumHeadingStepDegrees,
+		Rank11GuidanceMetrics.MinimumSignedTurn));
 
 	FABTSM110FinaleLocalFrame IdentityFrame;
 	IdentityFrame.LayoutVersion = 1;
@@ -673,6 +818,18 @@ bool FABTSM11CM7RandomF4WitnessTest::RunTest(const FString& Parameters)
 		{
 			continue;
 		}
+		FTerminalGuidanceMetrics GuidanceMetrics;
+		if (!MeasureTerminalGuidance(
+				ContactPlan,
+				Preset.CanonicalScenario.Target
+					.GetGeometricContactCenterCM(),
+				GuidanceMetrics)
+			|| !GuidanceMetrics.bMonotonicTargetApproach
+			|| GuidanceMetrics.OppositeTurnCount != 0
+			|| GuidanceMetrics.MaximumHeadingStepDegrees > 1.0)
+		{
+			continue;
+		}
 		FABTSM11FinaleCameraShotPlan CameraPlan;
 		if (!CameraPlan.Build(
 			Result, FABTSM11FinaleCameraShotSettings(), &Failure))
@@ -684,7 +841,7 @@ bool FABTSM11CM7RandomF4WitnessTest::RunTest(const FString& Parameters)
 		UE_LOG(
 			LogTemp,
 			Display,
-			TEXT("[ABTS][M11-C][M7] RandomF4Witness Seed=0x4d3757a1 Index=%d Attempt=%d Yaw=%.12f Pitch=%.12f Power=%.12f Result=0x%016llx Plan=0x%016llx Adaptive=%d"),
+			TEXT("[ABTS][M11-C][M7] RandomF4Witness Seed=0x4d3757a1 Index=%d Attempt=%d Yaw=%.12f Pitch=%.12f Power=%.12f Result=0x%016llx Plan=0x%016llx Adaptive=%d Handoff=%.6f RawEnd=%.6f MaxHeadingDeg=%.6f MinSignedTurn=%.9f"),
 			WitnessCount,
 			Attempt,
 			Input.YawDegrees,
@@ -692,7 +849,11 @@ bool FABTSM11CM7RandomF4WitnessTest::RunTest(const FString& Parameters)
 			Input.Power,
 			Result.ValidationHash,
 			ContactPlan.PlanHash,
-			CameraPlan.bUsesAdaptiveCompression ? 1 : 0);
+			CameraPlan.bUsesAdaptiveCompression ? 1 : 0,
+			ContactPlan.TransferStartTimeSeconds,
+			Result.Points.Last().TimeSeconds,
+			GuidanceMetrics.MaximumHeadingStepDegrees,
+			GuidanceMetrics.MinimumSignedTurn);
 	}
 	TestEqual(
 		TEXT("Deterministic Rank11 neighborhood yields two distinct F4 recordings"),

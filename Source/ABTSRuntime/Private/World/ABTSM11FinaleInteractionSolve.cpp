@@ -501,7 +501,6 @@ void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
 		HudProbeProjection = FABTSM11ProbeProjection();
 		return;
 	}
-
 	if (!HudOverviewView.bValid)
 	{
 		const FVector3d InitialAxisX = DiagramSnapshot.bValid
@@ -519,6 +518,25 @@ void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
 			return;
 		}
 		InitialHudOverviewView = HudOverviewView;
+	}
+
+	if (PreviewPlaybackPlan.bUsesVisibleTerminalTransfer)
+	{
+		// Projection cannot enlarge a three-dimensional chord error. This
+		// conservative world-space threshold therefore keeps the deletion-only
+		// HUD polyline within 0.35 px even at the maximum overview zoom and a
+		// substantially larger diagram than the current layout permits.
+		constexpr double MaximumCurveErrorPixels = 0.35;
+		constexpr double MaximumSupportedDiagramRadiusPixels = 512.0;
+		constexpr double MaximumOverviewZoom = 4.0;
+		const double MaximumChordErrorCM = MaximumCurveErrorPixels
+			* HudOverviewView.ProjectionScaleCM
+			/ (MaximumSupportedDiagramRadiusPixels * MaximumOverviewZoom);
+		FABTSM11OrbitalSceneBuilder::AppendPlaybackExtension(
+			PreviewPlaybackPlan,
+			HudOrbitalScene,
+			720,
+			MaximumChordErrorCM);
 	}
 
 	if (!FABTSM11OverviewProjector::Build(

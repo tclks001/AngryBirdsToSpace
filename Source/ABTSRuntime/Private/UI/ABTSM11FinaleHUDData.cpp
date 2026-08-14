@@ -14,6 +14,262 @@ namespace
 			&& FMath::IsFinite(Value.Z);
 	}
 
+	struct FM11HudAdaptiveCurveRange
+	{
+		int32 StartIndex = INDEX_NONE;
+		int32 EndIndex = INDEX_NONE;
+		int32 SplitIndex = INDEX_NONE;
+		double MaximumChordErrorSquared = -1.0;
+	};
+
+	bool BuildM11HudAdaptiveCurveRange(
+		const TConstArrayView<FABTSM11PlaybackPoint> Points,
+		const int32 StartIndex,
+		const int32 EndIndex,
+		FM11HudAdaptiveCurveRange& OutRange)
+	{
+		OutRange = FM11HudAdaptiveCurveRange();
+		if (StartIndex < 0
+			|| EndIndex >= Points.Num()
+			|| EndIndex <= StartIndex + 1)
+		{
+			return false;
+		}
+
+		const FVector3d& Start = Points[StartIndex].PositionCM;
+		const FVector3d Chord = Points[EndIndex].PositionCM - Start;
+		const double ChordLengthSquared = Chord.SquaredLength();
+		int32 BestIndex = INDEX_NONE;
+		double BestErrorSquared = -1.0;
+		for (int32 Index = StartIndex + 1; Index < EndIndex; ++Index)
+		{
+			const FVector3d Offset = Points[Index].PositionCM - Start;
+			const double Alpha = ChordLengthSquared > UE_DOUBLE_SMALL_NUMBER
+				? FMath::Clamp(Offset.Dot(Chord) / ChordLengthSquared, 0.0, 1.0)
+				: 0.0;
+			const double ErrorSquared =
+				(Offset - Chord * Alpha).SquaredLength();
+			if (ErrorSquared > BestErrorSquared)
+			{
+				BestErrorSquared = ErrorSquared;
+				BestIndex = Index;
+			}
+		}
+		if (BestIndex == INDEX_NONE)
+		{
+			return false;
+		}
+
+		OutRange.StartIndex = StartIndex;
+		OutRange.EndIndex = EndIndex;
+		OutRange.SplitIndex = BestIndex;
+		OutRange.MaximumChordErrorSquared = BestErrorSquared;
+		return true;
+	}
+
+	bool SelectM11HudAdaptiveCurveIndices(
+		const TConstArrayView<FABTSM11PlaybackPoint> Points,
+		const int32 AnchorIndex,
+		const int32 MaximumExtensionPointCount,
+		const double MaximumChordErrorCM,
+		TArray<int32>& OutSourceIndices)
+	{
+		OutSourceIndices.Reset();
+		if (AnchorIndex < 0
+			|| AnchorIndex >= Points.Num() - 1
+			|| MaximumExtensionPointCount < 2
+			|| !FMath::IsFinite(MaximumChordErrorCM)
+			|| MaximumChordErrorCM < 0.0)
+		{
+			return false;
+		}
+
+		TArray<int32> SelectedIndices;
+		SelectedIndices.Add(AnchorIndex);
+		for (int32 Index = AnchorIndex + 1; Index < Points.Num(); ++Index)
+		{
+			if (Points[Index].SegmentKind != Points[Index - 1].SegmentKind)
+			{
+				SelectedIndices.Add(Index - 1);
+				SelectedIndices.Add(Index);
+			}
+		}
+		SelectedIndices.Add(Points.Num() - 1);
+		SelectedIndices.Sort();
+		for (int32 Index = SelectedIndices.Num() - 1; Index > 0; --Index)
+		{
+			if (SelectedIndices[Index] == SelectedIndices[Index - 1])
+			{
+				SelectedIndices.RemoveAt(Index, 1, EAllowShrinking::No);
+			}
+		}
+
+		// The anchor already exists in the scene and does not consume extension
+		// budget. Every semantic boundary is mandatory so colors never bridge a
+		// skipped segment kind.
+		const int32 MaximumSelectedPointCount = MaximumExtensionPointCount + 1;
+		if (SelectedIndices.Num() > MaximumSelectedPointCount)
+		{
+			return false;
+		}
+
+		TArray<FM11HudAdaptiveCurveRange> Ranges;
+		for (int32 Index = 1; Index < SelectedIndices.Num(); ++Index)
+		{
+			FM11HudAdaptiveCurveRange Range;
+			if (BuildM11HudAdaptiveCurveRange(
+					Points,
+					SelectedIndices[Index - 1],
+					SelectedIndices[Index],
+					Range))
+			{
+				Ranges.Add(Range);
+			}
+		}
+
+		while (SelectedIndices.Num() < MaximumSelectedPointCount
+			&& !Ranges.IsEmpty())
+		{
+			int32 BestRangeIndex = 0;
+			for (int32 Index = 1; Index < Ranges.Num(); ++Index)
+			{
+				if (Ranges[Index].MaximumChordErrorSquared
+					> Ranges[BestRangeIndex].MaximumChordErrorSquared)
+				{
+					BestRangeIndex = Index;
+				}
+			}
+
+			const FM11HudAdaptiveCurveRange BestRange = Ranges[BestRangeIndex];
+			if (MaximumChordErrorCM > 0.0
+				&& BestRange.MaximumChordErrorSquared
+					<= FMath::Square(MaximumChordErrorCM))
+			{
+				break;
+			}
+			Ranges.RemoveAtSwap(BestRangeIndex, 1, EAllowShrinking::No);
+			if (BestRange.SplitIndex == INDEX_NONE
+				|| BestRange.MaximumChordErrorSquared <= UE_DOUBLE_SMALL_NUMBER)
+			{
+				break;
+			}
+
+			SelectedIndices.Add(BestRange.SplitIndex);
+			FM11HudAdaptiveCurveRange ChildRange;
+			if (BuildM11HudAdaptiveCurveRange(
+					Points,
+					BestRange.StartIndex,
+					BestRange.SplitIndex,
+					ChildRange))
+			{
+				Ranges.Add(ChildRange);
+			}
+			if (BuildM11HudAdaptiveCurveRange(
+					Points,
+					BestRange.SplitIndex,
+					BestRange.EndIndex,
+					ChildRange))
+			{
+				Ranges.Add(ChildRange);
+			}
+		}
+
+		if (MaximumChordErrorCM > 0.0)
+		{
+			const double MaximumChordErrorSquared =
+				FMath::Square(MaximumChordErrorCM);
+			for (const FM11HudAdaptiveCurveRange& Range : Ranges)
+			{
+				if (Range.MaximumChordErrorSquared
+					> MaximumChordErrorSquared)
+				{
+					return false;
+				}
+			}
+		}
+
+		SelectedIndices.Sort();
+		for (const int32 SelectedIndex : SelectedIndices)
+		{
+			if (SelectedIndex > AnchorIndex)
+			{
+				OutSourceIndices.Add(SelectedIndex);
+			}
+		}
+		return OutSourceIndices.Num() >= 2
+			&& OutSourceIndices.Num() <= MaximumExtensionPointCount;
+	}
+
+	bool BuildM11HudPlaybackPresentationSamples(
+		const FABTSM11PlaybackPlan& PlaybackPlan,
+		const int32 PlaybackAnchorIndex,
+		const double AnchorArcLengthCM,
+		TArray<FABTSM11PlaybackPoint>& OutPoints,
+		TArray<double>& OutArcLengths)
+	{
+		OutPoints.Reset();
+		OutArcLengths.Reset();
+		if (PlaybackAnchorIndex < 0
+			|| PlaybackAnchorIndex >= PlaybackPlan.Points.Num() - 1
+			|| !FMath::IsFinite(AnchorArcLengthCM))
+		{
+			return false;
+		}
+
+		OutPoints.Add(PlaybackPlan.Points[PlaybackAnchorIndex]);
+		OutArcLengths.Add(AnchorArcLengthCM);
+		constexpr int32 PresentationSubstepsPerPlaybackInterval = 8;
+		for (int32 SourceIndex = PlaybackAnchorIndex + 1;
+			SourceIndex < PlaybackPlan.Points.Num();
+			++SourceIndex)
+		{
+			const FABTSM11PlaybackPoint& SourceA =
+				PlaybackPlan.Points[SourceIndex - 1];
+			const FABTSM11PlaybackPoint& SourceB =
+				PlaybackPlan.Points[SourceIndex];
+			for (int32 Substep = 1;
+				Substep <= PresentationSubstepsPerPlaybackInterval;
+				++Substep)
+			{
+				FABTSM11PlaybackPoint Point;
+				const double Alpha = static_cast<double>(Substep)
+					/ static_cast<double>(
+						PresentationSubstepsPerPlaybackInterval);
+				Point.TimeSeconds = FMath::Lerp(
+					SourceA.TimeSeconds,
+					SourceB.TimeSeconds,
+					Alpha);
+				if (Substep == PresentationSubstepsPerPlaybackInterval)
+				{
+					Point = SourceB;
+				}
+				else if (!PlaybackPlan.Sample(
+						Point.TimeSeconds,
+						Point.PositionCM,
+						Point.VelocityCMPerSec,
+						&Point.SegmentKind))
+				{
+					return false;
+				}
+				if (Point.SegmentKind
+						== EABTSM11PlaybackSegmentKind::PlayerAuthoritative
+					|| !IsFiniteFinaleHudVector(Point.PositionCM)
+					|| !IsFiniteFinaleHudVector(Point.VelocityCMPerSec))
+				{
+					return false;
+				}
+
+				OutArcLengths.Add(
+					OutArcLengths.Last()
+						+ (Point.PositionCM - OutPoints.Last().PositionCM)
+							.Length());
+				OutPoints.Add(Point);
+			}
+		}
+		return OutPoints.Num() >= 3
+			&& OutPoints.Num() == OutArcLengths.Num();
+	}
+
 	double AxisMinimum(
 		const FABTSM11FinaleLaunchModel& Model,
 		const EABTSM11FinaleControlAxis Axis)
@@ -1373,6 +1629,236 @@ bool FABTSM11OrbitalSceneBuilder::Build(
 	return OutSnapshot.bValid;
 }
 
+bool FABTSM11OrbitalSceneBuilder::AppendPlaybackExtension(
+	const FABTSM11PlaybackPlan& PlaybackPlan,
+	FABTSM11OrbitalSceneSnapshot& InOutSnapshot,
+	const int32 MaximumExtensionPointCount,
+	const double MaximumChordErrorCM)
+{
+	if (!InOutSnapshot.bValid
+		|| InOutSnapshot.Trajectory.Num() < 2
+		|| PlaybackPlan.PlanHash == 0
+		|| PlaybackPlan.ReleasedTrajectoryHash
+			!= InOutSnapshot.SourceTrajectoryHash
+		|| !PlaybackPlan.bPhysicalTargetHit
+		|| !PlaybackPlan.bUsesVisibleTerminalTransfer
+		|| PlaybackPlan.Points.Num() < 3
+		|| MaximumExtensionPointCount < 2
+		|| !FMath::IsFinite(MaximumChordErrorCM)
+		|| MaximumChordErrorCM < 0.0)
+	{
+		return false;
+	}
+
+	int32 PlaybackAnchorIndex = INDEX_NONE;
+	for (int32 Index = 0; Index < PlaybackPlan.Points.Num(); ++Index)
+	{
+		const FABTSM11PlaybackPoint& Candidate = PlaybackPlan.Points[Index];
+		if (Candidate.SegmentKind
+			== EABTSM11PlaybackSegmentKind::PlayerAuthoritative)
+		{
+			PlaybackAnchorIndex = Index;
+		}
+		else
+		{
+			break;
+		}
+	}
+	if (PlaybackAnchorIndex == INDEX_NONE
+		|| PlaybackAnchorIndex >= PlaybackPlan.Points.Num() - 1)
+	{
+		return false;
+	}
+
+	int32 TargetSegmentIndex = INDEX_NONE;
+	for (int32 Index = 0;
+		Index < InOutSnapshot.SemanticMap.Segments.Num();
+		++Index)
+	{
+		const FABTSM11TrajectorySemanticSegment& Segment =
+			InOutSnapshot.SemanticMap.Segments[Index];
+		if (Segment.Leg == EABTSM11TrajectorySemanticLeg::TargetApproach)
+		{
+			TargetSegmentIndex = Index;
+			break;
+		}
+		if (Segment.bContextIsTarget)
+		{
+			TargetSegmentIndex = Index;
+		}
+	}
+	if (TargetSegmentIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	/*
+	 * Circular guidance may hand off before the qualified solver endpoint.
+	 * Trim the overview to that same authority boundary and insert the exact
+	 * playback state as its final white anchor; the amber extension then shows
+	 * the path the bird will actually fly instead of retaining a stale white
+	 * suffix that the playback plan has intentionally replaced.
+	 */
+	const FABTSM11PlaybackPoint& PlaybackAnchor =
+		PlaybackPlan.Points[PlaybackAnchorIndex];
+	int32 PreservedScenePointCount = 0;
+	while (PreservedScenePointCount < InOutSnapshot.Trajectory.Num()
+		&& InOutSnapshot.Trajectory[PreservedScenePointCount].TimeSeconds
+			< PlaybackAnchor.TimeSeconds - 1.0e-8)
+	{
+		++PreservedScenePointCount;
+	}
+	if (PreservedScenePointCount < 1)
+	{
+		return false;
+	}
+	InOutSnapshot.Trajectory.SetNum(
+		PreservedScenePointCount,
+		EAllowShrinking::No);
+	const double PreviousArcLengthCM =
+		InOutSnapshot.Trajectory.Last().ArcLengthCM;
+	const FVector3d PreviousPositionCM =
+		InOutSnapshot.Trajectory.Last().PositionCM;
+	FABTSM11OrbitalScenePoint& AddedAnchor =
+		InOutSnapshot.Trajectory.AddDefaulted_GetRef();
+	AddedAnchor.TimeSeconds = PlaybackAnchor.TimeSeconds;
+	AddedAnchor.ArcLengthCM = PreviousArcLengthCM
+		+ (PlaybackAnchor.PositionCM - PreviousPositionCM).Length();
+	AddedAnchor.PositionCM = PlaybackAnchor.PositionCM;
+	AddedAnchor.VelocityCMPerSec = PlaybackAnchor.VelocityCMPerSec;
+	AddedAnchor.SegmentKind =
+		EABTSM11PlaybackSegmentKind::PlayerAuthoritative;
+	const FABTSM11OrbitalScenePoint SceneAnchor = AddedAnchor;
+	const int32 HandoffPointIndex = InOutSnapshot.Trajectory.Num() - 1;
+
+	/*
+	 * The circular handoff can now occur inside an earlier semantic leg.  The
+	 * scene suffix has just been replaced, so semantic ranges that still end at
+	 * the old solver endpoint are invalid and the overview projector will skip
+	 * their segments entirely.  Clip every retained leg to the exact handoff,
+	 * discard legs that only existed in the replaced suffix, then start the
+	 * target leg at that same point.  This preserves both strokes that meet at
+	 * the authority boundary: the final white segment into the handoff and the
+	 * first amber segment out of it.
+	 */
+	const FABTSM11TrajectorySemanticSegment HandoffTargetSegment =
+		InOutSnapshot.SemanticMap.Segments[TargetSegmentIndex];
+	TArray<FABTSM11TrajectorySemanticSegment> ClippedSegments;
+	ClippedSegments.Reserve(InOutSnapshot.SemanticMap.Segments.Num());
+	for (int32 Index = 0;
+		Index < InOutSnapshot.SemanticMap.Segments.Num();
+		++Index)
+	{
+		if (Index == TargetSegmentIndex)
+		{
+			continue;
+		}
+		FABTSM11TrajectorySemanticSegment Segment =
+			InOutSnapshot.SemanticMap.Segments[Index];
+		if (Segment.StartPointIndex > HandoffPointIndex)
+		{
+			continue;
+		}
+		Segment.EndPointIndex = FMath::Min(
+			Segment.EndPointIndex,
+			HandoffPointIndex);
+		Segment.ClosestPointIndex = FMath::Clamp(
+			Segment.ClosestPointIndex,
+			Segment.StartPointIndex,
+			Segment.EndPointIndex);
+		if (Segment.IsValid(InOutSnapshot.Trajectory.Num()))
+		{
+			ClippedSegments.Add(Segment);
+		}
+	}
+	FABTSM11TrajectorySemanticSegment& NewTargetSegment =
+		ClippedSegments.Add_GetRef(HandoffTargetSegment);
+	NewTargetSegment.StartPointIndex = HandoffPointIndex;
+	NewTargetSegment.ClosestPointIndex = HandoffPointIndex;
+	NewTargetSegment.EndPointIndex = HandoffPointIndex;
+	InOutSnapshot.SemanticMap.Segments = MoveTemp(ClippedSegments);
+	TargetSegmentIndex = InOutSnapshot.SemanticMap.Segments.Num() - 1;
+
+	double PreviousTime = PlaybackPlan.Points[PlaybackAnchorIndex].TimeSeconds;
+	bool bHasVisibleTransfer = false;
+	for (int32 Index = PlaybackAnchorIndex + 1;
+		Index < PlaybackPlan.Points.Num();
+		++Index)
+	{
+		const FABTSM11PlaybackPoint& Point = PlaybackPlan.Points[Index];
+		if (!FMath::IsFinite(Point.TimeSeconds)
+			|| Point.TimeSeconds <= PreviousTime
+			|| !IsFiniteFinaleHudVector(Point.PositionCM)
+			|| !IsFiniteFinaleHudVector(Point.VelocityCMPerSec)
+			|| Point.SegmentKind
+				== EABTSM11PlaybackSegmentKind::PlayerAuthoritative)
+		{
+			return false;
+		}
+		bHasVisibleTransfer = bHasVisibleTransfer
+			|| Point.SegmentKind
+				== EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer;
+		PreviousTime = Point.TimeSeconds;
+	}
+	const FABTSM11PlaybackPoint& PlaybackEnd = PlaybackPlan.Points.Last();
+	const double EndDistanceCM =
+		(PlaybackEnd.PositionCM - InOutSnapshot.TargetCenterCM).Length();
+	if (!bHasVisibleTransfer
+		|| !FMath::IsNearlyEqual(
+			EndDistanceCM,
+			InOutSnapshot.TargetRadiusCM,
+			1.0e-3))
+	{
+		return false;
+	}
+
+	TArray<FABTSM11PlaybackPoint> PresentationPoints;
+	TArray<double> PresentationArcLengths;
+	if (!BuildM11HudPlaybackPresentationSamples(
+			PlaybackPlan,
+			PlaybackAnchorIndex,
+			SceneAnchor.ArcLengthCM,
+			PresentationPoints,
+			PresentationArcLengths))
+	{
+		return false;
+	}
+
+	TArray<int32> SourceIndices;
+	if (!SelectM11HudAdaptiveCurveIndices(
+			PresentationPoints,
+			0,
+			MaximumExtensionPointCount,
+			MaximumChordErrorCM,
+			SourceIndices))
+	{
+		return false;
+	}
+
+	for (const int32 SourceIndex : SourceIndices)
+	{
+		const FABTSM11PlaybackPoint& Source = PresentationPoints[SourceIndex];
+		FABTSM11OrbitalScenePoint& Point =
+			InOutSnapshot.Trajectory.AddDefaulted_GetRef();
+		Point.TimeSeconds = Source.TimeSeconds;
+		Point.ArcLengthCM = PresentationArcLengths[SourceIndex];
+		Point.PositionCM = Source.PositionCM;
+		Point.VelocityCMPerSec = Source.VelocityCMPerSec;
+		Point.SegmentKind = Source.SegmentKind;
+	}
+
+	FABTSM11TrajectorySemanticSegment& TargetSegment =
+		InOutSnapshot.SemanticMap.Segments[TargetSegmentIndex];
+	TargetSegment.EndPointIndex = InOutSnapshot.Trajectory.Num() - 1;
+	TargetSegment.ClosestPointIndex = FindClosestPointIndex(
+		InOutSnapshot.Trajectory,
+		InOutSnapshot.TargetCenterCM,
+		TargetSegment.StartPointIndex,
+		TargetSegment.EndPointIndex);
+	InOutSnapshot.SourcePlaybackPlanHash = PlaybackPlan.PlanHash;
+	return true;
+}
+
 bool FABTSM11OverviewViewState::Initialize(
 	const FVector3d& InCenterCM,
 	const FVector3d& InAxisX,
@@ -1662,6 +2148,7 @@ bool FABTSM11OverviewProjector::Build(
 		Proxy.StartTimeSeconds = Scene.Trajectory[Index - 1].TimeSeconds;
 		Proxy.EndTimeSeconds = Scene.Trajectory[Index].TimeSeconds;
 		Proxy.Leg = Segment->Leg;
+		Proxy.SegmentKind = Scene.Trajectory[Index].SegmentKind;
 		Proxy.StartPhase = Scene.SemanticMap.ComputePhase(
 			*Segment,
 			Proxy.StartTimeSeconds,
@@ -1675,8 +2162,17 @@ bool FABTSM11OverviewProjector::Build(
 			&& OutProjection.Trajectory[Index].bHiddenByBody;
 	}
 	OutProjection.SourceTrajectoryHash = Scene.SourceTrajectoryHash;
+	OutProjection.SourcePlaybackPlanHash = Scene.SourcePlaybackPlanHash;
 	OutProjection.bValid = !OutProjection.HitProxies.IsEmpty();
 	return OutProjection.bValid;
+}
+
+bool ABTSM11ShouldDashOverviewTrajectorySegment(
+	const EABTSM11PlaybackSegmentKind SegmentKind,
+	const bool bHiddenByBody)
+{
+	return SegmentKind == EABTSM11PlaybackSegmentKind::PlayerAuthoritative
+		&& bHiddenByBody;
 }
 
 bool ABTSM11HitTestOverviewTrajectory(
@@ -1699,6 +2195,11 @@ bool ABTSM11HitTestOverviewTrajectory(
 	}
 	for (const FABTSM11OverviewHitProxy& Proxy : Projection.HitProxies)
 	{
+		if (Proxy.SegmentKind
+			!= EABTSM11PlaybackSegmentKind::PlayerAuthoritative)
+		{
+			continue;
+		}
 		const FVector2d Start = PanelCenterPixels
 			+ Proxy.Start * PanelRadiusPixels;
 		const FVector2d End = PanelCenterPixels
