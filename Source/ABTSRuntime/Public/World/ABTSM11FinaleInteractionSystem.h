@@ -292,6 +292,7 @@ private:
 	void RebuildHudPublishedData();
 	bool ApplyHudTargetInput(
 		const FABTSM11FinaleLaunchInput& TargetDesiredInput);
+	void PlayFinaleAudioCue(EABTSM11FinaleAudioCue Cue);
 	bool FinalizePendingRelease();
 	void UpdateAiming(float DeltaSeconds);
 	void UpdatePlayback(float DeltaSeconds);

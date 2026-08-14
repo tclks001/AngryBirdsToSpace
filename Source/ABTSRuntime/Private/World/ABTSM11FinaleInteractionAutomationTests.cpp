@@ -309,6 +309,38 @@ bool FABTSM11CEnvironmentStageContractTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CAudioCueAuthorityTest,
+	"ABTS.M11C.Unit.AudioCueAuthority",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CAudioCueAuthorityTest::RunTest(
+	const FString& Parameters)
+{
+	TestEqual(
+		TEXT("Production physical contact receives certified rescue audio"),
+		ABTSM11ResolveFinaleCompletionAudioCue(false, true, false),
+		EABTSM11FinaleAudioCue::CertifiedTargetHit);
+	TestEqual(
+		TEXT("Production cannot promote candidate-only contact"),
+		ABTSM11ResolveFinaleCompletionAudioCue(false, false, true),
+		EABTSM11FinaleAudioCue::AttemptFailed);
+	TestEqual(
+		TEXT("Editor candidate receives only the neutral preview cue"),
+		ABTSM11ResolveFinaleCompletionAudioCue(true, true, true),
+		EABTSM11FinaleAudioCue::CandidateTargetHit);
+	TestEqual(
+		TEXT("Editor candidate physical contact without candidate authority fails closed"),
+		ABTSM11ResolveFinaleCompletionAudioCue(true, true, false),
+		EABTSM11FinaleAudioCue::AttemptFailed);
+	TestEqual(
+		TEXT("Missing target evidence receives failure audio"),
+		ABTSM11ResolveFinaleCompletionAudioCue(false, false, false),
+		EABTSM11FinaleAudioCue::AttemptFailed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11CStabilizerTest,
 	"ABTS.M11C.Unit.Stabilizer",
 	EAutomationTestFlags::EditorContext

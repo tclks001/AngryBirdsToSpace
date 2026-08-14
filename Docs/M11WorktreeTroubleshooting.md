@@ -182,6 +182,12 @@
 
 最终验证补充：UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 完整链接成功；fresh NullRHI 合集 `19/19`，包含 V2.1、两条随机 F4、HUD、生产 `PreviewReleasePlayback` 和 Camera Capture Config，日志为 `Saved/Logs/M11-CircularGuidance-Final-Fresh-R2.log`。
 
+## 8.5 M11 终局音效接入（2026-08-15）
+
+| 现象 | 根因 | 处理 | 防回归验证 |
+| --- | --- | --- | --- |
+| `M11-AUDIO-001` 【已修复代码合同与自动化；待可听 PIE】若仅看到 `bPhysicalTargetHit` 就播放 UFO 爆炸、鸟叫和成功确认，Editor Candidate 也会获得与生产救援相同的成功音；若直接调用共享 `PlaySlingshotRelease`，又会把终局音乐临时切到普通 `Destruction`。 | Candidate 播放计划为验证可见终端接触也可能携带物理接触标志，但它没有正式认证身份；共享弹弓 Release 的通用音乐策略不了解 M11 终局上下文。音频若只按单个布尔值或通用事件映射，会制造“听起来已经认证”的假绿灯并覆盖 Finale 配乐。 | 新增 M11 自有 `EABTSM11FinaleAudioCue` 和纯解析器：Production 成功必须是非 Candidate 的物理 UFO 接触，Candidate 只播放中性 Select，其余 fail closed。进入、发射、失败、恢复/退出分别接入共享子系统；Release 后同帧重新声明 `Finale`。共享 Audio、Config 和公共音频资产保持只读。 | UE 5.8 Development Editor 与 ForceUnity 全链接均 `Succeeded`；`ABTS.M11C.Unit` 13/13（含 `AudioCueAuthority`）、共享 Audio 1/1，M11 快速门 WorldGeneration 2/2、PresentationAcceptance 3/3、M110 4/4、M11A 15/15、M11B Unit 9/9、Runtime 6/6，全部 fresh 日志有 Exit Code 0 且无 Fail/Ensure/Fatal。仍须在 `L_ABTS_M11` 可听 PIE 核对发射空间位置、成功触发帧、Candidate 无成功音、失败单次触发及退出回到 Explore。 |
+
 ## 9. 集成工作树摘录清单
 
 集成工作树每次整理本文时，至少检查：

@@ -694,6 +694,7 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	{
 		ActiveCord->ResetPouchVisualToRest();
 	}
+	PlayFinaleAudioCue(EABTSM11FinaleAudioCue::ReleaseCommitted);
 	UE_LOG(
 		LogABTSRuntime,
 		Log,

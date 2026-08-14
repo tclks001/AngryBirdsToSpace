@@ -34,6 +34,18 @@ enum class EABTSM11FinaleEnvironmentStage : uint8
 	Recovering = 3
 };
 
+/** M11-owned semantic cues consumed through the shared audio subsystem. */
+enum class EABTSM11FinaleAudioCue : uint8
+{
+	None = 0,
+	FinaleEntered,
+	ReleaseCommitted,
+	CertifiedTargetHit,
+	CandidateTargetHit,
+	AttemptFailed,
+	FinaleExited
+};
+
 enum class EABTSM11PrefixStabilizerPhase : uint8
 {
 	Free = 0,
@@ -79,6 +91,17 @@ enum class EABTSM11FailureReason : uint8
 
 ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
 	EABTSM11FinaleInteractionState State);
+
+/**
+ * Resolves terminal audio without promoting an Editor Candidate to a
+ * production rescue. Production success requires physical target contact;
+ * Candidate mode receives only a neutral preview cue.
+ */
+ABTSRUNTIME_API EABTSM11FinaleAudioCue
+ABTSM11ResolveFinaleCompletionAudioCue(
+	bool bEditorCandidateMode,
+	bool bPhysicalTargetHit,
+	bool bCandidateQualifiedIntercept);
 
 /**
  * Pure resolver for the read-only finale environment stage.

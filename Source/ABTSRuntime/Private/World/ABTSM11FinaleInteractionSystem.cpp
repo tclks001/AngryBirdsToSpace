@@ -3,6 +3,7 @@
 #include "World/ABTSM11FinaleInteractionSystem.h"
 
 #include "ABTSRuntime.h"
+#include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Camera/ABTSM11FinaleCameraDirector.h"
 #include "Camera/ABTSM11FinaleFlightCamera.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
@@ -221,6 +222,128 @@ bool AABTSM11FinaleInteractionSystem::Initialize(
 	return true;
 }
 
+void AABTSM11FinaleInteractionSystem::PlayFinaleAudioCue(
+	const EABTSM11FinaleAudioCue Cue)
+{
+	if (Cue == EABTSM11FinaleAudioCue::None)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	UABTSAudioWorldSubsystem* Audio = World != nullptr
+		? World->GetSubsystem<UABTSAudioWorldSubsystem>()
+		: nullptr;
+	const bool bEditorCandidate = IsValid(FinaleSystem)
+		&& FinaleSystem->IsEditorCandidateMode();
+	const TCHAR* CueLabel = TEXT("Unknown");
+	const TCHAR* AuthorityLabel = bEditorCandidate
+		? TEXT("EditorCandidate")
+		: TEXT("Production");
+	FVector CueLocation = IsValid(AttemptBird)
+		? AttemptBird->GetActorLocation()
+		: GetActorLocation();
+
+	switch (Cue)
+	{
+	case EABTSM11FinaleAudioCue::FinaleEntered:
+		CueLabel = TEXT("FinaleEntered");
+		if (Audio != nullptr)
+		{
+			Audio->SetMusicState(EABTSMusicState::Finale);
+			Audio->PlayUIEvent(EABTSUIAudioEvent::Open);
+		}
+		break;
+
+	case EABTSM11FinaleAudioCue::ReleaseCommitted:
+		CueLabel = TEXT("ReleaseCommitted");
+		if (Audio != nullptr)
+		{
+			if (IsValid(ActiveCord))
+			{
+				Audio->PlaySlingshotRelease(
+					AimPouchLocation,
+					ActiveCord->GetRestCordLengthCM(),
+					static_cast<float>(FrozenReleaseInput.Power));
+			}
+			else
+			{
+				Audio->PlayUIEvent(EABTSUIAudioEvent::Confirm);
+			}
+			// The shared release cue selects Destruction. M11 owns the
+			// terminal score and restores Finale in the same committed frame.
+			Audio->SetMusicState(EABTSMusicState::Finale);
+		}
+		break;
+
+	case EABTSM11FinaleAudioCue::CertifiedTargetHit:
+		CueLabel = TEXT("CertifiedTargetHit");
+		AuthorityLabel = TEXT("StrictCertifiedPhysical");
+		if (IsValid(FinaleSystem)
+			&& IsValid(FinaleSystem->GetUFOActor()))
+		{
+			CueLocation = FinaleSystem->GetUFOActor()->GetActorLocation();
+		}
+		if (Audio != nullptr)
+		{
+			Audio->PlayImpact(
+				CueLocation,
+				EABTSM6ImpactMaterial::Iron,
+				1800.0f);
+			Audio->PlayExplosion(CueLocation, false);
+			if (IsValid(AttemptBird))
+			{
+				Audio->PlayBirdChirp(
+					AttemptBird->GetActorLocation(),
+					AttemptBird->GetBirdId(),
+					1.0f);
+			}
+			Audio->PlayUIEvent(EABTSUIAudioEvent::Confirm);
+		}
+		break;
+
+	case EABTSM11FinaleAudioCue::CandidateTargetHit:
+		CueLabel = TEXT("CandidateTargetHit");
+		AuthorityLabel = TEXT("EditorCandidatePreviewOnly");
+		if (Audio != nullptr)
+		{
+			Audio->PlayUIEvent(EABTSUIAudioEvent::Select);
+		}
+		break;
+
+	case EABTSM11FinaleAudioCue::AttemptFailed:
+		CueLabel = TEXT("AttemptFailed");
+		AuthorityLabel = TEXT("FailClosed");
+		if (Audio != nullptr)
+		{
+			Audio->PlayUIEvent(EABTSUIAudioEvent::Error);
+		}
+		break;
+
+	case EABTSM11FinaleAudioCue::FinaleExited:
+		CueLabel = TEXT("FinaleExited");
+		if (Audio != nullptr)
+		{
+			Audio->SetMusicState(EABTSMusicState::Explore);
+			Audio->PlayUIEvent(EABTSUIAudioEvent::Close);
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-C][Audio] Cue=%s Authority=%s Played=%d State=%d Plan=0x%016llx"),
+		CueLabel,
+		AuthorityLabel,
+		Audio != nullptr ? 1 : 0,
+		static_cast<int32>(InteractionState),
+		ReleasedPlaybackPlan.PlanHash);
+}
+
 bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	AABTSM51SlingshotCord& Cord,
 	APlayerController& Controller)
@@ -345,6 +468,7 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 			FMath::RoundToInt(PouchScreen.Y));
 	}
 	QueuePreviewSolveIfNeeded();
+	PlayFinaleAudioCue(EABTSM11FinaleAudioCue::FinaleEntered);
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
@@ -745,6 +869,7 @@ void AABTSM11FinaleInteractionSystem::CancelStabilizerOrResetAttempt()
 		FailureTimeline.Reset();
 		RuntimeFailure.Reset();
 		InteractionState = EABTSM11FinaleInteractionState::Ready;
+		PlayFinaleAudioCue(EABTSM11FinaleAudioCue::FinaleExited);
 	}
 }
 
@@ -758,6 +883,7 @@ void AABTSM11FinaleInteractionSystem::ExitFinale()
 	FailureTimeline.Reset();
 	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Ready;
+	PlayFinaleAudioCue(EABTSM11FinaleAudioCue::FinaleExited);
 }
 
 bool AABTSM11FinaleInteractionSystem::IsFinaleActive() const
@@ -1418,6 +1544,11 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 		{
 			InteractionState =
 				EABTSM11FinaleInteractionState::TargetHit;
+			PlayFinaleAudioCue(
+				ABTSM11ResolveFinaleCompletionAudioCue(
+					FinaleSystem->IsEditorCandidateMode(),
+					ReleasedPlaybackPlan.bPhysicalTargetHit,
+					ReleasedPlaybackPlan.bCandidateQualifiedIntercept));
 			if (ReleasedPlaybackPlan.bPhysicalTargetHit)
 			{
 				UE_LOG(
@@ -1508,6 +1639,7 @@ void AABTSM11FinaleInteractionSystem::UpdateFailurePresentation(
 		FailureTimeline.Reset();
 		RuntimeFailure.Reset();
 		InteractionState = EABTSM11FinaleInteractionState::Ready;
+		PlayFinaleAudioCue(EABTSM11FinaleAudioCue::FinaleExited);
 	}
 }
 
@@ -2487,6 +2619,7 @@ void AABTSM11FinaleInteractionSystem::BeginAttemptFailure(
 		&& PlaybackElapsedSeconds
 			< PlaybackPresentationEndTimeSeconds - 1.0e-9;
 	InteractionState = EABTSM11FinaleInteractionState::Failed;
+	PlayFinaleAudioCue(EABTSM11FinaleAudioCue::AttemptFailed);
 	UE_LOG(
 		LogABTSRuntime,
 		Warning,
@@ -2511,6 +2644,7 @@ void AABTSM11FinaleInteractionSystem::FailInteraction(
 	}
 	RuntimeFailure = Reason;
 	InteractionState = EABTSM11FinaleInteractionState::Failed;
+	PlayFinaleAudioCue(EABTSM11FinaleAudioCue::AttemptFailed);
 	UE_LOG(
 		LogABTSRuntime,
 		Error,

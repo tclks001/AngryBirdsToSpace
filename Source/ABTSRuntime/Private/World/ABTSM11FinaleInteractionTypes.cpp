@@ -130,6 +130,22 @@ bool ABTSM11IsResettableFinaleState(
 	}
 }
 
+EABTSM11FinaleAudioCue ABTSM11ResolveFinaleCompletionAudioCue(
+	const bool bEditorCandidateMode,
+	const bool bPhysicalTargetHit,
+	const bool bCandidateQualifiedIntercept)
+{
+	if (bEditorCandidateMode)
+	{
+		return bCandidateQualifiedIntercept
+			? EABTSM11FinaleAudioCue::CandidateTargetHit
+			: EABTSM11FinaleAudioCue::AttemptFailed;
+	}
+	return bPhysicalTargetHit
+		? EABTSM11FinaleAudioCue::CertifiedTargetHit
+		: EABTSM11FinaleAudioCue::AttemptFailed;
+}
+
 EABTSM11FinaleEnvironmentStage ABTSM11ResolveFinaleEnvironmentStage(
 	const EABTSM11FinaleInteractionState State,
 	const double PlaybackElapsedSeconds,
