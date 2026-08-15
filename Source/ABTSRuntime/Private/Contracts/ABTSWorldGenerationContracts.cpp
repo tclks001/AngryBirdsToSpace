@@ -272,7 +272,7 @@ bool FABTSJuryDemoFixedSixContract::IsUsable(const double Tolerance) const
 		|| WorldSeed != FrozenWorldSeed
 		|| CandidateId != FrozenCandidateId
 		|| (bIsV1 && LayoutHash != FrozenLayoutHash)
-		|| (bIsV2 && (LayoutHash == 0 || LayoutHash == FrozenLayoutHash))
+		|| (bIsV2 && LayoutHash != FrozenV2LayoutHash)
 		|| Sites.Num() != ExpectedSiteCount)
 	{
 		return false;

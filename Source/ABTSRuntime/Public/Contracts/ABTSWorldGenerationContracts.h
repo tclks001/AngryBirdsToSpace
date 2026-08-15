@@ -134,7 +134,7 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
  */
 struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 {
-	/** V1 remains the default producer version until M3 and M7 migrate. */
+	/** V1 remains the compatibility version; fixed-six production publishes V2. */
 	static constexpr int32 CurrentContractVersion = 1;
 	static constexpr int32 SupportedV2ContractVersion = 2;
 	static constexpr int32 ExpectedSiteCount = 6;
@@ -148,8 +148,10 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 		11501529584318250152ull;
 	static constexpr int32 FrozenWorldSeed = 312503;
 	static constexpr int32 FrozenCandidateId = 4;
-	/** V1 alias retained until the M3 V2 layout is published and frozen. */
+	/** Frozen V1 identity retained for backward-compatible readers and tests. */
 	static constexpr uint64 FrozenLayoutHash = 0x8AB8D7E4F094072Dull;
+	/** Exact M3 V2 result published after dynamic-envelope reservation. */
+	static constexpr uint64 FrozenV2LayoutHash = 0x7029074579FDC52Eull;
 
 	/** Zero means this additive snapshot is absent. */
 	int32 ContractVersion = 0;

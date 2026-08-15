@@ -2,6 +2,7 @@
 
 #include "Terrain/ABTSM3Planet.h"
 
+#include "ABTSRuntime.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Math/RotationMatrix.h"
 
@@ -52,6 +53,8 @@ bool BuildJuryDemoFixedSixContractSnapshot(
 		|| Source.RejectReason != EABTSM3JuryFixedSixRejectReason::None
 		|| Source.SchemaVersion
 			!= FABTSM3JuryFixedSixLayoutBuilder::SchemaVersion
+		|| Source.FixedSixContractVersion
+			!= FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion
 		|| Source.WorldSeed != FABTSJuryDemoFixedSixContract::FrozenWorldSeed
 		|| Source.WorldSeed != Planet.WorldSeed
 		|| Source.SourceCandidateId
@@ -67,9 +70,9 @@ bool BuildJuryDemoFixedSixContractSnapshot(
 		|| static_cast<uint64>(Source.M7SourceManifestHash)
 			!= FABTSJuryDemoFixedSixContract::FrozenDemoManifestHash
 		|| static_cast<uint64>(Source.M7PlacementCatalogHash)
-			!= FABTSJuryDemoFixedSixContract::FrozenPlacementCatalogHash
+			!= FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash
 		|| static_cast<uint64>(Source.LayoutHash)
-			!= FABTSJuryDemoFixedSixContract::FrozenLayoutHash
+			!= FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash
 		|| static_cast<uint64>(Source.LayoutHash)
 			!= FABTSM3JuryFixedSixLayoutBuilder::ComputeLayoutHash(Source)
 		|| Source.Placements.Num()
@@ -81,7 +84,7 @@ bool BuildJuryDemoFixedSixContractSnapshot(
 	}
 
 	OutSnapshot.ContractVersion =
-		FABTSJuryDemoFixedSixContract::CurrentContractVersion;
+		FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
 	OutSnapshot.PlacementSchemaVersion = Source.M7PlacementSchemaVersion;
 	OutSnapshot.DemoManifestVersion = Source.M7SourceManifestVersion;
 	OutSnapshot.DemoManifestHash =
@@ -105,6 +108,21 @@ bool BuildJuryDemoFixedSixContractSnapshot(
 			|| Placement.DifficultyTier != Fixture.DifficultyTier
 			|| Placement.BuildingSeed != Fixture.BuildingSeed
 			|| Placement.SourceDescriptorHash != Fixture.SourceDescriptorHash
+			|| Placement.StaticGeometryHash != Fixture.StaticGeometryHash
+			|| Placement.ProductionIdentityHash
+				!= Fixture.ProductionIdentityHash
+			|| Placement.DeviceAssemblyHash != Fixture.DeviceAssemblyHash
+			|| Placement.bDynamicEnvelopeRequired
+				!= Fixture.bDynamicEnvelopeRequired
+			|| Placement.ReservedDynamicEnvelopeCellIds.IsEmpty()
+			|| !Placement.PhysicalBounds.Min.Equals(
+				Fixture.PhysicalBounds.Min, 1.0e-4)
+			|| !Placement.PhysicalBounds.Max.Equals(
+				Fixture.PhysicalBounds.Max, 1.0e-4)
+			|| !Placement.EffectBounds.Min.Equals(
+				Fixture.EffectBounds.Min, 1.0e-4)
+			|| !Placement.EffectBounds.Max.Equals(
+				Fixture.EffectBounds.Max, 1.0e-4)
 			|| !Placement.RequiredPadHalfExtentCM.Equals(
 				Fixture.RequiredPadHalfExtentCM, 1.0e-4)
 			|| static_cast<uint64>(Placement.PlacementHash)
@@ -132,7 +150,17 @@ bool BuildJuryDemoFixedSixContractSnapshot(
 		Site.DeterministicSeed = Placement.BuildingSeed;
 		Site.DescriptorHash =
 			static_cast<uint64>(Placement.SourceDescriptorHash);
-		if (!Site.IsUsable())
+		Site.V2Envelope.StaticGeometryHash =
+			static_cast<uint64>(Placement.StaticGeometryHash);
+		Site.V2Envelope.ProductionIdentityHash =
+			static_cast<uint64>(Placement.ProductionIdentityHash);
+		Site.V2Envelope.DeviceAssemblyHash =
+			static_cast<uint64>(Placement.DeviceAssemblyHash);
+		Site.V2Envelope.PhysicalBounds = Placement.PhysicalBounds;
+		Site.V2Envelope.EffectBounds = Placement.EffectBounds;
+		Site.V2Envelope.bDynamicEnvelopeRequired =
+			Placement.bDynamicEnvelopeRequired;
+		if (!Site.IsUsableForContractVersion(OutSnapshot.ContractVersion))
 		{
 			OutFailure = FString::Printf(TEXT("SiteFrame:%d"), Index);
 			return false;

@@ -1,8 +1,8 @@
 # JuryDemo Fixed-Six V1/V2 世界生成合同
 
-> 状态：2026-08-15，V1 J3 已发布；M7 J4 静态封口已通过。Integration 已发布加法式 V2 合同基线，默认生产仍为 V1，等待 M3 重算 V2 Placement/Layout 后再冻结 Adapter 与切换生产版本。
+> 状态：2026-08-15，V1 J3 保持兼容；M7 J4 静态封口与 M3 V2 Placement/Layout 均已通过。Integration 已用 M3 最终身份冻结 V2 Adapter，固定评审 Seed 现在原子发布 V2；下一步由 M7 消费该快照完成静态注册。
 >
-> 发布身份：`JuryDemoFixedSixV1`；可迁移身份：`JuryDemoFixedSixV2 / M3IdentityPending`。
+> 发布身份：`JuryDemoFixedSixV2 / AdapterPublished`；兼容身份：`JuryDemoFixedSixV1`。
 
 ## 1. 目标与非目标
 
@@ -12,10 +12,10 @@
 
 - M3 World Seed：`312503`
 - M3 Candidate：`4`
-- M3 Layout Hash：`0x8AB8D7E4F094072D`
+- M3 V1 / V2 Layout Hash：`0x8AB8D7E4F094072D / 0x7029074579FDC52E`
 - M7 Placement Schema：`1`
 - M7 Manifest Version / Hash：`1 / 2324068295`
-- M7 Placement Catalog Hash：`13889440156022460967`
+- M7 V1 / V2 Placement Catalog Hash：`13889440156022460967 / 11501529584318250152`
 - 有序 Encounter：`E1`～`E6`，恰好六条
 
 ## 2. 兼容策略
@@ -23,21 +23,21 @@
 现有 `FABTSBuildingGenerationContract::Identity` 与 `Sites` 保持 v1 语义不变。新增的 `JuryDemoFixedSix` 是可选、加法式快照：
 
 - `ContractVersion == 0` 且其他字段为空表示普通 v1 世界没有发布 Fixed-Six；旧消费方可继续只读 `Sites`。
-- 固定评审 Seed 一旦出现，就必须发布完整 `JuryDemoFixedSixV1`；不存在“部分填充后继续使用旧站点”的回退。
+- 固定评审 Seed 一旦出现，就必须发布完整 `JuryDemoFixedSixV2`；不存在“部分填充后继续使用旧站点”的回退。V1 常量与校验继续保留给既有纯值读者和回归测试。
 - M7 J4 必须显式要求 `JuryDemoFixedSix.IsUsable()`，不得在缺失或拒绝时改读旧 Profile/Seed 搜索路径。
 
 该做法不新增 M7→M3 运行时通道，不暴露 M3 TaskGraph、Candidate 数组或可变 UObject，也不要求修改 M3 所有的 Planet 头文件。
 
 ### 2.1 V2 加法式迁移
 
-V2 不修改 V1 常量，也不让当前 M3 Adapter 在旧版本下静默换 Hash：
+V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身份匹配时切换发布版本：
 
 - `CurrentContractVersion` 继续为 `1`；当前已接受的 V1 Producer/Consumer 与 Layout `0x8AB8D7E4F094072D` 保持可用；
 - `SupportedV2ContractVersion=2`，Placement Catalog 固定为 `11501529584318250152`；
 - 每条站点追加 `V2Envelope`，包含 `StaticGeometryHash`、`ProductionIdentityHash`、`DeviceAssemblyHash`、`PhysicalBounds`、`EffectBounds` 与 `bDynamicEnvelopeRequired`；
 - V1 必须保持 `V2Envelope` 为空；V2 必须携带 M7 J4 精确身份，静态 `PhysicalBounds` 必须等于冻结 `LocalBounds`，相对 Pad 的 X/Y 安全边均不得小于 36 cm；
 - `EffectBounds` 是独立动态安全包络，不能并入静态 Pad。当前六栋均要求 `bDynamicEnvelopeRequired=true`；
-- V2 Layout 必须是 M3 基于新 Catalog/Descriptor 重新生成的非零新身份，不得复用 V1 Layout。最终值由 M3 提交后在 Integration Adapter 中冻结；在此之前生产仍只发布 V1。
+- V2 Layout 固定为 M3 基于新 Catalog/Descriptor 与动态包络预留生成的 `0x7029074579FDC52E`，不得接受任意非零 Hash 或复用 V1 Layout。
 
 合同校验按版本 fail closed：未知版本、V1 混入 V2 状态、V2 复用旧 Catalog/Layout、任一 Descriptor/Stage 5/Stage 5.5 Hash 漂移、静态 Bounds 漂移或动态走廊标志不一致都会拒绝整个快照。
 
@@ -96,7 +96,7 @@ V2 不修改 V1 常量，也不让当前 M3 Adapter 在旧版本下静默换 Has
 J3 自动门：
 
 - `ABTS.Contracts.WorldGeneration.Validation`：普通 v1 快照继续可用；Fixed-Six 的错误 Manifest Hash、缺条目、乱序、重复 Entry、错误 Layout Hash 与父子 World Seed 不一致均拒绝。
-- `ABTS.Contracts.WorldGeneration.M3Adapter`：同一固定世界连续导出两次得到相同六条 Entry、Transform 与 Layout Hash；源 Manifest Hash、缺条目、乱序、重复 Entry 和 Layout Hash 注入均原子拒绝。
+- `ABTS.Contracts.WorldGeneration.M3Adapter`：同一固定世界连续导出两次得到相同 V2 六条 Entry、Transform、三类身份 Hash、Bounds 与 Layout Hash；源版本、Manifest/Catalog、缺条目、乱序、重复 Entry、Layout、三类身份 Hash、两类 Bounds、动态标志及动态预留注入均原子拒绝。
 - UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity` 全链接。
 
 这些门只证明数据合同和导出生命周期，不证明六栋已经生成、静态注册、动态 Chaos 稳定或画面无重叠。
@@ -109,6 +109,16 @@ J3 自动门：
 - `ABTS.M110.TaskGraphFinaleSeparation`：1/1，日志 `Saved/Logs/J3-FinaleSeparation-20260815-132600-091-FreshAutomation.log`；
 - `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze`：1/1，六条 Descriptor 与 Catalog Hash `13889440156022460967` 一致，日志 `Saved/Logs/J3-M7Stage45-20260815-132645-612-FreshAutomation.log`；
 - 四份日志均有唯一 `EXIT CODE: 0` 完成标记，且 `LogAutomationController Error`、`LogABTSRuntime Error`、Fatal、ensure 与失败测试计数均为零。
+
+2026-08-15 V2 Adapter 发布证据：
+
+- M3 交接提交：`370e50e85c9977b0bf8e0f9ab81909becc12171f`；固定结果为 `Buildings=6 / ReservedPadCells=52 / ReservedDynamicEnvelopeCells=40 / LayoutHash=0x7029074579FDC52E`；
+- UE 5.8 Development Editor 自适应非 Unity 与 `-ForceUnity -DisableAdaptiveUnity` 均 `Result: Succeeded`；非 Unity 首次暴露 Adapter 日志类别依赖 Unity 偶然带入，补充显式 `ABTSRuntime.h` 后两种编译均独立通过；
+- `ABTS.Contracts.WorldGeneration`：2/2，包含 V2 合同常量门和 M3 Adapter 全部失败注入，最终源码日志 `Saved/Logs/Integration-M3V2-Contracts-20260815-R3-FreshAutomation.log`；
+- `ABTS.M3.Monthly.JuryFixedSix`：2/2，日志 `Saved/Logs/Integration-M3V2-FixedSix-20260815-R2-FreshAutomation.log`；
+- `ABTS.M110.TaskGraphFinaleSeparation`：1/1，日志 `Saved/Logs/Integration-M3V2-Finale-20260815-FreshAutomation.log`；
+- `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze`：1/1，日志 `Saved/Logs/Integration-M3V2-M7Stage45-20260815-FreshAutomation.log`；
+- 四份 fresh NullRHI 日志均有唯一 `TEST COMPLETE. EXIT CODE: 0`，失败测试、项目 Error、Fatal 与 ensure 计数均为零。前两份初始 `-log` 预检运行没有测试完成标记，已明确作废且未计入证据。
 
 该 DTO 固定六个纯值站点，只在导出时复制并验证，无 Tick、渲染、GPU、纹理、Sampler 或资产内存增量；J4 的 Actor/Chaos/帧时预算必须由 M7 和 J5 另行测量。
 
@@ -128,7 +138,7 @@ M7 必须在自己的排错账本记录 J4 新 ID；共享合同改动仍回到�
 
 V2 的 Manifest 仍为 `1 / 2324068295`，Schema 仍为 `1`，Pad、Tier、Seed、Pivot 与静态 Bounds 不变。新的 Catalog、逐栋 Descriptor/Production/Device Hash 及 EffectBounds 以 [M7 JuryDemo 静态封口与 Fixed-Six V2 交接设计](M7JuryDemoStaticSealAndContractV2Handoff.md) 为唯一人读表；运行时校验中的精确常量由集成工作树所有的合同实现维护。
 
-本阶段只批准 V2 合同数据面，不代表 M3 已输出 V2，也不代表六栋已静态注册、ChaosReady 或 IntegrationAccepted。
+M3 与 Integration 现在已经输出并验证 V2 数据面；这仍不代表六栋已静态注册、ChaosReady 或 IntegrationAccepted。上述状态必须由 M7 消费和 J5 独立证据提升。
 
 ## 7. J5 联合验收
 
