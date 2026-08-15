@@ -442,7 +442,14 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	{
 		Audio->SetMusicState(EABTSMusicState::Aim);
 	}
-	if (SlingshotCamera) SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
+		if (!bPlanarTestMode && Planet.IsValid())
+		{
+			SlingshotCamera->ConfigureAimPrimarySurfaceGroundContext(Planet.Get());
+		}
+	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Enter] Bird=%d Reinforced=%d"), ABTSBirdIdToIndex(Bird->GetBirdId()), Cord.GetStakeItem() == EABTSItemId::ReinforcedStake ? 1 : 0);
 	return true;
 }

@@ -193,7 +193,40 @@ void AABTSM6SlingshotCamera::SetAimFrame(const FVector& InCenter, const FVector&
 	SatelliteSubtleAssistAlpha = 0.0f;
 	PredictedPeriapsisWorld = FVector::ZeroVector;
 	PredictedPeriapsisVelocity = FVector::ZeroVector;
+	bAimGroundContextValid = false;
+	AimGroundContextWorld = FVector::ZeroVector;
 	UpdateAim(0.0f);
+}
+
+bool AABTSM6SlingshotCamera::ConfigureAimPrimarySurfaceGroundContext(
+	AABTSM2Planet* InPlanet)
+{
+	bAimGroundContextValid = false;
+	AimGroundContextWorld = FVector::ZeroVector;
+	if (InPlanet == nullptr) return false;
+
+	const FVector PlanetCenter = InPlanet->GetPlanetCenterWorld();
+	const FVector Candidate =
+		AimCenter + AimForward * FMath::Max(100.0f, AimGroundContextForwardDistanceCM);
+	const FVector SurfaceDirection = (Candidate - PlanetCenter).GetSafeNormal();
+	if (SurfaceDirection.IsNearlyZero()) return false;
+	const float SurfaceRadiusCM =
+		InPlanet->GetSurfaceRadiusAtDirection(SurfaceDirection);
+	if (!FMath::IsFinite(SurfaceRadiusCM) || SurfaceRadiusCM <= 0.0f) return false;
+
+	AimGroundContextWorld = PlanetCenter + SurfaceDirection * SurfaceRadiusCM;
+	bAimGroundContextValid = !AimGroundContextWorld.ContainsNaN();
+	if (!bAimGroundContextValid)
+	{
+		AimGroundContextWorld = FVector::ZeroVector;
+		return false;
+	}
+	UpdateAim(0.0f);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][CameraGroundContext] AimLocked=1 Anchor=%s MinLookDown=%.2f"),
+		*AimGroundContextWorld.ToCompactString(),
+		AimGroundContextMinimumLookDownDegrees);
+	return true;
 }
 
 bool AABTSM6SlingshotCamera::CopyAimFraming(
@@ -285,6 +318,74 @@ bool AABTSM6SlingshotCamera::BuildAimInputPlaneBasis(
 		OutOutOfPlaneAxis *= -1.0f;
 	}
 	return !OutOutOfPlaneAxis.IsNearlyZero();
+}
+
+bool AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+	const FVector& LegacyLocation,
+	const FVector& GroundAnchor,
+	const FVector& Up,
+	const float MinimumLookDownDegrees,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp)
+{
+	const FVector SafeUp = Up.GetSafeNormal();
+	if (SafeUp.IsNearlyZero()
+		|| LegacyLocation.ContainsNaN()
+		|| GroundAnchor.ContainsNaN())
+	{
+		return false;
+	}
+
+	OutLocation = LegacyLocation;
+	const FVector ToAnchor = GroundAnchor - LegacyLocation;
+	const float HorizontalDistanceCM =
+		FVector::VectorPlaneProject(ToAnchor, SafeUp).Size();
+	const float RequiredHeightCM = HorizontalDistanceCM * FMath::Tan(
+		FMath::DegreesToRadians(
+			FMath::Clamp(MinimumLookDownDegrees, 0.0f, 30.0f)));
+	const float CurrentHeightCM =
+		FVector::DotProduct(LegacyLocation - GroundAnchor, SafeUp);
+	OutLocation += SafeUp * FMath::Max(0.0f, RequiredHeightCM - CurrentHeightCM);
+	OutLook = (GroundAnchor - OutLocation).GetSafeNormal();
+	OutScreenUp = FVector::VectorPlaneProject(SafeUp, OutLook).GetSafeNormal();
+	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
+}
+
+bool AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
+	const FVector& BirdLocation,
+	const FVector& Up,
+	const FVector& Forward,
+	const float DistanceCM,
+	const float HeightCM,
+	const float LookDownDegrees,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp)
+{
+	const FVector SafeUp = Up.GetSafeNormal();
+	const FVector SafeForward =
+		FVector::VectorPlaneProject(Forward, SafeUp).GetSafeNormal();
+	if (SafeUp.IsNearlyZero()
+		|| SafeForward.IsNearlyZero()
+		|| BirdLocation.ContainsNaN()
+		|| !FMath::IsFinite(DistanceCM)
+		|| !FMath::IsFinite(HeightCM)
+		|| !FMath::IsFinite(LookDownDegrees))
+	{
+		return false;
+	}
+
+	OutLocation = BirdLocation
+		- SafeForward * FMath::Max(0.0f, DistanceCM)
+		+ SafeUp * FMath::Max(0.0f, HeightCM);
+	const float LookDownRadians = FMath::DegreesToRadians(
+		FMath::Clamp(LookDownDegrees, 0.0f, 45.0f));
+	OutLook = (
+		SafeForward * FMath::Cos(LookDownRadians)
+		- SafeUp * FMath::Sin(LookDownRadians)).GetSafeNormal();
+	OutScreenUp = FVector::VectorPlaneProject(SafeUp, OutLook).GetSafeNormal();
+	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
 }
 
 void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet)
@@ -667,6 +768,18 @@ void AABTSM6SlingshotCamera::UpdateAim(const float DeltaSeconds)
 	{
 		return;
 	}
+	if (bAimGroundContextValid
+		&& !BuildGroundAwareAimView(
+			DesiredLocation,
+			AimGroundContextWorld,
+			AimUp,
+			AimGroundContextMinimumLookDownDegrees,
+			DesiredLocation,
+			Look,
+			ScreenUp))
+	{
+		return;
+	}
 	const FQuat Rotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
 	SetActorLocationAndRotation(DeltaSeconds > 0.0f ? FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, AimCameraBlendSpeed) : DesiredLocation, Rotation);
 }
@@ -684,9 +797,9 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 	FVector DesiredLocation;
 	FQuat DesiredRotation;
 	if (!BuildPrimaryFollowPose(*TargetBird, DesiredLocation, DesiredRotation)) return;
-	const FVector Location = FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, FollowSpeed);
-	const FQuat Rotation = FMath::QInterpTo(GetActorQuat(), DesiredRotation, DeltaSeconds, FollowSpeed);
-	SetActorLocationAndRotation(Location, Rotation);
+	// Primary flight is a rigid bird-relative composition. Independent position
+	// and rotation lag changes both apparent bird scale and screen placement.
+	SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
 }
 
 void AABTSM6SlingshotCamera::CalcCamera(
@@ -780,13 +893,21 @@ bool AABTSM6SlingshotCamera::BuildPrimaryFollowPose(
 		TargetBird.GetSlingshotVelocity(),
 		FollowFacingLockRemainingSeconds > 0.0f);
 	if (Forward.IsNearlyZero()) return false;
-	OutLocation = TargetBird.GetActorLocation()
-		- Forward * FlightDistanceCM
-		+ Up * FlightHeightCM;
-	const FVector Look =
-		(TargetBird.GetActorLocation() + Up * 80.0f - OutLocation).GetSafeNormal();
-	FVector ScreenUp = FVector::VectorPlaneProject(Up, Look).GetSafeNormal();
-	if (ScreenUp.IsNearlyZero()) ScreenUp = Up;
+	FVector Look;
+	FVector ScreenUp;
+	if (!BuildFixedBirdFlightPose(
+		TargetBird.GetActorLocation(),
+		Up,
+		Forward,
+		FlightDistanceCM,
+		FlightHeightCM,
+		FlightLookDownDegrees,
+		OutLocation,
+		Look,
+		ScreenUp))
+	{
+		return false;
+	}
 	OutRotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
 	return true;
 }

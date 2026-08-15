@@ -228,4 +228,118 @@ bool FABTSM9SatelliteFlightCameraIntentTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6LaunchGroundContextCameraTest,
+	"ABTS.M6.Camera.LaunchGroundContext",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6LaunchGroundContextCameraTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FVector Up = FVector::UpVector;
+	const FVector LegacyLocation(-1500.0f, 0.0f, -80.0f);
+	const FVector GroundAnchor(1800.0f, 0.0f, -250.0f);
+	FVector GroundAwareLocation;
+	FVector Look;
+	FVector ScreenUp;
+	TestTrue(
+		TEXT("A valid surface anchor produces an aim view"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			LegacyLocation,
+			GroundAnchor,
+			Up,
+			8.0f,
+			GroundAwareLocation,
+			Look,
+			ScreenUp));
+	TestTrue(
+		TEXT("Aim framing keeps the authored horizontal camera position"),
+		FMath::IsNearlyEqual(GroundAwareLocation.X, LegacyLocation.X, 0.01f)
+			&& FMath::IsNearlyEqual(GroundAwareLocation.Y, LegacyLocation.Y, 0.01f));
+	TestTrue(
+		TEXT("Aim framing raises a camera that cannot yet read the ground"),
+		GroundAwareLocation.Z > LegacyLocation.Z);
+	TestTrue(
+		TEXT("Aim framing looks at the exact immutable surface anchor"),
+		FVector::DotProduct(
+			Look,
+			(GroundAnchor - GroundAwareLocation).GetSafeNormal()) > 0.9999f);
+	TestTrue(
+		TEXT("Aim framing guarantees the authored minimum downward angle"),
+		FVector::DotProduct(Look, Up)
+			<= -FMath::Sin(FMath::DegreesToRadians(8.0f)) + 0.0001f);
+	TestTrue(
+		TEXT("Aim framing keeps a valid roll-free screen up"),
+		FMath::Abs(FVector::DotProduct(Look, ScreenUp)) < 0.0001f
+			&& ScreenUp.SizeSquared() > 0.999f);
+
+	FVector FlightLocation;
+	FVector FlightLook;
+	FVector FlightScreenUp;
+	TestTrue(
+		TEXT("Fixed bird framing produces a valid flight pose"),
+		AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
+			FVector::ZeroVector,
+			Up,
+			FVector::ForwardVector,
+			920.0f,
+			310.0f,
+			26.0f,
+			FlightLocation,
+			FlightLook,
+			FlightScreenUp));
+	const float ExpectedBirdDistanceCM = FVector(920.0f, 0.0f, 310.0f).Size();
+	TestTrue(
+		TEXT("Fixed bird framing preserves the authored camera-to-bird distance"),
+		FMath::IsNearlyEqual(
+			FlightLocation.Size(),
+			ExpectedBirdDistanceCM,
+			0.01f));
+	TestTrue(
+		TEXT("Fixed bird framing uses the authored downward optical pitch"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(FlightLook, Up),
+			-FMath::Sin(FMath::DegreesToRadians(26.0f)),
+			0.0001f));
+	const FVector BirdDirection = (-FlightLocation).GetSafeNormal();
+	const float BirdScreenOffsetCosine = FVector::DotProduct(
+		FlightLook,
+		BirdDirection);
+	FVector ShiftedLocation;
+	FVector ShiftedLook;
+	FVector ShiftedScreenUp;
+	TestTrue(
+		TEXT("A translated and rotated local frame keeps a valid fixed flight pose"),
+		AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
+			FVector(4200.0f, -1700.0f, 800.0f),
+			FVector::RightVector,
+			FVector::UpVector,
+			920.0f,
+			310.0f,
+			26.0f,
+			ShiftedLocation,
+			ShiftedLook,
+			ShiftedScreenUp));
+	TestTrue(
+		TEXT("Bird screen position is invariant in the moving local frame"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(
+				ShiftedLook,
+				(FVector(4200.0f, -1700.0f, 800.0f) - ShiftedLocation)
+					.GetSafeNormal()),
+			BirdScreenOffsetCosine,
+			0.0001f));
+	TestTrue(
+		TEXT("Camera-to-bird distance is invariant in the moving local frame"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(
+				ShiftedLocation,
+				FVector(4200.0f, -1700.0f, 800.0f)),
+			ExpectedBirdDistanceCM,
+			0.01f));
+	return true;
+}
+
 #endif
