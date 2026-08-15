@@ -22,6 +22,7 @@ public class ABTSRuntime : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"Chaos",
 			"Json",
 			"RHI",
 		});
