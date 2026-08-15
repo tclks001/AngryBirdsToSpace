@@ -29,6 +29,8 @@ public:
 	void ResetCraftingSelection();
 	/** Routes the mouse wheel to the left-side backpack while the modal is open. */
 	void ScrollInventoryRows(float WheelValue);
+	/** True when this pointer press belongs to backpack/hotbar UI rather than the world. */
+	bool ConsumesPrimaryPointerAtScreenPosition(const FVector2D& ScreenPosition) const;
 
 private:
 	void DrawHotbar(AABTSCraftingSystem& System);

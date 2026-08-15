@@ -25,6 +25,8 @@ public:
 
 protected:
 	virtual void PrimaryWorldInteract();
+	/** Central barrier shared by M5.1/M6/M11 before any left-click world action. */
+	bool ShouldConsumePrimaryPointerForHUD() const;
 
 private:
 	AABTSM51WorldSystem* FindWorldSystem();

@@ -32,6 +32,7 @@ void AABTSM6PlayerController::InteractWithSlingshotCord(AABTSM51SlingshotCord* C
 
 void AABTSM6PlayerController::PrimaryWorldInteract()
 {
+	if (ShouldConsumePrimaryPointerForHUD()) return;
 	AABTSM6SlingshotSystem* System = FindSlingshotSystem();
 	if (System == nullptr) { Super::PrimaryWorldInteract(); return; }
 	if (System->GetLaunchState() == EABTSM6LaunchState::Ready)

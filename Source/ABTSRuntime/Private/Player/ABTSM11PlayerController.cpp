@@ -179,6 +179,7 @@ void AABTSM11PlayerController::InteractWithSlingshotCord(
 
 void AABTSM11PlayerController::PrimaryWorldInteract()
 {
+	if (ShouldConsumePrimaryPointerForHUD()) return;
 	if (AABTSM11FinaleInteractionSystem* Interaction =
 		FindM11Interaction();
 		Interaction != nullptr && Interaction->IsFinaleActive())

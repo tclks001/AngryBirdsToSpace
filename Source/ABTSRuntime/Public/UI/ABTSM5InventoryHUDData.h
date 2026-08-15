@@ -71,6 +71,15 @@ public:
 		float RequestedEdgeInsetPx,
 		FABTSM5CountBadgeLayout& OutLayout);
 
+	/**
+	 * Stable input barrier for the backpack and hotbar. This deliberately does not depend on
+	 * AHUD's transient hit-box list, which may be between draw-frame revisions during input.
+	 */
+	static bool ConsumesPrimaryPointer(
+		const FABTSM5InventoryUILayout& Layout,
+		const FVector2D& ScreenPosition,
+		bool bCraftingInterfaceOpen);
+
 	static const TCHAR* GetItemIconAssetPath(EABTSItemId ItemId);
 
 	static const TCHAR* GetActionIconAtlasAssetPath();

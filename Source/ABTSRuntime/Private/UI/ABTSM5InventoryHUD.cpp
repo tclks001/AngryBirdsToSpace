@@ -961,6 +961,16 @@ void AABTSM5InventoryHUD::ScrollInventoryRows(const float WheelValue)
 		0, MaxInventoryScrollRowOffset);
 }
 
+bool AABTSM5InventoryHUD::ConsumesPrimaryPointerAtScreenPosition(
+	const FVector2D& ScreenPosition) const
+{
+	const AABTSM5PlayerController* Controller = GetM5Controller();
+	return FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
+		ActiveLayout,
+		ScreenPosition,
+		Controller != nullptr && Controller->IsCraftingInterfaceOpen());
+}
+
 AABTSCraftingSystem* AABTSM5InventoryHUD::FindCraftingSystem()
 {
 	if (CraftingSystem.IsValid()) return CraftingSystem.Get();

@@ -168,6 +168,19 @@ bool FABTSM5InventoryHUDData::ResolveCountBadgeLayout(
 		&& CardBox.IsInsideOrOn(OutLayout.BadgeBox.Max);
 }
 
+bool FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
+	const FABTSM5InventoryUILayout& Layout,
+	const FVector2D& ScreenPosition,
+	const bool bCraftingInterfaceOpen)
+{
+	// The backpack is modal: even its dimmed surround belongs to UI and must never place a
+	// held world item. When closed, the complete hotbar shell (including gaps and labels)
+	// remains an input-safe region instead of relying only on individual item hit boxes.
+	return bCraftingInterfaceOpen
+		|| (Layout.HotbarShell.bIsValid
+			&& Layout.HotbarShell.IsInsideOrOn(ScreenPosition));
+}
+
 const TCHAR* FABTSM5InventoryHUDData::GetItemIconAssetPath(const EABTSItemId ItemId)
 {
 	switch (ItemId)

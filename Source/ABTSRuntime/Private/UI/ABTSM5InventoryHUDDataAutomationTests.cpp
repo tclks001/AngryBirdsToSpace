@@ -29,6 +29,18 @@ bool FABTSM5InventoryHUDVisualLayoutTest::RunTest(const FString& Parameters)
 			&& Layout.ModalShell.Min.Y >= 0.0f
 			&& Layout.ModalShell.Max.X <= Viewport.X
 			&& Layout.ModalShell.Max.Y <= Viewport.Y);
+		TestTrue(TEXT("Hotbar center consumes primary world input"),
+			FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
+				Layout, Layout.HotbarShell.GetCenter(), false));
+		TestTrue(TEXT("Hotbar boundary consumes primary world input"),
+			FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
+				Layout, Layout.HotbarShell.Min, false));
+		TestFalse(TEXT("World point above hotbar remains interactive"),
+			FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
+				Layout, FVector2D(Viewport.X * 0.5f, 32.0f), false));
+		TestTrue(TEXT("Open backpack consumes the entire primary click"),
+			FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
+				Layout, FVector2D(Viewport.X * 0.5f, 32.0f), true));
 	}
 
 	TSet<FString> IconPaths;
