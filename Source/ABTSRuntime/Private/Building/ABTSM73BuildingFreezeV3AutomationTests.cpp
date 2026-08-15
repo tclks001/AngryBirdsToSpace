@@ -232,15 +232,24 @@ bool FABTSM73BuildingFreezeV3E6CompoundV1CandidateTest::RunTest(
 {
 	FABTSM73BuildingFreezeV3Descriptor Frozen;
 	FABTSM73BuildingFreezeV3Descriptor Candidate;
+	TArray<FABTSM73BuildingFreezeV3Descriptor> PublishedCatalog;
 	TArray<FABTSM73BuildingFreezeV3Descriptor> CandidateCatalog;
+	uint64 PublishedCatalogHash = 0;
 	uint64 CandidateCatalogHash = 0;
 	FString Error;
-	if (!TestTrue(TEXT("Frozen E6 remains derivable while Integration owns the seal"),
+	if (!TestTrue(TEXT("Published E6 remains derivable"),
 		FABTSM73BuildingFreezeV3::DeriveAndValidate(
 			EABTSM73BeamDemoBuilding::E6TipOver, Frozen, Error))
 		|| !TestTrue(TEXT("E6 compound V1 atomic candidate derives"),
 			FABTSM73BuildingFreezeV3::DeriveAndValidate(
 				EABTSM73BeamDemoBuilding::E6TipOver, Candidate, Error, true)))
+	{
+		AddError(Error);
+		return false;
+	}
+	if (!TestTrue(TEXT("Published fixed-six catalog derives"),
+		FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
+			PublishedCatalog, PublishedCatalogHash, Error)))
 	{
 		AddError(Error);
 		return false;
@@ -258,8 +267,32 @@ bool FABTSM73BuildingFreezeV3E6CompoundV1CandidateTest::RunTest(
 	TestEqual(TEXT("Candidate catalog publishes the exact handoff identity"),
 		CandidateCatalogHash,
 		FABTSM73BuildingFreezeV3::E6CompoundV1CandidateCatalogHash);
-	TestEqual(TEXT("The published E6 remains one body per visible module"),
-		Frozen.PhysicsAssemblyHash, static_cast<uint64>(0));
+	if constexpr (FABTSM73BuildingFreezeV3::bE6CompoundV1Published)
+	{
+		TestEqual(TEXT("Published catalog adopts the exact compound candidate identity"),
+			PublishedCatalogHash, CandidateCatalogHash);
+		TestEqual(TEXT("Published E6 adopts the exact candidate descriptor"),
+			Frozen.DescriptorHash, Candidate.DescriptorHash);
+		TestEqual(TEXT("Published E6 adopts the exact candidate production identity"),
+			Frozen.ProductionHash, Candidate.ProductionHash);
+		TestEqual(TEXT("Published E6 adopts the exact candidate body count"),
+			Frozen.PhysicsBodyCount, Candidate.PhysicsBodyCount);
+		TestEqual(TEXT("Published E6 adopts the exact candidate physics assembly"),
+			Frozen.PhysicsAssemblyHash, Candidate.PhysicsAssemblyHash);
+	}
+	else
+	{
+		TestNotEqual(TEXT("Unpublished compound candidate stays distinct from the published catalog"),
+			PublishedCatalogHash, CandidateCatalogHash);
+		TestNotEqual(TEXT("Unpublished compound candidate stays distinct from the published descriptor"),
+			Frozen.DescriptorHash, Candidate.DescriptorHash);
+		TestNotEqual(TEXT("Unpublished compound candidate stays distinct from the published production identity"),
+			Frozen.ProductionHash, Candidate.ProductionHash);
+		TestEqual(TEXT("The pre-compound published E6 has no assembly body count"),
+			Frozen.PhysicsBodyCount, 0);
+		TestEqual(TEXT("The pre-compound published E6 has no physics assembly"),
+			Frozen.PhysicsAssemblyHash, static_cast<uint64>(0));
+	}
 	TestEqual(TEXT("Candidate keeps the exact static geometry identity"),
 		Candidate.StaticGeometryHash, Frozen.StaticGeometryHash);
 	TestEqual(TEXT("Candidate keeps every E6 Brick"),
