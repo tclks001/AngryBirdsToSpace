@@ -9,6 +9,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
@@ -323,6 +324,9 @@ bool AABTSM10ScoutMapSystem::RevealAtLanding(const FVector& LandingLocation)
 		LandingLocation.X, LandingLocation.Y, LandingLocation.Z,
 		ResolvedScoutRadiusCM, ResolvedScoutRadiusCM / PlanetRadiusCM,
 		FMath::Clamp(Settings.TerrainTextureResolution, 64, 512), EnvironmentMarkers.Num());
+	FABTSGuideEventBus::PublishAtLocation(this, FABTSGuideEventIds::ScoutRevealed,
+		FABTSGuideSubjects::Blue, LandingLocation,
+		FMath::RoundToInt(ResolvedScoutRadiusCM), EnvironmentMarkers.Num());
 	return true;
 }
 

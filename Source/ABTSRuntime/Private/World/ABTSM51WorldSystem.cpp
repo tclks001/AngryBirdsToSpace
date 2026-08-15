@@ -7,6 +7,7 @@
 #include "Crafting/ABTSCraftingStation.h"
 #include "Crafting/ABTSCraftingSystem.h"
 #include "EngineUtils.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "Inventory/ABTSInventoryComponent.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
@@ -59,6 +60,8 @@ bool AABTSM51WorldSystem::InitializeWorldContent()
 	}
 	SpawnSdfPickups();
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1] World ready Pickups=%d OccupiedCells=%d"), Pickups.Num(), OccupiedCells.Num());
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::WorldReady,
+		NAME_None, this, Pickups.Num(), OccupiedCells.Num());
 	return true;
 }
 
@@ -524,6 +527,9 @@ bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)
 	Hole.SetOccupiedStake(Stake);
 	Inventory->RemoveItem(Held, 1);
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][Stake] Installed=%s Cell=%d"), *ABTSGetItemFallbackLabel(Held), Hole.GetCellId());
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::StakeInstalled,
+		FABTSGuideSubjects::FromSlingshotTier(HeldTier), Stake,
+		Hole.GetCellId(), Hole.GetSlotPairId());
 	return true;
 }
 
@@ -549,6 +555,9 @@ bool AABTSM51WorldSystem::SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake)
 	{
 		PendingCordStake = &Stake;
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][Cord] FirstStake Cell=%d"), Stake.GetCellId());
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::CordEndpointSelected,
+			FABTSGuideSubjects::FromSlingshotTier(ResolvedTier), &Stake,
+			Stake.GetCellId(), Stake.GetInstalledSlotPairId());
 		return true;
 	}
 	AABTSM51SlingshotStake* First = PendingCordStake.Get();

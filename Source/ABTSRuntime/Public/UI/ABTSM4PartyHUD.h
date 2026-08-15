@@ -10,6 +10,7 @@ class AABTSBirdParty;
 class UTexture2D;
 enum class EABTSBirdId : uint8;
 struct FABTSUIThemeSnapshot;
+struct FABTSGuidePresentationSnapshot;
 
 /** Asset-optional fixed-order four-bird portrait HUD. */
 UCLASS()
@@ -30,6 +31,11 @@ private:
 	AABTSBirdParty* FindParty();
 	FName MakeBirdHitBoxName(int32 BirdIndex) const;
 	void DrawThemeDebugOverlay(const FABTSUIThemeSnapshot& Theme);
+	void DrawGuideOverlay(const FABTSUIThemeSnapshot& Theme);
+	void DrawGuidePictogram(
+		const FABTSGuidePresentationSnapshot& Guide,
+		const FBox2D& IconBox,
+		const FABTSUIThemeSnapshot& Theme);
 
 	TWeakObjectPtr<AABTSBirdParty> Party;
 	UPROPERTY()
