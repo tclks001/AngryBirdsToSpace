@@ -222,10 +222,24 @@ bool AABTSM6SlingshotCamera::ConfigureAimPrimarySurfaceGroundContext(
 		return false;
 	}
 	UpdateAim(0.0f);
+	const FVector ResolvedLook = GetActorForwardVector().GetSafeNormal();
+	const FVector ResolvedSubjectDirection =
+		(AimCenter - GetActorLocation()).GetSafeNormal();
+	const float ResolvedLookDownDegrees = FMath::RadiansToDegrees(FMath::Asin(
+		FMath::Clamp(-FVector::DotProduct(ResolvedLook, AimUp), -1.0f, 1.0f)));
+	const float ResolvedSubjectOffsetDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(
+			FVector::DotProduct(ResolvedLook, ResolvedSubjectDirection),
+			-1.0f,
+			1.0f)));
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M6][CameraGroundContext] AimLocked=1 Anchor=%s MinLookDown=%.2f"),
+		TEXT("[ABTS][M6][CameraGroundContext] AimLocked=1 Anchor=%s LookDown=%.2f Range=[%.2f,%.2f] SubjectOffset=%.2f Distance=%.1f"),
 		*AimGroundContextWorld.ToCompactString(),
-		AimGroundContextMinimumLookDownDegrees);
+		ResolvedLookDownDegrees,
+		AimGroundContextMinimumLookDownDegrees,
+		AimGroundContextMaximumLookDownDegrees,
+		ResolvedSubjectOffsetDegrees,
+		FVector::Distance(GetActorLocation(), AimCenter));
 	return true;
 }
 
@@ -322,32 +336,82 @@ bool AABTSM6SlingshotCamera::BuildAimInputPlaneBasis(
 
 bool AABTSM6SlingshotCamera::BuildGroundAwareAimView(
 	const FVector& LegacyLocation,
+	const FVector& AimCenter,
+	const FVector& AimForward,
 	const FVector& GroundAnchor,
 	const FVector& Up,
+	const float CameraDistanceCM,
 	const float MinimumLookDownDegrees,
+	const float MaximumLookDownDegrees,
+	const float SubjectAboveCenterDegrees,
 	FVector& OutLocation,
 	FVector& OutLook,
 	FVector& OutScreenUp)
 {
 	const FVector SafeUp = Up.GetSafeNormal();
+	const FVector SafeForward =
+		FVector::VectorPlaneProject(AimForward, SafeUp).GetSafeNormal();
 	if (SafeUp.IsNearlyZero()
+		|| SafeForward.IsNearlyZero()
 		|| LegacyLocation.ContainsNaN()
-		|| GroundAnchor.ContainsNaN())
+		|| AimCenter.ContainsNaN()
+		|| GroundAnchor.ContainsNaN()
+		|| !FMath::IsFinite(CameraDistanceCM)
+		|| !FMath::IsFinite(MinimumLookDownDegrees)
+		|| !FMath::IsFinite(MaximumLookDownDegrees)
+		|| !FMath::IsFinite(SubjectAboveCenterDegrees))
 	{
 		return false;
 	}
 
-	OutLocation = LegacyLocation;
 	const FVector ToAnchor = GroundAnchor - LegacyLocation;
 	const float HorizontalDistanceCM =
 		FVector::VectorPlaneProject(ToAnchor, SafeUp).Size();
-	const float RequiredHeightCM = HorizontalDistanceCM * FMath::Tan(
-		FMath::DegreesToRadians(
-			FMath::Clamp(MinimumLookDownDegrees, 0.0f, 30.0f)));
-	const float CurrentHeightCM =
-		FVector::DotProduct(LegacyLocation - GroundAnchor, SafeUp);
-	OutLocation += SafeUp * FMath::Max(0.0f, RequiredHeightCM - CurrentHeightCM);
-	OutLook = (GroundAnchor - OutLocation).GetSafeNormal();
+	const FVector AnchorForward =
+		FVector::VectorPlaneProject(GroundAnchor - AimCenter, SafeUp);
+	if (HorizontalDistanceCM <= KINDA_SMALL_NUMBER
+		|| FVector::DotProduct(AnchorForward, SafeForward) <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const float RawLookDownDegrees = FMath::RadiansToDegrees(FMath::Atan2(
+		-FVector::DotProduct(ToAnchor, SafeUp),
+		HorizontalDistanceCM));
+	const float SafeMinimumLookDownDegrees = FMath::Clamp(
+		FMath::Min(MinimumLookDownDegrees, MaximumLookDownDegrees),
+		0.0f,
+		30.0f);
+	const float SafeMaximumLookDownDegrees = FMath::Clamp(
+		FMath::Max(MinimumLookDownDegrees, MaximumLookDownDegrees),
+		SafeMinimumLookDownDegrees,
+		30.0f);
+	const float ResolvedLookDownDegrees = FMath::Clamp(
+		RawLookDownDegrees,
+		SafeMinimumLookDownDegrees,
+		SafeMaximumLookDownDegrees);
+	const float SafeSubjectAboveCenterDegrees = FMath::Clamp(
+		SubjectAboveCenterDegrees,
+		0.0f,
+		ResolvedLookDownDegrees);
+	const float CameraElevationDegrees =
+		ResolvedLookDownDegrees - SafeSubjectAboveCenterDegrees;
+	const float CameraElevationRadians =
+		FMath::DegreesToRadians(CameraElevationDegrees);
+	const float LookDownRadians =
+		FMath::DegreesToRadians(ResolvedLookDownDegrees);
+	const float SafeCameraDistanceCM = FMath::Max(1.0f, CameraDistanceCM);
+
+	// The terrain anchor selects only a bounded optical pitch. The authored
+	// camera-to-sling distance and sling screen offset remain invariant across
+	// sphere curvature and terrain-height changes.
+	OutLocation = AimCenter
+		+ (-SafeForward * FMath::Cos(CameraElevationRadians)
+			+ SafeUp * FMath::Sin(CameraElevationRadians))
+		* SafeCameraDistanceCM;
+	OutLook = (
+		SafeForward * FMath::Cos(LookDownRadians)
+		- SafeUp * FMath::Sin(LookDownRadians)).GetSafeNormal();
 	OutScreenUp = FVector::VectorPlaneProject(SafeUp, OutLook).GetSafeNormal();
 	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
 }
@@ -935,9 +999,14 @@ void AABTSM6SlingshotCamera::UpdateAim(const float DeltaSeconds)
 	if (bAimGroundContextValid
 		&& !BuildGroundAwareAimView(
 			DesiredLocation,
+			AimCenter,
+			AimForward,
 			AimGroundContextWorld,
 			AimUp,
+			AimDistanceCM,
 			AimGroundContextMinimumLookDownDegrees,
+			AimGroundContextMaximumLookDownDegrees,
+			AimGroundContextSubjectAboveCenterDegrees,
 			DesiredLocation,
 			Look,
 			ScreenUp))
