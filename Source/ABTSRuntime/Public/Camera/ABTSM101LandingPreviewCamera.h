@@ -14,6 +14,7 @@ class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class USceneCaptureComponent2D;
 class USceneComponent;
+class UStaticMeshComponent;
 class UTextureRenderTarget2D;
 struct FABTSM6TrajectoryPreview;
 
@@ -98,6 +99,7 @@ private:
 	void RebuildTrajectoryPointsAround(
 		const FABTSM6TrajectoryPreview& Preview,
 		int32 CenterSegmentStartIndex);
+	void UpdateTrajectoryEndpoint(const FVector& WorldLocation, float BaseScale);
 	void SetPreviewSubject(EABTSM101PreviewSubject NewSubject);
 	void CaptureWithPersistentHistory(const FTransform& CaptureTransform);
 
@@ -111,6 +113,10 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M10.1|Landing Preview")
 	TObjectPtr<UInstancedStaticMeshComponent> TrajectoryPointInstances;
 
+	/** Theme-amber terminal marker, isolated to the landing SceneCapture. */
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M10.1|Landing Preview")
+	TObjectPtr<UStaticMeshComponent> TrajectoryEndpoint;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> RenderTarget;
 
@@ -120,6 +126,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TrajectoryMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TrajectoryEndpointMaterial;
 
 	FABTSM10ScoutMapSettings Settings;
 	float CaptureAccumulatorSeconds = 0.0f;

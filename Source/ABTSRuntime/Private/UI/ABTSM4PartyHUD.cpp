@@ -9,7 +9,75 @@
 #include "EngineUtils.h"
 #include "Party/ABTSBirdParty.h"
 #include "Party/ABTSBirdPartySettings.h"
+#include "UI/ABTSCanvasUI.h"
 #include "UI/ABTSUITheme.h"
+#include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	TAutoConsoleVariable<float> CVarFlightPortraitCardPx(
+		TEXT("abts.UI.Flight.PortraitCardPx"), 78.0f,
+		TEXT("Bird portrait card size in pixels [52, 112]."));
+	TAutoConsoleVariable<float> CVarFlightPortraitGapPx(
+		TEXT("abts.UI.Flight.PortraitGapPx"), 10.0f,
+		TEXT("Gap between bird portrait cards in pixels [4, 28]."));
+	TAutoConsoleVariable<float> CVarFlightPortraitRightPx(
+		TEXT("abts.UI.Flight.PortraitRightPx"), 30.0f,
+		TEXT("Right viewport margin for the bird rail [8, 100]."));
+	TAutoConsoleVariable<float> CVarFlightPortraitInsetPx(
+		TEXT("abts.UI.Flight.PortraitInsetPx"), 8.0f,
+		TEXT("Portrait image inset inside its card [3, 20]."));
+	TAutoConsoleVariable<float> CVarFlightCutPx(
+		TEXT("abts.UI.Flight.CutPx"), 11.0f,
+		TEXT("Shared cut-corner size for flight HUD panels [4, 24]."));
+
+	void DumpFlightUISettings()
+	{
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][FlightUI] PortraitCardPx=%.2f PortraitGapPx=%.2f PortraitRightPx=%.2f PortraitInsetPx=%.2f CutPx=%.2f"),
+			CVarFlightPortraitCardPx.GetValueOnGameThread(),
+			CVarFlightPortraitGapPx.GetValueOnGameThread(),
+			CVarFlightPortraitRightPx.GetValueOnGameThread(),
+			CVarFlightPortraitInsetPx.GetValueOnGameThread(),
+			CVarFlightCutPx.GetValueOnGameThread());
+	}
+
+	FAutoConsoleCommand DumpFlightUICommand(
+		TEXT("abts.UI.Flight.Dump"),
+		TEXT("Print the live flight HUD layout settings."),
+		FConsoleCommandDelegate::CreateStatic(&DumpFlightUISettings));
+}
+
+const TCHAR* AABTSM4PartyHUD::GetBirdPortraitAssetPath(const EABTSBirdId BirdId)
+{
+	switch (BirdId)
+	{
+	case EABTSBirdId::Red: return TEXT("/Game/Icons/Birds/T_Icon_Bird_Red.T_Icon_Bird_Red");
+	case EABTSBirdId::Blue: return TEXT("/Game/Icons/Birds/T_Icon_Bird_Blue.T_Icon_Bird_Blue");
+	case EABTSBirdId::Yellow: return TEXT("/Game/Icons/Birds/T_Icon_Bird_Yellow.T_Icon_Bird_Yellow");
+	case EABTSBirdId::Black: return TEXT("/Game/Icons/Birds/T_Icon_Bird_Black.T_Icon_Bird_Black");
+	default: return nullptr;
+	}
+}
+
+AABTSM4PartyHUD::AABTSM4PartyHUD()
+{
+	BirdPortraitTextures.SetNum(4);
+	for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
+	{
+		const EABTSBirdId BirdId = static_cast<EABTSBirdId>(BirdIndex);
+		const TCHAR* AssetPath = GetBirdPortraitAssetPath(BirdId);
+		if (AssetPath == nullptr) continue;
+		ConstructorHelpers::FObjectFinder<UTexture2D> PortraitFinder(AssetPath);
+		if (PortraitFinder.Succeeded()) BirdPortraitTextures[BirdIndex] = PortraitFinder.Object;
+	}
+}
+
+UTexture2D* AABTSM4PartyHUD::GetBirdPortraitTexture(const EABTSBirdId BirdId) const
+{
+	const int32 Index = static_cast<int32>(BirdId);
+	return BirdPortraitTextures.IsValidIndex(Index) ? BirdPortraitTextures[Index] : nullptr;
+}
 
 FName AABTSM4PartyHUD::MakeBirdHitBoxName(const int32 BirdIndex) const
 {
@@ -25,41 +93,67 @@ void AABTSM4PartyHUD::DrawHUD()
 	AABTSBirdParty* ResolvedParty = FindParty();
 	if (ResolvedParty == nullptr || !ResolvedParty->IsPartyReady()) return;
 
-	const AABTSBirdPartySettings* Settings = ResolvedParty->GetResolvedSettings();
-	const float Diameter = Settings ? Settings->PortraitDiameterPx : 72.0f;
-	const float Gap = Settings ? Settings->PortraitGapPx : 18.0f;
-	const float RightMargin = Settings ? Settings->RightMarginPx : 42.0f;
+	const float Diameter = FMath::Clamp(CVarFlightPortraitCardPx.GetValueOnGameThread(), 52.0f, 112.0f);
+	const float Gap = FMath::Clamp(CVarFlightPortraitGapPx.GetValueOnGameThread(), 4.0f, 28.0f);
+	const float RightMargin = FMath::Clamp(CVarFlightPortraitRightPx.GetValueOnGameThread(), 8.0f, 100.0f);
+	const float ImageInset = FMath::Clamp(CVarFlightPortraitInsetPx.GetValueOnGameThread(), 3.0f, Diameter * 0.25f);
+	const float CutPx = FMath::Clamp(CVarFlightCutPx.GetValueOnGameThread(), 4.0f, 24.0f);
 	const float TotalHeight = Diameter * 4.0f + Gap * 3.0f;
 	const float X = Canvas->ClipX - RightMargin - Diameter;
 	const float StartY = (Canvas->ClipY - TotalHeight) * 0.5f;
-	UTexture2D* FillTexture = Canvas->DefaultTexture;
 
 	for (int32 BirdIndex = 0; BirdIndex < 4; ++BirdIndex)
 	{
 		const EABTSBirdId BirdId = static_cast<EABTSBirdId>(BirdIndex);
 		const FABTSBirdPresentationConfig* Presentation = ResolvedParty->GetPresentation(BirdId);
 		if (Presentation == nullptr) continue;
-		const FVector2D Center(X + Diameter * 0.5f, StartY + BirdIndex * (Diameter + Gap) + Diameter * 0.5f);
+		const FVector2D CardOrigin(X, StartY + BirdIndex * (Diameter + Gap));
+		const FBox2D CardBox(CardOrigin, CardOrigin + FVector2D(Diameter));
 		const bool bControlled = ResolvedParty->GetControlledBirdId() == BirdId;
-		if (bControlled)
+		const FLinearColor Border = bControlled ? Theme.AccentPrimary : Theme.PanelBorder;
+		const FLinearColor Fill = bControlled ? Theme.SlotSelected : Theme.PanelSecondary;
+		FABTSCanvasUI::DrawFacetedBox(*Canvas, Theme, CardBox, Theme.SlotBorder, Border,
+			CutPx, bControlled ? Theme.BorderThicknessPx : 1.5f);
+		const FBox2D InnerBox(CardBox.Min + FVector2D(3.0f), CardBox.Max - FVector2D(3.0f));
+		FABTSCanvasUI::DrawFacetedBox(*Canvas, Theme, InnerBox, Fill, Fill,
+			FMath::Max(3.0f, CutPx - 3.0f), 1.0f);
+		const float RailX = CardBox.Min.X + 4.0f;
+		DrawLine(RailX, CardBox.Min.Y + CutPx, RailX, CardBox.Max.Y - CutPx,
+			Theme.ApplyOpacity(bControlled ? Theme.AccentPrimary : Theme.AccentSecondary),
+			bControlled ? 3.0f : 1.0f);
+		const FBox2D PortraitBox(
+			CardBox.Min + FVector2D(ImageInset),
+			CardBox.Max - FVector2D(ImageInset));
+		UTexture2D* Portrait = GetBirdPortraitTexture(BirdId);
+		if (Portrait == nullptr) Portrait = Presentation->PortraitTexture;
+		if (Portrait != nullptr)
 		{
-			Canvas->K2_DrawPolygon(FillTexture, Center, FVector2D(Diameter * 0.61f), 48, Theme.ApplyOpacity(Theme.AccentPrimary));
-		}
-		Canvas->K2_DrawPolygon(FillTexture, Center, FVector2D(Diameter * 0.53f), 48, Theme.ApplyOpacity(Theme.PortraitBacking));
-		if (Presentation->PortraitTexture)
-		{
-			Canvas->K2_DrawPolygon(Presentation->PortraitTexture, Center, FVector2D(Diameter * 0.48f), 48, FLinearColor::White);
+			FABTSCanvasUI::DrawTextureFitted(*Canvas, *Portrait, PortraitBox);
 		}
 		else
 		{
-			Canvas->K2_DrawPolygon(FillTexture, Center, FVector2D(Diameter * 0.48f), 48, Presentation->FallbackColor);
+			Canvas->K2_DrawPolygon(Canvas->DefaultTexture, CardBox.GetCenter(),
+				PortraitBox.GetSize() * 0.42f, 28, Presentation->FallbackColor);
 		}
-		AddHitBox(FVector2D(X, Center.Y - Diameter * 0.5f), FVector2D(Diameter), MakeBirdHitBoxName(BirdIndex), true, 10);
+		if (GEngine)
+		{
+			DrawText(FString::FromInt(BirdIndex + 1), Theme.ApplyOpacity(Theme.TextMuted),
+				CardBox.Max.X - 15.0f, CardBox.Min.Y + 5.0f,
+				GEngine->GetSmallFont(), 0.60f * Theme.TextScale, false);
+		}
+		AddHitBox(CardBox.Min, CardBox.GetSize(), MakeBirdHitBoxName(BirdIndex), true, 10);
 	}
 
 	if (GEngine)
 	{
-		DrawText(TEXT("TAB: Switch Bird"), Theme.ApplyOpacity(Theme.TextPrimary), X - 22.0f, StartY + TotalHeight + 20.0f, GEngine->GetSmallFont(), 0.9f * Theme.TextScale, false);
+		const FBox2D HintBox(
+			FVector2D(X, StartY + TotalHeight + 12.0f),
+			FVector2D(X + Diameter, StartY + TotalHeight + 38.0f));
+		FABTSCanvasUI::DrawFacetedBox(*Canvas, Theme, HintBox, Theme.PanelPrimary,
+			Theme.PanelBorder, 6.0f, 1.0f);
+		DrawText(TEXT("TAB  SWITCH"), Theme.ApplyOpacity(Theme.TextMuted),
+			HintBox.Min.X + 9.0f, HintBox.Min.Y + 5.0f,
+			GEngine->GetSmallFont(), 0.62f * Theme.TextScale, false);
 	}
 }
 

@@ -80,11 +80,74 @@ struct ABTSRUNTIME_API FABTSGeneratedBuildingSite
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };
 
+/**
+ * One immutable JuryDemoFixedSixV1 placement exported by M3 for exact M7
+ * Manifest resolution.
+ *
+ * This DTO deliberately carries no weakness, attack-face or profile-search
+ * data. M7 must resolve ManifestEntryId exactly and may not substitute another
+ * entry or seed when any identity check fails.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
+{
+	FName ManifestEntryId = NAME_None;
+	int32 EncounterIndex = INDEX_NONE;
+	FTransform WorldTransform = FTransform::Identity;
+	FVector2D PadHalfExtentCM = FVector2D::ZeroVector;
+	FBox LocalBounds = FBox(EForceInit::ForceInit);
+	int32 DifficultyTier = INDEX_NONE;
+	int32 DeterministicSeed = 0;
+	uint64 DescriptorHash = 0;
+
+	bool IsUsable(double Tolerance = 1.0e-3) const;
+};
+
+/**
+ * Optional, additive vNext identity for the DDL-scoped fixed-six jury map.
+ *
+ * ContractVersion == 0 and otherwise-default fields mean that an existing v1
+ * building snapshot does not publish this profile. Once any fixed-six state is
+ * present, the complete frozen identity and all six ordered sites are required.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
+{
+	static constexpr int32 CurrentContractVersion = 1;
+	static constexpr int32 ExpectedSiteCount = 6;
+	static constexpr int32 FrozenPlacementSchemaVersion = 1;
+	static constexpr int32 FrozenDemoManifestVersion = 1;
+	static constexpr uint64 FrozenDemoManifestHash = 2324068295ull;
+	static constexpr uint64 FrozenPlacementCatalogHash =
+		13889440156022460967ull;
+	static constexpr int32 FrozenWorldSeed = 312503;
+	static constexpr int32 FrozenCandidateId = 4;
+	static constexpr uint64 FrozenLayoutHash = 0x8AB8D7E4F094072Dull;
+
+	/** Zero means this additive snapshot is absent. */
+	int32 ContractVersion = 0;
+	int32 PlacementSchemaVersion = 0;
+	int32 DemoManifestVersion = 0;
+	uint64 DemoManifestHash = 0;
+	uint64 PlacementCatalogHash = 0;
+	int32 WorldSeed = 0;
+	int32 CandidateId = INDEX_NONE;
+	uint64 LayoutHash = 0;
+	TArray<FABTSJuryDemoFixedSixBuildingSite> Sites;
+
+	bool IsEmpty() const;
+	bool IsUsable(double Tolerance = 1.0e-3) const;
+};
+
 /** Complete read-only input consumed by the M7 building-generation boundary. */
 struct ABTSRUNTIME_API FABTSBuildingGenerationContract
 {
 	FABTSGeneratedWorldIdentity Identity;
 	TArray<FABTSGeneratedBuildingSite> Sites;
+
+	/**
+	 * Additive exact-placement profile. Existing generic consumers may ignore an
+	 * empty value; fixed-six consumers must require IsUsable().
+	 */
+	FABTSJuryDemoFixedSixContract JuryDemoFixedSix;
 
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };

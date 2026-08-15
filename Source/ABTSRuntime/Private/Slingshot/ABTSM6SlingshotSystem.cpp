@@ -13,6 +13,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
@@ -22,12 +23,32 @@
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TestStage/ABTSM71TestStageActors.h"
+#include "UI/ABTSUITheme.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "World/ABTSM9Satellite.h"
 
 namespace
 {
+	// DrawDebugPoint depth priority 0 maps to the world depth group. Every visual
+	// layer of the prediction must share it so occlusion remains spatially honest.
+	constexpr uint8 FlightTrajectoryWorldDepthPriority = 0;
+	static_assert(FlightTrajectoryWorldDepthPriority == 0,
+		"World trajectory layers must remain world-depth tested.");
+
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryCoreScale(
+		TEXT("abts.UI.Flight.WorldTrajectory.CoreScale"), 0.62f,
+		TEXT("World trajectory cyan core scale relative to M6 point size [0.25, 1]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryUnderlayScale(
+		TEXT("abts.UI.Flight.WorldTrajectory.UnderlayScale"), 1.24f,
+		TEXT("World trajectory dark underlay scale relative to M6 point size [1, 2]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryEndpointScale(
+		TEXT("abts.UI.Flight.WorldTrajectory.EndpointScale"), 1.35f,
+		TEXT("Predicted endpoint scale relative to M6 point size [1, 2.5]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryForegroundDepthBiasCM(
+		TEXT("abts.UI.Flight.WorldTrajectory.ForegroundDepthBiasCM"), 0.5f,
+		TEXT("Camera-facing world-space bias for the cyan/amber foreground point [0.05, 3] cm."));
+
 	/** Keeps pouch local +Y on the stable stake-to-stake side while local +Z follows launch. */
 	FQuat MakePulledPouchRotation(const FVector& LaunchDirection, const FVector& PreferredRight)
 	{
@@ -570,15 +591,44 @@ FVector AABTSM6SlingshotSystem::GetBirdInPouchLocation(const FQuat& PouchRotatio
 void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !bCurrentTrajectoryPreviewValid) return;
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
+	const float UnderlaySize = TrajectoryPointSize * FMath::Clamp(
+		CVarFlightWorldTrajectoryUnderlayScale.GetValueOnGameThread(), 1.0f, 2.0f);
+	const float CoreSize = TrajectoryPointSize * FMath::Clamp(
+		CVarFlightWorldTrajectoryCoreScale.GetValueOnGameThread(), 0.25f, 1.0f);
+	const float EndpointSize = TrajectoryPointSize * FMath::Clamp(
+		CVarFlightWorldTrajectoryEndpointScale.GetValueOnGameThread(), 1.0f, 2.5f);
+	const float ForegroundDepthBiasCM = FMath::Clamp(
+		CVarFlightWorldTrajectoryForegroundDepthBiasCM.GetValueOnGameThread(), 0.05f, 3.0f);
+	const FColor UnderlayColor = Theme.SlotBorder.ToFColorSRGB();
+	const FColor CoreColor = Theme.AccentSecondary.ToFColorSRGB();
+	const FColor EndpointColor = Theme.AccentPrimary.ToFColorSRGB();
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	const APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+	const bool bHasPlayerView = PlayerController != nullptr;
+	if (bHasPlayerView)
+	{
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
 	const int32 VisiblePointCount = FMath::Min(
 		FMath::Clamp(TrajectorySampleCount, 8, 128),
 		CurrentTrajectoryPreview.WorldPoints.Num());
+	const int32 LastVisibleIndex = FMath::Max(0, (VisiblePointCount - 1) & ~1);
 	for (int32 Index = 0; Index < VisiblePointCount; ++Index)
 	{
 		if ((Index & 1) == 0)
 		{
-			DrawDebugPoint(GetWorld(), CurrentTrajectoryPreview.WorldPoints[Index],
-				TrajectoryPointSize, FColor(176, 224, 255), false, 0.0f, 0);
+			const FVector& Point = CurrentTrajectoryPreview.WorldPoints[Index];
+			const FVector ForegroundPoint = bHasPlayerView
+				? Point + (ViewLocation - Point).GetSafeNormal() * ForegroundDepthBiasCM
+				: Point;
+			DrawDebugPoint(GetWorld(), Point, UnderlaySize, UnderlayColor, false, 0.0f,
+				FlightTrajectoryWorldDepthPriority);
+			DrawDebugPoint(GetWorld(), ForegroundPoint,
+				Index == LastVisibleIndex ? EndpointSize : CoreSize,
+				Index == LastVisibleIndex ? EndpointColor : CoreColor,
+				false, 0.0f, FlightTrajectoryWorldDepthPriority);
 		}
 	}
 }

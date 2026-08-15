@@ -6,12 +6,15 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Slingshot/ABTSM6Types.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "UI/ABTSUITheme.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSM9Satellite.h"
 
@@ -20,6 +23,25 @@ namespace
 	constexpr float BasicShapeSphereDiameterCM = 100.0f;
 	constexpr int32 LandingPreviewHistoryWarmupCaptureCount = 2;
 	constexpr float LandingPreviewCameraCutRotationDegrees = 15.0f;
+	TAutoConsoleVariable<float> CVarFlightPIPTrajectoryPointScale(
+		TEXT("abts.UI.Flight.PIP.TrajectoryPointScale"), 1.0f,
+		TEXT("Scale multiplier for cyan trajectory points inside the landing PIP [0.4, 2]."));
+	TAutoConsoleVariable<float> CVarFlightPIPEndpointScale(
+		TEXT("abts.UI.Flight.PIP.EndpointScale"), 1.45f,
+		TEXT("Terminal marker scale relative to PIP trajectory points [1, 3]."));
+
+	void DumpFlightPIPSettings()
+	{
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][FlightUI][PIP] TrajectoryPointScale=%.3f EndpointScale=%.3f"),
+			CVarFlightPIPTrajectoryPointScale.GetValueOnGameThread(),
+			CVarFlightPIPEndpointScale.GetValueOnGameThread());
+	}
+
+	FAutoConsoleCommand DumpFlightPIPCommand(
+		TEXT("abts.UI.Flight.PIP.Dump"),
+		TEXT("Print live SceneCapture trajectory marker settings."),
+		FConsoleCommandDelegate::CreateStatic(&DumpFlightPIPSettings));
 
 	FVector ResolveStableScreenUp(const FVector& LandingUp, const FVector& Look)
 	{
@@ -66,11 +88,27 @@ AABTSM101LandingPreviewCamera::AABTSM101LandingPreviewCamera()
 	// instances are the inactive state; the SceneCapture-only flag hides it
 	// from the player camera.
 	TrajectoryPointInstances->SetCastShadow(false);
+	TrajectoryEndpoint = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LandingTrajectoryEndpoint"));
+	TrajectoryEndpoint->SetupAttachment(Root);
+	TrajectoryEndpoint->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TrajectoryEndpoint->SetGenerateOverlapEvents(false);
+	TrajectoryEndpoint->SetCanEverAffectNavigation(false);
+	TrajectoryEndpoint->SetVisibleInSceneCaptureOnly(true);
+	TrajectoryEndpoint->SetCastShadow(false);
+	TrajectoryEndpoint->SetVisibility(false, true);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereMesh.Succeeded()) TrajectoryPointInstances->SetStaticMesh(SphereMesh.Object);
+	if (SphereMesh.Succeeded())
+	{
+		TrajectoryPointInstances->SetStaticMesh(SphereMesh.Object);
+		TrajectoryEndpoint->SetStaticMesh(SphereMesh.Object);
+	}
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicShapeMaterial(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (BasicShapeMaterial.Succeeded()) TrajectoryPointInstances->SetMaterial(0, BasicShapeMaterial.Object);
+	if (BasicShapeMaterial.Succeeded())
+	{
+		TrajectoryPointInstances->SetMaterial(0, BasicShapeMaterial.Object);
+		TrajectoryEndpoint->SetMaterial(0, BasicShapeMaterial.Object);
+	}
 }
 
 void AABTSM101LandingPreviewCamera::Configure(const FABTSM10ScoutMapSettings& InSettings)
@@ -195,6 +233,7 @@ void AABTSM101LandingPreviewCamera::DeactivatePreview()
 	{
 		TrajectoryPointInstances->ClearInstances();
 	}
+	if (TrajectoryEndpoint) TrajectoryEndpoint->SetVisibility(false, true);
 	if (SceneCapture)
 	{
 		SceneCapture->TextureTarget = RenderTarget;
@@ -339,8 +378,15 @@ void AABTSM101LandingPreviewCamera::EnsureRenderTarget()
 		SceneCapture->FOVAngle = FMath::Clamp(Settings.LandingViewFieldOfViewDegrees, 10.0f, 120.0f);
 		if (TrajectoryMaterial)
 		{
-			TrajectoryMaterial->SetVectorParameterValue(TEXT("Color"), Settings.LandingViewTrajectoryColor);
-			TrajectoryMaterial->SetVectorParameterValue(TEXT("BaseColor"), Settings.LandingViewTrajectoryColor);
+			const FLinearColor TrajectoryColor = FABTSUITheme::Get().AccentSecondary;
+			TrajectoryMaterial->SetVectorParameterValue(TEXT("Color"), TrajectoryColor);
+			TrajectoryMaterial->SetVectorParameterValue(TEXT("BaseColor"), TrajectoryColor);
+		}
+		if (TrajectoryEndpointMaterial)
+		{
+			const FLinearColor EndpointColor = FABTSUITheme::Get().AccentPrimary;
+			TrajectoryEndpointMaterial->SetVectorParameterValue(TEXT("Color"), EndpointColor);
+			TrajectoryEndpointMaterial->SetVectorParameterValue(TEXT("BaseColor"), EndpointColor);
 		}
 		return;
 	}
@@ -379,10 +425,25 @@ void AABTSM101LandingPreviewCamera::EnsureRenderTarget()
 			TrajectoryPointInstances->SetMaterial(0, TrajectoryMaterial);
 		}
 	}
+	if (TrajectoryEndpoint && !TrajectoryEndpointMaterial)
+	{
+		TrajectoryEndpointMaterial = UMaterialInstanceDynamic::Create(
+			TrajectoryEndpoint->GetMaterial(0), this);
+		if (TrajectoryEndpointMaterial)
+		{
+			TrajectoryEndpoint->SetMaterial(0, TrajectoryEndpointMaterial);
+		}
+	}
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
 	if (TrajectoryMaterial)
 	{
-		TrajectoryMaterial->SetVectorParameterValue(TEXT("Color"), Settings.LandingViewTrajectoryColor);
-		TrajectoryMaterial->SetVectorParameterValue(TEXT("BaseColor"), Settings.LandingViewTrajectoryColor);
+		TrajectoryMaterial->SetVectorParameterValue(TEXT("Color"), Theme.AccentSecondary);
+		TrajectoryMaterial->SetVectorParameterValue(TEXT("BaseColor"), Theme.AccentSecondary);
+	}
+	if (TrajectoryEndpointMaterial)
+	{
+		TrajectoryEndpointMaterial->SetVectorParameterValue(TEXT("Color"), Theme.AccentPrimary);
+		TrajectoryEndpointMaterial->SetVectorParameterValue(TEXT("BaseColor"), Theme.AccentPrimary);
 	}
 }
 
@@ -473,6 +534,7 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 		SceneCapture->ShowOnlyActorComponents(&E5Target);
 	}
 	SceneCapture->ShowOnlyComponent(TrajectoryPointInstances);
+	SceneCapture->ShowOnlyComponent(TrajectoryEndpoint);
 	const FQuat CaptureRotation =
 		FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
 	const FTransform CaptureTransform(CaptureRotation, CameraLocation);
@@ -580,7 +642,8 @@ void AABTSM101LandingPreviewCamera::RebuildTrajectoryPoints(const FABTSM6Traject
 	const int32 MaximumPointCount = FMath::Clamp(Settings.LandingViewTrajectoryPointCount, 8, 128);
 	const int32 FirstIndex = FMath::Max(0, Preview.WorldPoints.Num() - MaximumPointCount * Stride);
 	const float Scale = FMath::Clamp(Settings.LandingViewTrajectoryPointSizeCM, 1.0f, 100.0f)
-		/ BasicShapeSphereDiameterCM;
+		/ BasicShapeSphereDiameterCM
+		* FMath::Clamp(CVarFlightPIPTrajectoryPointScale.GetValueOnGameThread(), 0.4f, 2.0f);
 	TArray<FTransform> Instances;
 	Instances.Reserve(MaximumPointCount + 1);
 	for (int32 Index = FirstIndex; Index < Preview.WorldPoints.Num(); Index += Stride)
@@ -593,6 +656,7 @@ void AABTSM101LandingPreviewCamera::RebuildTrajectoryPoints(const FABTSM6Traject
 		Instances.Emplace(FQuat::Identity, Preview.PrimarySurfaceLandingWorld, FVector(Scale));
 	}
 	TrajectoryPointInstances->AddInstances(Instances, false, true, false);
+	UpdateTrajectoryEndpoint(Preview.PrimarySurfaceLandingWorld, Scale);
 }
 
 void AABTSM101LandingPreviewCamera::RebuildTrajectoryPointsAround(
@@ -639,7 +703,8 @@ void AABTSM101LandingPreviewCamera::RebuildTrajectoryPointsAround(
 			Settings.LandingViewTrajectoryPointSizeCM,
 			1.0f,
 			100.0f)
-		/ BasicShapeSphereDiameterCM;
+		/ BasicShapeSphereDiameterCM
+		* FMath::Clamp(CVarFlightPIPTrajectoryPointScale.GetValueOnGameThread(), 0.4f, 2.0f);
 	TArray<FTransform> Instances;
 	Instances.Reserve(MaximumPointCount + 2);
 	for (int32 Index = FirstIndex;
@@ -666,4 +731,21 @@ void AABTSM101LandingPreviewCamera::RebuildTrajectoryPointsAround(
 		false,
 		true,
 		false);
+	const FVector Endpoint = !Preview.TerminalWorldLocation.ContainsNaN()
+		? Preview.TerminalWorldLocation
+		: Preview.WorldPoints[LastIndex];
+	UpdateTrajectoryEndpoint(Endpoint, Scale);
+}
+
+void AABTSM101LandingPreviewCamera::UpdateTrajectoryEndpoint(
+	const FVector& WorldLocation,
+	const float BaseScale)
+{
+	if (TrajectoryEndpoint == nullptr || WorldLocation.ContainsNaN()) return;
+	TrajectoryEndpoint->SetWorldTransform(FTransform(
+		FQuat::Identity,
+		WorldLocation,
+		FVector(FMath::Max(BaseScale * FMath::Clamp(
+			CVarFlightPIPEndpointScale.GetValueOnGameThread(), 1.0f, 3.0f), 0.01f))));
+	TrajectoryEndpoint->SetVisibility(true, true);
 }

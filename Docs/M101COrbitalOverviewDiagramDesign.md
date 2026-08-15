@@ -48,9 +48,9 @@ M10.1-C 在强化弹弓拉弓时提供一张圆形二维轨道全景图，让玩
 布局规则：
 
 - 左边缘与青翎侦察圆使用相同 `TopLeftMarginPx`；
-- 顶边为 `TopLeftMarginPx + MapDiameterPx + OrbitalDiagramScoutMapGapPx`；
+- 顶边按小地图完整面板底边（含状态标题轨）再加 `OrbitalDiagramScoutMapGapPx` 计算，两个截角面板不会相互覆盖；
 - 默认直径 `250 px`；
-- 视口不足时缩小圆图，底部至少为物品栏预留 `OrbitalDiagramBottomReservedPx`；
+- 视口不足时优先响应式缩小小地图、保留轨迹全览请求直径，两个完整面板底部共同为物品栏预留 `OrbitalDiagramBottomReservedPx`；
 - 视口无法容纳最小直径时不绘制，不能越界或覆盖弹弓操作区；
 - 所有图元都裁剪在圆形内容边界内。
 

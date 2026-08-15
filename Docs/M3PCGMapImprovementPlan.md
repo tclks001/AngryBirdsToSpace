@@ -1,5 +1,6 @@
 # M3R PCG 地图生成改进方案
 
+> 2026-08-15 DDL 路线：本次交付切换为 `JuryDemoFixedSixV1`。M7 Stage 4.5 已冻结六条静态放置描述；M3 固定 Seed `312503` / Candidate `4` 并只验证 E1–E6 的 Transform、真实 Pad、道路/水体避让与 Layout Hash。Weakness、AttackFace、Prior-tier Infeasibility、全 Ballistic Witness、M7 全种子可行性及旧 R7 的 1000/20/3 Seed 门均延后，不阻塞本次评审路径。详见 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md)。
 > 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层、R-5.1 卫星/E5 候选预览及 R-5.2 道路末端终局锚点提案已达到 M3LocalAccepted（IntegrationPending）
 > 日期：2026-08-02
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
@@ -1442,6 +1443,11 @@ F7 在显式精确 Candidate 预览下增加洋红净空 Cell、白色锚点、�
 - 联合验收必须证明普通槽 Actor 不进入 `ClearanceCellIds`、太空槽恰有一对、位于道路末端真实地表、局部帧与 M11 预冻结布局使用同一 Hash 身份，并在可见 PIE 中完成道路末端位置/朝向抽查；
 - 实体消费和共享接缝已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与可见 PIE，详见 [M3R-5.2 → M5.1 → M11 Preview/Test 集成](M3R52M11PreviewFinaleIntegrationDesign.md)，当前为 **IntegrationAccepted**；测试预览仍不得确认为月度正式布局。
 
+### 14.8.1 DDL JuryDemoFixedSixV1（当前发布路线）
+
+当前发布路线以 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md) 为准。M3 使用 M7 Stage 4.5 的六条 PlacementReady 描述冻结单一展示布局；下方原 M3R-6 通用 Profile/Witness 集成与 M3R-7 全量认证保留为长期设计历史，不再构成本次 DDL 门槛。
+
+代码入口为 `FABTSM3JuryFixedSixLayoutBuilder`。它不修改稳定契约；Integration 仍需提供向后兼容的 fixed-six DTO/Adapter，M7 仍需独立完成逐栋 ChaosReady 和最终联合 PIE。
 ### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
 
 **实现目标**

@@ -411,7 +411,7 @@ M10.1-C 实现的是“整条轨迹最佳拟合平面上的正交投影图”，
 | `OrbitalDiagramPathLengthHysteresisCM` | `800 cm` | 已显示后的路径长度隐藏滞回 |
 | `OrbitalDiagramViewportInsetRatio` | `0.06` | 主视图安全框；落点离开或被主星遮挡时兜底显示 |
 | `OrbitalDiagramDiameterPx` | `250 px` | 青翎侦察圆下方圆形轨道图请求直径 |
-| `OrbitalDiagramScoutMapGapPx` | `32 px` | 轨道图与侦察圆之间的垂直间距 |
+| `OrbitalDiagramScoutMapGapPx` | `32 px` | 轨道图与侦察圆完整面板外框之间的垂直间距 |
 | `OrbitalDiagramBottomReservedPx` | `116 px` | 为底部物品 HUD 与提示文字保留的高度 |
 | `OrbitalDiagramContentPaddingPx` | `14 px` | 完整轨迹凸包与圆形边框之间的安全边距 |
 | `OrbitalDiagramLatitude/LongitudeStepDegrees` | `30° / 30°` | 主星绝对经纬网密度；卫星不使用 |
