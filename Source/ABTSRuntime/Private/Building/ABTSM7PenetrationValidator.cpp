@@ -6,6 +6,7 @@
 #include "Building/ABTSM7BuildingModule.h"
 #include "CollisionQueryParams.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 
 namespace
@@ -83,21 +84,137 @@ namespace
 			*BoundsOverlap.ToString());
 	}
 
-	bool HasPositiveBoundsOverlap(
+	struct FOrientedBounds
+	{
+		FVector Center = FVector::ZeroVector;
+		FVector Axis[3] = {
+			FVector::ForwardVector,
+			FVector::RightVector,
+			FVector::UpVector};
+		FVector Extent = FVector::ZeroVector;
+	};
+
+	bool TryMakeOrientedBounds(
+		const UPrimitiveComponent& Component,
+		FOrientedBounds& OutBounds)
+	{
+		const UStaticMeshComponent* StaticMesh =
+			Cast<UStaticMeshComponent>(&Component);
+		if (StaticMesh == nullptr || StaticMesh->GetStaticMesh() == nullptr)
+		{
+			return false;
+		}
+		FVector LocalMin;
+		FVector LocalMax;
+		StaticMesh->GetLocalBounds(LocalMin, LocalMax);
+		const FTransform& Transform = StaticMesh->GetComponentTransform();
+		OutBounds.Center = Transform.TransformPosition(
+			(LocalMin + LocalMax) * 0.5);
+		OutBounds.Axis[0] = Transform.GetUnitAxis(EAxis::X);
+		OutBounds.Axis[1] = Transform.GetUnitAxis(EAxis::Y);
+		OutBounds.Axis[2] = Transform.GetUnitAxis(EAxis::Z);
+		OutBounds.Extent = (LocalMax - LocalMin) * 0.5
+			* Transform.GetScale3D().GetAbs();
+		return !OutBounds.Extent.IsNearlyZero();
+	}
+
+	bool HasPositiveOrientedBoundsOverlap(
 		const UPrimitiveComponent& A,
 		const UPrimitiveComponent& B)
 	{
-		const FBox ABounds = A.Bounds.GetBox();
-		const FBox BBounds = B.Bounds.GetBox();
-		return FMath::Min(ABounds.Max.X, BBounds.Max.X)
-				- FMath::Max(ABounds.Min.X, BBounds.Min.X)
-				> UE_KINDA_SMALL_NUMBER
-			&& FMath::Min(ABounds.Max.Y, BBounds.Max.Y)
-				- FMath::Max(ABounds.Min.Y, BBounds.Min.Y)
-				> UE_KINDA_SMALL_NUMBER
-			&& FMath::Min(ABounds.Max.Z, BBounds.Max.Z)
-				- FMath::Max(ABounds.Min.Z, BBounds.Min.Z)
-				> UE_KINDA_SMALL_NUMBER;
+		FOrientedBounds BoxA;
+		FOrientedBounds BoxB;
+		if (!TryMakeOrientedBounds(A, BoxA)
+			|| !TryMakeOrientedBounds(B, BoxB))
+		{
+			const FBox ABounds = A.Bounds.GetBox();
+			const FBox BBounds = B.Bounds.GetBox();
+			return ABounds.Intersect(BBounds);
+		}
+
+		constexpr double ContactSlopCM = 0.01;
+		constexpr double ParallelEpsilon = 1.0e-8;
+		double Rotation[3][3];
+		double AbsoluteRotation[3][3];
+		for (int32 AIndex = 0; AIndex < 3; ++AIndex)
+		{
+			for (int32 BIndex = 0; BIndex < 3; ++BIndex)
+			{
+				Rotation[AIndex][BIndex] = FVector::DotProduct(
+					BoxA.Axis[AIndex], BoxB.Axis[BIndex]);
+				AbsoluteRotation[AIndex][BIndex] =
+					FMath::Abs(Rotation[AIndex][BIndex]);
+			}
+		}
+		const FVector CenterDelta = BoxB.Center - BoxA.Center;
+		const double Translation[3] = {
+			FVector::DotProduct(CenterDelta, BoxA.Axis[0]),
+			FVector::DotProduct(CenterDelta, BoxA.Axis[1]),
+			FVector::DotProduct(CenterDelta, BoxA.Axis[2])};
+		const double AExtent[3] = {BoxA.Extent.X, BoxA.Extent.Y, BoxA.Extent.Z};
+		const double BExtent[3] = {BoxB.Extent.X, BoxB.Extent.Y, BoxB.Extent.Z};
+
+		for (int32 AIndex = 0; AIndex < 3; ++AIndex)
+		{
+			double BRadius = 0.0;
+			for (int32 BIndex = 0; BIndex < 3; ++BIndex)
+			{
+				BRadius += BExtent[BIndex]
+					* AbsoluteRotation[AIndex][BIndex];
+			}
+			if (AExtent[AIndex] + BRadius
+					- FMath::Abs(Translation[AIndex]) <= ContactSlopCM)
+			{
+				return false;
+			}
+		}
+		for (int32 BIndex = 0; BIndex < 3; ++BIndex)
+		{
+			double ARadius = 0.0;
+			double ProjectedTranslation = 0.0;
+			for (int32 AIndex = 0; AIndex < 3; ++AIndex)
+			{
+				ARadius += AExtent[AIndex]
+					* AbsoluteRotation[AIndex][BIndex];
+				ProjectedTranslation += Translation[AIndex]
+					* Rotation[AIndex][BIndex];
+			}
+			if (ARadius + BExtent[BIndex]
+					- FMath::Abs(ProjectedTranslation) <= ContactSlopCM)
+			{
+				return false;
+			}
+		}
+		for (int32 AIndex = 0; AIndex < 3; ++AIndex)
+		{
+			const int32 ANext = (AIndex + 1) % 3;
+			const int32 ALast = (AIndex + 2) % 3;
+			for (int32 BIndex = 0; BIndex < 3; ++BIndex)
+			{
+				if (FVector::CrossProduct(
+					BoxA.Axis[AIndex], BoxB.Axis[BIndex]).SizeSquared()
+					<= ParallelEpsilon)
+				{
+					continue;
+				}
+				const int32 BNext = (BIndex + 1) % 3;
+				const int32 BLast = (BIndex + 2) % 3;
+				const double ARadius =
+					AExtent[ANext] * AbsoluteRotation[ALast][BIndex]
+					+ AExtent[ALast] * AbsoluteRotation[ANext][BIndex];
+				const double BRadius =
+					BExtent[BNext] * AbsoluteRotation[AIndex][BLast]
+					+ BExtent[BLast] * AbsoluteRotation[AIndex][BNext];
+				const double ProjectedTranslation = FMath::Abs(
+					Translation[ALast] * Rotation[ANext][BIndex]
+					- Translation[ANext] * Rotation[ALast][BIndex]);
+				if (ARadius + BRadius - ProjectedTranslation <= ContactSlopCM)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 }
 
@@ -135,7 +252,7 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 				{
 					continue;
 				}
-				if (!HasPositiveBoundsOverlap(*Component, *OtherComponent))
+				if (!HasPositiveOrientedBoundsOverlap(*Component, *OtherComponent))
 				{
 					continue;
 				}
@@ -204,7 +321,7 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 			{
 				continue;
 			}
-			if (!HasPositiveBoundsOverlap(*Component, *OtherComponent))
+			if (!HasPositiveOrientedBoundsOverlap(*Component, *OtherComponent))
 			{
 				continue;
 			}

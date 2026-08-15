@@ -61,6 +61,8 @@ public:
 	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
 	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
+	uint32 GetLastLaunchChaosBodyProfileHash() const { return LastLaunchChaosBodyProfileHash; }
+	uint32 GetLastLaunchChaosWorldProfileHash() const { return LastLaunchChaosWorldProfileHash; }
 	/** Extends the damage grace on all currently dynamic modules without changing their gravity or launch configuration. */
 	void SetDynamicContactDamageGraceSeconds(float Seconds);
 	void FreezeDynamicModules();
@@ -168,6 +170,8 @@ private:
 	bool bLaunchPhysicsPlanar = false;
 	FVector LaunchGravityReference = FVector::ZeroVector;
 	float LaunchGravityAccelerationCMPerSec2 = 980.0f;
+	uint32 LastLaunchChaosBodyProfileHash = 0;
+	uint32 LastLaunchChaosWorldProfileHash = 0;
 	float LastPhysicsActivityTimeSeconds = -BIG_NUMBER;
 	bool bSpawnTestSetAtStart = false;
 	FTransform TestSetTransform = FTransform::Identity;

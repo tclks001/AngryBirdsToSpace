@@ -370,6 +370,12 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 	bLaunchPhysicsPlanar = bPlanar;
 	LaunchGravityReference = GravityReference;
 	LaunchGravityAccelerationCMPerSec2 = FMath::Max(0.0f, GravityAcceleration);
+	const FABTSM7ChaosBodyProfile BodyProfile =
+		FABTSM7ChaosBodyProfile::Production();
+	const FABTSM7ChaosWorldProfile WorldProfile =
+		FABTSM7ChaosWorldProfile::CaptureProduction();
+	LastLaunchChaosBodyProfileHash = BodyProfile.ComputeCrc32();
+	LastLaunchChaosWorldProfileHash = WorldProfile.ComputeCrc32();
 	if (ContactDamageGraceSeconds >= 0.0f)
 	{
 		LaunchContactDamageGraceSeconds = ContactDamageGraceSeconds;
@@ -407,12 +413,19 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 		if (IsValid(Module) && !Module->IsDynamic()) ActivateModuleForLaunch(*Module);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d Gravity=%.1f ContactGrace=%.3f PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
+		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d GravityModel=%s GravityReference=%s Gravity=%.1f ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
 		bLaunchPhysicsPlanar ? 1 : 0,
 		PromotedCount,
 		PendingModules.Num(),
+		bLaunchPhysicsPlanar
+			? TEXT("PlanarConstantAcceleration")
+			: TEXT("RadialConstantAcceleration"),
+		*LaunchGravityReference.ToString(),
 		LaunchGravityAccelerationCMPerSec2,
 		LaunchContactDamageGraceSeconds,
+		LastLaunchChaosBodyProfileHash,
+		LastLaunchChaosWorldProfileHash,
+		*WorldProfile.ToLogString(),
 		Validation.DetectedPairCount,
 		Validation.RepairCount,
 		Validation.LargeErrorPairCount,

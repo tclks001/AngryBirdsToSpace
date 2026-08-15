@@ -11,6 +11,46 @@ class AABTSM7BuildingMaterialSystem;
 class UPhysicalMaterial;
 class UStaticMeshComponent;
 
+/**
+ * The per-body Chaos identity shared by production modules and M7 stability
+ * fixtures. Keep experiment-only tuning out of this profile: changing it
+ * changes live building physics as well as the research candidate hash.
+ */
+struct ABTSRUNTIME_API FABTSM7ChaosBodyProfile final
+{
+	static constexpr int32 SchemaVersion = 1;
+
+	int32 PositionSolverIterations = 80;
+	int32 VelocitySolverIterations = 20;
+	float LinearDamping = 2.0f;
+	float AngularDamping = 4.0f;
+
+	static FABTSM7ChaosBodyProfile Production();
+	bool IsUsable() const;
+	uint32 ComputeCrc32() const;
+	void ApplyTo(UStaticMeshComponent& Component) const;
+};
+
+/** Read-only snapshot of the project/world Chaos stepping identity. */
+struct ABTSRUNTIME_API FABTSM7ChaosWorldProfile final
+{
+	static constexpr int32 SchemaVersion = 1;
+
+	bool bSubstepping = false;
+	bool bSubsteppingAsync = false;
+	bool bTickPhysicsAsync = false;
+	float MaxPhysicsDeltaSeconds = 0.0f;
+	float MaxSubstepDeltaSeconds = 0.0f;
+	int32 MaximumSubsteps = 1;
+	float AsyncFixedDeltaSeconds = 0.0f;
+	int32 PositionFrictionIterations = 0;
+	int32 PositionShockPropagationIterations = 0;
+
+	static FABTSM7ChaosWorldProfile CaptureProduction();
+	uint32 ComputeCrc32() const;
+	FString ToLogString() const;
+};
+
 /** Parameterized non-HISM M7 module and promoted brick body. */
 UCLASS(BlueprintType)
 class ABTSRUNTIME_API AABTSM7BuildingModule : public AActor
