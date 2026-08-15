@@ -10,6 +10,40 @@
 
 namespace ABTSM73BeamStage5Tests
 {
+	constexpr double StaticSealToleranceCM = 1.0e-3;
+
+	bool ContainsBox(
+		const FBox& Outer,
+		const FBox& Inner,
+		const double Tolerance = StaticSealToleranceCM)
+	{
+		return Outer.IsValid && Inner.IsValid
+			&& Inner.Min.X >= Outer.Min.X - Tolerance
+			&& Inner.Min.Y >= Outer.Min.Y - Tolerance
+			&& Inner.Min.Z >= Outer.Min.Z - Tolerance
+			&& Inner.Max.X <= Outer.Max.X + Tolerance
+			&& Inner.Max.Y <= Outer.Max.Y + Tolerance
+			&& Inner.Max.Z <= Outer.Max.Z + Tolerance;
+	}
+
+	void AppendBox(FBox& Aggregate, const FBox& Box)
+	{
+		if (Box.IsValid)
+		{
+			Aggregate += Box.Min;
+			Aggregate += Box.Max;
+		}
+	}
+
+	FVector2D RequiredHalfExtentXY(const FBox& Bounds)
+	{
+		return Bounds.IsValid
+			? FVector2D(
+				FMath::Max(FMath::Abs(Bounds.Min.X), FMath::Abs(Bounds.Max.X)),
+				FMath::Max(FMath::Abs(Bounds.Min.Y), FMath::Abs(Bounds.Max.Y)))
+			: FVector2D::ZeroVector;
+	}
+
 	bool ValidateEntry(
 		FAutomationTestBase& Test,
 		const FABTSM73BeamDemoManifestEntry& Entry)
@@ -109,6 +143,110 @@ namespace ABTSM73BeamStage5Tests
 			Result.ProductionIdentityHash));
 		return true;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamJ4StaticSealBoundsAndPadTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.J4StaticSeal.BoundsAndPad",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamJ4StaticSealBoundsAndPadTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamStage5Tests;
+	bool bAllPassed = true;
+	int32 DynamicEnvelopeRequiredCount = 0;
+	for (const FABTSM73BeamDemoManifestEntry& Entry
+		: FABTSM73BeamDemoManifest::GetEntries())
+	{
+		FABTSM73BeamStage45PlacementDescriptor Frozen;
+		FABTSM73BeamD1Stage55Result Result;
+		FString Error;
+		if (!FABTSM73BeamStage45PlacementFreeze::ResolveFrozen(
+				Entry.Id, Frozen, Error))
+		{
+			AddError(FString::Printf(TEXT("%s frozen descriptor: %s"),
+				*Entry.StableId.ToString(), *Error));
+			bAllPassed = false;
+			continue;
+		}
+		if (!FABTSM73BeamD1BrickCompiler().GenerateStage55DeviceAssembly(
+				Entry.Settings, Result, Error))
+		{
+			AddError(FString::Printf(TEXT("%s Stage 5.5: %s"),
+				*Entry.StableId.ToString(), *Error));
+			bAllPassed = false;
+			continue;
+		}
+
+		FBox PhysicalBounds(EForceInit::ForceInit);
+		for (const FABTSM73BeamD1BrickBinding& Brick : Result.Stage5.Bricks)
+		{
+			AppendBox(PhysicalBounds, Brick.LocalBounds);
+		}
+		FBox EffectBounds(EForceInit::ForceInit);
+		for (const FABTSM73BeamD1DeviceBinding& Device : Result.Devices)
+		{
+			AppendBox(PhysicalBounds, Device.LocalBounds);
+			AppendBox(EffectBounds, Device.EffectCorridorLocalBounds);
+			bAllPassed = TestTrue(
+				*FString::Printf(TEXT("%s effect corridor contains its device"),
+					*Entry.StableId.ToString()),
+				ContainsBox(Device.EffectCorridorLocalBounds, Device.LocalBounds))
+				&& bAllPassed;
+		}
+
+		const FVector2D PhysicalHalfExtent = RequiredHalfExtentXY(PhysicalBounds);
+		const FVector2D EffectHalfExtent = RequiredHalfExtentXY(EffectBounds);
+		const FVector2D PadMargin = Frozen.RequiredPadHalfExtentCM
+			- PhysicalHalfExtent;
+		const FVector2D EffectPadMargin = Frozen.RequiredPadHalfExtentCM
+			- EffectHalfExtent;
+		const bool bPhysicalInsideFrozenBounds =
+			ContainsBox(Frozen.LocalBounds, PhysicalBounds);
+		const bool bRetainsStaticSafetyMargin =
+			PadMargin.X + StaticSealToleranceCM
+				>= FABTSM73BeamStage45PlacementFreeze::PadSafetyMarginCM
+			&& PadMargin.Y + StaticSealToleranceCM
+				>= FABTSM73BeamStage45PlacementFreeze::PadSafetyMarginCM;
+		const bool bEffectInsidePad = EffectBounds.IsValid
+			&& EffectPadMargin.X >= -StaticSealToleranceCM
+			&& EffectPadMargin.Y >= -StaticSealToleranceCM;
+
+		bAllPassed = TestTrue(
+			*FString::Printf(TEXT("%s physical Stage 5/5.5 bounds stay inside frozen LocalBounds"),
+				*Entry.StableId.ToString()),
+			bPhysicalInsideFrozenBounds) && bAllPassed;
+		bAllPassed = TestTrue(
+			*FString::Printf(TEXT("%s physical Stage 5/5.5 bounds retain the 36 cm Pad margin"),
+				*Entry.StableId.ToString()),
+			bRetainsStaticSafetyMargin) && bAllPassed;
+		DynamicEnvelopeRequiredCount += bEffectInsidePad ? 0 : 1;
+
+		AddInfo(FString::Printf(
+			TEXT("J4StaticSeal Entry=%s Tier=%d Seed=%d Catalog=%llu Descriptor=%llu")
+			TEXT(" Production=%llu Device=%llu PhysicalMin=%s PhysicalMax=%s")
+			TEXT(" Pad=%s PadMargin=%s EffectMin=%s EffectMax=%s EffectPadMargin=%s")
+			TEXT(" StaticAccepted=%d DynamicEnvelopeRequired=%d Chaos=NotEvaluated"),
+			*Entry.StableId.ToString(), Entry.Settings.DifficultyTier,
+			Entry.Settings.BuildingSeed,
+			FABTSM73BeamStage45PlacementFreeze::FrozenCatalogHash,
+			Frozen.DescriptorHash, Result.Stage5.ProductionIdentityHash,
+			Result.DeviceAssemblyHash, *PhysicalBounds.Min.ToString(),
+			*PhysicalBounds.Max.ToString(),
+			*Frozen.RequiredPadHalfExtentCM.ToString(), *PadMargin.ToString(),
+			*EffectBounds.Min.ToString(), *EffectBounds.Max.ToString(),
+			*EffectPadMargin.ToString(),
+			bPhysicalInsideFrozenBounds && bRetainsStaticSafetyMargin ? 1 : 0,
+			bEffectInsidePad ? 0 : 1));
+	}
+	AddInfo(FString::Printf(
+		TEXT("J4StaticSealSummary Buildings=%d DynamicEnvelopeRequired=%d")
+		TEXT(" Catalog=%llu Authority=StaticOnly Chaos=NotEvaluated"),
+		FABTSM73BeamDemoManifest::GetEntries().Num(),
+		DynamicEnvelopeRequiredCount,
+		FABTSM73BeamStage45PlacementFreeze::FrozenCatalogHash));
+	return bAllPassed;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
