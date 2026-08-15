@@ -135,9 +135,10 @@ abts.Settings.Reset
 
 ## 9. 启动地图加载前台层
 
-`ABTSLoadingScreen` 是 `PreLoadingScreen` 阶段加载的独立 Runtime 模块。普通游戏启动时，它在默认地图装载前向 UE MoviePlayer 注册纯 Slate 前台：玩家立即看到标题、当前阶段文本和进度条；M3 地形、Map Freeze V3、M7 六栋静态生成及 Actor 初始化仍在原默认地图装载路径中完成，不增加 Boot Map 或第二次地图切换。地图装载结束后 MoviePlayer 自动完成，现有 `UABTSGameViewportClient` 首屏在第一个交互帧接管并继续阻断玩家输入，直到玩家主动 Begin。
+`ABTSLoadingScreen` 是 `PreLoadingScreen` 阶段加载的独立 Runtime 模块。普通游戏启动时，它在默认地图装载前向 UE MoviePlayer 注册纯 Slate 前台：玩家立即看到标题、当前阶段文本和进度条；M3 地形、Map Freeze V3、M7 六栋静态生成及 Actor 初始化仍在原默认地图装载路径中完成，不增加 Boot Map 或第二次地图切换。地图装载结束后 MoviePlayer 自动完成，现有 `UABTSGameViewportClient` 首屏在第一个交互帧接管。只要 M6 权威启动物理门尚未 Ready，首屏持续占有输入但不暂停 World Tick，Begin 显示为 `GENERATING WORLD` 且不可用；Ready 后进度到 100% 并允许 Begin，Failed 则保持锁定并暂停世界，不能带失败状态进入游戏。
 
 - 进度条以 30 秒目标做单调时间进度，地图装载期间封顶 92%，`PostLoadMapWithWorld` 后置为 100%；这只是可验证的加载反馈，不声称是每个生成器的精确百分比。
 - `bAutoCompleteWhenLoadingCompletes=true`、`bWaitForManualStop=false`、`bAllowEngineTick=false`，避免启动主循环前等待手动停止造成死锁。
+- Canvas 首屏继续按同一 30 秒目标显示单调进度，未 Ready 封顶 92%；`-ABTSMenuCapture=Front` 会等权威门结束再截图（专用超时 180 秒），不把生成中间态误作最终首屏证据。
 - Commandlet、Dedicated Server、Editor 和 unattended 默认不显示；`-ABTSStartupLoadingScreen` 可用于显式离屏证据，`-ABTSSkipStartupLoadingScreen` 始终优先跳过。
 - `ABTS.UI.StartupLoadingScreen.Policy` 必须验证交互游戏启用、自动化/Editor 默认跳过、显式 force 可取证且 skip 优先。前台像素、启动首帧无黑屏及与 Canvas 首屏的视觉衔接仍属于离屏/可见层验收。

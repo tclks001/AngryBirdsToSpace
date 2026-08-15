@@ -58,6 +58,8 @@ public:
 	static TArray<FIntPoint> BuildFallbackResolutionOptions(FIntPoint DesktopResolution);
 	static FString FormatFrameRateLimit(float Limit);
 	static int32 ComputeConfirmationSecondsRemaining(double DeadlineSeconds, double NowSeconds);
+	/** Monotonic foreground progress: cap below completion until the authoritative world gate opens. */
+	static float ComputeStartupLoadingProgress(double ElapsedSeconds, bool bReady);
 
 private:
 	enum class EHitAction : uint8
@@ -88,6 +90,8 @@ private:
 	};
 
 	void EnsureInitialMenuState();
+	void RefreshStartupWorldState();
+	bool IsStartupInputBlocked() const;
 	void SetMenuVisible(bool bVisible, EABTSSystemMenuPage NewPage);
 	void ApplyMenuInputMode();
 	void RestoreGameplayInputMode();
@@ -140,10 +144,17 @@ private:
 	bool bInputStateCaptured = false;
 	bool bCaptureMode = false;
 	bool bScreenshotRequested = false;
+	bool bStartupGateRequired = false;
+	bool bStartupWorldReady = false;
+	bool bStartupWorldFailed = false;
+	bool bStartupGateStartedLogged = false;
+	bool bStartupGateTerminalLogged = false;
 	int32 CaptureFrameCount = 0;
 	double CaptureStartSeconds = 0.0;
+	double StartupForegroundStartSeconds = 0.0;
 	double VideoConfirmationDeadlineSeconds = 0.0;
 	FString CaptureOutputPath;
 	FDelegateHandle ScreenshotDelegateHandle;
 	TWeakObjectPtr<APlayerController> MenuPlayerController;
+	TWeakObjectPtr<UWorld> StartupTrackedWorld;
 };

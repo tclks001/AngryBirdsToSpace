@@ -168,6 +168,8 @@ public:
 	bool IsLaunchModeActive() const { return LaunchState != EABTSM6LaunchState::Inactive; }
 	/** True only after startup Chaos settling has frozen every promoted world body. */
 	bool IsStartupPhysicsWarmupComplete() const { return !bEnableStartupPhysicsWarmup || bStartupPhysicsWarmupComplete; }
+	/** Fail-closed terminal state used by the startup foreground instead of enabling gameplay. */
+	bool HasStartupPhysicsWarmupFailed() const { return bStartupPhysicsWarmupFailed; }
 	/** The location is the final settled landing point captured before return flight begins. */
 	FABTSM6LaunchCompletedNative& OnLaunchCompleted() { return LaunchCompletedNative; }
 	FABTSM6CalibrationLaunchRecordedNative& OnCalibrationLaunchRecorded()
