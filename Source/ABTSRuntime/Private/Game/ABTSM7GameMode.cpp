@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "DrawDebugHelpers.h"
@@ -352,6 +353,115 @@ int32 AABTSM7GameMode::SpawnTaskGraphBuildings(
 	return SpawnedCount;
 }
 
+int32 AABTSM7GameMode::SpawnJuryDemoFixedSixStaticBuildings(
+	const FABTSBuildingGenerationContract& Contract,
+	AABTSM7BuildingMaterialSystem& MaterialSystem,
+	AABTSM6SlingshotSystem* SlingshotSystem,
+	bool& bOutSetupFailed)
+{
+	bOutSetupFailed = false;
+	TaskGraphBuildingDebugEntries.Reset();
+	if (SlingshotSystem == nullptr || !StableBuildingClass)
+	{
+		bOutSetupFailed = true;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][FixedSixV2] RegistrationPrerequisiteMissing")
+			TEXT(" Slingshot=%d BuildingClass=%d"),
+			SlingshotSystem ? 1 : 0, StableBuildingClass ? 1 : 0);
+		return 0;
+	}
+
+	FABTSM73JuryDemoFixedSixStaticPlan Plan;
+	FString Error;
+	if (!FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
+		Contract, Plan, Error))
+	{
+		bOutSetupFailed = true;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][FixedSixV2] StaticPlanRejected Reason=%s")
+			TEXT(" Fallback=Forbidden"), *Error);
+		return 0;
+	}
+	const uint64 RegistrationResultHash = Plan.RegistrationResultHash;
+	const uint64 LayoutHash = Plan.LayoutHash;
+	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>> Actors;
+	if (!FABTSM73JuryDemoFixedSixRegistration::SpawnStaticActors(
+		*GetWorld(), MaterialSystem, StableBuildingClass,
+		MoveTemp(Plan), Actors, Error))
+	{
+		bOutSetupFailed = true;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][FixedSixV2] StaticActorBatchRejected")
+			TEXT(" Reason=%s RolledBack=1 Fallback=Forbidden"), *Error);
+		return 0;
+	}
+
+	int32 RegisteredCount = 0;
+	int32 StaticModuleCount = 0;
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakActor : Actors)
+	{
+		AABTSM73StableBuildingActor* Actor = WeakActor.Get();
+		if (Actor == nullptr
+			|| !Actor->IsJuryDemoFixedSixStaticRegistrationAccepted())
+		{
+			bOutSetupFailed = true;
+			break;
+		}
+		StaticModuleCount += Actor->GetJuryDemoFixedSixStaticModuleCount();
+	}
+	if (bOutSetupFailed)
+	{
+		for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakActor : Actors)
+		{
+			if (AABTSM73StableBuildingActor* Actor = WeakActor.Get())
+			{
+				Actor->RollbackJuryDemoFixedSixStaticRegistration(
+					TEXT("FixedSixV2PreRegistrationActorLost"));
+			}
+		}
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][FixedSixV2] AtomicRegistrationRejected")
+			TEXT(" Registered=0 Expected=%d SetupRejected=1"),
+			FABTSJuryDemoFixedSixContract::ExpectedSiteCount);
+		return 0;
+	}
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakActor : Actors)
+	{
+		AABTSM73StableBuildingActor* Actor = WeakActor.Get();
+		check(Actor != nullptr);
+		SlingshotSystem->RegisterRequiredBuilding(*Actor);
+		FABTSM7TaskGraphBuildingDebugEntry& DebugEntry =
+			TaskGraphBuildingDebugEntries.AddDefaulted_GetRef();
+		DebugEntry.Building = Actor;
+		DebugEntry.TaskId = Actor->GetJuryDemoFixedSixEncounterIndex();
+		DebugEntry.TaskType = EABTSM3TaskType::Unassigned;
+		DebugEntry.CellId = INDEX_NONE;
+		++RegisteredCount;
+	}
+	if (RegisteredCount != FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
+	{
+		// RegisterRequiredBuilding has no removal API by design. This branch can
+		// only be reached if a validated Actor disappears in the same frame; the
+		// shared seal therefore remains rejected and blocks WorldReady.
+		bOutSetupFailed = true;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][FixedSixV2] AtomicRegistrationRejected")
+			TEXT(" Registered=%d Expected=%d SetupRejected=1"),
+			RegisteredCount,
+			FABTSJuryDemoFixedSixContract::ExpectedSiteCount);
+		return RegisteredCount;
+	}
+
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][FixedSixV2] StaticRegistrationComplete")
+		TEXT(" ContractVersion=2 Buildings=%d Modules=%d Layout=%llu")
+		TEXT(" ResultHash=%llu Authority=StaticRegistration")
+		TEXT(" Chaos=NotEvaluated Accepted=1"),
+		RegisteredCount, StaticModuleCount, LayoutHash,
+		RegistrationResultHash);
+	return RegisteredCount;
+}
+
 void AABTSM7GameMode::DrawTaskGraphPositionDebug()
 {
 	AABTSM3Planet* Planet = TaskGraphDebugPlanet.Get();
@@ -411,8 +521,12 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	const bool bBuildingContractReady =
 		Planet != nullptr
 		&& Planet->TryExportBuildingGenerationContract(BuildingContract);
+	const bool bFixedSixSnapshotPresent = bBuildingContractReady
+		&& !BuildingContract.JuryDemoFixedSix.IsEmpty();
 	const int32 ExpectedRequiredBuildingCount =
-		bSpawnTaskGraphBuildings && bBuildingContractReady
+		bFixedSixSnapshotPresent
+		? FABTSJuryDemoFixedSixContract::ExpectedSiteCount
+		: bSpawnTaskGraphBuildings && bBuildingContractReady
 		? CountRequiredTaskGraphBuildings(BuildingContract)
 		: bUseLegacySingleBuildingTest ? 1 : 0;
 	if (SlingshotSystem)
@@ -422,7 +536,8 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	bool bBuildingSetupFailed = SlingshotSystem == nullptr
 		|| Planet == nullptr
 		|| (bNeedsBuildingContract && !bBuildingContractReady);
-	if (bSpawnTaskGraphBuildings && MaxTaskGraphBuildings > 0
+	if (!bFixedSixSnapshotPresent
+		&& bSpawnTaskGraphBuildings && MaxTaskGraphBuildings > 0
 		&& ExpectedRequiredBuildingCount == 0)
 	{
 		bBuildingSetupFailed = true;
@@ -442,7 +557,18 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	TaskGraphDebugPlayer = &Character;
 	TaskGraphDebugPlanet = Planet;
 	int32 TaskGraphBuildingCount = 0;
-	if (System && Planet && bSpawnTaskGraphBuildings
+	int32 FixedSixStaticBuildingCount = 0;
+	if (System && bFixedSixSnapshotPresent)
+	{
+		bool bFixedSixSetupFailed = false;
+		FixedSixStaticBuildingCount = SpawnJuryDemoFixedSixStaticBuildings(
+			BuildingContract,
+			*System,
+			SlingshotSystem,
+			bFixedSixSetupFailed);
+		bBuildingSetupFailed = bBuildingSetupFailed || bFixedSixSetupFailed;
+	}
+	else if (System && Planet && bSpawnTaskGraphBuildings
 		&& bBuildingContractReady)
 	{
 		bool bTaskGraphSetupFailed = false;
@@ -456,7 +582,8 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	}
 
 	AABTSM73StableBuildingActor* StableBuilding = nullptr;
-	if (System && bUseLegacySingleBuildingTest && StableBuildingClass)
+	if (System && !bFixedSixSnapshotPresent
+		&& bUseLegacySingleBuildingTest && StableBuildingClass)
 	{
 		if (Planet && bBuildingContractReady
 			&& !BuildingContract.Sites.IsEmpty())
@@ -481,7 +608,8 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 			}
 		}
 	}
-	if (bUseLegacySingleBuildingTest && StableBuilding == nullptr)
+	if (!bFixedSixSnapshotPresent
+		&& bUseLegacySingleBuildingTest && StableBuilding == nullptr)
 	{
 		bBuildingSetupFailed = true;
 	}
@@ -490,11 +618,15 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		SlingshotSystem->SealRequiredBuildingContract(bBuildingSetupFailed);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7] Entry ready=%d StartCell=%d TestSet=%d ExpectedBuildings=%d TaskGraphBuildings=%d LegacyM73A=%d SetupRejected=%d"),
+		TEXT("[ABTS][M7] Entry ready=%d StartCell=%d TestSet=%d")
+		TEXT(" ExpectedBuildings=%d FixedSixV2=%d FixedSixStatic=%d")
+		TEXT(" TaskGraphBuildings=%d LegacyM73A=%d SetupRejected=%d"),
 		System ? 1 : 0,
 		SpawnCellId,
 		bSpawnBuildingMaterialTestSet ? 1 : 0,
 		ExpectedRequiredBuildingCount,
+		bFixedSixSnapshotPresent ? 1 : 0,
+		FixedSixStaticBuildingCount,
 		TaskGraphBuildingCount,
 		StableBuilding ? 1 : 0,
 		bBuildingSetupFailed ? 1 : 0);

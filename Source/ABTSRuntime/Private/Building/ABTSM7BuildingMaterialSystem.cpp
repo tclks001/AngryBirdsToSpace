@@ -179,6 +179,21 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnVoxelDevice(
 	const FABTSM7DeviceSpec& Spec,
 	const FTransform& WorldTransform)
 {
+	return SpawnVoxelDeviceInternal(Spec, WorldTransform, true);
+}
+
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnStaticVoxelDevice(
+	const FABTSM7DeviceSpec& Spec,
+	const FTransform& WorldTransform)
+{
+	return SpawnVoxelDeviceInternal(Spec, WorldTransform, false);
+}
+
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnVoxelDeviceInternal(
+	const FABTSM7DeviceSpec& Spec,
+	const FTransform& WorldTransform,
+	const bool bRegisterForLaunchPhysics)
+{
 	if (Spec.Kind != EABTSM7ModuleKind::ExplosiveBarrel
 		&& Spec.Kind != EABTSM7ModuleKind::SpringPiston)
 	{
@@ -207,7 +222,10 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnVoxelDevice(
 		RuntimeMaterial, Spec.Kind, Spec.LengthCM, Spec.DiameterCM,
 		WorldTransform);
 	Module->ConfigureImpactPhysics(GetProfile(EABTSM7BuildingMaterial::Iron));
-	Modules.Add(Module);
+	if (bRegisterForLaunchPhysics)
+	{
+		Modules.Add(Module);
+	}
 	return Module;
 }
 

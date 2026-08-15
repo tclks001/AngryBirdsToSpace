@@ -185,3 +185,16 @@ Stage 5/5.5 完成后不直接进入 Chaos。先由 M7 用真实生产 Brick 与
 [M7 JuryDemo 静态封口与 Fixed-Six V2 交接设计](M7JuryDemoStaticSealAndContractV2Handoff.md)。M7 不修改
 共享合同或 M3 Fixture；若静态物理 Bounds 超界，本阶段只发布精确需求并停止 J4。只有静态联合门通过后，
 Chaos 才允许在冻结包络内修改 Stage 5/5.5 与物理参数；修改 Stage 4 前缀必须显式重新开冻。
+
+### 10.1 Fixed-Six V2 静态消费完成（2026-08-15）
+
+固定顺序第 5 步已在 M7 完成：合并 `master@3991723` 后，按 V2 `ManifestEntryId` 精确重建并核验
+E1～E6，只有六项身份全部匹配才原子生成和注册。最终六栋共 `5736` 块静态 HISM 积木和 `6` 个静态装置，
+注册结果 Hash 为 `3948236352584381910`；快照漂移、顺序篡改和不完整批次均失败关闭，不回退旧生成路径。
+新自动化 `J4V2Consumer` 为 `2/2`，并验证全局 LaunchPhysics 后仍为 `Promoted=0 / Activated=0`；
+既有 J4 静态封口为 `1/1`，世界生成合同为 `2/2`。
+
+该结果完成的是 `StaticRegistration`，不是 Chaos 激活或可见 PIE。下一所有者为 Integration：合并 M7
+精确提交，在 canonical 地图与 M6 共同门完成 `Expected=6 / Registered=6 / SetupRejected=0` 的静态联合验收。
+其后 M7 才研究当前 encounter 的动态激活；只要 Stage 4 前缀、Pivot、Bounds、Pad 与共享身份不变，
+包络内的 Stage 5/5.5、材料、Solver 与装置效果调整不触发重新冻结。

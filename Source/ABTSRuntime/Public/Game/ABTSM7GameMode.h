@@ -107,6 +107,11 @@ private:
 		AABTSM7BuildingMaterialSystem& MaterialSystem,
 		AABTSM6SlingshotSystem* SlingshotSystem,
 		bool& bOutSetupFailed);
+	int32 SpawnJuryDemoFixedSixStaticBuildings(
+		const FABTSBuildingGenerationContract& Contract,
+		AABTSM7BuildingMaterialSystem& MaterialSystem,
+		AABTSM6SlingshotSystem* SlingshotSystem,
+		bool& bOutSetupFailed);
 	void DrawTaskGraphPositionDebug();
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M7")
