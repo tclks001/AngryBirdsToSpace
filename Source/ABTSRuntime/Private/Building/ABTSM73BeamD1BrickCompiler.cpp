@@ -4051,6 +4051,349 @@ namespace ABTSM73BeamStage5
 		Summary.BrickGeometryHash = ABTSM73BeamD1::HashBricks(Summary, OutBricks);
 		return true;
 	}
+
+	struct FDeviceVoxelCandidate
+	{
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::Z;
+		FIntVector Minimum = FIntVector::ZeroValue;
+		FIntVector Extent = FIntVector::ZeroValue;
+		TArray<int32> SupportMemberIds;
+		int32 SupportCellCount = 0;
+		bool bDirectGroundSupport = false;
+		int64 Score = MAX_int64;
+	};
+
+	// Stage 5 now proves one common 36 cm boundary lattice before the derived
+	// device pass. Device occupancy and contact analysis use that same lattice;
+	// a half-cell compatibility path would conceal an upstream contract breach.
+	constexpr double DeviceAnalysisCellCM = SectionCM;
+
+	bool PositiveOverlap(const FBox& A, const FBox& B)
+	{
+		return A.IsValid && B.IsValid
+			&& A.Min.X < B.Max.X - GeometryToleranceCM
+			&& A.Max.X > B.Min.X + GeometryToleranceCM
+			&& A.Min.Y < B.Max.Y - GeometryToleranceCM
+			&& A.Max.Y > B.Min.Y + GeometryToleranceCM
+			&& A.Min.Z < B.Max.Z - GeometryToleranceCM
+			&& A.Max.Z > B.Min.Z + GeometryToleranceCM;
+	}
+
+	FBox VoxelBounds(
+		const FIntVector& Minimum,
+		const FIntVector& Extent,
+		const FVector& GridOrigin = FVector::ZeroVector)
+	{
+		return FBox(
+			GridOrigin + FVector(Minimum) * DeviceAnalysisCellCM,
+			GridOrigin + FVector(Minimum + Extent) * DeviceAnalysisCellCM);
+	}
+
+	bool BuildBrickVoxelMap(
+		const TArray<FABTSM73BeamD1BrickBinding>& Bricks,
+		TMap<FIntVector, int32>& OutOwnerByCell,
+		FIntVector& OutMinimum,
+		FIntVector& OutMaximum,
+		FVector& OutGridOrigin,
+		FString& OutError)
+	{
+		OutOwnerByCell.Reset();
+		OutMinimum = FIntVector(MAX_int32);
+		OutMaximum = FIntVector(MIN_int32);
+		// This is a contract, not a phase inferred from whichever brick happens to
+		// be first. In building-local space X/Y boundaries are half-section shifted
+		// while Z starts at the ground plane.
+		OutGridOrigin = FVector(SectionCM * 0.5, SectionCM * 0.5, 0.0);
+		if (Bricks.IsEmpty())
+		{
+			OutError = TEXT("BeamD1Stage55EmptyBrickSet");
+			return false;
+		}
+		for (const FABTSM73BeamD1BrickBinding& Brick : Bricks)
+		{
+			const FIntVector Minimum(
+				FMath::RoundToInt((Brick.LocalBounds.Min.X - OutGridOrigin.X) / DeviceAnalysisCellCM),
+				FMath::RoundToInt((Brick.LocalBounds.Min.Y - OutGridOrigin.Y) / DeviceAnalysisCellCM),
+				FMath::RoundToInt((Brick.LocalBounds.Min.Z - OutGridOrigin.Z) / DeviceAnalysisCellCM));
+			const FIntVector Maximum(
+				FMath::RoundToInt((Brick.LocalBounds.Max.X - OutGridOrigin.X) / DeviceAnalysisCellCM),
+				FMath::RoundToInt((Brick.LocalBounds.Max.Y - OutGridOrigin.Y) / DeviceAnalysisCellCM),
+				FMath::RoundToInt((Brick.LocalBounds.Max.Z - OutGridOrigin.Z) / DeviceAnalysisCellCM));
+			const FBox QuantizedBounds = VoxelBounds(
+				Minimum, Maximum - Minimum, OutGridOrigin);
+			if (!QuantizedBounds.Min.Equals(Brick.LocalBounds.Min, GeometryToleranceCM)
+				|| !QuantizedBounds.Max.Equals(Brick.LocalBounds.Max, GeometryToleranceCM)
+				|| Maximum.X <= Minimum.X || Maximum.Y <= Minimum.Y
+				|| Maximum.Z <= Minimum.Z)
+			{
+				OutError = FString::Printf(
+					TEXT("BeamD1Stage55NonVoxelBrick:Brick=%d Bounds=%s"),
+					Brick.BrickId, *Brick.LocalBounds.ToString());
+				return false;
+			}
+			OutMinimum.X = FMath::Min(OutMinimum.X, Minimum.X);
+			OutMinimum.Y = FMath::Min(OutMinimum.Y, Minimum.Y);
+			OutMinimum.Z = FMath::Min(OutMinimum.Z, Minimum.Z);
+			OutMaximum.X = FMath::Max(OutMaximum.X, Maximum.X);
+			OutMaximum.Y = FMath::Max(OutMaximum.Y, Maximum.Y);
+			OutMaximum.Z = FMath::Max(OutMaximum.Z, Maximum.Z);
+			for (int32 X = Minimum.X; X < Maximum.X; ++X)
+			{
+				for (int32 Y = Minimum.Y; Y < Maximum.Y; ++Y)
+				{
+					for (int32 Z = Minimum.Z; Z < Maximum.Z; ++Z)
+					{
+						const FIntVector Cell(X, Y, Z);
+						if (OutOwnerByCell.Contains(Cell))
+						{
+							OutError = FString::Printf(
+								TEXT("BeamD1Stage55VoxelOwnerCollision:Brick=%d Cell=%s"),
+								Brick.BrickId, *Cell.ToString());
+							return false;
+						}
+						OutOwnerByCell.Add(Cell, Brick.BrickId);
+					}
+				}
+			}
+		}
+		return !OutOwnerByCell.IsEmpty();
+	}
+
+	bool DeviceCellsFitSemanticEnvelope(
+		const FBox& DeviceBounds,
+		const FABTSM73DAG5BV2GenerationResult& Silhouette,
+		const FVector& GridOrigin)
+	{
+		for (int32 X = FMath::RoundToInt((DeviceBounds.Min.X - GridOrigin.X) / DeviceAnalysisCellCM);
+			X < FMath::RoundToInt((DeviceBounds.Max.X - GridOrigin.X) / DeviceAnalysisCellCM); ++X)
+		{
+			for (int32 Y = FMath::RoundToInt((DeviceBounds.Min.Y - GridOrigin.Y) / DeviceAnalysisCellCM);
+				Y < FMath::RoundToInt((DeviceBounds.Max.Y - GridOrigin.Y) / DeviceAnalysisCellCM); ++Y)
+			{
+				for (int32 Z = FMath::RoundToInt((DeviceBounds.Min.Z - GridOrigin.Z) / DeviceAnalysisCellCM);
+					Z < FMath::RoundToInt((DeviceBounds.Max.Z - GridOrigin.Z) / DeviceAnalysisCellCM); ++Z)
+				{
+					const FVector Center = GridOrigin
+						+ (FVector(X, Y, Z) + FVector(0.5)) * DeviceAnalysisCellCM;
+					if (!Silhouette.Volumes.ContainsByPredicate(
+						[&Center](const FABTSM73DAG5BV2Volume& Volume)
+						{
+							return Volume.LocalBounds.IsValid
+								&& Volume.LocalBounds.IsInsideOrOn(Center);
+						}))
+					{
+						return false;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	bool FindDeviceVoxelCandidate(
+		const EABTSM7ModuleKind Kind,
+		const FABTSM73BeamD1Stage5Result& Stage5,
+		FDeviceVoxelCandidate& OutCandidate,
+		FString& OutError)
+	{
+		TMap<FIntVector, int32> OwnerByCell;
+		FIntVector BuildingMinimum;
+		FIntVector BuildingMaximum;
+		FVector GridOrigin;
+		if (!BuildBrickVoxelMap(Stage5.Bricks, OwnerByCell,
+			BuildingMinimum, BuildingMaximum, GridOrigin, OutError))
+		{
+			return false;
+		}
+		TArray<int32> CandidateBottomCourses;
+		CandidateBottomCourses.Add(BuildingMinimum.Z);
+		for (const TPair<FIntVector, int32>& Pair : OwnerByCell)
+		{
+			CandidateBottomCourses.AddUnique(Pair.Key.Z + 1);
+		}
+		CandidateBottomCourses.Sort();
+
+		TArray<TPair<EABTSM73BeamAFrameAxis, FIntVector>> Orientations;
+		if (Kind == EABTSM7ModuleKind::ExplosiveBarrel)
+		{
+			Orientations.Emplace(EABTSM73BeamAFrameAxis::Z, FIntVector(2, 2, 5));
+		}
+		else
+		{
+			Orientations.Emplace(EABTSM73BeamAFrameAxis::X, FIntVector(6, 2, 2));
+			Orientations.Emplace(EABTSM73BeamAFrameAxis::Y, FIntVector(2, 6, 2));
+			Orientations.Emplace(EABTSM73BeamAFrameAxis::Z, FIntVector(2, 2, 6));
+		}
+
+		bool bFound = false;
+		for (const TPair<EABTSM73BeamAFrameAxis, FIntVector>& Orientation : Orientations)
+		{
+			const EABTSM73BeamAFrameAxis Axis = Orientation.Key;
+			const FIntVector Extent = Orientation.Value;
+			for (const int32 BottomZ : CandidateBottomCourses)
+			{
+				if (BottomZ + Extent.Z > BuildingMaximum.Z)
+				{
+					continue;
+				}
+				for (int32 X = BuildingMinimum.X;
+					X + Extent.X <= BuildingMaximum.X; ++X)
+				{
+					for (int32 Y = BuildingMinimum.Y;
+						Y + Extent.Y <= BuildingMaximum.Y; ++Y)
+					{
+						const FIntVector Minimum(X, Y, BottomZ);
+						bool bOccupied = false;
+						for (int32 DX = 0; DX < Extent.X && !bOccupied; ++DX)
+						{
+							for (int32 DY = 0; DY < Extent.Y && !bOccupied; ++DY)
+							{
+								for (int32 DZ = 0; DZ < Extent.Z; ++DZ)
+								{
+									if (OwnerByCell.Contains(Minimum + FIntVector(DX, DY, DZ)))
+									{
+										bOccupied = true;
+										break;
+									}
+								}
+							}
+						}
+						if (bOccupied)
+						{
+							continue;
+						}
+
+						TArray<int32> Supports;
+						int32 SupportCells = 0;
+						bool bFirstEndSupported = false;
+						bool bLastEndSupported = false;
+						bool bMinXSupported = false;
+						bool bMaxXSupported = false;
+						bool bMinYSupported = false;
+						bool bMaxYSupported = false;
+						const bool bDirectGroundSupport =
+							BottomZ == BuildingMinimum.Z;
+						for (int32 DX = 0; DX < Extent.X; ++DX)
+						{
+							for (int32 DY = 0; DY < Extent.Y; ++DY)
+							{
+								if (bDirectGroundSupport)
+								{
+									++SupportCells;
+									bFirstEndSupported |= Axis == EABTSM73BeamAFrameAxis::X
+										? DX == 0 : Axis == EABTSM73BeamAFrameAxis::Y
+											? DY == 0 : true;
+									bLastEndSupported |= Axis == EABTSM73BeamAFrameAxis::X
+										? DX == Extent.X - 1 : Axis == EABTSM73BeamAFrameAxis::Y
+											? DY == Extent.Y - 1 : true;
+									bMinXSupported |= DX == 0;
+									bMaxXSupported |= DX == Extent.X - 1;
+									bMinYSupported |= DY == 0;
+									bMaxYSupported |= DY == Extent.Y - 1;
+									continue;
+								}
+								const FIntVector Below = Minimum
+									+ FIntVector(DX, DY, -1);
+								if (const int32* Support = OwnerByCell.Find(Below))
+								{
+									++SupportCells;
+									Supports.AddUnique(*Support);
+									bMinXSupported |= DX == 0;
+									bMaxXSupported |= DX == Extent.X - 1;
+									bMinYSupported |= DY == 0;
+									bMaxYSupported |= DY == Extent.Y - 1;
+									bFirstEndSupported |= Axis == EABTSM73BeamAFrameAxis::X
+										? DX == 0 : Axis == EABTSM73BeamAFrameAxis::Y
+											? DY == 0 : true;
+									bLastEndSupported |= Axis == EABTSM73BeamAFrameAxis::X
+										? DX == Extent.X - 1 : Axis == EABTSM73BeamAFrameAxis::Y
+											? DY == Extent.Y - 1 : true;
+								}
+							}
+						}
+						const bool bSupported = Axis == EABTSM73BeamAFrameAxis::Z
+							? SupportCells >= 4
+								&& bMinXSupported && bMaxXSupported
+								&& bMinYSupported && bMaxYSupported
+							: SupportCells >= 2 && bFirstEndSupported && bLastEndSupported;
+						if (!bSupported)
+						{
+							continue;
+						}
+
+						const FBox Bounds = VoxelBounds(Minimum, Extent, GridOrigin);
+						if (!DeviceCellsFitSemanticEnvelope(
+							Bounds, Stage5.Silhouette, GridOrigin)
+							|| Stage5.CompactAssembly.ReservedSupportVoids.ContainsByPredicate(
+								[&Bounds](const FABTSM73BeamASupportVoid& Void)
+								{
+									return PositiveOverlap(Bounds, Void.Bounds);
+								}))
+						{
+							continue;
+						}
+						bool bAllGroundReachable = true;
+						for (const int32 SupportId : Supports)
+						{
+							bAllGroundReachable &= Stage5.LoadDAG.Nodes.IsValidIndex(SupportId)
+								&& Stage5.LoadDAG.Nodes[SupportId].bGroundReachable;
+						}
+						if (!bAllGroundReachable)
+						{
+							continue;
+						}
+						Supports.Sort();
+						const int32 EdgeDistance = FMath::Min(
+							FMath::Min(X - BuildingMinimum.X,
+								BuildingMaximum.X - (X + Extent.X)),
+							FMath::Min(Y - BuildingMinimum.Y,
+								BuildingMaximum.Y - (Y + Extent.Y)));
+						const int64 Score = static_cast<int64>(
+							BottomZ - BuildingMinimum.Z) * 1000000000ll
+							+ static_cast<int64>(FMath::Max(0, EdgeDistance)) * 1000000ll
+							+ static_cast<int64>(X - BuildingMinimum.X) * 1000ll
+							+ static_cast<int64>(Y - BuildingMinimum.Y) * 10ll
+							+ static_cast<int32>(Axis);
+						if (!bFound || Score < OutCandidate.Score)
+						{
+							bFound = true;
+							OutCandidate.Axis = Axis;
+							OutCandidate.Minimum = Minimum;
+							OutCandidate.Extent = Extent;
+							OutCandidate.SupportMemberIds = MoveTemp(Supports);
+							OutCandidate.SupportCellCount = SupportCells;
+							OutCandidate.bDirectGroundSupport = bDirectGroundSupport;
+							OutCandidate.Score = Score;
+						}
+					}
+				}
+			}
+		}
+		if (!bFound)
+		{
+			OutError = FString::Printf(
+				TEXT("BeamD1Stage55NoLegalDeviceSlot:Kind=%d Cells=%d Bounds=%s"),
+				static_cast<int32>(Kind), OwnerByCell.Num(),
+				*Stage5.Summary.LocalBounds.ToString());
+		}
+		return bFound;
+	}
+
+	EABTSM7ModuleKind ResolveDemoDeviceKind(
+		const FABTSM73BeamD0ResolvedProfile& Profile)
+	{
+		if (Profile.DeviceIntent == EABTSM73BeamD0DeviceIntent::BreakableSeam)
+		{
+			return EABTSM7ModuleKind::SpringPiston;
+		}
+		if (Profile.DeviceIntent == EABTSM73BeamD0DeviceIntent::HangingMass)
+		{
+			return EABTSM7ModuleKind::ExplosiveBarrel;
+		}
+		return Profile.GameplayProfileId == TEXT("TipOver")
+			? EABTSM7ModuleKind::SpringPiston
+			: EABTSM7ModuleKind::ExplosiveBarrel;
+	}
 }
 
 bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
@@ -4310,5 +4653,141 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 		OutResult.ActiveGeometryHash, OutResult.BearingDAGHash,
 		OutResult.LoadDAG.Summary.LoadDAGHash,
 		OutResult.ProductionIdentityHash);
+	return true;
+}
+
+bool FABTSM73BeamD1BrickCompiler::GenerateStage55DeviceAssembly(
+	const FABTSM73BeamD1Settings& Settings,
+	FABTSM73BeamD1Stage55Result& OutResult,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamStage5;
+	OutResult = FABTSM73BeamD1Stage55Result();
+	OutError.Reset();
+	if (!GenerateStage5(Settings, OutResult.Stage5, OutError))
+	{
+		OutError = FString::Printf(TEXT("BeamD1Stage55Stage5:%s"), *OutError);
+		return false;
+	}
+
+	const int32 SelectedSeed = ABTSM73BeamD1::CandidateSeed(
+		Settings.BuildingSeed,
+		OutResult.Stage5.Summary.VisualCandidateAttempt);
+	FABTSM73BeamD0ResolvedProfile Profile;
+	if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
+		Settings.GameplayProfileId, Settings.DifficultyTier,
+		SelectedSeed, Profile, OutError))
+	{
+		OutError = FString::Printf(TEXT("BeamD1Stage55Profile:%s"), *OutError);
+		return false;
+	}
+
+	const EABTSM7ModuleKind Kind = ResolveDemoDeviceKind(Profile);
+	FDeviceVoxelCandidate Candidate;
+	if (!FindDeviceVoxelCandidate(Kind, OutResult.Stage5, Candidate, OutError))
+	{
+		return false;
+	}
+	FABTSM73BeamD1DeviceBinding& Device = OutResult.Devices.AddDefaulted_GetRef();
+	Device.DeviceId = 0;
+	Device.Kind = Kind;
+	Device.Axis = Candidate.Axis;
+	Device.VoxelMin = Candidate.Minimum;
+	Device.VoxelExtent = Candidate.Extent;
+	Device.VoxelCellSizeCM = DeviceAnalysisCellCM;
+	TMap<FIntVector, int32> RebuiltVoxelOwners;
+	FIntVector IgnoredMinimum;
+	FIntVector IgnoredMaximum;
+	if (!BuildBrickVoxelMap(OutResult.Stage5.Bricks, RebuiltVoxelOwners,
+		IgnoredMinimum, IgnoredMaximum, Device.GridOriginCM, OutError))
+	{
+		return false;
+	}
+	Device.DeviceSpec.Kind = Kind;
+	Device.DeviceSpec.DiameterCM = 72.0f;
+	Device.DeviceSpec.LengthCM = Kind == EABTSM7ModuleKind::ExplosiveBarrel
+		? 180.0f : 216.0f;
+	Device.LocalBounds = VoxelBounds(
+		Candidate.Minimum, Candidate.Extent, Device.GridOriginCM);
+	const FVector AxisVector = Candidate.Axis == EABTSM73BeamAFrameAxis::X
+		? FVector::ForwardVector
+		: Candidate.Axis == EABTSM73BeamAFrameAxis::Y
+			? FVector::RightVector : FVector::UpVector;
+	Device.LocalTransform = FTransform(
+		FQuat::FindBetweenNormals(FVector::UpVector, AxisVector),
+		Device.LocalBounds.GetCenter());
+	Device.SupportMemberIds = Candidate.SupportMemberIds;
+	Device.SupportContactCellCount = Candidate.SupportCellCount;
+	Device.bDirectGroundSupport = Candidate.bDirectGroundSupport;
+	Device.StaticMassKG = Kind == EABTSM7ModuleKind::ExplosiveBarrel
+		? 90.0f : 110.0f;
+	if (Kind == EABTSM7ModuleKind::ExplosiveBarrel)
+	{
+		const FVector Center = Device.LocalBounds.GetCenter();
+		Device.EffectCorridorLocalBounds = FBox(
+			Center - FVector(760.0), Center + FVector(760.0));
+	}
+	else
+	{
+		const FVector Center = Device.LocalBounds.GetCenter();
+		const FVector Half = AxisVector.GetAbs() * 360.0
+			+ (FVector::OneVector - AxisVector.GetAbs()) * 180.0;
+		Device.EffectCorridorLocalBounds = FBox(Center - Half, Center + Half);
+	}
+
+	const FString SupportText = FString::JoinBy(
+		Device.SupportMemberIds, TEXT("."), [](const int32 Id)
+		{ return FString::FromInt(Id); });
+	OutResult.DeviceSlotHash = HashUtf8(FString::Printf(
+		TEXT("Stage5=%llu|Kind=%d|Axis=%d|Cell=%.3f|Grid=%.3f,%.3f,%.3f|Min=%d,%d,%d|Extent=%d,%d,%d|Supports=%s"),
+		OutResult.Stage5.ProductionIdentityHash,
+		static_cast<int32>(Device.Kind), static_cast<int32>(Device.Axis),
+		Device.VoxelCellSizeCM,
+		Device.GridOriginCM.X, Device.GridOriginCM.Y, Device.GridOriginCM.Z,
+		Device.VoxelMin.X, Device.VoxelMin.Y, Device.VoxelMin.Z,
+		Device.VoxelExtent.X, Device.VoxelExtent.Y, Device.VoxelExtent.Z,
+		*SupportText));
+	OutResult.DeviceLoadDAGHash = HashUtf8(FString::Printf(
+		TEXT("Slot=%llu|Mass=%.3f|SupportCells=%d|DirectGround=%d|GroundReachable=1"),
+		OutResult.DeviceSlotHash, Device.StaticMassKG,
+		Device.SupportContactCellCount,
+		Device.bDirectGroundSupport ? 1 : 0));
+	OutResult.DeviceAssemblyHash = HashUtf8(FString::Printf(
+		TEXT("Stage5=%llu|Slot=%llu|DeviceLoad=%llu|Devices=%d"),
+		OutResult.Stage5.ProductionIdentityHash,
+		OutResult.DeviceSlotHash, OutResult.DeviceLoadDAGHash,
+		OutResult.Devices.Num()));
+
+	OutResult.Summary = OutResult.Stage5.Summary;
+	OutResult.Summary.GenerationStage =
+		EABTSM73BeamC3GenerationStage::DeviceAssembly;
+	OutResult.Summary.bDeviceAssemblyEvaluated = true;
+	OutResult.Summary.DeviceAssemblyCount = OutResult.Devices.Num();
+	OutResult.Summary.DeviceAssemblySupportCellCount =
+		Device.SupportContactCellCount;
+	OutResult.Summary.DeviceAssemblyUnsupportedCount = 0;
+	OutResult.Summary.DeviceRoleCount = OutResult.Devices.Num();
+	OutResult.Summary.DeviceSlotHash =
+		static_cast<int64>(OutResult.DeviceSlotHash);
+	OutResult.Summary.DeviceLoadDAGHash =
+		static_cast<int64>(OutResult.DeviceLoadDAGHash);
+	OutResult.Summary.DeviceAssemblyHash =
+		static_cast<int64>(OutResult.DeviceAssemblyHash);
+	OutResult.Summary.bAccepted = true;
+	OutResult.Summary.RejectReason.Reset();
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7.3-Beam-D1][Stage55DeviceAssemblyAccepted]")
+		TEXT(" Profile=%s Tier=%d Seed=%d Kind=%d Axis=%d")
+		TEXT(" VoxelMin=%s VoxelExtent=%s Supports=%s SupportCells=%d")
+		TEXT(" Stage5Hash=%llu SlotHash=%llu DeviceLoadHash=%llu AssemblyHash=%llu")
+		TEXT(" Chaos=NotEvaluated"),
+		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+		Settings.BuildingSeed, static_cast<int32>(Device.Kind),
+		static_cast<int32>(Device.Axis), *Device.VoxelMin.ToString(),
+		*Device.VoxelExtent.ToString(), *SupportText,
+		Device.SupportContactCellCount,
+		OutResult.Stage5.ProductionIdentityHash,
+		OutResult.DeviceSlotHash, OutResult.DeviceLoadDAGHash,
+		OutResult.DeviceAssemblyHash);
 	return true;
 }

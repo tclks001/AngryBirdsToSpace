@@ -647,6 +647,10 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 		TEXT("IronBrickPreview"));
 	GlassPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
 		TEXT("GlassBrickPreview"));
+	ExplosiveDevicePreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("Stage55ExplosiveDevicePreview"));
+	PistonDevicePreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
+		TEXT("Stage55PistonDevicePreview"));
 	CoreIntentPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
 		TEXT("BeamC3CoreIntentPreview"));
 	TowerChildIntentPreview = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(
@@ -659,6 +663,7 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 		TEXT("BeamC3ProtectedVoidPreview"));
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
 		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		ExplosiveDevicePreview.Get(), PistonDevicePreview.Get(),
 		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
 		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
 	{
@@ -685,6 +690,14 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 		TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Glass.MI_Bricks_Glass"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Basic(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DynamiteMesh(
+		TEXT("/Game/StaticMesh/Dynamite/SM_Dynamite.SM_Dynamite"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SpringMesh(
+		TEXT("/Game/StaticMesh/Spring/SM_Spring.SM_Spring"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DynamiteMaterial(
+		TEXT("/Game/StaticMesh/Dynamite/MI_Dynamite.MI_Dynamite"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SpringMaterial(
+		TEXT("/Game/StaticMesh/Spring/MI_Spring.MI_Spring"));
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
 		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
 		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
@@ -713,6 +726,10 @@ AABTSM73BeamD1PreviewActor::AABTSM73BeamD1PreviewActor()
 	if (Glass.Succeeded()) CoreMergeRegionPreview->SetMaterial(0, Glass.Object);
 	if (Stone.Succeeded()) SharedPairIntentPreview->SetMaterial(0, Stone.Object);
 	if (Glass.Succeeded()) ProtectedVoidPreview->SetMaterial(0, Glass.Object);
+	if (DynamiteMesh.Succeeded()) ExplosiveDevicePreview->SetStaticMesh(DynamiteMesh.Object);
+	if (SpringMesh.Succeeded()) PistonDevicePreview->SetStaticMesh(SpringMesh.Object);
+	if (DynamiteMaterial.Succeeded()) ExplosiveDevicePreview->SetMaterial(0, DynamiteMaterial.Object);
+	if (SpringMaterial.Succeeded()) PistonDevicePreview->SetMaterial(0, SpringMaterial.Object);
 }
 
 void AABTSM73BeamD1PreviewActor::OnConstruction(const FTransform& Transform)
@@ -806,7 +823,8 @@ void AABTSM73BeamD1PreviewActor::EndPlay(
 void AABTSM73BeamD1PreviewActor::ClearPreview()
 {
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
-		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get()})
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		ExplosiveDevicePreview.Get(), PistonDevicePreview.Get()})
 	{
 		if (Preview != nullptr)
 		{
@@ -863,6 +881,7 @@ bool AABTSM73BeamD1PreviewActor::ConfigureStage5ProductionForAutomatedCapture(
 {
 	ClearPreview();
 	CompiledBricks.Reset();
+	CompiledDevices.Reset();
 	LastSummary = FABTSM73BeamD1Summary();
 	DemoBuilding = InDemoBuilding;
 	bShowEditorPreview = true;
@@ -939,11 +958,90 @@ bool AABTSM73BeamD1PreviewActor::GenerateStage5ProductionPreview(
 	return true;
 }
 
+bool AABTSM73BeamD1PreviewActor::GenerateStage55DeviceAssemblyPreview(
+	FString& OutError)
+{
+	FABTSM73BeamD1Stage55Result Result;
+	if (!FABTSM73BeamD1BrickCompiler().GenerateStage55DeviceAssembly(
+		Settings, Result, OutError))
+	{
+		LastSummary = Result.Summary;
+		return false;
+	}
+	LastSummary = Result.Summary;
+	CompiledBricks = Result.Stage5.Bricks;
+	CompiledDevices = Result.Devices;
+	if (bShowEditorPreview)
+	{
+		for (const FABTSM73BeamD1BrickBinding& Brick : CompiledBricks)
+		{
+			if (UHierarchicalInstancedStaticMeshComponent* Preview =
+				GetPreview(Brick.BrickSpec.Material))
+			{
+				FTransform InstanceTransform = Brick.LocalTransform;
+				InstanceTransform.SetScale3D(
+					Brick.BrickSpec.DimensionsCM / 100.0f);
+				Preview->AddInstance(InstanceTransform, false);
+			}
+		}
+		for (const FABTSM73BeamD1DeviceBinding& Device : CompiledDevices)
+		{
+			UHierarchicalInstancedStaticMeshComponent* Preview =
+				Device.Kind == EABTSM7ModuleKind::ExplosiveBarrel
+					? ExplosiveDevicePreview.Get() : PistonDevicePreview.Get();
+			if (Preview == nullptr || Preview->GetStaticMesh() == nullptr)
+			{
+				continue;
+			}
+			const FBox NativeBounds = Preview->GetStaticMesh()->GetBoundingBox();
+			const FVector NativeSize = NativeBounds.GetSize();
+			const double RadialSize = FMath::Max(
+				static_cast<double>(NativeSize.X), static_cast<double>(NativeSize.Y));
+			if (RadialSize <= UE_DOUBLE_SMALL_NUMBER
+				|| NativeSize.Z <= UE_DOUBLE_SMALL_NUMBER)
+			{
+				continue;
+			}
+			const FVector Scale(
+				Device.DeviceSpec.DiameterCM / RadialSize,
+				Device.DeviceSpec.DiameterCM / RadialSize,
+				Device.DeviceSpec.LengthCM / NativeSize.Z);
+			const FQuat Rotation = Device.LocalTransform.GetRotation();
+			const FVector Translation = Device.LocalTransform.GetLocation()
+				- Rotation.RotateVector(NativeBounds.GetCenter() * Scale);
+			Preview->AddInstance(FTransform(Rotation, Translation, Scale), false);
+		}
+	}
+	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
+		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		ExplosiveDevicePreview.Get(), PistonDevicePreview.Get()})
+	{
+		if (Preview != nullptr)
+		{
+			Preview->SetVisibility(Preview->GetInstanceCount() > 0, true);
+			Preview->SetHiddenInGame(false);
+			Preview->MarkRenderStateDirty();
+		}
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7.3-Beam-D1][Stage55DeviceAssemblyPreviewGenerated]")
+		TEXT(" Actor=%s Profile=%s Tier=%d Seed=%d Bricks=%d Devices=%d")
+		TEXT(" Stage5Hash=%lld AssemblyHash=%lld"),
+		*GetName(), *Settings.GameplayProfileId.ToString(),
+		Settings.DifficultyTier, Settings.BuildingSeed,
+		CompiledBricks.Num(), CompiledDevices.Num(),
+		Result.Stage5.Summary.BrickGeometryHash,
+		LastSummary.DeviceAssemblyHash);
+	OutError.Reset();
+	return true;
+}
+
 FBox AABTSM73BeamD1PreviewActor::GetAutomatedCaptureBounds() const
 {
 	FBox Bounds(EForceInit::ForceInit);
 	for (const UHierarchicalInstancedStaticMeshComponent* Preview : {
 		WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(), GlassPreview.Get(),
+		ExplosiveDevicePreview.Get(), PistonDevicePreview.Get(),
 		CoreIntentPreview.Get(), TowerChildIntentPreview.Get(), CoreMergeRegionPreview.Get(),
 		SharedPairIntentPreview.Get(), ProtectedVoidPreview.Get()})
 	{
@@ -997,6 +1095,7 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 {
 	ClearPreview();
 	CompiledBricks.Reset();
+	CompiledDevices.Reset();
 	LastSummary = FABTSM73BeamD1Summary();
 	FString Error;
 	if (DemoBuilding != EABTSM73BeamDemoBuilding::Custom)
@@ -1022,6 +1121,18 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier + 1,
 			Settings.BuildingSeed);
 	}
+	if (GenerationStopStage == EABTSM73BeamC3GenerationStage::DeviceAssembly)
+	{
+		if (!GenerateStage55DeviceAssemblyPreview(Error))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][Stage55DeviceAssemblyPreviewRejected]")
+				TEXT(" Actor=%s Profile=%s Tier=%d Seed=%d Reason=%s"),
+				*GetName(), *Settings.GameplayProfileId.ToString(),
+				Settings.DifficultyTier, Settings.BuildingSeed, *Error);
+		}
+		return;
+	}
 	if (GenerationStopStage == EABTSM73BeamC3GenerationStage::StaticDAG)
 	{
 		if (!GenerateStage5ProductionPreview(false, Error))
@@ -1035,7 +1146,8 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 		return;
 	}
 	FABTSM73BeamD1BrickCompiler Compiler;
-	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG)
+	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG
+		&& GenerationStopStage != EABTSM73BeamC3GenerationStage::DeviceAssembly)
 	{
 		FABTSM73BeamD1StagePreviewResult StageResult;
 		if (!Compiler.GenerateStagePreview(
@@ -2448,7 +2560,8 @@ bool AABTSM73BeamD1PreviewActor::InitializeRuntimeBuilding(
 	{
 		return false;
 	}
-	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG)
+	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG
+		&& GenerationStopStage != EABTSM73BeamC3GenerationStage::DeviceAssembly)
 	{
 		UE_LOG(LogABTSRuntime, Warning,
 			TEXT("[ABTS][M7.3-Beam-D1][StagePreviewRuntimeBlocked]")
@@ -2481,8 +2594,25 @@ bool AABTSM73BeamD1PreviewActor::InitializeRuntimeBuilding(
 		}
 		RuntimeModules.Add(Module);
 	}
+	for (const FABTSM73BeamD1DeviceBinding& Device : CompiledDevices)
+	{
+		const FTransform WorldTransform =
+			Device.LocalTransform * GetActorTransform();
+		AABTSM7BuildingModule* Module = MaterialSystem->SpawnVoxelDevice(
+			Device.DeviceSpec, WorldTransform);
+		if (Module == nullptr)
+		{
+			for (const TWeakObjectPtr<AABTSM7BuildingModule>& Spawned : RuntimeModules)
+			{
+				if (Spawned.IsValid()) Spawned->Destroy();
+			}
+			RuntimeModules.Reset();
+			return false;
+		}
+		RuntimeModules.Add(Module);
+	}
 	ClearPreview();
-	return RuntimeModules.Num() == CompiledBricks.Num();
+	return RuntimeModules.Num() == CompiledBricks.Num() + CompiledDevices.Num();
 }
 
 int32 AABTSM73BeamD1PreviewActor::GetRuntimeModuleCountForValidation() const

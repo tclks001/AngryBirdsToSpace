@@ -26,7 +26,10 @@ Stage 5 把 Stage 4 的程序化构件计划编译成真正可实例化的积木
 
 - Stage 4 必须 accepted，Roof/Crown hash 非零，且计划 member 数与 Stage-4 assembly member 数一致。
 - 活跃构件必须保留有效 Assembly owner；suppressed 构件不得出现在 compact assembly、brick 或 DAG 中。
-- 截面必须为 `36×36 cm`，轴向长度必须为 `36n cm`，禁止 diagonal，禁止正体积穿透。
+- 所有构件不仅尺寸必须为 `36×36×36n cm`，还必须属于同一三轴边界格：X/Y AABB 边界为
+  `18 + 36n cm`，Z AABB 边界为 `GroundZ + 36n cm`。连续 Load Resultant 只用于选择支撑需求，
+  不得直接成为 Z 柱中心；Beam-C 闭合柱中心必须量化到 `36n cm` 后重新通过合力闭合门。
+- 禁止 diagonal，禁止正体积穿透，禁止为设备分析另开 18 cm 半格兼容层。
 - `Stage4ActiveMemberCount == Frozen.ActiveMemberCount`，且 `ActiveGeometryHash` 必须继续匹配重新批准的 Stage 4.5 冻结值。
 - `ProductionMemberCount == Stage4ActiveMemberCount + ReachabilitySupportPostCount + StructuralClosureMemberCount == BrickCount == LoadNodeCount`。
 - `BearingContactCount == LoadEdgeCount`，真实接触复算必须一致。
@@ -39,7 +42,7 @@ Stage 5 把 Stage 4 的程序化构件计划编译成真正可实例化的积木
 1. 先运行最小 E1，验证 compact/mapping/brick/contact/DAG 身份链。
 2. 再运行冻结六栋清单，逐栋对照 Stage 4.5 active member count 和 geometry hash。
 3. ForceUnity Development Editor 全链接。
-4. Spawn 一个 E6 PreviewActor 并选择 Stage 5，要求生产 hash 与直接 `GenerateStage5()` 一致、2433 个 production brick 全部成为可见实例。
+4. Spawn 一个 E6 PreviewActor 并选择 Stage 5，要求生产 hash 与直接 `GenerateStage5()` 一致、2232 个 production brick 全部成为可见实例。
 5. 用显式离屏取证分别检查完整生产装配和仅新增闭合构件；E5/E6 不得出现轮廓外支撑林或跨越保留开口。
 6. 两个独立 fresh 进程重放固定六栋，要求 Production Hash 稳定，再冻结 Stage 5。
 7. 冻结后再进入 Chaos；Stage 5 静态通过不能替代物理稳定证据。
@@ -56,10 +59,13 @@ Stage 5 把 Stage 4 的程序化构件计划编译成真正可实例化的积木
 | 建筑 | Stage 4 active | Reachability | Structural closure | Production |
 | --- | ---: | ---: | ---: | ---: |
 | E1 | 52 | 0 | 0 | 52 |
-| E2 | 238 | 0 | 25 | 263 |
-| E3 | 373 | 2 | 37 | 412 |
-| E4 | 890 | 0 | 40 | 930 |
-| E5 | 1910 | 14 | 133 | 2057 |
-| E6 | 2354 | 14 | 65 | 2433 |
+| E2 | 235 | 0 | 21 | 256 |
+| E3 | 364 | 2 | 24 | 390 |
+| E4 | 872 | 0 | 31 | 903 |
+| E5 | 1807 | 14 | 82 | 1903 |
+| E6 | 2174 | 14 | 44 | 2232 |
 
-六栋均满足 member/brick/node 一一对应、contact/edge 一一对应、零不可达、零环和 Profile 预算。E5/E6 已通过离屏完整装配与仅新增构件检查；Chaos 仍为 `NotEvaluated`。
+六栋均满足统一三轴 36 cm 边界格、member/brick/node 一一对应、contact/edge 一一对应、零不可达、
+零环和 Profile 预算。网格修正没有改变六栋 WFC/整体 Bounds，但使 Floor/Infill 取得完整支座中心承压面，
+并使 Beam-C 闭合柱从连续重心坐标回到离散格点，因此 Stage 4.5 与 Stage 5 身份已重新冻结。Chaos 仍为
+`NotEvaluated`。

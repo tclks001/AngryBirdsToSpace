@@ -265,6 +265,38 @@ namespace ABTSM73BeamC
 		const double Section = Settings.BeamB.BeamA.BlockCrossSectionCM;
 		const double HalfSection = Section * 0.5;
 		const double Tolerance = Settings.BeamB.BeamA.JointMergeToleranceCM;
+		// Beam-C load resultants are continuous analysis coordinates. They may guide
+		// which lane needs support, but they are not legal construction stations.
+		// The frozen M7 voxel contract places every X/Y member boundary at
+		// HalfSection + N * Section, therefore every Z-member centre must remain on
+		// N * Section. Keep the analysis continuous and quantize only candidates.
+		auto TrySnapGridCoordinateWithin =
+			[Section, Tolerance](const double Value,
+				const double Minimum, const double Maximum, double& OutCoordinate)
+		{
+			const double GridMinimum = FMath::CeilToDouble(
+				(Minimum - Tolerance) / Section) * Section;
+			const double GridMaximum = FMath::FloorToDouble(
+				(Maximum + Tolerance) / Section) * Section;
+			if (GridMinimum > GridMaximum + Tolerance)
+			{
+				return false;
+			}
+			OutCoordinate = FMath::Clamp(
+				FMath::GridSnap(Value, Section), GridMinimum, GridMaximum);
+			return true;
+		};
+		auto TrySnapGridStationWithin =
+			[&TrySnapGridCoordinateWithin](const FVector2D& Station,
+				const double MinimumX, const double MaximumX,
+				const double MinimumY, const double MaximumY,
+				FVector2D& OutStation)
+		{
+			return TrySnapGridCoordinateWithin(
+				Station.X, MinimumX, MaximumX, OutStation.X)
+				&& TrySnapGridCoordinateWithin(
+					Station.Y, MinimumY, MaximumY, OutStation.Y);
+		};
 		TArray<FBox> Bounds;
 		Bounds.Reserve(Assembly.Members.Num());
 		for (const FABTSM73BeamAMember& Member : Assembly.Members)
@@ -328,16 +360,28 @@ namespace ABTSM73BeamC
 			const int32 AxisIndex = Upper.Axis == EABTSM73BeamAFrameAxis::X ? 0 : 1;
 			const int32 CrossIndex = AxisIndex == 0 ? 1 : 0;
 			TArray<FVector2D> DesiredStations;
-			auto AddDesiredStation = [&DesiredStations, Tolerance](
+			auto AddDesiredStation = [&DesiredStations, &UpperBounds,
+				&TrySnapGridStationWithin, HalfSection, Tolerance](
 				const FVector2D& Station)
 			{
+				FVector2D SnappedStation;
+				if (!TrySnapGridStationWithin(
+					Station,
+					UpperBounds.Min.X + HalfSection,
+					UpperBounds.Max.X - HalfSection,
+					UpperBounds.Min.Y + HalfSection,
+					UpperBounds.Max.Y - HalfSection,
+					SnappedStation))
+				{
+					return;
+				}
 				if (!DesiredStations.ContainsByPredicate(
-					[&Station, Tolerance](const FVector2D& Existing)
+					[&SnappedStation, Tolerance](const FVector2D& Existing)
 					{
-						return Existing.Equals(Station, Tolerance);
+						return Existing.Equals(SnappedStation, Tolerance);
 					}))
 				{
-					DesiredStations.Add(Station);
+					DesiredStations.Add(SnappedStation);
 				}
 			};
 			if (!Node.bSupportResultantValid)
@@ -448,12 +492,6 @@ namespace ABTSM73BeamC
 			}
 			for (FVector2D Desired : DesiredStations)
 			{
-				Desired.X = FMath::Clamp(Desired.X,
-					UpperBounds.Min.X + HalfSection,
-					UpperBounds.Max.X - HalfSection);
-				Desired.Y = FMath::Clamp(Desired.Y,
-					UpperBounds.Min.Y + HalfSection,
-					UpperBounds.Max.Y - HalfSection);
 				for (const FABTSM73BeamASupportVoid& SupportVoid :
 					Assembly.ReservedSupportVoids)
 				{
@@ -512,6 +550,18 @@ namespace ABTSM73BeamC
 							? NegativeStation : PositiveStation;
 					}
 				}
+				FVector2D SnappedDesired;
+				if (!TrySnapGridStationWithin(
+					Desired,
+					UpperBounds.Min.X + HalfSection,
+					UpperBounds.Max.X - HalfSection,
+					UpperBounds.Min.Y + HalfSection,
+					UpperBounds.Max.Y - HalfSection,
+					SnappedDesired))
+				{
+					continue;
+				}
+				Desired = SnappedDesired;
 				const double TopZ = UpperBounds.Min.Z;
 				TArray<FVector2D> ExistingZSupportStations;
 				for (const FABTSM73BeamAMember& Existing : Assembly.Members)
@@ -661,7 +711,7 @@ namespace ABTSM73BeamC
 						(UsableMinimum + UsableMaximum) * 0.5;
 					const double PreferredDirection =
 						Desired[AxisIndex] <= CenterCoordinate ? -1.0 : 1.0;
-					const double LaneStep = Section + Tolerance;
+					const double LaneStep = Section;
 					const int32 MaximumSteps = FMath::Max(1,
 						FMath::CeilToInt(
 							(UsableMaximum - UsableMinimum) / LaneStep));
@@ -728,9 +778,15 @@ namespace ABTSM73BeamC
 					{
 						continue;
 					}
-					FVector2D Candidate(
+					FVector2D CandidateUnsnapped(
 						FMath::Clamp(Desired.X, MinX, MaxX),
 						FMath::Clamp(Desired.Y, MinY, MaxY));
+					FVector2D Candidate;
+					if (!TrySnapGridStationWithin(
+						CandidateUnsnapped, MinX, MaxX, MinY, MaxY, Candidate))
+					{
+						continue;
+					}
 					const double CandidateBottomZ = LowerBounds.Max.Z;
 					if (IsOccupiedSupportStation(Candidate)
 						|| WouldOverlapExistingZ(
@@ -742,7 +798,7 @@ namespace ABTSM73BeamC
 						const double LaneCenter = (LaneMinimum + LaneMaximum) * 0.5;
 						const double PreferredDirection =
 							Candidate[AxisIndex] <= LaneCenter ? -1.0 : 1.0;
-						const double LaneStep = Section + Tolerance;
+						const double LaneStep = Section;
 						const int32 MaximumSteps = FMath::Max(1,
 							FMath::CeilToInt(
 								(LaneMaximum - LaneMinimum) / LaneStep));

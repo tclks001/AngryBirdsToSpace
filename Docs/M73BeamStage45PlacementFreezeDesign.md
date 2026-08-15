@@ -1,6 +1,6 @@
 # M7.3 Beam Stage 4.5 建筑放置冻结设计
 
-> 状态：2026-08-15 已冻结；以 Stage 4 收尾提交 `c613e8c1b21fccf91fde434b2d8f2e782d659991` 为输入基线。
+> 状态：2026-08-15 已按统一三轴 36 cm 边界格重新冻结；WFC 与六栋 Bounds 未改变。
 >
 > 范围：固定演示六栋的静态放置描述。本文不声明 Stage 5、Chaos、破坏、弱点、六栋动态并发或完整 PIE 已完成。
 
@@ -21,7 +21,7 @@ Stage 4.5 让集成工作树和 M3 在不等待 M7 完成生产积木承重 DAG�
 - 源 Beam Demo Manifest 版本：`1`
 - 源 Manifest Hash：`2324068295`
 - 冻结条目数：`6`
-- 放置目录 Hash：`13889440156022460967`
+- 放置目录 Hash：`11501529584318250152`
 - 目录入口：`FABTSM73BeamStage45PlacementFreeze::GetFrozenDescriptors()`
 - 单项入口：`FABTSM73BeamStage45PlacementFreeze::ResolveFrozen()`
 - 权威头文件：`Source/ABTSRuntime/Public/Building/ABTSM73BeamStage45PlacementFreeze.h`
@@ -68,12 +68,12 @@ Seed 字面相同但输入身份已经变化。
 
 | ManifestEntryId | StableId | Profile / Tier / Seed | Local Bounds Min → Max | Required Pad Half Extent | Active Members | Static Geometry Hash | Descriptor Hash |
 | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| `E1ColumnBreak` | `DemoE1ColumnBreak` | `ColumnBreak / 0 / 710000` | `(-414,-162,0) → (-90,162,648)` | `(450,198)` | 52 | `16780849829317489644` | `14931273032555350531` |
-| `E2DropTrigger` | `DemoE2DropTrigger` | `DropTrigger / 1 / 740000` | `(-774,-450,0) → (486,450,1476)` | `(810,486)` | 230 | `2343934176722587840` | `17636075314117899824` |
-| `E3SlideRelease` | `DemoE3SlideRelease` | `SlideRelease / 2 / 750137` | `(-1026,-414,0) → (1026,414,1332)` | `(1062,450)` | 387 | `4060368085179305333` | `3277746625945437825` |
-| `E4TipOver` | `DemoE4TipOver` | `TipOver / 3 / 730000` | `(-846,-378,0) → (846,378,2376)` | `(882,414)` | 877 | `3905124247026714506` | `5284820191875006966` |
-| `E5SeamRelease` | `DemoE5SeamRelease` | `SeamRelease / 4 / 720000` | `(-1350,-630,0) → (1350,630,2376)` | `(1386,666)` | 1894 | `10244968675392635774` | `15983895412278031603` |
-| `E6TipOver` | `DemoE6TipOver` | `TipOver / 5 / 750000` | `(-1062,-486,0) → (1062,486,3384)` | `(1098,522)` | 2316 | `10028734189939141390` | `9843082278464018151` |
+| `E1ColumnBreak` | `DemoE1ColumnBreak` | `ColumnBreak / 0 / 710000` | `(-414,-162,0) → (-90,162,648)` | `(450,198)` | 52 | `10276011350224018878` | `10113758205408230493` |
+| `E2DropTrigger` | `DemoE2DropTrigger` | `DropTrigger / 1 / 740000` | `(-774,-450,0) → (486,450,1476)` | `(810,486)` | 235 | `1243337162086650128` | `1108134973396587699` |
+| `E3SlideRelease` | `DemoE3SlideRelease` | `SlideRelease / 2 / 750137` | `(-1026,-414,0) → (1026,414,1332)` | `(1062,450)` | 364 | `3075258440093988143` | `17683520519518435068` |
+| `E4TipOver` | `DemoE4TipOver` | `TipOver / 3 / 730000` | `(-846,-378,0) → (846,378,2376)` | `(882,414)` | 872 | `4328116049969586954` | `11089610541129920709` |
+| `E5SeamRelease` | `DemoE5SeamRelease` | `SeamRelease / 4 / 720000` | `(-1350,-630,0) → (1350,630,2376)` | `(1386,666)` | 1807 | `461929562625370845` | `7322844578368466709` |
+| `E6TipOver` | `DemoE6TipOver` | `TipOver / 5 / 750000` | `(-1062,-486,0) → (1062,486,3384)` | `(1098,522)` | 2174 | `6610608065286482828` | `3963542007450344969` |
 
 表中 Bounds、Pad 与 Hash 均来自同一自动化提取结果；源码中的冻结目录还保存每项 Profile Catalog、Resolved
 Settings、Grammar、WFC、Stage4 Plan 和 Static Structure Hash，表格仅省略这些长字段。

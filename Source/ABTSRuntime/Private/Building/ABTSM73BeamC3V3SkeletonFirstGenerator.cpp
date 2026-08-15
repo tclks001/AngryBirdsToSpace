@@ -4004,6 +4004,11 @@ namespace
 			GeometryToleranceCM / static_cast<double>(BlockUnitsCM));
 	}
 
+	bool IsUnitizedBoundary(const double Value, const double Origin)
+	{
+		return IsIntegerMultipleOfBlock(Value - Origin);
+	}
+
 	bool ValidateUnitizedMemberGeometry(
 		const FPlan& Plan,
 		const int32 ComponentId,
@@ -4012,8 +4017,6 @@ namespace
 		const FVector& End,
 		FString& OutDiagnostic)
 	{
-		(void)Plan;
-		(void)ComponentId;
 		FPlannedMember Probe;
 		Probe.Axis = Axis;
 		Probe.LocalStart = Start;
@@ -4033,17 +4036,27 @@ namespace
 		const bool bDimensions = IsIntegerMultipleOfBlock(Dimensions.X)
 			&& IsIntegerMultipleOfBlock(Dimensions.Y)
 			&& IsIntegerMultipleOfBlock(Dimensions.Z);
-		if (bAxisAligned && bDimensions)
+		const double XYBoundaryOrigin = BlockUnitsCM * 0.5;
+		const double GroundZ = Plan.Components.IsValidIndex(ComponentId)
+			? Plan.Components[ComponentId].GroundPlaneZCM : 0.0;
+		const bool bUnifiedGrid = IsUnitizedBoundary(Bounds.Min.X, XYBoundaryOrigin)
+			&& IsUnitizedBoundary(Bounds.Max.X, XYBoundaryOrigin)
+			&& IsUnitizedBoundary(Bounds.Min.Y, XYBoundaryOrigin)
+			&& IsUnitizedBoundary(Bounds.Max.Y, XYBoundaryOrigin)
+			&& IsUnitizedBoundary(Bounds.Min.Z, GroundZ)
+			&& IsUnitizedBoundary(Bounds.Max.Z, GroundZ);
+		if (bAxisAligned && bDimensions && bUnifiedGrid)
 		{
 			return true;
 		}
 		OutDiagnostic = FString::Printf(
-			TEXT("Axis=%d:Start=%.3f,%.3f,%.3f:End=%.3f,%.3f,%.3f:Bounds=%.3f,%.3f,%.3f..%.3f,%.3f,%.3f:Dimensions=%.3f,%.3f,%.3f:AxisAligned=%d:DimensionsValid=%d"),
+			TEXT("Axis=%d:Start=%.3f,%.3f,%.3f:End=%.3f,%.3f,%.3f:Bounds=%.3f,%.3f,%.3f..%.3f,%.3f,%.3f:Dimensions=%.3f,%.3f,%.3f:AxisAligned=%d:DimensionsValid=%d:UnifiedGrid=%d:GridOrigin=%.3f,%.3f,%.3f"),
 			static_cast<int32>(Axis), Start.X, Start.Y, Start.Z,
 			End.X, End.Y, End.Z, Bounds.Min.X, Bounds.Min.Y, Bounds.Min.Z,
 			Bounds.Max.X, Bounds.Max.Y, Bounds.Max.Z, Dimensions.X,
 			Dimensions.Y, Dimensions.Z, bAxisAligned ? 1 : 0,
-			bDimensions ? 1 : 0);
+			bDimensions ? 1 : 0, bUnifiedGrid ? 1 : 0,
+			XYBoundaryOrigin, XYBoundaryOrigin, GroundZ);
 		return false;
 	}
 
@@ -4153,6 +4166,9 @@ namespace
 		const bool bLongSpanMember = SkeletonKind == ESkeletonMemberKind::SharedCourse
 			|| SkeletonKind == ESkeletonMemberKind::CoreCourse
 			|| SkeletonKind == ESkeletonMemberKind::ThroughCourse
+			|| SkeletonKind == ESkeletonMemberKind::FloorCourse
+			|| SkeletonKind == ESkeletonMemberKind::FloorInfillCourse
+			|| SkeletonKind == ESkeletonMemberKind::StyleInfillCourse
 			|| SkeletonKind == ESkeletonMemberKind::RoofCourse;
 		const double Maximum = Axis == EABTSM73BeamAFrameAxis::Z || bLongSpanMember
 			? 720.0 : 648.0;
@@ -25054,8 +25070,12 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FloorStyleInfill(
 			FVector End = FVector::ZeroVector;
 			const int32 AxisIndex = static_cast<int32>(Pair.Axis);
 			const int32 TangentAxisIndex = AxisIndex == 0 ? 1 : 0;
-			Start[AxisIndex] = Pair.MinimumCM;
-			End[AxisIndex] = Pair.MaximumCM;
+			// Pair endpoints are lower-carrier centre stations. The supported
+			// floor brick must cover the complete 36 cm carrier width at both
+			// ends; using the centres as end planes introduced the complementary
+			// 18 cm boundary phase and only half-depth bearing.
+			Start[AxisIndex] = Pair.MinimumCM - BlockUnitsCM * 0.5;
+			End[AxisIndex] = Pair.MaximumCM + BlockUnitsCM * 0.5;
 			Start[TangentAxisIndex] = End[TangentAxisIndex] = Tangent;
 			Start.Z = End.Z = Z;
 			FPlannedMember Probe;
@@ -25699,6 +25719,28 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4RoofCrown(
 		{
 			RoofBaseBounds = Crown->LocalBounds;
 		}
+		// All Stage-1..5 bricks share one boundary lattice: XY boundaries are
+		// 18 + n*36 cm, while Z boundaries start at the component ground plane.
+		// Semantic/core envelopes can end on the complementary half phase. Expand
+		// the deterministic roof base outward before deriving parity so an odd cap
+		// can never introduce a second lattice phase.
+		const double XYBoundaryOrigin = BlockUnitsCM * 0.5;
+		auto SnapBoundaryDown = [XYBoundaryOrigin](const double Value)
+		{
+			return FMath::FloorToDouble(
+				(Value - XYBoundaryOrigin) / BlockUnitsCM) * BlockUnitsCM
+				+ XYBoundaryOrigin;
+		};
+		auto SnapBoundaryUp = [XYBoundaryOrigin](const double Value)
+		{
+			return FMath::CeilToDouble(
+				(Value - XYBoundaryOrigin) / BlockUnitsCM) * BlockUnitsCM
+				+ XYBoundaryOrigin;
+		};
+		RoofBaseBounds.Min.X = SnapBoundaryDown(RoofBaseBounds.Min.X);
+		RoofBaseBounds.Max.X = SnapBoundaryUp(RoofBaseBounds.Max.X);
+		RoofBaseBounds.Min.Y = SnapBoundaryDown(RoofBaseBounds.Min.Y);
+		RoofBaseBounds.Max.Y = SnapBoundaryUp(RoofBaseBounds.Max.Y);
 		const int32 RoofBaseUnitsX = FMath::Max(1, FMath::RoundToInt(
 			RoofBaseBounds.GetSize().X / BlockUnitsCM));
 		const int32 RoofBaseUnitsY = FMath::Max(1, FMath::RoundToInt(
@@ -26113,15 +26155,12 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4RoofCrown(
 						BestA->FixedAxisStationCM, BestB->FixedAxisStationCM);
 					const double SeatMaximum = FMath::Max(
 						BestA->FixedAxisStationCM, BestB->FixedAxisStationCM);
-					const double RequiredCarrierLength =
-						SeatMaximum - SeatMinimum + BlockUnitsCM;
-					const int32 CarrierUnits = FMath::Max(1, FMath::CeilToInt(
-						(RequiredCarrierLength - GeometryToleranceCM) / BlockUnitsCM));
-					const double CarrierCenter = (SeatMinimum + SeatMaximum) * 0.5;
-					double AxisMinimum = CarrierCenter
-						- CarrierUnits * BlockUnitsCM * 0.5;
-					double AxisMaximum = CarrierCenter
-						+ CarrierUnits * BlockUnitsCM * 0.5;
+					const double RequiredAxisMinimum =
+						SeatMinimum - BlockUnitsCM * 0.5;
+					const double RequiredAxisMaximum =
+						SeatMaximum + BlockUnitsCM * 0.5;
+					double AxisMinimum = SnapBoundaryDown(RequiredAxisMinimum);
+					double AxisMaximum = SnapBoundaryUp(RequiredAxisMaximum);
 					// The new rail spans the previous course's two transverse seat
 					// stations. Its pair stations come from the deterministic voxel
 					// footprint, not from the WFC Crown envelope.
@@ -26134,6 +26173,10 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4RoofCrown(
 						double CrossMaximum = FMath::Min(
 							SemanticBounds.Max[CrossAxisIndex] - BlockUnitsCM * 0.5,
 							BestOverlapMaximum - BlockUnitsCM * 0.5);
+						CrossMinimum = FMath::CeilToDouble(
+							CrossMinimum / BlockUnitsCM) * BlockUnitsCM;
+						CrossMaximum = FMath::FloorToDouble(
+							CrossMaximum / BlockUnitsCM) * BlockUnitsCM;
 						TArray<double> DesiredCrossStations;
 						if (CrossMaximum >= CrossMinimum - GeometryToleranceCM)
 						{

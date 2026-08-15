@@ -57,7 +57,7 @@ public:
 	static constexpr int32 ExpectedEntryCount = 6;
 	static constexpr int32 FrozenSourceManifestVersion = 1;
 	static constexpr int64 FrozenSourceManifestHash = 2324068295;
-	static constexpr uint64 FrozenCatalogHash = 2538906766243156379ull;
+	static constexpr uint64 FrozenCatalogHash = 11501529584318250152ull;
 
 	/** Committed values which Integration/M3 may consume after merging this branch. */
 	static const TArray<FABTSM73BeamStage45PlacementDescriptor>& GetFrozenDescriptors();

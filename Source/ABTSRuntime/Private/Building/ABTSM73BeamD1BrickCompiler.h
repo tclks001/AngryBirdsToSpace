@@ -53,6 +53,17 @@ struct FABTSM73BeamD1Stage5Result
 	bool bPhysicalStabilityEvaluated = false;
 };
 
+/** Derived device layer. Stage5 is retained byte-for-byte as its authority. */
+struct FABTSM73BeamD1Stage55Result
+{
+	FABTSM73BeamD1Stage5Result Stage5;
+	FABTSM73BeamD1Summary Summary;
+	TArray<FABTSM73BeamD1DeviceBinding> Devices;
+	uint64 DeviceSlotHash = 0;
+	uint64 DeviceLoadDAGHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+};
+
 /** Pure-data Beam-D1 profile-to-real-Brick compiler. */
 class FABTSM73BeamD1BrickCompiler
 {
@@ -73,6 +84,12 @@ public:
 	bool GenerateStage5(
 		const FABTSM73BeamD1Settings& Settings,
 		FABTSM73BeamD1Stage5Result& OutResult,
+		FString& OutError) const;
+
+	/** Adds one deterministic voxelized demo device without mutating Stage 5. */
+	bool GenerateStage55DeviceAssembly(
+		const FABTSM73BeamD1Settings& Settings,
+		FABTSM73BeamD1Stage55Result& OutResult,
 		FString& OutError) const;
 
 	bool CompileResolved(
