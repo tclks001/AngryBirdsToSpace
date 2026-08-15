@@ -12,8 +12,10 @@
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -462,6 +464,52 @@ int32 AABTSM7GameMode::SpawnJuryDemoFixedSixStaticBuildings(
 	return RegisteredCount;
 }
 
+void AABTSM7GameMode::BindSatellitePracticeE1CrystalTarget()
+{
+	AActor* CrystalTarget = nullptr;
+	FVector CrystalHalfExtentCM = FVector::ZeroVector;
+	for (const FABTSM7TaskGraphBuildingDebugEntry& Entry :
+		TaskGraphBuildingDebugEntries)
+	{
+		AABTSM73StableBuildingActor* Building = Entry.Building.Get();
+		if (Building != nullptr
+			&& Building->CopyJuryDemoE1CrystalTarget(
+				CrystalTarget,
+				CrystalHalfExtentCM))
+		{
+			break;
+		}
+	}
+	if (CrystalTarget == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=CrystalTargetMissing"));
+		return;
+	}
+
+	AABTSM3MonthlySatellitePracticeRuntime* SatelliteRuntime = nullptr;
+	for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(GetWorld());
+		It; ++It)
+	{
+		if (SatelliteRuntime != nullptr)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=MultipleSatelliteRuntimes"));
+			return;
+		}
+		SatelliteRuntime = *It;
+	}
+	if (SatelliteRuntime == nullptr)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=SatelliteRuntimeMissing"));
+		return;
+	}
+	SatelliteRuntime->BindProductionE1CrystalTarget(
+		*CrystalTarget,
+		CrystalHalfExtentCM);
+}
+
 void AABTSM7GameMode::DrawTaskGraphPositionDebug()
 {
 	AABTSM3Planet* Planet = TaskGraphDebugPlanet.Get();
@@ -567,6 +615,12 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 			SlingshotSystem,
 			bFixedSixSetupFailed);
 		bBuildingSetupFailed = bBuildingSetupFailed || bFixedSixSetupFailed;
+		if (!bFixedSixSetupFailed)
+		{
+			GetWorldTimerManager().SetTimerForNextTick(
+				this,
+				&AABTSM7GameMode::BindSatellitePracticeE1CrystalTarget);
+		}
 	}
 	else if (System && Planet && bSpawnTaskGraphBuildings
 		&& bBuildingContractReady)

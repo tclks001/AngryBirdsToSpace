@@ -586,6 +586,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		RuntimeE5Target,
 		ResolvedE5Transform);
 	RuntimeE5Target->SetActorEnableCollision(true);
+	RuntimeE5GameplayTarget = RuntimeE5Target;
 	RuntimeE5Target->AttachToActor(
 		RuntimeSatellite,
 		FAttachmentTransformRules::KeepWorldTransform);
@@ -880,7 +881,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnPracticeSlingshot()
 
 bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 {
-	if (!IsValid(RuntimeSatellite) || !IsValid(RuntimeE5Target)
+	AActor* const GameplayTarget = GetRuntimeE5Target();
+	if (!IsValid(RuntimeSatellite) || !IsValid(GameplayTarget)
 		|| GetWorld() == nullptr)
 	{
 		bM6TargetBound = false;
@@ -906,7 +908,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 			BoundTarget,
 			BoundHalfExtent)
 			&& BoundSatellite == RuntimeSatellite.Get()
-			&& BoundTarget == RuntimeE5Target.Get()
+			&& BoundTarget == GameplayTarget
 			&& BoundHalfExtent.Equals(RuntimeSnapshot.E5HalfExtentCM, 0.1f);
 		if (bM6TargetBound && bProductionLaunchProfileBound)
 		{
@@ -926,7 +928,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 		BoundSlingshotSystem = *It;
 		BoundSlingshotSystem->ConfigureSatellitePracticeTarget(
 			*RuntimeSatellite,
-			*RuntimeE5Target,
+			*GameplayTarget,
 			RuntimeSnapshot.E5HalfExtentCM,
 			FrozenPreset.IntegrationStepSeconds,
 			FrozenPreset.MaximumFlightSeconds);
@@ -963,6 +965,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 
 bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 {
+	AActor* const GameplayTarget = GetRuntimeE5Target();
 	bTrajectoryCertificationAttempted = true;
 	bTrajectoryCertified = false;
 	RuntimeSnapshot.bTrajectoryCertified = false;
@@ -970,7 +973,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		|| !IsValid(PrimaryPlanet)
 		|| !IsValid(RuntimePracticeCord)
 		|| !IsValid(RuntimeSatellite)
-		|| !IsValid(RuntimeE5Target))
+		|| !IsValid(GameplayTarget))
 	{
 		return false;
 	}
@@ -997,11 +1000,23 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 	const FABTSSatellitePracticePreset FrozenPreset =
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeFrozenSatellitePracticePresetV0();
+	FABTSSatellitePracticePreset CertificationPreset = FrozenPreset;
+	const bool bProductionCrystalTarget =
+		RuntimeSnapshot.E5HalfExtentCM.GetMax() <= 36.0f + KINDA_SMALL_NUMBER;
+	if (bProductionCrystalTarget)
+	{
+		// V3 replaces the 840 cm calibration proxy with a 72 cm Crystal cap.
+		// Preserve the player pull lattice and aim domain, but sample continuous
+		// aim at 8.7 x 5.3 cm intervals. The release gate still requires at least
+		// three connected witnesses instead of accepting a fragile single ray.
+		CertificationPreset.AimInPlaneSampleCount = 61;
+		CertificationPreset.AimOutOfPlaneSampleCount = 31;
+	}
 	FABTSCalibrationScenario Scenario;
 	Scenario.LaunchWorldLocation = LaunchFrame.RestPouchWorldLocation;
 	Scenario.LaunchFrame = LaunchFrame;
-	Scenario.TargetWorldLocation = RuntimeE5Target->GetActorLocation();
-	Scenario.TargetWorldTransform = RuntimeE5Target->GetActorTransform();
+	Scenario.TargetWorldLocation = GameplayTarget->GetActorLocation();
+	Scenario.TargetWorldTransform = GameplayTarget->GetActorTransform();
 	Scenario.TargetHalfExtentCM = RuntimeSnapshot.E5HalfExtentCM;
 	Scenario.TargetProxyRadiusCM = RuntimeSnapshot.E5HalfExtentCM.GetMax();
 	Scenario.Gravity.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
@@ -1018,7 +1033,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
 			Scenario,
 			ProductionCatalog,
-			FrozenPreset);
+			CertificationPreset);
 	// Real monthly terrain perturbs the ideal-sphere calibration carrier.  The
 	// practice gate keeps every gravity-dependence and uniqueness condition,
 	// but accepts an aim-connected island at one reachable 0.01 pull notch.
@@ -1063,9 +1078,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 				RuntimeSnapshot.PracticeStakeACellId,
 				RuntimeSnapshot.PracticeStakeBCellId));
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionCrystal=%d AimSamples=%dx%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f BestClearance=%.1f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
 		bM3PracticePassed ? 1 : 0,
 		Summary.bPassed ? 1 : 0,
+		bProductionCrystalTarget ? 1 : 0,
+		CertificationPreset.AimInPlaneSampleCount,
+		CertificationPreset.AimOutOfPlaneSampleCount,
 		static_cast<unsigned long long>(ProductionHash),
 		Summary.ReinforcedGravityOnHits,
 		Summary.GravityDependentHits,
@@ -1079,6 +1097,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		Summary.BestGravityOnAimInPlaneCM,
 		Summary.BestGravityOnAimOutOfPlaneCM,
 		Summary.BestGravityOnPullAlpha,
+		Summary.MinimumGravityOnTargetClearanceCM,
 		Summary.MinimumGravityOffMissCM,
 		Summary.SimpleFullPowerHits,
 		Summary.ReinforcedOutsideCertifiedPullHits,
@@ -1145,7 +1164,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 {
 	bRuntimeReady = RuntimeSnapshot.bValid
 		&& IsValid(RuntimeSatellite)
-		&& IsValid(RuntimeE5Target)
+		&& IsValid(GetRuntimeE5Target())
 		&& bSatelliteCollisionEnabled
 		&& bE5CollisionEnabled
 		&& bM6TargetBound
@@ -1153,6 +1172,74 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bTrajectoryCertified
 		&& bPracticeSlingshotReady
 		&& bPracticePouchInteractionReady;
+}
+
+bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
+	AActor& InTargetActor,
+	const FVector& InTargetHalfExtentCM)
+{
+	if (!bRuntimeActorsSpawned
+		|| GetWorld() == nullptr
+		|| InTargetActor.GetWorld() != GetWorld()
+		|| InTargetHalfExtentCM.GetMin() <= 0.0f)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=InvalidInput Target=%s HalfExtent=%s"),
+			*GetNameSafe(&InTargetActor),
+			*InTargetHalfExtentCM.ToCompactString());
+		return false;
+	}
+
+	AActor* const PreviousTarget = GetRuntimeE5Target();
+	const FVector PreviousTargetLocation = IsValid(PreviousTarget)
+		? PreviousTarget->GetActorLocation()
+		: FVector::ZeroVector;
+	if (IsValid(BoundSlingshotSystem))
+	{
+		BoundSlingshotSystem->ClearSatellitePracticeTarget(PreviousTarget);
+	}
+	RuntimeE5GameplayTarget = &InTargetActor;
+	RuntimeSnapshot.E5WorldTransform = InTargetActor.GetActorTransform();
+	RuntimeSnapshot.E5HalfExtentCM = InTargetHalfExtentCM;
+	bE5CollisionEnabled =
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			HasPawnBlockingCollision(InTargetActor);
+	bM6TargetBound = false;
+	bTrajectoryCertified = false;
+	bTrajectoryCertificationAttempted = false;
+	RuntimeSnapshot.bTrajectoryCertified = false;
+
+	if (IsValid(RuntimeE5Target))
+	{
+		RuntimeE5Target->SetActorEnableCollision(false);
+		RuntimeE5Target->SetActorHiddenInGame(true);
+		RuntimeE5Target->Destroy();
+		RuntimeE5Target = nullptr;
+	}
+
+	const bool bBound = BindM6Target();
+	RefreshReadyState();
+	const FString BindingSummary = FString::Printf(
+		TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Ready=%d Target=%s Location=%s HalfExtent=%s LegacyTargetDeltaCM=%.1f Collision=%d M6Target=%d TrajectoryCertified=%d LegacyProxyRetired=1"),
+		bRuntimeReady ? 1 : 0,
+		*GetNameSafe(&InTargetActor),
+		*InTargetActor.GetActorLocation().ToCompactString(),
+		*InTargetHalfExtentCM.ToCompactString(),
+		FVector::Distance(
+			PreviousTargetLocation,
+			InTargetActor.GetActorLocation()),
+		bE5CollisionEnabled ? 1 : 0,
+		bM6TargetBound ? 1 : 0,
+		bTrajectoryCertified ? 1 : 0);
+	if (bRuntimeReady)
+	{
+		UE_LOG(LogABTSRuntime, Log, TEXT("%s"), *BindingSummary);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error, TEXT("%s"), *BindingSummary);
+	}
+	return bBound && bRuntimeReady;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::Tick(const float DeltaSeconds)
@@ -1223,7 +1310,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 	if (IsValid(BoundSlingshotSystem))
 	{
 		BoundSlingshotSystem->ClearSatellitePracticeTarget(
-			RuntimeE5Target.Get());
+			GetRuntimeE5Target());
 	}
 	BoundSlingshotSystem = nullptr;
 	if (IsValid(RuntimeE5Target)
@@ -1232,6 +1319,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 		RuntimeE5Target->Destroy();
 	}
 	RuntimeE5Target = nullptr;
+	RuntimeE5GameplayTarget = nullptr;
 	if (IsValid(RuntimePracticeCord)
 		&& !RuntimePracticeCord->IsActorBeingDestroyed())
 	{
