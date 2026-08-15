@@ -358,7 +358,7 @@ bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	const FVector& Impulse,
 	const FABTSM7SiteUniformGravityPolicy& Policy)
 {
-	if (!Policy.IsUsable())
+	if (bCompoundChild || !Policy.IsUsable())
 	{
 		return false;
 	}
@@ -367,8 +367,32 @@ bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	return true;
 }
 
+bool AABTSM7BuildingModule::TryWeldStaticChild(
+	AABTSM7BuildingModule& Child)
+{
+	if (&Child == this || bBroken || Child.bBroken || bDynamic || Child.bDynamic
+		|| bCompoundChild || Child.bCompoundChild
+		|| BuildingMaterial != Child.BuildingMaterial
+		|| !IsValid(Visual) || !IsValid(Child.Visual)
+		|| !Visual->IsRegistered() || !Child.Visual->IsRegistered()
+		|| Visual->IsWelded() || Child.Visual->IsWelded())
+	{
+		return false;
+	}
+	Child.Visual->WeldTo(Visual, NAME_None, true);
+	if (!Child.Visual->IsWelded())
+	{
+		return false;
+	}
+	Child.bCompoundChild = true;
+	Child.CompoundRoot = this;
+	CompoundChildren.Add(&Child);
+	return true;
+}
+
 void AABTSM7BuildingModule::Freeze()
 {
+	if (bCompoundChild) return;
 	bDynamic = false;
 	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
@@ -405,6 +429,42 @@ bool AABTSM7BuildingModule::BreakModule()
 {
 	if (bBroken) return false;
 	bBroken = true;
+	if (bCompoundChild)
+	{
+		if (AABTSM7BuildingModule* Root = CompoundRoot.Get())
+		{
+			Root->CompoundChildren.Remove(this);
+		}
+		if (Visual->IsWelded()) Visual->UnWeldFromParent();
+		bCompoundChild = false;
+		CompoundRoot.Reset();
+	}
+	else
+	{
+		for (const TWeakObjectPtr<AABTSM7BuildingModule>& ChildPtr :
+			CompoundChildren)
+		{
+			AABTSM7BuildingModule* Child = ChildPtr.Get();
+			if (!IsValid(Child) || Child->bBroken) continue;
+			if (Child->Visual->IsWelded()) Child->Visual->UnWeldFromParent();
+			Child->bCompoundChild = false;
+			Child->CompoundRoot.Reset();
+			if (bDynamic)
+			{
+				if (bPlanarGravity)
+				{
+					Child->ActivateDynamicPlanar(FVector::ZeroVector,
+						PlanarGravityUp, GravityAccelerationCMPerSec2);
+				}
+				else
+				{
+					Child->ActivateDynamic(FVector::ZeroVector,
+						PlanetCenter, GravityAccelerationCMPerSec2);
+				}
+			}
+		}
+		CompoundChildren.Reset();
+	}
 	bDynamic = false;
 	Destroy();
 	return true;

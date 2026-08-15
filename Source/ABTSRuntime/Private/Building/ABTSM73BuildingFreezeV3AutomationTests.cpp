@@ -223,6 +223,93 @@ bool FABTSM73BuildingFreezeV3Test::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BuildingFreezeV3E6CompoundV1CandidateTest,
+	"ABTS.M73DAG.BuildingFreezeV3.E6CompoundV1Candidate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BuildingFreezeV3E6CompoundV1CandidateTest::RunTest(
+	const FString& Parameters)
+{
+	FABTSM73BuildingFreezeV3Descriptor Frozen;
+	FABTSM73BuildingFreezeV3Descriptor Candidate;
+	TArray<FABTSM73BuildingFreezeV3Descriptor> CandidateCatalog;
+	uint64 CandidateCatalogHash = 0;
+	FString Error;
+	if (!TestTrue(TEXT("Frozen E6 remains derivable while Integration owns the seal"),
+		FABTSM73BuildingFreezeV3::DeriveAndValidate(
+			EABTSM73BeamDemoBuilding::E6TipOver, Frozen, Error))
+		|| !TestTrue(TEXT("E6 compound V1 atomic candidate derives"),
+			FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				EABTSM73BeamDemoBuilding::E6TipOver, Candidate, Error, true)))
+	{
+		AddError(Error);
+		return false;
+	}
+	if (!TestTrue(TEXT("E6 compound V1 atomic candidate catalog derives"),
+		FABTSM73BuildingFreezeV3::
+			DeriveAndValidateE6CompoundV1CandidateCatalog(
+				CandidateCatalog, CandidateCatalogHash, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestEqual(TEXT("Candidate catalog contains the fixed six"),
+		CandidateCatalog.Num(), FABTSM73BuildingFreezeV3::ExpectedEntryCount);
+	TestEqual(TEXT("Candidate catalog publishes the exact handoff identity"),
+		CandidateCatalogHash,
+		FABTSM73BuildingFreezeV3::E6CompoundV1CandidateCatalogHash);
+	TestEqual(TEXT("The published E6 remains one body per visible module"),
+		Frozen.PhysicsAssemblyHash, static_cast<uint64>(0));
+	TestEqual(TEXT("Candidate keeps the exact static geometry identity"),
+		Candidate.StaticGeometryHash, Frozen.StaticGeometryHash);
+	TestEqual(TEXT("Candidate keeps every E6 Brick"),
+		Candidate.Bricks.Num(), Frozen.Bricks.Num());
+	TestEqual(TEXT("Candidate keeps every E6 device"),
+		Candidate.Devices.Num(), Frozen.Devices.Num());
+	TestEqual(TEXT("Candidate publishes the exact compound body count"),
+		Candidate.PhysicsBodyCount,
+		FABTSM73BuildingFreezeV3::E6CompoundV1PhysicsBodyCount);
+	TestEqual(TEXT("Candidate publishes the exact physics assembly identity"),
+		Candidate.PhysicsAssemblyHash,
+		FABTSM73BuildingFreezeV3::E6CompoundV1PhysicsAssemblyHash);
+	TestEqual(TEXT("Candidate publishes the exact production identity"),
+		Candidate.ProductionHash,
+		FABTSM73BuildingFreezeV3::E6CompoundV1ProductionHash);
+	TestEqual(TEXT("Candidate publishes the exact descriptor identity"),
+		Candidate.DescriptorHash,
+		FABTSM73BuildingFreezeV3::E6CompoundV1DescriptorHash);
+	TSet<int32> CoveredBricks;
+	for (const FABTSM73BuildingFreezeV3PhysicsCluster& Cluster :
+		Candidate.PhysicsClusters)
+	{
+		TestTrue(TEXT("Every candidate cluster has certified mass"),
+			Cluster.StaticSelfLoadKG > 0.0);
+		TestTrue(TEXT("Every candidate cluster reaches ground or a positive external support"),
+			Cluster.bDirectGroundSupport
+				|| Cluster.PositiveExternalSupportCount > 0);
+		TestTrue(TEXT("Every candidate cluster contains its root"),
+			Cluster.BrickIds.Contains(Cluster.RootBrickId));
+		for (const int32 BrickId : Cluster.BrickIds)
+		{
+			TestFalse(TEXT("Candidate clusters do not overlap"),
+				CoveredBricks.Contains(BrickId));
+			CoveredBricks.Add(BrickId);
+		}
+	}
+	TestEqual(TEXT("Candidate clusters cover every visible Brick exactly once"),
+		CoveredBricks.Num(), Candidate.Bricks.Num());
+	AddInfo(FString::Printf(
+		TEXT("E6CompoundV1Candidate:Catalog=%llu:Static=%llu:Production=%llu:Descriptor=%llu:PhysicsBodies=%d:PhysicsAssembly=%llu:VisibleModules=%d"),
+		FABTSM73BuildingFreezeV3::E6CompoundV1CandidateCatalogHash,
+		Candidate.StaticGeometryHash, Candidate.ProductionHash,
+		Candidate.DescriptorHash, Candidate.PhysicsBodyCount,
+		Candidate.PhysicsAssemblyHash,
+		Candidate.Bricks.Num() + Candidate.Devices.Num()
+			+ Candidate.Caps.Num()));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BuildingFreezeV3E1StaticExternalLoadTest,
 	"ABTS.M73DAG.BuildingFreezeV3.E1StaticExternalLoads",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

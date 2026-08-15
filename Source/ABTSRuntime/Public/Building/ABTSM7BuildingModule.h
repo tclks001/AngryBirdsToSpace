@@ -102,6 +102,8 @@ public:
 	bool ActivateDynamicSiteUniform(
 		const FVector& Impulse,
 		const FABTSM7SiteUniformGravityPolicy& Policy);
+	/** Joins an authored child shape into this module's initial rigid body. */
+	bool TryWeldStaticChild(AABTSM7BuildingModule& Child);
 	/** Applies acceleration without invalidating Chaos sleep; false means no usable physics body. */
 	static bool TryApplyNonInvalidatingAcceleration(
 		UStaticMeshComponent& Component,
@@ -116,6 +118,7 @@ public:
 	UStaticMeshComponent* GetMeshComponent() const { return Visual; }
 	bool IsDynamic() const { return bDynamic; }
 	bool IsBroken() const { return bBroken; }
+	bool IsCompoundChild() const { return bCompoundChild; }
 	float GetCurrentDamage() const { return CurrentDamage; }
 	float GetBreakDamage() const { return BreakDamage; }
 
@@ -139,6 +142,9 @@ private:
 	FVector PlanetCenter = FVector::ZeroVector;
 	float GravityAccelerationCMPerSec2 = 980.0f;
 	bool bDynamic = false;
+	bool bCompoundChild = false;
+	TWeakObjectPtr<AABTSM7BuildingModule> CompoundRoot;
+	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> CompoundChildren;
 	bool bPlanarGravity = false;
 	FVector PlanarGravityUp = FVector::UpVector;
 	UPROPERTY(Transient)

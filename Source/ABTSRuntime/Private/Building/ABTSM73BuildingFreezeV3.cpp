@@ -115,6 +115,208 @@ namespace ABTSM73BuildingFreezeV3Private
 			*Supports, *BoxRow(Cap.SiteLocalBounds));
 	}
 
+	bool BuildE6PhysicsAssembly(
+		const FABTSM73BeamD1Stage5Result& Stage5,
+		const int32 DeviceCount,
+		const int32 CapCount,
+		FABTSM73BuildingFreezeV3Descriptor& OutDescriptor,
+		FString& OutError)
+	{
+		// E6's 94-course alternating X/Y core is one connected prefabricated
+		// load frame. Keeping it in one deterministic band removes artificial
+		// inter-course rigid-body joints without filling any opening or merging
+		// facade/closure/device semantics.
+		constexpr int32 CompoundCourseSpan = 96;
+		constexpr double CourseHeightCM = 36.0;
+		const int32 BrickCount = Stage5.Bricks.Num();
+		if (BrickCount <= 0 || Stage5.CompactAssembly.Members.Num() != BrickCount
+			|| Stage5.LoadDAG.Nodes.Num() != BrickCount)
+		{
+			OutError = TEXT("BuildingFreezeV3E6PhysicsAssemblyCardinality");
+			return false;
+		}
+
+		TArray<int32> Parent;
+		Parent.SetNumUninitialized(BrickCount);
+		TArray<int32> Band;
+		Band.Init(INDEX_NONE, BrickCount);
+		TArray<bool> bCompoundEligible;
+		bCompoundEligible.Init(false, BrickCount);
+		for (int32 Index = 0; Index < BrickCount; ++Index)
+		{
+			Parent[Index] = Index;
+			const FABTSM73BeamD1BrickBinding& Brick = Stage5.Bricks[Index];
+			const FABTSM73BeamAMember& Member = Stage5.CompactAssembly.Members[Index];
+			if (Brick.BrickId != Index || Brick.MemberId != Index
+				|| Member.MemberId != Index)
+			{
+				OutError = TEXT("BuildingFreezeV3E6PhysicsAssemblyIdentity");
+				return false;
+			}
+			bCompoundEligible[Index] =
+				Member.Role == EABTSM73BeamAMemberRole::CoreCourse
+				&& !Brick.bWeaknessCandidate
+				&& Brick.DeviceRole == EABTSM73BeamD1DeviceRole::None;
+			if (bCompoundEligible[Index])
+			{
+				Band[Index] = FMath::FloorToInt(
+					Brick.LocalBounds.Min.Z
+					/ (CompoundCourseSpan * CourseHeightCM));
+			}
+		}
+		auto FindRoot = [&Parent](int32 Index)
+		{
+			int32 Root = Index;
+			while (Parent[Root] != Root) Root = Parent[Root];
+			while (Parent[Index] != Index)
+			{
+				const int32 Next = Parent[Index];
+				Parent[Index] = Root;
+				Index = Next;
+			}
+			return Root;
+		};
+		for (const FABTSM73BeamCLoadEdge& Edge : Stage5.LoadDAG.Edges)
+		{
+			if (!bCompoundEligible.IsValidIndex(Edge.UpperMemberId)
+				|| !bCompoundEligible.IsValidIndex(Edge.LowerMemberId)
+				|| !bCompoundEligible[Edge.UpperMemberId]
+				|| !bCompoundEligible[Edge.LowerMemberId]
+				|| Band[Edge.UpperMemberId] != Band[Edge.LowerMemberId])
+			{
+				continue;
+			}
+			const int32 UpperRoot = FindRoot(Edge.UpperMemberId);
+			const int32 LowerRoot = FindRoot(Edge.LowerMemberId);
+			if (UpperRoot != LowerRoot)
+			{
+				Parent[FMath::Max(UpperRoot, LowerRoot)] =
+					FMath::Min(UpperRoot, LowerRoot);
+			}
+		}
+
+		TMap<int32, TArray<int32>> BricksByRoot;
+		for (int32 Index = 0; Index < BrickCount; ++Index)
+		{
+			const int32 Root = bCompoundEligible[Index] ? FindRoot(Index) : Index;
+			BricksByRoot.FindOrAdd(Root).Add(Index);
+		}
+		TArray<TArray<int32>> Groups;
+		BricksByRoot.GenerateValueArray(Groups);
+		for (TArray<int32>& Group : Groups) Group.Sort();
+		Groups.Sort([](const TArray<int32>& A, const TArray<int32>& B)
+		{
+			return A[0] < B[0];
+		});
+
+		TArray<int32> ClusterByBrick;
+		ClusterByBrick.Init(INDEX_NONE, BrickCount);
+		OutDescriptor.PhysicsClusters.Reset();
+		for (TArray<int32>& Group : Groups)
+		{
+			FABTSM73BuildingFreezeV3PhysicsCluster& Cluster =
+				OutDescriptor.PhysicsClusters.AddDefaulted_GetRef();
+			Cluster.ClusterId = OutDescriptor.PhysicsClusters.Num() - 1;
+			Cluster.BrickIds = Group;
+			Cluster.RootBrickId = Group[0];
+			double LowestZ = DBL_MAX;
+			EABTSM7BuildingMaterial ClusterMaterial =
+				EABTSM7BuildingMaterial::Wood;
+			bool bHasClusterMaterial = false;
+			for (const int32 BrickId : Group)
+			{
+				ClusterByBrick[BrickId] = Cluster.ClusterId;
+				const FABTSM73BeamD1BrickBinding& Brick = Stage5.Bricks[BrickId];
+				const FABTSM73BeamCLoadNode& Node = Stage5.LoadDAG.Nodes[BrickId];
+				if (bHasClusterMaterial
+					&& Brick.BrickSpec.Material != ClusterMaterial)
+				{
+					OutError = TEXT("BuildingFreezeV3E6PhysicsClusterCrossesMaterial");
+					return false;
+				}
+				ClusterMaterial = Brick.BrickSpec.Material;
+				bHasClusterMaterial = true;
+				Cluster.StaticSelfLoadKG += Node.SelfLoadKG;
+				Cluster.bDirectGroundSupport |= Node.bGround;
+				if (Brick.LocalBounds.Min.Z < LowestZ - GeometryToleranceCM
+					|| (FMath::IsNearlyEqual(Brick.LocalBounds.Min.Z, LowestZ,
+						GeometryToleranceCM) && BrickId < Cluster.RootBrickId))
+				{
+					LowestZ = Brick.LocalBounds.Min.Z;
+					Cluster.RootBrickId = BrickId;
+				}
+			}
+		}
+
+		TArray<TSet<int32>> PositiveSupports;
+		PositiveSupports.SetNum(OutDescriptor.PhysicsClusters.Num());
+		for (const FABTSM73BeamCLoadEdge& Edge : Stage5.LoadDAG.Edges)
+		{
+			if (!ClusterByBrick.IsValidIndex(Edge.UpperMemberId)
+				|| !ClusterByBrick.IsValidIndex(Edge.LowerMemberId))
+			{
+				OutError = TEXT("BuildingFreezeV3E6PhysicsAssemblySupportIndex");
+				return false;
+			}
+			const int32 UpperCluster = ClusterByBrick[Edge.UpperMemberId];
+			const int32 LowerCluster = ClusterByBrick[Edge.LowerMemberId];
+			if (UpperCluster != LowerCluster && Edge.LoadShare > UE_DOUBLE_SMALL_NUMBER
+				&& Edge.ReactionLoadKG > UE_DOUBLE_SMALL_NUMBER)
+			{
+				PositiveSupports[UpperCluster].Add(LowerCluster);
+			}
+		}
+
+		FString AssemblyCanonical = FString::Printf(
+			TEXT("E6CompoundV1:CourseSpan=%d:Bricks=%d:Devices=%d:Caps=%d"),
+			CompoundCourseSpan, BrickCount, DeviceCount, CapCount);
+		for (FABTSM73BuildingFreezeV3PhysicsCluster& Cluster :
+			OutDescriptor.PhysicsClusters)
+		{
+			Cluster.PositiveExternalSupportCount =
+				PositiveSupports[Cluster.ClusterId].Num();
+			if (!FMath::IsFinite(Cluster.StaticSelfLoadKG)
+				|| Cluster.StaticSelfLoadKG <= 0.0
+				|| (!Cluster.bDirectGroundSupport
+					&& Cluster.PositiveExternalSupportCount <= 0))
+			{
+				OutError = FString::Printf(
+					TEXT("BuildingFreezeV3E6PhysicsClusterUnsupported:Cluster=%d:Mass=%.6f:Ground=%d:Supports=%d"),
+					Cluster.ClusterId, Cluster.StaticSelfLoadKG,
+					Cluster.bDirectGroundSupport ? 1 : 0,
+					Cluster.PositiveExternalSupportCount);
+				return false;
+			}
+			FString ClusterCanonical = FString::Printf(
+				TEXT("C=%d:R=%d:M=%.6f:G=%d:S=%d"),
+				Cluster.ClusterId, Cluster.RootBrickId, Cluster.StaticSelfLoadKG,
+				Cluster.bDirectGroundSupport ? 1 : 0,
+				Cluster.PositiveExternalSupportCount);
+			for (const int32 BrickId : Cluster.BrickIds)
+			{
+				ClusterCanonical += FString::Printf(TEXT(":B%d"), BrickId);
+			}
+			TArray<int32> Supports = PositiveSupports[Cluster.ClusterId].Array();
+			Supports.Sort();
+			for (const int32 Support : Supports)
+			{
+				ClusterCanonical += FString::Printf(TEXT(":L%d"), Support);
+			}
+			Cluster.ClusterHash = HashUtf8(ClusterCanonical);
+			AssemblyCanonical += FString::Printf(TEXT("|%llu"), Cluster.ClusterHash);
+		}
+		OutDescriptor.PhysicsAssemblySchemaVersion = 1;
+		OutDescriptor.PhysicsBodyCount = OutDescriptor.PhysicsClusters.Num()
+			+ DeviceCount + CapCount;
+		OutDescriptor.PhysicsAssemblyHash = HashUtf8(AssemblyCanonical);
+		if (OutDescriptor.PhysicsBodyCount >= BrickCount + DeviceCount + CapCount)
+		{
+			OutError = TEXT("BuildingFreezeV3E6PhysicsAssemblyDidNotReduceBodies");
+			return false;
+		}
+		return true;
+	}
+
 	FABTSM73BuildingFreezeV3FrozenIdentity MakeFrozen(
 		const EABTSM73BeamDemoBuilding Id,
 		const int32 EncounterSlot,
@@ -134,7 +336,9 @@ namespace ABTSM73BuildingFreezeV3Private
 		const uint64 StaticLoadCertificateHash,
 		const uint64 GeometryHash,
 		const uint64 ProductionHash,
-		const uint64 DescriptorHash)
+		const uint64 DescriptorHash,
+		const int32 PhysicsBodyCount = 0,
+		const uint64 PhysicsAssemblyHash = 0)
 	{
 		FABTSM73BuildingFreezeV3FrozenIdentity Frozen;
 		Frozen.ManifestEntryId = Id;
@@ -153,6 +357,8 @@ namespace ABTSM73BuildingFreezeV3Private
 		Frozen.SourceStage5ProductionHash = Stage5Hash;
 		Frozen.SourceDeviceAssemblyHash = DeviceHash;
 		Frozen.StaticExternalLoadCertificateHash = StaticLoadCertificateHash;
+		Frozen.PhysicsBodyCount = PhysicsBodyCount;
+		Frozen.PhysicsAssemblyHash = PhysicsAssemblyHash;
 		Frozen.StaticGeometryHash = GeometryHash;
 		Frozen.ProductionHash = ProductionHash;
 		Frozen.DescriptorHash = DescriptorHash;
@@ -236,8 +442,17 @@ FABTSM73BuildingFreezeV3::GetFrozenIdentities()
 			FBox(FVector(-522, -1098, 0), FVector(522, 1098, 3384)),
 			FBox(FVector(-594, 558, -144), FVector(-234, 1278, 216)),
 			2348159192872953385ull, 198894657042108135ull, 0ull,
-			11440919070458269246ull, 11323455661476895076ull,
-			3187373410644525608ull)};
+			11440919070458269246ull,
+			FABTSM73BuildingFreezeV3::bE6CompoundV1Published
+				? FABTSM73BuildingFreezeV3::E6CompoundV1ProductionHash
+				: 11323455661476895076ull,
+			FABTSM73BuildingFreezeV3::bE6CompoundV1Published
+				? FABTSM73BuildingFreezeV3::E6CompoundV1DescriptorHash
+				: 3187373410644525608ull,
+			FABTSM73BuildingFreezeV3::bE6CompoundV1Published
+				? FABTSM73BuildingFreezeV3::E6CompoundV1PhysicsBodyCount : 0,
+			FABTSM73BuildingFreezeV3::bE6CompoundV1Published
+				? FABTSM73BuildingFreezeV3::E6CompoundV1PhysicsAssemblyHash : 0ull)};
 	return Frozen;
 }
 
@@ -302,7 +517,8 @@ bool FABTSM73BuildingFreezeV3::ResolveEncounterSlot(
 bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 	const EABTSM73BeamDemoBuilding Id,
 	FABTSM73BuildingFreezeV3Descriptor& OutDescriptor,
-	FString& OutError)
+	FString& OutError,
+	const bool bEnableE6CompoundV1Candidate)
 {
 	using namespace ABTSM73BuildingFreezeV3Private;
 	OutDescriptor = FABTSM73BuildingFreezeV3Descriptor();
@@ -539,6 +755,13 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 		OutError = TEXT("BuildingFreezeV3CapOrHistogramInvariant");
 		return false;
 	}
+	if (Id == EABTSM73BeamDemoBuilding::E6TipOver
+		&& bEnableE6CompoundV1Candidate
+		&& !BuildE6PhysicsAssembly(Source.Stage5, OutDescriptor.Devices.Num(),
+			OutDescriptor.Caps.Num(), OutDescriptor, OutError))
+	{
+		return false;
+	}
 
 	OutDescriptor.SiteLocalOBB.Center =
 		OutDescriptor.ContentToSite.TransformPosition(
@@ -580,6 +803,19 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 			static_cast<int32>(OutDescriptor.PrimaryMaterial),
 			OutDescriptor.EncounterSlot));
 	}
+	else if (OutDescriptor.PhysicsAssemblyHash != 0)
+	{
+		OutDescriptor.ProductionHash = HashUtf8(FString::Printf(
+			TEXT("Stage5=%llu|Device=%llu|Geometry=%llu|Primary=%d|Encounter=%d|Front=YtoX|PhysicsSchema=%d|PhysicsBodies=%d|PhysicsAssembly=%llu"),
+			OutDescriptor.SourceStage5ProductionHash,
+			OutDescriptor.SourceDeviceAssemblyHash,
+			OutDescriptor.StaticGeometryHash,
+			static_cast<int32>(OutDescriptor.PrimaryMaterial),
+			OutDescriptor.EncounterSlot,
+			OutDescriptor.PhysicsAssemblySchemaVersion,
+			OutDescriptor.PhysicsBodyCount,
+			OutDescriptor.PhysicsAssemblyHash));
+	}
 	else
 	{
 		OutDescriptor.ProductionHash = HashUtf8(FString::Printf(
@@ -614,6 +850,14 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 			OutDescriptor.StaticExternalLoadLedgerHash,
 			OutDescriptor.StaticExternalLoadDAGHash,
 			OutDescriptor.StaticExternalLoadCertificateHash);
+	}
+	if (OutDescriptor.PhysicsAssemblyHash != 0)
+	{
+		DescriptorCanonical += FString::Printf(
+			TEXT("|PhysicsSchema=%d|PhysicsBodies=%d|PhysicsAssembly=%llu"),
+			OutDescriptor.PhysicsAssemblySchemaVersion,
+			OutDescriptor.PhysicsBodyCount,
+			OutDescriptor.PhysicsAssemblyHash);
 	}
 	DescriptorCanonical += FString::Printf(TEXT("|Production=%llu"),
 		OutDescriptor.ProductionHash);
@@ -667,7 +911,9 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
 		|| OutDescriptors[0].SourceManifestVersion != FrozenSourceManifestVersion
 		|| OutDescriptors[0].SourceManifestHash != FrozenSourceManifestHash)
 	{
-		OutError = TEXT("BuildingFreezeV3FrozenCatalogIdentityDrift");
+		OutError = FString::Printf(
+			TEXT("BuildingFreezeV3FrozenCatalogIdentityDrift:Actual=%llu:Expected=%llu"),
+			OutCatalogHash, FrozenCatalogHash);
 		OutDescriptors.Reset();
 		return false;
 	}
@@ -696,17 +942,82 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
 			&& Actual.SourceDeviceAssemblyHash == Expected.SourceDeviceAssemblyHash
 			&& Actual.StaticExternalLoadCertificateHash
 				== Expected.StaticExternalLoadCertificateHash
+			&& Actual.PhysicsBodyCount == Expected.PhysicsBodyCount
+			&& Actual.PhysicsAssemblyHash == Expected.PhysicsAssemblyHash
 			&& Actual.StaticGeometryHash == Expected.StaticGeometryHash
 			&& Actual.ProductionHash == Expected.ProductionHash
 			&& Actual.DescriptorHash == Expected.DescriptorHash;
 		if (!bMatches)
 		{
 			OutError = FString::Printf(
-				TEXT("BuildingFreezeV3FrozenEntryDrift:Slot=%d:Actual=%llu:Expected=%llu"),
-				Index, Actual.DescriptorHash, Expected.DescriptorHash);
+				TEXT("BuildingFreezeV3FrozenEntryDrift:Slot=%d:Descriptor=%llu/%llu:Production=%llu/%llu:Static=%llu/%llu:PhysicsBodies=%d/%d:PhysicsAssembly=%llu/%llu"),
+				Index, Actual.DescriptorHash, Expected.DescriptorHash,
+				Actual.ProductionHash, Expected.ProductionHash,
+				Actual.StaticGeometryHash, Expected.StaticGeometryHash,
+				Actual.PhysicsBodyCount, Expected.PhysicsBodyCount,
+				Actual.PhysicsAssemblyHash, Expected.PhysicsAssemblyHash);
 			OutDescriptors.Reset();
 			return false;
 		}
+	}
+	return true;
+}
+
+bool FABTSM73BuildingFreezeV3::
+DeriveAndValidateE6CompoundV1CandidateCatalog(
+	TArray<FABTSM73BuildingFreezeV3Descriptor>& OutDescriptors,
+	uint64& OutCatalogHash,
+	FString& OutError)
+{
+	using namespace ABTSM73BuildingFreezeV3Private;
+	OutDescriptors.Reset();
+	OutCatalogHash = 0;
+	OutError.Reset();
+	static const EABTSM73BeamDemoBuilding EncounterOrder[] = {
+		EABTSM73BeamDemoBuilding::E2DropTrigger,
+		EABTSM73BeamDemoBuilding::E3SlideRelease,
+		EABTSM73BeamDemoBuilding::E4TipOver,
+		EABTSM73BeamDemoBuilding::E5SeamRelease,
+		EABTSM73BeamDemoBuilding::E1ColumnBreak,
+		EABTSM73BeamDemoBuilding::E6TipOver};
+	FString Canonical = FString::Printf(
+		TEXT("BuildingFreezeV3Catalog=%d"), SchemaVersion);
+	for (int32 EncounterSlot = 0;
+		EncounterSlot < UE_ARRAY_COUNT(EncounterOrder); ++EncounterSlot)
+	{
+		FABTSM73BuildingFreezeV3Descriptor& Descriptor =
+			OutDescriptors.AddDefaulted_GetRef();
+		const bool bE6Candidate = EncounterOrder[EncounterSlot]
+			== EABTSM73BeamDemoBuilding::E6TipOver;
+		if (!DeriveAndValidate(EncounterOrder[EncounterSlot], Descriptor,
+			OutError, bE6Candidate)
+			|| Descriptor.EncounterSlot != EncounterSlot)
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("BuildingFreezeV3E6CompoundV1EncounterOrder");
+			}
+			OutDescriptors.Reset();
+			return false;
+		}
+		Canonical += FString::Printf(TEXT("|%d:%llu:%llu"), EncounterSlot,
+			Descriptor.DescriptorHash, Descriptor.ProductionHash);
+	}
+	OutCatalogHash = HashUtf8(Canonical);
+	if (OutDescriptors.Num() != ExpectedEntryCount
+		|| OutCatalogHash != E6CompoundV1CandidateCatalogHash
+		|| OutDescriptors.Last().PhysicsBodyCount
+			!= E6CompoundV1PhysicsBodyCount
+		|| OutDescriptors.Last().PhysicsAssemblyHash
+			!= E6CompoundV1PhysicsAssemblyHash
+		|| OutDescriptors.Last().ProductionHash != E6CompoundV1ProductionHash
+		|| OutDescriptors.Last().DescriptorHash != E6CompoundV1DescriptorHash)
+	{
+		OutError = FString::Printf(
+			TEXT("BuildingFreezeV3E6CompoundV1IdentityDrift:Catalog=%llu:Expected=%llu"),
+			OutCatalogHash, E6CompoundV1CandidateCatalogHash);
+		OutDescriptors.Reset();
+		return false;
 	}
 	return true;
 }

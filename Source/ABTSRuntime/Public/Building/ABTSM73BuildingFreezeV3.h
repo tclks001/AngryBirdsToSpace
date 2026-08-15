@@ -40,6 +40,20 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3MaterialHistogram
 	int32 Count(EABTSM7BuildingMaterial Material) const;
 };
 
+/** One deterministic compound Chaos body assembled from face-bearing bricks.
+ * Presentation and per-brick damage identities remain one-to-one; only the
+ * initial rigid-body/contact graph is coarsened. */
+struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3PhysicsCluster
+{
+	int32 ClusterId = INDEX_NONE;
+	int32 RootBrickId = INDEX_NONE;
+	TArray<int32> BrickIds;
+	double StaticSelfLoadKG = 0.0;
+	bool bDirectGroundSupport = false;
+	int32 PositiveExternalSupportCount = 0;
+	uint64 ClusterHash = 0;
+};
+
 /** M7-owned V3 payload. Shared Integration/M3 DTO adaptation is intentionally separate. */
 struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3Descriptor
 {
@@ -77,6 +91,11 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3Descriptor
 	uint64 StaticExternalLoadLedgerHash = 0;
 	uint64 StaticExternalLoadDAGHash = 0;
 	uint64 StaticExternalLoadCertificateHash = 0;
+	/** E6-only atomic compound-body policy. Zero/empty means one body per module. */
+	int32 PhysicsAssemblySchemaVersion = 0;
+	int32 PhysicsBodyCount = 0;
+	uint64 PhysicsAssemblyHash = 0;
+	TArray<FABTSM73BuildingFreezeV3PhysicsCluster> PhysicsClusters;
 	uint64 StaticGeometryHash = 0;
 	uint64 DescriptorHash = 0;
 	uint64 ProductionHash = 0;
@@ -101,6 +120,8 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3FrozenIdentity
 	uint64 SourceStage5ProductionHash = 0;
 	uint64 SourceDeviceAssemblyHash = 0;
 	uint64 StaticExternalLoadCertificateHash = 0;
+	int32 PhysicsBodyCount = 0;
+	uint64 PhysicsAssemblyHash = 0;
 	uint64 StaticGeometryHash = 0;
 	uint64 ProductionHash = 0;
 	uint64 DescriptorHash = 0;
@@ -116,7 +137,22 @@ public:
 	static constexpr double CrystalCapExtentCM = 72.0;
 	static constexpr int32 FrozenSourceManifestVersion = 1;
 	static constexpr int64 FrozenSourceManifestHash = 2324068295;
-	static constexpr uint64 FrozenCatalogHash = 2428875568906321995ull;
+	/** M7 atomic handoff; Integration must publish this with the shared V3 seal. */
+	static constexpr bool bE6CompoundV1Published = false;
+	static constexpr uint64 PreE6CompoundV1CatalogHash =
+		2428875568906321995ull;
+	static constexpr uint64 E6CompoundV1CandidateCatalogHash =
+		797455362285398432ull;
+	static constexpr int32 E6CompoundV1PhysicsBodyCount = 809;
+	static constexpr uint64 E6CompoundV1PhysicsAssemblyHash =
+		5207773572942773531ull;
+	static constexpr uint64 E6CompoundV1ProductionHash =
+		9998077171702075971ull;
+	static constexpr uint64 E6CompoundV1DescriptorHash =
+		16759489927185121372ull;
+	static constexpr uint64 FrozenCatalogHash = bE6CompoundV1Published
+		? E6CompoundV1CandidateCatalogHash
+		: PreE6CompoundV1CatalogHash;
 
 	static const TArray<FABTSM73BuildingFreezeV3FrozenIdentity>&
 		GetFrozenIdentities();
@@ -132,9 +168,15 @@ public:
 	static bool DeriveAndValidate(
 		EABTSM73BeamDemoBuilding Id,
 		FABTSM73BuildingFreezeV3Descriptor& OutDescriptor,
-		FString& OutError);
+		FString& OutError,
+		bool bEnableE6CompoundV1Candidate = bE6CompoundV1Published);
 	/** Returns descriptors in encounter order: E2, E3, E4, E5, E1, E6. */
 	static bool DeriveAndValidateCatalog(
+		TArray<FABTSM73BuildingFreezeV3Descriptor>& OutDescriptors,
+		uint64& OutCatalogHash,
+		FString& OutError);
+	/** Explicit M7 atomic handoff; never substitutes for the published catalog. */
+	static bool DeriveAndValidateE6CompoundV1CandidateCatalog(
 		TArray<FABTSM73BuildingFreezeV3Descriptor>& OutDescriptors,
 		uint64& OutCatalogHash,
 		FString& OutError);
