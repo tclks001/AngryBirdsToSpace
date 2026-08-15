@@ -273,22 +273,80 @@ float FABTSM3TerrainVisualField::GetBuildingPadSignedDistanceCM(
 	return Outside.Size() + FMath::Min(FMath::Max(Delta.X, Delta.Y), 0.0f);
 }
 
-float FABTSM3TerrainVisualField::ApplyBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const
+float FABTSM3TerrainVisualField::ApplyCompatibilityBuildingPadRadius(
+	const FVector& UnitDirection,
+	float UnpaddedRadiusCM) const
 {
 	const FVector Direction = UnitDirection.GetSafeNormal();
+	// Preserve the established TaskGraph construction-pad behavior, including
+	// both cut and fill. Terrain-only jury pads are composed separately below.
 	for (const FABTSM3BuildingSpawnSite& Pad : BuildingPads)
 	{
+		if (Pad.TaskId == INDEX_NONE)
+		{
+			continue;
+		}
 		const float Denominator = FVector::DotProduct(Pad.AnchorDirection.GetSafeNormal(), Direction);
 		if (Denominator <= 0.25f) continue;
 		const float SignedDistance = GetBuildingPadSignedDistanceCM(Direction, UnpaddedRadiusCM, Pad);
 		const float BlendWidth = FMath::Max(1.0f, Pad.PadEdgeBlendWidthCM);
 		const float BlendAlpha = 1.0f - FMath::SmoothStep(0.0f, BlendWidth, FMath::Max(0.0f, SignedDistance));
 		if (BlendAlpha <= 0.0f) continue;
-		// Intersect this radial ray with the tangent plane through the CellTopo anchor.
-		const float TangentPlaneRadius = Pad.PadTargetRadiusCM / Denominator;
-		UnpaddedRadiusCM = FMath::Lerp(UnpaddedRadiusCM, TangentPlaneRadius, BlendAlpha);
+		const float TangentPlaneRadiusCM = Pad.PadTargetRadiusCM / Denominator;
+		UnpaddedRadiusCM = FMath::Lerp(
+			UnpaddedRadiusCM,
+			TangentPlaneRadiusCM,
+			BlendAlpha);
 	}
 	return UnpaddedRadiusCM;
+}
+
+float FABTSM3TerrainVisualField::GetCompatibilityPaddedSurfaceRadius(
+	const FVector& UnitDirection) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	return ApplyCompatibilityBuildingPadRadius(
+		Direction,
+		GetUnpaddedSurfaceRadius(Direction));
+}
+
+float FABTSM3TerrainVisualField::ApplyBuildingPadRadius(
+	const FVector& UnitDirection,
+	float UnpaddedRadiusCM) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	const float CompatibilityPaddedRadiusCM =
+		ApplyCompatibilityBuildingPadRadius(Direction, UnpaddedRadiusCM);
+	float ResolvedRadiusCM = CompatibilityPaddedRadiusCM;
+	for (const FABTSM3BuildingSpawnSite& Pad : BuildingPads)
+	{
+		if (Pad.TaskId != INDEX_NONE)
+		{
+			continue;
+		}
+		const float Denominator = FVector::DotProduct(Pad.AnchorDirection.GetSafeNormal(), Direction);
+		if (Denominator <= 0.25f) continue;
+		const float SignedDistance = GetBuildingPadSignedDistanceCM(
+			Direction,
+			CompatibilityPaddedRadiusCM,
+			Pad);
+		const float BlendWidth = FMath::Max(1.0f, Pad.PadEdgeBlendWidthCM);
+		const float BlendAlpha = 1.0f - FMath::SmoothStep(
+			0.0f,
+			BlendWidth,
+			FMath::Max(0.0f, SignedDistance));
+		if (BlendAlpha <= 0.0f) continue;
+		const float TangentPlaneRadiusCM = Pad.PadTargetRadiusCM / Denominator;
+		const float CandidateRadiusCM = FMath::Lerp(
+			CompatibilityPaddedRadiusCM,
+			TangentPlaneRadiusCM,
+			BlendAlpha);
+		// All fixed-six work pads grade downward from the production terrain.
+		// Their lower envelope is continuous, order independent and guarantees
+		// that a remote overlapping skirt cannot lift or re-cut an inner plane.
+		ResolvedRadiusCM = FMath::Min(ResolvedRadiusCM, CandidateRadiusCM);
+	}
+	return ResolvedRadiusCM;
 }
 
 float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) const

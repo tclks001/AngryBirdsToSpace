@@ -794,6 +794,36 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - `M3-TaskGraphFinaleSeparation-20260815-FinalHash.log`：最终二进制上的 `ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
 - NullRHI 证明确定性和 CPU 几何合同，不替代可见 PIE/实时 Chaos。集成验收必须在 `L_ABTS_M3` 或 canonical 联合地图首次进入 Chaos/首次发射时确认树石不弹飞、不瞬移、不从地表钻出，并核对 Startup HISM 重叠候选趋近于零；若 M6 扫描仍报候选，按共享热点流程继续分诊，M3 不越权修改 M6。
 
+### M3-JURY-006：固定 180 cm 裙边会把冻结施工面切成六个地坑
+
+**现象**
+
+- 六栋冻结建筑的内部施工面与 M7 Pivot 对齐，但施工面四周像直壁坑口，不是与周围地形连续的平地；
+- 旧 `MaxPadResidualCM=0.001` 只证明内部九点落在冻结切平面上，不能证明裙边坡度、法线连续性、外缘回源或 Chaos 三角面一致；
+- 六栋原地形相对冻结切平面的局部高差并不相同，固定 `EdgeBlendWidthCM=180` 无法同时处理这些高差。
+
+**根因**
+
+固定六栋的 `WorldLocationCM` 位于冻结基础半径，而生产地形继续叠加正的宏观高度。M3 曾把同一个 `180 cm` SmoothStep 过渡带套到所有 Terrain-only Pad；高差越大，过渡带就越接近竖直切坡。宽裙边还可能互相覆盖，若继续按数组顺序累计 Lerp，会让后一个裙边重复切削前一个承台。内部残差门与这种外部不连续完全正交，因此旧绿灯无法发现画面问题。
+
+**修复**
+
+- 冻结六栋的 `WorldLocationCM`、三轴、`RequiredPadHalfExtentCM`、内部切平面、Placement/Layout Hash 和公开 `BuildingSpawnSites` 均保持不变；不需要 M7 或 Integration 联合升版；
+- M3 在安装 Pad 前从未整地 CellTopo 场采样每栋施工区边界及局部探针带，以 `JuryFixedSixMaximumGradeSlopeDegrees=18`、SmoothStep 峰值导数 `1.5` 和 `15%` 安全余量迭代解析逐栋裙边宽度；固定 `180 cm` 不再参与固定六栋生产整地；
+- 普通 TaskGraph 施工台仍保留原有可挖可填的顺序合成。仅 `TaskId=INDEX_NONE` 的六条 Terrain-only Jury Pad 使用与数组顺序无关的向下包络，避免宽裙边重叠后重复切地；
+- `ValidateJuryFixedSixProductionClearance` 新增逐栋解析峰值坡度、联合场法线步进、未被另一裙边占据的外缘回源、中心抗边界别名探针和裙边 Chaos 组件射线残差门。没有 PhysicsScene 的纯合同夹具跳过 Chaos 射线，但仍执行全部数值整地门；真实地图存在 PhysicsScene 时必须执行 Chaos 门；
+- HISM 继续避让静态/动态包络。宽缓整地改变了部分候选的合法贴地结果，因此展示 Seed 的 `DecorRejected` 从旧证据 `8` 更新为 `72`；Physical/Effect 重叠仍必须为零。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与最终 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；因另一个工作树 Editor 正在运行且未加载当前工作树，构建按规范使用了 `-NoHotReloadFromIDE`，未结束其他进程；
+- `M3Jury-AdaptiveGrade-Final-20260815-201507-056-FreshRuntime.log`：fresh `L_ABTS_M3` R5 smoke 得到逐栋宽度 `1068.2 / 2867.1 / 2581.2 / 3841.6 / 3274.2 / 3632.5 cm`，最大原始高差 `723.6 cm`，解析峰值坡度 `15.78° < 18°`，最大法线步进 `16.42°`，外缘残差 `0.000 cm`；
+- `M3Jury-AdaptiveGrade-Final-Repeat-20260815-201937-258-FreshRuntime.log` 重复得到完全相同的宽度、整地/Chaos 指标、HISM 数量与 `QuerySurfaceHash=B35195C5629CB12A`；
+- 同一日志的真实 PhysicsScene 门执行 `ChaosSamples=173 MaxChaosResidualCM=1.43`，六栋中心分别为 `5/5、5/5、5/5、5/5、5/5、4/5` 命中，且 `TerrainPads=6 PhysicalDecorOverlaps=0 DynamicDecorOverlaps=0 MaxPadResidualCM=0.001`；R5 终态为 `Terminal=1 Passed=1 Failed=0`；
+- 固定身份保持 `Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`，证明没有改动 M7 Pivot 或共享合同；
+- 最终 ForceUnity 二进制上的 `M3Jury-AdaptiveGrade-Final-FixedSix-20260815-201623-319-FreshAutomation.log` 为 `3/3 Success`，`M3Jury-AdaptiveGrade-Final-Contracts-20260815-201703-201-FreshAutomation.log` 为 `2/2 Success`，`M3Jury-AdaptiveGrade-Final-Finale-20260815-201739-961-FreshAutomation.log` 为 `1/1 Success`；
+- NullRHI 与组件级 Chaos 射线不替代可见地形观感。M7 逐栋 Chaos 激活后，联合可见 PIE 仍需检查六处均呈“内部平坦施工区 → 宽缓裙边 → 原地形”，没有坑壁、折线、碰撞台阶或建筑 Pivot 漂移。
+
 ## 15. 新条目模板
 
 ```markdown

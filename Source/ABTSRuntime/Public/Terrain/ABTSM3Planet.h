@@ -25,6 +25,19 @@ class UABTSM3TerrainMaterialBridge;
 struct FABTSBuildingGenerationContract;
 struct FABTSFinaleWorldContract;
 
+/** M3-only evidence for the frozen six-building terrain grading and Chaos surface. */
+struct FABTSM3JuryTerrainGradeDiagnostics
+{
+	float MinimumBlendWidthCM = 0.0f;
+	float MaximumBlendWidthCM = 0.0f;
+	float MaximumSourceHeightDeltaCM = 0.0f;
+	float MaximumGradeSlopeDegrees = 0.0f;
+	float MaximumNormalStepDegrees = 0.0f;
+	float MaximumEdgeHeightResidualCM = 0.0f;
+	float MaximumCollisionResidualCM = 0.0f;
+	int32 CollisionSampleCount = 0;
+};
+
 USTRUCT(BlueprintType)
 struct FABTSM3SurfacePhysicsProfile
 {
@@ -316,6 +329,7 @@ public:
 		int32& OutPhysicalOverlapInstanceCount,
 		int32& OutDynamicOverlapInstanceCount,
 		float& OutMaxPadResidualCM,
+		FABTSM3JuryTerrainGradeDiagnostics& OutGradeDiagnostics,
 		FString& OutFailure) const;
 
 	int32 GetJuryFixedSixDecorClearanceRejectedCount() const
@@ -401,6 +415,16 @@ public:
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
 	FABTSM3BuildingPadSettings BuildingPadSettings;
+
+	/** Maximum slope allowed across each M3-owned fixed-six grading skirt. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six|Terrain Grade",
+		meta = (ClampMin = "5.0", ClampMax = "30.0", UIMin = "10.0", UIMax = "24.0", Units = "Degrees"))
+	float JuryFixedSixMaximumGradeSlopeDegrees = 18.0f;
+
+	/** Lower bound for the adaptive skirt; the final width is resolved independently for every building. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six|Terrain Grade",
+		meta = (ClampMin = "300.0", ClampMax = "2000.0", UIMin = "400.0", UIMax = "1200.0", Units = "cm"))
+	float JuryFixedSixMinimumGradeWidthCM = 600.0f;
 
 	/** World-space spacing of the one terminal Space-slingshot slot pair. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
@@ -677,6 +701,8 @@ private:
 	int32 MonthlyDecorAccent1InstanceCount = 0;
 	int32 JuryFixedSixTerrainPadCount = 0;
 	int32 JuryFixedSixDecorClearanceRejectedCount = 0;
+	TArray<FABTSM3BuildingSpawnSite> JuryFixedSixTerrainPads;
+	TArray<float> JuryFixedSixTerrainSourceHeightDeltasCM;
 	bool bMonthlyPresentationPreviewActive = false;
 	int32 ActiveMonthlyPresentationPreviewCandidateId =
 		INDEX_NONE;

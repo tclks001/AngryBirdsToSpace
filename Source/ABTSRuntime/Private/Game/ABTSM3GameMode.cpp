@@ -2099,11 +2099,13 @@ void AABTSM3GameMode::TryCompleteM3R5Smoke()
 	int32 JuryPhysicalDecorOverlapCount = 0;
 	int32 JuryDynamicDecorOverlapCount = 0;
 	float JuryMaxPadResidualCM = 0.0f;
+	FABTSM3JuryTerrainGradeDiagnostics JuryGradeDiagnostics;
 	if (!Planet->ValidateJuryFixedSixProductionClearance(
 			JuryTerrainPadCount,
 			JuryPhysicalDecorOverlapCount,
 			JuryDynamicDecorOverlapCount,
 			JuryMaxPadResidualCM,
+			JuryGradeDiagnostics,
 			Failure))
 	{
 		FinishM3R5Smoke(
@@ -2114,12 +2116,20 @@ void AABTSM3GameMode::TryCompleteM3R5Smoke()
 		return;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3Jury][ProductionClearanceRegression] Passed=1 TerrainPads=%d PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f Authority=M3RuntimeSurface"),
+		TEXT("[ABTS][M3Jury][ProductionClearanceRegression] Passed=1 TerrainPads=%d PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f Authority=M3RuntimeSurface"),
 		JuryTerrainPadCount,
 		JuryPhysicalDecorOverlapCount,
 		JuryDynamicDecorOverlapCount,
 		Planet->GetJuryFixedSixDecorClearanceRejectedCount(),
-		JuryMaxPadResidualCM);
+		JuryMaxPadResidualCM,
+		JuryGradeDiagnostics.MinimumBlendWidthCM,
+		JuryGradeDiagnostics.MaximumBlendWidthCM,
+		JuryGradeDiagnostics.MaximumSourceHeightDeltaCM,
+		JuryGradeDiagnostics.MaximumGradeSlopeDegrees,
+		JuryGradeDiagnostics.MaximumNormalStepDegrees,
+		JuryGradeDiagnostics.MaximumEdgeHeightResidualCM,
+		JuryGradeDiagnostics.CollisionSampleCount,
+		JuryGradeDiagnostics.MaximumCollisionResidualCM);
 	if (!Planet->ValidateMonthlyPresentationResult(
 			Failure))
 	{
