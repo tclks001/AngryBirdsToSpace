@@ -7,6 +7,7 @@
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Contracts/ABTSWorldGenerationContracts.h"
 #include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "PhysicsEngine/BodyInstance.h"
@@ -51,6 +52,101 @@ struct FABTSM73StartupValidationSummary
 			NotRequired);
 	}
 };
+
+struct FABTSM6FixedSixStaticJointSummary
+{
+	bool bPresent = false;
+	bool bAccepted = false;
+	int32 RegisteredBuildingCount = 0;
+	int32 StaticModuleCount = 0;
+	uint64 RegistrationResultHash = 0;
+	FString RejectReason;
+};
+
+FABTSM6FixedSixStaticJointSummary ValidateFixedSixStaticJointGate(
+	const int32 ExpectedRequired,
+	const TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>>& RequiredBuildings)
+{
+	static const TCHAR* const ExpectedManifestEntryIds[] = {
+		TEXT("E1ColumnBreak"),
+		TEXT("E2DropTrigger"),
+		TEXT("E3SlideRelease"),
+		TEXT("E4TipOver"),
+		TEXT("E5SeamRelease"),
+		TEXT("E6TipOver")
+	};
+	static constexpr uint64 FrozenRegistrationResultHash =
+		3948236352584381910ull;
+	static constexpr int32 FrozenStaticModuleCount = 5742;
+
+	FABTSM6FixedSixStaticJointSummary Summary;
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& Required
+		: RequiredBuildings)
+	{
+		const AABTSM73StableBuildingActor* Actor = Required.Get();
+		if (Actor != nullptr
+			&& !Actor->GetJuryDemoFixedSixManifestEntryId().IsNone())
+		{
+			Summary.bPresent = true;
+			break;
+		}
+	}
+	if (!Summary.bPresent)
+	{
+		return Summary;
+	}
+
+	if (ExpectedRequired
+			!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount
+		|| RequiredBuildings.Num()
+			!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
+	{
+		Summary.RejectReason = TEXT("Count");
+		return Summary;
+	}
+
+	for (int32 Index = 0; Index < RequiredBuildings.Num(); ++Index)
+	{
+		const AABTSM73StableBuildingActor* Actor =
+			RequiredBuildings[Index].Get();
+		if (Actor == nullptr)
+		{
+			Summary.RejectReason = TEXT("ActorMissing");
+			return Summary;
+		}
+		const uint64 ResultHash =
+			Actor->GetJuryDemoFixedSixRegistrationResultHash();
+		if (!Actor->IsJuryDemoFixedSixStaticRegistrationAccepted()
+			|| Actor->GetJuryDemoFixedSixManifestEntryId()
+				!= FName(ExpectedManifestEntryIds[Index])
+			|| Actor->GetJuryDemoFixedSixEncounterIndex() != Index
+			|| ResultHash == 0
+			|| (Summary.RegistrationResultHash != 0
+				&& Summary.RegistrationResultHash != ResultHash))
+		{
+			Summary.RejectReason = FString::Printf(
+				TEXT("Identity:%d"), Index);
+			return Summary;
+		}
+		Summary.RegistrationResultHash = ResultHash;
+		Summary.StaticModuleCount +=
+			Actor->GetJuryDemoFixedSixStaticModuleCount();
+		++Summary.RegisteredBuildingCount;
+	}
+
+	if (Summary.RegistrationResultHash != FrozenRegistrationResultHash)
+	{
+		Summary.RejectReason = TEXT("ResultHash");
+		return Summary;
+	}
+	if (Summary.StaticModuleCount != FrozenStaticModuleCount)
+	{
+		Summary.RejectReason = TEXT("ModuleCount");
+		return Summary;
+	}
+	Summary.bAccepted = true;
+	return Summary;
+}
 
 FABTSM73StartupValidationSummary GetBuildingValidationSummary(
 	UWorld& World,
@@ -129,6 +225,10 @@ void AABTSM6SlingshotSystem::BeginRequiredBuildingContract(const int32 InExpecte
 	bRequiredBuildingSetupRejected = false;
 	ExpectedRequiredBuildingCount = FMath::Max(0, InExpectedRequiredBuildingCount);
 	RequiredBuildingActors.Reset();
+	bFixedSixStaticJointGateAccepted = false;
+	FixedSixStaticJointRegistrationResultHash = 0;
+	FixedSixStaticJointRegisteredBuildingCount = 0;
+	FixedSixStaticJointModuleCount = 0;
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][StartupPhysics] BuildingContractBegin Expected=%d"),
 		ExpectedRequiredBuildingCount);
@@ -163,9 +263,47 @@ void AABTSM6SlingshotSystem::SealRequiredBuildingContract(const bool bInSetupRej
 	{
 		if (Required.IsValid()) ++RegisteredRequired;
 	}
+	const FABTSM6FixedSixStaticJointSummary FixedSixJoint =
+		ValidateFixedSixStaticJointGate(
+			ExpectedRequiredBuildingCount, RequiredBuildingActors);
+	bFixedSixStaticJointGateAccepted =
+		FixedSixJoint.bPresent && FixedSixJoint.bAccepted;
+	FixedSixStaticJointRegistrationResultHash =
+		FixedSixJoint.bAccepted ? FixedSixJoint.RegistrationResultHash : 0;
+	FixedSixStaticJointRegisteredBuildingCount =
+		FixedSixJoint.bAccepted ? FixedSixJoint.RegisteredBuildingCount : 0;
+	FixedSixStaticJointModuleCount =
+		FixedSixJoint.bAccepted ? FixedSixJoint.StaticModuleCount : 0;
 	bRequiredBuildingContractSealed = true;
 	bRequiredBuildingSetupRejected = bInSetupRejected
-		|| RegisteredRequired != ExpectedRequiredBuildingCount;
+		|| RegisteredRequired != ExpectedRequiredBuildingCount
+		|| (FixedSixJoint.bPresent && !FixedSixJoint.bAccepted);
+	if (FixedSixJoint.bPresent)
+	{
+		if (FixedSixJoint.bAccepted)
+		{
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][StartupPhysics] FixedSixStaticJointGate")
+				TEXT(" Expected=6 Registered=%d Accepted=6 Modules=%d")
+				TEXT(" Layout=%llu ResultHash=%llu")
+				TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Gate=Accepted"),
+				FixedSixJoint.RegisteredBuildingCount,
+				FixedSixJoint.StaticModuleCount,
+				FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash,
+				FixedSixJoint.RegistrationResultHash);
+		}
+		else
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][StartupPhysics] FixedSixStaticJointGateRejected")
+				TEXT(" Reason=%s Expected=6 Registered=%d Modules=%d")
+				TEXT(" ResultHash=%llu Gate=Rejected"),
+				*FixedSixJoint.RejectReason,
+				FixedSixJoint.RegisteredBuildingCount,
+				FixedSixJoint.StaticModuleCount,
+				FixedSixJoint.RegistrationResultHash);
+		}
+	}
 	if (bRequiredBuildingSetupRejected)
 	{
 		UE_LOG(LogABTSRuntime, Error,
@@ -180,6 +318,29 @@ void AABTSM6SlingshotSystem::SealRequiredBuildingContract(const bool bInSetupRej
 			ExpectedRequiredBuildingCount,
 			RegisteredRequired);
 	}
+}
+
+bool AABTSM6SlingshotSystem::CopyFixedSixStaticJointGateResult(
+	uint64& OutRegistrationResultHash,
+	int32& OutRegisteredBuildingCount,
+	int32& OutStaticModuleCount) const
+{
+	OutRegistrationResultHash = 0;
+	OutRegisteredBuildingCount = 0;
+	OutStaticModuleCount = 0;
+	if (!bRequiredBuildingContractActive
+		|| !bRequiredBuildingContractSealed
+		|| bRequiredBuildingSetupRejected
+		|| !bFixedSixStaticJointGateAccepted)
+	{
+		return false;
+	}
+	OutRegistrationResultHash =
+		FixedSixStaticJointRegistrationResultHash;
+	OutRegisteredBuildingCount =
+		FixedSixStaticJointRegisteredBuildingCount;
+	OutStaticModuleCount = FixedSixStaticJointModuleCount;
+	return true;
 }
 
 bool AABTSM6SlingshotSystem::AreRuntimeBuildingsReadyForLaunch() const

@@ -104,3 +104,35 @@ M7 静态封口交给 Integration 时必须包含：
 - ForceUnity 结果、fresh 自动化过滤器、成功数和唯一日志；
 - 新增/更新的 M7 排错 ID；
 - `Shared files changed: none`、`Chaos: NotEvaluated`。
+
+## 7. 工作顺序第 5 步完成：M7 消费 V2 并注册六栋静态建筑
+
+2026-08-15，M7 工作树已合并 Integration 发布的 `master@3991723`，并只读消费 Fixed-Six V2
+快照。消费器只按 `ManifestEntryId` 解析清单项，逐项复验 Encounter、Tier、Seed、Descriptor、
+StaticGeometry、Production、Device、Catalog 与 Layout 身份；六项全部验证完成后才允许生成 Actor。
+任一字段漂移、顺序变化、数量不足或生产结果不一致都清空计划并失败关闭，禁止回退到旧三栋
+TaskGraph、按 Profile/Seed 搜索或 Legacy 单栋路径。
+
+静态实现为每栋一个 `AABTSM73StableBuildingActor`：生产积木进入该 Actor 的材质 HISM，装置以一个
+静态 `AABTSM7BuildingModule` 注册。六栋先作为完整批次生成并验证，再一起加入 M6 的 required-building
+门；批次在共享注册前失败会回滚所有候选 Actor。最终固定顺序 E1～E6 共 `5736` 块积木、`6` 个装置、
+`5742` 个静态模块，`RegistrationResultHash=3948236352584381910`，日志身份固定为
+`Authority=StaticRegistration / Chaos=NotEvaluated`。当前步骤没有激活任何单栋 Chaos，也没有修改共享合同、
+M3 Fixture、M6 门、地图或二进制资产。
+
+验证证据：
+
+- Development Editor 普通非 Unity 构建成功；`-ForceUnity -DisableAdaptiveUnity` 6 actions 完整链接成功；
+- 最终 Unity 二进制的 `ABTS.M73DAG.BeamC3V3.Demo.J4V2Consumer` 精确 `2/2`；测试主动执行全局
+  LaunchPhysics 后仍为 `Promoted=0 / Activated=0`，六个静态装置没有提前进入动态阶段，日志
+  `Saved/Logs/M7-J4V2Consumer-FinalUnityStaticIsolation-20260815-170755-FreshAutomation.log`；
+- `ABTS.M73DAG.BeamC3V3.Demo.J4StaticSeal.BoundsAndPad` 回归精确 `1/1`，日志
+  `Saved/Logs/M7-J4StaticSeal-Regression-20260815-165653-FreshAutomation.log`；
+- `ABTS.Contracts.WorldGeneration` 回归精确 `2/2`，日志
+  `Saved/Logs/M7-WorldGenerationContract-Regression-20260815-165800-FreshAutomation.log`。
+
+后续仍按固定顺序进入 Integration 静态联合门，然后才回到 M7 做当前 encounter 的动态 Chaos 激活。
+只要研究保持在已发布的静态/动态包络内，Stage 5/5.5 内部积木、材料和物理参数可形成新的
+Production/Device/Chaos Candidate Hash，不需要修改 Stage 4 冻结。只有 Stage 4 active 前缀、Pivot、
+LocalBounds、Pad、Manifest 映射或共享 Layout 身份需要变化时，才停止 Chaos 并重新执行
+Integration → M3 → Integration → M7 的开冻链。

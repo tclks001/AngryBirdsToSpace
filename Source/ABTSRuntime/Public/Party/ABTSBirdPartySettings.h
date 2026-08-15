@@ -103,6 +103,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Orbit", meta = (ClampMin = "300.0", UIMax = "3000.0"))
 	float MaxOrbitDistanceCM = 1300.0f;
 
+	/** Upward framing starts to dolly closer below this signed elevation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Orbit|Upward Framing", meta = (ClampMin = "-60.0", ClampMax = "20.0"))
+	float CameraUpwardFramingStartDegrees = -5.0f;
+
+	/** Upward framing reaches its closest authored distance at and below this elevation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Orbit|Upward Framing", meta = (ClampMin = "-85.0", ClampMax = "-10.0"))
+	float CameraUpwardFramingFullDegrees = -70.0f;
+
+	/** Fraction of the user's current zoom retained at full upward framing. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Orbit|Upward Framing", meta = (ClampMin = "0.4", ClampMax = "1.0"))
+	float CameraUpwardFramingMinimumDistanceScale = 0.72f;
+
 	/** Signed degrees above the local tangent plane; +85 is top-down and -85 is bottom-up. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Orbit", meta = (ClampMin = "-85.0", ClampMax = "85.0"))
 	float DefaultElevationDegrees = 60.0f;
@@ -167,6 +179,17 @@ public:
 	/** Spherical-world grounded tangential focus window. Radial height and all airborne movement remain continuous. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Follow", meta = (ClampMin = "0.0", UIMax = "100.0"))
 	float CameraPivotDeadZoneCM = 22.0f;
+
+	/**
+	 * Always-on minimum camera-center height above the authoritative ground.
+	 * Surface safety lifts the complete view frame and never shortens the orbit arm.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Surface Safety", meta = (ClampMin = "1.0", UIMax = "500.0"))
+	float CameraSurfaceSafetyClearanceCM = 120.0f;
+
+	/** Pre-contact C1 transition band for the rigid surface-safe view-frame lift. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Surface Safety", meta = (ClampMin = "0.0", UIMax = "600.0"))
+	float CameraSurfaceSafetyTransitionBandCM = 180.0f;
 
 	/** Optional camera collision avoidance. Disabled by default so blockers remain visibly between the camera and bird. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M4|Camera|Obstruction")
