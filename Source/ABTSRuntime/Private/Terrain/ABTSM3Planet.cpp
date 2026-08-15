@@ -15,6 +15,7 @@
 #include "ProceduralMeshComponent.h"
 #include "Rendering/ABTSStylizedMaterialContract.h"
 #include "Slingshot/ABTSSlingshotVisualTypes.h"
+#include "Terrain/ABTSM3DecorPlacement.h"
 #include "Terrain/ABTSM3TerrainVisualField.h"
 #include "Terrain/ABTSM3TerrainMaterialBridge.h"
 #include "UObject/ConstructorHelpers.h"
@@ -150,6 +151,83 @@ bool ValidateInstancedMeshMaterials(const TCHAR* Label, const UStaticMesh* Mesh)
 	}
 	return bAllMaterialsValid;
 }
+
+void HashABTSM3DecorPlacementValue(uint64& InOutHash, const int64 Value)
+{
+	constexpr uint64 Prime = 1099511628211ull;
+	uint64 Bits = static_cast<uint64>(Value);
+	for (int32 ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+	{
+		InOutHash ^= Bits & 0xffull;
+		InOutHash *= Prime;
+		Bits >>= 8;
+	}
+}
+
+void HashABTSM3DecorPlacementTransform(
+	uint64& InOutHash,
+	const uint8 Type,
+	const FTransform& Transform)
+{
+	HashABTSM3DecorPlacementValue(InOutHash, Type);
+	const FVector Location = Transform.GetLocation();
+	FQuat Rotation = Transform.GetRotation();
+	if (Rotation.W < 0.0f)
+	{
+		Rotation.X *= -1.0f;
+		Rotation.Y *= -1.0f;
+		Rotation.Z *= -1.0f;
+		Rotation.W *= -1.0f;
+	}
+	const FVector Scale = Transform.GetScale3D();
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Location.X * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Location.Y * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Location.Z * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Rotation.X * 1000000.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Rotation.Y * 1000000.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Rotation.Z * 1000000.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Rotation.W * 1000000.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Scale.X * 10000.0));
+}
+
+void HashABTSM3DecorCollisionShape(
+	uint64& InOutHash,
+	const uint8 Type,
+	const FABTSM3DecorCollisionShape& Shape)
+{
+	HashABTSM3DecorPlacementValue(InOutHash, Type);
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Shape.LocalBounds.Min.X * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Shape.LocalBounds.Min.Y * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Shape.LocalBounds.Min.Z * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Shape.LocalBounds.Max.X * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Shape.LocalBounds.Max.Y * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, FMath::RoundToInt64(Shape.LocalBounds.Max.Z * 100.0));
+	HashABTSM3DecorPlacementValue(
+		InOutHash, Shape.LocalSurfaceSamples.Num());
+	for (const FVector& Sample : Shape.LocalSurfaceSamples)
+	{
+		HashABTSM3DecorPlacementValue(
+			InOutHash, FMath::RoundToInt64(Sample.X * 100.0));
+		HashABTSM3DecorPlacementValue(
+			InOutHash, FMath::RoundToInt64(Sample.Y * 100.0));
+		HashABTSM3DecorPlacementValue(
+			InOutHash, FMath::RoundToInt64(Sample.Z * 100.0));
+	}
+}
 }
 
 AABTSM3Planet::AABTSM3Planet()
@@ -228,6 +306,7 @@ bool AABTSM3Planet::RebuildPlanet()
 	MonthlyDecorAccent1InstanceCount = 0;
 	JuryFixedSixTerrainPadCount = 0;
 	JuryFixedSixDecorClearanceRejectedCount = 0;
+	DecorPlacementSummary = FABTSM3DecorPlacementSummary();
 	bM3PresentationReady = false;
 	bMonthlyPresentationPreviewActive = false;
 	ActiveMonthlyPresentationPreviewCandidateId = INDEX_NONE;
@@ -2404,13 +2483,18 @@ void AABTSM3Planet::BuildDecorInstances(
 	const FABTSM3MonthlyCandidatePresentation*
 		PresentationCandidate)
 {
-	// Blueprint children created before the debug obstacle channel existed can
-	// serialize their old WorldStatic component type. Reapply the runtime
-	// contract whenever the instances are rebuilt.
-	ForestHISM->SetCollisionEnabled(
-		ECollisionEnabled::QueryAndPhysics);
-	RockHISM->SetCollisionEnabled(
-		ECollisionEnabled::QueryAndPhysics);
+	struct FPendingDecorPlacement
+	{
+		UHierarchicalInstancedStaticMeshComponent* TargetHISM = nullptr;
+		const FABTSM3DecorCollisionShape* CollisionShape = nullptr;
+		FTransform Transform = FTransform::Identity;
+		FABTSM3DecorOrientedBounds Bounds;
+		uint8 Type = 0;
+	};
+
+	DecorPlacementSummary = FABTSM3DecorPlacementSummary();
+	ForestHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	RockHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	ForestHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	RockHISM->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	ForestHISM->SetCollisionResponseToAllChannels(ECR_Block);
@@ -2423,9 +2507,6 @@ void AABTSM3Planet::BuildDecorInstances(
 	MonthlyDecorAccent1InstanceCount = 0;
 	JuryFixedSixDecorClearanceRejectedCount = 0;
 
-	// An artist may configure either the Actor properties or the HISM component
-	// templates in BP_ABTSM3Planet.  A null Actor property must not erase a mesh
-	// already assigned on the component.
 	if (ForestInstanceMesh)
 	{
 		ForestHISM->SetStaticMesh(ForestInstanceMesh);
@@ -2434,12 +2515,8 @@ void AABTSM3Planet::BuildDecorInstances(
 	{
 		RockHISM->SetStaticMesh(RockInstanceMesh);
 	}
-
 	UStaticMesh* ResolvedForestMesh = ForestHISM->GetStaticMesh();
 	UStaticMesh* ResolvedRockMesh = RockHISM->GetStaticMesh();
-	// Existing Blueprints created before native preview meshes were introduced
-	// can serialize an explicit null component mesh.  Resolve that migration case
-	// at runtime so the HISM path is immediately testable without an asset edit.
 	if (ResolvedForestMesh == nullptr)
 	{
 		ResolvedForestMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
@@ -2453,18 +2530,59 @@ void AABTSM3Planet::BuildDecorInstances(
 	const bool bForestMaterialsValid = ValidateInstancedMeshMaterials(TEXT("Forest"), ResolvedForestMesh);
 	const bool bRockMaterialsValid = ValidateInstancedMeshMaterials(TEXT("Rock"), ResolvedRockMesh);
 
+	FABTSM3DecorCollisionShape ForestCollisionShape;
+	FABTSM3DecorCollisionShape RockCollisionShape;
+	FString ForestCollisionFailure;
+	FString RockCollisionFailure;
+	if (!FABTSM3DecorPlacementGeometry::BuildCollisionShape(
+			ResolvedForestMesh,
+			ForestCollisionShape,
+			ForestCollisionFailure)
+		|| !FABTSM3DecorPlacementGeometry::BuildCollisionShape(
+			ResolvedRockMesh,
+			RockCollisionShape,
+			RockCollisionFailure))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3][HISMPlacement] Accepted=0 Failure=CollisionDescriptionUnavailable Forest=%s Rock=%s"),
+			*ForestCollisionFailure,
+			*RockCollisionFailure);
+		return;
+	}
 	if (InstancesPerCell <= 0)
 	{
-		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M3][HISM] InstancesPerCell=%d; decoration generation is disabled."), InstancesPerCell);
+		DecorPlacementSummary.bAccepted = true;
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M3][HISM] InstancesPerCell=%d; decoration generation is disabled."),
+			InstancesPerCell);
 		return;
 	}
 
+	constexpr float MaximumDecorScale = 1.25f * 1.12f * 1.05f;
+	const float SpatialCellSizeCM = FMath::Max(
+		ForestCollisionShape.LocalBounds.GetSize().GetMax(),
+		RockCollisionShape.LocalBounds.GetSize().GetMax())
+		* MaximumDecorScale
+		+ FMath::Max(DecorInstanceSeparationMarginCM, 0.0f);
+	FABTSM3DecorSpatialHash SpatialHash(SpatialCellSizeCM);
+	TArray<FPendingDecorPlacement> PendingPlacements;
+	PendingPlacements.Reserve(LogicalCells.Num() * InstancesPerCell);
 	int32 EligibleForestCells = 0;
 	int32 EligibleRockCells = 0;
 	float MaxForestSurfaceTiltDegrees = 0.0f;
 	float MaxForestAppliedTiltDegrees = 0.0f;
 	int32 ProtectedCellCount = 0;
 	int32 PlannedInstanceBudget = 0;
+	float MinimumGroundClearanceCM = TNumericLimits<float>::Max();
+	float MinimumPairAxisGapCM = TNumericLimits<float>::Max();
+	const int32 ResolvedAttemptsPerSlot = FMath::Clamp(
+		DecorPlacementAttemptsPerSlot, 1, 32);
+	const float ResolvedGroundClearanceCM = FMath::Max(
+		DecorGroundClearanceCM, 0.0f);
+	const float ResolvedSeparationMarginCM = FMath::Max(
+		DecorInstanceSeparationMarginCM, 0.0f);
+	const float ResolvedMaximumAdditionalSeatLiftCM = FMath::Max(
+		DecorMaximumAdditionalSeatLiftCM, 0.0f);
 	const TArray<FABTSM3CellState>& EffectiveCellStates =
 		PresentationCellStates != nullptr
 		? *PresentationCellStates
@@ -2473,57 +2591,53 @@ void AABTSM3Planet::BuildDecorInstances(
 	for (int32 CellId = 0; CellId < LogicalCells.Num(); ++CellId)
 	{
 		if (!EffectiveCellStates.IsValidIndex(CellId)) continue;
-		const FABTSM3CellState& State =
-			EffectiveCellStates[CellId];
-		const FABTSM3MonthlyPresentationCell*
-			PresentationCell =
-				PresentationCandidate != nullptr
-					&& PresentationCandidate->Cells
-						.IsValidIndex(CellId)
-				? &PresentationCandidate->Cells[CellId]
-				: nullptr;
+		const FABTSM3CellState& State = EffectiveCellStates[CellId];
+		const FABTSM3MonthlyPresentationCell* PresentationCell =
+			PresentationCandidate != nullptr
+				&& PresentationCandidate->Cells.IsValidIndex(CellId)
+			? &PresentationCandidate->Cells[CellId]
+			: nullptr;
 		if (PresentationCell != nullptr
 			&& (PresentationCell->CellId != CellId
-				|| PresentationCell
-					->bDecorationProtected))
+				|| PresentationCell->bDecorationProtected))
 		{
-			ProtectedCellCount +=
-				PresentationCell->bDecorationProtected
-				? 1 : 0;
+			ProtectedCellCount += PresentationCell->bDecorationProtected ? 1 : 0;
 			continue;
 		}
-		UHierarchicalInstancedStaticMeshComponent* TargetHISM = nullptr;
 		if (State.bRoad || State.bBuildingAnchor || State.bWater) continue;
+
+		UHierarchicalInstancedStaticMeshComponent* TargetHISM = nullptr;
+		const FABTSM3DecorCollisionShape* CollisionShape = nullptr;
+		uint8 DecorType = 0;
 		if (State.TerrainType == EABTSM3TerrainType::Forest && ResolvedForestMesh)
 		{
 			TargetHISM = ForestHISM;
+			CollisionShape = &ForestCollisionShape;
+			DecorType = 1;
 			++EligibleForestCells;
 		}
-		if (State.TerrainType == EABTSM3TerrainType::Mountain && ResolvedRockMesh)
+		else if (State.TerrainType == EABTSM3TerrainType::Mountain && ResolvedRockMesh)
 		{
 			TargetHISM = RockHISM;
+			CollisionShape = &RockCollisionShape;
+			DecorType = 2;
 			++EligibleRockCells;
 		}
-		if (TargetHISM == nullptr) continue;
+		if (TargetHISM == nullptr || CollisionShape == nullptr) continue;
+
 		int32 CellInstanceCount = InstancesPerCell;
 		if (PresentationCell != nullptr)
 		{
-			const int32 RequiredDecorationMask =
-				TargetHISM == ForestHISM
-				? static_cast<int32>(
-					EABTSM3MonthlyDecorationKind::Forest)
-				: static_cast<int32>(
-					EABTSM3MonthlyDecorationKind::Rock);
-			if ((PresentationCell->DecorationKindMask
-					& RequiredDecorationMask)
-				== 0)
+			const int32 RequiredDecorationMask = TargetHISM == ForestHISM
+				? static_cast<int32>(EABTSM3MonthlyDecorationKind::Forest)
+				: static_cast<int32>(EABTSM3MonthlyDecorationKind::Rock);
+			if ((PresentationCell->DecorationKindMask & RequiredDecorationMask) == 0)
 			{
 				continue;
 			}
 			CellInstanceCount = FMath::Min(
 				CellInstanceCount,
-				PresentationCell
-					->MaxDecorationInstances);
+				PresentationCell->MaxDecorationInstances);
 			PlannedInstanceBudget += CellInstanceCount;
 		}
 		if (CellInstanceCount <= 0) continue;
@@ -2532,136 +2646,348 @@ void AABTSM3Planet::BuildDecorInstances(
 		if (PresentationCell != nullptr)
 		{
 			const FABTSM3MonthlyVisualBeat* Beat =
-				PresentationCandidate->VisualBeats
-					.FindByPredicate(
-						[PresentationCell](
-							const FABTSM3MonthlyVisualBeat&
-								Item)
-						{
-							return Item.VisualBeatId
-								== PresentationCell->
-									VisualBeatId;
-						});
-			if (Beat == nullptr)
-			{
-				continue;
-			}
+				PresentationCandidate->VisualBeats.FindByPredicate(
+					[PresentationCell](const FABTSM3MonthlyVisualBeat& Item)
+					{
+						return Item.VisualBeatId == PresentationCell->VisualBeatId;
+					});
+			if (Beat == nullptr) continue;
 			AccentVariantId = Beat->AccentVariantId;
-			if ((AccentVariantId & 1) == 0
-				&& CellInstanceCount > 1)
+			if ((AccentVariantId & 1) == 0 && CellInstanceCount > 1)
 			{
 				--CellInstanceCount;
 			}
 		}
-		const uint32 VisualVariantSeed =
-			PresentationCell != nullptr
+		const uint32 VisualVariantSeed = PresentationCell != nullptr
 			? HashCombineFast(
-				GetTypeHash(
-					PresentationCell->ThemeVariantId),
+				GetTypeHash(PresentationCell->ThemeVariantId),
 				GetTypeHash(AccentVariantId))
 			: 0u;
-		FRandomStream Stream(HashCombineFast(
-			HashCombineFast(
-				GetTypeHash(WorldSeed),
-				GetTypeHash(CellId)),
-			VisualVariantSeed));
 		const FVector Center = LogicalCells[CellId].UnitCenter;
-		for (int32 Slot = 0;
-			Slot < CellInstanceCount;
-			++Slot)
+		if (LogicalCells[CellId].NeighborCellIds.IsEmpty()) continue;
+
+		for (int32 Slot = 0; Slot < CellInstanceCount; ++Slot)
 		{
-			const int32 NeighborId = LogicalCells[CellId].NeighborCellIds[Stream.RandRange(0, LogicalCells[CellId].NeighborCellIds.Num() - 1)];
-			const FVector Direction = FMath::Lerp(Center, LogicalCells[NeighborId].UnitCenter, Stream.FRandRange(0.0f, 0.42f)).GetSafeNormal();
-			if (PresentationCandidate != nullptr)
+			++DecorPlacementSummary.RequestedSlots;
+			for (int32 Attempt = 0; Attempt < ResolvedAttemptsPerSlot; ++Attempt)
 			{
-				const int32 ResolvedCellId =
-					FindNearestCell(Direction);
-				if (ResolvedCellId != CellId
-					|| !PresentationCandidate->Cells
-						.IsValidIndex(
-							ResolvedCellId)
-					|| PresentationCandidate->Cells[
-						ResolvedCellId]
-						.bDecorationProtected)
+				FRandomStream AttemptStream(
+					FABTSM3DecorPlacementGeometry::MakeAttemptSeed(
+						WorldSeed,
+						CellId,
+						Slot,
+						Attempt,
+						VisualVariantSeed));
+				const int32 NeighborId = LogicalCells[CellId].NeighborCellIds[
+					AttemptStream.RandRange(
+						0,
+						LogicalCells[CellId].NeighborCellIds.Num() - 1)];
+				if (!LogicalCells.IsValidIndex(NeighborId))
 				{
+					++DecorPlacementSummary.RejectedProtectedOrReserved;
 					continue;
 				}
-			}
-			if (TerrainVisualField->IsInsideBuildingPad(Direction)) continue;
-			const FVector PlanetLocalSurfaceLocation = Direction
-				* TerrainVisualField->GetSurfaceRadius(Direction);
-			if (IsInsideJuryFixedSixDynamicEnvelope(
-					PlanetLocalSurfaceLocation))
-			{
-				++JuryFixedSixDecorClearanceRejectedCount;
-				continue;
-			}
-			const float Radius = TerrainVisualField->GetSurfaceRadius(Direction) - 8.0f;
-			const FVector RadialUp = Direction;
-			FVector SurfaceUp = TerrainVisualField->GetSurfaceNormal(Direction).GetSafeNormal();
-			if (FVector::DotProduct(SurfaceUp, RadialUp) < 0.0f) SurfaceUp *= -1.0f;
-			FVector Up = SurfaceUp;
-			if (TargetHISM == ForestHISM)
-			{
-				// A tree should visually grow away from the planet, not lie along every
-				// local terrain ripple. Keep radial Up dominant and use the surface
-				// normal only as a controlled slope response.
-				const float SurfaceBlend = FMath::Clamp(ForestSurfaceNormalBlend, 0.0f, 1.0f);
-				Up = FMath::Lerp(RadialUp, SurfaceUp, SurfaceBlend).GetSafeNormal();
-				if (Up.IsNearlyZero()) Up = RadialUp;
-				const float SurfaceTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(RadialUp, SurfaceUp), -1.0f, 1.0f)));
-				const float AppliedTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(RadialUp, Up), -1.0f, 1.0f)));
-				MaxForestSurfaceTiltDegrees = FMath::Max(MaxForestSurfaceTiltDegrees, SurfaceTiltDegrees);
-				MaxForestAppliedTiltDegrees = FMath::Max(MaxForestAppliedTiltDegrees, AppliedTiltDegrees);
-			}
-			FVector Forward = FVector::VectorPlaneProject(LogicalCells[NeighborId].UnitCenter - Center, Up).GetSafeNormal();
-			if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
-			if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
-			const FQuat Rotation = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
-			const float BeatScale =
-				PresentationCell != nullptr
-				&& (AccentVariantId & 1) != 0
-				? 1.12f
-				: (PresentationCell != nullptr
-					? 0.88f
-					: 1.0f);
-			const float ThemeScale =
-				PresentationCell != nullptr
-				&& (PresentationCell->ThemeVariantId & 1)
-					!= 0
-				? 1.05f
-				: (PresentationCell != nullptr
-					? 0.95f
-					: 1.0f);
-			const float Scale =
-				Stream.FRandRange(0.75f, 1.25f)
-				* BeatScale
-				* ThemeScale;
-			TargetHISM->AddInstance(FTransform(Rotation, Direction * Radius, FVector(Scale)), false);
-			if (PresentationCell != nullptr)
-			{
-				if ((AccentVariantId & 1) != 0)
+				const FVector Direction = FMath::Lerp(
+					Center,
+					LogicalCells[NeighborId].UnitCenter,
+					AttemptStream.FRandRange(0.0f, 0.42f)).GetSafeNormal();
+				if (Direction.IsNearlyZero())
 				{
-					++MonthlyDecorAccent1InstanceCount;
+					++DecorPlacementSummary.RejectedGround;
+					continue;
 				}
-				else
+				if (PresentationCandidate != nullptr)
 				{
-					++MonthlyDecorAccent0InstanceCount;
+					const int32 ResolvedCellId = FindNearestCell(Direction);
+					if (ResolvedCellId != CellId
+						|| !PresentationCandidate->Cells.IsValidIndex(ResolvedCellId)
+						|| PresentationCandidate->Cells[ResolvedCellId].bDecorationProtected)
+					{
+						++DecorPlacementSummary.RejectedProtectedOrReserved;
+						continue;
+					}
 				}
+				if (TerrainVisualField->IsInsideBuildingPad(Direction))
+				{
+					++DecorPlacementSummary.RejectedProtectedOrReserved;
+					continue;
+				}
+				const float SurfaceRadiusCM = TerrainVisualField->GetSurfaceRadius(Direction);
+				const FVector PlanetLocalSurfaceLocation = Direction * SurfaceRadiusCM;
+				if (IsInsideJuryFixedSixDynamicEnvelope(PlanetLocalSurfaceLocation))
+				{
+					++JuryFixedSixDecorClearanceRejectedCount;
+					++DecorPlacementSummary.RejectedProtectedOrReserved;
+					continue;
+				}
+
+				const FVector RadialUp = Direction;
+				FVector SurfaceUp = TerrainVisualField->GetSurfaceNormal(Direction).GetSafeNormal();
+				if (FVector::DotProduct(SurfaceUp, RadialUp) < 0.0f) SurfaceUp *= -1.0f;
+				FVector Up = SurfaceUp;
+				float SurfaceTiltDegrees = 0.0f;
+				float AppliedTiltDegrees = 0.0f;
+				if (TargetHISM == ForestHISM)
+				{
+					const float SurfaceBlend = FMath::Clamp(
+						ForestSurfaceNormalBlend, 0.0f, 1.0f);
+					Up = FMath::Lerp(RadialUp, SurfaceUp, SurfaceBlend).GetSafeNormal();
+					if (Up.IsNearlyZero()) Up = RadialUp;
+					SurfaceTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(
+						FMath::Clamp(FVector::DotProduct(RadialUp, SurfaceUp), -1.0f, 1.0f)));
+					AppliedTiltDegrees = FMath::RadiansToDegrees(FMath::Acos(
+						FMath::Clamp(FVector::DotProduct(RadialUp, Up), -1.0f, 1.0f)));
+				}
+				FVector Forward = FVector::VectorPlaneProject(
+					LogicalCells[NeighborId].UnitCenter - Center,
+					Up).GetSafeNormal();
+				if (Forward.IsNearlyZero())
+				{
+					Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+				}
+				if (Forward.IsNearlyZero())
+				{
+					Forward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
+				}
+				const FQuat Rotation = FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
+				const float BeatScale = PresentationCell != nullptr
+					&& (AccentVariantId & 1) != 0
+					? 1.12f
+					: (PresentationCell != nullptr ? 0.88f : 1.0f);
+				const float ThemeScale = PresentationCell != nullptr
+					&& (PresentationCell->ThemeVariantId & 1) != 0
+					? 1.05f
+					: (PresentationCell != nullptr ? 0.95f : 1.0f);
+				const float Scale = AttemptStream.FRandRange(0.75f, 1.25f)
+					* BeatScale * ThemeScale;
+
+				FTransform CandidateTransform;
+				float SeatCorrectionCM = 0.0f;
+				float CandidateMinimumGroundClearanceCM = 0.0f;
+				if (!FABTSM3DecorPlacementGeometry::TrySeatOnSurface(
+						*CollisionShape,
+						RadialUp,
+						Rotation,
+						Scale,
+						PlanetLocalSurfaceLocation,
+						ResolvedGroundClearanceCM,
+						[this](const FVector& Point)
+						{
+							const FVector PointDirection = Point.GetSafeNormal();
+							if (PointDirection.IsNearlyZero())
+							{
+								return -TNumericLimits<float>::Max();
+							}
+							return static_cast<float>(Point.Size())
+								- TerrainVisualField->GetSurfaceRadius(PointDirection);
+						},
+						CandidateTransform,
+						SeatCorrectionCM,
+						CandidateMinimumGroundClearanceCM))
+				{
+					++DecorPlacementSummary.RejectedGround;
+					continue;
+				}
+				const float PivotConventionCorrectionCM = FMath::Max(
+					0.0f,
+					- static_cast<float>(CollisionShape->LocalBounds.Min.Z)
+						* Scale
+						+ ResolvedGroundClearanceCM);
+				if (SeatCorrectionCM
+					> PivotConventionCorrectionCM
+						+ ResolvedMaximumAdditionalSeatLiftCM)
+				{
+					++DecorPlacementSummary.RejectedGround;
+					continue;
+				}
+
+				const FABTSM3DecorOrientedBounds CandidateBounds =
+					FABTSM3DecorPlacementGeometry::BuildOrientedBounds(
+						*CollisionShape,
+						CandidateTransform);
+				float CandidatePairAxisGapCM = TNumericLimits<float>::Max();
+				if (SpatialHash.WouldOverlap(
+						CandidateBounds,
+						ResolvedSeparationMarginCM,
+						CandidatePairAxisGapCM))
+				{
+					++DecorPlacementSummary.RejectedPairOverlap;
+					continue;
+				}
+
+				FPendingDecorPlacement& Accepted = PendingPlacements.AddDefaulted_GetRef();
+				Accepted.TargetHISM = TargetHISM;
+				Accepted.CollisionShape = CollisionShape;
+				Accepted.Transform = CandidateTransform;
+				Accepted.Bounds = CandidateBounds;
+				Accepted.Type = DecorType;
+				SpatialHash.Add(CandidateBounds);
+				DecorPlacementSummary.MaxSeatCorrectionCM = FMath::Max(
+					DecorPlacementSummary.MaxSeatCorrectionCM,
+					SeatCorrectionCM);
+				MinimumGroundClearanceCM = FMath::Min(
+					MinimumGroundClearanceCM,
+					CandidateMinimumGroundClearanceCM);
+				if (FMath::IsFinite(CandidatePairAxisGapCM))
+				{
+					MinimumPairAxisGapCM = FMath::Min(
+						MinimumPairAxisGapCM,
+						CandidatePairAxisGapCM);
+				}
+				if (TargetHISM == ForestHISM)
+				{
+					MaxForestSurfaceTiltDegrees = FMath::Max(
+						MaxForestSurfaceTiltDegrees,
+						SurfaceTiltDegrees);
+					MaxForestAppliedTiltDegrees = FMath::Max(
+						MaxForestAppliedTiltDegrees,
+						AppliedTiltDegrees);
+				}
+				if (PresentationCell != nullptr)
+				{
+					if ((AccentVariantId & 1) != 0)
+					{
+						++MonthlyDecorAccent1InstanceCount;
+					}
+					else
+					{
+						++MonthlyDecorAccent0InstanceCount;
+					}
+				}
+				break;
 			}
 		}
 	}
 
+	// Re-run the pure geometry gate over the complete candidate set before any
+	// transform enters a HISM. A failure publishes no partial decoration world.
+	FABTSM3DecorSpatialHash ValidationHash(SpatialCellSizeCM);
+	bool bFinalValidationPassed = true;
+	for (const FPendingDecorPlacement& Placement : PendingPlacements)
+	{
+		float IgnoredAxisGapCM = 0.0f;
+		if (ValidationHash.WouldOverlap(
+				Placement.Bounds,
+				ResolvedSeparationMarginCM,
+				IgnoredAxisGapCM))
+		{
+			bFinalValidationPassed = false;
+			break;
+		}
+		for (const FVector& LocalSample : Placement.CollisionShape->LocalSurfaceSamples)
+		{
+			const FVector Point = Placement.Transform.TransformPosition(LocalSample);
+			const FVector PointDirection = Point.GetSafeNormal();
+			const float SignedDistanceCM = PointDirection.IsNearlyZero()
+				? -TNumericLimits<float>::Max()
+				: static_cast<float>(Point.Size())
+					- TerrainVisualField->GetSurfaceRadius(PointDirection);
+			if (!FMath::IsFinite(SignedDistanceCM)
+				|| SignedDistanceCM + 0.02f < ResolvedGroundClearanceCM)
+			{
+				bFinalValidationPassed = false;
+				break;
+			}
+		}
+		if (!bFinalValidationPassed) break;
+		ValidationHash.Add(Placement.Bounds);
+	}
+	if (!bFinalValidationPassed)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3][HISMPlacement] Accepted=0 Failure=FinalCollisionValidation Requested=%d CandidateAccepted=%d"),
+			DecorPlacementSummary.RequestedSlots,
+			PendingPlacements.Num());
+		return;
+	}
+
+	TArray<FTransform> ForestTransforms;
+	TArray<FTransform> RockTransforms;
+	ForestTransforms.Reserve(PendingPlacements.Num());
+	RockTransforms.Reserve(PendingPlacements.Num());
+	uint64 PlacementResultHash = 1469598103934665603ull;
+	HashABTSM3DecorPlacementValue(
+		PlacementResultHash,
+		DecorPlacementSummary.PlacementAlgorithmVersion);
+	HashABTSM3DecorPlacementValue(
+		PlacementResultHash,
+		ResolvedAttemptsPerSlot);
+	HashABTSM3DecorPlacementValue(
+		PlacementResultHash,
+		FMath::RoundToInt64(ResolvedGroundClearanceCM * 100.0));
+	HashABTSM3DecorPlacementValue(
+		PlacementResultHash,
+		FMath::RoundToInt64(ResolvedMaximumAdditionalSeatLiftCM * 100.0));
+	HashABTSM3DecorPlacementValue(
+		PlacementResultHash,
+		FMath::RoundToInt64(ResolvedSeparationMarginCM * 100.0));
+	HashABTSM3DecorCollisionShape(
+		PlacementResultHash,
+		1,
+		ForestCollisionShape);
+	HashABTSM3DecorCollisionShape(
+		PlacementResultHash,
+		2,
+		RockCollisionShape);
+	for (const FPendingDecorPlacement& Placement : PendingPlacements)
+	{
+		if (Placement.TargetHISM == ForestHISM)
+		{
+			ForestTransforms.Add(Placement.Transform);
+		}
+		else
+		{
+			RockTransforms.Add(Placement.Transform);
+		}
+		HashABTSM3DecorPlacementTransform(
+			PlacementResultHash,
+			Placement.Type,
+			Placement.Transform);
+	}
+	ForestHISM->AddInstances(ForestTransforms, false, false, true);
+	RockHISM->AddInstances(RockTransforms, false, false, true);
+	DecorPlacementSummary.bAccepted = true;
+	DecorPlacementSummary.AcceptedInstances = PendingPlacements.Num();
+	DecorPlacementSummary.MinimumGroundClearanceCM =
+		FMath::IsFinite(MinimumGroundClearanceCM)
+		? MinimumGroundClearanceCM
+		: 0.0f;
+	DecorPlacementSummary.MinimumPairAxisGapCM =
+		FMath::IsFinite(MinimumPairAxisGapCM)
+		? MinimumPairAxisGapCM
+		: (PendingPlacements.Num() > 1
+			? ResolvedSeparationMarginCM
+			: 0.0f);
+	DecorPlacementSummary.PlacementResultHash =
+		static_cast<int64>(PlacementResultHash);
+
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3][HISMPlacement] Accepted=1 Version=%d AttemptsPerSlot=%d Requested=%d AcceptedInstances=%d RejectedProtected=%d RejectedGround=%d RejectedPairOverlap=%d GroundClearanceCM=%.2f MaximumAdditionalSeatLiftCM=%.2f SeparationMarginCM=%.2f MaxSeatCorrectionCM=%.2f MinimumGroundClearanceCM=%.2f MinimumPairAxisGapCM=%.2f ResultHash=%lld"),
+		DecorPlacementSummary.PlacementAlgorithmVersion,
+		ResolvedAttemptsPerSlot,
+		DecorPlacementSummary.RequestedSlots,
+		DecorPlacementSummary.AcceptedInstances,
+		DecorPlacementSummary.RejectedProtectedOrReserved,
+		DecorPlacementSummary.RejectedGround,
+		DecorPlacementSummary.RejectedPairOverlap,
+		ResolvedGroundClearanceCM,
+		ResolvedMaximumAdditionalSeatLiftCM,
+		ResolvedSeparationMarginCM,
+		DecorPlacementSummary.MaxSeatCorrectionCM,
+		DecorPlacementSummary.MinimumGroundClearanceCM,
+		DecorPlacementSummary.MinimumPairAxisGapCM,
+		DecorPlacementSummary.PlacementResultHash);
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M3][HISM] ForestMesh=%s RockMesh=%s ForestMaterialsValid=%d RockMaterialsValid=%d EligibleForestCells=%d EligibleRockCells=%d ForestInstances=%d RockInstances=%d ForestNormalBlend=%.2f MaxSurfaceTilt=%.2f MaxAppliedTilt=%.2f M3R5PreviewAuthority=%d ProtectedCells=%d PlannedInstanceBudget=%d Accent0Instances=%d Accent1Instances=%d JuryDynamicClearanceRejected=%d Collision=QueryAndPhysics ObstacleChannel=%d SimulatePhysics=0"),
-		*GetNameSafe(ResolvedForestMesh), *GetNameSafe(ResolvedRockMesh), bForestMaterialsValid ? 1 : 0, bRockMaterialsValid ? 1 : 0, EligibleForestCells, EligibleRockCells,
-		ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(), FMath::Clamp(ForestSurfaceNormalBlend, 0.0f, 1.0f),
+		*GetNameSafe(ResolvedForestMesh), *GetNameSafe(ResolvedRockMesh),
+		bForestMaterialsValid ? 1 : 0, bRockMaterialsValid ? 1 : 0,
+		EligibleForestCells, EligibleRockCells,
+		ForestHISM->GetInstanceCount(), RockHISM->GetInstanceCount(),
+		FMath::Clamp(ForestSurfaceNormalBlend, 0.0f, 1.0f),
 		MaxForestSurfaceTiltDegrees, MaxForestAppliedTiltDegrees,
 		PresentationCandidate != nullptr ? 1 : 0,
-		ProtectedCellCount,
-		PlannedInstanceBudget,
-		MonthlyDecorAccent0InstanceCount,
-		MonthlyDecorAccent1InstanceCount,
+		ProtectedCellCount, PlannedInstanceBudget,
+		MonthlyDecorAccent0InstanceCount, MonthlyDecorAccent1InstanceCount,
 		JuryFixedSixDecorClearanceRejectedCount,
 		static_cast<int32>(ABTSDeveloperObstacleChannel));
 }

@@ -57,6 +57,46 @@ struct FABTSM3SurfacePhysicsSample
 	float Restitution = 0.02f;
 };
 
+/** Deterministic generation evidence for collision-legal forest/rock instances. */
+USTRUCT(BlueprintType)
+struct FABTSM3DecorPlacementSummary
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 PlacementAlgorithmVersion = 2;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	bool bAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RequestedSlots = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 AcceptedInstances = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RejectedProtectedOrReserved = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RejectedGround = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RejectedPairOverlap = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	float MaxSeatCorrectionCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	float MinimumGroundClearanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	float MinimumPairAxisGapCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int64 PlacementResultHash = 0;
+};
+
 /** M3 presentation planet. CellTopo and TaskGraph remain the only gameplay sources. */
 UCLASS(BlueprintType)
 class ABTSRUNTIME_API AABTSM3Planet : public AABTSM2Planet
@@ -99,6 +139,11 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellEdgeState>& GetGeneratedEdgeStates() const { return GeneratedEdgeStates; }
+
+	const FABTSM3DecorPlacementSummary& GetDecorPlacementSummary() const
+	{
+		return DecorPlacementSummary;
+	}
 
 	/** Internal read-only R-1 observation; it is never exported through the v1 M7/M11 contracts. */
 	const FABTSM3MonthlyWorldSchema& GetMonthlyWorldSchema() const
@@ -447,6 +492,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0", ClampMax = "8"))
 	int32 InstancesPerCell = 2;
 
+	/** Independent deterministic candidates tried for each requested decor slot. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "1", ClampMax = "32"))
+	int32 DecorPlacementAttemptsPerSlot = 10;
+
+	/** Positive clearance retained by every simple-collision support sample. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "5.0"))
+	float DecorGroundClearanceCM = 2.0f;
+
+	/** Maximum lift beyond the mesh's own Pivot-to-collision-bottom compensation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "50.0"))
+	float DecorMaximumAdditionalSeatLiftCM = 25.0f;
+
+	/** Required separating-axis gap between every accepted tree/rock collision box. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "50.0", UIMin = "0.0", UIMax = "10.0"))
+	float DecorInstanceSeparationMarginCM = 4.0f;
+
 	/** 0 keeps trees purely radial; 1 fully follows the rendered terrain normal. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.5"))
 	float ForestSurfaceNormalBlend = 0.2f;
@@ -456,6 +517,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> RockHISM;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	FABTSM3DecorPlacementSummary DecorPlacementSummary;
 
 	/** M3-owned T3-A1 material; published read-only to Integration. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM|Stylized")

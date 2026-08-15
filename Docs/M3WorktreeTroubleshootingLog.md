@@ -17,7 +17,7 @@
 3. 只写已经实际遇到的问题或已经证明必要的诊断边界。尚未实现的功能、纯设计风险和普通开发进度不冒充故障。
 4. 每条记录注明修复归属。若问题属于 M7、M11 或 Integration，M3 只记录如何识别、如何同步修复，不越权修改共享契约。
 5. 验收证据必须来自本次修改后的 fresh 进程、唯一日志或可见 PIE；旧日志、Editor 已加载的 CDO 和单纯“编译了某个 `.cpp`”都不是闭环证据。
-6. 新条目使用第 13 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
+6. 新条目使用第 15 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
 
 ## 2. 快速索引
 
@@ -45,6 +45,7 @@
 | M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化/可见 PIE 已验收 | M3 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
 | M3-JURY-004 | 合成 Fixture 绿灯未覆盖动态包络独占冲突和真实固定地图精确身份 | 已补专项失败注入、运行时身份门与 F7 诊断 | M3 |
+| M3-HISM-001 | 树石用统一 Pivot 偏移生成，首次进入 Chaos 因地形/实例穿插弹飞 | 已改为生成期碰撞包络贴地、跨类型避让和确定性门禁 | M3；M6 只保留集成诊断 |
 
 ## 3. 工作树、同步与构建
 
@@ -760,7 +761,40 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - `M3Jury-ProductionClearance-Final-WorldContracts-20260815-174933-794-FreshAutomation.log`：最终二进制上的 `ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`，证明公开兼容站点与 V2 Adapter 边界未漂移；
 - 本门只证明 NullRHI 下的生产地形数值与 HISM 空间清空，不替代 M7 实时 Chaos、SceneCapture 像素或最终 E1→E6 可见 PIE。
 
-## 14. 新条目模板
+## 14. 树石 HISM 生成期碰撞
+
+### M3-HISM-001：固定 Pivot 与事后 Chaos 松弛不能证明树石生成合法
+
+**现象**
+
+- `BuildDecorInstances` 曾统一把树、石 Pivot 放在 `SurfaceRadius - 8 cm`，但树和石的简单碰撞底部相对 Pivot 约定不同；石头会直接进入连续地形，倾斜树的高处碰撞包络也可能切入坡面；
+- Forest/Forest、Rock/Rock、Forest/Rock 之间没有生成期排斥。首次进入 Chaos 或发射范围批量提升动态代理时，重叠实例通过解穿冲量弹飞；
+- 旧 Startup Physics 预热依赖 `BodyInstance` 就绪时序，只做事后 HISM 重叠扫描，既不证明单实例没有穿地，也可能在相同实例规模下得到不同候选数；
+- 初版“只把所有碰撞样本向外抬到合法”虽然消除了穿透，但真实网格门显示 `MaxSeatCorrectionCM=345.03`，会把倾斜树整体抬离地面，属于物理绿灯、视觉假绿灯。
+
+**根因**
+
+生成器把渲染 Pivot 当作统一接地合同，并把运行时 Chaos 松弛当作生成合法化步骤。真实权威几何却是每个 `UStaticMesh::BodySetup->AggGeom` 的简单碰撞体；不同网格 Pivot、缩放、坡面旋转和跨类型邻居都会改变它的地表支撑与占用包络。物理场景扫描还受组件/BodyInstance 初始化时序影响，不能成为确定性生成来源。
+
+**修复**
+
+- M3 从每个树石网格的 `AggGeom` 构造碰撞描述；凸包采样全部顶点和下部 20% 三角面心，primitive fallback 使用简单碰撞包络，不再读取渲染包围盒或固定 `-8 cm`；
+- 每个候选沿行星径向迭代贴地，所有碰撞支撑样本必须保持 `DecorGroundClearanceCM=2`；额外抬升不得超过“该资产 Pivot 到碰撞底部的固有补偿 + 25 cm”，否则换下一个候选，避免用悬空换取无穿透；
+- 森林和岩石共享一个 3D Spatial Hash；窄阶段用简单碰撞包络 OBB 的 15 个分离轴检查，统一要求树—树、石—石、树—石至少保留 `4 cm` 分离；
+- `(WorldSeed, CellId, Slot, Attempt, VisualVariantSeed)` 独立派生随机种子，每槽最多尝试 10 次。尝试耗尽即跳过，不强行发布非法实例，也不让前一槽重试次数扰动后续结果；
+- 所有候选先进入 CPU 暂存并通过最终全局复核，再批量写入 HISM。任一最终地形/实例门失败时整批 fail closed；成功结果记录版本、Requested/Accepted、各类拒绝、最大贴地修正、最小净空/轴间距和量化 Transform Result Hash；
+- 本修复只修改 M3 自有 Terrain/HISM 生成链。集成所有的 M6 预热仍可暂作诊断兼容层，但不再是生成合法性的来源，也不得改写 M3 的确定性结果。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；
+- `M3-DecorPlacement-20260815-FinalHash.log`：`ABTS.M3.DecorPlacement` 精确 `4/4 Success`，覆盖碰撞支撑贴地、跨树石空间哈希、103 Seed 独立 Attempt 身份和真实生产网格两次完整重建；
+- 两次生产重建均得到 `AttemptsPerSlot=10 Requested=8990 AcceptedInstances=6646 RejectedGround=6479 RejectedPairOverlap=22853 MaxSeatCorrectionCM=71.57 MinimumGroundClearanceCM=1.99 MinimumPairAxisGapCM=4.10 ResultHash=-398834407951031673`；数量和 Hash 完全一致，Hash 已覆盖碰撞形状与关键放置参数，初版 `345.03 cm` 抬升与中间 Hash 已作废；`RebuildBudget` 分别为 `5192.327 ms`、`4999.561 ms`，均在 `8000 ms` 内；
+- `M3-WorldGenerationContract-20260815-FinalHash.log`：最终二进制上的 `ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`；
+- `M3-TaskGraphFinaleSeparation-20260815-FinalHash.log`：最终二进制上的 `ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
+- NullRHI 证明确定性和 CPU 几何合同，不替代可见 PIE/实时 Chaos。集成验收必须在 `L_ABTS_M3` 或 canonical 联合地图首次进入 Chaos/首次发射时确认树石不弹飞、不瞬移、不从地表钻出，并核对 Startup HISM 重叠候选趋近于零；若 M6 扫描仍报候选，按共享热点流程继续分诊，M3 不越权修改 M6。
+
+## 15. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>
