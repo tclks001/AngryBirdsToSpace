@@ -388,6 +388,78 @@ bool AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
 	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
 }
 
+bool AABTSM6SlingshotCamera::BuildImpactObservationPose(
+	const FVector& BirdLocation,
+	const FVector& Up,
+	const FVector& FrozenForward,
+	const FVector& FacilityAnchor,
+	const bool bHasFacilityAnchor,
+	const float DistanceCM,
+	const float HeightCM,
+	const float LookDownDegrees,
+	const float FacilityLookBias,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp)
+{
+	if (!BuildFixedBirdFlightPose(
+		BirdLocation,
+		Up,
+		FrozenForward,
+		DistanceCM,
+		HeightCM,
+		LookDownDegrees,
+		OutLocation,
+		OutLook,
+		OutScreenUp))
+	{
+		return false;
+	}
+	if (!bHasFacilityAnchor || FacilityAnchor.ContainsNaN()) return true;
+
+	const FVector SafeUp = Up.GetSafeNormal();
+	const FVector BirdFocus = BirdLocation + SafeUp * 80.0f;
+	const FVector BirdDirection = (BirdFocus - OutLocation).GetSafeNormal();
+	const FVector FacilityDirection = (FacilityAnchor - OutLocation).GetSafeNormal();
+	if (BirdDirection.IsNearlyZero() || FacilityDirection.IsNearlyZero()) return true;
+
+	// Direction-space blending shares the available angle between the bird and
+	// the actual hit facility without making a distant centroid dominate.
+	const FVector SharedLook = FMath::Lerp(
+		BirdDirection,
+		FacilityDirection,
+		FMath::Clamp(FacilityLookBias, 0.0f, 0.5f)).GetSafeNormal();
+	const FVector SharedScreenUp = FVector::VectorPlaneProject(
+		SafeUp,
+		SharedLook).GetSafeNormal();
+	if (!SharedLook.IsNearlyZero() && !SharedScreenUp.IsNearlyZero())
+	{
+		OutLook = SharedLook;
+		OutScreenUp = SharedScreenUp;
+	}
+	return true;
+}
+
+bool AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+	const EABTSM6ImpactObservationAuthority CurrentAuthority,
+	const EABTSM6ImpactObservationAuthority CandidateAuthority)
+{
+	return static_cast<uint8>(CandidateAuthority)
+		> static_cast<uint8>(CurrentAuthority);
+}
+
+void AABTSM6SlingshotCamera::ResetImpactObservation()
+{
+	ImpactObservationSample = FABTSM6ImpactObservationSample();
+	ImpactObservationForward = FVector::ZeroVector;
+	ImpactObservationBlendStartLocation = FVector::ZeroVector;
+	ImpactObservationBlendStartRotation = FQuat::Identity;
+	ImpactObservationBlendAlpha = 0.0f;
+	bImpactObservationActive = false;
+	bImpactSettlementHold = false;
+	FollowFacingLockRemainingSeconds = 0.0f;
+}
+
 void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet)
 {
 	Bird = InBird;
@@ -406,6 +478,7 @@ void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Pl
 	SatelliteSubtleAssistAlpha = 0.0f;
 	StableSatellitePresentationUp = FVector::ZeroVector;
 	StableFollowForward = FVector::ZeroVector;
+	ResetImpactObservation();
 	bForcePrimaryFrameUntilNextFollow = false;
 	SatelliteOrbitViewNormal = FVector::ZeroVector;
 	SetSatelliteFlightPhase(
@@ -420,6 +493,8 @@ void AABTSM6SlingshotCamera::FollowBirdPlanar(AABTSM25BirdCharacter* InBird, con
 	if (PlanarFollowUp.IsNearlyZero()) PlanarFollowUp = FVector::UpVector;
 	bPlanarFollow = true;
 	bFollowBird = true;
+	StableFollowForward = FVector::ZeroVector;
+	ResetImpactObservation();
 }
 
 bool AABTSM6SlingshotCamera::SnapToPrimaryFollowForSatelliteCapture()
@@ -702,15 +777,104 @@ void AABTSM6SlingshotCamera::NotifySatelliteSurfaceContact()
 	}
 }
 
-void AABTSM6SlingshotCamera::NotifyBirdImpact()
+void AABTSM6SlingshotCamera::NotifyBirdImpact(
+	const FABTSM6ImpactObservationSample& Sample)
 {
 	FollowFacingLockRemainingSeconds = FMath::Max(
 		FollowFacingLockRemainingSeconds,
 		FMath::Max(0.0f, FollowFacingImpactLockSeconds));
+	if (Sample.Authority == EABTSM6ImpactObservationAuthority::None
+		|| Sample.ImpactPoint.ContainsNaN()
+		|| Sample.IncomingVelocity.ContainsNaN()
+		|| !FMath::IsFinite(Sample.NormalSpeedCMPerSec))
+	{
+		return;
+	}
+	if (Sample.Authority == EABTSM6ImpactObservationAuthority::SurfaceImpact
+		&& Sample.NormalSpeedCMPerSec
+			< FMath::Max(0.0f, ImpactObservationMinimumSurfaceSpeedCMPerSec))
+	{
+		return;
+	}
+	if (!ShouldReplaceImpactObservation(
+		ImpactObservationSample.Authority,
+		Sample.Authority))
+	{
+		return;
+	}
+
+	ImpactObservationSample = Sample;
+	if (Sample.Authority == EABTSM6ImpactObservationAuthority::FacilityImpact)
+	{
+		ActivateImpactObservation();
+	}
+}
+
+void AABTSM6SlingshotCamera::NotifySettlementStarted()
+{
+	bImpactSettlementHold = true;
+	if (ImpactObservationSample.Authority
+		== EABTSM6ImpactObservationAuthority::None)
+	{
+		ImpactObservationSample.Authority =
+			EABTSM6ImpactObservationAuthority::SurfaceImpact;
+		ImpactObservationSample.ImpactPoint = Bird.IsValid()
+			? Bird->GetActorLocation()
+			: GetActorLocation();
+		ImpactObservationSample.IncomingVelocity = StableFollowForward;
+	}
+	if (!bImpactObservationActive) ActivateImpactObservation();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][CameraImpactObservation] SettlingHold=1 Authority=%d Facility=%d"),
+		static_cast<int32>(ImpactObservationSample.Authority),
+		ImpactObservationSample.Authority
+			== EABTSM6ImpactObservationAuthority::FacilityImpact ? 1 : 0);
+}
+
+void AABTSM6SlingshotCamera::ActivateImpactObservation()
+{
+	AABTSM25BirdCharacter* TargetBird = Bird.Get();
+	AABTSM2Planet* TargetPlanet = Planet.Get();
+	if (TargetBird == nullptr || (!bPlanarFollow && TargetPlanet == nullptr)) return;
+	const FVector Up = bPlanarFollow
+		? PlanarFollowUp
+		: TargetPlanet->GetRadialUpAtWorldLocation(
+			ImpactObservationSample.ImpactPoint);
+	FVector Forward = FVector::VectorPlaneProject(
+		ImpactObservationSample.IncomingVelocity,
+		Up).GetSafeNormal();
+	if (Forward.IsNearlyZero())
+	{
+		Forward = FVector::VectorPlaneProject(
+			StableFollowForward,
+			Up).GetSafeNormal();
+	}
+	if (Forward.IsNearlyZero())
+	{
+		Forward = FVector::VectorPlaneProject(
+			TargetBird->GetActorForwardVector(),
+			Up).GetSafeNormal();
+	}
+	if (Forward.IsNearlyZero()) return;
+
+	ImpactObservationForward = Forward;
+	StableFollowForward = Forward;
+	ImpactObservationBlendStartLocation = GetActorLocation();
+	ImpactObservationBlendStartRotation = GetActorQuat().GetNormalized();
+	ImpactObservationBlendAlpha = 0.0f;
+	bImpactObservationActive = true;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][CameraImpactObservation] Activated Authority=%d Facility=%d Speed=%.1f Anchor=%s"),
+		static_cast<int32>(ImpactObservationSample.Authority),
+		ImpactObservationSample.Authority
+			== EABTSM6ImpactObservationAuthority::FacilityImpact ? 1 : 0,
+		ImpactObservationSample.NormalSpeedCMPerSec,
+		*ImpactObservationSample.FacilityAnchor.ToCompactString());
 }
 
 void AABTSM6SlingshotCamera::BeginReturnToPrimaryFrame()
 {
+	ResetImpactObservation();
 	bSatelliteE5Hit = false;
 	bSatelliteSurfaceContact = false;
 	bSatelliteSurfaceFrameLatched = false;
@@ -796,10 +960,77 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 	}
 	FVector DesiredLocation;
 	FQuat DesiredRotation;
+	if (bImpactObservationActive)
+	{
+		if (!BuildImpactObservationFollowPose(
+			*TargetBird,
+			DesiredLocation,
+			DesiredRotation))
+		{
+			return;
+		}
+		ImpactObservationBlendAlpha = FMath::Clamp(
+			ImpactObservationBlendAlpha
+				+ FMath::Max(0.0f, DeltaSeconds)
+					/ FMath::Max(0.05f, ImpactObservationBlendSeconds),
+			0.0f,
+			1.0f);
+		const float Blend = FMath::SmoothStep(
+			0.0f,
+			1.0f,
+			ImpactObservationBlendAlpha);
+		SetActorLocationAndRotation(
+			FMath::Lerp(
+				ImpactObservationBlendStartLocation,
+				DesiredLocation,
+				Blend),
+			FQuat::Slerp(
+				ImpactObservationBlendStartRotation,
+				DesiredRotation,
+				Blend).GetNormalized());
+		return;
+	}
 	if (!BuildPrimaryFollowPose(*TargetBird, DesiredLocation, DesiredRotation)) return;
 	// Primary flight is a rigid bird-relative composition. Independent position
 	// and rotation lag changes both apparent bird scale and screen placement.
 	SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
+}
+
+bool AABTSM6SlingshotCamera::BuildImpactObservationFollowPose(
+	AABTSM25BirdCharacter& TargetBird,
+	FVector& OutLocation,
+	FQuat& OutRotation) const
+{
+	const AABTSM2Planet* TargetPlanet = Planet.Get();
+	if (!bPlanarFollow && TargetPlanet == nullptr) return false;
+	const FVector Up = bPlanarFollow
+		? PlanarFollowUp
+		: TargetPlanet->GetRadialUpAtWorldLocation(TargetBird.GetActorLocation());
+	const FVector Forward = FVector::VectorPlaneProject(
+		ImpactObservationForward,
+		Up).GetSafeNormal();
+	if (Forward.IsNearlyZero()) return false;
+	FVector Look;
+	FVector ScreenUp;
+	if (!BuildImpactObservationPose(
+		TargetBird.GetActorLocation(),
+		Up,
+		Forward,
+		ImpactObservationSample.FacilityAnchor,
+		ImpactObservationSample.Authority
+			== EABTSM6ImpactObservationAuthority::FacilityImpact,
+		FlightDistanceCM,
+		FlightHeightCM,
+		FlightLookDownDegrees,
+		ImpactObservationFacilityLookBias,
+		OutLocation,
+		Look,
+		ScreenUp))
+	{
+		return false;
+	}
+	OutRotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
+	return true;
 }
 
 void AABTSM6SlingshotCamera::CalcCamera(

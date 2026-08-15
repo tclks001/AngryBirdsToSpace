@@ -27,6 +27,7 @@ void AABTSM6SlingshotSystem::BeginSettlement()
 	}
 	const float Now = GetWorld()->GetTimeSeconds();
 	LaunchState = EABTSM6LaunchState::Settling;
+	if (SlingshotCamera) SlingshotCamera->NotifySettlementStarted();
 	PhysicsSettleMonitor.BeginSettlement(Now);
 	NextSettleDiagnosticTimeSeconds = Now;
 	TArray<UPrimitiveComponent*> Bodies;

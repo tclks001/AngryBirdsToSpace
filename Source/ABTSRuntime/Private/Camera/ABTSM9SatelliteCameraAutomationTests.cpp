@@ -342,4 +342,114 @@ bool FABTSM6LaunchGroundContextCameraTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6ImpactObservationCameraTest,
+	"ABTS.M6.Camera.ImpactObservation",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6ImpactObservationCameraTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(
+		TEXT("A first significant surface impact establishes a pending observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::None,
+			EABTSM6ImpactObservationAuthority::SurfaceImpact));
+	TestTrue(
+		TEXT("An actual facility hit upgrades a pending surface observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::SurfaceImpact,
+			EABTSM6ImpactObservationAuthority::FacilityImpact));
+	TestFalse(
+		TEXT("Residual surface contacts cannot replace a facility observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::FacilityImpact,
+			EABTSM6ImpactObservationAuthority::SurfaceImpact));
+	TestFalse(
+		TEXT("Repeated facility contacts cannot rotate an already locked observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::FacilityImpact,
+			EABTSM6ImpactObservationAuthority::FacilityImpact));
+
+	const FVector BirdLocation = FVector::ZeroVector;
+	const FVector Up = FVector::UpVector;
+	const FVector FrozenForward = FVector::ForwardVector;
+	const FVector FacilityAnchor(300.0f, 240.0f, 250.0f);
+	FVector ObservationLocation;
+	FVector ObservationLook;
+	FVector ObservationScreenUp;
+	TestTrue(
+		TEXT("A frozen tangent and actual facility anchor produce an observation pose"),
+		AABTSM6SlingshotCamera::BuildImpactObservationPose(
+			BirdLocation,
+			Up,
+			FrozenForward,
+			FacilityAnchor,
+			true,
+			920.0f,
+			310.0f,
+			26.0f,
+			0.42f,
+			ObservationLocation,
+			ObservationLook,
+			ObservationScreenUp));
+	TestTrue(
+		TEXT("Impact observation retains the authored bird-relative camera distance"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(ObservationLocation, BirdLocation),
+			FVector(920.0f, 0.0f, 310.0f).Size(),
+			0.01f));
+	const FVector BirdFocus = BirdLocation + Up * 80.0f;
+	const float BirdAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(FVector::DotProduct(
+			ObservationLook,
+			(BirdFocus - ObservationLocation).GetSafeNormal()), -1.0f, 1.0f)));
+	const float FacilityAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(FVector::DotProduct(
+			ObservationLook,
+			(FacilityAnchor - ObservationLocation).GetSafeNormal()), -1.0f, 1.0f)));
+	TestTrue(
+		TEXT("The bird remains inside the central observation framing"),
+		BirdAngleDegrees < 12.0f);
+	TestTrue(
+		TEXT("The actually hit facility remains inside the shared observation framing"),
+		FacilityAngleDegrees < 12.0f);
+	TestTrue(
+		TEXT("Impact observation remains roll-free"),
+		FMath::Abs(FVector::DotProduct(
+			ObservationLook,
+			ObservationScreenUp)) < 0.0001f
+			&& ObservationScreenUp.SizeSquared() > 0.999f);
+
+	FVector ResidualLocation;
+	FVector ResidualLook;
+	FVector ResidualScreenUp;
+	TestTrue(
+		TEXT("Settlement hold can rebuild from the frozen tangent"),
+		AABTSM6SlingshotCamera::BuildImpactObservationPose(
+			BirdLocation + FVector(15.0f, -8.0f, 0.0f),
+			Up,
+			FrozenForward,
+			FacilityAnchor,
+			true,
+			920.0f,
+			310.0f,
+			26.0f,
+			0.42f,
+			ResidualLocation,
+			ResidualLook,
+			ResidualScreenUp));
+	TestTrue(
+		TEXT("A sideways residual velocity is absent from the locked camera baseline"),
+		FVector::DotProduct(
+			FVector::VectorPlaneProject(
+				BirdLocation + FVector(15.0f, -8.0f, 0.0f)
+					- ResidualLocation,
+				Up).GetSafeNormal(),
+			FrozenForward) > 0.9999f);
+	return true;
+}
+
 #endif

@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -894,11 +895,73 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 	return true;
 }
 
+bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
+	const FHitResult& Hit,
+	FVector& OutAnchor,
+	FName& OutFacilityName) const
+{
+	OutAnchor = FVector::ZeroVector;
+	OutFacilityName = NAME_None;
+	const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+	if (HitComponent == nullptr) return false;
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding
+		: RequiredBuildingActors)
+	{
+		const AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+		if (Building == nullptr
+			|| !Building->OwnsRuntimePrimitive(HitComponent))
+		{
+			continue;
+		}
+		int32 LiveModuleCount = 0;
+		if (!Building->QueryLivePresentationAnchor(
+			OutAnchor,
+			LiveModuleCount))
+		{
+			return false;
+		}
+		OutFacilityName = Building->GetFName();
+		return true;
+	}
+	return false;
+}
+
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
 	LaunchedBird->NotifySlingshotPresentationImpact();
-	if (SlingshotCamera) SlingshotCamera->NotifyBirdImpact();
+	if (SlingshotCamera)
+	{
+		FABTSM6ImpactObservationSample Observation;
+		Observation.ImpactPoint = !Hit.ImpactPoint.IsNearlyZero()
+			? FVector(Hit.ImpactPoint)
+			: LaunchedBird->GetActorLocation();
+		Observation.ImpactNormal = Hit.ImpactNormal.GetSafeNormal();
+		Observation.IncomingVelocity = IncomingVelocity;
+		Observation.NormalSpeedCMPerSec = NormalSpeedCMPerSec;
+		FName FacilityName = NAME_None;
+		if (ResolveImpactFacilityObservationAnchor(
+			Hit,
+			Observation.FacilityAnchor,
+			FacilityName))
+		{
+			Observation.Authority =
+				EABTSM6ImpactObservationAuthority::FacilityImpact;
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M6][CameraImpactObservation] FacilityHit=%s Component=%s Impact=%s Anchor=%s Speed=%.1f"),
+				*FacilityName.ToString(),
+				*GetNameSafe(Hit.GetComponent()),
+				*Observation.ImpactPoint.ToCompactString(),
+				*Observation.FacilityAnchor.ToCompactString(),
+				NormalSpeedCMPerSec);
+		}
+		else
+		{
+			Observation.Authority =
+				EABTSM6ImpactObservationAuthority::SurfaceImpact;
+		}
+		SlingshotCamera->NotifyBirdImpact(Observation);
+	}
 	const bool bHitSatelliteBody =
 		Hit.GetActor() == SatellitePracticeBody.Get();
 	const bool bHitSatelliteTarget =

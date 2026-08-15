@@ -159,6 +159,12 @@ public:
 		const AABTSM3Planet* ExpectedPlanet,
 		FVector& OutWorldLocation,
 		int32& OutLiveModuleCount) const;
+	/** Generic read-only runtime centroid for camera/UI consumers; false for rejected or destroyed buildings. */
+	bool QueryLivePresentationAnchor(
+		FVector& OutWorldLocation,
+		int32& OutLiveModuleCount) const;
+	/** Event-time ownership query; callers must not cache module pointers or infer ownership from Actor Owner. */
+	bool OwnsRuntimePrimitive(const UPrimitiveComponent* Component) const;
 
 private:
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,

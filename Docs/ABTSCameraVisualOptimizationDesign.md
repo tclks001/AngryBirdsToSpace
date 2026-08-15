@@ -356,7 +356,22 @@ Target = SlingCenter + Forward * TargetForwardDistance + Up * TargetHeight
 - 镜头以鸟和观察锚点组成 Focus Set；建筑 Actor 后续若被破坏或回滚，使用已锁存的世界空间 ImpactPoint/包围球中心作为稳定回退，避免弱引用失效时突然转回鸟正前方。
 - `SettlingHold` 只允许小范围位置跟随和一次有界转场；新的显著撞击可以更新破坏焦点，但普通低速滚动不能重新取得镜头 Yaw 权威。进入 `Returning` 后再按现有流程回到主星 frame。
 
-这项接口若需要暴露 M7 建筑语义，属于共享镜头热点，应由集成工作树设计只读适配器；本轮不改稳定契约，也不修改 M7 专属文件。
+这项接口若需要暴露 M7 建筑语义，属于共享镜头热点，应由集成工作树设计只读适配器，不修改 M3→M7 稳定生成契约。
+
+#### 11.3.1 2026-08-15 候选实现
+
+本轮先落实“残余速度转圈”和“实际命中设施观察”，不扩展到“落在设施附近但没有命中”的候选搜索：
+
+- `HandleBirdImpact` 在破坏处理前把真实 `FHitResult` 复制为不可变的相机观察样本，保留 `ImpactPoint / ImpactNormal / IncomingVelocity / NormalSpeed`。相机仍不持有命中组件，也不反向修改碰撞、伤害或结算权威。
+- M7 运行时建筑新增通用只读查询：事件发生时判断命中 Primitive 是否属于该建筑，并从仍存活的模块计算一次实时质心。M6 只遍历开局已经注册且数量有界的 `RequiredBuildingActors`，不读取 M3 原始数组、不每帧 `ActorIterator`，也不缓存会因 Chaos 破坏而失效的模块指针。
+- 观察权威固定为 `None < SurfaceImpact < FacilityImpact`。首个有效地表命中可建立待用样本，实际设施命中可以升级它；一旦设施权威锁存，后续同级碰撞、低速滚动和地表抖动都不能再次改写目标。
+- 实际设施命中立即进入 `ImpactObservation`；普通落地在 `BeginSettlement` 显式通知相机进入 `SettlingHold`。两种路径都冻结命中前最后可信的入射切向，后续构图不再调用瞬时残余速度作为 Yaw 权威。
+- 观察机位仍保持鸟后 `920 cm`、鸟上 `310 cm`。有设施锚点时，在相机到鸟焦点与设施质心的两条视线之间按 `0.42` 构造共享注视方向，并用 `0.45 s` SmoothStep 完成一次有界转场；没有设施时继续使用冻结切向和 `26°` 地面构图。
+- `Returning` 和下一次 `FollowBird` 会清空观察样本与冻结状态。M9 的卫星接管仍优先于主星 `ImpactObservation`，避免新的地面阶段抢占月面/E5 构图。
+
+命令行证据：UE 5.8 Development Editor 常规构建和 `-ForceUnity -DisableAdaptiveUnity` 完整链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.M6.` 为 `4/4`、`ABTS.M9.Camera` 为 `1/1`，日志分别为 `Saved/Logs/M6-ImpactObservation-20260815-152150-FinalFreshAutomation.log` 和 `Saved/Logs/M9-Camera-ImpactObservation-20260815-152228-FinalFreshAutomation.log`。同源码常规构建后的接口回归 `ABTS.M73A` 为 `2/2`、`ABTS.Calibration` 为 `6/6`，日志为 `Saved/Logs/M73A-ImpactObservation-20260815-151826-FreshAutomation.log` 和 `Saved/Logs/Calibration-ImpactObservation-20260815-151925-FreshAutomation.log`。这些结果证明权威优先级、冻结几何、只读建筑接口和既有 M9/标定回归，不替代实际 Chaos 破坏时鸟与设施共同构图的可见 PIE 验收。
+
+可见 PIE 验收：2026-08-15，用户确认“实际命中设施观察”和“Settling 期间残余速度不再造成原地转圈”的手感通过；本候选冻结为问题二的当前接受基线。本次验收不覆盖“落在设施附近但未实际命中”的候选搜索，也不覆盖问题三的仰视地底穿透。
 
 ### 11.4 问题三：完整仰视范围与可选遮挡开关共同允许相机进入地表
 

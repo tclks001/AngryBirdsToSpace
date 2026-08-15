@@ -226,6 +226,10 @@ private:
 	void UpdateActiveLaunchTelemetry();
 	void FinalizeActiveLaunchTelemetry(const FVector& LandingWorldLocation);
 	void HandleBirdImpact(const FHitResult& Hit, float NormalSpeedCMPerSec, const FVector& IncomingVelocity);
+	bool ResolveImpactFacilityObservationAnchor(
+		const FHitResult& Hit,
+		FVector& OutAnchor,
+		FName& OutFacilityName) const;
 	EABTSM6ImpactMaterial ResolveMaterial(const UPrimitiveComponent* Component) const;
 	const FABTSM6BirdImpactProfile& GetBirdProfile(EABTSBirdId BirdId) const;
 	const FABTSM6MaterialImpactProfile& GetMaterialProfile(EABTSM6ImpactMaterial Material) const;
