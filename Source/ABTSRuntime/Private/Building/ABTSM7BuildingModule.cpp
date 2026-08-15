@@ -8,6 +8,7 @@
 #include "Misc/Crc.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/PhysicsObjectExternalInterface.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "World/ABTSCollisionChannels.h"
 
@@ -284,6 +285,30 @@ void AABTSM7BuildingModule::Freeze()
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
+bool AABTSM7BuildingModule::TryApplyNonInvalidatingAcceleration(
+	UStaticMeshComponent& Component,
+	const FVector& AccelerationCMPerSec2)
+{
+	if (!FMath::IsFinite(AccelerationCMPerSec2.X)
+		|| !FMath::IsFinite(AccelerationCMPerSec2.Y)
+		|| !FMath::IsFinite(AccelerationCMPerSec2.Z))
+	{
+		return false;
+	}
+	TArray<Chaos::FPhysicsObject*> PhysicsObjects =
+		Component.GetAllPhysicsObjects();
+	if (PhysicsObjects.IsEmpty()) return false;
+	FLockedWritePhysicsObjectExternalInterface Interface =
+		FPhysicsObjectExternalInterface::LockWrite(PhysicsObjects);
+	const float MassKG = Interface->GetMass(PhysicsObjects);
+	if (!FMath::IsFinite(MassKG) || MassKG <= 0.0f) return false;
+	Interface->AddForce(
+		PhysicsObjects,
+		AccelerationCMPerSec2 * MassKG,
+		false);
+	return true;
+}
+
 bool AABTSM7BuildingModule::BreakModule()
 {
 	if (bBroken) return false;
@@ -297,10 +322,17 @@ void AABTSM7BuildingModule::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (!bDynamic || !Visual->IsSimulatingPhysics()) return;
+	// UPrimitiveComponent::AddForce invalidates the particle and forces its
+	// state back to Dynamic every frame, so a supported body can never enter
+	// Chaos sleep. Skip bodies that are already asleep, and use the same
+	// non-invalidating force path as a persistent environmental acceleration
+	// for awake bodies. A collision/explicit wake makes the body eligible again.
+	if (!Visual->IsAnyRigidBodyAwake()) return;
 	const FVector GravityDirection = bPlanarGravity
 		? -PlanarGravityUp
 		: (PlanetCenter - GetActorLocation()).GetSafeNormal();
-	Visual->AddForce(GravityDirection * GravityAccelerationCMPerSec2, NAME_None, true);
+	TryApplyNonInvalidatingAcceleration(
+		*Visual, GravityDirection * GravityAccelerationCMPerSec2);
 }
 
 void AABTSM7BuildingModule::HandleHit(UPrimitiveComponent*, AActor*, UPrimitiveComponent* OtherComponent, FVector, const FHitResult& Hit)
