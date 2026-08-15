@@ -99,8 +99,42 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixV2Envelope
 	bool IsEmpty() const;
 };
 
+/** Stable support surface identity carried by a Fixed-Six V3 value snapshot. */
+enum class EABTSJuryDemoFixedSixSurfaceKind : uint8
+{
+	Unknown = 0,
+	PrimaryPlanet,
+	Satellite,
+	Count
+};
+
 /**
- * One immutable JuryDemoFixedSix V1/V2 placement exported by M3 for exact M7
+ * Additive Fixed-Six V3 building and placement facts.
+ *
+ * All values are immutable data. In particular, GravityAuthorityId names the
+ * producer authority but this DTO never retains a Planet/Satellite UObject.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixV3Envelope
+{
+	uint64 StaticGeometryHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+	FBox SiteLocalBounds = FBox(EForceInit::ForceInit);
+	FBox PadBounds = FBox(EForceInit::ForceInit);
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+	EABTSJuryDemoFixedSixSurfaceKind SurfaceKind =
+		EABTSJuryDemoFixedSixSurfaceKind::Unknown;
+	FVector SupportCenterWorldCM = FVector::ZeroVector;
+	double SupportRadiusCM = 0.0;
+	FName GravityAuthorityId = NAME_None;
+	uint64 GravityIdentityHash = 0;
+	uint64 PlacementHash = 0;
+
+	bool IsEmpty() const;
+};
+
+/**
+ * One immutable JuryDemoFixedSix V1/V2/V3 placement exported by M3 for exact M7
  * Manifest resolution.
  *
  * This DTO deliberately carries no weakness, attack-face or profile-search
@@ -118,6 +152,7 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
 	int32 DeterministicSeed = 0;
 	uint64 DescriptorHash = 0;
 	FABTSJuryDemoFixedSixV2Envelope V2Envelope;
+	FABTSJuryDemoFixedSixV3Envelope V3Envelope;
 
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 	bool IsUsableForContractVersion(
@@ -137,8 +172,13 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	/** V1 remains the compatibility version; fixed-six production publishes V2. */
 	static constexpr int32 CurrentContractVersion = 1;
 	static constexpr int32 SupportedV2ContractVersion = 2;
+	/** V3 is a handoff schema until Map Freeze publishes an approved Layout. */
+	static constexpr int32 SupportedV3ContractVersion = 3;
+	static constexpr int32 ProductionContractVersion =
+		SupportedV2ContractVersion;
 	static constexpr int32 ExpectedSiteCount = 6;
 	static constexpr int32 FrozenPlacementSchemaVersion = 1;
+	static constexpr int32 FrozenV3PlacementSchemaVersion = 3;
 	static constexpr int32 FrozenDemoManifestVersion = 1;
 	static constexpr uint64 FrozenDemoManifestHash = 2324068295ull;
 	/** V1 alias retained for existing producers and tests. */
@@ -146,6 +186,8 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 		13889440156022460967ull;
 	static constexpr uint64 FrozenV2PlacementCatalogHash =
 		11501529584318250152ull;
+	static constexpr uint64 FrozenV3PlacementCatalogHash =
+		8960617043786800590ull;
 	static constexpr int32 FrozenWorldSeed = 312503;
 	static constexpr int32 FrozenCandidateId = 4;
 	/** Frozen V1 identity retained for backward-compatible readers and tests. */
@@ -165,6 +207,13 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	TArray<FABTSJuryDemoFixedSixBuildingSite> Sites;
 
 	bool IsEmpty() const;
+	/**
+	 * Validates a complete V3 handoff without granting production authority.
+	 * LayoutHash and PlacementHash values must be non-zero but are not approved
+	 * until Integration freezes the M3 map identity in a later change.
+	 */
+	bool IsStructurallyUsableV3(double Tolerance = 1.0e-3) const;
+	/** Accepts only production-approved V1/V2 snapshots at this stage. */
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };
 

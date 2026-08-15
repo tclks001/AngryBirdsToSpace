@@ -112,6 +112,8 @@ UE 5.8 只读反射审计结果：
 
 ### 阶段 3：集成工作树加入 Fixed-Six V3 接口
 
+状态：2026-08-15 已完成。V3 仅开放 `IsStructurallyUsableV3()` 交接门，生产 `IsUsable()` 与默认版本仍保持 V2，等待 Map Freeze 后再原子启用。
+
 1. 先合入 M7 `BuildingFreezeV3` 的精确 SHA。
 2. 以向后兼容方式增加 V3 DTO；V1/V2 继续可读，V3 未完整时不切换默认生产版本。
 3. V3 追加 `SurfaceKind`、支撑球心、半径、重力身份和 site-local bounds 身份。

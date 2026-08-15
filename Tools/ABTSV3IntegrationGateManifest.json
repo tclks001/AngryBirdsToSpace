@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "BuildingFreezeV3AcceptedDTOPending",
+  "status": "IntegrationV3DTOPublishedMapFreezePending",
   "engineRoot": "C:\\Program Files\\Epic Games\\UE_5.8",
   "crystalBaselineCommit": "36400f498cbfbbd6a18e3d64c45b5c6291d82915",
   "activationAllowed": false,
@@ -46,7 +46,7 @@
     },
     {
       "filter": "ABTS.Contracts.WorldGeneration",
-      "expectedTests": 2,
+      "expectedTests": 3,
       "evidenceLayer": "NullRHIContract"
     }
   ],

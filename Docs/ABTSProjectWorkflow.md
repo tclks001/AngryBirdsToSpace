@@ -11,10 +11,10 @@
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
-- M3：Fixed-Six V2 的动态包络预留、生产地表落座与确定性诊断已经形成阶段提交；当前 V3 将改为五个主星 Pad 加一个月球背面 E1。M3 在 M7 发布最终 site-local bounds 和 Integration 发布 V3 DTO 前保持等待，不提前冻结占位 Transform/Hash。旧 R4 完整 Witness、R6 泛化 Profile 选择与 R7 全 Seed 认证继续延期，不阻断本轮固定演示路线。
+- M3：Fixed-Six V2 的动态包络预留、生产地表落座与确定性诊断已经形成阶段提交；当前 V3 将改为五个主星 Pad 加一个月球背面 E1。M7 最终 site-local bounds 与 Integration V3 DTO 已发布，M3 现在可开始 `MapFreezeV3`，但不得提前提交占位 Transform/Hash。旧 R4 完整 Witness、R6 泛化 Profile 选择与 R7 全 Seed 认证继续延期，不阻断本轮固定演示路线。
 - M7：Fixed-Six V2 六栋静态生产消费与共同门已进入 `master`；`BuildingFreezeV3@8a4892d` 已通过 Integration ForceUnity、冻结门 2/2、Stage5Production 3/3 和共同门 6/6，Catalog `8960617043786800590` 成为批准的建筑基线。旧位置 Chaos 证据继续仅作诊断，这仍不等于 `ChaosFreezeV3`。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`。集成工作树已新增独立的 `PresentationAccepted v1` 稳定合同；它明确不等于 M11-B `StrictCertified`，当前冻结生产绑定仍为 `Unbound`，所以 Rank12 仍不能替换 v1 默认值。
-- 当前下一步：Integration 加法发布 V3 DTO，保持 V1/V2 可读且生产默认仍为 V2；M3 随后冻结 `[E2,E3,E4,E5,E1,E6]` 的 5+1 地图身份。Integration 原子启用批准的 Map Freeze 后，M7 才从头执行生产重力下的 `ChaosFreezeV3`。最终候选串行执行 ForceUnity、fresh 合同/资源链、实时 30/60/120 FPS 和完整可见路线。T4-A3.3 与 M11 继续独立维护，不进入本轮关键路径。
+- 当前下一步：M3 基于已发布的 V3 DTO 冻结 `[E2,E3,E4,E5,E1,E6]` 的 5+1 地图身份；DTO 当前只允许结构交接，V1/V2 继续可读且生产默认仍为 V2。Integration 原子启用批准的 Map Freeze 后，M7 才从头执行生产重力下的 `ChaosFreezeV3`。最终候选串行执行 ForceUnity、fresh 合同/资源链、实时 30/60/120 FPS 和完整可见路线。T4-A3.3 与 M11 继续独立维护，不进入本轮关键路径。
 
 当前入口：[V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) · [V3 集成准备与门禁](BuildingGenerationAndPlacementFreezeV3IntegrationReadiness.md) · [Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M7 Stage 4.5 放置冻结](M73BeamStage45PlacementFreezeDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
@@ -72,7 +72,7 @@
 | --- | --- | --- | --- |
 | M3R-3.1 普通槽场 | M3 已生成候选槽场；Integration 已实现最小快照消费接缝、DirtHole 批回滚、M6 三维净空与失败原子状态，装配 2/2、槽 Actor 1/1，兼容世界 PIE 已通过 | M3R-4/R-6 产出唯一 Candidate、最终 `LayoutHash` 和正式导出；Integration 再绑定生产入口 | 未接受唯一月度 Candidate 前不得读取 `RetainedCandidates[0]`；月度实体槽与六关联合 Visible PIE 未通过前保持 `IntegrationPending` |
 | M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间；Integration 已冻结 M6/M9 Launch/Preset V0，普通 M6 三档实飞已消费同一目录并公开非零 `LaunchProfileHash`，生产消费 1/1 与标定 6/6 已通过 | Integration 继续提供实际 pouch/camera frame 与 M9 引力查询适配器；M7 提供已认证 ProfileDescriptor 目录 | 标定积分器不是生产 Witness 权威；只有 Launch/Preset 身份可跨 Seed，`GravitySnapshotHash` 仅为场景实例证据。实际 frame/M9 适配器或 M7 目录任一未就绪时，M3 仍为 `IntegrationPending` |
-| JuryDemo Fixed-Six 六栋建筑 | V2 的六栋静态生成、动态包络和共同静态门已进入 `master`；Crystal 材质/回收基线已发布 | M7 `BuildingFreezeV3` → Integration V3 DTO → M3 `MapFreezeV3` → Integration 原子启用 → M7 `ChaosFreezeV3` → 最终候选 | V2 旧位置 Chaos 证据已降级；Building/Map/Chaos 三门不得互代，最终 Hash 未到齐前保持 `IntegrationPending` |
+| JuryDemo Fixed-Six 六栋建筑 | `BuildingFreezeV3` 与 Integration V3 DTO 已进入 `master`；V3 只开放结构交接，生产仍为 V2 | M3 `MapFreezeV3` → Integration 原子启用 → M7 `ChaosFreezeV3` → 最终候选 | V2 旧位置 Chaos 证据已降级；Building/Map/Chaos 三门不得互代，最终 Hash 未到齐前保持 `IntegrationPending` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
 | M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成；Integration 已建立 `PresentationAccepted v1` 稳定合同，Rank12 的严格 v3 扫描已有早停证据 | M11 先实现完整表现兼容扫描并提交 Rank12 Manifest；严格拓扑认证可独立继续；M11-D 的 Party、环境和共享资产由 Integration 接线 | `PresentationAccepted` 不授予 `StrictCertified`；当前生产 Binding 为 `Unbound`，未完成全域证据、联合构建和可见 PIE 前不得进入生产 |
 

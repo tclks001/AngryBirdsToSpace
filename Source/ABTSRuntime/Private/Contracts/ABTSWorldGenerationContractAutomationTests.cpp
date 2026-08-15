@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -146,6 +147,94 @@ FABTSJuryDemoFixedSixContract MakeValidJuryDemoFixedSixV2Contract()
 		Site.V2Envelope.PhysicalBounds = Site.LocalBounds;
 		Site.V2Envelope.EffectBounds = EffectBounds[Index];
 		Site.V2Envelope.bDynamicEnvelopeRequired = true;
+	}
+	return Contract;
+}
+
+FABTSJuryDemoFixedSixContract MakeStructurallyUsableJuryDemoFixedSixV3Contract()
+{
+	FABTSJuryDemoFixedSixContract Contract;
+	Contract.ContractVersion =
+		FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion;
+	Contract.PlacementSchemaVersion =
+		FABTSJuryDemoFixedSixContract::FrozenV3PlacementSchemaVersion;
+	Contract.DemoManifestVersion =
+		FABTSJuryDemoFixedSixContract::FrozenDemoManifestVersion;
+	Contract.DemoManifestHash =
+		FABTSJuryDemoFixedSixContract::FrozenDemoManifestHash;
+	Contract.PlacementCatalogHash =
+		FABTSJuryDemoFixedSixContract::FrozenV3PlacementCatalogHash;
+	Contract.WorldSeed = FABTSJuryDemoFixedSixContract::FrozenWorldSeed;
+	Contract.CandidateId = FABTSJuryDemoFixedSixContract::FrozenCandidateId;
+	Contract.LayoutHash = 0x13579BDF2468ACE0ull;
+
+	static const TCHAR* ManifestEntryIds[] = {
+		TEXT("E2DropTrigger"),
+		TEXT("E3SlideRelease"),
+		TEXT("E4TipOver"),
+		TEXT("E5SeamRelease"),
+		TEXT("E1ColumnBreak"),
+		TEXT("E6TipOver")
+	};
+	static const FVector WorldLocations[] = {
+		FVector(0.0, 0.0, 10000.0),
+		FVector(10000.0, 0.0, 0.0),
+		FVector(0.0, 10000.0, 0.0),
+		FVector(-10000.0, 0.0, 0.0),
+		FVector(32000.0, 0.0, 0.0),
+		FVector(0.0, -10000.0, 0.0)
+	};
+	const TArray<FABTSM73BuildingFreezeV3FrozenIdentity>& Frozen =
+		FABTSM73BuildingFreezeV3::GetFrozenIdentities();
+	check(Frozen.Num() == UE_ARRAY_COUNT(ManifestEntryIds));
+	check(Frozen.Num() == UE_ARRAY_COUNT(WorldLocations));
+	Contract.Sites.Reserve(Frozen.Num());
+	for (int32 Index = 0; Index < Frozen.Num(); ++Index)
+	{
+		const FABTSM73BuildingFreezeV3FrozenIdentity& Identity = Frozen[Index];
+		FABTSJuryDemoFixedSixBuildingSite& Site =
+			Contract.Sites.AddDefaulted_GetRef();
+		Site.ManifestEntryId = FName(ManifestEntryIds[Index]);
+		Site.EncounterIndex = Index;
+		Site.LocalBounds = Identity.SiteLocalBounds;
+		Site.DifficultyTier = Identity.DifficultyTier;
+		Site.DeterministicSeed = Identity.BuildingSeed;
+		Site.DescriptorHash = Identity.DescriptorHash;
+
+		const bool bSatellite = Index == 4;
+		FABTSJuryDemoFixedSixV3Envelope& Envelope = Site.V3Envelope;
+		Envelope.StaticGeometryHash = Identity.StaticGeometryHash;
+		Envelope.ProductionIdentityHash = Identity.ProductionHash;
+		Envelope.DeviceAssemblyHash = Identity.SourceDeviceAssemblyHash;
+		Envelope.SiteLocalBounds = Identity.SiteLocalBounds;
+		Envelope.PadBounds = Identity.PadBounds;
+		Envelope.EffectBounds = Identity.EffectBounds;
+		Envelope.SurfaceKind = bSatellite
+			? EABTSJuryDemoFixedSixSurfaceKind::Satellite
+			: EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet;
+		Envelope.SupportCenterWorldCM = bSatellite
+			? FVector(30000.0, 0.0, 0.0)
+			: FVector::ZeroVector;
+		Envelope.SupportRadiusCM = bSatellite ? 2000.0 : 10000.0;
+		Envelope.GravityAuthorityId = bSatellite
+			? FName(TEXT("SatelliteGravity"))
+			: FName(TEXT("PrimaryGravity"));
+		Envelope.GravityIdentityHash = bSatellite ? 0x2202ull : 0x1101ull;
+		Envelope.PlacementHash = 0xA000ull + static_cast<uint64>(Index);
+
+		const FVector RadialUp =
+			(WorldLocations[Index] - Envelope.SupportCenterWorldCM)
+			.GetSafeNormal();
+		Site.WorldTransform = FTransform(
+			FQuat::FindBetweenNormals(FVector::UpVector, RadialUp),
+			WorldLocations[Index]);
+		Site.PadHalfExtentCM = FVector2D(
+			FMath::Max(
+				FMath::Abs(Identity.PadBounds.Min.X),
+				FMath::Abs(Identity.PadBounds.Max.X)),
+			FMath::Max(
+				FMath::Abs(Identity.PadBounds.Min.Y),
+				FMath::Abs(Identity.PadBounds.Max.Y)));
 	}
 	return Contract;
 }
@@ -465,6 +554,95 @@ bool FABTSWorldGenerationContractValidationTest::RunTest(
 	TestFalse(
 		TEXT("A scaled finale frame fails closed"),
 		FinaleContract.IsUsable());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSWorldGenerationV3DTOTest,
+	"ABTS.Contracts.WorldGeneration.V3DTO",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSWorldGenerationV3DTOTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	TestEqual(
+		TEXT("Integration V3 schema matches the accepted M7 producer"),
+		FABTSJuryDemoFixedSixContract::FrozenV3PlacementSchemaVersion,
+		FABTSM73BuildingFreezeV3::SchemaVersion);
+	TestEqual(
+		TEXT("Integration V3 Catalog matches the accepted M7 producer"),
+		FABTSJuryDemoFixedSixContract::FrozenV3PlacementCatalogHash,
+		FABTSM73BuildingFreezeV3::FrozenCatalogHash);
+
+	FABTSJuryDemoFixedSixContract Contract =
+		MakeStructurallyUsableJuryDemoFixedSixV3Contract();
+	TestTrue(
+		TEXT("A complete 5+1 V3 value snapshot is structurally usable for handoff"),
+		Contract.IsStructurallyUsableV3());
+	TestTrue(
+		TEXT("M3 can fail closed on each V3 site while building the handoff"),
+		Contract.Sites[4].IsUsableForContractVersion(
+			FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion));
+	TestFalse(
+		TEXT("A structurally usable V3 handoff is not production-approved early"),
+		Contract.IsUsable());
+	TestEqual(
+		TEXT("Production remains on V2 until Map Freeze is approved"),
+		FABTSJuryDemoFixedSixContract::ProductionContractVersion,
+		FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion);
+
+	FABTSJuryDemoFixedSixContract Legacy =
+		MakeValidJuryDemoFixedSixV2Contract();
+	TestTrue(TEXT("V2 remains production-usable"), Legacy.IsUsable());
+	Legacy.Sites[0].V3Envelope = Contract.Sites[0].V3Envelope;
+	TestFalse(
+		TEXT("V2 rejects silently injected V3 state"),
+		Legacy.IsUsable());
+
+	FABTSJuryDemoFixedSixContract WrongTier = Contract;
+	WrongTier.Sites[4].DifficultyTier = WrongTier.Sites[4].EncounterIndex;
+	TestFalse(
+		TEXT("E1 remains Tier 0 at encounter slot 4"),
+		WrongTier.IsStructurallyUsableV3());
+
+	FABTSJuryDemoFixedSixContract WrongSurface = Contract;
+	WrongSurface.Sites[4].V3Envelope.SurfaceKind =
+		EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet;
+	TestFalse(
+		TEXT("E1 must remain the single Satellite placement"),
+		WrongSurface.IsStructurallyUsableV3());
+
+	FABTSJuryDemoFixedSixContract InvalidSupport = Contract;
+	InvalidSupport.Sites[0].V3Envelope.SupportRadiusCM = 0.0;
+	TestFalse(
+		TEXT("A missing support sphere fails closed"),
+		InvalidSupport.IsStructurallyUsableV3());
+
+	FABTSJuryDemoFixedSixContract WrongBounds = Contract;
+	WrongBounds.Sites[2].V3Envelope.SiteLocalBounds.Max.X += 1.0;
+	TestFalse(
+		TEXT("M3 cannot reinterpret the accepted M7 site-local Bounds"),
+		WrongBounds.IsStructurallyUsableV3());
+
+	FABTSJuryDemoFixedSixContract DuplicatePlacement = Contract;
+	DuplicatePlacement.Sites[1].V3Envelope.PlacementHash =
+		DuplicatePlacement.Sites[0].V3Envelope.PlacementHash;
+	TestFalse(
+		TEXT("Duplicate V3 placement identities fail atomically"),
+		DuplicatePlacement.IsStructurallyUsableV3());
+
+	FABTSJuryDemoFixedSixContract MissingLayout = Contract;
+	MissingLayout.LayoutHash = 0;
+	TestFalse(
+		TEXT("An unfinished V3 Layout cannot be handed off"),
+		MissingLayout.IsStructurallyUsableV3());
+
+	FABTSJuryDemoFixedSixContract UnknownVersion = Contract;
+	UnknownVersion.ContractVersion++;
+	TestFalse(
+		TEXT("Unknown future versions fail closed"),
+		UnknownVersion.IsStructurallyUsableV3());
 	return true;
 }
 

@@ -1,6 +1,6 @@
 # Building Generation and Placement Freeze V3 集成准备与门禁
 
-> 状态：`BuildingFreezeV3IntegrationAccepted / IntegrationV3DTOPending`
+> 状态：`IntegrationV3DTOPublished / MapFreezeV3Pending`
 >
 > 日期：2026-08-15
 >
@@ -8,7 +8,7 @@
 
 ## 1. 目标与边界
 
-本文是 [V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) 的集成执行详稿，固定合同语义、负向矩阵、交接预检和最终证据层。M7 Building Freeze V3 已按精确 SHA 验收；本文仍不发布 V3 DTO、不填写 M3 最终 Hash、不切换生产版本，也不修改共同地图或默认绑定。
+本文是 [V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) 的集成执行详稿，固定合同语义、负向矩阵、交接预检和最终证据层。M7 Building Freeze V3 已按精确 SHA 验收，Integration V3 DTO 已加法发布；M3 最终 Hash 尚未填写，生产版本仍为 V2，且共同地图和默认绑定均未修改。
 
 当前已完成：
 
@@ -34,19 +34,19 @@
 
 提供精确交接 SHA 时追加 `-M7Commit`、`-M3Commit` 或 `-M11Commit`。工具只读 Git、Manifest 和引擎路径，不切分支、不合并、不写资产。
 
-## 3. V3 DTO 预备语义
+## 3. V3 DTO 已发布语义
 
 ### 3.1 版本策略
 
 - V1/V2 的字段、冻结值和当前校验行为保持不变。
-- `BuildingFreezeV3` 到达前不在稳定合同中声明可用 V3。
+- `SupportedV3ContractVersion=3` 只声明交接结构可用，不代表生产批准。
 - V3 必须是加法式新版本；任何 V3 字段缺失都拒绝整份 V3 快照，不能回退 V2。
 - `MapFreezeV3` 发布前 `activationAllowed=false`，生产合同仍是 V2。
 - 最终默认版本只在 M7 producer、M3 placement、M7 consumer 和共同自动化可原子通过时切换。
 
 ### 3.2 提议字段
 
-下列名称是集成设计名，最终 C++ 签名在 M7 交接后按真实类型落地：
+最终 C++ DTO 以 `FABTSJuryDemoFixedSixV3Envelope` 落地：
 
 | 字段 | 生产方 | 单位/域 | 失败策略 | Hash/序列化要求 |
 | --- | --- | --- | --- | --- |
@@ -56,10 +56,11 @@
 | `GravityAuthorityId` | M3/Integration | 非空稳定名称 | 未知权威或扫描 UObject 取得权威即拒绝 | 按稳定字符串内容 Hash，不使用进程内 `FName` 索引 |
 | `GravityIdentityHash` | M3 | 非零 `uint64` | 与球心、半径、模型版本不一致即拒绝 | 消费者只比对，不从 UObject 重建 |
 | `SiteLocalBounds` | M7 | content-to-site 转换后的有限 `FBox`，cm | 非法、退化或与冻结身份不符即拒绝 | 不允许 M3 从原始建筑宽深重新推断 |
-| `SiteLocalBoundsHash` | M7 | 非零 `uint64` | 与 M7 handoff 不同即拒绝 | 由 M7 唯一生成，M3 只携带 |
 | `PlacementHash` | M3 | 非零 `uint64` | Transform、Surface、支撑或 bounds 任一漂移即拒绝 | 每站点独立 Hash |
 
 DTO 不保存 Satellite、Planet 或其他 UObject 引用。世界对象只负责在生产边界生成不可变值快照。
+
+此外 V3 Envelope 直接携带 M7 已批准的 `StaticGeometryHash`、`ProductionIdentityHash`、`DeviceAssemblyHash`、`SiteLocalBounds`、`PadBounds` 与 `EffectBounds`。当前 M7 Catalog 没有独立发布 `SiteLocalBoundsHash`，因此合同不伪造占位字段；Bounds 由逐槽精确值、Descriptor 身份与 Catalog 共同约束。
 
 ### 3.3 已发现的 V1/V2 兼容陷阱
 
@@ -271,4 +272,16 @@ Saved/Logs/V3-Prepared-ABTS.M110.SpaceSlingshotItemContract-20260815-223154-610-
 Saved/Logs/V3-Prepared-ABTS.Contracts.WorldGeneration-20260815-223223-238-FreshAutomation.log
 ```
 
-本门只批准 Building Freeze V3 数据/合同层，不替代 Crystal 像素、实时 Chaos 或可见 PIE。下一步是在 Integration `master` 加法发布 V3 DTO，保持 V1/V2 可读且默认生产仍为 V2。
+本门只批准 Building Freeze V3 数据/合同层，不替代 Crystal 像素、实时 Chaos 或可见 PIE。
+
+## 12. Integration V3 DTO 发布
+
+2026-08-15 在 Building Freeze V3 已进入 `master` 后完成：
+
+- 新增 `EABTSJuryDemoFixedSixSurfaceKind` 与 `FABTSJuryDemoFixedSixV3Envelope`，只携带纯值 Surface、支撑球、Gravity 身份、M7 三类 Hash、三类 Bounds 和 Placement Hash；
+- `FABTSJuryDemoFixedSixContract::IsStructurallyUsableV3()` 验证完整 5+1 交接，固定顺序 `E2/E3/E4/E5/E1/E6`、E1 `Tier0 + Slot4 + Satellite`，并要求五个主星站点共享同一支撑/重力身份；
+- 站点级 `IsUsableForContractVersion(3)` 支持 M3 构造期逐条 fail closed；
+- 生产级 `IsUsable()` 仍只批准 V1/V2，`ProductionContractVersion=2`，Map Freeze 未到前任何 V3 快照都不能提前激活；
+- `ABTS.Contracts.WorldGeneration` 扩展为 3 项，其中 `V3DTO` 覆盖错误 Tier、Surface、支撑球、Bounds、重复 Placement、缺 Layout 和未知版本。
+
+验证：UE 5.8 ForceUnity 18/18 `Result: Succeeded`；独立世界合同 3/3；更新后的 Manifest 全门 7 个过滤器、11/11 通过。下一步由 M3 基于该 DTO 交付 `MapFreezeV3` 精确 SHA 与 Layout/Placement 身份。
