@@ -7,6 +7,8 @@
 
 Stage 5 把 Stage 4 的程序化构件计划编译成真正可实例化的积木，并建立与这些积木一一对应的承重图。它不得重新生成建筑形态，也不得调用旧 `CompleteStaticDAG` 路径。若压实后暴露 Stage 4 前缀没有真实接地路径，只允许追加普通、可见、计入预算且进入真实接触 DAG 的生产闭合构件；禁止隐藏救援柱和声明式补边。
 
+编辑器 `Generation Stop Stage = Stage 5`、PIE/runtime 初始化、自动化与离屏截图必须共享 `GenerateStage5()`。普通 PreviewActor 不得在 Stage 5 回退到旧 `Generate()`；生成拒绝时必须发布 `Stage5ProductionPreviewRejected`，成功时可见实例数必须等于生产 brick 数。
+
 第一停点只覆盖冻结的六栋演示建筑，不运行 5×6 全矩阵、全 Seed 搜索或 Chaos。弱点、绳索、炸药桶和活塞装配不属于这一停点；所有生产积木的 weakness/device role 暂为 `None`。
 
 ## 2. 唯一生成顺序
@@ -37,9 +39,10 @@ Stage 5 把 Stage 4 的程序化构件计划编译成真正可实例化的积木
 1. 先运行最小 E1，验证 compact/mapping/brick/contact/DAG 身份链。
 2. 再运行冻结六栋清单，逐栋对照 Stage 4.5 active member count 和 geometry hash。
 3. ForceUnity Development Editor 全链接。
-4. 用显式离屏取证分别检查完整生产装配和仅新增闭合构件；E5/E6 不得出现轮廓外支撑林或跨越保留开口。
-5. 两个独立 fresh 进程重放固定六栋，要求 Production Hash 稳定，再冻结 Stage 5。
-6. 冻结后再进入 Chaos；Stage 5 静态通过不能替代物理稳定证据。
+4. Spawn 一个 E6 PreviewActor 并选择 Stage 5，要求生产 hash 与直接 `GenerateStage5()` 一致、2433 个 production brick 全部成为可见实例。
+5. 用显式离屏取证分别检查完整生产装配和仅新增闭合构件；E5/E6 不得出现轮廓外支撑林或跨越保留开口。
+6. 两个独立 fresh 进程重放固定六栋，要求 Production Hash 稳定，再冻结 Stage 5。
+7. 冻结后再进入 Chaos；Stage 5 静态通过不能替代物理稳定证据。
 
 ## 5. 长期不收敛防线
 

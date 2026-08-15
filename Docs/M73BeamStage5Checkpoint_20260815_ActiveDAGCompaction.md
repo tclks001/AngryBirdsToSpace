@@ -80,3 +80,9 @@ Stage 5 不再添加隐藏构件，而是把闭合项作为普通 production mem
 - 日志：`M7-Stage45-Refreeze-Final-20260815.log`、`M7-Stage5-SixBuildings-Final-20260815.log`、`M7-Stage5-Offscreen-E5-ExplicitClosure-20260815.log`、`M7-Stage5-Offscreen-E6-ExplicitClosure-20260815.log`。
 - 截图：`Saved/ABTSVisualCaptures/M73Stage5/E5-ExplicitClosure`、`E6-ExplicitClosure`。
 - Chaos、爆炸物、活塞、破坏行为和可见 PIE 尚未评估；测试地图继续排除。
+
+## 8. 编辑器入口补充
+
+首次冻结后，物理测试场中的 E6 PreviewActor 选择 Stage 5 会清空画面。生产算法本身没有失败：自动化与离屏截图直接调用 `GenerateStage5()`，但普通 `RegeneratePreview()` 的 Stage 5 分支仍调用旧 `Generate()`，该旧路径被 E6 的 126 cm 非单位化遗留构件正确拒绝。现已将普通编辑器、PIE/runtime 与离屏截图统一到共享 Stage 5 生产预览函数，并增加真实 Spawn PreviewActor 的 E6 回归；禁止以后用 capture-only 入口替代地图实例入口验收。
+
+修复后 ForceUnity 通过；fresh `EditorPreviewE6` 1/1，真实 PreviewActor 可见实例与生产积木均为 2433；fresh `SixBuildings` 1/1，固定六栋的数量和生产哈希未变。日志为 `M7-Stage5-EditorPreviewRoute-E6-20260815.log` 与 `M7-Stage5-SixBuildings-AfterEditorRoute-20260815.log`。

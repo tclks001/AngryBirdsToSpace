@@ -874,7 +874,13 @@ bool AABTSM73BeamD1PreviewActor::ConfigureStage5ProductionForAutomatedCapture(
 		return false;
 	}
 	Settings = DemoEntry.Settings;
+	return GenerateStage5ProductionPreview(bAdditionsOnly, OutError);
+}
 
+bool AABTSM73BeamD1PreviewActor::GenerateStage5ProductionPreview(
+	const bool bAdditionsOnly,
+	FString& OutError)
+{
 	FABTSM73BeamD1BrickCompiler Compiler;
 	FABTSM73BeamD1Stage5Result Result;
 	if (!Compiler.GenerateStage5(Settings, Result, OutError))
@@ -887,24 +893,27 @@ bool AABTSM73BeamD1PreviewActor::ConfigureStage5ProductionForAutomatedCapture(
 	CompiledBricks = Result.Bricks;
 	const int32 ReachabilityEnd = Result.Stage4ActiveMemberCount
 		+ Result.ReachabilitySupportPostCount;
-	for (const FABTSM73BeamD1BrickBinding& Brick : CompiledBricks)
+	if (bShowEditorPreview)
 	{
-		if (bAdditionsOnly && Brick.BrickId < Result.Stage4ActiveMemberCount)
+		for (const FABTSM73BeamD1BrickBinding& Brick : CompiledBricks)
 		{
-			continue;
+			if (bAdditionsOnly && Brick.BrickId < Result.Stage4ActiveMemberCount)
+			{
+				continue;
+			}
+			UHierarchicalInstancedStaticMeshComponent* Preview =
+				Brick.BrickId < Result.Stage4ActiveMemberCount
+					? WoodPreview.Get()
+					: Brick.BrickId < ReachabilityEnd
+						? IronPreview.Get() : StonePreview.Get();
+			if (Preview == nullptr)
+			{
+				continue;
+			}
+			FTransform InstanceTransform = Brick.LocalTransform;
+			InstanceTransform.SetScale3D(Brick.BrickSpec.DimensionsCM / 100.0f);
+			Preview->AddInstance(InstanceTransform, false);
 		}
-		UHierarchicalInstancedStaticMeshComponent* Preview =
-			Brick.BrickId < Result.Stage4ActiveMemberCount
-				? WoodPreview.Get()
-				: Brick.BrickId < ReachabilityEnd
-					? IronPreview.Get() : StonePreview.Get();
-		if (Preview == nullptr)
-		{
-			continue;
-		}
-		FTransform InstanceTransform = Brick.LocalTransform;
-		InstanceTransform.SetScale3D(Brick.BrickSpec.DimensionsCM / 100.0f);
-		Preview->AddInstance(InstanceTransform, false);
 	}
 
 	for (UHierarchicalInstancedStaticMeshComponent* Preview : {
@@ -918,11 +927,14 @@ bool AABTSM73BeamD1PreviewActor::ConfigureStage5ProductionForAutomatedCapture(
 		}
 	}
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M7.3-Beam-D1][Stage5ProductionCapturePrepared]")
-		TEXT(" Demo=%s AdditionsOnly=%d Stage4=%d Reachability=%d Closure=%d Bricks=%d"),
-		*DemoEntry.StableId.ToString(), bAdditionsOnly ? 1 : 0,
+		TEXT("[ABTS][M7.3-Beam-D1][Stage5ProductionPreviewGenerated]")
+		TEXT(" Actor=%s Profile=%s Tier=%d Seed=%d AdditionsOnly=%d")
+		TEXT(" Stage4=%d Reachability=%d Closure=%d Bricks=%d Hash=%lld"),
+		*GetName(), *Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+		Settings.BuildingSeed, bAdditionsOnly ? 1 : 0,
 		Result.Stage4ActiveMemberCount, Result.ReachabilitySupportPostCount,
-		Result.StructuralClosureMemberCount, Result.Bricks.Num());
+		Result.StructuralClosureMemberCount, Result.Bricks.Num(),
+		LastSummary.BrickGeometryHash);
 	OutError.Reset();
 	return true;
 }
@@ -1009,6 +1021,18 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 			FABTSM73BeamDemoManifest::CalculateHash(),
 			*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier + 1,
 			Settings.BuildingSeed);
+	}
+	if (GenerationStopStage == EABTSM73BeamC3GenerationStage::StaticDAG)
+	{
+		if (!GenerateStage5ProductionPreview(false, Error))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7.3-Beam-D1][Stage5ProductionPreviewRejected]")
+				TEXT(" Actor=%s Profile=%s Tier=%d Seed=%d Reason=%s"),
+				*GetName(), *Settings.GameplayProfileId.ToString(),
+				Settings.DifficultyTier, Settings.BuildingSeed, *Error);
+		}
+		return;
 	}
 	FABTSM73BeamD1BrickCompiler Compiler;
 	if (GenerationStopStage != EABTSM73BeamC3GenerationStage::StaticDAG)
@@ -2415,65 +2439,6 @@ void AABTSM73BeamD1PreviewActor::RegeneratePreview()
 		return;
 	}
 
-	FABTSM73BeamD1GenerationResult Result;
-	if (!Compiler.Generate(Settings, Result, Error))
-	{
-		LastSummary = Result.Summary;
-		UE_LOG(LogABTSRuntime, Warning,
-			TEXT("[ABTS][M7.3-Beam-D1][PreviewRejected] Actor=%s Reason=%s"),
-			*GetName(), *Error);
-		return;
-	}
-	CompiledBricks = MoveTemp(Result.Bricks);
-	LastSummary = Result.Summary;
-	if (bShowEditorPreview)
-	{
-		for (const FABTSM73BeamD1BrickBinding& Brick : CompiledBricks)
-		{
-			if (UHierarchicalInstancedStaticMeshComponent* Preview =
-				GetPreview(Brick.BrickSpec.Material))
-			{
-				FTransform InstanceTransform = Brick.LocalTransform;
-				InstanceTransform.SetScale3D(
-					Brick.BrickSpec.DimensionsCM / 100.0f);
-				Preview->AddInstance(InstanceTransform, false);
-			}
-		}
-	}
-	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M7.3-Beam-D1][PreviewGenerated]")
-		TEXT(" Actor=%s Profile=%s Tier=%d Members=%d Bricks=%d")
-		TEXT(" Target=%d-%d Attempt=%d Volumes=%d Box=%d Prism=%d Pyramid=%d RoofBricks=%d Motifs=%d Spans=%d Certified=%d")
-		TEXT(" ClosurePass=%d AddedPosts=%d ContactMismatch=%d SupportViolations=%d Advisory=%d")
-		TEXT(" Stations=%d/%d AxisDensity=%.3f ClosureRatio=%.3f Quality=%d")
-		TEXT(" Wood=%d Stone=%d Iron=%d Glass=%d Weak=%d Device=%d Hash=%lld"),
-		*GetName(), *LastSummary.GameplayProfileId.ToString(),
-		LastSummary.DifficultyTier, LastSummary.MemberCount,
-		LastSummary.BrickCount, LastSummary.TargetMinimumBrickCount,
-		LastSummary.TargetMaximumBrickCount,
-		LastSummary.VisualCandidateAttempt,
-		LastSummary.SemanticVolumeCount,
-		LastSummary.SemanticBoxCount,
-		LastSummary.SemanticPrismCount,
-		LastSummary.SemanticPyramidCount,
-		LastSummary.RoofCourseBrickCount,
-		LastSummary.DistinctMotifCount,
-		LastSummary.SupportedSpanCount,
-		LastSummary.bVisualComplexityCertified ? 1 : 0,
-		LastSummary.StructuralClosurePassCount,
-		LastSummary.AddedStructuralSupportPostCount,
-		LastSummary.RealContactMismatchCount,
-		LastSummary.RemainingSupportViolationCount,
-		LastSummary.SupportResultantAdvisoryCount,
-		LastSummary.XColumnStationCount,
-		LastSummary.YColumnStationCount,
-		LastSummary.AxisStationDensityRatio,
-		LastSummary.StructuralClosurePostRatio,
-		LastSummary.bAssemblyQualityCertified ? 1 : 0,
-		LastSummary.WoodBrickCount,
-		LastSummary.StoneBrickCount, LastSummary.IronBrickCount,
-		LastSummary.GlassBrickCount, LastSummary.WeaknessCandidateCount,
-		LastSummary.DeviceRoleCount, LastSummary.BrickGeometryHash);
 }
 
 bool AABTSM73BeamD1PreviewActor::InitializeRuntimeBuilding(

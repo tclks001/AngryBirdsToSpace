@@ -6,9 +6,11 @@
 
 #include "ABTSM73BeamD0ProfileCatalog.h"
 #include "Building/ABTSM73BeamD1PreviewActor.h"
+#include "Building/ABTSM73BeamDemoManifest.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -695,6 +697,71 @@ bool FABTSM73BeamD1DelayedMaterialSystemTest::RunTest(
 	TestEqual(TEXT("Delayed MaterialSystem receives every compiled Brick"),
 		Preview->GetRuntimeModuleCountForValidation(),
 		Preview->GetSummaryForValidation().BrickCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1Stage5EditorPreviewRouteTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.Stage5Production.EditorPreviewE6",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1Stage5EditorPreviewRouteTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamDemoManifestEntry Entry;
+	FString Error;
+	if (!TestTrue(TEXT("E6 manifest resolves"),
+		FABTSM73BeamDemoManifest::Resolve(
+			EABTSM73BeamDemoBuilding::E6TipOver, Entry, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FABTSM73BeamD1Stage5Result DirectResult;
+	if (!TestTrue(TEXT("Direct E6 Stage 5 producer accepts"),
+		FABTSM73BeamD1BrickCompiler().GenerateStage5(
+			Entry.Settings, DirectResult, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	const FTransform PreviewTransform = FTransform::Identity;
+	AABTSM73BeamD1PreviewActor* Preview =
+		World->SpawnActorDeferred<AABTSM73BeamD1PreviewActor>(
+			AABTSM73BeamD1PreviewActor::StaticClass(), PreviewTransform,
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!TestNotNull(TEXT("Stage 5 E6 PreviewActor"), Preview))
+	{
+		return false;
+	}
+	Preview->DemoBuilding = EABTSM73BeamDemoBuilding::E6TipOver;
+	Preview->GenerationStopStage = EABTSM73BeamC3GenerationStage::StaticDAG;
+	Preview->bShowEditorPreview = true;
+	Preview->bSpawnRuntimeModulesInPIE = false;
+	UGameplayStatics::FinishSpawningActor(Preview, PreviewTransform);
+
+	const FABTSM73BeamD1Summary& Summary = Preview->GetSummaryForValidation();
+	const int32 VisibleInstanceCount = Preview->WoodPreview->GetInstanceCount()
+		+ Preview->StonePreview->GetInstanceCount()
+		+ Preview->IronPreview->GetInstanceCount()
+		+ Preview->GlassPreview->GetInstanceCount();
+	TestTrue(TEXT("Editor Stage 5 route accepts"), Summary.bAccepted);
+	TestEqual(TEXT("Editor route publishes every production brick"),
+		Preview->GetCompiledBricksForValidation().Num(), DirectResult.Bricks.Num());
+	TestEqual(TEXT("Editor route renders every production brick"),
+		VisibleInstanceCount, DirectResult.Bricks.Num());
+	TestEqual(TEXT("Editor route preserves the Stage 5 production hash"),
+		Summary.BrickGeometryHash, DirectResult.Summary.BrickGeometryHash);
 	return true;
 }
 

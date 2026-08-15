@@ -10,6 +10,7 @@
 class AABTSM7BuildingMaterialSystem;
 class AABTSM7BuildingModule;
 class FABTSM73BeamD1DelayedMaterialSystemTest;
+class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -184,9 +185,11 @@ protected:
 
 private:
 	friend class FABTSM73BeamD1DelayedMaterialSystemTest;
+	friend class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
 
 	UHierarchicalInstancedStaticMeshComponent* GetPreview(
 		EABTSM7BuildingMaterial Material) const;
+	bool GenerateStage5ProductionPreview(bool bAdditionsOnly, FString& OutError);
 	void ClearPreview();
 	void ClearStageDiagnostics();
 	void TryInitializeRuntimeBuilding();
