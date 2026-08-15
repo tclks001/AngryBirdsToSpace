@@ -6,9 +6,50 @@
 #include "Building/ABTSM73StructureData.h"
 #include "Building/ABTSM73WeakPointPlanner.h"
 #include "Building/ABTSM7MaterialProfileLibrary.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73CrystalMaterialBaselineTest,
+	"ABTS.M73A.CrystalMaterialBaseline",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73CrystalMaterialBaselineTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestEqual(
+		TEXT("Crystal is appended after frozen material enum values"),
+		static_cast<uint8>(EABTSM7BuildingMaterial::Crystal),
+		static_cast<uint8>(4));
+	TestNotNull(
+		TEXT("Crystal material instance resolves from its frozen content path"),
+		LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Game/StaticMesh/BrickMaterials/MI_Bricks_Crystal.MI_Bricks_Crystal")));
+	const TArray<FABTSM7MaterialProfile> Profiles =
+		FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+	TestEqual(TEXT("Default material catalog contains five entries"), Profiles.Num(), 5);
+	const FABTSM7MaterialProfile* Glass =
+		FABTSM7MaterialProfileLibrary::FindProfile(
+			Profiles,
+			EABTSM7BuildingMaterial::Glass);
+	const FABTSM7MaterialProfile* Crystal =
+		FABTSM7MaterialProfileLibrary::FindProfile(
+			Profiles,
+			EABTSM7BuildingMaterial::Crystal);
+	TestNotNull(TEXT("Glass baseline profile exists"), Glass);
+	TestNotNull(TEXT("Crystal baseline profile exists"), Crystal);
+	if (Glass != nullptr && Crystal != nullptr)
+	{
+		TestEqual(TEXT("Crystal starts from Glass knock speed"), Crystal->KnockSpeedCMPerSec, Glass->KnockSpeedCMPerSec);
+		TestEqual(TEXT("Crystal starts from Glass break speed"), Crystal->BreakSpeedCMPerSec, Glass->BreakSpeedCMPerSec);
+		TestEqual(TEXT("Crystal starts from Glass dynamic friction"), Crystal->DynamicFriction, Glass->DynamicFriction);
+		TestEqual(TEXT("Crystal starts from Glass density"), Crystal->DensityGPerCubicCM, Glass->DensityGPerCubicCM);
+	}
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73DefaultStructuresTest,

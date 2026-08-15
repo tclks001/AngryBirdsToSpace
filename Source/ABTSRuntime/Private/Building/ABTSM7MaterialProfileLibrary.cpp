@@ -42,6 +42,7 @@ namespace
 			Profile.PushVelocityTransfer = 0.38f;
 			break;
 		case EABTSM7BuildingMaterial::Glass:
+		case EABTSM7BuildingMaterial::Crystal:
 		default:
 			Profile.DynamicFriction = 0.36f;
 			Profile.StaticFriction = 0.46f;
@@ -58,11 +59,14 @@ namespace
 TArray<FABTSM7MaterialProfile> FABTSM7MaterialProfileLibrary::MakeDefaultProfiles()
 {
 	TArray<FABTSM7MaterialProfile> Result;
-	Result.Reserve(4);
+	Result.Reserve(5);
 	Result.Add(MakeProfile(EABTSM7BuildingMaterial::Wood, 460.0f, 900.0f, FLinearColor(0.38f, 0.13f, 0.035f)));
 	Result.Add(MakeProfile(EABTSM7BuildingMaterial::Stone, 680.0f, 1280.0f, FLinearColor(0.32f, 0.34f, 0.38f)));
 	Result.Add(MakeProfile(EABTSM7BuildingMaterial::Iron, 820.0f, 1580.0f, FLinearColor(0.12f, 0.16f, 0.20f)));
 	Result.Add(MakeProfile(EABTSM7BuildingMaterial::Glass, 280.0f, 520.0f, FLinearColor(0.20f, 0.62f, 0.78f, 0.42f)));
+	// Building Freeze V3 starts Crystal from the proven Glass physics baseline;
+	// its distinct identity is visual and recoverable rather than a new tuning lane.
+	Result.Add(MakeProfile(EABTSM7BuildingMaterial::Crystal, 280.0f, 520.0f, FLinearColor(0.35f, 0.72f, 1.00f, 1.00f)));
 	return Result;
 }
 
