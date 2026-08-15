@@ -26,6 +26,7 @@
 | M3-WT-001 | Codex 管理工作树不在旧 `C:\workspace` 路径 | 已建立固定检查流程 | M3 |
 | M3-WT-002 | 普通/Adaptive Unity 编译通过，强制 Unity 才暴露同名私有符号 | 已从 `master` 同步修复并建立构建门 | M11/Integration；M3 回归 |
 | M3-WT-003 | 其他工作树 Editor 导致 Live Coding/DLL 锁，容易误杀进程 | 已建立进程归属检查 | 各工作树 |
+| M3-WT-004 | 非 Unity 编译暴露稳定 Adapter 缺少日志类别声明 | 已定位到 Integration 所有权；M3 不越权修复 | Integration；M3 回归 |
 | M3-R3-001 | 冻结弹弓参数接入后，攻击走廊和建筑位置看似未变化 | 已修复数据布局；实体仍等 R-6 | M3 + Integration |
 | M3-R3-002 | 同一弹弓阶段的建筑距离全部退化为同一个舒适射程 | 已改为逐关递增射程窗口 | M3 |
 | M3-R5-001 | 逻辑 Target/Attack Corridor 已生成但画面无法辨认 | 已增加 F7 只读叠层 | M3 |
@@ -41,8 +42,9 @@
 | M3-X-001 | 建筑日志显示已生成，随后建筑消失，容易误判为 M3 漏生成 | 已建立 M7 Idle Reject 分诊规则 | M7；M3 只分诊 |
 | M3-T2B-001 | 风格语义若按名字、地图或位置识别，会随预览与生产身份漂移 | 已改为权威 Actor/组件/结果只读适配 | M3 |
 | M3-T2B-002 | M10 落点预览的 SceneCapture 没有跨模块稳定只读入口 | 已记录共享类型接线需求；M3 不越界绕过 | Integration/M10 |
-| M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化已通过；待可见 PIE | M3 |
+| M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化/可见 PIE 已验收 | M3 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
+| M3-JURY-004 | 合成 Fixture 绿灯未覆盖动态包络独占冲突和真实固定地图精确身份 | 已补专项失败注入、运行时身份门与 F7 诊断 | M3 |
 
 ## 3. 工作树、同步与构建
 
@@ -124,6 +126,32 @@ Adaptive Unity 的分桶会随源文件集合变化。两个内部辅助函数�
 - 记录占用进程 PID、命令行中的项目路径和处理结果；
 - 重试同一完整链接命令；
 - 最终交付说明是否仍有本任务启动的进程在运行。
+
+### M3-WT-004：ForceUnity 通过不能掩盖稳定 Adapter 的显式 include 缺失
+
+**现象**
+
+V2 Diagnostics checkpoint 的 `-ForceUnity -DisableAdaptiveUnity` Development Editor 完整链接成功，但普通 Development Editor 构建在单独编译集成工作树拥有的 `ABTSM3WorldContractAdapter.cpp` 时失败：
+
+```text
+ABTSM3WorldContractAdapter.cpp(217): error C2065: “LogABTSRuntime”: 未声明的标识符
+```
+
+M3 本次修改的三个 `.cpp` 均已成功编译；失败文件不在本 checkpoint 的修改列表中。
+
+**根因**
+
+该稳定 Adapter 直接使用 `LogABTSRuntime`，但当前 `master` 基线没有显式包含声明该日志类别的头文件。Unity 构建恰好从同一翻译单元的其他源文件获得声明，因此 ForceUnity 绿灯不能证明非 Unity 编译自足。
+
+**修复**
+
+修复归属 Integration：在原始集成工作树为稳定 Adapter 增加所需的显式 include，并先进入 `master`。M3 不直接修改共享 Adapter；待更新后的 `master` 合入功能分支后，再重跑普通 Development Editor 全链接。
+
+**防回归验证**
+
+- 普通 Development Editor 和 `-ForceUnity -DisableAdaptiveUnity` 必须分别完成最终链接；
+- 普通构建不得再依赖 Unity 翻译单元间的间接声明；
+- 在该 Integration 修复进入 `master` 前，本 checkpoint 只记录 ForceUnity 编译证据，不把普通 Development 标记为通过，也不作为最终集成交接 SHA。
 
 ## 4. R-3 射程、建筑范围与攻击走廊
 
@@ -576,7 +604,7 @@ Hydrology 只把“哪些 Cell 边跨越大圆切面”保存在 `FABTSM3CellEdg
 - `ABTS.Contracts.WorldGeneration` 与 `ABTS.M110.TaskGraphFinaleSeparation` 必须保持通过，证明稳定导出和 M9/Finale 分离未变；
 - 可见 `L_ABTS_M3` PIE 中，固定 Seed `312503` 的主线阻断河应呈连续低频大弧线，不再逐 Cell 左右摆动；桥面仍垂直跨河、两端落在不同河岸。NullRHI 不替代该视觉门。
 
-2026-08-14 fresh 证据：河流平滑 `1/1`、M8 语义桥位 `1/1`、Week One 确定性 `1/1`、世界生成契约 `2/2`、M9/Finale 分离 `1/1`；`L_ABTS_M3` NullRHI 为 `Segments=436 / FlowCenterlines=86 / BarrierDuals=350 / SmoothedBarrierSegments=350 / DroppedLocalRefs=0`。代码与数据门已通过，视觉状态仍明确保留为待用户 PIE。
+2026-08-14 fresh 证据：河流平滑 `1/1`、M8 语义桥位 `1/1`、Week One 确定性 `1/1`、世界生成契约 `2/2`、M9/Finale 分离 `1/1`；`L_ABTS_M3` NullRHI 为 `Segments=436 / FlowCenterlines=86 / BarrierDuals=350 / SmoothedBarrierSegments=350 / DroppedLocalRefs=0`。2026-08-15 用户已完成固定 Seed `312503` 的可见 PIE 验收，确认主线阻断河呈连续低频弧线、不再高频蜿蜒，桥面跨河关系保持正确；本条状态晋升为已验收。
 
 ## 12. 自动化与性能证据
 
@@ -668,12 +696,38 @@ V2 将“静态建筑落脚空间”和“激活后设备/效果运动空间”�
 
 **防回归验证**
 
-- Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接成功；
-- `M3Jury-V2-FixedSix-Final-20260815-160925-970-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`，逐栋校验全部 V2 Hash、36 cm Pad 边界、动态预留及 Hash tamper；
+- 前一版曾记录 Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接；本次 Diagnostics 在非 Unity 重编稳定 Adapter 时暴露显式 include 缺失，当前构建结论由 M3-WT-004 取代；
+- 前一版证据 `M3Jury-V2-FixedSix-Final-20260815-160925-970-FreshAutomation.log`：当时 `ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`，逐栋校验全部 V2 Hash、36 cm Pad 边界、动态预留及 Hash tamper；当前门已由 M3-JURY-004 扩展为 `3/3`；
 - `M3Jury-V2-ContractValidation-20260815-160449-888-FreshAutomation.log`：稳定合同 `Validation` 精确 `1/1 Success`；
 - `M3Jury-V2-FinaleRegression-20260815-161028-955-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
 - 两次固定地图 fresh NullRHI 日志 `M3Jury-V2-FixedMap-20260815-160534-710-FreshRuntime.log` / `M3Jury-V2-FixedMap-Repeat-20260815-160617-483-FreshRuntime.log` 均得到 `Buildings=6`、`ReservedPadCells=52`、`ReservedDynamicEnvelopeCells=40`、`LayoutHash=7029074579FDC52E`，且无 `Placement rejected`；
 - V2 使 E3 Pad Center 从 V1 的 Cell `702` 移到 `703`；这是动态包络避让后的确定性新身份，不得继续使用旧 V1 Layout Hash。
+
+### M3-JURY-004：合成绿灯不能替代动态独占冲突与真实固定地图身份门
+
+**现象**
+
+Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表存在，但道路/水体注入落在 Pad Center，本质只覆盖 `PadReservationFailed`；真实地图的六个 Pad Center、逐栋 Placement Hash 和 `52/40` 预留数量只存在于人工检索的 fresh 日志，F7 也看不到 Physical/Effect Bounds。
+
+**根因**
+
+合成球的 Cell 间距远大于 Pad/EffectBounds，静态和动态样本通常回落到同一个 Target Cell。若不专门在动态角点方向增加独立 Cell，测试无法证明 `DynamicEnvelopeReservationFailed`；若运行时只检查非零 Layout Hash，也无法阻止真实 Candidate 的 Cell 解析或逐栋身份静默漂移。
+
+**修复**
+
+- 合成测试在 EffectBounds 角点方向加入不会被静态 Pad 采样命中的独立 Cell，分别注入最终道路与水体，精确要求 `DynamicEnvelopeReservationFailed`；
+- 将 E2 中心移近 E1，精确要求 `DynamicEnvelopeSeparationFailed`；
+- Placement Hash tamper 扩展到 PhysicalBounds、EffectBounds、ProductionIdentity 与 DeviceAssembly；
+- `M3R5Smoke` 对真实 Seed `312503` 精确校验六个 Pad Center、六条 Placement Hash、逐栋静态/动态预留数及 `LayoutHash=7029074579FDC52E`；
+- F7 叠层使用 Cyan 表示静态 Pad/Cell、Green 表示 PhysicalBounds、Magenta 表示 EffectBounds/动态 Cell，Red/White 分别标出 Target Anchor/最终 Pad Center。
+
+**防回归验证**
+
+- `M3Jury-V2-Diagnostics-20260815-163413-442-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`，第三项分别命中动态包络道路、水体与建筑间距三类拒绝；
+- `M3Jury-V2-Diagnostics-FixedMap-20260815-163458-671-FreshRuntime.log`：fresh `L_ABTS_M3` R5 smoke 输出 `[ABTS][M3Jury][FixedMapRegression] Passed=1 ... Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`；
+- 同一 runtime 日志在启用 `-ABTSM3R5LogicRegions` 时输出 `JuryFixedSixPlacements=6 JuryFixedSixLayoutHash=7029074579FDC52E`；叠层是 Editor-only 诊断，不进入生产 Hash 或稳定合同。
+- `M3Jury-V2-Diagnostics-Contract-20260815-163814-618-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration.Validation` 精确 `1/1 Success`；
+- `M3Jury-V2-Diagnostics-Finale-20260815-163850-384-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`，候选尝试中的预期 Reject warning 不改变最终 Success 判定。
 
 ## 14. 新条目模板
 

@@ -60,8 +60,8 @@ Fixture 是 M3 对已经合入 `master` 的 M7 V2 不可变事实的版本化副
 
 ### Integration
 
-- 将固定六条身份和 M3 输出的 Transform/Pad 追加到向后兼容的 building contract vNext；
-- 固定 Manifest Version/Hash 与 Layout Hash；
+- 已以加法方式发布向后兼容的 Fixed-Six V2 字段，保留 V1 读取路径；
+- 待 M3 发布最终身份后，把 `CurrentContractVersion`、V2 Catalog/Layout Hash 和 Adapter 导出冻结到本页数值；
 - 维护默认地图、WorldReady 时序和联合验收。
 
 ### M7
@@ -75,16 +75,18 @@ Fixture 是 M3 对已经合入 `master` 的 M7 V2 不可变事实的版本化副
 
 M3 独立门：
 
-- `ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`；
+- `ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`；第三项必须分别覆盖动态包络独占道路/水体冲突和建筑间动态包络过近；
 - 同一输入重复构建得到相同六条 Placement Hash 与 Layout Hash；
 - 错误 World Seed、Candidate Hash、缺失 Pocket、静态 Pad/动态包络命中最终道路或水域、动态包络过近均 fail closed；
-- Development Editor 与 ForceUnity 全链接成功；
+- `-ForceUnity -DisableAdaptiveUnity` Development Editor 已完整链接；普通 Development 当前被 Integration 所有的稳定 Adapter 缺少 `LogABTSRuntime` 显式 include 阻断，详见 `M3-WT-004`。该共享修复进入 `master` 并由 M3 合入回归前，不把普通 Development 标记为通过；
 - `ABTS.Contracts.WorldGeneration.Validation` 保持通过；集成工作树在取得本页最终 V2 Layout Hash 后再冻结 V2 Adapter，因此本阶段不把仍发布 V1 的 `M3Adapter` 测试误报为通过；
 - `ABTS.M110.TaskGraphFinaleSeparation` 保持既有边界，最终由集成候选回归。
 
 联合门由集成工作树执行：固定六条静态注册、逐栋按需 Chaos 激活、一次完整 E1→E6 fresh 可见 PIE。旧版全量 `ABTS.M7` 当前明确豁免，因为 JuryDemo 不再消费该泛化路径；Stage 4.5 和当前固定 Stage 自动化不能被豁免。
 
-M3 本地固定地图 V2 证据：`Seed=312503`、`Candidate=4` 得到 `Buildings=6`、`ReservedPadCells=52`、`ReservedDynamicEnvelopeCells=40`、`LayoutHash=7029074579FDC52E`。两次 fresh NullRHI 重建得到完全相同的六条 Placement Hash 与 Layout Hash；E3 为满足动态包络从旧 V1 的 Pad Center Cell `702` 稳定解析到 `703`，其余结果可见日志 `M3Jury-V2-FixedMap-20260815-160534-710-FreshRuntime.log` 与 `M3Jury-V2-FixedMap-Repeat-20260815-160617-483-FreshRuntime.log`。
+M3 本地固定地图 V2 证据：`Seed=312503`、`Candidate=4` 得到 `Buildings=6`、`ReservedPadCells=52`、`ReservedDynamicEnvelopeCells=40`、`LayoutHash=7029074579FDC52E`。两次 fresh NullRHI 重建得到完全相同的六条 Placement Hash 与 Layout Hash；E3 为满足动态包络从旧 V1 的 Pad Center Cell `702` 稳定解析到 `703`，其余结果可见日志 `M3Jury-V2-FixedMap-20260815-160534-710-FreshRuntime.log` 与 `M3Jury-V2-FixedMap-Repeat-20260815-160617-483-FreshRuntime.log`。Diagnostics 扩展后的 `3/3` 自动化证据为 `M3Jury-V2-Diagnostics-20260815-163413-442-FreshAutomation.log`；带真实地图精确身份门和 F7 计数的 fresh runtime 证据为 `M3Jury-V2-Diagnostics-FixedMap-20260815-163458-671-FreshRuntime.log`；稳定合同与终局边界 fresh 回归分别为 `M3Jury-V2-Diagnostics-Contract-20260815-163814-618-FreshAutomation.log`、`M3Jury-V2-Diagnostics-Finale-20260815-163850-384-FreshAutomation.log`，均为 `1/1 Success`。
+
+F7 Editor-only 诊断叠层使用 Cyan 显示静态 Pad 与静态预留 Cell、Green 显示 PhysicalBounds、Magenta 显示 EffectBounds 与动态预留 Cell、Red/White 显示 Target Anchor/最终 Pad Center。它只帮助联合 PIE 定位空间冲突，不进入 Placement/Layout Hash，也不改变 Preview/Test 与生产权威边界。
 
 该结果身份是 `M3LocalAccepted`；集成工作树下一步须把稳定 Adapter 切到合同 V2，并冻结 `LayoutHash=0x7029074579FDC52E`。在 Adapter、M7 注册与可见 PIE 完成前，不得提升为 `IntegrationAccepted` 或 `ChaosReady`。
 

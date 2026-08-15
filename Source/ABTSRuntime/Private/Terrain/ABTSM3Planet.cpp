@@ -1532,6 +1532,173 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 	const float Radius = PlanetRadiusCM + 360.0f;
 	const float DrawLifeTime =
 		FMath::Clamp(LifeTimeSeconds, 0.05f, 5.0f);
+	int32 JuryFixedSixPlacementCount = 0;
+	constexpr uint64 JuryFixedSixV2LayoutHash = 0x7029074579FDC52Eull;
+	if (MonthlyJuryFixedSixLayoutResult.bPlacementReady
+		&& MonthlyJuryFixedSixLayoutResult.RejectReason
+			== EABTSM3JuryFixedSixRejectReason::None
+		&& MonthlyJuryFixedSixLayoutResult.SourceCandidateId
+			== CandidateId
+		&& static_cast<uint64>(
+			MonthlyJuryFixedSixLayoutResult.LayoutHash)
+			== JuryFixedSixV2LayoutHash)
+	{
+		for (const FABTSM3JuryBuildingPlacement& Placement
+			: MonthlyJuryFixedSixLayoutResult.Placements)
+		{
+			if (!LogicalCells.IsValidIndex(Placement.PadCenterCellId)
+				|| !LogicalCells.IsValidIndex(Placement.TargetAnchorCellId))
+			{
+				continue;
+			}
+			const FVector Origin = Center + Placement.WorldLocationCM;
+			const FVector Forward = Placement.WorldForwardAxis;
+			const FVector Right = Placement.WorldRightAxis;
+			const FVector Up = Placement.WorldUpAxis;
+			const FQuat Rotation =
+				FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat();
+			const FVector PadLift = Up * 36.0f;
+			const FVector PadCorners[] = {
+				Origin + PadLift
+					+ Forward * Placement.RequiredPadHalfExtentCM.X
+					+ Right * Placement.RequiredPadHalfExtentCM.Y,
+				Origin + PadLift
+					- Forward * Placement.RequiredPadHalfExtentCM.X
+					+ Right * Placement.RequiredPadHalfExtentCM.Y,
+				Origin + PadLift
+					- Forward * Placement.RequiredPadHalfExtentCM.X
+					- Right * Placement.RequiredPadHalfExtentCM.Y,
+				Origin + PadLift
+					+ Forward * Placement.RequiredPadHalfExtentCM.X
+					- Right * Placement.RequiredPadHalfExtentCM.Y
+			};
+			for (int32 CornerIndex = 0;
+				CornerIndex < UE_ARRAY_COUNT(PadCorners);
+				++CornerIndex)
+			{
+				DrawDebugLine(
+					GetWorld(),
+					PadCorners[CornerIndex],
+					PadCorners[(CornerIndex + 1)
+						% UE_ARRAY_COUNT(PadCorners)],
+					FColor::Cyan,
+					false,
+					DrawLifeTime,
+					0,
+					7.0f);
+			}
+
+			const auto DrawLocalBounds = [this,
+				&Origin,
+				&Forward,
+				&Right,
+				&Up,
+				&Rotation,
+				DrawLifeTime](const FBox& Bounds, const FColor Color)
+			{
+				if (Bounds.IsValid == 0)
+				{
+					return;
+				}
+				const FVector LocalCenter = Bounds.GetCenter();
+				const FVector WorldCenter = Origin
+					+ Forward * LocalCenter.X
+					+ Right * LocalCenter.Y
+					+ Up * LocalCenter.Z;
+				DrawDebugBox(
+					GetWorld(),
+					WorldCenter,
+					Bounds.GetExtent(),
+					Rotation,
+					Color,
+					false,
+					DrawLifeTime,
+					0,
+					5.0f);
+			};
+			DrawLocalBounds(Placement.PhysicalBounds, FColor::Green);
+			DrawLocalBounds(Placement.EffectBounds, FColor::Magenta);
+
+			const auto DrawReservedCells = [this,
+				&Center,
+				DrawLifeTime](
+					const TArray<int32>& CellIds,
+					const float SurfaceOffsetCM,
+					const FColor Color,
+					const float PointSize)
+			{
+				for (const int32 CellId : CellIds)
+				{
+					if (!LogicalCells.IsValidIndex(CellId))
+					{
+						continue;
+					}
+					const FVector Direction =
+						LogicalCells[CellId].UnitCenter.GetSafeNormal();
+					DrawDebugPoint(
+						GetWorld(),
+						Center + Direction
+							* (GetSurfaceRadiusAtDirection(Direction)
+								+ SurfaceOffsetCM),
+						PointSize,
+						Color,
+						false,
+						DrawLifeTime,
+						0);
+				}
+			};
+			DrawReservedCells(
+				Placement.ReservedPadCellIds,
+				95.0f,
+				FColor::Cyan,
+				16.0f);
+			DrawReservedCells(
+				Placement.ReservedDynamicEnvelopeCellIds,
+				135.0f,
+				FColor::Magenta,
+				20.0f);
+
+			const FVector TargetDirection =
+				LogicalCells[Placement.TargetAnchorCellId]
+					.UnitCenter.GetSafeNormal();
+			DrawDebugSphere(
+				GetWorld(),
+				Center + TargetDirection
+					* (GetSurfaceRadiusAtDirection(TargetDirection) + 70.0f),
+				42.0f,
+				8,
+				FColor::Red,
+				false,
+				DrawLifeTime,
+				0,
+				4.0f);
+			DrawDebugSphere(
+				GetWorld(),
+				Origin + Up * 70.0f,
+				48.0f,
+				8,
+				FColor::White,
+				false,
+				DrawLifeTime,
+				0,
+				5.0f);
+			DrawDebugString(
+				GetWorld(),
+				Origin + Up * (Placement.PhysicalBounds.Max.Z + 180.0f),
+				FString::Printf(
+					TEXT("E%d %s PAD=%d TARGET=%d"),
+					Placement.EncounterIndex + 1,
+					*Placement.ManifestEntryId.ToString(),
+					Placement.PadCenterCellId,
+					Placement.TargetAnchorCellId),
+				nullptr,
+				FColor::White,
+				DrawLifeTime,
+				false,
+				1.0f);
+			++JuryFixedSixPlacementCount;
+		}
+	}
 	bool bFinaleAnchorPreviewDrawn = false;
 	const FABTSM3MonthlyFinaleAnchorPlanCandidate* FinalePlan =
 		FABTSM3MonthlyFinaleAnchorBuilder::FindCandidate(
@@ -1888,6 +2055,7 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 	return (OutTargetFootprintCellCount > 0
 		&& OutAttackCorridorCellCount > 0)
 		|| bOutSatelliteE5PreviewDrawn
+		|| JuryFixedSixPlacementCount > 0
 		|| bFinaleAnchorPreviewDrawn;
 }
 #endif

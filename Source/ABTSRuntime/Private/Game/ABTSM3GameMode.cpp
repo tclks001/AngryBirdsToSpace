@@ -34,6 +34,8 @@
 
 namespace ABTSM3R5GameModePrivate
 {
+constexpr uint64 JuryFixedSixV2LayoutHash = 0x7029074579FDC52Eull;
+
 class FSurfaceHash64
 {
 public:
@@ -94,6 +96,98 @@ uint64 ComputeSurfaceQueryHash(const AABTSM3Planet& Planet)
 	}
 	return Hash.Get();
 }
+
+bool ValidateJuryFixedSixRuntimeIdentity(
+	const AABTSM3Planet& Planet,
+	int32& OutReservedPadCellCount,
+	int32& OutReservedDynamicEnvelopeCellCount,
+	FString& OutFailure)
+{
+	static constexpr uint64 ExpectedPlacementHashes[] = {
+		0x4DFAF4595F550C48ull,
+		0xD0DDE2A5036BC1DCull,
+		0x4D3B52410FCF3447ull,
+		0x178D81B8F7B982E8ull,
+		0x03D096B1864F9B43ull,
+		0x606D4B0335FAB2AEull
+	};
+	static constexpr int32 ExpectedPadCenterCellIds[] = {
+		6882, 7218, 703, 4367, 3367, 5239
+	};
+	static constexpr int32 ExpectedReservedPadCellCounts[] = {
+		7, 9, 9, 9, 9, 9
+	};
+	static constexpr int32 ExpectedReservedDynamicCellCounts[] = {
+		9, 9, 4, 6, 7, 5
+	};
+	OutReservedPadCellCount = 0;
+	OutReservedDynamicEnvelopeCellCount = 0;
+	OutFailure.Reset();
+	const FABTSM3JuryFixedSixLayoutResult& Result =
+		Planet.MonthlyJuryFixedSixLayoutResult;
+	const TConstArrayView<FABTSM3JuryBuildingPlacementFixture> Fixtures =
+		FABTSM3JuryFixedSixLayoutBuilder::GetFrozenPlacementFixtures();
+	if (!Result.bPlacementReady
+		|| Result.RejectReason != EABTSM3JuryFixedSixRejectReason::None
+		|| Result.SchemaVersion
+			!= FABTSM3JuryFixedSixLayoutBuilder::SchemaVersion
+		|| Result.FixedSixContractVersion
+			!= FABTSM3JuryFixedSixLayoutBuilder::FixedSixContractVersion
+		|| Result.SourceCandidateId
+			!= FABTSM3JuryFixedSixLayoutBuilder::FrozenSourceCandidateId
+		|| static_cast<uint64>(Result.M7PlacementCatalogHash)
+			!= FABTSM3JuryFixedSixLayoutBuilder::M7PlacementCatalogHash
+		|| static_cast<uint64>(Result.LayoutHash)
+			!= JuryFixedSixV2LayoutHash
+		|| static_cast<uint64>(Result.LayoutHash)
+			!= FABTSM3JuryFixedSixLayoutBuilder::ComputeLayoutHash(Result)
+		|| Result.Placements.Num() != UE_ARRAY_COUNT(ExpectedPlacementHashes)
+		|| Fixtures.Num() != UE_ARRAY_COUNT(ExpectedPlacementHashes))
+	{
+		OutFailure = TEXT("AggregateIdentity");
+		return false;
+	}
+	for (int32 Index = 0; Index < Result.Placements.Num(); ++Index)
+	{
+		const FABTSM3JuryBuildingPlacement& Placement =
+			Result.Placements[Index];
+		const FABTSM3JuryBuildingPlacementFixture& Fixture = Fixtures[Index];
+		if (Placement.EncounterIndex != Index
+			|| Placement.ManifestEntryId != Fixture.ManifestEntryId
+			|| Placement.PadCenterCellId != ExpectedPadCenterCellIds[Index]
+			|| Placement.ReservedPadCellIds.Num()
+				!= ExpectedReservedPadCellCounts[Index]
+			|| Placement.ReservedDynamicEnvelopeCellIds.Num()
+				!= ExpectedReservedDynamicCellCounts[Index]
+			|| Placement.StaticGeometryHash != Fixture.StaticGeometryHash
+			|| Placement.SourceDescriptorHash != Fixture.SourceDescriptorHash
+			|| Placement.ProductionIdentityHash != Fixture.ProductionIdentityHash
+			|| Placement.DeviceAssemblyHash != Fixture.DeviceAssemblyHash
+			|| !Placement.PhysicalBounds.Min.Equals(Fixture.PhysicalBounds.Min)
+			|| !Placement.PhysicalBounds.Max.Equals(Fixture.PhysicalBounds.Max)
+			|| !Placement.EffectBounds.Min.Equals(Fixture.EffectBounds.Min)
+			|| !Placement.EffectBounds.Max.Equals(Fixture.EffectBounds.Max)
+			|| static_cast<uint64>(Placement.PlacementHash)
+				!= ExpectedPlacementHashes[Index]
+			|| static_cast<uint64>(Placement.PlacementHash)
+				!= FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(
+					Placement))
+		{
+			OutFailure = FString::Printf(TEXT("PlacementIdentity:%d"), Index);
+			return false;
+		}
+		OutReservedPadCellCount += Placement.ReservedPadCellIds.Num();
+		OutReservedDynamicEnvelopeCellCount +=
+			Placement.ReservedDynamicEnvelopeCellIds.Num();
+	}
+	if (OutReservedPadCellCount != 52
+		|| OutReservedDynamicEnvelopeCellCount != 40)
+	{
+		OutFailure = TEXT("ReservationTotals");
+		return false;
+	}
+	return true;
+}
 }
 
 AABTSM3GameMode::AABTSM3GameMode()
@@ -119,7 +213,7 @@ void AABTSM3GameMode::BeginPlay()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M3R5][LogicRegionDebug] Shortcut=F7 StartupEnabled=%d TargetColor=Red AttackCorridorColor=Orange PreviewCandidateRequired=1"),
+		TEXT("[ABTS][M3R5][LogicRegionDebug] Shortcut=F7 StartupEnabled=%d TargetColor=Red AttackCorridorColor=Orange FixedSixPadColor=Cyan FixedSixPhysicalColor=Green FixedSixEffectColor=Magenta PreviewCandidateRequired=1"),
 		bMonthlyLogicRegionDebugEnabled ? 1 : 0);
 #endif
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3] TaskGraph terrain presentation entry ready."));
@@ -519,6 +613,7 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 	int32 TargetCellCount = 0;
 	int32 AttackCorridorCellCount = 0;
 	int32 SatelliteE5PreviewCount = 0;
+	int32 JuryFixedSixPlacementCount = 0;
 	bool bDrewAnyPlanet = false;
 	for (TActorIterator<AABTSM3Planet> It(GetWorld());
 		It;
@@ -539,6 +634,14 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 				PlanetAttackCorridorCellCount;
 			SatelliteE5PreviewCount +=
 				bPlanetSatelliteE5PreviewDrawn ? 1 : 0;
+			const FABTSM3JuryFixedSixLayoutResult& JuryResult =
+				It->MonthlyJuryFixedSixLayoutResult;
+			if (JuryResult.bPlacementReady
+				&& static_cast<uint64>(JuryResult.LayoutHash)
+					== ABTSM3R5GameModePrivate::JuryFixedSixV2LayoutHash)
+			{
+				JuryFixedSixPlacementCount += JuryResult.Placements.Num();
+			}
 		}
 	}
 	if (GEngine == nullptr)
@@ -553,20 +656,24 @@ void AABTSM3GameMode::RefreshMonthlyLogicRegionDebug(
 			UE_LOG(
 				LogABTSRuntime,
 				Log,
-				TEXT("[ABTS][M3R5.1][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d SatelliteE5Previews=%d"),
+				TEXT("[ABTS][M3R5.1][LogicRegionDebug] Ready=1 Enabled=1 Shortcut=F7 ExactPreviewCandidate=1 TargetFootprintCells=%d AttackCorridorCells=%d SatelliteE5Previews=%d JuryFixedSixPlacements=%d JuryFixedSixLayoutHash=%016llX"),
 				TargetCellCount,
 				AttackCorridorCellCount,
-				SatelliteE5PreviewCount);
+				SatelliteE5PreviewCount,
+				JuryFixedSixPlacementCount,
+				static_cast<unsigned long long>(
+					ABTSM3R5GameModePrivate::JuryFixedSixV2LayoutHash));
 		}
 		GEngine->AddOnScreenDebugMessage(
 			0x4D335235,
 			DrawLifeTimeSeconds + 0.1f,
 			FColor::Yellow,
 			FString::Printf(
-				TEXT("M3R5.1 Logic Regions ON (F7)  RED=Target [%d]  ORANGE=Corridor [%d]  BLUE/MAGENTA=Satellite/E5 [%d]"),
+				TEXT("M3R5.1 Logic Regions ON (F7)  RED=Target [%d]  ORANGE=Corridor [%d]  BLUE/MAGENTA=Satellite/E5 [%d]  CYAN/GREEN/MAGENTA=FixedSix [%d]"),
 				TargetCellCount,
 				AttackCorridorCellCount,
-				SatelliteE5PreviewCount));
+				SatelliteE5PreviewCount,
+				JuryFixedSixPlacementCount));
 	}
 	else
 	{
@@ -1965,6 +2072,29 @@ void AABTSM3GameMode::TryCompleteM3R5Smoke()
 			TEXT("R3SpatialIdentityMismatch"));
 		return;
 	}
+	int32 JuryReservedPadCellCount = 0;
+	int32 JuryReservedDynamicEnvelopeCellCount = 0;
+	if (!ABTSM3R5GameModePrivate::ValidateJuryFixedSixRuntimeIdentity(
+			*Planet,
+			JuryReservedPadCellCount,
+			JuryReservedDynamicEnvelopeCellCount,
+			Failure))
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(TEXT("JuryFixedSixV2:%s"), *Failure));
+		return;
+	}
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M3Jury][FixedMapRegression] Passed=1 Contract=2 Seed=%d Candidate=%d Buildings=6 ReservedPadCells=%d ReservedDynamicEnvelopeCells=%d LayoutHash=%016llX Authority=M3LocalAccepted"),
+		Planet->WorldSeed,
+		FABTSM3JuryFixedSixLayoutBuilder::FrozenSourceCandidateId,
+		JuryReservedPadCellCount,
+		JuryReservedDynamicEnvelopeCellCount,
+		static_cast<unsigned long long>(
+			ABTSM3R5GameModePrivate::JuryFixedSixV2LayoutHash));
 	if (!Planet->ValidateMonthlyPresentationResult(
 			Failure))
 	{
