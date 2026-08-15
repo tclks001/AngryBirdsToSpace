@@ -992,7 +992,7 @@ NotStarted
 | M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **M3LocalAccepted（FixtureAuthority，IntegrationPending）**；Core 8/8、Failure 8/8、100 Seed 100/100、父级回归、fresh runtime 与强制 Unity 均通过；真实 M5.1/M6/M7/M9/流程和 R6 仍待联合验收 | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M5.1/M6/M7/M9 | IntegrationAccepted |
 | M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **M3LocalAccepted（IntegrationPending）**；Biome Core/Failure、100 Seed 100/100、300 plans、冻结 Oracle、显式 preview runtime 和完整 Subdivision 7 `<=8 s` 均已通过；可见 PIE、M6/M9/Character/Visibility 碰撞回归仍待 | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3；碰撞联合回归在 Integration | IntegrationAccepted |
 | M3R-5.2 道路末端终局锚点提案 | Week 3 补充 | **IntegrationAccepted**；M3 专项 3/3、共享接缝 2/2、M5.1 4/4、M11 快速回归、fresh `L_ABTS_M11` 与可见联合 PIE 均已通过；Candidate 4 的双槽与 M11 同帧，但仍仅具 Preview/Test 权威 | 为每个保留 Candidate 输出道路末端窗口、终局双槽局部帧和普通槽排除区 | M3；实体槽与 M11 消费在 Integration/M5.1/M11 | IntegrationAccepted |
-| M3R-6 六栋 M7 实体建筑集成 | DDL Fixed-Six V2 | **M3LocalAccepted；Integration/M7 InProgress**。M3 已冻结六条 V2 Placement 与动态包络；旧通用 Profile/Witness 路径改为 Deferred | Fixed-Six V2 稳定 Adapter、六栋静态注册与逐栋动态化 | Integration + M7；M3 只生产冻结数据 | IntegrationAccepted |
+| M3R-6 六栋 M7 实体建筑集成 | DDL Fixed-Six V2 | **M3LocalAccepted / AdapterPublished；M7 InProgress**。M3 已冻结六条 V2 Placement 与动态包络，Integration 已发布 V2 Adapter；旧通用 Profile/Witness 路径改为 Deferred | 六栋静态注册、逐栋动态化与联合 PIE | Integration + M7；M3 只生产冻结数据 | IntegrationAccepted |
 | M3R-7 月度认证与调参冻结 | DDL 后续 | **Deferred / Non-release gate** | 旧 1000 Seed、20 Runtime、3 随机 PIE 与泛化 fallback 认证保留为长期路线 | Integration | Deferred |
 
 ```mermaid
@@ -1445,9 +1445,9 @@ F7 在显式精确 Candidate 预览下增加洋红净空 Cell、白色锚点、�
 
 ### 14.8.1 DDL JuryDemoFixedSixV2（当前发布路线）
 
-当前发布路线以 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md) 为准。M3 使用 M7 V2 的六条静态生产封装与 Physical/Effect Bounds 冻结单一展示布局；M3 数据侧已达到 `M3LocalAccepted`，Integration 正在冻结 V2 Adapter，M7 正在实现静态消费。下方原 M3R-6 通用 Profile/Witness 集成与 M3R-7 全量认证保留为长期设计历史，不再构成本次 DDL 门槛。
+当前发布路线以 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md) 为准。M3 使用 M7 V2 的六条静态生产封装与 Physical/Effect Bounds 冻结单一展示布局；M3 数据侧已达到 `M3LocalAccepted`，Integration V2 Adapter 已发布，M7 正在实现静态消费。下方原 M3R-6 通用 Profile/Witness 集成与 M3R-7 全量认证保留为长期设计历史，不再构成本次 DDL 门槛。
 
-代码入口为 `FABTSM3JuryFixedSixLayoutBuilder`。它不修改稳定契约；Integration 已加法扩展向后兼容的 Fixed-Six V2 DTO，仍需按 M3 最终 Hash 冻结 V2 常量并切换 Adapter 导出，M7 仍需独立完成逐栋 ChaosReady 和最终联合 PIE。
+代码入口为 `FABTSM3JuryFixedSixLayoutBuilder`。它不修改稳定契约；Integration 已加法扩展向后兼容的 Fixed-Six V2 DTO，并按 M3 最终 Hash 冻结 V2 常量、切换 Adapter 导出。M7 仍需独立完成六栋静态注册、逐栋 ChaosReady 和最终联合 PIE。
 ### 14.9 M3R-6（历史通用路线，Deferred）：通过稳定合同接入六栋 M7 实体建筑
 
 **实现目标**

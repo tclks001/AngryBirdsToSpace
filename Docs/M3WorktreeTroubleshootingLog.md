@@ -26,7 +26,7 @@
 | M3-WT-001 | Codex 管理工作树不在旧 `C:\workspace` 路径 | 已建立固定检查流程 | M3 |
 | M3-WT-002 | 普通/Adaptive Unity 编译通过，强制 Unity 才暴露同名私有符号 | 已从 `master` 同步修复并建立构建门 | M11/Integration；M3 回归 |
 | M3-WT-003 | 其他工作树 Editor 导致 Live Coding/DLL 锁，容易误杀进程 | 已建立进程归属检查 | 各工作树 |
-| M3-WT-004 | 非 Unity 编译暴露稳定 Adapter 缺少日志类别声明 | 已定位到 Integration 所有权；M3 不越权修复 | Integration；M3 回归 |
+| M3-WT-004 | 非 Unity 编译暴露稳定 Adapter 缺少日志类别声明 | 已由 `master 3991723` 修复并完成 M3 回归 | Integration；M3 回归 |
 | M3-R3-001 | 冻结弹弓参数接入后，攻击走廊和建筑位置看似未变化 | 已修复数据布局；实体仍等 R-6 | M3 + Integration |
 | M3-R3-002 | 同一弹弓阶段的建筑距离全部退化为同一个舒适射程 | 已改为逐关递增射程窗口 | M3 |
 | M3-R5-001 | 逻辑 Target/Attack Corridor 已生成但画面无法辨认 | 已增加 F7 只读叠层 | M3 |
@@ -145,13 +145,13 @@ M3 本次修改的三个 `.cpp` 均已成功编译；失败文件不在本 check
 
 **修复**
 
-修复归属 Integration：在原始集成工作树为稳定 Adapter 增加所需的显式 include，并先进入 `master`。M3 不直接修改共享 Adapter；待更新后的 `master` 合入功能分支后，再重跑普通 Development Editor 全链接。
+修复归属 Integration：原始集成工作树为稳定 Adapter 增加 `ABTSRuntime.h` 显式 include，并随 `3991723` 进入 `master`。M3 未直接修改共享 Adapter；合入更新后的 `master` 后重跑普通 Development Editor 全链接完成闭环。
 
 **防回归验证**
 
-- 普通 Development Editor 和 `-ForceUnity -DisableAdaptiveUnity` 必须分别完成最终链接；
+- 普通 Development Editor 和 `-ForceUnity -DisableAdaptiveUnity` 已分别完成最终链接；
 - 普通构建不得再依赖 Unity 翻译单元间的间接声明；
-- 在该 Integration 修复进入 `master` 前，本 checkpoint 只记录 ForceUnity 编译证据，不把普通 Development 标记为通过，也不作为最终集成交接 SHA。
+- 合入 `3991723` 后的普通构建为 8/8 actions、`Result: Succeeded`；`ABTS.Contracts.WorldGeneration` post-merge fresh 回归为 `2/2 Success`。
 
 ## 4. R-3 射程、建筑范围与攻击走廊
 
@@ -696,7 +696,7 @@ V2 将“静态建筑落脚空间”和“激活后设备/效果运动空间”�
 
 **防回归验证**
 
-- 前一版曾记录 Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接；本次 Diagnostics 在非 Unity 重编稳定 Adapter 时暴露显式 include 缺失，当前构建结论由 M3-WT-004 取代；
+- Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接；本次 Diagnostics 曾在非 Unity 重编稳定 Adapter 时暴露显式 include 缺失，已按 M3-WT-004 由 Integration 修复并从 `master` 回归；
 - 前一版证据 `M3Jury-V2-FixedSix-Final-20260815-160925-970-FreshAutomation.log`：当时 `ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`，逐栋校验全部 V2 Hash、36 cm Pad 边界、动态预留及 Hash tamper；当前门已由 M3-JURY-004 扩展为 `3/3`；
 - `M3Jury-V2-ContractValidation-20260815-160449-888-FreshAutomation.log`：稳定合同 `Validation` 精确 `1/1 Success`；
 - `M3Jury-V2-FinaleRegression-20260815-161028-955-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
@@ -728,6 +728,9 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - 同一 runtime 日志在启用 `-ABTSM3R5LogicRegions` 时输出 `JuryFixedSixPlacements=6 JuryFixedSixLayoutHash=7029074579FDC52E`；叠层是 Editor-only 诊断，不进入生产 Hash 或稳定合同。
 - `M3Jury-V2-Diagnostics-Contract-20260815-163814-618-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration.Validation` 精确 `1/1 Success`；
 - `M3Jury-V2-Diagnostics-Finale-20260815-163850-384-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`，候选尝试中的预期 Reject warning 不改变最终 Success 判定。
+- 合入 `master 3991723` 后，普通 Adaptive Non-Unity Development Editor 完整链接为 8/8 actions、`Result: Succeeded`；
+- `M3Jury-V2-Diagnostics-PostMerge-Contracts-20260815-164309-601-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`，包含 V2 Adapter 精确导出和原子失败注入；
+- `M3Jury-V2-Diagnostics-PostMerge-FixedSix-20260815-164354-852-FreshAutomation.log`：新增 Diagnostics 门在 V2 Adapter 发布基线上仍精确 `3/3 Success`。
 
 ## 14. 新条目模板
 
