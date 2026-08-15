@@ -600,7 +600,31 @@ Hydrology 只把“哪些 Cell 边跨越大圆切面”保存在 `FABTSM3CellEdg
 - 不用完整测试中的第二次缓存运行替换 fresh 首次数据；
 - 重型构建、慢速认证和可见 PIE 按多工作树规范串行执行。
 
-## 13. 新条目模板
+## 13. JuryDemo 固定六建筑
+
+### M3-JURY-001：PlacementReady 与 ChaosReady 必须解耦
+
+**现象**
+
+若把“冻结六条放置描述”误解为“六栋建筑已经通过 Chaos”，M3 会继续等待破坏和物理阶段；若只手写尺寸又不绑定几何 Hash，后续建筑变化会静默挤穿道路或水体。
+
+**根因**
+
+静态空间契约与动态物理证据属于不同层级。M3 只需要稳定的 Entry、Seed、Bounds、Pivot、方向和 Pad；最终联合发布才需要 M7 逐栋 ChaosReady。
+
+**修复**
+
+- 使用 M7 Stage 4.5 的六条几何派生描述及 Manifest/Catalog/Descriptor Hash；
+- M3 固定 Seed 312503、Candidate 4，并以真实 Pad 在 NoRoad 区域执行确定性采样；
+- M3 不读取 AttackFace、Weakness 或 Chaos 状态，不搜索其他 Profile/Seed；
+- 后续若 Chaos 修复改变静态几何、Pivot 或 Pad，必须提升 M7 Placement 版本并重新冻结 M3 Layout Hash。
+
+**防回归验证**
+
+- `ABTS.M3.Monthly.JuryFixedSix` 验证六条绑定、重复 Hash 和错误身份 fail closed；
+- Stage 4.5 只能证明 PlacementReady，最终可见 PIE 仍需 Integration/M7 单独留下 ChaosReady 证据。
+
+## 14. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>

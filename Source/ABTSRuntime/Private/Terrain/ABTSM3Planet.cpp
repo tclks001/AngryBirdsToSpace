@@ -468,6 +468,8 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlyWorldSchema = FABTSM3MonthlyWorldSchema();
 		MonthlyRoutePool = FABTSM3MonthlyRoutePool();
 		MonthlySpatialResult = FABTSM3MonthlySpatialResult();
+		MonthlyJuryFixedSixLayoutResult =
+			FABTSM3JuryFixedSixLayoutResult();
 		MonthlyPresentationResult =
 			FABTSM3MonthlyPresentationResult();
 		MonthlyFinaleAnchorPlanResult =
@@ -563,6 +565,43 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		MonthlySpatialResult,
 		MonthlySpatialDebugData);
 #endif
+	MonthlyJuryFixedSixLayoutResult = FABTSM3JuryFixedSixLayoutResult();
+	if (bSpatialBuilt
+		&& WorldSeed == FABTSM3JuryFixedSixLayoutBuilder::FrozenWorldSeed)
+	{
+		FString JuryPlacementFailure;
+		if (!FABTSM3JuryFixedSixLayoutBuilder::Build(
+				LogicalCells,
+				PlanetRadiusCM,
+				MonthlySpatialResult,
+				MonthlyJuryFixedSixLayoutResult,
+				JuryPlacementFailure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M3Jury][FixedSix] Placement rejected. Seed=%d Candidate=%d Reason=%s Failure=%s CompatibilityWorldPreserved=1"),
+				WorldSeed,
+				FABTSM3JuryFixedSixLayoutBuilder::FrozenSourceCandidateId,
+				FABTSM3JuryFixedSixLayoutBuilder::GetRejectReasonName(
+					MonthlyJuryFixedSixLayoutResult.RejectReason),
+				*JuryPlacementFailure);
+		}
+		else
+		{
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M3Jury][FixedSix] PlacementReady=1 Seed=%d Candidate=%d Buildings=%d M7Manifest=%d:%lld M7Catalog=%016llX LayoutHash=%016llX Authority=M3LocalAccepted"),
+				WorldSeed,
+				MonthlyJuryFixedSixLayoutResult.SourceCandidateId,
+				MonthlyJuryFixedSixLayoutResult.Placements.Num(),
+				MonthlyJuryFixedSixLayoutResult.M7SourceManifestVersion,
+				MonthlyJuryFixedSixLayoutResult.M7SourceManifestHash,
+				static_cast<unsigned long long>(
+					static_cast<uint64>(
+						MonthlyJuryFixedSixLayoutResult.M7PlacementCatalogHash)),
+				static_cast<unsigned long long>(
+					static_cast<uint64>(
+						MonthlyJuryFixedSixLayoutResult.LayoutHash)));
+		}
+	}
 	MonthlyFinaleAnchorPlanResult =
 		FABTSM3MonthlyFinaleAnchorPlanResult();
 	FString FinaleAnchorFailure;
