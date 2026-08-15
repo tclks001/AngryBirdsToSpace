@@ -680,8 +680,10 @@ private:
 	bool AppendJuryFixedSixTerrainPads(
 		TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
 		FString& OutFailure);
-	bool IsInsideJuryFixedSixDynamicEnvelope(
-		const FVector& PlanetLocalSurfaceLocation) const;
+	void GetJuryFixedSixDecorClearanceOverlaps(
+		const FVector& PlanetLocalLocation,
+		bool& bOutPhysicalOverlap,
+		bool& bOutDynamicOverlap) const;
 	bool TryBuildMonthlyPresentationPreviewData(
 		TArray<FABTSM3CellState>& OutCellStates,
 		TArray<FABTSM3CellEdgeState>& OutEdgeStates,

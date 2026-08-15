@@ -2819,12 +2819,6 @@ void AABTSM3Planet::BuildDecorInstances(
 				}
 				const float SurfaceRadiusCM = TerrainVisualField->GetSurfaceRadius(Direction);
 				const FVector PlanetLocalSurfaceLocation = Direction * SurfaceRadiusCM;
-				if (IsInsideJuryFixedSixDynamicEnvelope(PlanetLocalSurfaceLocation))
-				{
-					++JuryFixedSixDecorClearanceRejectedCount;
-					++DecorPlacementSummary.RejectedProtectedOrReserved;
-					continue;
-				}
 
 				const FVector RadialUp = Direction;
 				FVector SurfaceUp = TerrainVisualField->GetSurfaceNormal(Direction).GetSafeNormal();
@@ -2903,6 +2897,18 @@ void AABTSM3Planet::BuildDecorInstances(
 						+ ResolvedMaximumAdditionalSeatLiftCM)
 				{
 					++DecorPlacementSummary.RejectedGround;
+					continue;
+				}
+				bool bPhysicalClearanceOverlap = false;
+				bool bDynamicClearanceOverlap = false;
+				GetJuryFixedSixDecorClearanceOverlaps(
+					CandidateTransform.GetLocation(),
+					bPhysicalClearanceOverlap,
+					bDynamicClearanceOverlap);
+				if (bPhysicalClearanceOverlap || bDynamicClearanceOverlap)
+				{
+					++JuryFixedSixDecorClearanceRejectedCount;
+					++DecorPlacementSummary.RejectedProtectedOrReserved;
 					continue;
 				}
 
@@ -3304,22 +3310,21 @@ bool AABTSM3Planet::AppendJuryFixedSixTerrainPads(
 	return true;
 }
 
-bool AABTSM3Planet::IsInsideJuryFixedSixDynamicEnvelope(
-	const FVector& PlanetLocalSurfaceLocation) const
+void AABTSM3Planet::GetJuryFixedSixDecorClearanceOverlaps(
+	const FVector& PlanetLocalLocation,
+	bool& bOutPhysicalOverlap,
+	bool& bOutDynamicOverlap) const
 {
+	bOutPhysicalOverlap = false;
+	bOutDynamicOverlap = false;
 	if (!MonthlyJuryFixedSixLayoutResult.bPlacementReady)
 	{
-		return false;
+		return;
 	}
 	for (const FABTSM3JuryBuildingPlacement& Placement
 		: MonthlyJuryFixedSixLayoutResult.Placements)
 	{
-		if (!Placement.bDynamicEnvelopeRequired
-			|| Placement.EffectBounds.IsValid == 0)
-		{
-			continue;
-		}
-		const FVector Offset = PlanetLocalSurfaceLocation
+		const FVector Offset = PlanetLocalLocation
 			- Placement.WorldLocationCM;
 		const float LocalX = FVector::DotProduct(
 			Offset,
@@ -3327,15 +3332,28 @@ bool AABTSM3Planet::IsInsideJuryFixedSixDynamicEnvelope(
 		const float LocalY = FVector::DotProduct(
 			Offset,
 			Placement.WorldRightAxis);
-		if (LocalX >= Placement.EffectBounds.Min.X
+		if (Placement.PhysicalBounds.IsValid != 0
+			&& LocalX >= Placement.PhysicalBounds.Min.X
+			&& LocalX <= Placement.PhysicalBounds.Max.X
+			&& LocalY >= Placement.PhysicalBounds.Min.Y
+			&& LocalY <= Placement.PhysicalBounds.Max.Y)
+		{
+			bOutPhysicalOverlap = true;
+		}
+		if (Placement.bDynamicEnvelopeRequired
+			&& Placement.EffectBounds.IsValid != 0
+			&& LocalX >= Placement.EffectBounds.Min.X
 			&& LocalX <= Placement.EffectBounds.Max.X
 			&& LocalY >= Placement.EffectBounds.Min.Y
 			&& LocalY <= Placement.EffectBounds.Max.Y)
 		{
-			return true;
+			bOutDynamicOverlap = true;
+		}
+		if (bOutPhysicalOverlap && bOutDynamicOverlap)
+		{
+			return;
 		}
 	}
-	return false;
 }
 
 bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
@@ -3712,7 +3730,7 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 		return false;
 	}
 
-	auto CountHorizontalOverlaps = [this, &Result](
+	auto CountHorizontalOverlaps = [this](
 		const UHierarchicalInstancedStaticMeshComponent* HISM,
 		int32& InOutPhysicalOverlapCount,
 		int32& InOutDynamicOverlapCount)
@@ -3733,36 +3751,14 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 			{
 				return false;
 			}
-			for (const FABTSM3JuryBuildingPlacement& Placement
-				: Result.Placements)
-			{
-				const FVector Offset = InstanceTransform.GetLocation()
-					- (GetPlanetCenterWorld()
-						+ Placement.WorldLocationCM);
-				const float LocalX = FVector::DotProduct(
-					Offset,
-					Placement.WorldForwardAxis);
-				const float LocalY = FVector::DotProduct(
-					Offset,
-					Placement.WorldRightAxis);
-				if (Placement.PhysicalBounds.IsValid != 0
-					&& LocalX >= Placement.PhysicalBounds.Min.X
-					&& LocalX <= Placement.PhysicalBounds.Max.X
-					&& LocalY >= Placement.PhysicalBounds.Min.Y
-					&& LocalY <= Placement.PhysicalBounds.Max.Y)
-				{
-					++InOutPhysicalOverlapCount;
-				}
-				if (Placement.bDynamicEnvelopeRequired
-					&& Placement.EffectBounds.IsValid != 0
-					&& LocalX >= Placement.EffectBounds.Min.X
-					&& LocalX <= Placement.EffectBounds.Max.X
-					&& LocalY >= Placement.EffectBounds.Min.Y
-					&& LocalY <= Placement.EffectBounds.Max.Y)
-				{
-					++InOutDynamicOverlapCount;
-				}
-			}
+			bool bPhysicalOverlap = false;
+			bool bDynamicOverlap = false;
+			GetJuryFixedSixDecorClearanceOverlaps(
+				InstanceTransform.GetLocation() - GetPlanetCenterWorld(),
+				bPhysicalOverlap,
+				bDynamicOverlap);
+			InOutPhysicalOverlapCount += bPhysicalOverlap ? 1 : 0;
+			InOutDynamicOverlapCount += bDynamicOverlap ? 1 : 0;
 		}
 		return true;
 	};
