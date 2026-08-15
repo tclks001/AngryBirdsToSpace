@@ -1448,7 +1448,8 @@ bool FABTSM73BeamCGenerator::Generate(
 	const FABTSM73BeamCPreviewSettings& Settings,
 	const FABTSM73BeamAGenerationResult& ClosedAssembly,
 	FABTSM73BeamCGenerationResult& OutResult,
-	FString& OutError) const
+	FString& OutError,
+	const FABTSM73BeamCMemberSelfLoadResolver* MemberSelfLoadResolver) const
 {
 	using namespace ABTSM73BeamC;
 	OutResult = FABTSM73BeamCGenerationResult();
@@ -1513,7 +1514,15 @@ bool FABTSM73BeamCGenerator::Generate(
 		Node.MemberId = Member.MemberId;
 		Node.Axis = Member.Axis;
 		Node.bGround = IsGroundMember(Member, ClosedAssembly, Settings);
-		Node.SelfLoadKG = Member.LengthCM * Settings.MemberLinearDensityKGPerCM;
+		Node.SelfLoadKG = MemberSelfLoadResolver != nullptr
+			? static_cast<float>((*MemberSelfLoadResolver)(Member))
+			: Member.LengthCM * Settings.MemberLinearDensityKGPerCM;
+		if (!FMath::IsFinite(Node.SelfLoadKG)
+			|| Node.SelfLoadKG <= 0.0f)
+		{
+			return Reject(OutResult, OutError,
+				TEXT("BeamCInvalidResolvedMemberSelfLoad"));
+		}
 		Node.AccumulatedLoadKG = Node.SelfLoadKG;
 		Node.LoadResultant = MemberMidpoint(Member, ClosedAssembly);
 		MemberBoxes.Add(MemberBounds(
@@ -2049,7 +2058,9 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 	const int32 MaximumFinalMemberCount,
 	const bool bAllowDeferredCoreBracing,
 	const int32 PriorStructuralClosurePassCount,
-	const int32 PriorAddedStructuralSupportPostCount) const
+	const int32 PriorAddedStructuralSupportPostCount,
+	const FABTSM73BeamCMemberSelfLoadResolver* MemberSelfLoadResolver,
+	const bool bAllowPostRepairResultantAdvisory) const
 {
 	using namespace ABTSM73BeamC;
 	auto RejectMemberBudget = [&OutResult, &OutError,
@@ -2088,7 +2099,8 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 	{
 		const int32 CumulativePass =
 			PriorStructuralClosurePassCount + Pass;
-		if (Generate(Settings, InOutClosedAssembly, OutResult, OutError))
+		if (Generate(Settings, InOutClosedAssembly, OutResult, OutError,
+			MemberSelfLoadResolver))
 		{
 			if (InOutClosedAssembly.Members.Num() > MaximumFinalMemberCount)
 			{
@@ -2101,7 +2113,9 @@ bool FABTSM73BeamCGenerator::GenerateWithStructuralClosure(
 		const bool bRepairable =
 			OutResult.Summary.SupportResultantViolationCount > 0
 			|| OutResult.Summary.SupportSpreadViolationCount > 0;
-		const bool bResultantOnlyAfterRepair = CumulativePass > 0
+		const bool bResultantOnlyAfterRepair =
+			bAllowPostRepairResultantAdvisory
+			&& CumulativePass > 0
 			&& OutResult.Summary.SupportResultantViolationCount > 0
 			&& OutResult.Summary.SupportSpreadViolationCount == 0
 			&& OutResult.Summary.ReactionBalanceViolationCount == 0

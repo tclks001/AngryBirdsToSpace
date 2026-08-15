@@ -248,32 +248,143 @@ bool FABTSM6LaunchGroundContextCameraTest::RunTest(
 		TEXT("A valid surface anchor produces an aim view"),
 		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
 			LegacyLocation,
+			FVector::ZeroVector,
+			FVector::ForwardVector,
 			GroundAnchor,
 			Up,
+			1500.0f,
 			8.0f,
+			10.0f,
+			5.0f,
 			GroundAwareLocation,
 			Look,
 			ScreenUp));
 	TestTrue(
-		TEXT("Aim framing keeps the authored horizontal camera position"),
-		FMath::IsNearlyEqual(GroundAwareLocation.X, LegacyLocation.X, 0.01f)
-			&& FMath::IsNearlyEqual(GroundAwareLocation.Y, LegacyLocation.Y, 0.01f));
+		TEXT("Aim framing preserves the authored camera-to-sling distance"),
+		FMath::IsNearlyEqual(GroundAwareLocation.Size(), 1500.0f, 0.01f));
 	TestTrue(
-		TEXT("Aim framing raises a camera that cannot yet read the ground"),
-		GroundAwareLocation.Z > LegacyLocation.Z);
+		TEXT("Aim framing uses the minimum downward pitch for a shallow anchor"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(Look, Up),
+			-FMath::Sin(FMath::DegreesToRadians(8.0f)),
+			0.0001f));
+	const FVector SubjectDirection = (-GroundAwareLocation).GetSafeNormal();
 	TestTrue(
-		TEXT("Aim framing looks at the exact immutable surface anchor"),
-		FVector::DotProduct(
-			Look,
-			(GroundAnchor - GroundAwareLocation).GetSafeNormal()) > 0.9999f);
-	TestTrue(
-		TEXT("Aim framing guarantees the authored minimum downward angle"),
-		FVector::DotProduct(Look, Up)
-			<= -FMath::Sin(FMath::DegreesToRadians(8.0f)) + 0.0001f);
+		TEXT("Aim framing keeps the sling center at its authored screen offset"),
+		FMath::IsNearlyEqual(
+			FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(Look, SubjectDirection),
+				-1.0f,
+				1.0f))),
+			5.0f,
+			0.01f));
 	TestTrue(
 		TEXT("Aim framing keeps a valid roll-free screen up"),
 		FMath::Abs(FVector::DotProduct(Look, ScreenUp)) < 0.0001f
 			&& ScreenUp.SizeSquared() > 0.999f);
+
+	FVector LowTerrainLocation;
+	FVector LowTerrainLook;
+	FVector LowTerrainScreenUp;
+	TestTrue(
+		TEXT("A severe terrain drop still produces a bounded aim view"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			LegacyLocation,
+			FVector::ZeroVector,
+			FVector::ForwardVector,
+			FVector(1800.0f, 0.0f, -2200.0f),
+			Up,
+			1500.0f,
+			8.0f,
+			10.0f,
+			5.0f,
+			LowTerrainLocation,
+			LowTerrainLook,
+			LowTerrainScreenUp));
+	TestTrue(
+		TEXT("A severe terrain drop cannot exceed the maximum optical pitch"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(LowTerrainLook, Up),
+			-FMath::Sin(FMath::DegreesToRadians(10.0f)),
+			0.0001f));
+	TestTrue(
+		TEXT("A severe terrain drop preserves distance and sling screen placement"),
+		FMath::IsNearlyEqual(LowTerrainLocation.Size(), 1500.0f, 0.01f)
+			&& FMath::IsNearlyEqual(
+				FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+					FVector::DotProduct(
+						LowTerrainLook,
+						(-LowTerrainLocation).GetSafeNormal()),
+					-1.0f,
+					1.0f))),
+				5.0f,
+				0.01f));
+
+	const FVector SphericalUp = FVector(0.42f, -0.31f, 0.85f).GetSafeNormal();
+	const FVector SphericalForward =
+		FVector::VectorPlaneProject(FVector(0.73f, 0.61f, -0.12f), SphericalUp).GetSafeNormal();
+	const FVector SphericalCenter(7400.0f, -3200.0f, 1900.0f);
+	const FVector SphericalLegacyLocation = SphericalCenter
+		+ (-SphericalForward * FMath::Cos(FMath::DegreesToRadians(-3.0f))
+			+ SphericalUp * FMath::Sin(FMath::DegreesToRadians(-3.0f)))
+		* 1500.0f;
+	const FVector SphericalLowAnchor =
+		SphericalCenter + SphericalForward * 1800.0f - SphericalUp * 2200.0f;
+	FVector SphericalLocation;
+	FVector SphericalLook;
+	FVector SphericalScreenUp;
+	TestTrue(
+		TEXT("The bounded aim contract is invariant in a rotated spherical frame"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			SphericalLegacyLocation,
+			SphericalCenter,
+			SphericalForward,
+			SphericalLowAnchor,
+			SphericalUp,
+			1500.0f,
+			10.0f,
+			8.0f,
+			5.0f,
+			SphericalLocation,
+			SphericalLook,
+			SphericalScreenUp));
+	TestTrue(
+		TEXT("Rotated low terrain preserves the same distance pitch and subject offset"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(SphericalLocation, SphericalCenter),
+			1500.0f,
+			0.01f)
+			&& FMath::IsNearlyEqual(
+				FVector::DotProduct(SphericalLook, SphericalUp),
+				-FMath::Sin(FMath::DegreesToRadians(10.0f)),
+				0.0001f)
+			&& FMath::IsNearlyEqual(
+				FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+					FVector::DotProduct(
+						SphericalLook,
+						(SphericalCenter - SphericalLocation).GetSafeNormal()),
+					-1.0f,
+					1.0f))),
+				5.0f,
+				0.01f));
+	FVector InvalidLocation;
+	FVector InvalidLook;
+	FVector InvalidScreenUp;
+	TestFalse(
+		TEXT("A ground anchor behind the launch axis fails closed"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			LegacyLocation,
+			FVector::ZeroVector,
+			FVector::ForwardVector,
+			FVector(-1800.0f, 0.0f, -250.0f),
+			Up,
+			1500.0f,
+			8.0f,
+			10.0f,
+			5.0f,
+			InvalidLocation,
+			InvalidLook,
+			InvalidScreenUp));
 
 	FVector FlightLocation;
 	FVector FlightLook;

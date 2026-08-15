@@ -135,12 +135,17 @@ public:
 		float DistanceCM,
 		float HorizontalFovDegrees,
 		float AspectRatio);
-	/** Preserves the authored aim position unless it must rise to look down at the surface anchor. */
+	/** Builds a bounded ground-reading view while preserving sling distance and screen placement. */
 	static bool BuildGroundAwareAimView(
 		const FVector& LegacyLocation,
+		const FVector& AimCenter,
+		const FVector& AimForward,
 		const FVector& GroundAnchor,
 		const FVector& Up,
+		float CameraDistanceCM,
 		float MinimumLookDownDegrees,
+		float MaximumLookDownDegrees,
+		float SubjectAboveCenterDegrees,
 		FVector& OutLocation,
 		FVector& OutLook,
 		FVector& OutScreenUp);
@@ -296,6 +301,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
 		meta = (ClampMin = "0.0", ClampMax = "30.0", Units = "deg"))
 	float AimGroundContextMinimumLookDownDegrees = 8.0f;
+	/** Maximum downward optical pitch; lower terrain cannot drag the sling out of frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "30.0", Units = "deg"))
+	float AimGroundContextMaximumLookDownDegrees = 10.0f;
+	/** Stable angular placement of the sling center above the optical center. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "15.0", Units = "deg"))
+	float AimGroundContextSubjectAboveCenterDegrees = 5.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")
 	float FlightDistanceCM = 920.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")

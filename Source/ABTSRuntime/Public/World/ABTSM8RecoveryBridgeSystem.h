@@ -13,6 +13,7 @@ class AABTSM7BuildingMaterialSystem;
 class AABTSM8BridgeActor;
 class AABTSM8WaterBarrierActor;
 class APlayerController;
+enum class EABTSItemId : uint8;
 enum class EABTSM7BuildingMaterial : uint8;
 
 /** Pure semantic result for one point on the same water centerline M3 presents. */
@@ -51,6 +52,11 @@ public:
 	static float ComputeWaterBarrierHalfWidthCM(
 		float VisibleWaterHalfWidthCM,
 		float BankSafetyMarginCM);
+
+	/** Stable integration-owned mapping from a recovered M7 brick to shared inventory. */
+	static bool TryMapRecoveredMaterialToItem(
+		EABTSM7BuildingMaterial Material,
+		EABTSItemId& OutItemId);
 
 private:
 	bool InitializeRuntime();

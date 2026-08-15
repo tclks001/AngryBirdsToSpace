@@ -39,6 +39,22 @@ struct FFixedSixV2SiteIdentity
 	FBox EffectBounds = FBox(EForceInit::ForceInit);
 };
 
+struct FFixedSixV3SiteIdentity
+{
+	const TCHAR* ManifestEntryId = TEXT("");
+	int32 DifficultyTier = INDEX_NONE;
+	int32 BuildingSeed = 0;
+	uint64 DescriptorHash = 0;
+	uint64 StaticGeometryHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+	FBox SiteLocalBounds = FBox(EForceInit::ForceInit);
+	FBox PadBounds = FBox(EForceInit::ForceInit);
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+	EABTSJuryDemoFixedSixSurfaceKind SurfaceKind =
+		EABTSJuryDemoFixedSixSurfaceKind::Unknown;
+};
+
 const FFixedSixV2SiteIdentity& GetFixedSixV2SiteIdentity(const int32 Index)
 {
 	static const FFixedSixV2SiteIdentity Identities[] = {
@@ -70,6 +86,60 @@ const FFixedSixV2SiteIdentity& GetFixedSixV2SiteIdentity(const int32 Index)
 	check(Index >= 0 && Index < UE_ARRAY_COUNT(Identities));
 	return Identities[Index];
 }
+
+const FFixedSixV3SiteIdentity& GetFixedSixV3SiteIdentity(const int32 Index)
+{
+	static const FFixedSixV3SiteIdentity Identities[] = {
+		{TEXT("E2DropTrigger"), 1, 740000, 2093905216809054552ull,
+			9035518740462017661ull, 2547697344996591725ull,
+			17110365351347297356ull,
+			FBox(FVector(-450.0, -486.0, 0.0), FVector(450.0, 774.0, 1476.0)),
+			FBox(FVector(-486.0, -522.0, 0.0), FVector(486.0, 810.0, 1476.0)),
+			FBox(FVector(-1138.0, -58.0, -670.0), FVector(382.0, 1462.0, 850.0)),
+			EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet},
+		{TEXT("E3SlideRelease"), 2, 750137, 4766851746474182140ull,
+			6056576068412876568ull, 5980623437000438947ull,
+			13499840356386341553ull,
+			FBox(FVector(-414.0, -1026.0, 0.0), FVector(414.0, 1026.0, 1332.0)),
+			FBox(FVector(-450.0, -1062.0, 0.0), FVector(450.0, 1062.0, 1332.0)),
+			FBox(FVector(-522.0, 774.0, -252.0), FVector(-162.0, 1134.0, 468.0)),
+			EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet},
+		{TEXT("E4TipOver"), 3, 730000, 4414623922721955589ull,
+			12346635070808564758ull, 10546537168470496360ull,
+			4267868371875890409ull,
+			FBox(FVector(-378.0, -846.0, 0.0), FVector(378.0, 846.0, 2376.0)),
+			FBox(FVector(-414.0, -882.0, 0.0), FVector(414.0, 882.0, 2376.0)),
+			FBox(FVector(-486.0, -342.0, -144.0), FVector(-126.0, 378.0, 216.0)),
+			EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet},
+		{TEXT("E5SeamRelease"), 4, 720000, 543918785024958331ull,
+			17932683668713717862ull, 11772527566289753088ull,
+			15204117308279581184ull,
+			FBox(FVector(-630.0, -1350.0, 0.0), FVector(630.0, 1350.0, 2376.0)),
+			FBox(FVector(-666.0, -1386.0, 0.0), FVector(666.0, 1386.0, 2376.0)),
+			FBox(FVector(126.0, 846.0, -144.0), FVector(486.0, 1566.0, 216.0)),
+			EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet},
+		{TEXT("E1ColumnBreak"), 0, 710000, 6197101184822124424ull,
+			261011352776326791ull, 18375681187970766733ull,
+			976568201920830387ull,
+			FBox(FVector(-162.0, 90.0, 0.0), FVector(162.0, 432.0, 720.0)),
+			FBox(FVector(-198.0, 54.0, 0.0), FVector(198.0, 468.0, 720.0)),
+			FBox(FVector(-850.0, -418.0, -670.0), FVector(670.0, 1102.0, 850.0)),
+			EABTSJuryDemoFixedSixSurfaceKind::Satellite},
+		{TEXT("E6TipOver"), 5, 750000, 3187373410644525608ull,
+			11440919070458269246ull, 11323455661476895076ull,
+			198894657042108135ull,
+			FBox(FVector(-486.0, -1062.0, 0.0), FVector(486.0, 1062.0, 3384.0)),
+			FBox(FVector(-522.0, -1098.0, 0.0), FVector(522.0, 1098.0, 3384.0)),
+			FBox(FVector(-594.0, 558.0, -144.0), FVector(-234.0, 1278.0, 216.0)),
+			EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet}
+	};
+	check(Index >= 0 && Index < UE_ARRAY_COUNT(Identities));
+	return Identities[Index];
+}
+
+bool IsUsableFixedSixV3Site(
+	const FABTSJuryDemoFixedSixBuildingSite& Site,
+	double Tolerance);
 }
 
 bool FABTSGeneratedWorldIdentity::IsUsable() const
@@ -153,6 +223,22 @@ bool FABTSJuryDemoFixedSixV2Envelope::IsEmpty() const
 		&& !bDynamicEnvelopeRequired;
 }
 
+bool FABTSJuryDemoFixedSixV3Envelope::IsEmpty() const
+{
+	return StaticGeometryHash == 0
+		&& ProductionIdentityHash == 0
+		&& DeviceAssemblyHash == 0
+		&& !SiteLocalBounds.IsValid
+		&& !PadBounds.IsValid
+		&& !EffectBounds.IsValid
+		&& SurfaceKind == EABTSJuryDemoFixedSixSurfaceKind::Unknown
+		&& SupportCenterWorldCM.IsZero()
+		&& SupportRadiusCM == 0.0
+		&& GravityAuthorityId.IsNone()
+		&& GravityIdentityHash == 0
+		&& PlacementHash == 0;
+}
+
 bool FABTSJuryDemoFixedSixBuildingSite::IsUsable(
 	const double Tolerance) const
 {
@@ -193,16 +279,28 @@ bool FABTSJuryDemoFixedSixBuildingSite::IsUsableForContractVersion(
 	const int32 ContractVersion,
 	const double Tolerance) const
 {
+	if (ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		return IsUsableFixedSixV3Site(*this, Tolerance);
+	}
 	if (!IsUsable(Tolerance))
 	{
 		return false;
 	}
 	if (ContractVersion == FABTSJuryDemoFixedSixContract::CurrentContractVersion)
 	{
-		return V2Envelope.IsEmpty();
+		return V2Envelope.IsEmpty() && V3Envelope.IsEmpty();
 	}
 	if (ContractVersion
-		!= FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion)
+		== FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion)
+	{
+		if (!V3Envelope.IsEmpty())
+		{
+			return false;
+		}
+	}
+	else
 	{
 		return false;
 	}
@@ -244,6 +342,87 @@ bool FABTSJuryDemoFixedSixBuildingSite::IsUsableForContractVersion(
 	return V2Envelope.bDynamicEnvelopeRequired == !bEffectInsidePad;
 }
 
+namespace
+{
+bool IsUsableFixedSixV3Site(
+	const FABTSJuryDemoFixedSixBuildingSite& Site,
+	const double Tolerance)
+{
+	const double SafeTolerance = FMath::Max(Tolerance, UE_DOUBLE_SMALL_NUMBER);
+	if (Site.EncounterIndex < 0
+		|| Site.EncounterIndex
+			>= FABTSJuryDemoFixedSixContract::ExpectedSiteCount
+		|| !Site.V2Envelope.IsEmpty()
+		|| Site.V3Envelope.IsEmpty()
+		|| !Site.WorldTransform.IsValid()
+		|| !Site.WorldTransform.GetScale3D().Equals(
+			FVector::OneVector, SafeTolerance))
+	{
+		return false;
+	}
+
+	const FFixedSixV3SiteIdentity& Expected =
+		GetFixedSixV3SiteIdentity(Site.EncounterIndex);
+	const FABTSJuryDemoFixedSixV3Envelope& Envelope = Site.V3Envelope;
+	if (Site.ManifestEntryId != FName(Expected.ManifestEntryId)
+		|| Site.DifficultyTier != Expected.DifficultyTier
+		|| Site.DeterministicSeed != Expected.BuildingSeed
+		|| Site.DescriptorHash != Expected.DescriptorHash
+		|| Envelope.StaticGeometryHash != Expected.StaticGeometryHash
+		|| Envelope.ProductionIdentityHash != Expected.ProductionIdentityHash
+		|| Envelope.DeviceAssemblyHash != Expected.DeviceAssemblyHash
+		|| Envelope.SurfaceKind != Expected.SurfaceKind
+		|| Envelope.SurfaceKind
+			>= EABTSJuryDemoFixedSixSurfaceKind::Count
+		|| Envelope.GravityAuthorityId.IsNone()
+		|| Envelope.GravityIdentityHash == 0
+		|| Envelope.PlacementHash == 0
+		|| !FMath::IsFinite(Envelope.SupportRadiusCM)
+		|| Envelope.SupportRadiusCM <= 0.0
+		|| !IsFiniteContractVector(Envelope.SupportCenterWorldCM)
+		|| !IsNearlyEqualWorldGenerationContractBox(
+			Site.LocalBounds, Expected.SiteLocalBounds, SafeTolerance)
+		|| !IsNearlyEqualWorldGenerationContractBox(
+			Envelope.SiteLocalBounds, Expected.SiteLocalBounds, SafeTolerance)
+		|| !IsNearlyEqualWorldGenerationContractBox(
+			Envelope.PadBounds, Expected.PadBounds, SafeTolerance)
+		|| !IsNearlyEqualWorldGenerationContractBox(
+			Envelope.EffectBounds, Expected.EffectBounds, SafeTolerance))
+	{
+		return false;
+	}
+
+	const double ExpectedPadHalfExtentX = FMath::Max(
+		FMath::Abs(Expected.PadBounds.Min.X),
+		FMath::Abs(Expected.PadBounds.Max.X));
+	const double ExpectedPadHalfExtentY = FMath::Max(
+		FMath::Abs(Expected.PadBounds.Min.Y),
+		FMath::Abs(Expected.PadBounds.Max.Y));
+	if (!FMath::IsNearlyEqual(
+			Site.PadHalfExtentCM.X, ExpectedPadHalfExtentX, SafeTolerance)
+		|| !FMath::IsNearlyEqual(
+			Site.PadHalfExtentCM.Y, ExpectedPadHalfExtentY, SafeTolerance))
+	{
+		return false;
+	}
+
+	const FVector RadialOffset =
+		Site.WorldTransform.GetTranslation() - Envelope.SupportCenterWorldCM;
+	const double SurfaceTolerance = FMath::Max(
+		SafeTolerance, Envelope.SupportRadiusCM * 1.0e-6);
+	if (!FMath::IsNearlyEqual(
+			RadialOffset.Size(), Envelope.SupportRadiusCM, SurfaceTolerance))
+	{
+		return false;
+	}
+	const FVector RadialUp = RadialOffset.GetSafeNormal();
+	return !RadialUp.IsNearlyZero(SafeTolerance)
+		&& FVector::DotProduct(
+			Site.WorldTransform.GetUnitAxis(EAxis::Z), RadialUp)
+			>= 1.0 - SafeTolerance;
+}
+}
+
 bool FABTSJuryDemoFixedSixContract::IsEmpty() const
 {
 	return ContractVersion == 0
@@ -255,6 +434,81 @@ bool FABTSJuryDemoFixedSixContract::IsEmpty() const
 		&& CandidateId == INDEX_NONE
 		&& LayoutHash == 0
 		&& Sites.IsEmpty();
+}
+
+bool FABTSJuryDemoFixedSixContract::IsStructurallyUsableV3(
+	const double Tolerance) const
+{
+	if (ContractVersion != SupportedV3ContractVersion
+		|| PlacementSchemaVersion != FrozenV3PlacementSchemaVersion
+		|| DemoManifestVersion != FrozenDemoManifestVersion
+		|| DemoManifestHash != FrozenDemoManifestHash
+		|| PlacementCatalogHash != FrozenV3PlacementCatalogHash
+		|| WorldSeed != FrozenWorldSeed
+		|| CandidateId != FrozenCandidateId
+		|| LayoutHash == 0
+		|| Sites.Num() != ExpectedSiteCount)
+	{
+		return false;
+	}
+
+	TSet<FName> ManifestEntryIds;
+	TSet<uint64> DescriptorHashes;
+	TSet<uint64> PlacementHashes;
+	const FABTSJuryDemoFixedSixV3Envelope* PrimarySurface = nullptr;
+	const FABTSJuryDemoFixedSixV3Envelope* SatelliteSurface = nullptr;
+	const double SafeTolerance = FMath::Max(Tolerance, UE_DOUBLE_SMALL_NUMBER);
+	for (int32 Index = 0; Index < Sites.Num(); ++Index)
+	{
+		const FABTSJuryDemoFixedSixBuildingSite& Site = Sites[Index];
+		if (Site.EncounterIndex != Index
+			|| !IsUsableFixedSixV3Site(Site, SafeTolerance)
+			|| ManifestEntryIds.Contains(Site.ManifestEntryId)
+			|| DescriptorHashes.Contains(Site.DescriptorHash)
+			|| PlacementHashes.Contains(Site.V3Envelope.PlacementHash))
+		{
+			return false;
+		}
+		ManifestEntryIds.Add(Site.ManifestEntryId);
+		DescriptorHashes.Add(Site.DescriptorHash);
+		PlacementHashes.Add(Site.V3Envelope.PlacementHash);
+
+		if (Site.V3Envelope.SurfaceKind
+			== EABTSJuryDemoFixedSixSurfaceKind::Satellite)
+		{
+			if (SatelliteSurface != nullptr)
+			{
+				return false;
+			}
+			SatelliteSurface = &Site.V3Envelope;
+		}
+		else if (PrimarySurface == nullptr)
+		{
+			PrimarySurface = &Site.V3Envelope;
+		}
+		else if (!PrimarySurface->SupportCenterWorldCM.Equals(
+				Site.V3Envelope.SupportCenterWorldCM, SafeTolerance)
+			|| !FMath::IsNearlyEqual(
+				PrimarySurface->SupportRadiusCM,
+				Site.V3Envelope.SupportRadiusCM,
+				SafeTolerance)
+			|| PrimarySurface->GravityAuthorityId
+				!= Site.V3Envelope.GravityAuthorityId
+			|| PrimarySurface->GravityIdentityHash
+				!= Site.V3Envelope.GravityIdentityHash)
+		{
+			return false;
+		}
+	}
+
+	return PrimarySurface != nullptr
+		&& SatelliteSurface != nullptr
+		&& !PrimarySurface->SupportCenterWorldCM.Equals(
+			SatelliteSurface->SupportCenterWorldCM, SafeTolerance)
+		&& PrimarySurface->GravityAuthorityId
+			!= SatelliteSurface->GravityAuthorityId
+		&& PrimarySurface->GravityIdentityHash
+			!= SatelliteSurface->GravityIdentityHash;
 }
 
 bool FABTSJuryDemoFixedSixContract::IsUsable(const double Tolerance) const

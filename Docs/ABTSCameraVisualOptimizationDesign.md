@@ -340,6 +340,26 @@ Target = SlingCenter + Forward * TargetForwardDistance + Up * TargetHeight
 
 可见 PIE 验收：2026-08-15，用户确认当前 `26°` 候选的发射构图与手感通过；该参数冻结为问题一的当前接受基线。本次验收不覆盖落地后的设施观察与仰视地底穿透问题。
 
+#### 11.2.2 2026-08-15 不同地形下的瞄准构图边界修正
+
+后续在 M3 生产生成世界复测时，用户发现同一发射模式在 `M9 PracticeSlingshot` 上可接受，但在 `B3 Task=3` 等部分球面位置会把弹弓与鸟推到画面顶部、地面占据绝大部分画面，主观上读成“相机被拉得很远、很低”。M3 工作树此前已通过 `6004c1b` 合并包含相机提交的 `master`，因此它不是未装配镜头修改的旧基线。
+
+结构性根因位于第一轮瞄准地面锚点合同，而不是 M4 仰视相机：
+
+- `AimDistanceCM=1500 cm` 与 `50°` FOV 没有发生运行时缩放；异常来自视轴。第一轮 `BuildGroundAwareAimView` 在地表查询成功后完全丢弃原 `AimTargetForwardDistanceCM / AimTargetHeightCM` 构图，并精确注视前方 `1800 cm` 的地表锚点。
+- 旧 `8°` 只约束“至少向下”，没有最大俯角。球面曲率与前方地形降低会让锚点天然落到当地切平面下方数百厘米；锚点越低，视轴越向下，但相机没有主体安全框约束，弹弓中心可被持续推向屏幕顶边。
+- 第一轮自动化只冻结“精确注视锚点、最小俯角、Roll-free”，没有覆盖最大俯角、相机到弹弓距离或弹弓中心屏幕角位置，因此该测试能够在图 1 构图仍然错误时保持绿色。
+
+本轮把地表锚点从“强制焦点”降为“只读俯角提示”，建立三个同时成立的瞄准不变量：
+
+- 锚点从旧相机位姿导出的原始俯角只允许进入 `8°–10°` 区间；更低地形只能命中 `10°` 上限，不能继续下拉视轴。
+- 最终相机在 `SlingForward / SlingUp` 局部 frame 中重建，镜头到 `SlingCenter` 的距离严格保持实际相机类配置的 `AimDistanceCM`，当前为 `1500 cm`。
+- `SlingCenter` 固定在光轴上方 `5°`；相机机位仰角使用 `ResolvedLookDown - 5°`，所以俯角变化不会改变主体角位置。地表锚点无效、位于发射轴后方或输入非法时继续 fail closed，不生成替代错误位姿。
+
+`[ABTS][M6][CameraGroundContext]` 现在同时记录最终 `LookDown`、允许区间、`SubjectOffset` 与相机到弹弓距离。`ABTS.M6.Camera.LaunchGroundContext` 增加浅锚点、严重地形下降、旋转球面局部 frame、倒置参数端点和后向锚点覆盖，冻结 `1500 cm / 8°–10° / 5°` 三项不变量。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.M6.` 为 `4/4`、`ABTS.M9.Camera` 为 `1/1`、`ABTS.Calibration` 为 `6/6`，失败、Fatal 与 Assertion 均为 `0`，且每份日志只有一个 `TEST COMPLETE: EXIT CODE 0`。日志分别为 `Saved/Logs/M6-BoundedAim-20260815-FinalUnity-FreshAutomation.log`、`Saved/Logs/M9-Camera-BoundedAim-20260815-FinalUnity-FreshAutomation.log` 与 `Saved/Logs/Calibration-BoundedAim-20260815-FinalUnity-FreshAutomation.log`。最终仍需用户在同一 Seed 的 `M9 PracticeSlingshot` 和图 1 `B3 Task=3` 之间做可见 PIE 对照；NullRHI 不证明地面实际占屏和主体安全余量。
+
 ### 11.3 问题二：落地后没有设施观察阶段，残余速度仍可改写镜头方位
 
 当前主 ViewTarget 从进入弹弓开始一直是 `AABTSM6SlingshotCamera`，直到 `FinishReturn()` 才恢复 Party Camera。`BeginSettlement()` 只把 Gameplay 状态改为 `Settling`，没有通知相机切入落地构图；相机 Tick 因而仍调用与空中飞行完全相同的 `UpdateFollow/BuildPrimaryFollowPose`。

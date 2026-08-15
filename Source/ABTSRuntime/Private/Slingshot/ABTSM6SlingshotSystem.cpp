@@ -173,6 +173,7 @@ void AABTSM6SlingshotSystem::BeginPlay()
 			case EABTSM7BuildingMaterial::Stone: Material = EABTSM6ImpactMaterial::Stone; break;
 			case EABTSM7BuildingMaterial::Iron: Material = EABTSM6ImpactMaterial::Iron; break;
 			case EABTSM7BuildingMaterial::Glass: Material = EABTSM6ImpactMaterial::Glass; break;
+			case EABTSM7BuildingMaterial::Crystal: Material = EABTSM6ImpactMaterial::Glass; break;
 			default: break;
 			}
 			ApplyStaticPhysics(It->GetHISM(), Material, TEXT("ABTSPlanarBrickImpactPhysics"));
@@ -750,6 +751,7 @@ EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveCo
 		case EABTSM7BuildingMaterial::Stone: return EABTSM6ImpactMaterial::Stone;
 		case EABTSM7BuildingMaterial::Iron: return EABTSM6ImpactMaterial::Iron;
 		case EABTSM7BuildingMaterial::Glass: return EABTSM6ImpactMaterial::Glass;
+		case EABTSM7BuildingMaterial::Crystal: return EABTSM6ImpactMaterial::Glass;
 		default: return EABTSM6ImpactMaterial::Wood;
 		}
 	}

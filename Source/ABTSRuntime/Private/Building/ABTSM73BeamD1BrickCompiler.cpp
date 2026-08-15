@@ -11,6 +11,7 @@
 #include "ABTSM73BeamC3V3SkeletonFirstGenerator.h"
 #include "ABTSM73BeamCGenerator.h"
 #include "ABTSM73BeamD0ProfileCatalog.h"
+#include "ABTSM7MaterialProfileLibrary.h"
 #include "Building/ABTSM73DAG5BShapeGrammarV2.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/Crc.h"
@@ -1623,6 +1624,20 @@ namespace ABTSM73BeamD1
 		default:
 			return EABTSM7BuildingMaterial::Wood;
 		}
+	}
+
+	EABTSM7BuildingMaterial ResolveProductionMaterial(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const EABTSM73BeamD1StructuralRole Role,
+		const FABTSM73BeamD1MaterialPolicy* MaterialPolicy)
+	{
+		if (Role != EABTSM73BeamD1StructuralRole::Connector
+			&& MaterialPolicy != nullptr
+			&& MaterialPolicy->bOverrideOrdinaryBody)
+		{
+			return MaterialPolicy->PrimaryMaterial;
+		}
+		return BaseMaterial(Profile.MaterialPalette, Role);
 	}
 
 	EABTSM7BuildingMaterial CandidateMaterial(
@@ -3981,6 +3996,7 @@ namespace ABTSM73BeamStage5
 	bool CompileBricks(
 		const FABTSM73BeamD0ResolvedProfile& Profile,
 		const FABTSM73BeamAGenerationResult& Assembly,
+		const FABTSM73BeamD1MaterialPolicy* MaterialPolicy,
 		FABTSM73BeamD1Summary& Summary,
 		TArray<FABTSM73BeamD1BrickBinding>& OutBricks,
 		FString& OutError)
@@ -4014,8 +4030,8 @@ namespace ABTSM73BeamStage5
 			Brick.StructuralRole = ABTSM73BeamD1::StructuralRole(Member.Role);
 			Brick.bWeaknessCandidate = false;
 			Brick.DeviceRole = EABTSM73BeamD1DeviceRole::None;
-			Brick.BrickSpec.Material = ABTSM73BeamD1::BaseMaterial(
-				Profile.MaterialPalette, Brick.StructuralRole);
+			Brick.BrickSpec.Material = ABTSM73BeamD1::ResolveProductionMaterial(
+				Profile, Brick.StructuralRole, MaterialPolicy);
 			Brick.BrickSpec.DimensionsCM = Dimensions;
 			Brick.LocalTransform = FTransform(FQuat::Identity, (A + B) * 0.5);
 			const FVector Half = Dimensions * 0.5;
@@ -4401,6 +4417,17 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 	FABTSM73BeamD1Stage5Result& OutResult,
 	FString& OutError) const
 {
+	const FABTSM73BeamD1MaterialPolicy LegacyPolicy;
+	return GenerateStage5WithMaterialPolicy(
+		Settings, LegacyPolicy, OutResult, OutError);
+}
+
+bool FABTSM73BeamD1BrickCompiler::GenerateStage5WithMaterialPolicy(
+	const FABTSM73BeamD1Settings& Settings,
+	const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
+	FABTSM73BeamD1Stage5Result& OutResult,
+	FString& OutError) const
+{
 	using namespace ABTSM73BeamStage5;
 	OutResult = FABTSM73BeamD1Stage5Result();
 	OutError.Reset();
@@ -4465,9 +4492,34 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 	}
 
 	const int32 BeforeStructuralClosure = OutResult.CompactAssembly.Members.Num();
+	const TArray<FABTSM7MaterialProfile> ChaosMaterialProfiles =
+		FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+	const FABTSM73BeamCMemberSelfLoadResolver ChaosMemberSelfLoad =
+		[&Profile, &ChaosMaterialProfiles, &MaterialPolicy](const FABTSM73BeamAMember& Member)
+		{
+			const EABTSM7BuildingMaterial Material =
+				ABTSM73BeamD1::ResolveProductionMaterial(
+					Profile, ABTSM73BeamD1::StructuralRole(Member.Role),
+					&MaterialPolicy);
+			const FABTSM7MaterialProfile* MaterialProfile =
+				FABTSM7MaterialProfileLibrary::FindProfile(
+					ChaosMaterialProfiles, Material);
+			if (MaterialProfile == nullptr)
+			{
+				return -1.0;
+			}
+			const double BlockSectionCM =
+				Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM;
+			const double BasicMassKG = FMath::Max(
+				BlockSectionCM * BlockSectionCM * Member.LengthCM
+					* MaterialProfile->DensityGPerCubicCM * 0.001,
+				UE_DOUBLE_SMALL_NUMBER);
+			return FMath::Pow(BasicMassKG, 0.75);
+		};
 	if (!BeamCGenerator.GenerateWithStructuralClosure(Profile.BeamSettings,
 		OutResult.CompactAssembly, OutResult.LoadDAG, OutError,
-		Profile.VisualComplexity.MaximumBrickCount, false))
+		Profile.VisualComplexity.MaximumBrickCount, false, 0, 0,
+		&ChaosMemberSelfLoad, false))
 	{
 		int32 Logged = 0;
 		for (const FABTSM73BeamCLoadNode& Node : OutResult.LoadDAG.Nodes)
@@ -4596,7 +4648,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 		OutResult.ReachabilitySupportPostCount
 		+ OutResult.LoadDAG.Summary.AddedStructuralSupportPostCount;
 	Summary.bPhysicalStabilityEvaluated = false;
-	if (!CompileBricks(Profile, OutResult.CompactAssembly,
+	if (!CompileBricks(Profile, OutResult.CompactAssembly, &MaterialPolicy,
 		Summary, OutResult.Bricks, OutError))
 	{
 		return false;
@@ -4661,10 +4713,22 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage55DeviceAssembly(
 	FABTSM73BeamD1Stage55Result& OutResult,
 	FString& OutError) const
 {
+	const FABTSM73BeamD1MaterialPolicy LegacyPolicy;
+	return GenerateStage55DeviceAssemblyWithMaterialPolicy(
+		Settings, LegacyPolicy, OutResult, OutError);
+}
+
+bool FABTSM73BeamD1BrickCompiler::GenerateStage55DeviceAssemblyWithMaterialPolicy(
+	const FABTSM73BeamD1Settings& Settings,
+	const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
+	FABTSM73BeamD1Stage55Result& OutResult,
+	FString& OutError) const
+{
 	using namespace ABTSM73BeamStage5;
 	OutResult = FABTSM73BeamD1Stage55Result();
 	OutError.Reset();
-	if (!GenerateStage5(Settings, OutResult.Stage5, OutError))
+	if (!GenerateStage5WithMaterialPolicy(
+		Settings, MaterialPolicy, OutResult.Stage5, OutError))
 	{
 		OutError = FString::Printf(TEXT("BeamD1Stage55Stage5:%s"), *OutError);
 		return false;
