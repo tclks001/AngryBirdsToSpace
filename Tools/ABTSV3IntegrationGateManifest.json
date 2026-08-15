@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "status": "PreparedNotAccepted",
+  "status": "BuildingFreezeV3AcceptedDTOPending",
   "engineRoot": "C:\\Program Files\\Epic Games\\UE_5.8",
   "crystalBaselineCommit": "36400f498cbfbbd6a18e3d64c45b5c6291d82915",
   "activationAllowed": false,
   "productionContractVersion": 2,
   "frozenIdentities": {
-    "buildingFreezeV3Commit": null,
-    "placementCatalogHash": null,
+    "buildingFreezeV3Commit": "8a4892d3928233721b47e7410fc9dddbfc63e08e",
+    "placementCatalogHash": "8960617043786800590",
     "mapFreezeV3Commit": null,
     "layoutHash": null,
     "chaosFreezeV3Commit": null,
@@ -18,6 +18,16 @@
       "filter": "ABTS.M73A.CrystalMaterialBaseline",
       "expectedTests": 1,
       "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M73DAG.BuildingFreezeV3",
+      "expectedTests": 2,
+      "evidenceLayer": "NullRHIBuildingFreeze"
+    },
+    {
+      "filter": "ABTS.M73DAG.BeamC3V3.Demo.Stage5Production",
+      "expectedTests": 3,
+      "evidenceLayer": "NullRHICompatibility"
     },
     {
       "filter": "ABTS.M8.Recovery.BuildingMaterialMapping",
@@ -44,7 +54,7 @@
     {
       "owner": "M7",
       "identity": "BuildingFreezeV3",
-      "filter": null,
+      "filter": "ABTS.M73DAG.BuildingFreezeV3",
       "requiredFacts": [
         "ExactCommit",
         "PlacementCatalogHash",

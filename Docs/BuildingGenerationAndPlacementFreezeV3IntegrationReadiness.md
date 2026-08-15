@@ -1,28 +1,28 @@
 # Building Generation and Placement Freeze V3 集成准备与门禁
 
-> 状态：`IntegrationScaffoldVerified / BuildingFreezeV3HandoffUnderReview`
+> 状态：`BuildingFreezeV3IntegrationAccepted / IntegrationV3DTOPending`
 >
 > 日期：2026-08-15
 >
-> 基线：`master@36400f498cbfbbd6a18e3d64c45b5c6291d82915`
+> 建筑冻结基线：`M7@8a4892d3928233721b47e7410fc9dddbfc63e08e`，Catalog `8960617043786800590`
 
 ## 1. 目标与边界
 
-本文是 [V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) 的集成执行详稿，提前固定合同语义、负向矩阵、交接预检和最终证据层。它不发布 V3 DTO，不填写 M7/M3 最终 Hash，不切换生产版本，也不修改共同地图或默认绑定。
+本文是 [V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) 的集成执行详稿，固定合同语义、负向矩阵、交接预检和最终证据层。M7 Building Freeze V3 已按精确 SHA 验收；本文仍不发布 V3 DTO、不填写 M3 最终 Hash、不切换生产版本，也不修改共同地图或默认绑定。
 
-当前只允许：
+当前已完成：
 
 - 审计三个功能分支的精确提交、所有权和二进制红区；
 - 准备 V3 字段语义、fail-closed 测试矩阵和门禁清单；
 - 验证已存在的 `Crystal -> CrystalCore -> SpaceCord` 纯事务链；
-- 等待 M7 `BuildingFreezeV3` 精确 SHA 后再进入合同阶段。
+- 将 M7 `BuildingFreezeV3` 精确 SHA 提升为已验收建筑冻结基线，进入 Integration V3 DTO 阶段。
 
 ## 2. 当前工作树快照
 
 | 职责 | 当前精确 HEAD | 相对 `master` | 当前状态 | V3 结论 |
 | --- | --- | --- | --- | --- |
-| Integration | `36400f498cbfbbd6a18e3d64c45b5c6291d82915` | 基线 | 干净 | Crystal 共享基线已发布 |
-| M7 | `8a4892d3928233721b47e7410fc9dddbfc63e08e` | 已含 Crystal 基线 | `BuildingFreezeV3` 已提交；`PlanarPhysicsTestMap.umap` 仍为工作树未提交修改 | 精确 SHA 已进入 Integration 候选审计，尚未提升为已验收基线 |
+| Integration candidate | `9ad6af75c945fde100eff4835ae3c2be2242115d` | `b856972` + M7 精确交接合并 | 干净 | ForceUnity、M7 5/5、现有共同门 6/6 已通过 |
+| M7 | `8a4892d3928233721b47e7410fc9dddbfc63e08e` | 已含 Crystal 基线 | `BuildingFreezeV3` 已提交；`PlanarPhysicsTestMap.umap` 仍为工作树未提交修改 | 精确 SHA 与 Catalog 已提升为已验收建筑冻结基线；地图不在提交中且未触碰 |
 | M3 | `a6c2607e83b56fbacf251fb1489dcdd73eb0d934` | 未含当前 V3 基线 | 干净 | 正确等待 M7 bounds；不得先发布 V3 地图身份 |
 | M11 | `56caafd1ffb74fc19aa9381251e6d18f54405428` | 独立推进 | 干净 | 不进入本轮建筑关键路径 |
 
@@ -140,7 +140,7 @@ PlacementHash
 
 ## 6. 联合门禁清单
 
-机器可读基线位于 `Tools/ABTSV3IntegrationGateManifest.json`。其中最终三个冻结身份保持 `null`，这是阻止占位 Hash 被误认成批准值的显式门。
+机器可读基线位于 `Tools/ABTSV3IntegrationGateManifest.json`。其中 Building Freeze SHA 与 Catalog Hash 已写入批准值；Map/Chaos 冻结身份继续保持 `null`，这是阻止占位 Hash 被误认成批准值的显式门。
 
 只列出当前门禁而不启动 UE：
 
@@ -205,7 +205,7 @@ PlacementHash
 | 工作树 | 自上次摘录基线后的重点候选 | 当前处理 |
 | --- | --- | --- |
 | M3 | `M3-WT-004`、`M3-JURY-004`、`M3-HISM-001` | 前两项涉及共享编译/合同身份；HISM 项涉及生产初始穿插。等待 M3 handoff 后判定是否提炼 |
-| M7 | `M7-BC-119`～`125` | `124` 的旋转 OBB/SAT 分诊和 `125` 的证据身份降级最具跨阶段价值；旧位置 Chaos 结果不得进入 V3 |
+| M7 | `M7-BC-119`～`126` | 已随精确 SHA 合入；旋转 OBB/SAT、布局变化后的证据降级，以及材质覆盖/Crystal cap 的阶段边界已提炼到共同排错文档 |
 | M11 | `M11-UI-010`～`013`、`M11-AUDIO-001`、`M11-CINE-001`～`004` | 与本轮建筑冻结解耦；待独立 M11 集成候选再摘录 |
 
 当前 V3 最重要的共性结论是：一旦位置、支撑球或 Authority 改变，旧 Chaos 结果必须降级为诊断；不能用“同一几何”恢复旧实时证据。
@@ -245,4 +245,30 @@ Saved/Logs/V3-Prepared-ABTS.M110.SpaceSlingshotItemContract-20260815-220055-318-
 Saved/Logs/V3-Prepared-ABTS.Contracts.WorldGeneration-20260815-220151-952-FreshAutomation.log
 ```
 
-这些结果只把当前合同/事务脚手架标为已验证；Building、Map、Chaos 三个 V3 Freeze 仍全部等待功能交接，且没有可见 PIE 授权或证据。
+这些结果只把当时的合同/事务脚手架标为已验证；没有可见 PIE 授权或证据。
+
+## 11. Building Freeze V3 候选验收
+
+2026-08-15 在候选 `integration/candidate-20260815-m7-building-freeze-v3@9ad6af7` 完成：
+
+- 精确合并 M7 `8a4892d3928233721b47e7410fc9dddbfc63e08e`，无冲突，候选工作树干净；
+- UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity`：`Result: Succeeded`；
+- `ABTS.M73DAG.BuildingFreezeV3`：2/2；
+- `ABTS.M73DAG.BeamC3V3.Demo.Stage5Production`：3/3；
+- 既有 Integration 契约/资源链门：6/6；
+- 批准 Catalog Hash：`8960617043786800590`；Map/Chaos Hash 仍为空，`activationAllowed=false`、生产合同仍为 V2；
+- M7 工作树未提交的 `Content/Maps/PlanarPhysicsTestMap.umap` 不在交接提交中，集成过程未修改它。
+
+fresh 日志：
+
+```text
+Saved/Logs/Candidate-M7BuildingFreezeV3-20260815-222903-831-FreshAutomation.log
+Saved/Logs/Candidate-M7Stage5Production-20260815-222943-174-FreshAutomation.log
+Saved/Logs/V3-Prepared-ABTS.M73A.CrystalMaterialBaseline-20260815-223033-426-FreshAutomation.log
+Saved/Logs/V3-Prepared-ABTS.M8.Recovery.BuildingMaterialMapping-20260815-223100-119-FreshAutomation.log
+Saved/Logs/V3-Prepared-ABTS.M8.Recovery.CrystalCoreToSpaceCordTransaction-20260815-223127-750-FreshAutomation.log
+Saved/Logs/V3-Prepared-ABTS.M110.SpaceSlingshotItemContract-20260815-223154-610-FreshAutomation.log
+Saved/Logs/V3-Prepared-ABTS.Contracts.WorldGeneration-20260815-223223-238-FreshAutomation.log
+```
+
+本门只批准 Building Freeze V3 数据/合同层，不替代 Crystal 像素、实时 Chaos 或可见 PIE。下一步是在 Integration `master` 加法发布 V3 DTO，保持 V1/V2 可读且默认生产仍为 V2。
