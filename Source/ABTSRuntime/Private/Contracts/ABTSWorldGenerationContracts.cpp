@@ -10,6 +10,13 @@ bool IsFiniteContractVector(const FVector& Value)
 		&& FMath::IsFinite(Value.Y)
 		&& FMath::IsFinite(Value.Z);
 }
+
+bool IsFiniteWorldGenerationContractBox(const FBox& Box)
+{
+	return Box.IsValid
+		&& IsFiniteContractVector(Box.Min)
+		&& IsFiniteContractVector(Box.Max);
+}
 }
 
 bool FABTSGeneratedWorldIdentity::IsUsable() const
@@ -83,9 +90,95 @@ bool FABTSGeneratedBuildingSite::IsUsable(const double Tolerance) const
 			Up) >= 1.0 - SafeTolerance;
 }
 
+bool FABTSJuryDemoFixedSixBuildingSite::IsUsable(
+	const double Tolerance) const
+{
+	const double SafeTolerance = FMath::Max(Tolerance, UE_DOUBLE_SMALL_NUMBER);
+	const FVector Scale = WorldTransform.GetScale3D();
+	if (ManifestEntryId.IsNone()
+		|| EncounterIndex < 0
+		|| EncounterIndex >= FABTSJuryDemoFixedSixContract::ExpectedSiteCount
+		|| DifficultyTier != EncounterIndex
+		|| DeterministicSeed <= 0
+		|| DescriptorHash == 0
+		|| !WorldTransform.IsValid()
+		|| !Scale.Equals(FVector::OneVector, SafeTolerance)
+		|| !FMath::IsFinite(PadHalfExtentCM.X)
+		|| !FMath::IsFinite(PadHalfExtentCM.Y)
+		|| PadHalfExtentCM.X <= 0.0
+		|| PadHalfExtentCM.Y <= 0.0
+		|| !IsFiniteWorldGenerationContractBox(LocalBounds)
+		|| LocalBounds.Max.X < LocalBounds.Min.X
+		|| LocalBounds.Max.Y < LocalBounds.Min.Y
+		|| LocalBounds.Max.Z <= LocalBounds.Min.Z
+		|| LocalBounds.Min.Z < -SafeTolerance)
+	{
+		return false;
+	}
+
+	const double RequiredHalfExtentX = FMath::Max(
+		FMath::Abs(LocalBounds.Min.X),
+		FMath::Abs(LocalBounds.Max.X));
+	const double RequiredHalfExtentY = FMath::Max(
+		FMath::Abs(LocalBounds.Min.Y),
+		FMath::Abs(LocalBounds.Max.Y));
+	return PadHalfExtentCM.X + SafeTolerance >= RequiredHalfExtentX
+		&& PadHalfExtentCM.Y + SafeTolerance >= RequiredHalfExtentY;
+}
+
+bool FABTSJuryDemoFixedSixContract::IsEmpty() const
+{
+	return ContractVersion == 0
+		&& PlacementSchemaVersion == 0
+		&& DemoManifestVersion == 0
+		&& DemoManifestHash == 0
+		&& PlacementCatalogHash == 0
+		&& WorldSeed == 0
+		&& CandidateId == INDEX_NONE
+		&& LayoutHash == 0
+		&& Sites.IsEmpty();
+}
+
+bool FABTSJuryDemoFixedSixContract::IsUsable(const double Tolerance) const
+{
+	if (ContractVersion != CurrentContractVersion
+		|| PlacementSchemaVersion != FrozenPlacementSchemaVersion
+		|| DemoManifestVersion != FrozenDemoManifestVersion
+		|| DemoManifestHash != FrozenDemoManifestHash
+		|| PlacementCatalogHash != FrozenPlacementCatalogHash
+		|| WorldSeed != FrozenWorldSeed
+		|| CandidateId != FrozenCandidateId
+		|| LayoutHash != FrozenLayoutHash
+		|| Sites.Num() != ExpectedSiteCount)
+	{
+		return false;
+	}
+
+	TSet<FName> ManifestEntryIds;
+	TSet<uint64> DescriptorHashes;
+	for (int32 Index = 0; Index < Sites.Num(); ++Index)
+	{
+		const FABTSJuryDemoFixedSixBuildingSite& Site = Sites[Index];
+		if (!Site.IsUsable(Tolerance)
+			|| Site.EncounterIndex != Index
+			|| ManifestEntryIds.Contains(Site.ManifestEntryId)
+			|| DescriptorHashes.Contains(Site.DescriptorHash))
+		{
+			return false;
+		}
+		ManifestEntryIds.Add(Site.ManifestEntryId);
+		DescriptorHashes.Add(Site.DescriptorHash);
+	}
+	return true;
+}
+
 bool FABTSBuildingGenerationContract::IsUsable(const double Tolerance) const
 {
-	if (!Identity.IsUsable() || Sites.IsEmpty())
+	if (!Identity.IsUsable()
+		|| Sites.IsEmpty()
+		|| (!JuryDemoFixedSix.IsEmpty()
+			&& (!JuryDemoFixedSix.IsUsable(Tolerance)
+				|| JuryDemoFixedSix.WorldSeed != Identity.WorldSeed)))
 	{
 		return false;
 	}

@@ -205,7 +205,7 @@
 
 | 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `20cceaeaa1069a8b1b2f12c71e4740890b989006`（2026-08-07，含 `M3-T3A1-001/002`） |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `76b8212473cc3c0a725a410fa42d97217959ad05`（2026-08-15，含 `M3-JURY-001/002`） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `9f1634cb68dfa11e9960962e1ab3bc98bd512b5e`（2026-08-15，含 `M7-BC-004`～`111` 与 Stage 4.5 放置冻结） |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
@@ -237,6 +237,7 @@
 | T2-B 风格语义在 Preview/Test 与生产运行时漂移，或 HISM 产生逐实例注册 | 地图名、Actor 名称、Transform 和当前相机都不是权威身份。M3 只读适配器只接受精确 Planet/Component、卫星运行时 Actor 或已验证 Candidate/Result；未知对象返回 `None`。树石以 HISM 组件批次发布，不逐实例展开。适配器不保存 Profile、Stencil、Authority 或 Hash。 | `ABTS.M3.StylizedSemantics` 验证映射、确定性、批次粒度、fail closed 及 Custom Depth/Stencil 状态不变；`ABTS.M3.Monthly.SatellitePreview` 验证 Preview 与生产卫星/E5 语义且 Result/Candidate/Runtime Hash、月度权威和引力开关不变。详见 `M3-T2B-001`。 |
 | Integration 需要接线地面/月面 SceneCapture，但 M3 没有稳定访问入口 | 捕获 owner/component 位于共享 M10 私有成员，功能树不能靠名称或组件扫描绕过所有权。M3 只记录需求；Integration 应在共享类型增加 const getter，并用现有 Preview Subject 显式映射 `GroundLandingPreview` / `SatelliteLandingPreview`，缺失或未知时 fail closed。 | M3 提交不得修改共享 Camera/M10 类型；Integration 后续测试检查 Subject 映射及接线前后 M3/M9 Gameplay 身份不变。详见 `M3-T2B-002`。 |
 | 性能门单次轻微越线 | 保留首次失败；先核对 Seed/Oracle/Hash，再停止并行重型任务，以相同二进制 fresh 隔离重跑。既不能直接忽略，也不能在身份未变时立即断言算法回归。 | 同时保存 P50/P95/Max、接受数、Oracle Hash、命令和首次失败日志。详见 `M3-TEST-001`。 |
+| 固定六条 PlacementReady 已通过，却继续从旧 building `Sites` 猜测六栋身份，或把 Stage 4.5 直接宣告为 ChaosReady | 放置身份、通用旧站点、静态注册和动态 Chaos 是四层证据。Integration 以加法式 `JuryDemoFixedSixV1` 快照冻结 Seed/Candidate/Manifest/Catalog/Layout 及六条 Entry/Transform/Pad/Bounds；固定 Seed 缺条目、乱序、重复或 Hash 漂移时整个导出原子失败，不回退旧 Profile/Seed。Stage 4.5 仍只证明 PlacementReady。 | fresh `ABTS.Contracts.WorldGeneration` 2/2 保持旧 v1 可用，并覆盖 Fixed-Six 两次确定性导出与五类失败注入；M3 Fixed-Six 2/2、FinaleSeparation 1/1、M7 Stage 4.5 1/1。证据日志前缀为 `J3-*`（2026-08-15）；M7 J4、六栋静态注册、单栋动态化和 J5 可见 PIE仍是独立后续门。详见 `M3-JURY-001/002` 与 `JuryDemoFixedSixWorldGenerationContract.md`。 |
 
 ### 13.4 M7：语义结构、最终几何与物理权威
 
