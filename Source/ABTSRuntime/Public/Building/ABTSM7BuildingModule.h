@@ -12,6 +12,30 @@ class UPhysicalMaterial;
 class UStaticMeshComponent;
 
 /**
+ * M7 consumer policy for one frozen tangent-site building. The direction is
+ * derived only from immutable placement inputs; callers may not substitute a
+ * global up vector or infer it from an arbitrary module position.
+ */
+struct ABTSRUNTIME_API FABTSM7SiteUniformGravityPolicy final
+{
+	static constexpr int32 SchemaVersion = 1;
+
+	FVector SiteLocationWorldCM = FVector::ZeroVector;
+	FVector SupportCenterWorldCM = FVector::ZeroVector;
+	FVector SiteUp = FVector::ZeroVector;
+	float GravityAccelerationCMPerSec2 = 0.0f;
+
+	static bool TryDerive(
+		const FVector& SiteLocationWorldCM,
+		const FVector& SupportCenterWorldCM,
+		float GravityAccelerationCMPerSec2,
+		FABTSM7SiteUniformGravityPolicy& OutPolicy);
+	bool IsUsable() const;
+	uint32 ComputeCrc32() const;
+	FString ToLogString() const;
+};
+
+/**
  * The per-body Chaos identity shared by production modules and M7 stability
  * fixtures. Keep experiment-only tuning out of this profile: changing it
  * changes live building physics as well as the research candidate hash.
@@ -74,6 +98,10 @@ public:
 	void SetContactDamageGraceSeconds(float Seconds) { ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds); }
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);
 	void ActivateDynamicPlanar(const FVector& Impulse, const FVector& InGravityUp, float GravityAcceleration);
+	/** Activates with one exact tangent-site policy shared by production and Chaos fixtures. */
+	bool ActivateDynamicSiteUniform(
+		const FVector& Impulse,
+		const FABTSM7SiteUniformGravityPolicy& Policy);
 	/** Applies acceleration without invalidating Chaos sleep; false means no usable physics body. */
 	static bool TryApplyNonInvalidatingAcceleration(
 		UStaticMeshComponent& Component,

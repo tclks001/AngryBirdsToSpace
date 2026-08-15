@@ -12,6 +12,7 @@
 
 class AABTSM3Planet;
 class AABTSM7BuildingMaterialSystem;
+struct FABTSM7SiteUniformGravityPolicy;
 class AABTSM7BuildingModule;
 class UArrowComponent;
 class UHierarchicalInstancedStaticMeshComponent;
@@ -99,6 +100,10 @@ public:
 	FName GetJuryDemoFixedSixManifestEntryId() const;
 	int32 GetJuryDemoFixedSixEncounterIndex() const;
 	uint64 GetJuryDemoFixedSixRegistrationResultHash() const;
+	/** Copies the exact per-site gravity policy retained from the frozen V3 DTO. */
+	bool CopyJuryDemoSiteUniformGravityPolicy(
+		float GravityAccelerationCMPerSec2,
+		FABTSM7SiteUniformGravityPolicy& OutPolicy) const;
 	/** Integration V3 DTO: resolves the single live E1 Crystal cap as the release satellite target. */
 	bool CopyJuryDemoE1CrystalTarget(
 		AActor*& OutTargetActor,

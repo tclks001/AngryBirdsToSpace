@@ -137,12 +137,13 @@ namespace ABTSM73BeamStage5ChaosTests
 		const FABTSJuryDemoFixedSixBuildingSite& Site,
 		const FVector& SupportCenter,
 		const uint32 BodyProfileHash,
-		const uint32 WorldProfileHash)
+		const uint32 WorldProfileHash,
+		const FABTSM7SiteUniformGravityPolicy& SiteGravity)
 	{
 		const FVector Location = Site.WorldTransform.GetLocation();
 		const FQuat Rotation = Site.WorldTransform.GetRotation();
 		const FString Canonical = FString::Printf(
-			TEXT("BeamStage5ChaosProductionIdentity:v4:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
+			TEXT("BeamStage5ChaosProductionIdentity:v5:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
 			TEXT(":Descriptor=%llu:Static=%llu:Production=%llu:Device=%llu")
 			TEXT(":ContractEnvelopeProduction=%llu:Contract=%d:Layout=%llu:Placement=%llu")
 			TEXT(":EncounterSlot=%d:Surface=%d:GravityAuthority=%s:GravityHash=%llu:Location=%d,%d,%d")
@@ -150,7 +151,10 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(":Bricks=%d:Devices=%d:Caps=%d:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
 			TEXT(":OuterDT=%d:Min=%d:Hold=%d:Max=%d:Lin=%d:Ang=%d")
 			TEXT(":Drift=%d:Settle=%d:Rot=%d:BodyHash=%u:WorldHash=%u")
-			TEXT(":GravityModel=RadialConstantAcceleration:Gravity=%d")
+			TEXT(":GravityModel=SiteUniformTangentGravity:Gravity=%d")
+			TEXT(":SiteGravitySchema=%d:SiteGravityHash=%u")
+			TEXT(":SiteGravityDerivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM)")
+			TEXT(":SiteUp=%d,%d,%d")
 			TEXT(":GravityWakePolicy=NonInvalidatingForceSkipSleepingBodiesResumeOnExplicitWake")
 			TEXT(":EmptyPhysicsHandle=FailClosed")
 			TEXT(":MassExpectedPolicy=PerBodySetupCalculateMass")
@@ -199,7 +203,12 @@ namespace ABTSM73BeamStage5ChaosTests
 			FMath::RoundToInt(MaximumRotationDegrees * 1000.0f),
 			BodyProfileHash,
 			WorldProfileHash,
-			FMath::RoundToInt(GravityCMPerSec2 * 1000.0f));
+			FMath::RoundToInt(GravityCMPerSec2 * 1000.0f),
+			FABTSM7SiteUniformGravityPolicy::SchemaVersion,
+			SiteGravity.ComputeCrc32(),
+			FMath::RoundToInt(SiteGravity.SiteUp.X * 1000000.0),
+			FMath::RoundToInt(SiteGravity.SiteUp.Y * 1000000.0),
+			FMath::RoundToInt(SiteGravity.SiteUp.Z * 1000000.0));
 		return FCrc::StrCrc32(*Canonical);
 	}
 
@@ -237,12 +246,17 @@ namespace ABTSM73BeamStage5ChaosTests
 		FStage5PhysicsWorld& WorldWrapper,
 		const TArray<AABTSM7BuildingModule*>& Modules,
 		const TArray<FTransform>& Baselines,
-		const FVector& PlanetCenter,
+		const FVector& SiteUp,
 		FObservationResult& OutResult)
 	{
 		if (Modules.IsEmpty() || Baselines.Num() != Modules.Num())
 		{
 			Test.AddError(TEXT("Stage-5 entry has invalid Chaos observation inputs"));
+			return false;
+		}
+		if (SiteUp.ContainsNaN() || !SiteUp.IsNormalized())
+		{
+			Test.AddError(TEXT("Stage-5 entry has an invalid Site-uniform gravity frame"));
 			return false;
 		}
 
@@ -283,16 +297,10 @@ namespace ABTSM73BeamStage5ChaosTests
 
 				const FVector Delta = Module->GetActorLocation()
 					- Baselines[ModuleIndex].GetLocation();
-				FVector LocalUp = (Baselines[ModuleIndex].GetLocation()
-					- PlanetCenter).GetSafeNormal();
-				if (LocalUp.IsNearlyZero())
-				{
-					LocalUp = Baselines[ModuleIndex].GetUnitAxis(EAxis::Z);
-				}
 				const float PlanarDriftCM =
-					FVector::VectorPlaneProject(Delta, LocalUp).Size();
+					FVector::VectorPlaneProject(Delta, SiteUp).Size();
 				const float SettlementCM =
-					FMath::Abs(FVector::DotProduct(Delta, LocalUp));
+					FMath::Abs(FVector::DotProduct(Delta, SiteUp));
 				const float RotationDegrees = FMath::RadiansToDegrees(
 					Baselines[ModuleIndex].GetRotation().AngularDistance(
 						Module->GetActorQuat()));
@@ -539,6 +547,44 @@ namespace ABTSM73BeamStage5ChaosTests
 		const FABTSM73JuryDemoFixedSixStaticEntry& StaticEntry =
 			StaticPlan.Entries[StaticEntryIndex];
 		const FVector SupportCenter = Site.V3Envelope.SupportCenterWorldCM;
+		FABTSM7SiteUniformGravityPolicy SiteGravity;
+		if (!Test.TestTrue(TEXT("V3 Site-uniform gravity policy derives from frozen placement"),
+			FABTSM7SiteUniformGravityPolicy::TryDerive(
+				Site.WorldTransform.GetLocation(), SupportCenter,
+				GravityCMPerSec2, SiteGravity)))
+		{
+			return false;
+		}
+		Test.TestTrue(TEXT("V3 frozen tangent frame agrees with derived SiteUp"),
+			FVector::DotProduct(
+				SiteGravity.SiteUp,
+				Site.WorldTransform.GetUnitAxis(EAxis::Z)) >= 1.0 - 1.0e-6);
+		FABTSM7SiteUniformGravityPolicy InvalidSiteGravity;
+		Test.TestFalse(TEXT("Site-uniform gravity fails closed at the support center"),
+			FABTSM7SiteUniformGravityPolicy::TryDerive(
+				SupportCenter, SupportCenter,
+				GravityCMPerSec2, InvalidSiteGravity));
+		Test.TestTrue(TEXT("Production static plan retains the V3 support center"),
+			StaticEntry.SupportCenterWorldCM.Equals(
+				Site.V3Envelope.SupportCenterWorldCM, 1.0e-6));
+		Test.TestEqual(TEXT("Production static plan retains the V3 support radius"),
+			StaticEntry.SupportRadiusCM,
+			Site.V3Envelope.SupportRadiusCM);
+		Test.TestEqual(TEXT("Production static plan retains the V3 gravity authority"),
+			StaticEntry.GravityAuthorityId,
+			Site.V3Envelope.GravityAuthorityId);
+		Test.TestEqual(TEXT("Production static plan retains the V3 gravity identity"),
+			StaticEntry.GravityIdentityHash,
+			Site.V3Envelope.GravityIdentityHash);
+		FABTSM7SiteUniformGravityPolicy ProductionActorSiteGravity;
+		Test.TestTrue(TEXT("Production Actor payload derives the same Site-uniform policy"),
+			FABTSM7SiteUniformGravityPolicy::TryDerive(
+				StaticEntry.WorldTransform.GetLocation(),
+				StaticEntry.SupportCenterWorldCM,
+				GravityCMPerSec2, ProductionActorSiteGravity));
+		Test.TestEqual(TEXT("Fixture and production Actor payload share Site gravity hash"),
+			ProductionActorSiteGravity.ComputeCrc32(),
+			SiteGravity.ComputeCrc32());
 		const bool bExpectedSatellite = Entry.Id
 			== EABTSM73BeamDemoBuilding::E1ColumnBreak;
 		const EABTSJuryDemoFixedSixSurfaceKind ExpectedSurface =
@@ -655,14 +701,19 @@ namespace ABTSM73BeamStage5ChaosTests
 		AABTSM7BuildingModule* WakeProbe =
 			MaterialSystem->SpawnStaticBrickModule(
 				WakeProbeSpec, FTransform(ProbeLocation));
-		if (!Test.TestNotNull(TEXT("Radial-gravity wake probe"), WakeProbe)
-			|| !Test.TestNotNull(TEXT("Radial-gravity wake probe mesh"),
+		if (!Test.TestNotNull(TEXT("Site-uniform-gravity wake probe"), WakeProbe)
+			|| !Test.TestNotNull(TEXT("Site-uniform-gravity wake probe mesh"),
 				WakeProbe != nullptr ? WakeProbe->GetMeshComponent() : nullptr))
 		{
 			return false;
 		}
 		UStaticMeshComponent* WakeProbeMesh = WakeProbe->GetMeshComponent();
-		WakeProbe->ActivateDynamic(FVector::ZeroVector, SupportCenter, GravityCMPerSec2);
+		if (!Test.TestTrue(TEXT("Wake probe accepts the production Site-uniform policy"),
+			WakeProbe->ActivateDynamicSiteUniform(
+				FVector::ZeroVector, SiteGravity)))
+		{
+			return false;
+		}
 		WakeProbeMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
 		WakeProbeMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 		WakeProbeMesh->PutAllRigidBodiesToSleep();
@@ -688,19 +739,23 @@ namespace ABTSM73BeamStage5ChaosTests
 			WorldWrapper.ForwardErrorMessages(&Test);
 			return false;
 		}
-		const FVector ProbeGravityDirection =
-			(SupportCenter - WakeProbe->GetActorLocation()).GetSafeNormal();
-		const float ResumedRadialSpeed = FVector::DotProduct(
+		const FVector ProbeGravityDirection = -SiteGravity.SiteUp;
+		const float ResumedSiteGravitySpeed = FVector::DotProduct(
 			WakeProbeMesh->GetPhysicsLinearVelocity(), ProbeGravityDirection);
-		Test.TestTrue(TEXT("Explicit wake resumes radial gravity"),
-			ResumedRadialSpeed > 1.0f);
+		Test.TestTrue(TEXT("Explicit wake resumes Site-uniform gravity"),
+			ResumedSiteGravitySpeed > 1.0f);
 		UE_LOG(LogABTSRuntime, Log,
 			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][GravityWakePolicy]")
-			TEXT(" Entry=%s Policy=NonInvalidatingForceSkipSleepingBodiesResumeOnExplicitWake")
-			TEXT(" SleepingSpeed=%.6f ResumedRadialSpeed=%.6f Accepted=%d"),
-			*Entry.StableId.ToString(), SleepingSpeed, ResumedRadialSpeed,
+			TEXT(" Entry=%s GravityPolicy=SiteUniformTangentGravity")
+			TEXT(" Derivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM)")
+			TEXT(" SiteGravityHash=%u SiteUp=%s")
+			TEXT(" WakePolicy=NonInvalidatingForceSkipSleepingBodiesResumeOnExplicitWake")
+			TEXT(" SleepingSpeed=%.6f ResumedSiteGravitySpeed=%.6f Accepted=%d"),
+			*Entry.StableId.ToString(), SiteGravity.ComputeCrc32(),
+			*SiteGravity.SiteUp.ToString(), SleepingSpeed,
+			ResumedSiteGravitySpeed,
 			bStayedAsleep && SleepingSpeed <= KINDA_SMALL_NUMBER
-				&& ResumedRadialSpeed > 1.0f ? 1 : 0);
+				&& ResumedSiteGravitySpeed > 1.0f ? 1 : 0);
 		WakeProbe->Destroy();
 		if (!WorldWrapper.TickTestWorld(ProductionOuterDeltaSeconds))
 		{
@@ -919,16 +974,29 @@ namespace ABTSM73BeamStage5ChaosTests
 			FABTSM7ChaosWorldProfile::CaptureProduction();
 		const uint32 BodyProfileHash = BodyProfile.ComputeCrc32();
 		const uint32 WorldProfileHash = WorldProfile.ComputeCrc32();
-		MaterialSystem->BeginLaunchPhysics(
-			false, SupportCenter, GravityCMPerSec2,
-			MaximumObservationSeconds + 1.0f);
+		if (!Test.TestTrue(TEXT("Production module path accepts Site-uniform launch"),
+			MaterialSystem->BeginSiteUniformLaunchPhysics(
+				Modules,
+				Site.WorldTransform.GetLocation(),
+				SupportCenter,
+				GravityCMPerSec2,
+				MaximumObservationSeconds + 1.0f)))
+		{
+			return false;
+		}
 		Test.TestEqual(TEXT("Fixture and launch share the Chaos body identity"),
 			MaterialSystem->GetLastLaunchChaosBodyProfileHash(), BodyProfileHash);
 		Test.TestEqual(TEXT("Fixture and launch share the Chaos world identity"),
 			MaterialSystem->GetLastLaunchChaosWorldProfileHash(), WorldProfileHash);
+		Test.TestEqual(TEXT("Fixture and launch share the Site-uniform gravity identity"),
+			MaterialSystem->GetLastSiteUniformGravityPolicyHash(),
+			SiteGravity.ComputeCrc32());
+		Test.TestTrue(TEXT("Fixture and launch share the exact SiteUp"),
+			MaterialSystem->GetLastSiteUniformGravityUp().Equals(
+				SiteGravity.SiteUp, 1.0e-6));
 		const uint32 FixtureCrc32 = ComputeFixtureCrc32(
 			Entry, Result, Descriptor, StaticEntry, Site, SupportCenter,
-			BodyProfileHash, WorldProfileHash);
+			BodyProfileHash, WorldProfileHash, SiteGravity);
 		UE_LOG(LogABTSRuntime, Log,
 			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][Identity]")
 			TEXT(" Complexity=%s Tier=%d Seed=%d EncounterSlot=%d Surface=%d")
@@ -941,7 +1009,9 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(" ResultantAdvisories=%d StaticSelfLoadKG=%.3f ExternalLoadKG=%.3f")
 			TEXT(" BrickMassKG=%.3f MassKG=%.3f CalculatedMassKG=%.3f")
 			TEXT(" LocalCOM=%s GroundMin=%s GroundMax=%s COMSupported=%d")
-			TEXT(" OuterFPS=%.0f OuterDT=%.6f GravityModel=RadialConstantAcceleration Gravity=%.1f")
+			TEXT(" OuterFPS=%.0f OuterDT=%.6f GravityModel=SiteUniformTangentGravity Gravity=%.1f")
+			TEXT(" SiteGravitySchema=%d SiteGravityHash=%u")
+			TEXT(" SiteGravityDerivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM) SiteUp=%s")
 			TEXT(" BodyHash=%u Solver=%d/%d Damping=%.2f/%.2f WorldHash=%u %s")
 			TEXT(" SupportMaterial=ProductionTerrainDefault Observation=%.1f"),
 			*Entry.StableId.ToString(), Entry.Settings.DifficultyTier,
@@ -979,6 +1049,9 @@ namespace ABTSM73BeamStage5ChaosTests
 			1.0f / ProductionOuterDeltaSeconds,
 			ProductionOuterDeltaSeconds,
 			GravityCMPerSec2,
+			FABTSM7SiteUniformGravityPolicy::SchemaVersion,
+			SiteGravity.ComputeCrc32(),
+			*SiteGravity.SiteUp.ToString(),
 			BodyProfileHash,
 			BodyProfile.PositionSolverIterations,
 			BodyProfile.VelocitySolverIterations,
@@ -991,7 +1064,7 @@ namespace ABTSM73BeamStage5ChaosTests
 		FObservationResult Observation;
 		const bool bAccepted = ObserveUnderGravity(
 			Test, WorldWrapper, Modules, InitialTransforms,
-			SupportCenter, Observation);
+			SiteGravity.SiteUp, Observation);
 		TSet<int32> DiagnosticBrickIndices;
 		DiagnosticBrickIndices.Add(Observation.FinalMaximumPlanarDriftBrickIndex);
 		DiagnosticBrickIndices.Add(Observation.FinalMaximumSettlementBrickIndex);
