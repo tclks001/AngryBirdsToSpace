@@ -112,6 +112,7 @@ private:
 		AABTSM7BuildingMaterialSystem& MaterialSystem,
 		AABTSM6SlingshotSystem* SlingshotSystem,
 		bool& bOutSetupFailed);
+	void BindSatellitePracticeE1CrystalTarget();
 	void DrawTaskGraphPositionDebug();
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M7")

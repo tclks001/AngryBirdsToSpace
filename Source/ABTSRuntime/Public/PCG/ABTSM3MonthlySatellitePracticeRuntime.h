@@ -151,6 +151,10 @@ public:
 
 	/** Idempotent so automation fixtures can activate without a begun-play World. */
 	bool ActivateSnapshot();
+	/** Integration V3 replaces the temporary E5 proxy with E1's real Crystal cap. */
+	bool BindProductionE1CrystalTarget(
+		AActor& InTargetActor,
+		const FVector& InTargetHalfExtentCM);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -173,7 +177,7 @@ public:
 	bool IsSatelliteGravityEnabled() const;
 	int32 GetSatelliteGravityOverride() const { return LastGravityOverride; }
 	AABTSM9Satellite* GetRuntimeSatellite() const { return RuntimeSatellite.Get(); }
-	AABTSCalibrationTargetProxy* GetRuntimeE5Target() const { return RuntimeE5Target.Get(); }
+	AActor* GetRuntimeE5Target() const { return RuntimeE5GameplayTarget.Get(); }
 	AABTSM51SlingshotCord* GetRuntimePracticeCord() const;
 	AABTSM51SlingshotStake* GetRuntimePracticeStakeA() const { return RuntimePracticeStakeA.Get(); }
 	AABTSM51SlingshotStake* GetRuntimePracticeStakeB() const { return RuntimePracticeStakeB.Get(); }
@@ -202,6 +206,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSCalibrationTargetProxy> RuntimeE5Target;
+
+	/** Active gameplay authority; initially the legacy proxy, then the V3 Crystal cap. */
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> RuntimeE5GameplayTarget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM51SlingshotStake> RuntimePracticeStakeA;

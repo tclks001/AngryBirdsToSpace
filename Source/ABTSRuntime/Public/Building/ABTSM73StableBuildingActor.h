@@ -98,6 +98,10 @@ public:
 	FName GetJuryDemoFixedSixManifestEntryId() const;
 	int32 GetJuryDemoFixedSixEncounterIndex() const;
 	uint64 GetJuryDemoFixedSixRegistrationResultHash() const;
+	/** Integration V3 DTO: resolves the single live E1 Crystal cap as the release satellite target. */
+	bool CopyJuryDemoE1CrystalTarget(
+		AActor*& OutTargetActor,
+		FVector& OutHalfExtentCM) const;
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
 	bool RebuildPreview();

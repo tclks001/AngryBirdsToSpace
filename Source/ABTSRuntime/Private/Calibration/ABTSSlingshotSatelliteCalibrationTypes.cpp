@@ -894,15 +894,20 @@ FABTSCalibrationSweepSummary FABTSSlingshotSatelliteCalibrationModel::RunSuccess
 	{
 		int32 MinPullIndex = MAX_int32;
 		int32 MaxPullIndex = MIN_int32;
+		int32 MinVIndex = MAX_int32;
+		int32 MaxVIndex = MIN_int32;
 		int32 MinUIndex = MAX_int32;
 		int32 MaxUIndex = MIN_int32;
 		for (const int32 FlatIndex : LargestComponent)
 		{
 			const int32 UIndex = FlatIndex % UCount;
 			const int32 PullAndV = FlatIndex / UCount;
+			const int32 VIndex = PullAndV % VCount;
 			const int32 PullIndex = PullAndV / VCount;
 			MinPullIndex = FMath::Min(MinPullIndex, PullIndex);
 			MaxPullIndex = FMath::Max(MaxPullIndex, PullIndex);
+			MinVIndex = FMath::Min(MinVIndex, VIndex);
+			MaxVIndex = FMath::Max(MaxVIndex, VIndex);
 			MinUIndex = FMath::Min(MinUIndex, UIndex);
 			MaxUIndex = FMath::Max(MaxUIndex, UIndex);
 		}
@@ -913,7 +918,8 @@ FABTSCalibrationSweepSummary FABTSSlingshotSatelliteCalibrationModel::RunSuccess
 		Summary.SuccessAimInPlaneMaximumCM =
 			AimInPlaneByIndex[MaxUIndex];
 		Summary.bIslandSpansPullNeighbors = MaxPullIndex > MinPullIndex;
-		Summary.bIslandSpansAimNeighbors = MaxUIndex > MinUIndex;
+		Summary.bIslandSpansAimNeighbors =
+			MaxUIndex > MinUIndex || MaxVIndex > MinVIndex;
 	}
 
 	for (int32 VIndex = 0; VIndex < VCount; ++VIndex)

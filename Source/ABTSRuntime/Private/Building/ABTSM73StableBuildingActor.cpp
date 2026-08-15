@@ -399,6 +399,54 @@ uint64 AABTSM73StableBuildingActor::GetJuryDemoFixedSixRegistrationResultHash() 
 		: 0;
 }
 
+bool AABTSM73StableBuildingActor::CopyJuryDemoE1CrystalTarget(
+	AActor*& OutTargetActor,
+	FVector& OutHalfExtentCM) const
+{
+	OutTargetActor = nullptr;
+	OutHalfExtentCM = FVector::ZeroVector;
+	if (!IsJuryDemoFixedSixStaticRegistrationAccepted()
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->ManifestEntryId
+			!= FName(TEXT("E1ColumnBreak"))
+		|| JuryDemoFixedSixStaticEntry->Caps.Num() != 1)
+	{
+		return false;
+	}
+
+	const FABTSM73BuildingFreezeV3CapBinding& Cap =
+		JuryDemoFixedSixStaticEntry->Caps[0];
+	if (Cap.BrickSpec.Material != EABTSM7BuildingMaterial::Crystal
+		|| Cap.BrickSpec.DimensionsCM.GetMin() <= 0.0f)
+	{
+		return false;
+	}
+
+	AABTSM7BuildingModule* CrystalTarget = nullptr;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr
+			|| Module->GetBuildingMaterial()
+				!= EABTSM7BuildingMaterial::Crystal)
+		{
+			continue;
+		}
+		if (CrystalTarget != nullptr)
+		{
+			return false;
+		}
+		CrystalTarget = Module;
+	}
+	if (CrystalTarget == nullptr)
+	{
+		return false;
+	}
+	OutTargetActor = CrystalTarget;
+	OutHalfExtentCM = Cap.BrickSpec.DimensionsCM * 0.5f;
+	return true;
+}
+
 bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 	const bool bAllowFlatEditorFallback,
 	FABTSM73GroundContext& OutContext,
