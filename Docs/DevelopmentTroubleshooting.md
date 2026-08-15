@@ -206,7 +206,7 @@
 | 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
 | [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `76b8212473cc3c0a725a410fa42d97217959ad05`（2026-08-15，含 `M3-JURY-001/002`） |
-| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `9f1634cb68dfa11e9960962e1ab3bc98bd512b5e`（2026-08-15，含 `M7-BC-004`～`111` 与 Stage 4.5 放置冻结） |
+| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `3b005f6dc7ffd27e57c5c499fd257a39352599a9`（2026-08-15，含 `M7-BC-004`～`117`、Stage 5/5.5 与 Fixed-Six 静态封口） |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
 ### 13.2 跨阶段统一诊断顺序
@@ -254,6 +254,7 @@
 | 同一 Profile/Seed 在两个 fresh 进程生成不同数量或 Hash，或单位积木出现半格相位 | `FName` 进程内索引不能作为确定性种子；36 cm 截面也不自动保证长度和 lattice 相位。稳定种子使用字符串 CRC，所有阶段和 Brick Compiler 同时验证 `36×36×36n` 及各结构 lane 的奇偶/相位合同。 | 两个独立 fresh 进程逐项比较数量与 Hash；编译器拒绝非单位化尺寸，偶数 footprint 禁止通过居中 `2→1` 产生半格漂移。详见 `M7-BC-101/104/110`。 |
 | 自动化全绿但屋顶出现悬空梳齿、百叶塔或门架长柱 | 语义包络、inward 可追溯或每层 36 cm course 都不是实际下座。每根新增 RoofCourse 必须有真实 lower bearing；坡屋顶按 footprint 相邻 course 收缩，视觉假绿会撤销旧几何通过证据。 | `UnsupportedRoofMemberCount=0`、RoofPost/Deferred/Occluded 有明确权威；固定六栋自动化之外仍保留阶段视觉验收。详见 `M7-BC-107/108/110`。 |
 | 集成/M3 需要建筑占地，却直接手填宽高或对含 suppressed 临时柱的数组求 Bounds | Stage 4.5 放置目录必须从冻结 Manifest 重新运行真实 Stage 4，只对 active member 的排序实体 AABB 求 Bounds/结构/描述 Hash；Pivot、地面、局部基和 Pad 一并冻结。该目录只证明静态放置，不证明 Stage 5、Chaos、破坏或完整建筑可验收。 | `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze` 在两个 fresh 进程逐字段重放一致；Manifest `2324068295`、目录 Hash `13889440156022460967`。详见 `M7-BC-111`。 |
+| Fixed-Six V1 仍是旧 Catalog，却把 Stage 5/5.5 新 Hash 静默当成同一版本，或用效果走廊扩大静态 Pad | 静态实体 Bounds 与动态效果走廊是两种空间权威。M7 必须从真实 Stage 5/5.5 Producer 分别聚合 `PhysicalBounds` 与 `EffectBounds`；Catalog/Descriptor 变化必须发布加法式 V2，V1 保持可用。只要 Physical 仍在 LocalBounds 且 Pad 安全边不少于 36 cm，静态 Pad 不扩大；效果走廊作为独立动态安全包络交给 M3 避让。 | `ABTS.M73DAG.BeamC3V3.Demo.J4StaticSeal.BoundsAndPad` 两个独立 fresh 进程各 1/1，六栋 `StaticAccepted=1`、PadMargin 均为 `36/36 cm`、`DynamicEnvelopeRequired=1`；V2 合同双版本自动化拒绝旧 Catalog/Layout、Hash/Bounds/走廊漂移和 V1 混入 V2 状态。详见 `M7-BC-117` 与 `M7JuryDemoStaticSealAndContractV2Handoff.md`。 |
 | Chaos 固定时间步通过，实时 PIE 仍漂移或拒绝 | 静态几何正确不等于变步长接触稳定。保留严格空间门、quiet window、硬上限和事务回滚；`-benchmark` 只用于算法回归。 | fresh 实时运行记录 Drift/Settlement/Rotation、速度、Awake、TimedOut 和合同封口；失败后无模块或隐形 Foundation。 |
 
 ### 13.5 M11：唯一 Core、认证与表现消费

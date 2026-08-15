@@ -17,6 +17,59 @@ bool IsFiniteWorldGenerationContractBox(const FBox& Box)
 		&& IsFiniteContractVector(Box.Min)
 		&& IsFiniteContractVector(Box.Max);
 }
+
+bool IsNearlyEqualWorldGenerationContractBox(
+	const FBox& A,
+	const FBox& B,
+	const double Tolerance)
+{
+	return IsFiniteWorldGenerationContractBox(A)
+		&& IsFiniteWorldGenerationContractBox(B)
+		&& A.Min.Equals(B.Min, Tolerance)
+		&& A.Max.Equals(B.Max, Tolerance);
+}
+
+struct FFixedSixV2SiteIdentity
+{
+	const TCHAR* ManifestEntryId = TEXT("");
+	uint64 DescriptorHash = 0;
+	uint64 StaticGeometryHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+};
+
+const FFixedSixV2SiteIdentity& GetFixedSixV2SiteIdentity(const int32 Index)
+{
+	static const FFixedSixV2SiteIdentity Identities[] = {
+		{TEXT("E1ColumnBreak"), 10113758205408230493ull,
+			10276011350224018878ull, 6524532268529485689ull,
+			12560907909080588493ull,
+			FBox(FVector(-1102.0, -850.0, -670.0), FVector(418.0, 670.0, 850.0))},
+		{TEXT("E2DropTrigger"), 1108134973396587699ull,
+			1243337162086650128ull, 3864694895529971157ull,
+			1033929311817437759ull,
+			FBox(FVector(-1462.0, -1138.0, -670.0), FVector(58.0, 382.0, 850.0))},
+		{TEXT("E3SlideRelease"), 17683520519518435068ull,
+			3075258440093988143ull, 15118401498293854757ull,
+			6073774060920401162ull,
+			FBox(FVector(-1134.0, -522.0, -252.0), FVector(-774.0, -162.0, 468.0))},
+		{TEXT("E4TipOver"), 11089610541129920709ull,
+			4328116049969586954ull, 3596567542130940914ull,
+			3035395675580472088ull,
+			FBox(FVector(-378.0, -486.0, -144.0), FVector(342.0, -126.0, 216.0))},
+		{TEXT("E5SeamRelease"), 7322844578368466709ull,
+			461929562625370845ull, 12062404675177644267ull,
+			9042370151666144586ull,
+			FBox(FVector(-1566.0, 126.0, -144.0), FVector(-846.0, 486.0, 216.0))},
+		{TEXT("E6TipOver"), 3963542007450344969ull,
+			6610608065286482828ull, 10510335516369342439ull,
+			1309116746468502251ull,
+			FBox(FVector(-1278.0, -594.0, -144.0), FVector(-558.0, -234.0, 216.0))}
+	};
+	check(Index >= 0 && Index < UE_ARRAY_COUNT(Identities));
+	return Identities[Index];
+}
 }
 
 bool FABTSGeneratedWorldIdentity::IsUsable() const
@@ -90,6 +143,16 @@ bool FABTSGeneratedBuildingSite::IsUsable(const double Tolerance) const
 			Up) >= 1.0 - SafeTolerance;
 }
 
+bool FABTSJuryDemoFixedSixV2Envelope::IsEmpty() const
+{
+	return StaticGeometryHash == 0
+		&& ProductionIdentityHash == 0
+		&& DeviceAssemblyHash == 0
+		&& !PhysicalBounds.IsValid
+		&& !EffectBounds.IsValid
+		&& !bDynamicEnvelopeRequired;
+}
+
 bool FABTSJuryDemoFixedSixBuildingSite::IsUsable(
 	const double Tolerance) const
 {
@@ -126,6 +189,61 @@ bool FABTSJuryDemoFixedSixBuildingSite::IsUsable(
 		&& PadHalfExtentCM.Y + SafeTolerance >= RequiredHalfExtentY;
 }
 
+bool FABTSJuryDemoFixedSixBuildingSite::IsUsableForContractVersion(
+	const int32 ContractVersion,
+	const double Tolerance) const
+{
+	if (!IsUsable(Tolerance))
+	{
+		return false;
+	}
+	if (ContractVersion == FABTSJuryDemoFixedSixContract::CurrentContractVersion)
+	{
+		return V2Envelope.IsEmpty();
+	}
+	if (ContractVersion
+		!= FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion)
+	{
+		return false;
+	}
+
+	const double SafeTolerance = FMath::Max(Tolerance, UE_DOUBLE_SMALL_NUMBER);
+	const FFixedSixV2SiteIdentity& Expected =
+		GetFixedSixV2SiteIdentity(EncounterIndex);
+	if (ManifestEntryId != FName(Expected.ManifestEntryId)
+		|| DescriptorHash != Expected.DescriptorHash
+		|| V2Envelope.StaticGeometryHash != Expected.StaticGeometryHash
+		|| V2Envelope.ProductionIdentityHash
+			!= Expected.ProductionIdentityHash
+		|| V2Envelope.DeviceAssemblyHash != Expected.DeviceAssemblyHash
+		|| !IsNearlyEqualWorldGenerationContractBox(
+			V2Envelope.PhysicalBounds, LocalBounds, SafeTolerance)
+		|| !IsNearlyEqualWorldGenerationContractBox(
+			V2Envelope.EffectBounds, Expected.EffectBounds, SafeTolerance))
+	{
+		return false;
+	}
+
+	const double PhysicalHalfExtentX = FMath::Max(
+		FMath::Abs(V2Envelope.PhysicalBounds.Min.X),
+		FMath::Abs(V2Envelope.PhysicalBounds.Max.X));
+	const double PhysicalHalfExtentY = FMath::Max(
+		FMath::Abs(V2Envelope.PhysicalBounds.Min.Y),
+		FMath::Abs(V2Envelope.PhysicalBounds.Max.Y));
+	if (PadHalfExtentCM.X - PhysicalHalfExtentX + SafeTolerance < 36.0
+		|| PadHalfExtentCM.Y - PhysicalHalfExtentY + SafeTolerance < 36.0)
+	{
+		return false;
+	}
+
+	const bool bEffectInsidePad =
+		V2Envelope.EffectBounds.Min.X >= -PadHalfExtentCM.X - SafeTolerance
+		&& V2Envelope.EffectBounds.Max.X <= PadHalfExtentCM.X + SafeTolerance
+		&& V2Envelope.EffectBounds.Min.Y >= -PadHalfExtentCM.Y - SafeTolerance
+		&& V2Envelope.EffectBounds.Max.Y <= PadHalfExtentCM.Y + SafeTolerance;
+	return V2Envelope.bDynamicEnvelopeRequired == !bEffectInsidePad;
+}
+
 bool FABTSJuryDemoFixedSixContract::IsEmpty() const
 {
 	return ContractVersion == 0
@@ -141,14 +259,20 @@ bool FABTSJuryDemoFixedSixContract::IsEmpty() const
 
 bool FABTSJuryDemoFixedSixContract::IsUsable(const double Tolerance) const
 {
-	if (ContractVersion != CurrentContractVersion
+	const bool bIsV1 = ContractVersion == CurrentContractVersion;
+	const bool bIsV2 = ContractVersion == SupportedV2ContractVersion;
+	if ((!bIsV1 && !bIsV2)
 		|| PlacementSchemaVersion != FrozenPlacementSchemaVersion
 		|| DemoManifestVersion != FrozenDemoManifestVersion
 		|| DemoManifestHash != FrozenDemoManifestHash
-		|| PlacementCatalogHash != FrozenPlacementCatalogHash
+		|| PlacementCatalogHash
+			!= (bIsV1
+				? FrozenPlacementCatalogHash
+				: FrozenV2PlacementCatalogHash)
 		|| WorldSeed != FrozenWorldSeed
 		|| CandidateId != FrozenCandidateId
-		|| LayoutHash != FrozenLayoutHash
+		|| (bIsV1 && LayoutHash != FrozenLayoutHash)
+		|| (bIsV2 && (LayoutHash == 0 || LayoutHash == FrozenLayoutHash))
 		|| Sites.Num() != ExpectedSiteCount)
 	{
 		return false;
@@ -159,7 +283,7 @@ bool FABTSJuryDemoFixedSixContract::IsUsable(const double Tolerance) const
 	for (int32 Index = 0; Index < Sites.Num(); ++Index)
 	{
 		const FABTSJuryDemoFixedSixBuildingSite& Site = Sites[Index];
-		if (!Site.IsUsable(Tolerance)
+		if (!Site.IsUsableForContractVersion(ContractVersion, Tolerance)
 			|| Site.EncounterIndex != Index
 			|| ManifestEntryIds.Contains(Site.ManifestEntryId)
 			|| DescriptorHashes.Contains(Site.DescriptorHash))

@@ -84,6 +84,73 @@ FABTSJuryDemoFixedSixContract MakeValidJuryDemoFixedSixContract()
 	return Contract;
 }
 
+FABTSJuryDemoFixedSixContract MakeValidJuryDemoFixedSixV2Contract()
+{
+	FABTSJuryDemoFixedSixContract Contract =
+		MakeValidJuryDemoFixedSixContract();
+	Contract.ContractVersion =
+		FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
+	Contract.PlacementCatalogHash =
+		FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash;
+	// M3 owns the final V2 value. This distinct non-zero identity exercises the
+	// additive schema without pretending that Integration has frozen it early.
+	Contract.LayoutHash = 0xA26413CF5E02179Bull;
+
+	const uint64 DescriptorHashes[] = {
+		10113758205408230493ull,
+		1108134973396587699ull,
+		17683520519518435068ull,
+		11089610541129920709ull,
+		7322844578368466709ull,
+		3963542007450344969ull
+	};
+	const uint64 StaticGeometryHashes[] = {
+		10276011350224018878ull,
+		1243337162086650128ull,
+		3075258440093988143ull,
+		4328116049969586954ull,
+		461929562625370845ull,
+		6610608065286482828ull
+	};
+	const uint64 ProductionHashes[] = {
+		6524532268529485689ull,
+		3864694895529971157ull,
+		15118401498293854757ull,
+		3596567542130940914ull,
+		12062404675177644267ull,
+		10510335516369342439ull
+	};
+	const uint64 DeviceHashes[] = {
+		12560907909080588493ull,
+		1033929311817437759ull,
+		6073774060920401162ull,
+		3035395675580472088ull,
+		9042370151666144586ull,
+		1309116746468502251ull
+	};
+	const FBox EffectBounds[] = {
+		FBox(FVector(-1102.0, -850.0, -670.0), FVector(418.0, 670.0, 850.0)),
+		FBox(FVector(-1462.0, -1138.0, -670.0), FVector(58.0, 382.0, 850.0)),
+		FBox(FVector(-1134.0, -522.0, -252.0), FVector(-774.0, -162.0, 468.0)),
+		FBox(FVector(-378.0, -486.0, -144.0), FVector(342.0, -126.0, 216.0)),
+		FBox(FVector(-1566.0, 126.0, -144.0), FVector(-846.0, 486.0, 216.0)),
+		FBox(FVector(-1278.0, -594.0, -144.0), FVector(-558.0, -234.0, 216.0))
+	};
+	check(Contract.Sites.Num() == UE_ARRAY_COUNT(DescriptorHashes));
+	for (int32 Index = 0; Index < Contract.Sites.Num(); ++Index)
+	{
+		FABTSJuryDemoFixedSixBuildingSite& Site = Contract.Sites[Index];
+		Site.DescriptorHash = DescriptorHashes[Index];
+		Site.V2Envelope.StaticGeometryHash = StaticGeometryHashes[Index];
+		Site.V2Envelope.ProductionIdentityHash = ProductionHashes[Index];
+		Site.V2Envelope.DeviceAssemblyHash = DeviceHashes[Index];
+		Site.V2Envelope.PhysicalBounds = Site.LocalBounds;
+		Site.V2Envelope.EffectBounds = EffectBounds[Index];
+		Site.V2Envelope.bDynamicEnvelopeRequired = true;
+	}
+	return Contract;
+}
+
 FABTSM110FinaleLocalFrame MakeValidFinaleFrame()
 {
 	FABTSM110FinaleLocalFrame Frame;
@@ -292,6 +359,82 @@ bool FABTSWorldGenerationContractValidationTest::RunTest(
 	TestFalse(
 		TEXT("A mismatched fixed-six Layout hash fails closed"),
 		WrongLayout.IsUsable());
+
+	FABTSJuryDemoFixedSixContract FixedSixV2Contract =
+		MakeValidJuryDemoFixedSixV2Contract();
+	TestTrue(
+		TEXT("Fixed-Six V2 accepts the exact sealed M7 static and effect envelope"),
+		FixedSixV2Contract.IsUsable());
+	FABTSBuildingGenerationContract FixedSixV2BuildingContract;
+	FixedSixV2BuildingContract.Identity = MakeAcceptedIdentity();
+	FixedSixV2BuildingContract.Sites.Add(Site);
+	FixedSixV2BuildingContract.JuryDemoFixedSix = FixedSixV2Contract;
+	TestTrue(
+		TEXT("The additive V2 snapshot remains a usable building contract"),
+		FixedSixV2BuildingContract.IsUsable());
+
+	FABTSJuryDemoFixedSixContract V1WithV2State = FixedSixContract;
+	V1WithV2State.Sites[0].V2Envelope =
+		FixedSixV2Contract.Sites[0].V2Envelope;
+	TestFalse(
+		TEXT("V1 rejects silently injected V2 envelope state"),
+		V1WithV2State.IsUsable());
+
+	FABTSJuryDemoFixedSixContract V2WithV1Catalog = FixedSixV2Contract;
+	V2WithV1Catalog.PlacementCatalogHash =
+		FABTSJuryDemoFixedSixContract::FrozenPlacementCatalogHash;
+	TestFalse(
+		TEXT("V2 rejects the stale V1 placement Catalog"),
+		V2WithV1Catalog.IsUsable());
+
+	FABTSJuryDemoFixedSixContract V2WithV1Layout = FixedSixV2Contract;
+	V2WithV1Layout.LayoutHash =
+		FABTSJuryDemoFixedSixContract::FrozenLayoutHash;
+	TestFalse(
+		TEXT("V2 cannot silently reuse the V1 Layout hash"),
+		V2WithV1Layout.IsUsable());
+
+	FABTSJuryDemoFixedSixContract WrongV2Descriptor = FixedSixV2Contract;
+	WrongV2Descriptor.Sites[0].DescriptorHash++;
+	TestFalse(
+		TEXT("V2 rejects a Descriptor hash outside the sealed Catalog"),
+		WrongV2Descriptor.IsUsable());
+
+	FABTSJuryDemoFixedSixContract WrongV2Production = FixedSixV2Contract;
+	WrongV2Production.Sites[1].V2Envelope.ProductionIdentityHash++;
+	TestFalse(
+		TEXT("V2 rejects a mismatched Stage 5 production identity"),
+		WrongV2Production.IsUsable());
+
+	FABTSJuryDemoFixedSixContract WrongV2Device = FixedSixV2Contract;
+	WrongV2Device.Sites[2].V2Envelope.DeviceAssemblyHash++;
+	TestFalse(
+		TEXT("V2 rejects a mismatched Stage 5.5 device identity"),
+		WrongV2Device.IsUsable());
+
+	FABTSJuryDemoFixedSixContract WrongV2Physical = FixedSixV2Contract;
+	WrongV2Physical.Sites[3].V2Envelope.PhysicalBounds.Max.X += 1.0;
+	TestFalse(
+		TEXT("V2 rejects physical Bounds that drift from frozen LocalBounds"),
+		WrongV2Physical.IsUsable());
+
+	FABTSJuryDemoFixedSixContract WrongV2Effect = FixedSixV2Contract;
+	WrongV2Effect.Sites[4].V2Envelope.EffectBounds.Max.Y += 1.0;
+	TestFalse(
+		TEXT("V2 rejects a mismatched dynamic effect corridor"),
+		WrongV2Effect.IsUsable());
+
+	FABTSJuryDemoFixedSixContract MissingV2DynamicFlag = FixedSixV2Contract;
+	MissingV2DynamicFlag.Sites[5].V2Envelope.bDynamicEnvelopeRequired = false;
+	TestFalse(
+		TEXT("V2 rejects an effect corridor that exceeds Pad without a dynamic flag"),
+		MissingV2DynamicFlag.IsUsable());
+
+	FABTSJuryDemoFixedSixContract UnknownFixedSixVersion = FixedSixV2Contract;
+	UnknownFixedSixVersion.ContractVersion++;
+	TestFalse(
+		TEXT("Unknown Fixed-Six versions fail closed"),
+		UnknownFixedSixVersion.IsUsable());
 
 	FixedSixBuildingContract.Identity.WorldSeed++;
 	TestFalse(

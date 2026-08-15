@@ -81,7 +81,26 @@ struct ABTSRUNTIME_API FABTSGeneratedBuildingSite
 };
 
 /**
- * One immutable JuryDemoFixedSixV1 placement exported by M3 for exact M7
+ * Additive Fixed-Six V2 facts derived from the sealed M7 Stage 5/5.5 producer.
+ *
+ * V1 sites leave this structure empty. V2 keeps the static placement bounds
+ * separate from the dynamic effect corridor so M3 can reserve world clearance
+ * without inflating the building pad or changing the Stage 4 placement pivot.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixV2Envelope
+{
+	uint64 StaticGeometryHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+	FBox PhysicalBounds = FBox(EForceInit::ForceInit);
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+	bool bDynamicEnvelopeRequired = false;
+
+	bool IsEmpty() const;
+};
+
+/**
+ * One immutable JuryDemoFixedSix V1/V2 placement exported by M3 for exact M7
  * Manifest resolution.
  *
  * This DTO deliberately carries no weakness, attack-face or profile-search
@@ -98,8 +117,12 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
 	int32 DifficultyTier = INDEX_NONE;
 	int32 DeterministicSeed = 0;
 	uint64 DescriptorHash = 0;
+	FABTSJuryDemoFixedSixV2Envelope V2Envelope;
 
 	bool IsUsable(double Tolerance = 1.0e-3) const;
+	bool IsUsableForContractVersion(
+		int32 ContractVersion,
+		double Tolerance = 1.0e-3) const;
 };
 
 /**
@@ -111,15 +134,21 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
  */
 struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 {
+	/** V1 remains the default producer version until M3 and M7 migrate. */
 	static constexpr int32 CurrentContractVersion = 1;
+	static constexpr int32 SupportedV2ContractVersion = 2;
 	static constexpr int32 ExpectedSiteCount = 6;
 	static constexpr int32 FrozenPlacementSchemaVersion = 1;
 	static constexpr int32 FrozenDemoManifestVersion = 1;
 	static constexpr uint64 FrozenDemoManifestHash = 2324068295ull;
+	/** V1 alias retained for existing producers and tests. */
 	static constexpr uint64 FrozenPlacementCatalogHash =
 		13889440156022460967ull;
+	static constexpr uint64 FrozenV2PlacementCatalogHash =
+		11501529584318250152ull;
 	static constexpr int32 FrozenWorldSeed = 312503;
 	static constexpr int32 FrozenCandidateId = 4;
+	/** V1 alias retained until the M3 V2 layout is published and frozen. */
 	static constexpr uint64 FrozenLayoutHash = 0x8AB8D7E4F094072Dull;
 
 	/** Zero means this additive snapshot is absent. */

@@ -1,8 +1,8 @@
-# JuryDemo Fixed-Six 世界生成合同
+# JuryDemo Fixed-Six V1/V2 世界生成合同
 
-> 状态：2026-08-15，J3 候选已通过 UE 5.8 ForceUnity 与 fresh 自动化，身份为 `ContractReady / IntegrationPending`；等待候选接收后由 M7 执行 J4，最终由 Integration 执行 J5。
+> 状态：2026-08-15，V1 J3 已发布；M7 J4 静态封口已通过。Integration 已发布加法式 V2 合同基线，默认生产仍为 V1，等待 M3 重算 V2 Placement/Layout 后再冻结 Adapter 与切换生产版本。
 >
-> 发布身份：`JuryDemoFixedSixV1`。
+> 发布身份：`JuryDemoFixedSixV1`；可迁移身份：`JuryDemoFixedSixV2 / M3IdentityPending`。
 
 ## 1. 目标与非目标
 
@@ -28,6 +28,19 @@
 
 该做法不新增 M7→M3 运行时通道，不暴露 M3 TaskGraph、Candidate 数组或可变 UObject，也不要求修改 M3 所有的 Planet 头文件。
 
+### 2.1 V2 加法式迁移
+
+V2 不修改 V1 常量，也不让当前 M3 Adapter 在旧版本下静默换 Hash：
+
+- `CurrentContractVersion` 继续为 `1`；当前已接受的 V1 Producer/Consumer 与 Layout `0x8AB8D7E4F094072D` 保持可用；
+- `SupportedV2ContractVersion=2`，Placement Catalog 固定为 `11501529584318250152`；
+- 每条站点追加 `V2Envelope`，包含 `StaticGeometryHash`、`ProductionIdentityHash`、`DeviceAssemblyHash`、`PhysicalBounds`、`EffectBounds` 与 `bDynamicEnvelopeRequired`；
+- V1 必须保持 `V2Envelope` 为空；V2 必须携带 M7 J4 精确身份，静态 `PhysicalBounds` 必须等于冻结 `LocalBounds`，相对 Pad 的 X/Y 安全边均不得小于 36 cm；
+- `EffectBounds` 是独立动态安全包络，不能并入静态 Pad。当前六栋均要求 `bDynamicEnvelopeRequired=true`；
+- V2 Layout 必须是 M3 基于新 Catalog/Descriptor 重新生成的非零新身份，不得复用 V1 Layout。最终值由 M3 提交后在 Integration Adapter 中冻结；在此之前生产仍只发布 V1。
+
+合同校验按版本 fail closed：未知版本、V1 混入 V2 状态、V2 复用旧 Catalog/Layout、任一 Descriptor/Stage 5/Stage 5.5 Hash 漂移、静态 Bounds 漂移或动态走廊标志不一致都会拒绝整个快照。
+
 ## 3. DTO
 
 合同级 `FABTSJuryDemoFixedSixContract` 包含：
@@ -51,6 +64,16 @@
 - `DifficultyTier`
 - `DeterministicSeed`
 - `DescriptorHash`
+- 可选 `V2Envelope`；只在 `ContractVersion == 2` 时必须完整存在
+
+`FABTSJuryDemoFixedSixV2Envelope` 包含：
+
+- `StaticGeometryHash`
+- `ProductionIdentityHash`
+- `DeviceAssemblyHash`
+- `PhysicalBounds`
+- `EffectBounds`
+- `bDynamicEnvelopeRequired`
 
 `WorldTransform` 的局部 `+X/+Y/+Z` 分别是 M3 已冻结的 Forward/Right/Up；Pivot 保持 M7 Stage 4.5 的生成器原点，不移动到 Bounds 中心。
 
@@ -100,6 +123,12 @@ M7 合并包含本合同的 `master` 后，在其自有文件中实现：
 5. 任一不一致 fail closed，禁止换 Profile、递增 Seed、重新运行 WFC 搜索或回退旧 DAG2.3 三建筑合同。
 
 M7 必须在自己的排错账本记录 J4 新 ID；共享合同改动仍回到集成工作树。
+
+## 6.1 V2 当前冻结事实
+
+V2 的 Manifest 仍为 `1 / 2324068295`，Schema 仍为 `1`，Pad、Tier、Seed、Pivot 与静态 Bounds 不变。新的 Catalog、逐栋 Descriptor/Production/Device Hash 及 EffectBounds 以 [M7 JuryDemo 静态封口与 Fixed-Six V2 交接设计](M7JuryDemoStaticSealAndContractV2Handoff.md) 为唯一人读表；运行时校验中的精确常量由集成工作树所有的合同实现维护。
+
+本阶段只批准 V2 合同数据面，不代表 M3 已输出 V2，也不代表六栋已静态注册、ChaosReady 或 IntegrationAccepted。
 
 ## 7. J5 联合验收
 
