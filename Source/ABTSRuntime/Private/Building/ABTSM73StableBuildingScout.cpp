@@ -16,7 +16,8 @@ bool AABTSM73StableBuildingActor::QueryLivePresentationAnchor(
 	if (!bRuntimeSpawned || !GenerationSummary.bAccepted) return false;
 
 	FVector AccumulatedLocation = FVector::ZeroVector;
-	if (JuryDemoFixedSixStaticEntry.IsSet())
+	if (JuryDemoFixedSixStaticEntry.IsSet()
+		|| BuildingFreezeV3RuntimeEntry.IsSet())
 	{
 		for (const UHierarchicalInstancedStaticMeshComponent* HISM : {
 			WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(),
@@ -61,7 +62,8 @@ bool AABTSM73StableBuildingActor::OwnsRuntimePrimitive(
 	{
 		return false;
 	}
-	if (JuryDemoFixedSixStaticEntry.IsSet()
+	if ((JuryDemoFixedSixStaticEntry.IsSet()
+			|| BuildingFreezeV3RuntimeEntry.IsSet())
 		&& (Component == WoodPreview
 			|| Component == StonePreview
 			|| Component == IronPreview

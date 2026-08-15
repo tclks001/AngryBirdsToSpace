@@ -223,6 +223,12 @@ Chaos 夹具证伪，静态代理和生产实现先被做深；候选搜索、do
    用户视觉。前一状态未过不运行后一状态；禁止扫描 Seed、Attempt、密度、gap、预算 cap、截面、容差、
    摩擦或 solver。若 Matrix 只暴露确定性数量窗变化，只允许一次 owner-kind 精确计数调查并回到设计层。
 
+### 9.1 Building Freeze V3 runtime fixture 补充
+
+| ID | 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- | --- |
+| M7-BC-127 | V3 runtime consumer 完成后单跑旧 `ABTS.M73DAG.BeamC3V3.Demo.J4V2Consumer` 得到 `0/2`，两项都在构造测试合同阶段报 `RegistrationTestContractRejected`；若只看 Actor 改动，容易误判成 V3 破坏了 V2 注册生命周期 | V2 测试夹具会用当前 Stage5 producer 重新生成六栋，再要求整个快照满足 Integration 冻结的 V2 Production/Descriptor 身份。BuildingFreezeV3 已合法改变主体材料配方及当前 Stage5 Hash，而共享 V2 DTO 按所有权保持旧值；因此拒绝发生在 `AABTSM73StableBuildingActor` 被创建之前，与新 V3 Actor 分支无关 | 保持 V2 fail closed，不放宽 `Contract.IsUsable()`、不覆写共享 V2 Hash。V3 runtime 走独立 M7 fixture authority：分别保存 `ComplexityId/ComplexityIndex/ComplexityTier` 与 `EncounterSlot`，从冻结 V3 Catalog 生成主体 HISM、静态 Device 和 E1 Crystal cap；正式 GameMode 继续等待 Integration V3 DTO 适配 | UE 5.8 ForceUnity 全链接成功；fresh `ABTS.M73DAG.BuildingFreezeV3` 精确 `4/4`，六 Actor 原子注册 `5746` 个主体/设备/顶帽单元，Crystal cap `1`，E1=`ComplexityIndex 0 / EncounterSlot 4`，结果 Hash `5362210788187115933`。旧 V2 失败日志 `M7-J4V2Consumer-AfterV3Runtime-20260815-224512-FreshAutomation.log` 明确停在 `RegistrationTestContractRejected`，未进入 Actor 注册；正式 V2/V3 切换必须由 Integration 新 DTO 完成 |
+
 ## 10. 待集成工作树提炼
 
 当前建议按以下顺序上收到 [DevelopmentTroubleshooting.md](DevelopmentTroubleshooting.md)：

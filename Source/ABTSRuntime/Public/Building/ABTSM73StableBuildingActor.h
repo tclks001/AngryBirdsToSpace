@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Building/ABTSM73BuildingTypes.h"
+#include "Building/ABTSM73BuildingFreezeV3RuntimeRegistration.h"
 #include "Building/ABTSM73DAG5Types.h"
 #include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "GameFramework/Actor.h"
@@ -99,6 +100,20 @@ public:
 	int32 GetJuryDemoFixedSixEncounterIndex() const;
 	uint64 GetJuryDemoFixedSixRegistrationResultHash() const;
 
+	/** Consumes one M7-owned, placement-bound V3 fixture payload. */
+	bool ConfigureBuildingFreezeV3RuntimeRegistration(
+		FABTSM73BuildingFreezeV3RuntimeEntry&& InEntry,
+		FString& OutError);
+	void RollbackBuildingFreezeV3RuntimeRegistration(const FString& Reason);
+	bool IsBuildingFreezeV3RuntimeRegistrationAccepted() const;
+	int32 GetBuildingFreezeV3RuntimeModuleCount() const;
+	EABTSM73BeamDemoBuilding GetBuildingFreezeV3ComplexityId() const;
+	int32 GetBuildingFreezeV3ComplexityIndex() const;
+	int32 GetBuildingFreezeV3EncounterSlot() const;
+	uint64 GetBuildingFreezeV3RegistrationResultHash() const;
+	int32 GetBuildingFreezeV3BodyInstanceCount(
+		EABTSM7BuildingMaterial Material) const;
+
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
 	bool RebuildPreview();
 
@@ -181,6 +196,8 @@ public:
 
 private:
 	void InitializeJuryDemoFixedSixStaticRegistration(
+		AABTSM7BuildingMaterialSystem& MaterialSystem);
+	void InitializeBuildingFreezeV3RuntimeRegistration(
 		AABTSM7BuildingMaterialSystem& MaterialSystem);
 	void ConfigureJuryDemoFixedSixStaticHISM(
 		UHierarchicalInstancedStaticMeshComponent& Component);
@@ -333,6 +350,8 @@ private:
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
 	TOptional<FABTSM73JuryDemoFixedSixStaticEntry>
 		JuryDemoFixedSixStaticEntry;
+	TOptional<FABTSM73BuildingFreezeV3RuntimeEntry>
+		BuildingFreezeV3RuntimeEntry;
 	int32 JuryDemoFixedSixStaticBrickInstanceCount = 0;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
