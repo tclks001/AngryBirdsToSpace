@@ -259,6 +259,8 @@ return lerp(baseTerrainColor, RoadColor.rgb, saturate(roadMask));
 
 网格解析顺序为：Actor 的 `Forest/Rock Instance Mesh` → 对应 HISM 组件的 `Static Mesh` → Engine Cone/Cube 验收占位。重建不得用空 Actor 字段覆盖组件已经配置的网格。日志 `[ABTS][M3][HISM]` 会同时报告最终网格、符合摆放条件的 Cell 数和实际实例数；若 Cell 数大于 0 而实例数为 0，优先检查网格解析与 `InstancesPerCell`。
 
+树石 Transform 必须在写入 HISM 前完成生成期碰撞合法化。接地权威来自各网格 `BodySetup->AggGeom` 的简单碰撞支撑，而不是统一 Pivot 偏移：候选沿径向迭代到全部支撑样本保留 `DecorGroundClearanceCM`，同时限制超过资产固有 Pivot 补偿的额外抬升，避免用悬空换无穿透。Forest/Rock 共用一个 3D Spatial Hash，窄阶段以简单碰撞包络 OBB 的分离轴检查统一拒绝树—树、石—石和树—石穿插。每槽每 Attempt 独立派生 Seed；尝试耗尽即跳过，全部候选通过最终复核后才批量提交。`[ABTS][M3][HISMPlacement]` 的版本、Requested/Accepted、拒绝计数、净空、最小轴间距和 Result Hash 是确定性证据；Startup Chaos 预热只可作为 Integration 诊断，不能改写或替代该结果。
+
 HISM 使用的每个材质还必须在材质 Details 的 **Usage** 中启用 **Used with Instanced Static Meshes**，否则普通 StaticMesh 预览正常，HISM 却会使用默认材质或缺失对应渲染结果。当前 `M_PineTree` 与 `M_Stone` 已启用该 Usage；代码会把验证结果输出为 `ForestMaterialsValid` / `RockMaterialsValid`。
 
 树木的局部 `+Z` 不能完全跟随连续地表法线，否则在宏观高度交界或陡坡上会出现大幅侧倒。树木使用 `normalize(lerp(RadialUp, SurfaceNormal, ForestSurfaceNormalBlend))`，默认权重 `0.2`，即以球心径向为主、只吸收 20% 的坡面倾斜；岩石继续完整贴合地表法线。Pivot 必须位于树干底部中心且模型局部 `+Z` 指向树梢。日志 `[ABTS][M3][HISM]` 同时输出 `MaxSurfaceTilt` 与实际应用后的 `MaxAppliedTilt`，后者应显著更小。
