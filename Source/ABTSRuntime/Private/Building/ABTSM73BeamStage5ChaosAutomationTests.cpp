@@ -40,6 +40,22 @@ namespace ABTSM73BeamStage5ChaosTests
 	constexpr float MaximumRotationDegrees = 2.0f;
 	constexpr float GravityCMPerSec2 = 980.0f;
 	constexpr float GroundContactToleranceCM = 0.1f;
+
+	bool TryResolveProductionContractManifestEntryName(
+		const FABTSM73BeamDemoManifestEntry& Entry,
+		FName& OutContractManifestEntryName)
+	{
+		OutContractManifestEntryName = NAME_None;
+		FString ContractManifestEntryId = Entry.StableId.ToString();
+		if (!ContractManifestEntryId.RemoveFromStart(TEXT("Demo"))
+			|| ContractManifestEntryId.IsEmpty())
+		{
+			return false;
+		}
+		OutContractManifestEntryName = FName(*ContractManifestEntryId);
+		return true;
+	}
+
 	class FStage5PhysicsWorld final : public FTestWorldWrapper
 	{
 	public:
@@ -449,16 +465,25 @@ namespace ABTSM73BeamStage5ChaosTests
 			FABTSM73JuryDemoFixedSixRegistration::
 				FrozenV3RegistrationResultHash);
 
+		FName ContractManifestEntryName;
+		if (!Test.TestTrue(TEXT("Demo manifest entry maps to the production contract name"),
+			TryResolveProductionContractManifestEntryName(
+				Entry, ContractManifestEntryName)))
+		{
+			return false;
+		}
 		const int32 SiteIndex =
 			ProductionContract.JuryDemoFixedSix.Sites.IndexOfByPredicate(
-				[&Entry](const FABTSJuryDemoFixedSixBuildingSite& Candidate)
+				[ContractManifestEntryName](
+					const FABTSJuryDemoFixedSixBuildingSite& Candidate)
 				{
-					return Candidate.ManifestEntryId == Entry.StableId;
+					return Candidate.ManifestEntryId == ContractManifestEntryName;
 				});
 		const int32 StaticEntryIndex = StaticPlan.Entries.IndexOfByPredicate(
-			[&Entry](const FABTSM73JuryDemoFixedSixStaticEntry& Candidate)
+			[ContractManifestEntryName](
+				const FABTSM73JuryDemoFixedSixStaticEntry& Candidate)
 			{
-				return Candidate.ManifestEntryId == Entry.StableId;
+				return Candidate.ManifestEntryId == ContractManifestEntryName;
 			});
 		if (!Test.TestTrue(TEXT("V3 contract contains the requested complexity"),
 			ProductionContract.JuryDemoFixedSix.Sites.IsValidIndex(SiteIndex))
@@ -911,6 +936,48 @@ namespace ABTSM73BeamStage5ChaosTests
 		WorldWrapper.ForwardErrorMessages(&Test);
 		return bAccepted && !Test.HasAnyErrors();
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamStage5ContractManifestLookupTest,
+	"ABTS.M73DAG.BeamC3V3.ContractManifestLookup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamStage5ContractManifestLookupTest::RunTest(
+	const FString& Parameters)
+{
+	static const TArray<FName> ExpectedContractNames = {
+		TEXT("E1ColumnBreak"),
+		TEXT("E2DropTrigger"),
+		TEXT("E3SlideRelease"),
+		TEXT("E4TipOver"),
+		TEXT("E5SeamRelease"),
+		TEXT("E6TipOver")};
+	const TArray<FABTSM73BeamDemoManifestEntry>& Entries =
+		FABTSM73BeamDemoManifest::GetEntries();
+	TestEqual(TEXT("Every frozen demo entry has one production contract name"),
+		Entries.Num(), ExpectedContractNames.Num());
+	for (int32 Index = 0;
+		Index < FMath::Min(Entries.Num(), ExpectedContractNames.Num()); ++Index)
+	{
+		FName ActualContractName;
+		TestTrue(FString::Printf(TEXT("Entry %d maps to a contract name"), Index),
+			ABTSM73BeamStage5ChaosTests::
+				TryResolveProductionContractManifestEntryName(
+					Entries[Index], ActualContractName));
+		TestEqual(FString::Printf(TEXT("Entry %d maps to its V3 contract id"), Index),
+			ActualContractName, ExpectedContractNames[Index]);
+	}
+	FABTSM73BeamDemoManifestEntry InvalidEntry;
+	InvalidEntry.StableId = TEXT("E1ColumnBreak");
+	FName InvalidContractName;
+	TestFalse(TEXT("A non-demo id cannot silently enter the production lookup"),
+		ABTSM73BeamStage5ChaosTests::
+			TryResolveProductionContractManifestEntryName(
+				InvalidEntry, InvalidContractName));
+	TestTrue(TEXT("A rejected id leaves no contract name"),
+		InvalidContractName.IsNone());
+	return !HasAnyErrors();
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
