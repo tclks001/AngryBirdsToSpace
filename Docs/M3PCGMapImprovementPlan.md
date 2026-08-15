@@ -1699,3 +1699,19 @@ Editor-only Debug Layer：
 6. 用现有 M7/M9/M11.0 门槛回归。
 
 随后按第 14 节的 M3R-1～M3R-7 依次引入 `RouteBeat + EncounterContract + FlowS + BiomeDistrict`，并在稳定合同之后才接入六栋 M7 实体建筑。这能保留项目已有的确定性 CellTopo 基础，同时把 PCG 的价值从“随机铺一条路、分几块地”提升为“持续生成可通关、可侦察、可理解、可发射且节奏稳定的线性关卡”。
+
+---
+
+## 20. Building Generation and Placement Freeze V3：M3 MapFreezeV3
+
+本阶段采用增量预发布结果，不直接替换现行 V2 生产链：
+
+- 固定身份：`Seed=312503`、`Candidate=4`、`Schema=3`、M7 Catalog `8960617043786800590`；
+- 固定槽位：`[E2,E3,E4,E5,E1,E6]`；E2、E3、E4、E5、E6 在主星，E1 在既有卫星背面窗口；
+- 主星五栋从各自 Encounter 的 Attack Corridor/Slingshot 侧建立 Site X，Site Z 为主星径向；卫星 E1 复用卫星预览切帧，但把旧代理球心位置收回到真实月面 Pivot；
+- M7 已完成一次 `Building local +Y → Site +X`，M3 不再施加 90°。M3 用非方形 `SiteLocalBounds` 推导水平占地长轴，并冻结“攻击走廊沿 Site X、长轴与走廊正交”门，显式拦截装反和双重旋转；
+- 五个主星站点消费 V3 `PadBounds/EffectBounds` 做 Cell reservation，并逐对校验完整水平包络分离；卫星 E1 不生成或占用第六个主星施工位；
+- 每条站点冻结 Surface、Support Center/Radius、Gravity Authority/Identity、PlacementHash，最终按槽位顺序生成 LayoutHash；错误轴、Surface、E1 槽位、Bounds、发布副本漂移均 fail closed；
+- M3 只发布 `FABTSM3JuryMapFreezeV3Result` 供集成审核。Integration 切换生产契约前，现行 V2 Terrain Pad、V2 Adapter 和 `ProductionContractVersion=2` 保持不变，运行日志必须显示 `ActivationAllowed=0`。
+
+当前 M3 预发布冻结身份为 `LayoutHash=3EB6326A2877EE1E`；六条 PlacementHash 依次为 `A91A9FB5D79AE1CE / 4C41612002CC0208 / 8ACA9CA9BAFE95BD / 66C8FD0EF4ACD5F2 / F162C1D3F858E998 / 73BC7FE74D3835F7`。该身份需在最终代码上完成两次独立 fresh NullRHI 重跑后，才能作为集成候选；M7 实时 Chaos 与联合可见 PIE 仍是后续独立证据层。

@@ -325,6 +325,7 @@ bool AABTSM3Planet::RebuildPlanet()
 		FABTSM3MonthlySlingshotFieldResult();
 	MonthlySatellitePreviewResult =
 		FABTSM3MonthlySatellitePreviewResult();
+	JuryMapFreezeV3Result = FABTSM3JuryMapFreezeV3Result();
 	MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 	MonthlySlingshotFieldDebugData =
@@ -393,6 +394,54 @@ bool AABTSM3Planet::RebuildPlanet()
 			FABTSM3MonthlySatellitePreviewBuilder::GetRejectReasonName(
 				MonthlySatellitePreviewResult.RejectReason),
 			*SatellitePreviewFailure);
+	}
+	if (WorldSeed == FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed)
+	{
+		FString MapFreezeV3Failure;
+		if (!FABTSM3JuryMapFreezeV3Builder::Build(
+			LogicalCells,
+			GetActorLocation(),
+			PlanetRadiusCM,
+			MonthlySatellitePreviewConfig.PrimarySurfaceGravityCMPerSec2,
+			MonthlySpatialResult,
+			MonthlySatellitePreviewResult,
+			JuryMapFreezeV3Result,
+			MapFreezeV3Failure))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Reason=%s Failure=%s ProductionContract=V2 ActivationAllowed=0"),
+			WorldSeed,
+			FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId,
+			FABTSM3JuryMapFreezeV3Builder::GetRejectReasonName(
+				JuryMapFreezeV3Result.RejectReason),
+			*MapFreezeV3Failure);
+		}
+		else
+		{
+			UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=1 Seed=%d Candidate=%d Sites=%d Primary=5 SatelliteE1=1 Mapping=E2,E3,E4,E5,E1,E6 Catalog=%016llX LayoutHash=%016llX ProductionContract=V2 ActivationAllowed=0"),
+			WorldSeed,
+			JuryMapFreezeV3Result.SourceCandidateId,
+			JuryMapFreezeV3Result.Placements.Num(),
+			static_cast<unsigned long long>(
+				JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash),
+			static_cast<unsigned long long>(
+				JuryMapFreezeV3Result.LayoutHash));
+			for (const FABTSM3JuryMapFreezeV3Placement& Placement
+				: JuryMapFreezeV3Result.Placements)
+			{
+				UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M3Jury][MapFreezeV3][Site] Slot=%d Entry=%s Surface=%d PadCenterCell=%d CorridorLongAxisAbsDot=%.9f PlacementHash=%016llX"),
+				Placement.Site.EncounterIndex,
+				*Placement.Site.ManifestEntryId.ToString(),
+				static_cast<int32>(
+					Placement.Site.V3Envelope.SurfaceKind),
+				Placement.PadCenterCellId,
+				Placement.AttackCorridorLongAxisAbsDot,
+				static_cast<unsigned long long>(
+					Placement.Site.V3Envelope.PlacementHash));
+			}
+		}
 	}
 	BuildM3ContinuousSurface();
 	const FABTSM3MonthlyCandidatePresentation*
@@ -631,6 +680,7 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 			FABTSM3MonthlySlingshotFieldResult();
 		MonthlySatellitePreviewResult =
 			FABTSM3MonthlySatellitePreviewResult();
+		JuryMapFreezeV3Result = FABTSM3JuryMapFreezeV3Result();
 		MonthlyWitnessResult = FABTSM3MonthlyWitnessResult();
 #if WITH_EDITORONLY_DATA
 		MonthlySchemaDebugData = FABTSM3MonthlySchemaDebugData();
@@ -1336,6 +1386,40 @@ bool AABTSM3Planet::ValidateMonthlySatellitePreviewResult(
 			GetRejectReasonName(RejectReason),
 		*OutFailure);
 	return false;
+}
+
+bool AABTSM3Planet::ValidateJuryMapFreezeV3Result(
+	FString& OutFailure) const
+{
+	EABTSM3JuryMapFreezeV3RejectReason RejectReason =
+		EABTSM3JuryMapFreezeV3RejectReason::None;
+	if (ValidateJuryMapFreezeV3Snapshot(
+			JuryMapFreezeV3Result, RejectReason, OutFailure))
+	{
+		return true;
+	}
+	OutFailure = FString::Printf(
+		TEXT("%s:%s"),
+		FABTSM3JuryMapFreezeV3Builder::GetRejectReasonName(RejectReason),
+		*OutFailure);
+	return false;
+}
+
+bool AABTSM3Planet::ValidateJuryMapFreezeV3Snapshot(
+	const FABTSM3JuryMapFreezeV3Result& Result,
+	EABTSM3JuryMapFreezeV3RejectReason& OutReason,
+	FString& OutFailure) const
+{
+	return FABTSM3JuryMapFreezeV3Builder::Validate(
+		LogicalCells,
+		GetActorLocation(),
+		PlanetRadiusCM,
+		MonthlySatellitePreviewConfig.PrimarySurfaceGravityCMPerSec2,
+		MonthlySpatialResult,
+		MonthlySatellitePreviewResult,
+		Result,
+		OutReason,
+		OutFailure);
 }
 
 bool AABTSM3Planet::ValidateMonthlyWitnessResult(

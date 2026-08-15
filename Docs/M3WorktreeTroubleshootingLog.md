@@ -45,6 +45,9 @@
 | M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化/可见 PIE 已验收 | M3 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
 | M3-JURY-004 | 合成 Fixture 绿灯未覆盖动态包络独占冲突和真实固定地图精确身份 | 已补专项失败注入、运行时身份门与 F7 诊断 | M3 |
+| M3-JURY-005 | V2 Placement 已冻结，但生产地形/装饰未消费固定六栋空间 | 已接入 Terrain-only Pad、装饰避让与生产净空门 | M3 |
+| M3-JURY-006 | 固定 180 cm 裙边让施工台像嵌在地坑里 | 已改为逐栋解析宽缓整地并增加连续性/Chaos 门 | M3 |
+| M3-JURY-007 | V3 非方形建筑可能被 X/Y 装反或重复旋转，预发布结构门又依赖最终 LayoutHash | 已冻结路侧攻击轴/占地长轴正交门并按最终 Hash 顺序发布 | M3 |
 | M3-HISM-001 | 树石用统一 Pivot 偏移生成，首次进入 Chaos 因地形/实例穿插弹飞 | 已改为生成期碰撞包络贴地、跨类型避让和确定性门禁 | M3；M6 只保留集成诊断 |
 
 ## 3. 工作树、同步与构建
@@ -823,6 +826,34 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - 固定身份保持 `Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`，证明没有改动 M7 Pivot 或共享合同；
 - 最终 ForceUnity 二进制上的 `M3Jury-AdaptiveGrade-Final-FixedSix-20260815-201623-319-FreshAutomation.log` 为 `3/3 Success`，`M3Jury-AdaptiveGrade-Final-Contracts-20260815-201703-201-FreshAutomation.log` 为 `2/2 Success`，`M3Jury-AdaptiveGrade-Final-Finale-20260815-201739-961-FreshAutomation.log` 为 `1/1 Success`；
 - NullRHI 与组件级 Chaos 射线不替代可见地形观感。M7 逐栋 Chaos 激活后，联合可见 PIE 仍需检查六处均呈“内部平坦施工区 → 宽缓裙边 → 原地形”，没有坑壁、折线、碰撞台阶或建筑 Pivot 漂移。
+
+### M3-JURY-007：MapFreezeV3 必须用路侧攻击轴和非方形占地长轴证明没有重复旋转
+
+**现象**
+
+- V3 建筑由 M7 已经执行一次 `Building local +Y → Site +X` 内容到站点旋转；若 M3 再按旧认知补一个 90°，共享 V3 结构门仍可能只因 Z 轴径向正确而放行，但建筑会以窄面朝路；
+- 首版 MapFreezeV3 在六个 Site 和 PlacementHash 填完、`LayoutHash` 尚为零时提前调用 `IsStructurallyUsableV3()`，被正确拒绝为 `V3StructuralContract`。这不是空间候选失败，而是发布顺序违反“LayoutHash 非零”的预发布 DTO 约束。
+
+**根因**
+
+共享 V3 DTO 负责槽位、建筑身份、Bounds、支撑面、引力身份和径向 Z 轴等跨模块结构事实，但不推断玩家从道路/弹弓攻击走廊看到的横向轮廓，也不重复 M7 内容轴转换。M3 才拥有道路、Slingshot pocket、Attack Corridor 与地表切帧，因此“Site X 指向攻击来源、水平占地长轴与攻击走廊垂直”的证明必须由 M3 MapFreeze 门给出。另一方面，V3 结构门把非零 LayoutHash 视为完整快照的一部分，不能在 Hash 最终化之前调用。
+
+**修复**
+
+- 新增独立 `FABTSM3JuryMapFreezeV3Result`，固定 `Seed=312503 / Candidate=4 / [E2,E3,E4,E5,E1,E6]`；槽 0、1、2、3、5 在主星使用各自 Encounter 的 `AttackFaceDirection` 建立 Site X，槽 4 使用既有卫星背面预览帧建立 E1 Site X/Z 与真实卫星表面 Pivot；
+- 五个主星站点分别用 M7 V3 的精确 `PadBounds`、`EffectBounds` 做旋转后 `3 × 3` Cell 采样，并以完整水平 Pad/Effect 包络加 `180 cm` 余量做逐对分离；卫星 E1 明确不占用第六个主星 Pad/Effect reservation。Surface、Support Center/Radius、Gravity Authority/Hash、PlacementHash 与 LayoutHash 全部进入冻结身份；
+- 每栋从真实 `SiteLocalBounds` 推导水平长轴。当前六栋均为 Site Y 长于 Site X；门禁同时要求 `dot(SiteX, AttackCorridor) >= 0.9999` 与 `abs(dot(AttackCorridor, LongAxis)) <= 0.001`。因此 X/Y 装反、M3 再转 90°或只篡改发布 DTO 都 fail closed；
+- 先完成六条 PlacementHash，再计算并写入 LayoutHash，最后调用共享 `IsStructurallyUsableV3()`；生产 V2 导出、V2 Terrain Pad、Integration Adapter 与稳定共享契约均不修改，日志明确保持 `ProductionContract=V2 ActivationAllowed=0`。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；
+- 最终二进制上的 `Saved/Logs/M3MapFreezeV3_FinalRunA.log` 与 `Saved/Logs/M3MapFreezeV3_FinalRunB.log` 两次独立 fresh NullRHI 均为 `2/2 Success / EXIT CODE: 0`，并给出完全一致的 `LayoutHash=3EB6326A2877EE1E`；槽位顺序精确为 `E2,E3,E4,E5,E1,E6`，主星 PadCenter 分别为 `6882/7218/2782/4367/1328`，卫星 E1 为 `-1`，六栋 `CorridorLongAxisAbsDot` 均为 `0.000000000`；
+- `ABTS.M3.Jury.MapFreezeV3.01DeterminismAndRoadFacing` 验证五主星/一卫星、非方形 Y 长轴、Site X 路侧朝向、长轴正交、整结果重建和逐栋 PlacementHash 重复一致；
+- `ABTS.M3.Jury.MapFreezeV3.02AxisSurfaceSlotBoundsFailureClosure` 对第二次 90° 旋转、错误 Surface、错误 E1 槽位和 Bounds 漂移逐项要求拒绝；
+- `Saved/Logs/M3MapFreezeV3_LegacyV2Regression.log`：最终二进制上的现行 `ABTS.M3.Monthly.JuryFixedSix` 保持 `3/3 Success / EXIT CODE: 0`；
+- `Saved/Logs/M3MapFreezeV3_WorldContractRegression.log`：共享 `ABTS.Contracts.WorldGeneration` 保持 `3/3 Success / EXIT CODE: 0`，包含 V2 M3 Adapter、V3 DTO 与通用 Validation；
+- 以上 NullRHI 只证明 MapFreeze DTO、Cell reservation 和轴向合同，不替代 M7 逐栋实时 Chaos，也不替代最终联合可见 PIE。可见验收仍需从道路/弹弓侧确认看到的是建筑宽面，攻击走廊垂直穿向占地长轴，且月面只有 E1、主星只有 E2～E6。
 
 ## 15. 新条目模板
 

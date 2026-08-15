@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "PCG/ABTSM3MonthlyEncounter.h"
 #include "PCG/ABTSM3JuryFixedSixLayout.h"
+#include "PCG/ABTSM3JuryMapFreezeV3.h"
 #include "PCG/ABTSM3MonthlyFinaleAnchor.h"
 #include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
@@ -261,6 +262,18 @@ public:
 
 	/** Rebuilds and whole-struct compares the R-5.1 preview result. */
 	bool ValidateMonthlySatellitePreviewResult(
+		FString& OutFailure) const;
+
+	/** Additive V3 handoff; production remains on the Integration-owned V2 gate. */
+	const FABTSM3JuryMapFreezeV3Result& GetJuryMapFreezeV3Result() const
+	{
+		return JuryMapFreezeV3Result;
+	}
+
+	bool ValidateJuryMapFreezeV3Result(FString& OutFailure) const;
+	bool ValidateJuryMapFreezeV3Snapshot(
+		const FABTSM3JuryMapFreezeV3Result& Result,
+		EABTSM3JuryMapFreezeV3RejectReason& OutReason,
 		FString& OutFailure) const;
 
 	/**
@@ -599,6 +612,9 @@ public:
 	/** R-5.1 exact alternatives; no M9/M7 Actor and no monthly-world authority. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	FABTSM3MonthlySatellitePreviewResult MonthlySatellitePreviewResult;
+
+	/** Five primary sites plus satellite E1; not exported as production yet. */
+	FABTSM3JuryMapFreezeV3Result JuryMapFreezeV3Result;
 
 	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
