@@ -4,7 +4,9 @@
 
 #include "World/ABTSM8RecoveryBridgeSystem.h"
 
+#include "Building/ABTSM7BuildingTypes.h"
 #include "Engine/World.h"
+#include "Inventory/ABTSInventoryTypes.h"
 #include "Misc/AutomationTest.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "Terrain/ABTSM3RiverVisualBuilder.h"
@@ -278,6 +280,46 @@ bool FABTSM8WaterBarrierCoverageTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Neighbor water outside the bridge remains blocked"),
 		AdjacentBarrier->IsBlockingAtLocalAlongDistance(0.0f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM8RecoveredMaterialMappingTest,
+	"ABTS.M8.Recovery.BuildingMaterialMapping",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM8RecoveredMaterialMappingTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	struct FExpectedMapping
+	{
+		EABTSM7BuildingMaterial Material;
+		EABTSItemId Item;
+	};
+	const FExpectedMapping ExpectedMappings[] = {
+		{EABTSM7BuildingMaterial::Wood, EABTSItemId::Wood},
+		{EABTSM7BuildingMaterial::Stone, EABTSItemId::Stone},
+		{EABTSM7BuildingMaterial::Iron, EABTSItemId::MetalParts},
+		{EABTSM7BuildingMaterial::Glass, EABTSItemId::Glass},
+		{EABTSM7BuildingMaterial::Crystal, EABTSItemId::CrystalCore},
+	};
+	for (const FExpectedMapping& Expected : ExpectedMappings)
+	{
+		EABTSItemId Item = EABTSItemId::Branch;
+		TestTrue(
+			TEXT("Known building material maps to a shared inventory item"),
+			AABTSM8RecoveryBridgeSystem::TryMapRecoveredMaterialToItem(
+				Expected.Material,
+				Item));
+		TestEqual(TEXT("Recovered item mapping is stable"), Item, Expected.Item);
+	}
+
+	EABTSItemId UnknownItem = EABTSItemId::Branch;
+	TestFalse(
+		TEXT("Unknown building material fails closed"),
+		AABTSM8RecoveryBridgeSystem::TryMapRecoveredMaterialToItem(
+			static_cast<EABTSM7BuildingMaterial>(255),
+			UnknownItem));
 	return true;
 }
 

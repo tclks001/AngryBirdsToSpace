@@ -79,6 +79,8 @@ public:
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> IronBrickHISM;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Brick")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassBrickHISM;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Brick")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CrystalBrickHISM;
 
 private:
 	UHierarchicalInstancedStaticMeshComponent* GetBrickHISM(EABTSM7BuildingMaterial Material) const;
@@ -119,6 +121,8 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> GlassMaterial;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
+	TObjectPtr<UMaterialInterface> CrystalMaterial;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> RopeMaterial;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> ChainMaterial;
@@ -134,6 +138,8 @@ private:
 	TObjectPtr<UMaterialInterface> IronFallbackMaterial;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> GlassFallbackMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> CrystalFallbackMaterial;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Damage")
 	TArray<FABTSM7MaterialProfile> MaterialProfiles;
