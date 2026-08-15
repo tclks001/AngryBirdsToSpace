@@ -5,6 +5,9 @@
 > 日期：2026-08-15
 > 目标：以最小跨工作树改动冻结建筑生成规则、5+1 地图位置和后续 Chaos 证据链。
 
+集成执行详稿、V3 字段预备语义、fail-closed 矩阵与门禁清单见
+[Building Generation and Placement Freeze V3 集成准备与门禁](BuildingGenerationAndPlacementFreezeV3IntegrationReadiness.md)。
+
 ## 1. 本轮最终规则
 
 | 遭遇槽 | 建筑 | 支撑表面 | 主材料 | 特殊规则 |

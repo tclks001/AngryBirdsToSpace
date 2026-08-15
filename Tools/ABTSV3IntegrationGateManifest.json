@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "status": "PreparedNotAccepted",
+  "engineRoot": "C:\\Program Files\\Epic Games\\UE_5.8",
+  "crystalBaselineCommit": "36400f498cbfbbd6a18e3d64c45b5c6291d82915",
+  "activationAllowed": false,
+  "productionContractVersion": 2,
+  "frozenIdentities": {
+    "buildingFreezeV3Commit": null,
+    "placementCatalogHash": null,
+    "mapFreezeV3Commit": null,
+    "layoutHash": null,
+    "chaosFreezeV3Commit": null,
+    "chaosResultHash": null
+  },
+  "currentRunnableGates": [
+    {
+      "filter": "ABTS.M73A.CrystalMaterialBaseline",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M8.Recovery.BuildingMaterialMapping",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M8.Recovery.CrystalCoreToSpaceCordTransaction",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHITransaction"
+    },
+    {
+      "filter": "ABTS.M110.SpaceSlingshotItemContract",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.Contracts.WorldGeneration",
+      "expectedTests": 2,
+      "evidenceLayer": "NullRHIContract"
+    }
+  ],
+  "handoffRequiredGates": [
+    {
+      "owner": "M7",
+      "identity": "BuildingFreezeV3",
+      "filter": null,
+      "requiredFacts": [
+        "ExactCommit",
+        "PlacementCatalogHash",
+        "OrderedManifestEntries",
+        "SiteLocalBounds",
+        "SiteLocalBoundsHash",
+        "StaticGeometryHash",
+        "ProductionHash",
+        "CrystalCapIdentity"
+      ]
+    },
+    {
+      "owner": "M3",
+      "identity": "MapFreezeV3",
+      "filter": null,
+      "requiredFacts": [
+        "ExactCommit",
+        "WorldSeed",
+        "CandidateId",
+        "OrderedEncounterMapping",
+        "SurfaceKind",
+        "SupportSphereIdentity",
+        "PlacementHash",
+        "LayoutHash"
+      ]
+    },
+    {
+      "owner": "M7",
+      "identity": "ChaosFreezeV3",
+      "filter": null,
+      "requiredFacts": [
+        "ExactCommit",
+        "BodyProfileHash",
+        "WorldProfileHash",
+        "CandidateHash",
+        "ResultHash",
+        "FreshFixedStepEvidence",
+        "Realtime30FpsEvidence",
+        "Realtime60FpsEvidence",
+        "Realtime120FpsEvidence",
+        "VisiblePIEEvidence"
+      ]
+    }
+  ],
+  "evidencePolicy": {
+    "previewIsProduction": false,
+    "nullRhiIsRealtimeChaos": false,
+    "assetLoadIsVisiblePixel": false,
+    "visiblePieRequiresCurrentTaskAuthorization": true,
+    "failClosedOnIdentityMismatch": true
+  }
+}
