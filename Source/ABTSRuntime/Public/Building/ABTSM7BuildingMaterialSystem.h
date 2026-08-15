@@ -41,6 +41,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Device")
 	AABTSM7BuildingModule* SpawnDevice(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
 	AABTSM7BuildingModule* SpawnDeviceWithOverrides(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform, UStaticMesh* OverrideMesh, UMaterialInterface* OverrideMaterial);
+	/** Stage-5.5 device path: exact logical collision proxy plus authored visual child. */
+	AABTSM7BuildingModule* SpawnVoxelDevice(
+		const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
 
 	bool OwnsPrimitive(const UPrimitiveComponent* Component) const;
 	bool HandleBirdImpact(UPrimitiveComponent* Component, int32 InstanceIndex, float NormalSpeedCMPerSec, const FVector& IncomingVelocity, EABTSBirdId BirdId);
@@ -93,6 +96,10 @@ private:
 	TObjectPtr<UStaticMesh> SharedBrickMesh;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UStaticMesh> SharedCylinderMesh;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
+	TObjectPtr<UStaticMesh> ExplosivePresentationMesh;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
+	TObjectPtr<UStaticMesh> PistonPresentationMesh;
 	/** Parent used for colored no-asset fallbacks; Engine BasicShapeMaterial is the C++ default. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> FallbackMaterialParent;

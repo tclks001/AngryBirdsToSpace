@@ -49,6 +49,8 @@ AABTSM7BuildingMaterialSystem::AABTSM7BuildingMaterialSystem()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SteelCord(TEXT("/Game/StaticMesh/Cord/Steel/MI_Cord_Steel.MI_Cord_Steel"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DynamiteMaterial(TEXT("/Game/StaticMesh/Dynamite/MI_Dynamite.MI_Dynamite"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SpringMaterialAsset(TEXT("/Game/StaticMesh/Spring/MI_Spring.MI_Spring"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DynamiteMesh(TEXT("/Game/StaticMesh/Dynamite/SM_Dynamite.SM_Dynamite"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SpringMesh(TEXT("/Game/StaticMesh/Spring/SM_Spring.SM_Spring"));
 	if (Cube.Succeeded()) SharedBrickMesh = Cube.Object;
 	if (Cylinder.Succeeded()) SharedCylinderMesh = Cylinder.Object;
 	if (BasicShapeMaterial.Succeeded()) FallbackMaterialParent = BasicShapeMaterial.Object;
@@ -60,6 +62,8 @@ AABTSM7BuildingMaterialSystem::AABTSM7BuildingMaterialSystem()
 	if (SteelCord.Succeeded()) ChainMaterial = SteelCord.Object;
 	if (DynamiteMaterial.Succeeded()) ExplosiveMaterial = DynamiteMaterial.Object;
 	if (SpringMaterialAsset.Succeeded()) SpringMaterial = SpringMaterialAsset.Object;
+	if (DynamiteMesh.Succeeded()) ExplosivePresentationMesh = DynamiteMesh.Object;
+	if (SpringMesh.Succeeded()) PistonPresentationMesh = SpringMesh.Object;
 
 	MaterialProfiles = FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
 }
@@ -166,6 +170,42 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnDeviceWithOverrides(
 	const FVector ShapeScale = ModuleTransform.GetScale3D().GetAbs();
 	ModuleTransform.SetScale3D(FVector::OneVector);
 	Module->ConfigureCylinder(RuntimeMesh, RuntimeMaterial, Spec.Kind, EABTSM7BuildingMaterial::Iron, Spec.LengthCM, Spec.DiameterCM, ModuleTransform, ShapeScale);
+	Module->ConfigureImpactPhysics(GetProfile(EABTSM7BuildingMaterial::Iron));
+	Modules.Add(Module);
+	return Module;
+}
+
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnVoxelDevice(
+	const FABTSM7DeviceSpec& Spec,
+	const FTransform& WorldTransform)
+{
+	if (Spec.Kind != EABTSM7ModuleKind::ExplosiveBarrel
+		&& Spec.Kind != EABTSM7ModuleKind::SpringPiston)
+	{
+		return nullptr;
+	}
+	FActorSpawnParameters Params;
+	Params.Owner = this;
+	Params.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM7BuildingModule* Module = GetWorld()->SpawnActor<AABTSM7BuildingModule>(
+		AABTSM7BuildingModule::StaticClass(), WorldTransform, Params);
+	if (Module == nullptr)
+	{
+		return nullptr;
+	}
+	const bool bBarrel = Spec.Kind == EABTSM7ModuleKind::ExplosiveBarrel;
+	UMaterialInterface* RuntimeMaterial = bBarrel
+		? ExplosiveMaterial.Get() : SpringMaterial.Get();
+	if (RuntimeMaterial == nullptr)
+	{
+		RuntimeMaterial = GetMaterial(EABTSM7BuildingMaterial::Iron);
+	}
+	Module->ConfigureVoxelDevice(
+		SharedCylinderMesh,
+		bBarrel ? ExplosivePresentationMesh.Get() : PistonPresentationMesh.Get(),
+		RuntimeMaterial, Spec.Kind, Spec.LengthCM, Spec.DiameterCM,
+		WorldTransform);
 	Module->ConfigureImpactPhysics(GetProfile(EABTSM7BuildingMaterial::Iron));
 	Modules.Add(Module);
 	return Module;

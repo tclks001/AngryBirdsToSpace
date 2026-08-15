@@ -23,6 +23,10 @@ public:
 
 	void ConfigureBrick(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7BuildingMaterial InMaterial, const FTransform& WorldTransform);
 	void ConfigureCylinder(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7ModuleKind InKind, EABTSM7BuildingMaterial InMaterial, float LengthCM, float DiameterCM, const FTransform& WorldTransform, const FVector& AdditionalLocalScale = FVector::OneVector);
+	/** Uses an exact engine-cylinder collision proxy and a no-collision authored presentation mesh. */
+	void ConfigureVoxelDevice(UStaticMesh* CollisionMesh, UStaticMesh* PresentationMesh,
+		UMaterialInterface* Material, EABTSM7ModuleKind InKind,
+		float LengthCM, float DiameterCM, const FTransform& WorldTransform);
 	void ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile);
 	/** Applies a per-body Chaos quality override for multi-contact generated-building stacks. */
 	void ConfigureChaosSolverIterations(int32 PositionIterations, int32 VelocityIterations);
@@ -47,6 +51,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> Visual;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> DevicePresentation;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	EABTSM7ModuleKind ModuleKind = EABTSM7ModuleKind::Brick;

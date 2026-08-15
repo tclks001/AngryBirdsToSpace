@@ -42,6 +42,72 @@ void AABTSM7BuildingModule::ConfigureCylinder(UStaticMesh* Mesh, UMaterialInterf
 	Visual->SetRelativeScale3D(FVector(DiameterCM / 100.0f, DiameterCM / 100.0f, LengthCM / 100.0f) * AdditionalLocalScale.GetAbs());
 }
 
+void AABTSM7BuildingModule::ConfigureVoxelDevice(
+	UStaticMesh* CollisionMesh,
+	UStaticMesh* PresentationMesh,
+	UMaterialInterface* Material,
+	const EABTSM7ModuleKind InKind,
+	const float LengthCM,
+	const float DiameterCM,
+	const FTransform& WorldTransform)
+{
+	ConfigureCylinder(CollisionMesh, Material, InKind,
+		EABTSM7BuildingMaterial::Iron, LengthCM, DiameterCM, WorldTransform);
+	if (PresentationMesh == nullptr)
+	{
+		return;
+	}
+	if (DevicePresentation == nullptr)
+	{
+		DevicePresentation = NewObject<UStaticMeshComponent>(
+			this, TEXT("VoxelDevicePresentation"), RF_Transient);
+		DevicePresentation->SetupAttachment(Visual);
+		DevicePresentation->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		DevicePresentation->SetGenerateOverlapEvents(false);
+		DevicePresentation->SetCanEverAffectNavigation(false);
+		DevicePresentation->RegisterComponent();
+	}
+	DevicePresentation->SetStaticMesh(PresentationMesh);
+	if (Material != nullptr)
+	{
+		DevicePresentation->SetMaterial(0, Material);
+	}
+
+	const FBox NativeBounds = PresentationMesh->GetBoundingBox();
+	const FVector NativeSize = NativeBounds.GetSize();
+	const double NativeRadialSize = FMath::Max(
+		static_cast<double>(NativeSize.X), static_cast<double>(NativeSize.Y));
+	if (NativeRadialSize <= UE_DOUBLE_SMALL_NUMBER
+		|| NativeSize.Z <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return;
+	}
+	const FVector DesiredScale(
+		DiameterCM / NativeRadialSize,
+		DiameterCM / NativeRadialSize,
+		LengthCM / NativeSize.Z);
+	const FVector ProxyScale = Visual->GetRelativeScale3D().GetAbs();
+	const FVector RelativeScale(
+		DesiredScale.X / FMath::Max(ProxyScale.X, UE_DOUBLE_SMALL_NUMBER),
+		DesiredScale.Y / FMath::Max(ProxyScale.Y, UE_DOUBLE_SMALL_NUMBER),
+		DesiredScale.Z / FMath::Max(ProxyScale.Z, UE_DOUBLE_SMALL_NUMBER));
+	const FVector DesiredOffset = -NativeBounds.GetCenter() * DesiredScale;
+	const FVector RelativeOffset(
+		DesiredOffset.X / FMath::Max(ProxyScale.X, UE_DOUBLE_SMALL_NUMBER),
+		DesiredOffset.Y / FMath::Max(ProxyScale.Y, UE_DOUBLE_SMALL_NUMBER),
+		DesiredOffset.Z / FMath::Max(ProxyScale.Z, UE_DOUBLE_SMALL_NUMBER));
+	DevicePresentation->SetRelativeTransform(FTransform(
+		FQuat::Identity, RelativeOffset, RelativeScale));
+	// The shared engine cylinder remains the exact Chaos authority but is not
+	// part of presentation. Do not hide the root component: component visibility
+	// is inherited by attached children and would also hide the authored device.
+	// Disable only the proxy primitive's render passes instead.
+	Visual->SetRenderInMainPass(false);
+	Visual->SetRenderInDepthPass(false);
+	Visual->SetCastShadow(false);
+	DevicePresentation->SetVisibility(true, false);
+}
+
 void AABTSM7BuildingModule::ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile)
 {
 	BreakDamage = FMath::Max(1.0f, Profile.BreakDamage);

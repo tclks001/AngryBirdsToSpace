@@ -32,7 +32,8 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 	CouplingCourses UMETA(DisplayName = "Stage 2 - Core / Facade Coupling Courses"),
 	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame"),
 	FloorInfillRoof UMETA(DisplayName = "Stage 4 - Floor / Top Frames"),
-	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)")
+	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)"),
+	DeviceAssembly UMETA(DisplayName = "Stage 5.5 - Barrel / Piston Assembly")
 };
 
 /** Frozen jury-demo selection. Custom preserves manually authored preview settings. */
@@ -149,6 +150,67 @@ struct FABTSM73BeamD1BrickBinding
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Brick")
 	FBox LocalBounds = FBox(EForceInit::ForceInit);
+};
+
+/** One rigid device bound to an integer 36 cm occupancy box. Devices are not
+ * split into fake brick/load nodes; their support members remain Stage-5 ids. */
+USTRUCT(BlueprintType)
+struct FABTSM73BeamD1DeviceBinding
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Identity")
+	int32 DeviceId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device")
+	EABTSM7ModuleKind Kind = EABTSM7ModuleKind::ExplosiveBarrel;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device")
+	EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::Z;
+
+	/** Inclusive minimum occupied cell in the building-local 36 cm grid. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel")
+	FIntVector VoxelMin = FIntVector::ZeroValue;
+
+	/** Local-space phase of this building's unified 36 cm grid. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel", meta = (Units = "cm"))
+	FVector GridOriginCM = FVector::ZeroVector;
+
+	/** Occupancy and contact cell size; fixed by the Stage-1..5 grid contract. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel", meta = (Units = "cm"))
+	float VoxelCellSizeCM = 36.0f;
+
+	/** Positive occupied cell counts along local X/Y/Z. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel")
+	FIntVector VoxelExtent = FIntVector::ZeroValue;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device")
+	FABTSM7DeviceSpec DeviceSpec;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device")
+	FTransform LocalTransform = FTransform::Identity;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device")
+	FBox LocalBounds = FBox(EForceInit::ForceInit);
+
+	/** Stage-5 member ids carrying the device bottom contact cells. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static DAG")
+	TArray<int32> SupportMemberIds;
+
+	/** True when the device occupies free ground cells inside the envelope. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static DAG")
+	bool bDirectGroundSupport = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static DAG")
+	int32 SupportContactCellCount = 0;
+
+	/** Preliminary deterministic mass used only by the derived device ledger. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Static DAG", meta = (Units = "kg"))
+	float StaticMassKG = 0.0f;
+
+	/** Conservative swept/effect corridor; it is diagnostic, not a brick. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device")
+	FBox EffectCorridorLocalBounds = FBox(EForceInit::ForceInit);
 };
 
 USTRUCT(BlueprintType)
@@ -884,4 +946,26 @@ struct FABTSM73BeamD1Summary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Skeleton First|Stage 4|Timing")
 	double SkeletonFirstStage4TopFrameMilliseconds = 0.0;
+
+	/** Stage 5.5 derives devices without changing the frozen Stage-5 identity. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly")
+	bool bDeviceAssemblyEvaluated = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly")
+	int32 DeviceAssemblyCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly")
+	int32 DeviceAssemblySupportCellCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly")
+	int32 DeviceAssemblyUnsupportedCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly|Identity")
+	int64 DeviceSlotHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly|Identity")
+	int64 DeviceLoadDAGHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Device Assembly|Identity")
+	int64 DeviceAssemblyHash = 0;
 };

@@ -1,7 +1,8 @@
 # M7 评委演示六栋垂直切片冲刺设计
 
-> 状态：2026-08-15；Stage 1～4 与演示六栋清单 v1 已通过用户视觉验收并冻结，下一步进入 Stage 5
-> 生产积木承重 DAG。
+> 状态：2026-08-15；Stage 1～5.5 静态生产与装置装配已完成。进入完整建筑 Chaos 前，先执行
+> [JuryDemo 静态封口与 Fixed-Six V2 交接](M7JuryDemoStaticSealAndContractV2Handoff.md)，固定跨工作树
+> 顺序并验证最终静态 Bounds/Pad；Chaos 仍为 `NotEvaluated`。
 >
 > 上游：[Beam-C3 V3 骨架优先生成](M73BeamC3V3SkeletonFirstBuildingGenerationDesign.md)
 >
@@ -145,9 +146,42 @@ Bounds、XY 占地、原点 Pivot、`Z=0` 地面、方向与 36 cm Pad 安全边
 Facade-to-Top 替换的 suppressed Stage 3 临时柱，对 active AABB 全体执行正体积相交检查和落地检查；排序
 AABB/结构行分别形成几何与结构 Hash，因此不是手写六组尺寸，也不依赖 member 数组索引。
 
-冻结身份为 Schema `1`、Manifest Version `1`、Manifest Hash `2324068295`、Catalog Hash
-`13889440156022460967`。过滤器 `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze` 重新生成六栋并逐字段
+统一三轴 36 cm 网格修正后，冻结身份为 Schema `1`、Manifest Version `1`、Manifest Hash `2324068295`、
+Catalog Hash `11501529584318250152`。过滤器 `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze` 重新生成六栋并逐字段
 反验提交目录；完整字段与集成使用约定见
 [Stage 4.5 建筑放置冻结设计](M73BeamStage45PlacementFreezeDesign.md)。本门通过后 M3 可只等待集成工作树
 消费该目录，不再等待 M7 的 Stage 5/Chaos/破坏/弱点/六栋动态并发/完整 PIE；这些未完成项的证据身份保持
 `NotEvaluated`，不得由 Stage 4.5 推断。
+
+## 8. Stage 5：生产积木与承重 DAG
+
+详细生成顺序、fail-closed 合同和第一停点验收见
+[M73BeamStage5ProductionDAGDesign.md](M73BeamStage5ProductionDAGDesign.md)。Stage 5 只消费冻结 Stage 4 的
+active member：先过滤并压缩 suppression，再重建实际 BearingContacts，运行只读 Load DAG，最后形成
+`BrickId == MemberId == LoadNodeId` 的一对一绑定。禁止回到旧 `CompleteStaticDAG`、禁止结构失败后换 Seed、
+禁止由 Beam-C 插入修复柱改变已批准外观。
+
+验证仍按 E1 单栋首停，再跑固定六栋；不恢复 5×6 或全 Seed 门。Stage 5 已在修正后的统一三轴
+36 cm 格上固定六栋 6/6。Chaos、弱点和绳索保持 `NotEvaluated`；炸药桶/活塞进入独立 Stage 5.5，
+不得反向改写 Stage 5 建筑身份。详细合同见
+[Stage 5.5 炸药桶/活塞装配设计](M73BeamStage55DeviceAssemblyDesign.md)。
+
+## 9. Stage 5.5：炸药桶/活塞首版装配
+
+首版只服务固定六栋，每栋确定性发射一个装置。炸药桶占 `2×2×5` 个 36 cm cell；活塞按轴向占
+`6×2×2`、`2×6×2` 或 `2×2×6` cell。候选必须位于 WFC 语义实体内、不与任何 Stage 5 brick 或
+ProtectedVoid 正体积相交，并具有完整接地底面或可达地面的真实积木支座。装置保持单一刚体，不拆成
+伪积木节点；独立发布 Slot、Device Load DAG 与 Assembly Hash。编辑器下拉项
+`Stage 5.5 - Barrel / Piston Assembly` 同时显示完整建筑和真实装置资产。当前固定六栋 6/6，包含炸药桶和
+X/Z 向活塞；装置触发后的真实 Chaos 效果仍为 `NotEvaluated`。
+
+## 10. Chaos 前静态封口与跨工作树顺序
+
+Stage 5/5.5 完成后不直接进入 Chaos。先由 M7 用真实生产 Brick 与 Device 验证六栋是否仍位于 Stage 4.5
+`LocalBounds` 和 Pad 安全边内，并量化装置效果走廊；随后固定按
+`M7 → Integration → M3 → Integration → M7 → Integration → M7 Chaos → Integration` 推进。
+
+详细字段、判定矩阵、V2 所有权与交接清单见
+[M7 JuryDemo 静态封口与 Fixed-Six V2 交接设计](M7JuryDemoStaticSealAndContractV2Handoff.md)。M7 不修改
+共享合同或 M3 Fixture；若静态物理 Bounds 超界，本阶段只发布精确需求并停止 J4。只有静态联合门通过后，
+Chaos 才允许在冻结包络内修改 Stage 5/5.5 与物理参数；修改 Stage 4 前缀必须显式重新开冻。

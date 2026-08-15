@@ -10,6 +10,9 @@
 class AABTSM7BuildingMaterialSystem;
 class AABTSM7BuildingModule;
 class FABTSM73BeamD1DelayedMaterialSystemTest;
+class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
+class FABTSM73BeamD1Stage55DeviceAssemblyTest;
+class FABTSM73BeamD1Stage55EditorPreviewRouteTest;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -43,7 +46,27 @@ public:
 	{
 		return CompiledBricks;
 	}
+	const TArray<FABTSM73BeamD1DeviceBinding>& GetCompiledDevicesForValidation() const
+	{
+		return CompiledDevices;
+	}
 	int32 GetRuntimeModuleCountForValidation() const;
+
+	/** Capture-only setup used by the explicit offscreen Stage-5 evidence runner. */
+	bool ConfigureForAutomatedCapture(
+		EABTSM73BeamDemoBuilding InDemoBuilding,
+		EABTSM73BeamC3Stage4DiagnosticLayer InLayer,
+		FString& OutError);
+
+	/** Capture-only Stage-5 production view. Additions are rendered separately
+	 * from the immutable Stage-4 prefix and may be isolated for inspection. */
+	bool ConfigureStage5ProductionForAutomatedCapture(
+		EABTSM73BeamDemoBuilding InDemoBuilding,
+		bool bAdditionsOnly,
+		FString& OutError);
+
+	/** Tight world-space bounds of the currently visible diagnostic geometry. */
+	FBox GetAutomatedCaptureBounds() const;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
@@ -65,6 +88,14 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
 		Category = "ABTS|M7.3-Beam-D1|Preview")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassPreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Device Assembly")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ExplosiveDevicePreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Device Assembly")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> PistonDevicePreview;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
 		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
@@ -168,9 +199,14 @@ protected:
 
 private:
 	friend class FABTSM73BeamD1DelayedMaterialSystemTest;
+	friend class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
+	friend class FABTSM73BeamD1Stage55DeviceAssemblyTest;
+	friend class FABTSM73BeamD1Stage55EditorPreviewRouteTest;
 
 	UHierarchicalInstancedStaticMeshComponent* GetPreview(
 		EABTSM7BuildingMaterial Material) const;
+	bool GenerateStage5ProductionPreview(bool bAdditionsOnly, FString& OutError);
+	bool GenerateStage55DeviceAssemblyPreview(FString& OutError);
 	void ClearPreview();
 	void ClearStageDiagnostics();
 	void TryInitializeRuntimeBuilding();
@@ -179,6 +215,7 @@ private:
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> StageDiagnosticMIDs;
 
 	TArray<FABTSM73BeamD1BrickBinding> CompiledBricks;
+	TArray<FABTSM73BeamD1DeviceBinding> CompiledDevices;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
 	int32 RuntimeSystemSearchAttempts = 0;
 	FTimerHandle RuntimeSystemSearchTimer;

@@ -6,9 +6,11 @@
 
 #include "ABTSM73BeamD0ProfileCatalog.h"
 #include "Building/ABTSM73BeamD1PreviewActor.h"
+#include "Building/ABTSM73BeamDemoManifest.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -695,6 +697,225 @@ bool FABTSM73BeamD1DelayedMaterialSystemTest::RunTest(
 	TestEqual(TEXT("Delayed MaterialSystem receives every compiled Brick"),
 		Preview->GetRuntimeModuleCountForValidation(),
 		Preview->GetSummaryForValidation().BrickCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1Stage5EditorPreviewRouteTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.Stage5Production.EditorPreviewE6",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1Stage5EditorPreviewRouteTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamDemoManifestEntry Entry;
+	FString Error;
+	if (!TestTrue(TEXT("E6 manifest resolves"),
+		FABTSM73BeamDemoManifest::Resolve(
+			EABTSM73BeamDemoBuilding::E6TipOver, Entry, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FABTSM73BeamD1Stage5Result DirectResult;
+	if (!TestTrue(TEXT("Direct E6 Stage 5 producer accepts"),
+		FABTSM73BeamD1BrickCompiler().GenerateStage5(
+			Entry.Settings, DirectResult, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	const FTransform PreviewTransform = FTransform::Identity;
+	AABTSM73BeamD1PreviewActor* Preview =
+		World->SpawnActorDeferred<AABTSM73BeamD1PreviewActor>(
+			AABTSM73BeamD1PreviewActor::StaticClass(), PreviewTransform,
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!TestNotNull(TEXT("Stage 5 E6 PreviewActor"), Preview))
+	{
+		return false;
+	}
+	Preview->DemoBuilding = EABTSM73BeamDemoBuilding::E6TipOver;
+	Preview->GenerationStopStage = EABTSM73BeamC3GenerationStage::StaticDAG;
+	Preview->bShowEditorPreview = true;
+	Preview->bSpawnRuntimeModulesInPIE = false;
+	UGameplayStatics::FinishSpawningActor(Preview, PreviewTransform);
+
+	const FABTSM73BeamD1Summary& Summary = Preview->GetSummaryForValidation();
+	const int32 VisibleInstanceCount = Preview->WoodPreview->GetInstanceCount()
+		+ Preview->StonePreview->GetInstanceCount()
+		+ Preview->IronPreview->GetInstanceCount()
+		+ Preview->GlassPreview->GetInstanceCount();
+	TestTrue(TEXT("Editor Stage 5 route accepts"), Summary.bAccepted);
+	TestEqual(TEXT("Editor route publishes every production brick"),
+		Preview->GetCompiledBricksForValidation().Num(), DirectResult.Bricks.Num());
+	TestEqual(TEXT("Editor route renders every production brick"),
+		VisibleInstanceCount, DirectResult.Bricks.Num());
+	TestEqual(TEXT("Editor route preserves the Stage 5 production hash"),
+		Summary.BrickGeometryHash, DirectResult.Summary.BrickGeometryHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1Stage55DeviceAssemblyTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.Stage55DeviceAssembly.SixBuildings",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1Stage55DeviceAssemblyTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	int32 BarrelCount = 0;
+	int32 PistonCount = 0;
+	for (const FABTSM73BeamDemoManifestEntry& Entry
+		: FABTSM73BeamDemoManifest::GetEntries())
+	{
+		FABTSM73BeamD1Stage55Result Result;
+		FString Error;
+		if (!TestTrue(*FString::Printf(TEXT("%s Stage 5.5 accepts: %s"),
+			*Entry.StableId.ToString(), *Error),
+			FABTSM73BeamD1BrickCompiler().GenerateStage55DeviceAssembly(
+				Entry.Settings, Result, Error)))
+		{
+			AddError(Error);
+			return false;
+		}
+		TestTrue(TEXT("Stage 5.5 summary is accepted"), Result.Summary.bAccepted);
+		TestTrue(TEXT("Device assembly was evaluated"),
+			Result.Summary.bDeviceAssemblyEvaluated);
+		TestEqual(TEXT("Exactly one bounded demo device is emitted"),
+			Result.Devices.Num(), 1);
+		TestEqual(TEXT("Frozen Stage 5 remains device-free"),
+			Result.Stage5.Summary.DeviceAssemblyCount, 0);
+		TestNotEqual(TEXT("Device slot hash is populated"),
+			Result.DeviceSlotHash, 0ull);
+		TestNotEqual(TEXT("Device load DAG hash is populated"),
+			Result.DeviceLoadDAGHash, 0ull);
+		TestNotEqual(TEXT("Device assembly hash is populated"),
+			Result.DeviceAssemblyHash, 0ull);
+		if (Result.Devices.IsEmpty())
+		{
+			return false;
+		}
+		const FABTSM73BeamD1DeviceBinding& Device = Result.Devices[0];
+		BarrelCount += Device.Kind == EABTSM7ModuleKind::ExplosiveBarrel ? 1 : 0;
+		PistonCount += Device.Kind == EABTSM7ModuleKind::SpringPiston ? 1 : 0;
+		TestTrue(TEXT("Device uses at least two support cells"),
+			Device.SupportContactCellCount >= 2);
+		TestTrue(TEXT("Device has an explicit DAG support route"),
+			Device.bDirectGroundSupport || !Device.SupportMemberIds.IsEmpty());
+		for (const int32 SupportMemberId : Device.SupportMemberIds)
+		{
+			TestTrue(TEXT("Support member id exists in the Stage-5 DAG"),
+				Result.Stage5.LoadDAG.Nodes.IsValidIndex(SupportMemberId));
+			if (Result.Stage5.LoadDAG.Nodes.IsValidIndex(SupportMemberId))
+			{
+				TestTrue(TEXT("Every device support reaches ground"),
+					Result.Stage5.LoadDAG.Nodes[SupportMemberId].bGroundReachable);
+			}
+		}
+		for (const FABTSM73BeamD1BrickBinding& Brick : Result.Stage5.Bricks)
+		{
+			const FVector Overlap(
+				FMath::Min(Device.LocalBounds.Max.X, Brick.LocalBounds.Max.X)
+					- FMath::Max(Device.LocalBounds.Min.X, Brick.LocalBounds.Min.X),
+				FMath::Min(Device.LocalBounds.Max.Y, Brick.LocalBounds.Max.Y)
+					- FMath::Max(Device.LocalBounds.Min.Y, Brick.LocalBounds.Min.Y),
+				FMath::Min(Device.LocalBounds.Max.Z, Brick.LocalBounds.Max.Z)
+					- FMath::Max(Device.LocalBounds.Min.Z, Brick.LocalBounds.Min.Z));
+			TestFalse(TEXT("Device has no positive-volume brick penetration"),
+				Overlap.X > 0.01 && Overlap.Y > 0.01 && Overlap.Z > 0.01);
+		}
+		AddInfo(FString::Printf(
+			TEXT("Stage55Demo Entry=%s Kind=%d Axis=%d Min=%s Extent=%s Supports=%s Slot=%llu Load=%llu Assembly=%llu"),
+			*Entry.StableId.ToString(), static_cast<int32>(Device.Kind),
+			static_cast<int32>(Device.Axis), *Device.VoxelMin.ToString(),
+			*Device.VoxelExtent.ToString(),
+			*FString::JoinBy(Device.SupportMemberIds, TEXT("."),
+				[](const int32 Id) { return FString::FromInt(Id); }),
+			Result.DeviceSlotHash, Result.DeviceLoadDAGHash,
+			Result.DeviceAssemblyHash));
+	}
+	TestTrue(TEXT("Fixed six include at least one explosive barrel"), BarrelCount > 0);
+	TestTrue(TEXT("Fixed six include at least one spring piston"), PistonCount > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1Stage55EditorPreviewRouteTest,
+	"ABTS.M73DAG.BeamC3V3.Demo.Stage55DeviceAssembly.EditorPreviewE6",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1Stage55EditorPreviewRouteTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FABTSM73BeamDemoManifestEntry Entry;
+	FString Error;
+	if (!TestTrue(TEXT("E6 manifest resolves"),
+		FABTSM73BeamDemoManifest::Resolve(
+			EABTSM73BeamDemoBuilding::E6TipOver, Entry, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	FABTSM73BeamD1Stage55Result DirectResult;
+	if (!TestTrue(TEXT("Direct E6 Stage 5.5 producer accepts"),
+		FABTSM73BeamD1BrickCompiler().GenerateStage55DeviceAssembly(
+			Entry.Settings, DirectResult, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	AABTSM73BeamD1PreviewActor* Preview =
+		World->SpawnActorDeferred<AABTSM73BeamD1PreviewActor>(
+			AABTSM73BeamD1PreviewActor::StaticClass(), FTransform::Identity,
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!TestNotNull(TEXT("Stage 5.5 E6 PreviewActor"), Preview))
+	{
+		return false;
+	}
+	Preview->DemoBuilding = EABTSM73BeamDemoBuilding::E6TipOver;
+	Preview->GenerationStopStage = EABTSM73BeamC3GenerationStage::DeviceAssembly;
+	Preview->bShowEditorPreview = true;
+	Preview->bSpawnRuntimeModulesInPIE = false;
+	UGameplayStatics::FinishSpawningActor(Preview, FTransform::Identity);
+
+	const int32 VisibleBrickCount = Preview->WoodPreview->GetInstanceCount()
+		+ Preview->StonePreview->GetInstanceCount()
+		+ Preview->IronPreview->GetInstanceCount()
+		+ Preview->GlassPreview->GetInstanceCount();
+	const int32 VisibleDeviceCount =
+		Preview->ExplosiveDevicePreview->GetInstanceCount()
+		+ Preview->PistonDevicePreview->GetInstanceCount();
+	TestTrue(TEXT("Editor Stage 5.5 route accepts"),
+		Preview->GetSummaryForValidation().bAccepted);
+	TestEqual(TEXT("Editor route preserves every Stage-5 brick"),
+		VisibleBrickCount, DirectResult.Stage5.Bricks.Num());
+	TestEqual(TEXT("Editor route exposes the device ledger"),
+		Preview->GetCompiledDevicesForValidation().Num(), DirectResult.Devices.Num());
+	TestEqual(TEXT("Editor route renders every device asset"),
+		VisibleDeviceCount, DirectResult.Devices.Num());
+	TestEqual(TEXT("Editor route preserves device assembly identity"),
+		Preview->GetSummaryForValidation().DeviceAssemblyHash,
+		DirectResult.Summary.DeviceAssemblyHash);
 	return true;
 }
 
