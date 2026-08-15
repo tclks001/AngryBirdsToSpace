@@ -42,6 +42,8 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 	void SetAimFrame(const FVector& InCenter, const FVector& InForward, const FVector& InUp);
+	/** Opts the normal spherical M6 launch into a stable surface-reading aim composition. */
+	bool ConfigureAimPrimarySurfaceGroundContext(AABTSM2Planet* InPlanet);
 	/** Copies the authored camera-class defaults used by player input and calibration certification. */
 	bool CopyAimFraming(
 		float& OutDistanceCM,
@@ -113,6 +115,26 @@ public:
 		float DistanceCM,
 		float HorizontalFovDegrees,
 		float AspectRatio);
+	/** Preserves the authored aim position unless it must rise to look down at the surface anchor. */
+	static bool BuildGroundAwareAimView(
+		const FVector& LegacyLocation,
+		const FVector& GroundAnchor,
+		const FVector& Up,
+		float MinimumLookDownDegrees,
+		FVector& OutLocation,
+		FVector& OutLook,
+		FVector& OutScreenUp);
+	/** Builds a fixed bird-relative flight pose with an authored local-tangent look-down angle. */
+	static bool BuildFixedBirdFlightPose(
+		const FVector& BirdLocation,
+		const FVector& Up,
+		const FVector& Forward,
+		float DistanceCM,
+		float HeightCM,
+		float LookDownDegrees,
+		FVector& OutLocation,
+		FVector& OutLook,
+		FVector& OutScreenUp);
 	void ClearSatelliteFlightPresentation();
 	void NotifySatelliteE5Hit();
 	/** Real collision is stronger than prediction and guarantees a moon-frame hand-off. */
@@ -166,6 +188,8 @@ private:
 	FVector AimCenter = FVector::ZeroVector;
 	FVector AimForward = FVector::ForwardVector;
 	FVector AimUp = FVector::UpVector;
+	FVector AimGroundContextWorld = FVector::ZeroVector;
+	bool bAimGroundContextValid = false;
 	FVector PlanarFollowUp = FVector::UpVector;
 	bool bPlanarFollow = false;
 	bool bFollowBird = false;
@@ -211,6 +235,14 @@ private:
 	float AimTargetHeightCM = 245.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim", meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "20.0"))
 	float AimCameraBlendSpeed = 10.0f;
+	/** Tangential distance used to pick the stable surface anchor when launch mode begins. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "100.0", UIMin = "500.0", UIMax = "5000.0", Units = "cm"))
+	float AimGroundContextForwardDistanceCM = 1800.0f;
+	/** Minimum downward angle from the local tangent plane to the locked surface anchor. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "30.0", Units = "deg"))
+	float AimGroundContextMinimumLookDownDegrees = 8.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")
 	float FlightDistanceCM = 920.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")
@@ -224,6 +256,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight",
 		meta = (ClampMin = "0.0", ClampMax = "2.0", Units = "s"))
 	float FollowFacingImpactLockSeconds = 0.55f;
+	/** Fixed optical pitch below the local tangent; keeps the bird framing stable while revealing ground. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "45.0", Units = "deg"))
+	float FlightLookDownDegrees = 26.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
 		meta = (ClampMin = "2.0", ClampMax = "10.0"))
