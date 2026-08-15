@@ -15,6 +15,7 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
@@ -408,6 +409,9 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	if (Bird == nullptr || !IsBirdAllowed(*Bird, Cord))
 	{
 		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M6][Enter] Rejected Bird=%d Stake=%s"), Bird ? ABTSBirdIdToIndex(Bird->GetBirdId()) : -1, *ABTSGetItemFallbackLabel(Cord.GetStakeItem()));
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotEntryRejected,
+			FABTSGuideSubjects::FromSlingshotTier(Tier), &Cord,
+			Bird ? ABTSBirdIdToIndex(Bird->GetBirdId()) : -1);
 		return false;
 	}
 	ActiveCord = &Cord;
@@ -453,6 +457,9 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 		}
 	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Enter] Bird=%d Reinforced=%d"), ABTSBirdIdToIndex(Bird->GetBirdId()), Cord.GetStakeItem() == EABTSItemId::ReinforcedStake ? 1 : 0);
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotReady,
+		FABTSGuideSubjects::FromSlingshotTier(Tier), &Cord,
+		ABTSBirdIdToIndex(Bird->GetBirdId()), FMath::RoundToInt(PullAlpha * 100.0f));
 	return true;
 }
 
@@ -519,6 +526,12 @@ bool AABTSM6SlingshotSystem::BeginPull(APlayerController& Controller)
 			ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
 			PullAlpha);
 	}
+	if (ActiveCord.IsValid())
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotPulling,
+			FABTSGuideSubjects::FromSlingshotTier(ActiveCord->GetSlingshotTier()),
+			ActiveCord.Get(), FMath::RoundToInt(PullAlpha * 100.0f));
+	}
 	return true;
 }
 
@@ -548,11 +561,18 @@ void AABTSM6SlingshotSystem::UpdateAimFromCursor(APlayerController& Controller)
 void AABTSM6SlingshotSystem::AdjustPullPower(const float MouseWheelValue)
 {
 	if (LaunchState != EABTSM6LaunchState::Ready && LaunchState != EABTSM6LaunchState::Pulling) return;
+	const float PreviousPullAlpha = PullAlpha;
 	// UE wheel axis is positive upward. Design contract: wheel down increases power.
 	PullAlpha = FMath::Clamp(
 		PullAlpha - MouseWheelValue * GetResolvedPullPowerWheelStep(),
 		0.0f,
 		1.0f);
+	if (!FMath::IsNearlyEqual(PreviousPullAlpha, PullAlpha) && ActiveCord.IsValid())
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotPowerChanged,
+			FABTSGuideSubjects::FromSlingshotTier(ActiveCord->GetSlingshotTier()),
+			ActiveCord.Get(), FMath::RoundToInt(PullAlpha * 100.0f));
+	}
 }
 
 void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
@@ -701,6 +721,13 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 		AimPlaneOffset.Z,
 		GetActiveLaunchProfile() != nullptr ? CalibrationLaunchProfileHash : 0,
 		bCalibrationModeEnabled ? 1 : 0);
+	if (ActiveCord.IsValid())
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotLaunched,
+			FABTSGuideSubjects::FromSlingshotTier(ActiveCord->GetSlingshotTier()),
+			LaunchedBird.Get(), ABTSBirdIdToIndex(LaunchedBird->GetBirdId()),
+			FMath::RoundToInt(Velocity.Size()));
+	}
 	if (!bCalibrationModeEnabled)
 	{
 		BeginLaunchGravityPhase();

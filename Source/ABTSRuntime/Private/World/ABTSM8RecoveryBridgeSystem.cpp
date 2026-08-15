@@ -11,6 +11,7 @@
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "InputCoreTypes.h"
 #include "Inventory/ABTSInventoryComponent.h"
 #include "Inventory/ABTSInventoryTypes.h"
@@ -332,6 +333,9 @@ void AABTSM8RecoveryBridgeSystem::HandleMaterialRecovered(const EABTSM7BuildingM
 		const int32 FinalQuantity = Quantity * RecoveryQuantityPerDestroyedBrick;
 		Inventory->AddItem(ItemId, FinalQuantity);
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M8][Recovery] Added Item=%s Quantity=%d"), *ABTSGetItemFallbackLabel(ItemId), FinalQuantity);
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::BuildingMaterialRecovered,
+			FABTSGuideSubjects::FromItem(ItemId), nullptr, FinalQuantity,
+			static_cast<int32>(Material));
 	}
 }
 
@@ -520,6 +524,9 @@ bool AABTSM8RecoveryBridgeSystem::PlaceHeldBridgeAtAim(APlayerController& Contro
 		BridgeBarrierSideClearanceCM,
 		CarvedBarrierCount,
 		CarvedBarrierCount > 0 ? 1 : 0);
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::BridgeBuilt,
+		Geometry.bBarrierSegment ? FABTSGuideSubjects::Barrier : FABTSGuideSubjects::Flow,
+		Bridge, EdgeState.Key.CellA, EdgeState.Key.CellB);
 	return true;
 }
 

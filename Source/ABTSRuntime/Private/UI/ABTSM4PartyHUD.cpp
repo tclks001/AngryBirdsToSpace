@@ -7,6 +7,8 @@
 #include "Engine/Engine.h"
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
+#include "Guide/ABTSGuideWorldSubsystem.h"
 #include "Party/ABTSBirdParty.h"
 #include "Party/ABTSBirdPartySettings.h"
 #include "UI/ABTSCanvasUI.h"
@@ -30,6 +32,18 @@ namespace
 	TAutoConsoleVariable<float> CVarFlightCutPx(
 		TEXT("abts.UI.Flight.CutPx"), 11.0f,
 		TEXT("Shared cut-corner size for flight HUD panels [4, 24]."));
+	TAutoConsoleVariable<float> CVarGuideUIScale(
+		TEXT("abts.Guide.UIScale"), 1.0f,
+		TEXT("Manual multiplier applied after automatic 1280x720 guide DPI scaling [0.75, 1.5]."));
+	TAutoConsoleVariable<float> CVarGuideBubbleWidthPx(
+		TEXT("abts.Guide.BubbleWidthPx"), 500.0f,
+		TEXT("Guide bubble baseline width at 1280x720 [440, 620]."));
+	TAutoConsoleVariable<float> CVarGuideBubbleHeightPx(
+		TEXT("abts.Guide.BubbleHeightPx"), 150.0f,
+		TEXT("Guide bubble baseline height at 1280x720 [138, 190]."));
+	TAutoConsoleVariable<float> CVarGuidePictogramPx(
+		TEXT("abts.Guide.PictogramPx"), 92.0f,
+		TEXT("Guide pictogram slot baseline size at 1280x720 [76, 118]."));
 
 	void DumpFlightUISettings()
 	{
@@ -90,6 +104,7 @@ void AABTSM4PartyHUD::DrawHUD()
 	if (Canvas == nullptr) return;
 	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
 	DrawThemeDebugOverlay(Theme);
+	DrawGuideOverlay(Theme);
 	AABTSBirdParty* ResolvedParty = FindParty();
 	if (ResolvedParty == nullptr || !ResolvedParty->IsPartyReady()) return;
 
@@ -154,6 +169,227 @@ void AABTSM4PartyHUD::DrawHUD()
 		DrawText(TEXT("TAB  SWITCH"), Theme.ApplyOpacity(Theme.TextMuted),
 			HintBox.Min.X + 9.0f, HintBox.Min.Y + 5.0f,
 			GEngine->GetSmallFont(), 0.62f * Theme.TextScale, false);
+	}
+}
+
+void AABTSM4PartyHUD::DrawGuideOverlay(const FABTSUIThemeSnapshot& Theme)
+{
+	if (Canvas == nullptr || GEngine == nullptr || GetWorld() == nullptr) return;
+	const UABTSGuideWorldSubsystem* GuideSubsystem = GetWorld()->GetSubsystem<UABTSGuideWorldSubsystem>();
+	FABTSGuidePresentationSnapshot Guide;
+	if (GuideSubsystem == nullptr || !GuideSubsystem->GetActiveGuide(Guide)) return;
+
+	const float AutomaticScale = FMath::Min(Canvas->ClipX / 1280.0f, Canvas->ClipY / 720.0f);
+	const float ManualScale = FMath::Clamp(CVarGuideUIScale.GetValueOnGameThread(), 0.75f, 1.5f);
+	const float UIScale = FMath::Clamp(AutomaticScale * ManualScale, 0.80f, 1.45f);
+	const float BubbleWidth = FMath::Clamp(
+		CVarGuideBubbleWidthPx.GetValueOnGameThread(), 440.0f, 620.0f) * UIScale;
+	const float BubbleHeight = FMath::Clamp(
+		CVarGuideBubbleHeightPx.GetValueOnGameThread(), 138.0f, 190.0f) * UIScale;
+	const float IconSize = FMath::Min(
+		FMath::Clamp(CVarGuidePictogramPx.GetValueOnGameThread(), 76.0f, 118.0f) * UIScale,
+		BubbleHeight - 28.0f * UIScale);
+	const float ViewMargin = 24.0f * UIScale;
+	FVector2D AnchorScreen(Canvas->ClipX * 0.5f, ViewMargin + BubbleHeight);
+	bool bProjectedAnchor = false;
+	FVector AnchorWorld = Guide.WorldLocation;
+	if (AActor* AnchorActor = Guide.AnchorActor.Get())
+	{
+		FVector BoundsOrigin;
+		FVector BoundsExtent;
+		AnchorActor->GetActorBounds(true, BoundsOrigin, BoundsExtent);
+		AnchorWorld = BoundsOrigin + AnchorActor->GetActorUpVector()
+			* FMath::Max(10.0f, BoundsExtent.GetMax());
+	}
+	if ((Guide.AnchorActor.IsValid() || Guide.bHasWorldLocation) && PlayerOwner != nullptr)
+	{
+		bProjectedAnchor = PlayerOwner->ProjectWorldLocationToScreen(AnchorWorld, AnchorScreen, true);
+	}
+
+	FVector2D Origin(
+		bProjectedAnchor ? AnchorScreen.X - BubbleWidth * 0.5f : (Canvas->ClipX - BubbleWidth) * 0.5f,
+		bProjectedAnchor ? AnchorScreen.Y - BubbleHeight - 16.0f * UIScale : 36.0f * UIScale);
+	Origin.X = FMath::Clamp(Origin.X, ViewMargin, FMath::Max(ViewMargin, Canvas->ClipX - BubbleWidth - ViewMargin));
+	Origin.Y = FMath::Clamp(Origin.Y, ViewMargin, FMath::Max(ViewMargin, Canvas->ClipY - BubbleHeight - ViewMargin));
+	const FBox2D BubbleBox(Origin, Origin + FVector2D(BubbleWidth, BubbleHeight));
+	FABTSCanvasUI::DrawFacetedBox(*Canvas, Theme, BubbleBox,
+		Theme.PanelPrimary, Theme.AccentPrimary, 13.0f * UIScale,
+		FMath::Max(2.0f, Theme.BorderThicknessPx) * UIScale);
+
+	if (bProjectedAnchor)
+	{
+		const FVector2D TailStart(
+			FMath::Clamp(AnchorScreen.X,
+				BubbleBox.Min.X + 35.0f * UIScale,
+				BubbleBox.Max.X - 35.0f * UIScale),
+			BubbleBox.Max.Y);
+		DrawLine(TailStart.X, TailStart.Y, AnchorScreen.X, AnchorScreen.Y,
+			Theme.ApplyOpacity(Theme.AccentPrimary), 2.8f * UIScale);
+	}
+
+	const float Padding = 14.0f * UIScale;
+	const FBox2D IconBox(
+		FVector2D(BubbleBox.Min.X + Padding, BubbleBox.GetCenter().Y - IconSize * 0.5f),
+		FVector2D(BubbleBox.Min.X + Padding + IconSize, BubbleBox.GetCenter().Y + IconSize * 0.5f));
+	DrawGuidePictogram(Guide, IconBox, Theme);
+	const float TextX = IconBox.Max.X + 16.0f * UIScale;
+	const FString StepText = FString::Printf(TEXT("P0  %d/%d"), Guide.StepNumber, Guide.TotalSteps);
+	DrawText(StepText, Theme.ApplyOpacity(Theme.AccentSecondary),
+		TextX, BubbleBox.Min.Y + 13.0f * UIScale,
+		GEngine->GetSmallFont(), 0.72f * UIScale * Theme.TextScale, false);
+	DrawText(Guide.Title.ToString(), Theme.ApplyOpacity(Theme.TextPrimary),
+		TextX, BubbleBox.Min.Y + 38.0f * UIScale,
+		GEngine->GetSmallFont(), 1.03f * UIScale * Theme.TextScale, false);
+	DrawText(Guide.Body.ToString(), Theme.ApplyOpacity(Theme.TextMuted),
+		TextX, BubbleBox.Min.Y + 76.0f * UIScale,
+		GEngine->GetSmallFont(), 0.82f * UIScale * Theme.TextScale, false);
+	DrawText(Guide.InputHint.ToString(), Theme.ApplyOpacity(Theme.AccentPrimary),
+		TextX, BubbleBox.Min.Y + 116.0f * UIScale,
+		GEngine->GetSmallFont(), 0.84f * UIScale * Theme.TextScale, false);
+}
+
+void AABTSM4PartyHUD::DrawGuidePictogram(
+	const FABTSGuidePresentationSnapshot& Guide,
+	const FBox2D& IconBox,
+	const FABTSUIThemeSnapshot& Theme)
+{
+	if (Canvas == nullptr || GEngine == nullptr) return;
+	const float Scale = IconBox.GetSize().X / 92.0f;
+	const FLinearColor Primary = Theme.ApplyOpacity(Theme.AccentPrimary);
+	const FLinearColor Secondary = Theme.ApplyOpacity(Theme.AccentSecondary);
+	const FLinearColor Muted = Theme.ApplyOpacity(Theme.TextMuted);
+	const FLinearColor Dark = Theme.ApplyOpacity(Theme.SlotBorder);
+	FABTSCanvasUI::DrawFacetedBox(*Canvas, Theme, IconBox,
+		Theme.PanelSecondary, Theme.PanelBorder, 8.0f * Scale, 1.5f * Scale);
+
+	const auto Point = [&IconBox, Scale](const float X, const float Y)
+	{
+		return IconBox.Min + FVector2D(X, Y) * Scale;
+	};
+	const auto Stroke = [this, &Point, Scale](
+		const float X0, const float Y0, const float X1, const float Y1,
+		const FLinearColor& Color, const float Thickness = 2.4f)
+	{
+		const FVector2D A = Point(X0, Y0);
+		const FVector2D B = Point(X1, Y1);
+		DrawLine(A.X, A.Y, B.X, B.Y, Color, Thickness * Scale);
+	};
+	const auto Dot = [this, &Point, Scale](
+		const float X, const float Y, const float Radius, const FLinearColor& Color)
+	{
+		Canvas->K2_DrawPolygon(Canvas->DefaultTexture, Point(X, Y),
+			FVector2D(Radius * Scale), 18, Color);
+	};
+	const auto DrawStake = [&Stroke](const float X, const FLinearColor& Color)
+	{
+		Stroke(X, 28.0f, X, 71.0f, Color, 4.0f);
+		Stroke(X, 28.0f, X - 7.0f, 19.0f, Color, 3.0f);
+		Stroke(X, 28.0f, X + 7.0f, 18.0f, Color, 3.0f);
+		Stroke(X - 8.0f, 72.0f, X + 8.0f, 72.0f, Color, 2.0f);
+	};
+	const auto DrawPouch = [&Stroke, &Dot, &Dark](const float X, const float Y, const FLinearColor& Color)
+	{
+		Dot(X, Y, 7.0f, Color);
+		Stroke(X - 6.0f, Y - 2.0f, X + 6.0f, Y - 2.0f, Dark, 1.4f);
+	};
+
+	switch (Guide.Pictogram)
+	{
+	case EABTSGuidePictogram::CollectResources:
+		Stroke(20.0f, 61.0f, 72.0f, 61.0f, Muted, 2.0f);
+		Stroke(26.0f, 61.0f, 31.0f, 76.0f, Muted, 2.5f);
+		Stroke(66.0f, 61.0f, 61.0f, 76.0f, Muted, 2.5f);
+		Stroke(31.0f, 76.0f, 61.0f, 76.0f, Muted, 2.5f);
+		Stroke(27.0f, 18.0f, 48.0f, 59.0f, Primary, 4.0f);
+		Stroke(37.0f, 38.0f, 48.0f, 29.0f, Primary, 3.0f);
+		Stroke(33.0f, 31.0f, 25.0f, 27.0f, Primary, 2.5f);
+		Stroke(59.0f, 18.0f, 55.0f, 56.0f, Secondary, 2.4f);
+		Stroke(66.0f, 21.0f, 61.0f, 56.0f, Secondary, 2.4f);
+		Stroke(52.0f, 22.0f, 50.0f, 56.0f, Secondary, 2.4f);
+		break;
+
+	case EABTSGuidePictogram::InstallStakes:
+		DrawStake(28.0f, Primary);
+		DrawStake(64.0f, Primary);
+		Stroke(14.0f, 72.0f, 78.0f, 72.0f, Muted, 2.0f);
+		Stroke(28.0f, 7.0f, 28.0f, 16.0f, Secondary, 2.5f);
+		Stroke(23.0f, 12.0f, 28.0f, 17.0f, Secondary, 2.5f);
+		Stroke(33.0f, 12.0f, 28.0f, 17.0f, Secondary, 2.5f);
+		Stroke(64.0f, 7.0f, 64.0f, 16.0f, Secondary, 2.5f);
+		Stroke(59.0f, 12.0f, 64.0f, 17.0f, Secondary, 2.5f);
+		Stroke(69.0f, 12.0f, 64.0f, 17.0f, Secondary, 2.5f);
+		break;
+
+	case EABTSGuidePictogram::ConnectFirst:
+	case EABTSGuidePictogram::ConnectSecond:
+		DrawStake(24.0f, Primary);
+		DrawStake(68.0f, Guide.Pictogram == EABTSGuidePictogram::ConnectSecond ? Primary : Muted);
+		DrawPouch(46.0f, 48.0f, Primary);
+		Stroke(24.0f, 23.0f, 40.0f, 46.0f, Secondary, 3.0f);
+		Stroke(52.0f, 46.0f, 68.0f, 23.0f,
+			Guide.Pictogram == EABTSGuidePictogram::ConnectSecond ? Secondary : Muted, 3.0f);
+		Dot(Guide.Pictogram == EABTSGuidePictogram::ConnectSecond ? 68.0f : 24.0f,
+			23.0f, 4.0f, Secondary);
+		break;
+
+	case EABTSGuidePictogram::SwitchBird:
+		Dot(43.0f, 45.0f, 23.0f, Secondary);
+		Dot(35.0f, 40.0f, 2.2f, Dark);
+		Dot(51.0f, 40.0f, 2.2f, Dark);
+		Stroke(38.0f, 51.0f, 43.0f, 56.0f, Primary, 3.0f);
+		Stroke(43.0f, 56.0f, 49.0f, 51.0f, Primary, 3.0f);
+		Stroke(13.0f, 29.0f, 21.0f, 20.0f, Primary, 2.8f);
+		Stroke(21.0f, 20.0f, 21.0f, 29.0f, Primary, 2.8f);
+		DrawText(TEXT("2"), Primary, Point(66.0f, 57.0f).X, Point(66.0f, 57.0f).Y,
+			GEngine->GetSmallFont(), 0.95f * Scale * Theme.TextScale, false);
+		break;
+
+	case EABTSGuidePictogram::EnterLaunch:
+		DrawStake(24.0f, Muted);
+		DrawStake(68.0f, Muted);
+		DrawPouch(46.0f, 48.0f, Primary);
+		Stroke(24.0f, 23.0f, 40.0f, 46.0f, Secondary, 3.0f);
+		Stroke(52.0f, 46.0f, 68.0f, 23.0f, Secondary, 3.0f);
+		Stroke(72.0f, 72.0f, 53.0f, 55.0f, Primary, 3.0f);
+		Stroke(53.0f, 55.0f, 61.0f, 57.0f, Primary, 2.5f);
+		Stroke(53.0f, 55.0f, 56.0f, 63.0f, Primary, 2.5f);
+		break;
+
+	case EABTSGuidePictogram::PullPouch:
+		DrawStake(24.0f, Muted);
+		DrawStake(68.0f, Muted);
+		DrawPouch(46.0f, 66.0f, Primary);
+		Stroke(24.0f, 23.0f, 40.0f, 63.0f, Secondary, 3.0f);
+		Stroke(52.0f, 63.0f, 68.0f, 23.0f, Secondary, 3.0f);
+		Stroke(46.0f, 40.0f, 46.0f, 55.0f, Primary, 2.8f);
+		Stroke(40.0f, 50.0f, 46.0f, 56.0f, Primary, 2.8f);
+		Stroke(52.0f, 50.0f, 46.0f, 56.0f, Primary, 2.8f);
+		break;
+
+	case EABTSGuidePictogram::AdjustPower:
+		Canvas->K2_DrawBox(Point(29.0f, 14.0f), FVector2D(34.0f, 64.0f) * Scale,
+			2.5f * Scale, Secondary);
+		Stroke(29.0f, 39.0f, 63.0f, 39.0f, Secondary, 2.0f);
+		Stroke(46.0f, 19.0f, 46.0f, 32.0f, Primary, 4.0f);
+		Stroke(73.0f, 20.0f, 73.0f, 34.0f, Primary, 2.8f);
+		Stroke(66.0f, 27.0f, 80.0f, 27.0f, Primary, 2.8f);
+		Stroke(66.0f, 65.0f, 80.0f, 65.0f, Muted, 2.8f);
+		break;
+
+	case EABTSGuidePictogram::ReleaseLaunch:
+		DrawStake(24.0f, Muted);
+		DrawStake(68.0f, Muted);
+		DrawPouch(46.0f, 59.0f, Primary);
+		Stroke(24.0f, 23.0f, 40.0f, 57.0f, Secondary, 3.0f);
+		Stroke(52.0f, 57.0f, 68.0f, 23.0f, Secondary, 3.0f);
+		Stroke(46.0f, 49.0f, 46.0f, 10.0f, Primary, 3.2f);
+		Stroke(39.0f, 18.0f, 46.0f, 10.0f, Primary, 3.2f);
+		Stroke(53.0f, 18.0f, 46.0f, 10.0f, Primary, 3.2f);
+		break;
+
+	default:
+		Dot(46.0f, 46.0f, 18.0f, Secondary);
+		break;
 	}
 }
 
