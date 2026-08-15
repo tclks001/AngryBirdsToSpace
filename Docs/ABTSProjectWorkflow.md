@@ -18,6 +18,11 @@
 
 当前入口：[Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M3 Fixed-Six 计划](M3JuryDemoFixedSixIntegrationPlan.md) · [M7 Stage 4.5 放置冻结](M73BeamStage45PlacementFreezeDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
+- 数值冻结：技术展示版 Phase 1 已建立跨 M3/M6/M7/M11/合成拓扑的集中
+  `TechnicalFrozen` Manifest；配方材料量、掉落和破坏阈值仍是
+  `PlaytestCandidate`。完整流程继续受 CrystalCore 奖励交付与逐里程碑供需证明阻断，
+  详见[技术演示数值冻结设计](TechnicalDemoNumericFreezeDesign.md)。
+
 ## 2. 不可违反的项目约束
 
 1. `CellTopo` 永远是球面地表 Gameplay 的逻辑源：地形类型、道路、水网、桥址、建筑/资源逻辑与可达性均由它或 Task Graph 派生；连续球面只负责渲染与碰撞表现。M11 的三颗助推行星和 UFO 只能由 `LaunchSite` 太空弹弓的终局局部布局预设生成，不保存绝对世界坐标，也不反向成为地表逻辑源。
@@ -41,6 +46,7 @@
 | 领域 | 优先阅读的详稿 |
 | --- | --- |
 | 总体玩法与阶段状态 | [主设计稿](AngryBirdsToSpaceGameDesign.md) |
+| 数值冻结与无软锁 | [技术演示数值冻结设计](TechnicalDemoNumericFreezeDesign.md) |
 | 并行开发与集成 | [M3/M7/M11 多工作树协作与集成规范](ABTSMultiWorktreeDevelopmentGuide.md) |
 | 球面基础与移动 | [M1 独立入口](M1IndependentEntryDesign.md) · [M2 球面](M2PlanetSurfaceDesign.md) · [M2.5 径向引力/跳跃](M25RadialGravityAndJumpDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) |
 | PCG 与表现 | [M3 Fixed-Six 计划](M3JuryDemoFixedSixIntegrationPlan.md) · [Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M3R 月度地图改进](M3PCGMapImprovementPlan.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M3 地形表现/HISM](M3TaskGraphTerrainPresentationDesign.md) |
