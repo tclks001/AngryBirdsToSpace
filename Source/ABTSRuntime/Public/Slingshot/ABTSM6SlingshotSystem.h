@@ -158,6 +158,11 @@ public:
 	void BeginRequiredBuildingContract(int32 ExpectedRequiredBuildingCount);
 	void RegisterRequiredBuilding(AABTSM73StableBuildingActor& Building);
 	void SealRequiredBuildingContract(bool bSetupRejected);
+	/** Exact read-only result for the Integration-owned Fixed-Six static gate. */
+	bool CopyFixedSixStaticJointGateResult(
+		uint64& OutRegistrationResultHash,
+		int32& OutRegisteredBuildingCount,
+		int32& OutStaticModuleCount) const;
 
 	EABTSM6LaunchState GetLaunchState() const { return LaunchState; }
 	bool IsLaunchModeActive() const { return LaunchState != EABTSM6LaunchState::Inactive; }
@@ -491,4 +496,8 @@ private:
 	bool bRequiredBuildingSetupRejected = false;
 	int32 ExpectedRequiredBuildingCount = 0;
 	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>> RequiredBuildingActors;
+	bool bFixedSixStaticJointGateAccepted = false;
+	uint64 FixedSixStaticJointRegistrationResultHash = 0;
+	int32 FixedSixStaticJointRegisteredBuildingCount = 0;
+	int32 FixedSixStaticJointModuleCount = 0;
 };

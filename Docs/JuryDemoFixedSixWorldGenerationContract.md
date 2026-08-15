@@ -1,8 +1,8 @@
 # JuryDemo Fixed-Six V1/V2 世界生成合同
 
-> 状态：2026-08-15，V1 J3 保持兼容；M7 J4 静态封口与 M3 V2 Placement/Layout 均已通过。Integration 已用 M3 最终身份冻结 V2 Adapter，固定评审 Seed 现在原子发布 V2；下一步由 M7 消费该快照完成静态注册。
+> 状态：2026-08-15，V1 J3 保持兼容；M3 V2、Integration Adapter、M7 六栋静态消费与共享 M6 联合门均已通过。canonical `L_ABTS_M10` 两次 fresh NullRHI 均以六栋 Accepted 发布 WorldReady；下一步回到 M7 做逐关动态 Chaos。
 >
-> 发布身份：`JuryDemoFixedSixV2 / AdapterPublished`；兼容身份：`JuryDemoFixedSixV1`。
+> 发布身份：`JuryDemoFixedSixV2 / StaticJointAccepted / ChaosNotEvaluated`；兼容身份：`JuryDemoFixedSixV1`。
 
 ## 1. 目标与非目标
 
@@ -16,6 +16,8 @@
 - M7 Placement Schema：`1`
 - M7 Manifest Version / Hash：`1 / 2324068295`
 - M7 V1 / V2 Placement Catalog Hash：`13889440156022460967 / 11501529584318250152`
+- M7 静态 Registration Result Hash：`3948236352584381910`
+- 六栋静态模块：`5736` 块积木实例 + `6` 个静态装置 = `5742`
 - 有序 Encounter：`E1`～`E6`，恰好六条
 
 ## 2. 兼容策略
@@ -120,11 +122,21 @@ J3 自动门：
 - `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze`：1/1，日志 `Saved/Logs/Integration-M3V2-M7Stage45-20260815-FreshAutomation.log`；
 - 四份 fresh NullRHI 日志均有唯一 `TEST COMPLETE. EXIT CODE: 0`，失败测试、项目 Error、Fatal 与 ensure 计数均为零。前两份初始 `-log` 预检运行没有测试完成标记，已明确作废且未计入证据。
 
+2026-08-15 六栋静态联合门证据：
+
+- M7 交接提交：`5b4755719b9d82d87303a6861bc35640c6184e3d`；只修改 M7 所有权文本文件，无共享文件和二进制资产进入提交；
+- UE 5.8 Development Editor 自适应非 Unity 与 `-ForceUnity -DisableAdaptiveUnity` 均 `Result: Succeeded`；
+- `ABTS.Integration.JuryDemoFixedSix.StaticJointGate`：1/1；真实执行 M3 V2 导出 → M7 六栋生产/静态注册 → M6 required-building 封口，并验证顺序漂移及自洽但错误的 Registration Hash 均失败关闭，日志 `Saved/Logs/Integration-M7V2-StaticJointGate-20260815-R1-FreshAutomation.log`；
+- M7 `J4V2Consumer`：2/2，日志 `Saved/Logs/Integration-M7V2-J4Consumer-20260815-FreshAutomation.log`；J4 静态封口：1/1，日志 `Saved/Logs/Integration-M7V2-J4StaticSeal-20260815-FreshAutomation.log`；
+- 世界合同：2/2，日志 `Saved/Logs/Integration-M7V2-WorldContracts-20260815-FreshAutomation.log`；M6 回归：4/4，日志 `Saved/Logs/Integration-M7V2-M6-20260815-FreshAutomation.log`；上述五份自动化日志均有唯一正常完成标记和零失败测试；
+- canonical `L_ABTS_M10` 两个独立 fresh NullRHI 进程均得到 `Buildings=6 / Modules=5742 / Layout=0x7029074579FDC52E / ResultHash=3948236352584381910`、`BuildingContractSealed Expected=6 Registered=6 SetupRejected=0` 与 `WorldReady=1 BuildingAccepted=6 BuildingRejected=0`，日志 `Saved/Logs/Integration-M7V2-L_ABTS_M10-StaticJoint-20260815-FreshRuntime.log`、`Saved/Logs/Integration-M7V2-L_ABTS_M10-StaticJoint-Repeat-20260815-FreshRuntime.log`；
+- 两次运行的 M3 地貌 HISM 预热候选数分别为 `0 / 3502`，但扫描总数均为 `8909`，且 Fixed-Six 六栋身份、计数、共享封口和 WorldReady 完全一致；该预热调度差异不属于静态 Registration 身份，也不作为 Chaos 证据。
+
 该 DTO 固定六个纯值站点，只在导出时复制并验证，无 Tick、渲染、GPU、纹理、Sampler 或资产内存增量；J4 的 Actor/Chaos/帧时预算必须由 M7 和 J5 另行测量。
 
-## 6. M7 J4 消费要求
+## 6. M7 J4 消费与 Integration 静态联合门
 
-M7 合并包含本合同的 `master` 后，在其自有文件中实现：
+M7 已按以下边界完成 V2 静态消费；Integration 随后把同一批次接入共享 M6 门：
 
 1. 只按 `ManifestEntryId` 解析 Stage 4.5 冻结目录；
 2. 逐条比较 Encounter、Tier、Seed、Descriptor Hash，并比较合同级 Manifest/Catalog/Layout 身份；
@@ -132,21 +144,21 @@ M7 合并包含本合同的 `master` 后，在其自有文件中实现：
 4. 仅当前 Encounter 切换为动态 Chaos，离场后按明确生命周期处理；
 5. 任一不一致 fail closed，禁止换 Profile、递增 Seed、重新运行 WFC 搜索或回退旧 DAG2.3 三建筑合同。
 
-M7 必须在自己的排错账本记录 J4 新 ID；共享合同改动仍回到集成工作树。
+M7 排错账本新增 `M7-BC-118`；共享 M6 门要求 E1→E6 顺序、共同 Registration Hash、`5742` 静态模块与六个 Accepted Actor 同时匹配，之后才允许封口。
 
 ## 6.1 V2 当前冻结事实
 
 V2 的 Manifest 仍为 `1 / 2324068295`，Schema 仍为 `1`，Pad、Tier、Seed、Pivot 与静态 Bounds 不变。新的 Catalog、逐栋 Descriptor/Production/Device Hash 及 EffectBounds 以 [M7 JuryDemo 静态封口与 Fixed-Six V2 交接设计](M7JuryDemoStaticSealAndContractV2Handoff.md) 为唯一人读表；运行时校验中的精确常量由集成工作树所有的合同实现维护。
 
-M3 与 Integration 现在已经输出并验证 V2 数据面；这仍不代表六栋已静态注册、ChaosReady 或 IntegrationAccepted。上述状态必须由 M7 消费和 J5 独立证据提升。
+M3、Integration 与 M7 已输出并验证 V2 数据面及六栋静态注册，当前身份提升为 `StaticJointAccepted`。这仍不代表 `ChaosReady` 或最终 `IntegrationAccepted`；动态激活、离场清理、D3D12 与可见 PIE 必须另行取证。
 
 ## 7. J5 联合验收
 
-集成候选完成 M7 J4 后串行执行：
+静态联合门完成后继续串行执行：
 
-1. fresh NullRHI：六栋静态注册、重复加载身份不漂移、错误合同失败注入；
+1. ~~fresh NullRHI：六栋静态注册、重复加载身份不漂移、错误合同失败注入；~~ 已完成；
 2. fresh 可见 PIE：`L_ABTS_M10` 完整 E1→E6，核对道路、河流、水体、建筑、出生区与终局区无重叠；
 3. 每关只激活当前建筑的动态 Chaos，流程可继续，失败不遗留隐形碰撞或半注册 Actor；
 4. 日志同时记录 World Seed、Candidate、Manifest/Catalog/Layout Hash、当前 Encounter、静态注册数与动态 Authority。
 
-J3 通过后状态最多为 `ContractReady / IntegrationPending`。只有 J4 与上述 J5 共同通过，才可提升为 `IntegrationAccepted`；`ChaosReady` 仍是逐栋独立证据。
+当前状态最多为 `StaticJointAccepted / ChaosPending`。只有逐栋动态门与上述剩余 J5 共同通过，才可提升为 `IntegrationAccepted`；`ChaosReady` 仍是逐栋独立证据。
