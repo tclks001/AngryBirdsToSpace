@@ -261,6 +261,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Building")
 	const TArray<FABTSM3BuildingSpawnSite>& GetBuildingSpawnSites() const { return BuildingSpawnSites; }
 
+	/**
+	 * Verifies the production terrain seats and decoration clearance consumed by
+	 * the frozen E1-E6 jury layout. This is M3-local runtime evidence and does
+	 * not add the fixed-six placements to the compatibility building contract.
+	 */
+	bool ValidateJuryFixedSixProductionClearance(
+		int32& OutTerrainPadCount,
+		int32& OutPhysicalOverlapInstanceCount,
+		int32& OutDynamicOverlapInstanceCount,
+		float& OutMaxPadResidualCM,
+		FString& OutFailure) const;
+
+	int32 GetJuryFixedSixDecorClearanceRejectedCount() const
+	{
+		return JuryFixedSixDecorClearanceRejectedCount;
+	}
+
 	/** Deterministic terminal frame authored by M3 and consumed by M11 local-layout presets. */
 	const FABTSM110FinaleLocalFrame& GetFinaleLaunchFrame() const { return FinaleLaunchFrame; }
 
@@ -556,6 +573,11 @@ private:
 		const FABTSM3MonthlyCandidatePresentation*
 			PresentationCandidate = nullptr);
 	void BuildBuildingSpawnSites();
+	bool AppendJuryFixedSixTerrainPads(
+		TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
+		FString& OutFailure);
+	bool IsInsideJuryFixedSixDynamicEnvelope(
+		const FVector& PlanetLocalSurfaceLocation) const;
 	bool TryBuildMonthlyPresentationPreviewData(
 		TArray<FABTSM3CellState>& OutCellStates,
 		TArray<FABTSM3CellEdgeState>& OutEdgeStates,
@@ -589,6 +611,8 @@ private:
 	int32 TerrainBasePaletteCellCount = 0;
 	int32 MonthlyDecorAccent0InstanceCount = 0;
 	int32 MonthlyDecorAccent1InstanceCount = 0;
+	int32 JuryFixedSixTerrainPadCount = 0;
+	int32 JuryFixedSixDecorClearanceRejectedCount = 0;
 	bool bMonthlyPresentationPreviewActive = false;
 	int32 ActiveMonthlyPresentationPreviewCandidateId =
 		INDEX_NONE;

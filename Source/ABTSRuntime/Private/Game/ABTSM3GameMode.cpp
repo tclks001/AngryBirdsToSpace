@@ -2095,6 +2095,31 @@ void AABTSM3GameMode::TryCompleteM3R5Smoke()
 		JuryReservedDynamicEnvelopeCellCount,
 		static_cast<unsigned long long>(
 			ABTSM3R5GameModePrivate::JuryFixedSixV2LayoutHash));
+	int32 JuryTerrainPadCount = 0;
+	int32 JuryPhysicalDecorOverlapCount = 0;
+	int32 JuryDynamicDecorOverlapCount = 0;
+	float JuryMaxPadResidualCM = 0.0f;
+	if (!Planet->ValidateJuryFixedSixProductionClearance(
+			JuryTerrainPadCount,
+			JuryPhysicalDecorOverlapCount,
+			JuryDynamicDecorOverlapCount,
+			JuryMaxPadResidualCM,
+			Failure))
+	{
+		FinishM3R5Smoke(
+			false,
+			FString::Printf(
+				TEXT("JuryProductionClearance:%s"),
+				*Failure));
+		return;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3Jury][ProductionClearanceRegression] Passed=1 TerrainPads=%d PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f Authority=M3RuntimeSurface"),
+		JuryTerrainPadCount,
+		JuryPhysicalDecorOverlapCount,
+		JuryDynamicDecorOverlapCount,
+		Planet->GetJuryFixedSixDecorClearanceRejectedCount(),
+		JuryMaxPadResidualCM);
 	if (!Planet->ValidateMonthlyPresentationResult(
 			Failure))
 	{

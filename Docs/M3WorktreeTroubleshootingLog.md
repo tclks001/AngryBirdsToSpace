@@ -732,6 +732,34 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - `M3Jury-V2-Diagnostics-PostMerge-Contracts-20260815-164309-601-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`，包含 V2 Adapter 精确导出和原子失败注入；
 - `M3Jury-V2-Diagnostics-PostMerge-FixedSix-20260815-164354-852-FreshAutomation.log`：新增 Diagnostics 门在 V2 Adapter 发布基线上仍精确 `3/3 Success`。
 
+### M3-JURY-005：冻结放置已就绪不等于生产地形和装饰已消费
+
+**现象**
+
+固定地图已经稳定输出六条 V2 Placement，M7 也能按精确 WorldTransform 静态注册建筑，但 `AABTSM3Planet` 的生产连续表面仍只为兼容 TaskGraph 的 `BuildingSpawnSites` 建 Pad；固定六栋在日志中是 `Buildings=6`，而生产日志中的兼容 `BuildingSpawnSites` 仍是 `Buildings=4`。同时 Fixed-Six 的道路/水体预留只约束逻辑 Cell，森林和岩石 HISM 仍可能在建筑 PhysicalBounds 或设备 EffectBounds 中生成。若直接进入逐栋 Chaos 激活，建筑可能悬空、切入起伏地表，或让运动设备碰到 M3 装饰。
+
+**根因**
+
+`FABTSM3JuryFixedSixLayoutResult` 原先是放置/诊断结果，没有接入 `FABTSM3TerrainVisualField::SetBuildingPads`；`BuildDecorInstances` 只读取兼容 Building Pad 和 R5 `bDecorationProtected`，没有消费固定六栋的独立 EffectBounds。把六栋追加到公开 `BuildingSpawnSites` 会改变稳定兼容导出，把 EffectBounds 合并进静态 Pad 又会破坏 V2 的静态/动态语义分离，因此都不能作为修复。
+
+**修复**
+
+- M3 在第一次构建兼容 `BuildingSpawnSites` 后创建临时 Terrain Pad 快照，仅向生产与精确 Preview 的 TerrainVisualField 追加六条 Terrain-only Pad；公开 `BuildingSpawnSites` 随后按原流程重建，数量、顺序和稳定合同不变；
+- 每条 Terrain-only Pad 精确消费冻结 Placement 的位置、三轴和 `RequiredPadHalfExtentCM`，以冻结位置半径定义切平面；固定 Jury 地图无条件应用这六个生产 Pad，不受旧 Blueprint 的可选兼容 Pad 开关影响；
+- 装饰实例在静态 Pad 之外独立检查旋转后的 EffectBounds 水平包络，命中则跳过；不扩大静态 PhysicalBounds，不修改 Placement/Layout Hash；
+- `ValidateJuryFixedSixProductionClearance` 对六个 Pad 各取 `3 × 3` 内部样本，检查生产表面对冻结切平面的最大残差，并扫描实际 Forest/Rock HISM 世界变换，要求 Physical/Effect 水平包络重叠数均为零；固定 Seed 下任一条件失败都会让 M3 Presentation fail closed；
+- `M3R5Smoke` 新增 `[ABTS][M3Jury][ProductionClearanceRegression]` 门，使 Integration/M7 在逐栋 Chaos 前可用同一个 fresh 地图进程验证 M3 生产消费，而不是只检查布局 DTO。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；
+- `M3Jury-ProductionClearance-20260815-174312-722-FreshRuntime.log` 与 `M3Jury-ProductionClearance-Repeat-20260815-174430-939-FreshRuntime.log` 两次 fresh `L_ABTS_M3` R5 smoke 均输出 `TerrainPads=6 PhysicalDecorOverlaps=0 DynamicDecorOverlaps=0 DecorRejected=8 MaxPadResidualCM=0.001`；
+- 原子注入与实例 Transform fail-closed 加固后的最终 fresh 证据 `M3Jury-ProductionClearance-Final-20260815-174848-153-FreshRuntime.log` 保持相同结果；
+- 两次 runtime 的固定身份均保持 `Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`，R5 RuntimeCertification 均为 `Terminal=1 Passed=1 Failed=0`；
+- `M3Jury-ProductionClearance-Final-FixedSix-20260815-174933-754-FreshAutomation.log`：最终二进制上的 `ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`；
+- `M3Jury-ProductionClearance-Final-WorldContracts-20260815-174933-794-FreshAutomation.log`：最终二进制上的 `ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`，证明公开兼容站点与 V2 Adapter 边界未漂移；
+- 本门只证明 NullRHI 下的生产地形数值与 HISM 空间清空，不替代 M7 实时 Chaos、SceneCapture 像素或最终 E1→E6 可见 PIE。
+
 ## 14. 新条目模板
 
 ```markdown
