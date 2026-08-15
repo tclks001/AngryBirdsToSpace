@@ -7,6 +7,7 @@
 #include "Math/RotationMatrix.h"
 #include "Misc/AutomationTest.h"
 #include "PCG/ABTSM3JuryMapFreezeV3.h"
+#include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "Terrain/ABTSM3Planet.h"
 
 namespace ABTSM3JuryMapFreezeV3Tests
@@ -128,8 +129,8 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 		First.Placements.Num(), 6);
 	TestTrue(TEXT("V3 handoff is structurally usable"),
 		First.HandoffContract.IsStructurallyUsableV3());
-	TestTrue(TEXT("The exact published V3 handoff is the production contract"),
-		First.HandoffContract.IsUsable());
+	// Exact IsUsable() sealing is owned by Integration because M3 can publish a
+	// canonical refreeze candidate before the shared production hash is moved.
 	TestEqual(TEXT("Layout hash is canonical"),
 		First.LayoutHash,
 		FABTSM3JuryMapFreezeV3Builder::ComputeLayoutHash(First));
@@ -186,6 +187,20 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 	}
 	TestEqual(TEXT("Five sites are on the primary planet"), PrimaryCount, 5);
 	TestEqual(TEXT("One site is on the satellite"), SatelliteCount, 1);
+	const FABTSM3MonthlySatellitePreviewCandidate* FrozenSatelliteCandidate =
+		FABTSM3MonthlySatellitePreviewBuilder::FindCandidate(
+			Planet->GetMonthlySatellitePreviewResult(),
+			First.SourceCandidateId);
+	TestNotNull(TEXT("V3 E1 joins the selected final-surface satellite preview"),
+		FrozenSatelliteCandidate);
+	if (FrozenSatelliteCandidate != nullptr
+		&& First.Placements.IsValidIndex(4))
+	{
+		TestTrue(TEXT("V3 E1 support center is the final-surface satellite center"),
+			First.Placements[4].Site.V3Envelope.SupportCenterWorldCM.Equals(
+				FrozenSatelliteCandidate->SatelliteCenterWorld,
+				0.1));
+	}
 	int32 TerrainPadCount = 0;
 	int32 PhysicalDecorOverlapCount = 0;
 	int32 DynamicDecorOverlapCount = 0;

@@ -156,6 +156,30 @@ bool FABTSM3R51SatellitePreviewCoreTest::RunTest(
 			Candidate.SatelliteRadiusCM > 0.0f);
 		TestTrue(TEXT("E5 proxy is on the satellite back side"),
 			Candidate.bE5OnSatelliteBackside);
+		FVector FinalSurfaceWorld = FVector::ZeroVector;
+		FVector FinalSurfaceNormal = FVector::ZeroVector;
+		float FinalSurfaceRadiusCM = 0.0f;
+		int32 FinalSurfaceCellId = INDEX_NONE;
+		const bool bFinalSurfaceResolved = Planet->QuerySurface(
+			Candidate.SatelliteAnchorDirection,
+			FinalSurfaceWorld,
+			FinalSurfaceNormal,
+			FinalSurfaceRadiusCM,
+			FinalSurfaceCellId);
+		TestTrue(TEXT("Final production-pad surface resolves the frozen satellite anchor"),
+			bFinalSurfaceResolved && FinalSurfaceNormal.Normalize());
+		TestEqual(TEXT("Final production query keeps the frozen satellite anchor cell"),
+			FinalSurfaceCellId,
+			Candidate.SatelliteAnchorCellId);
+		const FVector FinalSurfaceSatelliteCenter = FinalSurfaceWorld
+			+ FinalSurfaceNormal
+				* (Planet->GetPlanetRadiusCM()
+					* FrozenPreset.SatelliteCenterClearancePrimaryRatio);
+		TestTrue(TEXT("Preview center is frozen from the final production-pad surface"),
+			bFinalSurfaceResolved
+				&& FinalSurfaceSatelliteCenter.Equals(
+					Candidate.SatelliteCenterWorld,
+					1.0f));
 		const float TargetCenterRadius = FVector::Distance(
 			Candidate.E5TargetWorldTransform.GetLocation(),
 			Candidate.SatelliteCenterWorld);
@@ -262,8 +286,18 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		AddError(TEXT("Runtime practice fixture has no preview candidate"));
 		return false;
 	}
+	const FABTSM3MonthlySatellitePreviewCandidate* ProductionCandidate =
+		FABTSM3MonthlySatellitePreviewBuilder::FindCandidate(
+			Preview,
+			Planet->GetJuryMapFreezeV3Result().SourceCandidateId);
+	TestNotNull(TEXT("Runtime practice fixture resolves the production V3 candidate"),
+		ProductionCandidate);
+	if (ProductionCandidate == nullptr)
+	{
+		return false;
+	}
 	const FABTSM3MonthlySatellitePreviewCandidate Candidate =
-		Preview.RetainedCandidates[0];
+		*ProductionCandidate;
 	const int64 PreviewResultHashBeforeSemanticQuery = Preview.ResultHash;
 	const int64 CandidateHashBeforeSemanticQuery = Candidate.CandidateHash;
 	const bool bPreviewAcceptedBeforeSemanticQuery =

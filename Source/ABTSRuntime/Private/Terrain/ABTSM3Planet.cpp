@@ -296,24 +296,14 @@ public:
 		{
 			return false;
 		}
-		OutSample.WorldLocation = Planet.GetPlanetCenterWorld()
-			+ Direction * Planet.GetSurfaceRadiusAtDirection(Direction);
-		OutSample.WorldNormal =
-			Planet.GetSurfaceNormalAtDirection(Direction);
-		OutSample.NearestCellId = INDEX_NONE;
-		double BestDot = -2.0;
-		for (int32 CellId = 0; CellId < Cells.Num(); ++CellId)
-		{
-			const double Dot = FVector::DotProduct(
+		float SurfaceRadiusCM = 0.0f;
+		return Planet.QuerySurface(
 				Direction,
-				Cells[CellId].UnitCenter);
-			if (Dot > BestDot)
-			{
-				BestDot = Dot;
-				OutSample.NearestCellId = CellId;
-			}
-		}
-		return OutSample.NearestCellId != INDEX_NONE
+				OutSample.WorldLocation,
+				OutSample.WorldNormal,
+				SurfaceRadiusCM,
+				OutSample.NearestCellId)
+			&& OutSample.NearestCellId != INDEX_NONE
 			&& !OutSample.WorldLocation.ContainsNaN()
 			&& !OutSample.WorldNormal.ContainsNaN()
 			&& OutSample.WorldNormal.Normalize();
@@ -555,9 +545,20 @@ bool AABTSM3Planet::RebuildPlanet()
 	const FPlanetMonthlySatellitePreviewSurface SatelliteSurface(
 		*this,
 		LogicalCells);
+	FABTSM3MonthlySatellitePreviewConfig InitialSatellitePreviewConfig =
+		MonthlySatellitePreviewConfig;
+	const bool bRequiresMapFreezeV3SurfaceFinalization =
+		WorldSeed == FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed;
+	if (bRequiresMapFreezeV3SurfaceFinalization)
+	{
+		// This first result is only a bootstrap input for resolving the five
+		// primary V3 pads. Publish a single SatellitePreview identity after the
+		// final production surface has replaced the retired V2 pad set.
+		InitialSatellitePreviewConfig.bEmitPreviewLogs = false;
+	}
 	if (!FABTSM3MonthlySatellitePreviewBuilder::Build(
 			WorldSeed,
-			MonthlySatellitePreviewConfig,
+			InitialSatellitePreviewConfig,
 			LogicalCells,
 			MonthlySpatialResult,
 			MonthlySlingshotFieldResult,
@@ -572,8 +573,35 @@ bool AABTSM3Planet::RebuildPlanet()
 				MonthlySatellitePreviewResult.RejectReason),
 			*SatellitePreviewFailure);
 	}
-	if (WorldSeed == FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed)
+	if (bRequiresMapFreezeV3SurfaceFinalization)
 	{
+		auto InstallCurrentMapFreezeV3TerrainPads = [&]()
+		{
+			TerrainPads.Reset();
+			for (const FABTSM3BuildingSpawnSite& CompatibilityPad
+				: CompatibilityTerrainPads)
+			{
+				// V3 replaces the ordinary Workshop/Target/Furnace building
+				// pads. The terminal LaunchSite remains an independent M11
+				// facility and keeps its established construction plane.
+				if (CompatibilityPad.TaskType == EABTSM3TaskType::LaunchSite)
+				{
+					TerrainPads.Add(CompatibilityPad);
+				}
+			}
+			FString V3TerrainPadFailure;
+			if (!AppendJuryMapFreezeV3TerrainPads(
+					TerrainPads,
+					V3TerrainPadFailure))
+			{
+				JuryTerrainPadFailure = MoveTemp(V3TerrainPadFailure);
+				return false;
+			}
+			TerrainVisualField->SetBuildingPads(TerrainPads);
+			BuildBuildingSpawnSites();
+			return true;
+		};
+
 		FString MapFreezeV3Failure;
 		if (!FABTSM3JuryMapFreezeV3Builder::Build(
 			LogicalCells,
@@ -597,64 +625,135 @@ bool AABTSM3Planet::RebuildPlanet()
 		}
 		else
 		{
-			UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=1 Seed=%d Candidate=%d Sites=%d Primary=5 SatelliteE1=1 Mapping=E2,E3,E4,E5,E1,E6 Catalog=%016llX LayoutHash=%016llX ProductionContract=V%d ActivationAllowed=1"),
-			WorldSeed,
-			JuryMapFreezeV3Result.SourceCandidateId,
-			JuryMapFreezeV3Result.Placements.Num(),
-			static_cast<unsigned long long>(
-				JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash),
-			static_cast<unsigned long long>(
-				JuryMapFreezeV3Result.LayoutHash),
-			FABTSJuryDemoFixedSixContract::ProductionContractVersion);
-			for (const FABTSM3JuryMapFreezeV3Placement& Placement
-				: JuryMapFreezeV3Result.Placements)
+			// The bootstrap snapshot may have sampled a retired V2 terrain-only
+			// pad. Resolve the primary V3 pads first, then rebuild both the
+			// satellite preview and E1 Map Freeze placement against the exact
+			// surface that production runtime QuerySurface() will consume.
+			bJuryTerrainPadsReady = InstallCurrentMapFreezeV3TerrainPads();
+			if (!bJuryTerrainPadsReady)
 			{
-				UE_LOG(LogABTSRuntime, Log,
-				TEXT("[ABTS][M3Jury][MapFreezeV3][Site] Slot=%d Entry=%s Surface=%d PadCenterCell=%d CorridorLongAxisAbsDot=%.9f PlacementHash=%016llX"),
-				Placement.Site.EncounterIndex,
-				*Placement.Site.ManifestEntryId.ToString(),
-				static_cast<int32>(
-					Placement.Site.V3Envelope.SurfaceKind),
-				Placement.PadCenterCellId,
-				Placement.AttackCorridorLongAxisAbsDot,
-					static_cast<unsigned long long>(
-						Placement.Site.V3Envelope.PlacementHash));
-			}
-
-			TerrainPads.Reset();
-			for (const FABTSM3BuildingSpawnSite& CompatibilityPad
-				: CompatibilityTerrainPads)
-			{
-				// V3 replaces the ordinary Workshop/Target/Furnace building pads.
-				// The terminal LaunchSite remains a separate M11 facility and keeps
-				// its established compatibility construction plane.
-				if (CompatibilityPad.TaskType == EABTSM3TaskType::LaunchSite)
-				{
-					TerrainPads.Add(CompatibilityPad);
-				}
-			}
-			FString V3TerrainPadFailure;
-			bJuryTerrainPadsReady = AppendJuryMapFreezeV3TerrainPads(
-				TerrainPads,
-				V3TerrainPadFailure);
-			if (bJuryTerrainPadsReady)
-			{
-				TerrainVisualField->SetBuildingPads(TerrainPads);
-				BuildBuildingSpawnSites();
-				UE_LOG(LogABTSRuntime, Log,
-					TEXT("[ABTS][M3Jury][ProductionTerrainPads] Ready=1 Contract=V3 PrimaryPads=%d SatellitePads=0 LayoutHash=%016llX Authority=M3RuntimeSurface"),
-					JuryFixedSixTerrainPadCount,
-					static_cast<unsigned long long>(
-						JuryMapFreezeV3Result.LayoutHash));
+				UE_LOG(LogABTSRuntime, Error,
+					TEXT("[ABTS][M3Jury][ProductionTerrainPads] Ready=0 Contract=V3 Phase=Bootstrap Failure=%s Authority=M3RuntimeSurface"),
+					*JuryTerrainPadFailure);
+				JuryMapFreezeV3Result = FABTSM3JuryMapFreezeV3Result();
 			}
 			else
 			{
-				UE_LOG(LogABTSRuntime, Error,
-					TEXT("[ABTS][M3Jury][ProductionTerrainPads] Ready=0 Contract=V3 Failure=%s LayoutHash=%016llX Authority=M3RuntimeSurface"),
-					*V3TerrainPadFailure,
-					static_cast<unsigned long long>(
-						JuryMapFreezeV3Result.LayoutHash));
+				FABTSM3MonthlySatellitePreviewResult FinalSatellitePreview;
+				FString FinalSatellitePreviewFailure;
+				if (!FABTSM3MonthlySatellitePreviewBuilder::Build(
+						WorldSeed,
+						MonthlySatellitePreviewConfig,
+						LogicalCells,
+						MonthlySpatialResult,
+						MonthlySlingshotFieldResult,
+						SatelliteSurface,
+						FinalSatellitePreview,
+						FinalSatellitePreviewFailure))
+				{
+					bJuryTerrainPadsReady = false;
+					MonthlySatellitePreviewResult =
+						MoveTemp(FinalSatellitePreview);
+					JuryMapFreezeV3Result = FABTSM3JuryMapFreezeV3Result();
+					UE_LOG(LogABTSRuntime, Error,
+						TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Phase=FinalSurfaceSatellitePreview Failure=%s ProductionContract=V%d ActivationAllowed=1"),
+						WorldSeed,
+						FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId,
+						*FinalSatellitePreviewFailure,
+						FABTSJuryDemoFixedSixContract::ProductionContractVersion);
+				}
+				else
+				{
+					FABTSM3JuryMapFreezeV3Result FinalMapFreezeV3;
+					FString FinalMapFreezeV3Failure;
+					if (!FABTSM3JuryMapFreezeV3Builder::Build(
+							LogicalCells,
+							GetActorLocation(),
+							PlanetRadiusCM,
+							MonthlySatellitePreviewConfig.PrimarySurfaceGravityCMPerSec2,
+							MonthlySpatialResult,
+							FinalSatellitePreview,
+							FinalMapFreezeV3,
+							FinalMapFreezeV3Failure))
+					{
+						bJuryTerrainPadsReady = false;
+						MonthlySatellitePreviewResult =
+							MoveTemp(FinalSatellitePreview);
+						JuryMapFreezeV3Result =
+							MoveTemp(FinalMapFreezeV3);
+						UE_LOG(LogABTSRuntime, Error,
+							TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Phase=FinalSurfaceMapFreeze Reason=%s Failure=%s ProductionContract=V%d ActivationAllowed=1"),
+							WorldSeed,
+							FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId,
+							FABTSM3JuryMapFreezeV3Builder::GetRejectReasonName(
+								JuryMapFreezeV3Result.RejectReason),
+							*FinalMapFreezeV3Failure,
+							FABTSJuryDemoFixedSixContract::ProductionContractVersion);
+					}
+					else
+					{
+						MonthlySatellitePreviewResult =
+							MoveTemp(FinalSatellitePreview);
+						JuryMapFreezeV3Result =
+							MoveTemp(FinalMapFreezeV3);
+						bJuryTerrainPadsReady =
+							InstallCurrentMapFreezeV3TerrainPads();
+						FString SatelliteAuthorityFailure;
+						FString MapFreezeAuthorityFailure;
+						const bool bFinalSurfaceAuthorityReady =
+							bJuryTerrainPadsReady
+							&& ValidateMonthlySatellitePreviewResult(
+								SatelliteAuthorityFailure)
+							&& ValidateJuryMapFreezeV3Result(
+								MapFreezeAuthorityFailure);
+						if (!bFinalSurfaceAuthorityReady)
+						{
+							bJuryTerrainPadsReady = false;
+							UE_LOG(LogABTSRuntime, Error,
+								TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Phase=FinalSurfaceAuthority Failure=%s%s%s ProductionContract=V%d ActivationAllowed=1"),
+								WorldSeed,
+								FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId,
+								*JuryTerrainPadFailure,
+								*SatelliteAuthorityFailure,
+								*MapFreezeAuthorityFailure,
+								FABTSJuryDemoFixedSixContract::ProductionContractVersion);
+							JuryMapFreezeV3Result =
+								FABTSM3JuryMapFreezeV3Result();
+						}
+						else
+						{
+							UE_LOG(LogABTSRuntime, Log,
+								TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=1 Seed=%d Candidate=%d Sites=%d Primary=5 SatelliteE1=1 Mapping=E2,E3,E4,E5,E1,E6 Catalog=%016llX LayoutHash=%016llX ProductionContract=V%d ActivationAllowed=1 SurfaceAuthority=FinalV3"),
+								WorldSeed,
+								JuryMapFreezeV3Result.SourceCandidateId,
+								JuryMapFreezeV3Result.Placements.Num(),
+								static_cast<unsigned long long>(
+									JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash),
+								static_cast<unsigned long long>(
+									JuryMapFreezeV3Result.LayoutHash),
+								FABTSJuryDemoFixedSixContract::ProductionContractVersion);
+							for (const FABTSM3JuryMapFreezeV3Placement& Placement
+								: JuryMapFreezeV3Result.Placements)
+							{
+								UE_LOG(LogABTSRuntime, Log,
+									TEXT("[ABTS][M3Jury][MapFreezeV3][Site] Slot=%d Entry=%s Surface=%d PadCenterCell=%d CorridorLongAxisAbsDot=%.9f PlacementHash=%016llX"),
+									Placement.Site.EncounterIndex,
+									*Placement.Site.ManifestEntryId.ToString(),
+									static_cast<int32>(
+										Placement.Site.V3Envelope.SurfaceKind),
+									Placement.PadCenterCellId,
+									Placement.AttackCorridorLongAxisAbsDot,
+									static_cast<unsigned long long>(
+										Placement.Site.V3Envelope.PlacementHash));
+							}
+							UE_LOG(LogABTSRuntime, Log,
+								TEXT("[ABTS][M3Jury][ProductionTerrainPads] Ready=1 Contract=V3 PrimaryPads=%d SatellitePads=0 LayoutHash=%016llX Authority=M3RuntimeSurface"),
+								JuryFixedSixTerrainPadCount,
+								static_cast<unsigned long long>(
+									JuryMapFreezeV3Result.LayoutHash));
+						}
+					}
+				}
 			}
 		}
 	}
