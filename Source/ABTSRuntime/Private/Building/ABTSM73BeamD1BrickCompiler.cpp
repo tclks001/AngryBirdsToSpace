@@ -11,6 +11,7 @@
 #include "ABTSM73BeamC3V3SkeletonFirstGenerator.h"
 #include "ABTSM73BeamCGenerator.h"
 #include "ABTSM73BeamD0ProfileCatalog.h"
+#include "ABTSM7MaterialProfileLibrary.h"
 #include "Building/ABTSM73DAG5BShapeGrammarV2.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/Crc.h"
@@ -4465,9 +4466,33 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
 	}
 
 	const int32 BeforeStructuralClosure = OutResult.CompactAssembly.Members.Num();
+	const TArray<FABTSM7MaterialProfile> ChaosMaterialProfiles =
+		FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+	const FABTSM73BeamCMemberSelfLoadResolver ChaosMemberSelfLoad =
+		[&Profile, &ChaosMaterialProfiles](const FABTSM73BeamAMember& Member)
+		{
+			const EABTSM7BuildingMaterial Material = ABTSM73BeamD1::BaseMaterial(
+				Profile.MaterialPalette,
+				ABTSM73BeamD1::StructuralRole(Member.Role));
+			const FABTSM7MaterialProfile* MaterialProfile =
+				FABTSM7MaterialProfileLibrary::FindProfile(
+					ChaosMaterialProfiles, Material);
+			if (MaterialProfile == nullptr)
+			{
+				return -1.0;
+			}
+			const double BlockSectionCM =
+				Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM;
+			const double BasicMassKG = FMath::Max(
+				BlockSectionCM * BlockSectionCM * Member.LengthCM
+					* MaterialProfile->DensityGPerCubicCM * 0.001,
+				UE_DOUBLE_SMALL_NUMBER);
+			return FMath::Pow(BasicMassKG, 0.75);
+		};
 	if (!BeamCGenerator.GenerateWithStructuralClosure(Profile.BeamSettings,
 		OutResult.CompactAssembly, OutResult.LoadDAG, OutError,
-		Profile.VisualComplexity.MaximumBrickCount, false))
+		Profile.VisualComplexity.MaximumBrickCount, false, 0, 0,
+		&ChaosMemberSelfLoad, false))
 	{
 		int32 Logged = 0;
 		for (const FABTSM73BeamCLoadNode& Node : OutResult.LoadDAG.Nodes)

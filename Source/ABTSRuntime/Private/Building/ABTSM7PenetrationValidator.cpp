@@ -53,8 +53,17 @@ namespace
 		const FHitResult& Hit,
 		const float ToleranceCM)
 	{
+		const FBox ABounds = Module.GetMeshComponent()->Bounds.GetBox();
+		const FBox BBounds = OtherComponent.Bounds.GetBox();
+		const FVector BoundsOverlap(
+			FMath::Min(ABounds.Max.X, BBounds.Max.X)
+				- FMath::Max(ABounds.Min.X, BBounds.Min.X),
+			FMath::Min(ABounds.Max.Y, BBounds.Max.Y)
+				- FMath::Max(ABounds.Min.Y, BBounds.Min.Y),
+			FMath::Min(ABounds.Max.Z, BBounds.Max.Z)
+				- FMath::Max(ABounds.Min.Z, BBounds.Min.Z));
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M7][PenetrationValidation] %s A=%s B=%s Depth=%.4fcm Tolerance=%.4fcm Normal=(%.4f,%.4f,%.4f) ALocation=(%.2f,%.2f,%.2f) BLocation=(%.2f,%.2f,%.2f)"),
+			TEXT("[ABTS][M7][PenetrationValidation] %s A=%s B=%s Depth=%.4fcm Tolerance=%.4fcm Normal=(%.4f,%.4f,%.4f) ALocation=(%.2f,%.2f,%.2f) BLocation=(%.2f,%.2f,%.2f) ABounds=%s..%s BBounds=%s..%s BoundsOverlap=%s"),
 			Reason,
 			*GetNameSafe(&Module),
 			*GetNameSafe(OtherComponent.GetOwner()),
@@ -68,7 +77,27 @@ namespace
 			Module.GetActorLocation().Z,
 			OtherComponent.GetComponentLocation().X,
 			OtherComponent.GetComponentLocation().Y,
-			OtherComponent.GetComponentLocation().Z);
+			OtherComponent.GetComponentLocation().Z,
+			*ABounds.Min.ToString(), *ABounds.Max.ToString(),
+			*BBounds.Min.ToString(), *BBounds.Max.ToString(),
+			*BoundsOverlap.ToString());
+	}
+
+	bool HasPositiveBoundsOverlap(
+		const UPrimitiveComponent& A,
+		const UPrimitiveComponent& B)
+	{
+		const FBox ABounds = A.Bounds.GetBox();
+		const FBox BBounds = B.Bounds.GetBox();
+		return FMath::Min(ABounds.Max.X, BBounds.Max.X)
+				- FMath::Max(ABounds.Min.X, BBounds.Min.X)
+				> UE_KINDA_SMALL_NUMBER
+			&& FMath::Min(ABounds.Max.Y, BBounds.Max.Y)
+				- FMath::Max(ABounds.Min.Y, BBounds.Min.Y)
+				> UE_KINDA_SMALL_NUMBER
+			&& FMath::Min(ABounds.Max.Z, BBounds.Max.Z)
+				- FMath::Max(ABounds.Min.Z, BBounds.Min.Z)
+				> UE_KINDA_SMALL_NUMBER;
 	}
 }
 
@@ -103,6 +132,10 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 				UPrimitiveComponent* OtherComponent = Hit.GetComponent();
 				if (!Hit.bBlockingHit || !Hit.bStartPenetrating || Hit.PenetrationDepth <= UE_KINDA_SMALL_NUMBER
 					|| OtherComponent == nullptr || OtherComponent == Component || OtherComponent->GetOwner() == Module)
+				{
+					continue;
+				}
+				if (!HasPositiveBoundsOverlap(*Component, *OtherComponent))
 				{
 					continue;
 				}
@@ -168,6 +201,10 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 			UPrimitiveComponent* OtherComponent = Hit.GetComponent();
 			if (!Hit.bBlockingHit || !Hit.bStartPenetrating || Hit.PenetrationDepth <= UE_KINDA_SMALL_NUMBER
 				|| OtherComponent == nullptr || OtherComponent == Component || OtherComponent->GetOwner() == Module)
+			{
+				continue;
+			}
+			if (!HasPositiveBoundsOverlap(*Component, *OtherComponent))
 			{
 				continue;
 			}
