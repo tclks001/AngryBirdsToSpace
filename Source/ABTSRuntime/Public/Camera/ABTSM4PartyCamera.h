@@ -17,15 +17,24 @@ struct ABTSRUNTIME_API FABTSM4CameraPoseSnapshot
 {
 	FVector Pivot = FVector::ZeroVector;
 	FVector DesiredLocation = FVector::ZeroVector;
+	FVector SurfaceSafeFocus = FVector::ZeroVector;
+	FVector SurfaceSafeLocation = FVector::ZeroVector;
 	FVector SafeLocation = FVector::ZeroVector;
 	FVector RenderedLocation = FVector::ZeroVector;
 	float DesiredDistanceCM = 0.0f;
 	float SafeDistanceCM = 0.0f;
 	float RenderedDistanceCM = 0.0f;
+	float UserOrbitDistanceCM = 0.0f;
+	float PitchFramingDistanceCM = 0.0f;
+	float UpwardFramingAlpha = 0.0f;
 	float UserElevationDegrees = 0.0f;
+	float SurfaceSafetyLiftCM = 0.0f;
+	float SurfaceSafetyRawPenetrationCM = 0.0f;
+	float SurfaceSafetyTransitionAlpha = 0.0f;
 	int32 ObstructionCandidateIndex = 0;
 	EABTSM4CameraObstructionPhase ObstructionPhase = EABTSM4CameraObstructionPhase::Clear;
 	bool bDirectManipulation = false;
+	bool bSurfaceConstrained = false;
 	TWeakObjectPtr<AActor> BlockingActor;
 	TWeakObjectPtr<UPrimitiveComponent> BlockingComponent;
 };
@@ -92,4 +101,5 @@ private:
 	bool bRecenterRequested = false;
 	bool bInitializedView = false;
 	bool bDirectManipulation = false;
+	bool bLastSurfaceConstrained = false;
 };

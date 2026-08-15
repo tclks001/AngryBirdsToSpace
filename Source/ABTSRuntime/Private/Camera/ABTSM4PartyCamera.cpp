@@ -218,19 +218,113 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	}
 
 	const float ElevationRadians = FMath::DegreesToRadians(ElevationDegrees);
+	float UpwardFramingAlpha = 0.0f;
+	const float PitchFramingDistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+		OrbitDistanceCM,
+		ElevationDegrees,
+		Settings ? Settings->CameraUpwardFramingStartDegrees : -5.0f,
+		Settings ? Settings->CameraUpwardFramingFullDegrees : -70.0f,
+		Settings ? Settings->CameraUpwardFramingMinimumDistanceScale : 0.72f,
+		UpwardFramingAlpha);
 	const FVector UnblockedOffsetDirection = (
 		CameraUp * FMath::Sin(ElevationRadians)
 		- OrbitForwardTangent * FMath::Cos(ElevationRadians)).GetSafeNormal();
-	const FVector UnblockedLocation = SmoothedPivot + UnblockedOffsetDirection * OrbitDistanceCM;
-	float HardSafeDistanceCM = OrbitDistanceCM;
-	FVector RenderedLocation = UnblockedLocation;
+	const FVector UnblockedLocation = SmoothedPivot + UnblockedOffsetDirection * PitchFramingDistanceCM;
+	const float ProbeRadiusCM = Settings ? Settings->CameraProbeRadiusCM : 24.0f;
+	const float CollisionSafetyMarginCM = Settings ? Settings->CameraCollisionSafetyMarginCM : 4.0f;
+	const float SurfaceSafetyClearanceCM = FMath::Max(
+		Settings ? Settings->CameraSurfaceSafetyClearanceCM : 120.0f,
+		ProbeRadiusCM + CollisionSafetyMarginCM);
+	const float SurfaceSafetyTransitionBandCM = Settings
+		? Settings->CameraSurfaceSafetyTransitionBandCM
+		: 180.0f;
+	FABTSM4SurfaceSafePose SurfaceSafePose;
+	bool bSurfacePoseValid = false;
+	if (bPlanar)
+	{
+		bSurfacePoseValid = ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+			UnblockedLocation,
+			SmoothedPivot,
+			PlanetCenter,
+			CameraUp,
+			SurfaceSafetyClearanceCM,
+			SurfaceSafetyTransitionBandCM,
+			SurfaceSafePose);
+	}
+	else
+	{
+		FVector CameraRadialDirection = (UnblockedLocation - PlanetCenter).GetSafeNormal();
+		if (CameraRadialDirection.IsNearlyZero()) CameraRadialDirection = CameraUp;
+		const float SurfaceRadiusCM = ResolvedPlanet->GetSurfaceRadiusAtDirection(CameraRadialDirection);
+		if (FMath::IsFinite(SurfaceRadiusCM) && SurfaceRadiusCM > 0.0f)
+		{
+			bSurfacePoseValid = ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+				UnblockedLocation,
+				SmoothedPivot,
+				PlanetCenter + CameraRadialDirection * SurfaceRadiusCM,
+				CameraRadialDirection,
+				SurfaceSafetyClearanceCM,
+				SurfaceSafetyTransitionBandCM,
+				SurfaceSafePose);
+		}
+	}
+	if (!bSurfacePoseValid)
+	{
+		if (bInitializedView
+			&& !PoseSnapshot.SurfaceSafeLocation.ContainsNaN()
+			&& !PoseSnapshot.SurfaceSafeFocus.ContainsNaN())
+		{
+			SurfaceSafePose.CameraLocation = PoseSnapshot.SurfaceSafeLocation;
+			SurfaceSafePose.FocusLocation = PoseSnapshot.SurfaceSafeFocus;
+			SurfaceSafePose.AppliedLiftCM = PoseSnapshot.SurfaceSafetyLiftCM;
+			SurfaceSafePose.RawPenetrationCM = PoseSnapshot.SurfaceSafetyRawPenetrationCM;
+			SurfaceSafePose.TransitionAlpha = PoseSnapshot.SurfaceSafetyTransitionAlpha;
+			SurfaceSafePose.bConstrained = PoseSnapshot.bSurfaceConstrained;
+		}
+		else
+		{
+			// A base-radius fallback keeps the first frame outside the planet even
+			// if a derived presentation surface temporarily returns invalid data.
+			FVector CameraRadialDirection = (UnblockedLocation - PlanetCenter).GetSafeNormal();
+			if (CameraRadialDirection.IsNearlyZero()) CameraRadialDirection = CameraUp;
+			const float FallbackSurfaceRadiusCM = bPlanar
+				? 0.0f
+				: FMath::Max(1.0f, ResolvedPlanet->GetPlanetRadiusCM());
+			ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+				UnblockedLocation,
+				SmoothedPivot,
+				bPlanar ? PlanetCenter : PlanetCenter + CameraRadialDirection * FallbackSurfaceRadiusCM,
+				bPlanar ? CameraUp : CameraRadialDirection,
+				SurfaceSafetyClearanceCM,
+				SurfaceSafetyTransitionBandCM,
+				SurfaceSafePose);
+		}
+	}
+	if (SurfaceSafePose.bConstrained != bLastSurfaceConstrained)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M4][SurfaceSafety] Constrained=%d Lift=%.1f RawPenetration=%.1f TransitionAlpha=%.3f Clearance=%.1f Band=%.1f Elevation=%.1f UserDistance=%.1f FramingDistance=%.1f UpwardAlpha=%.3f"),
+			SurfaceSafePose.bConstrained ? 1 : 0,
+			SurfaceSafePose.AppliedLiftCM,
+			SurfaceSafePose.RawPenetrationCM,
+			SurfaceSafePose.TransitionAlpha,
+			SurfaceSafetyClearanceCM,
+			SurfaceSafetyTransitionBandCM,
+			ElevationDegrees,
+			OrbitDistanceCM,
+			PitchFramingDistanceCM,
+			UpwardFramingAlpha);
+		bLastSurfaceConstrained = SurfaceSafePose.bConstrained;
+	}
+	float HardSafeDistanceCM = PitchFramingDistanceCM;
+	FVector RenderedLocation = SurfaceSafePose.CameraLocation;
 	if (Settings && Settings->bEnableCameraObstructionAvoidance)
 	{
 		RenderedLocation = ResolveObstructedLocation(
-			SmoothedPivot,
+			SurfaceSafePose.FocusLocation,
 			CameraUp,
 			UnblockedOffsetDirection,
-			OrbitDistanceCM,
+			PitchFramingDistanceCM,
 			DeltaSeconds,
 			HardSafeDistanceCM);
 	}
@@ -238,18 +332,18 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	{
 		// Intentional no-op obstruction policy: keep the requested camera pose and
 		// let world geometry remain visibly between the camera and controlled bird.
-		EffectiveDistanceCM = OrbitDistanceCM;
-		ObstructionFilter.Reset(OrbitDistanceCM);
+		EffectiveDistanceCM = PitchFramingDistanceCM;
+		ObstructionFilter.Reset(PitchFramingDistanceCM);
 		ObstructionYawOffsetDegrees = 0.0f;
 		ObstructionVerticalOffsetDegrees = 0.0f;
 		SelectedObstructionCandidate = 0;
 		LastLoggedObstructionCandidate = 0;
 		LastLoggedObstructionPhase = EABTSM4CameraObstructionPhase::Clear;
-		PoseSnapshot.SafeLocation = UnblockedLocation;
+		PoseSnapshot.SafeLocation = SurfaceSafePose.CameraLocation;
 		PoseSnapshot.BlockingActor.Reset();
 		PoseSnapshot.BlockingComponent.Reset();
 	}
-	const FVector DesiredLookDirection = (SmoothedPivot - RenderedLocation).GetSafeNormal();
+	const FVector DesiredLookDirection = (SurfaceSafePose.FocusLocation - RenderedLocation).GetSafeNormal();
 	// Forward alone does not define camera roll. Constrain the screen-up axis to
 	// the focus point's radial Up projected onto the image plane, so the visible
 	// world cannot roll sideways or invert while orbiting.
@@ -273,9 +367,11 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	if (bTargetChanged)
 	{
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M4][OrbitCamera] Target=%d Distance=%.1f Elevation=%.1f PitchRange=[%.1f,%.1f] SwitchBlend=%.2f PivotLag=%.2f Direct=%d RollError=%.3f"),
+			TEXT("[ABTS][M4][OrbitCamera] Target=%d UserDistance=%.1f FramingDistance=%.1f UpwardAlpha=%.3f Elevation=%.1f PitchRange=[%.1f,%.1f] SwitchBlend=%.2f PivotLag=%.2f Direct=%d RollError=%.3f"),
 			ABTSBirdIdToIndex(TargetBird->GetBirdId()),
 			OrbitDistanceCM,
+			PitchFramingDistanceCM,
+			UpwardFramingAlpha,
 			ElevationDegrees,
 			-OrbitPitchLimitDegrees,
 			OrbitPitchLimitDegrees,
@@ -286,14 +382,23 @@ void AABTSM4PartyCamera::UpdateCamera(const float DeltaSeconds, const bool bForc
 	}
 	PoseSnapshot.Pivot = SmoothedPivot;
 	PoseSnapshot.DesiredLocation = UnblockedLocation;
+	PoseSnapshot.SurfaceSafeFocus = SurfaceSafePose.FocusLocation;
+	PoseSnapshot.SurfaceSafeLocation = SurfaceSafePose.CameraLocation;
 	PoseSnapshot.RenderedLocation = RenderedLocation;
-	PoseSnapshot.DesiredDistanceCM = OrbitDistanceCM;
+	PoseSnapshot.DesiredDistanceCM = PitchFramingDistanceCM;
 	PoseSnapshot.SafeDistanceCM = HardSafeDistanceCM;
 	PoseSnapshot.RenderedDistanceCM = EffectiveDistanceCM;
+	PoseSnapshot.UserOrbitDistanceCM = OrbitDistanceCM;
+	PoseSnapshot.PitchFramingDistanceCM = PitchFramingDistanceCM;
+	PoseSnapshot.UpwardFramingAlpha = UpwardFramingAlpha;
 	PoseSnapshot.UserElevationDegrees = ElevationDegrees;
+	PoseSnapshot.SurfaceSafetyLiftCM = SurfaceSafePose.AppliedLiftCM;
+	PoseSnapshot.SurfaceSafetyRawPenetrationCM = SurfaceSafePose.RawPenetrationCM;
+	PoseSnapshot.SurfaceSafetyTransitionAlpha = SurfaceSafePose.TransitionAlpha;
 	PoseSnapshot.ObstructionCandidateIndex = SelectedObstructionCandidate;
 	PoseSnapshot.ObstructionPhase = ObstructionFilter.GetPhase();
 	PoseSnapshot.bDirectManipulation = bDirectManipulation;
+	PoseSnapshot.bSurfaceConstrained = SurfaceSafePose.bConstrained;
 	LastTargetBird = TargetBird;
 	bInitializedView = true;
 }

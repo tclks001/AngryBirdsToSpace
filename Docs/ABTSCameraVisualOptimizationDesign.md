@@ -390,21 +390,79 @@ DesiredCamera = Pivot + ArmDirection * OrbitDistance
 
 - `SurfaceSafety` 为始终开启的硬约束。它使用当前权威 `AABTSM2Planet::GetSurfaceRadiusAtDirection`（M3 地形可由现有 override 提供连续表面半径）或专用地形 Sweep，保证最终相机球心始终位于表面半径加 `ProbeRadius + SafetyMargin` 之外。
 - `SceneObstructionComfort` 继续负责建筑、树石和前景物的拉近/侧移/淡出，可以保持可选；关闭它只能表示“允许前景挡住主体”，不能表示“允许相机穿过主地形”。
-- 当负 Pitch 的期望臂穿入地表时，解算顺序为：先求同一用户 Yaw/Pitch 下的最大安全臂长，再尝试有界抬升或沿表面切向滑移；若本帧表面查询无效则保持上一帧 Safe Pose，不能输出地下 Desired Pose。
+- 当负 Pitch 的期望臂穿入地表时，不缩短相机臂；沿权威地表外法线等量平移相机和虚拟注视点，把完整视图框架抬到安全高度。若本帧表面查询无效则保持上一帧 `SurfaceSafe` 位姿，不能输出地下 Desired Pose。
 - `UserOrbitIntent.Elevation` 仍保存玩家请求的最低 `-85°`，安全层不得反写 Pitch。离开地表约束后，应沿当前意图恢复距离，而不是把镜头永久夹到较高角度。
 
-### 11.5 后续实现顺序与验收补充
+#### 11.4.1 2026-08-15 候选实现
 
-建议按彼此独立的三步落地，避免同时改动构图、碰撞和 Gameplay：
+本轮按“完整仰视、较高机位、地表硬安全、前景不回缩”的边界完成候选实现：
 
-1. 先拆出始终开启的 `SurfaceSafety`，补纯数学/解析地形测试，解决仰视入地。
-2. 再新增 `GroundAwareAim` 的稳定地表锚点与 `FixedBirdPrimaryFlight` 的固定鸟体构图，只改变镜头 Desired Pose。
-3. 最后新增 `ImpactObservation/SettlingHold` 和只读观察锚点，把碰撞事件语义送到镜头。
+- `SurfaceSafety` 在 Desired Orbit 之后、可选 `SceneObstructionComfort` 之前每帧执行，不受 `bEnableCameraObstructionAvoidance` 控制。球面世界按期望相机方向读取 `AABTSM2Planet::GetSurfaceRadiusAtDirection`，因此 M3 连续高度场和建筑施工台半径仍是权威；平面测试场使用已冻结的 `PlanarOrigin / PlanarUp`。
+- 最低相机球心高度新增为 `CameraSurfaceSafetyClearanceCM=120 cm`，运行时还会与 `CameraProbeRadiusCM + CameraCollisionSafetyMarginCM` 取较大值。该高度是镜头舒适机位，不是碰撞 Sweep 的拉近距离。
+- 当 Desired Camera 低于安全面时，相机与虚拟注视点沿当前表面外法线施加完全相同的平移。这样 `SurfaceSafety` 本身不再改变当帧构图臂长度，`-85°` 用户仰视方向、Yaw 和 Roll Lock 保持不变；代价是受约束时虚拟注视点会高于鸟，属于完整自由仰视，不再强制鸟始终居中。
+- 地表查询短暂无效时优先保持上一帧 `SurfaceSafeLocation / SurfaceSafeFocus`；首帧无历史状态时使用主星基础半径 fail closed。安全层不写回 `ElevationDegrees`，退出约束后直接回到同一用户意图的 Desired Pose。
+- 前景遮挡开关、四候选 Sweep 和回缩状态机均未重新启用或改默认值。三个生产/阶段地图原有的 `bEnableCameraObstructionAvoidance=false` 继续表示“允许建筑、树石挡住视线”，但不再允许相机进入主地形。
+- 位姿快照新增 `SurfaceSafeFocus / SurfaceSafeLocation / SurfaceSafetyLiftCM / bSurfaceConstrained`，约束进出输出 `[ABTS][M4][SurfaceSafety]`，可区分地下 Desired Pose、地表安全位姿和最终 Rendered Pose。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.Camera.GroundRig` 为 `5/5`、`ABTS.M6.` 为 `4/4`，日志分别为 `Saved/Logs/M4-SurfaceSafety-20260815-FinalUnity-FreshAutomation.log` 和 `Saved/Logs/M6-SurfaceSafety-20260815-FinalUnity-FreshAutomation.log`。新增 `SurfaceSafetyRigidLift` 解析测试覆盖球面地下仰视、平面地下仰视、无需约束的安全位姿、无效法线 fail closed，以及“相机—虚拟注视点”的距离和方向不变。本证据不替代 `L_ABTS_M4 / L_ABTS_M6 / L_ABTS_M10` 的可见 PIE 仰视手感与近地画面验收。
+
+#### 11.4.2 2026-08-15 仰视构图拉近补充
+
+用户完成第一轮可见 PIE 后确认地表安全效果基本成立，同时指出常见第三人称仰视会随 Pitch 主动拉近角色。公开方案表明需要继续区分“构图轨道”和“碰撞回缩”：
+
+- UE 5.8 Gameplay Cameras 的 `USplineOrbitCameraNode` 明确使用 Pitch 参数定义轨道形状；每个 `FSplineOrbitControlPoint` 同时提供 `PitchAngle / LocationOffset / TargetOffset`，说明不同俯仰角可以拥有不同机位和目标偏移，而不是固定半径球轨道。[Epic：Gameplay Cameras](https://dev.epicgames.com/documentation/unreal-engine/API/Plugins/GameplayCameras) · [Epic：FSplineOrbitControlPoint](https://dev.epicgames.com/documentation/unreal-engine/API/Plugins/GameplayCameras/FSplineOrbitControlPoint)
+- Cinemachine FreeLook 用三条分别具有半径、高度和镜头参数的 Rig，经样条连续插值得到最终状态；Third Person Follow 又把 `ShoulderOffset / VerticalArmLength / CameraDistance` 与 `CameraCollisionFilter / CameraRadius` 分开，支持构图变化与碰撞安全各自负责。[Unity：Cinemachine namespace](https://docs.unity3d.com/Packages/com.unity.cinemachine@2.6/api/Cinemachine.html) · [Unity：Cinemachine3rdPersonFollow](https://docs.unity3d.com/Packages/com.unity.cinemachine@2.6/api/Cinemachine.Cinemachine3rdPersonFollow.html)
+- Godot `SpringArm3D` 的标准行为则是 Shape Motion Cast 命中后把 Camera 子节点放到碰撞点附近；这是典型的障碍物驱动回缩，只适合作为碰撞兜底，不应承担本项目的仰视构图。[Godot：Third-person camera with spring arm](https://docs.godotengine.org/en/stable/tutorials/3d/spring_arm.html)
+
+因此在既有 `UserOrbitIntent` 与 `SurfaceSafety` 之间加入纯构图层 `PitchFramingDistance`：
+
+- 用户滚轮保存的 `OrbitDistanceCM` 仍是持久 Zoom，不被 Pitch 或安全层反写。`Elevation >= -5°` 时保持用户距离；`-5° → -70°` 使用 SmoothStep 单调拉近；`Elevation <= -70°` 保持用户距离的 `72%`。默认 `850 cm` 对应 `850 → 731（-37.5°）→ 612 cm（-70°）`。
+- 曲线直接由当前 Pitch 求值，无额外时间积分或松手后的残余速度；反向拖回时沿同一曲线恢复。最小/默认/最大 Zoom 都按比例保留差异，不把三档压成同一绝对距离。
+- `SurfaceSafety` 改为消费 `PitchFramingDistance`，并且只在该构图位姿仍低于地表时整体抬升相机与虚拟注视点；它不再额外缩短当帧构图距离。`SceneObstructionComfort` 继续默认关闭，树石和建筑命中不会触发这条 Pitch 曲线。
+- 快照新增 `UserOrbitDistanceCM / PitchFramingDistanceCM / UpwardFramingAlpha`；`[ABTS][M4][OrbitCamera]` 与 `[ABTS][M4][SurfaceSafety]` 同时记录用户距离、构图距离和曲线权重，可直接判断拉近来自 Pitch 还是障碍物。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.Camera.GroundRig` 为 `6/6`、`ABTS.M6.` 为 `4/4`，日志分别为 `Saved/Logs/M4-UpwardFraming-20260815-FinalUnity-FreshAutomation.log` 和 `Saved/Logs/M6-UpwardFraming-20260815-FinalUnity-FreshAutomation.log`。新增 `UpwardPitchFraming` 解析测试冻结起点、中点、终点、`-85°` 保持、单调性、错误端点顺序和 CDO 默认值；最终仍需用户可见 PIE 冻结 `-5° / -70° / 72%` 的手感参数。
+
+#### 11.4.3 2026-08-15 地表接管连续性补充
+
+第二轮用户可见 PIE 发现：进入地表约束前相机沿 Pitch Orbit 平滑圆弧运动，到达安全面的单一接地点后立即改为外法线抬升并继续拉近，形成明显折点。结构性原因是第一轮 `SurfaceSafety` 使用 `AppliedLift=max(0, RequiredClearance-CurrentClearance)`；该函数位置连续，但在零点的一阶导数从 `0` 突变为 `1`，所以调整 Pitch 的速度连续时，相机世界空间速度方向仍会突变。
+
+公开方案对这种接管通常提供策略和过渡，而不是把碰撞点直接当作唯一最终机位：
+
+- Unreal `USpringArmComponent` 保存 Desired 与 TraceHit 两个位置，并通过可重写的 `BlendLocations` 决定最终结果；默认实现仍是命中即返回 Hit、否则返回 Desired，因此若需要连续接管必须在项目层显式设计 Blend。[Epic：USpringArmComponent](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/USpringArmComponent)
+- Cinemachine Collider 提供 `Preserve Camera Height / Preserve Camera Distance`，并把 `Smoothing Time / Damping When Occluded / Damping` 分开，说明“选择替代几何”和“控制接管速度”是两个职责。[Unity：Cinemachine Collider](https://docs.unity3d.com/Packages/com.unity.cinemachine@2.6/manual/CinemachineCollider.html)
+- UE Gameplay Cameras 的 Collision Push 节点在开关变化时分别通过 Push/Pull Interpolator 混合碰撞修正，也明确避免用单一布尔切换直接写最终位置。[Epic：UCollisionPushCameraNode EnableCollision](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Plugins/GameplayCameras/Nodes/Collision/UCollisionPushCameraNode/EnableCollision)
+
+本项目不能直接对地表修正做时间阻尼：如果 Rendered Pose 落后于安全目标，就会在若干帧内再次进入地下。因此改为按空间求值的接触前 C1 过渡：
+
+```text
+x = RequiredClearance - DesiredClearance
+b = SurfaceSafetyTransitionBand = 180 cm
+
+Lift = 0                              , x <= -b
+Lift = (x + b)^2 / (4b)               , -b < x < b
+Lift = x                              , x >= b
+```
+
+- 过渡在真正安全面前 `180 cm` 开始，接触前便逐渐改变轨迹；在 `x=-b` 与零修正以零斜率相接，在 `x=+b` 与精确硬修正以单位斜率相接，因此位置和一阶运动方向都连续。
+- 中段始终满足 `Lift >= max(0,x)`，不会为了平滑允许相机短暂进入 `120 cm` 硬安全高度；相机与虚拟注视点继续等量平移，PitchFraming 距离和视线方向不被 SurfaceSafety 改写。
+- 过渡完全由当帧空间几何求值，没有帧时间积分；快拖、慢拖以及 30/60/120 FPS 使用同一条路径。`SurfaceSafetyTransitionBandCM` 暴露为 UPROPERTY，当前候选为 `180 cm`。
+- 快照与日志新增 `SurfaceSafetyRawPenetrationCM / SurfaceSafetyTransitionAlpha`，能够区分“尚未进入预接管带”“C1 预接管”“精确硬约束”三段。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.Camera.GroundRig` 为 `7/7`、`ABTS.M6.` 为 `4/4`，日志分别为 `Saved/Logs/M4-SurfaceC1-20260815-FinalUnity-FreshAutomation.log` 和 `Saved/Logs/M6-SurfaceC1-20260815-FinalUnity-FreshAutomation.log`。新增 `SurfaceSafetyC1Transition` 解析测试冻结两端导数、名义接触前抬升、全带硬安全、轨道臂不变量与 `180 cm` CDO 默认值；最终仍需用户在可见 PIE 中确认原接地点折线消失。
+
+### 11.5 当前阶段状态与验收补充
+
+三个问题保持彼此独立，当前状态如下：
+
+1. `GroundAwareAim / FixedBirdPrimaryFlight` 已通过用户可见 PIE，冻结为问题一基线。
+2. `ImpactObservation / SettlingHold` 已通过用户可见 PIE，冻结为问题二基线。
+3. `SurfaceSafety` 已完成代码、编译与解析几何门禁，等待用户执行问题三的可见 PIE 验收。
 
 新增验收要求：
 
 - `Ready/Pulling` 的视线不再稳定仰向天空；有效主星落点预测存在时，鸟/弹弓主体与地面锚点同时位于安全画框。
 - 实飞上升、最高点和下降段都保持鸟可见、鸟的屏幕位置与角尺寸稳定，并能读取主星地表；同输入的速度、轨迹点、碰撞和落点 Hash 与改造前一致。
 - 首次建筑/设施碰撞后，在一次有界转场内同时读到鸟和实际命中设施；进入 `SettlingHold` 后，反弹切向速度不再造成持续绕鸟转圈。
-- 在 `L_ABTS_M4`、`L_ABTS_M6`、`L_ABTS_M10` 中遍历 `Elevation=0°` 到 `-85°`、最小/默认/最大 Zoom；每帧都满足 `CameraRadiusFromPlanetCenter >= SurfaceRadiusAtCameraDirection + ProbeRadius + SafetyMargin`，且用户 Pitch 意图未被改写。
+- 在 `L_ABTS_M4`、`L_ABTS_M6`、`L_ABTS_M10` 中遍历 `Elevation=0°` 到 `-85°`、最小/默认/最大 Zoom；每帧都满足 `CameraRadiusFromPlanetCenter >= SurfaceRadiusAtCameraDirection + max(120 cm, ProbeRadius + SafetyMargin)`。用户 Pitch 与滚轮 Zoom 意图不得被改写，`PitchFramingDistance` 应在 `-5° → -70°` 单调降到 `72%`，`SurfaceSafety` 不得在此基础上继续缩短距离。
 - 自动化分别记录 `CameraMode`、Focus Set 来源、预测/碰撞 Authority、Desired/SurfaceSafe/ObstructionSafe/Rendered Pose 和继续运动原因；NullRHI 只证明状态与几何合同，最终地面可读性、设施构图和无入地仍需用户可见 PIE 验收。
