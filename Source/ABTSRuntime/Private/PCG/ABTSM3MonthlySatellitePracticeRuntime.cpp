@@ -1003,15 +1003,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 	FABTSSatellitePracticePreset CertificationPreset = FrozenPreset;
 	const bool bProductionCrystalTarget =
 		RuntimeSnapshot.E5HalfExtentCM.GetMax() <= 36.0f + KINDA_SMALL_NUMBER;
-	if (bProductionCrystalTarget)
-	{
-		// V3 replaces the 840 cm calibration proxy with a 72 cm Crystal cap.
-		// Preserve the player pull lattice and aim domain, but sample continuous
-		// aim at 8.7 x 5.3 cm intervals. The release gate still requires at least
-		// three connected witnesses instead of accepting a fragile single ray.
-		CertificationPreset.AimInPlaneSampleCount = 61;
-		CertificationPreset.AimOutOfPlaneSampleCount = 31;
-	}
+	// Final-V3 terrain can move the satellite inside the same frozen aim domain.
+	// Sample that continuous domain at the production Crystal density for both
+	// the pre-binding proxy and the Crystal itself. Pull limits, gravity-off
+	// miss, uniqueness and the three-connected-witness gate remain unchanged.
+	CertificationPreset.AimInPlaneSampleCount = 61;
+	CertificationPreset.AimOutOfPlaneSampleCount = 31;
 	FABTSCalibrationScenario Scenario;
 	Scenario.LaunchWorldLocation = LaunchFrame.RestPouchWorldLocation;
 	Scenario.LaunchFrame = LaunchFrame;

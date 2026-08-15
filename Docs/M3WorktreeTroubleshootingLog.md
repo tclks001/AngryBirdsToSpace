@@ -932,6 +932,39 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - 按集成协调要求不在本修正中运行重型自动化；集成候选须在合入后重跑 `ABTS.M3.Jury.MapFreezeV3`，证明 E1 方形断言与其后的公共朝向断言同时通过；
 - 若任一主星占地不再满足 `Y > X`、E1 的 X/Y 不再相等、走廊不再对准 Site X，或走廊与冻结长轴不再正交，测试仍须 fail closed。
 
+### M3-JURY-011：卫星预览不能冻结在即将被替换的 V2 引导地表上
+
+**现象**
+
+- Integration 在 `L_ABTS_M10 + -ABTSM3R5Preview -ABTSM3R5PreviewCandidate=4` 的 D3D11 离屏生产路径中得到 `PreviewAuthority=1`，但 `AABTSM3MonthlySatellitePracticeRuntime` 每次生成都记录 `AnchorCell=855 / CandidateAnchorCell=855 / DeltaFromPreview=1467.80`，随后以 `SatellitePreviewRuntimeDivergence` 失败关闭；M7 E1 Crystal 因而没有可绑定的 Ready runtime；
+- 失败基线 `MapFreezeV3 LayoutHash=5485D3F22956AE41`、E1 `PlacementHash=6A303ACBBA0358DB`、所选 Satellite candidate `3E024489860385BF`、Satellite result `B0FAE33A97832A1B`。锚点 Cell 完全一致，排除了方向求解、格点拓扑或 M7 绑定状态机漂移。
+
+**根因**
+
+`RebuildPlanet()` 先把兼容 TaskGraph Pad 与旧 Fixed-Six V2 六 Pad 安装到 `TerrainVisualField`，随后立即通过 `GetSurfaceRadiusAtDirection/GetSurfaceNormalAtDirection` 冻结 SatellitePreview；MapFreezeV3 完成后才把生产表面原子替换为最终五个主星 V3 Pad。生产 runtime 的 `ResolveFacingAlignedSatellitePlacement` 正确调用最终 `QuerySurface()`，因此同一 Anchor Cell 的世界表面位置/法线与过早冻结的 snapshot 相差 `1467.80 cm`。错误侧是临时 V2 表面上的 preview snapshot，不是最终 V3 production surface，也不是运行时 `250 cm` fail-closed 门。
+
+**修复**
+
+- 保留一次不发布日志的 bootstrap SatellitePreview，仅用于得到首轮 MapFreezeV3 和五个主星 Pad；安装最终 V3 地表后，用同一生产 `QuerySurface` 权威重新构造 SatellitePreview，再重建 V3 E1；
+- 以最终 MapFreezeV3 再安装一次五 Pad，并立即执行 SatellitePreview whole-struct 与 MapFreezeV3 canonical validation。任何 Pad 安装、最终 preview、最终 E1 或复验失败均清除 Ready 结果，不回退旧 snapshot，不放宽 `MaximumSatellitePreviewDeltaCM=250`；
+- 解析门直接用最终 `Planet->QuerySurface(Candidate.SatelliteAnchorDirection)` 重构卫星中心，要求 Cell 与冻结 Cell 相同、中心误差 `<=1 cm`；MapFreeze 门另要求 E1 `SupportCenterWorldCM` 精确连接所选最终表面 candidate。共享稳定契约、manifest、共同地图和 M7 代码均不修改；正式共享 refreeze 仍由 Integration 发布；
+- 最终地表中心不能沿用 bootstrap 轨迹证书。pre-binding proxy 与 production Crystal 都在最终中心上使用既有确定性域的 `61 x 31` 采样重新认证；冻结 Pull/Aim 范围、三连通见证、重力关闭 miss、唯一岛和误命中门槛均保持不变。没有合格候选时仍 fail closed；
+- Hash 影响被限定为卫星链：所选 Satellite candidate/result、E1 PlacementHash 和总 LayoutHash 必须重冻结；五个主星 E2/E3/E4/E5/E6 的 PlacementHash、PadCenter、Surface、走廊轴和 M7 Catalog 必须逐项保持。
+
+**Timing 与安全异步边界审计**
+
+- 当前真实地图已有 `ABTSM3TaskGraphGenerator` 每个 Attempt 的 Mission/Spatial/BuildingPadReserve/Height/Hydrology/Roads/BuildingPadCertify/Validate 累计 `TimeMS`（Verbose）、月度表现 Planner 的 `PlannerBudget DurationMS`、整次 Planet 的 `RebuildBudget DurationMS`，以及 RuntimeCertification 的 `PlannerMS/RebuildMS/ElapsedSeconds`；这些足以先定位规划或整图重建占比，但尚未把连续表面、材质、HISM、两阶段 MapFreeze 各自拆段；
+- 后续 `<=30 s` 冒烟优化可安全异步化的边界仅限不可变输入上的纯 CPU 候选工作：不同月度 retained candidate 的 preview/证书候选构造、连续表面唯一顶点的高度/法线采样缓存、树石候选几何与空间哈希预计算。归并时必须按稳定 CandidateId/顶点索引/Slot 顺序提交，保持首个接受候选和 Hash 不变；
+- `bootstrap preview -> 首轮 V3 -> 五 Pad -> final preview -> final V3 -> canonical validation` 是有向依赖链，不可互相并行；所有 UObject/Actor、PMC/碰撞烹饪、MID、HISM 写入和 Chaos 状态创建必须留在 Game Thread。启动 UI 不在本条修改范围。
+
+**防回归验证**
+
+- UE 5.8 普通 Development Editor 编译通过：全量 `27/27 actions / Result: Succeeded`；最终源码调整后的增量编译同样通过。期间未启动或结束其他工作树的 Editor；
+- fresh NullRHI `ABTS.M3.Monthly.SatellitePreview`：`Saved/Logs/M3Jury011-SatellitePreview-20260816-033304-FreshAutomation.log`，精确 `4/4 Success`；fresh NullRHI `ABTS.M3.Jury.MapFreezeV3`：`Saved/Logs/M3Jury011-MapFreezeV3-20260816-033304-FreshAutomation.log`，精确 `2/2 Success`；
+- 最终冻结身份：Satellite selected candidate `AA569671E58184A1`、Satellite result `3358BC5A456E3CD4`、E1 PlacementHash `1C267DFD88E65BAB`、LayoutHash `44723367D3DAA3A4`、Catalog `21B519761049404B`。五个主星逐项未变：E2 `A91A9FB5D79AE1CE`、E3 `4C41612002CC0208`、E4 `8ACA9CA9BAFE95BD`、E5 `66C8FD0EF4ACD5F2`、E6 `73BC7FE74D3835F7`；
+- fresh D3D11 离屏生产路径：`Saved/Logs/M3Jury011-L_ABTS_M10-OffscreenD3D11-20260816-033609.log`。唯一发布的最终 `[SatellitePreview] Result=3358BC5A456E3CD4`，随后 `MapFreezeV3 Ready=1 ... LayoutHash=44723367D3DAA3A4 ... SurfaceAuthority=FinalV3`；runtime 记录 `AnchorCell=754 / CandidateAnchorCell=754 / DeltaFromPreview=0.00`，轨迹 `PracticePassed=1 / FullFrozenCarrierPassed=1 / GravityDependentHits=144 / Island=51 / AimNeighbors=1 / PullNeighbors=1`，最终 `Ready=1 / TrajectoryCertified=1`，进程自行退出；日志不存在 `SatellitePreviewRuntimeDivergence`、`SpawnRejected` 或 `CertificationRejected`；
+- 本 M3 工作树的共享 exact V3 seal 仍是集成前旧值，因此 M7 E1 Crystal 正式绑定须等待 Integration 把共享 seal 重冻结为 `44723367D3DAA3A4` 后再跑联合门禁；这里没有回写共享契约，也没有把旧 bootstrap 坐标带回生产快照。
+
 ## 15. 新条目模板
 
 ```markdown
