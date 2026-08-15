@@ -34,6 +34,8 @@ public:
 	int32 AddBrick(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 	/** Creates a static per-brick Actor used by M7.3 validated structures; launch physics activates it with every other module. */
 	AABTSM7BuildingModule* SpawnBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
+	/** Caller-held static brick path for special V3 pieces such as the E1 Crystal cap. */
+	AABTSM7BuildingModule* SpawnStaticBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Suspension")
 	AABTSM7BuildingModule* SpawnSuspension(const FABTSM7SuspensionSpec& Spec, const FTransform& WorldTransform);
@@ -94,6 +96,10 @@ private:
 	void ApplyHISMPhysicalMaterial(UHierarchicalInstancedStaticMeshComponent& HISM, EABTSM7BuildingMaterial Material, const TCHAR* DebugName);
 	AABTSM7BuildingModule* SpawnVoxelDeviceInternal(
 		const FABTSM7DeviceSpec& Spec,
+		const FTransform& WorldTransform,
+		bool bRegisterForLaunchPhysics);
+	AABTSM7BuildingModule* SpawnBrickModuleInternal(
+		const FABTSM7BrickSpec& Spec,
 		const FTransform& WorldTransform,
 		bool bRegisterForLaunchPhysics);
 	void ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse = FVector::ZeroVector);

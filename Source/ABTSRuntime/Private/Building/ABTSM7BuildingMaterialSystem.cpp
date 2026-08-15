@@ -120,6 +120,21 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnBrickModule(
 	const FABTSM7BrickSpec& Spec,
 	const FTransform& WorldTransform)
 {
+	return SpawnBrickModuleInternal(Spec, WorldTransform, true);
+}
+
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnStaticBrickModule(
+	const FABTSM7BrickSpec& Spec,
+	const FTransform& WorldTransform)
+{
+	return SpawnBrickModuleInternal(Spec, WorldTransform, false);
+}
+
+AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnBrickModuleInternal(
+	const FABTSM7BrickSpec& Spec,
+	const FTransform& WorldTransform,
+	const bool bRegisterForLaunchPhysics)
+{
 	if (GetWorld() == nullptr || SharedBrickMesh == nullptr) return nullptr;
 	FActorSpawnParameters Params;
 	Params.Owner = this;
@@ -135,7 +150,10 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnBrickModule(
 	BrickTransform.SetScale3D(WorldTransform.GetScale3D() * (SafeDimensions / SharedCubeSizeCM));
 	Module->ConfigureBrick(SharedBrickMesh, GetMaterial(Spec.Material), Spec.Material, BrickTransform);
 	Module->ConfigureImpactPhysics(GetProfile(Spec.Material));
-	Modules.Add(Module);
+	if (bRegisterForLaunchPhysics)
+	{
+		Modules.Add(Module);
+	}
 	return Module;
 }
 
@@ -486,12 +504,15 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 		if (bDamageBreak || NormalSpeedCMPerSec >= Break * 1.35f)
 		{
 			const EABTSM7ModuleKind Kind = Module->GetModuleKind();
+			const EABTSM7BuildingMaterial ModuleMaterial = Module->GetBuildingMaterial();
 			const FVector Origin = Module->GetActorLocation();
 			const FVector Axis = Module->GetActorUpVector();
-			if (Kind == EABTSM7ModuleKind::Brick) NotifyBrickRecovered(Module->GetBuildingMaterial());
-			Module->BreakModule();
-			if (Kind == EABTSM7ModuleKind::ExplosiveBarrel) ApplyRadialBlast(Origin, BarrelDestroyRadiusCM, BarrelImpulseRadiusCM, BarrelImpulseSpeedCMPerSec);
-			else if (Kind == EABTSM7ModuleKind::SpringPiston) ApplyDirectionalBlast(Origin, Axis, PistonDestroyLengthCM, PistonImpulseLengthCM, PistonEffectRadiusCM, PistonImpulseSpeedCMPerSec);
+			if (Module->BreakModule())
+			{
+				if (Kind == EABTSM7ModuleKind::Brick) NotifyBrickRecovered(ModuleMaterial);
+				if (Kind == EABTSM7ModuleKind::ExplosiveBarrel) ApplyRadialBlast(Origin, BarrelDestroyRadiusCM, BarrelImpulseRadiusCM, BarrelImpulseSpeedCMPerSec);
+				else if (Kind == EABTSM7ModuleKind::SpringPiston) ApplyDirectionalBlast(Origin, Axis, PistonDestroyLengthCM, PistonImpulseLengthCM, PistonEffectRadiusCM, PistonImpulseSpeedCMPerSec);
+			}
 		}
 		else if (NormalSpeedCMPerSec >= Knock) ActivateModuleForLaunch(*Module, IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * Profile.PushVelocityTransfer);
 	}
@@ -523,8 +544,12 @@ void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent*
 	{
 		if (bDestroy)
 		{
-			if (Module->GetModuleKind() == EABTSM7ModuleKind::Brick) NotifyBrickRecovered(Module->GetBuildingMaterial());
-			Module->BreakModule();
+			const EABTSM7ModuleKind Kind = Module->GetModuleKind();
+			const EABTSM7BuildingMaterial Material = Module->GetBuildingMaterial();
+			if (Module->BreakModule() && Kind == EABTSM7ModuleKind::Brick)
+			{
+				NotifyBrickRecovered(Material);
+			}
 		}
 		else ActivateModuleForLaunch(*Module, ImpulseDirection.GetSafeNormal() * ImpulseSpeed);
 	}

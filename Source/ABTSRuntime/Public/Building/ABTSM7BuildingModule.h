@@ -75,13 +75,15 @@ public:
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);
 	void ActivateDynamicPlanar(const FVector& Impulse, const FVector& InGravityUp, float GravityAcceleration);
 	void Freeze();
-	void BreakModule();
+	/** Returns true only for the first successful break request. */
+	bool BreakModule();
 	bool ApplyImpactDamage(float DamageGain);
 
 	EABTSM7ModuleKind GetModuleKind() const { return ModuleKind; }
 	EABTSM7BuildingMaterial GetBuildingMaterial() const { return BuildingMaterial; }
 	UStaticMeshComponent* GetMeshComponent() const { return Visual; }
 	bool IsDynamic() const { return bDynamic; }
+	bool IsBroken() const { return bBroken; }
 	float GetCurrentDamage() const { return CurrentDamage; }
 	float GetBreakDamage() const { return BreakDamage; }
 
@@ -94,6 +96,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> DevicePresentation;
+	bool bBroken = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	EABTSM7ModuleKind ModuleKind = EABTSM7ModuleKind::Brick;

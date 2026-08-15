@@ -244,6 +244,7 @@ void AABTSM7BuildingModule::ConfigureChaosSolverIterations(
 
 bool AABTSM7BuildingModule::ApplyImpactDamage(const float DamageGain)
 {
+	if (bBroken) return false;
 	CurrentDamage = FMath::Max(0.0f, CurrentDamage + DamageGain);
 	return CurrentDamage >= BreakDamage;
 }
@@ -283,10 +284,13 @@ void AABTSM7BuildingModule::Freeze()
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
-void AABTSM7BuildingModule::BreakModule()
+bool AABTSM7BuildingModule::BreakModule()
 {
+	if (bBroken) return false;
+	bBroken = true;
 	bDynamic = false;
 	Destroy();
+	return true;
 }
 
 void AABTSM7BuildingModule::Tick(const float DeltaSeconds)
