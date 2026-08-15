@@ -40,6 +40,15 @@ struct FJuryCanonicalHash
 		}
 	}
 
+	void AddIntArray(const TArray<int32>& Values)
+	{
+		AddInt32(Values.Num());
+		for (const int32 Element : Values)
+		{
+			AddInt32(Element);
+		}
+	}
+
 	void AddName(const FName& Name)
 	{
 		const FString Text = Name.ToString();
@@ -183,15 +192,18 @@ bool IsJuryPlacementFrameValid(
 bool ValidateJuryPadReservation(
 	const TArray<FABTSM2Cell>& Cells,
 	const FABTSM3MonthlySpatialCandidate& Candidate,
-	const FABTSM3MonthlySpatialEncounter& Encounter,
 	const FVector& WorldLocationCM,
 	const FVector& Forward,
 	const FVector& Right,
-	const FVector2D& PadHalfExtentCM)
+	const FVector2D& PadHalfExtentCM,
+	TArray<int32>& OutReservedPadCellIds,
+	FString& OutFailure)
 {
-	if (Candidate.Cells.Num() != Cells.Num()
-		|| Encounter.TargetNoRoadCellIds.IsEmpty())
+	OutReservedPadCellIds.Reset();
+	OutFailure.Reset();
+	if (Candidate.Cells.Num() != Cells.Num())
 	{
+		OutFailure = TEXT("CandidateCellCount");
 		return false;
 	}
 
@@ -204,16 +216,30 @@ bool ValidateJuryPadReservation(
 				+ Forward * (PadHalfExtentCM.X * XIndex)
 				+ Right * (PadHalfExtentCM.Y * YIndex)).GetSafeNormal();
 			const int32 CellId = FindJuryNearestCell(Cells, SampleDirection);
-			if (!Candidate.Cells.IsValidIndex(CellId)
-				|| !Encounter.TargetNoRoadCellIds.Contains(CellId)
-				|| !Candidate.Cells[CellId].bNoRoad
-				|| Candidate.Cells[CellId].bWater)
+			if (!Candidate.Cells.IsValidIndex(CellId))
 			{
+				OutFailure = FString::Printf(
+					TEXT("InvalidCell:%d:%d"), XIndex, YIndex);
+				OutReservedPadCellIds.Reset();
 				return false;
 			}
+			if (Candidate.Cells[CellId].bWater)
+			{
+				OutFailure = FString::Printf(TEXT("WaterCell:%d"), CellId);
+				OutReservedPadCellIds.Reset();
+				return false;
+			}
+			if (Candidate.RecomputedRoute.OrderedRoadCellIds.Contains(CellId))
+			{
+				OutFailure = FString::Printf(TEXT("RoadCell:%d"), CellId);
+				OutReservedPadCellIds.Reset();
+				return false;
+			}
+			OutReservedPadCellIds.AddUnique(CellId);
 		}
 	}
-	return true;
+	OutReservedPadCellIds.Sort();
+	return !OutReservedPadCellIds.IsEmpty();
 }
 
 void SetJuryRejected(
@@ -270,12 +296,14 @@ uint64 FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(
 	Hash.AddInt32(Placement.DifficultyTier);
 	Hash.AddInt32(Placement.BuildingSeed);
 	Hash.AddInt32(Placement.TargetAnchorCellId);
+	Hash.AddInt32(Placement.PadCenterCellId);
 	Hash.AddInt32(Placement.SlingshotAnchorCellId);
 	Hash.AddVectorCM(Placement.WorldLocationCM);
 	Hash.AddVectorCM(Placement.WorldForwardAxis);
 	Hash.AddVectorCM(Placement.WorldRightAxis);
 	Hash.AddVectorCM(Placement.WorldUpAxis);
 	Hash.AddVector2DCM(Placement.RequiredPadHalfExtentCM);
+	Hash.AddIntArray(Placement.ReservedPadCellIds);
 	Hash.AddInt64(Placement.SourceDescriptorHash);
 	return Hash.Get();
 }
@@ -401,33 +429,6 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 			return false;
 		}
 
-		const FVector Up = Cells[Encounter.TargetAnchorCellId]
-			.UnitCenter.GetSafeNormal();
-		FVector Forward = FVector::VectorPlaneProject(
-			Cells[SlingshotPocket->AnchorCellId].UnitCenter,
-			Up).GetSafeNormal();
-		if (Forward.IsNearlyZero())
-		{
-			Forward = FVector::VectorPlaneProject(
-				FVector::ForwardVector,
-				Up).GetSafeNormal();
-		}
-		if (Forward.IsNearlyZero())
-		{
-			Forward = FVector::VectorPlaneProject(
-				FVector::RightVector,
-				Up).GetSafeNormal();
-		}
-		const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
-		Forward = FVector::CrossProduct(Right, Up).GetSafeNormal();
-		if (!IsJuryPlacementFrameValid(Forward, Right, Up))
-		{
-			OutFailure = FString::Printf(TEXT("PlacementFrame:%d"), Index);
-			SetJuryRejected(OutResult,
-				EABTSM3JuryFixedSixRejectReason::PlacementFrameInvalid);
-			return false;
-		}
-
 		FABTSM3JuryBuildingPlacement Placement;
 		Placement.EncounterIndex = Index;
 		Placement.ManifestEntryId = Fixture.ManifestEntryId;
@@ -436,22 +437,123 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 		Placement.BuildingSeed = Fixture.BuildingSeed;
 		Placement.TargetAnchorCellId = Encounter.TargetAnchorCellId;
 		Placement.SlingshotAnchorCellId = SlingshotPocket->AnchorCellId;
-		Placement.WorldLocationCM = Up * PlanetRadiusCM;
-		Placement.WorldForwardAxis = Forward;
-		Placement.WorldRightAxis = Right;
-		Placement.WorldUpAxis = Up;
 		Placement.RequiredPadHalfExtentCM = Fixture.RequiredPadHalfExtentCM;
 		Placement.SourceDescriptorHash = Fixture.SourceDescriptorHash;
-		if (!ValidateJuryPadReservation(
-				Cells,
-				*Candidate,
-				Encounter,
-				Placement.WorldLocationCM,
-				Forward,
-				Right,
-				Placement.RequiredPadHalfExtentCM))
+
+		TArray<int32> PadCenterCellIds;
+		PadCenterCellIds.Add(Encounter.TargetAnchorCellId);
+		for (const int32 CellId : Encounter.TargetNoRoadCellIds)
 		{
-			OutFailure = FString::Printf(TEXT("PadReservation:%d"), Index);
+			PadCenterCellIds.AddUnique(CellId);
+		}
+		for (const int32 CellId : Encounter.TargetFootprintCellIds)
+		{
+			PadCenterCellIds.AddUnique(CellId);
+		}
+		const FVector TargetAnchorDirection =
+			Cells[Encounter.TargetAnchorCellId].UnitCenter;
+		PadCenterCellIds.Sort(
+			[&Cells, &TargetAnchorDirection](const int32 First, const int32 Second)
+			{
+				if (!Cells.IsValidIndex(First))
+				{
+					return false;
+				}
+				if (!Cells.IsValidIndex(Second))
+				{
+					return true;
+				}
+				const double FirstDot = FVector::DotProduct(
+					Cells[First].UnitCenter, TargetAnchorDirection);
+				const double SecondDot = FVector::DotProduct(
+					Cells[Second].UnitCenter, TargetAnchorDirection);
+				return FirstDot != SecondDot ? FirstDot > SecondDot : First < Second;
+			});
+
+		FString PadReservationFailure;
+		bool bBuiltPlacementFrame = false;
+		bool bResolvedPad = false;
+		for (const int32 PadCenterCellId : PadCenterCellIds)
+		{
+			if (!Cells.IsValidIndex(PadCenterCellId)
+				|| !Candidate->Cells.IsValidIndex(PadCenterCellId))
+			{
+				PadReservationFailure = FString::Printf(
+					TEXT("InvalidCenterCell:%d"), PadCenterCellId);
+				continue;
+			}
+
+			const FVector Up = Cells[PadCenterCellId].UnitCenter.GetSafeNormal();
+			FVector Forward = FVector::VectorPlaneProject(
+				Cells[SlingshotPocket->AnchorCellId].UnitCenter,
+				Up).GetSafeNormal();
+			if (Forward.IsNearlyZero())
+			{
+				Forward = FVector::VectorPlaneProject(
+					FVector::ForwardVector,
+					Up).GetSafeNormal();
+			}
+			if (Forward.IsNearlyZero())
+			{
+				Forward = FVector::VectorPlaneProject(
+					FVector::RightVector,
+					Up).GetSafeNormal();
+			}
+			const FVector Right = FVector::CrossProduct(
+				Up, Forward).GetSafeNormal();
+			Forward = FVector::CrossProduct(Right, Up).GetSafeNormal();
+			if (!IsJuryPlacementFrameValid(Forward, Right, Up))
+			{
+				continue;
+			}
+			bBuiltPlacementFrame = true;
+			if (Candidate->Cells[PadCenterCellId].bWater)
+			{
+				PadReservationFailure = FString::Printf(
+					TEXT("WaterCenterCell:%d"), PadCenterCellId);
+				continue;
+			}
+			if (Candidate->RecomputedRoute.OrderedRoadCellIds.Contains(
+					PadCenterCellId))
+			{
+				PadReservationFailure = FString::Printf(
+					TEXT("RoadCenterCell:%d"), PadCenterCellId);
+				continue;
+			}
+
+			Placement.PadCenterCellId = PadCenterCellId;
+			Placement.WorldLocationCM = Up * PlanetRadiusCM;
+			Placement.WorldForwardAxis = Forward;
+			Placement.WorldRightAxis = Right;
+			Placement.WorldUpAxis = Up;
+			if (ValidateJuryPadReservation(
+					Cells,
+					*Candidate,
+					Placement.WorldLocationCM,
+					Forward,
+					Right,
+					Placement.RequiredPadHalfExtentCM,
+					Placement.ReservedPadCellIds,
+					PadReservationFailure))
+			{
+				bResolvedPad = true;
+				break;
+			}
+		}
+		if (!bBuiltPlacementFrame)
+		{
+			OutFailure = FString::Printf(TEXT("PlacementFrame:%d"), Index);
+			SetJuryRejected(OutResult,
+				EABTSM3JuryFixedSixRejectReason::PlacementFrameInvalid);
+			return false;
+		}
+		if (!bResolvedPad)
+		{
+			OutFailure = FString::Printf(
+				TEXT("PadReservation:%d:%s:Centers=%d"),
+				Index,
+				*PadReservationFailure,
+				PadCenterCellIds.Num());
 			SetJuryRejected(OutResult,
 				EABTSM3JuryFixedSixRejectReason::PadReservationFailed);
 			return false;

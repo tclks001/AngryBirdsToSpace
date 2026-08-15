@@ -123,6 +123,25 @@ bool FABTSM3JuryFixedSixBuildTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("placement ready"), First.bPlacementReady);
 	TestEqual(TEXT("six placements"), First.Placements.Num(), 6);
 	TestNotEqual(TEXT("layout hash"), First.LayoutHash, int64(0));
+	for (const FABTSM3JuryBuildingPlacement& Placement : First.Placements)
+	{
+		TestFalse(TEXT("pad reservation is non-empty"),
+			Placement.ReservedPadCellIds.IsEmpty());
+		for (int32 CellIndex = 1;
+			CellIndex < Placement.ReservedPadCellIds.Num();
+			++CellIndex)
+		{
+			TestTrue(TEXT("pad reservation is sorted and unique"),
+				Placement.ReservedPadCellIds[CellIndex - 1]
+					< Placement.ReservedPadCellIds[CellIndex]);
+		}
+	}
+	FABTSM3JuryBuildingPlacement HashTampered = First.Placements[0];
+	HashTampered.ReservedPadCellIds.Add(123456);
+	HashTampered.ReservedPadCellIds.Sort();
+	TestNotEqual(TEXT("reserved cells affect placement hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
+		static_cast<uint64>(First.Placements[0].PlacementHash));
 
 	FABTSM3JuryFixedSixLayoutResult Second;
 	TestTrue(TEXT("repeat build succeeds"),
@@ -150,8 +169,25 @@ bool FABTSM3JuryFixedSixBuildTest::RunTest(const FString& Parameters)
 		EABTSM3JuryFixedSixRejectReason::SourceIdentityMismatch);
 	TestFalse(TEXT("rejected result is not placement ready"),
 		Rejected.bPlacementReady);
+
+	FABTSM3MonthlySpatialResult RoadBlocked = Source;
+	RoadBlocked.RetainedCandidates[0].RecomputedRoute.OrderedRoadCellIds.Add(0);
+	TestFalse(TEXT("pad over final road fails closed"),
+		FABTSM3JuryFixedSixLayoutBuilder::Build(
+			Cells, 50000.0f, RoadBlocked, Rejected, Failure));
+	TestEqual(TEXT("road overlap reject reason"),
+		Rejected.RejectReason,
+		EABTSM3JuryFixedSixRejectReason::PadReservationFailed);
+
+	FABTSM3MonthlySpatialResult WaterBlocked = Source;
+	WaterBlocked.RetainedCandidates[0].Cells[0].bWater = true;
+	TestFalse(TEXT("pad over water fails closed"),
+		FABTSM3JuryFixedSixLayoutBuilder::Build(
+			Cells, 50000.0f, WaterBlocked, Rejected, Failure));
+	TestEqual(TEXT("water overlap reject reason"),
+		Rejected.RejectReason,
+		EABTSM3JuryFixedSixRejectReason::PadReservationFailed);
 	return true;
 }
 
 #endif
-

@@ -85,6 +85,10 @@ struct ABTSRUNTIME_API FABTSM3JuryBuildingPlacement
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int32 TargetAnchorCellId = INDEX_NONE;
 
+	/** Resolved center cell; may move within the encounter's frozen target region. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int32 PadCenterCellId = INDEX_NONE;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int32 SlingshotAnchorCellId = INDEX_NONE;
 
@@ -104,6 +108,10 @@ struct ABTSRUNTIME_API FABTSM3JuryBuildingPlacement
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six",
 		meta = (Units = "cm"))
 	FVector2D RequiredPadHalfExtentCM = FVector2D::ZeroVector;
+
+	/** Sorted candidate cells reserved by the rotated 3 x 3 pad samples. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	TArray<int32> ReservedPadCellIds;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int64 SourceDescriptorHash = 0;

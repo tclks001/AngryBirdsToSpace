@@ -587,11 +587,36 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		}
 		else
 		{
+			int32 ReservedPadCellCount = 0;
+			for (const FABTSM3JuryBuildingPlacement& Placement
+				: MonthlyJuryFixedSixLayoutResult.Placements)
+			{
+				ReservedPadCellCount += Placement.ReservedPadCellIds.Num();
+				FString ReservedPadCellText;
+				for (const int32 CellId : Placement.ReservedPadCellIds)
+				{
+					if (!ReservedPadCellText.IsEmpty())
+					{
+						ReservedPadCellText += TEXT(",");
+					}
+					ReservedPadCellText += FString::FromInt(CellId);
+				}
+				UE_LOG(LogABTSRuntime, Log,
+					TEXT("[ABTS][M3Jury][FixedSix][Placement] Encounter=%d Entry=%s TargetCell=%d PadCenterCell=%d ReservedPadCells=%s PlacementHash=%016llX"),
+					Placement.EncounterIndex,
+					*Placement.ManifestEntryId.ToString(),
+					Placement.TargetAnchorCellId,
+					Placement.PadCenterCellId,
+					*ReservedPadCellText,
+					static_cast<unsigned long long>(
+						static_cast<uint64>(Placement.PlacementHash)));
+			}
 			UE_LOG(LogABTSRuntime, Log,
-				TEXT("[ABTS][M3Jury][FixedSix] PlacementReady=1 Seed=%d Candidate=%d Buildings=%d M7Manifest=%d:%lld M7Catalog=%016llX LayoutHash=%016llX Authority=M3LocalAccepted"),
+				TEXT("[ABTS][M3Jury][FixedSix] PlacementReady=1 Seed=%d Candidate=%d Buildings=%d ReservedPadCells=%d M7Manifest=%d:%lld M7Catalog=%016llX LayoutHash=%016llX Authority=M3LocalAccepted"),
 				WorldSeed,
 				MonthlyJuryFixedSixLayoutResult.SourceCandidateId,
 				MonthlyJuryFixedSixLayoutResult.Placements.Num(),
+				ReservedPadCellCount,
 				MonthlyJuryFixedSixLayoutResult.M7SourceManifestVersion,
 				MonthlyJuryFixedSixLayoutResult.M7SourceManifestHash,
 				static_cast<unsigned long long>(
