@@ -50,6 +50,7 @@
 | M3-JURY-007 | V3 非方形建筑可能被 X/Y 装反或重复旋转，预发布结构门又依赖最终 LayoutHash | 已冻结路侧攻击轴/占地长轴正交门并按最终 Hash 顺序发布 | M3 |
 | M3-JURY-008 | V3 候选合线后装饰累计门稳定出现 2 个 PhysicalBounds 重叠 | 已统一生成过滤与最终生产净空查询 | M3 |
 | M3-JURY-009 | V3 建筑已激活但生产地形仍消费六个 V2 Pad，导致五栋主星建筑基部被地表穿过 | 已切换为五个 V3 主星 Pad，并让生产净空与装饰过滤消费同一 V3 快照 | M3 |
+| M3-JURY-010 | E1 双座梁/外载冻结身份形成方形占地后，被统一的“Y 必须长于 X”测试误拒绝 | 已按 SurfaceKind 区分主星长轴与卫星方形占地，并保留公共朝向门 | M3 |
 | M3-HISM-001 | 树石用统一 Pivot 偏移生成，首次进入 Chaos 因地形/实例穿插弹飞 | 已改为生成期碰撞包络贴地、跨类型避让和确定性门禁 | M3；M6 只保留集成诊断 |
 
 ## 3. 工作树、同步与构建
@@ -908,6 +909,28 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - 失败取证 `M3V3TerrainPads-20260816-010818-514-FreshAutomation.log` 与 `M3V3TerrainPads-R2-20260816-010957-698-FreshAutomation.log` 被保留：前者证明固定 32 段对 38 m 裙边给出 `19.50°` 假拒绝，后者证明盲目扩大裙边会恶化为 `25.88°`，不能靠加宽或放宽阈值掩盖；
 - `Saved/Logs/M3V3TerrainPads-Final-20260816-013024-196-FreshRuntime.log`：有 PhysicsScene 的 fresh M3 R5 runtime `Terminal=1 / Passed=1 / Failed=0`，五栋 `ChaosSamples=145 / MaxChaosResidualCM=2.85`，并再次证明 `PrimaryTerrainPads=5 / SatelliteTerrainPads=0`；
 - 命令行运行时仍不能替代视觉贴合证据。集成候选须由用户在 canonical `L_ABTS_M10` 可见 PIE 检查五栋基部无穿插、施工面平整且裙边连续。
+
+### M3-JURY-010：方形卫星建筑不能套用主星非方形长轴断言
+
+**现象**
+
+集成候选接受 M7 E1 双座梁/外载冻结身份后，E1 `SiteLocalBounds=(-162,90,0)-(162,414,756)`，Site X/Y 尺寸精确同为 `324 cm`。Map Freeze 已达到 `Ready=1`，攻击走廊长轴点积为 `0`，但 `ABTS.M3.Jury.MapFreezeV3.01DeterminismAndRoadFacing` 仍用统一的 `BoundsSize.Y > BoundsSize.X` 拒绝合法 E1。
+
+**根因**
+
+M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是占地长轴”写成所有 SurfaceKind 的统一前置条件。E1 新冻结身份的 Site X/Y 为方形后，不再存在可由尺寸唯一识别的水平长轴；该形状变化不代表朝向丢失，因为同一测试随后仍独立验证攻击走廊对准 Site X，且与冻结 `HorizontalLongAxisWorld` 正交。
+
+**修复**
+
+- 只在 M3 自有 `ABTSM3JuryMapFreezeV3AutomationTests.cpp` 中按 `SurfaceKind` 收窄形状断言：`PrimaryPlanet` 继续要求 `Y > X`，卫星 E1 要求 `X == Y`；
+- 六栋共同的 `AttackCorridorWorldDirection -> Site X` 与 `AttackCorridorLongAxisAbsDot` 门保持不变，因此没有放宽旋转、重复旋转或路侧攻击面的判定；
+- 不修改 Map Freeze 算法、V3 DTO/共享合同、M7 冻结身份、布局 Hash 或地图资产。
+
+**防回归验证**
+
+- 当前 M3 工作树没有 Editor/Editor-Cmd 进程；使用唯一允许的 UE 5.8 执行普通 Development Editor 编译，`5/5 actions / Result: Succeeded`，未结束或干预其他进程；
+- 按集成协调要求不在本修正中运行重型自动化；集成候选须在合入后重跑 `ABTS.M3.Jury.MapFreezeV3`，证明 E1 方形断言与其后的公共朝向断言同时通过；
+- 若任一主星占地不再满足 `Y > X`、E1 的 X/Y 不再相等、走廊不再对准 Site X，或走廊与冻结长轴不再正交，测试仍须 fail closed。
 
 ## 15. 新条目模板
 
