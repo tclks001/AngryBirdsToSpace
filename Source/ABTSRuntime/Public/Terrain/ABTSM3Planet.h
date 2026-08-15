@@ -613,7 +613,7 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	FABTSM3MonthlySatellitePreviewResult MonthlySatellitePreviewResult;
 
-	/** Five primary sites plus satellite E1; not exported as production yet. */
+	/** Published V3 placement: five primary sites plus satellite E1. */
 	FABTSM3JuryMapFreezeV3Result JuryMapFreezeV3Result;
 
 	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
@@ -678,6 +678,9 @@ private:
 			PresentationCandidate = nullptr);
 	void BuildBuildingSpawnSites();
 	bool AppendJuryFixedSixTerrainPads(
+		TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
+		FString& OutFailure);
+	bool AppendJuryMapFreezeV3TerrainPads(
 		TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
 		FString& OutFailure);
 	void GetJuryFixedSixDecorClearanceOverlaps(

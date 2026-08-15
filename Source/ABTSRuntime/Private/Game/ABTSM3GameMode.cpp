@@ -2116,7 +2116,7 @@ void AABTSM3GameMode::TryCompleteM3R5Smoke()
 		return;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3Jury][ProductionClearanceRegression] Passed=1 TerrainPads=%d PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f Authority=M3RuntimeSurface"),
+		TEXT("[ABTS][M3Jury][ProductionClearanceRegression] Passed=1 Contract=V3 PrimaryTerrainPads=%d SatelliteTerrainPads=0 PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f Authority=M3RuntimeSurface"),
 		JuryTerrainPadCount,
 		JuryPhysicalDecorOverlapCount,
 		JuryDynamicDecorOverlapCount,

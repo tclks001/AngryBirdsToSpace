@@ -28,6 +28,199 @@
 
 namespace
 {
+struct FABTSM3JuryTerrainPadSource
+{
+	int32 EncounterIndex = INDEX_NONE;
+	int32 PadCenterCellId = INDEX_NONE;
+	FVector PlanetLocalCenterCM = FVector::ZeroVector;
+	FVector Forward = FVector::ForwardVector;
+	FVector Right = FVector::RightVector;
+	FVector Up = FVector::UpVector;
+	FVector2D PadHalfExtentCM = FVector2D::ZeroVector;
+	float TargetRadiusCM = 0.0f;
+};
+
+bool BuildABTSM3JuryTerrainPads(
+	const TArray<FABTSM3JuryTerrainPadSource>& Sources,
+	const FVector& PlanetCenterWorld,
+	const float PlanetRadiusCM,
+	const float MaximumGradeSlopeDegreesSetting,
+	const float MinimumGradeWidthCMSetting,
+	const float SmoothStepGradeMultiplier,
+	const float SurfaceNormalSmoothingDistanceCM,
+	const FABTSM3TerrainVisualField& TerrainVisualField,
+	TArray<FABTSM3BuildingSpawnSite>& OutPads,
+	TArray<float>& OutSourceHeightDeltasCM,
+	FString& OutFailure)
+{
+	OutPads.Reset();
+	OutSourceHeightDeltasCM.Reset();
+	OutFailure.Reset();
+	OutPads.Reserve(Sources.Num());
+	OutSourceHeightDeltasCM.Reserve(Sources.Num());
+	const float MaximumGradeSlopeDegrees = FMath::Clamp(
+		MaximumGradeSlopeDegreesSetting,
+		5.0f,
+		30.0f);
+	const float MaximumGradeTangent = FMath::Tan(
+		FMath::DegreesToRadians(MaximumGradeSlopeDegrees));
+	const float MinimumGradeWidthCM = FMath::Max(
+		300.0f,
+		MinimumGradeWidthCMSetting);
+	// Cubic SmoothStep peaks at 1.5 times the average slope. Callers add
+	// contract-specific headroom for the CellTopo field and pad interactions.
+	constexpr int32 GradeRayCount = 16;
+	constexpr int32 GradeSamplesPerRay = 2;
+	constexpr int32 MaximumWidthSolveIterations = 12;
+	const float MaximumSafeGradeWidthCM = PlanetRadiusCM * 0.6f;
+	const float MinimumLocalHeightProbeWidthCM = FMath::Max(
+		200.0f,
+		SurfaceNormalSmoothingDistanceCM * 2.0f);
+
+	for (const FABTSM3JuryTerrainPadSource& Source : Sources)
+	{
+		if (Source.PadCenterCellId == INDEX_NONE
+			|| Source.Forward.IsNearlyZero()
+			|| Source.Right.IsNearlyZero()
+			|| Source.Up.IsNearlyZero()
+			|| FMath::Abs(FVector::DotProduct(Source.Forward, Source.Right))
+				> 1.0e-3f
+			|| FMath::Abs(FVector::DotProduct(Source.Forward, Source.Up))
+				> 1.0e-3f
+			|| FMath::Abs(FVector::DotProduct(Source.Right, Source.Up))
+				> 1.0e-3f
+			|| FVector::DotProduct(
+				FVector::CrossProduct(Source.Up, Source.Forward),
+				Source.Right) < 0.999f
+			|| Source.TargetRadiusCM <= 0.0f
+			|| Source.PadHalfExtentCM.X <= 0.0f
+			|| Source.PadHalfExtentCM.Y <= 0.0f)
+		{
+			OutFailure = FString::Printf(
+				TEXT("InvalidPlacementFrameOrPad:%d"),
+				Source.EncounterIndex);
+			return false;
+		}
+
+		FABTSM3BuildingSpawnSite& Site = OutPads.AddDefaulted_GetRef();
+		Site.TaskId = INDEX_NONE;
+		Site.CellId = Source.PadCenterCellId;
+		Site.TaskType = EABTSM3TaskType::Unassigned;
+		Site.WorldTransform = FTransform(
+			FRotationMatrix::MakeFromXZ(Source.Forward, Source.Up).ToQuat(),
+			PlanetCenterWorld + Source.PlanetLocalCenterCM);
+		Site.MaxSlopeDegrees = 0.0f;
+		Site.AnchorDirection = Source.Up;
+		Site.TangentForward = Source.Forward;
+		Site.TangentRight = Source.Right;
+		Site.PadHalfExtentCM = Source.PadHalfExtentCM;
+		Site.PadTargetRadiusCM = Source.TargetRadiusCM;
+
+		auto SampleMaximumSourceHeightDeltaCM = [
+			&TerrainVisualField,
+			&Source,
+			MinimumLocalHeightProbeWidthCM](const float CandidateWidthCM)
+		{
+			const float LocalHeightProbeWidthCM = FMath::Max(
+				MinimumLocalHeightProbeWidthCM,
+				CandidateWidthCM * 0.5f);
+			float MaximumHeightDeltaCM = 0.0f;
+			const FVector CenterDirection =
+				Source.PlanetLocalCenterCM.GetSafeNormal();
+			if (!CenterDirection.IsNearlyZero())
+			{
+				const FVector RawCenter = CenterDirection
+					* TerrainVisualField.GetUnpaddedSurfaceRadius(
+						CenterDirection);
+				MaximumHeightDeltaCM = FMath::Abs(FVector::DotProduct(
+					RawCenter - Source.PlanetLocalCenterCM,
+					Source.Up));
+			}
+			for (int32 RayIndex = 0; RayIndex < GradeRayCount; ++RayIndex)
+			{
+				const float AngleRadians = UE_TWO_PI
+					* static_cast<float>(RayIndex)
+					/ static_cast<float>(GradeRayCount);
+				const FVector2D Ray(
+					FMath::Cos(AngleRadians),
+					FMath::Sin(AngleRadians));
+				const float BoundaryDistanceCM = 1.0f / FMath::Max(
+					FMath::Abs(Ray.X) / Source.PadHalfExtentCM.X,
+					FMath::Abs(Ray.Y) / Source.PadHalfExtentCM.Y);
+				for (int32 SampleIndex = 0;
+					SampleIndex <= GradeSamplesPerRay;
+					++SampleIndex)
+				{
+					const float DistanceCM = BoundaryDistanceCM
+						+ LocalHeightProbeWidthCM
+							* static_cast<float>(SampleIndex)
+							/ static_cast<float>(GradeSamplesPerRay);
+					const FVector PlaneSample = Source.PlanetLocalCenterCM
+						+ Source.Forward * (Ray.X * DistanceCM)
+						+ Source.Right * (Ray.Y * DistanceCM);
+					const FVector Direction = PlaneSample.GetSafeNormal();
+					if (Direction.IsNearlyZero())
+					{
+						continue;
+					}
+					const FVector RawSurface = Direction
+						* TerrainVisualField.GetUnpaddedSurfaceRadius(Direction);
+					MaximumHeightDeltaCM = FMath::Max(
+						MaximumHeightDeltaCM,
+						FMath::Abs(FVector::DotProduct(
+							RawSurface - Source.PlanetLocalCenterCM,
+							Source.Up)));
+				}
+			}
+			return MaximumHeightDeltaCM;
+		};
+
+		float ResolvedGradeWidthCM = MinimumGradeWidthCM;
+		float MaximumSourceHeightDeltaCM = 0.0f;
+		bool bGradeWidthConverged = false;
+		for (int32 SolveIteration = 0;
+			SolveIteration < MaximumWidthSolveIterations;
+			++SolveIteration)
+		{
+			MaximumSourceHeightDeltaCM =
+				SampleMaximumSourceHeightDeltaCM(ResolvedGradeWidthCM);
+			const float RequiredGradeWidthCM = FMath::Max(
+				MinimumGradeWidthCM,
+				SmoothStepGradeMultiplier * MaximumSourceHeightDeltaCM
+					/ FMath::Max(MaximumGradeTangent, UE_KINDA_SMALL_NUMBER));
+			if (!FMath::IsFinite(RequiredGradeWidthCM)
+				|| RequiredGradeWidthCM > MaximumSafeGradeWidthCM)
+			{
+				OutFailure = FString::Printf(
+					TEXT("GradeWidthUnsafe:%d:Width=%.1f:Delta=%.1f"),
+					Source.EncounterIndex,
+					RequiredGradeWidthCM,
+					MaximumSourceHeightDeltaCM);
+				return false;
+			}
+			if (RequiredGradeWidthCM <= ResolvedGradeWidthCM + 1.0f)
+			{
+				bGradeWidthConverged = true;
+				break;
+			}
+			ResolvedGradeWidthCM = RequiredGradeWidthCM;
+		}
+		if (!bGradeWidthConverged)
+		{
+			OutFailure = FString::Printf(
+				TEXT("GradeWidthDidNotConverge:%d:Width=%.1f:Delta=%.1f"),
+				Source.EncounterIndex,
+				ResolvedGradeWidthCM,
+				MaximumSourceHeightDeltaCM);
+			return false;
+		}
+		Site.PadEdgeBlendWidthCM = ResolvedGradeWidthCM;
+		Site.bTerrainPadApplied = true;
+		OutSourceHeightDeltasCM.Add(MaximumSourceHeightDeltaCM);
+	}
+	return true;
+}
+
 class FPlanetMonthlyFinaleAnchorSurface final
 	: public IABTSM3MonthlyFinaleAnchorSurface
 {
@@ -342,38 +535,22 @@ bool AABTSM3Planet::RebuildPlanet()
 	// tangent construction pads and the sites are rebuilt so every downstream user
 	// (mesh, collision query, HISM and M7 building) reads the same final surface.
 	BuildBuildingSpawnSites();
-	TArray<FABTSM3BuildingSpawnSite> TerrainPads = BuildingSpawnSites;
+	const TArray<FABTSM3BuildingSpawnSite> CompatibilityTerrainPads =
+		BuildingSpawnSites;
+	TArray<FABTSM3BuildingSpawnSite> TerrainPads =
+		CompatibilityTerrainPads;
 	FString JuryTerrainPadFailure;
-	const bool bJuryTerrainPadsReady = AppendJuryFixedSixTerrainPads(
+	bool bJuryTerrainPadsReady = AppendJuryFixedSixTerrainPads(
 		TerrainPads,
 		JuryTerrainPadFailure);
 	if (!bJuryTerrainPadsReady)
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3Jury][ProductionClearance] TerrainPadsReady=0 Failure=%s CompatibilityBuildingSitesPreserved=1"),
+			TEXT("[ABTS][M3Jury][TerrainPadBootstrap] Ready=0 Failure=%s CompatibilityBuildingSitesPreserved=1"),
 			*JuryTerrainPadFailure);
 	}
 	TerrainVisualField->SetBuildingPads(TerrainPads);
 	BuildBuildingSpawnSites();
-	const bool bFinaleFrameReady = FinaleLaunchFrame.IsUsable();
-	if (bFinaleFrameReady)
-	{
-		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M11.0][FinaleFrame] Ready Layout=%d Task=%d Cell=%d Pair=%d Separation=%.1f Forward=%s Right=%s Up=%s"),
-			FinaleLaunchFrame.LayoutVersion,
-			FinaleLaunchFrame.LaunchTaskId,
-			FinaleLaunchFrame.AnchorCellId,
-			FinaleLaunchFrame.SlotPairId,
-			FVector::Distance(FinaleLaunchFrame.LeftSlotWorldLocation, FinaleLaunchFrame.RightSlotWorldLocation),
-			*FinaleLaunchFrame.GetForward().ToCompactString(),
-			*FinaleLaunchFrame.GetRight().ToCompactString(),
-			*FinaleLaunchFrame.GetUp().ToCompactString());
-	}
-	else
-	{
-		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M11.0][FinaleFrame] Rejected after final terrain-pad resolution."));
-	}
 	FString SatellitePreviewFailure;
 	const FPlanetMonthlySatellitePreviewSurface SatelliteSurface(
 		*this,
@@ -408,6 +585,7 @@ bool AABTSM3Planet::RebuildPlanet()
 			JuryMapFreezeV3Result,
 			MapFreezeV3Failure))
 		{
+			bJuryTerrainPadsReady = false;
 			UE_LOG(LogABTSRuntime, Warning,
 			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Reason=%s Failure=%s ProductionContract=V%d ActivationAllowed=1"),
 			WorldSeed,
@@ -440,10 +618,64 @@ bool AABTSM3Planet::RebuildPlanet()
 					Placement.Site.V3Envelope.SurfaceKind),
 				Placement.PadCenterCellId,
 				Placement.AttackCorridorLongAxisAbsDot,
-				static_cast<unsigned long long>(
-					Placement.Site.V3Envelope.PlacementHash));
+					static_cast<unsigned long long>(
+						Placement.Site.V3Envelope.PlacementHash));
+			}
+
+			TerrainPads.Reset();
+			for (const FABTSM3BuildingSpawnSite& CompatibilityPad
+				: CompatibilityTerrainPads)
+			{
+				// V3 replaces the ordinary Workshop/Target/Furnace building pads.
+				// The terminal LaunchSite remains a separate M11 facility and keeps
+				// its established compatibility construction plane.
+				if (CompatibilityPad.TaskType == EABTSM3TaskType::LaunchSite)
+				{
+					TerrainPads.Add(CompatibilityPad);
+				}
+			}
+			FString V3TerrainPadFailure;
+			bJuryTerrainPadsReady = AppendJuryMapFreezeV3TerrainPads(
+				TerrainPads,
+				V3TerrainPadFailure);
+			if (bJuryTerrainPadsReady)
+			{
+				TerrainVisualField->SetBuildingPads(TerrainPads);
+				BuildBuildingSpawnSites();
+				UE_LOG(LogABTSRuntime, Log,
+					TEXT("[ABTS][M3Jury][ProductionTerrainPads] Ready=1 Contract=V3 PrimaryPads=%d SatellitePads=0 LayoutHash=%016llX Authority=M3RuntimeSurface"),
+					JuryFixedSixTerrainPadCount,
+					static_cast<unsigned long long>(
+						JuryMapFreezeV3Result.LayoutHash));
+			}
+			else
+			{
+				UE_LOG(LogABTSRuntime, Error,
+					TEXT("[ABTS][M3Jury][ProductionTerrainPads] Ready=0 Contract=V3 Failure=%s LayoutHash=%016llX Authority=M3RuntimeSurface"),
+					*V3TerrainPadFailure,
+					static_cast<unsigned long long>(
+						JuryMapFreezeV3Result.LayoutHash));
 			}
 		}
+	}
+	const bool bFinaleFrameReady = FinaleLaunchFrame.IsUsable();
+	if (bFinaleFrameReady)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M11.0][FinaleFrame] Ready Layout=%d Task=%d Cell=%d Pair=%d Separation=%.1f Forward=%s Right=%s Up=%s"),
+			FinaleLaunchFrame.LayoutVersion,
+			FinaleLaunchFrame.LaunchTaskId,
+			FinaleLaunchFrame.AnchorCellId,
+			FinaleLaunchFrame.SlotPairId,
+			FVector::Distance(FinaleLaunchFrame.LeftSlotWorldLocation, FinaleLaunchFrame.RightSlotWorldLocation),
+			*FinaleLaunchFrame.GetForward().ToCompactString(),
+			*FinaleLaunchFrame.GetRight().ToCompactString(),
+			*FinaleLaunchFrame.GetUp().ToCompactString());
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M11.0][FinaleFrame] Rejected after final terrain-pad resolution."));
 	}
 	BuildM3ContinuousSurface();
 	const FABTSM3MonthlyCandidatePresentation*
@@ -551,7 +783,7 @@ bool AABTSM3Planet::RebuildPlanet()
 		if (bProductionClearanceReady)
 		{
 			UE_LOG(LogABTSRuntime, Log,
-				TEXT("[ABTS][M3Jury][ProductionClearance] Passed=1 TerrainPads=%d PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f GradeSlopeBudgetDegrees=%.2f Failure=None Authority=M3RuntimeSurface"),
+				TEXT("[ABTS][M3Jury][ProductionClearance] Passed=1 Contract=V3 PrimaryTerrainPads=%d SatelliteTerrainPads=0 PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f GradeSlopeBudgetDegrees=%.2f Failure=None Authority=M3RuntimeSurface"),
 				TerrainPadCount,
 				PhysicalOverlapInstanceCount,
 				DynamicOverlapInstanceCount,
@@ -570,7 +802,7 @@ bool AABTSM3Planet::RebuildPlanet()
 		else
 		{
 			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][M3Jury][ProductionClearance] Passed=0 TerrainPads=%d PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f GradeSlopeBudgetDegrees=%.2f Failure=%s Authority=M3RuntimeSurface"),
+				TEXT("[ABTS][M3Jury][ProductionClearance] Passed=0 Contract=V3 PrimaryTerrainPads=%d SatelliteTerrainPads=0 PhysicalDecorOverlaps=%d DynamicDecorOverlaps=%d DecorRejected=%d MaxPadResidualCM=%.3f MinGradeWidthCM=%.1f MaxGradeWidthCM=%.1f MaxSourceDeltaCM=%.1f MaxGradeSlopeDegrees=%.2f MaxNormalStepDegrees=%.2f MaxEdgeResidualCM=%.3f ChaosSamples=%d MaxChaosResidualCM=%.2f GradeSlopeBudgetDegrees=%.2f Failure=%s Authority=M3RuntimeSurface"),
 				TerrainPadCount,
 				PhysicalOverlapInstanceCount,
 				DynamicOverlapInstanceCount,
@@ -3133,175 +3365,171 @@ bool AABTSM3Planet::AppendJuryFixedSixTerrainPads(
 		return false;
 	}
 
-	TArray<FABTSM3BuildingSpawnSite> JuryTerrainPads;
-	TArray<float> JuryTerrainSourceHeightDeltasCM;
-	JuryTerrainPads.Reserve(
+	TArray<FABTSM3JuryTerrainPadSource> Sources;
+	Sources.Reserve(
 		FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount);
-	JuryTerrainSourceHeightDeltasCM.Reserve(
-		FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount);
-	const float MaximumGradeSlopeDegrees = FMath::Clamp(
-		JuryFixedSixMaximumGradeSlopeDegrees,
-		5.0f,
-		30.0f);
-	const float MaximumGradeTangent = FMath::Tan(
-		FMath::DegreesToRadians(MaximumGradeSlopeDegrees));
-	const float MinimumGradeWidthCM = FMath::Max(
-		300.0f,
-		JuryFixedSixMinimumGradeWidthCM);
-	// Cubic SmoothStep peaks at 1.5 times the average slope. The extra 15%
-	// leaves room for the underlying CellTopo field and spherical projection.
-	constexpr float SmoothStepGradeMultiplier = 1.725f;
-	constexpr int32 GradeRayCount = 16;
-	constexpr int32 GradeSamplesPerRay = 2;
-	constexpr int32 MaximumWidthSolveIterations = 12;
-	const float MaximumSafeGradeWidthCM = PlanetRadiusCM * 0.6f;
-	const float MinimumLocalHeightProbeWidthCM = FMath::Max(
-		200.0f,
-		SurfaceNormalSmoothingDistanceCM * 2.0f);
 	for (const FABTSM3JuryBuildingPlacement& Placement : Result.Placements)
 	{
-		const FVector Forward = Placement.WorldForwardAxis.GetSafeNormal();
-		const FVector Right = Placement.WorldRightAxis.GetSafeNormal();
-		const FVector Up = Placement.WorldUpAxis.GetSafeNormal();
-		const float TargetRadiusCM = FVector::DotProduct(
-			Placement.WorldLocationCM,
-			Up);
-		if (!LogicalCells.IsValidIndex(Placement.PadCenterCellId)
-			|| Forward.IsNearlyZero()
-			|| Right.IsNearlyZero()
-			|| Up.IsNearlyZero()
-			|| FMath::Abs(FVector::DotProduct(Forward, Right)) > 1.0e-3f
-			|| FMath::Abs(FVector::DotProduct(Forward, Up)) > 1.0e-3f
-			|| FMath::Abs(FVector::DotProduct(Right, Up)) > 1.0e-3f
-			|| FVector::DotProduct(FVector::CrossProduct(Up, Forward), Right)
-				< 0.999f
-			|| TargetRadiusCM <= 0.0f
-			|| Placement.RequiredPadHalfExtentCM.X <= 0.0f
-			|| Placement.RequiredPadHalfExtentCM.Y <= 0.0f)
+		if (!LogicalCells.IsValidIndex(Placement.PadCenterCellId))
 		{
 			OutFailure = FString::Printf(
-				TEXT("InvalidPlacementFrameOrPad:%d"),
+				TEXT("InvalidPadCenterCell:%d"),
 				Placement.EncounterIndex);
 			return false;
 		}
-
-		FABTSM3BuildingSpawnSite& Site =
-			JuryTerrainPads.AddDefaulted_GetRef();
-		Site.TaskId = INDEX_NONE;
-		Site.CellId = Placement.PadCenterCellId;
-		Site.TaskType = EABTSM3TaskType::Unassigned;
-		Site.WorldTransform = FTransform(
-			FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat(),
-			GetPlanetCenterWorld() + Placement.WorldLocationCM);
-		Site.MaxSlopeDegrees = 0.0f;
-		Site.AnchorDirection = Up;
-		Site.TangentForward = Forward;
-		Site.TangentRight = Right;
-		Site.PadHalfExtentCM = Placement.RequiredPadHalfExtentCM;
-		Site.PadTargetRadiusCM = TargetRadiusCM;
-
-		auto SampleMaximumSourceHeightDeltaCM = [this, &Placement, Forward, Right, MinimumLocalHeightProbeWidthCM](
-			const float CandidateWidthCM)
-		{
-			const float LocalHeightProbeWidthCM = FMath::Max(
-				MinimumLocalHeightProbeWidthCM,
-				CandidateWidthCM * 0.5f);
-			float MaximumHeightDeltaCM = 0.0f;
-			const FVector CenterDirection = Placement.WorldLocationCM.GetSafeNormal();
-			if (!CenterDirection.IsNearlyZero())
-			{
-				const FVector RawCenter = CenterDirection
-					* TerrainVisualField->GetUnpaddedSurfaceRadius(CenterDirection);
-				MaximumHeightDeltaCM = FMath::Abs(FVector::DotProduct(
-					RawCenter - Placement.WorldLocationCM,
-					Placement.WorldUpAxis));
-			}
-			for (int32 RayIndex = 0; RayIndex < GradeRayCount; ++RayIndex)
-			{
-				const float AngleRadians = UE_TWO_PI
-					* static_cast<float>(RayIndex)
-					/ static_cast<float>(GradeRayCount);
-				const FVector2D Ray(FMath::Cos(AngleRadians), FMath::Sin(AngleRadians));
-				const float BoundaryDistanceCM = 1.0f / FMath::Max(
-					FMath::Abs(Ray.X) / Placement.RequiredPadHalfExtentCM.X,
-					FMath::Abs(Ray.Y) / Placement.RequiredPadHalfExtentCM.Y);
-				for (int32 SampleIndex = 0;
-					SampleIndex <= GradeSamplesPerRay;
-					++SampleIndex)
-				{
-					const float DistanceCM = BoundaryDistanceCM
-						+ LocalHeightProbeWidthCM
-							* static_cast<float>(SampleIndex)
-							/ static_cast<float>(GradeSamplesPerRay);
-					const FVector PlaneSample = Placement.WorldLocationCM
-						+ Forward * (Ray.X * DistanceCM)
-						+ Right * (Ray.Y * DistanceCM);
-					const FVector Direction = PlaneSample.GetSafeNormal();
-					if (Direction.IsNearlyZero())
-					{
-						continue;
-					}
-					const FVector RawSurface = Direction
-						* TerrainVisualField->GetUnpaddedSurfaceRadius(Direction);
-					MaximumHeightDeltaCM = FMath::Max(
-						MaximumHeightDeltaCM,
-						FMath::Abs(FVector::DotProduct(
-							RawSurface - Placement.WorldLocationCM,
-							Placement.WorldUpAxis)));
-				}
-			}
-			return MaximumHeightDeltaCM;
-		};
-
-		float ResolvedGradeWidthCM = MinimumGradeWidthCM;
-		float MaximumSourceHeightDeltaCM = 0.0f;
-		bool bGradeWidthConverged = false;
-		for (int32 SolveIteration = 0;
-			SolveIteration < MaximumWidthSolveIterations;
-			++SolveIteration)
-		{
-			MaximumSourceHeightDeltaCM =
-				SampleMaximumSourceHeightDeltaCM(ResolvedGradeWidthCM);
-			const float RequiredGradeWidthCM = FMath::Max(
-				MinimumGradeWidthCM,
-				SmoothStepGradeMultiplier * MaximumSourceHeightDeltaCM
-					/ FMath::Max(MaximumGradeTangent, UE_KINDA_SMALL_NUMBER));
-			if (!FMath::IsFinite(RequiredGradeWidthCM)
-				|| RequiredGradeWidthCM > MaximumSafeGradeWidthCM)
-			{
-				OutFailure = FString::Printf(
-					TEXT("GradeWidthUnsafe:%d:Width=%.1f:Delta=%.1f"),
-					Placement.EncounterIndex,
-					RequiredGradeWidthCM,
-					MaximumSourceHeightDeltaCM);
-				return false;
-			}
-			if (RequiredGradeWidthCM <= ResolvedGradeWidthCM + 1.0f)
-			{
-				bGradeWidthConverged = true;
-				break;
-			}
-			ResolvedGradeWidthCM = RequiredGradeWidthCM;
-		}
-		if (!bGradeWidthConverged)
-		{
-			OutFailure = FString::Printf(
-				TEXT("GradeWidthDidNotConverge:%d:Width=%.1f:Delta=%.1f"),
-				Placement.EncounterIndex,
-				ResolvedGradeWidthCM,
-				MaximumSourceHeightDeltaCM);
-			return false;
-		}
-		Site.PadEdgeBlendWidthCM = ResolvedGradeWidthCM;
-		// The frozen jury map is a production consumer. Its six exact transforms
-		// must remain seated even if a legacy Blueprint disables optional pads.
-		Site.bTerrainPadApplied = true;
-		JuryTerrainSourceHeightDeltasCM.Add(MaximumSourceHeightDeltaCM);
+		FABTSM3JuryTerrainPadSource& Source =
+			Sources.AddDefaulted_GetRef();
+		Source.EncounterIndex = Placement.EncounterIndex;
+		Source.PadCenterCellId = Placement.PadCenterCellId;
+		Source.PlanetLocalCenterCM = Placement.WorldLocationCM;
+		Source.Forward = Placement.WorldForwardAxis.GetSafeNormal();
+		Source.Right = Placement.WorldRightAxis.GetSafeNormal();
+		Source.Up = Placement.WorldUpAxis.GetSafeNormal();
+		Source.PadHalfExtentCM = Placement.RequiredPadHalfExtentCM;
+		Source.TargetRadiusCM = FVector::DotProduct(
+			Placement.WorldLocationCM,
+			Source.Up);
+	}
+	TArray<FABTSM3BuildingSpawnSite> JuryTerrainPads;
+	TArray<float> JuryTerrainSourceHeightDeltasCM;
+	if (!BuildABTSM3JuryTerrainPads(
+			Sources,
+			GetPlanetCenterWorld(),
+			PlanetRadiusCM,
+			JuryFixedSixMaximumGradeSlopeDegrees,
+			JuryFixedSixMinimumGradeWidthCM,
+			1.725f,
+			SurfaceNormalSmoothingDistanceCM,
+			*TerrainVisualField,
+			JuryTerrainPads,
+			JuryTerrainSourceHeightDeltasCM,
+			OutFailure))
+	{
+		return false;
 	}
 	if (JuryTerrainPads.Num()
 		!= FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount)
 	{
 		OutFailure = TEXT("TerrainPadCountMismatch");
+		return false;
+	}
+	InOutTerrainPads.Append(JuryTerrainPads);
+	JuryFixedSixTerrainPads = JuryTerrainPads;
+	JuryFixedSixTerrainSourceHeightDeltasCM =
+		MoveTemp(JuryTerrainSourceHeightDeltasCM);
+	JuryFixedSixTerrainPadCount = JuryTerrainPads.Num();
+	return true;
+}
+
+bool AABTSM3Planet::AppendJuryMapFreezeV3TerrainPads(
+	TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
+	FString& OutFailure)
+{
+	JuryFixedSixTerrainPadCount = 0;
+	JuryFixedSixTerrainPads.Reset();
+	JuryFixedSixTerrainSourceHeightDeltasCM.Reset();
+	OutFailure.Reset();
+	if (WorldSeed != FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed)
+	{
+		return true;
+	}
+	if (FABTSJuryDemoFixedSixContract::ProductionContractVersion
+		!= FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		OutFailure = TEXT("MapFreezeV3IsNotProductionContract");
+		return false;
+	}
+	if (TerrainVisualField == nullptr
+		|| !TerrainVisualField->IsReady()
+		|| !JuryMapFreezeV3Result.bMapFreezeReady
+		|| JuryMapFreezeV3Result.RejectReason
+			!= EABTSM3JuryMapFreezeV3RejectReason::None
+		|| JuryMapFreezeV3Result.Placements.Num()
+			!= FABTSM3JuryMapFreezeV3Builder::ExpectedSiteCount
+		|| JuryMapFreezeV3Result.LayoutHash
+			!= FABTSM3JuryMapFreezeV3Builder::ComputeLayoutHash(
+				JuryMapFreezeV3Result))
+	{
+		OutFailure = TEXT("MapFreezeV3UnavailableOrInvalid");
+		return false;
+	}
+
+	TArray<FABTSM3JuryTerrainPadSource> Sources;
+	Sources.Reserve(FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount);
+	for (const FABTSM3JuryMapFreezeV3Placement& Placement
+		: JuryMapFreezeV3Result.Placements)
+	{
+		const FABTSJuryDemoFixedSixBuildingSite& Site = Placement.Site;
+		if (Site.V3Envelope.SurfaceKind
+			== EABTSJuryDemoFixedSixSurfaceKind::Satellite)
+		{
+			continue;
+		}
+		const FVector Forward =
+			Site.WorldTransform.GetUnitAxis(EAxis::X).GetSafeNormal();
+		const FVector Right =
+			Site.WorldTransform.GetUnitAxis(EAxis::Y).GetSafeNormal();
+		const FVector Up =
+			Site.WorldTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+		const FVector PlanetLocalCenterCM =
+			Site.WorldTransform.GetLocation() - GetPlanetCenterWorld();
+		const float TargetRadiusCM =
+			static_cast<float>(Site.V3Envelope.SupportRadiusCM);
+		const FVector ExpectedWorldLocation = GetPlanetCenterWorld()
+			+ Up * TargetRadiusCM;
+		if (Site.V3Envelope.SurfaceKind
+				!= EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet
+			|| !LogicalCells.IsValidIndex(Placement.PadCenterCellId)
+			|| Site.V3Envelope.PadBounds.IsValid == 0
+			|| !Site.V3Envelope.SupportCenterWorldCM.Equals(
+				GetPlanetCenterWorld(), 0.1)
+			|| !Site.WorldTransform.GetLocation().Equals(
+				ExpectedWorldLocation, 0.1)
+			|| !FMath::IsNearlyEqual(TargetRadiusCM, PlanetRadiusCM, 0.1f))
+		{
+			OutFailure = FString::Printf(
+				TEXT("InvalidV3PrimarySupport:%d"),
+				Site.EncounterIndex);
+			return false;
+		}
+
+		FABTSM3JuryTerrainPadSource& Source =
+			Sources.AddDefaulted_GetRef();
+		Source.EncounterIndex = Site.EncounterIndex;
+		Source.PadCenterCellId = Placement.PadCenterCellId;
+		Source.PlanetLocalCenterCM = PlanetLocalCenterCM;
+		Source.Forward = Forward;
+		Source.Right = Right;
+		Source.Up = Up;
+		// The frozen symmetric half extent is the conservative horizontal
+		// envelope of the exact (potentially asymmetric) V3 PadBounds.
+		Source.PadHalfExtentCM = Site.PadHalfExtentCM;
+		Source.TargetRadiusCM = TargetRadiusCM;
+	}
+	if (Sources.Num()
+		!= FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount)
+	{
+		OutFailure = FString::Printf(
+			TEXT("V3PrimaryTerrainPadCount:%d"),
+			Sources.Num());
+		return false;
+	}
+
+	TArray<FABTSM3BuildingSpawnSite> JuryTerrainPads;
+	TArray<float> JuryTerrainSourceHeightDeltasCM;
+	if (!BuildABTSM3JuryTerrainPads(
+			Sources,
+			GetPlanetCenterWorld(),
+			PlanetRadiusCM,
+			JuryFixedSixMaximumGradeSlopeDegrees,
+			JuryFixedSixMinimumGradeWidthCM,
+			1.725f,
+			SurfaceNormalSmoothingDistanceCM,
+			*TerrainVisualField,
+			JuryTerrainPads,
+			JuryTerrainSourceHeightDeltasCM,
+			OutFailure))
+	{
 		return false;
 	}
 	InOutTerrainPads.Append(JuryTerrainPads);
@@ -3319,6 +3547,48 @@ void AABTSM3Planet::GetJuryFixedSixDecorClearanceOverlaps(
 {
 	bOutPhysicalOverlap = false;
 	bOutDynamicOverlap = false;
+	if (FABTSJuryDemoFixedSixContract::ProductionContractVersion
+			== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion
+		&& JuryMapFreezeV3Result.bMapFreezeReady)
+	{
+		const FVector WorldLocation =
+			GetPlanetCenterWorld() + PlanetLocalLocation;
+		for (const FABTSM3JuryMapFreezeV3Placement& Placement
+			: JuryMapFreezeV3Result.Placements)
+		{
+			const FABTSJuryDemoFixedSixBuildingSite& Site = Placement.Site;
+			if (Site.V3Envelope.SurfaceKind
+				!= EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet)
+			{
+				continue;
+			}
+			const FVector SiteLocalLocation =
+				Site.WorldTransform.InverseTransformPosition(WorldLocation);
+			const FBox& PhysicalBounds = Site.V3Envelope.SiteLocalBounds;
+			const FBox& EffectBounds = Site.V3Envelope.EffectBounds;
+			if (PhysicalBounds.IsValid != 0
+				&& SiteLocalLocation.X >= PhysicalBounds.Min.X
+				&& SiteLocalLocation.X <= PhysicalBounds.Max.X
+				&& SiteLocalLocation.Y >= PhysicalBounds.Min.Y
+				&& SiteLocalLocation.Y <= PhysicalBounds.Max.Y)
+			{
+				bOutPhysicalOverlap = true;
+			}
+			if (EffectBounds.IsValid != 0
+				&& SiteLocalLocation.X >= EffectBounds.Min.X
+				&& SiteLocalLocation.X <= EffectBounds.Max.X
+				&& SiteLocalLocation.Y >= EffectBounds.Min.Y
+				&& SiteLocalLocation.Y <= EffectBounds.Max.Y)
+			{
+				bOutDynamicOverlap = true;
+			}
+			if (bOutPhysicalOverlap && bOutDynamicOverlap)
+			{
+				return;
+			}
+		}
+		return;
+	}
 	if (!MonthlyJuryFixedSixLayoutResult.bPlacementReady)
 	{
 		return;
@@ -3371,7 +3641,9 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 	constexpr float MaxAllowedCollisionResidualCM = 35.0f;
 	constexpr float GradeSlopeToleranceDegrees = 2.0f;
 	constexpr int32 GradeRayCount = 16;
-	constexpr int32 GradeSamplesPerRay = 32;
+	constexpr int32 MinimumGradeSamplesPerRay = 32;
+	constexpr int32 MaximumGradeSamplesPerRay = 128;
+	constexpr float MaximumNormalSampleSpacingCM = 60.0f;
 	const float MaxAllowedNormalStepDegrees = FMath::Clamp(
 		JuryFixedSixMaximumGradeSlopeDegrees,
 		5.0f,
@@ -3390,8 +3662,9 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 		&& ContinuousSurface != nullptr
 		&& ContinuousSurface->IsPhysicsStateCreated();
 
-	const FABTSM3JuryFixedSixLayoutResult& Result =
-		MonthlyJuryFixedSixLayoutResult;
+	FString MapFreezeV3Failure;
+	TArray<FABTSM3JuryTerrainPadSource> Sources;
+	Sources.Reserve(FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount);
 	if (WorldSeed != FABTSM3JuryFixedSixLayoutBuilder::FrozenWorldSeed
 		|| TerrainVisualField == nullptr
 		|| !TerrainVisualField->IsReady()
@@ -3400,31 +3673,68 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 			&& !ContinuousSurface->IsPhysicsStateCreated())
 		|| ForestHISM == nullptr
 		|| RockHISM == nullptr
-		|| !Result.bPlacementReady
-		|| Result.Placements.Num()
-			!= FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount
+		|| FABTSJuryDemoFixedSixContract::ProductionContractVersion
+			!= FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion
+		|| !ValidateJuryMapFreezeV3Result(MapFreezeV3Failure)
 		|| JuryFixedSixTerrainPadCount
-			!= FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount
+			!= FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount
 		|| JuryFixedSixTerrainPads.Num()
-			!= FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount
+			!= FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount
 		|| JuryFixedSixTerrainSourceHeightDeltasCM.Num()
-			!= FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount)
+			!= FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount)
 	{
-		OutFailure = TEXT("ProductionPadStateUnavailable");
+		OutFailure = MapFreezeV3Failure.IsEmpty()
+			? TEXT("ProductionPadStateUnavailable")
+			: FString::Printf(
+				TEXT("ProductionMapFreezeV3:%s"),
+				*MapFreezeV3Failure);
+		return false;
+	}
+	for (const FABTSM3JuryMapFreezeV3Placement& Placement
+		: JuryMapFreezeV3Result.Placements)
+	{
+		const FABTSJuryDemoFixedSixBuildingSite& Site = Placement.Site;
+		if (Site.V3Envelope.SurfaceKind
+			== EABTSJuryDemoFixedSixSurfaceKind::Satellite)
+		{
+			continue;
+		}
+		FABTSM3JuryTerrainPadSource& Source =
+			Sources.AddDefaulted_GetRef();
+		Source.EncounterIndex = Site.EncounterIndex;
+		Source.PadCenterCellId = Placement.PadCenterCellId;
+		Source.PlanetLocalCenterCM =
+			Site.WorldTransform.GetLocation() - GetPlanetCenterWorld();
+		Source.Forward =
+			Site.WorldTransform.GetUnitAxis(EAxis::X).GetSafeNormal();
+		Source.Right =
+			Site.WorldTransform.GetUnitAxis(EAxis::Y).GetSafeNormal();
+		Source.Up =
+			Site.WorldTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+		Source.PadHalfExtentCM = Site.PadHalfExtentCM;
+		Source.TargetRadiusCM =
+			static_cast<float>(Site.V3Envelope.SupportRadiusCM);
+	}
+	if (Sources.Num()
+		!= FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount)
+	{
+		OutFailure = FString::Printf(
+			TEXT("ProductionPrimarySourceCount:%d"),
+			Sources.Num());
 		return false;
 	}
 
-	for (const FABTSM3JuryBuildingPlacement& Placement : Result.Placements)
+	for (const FABTSM3JuryTerrainPadSource& Placement : Sources)
 	{
 		for (const float XFraction : SampleFractions)
 		{
 			for (const float YFraction : SampleFractions)
 			{
-				const FVector PlaneSample = Placement.WorldLocationCM
-					+ Placement.WorldForwardAxis
-						* (Placement.RequiredPadHalfExtentCM.X * XFraction)
-					+ Placement.WorldRightAxis
-						* (Placement.RequiredPadHalfExtentCM.Y * YFraction);
+				const FVector PlaneSample = Placement.PlanetLocalCenterCM
+					+ Placement.Forward
+						* (Placement.PadHalfExtentCM.X * XFraction)
+					+ Placement.Right
+						* (Placement.PadHalfExtentCM.Y * YFraction);
 				const FVector Direction = PlaneSample.GetSafeNormal();
 				if (Direction.IsNearlyZero()
 					|| !TerrainVisualField->IsInsideBuildingPad(Direction))
@@ -3437,8 +3747,8 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 				const FVector SurfaceSample = Direction
 					* TerrainVisualField->GetSurfaceRadius(Direction);
 				const float ResidualCM = FMath::Abs(FVector::DotProduct(
-					SurfaceSample - Placement.WorldLocationCM,
-					Placement.WorldUpAxis));
+					SurfaceSample - Placement.PlanetLocalCenterCM,
+					Placement.Up));
 				OutMaxPadResidualCM = FMath::Max(
 					OutMaxPadResidualCM,
 					ResidualCM);
@@ -3458,11 +3768,11 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 		FName(TEXT("ABTSM3JuryTerrainGrade")),
 		true);
 	for (int32 PlacementIndex = 0;
-		PlacementIndex < Result.Placements.Num();
+		PlacementIndex < Sources.Num();
 		++PlacementIndex)
 	{
-		const FABTSM3JuryBuildingPlacement& Placement =
-			Result.Placements[PlacementIndex];
+		const FABTSM3JuryTerrainPadSource& Placement =
+			Sources[PlacementIndex];
 		const FABTSM3BuildingSpawnSite& Pad =
 			JuryFixedSixTerrainPads[PlacementIndex];
 		OutGradeDiagnostics.MinimumBlendWidthCM = FMath::Min(
@@ -3487,9 +3797,9 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 			const FVector2D& Ray,
 			const float DistanceCM)
 		{
-			return (Placement.WorldLocationCM
-				+ Placement.WorldForwardAxis * (Ray.X * DistanceCM)
-				+ Placement.WorldRightAxis * (Ray.Y * DistanceCM)).GetSafeNormal();
+			return (Placement.PlanetLocalCenterCM
+				+ Placement.Forward * (Ray.X * DistanceCM)
+				+ Placement.Right * (Ray.Y * DistanceCM)).GetSafeNormal();
 		};
 		auto TraceCollisionSample = [this, bChaosCollisionValidationRequired, &CollisionQueryParams, &OutGradeDiagnostics](
 			const FVector& Direction)
@@ -3520,15 +3830,15 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 		static constexpr float CenterCollisionProbeOffsetCM = 5.0f;
 		const FVector CenterCollisionProbePoints[] =
 		{
-			Placement.WorldLocationCM,
-			Placement.WorldLocationCM
-				+ Placement.WorldForwardAxis * CenterCollisionProbeOffsetCM,
-			Placement.WorldLocationCM
-				- Placement.WorldForwardAxis * CenterCollisionProbeOffsetCM,
-			Placement.WorldLocationCM
-				+ Placement.WorldRightAxis * CenterCollisionProbeOffsetCM,
-			Placement.WorldLocationCM
-				- Placement.WorldRightAxis * CenterCollisionProbeOffsetCM
+			Placement.PlanetLocalCenterCM,
+			Placement.PlanetLocalCenterCM
+				+ Placement.Forward * CenterCollisionProbeOffsetCM,
+			Placement.PlanetLocalCenterCM
+				- Placement.Forward * CenterCollisionProbeOffsetCM,
+			Placement.PlanetLocalCenterCM
+				+ Placement.Right * CenterCollisionProbeOffsetCM,
+			Placement.PlanetLocalCenterCM
+				- Placement.Right * CenterCollisionProbeOffsetCM
 		};
 		for (const FVector& CenterCollisionProbePoint : CenterCollisionProbePoints)
 		{
@@ -3605,6 +3915,12 @@ bool AABTSM3Planet::ValidateJuryFixedSixProductionClearance(
 				}
 			}
 			const float EdgeDistanceCM = HighDistanceCM;
+			const int32 GradeSamplesPerRay = FMath::Clamp(
+				FMath::CeilToInt(
+					(EdgeDistanceCM - BoundaryDistanceCM)
+						/ MaximumNormalSampleSpacingCM),
+				MinimumGradeSamplesPerRay,
+				MaximumGradeSamplesPerRay);
 			const FVector EdgeDirection = SampleDirectionAtDistance(
 				Ray,
 				EdgeDistanceCM);

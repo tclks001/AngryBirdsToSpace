@@ -177,6 +177,29 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 	}
 	TestEqual(TEXT("Five sites are on the primary planet"), PrimaryCount, 5);
 	TestEqual(TEXT("One site is on the satellite"), SatelliteCount, 1);
+	int32 TerrainPadCount = 0;
+	int32 PhysicalDecorOverlapCount = 0;
+	int32 DynamicDecorOverlapCount = 0;
+	float MaxPadResidualCM = 0.0f;
+	FABTSM3JuryTerrainGradeDiagnostics GradeDiagnostics;
+	FString TerrainFailure;
+	TestTrue(TEXT("Production terrain conforms to the five primary V3 sites"),
+		Planet->ValidateJuryFixedSixProductionClearance(
+			TerrainPadCount,
+			PhysicalDecorOverlapCount,
+			DynamicDecorOverlapCount,
+			MaxPadResidualCM,
+			GradeDiagnostics,
+			TerrainFailure));
+	TestEqual(TEXT("Only five primary V3 sites grade the primary terrain"),
+		TerrainPadCount,
+		FABTSM3JuryMapFreezeV3Builder::ExpectedPrimarySiteCount);
+	TestTrue(TEXT("Every V3 building base is flush with its terrain plane"),
+		MaxPadResidualCM <= 0.5f);
+	TestEqual(TEXT("No decor intersects V3 physical bounds"),
+		PhysicalDecorOverlapCount, 0);
+	TestEqual(TEXT("No decor intersects V3 effect bounds"),
+		DynamicDecorOverlapCount, 0);
 
 	FString ValidationFailure;
 	TestTrue(TEXT("Whole-result canonical validation succeeds"),

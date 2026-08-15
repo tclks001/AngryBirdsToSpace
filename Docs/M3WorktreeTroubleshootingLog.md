@@ -49,6 +49,7 @@
 | M3-JURY-006 | 固定 180 cm 裙边让施工台像嵌在地坑里 | 已改为逐栋解析宽缓整地并增加连续性/Chaos 门 | M3 |
 | M3-JURY-007 | V3 非方形建筑可能被 X/Y 装反或重复旋转，预发布结构门又依赖最终 LayoutHash | 已冻结路侧攻击轴/占地长轴正交门并按最终 Hash 顺序发布 | M3 |
 | M3-JURY-008 | V3 候选合线后装饰累计门稳定出现 2 个 PhysicalBounds 重叠 | 已统一生成过滤与最终生产净空查询 | M3 |
+| M3-JURY-009 | V3 建筑已激活但生产地形仍消费六个 V2 Pad，导致五栋主星建筑基部被地表穿过 | 已切换为五个 V3 主星 Pad，并让生产净空与装饰过滤消费同一 V3 快照 | M3 |
 | M3-HISM-001 | 树石用统一 Pivot 偏移生成，首次进入 Chaos 因地形/实例穿插弹飞 | 已改为生成期碰撞包络贴地、跨类型避让和确定性门禁 | M3；M6 只保留集成诊断 |
 
 ## 3. 工作树、同步与构建
@@ -881,6 +882,32 @@ Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表
 - `Saved/Logs/M3V3MergeFix-FixedSixV2-20260815-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`；
 - `Saved/Logs/M3V3MergeFix-WorldGeneration-20260815-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration` 精确 `3/3 Success`；
 - `Saved/Logs/M3V3MergeFix-FinaleSeparation-20260815-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；以上五组均来自修复后二进制、独立 fresh NullRHI 进程和唯一日志。最终候选仍需由 Integration 使用新精确 SHA 重建，并在 M7 逐栋实时 Chaos 完成后执行联合可见 PIE。
+
+### M3-JURY-009：V3 生产建筑不能继续坐在 V2 地形施工台上
+
+**现象**
+
+- Integration 已发布 `ProductionContract=V3`，M7 六栋静态建筑也完成注册，但五栋主星建筑的柱脚/基部仍被连续地表穿过；截图可见绿色与沙色地形曲面直接进入建筑占地，而不是在建筑下形成统一水平施工面；
+- 旧日志同时给出 `MapFreezeV3 Ready=1` 与 `ProductionClearance Passed=1 TerrainPads=6`，形成“建筑是 V3、地形绿灯仍是 V2”的假绿。
+
+**根因**
+
+`RebuildPlanet()` 在构建 `JuryMapFreezeV3Result` 之前就调用 `AppendJuryFixedSixTerrainPads()`，最终表面和净空门读取的是 `MonthlyJuryFixedSixLayoutResult`。V3 五个主星 Site 的基部都冻结在 `SupportRadiusCM=PlanetRadiusCM`，而旧六 Pad 的位置、建筑映射与水平包络不同；未被 V2 Pad 覆盖的起伏地形因此高于 V3 的 Site-local `Z=0` 平面。六栋 V3 描述的 `SiteLocalBounds.Min.Z=0`，排除了 M7 Pivot 或负基础深度作为根因。
+
+**修复**
+
+- 保留既有 V2 引导表面来生成冻结卫星预览和 MapFreezeV3，确保六栋 Placement/Layout Hash 不漂移；V3 快照完成后，生产表面原子替换为五个 `PrimaryPlanet` Site 派生的地形 Pad，月球 E1 明确不雕刻主星；
+- 每个 Pad 直接使用 V3 `WorldTransform` 的 X/Y/Z、冻结 `PadHalfExtentCM` 和 `SupportRadiusCM`，不抬升或重算建筑 Transform；继续复用 M3-JURY-006 的逐栋解析宽缓整地；
+- V3 生产表面移除已被五栋建筑替代的 Workshop/Target/Furnace 兼容 Pad，仅保留独立的 M11 `LaunchSite` 平面；装饰生成和最终净空门统一改读 V3 `SiteLocalBounds/EffectBounds`；
+- 法线连续性门保持 `18°` 阈值，但从每条固定 32 段改为最大 `60 cm` 空间步长、32～128 段自适应采样，消除宽裙边因单步跨度过大产生的假失败。
+
+**防回归验证**
+
+- `Saved/Logs/M3V3TerrainPads-Final-20260816-012620-477-FreshAutomation.log`：ForceUnity 后 `ABTS.M3.Jury.MapFreezeV3` 精确 `2/2 Success / EXIT CODE: 0`；生产结果为 `Contract=V3 / PrimaryPads=5 / SatellitePads=0 / LayoutHash=3EB6326A2877EE1E`；
+- 同一日志中五栋最大施工面残差 `0.001 cm`、最大解析坡度 `15.78°`、最大法线步进 `9.36°`、外缘回源残差 `0.000 cm`，且 Physical/Effect 装饰重叠均为零；
+- 失败取证 `M3V3TerrainPads-20260816-010818-514-FreshAutomation.log` 与 `M3V3TerrainPads-R2-20260816-010957-698-FreshAutomation.log` 被保留：前者证明固定 32 段对 38 m 裙边给出 `19.50°` 假拒绝，后者证明盲目扩大裙边会恶化为 `25.88°`，不能靠加宽或放宽阈值掩盖；
+- `Saved/Logs/M3V3TerrainPads-Final-20260816-013024-196-FreshRuntime.log`：有 PhysicsScene 的 fresh M3 R5 runtime `Terminal=1 / Passed=1 / Failed=0`，五栋 `ChaosSamples=145 / MaxChaosResidualCM=2.85`，并再次证明 `PrimaryTerrainPads=5 / SatelliteTerrainPads=0`；
+- 命令行运行时仍不能替代视觉贴合证据。集成候选须由用户在 canonical `L_ABTS_M10` 可见 PIE 检查五栋基部无穿插、施工面平整且裙边连续。
 
 ## 15. 新条目模板
 
