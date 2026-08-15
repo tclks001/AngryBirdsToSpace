@@ -169,13 +169,13 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
  */
 struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 {
-	/** V1 remains the compatibility version; fixed-six production publishes V2. */
+	/** V1/V2 remain compatibility versions; fixed-six production publishes V3. */
 	static constexpr int32 CurrentContractVersion = 1;
 	static constexpr int32 SupportedV2ContractVersion = 2;
-	/** V3 is a handoff schema until Map Freeze publishes an approved Layout. */
+	/** V3 is the published Map Freeze production schema. */
 	static constexpr int32 SupportedV3ContractVersion = 3;
 	static constexpr int32 ProductionContractVersion =
-		SupportedV2ContractVersion;
+		SupportedV3ContractVersion;
 	static constexpr int32 ExpectedSiteCount = 6;
 	static constexpr int32 FrozenPlacementSchemaVersion = 1;
 	static constexpr int32 FrozenV3PlacementSchemaVersion = 3;
@@ -194,6 +194,16 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	static constexpr uint64 FrozenLayoutHash = 0x8AB8D7E4F094072Dull;
 	/** Exact M3 V2 result published after dynamic-envelope reservation. */
 	static constexpr uint64 FrozenV2LayoutHash = 0x7029074579FDC52Eull;
+	/** Exact M3 Map Freeze V3 result published by Integration. */
+	static constexpr uint64 FrozenV3LayoutHash = 0x3EB6326A2877EE1Eull;
+	inline static constexpr uint64 FrozenV3PlacementHashes[ExpectedSiteCount] = {
+		0xA91A9FB5D79AE1CEull,
+		0x4C41612002CC0208ull,
+		0x8ACA9CA9BAFE95BDull,
+		0x66C8FD0EF4ACD5F2ull,
+		0xF162C1D3F858E998ull,
+		0x73BC7FE74D3835F7ull
+	};
 
 	/** Zero means this additive snapshot is absent. */
 	int32 ContractVersion = 0;
@@ -209,11 +219,11 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	bool IsEmpty() const;
 	/**
 	 * Validates a complete V3 handoff without granting production authority.
-	 * LayoutHash and PlacementHash values must be non-zero but are not approved
-	 * until Integration freezes the M3 map identity in a later change.
+	 * LayoutHash and PlacementHash values must be non-zero; IsUsable additionally
+	 * requires the exact Integration-published Map Freeze identities.
 	 */
 	bool IsStructurallyUsableV3(double Tolerance = 1.0e-3) const;
-	/** Accepts only production-approved V1/V2 snapshots at this stage. */
+	/** Accepts production-approved V1/V2 compatibility or exact frozen V3. */
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };
 

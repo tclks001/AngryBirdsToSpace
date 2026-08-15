@@ -409,24 +409,26 @@ bool AABTSM3Planet::RebuildPlanet()
 			MapFreezeV3Failure))
 		{
 			UE_LOG(LogABTSRuntime, Warning,
-			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Reason=%s Failure=%s ProductionContract=V2 ActivationAllowed=0"),
+			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=0 Seed=%d Candidate=%d Reason=%s Failure=%s ProductionContract=V%d ActivationAllowed=1"),
 			WorldSeed,
 			FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId,
 			FABTSM3JuryMapFreezeV3Builder::GetRejectReasonName(
 				JuryMapFreezeV3Result.RejectReason),
-			*MapFreezeV3Failure);
+			*MapFreezeV3Failure,
+			FABTSJuryDemoFixedSixContract::ProductionContractVersion);
 		}
 		else
 		{
 			UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=1 Seed=%d Candidate=%d Sites=%d Primary=5 SatelliteE1=1 Mapping=E2,E3,E4,E5,E1,E6 Catalog=%016llX LayoutHash=%016llX ProductionContract=V2 ActivationAllowed=0"),
+			TEXT("[ABTS][M3Jury][MapFreezeV3] Ready=1 Seed=%d Candidate=%d Sites=%d Primary=5 SatelliteE1=1 Mapping=E2,E3,E4,E5,E1,E6 Catalog=%016llX LayoutHash=%016llX ProductionContract=V%d ActivationAllowed=1"),
 			WorldSeed,
 			JuryMapFreezeV3Result.SourceCandidateId,
 			JuryMapFreezeV3Result.Placements.Num(),
 			static_cast<unsigned long long>(
 				JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash),
 			static_cast<unsigned long long>(
-				JuryMapFreezeV3Result.LayoutHash));
+				JuryMapFreezeV3Result.LayoutHash),
+			FABTSJuryDemoFixedSixContract::ProductionContractVersion);
 			for (const FABTSM3JuryMapFreezeV3Placement& Placement
 				: JuryMapFreezeV3Result.Placements)
 			{

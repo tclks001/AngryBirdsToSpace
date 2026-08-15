@@ -513,6 +513,24 @@ bool FABTSJuryDemoFixedSixContract::IsStructurallyUsableV3(
 
 bool FABTSJuryDemoFixedSixContract::IsUsable(const double Tolerance) const
 {
+	if (ContractVersion == SupportedV3ContractVersion)
+	{
+		if (!IsStructurallyUsableV3(Tolerance)
+			|| LayoutHash != FrozenV3LayoutHash)
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < Sites.Num(); ++Index)
+		{
+			if (Sites[Index].V3Envelope.PlacementHash
+				!= FrozenV3PlacementHashes[Index])
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	const bool bIsV1 = ContractVersion == CurrentContractVersion;
 	const bool bIsV2 = ContractVersion == SupportedV2ContractVersion;
 	if ((!bIsV1 && !bIsV2)

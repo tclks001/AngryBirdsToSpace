@@ -1,6 +1,6 @@
 # Building Generation and Placement Freeze V3 集成准备与门禁
 
-> 状态：`IntegrationV3DTOPublished / MapFreezeV3Pending`
+> 状态：`MapFreezeV3Published / ChaosFreezeV3Pending`
 >
 > 日期：2026-08-15
 >
@@ -285,3 +285,17 @@ Saved/Logs/V3-Prepared-ABTS.Contracts.WorldGeneration-20260815-223223-238-FreshA
 - `ABTS.Contracts.WorldGeneration` 扩展为 3 项，其中 `V3DTO` 覆盖错误 Tier、Surface、支撑球、Bounds、重复 Placement、缺 Layout 和未知版本。
 
 验证：UE 5.8 ForceUnity 18/18 `Result: Succeeded`；独立世界合同 3/3；更新后的 Manifest 全门 7 个过滤器、11/11 通过。下一步由 M3 基于该 DTO 交付 `MapFreezeV3` 精确 SHA 与 Layout/Placement 身份。
+
+## 13. Map Freeze V3 发布
+
+2026-08-16 以新的独立候选 `integration/candidate-20260815-m3-map-freeze-v3-r2` 精确合并并批准 M3：
+
+- M3 交付：`d52b6f52beec69ce571bbfee0456e1a71418cfe1`；旧失败候选不复用、不改写；
+- 固定 `WorldSeed=312503`、`CandidateId=4`、顺序 `E2/E3/E4/E5/E1/E6`；
+- `LayoutHash=0x3EB6326A2877EE1E`；
+- 六个 Placement Hash：`A91A9FB5D79AE1CE`、`4C41612002CC0208`、`8ACA9CA9BAFE95BD`、`66C8FD0EF4ACD5F2`、`F162C1D3F858E998`、`73BC7FE74D3835F7`；
+- `ProductionContractVersion=3`、`activationAllowed=true`；结构完整但非上述精确身份的 V3 快照继续 fail closed，V1/V2 历史快照仍可读；
+- M7 静态消费按 V3 Catalog 原子解析，E1 槽 4 注册唯一 Crystal cap；M6 联合启动门同步冻结 V3 顺序、`RegistrationResultHash=4923733484321510334` 与 `StaticModuleCount=5746`；
+- `M3-JURY-008` 将 Decor 最终贴地后的 physical/effect clearance 生成判定与生产验证统一，候选证据为 `PhysicalDecorOverlaps=0`、`DynamicDecorOverlaps=0`。
+
+发布门覆盖 UE 5.8 ForceUnity、WorldGeneration V3 DTO/Adapter、MapFreeze、DecorPlacement、V2 compatibility、V3 static registration、Crystal cap 首次且仅一次 recovery，以及 CrystalCore 制作 SpaceCord 后消费事务。Map Freeze 发布不声明 Chaos Freeze 完成；实时 30/60/120 FPS、正式 Chaos Result Hash 与可见 PIE 均留给阶段 6。当前任务没有 GUI 授权，因此可见验收状态为 `VisibleValidationPending`。

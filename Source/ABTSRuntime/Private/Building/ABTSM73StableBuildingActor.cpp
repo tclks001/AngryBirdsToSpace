@@ -1159,8 +1159,20 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 		}
 		RuntimeModules.Add(Module);
 	}
+	for (const FABTSM73BuildingFreezeV3CapBinding& Cap : Entry.Caps)
+	{
+		AABTSM7BuildingModule* Module = MaterialSystem.SpawnStaticBrickModule(
+			Cap.BrickSpec, Cap.SiteLocalTransform * GetActorTransform());
+		if (Module == nullptr)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationCapSpawnFailed"));
+			return;
+		}
+		RuntimeModules.Add(Module);
+	}
 
-	const int32 ExpectedModuleCount = Entry.Bricks.Num() + Entry.Devices.Num();
+	const int32 ExpectedModuleCount =
+		Entry.Bricks.Num() + Entry.Devices.Num() + Entry.Caps.Num();
 	bRuntimeSpawned = JuryDemoFixedSixStaticBrickInstanceCount
 			+ RuntimeModules.Num()
 		== ExpectedModuleCount;
@@ -1190,14 +1202,17 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 		TEXT("[ABTS][M7][FixedSixStaticRegistered]")
 		TEXT(" Actor=%s Entry=%s Encounter=%d Tier=%d Seed=%d")
 		TEXT(" Layout=%llu Descriptor=%llu Static=%llu")
-		TEXT(" Production=%llu Device=%llu Bricks=%d Devices=%d Modules=%d")
+		TEXT(" Production=%llu Device=%llu Contract=V%d Placement=%llu")
+		TEXT(" Bricks=%d Devices=%d Caps=%d Modules=%d")
 		TEXT(" ResultHash=%llu DynamicEnvelopeRequired=%d")
 		TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Accepted=1"),
 		*GetName(), *Entry.ManifestEntryId.ToString(), Entry.EncounterIndex,
 		Entry.DifficultyTier, Entry.DeterministicSeed, Entry.SourceLayoutHash,
 		Entry.DescriptorHash, Entry.StaticGeometryHash,
 		Entry.ProductionIdentityHash, Entry.DeviceAssemblyHash,
-		Entry.Bricks.Num(), Entry.Devices.Num(), ExpectedModuleCount,
+		Entry.SourceContractVersion, Entry.SourcePlacementHash,
+		Entry.Bricks.Num(), Entry.Devices.Num(), Entry.Caps.Num(),
+		ExpectedModuleCount,
 		Entry.RegistrationResultHash,
 		Entry.bDynamicEnvelopeRequired ? 1 : 0);
 }

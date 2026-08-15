@@ -126,9 +126,9 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 		EABTSM3JuryMapFreezeV3RejectReason::None);
 	TestEqual(TEXT("Exactly six V3 sites are frozen"),
 		First.Placements.Num(), 6);
-	TestTrue(TEXT("V3 handoff is structurally usable but not activated"),
+	TestTrue(TEXT("V3 handoff is structurally usable"),
 		First.HandoffContract.IsStructurallyUsableV3());
-	TestFalse(TEXT("V3 is not yet the production contract"),
+	TestTrue(TEXT("The exact published V3 handoff is the production contract"),
 		First.HandoffContract.IsUsable());
 	TestEqual(TEXT("Layout hash is canonical"),
 		First.LayoutHash,

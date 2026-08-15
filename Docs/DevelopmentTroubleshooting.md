@@ -206,7 +206,7 @@
 
 | 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `370e50e85c9977b0bf8e0f9ab81909becc12171f`（2026-08-15，含 `M3-JURY-001/002/003`） |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `d52b6f52beec69ce571bbfee0456e1a71418cfe1`（2026-08-16，含 `M3-JURY-001`–`008`） |
 | [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `8a4892d3928233721b47e7410fc9dddbfc63e08e`（2026-08-15，含 `M7-BC-004`～`126`、Building Freeze V3） |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
@@ -239,6 +239,7 @@
 | Integration 需要接线地面/月面 SceneCapture，但 M3 没有稳定访问入口 | 捕获 owner/component 位于共享 M10 私有成员，功能树不能靠名称或组件扫描绕过所有权。M3 只记录需求；Integration 应在共享类型增加 const getter，并用现有 Preview Subject 显式映射 `GroundLandingPreview` / `SatelliteLandingPreview`，缺失或未知时 fail closed。 | M3 提交不得修改共享 Camera/M10 类型；Integration 后续测试检查 Subject 映射及接线前后 M3/M9 Gameplay 身份不变。详见 `M3-T2B-002`。 |
 | 性能门单次轻微越线 | 保留首次失败；先核对 Seed/Oracle/Hash，再停止并行重型任务，以相同二进制 fresh 隔离重跑。既不能直接忽略，也不能在身份未变时立即断言算法回归。 | 同时保存 P50/P95/Max、接受数、Oracle Hash、命令和首次失败日志。详见 `M3-TEST-001`。 |
 | 固定六条 PlacementReady 已通过，却继续从旧 building `Sites` 猜测六栋身份，或把 Stage 4.5 / V2 数据面直接宣告为 ChaosReady | 放置身份、通用旧站点、静态注册和动态 Chaos 是四层证据。Integration 以加法式合同保留 V1 兼容身份，并用 M3 最终 `LayoutHash=0x7029074579FDC52E` 发布 `JuryDemoFixedSixV2`；静态 Pad 与动态 EffectBounds 分开预留，六条 Entry/Transform/Descriptor/Production/Device/Bounds 任一漂移都原子失败，不回退旧 Profile/Seed。 | V2 合同与 Adapter 门通过后，M7/Integration 已进一步完成六栋静态注册和 M6 联合封口；当前只能提升为 `StaticJointAccepted / ChaosPending`。动态激活、离场清理和 J5 可见 PIE仍是独立后续门。详见 `M3-JURY-001/002/003`、`M7-BC-118` 与 `JuryDemoFixedSixWorldGenerationContract.md`。 |
+| Map Freeze 与 DecorPlacement 各自通过，但合并候选的生产清距仍报告装饰物穿入建筑物理包围盒 | 生成阶段只过滤 Terrain Pad 与动态 Effect envelope；装饰物完成最终贴地后没有复用生产验证使用的物理 bounds 清距判定，形成“生成接受、验收拒绝”的双重语义。 | `M3-JURY-008` 把最终贴地后的 physical/effect clearance 合并为同一共享判定，生成与验证共同消费；集成候选若在精确交付 SHA 上复现此类失败，必须退回唯一功能写入者修复并以新 SHA 重建候选，不在集成树临时放宽门禁。 | `ABTS.M3.DecorPlacement` 4/4、`ABTS.M3.Jury.MapFreezeV3` 2/2；固定 Seed/Candidate 的 `LayoutHash=0x3EB6326A2877EE1E`，六个 Placement Hash 精确匹配，`PhysicalDecorOverlaps=0`、`DynamicDecorOverlaps=0`。NullRHI 清距不替代实时 Chaos 或可见 PIE。 |
 
 ### 13.4 M7：语义结构、最终几何与物理权威
 

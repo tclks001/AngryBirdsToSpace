@@ -156,8 +156,22 @@ $baselineCheck = Invoke-CheckedGit -Root $IntegrationRoot -Arguments @(
 if ($baselineCheck.ExitCode -ne 0) {
     $errors.Add("Crystal baseline is not an ancestor of master: $($manifest.crystalBaselineCommit)")
 }
-if ($manifest.activationAllowed -or $manifest.productionContractVersion -ne 2) {
-    $errors.Add('Prepared manifest must keep activationAllowed=false and productionContractVersion=2.')
+if ($manifest.status -eq 'IntegrationV3DTOPublishedMapFreezePending') {
+    if ($manifest.activationAllowed -or $manifest.productionContractVersion -ne 2) {
+        $errors.Add('Prepared manifest must keep activationAllowed=false and productionContractVersion=2.')
+    }
+}
+elseif ($manifest.status -eq 'MapFreezeV3PublishedChaosFreezePending') {
+    if (-not $manifest.activationAllowed -or $manifest.productionContractVersion -ne 3) {
+        $errors.Add('Published Map Freeze manifest must set activationAllowed=true and productionContractVersion=3.')
+    }
+    if ([string]::IsNullOrWhiteSpace($manifest.frozenIdentities.mapFreezeV3Commit) -or
+        [string]::IsNullOrWhiteSpace($manifest.frozenIdentities.layoutHash)) {
+        $errors.Add('Published Map Freeze manifest requires exact M3 commit and Layout hash identities.')
+    }
+}
+else {
+    $errors.Add("Unsupported V3 manifest status: $($manifest.status)")
 }
 
 $expectedBranches = [ordered]@{

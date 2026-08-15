@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "status": "IntegrationV3DTOPublishedMapFreezePending",
+  "status": "MapFreezeV3PublishedChaosFreezePending",
   "engineRoot": "C:\\Program Files\\Epic Games\\UE_5.8",
   "crystalBaselineCommit": "36400f498cbfbbd6a18e3d64c45b5c6291d82915",
-  "activationAllowed": false,
-  "productionContractVersion": 2,
+  "activationAllowed": true,
+  "productionContractVersion": 3,
   "frozenIdentities": {
     "buildingFreezeV3Commit": "8a4892d3928233721b47e7410fc9dddbfc63e08e",
     "placementCatalogHash": "8960617043786800590",
-    "mapFreezeV3Commit": null,
-    "layoutHash": null,
+    "mapFreezeV3Commit": "d52b6f52beec69ce571bbfee0456e1a71418cfe1",
+    "layoutHash": "0x3EB6326A2877EE1E",
     "chaosFreezeV3Commit": null,
     "chaosResultHash": null
   },
@@ -48,6 +48,26 @@
       "filter": "ABTS.Contracts.WorldGeneration",
       "expectedTests": 3,
       "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M3.Jury.MapFreezeV3",
+      "expectedTests": 2,
+      "evidenceLayer": "NullRHIMapFreeze"
+    },
+    {
+      "filter": "ABTS.M3.DecorPlacement",
+      "expectedTests": 4,
+      "evidenceLayer": "NullRHIDecorClearance"
+    },
+    {
+      "filter": "ABTS.M3.Monthly.JuryFixedSix",
+      "expectedTests": 3,
+      "evidenceLayer": "NullRHIV2Compatibility"
+    },
+    {
+      "filter": "ABTS.Integration.JuryDemoFixedSix.StaticJointGate",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIStaticRegistration"
     }
   ],
   "handoffRequiredGates": [
@@ -69,7 +89,7 @@
     {
       "owner": "M3",
       "identity": "MapFreezeV3",
-      "filter": null,
+      "filter": "ABTS.M3.Jury.MapFreezeV3",
       "requiredFacts": [
         "ExactCommit",
         "WorldSeed",

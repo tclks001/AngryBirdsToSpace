@@ -38,8 +38,8 @@ struct ABTSRUNTIME_API FABTSM3JuryMapFreezeV3Placement
 };
 
 /**
- * Additive MapFreezeV3 handoff. It is deliberately not the production V2
- * export; Integration owns the later contract-version activation.
+ * Additive MapFreezeV3 handoff. Integration owns the exact production
+ * contract-version and frozen-hash activation.
  */
 struct ABTSRUNTIME_API FABTSM3JuryMapFreezeV3Result
 {

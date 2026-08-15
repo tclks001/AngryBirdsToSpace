@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Building/ABTSM73BuildingFreezeV3.h"
+#include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -585,12 +586,28 @@ bool FABTSWorldGenerationV3DTOTest::RunTest(const FString& Parameters)
 		Contract.Sites[4].IsUsableForContractVersion(
 			FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion));
 	TestFalse(
-		TEXT("A structurally usable V3 handoff is not production-approved early"),
+		TEXT("An unapproved V3 hash set remains structurally valid but fails production"),
 		Contract.IsUsable());
 	TestEqual(
-		TEXT("Production remains on V2 until Map Freeze is approved"),
+		TEXT("Production activates V3 only after Map Freeze publication"),
 		FABTSJuryDemoFixedSixContract::ProductionContractVersion,
-		FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion);
+		FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion);
+
+	FABTSJuryDemoFixedSixContract Approved = Contract;
+	Approved.LayoutHash = FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash;
+	for (int32 Index = 0; Index < Approved.Sites.Num(); ++Index)
+	{
+		Approved.Sites[Index].V3Envelope.PlacementHash =
+			FABTSJuryDemoFixedSixContract::FrozenV3PlacementHashes[Index];
+	}
+	TestTrue(
+		TEXT("The exact published V3 Layout and six Placement hashes are usable"),
+		Approved.IsUsable());
+	FABTSJuryDemoFixedSixContract WrongApprovedPlacement = Approved;
+	WrongApprovedPlacement.Sites[3].V3Envelope.PlacementHash ^= 1ull;
+	TestFalse(
+		TEXT("Any V3 Placement hash drift fails production atomically"),
+		WrongApprovedPlacement.IsUsable());
 
 	FABTSJuryDemoFixedSixContract Legacy =
 		MakeValidJuryDemoFixedSixV2Contract();
@@ -891,53 +908,76 @@ bool FABTSM3WorldGenerationContractAdapterTest::RunTest(
 		JuryContract.JuryDemoFixedSix.Sites.Num(),
 		FABTSJuryDemoFixedSixContract::ExpectedSiteCount);
 	TestEqual(
-		TEXT("Exported fixed-six snapshot publishes V2"),
+		TEXT("Exported fixed-six snapshot publishes V3"),
 		JuryContract.JuryDemoFixedSix.ContractVersion,
-		FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion);
+		FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion);
 	TestEqual(
-		TEXT("Exported fixed-six snapshot freezes the V2 Catalog hash"),
+		TEXT("Exported fixed-six snapshot freezes the V3 Catalog hash"),
 		JuryContract.JuryDemoFixedSix.PlacementCatalogHash,
-		FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash);
+		FABTSJuryDemoFixedSixContract::FrozenV3PlacementCatalogHash);
 	TestEqual(
 		TEXT("Exported fixed-six snapshot freezes the Layout hash"),
 		JuryContract.JuryDemoFixedSix.LayoutHash,
-		FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash);
+		FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash);
+	const FABTSM3JuryMapFreezeV3Result& MapFreeze =
+		JuryPlanet->GetJuryMapFreezeV3Result();
 	for (int32 Index = 0;
 		Index < JuryContract.JuryDemoFixedSix.Sites.Num();
 		++Index)
 	{
 		const FABTSJuryDemoFixedSixBuildingSite& ExportedSite =
 			JuryContract.JuryDemoFixedSix.Sites[Index];
-		const FABTSM3JuryBuildingPlacement& SourcePlacement =
-			JuryPlanet->MonthlyJuryFixedSixLayoutResult.Placements[Index];
+		const FABTSJuryDemoFixedSixBuildingSite& SourceSite =
+			MapFreeze.HandoffContract.Sites[Index];
 		TestEqual(
-			*FString::Printf(TEXT("V2 site %d keeps static identity"), Index),
-			ExportedSite.V2Envelope.StaticGeometryHash,
-			static_cast<uint64>(SourcePlacement.StaticGeometryHash));
+			*FString::Printf(TEXT("V3 site %d keeps static identity"), Index),
+			ExportedSite.V3Envelope.StaticGeometryHash,
+			SourceSite.V3Envelope.StaticGeometryHash);
 		TestEqual(
-			*FString::Printf(TEXT("V2 site %d keeps production identity"), Index),
-			ExportedSite.V2Envelope.ProductionIdentityHash,
-			static_cast<uint64>(SourcePlacement.ProductionIdentityHash));
+			*FString::Printf(TEXT("V3 site %d keeps production identity"), Index),
+			ExportedSite.V3Envelope.ProductionIdentityHash,
+			SourceSite.V3Envelope.ProductionIdentityHash);
 		TestEqual(
-			*FString::Printf(TEXT("V2 site %d keeps device identity"), Index),
-			ExportedSite.V2Envelope.DeviceAssemblyHash,
-			static_cast<uint64>(SourcePlacement.DeviceAssemblyHash));
+			*FString::Printf(TEXT("V3 site %d keeps device identity"), Index),
+			ExportedSite.V3Envelope.DeviceAssemblyHash,
+			SourceSite.V3Envelope.DeviceAssemblyHash);
 		TestTrue(
-			*FString::Printf(TEXT("V2 site %d keeps physical Bounds"), Index),
-			ExportedSite.V2Envelope.PhysicalBounds.Min.Equals(
-				SourcePlacement.PhysicalBounds.Min, 1.0e-4)
-				&& ExportedSite.V2Envelope.PhysicalBounds.Max.Equals(
-					SourcePlacement.PhysicalBounds.Max, 1.0e-4));
+			*FString::Printf(TEXT("V3 site %d keeps site-local Bounds"), Index),
+			ExportedSite.V3Envelope.SiteLocalBounds.Equals(
+				SourceSite.V3Envelope.SiteLocalBounds, 1.0e-4));
 		TestTrue(
-			*FString::Printf(TEXT("V2 site %d keeps effect Bounds"), Index),
-			ExportedSite.V2Envelope.EffectBounds.Min.Equals(
-				SourcePlacement.EffectBounds.Min, 1.0e-4)
-				&& ExportedSite.V2Envelope.EffectBounds.Max.Equals(
-					SourcePlacement.EffectBounds.Max, 1.0e-4));
+			*FString::Printf(TEXT("V3 site %d keeps effect Bounds"), Index),
+			ExportedSite.V3Envelope.EffectBounds.Equals(
+				SourceSite.V3Envelope.EffectBounds, 1.0e-4));
 		TestEqual(
-			*FString::Printf(TEXT("V2 site %d keeps dynamic authority"), Index),
-			ExportedSite.V2Envelope.bDynamicEnvelopeRequired,
-			SourcePlacement.bDynamicEnvelopeRequired);
+			*FString::Printf(TEXT("V3 site %d keeps Placement hash"), Index),
+			ExportedSite.V3Envelope.PlacementHash,
+			FABTSJuryDemoFixedSixContract::FrozenV3PlacementHashes[Index]);
+		TestTrue(
+			*FString::Printf(TEXT("V3 site %d carries no legacy V2 envelope"), Index),
+			ExportedSite.V2Envelope.IsEmpty());
+	}
+
+	FABTSM73JuryDemoFixedSixStaticPlan V3StaticPlan;
+	FString StaticPlanError;
+	TestTrue(
+		TEXT("M7 consumes the exact published V3 snapshot as one static plan"),
+		FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
+			JuryContract, V3StaticPlan, StaticPlanError));
+	if (!StaticPlanError.IsEmpty())
+	{
+		AddError(StaticPlanError);
+	}
+	TestEqual(
+		TEXT("V3 static plan freezes its registration result identity"),
+		V3StaticPlan.RegistrationResultHash,
+		FABTSM73JuryDemoFixedSixRegistration::FrozenV3RegistrationResultHash);
+	for (int32 Index = 0; Index < V3StaticPlan.Entries.Num(); ++Index)
+	{
+		TestEqual(
+			*FString::Printf(TEXT("Only V3 encounter slot %d has expected cap count"), Index),
+			V3StaticPlan.Entries[Index].Caps.Num(),
+			Index == 4 ? 1 : 0);
 	}
 
 	FABTSBuildingGenerationContract RepeatedJuryContract;

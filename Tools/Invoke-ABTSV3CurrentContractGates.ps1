@@ -30,8 +30,24 @@ if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $editorCmd -PathType Leaf)) {
     throw "Required UE 5.8 UnrealEditor-Cmd is missing: $editorCmd"
 }
-if ($manifest.activationAllowed -or $manifest.productionContractVersion -ne 2) {
-    throw 'Prepared gates require activationAllowed=false and productionContractVersion=2.'
+$gatePhase = 'Prepared'
+if ($manifest.status -eq 'IntegrationV3DTOPublishedMapFreezePending') {
+    if ($manifest.activationAllowed -or $manifest.productionContractVersion -ne 2) {
+        throw 'Prepared gates require activationAllowed=false and productionContractVersion=2.'
+    }
+}
+elseif ($manifest.status -eq 'MapFreezeV3PublishedChaosFreezePending') {
+    $gatePhase = 'Published'
+    if (-not $manifest.activationAllowed -or $manifest.productionContractVersion -ne 3) {
+        throw 'Published Map Freeze gates require activationAllowed=true and productionContractVersion=3.'
+    }
+    if ([string]::IsNullOrWhiteSpace($manifest.frozenIdentities.mapFreezeV3Commit) -or
+        [string]::IsNullOrWhiteSpace($manifest.frozenIdentities.layoutHash)) {
+        throw 'Published Map Freeze gates require exact M3 commit and Layout hash identities.'
+    }
+}
+else {
+    throw "Unsupported V3 gate-manifest status: $($manifest.status)"
 }
 
 $gates = @($manifest.currentRunnableGates)
@@ -62,7 +78,7 @@ $results = [System.Collections.Generic.List[object]]::new()
 foreach ($gate in $gates) {
     $runId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $safeFilter = $gate.filter -replace '[^A-Za-z0-9._-]', '_'
-    $log = Join-Path $logDirectory "V3-Prepared-$safeFilter-$runId-FreshAutomation.log"
+    $log = Join-Path $logDirectory "V3-$gatePhase-$safeFilter-$runId-FreshAutomation.log"
     $arguments = @(
         $project,
         '-unattended',
