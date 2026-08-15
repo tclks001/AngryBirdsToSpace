@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "PCG/ABTSM3MonthlyEncounter.h"
+#include "PCG/ABTSM3JuryFixedSixLayout.h"
 #include "PCG/ABTSM3MonthlyFinaleAnchor.h"
 #include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
@@ -473,6 +474,10 @@ public:
 	/** R-3 six-Encounter spatial result; it is not exported through compatibility contracts. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	FABTSM3MonthlySpatialResult MonthlySpatialResult;
+
+	/** DDL-scoped fixed E1-E6 placement plan; populated only for the frozen jury seed/candidate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	FABTSM3JuryFixedSixLayoutResult MonthlyJuryFixedSixLayoutResult;
 
 	/** R-5 read-only presentation plans for every retained R-3 candidate. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation")
