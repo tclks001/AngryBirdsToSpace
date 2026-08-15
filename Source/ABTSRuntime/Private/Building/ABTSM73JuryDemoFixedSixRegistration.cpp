@@ -99,6 +99,12 @@ bool FABTSM73JuryDemoFixedSixStaticEntry::IsUsable(
 			&& Caps.IsEmpty()
 		: bV3
 			&& SourcePlacementHash != 0
+			&& !SupportCenterWorldCM.ContainsNaN()
+			&& SupportRadiusCM > 0.0
+			&& !GravityAuthorityId.IsNone()
+			&& GravityIdentityHash != 0
+			&& !(WorldTransform.GetLocation()
+				- SupportCenterWorldCM).IsNearlyZero()
 			&& ((EncounterIndex == 4 && Caps.Num() == 1)
 				|| (EncounterIndex != 4 && Caps.IsEmpty()));
 	return !ManifestEntryId.IsNone()
@@ -292,6 +298,10 @@ bool FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
 			Entry.DeviceAssemblyHash = Descriptor.SourceDeviceAssemblyHash;
 			Entry.SourceLayoutHash = Snapshot.LayoutHash;
 			Entry.SourcePlacementHash = Envelope.PlacementHash;
+			Entry.SupportCenterWorldCM = Envelope.SupportCenterWorldCM;
+			Entry.SupportRadiusCM = Envelope.SupportRadiusCM;
+			Entry.GravityAuthorityId = Envelope.GravityAuthorityId;
+			Entry.GravityIdentityHash = Envelope.GravityIdentityHash;
 			Entry.bDynamicEnvelopeRequired = FixedSixEffectExitsPad(
 				Descriptor.EffectBounds, Site.PadHalfExtentCM);
 			Entry.Bricks = MoveTemp(Descriptor.Bricks);

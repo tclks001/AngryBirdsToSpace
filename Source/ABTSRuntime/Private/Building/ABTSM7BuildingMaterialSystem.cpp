@@ -464,6 +464,98 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 		InitialPenetrationRepairPasses);
 }
 
+bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
+	const TConstArrayView<AABTSM7BuildingModule*> TargetModules,
+	const FVector& SiteLocationWorldCM,
+	const FVector& SupportCenterWorldCM,
+	const float GravityAcceleration,
+	const float ContactDamageGraceSeconds)
+{
+	LastSiteUniformGravityPolicyHash = 0;
+	LastSiteUniformGravityUp = FVector::ZeroVector;
+	FABTSM7SiteUniformGravityPolicy Policy;
+	if (!FABTSM7SiteUniformGravityPolicy::TryDerive(
+		SiteLocationWorldCM, SupportCenterWorldCM,
+		GravityAcceleration, Policy)
+		|| TargetModules.IsEmpty())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][SiteUniformLaunch] Rejected Reason=PolicyOrTargetsInvalid Targets=%d Site=%s Center=%s Gravity=%.3f"),
+			TargetModules.Num(), *SiteLocationWorldCM.ToString(),
+			*SupportCenterWorldCM.ToString(), GravityAcceleration);
+		return false;
+	}
+
+	TSet<const AABTSM7BuildingModule*> UniqueTargets;
+	TArray<AABTSM7BuildingModule*> PendingModules;
+	PendingModules.Reserve(TargetModules.Num());
+	for (AABTSM7BuildingModule* Module : TargetModules)
+	{
+		if (!IsValid(Module)
+			|| Module->GetOwner() != this
+			|| Module->IsDynamic()
+			|| UniqueTargets.Contains(Module))
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][SiteUniformLaunch] Rejected Reason=TargetOwnershipInvalid Module=%s Dynamic=%d Duplicate=%d"),
+				*GetNameSafe(Module),
+				Module != nullptr && Module->IsDynamic() ? 1 : 0,
+				UniqueTargets.Contains(Module) ? 1 : 0);
+			return false;
+		}
+		UniqueTargets.Add(Module);
+		PendingModules.Add(Module);
+	}
+
+	const FABTSM7ChaosBodyProfile BodyProfile =
+		FABTSM7ChaosBodyProfile::Production();
+	const FABTSM7ChaosWorldProfile WorldProfile =
+		FABTSM7ChaosWorldProfile::CaptureProduction();
+	LastLaunchChaosBodyProfileHash = BodyProfile.ComputeCrc32();
+	LastLaunchChaosWorldProfileHash = WorldProfile.ComputeCrc32();
+	LastSiteUniformGravityPolicyHash = Policy.ComputeCrc32();
+	LastSiteUniformGravityUp = Policy.SiteUp;
+	const float EffectiveGraceSeconds = ContactDamageGraceSeconds >= 0.0f
+		? ContactDamageGraceSeconds
+		: LaunchContactDamageGraceSeconds;
+	const FABTSM7PenetrationValidationStats Validation =
+		ValidateAndRepairPendingModules(PendingModules);
+	for (AABTSM7BuildingModule* Module : PendingModules)
+	{
+		if (!Modules.ContainsByPredicate(
+			[Module](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+			{
+				return Candidate.Get() == Module;
+			}))
+		{
+			// Static-registration devices/caps are deliberately excluded from
+			// the global launch queue; an explicit per-site launch adopts only
+			// the caller-provided building subset into runtime ownership.
+			Modules.Add(Module);
+		}
+		Module->SetContactDamageGraceSeconds(EffectiveGraceSeconds);
+		if (!Module->ActivateDynamicSiteUniform(FVector::ZeroVector, Policy))
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][SiteUniformLaunch] Rejected Reason=ActivationRejected Module=%s"),
+				*GetNameSafe(Module));
+			return false;
+		}
+	}
+	MarkPhysicsActivity();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][SiteUniformLaunch] Accepted=1 Activated=%d %s ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
+		PendingModules.Num(), *Policy.ToLogString(), EffectiveGraceSeconds,
+		LastLaunchChaosBodyProfileHash, LastLaunchChaosWorldProfileHash,
+		*WorldProfile.ToLogString(), Validation.DetectedPairCount,
+		Validation.RepairCount, Validation.LargeErrorPairCount,
+		Validation.RemainingSmallPairCount,
+		Validation.MaximumDetectedDepthCM,
+		InitialPenetrationRepairToleranceCM,
+		InitialPenetrationRepairPasses);
+	return true;
+}
+
 bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Component, const int32 InstanceIndex, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity, const EABTSBirdId BirdId)
 {
 	if (!OwnsPrimitive(Component)) return false;

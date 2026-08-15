@@ -57,6 +57,17 @@ public:
 	void ApplyDirectionalBlast(const FVector& Origin, const FVector& Axis, float DestroyLengthCM, float ImpulseLengthCM, float EffectRadiusCM, float ImpulseSpeedCMPerSec);
 	/** Promotes all building HISM instances and enables gravity on every module for the launch phase. */
 	void BeginLaunchPhysics(bool bPlanar, const FVector& GravityReference, float GravityAcceleration, float ContactDamageGraceSeconds = -1.0f);
+	/**
+	 * Activates one explicit building body set with a direction derived from its
+	 * frozen site and support center. This API deliberately does not mutate the
+	 * global promotion direction because one MaterialSystem may own six sites.
+	 */
+	bool BeginSiteUniformLaunchPhysics(
+		TConstArrayView<AABTSM7BuildingModule*> TargetModules,
+		const FVector& SiteLocationWorldCM,
+		const FVector& SupportCenterWorldCM,
+		float GravityAcceleration,
+		float ContactDamageGraceSeconds = -1.0f);
 	/** Runs the same pre-Chaos contact repair used by launch physics on a caller-owned module subset. */
 	FABTSM7PenetrationValidationStats ValidateAndRepairPendingModules(
 		const TArray<AABTSM7BuildingModule*>& PendingModules) const;
@@ -65,6 +76,14 @@ public:
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
 	uint32 GetLastLaunchChaosBodyProfileHash() const { return LastLaunchChaosBodyProfileHash; }
 	uint32 GetLastLaunchChaosWorldProfileHash() const { return LastLaunchChaosWorldProfileHash; }
+	uint32 GetLastSiteUniformGravityPolicyHash() const
+	{
+		return LastSiteUniformGravityPolicyHash;
+	}
+	FVector GetLastSiteUniformGravityUp() const
+	{
+		return LastSiteUniformGravityUp;
+	}
 	/** Extends the damage grace on all currently dynamic modules without changing their gravity or launch configuration. */
 	void SetDynamicContactDamageGraceSeconds(float Seconds);
 	void FreezeDynamicModules();
@@ -184,6 +203,8 @@ private:
 	float LaunchGravityAccelerationCMPerSec2 = 980.0f;
 	uint32 LastLaunchChaosBodyProfileHash = 0;
 	uint32 LastLaunchChaosWorldProfileHash = 0;
+	uint32 LastSiteUniformGravityPolicyHash = 0;
+	FVector LastSiteUniformGravityUp = FVector::ZeroVector;
 	float LastPhysicsActivityTimeSeconds = -BIG_NUMBER;
 	bool bSpawnTestSetAtStart = false;
 	FTransform TestSetTransform = FTransform::Identity;

@@ -544,6 +544,26 @@ bool AABTSM73StableBuildingActor::CopyJuryDemoE1CrystalTarget(
 	return true;
 }
 
+bool AABTSM73StableBuildingActor::CopyJuryDemoSiteUniformGravityPolicy(
+	const float GravityAccelerationCMPerSec2,
+	FABTSM7SiteUniformGravityPolicy& OutPolicy) const
+{
+	OutPolicy = FABTSM7SiteUniformGravityPolicy();
+	if (!JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->SourceContractVersion
+			!= FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		return false;
+	}
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	return FABTSM7SiteUniformGravityPolicy::TryDerive(
+		Entry.WorldTransform.GetLocation(),
+		Entry.SupportCenterWorldCM,
+		GravityAccelerationCMPerSec2,
+		OutPolicy);
+}
+
 bool AABTSM73StableBuildingActor::BuildResolvedStructure(
 	const bool bAllowFlatEditorFallback,
 	FABTSM73GroundContext& OutContext,

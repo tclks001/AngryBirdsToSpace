@@ -30,6 +30,11 @@ struct FABTSM73JuryDemoFixedSixStaticEntry
 	uint64 DeviceAssemblyHash = 0;
 	uint64 SourceLayoutHash = 0;
 	uint64 SourcePlacementHash = 0;
+	/** Existing V3 DTO facts retained by the M7 consumer; not added to shared hashes. */
+	FVector SupportCenterWorldCM = FVector::ZeroVector;
+	double SupportRadiusCM = 0.0;
+	FName GravityAuthorityId = NAME_None;
+	uint64 GravityIdentityHash = 0;
 	uint64 RegistrationResultHash = 0;
 	bool bDynamicEnvelopeRequired = false;
 	TArray<FABTSM73BeamD1BrickBinding> Bricks;

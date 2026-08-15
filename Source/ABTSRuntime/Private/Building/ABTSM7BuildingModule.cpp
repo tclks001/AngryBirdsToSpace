@@ -12,6 +12,85 @@
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "World/ABTSCollisionChannels.h"
 
+bool FABTSM7SiteUniformGravityPolicy::TryDerive(
+	const FVector& InSiteLocationWorldCM,
+	const FVector& InSupportCenterWorldCM,
+	const float InGravityAccelerationCMPerSec2,
+	FABTSM7SiteUniformGravityPolicy& OutPolicy)
+{
+	OutPolicy = FABTSM7SiteUniformGravityPolicy();
+	if (InSiteLocationWorldCM.ContainsNaN()
+		|| InSupportCenterWorldCM.ContainsNaN()
+		|| !FMath::IsFinite(InGravityAccelerationCMPerSec2)
+		|| InGravityAccelerationCMPerSec2 <= 0.0f)
+	{
+		return false;
+	}
+	const FVector DerivedSiteUp =
+		(InSiteLocationWorldCM - InSupportCenterWorldCM).GetSafeNormal();
+	if (DerivedSiteUp.IsNearlyZero() || DerivedSiteUp.ContainsNaN())
+	{
+		return false;
+	}
+	OutPolicy.SiteLocationWorldCM = InSiteLocationWorldCM;
+	OutPolicy.SupportCenterWorldCM = InSupportCenterWorldCM;
+	OutPolicy.SiteUp = DerivedSiteUp;
+	OutPolicy.GravityAccelerationCMPerSec2 = InGravityAccelerationCMPerSec2;
+	return OutPolicy.IsUsable();
+}
+
+bool FABTSM7SiteUniformGravityPolicy::IsUsable() const
+{
+	if (SiteLocationWorldCM.ContainsNaN()
+		|| SupportCenterWorldCM.ContainsNaN()
+		|| SiteUp.ContainsNaN()
+		|| !FMath::IsFinite(GravityAccelerationCMPerSec2)
+		|| GravityAccelerationCMPerSec2 <= 0.0f)
+	{
+		return false;
+	}
+	const FVector DerivedSiteUp =
+		(SiteLocationWorldCM - SupportCenterWorldCM).GetSafeNormal();
+	return !DerivedSiteUp.IsNearlyZero()
+		&& SiteUp.IsNormalized()
+		&& SiteUp.Equals(DerivedSiteUp, 1.0e-6);
+}
+
+uint32 FABTSM7SiteUniformGravityPolicy::ComputeCrc32() const
+{
+	if (!IsUsable())
+	{
+		return 0;
+	}
+	const FString Canonical = FString::Printf(
+		TEXT("M7SiteUniformGravity:v%d:Derivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM)")
+		TEXT(":Site=%d,%d,%d:Center=%d,%d,%d:Up=%d,%d,%d:Acceleration=%d"),
+		SchemaVersion,
+		FMath::RoundToInt(SiteLocationWorldCM.X * 1000.0),
+		FMath::RoundToInt(SiteLocationWorldCM.Y * 1000.0),
+		FMath::RoundToInt(SiteLocationWorldCM.Z * 1000.0),
+		FMath::RoundToInt(SupportCenterWorldCM.X * 1000.0),
+		FMath::RoundToInt(SupportCenterWorldCM.Y * 1000.0),
+		FMath::RoundToInt(SupportCenterWorldCM.Z * 1000.0),
+		FMath::RoundToInt(SiteUp.X * 1000000.0),
+		FMath::RoundToInt(SiteUp.Y * 1000000.0),
+		FMath::RoundToInt(SiteUp.Z * 1000000.0),
+		FMath::RoundToInt(GravityAccelerationCMPerSec2 * 1000.0f));
+	return FCrc::StrCrc32(*Canonical);
+}
+
+FString FABTSM7SiteUniformGravityPolicy::ToLogString() const
+{
+	return FString::Printf(
+		TEXT("Policy=SiteUniformTangentGravity Schema=%d Derivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM) Site=%s Center=%s SiteUp=%s Acceleration=%.3f Hash=%u"),
+		SchemaVersion,
+		*SiteLocationWorldCM.ToString(),
+		*SupportCenterWorldCM.ToString(),
+		*SiteUp.ToString(),
+		GravityAccelerationCMPerSec2,
+		ComputeCrc32());
+}
+
 FABTSM7ChaosBodyProfile FABTSM7ChaosBodyProfile::Production()
 {
 	return FABTSM7ChaosBodyProfile();
@@ -273,6 +352,19 @@ void AABTSM7BuildingModule::ActivateDynamicPlanar(const FVector& Impulse, const 
 	bPlanarGravity = true;
 	PlanarGravityUp = InGravityUp.GetSafeNormal();
 	if (PlanarGravityUp.IsNearlyZero()) PlanarGravityUp = FVector::UpVector;
+}
+
+bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
+	const FVector& Impulse,
+	const FABTSM7SiteUniformGravityPolicy& Policy)
+{
+	if (!Policy.IsUsable())
+	{
+		return false;
+	}
+	ActivateDynamicPlanar(
+		Impulse, Policy.SiteUp, Policy.GravityAccelerationCMPerSec2);
+	return true;
 }
 
 void AABTSM7BuildingModule::Freeze()
