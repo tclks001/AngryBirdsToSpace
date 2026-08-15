@@ -6,12 +6,72 @@
 #include "CoreMinimal.h"
 #include "Game/ABTSM6GameMode.h"
 #include "PCG/ABTSM3TaskGraphTypes.h"
+#include "TimerManager.h"
 #include "ABTSM7GameMode.generated.h"
 
 class AABTSM7BuildingMaterialSystem;
 class AABTSM73StableBuildingActor;
 class AABTSM3Planet;
+class FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest;
+class UWorld;
 struct FABTSBuildingGenerationContract;
+
+enum class EABTSM7SatellitePracticeE1CrystalBindingState : uint8
+{
+	Inactive,
+	Waiting,
+	Binding,
+	Bound,
+	Rejected,
+	Cancelled
+};
+
+enum class EABTSM7SatellitePracticeE1CrystalBindingAction : uint8
+{
+	None,
+	Wait,
+	Bind,
+	Reject
+};
+
+struct FABTSM7SatellitePracticeE1CrystalBindingObservation
+{
+	int32 AcceptedStaticBuildingCount = 0;
+	int32 CrystalTargetCount = 0;
+	int32 SatelliteRuntimeCount = 0;
+	bool bSatelliteRuntimeReady = false;
+};
+
+/** Bounded, idempotent lifecycle used by production and its focused automation. */
+struct ABTSRUNTIME_API FABTSM7SatellitePracticeE1CrystalBindingLifecycle
+{
+	static constexpr int32 ExpectedStaticBuildingCount = 6;
+	static constexpr double TimeoutSeconds = 10.0;
+
+	bool Start(double NowSeconds);
+	EABTSM7SatellitePracticeE1CrystalBindingAction Advance(
+		double NowSeconds,
+		const FABTSM7SatellitePracticeE1CrystalBindingObservation& Observation,
+		FString& OutReason);
+	void MarkBound();
+	void MarkBindingRejected(const FString& Reason);
+	void Cancel();
+
+	EABTSM7SatellitePracticeE1CrystalBindingState GetState() const
+	{
+		return State;
+	}
+	int32 GetAttemptCount() const { return AttemptCount; }
+	double GetStartSeconds() const { return StartSeconds; }
+	const FString& GetTerminalReason() const { return TerminalReason; }
+
+private:
+	EABTSM7SatellitePracticeE1CrystalBindingState State =
+		EABTSM7SatellitePracticeE1CrystalBindingState::Inactive;
+	double StartSeconds = 0.0;
+	int32 AttemptCount = 0;
+	FString TerminalReason;
+};
 
 /** Runtime-only binding from a TaskGraph spawn site to its generated building. */
 struct FABTSM7TaskGraphBuildingDebugEntry
@@ -96,6 +156,7 @@ public:
 
 protected:
 	virtual void OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, int32 SpawnCellId) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	const FABTSM7TaskGraphBuildingProfile* FindTaskGraphBuildingProfile(EABTSM3TaskType TaskType) const;
@@ -112,7 +173,9 @@ private:
 		AABTSM7BuildingMaterialSystem& MaterialSystem,
 		AABTSM6SlingshotSystem* SlingshotSystem,
 		bool& bOutSetupFailed);
-	void BindSatellitePracticeE1CrystalTarget();
+	void ScheduleSatellitePracticeE1CrystalTargetBinding();
+	void TryBindSatellitePracticeE1CrystalTarget();
+	void ClearSatellitePracticeE1CrystalTargetBindingTimer();
 	void DrawTaskGraphPositionDebug();
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M7")
@@ -166,4 +229,13 @@ private:
 	TWeakObjectPtr<AABTSM3Planet> TaskGraphDebugPlanet;
 	TWeakObjectPtr<ACharacter> TaskGraphDebugPlayer;
 	TArray<FABTSM7TaskGraphBuildingDebugEntry> TaskGraphBuildingDebugEntries;
+
+	static constexpr float SatellitePracticeE1CrystalBindingRetrySeconds = 0.1f;
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycle
+		SatellitePracticeE1CrystalBindingLifecycle;
+	FTimerHandle SatellitePracticeE1CrystalBindingTimerHandle;
+	TWeakObjectPtr<UWorld> SatellitePracticeE1CrystalBindingWorld;
+	FString LastSatellitePracticeE1CrystalBindingWaitReason;
+
+	friend class FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest;
 };
