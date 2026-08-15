@@ -4,9 +4,110 @@
 
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Components/StaticMeshComponent.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/Crc.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "World/ABTSCollisionChannels.h"
+
+FABTSM7ChaosBodyProfile FABTSM7ChaosBodyProfile::Production()
+{
+	return FABTSM7ChaosBodyProfile();
+}
+
+bool FABTSM7ChaosBodyProfile::IsUsable() const
+{
+	return PositionSolverIterations > 0 && PositionSolverIterations <= 255
+		&& VelocitySolverIterations > 0 && VelocitySolverIterations <= 255
+		&& LinearDamping >= 0.0f && AngularDamping >= 0.0f;
+}
+
+uint32 FABTSM7ChaosBodyProfile::ComputeCrc32() const
+{
+	const FString Canonical = FString::Printf(
+		TEXT("M7ChaosBody:v%d:Solver=%d,%d:Damping=%d,%d"),
+		SchemaVersion,
+		PositionSolverIterations,
+		VelocitySolverIterations,
+		FMath::RoundToInt(LinearDamping * 1000.0f),
+		FMath::RoundToInt(AngularDamping * 1000.0f));
+	return FCrc::StrCrc32(*Canonical);
+}
+
+void FABTSM7ChaosBodyProfile::ApplyTo(UStaticMeshComponent& Component) const
+{
+	if (!IsUsable())
+	{
+		return;
+	}
+	FBodyInstance& BodyInstance = Component.BodyInstance;
+	BodyInstance.SetPositionSolverIterationCount(
+		static_cast<uint8>(PositionSolverIterations));
+	BodyInstance.SetVelocitySolverIterationCount(
+		static_cast<uint8>(VelocitySolverIterations));
+	BodyInstance.SetOverrideIterationCounts(true);
+	Component.SetLinearDamping(LinearDamping);
+	Component.SetAngularDamping(AngularDamping);
+}
+
+FABTSM7ChaosWorldProfile FABTSM7ChaosWorldProfile::CaptureProduction()
+{
+	FABTSM7ChaosWorldProfile Profile;
+	if (const UPhysicsSettings* Settings = UPhysicsSettings::Get())
+	{
+		Profile.bSubstepping = Settings->bSubstepping;
+		Profile.bSubsteppingAsync = Settings->bSubsteppingAsync;
+		Profile.bTickPhysicsAsync = Settings->bTickPhysicsAsync;
+		Profile.MaxPhysicsDeltaSeconds = Settings->MaxPhysicsDeltaTime;
+		Profile.MaxSubstepDeltaSeconds = Settings->MaxSubstepDeltaTime;
+		Profile.MaximumSubsteps = Settings->MaxSubsteps;
+		Profile.AsyncFixedDeltaSeconds = Settings->AsyncFixedTimeStepSize;
+	}
+	if (const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("p.Chaos.Solver.Collision.PositionFrictionIterations")))
+	{
+		Profile.PositionFrictionIterations = Variable->GetInt();
+	}
+	if (const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(
+		TEXT("p.Chaos.Solver.Collision.PositionShockPropagationIterations")))
+	{
+		Profile.PositionShockPropagationIterations = Variable->GetInt();
+	}
+	return Profile;
+}
+
+uint32 FABTSM7ChaosWorldProfile::ComputeCrc32() const
+{
+	const FString Canonical = FString::Printf(
+		TEXT("M7ChaosWorld:v%d:Substep=%d,%d,%d:%d,%d:Async=%d,%d:Friction=%d:Shock=%d"),
+		SchemaVersion,
+		bSubstepping ? 1 : 0,
+		bSubsteppingAsync ? 1 : 0,
+		FMath::RoundToInt(MaxSubstepDeltaSeconds * 1000000.0f),
+		MaximumSubsteps,
+		FMath::RoundToInt(MaxPhysicsDeltaSeconds * 1000000.0f),
+		bTickPhysicsAsync ? 1 : 0,
+		FMath::RoundToInt(AsyncFixedDeltaSeconds * 1000000.0f),
+		PositionFrictionIterations,
+		PositionShockPropagationIterations);
+	return FCrc::StrCrc32(*Canonical);
+}
+
+FString FABTSM7ChaosWorldProfile::ToLogString() const
+{
+	return FString::Printf(
+		TEXT("Substep=%d AsyncSubstep=%d MaxPhysicsDT=%.6f MaxSubstepDT=%.6f MaxSubsteps=%d AsyncTick=%d AsyncFixedDT=%.6f PositionFriction=%d PositionShock=%d"),
+		bSubstepping ? 1 : 0,
+		bSubsteppingAsync ? 1 : 0,
+		MaxPhysicsDeltaSeconds,
+		MaxSubstepDeltaSeconds,
+		MaximumSubsteps,
+		bTickPhysicsAsync ? 1 : 0,
+		AsyncFixedDeltaSeconds,
+		PositionFrictionIterations,
+		PositionShockPropagationIterations);
+}
 
 AABTSM7BuildingModule::AABTSM7BuildingModule()
 {
@@ -121,6 +222,7 @@ void AABTSM7BuildingModule::ConfigureImpactPhysics(const FABTSM7MaterialProfile&
 	ImpactPhysicalMaterial->bOverrideRestitutionCombineMode = true;
 	ImpactPhysicalMaterial->RestitutionCombineMode = EFrictionCombineMode::Average;
 	Visual->SetPhysMaterialOverride(ImpactPhysicalMaterial);
+	FABTSM7ChaosBodyProfile::Production().ApplyTo(*Visual);
 }
 
 void AABTSM7BuildingModule::ConfigureChaosSolverIterations(
@@ -142,6 +244,7 @@ void AABTSM7BuildingModule::ConfigureChaosSolverIterations(
 
 bool AABTSM7BuildingModule::ApplyImpactDamage(const float DamageGain)
 {
+	if (bBroken) return false;
 	CurrentDamage = FMath::Max(0.0f, CurrentDamage + DamageGain);
 	return CurrentDamage >= BreakDamage;
 }
@@ -181,10 +284,13 @@ void AABTSM7BuildingModule::Freeze()
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
-void AABTSM7BuildingModule::BreakModule()
+bool AABTSM7BuildingModule::BreakModule()
 {
+	if (bBroken) return false;
+	bBroken = true;
 	bDynamic = false;
 	Destroy();
+	return true;
 }
 
 void AABTSM7BuildingModule::Tick(const float DeltaSeconds)

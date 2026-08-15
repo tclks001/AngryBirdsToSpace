@@ -64,6 +64,13 @@ struct FABTSM73BeamD1Stage55Result
 	uint64 DeviceAssemblyHash = 0;
 };
 
+/** Optional production material policy used by the V3 fixed-six freeze publisher. */
+struct FABTSM73BeamD1MaterialPolicy
+{
+	bool bOverrideOrdinaryBody = false;
+	EABTSM7BuildingMaterial PrimaryMaterial = EABTSM7BuildingMaterial::Wood;
+};
+
 /** Pure-data Beam-D1 profile-to-real-Brick compiler. */
 class FABTSM73BeamD1BrickCompiler
 {
@@ -85,10 +92,20 @@ public:
 		const FABTSM73BeamD1Settings& Settings,
 		FABTSM73BeamD1Stage5Result& OutResult,
 		FString& OutError) const;
+	bool GenerateStage5WithMaterialPolicy(
+		const FABTSM73BeamD1Settings& Settings,
+		const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
+		FABTSM73BeamD1Stage5Result& OutResult,
+		FString& OutError) const;
 
 	/** Adds one deterministic voxelized demo device without mutating Stage 5. */
 	bool GenerateStage55DeviceAssembly(
 		const FABTSM73BeamD1Settings& Settings,
+		FABTSM73BeamD1Stage55Result& OutResult,
+		FString& OutError) const;
+	bool GenerateStage55DeviceAssemblyWithMaterialPolicy(
+		const FABTSM73BeamD1Settings& Settings,
+		const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
 		FABTSM73BeamD1Stage55Result& OutResult,
 		FString& OutError) const;
 

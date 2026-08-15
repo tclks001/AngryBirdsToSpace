@@ -643,6 +643,73 @@ bool FABTSM73BeamD1RealModuleTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BeamD1StaticCrystalCapTest,
+	"ABTS.M73DAG.BuildingFreezeV3.StaticCrystalCap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BeamD1StaticCrystalCapTest::RunTest(const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	AABTSM7BuildingMaterialSystem* MaterialSystem =
+		World->SpawnActor<AABTSM7BuildingMaterialSystem>();
+	if (!TestNotNull(TEXT("Crystal cap MaterialSystem"), MaterialSystem))
+	{
+		return false;
+	}
+	FABTSM7BrickSpec Spec;
+	Spec.Material = EABTSM7BuildingMaterial::Crystal;
+	Spec.DimensionsCM = FVector(72.0);
+	AABTSM7BuildingModule* Cap = MaterialSystem->SpawnStaticBrickModule(
+		Spec, FTransform(FVector(0.0, 0.0, 36.0)));
+	if (!TestNotNull(TEXT("Static Crystal cap module"), Cap))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Static cap retains Crystal identity"),
+		Cap->GetBuildingMaterial(), EABTSM7BuildingMaterial::Crystal);
+	TestNotNull(TEXT("Static cap has visible collision mesh"),
+		Cap->GetMeshComponent()->GetStaticMesh().Get());
+	TestNotNull(TEXT("Static cap has a Crystal material binding"),
+		Cap->GetMeshComponent()->GetMaterial(0));
+	TestTrue(TEXT("Static cap collision is enabled"),
+		Cap->GetMeshComponent()->GetCollisionEnabled()
+			== ECollisionEnabled::QueryAndPhysics);
+	MaterialSystem->BeginLaunchPhysics(
+		true, FVector::UpVector, 980.0f, 0.2f);
+	TestFalse(TEXT("Static cap is excluded from global launch activation"),
+		Cap->IsDynamic());
+
+	int32 CrystalRecoveryQuantity = 0;
+	MaterialSystem->OnMaterialRecovered.AddLambda(
+		[&CrystalRecoveryQuantity](
+			const EABTSM7BuildingMaterial Material, const int32 Quantity)
+		{
+			if (Material == EABTSM7BuildingMaterial::Crystal)
+			{
+				CrystalRecoveryQuantity += Quantity;
+			}
+		});
+	UStaticMeshComponent* Collision = Cap->GetMeshComponent();
+	TestTrue(TEXT("First Crystal impact is owned"),
+		MaterialSystem->HandleBirdImpact(Collision, INDEX_NONE, 100000.0f,
+			FVector(100000.0f, 0.0f, 0.0f), EABTSBirdId::Red));
+	TestTrue(TEXT("First Crystal impact breaks the cap"), Cap->IsBroken());
+	TestTrue(TEXT("Repeated impact remains an owned no-op during Destroy deferral"),
+		MaterialSystem->HandleBirdImpact(Collision, INDEX_NONE, 100000.0f,
+			FVector(100000.0f, 0.0f, 0.0f), EABTSBirdId::Red));
+	TestEqual(TEXT("Crystal recovery is emitted exactly once"),
+		CrystalRecoveryQuantity, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM73BeamD1DelayedMaterialSystemTest,
 	"ABTS.M73DAG.BeamD1.DelayedMaterialSystem",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

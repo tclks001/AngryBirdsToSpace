@@ -34,6 +34,8 @@ public:
 	int32 AddBrick(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 	/** Creates a static per-brick Actor used by M7.3 validated structures; launch physics activates it with every other module. */
 	AABTSM7BuildingModule* SpawnBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
+	/** Caller-held static brick path for special V3 pieces such as the E1 Crystal cap. */
+	AABTSM7BuildingModule* SpawnStaticBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Suspension")
 	AABTSM7BuildingModule* SpawnSuspension(const FABTSM7SuspensionSpec& Spec, const FTransform& WorldTransform);
@@ -61,6 +63,8 @@ public:
 	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
 	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
+	uint32 GetLastLaunchChaosBodyProfileHash() const { return LastLaunchChaosBodyProfileHash; }
+	uint32 GetLastLaunchChaosWorldProfileHash() const { return LastLaunchChaosWorldProfileHash; }
 	/** Extends the damage grace on all currently dynamic modules without changing their gravity or launch configuration. */
 	void SetDynamicContactDamageGraceSeconds(float Seconds);
 	void FreezeDynamicModules();
@@ -92,6 +96,10 @@ private:
 	void ApplyHISMPhysicalMaterial(UHierarchicalInstancedStaticMeshComponent& HISM, EABTSM7BuildingMaterial Material, const TCHAR* DebugName);
 	AABTSM7BuildingModule* SpawnVoxelDeviceInternal(
 		const FABTSM7DeviceSpec& Spec,
+		const FTransform& WorldTransform,
+		bool bRegisterForLaunchPhysics);
+	AABTSM7BuildingModule* SpawnBrickModuleInternal(
+		const FABTSM7BrickSpec& Spec,
 		const FTransform& WorldTransform,
 		bool bRegisterForLaunchPhysics);
 	void ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse = FVector::ZeroVector);
@@ -174,6 +182,8 @@ private:
 	bool bLaunchPhysicsPlanar = false;
 	FVector LaunchGravityReference = FVector::ZeroVector;
 	float LaunchGravityAccelerationCMPerSec2 = 980.0f;
+	uint32 LastLaunchChaosBodyProfileHash = 0;
+	uint32 LastLaunchChaosWorldProfileHash = 0;
 	float LastPhysicsActivityTimeSeconds = -BIG_NUMBER;
 	bool bSpawnTestSetAtStart = false;
 	FTransform TestSetTransform = FTransform::Identity;

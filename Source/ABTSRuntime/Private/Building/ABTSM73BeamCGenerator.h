@@ -13,6 +13,9 @@ struct FABTSM73BeamCGenerationResult
 	TArray<int32> TopologicalMemberOrder;
 };
 
+using FABTSM73BeamCMemberSelfLoadResolver =
+	TFunction<double(const FABTSM73BeamAMember&)>;
+
 namespace ABTSM73BeamC
 {
 	/** Register a failed DAG and reject non-adjacent hash cycles fail closed. */
@@ -56,7 +59,8 @@ public:
 		const FABTSM73BeamCPreviewSettings& Settings,
 		const FABTSM73BeamAGenerationResult& ClosedAssembly,
 		FABTSM73BeamCGenerationResult& OutResult,
-		FString& OutError) const;
+		FString& OutError,
+		const FABTSM73BeamCMemberSelfLoadResolver* MemberSelfLoadResolver = nullptr) const;
 
 	/**
 	 * Production path: validate final Brick contacts, add bounded local Z
@@ -73,5 +77,7 @@ public:
 		int32 MaximumFinalMemberCount = MAX_int32,
 		bool bAllowDeferredCoreBracing = false,
 		int32 PriorStructuralClosurePassCount = 0,
-		int32 PriorAddedStructuralSupportPostCount = 0) const;
+		int32 PriorAddedStructuralSupportPostCount = 0,
+		const FABTSM73BeamCMemberSelfLoadResolver* MemberSelfLoadResolver = nullptr,
+		bool bAllowPostRepairResultantAdvisory = true) const;
 };
