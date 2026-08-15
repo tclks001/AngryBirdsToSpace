@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "status": "MapFreezeV3PublishedChaosFreezePending",
+  "engineRoot": "C:\\Program Files\\Epic Games\\UE_5.8",
+  "crystalBaselineCommit": "36400f498cbfbbd6a18e3d64c45b5c6291d82915",
+  "activationAllowed": true,
+  "productionContractVersion": 3,
+  "frozenIdentities": {
+    "buildingFreezeV3Commit": "8a4892d3928233721b47e7410fc9dddbfc63e08e",
+    "placementCatalogHash": "8960617043786800590",
+    "mapFreezeV3Commit": "d52b6f52beec69ce571bbfee0456e1a71418cfe1",
+    "layoutHash": "0x3EB6326A2877EE1E",
+    "chaosFreezeV3Commit": null,
+    "chaosResultHash": null
+  },
+  "currentRunnableGates": [
+    {
+      "filter": "ABTS.M73A.CrystalMaterialBaseline",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M73DAG.BuildingFreezeV3",
+      "expectedTests": 2,
+      "evidenceLayer": "NullRHIBuildingFreeze"
+    },
+    {
+      "filter": "ABTS.M73DAG.BeamC3V3.Demo.Stage5Production",
+      "expectedTests": 3,
+      "evidenceLayer": "NullRHICompatibility"
+    },
+    {
+      "filter": "ABTS.M8.Recovery.BuildingMaterialMapping",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M8.Recovery.CrystalCoreToSpaceCordTransaction",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHITransaction"
+    },
+    {
+      "filter": "ABTS.M110.SpaceSlingshotItemContract",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.Contracts.WorldGeneration",
+      "expectedTests": 3,
+      "evidenceLayer": "NullRHIContract"
+    },
+    {
+      "filter": "ABTS.M3.Jury.MapFreezeV3",
+      "expectedTests": 2,
+      "evidenceLayer": "NullRHIMapFreeze"
+    },
+    {
+      "filter": "ABTS.M3.DecorPlacement",
+      "expectedTests": 4,
+      "evidenceLayer": "NullRHIDecorClearance"
+    },
+    {
+      "filter": "ABTS.M3.Monthly.JuryFixedSix",
+      "expectedTests": 3,
+      "evidenceLayer": "NullRHIV2Compatibility"
+    },
+    {
+      "filter": "ABTS.Integration.JuryDemoFixedSix.StaticJointGate",
+      "expectedTests": 1,
+      "evidenceLayer": "NullRHIStaticRegistration"
+    }
+  ],
+  "handoffRequiredGates": [
+    {
+      "owner": "M7",
+      "identity": "BuildingFreezeV3",
+      "filter": "ABTS.M73DAG.BuildingFreezeV3",
+      "requiredFacts": [
+        "ExactCommit",
+        "PlacementCatalogHash",
+        "OrderedManifestEntries",
+        "SiteLocalBounds",
+        "SiteLocalBoundsHash",
+        "StaticGeometryHash",
+        "ProductionHash",
+        "CrystalCapIdentity"
+      ]
+    },
+    {
+      "owner": "M3",
+      "identity": "MapFreezeV3",
+      "filter": "ABTS.M3.Jury.MapFreezeV3",
+      "requiredFacts": [
+        "ExactCommit",
+        "WorldSeed",
+        "CandidateId",
+        "OrderedEncounterMapping",
+        "SurfaceKind",
+        "SupportSphereIdentity",
+        "PlacementHash",
+        "LayoutHash"
+      ]
+    },
+    {
+      "owner": "M7",
+      "identity": "ChaosFreezeV3",
+      "filter": null,
+      "requiredFacts": [
+        "ExactCommit",
+        "BodyProfileHash",
+        "WorldProfileHash",
+        "CandidateHash",
+        "ResultHash",
+        "FreshFixedStepEvidence",
+        "Realtime30FpsEvidence",
+        "Realtime60FpsEvidence",
+        "Realtime120FpsEvidence",
+        "VisiblePIEEvidence"
+      ]
+    }
+  ],
+  "evidencePolicy": {
+    "previewIsProduction": false,
+    "nullRhiIsRealtimeChaos": false,
+    "assetLoadIsVisiblePixel": false,
+    "visiblePieRequiresCurrentTaskAuthorization": true,
+    "failClosedOnIdentityMismatch": true
+  }
+}

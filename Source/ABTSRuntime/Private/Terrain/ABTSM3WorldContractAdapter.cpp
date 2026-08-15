@@ -172,6 +172,34 @@ bool BuildJuryDemoFixedSixContractSnapshot(
 		OutFailure = TEXT("SnapshotValidation");
 		return false;
 	}
+
+	if constexpr (FABTSJuryDemoFixedSixContract::ProductionContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		const FABTSM3JuryMapFreezeV3Result& MapFreeze =
+			Planet.GetJuryMapFreezeV3Result();
+		FString ValidationFailure;
+		if (!MapFreeze.bMapFreezeReady
+			|| MapFreeze.RejectReason
+				!= EABTSM3JuryMapFreezeV3RejectReason::None
+			|| MapFreeze.SchemaVersion
+				!= FABTSM3JuryMapFreezeV3Builder::SchemaVersion
+			|| MapFreeze.WorldSeed
+				!= FABTSJuryDemoFixedSixContract::FrozenWorldSeed
+			|| MapFreeze.SourceCandidateId
+				!= FABTSJuryDemoFixedSixContract::FrozenCandidateId
+			|| MapFreeze.LayoutHash
+				!= FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash
+			|| MapFreeze.HandoffContract.LayoutHash != MapFreeze.LayoutHash
+			|| !Planet.ValidateJuryMapFreezeV3Result(ValidationFailure)
+			|| !MapFreeze.HandoffContract.IsUsable())
+		{
+			OutFailure = FString::Printf(
+				TEXT("MapFreezeV3:%s"), *ValidationFailure);
+			return false;
+		}
+		OutSnapshot = MapFreeze.HandoffContract;
+	}
 	return true;
 }
 }

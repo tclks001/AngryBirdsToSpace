@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -68,16 +69,17 @@ FABTSM6FixedSixStaticJointSummary ValidateFixedSixStaticJointGate(
 	const TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>>& RequiredBuildings)
 {
 	static const TCHAR* const ExpectedManifestEntryIds[] = {
-		TEXT("E1ColumnBreak"),
 		TEXT("E2DropTrigger"),
 		TEXT("E3SlideRelease"),
 		TEXT("E4TipOver"),
 		TEXT("E5SeamRelease"),
+		TEXT("E1ColumnBreak"),
 		TEXT("E6TipOver")
 	};
 	static constexpr uint64 FrozenRegistrationResultHash =
-		3948236352584381910ull;
-	static constexpr int32 FrozenStaticModuleCount = 5742;
+		FABTSM73JuryDemoFixedSixRegistration::FrozenV3RegistrationResultHash;
+	static constexpr int32 FrozenStaticModuleCount =
+		FABTSM73JuryDemoFixedSixRegistration::FrozenV3StaticModuleCount;
 
 	FABTSM6FixedSixStaticJointSummary Summary;
 	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& Required
@@ -289,7 +291,7 @@ void AABTSM6SlingshotSystem::SealRequiredBuildingContract(const bool bInSetupRej
 				TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Gate=Accepted"),
 				FixedSixJoint.RegisteredBuildingCount,
 				FixedSixJoint.StaticModuleCount,
-				FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash,
+				FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash,
 				FixedSixJoint.RegistrationResultHash);
 		}
 		else

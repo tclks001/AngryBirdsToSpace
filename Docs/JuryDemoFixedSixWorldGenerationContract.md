@@ -1,8 +1,8 @@
-# JuryDemo Fixed-Six V1/V2 世界生成合同
+# JuryDemo Fixed-Six V1/V2/V3 世界生成合同
 
-> 状态：2026-08-15，V1 J3 保持兼容；M3 V2、Integration Adapter、M7 六栋静态消费与共享 M6 联合门均已通过。canonical `L_ABTS_M10` 两次 fresh NullRHI 均以六栋 Accepted 发布 WorldReady；下一步回到 M7 做逐关动态 Chaos。
+> 状态：2026-08-15，V1/V2 保持兼容且生产仍为 V2；M7 Building Freeze V3 已验收，Integration V3 纯值 DTO 与结构交接门已发布。V3 Map Layout 尚未批准，不能进入生产。
 >
-> 发布身份：`JuryDemoFixedSixV2 / StaticJointAccepted / ChaosNotEvaluated`；兼容身份：`JuryDemoFixedSixV1`。
+> 发布身份：`JuryDemoFixedSixV2 / StaticJointAccepted / ChaosNotEvaluated`；交接身份：`JuryDemoFixedSixV3 / StructurallyUsable / MapFreezePending`；兼容身份：`JuryDemoFixedSixV1`。
 
 ## 1. 目标与非目标
 
@@ -43,6 +43,12 @@ V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身�
 
 合同校验按版本 fail closed：未知版本、V1 混入 V2 状态、V2 复用旧 Catalog/Layout、任一 Descriptor/Stage 5/Stage 5.5 Hash 漂移、静态 Bounds 漂移或动态走廊标志不一致都会拒绝整个快照。
 
+### 2.2 V3 结构交接与生产隔离
+
+V3 固定 `Schema=3`、Catalog `8960617043786800590` 和顺序 `E2/E3/E4/E5/E1/E6`，但不预填 M3 Layout Hash。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。
+
+这只是 M3 handoff 门。生产级 `IsUsable()` 当前仍只接受 V1/V2，`ProductionContractVersion=2`；因此半填 V3、任意非零占位 Layout，乃至结构完整但尚未被 Integration 批准的 V3，都不能被生产消费者接受。
+
 ## 3. DTO
 
 合同级 `FABTSJuryDemoFixedSixContract` 包含：
@@ -67,6 +73,7 @@ V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身�
 - `DeterministicSeed`
 - `DescriptorHash`
 - 可选 `V2Envelope`；只在 `ContractVersion == 2` 时必须完整存在
+- 可选 `V3Envelope`；只在 `ContractVersion == 3` 的结构交接中必须完整存在
 
 `FABTSJuryDemoFixedSixV2Envelope` 包含：
 
@@ -76,6 +83,16 @@ V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身�
 - `PhysicalBounds`
 - `EffectBounds`
 - `bDynamicEnvelopeRequired`
+
+`FABTSJuryDemoFixedSixV3Envelope` 包含：
+
+- M7 `StaticGeometryHash / ProductionIdentityHash / DeviceAssemblyHash`
+- `SiteLocalBounds / PadBounds / EffectBounds`
+- `SurfaceKind / SupportCenterWorldCM / SupportRadiusCM`
+- `GravityAuthorityId / GravityIdentityHash`
+- M3 `PlacementHash`
+
+Envelope 不保存 Planet、Satellite 或 Gravity UObject。M7 未独立发布 SiteLocalBounds Hash，因此合同使用批准的逐槽 Bounds、Descriptor 与 Catalog 共同约束，不伪造占位 Hash。
 
 `WorldTransform` 的局部 `+X/+Y/+Z` 分别是 M3 已冻结的 Forward/Right/Up；Pivot 保持 M7 Stage 4.5 的生成器原点，不移动到 Bounds 中心。
 
@@ -99,6 +116,7 @@ J3 自动门：
 
 - `ABTS.Contracts.WorldGeneration.Validation`：普通 v1 快照继续可用；Fixed-Six 的错误 Manifest Hash、缺条目、乱序、重复 Entry、错误 Layout Hash 与父子 World Seed 不一致均拒绝。
 - `ABTS.Contracts.WorldGeneration.M3Adapter`：同一固定世界连续导出两次得到相同 V2 六条 Entry、Transform、三类身份 Hash、Bounds 与 Layout Hash；源版本、Manifest/Catalog、缺条目、乱序、重复 Entry、Layout、三类身份 Hash、两类 Bounds、动态标志及动态预留注入均原子拒绝。
+- `ABTS.Contracts.WorldGeneration.V3DTO`：验证 M7 Schema/Catalog 对齐、5+1 结构快照、生产隔离，以及 Tier、Surface、支撑球、Bounds、Placement、Layout 和未知版本失败注入。
 - UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity` 全链接。
 
 这些门只证明数据合同和导出生命周期，不证明六栋已经生成、静态注册、动态 Chaos 稳定或画面无重叠。

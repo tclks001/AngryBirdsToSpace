@@ -11,12 +11,12 @@
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
-- M3：DDL 评审路线已切换为 `JuryDemoFixedSixV1`。M3 J1/J2 已冻结 World Seed `312503`、Candidate `4`、六条 E1–E6 放置和 Layout Hash `0x8AB8D7E4F094072D`；Integration J3 候选已完成加法式 DTO 与原子导出，ForceUnity、WorldGeneration 2/2、M3 Fixed-Six 2/2、FinaleSeparation 1/1 和 M7 Stage 4.5 1/1 均通过，状态为 `ContractReady / IntegrationPending`。旧 R4 完整 Witness、R6 泛化 Profile 选择与 R7 全 Seed 认证保留为后续项，不再阻断固定六建筑交付。
-- M7：固定六栋的 Stage 4.5 放置描述已冻结，Manifest Hash `2324068295`、Catalog Hash `13889440156022460967`；这只证明 PlacementReady，不证明 ChaosReady。普通 TaskGraph 三建筑仍走 DAG2.3；固定评审路线下一步是 J4 精确消费，不再等待通用 Profile Catalog、Weakness 或全 Seed 可行性。
+- M3：Fixed-Six V2 的动态包络预留、生产地表落座与确定性诊断已经形成阶段提交；当前 V3 将改为五个主星 Pad 加一个月球背面 E1。M7 最终 site-local bounds 与 Integration V3 DTO 已发布，M3 现在可开始 `MapFreezeV3`，但不得提前提交占位 Transform/Hash。旧 R4 完整 Witness、R6 泛化 Profile 选择与 R7 全 Seed 认证继续延期，不阻断本轮固定演示路线。
+- M7：Fixed-Six V2 六栋静态生产消费与共同门已进入 `master`；`BuildingFreezeV3@8a4892d` 已通过 Integration ForceUnity、冻结门 2/2、Stage5Production 3/3 和共同门 6/6，Catalog `8960617043786800590` 成为批准的建筑基线。旧位置 Chaos 证据继续仅作诊断，这仍不等于 `ChaosFreezeV3`。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`。集成工作树已新增独立的 `PresentationAccepted v1` 稳定合同；它明确不等于 M11-B `StrictCertified`，当前冻结生产绑定仍为 `Unbound`，所以 Rank12 仍不能替换 v1 默认值。
-- 当前下一步：待 J3 候选接收并进入 `master` 后，由 M7 合并该 `master`，实现 J4 的六条精确解析、静态注册与单关动态化；随后回到 Integration 执行 J5 fresh NullRHI 与一次完整 E1→E6 可见 PIE。该路线不恢复 Profile/Seed 搜索，也不以 J3 数据合同或 Stage 4.5 代替 Chaos 证据。T4-A3.3 可见恢复验收、M11 Rank12 表现扫描与严格拓扑认证继续按各自详稿并行维护，生产 Binding 在联合门通过前保持 `Unbound`。
+- 当前下一步：M3 基于已发布的 V3 DTO 冻结 `[E2,E3,E4,E5,E1,E6]` 的 5+1 地图身份；DTO 当前只允许结构交接，V1/V2 继续可读且生产默认仍为 V2。Integration 原子启用批准的 Map Freeze 后，M7 才从头执行生产重力下的 `ChaosFreezeV3`。最终候选串行执行 ForceUnity、fresh 合同/资源链、实时 30/60/120 FPS 和完整可见路线。T4-A3.3 与 M11 继续独立维护，不进入本轮关键路径。
 
-当前入口：[Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M3 Fixed-Six 计划](M3JuryDemoFixedSixIntegrationPlan.md) · [M7 Stage 4.5 放置冻结](M73BeamStage45PlacementFreezeDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
+当前入口：[V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) · [V3 集成准备与门禁](BuildingGenerationAndPlacementFreezeV3IntegrationReadiness.md) · [Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M7 Stage 4.5 放置冻结](M73BeamStage45PlacementFreezeDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 
 - 数值冻结：技术展示版 Phase 1 已建立跨 M3/M6/M7/M11/合成拓扑的集中
   `TechnicalFrozen` Manifest；配方材料量、掉落和破坏阈值仍是
@@ -49,8 +49,8 @@
 | 数值冻结与无软锁 | [技术演示数值冻结设计](TechnicalDemoNumericFreezeDesign.md) |
 | 并行开发与集成 | [M3/M7/M11 多工作树协作与集成规范](ABTSMultiWorktreeDevelopmentGuide.md) |
 | 球面基础与移动 | [M1 独立入口](M1IndependentEntryDesign.md) · [M2 球面](M2PlanetSurfaceDesign.md) · [M2.5 径向引力/跳跃](M25RadialGravityAndJumpDesign.md) · [Chaos 刚体移动](ChaosRigidBodyMovementDesign.md) |
-| PCG 与表现 | [M3 Fixed-Six 计划](M3JuryDemoFixedSixIntegrationPlan.md) · [Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M3R 月度地图改进](M3PCGMapImprovementPlan.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M3 地形表现/HISM](M3TaskGraphTerrainPresentationDesign.md) |
-| 鸟群、镜头与 UI | [M4 鸟群实现](M4BirdPartyImplementationDesign.md) · [M4 球面镜头](M4MultiCharacterOrbitCameraDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [UI 系统](UISystemDesign.md) |
+| PCG 与表现 | [V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) · [V3 集成准备与门禁](BuildingGenerationAndPlacementFreezeV3IntegrationReadiness.md) · [M3 Fixed-Six 计划](M3JuryDemoFixedSixIntegrationPlan.md) · [Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M3R 月度地图改进](M3PCGMapImprovementPlan.md) · [Task Graph 球面 PCG](ABTSTaskGraphPCGDesign.md) · [M3 地形表现/HISM](M3TaskGraphTerrainPresentationDesign.md) |
+| 鸟群、镜头与 UI | [M4 鸟群实现](M4BirdPartyImplementationDesign.md) · [M4 球面镜头](M4MultiCharacterOrbitCameraDesign.md) · [统一镜头视觉优化](ABTSCameraVisualOptimizationDesign.md) · [UI 系统](UISystemDesign.md) · [事件驱动引导系统](ABTSGuidanceSystemDesign.md) |
 | 物品、放置与通行 | [M5 背包/加工](M5InventoryCraftingImplementationDesign.md) · [M5.1 世界物品/弹弓装配](M51WorldItemsPlacementSlingshotDesign.md) · [M5.2 碰撞/移动](M52CollisionAndMovementDesign.md) · [M8 自动回收/桥梁](M8AutoRecoveryAndBridgesDesign.md) |
 | 发射与物理破坏 | [M6 发射/碰撞](M6SlingshotLaunchAndImpactDesign.md) · [M6 视觉表现](M6SlingshotVisualPresentationDesign.md) · [M6/M9 弹弓与卫星标定](M6M9SlingshotSatelliteCalibrationDesign.md) · [物理破坏调研](PhysicsImpactDestructionResearch.md) |
 | 建筑与测试台 | [M7 球面生产集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG3-C 可玩候选](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 动态认证](M73DAG4SettledContactAndAttackRolloutDesign.md) · [DAG-5 六栋路线](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) |
@@ -72,18 +72,19 @@
 | --- | --- | --- | --- |
 | M3R-3.1 普通槽场 | M3 已生成候选槽场；Integration 已实现最小快照消费接缝、DirtHole 批回滚、M6 三维净空与失败原子状态，装配 2/2、槽 Actor 1/1，兼容世界 PIE 已通过 | M3R-4/R-6 产出唯一 Candidate、最终 `LayoutHash` 和正式导出；Integration 再绑定生产入口 | 未接受唯一月度 Candidate 前不得读取 `RetainedCandidates[0]`；月度实体槽与六关联合 Visible PIE 未通过前保持 `IntegrationPending` |
 | M3R-4 六关 Ballistic Witness | M3 已有六 Encounter、攻击走廊和候选空间；Integration 已冻结 M6/M9 Launch/Preset V0，普通 M6 三档实飞已消费同一目录并公开非零 `LaunchProfileHash`，生产消费 1/1 与标定 6/6 已通过 | Integration 继续提供实际 pouch/camera frame 与 M9 引力查询适配器；M7 提供已认证 ProfileDescriptor 目录 | 标定积分器不是生产 Witness 权威；只有 Launch/Preset 身份可跨 Seed，`GravitySnapshotHash` 仅为场景实例证据。实际 frame/M9 适配器或 M7 目录任一未就绪时，M3 仍为 `IntegrationPending` |
-| JuryDemo Fixed-Six 六栋建筑 | M7 Stage 4.5 已冻结六条放置描述；M3 J1/J2 已冻结单一 Seed/Candidate、六个 Pad 与 Layout Hash；Integration J3 候选已通过 ForceUnity 与四组 fresh 自动化，以加法式 DTO 发布精确身份 | 候选进入 `master` 后，M7 J4 按 Entry/Tier/Seed/Descriptor Hash 精确消费，六栋静态注册、仅当前 Encounter 动态化；Integration 再做 J5 | J3 数据合同不等于实体注册或 ChaosReady；J4/J5 未通过前保持 `IntegrationPending`，禁止回退 Profile/Seed 搜索 |
+| JuryDemo Fixed-Six 六栋建筑 | `BuildingFreezeV3` 与 Integration V3 DTO 已进入 `master`；V3 只开放结构交接，生产仍为 V2 | M3 `MapFreezeV3` → Integration 原子启用 → M7 `ChaosFreezeV3` → 最终候选 | V2 旧位置 Chaos 证据已降级；Building/Map/Chaos 三门不得互代，最终 Hash 未到齐前保持 `IntegrationPending` |
 | M3R-5 Biome/Envelope 表现 | M3R-3 已提供逻辑结果 | 仅需 M3 自有表现消费 | 可与共享接口工作并行，但最终须在六关世界重新做性能与 PIE |
 | M11 v2.2 与 M11-D | M11 v2.1 Core、候选与交互已完成；Integration 已建立 `PresentationAccepted v1` 稳定合同，Rank12 的严格 v3 扫描已有早停证据 | M11 先实现完整表现兼容扫描并提交 Rank12 Manifest；严格拓扑认证可独立继续；M11-D 的 Party、环境和共享资产由 Integration 接线 | `PresentationAccepted` 不授予 `StrictCertified`；当前生产 Binding 为 `Unbound`，未完成全域证据、联合构建和可见 PIE 前不得进入生产 |
 
 ### 5.3 固定交接顺序
 
-1. M7 Stage 4.5 与 M3 J1/J2 的冻结身份先在候选分支对齐；只接受交接的精确提交，不从移动中的分支尖端猜测内容。
-2. Integration J3 发布兼容旧 `Sites` 的 `JuryDemoFixedSixV1` DTO，并对缺失、重复、乱序和 Hash 漂移原子 fail closed。
-3. J3 通过联合合同门并进入 `master` 后，M7 工作树只合并该 `master`，在自有文件中完成 J4；不得修改稳定合同或从 M3 内部数组重建 Seed/Entry。
-4. Integration 合并 M7 J4 精确提交后执行 J5：六栋静态注册、单关动态化、失败注入、WorldReady 时序与完整 E1→E6 fresh 可见 PIE。
-5. 只有 J5 通过才将固定六建筑提升为 `IntegrationAccepted`；逐栋 `ChaosReady` 仍按实际证据记录。旧完整 Witness、全 Seed 与泛化目录继续作为 Deferred，不反向扩张本批次门槛。
-6. M11、T4 与其他共享资产任务可按各自路线推进；进入共享地图、默认绑定或正式可见 PIE 时回到 Integration 串行调度。
+1. M7 在自有分支完成并交付 `BuildingFreezeV3` 精确 SHA；二进制修改必须单独说明，`Shared files changed: none`。
+2. Integration 合入该 SHA，以兼容 V1/V2 的加法式合同发布 V3 DTO；最终 bounds 只接受 M7 handoff，不填占位值。
+3. M3 只合并最新 `master`，完成 5+1 `MapFreezeV3` 和两次确定性证据，不从建筑原始数据重推 bounds。
+4. Integration 合入 M3 精确 SHA，填写批准 Layout Hash，并完成 CrystalCore→SpaceCord exactly-once 资源链门。
+5. M7 合并最终 V3 `master`，在主星/月球各自生产重力身份下从头执行 `ChaosFreezeV3`；任何几何/bounds 漂移退回第 1 步。
+6. Integration 用新的唯一候选名按精确 SHA 执行 ForceUnity、共同合同、实时 Chaos 和正式路线验收；全部通过后才 `--ff-only` 进入 `master`。
+7. M11、T4 与其他共享资产任务继续独立推进；共享地图、默认绑定、重型构建和正式可见 PIE 仍回到 Integration 串行调度。
 
 ## 6. 本文维护规则
 

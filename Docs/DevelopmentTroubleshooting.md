@@ -206,8 +206,8 @@
 
 | 原始账本 | 主要职责 | 本次摘录基线 |
 | --- | --- | --- |
-| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `370e50e85c9977b0bf8e0f9ab81909becc12171f`（2026-08-15，含 `M3-JURY-001/002/003`） |
-| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `5b4755719b9d82d87303a6861bc35640c6184e3d`（2026-08-15，含 `M7-BC-004`～`118`、Fixed-Six V2 静态消费） |
+| [M3 专属工作树排错记录](M3WorktreeTroubleshootingLog.md) | 月度 PCG 候选、真实地表、弹弓/卫星/槽位消费链、M3 与 M5.1/M6/M7/M9/M11 的分诊 | `d52b6f52beec69ce571bbfee0456e1a71418cfe1`（2026-08-16，含 `M3-JURY-001`–`008`） |
+| [M7 功能工作树排错记录](M7WorktreeTroubleshooting.md) | 建筑候选搜索、结构 IR、真实接触、Chaos 稳定门、难度与视觉阶梯 | `8a4892d3928233721b47e7410fc9dddbfc63e08e`（2026-08-15，含 `M7-BC-004`～`126`、Building Freeze V3） |
 | [M11 工作树排错记录](M11WorktreeTroubleshooting.md) | 终局 Core、候选/认证/绑定、异步生命周期、HUD/PIP、权威路径播放 | `f24f7809343cfed4ddc7d62b6e66c59b9ece5685`（2026-08-15，含 `M11-UI-001`～`009`、`M11-ASSET-001`、`M11-CAP-HUD-001`） |
 
 ### 13.2 跨阶段统一诊断顺序
@@ -239,6 +239,7 @@
 | Integration 需要接线地面/月面 SceneCapture，但 M3 没有稳定访问入口 | 捕获 owner/component 位于共享 M10 私有成员，功能树不能靠名称或组件扫描绕过所有权。M3 只记录需求；Integration 应在共享类型增加 const getter，并用现有 Preview Subject 显式映射 `GroundLandingPreview` / `SatelliteLandingPreview`，缺失或未知时 fail closed。 | M3 提交不得修改共享 Camera/M10 类型；Integration 后续测试检查 Subject 映射及接线前后 M3/M9 Gameplay 身份不变。详见 `M3-T2B-002`。 |
 | 性能门单次轻微越线 | 保留首次失败；先核对 Seed/Oracle/Hash，再停止并行重型任务，以相同二进制 fresh 隔离重跑。既不能直接忽略，也不能在身份未变时立即断言算法回归。 | 同时保存 P50/P95/Max、接受数、Oracle Hash、命令和首次失败日志。详见 `M3-TEST-001`。 |
 | 固定六条 PlacementReady 已通过，却继续从旧 building `Sites` 猜测六栋身份，或把 Stage 4.5 / V2 数据面直接宣告为 ChaosReady | 放置身份、通用旧站点、静态注册和动态 Chaos 是四层证据。Integration 以加法式合同保留 V1 兼容身份，并用 M3 最终 `LayoutHash=0x7029074579FDC52E` 发布 `JuryDemoFixedSixV2`；静态 Pad 与动态 EffectBounds 分开预留，六条 Entry/Transform/Descriptor/Production/Device/Bounds 任一漂移都原子失败，不回退旧 Profile/Seed。 | V2 合同与 Adapter 门通过后，M7/Integration 已进一步完成六栋静态注册和 M6 联合封口；当前只能提升为 `StaticJointAccepted / ChaosPending`。动态激活、离场清理和 J5 可见 PIE仍是独立后续门。详见 `M3-JURY-001/002/003`、`M7-BC-118` 与 `JuryDemoFixedSixWorldGenerationContract.md`。 |
+| Map Freeze 与 DecorPlacement 各自通过，但合并候选的生产清距仍报告装饰物穿入建筑物理包围盒 | 生成阶段只过滤 Terrain Pad 与动态 Effect envelope；装饰物完成最终贴地后没有复用生产验证使用的物理 bounds 清距判定，形成“生成接受、验收拒绝”的双重语义。 | `M3-JURY-008` 把最终贴地后的 physical/effect clearance 合并为同一共享判定，生成与验证共同消费；集成候选若在精确交付 SHA 上复现此类失败，必须退回唯一功能写入者修复并以新 SHA 重建候选，不在集成树临时放宽门禁。 | `ABTS.M3.DecorPlacement` 4/4、`ABTS.M3.Jury.MapFreezeV3` 2/2；固定 Seed/Candidate 的 `LayoutHash=0x3EB6326A2877EE1E`，六个 Placement Hash 精确匹配，`PhysicalDecorOverlaps=0`、`DynamicDecorOverlaps=0`。NullRHI 清距不替代实时 Chaos 或可见 PIE。 |
 
 ### 13.4 M7：语义结构、最终几何与物理权威
 
@@ -257,6 +258,8 @@
 | 集成/M3 需要建筑占地，却直接手填宽高或对含 suppressed 临时柱的数组求 Bounds | Stage 4.5 放置目录必须从冻结 Manifest 重新运行真实 Stage 4，只对 active member 的排序实体 AABB 求 Bounds/结构/描述 Hash；Pivot、地面、局部基和 Pad 一并冻结。该目录只证明静态放置，不证明 Stage 5、Chaos、破坏或完整建筑可验收。 | `ABTS.M73DAG.BeamC3V3.Demo.Stage45PlacementFreeze` 在两个 fresh 进程逐字段重放一致；Manifest `2324068295`、目录 Hash `13889440156022460967`。详见 `M7-BC-111`。 |
 | Fixed-Six V1 仍是旧 Catalog，却把 Stage 5/5.5 新 Hash 静默当成同一版本，或用效果走廊扩大静态 Pad | 静态实体 Bounds 与动态效果走廊是两种空间权威。M7 必须从真实 Stage 5/5.5 Producer 分别聚合 `PhysicalBounds` 与 `EffectBounds`；Catalog/Descriptor 变化必须发布加法式 V2，V1 保持可用。只要 Physical 仍在 LocalBounds 且 Pad 安全边不少于 36 cm，静态 Pad 不扩大；效果走廊作为独立动态安全包络交给 M3 避让。 | `ABTS.M73DAG.BeamC3V3.Demo.J4StaticSeal.BoundsAndPad` 两个独立 fresh 进程各 1/1，六栋 `StaticAccepted=1`、PadMargin 均为 `36/36 cm`、`DynamicEnvelopeRequired=1`；V2 合同双版本自动化拒绝旧 Catalog/Layout、Hash/Bounds/走廊漂移和 V1 混入 V2 状态。详见 `M7-BC-117` 与 `M7JuryDemoStaticSealAndContractV2Handoff.md`。 |
 | V2 快照已可解析，却逐栋边生成边登记到共享门，或只按 `Expected=Registered=6` 就发布 WorldReady | M7 必须先在纯数据层复验 Manifest/Catalog/Layout 和逐栋 Descriptor/Production/Device/Bounds，完整生成六个静态 Actor 后再登记。Integration 的 M6 门继续冻结 E1→E6 顺序、共同 `RegistrationResultHash=3948236352584381910`、`5742` 个静态模块与六个 Accepted Actor；任一漂移拒绝整个 required-building 合同。静态装置不加入全局 LaunchPhysics，Authority 保持 `StaticRegistration / Chaos=NotEvaluated`。 | `J4V2Consumer` 2/2、Integration StaticJointGate 1/1、M6 4/4；两个 canonical `L_ABTS_M10` fresh NullRHI 均为 `BuildingContractSealed Expected=6 Registered=6 SetupRejected=0`，随后 `WorldReady=1 / Accepted=6 / Rejected=0`。顺序和自洽错误 Hash 注入均 fail closed。详见 `M7-BC-118` 与 `JuryDemoFixedSixWorldGenerationContract.md`。 |
+| 旋转后的建筑用 world AABB 判断穿插，或材质/Crystal cap 在最终结构身份之后才覆盖 | V3 的 content `+Y` 到 site `+X` 只在 M7 发布边界转换一次；旋转实体以 OBB/SAT 做零正体积穿插判断。普通主体材质必须在结构闭包自重与 Brick 编译前确定；Crystal cap 是非承重、非弱点、非 Launch 成员的独立特殊砖，并以稳定 cap identity 保证破坏回收 exactly-once。 | `ABTS.M73DAG.BuildingFreezeV3` 两个 fresh case 验证顺序、Tier 解耦、材质、OBB/Pad/Effect、全局唯一 Crystal 与一次回收；Catalog `8960617043786800590`。详见 `M7-BC-124/126` 与 `M73BuildingFreezeV3Handoff.md`。 |
+| 建筑几何相同便继续沿用旧位置 Chaos 结论 | Chaos 证据身份还包含位置、支撑球、Gravity Authority、世界 Profile 和候选/结果 Hash。5+1 地图或重力身份变化时，旧结果必须降级为诊断；不得用旧 fixed-step、旧实时帧率或旧截图恢复新布局的物理批准。 | Map Freeze 完成后从新 `master` 在生产重力下重新运行 fixed-step、30/60/120 FPS 与可见 PIE，并记录全套身份。详见 `M7-BC-125`。 |
 | Chaos 固定时间步通过，实时 PIE 仍漂移或拒绝 | 静态几何正确不等于变步长接触稳定。保留严格空间门、quiet window、硬上限和事务回滚；`-benchmark` 只用于算法回归。 | fresh 实时运行记录 Drift/Settlement/Rotation、速度、Awake、TimedOut 和合同封口；失败后无模块或隐形 Foundation。 |
 
 ### 13.5 M11：唯一 Core、认证与表现消费

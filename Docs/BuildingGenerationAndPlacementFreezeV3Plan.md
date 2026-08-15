@@ -1,9 +1,12 @@
 # Building Generation and Placement Freeze V3 实现与冻结计划
 
-> 状态：集成前置 Crystal 基线已实现；提交精确 SHA 由本次交接消息给出。
+> 状态：Map Freeze V3 已发布；下一阶段为 M7 Chaos Freeze V3。
 >
 > 日期：2026-08-15
 > 目标：以最小跨工作树改动冻结建筑生成规则、5+1 地图位置和后续 Chaos 证据链。
+
+集成执行详稿、V3 字段预备语义、fail-closed 矩阵与门禁清单见
+[Building Generation and Placement Freeze V3 集成准备与门禁](BuildingGenerationAndPlacementFreezeV3IntegrationReadiness.md)。
 
 ## 1. 本轮最终规则
 
@@ -109,6 +112,8 @@ UE 5.8 只读反射审计结果：
 
 ### 阶段 3：集成工作树加入 Fixed-Six V3 接口
 
+状态：2026-08-15 已完成。该阶段先开放 `IsStructurallyUsableV3()` 交接门；2026-08-16 Map Freeze 发布后，生产版本已原子切换为 V3。
+
 1. 先合入 M7 `BuildingFreezeV3` 的精确 SHA。
 2. 以向后兼容方式增加 V3 DTO；V1/V2 继续可读，V3 未完整时不切换默认生产版本。
 3. V3 追加 `SurfaceKind`、支撑球心、半径、重力身份和 site-local bounds 身份。
@@ -116,6 +121,8 @@ UE 5.8 只读反射审计结果：
 5. Crystal recovery 继续沿本基线的 `Crystal -> CrystalCore` 映射，不额外发放遭遇完成奖励。
 
 ### 阶段 4：M3 执行 Map Freeze V3
+
+状态：2026-08-16 已完成，最终交付为 `d52b6f52beec69ce571bbfee0456e1a71418cfe1`。
 
 1. M3 合入包含 `BuildingFreezeV3` 的最新 master。
 2. 建立遭遇槽到建筑的固定映射 `[E2, E3, E4, E5, E1, E6]`。
@@ -128,6 +135,8 @@ UE 5.8 只读反射审计结果：
 优先用运行时确定性生成冻结位置；若没有必要，不修改共享 `.umap`。
 
 ### 阶段 5：集成工作树发布 Map Freeze V3
+
+状态：2026-08-16 已完成。批准 Seed/Candidate 为 `312503/4`，Layout Hash 为 `0x3EB6326A2877EE1E`，生产合同版本为 V3。
 
 1. 合入 M3 `MapFreezeV3` 精确 SHA。
 2. 填写最终 V3 LayoutHash，并只对批准的 Seed/Candidate 原子启用 V3。

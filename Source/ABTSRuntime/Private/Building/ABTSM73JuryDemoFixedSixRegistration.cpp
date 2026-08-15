@@ -3,6 +3,7 @@
 #include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 
 #include "Building/ABTSM73BeamDemoManifest.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Building/ABTSM73BeamStage45PlacementFreeze.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
@@ -88,12 +89,24 @@ bool FABTSM73JuryDemoFixedSixStaticEntry::IsUsable(
 	const double Tolerance) const
 {
 	const double SafeTolerance = FMath::Max(Tolerance, UE_DOUBLE_SMALL_NUMBER);
+	const bool bV2 = SourceContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
+	const bool bV3 = SourceContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion;
+	const bool bVersionStateValid = bV2
+		? DifficultyTier == EncounterIndex
+			&& SourcePlacementHash == 0
+			&& Caps.IsEmpty()
+		: bV3
+			&& SourcePlacementHash != 0
+			&& ((EncounterIndex == 4 && Caps.Num() == 1)
+				|| (EncounterIndex != 4 && Caps.IsEmpty()));
 	return !ManifestEntryId.IsNone()
 		&& DemoBuilding != EABTSM73BeamDemoBuilding::Custom
 		&& EncounterIndex >= 0
 		&& EncounterIndex
 			< FABTSJuryDemoFixedSixContract::ExpectedSiteCount
-		&& DifficultyTier == EncounterIndex
+		&& bVersionStateValid
 		&& DeterministicSeed > 0
 		&& WorldTransform.IsValid()
 		&& WorldTransform.GetScale3D().Equals(
@@ -115,12 +128,19 @@ bool FABTSM73JuryDemoFixedSixStaticEntry::IsUsable(
 bool FABTSM73JuryDemoFixedSixStaticPlan::IsUsable(
 	const double Tolerance) const
 {
-	if (ContractVersion
-			!= FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion
+	const bool bV2 = ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
+	const bool bV3 = ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion;
+	if ((!bV2 && !bV3)
 		|| WorldSeed != FABTSJuryDemoFixedSixContract::FrozenWorldSeed
 		|| PlacementCatalogHash
-			!= FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash
-		|| LayoutHash != FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash
+			!= (bV2
+				? FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash
+				: FABTSJuryDemoFixedSixContract::FrozenV3PlacementCatalogHash)
+		|| LayoutHash != (bV2
+			? FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash
+			: FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash)
 		|| RegistrationResultHash == 0
 		|| Entries.Num()
 			!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
@@ -132,8 +152,21 @@ bool FABTSM73JuryDemoFixedSixStaticPlan::IsUsable(
 		const FABTSM73JuryDemoFixedSixStaticEntry& Entry = Entries[Index];
 		if (!Entry.IsUsable(Tolerance)
 			|| Entry.EncounterIndex != Index
+			|| Entry.SourceContractVersion != ContractVersion
 			|| Entry.SourceLayoutHash != LayoutHash
 			|| Entry.RegistrationResultHash != RegistrationResultHash)
+		{
+			return false;
+		}
+	}
+	if (bV3)
+	{
+		int32 CapCount = 0;
+		for (const FABTSM73JuryDemoFixedSixStaticEntry& Entry : Entries)
+		{
+			CapCount += Entry.Caps.Num();
+		}
+		if (CapCount != 1)
 		{
 			return false;
 		}
@@ -158,10 +191,134 @@ bool FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
 
 	if (!Contract.IsUsable())
 	{
-		return Reject(TEXT("FixedSixV2OuterContractRejected"));
+		return Reject(TEXT("FixedSixOuterContractRejected"));
 	}
 	const FABTSJuryDemoFixedSixContract& Snapshot =
 		Contract.JuryDemoFixedSix;
+	if (Snapshot.ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		TArray<FABTSM73BuildingFreezeV3Descriptor> Descriptors;
+		uint64 CatalogHash = 0;
+		FString Error;
+		if (!FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
+			Descriptors, CatalogHash, Error)
+			|| CatalogHash != Snapshot.PlacementCatalogHash
+			|| Snapshot.PlacementSchemaVersion
+				!= FABTSM73BuildingFreezeV3::SchemaVersion
+			|| Snapshot.DemoManifestVersion
+				!= FABTSM73BeamDemoManifest::Version
+			|| Snapshot.DemoManifestHash
+				!= static_cast<uint64>(
+					FABTSM73BeamDemoManifest::CalculateHash())
+			|| Snapshot.LayoutHash
+				!= FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash
+			|| Snapshot.WorldSeed != Contract.Identity.WorldSeed
+			|| Snapshot.Sites.Num() != Descriptors.Num())
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV3SnapshotIdentityRejected:%s"), *Error));
+		}
+
+		FABTSM73JuryDemoFixedSixStaticPlan CandidatePlan;
+		CandidatePlan.ContractVersion = Snapshot.ContractVersion;
+		CandidatePlan.WorldSeed = Snapshot.WorldSeed;
+		CandidatePlan.PlacementCatalogHash = Snapshot.PlacementCatalogHash;
+		CandidatePlan.LayoutHash = Snapshot.LayoutHash;
+		CandidatePlan.Entries.Reserve(Snapshot.Sites.Num());
+		uint64 ResultHash = FNVOffsetBasis;
+		FixedSixRegistrationHashUInt64(ResultHash, Snapshot.LayoutHash);
+		FixedSixRegistrationHashUInt64(ResultHash, Snapshot.PlacementCatalogHash);
+
+		for (int32 Index = 0; Index < Snapshot.Sites.Num(); ++Index)
+		{
+			const FABTSJuryDemoFixedSixBuildingSite& Site = Snapshot.Sites[Index];
+			FABTSM73BuildingFreezeV3Descriptor& Descriptor = Descriptors[Index];
+			FABTSM73BeamDemoManifestEntry ManifestEntry;
+			if (!ResolveFixedSixManifestEntry(
+				Site.ManifestEntryId, ManifestEntry, Error))
+			{
+				return Reject(Error);
+			}
+			const double PadHalfExtentX = FMath::Max(
+				FMath::Abs(Descriptor.PadBounds.Min.X),
+				FMath::Abs(Descriptor.PadBounds.Max.X));
+			const double PadHalfExtentY = FMath::Max(
+				FMath::Abs(Descriptor.PadBounds.Min.Y),
+				FMath::Abs(Descriptor.PadBounds.Max.Y));
+			const FABTSJuryDemoFixedSixV3Envelope& Envelope = Site.V3Envelope;
+			if (Site.EncounterIndex != Index
+				|| Descriptor.EncounterSlot != Index
+				|| ManifestEntry.Id != Descriptor.ManifestEntryId
+				|| Site.DifficultyTier != Descriptor.DifficultyTier
+				|| Site.DeterministicSeed != Descriptor.BuildingSeed
+				|| Site.DescriptorHash != Descriptor.DescriptorHash
+				|| Envelope.StaticGeometryHash != Descriptor.StaticGeometryHash
+				|| Envelope.ProductionIdentityHash != Descriptor.ProductionHash
+				|| Envelope.DeviceAssemblyHash
+					!= Descriptor.SourceDeviceAssemblyHash
+				|| !Site.PadHalfExtentCM.Equals(
+					FVector2D(PadHalfExtentX, PadHalfExtentY),
+					RegistrationToleranceCM)
+				|| !FixedSixRegistrationBoxesEqual(
+					Site.LocalBounds, Descriptor.SiteLocalBounds)
+				|| !FixedSixRegistrationBoxesEqual(
+					Envelope.SiteLocalBounds, Descriptor.SiteLocalBounds)
+				|| !FixedSixRegistrationBoxesEqual(
+					Envelope.PadBounds, Descriptor.PadBounds)
+				|| !FixedSixRegistrationBoxesEqual(
+					Envelope.EffectBounds, Descriptor.EffectBounds))
+			{
+				return Reject(FString::Printf(
+					TEXT("FixedSixV3SiteIdentityRejected:%s:Encounter=%d"),
+					*Site.ManifestEntryId.ToString(), Index));
+			}
+
+			FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+				CandidatePlan.Entries.AddDefaulted_GetRef();
+			Entry.ManifestEntryId = Site.ManifestEntryId;
+			Entry.DemoBuilding = ManifestEntry.Id;
+			Entry.EncounterIndex = Site.EncounterIndex;
+			Entry.DifficultyTier = Site.DifficultyTier;
+			Entry.DeterministicSeed = Site.DeterministicSeed;
+			Entry.SourceContractVersion = Snapshot.ContractVersion;
+			Entry.WorldTransform = Site.WorldTransform;
+			Entry.PadHalfExtentCM = Site.PadHalfExtentCM;
+			Entry.LocalBounds = Descriptor.SiteLocalBounds;
+			Entry.EffectBounds = Descriptor.EffectBounds;
+			Entry.DescriptorHash = Descriptor.DescriptorHash;
+			Entry.StaticGeometryHash = Descriptor.StaticGeometryHash;
+			Entry.ProductionIdentityHash = Descriptor.ProductionHash;
+			Entry.DeviceAssemblyHash = Descriptor.SourceDeviceAssemblyHash;
+			Entry.SourceLayoutHash = Snapshot.LayoutHash;
+			Entry.SourcePlacementHash = Envelope.PlacementHash;
+			Entry.bDynamicEnvelopeRequired = FixedSixEffectExitsPad(
+				Descriptor.EffectBounds, Site.PadHalfExtentCM);
+			Entry.Bricks = MoveTemp(Descriptor.Bricks);
+			Entry.Devices = MoveTemp(Descriptor.Devices);
+			Entry.Caps = MoveTemp(Descriptor.Caps);
+
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.DescriptorHash);
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.StaticGeometryHash);
+			FixedSixRegistrationHashUInt64(
+				ResultHash, Entry.ProductionIdentityHash);
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.DeviceAssemblyHash);
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.SourcePlacementHash);
+		}
+
+		CandidatePlan.RegistrationResultHash = ResultHash;
+		for (FABTSM73JuryDemoFixedSixStaticEntry& Entry : CandidatePlan.Entries)
+		{
+			Entry.RegistrationResultHash = ResultHash;
+		}
+		if (!CandidatePlan.IsUsable())
+		{
+			return Reject(TEXT("FixedSixV3StaticPlanRejected"));
+		}
+		OutPlan = MoveTemp(CandidatePlan);
+		return true;
+	}
+
 	if (Snapshot.ContractVersion
 			!= FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion
 		|| Snapshot.PlacementSchemaVersion
@@ -285,6 +442,7 @@ bool FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
 		Entry.EncounterIndex = Site.EncounterIndex;
 		Entry.DifficultyTier = Site.DifficultyTier;
 		Entry.DeterministicSeed = Site.DeterministicSeed;
+		Entry.SourceContractVersion = Snapshot.ContractVersion;
 		Entry.WorldTransform = Site.WorldTransform;
 		Entry.PadHalfExtentCM = Site.PadHalfExtentCM;
 		Entry.LocalBounds = PhysicalBounds;
@@ -353,7 +511,8 @@ bool FABTSM73JuryDemoFixedSixRegistration::SpawnStaticActors(
 	for (FABTSM73JuryDemoFixedSixStaticEntry& Entry : Plan.Entries)
 	{
 		const FName EntryId = Entry.ManifestEntryId;
-		const int32 ExpectedModuleCount = Entry.Bricks.Num() + Entry.Devices.Num();
+		const int32 ExpectedModuleCount =
+			Entry.Bricks.Num() + Entry.Devices.Num() + Entry.Caps.Num();
 		AABTSM73StableBuildingActor* Actor =
 			World.SpawnActorDeferred<AABTSM73StableBuildingActor>(
 				BuildingClass,

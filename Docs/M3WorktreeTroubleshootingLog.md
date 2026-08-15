@@ -17,7 +17,7 @@
 3. 只写已经实际遇到的问题或已经证明必要的诊断边界。尚未实现的功能、纯设计风险和普通开发进度不冒充故障。
 4. 每条记录注明修复归属。若问题属于 M7、M11 或 Integration，M3 只记录如何识别、如何同步修复，不越权修改共享契约。
 5. 验收证据必须来自本次修改后的 fresh 进程、唯一日志或可见 PIE；旧日志、Editor 已加载的 CDO 和单纯“编译了某个 `.cpp`”都不是闭环证据。
-6. 新条目使用第 13 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
+6. 新条目使用第 15 节模板。若旧结论被后续诊断推翻，应保留演进过程，并明确哪组数值已经作废。
 
 ## 2. 快速索引
 
@@ -26,6 +26,7 @@
 | M3-WT-001 | Codex 管理工作树不在旧 `C:\workspace` 路径 | 已建立固定检查流程 | M3 |
 | M3-WT-002 | 普通/Adaptive Unity 编译通过，强制 Unity 才暴露同名私有符号 | 已从 `master` 同步修复并建立构建门 | M11/Integration；M3 回归 |
 | M3-WT-003 | 其他工作树 Editor 导致 Live Coding/DLL 锁，容易误杀进程 | 已建立进程归属检查 | 各工作树 |
+| M3-WT-004 | 非 Unity 编译暴露稳定 Adapter 缺少日志类别声明 | 已由 `master 3991723` 修复并完成 M3 回归 | Integration；M3 回归 |
 | M3-R3-001 | 冻结弹弓参数接入后，攻击走廊和建筑位置看似未变化 | 已修复数据布局；实体仍等 R-6 | M3 + Integration |
 | M3-R3-002 | 同一弹弓阶段的建筑距离全部退化为同一个舒适射程 | 已改为逐关递增射程窗口 | M3 |
 | M3-R5-001 | 逻辑 Target/Attack Corridor 已生成但画面无法辨认 | 已增加 F7 只读叠层 | M3 |
@@ -41,8 +42,14 @@
 | M3-X-001 | 建筑日志显示已生成，随后建筑消失，容易误判为 M3 漏生成 | 已建立 M7 Idle Reject 分诊规则 | M7；M3 只分诊 |
 | M3-T2B-001 | 风格语义若按名字、地图或位置识别，会随预览与生产身份漂移 | 已改为权威 Actor/组件/结果只读适配 | M3 |
 | M3-T2B-002 | M10 落点预览的 SceneCapture 没有跨模块稳定只读入口 | 已记录共享类型接线需求；M3 不越界绕过 | Integration/M10 |
-| M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化已通过；待可见 PIE | M3 |
+| M3-RIVER-001 | 主线阻断河沿不规则 Cell dual edge 高频蜿蜒，宽河 SDF 放大鼓包 | 代码/自动化/可见 PIE 已验收 | M3 |
 | M3-TEST-001 | 100 Seed 性能门单次越线，但固定 Oracle 未变化 | 已建立隔离重跑和证据保留规则 | M3 |
+| M3-JURY-004 | 合成 Fixture 绿灯未覆盖动态包络独占冲突和真实固定地图精确身份 | 已补专项失败注入、运行时身份门与 F7 诊断 | M3 |
+| M3-JURY-005 | V2 Placement 已冻结，但生产地形/装饰未消费固定六栋空间 | 已接入 Terrain-only Pad、装饰避让与生产净空门 | M3 |
+| M3-JURY-006 | 固定 180 cm 裙边让施工台像嵌在地坑里 | 已改为逐栋解析宽缓整地并增加连续性/Chaos 门 | M3 |
+| M3-JURY-007 | V3 非方形建筑可能被 X/Y 装反或重复旋转，预发布结构门又依赖最终 LayoutHash | 已冻结路侧攻击轴/占地长轴正交门并按最终 Hash 顺序发布 | M3 |
+| M3-JURY-008 | V3 候选合线后装饰累计门稳定出现 2 个 PhysicalBounds 重叠 | 已统一生成过滤与最终生产净空查询 | M3 |
+| M3-HISM-001 | 树石用统一 Pivot 偏移生成，首次进入 Chaos 因地形/实例穿插弹飞 | 已改为生成期碰撞包络贴地、跨类型避让和确定性门禁 | M3；M6 只保留集成诊断 |
 
 ## 3. 工作树、同步与构建
 
@@ -124,6 +131,32 @@ Adaptive Unity 的分桶会随源文件集合变化。两个内部辅助函数�
 - 记录占用进程 PID、命令行中的项目路径和处理结果；
 - 重试同一完整链接命令；
 - 最终交付说明是否仍有本任务启动的进程在运行。
+
+### M3-WT-004：ForceUnity 通过不能掩盖稳定 Adapter 的显式 include 缺失
+
+**现象**
+
+V2 Diagnostics checkpoint 的 `-ForceUnity -DisableAdaptiveUnity` Development Editor 完整链接成功，但普通 Development Editor 构建在单独编译集成工作树拥有的 `ABTSM3WorldContractAdapter.cpp` 时失败：
+
+```text
+ABTSM3WorldContractAdapter.cpp(217): error C2065: “LogABTSRuntime”: 未声明的标识符
+```
+
+M3 本次修改的三个 `.cpp` 均已成功编译；失败文件不在本 checkpoint 的修改列表中。
+
+**根因**
+
+该稳定 Adapter 直接使用 `LogABTSRuntime`，但当前 `master` 基线没有显式包含声明该日志类别的头文件。Unity 构建恰好从同一翻译单元的其他源文件获得声明，因此 ForceUnity 绿灯不能证明非 Unity 编译自足。
+
+**修复**
+
+修复归属 Integration：原始集成工作树为稳定 Adapter 增加 `ABTSRuntime.h` 显式 include，并随 `3991723` 进入 `master`。M3 未直接修改共享 Adapter；合入更新后的 `master` 后重跑普通 Development Editor 全链接完成闭环。
+
+**防回归验证**
+
+- 普通 Development Editor 和 `-ForceUnity -DisableAdaptiveUnity` 已分别完成最终链接；
+- 普通构建不得再依赖 Unity 翻译单元间的间接声明；
+- 合入 `3991723` 后的普通构建为 8/8 actions、`Result: Succeeded`；`ABTS.Contracts.WorldGeneration` post-merge fresh 回归为 `2/2 Success`。
 
 ## 4. R-3 射程、建筑范围与攻击走廊
 
@@ -576,7 +609,7 @@ Hydrology 只把“哪些 Cell 边跨越大圆切面”保存在 `FABTSM3CellEdg
 - `ABTS.Contracts.WorldGeneration` 与 `ABTS.M110.TaskGraphFinaleSeparation` 必须保持通过，证明稳定导出和 M9/Finale 分离未变；
 - 可见 `L_ABTS_M3` PIE 中，固定 Seed `312503` 的主线阻断河应呈连续低频大弧线，不再逐 Cell 左右摆动；桥面仍垂直跨河、两端落在不同河岸。NullRHI 不替代该视觉门。
 
-2026-08-14 fresh 证据：河流平滑 `1/1`、M8 语义桥位 `1/1`、Week One 确定性 `1/1`、世界生成契约 `2/2`、M9/Finale 分离 `1/1`；`L_ABTS_M3` NullRHI 为 `Segments=436 / FlowCenterlines=86 / BarrierDuals=350 / SmoothedBarrierSegments=350 / DroppedLocalRefs=0`。代码与数据门已通过，视觉状态仍明确保留为待用户 PIE。
+2026-08-14 fresh 证据：河流平滑 `1/1`、M8 语义桥位 `1/1`、Week One 确定性 `1/1`、世界生成契约 `2/2`、M9/Finale 分离 `1/1`；`L_ABTS_M3` NullRHI 为 `Segments=436 / FlowCenterlines=86 / BarrierDuals=350 / SmoothedBarrierSegments=350 / DroppedLocalRefs=0`。2026-08-15 用户已完成固定 Seed `312503` 的可见 PIE 验收，确认主线阻断河呈连续低频弧线、不再高频蜿蜒，桥面跨河关系保持正确；本条状态晋升为已验收。
 
 ## 12. 自动化与性能证据
 
@@ -668,14 +701,188 @@ V2 将“静态建筑落脚空间”和“激活后设备/效果运动空间”�
 
 **防回归验证**
 
-- Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接成功；
-- `M3Jury-V2-FixedSix-Final-20260815-160925-970-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`，逐栋校验全部 V2 Hash、36 cm Pad 边界、动态预留及 Hash tamper；
+- Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接；本次 Diagnostics 曾在非 Unity 重编稳定 Adapter 时暴露显式 include 缺失，已按 M3-WT-004 由 Integration 修复并从 `master` 回归；
+- 前一版证据 `M3Jury-V2-FixedSix-Final-20260815-160925-970-FreshAutomation.log`：当时 `ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`，逐栋校验全部 V2 Hash、36 cm Pad 边界、动态预留及 Hash tamper；当前门已由 M3-JURY-004 扩展为 `3/3`；
 - `M3Jury-V2-ContractValidation-20260815-160449-888-FreshAutomation.log`：稳定合同 `Validation` 精确 `1/1 Success`；
 - `M3Jury-V2-FinaleRegression-20260815-161028-955-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
 - 两次固定地图 fresh NullRHI 日志 `M3Jury-V2-FixedMap-20260815-160534-710-FreshRuntime.log` / `M3Jury-V2-FixedMap-Repeat-20260815-160617-483-FreshRuntime.log` 均得到 `Buildings=6`、`ReservedPadCells=52`、`ReservedDynamicEnvelopeCells=40`、`LayoutHash=7029074579FDC52E`，且无 `Placement rejected`；
 - V2 使 E3 Pad Center 从 V1 的 Cell `702` 移到 `703`；这是动态包络避让后的确定性新身份，不得继续使用旧 V1 Layout Hash。
 
-## 14. 新条目模板
+### M3-JURY-004：合成绿灯不能替代动态独占冲突与真实固定地图身份门
+
+**现象**
+
+Fixed-Six V2 初版自动化能证明六条 Fixture、Hash 和动态预留列表存在，但道路/水体注入落在 Pad Center，本质只覆盖 `PadReservationFailed`；真实地图的六个 Pad Center、逐栋 Placement Hash 和 `52/40` 预留数量只存在于人工检索的 fresh 日志，F7 也看不到 Physical/Effect Bounds。
+
+**根因**
+
+合成球的 Cell 间距远大于 Pad/EffectBounds，静态和动态样本通常回落到同一个 Target Cell。若不专门在动态角点方向增加独立 Cell，测试无法证明 `DynamicEnvelopeReservationFailed`；若运行时只检查非零 Layout Hash，也无法阻止真实 Candidate 的 Cell 解析或逐栋身份静默漂移。
+
+**修复**
+
+- 合成测试在 EffectBounds 角点方向加入不会被静态 Pad 采样命中的独立 Cell，分别注入最终道路与水体，精确要求 `DynamicEnvelopeReservationFailed`；
+- 将 E2 中心移近 E1，精确要求 `DynamicEnvelopeSeparationFailed`；
+- Placement Hash tamper 扩展到 PhysicalBounds、EffectBounds、ProductionIdentity 与 DeviceAssembly；
+- `M3R5Smoke` 对真实 Seed `312503` 精确校验六个 Pad Center、六条 Placement Hash、逐栋静态/动态预留数及 `LayoutHash=7029074579FDC52E`；
+- F7 叠层使用 Cyan 表示静态 Pad/Cell、Green 表示 PhysicalBounds、Magenta 表示 EffectBounds/动态 Cell，Red/White 分别标出 Target Anchor/最终 Pad Center。
+
+**防回归验证**
+
+- `M3Jury-V2-Diagnostics-20260815-163413-442-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`，第三项分别命中动态包络道路、水体与建筑间距三类拒绝；
+- `M3Jury-V2-Diagnostics-FixedMap-20260815-163458-671-FreshRuntime.log`：fresh `L_ABTS_M3` R5 smoke 输出 `[ABTS][M3Jury][FixedMapRegression] Passed=1 ... Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`；
+- 同一 runtime 日志在启用 `-ABTSM3R5LogicRegions` 时输出 `JuryFixedSixPlacements=6 JuryFixedSixLayoutHash=7029074579FDC52E`；叠层是 Editor-only 诊断，不进入生产 Hash 或稳定合同。
+- `M3Jury-V2-Diagnostics-Contract-20260815-163814-618-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration.Validation` 精确 `1/1 Success`；
+- `M3Jury-V2-Diagnostics-Finale-20260815-163850-384-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`，候选尝试中的预期 Reject warning 不改变最终 Success 判定。
+- 合入 `master 3991723` 后，普通 Adaptive Non-Unity Development Editor 完整链接为 8/8 actions、`Result: Succeeded`；
+- `M3Jury-V2-Diagnostics-PostMerge-Contracts-20260815-164309-601-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`，包含 V2 Adapter 精确导出和原子失败注入；
+- `M3Jury-V2-Diagnostics-PostMerge-FixedSix-20260815-164354-852-FreshAutomation.log`：新增 Diagnostics 门在 V2 Adapter 发布基线上仍精确 `3/3 Success`。
+
+### M3-JURY-005：冻结放置已就绪不等于生产地形和装饰已消费
+
+**现象**
+
+固定地图已经稳定输出六条 V2 Placement，M7 也能按精确 WorldTransform 静态注册建筑，但 `AABTSM3Planet` 的生产连续表面仍只为兼容 TaskGraph 的 `BuildingSpawnSites` 建 Pad；固定六栋在日志中是 `Buildings=6`，而生产日志中的兼容 `BuildingSpawnSites` 仍是 `Buildings=4`。同时 Fixed-Six 的道路/水体预留只约束逻辑 Cell，森林和岩石 HISM 仍可能在建筑 PhysicalBounds 或设备 EffectBounds 中生成。若直接进入逐栋 Chaos 激活，建筑可能悬空、切入起伏地表，或让运动设备碰到 M3 装饰。
+
+**根因**
+
+`FABTSM3JuryFixedSixLayoutResult` 原先是放置/诊断结果，没有接入 `FABTSM3TerrainVisualField::SetBuildingPads`；`BuildDecorInstances` 只读取兼容 Building Pad 和 R5 `bDecorationProtected`，没有消费固定六栋的独立 EffectBounds。把六栋追加到公开 `BuildingSpawnSites` 会改变稳定兼容导出，把 EffectBounds 合并进静态 Pad 又会破坏 V2 的静态/动态语义分离，因此都不能作为修复。
+
+**修复**
+
+- M3 在第一次构建兼容 `BuildingSpawnSites` 后创建临时 Terrain Pad 快照，仅向生产与精确 Preview 的 TerrainVisualField 追加六条 Terrain-only Pad；公开 `BuildingSpawnSites` 随后按原流程重建，数量、顺序和稳定合同不变；
+- 每条 Terrain-only Pad 精确消费冻结 Placement 的位置、三轴和 `RequiredPadHalfExtentCM`，以冻结位置半径定义切平面；固定 Jury 地图无条件应用这六个生产 Pad，不受旧 Blueprint 的可选兼容 Pad 开关影响；
+- 装饰实例在静态 Pad 之外独立检查旋转后的 EffectBounds 水平包络，命中则跳过；不扩大静态 PhysicalBounds，不修改 Placement/Layout Hash；
+- `ValidateJuryFixedSixProductionClearance` 对六个 Pad 各取 `3 × 3` 内部样本，检查生产表面对冻结切平面的最大残差，并扫描实际 Forest/Rock HISM 世界变换，要求 Physical/Effect 水平包络重叠数均为零；固定 Seed 下任一条件失败都会让 M3 Presentation fail closed；
+- `M3R5Smoke` 新增 `[ABTS][M3Jury][ProductionClearanceRegression]` 门，使 Integration/M7 在逐栋 Chaos 前可用同一个 fresh 地图进程验证 M3 生产消费，而不是只检查布局 DTO。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；
+- `M3Jury-ProductionClearance-20260815-174312-722-FreshRuntime.log` 与 `M3Jury-ProductionClearance-Repeat-20260815-174430-939-FreshRuntime.log` 两次 fresh `L_ABTS_M3` R5 smoke 均输出 `TerrainPads=6 PhysicalDecorOverlaps=0 DynamicDecorOverlaps=0 DecorRejected=8 MaxPadResidualCM=0.001`；
+- 原子注入与实例 Transform fail-closed 加固后的最终 fresh 证据 `M3Jury-ProductionClearance-Final-20260815-174848-153-FreshRuntime.log` 保持相同结果；
+- 两次 runtime 的固定身份均保持 `Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`，R5 RuntimeCertification 均为 `Terminal=1 Passed=1 Failed=0`；
+- `M3Jury-ProductionClearance-Final-FixedSix-20260815-174933-754-FreshAutomation.log`：最终二进制上的 `ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`；
+- `M3Jury-ProductionClearance-Final-WorldContracts-20260815-174933-794-FreshAutomation.log`：最终二进制上的 `ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`，证明公开兼容站点与 V2 Adapter 边界未漂移；
+- 本门只证明 NullRHI 下的生产地形数值与 HISM 空间清空，不替代 M7 实时 Chaos、SceneCapture 像素或最终 E1→E6 可见 PIE。
+
+## 14. 树石 HISM 生成期碰撞
+
+### M3-HISM-001：固定 Pivot 与事后 Chaos 松弛不能证明树石生成合法
+
+**现象**
+
+- `BuildDecorInstances` 曾统一把树、石 Pivot 放在 `SurfaceRadius - 8 cm`，但树和石的简单碰撞底部相对 Pivot 约定不同；石头会直接进入连续地形，倾斜树的高处碰撞包络也可能切入坡面；
+- Forest/Forest、Rock/Rock、Forest/Rock 之间没有生成期排斥。首次进入 Chaos 或发射范围批量提升动态代理时，重叠实例通过解穿冲量弹飞；
+- 旧 Startup Physics 预热依赖 `BodyInstance` 就绪时序，只做事后 HISM 重叠扫描，既不证明单实例没有穿地，也可能在相同实例规模下得到不同候选数；
+- 初版“只把所有碰撞样本向外抬到合法”虽然消除了穿透，但真实网格门显示 `MaxSeatCorrectionCM=345.03`，会把倾斜树整体抬离地面，属于物理绿灯、视觉假绿灯。
+
+**根因**
+
+生成器把渲染 Pivot 当作统一接地合同，并把运行时 Chaos 松弛当作生成合法化步骤。真实权威几何却是每个 `UStaticMesh::BodySetup->AggGeom` 的简单碰撞体；不同网格 Pivot、缩放、坡面旋转和跨类型邻居都会改变它的地表支撑与占用包络。物理场景扫描还受组件/BodyInstance 初始化时序影响，不能成为确定性生成来源。
+
+**修复**
+
+- M3 从每个树石网格的 `AggGeom` 构造碰撞描述；凸包采样全部顶点和下部 20% 三角面心，primitive fallback 使用简单碰撞包络，不再读取渲染包围盒或固定 `-8 cm`；
+- 每个候选沿行星径向迭代贴地，所有碰撞支撑样本必须保持 `DecorGroundClearanceCM=2`；额外抬升不得超过“该资产 Pivot 到碰撞底部的固有补偿 + 25 cm”，否则换下一个候选，避免用悬空换取无穿透；
+- 森林和岩石共享一个 3D Spatial Hash；窄阶段用简单碰撞包络 OBB 的 15 个分离轴检查，统一要求树—树、石—石、树—石至少保留 `4 cm` 分离；
+- `(WorldSeed, CellId, Slot, Attempt, VisualVariantSeed)` 独立派生随机种子，每槽最多尝试 10 次。尝试耗尽即跳过，不强行发布非法实例，也不让前一槽重试次数扰动后续结果；
+- 所有候选先进入 CPU 暂存并通过最终全局复核，再批量写入 HISM。任一最终地形/实例门失败时整批 fail closed；成功结果记录版本、Requested/Accepted、各类拒绝、最大贴地修正、最小净空/轴间距和量化 Transform Result Hash；
+- 本修复只修改 M3 自有 Terrain/HISM 生成链。集成所有的 M6 预热仍可暂作诊断兼容层，但不再是生成合法性的来源，也不得改写 M3 的确定性结果。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；
+- `M3-DecorPlacement-20260815-FinalHash.log`：`ABTS.M3.DecorPlacement` 精确 `4/4 Success`，覆盖碰撞支撑贴地、跨树石空间哈希、103 Seed 独立 Attempt 身份和真实生产网格两次完整重建；
+- 两次生产重建均得到 `AttemptsPerSlot=10 Requested=8990 AcceptedInstances=6646 RejectedGround=6479 RejectedPairOverlap=22853 MaxSeatCorrectionCM=71.57 MinimumGroundClearanceCM=1.99 MinimumPairAxisGapCM=4.10 ResultHash=-398834407951031673`；数量和 Hash 完全一致，Hash 已覆盖碰撞形状与关键放置参数，初版 `345.03 cm` 抬升与中间 Hash 已作废；`RebuildBudget` 分别为 `5192.327 ms`、`4999.561 ms`，均在 `8000 ms` 内；
+- `M3-WorldGenerationContract-20260815-FinalHash.log`：最终二进制上的 `ABTS.Contracts.WorldGeneration` 精确 `2/2 Success`；
+- `M3-TaskGraphFinaleSeparation-20260815-FinalHash.log`：最终二进制上的 `ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
+- NullRHI 证明确定性和 CPU 几何合同，不替代可见 PIE/实时 Chaos。集成验收必须在 `L_ABTS_M3` 或 canonical 联合地图首次进入 Chaos/首次发射时确认树石不弹飞、不瞬移、不从地表钻出，并核对 Startup HISM 重叠候选趋近于零；若 M6 扫描仍报候选，按共享热点流程继续分诊，M3 不越权修改 M6。
+
+### M3-JURY-006：固定 180 cm 裙边会把冻结施工面切成六个地坑
+
+**现象**
+
+- 六栋冻结建筑的内部施工面与 M7 Pivot 对齐，但施工面四周像直壁坑口，不是与周围地形连续的平地；
+- 旧 `MaxPadResidualCM=0.001` 只证明内部九点落在冻结切平面上，不能证明裙边坡度、法线连续性、外缘回源或 Chaos 三角面一致；
+- 六栋原地形相对冻结切平面的局部高差并不相同，固定 `EdgeBlendWidthCM=180` 无法同时处理这些高差。
+
+**根因**
+
+固定六栋的 `WorldLocationCM` 位于冻结基础半径，而生产地形继续叠加正的宏观高度。M3 曾把同一个 `180 cm` SmoothStep 过渡带套到所有 Terrain-only Pad；高差越大，过渡带就越接近竖直切坡。宽裙边还可能互相覆盖，若继续按数组顺序累计 Lerp，会让后一个裙边重复切削前一个承台。内部残差门与这种外部不连续完全正交，因此旧绿灯无法发现画面问题。
+
+**修复**
+
+- 冻结六栋的 `WorldLocationCM`、三轴、`RequiredPadHalfExtentCM`、内部切平面、Placement/Layout Hash 和公开 `BuildingSpawnSites` 均保持不变；不需要 M7 或 Integration 联合升版；
+- M3 在安装 Pad 前从未整地 CellTopo 场采样每栋施工区边界及局部探针带，以 `JuryFixedSixMaximumGradeSlopeDegrees=18`、SmoothStep 峰值导数 `1.5` 和 `15%` 安全余量迭代解析逐栋裙边宽度；固定 `180 cm` 不再参与固定六栋生产整地；
+- 普通 TaskGraph 施工台仍保留原有可挖可填的顺序合成。仅 `TaskId=INDEX_NONE` 的六条 Terrain-only Jury Pad 使用与数组顺序无关的向下包络，避免宽裙边重叠后重复切地；
+- `ValidateJuryFixedSixProductionClearance` 新增逐栋解析峰值坡度、联合场法线步进、未被另一裙边占据的外缘回源、中心抗边界别名探针和裙边 Chaos 组件射线残差门。没有 PhysicsScene 的纯合同夹具跳过 Chaos 射线，但仍执行全部数值整地门；真实地图存在 PhysicsScene 时必须执行 Chaos 门；
+- HISM 继续避让静态/动态包络。宽缓整地改变了部分候选的合法贴地结果，因此展示 Seed 的 `DecorRejected` 从旧证据 `8` 更新为 `72`；Physical/Effect 重叠仍必须为零。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与最终 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；因另一个工作树 Editor 正在运行且未加载当前工作树，构建按规范使用了 `-NoHotReloadFromIDE`，未结束其他进程；
+- `M3Jury-AdaptiveGrade-Final-20260815-201507-056-FreshRuntime.log`：fresh `L_ABTS_M3` R5 smoke 得到逐栋宽度 `1068.2 / 2867.1 / 2581.2 / 3841.6 / 3274.2 / 3632.5 cm`，最大原始高差 `723.6 cm`，解析峰值坡度 `15.78° < 18°`，最大法线步进 `16.42°`，外缘残差 `0.000 cm`；
+- `M3Jury-AdaptiveGrade-Final-Repeat-20260815-201937-258-FreshRuntime.log` 重复得到完全相同的宽度、整地/Chaos 指标、HISM 数量与 `QuerySurfaceHash=B35195C5629CB12A`；
+- 同一日志的真实 PhysicsScene 门执行 `ChaosSamples=173 MaxChaosResidualCM=1.43`，六栋中心分别为 `5/5、5/5、5/5、5/5、5/5、4/5` 命中，且 `TerrainPads=6 PhysicalDecorOverlaps=0 DynamicDecorOverlaps=0 MaxPadResidualCM=0.001`；R5 终态为 `Terminal=1 Passed=1 Failed=0`；
+- 固定身份保持 `Buildings=6 ReservedPadCells=52 ReservedDynamicEnvelopeCells=40 LayoutHash=7029074579FDC52E`，证明没有改动 M7 Pivot 或共享合同；
+- 最终 ForceUnity 二进制上的 `M3Jury-AdaptiveGrade-Final-FixedSix-20260815-201623-319-FreshAutomation.log` 为 `3/3 Success`，`M3Jury-AdaptiveGrade-Final-Contracts-20260815-201703-201-FreshAutomation.log` 为 `2/2 Success`，`M3Jury-AdaptiveGrade-Final-Finale-20260815-201739-961-FreshAutomation.log` 为 `1/1 Success`；
+- NullRHI 与组件级 Chaos 射线不替代可见地形观感。M7 逐栋 Chaos 激活后，联合可见 PIE 仍需检查六处均呈“内部平坦施工区 → 宽缓裙边 → 原地形”，没有坑壁、折线、碰撞台阶或建筑 Pivot 漂移。
+
+### M3-JURY-007：MapFreezeV3 必须用路侧攻击轴和非方形占地长轴证明没有重复旋转
+
+**现象**
+
+- V3 建筑由 M7 已经执行一次 `Building local +Y → Site +X` 内容到站点旋转；若 M3 再按旧认知补一个 90°，共享 V3 结构门仍可能只因 Z 轴径向正确而放行，但建筑会以窄面朝路；
+- 首版 MapFreezeV3 在六个 Site 和 PlacementHash 填完、`LayoutHash` 尚为零时提前调用 `IsStructurallyUsableV3()`，被正确拒绝为 `V3StructuralContract`。这不是空间候选失败，而是发布顺序违反“LayoutHash 非零”的预发布 DTO 约束。
+
+**根因**
+
+共享 V3 DTO 负责槽位、建筑身份、Bounds、支撑面、引力身份和径向 Z 轴等跨模块结构事实，但不推断玩家从道路/弹弓攻击走廊看到的横向轮廓，也不重复 M7 内容轴转换。M3 才拥有道路、Slingshot pocket、Attack Corridor 与地表切帧，因此“Site X 指向攻击来源、水平占地长轴与攻击走廊垂直”的证明必须由 M3 MapFreeze 门给出。另一方面，V3 结构门把非零 LayoutHash 视为完整快照的一部分，不能在 Hash 最终化之前调用。
+
+**修复**
+
+- 新增独立 `FABTSM3JuryMapFreezeV3Result`，固定 `Seed=312503 / Candidate=4 / [E2,E3,E4,E5,E1,E6]`；槽 0、1、2、3、5 在主星使用各自 Encounter 的 `AttackFaceDirection` 建立 Site X，槽 4 使用既有卫星背面预览帧建立 E1 Site X/Z 与真实卫星表面 Pivot；
+- 五个主星站点分别用 M7 V3 的精确 `PadBounds`、`EffectBounds` 做旋转后 `3 × 3` Cell 采样，并以完整水平 Pad/Effect 包络加 `180 cm` 余量做逐对分离；卫星 E1 明确不占用第六个主星 Pad/Effect reservation。Surface、Support Center/Radius、Gravity Authority/Hash、PlacementHash 与 LayoutHash 全部进入冻结身份；
+- 每栋从真实 `SiteLocalBounds` 推导水平长轴。当前六栋均为 Site Y 长于 Site X；门禁同时要求 `dot(SiteX, AttackCorridor) >= 0.9999` 与 `abs(dot(AttackCorridor, LongAxis)) <= 0.001`。因此 X/Y 装反、M3 再转 90°或只篡改发布 DTO 都 fail closed；
+- 先完成六条 PlacementHash，再计算并写入 LayoutHash，最后调用共享 `IsStructurallyUsableV3()`；生产 V2 导出、V2 Terrain Pad、Integration Adapter 与稳定共享契约均不修改，日志明确保持 `ProductionContract=V2 ActivationAllowed=0`。
+
+**防回归验证**
+
+- 普通 Adaptive Non-Unity Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接，`Result: Succeeded`；
+- 最终二进制上的 `Saved/Logs/M3MapFreezeV3_FinalRunA.log` 与 `Saved/Logs/M3MapFreezeV3_FinalRunB.log` 两次独立 fresh NullRHI 均为 `2/2 Success / EXIT CODE: 0`，并给出完全一致的 `LayoutHash=3EB6326A2877EE1E`；槽位顺序精确为 `E2,E3,E4,E5,E1,E6`，主星 PadCenter 分别为 `6882/7218/2782/4367/1328`，卫星 E1 为 `-1`，六栋 `CorridorLongAxisAbsDot` 均为 `0.000000000`；
+- `ABTS.M3.Jury.MapFreezeV3.01DeterminismAndRoadFacing` 验证五主星/一卫星、非方形 Y 长轴、Site X 路侧朝向、长轴正交、整结果重建和逐栋 PlacementHash 重复一致；
+- `ABTS.M3.Jury.MapFreezeV3.02AxisSurfaceSlotBoundsFailureClosure` 对第二次 90° 旋转、错误 Surface、错误 E1 槽位和 Bounds 漂移逐项要求拒绝；
+- `Saved/Logs/M3MapFreezeV3_LegacyV2Regression.log`：最终二进制上的现行 `ABTS.M3.Monthly.JuryFixedSix` 保持 `3/3 Success / EXIT CODE: 0`；
+- `Saved/Logs/M3MapFreezeV3_WorldContractRegression.log`：共享 `ABTS.Contracts.WorldGeneration` 保持 `3/3 Success / EXIT CODE: 0`，包含 V2 M3 Adapter、V3 DTO 与通用 Validation；
+- 以上 NullRHI 只证明 MapFreeze DTO、Cell reservation 和轴向合同，不替代 M7 逐栋实时 Chaos，也不替代最终联合可见 PIE。可见验收仍需从道路/弹弓侧确认看到的是建筑宽面，攻击走廊垂直穿向占地长轴，且月面只有 E1、主星只有 E2～E6。
+
+### M3-JURY-008：候选合线绿灯不能掩盖装饰生成与最终 PhysicalBounds 口径不一致
+
+**现象**
+
+- Integration 将 M3 MapFreezeV3 精确提交 `a6a31362d0ce8b346a145440a2792f44e47f4a01` 合入候选 `52672002a74b57294603cd35f2cdecd9d2e13455` 后，ForceUnity、MapFreezeV3、FixedSix V2、WorldGeneration 与 FinaleSeparation 均通过，但 `ABTS.M3.DecorPlacement.04ProductionMeshDeterministicRebuild` 稳定输出 `PhysicalDecorOverlaps=2 / DynamicDecorOverlaps=0`，使累计门只能达到 `3/4`；
+- 同一失败在原 M3 精确 SHA 上独立复现，因此不是 Git 文本冲突、候选合并顺序或 V3 六栋 Hash 被改写。它会阻断 V3 候选晋升，但不证明 MapFreezeV3 的位置、轴向或槽位身份本身错误。
+
+**根因**
+
+`BuildDecorInstances` 在候选落座前只用 Terrain Pad 和动态 `EffectBounds` 排除装饰；对于不要求动态包络的静态建筑，没有直接消费冻结 Placement 的 `PhysicalBounds`。最终 `ValidateJuryFixedSixProductionClearance` 却在 HISM 实例生成后同时检查全部 `PhysicalBounds` 与动态 `EffectBounds`。生成过滤和最终门使用了不同的空间语义与生命周期位置，因而两个确定性装饰落点能够通过生成、随后被累计门拒绝。
+
+**修复**
+
+- M3 新增单一 `GetJuryFixedSixDecorClearanceOverlaps` 查询，以冻结 Placement 的 Site X/Y 为基底，同时计算 `PhysicalBounds` 与按需启用的 `EffectBounds` 水平重叠；
+- 候选装饰先完成真实网格碰撞贴地，再以 `CandidateTransform.GetLocation()` 查询最终落座位置；命中任一包络就消耗当前 Attempt、继续尝试同一 Slot 的下一个确定性候选，不发布非法实例；
+- 最终生产净空门改为复用同一查询，并把 HISM 世界位置转换回 Planet Local 后检查，消除生成端和验证端的重复实现。修复只修改 M3 自有 Terrain/HISM 代码，不改变共享 V3 DTO、Integration Adapter、V2 生产导出、六栋 Placement/Layout Hash 或地图二进制资产。
+
+**防回归验证**
+
+- 同步 `master 1e4d1564eb885ab13149bc823c13b26c8f7fd67b` 后，UE 5.8 Development Editor `-ForceUnity -DisableAdaptiveUnity` 完整 `19/19`，`Result: Succeeded`；另一个集成工作树 Editor 仍在运行且未加载当前 M3 工程，按规范使用 `-NoHotReloadFromIDE`，未结束其他进程；
+- `Saved/Logs/M3V3MergeFix-DecorPlacement-20260815-FreshAutomation.log`：`ABTS.M3.DecorPlacement` 精确 `4/4 Success / EXIT CODE: 0`；两次生产重建均为 `AcceptedInstances=6714 / RejectedProtected=2970 / ResultHash=-3242174576560399102`，且 `PhysicalDecorOverlaps=0 / DynamicDecorOverlaps=0 / DecorRejected=556`。旧失败的 `DecorRejected=553 / Physical=2` 已作废；新增 3 次拒绝来自补齐 PhysicalBounds 过滤后的确定性候选重试；
+- `Saved/Logs/M3V3MergeFix-MapFreezeV3-20260815-FreshAutomation.log`：`ABTS.M3.Jury.MapFreezeV3` 精确 `2/2 Success`，仍为 `Mapping=E2,E3,E4,E5,E1,E6 / LayoutHash=3EB6326A2877EE1E / ProductionContract=V2 / ActivationAllowed=0`，六栋 PlacementHash 与 M3-JURY-007 完全一致；
+- `Saved/Logs/M3V3MergeFix-FixedSixV2-20260815-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `3/3 Success`；
+- `Saved/Logs/M3V3MergeFix-WorldGeneration-20260815-FreshAutomation.log`：`ABTS.Contracts.WorldGeneration` 精确 `3/3 Success`；
+- `Saved/Logs/M3V3MergeFix-FinaleSeparation-20260815-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；以上五组均来自修复后二进制、独立 fresh NullRHI 进程和唯一日志。最终候选仍需由 Integration 使用新精确 SHA 重建，并在 M7 逐栋实时 Chaos 完成后执行联合可见 PIE。
+
+## 15. 新条目模板
 
 ```markdown
 ### M3-<阶段>-<序号>：<短标题>

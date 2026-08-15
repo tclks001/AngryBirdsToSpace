@@ -4,6 +4,7 @@
 
 #include "ABTSRuntime.h"
 #include "EngineUtils.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "Inventory/ABTSInventoryComponent.h"
 #include "Slingshot/ABTSM6CordConnectionRules.h"
 #include "World/ABTSM51WorldActors.h"
@@ -182,5 +183,8 @@ bool AABTSM51WorldSystem::TryConnectCord(
 		*ABTSGetItemFallbackLabel(HeldCord),
 		static_cast<int32>(Tier),
 		Cord->GetFinaleSlotPairId());
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotAssembled,
+		FABTSGuideSubjects::FromSlingshotTier(Tier), Cord,
+		FMath::RoundToInt(Geometry.CandidateLengthCM), Cord->GetFinaleSlotPairId());
 	return true;
 }

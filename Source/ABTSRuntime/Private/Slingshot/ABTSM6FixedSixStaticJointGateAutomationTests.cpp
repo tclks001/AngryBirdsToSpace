@@ -30,9 +30,9 @@ public:
 		UWorld::InitializationValues Values;
 		Values.AllowAudioPlayback(false)
 			.RequiresHitProxies(false)
-			.CreatePhysicsScene(true)
+			.CreatePhysicsScene(false)
 			.ShouldSimulatePhysics(false)
-			.EnableTraceCollision(true)
+			.EnableTraceCollision(false)
 			.CreateNavigation(false)
 			.CreateAISystem(false)
 			.CreateFXSystem(false);
@@ -83,8 +83,9 @@ bool FABTSM6FixedSixStaticJointGateTest::RunTest(const FString& Parameters)
 	using namespace ABTSM6FixedSixStaticJointGateTests;
 	(void)Parameters;
 	static constexpr uint64 FrozenRegistrationResultHash =
-		3948236352584381910ull;
-	static constexpr int32 FrozenStaticModuleCount = 5742;
+		FABTSM73JuryDemoFixedSixRegistration::FrozenV3RegistrationResultHash;
+	static constexpr int32 FrozenStaticModuleCount =
+		FABTSM73JuryDemoFixedSixRegistration::FrozenV3StaticModuleCount;
 
 	FFixedSixStaticJointTestWorld WorldWrapper;
 	if (!WorldWrapper.Create())
@@ -112,7 +113,7 @@ bool FABTSM6FixedSixStaticJointGateTest::RunTest(const FString& Parameters)
 	}
 
 	FABTSBuildingGenerationContract Contract;
-	if (!TestTrue(TEXT("M3 exports the frozen V2 snapshot"),
+	if (!TestTrue(TEXT("M3 exports the frozen V3 snapshot"),
 		Planet->TryExportBuildingGenerationContract(Contract)))
 	{
 		return false;
@@ -256,7 +257,7 @@ bool FABTSM6FixedSixStaticJointGateTest::RunTest(const FString& Parameters)
 		TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Gate=Accepted"),
 		FABTSJuryDemoFixedSixContract::ExpectedSiteCount,
 		FrozenStaticModuleCount,
-		FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash,
+		FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash,
 		FrozenRegistrationResultHash));
 
 	RollbackFixedSixStaticActors(Actors, TEXT("StaticJointAutomationCleanup"));

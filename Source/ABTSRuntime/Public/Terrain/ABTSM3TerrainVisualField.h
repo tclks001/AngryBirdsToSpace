@@ -58,6 +58,12 @@ public:
 	/** Used by HISM placement to keep decoration out of the construction footprint. */
 	bool IsInsideBuildingPad(const FVector& UnitDirection) const;
 	int32 FindNearestCell(const FVector& UnitDirection, int32 StartCellHint = 0) const;
+	/** Base CellTopo surface before any construction pad is applied. Used by M3 grading and diagnostics only. */
+	float GetUnpaddedSurfaceRadius(const FVector& UnitDirection) const;
+	/** Surface after ordinary TaskGraph pads but before terrain-only fixed-six grading. */
+	float GetCompatibilityPaddedSurfaceRadius(const FVector& UnitDirection) const;
+	/** Signed distance from the unpadded surface sample to one rectangular pad footprint. */
+	float GetBuildingPadSignedDistanceCM(const FVector& UnitDirection, float RadiusCM, const FABTSM3BuildingSpawnSite& Pad) const;
 	float GetSurfaceRadius(const FVector& UnitDirection) const;
 	FVector GetSurfaceNormal(const FVector& UnitDirection) const;
 	/** Samples terrain, road and river line-SDF weights on CPU; never reads GPU material pixels. */
@@ -85,9 +91,8 @@ private:
 	void BuildRoadSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates);
 	float GetCellHeightCM(int32 CellId) const;
 	float GetInterpolatedHeightCM(const FVector& UnitDirection, int32 NearestCellId) const;
-	float GetUnpaddedSurfaceRadius(const FVector& UnitDirection) const;
+	float ApplyCompatibilityBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const;
 	float ApplyBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const;
-	float GetBuildingPadSignedDistanceCM(const FVector& UnitDirection, float RadiusCM, const FABTSM3BuildingSpawnSite& Pad) const;
 	float GetDistanceToSegmentCM(const FVector& UnitDirection, const FABTSM3BoundarySegment& Segment) const;
 	void FindTwoNearestTerrainFeatures(const FVector& UnitDirection, int32 CellId, const FABTSM3BoundarySegment*& OutBest, float& OutBestDistanceCM, const FABTSM3BoundarySegment*& OutSecond, float& OutSecondDistanceCM) const;
 	FLinearColor GetCellColor(int32 CellId) const;
