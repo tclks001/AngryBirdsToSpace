@@ -6,13 +6,13 @@
   "activationAllowed": true,
   "productionContractVersion": 3,
   "frozenIdentities": {
-    "buildingFreezeV3Commit": "b1e6fc65f18d338c54302c747d67a292ba59002a",
-    "placementCatalogHash": "2428875568906321995",
+    "buildingFreezeV3Commit": "9477c407250c911b527b6e5e8a4fd2ad0d6be13e",
+    "placementCatalogHash": "797455362285398432",
     "mapFreezeV3Commit": "b257f1b810f4fdd85c3d8740e0d623e4f73a177a",
-    "layoutHash": "0x44723367D3DAA3A4",
+    "layoutHash": "0x0044C9789AD84147",
     "satelliteCandidateHash": "0xAA569671E58184A1",
     "satelliteResultHash": "0x3358BC5A456E3CD4",
-    "registrationResultHash": "14507275966565957788",
+    "registrationResultHash": "8828767116104973231",
     "staticModuleCount": 5748,
     "chaosFreezeV3Commit": null,
     "chaosResultHash": null
@@ -25,7 +25,7 @@
     },
     {
       "filter": "ABTS.M73DAG.BuildingFreezeV3",
-      "expectedTests": 7,
+      "expectedTests": 8,
       "evidenceLayer": "NullRHIBuildingFreeze"
     },
     {

@@ -138,7 +138,7 @@ public:
 	static constexpr int32 FrozenSourceManifestVersion = 1;
 	static constexpr int64 FrozenSourceManifestHash = 2324068295;
 	/** M7 atomic handoff; Integration must publish this with the shared V3 seal. */
-	static constexpr bool bE6CompoundV1Published = false;
+	static constexpr bool bE6CompoundV1Published = true;
 	static constexpr uint64 PreE6CompoundV1CatalogHash =
 		2428875568906321995ull;
 	static constexpr uint64 E6CompoundV1CandidateCatalogHash =

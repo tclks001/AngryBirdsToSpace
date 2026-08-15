@@ -187,7 +187,7 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	static constexpr uint64 FrozenV2PlacementCatalogHash =
 		11501529584318250152ull;
 	static constexpr uint64 FrozenV3PlacementCatalogHash =
-		2428875568906321995ull;
+		797455362285398432ull;
 	static constexpr int32 FrozenWorldSeed = 312503;
 	static constexpr int32 FrozenCandidateId = 4;
 	/** Frozen V1 identity retained for backward-compatible readers and tests. */
@@ -195,14 +195,14 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	/** Exact M3 V2 result published after dynamic-envelope reservation. */
 	static constexpr uint64 FrozenV2LayoutHash = 0x7029074579FDC52Eull;
 	/** Exact M3 Map Freeze V3 result published by Integration. */
-	static constexpr uint64 FrozenV3LayoutHash = 0x44723367D3DAA3A4ull;
+	static constexpr uint64 FrozenV3LayoutHash = 0x0044C9789AD84147ull;
 	inline static constexpr uint64 FrozenV3PlacementHashes[ExpectedSiteCount] = {
 		0xA91A9FB5D79AE1CEull,
 		0x4C41612002CC0208ull,
 		0x8ACA9CA9BAFE95BDull,
 		0x66C8FD0EF4ACD5F2ull,
 		0x1C267DFD88E65BABull,
-		0x73BC7FE74D3835F7ull
+		0x618C6BB2B4FB749Bull
 	};
 
 	/** Zero means this additive snapshot is absent. */
