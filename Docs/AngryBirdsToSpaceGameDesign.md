@@ -18,6 +18,7 @@
 - 建筑：[M7 球面 TaskGraph 集成](M7TaskGraphSphericalBuildingIntegrationDesign.md) · [M7.1 平面测试台](M71PlanarPhysicsTestStageDesign.md) · [M7.3 DAG 总路线](M73RecursiveSupportDAGProceduralBuildingGenerationResearch.md) · [DAG2.3 联合支撑](M73DAG23CumulativeLoadAndJointSupportDesign.md) · [DAG3-C 可玩候选](M73DAG3CAttackReachabilityAndProductionRoutingDesign.md) · [DAG-4 动态认证](M73DAG4SettledContactAndAttackRolloutDesign.md) · [DAG-5 六栋路线](M73DAG5CandidateSearchSemanticEnvelopeAndProductionDesign.md) · [建筑语义 WFC 调研](M73WFCBuildingEnvelopeAndDAGFittingResearch.md)
 - 卫星、侦察与终局：[M9 卫星](M9SatelliteGravityDesign.md) · [M10 侦察小地图](M10ScoutMinimapDesign.md) · [M10.1-C 轨道全景图](M101COrbitalOverviewDiagramDesign.md) · [M11 算法预演](M11GravityAssistAlgorithmPrevisualization.md) · [M11 v2 优化](M11V2FinaleOptimizationDesign.md) · [M11-A/Core](M11AGravityAssistSolverDesign.md) · [M11-B v1 认证](M11BFinaleLayoutCertificationDesign.md) · [M11-B v2.1 候选搜索](M11B21CandidateSearchDesign.md) · [M11-C 交互与实飞](M11CFinaleInteractionAndPlaybackDesign.md)
 - 视觉、资产与工程参考：[三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [Low Poly/AI 资产工作流](LowPolyAssetProductionAndAIReportWorkflow.md) · [开发排错记录](DevelopmentTroubleshooting.md)
+- 数值冻结与拉通：[技术演示数值冻结设计](TechnicalDemoNumericFreezeDesign.md)
 
 ## 1. 概念与终局
 
