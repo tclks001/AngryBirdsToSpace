@@ -63,6 +63,41 @@ void BuildSyntheticJurySource(
 	}
 	OutSpatial.RetainedCandidates.Add(MoveTemp(Candidate));
 }
+
+int32 AddSyntheticDynamicEnvelopeCell(
+	TArray<FABTSM2Cell>& Cells,
+	FABTSM3MonthlySpatialResult& Spatial,
+	const int32 EncounterIndex)
+{
+	constexpr float PlanetRadiusCM = 50000.0f;
+	constexpr int32 Count =
+		FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount;
+	const TConstArrayView<FABTSM3JuryBuildingPlacementFixture> Fixtures =
+		FABTSM3JuryFixedSixLayoutBuilder::GetFrozenPlacementFixtures();
+	check(Cells.IsValidIndex(EncounterIndex));
+	check(Cells.IsValidIndex(Count + EncounterIndex));
+	check(Fixtures.IsValidIndex(EncounterIndex));
+	check(!Spatial.RetainedCandidates.IsEmpty());
+
+	const FVector Up = Cells[EncounterIndex].UnitCenter.GetSafeNormal();
+	FVector Forward = FVector::VectorPlaneProject(
+		Cells[Count + EncounterIndex].UnitCenter,
+		Up).GetSafeNormal();
+	const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
+	Forward = FVector::CrossProduct(Right, Up).GetSafeNormal();
+	const FBox& EffectBounds = Fixtures[EncounterIndex].EffectBounds;
+	const FVector DynamicCornerDirection = (
+		Up * PlanetRadiusCM
+			+ Forward * EffectBounds.Min.X
+			+ Right * EffectBounds.Min.Y).GetSafeNormal();
+
+	FABTSM2Cell& AddedCell = Cells.AddDefaulted_GetRef();
+	AddedCell.UnitCenter = DynamicCornerDirection;
+	FABTSM3MonthlySpatialCell& AddedState =
+		Spatial.RetainedCandidates[0].Cells.AddDefaulted_GetRef();
+	AddedState.CellId = Cells.Num() - 1;
+	return AddedState.CellId;
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -224,6 +259,26 @@ bool FABTSM3JuryFixedSixBuildTest::RunTest(const FString& Parameters)
 	TestNotEqual(TEXT("dynamic reserved cells affect placement hash"),
 		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
 		static_cast<uint64>(First.Placements[0].PlacementHash));
+	HashTampered = First.Placements[0];
+	HashTampered.PhysicalBounds.Max.X += 1.0;
+	TestNotEqual(TEXT("physical bounds affect placement hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
+		static_cast<uint64>(First.Placements[0].PlacementHash));
+	HashTampered = First.Placements[0];
+	HashTampered.EffectBounds.Min.Y -= 1.0;
+	TestNotEqual(TEXT("effect bounds affect placement hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
+		static_cast<uint64>(First.Placements[0].PlacementHash));
+	HashTampered = First.Placements[0];
+	HashTampered.ProductionIdentityHash ^= 1;
+	TestNotEqual(TEXT("production identity affects placement hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
+		static_cast<uint64>(First.Placements[0].PlacementHash));
+	HashTampered = First.Placements[0];
+	HashTampered.DeviceAssemblyHash ^= 1;
+	TestNotEqual(TEXT("device assembly affects placement hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
+		static_cast<uint64>(First.Placements[0].PlacementHash));
 
 	FABTSM3JuryFixedSixLayoutResult Second;
 	TestTrue(TEXT("repeat build succeeds"),
@@ -269,6 +324,88 @@ bool FABTSM3JuryFixedSixBuildTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("water overlap reject reason"),
 		Rejected.RejectReason,
 		EABTSM3JuryFixedSixRejectReason::PadReservationFailed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM3JuryFixedSixDynamicEnvelopeFailureTest,
+	"ABTS.M3.Monthly.JuryFixedSix.03DynamicEnvelopeFailClosed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM3JuryFixedSixDynamicEnvelopeFailureTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	constexpr float PlanetRadiusCM = 50000.0f;
+	TArray<FABTSM2Cell> Cells;
+	FABTSM3MonthlySpatialResult Source;
+	ABTSM3JuryFixedSixTests::BuildSyntheticJurySource(Cells, Source);
+
+	TArray<FABTSM2Cell> RoadCells = Cells;
+	FABTSM3MonthlySpatialResult RoadBlocked = Source;
+	const int32 RoadCellId =
+		ABTSM3JuryFixedSixTests::AddSyntheticDynamicEnvelopeCell(
+			RoadCells,
+			RoadBlocked,
+			0);
+	RoadBlocked.RetainedCandidates[0]
+		.RecomputedRoute.OrderedRoadCellIds.Add(RoadCellId);
+	FABTSM3JuryFixedSixLayoutResult Rejected;
+	FString Failure;
+	TestFalse(TEXT("dynamic envelope over final road fails closed"),
+		FABTSM3JuryFixedSixLayoutBuilder::Build(
+			RoadCells,
+			PlanetRadiusCM,
+			RoadBlocked,
+			Rejected,
+			Failure));
+	TestEqual(TEXT("dynamic road reject reason"),
+		Rejected.RejectReason,
+		EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeReservationFailed);
+
+	TArray<FABTSM2Cell> WaterCells = Cells;
+	FABTSM3MonthlySpatialResult WaterBlocked = Source;
+	const int32 WaterCellId =
+		ABTSM3JuryFixedSixTests::AddSyntheticDynamicEnvelopeCell(
+			WaterCells,
+			WaterBlocked,
+			0);
+	WaterBlocked.RetainedCandidates[0].Cells[WaterCellId].bWater = true;
+	TestFalse(TEXT("dynamic envelope over water fails closed"),
+		FABTSM3JuryFixedSixLayoutBuilder::Build(
+			WaterCells,
+			PlanetRadiusCM,
+			WaterBlocked,
+			Rejected,
+			Failure));
+	TestEqual(TEXT("dynamic water reject reason"),
+		Rejected.RejectReason,
+		EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeReservationFailed);
+
+	TArray<FABTSM2Cell> SeparationCells = Cells;
+	FABTSM3MonthlySpatialResult SeparationSource = Source;
+	const double NearAngle = FMath::DegreesToRadians(1.0);
+	const double NearSlingshotAngle = FMath::DegreesToRadians(9.0);
+	SeparationCells[1].UnitCenter = FVector(
+		FMath::Cos(NearAngle),
+		FMath::Sin(NearAngle),
+		0.0);
+	SeparationCells[
+		FABTSM3JuryFixedSixLayoutBuilder::ExpectedEncounterCount + 1]
+		.UnitCenter = FVector(
+			FMath::Cos(NearSlingshotAngle),
+			FMath::Sin(NearSlingshotAngle),
+			0.0);
+	TestFalse(TEXT("overlapping dynamic envelopes fail closed"),
+		FABTSM3JuryFixedSixLayoutBuilder::Build(
+			SeparationCells,
+			PlanetRadiusCM,
+			SeparationSource,
+			Rejected,
+			Failure));
+	TestEqual(TEXT("dynamic separation reject reason"),
+		Rejected.RejectReason,
+		EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeSeparationFailed);
 	return true;
 }
 
