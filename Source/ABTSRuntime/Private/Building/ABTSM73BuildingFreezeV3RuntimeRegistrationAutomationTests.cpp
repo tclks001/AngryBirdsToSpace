@@ -11,6 +11,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Game/ABTSM7GameMode.h"
 #include "GameFramework/GameModeBase.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
@@ -343,6 +344,123 @@ bool FABTSM73BuildingFreezeV3AtomicRuntimeRegistrationTest::RunTest(
 		}
 	}
 	MaterialSystem->Destroy();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest,
+	"ABTS.M73DAG.BuildingFreezeV3.E1CrystalBindingLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest::RunTest(
+	const FString& Parameters)
+{
+	using FAction = EABTSM7SatellitePracticeE1CrystalBindingAction;
+	using FState = EABTSM7SatellitePracticeE1CrystalBindingState;
+
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycle DelayedRuntime;
+	TestTrue(TEXT("Lifecycle starts once"), DelayedRuntime.Start(0.0));
+	TestFalse(TEXT("A duplicate schedule cannot reset the timeout"),
+		DelayedRuntime.Start(0.01));
+	FABTSM7SatellitePracticeE1CrystalBindingObservation Observation;
+	Observation.AcceptedStaticBuildingCount =
+		FABTSM7SatellitePracticeE1CrystalBindingLifecycle::
+			ExpectedStaticBuildingCount;
+	Observation.CrystalTargetCount = 1;
+	FString Reason;
+	TestTrue(TEXT("A missing runtime remains a non-terminal wait"),
+		DelayedRuntime.Advance(0.1, Observation, Reason) == FAction::Wait);
+	TestEqual(TEXT("Missing runtime wait is diagnostic"), Reason,
+		FString(TEXT("SatelliteRuntimePending")));
+	TestTrue(TEXT("Waiting remains active"),
+		DelayedRuntime.GetState() == FState::Waiting);
+
+	Observation.SatelliteRuntimeCount = 1;
+	TestTrue(TEXT("An existing but unready runtime keeps waiting"),
+		DelayedRuntime.Advance(0.2, Observation, Reason) == FAction::Wait);
+	TestEqual(TEXT("Unready runtime wait is diagnostic"), Reason,
+		FString(TEXT("SatelliteRuntimeNotReady")));
+	Observation.bSatelliteRuntimeReady = true;
+	TestTrue(TEXT("A late ready runtime produces exactly one bind request"),
+		DelayedRuntime.Advance(0.3, Observation, Reason) == FAction::Bind);
+	TestTrue(TEXT("Bind request enters the binding state"),
+		DelayedRuntime.GetState() == FState::Binding);
+	DelayedRuntime.MarkBound();
+	TestTrue(TEXT("Successful binding becomes terminal"),
+		DelayedRuntime.GetState() == FState::Bound);
+	const int32 AttemptsAfterBind = DelayedRuntime.GetAttemptCount();
+	TestTrue(TEXT("A repeated callback after success is idempotent"),
+		DelayedRuntime.Advance(0.4, Observation, Reason) == FAction::None);
+	TestEqual(TEXT("Idempotent callback does not add an attempt"),
+		DelayedRuntime.GetAttemptCount(), AttemptsAfterBind);
+
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycle TimeoutLifecycle;
+	TestTrue(TEXT("Timeout lifecycle starts"),
+		TimeoutLifecycle.Start(5.0));
+	Observation.SatelliteRuntimeCount = 0;
+	Observation.bSatelliteRuntimeReady = false;
+	TestTrue(TEXT("Missing runtime fails closed only after timeout"),
+		TimeoutLifecycle.Advance(
+			5.0 + FABTSM7SatellitePracticeE1CrystalBindingLifecycle::
+				TimeoutSeconds + 0.01,
+			Observation, Reason) == FAction::Reject);
+	TestEqual(TEXT("Timeout publishes a precise reason"), Reason,
+		FString(TEXT("SatelliteRuntimeTimeout")));
+
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycle MultipleRuntime;
+	TestTrue(TEXT("Multiple-runtime lifecycle starts"),
+		MultipleRuntime.Start(0.0));
+	Observation.SatelliteRuntimeCount = 2;
+	Observation.bSatelliteRuntimeReady = true;
+	TestTrue(TEXT("Multiple runtimes fail closed immediately"),
+		MultipleRuntime.Advance(0.1, Observation, Reason)
+			== FAction::Reject);
+	TestEqual(TEXT("Multiple-runtime reason is diagnostic"), Reason,
+		FString(TEXT("MultipleSatelliteRuntimes")));
+
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycle MultipleCrystal;
+	TestTrue(TEXT("Multiple-crystal lifecycle starts"),
+		MultipleCrystal.Start(0.0));
+	Observation.SatelliteRuntimeCount = 1;
+	Observation.CrystalTargetCount = 2;
+	TestTrue(TEXT("Multiple Crystal targets fail closed"),
+		MultipleCrystal.Advance(0.1, Observation, Reason)
+			== FAction::Reject);
+	TestEqual(TEXT("Multiple-Crystal reason is diagnostic"), Reason,
+		FString(TEXT("MultipleCrystalTargets")));
+
+	using namespace ABTSM73BuildingFreezeV3RuntimeRegistrationTests;
+	FRuntimeRegistrationTestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	AABTSM7GameMode* GameMode = World != nullptr
+		? World->SpawnActor<AABTSM7GameMode>()
+		: nullptr;
+	if (!TestNotNull(TEXT("Lifecycle timer test GameMode"), GameMode))
+	{
+		return false;
+	}
+	GameMode->ScheduleSatellitePracticeE1CrystalTargetBinding();
+	TestTrue(TEXT("Production retry timer is active while waiting"),
+		World->GetTimerManager().TimerExists(
+			GameMode->SatellitePracticeE1CrystalBindingTimerHandle));
+	GameMode->EndPlay(EEndPlayReason::Quit);
+	TestFalse(TEXT("EndPlay clears the retry timer"),
+		World->GetTimerManager().TimerExists(
+			GameMode->SatellitePracticeE1CrystalBindingTimerHandle));
+	TestTrue(TEXT("Teardown cancels the lifecycle"),
+		GameMode->SatellitePracticeE1CrystalBindingLifecycle.GetState()
+			== FState::Cancelled);
+	AddInfo(FString::Printf(
+		TEXT("E1CrystalBindingLifecycle Attempts=%d Timeout=%.1fs")
+		TEXT(" LateRuntime=Bound Duplicate=Idempotent")
+		TEXT(" MultipleRuntime=Rejected Teardown=Cancelled"),
+		AttemptsAfterBind,
+		FABTSM7SatellitePracticeE1CrystalBindingLifecycle::TimeoutSeconds));
 	return true;
 }
 

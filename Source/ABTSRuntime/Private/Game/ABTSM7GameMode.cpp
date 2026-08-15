@@ -45,6 +45,135 @@ namespace
 	}
 }
 
+bool FABTSM7SatellitePracticeE1CrystalBindingLifecycle::Start(
+	const double NowSeconds)
+{
+	if (!FMath::IsFinite(NowSeconds)
+		|| State != EABTSM7SatellitePracticeE1CrystalBindingState::Inactive)
+	{
+		return false;
+	}
+	State = EABTSM7SatellitePracticeE1CrystalBindingState::Waiting;
+	StartSeconds = NowSeconds;
+	AttemptCount = 0;
+	TerminalReason.Reset();
+	return true;
+}
+
+EABTSM7SatellitePracticeE1CrystalBindingAction
+FABTSM7SatellitePracticeE1CrystalBindingLifecycle::Advance(
+	const double NowSeconds,
+	const FABTSM7SatellitePracticeE1CrystalBindingObservation& Observation,
+	FString& OutReason)
+{
+	OutReason.Reset();
+	if (State != EABTSM7SatellitePracticeE1CrystalBindingState::Waiting)
+	{
+		return EABTSM7SatellitePracticeE1CrystalBindingAction::None;
+	}
+	++AttemptCount;
+	const auto Reject = [this, &OutReason](const TCHAR* Reason)
+	{
+		OutReason = Reason;
+		TerminalReason = OutReason;
+		State = EABTSM7SatellitePracticeE1CrystalBindingState::Rejected;
+		return EABTSM7SatellitePracticeE1CrystalBindingAction::Reject;
+	};
+	if (!FMath::IsFinite(NowSeconds)
+		|| Observation.AcceptedStaticBuildingCount < 0
+		|| Observation.CrystalTargetCount < 0
+		|| Observation.SatelliteRuntimeCount < 0)
+	{
+		return Reject(TEXT("InvalidObservation"));
+	}
+	if (Observation.AcceptedStaticBuildingCount
+		> ExpectedStaticBuildingCount)
+	{
+		return Reject(TEXT("MultipleStaticBuildingSets"));
+	}
+	if (Observation.CrystalTargetCount > 1)
+	{
+		return Reject(TEXT("MultipleCrystalTargets"));
+	}
+	if (Observation.SatelliteRuntimeCount > 1)
+	{
+		return Reject(TEXT("MultipleSatelliteRuntimes"));
+	}
+	if (Observation.AcceptedStaticBuildingCount
+		== ExpectedStaticBuildingCount
+		&& Observation.CrystalTargetCount == 1
+		&& Observation.SatelliteRuntimeCount == 1
+		&& Observation.bSatelliteRuntimeReady)
+	{
+		OutReason = TEXT("ReadyToBind");
+		State = EABTSM7SatellitePracticeE1CrystalBindingState::Binding;
+		return EABTSM7SatellitePracticeE1CrystalBindingAction::Bind;
+	}
+
+	const bool bTimedOut = NowSeconds - StartSeconds >= TimeoutSeconds;
+	if (Observation.AcceptedStaticBuildingCount
+		< ExpectedStaticBuildingCount)
+	{
+		OutReason = bTimedOut
+			? TEXT("StaticBuildingsTimeout")
+			: TEXT("StaticBuildingsPending");
+	}
+	else if (Observation.CrystalTargetCount == 0)
+	{
+		OutReason = bTimedOut
+			? TEXT("CrystalTargetTimeout")
+			: TEXT("CrystalTargetPending");
+	}
+	else if (Observation.SatelliteRuntimeCount == 0)
+	{
+		OutReason = bTimedOut
+			? TEXT("SatelliteRuntimeTimeout")
+			: TEXT("SatelliteRuntimePending");
+	}
+	else
+	{
+		OutReason = bTimedOut
+			? TEXT("SatelliteRuntimeNotReadyTimeout")
+			: TEXT("SatelliteRuntimeNotReady");
+	}
+	if (bTimedOut)
+	{
+		TerminalReason = OutReason;
+		State = EABTSM7SatellitePracticeE1CrystalBindingState::Rejected;
+		return EABTSM7SatellitePracticeE1CrystalBindingAction::Reject;
+	}
+	return EABTSM7SatellitePracticeE1CrystalBindingAction::Wait;
+}
+
+void FABTSM7SatellitePracticeE1CrystalBindingLifecycle::MarkBound()
+{
+	if (State == EABTSM7SatellitePracticeE1CrystalBindingState::Binding)
+	{
+		State = EABTSM7SatellitePracticeE1CrystalBindingState::Bound;
+		TerminalReason = TEXT("Bound");
+	}
+}
+
+void FABTSM7SatellitePracticeE1CrystalBindingLifecycle::
+MarkBindingRejected(const FString& Reason)
+{
+	if (State == EABTSM7SatellitePracticeE1CrystalBindingState::Inactive
+		|| State == EABTSM7SatellitePracticeE1CrystalBindingState::Waiting
+		|| State == EABTSM7SatellitePracticeE1CrystalBindingState::Binding)
+	{
+		State = EABTSM7SatellitePracticeE1CrystalBindingState::Rejected;
+		TerminalReason = Reason.IsEmpty()
+			? TEXT("BindingRejected")
+			: Reason;
+	}
+}
+
+void FABTSM7SatellitePracticeE1CrystalBindingLifecycle::Cancel()
+{
+	State = EABTSM7SatellitePracticeE1CrystalBindingState::Cancelled;
+	TerminalReason = TEXT("Cancelled");
+}
+
 bool FABTSM7TaskGraphDAG23ProfileResolver::IsSupportedBuildingTask(const EABTSM3TaskType TaskType)
 {
 	return TaskType == EABTSM3TaskType::Workshop
@@ -201,6 +330,14 @@ void AABTSM7GameMode::Tick(const float DeltaSeconds)
 	{
 		DrawTaskGraphPositionDebug();
 	}
+}
+
+void AABTSM7GameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	ClearSatellitePracticeE1CrystalTargetBindingTimer();
+	SatellitePracticeE1CrystalBindingLifecycle.Cancel();
+	LastSatellitePracticeE1CrystalBindingWaitReason.Reset();
+	Super::EndPlay(EndPlayReason);
 }
 
 const FABTSM7TaskGraphBuildingProfile* AABTSM7GameMode::FindTaskGraphBuildingProfile(const EABTSM3TaskType TaskType) const
@@ -464,50 +601,160 @@ int32 AABTSM7GameMode::SpawnJuryDemoFixedSixStaticBuildings(
 	return RegisteredCount;
 }
 
-void AABTSM7GameMode::BindSatellitePracticeE1CrystalTarget()
+void AABTSM7GameMode::ScheduleSatellitePracticeE1CrystalTargetBinding()
 {
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		SatellitePracticeE1CrystalBindingLifecycle.MarkBindingRejected(
+			TEXT("BindingWorldMissing"));
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=BindingWorldMissing"));
+		return;
+	}
+	if (!SatellitePracticeE1CrystalBindingLifecycle.Start(
+		World->GetTimeSeconds()))
+	{
+		return;
+	}
+	SatellitePracticeE1CrystalBindingWorld = World;
+	LastSatellitePracticeE1CrystalBindingWaitReason.Reset();
+	World->GetTimerManager().SetTimer(
+		SatellitePracticeE1CrystalBindingTimerHandle,
+		this,
+		&AABTSM7GameMode::TryBindSatellitePracticeE1CrystalTarget,
+		SatellitePracticeE1CrystalBindingRetrySeconds,
+		true,
+		SatellitePracticeE1CrystalBindingRetrySeconds);
+}
+
+void AABTSM7GameMode::ClearSatellitePracticeE1CrystalTargetBindingTimer()
+{
+	if (UWorld* BindingWorld = SatellitePracticeE1CrystalBindingWorld.Get())
+	{
+		BindingWorld->GetTimerManager().ClearTimer(
+			SatellitePracticeE1CrystalBindingTimerHandle);
+	}
+	SatellitePracticeE1CrystalBindingTimerHandle.Invalidate();
+	SatellitePracticeE1CrystalBindingWorld.Reset();
+}
+
+void AABTSM7GameMode::TryBindSatellitePracticeE1CrystalTarget()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr
+		|| SatellitePracticeE1CrystalBindingWorld.Get() != World)
+	{
+		ClearSatellitePracticeE1CrystalTargetBindingTimer();
+		SatellitePracticeE1CrystalBindingLifecycle.Cancel();
+		return;
+	}
+
 	AActor* CrystalTarget = nullptr;
 	FVector CrystalHalfExtentCM = FVector::ZeroVector;
+	FABTSM7SatellitePracticeE1CrystalBindingObservation Observation;
 	for (const FABTSM7TaskGraphBuildingDebugEntry& Entry :
 		TaskGraphBuildingDebugEntries)
 	{
 		AABTSM73StableBuildingActor* Building = Entry.Building.Get();
-		if (Building != nullptr
-			&& Building->CopyJuryDemoE1CrystalTarget(
-				CrystalTarget,
-				CrystalHalfExtentCM))
+		if (Building == nullptr
+			|| !Building->IsJuryDemoFixedSixStaticRegistrationAccepted())
 		{
-			break;
+			continue;
 		}
-	}
-	if (CrystalTarget == nullptr)
-	{
-		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=CrystalTargetMissing"));
-		return;
+		++Observation.AcceptedStaticBuildingCount;
+		AActor* CandidateTarget = nullptr;
+		FVector CandidateHalfExtentCM = FVector::ZeroVector;
+		if (Building->CopyJuryDemoE1CrystalTarget(
+			CandidateTarget,
+			CandidateHalfExtentCM))
+		{
+			++Observation.CrystalTargetCount;
+			if (CrystalTarget == nullptr)
+			{
+				CrystalTarget = CandidateTarget;
+				CrystalHalfExtentCM = CandidateHalfExtentCM;
+			}
+		}
 	}
 
 	AABTSM3MonthlySatellitePracticeRuntime* SatelliteRuntime = nullptr;
-	for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(GetWorld());
+	for (TActorIterator<AABTSM3MonthlySatellitePracticeRuntime> It(World);
 		It; ++It)
 	{
-		if (SatelliteRuntime != nullptr)
+		if (!IsValid(*It) || It->IsActorBeingDestroyed())
 		{
-			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=MultipleSatelliteRuntimes"));
-			return;
+			continue;
 		}
-		SatelliteRuntime = *It;
+		++Observation.SatelliteRuntimeCount;
+		if (SatelliteRuntime == nullptr)
+		{
+			SatelliteRuntime = *It;
+		}
 	}
-	if (SatelliteRuntime == nullptr)
+	Observation.bSatelliteRuntimeReady = SatelliteRuntime != nullptr
+		&& SatelliteRuntime->IsRuntimeReady();
+
+	FString Reason;
+	const EABTSM7SatellitePracticeE1CrystalBindingAction Action =
+		SatellitePracticeE1CrystalBindingLifecycle.Advance(
+			World->GetTimeSeconds(), Observation, Reason);
+	if (Action == EABTSM7SatellitePracticeE1CrystalBindingAction::Wait)
 	{
-		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=SatelliteRuntimeMissing"));
+		if (Reason != LastSatellitePracticeE1CrystalBindingWaitReason)
+		{
+			LastSatellitePracticeE1CrystalBindingWaitReason = Reason;
+			UE_LOG(LogABTSRuntime, Verbose,
+				TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Waiting Reason=%s Attempt=%d Buildings=%d CrystalTargets=%d SatelliteRuntimes=%d RuntimeReady=%d"),
+				*Reason,
+				SatellitePracticeE1CrystalBindingLifecycle.GetAttemptCount(),
+				Observation.AcceptedStaticBuildingCount,
+				Observation.CrystalTargetCount,
+				Observation.SatelliteRuntimeCount,
+				Observation.bSatelliteRuntimeReady ? 1 : 0);
+		}
 		return;
 	}
-	SatelliteRuntime->BindProductionE1CrystalTarget(
-		*CrystalTarget,
-		CrystalHalfExtentCM);
+	if (Action == EABTSM7SatellitePracticeE1CrystalBindingAction::Reject)
+	{
+		ClearSatellitePracticeE1CrystalTargetBindingTimer();
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=%s Attempt=%d Buildings=%d CrystalTargets=%d SatelliteRuntimes=%d RuntimeReady=%d"),
+			*Reason,
+			SatellitePracticeE1CrystalBindingLifecycle.GetAttemptCount(),
+			Observation.AcceptedStaticBuildingCount,
+			Observation.CrystalTargetCount,
+			Observation.SatelliteRuntimeCount,
+			Observation.bSatelliteRuntimeReady ? 1 : 0);
+		return;
+	}
+	if (Action != EABTSM7SatellitePracticeE1CrystalBindingAction::Bind)
+	{
+		return;
+	}
+	if (CrystalTarget != nullptr
+		&& SatelliteRuntime != nullptr
+		&& SatelliteRuntime->BindProductionE1CrystalTarget(
+			*CrystalTarget,
+			CrystalHalfExtentCM))
+	{
+		SatellitePracticeE1CrystalBindingLifecycle.MarkBound();
+		ClearSatellitePracticeE1CrystalTargetBindingTimer();
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Bound Attempt=%d Target=%s HalfExtent=%s"),
+			SatellitePracticeE1CrystalBindingLifecycle.GetAttemptCount(),
+			*GetNameSafe(CrystalTarget),
+			*CrystalHalfExtentCM.ToCompactString());
+		return;
+	}
+	SatellitePracticeE1CrystalBindingLifecycle.MarkBindingRejected(
+		TEXT("SatelliteRuntimeBindingRejected"));
+	ClearSatellitePracticeE1CrystalTargetBindingTimer();
+	UE_LOG(LogABTSRuntime, Error,
+		TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=SatelliteRuntimeBindingRejected Attempt=%d Target=%s Runtime=%s"),
+		SatellitePracticeE1CrystalBindingLifecycle.GetAttemptCount(),
+		*GetNameSafe(CrystalTarget),
+		*GetNameSafe(SatelliteRuntime));
 }
 
 void AABTSM7GameMode::DrawTaskGraphPositionDebug()
@@ -617,9 +864,7 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		bBuildingSetupFailed = bBuildingSetupFailed || bFixedSixSetupFailed;
 		if (!bFixedSixSetupFailed)
 		{
-			GetWorldTimerManager().SetTimerForNextTick(
-				this,
-				&AABTSM7GameMode::BindSatellitePracticeE1CrystalTarget);
+			ScheduleSatellitePracticeE1CrystalTargetBinding();
 		}
 	}
 	else if (System && Planet && bSpawnTaskGraphBuildings
