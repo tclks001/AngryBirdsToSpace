@@ -21,6 +21,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/Crc.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "Tests/AutomationCommon.h"
 #include "TestStage/ABTSM71TestStageActors.h"
@@ -141,7 +142,7 @@ namespace ABTSM73BeamStage5ChaosTests
 		const FVector Location = Site.WorldTransform.GetLocation();
 		const FQuat Rotation = Site.WorldTransform.GetRotation();
 		const FString Canonical = FString::Printf(
-			TEXT("BeamStage5ChaosProductionIdentity:v3:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
+			TEXT("BeamStage5ChaosProductionIdentity:v4:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
 			TEXT(":Descriptor=%llu:Static=%llu:Production=%llu:Device=%llu")
 			TEXT(":ContractEnvelopeProduction=%llu:Contract=%d:Layout=%llu:Placement=%llu")
 			TEXT(":EncounterSlot=%d:Surface=%d:GravityAuthority=%s:GravityHash=%llu:Location=%d,%d,%d")
@@ -149,7 +150,11 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(":Bricks=%d:Devices=%d:Caps=%d:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
 			TEXT(":OuterDT=%d:Min=%d:Hold=%d:Max=%d:Lin=%d:Ang=%d")
 			TEXT(":Drift=%d:Settle=%d:Rot=%d:BodyHash=%u:WorldHash=%u")
-			TEXT(":GravityModel=RadialConstantAcceleration:Gravity=%d:SupportMaterial=ProductionTerrainDefault"),
+			TEXT(":GravityModel=RadialConstantAcceleration:Gravity=%d")
+			TEXT(":GravityWakePolicy=NonInvalidatingForceSkipSleepingBodiesResumeOnExplicitWake")
+			TEXT(":EmptyPhysicsHandle=FailClosed")
+			TEXT(":MassExpectedPolicy=PerBodySetupCalculateMass")
+			TEXT(":StaticExternalMass=CertificateOnly:SupportMaterial=ProductionTerrainDefault"),
 			*Entry.StableId.ToString(),
 			Entry.Settings.DifficultyTier,
 			Entry.Settings.BuildingSeed,
@@ -195,6 +200,35 @@ namespace ABTSM73BeamStage5ChaosTests
 			BodyProfileHash,
 			WorldProfileHash,
 			FMath::RoundToInt(GravityCMPerSec2 * 1000.0f));
+		return FCrc::StrCrc32(*Canonical);
+	}
+
+	uint32 ComputeResultCrc32(
+		const uint32 CandidateCrc32,
+		const bool bAccepted,
+		const FObservationResult& Observation)
+	{
+		const FString Canonical = FString::Printf(
+			TEXT("BeamStage5ChaosResult:v1:Candidate=%u:Accepted=%d")
+			TEXT(":ReachedQuiet=%d:EndedQuiet=%d:FirstQuietMS=%d")
+			TEXT(":FinalDriftMilliCM=%d:FinalSettlementMilliCM=%d")
+			TEXT(":FinalRotationMilliDegrees=%d:FinalLinearMilli=%d")
+			TEXT(":FinalAngularMilli=%d:FinalAwake=%d")
+			TEXT(":PeakDriftMilliCM=%d:PeakSettlementMilliCM=%d")
+			TEXT(":PeakRotationMilliDegrees=%d"),
+			CandidateCrc32, bAccepted ? 1 : 0,
+			Observation.bReachedQuietWindow ? 1 : 0,
+			Observation.bEndedInQuietWindow ? 1 : 0,
+			FMath::RoundToInt(Observation.FirstQuietWindowSeconds * 1000.0f),
+			FMath::RoundToInt(Observation.FinalMaximumPlanarDriftCM * 1000.0f),
+			FMath::RoundToInt(Observation.FinalMaximumSettlementCM * 1000.0f),
+			FMath::RoundToInt(Observation.FinalMaximumRotationDegrees * 1000.0f),
+			FMath::RoundToInt(Observation.FinalMaximumLinearSpeedCMPerSec * 1000.0f),
+			FMath::RoundToInt(Observation.FinalMaximumAngularSpeedDegreesPerSec * 1000.0f),
+			Observation.FinalAwakeBodyCount,
+			FMath::RoundToInt(Observation.PeakPlanarDriftCM * 1000.0f),
+			FMath::RoundToInt(Observation.PeakSettlementCM * 1000.0f),
+			FMath::RoundToInt(Observation.PeakRotationDegrees * 1000.0f));
 		return FCrc::StrCrc32(*Canonical);
 	}
 
@@ -325,6 +359,8 @@ namespace ABTSM73BeamStage5ChaosTests
 			OutResult.bReachedQuietWindow);
 		Test.TestTrue(TEXT("Stage-5 entry ends in a continuous quiet window without Freeze"),
 			OutResult.bEndedInQuietWindow);
+		Test.TestEqual(TEXT("Stage-5 entry ends with every Chaos body asleep"),
+			OutResult.FinalAwakeBodyCount, 0);
 		Test.TestTrue(TEXT("Stage-5 entry final planar drift remains bounded"),
 			OutResult.FinalMaximumPlanarDriftCM <= MaximumPlanarDriftCM);
 		Test.TestTrue(TEXT("Stage-5 entry final settlement remains bounded"),
@@ -345,15 +381,29 @@ namespace ABTSM73BeamStage5ChaosTests
 		const FABTSM73BeamDemoManifestEntry& Entry)
 	{
 		const double StartSeconds = FPlatformTime::Seconds();
-		FABTSM73BeamD1Stage5Result Result;
 		FString Error;
-		if (!Test.TestTrue(TEXT("Frozen Stage-5 production entry generates"),
-			FABTSM73BeamD1BrickCompiler().GenerateStage5(
-				Entry.Settings, Result, Error)))
+		FABTSM73BuildingFreezeV3Descriptor Descriptor;
+		if (!Test.TestTrue(TEXT("Frozen V3 production descriptor resolves"),
+			FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				Entry.Id, Descriptor, Error)))
 		{
 			Test.AddError(Error);
 			return false;
 		}
+
+		FABTSM73BeamD1MaterialPolicy MaterialPolicy;
+		MaterialPolicy.bOverrideOrdinaryBody = true;
+		MaterialPolicy.PrimaryMaterial = Descriptor.PrimaryMaterial;
+		FABTSM73BeamD1Stage55Result Source;
+		if (!Test.TestTrue(TEXT("Frozen Stage-5 production entry generates"),
+			FABTSM73BeamD1BrickCompiler().
+				GenerateStage55DeviceAssemblyWithMaterialPolicy(
+					Entry.Settings, MaterialPolicy, Source, Error)))
+		{
+			Test.AddError(Error);
+			return false;
+		}
+		const FABTSM73BeamD1Stage5Result& Result = Source.Stage5;
 		Test.TestEqual(TEXT("Stage-5 entry has no support-resultant advisory"),
 			Result.Summary.SupportResultantAdvisoryCount, 0);
 		Test.TestFalse(TEXT("Stage 5 does not claim Chaos evidence"),
@@ -440,14 +490,6 @@ namespace ABTSM73BeamStage5ChaosTests
 			ProductionContract.JuryDemoFixedSix.LayoutHash,
 			FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash);
 
-		FABTSM73BuildingFreezeV3Descriptor Descriptor;
-		if (!Test.TestTrue(TEXT("Frozen V3 production descriptor resolves"),
-			FABTSM73BuildingFreezeV3::DeriveAndValidate(
-				Entry.Id, Descriptor, Error)))
-		{
-			Test.AddError(Error);
-			return false;
-		}
 		Test.TestEqual(TEXT("V3 descriptor keeps the Stage-5 source identity"),
 			Descriptor.SourceStage5ProductionHash,
 			static_cast<uint64>(Result.ProductionIdentityHash));
@@ -571,6 +613,105 @@ namespace ABTSM73BeamStage5ChaosTests
 			return false;
 		}
 
+		AABTSM7BuildingModule* EmptyHandleProbe =
+			World->SpawnActor<AABTSM7BuildingModule>(
+				AABTSM7BuildingModule::StaticClass(),
+				FTransform::Identity,
+				SpawnParameters);
+		if (!Test.TestNotNull(TEXT("Empty-handle gravity probe"), EmptyHandleProbe)
+			|| !Test.TestNotNull(TEXT("Empty-handle gravity probe mesh"),
+				EmptyHandleProbe != nullptr
+					? EmptyHandleProbe->GetMeshComponent() : nullptr))
+		{
+			return false;
+		}
+		const bool bEmptyHandleAccepted =
+			AABTSM7BuildingModule::TryApplyNonInvalidatingAcceleration(
+				*EmptyHandleProbe->GetMeshComponent(), FVector::DownVector);
+		Test.TestFalse(TEXT("Non-invalidating acceleration fails closed without a physics handle"),
+			bEmptyHandleAccepted);
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][EmptyPhysicsHandle]")
+			TEXT(" Entry=%s Policy=FailClosed Accepted=%d"),
+			*Entry.StableId.ToString(), bEmptyHandleAccepted ? 0 : 1);
+		EmptyHandleProbe->Destroy();
+
+		// Production radial gravity is actor-driven because built-in gravity is
+		// disabled. Prove that the sleep guard does not turn gravity into a
+		// one-way latch: a sleeping body remains untouched, while an explicit
+		// wake resumes the same radial acceleration on the next physics step.
+		FABTSM7BrickSpec WakeProbeSpec;
+		WakeProbeSpec.Material = Descriptor.PrimaryMaterial;
+		WakeProbeSpec.DimensionsCM = FVector(20.0f);
+		FVector ProbeUp = (Site.WorldTransform.GetLocation()
+			- SupportCenter).GetSafeNormal();
+		if (ProbeUp.IsNearlyZero())
+		{
+			ProbeUp = Site.WorldTransform.GetUnitAxis(EAxis::Z);
+		}
+		const FVector ProbeLocation = Site.WorldTransform.GetLocation()
+			+ ProbeUp * 5000.0f
+			+ Site.WorldTransform.GetUnitAxis(EAxis::X) * 5000.0f;
+		AABTSM7BuildingModule* WakeProbe =
+			MaterialSystem->SpawnStaticBrickModule(
+				WakeProbeSpec, FTransform(ProbeLocation));
+		if (!Test.TestNotNull(TEXT("Radial-gravity wake probe"), WakeProbe)
+			|| !Test.TestNotNull(TEXT("Radial-gravity wake probe mesh"),
+				WakeProbe != nullptr ? WakeProbe->GetMeshComponent() : nullptr))
+		{
+			return false;
+		}
+		UStaticMeshComponent* WakeProbeMesh = WakeProbe->GetMeshComponent();
+		WakeProbe->ActivateDynamic(FVector::ZeroVector, SupportCenter, GravityCMPerSec2);
+		WakeProbeMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		WakeProbeMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		WakeProbeMesh->PutAllRigidBodiesToSleep();
+		Test.TestFalse(TEXT("Sleeping radial-gravity body is asleep before guarded tick"),
+			WakeProbeMesh->IsAnyRigidBodyAwake());
+		if (!WorldWrapper.TickTestWorld(ProductionOuterDeltaSeconds))
+		{
+			WorldWrapper.ForwardErrorMessages(&Test);
+			return false;
+		}
+		const float SleepingSpeed =
+			WakeProbeMesh->GetPhysicsLinearVelocity().Size();
+		const bool bStayedAsleep = !WakeProbeMesh->IsAnyRigidBodyAwake();
+		Test.TestTrue(TEXT("Guarded radial-gravity tick does not wake sleeping body"),
+			bStayedAsleep);
+		Test.TestTrue(TEXT("Guarded radial-gravity tick leaves sleeping velocity at zero"),
+			SleepingSpeed <= KINDA_SMALL_NUMBER);
+		WakeProbeMesh->WakeAllRigidBodies();
+		Test.TestTrue(TEXT("Explicit wake reactivates radial-gravity body"),
+			WakeProbeMesh->IsAnyRigidBodyAwake());
+		if (!WorldWrapper.TickTestWorld(ProductionOuterDeltaSeconds))
+		{
+			WorldWrapper.ForwardErrorMessages(&Test);
+			return false;
+		}
+		const FVector ProbeGravityDirection =
+			(SupportCenter - WakeProbe->GetActorLocation()).GetSafeNormal();
+		const float ResumedRadialSpeed = FVector::DotProduct(
+			WakeProbeMesh->GetPhysicsLinearVelocity(), ProbeGravityDirection);
+		Test.TestTrue(TEXT("Explicit wake resumes radial gravity"),
+			ResumedRadialSpeed > 1.0f);
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][GravityWakePolicy]")
+			TEXT(" Entry=%s Policy=NonInvalidatingForceSkipSleepingBodiesResumeOnExplicitWake")
+			TEXT(" SleepingSpeed=%.6f ResumedRadialSpeed=%.6f Accepted=%d"),
+			*Entry.StableId.ToString(), SleepingSpeed, ResumedRadialSpeed,
+			bStayedAsleep && SleepingSpeed <= KINDA_SMALL_NUMBER
+				&& ResumedRadialSpeed > 1.0f ? 1 : 0);
+		WakeProbe->Destroy();
+		if (!WorldWrapper.TickTestWorld(ProductionOuterDeltaSeconds))
+		{
+			WorldWrapper.ForwardErrorMessages(&Test);
+			return false;
+		}
+		if (Test.HasAnyErrors())
+		{
+			return false;
+		}
+
 		TArray<AABTSM7BuildingModule*> Modules;
 		TArray<FTransform> InitialTransforms;
 		const int32 ExpectedBodyCount = StaticEntry.Bricks.Num()
@@ -579,7 +720,10 @@ namespace ABTSM73BeamStage5ChaosTests
 		InitialTransforms.Reserve(ExpectedBodyCount);
 		FBox GroundSupportBounds(EForceInit::ForceInit);
 		double TotalMassKG = 0.0;
+		double BrickMassKG = 0.0;
+		double CalculatedChaosMassKG = 0.0;
 		FVector MassMoment = FVector::ZeroVector;
+		int32 BrickMassIndex = 0;
 		for (const FABTSM73BeamD1BrickBinding& Brick : StaticEntry.Bricks)
 		{
 			const FTransform BrickWorldTransform =
@@ -604,6 +748,27 @@ namespace ABTSM73BeamStage5ChaosTests
 			}
 			const double MassKG = Body->GetBodyMass();
 			TotalMassKG += MassKG;
+			BrickMassKG += MassKG;
+			UBodySetup* BodySetup = Body->GetBodySetup();
+			if (!Test.TestNotNull(TEXT("Stage-5 Brick owns a BodySetup"), BodySetup))
+			{
+				return false;
+			}
+			const double ExpectedMassKG = BodySetup->CalculateMass(Mesh);
+			const double MassToleranceKG = FMath::Max(0.01, ExpectedMassKG * 0.001);
+			CalculatedChaosMassKG += ExpectedMassKG;
+			Test.TestTrue(*FString::Printf(
+				TEXT("BodySetup mass matches Brick Index=%d Member=%d Actual=%.6f Expected=%.6f Tolerance=%.6f"),
+				BrickMassIndex, Brick.MemberId, MassKG, ExpectedMassKG,
+				MassToleranceKG),
+				FMath::IsNearlyEqual(MassKG, ExpectedMassKG, MassToleranceKG));
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][BodyMass]")
+				TEXT(" Entry=%s Type=Brick Index=%d Member=%d ActualKG=%.6f ExpectedKG=%.6f ToleranceKG=%.6f Accepted=%d"),
+				*Entry.StableId.ToString(), BrickMassIndex, Brick.MemberId,
+				MassKG, ExpectedMassKG, MassToleranceKG,
+				FMath::IsNearlyEqual(MassKG, ExpectedMassKG, MassToleranceKG) ? 1 : 0);
+			++BrickMassIndex;
 			MassMoment += Brick.LocalTransform.GetLocation() * MassKG;
 			if (Brick.LocalBounds.Min.Z <= GroundContactToleranceCM)
 			{
@@ -619,6 +784,7 @@ namespace ABTSM73BeamStage5ChaosTests
 				*Brick.LocalTransform.GetLocation().ToString(),
 				*Brick.BrickSpec.DimensionsCM.ToString());
 		}
+		int32 DeviceMassIndex = 0;
 		for (const FABTSM73BeamD1DeviceBinding& Device : StaticEntry.Devices)
 		{
 			AABTSM7BuildingModule* Module = MaterialSystem->SpawnVoxelDevice(
@@ -634,12 +800,37 @@ namespace ABTSM73BeamStage5ChaosTests
 			{
 				return false;
 			}
-			const double MassKG = Mesh->GetBodyInstance()->GetBodyMass();
+			FBodyInstance* Body = Mesh->GetBodyInstance();
+			if (!Test.TestNotNull(TEXT("V3 device owns a Chaos body"), Body))
+			{
+				return false;
+			}
+			UBodySetup* BodySetup = Body->GetBodySetup();
+			if (!Test.TestNotNull(TEXT("V3 device owns a BodySetup"), BodySetup))
+			{
+				return false;
+			}
+			const double MassKG = Body->GetBodyMass();
 			TotalMassKG += MassKG;
+			const double ExpectedMassKG = BodySetup->CalculateMass(Mesh);
+			const double MassToleranceKG = FMath::Max(0.01, ExpectedMassKG * 0.001);
+			CalculatedChaosMassKG += ExpectedMassKG;
+			Test.TestTrue(*FString::Printf(
+				TEXT("BodySetup mass matches Device Index=%d Actual=%.6f Expected=%.6f Tolerance=%.6f"),
+				DeviceMassIndex, MassKG, ExpectedMassKG, MassToleranceKG),
+				FMath::IsNearlyEqual(MassKG, ExpectedMassKG, MassToleranceKG));
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][BodyMass]")
+				TEXT(" Entry=%s Type=Device Index=%d ActualKG=%.6f ExpectedKG=%.6f ToleranceKG=%.6f Accepted=%d"),
+				*Entry.StableId.ToString(), DeviceMassIndex, MassKG,
+				ExpectedMassKG, MassToleranceKG,
+				FMath::IsNearlyEqual(MassKG, ExpectedMassKG, MassToleranceKG) ? 1 : 0);
+			++DeviceMassIndex;
 			MassMoment += Device.LocalTransform.GetLocation() * MassKG;
 			Modules.Add(Module);
 			InitialTransforms.Add(Module->GetActorTransform());
 		}
+		int32 CapMassIndex = 0;
 		for (const FABTSM73BuildingFreezeV3CapBinding& Cap : StaticEntry.Caps)
 		{
 			AABTSM7BuildingModule* Module = MaterialSystem->SpawnBrickModule(
@@ -655,8 +846,32 @@ namespace ABTSM73BeamStage5ChaosTests
 			{
 				return false;
 			}
-			const double MassKG = Mesh->GetBodyInstance()->GetBodyMass();
+			FBodyInstance* Body = Mesh->GetBodyInstance();
+			if (!Test.TestNotNull(TEXT("V3 cap owns a Chaos body"), Body))
+			{
+				return false;
+			}
+			UBodySetup* BodySetup = Body->GetBodySetup();
+			if (!Test.TestNotNull(TEXT("V3 cap owns a BodySetup"), BodySetup))
+			{
+				return false;
+			}
+			const double MassKG = Body->GetBodyMass();
 			TotalMassKG += MassKG;
+			const double ExpectedMassKG = BodySetup->CalculateMass(Mesh);
+			const double MassToleranceKG = FMath::Max(0.01, ExpectedMassKG * 0.001);
+			CalculatedChaosMassKG += ExpectedMassKG;
+			Test.TestTrue(*FString::Printf(
+				TEXT("BodySetup mass matches Cap Index=%d Actual=%.6f Expected=%.6f Tolerance=%.6f"),
+				CapMassIndex, MassKG, ExpectedMassKG, MassToleranceKG),
+				FMath::IsNearlyEqual(MassKG, ExpectedMassKG, MassToleranceKG));
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][BodyMass]")
+				TEXT(" Entry=%s Type=Cap Index=%d ActualKG=%.6f ExpectedKG=%.6f ToleranceKG=%.6f Accepted=%d"),
+				*Entry.StableId.ToString(), CapMassIndex, MassKG,
+				ExpectedMassKG, MassToleranceKG,
+				FMath::IsNearlyEqual(MassKG, ExpectedMassKG, MassToleranceKG) ? 1 : 0);
+			++CapMassIndex;
 			MassMoment += Cap.SiteLocalTransform.GetLocation() * MassKG;
 			Modules.Add(Module);
 			InitialTransforms.Add(Module->GetActorTransform());
@@ -689,12 +904,14 @@ namespace ABTSM73BeamStage5ChaosTests
 			&& CenterOfMass.Y <= GroundSupportBounds.Max.Y;
 		Test.TestTrue(TEXT("Stage-5 aggregate center of mass projects into its ground-support envelope"),
 			bCenterOfMassInsideGroundEnvelope);
-		Test.TestTrue(TEXT("V3 certified self-load matches spawned Chaos mass"),
+		Test.TestTrue(TEXT("V3 certified Brick self-load matches spawned Chaos Brick mass"),
 			FMath::IsNearlyEqual(
-				Result.LoadDAG.Summary.TotalSelfLoadKG
-					+ Descriptor.StaticExternalMassKG,
-				TotalMassKG,
-				FMath::Max(1.0, TotalMassKG * 0.001)));
+				Result.LoadDAG.Summary.TotalSelfLoadKG,
+				BrickMassKG,
+				FMath::Max(1.0, BrickMassKG * 0.001)));
+		Test.TestTrue(TEXT("V3 spawned aggregate Chaos mass matches per-body UE BodySetup mass"),
+			FMath::IsNearlyEqual(TotalMassKG, CalculatedChaosMassKG,
+				FMath::Max(0.05, CalculatedChaosMassKG * 0.01)));
 
 		const FABTSM7ChaosBodyProfile BodyProfile =
 			FABTSM7ChaosBodyProfile::Production();
@@ -721,7 +938,8 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(" GravityAuthority=%s GravityHash=%llu FixtureCrc32=%u")
 			TEXT(" ContractVersion=%d LayoutHash=%llu SiteTransform=%s SupportCenter=%s SupportRadius=%.3f")
 			TEXT(" Bricks=%d Devices=%d Caps=%d Bodies=%d Contacts=%d Ground=%d")
-			TEXT(" ResultantAdvisories=%d StaticSelfLoadKG=%.3f ExternalLoadKG=%.3f MassKG=%.3f")
+			TEXT(" ResultantAdvisories=%d StaticSelfLoadKG=%.3f ExternalLoadKG=%.3f")
+			TEXT(" BrickMassKG=%.3f MassKG=%.3f CalculatedMassKG=%.3f")
 			TEXT(" LocalCOM=%s GroundMin=%s GroundMax=%s COMSupported=%d")
 			TEXT(" OuterFPS=%.0f OuterDT=%.6f GravityModel=RadialConstantAcceleration Gravity=%.1f")
 			TEXT(" BodyHash=%u Solver=%d/%d Damping=%.2f/%.2f WorldHash=%u %s")
@@ -753,7 +971,8 @@ namespace ABTSM73BeamStage5ChaosTests
 			Result.Summary.SupportResultantAdvisoryCount,
 			Result.LoadDAG.Summary.TotalSelfLoadKG,
 			Descriptor.StaticExternalMassKG,
-			TotalMassKG, *CenterOfMass.ToString(),
+			BrickMassKG, TotalMassKG, CalculatedChaosMassKG,
+			*CenterOfMass.ToString(),
 			*GroundSupportBounds.Min.ToString(),
 			*GroundSupportBounds.Max.ToString(),
 			bCenterOfMassInsideGroundEnvelope ? 1 : 0,
@@ -913,6 +1132,8 @@ namespace ABTSM73BeamStage5ChaosTests
 				CurrentMemberId = PrimarySupport->LowerMemberId;
 			}
 		}
+		const uint32 ResultCrc32 = ComputeResultCrc32(
+			FixtureCrc32, bAccepted, Observation);
 		UE_LOG(LogABTSRuntime, Log,
 			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][Result] Entry=%s CandidateHash=%u Accepted=%d ReachedQuiet=%d EndedQuiet=%d FirstQuiet=%.2f FinalDrift=%.3f@%d FinalSettlement=%.3f@%d FinalRotation=%.3f@%d FinalLinear=%.3f FinalAngular=%.3f FinalAwake=%d PeakDrift=%.3f PeakSettlement=%.3f PeakRotation=%.3f Seconds=%.3f"),
 			*Entry.StableId.ToString(), FixtureCrc32,
@@ -933,6 +1154,11 @@ namespace ABTSM73BeamStage5ChaosTests
 			Observation.PeakSettlementCM,
 			Observation.PeakRotationDegrees,
 			FPlatformTime::Seconds() - StartSeconds);
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][ResultHash]")
+			TEXT(" Entry=%s CandidateHash=%u ResultHash=%u Accepted=%d"),
+			*Entry.StableId.ToString(), FixtureCrc32, ResultCrc32,
+			bAccepted ? 1 : 0);
 		WorldWrapper.ForwardErrorMessages(&Test);
 		return bAccepted && !Test.HasAnyErrors();
 	}

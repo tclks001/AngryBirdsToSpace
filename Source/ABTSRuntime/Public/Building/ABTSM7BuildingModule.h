@@ -74,6 +74,10 @@ public:
 	void SetContactDamageGraceSeconds(float Seconds) { ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds); }
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);
 	void ActivateDynamicPlanar(const FVector& Impulse, const FVector& InGravityUp, float GravityAcceleration);
+	/** Applies acceleration without invalidating Chaos sleep; false means no usable physics body. */
+	static bool TryApplyNonInvalidatingAcceleration(
+		UStaticMeshComponent& Component,
+		const FVector& AccelerationCMPerSec2);
 	void Freeze();
 	/** Returns true only for the first successful break request. */
 	bool BreakModule();
