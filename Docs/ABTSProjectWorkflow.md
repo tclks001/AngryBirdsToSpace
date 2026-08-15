@@ -11,10 +11,10 @@
 - 项目形态：UE 5.8 C++ 项目；运行时代码主模块为 `Source/ABTSRuntime`。
 - 既有集成基线：M1 至 M10 的球面、Task Graph PCG、鸟群、物品/放置、弹弓、Chaos 破坏、建筑、桥梁、卫星与侦察系统均已进入工程；以实际源码和对应设计稿为准。
 - 当前验收项：M10 初版已全部完成验收，其中 M10.1-A/B/C 均已通过 PIE；M10.1-D 的通用目标选择与引力走廊不属于本次已验收初版，继续延期。
-- M3：Map Freeze V3 已发布五个主星 Pad 加一个月球背面 E1，并完成生产地形落座。当前集成候选接受方形 E1 后，Layout 重冻为 `0x5485D3F22956AE41`；E2～E6 Placement 不漂移，E1 为 `0x6A303ACBBA0358DB`。旧 R4 完整 Witness、R6 泛化 Profile 选择与 R7 全 Seed 认证继续延期，不阻断本轮固定演示路线。
-- M7：E1 已增加两根真实 Crystal 座梁与 `1023.12 kg` 组合外载静态认证，Building Freeze V3 Catalog 为 `2428875568906321995`，六栋静态模块为 `5748`。Integration 正以该身份重冻共享 DTO、Map 与 Registration；旧位置及旧 Catalog Chaos 证据只作诊断，不等于 `ChaosFreezeV3`。
+- M3：Map Freeze V3 已发布五个主星 Pad 加一个月球背面 E1，并完成生产地形落座。卫星预览与运行时现统一消费最终五垫 production surface，Layout 重冻为 `0x44723367D3DAA3A4`；E2～E6 Placement 不漂移，E1 为 `0x1C267DFD88E65BAB`。旧 R4 完整 Witness、R6 泛化 Profile 选择与 R7 全 Seed 认证继续延期，不阻断本轮固定演示路线。
+- M7：E1 已增加两根真实 Crystal 座梁与 `1023.12 kg` 组合外载静态认证，Building Freeze V3 Catalog 为 `2428875568906321995`，六栋静态模块为 `5748`；共享 DTO、Map 与 Registration 已按最终地表重冻。旧位置及旧 Catalog Chaos 证据只作诊断，不等于 `ChaosFreezeV3`。
 - M11：v1 的 M11.0/A/B/C 是生产基线；A/B/C v2.1 的 Core、Editor-only 候选和交互表现已进入 `master`。M3R-5.2 道路末端帧与 M5.1 双槽、M11 3+1 表现已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与 Visible PIE，接缝为 `IntegrationAccepted`。集成工作树已新增独立的 `PresentationAccepted v1` 稳定合同；它明确不等于 M11-B `StrictCertified`，当前冻结生产绑定仍为 `Unbound`，所以 Rank12 仍不能替换 v1 默认值。
-- 当前下一步：Integration 完成 E1 外载版本的 ForceUnity、fresh 合同/资源链和离屏路线证据后原子发布新 `master`；M7 随后合并该基线，从 E1 开始串行执行生产重力下的 `ChaosFreezeV3`，E1 未通过前不运行 E2。实时 30/60/120 FPS 与完整可见路线继续是独立证据层。T4-A3.3 与 M11 继续独立维护，不进入本轮关键路径。
+- 当前下一步：Integration 发布最终地表重冻结 `master`；M7 随后合并该基线，从 E1 开始串行执行生产重力下的 `ChaosFreezeV3`，E1 未通过前不运行 E2。Chaos 完成后执行包含六栋 Chaos 建筑的整图生成冒烟与 `<=30 s` 优化，并验证启动期 Slate 加载层在前台覆盖地图生成、现有 Canvas 首屏随后接管。实时 30/60/120 FPS 与完整可见路线继续是独立证据层。T4-A3.3 与 M11 继续独立维护，不进入本轮关键路径。
 
 当前入口：[V3 实现与冻结计划](BuildingGenerationAndPlacementFreezeV3Plan.md) · [V3 集成准备与门禁](BuildingGenerationAndPlacementFreezeV3IntegrationReadiness.md) · [Fixed-Six 世界生成合同](JuryDemoFixedSixWorldGenerationContract.md) · [M7 Stage 4.5 放置冻结](M73BeamStage45PlacementFreezeDesign.md) · [三渲二与全局风格化渲染](ABTSToonStylizedRenderingDesign.md) · [M11 v2](M11V2FinaleOptimizationDesign.md) · [多工作树规范](ABTSMultiWorktreeDevelopmentGuide.md)。
 

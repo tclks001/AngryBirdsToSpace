@@ -23,9 +23,9 @@
 V3 当前生产身份：
 
 - Placement Schema / Catalog：`3 / 2428875568906321995`
-- Layout Hash：`0x5485D3F22956AE41`
-- 六个 Placement Hash：`A91A9FB5D79AE1CE / 4C41612002CC0208 / 8ACA9CA9BAFE95BD / 66C8FD0EF4ACD5F2 / 6A303ACBBA0358DB / 73BC7FE74D3835F7`
-- Registration Result Hash：`13098783739158441303`
+- Layout Hash：`0x44723367D3DAA3A4`
+- 六个 Placement Hash：`A91A9FB5D79AE1CE / 4C41612002CC0208 / 8ACA9CA9BAFE95BD / 66C8FD0EF4ACD5F2 / 1C267DFD88E65BAB / 73BC7FE74D3835F7`
+- Registration Result Hash：`14507275966565957788`
 - 六栋静态模块：`5748`，其中 E1 唯一一个 `72×72×72 cm` Crystal cap
 - 有序 Encounter：`E2/E3/E4/E5/E1/E6`，E1 为 `Tier0 + Slot4 + Satellite`
 
@@ -54,7 +54,7 @@ V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身�
 
 ### 2.2 V3 结构交接与生产隔离
 
-V3 固定 `Schema=3`、Catalog `2428875568906321995`、Layout `0x5485D3F22956AE41` 和顺序 `E2/E3/E4/E5/E1/E6`。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。
+V3 固定 `Schema=3`、Catalog `2428875568906321995`、Layout `0x44723367D3DAA3A4` 和顺序 `E2/E3/E4/E5/E1/E6`。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。
 
 结构门只证明 DTO 完整；生产级 `IsUsable()` 还要求上述精确 Layout 与六个 Placement Hash。`ProductionContractVersion=3`；半填 V3、任意非零占位 Layout 或旧 Catalog 都必须 fail closed。V1/V2 继续用于兼容读取和历史回归，不得覆盖 V3 生产结果。
 

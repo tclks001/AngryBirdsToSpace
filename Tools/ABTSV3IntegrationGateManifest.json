@@ -8,9 +8,11 @@
   "frozenIdentities": {
     "buildingFreezeV3Commit": "b1e6fc65f18d338c54302c747d67a292ba59002a",
     "placementCatalogHash": "2428875568906321995",
-    "mapFreezeV3Commit": "dbf7bf7ea388cd064bd8ade5079d1a4947d9a64b",
-    "layoutHash": "0x5485D3F22956AE41",
-    "registrationResultHash": "13098783739158441303",
+    "mapFreezeV3Commit": "b257f1b810f4fdd85c3d8740e0d623e4f73a177a",
+    "layoutHash": "0x44723367D3DAA3A4",
+    "satelliteCandidateHash": "0xAA569671E58184A1",
+    "satelliteResultHash": "0x3358BC5A456E3CD4",
+    "registrationResultHash": "14507275966565957788",
     "staticModuleCount": 5748,
     "chaosFreezeV3Commit": null,
     "chaosResultHash": null
