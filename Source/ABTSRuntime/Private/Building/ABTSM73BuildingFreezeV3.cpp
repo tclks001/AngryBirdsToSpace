@@ -4,6 +4,7 @@
 
 #include "ABTSM73BeamD1BrickCompiler.h"
 #include "Building/ABTSM73BeamDemoManifest.h"
+#include "Building/ABTSM7MaterialProfileLibrary.h"
 
 namespace ABTSM73BuildingFreezeV3Private
 {
@@ -104,10 +105,14 @@ namespace ABTSM73BuildingFreezeV3Private
 
 	FString CapRow(const FABTSM73BuildingFreezeV3CapBinding& Cap)
 	{
-		return FString::Printf(TEXT("C:%d:%d:%d:%d:%s"),
+		const FString Supports = FString::JoinBy(Cap.SupportingMemberIds,
+			TEXT("."), [](const int32 Id) { return FString::FromInt(Id); });
+		return FString::Printf(TEXT("C:%d:%d:%d:%d:%d:%s:%s"),
 			static_cast<int32>(Cap.BrickSpec.Material),
 			Cap.bLoadBearing ? 1 : 0, Cap.bWeaknessCandidate ? 1 : 0,
-			static_cast<int32>(Cap.DeviceRole), *BoxRow(Cap.SiteLocalBounds));
+			static_cast<int32>(Cap.DeviceRole),
+			Cap.bStaticExternalLoadCertified ? 1 : 0,
+			*Supports, *BoxRow(Cap.SiteLocalBounds));
 	}
 
 	FABTSM73BuildingFreezeV3FrozenIdentity MakeFrozen(
@@ -126,6 +131,7 @@ namespace ABTSM73BuildingFreezeV3Private
 		const FBox& EffectBounds,
 		const uint64 Stage5Hash,
 		const uint64 DeviceHash,
+		const uint64 StaticLoadCertificateHash,
 		const uint64 GeometryHash,
 		const uint64 ProductionHash,
 		const uint64 DescriptorHash)
@@ -146,6 +152,7 @@ namespace ABTSM73BuildingFreezeV3Private
 		Frozen.EffectBounds = EffectBounds;
 		Frozen.SourceStage5ProductionHash = Stage5Hash;
 		Frozen.SourceDeviceAssemblyHash = DeviceHash;
+		Frozen.StaticExternalLoadCertificateHash = StaticLoadCertificateHash;
 		Frozen.StaticGeometryHash = GeometryHash;
 		Frozen.ProductionHash = ProductionHash;
 		Frozen.DescriptorHash = DescriptorHash;
@@ -178,7 +185,7 @@ FABTSM73BuildingFreezeV3::GetFrozenIdentities()
 			FBox(FVector(-450, -486, 0), FVector(450, 774, 1476)),
 			FBox(FVector(-486, -522, 0), FVector(486, 810, 1476)),
 			FBox(FVector(-1138, -58, -670), FVector(382, 1462, 850)),
-			17685577480875777327ull, 17110365351347297356ull,
+			17685577480875777327ull, 17110365351347297356ull, 0ull,
 			9035518740462017661ull, 2547697344996591725ull,
 			2093905216809054552ull),
 		MakeFrozen(EABTSM73BeamDemoBuilding::E3SlideRelease, 1,
@@ -188,7 +195,7 @@ FABTSM73BuildingFreezeV3::GetFrozenIdentities()
 			FBox(FVector(-414, -1026, 0), FVector(414, 1026, 1332)),
 			FBox(FVector(-450, -1062, 0), FVector(450, 1062, 1332)),
 			FBox(FVector(-522, 774, -252), FVector(-162, 1134, 468)),
-			3783807544959526326ull, 13499840356386341553ull,
+			3783807544959526326ull, 13499840356386341553ull, 0ull,
 			6056576068412876568ull, 5980623437000438947ull,
 			4766851746474182140ull),
 		MakeFrozen(EABTSM73BeamDemoBuilding::E4TipOver, 2,
@@ -198,7 +205,7 @@ FABTSM73BuildingFreezeV3::GetFrozenIdentities()
 			FBox(FVector(-378, -846, 0), FVector(378, 846, 2376)),
 			FBox(FVector(-414, -882, 0), FVector(414, 882, 2376)),
 			FBox(FVector(-486, -342, -144), FVector(-126, 378, 216)),
-			8626866139811673118ull, 4267868371875890409ull,
+			8626866139811673118ull, 4267868371875890409ull, 0ull,
 			12346635070808564758ull, 10546537168470496360ull,
 			4414623922721955589ull),
 		MakeFrozen(EABTSM73BeamDemoBuilding::E5SeamRelease, 3,
@@ -208,19 +215,19 @@ FABTSM73BuildingFreezeV3::GetFrozenIdentities()
 			FBox(FVector(-630, -1350, 0), FVector(630, 1350, 2376)),
 			FBox(FVector(-666, -1386, 0), FVector(666, 1386, 2376)),
 			FBox(FVector(126, 846, -144), FVector(486, 1566, 216)),
-			6515755032372742292ull, 15204117308279581184ull,
+			6515755032372742292ull, 15204117308279581184ull, 0ull,
 			17932683668713717862ull, 11772527566289753088ull,
 			543918785024958331ull),
 		MakeFrozen(EABTSM73BeamDemoBuilding::E1ColumnBreak, 4,
-			EABTSM7BuildingMaterial::Stone, 0, 710000, 52, 1, 1,
-			Histogram(0, 52, 0, 0, 1),
-			FBox(FVector(-432, -162, 0), FVector(-90, 162, 720)),
-			FBox(FVector(-162, 90, 0), FVector(162, 432, 720)),
-			FBox(FVector(-198, 54, 0), FVector(198, 468, 720)),
+			EABTSM7BuildingMaterial::Stone, 0, 710000, 54, 1, 1,
+			Histogram(0, 54, 0, 0, 1),
+			FBox(FVector(-414, -162, 0), FVector(-90, 162, 756)),
+			FBox(FVector(-162, 90, 0), FVector(162, 414, 756)),
+			FBox(FVector(-198, 54, 0), FVector(198, 450, 756)),
 			FBox(FVector(-850, -418, -670), FVector(670, 1102, 850)),
-			11654936042725289290ull, 976568201920830387ull,
-			261011352776326791ull, 18375681187970766733ull,
-			6197101184822124424ull),
+			8855396142165301146ull, 1306678247463021210ull,
+			2301603703857336297ull, 5109319969545358893ull,
+			7092558964138954002ull, 12209885623584966783ull),
 		MakeFrozen(EABTSM73BeamDemoBuilding::E6TipOver, 5,
 			EABTSM7BuildingMaterial::Iron, 5, 750000, 2235, 1, 0,
 			Histogram(0, 0, 2235, 0, 0),
@@ -228,7 +235,7 @@ FABTSM73BuildingFreezeV3::GetFrozenIdentities()
 			FBox(FVector(-486, -1062, 0), FVector(486, 1062, 3384)),
 			FBox(FVector(-522, -1098, 0), FVector(522, 1098, 3384)),
 			FBox(FVector(-594, 558, -144), FVector(-234, 1278, 216)),
-			2348159192872953385ull, 198894657042108135ull,
+			2348159192872953385ull, 198894657042108135ull, 0ull,
 			11440919070458269246ull, 11323455661476895076ull,
 			3187373410644525608ull)};
 	return Frozen;
@@ -378,31 +385,19 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 
 	if (Id == EABTSM73BeamDemoBuilding::E1ColumnBreak)
 	{
-		const FVector Half(CrystalCapExtentCM * 0.5);
-		const FABTSM73BeamD1BrickBinding* CapSeat = nullptr;
-		for (const FABTSM73BeamD1BrickBinding& Brick : Source.Stage5.Bricks)
+		if (Source.Stage5.CrystalSeatMemberIds.Num() != 2)
 		{
-			if (CapSeat == nullptr
-				|| Brick.LocalBounds.Max.Z > CapSeat->LocalBounds.Max.Z
-					+ GeometryToleranceCM
-				|| (FMath::IsNearlyEqual(Brick.LocalBounds.Max.Z,
-						CapSeat->LocalBounds.Max.Z, GeometryToleranceCM)
-					&& Brick.BrickId < CapSeat->BrickId))
-			{
-				CapSeat = &Brick;
-			}
-		}
-		if (CapSeat == nullptr)
-		{
-			OutError = TEXT("BuildingFreezeV3CrystalCapWithoutSeatCandidate");
+			OutError = TEXT("BuildingFreezeV3CrystalSeatPairMissing");
 			return false;
 		}
+		const FVector Half(CrystalCapExtentCM * 0.5);
 		const FVector GeneratorCenter(
-			CapSeat->LocalBounds.GetCenter().X,
-			CapSeat->LocalBounds.GetCenter().Y,
-			CapSeat->LocalBounds.Max.Z + Half.Z);
+			Source.Stage5.CrystalSeatCenterLocal.X,
+			Source.Stage5.CrystalSeatCenterLocal.Y,
+			Source.Stage5.CrystalSeatCenterLocal.Z + Half.Z);
 		const FBox GeneratorCapBounds(GeneratorCenter - Half, GeneratorCenter + Half);
-		bool bHasTopFaceContact = false;
+		TArray<int32> ContactingSeatIds;
+		double TotalSeatContactAreaCM2 = 0.0;
 		for (const FABTSM73BeamD1BrickBinding& Brick : Source.Stage5.Bricks)
 		{
 			if (HasPositiveVolumeOverlap(GeneratorCapBounds, Brick.LocalBounds))
@@ -416,14 +411,34 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 			const double OverlapY = FMath::Min(GeneratorCapBounds.Max.Y,
 				Brick.LocalBounds.Max.Y) - FMath::Max(GeneratorCapBounds.Min.Y,
 					Brick.LocalBounds.Min.Y);
-			bHasTopFaceContact |= FMath::IsNearlyEqual(
-				GeneratorCapBounds.Min.Z, Brick.LocalBounds.Max.Z,
-				GeometryToleranceCM) && OverlapX > GeometryToleranceCM
-				&& OverlapY > GeometryToleranceCM;
+			if (FMath::IsNearlyEqual(GeneratorCapBounds.Min.Z,
+				Brick.LocalBounds.Max.Z, GeometryToleranceCM)
+				&& OverlapX > GeometryToleranceCM && OverlapY > GeometryToleranceCM)
+			{
+				if (!Source.Stage5.CrystalSeatMemberIds.Contains(Brick.MemberId))
+				{
+					OutError = TEXT("BuildingFreezeV3CrystalCapTouchesNonSeat");
+					return false;
+				}
+				ContactingSeatIds.AddUnique(Brick.MemberId);
+				const double ContactArea = OverlapX * OverlapY;
+				if (!FMath::IsNearlyEqual(ContactArea,
+					CrystalCapExtentCM * CrystalCapExtentCM * 0.5, 0.1))
+				{
+					OutError = TEXT("BuildingFreezeV3CrystalCapUnequalSeatShare");
+					return false;
+				}
+				TotalSeatContactAreaCM2 += ContactArea;
+			}
 		}
-		if (!bHasTopFaceContact)
+		ContactingSeatIds.Sort();
+		TArray<int32> ExpectedSeatIds = Source.Stage5.CrystalSeatMemberIds;
+		ExpectedSeatIds.Sort();
+		if (ContactingSeatIds != ExpectedSeatIds
+			|| !FMath::IsNearlyEqual(TotalSeatContactAreaCM2,
+				CrystalCapExtentCM * CrystalCapExtentCM, 0.1))
 		{
-			OutError = TEXT("BuildingFreezeV3CrystalCapWithoutTopContact");
+			OutError = TEXT("BuildingFreezeV3CrystalCapSeatCoverage");
 			return false;
 		}
 		FABTSM73BuildingFreezeV3CapBinding& Cap = OutDescriptor.Caps.AddDefaulted_GetRef();
@@ -432,9 +447,81 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 		Cap.SiteLocalTransform = FTransform(FQuat::Identity, GeneratorCenter)
 			* OutDescriptor.ContentToSite;
 		Cap.SiteLocalBounds = TransformBox(GeneratorCapBounds, OutDescriptor.ContentToSite);
+		Cap.SupportingMemberIds = ExpectedSeatIds;
 		OutDescriptor.GeneratorLocalBounds += GeneratorCapBounds;
 		OutDescriptor.SiteLocalBounds += Cap.SiteLocalBounds;
 		AddMaterial(OutDescriptor.MaterialHistogram, Cap.BrickSpec.Material);
+
+		if (Source.Devices.Num() != 1
+			|| Source.Devices[0].SupportContactCellCount <= 0)
+		{
+			OutError = TEXT("BuildingFreezeV3E1DeviceStaticSupportMissing");
+			return false;
+		}
+		TArray<FABTSM73BeamD1ExternalLoad> ExternalLoads;
+		FABTSM73BeamD1ExternalLoad& DeviceLoad = ExternalLoads.AddDefaulted_GetRef();
+		DeviceLoad.StableId = TEXT("E1Device");
+		DeviceLoad.StaticMassKG = Source.Devices[0].StaticMassKG;
+		DeviceLoad.bDirectGroundSupport = Source.Devices[0].bDirectGroundSupport;
+		if (DeviceLoad.bDirectGroundSupport)
+		{
+			if (!Source.Devices[0].SupportMemberIds.IsEmpty())
+			{
+				OutError = TEXT("BuildingFreezeV3E1GroundDeviceHasMemberSupports");
+				return false;
+			}
+		}
+		else
+		{
+			if (Source.Devices[0].SupportMemberIds.IsEmpty())
+			{
+				OutError = TEXT("BuildingFreezeV3E1DeviceWithoutSupportMembers");
+				return false;
+			}
+			const double Fraction = 1.0 / Source.Devices[0].SupportMemberIds.Num();
+			for (const int32 MemberId : Source.Devices[0].SupportMemberIds)
+			{
+				DeviceLoad.SupportShares.Add({MemberId, Fraction});
+			}
+		}
+
+		const TArray<FABTSM7MaterialProfile> MaterialProfiles =
+			FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+		const FABTSM7MaterialProfile* CrystalMaterial =
+			FABTSM7MaterialProfileLibrary::FindProfile(
+				MaterialProfiles, EABTSM7BuildingMaterial::Crystal);
+		if (CrystalMaterial == nullptr)
+		{
+			OutError = TEXT("BuildingFreezeV3CrystalMaterialProfileMissing");
+			return false;
+		}
+		FABTSM73BeamD1ExternalLoad& CrystalLoad = ExternalLoads.AddDefaulted_GetRef();
+		CrystalLoad.StableId = TEXT("E1Crystal72");
+		CrystalLoad.StaticMassKG = FMath::Pow(CrystalCapExtentCM, 3.0)
+			* CrystalMaterial->DensityGPerCubicCM * 0.001;
+		CrystalLoad.SupportShares.Add({ExpectedSeatIds[0], 0.5});
+		CrystalLoad.SupportShares.Add({ExpectedSeatIds[1], 0.5});
+
+		FABTSM73BeamD1StaticLoadCertificate Certificate;
+		if (!Compiler.CertifyStage5StaticExternalLoads(Entry.Settings,
+			MaterialPolicy, Source.Stage5, ExternalLoads, Certificate, OutError))
+		{
+			OutError = FString::Printf(TEXT("BuildingFreezeV3E1StaticExternalLoad:%s"),
+				*OutError);
+			return false;
+		}
+		Cap.bStaticExternalLoadCertified = true;
+		OutDescriptor.bStaticExternalLoadCertified = Certificate.bAccepted;
+		OutDescriptor.StaticExternalLoadCount = Certificate.ExternalLoadCount;
+		OutDescriptor.StaticExternalMassKG = Certificate.ExternalMassKG;
+		OutDescriptor.StaticDirectGroundMassKG = Certificate.DirectGroundMassKG;
+		OutDescriptor.StaticSupportResultantAdvisoryCount =
+			Certificate.LoadDAG.Summary.SupportResultantAdvisoryCount;
+		OutDescriptor.StaticExternalLoadLedgerHash =
+			Certificate.ExternalLoadLedgerHash;
+		OutDescriptor.StaticExternalLoadDAGHash = static_cast<uint64>(
+			Certificate.LoadDAG.Summary.LoadDAGHash);
+		OutDescriptor.StaticExternalLoadCertificateHash = Certificate.CertificateHash;
 	}
 
 	if (!OutDescriptor.GeneratorLocalBounds.IsValid
@@ -442,7 +529,11 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 		|| OutDescriptor.MaterialHistogram.Total()
 			!= OutDescriptor.Bricks.Num() + OutDescriptor.Caps.Num()
 		|| (Id == EABTSM73BeamDemoBuilding::E1ColumnBreak
-			? OutDescriptor.Caps.Num() != 1 || OutDescriptor.MaterialHistogram.Crystal != 1
+			? OutDescriptor.Caps.Num() != 1
+				|| OutDescriptor.MaterialHistogram.Crystal != 1
+				|| !OutDescriptor.bStaticExternalLoadCertified
+				|| OutDescriptor.StaticExternalLoadCount != 2
+				|| OutDescriptor.StaticSupportResultantAdvisoryCount != 0
 			: !OutDescriptor.Caps.IsEmpty() || OutDescriptor.MaterialHistogram.Crystal != 0))
 	{
 		OutError = TEXT("BuildingFreezeV3CapOrHistogramInvariant");
@@ -478,15 +569,29 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 		GeometryCanonical += TEXT("|") + CapRow(Cap);
 	}
 	OutDescriptor.StaticGeometryHash = HashUtf8(GeometryCanonical);
-	OutDescriptor.ProductionHash = HashUtf8(FString::Printf(
-		TEXT("Stage5=%llu|Device=%llu|Geometry=%llu|Primary=%d|Encounter=%d|Front=YtoX"),
-		OutDescriptor.SourceStage5ProductionHash,
-		OutDescriptor.SourceDeviceAssemblyHash,
-		OutDescriptor.StaticGeometryHash,
-		static_cast<int32>(OutDescriptor.PrimaryMaterial),
-		OutDescriptor.EncounterSlot));
-	OutDescriptor.DescriptorHash = HashUtf8(FString::Printf(
-		TEXT("Schema=%d|Manifest=%lld|Id=%d|Stable=%s|Profile=%s|Tier=%d|Seed=%d|Encounter=%d|Material=%d|Generator=%s|Site=%s|Pad=%s|Effect=%s|Histogram=%d,%d,%d,%d,%d|Production=%llu"),
+	if (OutDescriptor.StaticExternalLoadCertificateHash != 0)
+	{
+		OutDescriptor.ProductionHash = HashUtf8(FString::Printf(
+			TEXT("Stage5=%llu|Device=%llu|StaticLoad=%llu|Geometry=%llu|Primary=%d|Encounter=%d|Front=YtoX"),
+			OutDescriptor.SourceStage5ProductionHash,
+			OutDescriptor.SourceDeviceAssemblyHash,
+			OutDescriptor.StaticExternalLoadCertificateHash,
+			OutDescriptor.StaticGeometryHash,
+			static_cast<int32>(OutDescriptor.PrimaryMaterial),
+			OutDescriptor.EncounterSlot));
+	}
+	else
+	{
+		OutDescriptor.ProductionHash = HashUtf8(FString::Printf(
+			TEXT("Stage5=%llu|Device=%llu|Geometry=%llu|Primary=%d|Encounter=%d|Front=YtoX"),
+			OutDescriptor.SourceStage5ProductionHash,
+			OutDescriptor.SourceDeviceAssemblyHash,
+			OutDescriptor.StaticGeometryHash,
+			static_cast<int32>(OutDescriptor.PrimaryMaterial),
+			OutDescriptor.EncounterSlot));
+	}
+	FString DescriptorCanonical = FString::Printf(
+		TEXT("Schema=%d|Manifest=%lld|Id=%d|Stable=%s|Profile=%s|Tier=%d|Seed=%d|Encounter=%d|Material=%d|Generator=%s|Site=%s|Pad=%s|Effect=%s|Histogram=%d,%d,%d,%d,%d"),
 		OutDescriptor.SchemaVersion, OutDescriptor.SourceManifestHash,
 		static_cast<int32>(OutDescriptor.ManifestEntryId),
 		*OutDescriptor.StableId.ToString(), *OutDescriptor.GameplayProfileId.ToString(),
@@ -496,8 +601,23 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidate(
 		*BoxRow(OutDescriptor.SiteLocalBounds), *BoxRow(OutDescriptor.PadBounds),
 		*BoxRow(OutDescriptor.EffectBounds), OutDescriptor.MaterialHistogram.Wood,
 		OutDescriptor.MaterialHistogram.Stone, OutDescriptor.MaterialHistogram.Iron,
-		OutDescriptor.MaterialHistogram.Glass, OutDescriptor.MaterialHistogram.Crystal,
-		OutDescriptor.ProductionHash));
+		OutDescriptor.MaterialHistogram.Glass, OutDescriptor.MaterialHistogram.Crystal);
+	if (OutDescriptor.StaticExternalLoadCertificateHash != 0)
+	{
+		DescriptorCanonical += FString::Printf(
+			TEXT("|StaticCertified=%d|StaticLoads=%d|StaticMass=%.6f|StaticGroundMass=%.6f|StaticAdvisory=%d|StaticLedger=%llu|StaticDAG=%llu|StaticCertificate=%llu"),
+			OutDescriptor.bStaticExternalLoadCertified ? 1 : 0,
+			OutDescriptor.StaticExternalLoadCount,
+			OutDescriptor.StaticExternalMassKG,
+			OutDescriptor.StaticDirectGroundMassKG,
+			OutDescriptor.StaticSupportResultantAdvisoryCount,
+			OutDescriptor.StaticExternalLoadLedgerHash,
+			OutDescriptor.StaticExternalLoadDAGHash,
+			OutDescriptor.StaticExternalLoadCertificateHash);
+	}
+	DescriptorCanonical += FString::Printf(TEXT("|Production=%llu"),
+		OutDescriptor.ProductionHash);
+	OutDescriptor.DescriptorHash = HashUtf8(DescriptorCanonical);
 	return true;
 }
 
@@ -574,6 +694,8 @@ bool FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
 			&& Actual.EffectBounds.Equals(Expected.EffectBounds, 0.01)
 			&& Actual.SourceStage5ProductionHash == Expected.SourceStage5ProductionHash
 			&& Actual.SourceDeviceAssemblyHash == Expected.SourceDeviceAssemblyHash
+			&& Actual.StaticExternalLoadCertificateHash
+				== Expected.StaticExternalLoadCertificateHash
 			&& Actual.StaticGeometryHash == Expected.StaticGeometryHash
 			&& Actual.ProductionHash == Expected.ProductionHash
 			&& Actual.DescriptorHash == Expected.DescriptorHash;

@@ -18,6 +18,34 @@ struct FABTSM73BeamD1GenerationResult
 	TArray<FABTSM73BeamD1BrickBinding> Bricks;
 };
 
+struct FABTSM73BeamD1ExternalLoadShare
+{
+	int32 SupportMemberId = INDEX_NONE;
+	double LoadFraction = 0.0;
+};
+
+/** A non-brick mass applied either to explicit Stage-5 members or directly to ground. */
+struct FABTSM73BeamD1ExternalLoad
+{
+	FName StableId;
+	double StaticMassKG = 0.0;
+	bool bDirectGroundSupport = false;
+	TArray<FABTSM73BeamD1ExternalLoadShare> SupportShares;
+};
+
+/** Fail-closed, non-Chaos certificate for the final body plus external masses. */
+struct FABTSM73BeamD1StaticLoadCertificate
+{
+	FABTSM73BeamCGenerationResult LoadDAG;
+	int32 ExternalLoadCount = 0;
+	double ExternalMassKG = 0.0;
+	double DirectGroundMassKG = 0.0;
+	double DirectGroundProxyLoadKG = 0.0;
+	uint64 ExternalLoadLedgerHash = 0;
+	uint64 CertificateHash = 0;
+	bool bAccepted = false;
+};
+
 /** Editor acceptance payload. It is deliberately separate from production D1 bricks. */
 struct FABTSM73BeamD1StagePreviewResult
 {
@@ -47,6 +75,9 @@ struct FABTSM73BeamD1Stage5Result
 	int32 ReachabilitySupportPostCount = 0;
 	/** Additional visible members emitted by bounded Beam-C structural closure. */
 	int32 StructuralClosureMemberCount = 0;
+	/** E1-only paired roof seats forming one 72 cm-wide support surface. */
+	TArray<int32> CrystalSeatMemberIds;
+	FVector CrystalSeatCenterLocal = FVector::ZeroVector;
 	uint64 ActiveGeometryHash = 0;
 	uint64 BearingDAGHash = 0;
 	uint64 ProductionIdentityHash = 0;
@@ -107,6 +138,15 @@ public:
 		const FABTSM73BeamD1Settings& Settings,
 		const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
 		FABTSM73BeamD1Stage55Result& OutResult,
+		FString& OutError) const;
+
+	/** Replays Beam-C with material-aware self load plus explicit external masses. */
+	bool CertifyStage5StaticExternalLoads(
+		const FABTSM73BeamD1Settings& Settings,
+		const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
+		const FABTSM73BeamD1Stage5Result& Stage5,
+		TConstArrayView<FABTSM73BeamD1ExternalLoad> ExternalLoads,
+		FABTSM73BeamD1StaticLoadCertificate& OutCertificate,
 		FString& OutError) const;
 
 	bool CompileResolved(

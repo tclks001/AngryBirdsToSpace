@@ -13,6 +13,7 @@ class FABTSM73BeamD1DelayedMaterialSystemTest;
 class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
 class FABTSM73BeamD1Stage55DeviceAssemblyTest;
 class FABTSM73BeamD1Stage55EditorPreviewRouteTest;
+class FABTSM73BuildingFreezeV3EditorPreviewRouteTest;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -88,6 +89,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
 		Category = "ABTS|M7.3-Beam-D1|Preview")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassPreview;
+
+	/** Frozen V3 special-piece preview; currently used by the E1 Crystal cap. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Preview")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CrystalPreview;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
 		Category = "ABTS|M7.3-Beam-D1|Device Assembly")
@@ -202,11 +208,13 @@ private:
 	friend class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
 	friend class FABTSM73BeamD1Stage55DeviceAssemblyTest;
 	friend class FABTSM73BeamD1Stage55EditorPreviewRouteTest;
+	friend class FABTSM73BuildingFreezeV3EditorPreviewRouteTest;
 
 	UHierarchicalInstancedStaticMeshComponent* GetPreview(
 		EABTSM7BuildingMaterial Material) const;
 	bool GenerateStage5ProductionPreview(bool bAdditionsOnly, FString& OutError);
 	bool GenerateStage55DeviceAssemblyPreview(FString& OutError);
+	bool GenerateBuildingFreezeV3Preview(FString& OutError);
 	void ClearPreview();
 	void ClearStageDiagnostics();
 	void TryInitializeRuntimeBuilding();
@@ -216,6 +224,8 @@ private:
 
 	TArray<FABTSM73BeamD1BrickBinding> CompiledBricks;
 	TArray<FABTSM73BeamD1DeviceBinding> CompiledDevices;
+	int32 CompiledFrozenV3CapCount = 0;
+	uint64 FrozenV3DescriptorHash = 0;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
 	int32 RuntimeSystemSearchAttempts = 0;
 	FTimerHandle RuntimeSystemSearchTimer;

@@ -33,7 +33,8 @@ enum class EABTSM73BeamC3GenerationStage : uint8
 	CommonExteriorFrame UMETA(DisplayName = "Stage 3 - Common Exterior Frame"),
 	FloorInfillRoof UMETA(DisplayName = "Stage 4 - Floor / Top Frames"),
 	StaticDAG UMETA(DisplayName = "Stage 5 - Complete Static DAG (Legacy Baseline)"),
-	DeviceAssembly UMETA(DisplayName = "Stage 5.5 - Barrel / Piston Assembly")
+	DeviceAssembly UMETA(DisplayName = "Stage 5.5 - Barrel / Piston Assembly"),
+	FrozenBuildingV3 UMETA(DisplayName = "Frozen V3 - Final Material Recipe")
 };
 
 /** Frozen jury-demo selection. Custom preserves manually authored preview settings. */
@@ -41,12 +42,12 @@ UENUM(BlueprintType)
 enum class EABTSM73BeamDemoBuilding : uint8
 {
 	Custom UMETA(DisplayName = "Custom Settings"),
-	E1ColumnBreak UMETA(DisplayName = "Demo 1 - E1 ColumnBreak / 710000"),
-	E2DropTrigger UMETA(DisplayName = "Demo 2 - E2 DropTrigger / 740000"),
-	E3SlideRelease UMETA(DisplayName = "Demo 3 - E3 SlideRelease / 750137"),
-	E4TipOver UMETA(DisplayName = "Demo 4 - E4 TipOver / 730000"),
-	E5SeamRelease UMETA(DisplayName = "Demo 5 - E5 SeamRelease / 720000"),
-	E6TipOver UMETA(DisplayName = "Demo 6 - E6 TipOver / 750000")
+	E1ColumnBreak UMETA(DisplayName = "Complexity E1 - ColumnBreak / 710000"),
+	E2DropTrigger UMETA(DisplayName = "Complexity E2 - DropTrigger / 740000"),
+	E3SlideRelease UMETA(DisplayName = "Complexity E3 - SlideRelease / 750137"),
+	E4TipOver UMETA(DisplayName = "Complexity E4 - TipOver / 730000"),
+	E5SeamRelease UMETA(DisplayName = "Complexity E5 - SeamRelease / 720000"),
+	E6TipOver UMETA(DisplayName = "Complexity E6 - TipOver / 750000")
 };
 
 /** Mutually exclusive Stage-2 visual evidence layer on the D1 preview Actor. */

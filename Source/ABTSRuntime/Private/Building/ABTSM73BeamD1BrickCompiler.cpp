@@ -3758,6 +3758,414 @@ namespace ABTSM73BeamStage5
 		return FBox(Minimum, Maximum);
 	}
 
+	bool PositiveOverlap(const FBox& A, const FBox& B);
+
+	bool IsFrozenE1Recipe(const FABTSM73BeamD1Settings& Settings)
+	{
+		return Settings.GameplayProfileId == TEXT("ColumnBreak")
+			&& Settings.DifficultyTier == 0
+			&& Settings.BuildingSeed == 710000;
+	}
+
+	struct FCrystalSeatCandidate
+	{
+		EABTSM73BeamAFrameAxis Axis = EABTSM73BeamAFrameAxis::X;
+		FVector Center = FVector::ZeroVector;
+		FBox SeatBounds[2];
+		int32 SupportMemberIds[2] = {INDEX_NONE, INDEX_NONE};
+		int32 OwnerIndices[2] = {INDEX_NONE, INDEX_NONE};
+		double MinimumSupportAreaCM2 = 0.0;
+		double CenterDistanceSquared = DBL_MAX;
+		bool bValid = false;
+	};
+
+	bool AddFrozenE1CrystalSeatPair(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		const FABTSM73BeamCGenerationResult& ExistingDAG,
+		FABTSM73BeamAGenerationResult& Assembly,
+		TArray<int32>& OutSeatMemberIds,
+		FVector& OutSeatCenter,
+		FString& OutError)
+	{
+		OutSeatMemberIds.Reset();
+		OutSeatCenter = FVector::ZeroVector;
+		if (Assembly.Members.Num() + 2 > Profile.VisualComplexity.MaximumBrickCount)
+		{
+			OutError = TEXT("BeamD1Stage5CrystalSeatBudget");
+			return false;
+		}
+
+		FBox BodyBounds(EForceInit::ForceInit);
+		TArray<FBox> MemberBounds;
+		MemberBounds.Reserve(Assembly.Members.Num());
+		for (const FABTSM73BeamAMember& Member : Assembly.Members)
+		{
+			const FBox Bounds = CompactMemberBounds(Assembly, Member);
+			MemberBounds.Add(Bounds);
+			BodyBounds += Bounds;
+		}
+		if (!BodyBounds.IsValid)
+		{
+			OutError = TEXT("BeamD1Stage5CrystalSeatEmptyBody");
+			return false;
+		}
+
+		TArray<int32> OwnerByMember;
+		OwnerByMember.Init(INDEX_NONE, Assembly.Members.Num());
+		for (int32 OwnerIndex = 0; OwnerIndex < Assembly.Assemblies.Num(); ++OwnerIndex)
+		{
+			for (const int32 MemberId : Assembly.Assemblies[OwnerIndex].MemberIds)
+			{
+				if (OwnerByMember.IsValidIndex(MemberId))
+				{
+					OwnerByMember[MemberId] = OwnerIndex;
+				}
+			}
+		}
+
+		const double RoofZ = BodyBounds.Max.Z;
+		const FVector2D BodyCenter(BodyBounds.GetCenter().X, BodyBounds.GetCenter().Y);
+		const int32 MinimumGridX = FMath::FloorToInt((BodyBounds.Min.X - 18.0) / SectionCM) - 1;
+		const int32 MaximumGridX = FMath::CeilToInt((BodyBounds.Max.X - 18.0) / SectionCM) + 1;
+		const int32 MinimumGridY = FMath::FloorToInt((BodyBounds.Min.Y - 18.0) / SectionCM) - 1;
+		const int32 MaximumGridY = FMath::CeilToInt((BodyBounds.Max.Y - 18.0) / SectionCM) + 1;
+		FCrystalSeatCandidate Best;
+		for (const EABTSM73BeamAFrameAxis Axis : {
+			EABTSM73BeamAFrameAxis::X, EABTSM73BeamAFrameAxis::Y})
+		{
+			for (int32 GridX = MinimumGridX; GridX <= MaximumGridX; ++GridX)
+			{
+				for (int32 GridY = MinimumGridY; GridY <= MaximumGridY; ++GridY)
+				{
+					FCrystalSeatCandidate Candidate;
+					Candidate.Axis = Axis;
+					Candidate.Center = FVector(
+						18.0 + GridX * SectionCM,
+						18.0 + GridY * SectionCM,
+						RoofZ + SectionCM * 0.5);
+					for (int32 SeatIndex = 0; SeatIndex < 2; ++SeatIndex)
+					{
+						const double Side = SeatIndex == 0 ? -1.0 : 1.0;
+						FVector SeatCenter = Candidate.Center;
+						if (Axis == EABTSM73BeamAFrameAxis::X)
+						{
+							SeatCenter.Y += Side * SectionCM * 0.5;
+							Candidate.SeatBounds[SeatIndex] = FBox(
+								SeatCenter - FVector(SectionCM, SectionCM * 0.5, SectionCM * 0.5),
+								SeatCenter + FVector(SectionCM, SectionCM * 0.5, SectionCM * 0.5));
+						}
+						else
+						{
+							SeatCenter.X += Side * SectionCM * 0.5;
+							Candidate.SeatBounds[SeatIndex] = FBox(
+								SeatCenter - FVector(SectionCM * 0.5, SectionCM, SectionCM * 0.5),
+								SeatCenter + FVector(SectionCM * 0.5, SectionCM, SectionCM * 0.5));
+						}
+					}
+
+					bool bPenetrates = false;
+					for (const FBox& Existing : MemberBounds)
+					{
+						bPenetrates |= PositiveOverlap(Candidate.SeatBounds[0], Existing)
+							|| PositiveOverlap(Candidate.SeatBounds[1], Existing);
+					}
+					if (bPenetrates)
+					{
+						continue;
+					}
+
+					TArray<TPair<int32, double>> Supports[2];
+					for (int32 MemberId = 0; MemberId < MemberBounds.Num(); ++MemberId)
+					{
+						if (!FMath::IsNearlyEqual(MemberBounds[MemberId].Max.Z,
+							RoofZ, GeometryToleranceCM)
+							|| !ExistingDAG.Nodes.IsValidIndex(MemberId)
+							|| !ExistingDAG.Nodes[MemberId].bGroundReachable
+							|| !OwnerByMember.IsValidIndex(MemberId)
+							|| !Assembly.Assemblies.IsValidIndex(OwnerByMember[MemberId]))
+						{
+							continue;
+						}
+						for (int32 SeatIndex = 0; SeatIndex < 2; ++SeatIndex)
+						{
+							const double OverlapX = FMath::Min(
+								Candidate.SeatBounds[SeatIndex].Max.X, MemberBounds[MemberId].Max.X)
+								- FMath::Max(Candidate.SeatBounds[SeatIndex].Min.X,
+									MemberBounds[MemberId].Min.X);
+							const double OverlapY = FMath::Min(
+								Candidate.SeatBounds[SeatIndex].Max.Y, MemberBounds[MemberId].Max.Y)
+								- FMath::Max(Candidate.SeatBounds[SeatIndex].Min.Y,
+									MemberBounds[MemberId].Min.Y);
+							if (OverlapX > GeometryToleranceCM && OverlapY > GeometryToleranceCM)
+							{
+								Supports[SeatIndex].Emplace(MemberId, OverlapX * OverlapY);
+							}
+						}
+					}
+
+					double BestMinimumArea = -1.0;
+					for (const TPair<int32, double>& First : Supports[0])
+					{
+						for (const TPair<int32, double>& Second : Supports[1])
+						{
+							if (First.Key == Second.Key)
+							{
+								continue;
+							}
+							const double MinimumArea = FMath::Min(First.Value, Second.Value);
+							if (MinimumArea > BestMinimumArea)
+							{
+								BestMinimumArea = MinimumArea;
+								Candidate.SupportMemberIds[0] = First.Key;
+								Candidate.SupportMemberIds[1] = Second.Key;
+							}
+						}
+					}
+					if (BestMinimumArea <= GeometryToleranceCM)
+					{
+						continue;
+					}
+					Candidate.OwnerIndices[0] = OwnerByMember[Candidate.SupportMemberIds[0]];
+					Candidate.OwnerIndices[1] = OwnerByMember[Candidate.SupportMemberIds[1]];
+					Candidate.MinimumSupportAreaCM2 = BestMinimumArea;
+					Candidate.CenterDistanceSquared = FVector2D::DistSquared(
+						FVector2D(Candidate.Center.X, Candidate.Center.Y), BodyCenter);
+					Candidate.bValid = true;
+					if (!Best.bValid
+						|| Candidate.CenterDistanceSquared < Best.CenterDistanceSquared - 0.01
+						|| (FMath::IsNearlyEqual(Candidate.CenterDistanceSquared,
+								Best.CenterDistanceSquared, 0.01)
+							&& Candidate.MinimumSupportAreaCM2 > Best.MinimumSupportAreaCM2 + 0.01)
+						|| (FMath::IsNearlyEqual(Candidate.CenterDistanceSquared,
+								Best.CenterDistanceSquared, 0.01)
+							&& FMath::IsNearlyEqual(Candidate.MinimumSupportAreaCM2,
+								Best.MinimumSupportAreaCM2, 0.01)
+							&& static_cast<int32>(Candidate.Axis) < static_cast<int32>(Best.Axis)))
+					{
+						Best = Candidate;
+					}
+				}
+			}
+		}
+		// E1's frozen roof has two tall, ground-reachable Y rails with an open
+		// center. When no compact 2x2 seat can sit on the roof, span both rails
+		// with two adjacent beams. Together they form one 72 cm-wide seat, and
+		// each beam independently reaches both existing load paths.
+		if (!Best.bValid)
+		{
+			auto SnapPairCenter = [](const double Value)
+			{
+				return 18.0 + FMath::RoundToDouble((Value - 18.0) / SectionCM) * SectionCM;
+			};
+			for (int32 FirstId = 0; FirstId < MemberBounds.Num(); ++FirstId)
+			{
+				if (!FMath::IsNearlyEqual(MemberBounds[FirstId].Max.Z,
+					RoofZ, GeometryToleranceCM)
+					|| !ExistingDAG.Nodes.IsValidIndex(FirstId)
+					|| !ExistingDAG.Nodes[FirstId].bGroundReachable)
+				{
+					continue;
+				}
+				for (int32 SecondId = FirstId + 1;
+					SecondId < MemberBounds.Num(); ++SecondId)
+				{
+					if (!FMath::IsNearlyEqual(MemberBounds[SecondId].Max.Z,
+						RoofZ, GeometryToleranceCM)
+						|| !ExistingDAG.Nodes.IsValidIndex(SecondId)
+						|| !ExistingDAG.Nodes[SecondId].bGroundReachable)
+					{
+						continue;
+					}
+					const FBox& FirstBounds = MemberBounds[FirstId];
+					const FBox& SecondBounds = MemberBounds[SecondId];
+					const bool bSeparatedX = FirstBounds.GetCenter().X
+						< SecondBounds.GetCenter().X - GeometryToleranceCM;
+					const bool bSeparatedY = FirstBounds.GetCenter().Y
+						< SecondBounds.GetCenter().Y - GeometryToleranceCM;
+					for (const EABTSM73BeamAFrameAxis BridgeAxis : {
+						EABTSM73BeamAFrameAxis::X, EABTSM73BeamAFrameAxis::Y})
+					{
+						if ((BridgeAxis == EABTSM73BeamAFrameAxis::X && !bSeparatedX)
+							|| (BridgeAxis == EABTSM73BeamAFrameAxis::Y && !bSeparatedY))
+						{
+							continue;
+						}
+						const double NormalMinimum = BridgeAxis == EABTSM73BeamAFrameAxis::X
+							? FMath::Max(FirstBounds.Min.Y, SecondBounds.Min.Y)
+							: FMath::Max(FirstBounds.Min.X, SecondBounds.Min.X);
+						const double NormalMaximum = BridgeAxis == EABTSM73BeamAFrameAxis::X
+							? FMath::Min(FirstBounds.Max.Y, SecondBounds.Max.Y)
+							: FMath::Min(FirstBounds.Max.X, SecondBounds.Max.X);
+						if (NormalMaximum - NormalMinimum < SectionCM - GeometryToleranceCM)
+						{
+							continue;
+						}
+						const double DesiredNormal = BridgeAxis == EABTSM73BeamAFrameAxis::X
+							? BodyCenter.Y : BodyCenter.X;
+						const double PairCenter = SnapPairCenter(FMath::Clamp(
+							DesiredNormal, NormalMinimum + SectionCM,
+							NormalMaximum - SectionCM));
+						if (PairCenter - SectionCM < NormalMinimum - GeometryToleranceCM
+							|| PairCenter + SectionCM > NormalMaximum + GeometryToleranceCM)
+						{
+							continue;
+						}
+						const double FirstOuter = BridgeAxis == EABTSM73BeamAFrameAxis::X
+							? FirstBounds.Min.X : FirstBounds.Min.Y;
+						const double SecondOuter = BridgeAxis == EABTSM73BeamAFrameAxis::X
+							? SecondBounds.Max.X : SecondBounds.Max.Y;
+						const double SpanLength = SecondOuter - FirstOuter;
+						if (SpanLength < SectionCM * 2.0 - GeometryToleranceCM
+							|| !FMath::IsNearlyZero(FMath::Fmod(SpanLength, SectionCM),
+								GeometryToleranceCM))
+						{
+							continue;
+						}
+						FCrystalSeatCandidate Candidate;
+						Candidate.Axis = BridgeAxis;
+						Candidate.Center = BridgeAxis == EABTSM73BeamAFrameAxis::X
+							? FVector((FirstOuter + SecondOuter) * 0.5, PairCenter,
+								RoofZ + SectionCM * 0.5)
+							: FVector(PairCenter, (FirstOuter + SecondOuter) * 0.5,
+								RoofZ + SectionCM * 0.5);
+						if (BridgeAxis == EABTSM73BeamAFrameAxis::X)
+						{
+							Candidate.SeatBounds[0] = FBox(
+								FVector(FirstOuter, PairCenter - SectionCM, RoofZ),
+								FVector(SecondOuter, PairCenter, RoofZ + SectionCM));
+							Candidate.SeatBounds[1] = FBox(
+								FVector(FirstOuter, PairCenter, RoofZ),
+								FVector(SecondOuter, PairCenter + SectionCM, RoofZ + SectionCM));
+						}
+						else
+						{
+							Candidate.SeatBounds[0] = FBox(
+								FVector(PairCenter - SectionCM, FirstOuter, RoofZ),
+								FVector(PairCenter, SecondOuter, RoofZ + SectionCM));
+							Candidate.SeatBounds[1] = FBox(
+								FVector(PairCenter, FirstOuter, RoofZ),
+								FVector(PairCenter + SectionCM, SecondOuter, RoofZ + SectionCM));
+						}
+						Candidate.SupportMemberIds[0] = FirstId;
+						Candidate.SupportMemberIds[1] = SecondId;
+						Candidate.OwnerIndices[0] = OwnerByMember[FirstId];
+						Candidate.OwnerIndices[1] = OwnerByMember[SecondId];
+						Candidate.MinimumSupportAreaCM2 = SectionCM * SectionCM;
+						Candidate.CenterDistanceSquared = FVector2D::DistSquared(
+							FVector2D(Candidate.Center.X, Candidate.Center.Y), BodyCenter);
+						Candidate.bValid = Assembly.Assemblies.IsValidIndex(
+							Candidate.OwnerIndices[0])
+							&& Assembly.Assemblies.IsValidIndex(Candidate.OwnerIndices[1]);
+						if (Candidate.bValid && (!Best.bValid
+							|| Candidate.CenterDistanceSquared < Best.CenterDistanceSquared))
+						{
+							Best = Candidate;
+						}
+					}
+				}
+			}
+		}
+		if (!Best.bValid)
+		{
+			for (int32 MemberId = 0; MemberId < MemberBounds.Num(); ++MemberId)
+			{
+				if (FMath::IsNearlyEqual(MemberBounds[MemberId].Max.Z,
+					RoofZ, GeometryToleranceCM))
+				{
+					UE_LOG(LogABTSRuntime, Warning,
+						TEXT("[ABTS][M7.3-Beam-D1][E1CrystalSeatTopMember]")
+						TEXT(" Member=%d Axis=%d Role=%d GroundReachable=%d Bounds=%s"),
+						MemberId, static_cast<int32>(Assembly.Members[MemberId].Axis),
+						static_cast<int32>(Assembly.Members[MemberId].Role),
+						ExistingDAG.Nodes.IsValidIndex(MemberId)
+							&& ExistingDAG.Nodes[MemberId].bGroundReachable ? 1 : 0,
+						*MemberBounds[MemberId].ToString());
+				}
+			}
+			OutError = TEXT("BeamD1Stage5CrystalSeatNoDistinctSupportedPair");
+			return false;
+		}
+
+		TMap<FString, int32> JointByPosition;
+		const double JointScale = 1.0 / FMath::Max(0.1,
+			static_cast<double>(Profile.BeamSettings.BeamB.BeamA.JointMergeToleranceCM));
+		for (const FABTSM73BeamAJoint& Joint : Assembly.Joints)
+		{
+			JointByPosition.Add(FString::Printf(TEXT("%lld:%lld:%lld"),
+				FMath::RoundToInt64(Joint.LocalPosition.X * JointScale),
+				FMath::RoundToInt64(Joint.LocalPosition.Y * JointScale),
+				FMath::RoundToInt64(Joint.LocalPosition.Z * JointScale)), Joint.JointId);
+		}
+		auto AddJoint = [&Assembly, &JointByPosition, JointScale](const FVector& Point)
+		{
+			const FString Key = FString::Printf(TEXT("%lld:%lld:%lld"),
+				FMath::RoundToInt64(Point.X * JointScale),
+				FMath::RoundToInt64(Point.Y * JointScale),
+				FMath::RoundToInt64(Point.Z * JointScale));
+			if (const int32* Existing = JointByPosition.Find(Key)) return *Existing;
+			FABTSM73BeamAJoint& Joint = Assembly.Joints.AddDefaulted_GetRef();
+			Joint.JointId = Assembly.Joints.Num() - 1;
+			Joint.LocalPosition = Point;
+			Joint.Role = EABTSM73BeamAJointRole::RoofNode;
+			JointByPosition.Add(Key, Joint.JointId);
+			return Joint.JointId;
+		};
+
+		for (int32 SeatIndex = 0; SeatIndex < 2; ++SeatIndex)
+		{
+			const FBox& Bounds = Best.SeatBounds[SeatIndex];
+			FVector Start = Bounds.GetCenter();
+			FVector End = Bounds.GetCenter();
+			Start.Z = End.Z = Best.Center.Z;
+			if (Best.Axis == EABTSM73BeamAFrameAxis::X)
+			{
+				Start.X = Bounds.Min.X;
+				End.X = Bounds.Max.X;
+			}
+			else
+			{
+				Start.Y = Bounds.Min.Y;
+				End.Y = Bounds.Max.Y;
+			}
+			FABTSM73BeamAMember& Seat = Assembly.Members.AddDefaulted_GetRef();
+			Seat.MemberId = Assembly.Members.Num() - 1;
+			Seat.JointA = AddJoint(Start);
+			Seat.JointB = AddJoint(End);
+			Seat.Axis = Best.Axis;
+			Seat.Role = EABTSM73BeamAMemberRole::RoofCourse;
+			Seat.LengthCM = FVector::Distance(Start, End);
+			Assembly.Assemblies[Best.OwnerIndices[SeatIndex]].MemberIds.Add(Seat.MemberId);
+			Assembly.Assemblies[Best.OwnerIndices[SeatIndex]].JointIds.AddUnique(Seat.JointA);
+			Assembly.Assemblies[Best.OwnerIndices[SeatIndex]].JointIds.AddUnique(Seat.JointB);
+			OutSeatMemberIds.Add(Seat.MemberId);
+		}
+		if (!ABTSM73BeamA::RebuildBearingContacts(
+			Profile.BeamSettings.BeamB.BeamA, Assembly, OutError))
+		{
+			OutError = FString::Printf(TEXT("BeamD1Stage5CrystalSeatBearing:%s"), *OutError);
+			return false;
+		}
+		for (const int32 SeatMemberId : OutSeatMemberIds)
+		{
+			if (!Assembly.BearingContacts.ContainsByPredicate(
+				[SeatMemberId](const FABTSM73BeamABearingContact& Contact)
+				{ return Contact.UpperMemberId == SeatMemberId; }))
+			{
+				OutError = TEXT("BeamD1Stage5CrystalSeatWithoutBearing");
+				return false;
+			}
+		}
+		OutSeatCenter = FVector(Best.Center.X, Best.Center.Y, RoofZ + SectionCM);
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-Beam-D1][E1CrystalSeatAdded]")
+			TEXT(" Axis=%d Center=%s Seats=%d,%d Supports=%d,%d MinArea=%.1f"),
+			static_cast<int32>(Best.Axis), *OutSeatCenter.ToString(),
+			OutSeatMemberIds[0], OutSeatMemberIds[1],
+			Best.SupportMemberIds[0], Best.SupportMemberIds[1],
+			Best.MinimumSupportAreaCM2);
+		return true;
+	}
+
 	/**
 	 * Stage 4 deliberately freezes semantic facade/top geometry before whole-
 	 * building reachability exists.  Stage 5 may therefore discover a horizontal
@@ -4410,6 +4818,31 @@ namespace ABTSM73BeamStage5
 			? EABTSM7ModuleKind::SpringPiston
 			: EABTSM7ModuleKind::ExplosiveBarrel;
 	}
+
+	double ResolveMaterialAwareProxySelfLoad(
+		const FABTSM73BeamD0ResolvedProfile& Profile,
+		TConstArrayView<FABTSM7MaterialProfile> MaterialProfiles,
+		const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
+		const FABTSM73BeamAMember& Member)
+	{
+		const EABTSM7BuildingMaterial Material =
+			ABTSM73BeamD1::ResolveProductionMaterial(
+				Profile, ABTSM73BeamD1::StructuralRole(Member.Role),
+				&MaterialPolicy);
+		const FABTSM7MaterialProfile* MaterialProfile =
+			FABTSM7MaterialProfileLibrary::FindProfile(MaterialProfiles, Material);
+		if (MaterialProfile == nullptr)
+		{
+			return -1.0;
+		}
+		const double BlockSectionCM =
+			Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM;
+		const double BasicMassKG = FMath::Max(
+			BlockSectionCM * BlockSectionCM * Member.LengthCM
+				* MaterialProfile->DensityGPerCubicCM * 0.001,
+			UE_DOUBLE_SMALL_NUMBER);
+		return FMath::Pow(BasicMassKG, 0.75);
+	}
 }
 
 bool FABTSM73BeamD1BrickCompiler::GenerateStage5(
@@ -4490,6 +4923,14 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5WithMaterialPolicy(
 			OutResult.ReachabilitySupportPostCount,
 			OutResult.CompactAssembly.Members.Num());
 	}
+	if (IsFrozenE1Recipe(Settings)
+		&& !AddFrozenE1CrystalSeatPair(Profile, OutResult.LoadDAG,
+			OutResult.CompactAssembly, OutResult.CrystalSeatMemberIds,
+			OutResult.CrystalSeatCenterLocal, OutError))
+	{
+		OutError = FString::Printf(TEXT("BeamD1Stage5CrystalSeat:%s"), *OutError);
+		return false;
+	}
 
 	const int32 BeforeStructuralClosure = OutResult.CompactAssembly.Members.Num();
 	const TArray<FABTSM7MaterialProfile> ChaosMaterialProfiles =
@@ -4497,24 +4938,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5WithMaterialPolicy(
 	const FABTSM73BeamCMemberSelfLoadResolver ChaosMemberSelfLoad =
 		[&Profile, &ChaosMaterialProfiles, &MaterialPolicy](const FABTSM73BeamAMember& Member)
 		{
-			const EABTSM7BuildingMaterial Material =
-				ABTSM73BeamD1::ResolveProductionMaterial(
-					Profile, ABTSM73BeamD1::StructuralRole(Member.Role),
-					&MaterialPolicy);
-			const FABTSM7MaterialProfile* MaterialProfile =
-				FABTSM7MaterialProfileLibrary::FindProfile(
-					ChaosMaterialProfiles, Material);
-			if (MaterialProfile == nullptr)
-			{
-				return -1.0;
-			}
-			const double BlockSectionCM =
-				Profile.BeamSettings.BeamB.BeamA.BlockCrossSectionCM;
-			const double BasicMassKG = FMath::Max(
-				BlockSectionCM * BlockSectionCM * Member.LengthCM
-					* MaterialProfile->DensityGPerCubicCM * 0.001,
-				UE_DOUBLE_SMALL_NUMBER);
-			return FMath::Pow(BasicMassKG, 0.75);
+			return ResolveMaterialAwareProxySelfLoad(
+				Profile, ChaosMaterialProfiles, MaterialPolicy, Member);
 		};
 	if (!BeamCGenerator.GenerateWithStructuralClosure(Profile.BeamSettings,
 		OutResult.CompactAssembly, OutResult.LoadDAG, OutError,
@@ -4656,34 +5081,46 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5WithMaterialPolicy(
 	if (Summary.MemberCount != OutResult.LoadDAG.Nodes.Num()
 		|| OutResult.CompactAssembly.BearingContacts.Num()
 			!= OutResult.LoadDAG.Edges.Num()
+		|| OutResult.LoadDAG.Summary.SupportResultantAdvisoryCount != 0
 		|| OutResult.LoadDAG.Summary.GroundUnreachableNodeCount != 0
 		|| OutResult.LoadDAG.Summary.CycleNodeCount != 0)
 	{
 		OutError = FString::Printf(
-			TEXT("BeamD1Stage5IdentityOrReachability:Members=%d:Bricks=%d:Nodes=%d:Contacts=%d:Edges=%d:Unreachable=%d:Cycles=%d"),
+			TEXT("BeamD1Stage5IdentityOrReachability:Members=%d:Bricks=%d:Nodes=%d:Contacts=%d:Edges=%d:Advisory=%d:Unreachable=%d:Cycles=%d"),
 			Summary.MemberCount, Summary.BrickCount,
 			OutResult.LoadDAG.Nodes.Num(),
 			OutResult.CompactAssembly.BearingContacts.Num(),
 			OutResult.LoadDAG.Edges.Num(),
+			OutResult.LoadDAG.Summary.SupportResultantAdvisoryCount,
 			OutResult.LoadDAG.Summary.GroundUnreachableNodeCount,
 			OutResult.LoadDAG.Summary.CycleNodeCount);
 		return false;
 	}
-	OutResult.ProductionIdentityHash = HashUtf8(FString::Printf(
+	FString ProductionCanonical = FString::Printf(
 		TEXT("Stage4=%lld|Geometry=%llu|Bearing=%llu|Load=%lld|Brick=%lld|Members=%d|Reach=%d|Closure=%d"),
 		OutResult.Stage4.Plan.Summary.FinalGeometryHash,
 		OutResult.ActiveGeometryHash, OutResult.BearingDAGHash,
 		OutResult.LoadDAG.Summary.LoadDAGHash,
 		Summary.BrickGeometryHash, Summary.MemberCount,
 		OutResult.ReachabilitySupportPostCount,
-		OutResult.StructuralClosureMemberCount));
+		OutResult.StructuralClosureMemberCount);
+	if (!OutResult.CrystalSeatMemberIds.IsEmpty())
+	{
+		ProductionCanonical += FString::Printf(
+			TEXT("|CrystalSeats=%d|CrystalCenter=%lld,%lld,%lld"),
+			OutResult.CrystalSeatMemberIds.Num(),
+			QuantizeCM(OutResult.CrystalSeatCenterLocal.X),
+			QuantizeCM(OutResult.CrystalSeatCenterLocal.Y),
+			QuantizeCM(OutResult.CrystalSeatCenterLocal.Z));
+	}
+	OutResult.ProductionIdentityHash = HashUtf8(ProductionCanonical);
 	Summary.bAccepted = true;
 	Summary.RejectReason.Reset();
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7.3-Beam-D1][Stage5Accepted]")
 		TEXT(" Profile=%s Tier=%d BaseSeed=%d CandidateSeed=%d")
 		TEXT(" Stage4Members=%d Suppressed=%d Stage4Active=%d Production=%d Bricks=%d")
-		TEXT(" ReachabilityPosts=%d ClosureMembers=%d ClosurePasses=%d ResultantAdvisories=%d")
+		TEXT(" ReachabilityPosts=%d ClosureMembers=%d CrystalSeats=%d ClosurePasses=%d ResultantAdvisories=%d")
 		TEXT(" Contacts=%d LoadEdges=%d Ground=%d Unreachable=%d")
 		TEXT(" Stage4Hash=%lld GeometryHash=%llu BearingHash=%llu LoadHash=%lld ProductionHash=%llu")
 		TEXT(" Chaos=NotEvaluated"),
@@ -4695,6 +5132,7 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage5WithMaterialPolicy(
 		OutResult.CompactAssembly.Members.Num(), OutResult.Bricks.Num(),
 		OutResult.ReachabilitySupportPostCount,
 		OutResult.StructuralClosureMemberCount,
+		OutResult.CrystalSeatMemberIds.Num(),
 		OutResult.LoadDAG.Summary.StructuralClosurePassCount,
 		OutResult.LoadDAG.Summary.SupportResultantAdvisoryCount,
 		OutResult.CompactAssembly.BearingContacts.Num(),
@@ -4853,5 +5291,175 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStage55DeviceAssemblyWithMaterialPolic
 		OutResult.Stage5.ProductionIdentityHash,
 		OutResult.DeviceSlotHash, OutResult.DeviceLoadDAGHash,
 		OutResult.DeviceAssemblyHash);
+	return true;
+}
+
+bool FABTSM73BeamD1BrickCompiler::CertifyStage5StaticExternalLoads(
+	const FABTSM73BeamD1Settings& Settings,
+	const FABTSM73BeamD1MaterialPolicy& MaterialPolicy,
+	const FABTSM73BeamD1Stage5Result& Stage5,
+	const TConstArrayView<FABTSM73BeamD1ExternalLoad> ExternalLoads,
+	FABTSM73BeamD1StaticLoadCertificate& OutCertificate,
+	FString& OutError) const
+{
+	using namespace ABTSM73BeamStage5;
+	OutCertificate = FABTSM73BeamD1StaticLoadCertificate();
+	OutError.Reset();
+	if (!Stage5.Summary.bAccepted || Stage5.ProductionIdentityHash == 0
+		|| Stage5.CompactAssembly.Members.Num() != Stage5.LoadDAG.Nodes.Num()
+		|| ExternalLoads.IsEmpty())
+	{
+		OutError = TEXT("BeamD1StaticExternalLoadInvalidAuthority");
+		return false;
+	}
+
+	const int32 SelectedSeed = ABTSM73BeamD1::CandidateSeed(
+		Settings.BuildingSeed, Stage5.Summary.VisualCandidateAttempt);
+	FABTSM73BeamD0ResolvedProfile Profile;
+	if (!FABTSM73BeamD0ProfileCatalog::GetDefault().Resolve(
+		Settings.GameplayProfileId, Settings.DifficultyTier,
+		SelectedSeed, Profile, OutError))
+	{
+		OutError = FString::Printf(TEXT("BeamD1StaticExternalLoadProfile:%s"), *OutError);
+		return false;
+	}
+
+	TMap<int32, double> AdditionalProxyLoadByMember;
+	TSet<FName> SeenStableIds;
+	TArray<FString> LedgerRows;
+	for (const FABTSM73BeamD1ExternalLoad& Load : ExternalLoads)
+	{
+		if (Load.StableId.IsNone() || SeenStableIds.Contains(Load.StableId)
+			|| !FMath::IsFinite(Load.StaticMassKG) || Load.StaticMassKG <= 0.0)
+		{
+			OutError = TEXT("BeamD1StaticExternalLoadInvalidLedgerRow");
+			return false;
+		}
+		SeenStableIds.Add(Load.StableId);
+		OutCertificate.ExternalMassKG += Load.StaticMassKG;
+		const double ProxyLoadKG = FMath::Pow(Load.StaticMassKG, 0.75);
+		FString SupportRow;
+		if (Load.bDirectGroundSupport)
+		{
+			if (!Load.SupportShares.IsEmpty())
+			{
+				OutError = TEXT("BeamD1StaticExternalLoadGroundHasMemberShares");
+				return false;
+			}
+			OutCertificate.DirectGroundMassKG += Load.StaticMassKG;
+			OutCertificate.DirectGroundProxyLoadKG += ProxyLoadKG;
+			SupportRow = TEXT("Ground");
+		}
+		else
+		{
+			if (Load.SupportShares.IsEmpty())
+			{
+				OutError = TEXT("BeamD1StaticExternalLoadMissingMemberShares");
+				return false;
+			}
+			double FractionSum = 0.0;
+			TSet<int32> SeenSupportIds;
+			TArray<FString> SupportRows;
+			for (const FABTSM73BeamD1ExternalLoadShare& Share : Load.SupportShares)
+			{
+				if (!Stage5.CompactAssembly.Members.IsValidIndex(Share.SupportMemberId)
+					|| !Stage5.LoadDAG.Nodes.IsValidIndex(Share.SupportMemberId)
+					|| !Stage5.LoadDAG.Nodes[Share.SupportMemberId].bGroundReachable
+					|| SeenSupportIds.Contains(Share.SupportMemberId)
+					|| !FMath::IsFinite(Share.LoadFraction)
+					|| Share.LoadFraction <= 0.0)
+				{
+					OutError = TEXT("BeamD1StaticExternalLoadInvalidMemberShare");
+					return false;
+				}
+				SeenSupportIds.Add(Share.SupportMemberId);
+				FractionSum += Share.LoadFraction;
+				AdditionalProxyLoadByMember.FindOrAdd(Share.SupportMemberId)
+					+= ProxyLoadKG * Share.LoadFraction;
+				SupportRows.Add(FString::Printf(TEXT("%d:%.6f"),
+					Share.SupportMemberId, Share.LoadFraction));
+			}
+			if (!FMath::IsNearlyEqual(FractionSum, 1.0, 1.0e-6))
+			{
+				OutError = TEXT("BeamD1StaticExternalLoadShareSum");
+				return false;
+			}
+			SupportRows.Sort();
+			SupportRow = FString::Join(SupportRows, TEXT("."));
+		}
+		LedgerRows.Add(FString::Printf(TEXT("%s:%.6f:%d:%s"),
+			*Load.StableId.ToString(), Load.StaticMassKG,
+			Load.bDirectGroundSupport ? 1 : 0, *SupportRow));
+	}
+	LedgerRows.Sort();
+	OutCertificate.ExternalLoadCount = ExternalLoads.Num();
+	OutCertificate.ExternalLoadLedgerHash = HashUtf8(
+		FString::Join(LedgerRows, TEXT("|")));
+
+	const TArray<FABTSM7MaterialProfile> MaterialProfiles =
+		FABTSM7MaterialProfileLibrary::MakeDefaultProfiles();
+	const FABTSM73BeamCMemberSelfLoadResolver Resolver =
+		[&Profile, &MaterialProfiles, &MaterialPolicy,
+			&AdditionalProxyLoadByMember](const FABTSM73BeamAMember& Member)
+		{
+			const double BodyProxy = ResolveMaterialAwareProxySelfLoad(
+				Profile, MaterialProfiles, MaterialPolicy, Member);
+			return BodyProxy + AdditionalProxyLoadByMember.FindRef(Member.MemberId);
+		};
+	FABTSM73BeamCGenerator Generator;
+	if (!Generator.Generate(Profile.BeamSettings, Stage5.CompactAssembly,
+		OutCertificate.LoadDAG, OutError, &Resolver))
+	{
+		OutError = FString::Printf(TEXT("BeamD1StaticExternalLoadDAG:%s"), *OutError);
+		return false;
+	}
+	const FABTSM73BeamCPreviewSummary& Summary = OutCertificate.LoadDAG.Summary;
+	if (!Summary.bAccepted
+		|| Summary.SupportResultantAdvisoryCount != 0
+		|| Summary.SupportResultantViolationCount != 0
+		|| Summary.SupportSpreadViolationCount != 0
+		|| Summary.ReactionBalanceViolationCount != 0
+		|| Summary.SpanViolationCount != 0
+		|| Summary.CantileverViolationCount != 0
+		|| Summary.ColumnSlendernessViolationCount != 0
+		|| Summary.LateralMechanismViolationCount != 0
+		|| Summary.GroundUnreachableNodeCount != 0
+		|| Summary.CycleNodeCount != 0
+		|| !FMath::IsNearlyEqual(
+			static_cast<double>(Summary.TotalSelfLoadKG)
+				+ OutCertificate.DirectGroundProxyLoadKG,
+			static_cast<double>(Summary.TotalGroundReactionKG)
+				+ OutCertificate.DirectGroundProxyLoadKG,
+			FMath::Max(0.05, static_cast<double>(Summary.TotalSelfLoadKG) * 1.0e-4)))
+	{
+		OutError = FString::Printf(
+			TEXT("BeamD1StaticExternalLoadFailClosed:Accepted=%d:Advisory=%d:Resultant=%d:Spread=%d:Reaction=%d:Span=%d:Cantilever=%d:Slender=%d:Lateral=%d:Unreachable=%d:Cycles=%d"),
+			Summary.bAccepted ? 1 : 0, Summary.SupportResultantAdvisoryCount,
+			Summary.SupportResultantViolationCount, Summary.SupportSpreadViolationCount,
+			Summary.ReactionBalanceViolationCount, Summary.SpanViolationCount,
+			Summary.CantileverViolationCount, Summary.ColumnSlendernessViolationCount,
+			Summary.LateralMechanismViolationCount,
+			Summary.GroundUnreachableNodeCount, Summary.CycleNodeCount);
+		return false;
+	}
+	OutCertificate.CertificateHash = HashUtf8(FString::Printf(
+		TEXT("Stage5=%llu|Ledger=%llu|Load=%lld|Count=%d|Mass=%.6f|GroundMass=%.6f|GroundProxy=%.6f|Advisory=%d"),
+		Stage5.ProductionIdentityHash, OutCertificate.ExternalLoadLedgerHash,
+		Summary.LoadDAGHash, OutCertificate.ExternalLoadCount,
+		OutCertificate.ExternalMassKG, OutCertificate.DirectGroundMassKG,
+		OutCertificate.DirectGroundProxyLoadKG,
+		Summary.SupportResultantAdvisoryCount));
+	OutCertificate.bAccepted = true;
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7.3-Beam-D1][StaticExternalLoadCertified]")
+		TEXT(" Profile=%s Tier=%d Seed=%d Loads=%d MassKG=%.3f DirectGroundKG=%.3f")
+		TEXT(" Nodes=%d Edges=%d Advisory=%d LedgerHash=%llu LoadHash=%lld Certificate=%llu Chaos=NotEvaluated"),
+		*Settings.GameplayProfileId.ToString(), Settings.DifficultyTier,
+		Settings.BuildingSeed, OutCertificate.ExternalLoadCount,
+		OutCertificate.ExternalMassKG, OutCertificate.DirectGroundMassKG,
+		OutCertificate.LoadDAG.Nodes.Num(), OutCertificate.LoadDAG.Edges.Num(),
+		Summary.SupportResultantAdvisoryCount,
+		OutCertificate.ExternalLoadLedgerHash, Summary.LoadDAGHash,
+		OutCertificate.CertificateHash);
 	return true;
 }
