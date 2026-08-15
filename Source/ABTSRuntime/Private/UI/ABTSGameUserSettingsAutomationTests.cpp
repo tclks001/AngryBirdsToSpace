@@ -52,6 +52,14 @@ bool FABTSGameUserSettingsContractTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Finite frame cap has a readable label"), UABTSGameViewportClient::FormatFrameRateLimit(120.0f), FString(TEXT("120 FPS")));
 	TestEqual(TEXT("Confirmation countdown rounds up"), UABTSGameViewportClient::ComputeConfirmationSecondsRemaining(12.0, 0.1), 12);
 	TestEqual(TEXT("Confirmation countdown clamps at zero"), UABTSGameViewportClient::ComputeConfirmationSecondsRemaining(12.0, 13.0), 0);
+	TestEqual(TEXT("Startup progress begins at zero"),
+		UABTSGameViewportClient::ComputeStartupLoadingProgress(0.0, false), 0.0f);
+	TestEqual(TEXT("Startup progress follows the 30 second target"),
+		UABTSGameViewportClient::ComputeStartupLoadingProgress(15.0, false), 0.5f);
+	TestEqual(TEXT("Startup progress remains capped before Ready"),
+		UABTSGameViewportClient::ComputeStartupLoadingProgress(90.0, false), 0.92f);
+	TestEqual(TEXT("Startup progress completes only at Ready"),
+		UABTSGameViewportClient::ComputeStartupLoadingProgress(1.0, true), 1.0f);
 	TestNotNull(TEXT("Engine constructed the configured ABTS settings class"), UABTSGameUserSettings::Get());
 	FString ViewportClass;
 	GConfig->GetString(TEXT("/Script/Engine.Engine"), TEXT("GameViewportClientClassName"), ViewportClass, GEngineIni);

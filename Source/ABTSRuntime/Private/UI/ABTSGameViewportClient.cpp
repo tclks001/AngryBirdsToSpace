@@ -10,6 +10,7 @@
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformMisc.h"
 #include "HAL/FileManager.h"
@@ -22,6 +23,7 @@
 #include "Misc/DateTime.h"
 #include "Misc/Paths.h"
 #include "RHI.h"
+#include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "UI/ABTSCanvasUI.h"
 #include "UI/ABTSGameUserSettings.h"
 #include "UI/ABTSUITheme.h"
@@ -121,6 +123,7 @@ void UABTSGameViewportClient::Init(
 	Super::Init(WorldContext, OwningGameInstance, bCreateNewAudioDevice);
 	MenuCanvas = NewObject<UCanvas>(this, TEXT("ABTSSystemMenuCanvas"));
 	RebuildResolutionOptions();
+	StartupForegroundStartSeconds = FPlatformTime::Seconds();
 
 	FString CapturePage;
 	bCaptureMode = FParse::Value(FCommandLine::Get(), TEXT("ABTSMenuCapture="), CapturePage);
@@ -173,6 +176,7 @@ void UABTSGameViewportClient::Init(
 void UABTSGameViewportClient::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	RefreshStartupWorldState();
 	EnsureInitialMenuState();
 	if (bMenuVisible) ApplyMenuInputMode();
 	if (ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo
@@ -181,11 +185,81 @@ void UABTSGameViewportClient::Tick(const float DeltaTime)
 	{
 		RevertVideoSettings(TEXT("Timeout"));
 	}
-	if (bCaptureMode && !bScreenshotRequested && FPlatformTime::Seconds() - CaptureStartSeconds > 45.0)
+	const double CaptureTimeoutSeconds = MenuPage == EABTSSystemMenuPage::Front ? 180.0 : 45.0;
+	if (bCaptureMode && !bScreenshotRequested
+		&& FPlatformTime::Seconds() - CaptureStartSeconds > CaptureTimeoutSeconds)
 	{
 		UE_LOG(LogABTSRuntime, Error, TEXT("[ABTS][SystemMenuCapture] Complete Success=0 Reason=Timeout Output=%s"), *CaptureOutputPath);
 		FGenericPlatformMisc::RequestExitWithStatus(false, 1);
 	}
+}
+
+float UABTSGameViewportClient::ComputeStartupLoadingProgress(
+	const double ElapsedSeconds,
+	const bool bReady)
+{
+	return bReady
+		? 1.0f
+		: FMath::Min(
+			static_cast<float>(FMath::Max(0.0, ElapsedSeconds) / 30.0),
+			0.92f);
+}
+
+void UABTSGameViewportClient::RefreshStartupWorldState()
+{
+	UWorld* GameWorld = GetWorld();
+	if (StartupTrackedWorld.Get() != GameWorld)
+	{
+		StartupTrackedWorld = GameWorld;
+		StartupForegroundStartSeconds = FPlatformTime::Seconds();
+		bStartupGateRequired = false;
+		bStartupWorldReady = false;
+		bStartupWorldFailed = false;
+		bStartupGateStartedLogged = false;
+		bStartupGateTerminalLogged = false;
+	}
+	if (GameWorld == nullptr || !GameWorld->HasBegunPlay()) return;
+
+	bool bFoundGate = false;
+	bool bAllReady = true;
+	bool bAnyFailed = false;
+	for (TActorIterator<AABTSM6SlingshotSystem> It(GameWorld); It; ++It)
+	{
+		bFoundGate = true;
+		bAllReady = bAllReady && It->IsStartupPhysicsWarmupComplete();
+		bAnyFailed = bAnyFailed || It->HasStartupPhysicsWarmupFailed();
+	}
+	bStartupGateRequired = bFoundGate;
+	bStartupWorldFailed = bFoundGate && bAnyFailed;
+	bStartupWorldReady = !bFoundGate || (bAllReady && !bAnyFailed);
+	if (bFoundGate && !bStartupGateStartedLogged)
+	{
+		bStartupGateStartedLogged = true;
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][StartupFlow] ForegroundGateStarted TargetSeconds=30"));
+	}
+	if (bFoundGate && (bStartupWorldReady || bStartupWorldFailed)
+		&& !bStartupGateTerminalLogged)
+	{
+		bStartupGateTerminalLogged = true;
+		if (bStartupWorldReady)
+		{
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][StartupFlow] ForegroundGateTerminal Ready=1 Failed=0 ElapsedSeconds=%.3f"),
+				FPlatformTime::Seconds() - StartupForegroundStartSeconds);
+		}
+		else
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][StartupFlow] ForegroundGateTerminal Ready=0 Failed=1 ElapsedSeconds=%.3f"),
+				FPlatformTime::Seconds() - StartupForegroundStartSeconds);
+		}
+	}
+}
+
+bool UABTSGameViewportClient::IsStartupInputBlocked() const
+{
+	return bStartupGateRequired && !bStartupWorldReady;
 }
 
 void UABTSGameViewportClient::EnsureInitialMenuState()
@@ -335,6 +409,13 @@ void UABTSGameViewportClient::OpenSettingsMenu(const EABTSSettingsSection Sectio
 void UABTSGameViewportClient::CloseSystemMenu()
 {
 	if (!bMenuVisible || bCaptureMode) return;
+	if (IsStartupInputBlocked())
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][StartupFlow] BeginBlocked Ready=0 Failed=%d"),
+			bStartupWorldFailed ? 1 : 0);
+		return;
+	}
 	SetMenuVisible(false, MenuPage);
 }
 
@@ -393,7 +474,16 @@ void UABTSGameViewportClient::ApplyMenuInputMode()
 		bInputStateCaptured = true;
 		MenuPlayerController = PC;
 	}
-	PC->SetPause(true);
+	// The foreground owns input during startup, but the authoritative M3/M7/M6
+	// generation and Chaos gates still need World Tick. Pause only at a terminal
+	// Ready/Failed state (or for an ordinary menu without a startup gate).
+	if (!bWorldWasPaused)
+	{
+		const bool bStartupGenerationRunning = bStartupGateRequired
+			&& !bStartupWorldReady
+			&& !bStartupWorldFailed;
+		PC->SetPause(!bStartupGenerationRunning);
+	}
 	PC->bShowMouseCursor = true;
 	FInputModeGameAndUI InputMode;
 	InputMode.SetHideCursorDuringCapture(false);
@@ -532,8 +622,39 @@ void UABTSGameViewportClient::DrawFrontOrPause(UCanvas& Canvas, const FVector2D&
 	int32 NavigationIndex = 0;
 	if (MenuPage == EABTSSystemMenuPage::Front)
 	{
-		DrawButton(Canvas, FBox2D(FVector2D(ButtonX, ButtonY), FVector2D(ButtonX + ButtonW, ButtonY + ButtonH)), TEXT("BEGIN EXPEDITION"), EHitAction::Begin, NavigationIndex++);
-		ButtonY += 88.0f * Scale;
+		const bool bCanBegin = !IsStartupInputBlocked();
+		DrawButton(Canvas,
+			FBox2D(FVector2D(ButtonX, ButtonY), FVector2D(ButtonX + ButtonW, ButtonY + ButtonH)),
+			bCanBegin ? TEXT("BEGIN EXPEDITION") : TEXT("GENERATING WORLD"),
+			EHitAction::Begin, NavigationIndex++, INDEX_NONE, 0, bCanBegin);
+		if (!bCanBegin)
+		{
+			const float Progress = ComputeStartupLoadingProgress(
+				FPlatformTime::Seconds() - StartupForegroundStartSeconds,
+				false);
+			const FBox2D Track(
+				FVector2D(ButtonX, ButtonY + ButtonH + 10.0f * Scale),
+				FVector2D(ButtonX + ButtonW, ButtonY + ButtonH + 20.0f * Scale));
+			Canvas.K2_DrawTexture(Canvas.DefaultTexture, Track.Min, Track.GetSize(),
+				FVector2D::ZeroVector, FVector2D::UnitVector,
+				Theme.SlotBorder, BLEND_Translucent);
+			const FBox2D Fill(Track.Min,
+				FVector2D(FMath::Lerp(Track.Min.X, Track.Max.X, Progress), Track.Max.Y));
+			Canvas.K2_DrawTexture(Canvas.DefaultTexture, Fill.Min, Fill.GetSize(),
+				FVector2D::ZeroVector, FVector2D::UnitVector,
+				bStartupWorldFailed ? Theme.Danger : Theme.AccentSecondary,
+				BLEND_Translucent);
+			const FString LoadingStatus = bStartupWorldFailed
+				? FString(TEXT("WORLD GENERATION FAILED // GAMEPLAY LOCKED"))
+				: FString::Printf(TEXT("LOADING %d%% // GAMEPLAY LOCKED UNTIL READY"),
+					FMath::RoundToInt(Progress * 100.0f));
+			DrawLabel(Canvas,
+				LoadingStatus,
+				FVector2D(ButtonX, Track.Max.Y + 10.0f * Scale),
+				0.54f * Scale,
+				bStartupWorldFailed ? Theme.Danger : Theme.TextMuted);
+		}
+		ButtonY += (bCanBegin ? 88.0f : 122.0f) * Scale;
 		DrawButton(Canvas, FBox2D(FVector2D(ButtonX, ButtonY), FVector2D(ButtonX + ButtonW, ButtonY + ButtonH)), TEXT("SETTINGS"), EHitAction::Settings, NavigationIndex++);
 	}
 	else
@@ -1080,6 +1201,7 @@ void UABTSGameViewportClient::ResetSettingsToDefaults()
 void UABTSGameViewportClient::MaybeRequestCapture()
 {
 	if (!bCaptureMode || bScreenshotRequested || CaptureFrameCount < 60 || !GetWorld() || !GetWorld()->HasBegunPlay()) return;
+	if (MenuPage == EABTSSystemMenuPage::Front && IsStartupInputBlocked()) return;
 	bScreenshotRequested = true;
 	ScreenshotDelegateHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddUObject(this, &UABTSGameViewportClient::HandleScreenshotProcessed);
 	FScreenshotRequest::RequestScreenshot(CaptureOutputPath, true, false, false, FIntRect(), true);
