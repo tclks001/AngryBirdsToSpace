@@ -376,3 +376,11 @@
 - 根因：两轴对角相邻只证明粗格中的候选联系，不能证明连续输入域内存在 F4 路径；若直接把 `Connectivity=6` 改为 `18`，还会静默重签旧 Scan/Certification/Bundle 身份。
 - 处理：保留生产 v2 六邻域语义和 Hash；v3 将六邻域 face component、18 邻域待证明桥边与递归闭包证据分层。只有全部必要桥到达冻结精度、未超预算且连续 F4 路径证据有效时才合并分量。
 - 防回归：`ABTS.M11B.Unit.ConnectivityBridgeClosureV3` 必须证明 v2 Hash 不变、v3 无证据 fail closed、策略/顺序/预算/证据均进入 Hash；功能工作树不得自行修改此稳定合同或把发现初判写成 Certified。
+
+## 18. Map Freeze V3 与 E1 Crystal 外载身份重冻
+
+| 现象 | 根因 | 修复 | 防回归验证 |
+| --- | --- | --- | --- |
+| V3 建筑注册成功，但五栋主星建筑仍坐在旧 V2 地形施工台上，地表可穿入柱脚 | V3 快照生成前仍需 V2 引导表面，但生产表面没有在快照完成后切换到 V3 的五个主星 Pad；月面 E1 又不应雕刻主星 | 按 `M3-JURY-009` 保留 V2 引导表面，只在 V3 快照成功后原子替换为五个 `PrimaryPlanet` Pad；E1 保持 `Satellite`，不生成主星 Pad。装饰净空与最终清距共同消费 V3 Bounds | `ABTS.M3.Jury.MapFreezeV3` 必须报告 `PrimaryPads=5 / SatellitePads=0`、最大施工面残差不超过 `0.5 cm`，Physical/Effect 装饰重叠均为 0；NullRHI 不能替代离屏或可见地形贴合检查 |
+| E1 增加两根 Crystal 座梁和组合外载认证后，Map Freeze 在 Chaos 前以 `FrozenCatalogMismatch` fail closed | 共享 V3 仍冻结旧 M7 Catalog、E1 Descriptor/Static/Production/Device/Bounds、Placement/Layout、Registration 与模块数；只修改 Chaos 夹具会伪造生产身份 | 接受 `M7-BC-129` 的 E1 双座梁与 `1023.12 kg` 组合外载身份，并在 Integration 原子更新 Catalog、逐项 DTO、E1 Placement、Layout、Registration 与 M6 共同门；E2–E6 Placement 保持不变。旧身份继续作为历史证据，不混入新结果 | 新冻结为 Catalog `2428875568906321995`、Layout `0x5485D3F22956AE41`、E1 Placement `0x6A303ACBBA0358DB`、Registration `13098783739158441303`、模块 `5748`；`ABTS.Contracts.WorldGeneration`、Map Freeze、Building Freeze 与 Static Joint Gate 必须同一候选全绿后，M7 才能从 E1 串行恢复 Chaos |
+| E1 新 Bounds 的水平 X/Y 均为 `324 cm`，Map Freeze 方向正确却被“所有建筑 Y 都严格长于 X”的测试拒绝 | 该断言把旧 E1 非方形几何误当成六栋的稳定合同；新双座梁让 E1 合法成为方形，朝向语义仍由 corridor 对 Site X 及其与冻结长轴正交证明 | 按 `M3-JURY-010` 将形状断言分层：五栋主星继续要求 Y 为长轴；卫星 E1 明确要求 X/Y 方形。六栋共同朝向断言不变 | 集成候选上的 `ABTS.M3.Jury.MapFreezeV3` 必须精确 `2/2`；重复重建保持 Layout 和六个 Placement Hash，E1 仍为 slot 4 / Satellite，且 `CorridorLongAxisAbsDot=0` |

@@ -1,8 +1,8 @@
 # JuryDemo Fixed-Six V1/V2/V3 世界生成合同
 
-> 状态：2026-08-15，V1/V2 保持兼容且生产仍为 V2；M7 Building Freeze V3 已验收，Integration V3 纯值 DTO 与结构交接门已发布。V3 Map Layout 尚未批准，不能进入生产。
+> 状态：2026-08-16，V1/V2 保持兼容；V3 已成为生产合同。当前候选已接受 E1 Crystal 双座梁与外载认证并完成原子 Map/Registration 身份重冻，等待最终集成门和 M7 生产 Chaos。
 >
-> 发布身份：`JuryDemoFixedSixV2 / StaticJointAccepted / ChaosNotEvaluated`；交接身份：`JuryDemoFixedSixV3 / StructurallyUsable / MapFreezePending`；兼容身份：`JuryDemoFixedSixV1`。
+> 发布身份：`JuryDemoFixedSixV3 / MapFreezeRefrozen / ChaosPending`；兼容身份：`JuryDemoFixedSixV1/V2`。
 
 ## 1. 目标与非目标
 
@@ -19,6 +19,15 @@
 - M7 静态 Registration Result Hash：`3948236352584381910`
 - 六栋静态模块：`5736` 块积木实例 + `6` 个静态装置 = `5742`
 - 有序 Encounter：`E1`～`E6`，恰好六条
+
+V3 当前生产身份：
+
+- Placement Schema / Catalog：`3 / 2428875568906321995`
+- Layout Hash：`0x5485D3F22956AE41`
+- 六个 Placement Hash：`A91A9FB5D79AE1CE / 4C41612002CC0208 / 8ACA9CA9BAFE95BD / 66C8FD0EF4ACD5F2 / 6A303ACBBA0358DB / 73BC7FE74D3835F7`
+- Registration Result Hash：`13098783739158441303`
+- 六栋静态模块：`5748`，其中 E1 唯一一个 `72×72×72 cm` Crystal cap
+- 有序 Encounter：`E2/E3/E4/E5/E1/E6`，E1 为 `Tier0 + Slot4 + Satellite`
 
 ## 2. 兼容策略
 
@@ -45,9 +54,9 @@ V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身�
 
 ### 2.2 V3 结构交接与生产隔离
 
-V3 固定 `Schema=3`、Catalog `8960617043786800590` 和顺序 `E2/E3/E4/E5/E1/E6`，但不预填 M3 Layout Hash。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。
+V3 固定 `Schema=3`、Catalog `2428875568906321995`、Layout `0x5485D3F22956AE41` 和顺序 `E2/E3/E4/E5/E1/E6`。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。
 
-这只是 M3 handoff 门。生产级 `IsUsable()` 当前仍只接受 V1/V2，`ProductionContractVersion=2`；因此半填 V3、任意非零占位 Layout，乃至结构完整但尚未被 Integration 批准的 V3，都不能被生产消费者接受。
+结构门只证明 DTO 完整；生产级 `IsUsable()` 还要求上述精确 Layout 与六个 Placement Hash。`ProductionContractVersion=3`；半填 V3、任意非零占位 Layout 或旧 Catalog 都必须 fail closed。V1/V2 继续用于兼容读取和历史回归，不得覆盖 V3 生产结果。
 
 ## 3. DTO
 

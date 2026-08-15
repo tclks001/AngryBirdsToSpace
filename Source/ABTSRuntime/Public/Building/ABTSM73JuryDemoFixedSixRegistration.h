@@ -57,8 +57,8 @@ class ABTSRUNTIME_API FABTSM73JuryDemoFixedSixRegistration
 {
 public:
 	static constexpr uint64 FrozenV3RegistrationResultHash =
-		4923733484321510334ull;
-	static constexpr int32 FrozenV3StaticModuleCount = 5746;
+		13098783739158441303ull;
+	static constexpr int32 FrozenV3StaticModuleCount = 5748;
 
 	static bool BuildStaticPlan(
 		const FABTSBuildingGenerationContract& Contract,
