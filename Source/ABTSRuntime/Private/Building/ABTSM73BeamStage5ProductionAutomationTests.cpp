@@ -79,7 +79,8 @@ namespace ABTSM73BeamStage5Tests
 			Result.Stage4ActiveMemberCount, Frozen.ActiveMemberCount);
 		const int32 ExpectedProductionCount = Result.Stage4ActiveMemberCount
 			+ Result.ReachabilitySupportPostCount
-			+ Result.StructuralClosureMemberCount;
+			+ Result.StructuralClosureMemberCount
+			+ Result.CrystalSeatMemberIds.Num();
 		Test.TestEqual(*(Prefix + TEXT(" explicit production count")),
 			Result.CompactAssembly.Members.Num(), ExpectedProductionCount);
 		Test.TestEqual(*(Prefix + TEXT(" brick count")),
@@ -95,6 +96,11 @@ namespace ABTSM73BeamStage5Tests
 			Result.LoadDAG.Summary.GroundUnreachableNodeCount, 0);
 		Test.TestEqual(*(Prefix + TEXT(" no DAG cycles")),
 			Result.LoadDAG.Summary.CycleNodeCount, 0);
+		Test.TestEqual(*(Prefix + TEXT(" no resultant advisories before Chaos")),
+			Result.LoadDAG.Summary.SupportResultantAdvisoryCount, 0);
+		const bool bE1 = Entry.Id == EABTSM73BeamDemoBuilding::E1ColumnBreak;
+		Test.TestEqual(*(Prefix + TEXT(" crystal seat scope")),
+			Result.CrystalSeatMemberIds.Num(), bE1 ? 2 : 0);
 		Test.TestEqual(*(Prefix + TEXT(" no weakness candidates")),
 			Result.Summary.WeaknessCandidateCount, 0);
 		Test.TestEqual(*(Prefix + TEXT(" no device roles")),
@@ -125,8 +131,8 @@ namespace ABTSM73BeamStage5Tests
 			SuppressedMappingCount, Result.SuppressedStage4MemberCount);
 		Test.AddInfo(FString::Printf(
 			TEXT("Stage5:%s:Profile=%s:Tier=%d:Seed=%d:Stage4=%d:Suppressed=%d")
-			TEXT(":Stage4Active=%d:Reachability=%d:StructuralClosure=%d")
-			TEXT(":Production=%d:Contacts=%d:Ground=%d:Geometry=%llu:Bearing=%llu:Load=%lld:ProductionHash=%llu:Chaos=NotEvaluated"),
+			TEXT(":Stage4Active=%d:Reachability=%d:StructuralClosure=%d:CrystalSeats=%d")
+			TEXT(":Production=%d:Contacts=%d:Ground=%d:Advisory=%d:Geometry=%llu:Bearing=%llu:Load=%lld:ProductionHash=%llu:Chaos=NotEvaluated"),
 			*Entry.StableId.ToString(),
 			*Entry.Settings.GameplayProfileId.ToString(),
 			Entry.Settings.DifficultyTier, Entry.Settings.BuildingSeed,
@@ -135,9 +141,11 @@ namespace ABTSM73BeamStage5Tests
 			Result.Stage4ActiveMemberCount,
 			Result.ReachabilitySupportPostCount,
 			Result.StructuralClosureMemberCount,
+			Result.CrystalSeatMemberIds.Num(),
 			Result.CompactAssembly.Members.Num(),
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Summary.GroundNodeCount,
+			Result.LoadDAG.Summary.SupportResultantAdvisoryCount,
 			Result.ActiveGeometryHash, Result.BearingDAGHash,
 			Result.LoadDAG.Summary.LoadDAGHash,
 			Result.ProductionIdentityHash));

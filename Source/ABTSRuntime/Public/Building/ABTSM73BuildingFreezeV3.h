@@ -15,7 +15,7 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3OBB
 	FVector ContentZAxisInSite = FVector::UpVector;
 };
 
-/** The single E1 gameplay cap. It is deliberately outside the Beam load DAG. */
+/** The single E1 gameplay cap. It is not a bearing member, but its mass is an audited external load. */
 struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3CapBinding
 {
 	FABTSM7BrickSpec BrickSpec;
@@ -24,6 +24,8 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3CapBinding
 	bool bLoadBearing = false;
 	bool bWeaknessCandidate = false;
 	EABTSM73BeamD1DeviceRole DeviceRole = EABTSM73BeamD1DeviceRole::None;
+	TArray<int32> SupportingMemberIds;
+	bool bStaticExternalLoadCertified = false;
 };
 
 struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3MaterialHistogram
@@ -67,6 +69,14 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3Descriptor
 
 	uint64 SourceStage5ProductionHash = 0;
 	uint64 SourceDeviceAssemblyHash = 0;
+	bool bStaticExternalLoadCertified = false;
+	int32 StaticExternalLoadCount = 0;
+	double StaticExternalMassKG = 0.0;
+	double StaticDirectGroundMassKG = 0.0;
+	int32 StaticSupportResultantAdvisoryCount = 0;
+	uint64 StaticExternalLoadLedgerHash = 0;
+	uint64 StaticExternalLoadDAGHash = 0;
+	uint64 StaticExternalLoadCertificateHash = 0;
 	uint64 StaticGeometryHash = 0;
 	uint64 DescriptorHash = 0;
 	uint64 ProductionHash = 0;
@@ -90,6 +100,7 @@ struct ABTSRUNTIME_API FABTSM73BuildingFreezeV3FrozenIdentity
 	FBox EffectBounds = FBox(EForceInit::ForceInit);
 	uint64 SourceStage5ProductionHash = 0;
 	uint64 SourceDeviceAssemblyHash = 0;
+	uint64 StaticExternalLoadCertificateHash = 0;
 	uint64 StaticGeometryHash = 0;
 	uint64 ProductionHash = 0;
 	uint64 DescriptorHash = 0;
@@ -105,7 +116,7 @@ public:
 	static constexpr double CrystalCapExtentCM = 72.0;
 	static constexpr int32 FrozenSourceManifestVersion = 1;
 	static constexpr int64 FrozenSourceManifestHash = 2324068295;
-	static constexpr uint64 FrozenCatalogHash = 8960617043786800590ull;
+	static constexpr uint64 FrozenCatalogHash = 2428875568906321995ull;
 
 	static const TArray<FABTSM73BuildingFreezeV3FrozenIdentity>&
 		GetFrozenIdentities();
