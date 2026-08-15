@@ -649,6 +649,32 @@ Hydrology 只把“哪些 Cell 边跨越大圆切面”保存在 `FABTSM3CellEdg
 - 固定地图 fresh NullRHI 必须出现 `PlacementReady=1 Seed=312503 Candidate=4 Buildings=6 ReservedPadCells=<正数>`，且不得出现 `Placement rejected`。
 - 最终证据 `M3Jury-FixedMap-Final-20260815-122339-605-FreshRuntime.log` 得到 `ReservedPadCells=52`、`LayoutHash=8AB8D7E4F094072D`；E3 从 Target Cell `2782` 解析到 Pad Center Cell `702`，E5 从 `3368` 解析到 `3367`，其余四栋保持 Target Anchor。
 
+### M3-JURY-003：V2 动态效果包络必须独立于静态 Pad 预留
+
+**现象**
+
+M7 V2 保持六栋 PhysicalBounds 和静态 Pad 不变，但六栋 EffectBounds 均至少在一个水平轴超出 Pad。若 M3 只替换 Descriptor/Geometry Hash 而不消费 EffectBounds，设备运动空间可能穿过道路、水体或相邻建筑；若直接放大静态 Pad，又会改变 M7 已冻结的 36 cm 静态落脚边界。
+
+**根因**
+
+V2 将“静态建筑落脚空间”和“激活后设备/效果运动空间”明确拆成两个语义。`bDynamicEnvelopeRequired=true` 表示 M3/Integration 必须额外保留动态空间，但不授权修改 M7 的 PhysicalBounds、Pad 或 Chaos 状态。
+
+**修复**
+
+- M3 Fixture 切到 Contract V2 / Catalog `11501529584318250152`，逐栋更新 Descriptor、StaticGeometry、ProductionIdentity 与 DeviceAssembly Hash，并保存 PhysicalBounds、EffectBounds；
+- 对静态 Pad 和动态 EffectBounds 分别执行旋转后的 `3 × 3` Cell 采样，动态结果保存为 `ReservedDynamicEnvelopeCellIds`，两组列表分别进入 Placement/Layout Hash；
+- 动态样本命中最终道路或水域时以 `DynamicEnvelopeReservationFailed` 拒绝；建筑间距使用静态 Pad 与动态水平外接半径的较大值，过近时以 `DynamicEnvelopeSeparationFailed` 拒绝；
+- 不修改集成工作树拥有的稳定合同和 Adapter。M3 发布最终 Hash 后，由 Integration 把当前 V1 Adapter 加法式切到 V2。
+
+**防回归验证**
+
+- Development Editor 与 `-ForceUnity -DisableAdaptiveUnity` 均完整链接成功；
+- `M3Jury-V2-FixedSix-Final-20260815-160925-970-FreshAutomation.log`：`ABTS.M3.Monthly.JuryFixedSix` 精确 `2/2 Success`，逐栋校验全部 V2 Hash、36 cm Pad 边界、动态预留及 Hash tamper；
+- `M3Jury-V2-ContractValidation-20260815-160449-888-FreshAutomation.log`：稳定合同 `Validation` 精确 `1/1 Success`；
+- `M3Jury-V2-FinaleRegression-20260815-161028-955-FreshAutomation.log`：`ABTS.M110.TaskGraphFinaleSeparation` 精确 `1/1 Success`；
+- 两次固定地图 fresh NullRHI 日志 `M3Jury-V2-FixedMap-20260815-160534-710-FreshRuntime.log` / `M3Jury-V2-FixedMap-Repeat-20260815-160617-483-FreshRuntime.log` 均得到 `Buildings=6`、`ReservedPadCells=52`、`ReservedDynamicEnvelopeCells=40`、`LayoutHash=7029074579FDC52E`，且无 `Placement rejected`；
+- V2 使 E3 Pad Center 从 V1 的 Cell `702` 移到 `703`；这是动态包络避让后的确定性新身份，不得继续使用旧 V1 Layout Hash。
+
 ## 14. 新条目模板
 
 ```markdown

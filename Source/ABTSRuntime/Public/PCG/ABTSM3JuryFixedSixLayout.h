@@ -20,7 +20,9 @@ enum class EABTSM3JuryFixedSixRejectReason : uint8
 	PlacementFrameInvalid = 6,
 	PadReservationFailed = 7,
 	PadSeparationFailed = 8,
-	HashMismatch = 9
+	DynamicEnvelopeReservationFailed = 9,
+	DynamicEnvelopeSeparationFailed = 10,
+	HashMismatch = 11
 };
 
 /**
@@ -51,6 +53,14 @@ struct ABTSRUNTIME_API FABTSM3JuryBuildingPlacementFixture
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	FBox LocalBounds = FBox(EForceInit::ForceInit);
 
+	/** Frozen production physical envelope; V2 requires this to equal LocalBounds. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	FBox PhysicalBounds = FBox(EForceInit::ForceInit);
+
+	/** Local-space dynamic device/effect envelope; kept separate from the static pad. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six",
 		meta = (Units = "cm"))
 	FVector2D RequiredPadHalfExtentCM = FVector2D::ZeroVector;
@@ -59,7 +69,16 @@ struct ABTSRUNTIME_API FABTSM3JuryBuildingPlacementFixture
 	int64 StaticGeometryHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int64 ProductionIdentityHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int64 DeviceAssemblyHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int64 SourceDescriptorHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	bool bDynamicEnvelopeRequired = false;
 };
 
 USTRUCT(BlueprintType)
@@ -113,8 +132,30 @@ struct ABTSRUNTIME_API FABTSM3JuryBuildingPlacement
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	TArray<int32> ReservedPadCellIds;
 
+	/** Sorted candidate cells touched by the separate V2 dynamic effect envelope. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	TArray<int32> ReservedDynamicEnvelopeCellIds;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	FBox PhysicalBounds = FBox(EForceInit::ForceInit);
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int64 StaticGeometryHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int64 ProductionIdentityHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int64 DeviceAssemblyHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int64 SourceDescriptorHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	bool bDynamicEnvelopeRequired = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int64 PlacementHash = 0;
@@ -126,7 +167,10 @@ struct ABTSRUNTIME_API FABTSM3JuryFixedSixLayoutResult
 	GENERATED_BODY()
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
-	int32 SchemaVersion = 1;
+	int32 SchemaVersion = 2;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	int32 FixedSixContractVersion = 2;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
 	int32 WorldSeed = 0;
@@ -169,7 +213,8 @@ struct ABTSRUNTIME_API FABTSM3JuryFixedSixLayoutResult
 class ABTSRUNTIME_API FABTSM3JuryFixedSixLayoutBuilder
 {
 public:
-	static constexpr int32 SchemaVersion = 1;
+	static constexpr int32 SchemaVersion = 2;
+	static constexpr int32 FixedSixContractVersion = 2;
 	static constexpr int32 ExpectedEncounterCount = 6;
 	static constexpr int32 FrozenWorldSeed = 312503;
 	static constexpr int32 FrozenSourceCandidateId = 4;
@@ -177,7 +222,7 @@ public:
 	static constexpr int32 M7SourceManifestVersion = 1;
 	static constexpr int64 M7SourceManifestHash = 2324068295ll;
 	static constexpr uint64 M7PlacementCatalogHash =
-		13889440156022460967ull;
+		11501529584318250152ull;
 	static constexpr uint64 FrozenSourceSpatialResultHash =
 		0x16A44AF72C58261Eull;
 	static constexpr uint64 FrozenSourceSpatialCandidateHash =

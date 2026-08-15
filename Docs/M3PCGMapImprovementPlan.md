@@ -1,6 +1,6 @@
 # M3R PCG 地图生成改进方案
 
-> 2026-08-15 DDL 路线：本次交付切换为 `JuryDemoFixedSixV1`。M7 Stage 4.5 已冻结六条静态放置描述；M3 固定 Seed `312503` / Candidate `4` 并只验证 E1–E6 的 Transform、真实 Pad、道路/水体避让与 Layout Hash。Weakness、AttackFace、Prior-tier Infeasibility、全 Ballistic Witness、M7 全种子可行性及旧 R7 的 1000/20/3 Seed 门均延后，不阻塞本次评审路径。详见 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md)。
+> 2026-08-15 DDL 路线：本次交付已更新为 `JuryDemoFixedSixV2`。M7 已冻结六栋静态生产封装并发布 V2 身份与 Physical/Effect Bounds；M3 固定 Seed `312503` / Candidate `4`，分别预留静态 Pad 与动态 EffectBounds，验证 E1–E6 的 Transform、道路/水体/相邻建筑避让并重新冻结 Layout Hash。Weakness、AttackFace、Prior-tier Infeasibility、全 Ballistic Witness、M7 全种子可行性及旧 R7 的 1000/20/3 Seed 门均延后，不阻塞本次评审路径。详见 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md)。
 > 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层、R-5.1 卫星/E5 候选预览及 R-5.2 道路末端终局锚点提案已达到 M3LocalAccepted（IntegrationPending）
 > 日期：2026-08-02
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
