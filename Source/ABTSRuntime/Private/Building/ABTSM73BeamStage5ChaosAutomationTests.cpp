@@ -8,6 +8,8 @@
 #include "ABTSM7PenetrationValidator.h"
 #include "ABTSRuntime.h"
 #include "Building/ABTSM73BeamDemoManifest.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
+#include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "Components/StaticMeshComponent.h"
@@ -113,18 +115,22 @@ namespace ABTSM73BeamStage5ChaosTests
 	uint32 ComputeFixtureCrc32(
 		const FABTSM73BeamDemoManifestEntry& Entry,
 		const FABTSM73BeamD1Stage5Result& Result,
+		const FABTSM73BuildingFreezeV3Descriptor& Descriptor,
+		const FABTSM73JuryDemoFixedSixStaticEntry& StaticEntry,
 		const FABTSJuryDemoFixedSixBuildingSite& Site,
-		const FVector& PlanetCenter,
+		const FVector& SupportCenter,
 		const uint32 BodyProfileHash,
 		const uint32 WorldProfileHash)
 	{
 		const FVector Location = Site.WorldTransform.GetLocation();
 		const FQuat Rotation = Site.WorldTransform.GetRotation();
 		const FString Canonical = FString::Printf(
-			TEXT("BeamStage5ChaosProductionIdentity:v2:Entry=%s:Tier=%d:Seed=%d:Production=%llu")
-			TEXT(":ContractEnvelopeProduction=%llu:Contract=%d:Layout=%llu:Site=%d:Location=%d,%d,%d")
-			TEXT(":Rotation=%d,%d,%d,%d:PlanetCenter=%d,%d,%d")
-			TEXT(":Bricks=%d:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
+			TEXT("BeamStage5ChaosProductionIdentity:v3:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
+			TEXT(":Descriptor=%llu:Static=%llu:Production=%llu:Device=%llu")
+			TEXT(":ContractEnvelopeProduction=%llu:Contract=%d:Layout=%llu:Placement=%llu")
+			TEXT(":EncounterSlot=%d:Surface=%d:GravityAuthority=%s:GravityHash=%llu:Location=%d,%d,%d")
+			TEXT(":Rotation=%d,%d,%d,%d:SupportCenter=%d,%d,%d:SupportRadius=%d")
+			TEXT(":Bricks=%d:Devices=%d:Caps=%d:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
 			TEXT(":OuterDT=%d:Min=%d:Hold=%d:Max=%d:Lin=%d:Ang=%d")
 			TEXT(":Drift=%d:Settle=%d:Rot=%d:BodyHash=%u:WorldHash=%u")
 			TEXT(":GravityModel=RadialConstantAcceleration:Gravity=%d:SupportMaterial=ProductionTerrainDefault"),
@@ -132,10 +138,18 @@ namespace ABTSM73BeamStage5ChaosTests
 			Entry.Settings.DifficultyTier,
 			Entry.Settings.BuildingSeed,
 			Result.ProductionIdentityHash,
-			Site.V2Envelope.ProductionIdentityHash,
-			FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion,
-			FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash,
+			Descriptor.DescriptorHash,
+			Descriptor.StaticGeometryHash,
+			Descriptor.ProductionHash,
+			Descriptor.SourceDeviceAssemblyHash,
+			Site.V3Envelope.ProductionIdentityHash,
+			FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion,
+			FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash,
+			Site.V3Envelope.PlacementHash,
 			Site.EncounterIndex,
+			static_cast<int32>(Site.V3Envelope.SurfaceKind),
+			*Site.V3Envelope.GravityAuthorityId.ToString(),
+			Site.V3Envelope.GravityIdentityHash,
 			FMath::RoundToInt(Location.X * 1000.0),
 			FMath::RoundToInt(Location.Y * 1000.0),
 			FMath::RoundToInt(Location.Z * 1000.0),
@@ -143,10 +157,13 @@ namespace ABTSM73BeamStage5ChaosTests
 			FMath::RoundToInt(Rotation.Y * 1000000.0),
 			FMath::RoundToInt(Rotation.Z * 1000000.0),
 			FMath::RoundToInt(Rotation.W * 1000000.0),
-			FMath::RoundToInt(PlanetCenter.X * 1000.0),
-			FMath::RoundToInt(PlanetCenter.Y * 1000.0),
-			FMath::RoundToInt(PlanetCenter.Z * 1000.0),
-			Result.Bricks.Num(),
+			FMath::RoundToInt(SupportCenter.X * 1000.0),
+			FMath::RoundToInt(SupportCenter.Y * 1000.0),
+			FMath::RoundToInt(SupportCenter.Z * 1000.0),
+			FMath::RoundToInt(Site.V3Envelope.SupportRadiusCM * 1000.0),
+			StaticEntry.Bricks.Num(),
+			StaticEntry.Devices.Num(),
+			StaticEntry.Caps.Num(),
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Summary.GroundNodeCount,
 			Result.Summary.SupportResultantAdvisoryCount,
@@ -389,8 +406,6 @@ namespace ABTSM73BeamStage5ChaosTests
 			return false;
 		}
 		JuryPlanet->WorldSeed = FABTSJuryDemoFixedSixContract::FrozenWorldSeed;
-		JuryPlanet->SurfaceSubdivision = 1;
-		JuryPlanet->InstancesPerCell = 0;
 		if (!Test.TestTrue(TEXT("Frozen M3 Fixed-Six world rebuilds"),
 			JuryPlanet->RebuildPlanet()))
 		{
@@ -402,25 +417,100 @@ namespace ABTSM73BeamStage5ChaosTests
 		{
 			return false;
 		}
-		const int32 SiteIndex = static_cast<int32>(Entry.Id) - 1;
-		if (!Test.TestTrue(TEXT("Frozen contract contains the requested site"),
-			ProductionContract.JuryDemoFixedSix.Sites.IsValidIndex(SiteIndex)))
+		Test.TestEqual(TEXT("Map Freeze exports the V3 production contract"),
+			ProductionContract.JuryDemoFixedSix.ContractVersion,
+			FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion);
+		Test.TestEqual(TEXT("Map Freeze exports the V3 production layout"),
+			ProductionContract.JuryDemoFixedSix.LayoutHash,
+			FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash);
+
+		FABTSM73BuildingFreezeV3Descriptor Descriptor;
+		if (!Test.TestTrue(TEXT("Frozen V3 production descriptor resolves"),
+			FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				Entry.Id, Descriptor, Error)))
+		{
+			Test.AddError(Error);
+			return false;
+		}
+		Test.TestEqual(TEXT("V3 descriptor keeps the Stage-5 source identity"),
+			Descriptor.SourceStage5ProductionHash,
+			static_cast<uint64>(Result.ProductionIdentityHash));
+
+		FABTSM73JuryDemoFixedSixStaticPlan StaticPlan;
+		if (!Test.TestTrue(TEXT("Production V3 static plan resolves"),
+			FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
+				ProductionContract, StaticPlan, Error)))
+		{
+			Test.AddError(Error);
+			return false;
+		}
+		Test.TestEqual(TEXT("Production V3 registration identity is frozen"),
+			StaticPlan.RegistrationResultHash,
+			FABTSM73JuryDemoFixedSixRegistration::
+				FrozenV3RegistrationResultHash);
+
+		const int32 SiteIndex =
+			ProductionContract.JuryDemoFixedSix.Sites.IndexOfByPredicate(
+				[&Entry](const FABTSJuryDemoFixedSixBuildingSite& Candidate)
+				{
+					return Candidate.ManifestEntryId == Entry.StableId;
+				});
+		const int32 StaticEntryIndex = StaticPlan.Entries.IndexOfByPredicate(
+			[&Entry](const FABTSM73JuryDemoFixedSixStaticEntry& Candidate)
+			{
+				return Candidate.ManifestEntryId == Entry.StableId;
+			});
+		if (!Test.TestTrue(TEXT("V3 contract contains the requested complexity"),
+			ProductionContract.JuryDemoFixedSix.Sites.IsValidIndex(SiteIndex))
+			|| !Test.TestTrue(TEXT("V3 static plan contains the requested complexity"),
+				StaticPlan.Entries.IsValidIndex(StaticEntryIndex)))
 		{
 			return false;
 		}
 		const FABTSJuryDemoFixedSixBuildingSite Site =
 			ProductionContract.JuryDemoFixedSix.Sites[SiteIndex];
-		const FVector PlanetCenter = JuryPlanet->GetPlanetCenterWorld();
-		const bool bContractProductionEnvelopeMatches =
-			Site.V2Envelope.ProductionIdentityHash
-				== static_cast<uint64>(Result.ProductionIdentityHash);
-		Test.AddInfo(FString::Printf(
-			TEXT("PositionAuthority=M3FrozenV2 GeometryAuthority=M7CurrentProduction ContractProductionEnvelopeMatches=%d ContractProductionHash=%llu CurrentProductionHash=%llu"),
-			bContractProductionEnvelopeMatches ? 1 : 0,
-			Site.V2Envelope.ProductionIdentityHash,
-			Result.ProductionIdentityHash));
-		Test.TestEqual(TEXT("Frozen site keeps the manifest seed"),
+		const FABTSM73JuryDemoFixedSixStaticEntry& StaticEntry =
+			StaticPlan.Entries[StaticEntryIndex];
+		const FVector SupportCenter = Site.V3Envelope.SupportCenterWorldCM;
+		const bool bExpectedSatellite = Entry.Id
+			== EABTSM73BeamDemoBuilding::E1ColumnBreak;
+		const EABTSJuryDemoFixedSixSurfaceKind ExpectedSurface =
+			bExpectedSatellite
+				? EABTSJuryDemoFixedSixSurfaceKind::Satellite
+				: EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet;
+		Test.TestEqual(TEXT("Complexity resolves its frozen V3 surface"),
+			Site.V3Envelope.SurfaceKind, ExpectedSurface);
+		Test.TestEqual(TEXT("Complexity resolves its independent encounter slot"),
+			Site.EncounterIndex, Descriptor.EncounterSlot);
+		Test.TestEqual(TEXT("V3 site keeps the manifest seed"),
 			Site.DeterministicSeed, Entry.Settings.BuildingSeed);
+		Test.TestEqual(TEXT("V3 contract and production plan share descriptor identity"),
+			Site.DescriptorHash, StaticEntry.DescriptorHash);
+		Test.TestEqual(TEXT("V3 contract and production plan share static geometry"),
+			Site.V3Envelope.StaticGeometryHash,
+			StaticEntry.StaticGeometryHash);
+		Test.TestEqual(TEXT("V3 contract and production plan share production identity"),
+			Site.V3Envelope.ProductionIdentityHash,
+			StaticEntry.ProductionIdentityHash);
+		Test.TestEqual(TEXT("V3 contract and production plan share device identity"),
+			Site.V3Envelope.DeviceAssemblyHash,
+			StaticEntry.DeviceAssemblyHash);
+		Test.TestTrue(TEXT("V3 gravity authority is explicit"),
+			!Site.V3Envelope.GravityAuthorityId.IsNone()
+				&& Site.V3Envelope.GravityIdentityHash != 0
+				&& !SupportCenter.ContainsNaN()
+				&& Site.V3Envelope.SupportRadiusCM > 0.0);
+		Test.AddInfo(FString::Printf(
+			TEXT("PositionAuthority=M3MapFreezeV3 GeometryAuthority=M7BuildingFreezeV3")
+			TEXT(" Complexity=%s EncounterSlot=%d Surface=%d GravityAuthority=%s")
+			TEXT(" GravityHash=%llu PlacementHash=%llu Descriptor=%llu Static=%llu Production=%llu Device=%llu"),
+			*Entry.StableId.ToString(), Site.EncounterIndex,
+			static_cast<int32>(Site.V3Envelope.SurfaceKind),
+			*Site.V3Envelope.GravityAuthorityId.ToString(),
+			Site.V3Envelope.GravityIdentityHash,
+			Site.V3Envelope.PlacementHash, StaticEntry.DescriptorHash,
+			StaticEntry.StaticGeometryHash, StaticEntry.ProductionIdentityHash,
+			StaticEntry.DeviceAssemblyHash));
 		if (Test.HasAnyErrors())
 		{
 			return false;
@@ -458,12 +548,14 @@ namespace ABTSM73BeamStage5ChaosTests
 
 		TArray<AABTSM7BuildingModule*> Modules;
 		TArray<FTransform> InitialTransforms;
-		Modules.Reserve(Result.Bricks.Num());
-		InitialTransforms.Reserve(Result.Bricks.Num());
+		const int32 ExpectedBodyCount = StaticEntry.Bricks.Num()
+			+ StaticEntry.Devices.Num() + StaticEntry.Caps.Num();
+		Modules.Reserve(ExpectedBodyCount);
+		InitialTransforms.Reserve(ExpectedBodyCount);
 		FBox GroundSupportBounds(EForceInit::ForceInit);
 		double TotalMassKG = 0.0;
 		FVector MassMoment = FVector::ZeroVector;
-		for (const FABTSM73BeamD1BrickBinding& Brick : Result.Bricks)
+		for (const FABTSM73BeamD1BrickBinding& Brick : StaticEntry.Bricks)
 		{
 			const FTransform BrickWorldTransform =
 				Brick.LocalTransform * Site.WorldTransform;
@@ -502,8 +594,51 @@ namespace ABTSM73BeamStage5ChaosTests
 				*Brick.LocalTransform.GetLocation().ToString(),
 				*Brick.BrickSpec.DimensionsCM.ToString());
 		}
-		Test.TestEqual(TEXT("Stage-5 dynamic body count matches production"),
-			Modules.Num(), Result.Bricks.Num());
+		for (const FABTSM73BeamD1DeviceBinding& Device : StaticEntry.Devices)
+		{
+			AABTSM7BuildingModule* Module = MaterialSystem->SpawnVoxelDevice(
+				Device.DeviceSpec, Device.LocalTransform * Site.WorldTransform);
+			if (!Test.TestNotNull(TEXT("V3 device spawns through the production module path"),
+				Module))
+			{
+				return false;
+			}
+			Module->SetContactDamageGraceSeconds(MaximumObservationSeconds + 1.0f);
+			UStaticMeshComponent* Mesh = Module->GetMeshComponent();
+			if (!Test.TestNotNull(TEXT("V3 device owns a collision mesh"), Mesh))
+			{
+				return false;
+			}
+			const double MassKG = Mesh->GetBodyInstance()->GetBodyMass();
+			TotalMassKG += MassKG;
+			MassMoment += Device.LocalTransform.GetLocation() * MassKG;
+			Modules.Add(Module);
+			InitialTransforms.Add(Module->GetActorTransform());
+		}
+		for (const FABTSM73BuildingFreezeV3CapBinding& Cap : StaticEntry.Caps)
+		{
+			AABTSM7BuildingModule* Module = MaterialSystem->SpawnBrickModule(
+				Cap.BrickSpec, Cap.SiteLocalTransform * Site.WorldTransform);
+			if (!Test.TestNotNull(TEXT("V3 cap spawns through the production module path"),
+				Module))
+			{
+				return false;
+			}
+			Module->SetContactDamageGraceSeconds(MaximumObservationSeconds + 1.0f);
+			UStaticMeshComponent* Mesh = Module->GetMeshComponent();
+			if (!Test.TestNotNull(TEXT("V3 cap owns a collision mesh"), Mesh))
+			{
+				return false;
+			}
+			const double MassKG = Mesh->GetBodyInstance()->GetBodyMass();
+			TotalMassKG += MassKG;
+			MassMoment += Cap.SiteLocalTransform.GetLocation() * MassKG;
+			Modules.Add(Module);
+			InitialTransforms.Add(Module->GetActorTransform());
+		}
+		Test.TestEqual(TEXT("V3 dynamic body count matches production"),
+			Modules.Num(), StaticEntry.Bricks.Num()
+				+ StaticEntry.Devices.Num() + StaticEntry.Caps.Num());
 		const FABTSM7PenetrationValidationStats Penetration =
 			MaterialSystem->ValidateAndRepairPendingModules(Modules);
 		Test.TestEqual(TEXT("Stage-5 entry starts without detected penetration"),
@@ -529,9 +664,10 @@ namespace ABTSM73BeamStage5ChaosTests
 			&& CenterOfMass.Y <= GroundSupportBounds.Max.Y;
 		Test.TestTrue(TEXT("Stage-5 aggregate center of mass projects into its ground-support envelope"),
 			bCenterOfMassInsideGroundEnvelope);
-		Test.TestTrue(TEXT("Stage-5 static self-load matches spawned Chaos mass"),
+		Test.TestTrue(TEXT("V3 certified self-load matches spawned Chaos mass"),
 			FMath::IsNearlyEqual(
-				Result.LoadDAG.Summary.TotalSelfLoadKG,
+				Result.LoadDAG.Summary.TotalSelfLoadKG
+					+ Descriptor.StaticExternalMassKG,
 				TotalMassKG,
 				FMath::Max(1.0, TotalMassKG * 0.001)));
 
@@ -542,32 +678,56 @@ namespace ABTSM73BeamStage5ChaosTests
 		const uint32 BodyProfileHash = BodyProfile.ComputeCrc32();
 		const uint32 WorldProfileHash = WorldProfile.ComputeCrc32();
 		MaterialSystem->BeginLaunchPhysics(
-			false, PlanetCenter, GravityCMPerSec2,
+			false, SupportCenter, GravityCMPerSec2,
 			MaximumObservationSeconds + 1.0f);
 		Test.TestEqual(TEXT("Fixture and launch share the Chaos body identity"),
 			MaterialSystem->GetLastLaunchChaosBodyProfileHash(), BodyProfileHash);
 		Test.TestEqual(TEXT("Fixture and launch share the Chaos world identity"),
 			MaterialSystem->GetLastLaunchChaosWorldProfileHash(), WorldProfileHash);
 		const uint32 FixtureCrc32 = ComputeFixtureCrc32(
-			Entry, Result, Site, PlanetCenter, BodyProfileHash, WorldProfileHash);
+			Entry, Result, Descriptor, StaticEntry, Site, SupportCenter,
+			BodyProfileHash, WorldProfileHash);
 		UE_LOG(LogABTSRuntime, Log,
-			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][Identity] Entry=%s Tier=%d Seed=%d PositionAuthority=M3FrozenV2 GeometryAuthority=M7CurrentProduction ContractProductionHash=%llu ProductionHash=%llu ContractProductionEnvelopeMatches=%d FixtureCrc32=%u ContractVersion=%d LayoutHash=%llu Site=%d SiteTransform=%s PlanetCenter=%s Bricks=%d Contacts=%d Ground=%d ResultantAdvisories=%d StaticSelfLoadKG=%.3f MassKG=%.3f LocalCOM=%s GroundMin=%s GroundMax=%s COMSupported=%d OuterFPS=%.0f OuterDT=%.6f GravityModel=RadialConstantAcceleration Gravity=%.1f BodyHash=%u Solver=%d/%d Damping=%.2f/%.2f WorldHash=%u %s SupportMaterial=ProductionTerrainDefault Observation=%.1f"),
+			TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][Identity]")
+			TEXT(" Complexity=%s Tier=%d Seed=%d EncounterSlot=%d Surface=%d")
+			TEXT(" PositionAuthority=M3MapFreezeV3 GeometryAuthority=M7BuildingFreezeV3")
+			TEXT(" ContractProductionHash=%llu DescriptorHash=%llu StaticHash=%llu")
+			TEXT(" ProductionHash=%llu DeviceHash=%llu PlacementHash=%llu")
+			TEXT(" GravityAuthority=%s GravityHash=%llu FixtureCrc32=%u")
+			TEXT(" ContractVersion=%d LayoutHash=%llu SiteTransform=%s SupportCenter=%s SupportRadius=%.3f")
+			TEXT(" Bricks=%d Devices=%d Caps=%d Bodies=%d Contacts=%d Ground=%d")
+			TEXT(" ResultantAdvisories=%d StaticSelfLoadKG=%.3f ExternalLoadKG=%.3f MassKG=%.3f")
+			TEXT(" LocalCOM=%s GroundMin=%s GroundMax=%s COMSupported=%d")
+			TEXT(" OuterFPS=%.0f OuterDT=%.6f GravityModel=RadialConstantAcceleration Gravity=%.1f")
+			TEXT(" BodyHash=%u Solver=%d/%d Damping=%.2f/%.2f WorldHash=%u %s")
+			TEXT(" SupportMaterial=ProductionTerrainDefault Observation=%.1f"),
 			*Entry.StableId.ToString(), Entry.Settings.DifficultyTier,
 			Entry.Settings.BuildingSeed,
-			Site.V2Envelope.ProductionIdentityHash,
-			Result.ProductionIdentityHash,
-			bContractProductionEnvelopeMatches ? 1 : 0,
+			Site.EncounterIndex,
+			static_cast<int32>(Site.V3Envelope.SurfaceKind),
+			Site.V3Envelope.ProductionIdentityHash,
+			StaticEntry.DescriptorHash,
+			StaticEntry.StaticGeometryHash,
+			StaticEntry.ProductionIdentityHash,
+			StaticEntry.DeviceAssemblyHash,
+			Site.V3Envelope.PlacementHash,
+			*Site.V3Envelope.GravityAuthorityId.ToString(),
+			Site.V3Envelope.GravityIdentityHash,
 			FixtureCrc32,
 			ProductionContract.JuryDemoFixedSix.ContractVersion,
 			ProductionContract.JuryDemoFixedSix.LayoutHash,
-			Site.EncounterIndex,
 			*Site.WorldTransform.ToHumanReadableString(),
-			*PlanetCenter.ToString(),
-			Result.Bricks.Num(),
+			*SupportCenter.ToString(),
+			Site.V3Envelope.SupportRadiusCM,
+			StaticEntry.Bricks.Num(),
+			StaticEntry.Devices.Num(),
+			StaticEntry.Caps.Num(),
+			Modules.Num(),
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Summary.GroundNodeCount,
 			Result.Summary.SupportResultantAdvisoryCount,
 			Result.LoadDAG.Summary.TotalSelfLoadKG,
+			Descriptor.StaticExternalMassKG,
 			TotalMassKG, *CenterOfMass.ToString(),
 			*GroundSupportBounds.Min.ToString(),
 			*GroundSupportBounds.Max.ToString(),
@@ -587,7 +747,7 @@ namespace ABTSM73BeamStage5ChaosTests
 		FObservationResult Observation;
 		const bool bAccepted = ObserveUnderGravity(
 			Test, WorldWrapper, Modules, InitialTransforms,
-			PlanetCenter, Observation);
+			SupportCenter, Observation);
 		TSet<int32> DiagnosticBrickIndices;
 		DiagnosticBrickIndices.Add(Observation.FinalMaximumPlanarDriftBrickIndex);
 		DiagnosticBrickIndices.Add(Observation.FinalMaximumSettlementBrickIndex);
