@@ -588,11 +588,15 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 		else
 		{
 			int32 ReservedPadCellCount = 0;
+			int32 ReservedDynamicEnvelopeCellCount = 0;
 			for (const FABTSM3JuryBuildingPlacement& Placement
 				: MonthlyJuryFixedSixLayoutResult.Placements)
 			{
 				ReservedPadCellCount += Placement.ReservedPadCellIds.Num();
+				ReservedDynamicEnvelopeCellCount +=
+					Placement.ReservedDynamicEnvelopeCellIds.Num();
 				FString ReservedPadCellText;
+				FString ReservedDynamicEnvelopeCellText;
 				for (const int32 CellId : Placement.ReservedPadCellIds)
 				{
 					if (!ReservedPadCellText.IsEmpty())
@@ -601,22 +605,34 @@ bool AABTSM3Planet::GenerateLogicalTerrain()
 					}
 					ReservedPadCellText += FString::FromInt(CellId);
 				}
+				for (const int32 CellId
+					: Placement.ReservedDynamicEnvelopeCellIds)
+				{
+					if (!ReservedDynamicEnvelopeCellText.IsEmpty())
+					{
+						ReservedDynamicEnvelopeCellText += TEXT(",");
+					}
+					ReservedDynamicEnvelopeCellText += FString::FromInt(CellId);
+				}
 				UE_LOG(LogABTSRuntime, Log,
-					TEXT("[ABTS][M3Jury][FixedSix][Placement] Encounter=%d Entry=%s TargetCell=%d PadCenterCell=%d ReservedPadCells=%s PlacementHash=%016llX"),
+					TEXT("[ABTS][M3Jury][FixedSix][Placement] Contract=2 Encounter=%d Entry=%s TargetCell=%d PadCenterCell=%d ReservedPadCells=%s ReservedDynamicEnvelopeCells=%s PlacementHash=%016llX"),
 					Placement.EncounterIndex,
 					*Placement.ManifestEntryId.ToString(),
 					Placement.TargetAnchorCellId,
 					Placement.PadCenterCellId,
 					*ReservedPadCellText,
+					*ReservedDynamicEnvelopeCellText,
 					static_cast<unsigned long long>(
 						static_cast<uint64>(Placement.PlacementHash)));
 			}
 			UE_LOG(LogABTSRuntime, Log,
-				TEXT("[ABTS][M3Jury][FixedSix] PlacementReady=1 Seed=%d Candidate=%d Buildings=%d ReservedPadCells=%d M7Manifest=%d:%lld M7Catalog=%016llX LayoutHash=%016llX Authority=M3LocalAccepted"),
+				TEXT("[ABTS][M3Jury][FixedSix] PlacementReady=1 Contract=%d Seed=%d Candidate=%d Buildings=%d ReservedPadCells=%d ReservedDynamicEnvelopeCells=%d M7Manifest=%d:%lld M7Catalog=%016llX LayoutHash=%016llX Authority=M3LocalAccepted"),
+				MonthlyJuryFixedSixLayoutResult.FixedSixContractVersion,
 				WorldSeed,
 				MonthlyJuryFixedSixLayoutResult.SourceCandidateId,
 				MonthlyJuryFixedSixLayoutResult.Placements.Num(),
 				ReservedPadCellCount,
+				ReservedDynamicEnvelopeCellCount,
 				MonthlyJuryFixedSixLayoutResult.M7SourceManifestVersion,
 				MonthlyJuryFixedSixLayoutResult.M7SourceManifestHash,
 				static_cast<unsigned long long>(

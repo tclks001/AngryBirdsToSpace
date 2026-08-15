@@ -80,11 +80,36 @@ bool FABTSM3JuryFixedSixDescriptorIdentityTest::RunTest(const FString& Parameter
 		FABTSM3JuryFixedSixLayoutBuilder::M7SourceManifestVersion, 1);
 	TestEqual(TEXT("source manifest hash"),
 		FABTSM3JuryFixedSixLayoutBuilder::M7SourceManifestHash, 2324068295ll);
+	TestEqual(TEXT("V2 fixed-six contract version"),
+		FABTSM3JuryFixedSixLayoutBuilder::FixedSixContractVersion, 2);
+	TestEqual(TEXT("V2 placement catalog hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::M7PlacementCatalogHash,
+		11501529584318250152ull);
 	TestTrue(TEXT("fixture catalog hash is non-zero"),
 		FABTSM3JuryFixedSixLayoutBuilder::ComputeFixtureCatalogHash() != 0);
 
 	TSet<FName> EntryIds;
 	TSet<FName> StableIds;
+	static constexpr uint64 ExpectedDescriptorHashes[] = {
+		10113758205408230493ull, 1108134973396587699ull,
+		17683520519518435068ull, 11089610541129920709ull,
+		7322844578368466709ull, 3963542007450344969ull
+	};
+	static constexpr uint64 ExpectedStaticGeometryHashes[] = {
+		10276011350224018878ull, 1243337162086650128ull,
+		3075258440093988143ull, 4328116049969586954ull,
+		461929562625370845ull, 6610608065286482828ull
+	};
+	static constexpr uint64 ExpectedProductionIdentityHashes[] = {
+		6524532268529485689ull, 3864694895529971157ull,
+		15118401498293854757ull, 3596567542130940914ull,
+		12062404675177644267ull, 10510335516369342439ull
+	};
+	static constexpr uint64 ExpectedDeviceAssemblyHashes[] = {
+		12560907909080588493ull, 1033929311817437759ull,
+		6073774060920401162ull, 3035395675580472088ull,
+		9042370151666144586ull, 1309116746468502251ull
+	};
 	for (int32 Index = 0; Index < Fixtures.Num(); ++Index)
 	{
 		const FABTSM3JuryBuildingPlacementFixture& Fixture = Fixtures[Index];
@@ -93,9 +118,49 @@ bool FABTSM3JuryFixedSixDescriptorIdentityTest::RunTest(const FString& Parameter
 		TestEqual(TEXT("difficulty follows encounter order"),
 			Fixture.DifficultyTier, Index);
 		TestTrue(TEXT("valid local bounds"), Fixture.LocalBounds.IsValid != 0);
+		TestTrue(TEXT("valid physical bounds"), Fixture.PhysicalBounds.IsValid != 0);
+		TestTrue(TEXT("physical min matches local bounds"),
+			Fixture.PhysicalBounds.Min.Equals(Fixture.LocalBounds.Min));
+		TestTrue(TEXT("physical max matches local bounds"),
+			Fixture.PhysicalBounds.Max.Equals(Fixture.LocalBounds.Max));
+		TestTrue(TEXT("valid effect bounds"), Fixture.EffectBounds.IsValid != 0);
 		TestTrue(TEXT("positive pad X"), Fixture.RequiredPadHalfExtentCM.X > 0.0);
 		TestTrue(TEXT("positive pad Y"), Fixture.RequiredPadHalfExtentCM.Y > 0.0);
+		TestEqual(TEXT("exact 36 cm physical pad margin X"),
+			Fixture.RequiredPadHalfExtentCM.X
+				- FMath::Max(FMath::Abs(Fixture.PhysicalBounds.Min.X),
+					FMath::Abs(Fixture.PhysicalBounds.Max.X)),
+			36.0);
+		TestEqual(TEXT("exact 36 cm physical pad margin Y"),
+			Fixture.RequiredPadHalfExtentCM.Y
+				- FMath::Max(FMath::Abs(Fixture.PhysicalBounds.Min.Y),
+					FMath::Abs(Fixture.PhysicalBounds.Max.Y)),
+			36.0);
+		TestNotEqual(TEXT("static geometry hash"), Fixture.StaticGeometryHash, int64(0));
 		TestNotEqual(TEXT("descriptor hash"), Fixture.SourceDescriptorHash, int64(0));
+		TestNotEqual(TEXT("production identity hash"),
+			Fixture.ProductionIdentityHash, int64(0));
+		TestNotEqual(TEXT("device assembly hash"),
+			Fixture.DeviceAssemblyHash, int64(0));
+		TestTrue(TEXT("dynamic envelope is required"),
+			Fixture.bDynamicEnvelopeRequired);
+		TestTrue(TEXT("effect envelope exceeds static pad"),
+			Fixture.EffectBounds.Min.X < -Fixture.RequiredPadHalfExtentCM.X
+				|| Fixture.EffectBounds.Max.X > Fixture.RequiredPadHalfExtentCM.X
+				|| Fixture.EffectBounds.Min.Y < -Fixture.RequiredPadHalfExtentCM.Y
+				|| Fixture.EffectBounds.Max.Y > Fixture.RequiredPadHalfExtentCM.Y);
+		TestEqual(TEXT("V2 descriptor identity"),
+			static_cast<uint64>(Fixture.SourceDescriptorHash),
+			ExpectedDescriptorHashes[Index]);
+		TestEqual(TEXT("V2 static geometry identity"),
+			static_cast<uint64>(Fixture.StaticGeometryHash),
+			ExpectedStaticGeometryHashes[Index]);
+		TestEqual(TEXT("V2 production identity"),
+			static_cast<uint64>(Fixture.ProductionIdentityHash),
+			ExpectedProductionIdentityHashes[Index]);
+		TestEqual(TEXT("V2 device assembly identity"),
+			static_cast<uint64>(Fixture.DeviceAssemblyHash),
+			ExpectedDeviceAssemblyHashes[Index]);
 	}
 	TestEqual(TEXT("unique manifest entries"), EntryIds.Num(), 6);
 	TestEqual(TEXT("unique stable ids"), StableIds.Num(), 6);
@@ -121,12 +186,15 @@ bool FABTSM3JuryFixedSixBuildTest::RunTest(const FString& Parameters)
 			Cells, 50000.0f, Source, First, Failure));
 	TestEqual(TEXT("build failure is empty"), Failure, FString());
 	TestTrue(TEXT("placement ready"), First.bPlacementReady);
+	TestEqual(TEXT("result is V2"), First.FixedSixContractVersion, 2);
 	TestEqual(TEXT("six placements"), First.Placements.Num(), 6);
 	TestNotEqual(TEXT("layout hash"), First.LayoutHash, int64(0));
 	for (const FABTSM3JuryBuildingPlacement& Placement : First.Placements)
 	{
 		TestFalse(TEXT("pad reservation is non-empty"),
 			Placement.ReservedPadCellIds.IsEmpty());
+		TestFalse(TEXT("dynamic envelope reservation is non-empty"),
+			Placement.ReservedDynamicEnvelopeCellIds.IsEmpty());
 		for (int32 CellIndex = 1;
 			CellIndex < Placement.ReservedPadCellIds.Num();
 			++CellIndex)
@@ -135,11 +203,25 @@ bool FABTSM3JuryFixedSixBuildTest::RunTest(const FString& Parameters)
 				Placement.ReservedPadCellIds[CellIndex - 1]
 					< Placement.ReservedPadCellIds[CellIndex]);
 		}
+		for (int32 CellIndex = 1;
+			CellIndex < Placement.ReservedDynamicEnvelopeCellIds.Num();
+			++CellIndex)
+		{
+			TestTrue(TEXT("dynamic reservation is sorted and unique"),
+				Placement.ReservedDynamicEnvelopeCellIds[CellIndex - 1]
+					< Placement.ReservedDynamicEnvelopeCellIds[CellIndex]);
+		}
 	}
 	FABTSM3JuryBuildingPlacement HashTampered = First.Placements[0];
 	HashTampered.ReservedPadCellIds.Add(123456);
 	HashTampered.ReservedPadCellIds.Sort();
 	TestNotEqual(TEXT("reserved cells affect placement hash"),
+		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
+		static_cast<uint64>(First.Placements[0].PlacementHash));
+	HashTampered = First.Placements[0];
+	HashTampered.ReservedDynamicEnvelopeCellIds.Add(123456);
+	HashTampered.ReservedDynamicEnvelopeCellIds.Sort();
+	TestNotEqual(TEXT("dynamic reserved cells affect placement hash"),
 		FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(HashTampered),
 		static_cast<uint64>(First.Placements[0].PlacementHash));
 

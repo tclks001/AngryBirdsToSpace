@@ -77,6 +77,16 @@ struct FJuryCanonicalHash
 		AddScalarCM(Vector.Y);
 	}
 
+	void AddBoxCM(const FBox& Box)
+	{
+		AddInt32(Box.IsValid != 0 ? 1 : 0);
+		if (Box.IsValid != 0)
+		{
+			AddVectorCM(Box.Min);
+			AddVectorCM(Box.Max);
+		}
+	}
+
 	uint64 Get() const
 	{
 		return Value;
@@ -92,7 +102,12 @@ FABTSM3JuryBuildingPlacementFixture MakeJuryFixture(
 	const FVector& BoundsMax,
 	const FVector2D& PadHalfExtentCM,
 	const uint64 StaticGeometryHash,
-	const uint64 SourceDescriptorHash)
+	const uint64 SourceDescriptorHash,
+	const uint64 ProductionIdentityHash,
+	const uint64 DeviceAssemblyHash,
+	const FVector& EffectBoundsMin,
+	const FVector& EffectBoundsMax,
+	const bool bDynamicEnvelopeRequired)
 {
 	FABTSM3JuryBuildingPlacementFixture Fixture;
 	Fixture.ManifestEntryId = FName(ManifestEntryId);
@@ -100,9 +115,14 @@ FABTSM3JuryBuildingPlacementFixture MakeJuryFixture(
 	Fixture.DifficultyTier = DifficultyTier;
 	Fixture.BuildingSeed = BuildingSeed;
 	Fixture.LocalBounds = FBox(BoundsMin, BoundsMax);
+	Fixture.PhysicalBounds = Fixture.LocalBounds;
+	Fixture.EffectBounds = FBox(EffectBoundsMin, EffectBoundsMax);
 	Fixture.RequiredPadHalfExtentCM = PadHalfExtentCM;
 	Fixture.StaticGeometryHash = static_cast<int64>(StaticGeometryHash);
 	Fixture.SourceDescriptorHash = static_cast<int64>(SourceDescriptorHash);
+	Fixture.ProductionIdentityHash = static_cast<int64>(ProductionIdentityHash);
+	Fixture.DeviceAssemblyHash = static_cast<int64>(DeviceAssemblyHash);
+	Fixture.bDynamicEnvelopeRequired = bDynamicEnvelopeRequired;
 	return Fixture;
 }
 
@@ -113,32 +133,44 @@ const TArray<FABTSM3JuryBuildingPlacementFixture>& GetJuryFixtures()
 			TEXT("E1ColumnBreak"), TEXT("DemoE1ColumnBreak"), 0, 710000,
 			FVector(-414.0, -162.0, 0.0), FVector(-90.0, 162.0, 648.0),
 			FVector2D(450.0, 198.0),
-			16780849829317489644ull, 14931273032555350531ull),
+			10276011350224018878ull, 10113758205408230493ull,
+			6524532268529485689ull, 12560907909080588493ull,
+			FVector(-1102.0, -850.0, -670.0), FVector(418.0, 670.0, 850.0), true),
 		MakeJuryFixture(
 			TEXT("E2DropTrigger"), TEXT("DemoE2DropTrigger"), 1, 740000,
 			FVector(-774.0, -450.0, 0.0), FVector(486.0, 450.0, 1476.0),
 			FVector2D(810.0, 486.0),
-			2343934176722587840ull, 17636075314117899824ull),
+			1243337162086650128ull, 1108134973396587699ull,
+			3864694895529971157ull, 1033929311817437759ull,
+			FVector(-1462.0, -1138.0, -670.0), FVector(58.0, 382.0, 850.0), true),
 		MakeJuryFixture(
 			TEXT("E3SlideRelease"), TEXT("DemoE3SlideRelease"), 2, 750137,
 			FVector(-1026.0, -414.0, 0.0), FVector(1026.0, 414.0, 1332.0),
 			FVector2D(1062.0, 450.0),
-			4060368085179305333ull, 3277746625945437825ull),
+			3075258440093988143ull, 17683520519518435068ull,
+			15118401498293854757ull, 6073774060920401162ull,
+			FVector(-1134.0, -522.0, -252.0), FVector(-774.0, -162.0, 468.0), true),
 		MakeJuryFixture(
 			TEXT("E4TipOver"), TEXT("DemoE4TipOver"), 3, 730000,
 			FVector(-846.0, -378.0, 0.0), FVector(846.0, 378.0, 2376.0),
 			FVector2D(882.0, 414.0),
-			3905124247026714506ull, 5284820191875006966ull),
+			4328116049969586954ull, 11089610541129920709ull,
+			3596567542130940914ull, 3035395675580472088ull,
+			FVector(-378.0, -486.0, -144.0), FVector(342.0, -126.0, 216.0), true),
 		MakeJuryFixture(
 			TEXT("E5SeamRelease"), TEXT("DemoE5SeamRelease"), 4, 720000,
 			FVector(-1350.0, -630.0, 0.0), FVector(1350.0, 630.0, 2376.0),
 			FVector2D(1386.0, 666.0),
-			10244968675392635774ull, 15983895412278031603ull),
+			461929562625370845ull, 7322844578368466709ull,
+			12062404675177644267ull, 9042370151666144586ull,
+			FVector(-1566.0, 126.0, -144.0), FVector(-846.0, 486.0, 216.0), true),
 		MakeJuryFixture(
 			TEXT("E6TipOver"), TEXT("DemoE6TipOver"), 5, 750000,
 			FVector(-1062.0, -486.0, 0.0), FVector(1062.0, 486.0, 3384.0),
 			FVector2D(1098.0, 522.0),
-			10028734189939141390ull, 9843082278464018151ull)
+			6610608065286482828ull, 3963542007450344969ull,
+			10510335516369342439ull, 1309116746468502251ull,
+			FVector(-1278.0, -594.0, -144.0), FVector(-558.0, -234.0, 216.0), true)
 	};
 	return Fixtures;
 }
@@ -242,6 +274,84 @@ bool ValidateJuryPadReservation(
 	return !OutReservedPadCellIds.IsEmpty();
 }
 
+bool ValidateJuryDynamicEnvelopeReservation(
+	const TArray<FABTSM2Cell>& Cells,
+	const FABTSM3MonthlySpatialCandidate& Candidate,
+	const FVector& WorldLocationCM,
+	const FVector& Forward,
+	const FVector& Right,
+	const FBox& EffectBounds,
+	TArray<int32>& OutReservedCellIds,
+	FString& OutFailure)
+{
+	OutReservedCellIds.Reset();
+	OutFailure.Reset();
+	if (Candidate.Cells.Num() != Cells.Num() || EffectBounds.IsValid == 0)
+	{
+		OutFailure = TEXT("CandidateCellCountOrEffectBounds");
+		return false;
+	}
+
+	const double XSamples[] = {
+		EffectBounds.Min.X,
+		(EffectBounds.Min.X + EffectBounds.Max.X) * 0.5,
+		EffectBounds.Max.X
+	};
+	const double YSamples[] = {
+		EffectBounds.Min.Y,
+		(EffectBounds.Min.Y + EffectBounds.Max.Y) * 0.5,
+		EffectBounds.Max.Y
+	};
+	for (int32 XIndex = 0; XIndex < UE_ARRAY_COUNT(XSamples); ++XIndex)
+	{
+		for (int32 YIndex = 0; YIndex < UE_ARRAY_COUNT(YSamples); ++YIndex)
+		{
+			const FVector SampleDirection = (
+				WorldLocationCM
+					+ Forward * XSamples[XIndex]
+					+ Right * YSamples[YIndex]).GetSafeNormal();
+			const int32 CellId = FindJuryNearestCell(Cells, SampleDirection);
+			if (!Candidate.Cells.IsValidIndex(CellId))
+			{
+				OutFailure = FString::Printf(
+					TEXT("InvalidCell:%d:%d"), XIndex, YIndex);
+				OutReservedCellIds.Reset();
+				return false;
+			}
+			if (Candidate.Cells[CellId].bWater)
+			{
+				OutFailure = FString::Printf(TEXT("WaterCell:%d"), CellId);
+				OutReservedCellIds.Reset();
+				return false;
+			}
+			if (Candidate.RecomputedRoute.OrderedRoadCellIds.Contains(CellId))
+			{
+				OutFailure = FString::Printf(TEXT("RoadCell:%d"), CellId);
+				OutReservedCellIds.Reset();
+				return false;
+			}
+			OutReservedCellIds.AddUnique(CellId);
+		}
+	}
+	OutReservedCellIds.Sort();
+	return !OutReservedCellIds.IsEmpty();
+}
+
+double GetJuryHorizontalEnvelopeRadiusCM(const FBox& Bounds)
+{
+	if (Bounds.IsValid == 0)
+	{
+		return 0.0;
+	}
+	return FMath::Max(
+		FMath::Max(
+			FVector2D(Bounds.Min.X, Bounds.Min.Y).Size(),
+			FVector2D(Bounds.Min.X, Bounds.Max.Y).Size()),
+		FMath::Max(
+			FVector2D(Bounds.Max.X, Bounds.Min.Y).Size(),
+			FVector2D(Bounds.Max.X, Bounds.Max.Y).Size()));
+}
+
 void SetJuryRejected(
 	FABTSM3JuryFixedSixLayoutResult& Result,
 	const EABTSM3JuryFixedSixRejectReason Reason)
@@ -267,6 +377,7 @@ uint64 FABTSM3JuryFixedSixLayoutBuilder::ComputeFixtureCatalogHash()
 	Hash.AddInt32(M7SourceManifestVersion);
 	Hash.AddInt64(M7SourceManifestHash);
 	Hash.AddInt64(static_cast<int64>(M7PlacementCatalogHash));
+	Hash.AddInt32(FixedSixContractVersion);
 	const TConstArrayView<FABTSM3JuryBuildingPlacementFixture> Fixtures =
 		GetFrozenPlacementFixtures();
 	Hash.AddInt32(Fixtures.Num());
@@ -276,11 +387,15 @@ uint64 FABTSM3JuryFixedSixLayoutBuilder::ComputeFixtureCatalogHash()
 		Hash.AddName(Fixture.StableId);
 		Hash.AddInt32(Fixture.DifficultyTier);
 		Hash.AddInt32(Fixture.BuildingSeed);
-		Hash.AddVectorCM(Fixture.LocalBounds.Min);
-		Hash.AddVectorCM(Fixture.LocalBounds.Max);
+		Hash.AddBoxCM(Fixture.LocalBounds);
+		Hash.AddBoxCM(Fixture.PhysicalBounds);
+		Hash.AddBoxCM(Fixture.EffectBounds);
 		Hash.AddVector2DCM(Fixture.RequiredPadHalfExtentCM);
 		Hash.AddInt64(Fixture.StaticGeometryHash);
+		Hash.AddInt64(Fixture.ProductionIdentityHash);
+		Hash.AddInt64(Fixture.DeviceAssemblyHash);
 		Hash.AddInt64(Fixture.SourceDescriptorHash);
+		Hash.AddInt32(Fixture.bDynamicEnvelopeRequired ? 1 : 0);
 	}
 	return Hash.Get();
 }
@@ -304,7 +419,14 @@ uint64 FABTSM3JuryFixedSixLayoutBuilder::ComputePlacementHash(
 	Hash.AddVectorCM(Placement.WorldUpAxis);
 	Hash.AddVector2DCM(Placement.RequiredPadHalfExtentCM);
 	Hash.AddIntArray(Placement.ReservedPadCellIds);
+	Hash.AddIntArray(Placement.ReservedDynamicEnvelopeCellIds);
+	Hash.AddBoxCM(Placement.PhysicalBounds);
+	Hash.AddBoxCM(Placement.EffectBounds);
+	Hash.AddInt64(Placement.StaticGeometryHash);
+	Hash.AddInt64(Placement.ProductionIdentityHash);
+	Hash.AddInt64(Placement.DeviceAssemblyHash);
 	Hash.AddInt64(Placement.SourceDescriptorHash);
+	Hash.AddInt32(Placement.bDynamicEnvelopeRequired ? 1 : 0);
 	return Hash.Get();
 }
 
@@ -313,6 +435,7 @@ uint64 FABTSM3JuryFixedSixLayoutBuilder::ComputeLayoutHash(
 {
 	ABTSM3JuryFixedSixPrivate::FJuryCanonicalHash Hash;
 	Hash.AddInt32(Result.SchemaVersion);
+	Hash.AddInt32(Result.FixedSixContractVersion);
 	Hash.AddInt32(Result.WorldSeed);
 	Hash.AddInt32(Result.SourceCandidateId);
 	Hash.AddInt64(Result.SourceSpatialResultHash);
@@ -342,6 +465,7 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 	OutResult = FABTSM3JuryFixedSixLayoutResult();
 	OutFailure.Reset();
 	OutResult.SchemaVersion = SchemaVersion;
+	OutResult.FixedSixContractVersion = FixedSixContractVersion;
 	OutResult.WorldSeed = SourceSpatialResult.WorldSeed;
 	OutResult.SourceCandidateId = FrozenSourceCandidateId;
 	OutResult.SourceSpatialResultHash = SourceSpatialResult.SpatialResultHash;
@@ -418,10 +542,24 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 			|| Fixture.DifficultyTier != Index
 			|| Fixture.ManifestEntryId.IsNone()
 			|| Fixture.StableId.IsNone()
+			|| Fixture.StaticGeometryHash == 0
 			|| Fixture.SourceDescriptorHash == 0
-			|| !Fixture.LocalBounds.IsValid
+			|| Fixture.ProductionIdentityHash == 0
+			|| Fixture.DeviceAssemblyHash == 0
+			|| Fixture.LocalBounds.IsValid == 0
+			|| Fixture.PhysicalBounds.IsValid == 0
+			|| Fixture.EffectBounds.IsValid == 0
+			|| !Fixture.PhysicalBounds.Min.Equals(Fixture.LocalBounds.Min)
+			|| !Fixture.PhysicalBounds.Max.Equals(Fixture.LocalBounds.Max)
 			|| Fixture.RequiredPadHalfExtentCM.X <= 0.0
-			|| Fixture.RequiredPadHalfExtentCM.Y <= 0.0)
+			|| Fixture.RequiredPadHalfExtentCM.Y <= 0.0
+			|| Fixture.RequiredPadHalfExtentCM.X
+				< FMath::Max(FMath::Abs(Fixture.PhysicalBounds.Min.X),
+					FMath::Abs(Fixture.PhysicalBounds.Max.X)) + 36.0
+			|| Fixture.RequiredPadHalfExtentCM.Y
+				< FMath::Max(FMath::Abs(Fixture.PhysicalBounds.Min.Y),
+					FMath::Abs(Fixture.PhysicalBounds.Max.Y)) + 36.0
+			|| !Fixture.bDynamicEnvelopeRequired)
 		{
 			OutFailure = FString::Printf(TEXT("EncounterIdentity:%d"), Index);
 			SetJuryRejected(OutResult,
@@ -438,7 +576,13 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 		Placement.TargetAnchorCellId = Encounter.TargetAnchorCellId;
 		Placement.SlingshotAnchorCellId = SlingshotPocket->AnchorCellId;
 		Placement.RequiredPadHalfExtentCM = Fixture.RequiredPadHalfExtentCM;
+		Placement.PhysicalBounds = Fixture.PhysicalBounds;
+		Placement.EffectBounds = Fixture.EffectBounds;
+		Placement.StaticGeometryHash = Fixture.StaticGeometryHash;
+		Placement.ProductionIdentityHash = Fixture.ProductionIdentityHash;
+		Placement.DeviceAssemblyHash = Fixture.DeviceAssemblyHash;
 		Placement.SourceDescriptorHash = Fixture.SourceDescriptorHash;
+		Placement.bDynamicEnvelopeRequired = Fixture.bDynamicEnvelopeRequired;
 
 		TArray<int32> PadCenterCellIds;
 		PadCenterCellIds.Add(Encounter.TargetAnchorCellId);
@@ -471,8 +615,10 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 			});
 
 		FString PadReservationFailure;
+		FString DynamicEnvelopeFailure;
 		bool bBuiltPlacementFrame = false;
-		bool bResolvedPad = false;
+		bool bResolvedStaticPad = false;
+		bool bResolvedPlacementClearance = false;
 		for (const int32 PadCenterCellId : PadCenterCellIds)
 		{
 			if (!Cells.IsValidIndex(PadCenterCellId)
@@ -536,8 +682,20 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 					Placement.ReservedPadCellIds,
 					PadReservationFailure))
 			{
-				bResolvedPad = true;
-				break;
+				bResolvedStaticPad = true;
+				if (ValidateJuryDynamicEnvelopeReservation(
+						Cells,
+						*Candidate,
+						Placement.WorldLocationCM,
+						Forward,
+						Right,
+						Placement.EffectBounds,
+						Placement.ReservedDynamicEnvelopeCellIds,
+						DynamicEnvelopeFailure))
+				{
+					bResolvedPlacementClearance = true;
+					break;
+				}
 			}
 		}
 		if (!bBuiltPlacementFrame)
@@ -547,15 +705,28 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 				EABTSM3JuryFixedSixRejectReason::PlacementFrameInvalid);
 			return false;
 		}
-		if (!bResolvedPad)
+		if (!bResolvedPlacementClearance)
 		{
-			OutFailure = FString::Printf(
-				TEXT("PadReservation:%d:%s:Centers=%d"),
-				Index,
-				*PadReservationFailure,
-				PadCenterCellIds.Num());
-			SetJuryRejected(OutResult,
-				EABTSM3JuryFixedSixRejectReason::PadReservationFailed);
+			if (bResolvedStaticPad)
+			{
+				OutFailure = FString::Printf(
+					TEXT("DynamicEnvelopeReservation:%d:%s:Centers=%d"),
+					Index,
+					*DynamicEnvelopeFailure,
+					PadCenterCellIds.Num());
+				SetJuryRejected(OutResult,
+					EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeReservationFailed);
+			}
+			else
+			{
+				OutFailure = FString::Printf(
+					TEXT("PadReservation:%d:%s:Centers=%d"),
+					Index,
+					*PadReservationFailure,
+					PadCenterCellIds.Num());
+				SetJuryRejected(OutResult,
+					EABTSM3JuryFixedSixRejectReason::PadReservationFailed);
+			}
 			return false;
 		}
 		Placement.PlacementHash = static_cast<int64>(
@@ -574,15 +745,22 @@ bool FABTSM3JuryFixedSixLayoutBuilder::Build(
 				-1.0,
 				1.0));
 			const double SurfaceDistanceCM = AngularDistance * PlanetRadiusCM;
+			const double FirstRadiusCM = FMath::Max(
+				First.RequiredPadHalfExtentCM.Size(),
+				GetJuryHorizontalEnvelopeRadiusCM(First.EffectBounds));
+			const double SecondRadiusCM = FMath::Max(
+				Second.RequiredPadHalfExtentCM.Size(),
+				GetJuryHorizontalEnvelopeRadiusCM(Second.EffectBounds));
 			const double RequiredDistanceCM =
-				First.RequiredPadHalfExtentCM.Size()
-				+ Second.RequiredPadHalfExtentCM.Size()
-				+ PadSeparationMarginCM;
+				FirstRadiusCM
+					+ SecondRadiusCM
+					+ PadSeparationMarginCM;
 			if (SurfaceDistanceCM <= RequiredDistanceCM)
 			{
-				OutFailure = FString::Printf(TEXT("PadSeparation:%d:%d"), A, B);
+				OutFailure = FString::Printf(
+					TEXT("DynamicEnvelopeSeparation:%d:%d"), A, B);
 				SetJuryRejected(OutResult,
-					EABTSM3JuryFixedSixRejectReason::PadSeparationFailed);
+					EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeSeparationFailed);
 				return false;
 			}
 		}
@@ -625,6 +803,10 @@ const TCHAR* FABTSM3JuryFixedSixLayoutBuilder::GetRejectReasonName(
 		return TEXT("PadReservationFailed");
 	case EABTSM3JuryFixedSixRejectReason::PadSeparationFailed:
 		return TEXT("PadSeparationFailed");
+	case EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeReservationFailed:
+		return TEXT("DynamicEnvelopeReservationFailed");
+	case EABTSM3JuryFixedSixRejectReason::DynamicEnvelopeSeparationFailed:
+		return TEXT("DynamicEnvelopeSeparationFailed");
 	case EABTSM3JuryFixedSixRejectReason::HashMismatch:
 		return TEXT("HashMismatch");
 	default:
