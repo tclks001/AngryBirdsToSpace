@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Building/ABTSM73BuildingTypes.h"
 #include "Building/ABTSM73DAG5Types.h"
+#include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "GameFramework/Actor.h"
 #include "ABTSM73StableBuildingActor.generated.h"
 
@@ -85,6 +86,18 @@ public:
 		const FABTSM73DAGFailurePlayabilitySettings& InDAGFailurePlayabilitySettings,
 		const FABTSM73DAG4ValidationSettings& InDAG4ValidationSettings,
 		const FABTSM73DifficultySettings& InDifficultySettings);
+
+	/** Consumes one already verified J4 payload before deferred spawning finishes. */
+	bool ConfigureJuryDemoFixedSixStaticRegistration(
+		FABTSM73JuryDemoFixedSixStaticEntry&& InEntry,
+		FString& OutError);
+	/** Removes every staged instance/module before destroying an atomic batch. */
+	void RollbackJuryDemoFixedSixStaticRegistration(const FString& Reason);
+	bool IsJuryDemoFixedSixStaticRegistrationAccepted() const;
+	int32 GetJuryDemoFixedSixStaticModuleCount() const;
+	FName GetJuryDemoFixedSixManifestEntryId() const;
+	int32 GetJuryDemoFixedSixEncounterIndex() const;
+	uint64 GetJuryDemoFixedSixRegistrationResultHash() const;
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7.3-A")
 	bool RebuildPreview();
@@ -167,6 +180,10 @@ public:
 	bool OwnsRuntimePrimitive(const UPrimitiveComponent* Component) const;
 
 private:
+	void InitializeJuryDemoFixedSixStaticRegistration(
+		AABTSM7BuildingMaterialSystem& MaterialSystem);
+	void ConfigureJuryDemoFixedSixStaticHISM(
+		UHierarchicalInstancedStaticMeshComponent& Component);
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,
 		struct FABTSM73StructureData& OutData, FString& OutError,
 		const AABTSM7BuildingMaterialSystem* MaterialProfileSource = nullptr);
@@ -314,6 +331,9 @@ private:
 	FABTSM73DAG5BResult LastDAG5BResult;
 
 	TWeakObjectPtr<AABTSM7BuildingMaterialSystem> RuntimeMaterialSystem;
+	TOptional<FABTSM73JuryDemoFixedSixStaticEntry>
+		JuryDemoFixedSixStaticEntry;
+	int32 JuryDemoFixedSixStaticBrickInstanceCount = 0;
 	TWeakObjectPtr<AABTSM3Planet> ConfiguredPlanet;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
 	TMap<int32, TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModulesByNodeId;

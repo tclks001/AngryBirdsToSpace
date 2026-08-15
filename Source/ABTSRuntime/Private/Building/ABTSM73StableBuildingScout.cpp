@@ -3,6 +3,7 @@
 #include "Building/ABTSM73StableBuildingActor.h"
 
 #include "Building/ABTSM7BuildingModule.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 
@@ -15,6 +16,27 @@ bool AABTSM73StableBuildingActor::QueryLivePresentationAnchor(
 	if (!bRuntimeSpawned || !GenerationSummary.bAccepted) return false;
 
 	FVector AccumulatedLocation = FVector::ZeroVector;
+	if (JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		for (const UHierarchicalInstancedStaticMeshComponent* HISM : {
+			WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(),
+			GlassPreview.Get()})
+		{
+			if (HISM == nullptr) continue;
+			for (int32 InstanceIndex = 0;
+				InstanceIndex < HISM->GetInstanceCount(); ++InstanceIndex)
+			{
+				FTransform InstanceTransform;
+				if (!HISM->GetInstanceTransform(
+					InstanceIndex, InstanceTransform, true))
+				{
+					continue;
+				}
+				AccumulatedLocation += InstanceTransform.GetLocation();
+				++OutLiveModuleCount;
+			}
+		}
+	}
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
 	{
 		const AABTSM7BuildingModule* Module = WeakModule.Get();
@@ -38,6 +60,14 @@ bool AABTSM73StableBuildingActor::OwnsRuntimePrimitive(
 		|| !GenerationSummary.bAccepted)
 	{
 		return false;
+	}
+	if (JuryDemoFixedSixStaticEntry.IsSet()
+		&& (Component == WoodPreview
+			|| Component == StonePreview
+			|| Component == IronPreview
+			|| Component == GlassPreview))
+	{
+		return true;
 	}
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
 	{

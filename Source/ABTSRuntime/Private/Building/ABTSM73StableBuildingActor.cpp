@@ -231,6 +231,17 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 void AABTSM73StableBuildingActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	if (JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		ClearBrickPreviews();
+		ClearDAGFailurePatternDiagnostics();
+		FoundationCap->SetVisibility(false, true);
+		FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		FoundationFeet->ClearInstances();
+		FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		AttackDirection->SetVisibility(false, true);
+		return;
+	}
 	RebuildPreview();
 }
 
@@ -322,6 +333,70 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	DAGFailurePlayabilitySettings = InDAGFailurePlayabilitySettings;
 	DAG4ValidationSettings = InDAG4ValidationSettings;
 	DifficultySettings = InDifficultySettings;
+}
+
+bool AABTSM73StableBuildingActor::ConfigureJuryDemoFixedSixStaticRegistration(
+	FABTSM73JuryDemoFixedSixStaticEntry&& InEntry,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (bRuntimeSpawned || JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		OutError = TEXT("FixedSixStaticRegistrationAlreadyConfigured");
+		return false;
+	}
+	if (!InEntry.IsUsable()
+		|| !GetActorTransform().Equals(InEntry.WorldTransform, 1.0e-3))
+	{
+		OutError = TEXT("FixedSixStaticRegistrationPayloadRejected");
+		return false;
+	}
+	bParticipateInPIERuntime = true;
+	bParticipateInSlingshotValidationGate = true;
+	bRunIdleChaosValidation = false;
+	bShowEditorPreview = false;
+	GenerationSettings.BuildingSeed = InEntry.DeterministicSeed;
+	JuryDemoFixedSixStaticEntry.Emplace(MoveTemp(InEntry));
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::IsJuryDemoFixedSixStaticRegistrationAccepted() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		&& bRuntimeSpawned
+		&& GenerationSummary.bAccepted
+		&& IdleValidationState == EABTSM73IdleValidationState::Accepted;
+}
+
+int32 AABTSM73StableBuildingActor::GetJuryDemoFixedSixStaticModuleCount() const
+{
+	int32 ModuleCount = JuryDemoFixedSixStaticBrickInstanceCount;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Module : RuntimeModules)
+	{
+		ModuleCount += Module.IsValid() ? 1 : 0;
+	}
+	return ModuleCount;
+}
+
+FName AABTSM73StableBuildingActor::GetJuryDemoFixedSixManifestEntryId() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->ManifestEntryId
+		: NAME_None;
+}
+
+int32 AABTSM73StableBuildingActor::GetJuryDemoFixedSixEncounterIndex() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->EncounterIndex
+		: INDEX_NONE;
+}
+
+uint64 AABTSM73StableBuildingActor::GetJuryDemoFixedSixRegistrationResultHash() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->RegistrationResultHash
+		: 0;
 }
 
 bool AABTSM73StableBuildingActor::BuildResolvedStructure(
@@ -1012,6 +1087,128 @@ void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 	}
 }
 
+void AABTSM73StableBuildingActor::ConfigureJuryDemoFixedSixStaticHISM(
+	UHierarchicalInstancedStaticMeshComponent& Component)
+{
+	Component.SetStaticMesh(BrickMesh);
+	Component.SetCollisionProfileName(TEXT("BlockAll"));
+	Component.SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	Component.SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Component.SetGenerateOverlapEvents(false);
+	Component.SetHiddenInGame(false);
+	Component.SetVisibility(true, true);
+}
+
+void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
+	AABTSM7BuildingMaterialSystem& MaterialSystem)
+{
+	if (!JuryDemoFixedSixStaticEntry.IsSet()
+		|| !JuryDemoFixedSixStaticEntry->IsUsable())
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationPayloadMissing"));
+		return;
+	}
+	FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	if (!GetActorTransform().Equals(Entry.WorldTransform, 1.0e-3))
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationTransformDrift"));
+		return;
+	}
+
+	RuntimeMaterialSystem = &MaterialSystem;
+	RuntimeModules.Reset();
+	RuntimeModulesByNodeId.Reset();
+	ClearBrickPreviews();
+	ConfigureJuryDemoFixedSixStaticHISM(*WoodPreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*StonePreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*IronPreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*GlassPreview);
+
+	JuryDemoFixedSixStaticBrickInstanceCount = 0;
+	for (const FABTSM73BeamD1BrickBinding& Brick : Entry.Bricks)
+	{
+		UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Brick.BrickSpec.Material);
+		if (HISM == nullptr)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationMaterialHISMMissing"));
+			return;
+		}
+		FTransform InstanceTransform = Brick.LocalTransform;
+		InstanceTransform.SetScale3D(
+			Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (HISM->AddInstance(InstanceTransform, false) == INDEX_NONE)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationBrickInstanceFailed"));
+			return;
+		}
+		++JuryDemoFixedSixStaticBrickInstanceCount;
+	}
+
+	for (const FABTSM73BeamD1DeviceBinding& Device : Entry.Devices)
+	{
+		const FTransform WorldTransform =
+			Device.LocalTransform * GetActorTransform();
+		AABTSM7BuildingModule* Module = MaterialSystem.SpawnStaticVoxelDevice(
+			Device.DeviceSpec, WorldTransform);
+		if (Module == nullptr)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationDeviceSpawnFailed"));
+			return;
+		}
+		RuntimeModules.Add(Module);
+	}
+
+	const int32 ExpectedModuleCount = Entry.Bricks.Num() + Entry.Devices.Num();
+	bRuntimeSpawned = JuryDemoFixedSixStaticBrickInstanceCount
+			+ RuntimeModules.Num()
+		== ExpectedModuleCount;
+	if (!bRuntimeSpawned)
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationCountMismatch"));
+		return;
+	}
+
+	FoundationCap->SetVisibility(false, true);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoundationFeet->ClearInstances();
+	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	AttackDirection->SetVisibility(false, true);
+	GenerationSummary = FABTSM73GenerationSummary();
+	GenerationSummary.bAccepted = true;
+	GenerationSummary.bPlanar = false;
+	GenerationSummary.BrickCount = Entry.Bricks.Num();
+	GenerationSummary.GenerationAlgorithm =
+		EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	GenerationSummary.RejectReason.Reset();
+	IdleValidationState = EABTSM73IdleValidationState::Accepted;
+	bIdleValidationRunning = false;
+	bDAG4ValidationRunning = false;
+	SetActorTickEnabled(false);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][FixedSixStaticRegistered]")
+		TEXT(" Actor=%s Entry=%s Encounter=%d Tier=%d Seed=%d")
+		TEXT(" Layout=%llu Descriptor=%llu Static=%llu")
+		TEXT(" Production=%llu Device=%llu Bricks=%d Devices=%d Modules=%d")
+		TEXT(" ResultHash=%llu DynamicEnvelopeRequired=%d")
+		TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Accepted=1"),
+		*GetName(), *Entry.ManifestEntryId.ToString(), Entry.EncounterIndex,
+		Entry.DifficultyTier, Entry.DeterministicSeed, Entry.SourceLayoutHash,
+		Entry.DescriptorHash, Entry.StaticGeometryHash,
+		Entry.ProductionIdentityHash, Entry.DeviceAssemblyHash,
+		Entry.Bricks.Num(), Entry.Devices.Num(), ExpectedModuleCount,
+		Entry.RegistrationResultHash,
+		Entry.bDynamicEnvelopeRequired ? 1 : 0);
+}
+
+void AABTSM73StableBuildingActor::RollbackJuryDemoFixedSixStaticRegistration(
+	const FString& Reason)
+{
+	RejectRuntimeStructure(Reason);
+	Destroy();
+}
+
 void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMaterialSystem* MaterialSystem)
 {
 	if (!bParticipateInPIERuntime)
@@ -1020,6 +1217,11 @@ void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMater
 		return;
 	}
 	if (bRuntimeSpawned || MaterialSystem == nullptr) return;
+	if (JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		InitializeJuryDemoFixedSixStaticRegistration(*MaterialSystem);
+		return;
+	}
 	LastDAG4ValidationResult = FABTSM73DAG4ValidationResult();
 	LastDAG4ValidationResult.bEnabled =
 		DAG4ValidationSettings.bEnableSettledChaosValidation;
@@ -1551,6 +1753,7 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	}
 	RuntimeModules.Reset();
 	RuntimeModulesByNodeId.Reset();
+	JuryDemoFixedSixStaticBrickInstanceCount = 0;
 	IdleInitialTransforms.Reset();
 	RuntimeMaterialSystem.Reset();
 	bRuntimeSpawned = false;

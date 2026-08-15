@@ -95,6 +95,13 @@ AABTSM73StableBuildingActor::~AABTSM73StableBuildingActor() = default;
 void AABTSM73StableBuildingActor::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (JuryDemoFixedSixStaticEntry.IsSet()
+		&& (bRuntimeSpawned
+			|| JuryDemoFixedSixStaticBrickInstanceCount > 0
+			|| !RuntimeModules.IsEmpty()))
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationEndPlay"));
+	}
 	CancelDAG4Validation();
 	Super::EndPlay(EndPlayReason);
 }

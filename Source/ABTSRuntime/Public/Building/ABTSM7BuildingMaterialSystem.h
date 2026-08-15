@@ -44,6 +44,9 @@ public:
 	/** Stage-5.5 device path: exact logical collision proxy plus authored visual child. */
 	AABTSM7BuildingModule* SpawnVoxelDevice(
 		const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
+	/** Static-world variant: owned by the caller and excluded from global launch activation. */
+	AABTSM7BuildingModule* SpawnStaticVoxelDevice(
+		const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
 
 	bool OwnsPrimitive(const UPrimitiveComponent* Component) const;
 	bool HandleBirdImpact(UPrimitiveComponent* Component, int32 InstanceIndex, float NormalSpeedCMPerSec, const FVector& IncomingVelocity, EABTSBirdId BirdId);
@@ -85,6 +88,10 @@ private:
 	float ComputeDamageGain(const FABTSM7MaterialProfile& Profile, float NormalSpeedCMPerSec, float BreakSpeedCMPerSec) const;
 	uint64 GetHISMDamageKey(const UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex) const;
 	void ApplyHISMPhysicalMaterial(UHierarchicalInstancedStaticMeshComponent& HISM, EABTSM7BuildingMaterial Material, const TCHAR* DebugName);
+	AABTSM7BuildingModule* SpawnVoxelDeviceInternal(
+		const FABTSM7DeviceSpec& Spec,
+		const FTransform& WorldTransform,
+		bool bRegisterForLaunchPhysics);
 	void ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse = FVector::ZeroVector);
 	void MarkPhysicsActivity();
 	AABTSM7BuildingModule* PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM7BuildingMaterial Material, const FVector& Impulse, bool bActivateImmediately = true);
