@@ -7,6 +7,7 @@
 #include "ABTSM73BeamD0ProfileCatalog.h"
 #include "Building/ABTSM73BeamD1PreviewActor.h"
 #include "Building/ABTSM73BeamDemoManifest.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
@@ -983,6 +984,102 @@ bool FABTSM73BeamD1Stage55EditorPreviewRouteTest::RunTest(
 	TestEqual(TEXT("Editor route preserves device assembly identity"),
 		Preview->GetSummaryForValidation().DeviceAssemblyHash,
 		DirectResult.Summary.DeviceAssemblyHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73BuildingFreezeV3EditorPreviewRouteTest,
+	"ABTS.M73DAG.BuildingFreezeV3.EditorPreview.FixedSix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73BuildingFreezeV3EditorPreviewRouteTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace ABTSM73BeamD1Tests;
+	FBeamD1TestWorld WorldWrapper;
+	if (!WorldWrapper.Create())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+	UWorld* World = WorldWrapper.GetTestWorld();
+	const EABTSM73BeamDemoBuilding ComplexityIds[] = {
+		EABTSM73BeamDemoBuilding::E1ColumnBreak,
+		EABTSM73BeamDemoBuilding::E2DropTrigger,
+		EABTSM73BeamDemoBuilding::E3SlideRelease,
+		EABTSM73BeamDemoBuilding::E4TipOver,
+		EABTSM73BeamDemoBuilding::E5SeamRelease,
+		EABTSM73BeamDemoBuilding::E6TipOver};
+
+	for (const EABTSM73BeamDemoBuilding ComplexityId : ComplexityIds)
+	{
+		FABTSM73BuildingFreezeV3Descriptor Descriptor;
+		FString Error;
+		if (!TestTrue(TEXT("Frozen V3 descriptor derives"),
+			FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				ComplexityId, Descriptor, Error)))
+		{
+			AddError(Error);
+			return false;
+		}
+
+		AABTSM73BeamD1PreviewActor* Preview =
+			World->SpawnActorDeferred<AABTSM73BeamD1PreviewActor>(
+				AABTSM73BeamD1PreviewActor::StaticClass(),
+				FTransform::Identity, nullptr, nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!TestNotNull(TEXT("Frozen V3 PreviewActor"), Preview))
+		{
+			return false;
+		}
+		Preview->DemoBuilding = ComplexityId;
+		Preview->GenerationStopStage =
+			EABTSM73BeamC3GenerationStage::FrozenBuildingV3;
+		Preview->bShowEditorPreview = true;
+		Preview->bSpawnRuntimeModulesInPIE = false;
+		UGameplayStatics::FinishSpawningActor(Preview, FTransform::Identity);
+
+		const FABTSM73BeamD1Summary& Summary =
+			Preview->GetSummaryForValidation();
+		TestTrue(TEXT("Frozen V3 editor route accepts"), Summary.bAccepted);
+		TestEqual(TEXT("Frozen V3 stage identity is visible"),
+			Summary.GenerationStage,
+			EABTSM73BeamC3GenerationStage::FrozenBuildingV3);
+		TestEqual(TEXT("Frozen V3 editor route publishes every body brick"),
+			Preview->GetCompiledBricksForValidation().Num(),
+			Descriptor.Bricks.Num());
+		TestEqual(TEXT("Frozen V3 editor route publishes every device"),
+			Preview->GetCompiledDevicesForValidation().Num(),
+			Descriptor.Devices.Num());
+		TestEqual(TEXT("Frozen V3 editor route publishes every cap"),
+			Preview->CompiledFrozenV3CapCount, Descriptor.Caps.Num());
+		TestEqual(TEXT("Frozen V3 descriptor identity is preserved"),
+			Preview->FrozenV3DescriptorHash, Descriptor.DescriptorHash);
+		TestEqual(TEXT("Frozen V3 Wood recipe is visible"),
+			Preview->WoodPreview->GetInstanceCount(),
+			Descriptor.MaterialHistogram.Wood);
+		TestEqual(TEXT("Frozen V3 Stone recipe is visible"),
+			Preview->StonePreview->GetInstanceCount(),
+			Descriptor.MaterialHistogram.Stone);
+		TestEqual(TEXT("Frozen V3 Iron recipe is visible"),
+			Preview->IronPreview->GetInstanceCount(),
+			Descriptor.MaterialHistogram.Iron);
+		TestEqual(TEXT("Frozen V3 Glass recipe is visible"),
+			Preview->GlassPreview->GetInstanceCount(),
+			Descriptor.MaterialHistogram.Glass);
+		TestEqual(TEXT("Frozen V3 Crystal recipe is visible"),
+			Preview->CrystalPreview->GetInstanceCount(),
+			Descriptor.MaterialHistogram.Crystal);
+		TestEqual(TEXT("Frozen V3 device asset is visible"),
+			Preview->ExplosiveDevicePreview->GetInstanceCount()
+				+ Preview->PistonDevicePreview->GetInstanceCount(),
+			Descriptor.Devices.Num());
+		TestTrue(TEXT("Frozen V3 visible bounds are valid"),
+			Preview->GetAutomatedCaptureBounds().IsValid != 0);
+		TestEqual(TEXT("Frozen V3 editor fixture remains non-physical"),
+			Preview->GetRuntimeModuleCountForValidation(), 0);
+		Preview->Destroy();
+	}
 	return true;
 }
 

@@ -2,7 +2,7 @@
 
 日期：2026-08-15
 
-状态：M7 生成/冻结发布层与位置无关 runtime fixture consumer 完成；等待 Integration V3 DTO、M3 位置冻结、生产接线及新布局 Chaos。
+状态：M7 生成/冻结发布层、位置无关 runtime fixture consumer 与物理测试场 PreviewActor V3 展示接线完成；等待用户可见验收、Integration V3 DTO、M3 位置冻结、生产接线及新布局 Chaos。
 
 ## 1. 本阶段完成项
 
@@ -14,6 +14,7 @@
 - Crystal 特殊砖可通过 caller-owned static module 显示、碰撞、破坏和回收，不参与全局 launch activation；Module break 幂等，回收事件精确一次。
 - 新增 M7-owned `FABTSM73BuildingFreezeV3RuntimeRegistration`：从冻结 Catalog 与调用方 fixture Transform 构造六栋原子 runtime plan。Fixture authority 明确为 `M7V3RuntimeFixture`、`SourceLayoutHash=0`，不得冒充 M3 生产布局。
 - `AABTSM73StableBuildingActor` 复用 V2 的 Wood/Stone/Iron/Glass 主体 HISM 装配，按 V3 配方实例化 5739 块主体砖、6 个静态设备和 E1 唯一 Crystal cap；任一条目失败即回滚整批 Actor。
+- `AABTSM73BeamD1PreviewActor` 的 `Generation Stop Stage` 新增 `Frozen V3 - Final Material Recipe`。该模式直接消费冻结 V3 descriptor 的 site-local Bricks/Devices/Caps，显示主材质配方、content-to-site 旋转、设备和 E1 Crystal 顶帽；Stage 0～5.5 原预览路径保持不变。编辑器中的 E1～E6 选项明确标为 Complexity，不再暗示遭遇顺序。
 
 ## 2. 冻结身份
 
@@ -48,7 +49,8 @@ Catalog hash：`8960617043786800590`
 ## 4. 验证证据
 
 - 构建：唯一引擎 `C:\Program Files\Epic Games\UE_5.8`，`AngryBirdsToSpaceEditor Win64 Development -ForceUnity` 成功。
-- fresh NullRHI filter：`ABTS.M73DAG.BuildingFreezeV3`，`4/4` 成功（冻结发布 2 项 + runtime fixture 2 项）。
+- fresh NullRHI filter：`ABTS.M73DAG.BuildingFreezeV3`，`5/5` 成功（冻结发布 2 项 + runtime fixture 2 项 + PreviewActor fixed-six 1 项）。
+- PreviewActor 日志：`Saved/Logs/M7-BuildingFreezeV3-EditorPreview-20260815-FreshAutomation.log`；六个 Complexity 逐一精确匹配冻结材质直方图、设备数和 cap 数。物理测试地图只读 NullRHI 加载日志 `Saved/Logs/M7-PlanarPhysicsTestMap-V3Preview-20260815-NullRHI.log`，E1～E6 现有 PreviewActor 均重建、地图加载完成、原生组件模板错误为 0。
 - Runtime fixture 日志：`Saved/Logs/M7-BuildingFreezeV3-Runtime-20260815-FinalFreshAutomation.log`；六 Actor、5746 个主体/设备/顶帽单元、Crystal cap `1`，Placement Hash `12657652078857838663`，Registration Result Hash `5362210788187115933`。
 - V3 日志：`Saved/Logs/M7BuildingFreezeV3_FinalPass_20260815.log`。
 - Crystal 基线与回收映射日志：`Saved/Logs/M7CrystalBaselineRecovery_Final_20260815.log`、`Saved/Logs/M7CrystalRecoveryMapping_Final_20260815.log`。
