@@ -23,7 +23,7 @@
     },
     {
       "filter": "ABTS.M73DAG.BuildingFreezeV3",
-      "expectedTests": 6,
+      "expectedTests": 7,
       "evidenceLayer": "NullRHIBuildingFreeze"
     },
     {
