@@ -57,6 +57,45 @@ namespace ABTSM73BeamStage5ChaosTests
 		return true;
 	}
 
+	FABTSM73JuryDemoFixedSixStaticEntry MakePendingAtomicPhysicsEntry(
+		const FABTSM73BeamDemoManifestEntry& ManifestEntry,
+		const FABTSM73BuildingFreezeV3Descriptor& Descriptor,
+		const FABTSJuryDemoFixedSixBuildingSite& Site,
+		const int32 ContractVersion,
+		const uint64 LayoutHash)
+	{
+		FABTSM73JuryDemoFixedSixStaticEntry Entry;
+		Entry.ManifestEntryId = Site.ManifestEntryId;
+		Entry.DemoBuilding = ManifestEntry.Id;
+		Entry.EncounterIndex = Site.EncounterIndex;
+		Entry.DifficultyTier = Descriptor.DifficultyTier;
+		Entry.DeterministicSeed = Descriptor.BuildingSeed;
+		Entry.SourceContractVersion = ContractVersion;
+		Entry.WorldTransform = Site.WorldTransform;
+		Entry.PadHalfExtentCM = Site.PadHalfExtentCM;
+		Entry.LocalBounds = Descriptor.SiteLocalBounds;
+		Entry.EffectBounds = Descriptor.EffectBounds;
+		Entry.DescriptorHash = Descriptor.DescriptorHash;
+		Entry.StaticGeometryHash = Descriptor.StaticGeometryHash;
+		Entry.ProductionIdentityHash = Descriptor.ProductionHash;
+		Entry.DeviceAssemblyHash = Descriptor.SourceDeviceAssemblyHash;
+		Entry.SourceLayoutHash = LayoutHash;
+		Entry.SourcePlacementHash = Site.V3Envelope.PlacementHash;
+		Entry.SupportCenterWorldCM = Site.V3Envelope.SupportCenterWorldCM;
+		Entry.SupportRadiusCM = Site.V3Envelope.SupportRadiusCM;
+		Entry.GravityAuthorityId = Site.V3Envelope.GravityAuthorityId;
+		Entry.GravityIdentityHash = Site.V3Envelope.GravityIdentityHash;
+		Entry.PhysicsAssemblySchemaVersion =
+			Descriptor.PhysicsAssemblySchemaVersion;
+		Entry.PhysicsBodyCount = Descriptor.PhysicsBodyCount;
+		Entry.PhysicsAssemblyHash = Descriptor.PhysicsAssemblyHash;
+		Entry.Bricks = Descriptor.Bricks;
+		Entry.Devices = Descriptor.Devices;
+		Entry.Caps = Descriptor.Caps;
+		Entry.PhysicsClusters = Descriptor.PhysicsClusters;
+		return Entry;
+	}
+
 	class FStage5PhysicsWorld final : public FTestWorldWrapper
 	{
 	public:
@@ -143,12 +182,12 @@ namespace ABTSM73BeamStage5ChaosTests
 		const FVector Location = Site.WorldTransform.GetLocation();
 		const FQuat Rotation = Site.WorldTransform.GetRotation();
 		const FString Canonical = FString::Printf(
-			TEXT("BeamStage5ChaosProductionIdentity:v5:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
+			TEXT("BeamStage5ChaosProductionIdentity:v6:Entry=%s:Tier=%d:Seed=%d:Stage5=%llu")
 			TEXT(":Descriptor=%llu:Static=%llu:Production=%llu:Device=%llu")
 			TEXT(":ContractEnvelopeProduction=%llu:Contract=%d:Layout=%llu:Placement=%llu")
 			TEXT(":EncounterSlot=%d:Surface=%d:GravityAuthority=%s:GravityHash=%llu:Location=%d,%d,%d")
 			TEXT(":Rotation=%d,%d,%d,%d:SupportCenter=%d,%d,%d:SupportRadius=%d")
-			TEXT(":Bricks=%d:Devices=%d:Caps=%d:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
+			TEXT(":Bricks=%d:Devices=%d:Caps=%d:PhysicsBodies=%d:PhysicsAssembly=%llu:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
 			TEXT(":OuterDT=%d:Min=%d:Hold=%d:Max=%d:Lin=%d:Ang=%d")
 			TEXT(":Drift=%d:Settle=%d:Rot=%d:BodyHash=%u:WorldHash=%u")
 			TEXT(":GravityModel=SiteUniformTangentGravity:Gravity=%d")
@@ -189,6 +228,11 @@ namespace ABTSM73BeamStage5ChaosTests
 			StaticEntry.Bricks.Num(),
 			StaticEntry.Devices.Num(),
 			StaticEntry.Caps.Num(),
+			StaticEntry.PhysicsBodyCount != 0
+				? StaticEntry.PhysicsBodyCount
+				: StaticEntry.Bricks.Num() + StaticEntry.Devices.Num()
+					+ StaticEntry.Caps.Num(),
+			StaticEntry.PhysicsAssemblyHash,
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Summary.GroundNodeCount,
 			Result.Summary.SupportResultantAdvisoryCount,
@@ -330,7 +374,8 @@ namespace ABTSM73BeamStage5ChaosTests
 					AngularSpeedDegreesPerSec);
 				const FBodyInstance* Body = Mesh->GetBodyInstance();
 				OutResult.FinalAwakeBodyCount +=
-					Body != nullptr && Body->IsInstanceAwake() ? 1 : 0;
+					!Module->IsCompoundChild() && Body != nullptr
+						&& Body->IsInstanceAwake() ? 1 : 0;
 				bEveryBodyQuiet = bEveryBodyQuiet
 					&& LinearSpeedCMPerSec <= MaximumLinearSpeedCMPerSec
 					&& AngularSpeedDegreesPerSec
@@ -393,7 +438,8 @@ namespace ABTSM73BeamStage5ChaosTests
 		FABTSM73BuildingFreezeV3Descriptor Descriptor;
 		if (!Test.TestTrue(TEXT("Frozen V3 production descriptor resolves"),
 			FABTSM73BuildingFreezeV3::DeriveAndValidate(
-				Entry.Id, Descriptor, Error)))
+				Entry.Id, Descriptor, Error,
+				Entry.Id == EABTSM73BeamDemoBuilding::E6TipOver)))
 		{
 			Test.AddError(Error);
 			return false;
@@ -502,19 +548,6 @@ namespace ABTSM73BeamStage5ChaosTests
 			Descriptor.SourceStage5ProductionHash,
 			static_cast<uint64>(Result.ProductionIdentityHash));
 
-		FABTSM73JuryDemoFixedSixStaticPlan StaticPlan;
-		if (!Test.TestTrue(TEXT("Production V3 static plan resolves"),
-			FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
-				ProductionContract, StaticPlan, Error)))
-		{
-			Test.AddError(Error);
-			return false;
-		}
-		Test.TestEqual(TEXT("Production V3 registration identity is frozen"),
-			StaticPlan.RegistrationResultHash,
-			FABTSM73JuryDemoFixedSixRegistration::
-				FrozenV3RegistrationResultHash);
-
 		FName ContractManifestEntryName;
 		if (!Test.TestTrue(TEXT("Demo manifest entry maps to the production contract name"),
 			TryResolveProductionContractManifestEntryName(
@@ -529,23 +562,63 @@ namespace ABTSM73BeamStage5ChaosTests
 				{
 					return Candidate.ManifestEntryId == ContractManifestEntryName;
 				});
-		const int32 StaticEntryIndex = StaticPlan.Entries.IndexOfByPredicate(
-			[ContractManifestEntryName](
-				const FABTSM73JuryDemoFixedSixStaticEntry& Candidate)
-			{
-				return Candidate.ManifestEntryId == ContractManifestEntryName;
-			});
 		if (!Test.TestTrue(TEXT("V3 contract contains the requested complexity"),
-			ProductionContract.JuryDemoFixedSix.Sites.IsValidIndex(SiteIndex))
-			|| !Test.TestTrue(TEXT("V3 static plan contains the requested complexity"),
-				StaticPlan.Entries.IsValidIndex(StaticEntryIndex)))
+			ProductionContract.JuryDemoFixedSix.Sites.IsValidIndex(SiteIndex)))
 		{
 			return false;
 		}
 		const FABTSJuryDemoFixedSixBuildingSite Site =
 			ProductionContract.JuryDemoFixedSix.Sites[SiteIndex];
-		const FABTSM73JuryDemoFixedSixStaticEntry& StaticEntry =
-			StaticPlan.Entries[StaticEntryIndex];
+		FABTSM73JuryDemoFixedSixStaticEntry StaticEntry;
+		FABTSM73JuryDemoFixedSixStaticPlan StaticPlan;
+		const bool bPendingAtomicPhysicsSeal =
+			Descriptor.PhysicsAssemblyHash != 0
+			&& Site.DescriptorHash != Descriptor.DescriptorHash;
+		if (bPendingAtomicPhysicsSeal)
+		{
+			StaticEntry = MakePendingAtomicPhysicsEntry(
+				Entry, Descriptor, Site,
+				ProductionContract.JuryDemoFixedSix.ContractVersion,
+				ProductionContract.JuryDemoFixedSix.LayoutHash);
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][PendingIntegrationSeal]")
+				TEXT(" Entry=%s Layout=%llu Placement=%llu OldDescriptor=%llu CandidateDescriptor=%llu")
+				TEXT(" Static=%llu Production=%llu PhysicsBodies=%d PhysicsAssembly=%llu Accepted=1"),
+				*Entry.StableId.ToString(),
+				ProductionContract.JuryDemoFixedSix.LayoutHash,
+				Site.V3Envelope.PlacementHash, Site.DescriptorHash,
+				Descriptor.DescriptorHash, Descriptor.StaticGeometryHash,
+				Descriptor.ProductionHash, Descriptor.PhysicsBodyCount,
+				Descriptor.PhysicsAssemblyHash);
+		}
+		else
+		{
+			if (!Test.TestTrue(TEXT("Production V3 static plan resolves"),
+				FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
+					ProductionContract, StaticPlan, Error)))
+			{
+				Test.AddError(Error);
+				return false;
+			}
+			Test.TestEqual(TEXT("Production V3 registration identity is frozen"),
+				StaticPlan.RegistrationResultHash,
+				FABTSM73JuryDemoFixedSixRegistration::
+					FrozenV3RegistrationResultHash);
+			const int32 StaticEntryIndex =
+				StaticPlan.Entries.IndexOfByPredicate(
+					[ContractManifestEntryName](
+						const FABTSM73JuryDemoFixedSixStaticEntry& Candidate)
+					{
+						return Candidate.ManifestEntryId
+							== ContractManifestEntryName;
+					});
+			if (!Test.TestTrue(TEXT("V3 static plan contains the requested complexity"),
+				StaticPlan.Entries.IsValidIndex(StaticEntryIndex)))
+			{
+				return false;
+			}
+			StaticEntry = StaticPlan.Entries[StaticEntryIndex];
+		}
 		const FVector SupportCenter = Site.V3Envelope.SupportCenterWorldCM;
 		FABTSM7SiteUniformGravityPolicy SiteGravity;
 		if (!Test.TestTrue(TEXT("V3 Site-uniform gravity policy derives from frozen placement"),
@@ -597,14 +670,31 @@ namespace ABTSM73BeamStage5ChaosTests
 			Site.EncounterIndex, Descriptor.EncounterSlot);
 		Test.TestEqual(TEXT("V3 site keeps the manifest seed"),
 			Site.DeterministicSeed, Entry.Settings.BuildingSeed);
-		Test.TestEqual(TEXT("V3 contract and production plan share descriptor identity"),
-			Site.DescriptorHash, StaticEntry.DescriptorHash);
+		if (bPendingAtomicPhysicsSeal)
+		{
+			Test.TestNotEqual(TEXT("Atomic M7 physics candidate requires a new shared descriptor seal"),
+				Site.DescriptorHash, StaticEntry.DescriptorHash);
+		}
+		else
+		{
+			Test.TestEqual(TEXT("V3 contract and production plan share descriptor identity"),
+				Site.DescriptorHash, StaticEntry.DescriptorHash);
+		}
 		Test.TestEqual(TEXT("V3 contract and production plan share static geometry"),
 			Site.V3Envelope.StaticGeometryHash,
 			StaticEntry.StaticGeometryHash);
-		Test.TestEqual(TEXT("V3 contract and production plan share production identity"),
-			Site.V3Envelope.ProductionIdentityHash,
-			StaticEntry.ProductionIdentityHash);
+		if (bPendingAtomicPhysicsSeal)
+		{
+			Test.TestNotEqual(TEXT("Atomic M7 physics candidate requires a new shared production seal"),
+				Site.V3Envelope.ProductionIdentityHash,
+				StaticEntry.ProductionIdentityHash);
+		}
+		else
+		{
+			Test.TestEqual(TEXT("V3 contract and production plan share production identity"),
+				Site.V3Envelope.ProductionIdentityHash,
+				StaticEntry.ProductionIdentityHash);
+		}
 		Test.TestEqual(TEXT("V3 contract and production plan share device identity"),
 			Site.V3Envelope.DeviceAssemblyHash,
 			StaticEntry.DeviceAssemblyHash);
@@ -768,11 +858,14 @@ namespace ABTSM73BeamStage5ChaosTests
 		}
 
 		TArray<AABTSM7BuildingModule*> Modules;
+		TArray<AABTSM7BuildingModule*> PhysicsModules;
 		TArray<FTransform> InitialTransforms;
-		const int32 ExpectedBodyCount = StaticEntry.Bricks.Num()
+		TArray<double> ExpectedBrickMassKG;
+		const int32 ExpectedModuleCount = StaticEntry.Bricks.Num()
 			+ StaticEntry.Devices.Num() + StaticEntry.Caps.Num();
-		Modules.Reserve(ExpectedBodyCount);
-		InitialTransforms.Reserve(ExpectedBodyCount);
+		Modules.Reserve(ExpectedModuleCount);
+		InitialTransforms.Reserve(ExpectedModuleCount);
+		ExpectedBrickMassKG.Reserve(StaticEntry.Bricks.Num());
 		FBox GroundSupportBounds(EForceInit::ForceInit);
 		double TotalMassKG = 0.0;
 		double BrickMassKG = 0.0;
@@ -810,6 +903,7 @@ namespace ABTSM73BeamStage5ChaosTests
 				return false;
 			}
 			const double ExpectedMassKG = BodySetup->CalculateMass(Mesh);
+			ExpectedBrickMassKG.Add(ExpectedMassKG);
 			const double MassToleranceKG = FMath::Max(0.01, ExpectedMassKG * 0.001);
 			CalculatedChaosMassKG += ExpectedMassKG;
 			Test.TestTrue(*FString::Printf(
@@ -931,7 +1025,7 @@ namespace ABTSM73BeamStage5ChaosTests
 			Modules.Add(Module);
 			InitialTransforms.Add(Module->GetActorTransform());
 		}
-		Test.TestEqual(TEXT("V3 dynamic body count matches production"),
+		Test.TestEqual(TEXT("V3 visible module count matches production"),
 			Modules.Num(), StaticEntry.Bricks.Num()
 				+ StaticEntry.Devices.Num() + StaticEntry.Caps.Num());
 		const FABTSM7PenetrationValidationStats Penetration =
@@ -948,6 +1042,69 @@ namespace ABTSM73BeamStage5ChaosTests
 		{
 			return false;
 		}
+
+		if (StaticEntry.PhysicsAssemblyHash != 0)
+		{
+			for (const FABTSM73BuildingFreezeV3PhysicsCluster& Cluster :
+				StaticEntry.PhysicsClusters)
+			{
+				if (!Test.TestTrue(TEXT("Compound root Brick index is valid"),
+					Modules.IsValidIndex(Cluster.RootBrickId)))
+				{
+					return false;
+				}
+				AABTSM7BuildingModule* Root = Modules[Cluster.RootBrickId];
+				double ExpectedCompoundMassKG = 0.0;
+				for (const int32 BrickId : Cluster.BrickIds)
+				{
+					if (!Test.TestTrue(TEXT("Compound member Brick index is valid"),
+						Modules.IsValidIndex(BrickId)
+							&& ExpectedBrickMassKG.IsValidIndex(BrickId)))
+					{
+						return false;
+					}
+					ExpectedCompoundMassKG += ExpectedBrickMassKG[BrickId];
+					if (BrickId != Cluster.RootBrickId
+						&& !Test.TestTrue(TEXT("Production module path welds the certified compound child"),
+							Root->TryWeldStaticChild(*Modules[BrickId])))
+					{
+						return false;
+					}
+				}
+				const double ActualCompoundMassKG =
+					Root->GetMeshComponent()->GetMass();
+				const double CompoundToleranceKG = FMath::Max(
+					0.05, ExpectedCompoundMassKG * 0.001);
+				Test.TestTrue(*FString::Printf(
+					TEXT("Compound Body mass matches authoritative member mass Cluster=%d Root=%d Actual=%.6f Expected=%.6f Tolerance=%.6f"),
+					Cluster.ClusterId, Cluster.RootBrickId,
+					ActualCompoundMassKG, ExpectedCompoundMassKG,
+					CompoundToleranceKG),
+					FMath::IsNearlyEqual(ActualCompoundMassKG,
+						ExpectedCompoundMassKG, CompoundToleranceKG));
+				PhysicsModules.Add(Root);
+			}
+			for (int32 ModuleIndex = StaticEntry.Bricks.Num();
+				ModuleIndex < Modules.Num(); ++ModuleIndex)
+			{
+				PhysicsModules.Add(Modules[ModuleIndex]);
+			}
+			Test.TestEqual(TEXT("Certified compound assembly produces the frozen Chaos body count"),
+				PhysicsModules.Num(), StaticEntry.PhysicsBodyCount);
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7.3-BeamC3V3][ChaosStability][PhysicsAssembly]")
+				TEXT(" Entry=%s Schema=%d VisibleModules=%d PhysicsBodies=%d Clusters=%d Hash=%llu MassPolicy=SumPerBodySetupCalculateMass Accepted=%d"),
+				*Entry.StableId.ToString(),
+				StaticEntry.PhysicsAssemblySchemaVersion, Modules.Num(),
+				PhysicsModules.Num(), StaticEntry.PhysicsClusters.Num(),
+				StaticEntry.PhysicsAssemblyHash,
+				Test.HasAnyErrors() ? 0 : 1);
+		}
+		else
+		{
+			PhysicsModules = Modules;
+		}
+		if (Test.HasAnyErrors()) return false;
 
 		const FVector CenterOfMass = TotalMassKG > UE_DOUBLE_SMALL_NUMBER
 			? MassMoment / TotalMassKG
@@ -976,7 +1133,7 @@ namespace ABTSM73BeamStage5ChaosTests
 		const uint32 WorldProfileHash = WorldProfile.ComputeCrc32();
 		if (!Test.TestTrue(TEXT("Production module path accepts Site-uniform launch"),
 			MaterialSystem->BeginSiteUniformLaunchPhysics(
-				Modules,
+				PhysicsModules,
 				Site.WorldTransform.GetLocation(),
 				SupportCenter,
 				GravityCMPerSec2,
@@ -1005,7 +1162,7 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(" ProductionHash=%llu DeviceHash=%llu PlacementHash=%llu")
 			TEXT(" GravityAuthority=%s GravityHash=%llu FixtureCrc32=%u")
 			TEXT(" ContractVersion=%d LayoutHash=%llu SiteTransform=%s SupportCenter=%s SupportRadius=%.3f")
-			TEXT(" Bricks=%d Devices=%d Caps=%d Bodies=%d Contacts=%d Ground=%d")
+			TEXT(" Bricks=%d Devices=%d Caps=%d VisibleModules=%d PhysicsBodies=%d PhysicsAssembly=%llu Contacts=%d Ground=%d")
 			TEXT(" ResultantAdvisories=%d StaticSelfLoadKG=%.3f ExternalLoadKG=%.3f")
 			TEXT(" BrickMassKG=%.3f MassKG=%.3f CalculatedMassKG=%.3f")
 			TEXT(" LocalCOM=%s GroundMin=%s GroundMax=%s COMSupported=%d")
@@ -1036,6 +1193,8 @@ namespace ABTSM73BeamStage5ChaosTests
 			StaticEntry.Devices.Num(),
 			StaticEntry.Caps.Num(),
 			Modules.Num(),
+			PhysicsModules.Num(),
+			StaticEntry.PhysicsAssemblyHash,
 			Result.CompactAssembly.BearingContacts.Num(),
 			Result.LoadDAG.Summary.GroundNodeCount,
 			Result.Summary.SupportResultantAdvisoryCount,

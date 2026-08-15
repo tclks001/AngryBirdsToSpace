@@ -107,6 +107,43 @@ bool FABTSM73JuryDemoFixedSixStaticEntry::IsUsable(
 				- SupportCenterWorldCM).IsNearlyZero()
 			&& ((EncounterIndex == 4 && Caps.Num() == 1)
 				|| (EncounterIndex != 4 && Caps.IsEmpty()));
+	bool bPhysicsAssemblyValid = PhysicsAssemblyHash == 0
+		&& PhysicsAssemblySchemaVersion == 0
+		&& PhysicsBodyCount == 0
+		&& PhysicsClusters.IsEmpty();
+	if (PhysicsAssemblyHash != 0)
+	{
+		TSet<int32> AssignedBricks;
+		bPhysicsAssemblyValid = PhysicsAssemblySchemaVersion == 1
+			&& PhysicsBodyCount == PhysicsClusters.Num() + Devices.Num() + Caps.Num()
+			&& PhysicsBodyCount < Bricks.Num() + Devices.Num() + Caps.Num();
+		for (int32 ClusterIndex = 0;
+			bPhysicsAssemblyValid && ClusterIndex < PhysicsClusters.Num();
+			++ClusterIndex)
+		{
+			const FABTSM73BuildingFreezeV3PhysicsCluster& Cluster =
+				PhysicsClusters[ClusterIndex];
+			bPhysicsAssemblyValid = Cluster.ClusterId == ClusterIndex
+				&& Cluster.ClusterHash != 0
+				&& Cluster.StaticSelfLoadKG > 0.0
+				&& !Cluster.BrickIds.IsEmpty()
+				&& Cluster.BrickIds.Contains(Cluster.RootBrickId)
+				&& (Cluster.bDirectGroundSupport
+					|| Cluster.PositiveExternalSupportCount > 0);
+			for (const int32 BrickId : Cluster.BrickIds)
+			{
+				if (!Bricks.IsValidIndex(BrickId)
+					|| AssignedBricks.Contains(BrickId))
+				{
+					bPhysicsAssemblyValid = false;
+					break;
+				}
+				AssignedBricks.Add(BrickId);
+			}
+		}
+		bPhysicsAssemblyValid = bPhysicsAssemblyValid
+			&& AssignedBricks.Num() == Bricks.Num();
+	}
 	return !ManifestEntryId.IsNone()
 		&& DemoBuilding != EABTSM73BeamDemoBuilding::Custom
 		&& EncounterIndex >= 0
@@ -126,6 +163,7 @@ bool FABTSM73JuryDemoFixedSixStaticEntry::IsUsable(
 		&& ProductionIdentityHash != 0
 		&& DeviceAssemblyHash != 0
 		&& SourceLayoutHash != 0
+		&& bPhysicsAssemblyValid
 		&& RegistrationResultHash != 0
 		&& !Bricks.IsEmpty()
 		&& !Devices.IsEmpty();
@@ -302,11 +340,16 @@ bool FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
 			Entry.SupportRadiusCM = Envelope.SupportRadiusCM;
 			Entry.GravityAuthorityId = Envelope.GravityAuthorityId;
 			Entry.GravityIdentityHash = Envelope.GravityIdentityHash;
+			Entry.PhysicsAssemblySchemaVersion =
+				Descriptor.PhysicsAssemblySchemaVersion;
+			Entry.PhysicsBodyCount = Descriptor.PhysicsBodyCount;
+			Entry.PhysicsAssemblyHash = Descriptor.PhysicsAssemblyHash;
 			Entry.bDynamicEnvelopeRequired = FixedSixEffectExitsPad(
 				Descriptor.EffectBounds, Site.PadHalfExtentCM);
 			Entry.Bricks = MoveTemp(Descriptor.Bricks);
 			Entry.Devices = MoveTemp(Descriptor.Devices);
 			Entry.Caps = MoveTemp(Descriptor.Caps);
+			Entry.PhysicsClusters = MoveTemp(Descriptor.PhysicsClusters);
 
 			FixedSixRegistrationHashUInt64(ResultHash, Entry.DescriptorHash);
 			FixedSixRegistrationHashUInt64(ResultHash, Entry.StaticGeometryHash);
@@ -314,6 +357,11 @@ bool FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
 				ResultHash, Entry.ProductionIdentityHash);
 			FixedSixRegistrationHashUInt64(ResultHash, Entry.DeviceAssemblyHash);
 			FixedSixRegistrationHashUInt64(ResultHash, Entry.SourcePlacementHash);
+			if (Entry.PhysicsAssemblyHash != 0)
+			{
+				FixedSixRegistrationHashUInt64(
+					ResultHash, Entry.PhysicsAssemblyHash);
+			}
 		}
 
 		CandidatePlan.RegistrationResultHash = ResultHash;

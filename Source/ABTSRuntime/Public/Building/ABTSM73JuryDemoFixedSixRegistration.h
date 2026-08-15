@@ -35,11 +35,15 @@ struct FABTSM73JuryDemoFixedSixStaticEntry
 	double SupportRadiusCM = 0.0;
 	FName GravityAuthorityId = NAME_None;
 	uint64 GravityIdentityHash = 0;
+	int32 PhysicsAssemblySchemaVersion = 0;
+	int32 PhysicsBodyCount = 0;
+	uint64 PhysicsAssemblyHash = 0;
 	uint64 RegistrationResultHash = 0;
 	bool bDynamicEnvelopeRequired = false;
 	TArray<FABTSM73BeamD1BrickBinding> Bricks;
 	TArray<FABTSM73BeamD1DeviceBinding> Devices;
 	TArray<FABTSM73BuildingFreezeV3CapBinding> Caps;
+	TArray<FABTSM73BuildingFreezeV3PhysicsCluster> PhysicsClusters;
 
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };
@@ -61,8 +65,14 @@ struct FABTSM73JuryDemoFixedSixStaticPlan
 class ABTSRUNTIME_API FABTSM73JuryDemoFixedSixRegistration
 {
 public:
-	static constexpr uint64 FrozenV3RegistrationResultHash =
+	static constexpr uint64 PreE6CompoundV1RegistrationResultHash =
 		14507275966565957788ull;
+	static constexpr uint64 E6CompoundV1CandidateRegistrationResultHash =
+		231363192505907336ull;
+	static constexpr uint64 FrozenV3RegistrationResultHash =
+		FABTSM73BuildingFreezeV3::bE6CompoundV1Published
+			? E6CompoundV1CandidateRegistrationResultHash
+			: PreE6CompoundV1RegistrationResultHash;
 	static constexpr int32 FrozenV3StaticModuleCount = 5748;
 
 	static bool BuildStaticPlan(
