@@ -151,8 +151,18 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 			Placement.Site.ManifestEntryId,
 			ExpectedEntries[Index]);
 		const FVector BoundsSize = Placement.Site.LocalBounds.GetSize();
-		TestTrue(TEXT("Frozen non-square footprint has Site Y as long axis"),
-			BoundsSize.Y > BoundsSize.X);
+		const bool bIsSatellite = Placement.Site.V3Envelope.SurfaceKind
+			== EABTSJuryDemoFixedSixSurfaceKind::Satellite;
+		if (bIsSatellite)
+		{
+			TestTrue(TEXT("Satellite E1 footprint is square in Site X/Y"),
+				FMath::IsNearlyEqual(BoundsSize.X, BoundsSize.Y, 1.0e-4));
+		}
+		else
+		{
+			TestTrue(TEXT("Frozen non-square primary footprint has Site Y as long axis"),
+				BoundsSize.Y > BoundsSize.X);
+		}
 		TestTrue(TEXT("Road/slingshot attack corridor faces Site X"),
 			FVector::DotProduct(
 				Placement.AttackCorridorWorldDirection.GetSafeNormal(),
@@ -160,8 +170,7 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 				>= 1.0 - 1.0e-4);
 		TestTrue(TEXT("Attack corridor is perpendicular to footprint long axis"),
 			Placement.AttackCorridorLongAxisAbsDot <= 1.0e-3);
-		if (Placement.Site.V3Envelope.SurfaceKind
-			== EABTSJuryDemoFixedSixSurfaceKind::Satellite)
+		if (bIsSatellite)
 		{
 			++SatelliteCount;
 			TestEqual(TEXT("Only slot four is satellite E1"), Index, 4);
