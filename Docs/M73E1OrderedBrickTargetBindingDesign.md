@@ -38,17 +38,17 @@
 
 Crystal 顶帽仍是损伤链终点，但不是轨迹 union 成员。命中 device、cap 或直接摧毁 Crystal 不会设置 `bRealModuleImpactObserved`。
 
-## 4. M3 seal 合入后的绑定切换
+## 4. M3 honest seal 下的绑定切换
 
-新 master 提供 set-based M3 runtime API 后，M7 GameMode 才执行以下原子替换：
+`master@82bb769` 的 M3 runtime 公开入口仍以 cap pose/half extent 恢复 frozen SiteTransform，但其内部会定位唯一 E1 StableBuildingActor，并逐材质 HISM 按 descriptor 有序 exact 审核完整 54-Brick union。因此 M7 不把 cap 当目标，只生成一次性、无碰撞、调用后立即销毁的 site-recovery adapter；真正的 gameplay target 始终是 E1 Actor，first-hit authority 始终是 54 个真实 Brick OBB。
 
-1. 有界重试等待六栋静态注册、E1 production promotion、唯一 ordered target set、唯一且 Ready 的 SatelliteRuntime。
-2. 将完整 target set 一次性交给 M3 runtime；禁止抽取 `BrickId4`、首项或任一代表 Brick。
-3. M3 以 frozen OBB union 做轨迹证书，以每项 live module/component 做真实 first-hit 身份。
-4. 绑定成功后一次性清 timer；数量、Hash、顺序或 ownership 不一致立即 fail closed。
-5. 移除旧 `BindProductionE1CrystalTarget()` 消费后，再单独清理 Crystal 命名兼容桥。
+1. 有界重试等待六栋静态注册、唯一 pre-promotion ordered HISM union 和唯一且 Ready 的 SatelliteRuntime。
+2. M7 先 exact 审核 54 项 descriptor/HISM 顺序、逐轴 OBB、collision 与 owner，再把 unit-scale cap descriptor pose 仅作为 site-recovery adapter 调用 M3。
+3. M3 再独立 exact 审核同一真实 E1 Actor 的 54-Brick HISM union，成功后销毁 stand-in，并把 gameplay target 切换为真实 E1 Actor。
+4. M7 只在 M3 成功后 promotion；promotion 后每个 descriptor Brick 一对一绑定真实 damage module，Caps/Devices/Crystal 仍不进入 first-hit union。
+5. 绑定成功后一次性清 timer；数量、Hash、顺序、scale、collision 或 ownership 任一不一致立即 fail closed。
 
-在 M3 honest seal 合入前，不修改 shared contract/M3 runtime，也不把当前单 Crystal API 宣称为新 authority。
+旧 `CopyJuryDemoE1CrystalTarget()` 仅保留 ABI/历史测试兼容，production GameMode 不再消费它。
 
 ## 5. 验证与日志计划
 
@@ -59,3 +59,38 @@ Crystal 顶帽仍是损伤链终点，但不是轨迹 union 成员。命中 devi
 - 禁止使用 proxy 命中、单 Brick 代表证书或脚本直接删除 Crystal 作为通过证据。
 
 计划日志字段：`DescriptorHash / StaticGeometryHash / TargetGeometryHash / TargetBrickCount / FirstHitBrickId / ModuleOwner / StructuralResponse / CrystalChain / Accepted`。
+
+## 6. 与生产 Chaos 的同物理身份
+
+- exact union 审核发生在 promotion 前；HISM 被替换为真实模块后，damage lifecycle 使用相同 `BrickId` 和 frozen OBB 顺序。
+- E1 位于连续卫星球面，但其 BuildingFreeze 几何是 frozen SiteTransform 的局部切平面。生产必须显式物化与夹具相同的 `PadHalfExtentCM × 100 cm` WorldStatic tangent support；该支撑不进入目标 union，也不改变共享 Static/Placement/Layout 身份。
+- canonical 首跑进一步证明，E2–E6 的 M3 pad 数学查询虽为切平面，实际刚体接触仍来自 tessellated ProceduralMesh；M3 自身允许最高 `35 cm` collision residual，不能与 Stage5 精确 box floor 互相替代。因此六栋都物化同一冻结尺寸/厚度的精确 tangent support，M3 继续拥有站点位置、地表和 grade skirt。
+- 六栋观察共同使用 60 Hz fixed step、post-activation frame barrier、SiteUniformTangentGravity 和 enhanced deterministic Chaos solver；Candidate 必须编码这些 consumer policy。
+- solver/fixed-step 是有界作用域：成功、拒绝、Actor 丢失及 EndPlay 都恢复进入前状态。Prepare 若发现 support 或 solver identity 漂移则 fail closed。
+
+## 7. Candidate v8 最终发行阻断
+
+- E1 exact 54-Brick union 已在 canonical 中绑定真实 `AABTSM73StableBuildingActor`，`Bricks=54`、`Geometry=3519185746`、`CapsDevicesExcluded=1`、`StandInRetired=1`；该 target authority 没有回退。
+- 六栋批次改为同一 fixed-step/determinism 作用域内按 E1→E6 逐栋跨帧激活，排除了大批刚体并发导致 E5 不稳的假设。
+- E5 单栋 frozen-pad fixture 全睡眠且最终空间门通过，真实地图串行 E5 仍有 1216 awake 与 9.594 cm 最终漂移。源码上 M3 continuous surface 和 M7 tangent pad 都是 Static BlockAll，故真实地图存在夹具没有的第二支撑碰撞 authority。
+- 在 Integration/M3 明确 pad 区域唯一 collision authority 前，M7 必须保持 `BuildingValidation=Rejected`；不得通过放宽 final/quiet/awake、强制 sleep、回写 transform 或关闭整个主星 collision 伪造通过。
+
+## 8. Candidate v9 碰撞分层实机结论
+
+- M7 GameMode 已把碰撞 override 做成代次绑定的有界资源：六个 exact pad 全部通过严格身份校验后、任何 building activation 前，保存主星与卫星 ContinuousSurface 的原 DeveloperObstacle 响应并切为 Ignore；成功保持到 EndPlay，setup/canonical failure 与 generation retry 恢复。
+- override 只操作 `ABTSDeveloperObstacleChannel`。每块 ContinuousSurface 的 Pawn、WorldStatic、PhysicsBody 响应在切换前后逐项恒等，六个 tangent pad 对 DeveloperObstacle 继续 Block。
+- 唯一 fresh canonical 证明 override 与恢复日志成立，却没有改变 E5：最终/峰值和 awake 数与 v8 相同。源码审计确认生产 module 激活时 `SetCollisionProfileName("PhysicsActor")` 把 ObjectType 重设为 `PhysicsBody`；因此被 terrain Ignore 的 DeveloperObstacle 并不是实际动态 brick 的当前 ObjectType。
+- Candidate v9 由此 fail closed。下一次验证前必须先在 M7-owned 动态激活边界恢复 DeveloperObstacle ObjectType，同时保留 PhysicsActor 的响应容器、模拟状态和玩家/鸟交互；未经新的 fresh canonical 不得提交为发行修复。
+
+## 9. Candidate v10 动态 shape-filter 实机结论
+
+- `ActivateDynamic()` 在应用 `PhysicsActor` profile 后立即恢复 `ABTSDeveloperObstacleChannel`；profile 的 QueryAndPhysics、Physics simulation、通知与响应容器仍保持，不改玩家/鸟/普通物理交互。
+- 每个 SiteUniform module 激活后、观察开始前，M7 读取 component ObjectType、physics actor 与所有 live `FPhysicsShapeHandle` 的 `FShapeFilterData`。任一 shape 非 DeveloperObstacle、没有 shape 或没有 actor 均 fail closed。
+- 唯一 fresh canonical 没有触发 `CollisionIdentityInvalid`，且 E5 指标由 v9 的 `9.594/2.670/1.497`、`10.138/4.275/2.887` 改变为 `9.245/2.794/2.510`、`10.834/4.412/3.388`，这证明过滤身份修复已作用于真实 Chaos。
+- E5 仍未达到 final `4/6/2`、quiet/end-quiet 和 `FinalAwake=0`，所以 v10 继续 fail closed；E6 未运行。下一步必须针对 E5 的实际结构/接触动力学提出新的最小修复授权，不能把当前修复或静止时间视作通过。
+
+## 10. Candidate v11 首击延迟 Chaos
+
+- 启动期仍精确物化 descriptor、frozen tangent pad 与所有真实模块，并执行质量、支撑、穿透、装配与 54-Brick OBB union 预检；仅不把无玩家命中的建筑提前推进到动态观察窗。
+- 每栋独立记录 `ChaosDeferredUntilFirstHit=1`。任何真实 module damage 在原伤害继续之前先原子激活该栋完整 module/device/cap 集合，保持 `PhysicsActor` response、`ABTSDeveloperObstacle` object/shape filter、对应 pad 与 `SiteUniformTangentGravity`；直接 Crystal、脚本删除与 blast 均不能替代 `ModuleContact -> Crystal` 因果链。
+- fresh canonical `M7-BC-142-CandidateV11-DeferredStartup-L_ABTS_M10-20260816-FreshOffscreenD3D11.log` 以 E1 exact 54 union 和 stand-in retired 完成 WorldReady；这是启动就绪证据，不重命名为六栋 startup Chaos 稳定认证。

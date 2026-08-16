@@ -105,6 +105,9 @@ public:
 	bool ActivateDynamicSiteUniform(
 		const FVector& Impulse,
 		const FABTSM7SiteUniformGravityPolicy& Policy);
+	/** Fail-closed audit of the live Chaos body and every shape filter. */
+	bool VerifyChaosDeveloperObstacleCollisionIdentity(
+		FString& OutError) const;
 	/** Joins an authored child shape into this module's initial rigid body. */
 	bool TryWeldStaticChild(AABTSM7BuildingModule& Child);
 	/** Applies acceleration without invalidating Chaos sleep; false means no usable physics body. */

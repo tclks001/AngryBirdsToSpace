@@ -366,7 +366,7 @@ bool FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest::RunTest(
 	Observation.AcceptedStaticBuildingCount =
 		FABTSM7SatellitePracticeE1CrystalBindingLifecycle::
 			ExpectedStaticBuildingCount;
-	Observation.CrystalTargetCount = 1;
+	Observation.E1OrderedUnionCount = 1;
 	FString Reason;
 	TestTrue(TEXT("A missing runtime remains a non-terminal wait"),
 		DelayedRuntime.Advance(0.1, Observation, Reason) == FAction::Wait);
@@ -418,16 +418,16 @@ bool FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest::RunTest(
 	TestEqual(TEXT("Multiple-runtime reason is diagnostic"), Reason,
 		FString(TEXT("MultipleSatelliteRuntimes")));
 
-	FABTSM7SatellitePracticeE1CrystalBindingLifecycle MultipleCrystal;
-	TestTrue(TEXT("Multiple-crystal lifecycle starts"),
-		MultipleCrystal.Start(0.0));
+	FABTSM7SatellitePracticeE1CrystalBindingLifecycle MultipleUnion;
+	TestTrue(TEXT("Multiple-union lifecycle starts"),
+		MultipleUnion.Start(0.0));
 	Observation.SatelliteRuntimeCount = 1;
-	Observation.CrystalTargetCount = 2;
-	TestTrue(TEXT("Multiple Crystal targets fail closed"),
-		MultipleCrystal.Advance(0.1, Observation, Reason)
+	Observation.E1OrderedUnionCount = 2;
+	TestTrue(TEXT("Multiple E1 ordered unions fail closed"),
+		MultipleUnion.Advance(0.1, Observation, Reason)
 			== FAction::Reject);
-	TestEqual(TEXT("Multiple-Crystal reason is diagnostic"), Reason,
-		FString(TEXT("MultipleCrystalTargets")));
+	TestEqual(TEXT("Multiple-union reason is diagnostic"), Reason,
+		FString(TEXT("MultipleE1OrderedUnions")));
 
 	using namespace ABTSM73BuildingFreezeV3RuntimeRegistrationTests;
 	FRuntimeRegistrationTestWorld WorldWrapper;

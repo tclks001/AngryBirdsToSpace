@@ -13,6 +13,7 @@ class AABTSM7BuildingMaterialSystem;
 class AABTSM73StableBuildingActor;
 class AABTSM3Planet;
 class FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest;
+class UProceduralMeshComponent;
 class UWorld;
 struct FABTSBuildingGenerationContract;
 
@@ -37,7 +38,8 @@ enum class EABTSM7SatellitePracticeE1CrystalBindingAction : uint8
 struct FABTSM7SatellitePracticeE1CrystalBindingObservation
 {
 	int32 AcceptedStaticBuildingCount = 0;
-	int32 CrystalTargetCount = 0;
+	/** Number of complete pre-promotion 54-Brick ordered unions, not caps. */
+	int32 E1OrderedUnionCount = 0;
 	int32 SatelliteRuntimeCount = 0;
 	bool bSatelliteRuntimeReady = false;
 };
@@ -179,6 +181,12 @@ private:
 	void DrawTaskGraphPositionDebug();
 	bool BeginJuryDemoFixedSixProductionChaosBatch();
 	void UpdateJuryDemoFixedSixProductionChaosBatch();
+	bool EnterJuryDemoFixedSixProductionChaosFixedStep();
+	void RestoreJuryDemoFixedSixProductionChaosFixedStep();
+	bool ApplyJuryDemoFixedSixTerrainBuildingCollisionOverride(
+		FString& OutError);
+	void RestoreJuryDemoFixedSixTerrainBuildingCollisionOverride(
+		const TCHAR* Reason);
 	void UpdateProductionFlowTiming(float DeltaSeconds);
 	void LogProductionFlowSegment(const TCHAR* Segment);
 	void FinishProductionFlow(bool bReady, const FString& Reason);
@@ -246,6 +254,19 @@ private:
 	TWeakObjectPtr<AABTSM6SlingshotSystem> ProductionFlowSlingshotSystem;
 	bool bJuryDemoFixedSixChaosBatchActive = false;
 	bool bJuryDemoFixedSixChaosBatchTerminal = false;
+	int32 JuryDemoFixedSixChaosActiveIndex = INDEX_NONE;
+	bool bJuryDemoFixedSixChaosOwnsFixedStep = false;
+	bool bJuryDemoFixedSixChaosOwnsSolverDeterminism = false;
+	bool bJuryDemoFixedSixPreviousUseFixedTimeStep = false;
+	bool bJuryDemoFixedSixPreviousSolverDeterminism = false;
+	double JuryDemoFixedSixPreviousFixedDeltaSeconds = 0.0;
+	TArray<TWeakObjectPtr<UProceduralMeshComponent>>
+		JuryDemoFixedSixTerrainSurfaces;
+	TArray<TEnumAsByte<ECollisionResponse>>
+		JuryDemoFixedSixTerrainPreviousBuildingResponses;
+	uint64 JuryDemoFixedSixProductionGenerationToken = 0;
+	uint64 JuryDemoFixedSixTerrainOverrideGenerationToken = 0;
+	bool bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride = false;
 	bool bProductionFlowTimingActive = false;
 	bool bProductionFlowTerminal = false;
 	double ProductionFlowStartWallSeconds = 0.0;

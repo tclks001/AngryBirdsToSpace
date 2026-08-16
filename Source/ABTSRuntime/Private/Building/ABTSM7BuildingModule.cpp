@@ -2,6 +2,7 @@
 
 #include "Building/ABTSM7BuildingModule.h"
 
+#include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/StaticMeshComponent.h"
@@ -11,6 +12,8 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/PhysicsObjectExternalInterface.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Physics/Experimental/PhysInterface_Chaos.h"
+#include "Physics/PhysicsFiltering.h"
 #include "World/ABTSCollisionChannels.h"
 
 bool FABTSM7SiteUniformGravityPolicy::TryDerive(
@@ -345,6 +348,10 @@ void AABTSM7BuildingModule::ActivateDynamic(const FVector& Impulse, const FVecto
 	PlanetCenter = InPlanetCenter;
 	GravityAccelerationCMPerSec2 = FMath::Max(0.0f, GravityAcceleration);
 	Visual->SetCollisionProfileName(TEXT("PhysicsActor"));
+	// PhysicsActor restores the engine's PhysicsBody ObjectType. M7's frozen
+	// pads deliberately ignore only the M7 building channel, so restore that
+	// channel after loading the profile while retaining its response container.
+	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Visual->SetSimulatePhysics(true);
 	Visual->SetEnableGravity(false);
@@ -416,6 +423,63 @@ bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	ActivateDynamicPlanar(
 		Impulse, Policy.SiteUp, Policy.GravityAccelerationCMPerSec2);
 	bSiteUniformGravity = true;
+	return true;
+}
+
+bool AABTSM7BuildingModule::VerifyChaosDeveloperObstacleCollisionIdentity(
+	FString& OutError) const
+{
+	OutError.Reset();
+	if (!IsValid(Visual)
+		|| !Visual->IsRegistered()
+		|| Visual->GetCollisionEnabled() != ECollisionEnabled::QueryAndPhysics
+		|| Visual->GetCollisionObjectType() != ABTSDeveloperObstacleChannel
+		|| !Visual->IsSimulatingPhysics())
+	{
+		OutError = TEXT("ComponentCollisionIdentityInvalid");
+		return false;
+	}
+	const FBodyInstance* BodyInstance = Visual->GetBodyInstance();
+	if (BodyInstance == nullptr
+		|| !FPhysicsInterface::IsValid(BodyInstance->GetPhysicsActor()))
+	{
+		OutError = TEXT("ChaosPhysicsActorMissing");
+		return false;
+	}
+
+	int32 ShapeCount = 0;
+	int32 MatchingShapeCount = 0;
+	FPhysicsCommand::ExecuteRead(
+		BodyInstance->GetPhysicsActor(),
+		[BodyInstance, &ShapeCount, &MatchingShapeCount](
+			const FPhysicsActorHandle& Actor)
+		{
+			TArray<FPhysicsShapeHandle> Shapes;
+			BodyInstance->GetAllShapes_AssumesLocked(Shapes);
+			ShapeCount = Shapes.Num();
+			for (const FPhysicsShapeHandle& Shape : Shapes)
+			{
+				if (GetCollisionChannel(
+					FPhysicsInterface::GetShapeFilterData(Shape))
+					== ABTSDeveloperObstacleChannel)
+				{
+					++MatchingShapeCount;
+				}
+			}
+		});
+	if (ShapeCount <= 0 || MatchingShapeCount != ShapeCount)
+	{
+		OutError = FString::Printf(
+			TEXT("ChaosShapeFilterChannelMismatch:Shapes=%d:Matching=%d"),
+			ShapeCount, MatchingShapeCount);
+		return false;
+	}
+	UE_LOG(LogABTSRuntime, Verbose,
+		TEXT("[ABTS][M7][SiteUniformLaunch][CollisionIdentity]")
+		TEXT(" Module=%s ComponentObjectType=%d Shapes=%d")
+		TEXT(" ShapeFilterChannel=%d Accepted=1"),
+		*GetName(), static_cast<int32>(Visual->GetCollisionObjectType()),
+		ShapeCount, static_cast<int32>(ABTSDeveloperObstacleChannel));
 	return true;
 }
 

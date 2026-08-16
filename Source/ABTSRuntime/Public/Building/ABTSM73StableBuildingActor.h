@@ -73,6 +73,37 @@ struct ABTSRUNTIME_API FABTSM73E1DamageLifecycleState final
 	bool IsAccepted() const;
 };
 
+/** One pre-promotion HISM instance in the exact public E1 Brick order. */
+struct ABTSRUNTIME_API FABTSM73E1OrderedBrickInstanceBinding final
+{
+	int32 BrickId = INDEX_NONE;
+	EABTSM7BuildingMaterial Material = EABTSM7BuildingMaterial::Wood;
+	int32 MaterialInstanceIndex = INDEX_NONE;
+	FTransform FrozenWorldTransform = FTransform::Identity;
+	FVector HalfExtentCM = FVector::ZeroVector;
+	TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent> SourceHISM;
+	TWeakObjectPtr<AABTSM73StableBuildingActor> OwningBuilding;
+
+	bool IsUsable(bool bRequireLiveOwnership = true) const;
+};
+
+/**
+ * Exact 54-Brick pre-promotion target union. Descriptor order is global while
+ * MaterialInstanceIndex is the stable per-material HISM insertion order.
+ */
+struct ABTSRUNTIME_API FABTSM73E1OrderedBrickUnionBinding final
+{
+	static constexpr int32 FrozenBrickCount = 54;
+
+	FName ManifestEntryId = NAME_None;
+	uint64 DescriptorHash = 0;
+	uint64 StaticGeometryHash = 0;
+	TArray<FABTSM73E1OrderedBrickInstanceBinding> OrderedBricks;
+
+	bool IsUsable(bool bRequireLiveOwnership = true) const;
+	uint32 ComputeOrderedGeometryHash() const;
+};
+
 /** One exact descriptor OBB associated with its real promoted E1 module. */
 struct ABTSRUNTIME_API FABTSM73E1DestructibleModuleTarget final
 {
@@ -193,8 +224,15 @@ public:
 	bool PrepareJuryDemoFixedSixChaosValidation(
 		float GravityAccelerationCMPerSec2,
 		FString& OutError);
+	/** True only while this frozen building owns its exact blocking tangent pad. */
+	bool IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel() const;
 	/** Phase two: start every prepared site from one GameMode batch boundary. */
 	bool ActivatePreparedJuryDemoFixedSixChaosValidation(FString& OutError);
+	/** Release fallback: retain static preflight and defer physical promotion until a real module hit. */
+	bool MarkPreparedJuryDemoFixedSixChaosDeferred(FString& OutError);
+	/** Called by the owned material system before it applies the first real module damage. */
+	bool ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
+		const AABTSM7BuildingModule& TriggerModule, FString& OutError);
 	void RejectJuryDemoFixedSixChaosValidation(const FString& Reason);
 	bool CopyJuryDemoFixedSixChaosResult(
 		FABTSM73JuryDemoFixedSixChaosResult& OutResult) const;
@@ -202,10 +240,19 @@ public:
 	bool CopyJuryDemoSiteUniformGravityPolicy(
 		float GravityAccelerationCMPerSec2,
 		FABTSM7SiteUniformGravityPolicy& OutPolicy) const;
-	/** Legacy current-master bridge only; the honest target-set authority must not consume it. */
+	/** Legacy compatibility query; production target binding must not consume it. */
 	bool CopyJuryDemoE1CrystalTarget(
 		AActor*& OutTargetActor,
 		FVector& OutHalfExtentCM) const;
+	/**
+	 * Audits the pre-promotion per-material HISMs against all 54 descriptor OBBs
+	 * and returns the unique Crystal cap only as M3's site-recovery anchor. The
+	 * cap is not a trajectory first-hit target.
+	 */
+	bool CopyJuryDemoE1OrderedBrickUnionBinding(
+		FABTSM73E1OrderedBrickUnionBinding& OutBinding,
+		FTransform& OutSiteRecoveryAnchorTransform,
+		FVector& OutSiteRecoveryAnchorHalfExtentCM) const;
 	/**
 	 * Copies every public-descriptor E1 Brick OBB in descriptor order and binds
 	 * each row to the corresponding real promoted damage module. Caps/devices
@@ -326,6 +373,12 @@ private:
 		AABTSM7BuildingMaterialSystem& MaterialSystem);
 	void ConfigureJuryDemoFixedSixStaticHISM(
 		UHierarchicalInstancedStaticMeshComponent& Component);
+	bool ConfigureJuryDemoFixedSixFrozenTangentSupport(
+		const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+		FString& OutError);
+	bool ValidateJuryDemoFixedSixFrozenTangentSupport(
+		const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+		FString& OutError) const;
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,
 		struct FABTSM73StructureData& OutData, FString& OutError,
 		const AABTSM7BuildingMaterialSystem* MaterialProfileSource = nullptr);
@@ -493,13 +546,18 @@ private:
 	float IdleStableElapsed = 0.0f;
 	bool bRuntimeSpawned = false;
 	bool bJuryDemoFixedSixStaticRegistrationAccepted = false;
+	bool bJuryDemoFixedSixFrozenTangentSupportActive = false;
 	bool bJuryDemoFixedSixChaosPrepared = false;
 	bool bJuryDemoFixedSixChaosRunning = false;
+	bool bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
+	bool bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+	bool bJuryDemoFixedSixChaosDeferredActivated = false;
 	FABTSM73JuryDemoFixedSixChaosResult JuryDemoFixedSixChaosResult;
 	FABTSM73E1DamageLifecycleState JuryDemoE1DamageLifecycleState;
 	FVector JuryDemoFixedSixChaosSiteUp = FVector::UpVector;
 	float JuryDemoFixedSixChaosQuietSeconds = 0.0f;
 	double JuryDemoFixedSixChaosWallStartSeconds = 0.0;
+	uint64 JuryDemoFixedSixChaosActivationFrame = 0;
 	bool bIdleValidationRunning = false;
 	bool bDAG4ValidationRunning = false;
 	EABTSM73IdleValidationState IdleValidationState = EABTSM73IdleValidationState::Pending;
