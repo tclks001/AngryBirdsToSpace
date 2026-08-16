@@ -226,6 +226,15 @@ float FABTSM3TerrainVisualField::GetUnpaddedSurfaceRadius(const FVector& UnitDir
 	if (!IsReady()) return BaseRadiusCM;
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
+	return GetUnpaddedSurfaceRadiusForCell(Direction, CellId);
+}
+
+float FABTSM3TerrainVisualField::GetUnpaddedSurfaceRadiusForCell(
+	const FVector& UnitDirection,
+	const int32 CellId) const
+{
+	if (!IsReady() || !Cells->IsValidIndex(CellId)) return BaseRadiusCM;
+	const FVector Direction = UnitDirection.GetSafeNormal();
 	float HeightCM = GetInterpolatedHeightCM(Direction, CellId);
 	// Water is an edge property. Deform only a narrow band around the generated
 	// flow-centerline or barrier-dual segment; never lower an entire logical Cell (which creates a
@@ -355,6 +364,18 @@ float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) 
 	return ApplyBuildingPadRadius(Direction, GetUnpaddedSurfaceRadius(Direction));
 }
 
+float FABTSM3TerrainVisualField::GetSurfaceRadiusWithHint(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	int32& OutCellId) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutCellId = FindNearestCell(Direction, StartCellHint);
+	return ApplyBuildingPadRadius(
+		Direction,
+		GetUnpaddedSurfaceRadiusForCell(Direction, OutCellId));
+}
+
 FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection) const
 {
 	const FVector Up = UnitDirection.GetSafeNormal();
@@ -383,6 +404,58 @@ FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection
 	FVector Normal = (NormalXY + NormalDiagonal).GetSafeNormal();
 	if (FVector::DotProduct(Normal, Up) < 0.0f) Normal *= -1.0f;
 	return Normal.IsNearlyZero() ? Up : Normal;
+}
+bool FABTSM3TerrainVisualField::QueryContinuousSurfaceSample(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	FABTSM3ContinuousSurfaceSample& OutSample) const
+{
+	if (!QueryContinuousSurfaceBaseSample(
+			UnitDirection, StartCellHint, OutSample))
+	{
+		return false;
+	}
+	OutSample.SurfaceNormal = GetSurfaceNormal(UnitDirection);
+	return true;
+}
+
+bool FABTSM3TerrainVisualField::QueryContinuousSurfaceBaseSample(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	FABTSM3ContinuousSurfaceSample& OutSample) const
+{
+	OutSample = FABTSM3ContinuousSurfaceSample();
+	if (!IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutSample.SurfaceRadiusCM = GetSurfaceRadiusWithHint(
+		Direction, StartCellHint, OutSample.CellId);
+	if (OutSample.CellId == INDEX_NONE) return false;
+	OutSample.TerrainColor = GetDebugTerrainColorForCell(
+		Direction,
+		OutSample.CellId);
+	return true;
+}
+
+bool FABTSM3TerrainVisualField::QuerySurfaceGeometry(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	int32& OutCellId,
+	float& OutSurfaceRadiusCM,
+	FVector& OutSurfaceNormal) const
+{
+	OutCellId = INDEX_NONE;
+	OutSurfaceRadiusCM = 0.0f;
+	OutSurfaceNormal = FVector::UpVector;
+	if (!IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutSurfaceRadiusCM = GetSurfaceRadiusWithHint(
+		Direction, StartCellHint, OutCellId);
+	if (OutCellId == INDEX_NONE) return false;
+	// Keep the eight offset probes on their original Cell-0 canonical path.
+	// Production mesh generation invokes this normal path serially because its
+	// exact oracle proved worker-thread evaluation can drift in the low bits.
+	OutSurfaceNormal = GetSurfaceNormal(Direction);
+	return true;
 }
 
 bool FABTSM3TerrainVisualField::QuerySurfaceSDF(
@@ -471,6 +544,14 @@ FLinearColor FABTSM3TerrainVisualField::GetDebugTerrainColor(const FVector& Unit
 {
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
+	return GetDebugTerrainColorForCell(Direction, CellId);
+}
+
+FLinearColor FABTSM3TerrainVisualField::GetDebugTerrainColorForCell(
+	const FVector& UnitDirection,
+	const int32 CellId) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
 	const FABTSM3BoundarySegment* Best = nullptr;
 	const FABTSM3BoundarySegment* Second = nullptr;
 	float BestDistance = 0.0f, SecondDistance = 0.0f;

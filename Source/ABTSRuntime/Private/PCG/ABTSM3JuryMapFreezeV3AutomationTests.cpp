@@ -2,8 +2,11 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "ABTSRuntime.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "Math/RotationMatrix.h"
 #include "Misc/AutomationTest.h"
 #include "PCG/ABTSM3JuryMapFreezeV3.h"
@@ -12,6 +15,79 @@
 
 namespace ABTSM3JuryMapFreezeV3Tests
 {
+uint64 ComputeProposedV3RegistrationHash(
+	const FABTSM3JuryMapFreezeV3Result& Result)
+{
+	constexpr uint64 OffsetBasis = 1469598103934665603ull;
+	const auto AddUInt64 = [](uint64& Hash, const uint64 Value)
+	{
+		for (int32 ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+		{
+			Hash ^= (Value >> (ByteIndex * 8)) & 0xffull;
+			Hash *= 1099511628211ull;
+		}
+	};
+	TArray<FABTSM73BuildingFreezeV3Descriptor> Descriptors;
+	uint64 CatalogHash = 0;
+	FString Failure;
+	if (!FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
+			Descriptors, CatalogHash, Failure)
+		|| Descriptors.Num() != Result.Placements.Num()
+		|| CatalogHash != Result.HandoffContract.PlacementCatalogHash)
+	{
+		return 0;
+	}
+	uint64 Hash = OffsetBasis;
+	AddUInt64(Hash, Result.LayoutHash);
+	AddUInt64(Hash, CatalogHash);
+	for (int32 Index = 0; Index < Descriptors.Num(); ++Index)
+	{
+		const FABTSM73BuildingFreezeV3Descriptor& Descriptor =
+			Descriptors[Index];
+		const FABTSJuryDemoFixedSixV3Envelope& Envelope =
+			Result.Placements[Index].Site.V3Envelope;
+		AddUInt64(Hash, Descriptor.DescriptorHash);
+		AddUInt64(Hash, Descriptor.StaticGeometryHash);
+		AddUInt64(Hash, Descriptor.ProductionHash);
+		AddUInt64(Hash, Descriptor.SourceDeviceAssemblyHash);
+		AddUInt64(Hash, Envelope.PlacementHash);
+		if (Descriptor.PhysicsAssemblyHash != 0)
+		{
+			AddUInt64(Hash, Descriptor.PhysicsAssemblyHash);
+		}
+	}
+	return Hash;
+}
+
+class FScopedContinuousSurfaceExactOracle
+{
+public:
+	FScopedContinuousSurfaceExactOracle()
+	{
+		Variable = IConsoleManager::Get().FindConsoleVariable(
+			TEXT("abts.M3.ContinuousSurfaceExactOracle"));
+		if (Variable != nullptr)
+		{
+			PreviousValue = Variable->GetInt();
+			Variable->Set(1, ECVF_SetByCode);
+		}
+	}
+
+	~FScopedContinuousSurfaceExactOracle()
+	{
+		if (Variable != nullptr)
+		{
+			Variable->Set(PreviousValue, ECVF_SetByCode);
+		}
+	}
+
+	bool IsAvailable() const { return Variable != nullptr; }
+
+private:
+	IConsoleVariable* Variable = nullptr;
+	int32 PreviousValue = 0;
+};
+
 class FScopedTestWorld
 {
 public:
@@ -112,6 +188,9 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 {
 	(void)Parameters;
 	using namespace ABTSM3JuryMapFreezeV3Tests;
+	FScopedContinuousSurfaceExactOracle ExactOracle;
+	TestTrue(TEXT("Continuous-surface exact oracle CVar is registered"),
+		ExactOracle.IsAvailable());
 	FScopedTestWorld ScopedWorld;
 	AABTSM3Planet* Planet = nullptr;
 	if (!BuildFixture(*this, ScopedWorld, Planet))
@@ -196,10 +275,48 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 	if (FrozenSatelliteCandidate != nullptr
 		&& First.Placements.IsValidIndex(4))
 	{
+		TestEqual(TEXT("Final V3 target authority is the frozen E1 building modules"),
+			FrozenSatelliteCandidate->TargetAuthority,
+			EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules);
+		TestTrue(TEXT("Final V3 target is production-trajectory certified"),
+			FrozenSatelliteCandidate->bProductionTargetTrajectoryCertified
+				&& FrozenSatelliteCandidate->ProductionTargetTrajectoryHash != 0);
 		TestTrue(TEXT("V3 E1 support center is the final-surface satellite center"),
 			First.Placements[4].Site.V3Envelope.SupportCenterWorldCM.Equals(
 				FrozenSatelliteCandidate->SatelliteCenterWorld,
 				0.1));
+		TestTrue(TEXT("Preview Site carrier is the exact frozen E1 placement"),
+			First.Placements[4].Site.WorldTransform.Equals(
+				FrozenSatelliteCandidate->SatelliteSiteWorldTransform,
+				0.001f));
+		FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+		FString E1Failure;
+		TestTrue(TEXT("Published frozen E1 descriptor resolves for target oracle"),
+			FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				EABTSM73BeamDemoBuilding::E1ColumnBreak,
+				E1Descriptor,
+				E1Failure));
+		const FABTSM73BeamD1BrickBinding* TargetModule =
+			E1Descriptor.Bricks.FindByPredicate(
+				[FrozenSatelliteCandidate](const FABTSM73BeamD1BrickBinding& Brick)
+				{
+					return Brick.BrickId
+						== FrozenSatelliteCandidate->ProductionTargetModuleId;
+				});
+		TestNotNull(TEXT("Frozen module target resolves from the public descriptor"),
+			TargetModule);
+		if (TargetModule != nullptr)
+		{
+			TestTrue(TEXT("Frozen module world target follows the published brick transform"),
+				FrozenSatelliteCandidate->E5TargetWorldTransform.Equals(
+					TargetModule->LocalTransform
+						* First.Placements[4].Site.WorldTransform,
+					0.001f));
+			TestTrue(TEXT("Frozen module extent follows the published brick dimensions"),
+				FrozenSatelliteCandidate->E5TargetHalfExtentCM.Equals(
+					TargetModule->BrickSpec.DimensionsCM * 0.5f,
+					0.001f));
+		}
 	}
 	int32 TerrainPadCount = 0;
 	int32 PhysicalDecorOverlapCount = 0;
@@ -242,6 +359,20 @@ bool FABTSM3JuryMapFreezeV3DeterminismTest::RunTest(
 			Second.Placements[Index].Site.V3Envelope.PlacementHash,
 			First.Placements[Index].Site.V3Envelope.PlacementHash);
 	}
+	const uint64 ProposedRegistrationHash =
+		ComputeProposedV3RegistrationHash(First);
+	TestNotEqual(TEXT("Proposed V3 registration hash is computable"),
+		ProposedRegistrationHash, 0ull);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M3Jury][PendingIntegrationSeal] SatelliteCandidate=%016llX SatelliteResult=%016llX Layout=%016llX Registration=%016llX Catalog=%016llX SharedMutation=0"),
+		static_cast<unsigned long long>(
+			First.SourceSatellitePreviewCandidateHash),
+		static_cast<unsigned long long>(
+			First.SourceSatellitePreviewResultHash),
+		static_cast<unsigned long long>(First.LayoutHash),
+		static_cast<unsigned long long>(ProposedRegistrationHash),
+		static_cast<unsigned long long>(
+			First.HandoffContract.PlacementCatalogHash));
 	return true;
 }
 

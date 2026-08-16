@@ -670,7 +670,7 @@ public:
 
 private:
 	bool GenerateLogicalTerrain();
-	void BuildM3ContinuousSurface();
+	bool BuildM3ContinuousSurface();
 	void BuildDecorInstances(
 		const TArray<FABTSM3CellState>*
 			PresentationCellStates = nullptr,

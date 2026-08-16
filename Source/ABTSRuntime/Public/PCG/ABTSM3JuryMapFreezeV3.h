@@ -80,7 +80,8 @@ public:
 		const FABTSM3MonthlySpatialResult& SpatialResult,
 		const FABTSM3MonthlySatellitePreviewResult& SatellitePreviewResult,
 		FABTSM3JuryMapFreezeV3Result& OutResult,
-		FString& OutFailure);
+		FString& OutFailure,
+		bool bRequireFrozenE1BuildingModuleTarget = false);
 
 	static bool Validate(
 		const TArray<FABTSM2Cell>& Cells,
@@ -91,7 +92,8 @@ public:
 		const FABTSM3MonthlySatellitePreviewResult& SatellitePreviewResult,
 		const FABTSM3JuryMapFreezeV3Result& Result,
 		EABTSM3JuryMapFreezeV3RejectReason& OutReason,
-		FString& OutFailure);
+		FString& OutFailure,
+		bool bRequireFrozenE1BuildingModuleTarget = false);
 
 	static uint64 ComputePlacementHash(
 		const FABTSM3JuryMapFreezeV3Placement& Placement);
