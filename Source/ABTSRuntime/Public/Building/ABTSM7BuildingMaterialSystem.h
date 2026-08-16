@@ -16,6 +16,7 @@ class UPrimitiveComponent;
 class UStaticMesh;
 class UPhysicalMaterial;
 struct FABTSM7PenetrationValidationStats;
+enum class EABTSM73E1DamageCause : uint8;
 
 /** Emitted only when an actual M7 brick is removed from the world. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FABTSM7MaterialRecoveredNative, EABTSM7BuildingMaterial /* Material */, int32 /* Quantity */);
@@ -67,10 +68,17 @@ public:
 		const FVector& SiteLocationWorldCM,
 		const FVector& SupportCenterWorldCM,
 		float GravityAcceleration,
-		float ContactDamageGraceSeconds = -1.0f);
+		float ContactDamageGraceSeconds = -1.0f,
+		/** True only after the same frozen target set passed the read-only internal penetration gate. */
+		bool bPenetrationPrevalidated = false);
 	/** Runs the same pre-Chaos contact repair used by launch physics on a caller-owned module subset. */
 	FABTSM7PenetrationValidationStats ValidateAndRepairPendingModules(
 		const TArray<AABTSM7BuildingModule*>& PendingModules) const;
+	/** Read-only frozen-geometry gate; intentional support-world contact is left for real Chaos. */
+	FABTSM7PenetrationValidationStats ValidatePendingModuleInterpenetration(
+		const TArray<AABTSM7BuildingModule*>& PendingModules) const;
+	/** Keeps newly unwelded certified compound members in blast/freeze ownership. */
+	void AdoptUnweldedCompoundChild(AABTSM7BuildingModule& Module);
 	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
 	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
@@ -122,6 +130,13 @@ private:
 		const FTransform& WorldTransform,
 		bool bRegisterForLaunchPhysics);
 	void ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse = FVector::ZeroVector);
+	bool ApplyImpactToModule(
+		AABTSM7BuildingModule& Module,
+		float NormalSpeedCMPerSec,
+		const FVector& IncomingVelocity,
+		EABTSBirdId BirdId,
+		EABTSM73E1DamageCause Cause,
+		bool bApplyGameplayTransferImpulse);
 	void MarkPhysicsActivity();
 	AABTSM7BuildingModule* PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM7BuildingMaterial Material, const FVector& Impulse, bool bActivateImmediately = true);
 	void BreakOrImpulsePrimitive(UPrimitiveComponent* Component, int32 InstanceIndex, const FVector& ImpulseDirection, float ImpulseSpeed, bool bDestroy);

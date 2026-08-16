@@ -8,6 +8,7 @@
 #include "ABTSM7BuildingModule.generated.h"
 
 class AABTSM7BuildingMaterialSystem;
+class AABTSM73StableBuildingActor;
 class UPhysicalMaterial;
 class UStaticMeshComponent;
 
@@ -86,6 +87,8 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	void ConfigureBrick(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7BuildingMaterial InMaterial, const FTransform& WorldTransform);
+	/** Installs immutable brick geometry before deferred spawn registration. */
+	void ConfigureBrickBeforeFinishSpawning(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7BuildingMaterial InMaterial);
 	void ConfigureCylinder(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7ModuleKind InKind, EABTSM7BuildingMaterial InMaterial, float LengthCM, float DiameterCM, const FTransform& WorldTransform, const FVector& AdditionalLocalScale = FVector::OneVector);
 	/** Uses an exact engine-cylinder collision proxy and a no-collision authored presentation mesh. */
 	void ConfigureVoxelDevice(UStaticMesh* CollisionMesh, UStaticMesh* PresentationMesh,
@@ -94,14 +97,17 @@ public:
 	void ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile);
 	/** Applies a per-body Chaos quality override for multi-contact generated-building stacks. */
 	void ConfigureChaosSolverIterations(int32 PositionIterations, int32 VelocityIterations);
-	/** Ignores contact damage briefly after a static body enters Chaos. */
-	void SetContactDamageGraceSeconds(float Seconds) { ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds); }
+	/** Sets the grace and, for a live body, rebases its current damage-enable deadline. */
+	void SetContactDamageGraceSeconds(float Seconds);
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);
 	void ActivateDynamicPlanar(const FVector& Impulse, const FVector& InGravityUp, float GravityAcceleration);
 	/** Activates with one exact tangent-site policy shared by production and Chaos fixtures. */
 	bool ActivateDynamicSiteUniform(
 		const FVector& Impulse,
 		const FABTSM7SiteUniformGravityPolicy& Policy);
+	/** Fail-closed audit of the live Chaos body and every shape filter. */
+	bool VerifyChaosDeveloperObstacleCollisionIdentity(
+		FString& OutError) const;
 	/** Joins an authored child shape into this module's initial rigid body. */
 	bool TryWeldStaticChild(AABTSM7BuildingModule& Child);
 	/** Applies acceleration without invalidating Chaos sleep; false means no usable physics body. */
@@ -112,13 +118,33 @@ public:
 	/** Returns true only for the first successful break request. */
 	bool BreakModule();
 	bool ApplyImpactDamage(float DamageGain);
+	/** Adds gameplay impulse without replacing an already active gravity identity. */
+	bool ApplyDynamicImpactImpulse(const FVector& Impulse);
+	/** Associates a real production module with its owning frozen building. */
+	void ConfigureDamageLifecycleOwner(
+		AABTSM73StableBuildingActor* InOwner,
+		int32 InFrozenBrickId,
+		bool bInCrystalLifecycleTarget);
 
 	EABTSM7ModuleKind GetModuleKind() const { return ModuleKind; }
 	EABTSM7BuildingMaterial GetBuildingMaterial() const { return BuildingMaterial; }
 	UStaticMeshComponent* GetMeshComponent() const { return Visual; }
 	bool IsDynamic() const { return bDynamic; }
+	bool UsesSiteUniformGravity() const { return bSiteUniformGravity; }
 	bool IsBroken() const { return bBroken; }
 	bool IsCompoundChild() const { return bCompoundChild; }
+	AABTSM73StableBuildingActor* GetDamageLifecycleOwner() const
+	{
+		return DamageLifecycleOwner.Get();
+	}
+	bool IsCrystalLifecycleTarget() const
+	{
+		return bCrystalLifecycleTarget;
+	}
+	int32 GetDamageLifecycleBrickId() const
+	{
+		return DamageLifecycleBrickId;
+	}
 	float GetCurrentDamage() const { return CurrentDamage; }
 	float GetBreakDamage() const { return BreakDamage; }
 
@@ -145,7 +171,11 @@ private:
 	bool bCompoundChild = false;
 	TWeakObjectPtr<AABTSM7BuildingModule> CompoundRoot;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> CompoundChildren;
+	TWeakObjectPtr<AABTSM73StableBuildingActor> DamageLifecycleOwner;
+	int32 DamageLifecycleBrickId = INDEX_NONE;
 	bool bPlanarGravity = false;
+	bool bSiteUniformGravity = false;
+	bool bCrystalLifecycleTarget = false;
 	FVector PlanarGravityUp = FVector::UpVector;
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicalMaterial> ImpactPhysicalMaterial;

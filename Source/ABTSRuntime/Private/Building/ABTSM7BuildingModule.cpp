@@ -2,7 +2,9 @@
 
 #include "Building/ABTSM7BuildingModule.h"
 
+#include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Crc.h"
@@ -10,6 +12,8 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/PhysicsObjectExternalInterface.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Physics/Experimental/PhysInterface_Chaos.h"
+#include "Physics/PhysicsFiltering.h"
 #include "World/ABTSCollisionChannels.h"
 
 bool FABTSM7SiteUniformGravityPolicy::TryDerive(
@@ -205,11 +209,19 @@ AABTSM7BuildingModule::AABTSM7BuildingModule()
 
 void AABTSM7BuildingModule::ConfigureBrick(UStaticMesh* Mesh, UMaterialInterface* Material, const EABTSM7BuildingMaterial InMaterial, const FTransform& WorldTransform)
 {
+	ConfigureBrickBeforeFinishSpawning(Mesh, Material, InMaterial);
+	SetActorTransform(WorldTransform, false, nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AABTSM7BuildingModule::ConfigureBrickBeforeFinishSpawning(
+	UStaticMesh* Mesh,
+	UMaterialInterface* Material,
+	const EABTSM7BuildingMaterial InMaterial)
+{
 	ModuleKind = EABTSM7ModuleKind::Brick;
 	BuildingMaterial = InMaterial;
 	Visual->SetStaticMesh(Mesh);
 	if (Material) Visual->SetMaterial(0, Material);
-	SetActorTransform(WorldTransform, false, nullptr, ETeleportType::TeleportPhysics);
 }
 
 void AABTSM7BuildingModule::ConfigureCylinder(UStaticMesh* Mesh, UMaterialInterface* Material, const EABTSM7ModuleKind InKind, const EABTSM7BuildingMaterial InMaterial, const float LengthCM, const float DiameterCM, const FTransform& WorldTransform, const FVector& AdditionalLocalScale)
@@ -332,9 +344,14 @@ bool AABTSM7BuildingModule::ApplyImpactDamage(const float DamageGain)
 void AABTSM7BuildingModule::ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, const float GravityAcceleration)
 {
 	bPlanarGravity = false;
+	bSiteUniformGravity = false;
 	PlanetCenter = InPlanetCenter;
 	GravityAccelerationCMPerSec2 = FMath::Max(0.0f, GravityAcceleration);
 	Visual->SetCollisionProfileName(TEXT("PhysicsActor"));
+	// PhysicsActor restores the engine's PhysicsBody ObjectType. M7's frozen
+	// pads deliberately ignore only the M7 building channel, so restore that
+	// channel after loading the profile while retaining its response container.
+	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Visual->SetSimulatePhysics(true);
 	Visual->SetEnableGravity(false);
@@ -354,6 +371,47 @@ void AABTSM7BuildingModule::ActivateDynamicPlanar(const FVector& Impulse, const 
 	if (PlanarGravityUp.IsNearlyZero()) PlanarGravityUp = FVector::UpVector;
 }
 
+void AABTSM7BuildingModule::SetContactDamageGraceSeconds(
+	const float Seconds)
+{
+	ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds);
+	if (bDynamic)
+	{
+		const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+		ContactDamageEnabledTimeSeconds = Now + ContactDamageGraceSeconds;
+		LastDamageImpactSeconds = -BIG_NUMBER;
+	}
+}
+
+bool AABTSM7BuildingModule::ApplyDynamicImpactImpulse(
+	const FVector& Impulse)
+{
+	if (bBroken || bCompoundChild || !bDynamic || !IsValid(Visual)
+		|| !Visual->IsSimulatingPhysics() || Impulse.ContainsNaN())
+	{
+		return false;
+	}
+	Visual->WakeAllRigidBodies();
+	if (!Impulse.IsNearlyZero())
+	{
+		Visual->AddImpulse(Impulse, NAME_None, true);
+	}
+	return true;
+}
+
+void AABTSM7BuildingModule::ConfigureDamageLifecycleOwner(
+	AABTSM73StableBuildingActor* InOwner,
+	const int32 InFrozenBrickId,
+	const bool bInCrystalLifecycleTarget)
+{
+	DamageLifecycleOwner = InOwner;
+	DamageLifecycleBrickId = InOwner != nullptr
+		? InFrozenBrickId
+		: INDEX_NONE;
+	bCrystalLifecycleTarget = InOwner != nullptr
+		&& bInCrystalLifecycleTarget;
+}
+
 bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	const FVector& Impulse,
 	const FABTSM7SiteUniformGravityPolicy& Policy)
@@ -364,6 +422,64 @@ bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	}
 	ActivateDynamicPlanar(
 		Impulse, Policy.SiteUp, Policy.GravityAccelerationCMPerSec2);
+	bSiteUniformGravity = true;
+	return true;
+}
+
+bool AABTSM7BuildingModule::VerifyChaosDeveloperObstacleCollisionIdentity(
+	FString& OutError) const
+{
+	OutError.Reset();
+	if (!IsValid(Visual)
+		|| !Visual->IsRegistered()
+		|| Visual->GetCollisionEnabled() != ECollisionEnabled::QueryAndPhysics
+		|| Visual->GetCollisionObjectType() != ABTSDeveloperObstacleChannel
+		|| !Visual->IsSimulatingPhysics())
+	{
+		OutError = TEXT("ComponentCollisionIdentityInvalid");
+		return false;
+	}
+	const FBodyInstance* BodyInstance = Visual->GetBodyInstance();
+	if (BodyInstance == nullptr
+		|| !FPhysicsInterface::IsValid(BodyInstance->GetPhysicsActor()))
+	{
+		OutError = TEXT("ChaosPhysicsActorMissing");
+		return false;
+	}
+
+	int32 ShapeCount = 0;
+	int32 MatchingShapeCount = 0;
+	FPhysicsCommand::ExecuteRead(
+		BodyInstance->GetPhysicsActor(),
+		[BodyInstance, &ShapeCount, &MatchingShapeCount](
+			const FPhysicsActorHandle& Actor)
+		{
+			TArray<FPhysicsShapeHandle> Shapes;
+			BodyInstance->GetAllShapes_AssumesLocked(Shapes);
+			ShapeCount = Shapes.Num();
+			for (const FPhysicsShapeHandle& Shape : Shapes)
+			{
+				if (GetCollisionChannel(
+					FPhysicsInterface::GetShapeFilterData(Shape))
+					== ABTSDeveloperObstacleChannel)
+				{
+					++MatchingShapeCount;
+				}
+			}
+		});
+	if (ShapeCount <= 0 || MatchingShapeCount != ShapeCount)
+	{
+		OutError = FString::Printf(
+			TEXT("ChaosShapeFilterChannelMismatch:Shapes=%d:Matching=%d"),
+			ShapeCount, MatchingShapeCount);
+		return false;
+	}
+	UE_LOG(LogABTSRuntime, Verbose,
+		TEXT("[ABTS][M7][SiteUniformLaunch][CollisionIdentity]")
+		TEXT(" Module=%s ComponentObjectType=%d Shapes=%d")
+		TEXT(" ShapeFilterChannel=%d Accepted=1"),
+		*GetName(), static_cast<int32>(Visual->GetCollisionObjectType()),
+		ShapeCount, static_cast<int32>(ABTSDeveloperObstacleChannel));
 	return true;
 }
 
@@ -441,6 +557,8 @@ bool AABTSM7BuildingModule::BreakModule()
 	}
 	else
 	{
+		AABTSM7BuildingMaterialSystem* MaterialSystem =
+			Cast<AABTSM7BuildingMaterialSystem>(GetOwner());
 		for (const TWeakObjectPtr<AABTSM7BuildingModule>& ChildPtr :
 			CompoundChildren)
 		{
@@ -455,11 +573,16 @@ bool AABTSM7BuildingModule::BreakModule()
 				{
 					Child->ActivateDynamicPlanar(FVector::ZeroVector,
 						PlanarGravityUp, GravityAccelerationCMPerSec2);
+					Child->bSiteUniformGravity = bSiteUniformGravity;
 				}
 				else
 				{
 					Child->ActivateDynamic(FVector::ZeroVector,
 						PlanetCenter, GravityAccelerationCMPerSec2);
+				}
+				if (MaterialSystem != nullptr)
+				{
+					MaterialSystem->AdoptUnweldedCompoundChild(*Child);
 				}
 			}
 		}

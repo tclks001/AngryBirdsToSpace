@@ -25,5 +25,6 @@ public:
 		UWorld& World,
 		const TArray<AABTSM7BuildingModule*>& PendingModules,
 		float RepairToleranceCM,
-		int32 MaximumRepairPasses);
+		int32 MaximumRepairPasses,
+		bool bPendingModulesOnly = false);
 };

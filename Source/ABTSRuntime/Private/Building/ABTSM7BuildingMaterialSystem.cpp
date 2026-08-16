@@ -4,12 +4,14 @@
 
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7MaterialProfileLibrary.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "Building/ABTSM7PenetrationValidator.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
@@ -136,19 +138,24 @@ AABTSM7BuildingModule* AABTSM7BuildingMaterialSystem::SpawnBrickModuleInternal(
 	const bool bRegisterForLaunchPhysics)
 {
 	if (GetWorld() == nullptr || SharedBrickMesh == nullptr) return nullptr;
-	FActorSpawnParameters Params;
-	Params.Owner = this;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AABTSM7BuildingModule* Module = GetWorld()->SpawnActor<AABTSM7BuildingModule>(
-		AABTSM7BuildingModule::StaticClass(), WorldTransform, Params);
-	if (Module == nullptr) return nullptr;
 	FTransform BrickTransform = WorldTransform;
 	const FVector SafeDimensions(
 		FMath::Max(1.0f, Spec.DimensionsCM.X),
 		FMath::Max(1.0f, Spec.DimensionsCM.Y),
 		FMath::Max(1.0f, Spec.DimensionsCM.Z));
 	BrickTransform.SetScale3D(WorldTransform.GetScale3D() * (SafeDimensions / SharedCubeSizeCM));
-	Module->ConfigureBrick(SharedBrickMesh, GetMaterial(Spec.Material), Spec.Material, BrickTransform);
+	AABTSM7BuildingModule* Module =
+		GetWorld()->SpawnActorDeferred<AABTSM7BuildingModule>(
+			AABTSM7BuildingModule::StaticClass(), BrickTransform,
+			this, nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Module == nullptr) return nullptr;
+	Module->ConfigureBrickBeforeFinishSpawning(
+		SharedBrickMesh, GetMaterial(Spec.Material), Spec.Material);
+	// Mesh and scale are immutable frozen geometry, so install them before the
+	// component enters the scene. Apply the physical material only after normal
+	// registration: BodyInstance mass initialization depends on that ordering.
+	UGameplayStatics::FinishSpawningActor(Module, BrickTransform);
 	Module->ConfigureImpactPhysics(GetProfile(Spec.Material));
 	if (bRegisterForLaunchPhysics)
 	{
@@ -389,6 +396,19 @@ FABTSM7PenetrationValidationStats AABTSM7BuildingMaterialSystem::ValidateAndRepa
 		: FABTSM7PenetrationValidationStats();
 }
 
+FABTSM7PenetrationValidationStats
+AABTSM7BuildingMaterialSystem::ValidatePendingModuleInterpenetration(
+	const TArray<AABTSM7BuildingModule*>& PendingModules) const
+{
+	return GetWorld() != nullptr
+		? FABTSM7PenetrationValidator::ValidateAndRepair(
+			*GetWorld(), PendingModules,
+			/*RepairToleranceCM=*/0.0f,
+			/*MaximumRepairPasses=*/1,
+			/*bPendingModulesOnly=*/true)
+		: FABTSM7PenetrationValidationStats();
+}
+
 void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 	const bool bPlanar,
 	const FVector& GravityReference,
@@ -469,7 +489,8 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 	const FVector& SiteLocationWorldCM,
 	const FVector& SupportCenterWorldCM,
 	const float GravityAcceleration,
-	const float ContactDamageGraceSeconds)
+	const float ContactDamageGraceSeconds,
+	const bool bPenetrationPrevalidated)
 {
 	LastSiteUniformGravityPolicyHash = 0;
 	LastSiteUniformGravityUp = FVector::ZeroVector;
@@ -519,7 +540,9 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 		? ContactDamageGraceSeconds
 		: LaunchContactDamageGraceSeconds;
 	const FABTSM7PenetrationValidationStats Validation =
-		ValidateAndRepairPendingModules(PendingModules);
+		bPenetrationPrevalidated
+			? FABTSM7PenetrationValidationStats()
+			: ValidateAndRepairPendingModules(PendingModules);
 	for (AABTSM7BuildingModule* Module : PendingModules)
 	{
 		if (!Modules.ContainsByPredicate(
@@ -541,19 +564,47 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 				*GetNameSafe(Module));
 			return false;
 		}
+		FString CollisionIdentityError;
+		if (!Module->VerifyChaosDeveloperObstacleCollisionIdentity(
+			CollisionIdentityError))
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][SiteUniformLaunch]")
+				TEXT(" Rejected Reason=CollisionIdentityInvalid Module=%s Detail=%s"),
+				*GetNameSafe(Module), *CollisionIdentityError);
+			return false;
+		}
 	}
 	MarkPhysicsActivity();
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][SiteUniformLaunch] Accepted=1 Activated=%d %s ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
+		TEXT("[ABTS][M7][SiteUniformLaunch] Accepted=1 Activated=%d %s ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPrevalidated=%d PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
 		PendingModules.Num(), *Policy.ToLogString(), EffectiveGraceSeconds,
 		LastLaunchChaosBodyProfileHash, LastLaunchChaosWorldProfileHash,
-		*WorldProfile.ToLogString(), Validation.DetectedPairCount,
+		*WorldProfile.ToLogString(), bPenetrationPrevalidated ? 1 : 0,
+		Validation.DetectedPairCount,
 		Validation.RepairCount, Validation.LargeErrorPairCount,
 		Validation.RemainingSmallPairCount,
 		Validation.MaximumDetectedDepthCM,
 		InitialPenetrationRepairToleranceCM,
 		InitialPenetrationRepairPasses);
 	return true;
+}
+
+void AABTSM7BuildingMaterialSystem::AdoptUnweldedCompoundChild(
+	AABTSM7BuildingModule& Module)
+{
+	if (Module.GetOwner() != this)
+	{
+		return;
+	}
+	if (!Modules.ContainsByPredicate(
+		[&Module](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+		{
+			return Candidate.Get() == &Module;
+		}))
+	{
+		Modules.Add(&Module);
+	}
 }
 
 bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Component, const int32 InstanceIndex, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity, const EABTSBirdId BirdId)
@@ -592,29 +643,145 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 	}
 	else if (AABTSM7BuildingModule* Module = Cast<AABTSM7BuildingModule>(Component->GetOwner()))
 	{
-		const bool bDamageBreak = Module->ApplyImpactDamage(ComputeDamageGain(Profile, NormalSpeedCMPerSec, Break));
-		if (bDamageBreak || NormalSpeedCMPerSec >= Break * 1.35f)
+		ApplyImpactToModule(*Module, NormalSpeedCMPerSec, IncomingVelocity,
+			BirdId, EABTSM73E1DamageCause::BirdImpact,
+			/*bApplyGameplayTransferImpulse=*/true);
+	}
+	return true;
+}
+
+bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
+	AABTSM7BuildingModule& Module,
+	const float NormalSpeedCMPerSec,
+	const FVector& IncomingVelocity,
+	const EABTSBirdId BirdId,
+	const EABTSM73E1DamageCause Cause,
+	const bool bApplyGameplayTransferImpulse)
+{
+	if (Module.IsBroken() || !FMath::IsFinite(NormalSpeedCMPerSec)
+		|| NormalSpeedCMPerSec <= 0.0f)
+	{
+		return false;
+	}
+	if (AABTSM73StableBuildingActor* Building =
+		Module.GetDamageLifecycleOwner())
+	{
+		FString ActivationError;
+		if (!Building->ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
+			Module, ActivationError))
 		{
-			const EABTSM7ModuleKind Kind = Module->GetModuleKind();
-			const EABTSM7BuildingMaterial ModuleMaterial = Module->GetBuildingMaterial();
-			const FVector Origin = Module->GetActorLocation();
-			const FVector Axis = Module->GetActorUpVector();
-			if (Module->BreakModule())
-			{
-				if (Kind == EABTSM7ModuleKind::Brick) NotifyBrickRecovered(ModuleMaterial);
-				if (Kind == EABTSM7ModuleKind::ExplosiveBarrel) ApplyRadialBlast(Origin, BarrelDestroyRadiusCM, BarrelImpulseRadiusCM, BarrelImpulseSpeedCMPerSec);
-				else if (Kind == EABTSM7ModuleKind::SpringPiston) ApplyDirectionalBlast(Origin, Axis, PistonDestroyLengthCM, PistonImpulseLengthCM, PistonEffectRadiusCM, PistonImpulseSpeedCMPerSec);
-			}
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitRejected]")
+				TEXT(" Module=%s Reason=%s DamageDropped=1"),
+				*Module.GetName(), *ActivationError);
+			return false;
 		}
-		else if (NormalSpeedCMPerSec >= Knock) ActivateModuleForLaunch(*Module, IncomingVelocity.GetSafeNormal() * NormalSpeedCMPerSec * Profile.PushVelocityTransfer);
+	}
+	const FABTSM7MaterialProfile& Profile =
+		GetProfile(Module.GetBuildingMaterial());
+	const float Scale = GetBirdThresholdScale(BirdId);
+	const float Knock = Profile.KnockSpeedCMPerSec * Scale;
+	const float Break = Profile.BreakSpeedCMPerSec * Scale;
+	const bool bDamageBreak = Module.ApplyImpactDamage(
+		ComputeDamageGain(Profile, NormalSpeedCMPerSec, Break));
+	const bool bShouldBreak = bDamageBreak
+		|| NormalSpeedCMPerSec >= Break * 1.35f;
+	if (bShouldBreak)
+	{
+		const EABTSM7ModuleKind Kind = Module.GetModuleKind();
+		const EABTSM7BuildingMaterial Material = Module.GetBuildingMaterial();
+		const FVector Origin = Module.GetActorLocation();
+		const FVector Axis = Module.GetActorUpVector();
+		// BreakModule marks the Actor pending-destroy. Record the already proven,
+		// game-thread break decision while the exact RuntimeModules identity is
+		// still queryable; BreakModule is idempotent and cannot reject here after
+		// the entry bBroken guard above.
+		if (AABTSM73StableBuildingActor* Building =
+			Module.GetDamageLifecycleOwner())
+		{
+			Building->NotifyJuryDemoE1ModuleDamage(
+				Module, Cause, true, NormalSpeedCMPerSec);
+		}
+		if (Module.BreakModule())
+		{
+			if (Kind == EABTSM7ModuleKind::Brick)
+			{
+				NotifyBrickRecovered(Material);
+			}
+			if (Kind == EABTSM7ModuleKind::ExplosiveBarrel)
+			{
+				ApplyRadialBlast(Origin, BarrelDestroyRadiusCM,
+					BarrelImpulseRadiusCM, BarrelImpulseSpeedCMPerSec);
+			}
+			else if (Kind == EABTSM7ModuleKind::SpringPiston)
+			{
+				ApplyDirectionalBlast(Origin, Axis,
+					PistonDestroyLengthCM, PistonImpulseLengthCM,
+					PistonEffectRadiusCM, PistonImpulseSpeedCMPerSec);
+			}
+			return true;
+		}
+	}
+
+	if (AABTSM73StableBuildingActor* Building =
+		Module.GetDamageLifecycleOwner())
+	{
+		Building->NotifyJuryDemoE1ModuleDamage(
+			Module, Cause, false, NormalSpeedCMPerSec);
+	}
+	if (NormalSpeedCMPerSec >= Knock && bApplyGameplayTransferImpulse)
+	{
+		const FVector TransferImpulse = IncomingVelocity.GetSafeNormal()
+			* NormalSpeedCMPerSec * Profile.PushVelocityTransfer;
+		if (Module.IsDynamic())
+		{
+			// Preserve SiteUniformTangentGravity and the wake/sleep identity.
+			Module.ApplyDynamicImpactImpulse(TransferImpulse);
+		}
+		else
+		{
+			ActivateModuleForLaunch(Module, TransferImpulse);
+		}
 	}
 	return true;
 }
 
 void AABTSM7BuildingMaterialSystem::HandleModuleChainImpact(AABTSM7BuildingModule& Source, const FHitResult& Hit, const float NormalSpeedCMPerSec)
 {
-	if (NormalSpeedCMPerSec < 300.0f || !Hit.GetComponent()) return;
-	HandleBirdImpact(Hit.GetComponent(), Hit.Item, NormalSpeedCMPerSec, Source.GetMeshComponent()->GetPhysicsLinearVelocity(), EABTSBirdId::Red);
+	if (NormalSpeedCMPerSec < 300.0f) return;
+	const FVector SourceVelocity = Source.GetMeshComponent() != nullptr
+		? Source.GetMeshComponent()->GetPhysicsLinearVelocityAtPoint(
+			Hit.ImpactPoint)
+		: FVector::ZeroVector;
+	// The source must take real collision damage too. This is what permits a
+	// displaced Crystal to break after falling onto terrain instead of remaining
+	// immortal because the terrain is not an M7-owned primitive.
+	ApplyImpactToModule(Source, NormalSpeedCMPerSec, SourceVelocity,
+		EABTSBirdId::Red, EABTSM73E1DamageCause::ModuleContact,
+		/*bApplyGameplayTransferImpulse=*/false);
+
+	UPrimitiveComponent* TargetComponent = Hit.GetComponent();
+	AABTSM7BuildingModule* TargetModule = Cast<AABTSM7BuildingModule>(
+		TargetComponent != nullptr ? TargetComponent->GetOwner() : nullptr);
+	if (TargetModule != nullptr && TargetModule != &Source
+		&& !TargetModule->IsDynamic() && OwnsPrimitive(TargetComponent))
+	{
+		// Dynamic M7 peers receive their own OnComponentHit callback. Only a
+		// static peer needs target-side forwarding, otherwise one contact would
+		// be counted twice for each body.
+		ApplyImpactToModule(*TargetModule, NormalSpeedCMPerSec,
+			SourceVelocity, EABTSBirdId::Red,
+			EABTSM73E1DamageCause::ModuleContact,
+			/*bApplyGameplayTransferImpulse=*/false);
+	}
+	else if (TargetModule == nullptr
+		&& Cast<UHierarchicalInstancedStaticMeshComponent>(TargetComponent)
+		&& OwnsPrimitive(TargetComponent))
+	{
+		// Preserve the legacy static-HISM chain path outside promoted Fixed-Six.
+		HandleBirdImpact(TargetComponent, Hit.Item, NormalSpeedCMPerSec,
+			SourceVelocity, EABTSBirdId::Red);
+	}
 }
 
 void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent* Component, const int32 InstanceIndex, const FVector& ImpulseDirection, const float ImpulseSpeed, const bool bDestroy)
@@ -700,9 +867,29 @@ void AABTSM7BuildingMaterialSystem::ApplyDirectionalBlast(const FVector& Origin,
 
 void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 {
+	int32 PreservedSiteUniformCount = 0;
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
 	{
-		if (AABTSM7BuildingModule* Module = Modules[Index].Get()) Module->Freeze(); else Modules.RemoveAtSwap(Index);
+		if (AABTSM7BuildingModule* Module = Modules[Index].Get())
+		{
+			if (Module->UsesSiteUniformGravity())
+			{
+				++PreservedSiteUniformCount;
+				continue;
+			}
+			Module->Freeze();
+		}
+		else
+		{
+			Modules.RemoveAtSwap(Index);
+		}
+	}
+	if (PreservedSiteUniformCount > 0)
+	{
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M7][SiteUniformLaunch] M6GlobalFreezeSkipped=%d")
+			TEXT(" Reason=ProductionSiteUniformBodiesRemainWakeable"),
+			PreservedSiteUniformCount);
 	}
 }
 

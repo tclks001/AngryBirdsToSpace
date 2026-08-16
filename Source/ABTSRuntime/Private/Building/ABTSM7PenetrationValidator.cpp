@@ -222,7 +222,8 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 	UWorld& World,
 	const TArray<AABTSM7BuildingModule*>& PendingModules,
 	const float RepairToleranceCM,
-	const int32 MaximumRepairPasses)
+	const int32 MaximumRepairPasses,
+	const bool bPendingModulesOnly)
 {
 	FABTSM7PenetrationValidationStats Stats;
 	Stats.PendingModuleCount = PendingModules.Num();
@@ -249,6 +250,13 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 				UPrimitiveComponent* OtherComponent = Hit.GetComponent();
 				if (!Hit.bBlockingHit || !Hit.bStartPenetrating || Hit.PenetrationDepth <= UE_KINDA_SMALL_NUMBER
 					|| OtherComponent == nullptr || OtherComponent == Component || OtherComponent->GetOwner() == Module)
+				{
+					continue;
+				}
+				AABTSM7BuildingModule* OtherModule =
+					Cast<AABTSM7BuildingModule>(OtherComponent->GetOwner());
+				if (bPendingModulesOnly
+					&& (OtherModule == nullptr || !PendingSet.Contains(OtherModule)))
 				{
 					continue;
 				}
@@ -285,7 +293,6 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 				}
 
 				const FVector Correction = RepairNormal * (Hit.PenetrationDepth + RepairPaddingCM);
-				AABTSM7BuildingModule* OtherModule = Cast<AABTSM7BuildingModule>(OtherComponent->GetOwner());
 				if (OtherModule != nullptr && PendingSet.Contains(OtherModule) && !OtherModule->IsDynamic())
 				{
 					Module->AddActorWorldOffset(Correction * 0.5f, false, nullptr, ETeleportType::TeleportPhysics);
@@ -304,6 +311,13 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 		}
 		if (!bRepairedThisPass) break;
 	}
+	if (DetectedPairs.IsEmpty())
+	{
+		// The first pass already queried every valid static pending component.
+		// With no penetration and therefore no transform repair, the final pass
+		// would repeat the identical scene queries without observing new state.
+		return Stats;
+	}
 
 	TSet<uint64> RemainingPairs;
 	for (AABTSM7BuildingModule* Module : PendingModules)
@@ -318,6 +332,13 @@ FABTSM7PenetrationValidationStats FABTSM7PenetrationValidator::ValidateAndRepair
 			UPrimitiveComponent* OtherComponent = Hit.GetComponent();
 			if (!Hit.bBlockingHit || !Hit.bStartPenetrating || Hit.PenetrationDepth <= UE_KINDA_SMALL_NUMBER
 				|| OtherComponent == nullptr || OtherComponent == Component || OtherComponent->GetOwner() == Module)
+			{
+				continue;
+			}
+			const AABTSM7BuildingModule* OtherModule =
+				Cast<AABTSM7BuildingModule>(OtherComponent->GetOwner());
+			if (bPendingModulesOnly
+				&& (OtherModule == nullptr || !PendingSet.Contains(OtherModule)))
 			{
 				continue;
 			}
