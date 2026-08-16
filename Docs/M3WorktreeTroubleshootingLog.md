@@ -1113,6 +1113,23 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 断言：245 gameplay、1960 frozen calibration、真实 union overlap、`SampleCount=0`，并断言 runtime proof hash 不等于历史 preview trajectory certificate。
 - Development Editor 增量编译通过；fresh NullRHI `Saved/Logs/M3RC3-ProxyOverlap-FreshNullRHI.log` 精确 `1/1 Success`。候选 4 输出 `ProjectionExact=1 / ProxyOverlapBrickId=0 / ProxyOverlapCount=54 / TargetIdentity=5F1D6833F37C28C4 / OverlapHash=102C2ECF35AF1AB1 / Ready=1`；未启动 D3D、PIE 或全量门。
 
+### M3-RC5-001：将 1960 冻结月球误降为 245 是对主星误选故障的错误归因
+
+**现象与已证实根因**
+
+- 8/6–8/15 的真实 `L_ABTS_M11` ChaosRigidBody 运行证据持续记录 `RuntimePractice Gravity=1960`，同时接触 `BP_ABTSM3Planet`；历史用户体验并未因该数值本身在地面行走时飞向月球。
+- 后续历史审计确认 RC4 在 `GameplayGravity=245` 且非 Ballistic 地面卫星力已被屏蔽后仍飞月球，根因是主星权威误选为 `AABTSM9Satellite`，使 `980 cm/s²` 的**主星**力朝月球施加；此共享 Movement 修复已由 Integration 的 `0178cc6` 完成，RC5 用户确认修复。该主星选择不属于 M3 runtime 所有权。
+
+**修复与边界**
+
+- M3 runtime 恢复直接消费已冻结 `CandidateSnapshot.SatelliteSurfaceGravityCMPerSec2`；当前 V3 候选为 `1960 cm/s²`。不再硬编码 `245` 或把该值称为仅供 calibration 的历史身份。日志同时输出 `GameplayGravity`、`FrozenPreviewGravity` 与 `GravityMatchesFrozenPreview=1`。
+- `ReachableLegacyProxyOverlapV1`、真实有序 E1 Brick OBB union、`SampleCount=0`、无数值 trajectory sweep、Site/Layout/Placement 与 shared seal 均保持不变。Integration 的 non-Ballistic satellite-force gate 仍是地面安全的唯一共享权威，本 M3 提交不修改它。
+
+**防回归验证**
+
+- `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 必须同时断言：冻结候选为 `1960`、runtime 的 frozen-preview record 为 `1960`、实际 gameplay satellite gravity 与二者精确一致；并继续断言真实 union proxy overlap 和 `SampleCount=0`。
+- UE 5.8 Development Editor 增量构建 `12 actions / Result: Succeeded`。fresh NullRHI `Saved/Logs/M3RC5-FrozenGameplayGravity-20260816-172428-FreshNullRHI.log` 中，`03RuntimePracticeSnapshot` 精确 `1/1 Success / EXIT CODE: 0`，记录 `Ready=1 / GameplayGravity=1960.0 / FrozenPreviewGravity=1960.0 / GravityMatchesFrozenPreview=1 / ProxyOverlapBrickId=0 / ProxyOverlapCount=54 / SampleCount=0 / TrajectoryHash=102C2ECF35AF1AB1`；未启动 D3D、可见 PIE 或全量门。
+
 ## 15. 新条目模板
 
 ```markdown

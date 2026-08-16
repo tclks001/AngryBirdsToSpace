@@ -88,7 +88,7 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm/s^2"))
 	float SatelliteSurfaceGravityCMPerSec2 = 0.0f;
 
-	/** Historical frozen-preview calibration gravity.  It is identity evidence only, never gameplay gravity. */
+	/** Frozen-preview gravity retained for source-identity inspection; the production satellite consumes this exact value for gameplay. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm/s^2"))
 	float CalibrationSatelliteSurfaceGravityCMPerSec2 = 0.0f;
 
