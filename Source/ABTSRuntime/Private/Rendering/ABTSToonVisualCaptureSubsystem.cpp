@@ -982,25 +982,112 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 		EnvironmentDawnUp *= -1.0;
 	}
 
+	// Production Fixed-Six actors are registered from the exact V3 snapshot,
+	// not from the legacy generic Sites array.  Selecting a generic midpoint
+	// site and then looking for the nearest Fixed-Six actor can pair unrelated
+	// identities (and used to reject the packaged screenshot gate at ~10 km).
+	// Materialize the exact snapshot site into the generic camera-frame shape so
+	// the remainder of the capture catalogue continues to share one code path.
+	FABTSGeneratedBuildingSite FixedSixCaptureSite;
+	FName FixedSixCaptureEntryId = NAME_None;
 	const FABTSGeneratedBuildingSite* SelectedSite = nullptr;
 	double BestSiteScore = TNumericLimits<double>::Max();
-	for (const FABTSGeneratedBuildingSite& Site : BuildingContract.Sites)
+	if (BuildingContract.JuryDemoFixedSix.IsUsable())
 	{
-		if (Site.Purpose != EABTSGeneratedBuildingPurpose::DestructibleTarget)
+		const FABTSJuryDemoFixedSixBuildingSite* SelectedFixedSite = nullptr;
+		const double CentreEncounter =
+			(FABTSJuryDemoFixedSixContract::ExpectedSiteCount - 1) * 0.5;
+		double BestSolarHeight = -2.0;
+		double BestCentreDistance = TNumericLimits<double>::Max();
+		for (const FABTSJuryDemoFixedSixBuildingSite& Site
+			: BuildingContract.JuryDemoFixedSix.Sites)
 		{
-			continue;
+			if (!Site.IsUsableForContractVersion(
+					BuildingContract.JuryDemoFixedSix.ContractVersion)
+				|| (BuildingContract.JuryDemoFixedSix.ContractVersion
+						>= FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion
+					&& Site.V3Envelope.SurfaceKind
+						!= EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet))
+			{
+				continue;
+			}
+			const double CentreDistance = FMath::Abs(
+				static_cast<double>(Site.EncounterIndex) - CentreEncounter);
+			const double SolarHeight = FVector::DotProduct(
+				Site.WorldTransform.GetUnitAxis(EAxis::Z),
+				EnvironmentSnapshot.SunDirectionToSunWorld);
+			if (SelectedFixedSite == nullptr
+				|| SolarHeight > BestSolarHeight + KINDA_SMALL_NUMBER
+				|| (FMath::IsNearlyEqual(SolarHeight, BestSolarHeight)
+					&& (CentreDistance < BestCentreDistance
+						|| (FMath::IsNearlyEqual(
+							CentreDistance, BestCentreDistance)
+							&& Site.EncounterIndex
+								< SelectedFixedSite->EncounterIndex))))
+			{
+				SelectedFixedSite = &Site;
+				BestSolarHeight = SolarHeight;
+				BestCentreDistance = CentreDistance;
+			}
 		}
-		const double Progress = Site.NormalizedRouteProgress >= 0.0f
-			? Site.NormalizedRouteProgress
-			: 0.5;
-		const double Score = FMath::Abs(Progress - 0.5);
-		if (SelectedSite == nullptr
-			|| Score < BestSiteScore
-			|| (FMath::IsNearlyEqual(Score, BestSiteScore)
-				&& Site.SiteId < SelectedSite->SiteId))
+		if (SelectedFixedSite != nullptr)
 		{
-			SelectedSite = &Site;
-			BestSiteScore = Score;
+			FixedSixCaptureEntryId = SelectedFixedSite->ManifestEntryId;
+			FixedSixCaptureSite.SiteId =
+				SelectedFixedSite->V3Envelope.PlacementHash != 0
+					? SelectedFixedSite->V3Envelope.PlacementHash
+					: SelectedFixedSite->V2Envelope.StaticGeometryHash != 0
+						? SelectedFixedSite->V2Envelope.StaticGeometryHash
+						: static_cast<uint64>(GetTypeHash(
+							SelectedFixedSite->ManifestEntryId));
+			FixedSixCaptureSite.TaskId = SelectedFixedSite->EncounterIndex;
+			FixedSixCaptureSite.EncounterIndex =
+				SelectedFixedSite->EncounterIndex;
+			FixedSixCaptureSite.DifficultyTier =
+				SelectedFixedSite->DifficultyTier;
+			FixedSixCaptureSite.NormalizedRouteProgress =
+				static_cast<float>(SelectedFixedSite->EncounterIndex)
+				/ (FABTSJuryDemoFixedSixContract::ExpectedSiteCount - 1);
+			FixedSixCaptureSite.LayoutArchetypeId =
+				SelectedFixedSite->ManifestEntryId;
+			FixedSixCaptureSite.DeterministicSeed =
+				SelectedFixedSite->DeterministicSeed;
+			FixedSixCaptureSite.Purpose =
+				EABTSGeneratedBuildingPurpose::DestructibleTarget;
+			FixedSixCaptureSite.WorldTransform =
+				SelectedFixedSite->WorldTransform;
+			FixedSixCaptureSite.AnchorDirection =
+				SelectedFixedSite->WorldTransform.GetUnitAxis(EAxis::Z);
+			FixedSixCaptureSite.TangentForward =
+				SelectedFixedSite->WorldTransform.GetUnitAxis(EAxis::X);
+			FixedSixCaptureSite.TangentRight =
+				SelectedFixedSite->WorldTransform.GetUnitAxis(EAxis::Y);
+			FixedSixCaptureSite.PadHalfExtentCM =
+				SelectedFixedSite->PadHalfExtentCM;
+			SelectedSite = &FixedSixCaptureSite;
+		}
+	}
+	if (SelectedSite == nullptr)
+	{
+		BestSiteScore = TNumericLimits<double>::Max();
+		for (const FABTSGeneratedBuildingSite& Site : BuildingContract.Sites)
+		{
+			if (Site.Purpose != EABTSGeneratedBuildingPurpose::DestructibleTarget)
+			{
+				continue;
+			}
+			const double Progress = Site.NormalizedRouteProgress >= 0.0f
+				? Site.NormalizedRouteProgress
+				: 0.5;
+			const double Score = FMath::Abs(Progress - 0.5);
+			if (SelectedSite == nullptr
+				|| Score < BestSiteScore
+				|| (FMath::IsNearlyEqual(Score, BestSiteScore)
+					&& Site.SiteId < SelectedSite->SiteId))
+			{
+				SelectedSite = &Site;
+				BestSiteScore = Score;
+			}
 		}
 	}
 	if (SelectedSite == nullptr)
@@ -1013,8 +1100,19 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 
 	AABTSM73StableBuildingActor* SelectedBuilding = nullptr;
 	double BestBuildingDistanceSquared = TNumericLimits<double>::Max();
+	int32 ExactFixedSixMatches = 0;
 	for (AABTSM73StableBuildingActor* Building : AcceptedBuildings)
 	{
+		if (!FixedSixCaptureEntryId.IsNone()
+			&& Building->GetJuryDemoFixedSixManifestEntryId()
+				!= FixedSixCaptureEntryId)
+		{
+			continue;
+		}
+		if (!FixedSixCaptureEntryId.IsNone())
+		{
+			++ExactFixedSixMatches;
+		}
 		const double DistanceSquared = FVector::DistSquared(
 			Building->GetActorLocation(),
 			SelectedSite->WorldTransform.GetLocation());
@@ -1023,6 +1121,14 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 			SelectedBuilding = Building;
 			BestBuildingDistanceSquared = DistanceSquared;
 		}
+	}
+	if (!FixedSixCaptureEntryId.IsNone() && ExactFixedSixMatches != 1)
+	{
+		OutReason = FString::Printf(
+			TEXT("Fixed-Six capture site did not resolve exactly one accepted actor: Entry=%s Matches=%d."),
+			*FixedSixCaptureEntryId.ToString(),
+			ExactFixedSixMatches);
+		return EWorldResolveResult::Failed;
 	}
 	if (SelectedBuilding == nullptr)
 	{
@@ -1045,17 +1151,31 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 			*SelectedBuilding->GetName());
 		return EWorldResolveResult::Failed;
 	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][ToonT0][BuildingCaptureBinding]")
+		TEXT(" Source=%s Site=%llu Entry=%s Actor=%s AnchorDistanceCM=%.2f")
+		TEXT(" LimitCM=%.2f SolarHeight=%.4f Accepted=1"),
+		FixedSixCaptureEntryId.IsNone() ? TEXT("GenericSites") : TEXT("FixedSixExact"),
+		static_cast<unsigned long long>(SelectedSite->SiteId),
+		FixedSixCaptureEntryId.IsNone()
+			? TEXT("None")
+			: *FixedSixCaptureEntryId.ToString(),
+		*SelectedBuilding->GetName(),
+		FMath::Sqrt(BestBuildingDistanceSquared),
+		MaxBuildingMatchDistanceCM,
+		FVector::DotProduct(
+			SelectedSite->AnchorDirection.GetSafeNormal(),
+			EnvironmentSnapshot.SunDirectionToSunWorld));
 
-	FVector BuildingMarker;
+	FBox SelectedBuildingPresentationBounds(EForceInit::ForceInit);
 	int32 LiveModuleCount = 0;
-	if (!SelectedBuilding->QueryScoutMapMarkerLocation(
-		&Planet,
-		BuildingMarker,
+	if (!SelectedBuilding->QueryLivePresentationBounds(
+		SelectedBuildingPresentationBounds,
 		LiveModuleCount)
 		|| LiveModuleCount <= 0
-		|| BuildingMarker.ContainsNaN())
+		|| !SelectedBuildingPresentationBounds.IsValid)
 	{
-		OutReason = TEXT("Selected building has no live presentation centroid.");
+		OutReason = TEXT("Selected building has no live presentation bounds.");
 		return EWorldResolveResult::Failed;
 	}
 
@@ -1271,6 +1391,11 @@ UABTSToonVisualCaptureSubsystem::TryResolveWorldAndCapturePoints(
 				HalfForwardCM,
 				HalfRightCM,
 				HalfHeightCM);
+			// The frozen site pad is a placement contract, not a visual-size
+			// contract.  Large Fixed-Six buildings can extend well beyond it;
+			// include their live physical bounds so the QA shot proves the whole
+			// building rather than an empty pad or a clipped facade.
+			Bounds += SelectedBuildingPresentationBounds;
 			for (int32 HoleIndex = 0; HoleIndex < 2; ++HoleIndex)
 			{
 				ABTSToonVisualCaptureSubsystemPrivate::AddBoundsPoint(
