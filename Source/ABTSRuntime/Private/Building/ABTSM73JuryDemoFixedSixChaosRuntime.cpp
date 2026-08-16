@@ -32,7 +32,7 @@ namespace
 	constexpr float FixedSixMaximumPeakPlanarDriftCM = 6.0f;
 	constexpr float FixedSixMaximumPeakSettlementCM = 6.0f;
 	constexpr float FixedSixMaximumPeakRotationDegrees = 3.0f;
-	constexpr float FixedSixFrozenTangentSupportThicknessCM = 100.0f;
+	constexpr float JuryDemoFrozenTangentSupportThicknessCM = 100.0f;
 
 	uint32 ComputeProductionCandidateHash(
 		const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
@@ -89,7 +89,7 @@ namespace
 			FMath::RoundToInt(FixedSixSimulationDeltaSeconds * 1000000.0f),
 			FMath::RoundToInt(Entry.PadHalfExtentCM.X * 1000.0f),
 			FMath::RoundToInt(Entry.PadHalfExtentCM.Y * 1000.0f),
-			FMath::RoundToInt(FixedSixFrozenTangentSupportThicknessCM * 1000.0f),
+			FMath::RoundToInt(JuryDemoFrozenTangentSupportThicknessCM * 1000.0f),
 			FMath::RoundToInt(FixedSixMinimumObservationSeconds * 1000.0f),
 			FMath::RoundToInt(FixedSixStableHoldSeconds * 1000.0f),
 			FMath::RoundToInt(FixedSixMaximumObservationSeconds * 1000.0f),

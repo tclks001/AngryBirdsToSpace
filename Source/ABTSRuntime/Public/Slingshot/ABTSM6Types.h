@@ -38,6 +38,15 @@ enum class EABTSM6TrajectoryTerminalType : uint8
 	SatelliteE5
 };
 
+/** Pure pouch geometry used to shorten a blocked draw without changing its launch direction. */
+struct ABTSRUNTIME_API FABTSM6PouchClearanceGeometry
+{
+	static FVector ContractAlongLaunchRay(
+		const FVector& LaunchFocusWorld,
+		const FVector& UnobstructedPouchWorld,
+		float RetainedDrawScale);
+};
+
 /** Immutable copy of one M6 aim prediction, consumed by M10 without re-integrating physics in the HUD. */
 USTRUCT(BlueprintType)
 struct FABTSM6TrajectoryPreview
@@ -55,6 +64,10 @@ struct FABTSM6TrajectoryPreview
 
 	UPROPERTY(BlueprintReadOnly)
 	FVector InitialWorldVelocity = FVector::ZeroVector;
+
+	/** Exact M9 gravity snapshot consumed by this prediction; zero in planar mode. */
+	UPROPERTY(BlueprintReadOnly)
+	int64 GravitySnapshotHash = 0;
 
 	UPROPERTY(BlueprintReadOnly)
 	bool bHasPrimarySurfaceLanding = false;

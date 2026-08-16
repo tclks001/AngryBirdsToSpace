@@ -2758,91 +2758,115 @@ bool AABTSM3Planet::GetInitialRoadSpawnTransform(
 	OutCellId = INDEX_NONE;
 	if (!TerrainVisualField || !TerrainVisualField->IsReady()) return false;
 
-	const FABTSM3TaskNode* StartTask = GeneratedTasks.FindByPredicate([](const FABTSM3TaskNode& Task)
+	int32 SourceCandidateId = INDEX_NONE;
+	const TCHAR* SpawnAuthority = TEXT("TaskGraphMainRoute");
+	if (JuryMapFreezeV3Result.bMapFreezeReady)
 	{
-		return Task.Type == EABTSM3TaskType::Start;
-	});
-	if (StartTask == nullptr || !LogicalCells.IsValidIndex(StartTask->SeedCellId)) return false;
-
-	// The first Task seed is always included in the first main-road path. Keep a
-	// defensive search inside the Start region for future graph templates.
-	int32 SpawnCellId = StartTask->SeedCellId;
-	if (!GeneratedCellStates.IsValidIndex(SpawnCellId) || !GeneratedCellStates[SpawnCellId].bRoad)
-	{
-		SpawnCellId = INDEX_NONE;
-		for (const int32 CellId : StartTask->CellIds)
-		{
-			if (GeneratedCellStates.IsValidIndex(CellId) && GeneratedCellStates[CellId].bRoad)
-			{
-				SpawnCellId = CellId;
-				break;
-			}
-		}
+		SourceCandidateId = JuryMapFreezeV3Result.SourceCandidateId;
+		SpawnAuthority = TEXT("MapFreezeV3MainRoute");
 	}
-	if (!LogicalCells.IsValidIndex(SpawnCellId)) return false;
+	else if (bMonthlyPresentationPreviewActive)
+	{
+		SourceCandidateId = ActiveMonthlyPresentationPreviewCandidateId;
+		SpawnAuthority = TEXT("PreviewMainRoute");
+	}
+
+	int32 SpawnCellId = INDEX_NONE;
+	int32 NextRoadCellId = INDEX_NONE;
+	if (SourceCandidateId != INDEX_NONE)
+	{
+		const FABTSM3MonthlySpatialCandidate* SpatialCandidate =
+			MonthlySpatialResult.RetainedCandidates.FindByPredicate(
+				[SourceCandidateId](const FABTSM3MonthlySpatialCandidate& Candidate)
+				{
+					return Candidate.SourceRouteCandidateId == SourceCandidateId;
+				});
+		if (SpatialCandidate == nullptr
+			|| SpatialCandidate->RecomputedRoute.OrderedRoadCellIds.Num() < 2)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3][SpawnAuthority] Rejected Authority=%s Candidate=%d Reason=CanonicalRouteUnavailable"),
+				SpawnAuthority,
+				SourceCandidateId);
+			return false;
+		}
+		SpawnCellId = SpatialCandidate->RecomputedRoute.OrderedRoadCellIds[0];
+		NextRoadCellId =
+			SpatialCandidate->RecomputedRoute.OrderedRoadCellIds[1];
+	}
+	else
+	{
+		const FABTSM3TaskNode* StartTask =
+			GeneratedTasks.FindByPredicate([](const FABTSM3TaskNode& Task)
+			{
+				return Task.Type == EABTSM3TaskType::Start;
+			});
+		if (StartTask == nullptr) return false;
+
+		const FABTSM3TaskLink* StartMainRoute =
+			GeneratedTaskLinks.FindByPredicate(
+				[StartTask](const FABTSM3TaskLink& Link)
+				{
+					return (Link.TaskA == StartTask->TaskId
+							|| Link.TaskB == StartTask->TaskId)
+						&& (Link.Role == EABTSM3TaskLinkRole::MainPath
+							|| Link.Role == EABTSM3TaskLinkRole::LockedGate)
+						&& Link.CorridorCells.Num() >= 2;
+				});
+		if (StartMainRoute == nullptr) return false;
+
+		const bool bStartAtFirstCell =
+			StartMainRoute->TaskA == StartTask->TaskId;
+		const int32 RouteStartIndex = bStartAtFirstCell
+			? 0
+			: StartMainRoute->CorridorCells.Num() - 1;
+		const int32 RouteNextIndex = bStartAtFirstCell
+			? 1
+			: StartMainRoute->CorridorCells.Num() - 2;
+		SpawnCellId = StartMainRoute->CorridorCells[RouteStartIndex];
+		NextRoadCellId = StartMainRoute->CorridorCells[RouteNextIndex];
+	}
+	if (!LogicalCells.IsValidIndex(SpawnCellId)
+		|| !LogicalCells.IsValidIndex(NextRoadCellId))
+	{
+		return false;
+	}
 
 	const FVector SpawnDirection = LogicalCells[SpawnCellId].UnitCenter.GetSafeNormal();
 	const FVector SurfaceNormal = TerrainVisualField->GetSurfaceNormal(SpawnDirection);
-	FVector RoadForward = FVector::ZeroVector;
-	float BestNextTaskDot = -2.0f;
-	const FABTSM3TaskNode* NextMainTask = nullptr;
-	for (const int32 LinkedTaskId : StartTask->LinkedTaskIds)
-	{
-		const FABTSM3TaskNode* LinkedTask = GeneratedTasks.FindByPredicate([LinkedTaskId](const FABTSM3TaskNode& Task)
-		{
-			return Task.TaskId == LinkedTaskId;
-		});
-		if (LinkedTask != nullptr && LogicalCells.IsValidIndex(LinkedTask->SeedCellId))
-		{
-			const float Dot = FVector::DotProduct(SpawnDirection, LogicalCells[LinkedTask->SeedCellId].UnitCenter);
-			if (Dot > BestNextTaskDot)
-			{
-				BestNextTaskDot = Dot;
-				NextMainTask = LinkedTask;
-			}
-		}
-	}
-	if (NextMainTask != nullptr)
-	{
-		const FVector TargetDirection = LogicalCells[NextMainTask->SeedCellId].UnitCenter;
-		int32 FirstRoadNeighborId = INDEX_NONE;
-		float BestRoadProgress = -2.0f;
-		for (const int32 NeighborId : LogicalCells[SpawnCellId].NeighborCellIds)
-		{
-			if (!GeneratedCellStates.IsValidIndex(NeighborId) || !GeneratedCellStates[NeighborId].bRoad) continue;
-			const float Progress = FVector::DotProduct(LogicalCells[NeighborId].UnitCenter, TargetDirection);
-			if (Progress > BestRoadProgress)
-			{
-				BestRoadProgress = Progress;
-				FirstRoadNeighborId = NeighborId;
-			}
-		}
-		if (FirstRoadNeighborId != INDEX_NONE)
-		{
-			RoadForward = FVector::VectorPlaneProject(LogicalCells[FirstRoadNeighborId].UnitCenter - SpawnDirection, SurfaceNormal).GetSafeNormal();
-		}
-	}
-	if (RoadForward.IsNearlyZero())
-	{
-		for (const int32 NeighborId : LogicalCells[SpawnCellId].NeighborCellIds)
-		{
-			if (GeneratedCellStates.IsValidIndex(NeighborId) && GeneratedCellStates[NeighborId].bRoad)
-			{
-				RoadForward = FVector::VectorPlaneProject(LogicalCells[NeighborId].UnitCenter - SpawnDirection, SurfaceNormal).GetSafeNormal();
-				if (!RoadForward.IsNearlyZero()) break;
-			}
-		}
-	}
-	if (RoadForward.IsNearlyZero())
-	{
-		RoadForward = FVector::VectorPlaneProject(FVector::ForwardVector, SurfaceNormal).GetSafeNormal();
-		if (RoadForward.IsNearlyZero()) RoadForward = FVector::VectorPlaneProject(FVector::RightVector, SurfaceNormal).GetSafeNormal();
-	}
+	const FVector RoadForward = FVector::VectorPlaneProject(
+		LogicalCells[NextRoadCellId].UnitCenter - SpawnDirection,
+		SurfaceNormal).GetSafeNormal();
+	if (SpawnDirection.IsNearlyZero() || SurfaceNormal.IsNearlyZero()
+		|| RoadForward.IsNearlyZero()) return false;
 
 	const float CharacterCenterRadius = TerrainVisualField->GetSurfaceRadius(SpawnDirection) + FMath::Max(0.0f, SurfaceOffsetCM);
 	const FVector CharacterCenter = GetPlanetCenterWorld() + SpawnDirection * CharacterCenterRadius;
+	bool bPhysicalClearanceOverlap = false;
+	bool bDynamicClearanceOverlap = false;
+	GetJuryFixedSixDecorClearanceOverlaps(
+		CharacterCenter - GetPlanetCenterWorld(),
+		bPhysicalClearanceOverlap,
+		bDynamicClearanceOverlap);
+	if (bPhysicalClearanceOverlap || bDynamicClearanceOverlap)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3][SpawnAuthority] Rejected Authority=%s Candidate=%d EndpointCell=%d Reason=ProtectedBuildingClearance Physical=%d Dynamic=%d"),
+			SpawnAuthority,
+			SourceCandidateId,
+			SpawnCellId,
+			bPhysicalClearanceOverlap ? 1 : 0,
+			bDynamicClearanceOverlap ? 1 : 0);
+		return false;
+	}
 	OutWorldTransform = FTransform(FRotationMatrix::MakeFromXZ(RoadForward, SpawnDirection).ToQuat(), CharacterCenter);
 	OutCellId = SpawnCellId;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3][SpawnAuthority] Authority=%s Candidate=%d EndpointOrdinal=0 EndpointCell=%d NextCell=%d Protected=0"),
+		SpawnAuthority,
+		SourceCandidateId,
+		SpawnCellId,
+		NextRoadCellId);
 	return true;
 }
 

@@ -412,6 +412,8 @@ private:
 	FVector RestPouchLocation = FVector::ZeroVector;
 	FVector PouchLocation = FVector::ZeroVector;
 	FVector AimPlaneOffset = FVector::ZeroVector;
+	bool bPouchSurfaceClampActive = false;
+	float LastPouchSurfaceAdjustmentCM = 0.0f;
 	FABTSM6TrajectoryPreview CurrentTrajectoryPreview;
 	FVector LastTrajectoryPreviewStart = FVector::ZeroVector;
 	FVector LastTrajectoryPreviewVelocity = FVector::ZeroVector;

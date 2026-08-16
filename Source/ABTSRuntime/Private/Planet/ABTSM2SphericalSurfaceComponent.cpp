@@ -5,7 +5,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "Planet/ABTSM2Planet.h"
-#include "EngineUtils.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 
 UABTSM2SphericalSurfaceComponent::UABTSM2SphericalSurfaceComponent()
 {
@@ -76,17 +76,7 @@ FVector UABTSM2SphericalSurfaceComponent::GetTangentRight() const
 
 AABTSM2Planet* UABTSM2SphericalSurfaceComponent::FindPlanet()
 {
-	if (Planet.IsValid())
-	{
-		return Planet.Get();
-	}
-
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		Planet = *It;
-		return Planet.Get();
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }
 
 FVector UABTSM2SphericalSurfaceComponent::ProjectToTangent(const FVector& Candidate, const FVector& Fallback) const

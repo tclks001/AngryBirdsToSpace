@@ -380,7 +380,7 @@ public:
 		int32 StartCellHint = 0,
 		int32* OutCellId = nullptr) const;
 
-	/** Character-center spawn transform at the Start Task's first logical road Cell. */
+	/** Character-center transform at the canonical main-road start endpoint. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Spawn")
 	bool GetInitialRoadSpawnTransform(float SurfaceOffsetCM, FTransform& OutWorldTransform, int32& OutCellId) const;
 

@@ -446,7 +446,7 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsE5CollisionEnabled());
 	TestTrue(TEXT("M6 consumes the exact E5 snapshot"),
 		Runtime->IsM6TargetBound());
-	TestTrue(TEXT("Runtime layout passes the gravity-dependent trajectory gate"),
+	TestTrue(TEXT("Runtime layout passes the building-level attackability gate"),
 		Runtime->IsTrajectoryCertified());
 	TestTrue(TEXT("A real reinforced slingshot is grounded from the candidate cells"),
 		Runtime->IsPracticeSlingshotReady());
@@ -555,16 +555,38 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	TestEqual(TEXT("Live production M6 hash matches the preview witness"),
 		Snapshot.ProductionLaunchProfileHash,
 		Candidate.LaunchProfileHash);
-	TestTrue(TEXT("Trajectory certification is persisted"),
+	TestTrue(TEXT("Building-level attackability certification is persisted"),
 		Snapshot.bTrajectoryCertified);
-	TestTrue(TEXT("Certification finds gravity-on hits"),
-		Snapshot.GravityOnHits > 0);
-	TestTrue(TEXT("Certification finds gravity-dependent hits"),
-		Snapshot.GravityDependentHits > 0);
-	TestTrue(TEXT("Certification retains a connected success island"),
-		Snapshot.LargestSuccessIslandSamples >= 3);
-	TestTrue(TEXT("Certified gravity-off witness misses by the frozen margin"),
-		Snapshot.MinimumGravityOffMissCM >= 60.0f);
+	TestTrue(TEXT("Runtime identifies the reachable legacy proxy overlap policy"),
+		Snapshot.bBuildingLevelAttackabilityCertified);
+	TestEqual(TEXT("Runtime executes no numerical trajectory samples"),
+		Snapshot.AttackabilityWitnessSampleCount, 0);
+	TestTrue(TEXT("No runtime numerical witness BrickId is retained"),
+		Snapshot.AttackabilityWitnessBrickId == INDEX_NONE);
+	TestTrue(TEXT("Historical reachable proxy overlaps real frozen E1 Brick OBBs"),
+		Snapshot.ProxyOverlapBrickCount > 0);
+	TestTrue(TEXT("Overlap records the stable first BrickId"),
+		Snapshot.ProxyOverlapBrickId != INDEX_NONE);
+	TestTrue(TEXT("Frozen preview remains 2.0 primary gravity"),
+		FMath::IsNearlyEqual(
+			Candidate.SatelliteSurfaceGravityCMPerSec2,
+			1960.0f,
+			0.01f));
+	TestTrue(TEXT("Runtime records the frozen preview gravity separately"),
+		FMath::IsNearlyEqual(
+			Snapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
+			1960.0f,
+			0.01f));
+	TestTrue(TEXT("Production gameplay satellite consumes the frozen preview gravity"),
+		FMath::IsNearlyEqual(
+			Snapshot.SatelliteSurfaceGravityCMPerSec2,
+			Candidate.SatelliteSurfaceGravityCMPerSec2,
+			0.01f));
+	TestTrue(TEXT("Runtime frozen-preview record and gameplay gravity are exact peers"),
+		FMath::IsNearlyEqual(
+			Snapshot.SatelliteSurfaceGravityCMPerSec2,
+			Snapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
+			0.01f));
 	TestNotEqual(TEXT("Trajectory certification hash is persisted"),
 		Snapshot.TrajectoryCertificationHash,
 		static_cast<int64>(0));
@@ -679,7 +701,7 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	TestEqual(TEXT("Runtime target identity joins the preview exactly"),
 		Snapshot.ProductionTargetIdentityHash,
 		Candidate.ProductionTargetIdentityHash);
-	TestEqual(TEXT("Runtime trajectory joins the preview certificate exactly"),
+	TestNotEqual(TEXT("Runtime overlap proof is distinct from the historical trajectory certificate"),
 		Snapshot.TrajectoryCertificationHash,
 		Candidate.ProductionTargetTrajectoryHash);
 
@@ -887,6 +909,150 @@ bool FABTSM3R51ScoutMapPresentationAuthorityTest::RunTest(
 		SelectedCandidateId,
 		DiscriminatingSamples,
 		PresentedPaletteMatches));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM3R51CanonicalRoadSpawnTest,
+	"ABTS.M3.Monthly.SatellitePreview.05CanonicalPrimaryRoadSpawn",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM3R51CanonicalRoadSpawnTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace ABTSM3R51SatellitePreviewTests;
+	FScopedTestWorld ScopedWorld;
+	UWorld* World = ScopedWorld.Get();
+	TestNotNull(TEXT("Transient test World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	AABTSM3Planet* Planet = SpawnPreviewPlanet(*this, *World);
+	if (Planet == nullptr)
+	{
+		return false;
+	}
+	Planet->bEnableMonthlyPresentationPreview = true;
+	Planet->MonthlyPresentationPreviewCandidateId =
+		FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId;
+	TestTrue(TEXT("V3 candidate preview rebuild succeeds"),
+		Planet->RebuildPlanet());
+
+	const FABTSM3JuryMapFreezeV3Result& Freeze =
+		Planet->GetJuryMapFreezeV3Result();
+	TestTrue(TEXT("V3 map freeze is ready"), Freeze.bMapFreezeReady);
+	const FABTSM3MonthlySpatialCandidate* Candidate =
+		Planet->GetMonthlySpatialResult().RetainedCandidates.FindByPredicate(
+			[&Freeze](const FABTSM3MonthlySpatialCandidate& Value)
+			{
+				return Value.SourceRouteCandidateId == Freeze.SourceCandidateId;
+			});
+	TestNotNull(TEXT("Frozen V3 candidate resolves"), Candidate);
+	if (Candidate == nullptr
+		|| Candidate->RecomputedRoute.OrderedRoadCellIds.Num() < 2)
+	{
+		return false;
+	}
+
+	FTransform SpawnTransform;
+	int32 SpawnCellId = INDEX_NONE;
+	constexpr float CharacterSurfaceOffsetCM = 95.0f;
+	TestTrue(TEXT("Canonical endpoint spawn transform resolves"),
+		Planet->GetInitialRoadSpawnTransform(
+			CharacterSurfaceOffsetCM,
+			SpawnTransform,
+			SpawnCellId));
+	const TArray<int32>& OrderedRoute =
+		Candidate->RecomputedRoute.OrderedRoadCellIds;
+	TestEqual(TEXT("Spawn cell is route ordinal zero"),
+		SpawnCellId,
+		OrderedRoute[0]);
+	TestEqual(TEXT("Spawn cell has no interior route ordinal"),
+		OrderedRoute.IndexOfByKey(SpawnCellId), 0);
+
+	const FABTSM3TaskNode* LegacyStartTask =
+		Planet->GetGeneratedTasks().FindByPredicate(
+			[](const FABTSM3TaskNode& Task)
+			{
+				return Task.Type == EABTSM3TaskType::Start;
+			});
+	TestNotNull(TEXT("Compatibility Start task exists"), LegacyStartTask);
+	if (LegacyStartTask != nullptr)
+	{
+		TestNotEqual(
+			TEXT("Legacy Start seed is rejected when it is not the V3 route endpoint"),
+			LegacyStartTask->SeedCellId,
+			SpawnCellId);
+	}
+
+	FVector SurfaceWorldPosition = FVector::ZeroVector;
+	FVector SurfaceWorldNormal = FVector::ZeroVector;
+	float SurfaceRadiusCM = 0.0f;
+	int32 SurfaceCellId = INDEX_NONE;
+	const FVector EndpointDirection =
+		Planet->LogicalCells[OrderedRoute[0]].UnitCenter;
+	TestTrue(TEXT("Endpoint resolves on the primary terrain surface"),
+		Planet->QuerySurface(
+			EndpointDirection,
+			SurfaceWorldPosition,
+			SurfaceWorldNormal,
+			SurfaceRadiusCM,
+			SurfaceCellId));
+	TestEqual(TEXT("Primary terrain surface resolves the endpoint cell"),
+		SurfaceCellId,
+		SpawnCellId);
+	TestTrue(TEXT("Spawn remains surface-attached at the requested offset"),
+		SpawnTransform.GetLocation().Equals(
+			SurfaceWorldPosition
+				+ EndpointDirection.GetSafeNormal() * CharacterSurfaceOffsetCM,
+			0.1f));
+	const FVector ExpectedForward = FVector::VectorPlaneProject(
+		Planet->LogicalCells[OrderedRoute[1]].UnitCenter
+			- EndpointDirection.GetSafeNormal(),
+		SurfaceWorldNormal).GetSafeNormal();
+	TestTrue(TEXT("Spawn forward follows canonical route ordinal one"),
+		FVector::DotProduct(
+			SpawnTransform.GetUnitAxis(EAxis::X),
+			ExpectedForward) > 0.999f);
+
+	const FVector SpawnLocal =
+		SpawnTransform.GetLocation() - Planet->GetPlanetCenterWorld();
+	bool bInsideProtectedPrimaryBuilding = false;
+	for (const FABTSM3JuryMapFreezeV3Placement& Placement : Freeze.Placements)
+	{
+		const FABTSJuryDemoFixedSixBuildingSite& Site = Placement.Site;
+		if (Site.V3Envelope.SurfaceKind
+			!= EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet)
+		{
+			continue;
+		}
+		const FVector SiteLocal = Site.WorldTransform.InverseTransformPosition(
+			Planet->GetPlanetCenterWorld() + SpawnLocal);
+		const FBox& PhysicalBounds = Site.V3Envelope.SiteLocalBounds;
+		const FBox& EffectBounds = Site.V3Envelope.EffectBounds;
+		bInsideProtectedPrimaryBuilding |= (PhysicalBounds.IsValid != 0
+			&& SiteLocal.X >= PhysicalBounds.Min.X
+			&& SiteLocal.X <= PhysicalBounds.Max.X
+			&& SiteLocal.Y >= PhysicalBounds.Min.Y
+			&& SiteLocal.Y <= PhysicalBounds.Max.Y)
+			|| (EffectBounds.IsValid != 0
+				&& SiteLocal.X >= EffectBounds.Min.X
+				&& SiteLocal.X <= EffectBounds.Max.X
+				&& SiteLocal.Y >= EffectBounds.Min.Y
+				&& SiteLocal.Y <= EffectBounds.Max.Y);
+	}
+	TestFalse(TEXT("Canonical primary endpoint is outside every V3 building protection envelope"),
+		bInsideProtectedPrimaryBuilding);
+	AddInfo(FString::Printf(
+		TEXT("CanonicalRoadSpawn Candidate=%d EndpointOrdinal=0 EndpointCell=%d NextCell=%d LegacyStartCell=%d"),
+		Freeze.SourceCandidateId,
+		SpawnCellId,
+		OrderedRoute[1],
+		LegacyStartTask != nullptr ? LegacyStartTask->SeedCellId : INDEX_NONE));
 	return true;
 }
 

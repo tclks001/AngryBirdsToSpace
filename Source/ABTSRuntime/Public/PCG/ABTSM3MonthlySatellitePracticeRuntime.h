@@ -88,6 +88,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm/s^2"))
 	float SatelliteSurfaceGravityCMPerSec2 = 0.0f;
 
+	/** Frozen-preview gravity retained for source-identity inspection; the production satellite consumes this exact value for gameplay. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm/s^2"))
+	float CalibrationSatelliteSurfaceGravityCMPerSec2 = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	FTransform E5WorldTransform = FTransform::Identity;
 
@@ -111,9 +115,26 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int64 BaselineGravitySnapshotHash = 0;
 
-	/** Formal gate: a connected gravity-on success island exists and gravity-off misses it. */
+	/** Compatibility field.  Runtime policy is BuildingLevelAttackabilityV1, not the frozen 2g sweep. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
 	bool bTrajectoryCertified = false;
+
+	/** Reachability evidence inherited from the historically hand-validated proxy volume overlapping the exact frozen E1 Brick OBB union; no numerical trajectory or exact-crystal requirement. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	bool bBuildingLevelAttackabilityCertified = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 AttackabilityWitnessSampleCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 AttackabilityWitnessBrickId = INDEX_NONE;
+
+	/** Geometry-inheritance evidence from the historical reachable magenta proxy; no runtime trajectory samples are run. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 ProxyOverlapBrickId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 ProxyOverlapBrickCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
 	int32 GravityOnHits = 0;

@@ -179,6 +179,52 @@ namespace ABTSSlingshotCalibrationTests
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6PouchClearanceDirectionInvariantTest,
+	"ABTS.M6.LaunchProfiles.PouchClearanceDirectionInvariant",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6PouchClearanceDirectionInvariantTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FVector LaunchFocus(10240.0, -330.0, 1840.0);
+	const FVector UnobstructedPouch(9860.0, -515.0, 1610.0);
+	const FVector ExpectedDirection =
+		(LaunchFocus - UnobstructedPouch).GetSafeNormal();
+	for (const float RetainedScale : {1.0f, 0.75f, 0.5f, 0.2f, 0.05f})
+	{
+		const FVector ContractedPouch =
+			FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+				LaunchFocus,
+				UnobstructedPouch,
+				RetainedScale);
+		const FVector ContractedDirection =
+			(LaunchFocus - ContractedPouch).GetSafeNormal();
+		TestTrue(
+			*FString::Printf(
+				TEXT("Retained scale %.2f preserves launch direction"),
+				RetainedScale),
+			FVector::DotProduct(ExpectedDirection, ContractedDirection)
+				> 0.9999999f);
+	}
+	TestEqual(
+		TEXT("Negative retained scale clamps to launch focus"),
+		FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+			LaunchFocus,
+			UnobstructedPouch,
+			-1.0f),
+		LaunchFocus);
+	TestEqual(
+		TEXT("Oversized retained scale clamps to unobstructed pouch"),
+		FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+			LaunchFocus,
+			UnobstructedPouch,
+			2.0f),
+		UnobstructedPouch);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM6ProductionLaunchProfileConsumptionTest,
 	"ABTS.M6.LaunchProfiles.ProductionCatalog",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

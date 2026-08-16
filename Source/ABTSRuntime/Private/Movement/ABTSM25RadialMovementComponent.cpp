@@ -7,6 +7,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 
 UABTSM25RadialMovementComponent::UABTSM25RadialMovementComponent()
 {
@@ -103,20 +104,7 @@ void UABTSM25RadialMovementComponent::TickComponent(const float DeltaTime, const
 
 AABTSM2Planet* UABTSM25RadialMovementComponent::FindPlanet()
 {
-	if (Planet.IsValid())
-	{
-		return Planet.Get();
-	}
-
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		if (It->IsPlanetReady())
-		{
-			Planet = *It;
-			return Planet.Get();
-		}
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }
 
 void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)

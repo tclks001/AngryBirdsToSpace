@@ -65,6 +65,17 @@ namespace
 	}
 }
 
+FVector FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+	const FVector& LaunchFocusWorld,
+	const FVector& UnobstructedPouchWorld,
+	const float RetainedDrawScale)
+{
+	return FMath::Lerp(
+		LaunchFocusWorld,
+		UnobstructedPouchWorld,
+		FMath::Clamp(RetainedDrawScale, 0.0f, 1.0f));
+}
+
 AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -582,9 +593,150 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 		GetResolvedMinimumPullDistanceCM(),
 		GetResolvedMaximumPullDistanceCM(),
 		PullAlpha);
-	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
-	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
-	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
+	const FVector LaunchFocus = SlingCenter + SlingUp * 65.0f;
+	const FVector UnobstructedPouchLocation =
+		RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
+	const FVector UnobstructedDirection =
+		(LaunchFocus - UnobstructedPouchLocation).GetSafeNormal();
+	const FQuat PouchRotation =
+		MakePulledPouchRotation(UnobstructedDirection, SlingRight);
+	const float BirdRadiusCM = FMath::Max(
+		1.0f, LaunchedBird->GetSlingshotTrajectoryCollisionRadiusCM());
+	constexpr float ReleaseClearanceMarginCM = 10.0f;
+
+	const auto ResolveClearance = [this, &PouchRotation, BirdRadiusCM](
+		const FVector& CandidatePouchLocation,
+		float& OutClearanceDeficitCM)
+	{
+		const FVector CandidateBirdCenter =
+			CandidatePouchLocation
+			+ PouchRotation.RotateVector(
+				FVector(0.0f, 0.0f, BirdInPouchOffsetCM));
+		FVector SurfacePosition = FVector::ZeroVector;
+		FVector SurfaceNormal = SlingUp;
+		bool bSurfaceResolved = false;
+		if (bPlanarTestMode)
+		{
+			SurfacePosition = CandidateBirdCenter
+				- PlanarUp * FVector::DotProduct(
+					CandidateBirdCenter - PlanarOrigin, PlanarUp);
+			SurfaceNormal = PlanarUp;
+			bSurfaceResolved = true;
+		}
+		else if (Planet.IsValid())
+		{
+			float SurfaceRadiusCM = 0.0f;
+			int32 SurfaceCellId = INDEX_NONE;
+			const FVector SurfaceDirection =
+				(CandidateBirdCenter - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+			bSurfaceResolved = !SurfaceDirection.IsNearlyZero()
+				&& Planet->QuerySurface(
+					SurfaceDirection,
+					SurfacePosition,
+					SurfaceNormal,
+					SurfaceRadiusCM,
+					SurfaceCellId);
+		}
+		if (!bSurfaceResolved)
+		{
+			OutClearanceDeficitCM = 0.0f;
+			return false;
+		}
+		const float CurrentClearanceCM = FVector::DotProduct(
+			CandidateBirdCenter - SurfacePosition,
+			SurfaceNormal.GetSafeNormal());
+		OutClearanceDeficitCM =
+			BirdRadiusCM + ReleaseClearanceMarginCM - CurrentClearanceCM;
+		return true;
+	};
+
+	PouchLocation = UnobstructedPouchLocation;
+	float RetainedDrawScale = 1.0f;
+	float RawClearanceDeficitCM = 0.0f;
+	const bool bSurfaceResolved =
+		ResolveClearance(UnobstructedPouchLocation, RawClearanceDeficitCM);
+	if (bSurfaceResolved && RawClearanceDeficitCM > 0.01f)
+	{
+		// PullAlpha owns power. When terrain blocks the visual draw, shorten the
+		// physical pouch along the same launch ray so direction and launch speed
+		// remain authoritative while the bird stays above the primary surface.
+		constexpr float MinimumRetainedDrawScale = 0.05f;
+		float MinimumScaleDeficitCM = 0.0f;
+		const FVector MinimumScalePouch =
+			FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+				LaunchFocus,
+				UnobstructedPouchLocation,
+				MinimumRetainedDrawScale);
+		if (ResolveClearance(MinimumScalePouch, MinimumScaleDeficitCM)
+			&& MinimumScaleDeficitCM <= 0.01f)
+		{
+			float SafeScale = MinimumRetainedDrawScale;
+			float BlockedScale = 1.0f;
+			for (int32 Iteration = 0; Iteration < 12; ++Iteration)
+			{
+				const float CandidateScale = (SafeScale + BlockedScale) * 0.5f;
+				float CandidateDeficitCM = 0.0f;
+				const FVector CandidatePouch =
+					FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+						LaunchFocus,
+						UnobstructedPouchLocation,
+						CandidateScale);
+				if (ResolveClearance(CandidatePouch, CandidateDeficitCM)
+					&& CandidateDeficitCM <= 0.01f)
+				{
+					SafeScale = CandidateScale;
+				}
+				else
+				{
+					BlockedScale = CandidateScale;
+				}
+			}
+			RetainedDrawScale = SafeScale;
+			PouchLocation =
+				FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+					LaunchFocus,
+					UnobstructedPouchLocation,
+					RetainedDrawScale);
+		}
+		else
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Error,
+				TEXT("[ABTS][M6][PouchSurfaceClearance] Rejected Reason=LaunchFocusNotClear RawDeficit=%.2f MinimumScaleDeficit=%.2f Pull=%.3f"),
+				RawClearanceDeficitCM,
+				MinimumScaleDeficitCM,
+				PullAlpha);
+			PouchLocation = MinimumScalePouch;
+			RetainedDrawScale = MinimumRetainedDrawScale;
+		}
+	}
+	const FVector Direction = (LaunchFocus - PouchLocation).GetSafeNormal();
+	const float DirectionDot = FVector::DotProduct(
+		UnobstructedDirection,
+		Direction);
+	const bool bSurfaceClampActive = RetainedDrawScale < 0.9999f;
+	const float ShortenedDrawCM = FVector::Distance(
+		UnobstructedPouchLocation,
+		PouchLocation);
+	if (bSurfaceClampActive != bPouchSurfaceClampActive
+		|| (bSurfaceClampActive
+			&& !FMath::IsNearlyEqual(
+				ShortenedDrawCM, LastPouchSurfaceAdjustmentCM, 1.0f)))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Display,
+			TEXT("[ABTS][M6][PouchSurfaceClearance] Active=%d Mode=LaunchRayContract Scale=%.4f Shortened=%.2f DirectionDot=%.9f Pull=%.3f BirdRadius=%.2f Margin=10.00"),
+			bSurfaceClampActive ? 1 : 0,
+			RetainedDrawScale,
+			ShortenedDrawCM,
+			DirectionDot,
+			PullAlpha,
+			BirdRadiusCM);
+	}
+	bPouchSurfaceClampActive = bSurfaceClampActive;
+	LastPouchSurfaceAdjustmentCM = ShortenedDrawCM;
 	const FQuat MountedBirdRotation =
 		ABTSMakeSlingshotMountedBirdRotation(Direction, SlingUp);
 	LaunchedBird->SetActorLocationAndRotation(

@@ -130,6 +130,8 @@ bool FABTSM11HudControlKnobsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+#if WITH_EDITOR
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11HudF4GuidanceTest,
 	"ABTS.M11C.HUD.Unit.F4Guidance",
@@ -277,6 +279,8 @@ bool FABTSM11HudF4GuidanceTest::RunTest(const FString& Parameters)
 	}
 	return true;
 }
+
+#endif // WITH_EDITOR
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11HudOverviewViewInvarianceTest,

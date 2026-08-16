@@ -10,6 +10,7 @@
 #include "Party/ABTSBirdParty.h"
 #include "Party/ABTSBirdPartySettings.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 #include "Player/ABTSM25BirdCharacter.h"
 
 namespace
@@ -665,14 +666,5 @@ AABTSBirdParty* AABTSM4PartyCamera::FindParty()
 
 AABTSM2Planet* AABTSM4PartyCamera::FindPlanet()
 {
-	if (Planet.IsValid()) return Planet.Get();
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		if (It->IsPlanetReady())
-		{
-			Planet = *It;
-			return Planet.Get();
-		}
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }

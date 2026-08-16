@@ -1056,6 +1056,80 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - fresh offscreen D3D11 `Saved/Logs/M3-HonestUnion-L_ABTS_M10-OffscreenD3D11-20260816.log`：`MapFreezeV3 Ready=1 / SurfaceAuthority=FinalV3 / Layout=3E143A25531F3F7A`，`ContinuousSurface=2471.450 ms`、整次 `RebuildBudget=6583.687 ms / Passed=1`、`ProductionClearance Passed=1`，runtime 为 `DeltaFromPreview=0.00 / TrajectoryHash=3BE096C16B3D9807 / Ready=1 / TrajectoryCertified=1`；日志不含 `SatellitePreviewRuntimeDivergence`、`SpawnRejected` 或 M3 trajectory rejection；
 - 该 D3D 仍**不构成最终 M7 实体联合绑定通过**：功能树的旧共享 seal 在 M7 注册前以 `BuildingContractSealed Expected=0 Registered=0 SetupRejected=1` fail closed，因此没有真实 E1 Actor 可替换 stand-in，最终 StartupFlow 也正确 blocked。只有 Integration 原子发布上述 proposed seal 后才能复跑实体绑定；M3 不越权修改 shared/M7，也不把 stand-in Ready 冒充联合 Ready。
 
+### M3-SPAWN-001: 已冻结 V3 道路地图不能从兼容 Task Seed 出生
+
+**现象**
+
+- Development RC0 可见验收截图显示玩家与四鸟队伍落在主路中段；日志虽显示 `Player placed at Start road. Cell=6946`，但已发布 V3 Candidate 4 的可见主路起端并非该 Cell。
+- M4 Party 只以玩家 transform 为 leader 生成三只跟随鸟，不会二次选择道路 Cell；因此问题位于 M3 初始出生取点。
+
+**根因**
+
+`GetInitialRoadSpawnTransform()` 旧实现使用兼容 TaskGraph 的 `StartTask.SeedCellId` 并从邻接 road cell 猜测朝向。而已冻结 V3 的地图路网权威是 `JuryMapFreezeV3Result.SourceCandidateId` 所指向的 `FABTSM3MonthlySpatialCandidate::RecomputedRoute` 有序序列。兼容 Seed `6946` 与 Candidate 4 的 canonical route endpoint `5420` 不同，造成日志名义上的 Start 与可见路网语义脱节。
+
+**修复**
+
+- 已冻结 V3 时，出生位置与朝向严格从 `RecomputedRoute[0] -> RecomputedRoute[1]` 派生；若 V3 candidate 或其两个有序端点缺失则 fail closed，不回退到任意兼容 interior cell。
+- 非 V3/preview 兼容路径也改为取 Start Task 的 MainPath/LockedGate corridor 实际端点，不再直接依赖 Task seed。仍使用 M3 final surface 求高以保持地表贴合。
+- 出生 Cell 仅从主星 `LogicalCells` 解析，并在正式输出前检查全部主星 V3 physical/effect building envelope；任一重叠即拒绝。未改动 shared seal、共同地图、M7/M11 或二进制资产。
+
+**防回归验证**
+
+- 新增 `ABTS.M3.Monthly.SatellitePreview.05CanonicalPrimaryRoadSpawn`：量化断言 route ordinal `0`、route ordinal `1` 朝向、主星地表 Cell/偏移、V3 建筑保护区清空，并显式断言旧 `StartTask.SeedCellId` 不可冒充冻结端点。
+- UE 5.8 `AngryBirdsToSpaceEditor Win64 Development` 增量编译通过（`Result: Succeeded`）。fresh NullRHI 日志 `Saved/Logs/M3CanonicalRoadSpawn-20260816-FreshNullRHI.log` 精确 `1/1 Success / EXIT CODE: 0`；记录 `Candidate=4 EndpointOrdinal=0 EndpointCell=5420 NextCell=352 LegacyStartCell=6946`，同时输出 `SpawnAuthority=MapFreezeV3MainRoute ... Protected=0`。本次未启动 D3D、可见 PIE 或全量门。
+
+### M3-RC3-001：245 gameplay 重力下固定强化见证未命中真实 E1 模块联合体
+
+**现象**
+
+- RC3 packaged 运行日志显示 production `AABTSM9Satellite` 的 surface gravity 为 `1960 cm/s²`，使待机/行走鸟受到远强于设计 M9 `0.25 primary = 245 cm/s²` 的月球吸引。
+- 在 M3 runtime 中将 production satellite 固定为 `245 cm/s²`、保留冻结 preview `1960 cm/s²` 仅作历史 calibration identity 后，fresh NullRHI `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 对唯一固定强化见证（Pull `0.860`、Aim `(-173.3,-21.3)`）正确拒绝：`FrozenE1AttackabilityMiss:Outcome=3:FirstHit=-1:Hash=CE30CE7A7670CE03`。
+
+**根因**
+
+冻结 V3 preview 的 `SatelliteSurfaceGravityPrimaryRatio=2.0` 被 runtime 直接传入 production `AABTSM9Satellite::ConfigureFromPrimaryDirection`。历史 2g 的 61x31 Brick certificate 因而不能诚实地作为 245 gameplay 的攻击证据；历史可达 witness 在真实 245 物理下没有 first-hit 任意 ordered E1 Brick OBB。
+
+**处理与边界**
+
+- M3 候选改动将 calibration gravity 与 gameplay gravity 分离，生产值为 `245`，日志显式输出 `CalibrationGravity=1960` 与 `GameplayGravity=245`；preview Candidate/Result、MapFreeze Layout、shared seal、Site、卫星、yaw 和五个主星 Pad 均未修改。
+- runtime policy 候选为 `BuildingLevelAttackabilityV1`：仅对公开冻结 E1 的有序真实 Brick OBB union 执行一个固定强化样本；不使用 Crystal、hidden proxy、max-axis cube 或 61x31 runtime 重扫。零命中保持 `Ready=0`，不移动 Site、不搜索 yaw/correction/candidate、不放宽 first-hit 门。
+- 本条目是阻断记录，不构成可提交的发行修复；需要 Integration 明确授权新的产品可达性自由度或提供在 245 重力下已有的合法固定 witness，M3 才能完成验证并提交。
+
+**证据**
+
+- Development Editor 增量编译成功（`Result: Succeeded`）。
+- fresh NullRHI 日志：`Saved/Logs/M3RC3-GameplayGravity245-FreshNullRHI.log`；该针对性测试预期 fail-closed，`03RuntimePracticeSnapshot` 结果为 fail，未启动 D3D、PIE 或全量门。
+
+### M3-RC3-002：用户已验证的旧可达代理证据须以真实 E1 union 几何继承，而非 245 重力轨迹重算
+
+**根因与处理**
+
+- 用户玩法只要求强化弹弓攻击 E1 任一真实模块；245 gameplay 物理下不应继续冒充或重建历史 2g 的 61x31 数值证书。
+- `ReachableLegacyProxyOverlapV1` 从冻结 calibration 的实际 `420 cm` 代理体积和 `42 cm` 鸟碰撞半径构造唯一可审计膨胀域；它先验证 final E1 Site 仍处于该代理的 radial projection，再逐个检查公开 descriptor 的有序真实 Brick OBB。无 trajectory integration、无 sweep、`SampleCount=0`；记录稳定首个 overlap BrickId 与总数。
+- `bTrajectoryCertified` 仅兼容映射 `bBuildingLevelAttackabilityCertified`。日志强制输出 `NumericalTrajectoryRequired=0`、`ExactCrystalRequired=0`、245 gameplay 与 1960 calibration，绝不声称 preview trajectory exact。M7 的真实静态注册/贴地稳定仍保持其 own gate。
+
+**防回归验证**
+
+- `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 断言：245 gameplay、1960 frozen calibration、真实 union overlap、`SampleCount=0`，并断言 runtime proof hash 不等于历史 preview trajectory certificate。
+- Development Editor 增量编译通过；fresh NullRHI `Saved/Logs/M3RC3-ProxyOverlap-FreshNullRHI.log` 精确 `1/1 Success`。候选 4 输出 `ProjectionExact=1 / ProxyOverlapBrickId=0 / ProxyOverlapCount=54 / TargetIdentity=5F1D6833F37C28C4 / OverlapHash=102C2ECF35AF1AB1 / Ready=1`；未启动 D3D、PIE 或全量门。
+
+### M3-RC5-001：将 1960 冻结月球误降为 245 是对主星误选故障的错误归因
+
+**现象与已证实根因**
+
+- 8/6–8/15 的真实 `L_ABTS_M11` ChaosRigidBody 运行证据持续记录 `RuntimePractice Gravity=1960`，同时接触 `BP_ABTSM3Planet`；历史用户体验并未因该数值本身在地面行走时飞向月球。
+- 后续历史审计确认 RC4 在 `GameplayGravity=245` 且非 Ballistic 地面卫星力已被屏蔽后仍飞月球，根因是主星权威误选为 `AABTSM9Satellite`，使 `980 cm/s²` 的**主星**力朝月球施加；此共享 Movement 修复已由 Integration 的 `0178cc6` 完成，RC5 用户确认修复。该主星选择不属于 M3 runtime 所有权。
+
+**修复与边界**
+
+- M3 runtime 恢复直接消费已冻结 `CandidateSnapshot.SatelliteSurfaceGravityCMPerSec2`；当前 V3 候选为 `1960 cm/s²`。不再硬编码 `245` 或把该值称为仅供 calibration 的历史身份。日志同时输出 `GameplayGravity`、`FrozenPreviewGravity` 与 `GravityMatchesFrozenPreview=1`。
+- `ReachableLegacyProxyOverlapV1`、真实有序 E1 Brick OBB union、`SampleCount=0`、无数值 trajectory sweep、Site/Layout/Placement 与 shared seal 均保持不变。Integration 的 non-Ballistic satellite-force gate 仍是地面安全的唯一共享权威，本 M3 提交不修改它。
+
+**防回归验证**
+
+- `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 必须同时断言：冻结候选为 `1960`、runtime 的 frozen-preview record 为 `1960`、实际 gameplay satellite gravity 与二者精确一致；并继续断言真实 union proxy overlap 和 `SampleCount=0`。
+- UE 5.8 Development Editor 增量构建 `12 actions / Result: Succeeded`。fresh NullRHI `Saved/Logs/M3RC5-FrozenGameplayGravity-20260816-172428-FreshNullRHI.log` 中，`03RuntimePracticeSnapshot` 精确 `1/1 Success / EXIT CODE: 0`，记录 `Ready=1 / GameplayGravity=1960.0 / FrozenPreviewGravity=1960.0 / GravityMatchesFrozenPreview=1 / ProxyOverlapBrickId=0 / ProxyOverlapCount=54 / SampleCount=0 / TrajectoryHash=102C2ECF35AF1AB1`；未启动 D3D、可见 PIE 或全量门。
+
 ## 15. 新条目模板
 
 ```markdown

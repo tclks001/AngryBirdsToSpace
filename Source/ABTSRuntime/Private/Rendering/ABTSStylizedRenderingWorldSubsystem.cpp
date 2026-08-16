@@ -25,6 +25,9 @@
 #include "ProceduralMeshComponent.h"
 
 #include "ABTSRuntime.h"
+#include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM7BuildingModule.h"
+#include "Building/ABTSM7StylizedRenderingAdapter.h"
 #include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -1220,6 +1223,8 @@ void UABTSStylizedRenderingWorldSubsystem::Initialize(
 		MakeUnique<FABTSToonEnvironmentPresentationState>();
 	PreloadedSharedMaterials.Reset();
 	bSharedMaterialPreloadReady = false;
+	bM7SemanticAdapterReady = false;
+	bM7MaterialSetReady = false;
 	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
 	bEnvironmentSnapshotReady = false;
 	bWorldTearingDown = false;
@@ -1266,6 +1271,8 @@ void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 	}
 	PreloadedSharedMaterials.Reset();
 	bSharedMaterialPreloadReady = false;
+	bM7SemanticAdapterReady = false;
+	bM7MaterialSetReady = false;
 	EnvironmentSnapshot = FABTSToonEnvironmentSnapshot();
 	bEnvironmentSnapshotReady = false;
 	LastEnvironmentDiagnosticHash = 0;
@@ -1333,7 +1340,9 @@ void UABTSStylizedRenderingWorldSubsystem::HandleActorSpawned(AActor* Actor)
 {
 	if (!bWorldTearingDown
 		&& IsValid(Actor)
-		&& Actor->IsA<AABTSM11FinaleInteractionSystem>())
+		&& (Actor->IsA<AABTSM11FinaleInteractionSystem>()
+			|| Actor->IsA<AABTSM7BuildingMaterialSystem>()
+			|| Actor->IsA<AABTSM7BuildingModule>()))
 	{
 		// Finished spawning precedes the M11 Initialize call.  Mark the lease
 		// dirty now; the bounded fallback poll acquires it once initialization
@@ -1947,6 +1956,8 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 
 	TMap<TWeakObjectPtr<UPrimitiveComponent>, EABTSStylizedObjectClass> Desired;
 	int32 M3SemanticCount = 0;
+	int32 M7SemanticCount = 0;
+	int32 M7MaterialSlotCount = 0;
 	int32 M11SemanticCount = 0;
 	int32 PlayerSemanticCount = 0;
 	int32 SlingshotSemanticCount = 0;
@@ -1956,6 +1967,21 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	int32 SharedBirdMaterialCount = 0;
 	int32 SharedSlingshotMaterialCount = 0;
 	TArray<FABTSStylizedMaterialSlotBinding> DesiredMaterialBindings;
+	TArray<AABTSM7BuildingMaterialSystem*> M7Authorities;
+	for (TActorIterator<AABTSM7BuildingMaterialSystem> It(World); It; ++It)
+	{
+		if (IsValid(*It) && !It->IsActorBeingDestroyed())
+		{
+			M7Authorities.Add(*It);
+		}
+	}
+	bM7SemanticAdapterReady = M7Authorities.Num() == 1;
+	FABTSM7StylizedMaterialSet M7MaterialSet;
+	FString M7MaterialFailure;
+	bM7MaterialSetReady = bM7SemanticAdapterReady
+		&& FABTSM7StylizedRenderingAdapter::TryLoadMaterialSet(
+			M7MaterialSet,
+			&M7MaterialFailure);
 
 	auto AddPrimitive = [&Desired](
 		UPrimitiveComponent* Component,
@@ -2000,6 +2026,34 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 
 	if (bLastObservedStyleEnabled)
 	{
+		if (bM7SemanticAdapterReady)
+		{
+			TArray<FABTSM7StylizedSemanticBinding> Bindings;
+			FABTSM7StylizedRenderingAdapter::GatherSemanticBindings(
+				*M7Authorities[0],
+				Bindings);
+			M7SemanticCount = Bindings.Num();
+			for (const FABTSM7StylizedSemanticBinding& Binding : Bindings)
+			{
+				AddPrimitive(
+					const_cast<UPrimitiveComponent*>(Binding.Component),
+					Binding.ObjectClass);
+			}
+			if (bM7MaterialSetReady)
+			{
+				TArray<FABTSStylizedMaterialSlotBinding> M7MaterialBindings;
+				FABTSM7StylizedAdapterReadiness M7Readiness;
+				FABTSM7StylizedRenderingAdapter::GatherMaterialBindings(
+					*M7Authorities[0],
+					M7MaterialSet,
+					M7MaterialBindings,
+					&M7Readiness);
+				bM7SemanticAdapterReady = M7Readiness.bSemanticReady;
+				bM7MaterialSetReady = M7Readiness.bMaterialSetReady;
+				M7MaterialSlotCount = M7Readiness.PublishedSlotCount;
+				DesiredMaterialBindings.Append(MoveTemp(M7MaterialBindings));
+			}
+		}
 		for (TActorIterator<AABTSM3Planet> It(World); It; ++It)
 		{
 			TArray<FABTSM3StylizedSemanticBinding> Bindings;
@@ -2203,6 +2257,18 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	uint64 DiagnosticSummaryHash = GetTypeHash(M3SemanticCount);
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
+		GetTypeHash(M7SemanticCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(M7MaterialSlotCount));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(bM7SemanticAdapterReady));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
+		GetTypeHash(bM7MaterialSetReady));
+	DiagnosticSummaryHash = HashCombineFast(
+		DiagnosticSummaryHash,
 		GetTypeHash(M11SemanticCount));
 	DiagnosticSummaryHash = HashCombineFast(
 		DiagnosticSummaryHash,
@@ -2261,11 +2327,26 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 	if (LastDiagnosticSummaryHash != DiagnosticSummaryHash)
 	{
 		LastDiagnosticSummaryHash = DiagnosticSummaryHash;
+		if (bM7SemanticAdapterReady && !bM7MaterialSetReady)
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Warning,
+				TEXT("[ABTS][Rendering][T3-B] M7MaterialSetReady=0 Reason=%s"),
+				M7MaterialFailure.IsEmpty()
+					? TEXT("IncompleteFixedCandidateSet")
+					: *M7MaterialFailure);
+		}
 		UE_LOG(
 			LogABTSRuntime,
 			Log,
-			TEXT("[ABTS][Rendering][T2-B1] M3Semantics=%d M7AdapterReady=0 M11Semantics=%d Birds=%d SlingshotPrimitives=%d SelectiveProducers=%d PreviewViews=%d Conflicts=%d Style=%d"),
+			TEXT("[ABTS][Rendering][T2-B2] M3Semantics=%d M7AdapterReady=%d M7Semantics=%d M7MaterialSetReady=%d M7MaterialSlots=%d M7Authorities=%d M11Semantics=%d Birds=%d SlingshotPrimitives=%d SelectiveProducers=%d PreviewViews=%d Conflicts=%d Style=%d"),
 			M3SemanticCount,
+			bM7SemanticAdapterReady ? 1 : 0,
+			M7SemanticCount,
+			bM7MaterialSetReady ? 1 : 0,
+			M7MaterialSlotCount,
+			M7Authorities.Num(),
 			M11SemanticCount,
 			PlayerSemanticCount,
 			SlingshotSemanticCount,
