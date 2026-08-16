@@ -182,8 +182,13 @@ void AABTSM11PlayerController::PrimaryWorldInteract()
 	if (ShouldConsumePrimaryPointerForHUD()) return;
 	if (AABTSM11FinaleInteractionSystem* Interaction =
 		FindM11Interaction();
-		Interaction != nullptr && Interaction->IsFinaleActive())
+		Interaction != nullptr
+		&& ABTSM11RequiresExclusiveFinaleHudPointerRouting(
+			Interaction->IsFinaleActive()))
 	{
+		// Route the custom Canvas console before any inherited Inventory HUD
+		// consumption gate. The M11 HUD suppresses that visual layer but its
+		// cached layout can still overlap the bottom control deck.
 		float MouseX = 0.0f;
 		float MouseY = 0.0f;
 		if (Interaction->IsAiming()

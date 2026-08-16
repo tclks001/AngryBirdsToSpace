@@ -1130,6 +1130,12 @@ bool ABTSM11ShouldCommitFinaleHudLaunch(
 		&& bIsAiming;
 }
 
+bool ABTSM11RequiresExclusiveFinaleHudPointerRouting(
+	const bool bFinaleActive)
+{
+	return bFinaleActive;
+}
+
 bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
 	const bool bHasFrozenProbe,
 	const bool bCaptureInitialized,

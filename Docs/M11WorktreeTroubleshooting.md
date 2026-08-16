@@ -182,6 +182,12 @@
 
 最终验证补充：UE 5.8 `-ForceUnity -DisableAdaptiveUnity` 完整链接成功；fresh NullRHI 合集 `19/19`，包含 V2.1、两条随机 F4、HUD、生产 `PreviewReleasePlayback` 和 Camera Capture Config，日志为 `Saved/Logs/M11-CircularGuidance-Final-Fresh-R2.log`。
 
+## 8.7 M11 RC8 终局控制台输入与终端延长线交付审计（2026-08-16）
+
+| 现象 | 根因 | 处理 | 防回归/交接 |
+| --- | --- | --- | --- |
+| `M11-RC8-P0-001`【已在 M11 源码固化，待集成验证窗口】RC8 Development 的 `L_ABTS_M11` 中，底部 `1x`、`0.1x`、`0.01x` 与 `LAUNCH` 均可见但按下无效；右下角轨道全览没有抵达 UFO 的琥珀色终端延长线。 | master 的 `2f56142` 将共享 `ShouldConsumePrimaryPointerForHUD()` 放在 M11 终局路由之前。M11 HUD 继承库存 HUD，虽在终局隐藏库存层，但其缓存布局/HitBox 仍可能覆盖底部控制台，故 press 在 `HandleFinalePrimaryPressed()` 前被消费，release 没有 capture 可提交。状态门、M11 press/release delegate、`GameAndUI` 指针模式均存在；未发现 Viewport/PreLoading 前台输入阻断。延长线实现则已在 M11 `d7304cad`，但该提交不在 RC8/master，因此 `AppendPlaybackExtension`、语义投影和琥珀绘制路径没有进入包。 | 在 M11 数据契约新增 `ABTSM11RequiresExclusiveFinaleHudPointerRouting`，并让 `PrimaryWorldInteract()` 明确先把 active finale 的 Canvas 控制台交给 M11，再允许共享 HUD 门处理非终局输入；`ABTS.M11C.HUD.Unit.InputCapture` 冻结 active/inactive 两个分支。未修改共享 M5.1/M6 输入、Config、地图或二进制资产。 | 集成时先以当前 master 为基线，保留“M11 active 路由在 shared HUD guard 之前”的顺序，并接入 `d7304cad`（含其 HUD data/interaction/playback 依赖）；不可只拣选单个 HUD 绘制文件。当前轮按发行窗口限制未启动 Build、NullRHI、D3D、Editor/PIE；需在集成窗口运行该单测，并在 RC8/后继包的 `L_ABTS_M11` 验证四按钮、F4 琥珀延长弧和 LAUNCH release。 |
+
 ## 9. 集成工作树摘录清单
 
 集成工作树每次整理本文时，至少检查：

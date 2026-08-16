@@ -1329,6 +1329,10 @@ bool FABTSM11HudInputCaptureTest::RunTest(const FString& Parameters)
 			EABTSM11FinaleHudCapture::LaunchButton,
 			true,
 			true));
+	TestTrue(TEXT("An active finale routes console presses before shared HUD consumption"),
+		ABTSM11RequiresExclusiveFinaleHudPointerRouting(true));
+	TestFalse(TEXT("An inactive finale leaves shared HUD consumption in control"),
+		ABTSM11RequiresExclusiveFinaleHudPointerRouting(false));
 	TestFalse(TEXT("Aim-only updates never recapture a frozen probe"),
 		ABTSM11ShouldRefreshFinaleHudTargetCapture(
 			true,
