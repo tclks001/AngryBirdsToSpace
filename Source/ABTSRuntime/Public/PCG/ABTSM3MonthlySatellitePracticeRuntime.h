@@ -119,7 +119,7 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
 	bool bTrajectoryCertified = false;
 
-	/** One fixed reinforced sample first-hit an exact frozen E1 Brick OBB union at gameplay gravity. */
+	/** Reachability evidence inherited from the historically hand-validated proxy volume overlapping the exact frozen E1 Brick OBB union; no numerical trajectory or exact-crystal requirement. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
 	bool bBuildingLevelAttackabilityCertified = false;
 
