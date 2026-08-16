@@ -163,11 +163,11 @@ public:
 
 	/** Idempotent so automation fixtures can activate without a begun-play World. */
 	bool ActivateSnapshot();
-	/** Integration V3 replaces the temporary target with the selected real E1 module. */
+	/** Integration V3 replaces the exact OBB stand-in union with the real frozen E1 building. */
 	bool BindProductionE1BuildingModuleTarget(
 		AActor& InTargetActor,
 		const FVector& InTargetHalfExtentCM);
-	/** Compatibility entry point for the current M7 adapter; exact module identity still gates it. */
+	/** Compatibility entry point for the current M7 cap adapter; exact union identity still gates it. */
 	bool BindProductionE1CrystalTarget(
 		AActor& InTargetActor,
 		const FVector& InTargetHalfExtentCM)
@@ -227,7 +227,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> RuntimeE5Target;
 
-	/** Active gameplay authority; initially the exact module OBB stand-in, then the real module. */
+	/** Active gameplay authority; initially the exact 54-OBB union, then the real frozen building. */
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> RuntimeE5GameplayTarget;
 

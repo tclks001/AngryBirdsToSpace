@@ -7,6 +7,11 @@
 #include "ABTSM3MonthlySatellitePreview.generated.h"
 
 struct FABTSM2Cell;
+struct FABTSCalibrationGravitySnapshot;
+struct FABTSCalibrationSweepSummary;
+struct FABTSM6CalibrationLaunchFrame;
+struct FABTSM6LaunchProfileCatalog;
+struct FABTSSatellitePracticePreset;
 
 UENUM(BlueprintType)
 enum class EABTSM3MonthlySatellitePreviewRejectReason : uint8
@@ -246,7 +251,7 @@ class ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewBuilder
 {
 public:
 	static constexpr int32 SchemaVersion = 1;
-	static constexpr int32 GeneratorVersion = 5;
+	static constexpr int32 GeneratorVersion = 6;
 	static constexpr int32 MonthlyLayoutPolicyVersion = 4;
 
 	static bool Build(
@@ -291,6 +296,19 @@ public:
 		const FTransform& SiteWorldTransform,
 		const FTransform& TargetWorldTransform,
 		const FVector& TargetHalfExtentCM);
+
+	/** M3-private production math exposed to its runtime consumer: exact ordered
+	 * public E1 Brick OBB union, stable first-hit, no max-axis cube fallback. */
+	static bool RunFrozenE1BuildingModuleUnionSweep(
+		const FABTSM6CalibrationLaunchFrame& LaunchFrame,
+		const FABTSCalibrationGravitySnapshot& Gravity,
+		const FTransform& SiteWorldTransform,
+		const FABTSM6LaunchProfileCatalog& Catalog,
+		const FABTSSatellitePracticePreset& Preset,
+		FABTSCalibrationSweepSummary& OutSummary,
+		int32& OutWitnessBrickId,
+		uint64& OutTargetIdentityHash,
+		FString& OutFailure);
 
 	static uint64 ComputeResultHash(
 		const FABTSM3MonthlySatellitePreviewResult& Result);

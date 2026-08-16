@@ -5,6 +5,7 @@
 #include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Calibration/ABTSCalibrationTargetProxy.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -620,6 +621,17 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 			Snapshot.E5WorldTransform.Equals(
 				Runtime->GetRuntimeE5Target()->GetActorTransform(),
 				0.1f));
+		TArray<UBoxComponent*> UnionBoxes;
+		Runtime->GetRuntimeE5Target()->GetComponents<UBoxComponent>(UnionBoxes);
+		FABTSM73BuildingFreezeV3Descriptor UnionDescriptor;
+		FString UnionDescriptorFailure;
+		TestTrue(TEXT("Exact OBB union descriptor resolves for the stand-in"),
+			FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				EABTSM73BeamDemoBuilding::E1ColumnBreak,
+				UnionDescriptor,
+				UnionDescriptorFailure));
+		TestEqual(TEXT("Pre-binding stand-in has one exact OBB per public Brick"),
+			UnionBoxes.Num(), UnionDescriptor.Bricks.Num());
 	}
 	TestNotEqual(TEXT("Baseline gravity snapshot hash is persisted"),
 		Snapshot.BaselineGravitySnapshotHash,
@@ -656,8 +668,8 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		BoundSatellite == Runtime->GetRuntimeSatellite());
 	TestTrue(TEXT("M6 E5 target is the runtime snapshot actor"),
 		BoundTarget == Runtime->GetRuntimeE5Target());
-	TestTrue(TEXT("M6 target extent is the frozen E5 extent"),
-		BoundHalfExtent.Equals(Candidate.E5TargetHalfExtentCM, 0.1f));
+	TestTrue(TEXT("M6 target extent is the exact union aggregate extent"),
+		BoundHalfExtent.Equals(Snapshot.E5HalfExtentCM, 0.1f));
 	TestEqual(TEXT("Runtime target authority remains frozen E1 building modules"),
 		Snapshot.TargetAuthority,
 		EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules);
@@ -691,7 +703,7 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		UGameplayStatics::FinishSpawningActor(
 			TamperedModule, TamperedModuleTransform);
 		AddExpectedError(
-			TEXT("Rejected Reason=TargetIdentityMismatch"),
+			TEXT("Rejected Reason=TargetUnionIdentityMismatch"),
 			EAutomationExpectedErrorFlags::Contains,
 			1);
 		TestFalse(TEXT("Runtime rejects a non-exact module target identity"),
@@ -719,16 +731,17 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 			FLinearColor::White);
 		UGameplayStatics::FinishSpawningActor(
 			ExactModule, Candidate.E5TargetWorldTransform);
-		TestTrue(TEXT("Runtime accepts the exact frozen module target identity"),
+		AddExpectedError(
+			TEXT("Rejected Reason=TargetUnionIdentityMismatch"),
+			EAutomationExpectedErrorFlags::Contains,
+			1);
+		TestFalse(TEXT("A single exact witness OBB cannot impersonate the E1 union"),
 			Runtime->BindProductionE1BuildingModuleTarget(
 				*ExactModule,
 				Candidate.E5TargetHalfExtentCM));
-		TestTrue(TEXT("Exact module binding restores Ready without proxy fallback"),
+		TestFalse(TEXT("Single-box rejection never restores a proxy fallback"),
 			Runtime->IsRuntimeReady()
-				&& Runtime->GetRuntimeE5Target() == ExactModule);
-		TestEqual(TEXT("Bound module trajectory remains the preview certificate"),
-			Runtime->GetRuntimeSnapshot().TrajectoryCertificationHash,
-			Candidate.ProductionTargetTrajectoryHash);
+				|| Runtime->GetRuntimeE5Target() != nullptr);
 	}
 
 	GravityCVar->Set(OriginalGravityOverride, ECVF_SetByCode);

@@ -3,9 +3,11 @@
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
 
 #include "ABTSRuntime.h"
+#include "Async/ParallelFor.h"
 #include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Physics/ABTSSweptCollision.h"
 #include "Slingshot/ABTSSlingshotVisualTypes.h"
 
 namespace ABTSM3R51SatellitePreviewPrivate
@@ -482,6 +484,39 @@ struct FResolvedProductionTarget
 	FABTSCalibrationSweepSummary TrajectorySummary;
 };
 
+uint64 ComputeProductionTargetUnionIdentityHashPrivate(
+	const FFrozenE1BuildingModuleSource& Source,
+	const FTransform& SiteWorldTransform)
+{
+	TArray<const FFrozenE1BuildingModuleSource::FBuildingModule*> Ordered;
+	Ordered.Reserve(Source.BuildingModules.Num());
+	for (const FFrozenE1BuildingModuleSource::FBuildingModule& Module
+		: Source.BuildingModules)
+	{
+		Ordered.Add(&Module);
+	}
+	Ordered.Sort([](
+		const FFrozenE1BuildingModuleSource::FBuildingModule& A,
+		const FFrozenE1BuildingModuleSource::FBuildingModule& B)
+	{
+		return A.BrickId < B.BrickId;
+	});
+	FCanonicalHash64 Hash;
+	Hash.AddInt32(2);
+	Hash.AddUInt64(Source.DescriptorHash);
+	Hash.AddVector(SiteWorldTransform.GetLocation());
+	Hash.AddQuat(SiteWorldTransform.GetRotation());
+	Hash.AddInt32(Ordered.Num());
+	for (const FFrozenE1BuildingModuleSource::FBuildingModule* Module : Ordered)
+	{
+		Hash.AddInt32(Module->BrickId);
+		Hash.AddVector(Module->SiteLocalTransform.GetLocation());
+		Hash.AddQuat(Module->SiteLocalTransform.GetRotation());
+		Hash.AddVector(Module->HalfExtentCM);
+	}
+	return Hash.Get();
+}
+
 uint64 ComputeProductionTargetIdentityHashPrivate(
 	const uint64 DescriptorHash,
 	const FTransform& SiteWorldTransform,
@@ -735,8 +770,11 @@ bool ResolveProductionTargetAtCorrection(
 		OutTarget.TargetHalfExtentCM = FVector(
 			FrozenPreset.TargetProxyRadiusCM);
 	}
-	OutTarget.TargetIdentityHash =
-		ComputeProductionTargetIdentityHashPrivate(
+	OutTarget.TargetIdentityHash = TargetAuthority
+		== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+		? ComputeProductionTargetUnionIdentityHashPrivate(
+			*FrozenE1, OutTarget.SiteWorldTransform)
+		: ComputeProductionTargetIdentityHashPrivate(
 			OutTarget.DescriptorHash,
 			OutTarget.SiteWorldTransform,
 			OutTarget.TargetWorldTransform,
@@ -760,6 +798,784 @@ FABTSCalibrationScenario MakeProductionTargetScenario(
 	return Scenario;
 }
 
+struct FCachedSweepSeed
+{
+	int32 PullIndex = INDEX_NONE;
+	int32 AimOutIndex = INDEX_NONE;
+	int32 AimInIndex = INDEX_NONE;
+	FVector BirdWorld = FVector::ZeroVector;
+	FVector InitialVelocity = FVector::ZeroVector;
+};
+
+struct FParallelSweepOutput
+{
+	FABTSCalibrationSweepSummary Summary;
+	TArray<float> CertifiedPulls;
+	TArray<FCachedSweepSeed> GravityDependentSeeds;
+	int32 BestGravityOnFirstHitModuleId = INDEX_NONE;
+};
+
+struct FWorldBuildingModule
+{
+	int32 BrickId = INDEX_NONE;
+	FTransform WorldTransform = FTransform::Identity;
+	FVector HalfExtentCM = FVector::ZeroVector;
+};
+
+struct FUnionTrajectoryResult
+{
+	FABTSCalibrationTrajectoryResult Trajectory;
+	int32 FirstHitModuleId = INDEX_NONE;
+};
+
+FUnionTrajectoryResult IntegrateBuildingModuleUnionTrajectory(
+	const FABTSCalibrationScenario& Scenario,
+	const FVector& InitialWorldVelocity,
+	const FABTSSatellitePracticePreset& Preset,
+	const bool bSatelliteGravityEnabled,
+	const TArray<FWorldBuildingModule>& Modules,
+	const FWorldBuildingModule& Broadphase,
+	const bool bComputeExactClearance)
+{
+	FUnionTrajectoryResult Out;
+	FVector Position = Scenario.LaunchWorldLocation;
+	FVector Velocity = InitialWorldVelocity;
+	const float StepSeconds = FMath::Clamp(
+		Preset.IntegrationStepSeconds, 0.01f, 0.2f);
+	const int32 MaximumSteps = FMath::Max(
+		1,
+		FMath::CeilToInt(
+			FMath::Clamp(Preset.MaximumFlightSeconds, 2.0f, 60.0f)
+			/ StepSeconds));
+	const float BirdRadiusCM = FMath::Max(1.0f, Preset.BirdCollisionRadiusCM);
+	const float SatelliteBodyRadiusCM = FMath::Max(
+		1.0f, Scenario.Gravity.SatelliteRadiusCM + BirdRadiusCM);
+	const float PrimaryBodyRadiusCM = FMath::Max(
+		1.0f, Scenario.Gravity.PrimaryRadiusCM + BirdRadiusCM);
+	const float PrimaryMu = FMath::Max(
+		0.0f, Scenario.Gravity.PrimarySurfaceGravityCMPerSec2)
+		* FMath::Square(FMath::Max(1.0f, Scenario.Gravity.PrimaryRadiusCM));
+	const float SatelliteMu = FMath::Max(
+		0.0f, Scenario.Gravity.SatelliteSurfaceGravityCMPerSec2)
+		* FMath::Square(FMath::Max(1.0f, Scenario.Gravity.SatelliteRadiusCM));
+	Out.Trajectory.ClosestTargetClearanceCM = BIG_NUMBER;
+	if (bComputeExactClearance)
+	{
+		for (const FWorldBuildingModule& Module : Modules)
+		{
+			Out.Trajectory.ClosestTargetClearanceCM = FMath::Min(
+				Out.Trajectory.ClosestTargetClearanceCM,
+				ABTSSweptCollision::PointExpandedOrientedBoxClearance(
+					Position,
+					Module.WorldTransform,
+					Module.HalfExtentCM,
+					BirdRadiusCM));
+		}
+	}
+	for (int32 StepIndex = 0; StepIndex < MaximumSteps; ++StepIndex)
+	{
+		const FVector ToPrimary = Scenario.Gravity.PrimaryCenterWorld - Position;
+		const float PrimaryDistance = FMath::Max(ToPrimary.Size(), 1.0f);
+		FVector Acceleration = ToPrimary / PrimaryDistance
+			* (PrimaryMu / FMath::Square(PrimaryDistance));
+		if (bSatelliteGravityEnabled)
+		{
+			const FVector ToSatellite =
+				Scenario.Gravity.SatelliteCenterWorld - Position;
+			const float SatelliteDistance = FMath::Max(
+				ToSatellite.Size(),
+				FMath::Max(1.0f, Scenario.Gravity.SatelliteRadiusCM));
+			Acceleration += ToSatellite / SatelliteDistance
+				* (SatelliteMu / FMath::Square(SatelliteDistance));
+		}
+		Acceleration -= Velocity
+			* FMath::Max(0.0f, Scenario.Gravity.FlightAirDragPerSecond);
+		Velocity += Acceleration * StepSeconds;
+		const FVector NextPosition = Position + Velocity * StepSeconds;
+		Out.Trajectory.PathLengthCM += FVector::Distance(Position, NextPosition);
+		Out.Trajectory.ApexAltitudeAbovePrimaryCM = FMath::Max(
+			Out.Trajectory.ApexAltitudeAbovePrimaryCM,
+			FVector::Distance(
+				NextPosition, Scenario.Gravity.PrimaryCenterWorld)
+				- Scenario.Gravity.PrimaryRadiusCM);
+
+		float BestModuleAlpha = BIG_NUMBER;
+		int32 BestModuleId = INDEX_NONE;
+		const float BroadphaseClearance = bComputeExactClearance
+			? ABTSSweptCollision::SegmentExpandedOrientedBoxMinimumClearance(
+				Position,
+				NextPosition,
+				Broadphase.WorldTransform,
+				Broadphase.HalfExtentCM,
+				BirdRadiusCM)
+			: BIG_NUMBER;
+		float BroadphaseAlpha = BIG_NUMBER;
+		const bool bBroadphaseHit =
+			ABTSSweptCollision::SegmentExpandedOrientedBoxFirstAlpha(
+				Position,
+				NextPosition,
+				Broadphase.WorldTransform,
+				Broadphase.HalfExtentCM,
+				BirdRadiusCM,
+				BroadphaseAlpha);
+		if (bBroadphaseHit
+			|| (bComputeExactClearance && BroadphaseClearance
+				< Out.Trajectory.ClosestTargetClearanceCM)
+			)
+		{
+			for (const FWorldBuildingModule& Module : Modules)
+			{
+				if (bComputeExactClearance || bBroadphaseHit)
+				{
+					Out.Trajectory.ClosestTargetClearanceCM = FMath::Min(
+						Out.Trajectory.ClosestTargetClearanceCM,
+						ABTSSweptCollision::
+							SegmentExpandedOrientedBoxMinimumClearance(
+								Position,
+								NextPosition,
+								Module.WorldTransform,
+								Module.HalfExtentCM,
+								BirdRadiusCM));
+				}
+				float ModuleAlpha = BIG_NUMBER;
+				if (!bBroadphaseHit
+					|| !ABTSSweptCollision::
+						SegmentExpandedOrientedBoxFirstAlpha(
+							Position,
+							NextPosition,
+							Module.WorldTransform,
+							Module.HalfExtentCM,
+							BirdRadiusCM,
+							ModuleAlpha))
+				{
+					continue;
+				}
+				if (ModuleAlpha < BestModuleAlpha - KINDA_SMALL_NUMBER
+					|| (FMath::IsNearlyEqual(
+							ModuleAlpha,
+							BestModuleAlpha,
+							KINDA_SMALL_NUMBER)
+						&& Module.BrickId < BestModuleId))
+				{
+					BestModuleAlpha = ModuleAlpha;
+					BestModuleId = Module.BrickId;
+				}
+			}
+		}
+		float SatelliteAlpha = BIG_NUMBER;
+		float PrimaryAlpha = BIG_NUMBER;
+		const bool bSatelliteHit = ABTSSweptCollision::SegmentSphereFirstAlpha(
+			Position,
+			NextPosition,
+			Scenario.Gravity.SatelliteCenterWorld,
+			SatelliteBodyRadiusCM,
+			SatelliteAlpha);
+		const bool bPrimaryHit = ABTSSweptCollision::SegmentSphereFirstAlpha(
+			Position,
+			NextPosition,
+			Scenario.Gravity.PrimaryCenterWorld,
+			PrimaryBodyRadiusCM,
+			PrimaryAlpha);
+		const float FirstAlpha = FMath::Min3(
+			BestModuleId != INDEX_NONE ? BestModuleAlpha : BIG_NUMBER,
+			bSatelliteHit ? SatelliteAlpha : BIG_NUMBER,
+			bPrimaryHit ? PrimaryAlpha : BIG_NUMBER);
+		if (FirstAlpha < BIG_NUMBER)
+		{
+			Out.Trajectory.FlightTimeSeconds =
+				(static_cast<float>(StepIndex) + FirstAlpha) * StepSeconds;
+			if (BestModuleId != INDEX_NONE
+				&& BestModuleAlpha <= FirstAlpha + KINDA_SMALL_NUMBER)
+			{
+				Out.Trajectory.Outcome =
+					EABTSCalibrationTrajectoryOutcome::TargetHit;
+				Out.FirstHitModuleId = BestModuleId;
+			}
+			else if (bSatelliteHit
+				&& SatelliteAlpha <= FirstAlpha + KINDA_SMALL_NUMBER)
+			{
+				Out.Trajectory.Outcome =
+					EABTSCalibrationTrajectoryOutcome::SatelliteBodyHit;
+			}
+			else
+			{
+				Out.Trajectory.Outcome =
+					EABTSCalibrationTrajectoryOutcome::PrimaryBodyHit;
+			}
+			return Out;
+		}
+		Position = NextPosition;
+	}
+	Out.Trajectory.FlightTimeSeconds =
+		static_cast<float>(MaximumSteps) * StepSeconds;
+	if (Out.Trajectory.ClosestTargetClearanceCM == BIG_NUMBER)
+	{
+		Out.Trajectory.ClosestTargetClearanceCM = 0.0f;
+	}
+	return Out;
+}
+
+float SampleProductionRange(
+	const float Minimum,
+	const float Maximum,
+	const int32 Index,
+	const int32 Count)
+{
+	return Count <= 1
+		? (Minimum + Maximum) * 0.5f
+		: FMath::Lerp(
+			Minimum,
+			Maximum,
+			static_cast<float>(Index) / static_cast<float>(Count - 1));
+}
+
+void BuildProductionReachablePulls(
+	const FABTSM6LaunchProfile& Profile,
+	TArray<float>& OutPulls)
+{
+	OutPulls.Reset();
+	OutPulls.Add(0.0f);
+	OutPulls.Add(1.0f);
+	for (int32 Notch = -1000; Notch <= 1000; ++Notch)
+	{
+		const float Pull = Profile.InitialPullAlpha
+			+ Profile.PullPowerWheelStep * static_cast<float>(Notch);
+		if (Pull < -KINDA_SMALL_NUMBER || Pull > 1.0f + KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		OutPulls.AddUnique(FMath::Clamp(Pull, 0.0f, 1.0f));
+	}
+	OutPulls.Sort();
+}
+
+int32 FlattenProductionSweep(
+	const int32 PullIndex,
+	const int32 AimOutIndex,
+	const int32 AimInIndex,
+	const int32 AimOutCount,
+	const int32 AimInCount)
+{
+	return (PullIndex * AimOutCount + AimOutIndex) * AimInCount
+		+ AimInIndex;
+}
+
+struct FSuccessIslandMetrics
+{
+	int32 LargestSamples = 0;
+	int32 MinPullIndex = INDEX_NONE;
+	int32 MaxPullIndex = INDEX_NONE;
+	int32 MinAimOutIndex = INDEX_NONE;
+	int32 MaxAimOutIndex = INDEX_NONE;
+	int32 MinAimInIndex = INDEX_NONE;
+	int32 MaxAimInIndex = INDEX_NONE;
+};
+
+FSuccessIslandMetrics MeasureSuccessIsland(
+	const TBitArray<>& Success,
+	const int32 PullCount,
+	const int32 AimOutCount,
+	const int32 AimInCount)
+{
+	FSuccessIslandMetrics Metrics;
+	TBitArray<> Remaining = Success;
+	TArray<int32> Stack;
+	TArray<int32> Component;
+	for (TConstSetBitIterator<> It(Remaining); It; ++It)
+	{
+		const int32 SeedIndex = It.GetIndex();
+		if (!Remaining[SeedIndex])
+		{
+			continue;
+		}
+		Remaining[SeedIndex] = false;
+		Stack.Reset();
+		Component.Reset();
+		Stack.Add(SeedIndex);
+		while (!Stack.IsEmpty())
+		{
+			const int32 FlatIndex = Stack.Pop(EAllowShrinking::No);
+			Component.Add(FlatIndex);
+			const int32 AimInIndex = FlatIndex % AimInCount;
+			const int32 PullAndAimOut = FlatIndex / AimInCount;
+			const int32 AimOutIndex = PullAndAimOut % AimOutCount;
+			const int32 PullIndex = PullAndAimOut / AimOutCount;
+			const int32 Neighbors[][3] =
+			{
+				{PullIndex - 1, AimOutIndex, AimInIndex},
+				{PullIndex + 1, AimOutIndex, AimInIndex},
+				{PullIndex, AimOutIndex - 1, AimInIndex},
+				{PullIndex, AimOutIndex + 1, AimInIndex},
+				{PullIndex, AimOutIndex, AimInIndex - 1},
+				{PullIndex, AimOutIndex, AimInIndex + 1}
+			};
+			for (const int32* Neighbor : Neighbors)
+			{
+				if (Neighbor[0] < 0 || Neighbor[0] >= PullCount
+					|| Neighbor[1] < 0 || Neighbor[1] >= AimOutCount
+					|| Neighbor[2] < 0 || Neighbor[2] >= AimInCount)
+				{
+					continue;
+				}
+				const int32 NeighborIndex = FlattenProductionSweep(
+					Neighbor[0], Neighbor[1], Neighbor[2],
+					AimOutCount, AimInCount);
+				if (!Remaining[NeighborIndex])
+				{
+					continue;
+				}
+				Remaining[NeighborIndex] = false;
+				Stack.Add(NeighborIndex);
+			}
+		}
+		if (Component.Num() <= Metrics.LargestSamples)
+		{
+			continue;
+		}
+		Metrics.LargestSamples = Component.Num();
+		Metrics.MinPullIndex = MAX_int32;
+		Metrics.MaxPullIndex = MIN_int32;
+		Metrics.MinAimOutIndex = MAX_int32;
+		Metrics.MaxAimOutIndex = MIN_int32;
+		Metrics.MinAimInIndex = MAX_int32;
+		Metrics.MaxAimInIndex = MIN_int32;
+		for (const int32 FlatIndex : Component)
+		{
+			const int32 AimInIndex = FlatIndex % AimInCount;
+			const int32 PullAndAimOut = FlatIndex / AimInCount;
+			const int32 AimOutIndex = PullAndAimOut % AimOutCount;
+			const int32 PullIndex = PullAndAimOut / AimOutCount;
+			Metrics.MinPullIndex = FMath::Min(Metrics.MinPullIndex, PullIndex);
+			Metrics.MaxPullIndex = FMath::Max(Metrics.MaxPullIndex, PullIndex);
+			Metrics.MinAimOutIndex = FMath::Min(
+				Metrics.MinAimOutIndex, AimOutIndex);
+			Metrics.MaxAimOutIndex = FMath::Max(
+				Metrics.MaxAimOutIndex, AimOutIndex);
+			Metrics.MinAimInIndex = FMath::Min(
+				Metrics.MinAimInIndex, AimInIndex);
+			Metrics.MaxAimInIndex = FMath::Max(
+				Metrics.MaxAimInIndex, AimInIndex);
+		}
+	}
+	return Metrics;
+}
+
+void AppendCalibrationHash(uint64& InOutHash, const int64 Value)
+{
+	uint64 Bits = static_cast<uint64>(Value);
+	for (int32 ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+	{
+		InOutHash ^= (Bits >> (ByteIndex * 8)) & 0xffull;
+		InOutHash *= Fnv1a64Prime;
+	}
+}
+
+int64 QuantizeCalibration(const double Value)
+{
+	return FMath::RoundToInt64(Value * 1000.0);
+}
+
+void FinalizeCalibrationSummaryHash(FABTSCalibrationSweepSummary& Summary)
+{
+	uint64 Hash = Fnv1a64OffsetBasis;
+	AppendCalibrationHash(Hash, Summary.ReinforcedSampleCount);
+	AppendCalibrationHash(Hash, Summary.ReinforcedReachablePullSamples);
+	AppendCalibrationHash(Hash, Summary.ReinforcedCertifiedPullSamples);
+	AppendCalibrationHash(Hash, Summary.ReinforcedGravityOnHits);
+	AppendCalibrationHash(Hash, Summary.ReinforcedSatelliteBodyHits);
+	AppendCalibrationHash(Hash, Summary.ReinforcedPrimaryBodyHits);
+	AppendCalibrationHash(Hash, Summary.ReinforcedTimeouts);
+	AppendCalibrationHash(Hash, Summary.GravityDependentHits);
+	AppendCalibrationHash(Hash, Summary.LargestSuccessIslandSamples);
+	AppendCalibrationHash(Hash, Summary.SimpleFullPowerHits);
+	AppendCalibrationHash(Hash, Summary.ReinforcedOutsideCertifiedPullHits);
+	AppendCalibrationHash(Hash, QuantizeCalibration(Summary.SuccessPullMinimum));
+	AppendCalibrationHash(Hash, QuantizeCalibration(Summary.SuccessPullMaximum));
+	AppendCalibrationHash(
+		Hash, QuantizeCalibration(Summary.SuccessAimInPlaneMinimumCM));
+	AppendCalibrationHash(
+		Hash, QuantizeCalibration(Summary.SuccessAimInPlaneMaximumCM));
+	AppendCalibrationHash(Hash, QuantizeCalibration(Summary.MinimumGravityOffMissCM));
+	AppendCalibrationHash(
+		Hash, QuantizeCalibration(Summary.MinimumGravityOnTargetClearanceCM));
+	AppendCalibrationHash(
+		Hash, QuantizeCalibration(Summary.BestGravityOnAimInPlaneCM));
+	AppendCalibrationHash(
+		Hash, QuantizeCalibration(Summary.BestGravityOnAimOutOfPlaneCM));
+	AppendCalibrationHash(Hash, QuantizeCalibration(Summary.BestGravityOnPullAlpha));
+	AppendCalibrationHash(Hash, Summary.bPassed ? 1 : 0);
+	Summary.ResultHash = Hash;
+}
+
+bool RunParallelExactSweep(
+	const FABTSCalibrationScenario& Scenario,
+	const FABTSM6LaunchProfileCatalog& Catalog,
+	const FABTSSatellitePracticePreset& Preset,
+	const bool bCollectSeeds,
+	FParallelSweepOutput& Out,
+	const TArray<FWorldBuildingModule>* UnionModules = nullptr,
+	const FWorldBuildingModule* UnionBroadphase = nullptr,
+	const uint64 UnionTargetIdentityHash = 0)
+{
+	Out = FParallelSweepOutput();
+	const FABTSM6LaunchProfile* Reinforced =
+		FABTSSlingshotSatelliteCalibrationModel::FindProfile(
+			Catalog, EABTSSlingshotTier::Reinforced);
+	const FABTSM6LaunchProfile* Simple =
+		FABTSSlingshotSatelliteCalibrationModel::FindProfile(
+			Catalog, EABTSSlingshotTier::Simple);
+	if (Reinforced == nullptr || Simple == nullptr)
+	{
+		return false;
+	}
+	const int32 AimInCount = FMath::Clamp(Preset.AimInPlaneSampleCount, 5, 161);
+	const int32 AimOutCount = FMath::Clamp(
+		Preset.AimOutOfPlaneSampleCount, 1, 31);
+	TArray<float> ReachablePulls;
+	BuildProductionReachablePulls(*Reinforced, ReachablePulls);
+	Out.Summary.ReinforcedReachablePullSamples = ReachablePulls.Num();
+	for (const float Pull : ReachablePulls)
+	{
+		if (Pull + KINDA_SMALL_NUMBER >= Preset.PullMinimum
+			&& Pull <= Preset.PullMaximum + KINDA_SMALL_NUMBER)
+		{
+			Out.CertifiedPulls.Add(Pull);
+		}
+	}
+	Out.Summary.ReinforcedCertifiedPullSamples = Out.CertifiedPulls.Num();
+	if (Out.CertifiedPulls.IsEmpty())
+	{
+		return false;
+	}
+
+	struct FSampleResult
+	{
+		bool bSampled = false;
+		bool bGravityDependent = false;
+		FVector BirdWorld = FVector::ZeroVector;
+		FVector InitialVelocity = FVector::ZeroVector;
+		FABTSCalibrationTrajectoryResult GravityOn;
+		FABTSCalibrationTrajectoryResult GravityOff;
+		int32 GravityOnFirstHitModuleId = INDEX_NONE;
+		int32 GravityOffFirstHitModuleId = INDEX_NONE;
+	};
+	const int32 TotalCount = Out.CertifiedPulls.Num()
+		* AimOutCount * AimInCount;
+	TArray<FSampleResult> Samples;
+	Samples.SetNum(TotalCount);
+	ParallelFor(TotalCount, [&](const int32 FlatIndex)
+	{
+		const int32 AimInIndex = FlatIndex % AimInCount;
+		const int32 PullAndAimOut = FlatIndex / AimInCount;
+		const int32 AimOutIndex = PullAndAimOut % AimOutCount;
+		const int32 PullIndex = PullAndAimOut / AimOutCount;
+		const float AimIn = SampleProductionRange(
+			Preset.AimInPlaneMinimumCM, Preset.AimInPlaneMaximumCM,
+			AimInIndex, AimInCount);
+		const float AimOut = SampleProductionRange(
+			Preset.AimOutOfPlaneMinimumCM, Preset.AimOutOfPlaneMaximumCM,
+			AimOutIndex, AimOutCount);
+		if (FVector2D(AimIn, AimOut).Size()
+			> Reinforced->MaximumAimPlaneOffsetCM + KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		FSampleResult& Sample = Samples[FlatIndex];
+		if (!FABTSSlingshotSatelliteCalibrationModel::BuildM6LaunchSample(
+				Scenario.LaunchFrame, *Reinforced, AimIn, AimOut,
+				Out.CertifiedPulls[PullIndex],
+				Sample.BirdWorld, Sample.InitialVelocity))
+		{
+			return;
+		}
+		Sample.bSampled = true;
+		FABTSCalibrationScenario SampleScenario = Scenario;
+		SampleScenario.LaunchWorldLocation = Sample.BirdWorld;
+		if (UnionModules != nullptr && UnionBroadphase != nullptr)
+		{
+			const FUnionTrajectoryResult UnionOn =
+				IntegrateBuildingModuleUnionTrajectory(
+					SampleScenario,
+					Sample.InitialVelocity,
+					Preset,
+					true,
+					*UnionModules,
+					*UnionBroadphase,
+					false);
+			Sample.GravityOn = UnionOn.Trajectory;
+			Sample.GravityOnFirstHitModuleId = UnionOn.FirstHitModuleId;
+		}
+		else
+		{
+			Sample.GravityOn =
+				FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
+					SampleScenario, Sample.InitialVelocity, Preset, true);
+		}
+		if (Sample.GravityOn.Outcome
+			!= EABTSCalibrationTrajectoryOutcome::TargetHit)
+		{
+			return;
+		}
+		if (UnionModules != nullptr && UnionBroadphase != nullptr)
+		{
+			const FUnionTrajectoryResult UnionOff =
+				IntegrateBuildingModuleUnionTrajectory(
+					SampleScenario,
+					Sample.InitialVelocity,
+					Preset,
+					false,
+					*UnionModules,
+					*UnionBroadphase,
+					true);
+			Sample.GravityOff = UnionOff.Trajectory;
+			Sample.GravityOffFirstHitModuleId = UnionOff.FirstHitModuleId;
+		}
+		else
+		{
+			Sample.GravityOff =
+				FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
+					SampleScenario, Sample.InitialVelocity, Preset, false);
+		}
+		Sample.bGravityDependent =
+			Sample.GravityOff.Outcome
+				!= EABTSCalibrationTrajectoryOutcome::TargetHit
+			&& Sample.GravityOff.ClosestTargetClearanceCM
+					+ KINDA_SMALL_NUMBER >= Preset.GravityOffMinimumMissCM;
+	});
+
+	Out.Summary.MinimumGravityOffMissCM = BIG_NUMBER;
+	Out.Summary.MinimumGravityOnTargetClearanceCM = BIG_NUMBER;
+	TBitArray<> GravityDependent(false, TotalCount);
+	for (int32 FlatIndex = 0; FlatIndex < TotalCount; ++FlatIndex)
+	{
+		const FSampleResult& Sample = Samples[FlatIndex];
+		if (!Sample.bSampled)
+		{
+			continue;
+		}
+		const int32 AimInIndex = FlatIndex % AimInCount;
+		const int32 PullAndAimOut = FlatIndex / AimInCount;
+		const int32 AimOutIndex = PullAndAimOut % AimOutCount;
+		const int32 PullIndex = PullAndAimOut / AimOutCount;
+		const float AimIn = SampleProductionRange(
+			Preset.AimInPlaneMinimumCM, Preset.AimInPlaneMaximumCM,
+			AimInIndex, AimInCount);
+		const float AimOut = SampleProductionRange(
+			Preset.AimOutOfPlaneMinimumCM, Preset.AimOutOfPlaneMaximumCM,
+			AimOutIndex, AimOutCount);
+		++Out.Summary.ReinforcedSampleCount;
+		if (Sample.GravityOn.ClosestTargetClearanceCM
+			< Out.Summary.MinimumGravityOnTargetClearanceCM)
+		{
+			Out.Summary.MinimumGravityOnTargetClearanceCM =
+				Sample.GravityOn.ClosestTargetClearanceCM;
+			Out.Summary.BestGravityOnAimInPlaneCM = AimIn;
+			Out.Summary.BestGravityOnAimOutOfPlaneCM = AimOut;
+			Out.Summary.BestGravityOnPullAlpha = Out.CertifiedPulls[PullIndex];
+			Out.BestGravityOnFirstHitModuleId =
+				Sample.GravityOnFirstHitModuleId;
+		}
+		switch (Sample.GravityOn.Outcome)
+		{
+		case EABTSCalibrationTrajectoryOutcome::SatelliteBodyHit:
+			++Out.Summary.ReinforcedSatelliteBodyHits;
+			break;
+		case EABTSCalibrationTrajectoryOutcome::PrimaryBodyHit:
+			++Out.Summary.ReinforcedPrimaryBodyHits;
+			break;
+		case EABTSCalibrationTrajectoryOutcome::Timeout:
+			++Out.Summary.ReinforcedTimeouts;
+			break;
+		case EABTSCalibrationTrajectoryOutcome::TargetHit:
+			++Out.Summary.ReinforcedGravityOnHits;
+			break;
+		default:
+			break;
+		}
+		if (!Sample.bGravityDependent)
+		{
+			continue;
+		}
+		GravityDependent[FlatIndex] = true;
+		++Out.Summary.GravityDependentHits;
+		Out.Summary.MinimumGravityOffMissCM = FMath::Min(
+			Out.Summary.MinimumGravityOffMissCM,
+			Sample.GravityOff.ClosestTargetClearanceCM);
+		if (bCollectSeeds)
+		{
+			FCachedSweepSeed& Seed =
+				Out.GravityDependentSeeds.AddDefaulted_GetRef();
+			Seed.PullIndex = PullIndex;
+			Seed.AimOutIndex = AimOutIndex;
+			Seed.AimInIndex = AimInIndex;
+			Seed.BirdWorld = Sample.BirdWorld;
+			Seed.InitialVelocity = Sample.InitialVelocity;
+		}
+	}
+
+	const FSuccessIslandMetrics Island = MeasureSuccessIsland(
+		GravityDependent, Out.CertifiedPulls.Num(), AimOutCount, AimInCount);
+	Out.Summary.LargestSuccessIslandSamples = Island.LargestSamples;
+	if (Island.LargestSamples > 0)
+	{
+		Out.Summary.SuccessPullMinimum =
+			Out.CertifiedPulls[Island.MinPullIndex];
+		Out.Summary.SuccessPullMaximum =
+			Out.CertifiedPulls[Island.MaxPullIndex];
+		Out.Summary.SuccessAimInPlaneMinimumCM = SampleProductionRange(
+			Preset.AimInPlaneMinimumCM, Preset.AimInPlaneMaximumCM,
+			Island.MinAimInIndex, AimInCount);
+		Out.Summary.SuccessAimInPlaneMaximumCM = SampleProductionRange(
+			Preset.AimInPlaneMinimumCM, Preset.AimInPlaneMaximumCM,
+			Island.MaxAimInIndex, AimInCount);
+		Out.Summary.bIslandSpansPullNeighbors =
+			Island.MaxPullIndex > Island.MinPullIndex;
+		Out.Summary.bIslandSpansAimNeighbors =
+			Island.MaxAimInIndex > Island.MinAimInIndex
+			|| Island.MaxAimOutIndex > Island.MinAimOutIndex;
+	}
+
+	const int32 SimpleCount = AimOutCount * AimInCount;
+	TArray<uint8> SimpleHits;
+	SimpleHits.SetNumZeroed(SimpleCount);
+	ParallelFor(SimpleCount, [&](const int32 FlatIndex)
+	{
+		const int32 AimInIndex = FlatIndex % AimInCount;
+		const int32 AimOutIndex = FlatIndex / AimInCount;
+		const float AimIn = SampleProductionRange(
+			Preset.AimInPlaneMinimumCM, Preset.AimInPlaneMaximumCM,
+			AimInIndex, AimInCount);
+		const float AimOut = SampleProductionRange(
+			Preset.AimOutOfPlaneMinimumCM, Preset.AimOutOfPlaneMaximumCM,
+			AimOutIndex, AimOutCount);
+		if (FVector2D(AimIn, AimOut).Size()
+			> Simple->MaximumAimPlaneOffsetCM + KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		FVector BirdWorld;
+		FVector InitialVelocity;
+		if (!FABTSSlingshotSatelliteCalibrationModel::BuildM6LaunchSample(
+				Scenario.LaunchFrame, *Simple, AimIn, AimOut, 1.0f,
+				BirdWorld, InitialVelocity))
+		{
+			return;
+		}
+		FABTSCalibrationScenario SampleScenario = Scenario;
+		SampleScenario.LaunchWorldLocation = BirdWorld;
+		SimpleHits[FlatIndex] = UnionModules != nullptr
+			&& UnionBroadphase != nullptr
+			? IntegrateBuildingModuleUnionTrajectory(
+				SampleScenario, InitialVelocity, Preset, true,
+				*UnionModules, *UnionBroadphase, false)
+				.Trajectory.Outcome
+				== EABTSCalibrationTrajectoryOutcome::TargetHit
+			: FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
+				SampleScenario, InitialVelocity, Preset, true).Outcome
+				== EABTSCalibrationTrajectoryOutcome::TargetHit;
+	});
+	for (const uint8 bHit : SimpleHits)
+	{
+		Out.Summary.SimpleFullPowerHits += bHit != 0 ? 1 : 0;
+	}
+
+	TArray<float> OutsidePulls;
+	for (const float Pull : ReachablePulls)
+	{
+		if (Pull + KINDA_SMALL_NUMBER < Preset.PullMinimum
+			|| Pull > Preset.PullMaximum + KINDA_SMALL_NUMBER)
+		{
+			OutsidePulls.Add(Pull);
+		}
+	}
+	const int32 OutsideCount = OutsidePulls.Num() * AimOutCount * AimInCount;
+	TArray<uint8> OutsideHits;
+	OutsideHits.SetNumZeroed(OutsideCount);
+	ParallelFor(OutsideCount, [&](const int32 FlatIndex)
+	{
+		const int32 AimInIndex = FlatIndex % AimInCount;
+		const int32 PullAndAimOut = FlatIndex / AimInCount;
+		const int32 AimOutIndex = PullAndAimOut % AimOutCount;
+		const int32 PullIndex = PullAndAimOut / AimOutCount;
+		const float AimIn = SampleProductionRange(
+			Preset.AimInPlaneMinimumCM, Preset.AimInPlaneMaximumCM,
+			AimInIndex, AimInCount);
+		const float AimOut = SampleProductionRange(
+			Preset.AimOutOfPlaneMinimumCM, Preset.AimOutOfPlaneMaximumCM,
+			AimOutIndex, AimOutCount);
+		if (FVector2D(AimIn, AimOut).Size()
+			> Reinforced->MaximumAimPlaneOffsetCM + KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		FVector BirdWorld;
+		FVector InitialVelocity;
+		if (!FABTSSlingshotSatelliteCalibrationModel::BuildM6LaunchSample(
+				Scenario.LaunchFrame, *Reinforced, AimIn, AimOut,
+				OutsidePulls[PullIndex], BirdWorld, InitialVelocity))
+		{
+			return;
+		}
+		FABTSCalibrationScenario SampleScenario = Scenario;
+		SampleScenario.LaunchWorldLocation = BirdWorld;
+		OutsideHits[FlatIndex] = UnionModules != nullptr
+			&& UnionBroadphase != nullptr
+			? IntegrateBuildingModuleUnionTrajectory(
+				SampleScenario, InitialVelocity, Preset, true,
+				*UnionModules, *UnionBroadphase, false)
+				.Trajectory.Outcome
+				== EABTSCalibrationTrajectoryOutcome::TargetHit
+			: FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
+				SampleScenario, InitialVelocity, Preset, true).Outcome
+				== EABTSCalibrationTrajectoryOutcome::TargetHit;
+	});
+	for (const uint8 bHit : OutsideHits)
+	{
+		Out.Summary.ReinforcedOutsideCertifiedPullHits += bHit != 0 ? 1 : 0;
+	}
+	if (Out.Summary.MinimumGravityOffMissCM == BIG_NUMBER)
+	{
+		Out.Summary.MinimumGravityOffMissCM = 0.0f;
+	}
+	if (Out.Summary.MinimumGravityOnTargetClearanceCM == BIG_NUMBER)
+	{
+		Out.Summary.MinimumGravityOnTargetClearanceCM = 0.0f;
+	}
+	Out.Summary.bPassed =
+		Out.Summary.LargestSuccessIslandSamples
+			>= FMath::Max(1, Preset.MinimumSuccessIslandSamples)
+		&& Out.Summary.bIslandSpansAimNeighbors
+		&& Out.Summary.bIslandSpansPullNeighbors
+		&& Out.Summary.GravityDependentHits > 0
+		&& Out.Summary.SimpleFullPowerHits == 0
+		&& Out.Summary.ReinforcedOutsideCertifiedPullHits == 0
+		&& Out.Summary.SuccessPullMinimum + KINDA_SMALL_NUMBER
+			>= Preset.PullMinimum
+		&& Out.Summary.SuccessPullMaximum
+			<= Preset.PullMaximum + KINDA_SMALL_NUMBER;
+	FinalizeCalibrationSummaryHash(Out.Summary);
+	if (UnionModules != nullptr && UnionBroadphase != nullptr)
+	{
+		FCanonicalHash64 UnionHash;
+		UnionHash.AddInt32(1);
+		UnionHash.AddUInt64(UnionTargetIdentityHash);
+		UnionHash.AddUInt64(Out.Summary.ResultHash);
+		UnionHash.AddInt32(Samples.Num());
+		for (const FSampleResult& Sample : Samples)
+		{
+			UnionHash.AddBool(Sample.bSampled);
+			UnionHash.AddInt32(static_cast<int32>(Sample.GravityOn.Outcome));
+			UnionHash.AddInt32(Sample.GravityOnFirstHitModuleId);
+			UnionHash.AddFloat(Sample.GravityOn.ClosestTargetClearanceCM);
+			UnionHash.AddInt32(static_cast<int32>(Sample.GravityOff.Outcome));
+			UnionHash.AddInt32(Sample.GravityOffFirstHitModuleId);
+			UnionHash.AddFloat(Sample.GravityOff.ClosestTargetClearanceCM);
+		}
+		Out.Summary.ResultHash = UnionHash.Get();
+	}
+	return true;
+}
+
 bool SelectAndCertifyFrozenE1Target(
 	const IABTSM3MonthlySatellitePreviewSurface& Surface,
 	const FVector& LaunchWorld,
@@ -776,7 +1592,8 @@ bool SelectAndCertifyFrozenE1Target(
 {
 	constexpr int32 ProductionAimInPlaneSamples = 61;
 	constexpr int32 ProductionAimOutOfPlaneSamples = 31;
-	constexpr int32 ModuleSelectionAndCertificationPasses = 2;
+	constexpr uint64 ExpectedLegacyProxyTrajectoryHash = 0xCB88635D085D213Cull;
+	const double CertificationStartSeconds = FPlatformTime::Seconds();
 	FABTSSatellitePracticePreset ProductionPreset = FrozenPreset;
 	ProductionPreset.AimInPlaneSampleCount = ProductionAimInPlaneSamples;
 	ProductionPreset.AimOutOfPlaneSampleCount =
@@ -828,17 +1645,103 @@ bool SelectAndCertifyFrozenE1Target(
 		OutFailure = TEXT("FrozenE1SiteIsNotLegacyProxyRadialProjection");
 		return false;
 	}
-	const FABTSCalibrationSweepSummary LegacyProxySummary =
-		FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
+	FCanonicalHash64 CertificationKeyHash;
+	// Version 2 keys the exact ordered E1 Brick OBB union certification. Version 1
+	// represented the retired single-target/cube-expanded certificate.
+	CertificationKeyHash.AddInt32(2);
+	CertificationKeyHash.AddUInt64(FrozenE1.DescriptorHash);
+	CertificationKeyHash.AddUInt64(
+		FABTSSlingshotSatelliteCalibrationModel::ComputeLaunchProfileHash(
+			FrozenCatalog));
+	CertificationKeyHash.AddUInt64(
+		FABTSSlingshotSatelliteCalibrationModel::
+			ComputeSatellitePracticePresetHash(ProductionPreset));
+	CertificationKeyHash.AddUInt64(
+		FABTSSlingshotSatelliteCalibrationModel::ComputeGravitySnapshotHash(
+			OutTarget.Gravity));
+	CertificationKeyHash.AddVector(LaunchFrame.SlingCenterWorld);
+	CertificationKeyHash.AddVector(LaunchFrame.RestPouchWorldLocation);
+	CertificationKeyHash.AddVector(LaunchFrame.SlingUpWorld);
+	CertificationKeyHash.AddVector(LaunchFrame.SlingForwardWorld);
+	CertificationKeyHash.AddVector(LaunchFrame.SlingRightWorld);
+	CertificationKeyHash.AddVector(LaunchFrame.AimPlaneNormalWorld);
+	CertificationKeyHash.AddVector(LaunchFrame.AimInPlaneAxisWorld);
+	CertificationKeyHash.AddVector(LaunchFrame.AimOutOfPlaneAxisWorld);
+	CertificationKeyHash.AddFloat(LaunchFrame.BirdInPouchOffsetCM);
+	CertificationKeyHash.AddVector(OutTarget.SiteWorldTransform.GetLocation());
+	CertificationKeyHash.AddQuat(OutTarget.SiteWorldTransform.GetRotation());
+	CertificationKeyHash.AddFloat(InitialCorrectionDegrees);
+	const uint64 CertificationKey = CertificationKeyHash.Get();
+	struct FFrozenE1CertificateCacheEntry
+	{
+		FResolvedProductionTarget Target;
+		uint64 LegacyProxyHash = 0;
+		int32 LegacySeedCount = 0;
+	};
+	static TMap<uint64, FFrozenE1CertificateCacheEntry> CertificateCache;
+	if (const FFrozenE1CertificateCacheEntry* Cached =
+		CertificateCache.Find(CertificationKey))
+	{
+		OutTarget = Cached->Target;
+		const uint64 ExpectedUnionIdentity =
+			ComputeProductionTargetUnionIdentityHashPrivate(
+				FrozenE1, OutTarget.SiteWorldTransform);
+		const bool bCacheIdentityExact =
+			Cached->LegacyProxyHash == ExpectedLegacyProxyTrajectoryHash
+			&& FrozenE1.BuildingModules.ContainsByPredicate(
+				[&OutTarget](
+					const FFrozenE1BuildingModuleSource::FBuildingModule& Module)
+				{
+					return Module.BrickId == OutTarget.TargetModuleId;
+				})
+			&& OutTarget.TargetIdentityHash == ExpectedUnionIdentity
+			&& OutTarget.TrajectorySummary.ResultHash != 0
+			&& IsM3ProductionTrajectoryCertified(
+				OutTarget.TrajectorySummary, FrozenPreset);
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M3R5.1][FrozenE1TrajectoryReuse] CacheHit=1 Key=%016llX LegacySeeds=%d ProductionSweeps=0 UnselectedProductionSweeps=0 WitnessBrickId=%d TargetIdentity=%016llX Trajectory=%016llX ExactOBBUnion=%d WallMS=%.3f"),
+			static_cast<unsigned long long>(CertificationKey),
+			Cached->LegacySeedCount,
+			OutTarget.TargetModuleId,
+			static_cast<unsigned long long>(OutTarget.TargetIdentityHash),
+			static_cast<unsigned long long>(
+				OutTarget.TrajectorySummary.ResultHash),
+			bCacheIdentityExact ? 1 : 0,
+			(FPlatformTime::Seconds() - CertificationStartSeconds) * 1000.0);
+		if (!bCacheIdentityExact)
+		{
+			OutFailure = TEXT("FrozenE1CertificateCacheIdentityMismatch");
+			return false;
+		}
+		return true;
+	}
+
+	FParallelSweepOutput LegacySweep;
+	if (!RunParallelExactSweep(
 			MakeProductionTargetScenario(LaunchFrame, LegacyProxyTarget),
 			FrozenCatalog,
-			ProductionPreset);
+			ProductionPreset,
+			true,
+			LegacySweep))
+	{
+		OutFailure = TEXT("LegacyProxyParallelSweepFailed");
+		return false;
+	}
+	const FABTSCalibrationSweepSummary& LegacyProxySummary = LegacySweep.Summary;
 	if (!IsM3ProductionTrajectoryCertified(LegacyProxySummary, FrozenPreset))
 	{
 		OutFailure = FString::Printf(
 			TEXT("LegacyProxySeedNotCertified:Hash=%016llX:Island=%d"),
 			static_cast<unsigned long long>(LegacyProxySummary.ResultHash),
 			LegacyProxySummary.LargestSuccessIslandSamples);
+		return false;
+	}
+	if (LegacyProxySummary.ResultHash != ExpectedLegacyProxyTrajectoryHash)
+	{
+		OutFailure = FString::Printf(
+			TEXT("LegacyProxyExactIdentityMismatch:Expected=%016llX:Actual=%016llX"),
+			static_cast<unsigned long long>(ExpectedLegacyProxyTrajectoryHash),
+			static_cast<unsigned long long>(LegacyProxySummary.ResultHash));
 		return false;
 	}
 	UE_LOG(LogABTSRuntime, Display,
@@ -854,371 +1757,186 @@ bool SelectAndCertifyFrozenE1Target(
 		LegacyProxySummary.BestGravityOnAimInPlaneCM,
 		LegacyProxySummary.BestGravityOnAimOutOfPlaneCM,
 		LegacyProxySummary.BestGravityOnPullAlpha);
-	TArray<float> ReachablePulls;
-	ReachablePulls.Add(0.0f);
-	ReachablePulls.Add(1.0f);
-	for (int32 Notch = -1000; Notch <= 1000; ++Notch)
-	{
-		const float Pull = Reinforced->InitialPullAlpha
-			+ Reinforced->PullPowerWheelStep * static_cast<float>(Notch);
-		if (Pull >= -KINDA_SMALL_NUMBER && Pull <= 1.0f + KINDA_SMALL_NUMBER)
-		{
-			ReachablePulls.AddUnique(FMath::Clamp(Pull, 0.0f, 1.0f));
-		}
-	}
-	ReachablePulls.Sort();
-	TArray<float> CertifiedPulls;
-	for (const float Pull : ReachablePulls)
-	{
-		if (Pull + KINDA_SMALL_NUMBER >= FrozenPreset.PullMinimum
-			&& Pull <= FrozenPreset.PullMaximum + KINDA_SMALL_NUMBER)
-		{
-			CertifiedPulls.Add(Pull);
-		}
-	}
-	struct FLegacyProxyTrajectorySeed
-	{
-		int32 PullIndex = INDEX_NONE;
-		int32 AimOutIndex = INDEX_NONE;
-		int32 AimInIndex = INDEX_NONE;
-		FVector BirdWorld = FVector::ZeroVector;
-		FVector InitialVelocity = FVector::ZeroVector;
-	};
-	TArray<FLegacyProxyTrajectorySeed> LegacySeeds;
-	const auto SampleRange = [](const float Minimum, const float Maximum,
-		const int32 Index, const int32 Count)
-	{
-		return Count <= 1
-			? Minimum
-			: FMath::Lerp(Minimum, Maximum,
-				static_cast<float>(Index) / static_cast<float>(Count - 1));
-	};
 	const FABTSCalibrationScenario LegacyScenario =
 		MakeProductionTargetScenario(LaunchFrame, LegacyProxyTarget);
-	for (int32 PullIndex = 0; PullIndex < CertifiedPulls.Num(); ++PullIndex)
-	{
-		for (int32 AimOutIndex = 0;
-			AimOutIndex < ProductionAimOutOfPlaneSamples; ++AimOutIndex)
-		{
-			const float AimOut = SampleRange(
-				ProductionPreset.AimOutOfPlaneMinimumCM,
-				ProductionPreset.AimOutOfPlaneMaximumCM,
-				AimOutIndex, ProductionAimOutOfPlaneSamples);
-			for (int32 AimInIndex = 0;
-				AimInIndex < ProductionAimInPlaneSamples; ++AimInIndex)
-			{
-				const float AimIn = SampleRange(
-					ProductionPreset.AimInPlaneMinimumCM,
-					ProductionPreset.AimInPlaneMaximumCM,
-					AimInIndex, ProductionAimInPlaneSamples);
-				if (FVector2D(AimIn, AimOut).Size()
-					> Reinforced->MaximumAimPlaneOffsetCM + KINDA_SMALL_NUMBER)
-				{
-					continue;
-				}
-				FVector BirdWorld;
-				FVector InitialVelocity;
-				if (!FABTSSlingshotSatelliteCalibrationModel::BuildM6LaunchSample(
-						LaunchFrame, *Reinforced, AimIn, AimOut,
-						CertifiedPulls[PullIndex], BirdWorld, InitialVelocity))
-				{
-					continue;
-				}
-				FABTSCalibrationScenario SampleScenario = LegacyScenario;
-				SampleScenario.LaunchWorldLocation = BirdWorld;
-				const FABTSCalibrationTrajectoryResult GravityOn =
-					FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
-						SampleScenario, InitialVelocity, ProductionPreset, true);
-				if (GravityOn.Outcome
-					!= EABTSCalibrationTrajectoryOutcome::TargetHit)
-				{
-					continue;
-				}
-				const FABTSCalibrationTrajectoryResult GravityOff =
-					FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
-						SampleScenario, InitialVelocity, ProductionPreset, false);
-				if (GravityOff.Outcome
-						== EABTSCalibrationTrajectoryOutcome::TargetHit
-					|| GravityOff.ClosestTargetClearanceCM + KINDA_SMALL_NUMBER
-						< FrozenPreset.GravityOffMinimumMissCM)
-				{
-					continue;
-				}
-				FLegacyProxyTrajectorySeed& Seed = LegacySeeds.AddDefaulted_GetRef();
-				Seed.PullIndex = PullIndex;
-				Seed.AimOutIndex = AimOutIndex;
-				Seed.AimInIndex = AimInIndex;
-				Seed.BirdWorld = BirdWorld;
-				Seed.InitialVelocity = InitialVelocity;
-			}
-		}
-	}
-	if (LegacySeeds.Num() != LegacyProxySummary.GravityDependentHits
-		|| LegacySeeds.IsEmpty())
+	if (LegacySweep.GravityDependentSeeds.Num()
+			!= LegacyProxySummary.GravityDependentHits
+		|| LegacySweep.GravityDependentSeeds.IsEmpty())
 	{
 		OutFailure = FString::Printf(
 			TEXT("LegacyProxySeedEnumerationMismatch:Expected=%d:Actual=%d"),
-			LegacyProxySummary.GravityDependentHits, LegacySeeds.Num());
+			LegacyProxySummary.GravityDependentHits,
+			LegacySweep.GravityDependentSeeds.Num());
 		return false;
 	}
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M3R5.1][FrozenE1LegacySeedSet] Exact=1 Samples=%d Pulls=%d Grid=%dx%d"),
-		LegacySeeds.Num(), CertifiedPulls.Num(),
+		TEXT("[ABTS][M3R5.1][FrozenE1LegacySeedSet] Exact=1 ReusedTrajectories=1 Samples=%d Pulls=%d Grid=%dx%d"),
+		LegacySweep.GravityDependentSeeds.Num(),
+		LegacySweep.CertifiedPulls.Num(),
 		ProductionAimInPlaneSamples, ProductionAimOutOfPlaneSamples);
 
-	for (int32 Iteration = 0;
-		Iteration < ModuleSelectionAndCertificationPasses;
-		++Iteration)
+	TArray<FWorldBuildingModule> WorldModules;
+	WorldModules.Reserve(FrozenE1.BuildingModules.Num());
+	for (const FFrozenE1BuildingModuleSource::FBuildingModule& Module
+		: FrozenE1.BuildingModules)
 	{
-		if (Iteration > 0)
-		{
-			OutTarget.TrajectorySummary =
-				FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
-					MakeProductionTargetScenario(LaunchFrame, OutTarget),
-					FrozenCatalog,
-					ProductionPreset);
-			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][M3R5.1][FrozenE1BuildingModuleCertification] BrickId=%d Correction=%.3f SiteYaw=%.3f ReinforcedHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d SimpleHits=%d OutsidePullHits=%d Pull=[%.3f,%.3f] GravityOffMiss=%.1f Clearance=%.1f BestAim=(%.1f,%.1f) BestPull=%.3f Hash=%016llX"),
-				OutTarget.TargetModuleId,
-				OutTarget.CorrectionDegrees,
-				OutTarget.SiteYawDegrees,
-				OutTarget.TrajectorySummary.ReinforcedGravityOnHits,
-				OutTarget.TrajectorySummary.GravityDependentHits,
-				OutTarget.TrajectorySummary.LargestSuccessIslandSamples,
-				OutTarget.TrajectorySummary.bIslandSpansAimNeighbors ? 1 : 0,
-				OutTarget.TrajectorySummary.SimpleFullPowerHits,
-				OutTarget.TrajectorySummary.ReinforcedOutsideCertifiedPullHits,
-				OutTarget.TrajectorySummary.SuccessPullMinimum,
-				OutTarget.TrajectorySummary.SuccessPullMaximum,
-				OutTarget.TrajectorySummary.MinimumGravityOffMissCM,
-				OutTarget.TrajectorySummary.MinimumGravityOnTargetClearanceCM,
-				OutTarget.TrajectorySummary.BestGravityOnAimInPlaneCM,
-				OutTarget.TrajectorySummary.BestGravityOnAimOutOfPlaneCM,
-				OutTarget.TrajectorySummary.BestGravityOnPullAlpha,
-				static_cast<unsigned long long>(
-					OutTarget.TrajectorySummary.ResultHash));
-			if (IsM3ProductionTrajectoryCertified(
-					OutTarget.TrajectorySummary, FrozenPreset))
-			{
-				return true;
-			}
-			break;
-		}
-
-		bool bFoundProbe = false;
-		bool bBestProbeGate = false;
-		int32 BestProbeIsland = -1;
-		bool bBestProbeAimSpan = false;
-		int64 BestClearanceMilliCM = MAX_int64;
-		int64 BestFacingMicroDegrees = MAX_int64;
-		int32 BestModuleId = MAX_int32;
-		FResolvedProductionTarget BestProbeTarget;
-		for (const FFrozenE1BuildingModuleSource::FBuildingModule& Module
-			: FrozenE1.BuildingModules)
-		{
-				FResolvedProductionTarget ProbeTarget = OutTarget;
-				ProbeTarget.TargetWorldTransform = Module.SiteLocalTransform
-					* OutTarget.SiteWorldTransform;
-				ProbeTarget.TargetHalfExtentCM = Module.HalfExtentCM;
-				ProbeTarget.TargetModuleId = Module.BrickId;
-				ProbeTarget.TargetIdentityHash =
-					ComputeProductionTargetIdentityHashPrivate(
-						FrozenE1.DescriptorHash,
-						ProbeTarget.SiteWorldTransform,
-						ProbeTarget.TargetWorldTransform,
-						ProbeTarget.TargetHalfExtentCM);
-				if (!ProbeTarget.SiteWorldTransform.GetLocation().Equals(
-						ExpectedProjectedSite, 0.001f)
-					|| !ProbeTarget.SatelliteCenterWorld.Equals(
-						LegacyProxyTarget.SatelliteCenterWorld, 0.001f)
-					|| !FMath::IsNearlyEqual(
-						ProbeTarget.CorrectionDegrees,
-						InitialCorrectionDegrees, 0.0001f))
-				{
-					OutFailure = TEXT("FrozenE1ModuleSelectionMovedFixedSite");
-					return false;
-				}
-			const int32 ProbeSampleCount = CertifiedPulls.Num()
-				* ProductionAimOutOfPlaneSamples
-				* ProductionAimInPlaneSamples;
-			TBitArray<> ProbeSuccess(false, ProbeSampleCount);
-			const auto FlattenProbe = [](const int32 PullIndex,
-				const int32 AimOutIndex, const int32 AimInIndex)
-			{
-				return (PullIndex * ProductionAimOutOfPlaneSamples
-					+ AimOutIndex) * ProductionAimInPlaneSamples
-					+ AimInIndex;
-			};
-			double ClearanceSumCM = 0.0;
-			FABTSCalibrationScenario ProbeScenario =
-				MakeProductionTargetScenario(LaunchFrame, ProbeTarget);
-			for (const FLegacyProxyTrajectorySeed& Seed : LegacySeeds)
-			{
-				ProbeScenario.LaunchWorldLocation = Seed.BirdWorld;
-				const FABTSCalibrationTrajectoryResult ProbeResult =
-					FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
-						ProbeScenario, Seed.InitialVelocity,
-						ProductionPreset, true);
-				if (ProbeResult.Outcome
-					== EABTSCalibrationTrajectoryOutcome::TargetHit)
-				{
-					const FABTSCalibrationTrajectoryResult GravityOff =
-						FABTSSlingshotSatelliteCalibrationModel::IntegrateTrajectory(
-							ProbeScenario, Seed.InitialVelocity,
-							ProductionPreset, false);
-					if (GravityOff.Outcome
-							!= EABTSCalibrationTrajectoryOutcome::TargetHit
-						&& GravityOff.ClosestTargetClearanceCM
-							+ KINDA_SMALL_NUMBER
-							>= FrozenPreset.GravityOffMinimumMissCM)
-					{
-						ProbeSuccess[FlattenProbe(
-							Seed.PullIndex, Seed.AimOutIndex,
-							Seed.AimInIndex)] = true;
-					}
-				}
-				ClearanceSumCM += FMath::Max(
-					0.0f, ProbeResult.ClosestTargetClearanceCM);
-			}
-			TBitArray<> Remaining = ProbeSuccess;
-			int32 ProbeLargestIsland = 0;
-			bool bProbeAimSpan = false;
-			TArray<int32> Stack;
-			for (TConstSetBitIterator<> It(Remaining); It; ++It)
-			{
-				const int32 SeedIndex = It.GetIndex();
-				if (!Remaining[SeedIndex])
-				{
-					continue;
-				}
-				Remaining[SeedIndex] = false;
-				Stack.Reset();
-				Stack.Add(SeedIndex);
-				int32 ComponentSize = 0;
-				int32 MinAimOut = MAX_int32;
-				int32 MaxAimOut = MIN_int32;
-				int32 MinAimIn = MAX_int32;
-				int32 MaxAimIn = MIN_int32;
-				while (!Stack.IsEmpty())
-				{
-					const int32 FlatIndex = Stack.Pop(EAllowShrinking::No);
-					++ComponentSize;
-					const int32 AimInIndex =
-						FlatIndex % ProductionAimInPlaneSamples;
-					const int32 PullAndAimOut =
-						FlatIndex / ProductionAimInPlaneSamples;
-					const int32 AimOutIndex = PullAndAimOut
-						% ProductionAimOutOfPlaneSamples;
-					const int32 PullIndex = PullAndAimOut
-						/ ProductionAimOutOfPlaneSamples;
-					MinAimOut = FMath::Min(MinAimOut, AimOutIndex);
-					MaxAimOut = FMath::Max(MaxAimOut, AimOutIndex);
-					MinAimIn = FMath::Min(MinAimIn, AimInIndex);
-					MaxAimIn = FMath::Max(MaxAimIn, AimInIndex);
-					const int32 NeighborCoordinates[][3] =
-					{
-						{PullIndex - 1, AimOutIndex, AimInIndex},
-						{PullIndex + 1, AimOutIndex, AimInIndex},
-						{PullIndex, AimOutIndex - 1, AimInIndex},
-						{PullIndex, AimOutIndex + 1, AimInIndex},
-						{PullIndex, AimOutIndex, AimInIndex - 1},
-						{PullIndex, AimOutIndex, AimInIndex + 1}
-					};
-					for (const int32* Neighbor : NeighborCoordinates)
-					{
-						if (Neighbor[0] < 0
-							|| Neighbor[0] >= CertifiedPulls.Num()
-							|| Neighbor[1] < 0
-							|| Neighbor[1] >= ProductionAimOutOfPlaneSamples
-							|| Neighbor[2] < 0
-							|| Neighbor[2] >= ProductionAimInPlaneSamples)
-						{
-							continue;
-						}
-						const int32 NeighborIndex = FlattenProbe(
-							Neighbor[0], Neighbor[1], Neighbor[2]);
-						if (!Remaining[NeighborIndex])
-						{
-							continue;
-						}
-						Remaining[NeighborIndex] = false;
-						Stack.Add(NeighborIndex);
-					}
-				}
-				if (ComponentSize > ProbeLargestIsland)
-				{
-					ProbeLargestIsland = ComponentSize;
-					bProbeAimSpan = MaxAimOut > MinAimOut
-						|| MaxAimIn > MinAimIn;
-				}
-			}
-			const bool bProbeGate = ProbeLargestIsland
-					>= FMath::Max(1, FrozenPreset.MinimumSuccessIslandSamples)
-				&& bProbeAimSpan;
-			const int64 ClearanceMilliCM = FMath::RoundToInt64(
-				ClearanceSumCM * 1000.0);
-			const int64 FacingMicroDegrees = FMath::RoundToInt64(
-				ProbeTarget.FacingErrorDegrees * 1000000.0);
-			const bool bBetter = !bFoundProbe
-				|| (bProbeGate && !bBestProbeGate)
-				|| (bProbeGate == bBestProbeGate
-					&& ProbeLargestIsland > BestProbeIsland)
-				|| (bProbeGate == bBestProbeGate
-					&& ProbeLargestIsland == BestProbeIsland
-					&& bProbeAimSpan && !bBestProbeAimSpan)
-				|| (bProbeGate == bBestProbeGate
-					&& ProbeLargestIsland == BestProbeIsland
-					&& bProbeAimSpan == bBestProbeAimSpan
-					&& ClearanceMilliCM < BestClearanceMilliCM)
-				|| (bProbeGate == bBestProbeGate
-					&& ProbeLargestIsland == BestProbeIsland
-					&& bProbeAimSpan == bBestProbeAimSpan
-					&& ClearanceMilliCM == BestClearanceMilliCM
-					&& FacingMicroDegrees < BestFacingMicroDegrees)
-				|| (bProbeGate == bBestProbeGate
-					&& ProbeLargestIsland == BestProbeIsland
-					&& bProbeAimSpan == bBestProbeAimSpan
-					&& ClearanceMilliCM == BestClearanceMilliCM
-					&& FacingMicroDegrees == BestFacingMicroDegrees
-					&& Module.BrickId < BestModuleId);
-			if (bBetter)
-			{
-				bFoundProbe = true;
-				bBestProbeGate = bProbeGate;
-				BestProbeIsland = ProbeLargestIsland;
-				bBestProbeAimSpan = bProbeAimSpan;
-				BestClearanceMilliCM = ClearanceMilliCM;
-				BestFacingMicroDegrees = FacingMicroDegrees;
-				BestModuleId = Module.BrickId;
-				BestProbeTarget = MoveTemp(ProbeTarget);
-			}
-		}
-		if (!bFoundProbe)
-		{
-			break;
-		}
-		UE_LOG(LogABTSRuntime, Display,
-			TEXT("[ABTS][M3R5.1][FrozenE1ModuleSelection] Iteration=%d FixedCorrection=%.3f FixedSite=1 FixedYaw=1 BrickId=%d Gate=%d Island=%d AimSpan=%d ClearanceSumCM=%.3f"),
-			Iteration,
-			BestProbeTarget.CorrectionDegrees,
-			BestModuleId,
-			bBestProbeGate ? 1 : 0,
-			BestProbeIsland,
-			bBestProbeAimSpan ? 1 : 0,
-			static_cast<double>(BestClearanceMilliCM) / 1000.0);
-		OutTarget = MoveTemp(BestProbeTarget);
+		FWorldBuildingModule& WorldModule = WorldModules.AddDefaulted_GetRef();
+		WorldModule.BrickId = Module.BrickId;
+		WorldModule.WorldTransform =
+			Module.SiteLocalTransform * OutTarget.SiteWorldTransform;
+		WorldModule.WorldTransform.SetScale3D(FVector::OneVector);
+		WorldModule.HalfExtentCM = Module.HalfExtentCM.GetAbs();
 	}
+	WorldModules.Sort([](const FWorldBuildingModule& A,
+		const FWorldBuildingModule& B)
+	{
+		return A.BrickId < B.BrickId;
+	});
+	if (WorldModules.IsEmpty())
+	{
+		OutFailure = TEXT("FrozenE1ProductionUnionEmpty");
+		return false;
+	}
+	FBox SiteLocalUnionBounds(EForceInit::ForceInit);
+	for (const FFrozenE1BuildingModuleSource::FBuildingModule& Module
+		: FrozenE1.BuildingModules)
+	{
+		for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
+		{
+			const FVector Corner(
+				(CornerIndex & 1) != 0
+					? Module.HalfExtentCM.X : -Module.HalfExtentCM.X,
+				(CornerIndex & 2) != 0
+					? Module.HalfExtentCM.Y : -Module.HalfExtentCM.Y,
+				(CornerIndex & 4) != 0
+					? Module.HalfExtentCM.Z : -Module.HalfExtentCM.Z);
+			SiteLocalUnionBounds +=
+				Module.SiteLocalTransform.TransformPosition(Corner);
+		}
+	}
+	if (!SiteLocalUnionBounds.IsValid)
+	{
+		OutFailure = TEXT("FrozenE1ProductionUnionBroadphaseBounds");
+		return false;
+	}
+	FWorldBuildingModule UnionBroadphase;
+	UnionBroadphase.BrickId = INDEX_NONE;
+	UnionBroadphase.WorldTransform = FTransform(
+		FQuat::Identity, SiteLocalUnionBounds.GetCenter())
+		* OutTarget.SiteWorldTransform;
+	UnionBroadphase.WorldTransform.SetScale3D(FVector::OneVector);
+	UnionBroadphase.HalfExtentCM = SiteLocalUnionBounds.GetExtent();
+	TArray<int32> LegacyUnionFirstHitModuleIds;
+	LegacyUnionFirstHitModuleIds.SetNum(
+		LegacySweep.GravityDependentSeeds.Num());
+	ParallelFor(LegacySweep.GravityDependentSeeds.Num(),
+		[&](const int32 SeedIndex)
+	{
+		const FCachedSweepSeed& Seed =
+			LegacySweep.GravityDependentSeeds[SeedIndex];
+		FABTSCalibrationScenario PathScenario = LegacyScenario;
+		PathScenario.LaunchWorldLocation = Seed.BirdWorld;
+		LegacyUnionFirstHitModuleIds[SeedIndex] =
+			IntegrateBuildingModuleUnionTrajectory(
+				PathScenario, Seed.InitialVelocity, ProductionPreset,
+				true, WorldModules, UnionBroadphase, false).FirstHitModuleId;
+	});
+	int32 LegacyUnionHitCount = 0;
+	for (const int32 ModuleId : LegacyUnionFirstHitModuleIds)
+	{
+		LegacyUnionHitCount += ModuleId != INDEX_NONE ? 1 : 0;
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M3R5.1][FrozenE1ModuleUnionProbe] AnalyticFirstIntersection=1 ExactOBB=1 FixedCorrection=%.3f FixedSite=1 FixedYaw=1 Modules=%d LegacySeedHits=%d LegacySeeds=%d"),
+		OutTarget.CorrectionDegrees,
+		WorldModules.Num(),
+		LegacyUnionHitCount,
+		LegacyUnionFirstHitModuleIds.Num());
 
-	OutFailure = FString::Printf(
-		TEXT("FrozenE1Trajectory:Correction=%.3f:SiteYaw=%.3f:Hits=%d:Island=%d:Clearance=%.1f:Hash=%016llX"),
+	FParallelSweepOutput ProductionSweep;
+	if (!RunParallelExactSweep(
+			MakeProductionTargetScenario(LaunchFrame, OutTarget),
+			FrozenCatalog,
+			ProductionPreset,
+			false,
+			ProductionSweep,
+			&WorldModules,
+			&UnionBroadphase,
+			OutTarget.TargetIdentityHash))
+	{
+		OutFailure = TEXT("FrozenE1ProductionUnionParallelSweepFailed");
+		return false;
+	}
+	OutTarget.TrajectorySummary = ProductionSweep.Summary;
+	const FFrozenE1BuildingModuleSource::FBuildingModule* WitnessModule =
+		FrozenE1.BuildingModules.FindByPredicate(
+			[&ProductionSweep](
+				const FFrozenE1BuildingModuleSource::FBuildingModule& Module)
+			{
+				return Module.BrickId
+					== ProductionSweep.BestGravityOnFirstHitModuleId;
+			});
+	if (WitnessModule == nullptr)
+	{
+		OutFailure = TEXT("FrozenE1ProductionUnionWitnessMissing");
+		return false;
+	}
+	OutTarget.TargetModuleId = WitnessModule->BrickId;
+	OutTarget.TargetWorldTransform =
+		WitnessModule->SiteLocalTransform * OutTarget.SiteWorldTransform;
+	OutTarget.TargetHalfExtentCM = WitnessModule->HalfExtentCM;
+	OutTarget.TargetIdentityHash =
+		ComputeProductionTargetUnionIdentityHashPrivate(
+			FrozenE1, OutTarget.SiteWorldTransform);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M3R5.1][FrozenE1BuildingModuleUnionCertification] WitnessBrickId=%d Modules=%d ExactOBB=1 StableFirstHit=1 Correction=%.3f SiteYaw=%.3f ReinforcedHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d SimpleHits=%d OutsidePullHits=%d Pull=[%.3f,%.3f] GravityOffMiss=%.1f Clearance=%.1f BestAim=(%.1f,%.1f) BestPull=%.3f TargetIdentity=%016llX TrajectoryHash=%016llX"),
+		OutTarget.TargetModuleId,
+		WorldModules.Num(),
 		OutTarget.CorrectionDegrees,
 		OutTarget.SiteYawDegrees,
+		OutTarget.TrajectorySummary.ReinforcedGravityOnHits,
 		OutTarget.TrajectorySummary.GravityDependentHits,
 		OutTarget.TrajectorySummary.LargestSuccessIslandSamples,
+		OutTarget.TrajectorySummary.bIslandSpansAimNeighbors ? 1 : 0,
+		OutTarget.TrajectorySummary.SimpleFullPowerHits,
+		OutTarget.TrajectorySummary.ReinforcedOutsideCertifiedPullHits,
+		OutTarget.TrajectorySummary.SuccessPullMinimum,
+		OutTarget.TrajectorySummary.SuccessPullMaximum,
+		OutTarget.TrajectorySummary.MinimumGravityOffMissCM,
 		OutTarget.TrajectorySummary.MinimumGravityOnTargetClearanceCM,
+		OutTarget.TrajectorySummary.BestGravityOnAimInPlaneCM,
+		OutTarget.TrajectorySummary.BestGravityOnAimOutOfPlaneCM,
+		OutTarget.TrajectorySummary.BestGravityOnPullAlpha,
+		static_cast<unsigned long long>(OutTarget.TargetIdentityHash),
 		static_cast<unsigned long long>(
 			OutTarget.TrajectorySummary.ResultHash));
-	return false;
+	if (!IsM3ProductionTrajectoryCertified(
+			OutTarget.TrajectorySummary, FrozenPreset)
+		|| OutTarget.TrajectorySummary.ResultHash == 0)
+	{
+		OutFailure = FString::Printf(
+			TEXT("FrozenE1ProductionUnionNotCertified:Hash=%016llX:Island=%d"),
+			static_cast<unsigned long long>(
+				OutTarget.TrajectorySummary.ResultHash),
+			OutTarget.TrajectorySummary.LargestSuccessIslandSamples);
+		return false;
+	}
+	FFrozenE1CertificateCacheEntry& Cached =
+		CertificateCache.Add(CertificationKey);
+	Cached.Target = OutTarget;
+	Cached.LegacyProxyHash = LegacyProxySummary.ResultHash;
+	Cached.LegacySeedCount = LegacySweep.GravityDependentSeeds.Num();
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M3R5.1][FrozenE1TrajectoryReuse] CacheHit=0 Key=%016llX LegacyParallelSweeps=1 LegacySeeds=%d AnalyticModulePaths=%d ProductionSweeps=1 UnselectedProductionSweeps=0 WitnessBrickId=%d TargetIdentity=%016llX Trajectory=%016llX ExactOBBUnion=1 WallMS=%.3f"),
+		static_cast<unsigned long long>(CertificationKey),
+		LegacySweep.GravityDependentSeeds.Num(),
+		LegacySweep.GravityDependentSeeds.Num(),
+		OutTarget.TargetModuleId,
+		static_cast<unsigned long long>(OutTarget.TargetIdentityHash),
+		static_cast<unsigned long long>(
+			OutTarget.TrajectorySummary.ResultHash),
+		(FPlatformTime::Seconds() - CertificationStartSeconds) * 1000.0);
+	return true;
 }
 }
 
@@ -1681,12 +2399,120 @@ ComputeProductionTargetIdentityHash(
 	const FTransform& TargetWorldTransform,
 	const FVector& TargetHalfExtentCM)
 {
+	ABTSM3R51SatellitePreviewPrivate::FFrozenE1BuildingModuleSource FrozenE1;
+	FString Failure;
+	if (DescriptorHash != 0
+		&& ABTSM3R51SatellitePreviewPrivate::
+			ResolveFrozenE1BuildingModuleSource(FrozenE1, Failure)
+		&& FrozenE1.DescriptorHash == DescriptorHash)
+	{
+		return ABTSM3R51SatellitePreviewPrivate::
+			ComputeProductionTargetUnionIdentityHashPrivate(
+				FrozenE1, SiteWorldTransform);
+	}
 	return ABTSM3R51SatellitePreviewPrivate::
 		ComputeProductionTargetIdentityHashPrivate(
 			DescriptorHash,
 			SiteWorldTransform,
 			TargetWorldTransform,
 			TargetHalfExtentCM);
+}
+
+bool FABTSM3MonthlySatellitePreviewBuilder::
+RunFrozenE1BuildingModuleUnionSweep(
+	const FABTSM6CalibrationLaunchFrame& LaunchFrame,
+	const FABTSCalibrationGravitySnapshot& Gravity,
+	const FTransform& SiteWorldTransform,
+	const FABTSM6LaunchProfileCatalog& Catalog,
+	const FABTSSatellitePracticePreset& Preset,
+	FABTSCalibrationSweepSummary& OutSummary,
+	int32& OutWitnessBrickId,
+	uint64& OutTargetIdentityHash,
+	FString& OutFailure)
+{
+	using namespace ABTSM3R51SatellitePreviewPrivate;
+	OutSummary = FABTSCalibrationSweepSummary();
+	OutWitnessBrickId = INDEX_NONE;
+	OutTargetIdentityHash = 0;
+	OutFailure.Reset();
+	FFrozenE1BuildingModuleSource FrozenE1;
+	if (!ResolveFrozenE1BuildingModuleSource(FrozenE1, OutFailure)
+		|| !SiteWorldTransform.IsValid())
+	{
+		OutFailure = FString::Printf(
+			TEXT("FrozenE1UnionSource:%s"), *OutFailure);
+		return false;
+	}
+	TArray<FWorldBuildingModule> WorldModules;
+	WorldModules.Reserve(FrozenE1.BuildingModules.Num());
+	FBox SiteLocalUnionBounds(EForceInit::ForceInit);
+	for (const FFrozenE1BuildingModuleSource::FBuildingModule& Module
+		: FrozenE1.BuildingModules)
+	{
+		FWorldBuildingModule& WorldModule = WorldModules.AddDefaulted_GetRef();
+		WorldModule.BrickId = Module.BrickId;
+		WorldModule.WorldTransform =
+			Module.SiteLocalTransform * SiteWorldTransform;
+		WorldModule.WorldTransform.SetScale3D(FVector::OneVector);
+		WorldModule.HalfExtentCM = Module.HalfExtentCM.GetAbs();
+		for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
+		{
+			const FVector Corner(
+				(CornerIndex & 1) != 0
+					? Module.HalfExtentCM.X : -Module.HalfExtentCM.X,
+				(CornerIndex & 2) != 0
+					? Module.HalfExtentCM.Y : -Module.HalfExtentCM.Y,
+				(CornerIndex & 4) != 0
+					? Module.HalfExtentCM.Z : -Module.HalfExtentCM.Z);
+			SiteLocalUnionBounds +=
+				Module.SiteLocalTransform.TransformPosition(Corner);
+		}
+	}
+	WorldModules.Sort([](const FWorldBuildingModule& A,
+		const FWorldBuildingModule& B)
+	{
+		return A.BrickId < B.BrickId;
+	});
+	if (WorldModules.IsEmpty() || !SiteLocalUnionBounds.IsValid)
+	{
+		OutFailure = TEXT("FrozenE1UnionGeometry");
+		return false;
+	}
+	FWorldBuildingModule Broadphase;
+	Broadphase.WorldTransform = FTransform(
+		FQuat::Identity, SiteLocalUnionBounds.GetCenter())
+		* SiteWorldTransform;
+	Broadphase.WorldTransform.SetScale3D(FVector::OneVector);
+	Broadphase.HalfExtentCM = SiteLocalUnionBounds.GetExtent();
+	OutTargetIdentityHash = ComputeProductionTargetUnionIdentityHashPrivate(
+		FrozenE1, SiteWorldTransform);
+	FABTSCalibrationScenario Scenario;
+	Scenario.LaunchWorldLocation = LaunchFrame.RestPouchWorldLocation;
+	Scenario.LaunchFrame = LaunchFrame;
+	Scenario.Gravity = Gravity;
+	FParallelSweepOutput Sweep;
+	if (!RunParallelExactSweep(
+			Scenario,
+			Catalog,
+			Preset,
+			false,
+			Sweep,
+			&WorldModules,
+			&Broadphase,
+			OutTargetIdentityHash)
+		|| !IsM3ProductionTrajectoryCertified(Sweep.Summary, Preset)
+		|| Sweep.BestGravityOnFirstHitModuleId == INDEX_NONE)
+	{
+		OutFailure = FString::Printf(
+			TEXT("FrozenE1UnionCertificate:Hash=%016llX:Island=%d:Witness=%d"),
+			static_cast<unsigned long long>(Sweep.Summary.ResultHash),
+			Sweep.Summary.LargestSuccessIslandSamples,
+			Sweep.BestGravityOnFirstHitModuleId);
+		return false;
+	}
+	OutSummary = Sweep.Summary;
+	OutWitnessBrickId = Sweep.BestGravityOnFirstHitModuleId;
+	return true;
 }
 
 uint64 FABTSM3MonthlySatellitePreviewBuilder::ComputeResultHash(
