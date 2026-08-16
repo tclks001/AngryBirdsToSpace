@@ -66,7 +66,14 @@ public:
 	{
 		return RegisteredCaptures.Num();
 	}
-	bool IsM7SemanticAdapterReady() const { return false; }
+	bool IsM7SemanticAdapterReady() const
+	{
+		return bM7SemanticAdapterReady;
+	}
+	bool IsM7MaterialSetReady() const
+	{
+		return bM7MaterialSetReady;
+	}
 	/** Latest accepted T4 environment snapshot; false means fail closed. */
 	bool TryGetEnvironmentSnapshot(
 		FABTSToonEnvironmentSnapshot& OutSnapshot) const
@@ -151,6 +158,8 @@ private:
 	bool bWorldTearingDown = false;
 	bool bLastObservedStyleEnabled = false;
 	bool bSharedMaterialPreloadReady = false;
+	bool bM7SemanticAdapterReady = false;
+	bool bM7MaterialSetReady = false;
 	bool bEnvironmentOwnershipActive = false;
 	uint32 EnvironmentOwnershipGeneration = 0;
 	uint32 EnvironmentRecoveryGeneration = 0;
