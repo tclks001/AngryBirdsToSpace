@@ -19,6 +19,7 @@ class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class UPointLightComponent;
 class UWorld;
+struct FMinimalViewInfo;
 
 enum class EABTSOpeningStartResult : uint8
 {
@@ -46,6 +47,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 
 	void SetPreviewTimeScale(float InTimeScale);
 	void StopPreview();
@@ -89,6 +91,7 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UABTSBirdAnimationPresentationComponent>> AnimationDrivers;
+	TArray<EABTSOpeningAnimationCue> PreviousAnimationCues;
 
 	UPROPERTY(Transient)
 	TObjectPtr<APlayerController> PreviewController;
@@ -124,5 +127,6 @@ private:
 	bool bProductionWorldWasPaused = false;
 	bool bProductionInputWasBlocked = false;
 	bool bProductionHUDWasVisible = true;
+	bool bProductionControllerFullTickWhenPaused = false;
 	bool bPreviewFinished = false;
 };

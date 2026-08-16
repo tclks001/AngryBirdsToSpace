@@ -179,7 +179,6 @@ void AABTSM11PlayerController::InteractWithSlingshotCord(
 
 void AABTSM11PlayerController::PrimaryWorldInteract()
 {
-	if (ShouldConsumePrimaryPointerForHUD()) return;
 	if (AABTSM11FinaleInteractionSystem* Interaction =
 		FindM11Interaction();
 		Interaction != nullptr
@@ -204,6 +203,12 @@ void AABTSM11PlayerController::PrimaryWorldInteract()
 		}
 		return;
 	}
+
+	// The finale console owns the primary pointer while active. Only consult
+	// inherited HUD hit targets after the exclusive finale route above; the
+	// hidden M5 inventory HUD retains cached bottom-deck hit boxes and would
+	// otherwise consume all four M11 buttons before they can establish capture.
+	if (ShouldConsumePrimaryPointerForHUD()) return;
 
 	AABTSM6SlingshotSystem* System =
 		FindOrdinarySlingshotSystem();

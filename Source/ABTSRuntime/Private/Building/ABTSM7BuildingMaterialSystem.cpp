@@ -374,6 +374,16 @@ void AABTSM7BuildingMaterialSystem::ActivateModuleForLaunch(AABTSM7BuildingModul
 {
 	MarkPhysicsActivity();
 	Module.SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
+	if (Module.UsesSiteUniformGravity())
+	{
+		if (!Module.ReactivatePreservingSiteUniformGravity(InitialImpulse))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7][SiteUniformLaunch] ReactivationRejected Module=%s RadialFallback=Forbidden"),
+				*Module.GetName());
+		}
+		return;
+	}
 	if (bLaunchPhysicsPlanar)
 	{
 		Module.ActivateDynamicPlanar(InitialImpulse, LaunchGravityReference, LaunchGravityAccelerationCMPerSec2);
@@ -461,11 +471,19 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 	PromoteAll(CrystalBrickHISM, EABTSM7BuildingMaterial::Crystal);
 
 	TArray<AABTSM7BuildingModule*> PendingModules;
+	int32 SkippedSiteUniformCount = 0;
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
 	{
 		if (AABTSM7BuildingModule* Module = Modules[Index].Get())
 		{
-			if (!Module->IsDynamic()) PendingModules.Add(Module);
+			if (!Module->IsDynamic() && Module->UsesSiteUniformGravity())
+			{
+				++SkippedSiteUniformCount;
+			}
+			else if (!Module->IsDynamic())
+			{
+				PendingModules.Add(Module);
+			}
 		}
 		else
 		{
@@ -478,10 +496,11 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 		if (IsValid(Module) && !Module->IsDynamic()) ActivateModuleForLaunch(*Module);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d GravityModel=%s GravityReference=%s Gravity=%.1f ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
+		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d SkippedFrozenSiteUniform=%d M6RadialReactivation=Forbidden GravityModel=%s GravityReference=%s Gravity=%.1f ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
 		bLaunchPhysicsPlanar ? 1 : 0,
 		PromotedCount,
 		PendingModules.Num(),
+		SkippedSiteUniformCount,
 		bLaunchPhysicsPlanar
 			? TEXT("PlanarConstantAcceleration")
 			: TEXT("RadialConstantAcceleration"),

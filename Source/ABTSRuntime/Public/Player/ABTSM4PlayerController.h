@@ -29,6 +29,15 @@ public:
 	/** Shared release-cinematic gate; preserves the existing gameplay input latch. */
 	void SetCinematicInputBlocked(bool bBlocked) { SetGameplayInputBlocked(bBlocked); }
 	bool IsCinematicInputBlocked() const { return IsGameplayInputBlocked(); }
+	/** Allows a paused release cinematic to keep camera-manager evaluation alive. */
+	void SetCinematicFullTickWhenPaused(bool bEnabled)
+	{
+		bShouldPerformFullTickWhenPaused = bEnabled;
+	}
+	bool IsCinematicFullTickWhenPaused() const
+	{
+		return bShouldPerformFullTickWhenPaused;
+	}
 
 protected:
 	virtual void BeginPlay() override;

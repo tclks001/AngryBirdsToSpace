@@ -475,6 +475,21 @@ bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	return true;
 }
 
+bool AABTSM7BuildingModule::ReactivatePreservingSiteUniformGravity(
+	const FVector& Impulse)
+{
+	if (!bSiteUniformGravity || PlanarGravityUp.IsNearlyZero()
+		|| GravityAccelerationCMPerSec2 <= 0.0f || bCompoundChild)
+	{
+		return false;
+	}
+	const FVector SavedSiteUp = PlanarGravityUp;
+	const float SavedAcceleration = GravityAccelerationCMPerSec2;
+	ActivateDynamicPlanar(Impulse, SavedSiteUp, SavedAcceleration);
+	bSiteUniformGravity = true;
+	return true;
+}
+
 bool AABTSM7BuildingModule::VerifyChaosDeveloperObstacleCollisionIdentity(
 	FString& OutError) const
 {

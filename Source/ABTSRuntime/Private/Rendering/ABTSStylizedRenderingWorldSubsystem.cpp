@@ -27,6 +27,7 @@
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7StylizedRenderingAdapter.h"
 #include "Camera/ABTSM101LandingPreviewCamera.h"
 #include "Components/PrimitiveComponent.h"
@@ -2060,6 +2061,35 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshNow()
 				bM7MaterialSetReady = M7Readiness.bMaterialSetReady;
 				M7MaterialSlotCount = M7Readiness.PublishedSlotCount;
 				DesiredMaterialBindings.Append(MoveTemp(M7MaterialBindings));
+				// Fixed-Six keeps lightweight HISM previews until the first real
+				// impact. Publish those previews through the same exact toon
+				// material family as the Chaos modules that replace them, avoiding
+				// a visible color pop at activation.
+				for (TActorIterator<AABTSM73StableBuildingActor> BuildingIt(World);
+					BuildingIt; ++BuildingIt)
+				{
+					TArray<TPair<UPrimitiveComponent*, EABTSM7BuildingMaterial>> PreviewComponents;
+					BuildingIt->GatherPreviewComponentsForStylizedAdapter(PreviewComponents);
+					for (const TPair<UPrimitiveComponent*, EABTSM7BuildingMaterial>& Pair : PreviewComponents)
+					{
+						UMaterialInterface* StylizedMaterial = M7MaterialSet.Get(Pair.Value);
+						if (!IsValid(Pair.Key) || !IsValid(StylizedMaterial))
+						{
+							continue;
+						}
+						FABTSStylizedMaterialSlotBinding PreviewBinding;
+						PreviewBinding.Component = Pair.Key;
+						PreviewBinding.MaterialSlotIndex = 0;
+						PreviewBinding.StylizedMaterial = StylizedMaterial;
+						PreviewBinding.Family =
+							FABTSM7StylizedRenderingAdapter::ResolveMaterialFamily(Pair.Value);
+						if (PreviewBinding.IsValid())
+						{
+							DesiredMaterialBindings.Add(PreviewBinding);
+							++M7MaterialSlotCount;
+						}
+					}
+				}
 			}
 		}
 		for (TActorIterator<AABTSM3Planet> It(World); It; ++It)
@@ -2675,17 +2705,21 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 			Failure.IsEmpty() ? TEXT("WorldUnavailable") : *Failure);
 		return;
 	}
-	if (!RefreshLowPolyCloudPrototype(Parameters, Failure))
+	const bool bCloudPrototypeReady =
+		RefreshLowPolyCloudPrototype(Parameters, Failure);
+	if (!bCloudPrototypeReady)
 	{
-		ReleaseEnvironmentOwnership(
-			TEXT("CloudPrototypeApplyFailed"),
-			false);
+		// The low-poly cloud field is an optional presentation layer. Preserve
+		// the already-applied spherical atmosphere, native-cloud suppression,
+		// exposure and star parameters if its material is unavailable; restoring
+		// the native environment here caused a packaged build to oscillate back
+		// to volumetric clouds every refresh.
+		DestroyLowPolyCloudPrototype();
 		UE_LOG(
 			LogABTSRuntime,
 			Warning,
-			TEXT("[ABTS][Rendering][T4-A2R1A][CloudPrototype] Applied=0 Reason=%s"),
+			TEXT("[ABTS][Rendering][T4-A2R1A][CloudPrototype] Applied=0 Fallback=StylizedNoCloud EnvironmentPreserved=1 NativeActorHidden=1 Reason=%s"),
 			Failure.IsEmpty() ? TEXT("Unknown") : *Failure);
-		return;
 	}
 
 	FABTSStylizedRenderingControl::SetEnvironmentParameters(Parameters);
@@ -2705,7 +2739,9 @@ void UABTSStylizedRenderingWorldSubsystem::RefreshEnvironmentPresentation()
 			ABTSStylizedRenderingWorldSubsystemPrivate::
 				ContinuousAtmosphereTraceSampleCountScale);
 	}
-	if (!bWasApplied && EnvironmentPresentation->IsCloudApplied())
+	if (!bWasApplied
+		&& bCloudPrototypeReady
+		&& EnvironmentPresentation->IsCloudApplied())
 	{
 		UE_LOG(
 			LogABTSRuntime,

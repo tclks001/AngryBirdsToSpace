@@ -230,13 +230,14 @@ float UABTSGameViewportClient::ComputeStartupLoadingProgress(
 bool UABTSGameViewportClient::IsStartupPresentationReady(
 	const bool bWorldAuthorityReady,
 	const bool bPresentationSurfaceReady,
-	const int32 ConsecutiveReadyFrames)
+	const int32 CompletedFrontEndDraws)
 {
-	// Tick precedes Draw.  Requiring two ready ticks guarantees that one complete
-	// foreground frame was submitted before the button becomes enterable.
+	// The counter is advanced only after DrawMenu has emitted a complete front
+	// screen.  Keep two such frames behind the opaque handoff cover, then reveal
+	// the already-warm menu atomically on the following present.
 	return bWorldAuthorityReady
 		&& bPresentationSurfaceReady
-		&& ConsecutiveReadyFrames >= 2;
+		&& CompletedFrontEndDraws >= 2;
 }
 
 void UABTSGameViewportClient::RefreshStartupWorldState()
@@ -247,6 +248,7 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		StartupTrackedWorld = GameWorld;
 		StartupForegroundStartSeconds = FPlatformTime::Seconds();
 		bStartupGateRequired = false;
+		bStartupAuthorityReady = false;
 		bStartupWorldReady = false;
 		bStartupWorldFailed = false;
 		bStartupPresentationReady = false;
@@ -269,15 +271,12 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 	bStartupWorldFailed = bFoundGate && bAnyFailed;
 	const bool bWorldAuthorityReady = !bFoundGate
 		|| (bAllReady && !bAnyFailed);
+	bStartupAuthorityReady = bWorldAuthorityReady;
 	const bool bPresentationSurfaceReady = !bStartupFrontEndRequired
 		|| (bMenuVisible
 			&& MenuPage == EABTSSystemMenuPage::Front
 			&& MenuCanvas != nullptr);
-	if (bWorldAuthorityReady && bPresentationSurfaceReady)
-	{
-		++StartupReadyPresentationFrameCount;
-	}
-	else
+	if (!bWorldAuthorityReady || !bPresentationSurfaceReady)
 	{
 		StartupReadyPresentationFrameCount = 0;
 	}
@@ -342,6 +341,24 @@ void UABTSGameViewportClient::Draw(FViewport* InViewport, FCanvas* SceneCanvas)
 	if (!OverlayCanvas) OverlayCanvas = SceneCanvas;
 	MenuCanvas->Init(ViewSize.X, ViewSize.Y, nullptr, OverlayCanvas);
 	DrawMenu(*MenuCanvas, FVector2D(ViewSize));
+	if (bStartupFrontEndRequired
+		&& !bStartupPresentationReady
+		&& MenuPage == EABTSSystemMenuPage::Front)
+	{
+		// Count only fully emitted menus, not merely allocated UCanvas objects.
+		// The cover is drawn last and opaque, so neither the world HUD nor a
+		// partially initialized front screen can leak between MoviePlayer and
+		// the first valid interactive frame.
+		if (bStartupAuthorityReady && HitTargets.Num() >= 2)
+		{
+			++StartupReadyPresentationFrameCount;
+		}
+		else
+		{
+			StartupReadyPresentationFrameCount = 0;
+		}
+		DrawStartupHandoffCover(*MenuCanvas, FVector2D(ViewSize));
+	}
 	if (bCaptureMode)
 	{
 		++CaptureFrameCount;
@@ -638,6 +655,75 @@ void UABTSGameViewportClient::DrawMenu(UCanvas& Canvas, const FVector2D& ViewSiz
 	if (MenuPage == EABTSSystemMenuPage::Settings) DrawSettings(Canvas, ViewSize);
 	else DrawFrontOrPause(Canvas, ViewSize);
 	if (ActiveDialog != EABTSSystemMenuDialog::None) DrawDialog(Canvas, ViewSize);
+}
+
+void UABTSGameViewportClient::DrawStartupHandoffCover(
+	UCanvas& Canvas,
+	const FVector2D& ViewSize)
+{
+	// This Canvas bridge deliberately mirrors the asset-free MoviePlayer page.
+	// It survives the one-or-more presents between MoviePlayer teardown and the
+	// first fully initialized front-end draw without depending on Slate lifetime.
+	const FLinearColor Background(0.008f, 0.018f, 0.038f, 1.0f);
+	const FLinearColor Accent(0.18f, 0.82f, 0.94f, 1.0f);
+	const FLinearColor Text(0.72f, 0.82f, 0.92f, 1.0f);
+	Canvas.K2_DrawTexture(
+		Canvas.DefaultTexture,
+		FVector2D::ZeroVector,
+		ViewSize,
+		FVector2D::ZeroVector,
+		FVector2D::UnitVector,
+		Background,
+		BLEND_Translucent);
+
+	const float Scale = FMath::Clamp(
+		FMath::Min(ViewSize.X / 1920.0f, ViewSize.Y / 1080.0f),
+		0.65f,
+		1.35f);
+	const float Width = FMath::Min(720.0f * Scale, ViewSize.X * 0.72f);
+	const FVector2D Center(ViewSize.X * 0.5f, ViewSize.Y * 0.5f);
+	DrawLabel(
+		Canvas,
+		TEXT("ANGRY BIRDS TO SPACE"),
+		Center - FVector2D(0.0f, 78.0f * Scale),
+		1.34f * Scale,
+		FLinearColor(0.31f, 0.91f, 1.0f, 1.0f),
+		true,
+		true);
+	DrawLabel(
+		Canvas,
+		bStartupAuthorityReady
+			? TEXT("WORLD READY")
+			: TEXT("GENERATING PLANETARY WORLD"),
+		Center - FVector2D(0.0f, 24.0f * Scale),
+		0.72f * Scale,
+		Text,
+		false,
+		true);
+
+	const float Progress = ComputeStartupLoadingProgress(
+		FPlatformTime::Seconds() - StartupForegroundStartSeconds,
+		bStartupAuthorityReady);
+	const FVector2D TrackMin(
+		Center.X - Width * 0.5f,
+		Center.Y + 22.0f * Scale);
+	const FVector2D TrackSize(Width, 14.0f * Scale);
+	Canvas.K2_DrawTexture(
+		Canvas.DefaultTexture,
+		TrackMin,
+		TrackSize,
+		FVector2D::ZeroVector,
+		FVector2D::UnitVector,
+		FLinearColor(0.08f, 0.15f, 0.24f, 1.0f),
+		BLEND_Translucent);
+	Canvas.K2_DrawTexture(
+		Canvas.DefaultTexture,
+		TrackMin,
+		FVector2D(TrackSize.X * Progress, TrackSize.Y),
+		FVector2D::ZeroVector,
+		FVector2D::UnitVector,
+		Accent,
+		BLEND_Translucent);
 }
 
 void UABTSGameViewportClient::DrawBackdrop(UCanvas& Canvas, const FVector2D& ViewSize)

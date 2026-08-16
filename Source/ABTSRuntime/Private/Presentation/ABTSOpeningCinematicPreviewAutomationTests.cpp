@@ -39,6 +39,14 @@ bool FABTSOpeningCinematicTimelineTest::RunTest(const FString& Parameters)
 			FMath::IsNearlyEqual(Pose.LocalPosition.Size(), FABTSOpeningCinematicEvaluator::CircleRadiusCM, 0.1f));
 		TestEqual(TEXT("Initial bird is idle"), Pose.AnimationCue, EABTSOpeningAnimationCue::Idle);
 	}
+	TestEqual(TEXT("Red performs an authored happy-play cue during establish"),
+		FABTSOpeningCinematicEvaluator::EvaluateBird(
+			1.0f, EABTSOpeningBird::Red).AnimationCue,
+		EABTSOpeningAnimationCue::Celebrate);
+	TestEqual(TEXT("White receives a staggered happy-play cue during the circle"),
+		FABTSOpeningCinematicEvaluator::EvaluateBird(
+			9.25f, EABTSOpeningBird::White).AnimationCue,
+		EABTSOpeningAnimationCue::Celebrate);
 	for (int32 Index = 0; Index < InitialPositions.Num(); ++Index)
 	{
 		const int32 Next = (Index + 1) % InitialPositions.Num();

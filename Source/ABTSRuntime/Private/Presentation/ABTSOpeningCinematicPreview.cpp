@@ -237,6 +237,7 @@ AABTSOpeningCinematicPreview::AABTSOpeningCinematicPreview()
 	CinematicCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("CinematicCamera"));
 	CinematicCamera->SetupAttachment(SceneRoot);
 	CinematicCamera->SetFieldOfView(50.0f);
+	CinematicCamera->PrimaryComponentTick.bTickEvenWhenPaused = true;
 
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BirdMeshAsset(
 		TEXT("/Game/CuteBird/Meshes/SM_Cute_Bird.SM_Cute_Bird"));
@@ -250,6 +251,7 @@ AABTSOpeningCinematicPreview::AABTSOpeningCinematicPreview()
 		BirdVisual->SetSimulatePhysics(false);
 		BirdVisual->SetCanEverAffectNavigation(false);
 		BirdVisual->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		BirdVisual->PrimaryComponentTick.bTickEvenWhenPaused = true;
 		BirdVisual->SetRelativeScale3D(FVector(4.0f));
 		if (BirdMeshAsset.Succeeded()) BirdVisual->SetSkeletalMesh(BirdMeshAsset.Object);
 		BirdVisuals.Add(BirdVisual);
@@ -380,6 +382,18 @@ void AABTSOpeningCinematicPreview::EndPlay(const EEndPlayReason::Type EndPlayRea
 	Super::EndPlay(EndPlayReason);
 }
 
+void AABTSOpeningCinematicPreview::CalcCamera(
+	const float DeltaTime,
+	FMinimalViewInfo& OutResult)
+{
+	if (CinematicCamera)
+	{
+		CinematicCamera->GetCameraView(DeltaTime, OutResult);
+		return;
+	}
+	Super::CalcCamera(DeltaTime, OutResult);
+}
+
 void AABTSOpeningCinematicPreview::SetPreviewTimeScale(const float InTimeScale)
 {
 	PreviewTimeScale = FMath::Clamp(InTimeScale, 0.05f, 8.0f);
@@ -393,6 +407,9 @@ void AABTSOpeningCinematicPreview::StopPreview()
 void AABTSOpeningCinematicPreview::InitializeAnimationDrivers()
 {
 	AnimationDrivers.Reserve(BirdVisuals.Num());
+	PreviousAnimationCues.Init(
+		EABTSOpeningAnimationCue::Idle,
+		BirdVisuals.Num());
 	for (int32 Index = 0; Index < BirdVisuals.Num(); ++Index)
 	{
 		UABTSBirdAnimationPresentationComponent* Driver = NewObject<UABTSBirdAnimationPresentationComponent>(
@@ -443,6 +460,9 @@ void AABTSOpeningCinematicPreview::InitializeCaptureBeamVisual()
 bool AABTSOpeningCinematicPreview::InitializeProductionBinding()
 {
 	if (!GetWorld() || !PreviewController) return false;
+	AABTSM4PlayerController* ABTSController =
+		Cast<AABTSM4PlayerController>(PreviewController);
+	if (!ABTSController) return false;
 	AABTSBirdParty* ReadyParty = nullptr;
 	for (TActorIterator<AABTSBirdParty> It(GetWorld()); It; ++It)
 	{
@@ -476,11 +496,11 @@ bool AABTSOpeningCinematicPreview::InitializeProductionBinding()
 	if (PreviewStage) PreviewStage->SetVisibility(false, true);
 
 	bProductionWorldWasPaused = UGameplayStatics::IsGamePaused(GetWorld());
-	if (AABTSM4PlayerController* ABTSController = Cast<AABTSM4PlayerController>(PreviewController))
-	{
-		bProductionInputWasBlocked = ABTSController->IsCinematicInputBlocked();
-		ABTSController->SetCinematicInputBlocked(true);
-	}
+	bProductionControllerFullTickWhenPaused =
+		ABTSController->IsCinematicFullTickWhenPaused();
+	ABTSController->SetCinematicFullTickWhenPaused(true);
+	bProductionInputWasBlocked = ABTSController->IsCinematicInputBlocked();
+	ABTSController->SetCinematicInputBlocked(true);
 	if (PreviewController->MyHUD)
 	{
 		bProductionHUDWasVisible = PreviewController->MyHUD->bShowHUD;
@@ -490,7 +510,7 @@ bool AABTSOpeningCinematicPreview::InitializeProductionBinding()
 	LastProductionWallSeconds = FPlatformTime::Seconds();
 	bProductionBindingReleased = false;
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][OpeningProduction][Bound] RealParty=4 SpawnFrame=ReadyParty WorldPaused=1 HUDHidden=1 InputBlocked=1"));
+		TEXT("[ABTS][OpeningProduction][Bound] RealParty=4 SpawnFrame=ReadyParty WorldPaused=1 FullControllerTickWhenPaused=1 CameraPausedTick=1 BirdPausedTick=1 HUDHidden=1 InputBlocked=1"));
 	return true;
 }
 
@@ -512,6 +532,8 @@ void AABTSOpeningCinematicPreview::ReleaseProductionBinding()
 	{
 		if (AABTSM4PlayerController* ABTSController = Cast<AABTSM4PlayerController>(PreviewController))
 		{
+			ABTSController->SetCinematicFullTickWhenPaused(
+				bProductionControllerFullTickWhenPaused);
 			ABTSController->SetCinematicInputBlocked(bProductionInputWasBlocked);
 		}
 		if (PreviewController->MyHUD) PreviewController->MyHUD->bShowHUD = bProductionHUDWasVisible;
@@ -553,11 +575,28 @@ void AABTSOpeningCinematicPreview::UpdateBirds(const float DeltaSeconds)
 		Visual->SetRelativeRotation(LocalRotation);
 		if (AnimationDrivers.IsValidIndex(Index) && AnimationDrivers[Index])
 		{
+			const EABTSOpeningAnimationCue PreviousCue =
+				PreviousAnimationCues.IsValidIndex(Index)
+					? PreviousAnimationCues[Index]
+					: EABTSOpeningAnimationCue::Idle;
+			if (Pose.AnimationCue == EABTSOpeningAnimationCue::Celebrate
+				&& PreviousCue != EABTSOpeningAnimationCue::Celebrate)
+			{
+				AnimationDrivers[Index]->RequestAction(
+					EABTSBirdPresentationAction::Celebrate);
+			}
 			FABTSBirdAnimationSnapshot Snapshot;
 			Snapshot.bGrounded = Pose.AnimationCue != EABTSOpeningAnimationCue::Fly;
 			Snapshot.bForceFlight = Pose.AnimationCue == EABTSOpeningAnimationCue::Fly;
-			Snapshot.TangentialSpeedCMPerSecond = Pose.AnimationCue == EABTSOpeningAnimationCue::Move ? 315.0f : 0.0f;
+			Snapshot.TangentialSpeedCMPerSecond =
+				Pose.AnimationCue == EABTSOpeningAnimationCue::Move
+					? 315.0f
+					: 0.0f;
 			AnimationDrivers[Index]->UpdatePresentation(Snapshot, DeltaSeconds);
+			if (PreviousAnimationCues.IsValidIndex(Index))
+			{
+				PreviousAnimationCues[Index] = Pose.AnimationCue;
+			}
 		}
 	}
 }

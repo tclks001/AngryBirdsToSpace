@@ -35,6 +35,10 @@ namespace
 	constexpr float FixedSixMaximumPeakSettlementCM = 6.0f;
 	constexpr float FixedSixMaximumPeakRotationDegrees = 3.0f;
 	constexpr float JuryDemoFrozenTangentSupportThicknessCM = 100.0f;
+	// Release destruction keeps a dense local collapse while bounding the
+	// solver island. The full frozen body set remains the static/certification
+	// identity; only real first-hit gameplay uses this activation budget.
+	constexpr int32 FixedSixGameplayMaximumActiveBodies = 128;
 
 	uint32 ComputeProductionCandidateHash(
 		const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
@@ -451,7 +455,9 @@ bool AABTSM73StableBuildingActor::PrepareJuryDemoFixedSixChaosValidation(
 }
 
 bool AABTSM73StableBuildingActor::
-ActivatePreparedJuryDemoFixedSixChaosValidation(FString& OutError)
+ActivatePreparedJuryDemoFixedSixChaosValidation(
+	FString& OutError,
+	const FVector* GameplayImpactWorld)
 {
 	OutError.Reset();
 	if (!bJuryDemoFixedSixChaosPrepared
@@ -475,6 +481,29 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(FString& OutError)
 		}
 		PhysicsModules.Add(Module);
 	}
+	const int32 CertifiedPhysicsBodyCount = PhysicsModules.Num();
+	if (GameplayImpactWorld != nullptr
+		&& PhysicsModules.Num() > FixedSixGameplayMaximumActiveBodies)
+	{
+		const FVector ImpactWorld = *GameplayImpactWorld;
+		PhysicsModules.StableSort([&ImpactWorld](
+			const AABTSM7BuildingModule& A,
+			const AABTSM7BuildingModule& B)
+		{
+			const double DistanceA = FVector::DistSquared(
+				A.GetActorLocation(), ImpactWorld);
+			const double DistanceB = FVector::DistSquared(
+				B.GetActorLocation(), ImpactWorld);
+			if (!FMath::IsNearlyEqual(DistanceA, DistanceB, 0.001))
+			{
+				return DistanceA < DistanceB;
+			}
+			return A.GetDamageLifecycleBrickId()
+				< B.GetDamageLifecycleBrickId();
+		});
+		PhysicsModules.SetNum(FixedSixGameplayMaximumActiveBodies);
+	}
+	JuryDemoFixedSixActivePhysicsBodyCount = PhysicsModules.Num();
 	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
 		JuryDemoFixedSixStaticEntry.GetValue();
 	int32 E1CrystalTargetCount = 0;
@@ -555,14 +584,18 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(FString& OutError)
 	SetActorTickEnabled(true);
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixProductionChaos][Activated]")
-		TEXT(" Entry=%s Candidate=%u Visible=%d Bodies=%d")
+		TEXT(" Entry=%s Candidate=%u Visible=%d Bodies=%d CertifiedBodies=%d GameplayBudgeted=%d")
 		TEXT(" GravityModel=SiteUniformTangentGravity SiteUp=%s")
 		TEXT(" SimulationClock=ScopedProductionFixedStep SimulationHz=60")
 		TEXT(" M6RadialReactivation=Forbidden Accepted=1"),
 		*Entry.ManifestEntryId.ToString(),
 		JuryDemoFixedSixChaosResult.CandidateHash,
 		JuryDemoFixedSixChaosResult.VisibleModuleCount,
-		JuryDemoFixedSixChaosResult.PhysicsBodyCount,
+		JuryDemoFixedSixActivePhysicsBodyCount,
+		CertifiedPhysicsBodyCount,
+		GameplayImpactWorld != nullptr
+			&& JuryDemoFixedSixActivePhysicsBodyCount < CertifiedPhysicsBodyCount
+			? 1 : 0,
 		*ExpectedPolicy.SiteUp.ToCompactString());
 	return true;
 }
@@ -628,7 +661,9 @@ ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
 			return false;
 		}
 	}
-	if (!ActivatePreparedJuryDemoFixedSixChaosValidation(OutError))
+	const FVector GameplayImpactWorld = TriggerModule.GetActorLocation();
+	if (!ActivatePreparedJuryDemoFixedSixChaosValidation(
+		OutError, &GameplayImpactWorld))
 	{
 		bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
 		return false;
@@ -645,7 +680,7 @@ ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
 		TEXT(" TerrainBuildingResponse=Block PadsBuildingResponse=Block")
 		TEXT(" CCD=1 SiteUniformGravity=1 DamageTransaction=Continue"),
 		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
-		*TriggerModule.GetName(), JuryDemoFixedSixChaosPhysicsModules.Num());
+		*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount);
 	return true;
 }
 

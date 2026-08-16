@@ -17,12 +17,14 @@ UABTSBirdAnimationPresentationComponent::UABTSBirdAnimationPresentationComponent
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> FlyAsset(TEXT("/Game/CuteBird/Animations/Cutebird_Fly.Cutebird_Fly"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ImpactAsset(TEXT("/Game/CuteBird/Animations/Cutebird_Attack.Cutebird_Attack"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> DamageAsset(TEXT("/Game/CuteBird/Animations/Cutebird_Damage.Cutebird_Damage"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> CelebrateAsset(TEXT("/Game/CuteBird/Animations/Cutebird_Yes.Cutebird_Yes"));
 	IdleAnimation = IdleAsset.Object;
 	MoveAnimation = MoveAsset.Object;
 	JumpAnimation = JumpAsset.Object;
 	FlyAnimation = FlyAsset.Object;
 	ImpactAnimation = ImpactAsset.Object;
 	DamageAnimation = DamageAsset.Object;
+	CelebrateAnimation = CelebrateAsset.Object;
 }
 
 void UABTSBirdAnimationPresentationComponent::InitializePresentation(
@@ -140,5 +142,15 @@ void UABTSBirdAnimationPresentationComponent::PlayAnimation(
 UAnimSequence* UABTSBirdAnimationPresentationComponent::ResolveActionAnimation(
 	const EABTSBirdPresentationAction Action) const
 {
-	return Action == EABTSBirdPresentationAction::Impact ? ImpactAnimation : DamageAnimation;
+	switch (Action)
+	{
+	case EABTSBirdPresentationAction::Impact:
+		return ImpactAnimation;
+	case EABTSBirdPresentationAction::Damage:
+		return DamageAnimation;
+	case EABTSBirdPresentationAction::Celebrate:
+		return CelebrateAnimation;
+	default:
+		return nullptr;
+	}
 }

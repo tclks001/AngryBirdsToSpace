@@ -1013,16 +1013,19 @@ void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
 	});
 	const float ActivationRadiusSquared = FMath::Square(FMath::Max(0.0f, LaunchGravityActivationRadiusCM));
 	int32 ReactivatedProxyCount = 0;
-	for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies)
+	if (bPlanarTestMode)
 	{
-		if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get())
+		for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies)
 		{
-			const UStaticMeshComponent* ProxyMesh = Proxy->GetMeshComponent();
-			const FVector ProxyLocation = ProxyMesh ? ProxyMesh->GetComponentLocation() : Proxy->GetActorLocation();
-			if (FVector::DistSquared(ProxyLocation, SlingCenter) > ActivationRadiusSquared) continue;
-			Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
-			Proxy->Reactivate(FVector::ZeroVector);
-			++ReactivatedProxyCount;
+			if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get())
+			{
+				const UStaticMeshComponent* ProxyMesh = Proxy->GetMeshComponent();
+				const FVector ProxyLocation = ProxyMesh ? ProxyMesh->GetComponentLocation() : Proxy->GetActorLocation();
+				if (FVector::DistSquared(ProxyLocation, SlingCenter) > ActivationRadiusSquared) continue;
+				Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
+				Proxy->Reactivate(FVector::ZeroVector);
+				++ReactivatedProxyCount;
+			}
 		}
 	}
 
@@ -1034,12 +1037,10 @@ void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
 			if (UHierarchicalInstancedStaticMeshComponent* HISM = It->GetHISM()) PromotedCount += PromoteHISMForLaunchGravity(*HISM);
 		}
 	}
-	else if (Planet.IsValid())
-	{
-		PromotedCount += PromoteHISMForLaunchGravity(*Planet->ForestHISM);
-		PromotedCount += PromoteHISMForLaunchGravity(*Planet->RockHISM);
-	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ReactivatedProxies=%d ContactGrace=%.3f"),
+	// Production scenery stays instanced/static until a real impact promotes the
+	// exact hit primitive. Pre-promoting and re-waking every tree/rock in a 60 m
+	// radius accumulated hundreds of unrelated Chaos bodies across launches.
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ReactivatedProxies=%d ProductionPrePromotion=ImpactOnly FrozenDebrisReactivation=Disabled ContactGrace=%.3f"),
 		bPlanarTestMode ? 1 : 0, LaunchGravityActivationRadiusCM, PromotedCount,
 		DynamicProxies.Num(), ReactivatedProxyCount, LaunchContactDamageGraceSeconds);
 }
