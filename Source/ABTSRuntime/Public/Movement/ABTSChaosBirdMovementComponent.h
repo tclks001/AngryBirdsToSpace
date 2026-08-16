@@ -80,6 +80,7 @@ private:
 	float CollisionGroundMaxAngleDegrees = 55.0f;
 
 	TWeakObjectPtr<AABTSM2Planet> Planet;
+	TWeakObjectPtr<AABTSM2Planet> LoggedPrimaryGravitySource;
 	FVector PlanarOrigin = FVector::ZeroVector;
 	FVector PlanarUp = FVector::UpVector;
 	bool bPlanarTestMode = false;

@@ -15,6 +15,7 @@
 #include "ProceduralMeshComponent.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "Movement/ABTSSatelliteGravityMovementPolicy.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 
 UABTSRadialForceMovementComponent::UABTSRadialForceMovementComponent()
 {
@@ -221,16 +222,7 @@ bool UABTSRadialForceMovementComponent::IsGrounded() const
 
 AABTSM2Planet* UABTSRadialForceMovementComponent::FindPlanet()
 {
-	if (Planet.IsValid() && Planet->IsPlanetReady()) return Planet.Get();
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		if (It->IsPlanetReady())
-		{
-			Planet = *It;
-			return Planet.Get();
-		}
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }
 
 UABTSRadialSurfaceSuspensionComponent* UABTSRadialForceMovementComponent::FindSuspension()
