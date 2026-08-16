@@ -30,7 +30,7 @@
 namespace
 {
 	constexpr float BasicCubeSizeCM = 100.0f;
-	constexpr float FixedSixFrozenTangentSupportThicknessCM = 100.0f;
+	constexpr float StableBuildingFrozenTangentSupportThicknessCM = 100.0f;
 
 	FTransform WorldBoxTransform(const FABTSM73GroundContext& Context, const FVector& LocalCenter, const FVector& Dimensions)
 	{
@@ -1815,11 +1815,11 @@ ConfigureJuryDemoFixedSixFrozenTangentSupport(
 	const FTransform LocalSupportTransform(
 		FQuat::Identity,
 		FVector(0.0f, 0.0f,
-			-FixedSixFrozenTangentSupportThicknessCM * 0.5f),
+			-StableBuildingFrozenTangentSupportThicknessCM * 0.5f),
 		FVector(
 			Entry.PadHalfExtentCM.X * 2.0f / BasicCubeSizeCM,
 			Entry.PadHalfExtentCM.Y * 2.0f / BasicCubeSizeCM,
-			FixedSixFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
+			StableBuildingFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
 	FoundationCap->SetRelativeTransform(LocalSupportTransform);
 	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
 	FoundationCap->SetCollisionObjectType(ECC_WorldStatic);
@@ -1844,7 +1844,7 @@ ConfigureJuryDemoFixedSixFrozenTangentSupport(
 		TEXT(" Visible=0 Collision=QueryAndPhysics Accepted=1"),
 		*Entry.ManifestEntryId.ToString(),
 		*Entry.PadHalfExtentCM.ToString(),
-		FixedSixFrozenTangentSupportThicknessCM,
+		StableBuildingFrozenTangentSupportThicknessCM,
 		static_cast<int32>(FoundationCap->GetCollisionObjectType()));
 	return true;
 }
@@ -1858,11 +1858,11 @@ ValidateJuryDemoFixedSixFrozenTangentSupport(
 	const FTransform ExpectedLocalTransform(
 		FQuat::Identity,
 		FVector(0.0f, 0.0f,
-			-FixedSixFrozenTangentSupportThicknessCM * 0.5f),
+			-StableBuildingFrozenTangentSupportThicknessCM * 0.5f),
 		FVector(
 			Entry.PadHalfExtentCM.X * 2.0f / BasicCubeSizeCM,
 			Entry.PadHalfExtentCM.Y * 2.0f / BasicCubeSizeCM,
-			FixedSixFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
+			StableBuildingFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
 	const FTransform ExpectedWorldTransform =
 		ExpectedLocalTransform * GetActorTransform();
 	if (!bJuryDemoFixedSixFrozenTangentSupportActive
