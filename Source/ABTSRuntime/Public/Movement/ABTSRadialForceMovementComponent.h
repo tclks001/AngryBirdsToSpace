@@ -41,6 +41,10 @@ public:
 	bool IsGrounded() const;
 	void BeginBallisticFlight(const FVector& InitialVelocity, float InFlightAirDragPerSecond);
 	void EndBallisticFlight(bool bResetVelocity);
+	/** Satellite gravity is a slingshot-flight mechanic, never a ground-locomotion force. */
+	static FVector ResolveSatelliteAccelerationForMovement(
+		bool bIsBallisticFlight,
+		const FVector& RawSatelliteAcceleration);
 	void SetVelocity(const FVector& InVelocity) { Velocity = InVelocity; }
 	const FVector& GetVelocity() const { return Velocity; }
 	const FVector& GetPendingMoveVector() const { return PendingMoveVector; }
@@ -122,6 +126,7 @@ private:
 	FVector PendingMoveVector = FVector::ZeroVector;
 	float JumpBufferRemainingSeconds = 0.0f;
 	bool bLoggedNoDependencies = false;
+	bool bLoggedGroundSatelliteGravitySuppressed = false;
 	bool bBallisticFlight = false;
 	float BallisticFlightAirDragPerSecond = 0.08f;
 	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;
