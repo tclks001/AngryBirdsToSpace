@@ -11,11 +11,17 @@
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
+#include "HAL/PlatformMisc.h"
+#include "HAL/PlatformTime.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Crc.h"
+#include "Misc/Parse.h"
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -326,6 +332,8 @@ AABTSM7GameMode::AABTSM7GameMode()
 void AABTSM7GameMode::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateProductionFlowTiming(DeltaSeconds);
+	UpdateJuryDemoFixedSixProductionChaosBatch();
 	if (bShowTaskGraphPositionDebug)
 	{
 		DrawTaskGraphPositionDebug();
@@ -337,6 +345,9 @@ void AABTSM7GameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ClearSatellitePracticeE1CrystalTargetBindingTimer();
 	SatellitePracticeE1CrystalBindingLifecycle.Cancel();
 	LastSatellitePracticeE1CrystalBindingWaitReason.Reset();
+	JuryDemoFixedSixChaosBuildings.Reset();
+	bJuryDemoFixedSixChaosBatchActive = false;
+	bProductionFlowTimingActive = false;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -757,6 +768,326 @@ void AABTSM7GameMode::TryBindSatellitePracticeE1CrystalTarget()
 		*GetNameSafe(SatelliteRuntime));
 }
 
+bool AABTSM7GameMode::BeginJuryDemoFixedSixProductionChaosBatch()
+{
+	JuryDemoFixedSixChaosBuildings.Reset();
+	for (const FABTSM7TaskGraphBuildingDebugEntry& DebugEntry :
+		TaskGraphBuildingDebugEntries)
+	{
+		if (AABTSM73StableBuildingActor* Building = DebugEntry.Building.Get();
+			Building != nullptr
+			&& Building->IsJuryDemoFixedSixStaticRegistrationAccepted())
+		{
+			JuryDemoFixedSixChaosBuildings.Add(Building);
+		}
+	}
+	JuryDemoFixedSixChaosBuildings.Sort([](
+		const TWeakObjectPtr<AABTSM73StableBuildingActor>& Left,
+		const TWeakObjectPtr<AABTSM73StableBuildingActor>& Right)
+	{
+		const AABTSM73StableBuildingActor* LeftActor = Left.Get();
+		const AABTSM73StableBuildingActor* RightActor = Right.Get();
+		return static_cast<int32>(LeftActor != nullptr
+			? LeftActor->GetJuryDemoFixedSixComplexityId()
+			: EABTSM73BeamDemoBuilding::Custom)
+			< static_cast<int32>(RightActor != nullptr
+				? RightActor->GetJuryDemoFixedSixComplexityId()
+				: EABTSM73BeamDemoBuilding::Custom);
+	});
+	if (JuryDemoFixedSixChaosBuildings.Num()
+		!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][FixedSixProductionChaos][BatchRejected]")
+			TEXT(" Reason=BuildingCount Actual=%d Expected=%d"),
+			JuryDemoFixedSixChaosBuildings.Num(),
+			FABTSJuryDemoFixedSixContract::ExpectedSiteCount);
+		return false;
+	}
+	for (int32 Index = 0; Index < JuryDemoFixedSixChaosBuildings.Num();
+		++Index)
+	{
+		const AABTSM73StableBuildingActor* Building =
+			JuryDemoFixedSixChaosBuildings[Index].Get();
+		if (Building == nullptr
+			|| static_cast<int32>(Building->GetJuryDemoFixedSixComplexityId())
+				!= Index + 1)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][FixedSixProductionChaos][BatchRejected]")
+				TEXT(" Reason=ComplexityOrder Index=%d Actor=%s Complexity=%d"),
+				Index, *GetNameSafe(Building),
+				Building != nullptr
+					? static_cast<int32>(
+						Building->GetJuryDemoFixedSixComplexityId())
+					: INDEX_NONE);
+			return false;
+		}
+	}
+
+	const bool bAsyncLoadingBeforeDrain = IsAsyncLoading();
+	const double DrainStartSeconds = FPlatformTime::Seconds();
+	FlushAsyncLoading();
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixProductionChaos][BackgroundDrain]")
+		TEXT(" AsyncBefore=%d AsyncAfter=%d WallMS=%.3f Accepted=%d"),
+		bAsyncLoadingBeforeDrain ? 1 : 0,
+		IsAsyncLoading() ? 1 : 0,
+		(FPlatformTime::Seconds() - DrainStartSeconds) * 1000.0,
+		IsAsyncLoading() ? 0 : 1);
+	if (IsAsyncLoading())
+	{
+		return false;
+	}
+
+	FString FailureReason;
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding :
+		JuryDemoFixedSixChaosBuildings)
+	{
+		AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+		if (Building == nullptr
+			|| !Building->PrepareJuryDemoFixedSixChaosValidation(
+				980.0f, FailureReason))
+		{
+			if (FailureReason.IsEmpty())
+			{
+				FailureReason = TEXT("PreparationActorMissing");
+			}
+			for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& Cleanup :
+				JuryDemoFixedSixChaosBuildings)
+			{
+				if (AABTSM73StableBuildingActor* CleanupActor = Cleanup.Get())
+				{
+					CleanupActor->RejectJuryDemoFixedSixChaosValidation(
+						FailureReason);
+				}
+			}
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][FixedSixProductionChaos][BatchRejected]")
+				TEXT(" Phase=Prepare Reason=%s"), *FailureReason);
+			return false;
+		}
+	}
+	LogProductionFlowSegment(TEXT("ChaosPrepared"));
+
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding :
+		JuryDemoFixedSixChaosBuildings)
+	{
+		AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+		if (Building == nullptr
+			|| !Building->ActivatePreparedJuryDemoFixedSixChaosValidation(
+				FailureReason))
+		{
+			if (FailureReason.IsEmpty())
+			{
+				FailureReason = TEXT("ActivationActorMissing");
+			}
+			for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& Cleanup :
+				JuryDemoFixedSixChaosBuildings)
+			{
+				if (AABTSM73StableBuildingActor* CleanupActor = Cleanup.Get())
+				{
+					CleanupActor->RejectJuryDemoFixedSixChaosValidation(
+						FailureReason);
+				}
+			}
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][FixedSixProductionChaos][BatchRejected]")
+				TEXT(" Phase=Activate Reason=%s"), *FailureReason);
+			return false;
+		}
+	}
+	bJuryDemoFixedSixChaosBatchActive = true;
+	bJuryDemoFixedSixChaosBatchTerminal = false;
+	LogProductionFlowSegment(TEXT("ChaosActivated"));
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixProductionChaos][BatchActivated]")
+		TEXT(" Buildings=6 StableOrder=E1,E2,E3,E4,E5,E6")
+		TEXT(" GravityModel=SiteUniformTangentGravity Concurrent=1")
+		TEXT(" M6RadialReactivation=Forbidden"));
+	return true;
+}
+
+void AABTSM7GameMode::UpdateJuryDemoFixedSixProductionChaosBatch()
+{
+	if (!bJuryDemoFixedSixChaosBatchActive
+		|| bJuryDemoFixedSixChaosBatchTerminal)
+	{
+		return;
+	}
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding :
+		JuryDemoFixedSixChaosBuildings)
+	{
+		const AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+		if (Building == nullptr)
+		{
+			bJuryDemoFixedSixChaosBatchActive = false;
+			bJuryDemoFixedSixChaosBatchTerminal = true;
+			FinishProductionFlow(false, TEXT("FixedSixChaosActorLost"));
+			return;
+		}
+		const EABTSM73IdleValidationState State =
+			Building->GetIdleValidationState();
+		if (State == EABTSM73IdleValidationState::Pending
+			|| State == EABTSM73IdleValidationState::Running)
+		{
+			return;
+		}
+	}
+
+	bJuryDemoFixedSixChaosBatchActive = false;
+	bJuryDemoFixedSixChaosBatchTerminal = true;
+	bool bAllAccepted = true;
+	uint32 AggregateResultHash = 0;
+	for (int32 Index = 0; Index < JuryDemoFixedSixChaosBuildings.Num();
+		++Index)
+	{
+		const AABTSM73StableBuildingActor* Building =
+			JuryDemoFixedSixChaosBuildings[Index].Get();
+		FABTSM73JuryDemoFixedSixChaosResult Result;
+		const bool bHasResult = Building != nullptr
+			&& Building->CopyJuryDemoFixedSixChaosResult(Result);
+		bAllAccepted = bAllAccepted && bHasResult && Result.bAccepted;
+		AggregateResultHash = FCrc::MemCrc32(
+			&Result.ResultHash, sizeof(Result.ResultHash), AggregateResultHash);
+		UE_LOG(LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M7][FixedSixProductionChaos][StableResult]")
+			TEXT(" Order=%d Complexity=E%d Entry=%s Candidate=%u Result=%u")
+			TEXT(" Accepted=%d Final=%.3f/%.3f/%.3f Peak=%.3f/%.3f/%.3f")
+			TEXT(" Awake=%d Internal=%.3f Wall=%.3f Visible=%d Bodies=%d Assembly=%llu"),
+			Index + 1, static_cast<int32>(Result.ComplexityId),
+			*Result.ManifestEntryId.ToString(), Result.CandidateHash,
+			Result.ResultHash, bHasResult && Result.bAccepted ? 1 : 0,
+			Result.FinalPlanarDriftCM, Result.FinalSettlementCM,
+			Result.FinalRotationDegrees, Result.PeakPlanarDriftCM,
+			Result.PeakSettlementCM, Result.PeakRotationDegrees,
+			Result.FinalAwakeBodyCount, Result.InternalSeconds,
+			Result.WallSeconds, Result.VisibleModuleCount,
+			Result.PhysicsBodyCount, Result.PhysicsAssemblyHash);
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixProductionChaos][BatchResult]")
+		TEXT(" Accepted=%d Buildings=6 StableOrder=E1,E2,E3,E4,E5,E6")
+		TEXT(" AggregateResult=%u BuildingValidation=%s"),
+		bAllAccepted ? 1 : 0, AggregateResultHash,
+		bAllAccepted ? TEXT("Accepted") : TEXT("Rejected"));
+	LogProductionFlowSegment(
+		bAllAccepted ? TEXT("ChaosAccepted") : TEXT("ChaosRejected"));
+	if (!bAllAccepted)
+	{
+		FinishProductionFlow(false, TEXT("FixedSixChaosHardGateRejected"));
+	}
+}
+
+void AABTSM7GameMode::UpdateProductionFlowTiming(
+	const float DeltaSeconds)
+{
+	UE_UNUSED(DeltaSeconds);
+	if (!bProductionFlowTimingActive || bProductionFlowTerminal)
+	{
+		return;
+	}
+	const FCPUTime CPUTime = FPlatformTime::GetCPUTime();
+	const double NowSeconds = FPlatformTime::Seconds();
+	const double EffectiveWallSeconds = FMath::Max(
+		0.0, NowSeconds - ProductionFlowLastCPUSampleWallSeconds);
+	ProductionFlowLastCPUSampleWallSeconds = NowSeconds;
+	ProductionFlowAccumulatedTickWallSeconds += EffectiveWallSeconds;
+	ProductionFlowEstimatedCPUSeconds += EffectiveWallSeconds
+		* FMath::Max(0.0f, CPUTime.CPUTimePctRelative) / 100.0f;
+	AABTSM6SlingshotSystem* SlingshotSystem =
+		ProductionFlowSlingshotSystem.Get();
+	if (SlingshotSystem == nullptr)
+	{
+		FinishProductionFlow(false, TEXT("StartupPhysicsAuthorityLost"));
+		return;
+	}
+	if (SlingshotSystem->HasStartupPhysicsWarmupFailed())
+	{
+		FinishProductionFlow(false, TEXT("M6StartupPhysicsFailed"));
+		return;
+	}
+	if (bJuryDemoFixedSixChaosBatchTerminal
+		&& SlingshotSystem->IsStartupPhysicsWarmupComplete())
+	{
+		FinishProductionFlow(true, TEXT("M6StartupPhysicsReady"));
+	}
+}
+
+void AABTSM7GameMode::LogProductionFlowSegment(const TCHAR* Segment)
+{
+	if (!bProductionFlowTimingActive
+		|| Segment == nullptr
+		|| ProductionFlowStartWallSeconds <= 0.0)
+	{
+		return;
+	}
+	const double NowSeconds = FPlatformTime::Seconds();
+	const FCPUTime CPUTime = FPlatformTime::GetCPUTime();
+	const double SegmentWallSeconds = FMath::Max(
+		0.0, NowSeconds - ProductionFlowLastSegmentWallSeconds);
+	const double TickCoveredSeconds = FMath::Max(
+		0.0, ProductionFlowAccumulatedTickWallSeconds
+			- ProductionFlowLastSegmentTickWallSeconds);
+	const double SynchronousWallSeconds = FMath::Max(
+		0.0, SegmentWallSeconds - TickCoveredSeconds);
+	ProductionFlowEstimatedCPUSeconds += SynchronousWallSeconds
+		* FMath::Max(0.0f, CPUTime.CPUTimePctRelative) / 100.0f;
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FlowTiming][P0]")
+		TEXT(" Segment=%s WallFromStartMS=%.3f WallSegmentMS=%.3f")
+		TEXT(" CPUCoreSecondsEstimate=%.6f CPUSegmentEstimate=%.6f")
+		TEXT(" CPUProcessPct=%.3f CPUCorePct=%.3f"),
+		Segment,
+		(NowSeconds - ProductionFlowStartWallSeconds) * 1000.0,
+		SegmentWallSeconds * 1000.0,
+		ProductionFlowEstimatedCPUSeconds,
+		ProductionFlowEstimatedCPUSeconds
+			- ProductionFlowLastSegmentCPUSeconds,
+		CPUTime.CPUTimePct,
+		CPUTime.CPUTimePctRelative);
+	ProductionFlowLastSegmentWallSeconds = NowSeconds;
+	ProductionFlowLastSegmentCPUSeconds =
+		ProductionFlowEstimatedCPUSeconds;
+	ProductionFlowLastSegmentTickWallSeconds =
+		ProductionFlowAccumulatedTickWallSeconds;
+	ProductionFlowLastCPUSampleWallSeconds = NowSeconds;
+}
+
+void AABTSM7GameMode::FinishProductionFlow(
+	const bool bReady,
+	const FString& Reason)
+{
+	if (!bProductionFlowTimingActive || bProductionFlowTerminal)
+	{
+		return;
+	}
+	LogProductionFlowSegment(bReady ? TEXT("FlowReady") : TEXT("FlowFailed"));
+	bProductionFlowTerminal = true;
+	bProductionFlowTimingActive = false;
+	const FString TerminalMessage = FString::Printf(
+		TEXT("[ABTS][M7][FlowTiming][P0][Terminal]")
+		TEXT(" Ready=%d Reason=%s WallTotalMS=%.3f CPUCoreSecondsEstimate=%.6f"),
+		bReady ? 1 : 0, *Reason,
+		(FPlatformTime::Seconds() - ProductionFlowStartWallSeconds) * 1000.0,
+		ProductionFlowEstimatedCPUSeconds);
+	if (bReady)
+	{
+		UE_LOG(LogABTSRuntime, Display, TEXT("%s"), *TerminalMessage);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error, TEXT("%s"), *TerminalMessage);
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM7ExitOnFlowReady")))
+	{
+		FGenericPlatformMisc::RequestExitWithStatus(
+			false, bReady ? 0 : 2,
+			bReady ? TEXT("M7FlowReady") : TEXT("M7FlowFailed"));
+	}
+}
+
 void AABTSM7GameMode::DrawTaskGraphPositionDebug()
 {
 	AABTSM3Planet* Planet = TaskGraphDebugPlanet.Get();
@@ -796,6 +1127,19 @@ void AABTSM7GameMode::DrawTaskGraphPositionDebug()
 
 void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, const int32 SpawnCellId)
 {
+	ProductionFlowStartWallSeconds = FPlatformTime::Seconds();
+	ProductionFlowLastSegmentWallSeconds = ProductionFlowStartWallSeconds;
+	ProductionFlowEstimatedCPUSeconds = 0.0;
+	ProductionFlowLastSegmentCPUSeconds = 0.0;
+	ProductionFlowAccumulatedTickWallSeconds = 0.0;
+	ProductionFlowLastSegmentTickWallSeconds = 0.0;
+	ProductionFlowLastCPUSampleWallSeconds =
+		ProductionFlowStartWallSeconds;
+	bProductionFlowTimingActive = true;
+	bProductionFlowTerminal = false;
+	bJuryDemoFixedSixChaosBatchActive = false;
+	bJuryDemoFixedSixChaosBatchTerminal = false;
+	LogProductionFlowSegment(TEXT("FlowStart"));
 	Super::OnInitialPlayerPlaced(Character, SpawnTransform, SpawnCellId);
 	AABTSM6SlingshotSystem* SlingshotSystem = GetRuntimeSlingshotSystem();
 	AABTSM3Planet* Planet = nullptr;
@@ -818,6 +1162,15 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		&& Planet->TryExportBuildingGenerationContract(BuildingContract);
 	const bool bFixedSixSnapshotPresent = bBuildingContractReady
 		&& !BuildingContract.JuryDemoFixedSix.IsEmpty();
+	if (bFixedSixSnapshotPresent)
+	{
+		ProductionFlowSlingshotSystem = SlingshotSystem;
+		LogProductionFlowSegment(TEXT("ContractReady"));
+	}
+	else
+	{
+		bProductionFlowTimingActive = false;
+	}
 	const int32 ExpectedRequiredBuildingCount =
 		bFixedSixSnapshotPresent
 		? FABTSJuryDemoFixedSixContract::ExpectedSiteCount
@@ -864,6 +1217,7 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		bBuildingSetupFailed = bBuildingSetupFailed || bFixedSixSetupFailed;
 		if (!bFixedSixSetupFailed)
 		{
+			LogProductionFlowSegment(TEXT("StaticRegistered"));
 			ScheduleSatellitePracticeE1CrystalTargetBinding();
 		}
 	}
@@ -915,6 +1269,18 @@ void AABTSM7GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	if (SlingshotSystem)
 	{
 		SlingshotSystem->SealRequiredBuildingContract(bBuildingSetupFailed);
+	}
+	if (bFixedSixSnapshotPresent)
+	{
+		LogProductionFlowSegment(TEXT("ContractSealed"));
+		if (bBuildingSetupFailed
+			|| !BeginJuryDemoFixedSixProductionChaosBatch())
+		{
+			FinishProductionFlow(false,
+				bBuildingSetupFailed
+					? TEXT("FixedSixStaticSetupRejected")
+					: TEXT("FixedSixChaosBatchStartRejected"));
+		}
 	}
 	UE_LOG(LogABTSRuntime, Log,
 		TEXT("[ABTS][M7] Entry ready=%d StartCell=%d TestSet=%d")

@@ -177,6 +177,11 @@ private:
 	void TryBindSatellitePracticeE1CrystalTarget();
 	void ClearSatellitePracticeE1CrystalTargetBindingTimer();
 	void DrawTaskGraphPositionDebug();
+	bool BeginJuryDemoFixedSixProductionChaosBatch();
+	void UpdateJuryDemoFixedSixProductionChaosBatch();
+	void UpdateProductionFlowTiming(float DeltaSeconds);
+	void LogProductionFlowSegment(const TCHAR* Segment);
+	void FinishProductionFlow(bool bReady, const FString& Reason);
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M7")
 	TSubclassOf<AABTSM7BuildingMaterialSystem> BuildingMaterialSystemClass;
@@ -236,6 +241,20 @@ private:
 	FTimerHandle SatellitePracticeE1CrystalBindingTimerHandle;
 	TWeakObjectPtr<UWorld> SatellitePracticeE1CrystalBindingWorld;
 	FString LastSatellitePracticeE1CrystalBindingWaitReason;
+	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>>
+		JuryDemoFixedSixChaosBuildings;
+	TWeakObjectPtr<AABTSM6SlingshotSystem> ProductionFlowSlingshotSystem;
+	bool bJuryDemoFixedSixChaosBatchActive = false;
+	bool bJuryDemoFixedSixChaosBatchTerminal = false;
+	bool bProductionFlowTimingActive = false;
+	bool bProductionFlowTerminal = false;
+	double ProductionFlowStartWallSeconds = 0.0;
+	double ProductionFlowLastSegmentWallSeconds = 0.0;
+	double ProductionFlowEstimatedCPUSeconds = 0.0;
+	double ProductionFlowLastSegmentCPUSeconds = 0.0;
+	double ProductionFlowAccumulatedTickWallSeconds = 0.0;
+	double ProductionFlowLastSegmentTickWallSeconds = 0.0;
+	double ProductionFlowLastCPUSampleWallSeconds = 0.0;
 
 	friend class FABTSM7SatellitePracticeE1CrystalBindingLifecycleTest;
 };
