@@ -3,9 +3,13 @@
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 
 #include "ABTSRuntime.h"
-#include "Calibration/ABTSCalibrationTargetProxy.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Components/BoxComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -248,6 +252,81 @@ bool HasPawnBlockingCollision(const AActor& Actor)
 		}
 	}
 	return false;
+}
+
+FName ResolveFrozenBrickHISMName(const EABTSM7BuildingMaterial Material)
+{
+	switch (Material)
+	{
+	case EABTSM7BuildingMaterial::Wood: return TEXT("WoodPreview");
+	case EABTSM7BuildingMaterial::Stone: return TEXT("StonePreview");
+	case EABTSM7BuildingMaterial::Iron: return TEXT("IronPreview");
+	case EABTSM7BuildingMaterial::Glass: return TEXT("GlassPreview");
+	default: return NAME_None;
+	}
+}
+
+bool DoesStableBuildingMatchFrozenBrickUnion(
+	const AABTSM73StableBuildingActor& Building,
+	const FABTSM73BuildingFreezeV3Descriptor& Descriptor)
+{
+	constexpr double BasicCubeSizeCM = 100.0;
+	constexpr double TransformTolerance = 0.001;
+	TInlineComponentArray<UHierarchicalInstancedStaticMeshComponent*> HISMs;
+	Building.GetComponents(HISMs);
+	for (const EABTSM7BuildingMaterial Material : {
+		EABTSM7BuildingMaterial::Wood,
+		EABTSM7BuildingMaterial::Stone,
+		EABTSM7BuildingMaterial::Iron,
+		EABTSM7BuildingMaterial::Glass})
+	{
+		const FName ComponentName = ResolveFrozenBrickHISMName(Material);
+		UHierarchicalInstancedStaticMeshComponent* MaterialHISM = nullptr;
+		for (UHierarchicalInstancedStaticMeshComponent* HISM : HISMs)
+		{
+			if (IsValid(HISM) && HISM->GetFName() == ComponentName)
+			{
+				if (MaterialHISM != nullptr)
+				{
+					return false;
+				}
+				MaterialHISM = HISM;
+			}
+		}
+		int32 ExpectedInstanceCount = 0;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Descriptor.Bricks)
+		{
+			ExpectedInstanceCount += Brick.BrickSpec.Material == Material ? 1 : 0;
+		}
+		if (!IsValid(MaterialHISM)
+			|| MaterialHISM->GetInstanceCount() != ExpectedInstanceCount)
+		{
+			return false;
+		}
+		int32 MaterialInstanceIndex = 0;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Descriptor.Bricks)
+		{
+			if (Brick.BrickSpec.Material != Material)
+			{
+				continue;
+			}
+			FTransform ActualLocalTransform = FTransform::Identity;
+			if (!MaterialHISM->GetInstanceTransform(
+				MaterialInstanceIndex++, ActualLocalTransform, false))
+			{
+				return false;
+			}
+			FTransform ExpectedLocalTransform = Brick.LocalTransform;
+			ExpectedLocalTransform.SetScale3D(
+				Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+			if (!ActualLocalTransform.Equals(
+				ExpectedLocalTransform, TransformTolerance))
+			{
+				return false;
+			}
+		}
+	}
+	return !Descriptor.Bricks.IsEmpty();
 }
 
 int32 DisableVisibilityInteraction(AActor& Actor)
@@ -552,39 +631,100 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	GravitySnapshot.FlightAirDragPerSecond =
 		FrozenCatalog.FlightAirDragPerSecond;
 	GravitySnapshot.bSatelliteGravityEnabled = true;
-	FTransform ResolvedE5Transform = FTransform::Identity;
-	FString TargetFailure;
-	if (!FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
-			RuntimeSnapshot.PracticeLaunchWorldTransform.GetLocation(),
-			GravitySnapshot,
-			FrozenPreset,
-			ResolvedE5Transform,
-			&TargetFailure))
+	const FTransform ResolvedE5Transform =
+		CandidateSnapshot.E5TargetWorldTransform;
+	FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+	FString E1DescriptorFailure;
+	if (!FABTSM73BuildingFreezeV3::DeriveAndValidate(
+			EABTSM73BeamDemoBuilding::E1ColumnBreak,
+			E1Descriptor,
+			E1DescriptorFailure)
+		|| E1Descriptor.DescriptorHash != static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetDescriptorHash))
+	{
+		return RejectSpawn(TEXT("FrozenE1UnionDescriptor"));
+	}
+	const uint64 ExpectedTargetIdentity =
+		FABTSM3MonthlySatellitePreviewBuilder::
+			ComputeProductionTargetIdentityHash(
+				static_cast<uint64>(
+					CandidateSnapshot.ProductionTargetDescriptorHash),
+				CandidateSnapshot.SatelliteSiteWorldTransform,
+				ResolvedE5Transform,
+				CandidateSnapshot.E5TargetHalfExtentCM);
+	const FABTSM73BeamD1BrickBinding* WitnessBrick =
+		E1Descriptor.Bricks.FindByPredicate(
+			[this](const FABTSM73BeamD1BrickBinding& Brick)
+			{
+				return Brick.BrickId
+					== CandidateSnapshot.ProductionTargetModuleId;
+			});
+	if (!ResolvedE5Transform.IsValid()
+		|| CandidateSnapshot.E5TargetHalfExtentCM.GetMin() <= 0.0f
+		|| WitnessBrick == nullptr
+		|| !ResolvedE5Transform.Equals(
+			WitnessBrick->LocalTransform
+				* CandidateSnapshot.SatelliteSiteWorldTransform,
+			0.001f)
+		|| !CandidateSnapshot.E5TargetHalfExtentCM.Equals(
+			WitnessBrick->BrickSpec.DimensionsCM * 0.5f, 0.001f)
+		|| ExpectedTargetIdentity != static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash))
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=E5Transform Detail=%s"),
-			*TargetFailure);
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=ProductionTargetIdentity Expected=%016llX Candidate=%016llX"),
+			static_cast<unsigned long long>(ExpectedTargetIdentity),
+			static_cast<unsigned long long>(static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)));
 		return false;
 	}
 
-	RuntimeE5Target =
-		GetWorld()->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
-			AABTSCalibrationTargetProxy::StaticClass(),
-			ResolvedE5Transform,
-			this,
-			nullptr,
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	RuntimeE5Target = GetWorld()->SpawnActor<AActor>(
+		AActor::StaticClass(),
+		CandidateSnapshot.SatelliteSiteWorldTransform,
+		FActorSpawnParameters());
 	if (RuntimeE5Target == nullptr)
 	{
 		return RejectSpawn(TEXT("E5Spawn"));
 	}
-	RuntimeE5Target->ConfigureCube(
-		TEXT("Satellite.Backside.E5"),
-		CandidateSnapshot.E5TargetHalfExtentCM.GetMax(),
-		FLinearColor(1.0f, 0.12f, 0.72f, 1.0f));
-	UGameplayStatics::FinishSpawningActor(
-		RuntimeE5Target,
-		ResolvedE5Transform);
+	RuntimeE5Target->SetOwner(this);
+	RuntimeE5Target->Tags.AddUnique(
+		TEXT("Satellite.Backside.FrozenE1BuildingModules"));
+	USceneComponent* const UnionRoot = NewObject<USceneComponent>(
+		RuntimeE5Target, TEXT("FrozenE1BuildingModuleUnionRoot"));
+	if (UnionRoot == nullptr)
+	{
+		return RejectSpawn(TEXT("E1ModuleUnionRootCreate"));
+	}
+	RuntimeE5Target->SetRootComponent(UnionRoot);
+	UnionRoot->RegisterComponent();
+	int32 RegisteredUnionModules = 0;
+	for (const FABTSM73BeamD1BrickBinding& Brick : E1Descriptor.Bricks)
+	{
+		UBoxComponent* const ModuleCollision = NewObject<UBoxComponent>(
+			RuntimeE5Target,
+			FName(*FString::Printf(
+				TEXT("FrozenE1BrickOBB_%03d"), Brick.BrickId)));
+		if (ModuleCollision == nullptr)
+		{
+			return RejectSpawn(TEXT("E1ModuleUnionCollisionCreate"));
+		}
+		ModuleCollision->SetupAttachment(UnionRoot);
+		ModuleCollision->SetRelativeTransform(Brick.LocalTransform);
+		ModuleCollision->InitBoxExtent(
+			Brick.BrickSpec.DimensionsCM * 0.5f);
+		ModuleCollision->SetCollisionEnabled(
+			ECollisionEnabled::QueryAndPhysics);
+		ModuleCollision->SetCollisionResponseToAllChannels(ECR_Block);
+		ModuleCollision->RegisterComponent();
+		++RegisteredUnionModules;
+	}
+	if (RegisteredUnionModules != E1Descriptor.Bricks.Num())
+	{
+		return RejectSpawn(TEXT("E1ModuleUnionCardinality"));
+	}
+	RuntimeE5Target->SetActorTransform(
+		CandidateSnapshot.SatelliteSiteWorldTransform);
 	RuntimeE5Target->SetActorEnableCollision(true);
 	RuntimeE5GameplayTarget = RuntimeE5Target;
 	RuntimeE5Target->AttachToActor(
@@ -626,7 +766,14 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2 =
 		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
 	RuntimeSnapshot.E5WorldTransform = RuntimeE5Target->GetActorTransform();
-	RuntimeSnapshot.E5HalfExtentCM = RuntimeE5Target->GetTargetHalfExtentCM();
+	RuntimeSnapshot.E5HalfExtentCM = E1Descriptor.SiteLocalBounds.GetExtent();
+	RuntimeSnapshot.TargetAuthority = CandidateSnapshot.TargetAuthority;
+	RuntimeSnapshot.ProductionTargetDescriptorHash =
+		CandidateSnapshot.ProductionTargetDescriptorHash;
+	RuntimeSnapshot.ProductionTargetModuleId =
+		CandidateSnapshot.ProductionTargetModuleId;
+	RuntimeSnapshot.ProductionTargetIdentityHash =
+		CandidateSnapshot.ProductionTargetIdentityHash;
 	RuntimeSnapshot.BaselineGravitySnapshotHash =
 		static_cast<int64>(BaselineGravitySnapshotHash);
 	RuntimeSnapshot.RuntimeLayoutSnapshotHash = static_cast<int64>(
@@ -1001,11 +1148,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeFrozenSatellitePracticePresetV0();
 	FABTSSatellitePracticePreset CertificationPreset = FrozenPreset;
-	const bool bProductionCrystalTarget =
-		RuntimeSnapshot.E5HalfExtentCM.GetMax() <= 36.0f + KINDA_SMALL_NUMBER;
+	const bool bProductionBuildingModuleTarget =
+		RuntimeSnapshot.TargetAuthority
+			== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules;
 	// Final-V3 terrain can move the satellite inside the same frozen aim domain.
-	// Sample that continuous domain at the production Crystal density for both
-	// the pre-binding proxy and the Crystal itself. Pull limits, gravity-off
+	// Sample that continuous domain at the production module density for both
+	// the pre-binding target and the real module. Pull limits, gravity-off
 	// miss, uniqueness and the three-connected-witness gate remain unchanged.
 	CertificationPreset.AimInPlaneSampleCount = 61;
 	CertificationPreset.AimOutOfPlaneSampleCount = 31;
@@ -1026,16 +1174,43 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 	Scenario.Gravity.FlightAirDragPerSecond =
 		ProductionCatalog.FlightAirDragPerSecond;
 	Scenario.Gravity.bSatelliteGravityEnabled = true;
-	const FABTSCalibrationSweepSummary Summary =
-		FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
-			Scenario,
-			ProductionCatalog,
-			CertificationPreset);
+	FABTSCalibrationSweepSummary Summary;
+	int32 UnionWitnessBrickId = INDEX_NONE;
+	uint64 UnionTargetIdentityHash = 0;
+	FString UnionFailure;
+	const bool bSweepBuilt = bProductionBuildingModuleTarget
+		? FABTSM3MonthlySatellitePreviewBuilder::
+			RunFrozenE1BuildingModuleUnionSweep(
+				LaunchFrame,
+				Scenario.Gravity,
+				CandidateSnapshot.SatelliteSiteWorldTransform,
+				ProductionCatalog,
+				CertificationPreset,
+				Summary,
+				UnionWitnessBrickId,
+				UnionTargetIdentityHash,
+				UnionFailure)
+		: true;
+	if (!bProductionBuildingModuleTarget)
+	{
+		Summary =
+			FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
+				Scenario,
+				ProductionCatalog,
+				CertificationPreset);
+	}
+	if (!bSweepBuilt)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] CertificationRejected Reason=FrozenE1ModuleUnion Failure=%s"),
+			*UnionFailure);
+		return false;
+	}
 	// Real monthly terrain perturbs the ideal-sphere calibration carrier.  The
 	// practice gate keeps every gravity-dependence and uniqueness condition,
 	// but accepts an aim-connected island at one reachable 0.01 pull notch.
 	// The stricter frozen-carrier bPassed value remains visible in the log.
-	const bool bM3PracticePassed =
+	bool bM3PracticePassed =
 		Summary.LargestSuccessIslandSamples
 			>= FMath::Max(1, FrozenPreset.MinimumSuccessIslandSamples)
 		&& Summary.bIslandSpansAimNeighbors
@@ -1048,6 +1223,20 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 			<= FrozenPreset.PullMaximum + KINDA_SMALL_NUMBER
 		&& Summary.MinimumGravityOffMissCM + KINDA_SMALL_NUMBER
 			>= FrozenPreset.GravityOffMinimumMissCM;
+	const bool bFrozenTargetTrajectoryIdentityMatches =
+		CandidateSnapshot.TargetAuthority
+			!= EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+		|| (CandidateSnapshot.bProductionTargetTrajectoryCertified
+			&& UnionTargetIdentityHash == static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)
+			&& UnionWitnessBrickId
+				== CandidateSnapshot.ProductionTargetModuleId
+			&& CandidateSnapshot.ProductionTargetTrajectoryHash != 0
+			&& static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetTrajectoryHash)
+				== Summary.ResultHash);
+	bM3PracticePassed = bM3PracticePassed
+		&& bFrozenTargetTrajectoryIdentityMatches;
 	bTrajectoryCertified = bM3PracticePassed;
 	RuntimeSnapshot.bTrajectoryCertified = bM3PracticePassed;
 	RuntimeSnapshot.ProductionLaunchProfileHash =
@@ -1075,10 +1264,11 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 				RuntimeSnapshot.PracticeStakeACellId,
 				RuntimeSnapshot.PracticeStakeBCellId));
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionCrystal=%d AimSamples=%dx%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f BestClearance=%.1f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionBuildingModule=%d PreviewTrajectoryExact=%d AimSamples=%dx%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f BestClearance=%.1f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
 		bM3PracticePassed ? 1 : 0,
 		Summary.bPassed ? 1 : 0,
-		bProductionCrystalTarget ? 1 : 0,
+		bProductionBuildingModuleTarget ? 1 : 0,
+		bFrozenTargetTrajectoryIdentityMatches ? 1 : 0,
 		CertificationPreset.AimInPlaneSampleCount,
 		CertificationPreset.AimOutOfPlaneSampleCount,
 		static_cast<unsigned long long>(ProductionHash),
@@ -1171,7 +1361,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bPracticePouchInteractionReady;
 }
 
-bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
+bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1BuildingModuleTarget(
 	AActor& InTargetActor,
 	const FVector& InTargetHalfExtentCM)
 {
@@ -1180,9 +1370,122 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
 		|| InTargetActor.GetWorld() != GetWorld()
 		|| InTargetHalfExtentCM.GetMin() <= 0.0f)
 	{
+		bRuntimeReady = false;
+		bTrajectoryCertified = false;
+		RuntimeSnapshot.bTrajectoryCertified = false;
+		if (IsValid(RuntimeE5Target))
+		{
+			RuntimeE5Target->SetActorEnableCollision(false);
+			RuntimeE5Target->Destroy();
+			RuntimeE5Target = nullptr;
+			RuntimeE5GameplayTarget = nullptr;
+		}
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=InvalidInput Target=%s HalfExtent=%s"),
+			TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Rejected Reason=InvalidInput Target=%s HalfExtent=%s"),
 			*GetNameSafe(&InTargetActor),
+			*InTargetHalfExtentCM.ToCompactString());
+		return false;
+	}
+	FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+	FString E1DescriptorFailure;
+	const bool bDescriptorReady =
+		FABTSM73BuildingFreezeV3::DeriveAndValidate(
+			EABTSM73BeamDemoBuilding::E1ColumnBreak,
+			E1Descriptor,
+			E1DescriptorFailure)
+		&& E1Descriptor.DescriptorHash == static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetDescriptorHash)
+		&& E1Descriptor.Caps.Num() == 1;
+	const FABTSM73BuildingFreezeV3CapBinding* Cap = bDescriptorReady
+		? &E1Descriptor.Caps[0]
+		: nullptr;
+	const FTransform ActualSiteWorldTransform = Cap != nullptr
+		? Cap->SiteLocalTransform.Inverse()
+			* InTargetActor.GetActorTransform()
+		: FTransform::Identity;
+	const uint64 ActualTargetIdentity = bDescriptorReady
+		? FABTSM3MonthlySatellitePreviewBuilder::
+			ComputeProductionTargetIdentityHash(
+				E1Descriptor.DescriptorHash,
+				ActualSiteWorldTransform,
+				CandidateSnapshot.E5TargetWorldTransform,
+				CandidateSnapshot.E5TargetHalfExtentCM)
+		: 0;
+	AABTSM73StableBuildingActor* ActualE1Building = nullptr;
+	if (bDescriptorReady)
+	{
+		for (TActorIterator<AABTSM73StableBuildingActor> It(GetWorld()); It; ++It)
+		{
+			if (It->IsJuryDemoFixedSixStaticRegistrationAccepted()
+				&& It->GetJuryDemoFixedSixManifestEntryId()
+					== FName(TEXT("E1ColumnBreak"))
+				&& It->GetActorTransform().Equals(
+					ActualSiteWorldTransform, 0.001f))
+			{
+				if (ActualE1Building != nullptr)
+				{
+					ActualE1Building = nullptr;
+					break;
+				}
+				ActualE1Building = *It;
+			}
+		}
+	}
+	const bool bActualBrickUnionExact = ActualE1Building != nullptr
+		&& ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			DoesStableBuildingMatchFrozenBrickUnion(
+				*ActualE1Building, E1Descriptor);
+	const bool bTargetIdentityExact =
+		CandidateSnapshot.TargetAuthority
+			== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+		&& bDescriptorReady
+		&& Cap != nullptr
+		&& ActualE1Building != nullptr
+		&& bActualBrickUnionExact
+		&& CandidateSnapshot.ProductionTargetIdentityHash != 0
+		&& ActualTargetIdentity == static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash)
+		&& ActualSiteWorldTransform.Equals(
+			CandidateSnapshot.SatelliteSiteWorldTransform, 0.001f)
+		&& InTargetActor.GetActorTransform().Equals(
+			Cap->SiteLocalTransform
+				* CandidateSnapshot.SatelliteSiteWorldTransform,
+			0.001f)
+		&& InTargetHalfExtentCM.Equals(
+			Cap->BrickSpec.DimensionsCM * 0.5f, 0.001f);
+	if (!bTargetIdentityExact)
+	{
+		bRuntimeReady = false;
+		bTrajectoryCertified = false;
+		RuntimeSnapshot.bTrajectoryCertified = false;
+		if (IsValid(BoundSlingshotSystem))
+		{
+			BoundSlingshotSystem->ClearSatellitePracticeTarget(
+				GetRuntimeE5Target());
+		}
+		if (IsValid(RuntimeE5Target))
+		{
+			RuntimeE5Target->SetActorEnableCollision(false);
+			RuntimeE5Target->Destroy();
+			RuntimeE5Target = nullptr;
+		}
+		RuntimeE5GameplayTarget = nullptr;
+		bE5CollisionEnabled = false;
+		bM6TargetBound = false;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Rejected Reason=TargetUnionIdentityMismatch Cap=%s Building=%s ActualBrickUnionExact=%d Expected=%016llX Actual=%016llX ExpectedSite=%s ActualSite=%s ExpectedCapHalfExtent=%s ActualCapHalfExtent=%s ProxyFallback=0"),
+			*GetNameSafe(&InTargetActor),
+			*GetNameSafe(ActualE1Building),
+			bActualBrickUnionExact ? 1 : 0,
+			static_cast<unsigned long long>(static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)),
+			static_cast<unsigned long long>(ActualTargetIdentity),
+			*CandidateSnapshot.SatelliteSiteWorldTransform.GetLocation()
+				.ToCompactString(),
+			*ActualSiteWorldTransform.GetLocation().ToCompactString(),
+			*(Cap != nullptr
+				? (Cap->BrickSpec.DimensionsCM * 0.5f).ToCompactString()
+				: FVector::ZeroVector.ToCompactString()),
 			*InTargetHalfExtentCM.ToCompactString());
 		return false;
 	}
@@ -1195,12 +1498,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
 	{
 		BoundSlingshotSystem->ClearSatellitePracticeTarget(PreviousTarget);
 	}
-	RuntimeE5GameplayTarget = &InTargetActor;
-	RuntimeSnapshot.E5WorldTransform = InTargetActor.GetActorTransform();
-	RuntimeSnapshot.E5HalfExtentCM = InTargetHalfExtentCM;
+	RuntimeE5GameplayTarget = ActualE1Building;
+	RuntimeSnapshot.E5WorldTransform = ActualSiteWorldTransform;
+	RuntimeSnapshot.E5HalfExtentCM = E1Descriptor.SiteLocalBounds.GetExtent();
 	bE5CollisionEnabled =
 		ABTSM3MonthlySatellitePracticeRuntimePrivate::
-			HasPawnBlockingCollision(InTargetActor);
+			HasPawnBlockingCollision(*ActualE1Building);
 	bM6TargetBound = false;
 	bTrajectoryCertified = false;
 	bTrajectoryCertificationAttempted = false;
@@ -1217,17 +1520,20 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
 	const bool bBound = BindM6Target();
 	RefreshReadyState();
 	const FString BindingSummary = FString::Printf(
-		TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Ready=%d Target=%s Location=%s HalfExtent=%s LegacyTargetDeltaCM=%.1f Collision=%d M6Target=%d TrajectoryCertified=%d LegacyProxyRetired=1"),
+		TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Ready=%d Target=%s CapAnchor=%s WitnessBrickId=%d TargetAuthority=FrozenE1BuildingModulesUnion Site=%s UnionHalfExtent=%s LegacyTargetDeltaCM=%.1f Collision=%d M6Target=%d TrajectoryCertified=%d LegacyProxyRetired=1 ExactOBBUnion=%d"),
 		bRuntimeReady ? 1 : 0,
+		*GetNameSafe(ActualE1Building),
 		*GetNameSafe(&InTargetActor),
-		*InTargetActor.GetActorLocation().ToCompactString(),
-		*InTargetHalfExtentCM.ToCompactString(),
+		CandidateSnapshot.ProductionTargetModuleId,
+		*ActualSiteWorldTransform.GetLocation().ToCompactString(),
+		*RuntimeSnapshot.E5HalfExtentCM.ToCompactString(),
 		FVector::Distance(
 			PreviousTargetLocation,
-			InTargetActor.GetActorLocation()),
+			ActualSiteWorldTransform.GetLocation()),
 		bE5CollisionEnabled ? 1 : 0,
 		bM6TargetBound ? 1 : 0,
-		bTrajectoryCertified ? 1 : 0);
+		bTrajectoryCertified ? 1 : 0,
+		bActualBrickUnionExact ? 1 : 0);
 	if (bRuntimeReady)
 	{
 		UE_LOG(LogABTSRuntime, Log, TEXT("%s"), *BindingSummary);

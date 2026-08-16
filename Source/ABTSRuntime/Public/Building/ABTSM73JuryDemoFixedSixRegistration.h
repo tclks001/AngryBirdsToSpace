@@ -69,10 +69,10 @@ public:
 		14507275966565957788ull;
 	static constexpr uint64 E6CompoundV1CandidateRegistrationResultHash =
 		8828767116104973231ull;
+	static constexpr uint64 FrozenE1BrickUnionRegistrationResultHash =
+		17633525379359033190ull;
 	static constexpr uint64 FrozenV3RegistrationResultHash =
-		FABTSM73BuildingFreezeV3::bE6CompoundV1Published
-			? E6CompoundV1CandidateRegistrationResultHash
-			: PreE6CompoundV1RegistrationResultHash;
+		FrozenE1BrickUnionRegistrationResultHash;
 	static constexpr int32 FrozenV3StaticModuleCount = 5748;
 
 	static bool BuildStaticPlan(

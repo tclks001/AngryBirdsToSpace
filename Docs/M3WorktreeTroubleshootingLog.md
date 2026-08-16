@@ -51,6 +51,7 @@
 | M3-JURY-008 | V3 候选合线后装饰累计门稳定出现 2 个 PhysicalBounds 重叠 | 已统一生成过滤与最终生产净空查询 | M3 |
 | M3-JURY-009 | V3 建筑已激活但生产地形仍消费六个 V2 Pad，导致五栋主星建筑基部被地表穿过 | 已切换为五个 V3 主星 Pad，并让生产净空与装饰过滤消费同一 V3 快照 | M3 |
 | M3-JURY-010 | E1 双座梁/外载冻结身份形成方形占地后，被统一的“Y 必须长于 X”测试误拒绝 | 已按 SurfaceKind 区分主星长轴与卫星方形占地，并保留公共朝向门 | M3 |
+| M3-PERF-001 | 连续地表每个顶点重复从 Cell 0 搜索且三角形串行展开，吞噬真实地图启动预算 | P0+P1 候选性能与 V3 identity 已通过；最终联合证据待 M7 实体 Crystal 绑定修复后复证 | M3 |
 | M3-HISM-001 | 树石用统一 Pivot 偏移生成，首次进入 Chaos 因地形/实例穿插弹飞 | 已改为生成期碰撞包络贴地、跨类型避让和确定性门禁 | M3；M6 只保留集成诊断 |
 
 ## 3. 工作树、同步与构建
@@ -964,6 +965,96 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - 最终冻结身份：Satellite selected candidate `AA569671E58184A1`、Satellite result `3358BC5A456E3CD4`、E1 PlacementHash `1C267DFD88E65BAB`、LayoutHash `44723367D3DAA3A4`、Catalog `21B519761049404B`。五个主星逐项未变：E2 `A91A9FB5D79AE1CE`、E3 `4C41612002CC0208`、E4 `8ACA9CA9BAFE95BD`、E5 `66C8FD0EF4ACD5F2`、E6 `73BC7FE74D3835F7`；
 - fresh D3D11 离屏生产路径：`Saved/Logs/M3Jury011-L_ABTS_M10-OffscreenD3D11-20260816-033609.log`。唯一发布的最终 `[SatellitePreview] Result=3358BC5A456E3CD4`，随后 `MapFreezeV3 Ready=1 ... LayoutHash=44723367D3DAA3A4 ... SurfaceAuthority=FinalV3`；runtime 记录 `AnchorCell=754 / CandidateAnchorCell=754 / DeltaFromPreview=0.00`，轨迹 `PracticePassed=1 / FullFrozenCarrierPassed=1 / GravityDependentHits=144 / Island=51 / AimNeighbors=1 / PullNeighbors=1`，最终 `Ready=1 / TrajectoryCertified=1`，进程自行退出；日志不存在 `SatellitePreviewRuntimeDivergence`、`SpawnRejected` 或 `CertificationRejected`；
 - 本 M3 工作树的共享 exact V3 seal 仍是集成前旧值，因此 M7 E1 Crystal 正式绑定须等待 Integration 把共享 seal 重冻结为 `44723367D3DAA3A4` 后再跑联合门禁；这里没有回写共享契约，也没有把旧 bootstrap 坐标带回生产快照。
+
+### M3-PERF-001：连续地表重复 Cell 搜索和串行展开占用启动关键路径
+
+**现象**
+
+- final-surface D3D11 基线 `M3Jury011-L_ABTS_M10-OffscreenD3D11-20260816-033609.log` 中，整次 M3 Rebuild 为 `4930.347 ms`，连续地表阶段约 `2948 ms`，是 M3 最大单段瓶颈；
+- `SurfaceSubdivision=7` 时共有 `163842` 个唯一顶点和 `983040` 个 PMC 输出顶点。旧实现对每个唯一顶点分别查询 Cell、半径、法线和颜色；其中法线的八个偏移采样都重新从 Cell 0 开始最近 Cell 游走，随后三角形展开仍完全串行。
+
+**根因**
+
+连续地表没有把中央 Cell 当作同一顶点各派生查询的只读权威：中心 Cell 被半径、颜色重复搜索，八个近邻法线采样也丢弃中央 Cell Hint。顶点之间和三角形之间是不可变输入上的纯 CPU 独立工作，却未使用固定输出索引并行；相反，真正必须留在 Game Thread 的 PMC、碰撞、材质提交与纯 CPU 阶段混在同一个无分段计时函数中，难以审计收益或漂移。
+
+**修复**
+
+- `FABTSM3TerrainVisualField::QueryContinuousSurfaceSample` 一次解析中央 Cell，半径与颜色直接复用；曾尝试让八个法线偏移以中央 Cell 为 `StartCellHint`，exact oracle 在 `Sample[12]` 首次发现法线低位不同。恢复旧 Cell-0 路径后差异仍存在，高精度日志最终证明同一 canonical normal 在 ParallelFor worker 与 Game Thread 间约有 `1e-15` 低位差，推翻了“Hint 平台终点就是根因”的早期假设；最终八个偏移继续沿旧 Cell-0 canonical 单算并按顶点索引串行，不保留 Hint+canonical 双算负优化，也不修改 worker 浮点控制寄存器；
+- 中央 Cell/radius/color sample 与三角形展开只在预分配数组中按固定索引 `ParallelFor` 写各自槽位；canonical normal、最大法线倾角、极端计数、exact 比较和最终提交严格按升序索引串行归并；
+- `UObject`、PMC、Chaos physics、MID/HISM 的写入继续只在 Game Thread；`bootstrap -> final surface` 的 MapFreeze 有向顺序未改；
+- 新增 wall 分段日志与 `ABTSM3ContinuousSurface_*` CPU Trace scope。opt-in exact oracle 在 PMC 提交前双跑旧串行/新并行路径，逐 sample 精确比较 Cell/radius/normal/color，逐元素比较最终 Vertices/Triangles/Normals/UV0-3/Colors，并比较与 M3R5 相同算法的 `QuerySurfaceHash`；任何差异清空 section 并令 `RebuildPlanet()` fail closed；
+- oracle 同时快照并复验 Layout/Catalog/逐栋 PlacementHash，证明连续地表优化不会改写 V3 身份。未修改 shared contract、manifest、M2/M7、共同地图或两阶段表面权威顺序。
+
+**防回归验证**
+
+- 源码级门：`git diff --check` 通过；调用关系确认只有纯 `FABTSM3TerrainVisualField` 读取进入 worker，PMC/physics/material 调用均位于 `ParallelFor` 返回后的 Game Thread；
+- `ABTS.M3.Jury.MapFreezeV3.01DeterminismAndRoadFacing` 显式打开 `abts.M3.ContinuousSurfaceExactOracle=1`，两次重建都必须出现 `Enabled=1 Passed=1`，且既有 LayoutHash 与逐栋 PlacementHash 重复一致；
+- UE 5.8 Development 全量 `35/35` 与最终 ForceUnity `8/8` 均为 `Result: Succeeded`；
+- 最终 fresh NullRHI：`Saved/Logs/M3ContinuousSurfaceExactOracle-Final-MapFreezeV3-20260816-091351-FreshNullRHI.log`，`ABTS.M3.Jury.MapFreezeV3` 精确 `2/2 Success / EXIT CODE: 0`。第一项两次重建均为 `Enabled=1 / Passed=1 / QuerySurfaceHashLegacy=QuerySurfaceHashOptimized=75D145345C3A03A6 / V3IdentityUnchanged=1`；当前 `Layout=0044C9789AD84147 / Catalog=0B11216D494069A0`，六栋 PlacementHash 为 E2 `A91A9FB5D79AE1CE`、E3 `4C41612002CC0208`、E4 `8ACA9CA9BAFE95BD`、E5 `66C8FD0EF4ACD5F2`、E1 `1C267DFD88E65BAB`、E6 `618C6BB2B4FB749B`；
+- fail-closed 诊断日志 `M3ContinuousSurfaceExactOracle-MapFreezeV3-20260816-085943-FreshNullRHI.log`、`...-090708-...` 与 `M3ContinuousSurfaceExactOracle-FieldDiagnostic-20260816-090857-FreshNullRHI.log` 均保留，证明 oracle 先后拒绝 Hint 版本和 worker canonical normal 的低位漂移；NullRHI `Subdivision=1` 计时不冒充生产性能证据，真实 `Subdivision=7` 候选计时单列如下；
+- final-surface fresh offscreen D3D11 候选证据：`Saved/Logs/M3ContinuousSurface-FinalSurface-D3D11-20260816-091827.log`，CPU trace 为 `Saved/Profiling/M3ContinuousSurface-FinalSurface-D3D11-20260816-091827.utrace`。`Subdivision=7` 的 `ContinuousSurface WallMS.Total=2428.849`，分段为 Topology `13.038`、BaseSamples `41.311`、CanonicalNormals `1368.613`、TriangleExpand `12.055`、PMC `993.092`、Physics `0.102`；整次 M3 Rebuild `4556.109 ms`。相对历史 `4930.347 / ~2948 ms` 仅能说明候选方向改善：两次运行跨二进制、跨最终 V3 seal，且新运行启用了 CPU trace，不能作为严格同基线 A/B；
+- 同次 D3D 的 M3/V3 身份与表面门通过：`MapFreezeV3 Ready=1 / SurfaceAuthority=FinalV3 / Layout=0044C9789AD84147 / Catalog=0B11216D494069A0`，六个 PlacementHash 与 fresh NullRHI 逐项一致，`ProductionClearance Passed=1`，初始 final-surface runtime 为 `DeltaFromPreview=0.00 / Ready=1 / TrajectoryCertified=1 / TrajectoryHash=CB88635D085D213C`，不存在 surface divergence；
+- 该 D3D **不构成最终联合通过证据**：M7 实体 Crystal 生产绑定随后触发第二次 `ProductionCrystal=1` 轨迹认证，结果 `PracticePassed=0 / FullFrozenCarrierPassed=0 / GravityOnHits=0 / ResultHash=3A898F529035E194`，继而出现 M3 `CertificationRejected` 与 Integration `E1CrystalTarget Rejected Reason=SatelliteRuntimeBindingRejected`。此拒绝位于外部 M7 实体 Crystal 替换/绑定路径，未放宽任何 M3 容差或轨迹门；保持本候选未提交、停止重型任务，等待 M7 修复合入并同步后再做最终复证。
+
+### M3-JURY-012：固定 E1 Site 的强化弹弓应命中真实冻结建筑模块而非旧代理或 Crystal
+
+**现象**
+
+- 产品语义最终收敛为：E1 Site、卫星、final surface、五垫和当前 yaw 全部固定；强化弹弓只需可靠 first-hit E1 的真实建筑模块，不要求直接击中 `72 cm` Crystal；
+- 旧 proxy 的 `51` 点最大成功岛可作为确定性 seed，但不能继续作为生产目标。冻结 Crystal 中心与旧 proxy 相差约 `389.393 cm`，固定 Site 下最佳旧轨迹仍 miss Crystal `47.1 cm`；此前 `721 yaw`/Crystal 精确命中搜索因此作废并撤回；
+- 首次模块版 NullRHI 正确选中 `BrickId=4`，但旧 `AABTSCalibrationTargetProxy::ConfigureCube()` 只能生成等边立方体，把真实模块半尺寸 `144/18/18 cm` 扩成 `144/144/144 cm`，自动化以 extent 不一致 fail closed，证明该临时类会制造“命中空 AABB”的假证据。
+
+**根因**
+
+轨迹权威长期绑定在校准代理/Crystal cap 上，没有从公开冻结 E1 descriptor 的真实 `Bricks` 集合派生模块 OBB。与此同时，runtime 临时目标沿用了只支持 cube 的校准 Actor，不能表达非等轴真实模块碰撞。旧 shared V3 seal 还冻结在 `0044C9789AD84147`，因此新 M3 布局即使自身 Ready，也会在 M7 注册前被共享合同 fail closed。
+
+**修复**
+
+- 新权威命名为 `FrozenE1BuildingModules`。从公开 `FABTSM73BuildingFreezeV3Descriptor::Bricks` 读取每个 `BrickId / LocalTransform / DimensionsCM`，不读取 M7 私有 manifest；非生产 preview candidate 也只携带真实 descriptor module，不再携带 cap/旧代理几何；
+- 保持 `ProjectionExact=1` Site、卫星中心、final surface、五垫、`Correction=-8.320°` 与 `SiteYaw=0°` 不变。对旧 proxy 完整 `61 x 31` 认证并精确枚举 `144` 个 gravity-dependent seed，只用于确定性筛选真实模块；筛选得到 `BrickId=4 / seed island=24` 后，对其真实 OBB 重新执行完整 `61 x 31` 最终认证；
+- 最终门保持 `GravityDependentHits>0`、aim 连通、原 Pull 范围、`SimpleHits=0`、`OutsidePullHits=0` 与 gravity-off miss 原阈值。MapFreeze、candidate hash、runtime snapshot 和 exact binding 均携带同一 `ProductionTargetModuleId`、descriptor hash、world transform、三轴 extent 与 target identity；任何不一致销毁临时目标且 `ProxyFallback=0`；
+- runtime 不再生成旧洋红校准 proxy 类。绑定前只生成位于冻结真实模块 transform、使用精确 `UBoxComponent(144,18,18)` 的 module OBB stand-in；真实模块绑定成功时原子退休该 stand-in。现有 M7 Crystal 入口仅保留源码兼容 wrapper，其几何不匹配会被 exact identity 拒绝，不能冒充模块绑定；
+- `PendingIntegrationSeal` 解析门按 M7 公开注册算法只读计算 proposed Satellite/Layout/Registration，供 Integration 正式重冻结；M3 未修改 shared seal、manifest、共同地图或 M7 代码。
+
+**防回归验证**
+
+- UE 5.8 Development Editor 普通构建先后 `25/25`、`13/13`、最终测试增量 `4/4 actions`，均 `Result: Succeeded`；`-ForceUnity` 复核目标为 up-to-date / `Result: Succeeded`，未启用 Live Coding 或结束其他进程；
+- `Saved/Logs/M3FrozenE1BuildingModules-SatellitePreview-20260816-103107-FreshNullRHI.log`：`ABTS.M3.Monthly.SatellitePreview` 精确 `4/4 Success / EXIT CODE: 0`；`Saved/Logs/M3FrozenE1BuildingModules-MapFreezeV3-20260816-103454-FreshNullRHI.log`：MapFreezeV3 精确 `2/2 Success / EXIT CODE: 0`；
+- 固定位置 oracle：Satellite center `(-4063.99,14483.41,-3013.75)`、projected Site `(-3735.87,15423.47,-3769.48)`、`ProjectionExact=1`；真实 target 为 `BrickId=4`、world center `(-3417.04,15424.54,-3778.59)`、half extent `(144,18,18)`、descriptor `A9723A48ADEE487F`、target identity `15CC3CA9C1DF1694`；
+- 最终真实模块轨迹为 `ReinforcedHits=59 / GravityDependentHits=59 / Island=24 / AimNeighbors=1 / Pull=[0.850,0.890] / GravityOffMiss=2710.6 / SimpleHits=0 / OutsidePullHits=0 / Hash=72B802EB5C6411A5`；runtime exact OBB 重算保持同一 hash 并达到 `Ready=1 / Collision=1 / M6Target=1 / TrajectoryCertified=1`；
+- 新冻结身份：Satellite candidate `3E99A400B52C252C`、Satellite result `0ECC20D82E8E2156`、Layout `CB7C582A402911D5`、Catalog `0B11216D494069A0`、proposed Registration `34F159419F042166`。六栋 PlacementHash 逐项保持 E2 `A91A9FB5D79AE1CE`、E3 `4C41612002CC0208`、E4 `8ACA9CA9BAFE95BD`、E5 `66C8FD0EF4ACD5F2`、E1 `1C267DFD88E65BAB`、E6 `618C6BB2B4FB749B`，证明 Site/建筑位置未移动；
+- `Saved/Logs/M3FrozenE1BuildingModules-PendingSeal-20260816-104106-FreshNullRHI.log` 精确发布上述 proposed seal 并 `1/1 Success`；
+- fresh offscreen D3D11 `Saved/Logs/M3FrozenE1BuildingModules-L_ABTS_M10-OffscreenD3D11-20260816-103728.log`：`SurfaceAuthority=FinalV3 / DeltaFromPreview=0.00`，真实 module OBB 的生产重算精确为 `72B802EB5C6411A5`，runtime `Ready=1`，进程在 capture 后自行 `exit 0`；`ContinuousSurface=2403.655 ms`，但整次 Rebuild 为 `31193.839 ms`，已略超 `30 s` 目标，主要新增成本是旧 seed 枚举和真实模块完整认证，后续性能工作不得改变任何身份或门槛；
+- 同次 D3D **不构成 M7 实体 module 联合绑定通过**：旧 shared seal 先报告 `BuildingContractSealed Expected=0 Registered=0 SetupRejected=1`，未生成六栋实体，因此没有可绑定的真实 `BrickId=4` Actor。Integration 必须先正式发布 proposed exact seal，再由 M7 owner 把实体模块/碰撞集合接到新 exact binding 入口并复跑；本提交保持 `PendingIntegrationSeal`，不伪通过。
+
+### M3-JURY-013：E1 生产目标必须是有序真实 Brick OBB 联集，单 Brick 扩张体不能作为证书
+
+**现象**
+
+- M3-JURY-012 的 `BrickId=4 / Trajectory=72B802EB5C6411A5` 虽然通过单目标自动化，却把真实半尺寸 `(144,18,18) cm` 经 shared 单目标接口的 `ComponentMax` 扩成了 `(144,144,144) cm` 立方体；该证书可在真实长条 Brick 之外的空体积中命中，违反“必须 first-hit E1 真实建筑模块”的产品语义，因此该 BrickId、轨迹及其派生 Satellite/Layout/Registration 身份全部作废；
+- 若简单对 3 个 retained candidate 重跑旧 proxy、逐 Brick 选择和完整 `61 x 31` 生产轨迹，生产重建会达到约 `31.5 s`；若直接对所有 54 个 OBB 逐段计算完整 miss clearance，首次真实联集认证约 `41 s`，也无法满足 `RebuildBudget < 8000 ms`。
+
+**根因**
+
+共享校准接口只表达一个轴对齐/等边目标，不足以表达公开 E1 descriptor 中 54 个具有独立 `BrickId / SiteLocalTransform / DimensionsCM` 的非等轴 OBB 联集。旧证书的 hash 只覆盖被扩张的单目标，既没有覆盖有序模块集合，也没有覆盖稳定 first-hit 的 BrickId；runtime 的单 box stand-in 同样无法证明实际 E1 碰撞集合。性能方面，旧实现又把同一组 61 x 31 动力学轨迹对 retained candidate、逐 Brick 和生产目标重复积分。
+
+**修复**
+
+- `TargetAuthority=FrozenE1BuildingModulesUnion` 从公开冻结 E1 descriptor 派生 54 个按 `BrickId` 稳定排序的真实 OBB；TargetIdentity 覆盖 descriptor、固定 Site world transform、每个 BrickId、local transform 与三轴 half extent。任何单 box、max-axis cube 或 hidden proxy 都不能冒充联集；
+- 每条轨迹只积分一次，并对有序 OBB 集合做精确 segment-vs-oriented-box first-intersection。按最小命中 alpha、再按 BrickId 稳定决胜；任一真实 E1 Brick first-hit 合法，卫星/月体先命中则拒绝。联集外包 OBB 只作 broadphase，不能产生成功；轨迹 hash 覆盖 TargetIdentity、61 x 31 采样结果及每个成功轨迹的真实 first-hit BrickId；
+- 旧 proxy 的 `61 x 31` 成功样本只并行生成一次并作为不可变 seed。固定索引 `ParallelFor` 写各自槽位、串行稳定归并；只对最终选中的 production satellite candidate 执行一次真实联集证书，两个未选 retained candidate 不做 production target certification。gravity-on 失败路径不再为全部约 49k miss 计算昂贵的精确 clearance；真实 broadphase 命中和所有 gravity-off 复证仍做 exact OBB clearance，first-hit、障碍优先级和原门槛不变；
+- runtime 预绑定 stand-in 在固定 Site Actor 下创建 54 个 `UBoxComponent`，逐个使用 descriptor 的 local transform 与真实三轴 extent；M6 绑定联集 Actor。M7 cap 入口仅作为公开 Site 锚点，M3 从 cap 反解 Site 后查找唯一、已接受且 transform exact 的 `AABTSM73StableBuildingActor`，再把 gameplay target 原子切换为真实整栋 E1；身份比较覆盖整个联集，`ProxyFallback=0`；
+- `GeneratorVersion` 升为 6，缓存 key 版本升为 2；没有修改 shared calibration、shared seal、M7 manifest、共同地图或稳定契约。固定 Site、卫星、yaw、final surface、五垫和六栋 world transform 均不移动。
+
+**防回归验证**
+
+- UE 5.8 普通 Development Editor 最终增量构建 `5/5 actions / Result: Succeeded`，随后最终 `-ForceUnity -DisableAdaptiveUnity` 为 `4/4 actions / Result: Succeeded`；源码只进入 M3-owned preview/runtime/test 与本账本，未启动 Live Coding、未结束其他工作树进程；
+- fresh NullRHI `Saved/Logs/M3-HonestUnion-SatellitePreview-Final-4of4-20260816.log`：`ABTS.M3.Monthly.SatellitePreview` 精确 `4/4 Success`。真实联集为 `Modules=54 / WitnessBrickId=16 / ReinforcedHits=44 / GravityDependentHits=44 / Island=6 / AimNeighbors=1 / Pull=[0.900,0.910] / SimpleHits=0 / OutsidePullHits=0 / GravityOffMiss=2907.5`，`TargetIdentity=5F1D6833F37C28C4 / Trajectory=3BE096C16B3D9807`；预绑定 stand-in 精确包含 54 个 box，单一 witness box 明确 fail closed；
+- fresh NullRHI `Saved/Logs/M3-HonestUnion-MapFreezeV3-2of2-20260816.log`：`ABTS.M3.Jury.MapFreezeV3` 精确 `2/2 Success`，exact oracle 为 `QuerySurfaceHashLegacy=QuerySurfaceHashOptimized=75D145345C3A03A6 / V3IdentityUnchanged=1`。proposed seal 为 Satellite candidate `34AA95E1E0FA3303`、Satellite result `A13243FDC2E7D83B`、Layout `3E143A25531F3F7A`、Registration `F4B6DDE7F687C766`、Catalog `0B11216D494069A0`；
+- 六栋 PlacementHash 为 E2 `A91A9FB5D79AE1CE`、E3 `4C41612002CC0208`、E4 `8ACA9CA9BAFE95BD`、E5 `66C8FD0EF4ACD5F2`、E1 `1C267DFD88E65BAB`、E6 `618C6BB2B4FB749B`，逐项证明位置/方向未变；E1 Placement 也未因 target identity 改变，变化只沿 Satellite candidate/result -> Layout -> Registration 依赖链传播；
+- fresh NullRHI `Saved/Logs/M3-HonestUnion-DecorPlacement-4of4-20260816.log`：`ABTS.M3.DecorPlacement` 精确 `4/4 Success`，两次生产重建分别 `6205.926 / 5119.317 ms`，均低于 `8000 ms`；首次真实联集证书 `1065.315 ms`，缓存复用约 `0.03 ms`，`ProductionSweeps=1 / UnselectedProductionSweeps=0`；
+- fresh offscreen D3D11 `Saved/Logs/M3-HonestUnion-L_ABTS_M10-OffscreenD3D11-20260816.log`：`MapFreezeV3 Ready=1 / SurfaceAuthority=FinalV3 / Layout=3E143A25531F3F7A`，`ContinuousSurface=2471.450 ms`、整次 `RebuildBudget=6583.687 ms / Passed=1`、`ProductionClearance Passed=1`，runtime 为 `DeltaFromPreview=0.00 / TrajectoryHash=3BE096C16B3D9807 / Ready=1 / TrajectoryCertified=1`；日志不含 `SatellitePreviewRuntimeDivergence`、`SpawnRejected` 或 M3 trajectory rejection；
+- 该 D3D 仍**不构成最终 M7 实体联合绑定通过**：功能树的旧共享 seal 在 M7 注册前以 `BuildingContractSealed Expected=0 Registered=0 SetupRejected=1` fail closed，因此没有真实 E1 Actor 可替换 stand-in，最终 StartupFlow 也正确 blocked。只有 Integration 原子发布上述 proposed seal 后才能复跑实体绑定；M3 不越权修改 shared/M7，也不把 stand-in Ready 冒充联合 Ready。
 
 ## 15. 新条目模板
 

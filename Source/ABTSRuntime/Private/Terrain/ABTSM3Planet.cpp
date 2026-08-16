@@ -3,10 +3,12 @@
 #include "Terrain/ABTSM3Planet.h"
 
 #include "ABTSRuntime.h"
+#include "Async/ParallelFor.h"
 #include "CollisionQueryParams.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "HAL/PlatformTime.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -14,6 +16,7 @@
 #include "PCG/ABTSM3R5AcceptanceManifest.h"
 #include "PCG/ABTSM3TaskGraphGenerator.h"
 #include "ProceduralMeshComponent.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Rendering/ABTSStylizedMaterialContract.h"
 #include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "Terrain/ABTSM3DecorPlacement.h"
@@ -28,6 +31,12 @@
 
 namespace
 {
+TAutoConsoleVariable<int32> CVarABTSM3ContinuousSurfaceExactOracle(
+	TEXT("abts.M3.ContinuousSurfaceExactOracle"),
+	0,
+	TEXT("Builds legacy and optimized M3 continuous-surface buffers and fails closed on any exact mismatch."),
+	ECVF_Default);
+
 struct FABTSM3JuryTerrainPadSource
 {
 	int32 EncounterIndex = INDEX_NONE;
@@ -649,7 +658,11 @@ bool AABTSM3Planet::RebuildPlanet()
 						MonthlySlingshotFieldResult,
 						SatelliteSurface,
 						FinalSatellitePreview,
-						FinalSatellitePreviewFailure))
+						FinalSatellitePreviewFailure,
+						EABTSM3MonthlySatelliteTargetAuthority::
+							FrozenE1BuildingModules,
+						FABTSM3JuryMapFreezeV3Builder::
+							FrozenSourceCandidateId))
 				{
 					bJuryTerrainPadsReady = false;
 					MonthlySatellitePreviewResult =
@@ -674,7 +687,8 @@ bool AABTSM3Planet::RebuildPlanet()
 							MonthlySpatialResult,
 							FinalSatellitePreview,
 							FinalMapFreezeV3,
-							FinalMapFreezeV3Failure))
+							FinalMapFreezeV3Failure,
+							true))
 					{
 						bJuryTerrainPadsReady = false;
 						MonthlySatellitePreviewResult =
@@ -776,7 +790,12 @@ bool AABTSM3Planet::RebuildPlanet()
 		UE_LOG(LogABTSRuntime, Error,
 			TEXT("[ABTS][M11.0][FinaleFrame] Rejected after final terrain-pad resolution."));
 	}
-	BuildM3ContinuousSurface();
+	if (!BuildM3ContinuousSurface())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3][ContinuousSurface] Ready=0 Failure=ExactOracleOrBufferBuild"));
+		return false;
+	}
 	const FABTSM3MonthlyCandidatePresentation*
 		PresentationCandidate = nullptr;
 	bool bPreviewDataReady =
@@ -1709,7 +1728,14 @@ bool AABTSM3Planet::ValidateMonthlySatellitePreviewResult(
 			Surface,
 			MonthlySatellitePreviewResult,
 			RejectReason,
-			OutFailure))
+			OutFailure,
+			WorldSeed == FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed
+				? EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+				: EABTSM3MonthlySatelliteTargetAuthority::
+					LegacyCalibrationProxy,
+			WorldSeed == FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed
+				? FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId
+				: INDEX_NONE))
 	{
 		return true;
 	}
@@ -1752,7 +1778,8 @@ bool AABTSM3Planet::ValidateJuryMapFreezeV3Snapshot(
 		MonthlySatellitePreviewResult,
 		Result,
 		OutReason,
-		OutFailure);
+		OutFailure,
+		WorldSeed == FABTSM3JuryMapFreezeV3Builder::FrozenWorldSeed);
 }
 
 bool AABTSM3Planet::ValidateMonthlyWitnessResult(
@@ -2658,10 +2685,16 @@ bool AABTSM3Planet::QuerySurface(
 {
 	if (!TerrainVisualField || !TerrainVisualField->IsReady() || UnitDirection.IsNearlyZero()) return false;
 	const FVector Direction = UnitDirection.GetSafeNormal();
-	OutSurfaceRadius = TerrainVisualField->GetSurfaceRadius(Direction);
+	if (!TerrainVisualField->QuerySurfaceGeometry(
+			Direction,
+			0,
+			OutCellId,
+			OutSurfaceRadius,
+			OutWorldNormal))
+	{
+		return false;
+	}
 	OutWorldPosition = GetPlanetCenterWorld() + Direction * OutSurfaceRadius;
-	OutWorldNormal = TerrainVisualField->GetSurfaceNormal(Direction);
-	OutCellId = TerrainVisualField->FindNearestCell(Direction);
 	return OutCellId != INDEX_NONE;
 }
 
@@ -2813,106 +2846,518 @@ bool AABTSM3Planet::GetInitialRoadSpawnTransform(
 	return true;
 }
 
-void AABTSM3Planet::BuildM3ContinuousSurface()
+bool AABTSM3Planet::BuildM3ContinuousSurface()
 {
-	FUnitSphereMesh Mesh;
-	BuildUnitIcosphere(SurfaceSubdivision, Mesh);
-	TArray<int32> CachedCellIds;
-	TArray<FVector> CachedSurfaceVertices;
-	TArray<FVector> CachedSurfaceNormals;
-	TArray<FLinearColor> CachedSurfaceColors;
-	CachedCellIds.SetNumUninitialized(Mesh.Vertices.Num());
-	CachedSurfaceVertices.SetNumUninitialized(
-		Mesh.Vertices.Num());
-	CachedSurfaceNormals.SetNumUninitialized(
-		Mesh.Vertices.Num());
-	CachedSurfaceColors.SetNumUninitialized(
-		Mesh.Vertices.Num());
-	float MaxSurfaceNormalTiltDegrees = 0.0f;
-	int32 ExtremeSurfaceNormalCount = 0;
-
-	// Surface subdivision 7 shares each icosphere vertex across several
-	// triangles, while the material requires triangle-local UV candidates.
-	// Cache the expensive surface-field samples once per unique vertex, then
-	// duplicate only the already-resolved values into the PMC vertex stream.
-	for (int32 VertexIndex = 0;
-		VertexIndex < Mesh.Vertices.Num();
-		++VertexIndex)
+	TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_Total);
+	check(IsInGameThread());
+	const double TotalStartSeconds = FPlatformTime::Seconds();
+	if (TerrainVisualField == nullptr || !TerrainVisualField->IsReady()
+		|| ContinuousSurface == nullptr)
 	{
-		const FVector Unit =
-			Mesh.Vertices[VertexIndex].GetSafeNormal();
-		CachedCellIds[VertexIndex] = FindNearestCell(Unit);
-		CachedSurfaceVertices[VertexIndex] =
-			Unit * TerrainVisualField->GetSurfaceRadius(Unit);
-		const FVector SurfaceNormal =
-			TerrainVisualField->GetSurfaceNormal(Unit);
-		CachedSurfaceNormals[VertexIndex] = SurfaceNormal;
-		CachedSurfaceColors[VertexIndex] =
-			TerrainVisualField->GetDebugTerrainColor(Unit);
-		const float NormalTiltDegrees =
-			FMath::RadiansToDegrees(FMath::Acos(
-				FMath::Clamp(
-					FVector::DotProduct(Unit, SurfaceNormal),
-					-1.0f,
-					1.0f)));
-		MaxSurfaceNormalTiltDegrees = FMath::Max(
-			MaxSurfaceNormalTiltDegrees,
-			NormalTiltDegrees);
-		ExtremeSurfaceNormalCount +=
-			NormalTiltDegrees > 80.0f ? 1 : 0;
+		return false;
 	}
 
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0, UV1, UV2, UV3;
-	TArray<FLinearColor> Colors;
-	TArray<FProcMeshTangent> Tangents;
-	Vertices.Reserve(Mesh.Triangles.Num() * 3);
-	Triangles.Reserve(Mesh.Triangles.Num() * 3);
-	Normals.Reserve(Mesh.Triangles.Num() * 3);
-	Colors.Reserve(Mesh.Triangles.Num() * 3);
-
-	for (const FIntVector& Triangle : Mesh.Triangles)
+	const uint64 LayoutHashBefore = JuryMapFreezeV3Result.LayoutHash;
+	const uint64 CatalogHashBefore =
+		JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash;
+	TArray<uint64> PlacementHashesBefore;
+	PlacementHashesBefore.Reserve(JuryMapFreezeV3Result.Placements.Num());
+	for (const FABTSM3JuryMapFreezeV3Placement& Placement
+		: JuryMapFreezeV3Result.Placements)
 	{
-		const int32 CandidateCellIds[3] = {
-			CachedCellIds[Triangle.X],
-			CachedCellIds[Triangle.Y],
-			CachedCellIds[Triangle.Z]};
+		PlacementHashesBefore.Add(
+			Placement.Site.V3Envelope.PlacementHash);
+	}
+
+	const double TopologyStartSeconds = FPlatformTime::Seconds();
+	FUnitSphereMesh Mesh;
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_Icosphere);
+		BuildUnitIcosphere(SurfaceSubdivision, Mesh);
+	}
+	const double TopologyMS =
+		(FPlatformTime::Seconds() - TopologyStartSeconds) * 1000.0;
+
+	struct FSampleBuffers
+	{
+		TArray<int32> CellIds;
+		TArray<float> RadiiCM;
+		TArray<FVector> Vertices;
+		TArray<FVector> Normals;
+		TArray<FLinearColor> Colors;
+		TArray<float> NormalTiltDegrees;
+		TArray<uint8> Valid;
+
+		void SetNumUninitialized(const int32 Num)
+		{
+			CellIds.SetNumUninitialized(Num);
+			RadiiCM.SetNumUninitialized(Num);
+			Vertices.SetNumUninitialized(Num);
+			Normals.SetNumUninitialized(Num);
+			Colors.SetNumUninitialized(Num);
+			NormalTiltDegrees.SetNumUninitialized(Num);
+			Valid.SetNumUninitialized(Num);
+		}
+	};
+
+	auto SampleOne = [this, &Mesh](
+		const int32 VertexIndex,
+		const bool bUseHintedQuery,
+		FSampleBuffers& OutBuffers)
+	{
+		const FVector Unit = Mesh.Vertices[VertexIndex].GetSafeNormal();
+		int32 CellId = INDEX_NONE;
+		float RadiusCM = 0.0f;
+		FVector SurfaceNormal = FVector::UpVector;
+		FLinearColor SurfaceColor = FLinearColor::Gray;
+		bool bValid = true;
+		if (bUseHintedQuery)
+		{
+			FABTSM3ContinuousSurfaceSample Sample;
+			bValid = TerrainVisualField->QueryContinuousSurfaceBaseSample(
+				Unit, 0, Sample);
+			if (bValid)
+			{
+				CellId = Sample.CellId;
+				RadiusCM = Sample.SurfaceRadiusCM;
+				SurfaceColor = Sample.TerrainColor;
+			}
+		}
+		else
+		{
+			CellId = TerrainVisualField->FindNearestCell(Unit);
+			bValid = CellId != INDEX_NONE;
+			RadiusCM = TerrainVisualField->GetSurfaceRadius(Unit);
+			SurfaceNormal = TerrainVisualField->GetSurfaceNormal(Unit);
+			SurfaceColor = TerrainVisualField->GetDebugTerrainColor(Unit);
+		}
+		OutBuffers.CellIds[VertexIndex] = CellId;
+		OutBuffers.RadiiCM[VertexIndex] = RadiusCM;
+		OutBuffers.Vertices[VertexIndex] = Unit * RadiusCM;
+		OutBuffers.Normals[VertexIndex] = SurfaceNormal;
+		OutBuffers.Colors[VertexIndex] = SurfaceColor;
+		OutBuffers.NormalTiltDegrees[VertexIndex] =
+			FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(Unit, SurfaceNormal), -1.0f, 1.0f)));
+		OutBuffers.Valid[VertexIndex] = bValid ? 1 : 0;
+	};
+
+	FSampleBuffers OptimizedSamples;
+	OptimizedSamples.SetNumUninitialized(Mesh.Vertices.Num());
+	const double OptimizedSampleStartSeconds = FPlatformTime::Seconds();
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_HintedSamplesParallel);
+		ParallelFor(Mesh.Vertices.Num(),
+			[&SampleOne, &OptimizedSamples](const int32 VertexIndex)
+			{
+				SampleOne(VertexIndex, true, OptimizedSamples);
+			});
+	}
+	const double OptimizedSampleMS =
+		(FPlatformTime::Seconds() - OptimizedSampleStartSeconds) * 1000.0;
+	for (int32 VertexIndex = 0;
+		VertexIndex < OptimizedSamples.Valid.Num();
+		++VertexIndex)
+	{
+		if (OptimizedSamples.Valid[VertexIndex] == 0)
+		{
+			ContinuousSurface->ClearAllMeshSections();
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M3][ContinuousSurfaceExactOracle] Passed=0 Failure=HintedSample[%d] CommitPMC=0 FailClosed=1"),
+				VertexIndex);
+			return false;
+		}
+	}
+	const double CanonicalNormalStartSeconds = FPlatformTime::Seconds();
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_CanonicalNormalsSerial);
+		for (int32 VertexIndex = 0;
+			VertexIndex < Mesh.Vertices.Num();
+			++VertexIndex)
+		{
+			const FVector Unit = Mesh.Vertices[VertexIndex].GetSafeNormal();
+			const FVector SurfaceNormal =
+				TerrainVisualField->GetSurfaceNormal(Unit);
+			OptimizedSamples.Normals[VertexIndex] = SurfaceNormal;
+			OptimizedSamples.NormalTiltDegrees[VertexIndex] =
+				FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+					FVector::DotProduct(Unit, SurfaceNormal), -1.0f, 1.0f)));
+		}
+	}
+	const double CanonicalNormalMS =
+		(FPlatformTime::Seconds() - CanonicalNormalStartSeconds) * 1000.0;
+
+	struct FExpandedBuffers
+	{
+		TArray<FVector> Vertices;
+		TArray<int32> Triangles;
+		TArray<FVector> Normals;
+		TArray<FVector2D> UV0;
+		TArray<FVector2D> UV1;
+		TArray<FVector2D> UV2;
+		TArray<FVector2D> UV3;
+		TArray<FLinearColor> Colors;
+		TArray<FProcMeshTangent> Tangents;
+
+		void SetNumUninitialized(const int32 Num)
+		{
+			Vertices.SetNumUninitialized(Num);
+			Triangles.SetNumUninitialized(Num);
+			Normals.SetNumUninitialized(Num);
+			UV0.SetNumUninitialized(Num);
+			UV1.SetNumUninitialized(Num);
+			UV2.SetNumUninitialized(Num);
+			UV3.SetNumUninitialized(Num);
+			Colors.SetNumUninitialized(Num);
+		}
+	};
+
+	auto ExpandOne = [&Mesh](
+		const int32 TriangleIndex,
+		const FSampleBuffers& Samples,
+		FExpandedBuffers& OutBuffers)
+	{
+		const FIntVector& Triangle = Mesh.Triangles[TriangleIndex];
 		const auto EncodeCellId = [](const int32 CellId)
 		{
-			return FVector2D(static_cast<float>(CellId >> 8), static_cast<float>(CellId & 0xff));
+			return FVector2D(
+				static_cast<float>(CellId >> 8),
+				static_cast<float>(CellId & 0xff));
 		};
-		const FVector2D EncodedA = EncodeCellId(CandidateCellIds[0]);
-		const FVector2D EncodedB = EncodeCellId(CandidateCellIds[1]);
-		const FVector2D EncodedC = EncodeCellId(CandidateCellIds[2]);
+		const FVector2D EncodedA = EncodeCellId(Samples.CellIds[Triangle.X]);
+		const FVector2D EncodedB = EncodeCellId(Samples.CellIds[Triangle.Y]);
+		const FVector2D EncodedC = EncodeCellId(Samples.CellIds[Triangle.Z]);
+		const int32 BaseIndex = TriangleIndex * 3;
 		for (int32 Corner = 0; Corner < 3; ++Corner)
 		{
+			const int32 OutputIndex = BaseIndex + Corner;
 			const int32 SourceVertexIndex = Triangle[Corner];
-			const int32 BaseIndex = Vertices.Num();
-			Vertices.Add(
-				CachedSurfaceVertices[SourceVertexIndex]);
-			Normals.Add(
-				CachedSurfaceNormals[SourceVertexIndex]);
-			// UV0/1/2 are constant per triangle: three material candidate CellIds.
-			// UV3 is one-hot so the material can reconstruct barycentric role if needed.
-			UV0.Add(EncodedA);
-			UV1.Add(EncodedB);
-			UV2.Add(EncodedC);
-			UV3.Emplace(Corner == 0 ? 1.0f : 0.0f, Corner == 1 ? 1.0f : 0.0f);
-			Colors.Add(
-				CachedSurfaceColors[SourceVertexIndex]);
-			Triangles.Add(BaseIndex);
+			OutBuffers.Vertices[OutputIndex] = Samples.Vertices[SourceVertexIndex];
+			OutBuffers.Normals[OutputIndex] = Samples.Normals[SourceVertexIndex];
+			OutBuffers.UV0[OutputIndex] = EncodedA;
+			OutBuffers.UV1[OutputIndex] = EncodedB;
+			OutBuffers.UV2[OutputIndex] = EncodedC;
+			OutBuffers.UV3[OutputIndex] = FVector2D(
+				Corner == 0 ? 1.0f : 0.0f,
+				Corner == 1 ? 1.0f : 0.0f);
+			OutBuffers.Colors[OutputIndex] = Samples.Colors[SourceVertexIndex];
+			OutBuffers.Triangles[OutputIndex] = OutputIndex;
+		}
+	};
+
+	FExpandedBuffers OptimizedExpanded;
+	OptimizedExpanded.SetNumUninitialized(Mesh.Triangles.Num() * 3);
+	const double OptimizedExpandStartSeconds = FPlatformTime::Seconds();
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_TriangleExpandParallel);
+		ParallelFor(Mesh.Triangles.Num(),
+			[&ExpandOne, &OptimizedSamples, &OptimizedExpanded](
+				const int32 TriangleIndex)
+			{
+				ExpandOne(TriangleIndex, OptimizedSamples, OptimizedExpanded);
+			});
+	}
+	const double OptimizedExpandMS =
+		(FPlatformTime::Seconds() - OptimizedExpandStartSeconds) * 1000.0;
+
+	const bool bRunExactOracle =
+		CVarABTSM3ContinuousSurfaceExactOracle.GetValueOnGameThread() != 0
+		|| FParse::Param(FCommandLine::Get(),
+			TEXT("ABTSM3ContinuousSurfaceExactOracle"));
+	double LegacySampleMS = 0.0;
+	double LegacyExpandMS = 0.0;
+	double ExactCompareMS = 0.0;
+	FString ExactFailure;
+	uint64 QuerySurfaceHashLegacy = 0;
+	uint64 QuerySurfaceHashOptimized = 0;
+	if (bRunExactOracle)
+	{
+		FSampleBuffers LegacySamples;
+		LegacySamples.SetNumUninitialized(Mesh.Vertices.Num());
+		const double LegacySampleStartSeconds = FPlatformTime::Seconds();
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_LegacySamplesSerial);
+			for (int32 VertexIndex = 0; VertexIndex < Mesh.Vertices.Num(); ++VertexIndex)
+			{
+				SampleOne(VertexIndex, false, LegacySamples);
+			}
+		}
+		LegacySampleMS =
+			(FPlatformTime::Seconds() - LegacySampleStartSeconds) * 1000.0;
+
+		FExpandedBuffers LegacyExpanded;
+		LegacyExpanded.SetNumUninitialized(Mesh.Triangles.Num() * 3);
+		const double LegacyExpandStartSeconds = FPlatformTime::Seconds();
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_LegacyTriangleExpandSerial);
+			for (int32 TriangleIndex = 0;
+				TriangleIndex < Mesh.Triangles.Num();
+				++TriangleIndex)
+			{
+				ExpandOne(TriangleIndex, LegacySamples, LegacyExpanded);
+			}
+		}
+		LegacyExpandMS =
+			(FPlatformTime::Seconds() - LegacyExpandStartSeconds) * 1000.0;
+
+		const double ExactCompareStartSeconds = FPlatformTime::Seconds();
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_ExactCompareSerial);
+			for (int32 VertexIndex = 0;
+				VertexIndex < Mesh.Vertices.Num() && ExactFailure.IsEmpty();
+				++VertexIndex)
+			{
+				const TCHAR* Field = nullptr;
+				if (LegacySamples.CellIds[VertexIndex]
+						!= OptimizedSamples.CellIds[VertexIndex]
+					|| LegacySamples.Valid[VertexIndex]
+						!= OptimizedSamples.Valid[VertexIndex])
+				{
+					Field = TEXT("CellOrValidity");
+				}
+				else if (LegacySamples.RadiiCM[VertexIndex]
+					!= OptimizedSamples.RadiiCM[VertexIndex])
+				{
+					Field = TEXT("Radius");
+				}
+				else if (LegacySamples.Normals[VertexIndex]
+					!= OptimizedSamples.Normals[VertexIndex])
+				{
+					Field = TEXT("Normal");
+				}
+				else if (LegacySamples.Colors[VertexIndex]
+					!= OptimizedSamples.Colors[VertexIndex])
+				{
+					Field = TEXT("Color");
+				}
+				if (Field != nullptr)
+				{
+					ExactFailure = FString::Printf(
+						TEXT("Sample[%d].%s:Cell(L=%d O=%d) Radius(L=%.17g O=%.17g) Normal(L=(%.17g,%.17g,%.17g) O=(%.17g,%.17g,%.17g)) Color(L=(%.9g,%.9g,%.9g,%.9g) O=(%.9g,%.9g,%.9g,%.9g))"),
+						VertexIndex,
+						Field,
+						LegacySamples.CellIds[VertexIndex],
+						OptimizedSamples.CellIds[VertexIndex],
+						LegacySamples.RadiiCM[VertexIndex],
+						OptimizedSamples.RadiiCM[VertexIndex],
+						LegacySamples.Normals[VertexIndex].X,
+						LegacySamples.Normals[VertexIndex].Y,
+						LegacySamples.Normals[VertexIndex].Z,
+						OptimizedSamples.Normals[VertexIndex].X,
+						OptimizedSamples.Normals[VertexIndex].Y,
+						OptimizedSamples.Normals[VertexIndex].Z,
+						LegacySamples.Colors[VertexIndex].R,
+						LegacySamples.Colors[VertexIndex].G,
+						LegacySamples.Colors[VertexIndex].B,
+						LegacySamples.Colors[VertexIndex].A,
+						OptimizedSamples.Colors[VertexIndex].R,
+						OptimizedSamples.Colors[VertexIndex].G,
+						OptimizedSamples.Colors[VertexIndex].B,
+						OptimizedSamples.Colors[VertexIndex].A);
+				}
+			}
+
+			auto CompareExactArray = [&ExactFailure](
+				const TCHAR* Name,
+				const auto& Legacy,
+				const auto& Optimized)
+			{
+				if (!ExactFailure.IsEmpty()) return;
+				if (Legacy.Num() != Optimized.Num())
+				{
+					ExactFailure = FString::Printf(
+						TEXT("%s:Count"), Name);
+					return;
+				}
+				for (int32 Index = 0; Index < Legacy.Num(); ++Index)
+				{
+					if (Legacy[Index] != Optimized[Index])
+					{
+						ExactFailure = FString::Printf(
+							TEXT("%s[%d]"), Name, Index);
+						return;
+					}
+				}
+			};
+			CompareExactArray(TEXT("Vertices"), LegacyExpanded.Vertices, OptimizedExpanded.Vertices);
+			CompareExactArray(TEXT("Triangles"), LegacyExpanded.Triangles, OptimizedExpanded.Triangles);
+			CompareExactArray(TEXT("Normals"), LegacyExpanded.Normals, OptimizedExpanded.Normals);
+			CompareExactArray(TEXT("UV0"), LegacyExpanded.UV0, OptimizedExpanded.UV0);
+			CompareExactArray(TEXT("UV1"), LegacyExpanded.UV1, OptimizedExpanded.UV1);
+			CompareExactArray(TEXT("UV2"), LegacyExpanded.UV2, OptimizedExpanded.UV2);
+			CompareExactArray(TEXT("UV3"), LegacyExpanded.UV3, OptimizedExpanded.UV3);
+			CompareExactArray(TEXT("Colors"), LegacyExpanded.Colors, OptimizedExpanded.Colors);
+		}
+		ExactCompareMS =
+			(FPlatformTime::Seconds() - ExactCompareStartSeconds) * 1000.0;
+
+		auto ComputeQuerySurfaceHash = [this](const bool bUseHintedQuery)
+		{
+			static const FVector Directions[] = {
+				FVector::ForwardVector, -FVector::ForwardVector,
+				FVector::RightVector, -FVector::RightVector,
+				FVector::UpVector, -FVector::UpVector,
+				FVector(1.0, 1.0, 1.0).GetSafeNormal(),
+				FVector(-1.0, 1.0, -1.0).GetSafeNormal()};
+			uint64 Hash = 14695981039346656037ull;
+			const auto Add = [&Hash](const uint64 Input)
+			{
+				for (int32 ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+				{
+					Hash ^= static_cast<uint8>(
+						(Input >> (ByteIndex * 8)) & 0xffull);
+					Hash *= 1099511628211ull;
+				}
+			};
+			for (const FVector& Direction : Directions)
+			{
+				int32 CellId = INDEX_NONE;
+				float RadiusCM = 0.0f;
+				FVector Normal = FVector::ZeroVector;
+				bool bHit = false;
+				if (bUseHintedQuery)
+				{
+					FABTSM3ContinuousSurfaceSample Sample;
+					bHit = TerrainVisualField->QueryContinuousSurfaceSample(
+						Direction, 0, Sample);
+					CellId = Sample.CellId;
+					RadiusCM = Sample.SurfaceRadiusCM;
+					Normal = Sample.SurfaceNormal;
+				}
+				else
+				{
+					CellId = TerrainVisualField->FindNearestCell(Direction);
+					RadiusCM = TerrainVisualField->GetSurfaceRadius(Direction);
+					Normal = TerrainVisualField->GetSurfaceNormal(Direction);
+					bHit = CellId != INDEX_NONE;
+				}
+				Add(bHit ? 1ull : 0ull);
+				Add(static_cast<uint32>(CellId));
+				Add(static_cast<uint32>(FMath::RoundToInt(RadiusCM * 100.0f)));
+				Add(static_cast<uint32>(FMath::RoundToInt(Normal.X * 1000000.0)));
+				Add(static_cast<uint32>(FMath::RoundToInt(Normal.Y * 1000000.0)));
+				Add(static_cast<uint32>(FMath::RoundToInt(Normal.Z * 1000000.0)));
+			}
+			return Hash;
+		};
+		QuerySurfaceHashLegacy = ComputeQuerySurfaceHash(false);
+		QuerySurfaceHashOptimized = ComputeQuerySurfaceHash(true);
+		if (ExactFailure.IsEmpty()
+			&& QuerySurfaceHashLegacy != QuerySurfaceHashOptimized)
+		{
+			ExactFailure = TEXT("QuerySurfaceHash");
 		}
 	}
 
-	ContinuousSurface->ClearAllMeshSections();
-	ContinuousSurface->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, UV3, Colors, Tangents, true, false);
-	// Rebuild Chaos state after installing the runtime-generated M3 section.
-	ContinuousSurface->RecreatePhysicsState();
+	if (!ExactFailure.IsEmpty())
+	{
+		check(IsInGameThread());
+		ContinuousSurface->ClearAllMeshSections();
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3][ContinuousSurfaceExactOracle] Passed=0 Failure=%s QuerySurfaceHashLegacy=%016llX QuerySurfaceHashOptimized=%016llX CommitPMC=0 FailClosed=1"),
+			*ExactFailure,
+			static_cast<unsigned long long>(QuerySurfaceHashLegacy),
+			static_cast<unsigned long long>(QuerySurfaceHashOptimized));
+		return false;
+	}
+
+	float MaxSurfaceNormalTiltDegrees = 0.0f;
+	int32 ExtremeSurfaceNormalCount = 0;
+	for (const float NormalTiltDegrees : OptimizedSamples.NormalTiltDegrees)
+	{
+		MaxSurfaceNormalTiltDegrees = FMath::Max(
+			MaxSurfaceNormalTiltDegrees, NormalTiltDegrees);
+		ExtremeSurfaceNormalCount += NormalTiltDegrees > 80.0f ? 1 : 0;
+	}
+
+	check(IsInGameThread());
+	const double PMCStartSeconds = FPlatformTime::Seconds();
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_PMCGameThread);
+		ContinuousSurface->ClearAllMeshSections();
+		ContinuousSurface->CreateMeshSection_LinearColor(
+			0,
+			OptimizedExpanded.Vertices,
+			OptimizedExpanded.Triangles,
+			OptimizedExpanded.Normals,
+			OptimizedExpanded.UV0,
+			OptimizedExpanded.UV1,
+			OptimizedExpanded.UV2,
+			OptimizedExpanded.UV3,
+			OptimizedExpanded.Colors,
+			OptimizedExpanded.Tangents,
+			true,
+			false);
+	}
+	const double PMCMS =
+		(FPlatformTime::Seconds() - PMCStartSeconds) * 1000.0;
+	const double PhysicsStartSeconds = FPlatformTime::Seconds();
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ABTSM3ContinuousSurface_PhysicsGameThread);
+		// Rebuild Chaos state after installing the runtime-generated M3 section.
+		ContinuousSurface->RecreatePhysicsState();
+	}
+	const double PhysicsMS =
+		(FPlatformTime::Seconds() - PhysicsStartSeconds) * 1000.0;
 	if (TerrainMaterial) ContinuousSurface->SetMaterial(0, TerrainMaterial);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M3][SurfaceNormals] SmoothingDistance=%.1f MaxTilt=%.2f ExtremeOver80=%d UniqueSamples=%d Vertices=%d"),
-		SurfaceNormalSmoothingDistanceCM, MaxSurfaceNormalTiltDegrees, ExtremeSurfaceNormalCount, CachedSurfaceNormals.Num(), Normals.Num());
+
+	bool bV3IdentityUnchanged =
+		LayoutHashBefore == JuryMapFreezeV3Result.LayoutHash
+		&& CatalogHashBefore
+			== JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash
+		&& PlacementHashesBefore.Num()
+			== JuryMapFreezeV3Result.Placements.Num();
+	for (int32 Index = 0;
+		bV3IdentityUnchanged && Index < PlacementHashesBefore.Num();
+		++Index)
+	{
+		bV3IdentityUnchanged = PlacementHashesBefore[Index]
+			== JuryMapFreezeV3Result.Placements[Index]
+				.Site.V3Envelope.PlacementHash;
+	}
+	if (!bV3IdentityUnchanged)
+	{
+		ContinuousSurface->ClearAllMeshSections();
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3][ContinuousSurfaceExactOracle] Passed=0 Failure=V3IdentityMutation CommitPMC=0 FailClosed=1"));
+		return false;
+	}
+
+	const double TotalMS =
+		(FPlatformTime::Seconds() - TotalStartSeconds) * 1000.0;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3][ContinuousSurfaceTiming] Ready=1 Subdivision=%d UniqueSamples=%d Triangles=%d OutputVertices=%d ParallelBaseSamples=1 CanonicalNormalsSerial=1 ParallelExpand=1 StableIndexMerge=1 UObjectWritesGameThread=1 WallMS.Total=%.3f WallMS.Topology=%.3f WallMS.HintedBaseSamples=%.3f WallMS.CanonicalNormals=%.3f WallMS.TriangleExpand=%.3f WallMS.LegacySamples=%.3f WallMS.LegacyExpand=%.3f WallMS.ExactCompare=%.3f WallMS.PMC=%.3f WallMS.Physics=%.3f CpuTrace=ABTSM3ContinuousSurface_*"),
+		SurfaceSubdivision,
+		OptimizedSamples.Normals.Num(),
+		Mesh.Triangles.Num(),
+		OptimizedExpanded.Normals.Num(),
+		TotalMS,
+		TopologyMS,
+		OptimizedSampleMS,
+		CanonicalNormalMS,
+		OptimizedExpandMS,
+		LegacySampleMS,
+		LegacyExpandMS,
+		ExactCompareMS,
+		PMCMS,
+		PhysicsMS);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3][ContinuousSurfaceExactOracle] Enabled=%d Passed=1 QuerySurfaceHashLegacy=%016llX QuerySurfaceHashOptimized=%016llX LayoutHash=%016llX CatalogHash=%016llX PlacementCount=%d V3IdentityUnchanged=1 FailClosed=1"),
+		bRunExactOracle ? 1 : 0,
+		static_cast<unsigned long long>(QuerySurfaceHashLegacy),
+		static_cast<unsigned long long>(QuerySurfaceHashOptimized),
+		static_cast<unsigned long long>(JuryMapFreezeV3Result.LayoutHash),
+		static_cast<unsigned long long>(
+			JuryMapFreezeV3Result.HandoffContract.PlacementCatalogHash),
+		JuryMapFreezeV3Result.Placements.Num());
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M3][SurfaceNormals] SmoothingDistance=%.1f MaxTilt=%.2f ExtremeOver80=%d UniqueSamples=%d Vertices=%d"),
+		SurfaceNormalSmoothingDistanceCM,
+		MaxSurfaceNormalTiltDegrees,
+		ExtremeSurfaceNormalCount,
+		OptimizedSamples.Normals.Num(),
+		OptimizedExpanded.Normals.Num());
+	return true;
 }
 
 void AABTSM3Planet::BuildDecorInstances(
