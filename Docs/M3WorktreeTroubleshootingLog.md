@@ -1078,6 +1078,41 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - 新增 `ABTS.M3.Monthly.SatellitePreview.05CanonicalPrimaryRoadSpawn`：量化断言 route ordinal `0`、route ordinal `1` 朝向、主星地表 Cell/偏移、V3 建筑保护区清空，并显式断言旧 `StartTask.SeedCellId` 不可冒充冻结端点。
 - UE 5.8 `AngryBirdsToSpaceEditor Win64 Development` 增量编译通过（`Result: Succeeded`）。fresh NullRHI 日志 `Saved/Logs/M3CanonicalRoadSpawn-20260816-FreshNullRHI.log` 精确 `1/1 Success / EXIT CODE: 0`；记录 `Candidate=4 EndpointOrdinal=0 EndpointCell=5420 NextCell=352 LegacyStartCell=6946`，同时输出 `SpawnAuthority=MapFreezeV3MainRoute ... Protected=0`。本次未启动 D3D、可见 PIE 或全量门。
 
+### M3-RC3-001：245 gameplay 重力下固定强化见证未命中真实 E1 模块联合体
+
+**现象**
+
+- RC3 packaged 运行日志显示 production `AABTSM9Satellite` 的 surface gravity 为 `1960 cm/s²`，使待机/行走鸟受到远强于设计 M9 `0.25 primary = 245 cm/s²` 的月球吸引。
+- 在 M3 runtime 中将 production satellite 固定为 `245 cm/s²`、保留冻结 preview `1960 cm/s²` 仅作历史 calibration identity 后，fresh NullRHI `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 对唯一固定强化见证（Pull `0.860`、Aim `(-173.3,-21.3)`）正确拒绝：`FrozenE1AttackabilityMiss:Outcome=3:FirstHit=-1:Hash=CE30CE7A7670CE03`。
+
+**根因**
+
+冻结 V3 preview 的 `SatelliteSurfaceGravityPrimaryRatio=2.0` 被 runtime 直接传入 production `AABTSM9Satellite::ConfigureFromPrimaryDirection`。历史 2g 的 61x31 Brick certificate 因而不能诚实地作为 245 gameplay 的攻击证据；历史可达 witness 在真实 245 物理下没有 first-hit 任意 ordered E1 Brick OBB。
+
+**处理与边界**
+
+- M3 候选改动将 calibration gravity 与 gameplay gravity 分离，生产值为 `245`，日志显式输出 `CalibrationGravity=1960` 与 `GameplayGravity=245`；preview Candidate/Result、MapFreeze Layout、shared seal、Site、卫星、yaw 和五个主星 Pad 均未修改。
+- runtime policy 候选为 `BuildingLevelAttackabilityV1`：仅对公开冻结 E1 的有序真实 Brick OBB union 执行一个固定强化样本；不使用 Crystal、hidden proxy、max-axis cube 或 61x31 runtime 重扫。零命中保持 `Ready=0`，不移动 Site、不搜索 yaw/correction/candidate、不放宽 first-hit 门。
+- 本条目是阻断记录，不构成可提交的发行修复；需要 Integration 明确授权新的产品可达性自由度或提供在 245 重力下已有的合法固定 witness，M3 才能完成验证并提交。
+
+**证据**
+
+- Development Editor 增量编译成功（`Result: Succeeded`）。
+- fresh NullRHI 日志：`Saved/Logs/M3RC3-GameplayGravity245-FreshNullRHI.log`；该针对性测试预期 fail-closed，`03RuntimePracticeSnapshot` 结果为 fail，未启动 D3D、PIE 或全量门。
+
+### M3-RC3-002：用户已验证的旧可达代理证据须以真实 E1 union 几何继承，而非 245 重力轨迹重算
+
+**根因与处理**
+
+- 用户玩法只要求强化弹弓攻击 E1 任一真实模块；245 gameplay 物理下不应继续冒充或重建历史 2g 的 61x31 数值证书。
+- `ReachableLegacyProxyOverlapV1` 从冻结 calibration 的实际 `420 cm` 代理体积和 `42 cm` 鸟碰撞半径构造唯一可审计膨胀域；它先验证 final E1 Site 仍处于该代理的 radial projection，再逐个检查公开 descriptor 的有序真实 Brick OBB。无 trajectory integration、无 sweep、`SampleCount=0`；记录稳定首个 overlap BrickId 与总数。
+- `bTrajectoryCertified` 仅兼容映射 `bBuildingLevelAttackabilityCertified`。日志强制输出 `NumericalTrajectoryRequired=0`、`ExactCrystalRequired=0`、245 gameplay 与 1960 calibration，绝不声称 preview trajectory exact。M7 的真实静态注册/贴地稳定仍保持其 own gate。
+
+**防回归验证**
+
+- `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 断言：245 gameplay、1960 frozen calibration、真实 union overlap、`SampleCount=0`，并断言 runtime proof hash 不等于历史 preview trajectory certificate。
+- Development Editor 增量编译通过；fresh NullRHI `Saved/Logs/M3RC3-ProxyOverlap-FreshNullRHI.log` 精确 `1/1 Success`。候选 4 输出 `ProjectionExact=1 / ProxyOverlapBrickId=0 / ProxyOverlapCount=54 / TargetIdentity=5F1D6833F37C28C4 / OverlapHash=102C2ECF35AF1AB1 / Ready=1`；未启动 D3D、PIE 或全量门。
+
 ## 15. 新条目模板
 
 ```markdown
