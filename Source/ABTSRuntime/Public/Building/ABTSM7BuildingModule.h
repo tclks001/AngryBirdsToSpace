@@ -10,6 +10,7 @@
 class AABTSM7BuildingMaterialSystem;
 class AABTSM73StableBuildingActor;
 class UPhysicalMaterial;
+class UPrimitiveComponent;
 class UStaticMeshComponent;
 
 /**
@@ -147,6 +148,10 @@ public:
 	}
 	float GetCurrentDamage() const { return CurrentDamage; }
 	float GetBreakDamage() const { return BreakDamage; }
+	/** Read-only visual surface used by the M7 stylized adapter; collision proxies never publish twice. */
+	UPrimitiveComponent* GetStylizedPresentationPrimitive() const;
+	/** Crystal targets and authored devices are gameplay weak-point semantics. */
+	bool IsStylizedWeakPoint() const;
 
 private:
 	UFUNCTION()
