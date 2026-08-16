@@ -158,6 +158,10 @@ void UABTSGameViewportClient::Init(
 		}
 		bMenuVisible = true;
 		bInitialMenuStateResolved = true;
+		// Front-end capture must traverse the same presentation-ready gate as the
+		// interactive startup path. Otherwise its completed-menu frame counter is
+		// never advanced and the capture waits until its timeout.
+		bStartupFrontEndRequired = MenuPage == EABTSSystemMenuPage::Front;
 		FParse::Value(FCommandLine::Get(), TEXT("ABTSMenuCaptureOutput="), CaptureOutputPath);
 		if (CaptureOutputPath.IsEmpty())
 		{

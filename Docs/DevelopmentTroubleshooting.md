@@ -408,6 +408,7 @@
 | P0 | RC7 实击 E2/B0 后建筑可倒塌，但少量动态积木最终穿入主星连续地表 | 首击后 HISM 到真实 Chaos 模块的碰撞身份、CCD、连续地表响应与睡眠前穿透门正在 M7-owned 路径复核；在真实运行证据收敛前不得把截图归因于单纯视觉裁切 | 保持首击原子激活、SiteUniformGravity 与真实 Chaos；禁止 Tick 传送、隐藏地板或关闭物理。下一候选必须记录每个 promoted body 的地形 Block/CCD 身份，并在静止前对权威 `QuerySurface` 做穿透 fail-closed；玩家复击 E2 后所有可见积木应停在表面而非半埋 |
 | P0 | 建筑命中后观察镜头长期盯住建筑旁地面，整栋倒塌过程在画外 | 旧观察虽取建筑模块平均点，却仍把相机固定在鸟的 `920 cm` 近距离，并以鸟为主要焦点；对高楼而言只够看到命中脚点。平均点也不能表达建筑完整尺寸 | 首次真实 Facility hit 冻结该建筑物理组件的完整 Bounds，以包围盒中心为观察主体，并按包围球半径扩大相机距离；无有效 Bounds 才回退旧点锚。自动化要求建筑中心居中、距离大于完整包围球拟合门且残余接触不改写首击构图；下一 Development 仍需玩家确认整栋倒塌可见 |
 | P0 | 开屏 MoviePlayer 到可进入前台之间约一秒暴露蓝色 clear frame 与局部 HUD；RC9 仅预置 FrontEnd 后仍能复现 | MoviePlayer 在地图对象加载完成即自动撤下；Viewport `Init` 预置菜单只证明状态存在，不能证明 Canvas 字体、主题和全部面板已经在一个完整 present 中提交。旧计数又在 `Tick` 中递增，因此实际从未观察 `DrawMenu` 完成，首个半初始化 Canvas 帧仍可泄漏世界 HUD | Interactive packaged 启动在 Viewport `Init` 预置 FrontEnd；MoviePlayer 撤下后由 Viewport 最后绘制一个全不透明、与加载页同构的 Canvas handoff cover。只有 `WorldReady + FrontEnd 可绘制 + DrawMenu 已完整发出两帧` 同时成立，下一帧才撤掉 cover 并原子显示已预热菜单；按钮和输入此前保持锁定。打包逐帧录制不得再出现局部 HUD、半菜单或 clear-color 中间帧 |
+| P1 | `-ABTSMenuCapture=Front` 在世界已经 Ready 后仍无法出图并最终超时 | 捕获模式预置了 Front 菜单，却没有把自己标记为需要前台 presentation gate；而完整菜单帧计数只在该 gate 开启时递增，形成捕获工具自身的循环等待，不能作为开屏修复证据 | Front 捕获显式复用交互启动的 presentation-ready gate；必须在打包态记录 `ForegroundGateTerminal Ready=1 PresentationFrames>=2`，随后 `SystemMenuCapture Complete Success=1`，并检查截图中没有世界 HUD、clear color 或半初始化菜单。记录 `INT-RC92-STARTUP-CAPTURE-001` |
 
 ## 20. RC9.1 发行候选收敛（2026-08-16）
 
