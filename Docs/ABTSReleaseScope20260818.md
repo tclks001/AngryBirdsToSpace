@@ -78,6 +78,13 @@ device, or specially highlighted brick.
 - The opening UFO capture beam may not ship as the Engine BasicShapes cylinder;
   RC9 requires a stylized, collision-free presentation effect tied to the same
   deterministic capture interval.
+- Integration production binding is one-shot and fail closed: only a formally
+  certified, non-Candidate `PhysicalTargetHit` may start the post-hit timeline.
+  Its first proxy frame is copied from the four real bird visuals, the root is
+  the authoritative UFO transform, and the real presentation is retired only
+  after the replacement Geometry Collection is ready. A rejected binding keeps
+  the already-authoritative gameplay `TargetHit` instead of fabricating a
+  preview success.
 
 ## Release validation filters
 
