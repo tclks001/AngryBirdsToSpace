@@ -1056,6 +1056,28 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - fresh offscreen D3D11 `Saved/Logs/M3-HonestUnion-L_ABTS_M10-OffscreenD3D11-20260816.log`：`MapFreezeV3 Ready=1 / SurfaceAuthority=FinalV3 / Layout=3E143A25531F3F7A`，`ContinuousSurface=2471.450 ms`、整次 `RebuildBudget=6583.687 ms / Passed=1`、`ProductionClearance Passed=1`，runtime 为 `DeltaFromPreview=0.00 / TrajectoryHash=3BE096C16B3D9807 / Ready=1 / TrajectoryCertified=1`；日志不含 `SatellitePreviewRuntimeDivergence`、`SpawnRejected` 或 M3 trajectory rejection；
 - 该 D3D 仍**不构成最终 M7 实体联合绑定通过**：功能树的旧共享 seal 在 M7 注册前以 `BuildingContractSealed Expected=0 Registered=0 SetupRejected=1` fail closed，因此没有真实 E1 Actor 可替换 stand-in，最终 StartupFlow 也正确 blocked。只有 Integration 原子发布上述 proposed seal 后才能复跑实体绑定；M3 不越权修改 shared/M7，也不把 stand-in Ready 冒充联合 Ready。
 
+### M3-SPAWN-001: 已冻结 V3 道路地图不能从兼容 Task Seed 出生
+
+**现象**
+
+- Development RC0 可见验收截图显示玩家与四鸟队伍落在主路中段；日志虽显示 `Player placed at Start road. Cell=6946`，但已发布 V3 Candidate 4 的可见主路起端并非该 Cell。
+- M4 Party 只以玩家 transform 为 leader 生成三只跟随鸟，不会二次选择道路 Cell；因此问题位于 M3 初始出生取点。
+
+**根因**
+
+`GetInitialRoadSpawnTransform()` 旧实现使用兼容 TaskGraph 的 `StartTask.SeedCellId` 并从邻接 road cell 猜测朝向。而已冻结 V3 的地图路网权威是 `JuryMapFreezeV3Result.SourceCandidateId` 所指向的 `FABTSM3MonthlySpatialCandidate::RecomputedRoute` 有序序列。兼容 Seed `6946` 与 Candidate 4 的 canonical route endpoint `5420` 不同，造成日志名义上的 Start 与可见路网语义脱节。
+
+**修复**
+
+- 已冻结 V3 时，出生位置与朝向严格从 `RecomputedRoute[0] -> RecomputedRoute[1]` 派生；若 V3 candidate 或其两个有序端点缺失则 fail closed，不回退到任意兼容 interior cell。
+- 非 V3/preview 兼容路径也改为取 Start Task 的 MainPath/LockedGate corridor 实际端点，不再直接依赖 Task seed。仍使用 M3 final surface 求高以保持地表贴合。
+- 出生 Cell 仅从主星 `LogicalCells` 解析，并在正式输出前检查全部主星 V3 physical/effect building envelope；任一重叠即拒绝。未改动 shared seal、共同地图、M7/M11 或二进制资产。
+
+**防回归验证**
+
+- 新增 `ABTS.M3.Monthly.SatellitePreview.05CanonicalPrimaryRoadSpawn`：量化断言 route ordinal `0`、route ordinal `1` 朝向、主星地表 Cell/偏移、V3 建筑保护区清空，并显式断言旧 `StartTask.SeedCellId` 不可冒充冻结端点。
+- UE 5.8 `AngryBirdsToSpaceEditor Win64 Development` 增量编译通过（`Result: Succeeded`）。fresh NullRHI 日志 `Saved/Logs/M3CanonicalRoadSpawn-20260816-FreshNullRHI.log` 精确 `1/1 Success / EXIT CODE: 0`；记录 `Candidate=4 EndpointOrdinal=0 EndpointCell=5420 NextCell=352 LegacyStartCell=6946`，同时输出 `SpawnAuthority=MapFreezeV3MainRoute ... Protected=0`。本次未启动 D3D、可见 PIE 或全量门。
+
 ## 15. 新条目模板
 
 ```markdown
