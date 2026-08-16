@@ -567,20 +567,25 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Snapshot.ProxyOverlapBrickCount > 0);
 	TestTrue(TEXT("Overlap records the stable first BrickId"),
 		Snapshot.ProxyOverlapBrickId != INDEX_NONE);
-	TestTrue(TEXT("Historical preview calibration remains 2.0 primary gravity"),
+	TestTrue(TEXT("Frozen preview remains 2.0 primary gravity"),
 		FMath::IsNearlyEqual(
 			Candidate.SatelliteSurfaceGravityCMPerSec2,
 			1960.0f,
 			0.01f));
-	TestTrue(TEXT("Runtime records the historical calibration gravity separately"),
+	TestTrue(TEXT("Runtime records the frozen preview gravity separately"),
 		FMath::IsNearlyEqual(
 			Snapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
 			1960.0f,
 			0.01f));
-	TestTrue(TEXT("Production gameplay satellite uses 0.25 primary gravity"),
+	TestTrue(TEXT("Production gameplay satellite consumes the frozen preview gravity"),
 		FMath::IsNearlyEqual(
 			Snapshot.SatelliteSurfaceGravityCMPerSec2,
-			245.0f,
+			Candidate.SatelliteSurfaceGravityCMPerSec2,
+			0.01f));
+	TestTrue(TEXT("Runtime frozen-preview record and gameplay gravity are exact peers"),
+		FMath::IsNearlyEqual(
+			Snapshot.SatelliteSurfaceGravityCMPerSec2,
+			Snapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
 			0.01f));
 	TestNotEqual(TEXT("Trajectory certification hash is persisted"),
 		Snapshot.TrajectoryCertificationHash,
