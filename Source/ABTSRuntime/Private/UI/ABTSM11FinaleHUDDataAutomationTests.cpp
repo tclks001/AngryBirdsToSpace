@@ -403,6 +403,10 @@ bool FABTSM11HudOverviewViewInvarianceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Candidate catalog construction is intentionally editor-only. Keep the
+// Rank11 terminal-transfer regression intact for Editor/NullRHI, but never
+// compile it into the Win64 game target.
+#if WITH_EDITOR
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11HudTerminalTransferOverviewTest,
 	"ABTS.M11C.HUD.Unit.TerminalTransferOverview",
@@ -1009,6 +1013,7 @@ bool FABTSM11HudTerminalTransferOverviewTest::RunTest(
 		UnchangedPointCount);
 	return true;
 }
+#endif // WITH_EDITOR
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11HudTrajectoryHitTest,
