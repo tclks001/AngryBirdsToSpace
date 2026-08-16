@@ -553,7 +553,9 @@ namespace ABTSM73BeamA
 					Bounds,
 					Bounds.Min.Z + CrossSection * (CourseIndex + 0.5),
 					Axis,
-					Context.Settings->MaxParallelBlocksPerCourse,
+					FMath::Min(
+						Context.Settings->MaxFrameParallelBlocksPerCourse,
+						Context.Settings->MaxParallelBlocksPerCourse),
 					CourseIndex % 2 == 0
 						? EABTSM73BeamAMemberRole::PrimaryBeam
 						: EABTSM73BeamAMemberRole::SecondaryBeam))
@@ -563,8 +565,7 @@ namespace ABTSM73BeamA
 			}
 			return true;
 		}
-		TArray<int32> LowerBearingMembers;
-		TArray<int32> UpperBearingMembers;
+		TArray<int32> PreviousBearingMembers;
 		if (!AddHorizontalCourse(
 			Context,
 			Bay,
@@ -572,7 +573,9 @@ namespace ABTSM73BeamA
 			Bounds,
 			Bounds.Min.Z + CrossSection * 0.5,
 			Primary,
-			Context.Settings->MaxParallelBlocksPerCourse,
+			FMath::Min(
+				Context.Settings->MaxFrameParallelBlocksPerCourse,
+				Context.Settings->MaxParallelBlocksPerCourse),
 			EABTSM73BeamAMemberRole::PrimaryBeam)
 			|| !AddHorizontalCourse(
 				Context,
@@ -581,12 +584,63 @@ namespace ABTSM73BeamA
 				Bounds,
 				Bounds.Min.Z + CrossSection * 1.5,
 				Secondary,
-				Context.Settings->MaxParallelBlocksPerCourse,
+				FMath::Min(
+					Context.Settings->MaxFrameParallelBlocksPerCourse,
+					Context.Settings->MaxParallelBlocksPerCourse),
 				EABTSM73BeamAMemberRole::SecondaryBeam,
-				&LowerBearingMembers))
+				&PreviousBearingMembers))
 		{
 			return false;
 		}
+		const double LowerBearingCenterZ =
+			Bounds.Min.Z + CrossSection * 1.5;
+		const double UpperBearingCenterZ =
+			Bounds.Max.Z - CrossSection * 1.5;
+		const int32 VerticalSegmentCount = FMath::Max(1,
+			FMath::CeilToInt(
+				(UpperBearingCenterZ - LowerBearingCenterZ)
+				/ Context.Settings->MaximumVerticalSupportSpanCM));
+		for (int32 SegmentIndex = 1;
+			SegmentIndex < VerticalSegmentCount;
+			++SegmentIndex)
+		{
+			const double MidZ = FMath::Lerp(
+				LowerBearingCenterZ, UpperBearingCenterZ,
+				static_cast<double>(SegmentIndex) / VerticalSegmentCount);
+			TArray<int32> PrimaryMembers;
+			TArray<int32> SecondaryMembers;
+			if (!AddHorizontalCourse(
+					Context,
+					Bay,
+					Assembly,
+					Bounds,
+					MidZ - CrossSection * 0.5,
+					Primary,
+					FMath::Min(
+						Context.Settings->MaxFrameParallelBlocksPerCourse,
+						Context.Settings->MaxParallelBlocksPerCourse),
+					EABTSM73BeamAMemberRole::PrimaryBeam,
+					&PrimaryMembers)
+				|| !AddHorizontalCourse(
+					Context,
+					Bay,
+					Assembly,
+					Bounds,
+					MidZ + CrossSection * 0.5,
+					Secondary,
+					FMath::Min(
+						Context.Settings->MaxFrameParallelBlocksPerCourse,
+						Context.Settings->MaxParallelBlocksPerCourse),
+					EABTSM73BeamAMemberRole::SecondaryBeam,
+					&SecondaryMembers)
+				|| !AddVerticalSupportsBetweenCourses(
+					Context, Assembly, PreviousBearingMembers, PrimaryMembers))
+			{
+				return false;
+			}
+			PreviousBearingMembers = MoveTemp(SecondaryMembers);
+		}
+		TArray<int32> UpperBearingMembers;
 		if (!AddHorizontalCourse(
 				Context,
 				Bay,
@@ -594,7 +648,9 @@ namespace ABTSM73BeamA
 				Bounds,
 				Bounds.Max.Z - CrossSection * 1.5,
 				Primary,
-				Context.Settings->MaxParallelBlocksPerCourse,
+				FMath::Min(
+					Context.Settings->MaxFrameParallelBlocksPerCourse,
+					Context.Settings->MaxParallelBlocksPerCourse),
 				EABTSM73BeamAMemberRole::PrimaryBeam,
 				&UpperBearingMembers)
 			|| !AddHorizontalCourse(
@@ -604,16 +660,15 @@ namespace ABTSM73BeamA
 				Bounds,
 				Bounds.Max.Z - CrossSection * 0.5,
 				Secondary,
-				Context.Settings->MaxParallelBlocksPerCourse,
+				FMath::Min(
+					Context.Settings->MaxFrameParallelBlocksPerCourse,
+					Context.Settings->MaxParallelBlocksPerCourse),
 				EABTSM73BeamAMemberRole::SecondaryBeam))
 		{
 			return false;
 		}
 		return AddVerticalSupportsBetweenCourses(
-			Context,
-			Assembly,
-			LowerBearingMembers,
-			UpperBearingMembers);
+			Context, Assembly, PreviousBearingMembers, UpperBearingMembers);
 	}
 
 	FBox SemanticRoofCourseBounds(
@@ -890,7 +945,11 @@ namespace ABTSM73BeamA
 				{
 					if (++PairChecks > Settings.MaxBearingPairChecks)
 					{
-						OutError = TEXT("BeamAMaxBearingPairChecksExceeded");
+						OutError = FString::Printf(
+							TEXT("BeamAMaxBearingPairChecksExceeded:Checks=%d/%d:Contacts=%d/%d"),
+							PairChecks, Settings.MaxBearingPairChecks,
+							Result.BearingContacts.Num(),
+							Settings.MaxBearingContactCount);
 						return false;
 					}
 					if (LowerId == UpperId)
@@ -923,7 +982,11 @@ namespace ABTSM73BeamA
 					if (Result.BearingContacts.Num()
 						>= Settings.MaxBearingContactCount)
 					{
-						OutError = TEXT("BeamAMaxBearingContactCountExceeded");
+						OutError = FString::Printf(
+							TEXT("BeamAMaxBearingContactCountExceeded:Contacts=%d/%d:Checks=%d/%d"),
+							Result.BearingContacts.Num(),
+							Settings.MaxBearingContactCount,
+							PairChecks, Settings.MaxBearingPairChecks);
 						return false;
 					}
 					FABTSM73BeamABearingContact& Contact =
@@ -1008,8 +1071,16 @@ namespace ABTSM73BeamA
 		}
 	}
 
-	int32 BridgeRolePriority(const EABTSM73BeamAMemberRole Role)
+	int32 SemanticRolePriority(const EABTSM73BeamAMemberRole Role)
 	{
+		if (Role == EABTSM73BeamAMemberRole::CoreCourse)
+		{
+			return 5;
+		}
+		if (Role == EABTSM73BeamAMemberRole::CorePost)
+		{
+			return 4;
+		}
 		if (Role == EABTSM73BeamAMemberRole::BridgeSeat)
 		{
 			return 3;
@@ -1098,11 +1169,21 @@ namespace ABTSM73BeamA
 						(UnionMin + UnionMax) * 0.5;
 					Specs[AIndex].LengthCM =
 						static_cast<float>(UnionMax - UnionMin);
-					if (BridgeRolePriority(Specs[BIndex].Role)
-						> BridgeRolePriority(Specs[AIndex].Role))
+					if (SemanticRolePriority(Specs[BIndex].Role)
+						> SemanticRolePriority(Specs[AIndex].Role))
 					{
-						// Preserve bridge identity when a semantic rail or seat is
-						// absorbed into an existing support-module course.
+						// A semantic member owns its physical lane as well as its role.
+						// Keeping A's transverse center while only copying B's CorePost
+						// role can move a certified C3 station by almost one section and
+						// leave the new crib course with no real post bearing face.
+						for (int32 Coordinate = 0; Coordinate < 3; ++Coordinate)
+						{
+							if (Coordinate != AxisIndex)
+							{
+								Specs[AIndex].Center[Coordinate] =
+									Specs[BIndex].Center[Coordinate];
+							}
+						}
 						Specs[AIndex].Role =
 							Specs[BIndex].Role;
 					}
@@ -1313,6 +1394,29 @@ namespace ABTSM73BeamA
 		FBuildContext& Context,
 		const TArray<FMemberBuildSpec>& Specs)
 	{
+		// Rebuild is transactional from the caller's point of view.  Reject an
+		// invalid physical member before clearing the accepted IR; otherwise a
+		// failed rebuild leaves a half-written assembly and hides the producer
+		// that emitted a sub-block residual.
+		for (int32 SpecIndex = 0; SpecIndex < Specs.Num(); ++SpecIndex)
+		{
+			const FMemberBuildSpec& Spec = Specs[SpecIndex];
+			if (!FMath::IsFinite(Spec.LengthCM)
+				|| Spec.LengthCM <= 0.0f
+				|| Spec.LengthCM
+					+ Context.Settings->JointMergeToleranceCM
+					< Context.Settings->BlockCrossSectionCM)
+			{
+				UE_LOG(LogABTSRuntime, Warning,
+					TEXT("[ABTS][M7.3-Beam-A][RebuildFailed] Reason=SubBlockMemberPreflight Spec=%d/%d Axis=%d Role=%d Length=%.2f Section=%.2f Tol=%.2f Center=%s"),
+					SpecIndex, Specs.Num(), static_cast<int32>(Spec.Axis),
+					static_cast<int32>(Spec.Role), Spec.LengthCM,
+					Context.Settings->BlockCrossSectionCM,
+					Context.Settings->JointMergeToleranceCM,
+					*Spec.Center.ToString());
+				return false;
+			}
+		}
 		Context.Result->Joints.Reset();
 		Context.Result->Members.Reset();
 		Context.Result->BearingContacts.Reset();
@@ -1323,16 +1427,24 @@ namespace ABTSM73BeamA
 			Assembly.JointIds.Reset();
 			Assembly.MemberIds.Reset();
 		}
-		for (const FMemberBuildSpec& Spec : Specs)
+		for (int32 SpecIndex = 0; SpecIndex < Specs.Num(); ++SpecIndex)
 		{
+			const FMemberBuildSpec& Spec = Specs[SpecIndex];
 			if (Spec.AssemblyIds.IsEmpty())
 			{
+				UE_LOG(LogABTSRuntime, Warning,
+					TEXT("[ABTS][M7.3-Beam-A][RebuildFailed] Reason=MissingAssembly Spec=%d Axis=%d Length=%.2f Center=%s"),
+					SpecIndex, static_cast<int32>(Spec.Axis), Spec.LengthCM,
+					*Spec.Center.ToString());
 				return false;
 			}
 			TArray<int32> AssemblyIds = Spec.AssemblyIds;
 			AssemblyIds.Sort();
 			if (!Context.Result->Assemblies.IsValidIndex(AssemblyIds[0]))
 			{
+				UE_LOG(LogABTSRuntime, Warning,
+					TEXT("[ABTS][M7.3-Beam-A][RebuildFailed] Reason=InvalidPrimaryAssembly Spec=%d Assembly=%d Assemblies=%d"),
+					SpecIndex, AssemblyIds[0], Context.Result->Assemblies.Num());
 				return false;
 			}
 			// Split/merge passes deliberately use JointMergeToleranceCM when
@@ -1356,6 +1468,22 @@ namespace ABTSM73BeamA
 				Spec.Role);
 			if (MemberId == INDEX_NONE)
 			{
+				const FVector Direction = AxisVector(Spec.Axis);
+				const FVector Half = Direction * (RebuiltLength * 0.5f);
+				const FVector PositionA = Spec.Center - Half;
+				const FVector PositionB = Spec.Center + Half;
+				UE_LOG(LogABTSRuntime, Warning,
+					TEXT("[ABTS][M7.3-Beam-A][RebuildFailed] Reason=AddMember Spec=%d/%d Axis=%d Length=%.2f Rebuilt=%.2f Section=%.2f Tol=%.2f SameJointKey=%d Center=%s Members=%d/%d Joints=%d/%d"),
+					SpecIndex, Specs.Num(), static_cast<int32>(Spec.Axis),
+					Spec.LengthCM, RebuiltLength,
+					Context.Settings->BlockCrossSectionCM,
+					Context.Settings->JointMergeToleranceCM,
+					JointKey(PositionA, Context.Settings->JointMergeToleranceCM)
+						== JointKey(PositionB,
+							Context.Settings->JointMergeToleranceCM) ? 1 : 0,
+					*Spec.Center.ToString(),
+					Context.Result->Members.Num(), Context.Settings->MaxMemberCount,
+					Context.Result->Joints.Num(), Context.Settings->MaxJointCount);
 				return false;
 			}
 			const FABTSM73BeamAMember& Member =
@@ -1364,6 +1492,10 @@ namespace ABTSM73BeamA
 			{
 				if (!Context.Result->Assemblies.IsValidIndex(AssemblyIds[Index]))
 				{
+					UE_LOG(LogABTSRuntime, Warning,
+						TEXT("[ABTS][M7.3-Beam-A][RebuildFailed] Reason=InvalidSecondaryAssembly Spec=%d Assembly=%d Assemblies=%d"),
+						SpecIndex, AssemblyIds[Index],
+						Context.Result->Assemblies.Num());
 					return false;
 				}
 				FABTSM73BeamAAssembly& Assembly =
@@ -1406,13 +1538,15 @@ namespace ABTSM73BeamA
 							LogABTSRuntime,
 							Warning,
 							TEXT("[ABTS][M7.3-Beam-A][Penetration]")
-							TEXT(" A=%d AxisA=%d BoundsA=%s")
-							TEXT(" B=%d AxisB=%d BoundsB=%s"),
+							TEXT(" A=%d AxisA=%d RoleA=%d BoundsA=%s")
+							TEXT(" B=%d AxisB=%d RoleB=%d BoundsB=%s"),
 							A,
 							static_cast<int32>(Result.Members[A].Axis),
+							static_cast<int32>(Result.Members[A].Role),
 							*Bounds[A].ToString(),
 							B,
 							static_cast<int32>(Result.Members[B].Axis),
+							static_cast<int32>(Result.Members[B].Role),
 							*Bounds[B].ToString());
 					}
 					++Count;
@@ -1965,6 +2099,14 @@ namespace ABTSM73BeamA
 				Context.Settings->BlockCrossSectionCM,
 				Context.Settings->JointMergeToleranceCM,
 				PostMergedCount);
+			// The post-split collinear merge can legitimately combine overlapping
+			// fragments from the same Z lane, but their union may cross the
+			// horizontal course that caused the split. Re-apply the physical course
+			// exclusion once after the final merge; no later merge may undo it.
+			int32 FinalSplitCount = 0;
+			SplitPostsAtHorizontalCourses(
+				Specs, *Context.Settings, FinalSplitCount);
+			SplitCount += FinalSplitCount;
 			const int32 MergedCount = PreMergedCount + PostMergedCount;
 			Context.Result->Summary.SplitPostMemberCount += SplitCount;
 			Context.Result->Summary.MergedMemberCount += MergedCount;
@@ -2422,16 +2564,20 @@ bool FABTSM73BeamAGenerator::Generate(
 		return Reject(TEXT("BeamASilhouetteNotAccepted"));
 	}
 	if (!FMath::IsFinite(Settings.TargetBaySpanCM)
+		|| !FMath::IsFinite(Settings.MaximumVerticalSupportSpanCM)
 		|| !FMath::IsFinite(Settings.BlockCrossSectionCM)
 		|| !FMath::IsFinite(Settings.MinimumParallelBlockGapCM)
 		|| !FMath::IsFinite(Settings.TwoBlockMergeGapCM)
 		|| !FMath::IsFinite(Settings.JointMergeToleranceCM)
 		|| Settings.TargetBaySpanCM <= 0.0f
+		|| Settings.MaximumVerticalSupportSpanCM
+			< Settings.BlockCrossSectionCM * 4.0f
 		|| Settings.BlockCrossSectionCM <= 0.0f
 		|| Settings.MinimumParallelBlockGapCM <= 0.0f
 		|| Settings.TwoBlockMergeGapCM < 0.0f
 		|| Settings.TwoBlockMergeGapCM > Settings.MinimumParallelBlockGapCM
 		|| Settings.MaxParallelBlocksPerCourse < 2
+		|| Settings.MaxFrameParallelBlocksPerCourse < 1
 		|| Settings.JointMergeToleranceCM <= 0.0f
 		|| Settings.MaxRoofCourseCount < 2
 		|| Settings.RoofBlocksPerCourse < 1

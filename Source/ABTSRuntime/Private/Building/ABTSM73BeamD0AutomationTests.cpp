@@ -32,12 +32,14 @@ namespace ABTSM73BeamD0Tests
 			&& A.BeamB.BeamA.Silhouette.MaxWFCBacktrackSteps
 				== B.BeamB.BeamA.Silhouette.MaxWFCBacktrackSteps
 			&& A.BeamB.BeamA.MaxBayCount == B.BeamB.BeamA.MaxBayCount
-			&& A.BeamB.BeamA.MaxJointCount == B.BeamB.BeamA.MaxJointCount
-			&& A.BeamB.BeamA.MaxMemberCount == B.BeamB.BeamA.MaxMemberCount
-			&& A.BeamB.BeamA.MaxBearingContactCount
-				== B.BeamB.BeamA.MaxBearingContactCount
-			&& A.BeamB.BeamA.MaxBearingPairChecks
-				== B.BeamB.BeamA.MaxBearingPairChecks
+			&& A.BeamB.BeamA.MaximumVerticalSupportSpanCM
+				== B.BeamB.BeamA.MaximumVerticalSupportSpanCM
+			&& A.BeamB.BeamA.BlockCrossSectionCM
+				== B.BeamB.BeamA.BlockCrossSectionCM
+			&& A.BeamB.BeamA.MinimumParallelBlockGapCM
+				== B.BeamB.BeamA.MinimumParallelBlockGapCM
+			&& A.BeamB.BeamA.TwoBlockMergeGapCM
+				== B.BeamB.BeamA.TwoBlockMergeGapCM
 			&& A.BeamB.MaxWFCPropagationOperations
 				== B.BeamB.MaxWFCPropagationOperations
 			&& A.BeamB.MaxWFCBacktrackSteps == B.BeamB.MaxWFCBacktrackSteps
@@ -69,6 +71,8 @@ bool FABTSM73BeamD0CatalogValidationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Default catalog validates"), Catalog.Validate(Error));
 	TestEqual(TEXT("Default catalog exposes five semantic families"),
 		Catalog.GetDefinitions().Num(), 5);
+	TestEqual(TEXT("Default catalog identity includes the parallel-spacing recipe"),
+		Catalog.GetCatalogVersion(), 11);
 	TestTrue(TEXT("Catalog hash is non-zero"), Catalog.GetCatalogHash() != 0);
 	return true;
 }
@@ -81,6 +85,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 {
 	using namespace ABTSM73BeamD0Tests;
+	static constexpr int32 ExpectedCourseCounts[6] = {8, 16, 30, 44, 60, 76};
+	static constexpr int32 ExpectedRailCounts[6] = {2, 2, 3, 3, 4, 5};
+	static constexpr int32 ExpectedCellCaps[6] = {1, 1, 2, 2, 3, 4};
 	const FABTSM73BeamD0ProfileCatalog& Catalog =
 		FABTSM73BeamD0ProfileCatalog::GetDefault();
 	TSet<FName> ExactIds;
@@ -101,6 +108,30 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 				Resolved.Difficulty.SolutionSteps, 1);
 			TestEqual(TEXT("Visual milestone matches exact tier"),
 				Resolved.VisualComplexity.MilestoneTier, Tier);
+			TestTrue(TEXT("Coupled exterior frame recipe is enabled"),
+				Resolved.CoupledExteriorFrame.bEnabled);
+			TestEqual(TEXT("Coupled exterior frame course count follows the discrete tier table"),
+				Resolved.CoupledExteriorFrame.CourseCount,
+				ExpectedCourseCounts[Tier]);
+			TestEqual(TEXT("Coupled exterior frame rail count follows the discrete tier table"),
+				Resolved.CoupledExteriorFrame.RailCount,
+				ExpectedRailCounts[Tier]);
+			TestEqual(TEXT("Coupled exterior frame cell cap follows the discrete tier table"),
+				Resolved.CoupledExteriorFrame.MaximumCellCount,
+				ExpectedCellCaps[Tier]);
+			TestEqual(TEXT("Coupled exterior frame keeps the all-axis 720 cm gate"),
+				Resolved.CoupledExteriorFrame.MaximumMemberLengthCM, 720.0f);
+			TestEqual(TEXT("Production keeps the registered 40 cm parallel clear gap"),
+				Resolved.BeamSettings.BeamB.BeamA.MinimumParallelBlockGapCM,
+				40.0f);
+			TestEqual(TEXT("The final two-lane merge contract remains 4 cm"),
+				Resolved.BeamSettings.BeamB.BeamA.TwoBlockMergeGapCM, 4.0f);
+			if (ProfileId == TEXT("ColumnBreak") && Tier >= 4)
+			{
+				TestEqual(TEXT("Column high-tier bay span is an exact closure contract"),
+					Resolved.BeamSettings.BeamB.BeamA.TargetBaySpanCM,
+					Tier == 4 ? 473.0f : 420.0f);
+			}
 			if (Tier <= 1)
 			{
 				TestTrue(TEXT("Low tier requires one terminal roof"),
@@ -262,6 +293,42 @@ bool FABTSM73BeamD0HardGateIsolationTest::RunTest(const FString& Parameters)
 			> Easy.BeamSettings.BeamB.BeamA.Silhouette.TargetHeightCM);
 	TestTrue(TEXT("Validation budgets and hard gates stay project-owned"),
 		HardGatesEqual(Easy.BeamSettings, Hard.BeamSettings));
+	TestTrue(TEXT("High-tier Beam-A joint capacity grows with the resolved visual scale"),
+		Hard.BeamSettings.BeamB.BeamA.MaxJointCount
+			> Easy.BeamSettings.BeamB.BeamA.MaxJointCount);
+	TestTrue(TEXT("High-tier Beam-A member capacity grows with the resolved visual scale"),
+		Hard.BeamSettings.BeamB.BeamA.MaxMemberCount
+			> Easy.BeamSettings.BeamB.BeamA.MaxMemberCount);
+	TestTrue(TEXT("High-tier bearing capacity grows with the resolved visual scale"),
+		Hard.BeamSettings.BeamB.BeamA.MaxBearingContactCount
+			> Easy.BeamSettings.BeamB.BeamA.MaxBearingContactCount);
+	TestTrue(TEXT("High-tier bearing pair-check budget grows with the resolved visual scale"),
+		Hard.BeamSettings.BeamB.BeamA.MaxBearingPairChecks
+			> Easy.BeamSettings.BeamB.BeamA.MaxBearingPairChecks);
+	TestEqual(TEXT("Coupled-frame all-axis span gate is tier-independent"),
+		Easy.CoupledExteriorFrame.MaximumMemberLengthCM,
+		Hard.CoupledExteriorFrame.MaximumMemberLengthCM);
+	TestEqual(TEXT("Low tier starts with two coupled-frame rails"),
+		Easy.CoupledExteriorFrame.RailCount, 2);
+	TestEqual(TEXT("Highest tier resolves five coupled-frame rails"),
+		Hard.CoupledExteriorFrame.RailCount, 5);
+	TestEqual(TEXT("Core post span safety gate is tier-independent"),
+		Easy.StabilityCore.MaximumUnbracedCorePostSpanCM,
+		Hard.StabilityCore.MaximumUnbracedCorePostSpanCM);
+	TestEqual(TEXT("Beam-A vertical segmentation consumes the C3 hard gate"),
+		Easy.BeamSettings.BeamB.BeamA.MaximumVerticalSupportSpanCM,
+		Easy.StabilityCore.MaximumUnbracedCorePostSpanCM);
+	TestEqual(TEXT("Core arm safety gate is tier-independent"),
+		Easy.StabilityCore.MinimumCoreArmSpanCM,
+		Hard.StabilityCore.MinimumCoreArmSpanCM);
+	TestEqual(TEXT("Minimum crib topology is tier-independent"),
+		Easy.StabilityCore.TargetBeltCount,
+		Hard.StabilityCore.TargetBeltCount);
+	TestTrue(TEXT("Large tiers receive more bounded local crib hosts"),
+		Hard.StabilityCore.MaximumHostCount
+			> Easy.StabilityCore.MaximumHostCount);
+	TestEqual(TEXT("Easy tier uses one Bay per semantic volume"),
+		Easy.BeamSettings.BeamB.BeamA.MaxBaysPerVolume, 1);
 	return true;
 }
 

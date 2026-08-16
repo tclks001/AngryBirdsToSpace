@@ -8,8 +8,83 @@
 #include "ABTSM7BuildingModule.generated.h"
 
 class AABTSM7BuildingMaterialSystem;
+class AABTSM73StableBuildingActor;
 class UPhysicalMaterial;
+class UPrimitiveComponent;
 class UStaticMeshComponent;
+
+/** Per-body first-hit settings; never changes frozen geometry or global config. */
+struct ABTSRUNTIME_API FABTSM7DeferredImpactCollisionPolicy final
+{
+	static constexpr float MinimumInitialOverlapDepenetrationCMPerSec = 1000.0f;
+
+	static void ApplyTo(UStaticMeshComponent& Component);
+	static bool VerifyDynamic(UStaticMeshComponent& Component, FString& OutError);
+};
+
+/**
+ * M7 consumer policy for one frozen tangent-site building. The direction is
+ * derived only from immutable placement inputs; callers may not substitute a
+ * global up vector or infer it from an arbitrary module position.
+ */
+struct ABTSRUNTIME_API FABTSM7SiteUniformGravityPolicy final
+{
+	static constexpr int32 SchemaVersion = 1;
+
+	FVector SiteLocationWorldCM = FVector::ZeroVector;
+	FVector SupportCenterWorldCM = FVector::ZeroVector;
+	FVector SiteUp = FVector::ZeroVector;
+	float GravityAccelerationCMPerSec2 = 0.0f;
+
+	static bool TryDerive(
+		const FVector& SiteLocationWorldCM,
+		const FVector& SupportCenterWorldCM,
+		float GravityAccelerationCMPerSec2,
+		FABTSM7SiteUniformGravityPolicy& OutPolicy);
+	bool IsUsable() const;
+	uint32 ComputeCrc32() const;
+	FString ToLogString() const;
+};
+
+/**
+ * The per-body Chaos identity shared by production modules and M7 stability
+ * fixtures. Keep experiment-only tuning out of this profile: changing it
+ * changes live building physics as well as the research candidate hash.
+ */
+struct ABTSRUNTIME_API FABTSM7ChaosBodyProfile final
+{
+	static constexpr int32 SchemaVersion = 1;
+
+	int32 PositionSolverIterations = 80;
+	int32 VelocitySolverIterations = 20;
+	float LinearDamping = 2.0f;
+	float AngularDamping = 4.0f;
+
+	static FABTSM7ChaosBodyProfile Production();
+	bool IsUsable() const;
+	uint32 ComputeCrc32() const;
+	void ApplyTo(UStaticMeshComponent& Component) const;
+};
+
+/** Read-only snapshot of the project/world Chaos stepping identity. */
+struct ABTSRUNTIME_API FABTSM7ChaosWorldProfile final
+{
+	static constexpr int32 SchemaVersion = 1;
+
+	bool bSubstepping = false;
+	bool bSubsteppingAsync = false;
+	bool bTickPhysicsAsync = false;
+	float MaxPhysicsDeltaSeconds = 0.0f;
+	float MaxSubstepDeltaSeconds = 0.0f;
+	int32 MaximumSubsteps = 1;
+	float AsyncFixedDeltaSeconds = 0.0f;
+	int32 PositionFrictionIterations = 0;
+	int32 PositionShockPropagationIterations = 0;
+
+	static FABTSM7ChaosWorldProfile CaptureProduction();
+	uint32 ComputeCrc32() const;
+	FString ToLogString() const;
+};
 
 /** Parameterized non-HISM M7 module and promoted brick body. */
 UCLASS(BlueprintType)
@@ -22,24 +97,69 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	void ConfigureBrick(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7BuildingMaterial InMaterial, const FTransform& WorldTransform);
+	/** Installs immutable brick geometry before deferred spawn registration. */
+	void ConfigureBrickBeforeFinishSpawning(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7BuildingMaterial InMaterial);
 	void ConfigureCylinder(UStaticMesh* Mesh, UMaterialInterface* Material, EABTSM7ModuleKind InKind, EABTSM7BuildingMaterial InMaterial, float LengthCM, float DiameterCM, const FTransform& WorldTransform, const FVector& AdditionalLocalScale = FVector::OneVector);
+	/** Uses an exact engine-cylinder collision proxy and a no-collision authored presentation mesh. */
+	void ConfigureVoxelDevice(UStaticMesh* CollisionMesh, UStaticMesh* PresentationMesh,
+		UMaterialInterface* Material, EABTSM7ModuleKind InKind,
+		float LengthCM, float DiameterCM, const FTransform& WorldTransform);
 	void ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile);
 	/** Applies a per-body Chaos quality override for multi-contact generated-building stacks. */
 	void ConfigureChaosSolverIterations(int32 PositionIterations, int32 VelocityIterations);
-	/** Ignores contact damage briefly after a static body enters Chaos. */
-	void SetContactDamageGraceSeconds(float Seconds) { ContactDamageGraceSeconds = FMath::Max(0.0f, Seconds); }
+	/** Sets the grace and, for a live body, rebases its current damage-enable deadline. */
+	void SetContactDamageGraceSeconds(float Seconds);
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);
 	void ActivateDynamicPlanar(const FVector& Impulse, const FVector& InGravityUp, float GravityAcceleration);
+	/** Activates with one exact tangent-site policy shared by production and Chaos fixtures. */
+	bool ActivateDynamicSiteUniform(
+		const FVector& Impulse,
+		const FABTSM7SiteUniformGravityPolicy& Policy);
+	/** Fail-closed audit of the live Chaos body and every shape filter. */
+	bool VerifyChaosDeveloperObstacleCollisionIdentity(
+		FString& OutError) const;
+	/** Joins an authored child shape into this module's initial rigid body. */
+	bool TryWeldStaticChild(AABTSM7BuildingModule& Child);
+	/** Applies acceleration without invalidating Chaos sleep; false means no usable physics body. */
+	static bool TryApplyNonInvalidatingAcceleration(
+		UStaticMeshComponent& Component,
+		const FVector& AccelerationCMPerSec2);
 	void Freeze();
-	void BreakModule();
+	/** Returns true only for the first successful break request. */
+	bool BreakModule();
 	bool ApplyImpactDamage(float DamageGain);
+	/** Adds gameplay impulse without replacing an already active gravity identity. */
+	bool ApplyDynamicImpactImpulse(const FVector& Impulse);
+	/** Associates a real production module with its owning frozen building. */
+	void ConfigureDamageLifecycleOwner(
+		AABTSM73StableBuildingActor* InOwner,
+		int32 InFrozenBrickId,
+		bool bInCrystalLifecycleTarget);
 
 	EABTSM7ModuleKind GetModuleKind() const { return ModuleKind; }
 	EABTSM7BuildingMaterial GetBuildingMaterial() const { return BuildingMaterial; }
 	UStaticMeshComponent* GetMeshComponent() const { return Visual; }
 	bool IsDynamic() const { return bDynamic; }
+	bool UsesSiteUniformGravity() const { return bSiteUniformGravity; }
+	bool IsBroken() const { return bBroken; }
+	bool IsCompoundChild() const { return bCompoundChild; }
+	AABTSM73StableBuildingActor* GetDamageLifecycleOwner() const
+	{
+		return DamageLifecycleOwner.Get();
+	}
+	bool IsCrystalLifecycleTarget() const
+	{
+		return bCrystalLifecycleTarget;
+	}
+	int32 GetDamageLifecycleBrickId() const
+	{
+		return DamageLifecycleBrickId;
+	}
 	float GetCurrentDamage() const { return CurrentDamage; }
 	float GetBreakDamage() const { return BreakDamage; }
+	/** Read-only visual surface used by the M7 stylized adapter; collision proxies never publish twice. */
+	UPrimitiveComponent* GetStylizedPresentationPrimitive() const;
+	/** Crystal targets and authored devices are gameplay weak-point semantics. */
 
 private:
 	UFUNCTION()
@@ -47,6 +167,10 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> Visual;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> DevicePresentation;
+	bool bBroken = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	EABTSM7ModuleKind ModuleKind = EABTSM7ModuleKind::Brick;
@@ -57,7 +181,15 @@ private:
 	FVector PlanetCenter = FVector::ZeroVector;
 	float GravityAccelerationCMPerSec2 = 980.0f;
 	bool bDynamic = false;
+	bool bCompoundChild = false;
+	TWeakObjectPtr<AABTSM7BuildingModule> CompoundRoot;
+	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> CompoundChildren;
+	TWeakObjectPtr<AABTSM73StableBuildingActor> DamageLifecycleOwner;
+	int32 DamageLifecycleBrickId = INDEX_NONE;
 	bool bPlanarGravity = false;
+	bool bSiteUniformGravity = false;
+	bool bCrystalLifecycleTarget = false;
+	bool bTerrainPenetrationReported = false;
 	FVector PlanarGravityUp = FVector::UpVector;
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicalMaterial> ImpactPhysicalMaterial;
@@ -66,4 +198,5 @@ private:
 	float LastDamageImpactSeconds = -BIG_NUMBER;
 	float ContactDamageGraceSeconds = 0.20f;
 	float ContactDamageEnabledTimeSeconds = 0.0f;
+	bool DetectSleepingTerrainPenetration(FString& OutDiagnostic) const;
 };

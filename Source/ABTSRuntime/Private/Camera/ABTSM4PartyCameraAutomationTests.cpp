@@ -114,6 +114,247 @@ bool FABTSM4CameraSphericalPivotAxisSeparationTest::RunTest(const FString& Param
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM4CameraUpwardPitchFramingTest,
+	"ABTS.Camera.GroundRig.UpwardPitchFraming",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM4CameraUpwardPitchFramingTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	constexpr float UserDistanceCM = 850.0f;
+	constexpr float StartElevationDegrees = -5.0f;
+	constexpr float FullElevationDegrees = -70.0f;
+	constexpr float MinimumScale = 0.72f;
+	float Alpha = -1.0f;
+	const float HorizontalDistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+		UserDistanceCM,
+		0.0f,
+		StartElevationDegrees,
+		FullElevationDegrees,
+		MinimumScale,
+		Alpha);
+	TestTrue(TEXT("Horizontal and downward views preserve the user's zoom"),
+		FMath::IsNearlyEqual(HorizontalDistanceCM, UserDistanceCM, 0.01f)
+			&& FMath::IsNearlyZero(Alpha));
+
+	const float MidDistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+		UserDistanceCM,
+		-37.5f,
+		StartElevationDegrees,
+		FullElevationDegrees,
+		MinimumScale,
+		Alpha);
+	TestTrue(TEXT("The midpoint uses the center of the SmoothStep framing curve"),
+		FMath::IsNearlyEqual(Alpha, 0.5f, 0.0001f)
+			&& FMath::IsNearlyEqual(MidDistanceCM, 731.0f, 0.01f));
+
+	const float FullDistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+		UserDistanceCM,
+		-70.0f,
+		StartElevationDegrees,
+		FullElevationDegrees,
+		MinimumScale,
+		Alpha);
+	TestTrue(TEXT("Full upward framing reaches the authored minimum scale"),
+		FMath::IsNearlyEqual(Alpha, 1.0f, 0.0001f)
+			&& FMath::IsNearlyEqual(FullDistanceCM, 612.0f, 0.01f));
+	const float ExtremeDistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+		UserDistanceCM,
+		-85.0f,
+		StartElevationDegrees,
+		FullElevationDegrees,
+		MinimumScale,
+		Alpha);
+	TestTrue(TEXT("The last upward degrees hold a stable authored distance"),
+		FMath::IsNearlyEqual(ExtremeDistanceCM, FullDistanceCM, 0.01f));
+
+	float PreviousDistanceCM = UserDistanceCM;
+	for (float Elevation = 0.0f; Elevation >= -85.0f; Elevation -= 5.0f)
+	{
+		const float DistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+			UserDistanceCM,
+			Elevation,
+			StartElevationDegrees,
+			FullElevationDegrees,
+			MinimumScale,
+			Alpha);
+		TestTrue(TEXT("Upward framing distance is monotonic"),
+			DistanceCM <= PreviousDistanceCM + 0.001f);
+		PreviousDistanceCM = DistanceCM;
+	}
+
+	float ReversedRangeAlpha = 0.0f;
+	const float ReversedRangeDistanceCM = ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+		UserDistanceCM,
+		-37.5f,
+		FullElevationDegrees,
+		StartElevationDegrees,
+		MinimumScale,
+		ReversedRangeAlpha);
+	TestTrue(TEXT("Misordered editor endpoints resolve deterministically"),
+		FMath::IsNearlyEqual(ReversedRangeDistanceCM, MidDistanceCM, 0.01f)
+			&& FMath::IsNearlyEqual(ReversedRangeAlpha, 0.5f, 0.0001f));
+	const AABTSBirdPartySettings* Defaults = GetDefault<AABTSBirdPartySettings>();
+	TestTrue(TEXT("Runtime defaults select the validated upward framing curve"),
+		FMath::IsNearlyEqual(Defaults->CameraUpwardFramingStartDegrees, StartElevationDegrees)
+			&& FMath::IsNearlyEqual(Defaults->CameraUpwardFramingFullDegrees, FullElevationDegrees)
+			&& FMath::IsNearlyEqual(Defaults->CameraUpwardFramingMinimumDistanceScale, MinimumScale));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM4CameraSurfaceSafetyC1TransitionTest,
+	"ABTS.Camera.GroundRig.SurfaceSafetyC1Transition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM4CameraSurfaceSafetyC1TransitionTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	constexpr float RequiredClearanceCM = 120.0f;
+	constexpr float TransitionBandCM = 180.0f;
+	auto ResolveAtRawPenetration = [&](const float RawPenetrationCM)
+	{
+		FABTSM4SurfaceSafePose Pose;
+		const float DesiredClearanceCM = RequiredClearanceCM - RawPenetrationCM;
+		const bool bResolved = ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+			FVector(0.0f, 0.0f, DesiredClearanceCM),
+			FVector(850.0f, 0.0f, DesiredClearanceCM),
+			FVector::ZeroVector,
+			FVector::UpVector,
+			RequiredClearanceCM,
+			TransitionBandCM,
+			Pose);
+		TestTrue(TEXT("The analytic surface transition resolves"), bResolved);
+		return Pose;
+	};
+
+	const FABTSM4SurfaceSafePose BeforeBand = ResolveAtRawPenetration(-TransitionBandCM - 1.0f);
+	const FABTSM4SurfaceSafePose AtBandStart = ResolveAtRawPenetration(-TransitionBandCM);
+	const FABTSM4SurfaceSafePose JustInsideBand = ResolveAtRawPenetration(-TransitionBandCM + 1.0f);
+	TestTrue(TEXT("The pre-contact lift is zero before and at the transition start"),
+		FMath::IsNearlyZero(BeforeBand.AppliedLiftCM)
+			&& FMath::IsNearlyZero(AtBandStart.AppliedLiftCM));
+	TestTrue(TEXT("The pre-contact transition enters with zero slope"),
+		JustInsideBand.AppliedLiftCM < 0.01f);
+
+	const FABTSM4SurfaceSafePose AtHardBoundary = ResolveAtRawPenetration(0.0f);
+	TestTrue(TEXT("The camera is already above the hard boundary at nominal contact"),
+		FMath::IsNearlyEqual(AtHardBoundary.AppliedLiftCM, TransitionBandCM * 0.25f, 0.01f)
+			&& AtHardBoundary.CameraLocation.Z >= RequiredClearanceCM);
+
+	const FABTSM4SurfaceSafePose JustBeforeBandEnd = ResolveAtRawPenetration(TransitionBandCM - 1.0f);
+	const FABTSM4SurfaceSafePose AtBandEnd = ResolveAtRawPenetration(TransitionBandCM);
+	const FABTSM4SurfaceSafePose BeyondBand = ResolveAtRawPenetration(TransitionBandCM + 1.0f);
+	TestTrue(TEXT("The transition joins the exact hard correction with unit slope"),
+		FMath::IsNearlyEqual(AtBandEnd.AppliedLiftCM, TransitionBandCM, 0.01f)
+			&& FMath::IsNearlyEqual(BeyondBand.AppliedLiftCM, TransitionBandCM + 1.0f, 0.01f)
+			&& AtBandEnd.AppliedLiftCM - JustBeforeBandEnd.AppliedLiftCM > 0.99f);
+
+	for (float RawPenetrationCM = -TransitionBandCM; RawPenetrationCM <= TransitionBandCM; RawPenetrationCM += 10.0f)
+	{
+		const FABTSM4SurfaceSafePose Pose = ResolveAtRawPenetration(RawPenetrationCM);
+		TestTrue(TEXT("Every transition sample remains above the hard surface clearance"),
+			Pose.CameraLocation.Z >= RequiredClearanceCM - 0.001f);
+		TestTrue(TEXT("Every transition sample preserves the framing arm"),
+			FMath::IsNearlyEqual(
+				FVector::Distance(Pose.CameraLocation, Pose.FocusLocation),
+				850.0f,
+				0.01f));
+	}
+	TestTrue(TEXT("The CDO uses the validated pre-contact transition band"),
+		FMath::IsNearlyEqual(
+			GetDefault<AABTSBirdPartySettings>()->CameraSurfaceSafetyTransitionBandCM,
+			TransitionBandCM));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM4CameraSurfaceSafetyRigidLiftTest,
+	"ABTS.Camera.GroundRig.SurfaceSafetyRigidLift",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM4CameraSurfaceSafetyRigidLiftTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSM4SurfaceSafePose Pose;
+	const FVector DesiredCamera(9200.0f, 0.0f, 0.0f);
+	const FVector DesiredFocus(10050.0f, 0.0f, 0.0f);
+	const FVector RequestedArm = DesiredFocus - DesiredCamera;
+	TestTrue(TEXT("A radial underground pose resolves"),
+		ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+			DesiredCamera,
+			DesiredFocus,
+			FVector(10000.0f, 0.0f, 0.0f),
+			FVector::ForwardVector,
+			120.0f,
+			180.0f,
+			Pose));
+	TestTrue(TEXT("The camera center is lifted to the requested radial clearance"),
+		FMath::IsNearlyEqual(Pose.CameraLocation.X, 10120.0f, 0.01f));
+	TestTrue(TEXT("The virtual focus receives the identical lift"),
+		FMath::IsNearlyEqual(Pose.FocusLocation.X, 10970.0f, 0.01f));
+	TestTrue(TEXT("Surface safety reports the applied lift"),
+		Pose.bConstrained && FMath::IsNearlyEqual(Pose.AppliedLiftCM, 920.0f, 0.01f));
+	TestTrue(TEXT("Surface safety preserves orbit-arm length"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(Pose.CameraLocation, Pose.FocusLocation),
+			RequestedArm.Size(),
+			0.01f));
+	TestTrue(TEXT("Surface safety preserves the requested look direction"),
+		(Pose.FocusLocation - Pose.CameraLocation).GetSafeNormal().Equals(
+			RequestedArm.GetSafeNormal(),
+			0.0001f));
+
+	FABTSM4SurfaceSafePose PlanarPose;
+	TestTrue(TEXT("A planar underground pose resolves"),
+		ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+			FVector(0.0f, 0.0f, -500.0f),
+			FVector(850.0f, 0.0f, -500.0f),
+			FVector::ZeroVector,
+			FVector::UpVector,
+			120.0f,
+			180.0f,
+			PlanarPose));
+	TestTrue(TEXT("Planar safety also raises the camera center to clearance"),
+		FMath::IsNearlyEqual(PlanarPose.CameraLocation.Z, 120.0f, 0.01f));
+	TestTrue(TEXT("Planar safety does not change a horizontal orbit arm"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(PlanarPose.CameraLocation, PlanarPose.FocusLocation),
+			850.0f,
+			0.01f));
+
+	FABTSM4SurfaceSafePose ClearPose;
+	TestTrue(TEXT("An already-clear pose resolves"),
+		ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+			FVector(10350.0f, 0.0f, 0.0f),
+			FVector(11200.0f, 0.0f, 0.0f),
+			FVector(10000.0f, 0.0f, 0.0f),
+			FVector::ForwardVector,
+			120.0f,
+			180.0f,
+			ClearPose));
+	TestFalse(TEXT("An already-clear pose remains unconstrained"), ClearPose.bConstrained);
+	TestTrue(TEXT("An already-clear camera remains unchanged"),
+		ClearPose.CameraLocation.Equals(FVector(10350.0f, 0.0f, 0.0f), 0.01f));
+
+	FABTSM4SurfaceSafePose InvalidPose;
+	TestFalse(TEXT("An invalid surface normal fails closed for the caller"),
+		ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+			DesiredCamera,
+			DesiredFocus,
+			FVector(10000.0f, 0.0f, 0.0f),
+			FVector::ZeroVector,
+			120.0f,
+			180.0f,
+			InvalidPose));
+	const AABTSBirdPartySettings* Defaults = GetDefault<AABTSBirdPartySettings>();
+	TestTrue(TEXT("The default surface clearance contains the camera probe and safety margin"),
+		Defaults->CameraSurfaceSafetyClearanceCM
+			>= Defaults->CameraProbeRadiusCM + Defaults->CameraCollisionSafetyMarginCM);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM4CameraSweepCenterDistanceTest,
 	"ABTS.Camera.GroundRig.SweepCenterDistance",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

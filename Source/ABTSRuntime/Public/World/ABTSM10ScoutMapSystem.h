@@ -109,6 +109,7 @@ private:
 	FVector CachedOrbitalPreviewVelocity = FVector::ZeroVector;
 	float CachedOrbitalPreviewPathLengthCM = -1.0f;
 	int32 CachedOrbitalPreviewPointCount = 0;
+	int64 CachedOrbitalPreviewGravityHash = 0;
 	FVector LastOrbitalPlaneNormal = FVector::ZeroVector;
 	FVector LastOrbitalHorizontalAxis = FVector::ZeroVector;
 	bool bBoundToSlingshot = false;

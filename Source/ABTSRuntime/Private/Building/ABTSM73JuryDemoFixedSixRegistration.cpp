@@ -1,0 +1,617 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
+
+#include "Building/ABTSM73BeamDemoManifest.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
+#include "Building/ABTSM73BeamStage45PlacementFreeze.h"
+#include "Building/ABTSM73StableBuildingActor.h"
+#include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Kismet/GameplayStatics.h"
+
+#include "ABTSM73BeamD1BrickCompiler.h"
+
+namespace ABTSM73JuryDemoFixedSixRegistrationPrivate
+{
+	constexpr double RegistrationToleranceCM = 1.0e-3;
+	constexpr uint64 FNVOffsetBasis = 1469598103934665603ull;
+	constexpr uint64 FNVPrime = 1099511628211ull;
+
+	bool FixedSixRegistrationBoxesEqual(
+		const FBox& A,
+		const FBox& B,
+		const double Tolerance = RegistrationToleranceCM)
+	{
+		return A.IsValid && B.IsValid
+			&& A.Min.Equals(B.Min, Tolerance)
+			&& A.Max.Equals(B.Max, Tolerance);
+	}
+
+	void FixedSixRegistrationAppendBox(FBox& Aggregate, const FBox& Box)
+	{
+		if (!Box.IsValid)
+		{
+			return;
+		}
+		Aggregate += Box.Min;
+		Aggregate += Box.Max;
+	}
+
+	void FixedSixRegistrationHashUInt64(uint64& Hash, const uint64 Value)
+	{
+		for (int32 ByteIndex = 0; ByteIndex < 8; ++ByteIndex)
+		{
+			Hash ^= (Value >> (ByteIndex * 8)) & 0xffull;
+			Hash *= FNVPrime;
+		}
+	}
+
+	bool ResolveFixedSixManifestEntry(
+		const FName ContractManifestEntryId,
+		FABTSM73BeamDemoManifestEntry& OutEntry,
+		FString& OutError)
+	{
+		OutEntry = FABTSM73BeamDemoManifestEntry();
+		OutError.Reset();
+		for (const FABTSM73BeamDemoManifestEntry& Entry
+			: FABTSM73BeamDemoManifest::GetEntries())
+		{
+			FString ContractId = Entry.StableId.ToString();
+			if (!ContractId.RemoveFromStart(TEXT("Demo")))
+			{
+				continue;
+			}
+			if (FName(*ContractId) == ContractManifestEntryId)
+			{
+				OutEntry = Entry;
+				return true;
+			}
+		}
+		OutError = FString::Printf(
+			TEXT("FixedSixManifestEntryUnknown:%s"),
+			*ContractManifestEntryId.ToString());
+		return false;
+	}
+
+	bool FixedSixEffectExitsPad(
+		const FBox& EffectBounds,
+		const FVector2D& PadHalfExtentCM)
+	{
+		return !EffectBounds.IsValid
+			|| EffectBounds.Min.X < -PadHalfExtentCM.X - RegistrationToleranceCM
+			|| EffectBounds.Max.X > PadHalfExtentCM.X + RegistrationToleranceCM
+			|| EffectBounds.Min.Y < -PadHalfExtentCM.Y - RegistrationToleranceCM
+			|| EffectBounds.Max.Y > PadHalfExtentCM.Y + RegistrationToleranceCM;
+	}
+}
+
+bool FABTSM73JuryDemoFixedSixStaticEntry::IsUsable(
+	const double Tolerance) const
+{
+	const double SafeTolerance = FMath::Max(Tolerance, UE_DOUBLE_SMALL_NUMBER);
+	const bool bV2 = SourceContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
+	const bool bV3 = SourceContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion;
+	const bool bVersionStateValid = bV2
+		? DifficultyTier == EncounterIndex
+			&& SourcePlacementHash == 0
+			&& Caps.IsEmpty()
+		: bV3
+			&& SourcePlacementHash != 0
+			&& !SupportCenterWorldCM.ContainsNaN()
+			&& SupportRadiusCM > 0.0
+			&& !GravityAuthorityId.IsNone()
+			&& GravityIdentityHash != 0
+			&& !(WorldTransform.GetLocation()
+				- SupportCenterWorldCM).IsNearlyZero()
+			&& ((EncounterIndex == 4 && Caps.Num() == 1)
+				|| (EncounterIndex != 4 && Caps.IsEmpty()));
+	bool bPhysicsAssemblyValid = PhysicsAssemblyHash == 0
+		&& PhysicsAssemblySchemaVersion == 0
+		&& PhysicsBodyCount == 0
+		&& PhysicsClusters.IsEmpty();
+	if (PhysicsAssemblyHash != 0)
+	{
+		TSet<int32> AssignedBricks;
+		bPhysicsAssemblyValid = PhysicsAssemblySchemaVersion == 1
+			&& PhysicsBodyCount == PhysicsClusters.Num() + Devices.Num() + Caps.Num()
+			&& PhysicsBodyCount < Bricks.Num() + Devices.Num() + Caps.Num();
+		for (int32 ClusterIndex = 0;
+			bPhysicsAssemblyValid && ClusterIndex < PhysicsClusters.Num();
+			++ClusterIndex)
+		{
+			const FABTSM73BuildingFreezeV3PhysicsCluster& Cluster =
+				PhysicsClusters[ClusterIndex];
+			bPhysicsAssemblyValid = Cluster.ClusterId == ClusterIndex
+				&& Cluster.ClusterHash != 0
+				&& Cluster.StaticSelfLoadKG > 0.0
+				&& !Cluster.BrickIds.IsEmpty()
+				&& Cluster.BrickIds.Contains(Cluster.RootBrickId)
+				&& (Cluster.bDirectGroundSupport
+					|| Cluster.PositiveExternalSupportCount > 0);
+			for (const int32 BrickId : Cluster.BrickIds)
+			{
+				if (!Bricks.IsValidIndex(BrickId)
+					|| AssignedBricks.Contains(BrickId))
+				{
+					bPhysicsAssemblyValid = false;
+					break;
+				}
+				AssignedBricks.Add(BrickId);
+			}
+		}
+		bPhysicsAssemblyValid = bPhysicsAssemblyValid
+			&& AssignedBricks.Num() == Bricks.Num();
+	}
+	return !ManifestEntryId.IsNone()
+		&& DemoBuilding != EABTSM73BeamDemoBuilding::Custom
+		&& EncounterIndex >= 0
+		&& EncounterIndex
+			< FABTSJuryDemoFixedSixContract::ExpectedSiteCount
+		&& bVersionStateValid
+		&& DeterministicSeed > 0
+		&& WorldTransform.IsValid()
+		&& WorldTransform.GetScale3D().Equals(
+			FVector::OneVector, SafeTolerance)
+		&& PadHalfExtentCM.X > 0.0
+		&& PadHalfExtentCM.Y > 0.0
+		&& LocalBounds.IsValid
+		&& EffectBounds.IsValid
+		&& DescriptorHash != 0
+		&& StaticGeometryHash != 0
+		&& ProductionIdentityHash != 0
+		&& DeviceAssemblyHash != 0
+		&& SourceLayoutHash != 0
+		&& bPhysicsAssemblyValid
+		&& RegistrationResultHash != 0
+		&& !Bricks.IsEmpty()
+		&& !Devices.IsEmpty();
+}
+
+bool FABTSM73JuryDemoFixedSixStaticPlan::IsUsable(
+	const double Tolerance) const
+{
+	const bool bV2 = ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
+	const bool bV3 = ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion;
+	if ((!bV2 && !bV3)
+		|| WorldSeed != FABTSJuryDemoFixedSixContract::FrozenWorldSeed
+		|| PlacementCatalogHash
+			!= (bV2
+				? FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash
+				: FABTSJuryDemoFixedSixContract::FrozenV3PlacementCatalogHash)
+		|| LayoutHash != (bV2
+			? FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash
+			: FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash)
+		|| RegistrationResultHash == 0
+		|| Entries.Num()
+			!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < Entries.Num(); ++Index)
+	{
+		const FABTSM73JuryDemoFixedSixStaticEntry& Entry = Entries[Index];
+		if (!Entry.IsUsable(Tolerance)
+			|| Entry.EncounterIndex != Index
+			|| Entry.SourceContractVersion != ContractVersion
+			|| Entry.SourceLayoutHash != LayoutHash
+			|| Entry.RegistrationResultHash != RegistrationResultHash)
+		{
+			return false;
+		}
+	}
+	if (bV3)
+	{
+		int32 CapCount = 0;
+		for (const FABTSM73JuryDemoFixedSixStaticEntry& Entry : Entries)
+		{
+			CapCount += Entry.Caps.Num();
+		}
+		if (CapCount != 1)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool FABTSM73JuryDemoFixedSixRegistration::BuildStaticPlan(
+	const FABTSBuildingGenerationContract& Contract,
+	FABTSM73JuryDemoFixedSixStaticPlan& OutPlan,
+	FString& OutError)
+{
+	using namespace ABTSM73JuryDemoFixedSixRegistrationPrivate;
+	OutPlan = FABTSM73JuryDemoFixedSixStaticPlan();
+	OutError.Reset();
+	const auto Reject = [&OutPlan, &OutError](const FString& Reason)
+	{
+		OutPlan = FABTSM73JuryDemoFixedSixStaticPlan();
+		OutError = Reason;
+		return false;
+	};
+
+	if (!Contract.IsUsable())
+	{
+		return Reject(TEXT("FixedSixOuterContractRejected"));
+	}
+	const FABTSJuryDemoFixedSixContract& Snapshot =
+		Contract.JuryDemoFixedSix;
+	if (Snapshot.ContractVersion
+		== FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		TArray<FABTSM73BuildingFreezeV3Descriptor> Descriptors;
+		uint64 CatalogHash = 0;
+		FString Error;
+		if (!FABTSM73BuildingFreezeV3::DeriveAndValidateCatalog(
+			Descriptors, CatalogHash, Error)
+			|| CatalogHash != Snapshot.PlacementCatalogHash
+			|| Snapshot.PlacementSchemaVersion
+				!= FABTSM73BuildingFreezeV3::SchemaVersion
+			|| Snapshot.DemoManifestVersion
+				!= FABTSM73BeamDemoManifest::Version
+			|| Snapshot.DemoManifestHash
+				!= static_cast<uint64>(
+					FABTSM73BeamDemoManifest::CalculateHash())
+			|| Snapshot.LayoutHash
+				!= FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash
+			|| Snapshot.WorldSeed != Contract.Identity.WorldSeed
+			|| Snapshot.Sites.Num() != Descriptors.Num())
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV3SnapshotIdentityRejected:%s"), *Error));
+		}
+
+		FABTSM73JuryDemoFixedSixStaticPlan CandidatePlan;
+		CandidatePlan.ContractVersion = Snapshot.ContractVersion;
+		CandidatePlan.WorldSeed = Snapshot.WorldSeed;
+		CandidatePlan.PlacementCatalogHash = Snapshot.PlacementCatalogHash;
+		CandidatePlan.LayoutHash = Snapshot.LayoutHash;
+		CandidatePlan.Entries.Reserve(Snapshot.Sites.Num());
+		uint64 ResultHash = FNVOffsetBasis;
+		FixedSixRegistrationHashUInt64(ResultHash, Snapshot.LayoutHash);
+		FixedSixRegistrationHashUInt64(ResultHash, Snapshot.PlacementCatalogHash);
+
+		for (int32 Index = 0; Index < Snapshot.Sites.Num(); ++Index)
+		{
+			const FABTSJuryDemoFixedSixBuildingSite& Site = Snapshot.Sites[Index];
+			FABTSM73BuildingFreezeV3Descriptor& Descriptor = Descriptors[Index];
+			FABTSM73BeamDemoManifestEntry ManifestEntry;
+			if (!ResolveFixedSixManifestEntry(
+				Site.ManifestEntryId, ManifestEntry, Error))
+			{
+				return Reject(Error);
+			}
+			const double PadHalfExtentX = FMath::Max(
+				FMath::Abs(Descriptor.PadBounds.Min.X),
+				FMath::Abs(Descriptor.PadBounds.Max.X));
+			const double PadHalfExtentY = FMath::Max(
+				FMath::Abs(Descriptor.PadBounds.Min.Y),
+				FMath::Abs(Descriptor.PadBounds.Max.Y));
+			const FABTSJuryDemoFixedSixV3Envelope& Envelope = Site.V3Envelope;
+			if (Site.EncounterIndex != Index
+				|| Descriptor.EncounterSlot != Index
+				|| ManifestEntry.Id != Descriptor.ManifestEntryId
+				|| Site.DifficultyTier != Descriptor.DifficultyTier
+				|| Site.DeterministicSeed != Descriptor.BuildingSeed
+				|| Site.DescriptorHash != Descriptor.DescriptorHash
+				|| Envelope.StaticGeometryHash != Descriptor.StaticGeometryHash
+				|| Envelope.ProductionIdentityHash != Descriptor.ProductionHash
+				|| Envelope.DeviceAssemblyHash
+					!= Descriptor.SourceDeviceAssemblyHash
+				|| !Site.PadHalfExtentCM.Equals(
+					FVector2D(PadHalfExtentX, PadHalfExtentY),
+					RegistrationToleranceCM)
+				|| !FixedSixRegistrationBoxesEqual(
+					Site.LocalBounds, Descriptor.SiteLocalBounds)
+				|| !FixedSixRegistrationBoxesEqual(
+					Envelope.SiteLocalBounds, Descriptor.SiteLocalBounds)
+				|| !FixedSixRegistrationBoxesEqual(
+					Envelope.PadBounds, Descriptor.PadBounds)
+				|| !FixedSixRegistrationBoxesEqual(
+					Envelope.EffectBounds, Descriptor.EffectBounds))
+			{
+				return Reject(FString::Printf(
+					TEXT("FixedSixV3SiteIdentityRejected:%s:Encounter=%d"),
+					*Site.ManifestEntryId.ToString(), Index));
+			}
+
+			FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+				CandidatePlan.Entries.AddDefaulted_GetRef();
+			Entry.ManifestEntryId = Site.ManifestEntryId;
+			Entry.DemoBuilding = ManifestEntry.Id;
+			Entry.EncounterIndex = Site.EncounterIndex;
+			Entry.DifficultyTier = Site.DifficultyTier;
+			Entry.DeterministicSeed = Site.DeterministicSeed;
+			Entry.SourceContractVersion = Snapshot.ContractVersion;
+			Entry.WorldTransform = Site.WorldTransform;
+			Entry.PadHalfExtentCM = Site.PadHalfExtentCM;
+			Entry.LocalBounds = Descriptor.SiteLocalBounds;
+			Entry.EffectBounds = Descriptor.EffectBounds;
+			Entry.DescriptorHash = Descriptor.DescriptorHash;
+			Entry.StaticGeometryHash = Descriptor.StaticGeometryHash;
+			Entry.ProductionIdentityHash = Descriptor.ProductionHash;
+			Entry.DeviceAssemblyHash = Descriptor.SourceDeviceAssemblyHash;
+			Entry.SourceLayoutHash = Snapshot.LayoutHash;
+			Entry.SourcePlacementHash = Envelope.PlacementHash;
+			Entry.SupportCenterWorldCM = Envelope.SupportCenterWorldCM;
+			Entry.SupportRadiusCM = Envelope.SupportRadiusCM;
+			Entry.GravityAuthorityId = Envelope.GravityAuthorityId;
+			Entry.GravityIdentityHash = Envelope.GravityIdentityHash;
+			Entry.PhysicsAssemblySchemaVersion =
+				Descriptor.PhysicsAssemblySchemaVersion;
+			Entry.PhysicsBodyCount = Descriptor.PhysicsBodyCount;
+			Entry.PhysicsAssemblyHash = Descriptor.PhysicsAssemblyHash;
+			Entry.bDynamicEnvelopeRequired = FixedSixEffectExitsPad(
+				Descriptor.EffectBounds, Site.PadHalfExtentCM);
+			Entry.Bricks = MoveTemp(Descriptor.Bricks);
+			Entry.Devices = MoveTemp(Descriptor.Devices);
+			Entry.Caps = MoveTemp(Descriptor.Caps);
+			Entry.PhysicsClusters = MoveTemp(Descriptor.PhysicsClusters);
+
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.DescriptorHash);
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.StaticGeometryHash);
+			FixedSixRegistrationHashUInt64(
+				ResultHash, Entry.ProductionIdentityHash);
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.DeviceAssemblyHash);
+			FixedSixRegistrationHashUInt64(ResultHash, Entry.SourcePlacementHash);
+			if (Entry.PhysicsAssemblyHash != 0)
+			{
+				FixedSixRegistrationHashUInt64(
+					ResultHash, Entry.PhysicsAssemblyHash);
+			}
+		}
+
+		CandidatePlan.RegistrationResultHash = ResultHash;
+		for (FABTSM73JuryDemoFixedSixStaticEntry& Entry : CandidatePlan.Entries)
+		{
+			Entry.RegistrationResultHash = ResultHash;
+		}
+		if (!CandidatePlan.IsUsable())
+		{
+			return Reject(TEXT("FixedSixV3StaticPlanRejected"));
+		}
+		OutPlan = MoveTemp(CandidatePlan);
+		return true;
+	}
+
+	if (Snapshot.ContractVersion
+			!= FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion
+		|| Snapshot.PlacementSchemaVersion
+			!= FABTSM73BeamStage45PlacementFreeze::SchemaVersion
+		|| Snapshot.DemoManifestVersion != FABTSM73BeamDemoManifest::Version
+		|| Snapshot.DemoManifestHash
+			!= static_cast<uint64>(FABTSM73BeamDemoManifest::CalculateHash())
+		|| Snapshot.PlacementCatalogHash
+			!= FABTSM73BeamStage45PlacementFreeze::FrozenCatalogHash
+		|| Snapshot.LayoutHash
+			!= FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash
+		|| Snapshot.WorldSeed != Contract.Identity.WorldSeed
+		|| Snapshot.Sites.Num()
+			!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
+	{
+		return Reject(TEXT("FixedSixV2SnapshotIdentityRejected"));
+	}
+
+	FABTSM73JuryDemoFixedSixStaticPlan CandidatePlan;
+	CandidatePlan.ContractVersion = Snapshot.ContractVersion;
+	CandidatePlan.WorldSeed = Snapshot.WorldSeed;
+	CandidatePlan.PlacementCatalogHash = Snapshot.PlacementCatalogHash;
+	CandidatePlan.LayoutHash = Snapshot.LayoutHash;
+	CandidatePlan.Entries.Reserve(Snapshot.Sites.Num());
+	uint64 ResultHash = FNVOffsetBasis;
+	FixedSixRegistrationHashUInt64(ResultHash, Snapshot.LayoutHash);
+	FixedSixRegistrationHashUInt64(ResultHash, Snapshot.PlacementCatalogHash);
+
+	for (int32 Index = 0; Index < Snapshot.Sites.Num(); ++Index)
+	{
+		const FABTSJuryDemoFixedSixBuildingSite& Site = Snapshot.Sites[Index];
+		FABTSM73BeamDemoManifestEntry ManifestEntry;
+		FString Error;
+		if (!ResolveFixedSixManifestEntry(
+			Site.ManifestEntryId, ManifestEntry, Error))
+		{
+			return Reject(Error);
+		}
+		const int32 ManifestEncounterIndex =
+			static_cast<int32>(ManifestEntry.Id) - 1;
+		FABTSM73BeamStage45PlacementDescriptor Frozen;
+		if (!FABTSM73BeamStage45PlacementFreeze::ResolveFrozen(
+			ManifestEntry.Id, Frozen, Error))
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV2FrozenResolve:%s:%s"),
+				*Site.ManifestEntryId.ToString(), *Error));
+		}
+		if (Site.EncounterIndex != Index
+			|| Site.EncounterIndex != ManifestEncounterIndex
+			|| Site.DifficultyTier
+				!= ManifestEntry.Settings.DifficultyTier
+			|| Site.DeterministicSeed
+				!= ManifestEntry.Settings.BuildingSeed
+			|| Frozen.StableId != ManifestEntry.StableId
+			|| Site.DescriptorHash != Frozen.DescriptorHash
+			|| Site.V2Envelope.StaticGeometryHash
+				!= Frozen.StaticGeometryHash
+			|| !Site.PadHalfExtentCM.Equals(
+				Frozen.RequiredPadHalfExtentCM, RegistrationToleranceCM)
+			|| !FixedSixRegistrationBoxesEqual(
+				Site.LocalBounds, Frozen.LocalBounds)
+			|| !FixedSixRegistrationBoxesEqual(
+				Site.V2Envelope.PhysicalBounds, Frozen.LocalBounds))
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV2SiteIdentityRejected:%s:Encounter=%d"),
+				*Site.ManifestEntryId.ToString(), Index));
+		}
+
+		FABTSM73BeamD1Stage55Result Generated;
+		if (!FABTSM73BeamD1BrickCompiler().GenerateStage55DeviceAssembly(
+			ManifestEntry.Settings, Generated, Error))
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV2ProductionRejected:%s:%s"),
+				*Site.ManifestEntryId.ToString(), *Error));
+		}
+		if (!Generated.Summary.bAccepted
+			|| !Generated.Stage5.Summary.bAccepted
+			|| static_cast<uint64>(Generated.Stage5.ProductionIdentityHash)
+				!= Site.V2Envelope.ProductionIdentityHash
+			|| static_cast<uint64>(Generated.DeviceAssemblyHash)
+				!= Site.V2Envelope.DeviceAssemblyHash)
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV2ProductionIdentityRejected:%s"),
+				*Site.ManifestEntryId.ToString()));
+		}
+
+		FBox PhysicalBounds(EForceInit::ForceInit);
+		for (const FABTSM73BeamD1BrickBinding& Brick : Generated.Stage5.Bricks)
+		{
+			FixedSixRegistrationAppendBox(PhysicalBounds, Brick.LocalBounds);
+		}
+		FBox EffectBounds(EForceInit::ForceInit);
+		for (const FABTSM73BeamD1DeviceBinding& Device : Generated.Devices)
+		{
+			FixedSixRegistrationAppendBox(PhysicalBounds, Device.LocalBounds);
+			FixedSixRegistrationAppendBox(
+				EffectBounds, Device.EffectCorridorLocalBounds);
+		}
+		const bool bDynamicEnvelopeRequired = FixedSixEffectExitsPad(
+			EffectBounds, Site.PadHalfExtentCM);
+		if (!FixedSixRegistrationBoxesEqual(
+				PhysicalBounds, Site.V2Envelope.PhysicalBounds)
+			|| !FixedSixRegistrationBoxesEqual(
+				EffectBounds, Site.V2Envelope.EffectBounds)
+			|| Site.V2Envelope.bDynamicEnvelopeRequired
+				!= bDynamicEnvelopeRequired)
+		{
+			return Reject(FString::Printf(
+				TEXT("FixedSixV2EnvelopeRejected:%s"),
+				*Site.ManifestEntryId.ToString()));
+		}
+
+		FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+			CandidatePlan.Entries.AddDefaulted_GetRef();
+		Entry.ManifestEntryId = Site.ManifestEntryId;
+		Entry.DemoBuilding = ManifestEntry.Id;
+		Entry.EncounterIndex = Site.EncounterIndex;
+		Entry.DifficultyTier = Site.DifficultyTier;
+		Entry.DeterministicSeed = Site.DeterministicSeed;
+		Entry.SourceContractVersion = Snapshot.ContractVersion;
+		Entry.WorldTransform = Site.WorldTransform;
+		Entry.PadHalfExtentCM = Site.PadHalfExtentCM;
+		Entry.LocalBounds = PhysicalBounds;
+		Entry.EffectBounds = EffectBounds;
+		Entry.DescriptorHash = Site.DescriptorHash;
+		Entry.StaticGeometryHash = Site.V2Envelope.StaticGeometryHash;
+		Entry.ProductionIdentityHash =
+			Site.V2Envelope.ProductionIdentityHash;
+		Entry.DeviceAssemblyHash = Site.V2Envelope.DeviceAssemblyHash;
+		Entry.SourceLayoutHash = Snapshot.LayoutHash;
+		Entry.bDynamicEnvelopeRequired = bDynamicEnvelopeRequired;
+		Entry.Bricks = MoveTemp(Generated.Stage5.Bricks);
+		Entry.Devices = MoveTemp(Generated.Devices);
+
+		FixedSixRegistrationHashUInt64(ResultHash, Entry.DescriptorHash);
+		FixedSixRegistrationHashUInt64(ResultHash, Entry.StaticGeometryHash);
+		FixedSixRegistrationHashUInt64(
+			ResultHash, Entry.ProductionIdentityHash);
+		FixedSixRegistrationHashUInt64(ResultHash, Entry.DeviceAssemblyHash);
+	}
+
+	CandidatePlan.RegistrationResultHash = ResultHash;
+	for (FABTSM73JuryDemoFixedSixStaticEntry& Entry : CandidatePlan.Entries)
+	{
+		Entry.RegistrationResultHash = ResultHash;
+	}
+	if (!CandidatePlan.IsUsable())
+	{
+		return Reject(TEXT("FixedSixV2StaticPlanRejected"));
+	}
+	OutPlan = MoveTemp(CandidatePlan);
+	return true;
+}
+
+bool FABTSM73JuryDemoFixedSixRegistration::SpawnStaticActors(
+	UWorld& World,
+	AABTSM7BuildingMaterialSystem& MaterialSystem,
+	TSubclassOf<AABTSM73StableBuildingActor> BuildingClass,
+	FABTSM73JuryDemoFixedSixStaticPlan&& Plan,
+	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>>& OutActors,
+	FString& OutError)
+{
+	OutActors.Reset();
+	OutError.Reset();
+	if (!Plan.IsUsable() || !BuildingClass)
+	{
+		OutError = TEXT("FixedSixV2StaticSpawnPreflightRejected");
+		return false;
+	}
+
+	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>> CandidateActors;
+	CandidateActors.Reserve(Plan.Entries.Num());
+	const auto Rollback = [&CandidateActors](const FString& Reason)
+	{
+		for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakActor
+			: CandidateActors)
+		{
+			if (AABTSM73StableBuildingActor* Actor = WeakActor.Get())
+			{
+				Actor->RollbackJuryDemoFixedSixStaticRegistration(Reason);
+			}
+		}
+		CandidateActors.Reset();
+	};
+
+	for (FABTSM73JuryDemoFixedSixStaticEntry& Entry : Plan.Entries)
+	{
+		const FName EntryId = Entry.ManifestEntryId;
+		const int32 ExpectedModuleCount =
+			Entry.Bricks.Num() + Entry.Devices.Num() + Entry.Caps.Num();
+		AABTSM73StableBuildingActor* Actor =
+			World.SpawnActorDeferred<AABTSM73StableBuildingActor>(
+				BuildingClass,
+				Entry.WorldTransform,
+				nullptr,
+				nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (Actor == nullptr)
+		{
+			OutError = FString::Printf(
+				TEXT("FixedSixV2StaticSpawnDeferred:%s"),
+				*EntryId.ToString());
+			Rollback(OutError);
+			return false;
+		}
+		CandidateActors.Add(Actor);
+		FString ConfigureError;
+		if (!Actor->ConfigureJuryDemoFixedSixStaticRegistration(
+			MoveTemp(Entry), ConfigureError))
+		{
+			OutError = FString::Printf(
+				TEXT("FixedSixV2StaticConfigure:%s:%s"),
+				*EntryId.ToString(), *ConfigureError);
+			Rollback(OutError);
+			return false;
+		}
+		UGameplayStatics::FinishSpawningActor(Actor, Actor->GetActorTransform());
+		Actor->InitializeRuntimeBuilding(&MaterialSystem);
+		if (!Actor->IsJuryDemoFixedSixStaticRegistrationAccepted()
+			|| Actor->GetJuryDemoFixedSixStaticModuleCount()
+				!= ExpectedModuleCount)
+		{
+			OutError = FString::Printf(
+				TEXT("FixedSixV2StaticInitialize:%s:Expected=%d:Actual=%d"),
+				*EntryId.ToString(), ExpectedModuleCount,
+				Actor->GetJuryDemoFixedSixStaticModuleCount());
+			Rollback(OutError);
+			return false;
+		}
+	}
+
+	OutActors = MoveTemp(CandidateActors);
+	return true;
+}

@@ -3,9 +3,13 @@
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 
 #include "ABTSRuntime.h"
-#include "Calibration/ABTSCalibrationTargetProxy.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Components/BoxComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -250,6 +254,81 @@ bool HasPawnBlockingCollision(const AActor& Actor)
 	return false;
 }
 
+FName ResolveFrozenBrickHISMName(const EABTSM7BuildingMaterial Material)
+{
+	switch (Material)
+	{
+	case EABTSM7BuildingMaterial::Wood: return TEXT("WoodPreview");
+	case EABTSM7BuildingMaterial::Stone: return TEXT("StonePreview");
+	case EABTSM7BuildingMaterial::Iron: return TEXT("IronPreview");
+	case EABTSM7BuildingMaterial::Glass: return TEXT("GlassPreview");
+	default: return NAME_None;
+	}
+}
+
+bool DoesStableBuildingMatchFrozenBrickUnion(
+	const AABTSM73StableBuildingActor& Building,
+	const FABTSM73BuildingFreezeV3Descriptor& Descriptor)
+{
+	constexpr double BasicCubeSizeCM = 100.0;
+	constexpr double TransformTolerance = 0.001;
+	TInlineComponentArray<UHierarchicalInstancedStaticMeshComponent*> HISMs;
+	Building.GetComponents(HISMs);
+	for (const EABTSM7BuildingMaterial Material : {
+		EABTSM7BuildingMaterial::Wood,
+		EABTSM7BuildingMaterial::Stone,
+		EABTSM7BuildingMaterial::Iron,
+		EABTSM7BuildingMaterial::Glass})
+	{
+		const FName ComponentName = ResolveFrozenBrickHISMName(Material);
+		UHierarchicalInstancedStaticMeshComponent* MaterialHISM = nullptr;
+		for (UHierarchicalInstancedStaticMeshComponent* HISM : HISMs)
+		{
+			if (IsValid(HISM) && HISM->GetFName() == ComponentName)
+			{
+				if (MaterialHISM != nullptr)
+				{
+					return false;
+				}
+				MaterialHISM = HISM;
+			}
+		}
+		int32 ExpectedInstanceCount = 0;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Descriptor.Bricks)
+		{
+			ExpectedInstanceCount += Brick.BrickSpec.Material == Material ? 1 : 0;
+		}
+		if (!IsValid(MaterialHISM)
+			|| MaterialHISM->GetInstanceCount() != ExpectedInstanceCount)
+		{
+			return false;
+		}
+		int32 MaterialInstanceIndex = 0;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Descriptor.Bricks)
+		{
+			if (Brick.BrickSpec.Material != Material)
+			{
+				continue;
+			}
+			FTransform ActualLocalTransform = FTransform::Identity;
+			if (!MaterialHISM->GetInstanceTransform(
+				MaterialInstanceIndex++, ActualLocalTransform, false))
+			{
+				return false;
+			}
+			FTransform ExpectedLocalTransform = Brick.LocalTransform;
+			ExpectedLocalTransform.SetScale3D(
+				Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+			if (!ActualLocalTransform.Equals(
+				ExpectedLocalTransform, TransformTolerance))
+			{
+				return false;
+			}
+		}
+	}
+	return !Descriptor.Bricks.IsEmpty();
+}
+
 int32 DisableVisibilityInteraction(AActor& Actor)
 {
 	int32 DisabledComponents = 0;
@@ -406,13 +485,20 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 	RefreshReadyState();
 
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f Gravity=%.1f E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticeInteraction=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f FrozenPreviewGravity=%.1f GameplayGravity=%.1f GravityMatchesFrozenPreview=%d Policy=ReachableLegacyProxyOverlapV1 NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 ProxyOverlapBrickId=%d ProxyOverlapCount=%d E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticeInteraction=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
 		bRuntimeReady ? 1 : 0,
 		RuntimeSnapshot.SourceRouteCandidateId,
 		SupersededSatellites.Num(),
 		*RuntimeSnapshot.SatelliteWorldTransform.GetLocation().ToCompactString(),
 		RuntimeSnapshot.SatelliteRadiusCM,
+		RuntimeSnapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
 		RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2,
+		FMath::IsNearlyEqual(
+			RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2,
+			RuntimeSnapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
+			0.01f) ? 1 : 0,
+		RuntimeSnapshot.ProxyOverlapBrickId,
+		RuntimeSnapshot.ProxyOverlapBrickCount,
 		*RuntimeSnapshot.E5WorldTransform.GetLocation().ToCompactString(),
 		*RuntimeSnapshot.E5HalfExtentCM.ToCompactString(),
 		bSatelliteCollisionEnabled ? 1 : 0,
@@ -552,40 +638,102 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	GravitySnapshot.FlightAirDragPerSecond =
 		FrozenCatalog.FlightAirDragPerSecond;
 	GravitySnapshot.bSatelliteGravityEnabled = true;
-	FTransform ResolvedE5Transform = FTransform::Identity;
-	FString TargetFailure;
-	if (!FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
-			RuntimeSnapshot.PracticeLaunchWorldTransform.GetLocation(),
-			GravitySnapshot,
-			FrozenPreset,
-			ResolvedE5Transform,
-			&TargetFailure))
+	const FTransform ResolvedE5Transform =
+		CandidateSnapshot.E5TargetWorldTransform;
+	FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+	FString E1DescriptorFailure;
+	if (!FABTSM73BuildingFreezeV3::DeriveAndValidate(
+			EABTSM73BeamDemoBuilding::E1ColumnBreak,
+			E1Descriptor,
+			E1DescriptorFailure)
+		|| E1Descriptor.DescriptorHash != static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetDescriptorHash))
+	{
+		return RejectSpawn(TEXT("FrozenE1UnionDescriptor"));
+	}
+	const uint64 ExpectedTargetIdentity =
+		FABTSM3MonthlySatellitePreviewBuilder::
+			ComputeProductionTargetIdentityHash(
+				static_cast<uint64>(
+					CandidateSnapshot.ProductionTargetDescriptorHash),
+				CandidateSnapshot.SatelliteSiteWorldTransform,
+				ResolvedE5Transform,
+				CandidateSnapshot.E5TargetHalfExtentCM);
+	const FABTSM73BeamD1BrickBinding* WitnessBrick =
+		E1Descriptor.Bricks.FindByPredicate(
+			[this](const FABTSM73BeamD1BrickBinding& Brick)
+			{
+				return Brick.BrickId
+					== CandidateSnapshot.ProductionTargetModuleId;
+			});
+	if (!ResolvedE5Transform.IsValid()
+		|| CandidateSnapshot.E5TargetHalfExtentCM.GetMin() <= 0.0f
+		|| WitnessBrick == nullptr
+		|| !ResolvedE5Transform.Equals(
+			WitnessBrick->LocalTransform
+				* CandidateSnapshot.SatelliteSiteWorldTransform,
+			0.001f)
+		|| !CandidateSnapshot.E5TargetHalfExtentCM.Equals(
+			WitnessBrick->BrickSpec.DimensionsCM * 0.5f, 0.001f)
+		|| ExpectedTargetIdentity != static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash))
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=E5Transform Detail=%s"),
-			*TargetFailure);
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=ProductionTargetIdentity Expected=%016llX Candidate=%016llX"),
+			static_cast<unsigned long long>(ExpectedTargetIdentity),
+			static_cast<unsigned long long>(static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)));
 		return false;
 	}
 
-	RuntimeE5Target =
-		GetWorld()->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
-			AABTSCalibrationTargetProxy::StaticClass(),
-			ResolvedE5Transform,
-			this,
-			nullptr,
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	RuntimeE5Target = GetWorld()->SpawnActor<AActor>(
+		AActor::StaticClass(),
+		CandidateSnapshot.SatelliteSiteWorldTransform,
+		FActorSpawnParameters());
 	if (RuntimeE5Target == nullptr)
 	{
 		return RejectSpawn(TEXT("E5Spawn"));
 	}
-	RuntimeE5Target->ConfigureCube(
-		TEXT("Satellite.Backside.E5"),
-		CandidateSnapshot.E5TargetHalfExtentCM.GetMax(),
-		FLinearColor(1.0f, 0.12f, 0.72f, 1.0f));
-	UGameplayStatics::FinishSpawningActor(
-		RuntimeE5Target,
-		ResolvedE5Transform);
+	RuntimeE5Target->SetOwner(this);
+	RuntimeE5Target->Tags.AddUnique(
+		TEXT("Satellite.Backside.FrozenE1BuildingModules"));
+	USceneComponent* const UnionRoot = NewObject<USceneComponent>(
+		RuntimeE5Target, TEXT("FrozenE1BuildingModuleUnionRoot"));
+	if (UnionRoot == nullptr)
+	{
+		return RejectSpawn(TEXT("E1ModuleUnionRootCreate"));
+	}
+	RuntimeE5Target->SetRootComponent(UnionRoot);
+	UnionRoot->RegisterComponent();
+	int32 RegisteredUnionModules = 0;
+	for (const FABTSM73BeamD1BrickBinding& Brick : E1Descriptor.Bricks)
+	{
+		UBoxComponent* const ModuleCollision = NewObject<UBoxComponent>(
+			RuntimeE5Target,
+			FName(*FString::Printf(
+				TEXT("FrozenE1BrickOBB_%03d"), Brick.BrickId)));
+		if (ModuleCollision == nullptr)
+		{
+			return RejectSpawn(TEXT("E1ModuleUnionCollisionCreate"));
+		}
+		ModuleCollision->SetupAttachment(UnionRoot);
+		ModuleCollision->SetRelativeTransform(Brick.LocalTransform);
+		ModuleCollision->InitBoxExtent(
+			Brick.BrickSpec.DimensionsCM * 0.5f);
+		ModuleCollision->SetCollisionEnabled(
+			ECollisionEnabled::QueryAndPhysics);
+		ModuleCollision->SetCollisionResponseToAllChannels(ECR_Block);
+		ModuleCollision->RegisterComponent();
+		++RegisteredUnionModules;
+	}
+	if (RegisteredUnionModules != E1Descriptor.Bricks.Num())
+	{
+		return RejectSpawn(TEXT("E1ModuleUnionCardinality"));
+	}
+	RuntimeE5Target->SetActorTransform(
+		CandidateSnapshot.SatelliteSiteWorldTransform);
 	RuntimeE5Target->SetActorEnableCollision(true);
+	RuntimeE5GameplayTarget = RuntimeE5Target;
 	RuntimeE5Target->AttachToActor(
 		RuntimeSatellite,
 		FAttachmentTransformRules::KeepWorldTransform);
@@ -624,8 +772,17 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 		RuntimeSatellite->GetPlanetRadiusCM();
 	RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2 =
 		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
+	RuntimeSnapshot.CalibrationSatelliteSurfaceGravityCMPerSec2 =
+		CandidateSnapshot.SatelliteSurfaceGravityCMPerSec2;
 	RuntimeSnapshot.E5WorldTransform = RuntimeE5Target->GetActorTransform();
-	RuntimeSnapshot.E5HalfExtentCM = RuntimeE5Target->GetTargetHalfExtentCM();
+	RuntimeSnapshot.E5HalfExtentCM = E1Descriptor.SiteLocalBounds.GetExtent();
+	RuntimeSnapshot.TargetAuthority = CandidateSnapshot.TargetAuthority;
+	RuntimeSnapshot.ProductionTargetDescriptorHash =
+		CandidateSnapshot.ProductionTargetDescriptorHash;
+	RuntimeSnapshot.ProductionTargetModuleId =
+		CandidateSnapshot.ProductionTargetModuleId;
+	RuntimeSnapshot.ProductionTargetIdentityHash =
+		CandidateSnapshot.ProductionTargetIdentityHash;
 	RuntimeSnapshot.BaselineGravitySnapshotHash =
 		static_cast<int64>(BaselineGravitySnapshotHash);
 	RuntimeSnapshot.RuntimeLayoutSnapshotHash = static_cast<int64>(
@@ -880,7 +1037,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnPracticeSlingshot()
 
 bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 {
-	if (!IsValid(RuntimeSatellite) || !IsValid(RuntimeE5Target)
+	AActor* const GameplayTarget = GetRuntimeE5Target();
+	if (!IsValid(RuntimeSatellite) || !IsValid(GameplayTarget)
 		|| GetWorld() == nullptr)
 	{
 		bM6TargetBound = false;
@@ -906,7 +1064,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 			BoundTarget,
 			BoundHalfExtent)
 			&& BoundSatellite == RuntimeSatellite.Get()
-			&& BoundTarget == RuntimeE5Target.Get()
+			&& BoundTarget == GameplayTarget
 			&& BoundHalfExtent.Equals(RuntimeSnapshot.E5HalfExtentCM, 0.1f);
 		if (bM6TargetBound && bProductionLaunchProfileBound)
 		{
@@ -926,7 +1084,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 		BoundSlingshotSystem = *It;
 		BoundSlingshotSystem->ConfigureSatellitePracticeTarget(
 			*RuntimeSatellite,
-			*RuntimeE5Target,
+			*GameplayTarget,
 			RuntimeSnapshot.E5HalfExtentCM,
 			FrozenPreset.IntegrationStepSeconds,
 			FrozenPreset.MaximumFlightSeconds);
@@ -963,14 +1121,20 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindM6Target()
 
 bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 {
+	AActor* const GameplayTarget = GetRuntimeE5Target();
 	bTrajectoryCertificationAttempted = true;
 	bTrajectoryCertified = false;
 	RuntimeSnapshot.bTrajectoryCertified = false;
+	RuntimeSnapshot.bBuildingLevelAttackabilityCertified = false;
+	RuntimeSnapshot.AttackabilityWitnessSampleCount = 0;
+	RuntimeSnapshot.AttackabilityWitnessBrickId = INDEX_NONE;
+	RuntimeSnapshot.ProxyOverlapBrickId = INDEX_NONE;
+	RuntimeSnapshot.ProxyOverlapBrickCount = 0;
 	if (!IsValid(BoundSlingshotSystem)
 		|| !IsValid(PrimaryPlanet)
 		|| !IsValid(RuntimePracticeCord)
 		|| !IsValid(RuntimeSatellite)
-		|| !IsValid(RuntimeE5Target))
+		|| !IsValid(GameplayTarget))
 	{
 		return false;
 	}
@@ -995,61 +1159,70 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		return false;
 	}
 	const FABTSSatellitePracticePreset FrozenPreset =
-		FABTSSlingshotSatelliteCalibrationModel::
-			MakeFrozenSatellitePracticePresetV0();
-	FABTSCalibrationScenario Scenario;
-	Scenario.LaunchWorldLocation = LaunchFrame.RestPouchWorldLocation;
-	Scenario.LaunchFrame = LaunchFrame;
-	Scenario.TargetWorldLocation = RuntimeE5Target->GetActorLocation();
-	Scenario.TargetWorldTransform = RuntimeE5Target->GetActorTransform();
-	Scenario.TargetHalfExtentCM = RuntimeSnapshot.E5HalfExtentCM;
-	Scenario.TargetProxyRadiusCM = RuntimeSnapshot.E5HalfExtentCM.GetMax();
-	Scenario.Gravity.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
-	Scenario.Gravity.PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
-	Scenario.Gravity.PrimarySurfaceGravityCMPerSec2 = 980.0f;
-	Scenario.Gravity.SatelliteCenterWorld = RuntimeSatellite->GetPlanetCenterWorld();
-	Scenario.Gravity.SatelliteRadiusCM = RuntimeSatellite->GetPlanetRadiusCM();
-	Scenario.Gravity.SatelliteSurfaceGravityCMPerSec2 =
-		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
-	Scenario.Gravity.FlightAirDragPerSecond =
-		ProductionCatalog.FlightAirDragPerSecond;
-	Scenario.Gravity.bSatelliteGravityEnabled = true;
-	const FABTSCalibrationSweepSummary Summary =
-		FABTSSlingshotSatelliteCalibrationModel::RunSuccessIslandSweep(
-			Scenario,
-			ProductionCatalog,
-			FrozenPreset);
-	// Real monthly terrain perturbs the ideal-sphere calibration carrier.  The
-	// practice gate keeps every gravity-dependence and uniqueness condition,
-	// but accepts an aim-connected island at one reachable 0.01 pull notch.
-	// The stricter frozen-carrier bPassed value remains visible in the log.
-	const bool bM3PracticePassed =
-		Summary.LargestSuccessIslandSamples
-			>= FMath::Max(1, FrozenPreset.MinimumSuccessIslandSamples)
-		&& Summary.bIslandSpansAimNeighbors
-		&& Summary.GravityDependentHits > 0
-		&& Summary.SimpleFullPowerHits == 0
-		&& Summary.ReinforcedOutsideCertifiedPullHits == 0
-		&& Summary.SuccessPullMinimum + KINDA_SMALL_NUMBER
-			>= FrozenPreset.PullMinimum
-		&& Summary.SuccessPullMaximum
-			<= FrozenPreset.PullMaximum + KINDA_SMALL_NUMBER
-		&& Summary.MinimumGravityOffMissCM + KINDA_SMALL_NUMBER
-			>= FrozenPreset.GravityOffMinimumMissCM;
-	bTrajectoryCertified = bM3PracticePassed;
-	RuntimeSnapshot.bTrajectoryCertified = bM3PracticePassed;
+		FABTSSlingshotSatelliteCalibrationModel::MakeFrozenSatellitePracticePresetV0();
+	const bool bProductionBuildingModuleTarget =
+		RuntimeSnapshot.TargetAuthority
+			== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules;
+	FABTSCalibrationGravitySnapshot FrozenPreviewGravity;
+	FrozenPreviewGravity.PrimaryCenterWorld = PrimaryPlanet->GetPlanetCenterWorld();
+	FrozenPreviewGravity.PrimaryRadiusCM = PrimaryPlanet->GetPlanetRadiusCM();
+	FrozenPreviewGravity.PrimarySurfaceGravityCMPerSec2 = 980.0f;
+	FrozenPreviewGravity.SatelliteCenterWorld = RuntimeSatellite->GetPlanetCenterWorld();
+	FrozenPreviewGravity.SatelliteRadiusCM = RuntimeSatellite->GetPlanetRadiusCM();
+	FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2 =
+		CandidateSnapshot.SatelliteSurfaceGravityCMPerSec2;
+	FrozenPreviewGravity.FlightAirDragPerSecond = ProductionCatalog.FlightAirDragPerSecond;
+	FrozenPreviewGravity.bSatelliteGravityEnabled = true;
+	int32 OverlapBrickId = INDEX_NONE;
+	int32 OverlapBrickCount = 0;
+	uint64 UnionTargetIdentityHash = 0;
+	uint64 OverlapHash = 0;
+	FString UnionFailure;
+	const bool bProxyOverlap = bProductionBuildingModuleTarget
+		? FABTSM3MonthlySatellitePreviewBuilder::
+			EvaluateFrozenE1LegacyProxyOverlap(
+				LaunchFrame.RestPouchWorldLocation,
+				FrozenPreviewGravity,
+				CandidateSnapshot.SatelliteSiteWorldTransform,
+				FrozenPreset,
+				OverlapBrickId,
+				OverlapBrickCount,
+				UnionTargetIdentityHash,
+				OverlapHash,
+				UnionFailure)
+		: false;
+	const bool bExactFrozenUnionIdentity = bProductionBuildingModuleTarget
+		&& CandidateSnapshot.ProductionTargetDescriptorHash != 0
+		&& UnionTargetIdentityHash == static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash);
+	if (!bProxyOverlap || !bExactFrozenUnionIdentity)
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M3R5.1][RuntimePractice] CertificationRejected Policy=ReachableLegacyProxyOverlapV1 NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 GameplayGravity=%.1f FrozenPreviewGravity=%.1f GravityMatchesFrozenPreview=%d ProxyOverlapBrickId=%d ProxyOverlapCount=%d ExactUnionIdentity=%d Failure=%s"),
+			RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2, FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2,
+			FMath::IsNearlyEqual(RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2, FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2, 0.01f) ? 1 : 0,
+			OverlapBrickId, OverlapBrickCount,
+			bExactFrozenUnionIdentity ? 1 : 0, *UnionFailure);
+		return false;
+	}
+	bTrajectoryCertified = true;
+	RuntimeSnapshot.bTrajectoryCertified = true;
+	RuntimeSnapshot.bBuildingLevelAttackabilityCertified = true;
 	RuntimeSnapshot.ProductionLaunchProfileHash =
 		static_cast<int64>(ProductionHash);
-	RuntimeSnapshot.GravityOnHits = Summary.ReinforcedGravityOnHits;
-	RuntimeSnapshot.GravityDependentHits = Summary.GravityDependentHits;
-	RuntimeSnapshot.LargestSuccessIslandSamples =
-		Summary.LargestSuccessIslandSamples;
-	RuntimeSnapshot.BestAimInPlaneCM = Summary.BestGravityOnAimInPlaneCM;
-	RuntimeSnapshot.BestAimOutOfPlaneCM = Summary.BestGravityOnAimOutOfPlaneCM;
-	RuntimeSnapshot.BestPullAlpha = Summary.BestGravityOnPullAlpha;
-	RuntimeSnapshot.MinimumGravityOffMissCM = Summary.MinimumGravityOffMissCM;
+	RuntimeSnapshot.AttackabilityWitnessSampleCount = 0;
+	RuntimeSnapshot.AttackabilityWitnessBrickId = INDEX_NONE;
+	RuntimeSnapshot.ProxyOverlapBrickId = OverlapBrickId;
+	RuntimeSnapshot.ProxyOverlapBrickCount = OverlapBrickCount;
+	RuntimeSnapshot.GravityOnHits = 0;
+	RuntimeSnapshot.GravityDependentHits = 0;
+	RuntimeSnapshot.LargestSuccessIslandSamples = 0;
+	RuntimeSnapshot.BestAimInPlaneCM = 0.0f;
+	RuntimeSnapshot.BestAimOutOfPlaneCM = 0.0f;
+	RuntimeSnapshot.BestPullAlpha = 0.0f;
+	RuntimeSnapshot.MinimumGravityOffMissCM = 0.0f;
 	RuntimeSnapshot.TrajectoryCertificationHash =
-		static_cast<int64>(Summary.ResultHash);
+		static_cast<int64>(OverlapHash);
 	RuntimeSnapshot.RuntimeLayoutSnapshotHash = static_cast<int64>(
 		ABTSM3MonthlySatellitePracticeRuntimePrivate::
 			ComputeRuntimeLayoutSnapshotHash(
@@ -1058,37 +1231,22 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 				static_cast<uint64>(
 					RuntimeSnapshot.BaselineGravitySnapshotHash),
 				ProductionHash,
-				Summary.ResultHash,
+				OverlapHash,
 				RuntimeSnapshot.PracticeLaunchWorldTransform,
 				RuntimeSnapshot.PracticeStakeACellId,
 				RuntimeSnapshot.PracticeStakeBCellId));
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
-		bM3PracticePassed ? 1 : 0,
-		Summary.bPassed ? 1 : 0,
-		static_cast<unsigned long long>(ProductionHash),
-		Summary.ReinforcedGravityOnHits,
-		Summary.GravityDependentHits,
-		Summary.LargestSuccessIslandSamples,
-		Summary.bIslandSpansAimNeighbors ? 1 : 0,
-		Summary.bIslandSpansPullNeighbors ? 1 : 0,
-		Summary.SuccessPullMinimum,
-		Summary.SuccessPullMaximum,
-		Summary.SuccessAimInPlaneMinimumCM,
-		Summary.SuccessAimInPlaneMaximumCM,
-		Summary.BestGravityOnAimInPlaneCM,
-		Summary.BestGravityOnAimOutOfPlaneCM,
-		Summary.BestGravityOnPullAlpha,
-		Summary.MinimumGravityOffMissCM,
-		Summary.SimpleFullPowerHits,
-		Summary.ReinforcedOutsideCertifiedPullHits,
-		static_cast<unsigned long long>(Summary.ResultHash));
-	if (!bM3PracticePassed)
-	{
-		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] CertificationRejected ResultHash=%016llX"),
-			static_cast<unsigned long long>(Summary.ResultHash));
-	}
+		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] Policy=ReachableLegacyProxyOverlapV1 NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 GameplayGravity=%.1f FrozenPreviewGravity=%.1f GravityMatchesFrozenPreview=%d Certified=%d ProductionBuildingModule=%d ExactOBBUnion=%d ProxyOverlapBrickId=%d ProxyOverlapCount=%d TargetIdentity=%016llX OverlapHash=%016llX"),
+		RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2,
+		FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2,
+		FMath::IsNearlyEqual(RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2, FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2, 0.01f) ? 1 : 0,
+		bTrajectoryCertified ? 1 : 0,
+		bProductionBuildingModuleTarget ? 1 : 0,
+		bExactFrozenUnionIdentity ? 1 : 0,
+		OverlapBrickId,
+		OverlapBrickCount,
+		static_cast<unsigned long long>(UnionTargetIdentityHash),
+		static_cast<unsigned long long>(OverlapHash));
 	return bTrajectoryCertified;
 }
 
@@ -1145,7 +1303,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 {
 	bRuntimeReady = RuntimeSnapshot.bValid
 		&& IsValid(RuntimeSatellite)
-		&& IsValid(RuntimeE5Target)
+		&& IsValid(GetRuntimeE5Target())
 		&& bSatelliteCollisionEnabled
 		&& bE5CollisionEnabled
 		&& bM6TargetBound
@@ -1153,6 +1311,195 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bTrajectoryCertified
 		&& bPracticeSlingshotReady
 		&& bPracticePouchInteractionReady;
+}
+
+bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1BuildingModuleTarget(
+	AActor& InTargetActor,
+	const FVector& InTargetHalfExtentCM)
+{
+	if (!bRuntimeActorsSpawned
+		|| GetWorld() == nullptr
+		|| InTargetActor.GetWorld() != GetWorld()
+		|| InTargetHalfExtentCM.GetMin() <= 0.0f)
+	{
+		bRuntimeReady = false;
+		bTrajectoryCertified = false;
+		RuntimeSnapshot.bTrajectoryCertified = false;
+		if (IsValid(RuntimeE5Target))
+		{
+			RuntimeE5Target->SetActorEnableCollision(false);
+			RuntimeE5Target->Destroy();
+			RuntimeE5Target = nullptr;
+			RuntimeE5GameplayTarget = nullptr;
+		}
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Rejected Reason=InvalidInput Target=%s HalfExtent=%s"),
+			*GetNameSafe(&InTargetActor),
+			*InTargetHalfExtentCM.ToCompactString());
+		return false;
+	}
+	FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+	FString E1DescriptorFailure;
+	const bool bDescriptorReady =
+		FABTSM73BuildingFreezeV3::DeriveAndValidate(
+			EABTSM73BeamDemoBuilding::E1ColumnBreak,
+			E1Descriptor,
+			E1DescriptorFailure)
+		&& E1Descriptor.DescriptorHash == static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetDescriptorHash)
+		&& E1Descriptor.Caps.Num() == 1;
+	const FABTSM73BuildingFreezeV3CapBinding* Cap = bDescriptorReady
+		? &E1Descriptor.Caps[0]
+		: nullptr;
+	const FTransform ActualSiteWorldTransform = Cap != nullptr
+		? Cap->SiteLocalTransform.Inverse()
+			* InTargetActor.GetActorTransform()
+		: FTransform::Identity;
+	const uint64 ActualTargetIdentity = bDescriptorReady
+		? FABTSM3MonthlySatellitePreviewBuilder::
+			ComputeProductionTargetIdentityHash(
+				E1Descriptor.DescriptorHash,
+				ActualSiteWorldTransform,
+				CandidateSnapshot.E5TargetWorldTransform,
+				CandidateSnapshot.E5TargetHalfExtentCM)
+		: 0;
+	AABTSM73StableBuildingActor* ActualE1Building = nullptr;
+	if (bDescriptorReady)
+	{
+		for (TActorIterator<AABTSM73StableBuildingActor> It(GetWorld()); It; ++It)
+		{
+			if (It->IsJuryDemoFixedSixStaticRegistrationAccepted()
+				&& It->GetJuryDemoFixedSixManifestEntryId()
+					== FName(TEXT("E1ColumnBreak"))
+				&& It->GetActorTransform().Equals(
+					ActualSiteWorldTransform, 0.001f))
+			{
+				if (ActualE1Building != nullptr)
+				{
+					ActualE1Building = nullptr;
+					break;
+				}
+				ActualE1Building = *It;
+			}
+		}
+	}
+	const bool bActualBrickUnionExact = ActualE1Building != nullptr
+		&& ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			DoesStableBuildingMatchFrozenBrickUnion(
+				*ActualE1Building, E1Descriptor);
+	const bool bTargetIdentityExact =
+		CandidateSnapshot.TargetAuthority
+			== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+		&& bDescriptorReady
+		&& Cap != nullptr
+		&& ActualE1Building != nullptr
+		&& bActualBrickUnionExact
+		&& CandidateSnapshot.ProductionTargetIdentityHash != 0
+		&& ActualTargetIdentity == static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash)
+		&& ActualSiteWorldTransform.Equals(
+			CandidateSnapshot.SatelliteSiteWorldTransform, 0.001f)
+		&& InTargetActor.GetActorTransform().Equals(
+			Cap->SiteLocalTransform
+				* CandidateSnapshot.SatelliteSiteWorldTransform,
+			0.001f)
+		&& InTargetHalfExtentCM.Equals(
+			Cap->BrickSpec.DimensionsCM * 0.5f, 0.001f);
+	if (!bTargetIdentityExact)
+	{
+		bRuntimeReady = false;
+		bTrajectoryCertified = false;
+		RuntimeSnapshot.bTrajectoryCertified = false;
+		if (IsValid(BoundSlingshotSystem))
+		{
+			BoundSlingshotSystem->ClearSatellitePracticeTarget(
+				GetRuntimeE5Target());
+		}
+		if (IsValid(RuntimeE5Target))
+		{
+			RuntimeE5Target->SetActorEnableCollision(false);
+			RuntimeE5Target->Destroy();
+			RuntimeE5Target = nullptr;
+		}
+		RuntimeE5GameplayTarget = nullptr;
+		bE5CollisionEnabled = false;
+		bM6TargetBound = false;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Rejected Reason=TargetUnionIdentityMismatch Cap=%s Building=%s ActualBrickUnionExact=%d Expected=%016llX Actual=%016llX ExpectedSite=%s ActualSite=%s ExpectedCapHalfExtent=%s ActualCapHalfExtent=%s ProxyFallback=0"),
+			*GetNameSafe(&InTargetActor),
+			*GetNameSafe(ActualE1Building),
+			bActualBrickUnionExact ? 1 : 0,
+			static_cast<unsigned long long>(static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)),
+			static_cast<unsigned long long>(ActualTargetIdentity),
+			*CandidateSnapshot.SatelliteSiteWorldTransform.GetLocation()
+				.ToCompactString(),
+			*ActualSiteWorldTransform.GetLocation().ToCompactString(),
+			*(Cap != nullptr
+				? (Cap->BrickSpec.DimensionsCM * 0.5f).ToCompactString()
+				: FVector::ZeroVector.ToCompactString()),
+			*InTargetHalfExtentCM.ToCompactString());
+		return false;
+	}
+
+	AActor* const PreviousTarget = GetRuntimeE5Target();
+	const FVector PreviousTargetLocation = IsValid(PreviousTarget)
+		? PreviousTarget->GetActorLocation()
+		: FVector::ZeroVector;
+	if (IsValid(BoundSlingshotSystem))
+	{
+		BoundSlingshotSystem->ClearSatellitePracticeTarget(PreviousTarget);
+	}
+	RuntimeE5GameplayTarget = ActualE1Building;
+	RuntimeSnapshot.E5WorldTransform = ActualSiteWorldTransform;
+	RuntimeSnapshot.E5HalfExtentCM = E1Descriptor.SiteLocalBounds.GetExtent();
+	bE5CollisionEnabled =
+		ABTSM3MonthlySatellitePracticeRuntimePrivate::
+			HasPawnBlockingCollision(*ActualE1Building);
+	bM6TargetBound = false;
+	bTrajectoryCertified = false;
+	bTrajectoryCertificationAttempted = false;
+	RuntimeSnapshot.bTrajectoryCertified = false;
+	RuntimeSnapshot.bBuildingLevelAttackabilityCertified = false;
+	RuntimeSnapshot.AttackabilityWitnessSampleCount = 0;
+	RuntimeSnapshot.AttackabilityWitnessBrickId = INDEX_NONE;
+	RuntimeSnapshot.ProxyOverlapBrickId = INDEX_NONE;
+	RuntimeSnapshot.ProxyOverlapBrickCount = 0;
+
+	if (IsValid(RuntimeE5Target))
+	{
+		RuntimeE5Target->SetActorEnableCollision(false);
+		RuntimeE5Target->SetActorHiddenInGame(true);
+		RuntimeE5Target->Destroy();
+		RuntimeE5Target = nullptr;
+	}
+
+	const bool bBound = BindM6Target();
+	RefreshReadyState();
+	const FString BindingSummary = FString::Printf(
+		TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Ready=%d Target=%s CapAnchor=%s WitnessBrickId=%d TargetAuthority=FrozenE1BuildingModulesUnion Site=%s UnionHalfExtent=%s LegacyTargetDeltaCM=%.1f Collision=%d M6Target=%d TrajectoryCertified=%d LegacyProxyRetired=1 ExactOBBUnion=%d"),
+		bRuntimeReady ? 1 : 0,
+		*GetNameSafe(ActualE1Building),
+		*GetNameSafe(&InTargetActor),
+		CandidateSnapshot.ProductionTargetModuleId,
+		*ActualSiteWorldTransform.GetLocation().ToCompactString(),
+		*RuntimeSnapshot.E5HalfExtentCM.ToCompactString(),
+		FVector::Distance(
+			PreviousTargetLocation,
+			ActualSiteWorldTransform.GetLocation()),
+		bE5CollisionEnabled ? 1 : 0,
+		bM6TargetBound ? 1 : 0,
+		bTrajectoryCertified ? 1 : 0,
+		bActualBrickUnionExact ? 1 : 0);
+	if (bRuntimeReady)
+	{
+		UE_LOG(LogABTSRuntime, Log, TEXT("%s"), *BindingSummary);
+	}
+	else
+	{
+		UE_LOG(LogABTSRuntime, Error, TEXT("%s"), *BindingSummary);
+	}
+	return bBound && bRuntimeReady;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::Tick(const float DeltaSeconds)
@@ -1223,7 +1570,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 	if (IsValid(BoundSlingshotSystem))
 	{
 		BoundSlingshotSystem->ClearSatellitePracticeTarget(
-			RuntimeE5Target.Get());
+			GetRuntimeE5Target());
 	}
 	BoundSlingshotSystem = nullptr;
 	if (IsValid(RuntimeE5Target)
@@ -1232,6 +1579,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 		RuntimeE5Target->Destroy();
 	}
 	RuntimeE5Target = nullptr;
+	RuntimeE5GameplayTarget = nullptr;
 	if (IsValid(RuntimePracticeCord)
 		&& !RuntimePracticeCord->IsActorBeingDestroyed())
 	{

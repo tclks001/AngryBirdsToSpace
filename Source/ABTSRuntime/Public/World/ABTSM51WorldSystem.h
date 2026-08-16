@@ -41,7 +41,15 @@ public:
 	bool SelectStakeForHeldCord(AABTSM51SlingshotStake& Stake);
 	AABTSCraftingSystem* FindCraftingSystem() const;
 	bool GetFinaleSpaceSlots(AABTSM51SlingshotDirtHole*& OutLeft, AABTSM51SlingshotDirtHole*& OutRight) const;
-	void SetDeveloperAnyCellStakePlacementEnabled(bool bEnabled) { bAllowDeveloperAnyCellStakePlacement = bEnabled; }
+	void SetDeveloperAnyCellStakePlacementEnabled(bool bEnabled)
+	{
+#if UE_BUILD_SHIPPING
+		bAllowDeveloperAnyCellStakePlacement = false;
+		(void)bEnabled;
+#else
+		bAllowDeveloperAnyCellStakePlacement = bEnabled;
+#endif
+	}
 
 	/**
 	 * Pre-BeginPlay injection point for the future M3R-4/R-6 accepted layout.

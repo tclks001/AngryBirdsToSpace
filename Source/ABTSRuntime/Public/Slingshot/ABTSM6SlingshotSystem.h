@@ -158,11 +158,18 @@ public:
 	void BeginRequiredBuildingContract(int32 ExpectedRequiredBuildingCount);
 	void RegisterRequiredBuilding(AABTSM73StableBuildingActor& Building);
 	void SealRequiredBuildingContract(bool bSetupRejected);
+	/** Exact read-only result for the Integration-owned Fixed-Six static gate. */
+	bool CopyFixedSixStaticJointGateResult(
+		uint64& OutRegistrationResultHash,
+		int32& OutRegisteredBuildingCount,
+		int32& OutStaticModuleCount) const;
 
 	EABTSM6LaunchState GetLaunchState() const { return LaunchState; }
 	bool IsLaunchModeActive() const { return LaunchState != EABTSM6LaunchState::Inactive; }
 	/** True only after startup Chaos settling has frozen every promoted world body. */
 	bool IsStartupPhysicsWarmupComplete() const { return !bEnableStartupPhysicsWarmup || bStartupPhysicsWarmupComplete; }
+	/** Fail-closed terminal state used by the startup foreground instead of enabling gameplay. */
+	bool HasStartupPhysicsWarmupFailed() const { return bStartupPhysicsWarmupFailed; }
 	/** The location is the final settled landing point captured before return flight begins. */
 	FABTSM6LaunchCompletedNative& OnLaunchCompleted() { return LaunchCompletedNative; }
 	FABTSM6CalibrationLaunchRecordedNative& OnCalibrationLaunchRecorded()
@@ -226,6 +233,11 @@ private:
 	void UpdateActiveLaunchTelemetry();
 	void FinalizeActiveLaunchTelemetry(const FVector& LandingWorldLocation);
 	void HandleBirdImpact(const FHitResult& Hit, float NormalSpeedCMPerSec, const FVector& IncomingVelocity);
+	bool ResolveImpactFacilityObservationAnchor(
+		const FHitResult& Hit,
+		FVector& OutAnchor,
+		FVector& OutExtent,
+		FName& OutFacilityName) const;
 	EABTSM6ImpactMaterial ResolveMaterial(const UPrimitiveComponent* Component) const;
 	const FABTSM6BirdImpactProfile& GetBirdProfile(EABTSBirdId BirdId) const;
 	const FABTSM6MaterialImpactProfile& GetMaterialProfile(EABTSM6ImpactMaterial Material) const;
@@ -401,6 +413,8 @@ private:
 	FVector RestPouchLocation = FVector::ZeroVector;
 	FVector PouchLocation = FVector::ZeroVector;
 	FVector AimPlaneOffset = FVector::ZeroVector;
+	bool bPouchSurfaceClampActive = false;
+	float LastPouchSurfaceAdjustmentCM = 0.0f;
 	FABTSM6TrajectoryPreview CurrentTrajectoryPreview;
 	FVector LastTrajectoryPreviewStart = FVector::ZeroVector;
 	FVector LastTrajectoryPreviewVelocity = FVector::ZeroVector;
@@ -487,4 +501,8 @@ private:
 	bool bRequiredBuildingSetupRejected = false;
 	int32 ExpectedRequiredBuildingCount = 0;
 	TArray<TWeakObjectPtr<AABTSM73StableBuildingActor>> RequiredBuildingActors;
+	bool bFixedSixStaticJointGateAccepted = false;
+	uint64 FixedSixStaticJointRegistrationResultHash = 0;
+	int32 FixedSixStaticJointRegisteredBuildingCount = 0;
+	int32 FixedSixStaticJointModuleCount = 0;
 };

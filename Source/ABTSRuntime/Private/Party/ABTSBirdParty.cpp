@@ -7,8 +7,10 @@
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "Party/ABTSBirdPartySettings.h"
 #include "Planet/ABTSM2Planet.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 #include "Player/ABTSM25BirdCharacter.h"
 
 namespace
@@ -88,6 +90,11 @@ bool AABTSBirdParty::InitializeParty(AABTSM25BirdCharacter* InitialLeader)
 		Settings.IsValid() ? Settings->FollowStartDistanceCM : 250.0f,
 		Settings.IsValid() ? Settings->FollowStopDistanceCM : 145.0f,
 		Settings.IsValid() ? Settings->SeparationDistanceCM : 95.0f);
+	if (bPartyReady)
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::ControlledBirdChanged,
+			FABTSGuideSubjects::Red, InitialLeader, ABTSBirdIdToIndex(EABTSBirdId::Red));
+	}
 	return bPartyReady;
 }
 
@@ -110,6 +117,11 @@ bool AABTSBirdParty::InitializePlanarParty(
 	bPartyReady = PartyMembers.Num() == BirdCount;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7.1][Party] Planar=%d Members=%d Up=(%.3f,%.3f,%.3f)"),
 		bPartyReady ? 1 : 0, PartyMembers.Num(), PlanarUp.X, PlanarUp.Y, PlanarUp.Z);
+	if (bPartyReady)
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::ControlledBirdChanged,
+			FABTSGuideSubjects::Red, InitialLeader, ABTSBirdIdToIndex(EABTSBirdId::Red));
+	}
 	return bPartyReady;
 }
 
@@ -519,6 +531,8 @@ bool AABTSBirdParty::SwitchControlledBird(const EABTSBirdId NewBirdId)
 		ABTSBirdIdToIndex(QueueOrder[3]),
 		bClearNewLeaderMotionCaches ? 1 : 0,
 		FollowerUpdatePauseRemainingSeconds);
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::ControlledBirdChanged,
+		FABTSGuideSubjects::FromBird(NewBirdId), NewBird, ABTSBirdIdToIndex(NewBirdId));
 	return true;
 }
 
@@ -611,16 +625,7 @@ const FABTSBirdPartyRuntime* AABTSBirdParty::FindRuntime(const EABTSBirdId BirdI
 
 AABTSM2Planet* AABTSBirdParty::FindPlanet()
 {
-	if (Planet.IsValid() && Planet->IsPlanetReady()) return Planet.Get();
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		if (It->IsPlanetReady())
-		{
-			Planet = *It;
-			return Planet.Get();
-		}
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }
 
 float AABTSBirdParty::GetSurfaceDistanceCM(const FVector& A, const FVector& B) const

@@ -122,6 +122,7 @@ private:
 	FVector PendingMoveVector = FVector::ZeroVector;
 	float JumpBufferRemainingSeconds = 0.0f;
 	bool bLoggedNoDependencies = false;
+	bool bLoggedGroundSatelliteGravitySuppressed = false;
 	bool bBallisticFlight = false;
 	float BallisticFlightAirDragPerSecond = 0.08f;
 	float ControlHandoffJumpGraceRemainingSeconds = 0.0f;

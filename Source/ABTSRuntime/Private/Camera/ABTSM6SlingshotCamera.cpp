@@ -193,7 +193,54 @@ void AABTSM6SlingshotCamera::SetAimFrame(const FVector& InCenter, const FVector&
 	SatelliteSubtleAssistAlpha = 0.0f;
 	PredictedPeriapsisWorld = FVector::ZeroVector;
 	PredictedPeriapsisVelocity = FVector::ZeroVector;
+	bAimGroundContextValid = false;
+	AimGroundContextWorld = FVector::ZeroVector;
 	UpdateAim(0.0f);
+}
+
+bool AABTSM6SlingshotCamera::ConfigureAimPrimarySurfaceGroundContext(
+	AABTSM2Planet* InPlanet)
+{
+	bAimGroundContextValid = false;
+	AimGroundContextWorld = FVector::ZeroVector;
+	if (InPlanet == nullptr) return false;
+
+	const FVector PlanetCenter = InPlanet->GetPlanetCenterWorld();
+	const FVector Candidate =
+		AimCenter + AimForward * FMath::Max(100.0f, AimGroundContextForwardDistanceCM);
+	const FVector SurfaceDirection = (Candidate - PlanetCenter).GetSafeNormal();
+	if (SurfaceDirection.IsNearlyZero()) return false;
+	const float SurfaceRadiusCM =
+		InPlanet->GetSurfaceRadiusAtDirection(SurfaceDirection);
+	if (!FMath::IsFinite(SurfaceRadiusCM) || SurfaceRadiusCM <= 0.0f) return false;
+
+	AimGroundContextWorld = PlanetCenter + SurfaceDirection * SurfaceRadiusCM;
+	bAimGroundContextValid = !AimGroundContextWorld.ContainsNaN();
+	if (!bAimGroundContextValid)
+	{
+		AimGroundContextWorld = FVector::ZeroVector;
+		return false;
+	}
+	UpdateAim(0.0f);
+	const FVector ResolvedLook = GetActorForwardVector().GetSafeNormal();
+	const FVector ResolvedSubjectDirection =
+		(AimCenter - GetActorLocation()).GetSafeNormal();
+	const float ResolvedLookDownDegrees = FMath::RadiansToDegrees(FMath::Asin(
+		FMath::Clamp(-FVector::DotProduct(ResolvedLook, AimUp), -1.0f, 1.0f)));
+	const float ResolvedSubjectOffsetDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(
+			FVector::DotProduct(ResolvedLook, ResolvedSubjectDirection),
+			-1.0f,
+			1.0f)));
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][CameraGroundContext] AimLocked=1 Anchor=%s LookDown=%.2f Range=[%.2f,%.2f] SubjectOffset=%.2f Distance=%.1f"),
+		*AimGroundContextWorld.ToCompactString(),
+		ResolvedLookDownDegrees,
+		AimGroundContextMinimumLookDownDegrees,
+		AimGroundContextMaximumLookDownDegrees,
+		ResolvedSubjectOffsetDegrees,
+		FVector::Distance(GetActorLocation(), AimCenter));
+	return true;
 }
 
 bool AABTSM6SlingshotCamera::CopyAimFraming(
@@ -287,6 +334,236 @@ bool AABTSM6SlingshotCamera::BuildAimInputPlaneBasis(
 	return !OutOutOfPlaneAxis.IsNearlyZero();
 }
 
+bool AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+	const FVector& LegacyLocation,
+	const FVector& AimCenter,
+	const FVector& AimForward,
+	const FVector& GroundAnchor,
+	const FVector& Up,
+	const float CameraDistanceCM,
+	const float MinimumLookDownDegrees,
+	const float MaximumLookDownDegrees,
+	const float SubjectAboveCenterDegrees,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp)
+{
+	const FVector SafeUp = Up.GetSafeNormal();
+	const FVector SafeForward =
+		FVector::VectorPlaneProject(AimForward, SafeUp).GetSafeNormal();
+	if (SafeUp.IsNearlyZero()
+		|| SafeForward.IsNearlyZero()
+		|| LegacyLocation.ContainsNaN()
+		|| AimCenter.ContainsNaN()
+		|| GroundAnchor.ContainsNaN()
+		|| !FMath::IsFinite(CameraDistanceCM)
+		|| !FMath::IsFinite(MinimumLookDownDegrees)
+		|| !FMath::IsFinite(MaximumLookDownDegrees)
+		|| !FMath::IsFinite(SubjectAboveCenterDegrees))
+	{
+		return false;
+	}
+
+	const FVector ToAnchor = GroundAnchor - LegacyLocation;
+	const float HorizontalDistanceCM =
+		FVector::VectorPlaneProject(ToAnchor, SafeUp).Size();
+	const FVector AnchorForward =
+		FVector::VectorPlaneProject(GroundAnchor - AimCenter, SafeUp);
+	if (HorizontalDistanceCM <= KINDA_SMALL_NUMBER
+		|| FVector::DotProduct(AnchorForward, SafeForward) <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const float RawLookDownDegrees = FMath::RadiansToDegrees(FMath::Atan2(
+		-FVector::DotProduct(ToAnchor, SafeUp),
+		HorizontalDistanceCM));
+	const float SafeMinimumLookDownDegrees = FMath::Clamp(
+		FMath::Min(MinimumLookDownDegrees, MaximumLookDownDegrees),
+		0.0f,
+		30.0f);
+	const float SafeMaximumLookDownDegrees = FMath::Clamp(
+		FMath::Max(MinimumLookDownDegrees, MaximumLookDownDegrees),
+		SafeMinimumLookDownDegrees,
+		30.0f);
+	const float ResolvedLookDownDegrees = FMath::Clamp(
+		RawLookDownDegrees,
+		SafeMinimumLookDownDegrees,
+		SafeMaximumLookDownDegrees);
+	const float SafeSubjectAboveCenterDegrees = FMath::Clamp(
+		SubjectAboveCenterDegrees,
+		0.0f,
+		ResolvedLookDownDegrees);
+	const float CameraElevationDegrees =
+		ResolvedLookDownDegrees - SafeSubjectAboveCenterDegrees;
+	const float CameraElevationRadians =
+		FMath::DegreesToRadians(CameraElevationDegrees);
+	const float LookDownRadians =
+		FMath::DegreesToRadians(ResolvedLookDownDegrees);
+	const float SafeCameraDistanceCM = FMath::Max(1.0f, CameraDistanceCM);
+
+	// The terrain anchor selects only a bounded optical pitch. The authored
+	// camera-to-sling distance and sling screen offset remain invariant across
+	// sphere curvature and terrain-height changes.
+	OutLocation = AimCenter
+		+ (-SafeForward * FMath::Cos(CameraElevationRadians)
+			+ SafeUp * FMath::Sin(CameraElevationRadians))
+		* SafeCameraDistanceCM;
+	OutLook = (
+		SafeForward * FMath::Cos(LookDownRadians)
+		- SafeUp * FMath::Sin(LookDownRadians)).GetSafeNormal();
+	OutScreenUp = FVector::VectorPlaneProject(SafeUp, OutLook).GetSafeNormal();
+	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
+}
+
+bool AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
+	const FVector& BirdLocation,
+	const FVector& Up,
+	const FVector& Forward,
+	const float DistanceCM,
+	const float HeightCM,
+	const float LookDownDegrees,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp)
+{
+	const FVector SafeUp = Up.GetSafeNormal();
+	const FVector SafeForward =
+		FVector::VectorPlaneProject(Forward, SafeUp).GetSafeNormal();
+	if (SafeUp.IsNearlyZero()
+		|| SafeForward.IsNearlyZero()
+		|| BirdLocation.ContainsNaN()
+		|| !FMath::IsFinite(DistanceCM)
+		|| !FMath::IsFinite(HeightCM)
+		|| !FMath::IsFinite(LookDownDegrees))
+	{
+		return false;
+	}
+
+	OutLocation = BirdLocation
+		- SafeForward * FMath::Max(0.0f, DistanceCM)
+		+ SafeUp * FMath::Max(0.0f, HeightCM);
+	const float LookDownRadians = FMath::DegreesToRadians(
+		FMath::Clamp(LookDownDegrees, 0.0f, 45.0f));
+	OutLook = (
+		SafeForward * FMath::Cos(LookDownRadians)
+		- SafeUp * FMath::Sin(LookDownRadians)).GetSafeNormal();
+	OutScreenUp = FVector::VectorPlaneProject(SafeUp, OutLook).GetSafeNormal();
+	return !OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero();
+}
+
+bool AABTSM6SlingshotCamera::BuildImpactObservationPose(
+	const FVector& BirdLocation,
+	const FVector& Up,
+	const FVector& FrozenForward,
+	const FVector& FacilityAnchor,
+	const FVector& FacilityExtent,
+	const bool bHasFacilityAnchor,
+	const float DistanceCM,
+	const float HeightCM,
+	const float LookDownDegrees,
+	const float FacilityLookBias,
+	const float FacilityFramingDistanceMultiplier,
+	FVector& OutLocation,
+	FVector& OutLook,
+	FVector& OutScreenUp)
+{
+	if (!BuildFixedBirdFlightPose(
+		BirdLocation,
+		Up,
+		FrozenForward,
+		DistanceCM,
+		HeightCM,
+		LookDownDegrees,
+		OutLocation,
+		OutLook,
+		OutScreenUp))
+	{
+		return false;
+	}
+	if (!bHasFacilityAnchor || FacilityAnchor.ContainsNaN()) return true;
+
+	const FVector SafeUp = Up.GetSafeNormal();
+	const float FacilityRadiusCM = FacilityExtent.ContainsNaN()
+		? 0.0f
+		: FacilityExtent.GetAbs().Size();
+	if (FacilityRadiusCM > 1.0f)
+	{
+		// A facility impact changes the observation subject from the projectile to
+		// the complete structure.  The old bird-relative 920 cm camera could only
+		// see the impact foot of tall buildings, which looked like a ground shot
+		// while the collapse happened off screen.  Freeze the first-contact bounds
+		// and frame their centre with a conservative 50-degree-FOV sphere fit.
+		const FVector SafeForward = FVector::VectorPlaneProject(
+			FrozenForward,
+			SafeUp).GetSafeNormal();
+		if (!SafeForward.IsNearlyZero())
+		{
+			const float FramingDistanceCM = FMath::Max(
+				FMath::Max(0.0f, DistanceCM),
+				FacilityRadiusCM * FMath::Clamp(
+					FacilityFramingDistanceMultiplier,
+					2.0f,
+					8.0f));
+			const float FramingHeightCM = FMath::Max(
+				FMath::Max(0.0f, HeightCM),
+				FacilityRadiusCM * 0.45f);
+			OutLocation = FacilityAnchor
+				- SafeForward * FramingDistanceCM
+				+ SafeUp * FramingHeightCM;
+			OutLook = (FacilityAnchor - OutLocation).GetSafeNormal();
+			OutScreenUp = FVector::VectorPlaneProject(
+				SafeUp,
+				OutLook).GetSafeNormal();
+			if (!OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero())
+			{
+				return true;
+			}
+		}
+	}
+
+	const FVector BirdFocus = BirdLocation + SafeUp * 80.0f;
+	const FVector BirdDirection = (BirdFocus - OutLocation).GetSafeNormal();
+	const FVector FacilityDirection = (FacilityAnchor - OutLocation).GetSafeNormal();
+	if (BirdDirection.IsNearlyZero() || FacilityDirection.IsNearlyZero()) return true;
+
+	// Direction-space blending shares the available angle between the bird and
+	// the actual hit facility without making a distant centroid dominate.
+	const FVector SharedLook = FMath::Lerp(
+		BirdDirection,
+		FacilityDirection,
+		FMath::Clamp(FacilityLookBias, 0.0f, 0.5f)).GetSafeNormal();
+	const FVector SharedScreenUp = FVector::VectorPlaneProject(
+		SafeUp,
+		SharedLook).GetSafeNormal();
+	if (!SharedLook.IsNearlyZero() && !SharedScreenUp.IsNearlyZero())
+	{
+		OutLook = SharedLook;
+		OutScreenUp = SharedScreenUp;
+	}
+	return true;
+}
+
+bool AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+	const EABTSM6ImpactObservationAuthority CurrentAuthority,
+	const EABTSM6ImpactObservationAuthority CandidateAuthority)
+{
+	return static_cast<uint8>(CandidateAuthority)
+		> static_cast<uint8>(CurrentAuthority);
+}
+
+void AABTSM6SlingshotCamera::ResetImpactObservation()
+{
+	ImpactObservationSample = FABTSM6ImpactObservationSample();
+	ImpactObservationForward = FVector::ZeroVector;
+	ImpactObservationBlendStartLocation = FVector::ZeroVector;
+	ImpactObservationBlendStartRotation = FQuat::Identity;
+	ImpactObservationBlendAlpha = 0.0f;
+	bImpactObservationActive = false;
+	bImpactSettlementHold = false;
+	FollowFacingLockRemainingSeconds = 0.0f;
+}
+
 void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Planet* InPlanet)
 {
 	Bird = InBird;
@@ -305,6 +582,7 @@ void AABTSM6SlingshotCamera::FollowBird(AABTSM25BirdCharacter* InBird, AABTSM2Pl
 	SatelliteSubtleAssistAlpha = 0.0f;
 	StableSatellitePresentationUp = FVector::ZeroVector;
 	StableFollowForward = FVector::ZeroVector;
+	ResetImpactObservation();
 	bForcePrimaryFrameUntilNextFollow = false;
 	SatelliteOrbitViewNormal = FVector::ZeroVector;
 	SetSatelliteFlightPhase(
@@ -319,6 +597,8 @@ void AABTSM6SlingshotCamera::FollowBirdPlanar(AABTSM25BirdCharacter* InBird, con
 	if (PlanarFollowUp.IsNearlyZero()) PlanarFollowUp = FVector::UpVector;
 	bPlanarFollow = true;
 	bFollowBird = true;
+	StableFollowForward = FVector::ZeroVector;
+	ResetImpactObservation();
 }
 
 bool AABTSM6SlingshotCamera::SnapToPrimaryFollowForSatelliteCapture()
@@ -601,15 +881,104 @@ void AABTSM6SlingshotCamera::NotifySatelliteSurfaceContact()
 	}
 }
 
-void AABTSM6SlingshotCamera::NotifyBirdImpact()
+void AABTSM6SlingshotCamera::NotifyBirdImpact(
+	const FABTSM6ImpactObservationSample& Sample)
 {
 	FollowFacingLockRemainingSeconds = FMath::Max(
 		FollowFacingLockRemainingSeconds,
 		FMath::Max(0.0f, FollowFacingImpactLockSeconds));
+	if (Sample.Authority == EABTSM6ImpactObservationAuthority::None
+		|| Sample.ImpactPoint.ContainsNaN()
+		|| Sample.IncomingVelocity.ContainsNaN()
+		|| !FMath::IsFinite(Sample.NormalSpeedCMPerSec))
+	{
+		return;
+	}
+	if (Sample.Authority == EABTSM6ImpactObservationAuthority::SurfaceImpact
+		&& Sample.NormalSpeedCMPerSec
+			< FMath::Max(0.0f, ImpactObservationMinimumSurfaceSpeedCMPerSec))
+	{
+		return;
+	}
+	if (!ShouldReplaceImpactObservation(
+		ImpactObservationSample.Authority,
+		Sample.Authority))
+	{
+		return;
+	}
+
+	ImpactObservationSample = Sample;
+	if (Sample.Authority == EABTSM6ImpactObservationAuthority::FacilityImpact)
+	{
+		ActivateImpactObservation();
+	}
+}
+
+void AABTSM6SlingshotCamera::NotifySettlementStarted()
+{
+	bImpactSettlementHold = true;
+	if (ImpactObservationSample.Authority
+		== EABTSM6ImpactObservationAuthority::None)
+	{
+		ImpactObservationSample.Authority =
+			EABTSM6ImpactObservationAuthority::SurfaceImpact;
+		ImpactObservationSample.ImpactPoint = Bird.IsValid()
+			? Bird->GetActorLocation()
+			: GetActorLocation();
+		ImpactObservationSample.IncomingVelocity = StableFollowForward;
+	}
+	if (!bImpactObservationActive) ActivateImpactObservation();
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][CameraImpactObservation] SettlingHold=1 Authority=%d Facility=%d"),
+		static_cast<int32>(ImpactObservationSample.Authority),
+		ImpactObservationSample.Authority
+			== EABTSM6ImpactObservationAuthority::FacilityImpact ? 1 : 0);
+}
+
+void AABTSM6SlingshotCamera::ActivateImpactObservation()
+{
+	AABTSM25BirdCharacter* TargetBird = Bird.Get();
+	AABTSM2Planet* TargetPlanet = Planet.Get();
+	if (TargetBird == nullptr || (!bPlanarFollow && TargetPlanet == nullptr)) return;
+	const FVector Up = bPlanarFollow
+		? PlanarFollowUp
+		: TargetPlanet->GetRadialUpAtWorldLocation(
+			ImpactObservationSample.ImpactPoint);
+	FVector Forward = FVector::VectorPlaneProject(
+		ImpactObservationSample.IncomingVelocity,
+		Up).GetSafeNormal();
+	if (Forward.IsNearlyZero())
+	{
+		Forward = FVector::VectorPlaneProject(
+			StableFollowForward,
+			Up).GetSafeNormal();
+	}
+	if (Forward.IsNearlyZero())
+	{
+		Forward = FVector::VectorPlaneProject(
+			TargetBird->GetActorForwardVector(),
+			Up).GetSafeNormal();
+	}
+	if (Forward.IsNearlyZero()) return;
+
+	ImpactObservationForward = Forward;
+	StableFollowForward = Forward;
+	ImpactObservationBlendStartLocation = GetActorLocation();
+	ImpactObservationBlendStartRotation = GetActorQuat().GetNormalized();
+	ImpactObservationBlendAlpha = 0.0f;
+	bImpactObservationActive = true;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][CameraImpactObservation] Activated Authority=%d Facility=%d Speed=%.1f Anchor=%s"),
+		static_cast<int32>(ImpactObservationSample.Authority),
+		ImpactObservationSample.Authority
+			== EABTSM6ImpactObservationAuthority::FacilityImpact ? 1 : 0,
+		ImpactObservationSample.NormalSpeedCMPerSec,
+		*ImpactObservationSample.FacilityAnchor.ToCompactString());
 }
 
 void AABTSM6SlingshotCamera::BeginReturnToPrimaryFrame()
 {
+	ResetImpactObservation();
 	bSatelliteE5Hit = false;
 	bSatelliteSurfaceContact = false;
 	bSatelliteSurfaceFrameLatched = false;
@@ -667,6 +1036,23 @@ void AABTSM6SlingshotCamera::UpdateAim(const float DeltaSeconds)
 	{
 		return;
 	}
+	if (bAimGroundContextValid
+		&& !BuildGroundAwareAimView(
+			DesiredLocation,
+			AimCenter,
+			AimForward,
+			AimGroundContextWorld,
+			AimUp,
+			AimDistanceCM,
+			AimGroundContextMinimumLookDownDegrees,
+			AimGroundContextMaximumLookDownDegrees,
+			AimGroundContextSubjectAboveCenterDegrees,
+			DesiredLocation,
+			Look,
+			ScreenUp))
+	{
+		return;
+	}
 	const FQuat Rotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
 	SetActorLocationAndRotation(DeltaSeconds > 0.0f ? FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, AimCameraBlendSpeed) : DesiredLocation, Rotation);
 }
@@ -676,17 +1062,86 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 	AABTSM25BirdCharacter* TargetBird = Bird.Get();
 	AABTSM2Planet* TargetPlanet = Planet.Get();
 	if (TargetBird == nullptr || (!bPlanarFollow && TargetPlanet == nullptr)) return;
+	FVector DesiredLocation;
+	FQuat DesiredRotation;
+	if (bImpactObservationActive)
+	{
+		if (!BuildImpactObservationFollowPose(
+			*TargetBird,
+			DesiredLocation,
+			DesiredRotation))
+		{
+			return;
+		}
+		ImpactObservationBlendAlpha = FMath::Clamp(
+			ImpactObservationBlendAlpha
+				+ FMath::Max(0.0f, DeltaSeconds)
+					/ FMath::Max(0.05f, ImpactObservationBlendSeconds),
+			0.0f,
+			1.0f);
+		const float Blend = FMath::SmoothStep(
+			0.0f,
+			1.0f,
+			ImpactObservationBlendAlpha);
+		SetActorLocationAndRotation(
+			FMath::Lerp(
+				ImpactObservationBlendStartLocation,
+				DesiredLocation,
+				Blend),
+			FQuat::Slerp(
+				ImpactObservationBlendStartRotation,
+				DesiredRotation,
+				Blend).GetNormalized());
+		return;
+	}
 	if (!bPlanarFollow
 		&& UpdateSatelliteFollow(*TargetBird, DeltaSeconds))
 	{
 		return;
 	}
-	FVector DesiredLocation;
-	FQuat DesiredRotation;
 	if (!BuildPrimaryFollowPose(*TargetBird, DesiredLocation, DesiredRotation)) return;
-	const FVector Location = FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaSeconds, FollowSpeed);
-	const FQuat Rotation = FMath::QInterpTo(GetActorQuat(), DesiredRotation, DeltaSeconds, FollowSpeed);
-	SetActorLocationAndRotation(Location, Rotation);
+	// Primary flight is a rigid bird-relative composition. Independent position
+	// and rotation lag changes both apparent bird scale and screen placement.
+	SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
+}
+
+bool AABTSM6SlingshotCamera::BuildImpactObservationFollowPose(
+	AABTSM25BirdCharacter& TargetBird,
+	FVector& OutLocation,
+	FQuat& OutRotation) const
+{
+	const AABTSM2Planet* TargetPlanet = Planet.Get();
+	if (!bPlanarFollow && TargetPlanet == nullptr) return false;
+	const FVector Up = bPlanarFollow
+		? PlanarFollowUp
+		: TargetPlanet->GetRadialUpAtWorldLocation(TargetBird.GetActorLocation());
+	const FVector Forward = FVector::VectorPlaneProject(
+		ImpactObservationForward,
+		Up).GetSafeNormal();
+	if (Forward.IsNearlyZero()) return false;
+	FVector Look;
+	FVector ScreenUp;
+	if (!BuildImpactObservationPose(
+		TargetBird.GetActorLocation(),
+		Up,
+		Forward,
+		ImpactObservationSample.FacilityAnchor,
+		ImpactObservationSample.FacilityExtent,
+		ImpactObservationSample.Authority
+			== EABTSM6ImpactObservationAuthority::FacilityImpact,
+		FlightDistanceCM,
+		FlightHeightCM,
+		FlightLookDownDegrees,
+		ImpactObservationFacilityLookBias,
+		ImpactObservationFacilityFramingDistanceMultiplier,
+		OutLocation,
+		Look,
+		ScreenUp))
+	{
+		return false;
+	}
+	OutRotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
+	return true;
 }
 
 void AABTSM6SlingshotCamera::CalcCamera(
@@ -780,13 +1235,21 @@ bool AABTSM6SlingshotCamera::BuildPrimaryFollowPose(
 		TargetBird.GetSlingshotVelocity(),
 		FollowFacingLockRemainingSeconds > 0.0f);
 	if (Forward.IsNearlyZero()) return false;
-	OutLocation = TargetBird.GetActorLocation()
-		- Forward * FlightDistanceCM
-		+ Up * FlightHeightCM;
-	const FVector Look =
-		(TargetBird.GetActorLocation() + Up * 80.0f - OutLocation).GetSafeNormal();
-	FVector ScreenUp = FVector::VectorPlaneProject(Up, Look).GetSafeNormal();
-	if (ScreenUp.IsNearlyZero()) ScreenUp = Up;
+	FVector Look;
+	FVector ScreenUp;
+	if (!BuildFixedBirdFlightPose(
+		TargetBird.GetActorLocation(),
+		Up,
+		Forward,
+		FlightDistanceCM,
+		FlightHeightCM,
+		FlightLookDownDegrees,
+		OutLocation,
+		Look,
+		ScreenUp))
+	{
+		return false;
+	}
 	OutRotation = FRotationMatrix::MakeFromXZ(Look, ScreenUp).ToQuat();
 	return true;
 }
@@ -1097,10 +1560,11 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 			PrimaryLocation,
 			AssistLocation,
 			SatelliteSubtleAssistAlpha);
-		const FVector PredictedFocus = PredictedPeriapsisWorld.IsNearlyZero()
-			? BirdLocation
-			: FMath::Lerp(BirdLocation, PredictedPeriapsisWorld, 0.18f);
-		const FVector AssistLook = (PredictedFocus - DesiredLocation).GetSafeNormal();
+		// Prediction decides whether a lunar assist is eligible, but it must not
+		// own the live flight focus. Chaos can diverge from the frozen periapsis;
+		// always keeping the real bird as the look target prevents it leaving the
+		// frame while retaining the assist pullback and roll presentation.
+		const FVector AssistLook = (BirdLocation - DesiredLocation).GetSafeNormal();
 		FVector AssistUp = FVector::VectorPlaneProject(BirdRadialUp, AssistLook).GetSafeNormal();
 		if (AssistLook.IsNearlyZero() || AssistUp.IsNearlyZero()) return false;
 		const FQuat AssistRotation = FRotationMatrix::MakeFromXZ(

@@ -7,7 +7,6 @@
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "ABTSM3MonthlySatellitePracticeRuntime.generated.h"
 
-class AABTSCalibrationTargetProxy;
 class AABTSM3Planet;
 class AABTSM51SlingshotCord;
 class AABTSM51SlingshotStake;
@@ -89,19 +88,53 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm/s^2"))
 	float SatelliteSurfaceGravityCMPerSec2 = 0.0f;
 
+	/** Frozen-preview gravity retained for source-identity inspection; the production satellite consumes this exact value for gameplay. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm/s^2"))
+	float CalibrationSatelliteSurfaceGravityCMPerSec2 = 0.0f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	FTransform E5WorldTransform = FTransform::Identity;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm"))
 	FVector E5HalfExtentCM = FVector::ZeroVector;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	EABTSM3MonthlySatelliteTargetAuthority TargetAuthority =
+		EABTSM3MonthlySatelliteTargetAuthority::LegacyCalibrationProxy;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int64 ProductionTargetDescriptorHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Practice")
+	int32 ProductionTargetModuleId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int64 ProductionTargetIdentityHash = 0;
+
 	/** Hash of the frozen primary/satellite/drag inputs with satellite gravity enabled. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int64 BaselineGravitySnapshotHash = 0;
 
-	/** Formal gate: a connected gravity-on success island exists and gravity-off misses it. */
+	/** Compatibility field.  Runtime policy is BuildingLevelAttackabilityV1, not the frozen 2g sweep. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
 	bool bTrajectoryCertified = false;
+
+	/** Reachability evidence inherited from the historically hand-validated proxy volume overlapping the exact frozen E1 Brick OBB union; no numerical trajectory or exact-crystal requirement. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	bool bBuildingLevelAttackabilityCertified = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 AttackabilityWitnessSampleCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 AttackabilityWitnessBrickId = INDEX_NONE;
+
+	/** Geometry-inheritance evidence from the historical reachable magenta proxy; no runtime trajectory samples are run. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 ProxyOverlapBrickId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
+	int32 ProxyOverlapBrickCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime|Trajectory")
 	int32 GravityOnHits = 0;
@@ -151,6 +184,18 @@ public:
 
 	/** Idempotent so automation fixtures can activate without a begun-play World. */
 	bool ActivateSnapshot();
+	/** Integration V3 replaces the exact OBB stand-in union with the real frozen E1 building. */
+	bool BindProductionE1BuildingModuleTarget(
+		AActor& InTargetActor,
+		const FVector& InTargetHalfExtentCM);
+	/** Compatibility entry point for the current M7 cap adapter; exact union identity still gates it. */
+	bool BindProductionE1CrystalTarget(
+		AActor& InTargetActor,
+		const FVector& InTargetHalfExtentCM)
+	{
+		return BindProductionE1BuildingModuleTarget(
+			InTargetActor, InTargetHalfExtentCM);
+	}
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -173,7 +218,7 @@ public:
 	bool IsSatelliteGravityEnabled() const;
 	int32 GetSatelliteGravityOverride() const { return LastGravityOverride; }
 	AABTSM9Satellite* GetRuntimeSatellite() const { return RuntimeSatellite.Get(); }
-	AABTSCalibrationTargetProxy* GetRuntimeE5Target() const { return RuntimeE5Target.Get(); }
+	AActor* GetRuntimeE5Target() const { return RuntimeE5GameplayTarget.Get(); }
 	AABTSM51SlingshotCord* GetRuntimePracticeCord() const;
 	AABTSM51SlingshotStake* GetRuntimePracticeStakeA() const { return RuntimePracticeStakeA.Get(); }
 	AABTSM51SlingshotStake* GetRuntimePracticeStakeB() const { return RuntimePracticeStakeB.Get(); }
@@ -201,7 +246,11 @@ private:
 	TObjectPtr<AABTSM9Satellite> RuntimeSatellite;
 
 	UPROPERTY(Transient)
-	TObjectPtr<AABTSCalibrationTargetProxy> RuntimeE5Target;
+	TObjectPtr<AActor> RuntimeE5Target;
+
+	/** Active gameplay authority; initially the exact 54-OBB union, then the real frozen building. */
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> RuntimeE5GameplayTarget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM51SlingshotStake> RuntimePracticeStakeA;

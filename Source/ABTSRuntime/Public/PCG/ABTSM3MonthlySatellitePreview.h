@@ -7,6 +7,11 @@
 #include "ABTSM3MonthlySatellitePreview.generated.h"
 
 struct FABTSM2Cell;
+struct FABTSCalibrationGravitySnapshot;
+struct FABTSCalibrationSweepSummary;
+struct FABTSM6CalibrationLaunchFrame;
+struct FABTSM6LaunchProfileCatalog;
+struct FABTSSatellitePracticePreset;
 
 UENUM(BlueprintType)
 enum class EABTSM3MonthlySatellitePreviewRejectReason : uint8
@@ -24,6 +29,14 @@ enum class EABTSM3MonthlySatellitePreviewRejectReason : uint8
 	SurfaceQueryFailed = 10,
 	TargetTransformFailed = 11,
 	HashMismatch = 12
+};
+
+/** Target geometry authority carried by one satellite-preview candidate. */
+UENUM(BlueprintType)
+enum class EABTSM3MonthlySatelliteTargetAuthority : uint8
+{
+	LegacyCalibrationProxy = 0,
+	FrozenE1BuildingModules = 1
 };
 
 /**
@@ -149,12 +162,36 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewCandidate
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview", meta = (Units = "cm/s^2"))
 	float SatelliteSurfaceGravityCMPerSec2 = 0.0f;
 
-	/** Frozen E5 proxy on the satellite back side; no building Actor is spawned. */
+	/** Historical field name; final V3 stores the selected real frozen E1 module transform. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	FTransform E5TargetWorldTransform = FTransform::Identity;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview", meta = (Units = "cm"))
 	FVector E5TargetHalfExtentCM = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	EABTSM3MonthlySatelliteTargetAuthority TargetAuthority =
+		EABTSM3MonthlySatelliteTargetAuthority::LegacyCalibrationProxy;
+
+	/** Site carrier is separate from the module transform, avoiding a circular frame. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	FTransform SatelliteSiteWorldTransform = FTransform::Identity;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	int64 ProductionTargetDescriptorHash = 0;
+
+	/** Frozen descriptor BrickId; INDEX_NONE is the legacy proxy path. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	int32 ProductionTargetModuleId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	int64 ProductionTargetIdentityHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	bool bProductionTargetTrajectoryCertified = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	int64 ProductionTargetTrajectoryHash = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	bool bE5OnSatelliteBackside = false;
@@ -172,10 +209,10 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewResult
 	int32 SchemaVersion = 1;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
-	int32 GeneratorVersion = 4;
+	int32 GeneratorVersion = 5;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
-	int32 LayoutPolicyVersion = 3;
+	int32 LayoutPolicyVersion = 4;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	int32 WorldSeed = 0;
@@ -214,8 +251,8 @@ class ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewBuilder
 {
 public:
 	static constexpr int32 SchemaVersion = 1;
-	static constexpr int32 GeneratorVersion = 4;
-	static constexpr int32 MonthlyLayoutPolicyVersion = 3;
+	static constexpr int32 GeneratorVersion = 6;
+	static constexpr int32 MonthlyLayoutPolicyVersion = 4;
 
 	static bool Build(
 		int32 WorldSeed,
@@ -225,7 +262,10 @@ public:
 		const FABTSM3MonthlySlingshotFieldResult& SlingshotFieldResult,
 		const IABTSM3MonthlySatellitePreviewSurface& Surface,
 		FABTSM3MonthlySatellitePreviewResult& OutResult,
-		FString& OutFailure);
+		FString& OutFailure,
+		EABTSM3MonthlySatelliteTargetAuthority TargetAuthority =
+			EABTSM3MonthlySatelliteTargetAuthority::LegacyCalibrationProxy,
+		int32 RequiredCertifiedSourceCandidateId = INDEX_NONE);
 
 	static bool Validate(
 		const FABTSM3MonthlySatellitePreviewConfig& Config,
@@ -235,7 +275,10 @@ public:
 		const IABTSM3MonthlySatellitePreviewSurface& Surface,
 		const FABTSM3MonthlySatellitePreviewResult& Result,
 		EABTSM3MonthlySatellitePreviewRejectReason& OutReason,
-		FString& OutFailure);
+		FString& OutFailure,
+		EABTSM3MonthlySatelliteTargetAuthority TargetAuthority =
+			EABTSM3MonthlySatelliteTargetAuthority::LegacyCalibrationProxy,
+		int32 RequiredCertifiedSourceCandidateId = INDEX_NONE);
 
 	static const FABTSM3MonthlySatellitePreviewCandidate* FindCandidate(
 		const FABTSM3MonthlySatellitePreviewResult& Result,
@@ -247,6 +290,37 @@ public:
 
 	static uint64 ComputeCandidateHash(
 		const FABTSM3MonthlySatellitePreviewCandidate& Candidate);
+
+	static uint64 ComputeProductionTargetIdentityHash(
+		uint64 DescriptorHash,
+		const FTransform& SiteWorldTransform,
+		const FTransform& TargetWorldTransform,
+		const FVector& TargetHalfExtentCM);
+
+	/** M3-private production math exposed to its runtime consumer: exact ordered
+	 * public E1 Brick OBB union, stable first-hit, no max-axis cube fallback. */
+	static bool RunFrozenE1BuildingModuleUnionSweep(
+		const FABTSM6CalibrationLaunchFrame& LaunchFrame,
+		const FABTSCalibrationGravitySnapshot& Gravity,
+		const FTransform& SiteWorldTransform,
+		const FABTSM6LaunchProfileCatalog& Catalog,
+		const FABTSSatellitePracticePreset& Preset,
+		FABTSCalibrationSweepSummary& OutSummary,
+		int32& OutWitnessBrickId,
+		uint64& OutTargetIdentityHash,
+		FString& OutFailure);
+
+	/** No-trajectory release gate: the historical reachable proxy centre is inside a real E1 Brick OBB expanded only by its documented volume and bird radius. */
+	static bool EvaluateFrozenE1LegacyProxyOverlap(
+		const FVector& LaunchWorldLocation,
+		const FABTSCalibrationGravitySnapshot& CalibrationGravity,
+		const FTransform& SiteWorldTransform,
+		const FABTSSatellitePracticePreset& FrozenPreset,
+		int32& OutOverlapBrickId,
+		int32& OutOverlapBrickCount,
+		uint64& OutTargetIdentityHash,
+		uint64& OutOverlapHash,
+		FString& OutFailure);
 
 	static uint64 ComputeResultHash(
 		const FABTSM3MonthlySatellitePreviewResult& Result);

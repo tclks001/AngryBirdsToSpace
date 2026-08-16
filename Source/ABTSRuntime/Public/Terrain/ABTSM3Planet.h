@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "PCG/ABTSM3MonthlyEncounter.h"
+#include "PCG/ABTSM3JuryFixedSixLayout.h"
+#include "PCG/ABTSM3JuryMapFreezeV3.h"
 #include "PCG/ABTSM3MonthlyFinaleAnchor.h"
 #include "PCG/ABTSM3MonthlyPresentation.h"
 #include "PCG/ABTSM3MonthlyRoute.h"
@@ -23,6 +25,19 @@ class UStaticMesh;
 class UABTSM3TerrainMaterialBridge;
 struct FABTSBuildingGenerationContract;
 struct FABTSFinaleWorldContract;
+
+/** M3-only evidence for the frozen six-building terrain grading and Chaos surface. */
+struct FABTSM3JuryTerrainGradeDiagnostics
+{
+	float MinimumBlendWidthCM = 0.0f;
+	float MaximumBlendWidthCM = 0.0f;
+	float MaximumSourceHeightDeltaCM = 0.0f;
+	float MaximumGradeSlopeDegrees = 0.0f;
+	float MaximumNormalStepDegrees = 0.0f;
+	float MaximumEdgeHeightResidualCM = 0.0f;
+	float MaximumCollisionResidualCM = 0.0f;
+	int32 CollisionSampleCount = 0;
+};
 
 USTRUCT(BlueprintType)
 struct FABTSM3SurfacePhysicsProfile
@@ -54,6 +69,46 @@ struct FABTSM3SurfacePhysicsSample
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M5.2|Physics")
 	float Restitution = 0.02f;
+};
+
+/** Deterministic generation evidence for collision-legal forest/rock instances. */
+USTRUCT(BlueprintType)
+struct FABTSM3DecorPlacementSummary
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 PlacementAlgorithmVersion = 2;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	bool bAccepted = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RequestedSlots = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 AcceptedInstances = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RejectedProtectedOrReserved = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RejectedGround = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int32 RejectedPairOverlap = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	float MaxSeatCorrectionCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	float MinimumGroundClearanceCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	float MinimumPairAxisGapCM = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	int64 PlacementResultHash = 0;
 };
 
 /** M3 presentation planet. CellTopo and TaskGraph remain the only gameplay sources. */
@@ -98,6 +153,11 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|PCG")
 	const TArray<FABTSM3CellEdgeState>& GetGeneratedEdgeStates() const { return GeneratedEdgeStates; }
+
+	const FABTSM3DecorPlacementSummary& GetDecorPlacementSummary() const
+	{
+		return DecorPlacementSummary;
+	}
 
 	/** Internal read-only R-1 observation; it is never exported through the v1 M7/M11 contracts. */
 	const FABTSM3MonthlyWorldSchema& GetMonthlyWorldSchema() const
@@ -204,6 +264,18 @@ public:
 	bool ValidateMonthlySatellitePreviewResult(
 		FString& OutFailure) const;
 
+	/** Additive V3 handoff; production remains on the Integration-owned V2 gate. */
+	const FABTSM3JuryMapFreezeV3Result& GetJuryMapFreezeV3Result() const
+	{
+		return JuryMapFreezeV3Result;
+	}
+
+	bool ValidateJuryMapFreezeV3Result(FString& OutFailure) const;
+	bool ValidateJuryMapFreezeV3Snapshot(
+		const FABTSM3JuryMapFreezeV3Result& Result,
+		EABTSM3JuryMapFreezeV3RejectReason& OutReason,
+		FString& OutFailure) const;
+
 	/**
 	 * R-4 gameplay-finalize observation. Fixture authority may prove the local
 	 * algorithm, but only an Integration authority can certify external inputs.
@@ -260,6 +332,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Building")
 	const TArray<FABTSM3BuildingSpawnSite>& GetBuildingSpawnSites() const { return BuildingSpawnSites; }
 
+	/**
+	 * Verifies the production terrain seats and decoration clearance consumed by
+	 * the frozen E1-E6 jury layout. This is M3-local runtime evidence and does
+	 * not add the fixed-six placements to the compatibility building contract.
+	 */
+	bool ValidateJuryFixedSixProductionClearance(
+		int32& OutTerrainPadCount,
+		int32& OutPhysicalOverlapInstanceCount,
+		int32& OutDynamicOverlapInstanceCount,
+		float& OutMaxPadResidualCM,
+		FABTSM3JuryTerrainGradeDiagnostics& OutGradeDiagnostics,
+		FString& OutFailure) const;
+
+	int32 GetJuryFixedSixDecorClearanceRejectedCount() const
+	{
+		return JuryFixedSixDecorClearanceRejectedCount;
+	}
+
 	/** Deterministic terminal frame authored by M3 and consumed by M11 local-layout presets. */
 	const FABTSM110FinaleLocalFrame& GetFinaleLaunchFrame() const { return FinaleLaunchFrame; }
 
@@ -290,7 +380,7 @@ public:
 		int32 StartCellHint = 0,
 		int32* OutCellId = nullptr) const;
 
-	/** Character-center spawn transform at the Start Task's first logical road Cell. */
+	/** Character-center transform at the canonical main-road start endpoint. */
 	UFUNCTION(BlueprintPure, Category = "ABTS|M3|Spawn")
 	bool GetInitialRoadSpawnTransform(float SurfaceOffsetCM, FTransform& OutWorldTransform, int32& OutCellId) const;
 
@@ -338,6 +428,16 @@ public:
 	/** CellTopo anchor driven construction pads consumed by the M7 TaskGraph building spawner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Spherical Buildings")
 	FABTSM3BuildingPadSettings BuildingPadSettings;
+
+	/** Maximum slope allowed across each M3-owned fixed-six grading skirt. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six|Terrain Grade",
+		meta = (ClampMin = "5.0", ClampMax = "30.0", UIMin = "10.0", UIMax = "24.0", Units = "Degrees"))
+	float JuryFixedSixMaximumGradeSlopeDegrees = 18.0f;
+
+	/** Lower bound for the adaptive skirt; the final width is resolved independently for every building. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six|Terrain Grade",
+		meta = (ClampMin = "300.0", ClampMax = "2000.0", UIMin = "400.0", UIMax = "1200.0", Units = "cm"))
+	float JuryFixedSixMinimumGradeWidthCM = 600.0f;
 
 	/** World-space spacing of the one terminal Space-slingshot slot pair. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M11.0|Finale Closure",
@@ -429,6 +529,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0", ClampMax = "8"))
 	int32 InstancesPerCell = 2;
 
+	/** Independent deterministic candidates tried for each requested decor slot. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "1", ClampMax = "32"))
+	int32 DecorPlacementAttemptsPerSlot = 10;
+
+	/** Positive clearance retained by every simple-collision support sample. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "5.0"))
+	float DecorGroundClearanceCM = 2.0f;
+
+	/** Maximum lift beyond the mesh's own Pivot-to-collision-bottom compensation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "50.0"))
+	float DecorMaximumAdditionalSeatLiftCM = 25.0f;
+
+	/** Required separating-axis gap between every accepted tree/rock collision box. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "50.0", UIMin = "0.0", UIMax = "10.0"))
+	float DecorInstanceSeparationMarginCM = 4.0f;
+
 	/** 0 keeps trees purely radial; 1 fully follows the rendered terrain normal. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.5"))
 	float ForestSurfaceNormalBlend = 0.2f;
@@ -438,6 +554,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> RockHISM;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM")
+	FABTSM3DecorPlacementSummary DecorPlacementSummary;
 
 	/** M3-owned T3-A1 material; published read-only to Integration. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ABTS|M3|HISM|Stylized")
@@ -474,6 +593,10 @@ public:
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Encounter")
 	FABTSM3MonthlySpatialResult MonthlySpatialResult;
 
+	/** DDL-scoped fixed E1-E6 placement plan; populated only for the frozen jury seed/candidate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Jury Fixed Six")
+	FABTSM3JuryFixedSixLayoutResult MonthlyJuryFixedSixLayoutResult;
+
 	/** R-5 read-only presentation plans for every retained R-3 candidate. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Presentation")
 	FABTSM3MonthlyPresentationResult MonthlyPresentationResult;
@@ -489,6 +612,9 @@ public:
 	/** R-5.1 exact alternatives; no M9/M7 Actor and no monthly-world authority. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	FABTSM3MonthlySatellitePreviewResult MonthlySatellitePreviewResult;
+
+	/** Published V3 placement: five primary sites plus satellite E1. */
+	FABTSM3JuryMapFreezeV3Result JuryMapFreezeV3Result;
 
 	/** R-4 additive finalize result; never overwrites PCGSummary.LayoutHash. */
 	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "ABTS|M3|Monthly Witness")
@@ -544,13 +670,23 @@ public:
 
 private:
 	bool GenerateLogicalTerrain();
-	void BuildM3ContinuousSurface();
+	bool BuildM3ContinuousSurface();
 	void BuildDecorInstances(
 		const TArray<FABTSM3CellState>*
 			PresentationCellStates = nullptr,
 		const FABTSM3MonthlyCandidatePresentation*
 			PresentationCandidate = nullptr);
 	void BuildBuildingSpawnSites();
+	bool AppendJuryFixedSixTerrainPads(
+		TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
+		FString& OutFailure);
+	bool AppendJuryMapFreezeV3TerrainPads(
+		TArray<FABTSM3BuildingSpawnSite>& InOutTerrainPads,
+		FString& OutFailure);
+	void GetJuryFixedSixDecorClearanceOverlaps(
+		const FVector& PlanetLocalLocation,
+		bool& bOutPhysicalOverlap,
+		bool& bOutDynamicOverlap) const;
 	bool TryBuildMonthlyPresentationPreviewData(
 		TArray<FABTSM3CellState>& OutCellStates,
 		TArray<FABTSM3CellEdgeState>& OutEdgeStates,
@@ -584,6 +720,10 @@ private:
 	int32 TerrainBasePaletteCellCount = 0;
 	int32 MonthlyDecorAccent0InstanceCount = 0;
 	int32 MonthlyDecorAccent1InstanceCount = 0;
+	int32 JuryFixedSixTerrainPadCount = 0;
+	int32 JuryFixedSixDecorClearanceRejectedCount = 0;
+	TArray<FABTSM3BuildingSpawnSite> JuryFixedSixTerrainPads;
+	TArray<float> JuryFixedSixTerrainSourceHeightDeltasCM;
 	bool bMonthlyPresentationPreviewActive = false;
 	int32 ActiveMonthlyPresentationPreviewCandidateId =
 		INDEX_NONE;

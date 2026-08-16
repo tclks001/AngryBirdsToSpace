@@ -80,11 +80,13 @@ private:
 	float CollisionGroundMaxAngleDegrees = 55.0f;
 
 	TWeakObjectPtr<AABTSM2Planet> Planet;
+	TWeakObjectPtr<AABTSM2Planet> LoggedPrimaryGravitySource;
 	FVector PlanarOrigin = FVector::ZeroVector;
 	FVector PlanarUp = FVector::UpVector;
 	bool bPlanarTestMode = false;
 	FVector PendingMoveVector = FVector::ZeroVector;
 	bool bChaosEnabled = false;
+	bool bLoggedGroundSatelliteGravitySuppressed = false;
 	bool bGrounded = false;
 	bool bJumpQueued = false;
 	bool bBallisticFlight = false;

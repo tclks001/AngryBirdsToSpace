@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ABTSM73BeamC3CribCoreTypes.h"
 #include "Building/ABTSM73BeamCPreviewTypes.h"
 
 /** Gameplay-facing failure family selected before real Brick compilation. */
@@ -50,6 +51,64 @@ struct FABTSM73BeamD0DifficultyMetrics
 	int32 SupportRedundancy = 0;
 	float WeaknessRewardMultiplier = 0.0f;
 	int32 SolutionSteps = 1;
+};
+
+/**
+ * M7-private Stage-1 recipe for the 36 cm four-face grounded coupled frame.
+ *
+ * The recipe is deliberately discrete. A resolved Profile/Tier may consume
+ * the primary topology and no more than MaximumFallbackLevel pre-registered
+ * reductions; generation must fail closed instead of searching arbitrary
+ * course, cell, or coupling-band combinations.
+ */
+struct FABTSM73BeamC3V2CoupledExteriorFrameSettings
+{
+	bool bEnabled = true;
+
+	/** Alternating X/Y body courses, always even and at least eight. */
+	int32 CourseCount = 8;
+
+	/** Parallel rails in every body course. */
+	int32 RailCount = 2;
+
+	/** Maximum independently grounded semantic cells for one candidate. */
+	int32 MaximumCellCount = 1;
+
+	/** Hard cap on six-course coupled macro bands per cell. */
+	int32 MaximumMacroBandCount = 1;
+
+	/** Every new X/Y/Z member must remain inside this axial span. */
+	float MaximumMemberLengthCM = 720.0f;
+
+	/** Explicit Z-segment gate, retained separately for final diagnostics. */
+	float MaximumPostSegmentSpanCM = 720.0f;
+
+	/** Lowest body-course count reachable by the bounded fallback ladder. */
+	int32 MinimumCourseCount = 8;
+
+	/** D0-reserved structural floor after all registered fallbacks. */
+	int32 MinimumStructuralMemberBudget = 28;
+
+	/** Maximum core/through/facade/post members before shell compilation. */
+	int32 MaximumStructuralMemberCount = 28;
+
+	/** Final one-Member:one-Brick ceiling; C3 V2 may not raise it. */
+	int32 MaximumFinalMemberCount = 49;
+
+	/** Number of registered fallback levels after the primary topology. */
+	int32 MaximumFallbackLevel = 0;
+
+	/** Even course reduction applied by each registered fallback level. */
+	int32 CourseReductionPerFallbackLevel = 0;
+
+	/** Cell cap reduction applied by each registered fallback level. */
+	int32 CellReductionPerFallbackLevel = 0;
+
+	/** Coupling cadence bounds; 6..22 keeps every post segment <= 720 cm. */
+	int32 MinimumMacroBandStrideCourses = 6;
+	int32 MaximumMacroBandStrideCourses = 22;
+
+	bool Validate(FString& OutError) const;
 };
 
 /** Visual-only tier recipe. Beam-D2 gameplay difficulty does not consume it. */
@@ -151,6 +210,9 @@ struct FABTSM73BeamD0ResolvedProfile
 		EABTSM73BeamD0CollapseIntent::ProgressiveFold;
 	FABTSM73BeamD0DifficultyMetrics Difficulty;
 	FABTSM73BeamD0VisualComplexityRecipe VisualComplexity;
+	FABTSM73BeamC3V2CoupledExteriorFrameSettings CoupledExteriorFrame;
+	/** Historical Beam-C3 V1 recipe; production routes through V2 above. */
+	FABTSM73BeamC3CribCoreSettings StabilityCore;
 	FABTSM73BeamCPreviewSettings BeamSettings;
 	FString RejectReason;
 };

@@ -107,6 +107,7 @@ void AABTSM6SlingshotSystem::RebuildCurrentTrajectoryPreview()
 	Candidate.SlingshotTier = Tier;
 	Candidate.InitialWorldLocation = Start;
 	Candidate.InitialWorldVelocity = InitialVelocity;
+	Candidate.GravitySnapshotHash = static_cast<int64>(GravityHash);
 	AABTSM9Satellite* PracticeSatellite = nullptr;
 	AActor* PracticeTarget = nullptr;
 	FVector PracticeTargetHalfExtentCM = FVector::ZeroVector;

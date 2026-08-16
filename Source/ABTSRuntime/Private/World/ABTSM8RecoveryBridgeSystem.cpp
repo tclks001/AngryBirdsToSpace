@@ -11,6 +11,7 @@
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "InputCoreTypes.h"
 #include "Inventory/ABTSInventoryComponent.h"
 #include "Inventory/ABTSInventoryTypes.h"
@@ -317,19 +318,39 @@ bool AABTSM8RecoveryBridgeSystem::FindNearestUnbuiltWaterSegment(
 void AABTSM8RecoveryBridgeSystem::HandleMaterialRecovered(const EABTSM7BuildingMaterial Material, const int32 Quantity)
 {
 	if (!bEnableAutomaticMaterialRecovery || Quantity <= 0 || !CraftingSystem.IsValid()) return;
-	EABTSItemId ItemId = EABTSItemId::Wood;
-	switch (Material)
+	EABTSItemId ItemId;
+	if (!TryMapRecoveredMaterialToItem(Material, ItemId))
 	{
-	case EABTSM7BuildingMaterial::Stone: ItemId = EABTSItemId::Stone; break;
-	case EABTSM7BuildingMaterial::Iron: ItemId = EABTSItemId::MetalParts; break;
-	case EABTSM7BuildingMaterial::Glass: ItemId = EABTSItemId::Glass; break;
-	default: break;
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M8][Recovery] Rejected unknown building material=%d"),
+			static_cast<int32>(Material));
+		return;
 	}
 	if (UABTSInventoryComponent* Inventory = CraftingSystem->GetInventory())
 	{
 		const int32 FinalQuantity = Quantity * RecoveryQuantityPerDestroyedBrick;
 		Inventory->AddItem(ItemId, FinalQuantity);
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M8][Recovery] Added Item=%s Quantity=%d"), *ABTSGetItemFallbackLabel(ItemId), FinalQuantity);
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::BuildingMaterialRecovered,
+			FABTSGuideSubjects::FromItem(ItemId), nullptr, FinalQuantity,
+			static_cast<int32>(Material));
+	}
+}
+
+bool AABTSM8RecoveryBridgeSystem::TryMapRecoveredMaterialToItem(
+	const EABTSM7BuildingMaterial Material,
+	EABTSItemId& OutItemId)
+{
+	switch (Material)
+	{
+	case EABTSM7BuildingMaterial::Wood: OutItemId = EABTSItemId::Wood; return true;
+	case EABTSM7BuildingMaterial::Stone: OutItemId = EABTSItemId::Stone; return true;
+	case EABTSM7BuildingMaterial::Iron: OutItemId = EABTSItemId::MetalParts; return true;
+	case EABTSM7BuildingMaterial::Glass: OutItemId = EABTSItemId::Glass; return true;
+	case EABTSM7BuildingMaterial::Crystal: OutItemId = EABTSItemId::CrystalCore; return true;
+	default: return false;
 	}
 }
 
@@ -503,6 +524,9 @@ bool AABTSM8RecoveryBridgeSystem::PlaceHeldBridgeAtAim(APlayerController& Contro
 		BridgeBarrierSideClearanceCM,
 		CarvedBarrierCount,
 		CarvedBarrierCount > 0 ? 1 : 0);
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::BridgeBuilt,
+		Geometry.bBarrierSegment ? FABTSGuideSubjects::Barrier : FABTSGuideSubjects::Flow,
+		Bridge, EdgeState.Key.CellA, EdgeState.Key.CellB);
 	return true;
 }
 

@@ -8,6 +8,7 @@
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Party/ABTSBirdParty.h"
@@ -16,6 +17,7 @@
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSM9Satellite.h"
+#include "World/ABTSM51WorldActors.h"
 
 void AABTSM6SlingshotSystem::BeginSettlement()
 {
@@ -27,6 +29,7 @@ void AABTSM6SlingshotSystem::BeginSettlement()
 	}
 	const float Now = GetWorld()->GetTimeSeconds();
 	LaunchState = EABTSM6LaunchState::Settling;
+	if (SlingshotCamera) SlingshotCamera->NotifySettlementStarted();
 	PhysicsSettleMonitor.BeginSettlement(Now);
 	NextSettleDiagnosticTimeSeconds = Now;
 	TArray<UPrimitiveComponent*> Bodies;
@@ -172,6 +175,9 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	bHasPendingLaunchCompletion = true;
 	FinalizeActiveLaunchTelemetry(PendingCompletedLandingLocation);
 	FreezeDynamicProxies();
+	const int32 WalkFrozenBuildingBodies = BuildingMaterialSystem.IsValid()
+		? BuildingMaterialSystem->FreezeAllDynamicModulesForWalkReturn()
+		: 0;
 	if (SlingshotCamera)
 	{
 		SlingshotCamera->BeginReturnToPrimaryFrame();
@@ -194,7 +200,11 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	}
 	ReturnElapsedSeconds = 0.0f;
 	LaunchState = EABTSM6LaunchState::Returning;
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Begin FlightSeconds=%.2f Proxies=%d"), FlightElapsedSeconds, DynamicProxies.Num());
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][Return] Begin FlightSeconds=%.2f Proxies=%d WalkFrozenBuildingBodies=%d"),
+		FlightElapsedSeconds,
+		DynamicProxies.Num(),
+		WalkFrozenBuildingBodies);
 }
 
 void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)
@@ -245,6 +255,9 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	const bool bShouldBroadcastCompletion = bHasPendingLaunchCompletion;
 	const EABTSBirdId CompletedBirdId = PendingCompletedBirdId;
 	const FVector CompletedLandingLocation = PendingCompletedLandingLocation;
+	const EABTSSlingshotTier CompletedTier = ActiveCord.IsValid()
+		? ActiveCord->GetSlingshotTier()
+		: EABTSSlingshotTier::Simple;
 	const bool bShouldBroadcastCalibration =
 		bActiveLaunchCalibrationTelemetry && bCalibrationModeEnabled;
 	const FABTSM6LaunchCalibrationTelemetry CompletedCalibrationTelemetry =
@@ -282,6 +295,9 @@ void AABTSM6SlingshotSystem::FinishReturn()
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Complete StaticProxies=%d"), DynamicProxies.Num());
 	if (bShouldBroadcastCompletion)
 	{
+		FABTSGuideEventBus::PublishAtLocation(this, FABTSGuideEventIds::SlingshotCompleted,
+			FABTSGuideSubjects::FromSlingshotTier(CompletedTier), CompletedLandingLocation,
+			ABTSBirdIdToIndex(CompletedBirdId));
 		LaunchCompletedNative.Broadcast(CompletedBirdId, CompletedLandingLocation);
 	}
 	if (bShouldBroadcastCalibration)

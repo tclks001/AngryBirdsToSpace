@@ -7,10 +7,12 @@
 > 当前路线：以已验收的 DAG5-B v2 语义轮廓为上游，转入长条梁式结构编译；
 > [M7.3-Beam-B](M73BeamBMotifWFCAndGraphGrammarDesign.md) 已完成并通过用户编辑器读形验收。
 > Beam-C 已完成用户编辑器读形验收；[Beam-C2](M73BeamC2RealContactAndLoadClosureDesign.md) 已补齐真实接触检测与承重收口；
-> [M7.3-Beam-D0](M73BeamD0GameplayProfileCatalogDesign.md) 的 Profile Catalog、Difficulty Curve 与统一 Settings Resolver 首版已完成。
+> [M7.3-Beam-D0](M73BeamD0GameplayProfileCatalogDesign.md) 的 Profile Catalog、Difficulty Curve 与统一 Settings Resolver 已演进到 Catalog v8。
 > [M7.3-Beam-D1](M73BeamD1RealBrickAndMaterialRolesDesign.md) 的真实 Brick、材料角色与独立预览链已完成并通过编辑器验收。
 > [M7.3-Beam-D1.5](M73BeamD15VisualComplexityLadderDesign.md) 已用强制语义里程碑和不重叠 Brick 数量窗完成六档视觉复杂度阶梯；低 Tier 分级主屋顶及聚合语义屋顶已通过编辑器读形验收。
-> 下一步进入 Beam-D2：弱点、Chaos 与 Profile×Tier 解题认证。
+> [M7.3-Beam-C3](M73BeamC3CribCoreStabilityDesign.md) 已在 Beam-B 与 C2 之间接入 Catalog v8
+> 四柱闭合井干芯体、低 Tier 普通框架替换、根系化定向拉结和 C2 最终硬预算；固定
+> 5 Profile × Tier 0/1 静态生产矩阵已通过。下一道门槛是 C3 Chaos 静置/受控击打 PIE，之后才能进入 Beam-D2。
 >
 > 生产现状：球面 TaskGraph 普通建筑仍使用已稳定的 DAG2.3 路径。Beam 路线在完成
 > Beam-D1/D2 真实 Brick/弱点/Chaos 闭环与 Beam-E 生产认证完成前不得替换生产默认值。
@@ -29,7 +31,8 @@ M7 材料、碰撞与破坏服务
       ├─ Beam-A：Bay / Joint / Member / Assembly IR 与线框预览
       ├─ Beam-B：Bay 内 Motif WFC、Beam-A 语义屋顶与全局装配收口（已验收）
       ├─ Beam-C：Load DAG 提取、多支点反力与静态传力代理（已验收）
-      ├─ Beam-C2：真实接触检测、支撑展宽与有界承重收口（已完成自动化）
+      ├─ Beam-C3：四柱闭合井干芯体、根系化拉结、全部 Z 站位柱跨与低 Tier 普通框架替换（5×2 静态已通过，PIE 待验收）
+      ├─ Beam-C2：消费 C3 几何，以实际最终 Member 上限执行真实接触、支撑展宽与有界承重收口
       ├─ Beam-D0：Profile Catalog、Difficulty Curve 与统一 Settings Resolver
       ├─ Beam-D1：真实 Brick 与材料角色（已完成并验收）
       ├─ Beam-D1.5：强制视觉里程碑 + Brick 数量目标 + 低 Tier/聚合语义屋顶（已完成并验收）
@@ -101,8 +104,9 @@ Graph 是无向/混合方向的几何装配图；Load DAG 是之后按重力和�
 | Beam-A v2 | 将 Volume 编译为 Bay，再生成固定截面、可变长度的 XYZ 积木及 Bearing Contact | [已完成并通过用户编辑器读形验收](M73BeamAStructuralIRPreviewDesign.md) |
 | Beam-B | Box Bay 用 Motif WFC 选择结构家族，Prism/Pyramid Bay 复用 Beam-A 逐层收分语义屋顶；SupportedSpan 保留双端承托门洞，禁用单边 Cantilever，并统一装配收口 | [自动化与编辑器读形验收完成](M73BeamBMotifWFCAndGraphGrammarDesign.md) |
 | Beam-C | 从闭合 Bearing Contact 提取/验证 Load DAG，计算多支点反力并执行跨度、悬臂、长细比和侧向静态代理 | [代码、自动化与用户编辑器读形验收完成](M73BeamCLoadDAGAndStaticProxyDesign.md) |
-| Beam-C2 | 从最终 Brick AABB 重建真实接触，检查合力/支撑展宽，并有界补充 Z 柱完成承重收口 | [代码与自动化完成](M73BeamC2RealContactAndLoadClosureDesign.md) |
-| Beam-D0 | 用 `GameplayProfileId + DifficultyTier` 解析语义、难度曲线和完整内部生成设置；项目硬门槛不成为地图输入 | [首版代码与自动化完成](M73BeamD0GameplayProfileCatalogDesign.md) |
+| Beam-C3 | 用四角 Z 柱、每 Belt 两 X + 两 Y course 构成闭环；只认经拓扑认证的 Host/Tie course；低 Tier 以普通框架替换支付预算并保护主屋顶 | [Catalog v8 与正式 5×2 静态门槛已通过；Chaos PIE 待通过](M73BeamC3CribCoreStabilityDesign.md) |
+| Beam-C2 | 从 C3 Member AABB 重建真实接触，检查合力/支撑展宽，并只在同一候选累计轮次、累计补柱数和最终 Member 剩余容量内有界补柱 | [最终硬预算已随 C3 5×2 通过静态回归](M73BeamC2RealContactAndLoadClosureDesign.md) |
+| Beam-D0 | 用 `GameplayProfileId + DifficultyTier` 解析语义、难度曲线和完整内部生成设置；项目硬门槛不成为地图输入 | [Catalog v8；C3 5×2 静态门槛已通过](M73BeamD0GameplayProfileCatalogDesign.md) |
 | Beam-D1 | 把 Beam Member 编译为真实 Brick，并落实材料角色与装置意图 | [已完成并通过编辑器验收](M73BeamD1RealBrickAndMaterialRolesDesign.md) |
 | Beam-D1.5 | 用强制语义里程碑和互不重叠的 Brick 数量窗形成 E1–E6 视觉复杂度阶梯，并让 E1/E2 与聚合 Crown 保持完整建筑读形 | [代码、自动化与用户编辑器读形验收完成](M73BeamD15VisualComplexityLadderDesign.md) |
 | Beam-D2 | 联合 Failure Frontier、真实接触、Chaos，对完整 Profile×Tier 矩阵认证 | 未开始 |
@@ -121,7 +125,9 @@ DAG5-B v2 Shape Grammar + graph WFC
   -> editor-only stacked-block preview (implemented)
   -> Beam-B Box motifs + Beam-A semantic roof fitting + global closure (implemented)
   -> Beam-C Load DAG + multi-support reaction + static proxy (accepted)
-  -> Beam-C2 exact contact + structural support closure (implemented)
+  -> Beam-C3 Catalog v8 closed four-post crib rewrite (5x2 static gate passed; Chaos PIE pending)
+  -> Beam-C2 exact contact + structural support closure under final member cap
+  -> Beam-C3 final topology / all-Z-span / budget certification
   -> Beam-D0 Profile Catalog + Difficulty Curve + Settings Resolver (implemented)
   -> Beam-D1 real Brick + material roles (implemented and accepted)
   -> Beam-D1.5 mandatory visual milestones + Brick count windows (implemented)

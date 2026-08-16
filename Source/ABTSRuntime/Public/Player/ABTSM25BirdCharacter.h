@@ -58,6 +58,14 @@ public:
 	void SetPartyCollisionIsolation(bool bIsolateFromParty);
 	/** Makes this bird ignore ABTSDeveloperObstacle while preserving terrain collision and applies a walking-only speed multiplier. */
 	void SetDeveloperWalkEnabled(bool bEnabled, float SpeedMultiplier);
+	/** Developer walk never permits a launched bird to pass through building obstacles. */
+	static ECollisionResponse ResolveDeveloperObstacleCollisionResponse(
+		bool bDeveloperWalk,
+		bool bSlingshotFlight);
+	/** River air walls block walking but never alter a launched trajectory. */
+	static ECollisionResponse ResolveWalkBarrierCollisionResponse(
+		bool bDeveloperWalk,
+		bool bSlingshotFlight);
 	void SetPartyControlled(bool bInPlayerControlled);
 	void ApplyPartyMoveInput(const FVector& Direction, float Scale);
 	void ApplyPartyJump();
@@ -134,6 +142,7 @@ private:
 	FVector GetPresentationVelocity() const;
 	void ConfigureChaosPhysicsBody(bool bEnable);
 	void SetLocomotionCollisionEnabled(ECollisionEnabled::Type CollisionEnabled);
+	void ApplyDeveloperObstacleCollisionResponse();
 	void LogControlDiagnosticSnapshot();
 
 	/** Select on the C++ class defaults or a Blueprint child before starting PIE. */
@@ -173,6 +182,7 @@ private:
 	ECollisionEnabled::Type SavedChaosBodyCollision = ECollisionEnabled::QueryAndPhysics;
 	bool bPlanarChaosMode = false;
 	bool bDeveloperWalkEnabled = false;
+	bool bSlingshotObstacleCollisionOverride = false;
 	bool bSlingshotPresentationUpActive = false;
 	bool bSlingshotPresentationFrameInitialized = false;
 	bool bSlingshotPresentationLockFacingReversal = false;

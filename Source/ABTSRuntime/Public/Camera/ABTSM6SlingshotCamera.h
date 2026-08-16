@@ -31,6 +31,28 @@ enum class EABTSM9SatelliteFlightCameraPhase : uint8
 	E5Impact
 };
 
+/** Increasing authority prevents low-speed settlement contacts from replacing a meaningful hit. */
+enum class EABTSM6ImpactObservationAuthority : uint8
+{
+	None,
+	SurfaceImpact,
+	FacilityImpact
+};
+
+/** Immutable presentation-only collision sample copied from M6's authoritative FHitResult. */
+struct FABTSM6ImpactObservationSample
+{
+	FVector ImpactPoint = FVector::ZeroVector;
+	FVector ImpactNormal = FVector::UpVector;
+	FVector IncomingVelocity = FVector::ZeroVector;
+	FVector FacilityAnchor = FVector::ZeroVector;
+	/** Frozen world-AABB half extent of the actually hit building at first contact. */
+	FVector FacilityExtent = FVector::ZeroVector;
+	float NormalSpeedCMPerSec = 0.0f;
+	EABTSM6ImpactObservationAuthority Authority =
+		EABTSM6ImpactObservationAuthority::None;
+};
+
 /** Roll-locked aim and projectile-follow camera used only during one M6 launch. */
 UCLASS()
 class ABTSRUNTIME_API AABTSM6SlingshotCamera : public ACameraActor
@@ -42,6 +64,8 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 	void SetAimFrame(const FVector& InCenter, const FVector& InForward, const FVector& InUp);
+	/** Opts the normal spherical M6 launch into a stable surface-reading aim composition. */
+	bool ConfigureAimPrimarySurfaceGroundContext(AABTSM2Planet* InPlanet);
 	/** Copies the authored camera-class defaults used by player input and calibration certification. */
 	bool CopyAimFraming(
 		float& OutDistanceCM,
@@ -113,12 +137,59 @@ public:
 		float DistanceCM,
 		float HorizontalFovDegrees,
 		float AspectRatio);
+	/** Builds a bounded ground-reading view while preserving sling distance and screen placement. */
+	static bool BuildGroundAwareAimView(
+		const FVector& LegacyLocation,
+		const FVector& AimCenter,
+		const FVector& AimForward,
+		const FVector& GroundAnchor,
+		const FVector& Up,
+		float CameraDistanceCM,
+		float MinimumLookDownDegrees,
+		float MaximumLookDownDegrees,
+		float SubjectAboveCenterDegrees,
+		FVector& OutLocation,
+		FVector& OutLook,
+		FVector& OutScreenUp);
+	/** Builds a fixed bird-relative flight pose with an authored local-tangent look-down angle. */
+	static bool BuildFixedBirdFlightPose(
+		const FVector& BirdLocation,
+		const FVector& Up,
+		const FVector& Forward,
+		float DistanceCM,
+		float HeightCM,
+		float LookDownDegrees,
+		FVector& OutLocation,
+		FVector& OutLook,
+		FVector& OutScreenUp);
+	/** Pure landing composition: frozen tangent plus optional live-facility anchor. */
+	static bool BuildImpactObservationPose(
+		const FVector& BirdLocation,
+		const FVector& Up,
+		const FVector& FrozenForward,
+		const FVector& FacilityAnchor,
+		const FVector& FacilityExtent,
+		bool bHasFacilityAnchor,
+		float DistanceCM,
+		float HeightCM,
+		float LookDownDegrees,
+		float FacilityLookBias,
+		float FacilityFramingDistanceMultiplier,
+		FVector& OutLocation,
+		FVector& OutLook,
+		FVector& OutScreenUp);
+	/** Higher authority may replace a pending sample; equal/lower jitter never can. */
+	static bool ShouldReplaceImpactObservation(
+		EABTSM6ImpactObservationAuthority CurrentAuthority,
+		EABTSM6ImpactObservationAuthority CandidateAuthority);
 	void ClearSatelliteFlightPresentation();
 	void NotifySatelliteE5Hit();
 	/** Real collision is stronger than prediction and guarantees a moon-frame hand-off. */
 	void NotifySatelliteSurfaceContact();
-	/** Locks the last trustworthy tangent briefly so restitution cannot flip the shot 180 degrees. */
-	void NotifyBirdImpact();
+	/** Captures one presentation-only collision sample without changing physics or settlement. */
+	void NotifyBirdImpact(const FABTSM6ImpactObservationSample& Sample);
+	/** Freezes the accepted tangent for the complete settlement hold. */
+	void NotifySettlementStarted();
 	void BeginReturnToPrimaryFrame();
 	EABTSM9SatelliteFlightCameraPhase GetSatelliteFlightPhase() const
 	{
@@ -147,6 +218,12 @@ private:
 		AABTSM25BirdCharacter& TargetBird,
 		FVector& OutLocation,
 		FQuat& OutRotation);
+	bool BuildImpactObservationFollowPose(
+		AABTSM25BirdCharacter& TargetBird,
+		FVector& OutLocation,
+		FQuat& OutRotation) const;
+	void ActivateImpactObservation();
+	void ResetImpactObservation();
 	FVector ResolveStableFollowForward(
 		AABTSM25BirdCharacter& TargetBird,
 		const FVector& Up,
@@ -166,6 +243,8 @@ private:
 	FVector AimCenter = FVector::ZeroVector;
 	FVector AimForward = FVector::ForwardVector;
 	FVector AimUp = FVector::UpVector;
+	FVector AimGroundContextWorld = FVector::ZeroVector;
+	bool bAimGroundContextValid = false;
 	FVector PlanarFollowUp = FVector::UpVector;
 	bool bPlanarFollow = false;
 	bool bFollowBird = false;
@@ -194,6 +273,13 @@ private:
 	FVector StableSatellitePresentationUp = FVector::ZeroVector;
 	FVector StableFollowForward = FVector::ZeroVector;
 	float FollowFacingLockRemainingSeconds = 0.0f;
+	FABTSM6ImpactObservationSample ImpactObservationSample;
+	FVector ImpactObservationForward = FVector::ZeroVector;
+	FVector ImpactObservationBlendStartLocation = FVector::ZeroVector;
+	FQuat ImpactObservationBlendStartRotation = FQuat::Identity;
+	float ImpactObservationBlendAlpha = 0.0f;
+	bool bImpactObservationActive = false;
+	bool bImpactSettlementHold = false;
 	/** Return flight must remain in the primary frame until the next launch. */
 	bool bForcePrimaryFrameUntilNextFollow = false;
 
@@ -211,6 +297,22 @@ private:
 	float AimTargetHeightCM = 245.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim", meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "20.0"))
 	float AimCameraBlendSpeed = 10.0f;
+	/** Tangential distance used to pick the stable surface anchor when launch mode begins. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "100.0", UIMin = "500.0", UIMax = "5000.0", Units = "cm"))
+	float AimGroundContextForwardDistanceCM = 1800.0f;
+	/** Minimum downward angle from the local tangent plane to the locked surface anchor. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "30.0", Units = "deg"))
+	float AimGroundContextMinimumLookDownDegrees = 8.0f;
+	/** Maximum downward optical pitch; lower terrain cannot drag the sling out of frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "30.0", Units = "deg"))
+	float AimGroundContextMaximumLookDownDegrees = 10.0f;
+	/** Stable angular placement of the sling center above the optical center. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Aim|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "15.0", Units = "deg"))
+	float AimGroundContextSubjectAboveCenterDegrees = 5.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")
 	float FlightDistanceCM = 920.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight")
@@ -224,6 +326,26 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight",
 		meta = (ClampMin = "0.0", ClampMax = "2.0", Units = "s"))
 	float FollowFacingImpactLockSeconds = 0.55f;
+	/** Surface contacts below this speed are ignored until Settling explicitly starts. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
+		meta = (ClampMin = "0.0", ClampMax = "1000.0", Units = "cm/s"))
+	float ImpactObservationMinimumSurfaceSpeedCMPerSec = 180.0f;
+	/** Fixed-duration hand-off from flight composition to the observation pose. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
+		meta = (ClampMin = "0.05", ClampMax = "2.0", Units = "s"))
+	float ImpactObservationBlendSeconds = 0.45f;
+	/** Legacy point-anchor interpolation used when a building has no valid frozen bounds. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
+		meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	float ImpactObservationFacilityLookBias = 0.42f;
+	/** Conservative 50-degree-FOV distance used to keep the complete hit building in frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
+		meta = (ClampMin = "2.0", ClampMax = "8.0"))
+	float ImpactObservationFacilityFramingDistanceMultiplier = 4.2f;
+	/** Fixed optical pitch below the local tangent; keeps the bird framing stable while revealing ground. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Ground Context",
+		meta = (ClampMin = "0.0", ClampMax = "45.0", Units = "deg"))
+	float FlightLookDownDegrees = 26.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M9|Satellite Flight",
 		meta = (ClampMin = "2.0", ClampMax = "10.0"))

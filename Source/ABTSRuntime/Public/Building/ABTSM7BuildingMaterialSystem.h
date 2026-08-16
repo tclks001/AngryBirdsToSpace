@@ -16,6 +16,7 @@ class UPrimitiveComponent;
 class UStaticMesh;
 class UPhysicalMaterial;
 struct FABTSM7PenetrationValidationStats;
+enum class EABTSM73E1DamageCause : uint8;
 
 /** Emitted only when an actual M7 brick is removed from the world. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FABTSM7MaterialRecoveredNative, EABTSM7BuildingMaterial /* Material */, int32 /* Quantity */);
@@ -34,6 +35,8 @@ public:
 	int32 AddBrick(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 	/** Creates a static per-brick Actor used by M7.3 validated structures; launch physics activates it with every other module. */
 	AABTSM7BuildingModule* SpawnBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
+	/** Caller-held static brick path for special V3 pieces such as the E1 Crystal cap. */
+	AABTSM7BuildingModule* SpawnStaticBrickModule(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform);
 
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Suspension")
 	AABTSM7BuildingModule* SpawnSuspension(const FABTSM7SuspensionSpec& Spec, const FTransform& WorldTransform);
@@ -41,6 +44,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "ABTS|M7|Device")
 	AABTSM7BuildingModule* SpawnDevice(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
 	AABTSM7BuildingModule* SpawnDeviceWithOverrides(const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform, UStaticMesh* OverrideMesh, UMaterialInterface* OverrideMaterial);
+	/** Stage-5.5 device path: exact logical collision proxy plus authored visual child. */
+	AABTSM7BuildingModule* SpawnVoxelDevice(
+		const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
+	/** Static-world variant: owned by the caller and excluded from global launch activation. */
+	AABTSM7BuildingModule* SpawnStaticVoxelDevice(
+		const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
 
 	bool OwnsPrimitive(const UPrimitiveComponent* Component) const;
 	bool HandleBirdImpact(UPrimitiveComponent* Component, int32 InstanceIndex, float NormalSpeedCMPerSec, const FVector& IncomingVelocity, EABTSBirdId BirdId);
@@ -49,18 +58,54 @@ public:
 	void ApplyDirectionalBlast(const FVector& Origin, const FVector& Axis, float DestroyLengthCM, float ImpulseLengthCM, float EffectRadiusCM, float ImpulseSpeedCMPerSec);
 	/** Promotes all building HISM instances and enables gravity on every module for the launch phase. */
 	void BeginLaunchPhysics(bool bPlanar, const FVector& GravityReference, float GravityAcceleration, float ContactDamageGraceSeconds = -1.0f);
+	/**
+	 * Activates one explicit building body set with a direction derived from its
+	 * frozen site and support center. This API deliberately does not mutate the
+	 * global promotion direction because one MaterialSystem may own six sites.
+	 */
+	bool BeginSiteUniformLaunchPhysics(
+		TConstArrayView<AABTSM7BuildingModule*> TargetModules,
+		const FVector& SiteLocationWorldCM,
+		const FVector& SupportCenterWorldCM,
+		float GravityAcceleration,
+		float ContactDamageGraceSeconds = -1.0f,
+		/** True only after the same frozen target set passed the read-only internal penetration gate. */
+		bool bPenetrationPrevalidated = false);
 	/** Runs the same pre-Chaos contact repair used by launch physics on a caller-owned module subset. */
 	FABTSM7PenetrationValidationStats ValidateAndRepairPendingModules(
 		const TArray<AABTSM7BuildingModule*>& PendingModules) const;
+	/** Read-only frozen-geometry gate; intentional support-world contact is left for real Chaos. */
+	FABTSM7PenetrationValidationStats ValidatePendingModuleInterpenetration(
+		const TArray<AABTSM7BuildingModule*>& PendingModules) const;
+	/** Keeps newly unwelded certified compound members in blast/freeze ownership. */
+	void AdoptUnweldedCompoundChild(AABTSM7BuildingModule& Module);
 	/** Adds currently simulated M7 bodies to a read-only launch settlement sample. */
 	void AppendDynamicPhysicsBodies(TArray<UPrimitiveComponent*>& OutBodies) const;
 	float GetLastPhysicsActivityTimeSeconds() const { return LastPhysicsActivityTimeSeconds; }
+	uint32 GetLastLaunchChaosBodyProfileHash() const { return LastLaunchChaosBodyProfileHash; }
+	uint32 GetLastLaunchChaosWorldProfileHash() const { return LastLaunchChaosWorldProfileHash; }
+	uint32 GetLastSiteUniformGravityPolicyHash() const
+	{
+		return LastSiteUniformGravityPolicyHash;
+	}
+	FVector GetLastSiteUniformGravityUp() const
+	{
+		return LastSiteUniformGravityUp;
+	}
 	/** Extends the damage grace on all currently dynamic modules without changing their gravity or launch configuration. */
 	void SetDynamicContactDamageGraceSeconds(float Seconds);
 	void FreezeDynamicModules();
+	/**
+	 * Final launch boundary: preserve every settled transform, then stop all
+	 * remaining M7 simulation before party walking resumes.
+	 */
+	int32 FreezeAllDynamicModulesForWalkReturn();
 	void ConfigureTestSet(bool bEnable, const FTransform& SpawnTransform);
 	/** Copies the authoritative runtime tuning for deterministic M7.3 analysis without exposing Actor state. */
 	void CopyMaterialProfiles(TArray<FABTSM7MaterialProfile>& OutProfiles) const;
+	/** Read-only live module snapshot for the M7 stylized adapter; broken/destroyed modules are omitted. */
+	void GatherLiveModulesForStylizedAdapter(
+		TArray<AABTSM7BuildingModule*>& OutModules) const;
 
 	/** M8 subscribes here to turn destroyed building bricks into shared-inventory materials. */
 	FABTSM7MaterialRecoveredNative OnMaterialRecovered;
@@ -73,6 +118,8 @@ public:
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> IronBrickHISM;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Brick")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassBrickHISM;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7|Brick")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CrystalBrickHISM;
 
 private:
 	UHierarchicalInstancedStaticMeshComponent* GetBrickHISM(EABTSM7BuildingMaterial Material) const;
@@ -82,7 +129,22 @@ private:
 	float ComputeDamageGain(const FABTSM7MaterialProfile& Profile, float NormalSpeedCMPerSec, float BreakSpeedCMPerSec) const;
 	uint64 GetHISMDamageKey(const UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex) const;
 	void ApplyHISMPhysicalMaterial(UHierarchicalInstancedStaticMeshComponent& HISM, EABTSM7BuildingMaterial Material, const TCHAR* DebugName);
+	AABTSM7BuildingModule* SpawnVoxelDeviceInternal(
+		const FABTSM7DeviceSpec& Spec,
+		const FTransform& WorldTransform,
+		bool bRegisterForLaunchPhysics);
+	AABTSM7BuildingModule* SpawnBrickModuleInternal(
+		const FABTSM7BrickSpec& Spec,
+		const FTransform& WorldTransform,
+		bool bRegisterForLaunchPhysics);
 	void ActivateModuleForLaunch(AABTSM7BuildingModule& Module, const FVector& InitialImpulse = FVector::ZeroVector);
+	bool ApplyImpactToModule(
+		AABTSM7BuildingModule& Module,
+		float NormalSpeedCMPerSec,
+		const FVector& IncomingVelocity,
+		EABTSBirdId BirdId,
+		EABTSM73E1DamageCause Cause,
+		bool bApplyGameplayTransferImpulse);
 	void MarkPhysicsActivity();
 	AABTSM7BuildingModule* PromoteBrick(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM7BuildingMaterial Material, const FVector& Impulse, bool bActivateImmediately = true);
 	void BreakOrImpulsePrimitive(UPrimitiveComponent* Component, int32 InstanceIndex, const FVector& ImpulseDirection, float ImpulseSpeed, bool bDestroy);
@@ -93,6 +155,10 @@ private:
 	TObjectPtr<UStaticMesh> SharedBrickMesh;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UStaticMesh> SharedCylinderMesh;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
+	TObjectPtr<UStaticMesh> ExplosivePresentationMesh;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
+	TObjectPtr<UStaticMesh> PistonPresentationMesh;
 	/** Parent used for colored no-asset fallbacks; Engine BasicShapeMaterial is the C++ default. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> FallbackMaterialParent;
@@ -104,6 +170,8 @@ private:
 	TObjectPtr<UMaterialInterface> IronMaterial;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> GlassMaterial;
+	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
+	TObjectPtr<UMaterialInterface> CrystalMaterial;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
 	TObjectPtr<UMaterialInterface> RopeMaterial;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Assets")
@@ -120,6 +188,8 @@ private:
 	TObjectPtr<UMaterialInterface> IronFallbackMaterial;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> GlassFallbackMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> CrystalFallbackMaterial;
 
 	UPROPERTY(EditAnywhere, Category = "ABTS|M7|Damage")
 	TArray<FABTSM7MaterialProfile> MaterialProfiles;
@@ -154,6 +224,10 @@ private:
 	bool bLaunchPhysicsPlanar = false;
 	FVector LaunchGravityReference = FVector::ZeroVector;
 	float LaunchGravityAccelerationCMPerSec2 = 980.0f;
+	uint32 LastLaunchChaosBodyProfileHash = 0;
+	uint32 LastLaunchChaosWorldProfileHash = 0;
+	uint32 LastSiteUniformGravityPolicyHash = 0;
+	FVector LastSiteUniformGravityUp = FVector::ZeroVector;
 	float LastPhysicsActivityTimeSeconds = -BIG_NUMBER;
 	bool bSpawnTestSetAtStart = false;
 	FTransform TestSetTransform = FTransform::Identity;

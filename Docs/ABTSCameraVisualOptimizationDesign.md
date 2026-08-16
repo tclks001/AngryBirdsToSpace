@@ -1,6 +1,6 @@
 # ABTS：统一镜头视觉优化设计
 
-> 状态：实施中；2026-07-31 建立，2026-08-03 补充直接操纵与遮挡联合方案，2026-08-04 补充主流第三人称镜头调研与源码差异分析，并落实地面直接操纵与遮挡安全层。绕月和统一模式仲裁仍待后续阶段。
+> 状态：实施中；2026-07-31 建立，2026-08-03 补充直接操纵与遮挡联合方案，2026-08-04 补充主流第三人称镜头调研与源码差异分析，并落实地面直接操纵与遮挡安全层；2026-08-15 补充发射地面构图、落地观察和仰视入地三项根因调查，并开始落实发射地面构图。落地观察、仰视地表安全和统一模式仲裁仍待后续阶段。
 >
 > 父级入口：[项目工作流](ABTSProjectWorkflow.md) · [游戏主设计稿](AngryBirdsToSpaceGameDesign.md)
 >
@@ -290,3 +290,199 @@ PartyGround / Aim / PrimaryFlight / SatelliteAssist / SatelliteCinematic / Final
 - 相机忽略列表直接读取 Party 成员，不再在每帧 Sweep 前扫描世界中的全部鸟 Actor。
 
 自动化过滤器 `ABTS.Camera.GroundRig` 覆盖手柄 30/60/120 FPS 时间积分、Sweep 中心安全距离，以及硬收缩、退出迟滞、单调恢复和重新遮挡。可见 PIE 仍需按第 8.1 节检查手感、墙角/地形脊线和装饰碰撞。
+
+## 11. 2026-08-15 发射、落地与仰视问题调查
+
+### 11.1 调查范围与证据边界
+
+本节最初只调查并更新设计；同日后续按用户指定先实现问题一，不修改配置、Blueprint 或地图。调查证据来自当前 `master` 的真实头文件/实现、Git 历史，以及使用唯一允许的 UE 5.8 对 `L_ABTS_M4`、`L_ABTS_M6`、`L_ABTS_M10` 和 `BP_ABTSM6SlingshotCamera` 执行的只读 `UnrealEditor-Cmd -NullRHI` 属性查询。没有启动可见 Editor/PIE，因此下面可以确认结构性根因、实际序列化参数和纯几何合同，但不能把这些证据写成视觉手感已经验收。
+
+只读资产结果如下：
+
+| 资产/地图 | 与本问题相关的实际值 |
+| --- | --- |
+| `L_ABTS_M4`、`L_ABTS_M6`、`L_ABTS_M10` | `ABTSBirdPartySettings.bEnableCameraObstructionAvoidance=false`、`CameraLookAtHeightCM=30`、`OrbitDistanceCM=850`、`DefaultElevationDegrees=60` |
+| `BP_ABTSM6SlingshotCamera` | `AimDistanceCM=1500`、`AimPitchDegrees=-3`、`AimTargetForwardDistanceCM=900`、`AimTargetHeightCM=245` |
+| `BP_ABTSM6SlingshotCamera` 实飞 | `FlightDistanceCM=920`、`FlightHeightCM=310`、`FollowFacingMinimumSpeedCMPerSec=120`、`FollowFacingImpactLockSeconds=0.55` |
+
+### 11.2 问题一：发射构图没有建立地面阅读目标
+
+该现象包含瞄准与实飞两个连续但不同的子问题。
+
+`Ready/Pulling` 中，`BuildAimView` 使用：
+
+```text
+Camera = SlingCenter + (-Forward * cos(Pitch) + Up * sin(Pitch)) * AimDistance
+Target = SlingCenter + Forward * TargetForwardDistance + Up * TargetHeight
+```
+
+代入 Blueprint 的实际值后，相机位于弹弓中心后方约 `1497.9 cm`、径向低约 `78.5 cm`，目标则向前 `900 cm`、径向抬高 `245 cm`。因此最终视线相对当地切平面约向上 `7.7°`；“略仰视前方天空”是当前参数与公式的直接结果，不是发射轨迹或玩家输入把相机带偏。
+
+释放后，`BuildPrimaryFollowPose` 把相机放在鸟后 `920 cm`、鸟上方 `310 cm`，却始终只注视 `BirdLocation + Up * 80 cm`。这条视线相对当地切平面约向下 `14°`，但焦点仍是空中的鸟体，不包含地表、预测落点、飞行走廊或建筑目标。鸟升高后，相机跟着鸟一起升高，固定的鸟相对俯角不能保证地面进入画面；当前 `FABTSM6TrajectoryPreview::PrimarySurfaceLandingWorld` 即使已经存在，也没有被实飞镜头消费。
+
+根因不是单个 Pitch 数值，而是镜头只有“弹弓固定前视”和“鸟体跟随”两种几何，没有 `GroundContext` 焦点和构图约束。后续实现应：
+
+- 在 `Ready/Pulling` 中以预测落点或稳定的前方地表采样作为地面锚点；预测无效时使用弹弓前方的权威球面查询回退，不继续把抬高目标当成唯一焦点。
+- 在 `PrimaryFlight` 中采用刚性的鸟体相对构图：镜头到鸟的距离、鸟与视轴的夹角和 FOV 均保持不变，只把视轴相对当地切平面固定为轻微俯视。地面通过画面下方的稳定视野进入构图，不以动态落点牵引鸟的屏幕位置。
+- 轨迹预测继续只服务 Gameplay、轨迹线和既有卫星意图分类；普通主星飞行镜头不消费预测落点，也不能反向改变初速度、碰撞或终点判定。
+
+#### 11.2.1 2026-08-15 候选实现
+
+本轮按“构图只读、玩法权威不变”的边界完成第一阶段候选实现：
+
+- 正常球面 M6 进入 `Ready` 时，以 `SlingCenter + SlingForward * 1800 cm` 的方向查询权威主星表面半径，锁存一次稳定 `AimGroundContext`。相机保持原水平机位，只沿当地 `Up` 抬高到能够以至少 `8°` 向下准确注视该锚点；拖拽和逐帧轨迹预览不会反向推动相机，因此不会形成“鼠标 → 预览落点 → 相机 → 鼠标反投影”的反馈环。
+- `PrimaryFlight` 保留鸟后 `920 cm`、鸟上 `310 cm` 的原机位，即镜头到鸟的固定距离仍为约 `970.9 cm`；根据首次最高点可见 PIE 截图，视轴由相对当地切平面向下 `22°` 调整为 `26°`。相机位置与旋转不再分别追赶，因此飞行中鸟的角尺寸和屏幕位置不再被 Lag 或预测落点改写。按当前机位几何，鸟位于视轴上方约 `7.4°`，在保留顶部安全余量的同时扩大画面下方地面阅读空间。
+- 普通主星飞行不再锁存或消费 `PrimarySurfaceLandingWorld`。`LockSatelliteFlightIntent` 恢复为只处理卫星意图与近月点，既有 `SubtleAssist/CinematicE5/SurfaceLanding` 仲裁不变。
+- 平面测试不启用瞄准地表锚点；M6 标定和 M11 仍只调用 `SetAimFrame`，继续使用原 `BuildAimView/BuildAimInputPlaneBasis`。
+- 纯几何自动化过滤器 `ABTS.M6.Camera.LaunchGroundContext` 覆盖瞄准精确注视、最小俯角、Roll-free Screen Up，以及飞行镜头到鸟距离、固定俯角和跨球面局部 frame 的鸟屏幕位置不变量。最终 `26°` 参数与“全飞行段地面始终可见”仍需用户可见 PIE 验收后冻结。
+
+最新 `26°` 候选的命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；全新 NullRHI 中 `ABTS.M6.` 为 `3/3`、`ABTS.M9.Camera` 为 `1/1`、`ABTS.Calibration` 为 `6/6`。日志分别为 `Saved/Logs/M6-FixedBirdGroundView26-20260815-145055-FreshAutomation.log`、`Saved/Logs/M9-Camera-FixedBird26-20260815-145133-FreshAutomation.log` 和 `Saved/Logs/M6M9-Calibration-FixedBird26-20260815-145210-FreshAutomation.log`。这些证据证明编译和几何不变量，不替代可见 PIE 对地面占屏的视觉验收。
+
+可见 PIE 验收：2026-08-15，用户确认当前 `26°` 候选的发射构图与手感通过；该参数冻结为问题一的当前接受基线。本次验收不覆盖落地后的设施观察与仰视地底穿透问题。
+
+#### 11.2.2 2026-08-15 不同地形下的瞄准构图边界修正
+
+后续在 M3 生产生成世界复测时，用户发现同一发射模式在 `M9 PracticeSlingshot` 上可接受，但在 `B3 Task=3` 等部分球面位置会把弹弓与鸟推到画面顶部、地面占据绝大部分画面，主观上读成“相机被拉得很远、很低”。M3 工作树此前已通过 `6004c1b` 合并包含相机提交的 `master`，因此它不是未装配镜头修改的旧基线。
+
+结构性根因位于第一轮瞄准地面锚点合同，而不是 M4 仰视相机：
+
+- `AimDistanceCM=1500 cm` 与 `50°` FOV 没有发生运行时缩放；异常来自视轴。第一轮 `BuildGroundAwareAimView` 在地表查询成功后完全丢弃原 `AimTargetForwardDistanceCM / AimTargetHeightCM` 构图，并精确注视前方 `1800 cm` 的地表锚点。
+- 旧 `8°` 只约束“至少向下”，没有最大俯角。球面曲率与前方地形降低会让锚点天然落到当地切平面下方数百厘米；锚点越低，视轴越向下，但相机没有主体安全框约束，弹弓中心可被持续推向屏幕顶边。
+- 第一轮自动化只冻结“精确注视锚点、最小俯角、Roll-free”，没有覆盖最大俯角、相机到弹弓距离或弹弓中心屏幕角位置，因此该测试能够在图 1 构图仍然错误时保持绿色。
+
+本轮把地表锚点从“强制焦点”降为“只读俯角提示”，建立三个同时成立的瞄准不变量：
+
+- 锚点从旧相机位姿导出的原始俯角只允许进入 `8°–10°` 区间；更低地形只能命中 `10°` 上限，不能继续下拉视轴。
+- 最终相机在 `SlingForward / SlingUp` 局部 frame 中重建，镜头到 `SlingCenter` 的距离严格保持实际相机类配置的 `AimDistanceCM`，当前为 `1500 cm`。
+- `SlingCenter` 固定在光轴上方 `5°`；相机机位仰角使用 `ResolvedLookDown - 5°`，所以俯角变化不会改变主体角位置。地表锚点无效、位于发射轴后方或输入非法时继续 fail closed，不生成替代错误位姿。
+
+`[ABTS][M6][CameraGroundContext]` 现在同时记录最终 `LookDown`、允许区间、`SubjectOffset` 与相机到弹弓距离。`ABTS.M6.Camera.LaunchGroundContext` 增加浅锚点、严重地形下降、旋转球面局部 frame、倒置参数端点和后向锚点覆盖，冻结 `1500 cm / 8°–10° / 5°` 三项不变量。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.M6.` 为 `4/4`、`ABTS.M9.Camera` 为 `1/1`、`ABTS.Calibration` 为 `6/6`，失败、Fatal 与 Assertion 均为 `0`，且每份日志只有一个 `TEST COMPLETE: EXIT CODE 0`。日志分别为 `Saved/Logs/M6-BoundedAim-20260815-FinalUnity-FreshAutomation.log`、`Saved/Logs/M9-Camera-BoundedAim-20260815-FinalUnity-FreshAutomation.log` 与 `Saved/Logs/Calibration-BoundedAim-20260815-FinalUnity-FreshAutomation.log`。最终仍需用户在同一 Seed 的 `M9 PracticeSlingshot` 和图 1 `B3 Task=3` 之间做可见 PIE 对照；NullRHI 不证明地面实际占屏和主体安全余量。
+
+### 11.3 问题二：落地后没有设施观察阶段，残余速度仍可改写镜头方位
+
+当前主 ViewTarget 从进入弹弓开始一直是 `AABTSM6SlingshotCamera`，直到 `FinishReturn()` 才恢复 Party Camera。`BeginSettlement()` 只把 Gameplay 状态改为 `Settling`，没有通知相机切入落地构图；相机 Tick 因而仍调用与空中飞行完全相同的 `UpdateFollow/BuildPrimaryFollowPose`。
+
+这造成两个确定结果：
+
+1. 镜头没有建筑可看。焦点始终是 `BirdLocation + Up * 80 cm`。`HandleBirdImpact` 虽然持有 `FHitResult`，传给相机的却只有无参数 `NotifyBirdImpact()`；命中的 Actor、Component、ImpactPoint、法线和建筑语义都在相机边界前丢失。当前也没有“落点附近设施”候选选择或只读建筑观察锚点接口。
+2. `NotifyBirdImpact()` 只把旧方位锁住 `0.55 s`。之后 `ResolveStableFollowForward` 会重新信任大于 `120 cm/s` 的切向速度；反弹、滚动或连续碰撞可以在 `Settling` 早期多次改变 `StableFollowForward`，`QInterpTo(..., FollowSpeed=7)` 又继续追赶最近的方位。结算本身要求低于 `20 cm/s`、`10°/s` 连续稳定 `2 s`，且距最后活动至少 `2.5 s`，所以相机方位锁远早于结算窗口结束。用户看到的原地轻微转圈，结构上来自“结算期仍以瞬时速度为朝向权威 + 旋转插值追赶”，不是落地观察模式主动绕建筑。
+
+后续应新增显式 `ImpactObservation/SettlingHold` 镜头阶段：
+
+- 首次有意义的地面或建筑阻挡命中时，锁存本次 `ImpactPoint`、入射切向、命中 Actor/Component 和可失效的观察锚点；进入 `Settling` 后不再用反弹速度持续重写水平构图。
+- 观察优先级建议为“实际命中的建筑/设施锚点 → 落点附近经只读接口确认的 M7 建筑锚点 → 实际落点 + 入射方向”。不能每帧 `ActorIterator` 搜索，也不能从 M7 原始生成数组建立第二条共享通道。
+- 镜头以鸟和观察锚点组成 Focus Set；建筑 Actor 后续若被破坏或回滚，使用已锁存的世界空间 ImpactPoint/包围球中心作为稳定回退，避免弱引用失效时突然转回鸟正前方。
+- `SettlingHold` 只允许小范围位置跟随和一次有界转场；新的显著撞击可以更新破坏焦点，但普通低速滚动不能重新取得镜头 Yaw 权威。进入 `Returning` 后再按现有流程回到主星 frame。
+
+这项接口若需要暴露 M7 建筑语义，属于共享镜头热点，应由集成工作树设计只读适配器，不修改 M3→M7 稳定生成契约。
+
+#### 11.3.1 2026-08-15 候选实现
+
+本轮先落实“残余速度转圈”和“实际命中设施观察”，不扩展到“落在设施附近但没有命中”的候选搜索：
+
+- `HandleBirdImpact` 在破坏处理前把真实 `FHitResult` 复制为不可变的相机观察样本，保留 `ImpactPoint / ImpactNormal / IncomingVelocity / NormalSpeed`。相机仍不持有命中组件，也不反向修改碰撞、伤害或结算权威。
+- M7 运行时建筑新增通用只读查询：事件发生时判断命中 Primitive 是否属于该建筑，并从仍存活的模块计算一次实时质心。M6 只遍历开局已经注册且数量有界的 `RequiredBuildingActors`，不读取 M3 原始数组、不每帧 `ActorIterator`，也不缓存会因 Chaos 破坏而失效的模块指针。
+- 观察权威固定为 `None < SurfaceImpact < FacilityImpact`。首个有效地表命中可建立待用样本，实际设施命中可以升级它；一旦设施权威锁存，后续同级碰撞、低速滚动和地表抖动都不能再次改写目标。
+- 实际设施命中立即进入 `ImpactObservation`；普通落地在 `BeginSettlement` 显式通知相机进入 `SettlingHold`。两种路径都冻结命中前最后可信的入射切向，后续构图不再调用瞬时残余速度作为 Yaw 权威。
+- 观察机位仍保持鸟后 `920 cm`、鸟上 `310 cm`。有设施锚点时，在相机到鸟焦点与设施质心的两条视线之间按 `0.42` 构造共享注视方向，并用 `0.45 s` SmoothStep 完成一次有界转场；没有设施时继续使用冻结切向和 `26°` 地面构图。
+- `Returning` 和下一次 `FollowBird` 会清空观察样本与冻结状态。M9 的卫星接管仍优先于主星 `ImpactObservation`，避免新的地面阶段抢占月面/E5 构图。
+
+命令行证据：UE 5.8 Development Editor 常规构建和 `-ForceUnity -DisableAdaptiveUnity` 完整链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.M6.` 为 `4/4`、`ABTS.M9.Camera` 为 `1/1`，日志分别为 `Saved/Logs/M6-ImpactObservation-20260815-152150-FinalFreshAutomation.log` 和 `Saved/Logs/M9-Camera-ImpactObservation-20260815-152228-FinalFreshAutomation.log`。同源码常规构建后的接口回归 `ABTS.M73A` 为 `2/2`、`ABTS.Calibration` 为 `6/6`，日志为 `Saved/Logs/M73A-ImpactObservation-20260815-151826-FreshAutomation.log` 和 `Saved/Logs/Calibration-ImpactObservation-20260815-151925-FreshAutomation.log`。这些结果证明权威优先级、冻结几何、只读建筑接口和既有 M9/标定回归，不替代实际 Chaos 破坏时鸟与设施共同构图的可见 PIE 验收。
+
+可见 PIE 验收：2026-08-15，用户确认“实际命中设施观察”和“Settling 期间残余速度不再造成原地转圈”的手感通过；本候选冻结为问题二的当前接受基线。本次验收不覆盖“落在设施附近但未实际命中”的候选搜索，也不覆盖问题三的仰视地底穿透。
+
+### 11.4 问题三：完整仰视范围与可选遮挡开关共同允许相机进入地表
+
+地面 Orbit 的目标位置为：
+
+```text
+ArmDirection = Up * sin(Elevation) - OrbitForward * cos(Elevation)
+DesiredCamera = Pivot + ArmDirection * OrbitDistance
+```
+
+`Elevation < 0` 时相机臂具有指向地表内部的径向分量。局部切平面近似下，相机相对表面的径向高度为 `PivotClearance + OrbitDistance * sin(Elevation)`；`850 cm` 的臂长在 `-85°` 时会产生约 `-846.8 cm` 的径向下降，远大于当前鸟体中心高度和额外 `30 cm` LookAt 抬升。允许 `[-85°, +85°]` 完整 Pitch 本身没有问题，问题是这条 Desired Pose 没有独立的地表安全约束。
+
+现有球形 Sweep 只在 `bEnableCameraObstructionAvoidance=true` 时执行。Git 历史显示该开关为了让阻挡物保留在鸟与镜头之间而改成默认关闭；只读地图查询又确认三个生产/阶段地图都实际保存为 `false`。于是 `UpdateCamera` 在仰视时直接令 `RenderedLocation=UnblockedLocation`，连地形这一条硬安全边界也与舒适遮挡一起被旁路。这是本问题的直接根因。
+
+后续必须把两类职责拆开：
+
+- `SurfaceSafety` 为始终开启的硬约束。它使用当前权威 `AABTSM2Planet::GetSurfaceRadiusAtDirection`（M3 地形可由现有 override 提供连续表面半径）或专用地形 Sweep，保证最终相机球心始终位于表面半径加 `ProbeRadius + SafetyMargin` 之外。
+- `SceneObstructionComfort` 继续负责建筑、树石和前景物的拉近/侧移/淡出，可以保持可选；关闭它只能表示“允许前景挡住主体”，不能表示“允许相机穿过主地形”。
+- 当负 Pitch 的期望臂穿入地表时，不缩短相机臂；沿权威地表外法线等量平移相机和虚拟注视点，把完整视图框架抬到安全高度。若本帧表面查询无效则保持上一帧 `SurfaceSafe` 位姿，不能输出地下 Desired Pose。
+- `UserOrbitIntent.Elevation` 仍保存玩家请求的最低 `-85°`，安全层不得反写 Pitch。离开地表约束后，应沿当前意图恢复距离，而不是把镜头永久夹到较高角度。
+
+#### 11.4.1 2026-08-15 候选实现
+
+本轮按“完整仰视、较高机位、地表硬安全、前景不回缩”的边界完成候选实现：
+
+- `SurfaceSafety` 在 Desired Orbit 之后、可选 `SceneObstructionComfort` 之前每帧执行，不受 `bEnableCameraObstructionAvoidance` 控制。球面世界按期望相机方向读取 `AABTSM2Planet::GetSurfaceRadiusAtDirection`，因此 M3 连续高度场和建筑施工台半径仍是权威；平面测试场使用已冻结的 `PlanarOrigin / PlanarUp`。
+- 最低相机球心高度新增为 `CameraSurfaceSafetyClearanceCM=120 cm`，运行时还会与 `CameraProbeRadiusCM + CameraCollisionSafetyMarginCM` 取较大值。该高度是镜头舒适机位，不是碰撞 Sweep 的拉近距离。
+- 当 Desired Camera 低于安全面时，相机与虚拟注视点沿当前表面外法线施加完全相同的平移。这样 `SurfaceSafety` 本身不再改变当帧构图臂长度，`-85°` 用户仰视方向、Yaw 和 Roll Lock 保持不变；代价是受约束时虚拟注视点会高于鸟，属于完整自由仰视，不再强制鸟始终居中。
+- 地表查询短暂无效时优先保持上一帧 `SurfaceSafeLocation / SurfaceSafeFocus`；首帧无历史状态时使用主星基础半径 fail closed。安全层不写回 `ElevationDegrees`，退出约束后直接回到同一用户意图的 Desired Pose。
+- 前景遮挡开关、四候选 Sweep 和回缩状态机均未重新启用或改默认值。三个生产/阶段地图原有的 `bEnableCameraObstructionAvoidance=false` 继续表示“允许建筑、树石挡住视线”，但不再允许相机进入主地形。
+- 位姿快照新增 `SurfaceSafeFocus / SurfaceSafeLocation / SurfaceSafetyLiftCM / bSurfaceConstrained`，约束进出输出 `[ABTS][M4][SurfaceSafety]`，可区分地下 Desired Pose、地表安全位姿和最终 Rendered Pose。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.Camera.GroundRig` 为 `5/5`、`ABTS.M6.` 为 `4/4`，日志分别为 `Saved/Logs/M4-SurfaceSafety-20260815-FinalUnity-FreshAutomation.log` 和 `Saved/Logs/M6-SurfaceSafety-20260815-FinalUnity-FreshAutomation.log`。新增 `SurfaceSafetyRigidLift` 解析测试覆盖球面地下仰视、平面地下仰视、无需约束的安全位姿、无效法线 fail closed，以及“相机—虚拟注视点”的距离和方向不变。本证据不替代 `L_ABTS_M4 / L_ABTS_M6 / L_ABTS_M10` 的可见 PIE 仰视手感与近地画面验收。
+
+#### 11.4.2 2026-08-15 仰视构图拉近补充
+
+用户完成第一轮可见 PIE 后确认地表安全效果基本成立，同时指出常见第三人称仰视会随 Pitch 主动拉近角色。公开方案表明需要继续区分“构图轨道”和“碰撞回缩”：
+
+- UE 5.8 Gameplay Cameras 的 `USplineOrbitCameraNode` 明确使用 Pitch 参数定义轨道形状；每个 `FSplineOrbitControlPoint` 同时提供 `PitchAngle / LocationOffset / TargetOffset`，说明不同俯仰角可以拥有不同机位和目标偏移，而不是固定半径球轨道。[Epic：Gameplay Cameras](https://dev.epicgames.com/documentation/unreal-engine/API/Plugins/GameplayCameras) · [Epic：FSplineOrbitControlPoint](https://dev.epicgames.com/documentation/unreal-engine/API/Plugins/GameplayCameras/FSplineOrbitControlPoint)
+- Cinemachine FreeLook 用三条分别具有半径、高度和镜头参数的 Rig，经样条连续插值得到最终状态；Third Person Follow 又把 `ShoulderOffset / VerticalArmLength / CameraDistance` 与 `CameraCollisionFilter / CameraRadius` 分开，支持构图变化与碰撞安全各自负责。[Unity：Cinemachine namespace](https://docs.unity3d.com/Packages/com.unity.cinemachine@2.6/api/Cinemachine.html) · [Unity：Cinemachine3rdPersonFollow](https://docs.unity3d.com/Packages/com.unity.cinemachine@2.6/api/Cinemachine.Cinemachine3rdPersonFollow.html)
+- Godot `SpringArm3D` 的标准行为则是 Shape Motion Cast 命中后把 Camera 子节点放到碰撞点附近；这是典型的障碍物驱动回缩，只适合作为碰撞兜底，不应承担本项目的仰视构图。[Godot：Third-person camera with spring arm](https://docs.godotengine.org/en/stable/tutorials/3d/spring_arm.html)
+
+因此在既有 `UserOrbitIntent` 与 `SurfaceSafety` 之间加入纯构图层 `PitchFramingDistance`：
+
+- 用户滚轮保存的 `OrbitDistanceCM` 仍是持久 Zoom，不被 Pitch 或安全层反写。`Elevation >= -5°` 时保持用户距离；`-5° → -70°` 使用 SmoothStep 单调拉近；`Elevation <= -70°` 保持用户距离的 `72%`。默认 `850 cm` 对应 `850 → 731（-37.5°）→ 612 cm（-70°）`。
+- 曲线直接由当前 Pitch 求值，无额外时间积分或松手后的残余速度；反向拖回时沿同一曲线恢复。最小/默认/最大 Zoom 都按比例保留差异，不把三档压成同一绝对距离。
+- `SurfaceSafety` 改为消费 `PitchFramingDistance`，并且只在该构图位姿仍低于地表时整体抬升相机与虚拟注视点；它不再额外缩短当帧构图距离。`SceneObstructionComfort` 继续默认关闭，树石和建筑命中不会触发这条 Pitch 曲线。
+- 快照新增 `UserOrbitDistanceCM / PitchFramingDistanceCM / UpwardFramingAlpha`；`[ABTS][M4][OrbitCamera]` 与 `[ABTS][M4][SurfaceSafety]` 同时记录用户距离、构图距离和曲线权重，可直接判断拉近来自 Pitch 还是障碍物。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.Camera.GroundRig` 为 `6/6`、`ABTS.M6.` 为 `4/4`，日志分别为 `Saved/Logs/M4-UpwardFraming-20260815-FinalUnity-FreshAutomation.log` 和 `Saved/Logs/M6-UpwardFraming-20260815-FinalUnity-FreshAutomation.log`。新增 `UpwardPitchFraming` 解析测试冻结起点、中点、终点、`-85°` 保持、单调性、错误端点顺序和 CDO 默认值；最终仍需用户可见 PIE 冻结 `-5° / -70° / 72%` 的手感参数。
+
+#### 11.4.3 2026-08-15 地表接管连续性补充
+
+第二轮用户可见 PIE 发现：进入地表约束前相机沿 Pitch Orbit 平滑圆弧运动，到达安全面的单一接地点后立即改为外法线抬升并继续拉近，形成明显折点。结构性原因是第一轮 `SurfaceSafety` 使用 `AppliedLift=max(0, RequiredClearance-CurrentClearance)`；该函数位置连续，但在零点的一阶导数从 `0` 突变为 `1`，所以调整 Pitch 的速度连续时，相机世界空间速度方向仍会突变。
+
+公开方案对这种接管通常提供策略和过渡，而不是把碰撞点直接当作唯一最终机位：
+
+- Unreal `USpringArmComponent` 保存 Desired 与 TraceHit 两个位置，并通过可重写的 `BlendLocations` 决定最终结果；默认实现仍是命中即返回 Hit、否则返回 Desired，因此若需要连续接管必须在项目层显式设计 Blend。[Epic：USpringArmComponent](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/USpringArmComponent)
+- Cinemachine Collider 提供 `Preserve Camera Height / Preserve Camera Distance`，并把 `Smoothing Time / Damping When Occluded / Damping` 分开，说明“选择替代几何”和“控制接管速度”是两个职责。[Unity：Cinemachine Collider](https://docs.unity3d.com/Packages/com.unity.cinemachine@2.6/manual/CinemachineCollider.html)
+- UE Gameplay Cameras 的 Collision Push 节点在开关变化时分别通过 Push/Pull Interpolator 混合碰撞修正，也明确避免用单一布尔切换直接写最终位置。[Epic：UCollisionPushCameraNode EnableCollision](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Plugins/GameplayCameras/Nodes/Collision/UCollisionPushCameraNode/EnableCollision)
+
+本项目不能直接对地表修正做时间阻尼：如果 Rendered Pose 落后于安全目标，就会在若干帧内再次进入地下。因此改为按空间求值的接触前 C1 过渡：
+
+```text
+x = RequiredClearance - DesiredClearance
+b = SurfaceSafetyTransitionBand = 180 cm
+
+Lift = 0                              , x <= -b
+Lift = (x + b)^2 / (4b)               , -b < x < b
+Lift = x                              , x >= b
+```
+
+- 过渡在真正安全面前 `180 cm` 开始，接触前便逐渐改变轨迹；在 `x=-b` 与零修正以零斜率相接，在 `x=+b` 与精确硬修正以单位斜率相接，因此位置和一阶运动方向都连续。
+- 中段始终满足 `Lift >= max(0,x)`，不会为了平滑允许相机短暂进入 `120 cm` 硬安全高度；相机与虚拟注视点继续等量平移，PitchFraming 距离和视线方向不被 SurfaceSafety 改写。
+- 过渡完全由当帧空间几何求值，没有帧时间积分；快拖、慢拖以及 30/60/120 FPS 使用同一条路径。`SurfaceSafetyTransitionBandCM` 暴露为 UPROPERTY，当前候选为 `180 cm`。
+- 快照与日志新增 `SurfaceSafetyRawPenetrationCM / SurfaceSafetyTransitionAlpha`，能够区分“尚未进入预接管带”“C1 预接管”“精确硬约束”三段。
+
+命令行证据：UE 5.8 Development Editor 常规构建与 `-ForceUnity -DisableAdaptiveUnity` 全链接均成功；最终 Unity 二进制的 fresh NullRHI `ABTS.Camera.GroundRig` 为 `7/7`、`ABTS.M6.` 为 `4/4`，日志分别为 `Saved/Logs/M4-SurfaceC1-20260815-FinalUnity-FreshAutomation.log` 和 `Saved/Logs/M6-SurfaceC1-20260815-FinalUnity-FreshAutomation.log`。新增 `SurfaceSafetyC1Transition` 解析测试冻结两端导数、名义接触前抬升、全带硬安全、轨道臂不变量与 `180 cm` CDO 默认值；最终仍需用户在可见 PIE 中确认原接地点折线消失。
+
+### 11.5 当前阶段状态与验收补充
+
+三个问题保持彼此独立，当前状态如下：
+
+1. `GroundAwareAim / FixedBirdPrimaryFlight` 已通过用户可见 PIE，冻结为问题一基线。
+2. `ImpactObservation / SettlingHold` 已通过用户可见 PIE，冻结为问题二基线。
+3. `SurfaceSafety` 已完成代码、编译与解析几何门禁，等待用户执行问题三的可见 PIE 验收。
+
+新增验收要求：
+
+- `Ready/Pulling` 的视线不再稳定仰向天空；有效主星落点预测存在时，鸟/弹弓主体与地面锚点同时位于安全画框。
+- 实飞上升、最高点和下降段都保持鸟可见、鸟的屏幕位置与角尺寸稳定，并能读取主星地表；同输入的速度、轨迹点、碰撞和落点 Hash 与改造前一致。
+- 首次建筑/设施碰撞后，在一次有界转场内同时读到鸟和实际命中设施；进入 `SettlingHold` 后，反弹切向速度不再造成持续绕鸟转圈。
+- 在 `L_ABTS_M4`、`L_ABTS_M6`、`L_ABTS_M10` 中遍历 `Elevation=0°` 到 `-85°`、最小/默认/最大 Zoom；每帧都满足 `CameraRadiusFromPlanetCenter >= SurfaceRadiusAtCameraDirection + max(120 cm, ProbeRadius + SafetyMargin)`。用户 Pitch 与滚轮 Zoom 意图不得被改写，`PitchFramingDistance` 应在 `-5° → -70°` 单调降到 `72%`，`SurfaceSafety` 不得在此基础上继续缩短距离。
+- 自动化分别记录 `CameraMode`、Focus Set 来源、预测/碰撞 Authority、Desired/SurfaceSafe/ObstructionSafe/Rendered Pose 和继续运动原因；NullRHI 只证明状态与几何合同，最终地面可读性、设施构图和无入地仍需用户可见 PIE 验收。

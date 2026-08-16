@@ -20,6 +20,16 @@ public:
 	virtual void DrawHUD() override;
 
 private:
+	struct FFlightInstrumentLayout
+	{
+		float Margin = 0.0f;
+		float ScoutDiameter = 0.0f;
+		float OrbitalTop = 0.0f;
+		float OrbitalDiameter = 0.0f;
+	};
+
+	FFlightInstrumentLayout ResolveFlightInstrumentLayout(
+		const AABTSM10ScoutMapSystem& System) const;
 	void DrawScoutMap(AABTSM10ScoutMapSystem& System);
 	void DrawLandingPreview(AABTSM10ScoutMapSystem& System);
 	void DrawOrbitalOverview(AABTSM10ScoutMapSystem& System);
@@ -36,9 +46,18 @@ private:
 		float GapLength,
 		float& InOutPatternDistance);
 	void DrawEnvironmentMarker(const FVector2D& Center, UTexture2D* Texture, float SizePx, const FLinearColor& FallbackColor) const;
+	void DrawFlightUIReferencePreview();
+	void UpdateOffscreenFlightUICapture(AABTSM10ScoutMapSystem* System);
 	AABTSM10ScoutMapSystem* FindScoutMapSystem();
 	AABTSBirdParty* FindScoutParty();
 
 	TWeakObjectPtr<AABTSM10ScoutMapSystem> ScoutMapSystem;
 	TWeakObjectPtr<AABTSBirdParty> ScoutParty;
+	bool bFlightCaptureParsed = false;
+	bool bFlightCaptureInitialized = false;
+	bool bFlightCaptureRequested = false;
+	bool bFlightCaptureFinished = false;
+	int32 FlightCaptureFrame = 0;
+	FString FlightCaptureMode;
+	FString FlightCaptureOutputPath;
 };

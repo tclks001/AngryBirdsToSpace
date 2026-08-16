@@ -228,4 +228,341 @@ bool FABTSM9SatelliteFlightCameraIntentTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6LaunchGroundContextCameraTest,
+	"ABTS.M6.Camera.LaunchGroundContext",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6LaunchGroundContextCameraTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const FVector Up = FVector::UpVector;
+	const FVector LegacyLocation(-1500.0f, 0.0f, -80.0f);
+	const FVector GroundAnchor(1800.0f, 0.0f, -250.0f);
+	FVector GroundAwareLocation;
+	FVector Look;
+	FVector ScreenUp;
+	TestTrue(
+		TEXT("A valid surface anchor produces an aim view"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			LegacyLocation,
+			FVector::ZeroVector,
+			FVector::ForwardVector,
+			GroundAnchor,
+			Up,
+			1500.0f,
+			8.0f,
+			10.0f,
+			5.0f,
+			GroundAwareLocation,
+			Look,
+			ScreenUp));
+	TestTrue(
+		TEXT("Aim framing preserves the authored camera-to-sling distance"),
+		FMath::IsNearlyEqual(GroundAwareLocation.Size(), 1500.0f, 0.01f));
+	TestTrue(
+		TEXT("Aim framing uses the minimum downward pitch for a shallow anchor"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(Look, Up),
+			-FMath::Sin(FMath::DegreesToRadians(8.0f)),
+			0.0001f));
+	const FVector SubjectDirection = (-GroundAwareLocation).GetSafeNormal();
+	TestTrue(
+		TEXT("Aim framing keeps the sling center at its authored screen offset"),
+		FMath::IsNearlyEqual(
+			FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+				FVector::DotProduct(Look, SubjectDirection),
+				-1.0f,
+				1.0f))),
+			5.0f,
+			0.01f));
+	TestTrue(
+		TEXT("Aim framing keeps a valid roll-free screen up"),
+		FMath::Abs(FVector::DotProduct(Look, ScreenUp)) < 0.0001f
+			&& ScreenUp.SizeSquared() > 0.999f);
+
+	FVector LowTerrainLocation;
+	FVector LowTerrainLook;
+	FVector LowTerrainScreenUp;
+	TestTrue(
+		TEXT("A severe terrain drop still produces a bounded aim view"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			LegacyLocation,
+			FVector::ZeroVector,
+			FVector::ForwardVector,
+			FVector(1800.0f, 0.0f, -2200.0f),
+			Up,
+			1500.0f,
+			8.0f,
+			10.0f,
+			5.0f,
+			LowTerrainLocation,
+			LowTerrainLook,
+			LowTerrainScreenUp));
+	TestTrue(
+		TEXT("A severe terrain drop cannot exceed the maximum optical pitch"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(LowTerrainLook, Up),
+			-FMath::Sin(FMath::DegreesToRadians(10.0f)),
+			0.0001f));
+	TestTrue(
+		TEXT("A severe terrain drop preserves distance and sling screen placement"),
+		FMath::IsNearlyEqual(LowTerrainLocation.Size(), 1500.0f, 0.01f)
+			&& FMath::IsNearlyEqual(
+				FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+					FVector::DotProduct(
+						LowTerrainLook,
+						(-LowTerrainLocation).GetSafeNormal()),
+					-1.0f,
+					1.0f))),
+				5.0f,
+				0.01f));
+
+	const FVector SphericalUp = FVector(0.42f, -0.31f, 0.85f).GetSafeNormal();
+	const FVector SphericalForward =
+		FVector::VectorPlaneProject(FVector(0.73f, 0.61f, -0.12f), SphericalUp).GetSafeNormal();
+	const FVector SphericalCenter(7400.0f, -3200.0f, 1900.0f);
+	const FVector SphericalLegacyLocation = SphericalCenter
+		+ (-SphericalForward * FMath::Cos(FMath::DegreesToRadians(-3.0f))
+			+ SphericalUp * FMath::Sin(FMath::DegreesToRadians(-3.0f)))
+		* 1500.0f;
+	const FVector SphericalLowAnchor =
+		SphericalCenter + SphericalForward * 1800.0f - SphericalUp * 2200.0f;
+	FVector SphericalLocation;
+	FVector SphericalLook;
+	FVector SphericalScreenUp;
+	TestTrue(
+		TEXT("The bounded aim contract is invariant in a rotated spherical frame"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			SphericalLegacyLocation,
+			SphericalCenter,
+			SphericalForward,
+			SphericalLowAnchor,
+			SphericalUp,
+			1500.0f,
+			10.0f,
+			8.0f,
+			5.0f,
+			SphericalLocation,
+			SphericalLook,
+			SphericalScreenUp));
+	TestTrue(
+		TEXT("Rotated low terrain preserves the same distance pitch and subject offset"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(SphericalLocation, SphericalCenter),
+			1500.0f,
+			0.01f)
+			&& FMath::IsNearlyEqual(
+				FVector::DotProduct(SphericalLook, SphericalUp),
+				-FMath::Sin(FMath::DegreesToRadians(10.0f)),
+				0.0001f)
+			&& FMath::IsNearlyEqual(
+				FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(
+					FVector::DotProduct(
+						SphericalLook,
+						(SphericalCenter - SphericalLocation).GetSafeNormal()),
+					-1.0f,
+					1.0f))),
+				5.0f,
+				0.01f));
+	FVector InvalidLocation;
+	FVector InvalidLook;
+	FVector InvalidScreenUp;
+	TestFalse(
+		TEXT("A ground anchor behind the launch axis fails closed"),
+		AABTSM6SlingshotCamera::BuildGroundAwareAimView(
+			LegacyLocation,
+			FVector::ZeroVector,
+			FVector::ForwardVector,
+			FVector(-1800.0f, 0.0f, -250.0f),
+			Up,
+			1500.0f,
+			8.0f,
+			10.0f,
+			5.0f,
+			InvalidLocation,
+			InvalidLook,
+			InvalidScreenUp));
+
+	FVector FlightLocation;
+	FVector FlightLook;
+	FVector FlightScreenUp;
+	TestTrue(
+		TEXT("Fixed bird framing produces a valid flight pose"),
+		AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
+			FVector::ZeroVector,
+			Up,
+			FVector::ForwardVector,
+			920.0f,
+			310.0f,
+			26.0f,
+			FlightLocation,
+			FlightLook,
+			FlightScreenUp));
+	const float ExpectedBirdDistanceCM = FVector(920.0f, 0.0f, 310.0f).Size();
+	TestTrue(
+		TEXT("Fixed bird framing preserves the authored camera-to-bird distance"),
+		FMath::IsNearlyEqual(
+			FlightLocation.Size(),
+			ExpectedBirdDistanceCM,
+			0.01f));
+	TestTrue(
+		TEXT("Fixed bird framing uses the authored downward optical pitch"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(FlightLook, Up),
+			-FMath::Sin(FMath::DegreesToRadians(26.0f)),
+			0.0001f));
+	const FVector BirdDirection = (-FlightLocation).GetSafeNormal();
+	const float BirdScreenOffsetCosine = FVector::DotProduct(
+		FlightLook,
+		BirdDirection);
+	FVector ShiftedLocation;
+	FVector ShiftedLook;
+	FVector ShiftedScreenUp;
+	TestTrue(
+		TEXT("A translated and rotated local frame keeps a valid fixed flight pose"),
+		AABTSM6SlingshotCamera::BuildFixedBirdFlightPose(
+			FVector(4200.0f, -1700.0f, 800.0f),
+			FVector::RightVector,
+			FVector::UpVector,
+			920.0f,
+			310.0f,
+			26.0f,
+			ShiftedLocation,
+			ShiftedLook,
+			ShiftedScreenUp));
+	TestTrue(
+		TEXT("Bird screen position is invariant in the moving local frame"),
+		FMath::IsNearlyEqual(
+			FVector::DotProduct(
+				ShiftedLook,
+				(FVector(4200.0f, -1700.0f, 800.0f) - ShiftedLocation)
+					.GetSafeNormal()),
+			BirdScreenOffsetCosine,
+			0.0001f));
+	TestTrue(
+		TEXT("Camera-to-bird distance is invariant in the moving local frame"),
+		FMath::IsNearlyEqual(
+			FVector::Distance(
+				ShiftedLocation,
+				FVector(4200.0f, -1700.0f, 800.0f)),
+			ExpectedBirdDistanceCM,
+			0.01f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM6ImpactObservationCameraTest,
+	"ABTS.M6.Camera.ImpactObservation",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM6ImpactObservationCameraTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(
+		TEXT("A first significant surface impact establishes a pending observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::None,
+			EABTSM6ImpactObservationAuthority::SurfaceImpact));
+	TestTrue(
+		TEXT("An actual facility hit upgrades a pending surface observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::SurfaceImpact,
+			EABTSM6ImpactObservationAuthority::FacilityImpact));
+	TestFalse(
+		TEXT("Residual surface contacts cannot replace a facility observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::FacilityImpact,
+			EABTSM6ImpactObservationAuthority::SurfaceImpact));
+	TestFalse(
+		TEXT("Repeated facility contacts cannot rotate an already locked observation"),
+		AABTSM6SlingshotCamera::ShouldReplaceImpactObservation(
+			EABTSM6ImpactObservationAuthority::FacilityImpact,
+			EABTSM6ImpactObservationAuthority::FacilityImpact));
+
+	const FVector BirdLocation = FVector::ZeroVector;
+	const FVector Up = FVector::UpVector;
+	const FVector FrozenForward = FVector::ForwardVector;
+	const FVector FacilityAnchor(300.0f, 240.0f, 250.0f);
+	const FVector FacilityExtent(320.0f, 260.0f, 760.0f);
+	FVector ObservationLocation;
+	FVector ObservationLook;
+	FVector ObservationScreenUp;
+	TestTrue(
+		TEXT("A frozen tangent and actual facility anchor produce an observation pose"),
+		AABTSM6SlingshotCamera::BuildImpactObservationPose(
+			BirdLocation,
+			Up,
+			FrozenForward,
+			FacilityAnchor,
+			FacilityExtent,
+			true,
+			920.0f,
+			310.0f,
+			26.0f,
+			0.42f,
+			4.2f,
+			ObservationLocation,
+			ObservationLook,
+			ObservationScreenUp));
+	TestTrue(
+		TEXT("Facility bounds expand the observation beyond the old bird-relative distance"),
+		FVector::Distance(ObservationLocation, FacilityAnchor)
+			> FacilityExtent.Size() * 4.0f);
+	const FVector BirdFocus = BirdLocation + Up * 80.0f;
+	const float BirdAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(FVector::DotProduct(
+			ObservationLook,
+			(BirdFocus - ObservationLocation).GetSafeNormal()), -1.0f, 1.0f)));
+	const float FacilityAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(
+		FMath::Clamp(FVector::DotProduct(
+			ObservationLook,
+			(FacilityAnchor - ObservationLocation).GetSafeNormal()), -1.0f, 1.0f)));
+	TestTrue(
+		TEXT("The whole-building observation deliberately prioritizes the facility centre"),
+		FacilityAngleDegrees < 0.01f);
+	TestTrue(
+		TEXT("The impact bird remains in the same broad collapse composition"),
+		BirdAngleDegrees < 20.0f);
+	TestTrue(
+		TEXT("Impact observation remains roll-free"),
+		FMath::Abs(FVector::DotProduct(
+			ObservationLook,
+			ObservationScreenUp)) < 0.0001f
+			&& ObservationScreenUp.SizeSquared() > 0.999f);
+
+	FVector ResidualLocation;
+	FVector ResidualLook;
+	FVector ResidualScreenUp;
+	TestTrue(
+		TEXT("Settlement hold can rebuild from the frozen tangent"),
+		AABTSM6SlingshotCamera::BuildImpactObservationPose(
+			BirdLocation + FVector(15.0f, -8.0f, 0.0f),
+			Up,
+			FrozenForward,
+			FacilityAnchor,
+			FacilityExtent,
+			true,
+			920.0f,
+			310.0f,
+			26.0f,
+			0.42f,
+			4.2f,
+			ResidualLocation,
+			ResidualLook,
+			ResidualScreenUp));
+	TestTrue(
+		TEXT("Residual bird motion cannot rotate the frozen whole-building baseline"),
+		FVector::DotProduct(
+			FVector::VectorPlaneProject(
+				FacilityAnchor - ResidualLocation,
+				Up).GetSafeNormal(),
+			FrozenForward) > 0.9999f);
+	return true;
+}
+
 #endif

@@ -5,6 +5,7 @@
 #include "Crafting/ABTSCraftingStation.h"
 #include "EngineUtils.h"
 #include "GameFramework/HUD.h"
+#include "UI/ABTSM5InventoryHUD.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM51WorldSystem.h"
 #include "World/ABTSM8RecoveryBridgeSystem.h"
@@ -17,11 +18,7 @@ void AABTSM51PlayerController::SetupInputComponent()
 
 void AABTSM51PlayerController::PrimaryWorldInteract()
 {
-	if (IsCraftingInterfaceOpen()) return;
-	float MouseX = 0.0f;
-	float MouseY = 0.0f;
-	if (!GetMousePosition(MouseX, MouseY)) return;
-	if (const AHUD* HUD = GetHUD(); HUD && HUD->GetHitBoxAtCoordinates(FVector2D(MouseX, MouseY), true)) return;
+	if (ShouldConsumePrimaryPointerForHUD()) return;
 	FHitResult Hit;
 	if (GetHitResultUnderCursor(ECC_Visibility, false, Hit))
 	{
@@ -39,6 +36,24 @@ void AABTSM51PlayerController::PrimaryWorldInteract()
 	{
 		if (It->PlaceHeldBridgeAtAim(*this)) return;
 	}
+}
+
+bool AABTSM51PlayerController::ShouldConsumePrimaryPointerForHUD() const
+{
+	if (IsCraftingInterfaceOpen()) return true;
+	float MouseX = 0.0f;
+	float MouseY = 0.0f;
+	if (!GetMousePosition(MouseX, MouseY)) return false;
+	const FVector2D ScreenPosition(MouseX, MouseY);
+	if (const AABTSM5InventoryHUD* InventoryHUD = Cast<AABTSM5InventoryHUD>(GetHUD());
+		InventoryHUD != nullptr
+		&& InventoryHUD->ConsumesPrimaryPointerAtScreenPosition(ScreenPosition))
+	{
+		return true;
+	}
+	const AHUD* HUD = GetHUD();
+	return HUD != nullptr
+		&& HUD->GetHitBoxAtCoordinates(ScreenPosition, true) != nullptr;
 }
 
 void AABTSM51PlayerController::InteractWithDirtHole(AABTSM51SlingshotDirtHole* Hole)

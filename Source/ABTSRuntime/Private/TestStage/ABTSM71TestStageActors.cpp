@@ -56,6 +56,24 @@ void AABTSM71PhysicsTestStage::OnConstruction(const FTransform& Transform)
 	if (FloorMaterial) Floor->SetMaterial(0, FloorMaterial);
 }
 
+bool AABTSM71PhysicsTestStage::ConfigureFrozenTangentFloor(
+	const FVector2D& InFloorSizeCM,
+	const float InFloorThicknessCM)
+{
+	if (!FMath::IsFinite(InFloorSizeCM.X)
+		|| !FMath::IsFinite(InFloorSizeCM.Y)
+		|| !FMath::IsFinite(InFloorThicknessCM)
+		|| InFloorSizeCM.X < 100.0f
+		|| InFloorSizeCM.Y < 100.0f
+		|| InFloorThicknessCM < 10.0f)
+	{
+		return false;
+	}
+	FloorSizeCM = InFloorSizeCM;
+	FloorThicknessCM = InFloorThicknessCM;
+	return true;
+}
+
 AABTSM71PlayerStart::AABTSM71PlayerStart(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {

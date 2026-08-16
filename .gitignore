@@ -46,6 +46,7 @@
 # Precompiled Assets
 SourceArt/**/*.png
 SourceArt/**/*.tga
+!SourceArt/UI/ABTS_UI_ActionIconAtlas_v001.png
 
 # Binary Files
 Binaries/*

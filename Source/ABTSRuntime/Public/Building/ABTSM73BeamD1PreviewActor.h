@@ -9,7 +9,15 @@
 
 class AABTSM7BuildingMaterialSystem;
 class AABTSM7BuildingModule;
+class FABTSM73BeamD1DelayedMaterialSystemTest;
+class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
+class FABTSM73BeamD1Stage55DeviceAssemblyTest;
+class FABTSM73BeamD1Stage55EditorPreviewRouteTest;
+class FABTSM73BuildingFreezeV3EditorPreviewRouteTest;
 class UHierarchicalInstancedStaticMeshComponent;
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
+class UProceduralMeshComponent;
 class USceneComponent;
 
 /** Independent Beam-D1 editor preview and opt-in real Brick runtime harness. */
@@ -39,7 +47,27 @@ public:
 	{
 		return CompiledBricks;
 	}
+	const TArray<FABTSM73BeamD1DeviceBinding>& GetCompiledDevicesForValidation() const
+	{
+		return CompiledDevices;
+	}
 	int32 GetRuntimeModuleCountForValidation() const;
+
+	/** Capture-only setup used by the explicit offscreen Stage-5 evidence runner. */
+	bool ConfigureForAutomatedCapture(
+		EABTSM73BeamDemoBuilding InDemoBuilding,
+		EABTSM73BeamC3Stage4DiagnosticLayer InLayer,
+		FString& OutError);
+
+	/** Capture-only Stage-5 production view. Additions are rendered separately
+	 * from the immutable Stage-4 prefix and may be isolated for inspection. */
+	bool ConfigureStage5ProductionForAutomatedCapture(
+		EABTSM73BeamDemoBuilding InDemoBuilding,
+		bool bAdditionsOnly,
+		FString& OutError);
+
+	/** Tight world-space bounds of the currently visible diagnostic geometry. */
+	FBox GetAutomatedCaptureBounds() const;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
@@ -62,13 +90,109 @@ protected:
 		Category = "ABTS|M7.3-Beam-D1|Preview")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GlassPreview;
 
+	/** Frozen V3 special-piece preview; currently used by the E1 Crystal cap. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Preview")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CrystalPreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Device Assembly")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ExplosiveDevicePreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Device Assembly")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> PistonDevicePreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UProceduralMeshComponent> SemanticEnvelopePreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CoreIntentPreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> TowerChildIntentPreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CoreMergeRegionPreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> SharedPairIntentPreview;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ProtectedVoidPreview;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-D1")
 	FABTSM73BeamD1Settings Settings;
 
+	/** Selects one immutable jury-demo building and overrides Settings on rebuild. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Jury Demo",
+		meta = (DisplayName = "Demo Six-Building Entry"))
+	EABTSM73BeamDemoBuilding DemoBuilding = EABTSM73BeamDemoBuilding::Custom;
+
+	/** This changes what is actually generated. It is not a visibility filter. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Generation Stop Stage"))
+	EABTSM73BeamC3GenerationStage GenerationStopStage =
+		EABTSM73BeamC3GenerationStage::CoreAndShared;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Stage 1 Diagnostic Layer"))
+	EABTSM73BeamC3Stage1DiagnosticLayer Stage1DiagnosticLayer =
+		EABTSM73BeamC3Stage1DiagnosticLayer::WFCSemanticEnvelope;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Stage 2 Diagnostic Layer",
+			EditCondition = "GenerationStopStage == EABTSM73BeamC3GenerationStage::CouplingCourses",
+			EditConditionHides))
+	EABTSM73BeamC3Stage2DiagnosticLayer Stage2DiagnosticLayer =
+		EABTSM73BeamC3Stage2DiagnosticLayer::CoreAndCouplingCourses;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Stage 3 Diagnostic Layer",
+			EditCondition = "GenerationStopStage == EABTSM73BeamC3GenerationStage::CommonExteriorFrame",
+			EditConditionHides))
+	EABTSM73BeamC3Stage3DiagnosticLayer Stage3DiagnosticLayer =
+		EABTSM73BeamC3Stage3DiagnosticLayer::ExteriorFramesOnly;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Stage 4 Diagnostic Layer",
+			EditCondition = "GenerationStopStage == EABTSM73BeamC3GenerationStage::FloorInfillRoof",
+			EditConditionHides))
+	EABTSM73BeamC3Stage4DiagnosticLayer Stage4DiagnosticLayer =
+		EABTSM73BeamC3Stage4DiagnosticLayer::TopSurfaceIntent;
+
+	/** Visualization only: hide support Body/core-fit volumes while retaining DAG edges. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Beam-C3 Staged Acceptance",
+		meta = (DisplayName = "Hide Support Demand Volumes (Lines Only)",
+			EditCondition = "Stage1DiagnosticLayer == EABTSM73BeamC3Stage1DiagnosticLayer::SemanticSupportDemandDAG",
+			EditConditionHides))
+	bool bHideSemanticSupportDemandVolumes = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
 		Category = "ABTS|M7.3-Beam-D1|Preview")
 	bool bShowEditorPreview = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UMaterialInterface> SemanticEnvelopeMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "ABTS|M7.3-Beam-D1|Stage Diagnostics")
+	TObjectPtr<UMaterialInterface> DiagnosticSolidMaterial;
 
 	/** Opt-in only: real Modules can affect PIE physics and startup gates. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite,
@@ -80,10 +204,29 @@ protected:
 	FABTSM73BeamD1Summary LastSummary;
 
 private:
+	friend class FABTSM73BeamD1DelayedMaterialSystemTest;
+	friend class FABTSM73BeamD1Stage5EditorPreviewRouteTest;
+	friend class FABTSM73BeamD1Stage55DeviceAssemblyTest;
+	friend class FABTSM73BeamD1Stage55EditorPreviewRouteTest;
+	friend class FABTSM73BuildingFreezeV3EditorPreviewRouteTest;
+
 	UHierarchicalInstancedStaticMeshComponent* GetPreview(
 		EABTSM7BuildingMaterial Material) const;
+	bool GenerateStage5ProductionPreview(bool bAdditionsOnly, FString& OutError);
+	bool GenerateStage55DeviceAssemblyPreview(FString& OutError);
+	bool GenerateBuildingFreezeV3Preview(FString& OutError);
 	void ClearPreview();
+	void ClearStageDiagnostics();
+	void TryInitializeRuntimeBuilding();
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> StageDiagnosticMIDs;
 
 	TArray<FABTSM73BeamD1BrickBinding> CompiledBricks;
+	TArray<FABTSM73BeamD1DeviceBinding> CompiledDevices;
+	int32 CompiledFrozenV3CapCount = 0;
+	uint64 FrozenV3DescriptorHash = 0;
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> RuntimeModules;
+	int32 RuntimeSystemSearchAttempts = 0;
+	FTimerHandle RuntimeSystemSearchTimer;
 };

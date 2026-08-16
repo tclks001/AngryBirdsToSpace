@@ -82,6 +82,7 @@ namespace
 		}
 	}
 
+#if !UE_BUILD_SHIPPING
 	FAutoConsoleCommandWithWorldAndArgs GABTSOpeningPreviewCommand(
 		TEXT("ABTS.OpeningPreview"),
 		TEXT("Spawn the isolated 42-second C++ opening preview. Optional argument: time scale (0.05-8.0)."),
@@ -91,6 +92,7 @@ namespace
 		TEXT("ABTS.OpeningPreview.Stop"),
 		TEXT("Stop the active isolated opening preview and restore the previous view target."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&StopOpeningPreview));
+#endif
 }
 
 AABTSOpeningCinematicPreview::AABTSOpeningCinematicPreview()

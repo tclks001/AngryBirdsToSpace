@@ -80,11 +80,164 @@ struct ABTSRUNTIME_API FABTSGeneratedBuildingSite
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };
 
+/**
+ * Additive Fixed-Six V2 facts derived from the sealed M7 Stage 5/5.5 producer.
+ *
+ * V1 sites leave this structure empty. V2 keeps the static placement bounds
+ * separate from the dynamic effect corridor so M3 can reserve world clearance
+ * without inflating the building pad or changing the Stage 4 placement pivot.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixV2Envelope
+{
+	uint64 StaticGeometryHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+	FBox PhysicalBounds = FBox(EForceInit::ForceInit);
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+	bool bDynamicEnvelopeRequired = false;
+
+	bool IsEmpty() const;
+};
+
+/** Stable support surface identity carried by a Fixed-Six V3 value snapshot. */
+enum class EABTSJuryDemoFixedSixSurfaceKind : uint8
+{
+	Unknown = 0,
+	PrimaryPlanet,
+	Satellite,
+	Count
+};
+
+/**
+ * Additive Fixed-Six V3 building and placement facts.
+ *
+ * All values are immutable data. In particular, GravityAuthorityId names the
+ * producer authority but this DTO never retains a Planet/Satellite UObject.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixV3Envelope
+{
+	uint64 StaticGeometryHash = 0;
+	uint64 ProductionIdentityHash = 0;
+	uint64 DeviceAssemblyHash = 0;
+	FBox SiteLocalBounds = FBox(EForceInit::ForceInit);
+	FBox PadBounds = FBox(EForceInit::ForceInit);
+	FBox EffectBounds = FBox(EForceInit::ForceInit);
+	EABTSJuryDemoFixedSixSurfaceKind SurfaceKind =
+		EABTSJuryDemoFixedSixSurfaceKind::Unknown;
+	FVector SupportCenterWorldCM = FVector::ZeroVector;
+	double SupportRadiusCM = 0.0;
+	FName GravityAuthorityId = NAME_None;
+	uint64 GravityIdentityHash = 0;
+	uint64 PlacementHash = 0;
+
+	bool IsEmpty() const;
+};
+
+/**
+ * One immutable JuryDemoFixedSix V1/V2/V3 placement exported by M3 for exact M7
+ * Manifest resolution.
+ *
+ * This DTO deliberately carries no weakness, attack-face or profile-search
+ * data. M7 must resolve ManifestEntryId exactly and may not substitute another
+ * entry or seed when any identity check fails.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixBuildingSite
+{
+	FName ManifestEntryId = NAME_None;
+	int32 EncounterIndex = INDEX_NONE;
+	FTransform WorldTransform = FTransform::Identity;
+	FVector2D PadHalfExtentCM = FVector2D::ZeroVector;
+	FBox LocalBounds = FBox(EForceInit::ForceInit);
+	int32 DifficultyTier = INDEX_NONE;
+	int32 DeterministicSeed = 0;
+	uint64 DescriptorHash = 0;
+	FABTSJuryDemoFixedSixV2Envelope V2Envelope;
+	FABTSJuryDemoFixedSixV3Envelope V3Envelope;
+
+	bool IsUsable(double Tolerance = 1.0e-3) const;
+	bool IsUsableForContractVersion(
+		int32 ContractVersion,
+		double Tolerance = 1.0e-3) const;
+};
+
+/**
+ * Optional, additive vNext identity for the DDL-scoped fixed-six jury map.
+ *
+ * ContractVersion == 0 and otherwise-default fields mean that an existing v1
+ * building snapshot does not publish this profile. Once any fixed-six state is
+ * present, the complete frozen identity and all six ordered sites are required.
+ */
+struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
+{
+	/** V1/V2 remain compatibility versions; fixed-six production publishes V3. */
+	static constexpr int32 CurrentContractVersion = 1;
+	static constexpr int32 SupportedV2ContractVersion = 2;
+	/** V3 is the published Map Freeze production schema. */
+	static constexpr int32 SupportedV3ContractVersion = 3;
+	static constexpr int32 ProductionContractVersion =
+		SupportedV3ContractVersion;
+	static constexpr int32 ExpectedSiteCount = 6;
+	static constexpr int32 FrozenPlacementSchemaVersion = 1;
+	static constexpr int32 FrozenV3PlacementSchemaVersion = 3;
+	static constexpr int32 FrozenDemoManifestVersion = 1;
+	static constexpr uint64 FrozenDemoManifestHash = 2324068295ull;
+	/** V1 alias retained for existing producers and tests. */
+	static constexpr uint64 FrozenPlacementCatalogHash =
+		13889440156022460967ull;
+	static constexpr uint64 FrozenV2PlacementCatalogHash =
+		11501529584318250152ull;
+	static constexpr uint64 FrozenV3PlacementCatalogHash =
+		797455362285398432ull;
+	static constexpr int32 FrozenWorldSeed = 312503;
+	static constexpr int32 FrozenCandidateId = 4;
+	/** Frozen V1 identity retained for backward-compatible readers and tests. */
+	static constexpr uint64 FrozenLayoutHash = 0x8AB8D7E4F094072Dull;
+	/** Exact M3 V2 result published after dynamic-envelope reservation. */
+	static constexpr uint64 FrozenV2LayoutHash = 0x7029074579FDC52Eull;
+	/** Exact M3 Map Freeze V3 result published by Integration. */
+	static constexpr uint64 FrozenV3LayoutHash = 0x3E143A25531F3F7Aull;
+	inline static constexpr uint64 FrozenV3PlacementHashes[ExpectedSiteCount] = {
+		0xA91A9FB5D79AE1CEull,
+		0x4C41612002CC0208ull,
+		0x8ACA9CA9BAFE95BDull,
+		0x66C8FD0EF4ACD5F2ull,
+		0x1C267DFD88E65BABull,
+		0x618C6BB2B4FB749Bull
+	};
+
+	/** Zero means this additive snapshot is absent. */
+	int32 ContractVersion = 0;
+	int32 PlacementSchemaVersion = 0;
+	int32 DemoManifestVersion = 0;
+	uint64 DemoManifestHash = 0;
+	uint64 PlacementCatalogHash = 0;
+	int32 WorldSeed = 0;
+	int32 CandidateId = INDEX_NONE;
+	uint64 LayoutHash = 0;
+	TArray<FABTSJuryDemoFixedSixBuildingSite> Sites;
+
+	bool IsEmpty() const;
+	/**
+	 * Validates a complete V3 handoff without granting production authority.
+	 * LayoutHash and PlacementHash values must be non-zero; IsUsable additionally
+	 * requires the exact Integration-published Map Freeze identities.
+	 */
+	bool IsStructurallyUsableV3(double Tolerance = 1.0e-3) const;
+	/** Accepts production-approved V1/V2 compatibility or exact frozen V3. */
+	bool IsUsable(double Tolerance = 1.0e-3) const;
+};
+
 /** Complete read-only input consumed by the M7 building-generation boundary. */
 struct ABTSRUNTIME_API FABTSBuildingGenerationContract
 {
 	FABTSGeneratedWorldIdentity Identity;
 	TArray<FABTSGeneratedBuildingSite> Sites;
+
+	/**
+	 * Additive exact-placement profile. Existing generic consumers may ignore an
+	 * empty value; fixed-six consumers must require IsUsable().
+	 */
+	FABTSJuryDemoFixedSixContract JuryDemoFixedSix;
 
 	bool IsUsable(double Tolerance = 1.0e-3) const;
 };

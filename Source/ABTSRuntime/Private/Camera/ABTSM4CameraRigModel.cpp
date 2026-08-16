@@ -136,6 +136,87 @@ float ABTSM4CameraRigModel::ComputeSafeSweepDistance(
 		SafeDesiredDistance);
 }
 
+float ABTSM4CameraRigModel::ComputeUpwardFramingDistance(
+	const float UserOrbitDistanceCM,
+	const float ElevationDegrees,
+	const float PullInStartElevationDegrees,
+	const float FullPullInElevationDegrees,
+	const float MinimumDistanceScale,
+	float& OutPullInAlpha)
+{
+	const float SafeUserDistanceCM = FMath::Max(1.0f, UserOrbitDistanceCM);
+	const float StartElevationDegrees = FMath::Max(
+		PullInStartElevationDegrees,
+		FullPullInElevationDegrees);
+	const float EndElevationDegrees = FMath::Min(
+		PullInStartElevationDegrees,
+		FullPullInElevationDegrees);
+	const float RangeDegrees = FMath::Max(KINDA_SMALL_NUMBER, StartElevationDegrees - EndElevationDegrees);
+	const float LinearAlpha = FMath::Clamp(
+		(StartElevationDegrees - ElevationDegrees) / RangeDegrees,
+		0.0f,
+		1.0f);
+	OutPullInAlpha = FMath::SmoothStep(0.0f, 1.0f, LinearAlpha);
+	const float SafeMinimumScale = FMath::Clamp(MinimumDistanceScale, 0.1f, 1.0f);
+	return SafeUserDistanceCM * FMath::Lerp(1.0f, SafeMinimumScale, OutPullInAlpha);
+}
+
+bool ABTSM4CameraRigModel::BuildSurfaceSafeTranslatedPose(
+	const FVector& DesiredCameraLocation,
+	const FVector& DesiredFocusLocation,
+	const FVector& SurfacePoint,
+	const FVector& SurfaceOutwardNormal,
+	const float MinimumCameraCenterClearanceCM,
+	const float TransitionBandCM,
+	FABTSM4SurfaceSafePose& OutPose)
+{
+	OutPose = FABTSM4SurfaceSafePose{};
+	const FVector SafeNormal = SurfaceOutwardNormal.GetSafeNormal();
+	if (DesiredCameraLocation.ContainsNaN()
+		|| DesiredFocusLocation.ContainsNaN()
+		|| SurfacePoint.ContainsNaN()
+		|| SafeNormal.IsNearlyZero()
+		|| !FMath::IsFinite(MinimumCameraCenterClearanceCM)
+		|| !FMath::IsFinite(TransitionBandCM))
+	{
+		return false;
+	}
+
+	const float CurrentClearanceCM = FVector::DotProduct(
+		DesiredCameraLocation - SurfacePoint,
+		SafeNormal);
+	const float RequiredClearanceCM = FMath::Max(0.0f, MinimumCameraCenterClearanceCM);
+	const float RawPenetrationCM = RequiredClearanceCM - CurrentClearanceCM;
+	const float SafeTransitionBandCM = FMath::Max(0.0f, TransitionBandCM);
+	float AppliedLiftCM = FMath::Max(0.0f, RawPenetrationCM);
+	float TransitionAlpha = RawPenetrationCM > 0.0f ? 1.0f : 0.0f;
+	if (SafeTransitionBandCM > KINDA_SMALL_NUMBER)
+	{
+		if (RawPenetrationCM <= -SafeTransitionBandCM)
+		{
+			AppliedLiftCM = 0.0f;
+			TransitionAlpha = 0.0f;
+		}
+		else if (RawPenetrationCM < SafeTransitionBandCM)
+		{
+			TransitionAlpha = (RawPenetrationCM + SafeTransitionBandCM)
+				/ (2.0f * SafeTransitionBandCM);
+			// C1 smooth maximum of RawPenetrationCM and zero. It begins before
+			// contact, remains above the hard minimum, and joins the exact hard
+			// correction with matching velocity at the far edge of the band.
+			AppliedLiftCM = SafeTransitionBandCM * FMath::Square(TransitionAlpha);
+		}
+	}
+	const FVector Translation = SafeNormal * AppliedLiftCM;
+	OutPose.CameraLocation = DesiredCameraLocation + Translation;
+	OutPose.FocusLocation = DesiredFocusLocation + Translation;
+	OutPose.AppliedLiftCM = AppliedLiftCM;
+	OutPose.RawPenetrationCM = RawPenetrationCM;
+	OutPose.TransitionAlpha = TransitionAlpha;
+	OutPose.bConstrained = AppliedLiftCM > KINDA_SMALL_NUMBER;
+	return true;
+}
+
 const TCHAR* ABTSM4CameraRigModel::LexToString(const EABTSM4CameraObstructionPhase Phase)
 {
 	switch (Phase)

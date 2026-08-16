@@ -11,7 +11,9 @@ enum class EABTSM7BuildingMaterial : uint8
 	Wood,
 	Stone,
 	Iron,
-	Glass
+	Glass,
+	/** Collectible emissive reward brick. Appended to preserve existing serialized values. */
+	Crystal
 };
 
 UENUM(BlueprintType)

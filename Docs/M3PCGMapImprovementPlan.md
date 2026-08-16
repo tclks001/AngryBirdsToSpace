@@ -1,5 +1,6 @@
 # M3R PCG 地图生成改进方案
 
+> 2026-08-15 DDL 路线：本次交付已更新为 `JuryDemoFixedSixV2`。M7 已冻结六栋静态生产封装并发布 V2 身份与 Physical/Effect Bounds；M3 固定 Seed `312503` / Candidate `4`，分别预留静态 Pad 与动态 EffectBounds，验证 E1–E6 的 Transform、道路/水体/相邻建筑避让并重新冻结 Layout Hash。Weakness、AttackFace、Prior-tier Infeasibility、全 Ballistic Witness、M7 全种子可行性及旧 R7 的 1000/20/3 Seed 门均延后，不阻塞本次评审路径。详见 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md)。
 > 状态：M3R-0 已完成视觉验收并合并；M3R-1、M3R-2、M3R-3 已完成 M3 所有权范围内实现与自动验收；M3R-3.1 已合并 `master`，通用 M5.1/M6 消费端已完成自动验收和兼容世界 PIE，但月度实体槽仍等待 R4/R6 唯一 Candidate，因此保持 IntegrationPending；M3R-4 已达到 M3LocalAccepted（FixtureAuthority，IntegrationPending）；M3R-5 候选绑定表现层、R-5.1 卫星/E5 候选预览及 R-5.2 道路末端终局锚点提案已达到 M3LocalAccepted（IntegrationPending）
 > 日期：2026-08-02
 > 范围：M3 TaskGraph/球面空间布局、道路、遭遇点、地貌职责，以及与 M7/M9/M10/M11.0 的接口  
@@ -991,8 +992,8 @@ NotStarted
 | M3R-4 可玩性 Witness 与流程闭环 | Week 2 后半 | **M3LocalAccepted（FixtureAuthority，IntegrationPending）**；Core 8/8、Failure 8/8、100 Seed 100/100、父级回归、fresh runtime 与强制 Unity 均通过；真实 M5.1/M6/M7/M9/流程和 R6 仍待联合验收 | 弹道、能力门、资源、桥门与卫星训练的可解证明 | M3 + Integration/M5.1/M6/M7/M9 | IntegrationAccepted |
 | M3R-5 Biome/Envelope 表现 | Week 3，可与 R-4 后半并行 | **M3LocalAccepted（IntegrationPending）**；Biome Core/Failure、100 Seed 100/100、300 plans、冻结 Oracle、显式 preview runtime 和完整 Subdivision 7 `<=8 s` 均已通过；可见 PIE、M6/M9/Character/Visibility 碰撞回归仍待 | 消费 R-3 逻辑结果的材质、HISM 和可见表现 | M3；碰撞联合回归在 Integration | IntegrationAccepted |
 | M3R-5.2 道路末端终局锚点提案 | Week 3 补充 | **IntegrationAccepted**；M3 专项 3/3、共享接缝 2/2、M5.1 4/4、M11 快速回归、fresh `L_ABTS_M11` 与可见联合 PIE 均已通过；Candidate 4 的双槽与 M11 同帧，但仍仅具 Preview/Test 权威 | 为每个保留 Candidate 输出道路末端窗口、终局双槽局部帧和普通槽排除区 | M3；实体槽与 M11 消费在 Integration/M5.1/M11 | IntegrationAccepted |
-| M3R-6 六栋 M7 实体建筑集成 | Week 3 | **NotStarted** | vNext 建筑合同、动态数量、难度/视觉路由与物理批处理 | Integration + M7，M3 只生产数据 | IntegrationAccepted |
-| M3R-7 月度认证与调参冻结 | Week 4 | **NotStarted** | 1000 Seed、fresh runtime、联合 PIE、展示 Seed 与 fallback | Integration | Complete |
+| M3R-6 六栋 M7 实体建筑集成 | DDL Fixed-Six V2 | **M3LocalAccepted / AdapterPublished；M7 InProgress**。M3 已冻结六条 V2 Placement 与动态包络，Integration 已发布 V2 Adapter；旧通用 Profile/Witness 路径改为 Deferred | 六栋静态注册、逐栋动态化与联合 PIE | Integration + M7；M3 只生产冻结数据 | IntegrationAccepted |
+| M3R-7 月度认证与调参冻结 | DDL 后续 | **Deferred / Non-release gate** | 旧 1000 Seed、20 Runtime、3 随机 PIE 与泛化 fallback 认证保留为长期路线 | Integration | Deferred |
 
 ```mermaid
 flowchart LR
@@ -1442,7 +1443,12 @@ F7 在显式精确 Candidate 预览下增加洋红净空 Cell、白色锚点、�
 - 联合验收必须证明普通槽 Actor 不进入 `ClearanceCellIds`、太空槽恰有一对、位于道路末端真实地表、局部帧与 M11 预冻结布局使用同一 Hash 身份，并在可见 PIE 中完成道路末端位置/朝向抽查；
 - 实体消费和共享接缝已在 `L_ABTS_M11` 完成自动化、fresh NullRHI 与可见 PIE，详见 [M3R-5.2 → M5.1 → M11 Preview/Test 集成](M3R52M11PreviewFinaleIntegrationDesign.md)，当前为 **IntegrationAccepted**；测试预览仍不得确认为月度正式布局。
 
-### 14.9 M3R-6：通过稳定合同接入六栋 M7 实体建筑
+### 14.8.1 DDL JuryDemoFixedSixV2（当前发布路线）
+
+当前发布路线以 [M3 Jury Demo Fixed-Six 集成计划](M3JuryDemoFixedSixIntegrationPlan.md) 为准。M3 使用 M7 V2 的六条静态生产封装与 Physical/Effect Bounds 冻结单一展示布局；M3 数据侧已达到 `M3LocalAccepted`，Integration V2 Adapter 已发布，M7 正在实现静态消费。下方原 M3R-6 通用 Profile/Witness 集成与 M3R-7 全量认证保留为长期设计历史，不再构成本次 DDL 门槛。
+
+代码入口为 `FABTSM3JuryFixedSixLayoutBuilder`。它不修改稳定契约；Integration 已加法扩展向后兼容的 Fixed-Six V2 DTO，并按 M3 最终 Hash 冻结 V2 常量、切换 Adapter 导出。M7 仍需独立完成六栋静态注册、逐栋 ChaosReady 和最终联合 PIE。
+### 14.9 M3R-6（历史通用路线，Deferred）：通过稳定合同接入六栋 M7 实体建筑
 
 **实现目标**
 
@@ -1469,7 +1475,7 @@ F7 在显式精确 Candidate 预览下增加洋红净空 Cell、白色锚点、�
 
 该阶段不能在 M3 工作树单独宣告完成。共享合同由 Integration 修改，实体建筑与物理策略由 M7 修改；只有联合候选通过后状态才是 **IntegrationAccepted**。
 
-### 14.10 M3R-7：大规模认证、PIE 调参与发布冻结
+### 14.10 M3R-7（DDL 后续，Non-release gate）：大规模认证、PIE 调参与发布冻结
 
 **实现目标**
 
@@ -1693,3 +1699,19 @@ Editor-only Debug Layer：
 6. 用现有 M7/M9/M11.0 门槛回归。
 
 随后按第 14 节的 M3R-1～M3R-7 依次引入 `RouteBeat + EncounterContract + FlowS + BiomeDistrict`，并在稳定合同之后才接入六栋 M7 实体建筑。这能保留项目已有的确定性 CellTopo 基础，同时把 PCG 的价值从“随机铺一条路、分几块地”提升为“持续生成可通关、可侦察、可理解、可发射且节奏稳定的线性关卡”。
+
+---
+
+## 20. Building Generation and Placement Freeze V3：M3 MapFreezeV3
+
+本阶段采用增量预发布结果，不直接替换现行 V2 生产链：
+
+- 固定身份：`Seed=312503`、`Candidate=4`、`Schema=3`、M7 Catalog `8960617043786800590`；
+- 固定槽位：`[E2,E3,E4,E5,E1,E6]`；E2、E3、E4、E5、E6 在主星，E1 在既有卫星背面窗口；
+- 主星五栋从各自 Encounter 的 Attack Corridor/Slingshot 侧建立 Site X，Site Z 为主星径向；卫星 E1 复用卫星预览切帧，但把旧代理球心位置收回到真实月面 Pivot；
+- M7 已完成一次 `Building local +Y → Site +X`，M3 不再施加 90°。M3 用非方形 `SiteLocalBounds` 推导水平占地长轴，并冻结“攻击走廊沿 Site X、长轴与走廊正交”门，显式拦截装反和双重旋转；
+- 五个主星站点消费 V3 `PadBounds/EffectBounds` 做 Cell reservation，并逐对校验完整水平包络分离；卫星 E1 不生成或占用第六个主星施工位；
+- 每条站点冻结 Surface、Support Center/Radius、Gravity Authority/Identity、PlacementHash，最终按槽位顺序生成 LayoutHash；错误轴、Surface、E1 槽位、Bounds、发布副本漂移均 fail closed；
+- M3 只发布 `FABTSM3JuryMapFreezeV3Result` 供集成审核。Integration 切换生产契约前，现行 V2 Terrain Pad、V2 Adapter 和 `ProductionContractVersion=2` 保持不变，运行日志必须显示 `ActivationAllowed=0`。
+
+当前 M3 预发布冻结身份为 `LayoutHash=3EB6326A2877EE1E`；六条 PlacementHash 依次为 `A91A9FB5D79AE1CE / 4C41612002CC0208 / 8ACA9CA9BAFE95BD / 66C8FD0EF4ACD5F2 / F162C1D3F858E998 / 73BC7FE74D3835F7`。该身份需在最终代码上完成两次独立 fresh NullRHI 重跑后，才能作为集成候选；M7 实时 Chaos 与联合可见 PIE 仍是后续独立证据层。

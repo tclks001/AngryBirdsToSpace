@@ -34,6 +34,10 @@ public:
 	FVector GetPlaneOrigin() const { return GetActorLocation(); }
 	FVector GetPlaneUp() const { return GetActorUpVector().GetSafeNormal(); }
 	UStaticMeshComponent* GetFloorComponent() const { return Floor; }
+	/** Sets the exact frozen tangent-pad identity before FinishSpawningActor. */
+	bool ConfigureFrozenTangentFloor(
+		const FVector2D& InFloorSizeCM,
+		float InFloorThicknessCM);
 
 private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7.1", meta = (AllowPrivateAccess = "true"))

@@ -226,6 +226,15 @@ float FABTSM3TerrainVisualField::GetUnpaddedSurfaceRadius(const FVector& UnitDir
 	if (!IsReady()) return BaseRadiusCM;
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
+	return GetUnpaddedSurfaceRadiusForCell(Direction, CellId);
+}
+
+float FABTSM3TerrainVisualField::GetUnpaddedSurfaceRadiusForCell(
+	const FVector& UnitDirection,
+	const int32 CellId) const
+{
+	if (!IsReady() || !Cells->IsValidIndex(CellId)) return BaseRadiusCM;
+	const FVector Direction = UnitDirection.GetSafeNormal();
 	float HeightCM = GetInterpolatedHeightCM(Direction, CellId);
 	// Water is an edge property. Deform only a narrow band around the generated
 	// flow-centerline or barrier-dual segment; never lower an entire logical Cell (which creates a
@@ -273,28 +282,98 @@ float FABTSM3TerrainVisualField::GetBuildingPadSignedDistanceCM(
 	return Outside.Size() + FMath::Min(FMath::Max(Delta.X, Delta.Y), 0.0f);
 }
 
-float FABTSM3TerrainVisualField::ApplyBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const
+float FABTSM3TerrainVisualField::ApplyCompatibilityBuildingPadRadius(
+	const FVector& UnitDirection,
+	float UnpaddedRadiusCM) const
 {
 	const FVector Direction = UnitDirection.GetSafeNormal();
+	// Preserve the established TaskGraph construction-pad behavior, including
+	// both cut and fill. Terrain-only jury pads are composed separately below.
 	for (const FABTSM3BuildingSpawnSite& Pad : BuildingPads)
 	{
+		if (Pad.TaskId == INDEX_NONE)
+		{
+			continue;
+		}
 		const float Denominator = FVector::DotProduct(Pad.AnchorDirection.GetSafeNormal(), Direction);
 		if (Denominator <= 0.25f) continue;
 		const float SignedDistance = GetBuildingPadSignedDistanceCM(Direction, UnpaddedRadiusCM, Pad);
 		const float BlendWidth = FMath::Max(1.0f, Pad.PadEdgeBlendWidthCM);
 		const float BlendAlpha = 1.0f - FMath::SmoothStep(0.0f, BlendWidth, FMath::Max(0.0f, SignedDistance));
 		if (BlendAlpha <= 0.0f) continue;
-		// Intersect this radial ray with the tangent plane through the CellTopo anchor.
-		const float TangentPlaneRadius = Pad.PadTargetRadiusCM / Denominator;
-		UnpaddedRadiusCM = FMath::Lerp(UnpaddedRadiusCM, TangentPlaneRadius, BlendAlpha);
+		const float TangentPlaneRadiusCM = Pad.PadTargetRadiusCM / Denominator;
+		UnpaddedRadiusCM = FMath::Lerp(
+			UnpaddedRadiusCM,
+			TangentPlaneRadiusCM,
+			BlendAlpha);
 	}
 	return UnpaddedRadiusCM;
+}
+
+float FABTSM3TerrainVisualField::GetCompatibilityPaddedSurfaceRadius(
+	const FVector& UnitDirection) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	return ApplyCompatibilityBuildingPadRadius(
+		Direction,
+		GetUnpaddedSurfaceRadius(Direction));
+}
+
+float FABTSM3TerrainVisualField::ApplyBuildingPadRadius(
+	const FVector& UnitDirection,
+	float UnpaddedRadiusCM) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	const float CompatibilityPaddedRadiusCM =
+		ApplyCompatibilityBuildingPadRadius(Direction, UnpaddedRadiusCM);
+	float ResolvedRadiusCM = CompatibilityPaddedRadiusCM;
+	for (const FABTSM3BuildingSpawnSite& Pad : BuildingPads)
+	{
+		if (Pad.TaskId != INDEX_NONE)
+		{
+			continue;
+		}
+		const float Denominator = FVector::DotProduct(Pad.AnchorDirection.GetSafeNormal(), Direction);
+		if (Denominator <= 0.25f) continue;
+		const float SignedDistance = GetBuildingPadSignedDistanceCM(
+			Direction,
+			CompatibilityPaddedRadiusCM,
+			Pad);
+		const float BlendWidth = FMath::Max(1.0f, Pad.PadEdgeBlendWidthCM);
+		const float BlendAlpha = 1.0f - FMath::SmoothStep(
+			0.0f,
+			BlendWidth,
+			FMath::Max(0.0f, SignedDistance));
+		if (BlendAlpha <= 0.0f) continue;
+		const float TangentPlaneRadiusCM = Pad.PadTargetRadiusCM / Denominator;
+		const float CandidateRadiusCM = FMath::Lerp(
+			CompatibilityPaddedRadiusCM,
+			TangentPlaneRadiusCM,
+			BlendAlpha);
+		// All fixed-six work pads grade downward from the production terrain.
+		// Their lower envelope is continuous, order independent and guarantees
+		// that a remote overlapping skirt cannot lift or re-cut an inner plane.
+		ResolvedRadiusCM = FMath::Min(ResolvedRadiusCM, CandidateRadiusCM);
+	}
+	return ResolvedRadiusCM;
 }
 
 float FABTSM3TerrainVisualField::GetSurfaceRadius(const FVector& UnitDirection) const
 {
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	return ApplyBuildingPadRadius(Direction, GetUnpaddedSurfaceRadius(Direction));
+}
+
+float FABTSM3TerrainVisualField::GetSurfaceRadiusWithHint(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	int32& OutCellId) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutCellId = FindNearestCell(Direction, StartCellHint);
+	return ApplyBuildingPadRadius(
+		Direction,
+		GetUnpaddedSurfaceRadiusForCell(Direction, OutCellId));
 }
 
 FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection) const
@@ -325,6 +404,58 @@ FVector FABTSM3TerrainVisualField::GetSurfaceNormal(const FVector& UnitDirection
 	FVector Normal = (NormalXY + NormalDiagonal).GetSafeNormal();
 	if (FVector::DotProduct(Normal, Up) < 0.0f) Normal *= -1.0f;
 	return Normal.IsNearlyZero() ? Up : Normal;
+}
+bool FABTSM3TerrainVisualField::QueryContinuousSurfaceSample(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	FABTSM3ContinuousSurfaceSample& OutSample) const
+{
+	if (!QueryContinuousSurfaceBaseSample(
+			UnitDirection, StartCellHint, OutSample))
+	{
+		return false;
+	}
+	OutSample.SurfaceNormal = GetSurfaceNormal(UnitDirection);
+	return true;
+}
+
+bool FABTSM3TerrainVisualField::QueryContinuousSurfaceBaseSample(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	FABTSM3ContinuousSurfaceSample& OutSample) const
+{
+	OutSample = FABTSM3ContinuousSurfaceSample();
+	if (!IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutSample.SurfaceRadiusCM = GetSurfaceRadiusWithHint(
+		Direction, StartCellHint, OutSample.CellId);
+	if (OutSample.CellId == INDEX_NONE) return false;
+	OutSample.TerrainColor = GetDebugTerrainColorForCell(
+		Direction,
+		OutSample.CellId);
+	return true;
+}
+
+bool FABTSM3TerrainVisualField::QuerySurfaceGeometry(
+	const FVector& UnitDirection,
+	const int32 StartCellHint,
+	int32& OutCellId,
+	float& OutSurfaceRadiusCM,
+	FVector& OutSurfaceNormal) const
+{
+	OutCellId = INDEX_NONE;
+	OutSurfaceRadiusCM = 0.0f;
+	OutSurfaceNormal = FVector::UpVector;
+	if (!IsReady() || UnitDirection.IsNearlyZero()) return false;
+	const FVector Direction = UnitDirection.GetSafeNormal();
+	OutSurfaceRadiusCM = GetSurfaceRadiusWithHint(
+		Direction, StartCellHint, OutCellId);
+	if (OutCellId == INDEX_NONE) return false;
+	// Keep the eight offset probes on their original Cell-0 canonical path.
+	// Production mesh generation invokes this normal path serially because its
+	// exact oracle proved worker-thread evaluation can drift in the low bits.
+	OutSurfaceNormal = GetSurfaceNormal(Direction);
+	return true;
 }
 
 bool FABTSM3TerrainVisualField::QuerySurfaceSDF(
@@ -413,6 +544,14 @@ FLinearColor FABTSM3TerrainVisualField::GetDebugTerrainColor(const FVector& Unit
 {
 	const FVector Direction = UnitDirection.GetSafeNormal();
 	const int32 CellId = FindNearestCell(Direction);
+	return GetDebugTerrainColorForCell(Direction, CellId);
+}
+
+FLinearColor FABTSM3TerrainVisualField::GetDebugTerrainColorForCell(
+	const FVector& UnitDirection,
+	const int32 CellId) const
+{
+	const FVector Direction = UnitDirection.GetSafeNormal();
 	const FABTSM3BoundarySegment* Best = nullptr;
 	const FABTSM3BoundarySegment* Second = nullptr;
 	float BestDistance = 0.0f, SecondDistance = 0.0f;

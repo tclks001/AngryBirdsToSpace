@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM73StableBuildingActor.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -13,6 +14,8 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "Guide/ABTSGuideEvents.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
@@ -22,12 +25,32 @@
 #include "Slingshot/ABTSM6DestructibleProxy.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TestStage/ABTSM71TestStageActors.h"
+#include "UI/ABTSUITheme.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM9GravityQuery.h"
 #include "World/ABTSM9Satellite.h"
 
 namespace
 {
+	// DrawDebugPoint depth priority 0 maps to the world depth group. Every visual
+	// layer of the prediction must share it so occlusion remains spatially honest.
+	constexpr uint8 FlightTrajectoryWorldDepthPriority = 0;
+	static_assert(FlightTrajectoryWorldDepthPriority == 0,
+		"World trajectory layers must remain world-depth tested.");
+
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryCoreScale(
+		TEXT("abts.UI.Flight.WorldTrajectory.CoreScale"), 0.62f,
+		TEXT("World trajectory cyan core scale relative to M6 point size [0.25, 1]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryUnderlayScale(
+		TEXT("abts.UI.Flight.WorldTrajectory.UnderlayScale"), 1.24f,
+		TEXT("World trajectory dark underlay scale relative to M6 point size [1, 2]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryEndpointScale(
+		TEXT("abts.UI.Flight.WorldTrajectory.EndpointScale"), 1.35f,
+		TEXT("Predicted endpoint scale relative to M6 point size [1, 2.5]."));
+	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryForegroundDepthBiasCM(
+		TEXT("abts.UI.Flight.WorldTrajectory.ForegroundDepthBiasCM"), 0.5f,
+		TEXT("Camera-facing world-space bias for the cyan/amber foreground point [0.05, 3] cm."));
+
 	/** Keeps pouch local +Y on the stable stake-to-stake side while local +Z follows launch. */
 	FQuat MakePulledPouchRotation(const FVector& LaunchDirection, const FVector& PreferredRight)
 	{
@@ -40,6 +63,17 @@ namespace
 		}
 		return FRotationMatrix::MakeFromYZ(PouchSideY, PouchForwardZ).ToQuat();
 	}
+}
+
+FVector FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+	const FVector& LaunchFocusWorld,
+	const FVector& UnobstructedPouchWorld,
+	const float RetainedDrawScale)
+{
+	return FMath::Lerp(
+		LaunchFocusWorld,
+		UnobstructedPouchWorld,
+		FMath::Clamp(RetainedDrawScale, 0.0f, 1.0f));
 }
 
 AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
@@ -151,6 +185,7 @@ void AABTSM6SlingshotSystem::BeginPlay()
 			case EABTSM7BuildingMaterial::Stone: Material = EABTSM6ImpactMaterial::Stone; break;
 			case EABTSM7BuildingMaterial::Iron: Material = EABTSM6ImpactMaterial::Iron; break;
 			case EABTSM7BuildingMaterial::Glass: Material = EABTSM6ImpactMaterial::Glass; break;
+			case EABTSM7BuildingMaterial::Crystal: Material = EABTSM6ImpactMaterial::Glass; break;
 			default: break;
 			}
 			ApplyStaticPhysics(It->GetHISM(), Material, TEXT("ABTSPlanarBrickImpactPhysics"));
@@ -186,8 +221,14 @@ void AABTSM6SlingshotSystem::BeginPlay()
 
 void AABTSM6SlingshotSystem::ConfigureDebugSlingshots(const bool bEnable, const int32 InStartCellId)
 {
+#if UE_BUILD_SHIPPING
+	bSpawnDebugSlingshotsAtStart = false;
+	(void)bEnable;
+	(void)InStartCellId;
+#else
 	bSpawnDebugSlingshotsAtStart = bEnable;
 	DebugStartCellId = InStartCellId;
+#endif
 }
 
 void AABTSM6SlingshotSystem::ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp)
@@ -326,6 +367,10 @@ bool AABTSM6SlingshotSystem::SpawnDebugSlingshotPair(
 
 void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 {
+#if UE_BUILD_SHIPPING
+	bSpawnDebugSlingshotsAtStart = false;
+	return;
+#else
 	if (!bSpawnDebugSlingshotsAtStart || bDebugSlingshotsSpawned || !ResolveDependencies()
 		|| !Planet->LogicalCells.IsValidIndex(DebugStartCellId)) return;
 	const FVector StartDirection = Planet->LogicalCells[DebugStartCellId].UnitCenter.GetSafeNormal();
@@ -343,6 +388,7 @@ void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 	}
 	bDebugSlingshotsSpawned = true;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][DebugSlingshots] Enabled=1 StartCell=%d Spawned=%d Simple=4 Reinforced=4"), DebugStartCellId, Spawned);
+#endif
 }
 
 bool AABTSM6SlingshotSystem::IsBirdAllowed(const AABTSM25BirdCharacter& Bird, const AABTSM51SlingshotCord& Cord) const
@@ -385,6 +431,9 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	if (Bird == nullptr || !IsBirdAllowed(*Bird, Cord))
 	{
 		UE_LOG(LogABTSRuntime, Warning, TEXT("[ABTS][M6][Enter] Rejected Bird=%d Stake=%s"), Bird ? ABTSBirdIdToIndex(Bird->GetBirdId()) : -1, *ABTSGetItemFallbackLabel(Cord.GetStakeItem()));
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotEntryRejected,
+			FABTSGuideSubjects::FromSlingshotTier(Tier), &Cord,
+			Bird ? ABTSBirdIdToIndex(Bird->GetBirdId()) : -1);
 		return false;
 	}
 	ActiveCord = &Cord;
@@ -421,8 +470,18 @@ bool AABTSM6SlingshotSystem::TryEnterLaunchMode(AABTSM51SlingshotCord& Cord)
 	{
 		Audio->SetMusicState(EABTSMusicState::Aim);
 	}
-	if (SlingshotCamera) SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
+	if (SlingshotCamera)
+	{
+		SlingshotCamera->SetAimFrame(SlingCenter, SlingForward, SlingUp);
+		if (!bPlanarTestMode && Planet.IsValid())
+		{
+			SlingshotCamera->ConfigureAimPrimarySurfaceGroundContext(Planet.Get());
+		}
+	}
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Enter] Bird=%d Reinforced=%d"), ABTSBirdIdToIndex(Bird->GetBirdId()), Cord.GetStakeItem() == EABTSItemId::ReinforcedStake ? 1 : 0);
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotReady,
+		FABTSGuideSubjects::FromSlingshotTier(Tier), &Cord,
+		ABTSBirdIdToIndex(Bird->GetBirdId()), FMath::RoundToInt(PullAlpha * 100.0f));
 	return true;
 }
 
@@ -489,6 +548,12 @@ bool AABTSM6SlingshotSystem::BeginPull(APlayerController& Controller)
 			ActiveCord.IsValid() ? ActiveCord->GetRestCordLengthCM() : 0.0f,
 			PullAlpha);
 	}
+	if (ActiveCord.IsValid())
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotPulling,
+			FABTSGuideSubjects::FromSlingshotTier(ActiveCord->GetSlingshotTier()),
+			ActiveCord.Get(), FMath::RoundToInt(PullAlpha * 100.0f));
+	}
 	return true;
 }
 
@@ -518,11 +583,18 @@ void AABTSM6SlingshotSystem::UpdateAimFromCursor(APlayerController& Controller)
 void AABTSM6SlingshotSystem::AdjustPullPower(const float MouseWheelValue)
 {
 	if (LaunchState != EABTSM6LaunchState::Ready && LaunchState != EABTSM6LaunchState::Pulling) return;
+	const float PreviousPullAlpha = PullAlpha;
 	// UE wheel axis is positive upward. Design contract: wheel down increases power.
 	PullAlpha = FMath::Clamp(
 		PullAlpha - MouseWheelValue * GetResolvedPullPowerWheelStep(),
 		0.0f,
 		1.0f);
+	if (!FMath::IsNearlyEqual(PreviousPullAlpha, PullAlpha) && ActiveCord.IsValid())
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotPowerChanged,
+			FABTSGuideSubjects::FromSlingshotTier(ActiveCord->GetSlingshotTier()),
+			ActiveCord.Get(), FMath::RoundToInt(PullAlpha * 100.0f));
+	}
 }
 
 void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
@@ -532,9 +604,150 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 		GetResolvedMinimumPullDistanceCM(),
 		GetResolvedMaximumPullDistanceCM(),
 		PullAlpha);
-	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
-	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
-	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
+	const FVector LaunchFocus = SlingCenter + SlingUp * 65.0f;
+	const FVector UnobstructedPouchLocation =
+		RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
+	const FVector UnobstructedDirection =
+		(LaunchFocus - UnobstructedPouchLocation).GetSafeNormal();
+	const FQuat PouchRotation =
+		MakePulledPouchRotation(UnobstructedDirection, SlingRight);
+	const float BirdRadiusCM = FMath::Max(
+		1.0f, LaunchedBird->GetSlingshotTrajectoryCollisionRadiusCM());
+	constexpr float ReleaseClearanceMarginCM = 10.0f;
+
+	const auto ResolveClearance = [this, &PouchRotation, BirdRadiusCM](
+		const FVector& CandidatePouchLocation,
+		float& OutClearanceDeficitCM)
+	{
+		const FVector CandidateBirdCenter =
+			CandidatePouchLocation
+			+ PouchRotation.RotateVector(
+				FVector(0.0f, 0.0f, BirdInPouchOffsetCM));
+		FVector SurfacePosition = FVector::ZeroVector;
+		FVector SurfaceNormal = SlingUp;
+		bool bSurfaceResolved = false;
+		if (bPlanarTestMode)
+		{
+			SurfacePosition = CandidateBirdCenter
+				- PlanarUp * FVector::DotProduct(
+					CandidateBirdCenter - PlanarOrigin, PlanarUp);
+			SurfaceNormal = PlanarUp;
+			bSurfaceResolved = true;
+		}
+		else if (Planet.IsValid())
+		{
+			float SurfaceRadiusCM = 0.0f;
+			int32 SurfaceCellId = INDEX_NONE;
+			const FVector SurfaceDirection =
+				(CandidateBirdCenter - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+			bSurfaceResolved = !SurfaceDirection.IsNearlyZero()
+				&& Planet->QuerySurface(
+					SurfaceDirection,
+					SurfacePosition,
+					SurfaceNormal,
+					SurfaceRadiusCM,
+					SurfaceCellId);
+		}
+		if (!bSurfaceResolved)
+		{
+			OutClearanceDeficitCM = 0.0f;
+			return false;
+		}
+		const float CurrentClearanceCM = FVector::DotProduct(
+			CandidateBirdCenter - SurfacePosition,
+			SurfaceNormal.GetSafeNormal());
+		OutClearanceDeficitCM =
+			BirdRadiusCM + ReleaseClearanceMarginCM - CurrentClearanceCM;
+		return true;
+	};
+
+	PouchLocation = UnobstructedPouchLocation;
+	float RetainedDrawScale = 1.0f;
+	float RawClearanceDeficitCM = 0.0f;
+	const bool bSurfaceResolved =
+		ResolveClearance(UnobstructedPouchLocation, RawClearanceDeficitCM);
+	if (bSurfaceResolved && RawClearanceDeficitCM > 0.01f)
+	{
+		// PullAlpha owns power. When terrain blocks the visual draw, shorten the
+		// physical pouch along the same launch ray so direction and launch speed
+		// remain authoritative while the bird stays above the primary surface.
+		constexpr float MinimumRetainedDrawScale = 0.05f;
+		float MinimumScaleDeficitCM = 0.0f;
+		const FVector MinimumScalePouch =
+			FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+				LaunchFocus,
+				UnobstructedPouchLocation,
+				MinimumRetainedDrawScale);
+		if (ResolveClearance(MinimumScalePouch, MinimumScaleDeficitCM)
+			&& MinimumScaleDeficitCM <= 0.01f)
+		{
+			float SafeScale = MinimumRetainedDrawScale;
+			float BlockedScale = 1.0f;
+			for (int32 Iteration = 0; Iteration < 12; ++Iteration)
+			{
+				const float CandidateScale = (SafeScale + BlockedScale) * 0.5f;
+				float CandidateDeficitCM = 0.0f;
+				const FVector CandidatePouch =
+					FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+						LaunchFocus,
+						UnobstructedPouchLocation,
+						CandidateScale);
+				if (ResolveClearance(CandidatePouch, CandidateDeficitCM)
+					&& CandidateDeficitCM <= 0.01f)
+				{
+					SafeScale = CandidateScale;
+				}
+				else
+				{
+					BlockedScale = CandidateScale;
+				}
+			}
+			RetainedDrawScale = SafeScale;
+			PouchLocation =
+				FABTSM6PouchClearanceGeometry::ContractAlongLaunchRay(
+					LaunchFocus,
+					UnobstructedPouchLocation,
+					RetainedDrawScale);
+		}
+		else
+		{
+			UE_LOG(
+				LogABTSRuntime,
+				Error,
+				TEXT("[ABTS][M6][PouchSurfaceClearance] Rejected Reason=LaunchFocusNotClear RawDeficit=%.2f MinimumScaleDeficit=%.2f Pull=%.3f"),
+				RawClearanceDeficitCM,
+				MinimumScaleDeficitCM,
+				PullAlpha);
+			PouchLocation = MinimumScalePouch;
+			RetainedDrawScale = MinimumRetainedDrawScale;
+		}
+	}
+	const FVector Direction = (LaunchFocus - PouchLocation).GetSafeNormal();
+	const float DirectionDot = FVector::DotProduct(
+		UnobstructedDirection,
+		Direction);
+	const bool bSurfaceClampActive = RetainedDrawScale < 0.9999f;
+	const float ShortenedDrawCM = FVector::Distance(
+		UnobstructedPouchLocation,
+		PouchLocation);
+	if (bSurfaceClampActive != bPouchSurfaceClampActive
+		|| (bSurfaceClampActive
+			&& !FMath::IsNearlyEqual(
+				ShortenedDrawCM, LastPouchSurfaceAdjustmentCM, 1.0f)))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Display,
+			TEXT("[ABTS][M6][PouchSurfaceClearance] Active=%d Mode=LaunchRayContract Scale=%.4f Shortened=%.2f DirectionDot=%.9f Pull=%.3f BirdRadius=%.2f Margin=10.00"),
+			bSurfaceClampActive ? 1 : 0,
+			RetainedDrawScale,
+			ShortenedDrawCM,
+			DirectionDot,
+			PullAlpha,
+			BirdRadiusCM);
+	}
+	bPouchSurfaceClampActive = bSurfaceClampActive;
+	LastPouchSurfaceAdjustmentCM = ShortenedDrawCM;
 	const FQuat MountedBirdRotation =
 		ABTSMakeSlingshotMountedBirdRotation(Direction, SlingUp);
 	LaunchedBird->SetActorLocationAndRotation(
@@ -570,15 +783,44 @@ FVector AABTSM6SlingshotSystem::GetBirdInPouchLocation(const FQuat& PouchRotatio
 void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 {
 	if (LaunchState != EABTSM6LaunchState::Pulling || !bCurrentTrajectoryPreviewValid) return;
+	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
+	const float UnderlaySize = TrajectoryPointSize * FMath::Clamp(
+		CVarFlightWorldTrajectoryUnderlayScale.GetValueOnGameThread(), 1.0f, 2.0f);
+	const float CoreSize = TrajectoryPointSize * FMath::Clamp(
+		CVarFlightWorldTrajectoryCoreScale.GetValueOnGameThread(), 0.25f, 1.0f);
+	const float EndpointSize = TrajectoryPointSize * FMath::Clamp(
+		CVarFlightWorldTrajectoryEndpointScale.GetValueOnGameThread(), 1.0f, 2.5f);
+	const float ForegroundDepthBiasCM = FMath::Clamp(
+		CVarFlightWorldTrajectoryForegroundDepthBiasCM.GetValueOnGameThread(), 0.05f, 3.0f);
+	const FColor UnderlayColor = Theme.SlotBorder.ToFColorSRGB();
+	const FColor CoreColor = Theme.AccentSecondary.ToFColorSRGB();
+	const FColor EndpointColor = Theme.AccentPrimary.ToFColorSRGB();
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	const APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+	const bool bHasPlayerView = PlayerController != nullptr;
+	if (bHasPlayerView)
+	{
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
 	const int32 VisiblePointCount = FMath::Min(
 		FMath::Clamp(TrajectorySampleCount, 8, 128),
 		CurrentTrajectoryPreview.WorldPoints.Num());
+	const int32 LastVisibleIndex = FMath::Max(0, (VisiblePointCount - 1) & ~1);
 	for (int32 Index = 0; Index < VisiblePointCount; ++Index)
 	{
 		if ((Index & 1) == 0)
 		{
-			DrawDebugPoint(GetWorld(), CurrentTrajectoryPreview.WorldPoints[Index],
-				TrajectoryPointSize, FColor(176, 224, 255), false, 0.0f, 0);
+			const FVector& Point = CurrentTrajectoryPreview.WorldPoints[Index];
+			const FVector ForegroundPoint = bHasPlayerView
+				? Point + (ViewLocation - Point).GetSafeNormal() * ForegroundDepthBiasCM
+				: Point;
+			DrawDebugPoint(GetWorld(), Point, UnderlaySize, UnderlayColor, false, 0.0f,
+				FlightTrajectoryWorldDepthPriority);
+			DrawDebugPoint(GetWorld(), ForegroundPoint,
+				Index == LastVisibleIndex ? EndpointSize : CoreSize,
+				Index == LastVisibleIndex ? EndpointColor : CoreColor,
+				false, 0.0f, FlightTrajectoryWorldDepthPriority);
 		}
 	}
 }
@@ -642,6 +884,13 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 		AimPlaneOffset.Z,
 		GetActiveLaunchProfile() != nullptr ? CalibrationLaunchProfileHash : 0,
 		bCalibrationModeEnabled ? 1 : 0);
+	if (ActiveCord.IsValid())
+	{
+		FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::SlingshotLaunched,
+			FABTSGuideSubjects::FromSlingshotTier(ActiveCord->GetSlingshotTier()),
+			LaunchedBird.Get(), ABTSBirdIdToIndex(LaunchedBird->GetBirdId()),
+			FMath::RoundToInt(Velocity.Size()));
+	}
 	if (!bCalibrationModeEnabled)
 	{
 		BeginLaunchGravityPhase();
@@ -692,6 +941,7 @@ EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveCo
 		case EABTSM7BuildingMaterial::Stone: return EABTSM6ImpactMaterial::Stone;
 		case EABTSM7BuildingMaterial::Iron: return EABTSM6ImpactMaterial::Iron;
 		case EABTSM7BuildingMaterial::Glass: return EABTSM6ImpactMaterial::Glass;
+		case EABTSM7BuildingMaterial::Crystal: return EABTSM6ImpactMaterial::Glass;
 		default: return EABTSM6ImpactMaterial::Wood;
 		}
 	}
@@ -837,11 +1087,86 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 	return true;
 }
 
+bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
+	const FHitResult& Hit,
+	FVector& OutAnchor,
+	FVector& OutExtent,
+	FName& OutFacilityName) const
+{
+	OutAnchor = FVector::ZeroVector;
+	OutExtent = FVector::ZeroVector;
+	OutFacilityName = NAME_None;
+	const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+	if (HitComponent == nullptr) return false;
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding
+		: RequiredBuildingActors)
+	{
+		const AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+		if (Building == nullptr
+			|| !Building->OwnsRuntimePrimitive(HitComponent))
+		{
+			continue;
+		}
+		int32 LiveModuleCount = 0;
+		if (!Building->QueryLivePresentationAnchor(
+			OutAnchor,
+			LiveModuleCount))
+		{
+			return false;
+		}
+		FBox FacilityBounds(EForceInit::ForceInit);
+		int32 BoundsModuleCount = 0;
+		if (Building->QueryLivePresentationBounds(
+			FacilityBounds,
+			BoundsModuleCount))
+		{
+			OutAnchor = FacilityBounds.GetCenter();
+			OutExtent = FacilityBounds.GetExtent();
+		}
+		OutFacilityName = Building->GetFName();
+		return true;
+	}
+	return false;
+}
+
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
 	LaunchedBird->NotifySlingshotPresentationImpact();
-	if (SlingshotCamera) SlingshotCamera->NotifyBirdImpact();
+	if (SlingshotCamera)
+	{
+		FABTSM6ImpactObservationSample Observation;
+		Observation.ImpactPoint = !Hit.ImpactPoint.IsNearlyZero()
+			? FVector(Hit.ImpactPoint)
+			: LaunchedBird->GetActorLocation();
+		Observation.ImpactNormal = Hit.ImpactNormal.GetSafeNormal();
+		Observation.IncomingVelocity = IncomingVelocity;
+		Observation.NormalSpeedCMPerSec = NormalSpeedCMPerSec;
+		FName FacilityName = NAME_None;
+		if (ResolveImpactFacilityObservationAnchor(
+			Hit,
+			Observation.FacilityAnchor,
+			Observation.FacilityExtent,
+			FacilityName))
+		{
+			Observation.Authority =
+				EABTSM6ImpactObservationAuthority::FacilityImpact;
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][M6][CameraImpactObservation] FacilityHit=%s Component=%s Impact=%s Anchor=%s Extent=%s Speed=%.1f"),
+				*FacilityName.ToString(),
+				*GetNameSafe(Hit.GetComponent()),
+				*Observation.ImpactPoint.ToCompactString(),
+				*Observation.FacilityAnchor.ToCompactString(),
+				*Observation.FacilityExtent.ToCompactString(),
+				NormalSpeedCMPerSec);
+		}
+		else
+		{
+			Observation.Authority =
+				EABTSM6ImpactObservationAuthority::SurfaceImpact;
+		}
+		SlingshotCamera->NotifyBirdImpact(Observation);
+	}
 	const bool bHitSatelliteBody =
 		Hit.GetActor() == SatellitePracticeBody.Get();
 	const bool bHitSatelliteTarget =

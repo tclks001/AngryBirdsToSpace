@@ -14,6 +14,8 @@
 #include "Player/ABTSM25BirdCharacter.h"
 #include "ProceduralMeshComponent.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "Movement/ABTSSatelliteGravityMovementPolicy.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 
 UABTSRadialForceMovementComponent::UABTSRadialForceMovementComponent()
 {
@@ -220,16 +222,7 @@ bool UABTSRadialForceMovementComponent::IsGrounded() const
 
 AABTSM2Planet* UABTSRadialForceMovementComponent::FindPlanet()
 {
-	if (Planet.IsValid() && Planet->IsPlanetReady()) return Planet.Get();
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		if (It->IsPlanetReady())
-		{
-			Planet = *It;
-			return Planet.Get();
-		}
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }
 
 UABTSRadialSurfaceSuspensionComponent* UABTSRadialForceMovementComponent::FindSuspension()
@@ -337,7 +330,25 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	const float MassKG = FMath::Max(0.1f, VirtualMassKG);
 
 	const FVector GravityForce = -Surface.RadialUp * (MassKG * LocalGravityAcceleration);
-	const FVector SatelliteGravityForce = ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Character.GetActorLocation()) * MassKG;
+	const FVector RawSatelliteAcceleration = ABTSM9Gravity::GetSatelliteAcceleration(
+		GetWorld(),
+		Character.GetActorLocation());
+	const FVector AppliedSatelliteAcceleration =
+		FABTSSatelliteGravityMovementPolicy::ResolveAcceleration(
+		bBallisticFlight,
+		RawSatelliteAcceleration);
+	if (!bBallisticFlight
+		&& !bLoggedGroundSatelliteGravitySuppressed
+		&& !RawSatelliteAcceleration.IsNearlyZero())
+	{
+		bLoggedGroundSatelliteGravitySuppressed = true;
+		UE_LOG(
+			LogABTSRuntime,
+			Display,
+			TEXT("[ABTS][ForceSuspension][SatelliteGravityPolicy] GroundLocomotion=Suppressed BallisticFlight=Enabled RawAcceleration=%.3f"),
+			RawSatelliteAcceleration.Size());
+	}
+	const FVector SatelliteGravityForce = AppliedSatelliteAcceleration * MassKG;
 	const FVector SupportForce = Surface.RadialUp * (MassKG * Surface.OutwardSupportAccelerationCMPerSec2);
 	const float EffectiveMaxGroundSpeed = DesignMaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
 	const FVector MoveForce = MoveDirection * (MassKG * GroundMoveAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier * ControlScale * InputMagnitude);

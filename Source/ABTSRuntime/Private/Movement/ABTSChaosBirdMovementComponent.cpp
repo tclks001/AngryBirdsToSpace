@@ -10,6 +10,8 @@
 #include "Planet/ABTSM2Planet.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "Movement/ABTSSatelliteGravityMovementPolicy.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 
 UABTSChaosBirdMovementComponent::UABTSChaosBirdMovementComponent()
 {
@@ -159,6 +161,19 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	UPrimitiveComponent* Body = ResolveBody();
 	if ((!bPlanarTestMode && ResolvedPlanet == nullptr) || Body == nullptr || !Body->IsSimulatingPhysics()) return;
 	const FVector RadialUp = bPlanarTestMode ? PlanarUp : ResolvedPlanet->GetRadialUpAtWorldLocation(Body->GetComponentLocation());
+	if (!bPlanarTestMode && LoggedPrimaryGravitySource.Get() != ResolvedPlanet)
+	{
+		LoggedPrimaryGravitySource = ResolvedPlanet;
+		UE_LOG(
+			LogABTSRuntime,
+			Display,
+			TEXT("[ABTS][ChaosMovement][PrimaryGravitySource] Owner=%s Source=%s Class=%s Center=%s Radius=%.1f IsSatellite=0 Authority=LargestReadyNonSatellite"),
+			*GetNameSafe(GetOwner()),
+			*GetNameSafe(ResolvedPlanet),
+			*GetNameSafe(ResolvedPlanet->GetClass()),
+			*ResolvedPlanet->GetPlanetCenterWorld().ToCompactString(),
+			ResolvedPlanet->GetPlanetRadiusCM());
+	}
 	const float Mass = FMath::Max(0.1f, Body->GetMass());
 	float LocalGravityAcceleration = GravityAccelerationCMPerSec2;
 	if (bBallisticFlight && !bPlanarTestMode)
@@ -171,7 +186,25 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	Body->AddForce(-RadialUp * (Mass * LocalGravityAcceleration), NAME_None, false);
 	if (!bPlanarTestMode)
 	{
-		Body->AddForce(ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Body->GetComponentLocation()) * Mass, NAME_None, false);
+		const FVector RawSatelliteAcceleration =
+			ABTSM9Gravity::GetSatelliteAcceleration(
+				GetWorld(), Body->GetComponentLocation());
+		const FVector AppliedSatelliteAcceleration =
+			FABTSSatelliteGravityMovementPolicy::ResolveAcceleration(
+				bBallisticFlight, RawSatelliteAcceleration);
+		if (!bBallisticFlight
+			&& !bLoggedGroundSatelliteGravitySuppressed
+			&& !RawSatelliteAcceleration.IsNearlyZero())
+		{
+			bLoggedGroundSatelliteGravitySuppressed = true;
+			UE_LOG(
+				LogABTSRuntime,
+				Display,
+				TEXT("[ABTS][ChaosMovement][SatelliteGravityPolicy] GroundLocomotion=Suppressed BallisticFlight=Enabled RawAcceleration=%.3f"),
+				RawSatelliteAcceleration.Size());
+		}
+		Body->AddForce(
+			AppliedSatelliteAcceleration * Mass, NAME_None, false);
 	}
 
 	if (bJumpQueued && bGrounded)
@@ -242,12 +275,7 @@ void UABTSChaosBirdMovementComponent::TryGroundFromHit(const FHitResult& Hit)
 AABTSM2Planet* UABTSChaosBirdMovementComponent::FindPlanet()
 {
 	if (bPlanarTestMode) return nullptr;
-	if (Planet.IsValid() && Planet->IsPlanetReady()) return Planet.Get();
-	for (TActorIterator<AABTSM2Planet> It(GetWorld()); It; ++It)
-	{
-		if (It->IsPlanetReady()) { Planet = *It; return Planet.Get(); }
-	}
-	return nullptr;
+	return ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), Planet);
 }
 
 UPrimitiveComponent* UABTSChaosBirdMovementComponent::ResolveBody() const

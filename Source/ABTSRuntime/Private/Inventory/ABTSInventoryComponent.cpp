@@ -2,6 +2,8 @@
 
 #include "Inventory/ABTSInventoryComponent.h"
 
+#include "Guide/ABTSGuideEvents.h"
+
 UABTSInventoryComponent::UABTSInventoryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -38,6 +40,8 @@ bool UABTSInventoryComponent::AddItem(const EABTSItemId ItemId, const int32 Quan
 		}
 	}
 	OnInventoryChanged.Broadcast();
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::ItemAcquired,
+		FABTSGuideSubjects::FromItem(ItemId), nullptr, Quantity, GetQuantity(ItemId));
 	return true;
 }
 
@@ -66,6 +70,8 @@ bool UABTSInventoryComponent::SetHeldItem(const EABTSItemId ItemId)
 	bHasHeldItem = true;
 	HeldItemId = ItemId;
 	OnInventoryChanged.Broadcast();
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::HeldItemChanged,
+		FABTSGuideSubjects::FromItem(ItemId));
 	return true;
 }
 
@@ -74,6 +80,7 @@ void UABTSInventoryComponent::ClearHeldItem()
 	if (!bHasHeldItem) return;
 	bHasHeldItem = false;
 	OnInventoryChanged.Broadcast();
+	FABTSGuideEventBus::Publish(this, FABTSGuideEventIds::HeldItemChanged);
 }
 
 bool UABTSInventoryComponent::GetHeldItem(EABTSItemId& OutItemId) const

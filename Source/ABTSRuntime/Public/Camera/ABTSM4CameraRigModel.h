@@ -48,6 +48,17 @@ private:
 	EABTSM4CameraObstructionPhase Phase = EABTSM4CameraObstructionPhase::Clear;
 };
 
+/** A rigidly translated orbit pose that clears the authoritative ground surface. */
+struct ABTSRUNTIME_API FABTSM4SurfaceSafePose
+{
+	FVector CameraLocation = FVector::ZeroVector;
+	FVector FocusLocation = FVector::ZeroVector;
+	float AppliedLiftCM = 0.0f;
+	float RawPenetrationCM = 0.0f;
+	float TransitionAlpha = 0.0f;
+	bool bConstrained = false;
+};
+
 namespace ABTSM4CameraRigModel
 {
 	/** Converts a stick sample to a signed normalized response after dead zone and exponent. */
@@ -78,6 +89,28 @@ namespace ABTSM4CameraRigModel
 		bool bStartPenetrating,
 		float HitDistanceCM,
 		float CollisionSafetyMarginCM);
+
+	/** Pitch-authored composition distance, independent from collision response. */
+	ABTSRUNTIME_API float ComputeUpwardFramingDistance(
+		float UserOrbitDistanceCM,
+		float ElevationDegrees,
+		float PullInStartElevationDegrees,
+		float FullPullInElevationDegrees,
+		float MinimumDistanceScale,
+		float& OutPullInAlpha);
+
+	/**
+	 * Keeps a camera center above a known surface without shortening or rotating
+	 * the requested orbit arm. Camera and virtual focus receive the same lift.
+	 */
+	ABTSRUNTIME_API bool BuildSurfaceSafeTranslatedPose(
+		const FVector& DesiredCameraLocation,
+		const FVector& DesiredFocusLocation,
+		const FVector& SurfacePoint,
+		const FVector& SurfaceOutwardNormal,
+		float MinimumCameraCenterClearanceCM,
+		float TransitionBandCM,
+		FABTSM4SurfaceSafePose& OutPose);
 
 	ABTSRUNTIME_API const TCHAR* LexToString(EABTSM4CameraObstructionPhase Phase);
 }

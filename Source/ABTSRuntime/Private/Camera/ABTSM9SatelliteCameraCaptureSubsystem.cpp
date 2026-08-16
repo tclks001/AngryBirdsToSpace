@@ -67,8 +67,13 @@ namespace ABTSM9SatelliteCameraCapturePrivate
 bool UABTSM9SatelliteCameraCaptureSubsystem::ShouldCreateSubsystem(
 	UObject* Outer) const
 {
+#if UE_BUILD_SHIPPING
+	(void)Outer;
+	return false;
+#else
 	return FParse::Param(FCommandLine::Get(), TEXT("ABTSM9CameraCapture"))
 		&& Super::ShouldCreateSubsystem(Outer);
+#endif
 }
 
 bool UABTSM9SatelliteCameraCaptureSubsystem::DoesSupportWorldType(
@@ -261,9 +266,14 @@ bool UABTSM9SatelliteCameraCaptureSubsystem::ResolveAndLaunch(
 		OutFailure = TEXT("CinematicE5IntentNotLocked");
 		return false;
 	}
-	const bool bUseNearPassFixture = FParse::Param(
+	const bool bUseNearPassFixture =
+#if UE_BUILD_SHIPPING
+		false;
+#else
+		FParse::Param(
 		FCommandLine::Get(),
 		TEXT("ABTSM9CameraCaptureNearPass"));
+#endif
 	if (bUseNearPassFixture
 		&& !SlingshotSystem->StageSatelliteCameraCaptureNearPass())
 	{

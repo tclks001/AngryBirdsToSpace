@@ -21,6 +21,7 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/Crc.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
@@ -29,6 +30,7 @@
 namespace
 {
 	constexpr float BasicCubeSizeCM = 100.0f;
+	constexpr float StableBuildingFrozenTangentSupportThicknessCM = 100.0f;
 
 	FTransform WorldBoxTransform(const FABTSM73GroundContext& Context, const FVector& LocalCenter, const FVector& Dimensions)
 	{
@@ -116,6 +118,22 @@ namespace
 				Counts.FindChecked(Reasons[Index]));
 		}
 		return Result;
+	}
+
+	const TCHAR* E1DamageCauseName(
+		const EABTSM73E1DamageCause Cause)
+	{
+		switch (Cause)
+		{
+		case EABTSM73E1DamageCause::BirdImpact:
+			return TEXT("BirdImpact");
+		case EABTSM73E1DamageCause::ModuleContact:
+			return TEXT("ModuleContact");
+		case EABTSM73E1DamageCause::GameplayBlast:
+			return TEXT("GameplayBlast");
+		default:
+			return TEXT("UnknownOrScripted");
+		}
 	}
 }
 
@@ -231,12 +249,33 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 void AABTSM73StableBuildingActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	if (JuryDemoFixedSixStaticEntry.IsSet()
+		|| BuildingFreezeV3RuntimeEntry.IsSet())
+	{
+		ClearBrickPreviews();
+		ClearDAGFailurePatternDiagnostics();
+		FoundationCap->SetVisibility(false, true);
+		FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		FoundationFeet->ClearInstances();
+		FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		AttackDirection->SetVisibility(false, true);
+		return;
+	}
 	RebuildPreview();
 }
 
 void AABTSM73StableBuildingActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!bParticipateInPIERuntime)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::NotRequired;
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7.3-A][PIERuntimeSkipped]")
+			TEXT(" Actor=%s SlingshotGate=%d"),
+			*GetName(), bParticipateInSlingshotValidationGate ? 1 : 0);
+		return;
+	}
 	TryFindRuntimeMaterialSystem();
 }
 
@@ -313,6 +352,736 @@ void AABTSM73StableBuildingActor::ConfigureTaskGraphGeneration(
 	DAGFailurePlayabilitySettings = InDAGFailurePlayabilitySettings;
 	DAG4ValidationSettings = InDAG4ValidationSettings;
 	DifficultySettings = InDifficultySettings;
+}
+
+bool AABTSM73StableBuildingActor::ConfigureJuryDemoFixedSixStaticRegistration(
+	FABTSM73JuryDemoFixedSixStaticEntry&& InEntry,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (bRuntimeSpawned
+		|| JuryDemoFixedSixStaticEntry.IsSet()
+		|| BuildingFreezeV3RuntimeEntry.IsSet())
+	{
+		OutError = TEXT("FixedSixStaticRegistrationAlreadyConfigured");
+		return false;
+	}
+	if (!InEntry.IsUsable()
+		|| !GetActorTransform().Equals(InEntry.WorldTransform, 1.0e-3))
+	{
+		OutError = TEXT("FixedSixStaticRegistrationPayloadRejected");
+		return false;
+	}
+	bParticipateInPIERuntime = true;
+	bParticipateInSlingshotValidationGate = true;
+	bRunIdleChaosValidation = false;
+	bShowEditorPreview = false;
+	GenerationSettings.BuildingSeed = InEntry.DeterministicSeed;
+	JuryDemoFixedSixStaticEntry.Emplace(MoveTemp(InEntry));
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::IsJuryDemoFixedSixStaticRegistrationAccepted() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		&& bRuntimeSpawned
+		&& GenerationSummary.bAccepted
+		&& bJuryDemoFixedSixStaticRegistrationAccepted;
+}
+
+void FABTSM73E1DamageLifecycleState::Reset()
+{
+	*this = FABTSM73E1DamageLifecycleState();
+}
+
+void FABTSM73E1DamageLifecycleState::RecordChaosActivated()
+{
+	bChaosActivated = true;
+}
+
+void FABTSM73E1DamageLifecycleState::RecordModuleDamage(
+	const bool bCertifiedTargetBrick,
+	const bool bCrystal,
+	const EABTSM73E1DamageCause Cause,
+	const bool bModuleBroken)
+{
+	if (Cause == EABTSM73E1DamageCause::BirdImpact)
+	{
+		bRealModuleImpactObserved |= bCertifiedTargetBrick;
+		if (bCertifiedTargetBrick && !bCrystal && bModuleBroken)
+		{
+			bStructuralResponseObserved = true;
+		}
+	}
+	else if (Cause == EABTSM73E1DamageCause::ModuleContact)
+	{
+		++PhysicalContactDamageEventCount;
+		if (bCrystal)
+		{
+			bCrystalDestroyedByPhysicalChain |= bModuleBroken;
+		}
+		else
+		{
+			bStructuralResponseObserved = true;
+		}
+	}
+}
+
+bool FABTSM73E1DestructibleModuleTarget::IsUsable(
+	const bool bRequireLiveOwnership) const
+{
+	if (BrickId < 0
+		|| FrozenWorldTransform.ContainsNaN()
+		|| !FrozenWorldTransform.GetRotation().IsNormalized()
+		|| !FrozenWorldTransform.GetScale3D().Equals(FVector::OneVector, 1.0e-6)
+		|| HalfExtentCM.ContainsNaN()
+		|| HalfExtentCM.GetMin() <= 0.0f)
+	{
+		return false;
+	}
+	if (!bRequireLiveOwnership)
+	{
+		return true;
+	}
+	const AABTSM7BuildingModule* LiveModule = Module.Get();
+	const AABTSM73StableBuildingActor* LiveOwner = OwningBuilding.Get();
+	const AABTSM7BuildingMaterialSystem* LiveMaterialSystem =
+		OwningMaterialSystem.Get();
+	return LiveModule != nullptr
+		&& LiveOwner != nullptr
+		&& LiveMaterialSystem != nullptr
+		&& !LiveModule->IsBroken()
+		&& LiveModule->GetOwner() == LiveMaterialSystem
+		&& LiveModule->GetDamageLifecycleOwner() == LiveOwner
+		&& LiveModule->GetDamageLifecycleBrickId() == BrickId;
+}
+
+bool FABTSM73E1DestructibleModuleTargetSet::IsUsable(
+	const int32 ExpectedBrickCount,
+	const bool bRequireLiveOwnership) const
+{
+	if (ManifestEntryId != FName(TEXT("E1ColumnBreak"))
+		|| DescriptorHash == 0
+		|| StaticGeometryHash == 0
+		|| ExpectedBrickCount <= 0
+		|| OrderedBrickTargets.Num() != ExpectedBrickCount)
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < OrderedBrickTargets.Num(); ++Index)
+	{
+		const FABTSM73E1DestructibleModuleTarget& Target =
+			OrderedBrickTargets[Index];
+		if (Target.BrickId != Index
+			|| !Target.IsUsable(bRequireLiveOwnership))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32 FABTSM73E1DestructibleModuleTargetSet::
+ComputeOrderedGeometryHash() const
+{
+	FString Canonical = FString::Printf(
+		TEXT("E1DestructibleModuleTargetSet:v1:Entry=%s:Descriptor=%llu")
+		TEXT(":Static=%llu:Count=%d"),
+		*ManifestEntryId.ToString(), DescriptorHash, StaticGeometryHash,
+		OrderedBrickTargets.Num());
+	for (const FABTSM73E1DestructibleModuleTarget& Target :
+		OrderedBrickTargets)
+	{
+		const FVector Location = Target.FrozenWorldTransform.GetLocation();
+		const FQuat Rotation = Target.FrozenWorldTransform.GetRotation();
+		Canonical += FString::Printf(
+			TEXT(":B%d:L%.6f,%.6f,%.6f:Q%.9f,%.9f,%.9f,%.9f")
+			TEXT(":E%.6f,%.6f,%.6f"),
+			Target.BrickId,
+			Location.X, Location.Y, Location.Z,
+			Rotation.X, Rotation.Y, Rotation.Z, Rotation.W,
+			Target.HalfExtentCM.X,
+			Target.HalfExtentCM.Y,
+			Target.HalfExtentCM.Z);
+	}
+	return FCrc::StrCrc32(*Canonical);
+}
+
+bool FABTSM73E1DamageLifecycleState::IsAccepted() const
+{
+	return bChaosActivated
+		&& bRealModuleImpactObserved
+		&& bStructuralResponseObserved
+		&& bCrystalDestroyedByPhysicalChain;
+}
+
+bool FABTSM73E1OrderedBrickInstanceBinding::IsUsable(
+	const bool bRequireLiveOwnership) const
+{
+	if (BrickId < 0 || MaterialInstanceIndex < 0
+		|| Material == EABTSM7BuildingMaterial::Crystal
+		|| FrozenWorldTransform.ContainsNaN()
+		|| !FrozenWorldTransform.GetRotation().IsNormalized()
+		|| !FrozenWorldTransform.GetScale3D().Equals(
+			FVector::OneVector, 1.0e-6)
+		|| HalfExtentCM.ContainsNaN() || HalfExtentCM.GetMin() <= 0.0f)
+	{
+		return false;
+	}
+	if (!bRequireLiveOwnership)
+	{
+		return true;
+	}
+	const UHierarchicalInstancedStaticMeshComponent* HISM = SourceHISM.Get();
+	const AABTSM73StableBuildingActor* Building = OwningBuilding.Get();
+	return HISM != nullptr && Building != nullptr
+		&& HISM->GetOwner() == Building
+		&& MaterialInstanceIndex < HISM->GetInstanceCount()
+		&& HISM->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics
+		&& HISM->GetCollisionObjectType() == ABTSDeveloperObstacleChannel
+		&& HISM->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block;
+}
+
+bool FABTSM73E1OrderedBrickUnionBinding::IsUsable(
+	const bool bRequireLiveOwnership) const
+{
+	if (ManifestEntryId != FName(TEXT("E1ColumnBreak"))
+		|| DescriptorHash == 0 || StaticGeometryHash == 0
+		|| OrderedBricks.Num() != FrozenBrickCount)
+	{
+		return false;
+	}
+	int32 WoodIndex = 0;
+	int32 StoneIndex = 0;
+	int32 IronIndex = 0;
+	int32 GlassIndex = 0;
+	for (int32 Index = 0; Index < OrderedBricks.Num(); ++Index)
+	{
+		const FABTSM73E1OrderedBrickInstanceBinding& Brick =
+			OrderedBricks[Index];
+		int32 ExpectedMaterialIndex = INDEX_NONE;
+		switch (Brick.Material)
+		{
+		case EABTSM7BuildingMaterial::Wood:
+			ExpectedMaterialIndex = WoodIndex++; break;
+		case EABTSM7BuildingMaterial::Stone:
+			ExpectedMaterialIndex = StoneIndex++; break;
+		case EABTSM7BuildingMaterial::Iron:
+			ExpectedMaterialIndex = IronIndex++; break;
+		case EABTSM7BuildingMaterial::Glass:
+			ExpectedMaterialIndex = GlassIndex++; break;
+		default: break;
+		}
+		if (Brick.BrickId != Index
+			|| Brick.MaterialInstanceIndex != ExpectedMaterialIndex
+			|| !Brick.IsUsable(bRequireLiveOwnership))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32 FABTSM73E1OrderedBrickUnionBinding::ComputeOrderedGeometryHash() const
+{
+	FString Canonical = FString::Printf(
+		TEXT("E1OrderedBrickUnionBinding:v1:Entry=%s:Descriptor=%llu")
+		TEXT(":Static=%llu:Count=%d"),
+		*ManifestEntryId.ToString(), DescriptorHash, StaticGeometryHash,
+		OrderedBricks.Num());
+	for (const FABTSM73E1OrderedBrickInstanceBinding& Brick : OrderedBricks)
+	{
+		const FVector Location = Brick.FrozenWorldTransform.GetLocation();
+		const FQuat Rotation = Brick.FrozenWorldTransform.GetRotation();
+		Canonical += FString::Printf(
+			TEXT(":B%d:M%d:I%d:L%.6f,%.6f,%.6f:Q%.9f,%.9f,%.9f,%.9f")
+			TEXT(":E%.6f,%.6f,%.6f"),
+			Brick.BrickId, static_cast<int32>(Brick.Material),
+			Brick.MaterialInstanceIndex,
+			Location.X, Location.Y, Location.Z,
+			Rotation.X, Rotation.Y, Rotation.Z, Rotation.W,
+			Brick.HalfExtentCM.X, Brick.HalfExtentCM.Y,
+			Brick.HalfExtentCM.Z);
+	}
+	return FCrc::StrCrc32(*Canonical);
+}
+
+int32 AABTSM73StableBuildingActor::GetJuryDemoFixedSixStaticModuleCount() const
+{
+	int32 ModuleCount = JuryDemoFixedSixStaticBrickInstanceCount;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Module : RuntimeModules)
+	{
+		ModuleCount += Module.IsValid() ? 1 : 0;
+	}
+	return ModuleCount;
+}
+
+FName AABTSM73StableBuildingActor::GetJuryDemoFixedSixManifestEntryId() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->ManifestEntryId
+		: NAME_None;
+}
+
+int32 AABTSM73StableBuildingActor::GetJuryDemoFixedSixEncounterIndex() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->EncounterIndex
+		: INDEX_NONE;
+}
+
+uint64 AABTSM73StableBuildingActor::GetJuryDemoFixedSixRegistrationResultHash() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->RegistrationResultHash
+		: 0;
+}
+
+bool AABTSM73StableBuildingActor::
+ConfigureBuildingFreezeV3RuntimeRegistration(
+	FABTSM73BuildingFreezeV3RuntimeEntry&& InEntry,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (bRuntimeSpawned
+		|| JuryDemoFixedSixStaticEntry.IsSet()
+		|| BuildingFreezeV3RuntimeEntry.IsSet())
+	{
+		OutError = TEXT("BuildingFreezeV3RuntimeAlreadyConfigured");
+		return false;
+	}
+	if (!InEntry.IsUsable()
+		|| !GetActorTransform().Equals(InEntry.WorldTransform, 1.0e-3))
+	{
+		OutError = TEXT("BuildingFreezeV3RuntimePayloadRejected");
+		return false;
+	}
+	bParticipateInPIERuntime = true;
+	// Fixture authority is deliberately not promoted into the shared startup gate.
+	bParticipateInSlingshotValidationGate = false;
+	bRunIdleChaosValidation = false;
+	bShowEditorPreview = false;
+	GenerationSettings.BuildingSeed = InEntry.DeterministicSeed;
+	BuildingFreezeV3RuntimeEntry.Emplace(MoveTemp(InEntry));
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+IsBuildingFreezeV3RuntimeRegistrationAccepted() const
+{
+	return BuildingFreezeV3RuntimeEntry.IsSet()
+		&& bRuntimeSpawned
+		&& GenerationSummary.bAccepted
+		&& IdleValidationState == EABTSM73IdleValidationState::Accepted;
+}
+
+int32 AABTSM73StableBuildingActor::
+GetBuildingFreezeV3RuntimeModuleCount() const
+{
+	int32 ModuleCount = JuryDemoFixedSixStaticBrickInstanceCount;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Module : RuntimeModules)
+	{
+		ModuleCount += Module.IsValid() ? 1 : 0;
+	}
+	return ModuleCount;
+}
+
+EABTSM73BeamDemoBuilding AABTSM73StableBuildingActor::
+GetBuildingFreezeV3ComplexityId() const
+{
+	return BuildingFreezeV3RuntimeEntry.IsSet()
+		? BuildingFreezeV3RuntimeEntry->ComplexityId
+		: EABTSM73BeamDemoBuilding::Custom;
+}
+
+int32 AABTSM73StableBuildingActor::
+GetBuildingFreezeV3ComplexityIndex() const
+{
+	return BuildingFreezeV3RuntimeEntry.IsSet()
+		? BuildingFreezeV3RuntimeEntry->ComplexityIndex
+		: INDEX_NONE;
+}
+
+int32 AABTSM73StableBuildingActor::GetBuildingFreezeV3EncounterSlot() const
+{
+	return BuildingFreezeV3RuntimeEntry.IsSet()
+		? BuildingFreezeV3RuntimeEntry->EncounterSlot
+		: INDEX_NONE;
+}
+
+uint64 AABTSM73StableBuildingActor::
+GetBuildingFreezeV3RegistrationResultHash() const
+{
+	return BuildingFreezeV3RuntimeEntry.IsSet()
+		? BuildingFreezeV3RuntimeEntry->RegistrationResultHash
+		: 0;
+}
+
+int32 AABTSM73StableBuildingActor::GetBuildingFreezeV3BodyInstanceCount(
+	const EABTSM7BuildingMaterial Material) const
+{
+	const UHierarchicalInstancedStaticMeshComponent* HISM = nullptr;
+	switch (Material)
+	{
+	case EABTSM7BuildingMaterial::Wood: HISM = WoodPreview; break;
+	case EABTSM7BuildingMaterial::Stone: HISM = StonePreview; break;
+	case EABTSM7BuildingMaterial::Iron: HISM = IronPreview; break;
+	case EABTSM7BuildingMaterial::Glass: HISM = GlassPreview; break;
+	default: break;
+	}
+	return HISM != nullptr ? HISM->GetInstanceCount() : 0;
+}
+bool AABTSM73StableBuildingActor::CopyJuryDemoE1CrystalTarget(
+	AActor*& OutTargetActor,
+	FVector& OutHalfExtentCM) const
+{
+	OutTargetActor = nullptr;
+	OutHalfExtentCM = FVector::ZeroVector;
+	if (!IsJuryDemoFixedSixStaticRegistrationAccepted()
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->ManifestEntryId
+			!= FName(TEXT("E1ColumnBreak"))
+		|| JuryDemoFixedSixStaticEntry->Caps.Num() != 1)
+	{
+		return false;
+	}
+
+	const FABTSM73BuildingFreezeV3CapBinding& Cap =
+		JuryDemoFixedSixStaticEntry->Caps[0];
+	if (Cap.BrickSpec.Material != EABTSM7BuildingMaterial::Crystal
+		|| Cap.BrickSpec.DimensionsCM.GetMin() <= 0.0f)
+	{
+		return false;
+	}
+
+	AABTSM7BuildingModule* CrystalTarget = nullptr;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr
+			|| Module->GetBuildingMaterial()
+				!= EABTSM7BuildingMaterial::Crystal)
+		{
+			continue;
+		}
+		if (CrystalTarget != nullptr)
+		{
+			return false;
+		}
+		CrystalTarget = Module;
+	}
+	if (CrystalTarget == nullptr)
+	{
+		return false;
+	}
+	OutTargetActor = CrystalTarget;
+	OutHalfExtentCM = Cap.BrickSpec.DimensionsCM * 0.5f;
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+CopyJuryDemoE1OrderedBrickUnionBinding(
+	FABTSM73E1OrderedBrickUnionBinding& OutBinding,
+	FTransform& OutSiteRecoveryAnchorTransform,
+	FVector& OutSiteRecoveryAnchorHalfExtentCM) const
+{
+	OutBinding = FABTSM73E1OrderedBrickUnionBinding();
+	OutSiteRecoveryAnchorTransform = FTransform::Identity;
+	OutSiteRecoveryAnchorHalfExtentCM = FVector::ZeroVector;
+	if (!IsJuryDemoFixedSixStaticRegistrationAccepted()
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| !RuntimeMaterialSystem.IsValid())
+	{
+		return false;
+	}
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	if (Entry.ManifestEntryId != FName(TEXT("E1ColumnBreak"))
+		|| Entry.Bricks.Num()
+			!= FABTSM73E1OrderedBrickUnionBinding::FrozenBrickCount
+		|| Entry.Caps.Num() != 1
+		|| RuntimeModules.Num() != Entry.Devices.Num() + Entry.Caps.Num())
+	{
+		return false;
+	}
+
+	const EABTSM7BuildingMaterial Materials[] = {
+		EABTSM7BuildingMaterial::Wood,
+		EABTSM7BuildingMaterial::Stone,
+		EABTSM7BuildingMaterial::Iron,
+		EABTSM7BuildingMaterial::Glass};
+	for (const EABTSM7BuildingMaterial Material : Materials)
+	{
+		const UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Material);
+		int32 ExpectedCount = 0;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Entry.Bricks)
+		{
+			ExpectedCount += Brick.BrickSpec.Material == Material ? 1 : 0;
+		}
+		if (HISM == nullptr || HISM->GetOwner() != this
+			|| HISM->GetInstanceCount() != ExpectedCount
+			|| HISM->GetCollisionEnabled() != ECollisionEnabled::QueryAndPhysics
+			|| HISM->GetCollisionObjectType() != ABTSDeveloperObstacleChannel
+			|| HISM->GetCollisionResponseToChannel(ECC_Pawn) != ECR_Block)
+		{
+			return false;
+		}
+	}
+
+	int32 WoodIndex = 0;
+	int32 StoneIndex = 0;
+	int32 IronIndex = 0;
+	int32 GlassIndex = 0;
+	OutBinding.ManifestEntryId = Entry.ManifestEntryId;
+	OutBinding.DescriptorHash = Entry.DescriptorHash;
+	OutBinding.StaticGeometryHash = Entry.StaticGeometryHash;
+	OutBinding.OrderedBricks.Reserve(Entry.Bricks.Num());
+	for (int32 DescriptorIndex = 0;
+		DescriptorIndex < Entry.Bricks.Num(); ++DescriptorIndex)
+	{
+		const FABTSM73BeamD1BrickBinding& Brick = Entry.Bricks[DescriptorIndex];
+		int32* MaterialIndex = nullptr;
+		switch (Brick.BrickSpec.Material)
+		{
+		case EABTSM7BuildingMaterial::Wood: MaterialIndex = &WoodIndex; break;
+		case EABTSM7BuildingMaterial::Stone: MaterialIndex = &StoneIndex; break;
+		case EABTSM7BuildingMaterial::Iron: MaterialIndex = &IronIndex; break;
+		case EABTSM7BuildingMaterial::Glass: MaterialIndex = &GlassIndex; break;
+		default: break;
+		}
+		UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Brick.BrickSpec.Material);
+		FTransform ActualLocalTransform = FTransform::Identity;
+		FTransform ExpectedLocalTransform = Brick.LocalTransform;
+		ExpectedLocalTransform.SetScale3D(
+			Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (Brick.BrickId != DescriptorIndex || MaterialIndex == nullptr
+			|| HISM == nullptr
+			|| !HISM->GetInstanceTransform(
+				*MaterialIndex, ActualLocalTransform, false)
+			|| !ActualLocalTransform.Equals(ExpectedLocalTransform, 0.001))
+		{
+			OutBinding = FABTSM73E1OrderedBrickUnionBinding();
+			return false;
+		}
+
+		FABTSM73E1OrderedBrickInstanceBinding& BoundBrick =
+			OutBinding.OrderedBricks.AddDefaulted_GetRef();
+		BoundBrick.BrickId = Brick.BrickId;
+		BoundBrick.Material = Brick.BrickSpec.Material;
+		BoundBrick.MaterialInstanceIndex = (*MaterialIndex)++;
+		BoundBrick.FrozenWorldTransform =
+			Brick.LocalTransform * GetActorTransform();
+		BoundBrick.FrozenWorldTransform.SetScale3D(FVector::OneVector);
+		BoundBrick.HalfExtentCM = Brick.BrickSpec.DimensionsCM * 0.5f;
+		BoundBrick.SourceHISM = HISM;
+		BoundBrick.OwningBuilding =
+			const_cast<AABTSM73StableBuildingActor*>(this);
+	}
+
+	const FABTSM73BuildingFreezeV3CapBinding& Cap = Entry.Caps[0];
+	AABTSM7BuildingModule* CrystalCap = nullptr;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule :
+		RuntimeModules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr || !Module->IsCrystalLifecycleTarget())
+		{
+			continue;
+		}
+		if (CrystalCap != nullptr)
+		{
+			return false;
+		}
+		CrystalCap = Module;
+	}
+	const FTransform ExpectedCapTransform =
+		Cap.SiteLocalTransform * GetActorTransform();
+	const FVector ExpectedCapActorScale =
+		ExpectedCapTransform.GetScale3D()
+		* (Cap.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+	if (CrystalCap == nullptr || CrystalCap->GetOwner() != RuntimeMaterialSystem.Get()
+		|| CrystalCap->GetDamageLifecycleOwner() != this
+		|| CrystalCap->GetDamageLifecycleBrickId() != INDEX_NONE
+		|| CrystalCap->GetBuildingMaterial() != EABTSM7BuildingMaterial::Crystal
+		|| CrystalCap->IsBroken()
+		|| !CrystalCap->GetActorLocation().Equals(
+			ExpectedCapTransform.GetLocation(), 0.001)
+		|| !CrystalCap->GetActorQuat().Equals(
+			ExpectedCapTransform.GetRotation(), 0.001)
+		|| !CrystalCap->GetActorScale3D().Equals(ExpectedCapActorScale, 0.001)
+		|| CrystalCap->GetMeshComponent() == nullptr
+		|| CrystalCap->GetMeshComponent()->GetCollisionEnabled()
+			== ECollisionEnabled::NoCollision
+		|| !OutBinding.IsUsable(true))
+	{
+		OutBinding = FABTSM73E1OrderedBrickUnionBinding();
+		return false;
+	}
+
+	// M3's public API uses the cap pose solely to recover SiteTransform. Keep the
+	// real scaled Crystal out of the first-hit union and provide its frozen,
+	// unit-scale descriptor pose to a non-colliding single-call adapter.
+	OutSiteRecoveryAnchorTransform = ExpectedCapTransform;
+	OutSiteRecoveryAnchorTransform.SetScale3D(FVector::OneVector);
+	OutSiteRecoveryAnchorHalfExtentCM = Cap.BrickSpec.DimensionsCM * 0.5f;
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+CopyJuryDemoE1DestructibleModuleTargetSet(
+	FABTSM73E1DestructibleModuleTargetSet& OutTargetSet) const
+{
+	OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+	if (!IsJuryDemoFixedSixStaticRegistrationAccepted()
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->ManifestEntryId
+			!= FName(TEXT("E1ColumnBreak")))
+	{
+		return false;
+	}
+
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	const int32 ExpectedRuntimeModuleCount = Entry.Bricks.Num()
+		+ Entry.Devices.Num() + Entry.Caps.Num();
+	// Before production promotion, descriptor Bricks are still HISM instances
+	// and cannot be honestly associated with individual damage Actors.
+	if (RuntimeModules.Num() != ExpectedRuntimeModuleCount)
+	{
+		return false;
+	}
+
+	OutTargetSet.ManifestEntryId = Entry.ManifestEntryId;
+	OutTargetSet.DescriptorHash = Entry.DescriptorHash;
+	OutTargetSet.StaticGeometryHash = Entry.StaticGeometryHash;
+	OutTargetSet.OrderedBrickTargets.Reserve(Entry.Bricks.Num());
+	for (int32 DescriptorIndex = 0;
+		DescriptorIndex < Entry.Bricks.Num(); ++DescriptorIndex)
+	{
+		const FABTSM73BeamD1BrickBinding& Brick =
+			Entry.Bricks[DescriptorIndex];
+		AABTSM7BuildingModule* Module =
+			RuntimeModules[DescriptorIndex].Get();
+		UStaticMeshComponent* Mesh = Module != nullptr
+			? Module->GetMeshComponent()
+			: nullptr;
+		if (Brick.BrickId != DescriptorIndex
+			|| Brick.BrickSpec.DimensionsCM.ContainsNaN()
+			|| Brick.BrickSpec.DimensionsCM.GetMin() <= 0.0f
+			|| Module == nullptr
+			|| Module->GetOwner() != RuntimeMaterialSystem.Get()
+			|| Module->GetDamageLifecycleOwner() != this
+			|| Module->GetDamageLifecycleBrickId() != Brick.BrickId
+			|| Module->GetBuildingMaterial() != Brick.BrickSpec.Material
+			|| Module->IsBroken()
+			|| Mesh == nullptr
+			|| Mesh->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+		{
+			OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+			return false;
+		}
+
+		FTransform FrozenWorldTransform =
+			Brick.LocalTransform * GetActorTransform();
+		if (!FrozenWorldTransform.GetScale3D().Equals(
+			FVector::OneVector, 1.0e-6))
+		{
+			OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+			return false;
+		}
+		const FVector ExpectedModuleScale =
+			FrozenWorldTransform.GetScale3D()
+			* (Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (!Module->GetActorScale3D().Equals(ExpectedModuleScale, 1.0e-4))
+		{
+			OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+			return false;
+		}
+		FrozenWorldTransform.SetScale3D(FVector::OneVector);
+		FABTSM73E1DestructibleModuleTarget& Target =
+			OutTargetSet.OrderedBrickTargets.AddDefaulted_GetRef();
+		Target.BrickId = Brick.BrickId;
+		Target.FrozenWorldTransform = FrozenWorldTransform;
+		Target.HalfExtentCM = Brick.BrickSpec.DimensionsCM * 0.5f;
+		Target.Module = Module;
+		Target.OwningBuilding = const_cast<AABTSM73StableBuildingActor*>(this);
+		Target.OwningMaterialSystem = RuntimeMaterialSystem;
+	}
+
+	return OutTargetSet.IsUsable(Entry.Bricks.Num(), true);
+}
+
+void AABTSM73StableBuildingActor::NotifyJuryDemoE1ModuleDamage(
+	const AABTSM7BuildingModule& Module,
+	const EABTSM73E1DamageCause Cause,
+	const bool bModuleBroken,
+	const float NormalSpeedCMPerSec)
+{
+	if (!JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->ManifestEntryId
+			!= FName(TEXT("E1ColumnBreak"))
+		|| Module.GetDamageLifecycleOwner() != this
+		|| Module.GetOwner() != RuntimeMaterialSystem.Get())
+	{
+		return;
+	}
+
+	const int32 FrozenBrickId = Module.GetDamageLifecycleBrickId();
+	const bool bCertifiedTargetBrick = FrozenBrickId >= 0
+		&& JuryDemoFixedSixStaticEntry->Bricks.IsValidIndex(FrozenBrickId)
+		&& RuntimeModules.IsValidIndex(FrozenBrickId)
+		&& RuntimeModules[FrozenBrickId].Get() == &Module
+		&& JuryDemoFixedSixStaticEntry->Bricks[FrozenBrickId].BrickId
+			== FrozenBrickId;
+	JuryDemoE1DamageLifecycleState.RecordModuleDamage(
+		bCertifiedTargetBrick,
+		Module.IsCrystalLifecycleTarget(), Cause, bModuleBroken);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][E1DamageLifecycle]")
+		TEXT(" Event=ModuleDamage Module=%s BrickId=%d TargetBrick=%d")
+		TEXT(" Crystal=%d Cause=%s")
+		TEXT(" Broken=%d Speed=%.3f ContactEvents=%d Structural=%d")
+		TEXT(" CrystalChain=%d PhysicalChainEligible=%d Accepted=%d"),
+		*Module.GetName(), FrozenBrickId,
+		bCertifiedTargetBrick ? 1 : 0,
+		Module.IsCrystalLifecycleTarget() ? 1 : 0,
+		E1DamageCauseName(Cause), bModuleBroken ? 1 : 0,
+		NormalSpeedCMPerSec,
+		JuryDemoE1DamageLifecycleState.PhysicalContactDamageEventCount,
+		JuryDemoE1DamageLifecycleState.bStructuralResponseObserved ? 1 : 0,
+		JuryDemoE1DamageLifecycleState.bCrystalDestroyedByPhysicalChain ? 1 : 0,
+		Cause == EABTSM73E1DamageCause::ModuleContact ? 1 : 0,
+		JuryDemoE1DamageLifecycleState.IsAccepted() ? 1 : 0);
+}
+
+EABTSM73BeamDemoBuilding AABTSM73StableBuildingActor::
+GetJuryDemoFixedSixComplexityId() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->DemoBuilding
+		: EABTSM73BeamDemoBuilding::Custom;
+}
+
+bool AABTSM73StableBuildingActor::CopyJuryDemoSiteUniformGravityPolicy(
+	const float GravityAccelerationCMPerSec2,
+	FABTSM7SiteUniformGravityPolicy& OutPolicy) const
+{
+	OutPolicy = FABTSM7SiteUniformGravityPolicy();
+	if (!JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->SourceContractVersion
+			!= FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion)
+	{
+		return false;
+	}
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	return FABTSM7SiteUniformGravityPolicy::TryDerive(
+		Entry.WorldTransform.GetLocation(),
+		Entry.SupportCenterWorldCM,
+		GravityAccelerationCMPerSec2,
+		OutPolicy);
 }
 
 bool AABTSM73StableBuildingActor::BuildResolvedStructure(
@@ -981,6 +1750,11 @@ void AABTSM73StableBuildingActor::UpdateFoundationComponents(
 
 void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 {
+	if (!bParticipateInPIERuntime)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::NotRequired;
+		return;
+	}
 	if (bRuntimeSpawned || GetWorld() == nullptr) return;
 	for (TActorIterator<AABTSM7BuildingMaterialSystem> It(GetWorld()); It; ++It)
 	{
@@ -998,9 +1772,425 @@ void AABTSM73StableBuildingActor::TryFindRuntimeMaterialSystem()
 	}
 }
 
+void AABTSM73StableBuildingActor::ConfigureJuryDemoFixedSixStaticHISM(
+	UHierarchicalInstancedStaticMeshComponent& Component)
+{
+	Component.SetStaticMesh(BrickMesh);
+	Component.SetCollisionProfileName(TEXT("BlockAll"));
+	Component.SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	Component.SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Component.SetGenerateOverlapEvents(false);
+	Component.SetHiddenInGame(false);
+	Component.SetVisibility(true, true);
+}
+
+bool AABTSM73StableBuildingActor::
+ConfigureJuryDemoFixedSixFrozenTangentSupport(
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+	FString& OutError)
+{
+	OutError.Reset();
+	bJuryDemoFixedSixFrozenTangentSupportActive = false;
+	FoundationCap->SetVisibility(false, true);
+	FoundationCap->SetHiddenInGame(true);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoundationCap->SetSimulatePhysics(false);
+	FoundationCap->SetEnableGravity(false);
+
+	// M3 owns every frozen site transform, footprint and surrounding terrain.
+	// Its production contact is a tessellated ProceduralMesh, while the
+	// authoritative Chaos fixture uses an exact box plane. Materialize that
+	// exact frozen tangent plane for every building so the first supporting
+	// contact has the same shape in the fixture and the production batch.
+	if (FoundationCap->GetStaticMesh() == nullptr
+		|| !FMath::IsFinite(Entry.PadHalfExtentCM.X)
+		|| !FMath::IsFinite(Entry.PadHalfExtentCM.Y)
+		|| Entry.PadHalfExtentCM.X <= 0.0f
+		|| Entry.PadHalfExtentCM.Y <= 0.0f)
+	{
+		OutError = TEXT("FixedSixFrozenTangentSupportIdentityInvalid");
+		return false;
+	}
+
+	const FTransform LocalSupportTransform(
+		FQuat::Identity,
+		FVector(0.0f, 0.0f,
+			-StableBuildingFrozenTangentSupportThicknessCM * 0.5f),
+		FVector(
+			Entry.PadHalfExtentCM.X * 2.0f / BasicCubeSizeCM,
+			Entry.PadHalfExtentCM.Y * 2.0f / BasicCubeSizeCM,
+			StableBuildingFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
+	FoundationCap->SetRelativeTransform(LocalSupportTransform);
+	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationCap->SetCollisionObjectType(ECC_WorldStatic);
+	FoundationCap->SetCollisionResponseToAllChannels(ECR_Block);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	FoundationCap->SetGenerateOverlapEvents(false);
+	FoundationCap->SetCanEverAffectNavigation(false);
+	FoundationCap->SetCastShadow(false);
+	bJuryDemoFixedSixFrozenTangentSupportActive = true;
+
+	if (!ValidateJuryDemoFixedSixFrozenTangentSupport(Entry, OutError))
+	{
+		bJuryDemoFixedSixFrozenTangentSupportActive = false;
+		FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return false;
+	}
+
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixFrozenTangentSupport]")
+		TEXT(" Entry=%s Model=FrozenSiteLocalTangentPad")
+		TEXT(" HalfExtent=%s ThicknessCM=%.3f ObjectType=%d")
+		TEXT(" Visible=0 Collision=QueryAndPhysics Accepted=1"),
+		*Entry.ManifestEntryId.ToString(),
+		*Entry.PadHalfExtentCM.ToString(),
+		StableBuildingFrozenTangentSupportThicknessCM,
+		static_cast<int32>(FoundationCap->GetCollisionObjectType()));
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+ValidateJuryDemoFixedSixFrozenTangentSupport(
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+	FString& OutError) const
+{
+	OutError.Reset();
+	const FTransform ExpectedLocalTransform(
+		FQuat::Identity,
+		FVector(0.0f, 0.0f,
+			-StableBuildingFrozenTangentSupportThicknessCM * 0.5f),
+		FVector(
+			Entry.PadHalfExtentCM.X * 2.0f / BasicCubeSizeCM,
+			Entry.PadHalfExtentCM.Y * 2.0f / BasicCubeSizeCM,
+			StableBuildingFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
+	const FTransform ExpectedWorldTransform =
+		ExpectedLocalTransform * GetActorTransform();
+	if (!bJuryDemoFixedSixFrozenTangentSupportActive
+		|| FoundationCap->GetStaticMesh() == nullptr
+		|| FoundationCap->IsSimulatingPhysics()
+		|| FoundationCap->IsGravityEnabled()
+		|| FoundationCap->GetCollisionEnabled()
+			!= ECollisionEnabled::QueryAndPhysics
+		|| FoundationCap->GetCollisionObjectType() != ECC_WorldStatic
+		|| FoundationCap->GetCollisionResponseToChannel(
+			ABTSDeveloperObstacleChannel) != ECR_Block
+		|| FoundationCap->GetCollisionResponseToChannel(ECC_Pawn) != ECR_Block
+		|| !FoundationCap->GetRelativeTransform().Equals(
+			ExpectedLocalTransform, 1.0e-4)
+		|| !FoundationCap->GetComponentTransform().Equals(
+			ExpectedWorldTransform, 1.0e-3))
+	{
+		OutError = TEXT("FixedSixFrozenTangentSupportDrift");
+		return false;
+	}
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel() const
+{
+	if (!JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		return false;
+	}
+	FString Error;
+	return ValidateJuryDemoFixedSixFrozenTangentSupport(
+		JuryDemoFixedSixStaticEntry.GetValue(), Error);
+}
+
+void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
+	AABTSM7BuildingMaterialSystem& MaterialSystem)
+{
+	if (!JuryDemoFixedSixStaticEntry.IsSet()
+		|| !JuryDemoFixedSixStaticEntry->IsUsable())
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationPayloadMissing"));
+		return;
+	}
+	FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	if (!GetActorTransform().Equals(Entry.WorldTransform, 1.0e-3))
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationTransformDrift"));
+		return;
+	}
+
+	RuntimeMaterialSystem = &MaterialSystem;
+	JuryDemoE1DamageLifecycleState.Reset();
+	bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
+	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+	bJuryDemoFixedSixChaosDeferredActivated = false;
+	RuntimeModules.Reset();
+	RuntimeModulesByNodeId.Reset();
+	ClearBrickPreviews();
+	ConfigureJuryDemoFixedSixStaticHISM(*WoodPreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*StonePreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*IronPreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*GlassPreview);
+
+	JuryDemoFixedSixStaticBrickInstanceCount = 0;
+	for (const FABTSM73BeamD1BrickBinding& Brick : Entry.Bricks)
+	{
+		UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Brick.BrickSpec.Material);
+		if (HISM == nullptr)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationMaterialHISMMissing"));
+			return;
+		}
+		FTransform InstanceTransform = Brick.LocalTransform;
+		InstanceTransform.SetScale3D(
+			Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (HISM->AddInstance(InstanceTransform, false) == INDEX_NONE)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationBrickInstanceFailed"));
+			return;
+		}
+		++JuryDemoFixedSixStaticBrickInstanceCount;
+	}
+
+	for (const FABTSM73BeamD1DeviceBinding& Device : Entry.Devices)
+	{
+		const FTransform WorldTransform =
+			Device.LocalTransform * GetActorTransform();
+		AABTSM7BuildingModule* Module = MaterialSystem.SpawnStaticVoxelDevice(
+			Device.DeviceSpec, WorldTransform);
+		if (Module == nullptr)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationDeviceSpawnFailed"));
+			return;
+		}
+		Module->ConfigureDamageLifecycleOwner(this, INDEX_NONE, false);
+		RuntimeModules.Add(Module);
+	}
+	for (const FABTSM73BuildingFreezeV3CapBinding& Cap : Entry.Caps)
+	{
+		AABTSM7BuildingModule* Module = MaterialSystem.SpawnStaticBrickModule(
+			Cap.BrickSpec, Cap.SiteLocalTransform * GetActorTransform());
+		if (Module == nullptr)
+		{
+			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationCapSpawnFailed"));
+			return;
+		}
+		Module->ConfigureDamageLifecycleOwner(
+			this,
+			INDEX_NONE,
+			Cap.BrickSpec.Material == EABTSM7BuildingMaterial::Crystal);
+		RuntimeModules.Add(Module);
+	}
+
+	const int32 ExpectedModuleCount =
+		Entry.Bricks.Num() + Entry.Devices.Num() + Entry.Caps.Num();
+	bRuntimeSpawned = JuryDemoFixedSixStaticBrickInstanceCount
+			+ RuntimeModules.Num()
+		== ExpectedModuleCount;
+	if (!bRuntimeSpawned)
+	{
+		RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationCountMismatch"));
+		return;
+	}
+
+	FString FrozenTangentSupportError;
+	if (!ConfigureJuryDemoFixedSixFrozenTangentSupport(
+		Entry, FrozenTangentSupportError))
+	{
+		RejectRuntimeStructure(FrozenTangentSupportError);
+		return;
+	}
+	FoundationFeet->ClearInstances();
+	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	AttackDirection->SetVisibility(false, true);
+	GenerationSummary = FABTSM73GenerationSummary();
+	GenerationSummary.bAccepted = true;
+	GenerationSummary.bPlanar = false;
+	GenerationSummary.BrickCount = Entry.Bricks.Num();
+	GenerationSummary.GenerationAlgorithm =
+		EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	GenerationSummary.RejectReason.Reset();
+	bJuryDemoFixedSixStaticRegistrationAccepted = true;
+	// Static registration is a distinct prerequisite. M6 must continue to wait
+	// until the production Site-uniform Chaos observer accepts this building.
+	IdleValidationState = EABTSM73IdleValidationState::Pending;
+	bIdleValidationRunning = false;
+	bDAG4ValidationRunning = false;
+	SetActorTickEnabled(false);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][FixedSixStaticRegistered]")
+		TEXT(" Actor=%s Entry=%s Encounter=%d Tier=%d Seed=%d")
+		TEXT(" Layout=%llu Descriptor=%llu Static=%llu")
+		TEXT(" Production=%llu Device=%llu Contract=V%d Placement=%llu")
+		TEXT(" Bricks=%d Devices=%d Caps=%d Modules=%d")
+		TEXT(" ResultHash=%llu DynamicEnvelopeRequired=%d")
+		TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Accepted=1"),
+		*GetName(), *Entry.ManifestEntryId.ToString(), Entry.EncounterIndex,
+		Entry.DifficultyTier, Entry.DeterministicSeed, Entry.SourceLayoutHash,
+		Entry.DescriptorHash, Entry.StaticGeometryHash,
+		Entry.ProductionIdentityHash, Entry.DeviceAssemblyHash,
+		Entry.SourceContractVersion, Entry.SourcePlacementHash,
+		Entry.Bricks.Num(), Entry.Devices.Num(), Entry.Caps.Num(),
+		ExpectedModuleCount,
+		Entry.RegistrationResultHash,
+		Entry.bDynamicEnvelopeRequired ? 1 : 0);
+}
+
+void AABTSM73StableBuildingActor::
+InitializeBuildingFreezeV3RuntimeRegistration(
+	AABTSM7BuildingMaterialSystem& MaterialSystem)
+{
+	if (!BuildingFreezeV3RuntimeEntry.IsSet()
+		|| !BuildingFreezeV3RuntimeEntry->IsUsable())
+	{
+		RejectRuntimeStructure(TEXT("BuildingFreezeV3RuntimePayloadMissing"));
+		return;
+	}
+	FABTSM73BuildingFreezeV3RuntimeEntry& Entry =
+		BuildingFreezeV3RuntimeEntry.GetValue();
+	if (!GetActorTransform().Equals(Entry.WorldTransform, 1.0e-3))
+	{
+		RejectRuntimeStructure(TEXT("BuildingFreezeV3RuntimeTransformDrift"));
+		return;
+	}
+
+	RuntimeMaterialSystem = &MaterialSystem;
+	RuntimeModules.Reset();
+	RuntimeModulesByNodeId.Reset();
+	ClearBrickPreviews();
+	ConfigureJuryDemoFixedSixStaticHISM(*WoodPreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*StonePreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*IronPreview);
+	ConfigureJuryDemoFixedSixStaticHISM(*GlassPreview);
+
+	JuryDemoFixedSixStaticBrickInstanceCount = 0;
+	for (const FABTSM73BeamD1BrickBinding& Brick : Entry.Bricks)
+	{
+		UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Brick.BrickSpec.Material);
+		if (HISM == nullptr)
+		{
+			RejectRuntimeStructure(
+				TEXT("BuildingFreezeV3RuntimeMaterialHISMMissing"));
+			return;
+		}
+		FTransform InstanceTransform = Brick.LocalTransform;
+		InstanceTransform.SetScale3D(
+			Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (HISM->AddInstance(InstanceTransform, false) == INDEX_NONE)
+		{
+			RejectRuntimeStructure(
+				TEXT("BuildingFreezeV3RuntimeBrickInstanceFailed"));
+			return;
+		}
+		++JuryDemoFixedSixStaticBrickInstanceCount;
+	}
+
+	for (const FABTSM73BeamD1DeviceBinding& Device : Entry.Devices)
+	{
+		const FTransform WorldTransform =
+			Device.LocalTransform * GetActorTransform();
+		AABTSM7BuildingModule* Module = MaterialSystem.SpawnStaticVoxelDevice(
+			Device.DeviceSpec, WorldTransform);
+		if (Module == nullptr)
+		{
+			RejectRuntimeStructure(
+				TEXT("BuildingFreezeV3RuntimeDeviceSpawnFailed"));
+			return;
+		}
+		RuntimeModules.Add(Module);
+	}
+
+	for (const FABTSM73BuildingFreezeV3CapBinding& Cap : Entry.Caps)
+	{
+		const FTransform WorldTransform =
+			Cap.SiteLocalTransform * GetActorTransform();
+		AABTSM7BuildingModule* Module = MaterialSystem.SpawnStaticBrickModule(
+			Cap.BrickSpec, WorldTransform);
+		if (Module == nullptr)
+		{
+			RejectRuntimeStructure(
+				TEXT("BuildingFreezeV3RuntimeCapSpawnFailed"));
+			return;
+		}
+		RuntimeModules.Add(Module);
+	}
+
+	const int32 ExpectedModuleCount =
+		Entry.Bricks.Num() + Entry.Devices.Num() + Entry.Caps.Num();
+	bRuntimeSpawned = JuryDemoFixedSixStaticBrickInstanceCount
+			+ RuntimeModules.Num()
+		== ExpectedModuleCount;
+	if (!bRuntimeSpawned)
+	{
+		RejectRuntimeStructure(TEXT("BuildingFreezeV3RuntimeCountMismatch"));
+		return;
+	}
+
+	FoundationCap->SetVisibility(false, true);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoundationFeet->ClearInstances();
+	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	AttackDirection->SetVisibility(false, true);
+	GenerationSummary = FABTSM73GenerationSummary();
+	GenerationSummary.bAccepted = true;
+	GenerationSummary.bPlanar = false;
+	GenerationSummary.BrickCount = Entry.Bricks.Num() + Entry.Caps.Num();
+	GenerationSummary.GenerationAlgorithm =
+		EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
+	GenerationSummary.RejectReason.Reset();
+	IdleValidationState = EABTSM73IdleValidationState::Accepted;
+	bIdleValidationRunning = false;
+	bDAG4ValidationRunning = false;
+	SetActorTickEnabled(false);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][BuildingFreezeV3RuntimeRegistered]")
+		TEXT(" Actor=%s StableId=%s ComplexityId=%d ComplexityIndex=%d")
+		TEXT(" ComplexityTier=%d EncounterSlot=%d Seed=%d Primary=%d")
+		TEXT(" Catalog=%llu Placement=%llu Descriptor=%llu Static=%llu")
+		TEXT(" Production=%llu Device=%llu Bricks=%d Devices=%d Caps=%d")
+		TEXT(" Modules=%d ResultHash=%llu")
+		TEXT(" Authority=M7V3RuntimeFixture Chaos=NotEvaluated Accepted=1"),
+		*GetName(), *Entry.StableId.ToString(),
+		static_cast<int32>(Entry.ComplexityId), Entry.ComplexityIndex,
+		Entry.ComplexityTier, Entry.EncounterSlot, Entry.DeterministicSeed,
+		static_cast<int32>(Entry.PrimaryMaterial),
+		FABTSM73BuildingFreezeV3::FrozenCatalogHash,
+		Entry.RuntimePlacementHash, Entry.DescriptorHash,
+		Entry.StaticGeometryHash, Entry.ProductionHash,
+		Entry.DeviceAssemblyHash, Entry.Bricks.Num(), Entry.Devices.Num(),
+		Entry.Caps.Num(), ExpectedModuleCount, Entry.RegistrationResultHash);
+}
+
+void AABTSM73StableBuildingActor::RollbackJuryDemoFixedSixStaticRegistration(
+	const FString& Reason)
+{
+	RejectRuntimeStructure(Reason);
+	Destroy();
+}
+
+void AABTSM73StableBuildingActor::
+RollbackBuildingFreezeV3RuntimeRegistration(const FString& Reason)
+{
+	RejectRuntimeStructure(Reason);
+	Destroy();
+}
+
 void AABTSM73StableBuildingActor::InitializeRuntimeBuilding(AABTSM7BuildingMaterialSystem* MaterialSystem)
 {
+	if (!bParticipateInPIERuntime)
+	{
+		IdleValidationState = EABTSM73IdleValidationState::NotRequired;
+		return;
+	}
 	if (bRuntimeSpawned || MaterialSystem == nullptr) return;
+	if (JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		InitializeJuryDemoFixedSixStaticRegistration(*MaterialSystem);
+		return;
+	}
+	if (BuildingFreezeV3RuntimeEntry.IsSet())
+	{
+		InitializeBuildingFreezeV3RuntimeRegistration(*MaterialSystem);
+		return;
+	}
 	LastDAG4ValidationResult = FABTSM73DAG4ValidationResult();
 	LastDAG4ValidationResult.bEnabled =
 		DAG4ValidationSettings.bEnableSettledChaosValidation;
@@ -1352,6 +2542,11 @@ void AABTSM73StableBuildingActor::BeginIdleValidation(const FABTSM73GroundContex
 void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bJuryDemoFixedSixChaosRunning)
+	{
+		TickJuryDemoFixedSixChaosValidation(DeltaSeconds);
+		return;
+	}
 	if (bDAG4ValidationRunning)
 	{
 		TickDAG4Validation(DeltaSeconds);
@@ -1532,9 +2727,19 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	}
 	RuntimeModules.Reset();
 	RuntimeModulesByNodeId.Reset();
+	JuryDemoFixedSixStaticBrickInstanceCount = 0;
 	IdleInitialTransforms.Reset();
 	RuntimeMaterialSystem.Reset();
 	bRuntimeSpawned = false;
+	bJuryDemoFixedSixStaticRegistrationAccepted = false;
+	bJuryDemoFixedSixFrozenTangentSupportActive = false;
+	bJuryDemoFixedSixChaosPrepared = false;
+	bJuryDemoFixedSixChaosRunning = false;
+	bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
+	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+	bJuryDemoFixedSixChaosDeferredActivated = false;
+	JuryDemoFixedSixChaosPhysicsModules.Reset();
+	JuryDemoFixedSixChaosInitialTransforms.Reset();
 	bIdleValidationRunning = false;
 	bDAG4ValidationRunning = false;
 	IdleValidationState = EABTSM73IdleValidationState::Rejected;

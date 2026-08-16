@@ -692,6 +692,7 @@ void AABTSM10ScoutMapSystem::UpdateOrbitalOverview()
 
 	const bool bPredictionChanged =
 		CachedOrbitalPreviewPointCount != Preview.WorldPoints.Num()
+		|| CachedOrbitalPreviewGravityHash != Preview.GravitySnapshotHash
 		|| !CachedOrbitalPreviewStart.Equals(Preview.InitialWorldLocation, 0.1f)
 		|| !CachedOrbitalPreviewVelocity.Equals(Preview.InitialWorldVelocity, 0.1f)
 		|| !FMath::IsNearlyEqual(
@@ -707,6 +708,7 @@ void AABTSM10ScoutMapSystem::UpdateOrbitalOverview()
 	CachedOrbitalPreviewVelocity = Preview.InitialWorldVelocity;
 	CachedOrbitalPreviewPathLengthCM = Preview.PredictedPathLengthCM;
 	CachedOrbitalPreviewPointCount = Preview.WorldPoints.Num();
+	CachedOrbitalPreviewGravityHash = Preview.GravitySnapshotHash;
 	if (!bWasVisible)
 	{
 		UE_LOG(LogABTSRuntime, Log,
@@ -880,6 +882,7 @@ void AABTSM10ScoutMapSystem::ClearOrbitalOverview(const bool bLogTransition)
 	CachedOrbitalPreviewVelocity = FVector::ZeroVector;
 	CachedOrbitalPreviewPathLengthCM = -1.0f;
 	CachedOrbitalPreviewPointCount = 0;
+	CachedOrbitalPreviewGravityHash = 0;
 	LastOrbitalPlaneNormal = FVector::ZeroVector;
 	LastOrbitalHorizontalAxis = FVector::ZeroVector;
 }
