@@ -127,11 +127,29 @@ void UABTSGameViewportClient::Init(
 	StartupForegroundStartSeconds = FPlatformTime::Seconds();
 
 	FString CapturePage;
+#if UE_BUILD_SHIPPING
+	bCaptureMode = false;
+#else
 	bCaptureMode = FParse::Value(FCommandLine::Get(), TEXT("ABTSMenuCapture="), CapturePage);
+#endif
 	if (bCaptureMode)
 	{
 		CapturePage.TrimStartAndEndInline();
-		if (CapturePage.Equals(TEXT("Pause"), ESearchCase::IgnoreCase))
+		if (CapturePage.StartsWith(TEXT("Opening"), ESearchCase::IgnoreCase))
+		{
+			bOpeningProductionCapture = true;
+			MenuPage = EABTSSystemMenuPage::Front;
+			FString DelaySuffix = CapturePage.RightChop(7);
+			DelaySuffix.TrimStartAndEndInline();
+			if (!DelaySuffix.IsEmpty())
+			{
+				OpeningProductionCaptureDelaySeconds = FMath::Clamp(
+					FCString::Atof(*DelaySuffix),
+					1.0f,
+					40.0f);
+			}
+		}
+		else if (CapturePage.Equals(TEXT("Pause"), ESearchCase::IgnoreCase))
 		{
 			MenuPage = EABTSSystemMenuPage::Pause;
 		}
@@ -174,13 +192,22 @@ void UABTSGameViewportClient::Init(
 		CaptureOutputPath = FPaths::ConvertRelativePathToFull(CaptureOutputPath);
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(CaptureOutputPath), true);
 		CaptureStartSeconds = FPlatformTime::Seconds();
-		UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][SystemMenuCapture] Armed Page=%s Output=%s"), *CapturePage, *CaptureOutputPath);
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][SystemMenuCapture] Armed Page=%s OpeningProduction=%d DelaySeconds=%.2f Output=%s"),
+			*CapturePage,
+			bOpeningProductionCapture ? 1 : 0,
+			OpeningProductionCaptureDelaySeconds,
+			*CaptureOutputPath);
 	}
 	else
 	{
+#if UE_BUILD_SHIPPING
+		constexpr bool bSkipFrontEnd = false;
+#else
 		const bool bSkipFrontEnd = FParse::Param(
 			FCommandLine::Get(),
 			TEXT("ABTSSkipFrontEnd"));
+#endif
 		bStartupFrontEndRequired = !IsRunningCommandlet()
 			&& !FApp::IsUnattended()
 			&& !bSkipFrontEnd;
@@ -205,6 +232,7 @@ void UABTSGameViewportClient::Tick(const float DeltaTime)
 	RefreshStartupWorldState();
 	EnsureInitialMenuState();
 	if (bMenuVisible) ApplyMenuInputMode();
+	UpdateOpeningProductionCapture();
 	if (ActiveDialog == EABTSSystemMenuDialog::ConfirmVideo
 		&& FPlatformTime::Seconds() >= VideoConfirmationDeadlineSeconds
 		&& !bCaptureMode)
@@ -328,7 +356,11 @@ void UABTSGameViewportClient::EnsureInitialMenuState()
 	UWorld* GameWorld = GetWorld();
 	if (!GameWorld || !GameWorld->HasBegunPlay() || !GEngine || !GEngine->GetFirstLocalPlayerController(GameWorld)) return;
 	bInitialMenuStateResolved = true;
+#if UE_BUILD_SHIPPING
+	constexpr bool bSkip = false;
+#else
 	const bool bSkip = FParse::Param(FCommandLine::Get(), TEXT("ABTSSkipFrontEnd"));
+#endif
 	const bool bInteractive = !IsRunningCommandlet() && !FApp::IsUnattended();
 	if (bInteractive && !bSkip) OpenFrontEnd();
 }
@@ -486,7 +518,7 @@ void UABTSGameViewportClient::OpenSettingsMenu(const EABTSSettingsSection Sectio
 
 void UABTSGameViewportClient::CloseSystemMenu()
 {
-	if (!bMenuVisible || bCaptureMode) return;
+	if (!bMenuVisible || (bCaptureMode && !bOpeningProductionCapture)) return;
 	if (IsStartupInputBlocked())
 	{
 		UE_LOG(LogABTSRuntime, Warning,
@@ -1053,6 +1085,7 @@ void UABTSGameViewportClient::HandleAction(const EHitAction Action, const int32 
 	case EHitAction::Begin:
 	{
 		CloseSystemMenu();
+		if (bMenuVisible) break;
 		if (!bOpeningCinematicAttempted)
 		{
 			bOpeningCinematicAttempted = true;
@@ -1060,14 +1093,24 @@ void UABTSGameViewportClient::HandleAction(const EHitAction Action, const int32 
 				AABTSOpeningCinematicPreview::TryStartProductionOpening(GetWorld());
 			const bool bStarted = StartResult == EABTSOpeningStartResult::Started;
 			const bool bDebugSkip = StartResult == EABTSOpeningStartResult::DebugSkipped;
+			bOpeningCinematicStarted = bStarted;
 			UE_LOG(LogABTSRuntime, Log,
 				TEXT("[ABTS][StartupFlow] OpeningCinematicAttempted=1 Started=%d DebugSkipped=%d"),
 				bStarted ? 1 : 0, bDebugSkip ? 1 : 0);
-			if (!bStarted && !bDebugSkip)
+			if (bStarted || bDebugSkip)
+			{
+				// The front-end gate has completed its one startup handoff. It must no
+				// longer re-arm merely because the cinematic now owns the viewport.
+				bStartupFrontEndRequired = false;
+				bStartupPresentationReady = true;
+				bStartupWorldReady = bStartupAuthorityReady && !bStartupWorldFailed;
+			}
+			else
 			{
 				// A release binding rejection must not silently reveal an interactive
 				// world without its required opening handoff.
 				bOpeningCinematicAttempted = false;
+				bOpeningCinematicStarted = false;
 				OpenFrontEnd();
 			}
 		}
@@ -1367,10 +1410,57 @@ void UABTSGameViewportClient::ResetSettingsToDefaults()
 	}
 }
 
+void UABTSGameViewportClient::UpdateOpeningProductionCapture()
+{
+	if (!bCaptureMode || !bOpeningProductionCapture || bScreenshotRequested) return;
+
+	if (!bOpeningProductionStarted)
+	{
+		if (!bMenuVisible
+			|| MenuPage != EABTSSystemMenuPage::Front
+			|| IsStartupInputBlocked())
+		{
+			return;
+		}
+
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][OpeningProductionCapture] BeginRequested Ready=1"));
+		HandleAction(EHitAction::Begin);
+		if (!bOpeningCinematicStarted)
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][OpeningProductionCapture] Complete Success=0 Reason=OpeningDidNotStart DebugSkipped=%d"),
+				bOpeningCinematicAttempted ? 1 : 0);
+			bScreenshotRequested = true;
+			FGenericPlatformMisc::RequestExitWithStatus(false, 1);
+			return;
+		}
+
+		bOpeningProductionStarted = true;
+		OpeningProductionCaptureStartSeconds = FPlatformTime::Seconds();
+		CaptureFrameCount = 0;
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][OpeningProductionCapture] Started=1 DelaySeconds=%.2f"),
+			OpeningProductionCaptureDelaySeconds);
+		return;
+	}
+
+	if (FPlatformTime::Seconds() - OpeningProductionCaptureStartSeconds
+		< OpeningProductionCaptureDelaySeconds)
+	{
+		return;
+	}
+
+	CaptureFrameCount = FMath::Max(CaptureFrameCount, 60);
+	MaybeRequestCapture();
+}
+
 void UABTSGameViewportClient::MaybeRequestCapture()
 {
 	if (!bCaptureMode || bScreenshotRequested || CaptureFrameCount < 60 || !GetWorld() || !GetWorld()->HasBegunPlay()) return;
-	if (MenuPage == EABTSSystemMenuPage::Front && IsStartupInputBlocked()) return;
+	if (!bOpeningProductionStarted
+		&& MenuPage == EABTSSystemMenuPage::Front
+		&& IsStartupInputBlocked()) return;
 	bScreenshotRequested = true;
 	ScreenshotDelegateHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddUObject(this, &UABTSGameViewportClient::HandleScreenshotProcessed);
 	FScreenshotRequest::RequestScreenshot(CaptureOutputPath, true, false, false, FIntRect(), true);

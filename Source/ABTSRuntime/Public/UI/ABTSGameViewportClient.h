@@ -128,6 +128,7 @@ private:
 	bool CanQuitCurrentWorld() const;
 	void QuitGame();
 	void PlayUIFeedback(bool bConfirm) const;
+	void UpdateOpeningProductionCapture();
 	void MaybeRequestCapture();
 	void HandleScreenshotProcessed();
 
@@ -159,9 +160,14 @@ private:
 	bool bStartupGateStartedLogged = false;
 	bool bStartupGateTerminalLogged = false;
 	bool bOpeningCinematicAttempted = false;
+	bool bOpeningCinematicStarted = false;
+	bool bOpeningProductionCapture = false;
+	bool bOpeningProductionStarted = false;
 	int32 StartupReadyPresentationFrameCount = 0;
 	int32 CaptureFrameCount = 0;
 	double CaptureStartSeconds = 0.0;
+	double OpeningProductionCaptureStartSeconds = 0.0;
+	float OpeningProductionCaptureDelaySeconds = 8.0f;
 	double StartupForegroundStartSeconds = 0.0;
 	double VideoConfirmationDeadlineSeconds = 0.0;
 	FString CaptureOutputPath;
