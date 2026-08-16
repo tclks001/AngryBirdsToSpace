@@ -23,9 +23,9 @@
 V3 当前生产身份：
 
 - Placement Schema / Catalog：`3 / 797455362285398432`
-- Layout Hash：`0x0044C9789AD84147`
+- Layout Hash：`0x3E143A25531F3F7A`
 - 六个 Placement Hash：`A91A9FB5D79AE1CE / 4C41612002CC0208 / 8ACA9CA9BAFE95BD / 66C8FD0EF4ACD5F2 / 1C267DFD88E65BAB / 618C6BB2B4FB749B`
-- Registration Result Hash：`8828767116104973231`
+- Registration Result Hash：`17633525379359033190`
 - 六栋静态模块：`5748`，其中 E1 唯一一个 `72×72×72 cm` Crystal cap
 - 有序 Encounter：`E2/E3/E4/E5/E1/E6`，E1 为 `Tier0 + Slot4 + Satellite`
 
@@ -54,7 +54,7 @@ V2 不修改 V1 常量；M3 Adapter 只在源结果明确声明 V2 且全部身�
 
 ### 2.2 V3 结构交接与生产隔离
 
-V3 固定 `Schema=3`、Catalog `797455362285398432`、Layout `0x0044C9789AD84147` 和顺序 `E2/E3/E4/E5/E1/E6`。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。E6 的静态几何与 2236 个可见/可破坏模块不变，生产物理装配发布为 809 个权威 Chaos 刚体，`PhysicsAssemblyHash=5207773572942773531`；E6 的空间 Transform/Bounds 未变，但 PlacementHash 覆盖 Descriptor/Production，所以随发布重签为 `0x618C6BB2B4FB749B`。
+V3 固定 `Schema=3`、Catalog `797455362285398432`、Layout `0x3E143A25531F3F7A` 和顺序 `E2/E3/E4/E5/E1/E6`。`IsStructurallyUsableV3()` 要求完整的六条非零 Placement/布局身份并验证 M7 的逐槽 Tier、Seed、Descriptor、StaticGeometry、Production、Device、SiteLocal/Pad/Effect Bounds；同时验证五个主星站点共享支撑球/Gravity 身份，E1 为 `Tier0 + Slot4 + Satellite` 且使用不同卫星身份。E6 的静态几何与 2236 个可见/可破坏模块不变，生产物理装配发布为 809 个权威 Chaos 刚体，`PhysicsAssemblyHash=5207773572942773531`；E6 的空间 Transform/Bounds 未变，但 PlacementHash 覆盖 Descriptor/Production，所以随发布重签为 `0x618C6BB2B4FB749B`。E1 的生产攻击目标由公开冻结 descriptor 的 54 个真实 Brick OBB 有序联集提供；认证要求 first-hit 任一真实 Brick，并按命中 alpha、再按 BrickId 稳定决胜。旧洋红代理、空包围体与 Crystal 精确命中均不再是 V3 生产门。
 
 结构门只证明 DTO 完整；生产级 `IsUsable()` 还要求上述精确 Layout 与六个 Placement Hash。`ProductionContractVersion=3`；半填 V3、任意非零占位 Layout 或旧 Catalog 都必须 fail closed。V1/V2 继续用于兼容读取和历史回归，不得覆盖 V3 生产结果。
 
