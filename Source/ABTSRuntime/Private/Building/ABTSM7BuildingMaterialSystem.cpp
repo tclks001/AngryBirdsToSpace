@@ -564,6 +564,16 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 				*GetNameSafe(Module));
 			return false;
 		}
+		FString CollisionIdentityError;
+		if (!Module->VerifyChaosDeveloperObstacleCollisionIdentity(
+			CollisionIdentityError))
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][SiteUniformLaunch]")
+				TEXT(" Rejected Reason=CollisionIdentityInvalid Module=%s Detail=%s"),
+				*GetNameSafe(Module), *CollisionIdentityError);
+			return false;
+		}
 	}
 	MarkPhysicsActivity();
 	UE_LOG(LogABTSRuntime, Log,
@@ -652,6 +662,20 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 		|| NormalSpeedCMPerSec <= 0.0f)
 	{
 		return false;
+	}
+	if (AABTSM73StableBuildingActor* Building =
+		Module.GetDamageLifecycleOwner())
+	{
+		FString ActivationError;
+		if (!Building->ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
+			Module, ActivationError))
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitRejected]")
+				TEXT(" Module=%s Reason=%s DamageDropped=1"),
+				*Module.GetName(), *ActivationError);
+			return false;
+		}
 	}
 	const FABTSM7MaterialProfile& Profile =
 		GetProfile(Module.GetBuildingMaterial());

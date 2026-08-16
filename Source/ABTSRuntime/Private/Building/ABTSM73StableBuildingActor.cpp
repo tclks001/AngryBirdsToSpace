@@ -30,6 +30,7 @@
 namespace
 {
 	constexpr float BasicCubeSizeCM = 100.0f;
+	constexpr float FixedSixFrozenTangentSupportThicknessCM = 100.0f;
 
 	FTransform WorldBoxTransform(const FABTSM73GroundContext& Context, const FVector& LocalCenter, const FVector& Dimensions)
 	{
@@ -514,6 +515,97 @@ bool FABTSM73E1DamageLifecycleState::IsAccepted() const
 		&& bCrystalDestroyedByPhysicalChain;
 }
 
+bool FABTSM73E1OrderedBrickInstanceBinding::IsUsable(
+	const bool bRequireLiveOwnership) const
+{
+	if (BrickId < 0 || MaterialInstanceIndex < 0
+		|| Material == EABTSM7BuildingMaterial::Crystal
+		|| FrozenWorldTransform.ContainsNaN()
+		|| !FrozenWorldTransform.GetRotation().IsNormalized()
+		|| !FrozenWorldTransform.GetScale3D().Equals(
+			FVector::OneVector, 1.0e-6)
+		|| HalfExtentCM.ContainsNaN() || HalfExtentCM.GetMin() <= 0.0f)
+	{
+		return false;
+	}
+	if (!bRequireLiveOwnership)
+	{
+		return true;
+	}
+	const UHierarchicalInstancedStaticMeshComponent* HISM = SourceHISM.Get();
+	const AABTSM73StableBuildingActor* Building = OwningBuilding.Get();
+	return HISM != nullptr && Building != nullptr
+		&& HISM->GetOwner() == Building
+		&& MaterialInstanceIndex < HISM->GetInstanceCount()
+		&& HISM->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics
+		&& HISM->GetCollisionObjectType() == ABTSDeveloperObstacleChannel
+		&& HISM->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block;
+}
+
+bool FABTSM73E1OrderedBrickUnionBinding::IsUsable(
+	const bool bRequireLiveOwnership) const
+{
+	if (ManifestEntryId != FName(TEXT("E1ColumnBreak"))
+		|| DescriptorHash == 0 || StaticGeometryHash == 0
+		|| OrderedBricks.Num() != FrozenBrickCount)
+	{
+		return false;
+	}
+	int32 WoodIndex = 0;
+	int32 StoneIndex = 0;
+	int32 IronIndex = 0;
+	int32 GlassIndex = 0;
+	for (int32 Index = 0; Index < OrderedBricks.Num(); ++Index)
+	{
+		const FABTSM73E1OrderedBrickInstanceBinding& Brick =
+			OrderedBricks[Index];
+		int32 ExpectedMaterialIndex = INDEX_NONE;
+		switch (Brick.Material)
+		{
+		case EABTSM7BuildingMaterial::Wood:
+			ExpectedMaterialIndex = WoodIndex++; break;
+		case EABTSM7BuildingMaterial::Stone:
+			ExpectedMaterialIndex = StoneIndex++; break;
+		case EABTSM7BuildingMaterial::Iron:
+			ExpectedMaterialIndex = IronIndex++; break;
+		case EABTSM7BuildingMaterial::Glass:
+			ExpectedMaterialIndex = GlassIndex++; break;
+		default: break;
+		}
+		if (Brick.BrickId != Index
+			|| Brick.MaterialInstanceIndex != ExpectedMaterialIndex
+			|| !Brick.IsUsable(bRequireLiveOwnership))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32 FABTSM73E1OrderedBrickUnionBinding::ComputeOrderedGeometryHash() const
+{
+	FString Canonical = FString::Printf(
+		TEXT("E1OrderedBrickUnionBinding:v1:Entry=%s:Descriptor=%llu")
+		TEXT(":Static=%llu:Count=%d"),
+		*ManifestEntryId.ToString(), DescriptorHash, StaticGeometryHash,
+		OrderedBricks.Num());
+	for (const FABTSM73E1OrderedBrickInstanceBinding& Brick : OrderedBricks)
+	{
+		const FVector Location = Brick.FrozenWorldTransform.GetLocation();
+		const FQuat Rotation = Brick.FrozenWorldTransform.GetRotation();
+		Canonical += FString::Printf(
+			TEXT(":B%d:M%d:I%d:L%.6f,%.6f,%.6f:Q%.9f,%.9f,%.9f,%.9f")
+			TEXT(":E%.6f,%.6f,%.6f"),
+			Brick.BrickId, static_cast<int32>(Brick.Material),
+			Brick.MaterialInstanceIndex,
+			Location.X, Location.Y, Location.Z,
+			Rotation.X, Rotation.Y, Rotation.Z, Rotation.W,
+			Brick.HalfExtentCM.X, Brick.HalfExtentCM.Y,
+			Brick.HalfExtentCM.Z);
+	}
+	return FCrc::StrCrc32(*Canonical);
+}
+
 int32 AABTSM73StableBuildingActor::GetJuryDemoFixedSixStaticModuleCount() const
 {
 	int32 ModuleCount = JuryDemoFixedSixStaticBrickInstanceCount;
@@ -684,6 +776,156 @@ bool AABTSM73StableBuildingActor::CopyJuryDemoE1CrystalTarget(
 	}
 	OutTargetActor = CrystalTarget;
 	OutHalfExtentCM = Cap.BrickSpec.DimensionsCM * 0.5f;
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+CopyJuryDemoE1OrderedBrickUnionBinding(
+	FABTSM73E1OrderedBrickUnionBinding& OutBinding,
+	FTransform& OutSiteRecoveryAnchorTransform,
+	FVector& OutSiteRecoveryAnchorHalfExtentCM) const
+{
+	OutBinding = FABTSM73E1OrderedBrickUnionBinding();
+	OutSiteRecoveryAnchorTransform = FTransform::Identity;
+	OutSiteRecoveryAnchorHalfExtentCM = FVector::ZeroVector;
+	if (!IsJuryDemoFixedSixStaticRegistrationAccepted()
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| !RuntimeMaterialSystem.IsValid())
+	{
+		return false;
+	}
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	if (Entry.ManifestEntryId != FName(TEXT("E1ColumnBreak"))
+		|| Entry.Bricks.Num()
+			!= FABTSM73E1OrderedBrickUnionBinding::FrozenBrickCount
+		|| Entry.Caps.Num() != 1
+		|| RuntimeModules.Num() != Entry.Devices.Num() + Entry.Caps.Num())
+	{
+		return false;
+	}
+
+	const EABTSM7BuildingMaterial Materials[] = {
+		EABTSM7BuildingMaterial::Wood,
+		EABTSM7BuildingMaterial::Stone,
+		EABTSM7BuildingMaterial::Iron,
+		EABTSM7BuildingMaterial::Glass};
+	for (const EABTSM7BuildingMaterial Material : Materials)
+	{
+		const UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Material);
+		int32 ExpectedCount = 0;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Entry.Bricks)
+		{
+			ExpectedCount += Brick.BrickSpec.Material == Material ? 1 : 0;
+		}
+		if (HISM == nullptr || HISM->GetOwner() != this
+			|| HISM->GetInstanceCount() != ExpectedCount
+			|| HISM->GetCollisionEnabled() != ECollisionEnabled::QueryAndPhysics
+			|| HISM->GetCollisionObjectType() != ABTSDeveloperObstacleChannel
+			|| HISM->GetCollisionResponseToChannel(ECC_Pawn) != ECR_Block)
+		{
+			return false;
+		}
+	}
+
+	int32 WoodIndex = 0;
+	int32 StoneIndex = 0;
+	int32 IronIndex = 0;
+	int32 GlassIndex = 0;
+	OutBinding.ManifestEntryId = Entry.ManifestEntryId;
+	OutBinding.DescriptorHash = Entry.DescriptorHash;
+	OutBinding.StaticGeometryHash = Entry.StaticGeometryHash;
+	OutBinding.OrderedBricks.Reserve(Entry.Bricks.Num());
+	for (int32 DescriptorIndex = 0;
+		DescriptorIndex < Entry.Bricks.Num(); ++DescriptorIndex)
+	{
+		const FABTSM73BeamD1BrickBinding& Brick = Entry.Bricks[DescriptorIndex];
+		int32* MaterialIndex = nullptr;
+		switch (Brick.BrickSpec.Material)
+		{
+		case EABTSM7BuildingMaterial::Wood: MaterialIndex = &WoodIndex; break;
+		case EABTSM7BuildingMaterial::Stone: MaterialIndex = &StoneIndex; break;
+		case EABTSM7BuildingMaterial::Iron: MaterialIndex = &IronIndex; break;
+		case EABTSM7BuildingMaterial::Glass: MaterialIndex = &GlassIndex; break;
+		default: break;
+		}
+		UHierarchicalInstancedStaticMeshComponent* HISM =
+			GetPreviewForMaterial(Brick.BrickSpec.Material);
+		FTransform ActualLocalTransform = FTransform::Identity;
+		FTransform ExpectedLocalTransform = Brick.LocalTransform;
+		ExpectedLocalTransform.SetScale3D(
+			Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (Brick.BrickId != DescriptorIndex || MaterialIndex == nullptr
+			|| HISM == nullptr
+			|| !HISM->GetInstanceTransform(
+				*MaterialIndex, ActualLocalTransform, false)
+			|| !ActualLocalTransform.Equals(ExpectedLocalTransform, 0.001))
+		{
+			OutBinding = FABTSM73E1OrderedBrickUnionBinding();
+			return false;
+		}
+
+		FABTSM73E1OrderedBrickInstanceBinding& BoundBrick =
+			OutBinding.OrderedBricks.AddDefaulted_GetRef();
+		BoundBrick.BrickId = Brick.BrickId;
+		BoundBrick.Material = Brick.BrickSpec.Material;
+		BoundBrick.MaterialInstanceIndex = (*MaterialIndex)++;
+		BoundBrick.FrozenWorldTransform =
+			Brick.LocalTransform * GetActorTransform();
+		BoundBrick.FrozenWorldTransform.SetScale3D(FVector::OneVector);
+		BoundBrick.HalfExtentCM = Brick.BrickSpec.DimensionsCM * 0.5f;
+		BoundBrick.SourceHISM = HISM;
+		BoundBrick.OwningBuilding =
+			const_cast<AABTSM73StableBuildingActor*>(this);
+	}
+
+	const FABTSM73BuildingFreezeV3CapBinding& Cap = Entry.Caps[0];
+	AABTSM7BuildingModule* CrystalCap = nullptr;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule :
+		RuntimeModules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr || !Module->IsCrystalLifecycleTarget())
+		{
+			continue;
+		}
+		if (CrystalCap != nullptr)
+		{
+			return false;
+		}
+		CrystalCap = Module;
+	}
+	const FTransform ExpectedCapTransform =
+		Cap.SiteLocalTransform * GetActorTransform();
+	const FVector ExpectedCapActorScale =
+		ExpectedCapTransform.GetScale3D()
+		* (Cap.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+	if (CrystalCap == nullptr || CrystalCap->GetOwner() != RuntimeMaterialSystem.Get()
+		|| CrystalCap->GetDamageLifecycleOwner() != this
+		|| CrystalCap->GetDamageLifecycleBrickId() != INDEX_NONE
+		|| CrystalCap->GetBuildingMaterial() != EABTSM7BuildingMaterial::Crystal
+		|| CrystalCap->IsBroken()
+		|| !CrystalCap->GetActorLocation().Equals(
+			ExpectedCapTransform.GetLocation(), 0.001)
+		|| !CrystalCap->GetActorQuat().Equals(
+			ExpectedCapTransform.GetRotation(), 0.001)
+		|| !CrystalCap->GetActorScale3D().Equals(ExpectedCapActorScale, 0.001)
+		|| CrystalCap->GetMeshComponent() == nullptr
+		|| CrystalCap->GetMeshComponent()->GetCollisionEnabled()
+			== ECollisionEnabled::NoCollision
+		|| !OutBinding.IsUsable(true))
+	{
+		OutBinding = FABTSM73E1OrderedBrickUnionBinding();
+		return false;
+	}
+
+	// M3's public API uses the cap pose solely to recover SiteTransform. Keep the
+	// real scaled Crystal out of the first-hit union and provide its frozen,
+	// unit-scale descriptor pose to a non-colliding single-call adapter.
+	OutSiteRecoveryAnchorTransform = ExpectedCapTransform;
+	OutSiteRecoveryAnchorTransform.SetScale3D(FVector::OneVector);
+	OutSiteRecoveryAnchorHalfExtentCM = Cap.BrickSpec.DimensionsCM * 0.5f;
 	return true;
 }
 
@@ -1542,6 +1784,120 @@ void AABTSM73StableBuildingActor::ConfigureJuryDemoFixedSixStaticHISM(
 	Component.SetVisibility(true, true);
 }
 
+bool AABTSM73StableBuildingActor::
+ConfigureJuryDemoFixedSixFrozenTangentSupport(
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+	FString& OutError)
+{
+	OutError.Reset();
+	bJuryDemoFixedSixFrozenTangentSupportActive = false;
+	FoundationCap->SetVisibility(false, true);
+	FoundationCap->SetHiddenInGame(true);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoundationCap->SetSimulatePhysics(false);
+	FoundationCap->SetEnableGravity(false);
+
+	// M3 owns every frozen site transform, footprint and surrounding terrain.
+	// Its production contact is a tessellated ProceduralMesh, while the
+	// authoritative Chaos fixture uses an exact box plane. Materialize that
+	// exact frozen tangent plane for every building so the first supporting
+	// contact has the same shape in the fixture and the production batch.
+	if (FoundationCap->GetStaticMesh() == nullptr
+		|| !FMath::IsFinite(Entry.PadHalfExtentCM.X)
+		|| !FMath::IsFinite(Entry.PadHalfExtentCM.Y)
+		|| Entry.PadHalfExtentCM.X <= 0.0f
+		|| Entry.PadHalfExtentCM.Y <= 0.0f)
+	{
+		OutError = TEXT("FixedSixFrozenTangentSupportIdentityInvalid");
+		return false;
+	}
+
+	const FTransform LocalSupportTransform(
+		FQuat::Identity,
+		FVector(0.0f, 0.0f,
+			-FixedSixFrozenTangentSupportThicknessCM * 0.5f),
+		FVector(
+			Entry.PadHalfExtentCM.X * 2.0f / BasicCubeSizeCM,
+			Entry.PadHalfExtentCM.Y * 2.0f / BasicCubeSizeCM,
+			FixedSixFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
+	FoundationCap->SetRelativeTransform(LocalSupportTransform);
+	FoundationCap->SetCollisionProfileName(TEXT("BlockAll"));
+	FoundationCap->SetCollisionObjectType(ECC_WorldStatic);
+	FoundationCap->SetCollisionResponseToAllChannels(ECR_Block);
+	FoundationCap->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	FoundationCap->SetGenerateOverlapEvents(false);
+	FoundationCap->SetCanEverAffectNavigation(false);
+	FoundationCap->SetCastShadow(false);
+	bJuryDemoFixedSixFrozenTangentSupportActive = true;
+
+	if (!ValidateJuryDemoFixedSixFrozenTangentSupport(Entry, OutError))
+	{
+		bJuryDemoFixedSixFrozenTangentSupportActive = false;
+		FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return false;
+	}
+
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixFrozenTangentSupport]")
+		TEXT(" Entry=%s Model=FrozenSiteLocalTangentPad")
+		TEXT(" HalfExtent=%s ThicknessCM=%.3f ObjectType=%d")
+		TEXT(" Visible=0 Collision=QueryAndPhysics Accepted=1"),
+		*Entry.ManifestEntryId.ToString(),
+		*Entry.PadHalfExtentCM.ToString(),
+		FixedSixFrozenTangentSupportThicknessCM,
+		static_cast<int32>(FoundationCap->GetCollisionObjectType()));
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+ValidateJuryDemoFixedSixFrozenTangentSupport(
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+	FString& OutError) const
+{
+	OutError.Reset();
+	const FTransform ExpectedLocalTransform(
+		FQuat::Identity,
+		FVector(0.0f, 0.0f,
+			-FixedSixFrozenTangentSupportThicknessCM * 0.5f),
+		FVector(
+			Entry.PadHalfExtentCM.X * 2.0f / BasicCubeSizeCM,
+			Entry.PadHalfExtentCM.Y * 2.0f / BasicCubeSizeCM,
+			FixedSixFrozenTangentSupportThicknessCM / BasicCubeSizeCM));
+	const FTransform ExpectedWorldTransform =
+		ExpectedLocalTransform * GetActorTransform();
+	if (!bJuryDemoFixedSixFrozenTangentSupportActive
+		|| FoundationCap->GetStaticMesh() == nullptr
+		|| FoundationCap->IsSimulatingPhysics()
+		|| FoundationCap->IsGravityEnabled()
+		|| FoundationCap->GetCollisionEnabled()
+			!= ECollisionEnabled::QueryAndPhysics
+		|| FoundationCap->GetCollisionObjectType() != ECC_WorldStatic
+		|| FoundationCap->GetCollisionResponseToChannel(
+			ABTSDeveloperObstacleChannel) != ECR_Block
+		|| FoundationCap->GetCollisionResponseToChannel(ECC_Pawn) != ECR_Block
+		|| !FoundationCap->GetRelativeTransform().Equals(
+			ExpectedLocalTransform, 1.0e-4)
+		|| !FoundationCap->GetComponentTransform().Equals(
+			ExpectedWorldTransform, 1.0e-3))
+	{
+		OutError = TEXT("FixedSixFrozenTangentSupportDrift");
+		return false;
+	}
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel() const
+{
+	if (!JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		return false;
+	}
+	FString Error;
+	return ValidateJuryDemoFixedSixFrozenTangentSupport(
+		JuryDemoFixedSixStaticEntry.GetValue(), Error);
+}
+
 void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 	AABTSM7BuildingMaterialSystem& MaterialSystem)
 {
@@ -1561,6 +1917,9 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 
 	RuntimeMaterialSystem = &MaterialSystem;
 	JuryDemoE1DamageLifecycleState.Reset();
+	bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
+	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+	bJuryDemoFixedSixChaosDeferredActivated = false;
 	RuntimeModules.Reset();
 	RuntimeModulesByNodeId.Reset();
 	ClearBrickPreviews();
@@ -1631,8 +1990,13 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 		return;
 	}
 
-	FoundationCap->SetVisibility(false, true);
-	FoundationCap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FString FrozenTangentSupportError;
+	if (!ConfigureJuryDemoFixedSixFrozenTangentSupport(
+		Entry, FrozenTangentSupportError))
+	{
+		RejectRuntimeStructure(FrozenTangentSupportError);
+		return;
+	}
 	FoundationFeet->ClearInstances();
 	FoundationFeet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	AttackDirection->SetVisibility(false, true);
@@ -2368,8 +2732,12 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	RuntimeMaterialSystem.Reset();
 	bRuntimeSpawned = false;
 	bJuryDemoFixedSixStaticRegistrationAccepted = false;
+	bJuryDemoFixedSixFrozenTangentSupportActive = false;
 	bJuryDemoFixedSixChaosPrepared = false;
 	bJuryDemoFixedSixChaosRunning = false;
+	bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
+	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+	bJuryDemoFixedSixChaosDeferredActivated = false;
 	JuryDemoFixedSixChaosPhysicsModules.Reset();
 	JuryDemoFixedSixChaosInitialTransforms.Reset();
 	bIdleValidationRunning = false;

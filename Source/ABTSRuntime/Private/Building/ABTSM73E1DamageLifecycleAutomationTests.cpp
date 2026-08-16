@@ -113,6 +113,23 @@ bool FABTSM73E1DamageLifecycleAutomationTest::RunTest(
 	TestFalse(TEXT("The same events without production Chaos activation fail closed"),
 		NoChaos.IsAccepted());
 
+	FABTSM73E1DamageLifecycleState DeferredFirstHit;
+	TestFalse(TEXT("Deferred startup has no implicit Chaos certificate"),
+		DeferredFirstHit.bChaosActivated);
+	DeferredFirstHit.RecordChaosActivated();
+	TestTrue(TEXT("First valid hit activates before its damage is applied"),
+		DeferredFirstHit.bChaosActivated);
+	DeferredFirstHit.RecordModuleDamage(
+		/*bCertifiedTargetBrick=*/true,
+		/*bCrystal=*/false,
+		EABTSM73E1DamageCause::BirdImpact,
+		/*bModuleBroken=*/false);
+	TestTrue(TEXT("First-hit damage is retained after deferred activation"),
+		DeferredFirstHit.bRealModuleImpactObserved);
+	DeferredFirstHit.RecordChaosActivated();
+	TestTrue(TEXT("Repeated first-hit activation remains idempotent"),
+		DeferredFirstHit.bChaosActivated);
+
 	FABTSM73E1DamageLifecycleState DeviceFirstHit;
 	DeviceFirstHit.RecordChaosActivated();
 	DeviceFirstHit.RecordModuleDamage(
@@ -163,6 +180,79 @@ bool FABTSM73E1DamageLifecycleAutomationTest::RunTest(
 	TestFalse(TEXT("OBB transforms must be unit scale because extent carries size"),
 		ScaledObb.IsUsable(2, false));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM73E1OrderedBrickBindingAutomationTest,
+	"ABTS.M73DAG.BuildingFreezeV3.E1OrderedBrickBinding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM73E1OrderedBrickBindingAutomationTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSM73E1OrderedBrickUnionBinding Binding;
+	Binding.ManifestEntryId = FName(TEXT("E1ColumnBreak"));
+	Binding.DescriptorHash = 0x34AA95E1u;
+	Binding.StaticGeometryHash = 0xA13243FDu;
+	int32 MaterialIndices[4] = {0, 0, 0, 0};
+	for (int32 BrickId = 0;
+		BrickId < FABTSM73E1OrderedBrickUnionBinding::FrozenBrickCount;
+		++BrickId)
+	{
+		FABTSM73E1OrderedBrickInstanceBinding& Brick =
+			Binding.OrderedBricks.AddDefaulted_GetRef();
+		Brick.BrickId = BrickId;
+		Brick.Material = static_cast<EABTSM7BuildingMaterial>(BrickId % 4);
+		Brick.MaterialInstanceIndex = MaterialIndices[BrickId % 4]++;
+		Brick.FrozenWorldTransform = FTransform(
+			FQuat(FVector::UpVector, BrickId * 0.01),
+			FVector(BrickId * 36.0, BrickId % 3 * 18.0, 72.0),
+			FVector::OneVector);
+		Brick.HalfExtentCM = BrickId == 4
+			? FVector(72.0, 9.0, 9.0)
+			: FVector(18.0, 18.0, 18.0);
+	}
+	TestTrue(TEXT("Honest 54-Brick descriptor order is accepted"),
+		Binding.IsUsable(false));
+	TestFalse(TEXT("Pure data cannot impersonate live HISM ownership"),
+		Binding.IsUsable(true));
+	const uint32 ExactHash = Binding.ComputeOrderedGeometryHash();
+	TestNotEqual(TEXT("Exact ordered union has a non-zero identity"),
+		ExactHash, 0u);
+
+	FABTSM73E1OrderedBrickUnionBinding Reordered = Binding;
+	Reordered.OrderedBricks.Swap(4, 5);
+	TestFalse(TEXT("Global descriptor reordering fails closed"),
+		Reordered.IsUsable(false));
+
+	FABTSM73E1OrderedBrickUnionBinding MaterialOrderDrift = Binding;
+	++MaterialOrderDrift.OrderedBricks[8].MaterialInstanceIndex;
+	TestFalse(TEXT("Per-material HISM order drift fails closed"),
+		MaterialOrderDrift.IsUsable(false));
+
+	FABTSM73E1OrderedBrickUnionBinding ScaledObb = Binding;
+	ScaledObb.OrderedBricks[4].FrozenWorldTransform.SetScale3D(
+		FVector(1.0, 2.0, 1.0));
+	TestFalse(TEXT("Scale must remain in OBB extent, not transform"),
+		ScaledObb.IsUsable(false));
+
+	FABTSM73E1OrderedBrickUnionBinding CrystalInUnion = Binding;
+	CrystalInUnion.OrderedBricks[0].Material =
+		EABTSM7BuildingMaterial::Crystal;
+	TestFalse(TEXT("Crystal caps cannot enter the first-hit union"),
+		CrystalInUnion.IsUsable(false));
+
+	FABTSM73E1OrderedBrickUnionBinding CubeExpanded = Binding;
+	CubeExpanded.OrderedBricks[4].HalfExtentCM = FVector(72.0);
+	TestNotEqual(TEXT("Max-axis cube fallback changes identity"),
+		CubeExpanded.ComputeOrderedGeometryHash(), ExactHash);
+	AddInfo(FString::Printf(
+		TEXT("E1OrderedBrickBinding Bricks=54 ExactHash=%u")
+		TEXT(" DescriptorOrder=1 PerMaterialOrder=1")
+		TEXT(" CapsDevicesCrystalExcluded=1 MaxAxisCubeFallback=0"),
+		ExactHash));
 	return true;
 }
 

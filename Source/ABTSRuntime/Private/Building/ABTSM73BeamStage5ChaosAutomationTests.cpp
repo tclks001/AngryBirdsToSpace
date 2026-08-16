@@ -12,6 +12,7 @@
 #include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "PBDRigidsSolver.h"
 #include "Components/StaticMeshComponent.h"
 #include "Contracts/ABTSWorldGenerationContracts.h"
 #include "Engine/Engine.h"
@@ -22,6 +23,7 @@
 #include "Misc/Crc.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "Physics/Experimental/PhysScene_Chaos.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "Tests/AutomationCommon.h"
 #include "TestStage/ABTSM71TestStageActors.h"
@@ -39,6 +41,9 @@ namespace ABTSM73BeamStage5ChaosTests
 	constexpr float MaximumPlanarDriftCM = 4.0f;
 	constexpr float MaximumSettlementCM = 6.0f;
 	constexpr float MaximumRotationDegrees = 2.0f;
+	constexpr float MaximumPeakPlanarDriftCM = 6.0f;
+	constexpr float MaximumPeakSettlementCM = 6.0f;
+	constexpr float MaximumPeakRotationDegrees = 3.0f;
 	constexpr float GravityCMPerSec2 = 980.0f;
 	constexpr float GroundContactToleranceCM = 0.1f;
 
@@ -189,7 +194,8 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(":Rotation=%d,%d,%d,%d:SupportCenter=%d,%d,%d:SupportRadius=%d")
 			TEXT(":Bricks=%d:Devices=%d:Caps=%d:PhysicsBodies=%d:PhysicsAssembly=%llu:Contacts=%d:Ground=%d:ResultantAdvisories=%d")
 			TEXT(":OuterDT=%d:Min=%d:Hold=%d:Max=%d:Lin=%d:Ang=%d")
-			TEXT(":Drift=%d:Settle=%d:Rot=%d:BodyHash=%u:WorldHash=%u")
+			TEXT(":FinalDrift=%d:FinalSettle=%d:FinalRot=%d")
+			TEXT(":PeakDrift=%d:PeakSettle=%d:PeakRot=%d:BodyHash=%u:WorldHash=%u")
 			TEXT(":GravityModel=SiteUniformTangentGravity:Gravity=%d")
 			TEXT(":SiteGravitySchema=%d:SiteGravityHash=%u")
 			TEXT(":SiteGravityDerivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM)")
@@ -245,6 +251,9 @@ namespace ABTSM73BeamStage5ChaosTests
 			FMath::RoundToInt(MaximumPlanarDriftCM * 1000.0f),
 			FMath::RoundToInt(MaximumSettlementCM * 1000.0f),
 			FMath::RoundToInt(MaximumRotationDegrees * 1000.0f),
+			FMath::RoundToInt(MaximumPeakPlanarDriftCM * 1000.0f),
+			FMath::RoundToInt(MaximumPeakSettlementCM * 1000.0f),
+			FMath::RoundToInt(MaximumPeakRotationDegrees * 1000.0f),
 			BodyProfileHash,
 			WorldProfileHash,
 			FMath::RoundToInt(GravityCMPerSec2 * 1000.0f),
@@ -421,11 +430,11 @@ namespace ABTSM73BeamStage5ChaosTests
 		Test.TestTrue(TEXT("Stage-5 entry final rotation remains bounded"),
 			OutResult.FinalMaximumRotationDegrees <= MaximumRotationDegrees);
 		Test.TestTrue(TEXT("Stage-5 entry peak planar drift remains bounded"),
-			OutResult.PeakPlanarDriftCM <= MaximumPlanarDriftCM);
+			OutResult.PeakPlanarDriftCM <= MaximumPeakPlanarDriftCM);
 		Test.TestTrue(TEXT("Stage-5 entry peak settlement remains bounded"),
-			OutResult.PeakSettlementCM <= MaximumSettlementCM);
+			OutResult.PeakSettlementCM <= MaximumPeakSettlementCM);
 		Test.TestTrue(TEXT("Stage-5 entry peak rotation remains bounded"),
-			OutResult.PeakRotationDegrees <= MaximumRotationDegrees);
+			OutResult.PeakRotationDegrees <= MaximumPeakRotationDegrees);
 		return !Test.HasAnyErrors();
 	}
 
@@ -731,6 +740,9 @@ namespace ABTSM73BeamStage5ChaosTests
 				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 		if (Stage != nullptr)
 		{
+			Test.TestTrue(TEXT("Fixture accepts the exact frozen tangent-pad dimensions"),
+				Stage->ConfigureFrozenTangentFloor(
+					StaticEntry.PadHalfExtentCM * 2.0f, 100.0f));
 			UGameplayStatics::FinishSpawningActor(Stage, Site.WorldTransform);
 		}
 		AABTSM7BuildingMaterialSystem* MaterialSystem =
@@ -746,6 +758,20 @@ namespace ABTSM73BeamStage5ChaosTests
 		if (!WorldWrapper.BeginPlayInTestWorld())
 		{
 			WorldWrapper.ForwardErrorMessages(&Test);
+			return false;
+		}
+		FPhysScene* PhysicsScene = World->GetPhysicsScene();
+		Chaos::FPhysicsSolver* PhysicsSolver = PhysicsScene != nullptr
+			? PhysicsScene->GetSolver()
+			: nullptr;
+		if (!Test.TestNotNull(TEXT("Fixture Chaos solver"), PhysicsSolver))
+		{
+			return false;
+		}
+		PhysicsSolver->SetIsDeterministic(true);
+		if (!Test.TestTrue(TEXT("Fixture uses production enhanced determinism"),
+			PhysicsSolver->IsDetemerministic()))
+		{
 			return false;
 		}
 
@@ -1170,7 +1196,7 @@ namespace ABTSM73BeamStage5ChaosTests
 			TEXT(" SiteGravitySchema=%d SiteGravityHash=%u")
 			TEXT(" SiteGravityDerivation=Normalize(SiteLocationWorldCM-SupportCenterWorldCM) SiteUp=%s")
 			TEXT(" BodyHash=%u Solver=%d/%d Damping=%.2f/%.2f WorldHash=%u %s")
-			TEXT(" SupportMaterial=ProductionTerrainDefault Observation=%.1f"),
+			TEXT(" SupportMaterial=FrozenContractTangentPad EnhancedDeterminism=1 Observation=%.1f"),
 			*Entry.StableId.ToString(), Entry.Settings.DifficultyTier,
 			Entry.Settings.BuildingSeed,
 			Site.EncounterIndex,
