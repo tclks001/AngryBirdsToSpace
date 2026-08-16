@@ -22,6 +22,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/DateTime.h"
 #include "Misc/Paths.h"
+#include "Presentation/ABTSOpeningCinematicPreview.h"
 #include "RHI.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "UI/ABTSCanvasUI.h"
@@ -960,6 +961,28 @@ void UABTSGameViewportClient::HandleAction(const EHitAction Action, const int32 
 	switch (Action)
 	{
 	case EHitAction::Begin:
+	{
+		CloseSystemMenu();
+		if (!bOpeningCinematicAttempted)
+		{
+			bOpeningCinematicAttempted = true;
+			const EABTSOpeningStartResult StartResult =
+				AABTSOpeningCinematicPreview::TryStartProductionOpening(GetWorld());
+			const bool bStarted = StartResult == EABTSOpeningStartResult::Started;
+			const bool bDebugSkip = StartResult == EABTSOpeningStartResult::DebugSkipped;
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][StartupFlow] OpeningCinematicAttempted=1 Started=%d DebugSkipped=%d"),
+				bStarted ? 1 : 0, bDebugSkip ? 1 : 0);
+			if (!bStarted && !bDebugSkip)
+			{
+				// A release binding rejection must not silently reveal an interactive
+				// world without its required opening handoff.
+				bOpeningCinematicAttempted = false;
+				OpenFrontEnd();
+			}
+		}
+		break;
+	}
 	case EHitAction::Resume: CloseSystemMenu(); break;
 	case EHitAction::Settings: OpenSettingsMenu(); break;
 	case EHitAction::ReturnToTitle: OpenFrontEnd(); break;

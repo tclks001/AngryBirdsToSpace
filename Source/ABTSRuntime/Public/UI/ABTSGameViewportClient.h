@@ -156,6 +156,7 @@ private:
 	bool bStartupPresentationReady = false;
 	bool bStartupGateStartedLogged = false;
 	bool bStartupGateTerminalLogged = false;
+	bool bOpeningCinematicAttempted = false;
 	int32 StartupReadyPresentationFrameCount = 0;
 	int32 CaptureFrameCount = 0;
 	double CaptureStartSeconds = 0.0;

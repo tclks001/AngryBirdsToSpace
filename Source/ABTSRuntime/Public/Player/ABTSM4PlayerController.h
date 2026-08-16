@@ -26,6 +26,9 @@ public:
 	/** True while the jump-time drift intervention is enabled on the level's party settings. */
 	bool IsClearMotionBeforePlayerJumpExperimentEnabled() const;
 	void RestorePartyCameraView() { EnsurePartyCameraView(); }
+	/** Shared release-cinematic gate; preserves the existing gameplay input latch. */
+	void SetCinematicInputBlocked(bool bBlocked) { SetGameplayInputBlocked(bBlocked); }
+	bool IsCinematicInputBlocked() const { return IsGameplayInputBlocked(); }
 
 protected:
 	virtual void BeginPlay() override;
