@@ -21,6 +21,7 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/Crc.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
@@ -116,6 +117,22 @@ namespace
 				Counts.FindChecked(Reasons[Index]));
 		}
 		return Result;
+	}
+
+	const TCHAR* E1DamageCauseName(
+		const EABTSM73E1DamageCause Cause)
+	{
+		switch (Cause)
+		{
+		case EABTSM73E1DamageCause::BirdImpact:
+			return TEXT("BirdImpact");
+		case EABTSM73E1DamageCause::ModuleContact:
+			return TEXT("ModuleContact");
+		case EABTSM73E1DamageCause::GameplayBlast:
+			return TEXT("GameplayBlast");
+		default:
+			return TEXT("UnknownOrScripted");
+		}
 	}
 }
 
@@ -368,7 +385,133 @@ bool AABTSM73StableBuildingActor::IsJuryDemoFixedSixStaticRegistrationAccepted()
 	return JuryDemoFixedSixStaticEntry.IsSet()
 		&& bRuntimeSpawned
 		&& GenerationSummary.bAccepted
-		&& IdleValidationState == EABTSM73IdleValidationState::Accepted;
+		&& bJuryDemoFixedSixStaticRegistrationAccepted;
+}
+
+void FABTSM73E1DamageLifecycleState::Reset()
+{
+	*this = FABTSM73E1DamageLifecycleState();
+}
+
+void FABTSM73E1DamageLifecycleState::RecordChaosActivated()
+{
+	bChaosActivated = true;
+}
+
+void FABTSM73E1DamageLifecycleState::RecordModuleDamage(
+	const bool bCertifiedTargetBrick,
+	const bool bCrystal,
+	const EABTSM73E1DamageCause Cause,
+	const bool bModuleBroken)
+{
+	if (Cause == EABTSM73E1DamageCause::BirdImpact)
+	{
+		bRealModuleImpactObserved |= bCertifiedTargetBrick;
+		if (bCertifiedTargetBrick && !bCrystal && bModuleBroken)
+		{
+			bStructuralResponseObserved = true;
+		}
+	}
+	else if (Cause == EABTSM73E1DamageCause::ModuleContact)
+	{
+		++PhysicalContactDamageEventCount;
+		if (bCrystal)
+		{
+			bCrystalDestroyedByPhysicalChain |= bModuleBroken;
+		}
+		else
+		{
+			bStructuralResponseObserved = true;
+		}
+	}
+}
+
+bool FABTSM73E1DestructibleModuleTarget::IsUsable(
+	const bool bRequireLiveOwnership) const
+{
+	if (BrickId < 0
+		|| FrozenWorldTransform.ContainsNaN()
+		|| !FrozenWorldTransform.GetRotation().IsNormalized()
+		|| !FrozenWorldTransform.GetScale3D().Equals(FVector::OneVector, 1.0e-6)
+		|| HalfExtentCM.ContainsNaN()
+		|| HalfExtentCM.GetMin() <= 0.0f)
+	{
+		return false;
+	}
+	if (!bRequireLiveOwnership)
+	{
+		return true;
+	}
+	const AABTSM7BuildingModule* LiveModule = Module.Get();
+	const AABTSM73StableBuildingActor* LiveOwner = OwningBuilding.Get();
+	const AABTSM7BuildingMaterialSystem* LiveMaterialSystem =
+		OwningMaterialSystem.Get();
+	return LiveModule != nullptr
+		&& LiveOwner != nullptr
+		&& LiveMaterialSystem != nullptr
+		&& !LiveModule->IsBroken()
+		&& LiveModule->GetOwner() == LiveMaterialSystem
+		&& LiveModule->GetDamageLifecycleOwner() == LiveOwner
+		&& LiveModule->GetDamageLifecycleBrickId() == BrickId;
+}
+
+bool FABTSM73E1DestructibleModuleTargetSet::IsUsable(
+	const int32 ExpectedBrickCount,
+	const bool bRequireLiveOwnership) const
+{
+	if (ManifestEntryId != FName(TEXT("E1ColumnBreak"))
+		|| DescriptorHash == 0
+		|| StaticGeometryHash == 0
+		|| ExpectedBrickCount <= 0
+		|| OrderedBrickTargets.Num() != ExpectedBrickCount)
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < OrderedBrickTargets.Num(); ++Index)
+	{
+		const FABTSM73E1DestructibleModuleTarget& Target =
+			OrderedBrickTargets[Index];
+		if (Target.BrickId != Index
+			|| !Target.IsUsable(bRequireLiveOwnership))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32 FABTSM73E1DestructibleModuleTargetSet::
+ComputeOrderedGeometryHash() const
+{
+	FString Canonical = FString::Printf(
+		TEXT("E1DestructibleModuleTargetSet:v1:Entry=%s:Descriptor=%llu")
+		TEXT(":Static=%llu:Count=%d"),
+		*ManifestEntryId.ToString(), DescriptorHash, StaticGeometryHash,
+		OrderedBrickTargets.Num());
+	for (const FABTSM73E1DestructibleModuleTarget& Target :
+		OrderedBrickTargets)
+	{
+		const FVector Location = Target.FrozenWorldTransform.GetLocation();
+		const FQuat Rotation = Target.FrozenWorldTransform.GetRotation();
+		Canonical += FString::Printf(
+			TEXT(":B%d:L%.6f,%.6f,%.6f:Q%.9f,%.9f,%.9f,%.9f")
+			TEXT(":E%.6f,%.6f,%.6f"),
+			Target.BrickId,
+			Location.X, Location.Y, Location.Z,
+			Rotation.X, Rotation.Y, Rotation.Z, Rotation.W,
+			Target.HalfExtentCM.X,
+			Target.HalfExtentCM.Y,
+			Target.HalfExtentCM.Z);
+	}
+	return FCrc::StrCrc32(*Canonical);
+}
+
+bool FABTSM73E1DamageLifecycleState::IsAccepted() const
+{
+	return bChaosActivated
+		&& bRealModuleImpactObserved
+		&& bStructuralResponseObserved
+		&& bCrystalDestroyedByPhysicalChain;
 }
 
 int32 AABTSM73StableBuildingActor::GetJuryDemoFixedSixStaticModuleCount() const
@@ -542,6 +685,141 @@ bool AABTSM73StableBuildingActor::CopyJuryDemoE1CrystalTarget(
 	OutTargetActor = CrystalTarget;
 	OutHalfExtentCM = Cap.BrickSpec.DimensionsCM * 0.5f;
 	return true;
+}
+
+bool AABTSM73StableBuildingActor::
+CopyJuryDemoE1DestructibleModuleTargetSet(
+	FABTSM73E1DestructibleModuleTargetSet& OutTargetSet) const
+{
+	OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+	if (!IsJuryDemoFixedSixStaticRegistrationAccepted()
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->ManifestEntryId
+			!= FName(TEXT("E1ColumnBreak")))
+	{
+		return false;
+	}
+
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	const int32 ExpectedRuntimeModuleCount = Entry.Bricks.Num()
+		+ Entry.Devices.Num() + Entry.Caps.Num();
+	// Before production promotion, descriptor Bricks are still HISM instances
+	// and cannot be honestly associated with individual damage Actors.
+	if (RuntimeModules.Num() != ExpectedRuntimeModuleCount)
+	{
+		return false;
+	}
+
+	OutTargetSet.ManifestEntryId = Entry.ManifestEntryId;
+	OutTargetSet.DescriptorHash = Entry.DescriptorHash;
+	OutTargetSet.StaticGeometryHash = Entry.StaticGeometryHash;
+	OutTargetSet.OrderedBrickTargets.Reserve(Entry.Bricks.Num());
+	for (int32 DescriptorIndex = 0;
+		DescriptorIndex < Entry.Bricks.Num(); ++DescriptorIndex)
+	{
+		const FABTSM73BeamD1BrickBinding& Brick =
+			Entry.Bricks[DescriptorIndex];
+		AABTSM7BuildingModule* Module =
+			RuntimeModules[DescriptorIndex].Get();
+		UStaticMeshComponent* Mesh = Module != nullptr
+			? Module->GetMeshComponent()
+			: nullptr;
+		if (Brick.BrickId != DescriptorIndex
+			|| Brick.BrickSpec.DimensionsCM.ContainsNaN()
+			|| Brick.BrickSpec.DimensionsCM.GetMin() <= 0.0f
+			|| Module == nullptr
+			|| Module->GetOwner() != RuntimeMaterialSystem.Get()
+			|| Module->GetDamageLifecycleOwner() != this
+			|| Module->GetDamageLifecycleBrickId() != Brick.BrickId
+			|| Module->GetBuildingMaterial() != Brick.BrickSpec.Material
+			|| Module->IsBroken()
+			|| Mesh == nullptr
+			|| Mesh->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+		{
+			OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+			return false;
+		}
+
+		FTransform FrozenWorldTransform =
+			Brick.LocalTransform * GetActorTransform();
+		if (!FrozenWorldTransform.GetScale3D().Equals(
+			FVector::OneVector, 1.0e-6))
+		{
+			OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+			return false;
+		}
+		const FVector ExpectedModuleScale =
+			FrozenWorldTransform.GetScale3D()
+			* (Brick.BrickSpec.DimensionsCM / BasicCubeSizeCM);
+		if (!Module->GetActorScale3D().Equals(ExpectedModuleScale, 1.0e-4))
+		{
+			OutTargetSet = FABTSM73E1DestructibleModuleTargetSet();
+			return false;
+		}
+		FrozenWorldTransform.SetScale3D(FVector::OneVector);
+		FABTSM73E1DestructibleModuleTarget& Target =
+			OutTargetSet.OrderedBrickTargets.AddDefaulted_GetRef();
+		Target.BrickId = Brick.BrickId;
+		Target.FrozenWorldTransform = FrozenWorldTransform;
+		Target.HalfExtentCM = Brick.BrickSpec.DimensionsCM * 0.5f;
+		Target.Module = Module;
+		Target.OwningBuilding = const_cast<AABTSM73StableBuildingActor*>(this);
+		Target.OwningMaterialSystem = RuntimeMaterialSystem;
+	}
+
+	return OutTargetSet.IsUsable(Entry.Bricks.Num(), true);
+}
+
+void AABTSM73StableBuildingActor::NotifyJuryDemoE1ModuleDamage(
+	const AABTSM7BuildingModule& Module,
+	const EABTSM73E1DamageCause Cause,
+	const bool bModuleBroken,
+	const float NormalSpeedCMPerSec)
+{
+	if (!JuryDemoFixedSixStaticEntry.IsSet()
+		|| JuryDemoFixedSixStaticEntry->ManifestEntryId
+			!= FName(TEXT("E1ColumnBreak"))
+		|| Module.GetDamageLifecycleOwner() != this
+		|| Module.GetOwner() != RuntimeMaterialSystem.Get())
+	{
+		return;
+	}
+
+	const int32 FrozenBrickId = Module.GetDamageLifecycleBrickId();
+	const bool bCertifiedTargetBrick = FrozenBrickId >= 0
+		&& JuryDemoFixedSixStaticEntry->Bricks.IsValidIndex(FrozenBrickId)
+		&& RuntimeModules.IsValidIndex(FrozenBrickId)
+		&& RuntimeModules[FrozenBrickId].Get() == &Module
+		&& JuryDemoFixedSixStaticEntry->Bricks[FrozenBrickId].BrickId
+			== FrozenBrickId;
+	JuryDemoE1DamageLifecycleState.RecordModuleDamage(
+		bCertifiedTargetBrick,
+		Module.IsCrystalLifecycleTarget(), Cause, bModuleBroken);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][E1DamageLifecycle]")
+		TEXT(" Event=ModuleDamage Module=%s BrickId=%d TargetBrick=%d")
+		TEXT(" Crystal=%d Cause=%s")
+		TEXT(" Broken=%d Speed=%.3f ContactEvents=%d Structural=%d")
+		TEXT(" CrystalChain=%d PhysicalChainEligible=%d Accepted=%d"),
+		*Module.GetName(), FrozenBrickId,
+		bCertifiedTargetBrick ? 1 : 0,
+		Module.IsCrystalLifecycleTarget() ? 1 : 0,
+		E1DamageCauseName(Cause), bModuleBroken ? 1 : 0,
+		NormalSpeedCMPerSec,
+		JuryDemoE1DamageLifecycleState.PhysicalContactDamageEventCount,
+		JuryDemoE1DamageLifecycleState.bStructuralResponseObserved ? 1 : 0,
+		JuryDemoE1DamageLifecycleState.bCrystalDestroyedByPhysicalChain ? 1 : 0,
+		Cause == EABTSM73E1DamageCause::ModuleContact ? 1 : 0,
+		JuryDemoE1DamageLifecycleState.IsAccepted() ? 1 : 0);
+}
+
+EABTSM73BeamDemoBuilding AABTSM73StableBuildingActor::
+GetJuryDemoFixedSixComplexityId() const
+{
+	return JuryDemoFixedSixStaticEntry.IsSet()
+		? JuryDemoFixedSixStaticEntry->DemoBuilding
+		: EABTSM73BeamDemoBuilding::Custom;
 }
 
 bool AABTSM73StableBuildingActor::CopyJuryDemoSiteUniformGravityPolicy(
@@ -1282,6 +1560,7 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 	}
 
 	RuntimeMaterialSystem = &MaterialSystem;
+	JuryDemoE1DamageLifecycleState.Reset();
 	RuntimeModules.Reset();
 	RuntimeModulesByNodeId.Reset();
 	ClearBrickPreviews();
@@ -1322,6 +1601,7 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationDeviceSpawnFailed"));
 			return;
 		}
+		Module->ConfigureDamageLifecycleOwner(this, INDEX_NONE, false);
 		RuntimeModules.Add(Module);
 	}
 	for (const FABTSM73BuildingFreezeV3CapBinding& Cap : Entry.Caps)
@@ -1333,6 +1613,10 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 			RejectRuntimeStructure(TEXT("FixedSixStaticRegistrationCapSpawnFailed"));
 			return;
 		}
+		Module->ConfigureDamageLifecycleOwner(
+			this,
+			INDEX_NONE,
+			Cap.BrickSpec.Material == EABTSM7BuildingMaterial::Crystal);
 		RuntimeModules.Add(Module);
 	}
 
@@ -1359,7 +1643,10 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 	GenerationSummary.GenerationAlgorithm =
 		EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
 	GenerationSummary.RejectReason.Reset();
-	IdleValidationState = EABTSM73IdleValidationState::Accepted;
+	bJuryDemoFixedSixStaticRegistrationAccepted = true;
+	// Static registration is a distinct prerequisite. M6 must continue to wait
+	// until the production Site-uniform Chaos observer accepts this building.
+	IdleValidationState = EABTSM73IdleValidationState::Pending;
 	bIdleValidationRunning = false;
 	bDAG4ValidationRunning = false;
 	SetActorTickEnabled(false);
@@ -1891,6 +2178,11 @@ void AABTSM73StableBuildingActor::BeginIdleValidation(const FABTSM73GroundContex
 void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bJuryDemoFixedSixChaosRunning)
+	{
+		TickJuryDemoFixedSixChaosValidation(DeltaSeconds);
+		return;
+	}
 	if (bDAG4ValidationRunning)
 	{
 		TickDAG4Validation(DeltaSeconds);
@@ -2075,6 +2367,11 @@ void AABTSM73StableBuildingActor::RejectRuntimeStructure(const FString& Reason)
 	IdleInitialTransforms.Reset();
 	RuntimeMaterialSystem.Reset();
 	bRuntimeSpawned = false;
+	bJuryDemoFixedSixStaticRegistrationAccepted = false;
+	bJuryDemoFixedSixChaosPrepared = false;
+	bJuryDemoFixedSixChaosRunning = false;
+	JuryDemoFixedSixChaosPhysicsModules.Reset();
+	JuryDemoFixedSixChaosInitialTransforms.Reset();
 	bIdleValidationRunning = false;
 	bDAG4ValidationRunning = false;
 	IdleValidationState = EABTSM73IdleValidationState::Rejected;

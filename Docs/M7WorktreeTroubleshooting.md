@@ -9,6 +9,13 @@
 > 上收关系：集成工作树在合并 M7 阶段提交时，从本文提炼已确认条目到
 > [开发排错总文档](DevelopmentTroubleshooting.md)。总文档由集成工作树所有；M7 功能工作树不得直接修改。
 
+## 当前待 M3 seal 的源码增量
+
+| ID | 现象 | 根因 | 修复 | 防回归验证/状态 |
+| --- | --- | --- | --- | --- |
+| M7-BC-137 | 先前单 Brick target 证书把 `144x18x18 cm` 长砖按最大轴扩成 cube，并把代表 Brick 的假命中当成整栋 E1 可命中；Integration 已拒绝该假绿灯 | 单目标 Actor/half-extent API 无法表达公开 E1 descriptor 的完整有序 OBB union，也无法证明 first-hit 对应哪一个真实 promoted Brick。Crystal cap 又不属于 descriptor Brick 集合，继续绑定 Crystal 或固定 `BrickId4` 都与新 authority 不同 | M7 新增只读 `FABTSM73E1DestructibleModuleTargetSet`：严格按 descriptor 顺序输出每个 `BrickId`、unit-scale frozen world transform、逐轴真实 half extent、live module 与 owning building；Caps/Devices 明确排除。promotion 时把冻结 BrickId 写入真实 module，damage lifecycle 仅接受 `BrickId != INDEX_NONE` 的真实 descriptor Brick 作为合法 Bird first-hit。集合数量、顺序、material、scale、collision 或 ownership 任一不一致即不导出 | 纯专项新增长砖 `72x9x9` half extent、cube-expanded identity 不同、乱序拒绝和 device/cap 首击拒绝；设计与 M3 seal 后的原子切换见 `M73E1OrderedBrickTargetBindingDesign.md`。本轮遵守协调仅做源码/文档与静态检查，不启动 UE；旧单 Crystal bridge 暂留当前 master 兼容，但明确禁止作为新 authority，待 M3 honest seal 后替换并 fresh 验证 |
+| M7-BC-136 | 产品语义改为弹丸只需命中真实 E1 可破坏模块，随后必须由建筑损伤/倒塌链摧毁 Crystal；现有 production promotion 虽把 56 个真实模块送入 Chaos，却不能证明这条因果链 | 动态 SiteUniform 模块收到弹丸后仍会调用全局 `ActivateModuleForLaunch`，从而覆盖该建筑的重力身份；`OnComponentHit` 又只把伤害转发给被撞组件，下落 Crystal 撞到非 M7 地表时自身永远不受损。静态稳定通过与可破坏生命周期是两套证据，前者不能代替后者 | 动态命中改为只唤醒并施加 impulse，保留 `SiteUniformTangentGravity`；真实模块物理接触对运动源自身累计材料伤害，因而 Crystal 可通过实际下落/碰撞达到 `BreakDamage` 后走幂等 `BreakModule`。E1 Actor 记录 `ChaosActivated + real module BirdImpact + structural response + Crystal broken by ModuleContact`，仅四项齐全才 Accepted；直接命中 Crystal、blast 或 unknown/scripted 删除均不能冒充链式通过。稳定观察结束后仅对本栋真实 physics modules 解除 contact-damage grace，避免 FlowReady 后仍有无敌窗口 | 新增纯状态专项 `ABTS.M73DAG.BuildingFreezeV3.E1DamageLifecycle`，覆盖直接 Crystal、脚本删除、无 Chaos、真实接触传播和支撑破坏路径；运行时规划日志为 `ChaosActivated`、逐模块 `ModuleDamage`（Cause/Crystal/Broken/Speed/Structural/CrystalChain/Accepted）与 `ContactDamageArmed`。按协调要求本轮只完成源码与 `git diff --check`，未启动 UBT/NullRHI/D3D11/Chaos；须等待 M3 新 target authority/seal 后再做 fresh 专项和 canonical 实机闭环，用户 `PlanarPhysicsTestMap.umap` 始终排除 |
+
 ## 1. 使用与维护规则
 
 - 本文只记录 M7 工作树新遇到、且尚未完整进入共享总文档的问题。
