@@ -1284,7 +1284,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ApplyGravityOverride(
 		static_cast<unsigned long long>(WorldGravityHash),
 		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.RuntimeLayoutSnapshotHash)));
-	if (GEngine)
+	if (!UE_BUILD_SHIPPING && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			0x4D395347,

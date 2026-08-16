@@ -13,6 +13,7 @@
 - 所有运行时判断优先依赖当前进程的日志、截图或 Standalone 结果；旧 PIE 日志不能作为新修改的验收证据。
 - `CellTopo` 是球面逻辑源。连续球面、材质、水体 Mask、HISM 实例和碰撞命中均不得反向成为资源、建筑、道路、水网或可达性的逻辑来源。
 - 单次修复改变了类、组件、Blueprint 资产、材质或地图时，必须在本文中补充验证路径。
+- `INT-RC92-SHIPPING-DEBUG-001`：最终 Shipping 除关闭开发者行走、任意格插桩、建筑坐标和性能探针外，也必须在编译期阻止卫星重力状态的 `AddOnScreenDebugMessage`；Development 保留该诊断。包内验收同时检查 `DeveloperWalk=0 / AnyCellStake=0 / ShippingHardOff=1`，且画面无建筑坐标或重力调试叠字。
 - 本文记录的是问题与处理；每个里程碑的完整编辑器操作仍以对应 `M*...Design.md` 为准。
 
 ## 2. 构建与模块
