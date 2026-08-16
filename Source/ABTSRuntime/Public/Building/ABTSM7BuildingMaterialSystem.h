@@ -98,6 +98,9 @@ public:
 	void ConfigureTestSet(bool bEnable, const FTransform& SpawnTransform);
 	/** Copies the authoritative runtime tuning for deterministic M7.3 analysis without exposing Actor state. */
 	void CopyMaterialProfiles(TArray<FABTSM7MaterialProfile>& OutProfiles) const;
+	/** Read-only live module snapshot for the M7 stylized adapter; broken/destroyed modules are omitted. */
+	void GatherLiveModulesForStylizedAdapter(
+		TArray<AABTSM7BuildingModule*>& OutModules) const;
 
 	/** M8 subscribes here to turn destroyed building bricks into shared-inventory materials. */
 	FABTSM7MaterialRecoveredNative OnMaterialRecovered;

@@ -396,6 +396,22 @@ FABTSM7PenetrationValidationStats AABTSM7BuildingMaterialSystem::ValidateAndRepa
 		: FABTSM7PenetrationValidationStats();
 }
 
+void AABTSM7BuildingMaterialSystem::GatherLiveModulesForStylizedAdapter(
+	TArray<AABTSM7BuildingModule*>& OutModules) const
+{
+	OutModules.Reset();
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (IsValid(Module) && !Module->IsBroken()
+			&& Module->GetOwner() == this
+			&& IsValid(Module->GetStylizedPresentationPrimitive()))
+		{
+			OutModules.Add(Module);
+		}
+	}
+}
+
 FABTSM7PenetrationValidationStats
 AABTSM7BuildingMaterialSystem::ValidatePendingModuleInterpenetration(
 	const TArray<AABTSM7BuildingModule*>& PendingModules) const

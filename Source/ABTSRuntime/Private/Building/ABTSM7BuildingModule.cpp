@@ -371,6 +371,18 @@ void AABTSM7BuildingModule::ActivateDynamicPlanar(const FVector& Impulse, const 
 	if (PlanarGravityUp.IsNearlyZero()) PlanarGravityUp = FVector::UpVector;
 }
 
+UPrimitiveComponent* AABTSM7BuildingModule::GetStylizedPresentationPrimitive() const
+{
+	return IsValid(DevicePresentation) ? DevicePresentation.Get() : Visual.Get();
+}
+
+bool AABTSM7BuildingModule::IsStylizedWeakPoint() const
+{
+	return bCrystalLifecycleTarget
+		|| ModuleKind == EABTSM7ModuleKind::ExplosiveBarrel
+		|| ModuleKind == EABTSM7ModuleKind::SpringPiston;
+}
+
 void AABTSM7BuildingModule::SetContactDamageGraceSeconds(
 	const float Seconds)
 {
