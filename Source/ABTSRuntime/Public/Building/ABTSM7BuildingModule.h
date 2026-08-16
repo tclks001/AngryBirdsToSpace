@@ -13,6 +13,15 @@ class UPhysicalMaterial;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
+/** Per-body first-hit settings; never changes frozen geometry or global config. */
+struct ABTSRUNTIME_API FABTSM7DeferredImpactCollisionPolicy final
+{
+	static constexpr float MinimumInitialOverlapDepenetrationCMPerSec = 1000.0f;
+
+	static void ApplyTo(UStaticMeshComponent& Component);
+	static bool VerifyDynamic(UStaticMeshComponent& Component, FString& OutError);
+};
+
 /**
  * M7 consumer policy for one frozen tangent-site building. The direction is
  * derived only from immutable placement inputs; callers may not substitute a
@@ -180,6 +189,7 @@ private:
 	bool bPlanarGravity = false;
 	bool bSiteUniformGravity = false;
 	bool bCrystalLifecycleTarget = false;
+	bool bTerrainPenetrationReported = false;
 	FVector PlanarGravityUp = FVector::UpVector;
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicalMaterial> ImpactPhysicalMaterial;
@@ -188,4 +198,5 @@ private:
 	float LastDamageImpactSeconds = -BIG_NUMBER;
 	float ContactDamageGraceSeconds = 0.20f;
 	float ContactDamageEnabledTimeSeconds = 0.0f;
+	bool DetectSleepingTerrainPenetration(FString& OutDiagnostic) const;
 };

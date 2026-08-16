@@ -6,6 +6,8 @@
 #include "ABTSRuntime.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM7BuildingModule.h"
+#include "Engine/World.h"
+#include "Game/ABTSM7GameMode.h"
 #include "PBDRigidsSolver.h"
 #include "Components/StaticMeshComponent.h"
 #include "HAL/PlatformTime.h"
@@ -609,6 +611,23 @@ ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
 		return false;
 	}
 	bJuryDemoFixedSixChaosDeferredActivationInProgress = true;
+	if (UWorld* World = GetWorld())
+	{
+		AABTSM7GameMode* GameMode = Cast<AABTSM7GameMode>(
+			World->GetAuthGameMode());
+		if (GameMode == nullptr
+			|| !GameMode->
+				RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(
+					OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("FixedSixDeferredTerrainCollisionAuthorityMissing");
+			}
+			bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+			return false;
+		}
+	}
 	if (!ActivatePreparedJuryDemoFixedSixChaosValidation(OutError))
 	{
 		bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
@@ -623,7 +642,8 @@ ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitActivated]")
 		TEXT(" Entry=%s Trigger=%s AllBodies=%d PhysicsActorDeveloperObstacle=1")
-		TEXT(" SiteUniformGravity=1 DamageTransaction=Continue"),
+		TEXT(" TerrainBuildingResponse=Block PadsBuildingResponse=Block")
+		TEXT(" CCD=1 SiteUniformGravity=1 DamageTransaction=Continue"),
 		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
 		*TriggerModule.GetName(), JuryDemoFixedSixChaosPhysicsModules.Num());
 	return true;
