@@ -583,8 +583,78 @@ void AABTSM6SlingshotSystem::UpdatePouchAndPreview()
 		GetResolvedMaximumPullDistanceCM(),
 		PullAlpha);
 	PouchLocation = RestPouchLocation + AimPlaneOffset - SlingForward * PullDistance;
-	const FVector Direction = (SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
+	float AppliedSurfaceLiftCM = 0.0f;
+	for (int32 ClearanceIteration = 0; ClearanceIteration < 3; ++ClearanceIteration)
+	{
+		const FVector CandidateDirection =
+			(SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
+		const FQuat CandidateRotation =
+			MakePulledPouchRotation(CandidateDirection, SlingRight);
+		const FVector CandidateBirdCenter =
+			GetBirdInPouchLocation(CandidateRotation);
+		FVector SurfacePosition = FVector::ZeroVector;
+		FVector SurfaceNormal = SlingUp;
+		bool bSurfaceResolved = false;
+		if (bPlanarTestMode)
+		{
+			SurfacePosition = CandidateBirdCenter
+				- PlanarUp * FVector::DotProduct(
+					CandidateBirdCenter - PlanarOrigin, PlanarUp);
+			SurfaceNormal = PlanarUp;
+			bSurfaceResolved = true;
+		}
+		else if (Planet.IsValid())
+		{
+			float SurfaceRadiusCM = 0.0f;
+			int32 SurfaceCellId = INDEX_NONE;
+			const FVector SurfaceDirection =
+				(CandidateBirdCenter - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+			bSurfaceResolved = !SurfaceDirection.IsNearlyZero()
+				&& Planet->QuerySurface(
+					SurfaceDirection,
+					SurfacePosition,
+					SurfaceNormal,
+					SurfaceRadiusCM,
+					SurfaceCellId);
+		}
+		if (!bSurfaceResolved) break;
+
+		const float BirdRadiusCM = FMath::Max(
+			1.0f, LaunchedBird->GetSlingshotTrajectoryCollisionRadiusCM());
+		constexpr float ReleaseClearanceMarginCM = 10.0f;
+		const float CurrentClearanceCM = FVector::DotProduct(
+			CandidateBirdCenter - SurfacePosition,
+			SurfaceNormal.GetSafeNormal());
+		const float ClearanceDeficitCM =
+			BirdRadiusCM + ReleaseClearanceMarginCM - CurrentClearanceCM;
+		if (ClearanceDeficitCM <= 0.01f) break;
+		const float LiftAlignment = FVector::DotProduct(
+			SlingUp.GetSafeNormal(), SurfaceNormal.GetSafeNormal());
+		if (LiftAlignment <= 0.1f) break;
+		const float LiftCM = ClearanceDeficitCM / LiftAlignment;
+		PouchLocation += SlingUp * LiftCM;
+		AppliedSurfaceLiftCM += LiftCM;
+	}
+	const FVector Direction =
+		(SlingCenter + SlingUp * 65.0f - PouchLocation).GetSafeNormal();
 	const FQuat PouchRotation = MakePulledPouchRotation(Direction, SlingRight);
+	const bool bSurfaceClampActive = AppliedSurfaceLiftCM > 0.01f;
+	if (bSurfaceClampActive != bPouchSurfaceClampActive
+		|| (bSurfaceClampActive
+			&& !FMath::IsNearlyEqual(
+				AppliedSurfaceLiftCM, LastPouchSurfaceLiftCM, 1.0f)))
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Display,
+			TEXT("[ABTS][M6][PouchSurfaceClearance] Active=%d Lift=%.2f Pull=%.3f BirdRadius=%.2f Margin=10.00"),
+			bSurfaceClampActive ? 1 : 0,
+			AppliedSurfaceLiftCM,
+			PullAlpha,
+			LaunchedBird->GetSlingshotTrajectoryCollisionRadiusCM());
+	}
+	bPouchSurfaceClampActive = bSurfaceClampActive;
+	LastPouchSurfaceLiftCM = AppliedSurfaceLiftCM;
 	const FQuat MountedBirdRotation =
 		ABTSMakeSlingshotMountedBirdRotation(Direction, SlingUp);
 	LaunchedBird->SetActorLocationAndRotation(

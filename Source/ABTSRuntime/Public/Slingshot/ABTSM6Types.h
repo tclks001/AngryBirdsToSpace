@@ -56,6 +56,10 @@ struct FABTSM6TrajectoryPreview
 	UPROPERTY(BlueprintReadOnly)
 	FVector InitialWorldVelocity = FVector::ZeroVector;
 
+	/** Exact M9 gravity snapshot consumed by this prediction; zero in planar mode. */
+	UPROPERTY(BlueprintReadOnly)
+	int64 GravitySnapshotHash = 0;
+
 	UPROPERTY(BlueprintReadOnly)
 	bool bHasPrimarySurfaceLanding = false;
 

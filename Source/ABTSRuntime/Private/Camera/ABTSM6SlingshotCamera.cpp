@@ -1022,11 +1022,6 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 	AABTSM25BirdCharacter* TargetBird = Bird.Get();
 	AABTSM2Planet* TargetPlanet = Planet.Get();
 	if (TargetBird == nullptr || (!bPlanarFollow && TargetPlanet == nullptr)) return;
-	if (!bPlanarFollow
-		&& UpdateSatelliteFollow(*TargetBird, DeltaSeconds))
-	{
-		return;
-	}
 	FVector DesiredLocation;
 	FQuat DesiredRotation;
 	if (bImpactObservationActive)
@@ -1057,6 +1052,11 @@ void AABTSM6SlingshotCamera::UpdateFollow(const float DeltaSeconds)
 				ImpactObservationBlendStartRotation,
 				DesiredRotation,
 				Blend).GetNormalized());
+		return;
+	}
+	if (!bPlanarFollow
+		&& UpdateSatelliteFollow(*TargetBird, DeltaSeconds))
+	{
 		return;
 	}
 	if (!BuildPrimaryFollowPose(*TargetBird, DesiredLocation, DesiredRotation)) return;
@@ -1518,10 +1518,11 @@ bool AABTSM6SlingshotCamera::UpdateSatelliteFollow(
 			PrimaryLocation,
 			AssistLocation,
 			SatelliteSubtleAssistAlpha);
-		const FVector PredictedFocus = PredictedPeriapsisWorld.IsNearlyZero()
-			? BirdLocation
-			: FMath::Lerp(BirdLocation, PredictedPeriapsisWorld, 0.18f);
-		const FVector AssistLook = (PredictedFocus - DesiredLocation).GetSafeNormal();
+		// Prediction decides whether a lunar assist is eligible, but it must not
+		// own the live flight focus. Chaos can diverge from the frozen periapsis;
+		// always keeping the real bird as the look target prevents it leaving the
+		// frame while retaining the assist pullback and roll presentation.
+		const FVector AssistLook = (BirdLocation - DesiredLocation).GetSafeNormal();
 		FVector AssistUp = FVector::VectorPlaneProject(BirdRadialUp, AssistLook).GetSafeNormal();
 		if (AssistLook.IsNearlyZero() || AssistUp.IsNearlyZero()) return false;
 		const FQuat AssistRotation = FRotationMatrix::MakeFromXZ(
