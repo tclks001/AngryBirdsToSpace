@@ -14,6 +14,7 @@
 #include "Player/ABTSM25BirdCharacter.h"
 #include "ProceduralMeshComponent.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "Movement/ABTSSatelliteGravityMovementPolicy.h"
 
 UABTSRadialForceMovementComponent::UABTSRadialForceMovementComponent()
 {
@@ -212,20 +213,6 @@ void UABTSRadialForceMovementComponent::EndBallisticFlight(const bool bResetVelo
 	if (bResetVelocity) ResetMotionState();
 }
 
-FVector UABTSRadialForceMovementComponent::ResolveSatelliteAccelerationForMovement(
-	const bool bIsBallisticFlight,
-	const FVector& RawSatelliteAcceleration)
-{
-	// M9 gravity bends an intentional slingshot trajectory. Applying it to the
-	// ordinary walking/follower integrator creates a permanent tangential force
-	// that drags the party around the primary world and eventually onto the
-	// nearby satellite. Primary radial gravity and surface suspension remain
-	// active in both states; only the secondary-body force is flight-gated.
-	return bIsBallisticFlight
-		? RawSatelliteAcceleration
-		: FVector::ZeroVector;
-}
-
 bool UABTSRadialForceMovementComponent::IsGrounded() const
 {
 	if (bUseCollisionNormalGroundingExperiment) return bCollisionGrounded;
@@ -354,7 +341,8 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	const FVector RawSatelliteAcceleration = ABTSM9Gravity::GetSatelliteAcceleration(
 		GetWorld(),
 		Character.GetActorLocation());
-	const FVector AppliedSatelliteAcceleration = ResolveSatelliteAccelerationForMovement(
+	const FVector AppliedSatelliteAcceleration =
+		FABTSSatelliteGravityMovementPolicy::ResolveAcceleration(
 		bBallisticFlight,
 		RawSatelliteAcceleration);
 	if (!bBallisticFlight

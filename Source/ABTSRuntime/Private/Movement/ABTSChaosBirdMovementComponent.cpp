@@ -10,6 +10,7 @@
 #include "Planet/ABTSM2Planet.h"
 #include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM9GravityQuery.h"
+#include "Movement/ABTSSatelliteGravityMovementPolicy.h"
 
 UABTSChaosBirdMovementComponent::UABTSChaosBirdMovementComponent()
 {
@@ -171,7 +172,25 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	Body->AddForce(-RadialUp * (Mass * LocalGravityAcceleration), NAME_None, false);
 	if (!bPlanarTestMode)
 	{
-		Body->AddForce(ABTSM9Gravity::GetSatelliteAcceleration(GetWorld(), Body->GetComponentLocation()) * Mass, NAME_None, false);
+		const FVector RawSatelliteAcceleration =
+			ABTSM9Gravity::GetSatelliteAcceleration(
+				GetWorld(), Body->GetComponentLocation());
+		const FVector AppliedSatelliteAcceleration =
+			FABTSSatelliteGravityMovementPolicy::ResolveAcceleration(
+				bBallisticFlight, RawSatelliteAcceleration);
+		if (!bBallisticFlight
+			&& !bLoggedGroundSatelliteGravitySuppressed
+			&& !RawSatelliteAcceleration.IsNearlyZero())
+		{
+			bLoggedGroundSatelliteGravitySuppressed = true;
+			UE_LOG(
+				LogABTSRuntime,
+				Display,
+				TEXT("[ABTS][ChaosMovement][SatelliteGravityPolicy] GroundLocomotion=Suppressed BallisticFlight=Enabled RawAcceleration=%.3f"),
+				RawSatelliteAcceleration.Size());
+		}
+		Body->AddForce(
+			AppliedSatelliteAcceleration * Mass, NAME_None, false);
 	}
 
 	if (bJumpQueued && bGrounded)

@@ -85,6 +85,7 @@ private:
 	bool bPlanarTestMode = false;
 	FVector PendingMoveVector = FVector::ZeroVector;
 	bool bChaosEnabled = false;
+	bool bLoggedGroundSatelliteGravitySuppressed = false;
 	bool bGrounded = false;
 	bool bJumpQueued = false;
 	bool bBallisticFlight = false;

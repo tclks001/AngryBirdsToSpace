@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Party/ABTSBirdParty.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 
 namespace

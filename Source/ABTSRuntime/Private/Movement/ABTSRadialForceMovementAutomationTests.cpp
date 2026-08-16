@@ -3,7 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-#include "Movement/ABTSRadialForceMovementComponent.h"
+#include "Movement/ABTSSatelliteGravityMovementPolicy.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSGroundLocomotionSatelliteGravityGateTest,
@@ -16,13 +16,13 @@ bool FABTSGroundLocomotionSatelliteGravityGateTest::RunTest(
 	(void)Parameters;
 	const FVector RawSatelliteAcceleration(123.25, -456.5, 789.75);
 	TestTrue(
-		TEXT("Ground locomotion consumes no satellite acceleration"),
-		UABTSRadialForceMovementComponent::ResolveSatelliteAccelerationForMovement(
+		TEXT("Chaos and Force ground locomotion consume no satellite acceleration"),
+		FABTSSatelliteGravityMovementPolicy::ResolveAcceleration(
 			false,
 			RawSatelliteAcceleration) == FVector::ZeroVector);
 	TestTrue(
-		TEXT("Ballistic slingshot flight preserves the exact satellite acceleration"),
-		UABTSRadialForceMovementComponent::ResolveSatelliteAccelerationForMovement(
+		TEXT("Chaos and Force ballistic flight preserve the exact satellite acceleration"),
+		FABTSSatelliteGravityMovementPolicy::ResolveAcceleration(
 			true,
 			RawSatelliteAcceleration) == RawSatelliteAcceleration);
 	return true;

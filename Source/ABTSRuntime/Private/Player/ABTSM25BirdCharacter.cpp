@@ -12,9 +12,6 @@
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
-#include "HAL/PlatformProperties.h"
-#include "Misc/CommandLine.h"
-#include "Misc/Parse.h"
 #include "Movement/ABTSMovementModeSelector.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
 #include "Movement/ABTSM25RadialMovementComponent.h"
@@ -123,39 +120,13 @@ void AABTSM25BirdCharacter::ConfigureMovementMode()
 {
 	bool bUseCollisionGroundingExperiment = false;
 	float CollisionGroundMaxAngleDegrees = 55.0f;
-	EABTSBirdMovementMode RequestedMovementMode = MovementMode;
 	for (TActorIterator<AABTSMovementModeSelector> It(GetWorld()); It; ++It)
 	{
-		RequestedMovementMode = It->MovementMode;
-		MovementMode = RequestedMovementMode;
+		MovementMode = It->MovementMode;
 		bUseCollisionGroundingExperiment = It->bUseCollisionNormalGroundingExperiment;
 		CollisionGroundMaxAngleDegrees = It->CollisionGroundMaxAngleDegrees;
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][MovementMode] Level selector found: %s"), *GetNameSafe(*It));
 		break;
-	}
-
-	// Level selectors are useful for editor experiments, but a cooked build must
-	// not silently ship the free rigid-body locomotion mode. In that mode the
-	// party can roll away under radial gravity and a nearby satellite can become
-	// the active collision ground before the player ever uses a slingshot. Keep
-	// the established suspension locomotion as the production authority while
-	// retaining an explicit Development-only opt-in for packaged diagnostics.
-	bool bAllowPackagedChaosMovement = false;
-#if !UE_BUILD_SHIPPING
-	bAllowPackagedChaosMovement = FParse::Param(
-		FCommandLine::Get(),
-		TEXT("ABTSAllowPackagedChaosBirdMovement"));
-#endif
-	if (FPlatformProperties::RequiresCookedData()
-		&& RequestedMovementMode == EABTSBirdMovementMode::ChaosRigidBody
-		&& !bAllowPackagedChaosMovement)
-	{
-		MovementMode = EABTSBirdMovementMode::ForceSuspension;
-		bUseCollisionGroundingExperiment = false;
-		UE_LOG(
-			LogABTSRuntime,
-			Warning,
-			TEXT("[ABTS][MovementMode][ProductionOverride] Requested=ChaosRigidBody Active=ForceSuspension CollisionGroundExperiment=0 Authority=CookedReleaseSafety"));
 	}
 	RadialMovement->ConfigureCollisionGroundingExperiment(
 		bUseCollisionGroundingExperiment,
