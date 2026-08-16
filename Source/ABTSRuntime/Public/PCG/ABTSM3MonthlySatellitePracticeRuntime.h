@@ -7,7 +7,6 @@
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "ABTSM3MonthlySatellitePracticeRuntime.generated.h"
 
-class AABTSCalibrationTargetProxy;
 class AABTSM3Planet;
 class AABTSM51SlingshotCord;
 class AABTSM51SlingshotStake;
@@ -95,6 +94,19 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatelliteRuntimeSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime", meta = (Units = "cm"))
 	FVector E5HalfExtentCM = FVector::ZeroVector;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	EABTSM3MonthlySatelliteTargetAuthority TargetAuthority =
+		EABTSM3MonthlySatelliteTargetAuthority::LegacyCalibrationProxy;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int64 ProductionTargetDescriptorHash = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Practice")
+	int32 ProductionTargetModuleId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
+	int64 ProductionTargetIdentityHash = 0;
+
 	/** Hash of the frozen primary/satellite/drag inputs with satellite gravity enabled. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Runtime")
 	int64 BaselineGravitySnapshotHash = 0;
@@ -151,10 +163,18 @@ public:
 
 	/** Idempotent so automation fixtures can activate without a begun-play World. */
 	bool ActivateSnapshot();
-	/** Integration V3 replaces the temporary E5 proxy with E1's real Crystal cap. */
-	bool BindProductionE1CrystalTarget(
+	/** Integration V3 replaces the temporary target with the selected real E1 module. */
+	bool BindProductionE1BuildingModuleTarget(
 		AActor& InTargetActor,
 		const FVector& InTargetHalfExtentCM);
+	/** Compatibility entry point for the current M7 adapter; exact module identity still gates it. */
+	bool BindProductionE1CrystalTarget(
+		AActor& InTargetActor,
+		const FVector& InTargetHalfExtentCM)
+	{
+		return BindProductionE1BuildingModuleTarget(
+			InTargetActor, InTargetHalfExtentCM);
+	}
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -205,9 +225,9 @@ private:
 	TObjectPtr<AABTSM9Satellite> RuntimeSatellite;
 
 	UPROPERTY(Transient)
-	TObjectPtr<AABTSCalibrationTargetProxy> RuntimeE5Target;
+	TObjectPtr<AActor> RuntimeE5Target;
 
-	/** Active gameplay authority; initially the legacy proxy, then the V3 Crystal cap. */
+	/** Active gameplay authority; initially the exact module OBB stand-in, then the real module. */
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> RuntimeE5GameplayTarget;
 

@@ -3,8 +3,8 @@
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 
 #include "ABTSRuntime.h"
-#include "Calibration/ABTSCalibrationTargetProxy.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
+#include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
@@ -552,39 +552,53 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	GravitySnapshot.FlightAirDragPerSecond =
 		FrozenCatalog.FlightAirDragPerSecond;
 	GravitySnapshot.bSatelliteGravityEnabled = true;
-	FTransform ResolvedE5Transform = FTransform::Identity;
-	FString TargetFailure;
-	if (!FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
-			RuntimeSnapshot.PracticeLaunchWorldTransform.GetLocation(),
-			GravitySnapshot,
-			FrozenPreset,
-			ResolvedE5Transform,
-			&TargetFailure))
+	const FTransform ResolvedE5Transform =
+		CandidateSnapshot.E5TargetWorldTransform;
+	const uint64 ExpectedTargetIdentity =
+		FABTSM3MonthlySatellitePreviewBuilder::
+			ComputeProductionTargetIdentityHash(
+				static_cast<uint64>(
+					CandidateSnapshot.ProductionTargetDescriptorHash),
+				CandidateSnapshot.SatelliteSiteWorldTransform,
+				ResolvedE5Transform,
+				CandidateSnapshot.E5TargetHalfExtentCM);
+	if (!ResolvedE5Transform.IsValid()
+		|| CandidateSnapshot.E5TargetHalfExtentCM.GetMin() <= 0.0f
+		|| ExpectedTargetIdentity != static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash))
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=E5Transform Detail=%s"),
-			*TargetFailure);
+			TEXT("[ABTS][M3R5.1][RuntimePractice] SpawnRejected Reason=ProductionTargetIdentity Expected=%016llX Candidate=%016llX"),
+			static_cast<unsigned long long>(ExpectedTargetIdentity),
+			static_cast<unsigned long long>(static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)));
 		return false;
 	}
 
-	RuntimeE5Target =
-		GetWorld()->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
-			AABTSCalibrationTargetProxy::StaticClass(),
-			ResolvedE5Transform,
-			this,
-			nullptr,
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	RuntimeE5Target = GetWorld()->SpawnActor<AActor>(
+		AActor::StaticClass(),
+		ResolvedE5Transform,
+		FActorSpawnParameters());
 	if (RuntimeE5Target == nullptr)
 	{
 		return RejectSpawn(TEXT("E5Spawn"));
 	}
-	RuntimeE5Target->ConfigureCube(
-		TEXT("Satellite.Backside.E5"),
-		CandidateSnapshot.E5TargetHalfExtentCM.GetMax(),
-		FLinearColor(1.0f, 0.12f, 0.72f, 1.0f));
-	UGameplayStatics::FinishSpawningActor(
+	RuntimeE5Target->SetOwner(this);
+	RuntimeE5Target->Tags.AddUnique(
+		TEXT("Satellite.Backside.FrozenE1BuildingModules"));
+	UBoxComponent* const ModuleCollision = NewObject<UBoxComponent>(
 		RuntimeE5Target,
-		ResolvedE5Transform);
+		TEXT("FrozenE1BuildingModuleOBB"));
+	if (ModuleCollision == nullptr)
+	{
+		return RejectSpawn(TEXT("E1ModuleCollisionCreate"));
+	}
+	ModuleCollision->InitBoxExtent(CandidateSnapshot.E5TargetHalfExtentCM);
+	ModuleCollision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	ModuleCollision->SetCollisionResponseToAllChannels(ECR_Block);
+	RuntimeE5Target->SetRootComponent(ModuleCollision);
+	ModuleCollision->RegisterComponent();
+	RuntimeE5Target->SetActorTransform(ResolvedE5Transform);
 	RuntimeE5Target->SetActorEnableCollision(true);
 	RuntimeE5GameplayTarget = RuntimeE5Target;
 	RuntimeE5Target->AttachToActor(
@@ -626,7 +640,14 @@ bool AABTSM3MonthlySatellitePracticeRuntime::SpawnSnapshotActors()
 	RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2 =
 		RuntimeSatellite->GetSurfaceGravityAccelerationCMPerSec2();
 	RuntimeSnapshot.E5WorldTransform = RuntimeE5Target->GetActorTransform();
-	RuntimeSnapshot.E5HalfExtentCM = RuntimeE5Target->GetTargetHalfExtentCM();
+	RuntimeSnapshot.E5HalfExtentCM = CandidateSnapshot.E5TargetHalfExtentCM;
+	RuntimeSnapshot.TargetAuthority = CandidateSnapshot.TargetAuthority;
+	RuntimeSnapshot.ProductionTargetDescriptorHash =
+		CandidateSnapshot.ProductionTargetDescriptorHash;
+	RuntimeSnapshot.ProductionTargetModuleId =
+		CandidateSnapshot.ProductionTargetModuleId;
+	RuntimeSnapshot.ProductionTargetIdentityHash =
+		CandidateSnapshot.ProductionTargetIdentityHash;
 	RuntimeSnapshot.BaselineGravitySnapshotHash =
 		static_cast<int64>(BaselineGravitySnapshotHash);
 	RuntimeSnapshot.RuntimeLayoutSnapshotHash = static_cast<int64>(
@@ -1001,11 +1022,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		FABTSSlingshotSatelliteCalibrationModel::
 			MakeFrozenSatellitePracticePresetV0();
 	FABTSSatellitePracticePreset CertificationPreset = FrozenPreset;
-	const bool bProductionCrystalTarget =
-		RuntimeSnapshot.E5HalfExtentCM.GetMax() <= 36.0f + KINDA_SMALL_NUMBER;
+	const bool bProductionBuildingModuleTarget =
+		RuntimeSnapshot.TargetAuthority
+			== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules;
 	// Final-V3 terrain can move the satellite inside the same frozen aim domain.
-	// Sample that continuous domain at the production Crystal density for both
-	// the pre-binding proxy and the Crystal itself. Pull limits, gravity-off
+	// Sample that continuous domain at the production module density for both
+	// the pre-binding target and the real module. Pull limits, gravity-off
 	// miss, uniqueness and the three-connected-witness gate remain unchanged.
 	CertificationPreset.AimInPlaneSampleCount = 61;
 	CertificationPreset.AimOutOfPlaneSampleCount = 31;
@@ -1035,7 +1057,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 	// practice gate keeps every gravity-dependence and uniqueness condition,
 	// but accepts an aim-connected island at one reachable 0.01 pull notch.
 	// The stricter frozen-carrier bPassed value remains visible in the log.
-	const bool bM3PracticePassed =
+	bool bM3PracticePassed =
 		Summary.LargestSuccessIslandSamples
 			>= FMath::Max(1, FrozenPreset.MinimumSuccessIslandSamples)
 		&& Summary.bIslandSpansAimNeighbors
@@ -1048,6 +1070,16 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 			<= FrozenPreset.PullMaximum + KINDA_SMALL_NUMBER
 		&& Summary.MinimumGravityOffMissCM + KINDA_SMALL_NUMBER
 			>= FrozenPreset.GravityOffMinimumMissCM;
+	const bool bFrozenTargetTrajectoryIdentityMatches =
+		CandidateSnapshot.TargetAuthority
+			!= EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+		|| (CandidateSnapshot.bProductionTargetTrajectoryCertified
+			&& CandidateSnapshot.ProductionTargetTrajectoryHash != 0
+			&& static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetTrajectoryHash)
+				== Summary.ResultHash);
+	bM3PracticePassed = bM3PracticePassed
+		&& bFrozenTargetTrajectoryIdentityMatches;
 	bTrajectoryCertified = bM3PracticePassed;
 	RuntimeSnapshot.bTrajectoryCertified = bM3PracticePassed;
 	RuntimeSnapshot.ProductionLaunchProfileHash =
@@ -1075,10 +1107,11 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 				RuntimeSnapshot.PracticeStakeACellId,
 				RuntimeSnapshot.PracticeStakeBCellId));
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionCrystal=%d AimSamples=%dx%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f BestClearance=%.1f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] PracticePassed=%d FullFrozenCarrierPassed=%d ProductionBuildingModule=%d PreviewTrajectoryExact=%d AimSamples=%dx%d ProductionProfileHash=%016llX GravityOnHits=%d GravityDependentHits=%d Island=%d AimNeighbors=%d PullNeighbors=%d Pull=[%.3f,%.3f] AimIn=[%.1f,%.1f] BestAim=(%.1f,%.1f) BestPull=%.3f BestClearance=%.1f GravityOffMiss=%.1f SimpleHits=%d OutsidePullHits=%d ResultHash=%016llX"),
 		bM3PracticePassed ? 1 : 0,
 		Summary.bPassed ? 1 : 0,
-		bProductionCrystalTarget ? 1 : 0,
+		bProductionBuildingModuleTarget ? 1 : 0,
+		bFrozenTargetTrajectoryIdentityMatches ? 1 : 0,
 		CertificationPreset.AimInPlaneSampleCount,
 		CertificationPreset.AimOutOfPlaneSampleCount,
 		static_cast<unsigned long long>(ProductionHash),
@@ -1171,7 +1204,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bPracticePouchInteractionReady;
 }
 
-bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
+bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1BuildingModuleTarget(
 	AActor& InTargetActor,
 	const FVector& InTargetHalfExtentCM)
 {
@@ -1180,9 +1213,69 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
 		|| InTargetActor.GetWorld() != GetWorld()
 		|| InTargetHalfExtentCM.GetMin() <= 0.0f)
 	{
+		bRuntimeReady = false;
+		bTrajectoryCertified = false;
+		RuntimeSnapshot.bTrajectoryCertified = false;
+		if (IsValid(RuntimeE5Target))
+		{
+			RuntimeE5Target->SetActorEnableCollision(false);
+			RuntimeE5Target->Destroy();
+			RuntimeE5Target = nullptr;
+			RuntimeE5GameplayTarget = nullptr;
+		}
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Rejected Reason=InvalidInput Target=%s HalfExtent=%s"),
+			TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Rejected Reason=InvalidInput Target=%s HalfExtent=%s"),
 			*GetNameSafe(&InTargetActor),
+			*InTargetHalfExtentCM.ToCompactString());
+		return false;
+	}
+	const uint64 ActualTargetIdentity =
+		FABTSM3MonthlySatellitePreviewBuilder::
+			ComputeProductionTargetIdentityHash(
+				static_cast<uint64>(
+					CandidateSnapshot.ProductionTargetDescriptorHash),
+				CandidateSnapshot.SatelliteSiteWorldTransform,
+				InTargetActor.GetActorTransform(),
+				InTargetHalfExtentCM);
+	const bool bTargetIdentityExact =
+		CandidateSnapshot.TargetAuthority
+			== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+		&& CandidateSnapshot.ProductionTargetIdentityHash != 0
+		&& ActualTargetIdentity == static_cast<uint64>(
+			CandidateSnapshot.ProductionTargetIdentityHash)
+		&& InTargetActor.GetActorTransform().Equals(
+			CandidateSnapshot.E5TargetWorldTransform, 0.001f)
+		&& InTargetHalfExtentCM.Equals(
+			CandidateSnapshot.E5TargetHalfExtentCM, 0.001f);
+	if (!bTargetIdentityExact)
+	{
+		bRuntimeReady = false;
+		bTrajectoryCertified = false;
+		RuntimeSnapshot.bTrajectoryCertified = false;
+		if (IsValid(BoundSlingshotSystem))
+		{
+			BoundSlingshotSystem->ClearSatellitePracticeTarget(
+				GetRuntimeE5Target());
+		}
+		if (IsValid(RuntimeE5Target))
+		{
+			RuntimeE5Target->SetActorEnableCollision(false);
+			RuntimeE5Target->Destroy();
+			RuntimeE5Target = nullptr;
+		}
+		RuntimeE5GameplayTarget = nullptr;
+		bE5CollisionEnabled = false;
+		bM6TargetBound = false;
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Rejected Reason=TargetIdentityMismatch Target=%s Expected=%016llX Actual=%016llX ExpectedLocation=%s ActualLocation=%s ExpectedHalfExtent=%s ActualHalfExtent=%s ProxyFallback=0"),
+			*GetNameSafe(&InTargetActor),
+			static_cast<unsigned long long>(static_cast<uint64>(
+				CandidateSnapshot.ProductionTargetIdentityHash)),
+			static_cast<unsigned long long>(ActualTargetIdentity),
+			*CandidateSnapshot.E5TargetWorldTransform.GetLocation()
+				.ToCompactString(),
+			*InTargetActor.GetActorLocation().ToCompactString(),
+			*CandidateSnapshot.E5TargetHalfExtentCM.ToCompactString(),
 			*InTargetHalfExtentCM.ToCompactString());
 		return false;
 	}
@@ -1217,9 +1310,10 @@ bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1CrystalTarget(
 	const bool bBound = BindM6Target();
 	RefreshReadyState();
 	const FString BindingSummary = FString::Printf(
-		TEXT("[ABTS][IntegrationV3][E1CrystalTarget] Ready=%d Target=%s Location=%s HalfExtent=%s LegacyTargetDeltaCM=%.1f Collision=%d M6Target=%d TrajectoryCertified=%d LegacyProxyRetired=1"),
+		TEXT("[ABTS][IntegrationV3][E1BuildingModuleTarget] Ready=%d Target=%s BrickId=%d TargetAuthority=FrozenE1BuildingModules Location=%s HalfExtent=%s LegacyTargetDeltaCM=%.1f Collision=%d M6Target=%d TrajectoryCertified=%d LegacyProxyRetired=1"),
 		bRuntimeReady ? 1 : 0,
 		*GetNameSafe(&InTargetActor),
+		CandidateSnapshot.ProductionTargetModuleId,
 		*InTargetActor.GetActorLocation().ToCompactString(),
 		*InTargetHalfExtentCM.ToCompactString(),
 		FVector::Distance(

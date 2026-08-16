@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Calibration/ABTSCalibrationTargetProxy.h"
 #include "Calibration/ABTSSlingshotSatelliteCalibrationTypes.h"
 #include "Components/PrimitiveComponent.h"
@@ -10,6 +11,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
+#include "PCG/ABTSM3JuryMapFreezeV3.h"
 #include "PCG/ABTSM3MonthlySatellitePracticeRuntime.h"
 #include "PCG/ABTSM3MonthlySatellitePreview.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
@@ -136,6 +138,15 @@ bool FABTSM3R51SatellitePreviewCoreTest::RunTest(
 		FABTSSlingshotSatelliteCalibrationModel::MakeFrozenSatellitePracticePresetV0();
 	const int64 FrozenPresetHash = static_cast<int64>(
 		FABTSSlingshotSatelliteCalibrationModel::ComputeSatellitePracticePresetHash(FrozenPreset));
+	FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+	FString E1DescriptorFailure;
+	TestTrue(TEXT("Published frozen E1 descriptor resolves"),
+		FABTSM73BuildingFreezeV3::DeriveAndValidate(
+			EABTSM73BeamDemoBuilding::E1ColumnBreak,
+			E1Descriptor,
+			E1DescriptorFailure));
+	TestEqual(TEXT("Published E1 has one Crystal cap"),
+		E1Descriptor.Caps.Num(), 1);
 	for (const FABTSM3MonthlySatellitePreviewCandidate& Candidate :
 		First.RetainedCandidates)
 	{
@@ -154,8 +165,51 @@ bool FABTSM3R51SatellitePreviewCoreTest::RunTest(
 			FABTSM3MonthlySatellitePreviewBuilder::ComputeCandidateHash(Candidate));
 		TestTrue(TEXT("Satellite has a positive generated radius"),
 			Candidate.SatelliteRadiusCM > 0.0f);
-		TestTrue(TEXT("E5 proxy is on the satellite back side"),
+		TestTrue(TEXT("Frozen E1 building module is on the satellite back side"),
 			Candidate.bE5OnSatelliteBackside);
+		TestEqual(TEXT("Final preview target authority is frozen E1 building modules"),
+			Candidate.TargetAuthority,
+			EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules);
+		TestEqual(TEXT("Final preview joins the published E1 descriptor"),
+			static_cast<uint64>(Candidate.ProductionTargetDescriptorHash),
+			E1Descriptor.DescriptorHash);
+		TestEqual(TEXT("Target identity hash is canonical"),
+			static_cast<uint64>(Candidate.ProductionTargetIdentityHash),
+			FABTSM3MonthlySatellitePreviewBuilder::
+				ComputeProductionTargetIdentityHash(
+					E1Descriptor.DescriptorHash,
+					Candidate.SatelliteSiteWorldTransform,
+					Candidate.E5TargetWorldTransform,
+					Candidate.E5TargetHalfExtentCM));
+		const FABTSM73BeamD1BrickBinding* TargetModule =
+			E1Descriptor.Bricks.FindByPredicate(
+				[&Candidate](const FABTSM73BeamD1BrickBinding& Brick)
+				{
+					return Brick.BrickId == Candidate.ProductionTargetModuleId;
+				});
+		TestNotNull(TEXT("Target BrickId resolves in the public descriptor"),
+			TargetModule);
+		if (TargetModule != nullptr)
+		{
+			TestTrue(TEXT("Module target is descriptor local multiplied by frozen Site"),
+				Candidate.E5TargetWorldTransform.Equals(
+					TargetModule->LocalTransform
+						* Candidate.SatelliteSiteWorldTransform,
+					0.001f));
+			TestTrue(TEXT("Module half extent comes from descriptor dimensions"),
+				Candidate.E5TargetHalfExtentCM.Equals(
+					TargetModule->BrickSpec.DimensionsCM * 0.5f,
+					0.001f));
+		}
+		const bool bProductionCandidate =
+			Candidate.SourceRouteCandidateId
+				== FABTSM3JuryMapFreezeV3Builder::FrozenSourceCandidateId;
+		TestEqual(TEXT("Only the production candidate publishes a trajectory certificate"),
+			Candidate.bProductionTargetTrajectoryCertified,
+			bProductionCandidate);
+		TestEqual(TEXT("Only the production candidate publishes a trajectory hash"),
+			Candidate.ProductionTargetTrajectoryHash != 0,
+			bProductionCandidate);
 		FVector FinalSurfaceWorld = FVector::ZeroVector;
 		FVector FinalSurfaceNormal = FVector::ZeroVector;
 		float FinalSurfaceRadiusCM = 0.0f;
@@ -180,18 +234,6 @@ bool FABTSM3R51SatellitePreviewCoreTest::RunTest(
 				&& FinalSurfaceSatelliteCenter.Equals(
 					Candidate.SatelliteCenterWorld,
 					1.0f));
-		const float TargetCenterRadius = FVector::Distance(
-			Candidate.E5TargetWorldTransform.GetLocation(),
-			Candidate.SatelliteCenterWorld);
-		const float ExpectedTargetCenterRadius =
-			Candidate.SatelliteRadiusCM
-			+ FrozenPreset.TargetProxyRadiusCM
-			+ FrozenPreset.TargetSatelliteClearanceCM;
-		TestTrue(TEXT("E5 proxy rests on the satellite surface"),
-			FMath::IsNearlyEqual(
-				TargetCenterRadius,
-				ExpectedTargetCenterRadius,
-				0.25f));
 	}
 
 	FString ValidationFailure;
@@ -616,6 +658,78 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		BoundTarget == Runtime->GetRuntimeE5Target());
 	TestTrue(TEXT("M6 target extent is the frozen E5 extent"),
 		BoundHalfExtent.Equals(Candidate.E5TargetHalfExtentCM, 0.1f));
+	TestEqual(TEXT("Runtime target authority remains frozen E1 building modules"),
+		Snapshot.TargetAuthority,
+		EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules);
+	TestEqual(TEXT("Runtime target BrickId joins the preview exactly"),
+		Snapshot.ProductionTargetModuleId,
+		Candidate.ProductionTargetModuleId);
+	TestEqual(TEXT("Runtime target identity joins the preview exactly"),
+		Snapshot.ProductionTargetIdentityHash,
+		Candidate.ProductionTargetIdentityHash);
+	TestEqual(TEXT("Runtime trajectory joins the preview certificate exactly"),
+		Snapshot.TrajectoryCertificationHash,
+		Candidate.ProductionTargetTrajectoryHash);
+
+	FTransform TamperedModuleTransform = Candidate.E5TargetWorldTransform;
+	TamperedModuleTransform.AddToTranslation(FVector(1.0f, 0.0f, 0.0f));
+	AABTSCalibrationTargetProxy* TamperedModule =
+		World->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
+			AABTSCalibrationTargetProxy::StaticClass(),
+			TamperedModuleTransform,
+			nullptr,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	TestNotNull(TEXT("Tampered production module fixture spawns"),
+		TamperedModule);
+	if (TamperedModule != nullptr)
+	{
+		TamperedModule->ConfigureCube(
+			TEXT("Test.TamperedE1BuildingModule"),
+			Candidate.E5TargetHalfExtentCM.GetMax(),
+			FLinearColor::White);
+		UGameplayStatics::FinishSpawningActor(
+			TamperedModule, TamperedModuleTransform);
+		AddExpectedError(
+			TEXT("Rejected Reason=TargetIdentityMismatch"),
+			EAutomationExpectedErrorFlags::Contains,
+			1);
+		TestFalse(TEXT("Runtime rejects a non-exact module target identity"),
+			Runtime->BindProductionE1BuildingModuleTarget(
+				*TamperedModule,
+				Candidate.E5TargetHalfExtentCM));
+		TestFalse(TEXT("Identity rejection does not retain the proxy fallback"),
+			Runtime->IsRuntimeReady()
+				|| Runtime->GetRuntimeE5Target() != nullptr);
+	}
+
+	AABTSCalibrationTargetProxy* ExactModule =
+		World->SpawnActorDeferred<AABTSCalibrationTargetProxy>(
+			AABTSCalibrationTargetProxy::StaticClass(),
+			Candidate.E5TargetWorldTransform,
+			nullptr,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	TestNotNull(TEXT("Exact production module fixture spawns"), ExactModule);
+	if (ExactModule != nullptr)
+	{
+		ExactModule->ConfigureCube(
+			TEXT("Test.ExactE1BuildingModule"),
+			Candidate.E5TargetHalfExtentCM.GetMax(),
+			FLinearColor::White);
+		UGameplayStatics::FinishSpawningActor(
+			ExactModule, Candidate.E5TargetWorldTransform);
+		TestTrue(TEXT("Runtime accepts the exact frozen module target identity"),
+			Runtime->BindProductionE1BuildingModuleTarget(
+				*ExactModule,
+				Candidate.E5TargetHalfExtentCM));
+		TestTrue(TEXT("Exact module binding restores Ready without proxy fallback"),
+			Runtime->IsRuntimeReady()
+				&& Runtime->GetRuntimeE5Target() == ExactModule);
+		TestEqual(TEXT("Bound module trajectory remains the preview certificate"),
+			Runtime->GetRuntimeSnapshot().TrajectoryCertificationHash,
+			Candidate.ProductionTargetTrajectoryHash);
+	}
 
 	GravityCVar->Set(OriginalGravityOverride, ECVF_SetByCode);
 	return true;

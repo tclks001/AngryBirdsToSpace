@@ -32,6 +32,15 @@ struct FABTSM3SurfaceSDFSample
 	FVector SurfaceNormal = FVector::UpVector;
 };
 
+/** Read-only aggregate used by deterministic continuous-surface generation. */
+struct FABTSM3ContinuousSurfaceSample
+{
+	int32 CellId = INDEX_NONE;
+	float SurfaceRadiusCM = 0.0f;
+	FVector SurfaceNormal = FVector::UpVector;
+	FLinearColor TerrainColor = FLinearColor::Gray;
+};
+
 /** Pure presentation field derived from immutable CellTopo PCG output. */
 class ABTSRUNTIME_API FABTSM3TerrainVisualField
 {
@@ -66,6 +75,28 @@ public:
 	float GetBuildingPadSignedDistanceCM(const FVector& UnitDirection, float RadiusCM, const FABTSM3BuildingSpawnSite& Pad) const;
 	float GetSurfaceRadius(const FVector& UnitDirection) const;
 	FVector GetSurfaceNormal(const FVector& UnitDirection) const;
+	/** Central-Cell-reusing geometry query for production surface consumers. */
+	bool QuerySurfaceGeometry(
+		const FVector& UnitDirection,
+		int32 StartCellHint,
+		int32& OutCellId,
+		float& OutSurfaceRadiusCM,
+		FVector& OutSurfaceNormal) const;
+	/** Central Cell/radius/color only; caller may resolve canonical normal serially. */
+	bool QueryContinuousSurfaceBaseSample(
+		const FVector& UnitDirection,
+		int32 StartCellHint,
+		FABTSM3ContinuousSurfaceSample& OutSample) const;
+	/**
+	 * Resolves one central Cell once so radius and color reuse it directly.
+	 * Normal probes retain the legacy Cell-0 canonical path. Production mesh
+	 * generation resolves them serially because the exact oracle rejected
+	 * worker-thread low-bit drift. This method itself remains read-only.
+	 */
+	bool QueryContinuousSurfaceSample(
+		const FVector& UnitDirection,
+		int32 StartCellHint,
+		FABTSM3ContinuousSurfaceSample& OutSample) const;
 	/** Samples terrain, road and river line-SDF weights on CPU; never reads GPU material pixels. */
 	bool QuerySurfaceSDF(const FVector& UnitDirection, float PhysicsBlendWidthCM, FABTSM3SurfaceSDFSample& OutSample) const;
 	FLinearColor GetDebugTerrainColor(const FVector& UnitDirection) const;
@@ -91,11 +122,14 @@ private:
 	void BuildRoadSegments(const TArray<FABTSM3CellEdgeState>& EdgeStates);
 	float GetCellHeightCM(int32 CellId) const;
 	float GetInterpolatedHeightCM(const FVector& UnitDirection, int32 NearestCellId) const;
+	float GetUnpaddedSurfaceRadiusForCell(const FVector& UnitDirection, int32 CellId) const;
+	float GetSurfaceRadiusWithHint(const FVector& UnitDirection, int32 StartCellHint, int32& OutCellId) const;
 	float ApplyCompatibilityBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const;
 	float ApplyBuildingPadRadius(const FVector& UnitDirection, float UnpaddedRadiusCM) const;
 	float GetDistanceToSegmentCM(const FVector& UnitDirection, const FABTSM3BoundarySegment& Segment) const;
 	void FindTwoNearestTerrainFeatures(const FVector& UnitDirection, int32 CellId, const FABTSM3BoundarySegment*& OutBest, float& OutBestDistanceCM, const FABTSM3BoundarySegment*& OutSecond, float& OutSecondDistanceCM) const;
 	FLinearColor GetCellColor(int32 CellId) const;
+	FLinearColor GetDebugTerrainColorForCell(const FVector& UnitDirection, int32 CellId) const;
 
 	float BaseRadiusCM = 10000.0f;
 	float HeightScaleCM = 900.0f;

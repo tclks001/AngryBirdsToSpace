@@ -370,7 +370,8 @@ bool FABTSM3JuryMapFreezeV3Builder::Build(
 	const FABTSM3MonthlySpatialResult& SpatialResult,
 	const FABTSM3MonthlySatellitePreviewResult& SatellitePreviewResult,
 	FABTSM3JuryMapFreezeV3Result& OutResult,
-	FString& OutFailure)
+	FString& OutFailure,
+	const bool bRequireFrozenE1BuildingModuleTarget)
 {
 	using namespace ABTSM3JuryMapFreezeV3Private;
 	OutResult = FABTSM3JuryMapFreezeV3Result();
@@ -431,6 +432,71 @@ bool FABTSM3JuryMapFreezeV3Builder::Build(
 		Reject(OutResult,
 			EABTSM3JuryMapFreezeV3RejectReason::SourceIdentityMismatch);
 		return false;
+	}
+	if (bRequireFrozenE1BuildingModuleTarget)
+	{
+		FABTSM73BuildingFreezeV3Descriptor E1Descriptor;
+		FString E1Failure;
+		const bool bFrozenTargetIdentityReady =
+			SatelliteCandidate->TargetAuthority
+				== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
+			&& SatelliteCandidate->bProductionTargetTrajectoryCertified
+			&& SatelliteCandidate->ProductionTargetTrajectoryHash != 0
+			&& SatelliteCandidate->ProductionTargetDescriptorHash != 0
+			&& SatelliteCandidate->ProductionTargetModuleId != INDEX_NONE
+			&& SatelliteCandidate->ProductionTargetIdentityHash != 0
+			&& FABTSM73BuildingFreezeV3::DeriveAndValidate(
+				EABTSM73BeamDemoBuilding::E1ColumnBreak,
+				E1Descriptor,
+				E1Failure)
+			&& static_cast<uint64>(
+				SatelliteCandidate->ProductionTargetDescriptorHash)
+				== E1Descriptor.DescriptorHash;
+		if (!bFrozenTargetIdentityReady)
+		{
+			OutFailure = FString::Printf(
+				TEXT("FrozenE1ProductionTarget:%s"), *E1Failure);
+			Reject(OutResult,
+				EABTSM3JuryMapFreezeV3RejectReason::SourceIdentityMismatch);
+			return false;
+		}
+		const FABTSM73BeamD1BrickBinding* TargetModule =
+			E1Descriptor.Bricks.FindByPredicate(
+				[SatelliteCandidate](const FABTSM73BeamD1BrickBinding& Brick)
+				{
+					return Brick.BrickId
+						== SatelliteCandidate->ProductionTargetModuleId;
+				});
+		if (TargetModule == nullptr)
+		{
+			OutFailure = TEXT("FrozenE1ProductionModuleMissing");
+			Reject(OutResult,
+				EABTSM3JuryMapFreezeV3RejectReason::SourceIdentityMismatch);
+			return false;
+		}
+		const FTransform ExpectedTarget = TargetModule->LocalTransform
+			* SatelliteCandidate->SatelliteSiteWorldTransform;
+		const FVector ExpectedHalfExtent =
+			TargetModule->BrickSpec.DimensionsCM * 0.5f;
+		const uint64 ExpectedIdentity =
+			FABTSM3MonthlySatellitePreviewBuilder::
+				ComputeProductionTargetIdentityHash(
+					E1Descriptor.DescriptorHash,
+					SatelliteCandidate->SatelliteSiteWorldTransform,
+					ExpectedTarget,
+					ExpectedHalfExtent);
+		if (!ExpectedTarget.Equals(
+				SatelliteCandidate->E5TargetWorldTransform, 0.001f)
+			|| !ExpectedHalfExtent.Equals(
+				SatelliteCandidate->E5TargetHalfExtentCM, 0.001f)
+			|| ExpectedIdentity != static_cast<uint64>(
+				SatelliteCandidate->ProductionTargetIdentityHash))
+		{
+			OutFailure = TEXT("FrozenE1ProductionTargetGeometry");
+			Reject(OutResult,
+				EABTSM3JuryMapFreezeV3RejectReason::SourceIdentityMismatch);
+			return false;
+		}
 	}
 	OutResult.SourceSatellitePreviewCandidateHash =
 		static_cast<uint64>(SatelliteCandidate->CandidateHash);
@@ -524,28 +590,27 @@ bool FABTSM3JuryMapFreezeV3Builder::Build(
 
 		if (Index == SatelliteSiteIndex)
 		{
-			const FVector SatelliteUp =
-				(SatelliteCandidate->E5TargetWorldTransform.GetLocation()
-					- SatelliteCandidate->SatelliteCenterWorld).GetSafeNormal();
-			const FVector SatelliteX =
-				SatelliteCandidate->E5TargetWorldTransform
-					.GetUnitAxis(EAxis::X).GetSafeNormal();
-			const FVector SatelliteY =
-				FVector::CrossProduct(SatelliteUp, SatelliteX).GetSafeNormal();
-			if (!IsFrameValid(SatelliteX, SatelliteY, SatelliteUp))
+			const FTransform& SatelliteSiteTransform =
+				SatelliteCandidate->SatelliteSiteWorldTransform;
+			const FVector SatelliteUp = SatelliteSiteTransform
+				.GetUnitAxis(EAxis::Z).GetSafeNormal();
+			const FVector SatelliteX = SatelliteSiteTransform
+				.GetUnitAxis(EAxis::X).GetSafeNormal();
+			const FVector SatelliteY = SatelliteSiteTransform
+				.GetUnitAxis(EAxis::Y).GetSafeNormal();
+			const FVector ExpectedSurfacePivot =
+				SatelliteCandidate->SatelliteCenterWorld
+				+ SatelliteUp * SatelliteCandidate->SatelliteRadiusCM;
+			if (!IsFrameValid(SatelliteX, SatelliteY, SatelliteUp)
+				|| !SatelliteSiteTransform.GetLocation().Equals(
+					ExpectedSurfacePivot, 0.001f))
 			{
 				OutFailure = TEXT("SatellitePlacementFrame");
 				Reject(OutResult,
 					EABTSM3JuryMapFreezeV3RejectReason::PlacementFrameInvalid);
 				return false;
 			}
-			const FVector SurfacePivot =
-				SatelliteCandidate->SatelliteCenterWorld
-				+ SatelliteUp * SatelliteCandidate->SatelliteRadiusCM;
-			Site.WorldTransform = FTransform(
-				FRotationMatrix::MakeFromXZ(SatelliteX, SatelliteUp).ToQuat(),
-				SurfacePivot,
-				FVector::OneVector);
+			Site.WorldTransform = SatelliteSiteTransform;
 			Site.V3Envelope.SurfaceKind =
 				EABTSJuryDemoFixedSixSurfaceKind::Satellite;
 			Site.V3Envelope.SupportCenterWorldCM =
@@ -747,7 +812,8 @@ bool FABTSM3JuryMapFreezeV3Builder::Validate(
 	const FABTSM3MonthlySatellitePreviewResult& SatellitePreviewResult,
 	const FABTSM3JuryMapFreezeV3Result& Result,
 	EABTSM3JuryMapFreezeV3RejectReason& OutReason,
-	FString& OutFailure)
+	FString& OutFailure,
+	const bool bRequireFrozenE1BuildingModuleTarget)
 {
 	using namespace ABTSM3JuryMapFreezeV3Private;
 	OutReason = EABTSM3JuryMapFreezeV3RejectReason::None;
@@ -835,7 +901,8 @@ bool FABTSM3JuryMapFreezeV3Builder::Validate(
 			SpatialResult,
 			SatellitePreviewResult,
 			Expected,
-			ExpectedFailure)
+			ExpectedFailure,
+			bRequireFrozenE1BuildingModuleTarget)
 		|| Expected.LayoutHash != Result.LayoutHash)
 	{
 		OutReason = EABTSM3JuryMapFreezeV3RejectReason::HashMismatch;
