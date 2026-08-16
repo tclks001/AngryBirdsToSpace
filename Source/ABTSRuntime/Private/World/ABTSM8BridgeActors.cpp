@@ -17,7 +17,7 @@ AABTSM8WaterBarrierActor::AABTSM8WaterBarrierActor()
 	Collision = CreateDefaultSubobject<UBoxComponent>(TEXT("WaterBarrierCollision"));
 	SetRootComponent(Collision);
 	Collision->SetCollisionProfileName(TEXT("BlockAll"));
-	Collision->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	Collision->SetCollisionObjectType(ABTSWalkBarrierChannel);
 	Collision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Collision->SetGenerateOverlapEvents(false);
 }
@@ -25,7 +25,7 @@ AABTSM8WaterBarrierActor::AABTSM8WaterBarrierActor()
 void AABTSM8WaterBarrierActor::InitializeBarrier(const FABTSM3CellEdgeKey& InEdge, const FTransform& Transform, const FVector& HalfExtentCM)
 {
 	EdgeKey = InEdge;
-	Collision->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	Collision->SetCollisionObjectType(ABTSWalkBarrierChannel);
 	SetActorTransform(Transform, false, nullptr, ETeleportType::TeleportPhysics);
 	BaseHalfExtentCM = HalfExtentCM.ComponentMax(FVector(1.0f));
 	BlockingAlongIntervalsCM.Reset();
@@ -148,7 +148,7 @@ void AABTSM8WaterBarrierActor::RebuildCollisionPieces()
 		if (Piece == nullptr) continue;
 		Piece->SetupAttachment(Collision);
 		Piece->SetCollisionProfileName(TEXT("BlockAll"));
-		Piece->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+		Piece->SetCollisionObjectType(ABTSWalkBarrierChannel);
 		Piece->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		Piece->SetGenerateOverlapEvents(false);
 		Piece->SetBoxExtent(

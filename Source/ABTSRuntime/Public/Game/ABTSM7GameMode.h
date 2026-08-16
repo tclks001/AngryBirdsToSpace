@@ -269,6 +269,7 @@ private:
 		JuryDemoFixedSixTerrainPreviousBuildingResponses;
 	uint64 JuryDemoFixedSixProductionGenerationToken = 0;
 	uint64 JuryDemoFixedSixTerrainOverrideGenerationToken = 0;
+	uint64 JuryDemoFixedSixTerrainCollisionRestoredGenerationToken = 0;
 	bool bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride = false;
 	bool bProductionFlowTimingActive = false;
 	bool bProductionFlowTerminal = false;

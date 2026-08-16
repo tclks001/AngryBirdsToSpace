@@ -175,6 +175,9 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	bHasPendingLaunchCompletion = true;
 	FinalizeActiveLaunchTelemetry(PendingCompletedLandingLocation);
 	FreezeDynamicProxies();
+	const int32 WalkFrozenBuildingBodies = BuildingMaterialSystem.IsValid()
+		? BuildingMaterialSystem->FreezeAllDynamicModulesForWalkReturn()
+		: 0;
 	if (SlingshotCamera)
 	{
 		SlingshotCamera->BeginReturnToPrimaryFrame();
@@ -197,7 +200,11 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	}
 	ReturnElapsedSeconds = 0.0f;
 	LaunchState = EABTSM6LaunchState::Returning;
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Return] Begin FlightSeconds=%.2f Proxies=%d"), FlightElapsedSeconds, DynamicProxies.Num());
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6][Return] Begin FlightSeconds=%.2f Proxies=%d WalkFrozenBuildingBodies=%d"),
+		FlightElapsedSeconds,
+		DynamicProxies.Num(),
+		WalkFrozenBuildingBodies);
 }
 
 void AABTSM6SlingshotSystem::UpdateReturn(const float DeltaSeconds)

@@ -79,6 +79,21 @@ bool FABTSSlingshotDeveloperObstacleCollisionPolicyTest::RunTest(
 		AABTSM25BirdCharacter::ResolveDeveloperObstacleCollisionResponse(
 			false, false),
 		ECR_Block);
+	TestEqual(
+		TEXT("Normal gameplay walking is blocked by river air walls"),
+		AABTSM25BirdCharacter::ResolveWalkBarrierCollisionResponse(
+			false, false),
+		ECR_Block);
+	TestEqual(
+		TEXT("Slingshot flight ignores river air walls"),
+		AABTSM25BirdCharacter::ResolveWalkBarrierCollisionResponse(
+			false, true),
+		ECR_Ignore);
+	TestEqual(
+		TEXT("Developer walking may ignore river air walls"),
+		AABTSM25BirdCharacter::ResolveWalkBarrierCollisionResponse(
+			true, false),
+		ECR_Ignore);
 	return true;
 }
 

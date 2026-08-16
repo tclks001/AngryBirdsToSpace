@@ -337,6 +337,18 @@ bool FABTSM73JuryDemoFixedSixV2AtomicStaticRegistrationTest::RunTest(
 			Actor->QueryLivePresentationAnchor(Anchor, LiveModules));
 		TestTrue(*FString::Printf(TEXT("Actor %d live modules"), Index),
 			LiveModules > 0);
+		FBox PresentationBounds(EForceInit::ForceInit);
+		int32 BoundedModules = 0;
+		TestTrue(*FString::Printf(TEXT("Actor %d physical presentation bounds"), Index),
+			Actor->QueryLivePresentationBounds(
+				PresentationBounds,
+				BoundedModules));
+		TestEqual(*FString::Printf(TEXT("Actor %d bounded module identity"), Index),
+			BoundedModules,
+			LiveModules);
+		TestTrue(*FString::Printf(TEXT("Actor %d bounds have framing volume"), Index),
+			PresentationBounds.IsValid
+				&& PresentationBounds.GetExtent().GetMin() > 0.0);
 		ActualModuleCount +=
 			Actor->GetJuryDemoFixedSixStaticModuleCount();
 	}

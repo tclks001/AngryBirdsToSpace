@@ -457,11 +457,13 @@ bool AABTSM6SlingshotCamera::BuildImpactObservationPose(
 	const FVector& Up,
 	const FVector& FrozenForward,
 	const FVector& FacilityAnchor,
+	const FVector& FacilityExtent,
 	const bool bHasFacilityAnchor,
 	const float DistanceCM,
 	const float HeightCM,
 	const float LookDownDegrees,
 	const float FacilityLookBias,
+	const float FacilityFramingDistanceMultiplier,
 	FVector& OutLocation,
 	FVector& OutLook,
 	FVector& OutScreenUp)
@@ -482,6 +484,44 @@ bool AABTSM6SlingshotCamera::BuildImpactObservationPose(
 	if (!bHasFacilityAnchor || FacilityAnchor.ContainsNaN()) return true;
 
 	const FVector SafeUp = Up.GetSafeNormal();
+	const float FacilityRadiusCM = FacilityExtent.ContainsNaN()
+		? 0.0f
+		: FacilityExtent.GetAbs().Size();
+	if (FacilityRadiusCM > 1.0f)
+	{
+		// A facility impact changes the observation subject from the projectile to
+		// the complete structure.  The old bird-relative 920 cm camera could only
+		// see the impact foot of tall buildings, which looked like a ground shot
+		// while the collapse happened off screen.  Freeze the first-contact bounds
+		// and frame their centre with a conservative 50-degree-FOV sphere fit.
+		const FVector SafeForward = FVector::VectorPlaneProject(
+			FrozenForward,
+			SafeUp).GetSafeNormal();
+		if (!SafeForward.IsNearlyZero())
+		{
+			const float FramingDistanceCM = FMath::Max(
+				FMath::Max(0.0f, DistanceCM),
+				FacilityRadiusCM * FMath::Clamp(
+					FacilityFramingDistanceMultiplier,
+					2.0f,
+					8.0f));
+			const float FramingHeightCM = FMath::Max(
+				FMath::Max(0.0f, HeightCM),
+				FacilityRadiusCM * 0.45f);
+			OutLocation = FacilityAnchor
+				- SafeForward * FramingDistanceCM
+				+ SafeUp * FramingHeightCM;
+			OutLook = (FacilityAnchor - OutLocation).GetSafeNormal();
+			OutScreenUp = FVector::VectorPlaneProject(
+				SafeUp,
+				OutLook).GetSafeNormal();
+			if (!OutLook.IsNearlyZero() && !OutScreenUp.IsNearlyZero())
+			{
+				return true;
+			}
+		}
+	}
+
 	const FVector BirdFocus = BirdLocation + SafeUp * 80.0f;
 	const FVector BirdDirection = (BirdFocus - OutLocation).GetSafeNormal();
 	const FVector FacilityDirection = (FacilityAnchor - OutLocation).GetSafeNormal();
@@ -1086,12 +1126,14 @@ bool AABTSM6SlingshotCamera::BuildImpactObservationFollowPose(
 		Up,
 		Forward,
 		ImpactObservationSample.FacilityAnchor,
+		ImpactObservationSample.FacilityExtent,
 		ImpactObservationSample.Authority
 			== EABTSM6ImpactObservationAuthority::FacilityImpact,
 		FlightDistanceCM,
 		FlightHeightCM,
 		FlightLookDownDegrees,
 		ImpactObservationFacilityLookBias,
+		ImpactObservationFacilityFramingDistanceMultiplier,
 		OutLocation,
 		Look,
 		ScreenUp))

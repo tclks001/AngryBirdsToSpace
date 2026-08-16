@@ -221,8 +221,14 @@ void AABTSM6SlingshotSystem::BeginPlay()
 
 void AABTSM6SlingshotSystem::ConfigureDebugSlingshots(const bool bEnable, const int32 InStartCellId)
 {
+#if UE_BUILD_SHIPPING
+	bSpawnDebugSlingshotsAtStart = false;
+	(void)bEnable;
+	(void)InStartCellId;
+#else
 	bSpawnDebugSlingshotsAtStart = bEnable;
 	DebugStartCellId = InStartCellId;
+#endif
 }
 
 void AABTSM6SlingshotSystem::ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp)
@@ -361,6 +367,10 @@ bool AABTSM6SlingshotSystem::SpawnDebugSlingshotPair(
 
 void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 {
+#if UE_BUILD_SHIPPING
+	bSpawnDebugSlingshotsAtStart = false;
+	return;
+#else
 	if (!bSpawnDebugSlingshotsAtStart || bDebugSlingshotsSpawned || !ResolveDependencies()
 		|| !Planet->LogicalCells.IsValidIndex(DebugStartCellId)) return;
 	const FVector StartDirection = Planet->LogicalCells[DebugStartCellId].UnitCenter.GetSafeNormal();
@@ -378,6 +388,7 @@ void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 	}
 	bDebugSlingshotsSpawned = true;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][DebugSlingshots] Enabled=1 StartCell=%d Spawned=%d Simple=4 Reinforced=4"), DebugStartCellId, Spawned);
+#endif
 }
 
 bool AABTSM6SlingshotSystem::IsBirdAllowed(const AABTSM25BirdCharacter& Bird, const AABTSM51SlingshotCord& Cord) const
@@ -1079,9 +1090,11 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
 	const FHitResult& Hit,
 	FVector& OutAnchor,
+	FVector& OutExtent,
 	FName& OutFacilityName) const
 {
 	OutAnchor = FVector::ZeroVector;
+	OutExtent = FVector::ZeroVector;
 	OutFacilityName = NAME_None;
 	const UPrimitiveComponent* HitComponent = Hit.GetComponent();
 	if (HitComponent == nullptr) return false;
@@ -1100,6 +1113,15 @@ bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
 			LiveModuleCount))
 		{
 			return false;
+		}
+		FBox FacilityBounds(EForceInit::ForceInit);
+		int32 BoundsModuleCount = 0;
+		if (Building->QueryLivePresentationBounds(
+			FacilityBounds,
+			BoundsModuleCount))
+		{
+			OutAnchor = FacilityBounds.GetCenter();
+			OutExtent = FacilityBounds.GetExtent();
 		}
 		OutFacilityName = Building->GetFName();
 		return true;
@@ -1124,16 +1146,18 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 		if (ResolveImpactFacilityObservationAnchor(
 			Hit,
 			Observation.FacilityAnchor,
+			Observation.FacilityExtent,
 			FacilityName))
 		{
 			Observation.Authority =
 				EABTSM6ImpactObservationAuthority::FacilityImpact;
 			UE_LOG(LogABTSRuntime, Log,
-				TEXT("[ABTS][M6][CameraImpactObservation] FacilityHit=%s Component=%s Impact=%s Anchor=%s Speed=%.1f"),
+				TEXT("[ABTS][M6][CameraImpactObservation] FacilityHit=%s Component=%s Impact=%s Anchor=%s Extent=%s Speed=%.1f"),
 				*FacilityName.ToString(),
 				*GetNameSafe(Hit.GetComponent()),
 				*Observation.ImpactPoint.ToCompactString(),
 				*Observation.FacilityAnchor.ToCompactString(),
+				*Observation.FacilityExtent.ToCompactString(),
 				NormalSpeedCMPerSec);
 		}
 		else

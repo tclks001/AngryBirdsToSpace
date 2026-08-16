@@ -171,6 +171,27 @@ void UABTSGameViewportClient::Init(
 		CaptureStartSeconds = FPlatformTime::Seconds();
 		UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][SystemMenuCapture] Armed Page=%s Output=%s"), *CapturePage, *CaptureOutputPath);
 	}
+	else
+	{
+		const bool bSkipFrontEnd = FParse::Param(
+			FCommandLine::Get(),
+			TEXT("ABTSSkipFrontEnd"));
+		bStartupFrontEndRequired = !IsRunningCommandlet()
+			&& !FApp::IsUnattended()
+			&& !bSkipFrontEnd;
+		if (bStartupFrontEndRequired)
+		{
+			// Arm the correct full-screen front end before the first game viewport
+			// present.  Waiting for the first local PlayerController created a visible
+			// MoviePlayer -> partial HUD/clear-color gap in packaged builds.
+			MenuPage = EABTSSystemMenuPage::Front;
+			SelectedIndex = 0;
+			bMenuVisible = true;
+			bInitialMenuStateResolved = true;
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][StartupFlow] FrontEndPrearmed BeforeFirstPresent=1"));
+		}
+	}
 }
 
 void UABTSGameViewportClient::Tick(const float DeltaTime)
@@ -205,6 +226,18 @@ float UABTSGameViewportClient::ComputeStartupLoadingProgress(
 			0.92f);
 }
 
+bool UABTSGameViewportClient::IsStartupPresentationReady(
+	const bool bWorldAuthorityReady,
+	const bool bPresentationSurfaceReady,
+	const int32 ConsecutiveReadyFrames)
+{
+	// Tick precedes Draw.  Requiring two ready ticks guarantees that one complete
+	// foreground frame was submitted before the button becomes enterable.
+	return bWorldAuthorityReady
+		&& bPresentationSurfaceReady
+		&& ConsecutiveReadyFrames >= 2;
+}
+
 void UABTSGameViewportClient::RefreshStartupWorldState()
 {
 	UWorld* GameWorld = GetWorld();
@@ -215,6 +248,8 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		bStartupGateRequired = false;
 		bStartupWorldReady = false;
 		bStartupWorldFailed = false;
+		bStartupPresentationReady = false;
+		StartupReadyPresentationFrameCount = 0;
 		bStartupGateStartedLogged = false;
 		bStartupGateTerminalLogged = false;
 	}
@@ -231,7 +266,26 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 	}
 	bStartupGateRequired = bFoundGate;
 	bStartupWorldFailed = bFoundGate && bAnyFailed;
-	bStartupWorldReady = !bFoundGate || (bAllReady && !bAnyFailed);
+	const bool bWorldAuthorityReady = !bFoundGate
+		|| (bAllReady && !bAnyFailed);
+	const bool bPresentationSurfaceReady = !bStartupFrontEndRequired
+		|| (bMenuVisible
+			&& MenuPage == EABTSSystemMenuPage::Front
+			&& MenuCanvas != nullptr);
+	if (bWorldAuthorityReady && bPresentationSurfaceReady)
+	{
+		++StartupReadyPresentationFrameCount;
+	}
+	else
+	{
+		StartupReadyPresentationFrameCount = 0;
+	}
+	bStartupPresentationReady = IsStartupPresentationReady(
+		bWorldAuthorityReady,
+		bPresentationSurfaceReady,
+		StartupReadyPresentationFrameCount);
+	bStartupWorldReady = bWorldAuthorityReady
+		&& bStartupPresentationReady;
 	if (bFoundGate && !bStartupGateStartedLogged)
 	{
 		bStartupGateStartedLogged = true;
@@ -245,7 +299,8 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		if (bStartupWorldReady)
 		{
 			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][StartupFlow] ForegroundGateTerminal Ready=1 Failed=0 ElapsedSeconds=%.3f"),
+				TEXT("[ABTS][StartupFlow] ForegroundGateTerminal Ready=1 Failed=0 PresentationFrames=%d ElapsedSeconds=%.3f"),
+				StartupReadyPresentationFrameCount,
 				FPlatformTime::Seconds() - StartupForegroundStartSeconds);
 		}
 		else
@@ -259,7 +314,8 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 
 bool UABTSGameViewportClient::IsStartupInputBlocked() const
 {
-	return bStartupGateRequired && !bStartupWorldReady;
+	return (bStartupFrontEndRequired && !bStartupPresentationReady)
+		|| (bStartupGateRequired && !bStartupWorldReady);
 }
 
 void UABTSGameViewportClient::EnsureInitialMenuState()

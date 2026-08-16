@@ -60,6 +60,11 @@ public:
 	static int32 ComputeConfirmationSecondsRemaining(double DeadlineSeconds, double NowSeconds);
 	/** Monotonic foreground progress: cap below completion until the authoritative world gate opens. */
 	static float ComputeStartupLoadingProgress(double ElapsedSeconds, bool bReady);
+	/** Two-phase latch: world authority and a complete front-end presentation must both be stable. */
+	static bool IsStartupPresentationReady(
+		bool bWorldAuthorityReady,
+		bool bPresentationSurfaceReady,
+		int32 ConsecutiveReadyFrames);
 
 private:
 	enum class EHitAction : uint8
@@ -147,8 +152,11 @@ private:
 	bool bStartupGateRequired = false;
 	bool bStartupWorldReady = false;
 	bool bStartupWorldFailed = false;
+	bool bStartupFrontEndRequired = false;
+	bool bStartupPresentationReady = false;
 	bool bStartupGateStartedLogged = false;
 	bool bStartupGateTerminalLogged = false;
+	int32 StartupReadyPresentationFrameCount = 0;
 	int32 CaptureFrameCount = 0;
 	double CaptureStartSeconds = 0.0;
 	double StartupForegroundStartSeconds = 0.0;

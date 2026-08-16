@@ -95,6 +95,11 @@ public:
 	/** Extends the damage grace on all currently dynamic modules without changing their gravity or launch configuration. */
 	void SetDynamicContactDamageGraceSeconds(float Seconds);
 	void FreezeDynamicModules();
+	/**
+	 * Final launch boundary: preserve every settled transform, then stop all
+	 * remaining M7 simulation before party walking resumes.
+	 */
+	int32 FreezeAllDynamicModulesForWalkReturn();
 	void ConfigureTestSet(bool bEnable, const FTransform& SpawnTransform);
 	/** Copies the authoritative runtime tuning for deterministic M7.3 analysis without exposing Actor state. */
 	void CopyMaterialProfiles(TArray<FABTSM7MaterialProfile>& OutProfiles) const;

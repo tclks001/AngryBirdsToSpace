@@ -281,8 +281,17 @@ void AABTSM25BirdCharacter::SetPartyCollisionIsolation(const bool bIsolateFromPa
 
 void AABTSM25BirdCharacter::SetDeveloperWalkEnabled(const bool bEnabled, const float SpeedMultiplier)
 {
+#if UE_BUILD_SHIPPING
+	bDeveloperWalkEnabled = false;
+	const float ResolvedMultiplier = 1.0f;
+	(void)bEnabled;
+	(void)SpeedMultiplier;
+#else
 	bDeveloperWalkEnabled = bEnabled;
-	const float ResolvedMultiplier = bEnabled ? FMath::Clamp(SpeedMultiplier, 1.0f, 10.0f) : 1.0f;
+	const float ResolvedMultiplier = bDeveloperWalkEnabled
+		? FMath::Clamp(SpeedMultiplier, 1.0f, 10.0f)
+		: 1.0f;
+#endif
 	ApplyDeveloperObstacleCollisionResponse();
 	RadialMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
 	ForceMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
@@ -297,6 +306,14 @@ ResolveDeveloperObstacleCollisionResponse(
 	return bDeveloperWalk && !bSlingshotFlight ? ECR_Ignore : ECR_Block;
 }
 
+ECollisionResponse AABTSM25BirdCharacter::
+ResolveWalkBarrierCollisionResponse(
+	const bool bDeveloperWalk,
+	const bool bSlingshotFlight)
+{
+	return bDeveloperWalk || bSlingshotFlight ? ECR_Ignore : ECR_Block;
+}
+
 void AABTSM25BirdCharacter::ApplyDeveloperObstacleCollisionResponse()
 {
 	const ECollisionResponse Response =
@@ -304,9 +321,19 @@ void AABTSM25BirdCharacter::ApplyDeveloperObstacleCollisionResponse()
 			bDeveloperWalkEnabled,
 			bSlingshotObstacleCollisionOverride);
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, Response);
+	const ECollisionResponse WalkBarrierResponse =
+		ResolveWalkBarrierCollisionResponse(
+			bDeveloperWalkEnabled,
+			bSlingshotObstacleCollisionOverride);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(
+		ABTSWalkBarrierChannel,
+		WalkBarrierResponse);
 	if (ChaosPhysicsSphere)
 	{
 		ChaosPhysicsSphere->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, Response);
+		ChaosPhysicsSphere->SetCollisionResponseToChannel(
+			ABTSWalkBarrierChannel,
+			WalkBarrierResponse);
 	}
 }
 
@@ -344,7 +371,7 @@ void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, 
 	ApplyDeveloperObstacleCollisionResponse();
 	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M6][LaunchCollision] Bird=%d DeveloperWalk=%d DeveloperObstacle=Block DeferredBuildingFirstHitEnabled=1"),
+		TEXT("[ABTS][M6][LaunchCollision] Bird=%d DeveloperWalk=%d DeveloperObstacle=Block WalkBarrier=Ignore DeferredBuildingFirstHitEnabled=1"),
 		ABTSBirdIdToIndex(BirdId), bDeveloperWalkEnabled ? 1 : 0);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
@@ -1098,6 +1125,11 @@ void AABTSM25BirdCharacter::ConfigureChaosPhysicsBody(const bool bEnable)
 	ChaosPhysicsSphere->SetCollisionResponseToChannel(
 		ABTSDeveloperObstacleChannel,
 		ResolveDeveloperObstacleCollisionResponse(
+			bDeveloperWalkEnabled,
+			bSlingshotObstacleCollisionOverride));
+	ChaosPhysicsSphere->SetCollisionResponseToChannel(
+		ABTSWalkBarrierChannel,
+		ResolveWalkBarrierCollisionResponse(
 			bDeveloperWalkEnabled,
 			bSlingshotObstacleCollisionOverride));
 	ChaosPhysicsSphere->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);

@@ -60,6 +60,14 @@ bool FABTSGameUserSettingsContractTest::RunTest(const FString& Parameters)
 		UABTSGameViewportClient::ComputeStartupLoadingProgress(90.0, false), 0.92f);
 	TestEqual(TEXT("Startup progress completes only at Ready"),
 		UABTSGameViewportClient::ComputeStartupLoadingProgress(1.0, true), 1.0f);
+	TestFalse(TEXT("Presentation never opens before authoritative world Ready"),
+		UABTSGameViewportClient::IsStartupPresentationReady(false, true, 8));
+	TestFalse(TEXT("Presentation never opens onto a missing front-end surface"),
+		UABTSGameViewportClient::IsStartupPresentationReady(true, false, 8));
+	TestFalse(TEXT("First ready tick still keeps the loading foreground"),
+		UABTSGameViewportClient::IsStartupPresentationReady(true, true, 1));
+	TestTrue(TEXT("Second ready tick atomically exposes the complete entry frame"),
+		UABTSGameViewportClient::IsStartupPresentationReady(true, true, 2));
 	TestNotNull(TEXT("Engine constructed the configured ABTS settings class"), UABTSGameUserSettings::Get());
 	FString ViewportClass;
 	GConfig->GetString(TEXT("/Script/Engine.Engine"), TEXT("GameViewportClientClassName"), ViewportClass, GEngineIni);

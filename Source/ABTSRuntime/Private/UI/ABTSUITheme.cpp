@@ -139,6 +139,7 @@ namespace
 		return Color;
 	}
 
+#if !UE_BUILD_SHIPPING
 	FAutoConsoleCommand DumpThemeCommand(
 		TEXT("abts.UI.Theme.Dump"),
 		TEXT("Print the resolved frozen theme and a reproducible -ExecCmds payload."),
@@ -158,6 +159,7 @@ namespace
 		TEXT("abts.UI.Theme.Help"),
 		TEXT("Print live UI theme commands and token names."),
 		FConsoleCommandDelegate::CreateStatic(&ExecuteThemeHelpCommand));
+#endif
 }
 
 FLinearColor FABTSUIThemeSnapshot::ApplyOpacity(const FLinearColor& Color) const
@@ -221,7 +223,11 @@ FABTSUIThemeSnapshot FABTSUITheme::Get()
 		Theme.InventoryRowHeightPx - 2.0f);
 	Theme.RecipeRowHeightPx = FMath::Clamp(CVarRecipeRowHeightPx.GetValueOnGameThread(), 48.0f, 104.0f);
 	Theme.TextScale = FMath::Clamp(CVarTextScale.GetValueOnGameThread(), 0.75f, 1.5f);
+#if UE_BUILD_SHIPPING
+	Theme.bDebugOverlay = false;
+#else
 	Theme.bDebugOverlay = CVarDebugOverlay.GetValueOnGameThread() != 0;
+#endif
 	return Theme;
 }
 

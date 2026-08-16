@@ -254,6 +254,7 @@ namespace
 			TEXT("[ABTS][M5.1][PickupShowcase] Accepted=0 Reason=WorldSystemUnavailable"));
 	}
 
+#if !UE_BUILD_SHIPPING
 	FAutoConsoleCommandWithWorldAndArgs GWorkbenchVisualTuningCommand(
 		TEXT("ABTS.M51.Visual.Workbench"),
 		TEXT("PIE only. Args: ScaleMultiplier LocalZOffsetCM."),
@@ -323,6 +324,7 @@ namespace
 		TEXT("PIE only. Spawns Branch, Stone, Wood and PlantFiber on safe ground around the current pawn. Optional arg: DistanceCM."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 			&SpawnPickupShowcaseCommand));
+#endif
 }
 
 const FABTSVisualTuningValue& ABTSGetVisualTuning(

@@ -1282,6 +1282,14 @@ void UABTSStylizedRenderingWorldSubsystem::Deinitialize()
 void UABTSStylizedRenderingWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
+	// Shipping is a one-way release policy. Development keeps the console
+	// comparison seam, but both configurations begin with style enabled.
+	FABTSStylizedRenderingControl::SetEnabled(true);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Rendering][ReleaseStyle] Enabled=%d ShippingHardLock=%d DevelopmentComparisonAvailable=%d"),
+		FABTSStylizedRenderingControl::IsEnabled() ? 1 : 0,
+		UE_BUILD_SHIPPING ? 1 : 0,
+		UE_BUILD_SHIPPING ? 0 : 1);
 	bWorldTearingDown = false;
 	BindWorldLifecycleDelegates(InWorld);
 	PreloadSharedMaterials();

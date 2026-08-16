@@ -1465,9 +1465,13 @@ bool AABTSM3Planet::ValidateMonthlyPresentationResult(
 }
 
 int32 AABTSM3Planet::
-	ResolveMonthlyPresentationPreviewCandidateId(
+ResolveMonthlyPresentationPreviewCandidateId(
 		bool& bOutRequested) const
 {
+#if UE_BUILD_SHIPPING
+	bOutRequested = false;
+	return MonthlyPresentationPreviewCandidateId;
+#else
 	bOutRequested = bEnableMonthlyPresentationPreview
 		|| FParse::Param(
 			FCommandLine::Get(),
@@ -1484,6 +1488,7 @@ int32 AABTSM3Planet::
 		CandidateId = CommandLineCandidateId;
 	}
 	return CandidateId;
+#endif
 }
 
 bool AABTSM3Planet::TryBuildMonthlyPresentationPreviewData(
@@ -3085,9 +3090,13 @@ bool AABTSM3Planet::BuildM3ContinuousSurface()
 		(FPlatformTime::Seconds() - OptimizedExpandStartSeconds) * 1000.0;
 
 	const bool bRunExactOracle =
+#if UE_BUILD_SHIPPING
+		false;
+#else
 		CVarABTSM3ContinuousSurfaceExactOracle.GetValueOnGameThread() != 0
 		|| FParse::Param(FCommandLine::Get(),
 			TEXT("ABTSM3ContinuousSurfaceExactOracle"));
+#endif
 	double LegacySampleMS = 0.0;
 	double LegacyExpandMS = 0.0;
 	double ExactCompareMS = 0.0;

@@ -4,7 +4,7 @@
 
 #include "Building/ABTSM7BuildingModule.h"
 
-#include "Components/ProceduralMeshComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Misc/AutomationTest.h"
 #include "PhysicsEngine/BodyInstance.h"

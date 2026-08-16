@@ -363,6 +363,10 @@ public:
 	bool QueryLivePresentationAnchor(
 		FVector& OutWorldLocation,
 		int32& OutLiveModuleCount) const;
+	/** Physical module bounds for whole-building camera framing; excludes labels and foundations. */
+	bool QueryLivePresentationBounds(
+		FBox& OutWorldBounds,
+		int32& OutLiveModuleCount) const;
 	/** Event-time ownership query; callers must not cache module pointers or infer ownership from Actor Owner. */
 	bool OwnsRuntimePrimitive(const UPrimitiveComponent* Component) const;
 

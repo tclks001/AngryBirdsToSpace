@@ -40,10 +40,15 @@ void AABTSSlingshotSatelliteCalibrationGameMode::OnInitialPlayerPlaced(
 	const FTransform& SpawnTransform,
 	const int32 SpawnCellId)
 {
+#if UE_BUILD_SHIPPING
+	bCalibrationSmokeRequested = false;
+	bSatelliteCameraCaptureRequested = false;
+#else
 	bCalibrationSmokeRequested =
 		FParse::Param(FCommandLine::Get(), TEXT("ABTSCalibrationSmoke"));
 	bSatelliteCameraCaptureRequested =
 		FParse::Param(FCommandLine::Get(), TEXT("ABTSM9CameraCapture"));
+#endif
 	if (bCalibrationSmokeRequested)
 	{
 		CalibrationSmokeStartSeconds = FPlatformTime::Seconds();

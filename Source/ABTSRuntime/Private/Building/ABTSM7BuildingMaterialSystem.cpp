@@ -909,6 +909,44 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 	}
 }
 
+int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
+{
+	int32 FrozenCount = 0;
+	int32 SimulatingBefore = 0;
+	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
+	{
+		AABTSM7BuildingModule* Module = Modules[Index].Get();
+		if (Module == nullptr)
+		{
+			Modules.RemoveAtSwap(Index);
+			continue;
+		}
+		if (!Module->IsDynamic())
+		{
+			continue;
+		}
+		const UStaticMeshComponent* Body = Module->GetMeshComponent();
+		SimulatingBefore += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
+		Module->Freeze();
+		++FrozenCount;
+	}
+
+	int32 SimulatingAfter = 0;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		const AABTSM7BuildingModule* Module = WeakModule.Get();
+		const UStaticMeshComponent* Body =
+			Module != nullptr ? Module->GetMeshComponent() : nullptr;
+		SimulatingAfter += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][WalkReturnFreeze] Frozen=%d SimulatingBefore=%d SimulatingAfter=%d TransformPolicy=PreserveFinal"),
+		FrozenCount,
+		SimulatingBefore,
+		SimulatingAfter);
+	return FrozenCount;
+}
+
 void AABTSM7BuildingMaterialSystem::SetDynamicContactDamageGraceSeconds(const float Seconds)
 {
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
