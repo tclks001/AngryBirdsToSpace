@@ -6,6 +6,7 @@
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Crc.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
@@ -14,6 +15,7 @@
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "Physics/Experimental/PhysInterface_Chaos.h"
 #include "Physics/PhysicsFiltering.h"
+#include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSCollisionChannels.h"
 
 bool FABTSM7SiteUniformGravityPolicy::TryDerive(
@@ -193,6 +195,45 @@ FString FABTSM7ChaosWorldProfile::ToLogString() const
 		PositionShockPropagationIterations);
 }
 
+void FABTSM7DeferredImpactCollisionPolicy::ApplyTo(
+	UStaticMeshComponent& Component)
+{
+	Component.SetUseCCD(true);
+	Component.SetMaxDepenetrationVelocity(
+		NAME_None, MinimumInitialOverlapDepenetrationCMPerSec);
+}
+
+bool FABTSM7DeferredImpactCollisionPolicy::VerifyDynamic(
+	UStaticMeshComponent& Component, FString& OutError)
+{
+	OutError.Reset();
+	const FBodyInstance* BodyInstance = Component.GetBodyInstance();
+	const UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+	if (Component.GetCollisionEnabled() != ECollisionEnabled::QueryAndPhysics
+		|| Component.GetCollisionObjectType() != ABTSDeveloperObstacleChannel
+		|| !Component.IsSimulatingPhysics()
+		|| BodyInstance == nullptr || !BodyInstance->bUseCCD
+		|| Component.GetMaxDepenetrationVelocity(NAME_None)
+			< MinimumInitialOverlapDepenetrationCMPerSec
+		|| PhysicsSettings == nullptr
+		|| PhysicsSettings->ContactOffsetMultiplier <= 0.0f
+		|| PhysicsSettings->MinContactOffset <= 0.0f
+		|| PhysicsSettings->MaxContactOffset
+			< PhysicsSettings->MinContactOffset)
+	{
+		OutError = FString::Printf(
+			TEXT("DeferredImpactCollisionPolicyInvalid:Collision=%d:Object=%d:Sim=%d:CCD=%d:MaxDepen=%.3f:Contact=%s"),
+			static_cast<int32>(Component.GetCollisionEnabled()),
+			static_cast<int32>(Component.GetCollisionObjectType()),
+			Component.IsSimulatingPhysics() ? 1 : 0,
+			BodyInstance != nullptr && BodyInstance->bUseCCD ? 1 : 0,
+			Component.GetMaxDepenetrationVelocity(NAME_None),
+			PhysicsSettings != nullptr ? TEXT("Valid") : TEXT("Missing"));
+		return false;
+	}
+	return true;
+}
+
 AABTSM7BuildingModule::AABTSM7BuildingModule()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -354,6 +395,7 @@ void AABTSM7BuildingModule::ActivateDynamic(const FVector& Impulse, const FVecto
 	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Visual->SetSimulatePhysics(true);
+	FABTSM7DeferredImpactCollisionPolicy::ApplyTo(*Visual);
 	Visual->SetEnableGravity(false);
 	Visual->WakeAllRigidBodies();
 	Visual->AddImpulse(Impulse, NAME_None, true);
@@ -361,6 +403,7 @@ void AABTSM7BuildingModule::ActivateDynamic(const FVector& Impulse, const FVecto
 	ContactDamageEnabledTimeSeconds = Now + ContactDamageGraceSeconds;
 	LastDamageImpactSeconds = -BIG_NUMBER;
 	bDynamic = true;
+	bTerrainPenetrationReported = false;
 }
 
 void AABTSM7BuildingModule::ActivateDynamicPlanar(const FVector& Impulse, const FVector& InGravityUp, const float GravityAcceleration)
@@ -479,12 +522,19 @@ bool AABTSM7BuildingModule::VerifyChaosDeveloperObstacleCollisionIdentity(
 			ShapeCount, MatchingShapeCount);
 		return false;
 	}
+	if (!FABTSM7DeferredImpactCollisionPolicy::VerifyDynamic(
+		*Visual, OutError))
+	{
+		return false;
+	}
 	UE_LOG(LogABTSRuntime, Verbose,
 		TEXT("[ABTS][M7][SiteUniformLaunch][CollisionIdentity]")
 		TEXT(" Module=%s ComponentObjectType=%d Shapes=%d")
-		TEXT(" ShapeFilterChannel=%d Accepted=1"),
+		TEXT(" ShapeFilterChannel=%d CCD=1 MaxDepenetration=%.3f")
+		TEXT(" ContactOffsetPolicy=Valid Accepted=1"),
 		*GetName(), static_cast<int32>(Visual->GetCollisionObjectType()),
-		ShapeCount, static_cast<int32>(ABTSDeveloperObstacleChannel));
+		ShapeCount, static_cast<int32>(ABTSDeveloperObstacleChannel),
+		Visual->GetMaxDepenetrationVelocity(NAME_None));
 	return true;
 }
 
@@ -515,6 +565,7 @@ void AABTSM7BuildingModule::Freeze()
 {
 	if (bCompoundChild) return;
 	bDynamic = false;
+	bTerrainPenetrationReported = false;
 	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 	Visual->SetSimulatePhysics(false);
@@ -607,12 +658,71 @@ void AABTSM7BuildingModule::Tick(const float DeltaSeconds)
 	// Chaos sleep. Skip bodies that are already asleep, and use the same
 	// non-invalidating force path as a persistent environmental acceleration
 	// for awake bodies. A collision/explicit wake makes the body eligible again.
-	if (!Visual->IsAnyRigidBodyAwake()) return;
+	if (!Visual->IsAnyRigidBodyAwake())
+	{
+		FString PenetrationDiagnostic;
+		if (!bTerrainPenetrationReported
+			&& DetectSleepingTerrainPenetration(PenetrationDiagnostic))
+		{
+			bTerrainPenetrationReported = true;
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][DeferredImpactTerrain] Module=%s")
+				TEXT(" SleepingPenetration=1 FailClosed=1 Detail=%s"),
+				*GetName(), *PenetrationDiagnostic);
+			// No transform correction: re-wake only so the real terrain collision
+			// can resolve the contact through Chaos.
+			Visual->WakeAllRigidBodies();
+		}
+		return;
+	}
 	const FVector GravityDirection = bPlanarGravity
 		? -PlanarGravityUp
 		: (PlanetCenter - GetActorLocation()).GetSafeNormal();
 	TryApplyNonInvalidatingAcceleration(
 		*Visual, GravityDirection * GravityAccelerationCMPerSec2);
+}
+
+bool AABTSM7BuildingModule::DetectSleepingTerrainPenetration(
+	FString& OutDiagnostic) const
+{
+	OutDiagnostic.Reset();
+	if (!IsValid(Visual) || GetWorld() == nullptr
+		|| Visual->Bounds.SphereRadius <= 0.0f)
+	{
+		return false;
+	}
+	constexpr float AllowedPenetrationCM = 3.0f;
+	const FVector Location = Visual->GetComponentLocation();
+	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
+	{
+		const AABTSM3Planet* Planet = *It;
+		if (!IsValid(Planet) || !IsValid(Planet->ContinuousSurface))
+		{
+			continue;
+		}
+		const FVector Radial = Location - Planet->GetPlanetCenterWorld();
+		const float CenterRadius = Radial.Size();
+		const FVector Direction = Radial.GetSafeNormal();
+		if (Direction.IsNearlyZero())
+		{
+			continue;
+		}
+		const FVector Extent = Visual->Bounds.BoxExtent;
+		const float RadialExtent = FMath::Abs(Direction.X) * Extent.X
+			+ FMath::Abs(Direction.Y) * Extent.Y
+			+ FMath::Abs(Direction.Z) * Extent.Z;
+		const float TerrainRadius = Planet->GetSurfaceRadiusAtDirection(Direction);
+		const float BottomRadius = CenterRadius - RadialExtent;
+		if (BottomRadius < TerrainRadius - AllowedPenetrationCM)
+		{
+			OutDiagnostic = FString::Printf(
+				TEXT("Planet=%s BottomRadius=%.3f TerrainRadius=%.3f Depth=%.3f"),
+				*GetNameSafe(Planet), BottomRadius, TerrainRadius,
+				TerrainRadius - BottomRadius);
+			return true;
+		}
+	}
+	return false;
 }
 
 void AABTSM7BuildingModule::HandleHit(UPrimitiveComponent*, AActor*, UPrimitiveComponent* OtherComponent, FVector, const FHitResult& Hit)

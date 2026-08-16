@@ -1330,6 +1330,79 @@ void AABTSM7GameMode::RestoreJuryDemoFixedSixTerrainBuildingCollisionOverride(
 	JuryDemoFixedSixTerrainOverrideGenerationToken = 0;
 }
 
+bool AABTSM7GameMode::
+RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(
+	FString& OutError)
+{
+	OutError.Reset();
+	if (!bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride
+		|| JuryDemoFixedSixTerrainOverrideGenerationToken == 0
+		|| JuryDemoFixedSixTerrainOverrideGenerationToken
+			!= JuryDemoFixedSixProductionGenerationToken
+		|| JuryDemoFixedSixTerrainSurfaces.IsEmpty()
+		|| JuryDemoFixedSixTerrainSurfaces.Num()
+			!= JuryDemoFixedSixTerrainPreviousBuildingResponses.Num())
+	{
+		OutError = TEXT("DeferredFirstHitTerrainCollisionOverrideUnavailable");
+		return false;
+	}
+	TArray<TWeakObjectPtr<UProceduralMeshComponent>> Surfaces =
+		JuryDemoFixedSixTerrainSurfaces;
+	for (int32 Index = 0; Index < Surfaces.Num(); ++Index)
+	{
+		const UProceduralMeshComponent* Surface = Surfaces[Index].Get();
+		if (Surface == nullptr
+			|| JuryDemoFixedSixTerrainPreviousBuildingResponses[Index]
+				!= ECR_Block
+			|| Surface->GetCollisionEnabled()
+				!= ECollisionEnabled::QueryAndPhysics
+			|| Surface->GetCollisionObjectType() != ECC_WorldStatic)
+		{
+			OutError = TEXT("DeferredFirstHitTerrainCollisionBaselineInvalid");
+			return false;
+		}
+	}
+	for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding :
+		JuryDemoFixedSixChaosBuildings)
+	{
+		const AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+		if (Building == nullptr || !Building
+			->IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel())
+		{
+			OutError = TEXT("DeferredFirstHitFrozenPadCollisionInvalid");
+			return false;
+		}
+	}
+	const uint64 GenerationToken = JuryDemoFixedSixTerrainOverrideGenerationToken;
+	RestoreJuryDemoFixedSixTerrainBuildingCollisionOverride(
+		TEXT("DeferredFirstHitBeforePromotion"));
+	if (bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride)
+	{
+		OutError = TEXT("DeferredFirstHitTerrainCollisionRestoreIncomplete");
+		return false;
+	}
+	for (const TWeakObjectPtr<UProceduralMeshComponent>& WeakSurface : Surfaces)
+	{
+		const UProceduralMeshComponent* Surface = WeakSurface.Get();
+		if (Surface == nullptr
+			|| Surface->GetCollisionEnabled()
+				!= ECollisionEnabled::QueryAndPhysics
+			|| Surface->GetCollisionObjectType() != ECC_WorldStatic
+			|| Surface->GetCollisionResponseToChannel(
+				ABTSDeveloperObstacleChannel) != ECR_Block)
+		{
+			OutError = TEXT("DeferredFirstHitTerrainCollisionBlockVerificationFailed");
+			return false;
+		}
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixDeferredChaos][CollisionAuthority]")
+		TEXT(" Generation=%llu TerrainBuildingResponse=Block")
+		TEXT(" PadsBuildingResponse=Block FirstHitPromotion=1 Accepted=1"),
+		GenerationToken);
+	return true;
+}
+
 void AABTSM7GameMode::UpdateJuryDemoFixedSixProductionChaosBatch()
 {
 	if (!bJuryDemoFixedSixChaosBatchActive

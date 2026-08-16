@@ -155,6 +155,9 @@ class ABTSRUNTIME_API AABTSM7GameMode : public AABTSM6GameMode
 public:
 	AABTSM7GameMode();
 	virtual void Tick(float DeltaSeconds) override;
+	/** Restores terrain Block before a deferred first-hit promotion. */
+	bool RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(
+		FString& OutError);
 
 protected:
 	virtual void OnInitialPlayerPlaced(ACharacter& Character, const FTransform& SpawnTransform, int32 SpawnCellId) override;
