@@ -2515,6 +2515,87 @@ RunFrozenE1BuildingModuleUnionSweep(
 	return true;
 }
 
+bool FABTSM3MonthlySatellitePreviewBuilder::
+EvaluateFrozenE1LegacyProxyOverlap(
+	const FVector& LaunchWorldLocation,
+	const FABTSCalibrationGravitySnapshot& CalibrationGravity,
+	const FTransform& SiteWorldTransform,
+	const FABTSSatellitePracticePreset& FrozenPreset,
+	int32& OutOverlapBrickId,
+	int32& OutOverlapBrickCount,
+	uint64& OutTargetIdentityHash,
+	uint64& OutOverlapHash,
+	FString& OutFailure)
+{
+	using namespace ABTSM3R51SatellitePreviewPrivate;
+	OutOverlapBrickId = INDEX_NONE;
+	OutOverlapBrickCount = 0;
+	OutTargetIdentityHash = 0;
+	OutOverlapHash = 0;
+	OutFailure.Reset();
+	FFrozenE1BuildingModuleSource FrozenE1;
+	FTransform LegacyProxyTransform = FTransform::Identity;
+	if (!ResolveFrozenE1BuildingModuleSource(FrozenE1, OutFailure)
+		|| !SiteWorldTransform.IsValid()
+		|| !FABTSSlingshotSatelliteCalibrationModel::BuildSatelliteTargetWorldTransform(
+			LaunchWorldLocation, CalibrationGravity, FrozenPreset,
+			LegacyProxyTransform, &OutFailure))
+	{
+		OutFailure = FString::Printf(TEXT("FrozenE1ProxyOverlapSource:%s"), *OutFailure);
+		return false;
+	}
+	const FVector ProxyCenter = LegacyProxyTransform.GetLocation();
+	const FVector SiteRadial = (ProxyCenter - CalibrationGravity.SatelliteCenterWorld).GetSafeNormal();
+	const FVector ExpectedSiteCenter = CalibrationGravity.SatelliteCenterWorld
+		+ SiteRadial * CalibrationGravity.SatelliteRadiusCM;
+	if (SiteRadial.IsNearlyZero()
+		|| !SiteWorldTransform.GetLocation().Equals(ExpectedSiteCenter, 0.01f))
+	{
+		OutFailure = TEXT("FrozenE1ProxyOverlapProjectionExact");
+		return false;
+	}
+	OutTargetIdentityHash = ComputeProductionTargetUnionIdentityHashPrivate(FrozenE1, SiteWorldTransform);
+	const float ExplicitExpansionCM = FMath::Max(0.0f, FrozenPreset.TargetProxyRadiusCM)
+		+ FMath::Max(0.0f, FrozenPreset.BirdCollisionRadiusCM);
+	FCanonicalHash64 Hash;
+	Hash.AddInt32(1);
+	Hash.AddUInt64(OutTargetIdentityHash);
+	Hash.AddVector(ProxyCenter);
+	Hash.AddFloat(FrozenPreset.TargetProxyRadiusCM);
+	Hash.AddFloat(FrozenPreset.BirdCollisionRadiusCM);
+	for (const FFrozenE1BuildingModuleSource::FBuildingModule& Module : FrozenE1.BuildingModules)
+	{
+		FTransform WorldTransform = Module.SiteLocalTransform * SiteWorldTransform;
+		WorldTransform.SetScale3D(FVector::OneVector);
+		const FVector LocalProxyCenter = WorldTransform.InverseTransformPosition(ProxyCenter);
+		const FVector ExpandedExtent = Module.HalfExtentCM.GetAbs()
+			+ FVector(ExplicitExpansionCM);
+		const bool bOverlap = FMath::Abs(LocalProxyCenter.X) <= ExpandedExtent.X
+			&& FMath::Abs(LocalProxyCenter.Y) <= ExpandedExtent.Y
+			&& FMath::Abs(LocalProxyCenter.Z) <= ExpandedExtent.Z;
+		Hash.AddInt32(Module.BrickId);
+		Hash.AddBool(bOverlap);
+		if (bOverlap)
+		{
+			if (OutOverlapBrickId == INDEX_NONE)
+			{
+				OutOverlapBrickId = Module.BrickId;
+			}
+			++OutOverlapBrickCount;
+		}
+	}
+	Hash.AddInt32(OutOverlapBrickId);
+	Hash.AddInt32(OutOverlapBrickCount);
+	OutOverlapHash = Hash.Get();
+	if (OutOverlapBrickCount == 0)
+	{
+		OutFailure = FString::Printf(TEXT("FrozenE1ProxyOverlapMiss:Hash=%016llX"),
+			static_cast<unsigned long long>(OutOverlapHash));
+		return false;
+	}
+	return true;
+}
+
 uint64 FABTSM3MonthlySatellitePreviewBuilder::ComputeResultHash(
 	const FABTSM3MonthlySatellitePreviewResult& Result)
 {

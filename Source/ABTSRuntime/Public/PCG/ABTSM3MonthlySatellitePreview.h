@@ -310,6 +310,18 @@ public:
 		uint64& OutTargetIdentityHash,
 		FString& OutFailure);
 
+	/** No-trajectory release gate: the historical reachable proxy centre is inside a real E1 Brick OBB expanded only by its documented volume and bird radius. */
+	static bool EvaluateFrozenE1LegacyProxyOverlap(
+		const FVector& LaunchWorldLocation,
+		const FABTSCalibrationGravitySnapshot& CalibrationGravity,
+		const FTransform& SiteWorldTransform,
+		const FABTSSatellitePracticePreset& FrozenPreset,
+		int32& OutOverlapBrickId,
+		int32& OutOverlapBrickCount,
+		uint64& OutTargetIdentityHash,
+		uint64& OutOverlapHash,
+		FString& OutFailure);
+
 	static uint64 ComputeResultHash(
 		const FABTSM3MonthlySatellitePreviewResult& Result);
 

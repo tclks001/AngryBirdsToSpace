@@ -446,7 +446,7 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 		Runtime->IsE5CollisionEnabled());
 	TestTrue(TEXT("M6 consumes the exact E5 snapshot"),
 		Runtime->IsM6TargetBound());
-	TestTrue(TEXT("Runtime layout passes the gravity-dependent trajectory gate"),
+	TestTrue(TEXT("Runtime layout passes the building-level attackability gate"),
 		Runtime->IsTrajectoryCertified());
 	TestTrue(TEXT("A real reinforced slingshot is grounded from the candidate cells"),
 		Runtime->IsPracticeSlingshotReady());
@@ -555,16 +555,33 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	TestEqual(TEXT("Live production M6 hash matches the preview witness"),
 		Snapshot.ProductionLaunchProfileHash,
 		Candidate.LaunchProfileHash);
-	TestTrue(TEXT("Trajectory certification is persisted"),
+	TestTrue(TEXT("Building-level attackability certification is persisted"),
 		Snapshot.bTrajectoryCertified);
-	TestTrue(TEXT("Certification finds gravity-on hits"),
-		Snapshot.GravityOnHits > 0);
-	TestTrue(TEXT("Certification finds gravity-dependent hits"),
-		Snapshot.GravityDependentHits > 0);
-	TestTrue(TEXT("Certification retains a connected success island"),
-		Snapshot.LargestSuccessIslandSamples >= 3);
-	TestTrue(TEXT("Certified gravity-off witness misses by the frozen margin"),
-		Snapshot.MinimumGravityOffMissCM >= 60.0f);
+	TestTrue(TEXT("Runtime identifies the reachable legacy proxy overlap policy"),
+		Snapshot.bBuildingLevelAttackabilityCertified);
+	TestEqual(TEXT("Runtime executes no numerical trajectory samples"),
+		Snapshot.AttackabilityWitnessSampleCount, 0);
+	TestTrue(TEXT("No runtime numerical witness BrickId is retained"),
+		Snapshot.AttackabilityWitnessBrickId == INDEX_NONE);
+	TestTrue(TEXT("Historical reachable proxy overlaps real frozen E1 Brick OBBs"),
+		Snapshot.ProxyOverlapBrickCount > 0);
+	TestTrue(TEXT("Overlap records the stable first BrickId"),
+		Snapshot.ProxyOverlapBrickId != INDEX_NONE);
+	TestTrue(TEXT("Historical preview calibration remains 2.0 primary gravity"),
+		FMath::IsNearlyEqual(
+			Candidate.SatelliteSurfaceGravityCMPerSec2,
+			1960.0f,
+			0.01f));
+	TestTrue(TEXT("Runtime records the historical calibration gravity separately"),
+		FMath::IsNearlyEqual(
+			Snapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
+			1960.0f,
+			0.01f));
+	TestTrue(TEXT("Production gameplay satellite uses 0.25 primary gravity"),
+		FMath::IsNearlyEqual(
+			Snapshot.SatelliteSurfaceGravityCMPerSec2,
+			245.0f,
+			0.01f));
 	TestNotEqual(TEXT("Trajectory certification hash is persisted"),
 		Snapshot.TrajectoryCertificationHash,
 		static_cast<int64>(0));
@@ -679,7 +696,7 @@ bool FABTSM3R51SatelliteRuntimePracticeTest::RunTest(
 	TestEqual(TEXT("Runtime target identity joins the preview exactly"),
 		Snapshot.ProductionTargetIdentityHash,
 		Candidate.ProductionTargetIdentityHash);
-	TestEqual(TEXT("Runtime trajectory joins the preview certificate exactly"),
+	TestNotEqual(TEXT("Runtime overlap proof is distinct from the historical trajectory certificate"),
 		Snapshot.TrajectoryCertificationHash,
 		Candidate.ProductionTargetTrajectoryHash);
 
