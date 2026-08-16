@@ -68,7 +68,7 @@ public:
 	static constexpr uint64 PreE6CompoundV1RegistrationResultHash =
 		14507275966565957788ull;
 	static constexpr uint64 E6CompoundV1CandidateRegistrationResultHash =
-		231363192505907336ull;
+		8828767116104973231ull;
 	static constexpr uint64 FrozenV3RegistrationResultHash =
 		FABTSM73BuildingFreezeV3::bE6CompoundV1Published
 			? E6CompoundV1CandidateRegistrationResultHash
