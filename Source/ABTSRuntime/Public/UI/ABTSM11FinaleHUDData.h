@@ -178,6 +178,14 @@ ABTSRUNTIME_API bool ABTSM11ShouldCommitFinaleHudLaunch(
 	bool bReleasedInsideLaunchButton,
 	bool bIsAiming);
 
+/**
+ * M11 owns terminal console presses while its finale is active. This must be
+ * evaluated before inherited inventory/HUD hit testing, whose retained layout
+ * may overlap the terminal control deck even though that layer is not drawn.
+ */
+ABTSRUNTIME_API bool ABTSM11RequiresExclusiveFinaleHudPointerRouting(
+	bool bFinaleActive);
+
 /** Static capture refresh policy shared by runtime and regression tests. */
 ABTSRUNTIME_API bool ABTSM11ShouldRefreshFinaleHudTargetCapture(
 	bool bHasFrozenProbe,
