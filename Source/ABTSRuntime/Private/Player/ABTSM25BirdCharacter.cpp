@@ -283,15 +283,31 @@ void AABTSM25BirdCharacter::SetDeveloperWalkEnabled(const bool bEnabled, const f
 {
 	bDeveloperWalkEnabled = bEnabled;
 	const float ResolvedMultiplier = bEnabled ? FMath::Clamp(SpeedMultiplier, 1.0f, 10.0f) : 1.0f;
-	const ECollisionResponse Response = bEnabled ? ECR_Ignore : ECR_Block;
+	ApplyDeveloperObstacleCollisionResponse();
+	RadialMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
+	ForceMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
+	ChaosMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
+}
+
+ECollisionResponse AABTSM25BirdCharacter::
+ResolveDeveloperObstacleCollisionResponse(
+	const bool bDeveloperWalk,
+	const bool bSlingshotFlight)
+{
+	return bDeveloperWalk && !bSlingshotFlight ? ECR_Ignore : ECR_Block;
+}
+
+void AABTSM25BirdCharacter::ApplyDeveloperObstacleCollisionResponse()
+{
+	const ECollisionResponse Response =
+		ResolveDeveloperObstacleCollisionResponse(
+			bDeveloperWalkEnabled,
+			bSlingshotObstacleCollisionOverride);
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, Response);
 	if (ChaosPhysicsSphere)
 	{
 		ChaosPhysicsSphere->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, Response);
 	}
-	RadialMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
-	ForceMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
-	ChaosMovement->SetDeveloperWalkingSpeedMultiplier(ResolvedMultiplier);
 }
 
 bool AABTSM25BirdCharacter::CanUseSlingshotCapability(const EABTSBirdSlingshotCapability RequiredCapability) const
@@ -307,6 +323,8 @@ void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, co
 	ClearSlingshotPresentationUp();
 	SavedCapsuleCollision = GetCapsuleComponent()->GetCollisionEnabled();
 	SavedChaosBodyCollision = ChaosPhysicsSphere ? ChaosPhysicsSphere->GetCollisionEnabled() : ECollisionEnabled::NoCollision;
+	bSlingshotObstacleCollisionOverride = true;
+	ApplyDeveloperObstacleCollisionResponse();
 	SetLocomotionCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
@@ -322,7 +340,12 @@ void AABTSM25BirdCharacter::EnterSlingshotPouch(const FVector& WorldLocation, co
 void AABTSM25BirdCharacter::LaunchFromSlingshot(const FVector& InitialVelocity, const float FlightAirDragPerSecond)
 {
 	ClearSlingshotPresentationUp();
+	bSlingshotObstacleCollisionOverride = true;
+	ApplyDeveloperObstacleCollisionResponse();
 	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M6][LaunchCollision] Bird=%d DeveloperWalk=%d DeveloperObstacle=Block DeferredBuildingFirstHitEnabled=1"),
+		ABTSBirdIdToIndex(BirdId), bDeveloperWalkEnabled ? 1 : 0);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
 		ChaosMovement->SetChaosEnabled(true);
@@ -353,6 +376,8 @@ void AABTSM25BirdCharacter::BeginSlingshotReturn()
 void AABTSM25BirdCharacter::FinishSlingshotReturn()
 {
 	ClearSlingshotPresentationUp();
+	bSlingshotObstacleCollisionOverride = false;
+	ApplyDeveloperObstacleCollisionResponse();
 	SetLocomotionCollisionEnabled(MovementMode == EABTSBirdMovementMode::ChaosRigidBody ? SavedChaosBodyCollision : SavedCapsuleCollision);
 	if (MovementMode == EABTSBirdMovementMode::ChaosRigidBody)
 	{
@@ -1070,7 +1095,11 @@ void AABTSM25BirdCharacter::ConfigureChaosPhysicsBody(const bool bEnable)
 	ChaosPhysicsSphere->SetCollisionProfileName(UCollisionProfile::PhysicsActor_ProfileName);
 	ChaosPhysicsSphere->SetCollisionObjectType(ECC_Pawn);
 	ChaosPhysicsSphere->SetCollisionResponseToChannels(Capsule->GetCollisionResponseToChannels());
-	ChaosPhysicsSphere->SetCollisionResponseToChannel(ABTSDeveloperObstacleChannel, bDeveloperWalkEnabled ? ECR_Ignore : ECR_Block);
+	ChaosPhysicsSphere->SetCollisionResponseToChannel(
+		ABTSDeveloperObstacleChannel,
+		ResolveDeveloperObstacleCollisionResponse(
+			bDeveloperWalkEnabled,
+			bSlingshotObstacleCollisionOverride));
 	ChaosPhysicsSphere->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	UE_LOG(LogABTSRuntime, Log,

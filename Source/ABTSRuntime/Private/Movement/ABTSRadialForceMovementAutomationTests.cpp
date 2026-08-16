@@ -7,6 +7,7 @@
 #include "Movement/ABTSSatelliteGravityMovementPolicy.h"
 #include "Planet/ABTSM2Planet.h"
 #include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "World/ABTSM9Satellite.h"
 
 namespace
@@ -52,6 +53,33 @@ public:
 private:
 	UWorld* World = nullptr;
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSSlingshotDeveloperObstacleCollisionPolicyTest,
+	"ABTS.M6.Collision.DeveloperWalkSlingshotOverride",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSSlingshotDeveloperObstacleCollisionPolicyTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	TestEqual(
+		TEXT("Normal developer walking may ignore developer obstacles"),
+		AABTSM25BirdCharacter::ResolveDeveloperObstacleCollisionResponse(
+			true, false),
+		ECR_Ignore);
+	TestEqual(
+		TEXT("Slingshot flight blocks buildings even with developer walk enabled"),
+		AABTSM25BirdCharacter::ResolveDeveloperObstacleCollisionResponse(
+			true, true),
+		ECR_Block);
+	TestEqual(
+		TEXT("Normal gameplay always blocks developer obstacles"),
+		AABTSM25BirdCharacter::ResolveDeveloperObstacleCollisionResponse(
+			false, false),
+		ECR_Block);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
