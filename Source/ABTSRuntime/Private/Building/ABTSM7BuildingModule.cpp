@@ -376,13 +376,6 @@ UPrimitiveComponent* AABTSM7BuildingModule::GetStylizedPresentationPrimitive() c
 	return IsValid(DevicePresentation) ? DevicePresentation.Get() : Visual.Get();
 }
 
-bool AABTSM7BuildingModule::IsStylizedWeakPoint() const
-{
-	return bCrystalLifecycleTarget
-		|| ModuleKind == EABTSM7ModuleKind::ExplosiveBarrel
-		|| ModuleKind == EABTSM7ModuleKind::SpringPiston;
-}
-
 void AABTSM7BuildingModule::SetContactDamageGraceSeconds(
 	const float Seconds)
 {

@@ -7,9 +7,14 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Materials/MaterialInterface.h"
+#include "UObject/SoftObjectPtr.h"
 
 namespace ABTSM7StylizedRenderingAdapterPrivate
 {
+	constexpr const TCHAR* WoodPath = TEXT("/Game/M7/Toon/Buildings/MI_ABTS_M7_Toon_Wood.MI_ABTS_M7_Toon_Wood");
+	constexpr const TCHAR* StonePath = TEXT("/Game/M7/Toon/Buildings/MI_ABTS_M7_Toon_Stone.MI_ABTS_M7_Toon_Stone");
+	constexpr const TCHAR* SteelPath = TEXT("/Game/M7/Toon/Buildings/MI_ABTS_M7_Toon_Steel.MI_ABTS_M7_Toon_Steel");
+	constexpr const TCHAR* GlassPath = TEXT("/Game/M7/Toon/Buildings/MI_ABTS_M7_Toon_Glass.MI_ABTS_M7_Toon_Glass");
 	void AddMaterialBindings(
 		UPrimitiveComponent* Component,
 		const EABTSM7BuildingMaterial Material,
@@ -75,6 +80,11 @@ UMaterialInterface* FABTSM7StylizedMaterialSet::Get(
 	}
 }
 
+bool FABTSM7StylizedMaterialSet::IsComplete() const
+{
+	return IsValid(Wood) && IsValid(Stone) && IsValid(Steel) && IsValid(Glass);
+}
+
 bool FABTSM7StylizedSemanticBinding::IsValid() const
 {
 	return SemanticAuthority != nullptr && Actor != nullptr && Component != nullptr
@@ -105,17 +115,61 @@ EABTSStylizedMaterialFamily FABTSM7StylizedRenderingAdapter::ResolveMaterialFami
 EABTSStylizedObjectClass FABTSM7StylizedRenderingAdapter::ResolveObjectClass(
 	const AABTSM7BuildingModule& Module)
 {
-	return Module.IsStylizedWeakPoint()
-		? EABTSStylizedObjectClass::BuildingWeakPoint
-		: EABTSStylizedObjectClass::BuildingBody;
+	// 8/18 release deliberately has no gameplay weak-point visual semantics.
+	return EABTSStylizedObjectClass::BuildingBody;
+}
+
+bool FABTSM7StylizedRenderingAdapter::TryLoadMaterialSet(
+	FABTSM7StylizedMaterialSet& OutMaterials,
+	FString* OutFailureReason)
+{
+	OutMaterials = FABTSM7StylizedMaterialSet();
+	if (OutFailureReason != nullptr)
+	{
+		OutFailureReason->Reset();
+	}
+	using namespace ABTSM7StylizedRenderingAdapterPrivate;
+	const TSoftObjectPtr<UMaterialInterface> WoodCandidate{FSoftObjectPath(WoodPath)};
+	const TSoftObjectPtr<UMaterialInterface> StoneCandidate{FSoftObjectPath(StonePath)};
+	const TSoftObjectPtr<UMaterialInterface> SteelCandidate{FSoftObjectPath(SteelPath)};
+	const TSoftObjectPtr<UMaterialInterface> GlassCandidate{FSoftObjectPath(GlassPath)};
+	FABTSM7StylizedMaterialSet Candidate;
+	Candidate.Wood = WoodCandidate.LoadSynchronous();
+	Candidate.Stone = StoneCandidate.LoadSynchronous();
+	Candidate.Steel = SteelCandidate.LoadSynchronous();
+	Candidate.Glass = GlassCandidate.LoadSynchronous();
+	if (!Candidate.IsComplete())
+	{
+		if (OutFailureReason != nullptr)
+		{
+			*OutFailureReason = FString::Printf(
+				TEXT("MissingFixedCandidate Wood=%d Stone=%d Steel=%d Glass=%d"),
+				IsValid(Candidate.Wood) ? 1 : 0, IsValid(Candidate.Stone) ? 1 : 0,
+				IsValid(Candidate.Steel) ? 1 : 0, IsValid(Candidate.Glass) ? 1 : 0);
+		}
+		return false;
+	}
+	OutMaterials = Candidate;
+	return true;
 }
 
 void FABTSM7StylizedRenderingAdapter::GatherMaterialBindings(
 	const AABTSM7BuildingMaterialSystem& MaterialSystem,
 	const FABTSM7StylizedMaterialSet& Materials,
-	TArray<FABTSStylizedMaterialSlotBinding>& OutBindings)
+	TArray<FABTSStylizedMaterialSlotBinding>& OutBindings,
+	FABTSM7StylizedAdapterReadiness* OutReadiness)
 {
 	OutBindings.Reset();
+	if (OutReadiness != nullptr)
+	{
+		*OutReadiness = FABTSM7StylizedAdapterReadiness();
+		OutReadiness->bSemanticReady = true;
+		OutReadiness->bMaterialSetReady = Materials.IsComplete();
+	}
+	if (!Materials.IsComplete())
+	{
+		return;
+	}
 	using namespace ABTSM7StylizedRenderingAdapterPrivate;
 	for (const TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial> Pair : {
 		TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial>(MaterialSystem.WoodBrickHISM.Get(), EABTSM7BuildingMaterial::Wood),
@@ -132,6 +186,12 @@ void FABTSM7StylizedRenderingAdapter::GatherMaterialBindings(
 	{
 		AddMaterialBindings(Module->GetStylizedPresentationPrimitive(),
 			Module->GetBuildingMaterial(), Materials, OutBindings);
+	}
+	if (OutReadiness != nullptr)
+	{
+		OutReadiness->PublishedSlotCount = OutBindings.Num();
+		// Application is intentionally owned by Integration's reversible registry.
+		OutReadiness->AppliedSlotCount = 0;
 	}
 }
 
@@ -151,10 +211,7 @@ void FABTSM7StylizedRenderingAdapter::GatherSemanticBindings(
 		if (IsValid(Pair.Key))
 		{
 			AddSemantic(MaterialSystem, MaterialSystem, *Pair.Key, Pair.Value,
-				Pair.Value == EABTSM7BuildingMaterial::Crystal
-					? EABTSStylizedObjectClass::BuildingWeakPoint
-					: EABTSStylizedObjectClass::BuildingBody,
-				false, OutBindings);
+				EABTSStylizedObjectClass::BuildingBody, false, OutBindings);
 		}
 	}
 	TArray<AABTSM7BuildingModule*> Modules;

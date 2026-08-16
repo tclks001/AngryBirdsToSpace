@@ -151,7 +151,6 @@ public:
 	/** Read-only visual surface used by the M7 stylized adapter; collision proxies never publish twice. */
 	UPrimitiveComponent* GetStylizedPresentationPrimitive() const;
 	/** Crystal targets and authored devices are gameplay weak-point semantics. */
-	bool IsStylizedWeakPoint() const;
 
 private:
 	UFUNCTION()

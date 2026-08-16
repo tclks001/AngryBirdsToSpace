@@ -22,6 +22,20 @@ struct ABTSRUNTIME_API FABTSM7StylizedMaterialSet final
 	UMaterialInterface* Glass = nullptr;
 
 	UMaterialInterface* Get(EABTSM7BuildingMaterial Material) const;
+	bool IsComplete() const;
+};
+
+/**
+ * Adapter publication state.  Slot application remains Integration-owned, so
+ * AppliedSlotCount deliberately stays zero until the world registry consumes
+ * the returned bindings.
+ */
+struct ABTSRUNTIME_API FABTSM7StylizedAdapterReadiness final
+{
+	bool bSemanticReady = false;
+	bool bMaterialSetReady = false;
+	int32 PublishedSlotCount = 0;
+	int32 AppliedSlotCount = 0;
 };
 
 /** Ephemeral semantic declaration for Integration's single world renderer. */
@@ -50,11 +64,16 @@ public:
 		EABTSM7BuildingMaterial Material);
 	static EABTSStylizedObjectClass ResolveObjectClass(
 		const AABTSM7BuildingModule& Module);
+	/** Fixed, cook-safe T3-B candidates. All four must load or OutMaterials is reset. */
+	static bool TryLoadMaterialSet(
+		FABTSM7StylizedMaterialSet& OutMaterials,
+		FString* OutFailureReason = nullptr);
 
 	static void GatherMaterialBindings(
 		const AABTSM7BuildingMaterialSystem& MaterialSystem,
 		const FABTSM7StylizedMaterialSet& Materials,
-		TArray<FABTSStylizedMaterialSlotBinding>& OutBindings);
+		TArray<FABTSStylizedMaterialSlotBinding>& OutBindings,
+		FABTSM7StylizedAdapterReadiness* OutReadiness = nullptr);
 	static void GatherSemanticBindings(
 		const AABTSM7BuildingMaterialSystem& MaterialSystem,
 		TArray<FABTSM7StylizedSemanticBinding>& OutBindings);
