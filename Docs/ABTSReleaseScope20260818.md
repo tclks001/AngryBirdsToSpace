@@ -171,6 +171,29 @@ satellite-practice slingshot presentation in Shipping only, and awards exactly
 two Wood/Stone items for each destroyed map tree/rock without treating
 building modules as resources.
 
+### Next-package player guidance
+
+After the current release-blocking fixes are packaged, the next candidate adds
+short, contextual guidance without reopening the frozen world layout:
+
+- teach players that ordinary/reinforced stakes must be paired with the
+  matching ordinary/reinforced sling cord, including a clear mismatch hint;
+- when crafting is unavailable, show the exact missing material or required
+  station instead of silently rejecting the action;
+- explicitly point players toward the E1 building on the far side of the
+  satellite and explain that it is the source of the crystal needed for finale
+  progression;
+- introduce every finale window and control, with particular attention to how
+  the orbital overview selects observation points and pans/moves the view;
+- on each crafting recipe page, display the Workbench or Furnace texture/icon
+  beside the station requirement so the station is recognizable without
+  relying on small text.
+
+These prompts must remain dismissible and input-safe, must not cover the target
+controls they describe, and must not alter candidate, trajectory, inventory, or
+crafting authority. Packaged acceptance should cover a fresh player path with
+no prior tutorial state and a resumed path where completed prompts stay closed.
+
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
   Development, and Shipping hard-locks playback even if a skip request is
