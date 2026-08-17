@@ -182,7 +182,8 @@ public:
 		const FVector& TargetPosition,
 		const FVector& TrajectoryTangent,
 		const FVector& PreferredUp,
-		const FTransform& InitialViewTransform);
+		const FTransform& InitialViewTransform,
+		EABTSM11FinaleCameraDirectorMode DirectorMode);
 	bool UpdateAuthoritySample(
 		const FVector& TargetPosition,
 		const FVector& TrajectoryTangent,

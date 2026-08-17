@@ -20,6 +20,56 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 	const FString& Parameters)
 {
 	(void)Parameters;
+	const int32 PreviousM2 = ABTSM11FinaleCameraDirector::IsM2Enabled()
+		? 1 : 0;
+	const int32 PreviousM3 = ABTSM11FinaleCameraDirector::IsM3Enabled()
+		? 1 : 0;
+	const int32 PreviousProductionOverride =
+		ABTSM11FinaleCameraDirector::GetProductionModeOverride();
+	ABTSM11FinaleCameraDirector::SetM2Enabled(false);
+	ABTSM11FinaleCameraDirector::SetM3Enabled(false);
+	ABTSM11FinaleCameraDirector::SetProductionModeOverride(-1);
+	TestEqual(
+		TEXT("Normal production auto mode consumes the existing M3 director"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveProductionDirectorMode()),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::MultiAssistM3));
+	ABTSM11FinaleCameraDirector::SetProductionModeOverride(0);
+	TestEqual(TEXT("Explicit console Legacy override wins over production auto"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveProductionDirectorMode()),
+		static_cast<uint8>(EABTSM11FinaleCameraDirectorMode::Legacy));
+	ABTSM11FinaleCameraDirector::SetProductionModeOverride(1);
+	TestEqual(TEXT("Explicit console M2 override remains available"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveProductionDirectorMode()),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2));
+	ABTSM11FinaleCameraDirector::SetProductionModeOverride(2);
+	TestEqual(TEXT("Explicit console M3 override remains available"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveProductionDirectorMode()),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::MultiAssistM3));
+	TestEqual(TEXT("Capture false/false remains explicit Legacy"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(false, false)),
+		static_cast<uint8>(EABTSM11FinaleCameraDirectorMode::Legacy));
+	TestEqual(TEXT("Capture M2 remains explicit Assist1 mode"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(true, false)),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2));
+	TestEqual(TEXT("Capture M3 remains explicit multi-assist mode"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(false, true)),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::MultiAssistM3));
+	ABTSM11FinaleCameraDirector::SetProductionModeOverride(
+		PreviousProductionOverride);
+	ABTSM11FinaleCameraDirector::SetM2Enabled(PreviousM2 != 0);
+	ABTSM11FinaleCameraDirector::SetM3Enabled(PreviousM3 != 0);
 	const FVector Target(100.0, 200.0, 300.0);
 	FABTSM11FinaleFlightCameraFrame Frame;
 	TestTrue(
@@ -1798,6 +1848,8 @@ bool FABTSM11CFlightCameraScopedFXAATest::RunTest(
 	const FString& Parameters)
 {
 	(void)Parameters;
+	const int32 PreviousScopedProductionOverride =
+		ABTSM11FinaleCameraDirector::GetProductionModeOverride();
 	IConsoleVariable* AntiAliasingMethod =
 		IConsoleManager::Get().FindConsoleVariable(
 			TEXT("r.AntiAliasingMethod"));
@@ -1855,7 +1907,17 @@ bool FABTSM11CFlightCameraScopedFXAATest::RunTest(
 				FVector::ZeroVector,
 				FVector::ForwardVector,
 				FVector::UpVector,
-				FTransform::Identity));
+				FTransform::Identity,
+				EABTSM11FinaleCameraDirectorMode::MultiAssistM3));
+		TestTrue(TEXT("Flight camera freezes the requested M3 mode"),
+			FlightCamera->IsM3DirectorFrozenEnabled());
+		TestFalse(TEXT("Flight camera does not conflate M3 with M2"),
+			FlightCamera->IsM2DirectorFrozenEnabled());
+		ABTSM11FinaleCameraDirector::SetProductionModeOverride(0);
+		TestTrue(TEXT("Later console changes cannot replace frozen M3 mode"),
+			FlightCamera->IsM3DirectorFrozenEnabled());
+		ABTSM11FinaleCameraDirector::SetProductionModeOverride(
+			PreviousScopedProductionOverride);
 		TestEqual(
 			TEXT("M11 finale takeover selects FXAA"),
 			AntiAliasingMethod->GetInt(),

@@ -41,6 +41,18 @@ enum class EABTSM11FinaleCameraEndpointAuthority : uint8
 	PhysicalContact
 };
 
+/**
+ * One release-frozen consumer mode for the existing M2/M3 director stack.
+ * Auto selection is resolved before this reaches the flight camera, so a
+ * console change after launch cannot retime or replace an active shot plan.
+ */
+enum class EABTSM11FinaleCameraDirectorMode : uint8
+{
+	Legacy = 0,
+	Assist1OnlyM2,
+	MultiAssistM3
+};
+
 /** Deterministic timing policy used to schedule one inter-body shot. */
 struct ABTSRUNTIME_API FABTSM11FinaleCameraShotSettings
 {
@@ -178,6 +190,8 @@ namespace ABTSM11FinaleCameraDirector
 		EABTSM11FinaleCameraShotPhase ShotPhase);
 	ABTSRUNTIME_API const TCHAR* EndpointAuthorityLabel(
 		EABTSM11FinaleCameraEndpointAuthority EndpointAuthority);
+	ABTSRUNTIME_API const TCHAR* DirectorModeLabel(
+		EABTSM11FinaleCameraDirectorMode Mode);
 
 	/**
 	 * Resolves stage only from frozen authority events and playback time.
@@ -225,5 +239,18 @@ namespace ABTSM11FinaleCameraDirector
 	/** M3 directs all three assists while preserving the M2-only switch. */
 	ABTSRUNTIME_API void SetM3Enabled(bool bEnabled);
 	ABTSRUNTIME_API bool IsM3Enabled();
+
+	/**
+	 * Explicit console override for a normal production release.
+	 * -1 preserves production auto (M3); 0/1/2 select Legacy/M2/M3.
+	 */
+	ABTSRUNTIME_API void SetProductionModeOverride(int32 OverrideMode);
+	ABTSRUNTIME_API int32 GetProductionModeOverride();
+	/** Resolves a normal player release without mutating process-wide switches. */
+	ABTSRUNTIME_API EABTSM11FinaleCameraDirectorMode
+		ResolveProductionDirectorMode();
+	/** Capture mode is always explicit, including its backwards-compatible Legacy default. */
+	ABTSRUNTIME_API EABTSM11FinaleCameraDirectorMode
+		ResolveCaptureDirectorMode(bool bM2Enabled, bool bM3Enabled);
 
 }

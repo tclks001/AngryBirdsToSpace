@@ -191,6 +191,13 @@ public:
 	{
 		return ReleasedCameraShotPlan;
 	}
+	/** Capture-only explicit mode; normal player releases resolve production auto M3. */
+	void SetNextReleaseCameraDirectorModeOverride(
+		EABTSM11FinaleCameraDirectorMode Mode);
+	EABTSM11FinaleCameraDirectorMode GetReleasedCameraDirectorMode() const
+	{
+		return ReleasedCameraDirectorMode;
+	}
 	const FABTSM11TrajectoryResult* GetCurrentPrediction() const;
 	/** Exact current result used by the selected target's PIP. */
 	const FABTSM11TrajectoryResult* GetTargetPreviewPrediction() const;
@@ -463,6 +470,9 @@ private:
 	FABTSM11PlaybackPlan ReleasedPlaybackPlan;
 	FABTSM11TrajectoryResult ReleasedCameraTrajectoryResult;
 	FABTSM11FinaleCameraShotPlan ReleasedCameraShotPlan;
+	EABTSM11FinaleCameraDirectorMode ReleasedCameraDirectorMode =
+		EABTSM11FinaleCameraDirectorMode::Legacy;
+	int8 NextReleaseCameraDirectorModeOverride = -1;
 	FABTSM11OrbitalDiagramSnapshot DiagramSnapshot;
 	FABTSM11FinaleControlPanelState HudControlPanel;
 	FABTSM11OverviewViewState HudOverviewView;

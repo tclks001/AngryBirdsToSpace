@@ -12,6 +12,7 @@
 #include "Player/ABTSM11PlayerController.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "UI/ABTSM11FinaleHUD.h"
+#include "UI/ABTSM11FinaleHUDData.h"
 #include "UObject/UObjectGlobals.h"
 #include "World/ABTSM11FinaleInteractionSystem.h"
 #include "World/ABTSM11FinaleInteractionTypes.h"
@@ -523,6 +524,18 @@ bool FABTSM11CPreviewReleasePlaybackTest::RunTest(
 		ExactPlan.bPhysicalTargetHit);
 	TestFalse(TEXT("Exact same-input plan needs no transfer"),
 		ExactPlan.bUsesVisibleTerminalTransfer);
+	FABTSM11OrbitalSceneSnapshot ExactPhysicalHudScene;
+	TestTrue(
+		TEXT("Exact same-input physical authority is eligible for orbital HUD consumption"),
+		FABTSM11OrbitalSceneBuilder::Build(
+			Preset,
+			Physical,
+			ExactPhysicalHudScene,
+			900));
+	TestEqual(
+		TEXT("Orbital HUD retains the physical authority identity rather than the qualified source"),
+		ExactPhysicalHudScene.SourceTrajectoryHash,
+		ExactPlan.PhysicalTrajectoryHash);
 
 	const double CommonTime = FMath::Min(
 		100.0,

@@ -23,6 +23,14 @@ namespace
 		TEXT("1: direct Assist1/2/3 and their Handoff windows"),
 		ECVF_Default);
 
+	TAutoConsoleVariable<int32> CVarABTSM11CameraDirectorProductionModeOverride(
+		TEXT("abts.M11.CameraDirector.ProductionModeOverride"),
+		-1,
+		TEXT("Overrides the next normal M11 finale release director mode.\n")
+		TEXT("-1: production auto M3 (default); 0: Legacy; 1: M2; 2: M3.\n")
+		TEXT("The selected mode is frozen when flight-camera follow begins."),
+		ECVF_Default);
+
 	double ResolveStageProgress(
 		const double TimeSeconds,
 		const double StartSeconds,
@@ -729,6 +737,22 @@ const TCHAR* ABTSM11FinaleCameraDirector::StageLabel(
 	}
 }
 
+const TCHAR* ABTSM11FinaleCameraDirector::DirectorModeLabel(
+	const EABTSM11FinaleCameraDirectorMode Mode)
+{
+	switch (Mode)
+	{
+	case EABTSM11FinaleCameraDirectorMode::Legacy:
+		return TEXT("Legacy");
+	case EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2:
+		return TEXT("Assist1OnlyM2");
+	case EABTSM11FinaleCameraDirectorMode::MultiAssistM3:
+		return TEXT("MultiAssistM3");
+	default:
+		return TEXT("Unknown");
+	}
+}
+
 const TCHAR* ABTSM11FinaleCameraDirector::ShotPhaseLabel(
 	const EABTSM11FinaleCameraShotPhase ShotPhase)
 {
@@ -1080,4 +1104,55 @@ void ABTSM11FinaleCameraDirector::SetM3Enabled(const bool bEnabled)
 bool ABTSM11FinaleCameraDirector::IsM3Enabled()
 {
 	return CVarABTSM11CameraDirectorM3Enabled.GetValueOnGameThread() != 0;
+}
+
+void ABTSM11FinaleCameraDirector::SetProductionModeOverride(
+	const int32 OverrideMode)
+{
+	CVarABTSM11CameraDirectorProductionModeOverride->Set(
+		OverrideMode,
+		ECVF_SetByCode);
+}
+
+int32 ABTSM11FinaleCameraDirector::GetProductionModeOverride()
+{
+	return CVarABTSM11CameraDirectorProductionModeOverride
+		.GetValueOnGameThread();
+}
+
+EABTSM11FinaleCameraDirectorMode
+ABTSM11FinaleCameraDirector::ResolveProductionDirectorMode()
+{
+	switch (GetProductionModeOverride())
+	{
+	case 0:
+		return EABTSM11FinaleCameraDirectorMode::Legacy;
+	case 1:
+		return EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2;
+	case 2:
+		return EABTSM11FinaleCameraDirectorMode::MultiAssistM3;
+	default:
+		break;
+	}
+	if (IsM3Enabled())
+	{
+		return EABTSM11FinaleCameraDirectorMode::MultiAssistM3;
+	}
+	if (IsM2Enabled())
+	{
+		return EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2;
+	}
+	return EABTSM11FinaleCameraDirectorMode::MultiAssistM3;
+}
+
+EABTSM11FinaleCameraDirectorMode
+ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(
+	const bool bM2Enabled,
+	const bool bM3Enabled)
+{
+	return bM3Enabled
+		? EABTSM11FinaleCameraDirectorMode::MultiAssistM3
+		: bM2Enabled
+			? EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2
+			: EABTSM11FinaleCameraDirectorMode::Legacy;
 }

@@ -259,6 +259,10 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 
 	AttemptBird = Bird;
 	ActiveCord = &Cord;
+	// TargetHit is terminal for one launched attempt only.  A later attempt
+	// must never inherit a rejected or completed post-hit start latch.
+	bProductionPostHitCinematicAttempted = false;
+	ProductionPostHitCinematic = nullptr;
 	FString FormationFailure;
 	if (!BuildAttemptFormation(*Bird, FormationFailure))
 	{
@@ -1065,7 +1069,8 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 			WorldPosition,
 			CameraTangent,
 			Frame.GetUp(),
-			InitialViewTransform))
+			InitialViewTransform,
+			ReleasedCameraDirectorMode))
 		{
 			FailInteraction(TEXT("FlightCameraFollowInitializationFailed"));
 			return;
@@ -1535,6 +1540,12 @@ bool AABTSM11FinaleInteractionSystem::TryStartProductionPostHitCinematic()
 			*UFO,
 			Birds))
 	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M11-D][ProductionPostHit] BindingRejected Plan=0x%016llx Birds=%d"),
+			ReleasedPlaybackPlan.PlanHash,
+			Birds.Num());
 		Cinematic->Destroy();
 		return false;
 	}

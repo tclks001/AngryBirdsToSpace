@@ -1767,7 +1767,8 @@ bool AABTSM11FinaleFlightCamera::BeginAuthorityFollow(
 	const FVector& TargetPosition,
 	const FVector& TrajectoryTangent,
 	const FVector& PreferredUp,
-	const FTransform& InitialViewTransform)
+	const FTransform& InitialViewTransform,
+	const EABTSM11FinaleCameraDirectorMode DirectorMode)
 {
 	ResetAuthorityFollow();
 	FABTSM11FinaleFlightCameraFrame Frame;
@@ -1787,21 +1788,17 @@ bool AABTSM11FinaleFlightCamera::BeginAuthorityFollow(
 	LastAuthorityForward = Frame.TrajectoryForward;
 	LastTransportedUp = Frame.TransportedUp;
 	LastAuthorityTargetPosition = TargetPosition;
-	bM2DirectorFrozenEnabled =
-		ABTSM11FinaleCameraDirector::IsM2Enabled();
-	bM3DirectorFrozenEnabled =
-		ABTSM11FinaleCameraDirector::IsM3Enabled();
+	bM2DirectorFrozenEnabled = DirectorMode
+		== EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2;
+	bM3DirectorFrozenEnabled = DirectorMode
+		== EABTSM11FinaleCameraDirectorMode::MultiAssistM3;
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
 		TEXT("[ABTS][M11-C][FlightCamera] DirectorFrozen M2=%d M3=%d Mode=%s"),
 		bM2DirectorFrozenEnabled ? 1 : 0,
 		bM3DirectorFrozenEnabled ? 1 : 0,
-		bM3DirectorFrozenEnabled
-			? TEXT("MultiAssistM3")
-			: bM2DirectorFrozenEnabled
-				? TEXT("Assist1OnlyM2")
-				: TEXT("Legacy"));
+		ABTSM11FinaleCameraDirector::DirectorModeLabel(DirectorMode));
 	if (bM2DirectorFrozenEnabled && !bM3DirectorFrozenEnabled)
 	{
 		UE_LOG(

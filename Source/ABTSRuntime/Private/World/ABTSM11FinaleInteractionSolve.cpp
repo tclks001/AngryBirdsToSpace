@@ -25,6 +25,12 @@ namespace
 	}
 }
 
+void AABTSM11FinaleInteractionSystem::SetNextReleaseCameraDirectorModeOverride(
+	const EABTSM11FinaleCameraDirectorMode Mode)
+{
+	NextReleaseCameraDirectorModeOverride = static_cast<int8>(Mode);
+}
+
 struct FABTSM11PreviewSolvePayload
 {
 	int64 Revision = INDEX_NONE;
@@ -489,10 +495,28 @@ void AABTSM11FinaleInteractionSystem::RebuildPublishedPreview()
 void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
 {
 	check(IsInGameThread());
+	/*
+	 * A direct physical F4 playback is already the authoritative trajectory
+	 * the player will see.  The HUD used to always rebuild from the qualified
+	 * solve and only consumed PlaybackPlan for a visible terminal transfer;
+	 * that silently replaced an accepted circular physical tail with the
+	 * qualified solver's sparse display polyline.  Keep transfer plans on the
+	 * qualified source (AppendPlaybackExtension below owns their handoff), but
+	 * otherwise publish the exact same-input physical authority.
+	 */
+	const FABTSM11TrajectoryResult& HudAuthorityResult =
+		bLatestPhysicalResultAvailable
+		&& PreviewPlaybackPlan.bPhysicalTargetHit
+		&& !PreviewPlaybackPlan.bUsesVisibleTerminalTransfer
+		&& LatestSameInputPhysicalResult.ValidationHash != 0
+		&& PreviewPlaybackPlan.PhysicalTrajectoryHash
+			== LatestSameInputPhysicalResult.ValidationHash
+		? LatestSameInputPhysicalResult
+		: LatestQualifiedResult;
 	if (!IsValid(FinaleSystem)
 		|| !FABTSM11OrbitalSceneBuilder::Build(
 			FinaleSystem->GetLayoutPreset(),
-			LatestQualifiedResult,
+			HudAuthorityResult,
 			HudOrbitalScene,
 			900))
 	{
@@ -548,6 +572,13 @@ void AABTSM11FinaleInteractionSystem::RebuildHudPublishedData()
 		return;
 	}
 	++HudOverviewRevision;
+	UE_LOG(
+		LogABTSRuntime,
+		Verbose,
+		TEXT("[ABTS][M11-C][HUD] OrbitalAuthority Source=0x%016llx Physical=%d Transfer=%d"),
+		HudAuthorityResult.ValidationHash,
+		&HudAuthorityResult == &LatestSameInputPhysicalResult ? 1 : 0,
+		PreviewPlaybackPlan.bUsesVisibleTerminalTransfer ? 1 : 0);
 
 	if (HudTrajectoryProbe.bValid)
 	{
@@ -602,6 +633,11 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 		return false;
 	}
 	ReleasedCameraTrajectoryResult = LatestQualifiedResult;
+	ReleasedCameraDirectorMode = NextReleaseCameraDirectorModeOverride
+		>= 0
+		? static_cast<EABTSM11FinaleCameraDirectorMode>(
+			NextReleaseCameraDirectorModeOverride)
+		: ABTSM11FinaleCameraDirector::ResolveProductionDirectorMode();
 	ReleasedCameraShotPlan.Reset();
 	bCameraDirectorFallbackLogged = false;
 	FABTSM11FinaleCameraShotSettings PlaybackShotSettings;
@@ -625,10 +661,13 @@ bool AABTSM11FinaleInteractionSystem::FinalizePendingRelease()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-C][M7] ReleaseCameraPlan Source=0x%016llx Built=%d Adaptive=%d Failure=%s"),
+		TEXT("[ABTS][M11-C][M7] ReleaseCameraPlan Source=0x%016llx Built=%d Adaptive=%d DirectorMode=%s CaptureOverride=%d Failure=%s"),
 		ReleasedCameraTrajectoryResult.ValidationHash,
 		bCameraScheduleBuilt ? 1 : 0,
 		ReleasedCameraShotPlan.bUsesAdaptiveCompression ? 1 : 0,
+		ABTSM11FinaleCameraDirector::DirectorModeLabel(
+			ReleasedCameraDirectorMode),
+		NextReleaseCameraDirectorModeOverride >= 0 ? 1 : 0,
 		CameraScheduleFailure.IsEmpty() ? TEXT("None") : *CameraScheduleFailure);
 	PlaybackElapsedSeconds =
 		ReleasedPlaybackPlan.Points[0].TimeSeconds;
