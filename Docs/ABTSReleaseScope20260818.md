@@ -35,6 +35,10 @@ device, or specially highlighted brick.
 - Primary-planet locomotion authority, satellite gameplay gravity isolation,
   startup loading, `WorldReady`, and packaged Development/Shipping behavior
   remain mandatory core gates.
+- Shipping hard-disables DeveloperWalk, unrestricted slingshot-stake placement,
+  TaskGraph coordinate overlays, debug slingshot spawning, bridge debug drawing,
+  and maximum-inventory seeding even when a map or serialized class default
+  requests one of those development conveniences.
 - The release moon restores the player-validated `1960 cm/s^2` surface gravity
   for `BallisticFlight`. Idle and walking birds receive zero satellite force;
   the primary-planet authority continues to resolve the largest ready

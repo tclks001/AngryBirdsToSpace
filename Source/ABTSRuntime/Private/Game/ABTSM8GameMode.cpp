@@ -18,7 +18,13 @@ void AABTSM8GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 {
 	Super::OnInitialPlayerPlaced(Character, SpawnTransform, SpawnCellId);
 	if (GetWorld() == nullptr) return;
-	if (bSeedDebugMaximumInventory)
+	const bool bResolvedSeedDebugMaximumInventory =
+#if UE_BUILD_SHIPPING
+		false;
+#else
+		bSeedDebugMaximumInventory;
+#endif
+	if (bResolvedSeedDebugMaximumInventory)
 	{
 		for (TActorIterator<AABTSCraftingSystem> It(GetWorld()); It; ++It)
 		{
@@ -38,6 +44,10 @@ void AABTSM8GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	AABTSM8RecoveryBridgeSystem* System = GetWorld()->SpawnActor<AABTSM8RecoveryBridgeSystem>(RecoveryBridgeSystemClass, FTransform::Identity, Params);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M8] Entry ready=%d StartCell=%d DebugInventory=%d"),
-		System ? 1 : 0, SpawnCellId, bSeedDebugMaximumInventory ? 1 : 0);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M8] Entry ready=%d StartCell=%d DebugInventory=%d ShippingDebugInventoryHardOff=%d"),
+		System ? 1 : 0,
+		SpawnCellId,
+		bResolvedSeedDebugMaximumInventory ? 1 : 0,
+		UE_BUILD_SHIPPING ? 1 : 0);
 }
