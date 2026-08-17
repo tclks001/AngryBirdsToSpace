@@ -60,6 +60,13 @@ public:
 	static int32 ComputeConfirmationSecondsRemaining(double DeadlineSeconds, double NowSeconds);
 	/** Monotonic foreground progress: cap below completion until the authoritative world gate opens. */
 	static float ComputeStartupLoadingProgress(double ElapsedSeconds, bool bReady);
+	/** An interactive startup must fail closed until its authoritative gate exists and reports Ready. */
+	static bool IsStartupAuthorityReady(
+		bool bStartupFrontEndRequired,
+		bool bCaptureMode,
+		bool bFoundAuthority,
+		bool bAllAuthoritiesReady,
+		bool bAnyAuthorityFailed);
 	/** Two-phase latch: world authority and two complete front-end draws must both be stable. */
 	static bool IsStartupPresentationReady(
 		bool bWorldAuthorityReady,
@@ -159,6 +166,7 @@ private:
 	bool bScreenshotRequested = false;
 	bool bStartupGateRequired = false;
 	bool bStartupWorldHasBeenTracked = false;
+	bool bStartupAuthorityDiscoveredForTrackedWorld = false;
 	bool bStartupAuthorityReady = false;
 	bool bStartupWorldReady = false;
 	bool bStartupWorldFailed = false;

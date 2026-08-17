@@ -110,16 +110,26 @@ another world tick. The installed UE build cannot safely enable global Shipping
 logging without a log-category ABI mismatch, so Shipping verification uses
 project-owned markers, process state, and offscreen visual evidence instead.
 The first game-world handoff also preserves the MoviePlayer foreground clock
-and uses the same black visual field, so progress continues rather than visibly
-starting a second, differently styled loading pass.
+and uses the same black visual field, title/status palette, flat progress track,
+and 30-second progress function. `PostLoadMap` is not `WorldReady`: it leaves
+the bar below 100 percent and keeps the status at `GENERATING PLANETARY WORLD`.
+Only the authoritative runtime gate may publish `WORLD READY` and 100 percent.
+The interactive front end also fails closed before the M6 authority actor is
+first discovered, so the blue front page cannot leak between the two technical
+owners. The result is one continuous player-facing loading page rather than a
+second, differently styled loading pass.
 
-The source fix was verified by a full UE 5.8 Development Editor build and the
-fresh `ABTS.UI` NullRHI suite (4/4). A clean Shipping BuildCookRun also completed
-with ExitCode 0 at candidate `a2244b4`; the archived package is
+The earlier pause-ownership source fix was verified by a full UE 5.8
+Development Editor build and the fresh `ABTS.UI` NullRHI suite (4/4). A clean
+Shipping BuildCookRun also completed with ExitCode 0 at candidate `a2244b4`;
+the archived package is
 `G:\\ABTS\\Artifacts\\RC9.3\\candidate-a2244b4-20260817-Shipping`. This is a
 startup-P0 validation package and intentionally excludes the rejected M7
 coarse/queued-brick experiments. Visible packaged startup acceptance remains
-required before promoting it as the release candidate.
+required before promoting it as the release candidate. The later single-page
+visual/progress contract above is implemented on the active integration
+candidate and remains pending the next serialized build, fresh `ABTS.UI` run,
+and packaged Development/Shipping regression smoke.
 
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9

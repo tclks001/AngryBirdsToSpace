@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "CoreMinimal.h"
+#include "CoreGlobals.h"
 #include "Modules/ModuleManager.h"
 #include "MoviePlayer.h"
 #include "Misc/App.h"
@@ -11,7 +12,6 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SOverlay.h"
-#include "Widgets/Notifications/SProgressBar.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -30,25 +30,27 @@ namespace ABTSLoadingScreen
 		MapLoaded = 2,
 	};
 
+	float ComputeLoadingProgress(const double ElapsedSeconds, const EPhase Phase)
+	{
+		const float Floor = Phase == EPhase::Boot ? 0.03f : 0.12f;
+		const float TimedProgress = static_cast<float>(
+			FMath::Max(0.0, ElapsedSeconds) / 30.0);
+		return FMath::Clamp(FMath::Max(Floor, TimedProgress), Floor, 0.92f);
+	}
+
 	struct FState final
 	{
 		FState()
-			: StartSeconds(FPlatformTime::Seconds())
+			: StartSeconds(GStartTime)
 		{
 		}
 
 		float GetProgress() const
 		{
 			const EPhase CurrentPhase = static_cast<EPhase>(Phase.Load());
-			if (CurrentPhase == EPhase::MapLoaded)
-			{
-				return 1.0f;
-			}
-
-			const float Floor = CurrentPhase == EPhase::LoadingMap ? 0.12f : 0.03f;
-			const float TimedProgress = static_cast<float>(
-				(FPlatformTime::Seconds() - StartSeconds) / TargetGenerationSeconds);
-			return FMath::Clamp(FMath::Max(Floor, TimedProgress * 0.88f), Floor, 0.92f);
+			return ComputeLoadingProgress(
+				FPlatformTime::Seconds() - StartSeconds,
+				CurrentPhase);
 		}
 
 		FText GetStatusText() const
@@ -58,7 +60,9 @@ namespace ABTSLoadingScreen
 			case EPhase::LoadingMap:
 				return NSLOCTEXT("ABTSLoadingScreen", "LoadingMap", "GENERATING PLANETARY WORLD");
 			case EPhase::MapLoaded:
-				return NSLOCTEXT("ABTSLoadingScreen", "MapLoaded", "WORLD READY");
+				// PostLoadMap is only the handoff to the ticking world-generation phase.
+				// The runtime authority gate is the sole owner of WORLD READY.
+				return NSLOCTEXT("ABTSLoadingScreen", "MapLoaded", "GENERATING PLANETARY WORLD");
 			default:
 				return NSLOCTEXT("ABTSLoadingScreen", "Boot", "INITIALIZING FLIGHT SYSTEMS");
 			}
@@ -66,7 +70,6 @@ namespace ABTSLoadingScreen
 
 		TAtomic<int32> Phase { static_cast<int32>(EPhase::Boot) };
 		const double StartSeconds;
-		static constexpr double TargetGenerationSeconds = 30.0;
 	};
 	using FLoadingStatePtr = TSharedPtr<FState, ESPMode::ThreadSafe>;
 
@@ -103,7 +106,7 @@ namespace ABTSLoadingScreen
 				+ SOverlay::Slot()
 				[
 					SNew(SBorder)
-					.BorderBackgroundColor(FLinearColor(0.008f, 0.018f, 0.038f, 1.0f))
+					.BorderBackgroundColor(FLinearColor::Black)
 				]
 				+ SOverlay::Slot()
 				.HAlign(HAlign_Center)
@@ -137,12 +140,33 @@ namespace ABTSLoadingScreen
 						+ SVerticalBox::Slot()
 						.AutoHeight()
 						[
-							SNew(SProgressBar)
-							.Percent_Lambda([CapturedState]()
-							{
-								return TOptional<float>(CapturedState->GetProgress());
-							})
-							.FillColorAndOpacity(FLinearColor(0.18f, 0.82f, 0.94f, 1.0f))
+							SNew(SBox)
+							.HeightOverride(10.0f)
+							[
+								SNew(SOverlay)
+								+ SOverlay::Slot()
+								[
+									SNew(SBorder)
+									.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+									.BorderBackgroundColor(FLinearColor(0.08f, 0.15f, 0.24f, 1.0f))
+									.Padding(0.0f)
+								]
+								+ SOverlay::Slot()
+								.HAlign(HAlign_Left)
+								[
+									SNew(SBox)
+									.WidthOverride_Lambda([CapturedState]() -> FOptionalSize
+									{
+										return FOptionalSize(720.0f * CapturedState->GetProgress());
+									})
+									[
+										SNew(SBorder)
+										.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+										.BorderBackgroundColor(FLinearColor(0.18f, 0.82f, 0.94f, 1.0f))
+										.Padding(0.0f)
+									]
+								]
+							]
 						]
 					]
 				]
@@ -249,6 +273,15 @@ bool FABTSStartupLoadingScreenPolicyTest::RunTest(const FString& Parameters)
 		EvaluateEnablePolicy(false, false, true, true, true, false));
 	TestFalse(TEXT("Explicit skip wins over force"),
 		EvaluateEnablePolicy(false, false, false, false, true, true));
+	TestEqual(TEXT("MoviePlayer progress uses the shared 30 second clock"),
+		ABTSLoadingScreen::ComputeLoadingProgress(15.0, ABTSLoadingScreen::EPhase::LoadingMap),
+		0.5f);
+	TestEqual(TEXT("Map load completion remains capped until runtime authority Ready"),
+		ABTSLoadingScreen::ComputeLoadingProgress(90.0, ABTSLoadingScreen::EPhase::MapLoaded),
+		0.92f);
+	TestEqual(TEXT("MoviePlayer handoff never restarts or advances the same elapsed clock"),
+		ABTSLoadingScreen::ComputeLoadingProgress(12.0, ABTSLoadingScreen::EPhase::LoadingMap),
+		ABTSLoadingScreen::ComputeLoadingProgress(12.0, ABTSLoadingScreen::EPhase::MapLoaded));
 	return true;
 }
 #endif

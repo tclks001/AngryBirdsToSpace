@@ -60,6 +60,16 @@ bool FABTSGameUserSettingsContractTest::RunTest(const FString& Parameters)
 		UABTSGameViewportClient::ComputeStartupLoadingProgress(90.0, false), 0.92f);
 	TestEqual(TEXT("Startup progress completes only at Ready"),
 		UABTSGameViewportClient::ComputeStartupLoadingProgress(1.0, true), 1.0f);
+	TestFalse(TEXT("Interactive startup stays covered before its authority actor exists"),
+		UABTSGameViewportClient::IsStartupAuthorityReady(true, false, false, true, false));
+	TestTrue(TEXT("Asset-free capture maps may bypass a missing startup authority actor"),
+		UABTSGameViewportClient::IsStartupAuthorityReady(true, true, false, true, false));
+	TestFalse(TEXT("A discovered but pending authority cannot expose the front end"),
+		UABTSGameViewportClient::IsStartupAuthorityReady(true, false, true, false, false));
+	TestTrue(TEXT("All discovered authorities Ready opens the authority half of the latch"),
+		UABTSGameViewportClient::IsStartupAuthorityReady(true, false, true, true, false));
+	TestFalse(TEXT("Authority failure always fails closed"),
+		UABTSGameViewportClient::IsStartupAuthorityReady(true, false, true, true, true));
 	TestFalse(TEXT("Presentation never opens before authoritative world Ready"),
 		UABTSGameViewportClient::IsStartupPresentationReady(false, true, 8));
 	TestFalse(TEXT("Presentation never opens onto a missing front-end surface"),

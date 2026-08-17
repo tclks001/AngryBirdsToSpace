@@ -3,6 +3,7 @@
 #include "UI/ABTSGameViewportClient.h"
 
 #include "ABTSRuntime.h"
+#include "CoreGlobals.h"
 #include "Audio/ABTSAudioWorldSubsystem.h"
 #include "CanvasItem.h"
 #include "Engine/Canvas.h"
@@ -125,7 +126,8 @@ void UABTSGameViewportClient::Init(
 	Super::Init(WorldContext, OwningGameInstance, bCreateNewAudioDevice);
 	MenuCanvas = NewObject<UCanvas>(this, TEXT("ABTSSystemMenuCanvas"));
 	RebuildResolutionOptions();
-	StartupForegroundStartSeconds = FPlatformTime::Seconds();
+	// Continue the exact process-level clock used by the MoviePlayer screen.
+	StartupForegroundStartSeconds = GStartTime;
 	bStartupDiagnosticTraceEnabled = FParse::Param(
 		FCommandLine::Get(), TEXT("ABTSReleaseStartupTrace"));
 	if (bStartupDiagnosticTraceEnabled)
@@ -296,6 +298,24 @@ bool UABTSGameViewportClient::IsStartupPresentationReady(
 		&& CompletedFrontEndDraws >= 2;
 }
 
+bool UABTSGameViewportClient::IsStartupAuthorityReady(
+	const bool bStartupFrontEndRequired,
+	const bool bCaptureMode,
+	const bool bFoundAuthority,
+	const bool bAllAuthoritiesReady,
+	const bool bAnyAuthorityFailed)
+{
+	if (bAnyAuthorityFailed)
+	{
+		return false;
+	}
+
+	const bool bAuthorityExpected = bStartupFrontEndRequired && !bCaptureMode;
+	return bFoundAuthority
+		? bAllAuthoritiesReady
+		: !bAuthorityExpected;
+}
+
 void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
 {
 	if (!bStartupDiagnosticTraceEnabled || StartupDiagnosticTracePath.IsEmpty())
@@ -321,7 +341,7 @@ void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
 	const FString State = FString::Printf(
 		TEXT("World=%s BegunPlay=%d WorldSeconds=%.3f Paused=%d")
 		TEXT(" FrontEnd=%d MenuVisible=%d MenuPage=%d Canvas=%d")
-		TEXT(" GateCount=%d GateRequired=%d AuthorityReady=%d")
+		TEXT(" GateCount=%d GateRequired=%d AuthorityDiscovered=%d AuthorityReady=%d")
 		TEXT(" PresentationReady=%d WorldReady=%d WorldFailed=%d Draws=%d Gates=[%s]"),
 		GameWorld != nullptr ? *GameWorld->GetName() : TEXT("None"),
 		bHasBegunPlay ? 1 : 0,
@@ -333,6 +353,7 @@ void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
 		MenuCanvas != nullptr ? 1 : 0,
 		GateCount,
 		bStartupGateRequired ? 1 : 0,
+		bStartupAuthorityDiscoveredForTrackedWorld ? 1 : 0,
 		bStartupAuthorityReady ? 1 : 0,
 		bStartupPresentationReady ? 1 : 0,
 		bStartupWorldReady ? 1 : 0,
@@ -387,6 +408,7 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		}
 		bStartupWorldHasBeenTracked = true;
 		bStartupGateRequired = false;
+		bStartupAuthorityDiscoveredForTrackedWorld = false;
 		bStartupAuthorityReady = false;
 		bStartupWorldReady = false;
 		bStartupWorldFailed = false;
@@ -406,10 +428,22 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		bAllReady = bAllReady && It->IsStartupPhysicsWarmupComplete();
 		bAnyFailed = bAnyFailed || It->HasStartupPhysicsWarmupFailed();
 	}
-	bStartupGateRequired = bFoundGate;
-	bStartupWorldFailed = bFoundGate && bAnyFailed;
-	const bool bWorldAuthorityReady = !bFoundGate
-		|| (bAllReady && !bAnyFailed);
+	if (bFoundGate)
+	{
+		bStartupAuthorityDiscoveredForTrackedWorld = true;
+	}
+	const bool bAuthorityExpected = bStartupFrontEndRequired && !bCaptureMode;
+	const bool bAuthorityLost = bAuthorityExpected
+		&& bStartupAuthorityDiscoveredForTrackedWorld
+		&& !bFoundGate;
+	bStartupGateRequired = bAuthorityExpected || bFoundGate;
+	bStartupWorldFailed = bAnyFailed || bAuthorityLost;
+	const bool bWorldAuthorityReady = IsStartupAuthorityReady(
+		bStartupFrontEndRequired,
+		bCaptureMode,
+		bFoundGate,
+		bAllReady,
+		bStartupWorldFailed);
 	bStartupAuthorityReady = bWorldAuthorityReady;
 	const bool bPresentationSurfaceReady = !bStartupFrontEndRequired
 		|| (bMenuVisible
@@ -818,10 +852,9 @@ void UABTSGameViewportClient::DrawStartupHandoffCover(
 	// This Canvas bridge deliberately mirrors the asset-free MoviePlayer page.
 	// It survives the one-or-more presents between MoviePlayer teardown and the
 	// first fully initialized front-end draw without depending on Slate lifetime.
-	// Canvas colors take a different render path from the early Slate widget.
-	// An absolute black backdrop avoids the previous blue gamma shift and makes
-	// the handoff read as one uninterrupted loading page.
-	const FLinearColor Background(0.0f, 0.0f, 0.0f, 1.0f);
+	// Slate and Canvas travel through different color/gamma paths. Authored black
+	// is invariant across both and makes the ownership handoff visually exact.
+	const FLinearColor Background = FLinearColor::Black;
 	const FLinearColor Accent(0.18f, 0.82f, 0.94f, 1.0f);
 	const FLinearColor Text(0.72f, 0.82f, 0.92f, 1.0f);
 	Canvas.K2_DrawTexture(
