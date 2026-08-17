@@ -2576,6 +2576,7 @@ void AABTSM73StableBuildingActor::BeginIdleValidation(const FABTSM73GroundContex
 void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	TickJuryDemoFixedSixOverflowKinematic(DeltaSeconds);
 	if (bJuryDemoFixedSixChaosRunning)
 	{
 		TickJuryDemoFixedSixChaosValidation(DeltaSeconds);

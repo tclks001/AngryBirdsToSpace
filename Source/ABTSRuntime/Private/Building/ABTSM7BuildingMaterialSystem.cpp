@@ -885,6 +885,28 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 	const float Scale = GetBirdThresholdScale(BirdId);
 	const float Knock = Profile.KnockSpeedCMPerSec * Scale;
 	const float Break = Profile.BreakSpeedCMPerSec * Scale;
+	if (Module.IsOverflowKinematic())
+	{
+		FString PromotionError;
+		if (AABTSM73StableBuildingActor* Building =
+			Module.GetDamageLifecycleOwner(); Building != nullptr
+			&& Building->PromoteJuryDemoFixedSixOverflowForDirectImpact(
+				Module, PromotionError))
+		{
+			// Exact body acquired; continue below with the original one-shot hit.
+		}
+		else
+		{
+			// QueryOnly queue bricks remain explicitly routed by this hit path.
+			// If all reserved slots are exhausted, reject the bird interaction
+			// rather than silently letting it tunnel through a fake collision.
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][OverflowKinematicQueue][DirectRejected]")
+				TEXT(" Module=%s Reason=%s FailClosed=1"),
+				*Module.GetName(), *PromotionError);
+			return false;
+		}
+	}
 	const bool bDamageBreak = Module.ApplyImpactDamage(
 		ComputeDamageGain(Profile, NormalSpeedCMPerSec, Break));
 	const bool bShouldBreak = bDamageBreak
@@ -1069,6 +1091,7 @@ void AABTSM7BuildingMaterialSystem::ProcessCentralizedDynamicContactDamage()
 		CentralizedContactPairBudget), PairCount);
 	if (PairCount > 0)
 	{
+		int32 AcceptedDamagePairs = 0;
 		TArray<int32> PairWindow;
 		BuildCyclicPairWindow(PairCount, PairBudget,
 			CentralizedContactPairCursor, PairWindow);
@@ -1098,10 +1121,15 @@ void AABTSM7BuildingMaterialSystem::ProcessCentralizedDynamicContactDamage()
 			const float RelativeSpeed = (LeftVelocity - RightVelocity).Size();
 			if (RelativeSpeed >= 300.0f)
 			{
+				++AcceptedDamagePairs;
 				QueueCentralizedContactDamage(Left, RelativeSpeed, RightVelocity);
 				QueueCentralizedContactDamage(Right, RelativeSpeed, LeftVelocity);
 			}
 		}
+		UE_LOG(LogABTSRuntime, Verbose,
+			TEXT("[ABTS][M7][CentralContact.Total]")
+			TEXT(" M7SpatialCandidatePairs=%d M7AcceptedDamagePairs=%d Budget=%d"),
+			PairCount, AcceptedDamagePairs, PairBudget);
 	}
 
 	PendingCentralizedContactDamage.Sort([](
@@ -1264,7 +1292,23 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 			continue;
 		}
 		const FVector Delta = Module->GetActorLocation() - Origin;
-		if (Delta.Size() <= ImpulseRadiusCM) BreakOrImpulsePrimitive(Module->GetMeshComponent(), INDEX_NONE, Delta, ImpulseSpeedCMPerSec * (1.0f - Delta.Size() / ImpulseRadiusCM), Delta.Size() <= DestroyRadiusCM);
+		if (Delta.Size() <= ImpulseRadiusCM)
+		{
+			const float ImpactSpeed = ImpulseSpeedCMPerSec * (1.0f
+				- Delta.Size() / FMath::Max(1.0f, ImpulseRadiusCM));
+			if (Module->IsOverflowKinematic())
+			{
+				const FABTSM7MaterialProfile& Profile =
+					GetProfile(Module->GetBuildingMaterial());
+				Module->AddOverflowKinematicImpact(Delta.GetSafeNormal() * ImpactSpeed,
+					Delta.GetSafeNormal() * 120.0f,
+					ComputeDamageGain(Profile, ImpactSpeed,
+						Profile.BreakSpeedCMPerSec));
+				continue;
+			}
+			BreakOrImpulsePrimitive(Module->GetMeshComponent(), INDEX_NONE, Delta,
+				ImpactSpeed, Delta.Size() <= DestroyRadiusCM);
+		}
 	}
 }
 
@@ -1294,7 +1338,19 @@ void AABTSM7BuildingMaterialSystem::ApplyDirectionalBlast(const FVector& Origin,
 		const float Axial = FVector::DotProduct(Delta, UnitAxis);
 		if (FMath::Abs(Axial) > ImpulseLengthCM || FVector::VectorPlaneProject(Delta, UnitAxis).Size() > EffectRadiusCM) continue;
 		const FVector Direction = UnitAxis * (Axial >= 0.0f ? 1.0f : -1.0f);
-		BreakOrImpulsePrimitive(Module->GetMeshComponent(), INDEX_NONE, Direction, ImpulseSpeedCMPerSec * (1.0f - FMath::Abs(Axial) / ImpulseLengthCM), FMath::Abs(Axial) <= DestroyLengthCM);
+		const float ImpactSpeed = ImpulseSpeedCMPerSec * (1.0f
+			- FMath::Abs(Axial) / FMath::Max(1.0f, ImpulseLengthCM));
+		if (Module->IsOverflowKinematic())
+		{
+			const FABTSM7MaterialProfile& Profile =
+				GetProfile(Module->GetBuildingMaterial());
+			Module->AddOverflowKinematicImpact(Direction * ImpactSpeed,
+				Direction * 120.0f, ComputeDamageGain(Profile, ImpactSpeed,
+					Profile.BreakSpeedCMPerSec));
+			continue;
+		}
+		BreakOrImpulsePrimitive(Module->GetMeshComponent(), INDEX_NONE, Direction,
+			ImpactSpeed, FMath::Abs(Axial) <= DestroyLengthCM);
 	}
 }
 
