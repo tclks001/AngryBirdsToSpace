@@ -72,8 +72,8 @@ public:
 	static constexpr uint64 FrozenE1BrickUnionRegistrationResultHash =
 		17633525379359033190ull;
 	static constexpr uint64 FrozenV3RegistrationResultHash =
-		FrozenE1BrickUnionRegistrationResultHash;
-	static constexpr int32 FrozenV3StaticModuleCount = 5748;
+		8644894956638618790ull;
+	static constexpr int32 FrozenV3StaticModuleCount = 1246;
 
 	static bool BuildStaticPlan(
 		const FABTSBuildingGenerationContract& Contract,

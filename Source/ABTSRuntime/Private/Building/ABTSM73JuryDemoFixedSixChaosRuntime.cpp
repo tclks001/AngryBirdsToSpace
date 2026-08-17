@@ -44,7 +44,11 @@ namespace
 	// Release destruction keeps a dense local collapse while bounding the
 	// solver island. The full frozen body set remains the static/certification
 	// identity; only real first-hit gameplay uses this activation budget.
-	constexpr int32 FixedSixGameplayMaximumActiveBodies = 128;
+	// The compact release catalog guarantees every building fits this exact
+	// per-brick Chaos budget.  No compound body or analytic overflow is allowed
+	// in the fallback release path.
+	constexpr int32 FixedSixGameplayMaximumActiveBodies = 384;
+	constexpr bool bFixedSixCompactReleaseFullBuildingChaos = true;
 
 	bool IsFrozenAxisAlignedBrick(const FABTSM73BeamD1BrickBinding& Brick)
 	{
@@ -940,6 +944,13 @@ bool AABTSM73StableBuildingActor::QueueJuryDemoFixedSixDamageSeed(
 	{
 		return true;
 	}
+	if (bFixedSixCompactReleaseFullBuildingChaos)
+	{
+		TArray<AABTSM7BuildingModule*> ImmediateSeeds = {&TriggerModule};
+		return ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+			ImmediateSeeds, ImpactRadiusCM,
+			++JuryDemoFixedSixDamageEpoch, OutError);
+	}
 	if (!JuryDemoFixedSixQueuedDamageSeeds.ContainsByPredicate(
 		[&TriggerModule](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
 		{ return Candidate.Get() == &TriggerModule; }))
@@ -1074,8 +1085,33 @@ ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
 	const double DeriveBeginSeconds = FPlatformTime::Seconds();
 	TArray<AABTSM7BuildingModule*> SupportClosureModules;
 	TArray<int32> AffectedBrickIds;
-	if (!BuildJuryDemoFixedSixSupportClosure(SeedModules, SupportClosureModules,
-		&AffectedBrickIds, OutError))
+	if (bFixedSixCompactReleaseFullBuildingChaos)
+	{
+		for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+		{
+			AABTSM7BuildingModule* Module = WeakModule.Get();
+			if (Module == nullptr || Module->IsBroken() || Module->IsRecycled()
+				|| Module->IsDynamic() || Module->IsOverflowKinematic())
+			{
+				continue;
+			}
+			const int32 BrickId = Module->GetDamageLifecycleBrickId();
+			if (Entry.Bricks.IsValidIndex(BrickId))
+			{
+				SupportClosureModules.Add(Module);
+				AffectedBrickIds.Add(BrickId);
+			}
+		}
+		SupportClosureModules.Sort([](const AABTSM7BuildingModule& Left,
+			const AABTSM7BuildingModule& Right)
+		{
+			return Left.GetDamageLifecycleBrickId()
+				< Right.GetDamageLifecycleBrickId();
+		});
+		AffectedBrickIds.Sort();
+	}
+	else if (!BuildJuryDemoFixedSixSupportClosure(
+		SeedModules, SupportClosureModules, &AffectedBrickIds, OutError))
 	{
 		return false;
 	}
@@ -1117,6 +1153,13 @@ ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
 			JuryDemoFixedSixActivePhysicsBodyCount, ActualActiveBodyCount);
 	}
 	JuryDemoFixedSixActivePhysicsBodyCount = ActualActiveBodyCount;
+	if (bFixedSixCompactReleaseFullBuildingChaos
+		&& ActualActiveBodyCount + SupportClosureModules.Num()
+			> FixedSixGameplayMaximumActiveBodies)
+	{
+		OutError = TEXT("FixedSixCompactFullBuildingBodyBudgetExceeded");
+		return false;
+	}
 
 	TSet<int32> SeedBrickIds;
 	for (const AABTSM7BuildingModule* Seed : SeedModules)

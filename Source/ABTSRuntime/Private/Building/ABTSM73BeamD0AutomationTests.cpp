@@ -85,16 +85,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 {
 	using namespace ABTSM73BeamD0Tests;
-	static constexpr int32 ExpectedCourseCounts[6] = {8, 16, 30, 44, 60, 76};
-	static constexpr int32 ExpectedRailCounts[6] = {2, 2, 3, 3, 4, 5};
-	static constexpr int32 ExpectedCellCaps[6] = {1, 1, 2, 2, 3, 4};
+	static constexpr int32 ExpectedCourseCounts[6] = {8, 16, 16, 16, 16, 16};
+	static constexpr int32 ExpectedRailCounts[6] = {2, 2, 2, 2, 2, 2};
+	static constexpr int32 ExpectedCellCaps[6] = {1, 1, 1, 1, 1, 1};
+	static constexpr int32 ExpectedMinimumBricks[6] = {20, 150, 150, 180, 210, 240};
+	static constexpr int32 ExpectedMaximumBricks[6] = {149, 349, 349, 349, 349, 349};
 	const FABTSM73BeamD0ProfileCatalog& Catalog =
 		FABTSM73BeamD0ProfileCatalog::GetDefault();
 	TSet<FName> ExactIds;
 	for (const FName ProfileId : ProfileIds())
 	{
 		FABTSM73BeamD0DifficultyMetrics Previous;
-		FABTSM73BeamD0VisualComplexityRecipe PreviousVisual;
 		bool bHasPrevious = false;
 		for (int32 Tier = 0; Tier <= 5; ++Tier)
 		{
@@ -106,8 +107,17 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Resolved profile is accepted"), Resolved.bAccepted);
 			TestEqual(TEXT("Solution family remains single-step"),
 				Resolved.Difficulty.SolutionSteps, 1);
-			TestEqual(TEXT("Visual milestone matches exact tier"),
-				Resolved.VisualComplexity.MilestoneTier, Tier);
+			TestEqual(TEXT("Gameplay difficulty identity remains exact"),
+				Resolved.DifficultyTier, Tier);
+			TestEqual(TEXT("Release visual milestone is compact after E2"),
+				Resolved.VisualComplexity.MilestoneTier,
+				Tier <= 1 ? Tier : 1);
+			TestEqual(TEXT("Release visual minimum follows compact ladder"),
+				Resolved.VisualComplexity.MinimumBrickCount,
+				ExpectedMinimumBricks[Tier]);
+			TestEqual(TEXT("Release visual maximum stays inside E2 budget"),
+				Resolved.VisualComplexity.MaximumBrickCount,
+				ExpectedMaximumBricks[Tier]);
 			TestTrue(TEXT("Coupled exterior frame recipe is enabled"),
 				Resolved.CoupledExteriorFrame.bEnabled);
 			TestEqual(TEXT("Coupled exterior frame course count follows the discrete tier table"),
@@ -126,19 +136,12 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 				40.0f);
 			TestEqual(TEXT("The final two-lane merge contract remains 4 cm"),
 				Resolved.BeamSettings.BeamB.BeamA.TwoBlockMergeGapCM, 4.0f);
-			if (ProfileId == TEXT("ColumnBreak") && Tier >= 4)
 			{
-				TestEqual(TEXT("Column high-tier bay span is an exact closure contract"),
-					Resolved.BeamSettings.BeamB.BeamA.TargetBaySpanCM,
-					Tier == 4 ? 473.0f : 420.0f);
-			}
-			if (Tier <= 1)
-			{
-				TestTrue(TEXT("Low tier requires one terminal roof"),
+				TestTrue(TEXT("Compact release tier requires one terminal roof"),
 					Resolved.VisualComplexity.bRequireSingleTerminalRoof);
-				TestFalse(TEXT("Low tier does not require full primitive variety"),
+				TestFalse(TEXT("Compact release tier does not require full primitive variety"),
 					Resolved.VisualComplexity.bRequirePrimitiveVariety);
-				TestTrue(TEXT("Low tier keeps a non-Box roof domain"),
+				TestTrue(TEXT("Compact release tier keeps a non-Box roof domain"),
 					Resolved.BeamSettings.BeamB.BeamA.Silhouette.PrismWeight
 						+ Resolved.BeamSettings.BeamB.BeamA.Silhouette.PyramidWeight
 						> 0.0f);
@@ -160,11 +163,6 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 					Resolved.BeamSettings.BeamB.BeamA.BlockCrossSectionCM
 						* RequiredRoofCourses);
 			}
-			else
-			{
-				TestFalse(TEXT("Higher tier leaves single-roof policy"),
-					Resolved.VisualComplexity.bRequireSingleTerminalRoof);
-			}
 			TestFalse(TEXT("Exact resolved id is unique in the matrix"),
 				ExactIds.Contains(Resolved.ResolvedM7ProfileId));
 			ExactIds.Add(Resolved.ResolvedM7ProfileId);
@@ -185,21 +183,10 @@ bool FABTSM73BeamD0ProfileTierMatrixTest::RunTest(const FString& Parameters)
 				TestTrue(TEXT("Weakness reward is monotonic"),
 					Resolved.Difficulty.WeaknessRewardMultiplier
 						>= Previous.WeaknessRewardMultiplier);
-				TestTrue(TEXT("Adjacent visual Brick windows do not overlap"),
-					Resolved.VisualComplexity.MinimumBrickCount
-						> PreviousVisual.MaximumBrickCount);
-				TestTrue(TEXT("Every adjacent tier advances the macro recipe"),
-					Resolved.VisualComplexity.ShapeGrammarDepth
-						> PreviousVisual.ShapeGrammarDepth
-					|| Resolved.VisualComplexity.TargetShapeVolumeCount
-						> PreviousVisual.TargetShapeVolumeCount
-					|| Resolved.VisualComplexity.MaximumBaysPerVolume
-						> PreviousVisual.MaximumBaysPerVolume
-					|| Resolved.VisualComplexity.MaximumParallelBlocksPerCourse
-						> PreviousVisual.MaximumParallelBlocksPerCourse);
+				TestTrue(TEXT("Release visual budget remains bounded"),
+					Resolved.VisualComplexity.MaximumBrickCount <= 349);
 			}
 			Previous = Resolved.Difficulty;
-			PreviousVisual = Resolved.VisualComplexity;
 			bHasPrevious = true;
 		}
 	}
@@ -293,25 +280,25 @@ bool FABTSM73BeamD0HardGateIsolationTest::RunTest(const FString& Parameters)
 			> Easy.BeamSettings.BeamB.BeamA.Silhouette.TargetHeightCM);
 	TestTrue(TEXT("Validation budgets and hard gates stay project-owned"),
 		HardGatesEqual(Easy.BeamSettings, Hard.BeamSettings));
-	TestTrue(TEXT("High-tier Beam-A joint capacity grows with the resolved visual scale"),
-		Hard.BeamSettings.BeamB.BeamA.MaxJointCount
-			> Easy.BeamSettings.BeamB.BeamA.MaxJointCount);
-	TestTrue(TEXT("High-tier Beam-A member capacity grows with the resolved visual scale"),
-		Hard.BeamSettings.BeamB.BeamA.MaxMemberCount
-			> Easy.BeamSettings.BeamB.BeamA.MaxMemberCount);
-	TestTrue(TEXT("High-tier bearing capacity grows with the resolved visual scale"),
-		Hard.BeamSettings.BeamB.BeamA.MaxBearingContactCount
-			> Easy.BeamSettings.BeamB.BeamA.MaxBearingContactCount);
-	TestTrue(TEXT("High-tier bearing pair-check budget grows with the resolved visual scale"),
-		Hard.BeamSettings.BeamB.BeamA.MaxBearingPairChecks
-			> Easy.BeamSettings.BeamB.BeamA.MaxBearingPairChecks);
+	TestEqual(TEXT("Compact release keeps Beam-A joint capacity bounded"),
+		Hard.BeamSettings.BeamB.BeamA.MaxJointCount,
+		Easy.BeamSettings.BeamB.BeamA.MaxJointCount);
+	TestEqual(TEXT("Compact release keeps Beam-A member capacity bounded"),
+		Hard.BeamSettings.BeamB.BeamA.MaxMemberCount,
+		Easy.BeamSettings.BeamB.BeamA.MaxMemberCount);
+	TestEqual(TEXT("Compact release keeps bearing capacity bounded"),
+		Hard.BeamSettings.BeamB.BeamA.MaxBearingContactCount,
+		Easy.BeamSettings.BeamB.BeamA.MaxBearingContactCount);
+	TestEqual(TEXT("Compact release keeps pair-check budget bounded"),
+		Hard.BeamSettings.BeamB.BeamA.MaxBearingPairChecks,
+		Easy.BeamSettings.BeamB.BeamA.MaxBearingPairChecks);
 	TestEqual(TEXT("Coupled-frame all-axis span gate is tier-independent"),
 		Easy.CoupledExteriorFrame.MaximumMemberLengthCM,
 		Hard.CoupledExteriorFrame.MaximumMemberLengthCM);
 	TestEqual(TEXT("Low tier starts with two coupled-frame rails"),
 		Easy.CoupledExteriorFrame.RailCount, 2);
-	TestEqual(TEXT("Highest tier resolves five coupled-frame rails"),
-		Hard.CoupledExteriorFrame.RailCount, 5);
+	TestEqual(TEXT("Highest gameplay tier uses compact two-rail generation"),
+		Hard.CoupledExteriorFrame.RailCount, 2);
 	TestEqual(TEXT("Core post span safety gate is tier-independent"),
 		Easy.StabilityCore.MaximumUnbracedCorePostSpanCM,
 		Hard.StabilityCore.MaximumUnbracedCorePostSpanCM);

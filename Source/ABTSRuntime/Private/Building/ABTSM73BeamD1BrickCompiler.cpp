@@ -1555,7 +1555,8 @@ namespace ABTSM73BeamD1
 		const FABTSM73DAG5BV2GenerationResult& Silhouette)
 	{
 		static constexpr int32 MinimumVolumes[6] = {3, 6, 8, 16, 21, 25};
-		const int32 Tier = FMath::Clamp(Profile.DifficultyTier, 0, 5);
+		const int32 Tier = FMath::Clamp(
+			Profile.VisualComplexity.MilestoneTier, 0, 5);
 		const int32 RequiredVolumeCount =
 			Profile.GameplayProfileId == TEXT("ColumnBreak") && Tier == 5
 				? 16 : MinimumVolumes[Tier];
@@ -1576,7 +1577,8 @@ namespace ABTSM73BeamD1
 		const int32 VisibleFeatureCount)
 	{
 		return MeetsSemanticVisualMilestone(Profile, Silhouette)
-			&& (Profile.DifficultyTier < 2 || VisibleFeatureCount >= 2);
+			&& (Profile.VisualComplexity.MilestoneTier < 2
+				|| VisibleFeatureCount >= 2);
 	}
 
 	bool Reject(
@@ -1930,11 +1932,12 @@ namespace ABTSM73BeamD1
 		const bool bBalancedCitadel =
 			Profile.BeamSettings.BeamB.BeamA.Silhouette.Archetype
 				== EABTSM73DAG5BV2Archetype::TerracedCitadel;
-		const float MinimumDensityRatio = Profile.DifficultyTier <= 1
+		const float MinimumDensityRatio =
+			Profile.VisualComplexity.MilestoneTier <= 1
 			? 0.08f
 			: bBalancedCitadel ? 0.20f : 0.10f;
 		const float MaximumClosurePostRatio =
-			Profile.DifficultyTier <= 1 ? 0.20f : 0.12f;
+			Profile.VisualComplexity.MilestoneTier <= 1 ? 0.20f : 0.12f;
 		return Summary.XColumnStationCount > 0
 			&& Summary.YColumnStationCount > 0
 			&& Summary.AxisStationDensityRatio >= MinimumDensityRatio
@@ -2703,7 +2706,8 @@ bool FABTSM73BeamD1BrickCompiler::GenerateStagePreview(
 		if (!ABTSM73BeamD1::MeetsSemanticVisualMilestone(Profile, Silhouette))
 		{
 			static constexpr int32 MinimumVolumes[6] = {3, 6, 8, 16, 21, 25};
-			const int32 Tier = FMath::Clamp(Profile.DifficultyTier, 0, 5);
+			const int32 Tier = FMath::Clamp(
+				Profile.VisualComplexity.MilestoneTier, 0, 5);
 			const int32 RequiredVolumeCount =
 				Profile.GameplayProfileId == TEXT("ColumnBreak") && Tier == 5
 					? 16 : MinimumVolumes[Tier];

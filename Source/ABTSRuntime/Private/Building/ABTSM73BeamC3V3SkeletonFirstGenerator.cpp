@@ -3789,7 +3789,8 @@ namespace
 		// two strict count anchors. Do not turn this back into a neighbourhood scan.
 		static const int32 HorizontalByTier[] = {18, 12, 11, 8, 9, 8};
 		static const int32 VerticalByTier[] = {18, 14, 10, 8, 7, 5};
-		const int32 Tier = FMath::Clamp(Profile.DifficultyTier, 0, 5);
+		const int32 Tier = FMath::Clamp(
+			Profile.VisualComplexity.MilestoneTier, 0, 5);
 		FDensityRecipe Result;
 		Result.HorizontalUnits = HorizontalByTier[Tier];
 		Result.VerticalUnits = VerticalByTier[Tier];
@@ -24952,7 +24953,8 @@ bool FABTSM73BeamC3V3SkeletonFirstGenerator::GenerateStage4FloorStyleInfill(
 		DesiredRoofReserve, RemainingBeforeInfill / 2);
 	const int32 InfillMemberCeiling = MaximumMemberCount - RoofReserve;
 	Plan.Summary.Stage4RoofReservedMemberCount = RoofReserve;
-	const int32 Tier = FMath::Clamp(Profile.DifficultyTier, 0, 5);
+	const int32 Tier = FMath::Clamp(
+		Profile.VisualComplexity.MilestoneTier, 0, 5);
 	const int32 StyleStride = Tier == 0 ? MAX_int32
 		: Tier == 1 ? 5 : Tier == 2 ? 4 : Tier == 3 ? 3 : Tier == 4 ? 2 : 1;
 	const FString StableStyleProfileId = Profile.GameplayProfileId.ToString();

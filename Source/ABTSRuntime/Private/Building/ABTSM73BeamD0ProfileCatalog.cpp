@@ -49,62 +49,68 @@ namespace ABTSM73BeamD0
 			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		case 2:
-			Recipe.MinimumBrickCount = 350;
-			Recipe.MaximumBrickCount = 799;
-			Recipe.BoundsScale = 0.96f;
-			Recipe.BaySpanScale = 1.00f;
-			Recipe.ShapeGrammarDepth = 3;
-			Recipe.MotifGrammarDepth = 3;
-			Recipe.TargetShapeVolumeCount = 32;
-			Recipe.MaximumBaysPerVolume = 4;
-			Recipe.MaximumParallelBlocksPerCourse = 3;
+			// RC release fallback: keep the encounter identity and gameplay
+			// profile, but spend only an E2-sized independent-body budget.  The
+			// six encounters interpolate inside the proven E1/E2 range instead
+			// of asking Chaos to carry thousands of tiny bodies.
+			Recipe.MilestoneTier = 1;
+			Recipe.MinimumBrickCount = 150;
+			Recipe.MaximumBrickCount = 349;
+			Recipe.BoundsScale = 0.84f;
+			Recipe.BaySpanScale = 1.30f;
+			Recipe.ShapeGrammarDepth = 2;
+			Recipe.MotifGrammarDepth = 2;
+			Recipe.TargetShapeVolumeCount = 20;
+			Recipe.MaximumBaysPerVolume = 3;
+			Recipe.MaximumParallelBlocksPerCourse = 2;
 			Recipe.MaximumRoofCourseCount = 64;
-			Recipe.bRequirePrimitiveVariety = true;
-			Recipe.bRequireMotifVariety = true;
+			Recipe.SingleTerminalRoofCourseCount = 10;
+			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		case 3:
-			Recipe.MinimumBrickCount = 800;
-			Recipe.MaximumBrickCount = 2099;
-			Recipe.BoundsScale = 1.10f;
-			Recipe.BaySpanScale = 0.80f;
-			Recipe.ShapeGrammarDepth = 4;
-			Recipe.MotifGrammarDepth = 4;
-			Recipe.TargetShapeVolumeCount = 48;
-			Recipe.MaximumBaysPerVolume = 5;
-			Recipe.MaximumParallelBlocksPerCourse = 3;
+			Recipe.MilestoneTier = 1;
+			Recipe.MinimumBrickCount = 180;
+			Recipe.MaximumBrickCount = 349;
+			Recipe.BoundsScale = 0.86f;
+			Recipe.BaySpanScale = 1.30f;
+			Recipe.ShapeGrammarDepth = 2;
+			Recipe.MotifGrammarDepth = 2;
+			Recipe.TargetShapeVolumeCount = 20;
+			Recipe.MaximumBaysPerVolume = 3;
+			Recipe.MaximumParallelBlocksPerCourse = 2;
 			Recipe.MaximumRoofCourseCount = 64;
-			Recipe.bRequirePrimitiveVariety = true;
-			Recipe.bRequireMotifVariety = true;
+			Recipe.SingleTerminalRoofCourseCount = 10;
+			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		case 4:
-			Recipe.MaximumCandidateAttempts = 10;
-			Recipe.MinimumBrickCount = 2100;
-			Recipe.MaximumBrickCount = 3399;
-			Recipe.BoundsScale = 1.22f;
-			Recipe.BaySpanScale = 0.72f;
-			Recipe.ShapeGrammarDepth = 5;
-			Recipe.MotifGrammarDepth = 5;
-			Recipe.TargetShapeVolumeCount = 72;
-			Recipe.MaximumBaysPerVolume = 6;
-			Recipe.MaximumParallelBlocksPerCourse = 3;
+			Recipe.MilestoneTier = 1;
+			Recipe.MinimumBrickCount = 210;
+			Recipe.MaximumBrickCount = 349;
+			Recipe.BoundsScale = 0.88f;
+			Recipe.BaySpanScale = 1.30f;
+			Recipe.ShapeGrammarDepth = 2;
+			Recipe.MotifGrammarDepth = 2;
+			Recipe.TargetShapeVolumeCount = 20;
+			Recipe.MaximumBaysPerVolume = 3;
+			Recipe.MaximumParallelBlocksPerCourse = 2;
 			Recipe.MaximumRoofCourseCount = 64;
-			Recipe.bRequirePrimitiveVariety = true;
-			Recipe.bRequireMotifVariety = true;
+			Recipe.SingleTerminalRoofCourseCount = 10;
+			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		default:
-			Recipe.MaximumCandidateAttempts = 12;
-			Recipe.MinimumBrickCount = 3400;
-			Recipe.MaximumBrickCount = 5499;
-			Recipe.BoundsScale = 1.36f;
-			Recipe.BaySpanScale = 0.58f;
-			Recipe.ShapeGrammarDepth = 6;
-			Recipe.MotifGrammarDepth = 5;
-			Recipe.TargetShapeVolumeCount = 72;
-			Recipe.MaximumBaysPerVolume = 6;
-			Recipe.MaximumParallelBlocksPerCourse = 4;
+			Recipe.MilestoneTier = 1;
+			Recipe.MinimumBrickCount = 240;
+			Recipe.MaximumBrickCount = 349;
+			Recipe.BoundsScale = 0.90f;
+			Recipe.BaySpanScale = 1.30f;
+			Recipe.ShapeGrammarDepth = 2;
+			Recipe.MotifGrammarDepth = 2;
+			Recipe.TargetShapeVolumeCount = 20;
+			Recipe.MaximumBaysPerVolume = 3;
+			Recipe.MaximumParallelBlocksPerCourse = 2;
 			Recipe.MaximumRoofCourseCount = 64;
-			Recipe.bRequirePrimitiveVariety = true;
-			Recipe.bRequireMotifVariety = true;
+			Recipe.SingleTerminalRoofCourseCount = 10;
+			Recipe.bRequireSingleTerminalRoof = true;
 			break;
 		}
 		return Recipe;
@@ -776,19 +782,22 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 		// Brick window by contracting only its internal macro envelope.
 		OutProfile.VisualComplexity.BoundsScale = 0.42f;
 	}
-	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier == 3)
+	if (GameplayProfileId == TEXT("ColumnBreak")
+		&& OutProfile.VisualComplexity.MilestoneTier == 3)
 	{
 		// V3 skeleton-first canonical counts are separated by hundreds of
 		// members (E4/E5/E6 = 1348/1951/2515). Keep coarse hundred-scale
 		// guards; never fit a boundary to one emitted count by +/- one.
 		OutProfile.VisualComplexity.MaximumBrickCount = 1599;
 	}
-	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier == 4)
+	if (GameplayProfileId == TEXT("ColumnBreak")
+		&& OutProfile.VisualComplexity.MilestoneTier == 4)
 	{
 		OutProfile.VisualComplexity.MinimumBrickCount = 1600;
 		OutProfile.VisualComplexity.MaximumBrickCount = 2199;
 	}
-	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier == 5)
+	if (GameplayProfileId == TEXT("ColumnBreak")
+		&& OutProfile.VisualComplexity.MilestoneTier == 5)
 	{
 		// E6 gains its visible step from the four-lane light frame and denser
 		// bay budget. A sixth silhouette recursion or another envelope jump
@@ -804,7 +813,8 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 		return false;
 	}
 	OutProfile.StabilityCore = ABTSM73BeamD0::StabilityCoreRecipe(
-		DifficultyTier, OutProfile.VisualComplexity.MaximumBrickCount);
+		OutProfile.VisualComplexity.MilestoneTier,
+		OutProfile.VisualComplexity.MaximumBrickCount);
 	if (!OutProfile.StabilityCore.Validate(OutError))
 	{
 		OutProfile.RejectReason = OutError;
@@ -812,7 +822,8 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 	}
 	OutProfile.CoupledExteriorFrame =
 		ABTSM73BeamD0::CoupledExteriorFrameRecipe(
-			DifficultyTier, OutProfile.VisualComplexity.MaximumBrickCount);
+			OutProfile.VisualComplexity.MilestoneTier,
+			OutProfile.VisualComplexity.MaximumBrickCount);
 	if (!OutProfile.CoupledExteriorFrame.Validate(OutError))
 	{
 		OutProfile.RejectReason = OutError;
@@ -848,14 +859,15 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 	Shape.HorizontalSplitWeight = Definition->HorizontalSplitWeight;
 	Shape.SetbackWeight = Definition->SetbackWeight;
 	Shape.BridgeChance = Definition->BridgeChance;
-	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier >= 4)
+	if (GameplayProfileId == TEXT("ColumnBreak")
+		&& Visual.MilestoneTier >= 4)
 	{
 		// TwinTower's E5/E6 milestone is the paired vertical massing itself;
 		// random SupportedSpan insertion creates ground-rescue bridges that
 		// conflict with the light-frame structural closure.
 		Shape.BridgeChance = 0.0f;
 	}
-	if (DifficultyTier >= 4
+	if (Visual.MilestoneTier >= 4
 		&& Definition->Archetype
 			== EABTSM73DAG5BV2Archetype::BridgedArcology)
 	{
@@ -899,13 +911,14 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 	Settings.BeamB.BeamA.MinimumParallelBlockGapCM = 40.0f;
 	Settings.BeamB.BeamA.MaximumVerticalSupportSpanCM =
 		OutProfile.StabilityCore.MaximumUnbracedCorePostSpanCM;
-	if (GameplayProfileId == TEXT("ColumnBreak") && DifficultyTier >= 4)
+	if (GameplayProfileId == TEXT("ColumnBreak")
+		&& Visual.MilestoneTier >= 4)
 	{
 		// E5 needs one wider bay to leave enough final-member capacity for the
 		// physical C2 support cap. E6 keeps its denser certified four-lane frame.
 		Settings.BeamB.BeamA.TargetBaySpanCM = FMath::Max(
 			Settings.BeamB.BeamA.TargetBaySpanCM,
-			DifficultyTier == 4 ? 473.0f : 420.0f);
+			Visual.MilestoneTier == 4 ? 473.0f : 420.0f);
 	}
 	Settings.BeamB.BeamA.MaxBaysPerVolume = Visual.MaximumBaysPerVolume;
 	Settings.BeamB.BeamA.MaxParallelBlocksPerCourse =
@@ -924,14 +937,14 @@ bool FABTSM73BeamD0ProfileCatalog::Resolve(
 	// The Stage-1 shell is downstream of Beam-B, but Beam-B must first be able
 	// to publish its high-tier IR. These deterministic caps remove the E6
 	// 8192-joint hard stop without changing the 36 cm section or visual window.
-	if (DifficultyTier >= 4)
+	if (Visual.MilestoneTier >= 4)
 	{
 		FABTSM73BeamAPreviewSettings& BeamA = Settings.BeamB.BeamA;
-		BeamA.MaxJointCount = DifficultyTier == 4 ? 16384 : 32768;
-		BeamA.MaxMemberCount = DifficultyTier == 4 ? 32768 : 65536;
-		BeamA.MaxBearingContactCount = DifficultyTier == 4 ? 32768 : 65536;
+		BeamA.MaxJointCount = Visual.MilestoneTier == 4 ? 16384 : 32768;
+		BeamA.MaxMemberCount = Visual.MilestoneTier == 4 ? 32768 : 65536;
+		BeamA.MaxBearingContactCount = Visual.MilestoneTier == 4 ? 32768 : 65536;
 		BeamA.MaxBearingPairChecks =
-			DifficultyTier == 4 ? 524288 : 1048576;
+			Visual.MilestoneTier == 4 ? 524288 : 1048576;
 	}
 
 	OutProfile.ResolvedSettingsHash =
