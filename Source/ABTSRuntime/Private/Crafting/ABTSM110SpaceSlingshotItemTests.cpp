@@ -47,6 +47,25 @@ bool FABTSM110SpaceSlingshotItemContractTest::RunTest(const FString& Parameters)
 	if (Catalog == nullptr) return false;
 	TestNull(TEXT("Retired aggregate recipe is unavailable"), Catalog->FindRecipe(FName(TEXT("SpaceSlingshotPart"))));
 
+	const FABTSCraftingRecipe* ReinforcedStakeRecipe =
+		Catalog->FindRecipe(FName(TEXT("ReinforcedStake")));
+	TestNotNull(TEXT("Reinforced stake recipe exists"), ReinforcedStakeRecipe);
+	if (ReinforcedStakeRecipe != nullptr)
+	{
+		TestEqual(TEXT("Reinforced stake metal cost"),
+			FindIngredientQuantity(*ReinforcedStakeRecipe,
+				EABTSItemId::MetalParts), 1);
+	}
+	const FABTSCraftingRecipe* ReinforcedCordRecipe =
+		Catalog->FindRecipe(FName(TEXT("ReinforcedCord")));
+	TestNotNull(TEXT("Reinforced cord recipe exists"), ReinforcedCordRecipe);
+	if (ReinforcedCordRecipe != nullptr)
+	{
+		TestEqual(TEXT("Reinforced cord metal cost"),
+			FindIngredientQuantity(*ReinforcedCordRecipe,
+				EABTSItemId::MetalParts), 1);
+	}
+
 	const FABTSCraftingRecipe* StakeRecipe = Catalog->FindRecipe(FName(TEXT("SpaceStakePair")));
 	TestNotNull(TEXT("Space stake pair recipe exists"), StakeRecipe);
 	if (StakeRecipe != nullptr)

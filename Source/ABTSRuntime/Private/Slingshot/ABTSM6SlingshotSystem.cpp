@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
+#include "Building/ABTSM7BuildingModule.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
@@ -38,6 +39,8 @@
 namespace
 {
 	constexpr float BasicShapeSphereDiameterCM = 100.0f;
+	/** Yellow keeps its heading after actually clearing a wooden building brick. */
+	constexpr float YellowWoodPenetrationSpeedRetention = 0.94f;
 
 	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryCoreScale(
 		TEXT("abts.UI.Flight.WorldTrajectory.CoreScale"), 0.62f,
@@ -1057,6 +1060,18 @@ EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveCo
 		default: return EABTSM6ImpactMaterial::Wood;
 		}
 	}
+	if (const AABTSM7BuildingModule* Module = Component
+		? Cast<AABTSM7BuildingModule>(Component->GetOwner()) : nullptr)
+	{
+		switch (Module->GetBuildingMaterial())
+		{
+		case EABTSM7BuildingMaterial::Stone: return EABTSM6ImpactMaterial::Stone;
+		case EABTSM7BuildingMaterial::Iron: return EABTSM6ImpactMaterial::Iron;
+		case EABTSM7BuildingMaterial::Glass: return EABTSM6ImpactMaterial::Glass;
+		case EABTSM7BuildingMaterial::Crystal: return EABTSM6ImpactMaterial::Glass;
+		default: return EABTSM6ImpactMaterial::Wood;
+		}
+	}
 	if (const AABTSM6DestructibleProxy* Proxy = Component ? Cast<AABTSM6DestructibleProxy>(Component->GetOwner()) : nullptr) return Proxy->GetImpactMaterial();
 	const AActor* ComponentOwner = Component ? Component->GetOwner() : nullptr;
 	return ComponentOwner && ((Planet.IsValid() && ComponentOwner == Planet.Get())
@@ -1418,8 +1433,16 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 	const FABTSM6MaterialImpactProfile& MaterialProfile = GetMaterialProfile(Material);
 	const float KnockThreshold = BirdProfile.KnockSpeedCMPerSec * MaterialProfile.KnockThresholdMultiplier;
 	const float BreakThreshold = BirdProfile.BreakSpeedCMPerSec * MaterialProfile.BreakThresholdMultiplier;
+	const bool bYellowWoodBuildingImpact =
+		LaunchedBird->GetBirdId() == EABTSBirdId::Yellow
+		&& Material == EABTSM6ImpactMaterial::Wood
+		&& BuildingMaterialSystem.IsValid()
+		&& BuildingMaterialSystem->OwnsPrimitive(Hit.GetComponent());
+	bool bExactBuildingTargetCleared = false;
 	const bool bHandledByM7 = BuildingMaterialSystem.IsValid()
-		&& BuildingMaterialSystem->HandleBirdImpact(Hit.GetComponent(), Hit.Item, NormalSpeedCMPerSec, IncomingVelocity, LaunchedBird->GetBirdId());
+		&& BuildingMaterialSystem->HandleBirdImpact(Hit.GetComponent(), Hit.Item,
+			NormalSpeedCMPerSec, IncomingVelocity, LaunchedBird->GetBirdId(),
+			&bExactBuildingTargetCleared);
 	if (!bHandledByM7)
 	{
 		if (UHierarchicalInstancedStaticMeshComponent* HISM = Cast<UHierarchicalInstancedStaticMeshComponent>(Hit.GetComponent()))
@@ -1461,9 +1484,25 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 			}
 		}
 	}
-	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-	const FVector Tangent = FVector::VectorPlaneProject(IncomingVelocity, Normal);
-	LaunchedBird->SetSlingshotVelocity(Tangent * MaterialProfile.BirdSpeedRetention + Normal * NormalSpeedCMPerSec * MaterialProfile.BirdRestitution);
+	const bool bWoodBrickCleared = bYellowWoodBuildingImpact && bHandledByM7
+		&& bExactBuildingTargetCleared;
+	if (bWoodBrickCleared)
+	{
+		LaunchedBird->SetSlingshotVelocity(
+			IncomingVelocity * YellowWoodPenetrationSpeedRetention);
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M6][YellowWoodPenetration] Retention=%.2f SpeedBefore=%.1f SpeedAfter=%.1f"),
+			YellowWoodPenetrationSpeedRetention,
+			IncomingVelocity.Size(),
+			IncomingVelocity.Size() * YellowWoodPenetrationSpeedRetention);
+	}
+	else
+	{
+		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+		const FVector Tangent = FVector::VectorPlaneProject(IncomingVelocity, Normal);
+		LaunchedBird->SetSlingshotVelocity(Tangent * MaterialProfile.BirdSpeedRetention
+			+ Normal * NormalSpeedCMPerSec * MaterialProfile.BirdRestitution);
+	}
 	if (LaunchedBird->GetBirdId() == EABTSBirdId::Black && !bBlackDetonated && BlackFuseRemainingSeconds < 0.0f && NormalSpeedCMPerSec >= SignificantImpactSpeedCMPerSec)
 	{
 		BlackFuseRemainingSeconds = BlackAutoFuseSeconds;

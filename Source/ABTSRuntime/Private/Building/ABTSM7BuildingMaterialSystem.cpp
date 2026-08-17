@@ -811,8 +811,18 @@ void AABTSM7BuildingMaterialSystem::AdoptUnweldedCompoundChild(
 	}
 }
 
-bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Component, const int32 InstanceIndex, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity, const EABTSBirdId BirdId)
+bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(
+	UPrimitiveComponent* Component,
+	const int32 InstanceIndex,
+	const float NormalSpeedCMPerSec,
+	const FVector& IncomingVelocity,
+	const EABTSBirdId BirdId,
+	bool* bOutExactTargetCleared)
 {
+	if (bOutExactTargetCleared != nullptr)
+	{
+		*bOutExactTargetCleared = false;
+	}
 	if (!OwnsPrimitive(Component)) return false;
 	EABTSM7BuildingMaterial Material = EABTSM7BuildingMaterial::Wood;
 	if (Component == StoneBrickHISM) Material = EABTSM7BuildingMaterial::Stone;
@@ -832,7 +842,14 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 		HISMDamageByStableKey.Add(DamageKey, DamageAfter);
 		if (DamageAfter >= Profile.BreakDamage)
 		{
-			if (HISM->RemoveInstance(InstanceIndex)) NotifyBrickRecovered(Material);
+			if (HISM->RemoveInstance(InstanceIndex))
+			{
+				NotifyBrickRecovered(Material);
+				if (bOutExactTargetCleared != nullptr)
+				{
+					*bOutExactTargetCleared = true;
+				}
+			}
 			HISMDamageByStableKey.Remove(DamageKey);
 			UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7][DamageBreak] Material=%d Damage=%.1f/%.1f"), static_cast<int32>(Material), DamageAfter, Profile.BreakDamage);
 		}
@@ -848,9 +865,16 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 	else if (AABTSM7BuildingModule* Module = Cast<AABTSM7BuildingModule>(Component->GetOwner()))
 	{
 		if (Module->IsRecycled()) return false;
-		return ApplyImpactToModule(*Module, NormalSpeedCMPerSec, IncomingVelocity,
+		const bool bWasBroken = Module->IsBroken();
+		const bool bHandled = ApplyImpactToModule(*Module,
+			NormalSpeedCMPerSec, IncomingVelocity,
 			BirdId, EABTSM73E1DamageCause::BirdImpact,
 			/*bApplyGameplayTransferImpulse=*/true);
+		if (bOutExactTargetCleared != nullptr)
+		{
+			*bOutExactTargetCleared = !bWasBroken && Module->IsBroken();
+		}
+		return bHandled;
 	}
 	return true;
 }

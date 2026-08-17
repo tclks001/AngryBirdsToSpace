@@ -10,6 +10,105 @@
 #include "World/ABTSM51OrdinarySlingshotSlotPreview.h"
 #include "World/ABTSM51WorldSystem.h"
 
+namespace
+{
+constexpr int32 ReleaseSlotsPerOrdinaryGroup = 12;
+
+bool IsReleaseOrdinarySlotCellUsable(
+	const AABTSM3Planet& Planet,
+	const int32 CellId,
+	const int32 ExcludedFinaleCellId)
+{
+	const TArray<FABTSM3CellState>& CellStates =
+		Planet.GetGeneratedCellStates();
+	return Planet.LogicalCells.IsValidIndex(CellId)
+		&& CellStates.IsValidIndex(CellId)
+		&& CellId != ExcludedFinaleCellId
+		&& CellStates[CellId].bBuildable
+		&& !CellStates[CellId].bWater
+		&& !CellStates[CellId].bBuildingAnchor;
+}
+
+int32 ExpandReleaseOrdinarySlotGroups(
+	const AABTSM3Planet& Planet,
+	const int32 ExcludedFinaleCellId,
+	FABTSM51OrdinarySlingshotSlotSnapshot& InOutSnapshot)
+{
+	TSet<int32> UsedCells;
+	int32 RemovedInvalidSlots = 0;
+	for (FABTSM51OrdinarySlingshotSlotGroup& Group :
+		InOutSnapshot.SlotGroups)
+	{
+		for (int32 Index = Group.SlotCellIds.Num() - 1;
+			Index >= 0;
+			--Index)
+		{
+			const int32 CellId = Group.SlotCellIds[Index];
+			if (!IsReleaseOrdinarySlotCellUsable(
+					Planet,
+					CellId,
+					ExcludedFinaleCellId)
+				|| UsedCells.Contains(CellId))
+			{
+				Group.SlotCellIds.RemoveAt(Index);
+				++RemovedInvalidSlots;
+				continue;
+			}
+			UsedCells.Add(CellId);
+		}
+	}
+
+	int32 AddedSlots = 0;
+	for (FABTSM51OrdinarySlingshotSlotGroup& Group :
+		InOutSnapshot.SlotGroups)
+	{
+		TArray<int32> SearchQueue = Group.SlotCellIds;
+		SearchQueue.Sort();
+		int32 QueueIndex = 0;
+		while (Group.SlotCellIds.Num() < ReleaseSlotsPerOrdinaryGroup
+			&& QueueIndex < SearchQueue.Num())
+		{
+			const int32 SourceCellId = SearchQueue[QueueIndex++];
+			if (!Planet.LogicalCells.IsValidIndex(SourceCellId))
+			{
+				continue;
+			}
+			TArray<int32> OrderedNeighbors =
+				Planet.LogicalCells[SourceCellId].NeighborCellIds;
+			OrderedNeighbors.Sort();
+			for (const int32 NeighborCellId : OrderedNeighbors)
+			{
+				if (Group.SlotCellIds.Num()
+					>= ReleaseSlotsPerOrdinaryGroup)
+				{
+					break;
+				}
+				if (UsedCells.Contains(NeighborCellId)
+					|| !IsReleaseOrdinarySlotCellUsable(
+						Planet,
+						NeighborCellId,
+						ExcludedFinaleCellId))
+				{
+					continue;
+				}
+				UsedCells.Add(NeighborCellId);
+				Group.SlotCellIds.Add(NeighborCellId);
+				SearchQueue.Add(NeighborCellId);
+				++AddedSlots;
+			}
+		}
+	}
+
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M5.1][OrdinarySlots][ReleaseCapacity] Groups=%d TargetPerGroup=%d RemovedInvalid=%d Added=%d"),
+		InOutSnapshot.SlotGroups.Num(),
+		ReleaseSlotsPerOrdinaryGroup,
+		RemovedInvalidSlots,
+		AddedSlots);
+	return AddedSlots;
+}
+}
+
 AABTSM51GameMode::AABTSM51GameMode()
 {
 	PlayerControllerClass = AABTSM51PlayerController::StaticClass();
@@ -75,13 +174,23 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 	if (System != nullptr && bResolvedPreviewRequested)
 	{
 		FABTSM51OrdinarySlingshotSlotSnapshot Snapshot;
-		bPreviewConfigured = Planet != nullptr
+		const bool bSnapshotBuilt = Planet != nullptr
 			&& FABTSM51OrdinarySlingshotSlotPreviewAdapter::
 				BuildFromExplicitCandidate(
 					Planet->GetMonthlySlingshotFieldResult(),
 					ExplicitPreviewCandidateId,
 					Snapshot,
-					PreviewFailure)
+					PreviewFailure);
+		if (bSnapshotBuilt
+			&& !bPreviewRequested
+			&& ActiveFinalePreview != nullptr)
+		{
+			ExpandReleaseOrdinarySlotGroups(
+				*Planet,
+				ActiveFinalePreview->AnchorCellId,
+				Snapshot);
+		}
+		bPreviewConfigured = bSnapshotBuilt
 			&& System->ConfigurePreviewOrdinarySlingshotSlotSnapshot(
 				Snapshot);
 		if (!bPreviewConfigured)

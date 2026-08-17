@@ -88,9 +88,9 @@ void UABTSCraftingCatalog::BuildDefaultRecipes()
 		Recipe(TEXT("BridgeKit"), TEXT("Bridge Kit"), EABTSItemId::BridgeKit, 1, EABTSCraftingStationType::Workbench,
 			{ Ingredient(EABTSItemId::Wood, 6), Ingredient(EABTSItemId::Stone, 2) }),
 		Recipe(TEXT("ReinforcedStake"), TEXT("Reinforced Stake"), EABTSItemId::ReinforcedStake, 1, EABTSCraftingStationType::Furnace,
-			{ Ingredient(EABTSItemId::MetalParts, 4), Ingredient(EABTSItemId::Stone, 3) }),
+			{ Ingredient(EABTSItemId::MetalParts, 1), Ingredient(EABTSItemId::Stone, 3) }),
 		Recipe(TEXT("ReinforcedCord"), TEXT("Reinforced Cord"), EABTSItemId::ReinforcedCord, 1, EABTSCraftingStationType::Furnace,
-			{ Ingredient(EABTSItemId::MetalParts, 2), Ingredient(EABTSItemId::PlantFiber, 4) }),
+			{ Ingredient(EABTSItemId::MetalParts, 1), Ingredient(EABTSItemId::PlantFiber, 4) }),
 		SpaceStakePairRecipe(),
 		SpaceCordRecipe()
 	};

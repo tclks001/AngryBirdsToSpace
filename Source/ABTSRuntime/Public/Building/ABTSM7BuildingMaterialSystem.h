@@ -54,7 +54,9 @@ public:
 		const FABTSM7DeviceSpec& Spec, const FTransform& WorldTransform);
 
 	bool OwnsPrimitive(const UPrimitiveComponent* Component) const;
-	bool HandleBirdImpact(UPrimitiveComponent* Component, int32 InstanceIndex, float NormalSpeedCMPerSec, const FVector& IncomingVelocity, EABTSBirdId BirdId);
+	bool HandleBirdImpact(UPrimitiveComponent* Component, int32 InstanceIndex,
+		float NormalSpeedCMPerSec, const FVector& IncomingVelocity,
+		EABTSBirdId BirdId, bool* bOutExactTargetCleared = nullptr);
 	void HandleModuleChainImpact(AABTSM7BuildingModule& Source, const FHitResult& Hit, float NormalSpeedCMPerSec);
 	void ApplyRadialBlast(const FVector& Origin, float DestroyRadiusCM, float ImpulseRadiusCM, float ImpulseSpeedCMPerSec);
 	void ApplyDirectionalBlast(const FVector& Origin, const FVector& Axis, float DestroyLengthCM, float ImpulseLengthCM, float EffectRadiusCM, float ImpulseSpeedCMPerSec);
