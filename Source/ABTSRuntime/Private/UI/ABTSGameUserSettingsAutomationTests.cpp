@@ -68,6 +68,14 @@ bool FABTSGameUserSettingsContractTest::RunTest(const FString& Parameters)
 		UABTSGameViewportClient::IsStartupPresentationReady(true, true, 1));
 	TestTrue(TEXT("Second complete draw atomically exposes the warm entry frame"),
 		UABTSGameViewportClient::IsStartupPresentationReady(true, true, 2));
+	TestTrue(TEXT("Pre-armed Shipping foreground cannot pause before the authority actor is discoverable"),
+		UABTSGameViewportClient::ShouldKeepWorldTickingForStartup(true, false, false));
+	TestFalse(TEXT("Startup foreground may pause after authoritative Ready"),
+		UABTSGameViewportClient::ShouldKeepWorldTickingForStartup(true, true, false));
+	TestFalse(TEXT("Startup foreground may pause after authoritative failure"),
+		UABTSGameViewportClient::ShouldKeepWorldTickingForStartup(true, false, true));
+	TestFalse(TEXT("An ordinary pause menu does not masquerade as startup generation"),
+		UABTSGameViewportClient::ShouldKeepWorldTickingForStartup(false, false, false));
 	TestNotNull(TEXT("Engine constructed the configured ABTS settings class"), UABTSGameUserSettings::Get());
 	FString ViewportClass;
 	GConfig->GetString(TEXT("/Script/Engine.Engine"), TEXT("GameViewportClientClassName"), ViewportClass, GEngineIni);

@@ -84,6 +84,17 @@ Later candidates require only a normal packaged startup/finale regression
 smoke for these accepted paths. Do not reopen their root-cause investigations
 unless a later package visibly regresses one of them.
 
+### Shipping startup handoff P0
+
+The Shipping foreground is armed before the authoritative M6 startup actor is
+guaranteed to be discoverable. The world must therefore remain unpaused from
+that first armed frame until the startup authority reports either Ready or
+Failed. Pausing based on gate discovery creates a Shipping-only bootstrap
+deadlock: the MoviePlayer screen completes, the in-game handoff cover reaches
+its 92 percent pre-Ready cap, and the actor needed to open the gate never gets
+another world tick. Shipping logging remains enabled for startup/authority
+diagnostics; this does not enable developer gameplay options or the console.
+
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
   Development, and Shipping hard-locks playback even if a skip request is

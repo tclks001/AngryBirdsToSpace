@@ -272,6 +272,20 @@ bool UABTSGameViewportClient::IsStartupPresentationReady(
 		&& CompletedFrontEndDraws >= 2;
 }
 
+bool UABTSGameViewportClient::ShouldKeepWorldTickingForStartup(
+	const bool bStartupFrontEndRequired,
+	const bool bStartupWorldReady,
+	const bool bStartupWorldFailed)
+{
+	// Shipping pre-arms the foreground before the M6 authority actor is
+	// necessarily discoverable. Keying this decision on bStartupGateRequired
+	// can pause the world before that actor has a chance to spawn or tick,
+	// deadlocking the handoff cover at its pre-Ready progress cap.
+	return bStartupFrontEndRequired
+		&& !bStartupWorldReady
+		&& !bStartupWorldFailed;
+}
+
 void UABTSGameViewportClient::RefreshStartupWorldState()
 {
 	UWorld* GameWorld = GetWorld();
@@ -589,9 +603,10 @@ void UABTSGameViewportClient::ApplyMenuInputMode()
 	// Ready/Failed state (or for an ordinary menu without a startup gate).
 	if (!bWorldWasPaused)
 	{
-		const bool bStartupGenerationRunning = bStartupGateRequired
-			&& !bStartupWorldReady
-			&& !bStartupWorldFailed;
+		const bool bStartupGenerationRunning = ShouldKeepWorldTickingForStartup(
+			bStartupFrontEndRequired,
+			bStartupWorldReady,
+			bStartupWorldFailed);
 		PC->SetPause(!bStartupGenerationRunning);
 	}
 	PC->bShowMouseCursor = true;

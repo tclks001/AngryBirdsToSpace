@@ -65,6 +65,11 @@ public:
 		bool bWorldAuthorityReady,
 		bool bPresentationSurfaceReady,
 		int32 CompletedFrontEndDraws);
+	/** Keep the world ticking from the first pre-armed startup frame until Ready or Failed. */
+	static bool ShouldKeepWorldTickingForStartup(
+		bool bStartupFrontEndRequired,
+		bool bStartupWorldReady,
+		bool bStartupWorldFailed);
 
 private:
 	enum class EHitAction : uint8
