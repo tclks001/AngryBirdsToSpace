@@ -21,6 +21,7 @@
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Presentation/ABTSOpeningCinematicPreview.h"
 #include "RHI.h"
@@ -125,6 +126,28 @@ void UABTSGameViewportClient::Init(
 	MenuCanvas = NewObject<UCanvas>(this, TEXT("ABTSSystemMenuCanvas"));
 	RebuildResolutionOptions();
 	StartupForegroundStartSeconds = FPlatformTime::Seconds();
+	bStartupDiagnosticTraceEnabled = FParse::Param(
+		FCommandLine::Get(), TEXT("ABTSReleaseStartupTrace"));
+	if (bStartupDiagnosticTraceEnabled)
+	{
+		FParse::Value(
+			FCommandLine::Get(),
+			TEXT("ABTSReleaseStartupTraceOutput="),
+			StartupDiagnosticTracePath);
+		if (StartupDiagnosticTracePath.IsEmpty())
+		{
+			StartupDiagnosticTracePath = FPaths::Combine(
+				FPaths::ProjectSavedDir(),
+				TEXT("ABTSReleaseDiagnostics"),
+				TEXT("StartupTrace.log"));
+		}
+		StartupDiagnosticTracePath = FPaths::ConvertRelativePathToFull(
+			StartupDiagnosticTracePath);
+		IFileManager::Get().MakeDirectory(
+			*FPaths::GetPath(StartupDiagnosticTracePath), true);
+		IFileManager::Get().Delete(*StartupDiagnosticTracePath, false, true);
+		NextStartupDiagnosticTraceSeconds = 0.0;
+	}
 
 	FString CapturePage;
 #if UE_BUILD_SHIPPING
@@ -230,6 +253,7 @@ void UABTSGameViewportClient::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	RefreshStartupWorldState();
+	WriteStartupDiagnosticTrace();
 	EnsureInitialMenuState();
 	if (bMenuVisible) ApplyMenuInputMode();
 	UpdateOpeningProductionCapture();
@@ -270,6 +294,67 @@ bool UABTSGameViewportClient::IsStartupPresentationReady(
 	return bWorldAuthorityReady
 		&& bPresentationSurfaceReady
 		&& CompletedFrontEndDraws >= 2;
+}
+
+void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
+{
+	if (!bStartupDiagnosticTraceEnabled || StartupDiagnosticTracePath.IsEmpty())
+	{
+		return;
+	}
+
+	const double NowSeconds = FPlatformTime::Seconds();
+	UWorld* GameWorld = GetWorld();
+	const bool bHasBegunPlay = GameWorld != nullptr && GameWorld->HasBegunPlay();
+	const bool bPaused = GameWorld != nullptr
+		&& UGameplayStatics::IsGamePaused(GameWorld);
+	int32 GateCount = 0;
+	TArray<FString> GateStates;
+	if (GameWorld != nullptr)
+	{
+		for (TActorIterator<AABTSM6SlingshotSystem> It(GameWorld); It; ++It)
+		{
+			++GateCount;
+			GateStates.Add(It->BuildStartupPhysicsDiagnosticSummary());
+		}
+	}
+	const FString State = FString::Printf(
+		TEXT("World=%s BegunPlay=%d WorldSeconds=%.3f Paused=%d")
+		TEXT(" FrontEnd=%d MenuVisible=%d MenuPage=%d Canvas=%d")
+		TEXT(" GateCount=%d GateRequired=%d AuthorityReady=%d")
+		TEXT(" PresentationReady=%d WorldReady=%d WorldFailed=%d Draws=%d Gates=[%s]"),
+		GameWorld != nullptr ? *GameWorld->GetName() : TEXT("None"),
+		bHasBegunPlay ? 1 : 0,
+		GameWorld != nullptr ? GameWorld->GetTimeSeconds() : -1.0f,
+		bPaused ? 1 : 0,
+		bStartupFrontEndRequired ? 1 : 0,
+		bMenuVisible ? 1 : 0,
+		static_cast<int32>(MenuPage),
+		MenuCanvas != nullptr ? 1 : 0,
+		GateCount,
+		bStartupGateRequired ? 1 : 0,
+		bStartupAuthorityReady ? 1 : 0,
+		bStartupPresentationReady ? 1 : 0,
+		bStartupWorldReady ? 1 : 0,
+		bStartupWorldFailed ? 1 : 0,
+		StartupReadyPresentationFrameCount,
+		*FString::Join(GateStates, TEXT(" | ")));
+	if (NowSeconds < NextStartupDiagnosticTraceSeconds)
+	{
+		return;
+	}
+	NextStartupDiagnosticTraceSeconds = NowSeconds + 2.0;
+	const FString Line = FString::Printf(
+		TEXT("Elapsed=%.3f Build=%s %s\n"),
+		NowSeconds - StartupForegroundStartSeconds,
+		UE_BUILD_SHIPPING ? TEXT("Shipping") : TEXT("NonShipping"),
+		*State);
+	FFileHelper::SaveStringToFile(
+		Line,
+		*StartupDiagnosticTracePath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
+		&IFileManager::Get(),
+		FILEWRITE_Append);
 }
 
 bool UABTSGameViewportClient::ShouldKeepWorldTickingForStartup(
@@ -607,15 +692,19 @@ void UABTSGameViewportClient::ApplyMenuInputMode()
 		MenuPlayerController = PC;
 	}
 	// The foreground owns input during startup, but the authoritative M3/M7/M6
-	// generation and Chaos gates still need World Tick. Pause only at a terminal
-	// Ready/Failed state (or for an ordinary menu without a startup gate).
-	if (!bWorldWasPaused)
+	// generation and Chaos gates still need World Tick.  Do not let a pause that
+	// predates input-state capture (including the transient packaged-startup
+	// pause) deadlock the authority actors.  While this menu is visible it owns
+	// the active pause state; RestoreGameplayInputMode restores the state that
+	// was captured before ownership began.
+	const bool bStartupGenerationRunning = ShouldKeepWorldTickingForStartup(
+		bStartupFrontEndRequired,
+		bStartupWorldReady,
+		bStartupWorldFailed);
+	const bool bShouldPauseForMenu = !bStartupGenerationRunning;
+	if (UGameplayStatics::IsGamePaused(GameWorld) != bShouldPauseForMenu)
 	{
-		const bool bStartupGenerationRunning = ShouldKeepWorldTickingForStartup(
-			bStartupFrontEndRequired,
-			bStartupWorldReady,
-			bStartupWorldFailed);
-		PC->SetPause(!bStartupGenerationRunning);
+		PC->SetPause(bShouldPauseForMenu);
 	}
 	PC->bShowMouseCursor = true;
 	FInputModeGameAndUI InputMode;
@@ -630,7 +719,13 @@ void UABTSGameViewportClient::RestoreGameplayInputMode()
 	if (!PC && GEngine && GetWorld()) PC = GEngine->GetFirstLocalPlayerController(GetWorld());
 	if (PC)
 	{
-		if (!bWorldWasPaused) PC->SetPause(false);
+		if (UWorld* GameWorld = PC->GetWorld())
+		{
+			if (UGameplayStatics::IsGamePaused(GameWorld) != bWorldWasPaused)
+			{
+				PC->SetPause(bWorldWasPaused);
+			}
+		}
 		PC->bShowMouseCursor = bPreviousMouseCursor;
 		if (bPreviousMouseCursor) PC->SetInputMode(FInputModeGameAndUI());
 		else PC->SetInputMode(FInputModeGameOnly());

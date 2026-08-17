@@ -101,6 +101,7 @@ private:
 
 	void EnsureInitialMenuState();
 	void RefreshStartupWorldState();
+	void WriteStartupDiagnosticTrace();
 	bool IsStartupInputBlocked() const;
 	void SetMenuVisible(bool bVisible, EABTSSystemMenuPage NewPage);
 	void ApplyMenuInputMode();
@@ -175,8 +176,11 @@ private:
 	double OpeningProductionCaptureStartSeconds = 0.0;
 	float OpeningProductionCaptureDelaySeconds = 8.0f;
 	double StartupForegroundStartSeconds = 0.0;
+	double NextStartupDiagnosticTraceSeconds = 0.0;
 	double VideoConfirmationDeadlineSeconds = 0.0;
 	FString CaptureOutputPath;
+	FString StartupDiagnosticTracePath;
+	bool bStartupDiagnosticTraceEnabled = false;
 	FDelegateHandle ScreenshotDelegateHandle;
 	TWeakObjectPtr<APlayerController> MenuPlayerController;
 	TWeakObjectPtr<UWorld> StartupTrackedWorld;

@@ -820,3 +820,50 @@ void AABTSM6SlingshotSystem::FinishStartupPhysicsWarmup(const FABTSM6PhysicsActi
 		BuildingValidation.Accepted, BuildingValidation.Rejected, BuildingValidation.NotRequired,
 		BuildingValidation.ExpectedRequired, BuildingValidation.RegisteredRequired);
 }
+
+FString AABTSM6SlingshotSystem::BuildStartupPhysicsDiagnosticSummary() const
+{
+	FABTSM73StartupValidationSummary BuildingValidation;
+	if (UWorld* World = GetWorld())
+	{
+		BuildingValidation = GetBuildingValidationSummary(
+			*World,
+			bRequiredBuildingContractActive,
+			bRequiredBuildingContractSealed,
+			bRequiredBuildingSetupRejected,
+			ExpectedRequiredBuildingCount,
+			RequiredBuildingActors);
+	}
+
+	const EABTSM6BuildingValidationGate BuildingGate =
+		BuildingValidation.GetGate();
+	return FString::Printf(
+		TEXT("Enabled=%d Started=%d Complete=%d Failed=%d Dependencies=%d")
+		TEXT(" BuildingPhase=%d HISMTotal=%d HISMPromoted=%d HISMBatch=%d")
+		TEXT(" HISMTimedOut=%d DynamicProxies=%d BuildingGate=%d")
+		TEXT(" BuildingPending=%d BuildingRunning=%d BuildingAccepted=%d")
+		TEXT(" BuildingRejected=%d BuildingNotRequired=%d Contract=%d")
+		TEXT(" Sealed=%d SetupRejected=%d Expected=%d Registered=%d"),
+		bEnableStartupPhysicsWarmup ? 1 : 0,
+		bStartupPhysicsWarmupStarted ? 1 : 0,
+		bStartupPhysicsWarmupComplete ? 1 : 0,
+		bStartupPhysicsWarmupFailed ? 1 : 0,
+		(Party.IsValid() && Planet.IsValid()) ? 1 : 0,
+		bStartupBuildingSettlementActive ? 1 : 0,
+		StartupHISMWarmupTotalCandidates,
+		StartupHISMWarmupPromotedTotal,
+		StartupHISMWarmupBatchIndex,
+		StartupHISMWarmupTimedOutBatches,
+		DynamicProxies.Num(),
+		static_cast<int32>(BuildingGate),
+		BuildingValidation.Pending,
+		BuildingValidation.Running,
+		BuildingValidation.Accepted,
+		BuildingValidation.Rejected,
+		BuildingValidation.NotRequired,
+		BuildingValidation.bContractActive ? 1 : 0,
+		BuildingValidation.bContractSealed ? 1 : 0,
+		BuildingValidation.bSetupRejected ? 1 : 0,
+		BuildingValidation.ExpectedRequired,
+		BuildingValidation.RegisteredRequired);
+}

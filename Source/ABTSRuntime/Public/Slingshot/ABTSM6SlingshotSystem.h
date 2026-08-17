@@ -170,6 +170,11 @@ public:
 	bool IsStartupPhysicsWarmupComplete() const { return !bEnableStartupPhysicsWarmup || bStartupPhysicsWarmupComplete; }
 	/** Fail-closed terminal state used by the startup foreground instead of enabling gameplay. */
 	bool HasStartupPhysicsWarmupFailed() const { return bStartupPhysicsWarmupFailed; }
+	/**
+	 * Project-owned, read-only startup state used by an explicitly requested
+	 * packaged-build diagnostic trace. It never changes warmup behaviour.
+	 */
+	FString BuildStartupPhysicsDiagnosticSummary() const;
 	/** The location is the final settled landing point captured before return flight begins. */
 	FABTSM6LaunchCompletedNative& OnLaunchCompleted() { return LaunchCompletedNative; }
 	FABTSM6CalibrationLaunchRecordedNative& OnCalibrationLaunchRecorded()
