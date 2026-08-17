@@ -146,29 +146,20 @@ void AABTSM6SlingshotSystem::UpdatePhysicsSettlement(const float DeltaSeconds)
 	}
 	else if (Result == EABTSM6PhysicsSettleResult::TimedOut)
 	{
-		if (Summary.ActiveBodyCount > 0)
-		{
-			// A timeout is not a settled-state certificate.  The former path
-			// crossed directly into Walk and converted every still-awake building
-			// brick to query-only analytic motion.  That changed collision semantics
-			// exactly at the mode boundary, allowing roofs to fall, bricks to pass
-			// through one another, and unsupported beams to be frozen later.  Keep
-			// authoritative Chaos running and start a fresh bounded observation
-			// window; return is allowed only after the normal stable-hold gate.
-			UE_LOG(LogABTSRuntime, Warning,
-				TEXT("[ABTS][M6][Settle] TimeoutDeferredReturn Bodies=%d Moving=%d Awake=%d MaxLinear=%.1f MaxAngular=%.1f Elapsed=%.2f Grounded=%d Reason=ActiveBodiesRequireStableHold"),
-				Summary.ActiveBodyCount, Summary.MovingBodyCount,
-				Summary.AwakeBodyCount,
-				Summary.MaximumLinearSpeedCMPerSec,
-				Summary.MaximumAngularSpeedDegPerSec,
-				Summary.SettlementElapsedSeconds,
-				bLandingSupported ? 1 : 0);
-			PhysicsSettleMonitor.BeginSettlement(Now);
-			return;
-		}
+		// Repeated zero-speed contacts (for example a bird resting against a
+		// building) can keep refreshing activity forever.  The flight lifecycle
+		// must therefore retain a hard upper bound.  BeginReturn now freezes every
+		// live building body at its current Chaos transform while preserving
+		// QueryAndPhysics collision, so the old query-only analytic fallback is no
+		// longer needed to make this bounded transition.
 		UE_LOG(LogABTSRuntime, Warning,
-			TEXT("[ABTS][M6][Settle] TimeoutWithoutActiveBodies Elapsed=%.2f Grounded=%d"),
-			Summary.SettlementElapsedSeconds, bLandingSupported ? 1 : 0);
+			TEXT("[ABTS][M6][Settle] TimeoutBoundedReturn Bodies=%d Moving=%d Awake=%d MaxLinear=%.1f MaxAngular=%.1f Elapsed=%.2f Grounded=%d CollisionSemantics=PreservedQueryAndPhysics"),
+			Summary.ActiveBodyCount, Summary.MovingBodyCount,
+			Summary.AwakeBodyCount,
+			Summary.MaximumLinearSpeedCMPerSec,
+			Summary.MaximumAngularSpeedDegPerSec,
+			Summary.SettlementElapsedSeconds,
+			bLandingSupported ? 1 : 0);
 		BeginReturn();
 	}
 }
