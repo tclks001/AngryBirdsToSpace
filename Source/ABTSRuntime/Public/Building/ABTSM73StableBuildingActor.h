@@ -268,6 +268,40 @@ public:
 		AABTSM7BuildingModule& TriggerModule,
 		float ImpactRadiusCM,
 		FString& OutError);
+	/**
+	 * Queues one radial blast as a single building-scoped epoch.  The caller
+	 * supplies world-space blast authority; this actor resolves stable BrickIds
+	 * once, before any individual brick is broken or promoted.
+	 */
+	bool QueueJuryDemoFixedSixRadialDamage(
+		const FVector& OriginWorldCM,
+		float ImpactRadiusCM,
+		FString& OutError);
+	/**
+	 * Records a confirmed topology mutation before the source module is
+	 * destroyed.  Unlike an ordinary dynamic contact this must re-derive the
+	 * remaining frozen support graph, but it still coalesces into one epoch.
+	 */
+	bool QueueJuryDemoFixedSixTopologyMutation(
+		AABTSM7BuildingModule& MutatedModule,
+		FString& OutError);
+	/**
+	 * Material-system blast authority must be checked against this actor's
+	 * immutable Fixed-Six runtime ledger, rather than inferring ownership from
+	 * a transient module Actor owner.
+	 */
+	bool IsJuryDemoFixedSixRegisteredRuntimeModule(
+		const AABTSM7BuildingModule& Module,
+		const AABTSM7BuildingMaterialSystem& ExpectedMaterialSystem) const;
+	/** Read-only damage-epoch observability for automation and aggregation logs. */
+	int32 GetJuryDemoFixedSixQueuedDamageSeedCountForValidation() const
+	{
+		return JuryDemoFixedSixQueuedDamageSeedBrickIds.Num();
+	}
+	uint64 GetJuryDemoFixedSixDamageEpochForValidation() const
+	{
+		return JuryDemoFixedSixDamageEpoch;
+	}
 	/** Promotes one visible overflow brick for an explicit bird/device impact. */
 	bool PromoteJuryDemoFixedSixOverflowForDirectImpact(
 		AABTSM7BuildingModule& Module, FString& OutError);
@@ -430,13 +464,20 @@ private:
 		FString& OutError) const;
 	/** Frozen-geometry support closure used only by destructive gameplay, never by static certification. */
 	bool BuildJuryDemoFixedSixSupportClosure(
-		TConstArrayView<AABTSM7BuildingModule*> SeedModules,
+		TConstArrayView<int32> SeedBrickIds,
 		TArray<AABTSM7BuildingModule*>& OutPhysicsModules,
 		TArray<int32>* OutAffectedBrickIds,
 		FString& OutError) const;
-	bool ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+	bool ResolveJuryDemoFixedSixImpactSeedBrickIds(
 		TConstArrayView<AABTSM7BuildingModule*> TriggerModules,
 		float ImpactRadiusCM,
+		TArray<int32>& OutSeedBrickIds,
+		FString& OutError) const;
+	bool QueueJuryDemoFixedSixDamageBrickIds(
+		TConstArrayView<int32> SeedBrickIds,
+		FString& OutError);
+	bool ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+		TConstArrayView<int32> TriggerBrickIds,
 		uint64 DamageEpoch,
 		FString& OutError);
 	void ResolveQueuedJuryDemoFixedSixDamageTransaction();
@@ -621,10 +662,8 @@ private:
 	uint64 JuryDemoFixedSixChaosActivationFrame = 0;
 	int32 JuryDemoFixedSixActivePhysicsBodyCount = 0;
 	TSet<int32> JuryDemoFixedSixRemovedSupportBrickIds;
-	/** One stable building-scoped batch, resolved once from Tick. */
-	TArray<TWeakObjectPtr<AABTSM7BuildingModule>>
-		JuryDemoFixedSixQueuedDamageSeeds;
-	float JuryDemoFixedSixQueuedDamageRadiusCM = 0.0f;
+	/** One stable building-scoped BrickId batch, resolved once from Tick. */
+	TArray<int32> JuryDemoFixedSixQueuedDamageSeedBrickIds;
 	uint64 JuryDemoFixedSixDamageEpoch = 0;
 	/** Stable BrickId order; entries remain visible and independent until promoted. */
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> JuryDemoFixedSixOverflowKinematicModules;

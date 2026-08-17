@@ -933,6 +933,19 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 		if (AABTSM73StableBuildingActor* Building =
 			Module.GetDamageLifecycleOwner())
 		{
+			// This is a confirmed topology mutation, not another contact sample.
+			// Capture its stable frozen BrickId while the actor still exists; the
+			// building resolves one coalesced closure after all same-frame breaks.
+			FString TopologyError;
+			if (!Building->QueueJuryDemoFixedSixTopologyMutation(
+				Module, TopologyError))
+			{
+				UE_LOG(LogABTSRuntime, Error,
+					TEXT("[ABTS][M7][DamageEpoch][TopologySeedRejected]")
+					TEXT(" Module=%s Reason=%s"),
+					*Module.GetName(), *TopologyError);
+				return false;
+			}
 			Building->NotifyJuryDemoE1ModuleDamage(
 				Module, Cause, true, NormalSpeedCMPerSec);
 		}
@@ -1215,33 +1228,23 @@ void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent*
 void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, const float DestroyRadiusCM, const float ImpulseRadiusCM, const float ImpulseSpeedCMPerSec)
 {
 	MarkPhysicsActivity();
-	// Fixed-six modules are caller-held static actors, so they are intentionally
-	// absent from Modules until their first gameplay promotion. Discover one
-	// deterministic seed per touched building before applying the radial effect;
-	// the building expands that seed to its exact no-floating support closure.
+	// Fixed-six modules are intentionally absent from Modules until their first
+	// gameplay promotion. Their Actor owner is not a blast authority: use the
+	// owning building's immutable runtime ledger plus this MaterialSystem
+	// identity, then discover one deterministic building entry before applying
+	// the radial effect.
 	TMap<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*> BlastSeeds;
 	for (TActorIterator<AABTSM7BuildingModule> It(GetWorld()); It; ++It)
 	{
 		AABTSM7BuildingModule* Candidate = *It;
 		AABTSM73StableBuildingActor* Building = Candidate != nullptr
 			? Candidate->GetDamageLifecycleOwner() : nullptr;
-		if (Candidate == nullptr || Candidate->GetOwner() != this
-			|| Building == nullptr || Candidate->IsBroken() || Candidate->IsRecycled()
+		if (Candidate == nullptr || Building == nullptr
+			|| !Building->IsJuryDemoFixedSixRegisteredRuntimeModule(*Candidate, *this)
 			|| FVector::DistSquared(Candidate->GetActorLocation(), Origin)
 				> FMath::Square(ImpulseRadiusCM))
 		{
 			continue;
-		}
-		if (Candidate->IsOverflowKinematic())
-		{
-			const FVector Delta = Candidate->GetActorLocation() - Origin;
-			const float ImpactSpeed = ImpulseSpeedCMPerSec * (1.0f
-				- Delta.Size() / FMath::Max(1.0f, ImpulseRadiusCM));
-			const FABTSM7MaterialProfile& Profile =
-				GetProfile(Candidate->GetBuildingMaterial());
-			Candidate->AddOverflowKinematicImpact(Delta.GetSafeNormal() * ImpactSpeed,
-				Delta.GetSafeNormal() * 120.0f, ComputeDamageGain(Profile,
-					ImpactSpeed, Profile.BreakSpeedCMPerSec));
 		}
 		AABTSM7BuildingModule*& Existing = BlastSeeds.FindOrAdd(Building);
 		if (Existing == nullptr
@@ -1276,8 +1279,11 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 	for (const TPair<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*>& Pair : SortedBlastSeeds)
 	{
 		FString ClosureError;
-		if (!Pair.Key->QueueJuryDemoFixedSixDamageSeed(
-			*Pair.Value, ImpulseRadiusCM, ClosureError))
+		// A black-bird blast is one world event.  Resolve its full radial BrickId
+		// set once per owning building before per-brick material damage can break
+		// actors; this is deliberately not one closure per touched module.
+		if (!Pair.Key->QueueJuryDemoFixedSixRadialDamage(
+			Origin, ImpulseRadiusCM, ClosureError))
 		{
 			UE_LOG(LogABTSRuntime, Error,
 				TEXT("[ABTS][M7][DamageEpoch][BlastSeedRejected] Building=%s Seed=%d Reason=%s"),
@@ -1295,6 +1301,36 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 		TEXT(" Radius=%.1f Discovered=%d Queued=%d Rejected=%d SameTransaction=1"),
 		ImpulseRadiusCM, SortedBlastSeeds.Num(), PromotedBlastBuildingCount,
 		RejectedBlastBuildings.Num());
+	TSet<const AABTSM7BuildingModule*> FixedSixBlastModules;
+	for (TActorIterator<AABTSM7BuildingModule> It(GetWorld()); It; ++It)
+	{
+		AABTSM7BuildingModule* Module = *It;
+		AABTSM73StableBuildingActor* Building = Module != nullptr
+			? Module->GetDamageLifecycleOwner() : nullptr;
+		if (Module == nullptr || Building == nullptr
+			|| !Building->IsJuryDemoFixedSixRegisteredRuntimeModule(*Module, *this)
+			|| RejectedBlastBuildings.Contains(Building))
+		{
+			continue;
+		}
+		const FVector Delta = Module->GetActorLocation() - Origin;
+		if (Delta.SizeSquared() > FMath::Square(ImpulseRadiusCM))
+		{
+			continue;
+		}
+		FixedSixBlastModules.Add(Module);
+		const FABTSM7MaterialProfile& Profile =
+			GetProfile(Module->GetBuildingMaterial());
+		const float ImpactSpeed = ImpulseSpeedCMPerSec * (1.0f
+			- Delta.Size() / FMath::Max(1.0f, ImpulseRadiusCM));
+		const float DamageSpeed = Delta.SizeSquared()
+			<= FMath::Square(DestroyRadiusCM)
+			? FMath::Max(ImpactSpeed, Profile.BreakSpeedCMPerSec * 1.35f)
+			: ImpactSpeed;
+		ApplyImpactToModule(*Module, DamageSpeed, Delta,
+			EABTSBirdId::Black, EABTSM73E1DamageCause::BirdImpact,
+			/*bApplyGameplayTransferImpulse=*/true);
+	}
 	for (UHierarchicalInstancedStaticMeshComponent* HISM : {WoodBrickHISM.Get(), StoneBrickHISM.Get(), IronBrickHISM.Get(), GlassBrickHISM.Get(), CrystalBrickHISM.Get()})
 	{
 		TArray<int32> Indices = HISM->GetInstancesOverlappingSphere(Origin, ImpulseRadiusCM, true);
@@ -1310,6 +1346,7 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : Snapshot) if (AABTSM7BuildingModule* Module = Weak.Get())
 	{
 		if (Module->IsRecycled()) continue;
+		if (FixedSixBlastModules.Contains(Module)) continue;
 		if (RejectedBlastBuildings.Contains(Module->GetDamageLifecycleOwner()))
 		{
 			// A rejected closure cannot fall through to partial damage on a
