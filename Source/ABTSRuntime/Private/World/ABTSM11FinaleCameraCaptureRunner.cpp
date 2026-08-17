@@ -794,6 +794,10 @@ bool AABTSM11FinaleCameraCaptureRunner::Initialize(
 	bObservationCsvWritten = false;
 	ABTSM11FinaleCameraDirector::SetM2Enabled(Config.bDirectorM2);
 	ABTSM11FinaleCameraDirector::SetM3Enabled(Config.bDirectorM3);
+	InteractionSystem->SetNextReleaseCameraDirectorModeOverride(
+		ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(
+			Config.bDirectorM2,
+			Config.bDirectorM3));
 	FABTSStylizedRenderingControl::SetEnabled(Config.bStylized);
 	FABTSStylizedRenderingControl::SetProfile(
 		Config.bMirrorMainWorldEnvironment
@@ -2827,6 +2831,12 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 			Config,
 			&Failure));
 	TestFalse(TEXT("Disabled command line remains disabled"), Config.bEnabled);
+	TestEqual(TEXT("Capture defaults remain an explicit Legacy override"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(
+				Config.bDirectorM2,
+				Config.bDirectorM3)),
+		static_cast<uint8>(EABTSM11FinaleCameraDirectorMode::Legacy));
 
 	const FString Output = FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("M11CaptureTest")));
@@ -2849,6 +2859,13 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestFalse(TEXT("Visual capture is not telemetry-only"), Config.bTelemetryOnly);
 	TestTrue(TEXT("M2 director preserved"), Config.bDirectorM2);
 	TestFalse(TEXT("M3 director remains disabled"), Config.bDirectorM3);
+	TestEqual(TEXT("M2 capture config resolves to its explicit frozen mode"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(
+				Config.bDirectorM2,
+				Config.bDirectorM3)),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::Assist1OnlyM2));
 	TestFalse(TEXT("Auto-exit override preserved"), Config.bAutoExit);
 	TestEqual(
 		TEXT("JPG capture protocol preserved"),
@@ -2882,6 +2899,13 @@ bool FABTSM11FinaleCameraCaptureConfigTest::RunTest(
 	TestFalse(TEXT("Telemetry style is disabled"), Config.bStylized);
 	TestTrue(TEXT("Telemetry-only mode preserved"), Config.bTelemetryOnly);
 	TestTrue(TEXT("Telemetry M3 director preserved"), Config.bDirectorM3);
+	TestEqual(TEXT("M3 capture config resolves to its explicit frozen mode"),
+		static_cast<uint8>(
+			ABTSM11FinaleCameraDirector::ResolveCaptureDirectorMode(
+				Config.bDirectorM2,
+				Config.bDirectorM3)),
+		static_cast<uint8>(
+			EABTSM11FinaleCameraDirectorMode::MultiAssistM3));
 
 	const FString Rank12MirrorCommandLine = FString::Printf(
 		TEXT("-ABTSM11CameraCapture -ABTSM11CaptureRank=12 ")

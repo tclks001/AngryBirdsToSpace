@@ -528,8 +528,17 @@ void AABTSM11FinalePostHitCinematicPreview::BeginPlay()
 	InitializeUFOPresentation();
 	if (!bRealUFODebrisReady)
 	{
-		FinishPreview(false, false, TEXT("RealGeometryCollectionDebrisUnavailable"));
-		return;
+		/*
+		 * Production completion must not disappear solely because the optional
+		 * Chaos presentation asset is unavailable in this build.  The intact
+		 * fallback mesh keeps the authored camera/bird timeline alive; when the
+		 * shared Geometry Collection is present, the existing real-debris path
+		 * remains unchanged.
+		 */
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-D][PostHitPreview] RealDebrisUnavailable; continuing with static UFO fallback."));
 	}
 	if (bProductionBinding
 		&& (!ProductionController.IsValid()
@@ -1044,7 +1053,9 @@ bool AABTSM11FinalePostHitCinematicPreview::UpdateUFOAndDebris()
 		UFOIntactVisual->SetVisibility(Pose.bIntactVisible, true);
 	}
 	FallbackUFOVisual->SetVisibility(
-		UFOIntactVisual == nullptr && Pose.bIntactVisible,
+		UFOIntactVisual == nullptr
+			&& (Pose.bIntactVisible
+				|| (!bRealUFODebrisReady && Pose.bBrokenVisible)),
 		true);
 	if (UFOBrokenVisual != nullptr)
 	{
@@ -1055,6 +1066,7 @@ bool AABTSM11FinalePostHitCinematicPreview::UpdateUFOAndDebris()
 		>= FABTSM11FinalePostHitCinematicEvaluator::ImpactBreakCueSeconds
 			+ ABTSM11PostHitPreviewPrivate::RealDebrisActivationDelaySeconds;
 	if (Pose.bBrokenVisible && bActivationTimeReached
+		&& bRealUFODebrisReady
 		&& !bRealUFODebrisActivated
 		&& !ActivateRealUFODebris())
 	{
