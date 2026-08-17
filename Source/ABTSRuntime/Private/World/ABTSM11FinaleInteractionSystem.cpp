@@ -19,10 +19,12 @@
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Party/ABTSBirdParty.h"
 #include "Player/ABTSM25BirdCharacter.h"
+#include "Presentation/ABTSCinematicPlaybackPolicy.h"
 #include "Slingshot/ABTSSlingshotVisualTypes.h"
 #include "UI/ABTSM11FinalePresentation.h"
 #include "World/ABTSM11FinaleActors.h"
 #include "World/ABTSM11FinaleBirdTrailComponent.h"
+#include "World/ABTSM11FinalePostHitCinematicPreview.h"
 #include "World/ABTSM11FinaleSystem.h"
 #include "World/ABTSM51WorldActors.h"
 
@@ -1560,6 +1562,14 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 						.bUsesVisibleTerminalTransfer ? 1 : 0,
 					ReleasedPlaybackPlan
 						.bCandidateQualifiedIntercept ? 1 : 0);
+				if (!TryStartProductionPostHitCinematic())
+				{
+					UE_LOG(
+						LogABTSRuntime,
+						Error,
+						TEXT("[ABTS][M11-D][ProductionPostHit] Rejected Plan=0x%016llx GameplayTargetHitPreserved=1"),
+						ReleasedPlaybackPlan.PlanHash);
+				}
 			}
 			else if (ReleasedPlaybackPlan.bCandidateQualifiedIntercept)
 			{
@@ -1584,6 +1594,93 @@ void AABTSM11FinaleInteractionSystem::UpdatePlayback(
 				true);
 		}
 	}
+}
+
+bool AABTSM11FinaleInteractionSystem::TryStartProductionPostHitCinematic()
+{
+	if (bProductionPostHitCinematicAttempted)
+	{
+		return IsValid(ProductionPostHitCinematic)
+			|| FABTSCinematicPlaybackPolicy::ShouldSkipCinematics();
+	}
+	bProductionPostHitCinematicAttempted = true;
+	if (FABTSCinematicPlaybackPolicy::ShouldSkipCinematics())
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Log,
+			TEXT("[ABTS][M11-D][ProductionPostHit] DebugSkipped ShippingHardLock=%d"),
+			FABTSCinematicPlaybackPolicy::IsShippingPlaybackHardLocked() ? 1 : 0);
+		return true;
+	}
+	FString ContractFailure;
+	if (InteractionState != EABTSM11FinaleInteractionState::TargetHit
+		|| !ReleasedPlaybackPlan.bPhysicalTargetHit
+		|| ReleasedPlaybackPlan.bCandidateQualifiedIntercept
+		|| !IsValid(FinaleSystem)
+		|| FinaleSystem->IsEditorCandidateMode()
+		|| !ValidateInteractionContract(*FinaleSystem, &ContractFailure)
+		|| !IsValid(ActiveFinaleController.Get())
+		|| AttemptFormationBirds.Num() != 4
+		|| !IsValid(FinaleSystem->GetUFOActor())
+		|| GetWorld() == nullptr)
+	{
+		UE_LOG(
+			LogABTSRuntime,
+			Error,
+			TEXT("[ABTS][M11-D][ProductionPostHit] GateRejected State=%d Physical=%d Candidate=%d Contract=%s Controller=%d Birds=%d UFO=%d"),
+			static_cast<int32>(InteractionState),
+			ReleasedPlaybackPlan.bPhysicalTargetHit ? 1 : 0,
+			IsValid(FinaleSystem) && FinaleSystem->IsEditorCandidateMode() ? 1 : 0,
+			ContractFailure.IsEmpty() ? TEXT("Unavailable") : *ContractFailure,
+			IsValid(ActiveFinaleController.Get()) ? 1 : 0,
+			AttemptFormationBirds.Num(),
+			IsValid(FinaleSystem) && IsValid(FinaleSystem->GetUFOActor()) ? 1 : 0);
+		return false;
+	}
+
+	AABTSM11UFOActor* UFO = FinaleSystem->GetUFOActor();
+	const FTransform SpawnTransform(
+		UFO->GetActorQuat(),
+		UFO->GetActorLocation(),
+		FVector::OneVector);
+	AABTSM11FinalePostHitCinematicPreview* Cinematic =
+		GetWorld()->SpawnActorDeferred<AABTSM11FinalePostHitCinematicPreview>(
+			AABTSM11FinalePostHitCinematicPreview::StaticClass(),
+			SpawnTransform,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!IsValid(Cinematic))
+	{
+		return false;
+	}
+	TArray<AABTSM25BirdCharacter*> Birds;
+	Birds.Reserve(AttemptFormationBirds.Num());
+	for (AABTSM25BirdCharacter* Bird : AttemptFormationBirds)
+	{
+		Birds.Add(Bird);
+	}
+	if (!Cinematic->ConfigureProductionBinding(
+			*ActiveFinaleController.Get(),
+			*UFO,
+			Birds))
+	{
+		Cinematic->Destroy();
+		return false;
+	}
+	Cinematic->FinishSpawning(SpawnTransform);
+	if (!IsValid(Cinematic) || Cinematic->IsActorBeingDestroyed())
+	{
+		return false;
+	}
+	ProductionPostHitCinematic = Cinematic;
+	UE_LOG(
+		LogABTSRuntime,
+		Log,
+		TEXT("[ABTS][M11-D][ProductionPostHit] Started Plan=0x%016llx Birds=4 CandidateSource=0 PhysicalTargetHit=1"),
+		ReleasedPlaybackPlan.PlanHash);
+	return true;
 }
 
 double AABTSM11FinaleInteractionSystem::GetPlaybackPresentationTimeScale() const

@@ -5,6 +5,7 @@
 #include "ABTSRuntime.h"
 #include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/PointLightComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -17,6 +18,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
@@ -28,6 +30,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Party/ABTSBirdTypes.h"
+#include "Player/ABTSM25BirdCharacter.h"
 #include "Presentation/ABTSBirdAnimationPresentationComponent.h"
 #include "Rendering/ABTSStylizedRenderingControl.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
@@ -528,12 +531,59 @@ void AABTSM11FinalePostHitCinematicPreview::BeginPlay()
 		FinishPreview(false, false, TEXT("RealGeometryCollectionDebrisUnavailable"));
 		return;
 	}
-	PreviewController = GetWorld() != nullptr
-		? GetWorld()->GetFirstPlayerController()
-		: nullptr;
+	if (bProductionBinding
+		&& (!ProductionController.IsValid()
+			|| !ProductionAuthoritativeUFO.IsValid()
+			|| ProductionBirdSources.Num() != 4
+			|| ProductionBirdInitialWorldTransforms.Num() != 4))
+	{
+		FinishPreview(false, false, TEXT("ProductionBindingDependenciesLost"));
+		return;
+	}
+	PreviewController = bProductionBinding
+		? ProductionController.Get()
+		: GetWorld() != nullptr
+			? GetWorld()->GetFirstPlayerController()
+			: nullptr;
+	if (bProductionBinding && IsValid(UFOPresentationActor)
+		&& IsValid(UFOIntactVisual))
+	{
+		UPrimitiveComponent* SourceUFOVisual =
+			ProductionAuthoritativeUFO->FindComponentByClass<UPrimitiveComponent>();
+		const float SourceRadius = IsValid(SourceUFOVisual)
+			? SourceUFOVisual->Bounds.SphereRadius : 0.0f;
+		const float ProxyRadius = UFOIntactVisual->Bounds.SphereRadius;
+		if (FMath::IsFinite(SourceRadius) && FMath::IsFinite(ProxyRadius)
+			&& SourceRadius > 1.0f && ProxyRadius > 1.0f)
+		{
+			UFOPresentationActor->SetActorRelativeScale3D(
+				UFOPresentationActor->GetActorRelativeScale3D()
+					* (SourceRadius / ProxyRadius));
+		}
+	}
 	if (PreviewController != nullptr)
 	{
 		SavedViewTarget = PreviewController->GetViewTarget();
+		if (bProductionBinding)
+		{
+			if (AHUD* HUD = PreviewController->GetHUD())
+			{
+				bProductionHUDInitiallyVisible = HUD->bShowHUD;
+				HUD->bShowHUD = false;
+			}
+			for (TWeakObjectPtr<USkeletalMeshComponent>& Source
+				: ProductionBirdSources)
+			{
+				if (Source.IsValid())
+				{
+					Source->SetVisibility(false, true);
+				}
+			}
+			bProductionUFOInitiallyHidden =
+				ProductionAuthoritativeUFO->IsHidden();
+			ProductionAuthoritativeUFO->SetActorHiddenInGame(true);
+			bProductionSourcesHidden = true;
+		}
 		PreviewController->SetViewTarget(this);
 	}
 	if (UABTSAudioWorldSubsystem* Audio = GetWorld() != nullptr
@@ -555,11 +605,15 @@ void AABTSM11FinalePostHitCinematicPreview::BeginPlay()
 	UE_LOG(
 		LogABTSRuntime,
 		Log,
-		TEXT("[ABTS][M11-D][PostHitPreview][Started] Duration=%.1f TimeScale=%.2f Capture=%d DebrisSource=GC_UFO_Broken DebrisPlayback=StagedNativeChaos LiveChaos=1 LightingRig=CameraRelativeThreePoint ExposureBias=%.2f MaterialOverride=0 GameplayMutation=0 MapBinding=0 ProductionBinding=0"),
+		TEXT("[ABTS][M11-D][PostHitPreview][Started] Duration=%.1f TimeScale=%.2f Capture=%d DebrisSource=GC_UFO_Broken DebrisPlayback=StagedNativeChaos LiveChaos=1 LightingRig=CameraRelativeThreePoint ExposureBias=%.2f MaterialOverride=0 GameplayMutation=%d MapBinding=%d ProductionBinding=%d FirstFrameRealBirdsExact=%d"),
 		FABTSM11FinalePostHitCinematicEvaluator::DurationSeconds,
 		PreviewTimeScale,
 		bCaptureEnabled ? 1 : 0,
-		FABTSM11FinalePostHitCinematicEvaluator::CinematicExposureBias);
+		FABTSM11FinalePostHitCinematicEvaluator::CinematicExposureBias,
+		bProductionBinding ? 1 : 0,
+		bProductionBinding ? 1 : 0,
+		bProductionBinding ? 1 : 0,
+		bProductionBinding ? 1 : 0);
 }
 
 void AABTSM11FinalePostHitCinematicPreview::Tick(const float DeltaSeconds)
@@ -677,6 +731,56 @@ bool AABTSM11FinalePostHitCinematicPreview::ConfigureOffscreenCapture(
 	CaptureHeight = InHeight;
 	CaptureJpegQuality = InJpegQuality;
 	bCaptureEnabled = true;
+	PreviewTimeScale = 1.0f;
+	return true;
+}
+
+bool AABTSM11FinalePostHitCinematicPreview::ConfigureProductionBinding(
+	APlayerController& InController,
+	AActor& InAuthoritativeUFO,
+	const TArray<AABTSM25BirdCharacter*>& InBirds)
+{
+	if (HasActorBegunPlay() || bCaptureEnabled || InBirds.Num() != 4)
+	{
+		return false;
+	}
+	TArray<TWeakObjectPtr<USkeletalMeshComponent>> Sources;
+	TArray<FTransform> InitialTransforms;
+	TArray<uint8> InitialVisibility;
+	Sources.SetNum(4);
+	InitialTransforms.SetNum(4);
+	InitialVisibility.SetNumZeroed(4);
+	for (AABTSM25BirdCharacter* Bird : InBirds)
+	{
+		if (!IsValid(Bird))
+		{
+			return false;
+		}
+		const int32 BirdIndex = static_cast<int32>(Bird->GetBirdId());
+		USkeletalMeshComponent* Visual = Bird->GetBirdVisual();
+		if (BirdIndex < 0 || BirdIndex >= 4 || !IsValid(Visual)
+			|| Sources[BirdIndex].IsValid())
+		{
+			return false;
+		}
+		Sources[BirdIndex] = Visual;
+		InitialTransforms[BirdIndex] = Visual->GetComponentTransform();
+		InitialVisibility[BirdIndex] =
+			Visual->IsVisible() && !Visual->bHiddenInGame ? 1 : 0;
+	}
+	for (const TWeakObjectPtr<USkeletalMeshComponent>& Source : Sources)
+	{
+		if (!Source.IsValid())
+		{
+			return false;
+		}
+	}
+	ProductionController = &InController;
+	ProductionAuthoritativeUFO = &InAuthoritativeUFO;
+	ProductionBirdSources = MoveTemp(Sources);
+	ProductionBirdInitialWorldTransforms = MoveTemp(InitialTransforms);
+	ProductionBirdInitialVisibility = MoveTemp(InitialVisibility);
+	bProductionBinding = true;
 	PreviewTimeScale = 1.0f;
 	return true;
 }
@@ -888,10 +992,35 @@ void AABTSM11FinalePostHitCinematicPreview::UpdateBirds(
 				ElapsedSeconds,
 				static_cast<EABTSM11FinalePostHitBird>(Index));
 		Visual->SetVisibility(Pose.bVisible, true);
-		Visual->SetRelativeLocation(Pose.LocalPosition);
-		Visual->SetRelativeRotation(
-			ResolveBirdVisualRotation(Pose.LocalFacing));
-		Visual->SetRelativeScale3D(FVector(4.0f * Pose.VisualScale));
+		const FTransform AuthoredRelativeTransform(
+			ResolveBirdVisualRotation(Pose.LocalFacing),
+			Pose.LocalPosition,
+			FVector(4.0f * Pose.VisualScale));
+		if (bProductionBinding && Index < 4
+			&& ProductionBirdInitialWorldTransforms.IsValidIndex(Index))
+		{
+			const float RawAlpha = FMath::Clamp(
+				ElapsedSeconds
+					/ FABTSM11FinalePostHitCinematicEvaluator::ImpactEndSeconds,
+				0.0f,
+				1.0f);
+			const float BlendAlpha = RawAlpha * RawAlpha
+				* (3.0f - 2.0f * RawAlpha);
+			FTransform BlendedTransform;
+			BlendedTransform.Blend(
+				ProductionBirdInitialWorldTransforms[Index],
+				AuthoredRelativeTransform * GetActorTransform(),
+				BlendAlpha);
+			Visual->SetWorldTransform(
+				BlendedTransform,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+		}
+		else
+		{
+			Visual->SetRelativeTransform(AuthoredRelativeTransform);
+		}
 		if (AnimationDrivers.IsValidIndex(Index)
 			&& AnimationDrivers[Index] != nullptr)
 		{
@@ -1056,6 +1185,15 @@ void AABTSM11FinalePostHitCinematicPreview::UpdateCamera()
 			LookDirection,
 			GetActorUpVector()).ToQuat());
 	CinematicCamera->SetFieldOfView(Pose.FieldOfViewDegrees);
+	if (bProductionBinding && IsValid(PreviewController)
+		&& IsValid(PreviewController->PlayerCameraManager))
+	{
+		PreviewController->PlayerCameraManager->SetManualCameraFade(
+			Pose.FadeToBlackAlpha,
+			FLinearColor::Black,
+			false);
+		bProductionCameraFadeActive = Pose.FadeToBlackAlpha > 0.0f;
+	}
 }
 
 void AABTSM11FinalePostHitCinematicPreview::UpdateLighting()
@@ -1188,6 +1326,10 @@ void AABTSM11FinalePostHitCinematicPreview::FinishPreview(
 	}
 	RestoreCaptureGlobals();
 	RestoreGeometryCollectionRenderer();
+	if (bProductionBinding)
+	{
+		RestoreProductionSources(!bFinalSuccess);
+	}
 	if (PreviewController != nullptr && SavedViewTarget != nullptr
 		&& PreviewController->GetViewTarget() == this)
 	{
@@ -1204,14 +1346,17 @@ void AABTSM11FinalePostHitCinematicPreview::FinishPreview(
 		? GetCaptureVideoPath()
 		: TEXT("None");
 	const FString CompletionSummary = FString::Printf(
-		TEXT("[ABTS][M11-D][PostHitPreview][Completed] Success=%d Elapsed=%.2f Capture=%d Frames=%d Reason=%s Artifact=%s DebrisSource=GC_UFO_Broken RealGeometryCollectionDebris=%d DebrisPlayback=StagedNativeChaos GameplayMutation=0 ProductionBinding=0"),
+		TEXT("[ABTS][M11-D][PostHitPreview][Completed] Success=%d Elapsed=%.2f Capture=%d Frames=%d Reason=%s Artifact=%s DebrisSource=GC_UFO_Broken RealGeometryCollectionDebris=%d DebrisPlayback=StagedNativeChaos GameplayMutation=%d ProductionBinding=%d AuthoritativeUFORetired=%d"),
 		bFinalSuccess ? 1 : 0,
 		ElapsedSeconds,
 		bCaptureEnabled ? 1 : 0,
 		CapturedFrameCount,
 		*FinalReason,
 		*Artifact,
-		bRealUFODebrisActivated ? 1 : 0);
+		bRealUFODebrisActivated ? 1 : 0,
+		bProductionBinding ? 1 : 0,
+		bProductionBinding ? 1 : 0,
+		bProductionBinding && bFinalSuccess ? 1 : 0);
 	if (bFinalSuccess)
 	{
 		UE_LOG(LogABTSRuntime, Log, TEXT("%s"), *CompletionSummary);
@@ -1226,6 +1371,47 @@ void AABTSM11FinalePostHitCinematicPreview::FinishPreview(
 		return;
 	}
 	SetLifeSpan(bBlendBack ? 1.1f : 0.01f);
+}
+
+void AABTSM11FinalePostHitCinematicPreview::RestoreProductionSources(
+	const bool bRestoreAuthoritativeUFO)
+{
+	if (!bProductionBinding)
+	{
+		return;
+	}
+	for (int32 Index = 0; Index < ProductionBirdSources.Num(); ++Index)
+	{
+		if (ProductionBirdSources[Index].IsValid())
+		{
+			const bool bVisible = ProductionBirdInitialVisibility.IsValidIndex(Index)
+				&& ProductionBirdInitialVisibility[Index] != 0;
+			ProductionBirdSources[Index]->SetVisibility(bVisible, true);
+		}
+	}
+	if (bRestoreAuthoritativeUFO && ProductionAuthoritativeUFO.IsValid())
+	{
+		ProductionAuthoritativeUFO->SetActorHiddenInGame(
+			bProductionUFOInitiallyHidden);
+	}
+	if (ProductionController.IsValid())
+	{
+		if (AHUD* HUD = ProductionController->GetHUD())
+		{
+			HUD->bShowHUD = bProductionHUDInitiallyVisible;
+		}
+		if (bProductionCameraFadeActive
+			&& IsValid(ProductionController->PlayerCameraManager))
+		{
+			ProductionController->PlayerCameraManager->StopCameraFade();
+			ProductionController->PlayerCameraManager->SetManualCameraFade(
+				0.0f,
+				FLinearColor::Black,
+				false);
+		}
+	}
+	bProductionSourcesHidden = false;
+	bProductionCameraFadeActive = false;
 }
 
 bool AABTSM11FinalePostHitCinematicPreview::StartOffscreenCapture()

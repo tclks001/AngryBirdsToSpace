@@ -115,6 +115,8 @@ public:
 	bool ActivateDynamicSiteUniform(
 		const FVector& Impulse,
 		const FABTSM7SiteUniformGravityPolicy& Policy);
+	/** Re-awakens one previously frozen site body without substituting M6 radial gravity. */
+	bool ReactivatePreservingSiteUniformGravity(const FVector& Impulse);
 	/** Fail-closed audit of the live Chaos body and every shape filter. */
 	bool VerifyChaosDeveloperObstacleCollisionIdentity(
 		FString& OutError) const;

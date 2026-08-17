@@ -8,6 +8,7 @@
 #include "ABTSM11FinalePostHitCinematicPreview.generated.h"
 
 class APlayerController;
+class AABTSM25BirdCharacter;
 class UABTSBirdAnimationPresentationComponent;
 class UCameraComponent;
 class UPointLightComponent;
@@ -44,6 +45,15 @@ public:
 		int32 InWidth,
 		int32 InHeight,
 		int32 InJpegQuality);
+	/**
+	 * Converts the isolated direction Actor into the one-shot production
+	 * finale. The first proxy frame is taken from the four real bird visuals
+	 * and the authoritative UFO presentation before those sources are hidden.
+	 */
+	bool ConfigureProductionBinding(
+		APlayerController& InController,
+		AActor& InAuthoritativeUFO,
+		const TArray<AABTSM25BirdCharacter*>& InBirds);
 	void StopPreview();
 
 	float GetElapsedPreviewSeconds() const { return ElapsedSeconds; }
@@ -80,6 +90,7 @@ private:
 	bool WriteCaptureManifest(bool bSuccess, const FString& Reason) const;
 	void RestoreCaptureGlobals();
 	void RestoreGeometryCollectionRenderer();
+	void RestoreProductionSources(bool bRestoreAuthoritativeUFO);
 	FString GetCaptureFrameWildcard() const;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M11-D|Post Hit Preview")
@@ -132,6 +143,14 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> RecordingRenderTarget;
 
+	TWeakObjectPtr<AActor> ProductionAuthoritativeUFO;
+	TWeakObjectPtr<APlayerController> ProductionController;
+	TArray<TWeakObjectPtr<USkeletalMeshComponent>> ProductionBirdSources;
+	TArray<FTransform> ProductionBirdInitialWorldTransforms;
+	TArray<uint8> ProductionBirdInitialVisibility;
+	bool bProductionUFOInitiallyHidden = false;
+	bool bProductionHUDInitiallyVisible = true;
+
 	UPROPERTY(EditAnywhere, Category = "ABTS|M11-D|Post Hit Preview",
 		meta = (ClampMin = "0.05", ClampMax = "8.0"))
 	float PreviewTimeScale = 1.0f;
@@ -162,4 +181,7 @@ private:
 	bool bRealUFODebrisActivated = false;
 	bool bRealUFODebrisImpulseApplied = false;
 	bool bRealUFODebrisStopped = false;
+	bool bProductionBinding = false;
+	bool bProductionSourcesHidden = false;
+	bool bProductionCameraFadeActive = false;
 };

@@ -62,6 +62,30 @@ device, or specially highlighted brick.
   a later pass must constrain building OBB-to-road-edge clearance instead of
   translating sites ad hoc.
 
+## RC9 packaged cinematic acceptance
+
+- RC9 Development and Shipping both play the opening and post-hit finale
+  cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
+  Development, and Shipping hard-locks playback even if a skip request is
+  injected.
+- If RC10 or a later Development iteration is required, its debug default may
+  be changed to skip both cinematics for faster gameplay iteration. Shipping
+  remains permanently hard-locked to playback.
+- The opening must be anchored to the real spawn/party frame and hand off
+  without a bird-position jump. The finale must begin from the authoritative
+  UFO hit in its real local frame and trigger once. Preview-only substitute
+  worlds are not release evidence.
+- The opening UFO capture beam may not ship as the Engine BasicShapes cylinder;
+  RC9 requires a stylized, collision-free presentation effect tied to the same
+  deterministic capture interval.
+- Integration production binding is one-shot and fail closed: only a formally
+  certified, non-Candidate `PhysicalTargetHit` may start the post-hit timeline.
+  Its first proxy frame is copied from the four real bird visuals, the root is
+  the authoritative UFO transform, and the real presentation is retired only
+  after the replacement Geometry Collection is ready. A rejected binding keeps
+  the already-authoritative gameplay `TargetHit` instead of fabricating a
+  preview success.
+
 ## Release validation filters
 
 Use focused release filters instead of the broad historical `ABTS.M7` prefix:

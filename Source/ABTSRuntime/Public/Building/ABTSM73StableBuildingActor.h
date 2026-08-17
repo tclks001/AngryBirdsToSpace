@@ -227,7 +227,9 @@ public:
 	/** True only while this frozen building owns its exact blocking tangent pad. */
 	bool IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel() const;
 	/** Phase two: start every prepared site from one GameMode batch boundary. */
-	bool ActivatePreparedJuryDemoFixedSixChaosValidation(FString& OutError);
+	bool ActivatePreparedJuryDemoFixedSixChaosValidation(
+		FString& OutError,
+		const FVector* GameplayImpactWorld = nullptr);
 	/** Release fallback: retain static preflight and defer physical promotion until a real module hit. */
 	bool MarkPreparedJuryDemoFixedSixChaosDeferred(FString& OutError);
 	/** Called by the owned material system before it applies the first real module damage. */
@@ -369,6 +371,10 @@ public:
 		int32& OutLiveModuleCount) const;
 	/** Event-time ownership query; callers must not cache module pointers or infer ownership from Actor Owner. */
 	bool OwnsRuntimePrimitive(const UPrimitiveComponent* Component) const;
+	/** Publishes the static pre-impact HISM presentation through the same
+	 * stylized material authority used by its post-impact Chaos modules. */
+	void GatherPreviewComponentsForStylizedAdapter(
+		TArray<TPair<UPrimitiveComponent*, EABTSM7BuildingMaterial>>& OutBindings) const;
 
 private:
 	void InitializeJuryDemoFixedSixStaticRegistration(
@@ -562,6 +568,7 @@ private:
 	float JuryDemoFixedSixChaosQuietSeconds = 0.0f;
 	double JuryDemoFixedSixChaosWallStartSeconds = 0.0;
 	uint64 JuryDemoFixedSixChaosActivationFrame = 0;
+	int32 JuryDemoFixedSixActivePhysicsBodyCount = 0;
 	bool bIdleValidationRunning = false;
 	bool bDAG4ValidationRunning = false;
 	EABTSM73IdleValidationState IdleValidationState = EABTSM73IdleValidationState::Pending;

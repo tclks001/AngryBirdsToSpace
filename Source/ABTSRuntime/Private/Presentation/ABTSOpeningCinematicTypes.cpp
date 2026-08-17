@@ -45,6 +45,17 @@ namespace
 		default: return FVector::ZeroVector;
 		}
 	}
+
+	bool IsCelebrateWindow(
+		const float Time,
+		const EABTSOpeningBird Bird)
+	{
+		const float BirdOffset = static_cast<float>(static_cast<int32>(Bird));
+		const float EstablishStart = 0.35f + BirdOffset * 0.58f;
+		const float CircleStart = 4.75f + BirdOffset * 1.05f;
+		return (Time >= EstablishStart && Time < EstablishStart + 1.55f)
+			|| (Time >= CircleStart && Time < CircleStart + 1.55f);
+	}
 }
 
 EABTSOpeningPhase FABTSOpeningCinematicEvaluator::ResolvePhase(const float TimeSeconds)
@@ -73,12 +84,23 @@ FABTSOpeningBirdPose FABTSOpeningCinematicEvaluator::EvaluateBird(
 	Pose.LocalPosition = CirclePosition(Bird, 0.0f);
 	Pose.LocalFacing = CircleFacing(Bird, 0.0f);
 
-	if (Time < 4.0f) return Pose;
+	if (Time < 4.0f)
+	{
+		if (IsCelebrateWindow(Time, Bird))
+		{
+			Pose.AnimationCue = EABTSOpeningAnimationCue::Celebrate;
+		}
+		return Pose;
+	}
 
 	const float RunningSeconds = FMath::Min(Time - 4.0f, 8.0f);
 	Pose.LocalPosition = CirclePosition(Bird, RunningSeconds);
 	Pose.LocalFacing = CircleFacing(Bird, RunningSeconds);
 	Pose.AnimationCue = EABTSOpeningAnimationCue::Move;
+	if (IsCelebrateWindow(Time, Bird))
+	{
+		Pose.AnimationCue = EABTSOpeningAnimationCue::Celebrate;
+	}
 	if (Time < 12.0f) return Pose;
 
 	if (Bird == EABTSOpeningBird::White)

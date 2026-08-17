@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Presentation/ABTSOpeningCinematicTypes.h"
+#include "Presentation/ABTSCinematicPlaybackPolicy.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -13,6 +14,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FABTSOpeningCinematicTimelineTest::RunTest(const FString& Parameters)
 {
+	TestFalse(TEXT("RC9 Development default does not skip cinematics"),
+		FABTSCinematicPlaybackPolicy::ResolveSkipRequest(false, false));
+	TestTrue(TEXT("A later Development debug request may skip cinematics"),
+		FABTSCinematicPlaybackPolicy::ResolveSkipRequest(true, false));
+	TestFalse(TEXT("Shipping always plays cinematics even when skip is requested"),
+		FABTSCinematicPlaybackPolicy::ResolveSkipRequest(true, true));
+
 	TestEqual(TEXT("Opening duration"), FABTSOpeningCinematicEvaluator::DurationSeconds, 42.0f);
 	TestEqual(TEXT("0s establish phase"), FABTSOpeningCinematicEvaluator::ResolvePhase(0.0f), EABTSOpeningPhase::Establish);
 	TestEqual(TEXT("4s circle phase"), FABTSOpeningCinematicEvaluator::ResolvePhase(4.0f), EABTSOpeningPhase::CirclePlay);
@@ -31,6 +39,14 @@ bool FABTSOpeningCinematicTimelineTest::RunTest(const FString& Parameters)
 			FMath::IsNearlyEqual(Pose.LocalPosition.Size(), FABTSOpeningCinematicEvaluator::CircleRadiusCM, 0.1f));
 		TestEqual(TEXT("Initial bird is idle"), Pose.AnimationCue, EABTSOpeningAnimationCue::Idle);
 	}
+	TestEqual(TEXT("Red performs an authored happy-play cue during establish"),
+		FABTSOpeningCinematicEvaluator::EvaluateBird(
+			1.0f, EABTSOpeningBird::Red).AnimationCue,
+		EABTSOpeningAnimationCue::Celebrate);
+	TestEqual(TEXT("White receives a staggered happy-play cue during the circle"),
+		FABTSOpeningCinematicEvaluator::EvaluateBird(
+			9.25f, EABTSOpeningBird::White).AnimationCue,
+		EABTSOpeningAnimationCue::Celebrate);
 	for (int32 Index = 0; Index < InitialPositions.Num(); ++Index)
 	{
 		const int32 Next = (Index + 1) % InitialPositions.Num();

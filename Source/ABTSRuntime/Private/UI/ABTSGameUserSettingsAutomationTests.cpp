@@ -64,9 +64,9 @@ bool FABTSGameUserSettingsContractTest::RunTest(const FString& Parameters)
 		UABTSGameViewportClient::IsStartupPresentationReady(false, true, 8));
 	TestFalse(TEXT("Presentation never opens onto a missing front-end surface"),
 		UABTSGameViewportClient::IsStartupPresentationReady(true, false, 8));
-	TestFalse(TEXT("First ready tick still keeps the loading foreground"),
+	TestFalse(TEXT("First complete front-end draw stays behind the loading cover"),
 		UABTSGameViewportClient::IsStartupPresentationReady(true, true, 1));
-	TestTrue(TEXT("Second ready tick atomically exposes the complete entry frame"),
+	TestTrue(TEXT("Second complete draw atomically exposes the warm entry frame"),
 		UABTSGameViewportClient::IsStartupPresentationReady(true, true, 2));
 	TestNotNull(TEXT("Engine constructed the configured ABTS settings class"), UABTSGameUserSettings::Get());
 	FString ViewportClass;

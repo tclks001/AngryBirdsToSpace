@@ -13,6 +13,7 @@
 
 class AABTSBirdParty;
 class AABTSM11FinaleFlightCamera;
+class AABTSM11FinalePostHitCinematicPreview;
 class AABTSM11FinaleSystem;
 class AABTSM25BirdCharacter;
 class AABTSM51SlingshotCord;
@@ -333,6 +334,7 @@ private:
 		const FString& Reason,
 		bool bContinueReleasedFlight = false);
 	void FailInteraction(const FString& Reason);
+	bool TryStartProductionPostHitCinematic();
 	bool DoesInputMatchLatestSolve() const;
 	AActor* ResolvePreviewTargetActor(
 		EABTSM11PreviewTarget Target) const;
@@ -370,6 +372,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM11FinaleFlightCamera> FlightCamera;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AABTSM11FinalePostHitCinematicPreview>
+		ProductionPostHitCinematic;
 
 	UPROPERTY(Transient)
 	TSubclassOf<AABTSM6SlingshotCamera> AimCameraClass;
@@ -515,4 +521,5 @@ private:
 	bool bTargetCaptureDirty = false;
 	bool bTargetCaptureInitialized = false;
 	bool bAimFrameValid = false;
+	bool bProductionPostHitCinematicAttempted = false;
 };
