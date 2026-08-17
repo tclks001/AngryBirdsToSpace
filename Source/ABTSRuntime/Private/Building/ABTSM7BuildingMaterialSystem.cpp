@@ -562,6 +562,14 @@ void AABTSM7BuildingMaterialSystem::GatherLiveModulesForStylizedAdapter(
 		AABTSM7BuildingModule* Module = WeakModule.Get();
 		if (IsValid(Module) && !Module->IsBroken()
 			&& Module->GetOwner() == this
+			// Fixed-six production bricks are spawned with their authored M7
+			// material already installed.  They are adopted into Modules only
+			// when first-hit Chaos begins; publishing them to the stylized
+			// adapter at that point would replace the material on the exact
+			// same visible mesh and create a pre/post-impact colour jump.
+			// Keep their presentation identity stable across static and Chaos
+			// states while regular M7/HISM modules continue using the adapter.
+			&& Module->GetDamageLifecycleOwner() == nullptr
 			&& IsValid(Module->GetStylizedPresentationPrimitive()))
 		{
 			OutModules.Add(Module);
