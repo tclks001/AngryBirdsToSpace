@@ -97,6 +97,9 @@ public:
 	void RequestRelease();
 	void CancelStabilizerOrResetAttempt();
 	void ExitFinale();
+	void ShowFinaleEndScreen();
+	bool RequestFinaleEndGame();
+	bool IsFinaleEndScreenActive() const { return bFinaleEndScreenActive; }
 
 	bool IsFinaleActive() const;
 	bool IsAiming() const;
@@ -531,4 +534,5 @@ private:
 	bool bTargetCaptureInitialized = false;
 	bool bAimFrameValid = false;
 	bool bProductionPostHitCinematicAttempted = false;
+	bool bFinaleEndScreenActive = false;
 };

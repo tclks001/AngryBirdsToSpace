@@ -14,6 +14,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
 #include "Rendering/ABTSStylizedSceneCaptureRegistry.h"
 #include "Party/ABTSBirdParty.h"
@@ -227,6 +228,7 @@ bool AABTSM11FinaleInteractionSystem::TryEnterFinale(
 	AABTSM51SlingshotCord& Cord,
 	APlayerController& Controller)
 {
+	bFinaleEndScreenActive = false;
 	if (InteractionState != EABTSM11FinaleInteractionState::Ready
 		|| !IsValid(FinaleSystem)
 		|| !IsValid(Party)
@@ -745,6 +747,10 @@ void AABTSM11FinaleInteractionSystem::RequestRelease()
 
 void AABTSM11FinaleInteractionSystem::CancelStabilizerOrResetAttempt()
 {
+	if (bFinaleEndScreenActive)
+	{
+		return;
+	}
 	if (ABTSM11IsResettableFinaleState(InteractionState))
 	{
 		RestoreAttemptToWorld(false);
@@ -756,7 +762,7 @@ void AABTSM11FinaleInteractionSystem::CancelStabilizerOrResetAttempt()
 
 void AABTSM11FinaleInteractionSystem::ExitFinale()
 {
-	if (!IsFinaleActive())
+	if (!IsFinaleActive() || bFinaleEndScreenActive)
 	{
 		return;
 	}
@@ -764,6 +770,34 @@ void AABTSM11FinaleInteractionSystem::ExitFinale()
 	FailureTimeline.Reset();
 	RuntimeFailure.Reset();
 	InteractionState = EABTSM11FinaleInteractionState::Ready;
+}
+
+void AABTSM11FinaleInteractionSystem::ShowFinaleEndScreen()
+{
+	if (InteractionState != EABTSM11FinaleInteractionState::TargetHit)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M11-D][EndScreen] Rejected outside TargetHit."));
+		return;
+	}
+	bFinaleEndScreenActive = true;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M11-D][EndScreen] Presented; world input remains locked."));
+}
+
+bool AABTSM11FinaleInteractionSystem::RequestFinaleEndGame()
+{
+	if (!ABTSM11ShouldExitFromFinaleEndScreen(
+		bFinaleEndScreenActive, ActiveFinaleController.IsValid()))
+	{
+		return false;
+	}
+	UKismetSystemLibrary::QuitGame(
+		this,
+		ActiveFinaleController.Get(),
+		EQuitPreference::Quit,
+		false);
+	return true;
 }
 
 bool AABTSM11FinaleInteractionSystem::IsFinaleActive() const

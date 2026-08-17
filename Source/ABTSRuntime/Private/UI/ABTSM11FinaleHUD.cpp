@@ -164,7 +164,14 @@ void AABTSM11FinaleHUD::DrawHUD()
 	const bool bFinaleActive = System != nullptr && System->IsFinaleActive();
 	if (bFinaleActive)
 	{
-		DrawFinaleLayer(*System);
+		if (System->IsFinaleEndScreenActive())
+		{
+			DrawFinaleEndScreen(*System);
+		}
+		else
+		{
+			DrawFinaleLayer(*System);
+		}
 	}
 	else
 	{
@@ -182,6 +189,20 @@ void AABTSM11FinaleHUD::DrawHUD()
 	{
 		DrawFailureOverlay(*System);
 	}
+}
+
+bool AABTSM11FinaleHUD::HandleFinaleEndScreenPressed(
+	AABTSM11FinaleInteractionSystem& System,
+	const FVector2D& MousePosition)
+{
+	if (!System.IsFinaleEndScreenActive())
+	{
+		return false;
+	}
+	const FVector2D HudPosition = ToHudCanvasPosition(MousePosition);
+	return HudEndGameButton.bIsValid && HudEndGameButton.IsInside(HudPosition)
+		? System.RequestFinaleEndGame()
+		: true;
 }
 
 AABTSM11FinaleInteractionSystem*
@@ -682,6 +703,42 @@ void AABTSM11FinaleHUD::DrawFinaleLayer(
 		CachedPipTrajectory.Reset();
 	}
 	DrawStatus(System, HudDiagramCenter, HudDiagramRadius);
+}
+
+void AABTSM11FinaleHUD::DrawFinaleEndScreen(
+	AABTSM11FinaleInteractionSystem& System)
+{
+	if (Canvas == nullptr)
+	{
+		return;
+	}
+	HudPlayerViewOrigin = Canvas->SceneView != nullptr
+		? FVector2D(Canvas->SceneView->UnscaledViewRect.Min)
+		: FVector2D::ZeroVector;
+	HudPlayerViewSize = Canvas->SceneView != nullptr
+		? FVector2D(Canvas->SceneView->UnscaledViewRect.Size())
+		: FVector2D(Canvas->SizeX, Canvas->SizeY);
+	HudTheme = FABTSUITheme::Get();
+	DrawRect(FLinearColor::Black, 0.0f, 0.0f, Canvas->ClipX, Canvas->ClipY);
+	const FVector2D Center(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.5f);
+	DrawText(TEXT("F I N E"), HudTheme.AccentPrimary,
+		Center.X - 105.0f, Center.Y - 96.0f, GEngine->GetLargeFont(),
+		1.55f * HudTheme.TextScale, false);
+	DrawText(TEXT("THE FLOCK REACHES THE UNKNOWN"), HudTheme.TextPrimary,
+		Center.X - 155.0f, Center.Y - 26.0f, GEngine->GetSmallFont(),
+		0.90f * HudTheme.TextScale, false);
+	HudEndGameButton = FBox2D(
+		Center + FVector2D(-132.0f, 36.0f),
+		Center + FVector2D(132.0f, 96.0f));
+	DrawFacetedPanel(HudEndGameButton, HudTheme.PanelPrimary,
+		HudTheme.AccentPrimary, TEXT("END GAME"), HudTheme.AccentPrimary);
+	DrawText(TEXT("END GAME"), HudTheme.TextPrimary,
+		Center.X - 46.0f, Center.Y + 56.0f, GEngine->GetSmallFont(),
+		0.92f * HudTheme.TextScale, false);
+	DrawText(TEXT("CLICK  /  ENTER  /  GAMEPAD A"), HudTheme.TextMuted,
+		Center.X - 118.0f, Center.Y + 124.0f, GEngine->GetSmallFont(),
+		0.64f * HudTheme.TextScale, false);
+	(void)System;
 }
 
 void AABTSM11FinaleHUD::DrawFacetedPanel(

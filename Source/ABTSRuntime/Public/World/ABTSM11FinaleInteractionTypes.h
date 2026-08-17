@@ -80,6 +80,14 @@ enum class EABTSM11FailureReason : uint8
 ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
 	EABTSM11FinaleInteractionState State);
 
+/** Pure gate shared by the post-hit completion, HUD and controller routes. */
+ABTSRUNTIME_API bool ABTSM11ShouldShowFinaleEndScreen(
+	bool bProductionBinding,
+	bool bTimelineSucceeded);
+ABTSRUNTIME_API bool ABTSM11ShouldExitFromFinaleEndScreen(
+	bool bEndScreenActive,
+	bool bActivationRequested);
+
 /**
  * Pure resolver for the read-only finale environment stage.
  *

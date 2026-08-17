@@ -487,6 +487,31 @@ bool FABTSM11CTargetSelectorTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CFinaleEndScreenPolicyTest,
+	"ABTS.M11C.Unit.FinaleEndScreenPolicy",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CFinaleEndScreenPolicyTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Production success presents the terminal end page"),
+		ABTSM11ShouldShowFinaleEndScreen(true, true));
+	TestFalse(TEXT("Capture-only success never hijacks into the terminal page"),
+		ABTSM11ShouldShowFinaleEndScreen(false, true));
+	TestFalse(TEXT("Production failure never presents a success end page"),
+		ABTSM11ShouldShowFinaleEndScreen(true, false));
+	TestTrue(TEXT("Pointer, keyboard and gamepad routes share an active-page gate"),
+		ABTSM11ShouldExitFromFinaleEndScreen(true, true));
+	TestFalse(TEXT("Inactive end-page input cannot quit the world"),
+		ABTSM11ShouldExitFromFinaleEndScreen(false, true));
+	TestFalse(TEXT("Passive end page cannot quit the world"),
+		ABTSM11ShouldExitFromFinaleEndScreen(true, false));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11CPreviewReleasePlaybackTest,
 	"ABTS.M11C.Unit.PreviewReleasePlayback",
 	EAutomationTestFlags::EditorContext
@@ -550,25 +575,6 @@ bool FABTSM11CPreviewReleasePlaybackTest::RunTest(
 		At30.Equals(At60, 1.0e-8));
 	TestTrue(TEXT("60 and 120 FPS sample the same absolute state"),
 		At60.Equals(At120, 1.0e-8));
-
-	FABTSM11PlaybackPlan VisibleTransferPlan;
-	TestTrue(
-		TEXT("F4 can explicitly build a visible C2 terminal transfer"),
-		VisibleTransferPlan.Build(
-			Preset,
-			Qualified,
-			Classification,
-			nullptr,
-			&Physical));
-	TestTrue(TEXT("Transfer is explicitly typed and published"),
-		VisibleTransferPlan.bUsesVisibleTerminalTransfer);
-	TestTrue(TEXT("Transfer plan reaches physical target"),
-		VisibleTransferPlan.bPhysicalTargetHit);
-	TestTrue(TEXT("Transfer has a non-zero deterministic identity"),
-		VisibleTransferPlan.PlanHash != 0);
-	TestTrue(TEXT("Transfer time is ordered"),
-		VisibleTransferPlan.TransferEndTimeSeconds
-			> VisibleTransferPlan.TransferStartTimeSeconds);
 
 	bool bExercisedNeighborTransfer = false;
 	for (int32 YawOffset = -1;
@@ -649,6 +655,21 @@ bool FABTSM11CPreviewReleasePlaybackTest::RunTest(
 					TestTrue(
 						TEXT("A non-nominal neighboring F4 uses the visible transfer"),
 						NeighborPlan.bUsesVisibleTerminalTransfer);
+					TestEqual(TEXT("Fallback keeps the frozen physical identity"),
+						NeighborPlan.PhysicalTrajectoryHash,
+						Physical.ValidationHash);
+					const FVector3d ContactOffset = NeighborPlan.Points.Last().PositionCM
+						- Preset.CanonicalScenario.Target.GetGeometricContactCenterCM();
+					TestTrue(TEXT("Fallback ends on the geometric UFO contact"),
+						FMath::IsNearlyEqual(ContactOffset.Length(),
+							Preset.CanonicalScenario.Target.GetGeometricContactRadiusCM(), 1.0e-3));
+					int32 ArcPointCount = 0;
+					for (const FABTSM11PlaybackPoint& Point : NeighborPlan.Points)
+					{
+						ArcPointCount += Point.SegmentKind
+							== EABTSM11PlaybackSegmentKind::VisibleTerminalTransfer ? 1 : 0;
+					}
+					TestTrue(TEXT("Fallback arc is densely sampled"), ArcPointCount >= 24);
 				}
 			}
 		}

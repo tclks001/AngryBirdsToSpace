@@ -496,7 +496,11 @@ namespace
 		constexpr double CandidateMaximumJerkCMPerSec3 = 300000.0;
 		constexpr double MaximumHeadingStepRadians = PI / 24.0;
 		constexpr double MinimumSignedTurn = -1.0e-5;
-		constexpr double MaximumLookbackSeconds = 6.0;
+		// Production F4 envelopes can end on an almost radial UFO approach.
+		// Search back through the released assist leg for the last non-degenerate
+		// tangential state instead of treating that straight final sample as a
+		// reason to fall back to a nominal polyline.
+		constexpr double MaximumLookbackSeconds = 60.0;
 		constexpr double MinimumHandoffSpacingSeconds = 0.10;
 		const double GuidanceSampleStepSeconds =
 			Contract.SampleStepSeconds / 8.0;
@@ -930,38 +934,34 @@ bool FABTSM11PlaybackPlan::Build(
 		return Reject(TEXT("CertifiedNominalPhysicalPlaybackUnavailable"));
 	}
 
+	/*
+	 * The physical fallback remains the authority for the hit identity, but it
+	 * is not a presentation path.  Publishing its sparse nominal tail made the
+	 * orbital overview visibly polygonal.  Reuse the already accepted
+	 * candidate-contact construction instead: it preserves the released prefix
+	 * and joins a tangential circular approach to the exact geometric contact.
+	 */
 	AppendResult(
 		ReleasedQualifiedResult,
 		EABTSM11PlaybackSegmentKind::PlayerAuthoritative,
 		Points);
-	int32 NominalTailFirstIndex = INDEX_NONE;
-	double NominalTailTimeOffsetSeconds = 0.0;
 	FString TransferFailure;
-	if (!BuildTransfer(
+	if (!BuildCandidateContactTransfer(
 		Preset,
 		ReleasedQualifiedResult,
-		*NominalPhysicalResult,
 		TransferContract,
 		Points,
 		TransferStartTimeSeconds,
 		TransferEndTimeSeconds,
-		NominalTailFirstIndex,
-		NominalTailTimeOffsetSeconds,
 		TransferFailure))
 	{
 		return Reject(TransferFailure.IsEmpty()
 			? TEXT("NoValidVisibleTerminalTransfer")
 			: TransferFailure);
 	}
-	AppendResult(
-		*NominalPhysicalResult,
-		EABTSM11PlaybackSegmentKind::CertifiedNominalTail,
-		Points,
-		NominalTailFirstIndex,
-		NominalTailTimeOffsetSeconds);
 	if (Points.Num() < 3)
 	{
-		return Reject(TEXT("EmptyCertifiedNominalTail"));
+		return Reject(TEXT("EmptyVisibleTerminalContact"));
 	}
 
 	PhysicalTrajectoryHash = NominalPhysicalResult->ValidationHash;
