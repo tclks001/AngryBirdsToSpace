@@ -19,14 +19,155 @@
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSCollisionChannels.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
+
 namespace
 {
 	constexpr float SharedCubeSizeCM = 100.0f;
+
+	/** Stable candidate builder shared by runtime aggregation and its automation. */
+	void BuildStableSpatialContactCandidatePairs(
+		const TConstArrayView<FBox> SweptBounds,
+		const float CellSizeCM,
+		TArray<uint64>& OutPairs)
+	{
+		OutPairs.Reset();
+		const float CellSize = FMath::Max(36.0f, CellSizeCM);
+		TMap<FIntVector, TArray<int32>> SpatialBuckets;
+		for (int32 ModuleIndex = 0; ModuleIndex < SweptBounds.Num(); ++ModuleIndex)
+		{
+			const FBox& Bounds = SweptBounds[ModuleIndex];
+			const FIntVector MinimumCell(
+				FMath::FloorToInt(Bounds.Min.X / CellSize),
+				FMath::FloorToInt(Bounds.Min.Y / CellSize),
+				FMath::FloorToInt(Bounds.Min.Z / CellSize));
+			const FIntVector MaximumCell(
+				FMath::FloorToInt(Bounds.Max.X / CellSize),
+				FMath::FloorToInt(Bounds.Max.Y / CellSize),
+				FMath::FloorToInt(Bounds.Max.Z / CellSize));
+			for (int32 X = MinimumCell.X; X <= MaximumCell.X; ++X)
+			{
+				for (int32 Y = MinimumCell.Y; Y <= MaximumCell.Y; ++Y)
+				{
+					for (int32 Z = MinimumCell.Z; Z <= MaximumCell.Z; ++Z)
+					{
+						SpatialBuckets.FindOrAdd(FIntVector(X, Y, Z)).Add(ModuleIndex);
+					}
+				}
+			}
+		}
+		TArray<FIntVector> SortedCells;
+		SpatialBuckets.GetKeys(SortedCells);
+		SortedCells.Sort([](const FIntVector& Left, const FIntVector& Right)
+		{
+			return Left.X != Right.X ? Left.X < Right.X
+				: (Left.Y != Right.Y ? Left.Y < Right.Y : Left.Z < Right.Z);
+		});
+		TSet<uint64> UniquePairKeys;
+		for (const FIntVector& Cell : SortedCells)
+		{
+			const TArray<int32>& Bucket = SpatialBuckets.FindChecked(Cell);
+			for (int32 LeftIndex = 0; LeftIndex < Bucket.Num(); ++LeftIndex)
+			{
+				for (int32 RightIndex = LeftIndex + 1; RightIndex < Bucket.Num(); ++RightIndex)
+				{
+					const int32 First = FMath::Min(Bucket[LeftIndex], Bucket[RightIndex]);
+					const int32 Second = FMath::Max(Bucket[LeftIndex], Bucket[RightIndex]);
+					UniquePairKeys.Add((static_cast<uint64>(First) << 32)
+						| static_cast<uint32>(Second));
+				}
+			}
+		}
+		OutPairs = UniquePairKeys.Array();
+		OutPairs.Sort();
+	}
+
+	void BuildGroundReachableFreezeOrder(
+		const TConstArrayView<TArray<int32>> SupportChildren,
+		const TConstArrayView<int32> GroundRoots,
+		TArray<int32>& OutFreezeOrder)
+	{
+		OutFreezeOrder.Reset();
+		TBitArray<> Reachable(false, SupportChildren.Num());
+		for (const int32 RootIndex : GroundRoots)
+		{
+			if (SupportChildren.IsValidIndex(RootIndex)
+				&& !Reachable[RootIndex])
+			{
+				Reachable[RootIndex] = true;
+				OutFreezeOrder.Add(RootIndex);
+			}
+		}
+		for (int32 Head = 0; Head < OutFreezeOrder.Num(); ++Head)
+		{
+			for (const int32 ChildIndex : SupportChildren[OutFreezeOrder[Head]])
+			{
+				if (SupportChildren.IsValidIndex(ChildIndex)
+					&& !Reachable[ChildIndex])
+				{
+					Reachable[ChildIndex] = true;
+					OutFreezeOrder.Add(ChildIndex);
+				}
+			}
+		}
+	}
+
+	FBox MakeSweptBounds(const FBox& CurrentBounds, const FVector& Velocity,
+		const float DeltaSeconds)
+	{
+		const FVector Delta = Velocity * FMath::Max(0.0f, DeltaSeconds);
+		FBox Swept = CurrentBounds;
+		Swept += CurrentBounds.Min - Delta;
+		Swept += CurrentBounds.Max - Delta;
+		return Swept;
+	}
+
+	bool PassesSweptNarrowContactGate(const FBox& LeftCurrentBounds,
+		const FVector& LeftVelocity, const FBox& RightCurrentBounds,
+		const FVector& RightVelocity, const float DeltaSeconds)
+	{
+		const float Duration = FMath::Max(0.0f, DeltaSeconds);
+		const FVector LeftStart = LeftCurrentBounds.GetCenter()
+			- LeftVelocity * Duration;
+		const FVector RightStart = RightCurrentBounds.GetCenter()
+			- RightVelocity * Duration;
+		const FVector RelativeStart = LeftStart - RightStart;
+		const FVector RelativeVelocity = LeftVelocity - RightVelocity;
+		const float RelativeSpeedSquared = RelativeVelocity.SizeSquared();
+		const float ClosestTime = RelativeSpeedSquared > KINDA_SMALL_NUMBER
+			? FMath::Clamp(-FVector::DotProduct(RelativeStart, RelativeVelocity)
+				/ RelativeSpeedSquared, 0.0f, Duration)
+			: 0.0f;
+		const FVector LeftCenter = LeftStart + LeftVelocity * ClosestTime;
+		const FVector RightCenter = RightStart + RightVelocity * ClosestTime;
+		const FBox LeftAtClosest(LeftCenter - LeftCurrentBounds.GetExtent(),
+			LeftCenter + LeftCurrentBounds.GetExtent());
+		const FBox RightAtClosest(RightCenter - RightCurrentBounds.GetExtent(),
+			RightCenter + RightCurrentBounds.GetExtent());
+		return LeftAtClosest.Intersect(RightAtClosest);
+	}
+
+	void BuildCyclicPairWindow(const int32 PairCount, const int32 RequestedBudget,
+		int32& InOutCursor, TArray<int32>& OutPairIndices)
+	{
+		OutPairIndices.Reset();
+		if (PairCount <= 0) return;
+		const int32 Budget = FMath::Min(FMath::Max(1, RequestedBudget), PairCount);
+		const int32 Start = InOutCursor % PairCount;
+		for (int32 Offset = 0; Offset < Budget; ++Offset)
+		{
+			OutPairIndices.Add((Start + Offset) % PairCount);
+		}
+		InOutCursor = (Start + Budget) % PairCount;
+	}
 }
 
 AABTSM7BuildingMaterialSystem::AABTSM7BuildingMaterialSystem()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 	WoodBrickHISM = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("WoodBrickHISM"));
@@ -103,6 +244,12 @@ void AABTSM7BuildingMaterialSystem::BeginPlay()
 	ApplyHISMPhysicalMaterial(*CrystalBrickHISM, EABTSM7BuildingMaterial::Crystal, TEXT("ABTSCrystalBrickPhysics"));
 	if (bSpawnTestSetAtStart) SpawnTestSet();
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M7] MaterialSystem ready Planet=%d TestSet=%d Profiles=%d"), Planet.IsValid() ? 1 : 0, bSpawnTestSetAtStart ? 1 : 0, MaterialProfiles.Num());
+}
+
+void AABTSM7BuildingMaterialSystem::Tick(const float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	ProcessCentralizedDynamicContactDamage();
 }
 
 int32 AABTSM7BuildingMaterialSystem::AddBrick(const FABTSM7BrickSpec& Spec, const FTransform& WorldTransform)
@@ -476,6 +623,10 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 	{
 		if (AABTSM7BuildingModule* Module = Modules[Index].Get())
 		{
+			if (Module->IsRecycled())
+			{
+				continue;
+			}
 			if (!Module->IsDynamic() && Module->UsesSiteUniformGravity())
 			{
 				++SkippedSiteUniformCount;
@@ -525,7 +676,8 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 	const FVector& SupportCenterWorldCM,
 	const float GravityAcceleration,
 	const float ContactDamageGraceSeconds,
-	const bool bPenetrationPrevalidated)
+	const bool bPenetrationPrevalidated,
+	const FABTSM7ChaosBodyProfile* const RuntimeBodyProfile)
 {
 	LastSiteUniformGravityPolicyHash = 0;
 	LastSiteUniformGravityUp = FVector::ZeroVector;
@@ -550,21 +702,29 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 		if (!IsValid(Module)
 			|| Module->GetOwner() != this
 			|| Module->IsDynamic()
+			|| Module->IsRecycled()
 			|| UniqueTargets.Contains(Module))
 		{
 			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][M7][SiteUniformLaunch] Rejected Reason=TargetOwnershipInvalid Module=%s Dynamic=%d Duplicate=%d"),
-				*GetNameSafe(Module),
-				Module != nullptr && Module->IsDynamic() ? 1 : 0,
-				UniqueTargets.Contains(Module) ? 1 : 0);
+			TEXT("[ABTS][M7][SiteUniformLaunch] Rejected Reason=TargetOwnershipInvalid Module=%s Dynamic=%d Recycled=%d Duplicate=%d"),
+			*GetNameSafe(Module),
+			Module != nullptr && Module->IsDynamic() ? 1 : 0,
+			Module != nullptr && Module->IsRecycled() ? 1 : 0,
+			UniqueTargets.Contains(Module) ? 1 : 0);
 			return false;
 		}
 		UniqueTargets.Add(Module);
 		PendingModules.Add(Module);
 	}
 
-	const FABTSM7ChaosBodyProfile BodyProfile =
-		FABTSM7ChaosBodyProfile::Production();
+	const FABTSM7ChaosBodyProfile BodyProfile = RuntimeBodyProfile != nullptr
+		? *RuntimeBodyProfile : FABTSM7ChaosBodyProfile::Production();
+	if (!BodyProfile.IsUsable())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][SiteUniformLaunch] Rejected Reason=BodyProfileInvalid"));
+		return false;
+	}
 	const FABTSM7ChaosWorldProfile WorldProfile =
 		FABTSM7ChaosWorldProfile::CaptureProduction();
 	LastLaunchChaosBodyProfileHash = BodyProfile.ComputeCrc32();
@@ -591,6 +751,7 @@ bool AABTSM7BuildingMaterialSystem::BeginSiteUniformLaunchPhysics(
 			// the caller-provided building subset into runtime ownership.
 			Modules.Add(Module);
 		}
+		Module->ConfigureChaosBodyProfile(BodyProfile);
 		Module->SetContactDamageGraceSeconds(EffectiveGraceSeconds);
 		if (!Module->ActivateDynamicSiteUniform(FVector::ZeroVector, Policy))
 		{
@@ -678,7 +839,8 @@ bool AABTSM7BuildingMaterialSystem::HandleBirdImpact(UPrimitiveComponent* Compon
 	}
 	else if (AABTSM7BuildingModule* Module = Cast<AABTSM7BuildingModule>(Component->GetOwner()))
 	{
-		ApplyImpactToModule(*Module, NormalSpeedCMPerSec, IncomingVelocity,
+		if (Module->IsRecycled()) return false;
+		return ApplyImpactToModule(*Module, NormalSpeedCMPerSec, IncomingVelocity,
 			BirdId, EABTSM73E1DamageCause::BirdImpact,
 			/*bApplyGameplayTransferImpulse=*/true);
 	}
@@ -693,7 +855,8 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 	const EABTSM73E1DamageCause Cause,
 	const bool bApplyGameplayTransferImpulse)
 {
-	if (Module.IsBroken() || !FMath::IsFinite(NormalSpeedCMPerSec)
+	if (Module.IsBroken() || Module.IsRecycled()
+		|| !FMath::IsFinite(NormalSpeedCMPerSec)
 		|| NormalSpeedCMPerSec <= 0.0f)
 	{
 		return false;
@@ -701,9 +864,14 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 	if (AABTSM73StableBuildingActor* Building =
 		Module.GetDamageLifecycleOwner())
 	{
+		const float InitialImpactRadiusCM =
+			Module.GetModuleKind() == EABTSM7ModuleKind::ExplosiveBarrel
+				? BarrelImpulseRadiusCM
+				: Module.GetModuleKind() == EABTSM7ModuleKind::SpringPiston
+					? PistonEffectRadiusCM : 0.0f;
 		FString ActivationError;
 		if (!Building->ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
-			Module, ActivationError))
+			Module, ActivationError, InitialImpactRadiusCM))
 		{
 			UE_LOG(LogABTSRuntime, Error,
 				TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitRejected]")
@@ -788,12 +956,11 @@ void AABTSM7BuildingMaterialSystem::HandleModuleChainImpact(AABTSM7BuildingModul
 		? Source.GetMeshComponent()->GetPhysicsLinearVelocityAtPoint(
 			Hit.ImpactPoint)
 		: FVector::ZeroVector;
-	// The source must take real collision damage too. This is what permits a
-	// displaced Crystal to break after falling onto terrain instead of remaining
-	// immortal because the terrain is not an M7-owned primitive.
-	ApplyImpactToModule(Source, NormalSpeedCMPerSec, SourceVelocity,
-		EABTSBirdId::Red, EABTSM73E1DamageCause::ModuleContact,
-		/*bApplyGameplayTransferImpulse=*/false);
+	// This compatibility entry point is intentionally a queue, not immediate
+	// per-brick damage.  Modules no longer subscribe to OnComponentHit; both
+	// legacy contact notifications and the spatial pass below feed one bounded,
+	// deterministic transaction at the same cadence.
+	QueueCentralizedContactDamage(Source, NormalSpeedCMPerSec, SourceVelocity);
 
 	UPrimitiveComponent* TargetComponent = Hit.GetComponent();
 	AABTSM7BuildingModule* TargetModule = Cast<AABTSM7BuildingModule>(
@@ -801,13 +968,8 @@ void AABTSM7BuildingMaterialSystem::HandleModuleChainImpact(AABTSM7BuildingModul
 	if (TargetModule != nullptr && TargetModule != &Source
 		&& !TargetModule->IsDynamic() && OwnsPrimitive(TargetComponent))
 	{
-		// Dynamic M7 peers receive their own OnComponentHit callback. Only a
-		// static peer needs target-side forwarding, otherwise one contact would
-		// be counted twice for each body.
-		ApplyImpactToModule(*TargetModule, NormalSpeedCMPerSec,
-			SourceVelocity, EABTSBirdId::Red,
-			EABTSM73E1DamageCause::ModuleContact,
-			/*bApplyGameplayTransferImpulse=*/false);
+		QueueCentralizedContactDamage(*TargetModule, NormalSpeedCMPerSec,
+			SourceVelocity);
 	}
 	else if (TargetModule == nullptr
 		&& Cast<UHierarchicalInstancedStaticMeshComponent>(TargetComponent)
@@ -817,6 +979,165 @@ void AABTSM7BuildingMaterialSystem::HandleModuleChainImpact(AABTSM7BuildingModul
 		HandleBirdImpact(TargetComponent, Hit.Item, NormalSpeedCMPerSec,
 			SourceVelocity, EABTSBirdId::Red);
 	}
+}
+
+void AABTSM7BuildingMaterialSystem::QueueCentralizedContactDamage(
+	AABTSM7BuildingModule& Module,
+	const float NormalSpeedCMPerSec,
+	const FVector& IncomingVelocity)
+{
+	if (Module.IsBroken() || Module.IsRecycled()
+		|| NormalSpeedCMPerSec < 300.0f)
+	{
+		return;
+	}
+	for (FCachedModuleContactDamage& Pending : PendingCentralizedContactDamage)
+	{
+		if (Pending.Module.Get() == &Module)
+		{
+			if (NormalSpeedCMPerSec > Pending.MaximumNormalSpeedCMPerSec)
+			{
+				Pending.MaximumNormalSpeedCMPerSec = NormalSpeedCMPerSec;
+				Pending.IncomingVelocity = IncomingVelocity;
+			}
+			return;
+		}
+	}
+	FCachedModuleContactDamage& Pending =
+		PendingCentralizedContactDamage.Emplace_GetRef();
+	Pending.Module = &Module;
+	Pending.MaximumNormalSpeedCMPerSec = NormalSpeedCMPerSec;
+	Pending.IncomingVelocity = IncomingVelocity;
+}
+
+void AABTSM7BuildingMaterialSystem::ProcessCentralizedDynamicContactDamage()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	const float Now = World->GetTimeSeconds();
+	if (Now - LastCentralizedContactDamageSeconds
+		< FMath::Max(0.02f, CentralizedContactDamageIntervalSeconds))
+	{
+		return;
+	}
+	LastCentralizedContactDamageSeconds = Now;
+
+	TArray<AABTSM7BuildingModule*> DynamicModules;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module != nullptr && Module->IsDynamic() && !Module->IsBroken()
+			&& !Module->IsRecycled()
+			&& Module->GetMeshComponent() != nullptr
+			&& Module->GetMeshComponent()->IsSimulatingPhysics())
+		{
+			DynamicModules.Add(Module);
+		}
+	}
+	DynamicModules.Sort([](const AABTSM7BuildingModule& Left,
+		const AABTSM7BuildingModule& Right)
+	{
+		const int32 LeftId = Left.GetDamageLifecycleBrickId();
+		const int32 RightId = Right.GetDamageLifecycleBrickId();
+		return LeftId != RightId ? LeftId < RightId
+			: Left.GetFName().LexicalLess(Right.GetFName());
+	});
+	// Build a stable spatial hash from swept, expanded AABBs. This is O(active
+	// + nearPairs), not O(active^2): a 720 cm beam spans only a handful of the
+	// 180 cm cells, and every candidate pair is de-duplicated by its stable
+	// sorted brick-id key before we apply the bounded transaction.
+	const float CellSize = FMath::Max(36.0f, CentralizedContactCellSizeCM);
+	const float SweepSeconds = FMath::Max(0.02f,
+		CentralizedContactDamageIntervalSeconds);
+	TArray<FBox> SweptBounds;
+	SweptBounds.Reserve(DynamicModules.Num());
+	for (int32 ModuleIndex = 0; ModuleIndex < DynamicModules.Num(); ++ModuleIndex)
+	{
+		UStaticMeshComponent* Body = DynamicModules[ModuleIndex]->GetMeshComponent();
+		const FBox CurrentBounds = Body->Bounds.GetBox().ExpandBy(3.0f);
+		SweptBounds.Add(MakeSweptBounds(CurrentBounds,
+			Body->GetPhysicsLinearVelocity(), SweepSeconds));
+	}
+	TArray<uint64> CandidatePairs;
+	BuildStableSpatialContactCandidatePairs(SweptBounds, CellSize,
+		CandidatePairs);
+	const int32 PairCount = CandidatePairs.Num();
+	const int32 PairBudget = FMath::Min(FMath::Max(1,
+		CentralizedContactPairBudget), PairCount);
+	if (PairCount > 0)
+	{
+		TArray<int32> PairWindow;
+		BuildCyclicPairWindow(PairCount, PairBudget,
+			CentralizedContactPairCursor, PairWindow);
+		for (const int32 PairIndex : PairWindow)
+		{
+			const uint64 PairKey = CandidatePairs[PairIndex];
+			AABTSM7BuildingModule& Left = *DynamicModules[
+				static_cast<int32>(PairKey >> 32)];
+			AABTSM7BuildingModule& Right = *DynamicModules[
+				static_cast<int32>(PairKey & 0xffffffffu)];
+			if (!SweptBounds[static_cast<int32>(PairKey >> 32)].Intersect(
+				SweptBounds[static_cast<int32>(PairKey & 0xffffffffu)]))
+			{
+				continue;
+			}
+			const FVector LeftVelocity = Left.GetMeshComponent()->GetPhysicsLinearVelocity();
+			const FVector RightVelocity = Right.GetMeshComponent()->GetPhysicsLinearVelocity();
+			const FBox LeftCurrentBounds = Left.GetMeshComponent()->Bounds.GetBox()
+				.ExpandBy(3.0f);
+			const FBox RightCurrentBounds = Right.GetMeshComponent()->Bounds.GetBox()
+				.ExpandBy(3.0f);
+			if (!PassesSweptNarrowContactGate(LeftCurrentBounds, LeftVelocity,
+				RightCurrentBounds, RightVelocity, SweepSeconds))
+			{
+				continue;
+			}
+			const float RelativeSpeed = (LeftVelocity - RightVelocity).Size();
+			if (RelativeSpeed >= 300.0f)
+			{
+				QueueCentralizedContactDamage(Left, RelativeSpeed, RightVelocity);
+				QueueCentralizedContactDamage(Right, RelativeSpeed, LeftVelocity);
+			}
+		}
+	}
+
+	PendingCentralizedContactDamage.Sort([](
+		const FCachedModuleContactDamage& Left,
+		const FCachedModuleContactDamage& Right)
+	{
+		const AABTSM7BuildingModule* LeftModule = Left.Module.Get();
+		const AABTSM7BuildingModule* RightModule = Right.Module.Get();
+		const int32 LeftId = LeftModule != nullptr
+			? LeftModule->GetDamageLifecycleBrickId() : MAX_int32;
+		const int32 RightId = RightModule != nullptr
+			? RightModule->GetDamageLifecycleBrickId() : MAX_int32;
+		return LeftId != RightId ? LeftId < RightId
+			: GetNameSafe(LeftModule) < GetNameSafe(RightModule);
+	});
+	int32 AppliedCount = 0;
+	for (const FCachedModuleContactDamage& Pending : PendingCentralizedContactDamage)
+	{
+		if (AABTSM7BuildingModule* Module = Pending.Module.Get();
+			Module != nullptr && !Module->IsBroken() && !Module->IsRecycled())
+		{
+			ApplyImpactToModule(*Module, Pending.MaximumNormalSpeedCMPerSec,
+				Pending.IncomingVelocity, EABTSBirdId::Red,
+				EABTSM73E1DamageCause::ModuleContact,
+				/*bApplyGameplayTransferImpulse=*/false);
+			++AppliedCount;
+		}
+	}
+	if (AppliedCount > 0)
+	{
+		UE_LOG(LogABTSRuntime, Verbose,
+			TEXT("[ABTS][M7][CentralizedContactDamage] Interval=%.3f Pairs=%d Budget=%d Applied=%d Deterministic=1"),
+			CentralizedContactDamageIntervalSeconds, PairCount, PairBudget,
+			AppliedCount);
+	}
+	PendingCentralizedContactDamage.Reset();
 }
 
 void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent* Component, const int32 InstanceIndex, const FVector& ImpulseDirection, const float ImpulseSpeed, const bool bDestroy)
@@ -852,6 +1173,75 @@ void AABTSM7BuildingMaterialSystem::BreakOrImpulsePrimitive(UPrimitiveComponent*
 void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, const float DestroyRadiusCM, const float ImpulseRadiusCM, const float ImpulseSpeedCMPerSec)
 {
 	MarkPhysicsActivity();
+	// Fixed-six modules are caller-held static actors, so they are intentionally
+	// absent from Modules until their first gameplay promotion. Discover one
+	// deterministic seed per touched building before applying the radial effect;
+	// the building expands that seed to its exact no-floating support closure.
+	TMap<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*> BlastSeeds;
+	for (TActorIterator<AABTSM7BuildingModule> It(GetWorld()); It; ++It)
+	{
+		AABTSM7BuildingModule* Candidate = *It;
+		AABTSM73StableBuildingActor* Building = Candidate != nullptr
+			? Candidate->GetDamageLifecycleOwner() : nullptr;
+		if (Candidate == nullptr || Candidate->GetOwner() != this
+			|| Building == nullptr || Candidate->IsBroken() || Candidate->IsRecycled()
+			|| FVector::DistSquared(Candidate->GetActorLocation(), Origin)
+				> FMath::Square(ImpulseRadiusCM))
+		{
+			continue;
+		}
+		AABTSM7BuildingModule*& Existing = BlastSeeds.FindOrAdd(Building);
+		if (Existing == nullptr
+			|| FVector::DistSquared(Candidate->GetActorLocation(), Origin)
+				< FVector::DistSquared(Existing->GetActorLocation(), Origin)
+			|| (FMath::IsNearlyEqual(
+				FVector::DistSquared(Candidate->GetActorLocation(), Origin),
+				FVector::DistSquared(Existing->GetActorLocation(), Origin), 0.001)
+				&& Candidate->GetDamageLifecycleBrickId()
+					< Existing->GetDamageLifecycleBrickId()))
+		{
+			Existing = Candidate;
+		}
+	}
+	TArray<TPair<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*>>
+		SortedBlastSeeds;
+	for (const TPair<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*>& Pair : BlastSeeds)
+	{
+		SortedBlastSeeds.Add(Pair);
+	}
+	SortedBlastSeeds.Sort([](const auto& Left, const auto& Right)
+	{
+		const int32 LeftId = Left.Value != nullptr
+			? Left.Value->GetDamageLifecycleBrickId() : MAX_int32;
+		const int32 RightId = Right.Value != nullptr
+			? Right.Value->GetDamageLifecycleBrickId() : MAX_int32;
+		return LeftId != RightId ? LeftId < RightId
+			: GetNameSafe(Left.Key) < GetNameSafe(Right.Key);
+	});
+	TSet<const AABTSM73StableBuildingActor*> RejectedBlastBuildings;
+	int32 PromotedBlastBuildingCount = 0;
+	for (const TPair<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*>& Pair : SortedBlastSeeds)
+	{
+		FString ClosureError;
+		if (!Pair.Key->ActivateJuryDemoFixedSixImpactSupportClosure(
+			*Pair.Value, ImpulseRadiusCM, ClosureError))
+		{
+			UE_LOG(LogABTSRuntime, Error,
+				TEXT("[ABTS][M7][FixedSixSupportClosure][BlastRejected] Building=%s Seed=%d Reason=%s"),
+				*GetNameSafe(Pair.Key), Pair.Value->GetDamageLifecycleBrickId(),
+				*ClosureError);
+			RejectedBlastBuildings.Add(Pair.Key);
+		}
+		else
+		{
+			++PromotedBlastBuildingCount;
+		}
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixSupportClosure][BlastDiscovery]")
+		TEXT(" Radius=%.1f Discovered=%d Promoted=%d Rejected=%d SameTransaction=1"),
+		ImpulseRadiusCM, SortedBlastSeeds.Num(), PromotedBlastBuildingCount,
+		RejectedBlastBuildings.Num());
 	for (UHierarchicalInstancedStaticMeshComponent* HISM : {WoodBrickHISM.Get(), StoneBrickHISM.Get(), IronBrickHISM.Get(), GlassBrickHISM.Get(), CrystalBrickHISM.Get()})
 	{
 		TArray<int32> Indices = HISM->GetInstancesOverlappingSphere(Origin, ImpulseRadiusCM, true);
@@ -866,6 +1256,13 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> Snapshot = Modules;
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : Snapshot) if (AABTSM7BuildingModule* Module = Weak.Get())
 	{
+		if (Module->IsRecycled()) continue;
+		if (RejectedBlastBuildings.Contains(Module->GetDamageLifecycleOwner()))
+		{
+			// A rejected closure cannot fall through to partial damage on a
+			// still-static building; that would violate no-floating fail-closed.
+			continue;
+		}
 		const FVector Delta = Module->GetActorLocation() - Origin;
 		if (Delta.Size() <= ImpulseRadiusCM) BreakOrImpulsePrimitive(Module->GetMeshComponent(), INDEX_NONE, Delta, ImpulseSpeedCMPerSec * (1.0f - Delta.Size() / ImpulseRadiusCM), Delta.Size() <= DestroyRadiusCM);
 	}
@@ -892,6 +1289,7 @@ void AABTSM7BuildingMaterialSystem::ApplyDirectionalBlast(const FVector& Origin,
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> Snapshot = Modules;
 	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : Snapshot) if (AABTSM7BuildingModule* Module = Weak.Get())
 	{
+		if (Module->IsRecycled()) continue;
 		const FVector Delta = Module->GetActorLocation() - Origin;
 		const float Axial = FVector::DotProduct(Delta, UnitAxis);
 		if (FMath::Abs(Axial) > ImpulseLengthCM || FVector::VectorPlaneProject(Delta, UnitAxis).Size() > EffectRadiusCM) continue;
@@ -931,7 +1329,9 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 {
 	int32 FrozenCount = 0;
+	int32 RecycledAirborneCount = 0;
 	int32 SimulatingBefore = 0;
+	TArray<AABTSM7BuildingModule*> SleepingModules;
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
 	{
 		AABTSM7BuildingModule* Module = Modules[Index].Get();
@@ -944,10 +1344,85 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 		{
 			continue;
 		}
-		const UStaticMeshComponent* Body = Module->GetMeshComponent();
+		UStaticMeshComponent* Body = Module->GetMeshComponent();
 		SimulatingBefore += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
-		Module->Freeze();
+		if (Body != nullptr && Body->IsSimulatingPhysics()
+			&& !Body->IsAnyRigidBodyAwake())
+		{
+			SleepingModules.Add(Module);
+		}
+	}
+	SleepingModules.Sort([](const AABTSM7BuildingModule& Left,
+		const AABTSM7BuildingModule& Right)
+	{
+		const int32 LeftId = Left.GetDamageLifecycleBrickId();
+		const int32 RightId = Right.GetDamageLifecycleBrickId();
+		return LeftId != RightId ? LeftId < RightId
+			: Left.GetFName().LexicalLess(Right.GetFName());
+	});
+	TMap<const AABTSM7BuildingModule*, int32> SleepingIndex;
+	for (int32 Index = 0; Index < SleepingModules.Num(); ++Index)
+	{
+		SleepingIndex.Add(SleepingModules[Index], Index);
+	}
+	TArray<TArray<int32>> SupportChildren;
+	SupportChildren.SetNum(SleepingModules.Num());
+	TArray<int32> GroundRoots;
+	int32 SupportEdgeCount = 0;
+	UWorld* World = GetWorld();
+	for (int32 UpperIndex = 0; UpperIndex < SleepingModules.Num(); ++UpperIndex)
+	{
+		AABTSM7BuildingModule& Upper = *SleepingModules[UpperIndex];
+		if (Upper.CanFreezeAsGroundedRoot())
+		{
+			GroundRoots.Add(UpperIndex);
+			continue;
+		}
+		if (World == nullptr) continue;
+		UStaticMeshComponent* UpperBody = Upper.GetMeshComponent();
+		const FVector Up = Upper.GetCurrentGravityUp();
+		const FBoxSphereBounds Bounds = UpperBody->Bounds;
+		const float DownExtent = FMath::Abs(Up.X) * Bounds.BoxExtent.X
+			+ FMath::Abs(Up.Y) * Bounds.BoxExtent.Y
+			+ FMath::Abs(Up.Z) * Bounds.BoxExtent.Z;
+		FCollisionQueryParams QueryParams(
+			SCENE_QUERY_STAT(M7SettledSupportClosure), false, &Upper);
+		FHitResult SupportHit;
+		const FVector Start = Bounds.Origin - Up * FMath::Max(0.0f,
+			DownExtent - 1.0f);
+		if (!World->LineTraceSingleByChannel(SupportHit, Start,
+			Start - Up * 10.0f, ABTSDeveloperObstacleChannel, QueryParams))
+		{
+			continue;
+		}
+		AABTSM7BuildingModule* Lower = Cast<AABTSM7BuildingModule>(
+			SupportHit.GetActor());
+		const int32* LowerIndex = Lower != nullptr ? SleepingIndex.Find(Lower) : nullptr;
+		if (LowerIndex != nullptr
+			&& Lower->GetDamageLifecycleOwner()
+				== Upper.GetDamageLifecycleOwner()
+			&& FVector::DotProduct(Lower->GetActorLocation()
+				- Upper.GetActorLocation(), Up) < -1.0f)
+		{
+			SupportChildren[*LowerIndex].Add(UpperIndex);
+			++SupportEdgeCount;
+		}
+	}
+	TArray<int32> FreezeOrder;
+	BuildGroundReachableFreezeOrder(SupportChildren, GroundRoots, FreezeOrder);
+	for (const int32 Index : FreezeOrder)
+	{
+		SleepingModules[Index]->Freeze();
 		++FrozenCount;
+	}
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr || !Module->IsDynamic()) continue;
+		// The only remaining dynamics are awake or have no contact path to a
+		// certified root. Recycle them rather than creating suspended statics.
+		Module->RecycleUnsupportedDebris();
+		++RecycledAirborneCount;
 	}
 
 	int32 SimulatingAfter = 0;
@@ -959,9 +1434,15 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 		SimulatingAfter += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][WalkReturnFreeze] Frozen=%d SimulatingBefore=%d SimulatingAfter=%d TransformPolicy=PreserveFinal"),
+		TEXT("[ABTS][M7][WalkReturnFreeze] FrozenGroundReachable=%d GroundRoots=%d SupportEdges=%d RecycledAirborneOrAwake=%d SimulatingBefore=%d SimulatingAfter=%d NoFloatingStatic=1"),
 		FrozenCount,
+		GroundRoots.Num(),
+		SupportEdgeCount,
+		RecycledAirborneCount,
 		SimulatingBefore,
+		SimulatingAfter);
+	ensureAlwaysMsgf(SimulatingAfter == 0,
+		TEXT("Walk return left %d M7 module components simulating"),
 		SimulatingAfter);
 	return FrozenCount;
 }
@@ -1020,3 +1501,75 @@ void AABTSM7BuildingMaterialSystem::SpawnTestSet()
 	SpawnDevice(Barrel, FTransform(TestSetTransform.GetRotation(), Base + Forward * 600.0f - Right * 170.0f));
 	SpawnDevice(Piston, FTransform(TestSetTransform.GetRotation(), Base + Forward * 600.0f + Right * 170.0f));
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM7CentralizedContactSpatialHashTest,
+	"ABTS.M7.CentralizedContactDamage.SpatialHash",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM7CentralizedContactSpatialHashTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	// A 1,000 cm/s brick is outside the current overlap but its 0.1-second
+	// swept bounds reach the target. This is the case a low-frequency polling
+	// implementation must not silently miss after per-brick callbacks are off.
+	TArray<FBox> SweptBounds;
+	SweptBounds.Add(FBox(FVector(-18.0f), FVector(118.0f, 18.0f, 18.0f)));
+	SweptBounds.Add(FBox(FVector(100.0f, -18.0f, -18.0f),
+		FVector(136.0f, 18.0f, 18.0f)));
+	SweptBounds.Add(FBox(FVector(1000.0f), FVector(1036.0f)));
+	TArray<uint64> FirstPairs;
+	TArray<uint64> SecondPairs;
+	BuildStableSpatialContactCandidatePairs(SweptBounds, 180.0f, FirstPairs);
+	BuildStableSpatialContactCandidatePairs(SweptBounds, 180.0f, SecondPairs);
+	TestEqual(TEXT("High-speed swept contact has exactly one near candidate"),
+		FirstPairs.Num(), 1);
+	TestEqual(TEXT("Stable spatial hash emits the same candidate sequence"),
+		FirstPairs, SecondPairs);
+	TestEqual(TEXT("Candidate key retains the sorted two brick ordinals"),
+		FirstPairs.IsEmpty() ? 0ull : FirstPairs[0], 1ull);
+	const FBox CrossingMover(FVector(82.0f, -18.0f, -18.0f),
+		FVector(118.0f, 18.0f, 18.0f));
+	const FBox CrossingTarget(FVector(42.0f, -18.0f, -18.0f),
+		FVector(78.0f, 18.0f, 18.0f));
+	TestTrue(TEXT("High-speed crossing passes the deterministic narrow-contact gate"),
+		PassesSweptNarrowContactGate(CrossingMover, FVector(1000.0f, 0.0f, 0.0f),
+			CrossingTarget, FVector::ZeroVector, 0.10f));
+	const FBox ParallelNearMiss(FVector(42.0f, 82.0f, -18.0f),
+		FVector(78.0f, 118.0f, 18.0f));
+	TestFalse(TEXT("Parallel near-miss does not create ghost contact damage"),
+		PassesSweptNarrowContactGate(CrossingMover, FVector(1000.0f, 0.0f, 0.0f),
+			ParallelNearMiss, FVector(1000.0f, 0.0f, 0.0f), 0.10f));
+	int32 PairCursor = 0;
+	TSet<int32> VisitedPairIndices;
+	for (int32 Window = 0; Window < 8; ++Window)
+	{
+		TArray<int32> PairWindow;
+		BuildCyclicPairWindow(2048, 256, PairCursor, PairWindow);
+		for (const int32 PairIndex : PairWindow)
+		{
+			VisitedPairIndices.Add(PairIndex);
+		}
+	}
+	TestEqual(TEXT("Dense pair budget eventually visits every stable candidate"),
+		VisitedPairIndices.Num(), 2048);
+	TArray<TArray<int32>> StackSupportChildren;
+	StackSupportChildren.SetNum(4);
+	StackSupportChildren[0].Add(1);
+	StackSupportChildren[1].Add(2);
+	TArray<int32> StackRoots = {0};
+	TArray<int32> FreezeOrder;
+	BuildGroundReachableFreezeOrder(StackSupportChildren, StackRoots,
+		FreezeOrder);
+	TestEqual(TEXT("Three-brick settled stack preserves every grounded brick"),
+		FreezeOrder.Num(), 3);
+	TestFalse(TEXT("Disconnected sleeping brick is excluded and therefore recycled"),
+		FreezeOrder.Contains(3));
+	TestEqual(TEXT("Walk transaction identifies exactly one unsupported body for recycling"),
+		StackSupportChildren.Num() - FreezeOrder.Num(), 1);
+	return true;
+}
+
+#endif

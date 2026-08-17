@@ -61,6 +61,8 @@ struct ABTSRUNTIME_API FABTSM7ChaosBodyProfile final
 	float AngularDamping = 4.0f;
 
 	static FABTSM7ChaosBodyProfile Production();
+	/** Destruction-only candidate. It never changes frozen/static certification. */
+	static FABTSM7ChaosBodyProfile DestructionCandidate();
 	bool IsUsable() const;
 	uint32 ComputeCrc32() const;
 	void ApplyTo(UStaticMeshComponent& Component) const;
@@ -107,6 +109,8 @@ public:
 	void ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile);
 	/** Applies a per-body Chaos quality override for multi-contact generated-building stacks. */
 	void ConfigureChaosSolverIterations(int32 PositionIterations, int32 VelocityIterations);
+	/** Applies a runtime-only body profile immediately before this brick enters Chaos. */
+	void ConfigureChaosBodyProfile(const FABTSM7ChaosBodyProfile& Profile);
 	/** Sets the grace and, for a live body, rebases its current damage-enable deadline. */
 	void SetContactDamageGraceSeconds(float Seconds);
 	void ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, float GravityAcceleration);
@@ -127,6 +131,18 @@ public:
 		UStaticMeshComponent& Component,
 		const FVector& AccelerationCMPerSec2);
 	void Freeze();
+	/** True only for a sleeping body directly resting on planet terrain or its own frozen support pad. */
+	bool CanFreezeAsGroundedRoot() const;
+	/** Refuses to turn an airborne or awake brick back into a static collider. */
+	bool FreezeIfSafelyGrounded();
+	/** Exact gravity-up used for settled support closure after site-uniform launch. */
+	FVector GetCurrentGravityUp() const;
+	/**
+	 * Removes a body that cannot be safely frozen at the Walk boundary or within
+	 * a bounded support-closure transaction.  It deliberately never leaves an
+	 * airborne static collider behind.
+	 */
+	void RecycleUnsupportedDebris();
 	/** Returns true only for the first successful break request. */
 	bool BreakModule();
 	bool ApplyImpactDamage(float DamageGain);
@@ -144,6 +160,8 @@ public:
 	bool IsDynamic() const { return bDynamic; }
 	bool UsesSiteUniformGravity() const { return bSiteUniformGravity; }
 	bool IsBroken() const { return bBroken; }
+	/** Walk-boundary terminal state; hidden recycled debris is never a seed, support, or damage target. */
+	bool IsRecycled() const { return bRecycled; }
 	bool IsCompoundChild() const { return bCompoundChild; }
 	AABTSM73StableBuildingActor* GetDamageLifecycleOwner() const
 	{
@@ -173,6 +191,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> DevicePresentation;
 	bool bBroken = false;
+	bool bRecycled = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	EABTSM7ModuleKind ModuleKind = EABTSM7ModuleKind::Brick;

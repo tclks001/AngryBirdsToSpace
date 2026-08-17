@@ -226,15 +226,24 @@ public:
 		FString& OutError);
 	/** True only while this frozen building owns its exact blocking tangent pad. */
 	bool IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel() const;
+	/** Exact grounded-freeze authority: only the frozen tangent support is a building support. */
+	bool IsJuryDemoFixedSixGroundSupportPrimitive(const UPrimitiveComponent* Primitive) const;
 	/** Phase two: start every prepared site from one GameMode batch boundary. */
 	bool ActivatePreparedJuryDemoFixedSixChaosValidation(
 		FString& OutError,
-		const FVector* GameplayImpactWorld = nullptr);
+		const FVector* GameplayImpactWorld = nullptr,
+		const TArray<AABTSM7BuildingModule*>* GameplayPhysicsModules = nullptr);
 	/** Release fallback: retain static preflight and defer physical promotion until a real module hit. */
 	bool MarkPreparedJuryDemoFixedSixChaosDeferred(FString& OutError);
 	/** Called by the owned material system before it applies the first real module damage. */
 	bool ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
-		const AABTSM7BuildingModule& TriggerModule, FString& OutError);
+		const AABTSM7BuildingModule& TriggerModule, FString& OutError,
+		float ImpactRadiusCM = 0.0f);
+	/** Builds and atomically promotes an exact independent-brick support island. */
+	bool ActivateJuryDemoFixedSixImpactSupportClosure(
+		const AABTSM7BuildingModule& TriggerModule,
+		float ImpactRadiusCM,
+		FString& OutError);
 	void RejectJuryDemoFixedSixChaosValidation(const FString& Reason);
 	bool CopyJuryDemoFixedSixChaosResult(
 		FABTSM73JuryDemoFixedSixChaosResult& OutResult) const;
@@ -388,6 +397,12 @@ private:
 		FString& OutError);
 	bool ValidateJuryDemoFixedSixFrozenTangentSupport(
 		const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
+		FString& OutError) const;
+	/** Frozen-geometry support closure used only by destructive gameplay, never by static certification. */
+	bool BuildJuryDemoFixedSixSupportClosure(
+		TConstArrayView<AABTSM7BuildingModule*> SeedModules,
+		TArray<AABTSM7BuildingModule*>& OutPhysicsModules,
+		TArray<int32>* OutAffectedBrickIds,
 		FString& OutError) const;
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,
 		struct FABTSM73StructureData& OutData, FString& OutError,
@@ -569,6 +584,7 @@ private:
 	double JuryDemoFixedSixChaosWallStartSeconds = 0.0;
 	uint64 JuryDemoFixedSixChaosActivationFrame = 0;
 	int32 JuryDemoFixedSixActivePhysicsBodyCount = 0;
+	TSet<int32> JuryDemoFixedSixRemovedSupportBrickIds;
 	bool bIdleValidationRunning = false;
 	bool bDAG4ValidationRunning = false;
 	EABTSM73IdleValidationState IdleValidationState = EABTSM73IdleValidationState::Pending;

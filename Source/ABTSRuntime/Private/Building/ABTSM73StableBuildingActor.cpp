@@ -1915,6 +1915,23 @@ IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel() const
 		JuryDemoFixedSixStaticEntry.GetValue(), Error);
 }
 
+bool AABTSM73StableBuildingActor::
+IsJuryDemoFixedSixGroundSupportPrimitive(const UPrimitiveComponent* Primitive) const
+{
+	if (Primitive == nullptr || Primitive != FoundationCap.Get()
+		|| !bJuryDemoFixedSixFrozenTangentSupportActive)
+	{
+		return false;
+	}
+	if (!JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		return false;
+	}
+	FString Error;
+	return ValidateJuryDemoFixedSixFrozenTangentSupport(
+		JuryDemoFixedSixStaticEntry.GetValue(), Error);
+}
+
 void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 	AABTSM7BuildingMaterialSystem& MaterialSystem)
 {
