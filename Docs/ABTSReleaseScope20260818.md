@@ -113,6 +113,14 @@ The first game-world handoff also preserves the MoviePlayer foreground clock
 and uses the same black visual field, so progress continues rather than visibly
 starting a second, differently styled loading pass.
 
+The source fix was verified by a full UE 5.8 Development Editor build and the
+fresh `ABTS.UI` NullRHI suite (4/4). A clean Shipping BuildCookRun also completed
+with ExitCode 0 at candidate `a2244b4`; the archived package is
+`G:\\ABTS\\Artifacts\\RC9.3\\candidate-a2244b4-20260817-Shipping`. This is a
+startup-P0 validation package and intentionally excludes the rejected M7
+coarse/queued-brick experiments. Visible packaged startup acceptance remains
+required before promoting it as the release candidate.
+
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
   Development, and Shipping hard-locks playback even if a skip request is
