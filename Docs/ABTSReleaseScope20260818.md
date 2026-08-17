@@ -106,8 +106,9 @@ that first armed frame until the startup authority reports either Ready or
 Failed. Pausing based on gate discovery creates a Shipping-only bootstrap
 deadlock: the MoviePlayer screen completes, the in-game handoff cover reaches
 its 92 percent pre-Ready cap, and the actor needed to open the gate never gets
-another world tick. Shipping logging remains enabled for startup/authority
-diagnostics; this does not enable developer gameplay options or the console.
+another world tick. The installed UE build cannot safely enable global Shipping
+logging without a log-category ABI mismatch, so Shipping verification uses
+project-owned markers, process state, and offscreen visual evidence instead.
 The first game-world handoff also preserves the MoviePlayer foreground clock
 and uses the same black visual field, so progress continues rather than visibly
 starting a second, differently styled loading pass.
