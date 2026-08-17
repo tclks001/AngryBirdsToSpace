@@ -269,6 +269,67 @@ namespace
 					ContactRadiusCM,
 					1.0e-3);
 		}
+
+		/*
+		 * When an F4 sample approaches the UFO centre almost radially, no finite
+		 * circle can be tangent to that sample and also pass through the centre.
+		 * Select an exact point on the physical contact sphere instead. This keeps
+		 * the terminal segment geometric: the circle is tangent at the source and
+		 * ends precisely on the UFO contact, rather than falling back to a generic
+		 * position-interpolation curve.
+		 */
+		bool BuildToContactPoint(
+			const FVector3d& StartPositionCM,
+			const FVector3d& StartVelocityCMPerSec,
+			const FVector3d& ContactPointCM)
+		{
+			const double Speed = StartVelocityCMPerSec.Length();
+			if (!FMath::IsFinite(Speed) || Speed <= 1.0)
+			{
+				return false;
+			}
+
+			StartTangent = StartVelocityCMPerSec / Speed;
+			const FVector3d ToContact = ContactPointCM - StartPositionCM;
+			const double ForwardDistance = FVector3d::DotProduct(
+				ToContact,
+				StartTangent);
+			const FVector3d SideOffset = ToContact
+				- StartTangent * ForwardDistance;
+			const double SideDistance = SideOffset.Length();
+			const double ContactDistance = ToContact.Length();
+			if (!FMath::IsFinite(ContactDistance)
+				|| ContactDistance <= 1.0e-3
+				|| ForwardDistance <= 1.0
+				|| SideDistance <= 1.0e-3)
+			{
+				return false;
+			}
+
+			StartNormal = SideOffset / SideDistance;
+			RadiusCM = FMath::Square(ContactDistance)
+				/ (2.0 * SideDistance);
+			if (!FMath::IsFinite(RadiusCM) || RadiusCM <= 1.0e-3)
+			{
+				return false;
+			}
+
+			CircleCenterCM = StartPositionCM + StartNormal * RadiusCM;
+			const double Sweep = 2.0 * FMath::Atan2(
+				SideDistance,
+				ForwardDistance);
+			if (!FMath::IsFinite(Sweep)
+				|| Sweep <= 1.0e-5
+				|| Sweep >= PI - 1.0e-3)
+			{
+				return false;
+			}
+
+			ContactSweepRadians = Sweep;
+			return Position(ContactSweepRadians).Equals(
+				ContactPointCM,
+				1.0e-3);
+		}
 	};
 
 	double MinimumBodyClearanceCM(
@@ -491,7 +552,14 @@ namespace
 		 * guidance. This prevents the old single-quintic hairpin while keeping
 		 * position, velocity and acceleration continuous at both joins.
 		 */
-		constexpr double CandidateMaximumDurationSeconds = 12.0;
+		/*
+		 * F4 transfer begins at the final qualified envelope, not at the physical
+		 * impact. Some valid circular guides need more than the former 12-second
+		 * presentation cap to travel from that envelope to exact contact. The
+		 * per-sample acceleration, jerk, clearance and heading checks remain the
+		 * acceptance gate; this cap only prevents unbounded search candidates.
+		 */
+		constexpr double CandidateMaximumDurationSeconds = 600.0;
 		constexpr double CandidateMaximumAccelerationCMPerSec2 = 60000.0;
 		constexpr double CandidateMaximumJerkCMPerSec3 = 300000.0;
 		constexpr double MaximumHeadingStepRadians = PI / 24.0;
@@ -509,6 +577,11 @@ namespace
 
 		double BestScore = TNumericLimits<double>::Max();
 		FString BestDetail = TEXT("NoGeometricCandidate");
+		int32 SourceCount = 0;
+		int32 CenterCircleCount = 0;
+		int32 SphereContactCircleCount = 0;
+		int32 CandidateShapeCount = 0;
+		int32 CandidateDurationCount = 0;
 		double LastTestedTime = TNumericLimits<double>::Max();
 		const double LatestTime = Released.Points.Last().TimeSeconds;
 		for (int32 SourceIndex = Released.Points.Num() - 1;
@@ -528,15 +601,107 @@ namespace
 				continue;
 			}
 			LastTestedTime = Source.TimeSeconds;
+			++SourceCount;
 
 			FCircularContactGuidance Circle;
-			if (!Circle.Build(
+			bool bCircleBuilt = Circle.Build(
 				Source.PositionCM,
 				Source.VelocityCMPerSec,
 				ContactCenter,
-				ContactRadius))
+				ContactRadius);
+			bool bUsedSphereContactFallback = false;
+			if (bCircleBuilt)
+			{
+				++CenterCircleCount;
+			}
+			if (!bCircleBuilt)
+			{
+				/*
+				 * A radial F4 tail cannot define a tangent circle through the UFO
+				 * centre. Sweep a small, deterministic set of exact contact points
+				 * on the sphere instead. The selected route still has a true circular
+				 * terminal leg and every accepted candidate ends on that sphere.
+				 */
+				const FVector3d SourceRadial = (
+					Source.PositionCM - ContactCenter).GetSafeNormal();
+				const FVector3d SourceForward =
+					Source.VelocityCMPerSec.GetSafeNormal();
+				FVector3d Lateral = SourceForward
+					- SourceRadial * FVector3d::DotProduct(
+						SourceForward,
+						SourceRadial);
+				if (SourceRadial.IsNearlyZero() || Lateral.IsNearlyZero())
+				{
+					Lateral = FVector3d::CrossProduct(
+						SourceRadial,
+						FVector3d::UpVector);
+					if (Lateral.IsNearlyZero())
+					{
+						Lateral = FVector3d::CrossProduct(
+							SourceRadial,
+							FVector3d::RightVector);
+					}
+				}
+				Lateral = Lateral.GetSafeNormal();
+				/*
+				 * Test the near and far radial contacts plus deterministic lateral
+				 * offsets. A released F4 may be inbound, outbound or near-tangent
+				 * relative to the UFO; restricting the fallback to one near-side
+				 * great circle leaves valid sphere contacts undiscovered.
+				 */
+				const FVector3d ContactAxes[] = {
+					SourceRadial,
+					-SourceRadial,
+					SourceForward,
+					-SourceForward,
+					(SourceRadial + Lateral).GetSafeNormal(),
+					(SourceRadial - Lateral).GetSafeNormal(),
+					(-SourceRadial + Lateral).GetSafeNormal(),
+					(-SourceRadial - Lateral).GetSafeNormal() };
+				constexpr double ContactOffsetDegrees[] = {
+					0.0, 4.0, -4.0, 12.0, -12.0, 24.0, -24.0, 40.0, -40.0 };
+				for (const FVector3d& ContactAxis : ContactAxes)
+				{
+					if (ContactAxis.IsNearlyZero())
+					{
+						continue;
+					}
+					const FVector3d ContactLateral = FVector3d::CrossProduct(
+						ContactAxis,
+						SourceForward).GetSafeNormal();
+					for (const double OffsetDegrees : ContactOffsetDegrees)
+					{
+						const double OffsetRadians = FMath::DegreesToRadians(
+							OffsetDegrees);
+						const FVector3d ContactDirection = ContactLateral.IsNearlyZero()
+							? ContactAxis
+							: ContactAxis * FMath::Cos(OffsetRadians)
+								+ ContactLateral * FMath::Sin(OffsetRadians);
+						const FVector3d ContactPoint = ContactCenter
+							+ ContactRadius * ContactDirection;
+						if (Circle.BuildToContactPoint(
+							Source.PositionCM,
+							Source.VelocityCMPerSec,
+							ContactPoint))
+						{
+							bCircleBuilt = true;
+							bUsedSphereContactFallback = true;
+							break;
+						}
+					}
+					if (bCircleBuilt)
+					{
+						break;
+					}
+				}
+			}
+			if (!bCircleBuilt)
 			{
 				continue;
+			}
+			if (bUsedSphereContactFallback)
+			{
+				++SphereContactCircleCount;
 			}
 
 			const double SourceSpeed = Source.VelocityCMPerSec.Length();
@@ -588,6 +753,7 @@ namespace
 					{
 						continue;
 					}
+					++CandidateDurationCount;
 
 					FQuinticCurve Transition;
 					Transition.Build(
@@ -742,6 +908,10 @@ namespace
 							SampleIndex == ArcSampleCount);
 					}
 
+					if (bValidShape)
+					{
+						++CandidateShapeCount;
+					}
 					const double ClearanceScore =
 						MinimumClearance > Contract.BodyClearanceCM
 							? 0.0
@@ -794,9 +964,14 @@ namespace
 		}
 
 		OutFailure = FString::Printf(
-			TEXT("NoValidCandidateCircularContactTransfer:%s Score=%.6f"),
+			TEXT("NoValidCandidateCircularContactTransfer:%s Score=%.6f Sources=%d CenterCircles=%d SphereCircles=%d DurationCandidates=%d ShapeCandidates=%d"),
 			*BestDetail,
-			BestScore);
+			BestScore,
+			SourceCount,
+			CenterCircleCount,
+			SphereContactCircleCount,
+			CandidateDurationCount,
+			CandidateShapeCount);
 		return false;
 	}
 
