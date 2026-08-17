@@ -44,6 +44,20 @@ device, or specially highlighted brick.
   the primary-planet authority continues to resolve the largest ready
   non-satellite planet and applies its own `980 cm/s^2` radial gravity.
 
+### M7 per-brick runtime P0
+
+The user rejected M7 experiment `e41b6b7` in visible Standalone on August 17,
+2026. E2 impact produced an approximately three-second hitch followed by
+progressive collapse with floating bricks; an E3 black-bird explosion left
+unnaturally standing unsupported bricks. The experiment must not be integrated.
+Its runtime log recorded 3,247 complete support-closure derivations and 2,718
+`FixedSixSupportClosureNoPublicationSlots` damage drops in one session. A single
+building damage epoch must coalesce contacts, derive its support closure once,
+and publish every unsupported brick into immediate independent visible motion.
+No unsupported brick may remain frozen merely because a Chaos publication slot
+is unavailable, and the rejected coarse rigid-cluster fallback remains outside
+the release candidate.
+
 ## Explicitly deferred
 
 - Unique or authored building weak points.
