@@ -240,3 +240,9 @@
 - `NullRHI` 的结论是否被误写成 SceneCapture/光照像素验收；
 - 是否涉及共享地图、天空/雾云、默认 Blueprint 或稳定契约；若涉及，只摘录结论，实际修改仍留在集成工作树；
 - 摘录完成后不删除本文历史，后续复发继续在原条目追加日期和新证据。
+
+## 8.10 M11 RC93 F4 圆弧候选时长门（2026-08-18）
+
+| 现象 | 根因 | 处理 | 防回归验证 |
+| --- | --- | --- | --- |
+| `M11-RC93-P0-001`【已修复，待集成打包】`ABTS.M11C.Unit.PreviewReleasePlayback` 的邻域 F4 输入 `(-0.1875, 29.75, 0.971875)` 被错误拒绝为 `NoValidCandidateCircularContactTransfer:NoGeometricCandidate`，因而不能把 RC9.3 当前候选提升为新包。 | 现有逻辑已能从 F4 轨迹构造以 UFO 中心为目标的真实切向圆弧，但把圆弧总时长限制为 12 秒。诊断显示 554 个回溯采样均可建圆，失败发生在所有候选被总时长门过滤之前，属于过紧的展示时长上限而非“无几何圆弧”。 | 保留 `F I N E / END GAME` 终端页与同一权威 Playback/HUD 路径；把候选上限扩展到 600 秒，并保留加速度、jerk、碰撞体净空、单调接近、朝向步长和精确接触球的所有 fail-closed 验证。另加入有限、确定性的接触球候选构造，以便未来真遇径向退化时仍优先尝试真实圆弧而非退回位置插值。 | UE 5.8 Development Editor 全链接成功；fresh `ABTS.M11C.Unit.PreviewReleasePlayback` 通过，日志 `Saved/Logs/M11-P0-20260818-021500-FreshNullRHI.log`，completion marker 为 exit code 0。集成后仍须重跑 Opening Timeline、FinaleEndScreenPolicy、PreviewReleasePlayback 三项，并在新 Development/Shipping 包中做 startup/world-ready smoke 与可见圆弧、终端页验收。 |
