@@ -236,6 +236,7 @@ private:
 	bool ResolveImpactFacilityObservationAnchor(
 		const FHitResult& Hit,
 		FVector& OutAnchor,
+		FVector& OutExtent,
 		FName& OutFacilityName) const;
 	EABTSM6ImpactMaterial ResolveMaterial(const UPrimitiveComponent* Component) const;
 	const FABTSM6BirdImpactProfile& GetBirdProfile(EABTSBirdId BirdId) const;

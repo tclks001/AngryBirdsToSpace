@@ -93,7 +93,8 @@ private:
 		const FVector2d& NormalizedEnd,
 		const FLinearColor& Color,
 		float Thickness,
-		bool bDashed);
+		bool bDashed,
+		float DashPhasePixels = 0.0f);
 	void DrawDiagramCircleOutline(
 		const FVector2D& PanelCenter,
 		float PanelRadius,

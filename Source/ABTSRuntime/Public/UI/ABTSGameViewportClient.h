@@ -60,6 +60,11 @@ public:
 	static int32 ComputeConfirmationSecondsRemaining(double DeadlineSeconds, double NowSeconds);
 	/** Monotonic foreground progress: cap below completion until the authoritative world gate opens. */
 	static float ComputeStartupLoadingProgress(double ElapsedSeconds, bool bReady);
+	/** Two-phase latch: world authority and two complete front-end draws must both be stable. */
+	static bool IsStartupPresentationReady(
+		bool bWorldAuthorityReady,
+		bool bPresentationSurfaceReady,
+		int32 CompletedFrontEndDraws);
 
 private:
 	enum class EHitAction : uint8
@@ -97,6 +102,7 @@ private:
 	void RestoreGameplayInputMode();
 	void RebuildResolutionOptions();
 	void DrawMenu(UCanvas& Canvas, const FVector2D& ViewSize);
+	void DrawStartupHandoffCover(UCanvas& Canvas, const FVector2D& ViewSize);
 	void DrawBackdrop(UCanvas& Canvas, const FVector2D& ViewSize);
 	void DrawFrontOrPause(UCanvas& Canvas, const FVector2D& ViewSize);
 	void DrawSettings(UCanvas& Canvas, const FVector2D& ViewSize);
@@ -145,10 +151,15 @@ private:
 	bool bCaptureMode = false;
 	bool bScreenshotRequested = false;
 	bool bStartupGateRequired = false;
+	bool bStartupAuthorityReady = false;
 	bool bStartupWorldReady = false;
 	bool bStartupWorldFailed = false;
+	bool bStartupFrontEndRequired = false;
+	bool bStartupPresentationReady = false;
 	bool bStartupGateStartedLogged = false;
 	bool bStartupGateTerminalLogged = false;
+	bool bOpeningCinematicAttempted = false;
+	int32 StartupReadyPresentationFrameCount = 0;
 	int32 CaptureFrameCount = 0;
 	double CaptureStartSeconds = 0.0;
 	double StartupForegroundStartSeconds = 0.0;

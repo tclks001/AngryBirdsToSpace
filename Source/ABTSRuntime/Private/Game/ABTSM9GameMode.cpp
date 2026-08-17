@@ -20,19 +20,37 @@ void AABTSM9GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 {
 	Super::OnInitialPlayerPlaced(Character, SpawnTransform, SpawnCellId);
 	if (GetWorld() == nullptr) return;
+	const bool bResolvedDeveloperWalk =
+#if UE_BUILD_SHIPPING
+		false;
+#else
+		bEnableDeveloperWalk;
+#endif
+	const bool bResolvedAnyCellStake =
+#if UE_BUILD_SHIPPING
+		false;
+#else
+		bAllowDeveloperAnyCellSlingshotStakePlacement;
+#endif
 	int32 DebugBirdCount = 0;
 	for (TActorIterator<AABTSM25BirdCharacter> It(GetWorld()); It; ++It)
 	{
-		It->SetDeveloperWalkEnabled(bEnableDeveloperWalk, DeveloperWalkSpeedMultiplier);
+		It->SetDeveloperWalkEnabled(
+			bResolvedDeveloperWalk,
+			DeveloperWalkSpeedMultiplier);
 		++DebugBirdCount;
 	}
 	for (TActorIterator<AABTSM51WorldSystem> It(GetWorld()); It; ++It)
 	{
-		It->SetDeveloperAnyCellStakePlacementEnabled(bAllowDeveloperAnyCellSlingshotStakePlacement);
+		It->SetDeveloperAnyCellStakePlacementEnabled(bResolvedAnyCellStake);
 	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M9][Debug] DeveloperWalk=%d Birds=%d SpeedMultiplier=%.1f AnyCellStake=%d"),
-		bEnableDeveloperWalk ? 1 : 0, DebugBirdCount, FMath::Clamp(DeveloperWalkSpeedMultiplier, 1.0f, 10.0f),
-		bAllowDeveloperAnyCellSlingshotStakePlacement ? 1 : 0);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M9][Debug] DeveloperWalk=%d Birds=%d SpeedMultiplier=%.1f AnyCellStake=%d ShippingHardOff=%d"),
+		bResolvedDeveloperWalk ? 1 : 0,
+		DebugBirdCount,
+		FMath::Clamp(DeveloperWalkSpeedMultiplier, 1.0f, 10.0f),
+		bResolvedAnyCellStake ? 1 : 0,
+		UE_BUILD_SHIPPING ? 1 : 0);
 	if (!SatelliteClass) return;
 	AABTSM3Planet* PrimaryPlanet = nullptr;
 	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)

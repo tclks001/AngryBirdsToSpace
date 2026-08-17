@@ -447,6 +447,10 @@ bool AABTSM51WorldSystem::PlaceHeldToolAtAim(APlayerController& Controller)
 
 bool AABTSM51WorldSystem::PlaceHeldStakeAtAim(APlayerController& Controller)
 {
+#if UE_BUILD_SHIPPING
+	(void)Controller;
+	return false;
+#else
 	if (!bAllowDeveloperAnyCellStakePlacement) return false;
 	AABTSCraftingSystem* System = FindCraftingSystem();
 	UABTSInventoryComponent* Inventory = System ? System->GetInventory() : nullptr;
@@ -487,6 +491,7 @@ bool AABTSM51WorldSystem::PlaceHeldStakeAtAim(APlayerController& Controller)
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][DebugStake] Installed=%s Cell=%d AllowAnyCell=1"),
 		*ABTSGetItemFallbackLabel(Held), CellId);
 	return true;
+#endif
 }
 
 bool AABTSM51WorldSystem::InstallHeldStake(AABTSM51SlingshotDirtHole& Hole)

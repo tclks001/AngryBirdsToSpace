@@ -299,7 +299,9 @@ struct ABTSRUNTIME_API FABTSM11TerminalTransferContract
  * A non-F4 release contains only player-authoritative points. An F4 release
  * first tries the same input against the physical target. Only if that misses
  * may a visible, versioned C2 transfer join the player F4 endpoint to a future
- * state of the frozen nominal physical tail.
+ * state of the frozen nominal physical tail. Editor Candidate presentation
+ * instead hands off at the latest shape-valid released state, blends C2 into
+ * the tangent 3D contact circle, and follows that circle to first contact.
  */
 struct ABTSRUNTIME_API FABTSM11PlaybackPlan
 {

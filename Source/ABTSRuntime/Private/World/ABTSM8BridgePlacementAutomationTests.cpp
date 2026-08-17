@@ -6,6 +6,7 @@
 
 #include "Building/ABTSM7BuildingTypes.h"
 #include "Crafting/ABTSCraftingCatalog.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "Inventory/ABTSInventoryComponent.h"
 #include "Inventory/ABTSInventoryTypes.h"
@@ -13,6 +14,7 @@
 #include "Terrain/ABTSM3Planet.h"
 #include "Terrain/ABTSM3RiverVisualBuilder.h"
 #include "World/ABTSM8BridgeActors.h"
+#include "World/ABTSCollisionChannels.h"
 
 namespace
 {
@@ -228,6 +230,18 @@ bool FABTSM8WaterBarrierCoverageTest::RunTest(const FString& Parameters)
 		FABTSM3CellEdgeKey(1, 2),
 		CenterBarrierTransform,
 		BarrierHalfExtentCM);
+	const UPrimitiveComponent* CenterBarrierCollision =
+		Cast<UPrimitiveComponent>(CenterBarrier->GetRootComponent());
+	TestNotNull(
+		TEXT("Water barrier exposes a primitive walking wall"),
+		CenterBarrierCollision);
+	if (CenterBarrierCollision != nullptr)
+	{
+		TestEqual(
+			TEXT("Water barrier uses the walking-only channel instead of the building channel"),
+			CenterBarrierCollision->GetCollisionObjectType(),
+			ABTSWalkBarrierChannel);
+	}
 	TestEqual(
 		TEXT("Spawned wall uses the full visual-water-plus-margin half width"),
 		CenterBarrier->GetBaseHalfExtentCM().Y,

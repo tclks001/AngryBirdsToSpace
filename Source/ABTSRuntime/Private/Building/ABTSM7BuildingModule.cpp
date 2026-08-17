@@ -15,6 +15,7 @@
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "Physics/Experimental/PhysInterface_Chaos.h"
 #include "Physics/PhysicsFiltering.h"
+#include "ProceduralMeshComponent.h"
 #include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSCollisionChannels.h"
 
@@ -474,6 +475,21 @@ bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
 	return true;
 }
 
+bool AABTSM7BuildingModule::ReactivatePreservingSiteUniformGravity(
+	const FVector& Impulse)
+{
+	if (!bSiteUniformGravity || PlanarGravityUp.IsNearlyZero()
+		|| GravityAccelerationCMPerSec2 <= 0.0f || bCompoundChild)
+	{
+		return false;
+	}
+	const FVector SavedSiteUp = PlanarGravityUp;
+	const float SavedAcceleration = GravityAccelerationCMPerSec2;
+	ActivateDynamicPlanar(Impulse, SavedSiteUp, SavedAcceleration);
+	bSiteUniformGravity = true;
+	return true;
+}
+
 bool AABTSM7BuildingModule::VerifyChaosDeveloperObstacleCollisionIdentity(
 	FString& OutError) const
 {
@@ -696,7 +712,7 @@ bool AABTSM7BuildingModule::DetectSleepingTerrainPenetration(
 	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
 	{
 		const AABTSM3Planet* Planet = *It;
-		if (!IsValid(Planet) || !IsValid(Planet->ContinuousSurface))
+		if (!IsValid(Planet) || !IsValid(Planet->ContinuousSurface.Get()))
 		{
 			continue;
 		}

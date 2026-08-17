@@ -62,6 +62,10 @@ public:
 	static ECollisionResponse ResolveDeveloperObstacleCollisionResponse(
 		bool bDeveloperWalk,
 		bool bSlingshotFlight);
+	/** River air walls block walking but never alter a launched trajectory. */
+	static ECollisionResponse ResolveWalkBarrierCollisionResponse(
+		bool bDeveloperWalk,
+		bool bSlingshotFlight);
 	void SetPartyControlled(bool bInPlayerControlled);
 	void ApplyPartyMoveInput(const FVector& Direction, float Scale);
 	void ApplyPartyJump();

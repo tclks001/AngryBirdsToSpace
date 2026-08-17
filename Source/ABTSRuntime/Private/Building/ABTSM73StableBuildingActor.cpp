@@ -246,6 +246,23 @@ AABTSM73StableBuildingActor::AABTSM73StableBuildingActor()
 	if (GlassMaterial.Succeeded()) GlassPreview->SetMaterial(0, GlassMaterial.Object);
 }
 
+void AABTSM73StableBuildingActor::GatherPreviewComponentsForStylizedAdapter(
+	TArray<TPair<UPrimitiveComponent*, EABTSM7BuildingMaterial>>& OutBindings) const
+{
+	OutBindings.Reset();
+	for (const TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial> Pair : {
+		TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial>(WoodPreview.Get(), EABTSM7BuildingMaterial::Wood),
+		TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial>(StonePreview.Get(), EABTSM7BuildingMaterial::Stone),
+		TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial>(IronPreview.Get(), EABTSM7BuildingMaterial::Iron),
+		TPair<UHierarchicalInstancedStaticMeshComponent*, EABTSM7BuildingMaterial>(GlassPreview.Get(), EABTSM7BuildingMaterial::Glass)})
+	{
+		if (IsValid(Pair.Key) && Pair.Key->GetInstanceCount() > 0)
+		{
+			OutBindings.Emplace(Pair.Key, Pair.Value);
+		}
+	}
+}
+
 void AABTSM73StableBuildingActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);

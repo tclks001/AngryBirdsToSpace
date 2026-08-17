@@ -488,6 +488,7 @@ bool FABTSM6ImpactObservationCameraTest::RunTest(
 	const FVector Up = FVector::UpVector;
 	const FVector FrozenForward = FVector::ForwardVector;
 	const FVector FacilityAnchor(300.0f, 240.0f, 250.0f);
+	const FVector FacilityExtent(320.0f, 260.0f, 760.0f);
 	FVector ObservationLocation;
 	FVector ObservationLook;
 	FVector ObservationScreenUp;
@@ -498,20 +499,20 @@ bool FABTSM6ImpactObservationCameraTest::RunTest(
 			Up,
 			FrozenForward,
 			FacilityAnchor,
+			FacilityExtent,
 			true,
 			920.0f,
 			310.0f,
 			26.0f,
 			0.42f,
+			4.2f,
 			ObservationLocation,
 			ObservationLook,
 			ObservationScreenUp));
 	TestTrue(
-		TEXT("Impact observation retains the authored bird-relative camera distance"),
-		FMath::IsNearlyEqual(
-			FVector::Distance(ObservationLocation, BirdLocation),
-			FVector(920.0f, 0.0f, 310.0f).Size(),
-			0.01f));
+		TEXT("Facility bounds expand the observation beyond the old bird-relative distance"),
+		FVector::Distance(ObservationLocation, FacilityAnchor)
+			> FacilityExtent.Size() * 4.0f);
 	const FVector BirdFocus = BirdLocation + Up * 80.0f;
 	const float BirdAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(
 		FMath::Clamp(FVector::DotProduct(
@@ -522,11 +523,11 @@ bool FABTSM6ImpactObservationCameraTest::RunTest(
 			ObservationLook,
 			(FacilityAnchor - ObservationLocation).GetSafeNormal()), -1.0f, 1.0f)));
 	TestTrue(
-		TEXT("The bird remains inside the central observation framing"),
-		BirdAngleDegrees < 12.0f);
+		TEXT("The whole-building observation deliberately prioritizes the facility centre"),
+		FacilityAngleDegrees < 0.01f);
 	TestTrue(
-		TEXT("The actually hit facility remains inside the shared observation framing"),
-		FacilityAngleDegrees < 12.0f);
+		TEXT("The impact bird remains in the same broad collapse composition"),
+		BirdAngleDegrees < 20.0f);
 	TestTrue(
 		TEXT("Impact observation remains roll-free"),
 		FMath::Abs(FVector::DotProduct(
@@ -544,20 +545,21 @@ bool FABTSM6ImpactObservationCameraTest::RunTest(
 			Up,
 			FrozenForward,
 			FacilityAnchor,
+			FacilityExtent,
 			true,
 			920.0f,
 			310.0f,
 			26.0f,
 			0.42f,
+			4.2f,
 			ResidualLocation,
 			ResidualLook,
 			ResidualScreenUp));
 	TestTrue(
-		TEXT("A sideways residual velocity is absent from the locked camera baseline"),
+		TEXT("Residual bird motion cannot rotate the frozen whole-building baseline"),
 		FVector::DotProduct(
 			FVector::VectorPlaneProject(
-				BirdLocation + FVector(15.0f, -8.0f, 0.0f)
-					- ResidualLocation,
+				FacilityAnchor - ResidualLocation,
 				Up).GetSafeNormal(),
 			FrozenForward) > 0.9999f);
 	return true;

@@ -344,7 +344,7 @@ void AABTSM7GameMode::Tick(const float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	UpdateProductionFlowTiming(DeltaSeconds);
 	UpdateJuryDemoFixedSixProductionChaosBatch();
-	if (bShowTaskGraphPositionDebug)
+	if (!UE_BUILD_SHIPPING && bShowTaskGraphPositionDebug)
 	{
 		DrawTaskGraphPositionDebug();
 	}
@@ -1242,6 +1242,7 @@ bool AABTSM7GameMode::ApplyJuryDemoFixedSixTerrainBuildingCollisionOverride(
 	bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride = true;
 	JuryDemoFixedSixTerrainOverrideGenerationToken =
 		JuryDemoFixedSixProductionGenerationToken;
+	JuryDemoFixedSixTerrainCollisionRestoredGenerationToken = 0;
 	for (UProceduralMeshComponent* Surface : Surfaces)
 	{
 		Surface->SetCollisionResponseToChannel(
@@ -1336,6 +1337,64 @@ RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(
 {
 	OutError.Reset();
 	if (!bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride
+		&& JuryDemoFixedSixTerrainCollisionRestoredGenerationToken
+			== JuryDemoFixedSixProductionGenerationToken
+		&& JuryDemoFixedSixProductionGenerationToken != 0)
+	{
+		// The terrain override is global to the six-building generation.  The
+		// first building hit restores it; later buildings must verify and reuse
+		// that restored authority instead of rejecting their own first hit.
+		UWorld* World = GetWorld();
+		int32 VerifiedSurfaceCount = 0;
+		if (World == nullptr)
+		{
+			OutError = TEXT("DeferredFirstHitTerrainCollisionWorldMissing");
+			return false;
+		}
+		for (TActorIterator<AABTSM2Planet> It(World); It; ++It)
+		{
+			const AABTSM2Planet* Planet = *It;
+			const UProceduralMeshComponent* Surface = IsValid(Planet)
+				? Planet->ContinuousSurface.Get()
+				: nullptr;
+			if (Surface == nullptr) continue;
+			++VerifiedSurfaceCount;
+			if (Surface->GetCollisionEnabled()
+					!= ECollisionEnabled::QueryAndPhysics
+				|| Surface->GetCollisionObjectType() != ECC_WorldStatic
+				|| Surface->GetCollisionResponseToChannel(
+					ABTSDeveloperObstacleChannel) != ECR_Block)
+			{
+				OutError = TEXT("DeferredFirstHitRestoredTerrainCollisionDrift");
+				return false;
+			}
+		}
+		if (VerifiedSurfaceCount < 2)
+		{
+			OutError = TEXT("DeferredFirstHitRestoredTerrainSurfaceMissing");
+			return false;
+		}
+		for (const TWeakObjectPtr<AABTSM73StableBuildingActor>& WeakBuilding :
+			JuryDemoFixedSixChaosBuildings)
+		{
+			const AABTSM73StableBuildingActor* Building = WeakBuilding.Get();
+			if (Building == nullptr || !Building
+				->IsJuryDemoFixedSixFrozenTangentSupportBlockingBuildingChannel())
+			{
+				OutError = TEXT("DeferredFirstHitRestoredPadCollisionDrift");
+				return false;
+			}
+		}
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7][FixedSixDeferredChaos][CollisionAuthority]")
+			TEXT(" Generation=%llu TerrainBuildingResponse=Block")
+			TEXT(" PadsBuildingResponse=Block FirstHitPromotion=1")
+			TEXT(" IdempotentReuse=1 Surfaces=%d Accepted=1"),
+			JuryDemoFixedSixProductionGenerationToken,
+			VerifiedSurfaceCount);
+		return true;
+	}
+	if (!bJuryDemoFixedSixOwnsTerrainBuildingCollisionOverride
 		|| JuryDemoFixedSixTerrainOverrideGenerationToken == 0
 		|| JuryDemoFixedSixTerrainOverrideGenerationToken
 			!= JuryDemoFixedSixProductionGenerationToken
@@ -1395,6 +1454,7 @@ RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(
 			return false;
 		}
 	}
+	JuryDemoFixedSixTerrainCollisionRestoredGenerationToken = GenerationToken;
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixDeferredChaos][CollisionAuthority]")
 		TEXT(" Generation=%llu TerrainBuildingResponse=Block")
@@ -1658,6 +1718,10 @@ void AABTSM7GameMode::FinishProductionFlow(
 
 void AABTSM7GameMode::DrawTaskGraphPositionDebug()
 {
+	if (UE_BUILD_SHIPPING)
+	{
+		return;
+	}
 	AABTSM3Planet* Planet = TaskGraphDebugPlanet.Get();
 	ACharacter* Player = TaskGraphDebugPlayer.Get();
 	if (Planet == nullptr || Player == nullptr || !Planet->IsPlanetReady() || GEngine == nullptr) return;

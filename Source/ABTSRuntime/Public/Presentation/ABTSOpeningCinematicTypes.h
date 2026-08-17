@@ -18,7 +18,8 @@ enum class EABTSOpeningAnimationCue : uint8
 {
 	Idle,
 	Move,
-	Fly
+	Fly,
+	Celebrate
 };
 
 enum class EABTSOpeningPhase : uint8

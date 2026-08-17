@@ -55,6 +55,36 @@ device, or specially highlighted brick.
 - Legacy `1 Weak + 3 Ordinary` rollout matrices and the M73B/B2/DAG3/DAG4
   weak-point suites as release-signoff tests, unless a changed file directly
   requires one of those suites as a regression check.
+- Building-to-road visual clearance changes. The frozen sites still consume the
+  launch-range contract, but the enlarged production building envelopes make
+  several facades read closer to the main road than the earlier corridor
+  previews. August 18 keeps the current Placement/Layout identities unchanged;
+  a later pass must constrain building OBB-to-road-edge clearance instead of
+  translating sites ad hoc.
+
+## RC9 packaged cinematic acceptance
+
+- RC9 Development and Shipping both play the opening and post-hit finale
+  cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
+  Development, and Shipping hard-locks playback even if a skip request is
+  injected.
+- If RC10 or a later Development iteration is required, its debug default may
+  be changed to skip both cinematics for faster gameplay iteration. Shipping
+  remains permanently hard-locked to playback.
+- The opening must be anchored to the real spawn/party frame and hand off
+  without a bird-position jump. The finale must begin from the authoritative
+  UFO hit in its real local frame and trigger once. Preview-only substitute
+  worlds are not release evidence.
+- The opening UFO capture beam may not ship as the Engine BasicShapes cylinder;
+  RC9 requires a stylized, collision-free presentation effect tied to the same
+  deterministic capture interval.
+- Integration production binding is one-shot and fail closed: only a formally
+  certified, non-Candidate `PhysicalTargetHit` may start the post-hit timeline.
+  Its first proxy frame is copied from the four real bird visuals, the root is
+  the authoritative UFO transform, and the real presentation is retired only
+  after the replacement Geometry Collection is ready. A rejected binding keeps
+  the already-authoritative gameplay `TargetHit` instead of fabricating a
+  preview success.
 
 ## Release validation filters
 
@@ -72,3 +102,32 @@ ForceUnity remains required after integrating C++ changes. NullRHI proves data
 and lifecycle gates, not visible material quality or movement feel. The final
 release still needs packaged hand-feel testing and one visible production-map
 acceptance pass by the user.
+
+## Codex coordination and quota policy
+
+The primary Integration coordinator retains the global release graph, owns
+cross-system decisions, reviews every delivered diff, serializes heavy Unreal
+work, and is the only writer in the original Integration worktree while an
+integration edit is active. Model effort is selected by task risk rather than
+being inherited blindly from the coordinator:
+
+- use `gpt-5.6-sol` with high effort for cross-owner contracts, ambiguous root
+  causes, merge arbitration, release acceptance, and changes whose failure can
+  invalidate several systems;
+- use `gpt-5.6-terra` with medium or low effort for bounded implementation,
+  focused code review, and test-failure diagnosis with clear ownership;
+- use `gpt-5.6-luna` with low effort, or another available low-cost model, for
+  log extraction, inventory, mechanical audits, test watching, and other
+  narrowly specified high-volume work;
+- escalate one tier only when the lower-cost result is incomplete, internally
+  inconsistent, or fails its stated evidence contract. Do not keep a frontier
+  model on routine polling or transcription work.
+
+The same policy applies to M3, M7, M11, and additional Integration tasks. One
+worktree has exactly one source/config/asset/document writer at a time. Other
+tasks sharing that checkout must be read-only. If a parallel task must emit an
+artifact, it may write only beneath
+`Saved/CodexCoordination/<task-id>/` (or the corresponding project-owned path
+on `G:\ABTS`) and must not stage, commit, or modify tracked files. Heavy build,
+cook, package, D3D, Chaos, and visible acceptance work remains globally
+serialized regardless of model tier.

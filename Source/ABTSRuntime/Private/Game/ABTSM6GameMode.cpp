@@ -24,9 +24,21 @@ void AABTSM6GameMode::OnInitialPlayerPlaced(ACharacter& Character, const FTransf
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (System)
 	{
-		System->ConfigureDebugSlingshots(bSpawnDebugSlingshotsAtStart, SpawnCellId);
+		const bool bDebugSlingshotsAllowed =
+#if UE_BUILD_SHIPPING
+			false;
+#else
+			bSpawnDebugSlingshotsAtStart;
+#endif
+		System->ConfigureDebugSlingshots(
+			bDebugSlingshotsAllowed,
+			SpawnCellId);
 		UGameplayStatics::FinishSpawningActor(System, FTransform::Identity);
 	}
 	RuntimeSlingshotSystem = System;
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6] Entry ready=%d StartCell=%d"), System ? 1 : 0, SpawnCellId);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M6] Entry ready=%d StartCell=%d ShippingDebugSlingshotsHardOff=%d"),
+		System ? 1 : 0,
+		SpawnCellId,
+		UE_BUILD_SHIPPING ? 1 : 0);
 }

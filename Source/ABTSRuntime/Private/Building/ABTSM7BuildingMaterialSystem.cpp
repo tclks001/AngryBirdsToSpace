@@ -374,6 +374,16 @@ void AABTSM7BuildingMaterialSystem::ActivateModuleForLaunch(AABTSM7BuildingModul
 {
 	MarkPhysicsActivity();
 	Module.SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
+	if (Module.UsesSiteUniformGravity())
+	{
+		if (!Module.ReactivatePreservingSiteUniformGravity(InitialImpulse))
+		{
+			UE_LOG(LogABTSRuntime, Warning,
+				TEXT("[ABTS][M7][SiteUniformLaunch] ReactivationRejected Module=%s RadialFallback=Forbidden"),
+				*Module.GetName());
+		}
+		return;
+	}
 	if (bLaunchPhysicsPlanar)
 	{
 		Module.ActivateDynamicPlanar(InitialImpulse, LaunchGravityReference, LaunchGravityAccelerationCMPerSec2);
@@ -461,11 +471,19 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 	PromoteAll(CrystalBrickHISM, EABTSM7BuildingMaterial::Crystal);
 
 	TArray<AABTSM7BuildingModule*> PendingModules;
+	int32 SkippedSiteUniformCount = 0;
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
 	{
 		if (AABTSM7BuildingModule* Module = Modules[Index].Get())
 		{
-			if (!Module->IsDynamic()) PendingModules.Add(Module);
+			if (!Module->IsDynamic() && Module->UsesSiteUniformGravity())
+			{
+				++SkippedSiteUniformCount;
+			}
+			else if (!Module->IsDynamic())
+			{
+				PendingModules.Add(Module);
+			}
 		}
 		else
 		{
@@ -478,10 +496,11 @@ void AABTSM7BuildingMaterialSystem::BeginLaunchPhysics(
 		if (IsValid(Module) && !Module->IsDynamic()) ActivateModuleForLaunch(*Module);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d GravityModel=%s GravityReference=%s Gravity=%.1f ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
+		TEXT("[ABTS][M7][LaunchGravity] Planar=%d Promoted=%d Activated=%d SkippedFrozenSiteUniform=%d M6RadialReactivation=Forbidden GravityModel=%s GravityReference=%s Gravity=%.1f ContactGrace=%.3f ChaosBodyHash=%u ChaosWorldHash=%u %s PenetrationPairs=%d Repairs=%d LargeErrors=%d RemainingSmall=%d MaxDepth=%.4f Tolerance=%.4f Passes=%d"),
 		bLaunchPhysicsPlanar ? 1 : 0,
 		PromotedCount,
 		PendingModules.Num(),
+		SkippedSiteUniformCount,
 		bLaunchPhysicsPlanar
 			? TEXT("PlanarConstantAcceleration")
 			: TEXT("RadialConstantAcceleration"),
@@ -907,6 +926,44 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 			TEXT(" Reason=ProductionSiteUniformBodiesRemainWakeable"),
 			PreservedSiteUniformCount);
 	}
+}
+
+int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
+{
+	int32 FrozenCount = 0;
+	int32 SimulatingBefore = 0;
+	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
+	{
+		AABTSM7BuildingModule* Module = Modules[Index].Get();
+		if (Module == nullptr)
+		{
+			Modules.RemoveAtSwap(Index);
+			continue;
+		}
+		if (!Module->IsDynamic())
+		{
+			continue;
+		}
+		const UStaticMeshComponent* Body = Module->GetMeshComponent();
+		SimulatingBefore += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
+		Module->Freeze();
+		++FrozenCount;
+	}
+
+	int32 SimulatingAfter = 0;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
+	{
+		const AABTSM7BuildingModule* Module = WeakModule.Get();
+		const UStaticMeshComponent* Body =
+			Module != nullptr ? Module->GetMeshComponent() : nullptr;
+		SimulatingAfter += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
+	}
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M7][WalkReturnFreeze] Frozen=%d SimulatingBefore=%d SimulatingAfter=%d TransformPolicy=PreserveFinal"),
+		FrozenCount,
+		SimulatingBefore,
+		SimulatingAfter);
+	return FrozenCount;
 }
 
 void AABTSM7BuildingMaterialSystem::SetDynamicContactDamageGraceSeconds(const float Seconds)

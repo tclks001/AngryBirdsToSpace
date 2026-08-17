@@ -8,16 +8,30 @@
 #include "ABTSOpeningCinematicPreview.generated.h"
 
 class APlayerController;
+class AABTSM25BirdCharacter;
 class UABTSBirdAnimationPresentationComponent;
 class UCameraComponent;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UProceduralMeshComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class UPointLightComponent;
+class UWorld;
+struct FMinimalViewInfo;
+
+enum class EABTSOpeningStartResult : uint8
+{
+	Started,
+	DebugSkipped,
+	Rejected
+};
 
 /**
- * Self-contained C++ opening previsualization. It owns only collision-free
- * presentation components and never queries or mutates the real bird party.
+ * C++ opening presentation. Console preview stays isolated; the release entry
+ * temporarily takes visual control of the ready real Party and restores it at
+ * an exact proxy-to-real handoff.
  */
 UCLASS(BlueprintType)
 class ABTSRUNTIME_API AABTSOpeningCinematicPreview final : public AActor
@@ -27,9 +41,13 @@ class ABTSRUNTIME_API AABTSOpeningCinematicPreview final : public AActor
 public:
 	AABTSOpeningCinematicPreview();
 
+	/** Starts the release sequence at the ready four-bird party's real spawn frame. */
+	static EABTSOpeningStartResult TryStartProductionOpening(UWorld* World);
+
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 
 	void SetPreviewTimeScale(float InTimeScale);
 	void StopPreview();
@@ -38,6 +56,9 @@ public:
 
 private:
 	void InitializeAnimationDrivers();
+	void InitializeCaptureBeamVisual();
+	bool InitializeProductionBinding();
+	void ReleaseProductionBinding();
 	void UpdateBirds(float DeltaSeconds);
 	void UpdateUFOAndCaptureBeam();
 	void UpdateCamera();
@@ -57,7 +78,10 @@ private:
 	TObjectPtr<UStaticMeshComponent> UFOVisual;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|Opening Preview")
-	TObjectPtr<UStaticMeshComponent> CaptureBeam;
+	TObjectPtr<UProceduralMeshComponent> CaptureBeam;
+
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|Opening Preview")
+	TObjectPtr<UProceduralMeshComponent> CaptureBeamHalo;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|Opening Preview")
 	TObjectPtr<UPointLightComponent> CaptureLight;
@@ -67,6 +91,7 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UABTSBirdAnimationPresentationComponent>> AnimationDrivers;
+	TArray<EABTSOpeningAnimationCue> PreviousAnimationCues;
 
 	UPROPERTY(Transient)
 	TObjectPtr<APlayerController> PreviewController;
@@ -74,9 +99,34 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> SavedViewTarget;
 
+	UPROPERTY(Transient)
+	TArray<TWeakObjectPtr<AABTSM25BirdCharacter>> ProductionPartyBirds;
+	TArray<bool> ProductionBirdWasHidden;
+	TArray<FVector> ProductionHandoffLocalLocations;
+	TArray<FQuat> ProductionHandoffLocalRotations;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> CaptureBeamCoreMID;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> CaptureBeamHaloMID;
+
+	UPROPERTY()
+	TSoftObjectPtr<UMaterialInterface> CaptureBeamCoreMaterial;
+
+	UPROPERTY()
+	TSoftObjectPtr<UMaterialInterface> CaptureBeamHaloMaterial;
+
 	UPROPERTY(EditAnywhere, Category = "ABTS|Opening Preview", meta = (ClampMin = "0.05", ClampMax = "8.0"))
 	float PreviewTimeScale = 1.0f;
 
 	float ElapsedSeconds = 0.0f;
+	double LastProductionWallSeconds = 0.0;
+	bool bProductionBinding = false;
+	bool bProductionBindingReleased = false;
+	bool bProductionWorldWasPaused = false;
+	bool bProductionInputWasBlocked = false;
+	bool bProductionHUDWasVisible = true;
+	bool bProductionControllerFullTickWhenPaused = false;
 	bool bPreviewFinished = false;
 };

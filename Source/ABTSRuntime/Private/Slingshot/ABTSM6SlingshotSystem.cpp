@@ -221,8 +221,14 @@ void AABTSM6SlingshotSystem::BeginPlay()
 
 void AABTSM6SlingshotSystem::ConfigureDebugSlingshots(const bool bEnable, const int32 InStartCellId)
 {
+#if UE_BUILD_SHIPPING
+	bSpawnDebugSlingshotsAtStart = false;
+	(void)bEnable;
+	(void)InStartCellId;
+#else
 	bSpawnDebugSlingshotsAtStart = bEnable;
 	DebugStartCellId = InStartCellId;
+#endif
 }
 
 void AABTSM6SlingshotSystem::ConfigurePlanarTestMode(const FVector& InPlaneOrigin, const FVector& InPlaneUp)
@@ -361,6 +367,10 @@ bool AABTSM6SlingshotSystem::SpawnDebugSlingshotPair(
 
 void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 {
+#if UE_BUILD_SHIPPING
+	bSpawnDebugSlingshotsAtStart = false;
+	return;
+#else
 	if (!bSpawnDebugSlingshotsAtStart || bDebugSlingshotsSpawned || !ResolveDependencies()
 		|| !Planet->LogicalCells.IsValidIndex(DebugStartCellId)) return;
 	const FVector StartDirection = Planet->LogicalCells[DebugStartCellId].UnitCenter.GetSafeNormal();
@@ -378,6 +388,7 @@ void AABTSM6SlingshotSystem::SpawnDebugSlingshots()
 	}
 	bDebugSlingshotsSpawned = true;
 	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][DebugSlingshots] Enabled=1 StartCell=%d Spawned=%d Simple=4 Reinforced=4"), DebugStartCellId, Spawned);
+#endif
 }
 
 bool AABTSM6SlingshotSystem::IsBirdAllowed(const AABTSM25BirdCharacter& Bird, const AABTSM51SlingshotCord& Cord) const
@@ -1002,16 +1013,19 @@ void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
 	});
 	const float ActivationRadiusSquared = FMath::Square(FMath::Max(0.0f, LaunchGravityActivationRadiusCM));
 	int32 ReactivatedProxyCount = 0;
-	for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies)
+	if (bPlanarTestMode)
 	{
-		if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get())
+		for (TWeakObjectPtr<AABTSM6DestructibleProxy>& WeakProxy : DynamicProxies)
 		{
-			const UStaticMeshComponent* ProxyMesh = Proxy->GetMeshComponent();
-			const FVector ProxyLocation = ProxyMesh ? ProxyMesh->GetComponentLocation() : Proxy->GetActorLocation();
-			if (FVector::DistSquared(ProxyLocation, SlingCenter) > ActivationRadiusSquared) continue;
-			Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
-			Proxy->Reactivate(FVector::ZeroVector);
-			++ReactivatedProxyCount;
+			if (AABTSM6DestructibleProxy* Proxy = WeakProxy.Get())
+			{
+				const UStaticMeshComponent* ProxyMesh = Proxy->GetMeshComponent();
+				const FVector ProxyLocation = ProxyMesh ? ProxyMesh->GetComponentLocation() : Proxy->GetActorLocation();
+				if (FVector::DistSquared(ProxyLocation, SlingCenter) > ActivationRadiusSquared) continue;
+				Proxy->SetContactDamageGraceSeconds(LaunchContactDamageGraceSeconds);
+				Proxy->Reactivate(FVector::ZeroVector);
+				++ReactivatedProxyCount;
+			}
 		}
 	}
 
@@ -1023,12 +1037,10 @@ void AABTSM6SlingshotSystem::BeginLaunchGravityPhase()
 			if (UHierarchicalInstancedStaticMeshComponent* HISM = It->GetHISM()) PromotedCount += PromoteHISMForLaunchGravity(*HISM);
 		}
 	}
-	else if (Planet.IsValid())
-	{
-		PromotedCount += PromoteHISMForLaunchGravity(*Planet->ForestHISM);
-		PromotedCount += PromoteHISMForLaunchGravity(*Planet->RockHISM);
-	}
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ReactivatedProxies=%d ContactGrace=%.3f"),
+	// Production scenery stays instanced/static until a real impact promotes the
+	// exact hit primitive. Pre-promoting and re-waking every tree/rock in a 60 m
+	// radius accumulated hundreds of unrelated Chaos bodies across launches.
+	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][LaunchGravity] Planar=%d Radius=%.1f PromotedHISM=%d ExistingProxies=%d ReactivatedProxies=%d ProductionPrePromotion=ImpactOnly FrozenDebrisReactivation=Disabled ContactGrace=%.3f"),
 		bPlanarTestMode ? 1 : 0, LaunchGravityActivationRadiusCM, PromotedCount,
 		DynamicProxies.Num(), ReactivatedProxyCount, LaunchContactDamageGraceSeconds);
 }
@@ -1079,9 +1091,11 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
 	const FHitResult& Hit,
 	FVector& OutAnchor,
+	FVector& OutExtent,
 	FName& OutFacilityName) const
 {
 	OutAnchor = FVector::ZeroVector;
+	OutExtent = FVector::ZeroVector;
 	OutFacilityName = NAME_None;
 	const UPrimitiveComponent* HitComponent = Hit.GetComponent();
 	if (HitComponent == nullptr) return false;
@@ -1100,6 +1114,15 @@ bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
 			LiveModuleCount))
 		{
 			return false;
+		}
+		FBox FacilityBounds(EForceInit::ForceInit);
+		int32 BoundsModuleCount = 0;
+		if (Building->QueryLivePresentationBounds(
+			FacilityBounds,
+			BoundsModuleCount))
+		{
+			OutAnchor = FacilityBounds.GetCenter();
+			OutExtent = FacilityBounds.GetExtent();
 		}
 		OutFacilityName = Building->GetFName();
 		return true;
@@ -1124,16 +1147,18 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 		if (ResolveImpactFacilityObservationAnchor(
 			Hit,
 			Observation.FacilityAnchor,
+			Observation.FacilityExtent,
 			FacilityName))
 		{
 			Observation.Authority =
 				EABTSM6ImpactObservationAuthority::FacilityImpact;
 			UE_LOG(LogABTSRuntime, Log,
-				TEXT("[ABTS][M6][CameraImpactObservation] FacilityHit=%s Component=%s Impact=%s Anchor=%s Speed=%.1f"),
+				TEXT("[ABTS][M6][CameraImpactObservation] FacilityHit=%s Component=%s Impact=%s Anchor=%s Extent=%s Speed=%.1f"),
 				*FacilityName.ToString(),
 				*GetNameSafe(Hit.GetComponent()),
 				*Observation.ImpactPoint.ToCompactString(),
 				*Observation.FacilityAnchor.ToCompactString(),
+				*Observation.FacilityExtent.ToCompactString(),
 				NormalSpeedCMPerSec);
 		}
 		else

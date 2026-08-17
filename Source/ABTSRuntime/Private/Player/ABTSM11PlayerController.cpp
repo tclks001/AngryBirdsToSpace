@@ -179,11 +179,15 @@ void AABTSM11PlayerController::InteractWithSlingshotCord(
 
 void AABTSM11PlayerController::PrimaryWorldInteract()
 {
-	if (ShouldConsumePrimaryPointerForHUD()) return;
 	if (AABTSM11FinaleInteractionSystem* Interaction =
 		FindM11Interaction();
-		Interaction != nullptr && Interaction->IsFinaleActive())
+		Interaction != nullptr
+		&& ABTSM11RequiresExclusiveFinaleHudPointerRouting(
+			Interaction->IsFinaleActive()))
 	{
+		// Route the custom Canvas console before any inherited Inventory HUD
+		// consumption gate. The M11 HUD suppresses that visual layer but its
+		// cached layout can still overlap the bottom control deck.
 		float MouseX = 0.0f;
 		float MouseY = 0.0f;
 		if (Interaction->IsAiming()
@@ -199,6 +203,12 @@ void AABTSM11PlayerController::PrimaryWorldInteract()
 		}
 		return;
 	}
+
+	// The finale console owns the primary pointer while active. Only consult
+	// inherited HUD hit targets after the exclusive finale route above; the
+	// hidden M5 inventory HUD retains cached bottom-deck hit boxes and would
+	// otherwise consume all four M11 buttons before they can establish capture.
+	if (ShouldConsumePrimaryPointerForHUD()) return;
 
 	AABTSM6SlingshotSystem* System =
 		FindOrdinarySlingshotSystem();

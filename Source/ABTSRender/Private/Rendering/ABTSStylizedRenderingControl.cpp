@@ -9,8 +9,8 @@ namespace ABTSStylizedRenderingControl
 {
 	TAutoConsoleVariable<int32> CVarEnabled(
 		TEXT("abts.Rendering.Stylized.Enabled"),
-		0,
-		TEXT("Integration-owned stylized rendering switch. T2-B1 enables explicit main and preview view policies."),
+		1,
+		TEXT("Integration-owned stylized rendering switch. Development and Shipping default to the release stylized presentation."),
 		ECVF_Default);
 
 	TAutoConsoleVariable<int32> CVarProfile(
@@ -41,19 +41,32 @@ namespace ABTSStylizedRenderingControl
 
 bool FABTSStylizedRenderingControl::IsEnabled()
 {
+#if UE_BUILD_SHIPPING
+	return true;
+#else
 	return ABTSStylizedRenderingControl::CVarEnabled.GetValueOnGameThread() != 0;
+#endif
 }
 
 bool FABTSStylizedRenderingControl::IsEnabledOnAnyThread()
 {
+#if UE_BUILD_SHIPPING
+	return true;
+#else
 	return ABTSStylizedRenderingControl::CVarEnabled.GetValueOnAnyThread() != 0;
+#endif
 }
 
 void FABTSStylizedRenderingControl::SetEnabled(bool bEnabled)
 {
+#if UE_BUILD_SHIPPING
+	(void)bEnabled;
+	ABTSStylizedRenderingControl::CVarEnabled->Set(1, ECVF_SetByCode);
+#else
 	ABTSStylizedRenderingControl::CVarEnabled->Set(
 		bEnabled ? 1 : 0,
 		ECVF_SetByCode);
+#endif
 }
 
 EABTSStylizedRenderProfile FABTSStylizedRenderingControl::GetProfile()

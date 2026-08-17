@@ -46,6 +46,8 @@ struct FABTSM6ImpactObservationSample
 	FVector ImpactNormal = FVector::UpVector;
 	FVector IncomingVelocity = FVector::ZeroVector;
 	FVector FacilityAnchor = FVector::ZeroVector;
+	/** Frozen world-AABB half extent of the actually hit building at first contact. */
+	FVector FacilityExtent = FVector::ZeroVector;
 	float NormalSpeedCMPerSec = 0.0f;
 	EABTSM6ImpactObservationAuthority Authority =
 		EABTSM6ImpactObservationAuthority::None;
@@ -166,11 +168,13 @@ public:
 		const FVector& Up,
 		const FVector& FrozenForward,
 		const FVector& FacilityAnchor,
+		const FVector& FacilityExtent,
 		bool bHasFacilityAnchor,
 		float DistanceCM,
 		float HeightCM,
 		float LookDownDegrees,
 		float FacilityLookBias,
+		float FacilityFramingDistanceMultiplier,
 		FVector& OutLocation,
 		FVector& OutLook,
 		FVector& OutScreenUp);
@@ -330,10 +334,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
 		meta = (ClampMin = "0.05", ClampMax = "2.0", Units = "s"))
 	float ImpactObservationBlendSeconds = 0.45f;
-	/** Angular interpolation bias toward the actual facility anchor; below 0.5 keeps the bird primary. */
+	/** Legacy point-anchor interpolation used when a building has no valid frozen bounds. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
 		meta = (ClampMin = "0.0", ClampMax = "0.5"))
 	float ImpactObservationFacilityLookBias = 0.42f;
+	/** Conservative 50-degree-FOV distance used to keep the complete hit building in frame. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Impact Observation",
+		meta = (ClampMin = "2.0", ClampMax = "8.0"))
+	float ImpactObservationFacilityFramingDistanceMultiplier = 4.2f;
 	/** Fixed optical pitch below the local tangent; keeps the bird framing stable while revealing ground. */
 	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M6|Flight|Ground Context",
 		meta = (ClampMin = "0.0", ClampMax = "45.0", Units = "deg"))

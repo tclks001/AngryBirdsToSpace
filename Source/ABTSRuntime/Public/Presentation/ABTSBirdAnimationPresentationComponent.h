@@ -14,7 +14,8 @@ UENUM(BlueprintType)
 enum class EABTSBirdPresentationAction : uint8
 {
 	Impact UMETA(DisplayName = "Impact / Attack"),
-	Damage UMETA(DisplayName = "Damage Reaction")
+	Damage UMETA(DisplayName = "Damage Reaction"),
+	Celebrate UMETA(DisplayName = "Happy / Celebrate")
 };
 
 /** Read-only facts copied from Gameplay/physics for one presentation update. */
@@ -73,6 +74,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> DamageAnimation;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> CelebrateAnimation;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> ActiveAnimation;

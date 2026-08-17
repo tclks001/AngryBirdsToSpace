@@ -22,6 +22,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/DateTime.h"
 #include "Misc/Paths.h"
+#include "Presentation/ABTSOpeningCinematicPreview.h"
 #include "RHI.h"
 #include "Slingshot/ABTSM6SlingshotSystem.h"
 #include "UI/ABTSCanvasUI.h"
@@ -171,6 +172,27 @@ void UABTSGameViewportClient::Init(
 		CaptureStartSeconds = FPlatformTime::Seconds();
 		UE_LOG(LogABTSRuntime, Display, TEXT("[ABTS][SystemMenuCapture] Armed Page=%s Output=%s"), *CapturePage, *CaptureOutputPath);
 	}
+	else
+	{
+		const bool bSkipFrontEnd = FParse::Param(
+			FCommandLine::Get(),
+			TEXT("ABTSSkipFrontEnd"));
+		bStartupFrontEndRequired = !IsRunningCommandlet()
+			&& !FApp::IsUnattended()
+			&& !bSkipFrontEnd;
+		if (bStartupFrontEndRequired)
+		{
+			// Arm the correct full-screen front end before the first game viewport
+			// present.  Waiting for the first local PlayerController created a visible
+			// MoviePlayer -> partial HUD/clear-color gap in packaged builds.
+			MenuPage = EABTSSystemMenuPage::Front;
+			SelectedIndex = 0;
+			bMenuVisible = true;
+			bInitialMenuStateResolved = true;
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][StartupFlow] FrontEndPrearmed BeforeFirstPresent=1"));
+		}
+	}
 }
 
 void UABTSGameViewportClient::Tick(const float DeltaTime)
@@ -205,6 +227,19 @@ float UABTSGameViewportClient::ComputeStartupLoadingProgress(
 			0.92f);
 }
 
+bool UABTSGameViewportClient::IsStartupPresentationReady(
+	const bool bWorldAuthorityReady,
+	const bool bPresentationSurfaceReady,
+	const int32 CompletedFrontEndDraws)
+{
+	// The counter is advanced only after DrawMenu has emitted a complete front
+	// screen.  Keep two such frames behind the opaque handoff cover, then reveal
+	// the already-warm menu atomically on the following present.
+	return bWorldAuthorityReady
+		&& bPresentationSurfaceReady
+		&& CompletedFrontEndDraws >= 2;
+}
+
 void UABTSGameViewportClient::RefreshStartupWorldState()
 {
 	UWorld* GameWorld = GetWorld();
@@ -213,8 +248,11 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		StartupTrackedWorld = GameWorld;
 		StartupForegroundStartSeconds = FPlatformTime::Seconds();
 		bStartupGateRequired = false;
+		bStartupAuthorityReady = false;
 		bStartupWorldReady = false;
 		bStartupWorldFailed = false;
+		bStartupPresentationReady = false;
+		StartupReadyPresentationFrameCount = 0;
 		bStartupGateStartedLogged = false;
 		bStartupGateTerminalLogged = false;
 	}
@@ -231,7 +269,23 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 	}
 	bStartupGateRequired = bFoundGate;
 	bStartupWorldFailed = bFoundGate && bAnyFailed;
-	bStartupWorldReady = !bFoundGate || (bAllReady && !bAnyFailed);
+	const bool bWorldAuthorityReady = !bFoundGate
+		|| (bAllReady && !bAnyFailed);
+	bStartupAuthorityReady = bWorldAuthorityReady;
+	const bool bPresentationSurfaceReady = !bStartupFrontEndRequired
+		|| (bMenuVisible
+			&& MenuPage == EABTSSystemMenuPage::Front
+			&& MenuCanvas != nullptr);
+	if (!bWorldAuthorityReady || !bPresentationSurfaceReady)
+	{
+		StartupReadyPresentationFrameCount = 0;
+	}
+	bStartupPresentationReady = IsStartupPresentationReady(
+		bWorldAuthorityReady,
+		bPresentationSurfaceReady,
+		StartupReadyPresentationFrameCount);
+	bStartupWorldReady = bWorldAuthorityReady
+		&& bStartupPresentationReady;
 	if (bFoundGate && !bStartupGateStartedLogged)
 	{
 		bStartupGateStartedLogged = true;
@@ -245,7 +299,8 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 		if (bStartupWorldReady)
 		{
 			UE_LOG(LogABTSRuntime, Display,
-				TEXT("[ABTS][StartupFlow] ForegroundGateTerminal Ready=1 Failed=0 ElapsedSeconds=%.3f"),
+				TEXT("[ABTS][StartupFlow] ForegroundGateTerminal Ready=1 Failed=0 PresentationFrames=%d ElapsedSeconds=%.3f"),
+				StartupReadyPresentationFrameCount,
 				FPlatformTime::Seconds() - StartupForegroundStartSeconds);
 		}
 		else
@@ -259,7 +314,8 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 
 bool UABTSGameViewportClient::IsStartupInputBlocked() const
 {
-	return bStartupGateRequired && !bStartupWorldReady;
+	return (bStartupFrontEndRequired && !bStartupPresentationReady)
+		|| (bStartupGateRequired && !bStartupWorldReady);
 }
 
 void UABTSGameViewportClient::EnsureInitialMenuState()
@@ -285,6 +341,24 @@ void UABTSGameViewportClient::Draw(FViewport* InViewport, FCanvas* SceneCanvas)
 	if (!OverlayCanvas) OverlayCanvas = SceneCanvas;
 	MenuCanvas->Init(ViewSize.X, ViewSize.Y, nullptr, OverlayCanvas);
 	DrawMenu(*MenuCanvas, FVector2D(ViewSize));
+	if (bStartupFrontEndRequired
+		&& !bStartupPresentationReady
+		&& MenuPage == EABTSSystemMenuPage::Front)
+	{
+		// Count only fully emitted menus, not merely allocated UCanvas objects.
+		// The cover is drawn last and opaque, so neither the world HUD nor a
+		// partially initialized front screen can leak between MoviePlayer and
+		// the first valid interactive frame.
+		if (bStartupAuthorityReady && HitTargets.Num() >= 2)
+		{
+			++StartupReadyPresentationFrameCount;
+		}
+		else
+		{
+			StartupReadyPresentationFrameCount = 0;
+		}
+		DrawStartupHandoffCover(*MenuCanvas, FVector2D(ViewSize));
+	}
 	if (bCaptureMode)
 	{
 		++CaptureFrameCount;
@@ -581,6 +655,75 @@ void UABTSGameViewportClient::DrawMenu(UCanvas& Canvas, const FVector2D& ViewSiz
 	if (MenuPage == EABTSSystemMenuPage::Settings) DrawSettings(Canvas, ViewSize);
 	else DrawFrontOrPause(Canvas, ViewSize);
 	if (ActiveDialog != EABTSSystemMenuDialog::None) DrawDialog(Canvas, ViewSize);
+}
+
+void UABTSGameViewportClient::DrawStartupHandoffCover(
+	UCanvas& Canvas,
+	const FVector2D& ViewSize)
+{
+	// This Canvas bridge deliberately mirrors the asset-free MoviePlayer page.
+	// It survives the one-or-more presents between MoviePlayer teardown and the
+	// first fully initialized front-end draw without depending on Slate lifetime.
+	const FLinearColor Background(0.008f, 0.018f, 0.038f, 1.0f);
+	const FLinearColor Accent(0.18f, 0.82f, 0.94f, 1.0f);
+	const FLinearColor Text(0.72f, 0.82f, 0.92f, 1.0f);
+	Canvas.K2_DrawTexture(
+		Canvas.DefaultTexture,
+		FVector2D::ZeroVector,
+		ViewSize,
+		FVector2D::ZeroVector,
+		FVector2D::UnitVector,
+		Background,
+		BLEND_Translucent);
+
+	const float Scale = FMath::Clamp(
+		FMath::Min(ViewSize.X / 1920.0f, ViewSize.Y / 1080.0f),
+		0.65f,
+		1.35f);
+	const float Width = FMath::Min(720.0f * Scale, ViewSize.X * 0.72f);
+	const FVector2D Center(ViewSize.X * 0.5f, ViewSize.Y * 0.5f);
+	DrawLabel(
+		Canvas,
+		TEXT("ANGRY BIRDS TO SPACE"),
+		Center - FVector2D(0.0f, 78.0f * Scale),
+		1.34f * Scale,
+		FLinearColor(0.31f, 0.91f, 1.0f, 1.0f),
+		true,
+		true);
+	DrawLabel(
+		Canvas,
+		bStartupAuthorityReady
+			? TEXT("WORLD READY")
+			: TEXT("GENERATING PLANETARY WORLD"),
+		Center - FVector2D(0.0f, 24.0f * Scale),
+		0.72f * Scale,
+		Text,
+		false,
+		true);
+
+	const float Progress = ComputeStartupLoadingProgress(
+		FPlatformTime::Seconds() - StartupForegroundStartSeconds,
+		bStartupAuthorityReady);
+	const FVector2D TrackMin(
+		Center.X - Width * 0.5f,
+		Center.Y + 22.0f * Scale);
+	const FVector2D TrackSize(Width, 14.0f * Scale);
+	Canvas.K2_DrawTexture(
+		Canvas.DefaultTexture,
+		TrackMin,
+		TrackSize,
+		FVector2D::ZeroVector,
+		FVector2D::UnitVector,
+		FLinearColor(0.08f, 0.15f, 0.24f, 1.0f),
+		BLEND_Translucent);
+	Canvas.K2_DrawTexture(
+		Canvas.DefaultTexture,
+		TrackMin,
+		FVector2D(TrackSize.X * Progress, TrackSize.Y),
+		FVector2D::ZeroVector,
+		FVector2D::UnitVector,
+		Accent,
+		BLEND_Translucent);
 }
 
 void UABTSGameViewportClient::DrawBackdrop(UCanvas& Canvas, const FVector2D& ViewSize)
@@ -904,6 +1047,28 @@ void UABTSGameViewportClient::HandleAction(const EHitAction Action, const int32 
 	switch (Action)
 	{
 	case EHitAction::Begin:
+	{
+		CloseSystemMenu();
+		if (!bOpeningCinematicAttempted)
+		{
+			bOpeningCinematicAttempted = true;
+			const EABTSOpeningStartResult StartResult =
+				AABTSOpeningCinematicPreview::TryStartProductionOpening(GetWorld());
+			const bool bStarted = StartResult == EABTSOpeningStartResult::Started;
+			const bool bDebugSkip = StartResult == EABTSOpeningStartResult::DebugSkipped;
+			UE_LOG(LogABTSRuntime, Log,
+				TEXT("[ABTS][StartupFlow] OpeningCinematicAttempted=1 Started=%d DebugSkipped=%d"),
+				bStarted ? 1 : 0, bDebugSkip ? 1 : 0);
+			if (!bStarted && !bDebugSkip)
+			{
+				// A release binding rejection must not silently reveal an interactive
+				// world without its required opening handoff.
+				bOpeningCinematicAttempted = false;
+				OpenFrontEnd();
+			}
+		}
+		break;
+	}
 	case EHitAction::Resume: CloseSystemMenu(); break;
 	case EHitAction::Settings: OpenSettingsMenu(); break;
 	case EHitAction::ReturnToTitle: OpenFrontEnd(); break;

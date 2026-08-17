@@ -6,6 +6,51 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+
+bool AABTSM73StableBuildingActor::QueryLivePresentationBounds(
+	FBox& OutWorldBounds,
+	int32& OutLiveModuleCount) const
+{
+	OutWorldBounds = FBox(EForceInit::ForceInit);
+	OutLiveModuleCount = 0;
+	if (!bRuntimeSpawned || !GenerationSummary.bAccepted) return false;
+
+	if (JuryDemoFixedSixStaticEntry.IsSet()
+		|| BuildingFreezeV3RuntimeEntry.IsSet())
+	{
+		for (const UHierarchicalInstancedStaticMeshComponent* HISM : {
+			WoodPreview.Get(), StonePreview.Get(), IronPreview.Get(),
+			GlassPreview.Get()})
+		{
+			const UStaticMesh* StaticMesh = HISM ? HISM->GetStaticMesh() : nullptr;
+			if (StaticMesh == nullptr) continue;
+			const FBox LocalBounds = StaticMesh->GetBoundingBox();
+			for (int32 InstanceIndex = 0;
+				InstanceIndex < HISM->GetInstanceCount(); ++InstanceIndex)
+			{
+				FTransform InstanceTransform;
+				if (!HISM->GetInstanceTransform(
+					InstanceIndex, InstanceTransform, true))
+				{
+					continue;
+				}
+				OutWorldBounds += LocalBounds.TransformBy(InstanceTransform);
+				++OutLiveModuleCount;
+			}
+		}
+	}
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	{
+		const AABTSM7BuildingModule* Module = WeakModule.Get();
+		if (Module == nullptr || Module->IsActorBeingDestroyed()) continue;
+		const UStaticMeshComponent* Mesh = Module->GetMeshComponent();
+		if (Mesh == nullptr) continue;
+		OutWorldBounds += Mesh->Bounds.GetBox();
+		++OutLiveModuleCount;
+	}
+	return OutLiveModuleCount > 0 && OutWorldBounds.IsValid;
+}
 
 bool AABTSM73StableBuildingActor::QueryLivePresentationAnchor(
 	FVector& OutWorldLocation,

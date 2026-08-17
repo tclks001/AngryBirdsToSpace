@@ -26,12 +26,16 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 
 	int32 ExplicitPreviewCandidateId =
 		OrdinarySlingshotSlotPreviewCandidateId;
+#if UE_BUILD_SHIPPING
+	const bool bPreviewRequested = false;
+#else
 	const bool bCommandLinePreview = FParse::Value(
 		FCommandLine::Get(),
 		TEXT("ABTSM3R31SlotPreviewCandidate="),
 		ExplicitPreviewCandidateId);
 	const bool bPreviewRequested =
 		bEnableOrdinarySlingshotSlotPreview || bCommandLinePreview;
+#endif
 	AABTSM3Planet* Planet = nullptr;
 	for (TActorIterator<AABTSM3Planet> It(GetWorld()); It; ++It)
 	{
@@ -42,10 +46,14 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 		}
 	}
 	const FABTSM3MonthlyFinaleAnchorPreview* ActiveFinalePreview =
+#if UE_BUILD_SHIPPING
+		nullptr;
+#else
 		Planet != nullptr
 			&& Planet->GetActiveMonthlyFinaleAnchorPreview().bPreviewValid
 		? &Planet->GetActiveMonthlyFinaleAnchorPreview()
 		: nullptr;
+#endif
 	if (!bPreviewRequested && ActiveFinalePreview != nullptr)
 	{
 		ExplicitPreviewCandidateId =

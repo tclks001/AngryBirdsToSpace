@@ -468,6 +468,7 @@ void AABTSM3GameMode::BeginPlay()
 				FABTSM3R5AcceptanceManifest::
 					ComputeSweepSeedManifestHash()));
 	}
+#if !UE_BUILD_SHIPPING
 	if (FParse::Param(FCommandLine::Get(), TEXT("ABTSM3R0Smoke")))
 	{
 		M3R0SmokeStartSeconds = FPlatformTime::Seconds();
@@ -551,6 +552,7 @@ void AABTSM3GameMode::BeginPlay()
 			true,
 			0.25f);
 	}
+#endif
 	TryPlacePlayerAtInitialRoad();
 }
 
