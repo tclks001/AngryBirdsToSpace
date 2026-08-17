@@ -119,6 +119,19 @@ first discovered, so the blue front page cannot leak between the two technical
 owners. The result is one continuous player-facing loading page rather than a
 second, differently styled loading pass.
 
+The first visible Shipping world exposed two additional cooked-only fallbacks.
+`AABTSM3Planet` and `AABTSM51GameMode` had compile-time Shipping branches that
+discarded the production map's authored frozen V3 presentation request and
+ordinary-slot snapshot, restoring the short straight compatibility world and
+its sparse legacy stakes. Shipping now preserves the authored Candidate 4
+frame while continuing to reject command-line preview overrides. In the same
+package, M7 building HISM instances fell back to the checker/default material
+because the shared toon master lacked the cooked InstancedStaticMesh usage
+permutation. The master material now owns that usage and the M7 adapter test
+checks it explicitly. Release evidence must therefore show
+`MapFreezeV3MainRoute / Candidate=4 / EndpointOrdinal=0`, accepted ordinary
+slot snapshots, and no HISM default-material fallback in the cooked player.
+
 The unified handoff was verified by a full UE 5.8 Development Editor build and
 the fresh `ABTS.UI` NullRHI suite (4/4). The active candidate also integrates
 the M7 fixed-six static-startup acceptance and one-closure-per-building damage

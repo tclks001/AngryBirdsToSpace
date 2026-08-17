@@ -27,7 +27,12 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 	int32 ExplicitPreviewCandidateId =
 		OrdinarySlingshotSlotPreviewCandidateId;
 #if UE_BUILD_SHIPPING
-	const bool bPreviewRequested = false;
+	// Authored production snapshots remain valid in Shipping. Shipping only
+	// rejects command-line preview overrides; disabling this property restored
+	// the compatibility slot pairs even when M3 had published the frozen V3
+	// presentation.
+	const bool bPreviewRequested =
+		bEnableOrdinarySlingshotSlotPreview;
 #else
 	const bool bCommandLinePreview = FParse::Value(
 		FCommandLine::Get(),
@@ -46,14 +51,10 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 		}
 	}
 	const FABTSM3MonthlyFinaleAnchorPreview* ActiveFinalePreview =
-#if UE_BUILD_SHIPPING
-		nullptr;
-#else
 		Planet != nullptr
 			&& Planet->GetActiveMonthlyFinaleAnchorPreview().bPreviewValid
 		? &Planet->GetActiveMonthlyFinaleAnchorPreview()
 		: nullptr;
-#endif
 	if (!bPreviewRequested && ActiveFinalePreview != nullptr)
 	{
 		ExplicitPreviewCandidateId =

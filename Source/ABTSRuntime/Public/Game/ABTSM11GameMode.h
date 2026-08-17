@@ -55,12 +55,12 @@ protected:
 		int32 SpawnCellId) override;
 
 private:
-	/** Enables the M3R-5.2/M5.1/M11 shared Preview/Test frame on authored test maps. */
-	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11|Preview Test")
+	/** Enables the frozen M3R-5.2/M5.1/M11 frame on the authored production map. */
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11|Frozen Production Frame")
 	bool bEnableMonthlyFinalePreviewIntegration = false;
 
 	/** Exact M3 SourceRouteCandidateId; array order is never an authority. */
-	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11|Preview Test",
+	UPROPERTY(EditDefaultsOnly, Category = "ABTS|M11|Frozen Production Frame",
 		meta = (EditCondition = "bEnableMonthlyFinalePreviewIntegration"))
 	int32 MonthlyFinalePreviewCandidateId = INDEX_NONE;
 

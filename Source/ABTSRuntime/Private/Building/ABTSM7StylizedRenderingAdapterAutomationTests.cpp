@@ -43,6 +43,9 @@ bool FABTSM7StylizedRenderingAdapterTest::RunTest(const FString& Parameters)
 		LoadedMaterials.Wood, LoadedMaterials.Stone,
 		LoadedMaterials.Steel, LoadedMaterials.Glass})
 	{
+		TestTrue(TEXT("Every M7 toon building material has its Shipping HISM permutation"),
+			Candidate != nullptr
+				&& Candidate->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes));
 		const UMaterialInstance* Instance = Cast<UMaterialInstance>(Candidate);
 		TestNotNull(TEXT("Every M7 T3-B candidate is a real material instance"), Instance);
 		TestEqual(TEXT("Every M7 T3-B candidate uses the approved Toon parent"),

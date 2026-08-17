@@ -1469,7 +1469,11 @@ ResolveMonthlyPresentationPreviewCandidateId(
 		bool& bOutRequested) const
 {
 #if UE_BUILD_SHIPPING
-	bOutRequested = false;
+	// The authored M11 release world consumes the frozen V3 presentation in
+	// Shipping as well. Only command-line overrides are development-only;
+	// suppressing the authored request here silently restored the short,
+	// straight compatibility world (including its old roads and stake slots).
+	bOutRequested = bEnableMonthlyPresentationPreview;
 	return MonthlyPresentationPreviewCandidateId;
 #else
 	bOutRequested = bEnableMonthlyPresentationPreview
