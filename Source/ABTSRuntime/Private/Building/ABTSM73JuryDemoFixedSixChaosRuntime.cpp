@@ -365,7 +365,16 @@ bool AABTSM73StableBuildingActor::PrepareJuryDemoFixedSixChaosValidation(
 		}
 	}
 
-	IdleValidationState = EABTSM73IdleValidationState::Running;
+	// M6 has already accepted this fixed-six actor as an exact static-ready
+	// participant. Preparing the deferred first-hit representation must not
+	// regress that published startup state to Running: a late E1 binding would
+	// otherwise reopen the WorldReady gate. Any failure below remains fail-closed
+	// through RejectRuntimeStructure/RejectJuryDemoFixedSixChaosValidation.
+	if (IdleValidationState != EABTSM73IdleValidationState::Accepted)
+	{
+		OutError = TEXT("FixedSixChaosPreparationIdleValidationNotAccepted");
+		return false;
+	}
 	ClearBrickPreviews();
 	JuryDemoFixedSixStaticBrickInstanceCount = 0;
 	RuntimeModules.Reset(Entry.Bricks.Num() + AuxiliaryModuleCount);
@@ -846,16 +855,21 @@ bool AABTSM73StableBuildingActor::MarkPreparedJuryDemoFixedSixChaosDeferred(
 {
 	OutError.Reset();
 	if (!bJuryDemoFixedSixChaosPrepared || bJuryDemoFixedSixChaosRunning
-		|| bJuryDemoFixedSixChaosDeferredUntilFirstHit
-		|| !JuryDemoFixedSixStaticEntry.IsSet())
+		|| !JuryDemoFixedSixStaticEntry.IsSet()
+		|| IdleValidationState != EABTSM73IdleValidationState::Accepted)
 	{
 		OutError = TEXT("FixedSixChaosDeferredStateInvalid");
 		return false;
 	}
+	if (bJuryDemoFixedSixChaosDeferredUntilFirstHit)
+	{
+		// A harmless batch retry must retain the already-published static-ready
+		// authority instead of turning it into a fresh pending/rejected gate.
+		return true;
+	}
 	bJuryDemoFixedSixChaosDeferredUntilFirstHit = true;
 	bJuryDemoFixedSixChaosDeferredActivated = false;
-	// Startup is static-ready, not a substitute for a real-time Chaos certificate.
-	IdleValidationState = EABTSM73IdleValidationState::Accepted;
+	// This only arms real first-hit promotion; it must not start Chaos early.
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixDeferredChaos][StaticReady]")
 		TEXT(" Entry=%s Candidate=%u ChaosDeferredUntilFirstHit=1")

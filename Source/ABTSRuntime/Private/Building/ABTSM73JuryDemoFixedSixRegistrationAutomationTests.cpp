@@ -5,7 +5,7 @@
 #include "Building/ABTSM73JuryDemoFixedSixRegistration.h"
 
 #include "Building/ABTSM73BeamDemoManifest.h"
-#include "Building/ABTSM73BeamStage45PlacementFreeze.h"
+#include "Building/ABTSM73BuildingFreezeV3.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Building/ABTSM7BuildingModule.h"
 #include "Building/ABTSM7BuildingMaterialSystem.h"
@@ -16,8 +16,6 @@
 #include "GameFramework/GameModeBase.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
-
-#include "ABTSM73BeamD1BrickCompiler.h"
 
 namespace ABTSM73JuryDemoFixedSixRegistrationTests
 {
@@ -61,15 +59,6 @@ namespace ABTSM73JuryDemoFixedSixRegistrationTests
 		}
 	};
 
-	void AppendRegistrationTestBox(FBox& Aggregate, const FBox& Box)
-	{
-		if (Box.IsValid)
-		{
-			Aggregate += Box.Min;
-			Aggregate += Box.Max;
-		}
-	}
-
 	FABTSGeneratedBuildingSite MakeRegistrationTestGenericSite()
 	{
 		FABTSGeneratedBuildingSite Site;
@@ -110,42 +99,54 @@ namespace ABTSM73JuryDemoFixedSixRegistrationTests
 		FABTSJuryDemoFixedSixContract& Snapshot =
 			OutContract.JuryDemoFixedSix;
 		Snapshot.ContractVersion =
-			FABTSJuryDemoFixedSixContract::SupportedV2ContractVersion;
+			FABTSJuryDemoFixedSixContract::SupportedV3ContractVersion;
 		Snapshot.PlacementSchemaVersion =
-			FABTSJuryDemoFixedSixContract::FrozenPlacementSchemaVersion;
+			FABTSJuryDemoFixedSixContract::FrozenV3PlacementSchemaVersion;
 		Snapshot.DemoManifestVersion =
 			FABTSJuryDemoFixedSixContract::FrozenDemoManifestVersion;
 		Snapshot.DemoManifestHash =
 			FABTSJuryDemoFixedSixContract::FrozenDemoManifestHash;
 		Snapshot.PlacementCatalogHash =
-			FABTSJuryDemoFixedSixContract::FrozenV2PlacementCatalogHash;
+			FABTSJuryDemoFixedSixContract::FrozenV3PlacementCatalogHash;
 		Snapshot.WorldSeed = FABTSJuryDemoFixedSixContract::FrozenWorldSeed;
 		Snapshot.CandidateId = FABTSJuryDemoFixedSixContract::FrozenCandidateId;
-		Snapshot.LayoutHash = FABTSJuryDemoFixedSixContract::FrozenV2LayoutHash;
+		Snapshot.LayoutHash = FABTSJuryDemoFixedSixContract::FrozenV3LayoutHash;
 
-		const TArray<FABTSM73BeamDemoManifestEntry>& Manifest =
-			FABTSM73BeamDemoManifest::GetEntries();
-		Snapshot.Sites.Reserve(Manifest.Num());
-		for (int32 Index = 0; Index < Manifest.Num(); ++Index)
+		const TArray<FABTSM73BuildingFreezeV3FrozenIdentity>& Identities =
+			FABTSM73BuildingFreezeV3::GetFrozenIdentities();
+		if (Identities.Num()
+				!= FABTSJuryDemoFixedSixContract::ExpectedSiteCount)
 		{
-			const FABTSM73BeamDemoManifestEntry& Entry = Manifest[Index];
-			FABTSM73BeamStage45PlacementDescriptor Frozen;
-			if (!FABTSM73BeamStage45PlacementFreeze::ResolveFrozen(
-				Entry.Id, Frozen, OutError))
+			OutError = TEXT("RegistrationTestV3IdentityCount");
+			return false;
+		}
+
+		const FVector PrimaryCenter = FVector::ZeroVector;
+		constexpr double PrimaryRadiusCM = 10000.0;
+		const FVector PrimaryLocations[] = {
+			FVector(10000.0, 0.0, 0.0),
+			FVector(0.0, 10000.0, 0.0),
+			FVector(-10000.0, 0.0, 0.0),
+			FVector(0.0, -10000.0, 0.0),
+			FVector(7071.067811865, 7071.067811865, 0.0)};
+		const FVector SatelliteCenter(30000.0, 0.0, 0.0);
+		constexpr double SatelliteRadiusCM = 2000.0;
+		Snapshot.Sites.Reserve(Identities.Num());
+		for (int32 Index = 0; Index < Identities.Num(); ++Index)
+		{
+			const FABTSM73BuildingFreezeV3FrozenIdentity& Identity =
+				Identities[Index];
+			if (Identity.EncounterSlot != Index)
 			{
+				OutError = FString::Printf(
+					TEXT("RegistrationTestV3Encounter:%d"), Index);
 				return false;
 			}
-			FABTSM73BeamD1Stage55Result Generated;
-			if (!FABTSM73BeamD1BrickCompiler().GenerateStage55DeviceAssembly(
-				Entry.Settings, Generated, OutError))
+			FABTSM73BeamDemoManifestEntry Entry;
+			if (!FABTSM73BeamDemoManifest::Resolve(
+				Identity.ManifestEntryId, Entry, OutError))
 			{
 				return false;
-			}
-			FBox EffectBounds(EForceInit::ForceInit);
-			for (const FABTSM73BeamD1DeviceBinding& Device : Generated.Devices)
-			{
-				AppendRegistrationTestBox(
-					EffectBounds, Device.EffectCorridorLocalBounds);
 			}
 
 			FString ContractEntryId = Entry.StableId.ToString();
@@ -158,20 +159,46 @@ namespace ABTSM73JuryDemoFixedSixRegistrationTests
 				Snapshot.Sites.AddDefaulted_GetRef();
 			Site.ManifestEntryId = FName(*ContractEntryId);
 			Site.EncounterIndex = Index;
+			Site.DifficultyTier = Identity.DifficultyTier;
+			Site.DeterministicSeed = Identity.BuildingSeed;
+			Site.DescriptorHash = Identity.DescriptorHash;
+			Site.LocalBounds = Identity.SiteLocalBounds;
+			Site.PadHalfExtentCM = FVector2D(
+				FMath::Max(FMath::Abs(Identity.PadBounds.Min.X),
+					FMath::Abs(Identity.PadBounds.Max.X)),
+				FMath::Max(FMath::Abs(Identity.PadBounds.Min.Y),
+					FMath::Abs(Identity.PadBounds.Max.Y)));
+
+			const bool bSatellite = Index == 4;
+			const FVector SupportCenter = bSatellite
+				? SatelliteCenter : PrimaryCenter;
+			const double SupportRadius = bSatellite
+				? SatelliteRadiusCM : PrimaryRadiusCM;
+			const FVector Location = bSatellite
+				? SatelliteCenter + FVector(SatelliteRadiusCM, 0.0, 0.0)
+				: PrimaryLocations[Index < 4 ? Index : 4];
+			const FVector RadialUp = (Location - SupportCenter).GetSafeNormal();
 			Site.WorldTransform = FTransform(
-				FQuat::Identity, FVector(Index * 5000.0, 0.0, 0.0));
-			Site.PadHalfExtentCM = Frozen.RequiredPadHalfExtentCM;
-			Site.LocalBounds = Frozen.LocalBounds;
-			Site.DifficultyTier = Entry.Settings.DifficultyTier;
-			Site.DeterministicSeed = Entry.Settings.BuildingSeed;
-			Site.DescriptorHash = Frozen.DescriptorHash;
-			Site.V2Envelope.StaticGeometryHash = Frozen.StaticGeometryHash;
-			Site.V2Envelope.ProductionIdentityHash =
-				Generated.Stage5.ProductionIdentityHash;
-			Site.V2Envelope.DeviceAssemblyHash = Generated.DeviceAssemblyHash;
-			Site.V2Envelope.PhysicalBounds = Frozen.LocalBounds;
-			Site.V2Envelope.EffectBounds = EffectBounds;
-			Site.V2Envelope.bDynamicEnvelopeRequired = true;
+				FQuat::FindBetweenNormals(FVector::UpVector, RadialUp), Location);
+
+			FABTSJuryDemoFixedSixV3Envelope& Envelope = Site.V3Envelope;
+			Envelope.StaticGeometryHash = Identity.StaticGeometryHash;
+			Envelope.ProductionIdentityHash = Identity.ProductionHash;
+			Envelope.DeviceAssemblyHash = Identity.SourceDeviceAssemblyHash;
+			Envelope.SiteLocalBounds = Identity.SiteLocalBounds;
+			Envelope.PadBounds = Identity.PadBounds;
+			Envelope.EffectBounds = Identity.EffectBounds;
+			Envelope.SurfaceKind = bSatellite
+				? EABTSJuryDemoFixedSixSurfaceKind::Satellite
+				: EABTSJuryDemoFixedSixSurfaceKind::PrimaryPlanet;
+			Envelope.SupportCenterWorldCM = SupportCenter;
+			Envelope.SupportRadiusCM = SupportRadius;
+			Envelope.GravityAuthorityId = bSatellite
+				? FName(TEXT("RegistrationTestSatelliteGravity"))
+				: FName(TEXT("RegistrationTestPrimaryGravity"));
+			Envelope.GravityIdentityHash = bSatellite ? 0x2202ull : 0x1101ull;
+			Envelope.PlacementHash =
+				FABTSJuryDemoFixedSixContract::FrozenV3PlacementHashes[Index];
 		}
 		if (!OutContract.IsUsable())
 		{
@@ -273,9 +300,12 @@ bool FABTSM73JuryDemoFixedSixV2AtomicStaticRegistrationTest::RunTest(
 	}
 	const uint64 ExpectedResultHash = Plan.RegistrationResultHash;
 	int32 ExpectedModuleCount = 0;
+	int32 ExpectedStaticDeviceCount = 0;
 	for (const FABTSM73JuryDemoFixedSixStaticEntry& Entry : Plan.Entries)
 	{
-		ExpectedModuleCount += Entry.Bricks.Num() + Entry.Devices.Num();
+		ExpectedModuleCount += Entry.Bricks.Num()
+			+ Entry.Devices.Num() + Entry.Caps.Num();
+		ExpectedStaticDeviceCount += Entry.Devices.Num() + Entry.Caps.Num();
 	}
 
 	FFixedSixRegistrationTestWorld WorldWrapper;
@@ -326,6 +356,13 @@ bool FABTSM73JuryDemoFixedSixV2AtomicStaticRegistrationTest::RunTest(
 		}
 		TestTrue(*FString::Printf(TEXT("Actor %d accepted"), Index),
 			Actor->IsJuryDemoFixedSixStaticRegistrationAccepted());
+		TestEqual(*FString::Printf(TEXT("Actor %d closes the M6 startup gate while static"), Index),
+			Actor->GetIdleValidationState(),
+			EABTSM73IdleValidationState::Accepted);
+		TestTrue(*FString::Printf(TEXT("Actor %d is static-ready but has not started Chaos"), Index),
+			Actor->IsJuryDemoFixedSixStaticReadyDeferredForValidation());
+		TestFalse(*FString::Printf(TEXT("Actor %d cannot claim first-hit arming before Prepare"), Index),
+			Actor->IsJuryDemoFixedSixChaosDeferredUntilFirstHitForValidation());
 		TestEqual(*FString::Printf(TEXT("Actor %d order"), Index),
 			Actor->GetJuryDemoFixedSixEncounterIndex(), Index);
 		TestEqual(*FString::Printf(TEXT("Actor %d result hash"), Index),
@@ -360,8 +397,8 @@ bool FABTSM73JuryDemoFixedSixV2AtomicStaticRegistrationTest::RunTest(
 		++StaticDeviceCount;
 		TestFalse(TEXT("Fixed-Six device starts static"), It->IsDynamic());
 	}
-	TestEqual(TEXT("One static device per building"), StaticDeviceCount,
-		FABTSJuryDemoFixedSixContract::ExpectedSiteCount);
+	TestEqual(TEXT("All frozen static devices and caps are registered"),
+		StaticDeviceCount, ExpectedStaticDeviceCount);
 	MaterialSystem->BeginLaunchPhysics(
 		false, FVector::ZeroVector, 0.0f, 0.0f);
 	int32 DynamicDeviceCountAfterGlobalLaunch = 0;
