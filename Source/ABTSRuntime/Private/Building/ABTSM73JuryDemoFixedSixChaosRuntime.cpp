@@ -16,6 +16,10 @@
 #include "PhysicsEngine/BodySetup.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
+
 namespace
 {
 	constexpr float FixedSixGravityCMPerSec2 = 980.0f;
@@ -39,6 +43,127 @@ namespace
 	// solver island. The full frozen body set remains the static/certification
 	// identity; only real first-hit gameplay uses this activation budget.
 	constexpr int32 FixedSixGameplayMaximumActiveBodies = 128;
+
+	bool IsFrozenAxisAlignedBrick(const FABTSM73BeamD1BrickBinding& Brick)
+	{
+		const FQuat Rotation = Brick.LocalTransform.GetRotation();
+		if (!Rotation.IsNormalized())
+		{
+			return false;
+		}
+		const FVector Axes[] =
+		{
+			Rotation.RotateVector(FVector::XAxisVector),
+			Rotation.RotateVector(FVector::YAxisVector),
+			Rotation.RotateVector(FVector::ZAxisVector)
+		};
+		bool bUsedPrincipalAxis[3] = {false, false, false};
+		for (const FVector& Axis : Axes)
+		{
+			const FVector Absolute = Axis.GetAbs();
+			int32 PrincipalAxis = 0;
+			if (Absolute.Y > Absolute.X && Absolute.Y >= Absolute.Z)
+			{
+				PrincipalAxis = 1;
+			}
+			else if (Absolute.Z > Absolute.X && Absolute.Z > Absolute.Y)
+			{
+				PrincipalAxis = 2;
+			}
+			if (Absolute[PrincipalAxis] < 0.9999f
+				|| bUsedPrincipalAxis[PrincipalAxis])
+			{
+				return false;
+			}
+			bUsedPrincipalAxis[PrincipalAxis] = true;
+		}
+		return true;
+	}
+
+	bool VerifyFrozenAxisAlignedSupportConnectivity(
+		const TConstArrayView<FABTSM73BeamD1BrickBinding> Bricks,
+		FString& OutError)
+	{
+		OutError.Reset();
+		if (Bricks.IsEmpty())
+		{
+			OutError = TEXT("FixedSixSupportClosureEmptyFrozenGraph");
+			return false;
+		}
+		constexpr double ContactToleranceCM = 1.5;
+		constexpr double MinimumOverlapCM = 1.0;
+		double MinimumBottomZ = DBL_MAX;
+		for (const FABTSM73BeamD1BrickBinding& Brick : Bricks)
+		{
+			if (!Brick.LocalBounds.IsValid || !IsFrozenAxisAlignedBrick(Brick))
+			{
+				OutError = FString::Printf(
+					TEXT("FixedSixSupportClosureNonAxisAlignedOrInvalidBrick:%d"),
+					Brick.BrickId);
+				return false;
+			}
+			MinimumBottomZ = FMath::Min(MinimumBottomZ, Brick.LocalBounds.Min.Z);
+		}
+		TArray<TArray<int32>> Children;
+		Children.SetNum(Bricks.Num());
+		TArray<int32> Ground;
+		for (int32 UpperId = 0; UpperId < Bricks.Num(); ++UpperId)
+		{
+			const FBox& Upper = Bricks[UpperId].LocalBounds;
+			if (Upper.Min.Z <= MinimumBottomZ + ContactToleranceCM)
+			{
+				Ground.Add(UpperId);
+			}
+			for (int32 LowerId = 0; LowerId < Bricks.Num(); ++LowerId)
+			{
+				if (LowerId == UpperId) continue;
+				const FBox& Lower = Bricks[LowerId].LocalBounds;
+				const double OverlapX = FMath::Min(Lower.Max.X, Upper.Max.X)
+					- FMath::Max(Lower.Min.X, Upper.Min.X);
+				const double OverlapY = FMath::Min(Lower.Max.Y, Upper.Max.Y)
+					- FMath::Max(Lower.Min.Y, Upper.Min.Y);
+				if (FMath::Abs(Lower.Max.Z - Upper.Min.Z) <= ContactToleranceCM
+					&& OverlapX > MinimumOverlapCM && OverlapY > MinimumOverlapCM)
+				{
+					Children[LowerId].Add(UpperId);
+				}
+			}
+		}
+		TBitArray<> Reachable(false, Bricks.Num());
+		TArray<int32> Queue;
+		for (const int32 GroundId : Ground)
+		{
+			Reachable[GroundId] = true;
+			Queue.Add(GroundId);
+		}
+		for (int32 Head = 0; Head < Queue.Num(); ++Head)
+		{
+			for (const int32 ChildId : Children[Queue[Head]])
+			{
+				if (!Reachable[ChildId])
+				{
+					Reachable[ChildId] = true;
+					Queue.Add(ChildId);
+				}
+			}
+		}
+		if (Reachable.CountSetBits() != Bricks.Num())
+		{
+			OutError = FString::Printf(
+				TEXT("FixedSixSupportClosureFrozenDisconnected:Reachable=%d:Bricks=%d"),
+				Reachable.CountSetBits(), Bricks.Num());
+			return false;
+		}
+		return true;
+	}
+
+	bool CanPublishExactIndependentSupportClosure(const int32 ExistingBodies,
+		const int32 NewBodies, const int32 MaximumBodies)
+	{
+		return ExistingBodies >= 0 && NewBodies > 0 && MaximumBodies > 0
+			&& ExistingBodies <= MaximumBodies
+			&& NewBodies <= MaximumBodies - ExistingBodies;
+	}
 
 	uint32 ComputeProductionCandidateHash(
 		const FABTSM73JuryDemoFixedSixStaticEntry& Entry,
@@ -322,84 +447,21 @@ bool AABTSM73StableBuildingActor::PrepareJuryDemoFixedSixChaosValidation(
 	}
 	LogPreparationPhase(TEXT("PenetrationComplete"));
 
-	JuryDemoFixedSixChaosPhysicsModules.Reset();
-	if (Entry.PhysicsAssemblyHash != 0)
+	// The frozen PhysicsAssembly remains an immutable static certificate, but it
+	// is not a destruction representation. Welding here would make all children
+	// follow one root and destroys per-brick force/damage semantics before the
+	// player ever hits the building.
+	JuryDemoFixedSixChaosPhysicsModules = RuntimeModules;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule :
+		JuryDemoFixedSixChaosPhysicsModules)
 	{
-		for (const FABTSM73BuildingFreezeV3PhysicsCluster& Cluster :
-			Entry.PhysicsClusters)
+		if (const AABTSM7BuildingModule* Module = WeakModule.Get(); Module == nullptr
+			|| Module->IsCompoundChild())
 		{
-			if (!RuntimeModules.IsValidIndex(Cluster.RootBrickId))
-			{
-				OutError = TEXT("FixedSixChaosCompoundRootInvalid");
-				RejectRuntimeStructure(OutError);
-				return false;
-			}
-			AABTSM7BuildingModule* CompoundRootModule =
-				RuntimeModules[Cluster.RootBrickId].Get();
-			double ExpectedCompoundMassKG = 0.0;
-			for (const int32 BrickId : Cluster.BrickIds)
-			{
-				if (!RuntimeModules.IsValidIndex(BrickId)
-					|| !ExpectedBrickMassKG.IsValidIndex(BrickId))
-				{
-					OutError = TEXT("FixedSixChaosCompoundMemberInvalid");
-					RejectRuntimeStructure(OutError);
-					return false;
-				}
-				ExpectedCompoundMassKG += ExpectedBrickMassKG[BrickId];
-				if (BrickId != Cluster.RootBrickId
-					&& !CompoundRootModule->TryWeldStaticChild(
-						*RuntimeModules[BrickId].Get()))
-				{
-					OutError = FString::Printf(
-						TEXT("FixedSixChaosCompoundWeldFailed:%d:%d"),
-						Cluster.ClusterId, BrickId);
-					RejectRuntimeStructure(OutError);
-					return false;
-				}
-			}
-			const double ActualCompoundMassKG =
-				CompoundRootModule->GetMeshComponent()->GetMass();
-			const double CompoundToleranceKG =
-				FMath::Max(0.05, ExpectedCompoundMassKG * 0.001);
-			if (!FMath::IsNearlyEqual(
-				ActualCompoundMassKG,
-				ExpectedCompoundMassKG,
-				CompoundToleranceKG))
-			{
-				OutError = FString::Printf(
-					TEXT("FixedSixChaosCompoundMassMismatch:%d:Actual=%.6f:Expected=%.6f"),
-					Cluster.ClusterId, ActualCompoundMassKG,
-					ExpectedCompoundMassKG);
-				RejectRuntimeStructure(OutError);
-				return false;
-			}
-			JuryDemoFixedSixChaosPhysicsModules.Add(CompoundRootModule);
+			OutError = TEXT("FixedSixExactDestructionBodyIdentityInvalid");
+			RejectRuntimeStructure(OutError);
+			return false;
 		}
-		for (int32 ModuleIndex = Entry.Bricks.Num();
-			ModuleIndex < RuntimeModules.Num(); ++ModuleIndex)
-		{
-			JuryDemoFixedSixChaosPhysicsModules.Add(
-				RuntimeModules[ModuleIndex]);
-		}
-	}
-	else
-	{
-		JuryDemoFixedSixChaosPhysicsModules = RuntimeModules;
-	}
-
-	const int32 ExpectedPhysicsBodyCount = Entry.PhysicsBodyCount > 0
-		? Entry.PhysicsBodyCount
-		: RuntimeModules.Num();
-	if (JuryDemoFixedSixChaosPhysicsModules.Num()
-		!= ExpectedPhysicsBodyCount)
-	{
-		OutError = FString::Printf(
-			TEXT("FixedSixChaosBodyCountMismatch:Actual=%d:Expected=%d"),
-			JuryDemoFixedSixChaosPhysicsModules.Num(),
-			ExpectedPhysicsBodyCount);
-		RejectRuntimeStructure(OutError);
-		return false;
 	}
 	LogPreparationPhase(TEXT("AssemblyComplete"));
 
@@ -454,10 +516,156 @@ bool AABTSM73StableBuildingActor::PrepareJuryDemoFixedSixChaosValidation(
 	return true;
 }
 
+bool AABTSM73StableBuildingActor::BuildJuryDemoFixedSixSupportClosure(
+	const TConstArrayView<AABTSM7BuildingModule*> SeedModules,
+	TArray<AABTSM7BuildingModule*>& OutPhysicsModules,
+	TArray<int32>* OutAffectedBrickIds,
+	FString& OutError) const
+{
+	OutPhysicsModules.Reset();
+	if (OutAffectedBrickIds != nullptr) OutAffectedBrickIds->Reset();
+	OutError.Reset();
+	if (!JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		OutError = TEXT("FixedSixSupportClosureEntryMissing");
+		return false;
+	}
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	const int32 BrickCount = Entry.Bricks.Num();
+	if (BrickCount <= 0 || RuntimeModules.Num() < BrickCount || SeedModules.IsEmpty())
+	{
+		OutError = TEXT("FixedSixSupportClosureSeedSetInvalid");
+		return false;
+	}
+	FString FrozenConnectivityError;
+	if (!VerifyFrozenAxisAlignedSupportConnectivity(
+		Entry.Bricks, FrozenConnectivityError))
+	{
+		OutError = FrozenConnectivityError;
+		return false;
+	}
+
+	TBitArray<> Removed(false, BrickCount);
+	for (const AABTSM7BuildingModule* Seed : SeedModules)
+	{
+		const int32 BrickId = Seed != nullptr ? Seed->GetDamageLifecycleBrickId() : INDEX_NONE;
+		if (Seed == nullptr || Seed->GetDamageLifecycleOwner() != this
+			|| !Entry.Bricks.IsValidIndex(BrickId))
+		{
+			OutError = FString::Printf(TEXT("FixedSixSupportClosureSeedInvalid:%d"), BrickId);
+			return false;
+		}
+		Removed[BrickId] = true;
+	}
+
+	constexpr double ContactToleranceCM = 1.5;
+	constexpr double MinimumOverlapCM = 1.0;
+	double MinimumBottomZ = DBL_MAX;
+	for (const FABTSM73BeamD1BrickBinding& Brick : Entry.Bricks)
+	{
+		if (!Brick.LocalBounds.IsValid)
+		{
+			OutError = TEXT("FixedSixSupportClosureBoundsInvalid");
+			return false;
+		}
+		MinimumBottomZ = FMath::Min(MinimumBottomZ, Brick.LocalBounds.Min.Z);
+	}
+	TArray<TArray<int32>> SupportChildren;
+	SupportChildren.SetNum(BrickCount);
+	TArray<int32> GroundBrickIds;
+	int32 SupportEdgeCount = 0;
+	for (int32 UpperId = 0; UpperId < BrickCount; ++UpperId)
+	{
+		const FBox& Upper = Entry.Bricks[UpperId].LocalBounds;
+		if (Upper.Min.Z <= MinimumBottomZ + ContactToleranceCM)
+		{
+			GroundBrickIds.Add(UpperId);
+		}
+		for (int32 LowerId = 0; LowerId < BrickCount; ++LowerId)
+		{
+			if (LowerId == UpperId) continue;
+			const FBox& Lower = Entry.Bricks[LowerId].LocalBounds;
+			if (FMath::Abs(Lower.Max.Z - Upper.Min.Z) > ContactToleranceCM) continue;
+			const double OverlapX = FMath::Min(Lower.Max.X, Upper.Max.X)
+				- FMath::Max(Lower.Min.X, Upper.Min.X);
+			const double OverlapY = FMath::Min(Lower.Max.Y, Upper.Max.Y)
+				- FMath::Max(Lower.Min.Y, Upper.Min.Y);
+			if (OverlapX > MinimumOverlapCM && OverlapY > MinimumOverlapCM)
+			{
+				SupportChildren[LowerId].Add(UpperId);
+				++SupportEdgeCount;
+			}
+		}
+	}
+	const auto GatherGroundReachable = [&SupportChildren, &GroundBrickIds, BrickCount](
+		const TBitArray<>& RemovedBricks, TBitArray<>& OutReachable)
+	{
+		OutReachable.Init(false, BrickCount);
+		TArray<int32> Queue;
+		for (const int32 GroundId : GroundBrickIds)
+		{
+			if (!RemovedBricks[GroundId]) { OutReachable[GroundId] = true; Queue.Add(GroundId); }
+		}
+		for (int32 Head = 0; Head < Queue.Num(); ++Head)
+		{
+			for (const int32 ChildId : SupportChildren[Queue[Head]])
+			{
+				if (!RemovedBricks[ChildId] && !OutReachable[ChildId])
+				{
+					OutReachable[ChildId] = true;
+					Queue.Add(ChildId);
+				}
+			}
+		}
+	};
+	TBitArray<> BaselineRemoved(false, BrickCount);
+	TBitArray<> BaselineReachable;
+	GatherGroundReachable(BaselineRemoved, BaselineReachable);
+	if (GroundBrickIds.IsEmpty() || SupportEdgeCount <= 0
+		|| BaselineReachable.CountSetBits() != BrickCount)
+	{
+		OutError = FString::Printf(TEXT("FixedSixSupportClosureBaselineInvalid:Ground=%d:Edges=%d:Reachable=%d:Bricks=%d"),
+			GroundBrickIds.Num(), SupportEdgeCount, BaselineReachable.CountSetBits(), BrickCount);
+		return false;
+	}
+	for (int32 BrickId = 0; BrickId < BrickCount; ++BrickId)
+	{
+		const AABTSM7BuildingModule* Module = RuntimeModules[BrickId].Get();
+		Removed[BrickId] |= Module == nullptr || Module->IsBroken()
+			|| Module->IsRecycled() || Module->IsDynamic()
+			|| JuryDemoFixedSixRemovedSupportBrickIds.Contains(BrickId);
+	}
+	TBitArray<> Reachable;
+	GatherGroundReachable(Removed, Reachable);
+	for (int32 BrickId = 0; BrickId < BrickCount; ++BrickId)
+	{
+		const bool bAffected = Removed[BrickId] || !Reachable[BrickId];
+		if (bAffected && OutAffectedBrickIds != nullptr) OutAffectedBrickIds->Add(BrickId);
+		if (bAffected)
+		{
+			if (AABTSM7BuildingModule* Module = RuntimeModules[BrickId].Get();
+				Module != nullptr && !Module->IsBroken() && !Module->IsRecycled()
+				&& !Module->IsDynamic())
+			{
+				OutPhysicsModules.Add(Module);
+			}
+		}
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][FixedSixSupportClosure][Derived] Entry=%s Seeds=%d Ground=%d Edges=%d BaselineReachable=%d Affected=%d Active=%d StaticFloating=0 ExactIndependentBricks=1"),
+		*Entry.ManifestEntryId.ToString(), SeedModules.Num(), GroundBrickIds.Num(),
+		SupportEdgeCount, BaselineReachable.CountSetBits(),
+		OutAffectedBrickIds != nullptr ? OutAffectedBrickIds->Num() : OutPhysicsModules.Num(),
+		OutPhysicsModules.Num());
+	return true;
+}
+
 bool AABTSM73StableBuildingActor::
 ActivatePreparedJuryDemoFixedSixChaosValidation(
 	FString& OutError,
-	const FVector* GameplayImpactWorld)
+	const FVector* GameplayImpactWorld,
+	const TArray<AABTSM7BuildingModule*>* GameplayPhysicsModules)
 {
 	OutError.Reset();
 	if (!bJuryDemoFixedSixChaosPrepared
@@ -482,26 +690,34 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(
 		PhysicsModules.Add(Module);
 	}
 	const int32 CertifiedPhysicsBodyCount = PhysicsModules.Num();
-	if (GameplayImpactWorld != nullptr
-		&& PhysicsModules.Num() > FixedSixGameplayMaximumActiveBodies)
+	if (GameplayPhysicsModules != nullptr)
 	{
-		const FVector ImpactWorld = *GameplayImpactWorld;
-		PhysicsModules.StableSort([&ImpactWorld](
-			const AABTSM7BuildingModule& A,
-			const AABTSM7BuildingModule& B)
+		TSet<AABTSM7BuildingModule*> AllowedModules;
+		for (AABTSM7BuildingModule* Module : *GameplayPhysicsModules)
 		{
-			const double DistanceA = FVector::DistSquared(
-				A.GetActorLocation(), ImpactWorld);
-			const double DistanceB = FVector::DistSquared(
-				B.GetActorLocation(), ImpactWorld);
-			if (!FMath::IsNearlyEqual(DistanceA, DistanceB, 0.001))
+			if (!IsValid(Module) || Module->IsDynamic()
+				|| !PhysicsModules.Contains(Module))
 			{
-				return DistanceA < DistanceB;
+				OutError = TEXT("FixedSixGameplaySupportClosureIdentityInvalid");
+				return false;
 			}
-			return A.GetDamageLifecycleBrickId()
-				< B.GetDamageLifecycleBrickId();
-		});
-		PhysicsModules.SetNum(FixedSixGameplayMaximumActiveBodies);
+			AllowedModules.Add(Module);
+		}
+		PhysicsModules.RemoveAll([&AllowedModules](AABTSM7BuildingModule* Module)
+			{ return !AllowedModules.Contains(Module); });
+		if (PhysicsModules.IsEmpty()
+			|| PhysicsModules.Num() > FixedSixGameplayMaximumActiveBodies)
+		{
+			OutError = FString::Printf(
+				TEXT("FixedSixGameplaySupportClosureBudgetRejected:%d"),
+				PhysicsModules.Num());
+			return false;
+		}
+	}
+	else if (GameplayImpactWorld != nullptr)
+	{
+		OutError = TEXT("FixedSixGameplaySupportClosureRequired");
+		return false;
 	}
 	JuryDemoFixedSixActivePhysicsBodyCount = PhysicsModules.Num();
 	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
@@ -541,13 +757,16 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(
 			return false;
 		}
 	}
+	const FABTSM7ChaosBodyProfile DestructionBodyProfile =
+		FABTSM7ChaosBodyProfile::DestructionCandidate();
 	if (!RuntimeMaterialSystem->BeginSiteUniformLaunchPhysics(
 		PhysicsModules,
 		Entry.WorldTransform.GetLocation(),
 		Entry.SupportCenterWorldCM,
 		FixedSixGravityCMPerSec2,
 		FixedSixMaximumObservationSeconds + 1.0f,
-		/*bPenetrationPrevalidated=*/true))
+		/*bPenetrationPrevalidated=*/true,
+		GameplayImpactWorld != nullptr ? &DestructionBodyProfile : nullptr))
 	{
 		OutError = TEXT("FixedSixChaosSiteUniformActivationRejected");
 		return false;
@@ -626,14 +845,21 @@ bool AABTSM73StableBuildingActor::MarkPreparedJuryDemoFixedSixChaosDeferred(
 
 bool AABTSM73StableBuildingActor::
 ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
-	const AABTSM7BuildingModule& TriggerModule, FString& OutError)
+	const AABTSM7BuildingModule& TriggerModule, FString& OutError,
+	const float ImpactRadiusCM)
+{
+	return ActivateJuryDemoFixedSixImpactSupportClosure(
+		TriggerModule, ImpactRadiusCM, OutError);
+}
+
+bool AABTSM73StableBuildingActor::
+ActivateJuryDemoFixedSixImpactSupportClosure(
+	const AABTSM7BuildingModule& TriggerModule,
+	const float ImpactRadiusCM,
+	FString& OutError)
 {
 	OutError.Reset();
-	if (bJuryDemoFixedSixChaosDeferredActivated)
-	{
-		return true;
-	}
-	if (!bJuryDemoFixedSixChaosDeferredUntilFirstHit
+	if (!bJuryDemoFixedSixChaosPrepared
 		|| bJuryDemoFixedSixChaosDeferredActivationInProgress
 		|| TriggerModule.GetDamageLifecycleOwner() != this
 		|| !RuntimeModules.ContainsByPredicate([&TriggerModule](
@@ -643,44 +869,209 @@ ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
 		OutError = TEXT("FixedSixDeferredFirstHitIdentityRejected");
 		return false;
 	}
-	bJuryDemoFixedSixChaosDeferredActivationInProgress = true;
-	if (UWorld* World = GetWorld())
+	TArray<AABTSM7BuildingModule*> SeedModules;
+	const float EffectiveRadiusCM = FMath::Max(0.0f, ImpactRadiusCM);
+	const FVector TriggerLocation = TriggerModule.GetActorLocation();
+	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
+		JuryDemoFixedSixStaticEntry.GetValue();
+	AABTSM7BuildingModule* NearestBrickSeed = nullptr;
+	float NearestBrickDistanceSquared = TNumericLimits<float>::Max();
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
 	{
-		AABTSM7GameMode* GameMode = Cast<AABTSM7GameMode>(
-			World->GetAuthGameMode());
-		if (GameMode == nullptr
-			|| !GameMode->
-				RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(
-					OutError))
+		AABTSM7BuildingModule* Candidate = WeakModule.Get();
+		if (Candidate == nullptr || Candidate->IsBroken() || Candidate->IsRecycled()
+			|| !Entry.Bricks.IsValidIndex(Candidate->GetDamageLifecycleBrickId()))
 		{
-			if (OutError.IsEmpty())
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(
+			Candidate->GetActorLocation(), TriggerLocation);
+		if (DistanceSquared < NearestBrickDistanceSquared
+			|| (FMath::IsNearlyEqual(DistanceSquared, NearestBrickDistanceSquared)
+				&& (NearestBrickSeed == nullptr || Candidate->GetDamageLifecycleBrickId()
+					< NearestBrickSeed->GetDamageLifecycleBrickId())))
+		{
+			NearestBrickSeed = Candidate;
+			NearestBrickDistanceSquared = DistanceSquared;
+		}
+		if (Candidate == &TriggerModule || EffectiveRadiusCM <= 0.0f
+			|| FVector::DistSquared(Candidate->GetActorLocation(), TriggerLocation)
+				<= FMath::Square(EffectiveRadiusCM))
+		{
+			SeedModules.Add(Candidate);
+		}
+	}
+	// A barrel or piston is not itself a support-graph brick.  Its first hit
+	// still starts a destruction transaction by deterministically selecting the
+	// nearest frozen brick, before the same blast is applied below.
+	if (SeedModules.IsEmpty() && NearestBrickSeed != nullptr)
+	{
+		SeedModules.Add(NearestBrickSeed);
+	}
+	SeedModules.Sort([](const AABTSM7BuildingModule& Left,
+		const AABTSM7BuildingModule& Right)
+	{
+		return Left.GetDamageLifecycleBrickId() < Right.GetDamageLifecycleBrickId();
+	});
+	for (int32 SeedIndex = SeedModules.Num() - 1; SeedIndex > 0; --SeedIndex)
+	{
+		if (SeedModules[SeedIndex]->GetDamageLifecycleBrickId()
+			== SeedModules[SeedIndex - 1]->GetDamageLifecycleBrickId())
+		{
+			SeedModules.RemoveAt(SeedIndex);
+		}
+	}
+	TArray<AABTSM7BuildingModule*> SupportClosureModules;
+	TArray<int32> AffectedBrickIds;
+	if (!BuildJuryDemoFixedSixSupportClosure(SeedModules, SupportClosureModules,
+		&AffectedBrickIds, OutError))
+	{
+		return false;
+	}
+	const bool bWasDeferredActivated = bJuryDemoFixedSixChaosDeferredActivated;
+	if (SupportClosureModules.IsEmpty())
+	{
+		if (!bWasDeferredActivated)
+		{
+			OutError = TEXT("FixedSixSupportClosureInitialPromotionEmpty");
+			return false;
+		}
+		for (const int32 BrickId : AffectedBrickIds)
+		{
+			JuryDemoFixedSixRemovedSupportBrickIds.Add(BrickId);
+		}
+		UE_LOG(LogABTSRuntime, Verbose,
+			TEXT("[ABTS][M7][FixedSixSupportClosure][NoOp]")
+			TEXT(" Entry=%s Trigger=%s ActiveBodies=%d Reason=AlreadyDynamicOrRecycled"),
+			*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
+			*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount);
+		return true;
+	}
+	int32 ActualActiveBodyCount = 0;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	{
+		if (const AABTSM7BuildingModule* Module = WeakModule.Get();
+			Module != nullptr && Module->IsDynamic())
+		{
+			++ActualActiveBodyCount;
+		}
+	}
+	ensureAlwaysMsgf(JuryDemoFixedSixActivePhysicsBodyCount
+		== ActualActiveBodyCount,
+		TEXT("Fixed-six active-body ledger drift: ledger=%d actual=%d"),
+		JuryDemoFixedSixActivePhysicsBodyCount, ActualActiveBodyCount);
+	JuryDemoFixedSixActivePhysicsBodyCount = ActualActiveBodyCount;
+
+	TSet<int32> SeedBrickIds;
+	for (const AABTSM7BuildingModule* Seed : SeedModules)
+	{
+		SeedBrickIds.Add(Seed->GetDamageLifecycleBrickId());
+	}
+	SupportClosureModules.Sort([&SeedBrickIds](
+		const AABTSM7BuildingModule& Left,
+		const AABTSM7BuildingModule& Right)
+	{
+		const bool bLeftIsSeed = SeedBrickIds.Contains(
+			Left.GetDamageLifecycleBrickId());
+		const bool bRightIsSeed = SeedBrickIds.Contains(
+			Right.GetDamageLifecycleBrickId());
+		if (bLeftIsSeed != bRightIsSeed) return bLeftIsSeed;
+		return Left.GetDamageLifecycleBrickId() < Right.GetDamageLifecycleBrickId();
+	});
+	if (!CanPublishExactIndependentSupportClosure(ActualActiveBodyCount,
+		SupportClosureModules.Num(), FixedSixGameplayMaximumActiveBodies))
+	{
+		OutError = FString::Printf(
+			TEXT("FixedSixSupportClosureBudgetRejectedAtomic:Existing=%d:New=%d:Limit=%d"),
+			ActualActiveBodyCount, SupportClosureModules.Num(),
+			FixedSixGameplayMaximumActiveBodies);
+		return false;
+	}
+	const TArray<AABTSM7BuildingModule*> PhysicsModules = SupportClosureModules;
+	bJuryDemoFixedSixChaosDeferredActivationInProgress = true;
+	if (!bJuryDemoFixedSixChaosDeferredActivated)
+	{
+		if (!bJuryDemoFixedSixChaosDeferredUntilFirstHit)
+		{
+			bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+			OutError = TEXT("FixedSixDeferredFirstHitStateInvalid");
+			return false;
+		}
+		if (UWorld* World = GetWorld())
+		{
+			AABTSM7GameMode* GameMode = Cast<AABTSM7GameMode>(World->GetAuthGameMode());
+			if (GameMode == nullptr || !GameMode->
+				RestoreJuryDemoFixedSixTerrainCollisionForDeferredFirstHit(OutError))
 			{
-				OutError = TEXT("FixedSixDeferredTerrainCollisionAuthorityMissing");
+				bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+				if (OutError.IsEmpty()) OutError = TEXT("FixedSixDeferredTerrainCollisionAuthorityMissing");
+				return false;
 			}
+		}
+		const FVector GameplayImpactWorld = TriggerLocation;
+		if (!ActivatePreparedJuryDemoFixedSixChaosValidation(
+			OutError, &GameplayImpactWorld, &PhysicsModules))
+		{
 			bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
 			return false;
 		}
+		bJuryDemoFixedSixChaosRunning = false;
+		SetActorTickEnabled(false);
+		bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
+		bJuryDemoFixedSixChaosDeferredActivated = true;
 	}
-	const FVector GameplayImpactWorld = TriggerModule.GetActorLocation();
-	if (!ActivatePreparedJuryDemoFixedSixChaosValidation(
-		OutError, &GameplayImpactWorld))
+	else
 	{
-		bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
-		return false;
+		const FABTSM7ChaosBodyProfile DestructionProfile =
+			FABTSM7ChaosBodyProfile::DestructionCandidate();
+		if (!RuntimeMaterialSystem->BeginSiteUniformLaunchPhysics(
+			PhysicsModules,
+			JuryDemoFixedSixStaticEntry->WorldTransform.GetLocation(),
+			JuryDemoFixedSixStaticEntry->SupportCenterWorldCM,
+			FixedSixGravityCMPerSec2,
+			FixedSixMaximumObservationSeconds + 1.0f,
+			/*bPenetrationPrevalidated=*/true,
+			&DestructionProfile))
+		{
+			bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+			OutError = TEXT("FixedSixSupportClosureAdditionalActivationRejected");
+			return false;
+		}
 	}
-	// This is gameplay promotion, not the old startup stability observation.
-	bJuryDemoFixedSixChaosRunning = false;
-	SetActorTickEnabled(false);
-	bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
-	bJuryDemoFixedSixChaosDeferredActivated = true;
+	if (bWasDeferredActivated)
+	{
+		JuryDemoFixedSixActivePhysicsBodyCount += PhysicsModules.Num();
+	}
+	for (const int32 BrickId : AffectedBrickIds)
+	{
+		JuryDemoFixedSixRemovedSupportBrickIds.Add(BrickId);
+	}
+	int32 PostActivationActualActiveBodyCount = 0;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	{
+		if (const AABTSM7BuildingModule* Module = WeakModule.Get();
+			Module != nullptr && Module->IsDynamic())
+		{
+			++PostActivationActualActiveBodyCount;
+		}
+	}
+	ensureAlwaysMsgf(PostActivationActualActiveBodyCount
+		== JuryDemoFixedSixActivePhysicsBodyCount
+		&& PostActivationActualActiveBodyCount <= FixedSixGameplayMaximumActiveBodies,
+		TEXT("Fixed-six active-body publication invalid: ledger=%d actual=%d limit=%d"),
+		JuryDemoFixedSixActivePhysicsBodyCount,
+		PostActivationActualActiveBodyCount,
+		FixedSixGameplayMaximumActiveBodies);
+	JuryDemoFixedSixActivePhysicsBodyCount = PostActivationActualActiveBodyCount;
 	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitActivated]")
-		TEXT(" Entry=%s Trigger=%s AllBodies=%d PhysicsActorDeveloperObstacle=1")
+		TEXT(" Entry=%s Trigger=%s ActiveBodies=%d NewBodies=%d Affected=%d AtomicBudgetAccepted=1 IndependentBrickBodies=1")
 		TEXT(" TerrainBuildingResponse=Block PadsBuildingResponse=Block")
 		TEXT(" CCD=1 SiteUniformGravity=1 DamageTransaction=Continue"),
 		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
-		*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount);
+		*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount,
+		PhysicsModules.Num(), AffectedBrickIds.Num());
 	return true;
 }
 
@@ -930,3 +1321,50 @@ bool AABTSM73StableBuildingActor::CopyJuryDemoFixedSixChaosResult(
 		&& (IdleValidationState == EABTSM73IdleValidationState::Accepted
 			|| IdleValidationState == EABTSM73IdleValidationState::Rejected);
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM7FixedSixDisconnectedSupportTest,
+	"ABTS.M7.FixedSixSupportClosure.DisconnectedSupportRejected",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FABTSM7FixedSixDisconnectedSupportTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const auto MakeBrick = [](const int32 BrickId, const FVector& Center,
+		const FQuat& Rotation = FQuat::Identity)
+	{
+		FABTSM73BeamD1BrickBinding Brick;
+		Brick.BrickId = BrickId;
+		Brick.LocalTransform = FTransform(Rotation, Center);
+		Brick.LocalBounds = FBox(Center - FVector(18.0f),
+			Center + FVector(18.0f));
+		return Brick;
+	};
+	TArray<FABTSM73BeamD1BrickBinding> Disconnected;
+	Disconnected.Add(MakeBrick(0, FVector(0.0f, 0.0f, 18.0f)));
+	// The second brick has a 36 cm unsupported gap above the grounded one.
+	Disconnected.Add(MakeBrick(1, FVector(0.0f, 0.0f, 90.0f)));
+	FString Error;
+	TestFalse(TEXT("Frozen disconnected support graph fails closed"),
+		VerifyFrozenAxisAlignedSupportConnectivity(Disconnected, Error));
+	TestTrue(TEXT("Disconnected graph records its exact rejection"),
+		Error.Contains(TEXT("FrozenDisconnected")));
+
+	TArray<FABTSM73BeamD1BrickBinding> Rotated;
+	Rotated.Add(MakeBrick(0, FVector(0.0f, 0.0f, 18.0f),
+		FQuat(FVector::UpVector, FMath::DegreesToRadians(45.0f))));
+	Error.Reset();
+	TestFalse(TEXT("Non-axis-aligned frozen OBB never uses an AABB support edge"),
+		VerifyFrozenAxisAlignedSupportConnectivity(Rotated, Error));
+	TestTrue(TEXT("Rotation rejection is explicit"),
+		Error.Contains(TEXT("NonAxisAligned")));
+	TestTrue(TEXT("Exact independent closure publishes within the body cap"),
+		CanPublishExactIndependentSupportClosure(127, 1, 128));
+	TestFalse(TEXT("Over-cap closure rejects atomically without a recycle fallback"),
+		CanPublishExactIndependentSupportClosure(1, 128, 128));
+	return true;
+}
+
+#endif

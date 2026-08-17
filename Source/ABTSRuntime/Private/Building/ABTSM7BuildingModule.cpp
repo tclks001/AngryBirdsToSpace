@@ -6,6 +6,7 @@
 #include "Building/ABTSM7BuildingMaterialSystem.h"
 #include "Building/ABTSM73StableBuildingActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Crc.h"
@@ -101,6 +102,14 @@ FString FABTSM7SiteUniformGravityPolicy::ToLogString() const
 FABTSM7ChaosBodyProfile FABTSM7ChaosBodyProfile::Production()
 {
 	return FABTSM7ChaosBodyProfile();
+}
+
+FABTSM7ChaosBodyProfile FABTSM7ChaosBodyProfile::DestructionCandidate()
+{
+	FABTSM7ChaosBodyProfile Profile = Production();
+	Profile.PositionSolverIterations = 4;
+	Profile.VelocitySolverIterations = 1;
+	return Profile;
 }
 
 bool FABTSM7ChaosBodyProfile::IsUsable() const
@@ -244,9 +253,12 @@ AABTSM7BuildingModule::AABTSM7BuildingModule()
 	Visual->SetCollisionProfileName(TEXT("BlockAll"));
 	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	Visual->SetNotifyRigidBodyCollision(true);
+	// Bird/device impacts are routed explicitly by their owners. Enabling a
+	// delegate on every promoted brick turns one dense Chaos contact island into
+	// an uncontrolled callback storm, so peer contact damage is centralized in
+	// the material system instead.
+	Visual->SetNotifyRigidBodyCollision(false);
 	Visual->SetGenerateOverlapEvents(false);
-	Visual->OnComponentHit.AddDynamic(this, &AABTSM7BuildingModule::HandleHit);
 }
 
 void AABTSM7BuildingModule::ConfigureBrick(UStaticMesh* Mesh, UMaterialInterface* Material, const EABTSM7BuildingMaterial InMaterial, const FTransform& WorldTransform)
@@ -376,9 +388,15 @@ void AABTSM7BuildingModule::ConfigureChaosSolverIterations(
 	BodyInstance.SetOverrideIterationCounts(true);
 }
 
+void AABTSM7BuildingModule::ConfigureChaosBodyProfile(
+	const FABTSM7ChaosBodyProfile& Profile)
+{
+	Profile.ApplyTo(*Visual);
+}
+
 bool AABTSM7BuildingModule::ApplyImpactDamage(const float DamageGain)
 {
-	if (bBroken) return false;
+	if (bBroken || bRecycled) return false;
 	CurrentDamage = FMath::Max(0.0f, CurrentDamage + DamageGain);
 	return CurrentDamage >= BreakDamage;
 }
@@ -589,6 +607,94 @@ void AABTSM7BuildingModule::Freeze()
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
+bool AABTSM7BuildingModule::CanFreezeAsGroundedRoot() const
+{
+	if (!bDynamic || !IsValid(Visual) || Visual->IsAnyRigidBodyAwake())
+	{
+		return false;
+	}
+	FString PenetrationDiagnostic;
+	if (DetectSleepingTerrainPenetration(PenetrationDiagnostic))
+	{
+		return false;
+	}
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+	const FVector GravityUp = bSiteUniformGravity
+		? PlanarGravityUp.GetSafeNormal()
+		: FVector::UpVector;
+	const FVector SafeUp = GravityUp.IsNearlyZero()
+		? FVector::UpVector : GravityUp;
+	const FBoxSphereBounds Bounds = Visual->Bounds;
+	const float DownExtent = FMath::Abs(SafeUp.X) * Bounds.BoxExtent.X
+		+ FMath::Abs(SafeUp.Y) * Bounds.BoxExtent.Y
+		+ FMath::Abs(SafeUp.Z) * Bounds.BoxExtent.Z;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(M7GroundedFreeze), false, this);
+	FHitResult GroundHit;
+	const FVector Start = Bounds.Origin - SafeUp * FMath::Max(0.0f, DownExtent - 2.0f);
+	const bool bHasGround = World->LineTraceSingleByChannel(
+		GroundHit, Start, Start - SafeUp * 8.0f, ABTSDeveloperObstacleChannel,
+		QueryParams);
+	const AABTSM73StableBuildingActor* OwnerBuilding =
+		DamageLifecycleOwner.Get();
+	const bool bGroundIsFrozenBuildingSupport = OwnerBuilding != nullptr
+		&& OwnerBuilding->IsJuryDemoFixedSixGroundSupportPrimitive(
+			GroundHit.GetComponent());
+	const bool bGroundIsPlanetTerrain =
+		Cast<AABTSM3Planet>(GroundHit.GetActor()) != nullptr;
+	if (!bHasGround || (!bGroundIsFrozenBuildingSupport && !bGroundIsPlanetTerrain))
+	{
+		return false;
+	}
+	return true;
+}
+
+bool AABTSM7BuildingModule::FreezeIfSafelyGrounded()
+{
+	if (!CanFreezeAsGroundedRoot())
+	{
+		return false;
+	}
+	Freeze();
+	return true;
+}
+
+FVector AABTSM7BuildingModule::GetCurrentGravityUp() const
+{
+	if (bSiteUniformGravity && !PlanarGravityUp.IsNearlyZero())
+	{
+		return PlanarGravityUp.GetSafeNormal();
+	}
+	if (!bPlanarGravity)
+	{
+		const FVector Radial = GetActorLocation() - PlanetCenter;
+		if (!Radial.IsNearlyZero()) return Radial.GetSafeNormal();
+	}
+	return FVector::UpVector;
+}
+
+void AABTSM7BuildingModule::RecycleUnsupportedDebris()
+{
+	if (!IsValid(Visual) || bBroken || bRecycled)
+	{
+		return;
+	}
+	// This is intentionally not Freeze(): an unresolved, airborne body must not
+	// become a visible static obstacle when gameplay returns to Walk.
+	bDynamic = false;
+	bSiteUniformGravity = false;
+	bRecycled = true;
+	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	Visual->SetSimulatePhysics(false);
+	Visual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Visual->SetVisibility(false, true);
+	SetActorHiddenInGame(true);
+}
+
 bool AABTSM7BuildingModule::TryApplyNonInvalidatingAcceleration(
 	UStaticMeshComponent& Component,
 	const FVector& AccelerationCMPerSec2)
@@ -615,7 +721,7 @@ bool AABTSM7BuildingModule::TryApplyNonInvalidatingAcceleration(
 
 bool AABTSM7BuildingModule::BreakModule()
 {
-	if (bBroken) return false;
+	if (bBroken || bRecycled) return false;
 	bBroken = true;
 	if (bCompoundChild)
 	{
