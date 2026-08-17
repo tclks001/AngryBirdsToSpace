@@ -8,6 +8,7 @@
 #include "ABTSOpeningCinematicPreview.generated.h"
 
 class APlayerController;
+class AABTSM2Planet;
 class AABTSM25BirdCharacter;
 class UABTSBirdAnimationPresentationComponent;
 class UCameraComponent;
@@ -64,6 +65,12 @@ private:
 	void UpdateCamera();
 	void FinishPreview(bool bBlendBack);
 	FQuat ResolveBirdVisualRotation(const FVector& LocalFacing) const;
+	bool ResolveGroundedProductionBirdPose(
+		int32 BirdIndex,
+		const FVector& AuthoredLocalPosition,
+		const FVector& AuthoredLocalFacing,
+		FVector& OutLocalPosition,
+		FQuat& OutLocalRotation) const;
 
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|Opening Preview")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -104,6 +111,10 @@ private:
 	TArray<bool> ProductionBirdWasHidden;
 	TArray<FVector> ProductionHandoffLocalLocations;
 	TArray<FQuat> ProductionHandoffLocalRotations;
+	TArray<float> ProductionBirdSurfaceClearancesCM;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<AABTSM2Planet> ProductionPlanet;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> CaptureBeamCoreMID;

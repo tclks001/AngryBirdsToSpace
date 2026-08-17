@@ -19,6 +19,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Party/ABTSBirdParty.h"
+#include "Planet/ABTSM2Planet.h"
+#include "Planet/ABTSPrimaryPlanetMovementAuthority.h"
 #include "Presentation/ABTSBirdAnimationPresentationComponent.h"
 #include "Presentation/ABTSCinematicPlaybackPolicy.h"
 #include "Player/ABTSM25BirdCharacter.h"
@@ -478,6 +480,8 @@ bool AABTSOpeningCinematicPreview::InitializeProductionBinding()
 	ProductionBirdWasHidden.Reset();
 	ProductionHandoffLocalLocations.Reset();
 	ProductionHandoffLocalRotations.Reset();
+	ProductionBirdSurfaceClearancesCM.Reset();
+	ABTSPrimaryPlanetMovementAuthority::Resolve(GetWorld(), ProductionPlanet);
 	for (AABTSM25BirdCharacter* Bird : ReadyParty->GetPartyMembers())
 	{
 		if (!Bird || !Bird->GetBirdVisual()) return false;
@@ -487,8 +491,44 @@ bool AABTSOpeningCinematicPreview::InitializeProductionBinding()
 			GetActorTransform().InverseTransformPosition(Bird->GetBirdVisual()->GetComponentLocation()));
 		ProductionHandoffLocalRotations.Add(
 			GetActorQuat().Inverse() * Bird->GetBirdVisual()->GetComponentQuat());
+		float SurfaceClearanceCM = 0.0f;
+		if (const AABTSM2Planet* Planet = ProductionPlanet.Get())
+		{
+			const FVector VisualLocation =
+				Bird->GetBirdVisual()->GetComponentLocation();
+			const FVector Direction =
+				(VisualLocation - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+			if (!Direction.IsNearlyZero())
+			{
+				const FVector SurfaceNormal =
+					Planet->GetSurfaceNormalAtDirection(Direction).GetSafeNormal();
+				const FVector SurfacePoint = Planet->GetPlanetCenterWorld()
+					+ Direction * Planet->GetSurfaceRadiusAtDirection(Direction);
+				SurfaceClearanceCM = FVector::DotProduct(
+					VisualLocation - SurfacePoint,
+					SurfaceNormal.IsNearlyZero() ? Direction : SurfaceNormal);
+			}
+		}
+		ProductionBirdSurfaceClearancesCM.Add(SurfaceClearanceCM);
 	}
 	if (ProductionPartyBirds.Num() != ProductionPartyBirdCount) return false;
+	// The kidnapped white bird is a cinematic-only proxy, not a Party member.
+	// Give it the mean real-bird visual clearance so its grounded beats use the
+	// same production surface authority without inventing a separate pivot.
+	float MeanSurfaceClearanceCM = 0.0f;
+	for (const float SurfaceClearanceCM : ProductionBirdSurfaceClearancesCM)
+	{
+		MeanSurfaceClearanceCM += SurfaceClearanceCM;
+	}
+	if (ProductionBirdSurfaceClearancesCM.Num() > 0)
+	{
+		MeanSurfaceClearanceCM /= static_cast<float>(
+			ProductionBirdSurfaceClearancesCM.Num());
+	}
+	while (ProductionBirdSurfaceClearancesCM.Num() < BirdVisuals.Num())
+	{
+		ProductionBirdSurfaceClearancesCM.Add(MeanSurfaceClearanceCM);
+	}
 	for (const TWeakObjectPtr<AABTSM25BirdCharacter>& WeakBird : ProductionPartyBirds)
 	{
 		if (AABTSM25BirdCharacter* Bird = WeakBird.Get()) Bird->SetActorHiddenInGame(true);
@@ -555,6 +595,16 @@ void AABTSOpeningCinematicPreview::UpdateBirds(const float DeltaSeconds)
 		Visual->SetVisibility(Pose.bVisible, true);
 		FVector LocalPosition = Pose.LocalPosition;
 		FQuat LocalRotation = ResolveBirdVisualRotation(Pose.LocalFacing);
+		if (bProductionBinding
+			&& Pose.AnimationCue != EABTSOpeningAnimationCue::Fly)
+		{
+			ResolveGroundedProductionBirdPose(
+				Index,
+				Pose.LocalPosition,
+				Pose.LocalFacing,
+				LocalPosition,
+				LocalRotation);
+		}
 		if (bProductionBinding
 			&& Index < ProductionPartyBirdCount
 			&& ProductionHandoffLocalLocations.IsValidIndex(Index)
@@ -690,4 +740,61 @@ FQuat AABTSOpeningCinematicPreview::ResolveBirdVisualRotation(const FVector& Loc
 	const FVector Facing = LocalFacing.IsNearlyZero() ? FVector::ForwardVector : LocalFacing.GetSafeNormal();
 	return FRotationMatrix::MakeFromXZ(Facing, FVector::UpVector).ToQuat()
 		* FRotator(0.0f, -90.0f, 0.0f).Quaternion();
+}
+
+bool AABTSOpeningCinematicPreview::ResolveGroundedProductionBirdPose(
+	const int32 BirdIndex,
+	const FVector& AuthoredLocalPosition,
+	const FVector& AuthoredLocalFacing,
+	FVector& OutLocalPosition,
+	FQuat& OutLocalRotation) const
+{
+	const AABTSM2Planet* Planet = ProductionPlanet.Get();
+	if (Planet == nullptr
+		|| !ProductionBirdSurfaceClearancesCM.IsValidIndex(BirdIndex))
+	{
+		return false;
+	}
+	const FTransform OpeningTransform = GetActorTransform();
+	const FVector AuthoredWorldPosition =
+		OpeningTransform.TransformPosition(AuthoredLocalPosition);
+	const FVector Direction =
+		(AuthoredWorldPosition - Planet->GetPlanetCenterWorld()).GetSafeNormal();
+	if (Direction.IsNearlyZero())
+	{
+		return false;
+	}
+	FVector SurfaceNormal =
+		Planet->GetSurfaceNormalAtDirection(Direction).GetSafeNormal();
+	if (SurfaceNormal.IsNearlyZero())
+	{
+		SurfaceNormal = Direction;
+	}
+	const FVector SurfacePoint = Planet->GetPlanetCenterWorld()
+		+ Direction * Planet->GetSurfaceRadiusAtDirection(Direction);
+	const FVector GroundedWorldPosition = SurfacePoint
+		+ SurfaceNormal * ProductionBirdSurfaceClearancesCM[BirdIndex];
+	OutLocalPosition = OpeningTransform.InverseTransformPosition(
+		GroundedWorldPosition);
+
+	FVector WorldFacing = OpeningTransform.TransformVectorNoScale(
+		AuthoredLocalFacing.IsNearlyZero()
+			? FVector::ForwardVector
+			: AuthoredLocalFacing.GetSafeNormal());
+	WorldFacing = FVector::VectorPlaneProject(
+		WorldFacing, SurfaceNormal).GetSafeNormal();
+	if (WorldFacing.IsNearlyZero())
+	{
+		WorldFacing = FVector::CrossProduct(
+			OpeningTransform.GetUnitAxis(EAxis::Y), SurfaceNormal).GetSafeNormal();
+	}
+	if (WorldFacing.IsNearlyZero())
+	{
+		return false;
+	}
+	const FQuat WorldRotation =
+		FRotationMatrix::MakeFromXZ(WorldFacing, SurfaceNormal).ToQuat()
+		* FRotator(0.0f, -90.0f, 0.0f).Quaternion();
+	OutLocalRotation = (GetActorQuat().Inverse() * WorldRotation).GetNormalized();
+	return true;
 }
