@@ -403,6 +403,10 @@ bool AABTSM7BuildingModule::ApplyImpactDamage(const float DamageGain)
 
 void AABTSM7BuildingModule::ActivateDynamic(const FVector& Impulse, const FVector& InPlanetCenter, const float GravityAcceleration)
 {
+	bOverflowKinematic = false;
+	bOverflowPendingBreak = false;
+	OverflowKinematicLinearVelocity = FVector::ZeroVector;
+	OverflowKinematicAngularVelocityDegrees = FVector::ZeroVector;
 	bPlanarGravity = false;
 	bSiteUniformGravity = false;
 	PlanetCenter = InPlanetCenter;
@@ -607,6 +611,84 @@ void AABTSM7BuildingModule::Freeze()
 	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
+void AABTSM7BuildingModule::BeginOverflowKinematic(
+	const FVector& InitialLinearVelocity,
+	const FVector& InitialAngularVelocityDegrees,
+	const FVector& InSiteUp,
+	const float InGravityAcceleration)
+{
+	if (bBroken || bRecycled || !IsValid(Visual)) return;
+	bDynamic = false;
+	bSiteUniformGravity = true;
+	bPlanarGravity = true;
+	PlanarGravityUp = InSiteUp.GetSafeNormal();
+	if (PlanarGravityUp.IsNearlyZero()) PlanarGravityUp = FVector::UpVector;
+	GravityAccelerationCMPerSec2 = FMath::Max(0.0f, InGravityAcceleration);
+	bOverflowKinematic = true;
+	bOverflowPendingBreak = false;
+	OverflowKinematicLinearVelocity = InitialLinearVelocity;
+	OverflowKinematicAngularVelocityDegrees = InitialAngularVelocityDegrees;
+	Visual->SetSimulatePhysics(false);
+	Visual->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Visual->SetEnableGravity(false);
+	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	Visual->SetVisibility(true, true);
+	SetActorHiddenInGame(false);
+}
+
+FVector AABTSM7BuildingModule::PredictOverflowKinematicLocation(
+	const float FixedDeltaSeconds) const
+{
+	const float DeltaSeconds = FMath::Max(0.0f, FixedDeltaSeconds);
+	const FVector PredictedVelocity = OverflowKinematicLinearVelocity
+		- PlanarGravityUp * GravityAccelerationCMPerSec2 * DeltaSeconds;
+	return GetActorLocation() + PredictedVelocity * DeltaSeconds;
+}
+
+void AABTSM7BuildingModule::TickOverflowKinematic(const float FixedDeltaSeconds,
+	const FVector* ClampedContactLocation)
+{
+	if (!bOverflowKinematic || bBroken || bRecycled || !IsValid(Visual)) return;
+	const float DeltaSeconds = FMath::Max(0.0f, FixedDeltaSeconds);
+	OverflowKinematicLinearVelocity -= PlanarGravityUp
+		* GravityAccelerationCMPerSec2 * DeltaSeconds;
+	FQuat NewRotation = GetActorQuat();
+	const float AngularSpeed = OverflowKinematicAngularVelocityDegrees.Size();
+	if (AngularSpeed > KINDA_SMALL_NUMBER)
+	{
+		const FQuat DeltaRotation(OverflowKinematicAngularVelocityDegrees / AngularSpeed,
+			FMath::DegreesToRadians(AngularSpeed * DeltaSeconds));
+		NewRotation = (DeltaRotation * NewRotation).GetNormalized();
+	}
+	const bool bClampedToContact = ClampedContactLocation != nullptr;
+	const FVector NewLocation = bClampedToContact ? *ClampedContactLocation
+		: GetActorLocation() + OverflowKinematicLinearVelocity * DeltaSeconds;
+	if (bClampedToContact)
+	{
+		// No slot may never turn a ground hit into a hidden/penetrating brick.
+		OverflowKinematicLinearVelocity = FVector::ZeroVector;
+		OverflowKinematicAngularVelocityDegrees = FVector::ZeroVector;
+	}
+	SetActorLocationAndRotation(NewLocation, NewRotation,
+		false, nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AABTSM7BuildingModule::AddOverflowKinematicImpact(
+	const FVector& VelocityDelta,
+	const FVector& AngularVelocityDeltaDegrees,
+	const float DamageGain)
+{
+	if (!bOverflowKinematic || bBroken || bRecycled) return;
+	OverflowKinematicLinearVelocity += VelocityDelta;
+	OverflowKinematicAngularVelocityDegrees += AngularVelocityDeltaDegrees;
+	if (ApplyImpactDamage(DamageGain))
+	{
+		// Retain the brick until it receives an exact body; never hide/destroy it.
+		bOverflowPendingBreak = true;
+	}
+}
+
 bool AABTSM7BuildingModule::CanFreezeAsGroundedRoot() const
 {
 	if (!bDynamic || !IsValid(Visual) || Visual->IsAnyRigidBodyAwake())
@@ -686,6 +768,7 @@ void AABTSM7BuildingModule::RecycleUnsupportedDebris()
 	// become a visible static obstacle when gameplay returns to Walk.
 	bDynamic = false;
 	bSiteUniformGravity = false;
+	bOverflowKinematic = false;
 	bRecycled = true;
 	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);

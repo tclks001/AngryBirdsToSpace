@@ -244,6 +244,9 @@ public:
 		const AABTSM7BuildingModule& TriggerModule,
 		float ImpactRadiusCM,
 		FString& OutError);
+	/** Promotes one visible overflow brick for an explicit bird/device impact. */
+	bool PromoteJuryDemoFixedSixOverflowForDirectImpact(
+		AABTSM7BuildingModule& Module, FString& OutError);
 	void RejectJuryDemoFixedSixChaosValidation(const FString& Reason);
 	bool CopyJuryDemoFixedSixChaosResult(
 		FABTSM73JuryDemoFixedSixChaosResult& OutResult) const;
@@ -585,6 +588,15 @@ private:
 	uint64 JuryDemoFixedSixChaosActivationFrame = 0;
 	int32 JuryDemoFixedSixActivePhysicsBodyCount = 0;
 	TSet<int32> JuryDemoFixedSixRemovedSupportBrickIds;
+	/** Stable BrickId order; entries remain visible and independent until promoted. */
+	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> JuryDemoFixedSixOverflowKinematicModules;
+	float JuryDemoFixedSixOverflowAccumulatorSeconds = 0.0f;
+	/** Keep exact slots available for a later direct hit/ground encounter. */
+	int32 JuryDemoFixedSixOverflowEmergencyReserveBodies = 16;
+	void TickJuryDemoFixedSixOverflowKinematic(float DeltaSeconds);
+	bool PromoteJuryDemoFixedSixOverflowModule(
+		AABTSM7BuildingModule& Module, bool bDirectImpact,
+		FString& OutError);
 	bool bIdleValidationRunning = false;
 	bool bDAG4ValidationRunning = false;
 	EABTSM73IdleValidationState IdleValidationState = EABTSM73IdleValidationState::Pending;

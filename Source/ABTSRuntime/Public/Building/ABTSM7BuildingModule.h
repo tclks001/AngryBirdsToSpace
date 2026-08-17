@@ -148,6 +148,15 @@ public:
 	bool ApplyImpactDamage(float DamageGain);
 	/** Adds gameplay impulse without replacing an already active gravity identity. */
 	bool ApplyDynamicImpactImpulse(const FVector& Impulse);
+	/** Starts an independent, visible fixed-step fallback while the exact Chaos body budget is full. */
+	void BeginOverflowKinematic(const FVector& InitialLinearVelocity,
+		const FVector& InitialAngularVelocityDegrees, const FVector& InSiteUp,
+		float InGravityAcceleration);
+	FVector PredictOverflowKinematicLocation(float FixedDeltaSeconds) const;
+	void TickOverflowKinematic(float FixedDeltaSeconds,
+		const FVector* ClampedContactLocation = nullptr);
+	void AddOverflowKinematicImpact(const FVector& VelocityDelta,
+		const FVector& AngularVelocityDeltaDegrees, float DamageGain);
 	/** Associates a real production module with its owning frozen building. */
 	void ConfigureDamageLifecycleOwner(
 		AABTSM73StableBuildingActor* InOwner,
@@ -158,6 +167,12 @@ public:
 	EABTSM7BuildingMaterial GetBuildingMaterial() const { return BuildingMaterial; }
 	UStaticMeshComponent* GetMeshComponent() const { return Visual; }
 	bool IsDynamic() const { return bDynamic; }
+	bool IsOverflowKinematic() const { return bOverflowKinematic; }
+	FVector GetOverflowKinematicLinearVelocity() const { return OverflowKinematicLinearVelocity; }
+	FVector GetOverflowKinematicAngularVelocityDegrees() const { return OverflowKinematicAngularVelocityDegrees; }
+	FVector GetOverflowKinematicGravityUp() const { return PlanarGravityUp; }
+	float GetOverflowKinematicGravityAcceleration() const { return GravityAccelerationCMPerSec2; }
+	bool HasOverflowPendingBreak() const { return bOverflowPendingBreak; }
 	bool UsesSiteUniformGravity() const { return bSiteUniformGravity; }
 	bool IsBroken() const { return bBroken; }
 	/** Walk-boundary terminal state; hidden recycled debris is never a seed, support, or damage target. */
@@ -192,6 +207,10 @@ private:
 	TObjectPtr<UStaticMeshComponent> DevicePresentation;
 	bool bBroken = false;
 	bool bRecycled = false;
+	bool bOverflowKinematic = false;
+	bool bOverflowPendingBreak = false;
+	FVector OverflowKinematicLinearVelocity = FVector::ZeroVector;
+	FVector OverflowKinematicAngularVelocityDegrees = FVector::ZeroVector;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M7", meta = (AllowPrivateAccess = "true"))
 	EABTSM7ModuleKind ModuleKind = EABTSM7ModuleKind::Brick;

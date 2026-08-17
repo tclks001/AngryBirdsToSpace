@@ -15,6 +15,7 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
+#include "World/ABTSCollisionChannels.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
@@ -163,6 +164,25 @@ namespace
 		return ExistingBodies >= 0 && NewBodies > 0 && MaximumBodies > 0
 			&& ExistingBodies <= MaximumBodies
 			&& NewBodies <= MaximumBodies - ExistingBodies;
+	}
+
+	bool BuildOverflowKinematicPublicationPlan(const int32 ExistingBodies,
+		const int32 ClosureBodies, const int32 MaximumBodies,
+		const int32 RequestedReserveBodies, int32& OutDynamicBodies,
+		int32& OutQueuedBodies)
+	{
+		OutDynamicBodies = 0;
+		OutQueuedBodies = 0;
+		const int32 AvailableBodies = FMath::Max(0, MaximumBodies - ExistingBodies);
+		if (ClosureBodies <= 0 || AvailableBodies <= 0) return false;
+		const int32 Reserve = ClosureBodies > AvailableBodies
+			? FMath::Min(RequestedReserveBodies,
+				FMath::Max(0, AvailableBodies - 1)) : 0;
+		OutDynamicBodies = FMath::Min(ClosureBodies,
+			FMath::Max(1, AvailableBodies - Reserve));
+		OutQueuedBodies = ClosureBodies - OutDynamicBodies;
+		return OutDynamicBodies > 0 && OutDynamicBodies + OutQueuedBodies
+			== ClosureBodies && ExistingBodies + OutDynamicBodies <= MaximumBodies;
 	}
 
 	uint32 ComputeProductionCandidateHash(
@@ -634,6 +654,7 @@ bool AABTSM73StableBuildingActor::BuildJuryDemoFixedSixSupportClosure(
 		const AABTSM7BuildingModule* Module = RuntimeModules[BrickId].Get();
 		Removed[BrickId] |= Module == nullptr || Module->IsBroken()
 			|| Module->IsRecycled() || Module->IsDynamic()
+			|| Module->IsOverflowKinematic()
 			|| JuryDemoFixedSixRemovedSupportBrickIds.Contains(BrickId);
 	}
 	TBitArray<> Reachable;
@@ -653,7 +674,7 @@ bool AABTSM73StableBuildingActor::BuildJuryDemoFixedSixSupportClosure(
 		}
 	}
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M7][FixedSixSupportClosure][Derived] Entry=%s Seeds=%d Ground=%d Edges=%d BaselineReachable=%d Affected=%d Active=%d StaticFloating=0 ExactIndependentBricks=1"),
+	TEXT("[ABTS][M7][FixedSixSupportClosure][Derived] Scope=SupportClosure.Derive Entry=%s Seeds=%d Ground=%d Edges=%d BaselineReachable=%d Affected=%d Active=%d StaticFloating=0 ExactIndependentBricks=1"),
 		*Entry.ManifestEntryId.ToString(), SeedModules.Num(), GroundBrickIds.Num(),
 		SupportEdgeCount, BaselineReachable.CountSetBits(),
 		OutAffectedBrickIds != nullptr ? OutAffectedBrickIds->Num() : OutPhysicsModules.Num(),
@@ -978,16 +999,27 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 		if (bLeftIsSeed != bRightIsSeed) return bLeftIsSeed;
 		return Left.GetDamageLifecycleBrickId() < Right.GetDamageLifecycleBrickId();
 	});
-	if (!CanPublishExactIndependentSupportClosure(ActualActiveBodyCount,
-		SupportClosureModules.Num(), FixedSixGameplayMaximumActiveBodies))
+	int32 ImmediateBodyCount = 0;
+	int32 OverflowBodyCount = 0;
+	if (!BuildOverflowKinematicPublicationPlan(ActualActiveBodyCount,
+		SupportClosureModules.Num(), FixedSixGameplayMaximumActiveBodies,
+		JuryDemoFixedSixOverflowEmergencyReserveBodies, ImmediateBodyCount,
+		OverflowBodyCount))
 	{
-		OutError = FString::Printf(
-			TEXT("FixedSixSupportClosureBudgetRejectedAtomic:Existing=%d:New=%d:Limit=%d"),
-			ActualActiveBodyCount, SupportClosureModules.Num(),
-			FixedSixGameplayMaximumActiveBodies);
+		OutError = TEXT("FixedSixSupportClosureNoPublicationSlots");
 		return false;
 	}
-	const TArray<AABTSM7BuildingModule*> PhysicsModules = SupportClosureModules;
+	TArray<AABTSM7BuildingModule*> PhysicsModules;
+	TArray<AABTSM7BuildingModule*> OverflowModules;
+	PhysicsModules.Append(SupportClosureModules.GetData(), ImmediateBodyCount);
+	for (int32 ModuleIndex = ImmediateBodyCount;
+		ModuleIndex < SupportClosureModules.Num(); ++ModuleIndex)
+	{
+		OverflowModules.Add(SupportClosureModules[ModuleIndex]);
+	}
+	ensureAlwaysMsgf(OverflowModules.Num() == OverflowBodyCount,
+		TEXT("Overflow publication plan drift: planned=%d actual=%d"),
+		OverflowBodyCount, OverflowModules.Num());
 	bJuryDemoFixedSixChaosDeferredActivationInProgress = true;
 	if (!bJuryDemoFixedSixChaosDeferredActivated)
 	{
@@ -1016,7 +1048,6 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 			return false;
 		}
 		bJuryDemoFixedSixChaosRunning = false;
-		SetActorTickEnabled(false);
 		bJuryDemoFixedSixChaosDeferredUntilFirstHit = false;
 		bJuryDemoFixedSixChaosDeferredActivated = true;
 	}
@@ -1042,6 +1073,27 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 	{
 		JuryDemoFixedSixActivePhysicsBodyCount += PhysicsModules.Num();
 	}
+	for (AABTSM7BuildingModule* Module : OverflowModules)
+	{
+		if (Module == nullptr) continue;
+		// Ordinary support loss has no authored radial impulse.  Only the
+		// later explicit bird/barrel path contributes velocity or damage.
+		Module->BeginOverflowKinematic(FVector::ZeroVector,
+			FVector::ZeroVector, JuryDemoFixedSixChaosSiteUp,
+			FixedSixGravityCMPerSec2);
+		JuryDemoFixedSixOverflowKinematicModules.Add(Module);
+	}
+	JuryDemoFixedSixOverflowKinematicModules.Sort([](
+		const TWeakObjectPtr<AABTSM7BuildingModule>& Left,
+		const TWeakObjectPtr<AABTSM7BuildingModule>& Right)
+	{
+		const AABTSM7BuildingModule* LeftModule = Left.Get();
+		const AABTSM7BuildingModule* RightModule = Right.Get();
+		return LeftModule != nullptr && RightModule != nullptr
+			? LeftModule->GetDamageLifecycleBrickId()
+				< RightModule->GetDamageLifecycleBrickId()
+			: LeftModule != nullptr;
+	});
 	for (const int32 BrickId : AffectedBrickIds)
 	{
 		JuryDemoFixedSixRemovedSupportBrickIds.Add(BrickId);
@@ -1066,13 +1118,123 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitActivated]")
-		TEXT(" Entry=%s Trigger=%s ActiveBodies=%d NewBodies=%d Affected=%d AtomicBudgetAccepted=1 IndependentBrickBodies=1")
+	TEXT(" Entry=%s Trigger=%s ActiveBodies=%d NewBodies=%d QueueBodies=%d Affected=%d OverflowQueue=1 IndependentBrickBodies=1")
 		TEXT(" TerrainBuildingResponse=Block PadsBuildingResponse=Block")
 		TEXT(" CCD=1 SiteUniformGravity=1 DamageTransaction=Continue"),
 		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
 		*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount,
-		PhysicsModules.Num(), AffectedBrickIds.Num());
+		PhysicsModules.Num(), OverflowModules.Num(), AffectedBrickIds.Num());
+	SetActorTickEnabled(!JuryDemoFixedSixOverflowKinematicModules.IsEmpty());
 	return true;
+}
+
+bool AABTSM73StableBuildingActor::PromoteJuryDemoFixedSixOverflowModule(
+	AABTSM7BuildingModule& Module, const bool bDirectImpact, FString& OutError)
+{
+	OutError.Reset();
+	if (!Module.IsOverflowKinematic()
+		|| !JuryDemoFixedSixOverflowKinematicModules.ContainsByPredicate(
+			[&Module](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+			{ return Candidate.Get() == &Module; })
+		|| !RuntimeMaterialSystem.IsValid() || !JuryDemoFixedSixStaticEntry.IsSet())
+	{
+		OutError = TEXT("FixedSixOverflowPromotionIdentityInvalid");
+		return false;
+	}
+	int32 ActualActive = 0;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak : RuntimeModules)
+	{
+		if (const AABTSM7BuildingModule* Candidate = Weak.Get();
+			Candidate != nullptr && Candidate->IsDynamic())
+		{
+			++ActualActive;
+		}
+	}
+	if (ActualActive >= FixedSixGameplayMaximumActiveBodies)
+	{
+		OutError = TEXT("FixedSixOverflowPromotionNoBodySlot");
+		return false;
+	}
+	const FVector LinearVelocity = Module.GetOverflowKinematicLinearVelocity();
+	const FVector AngularVelocity = Module.GetOverflowKinematicAngularVelocityDegrees();
+	const FABTSM7ChaosBodyProfile DestructionProfile =
+		FABTSM7ChaosBodyProfile::DestructionCandidate();
+	TArray<AABTSM7BuildingModule*> Singleton = {&Module};
+	if (!RuntimeMaterialSystem->BeginSiteUniformLaunchPhysics(Singleton,
+		JuryDemoFixedSixStaticEntry->WorldTransform.GetLocation(),
+		JuryDemoFixedSixStaticEntry->SupportCenterWorldCM,
+		FixedSixGravityCMPerSec2, FixedSixMaximumObservationSeconds + 1.0f,
+		/*bPenetrationPrevalidated=*/false, &DestructionProfile))
+	{
+		OutError = TEXT("FixedSixOverflowPromotionLaunchRejected");
+		return false;
+	}
+	if (UStaticMeshComponent* Mesh = Module.GetMeshComponent())
+	{
+		Mesh->SetPhysicsLinearVelocity(LinearVelocity);
+		Mesh->SetPhysicsAngularVelocityInDegrees(AngularVelocity);
+		Mesh->WakeAllRigidBodies();
+	}
+	JuryDemoFixedSixOverflowKinematicModules.RemoveAll(
+		[&Module](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+		{ return Candidate.Get() == &Module; });
+	JuryDemoFixedSixActivePhysicsBodyCount = ActualActive + 1;
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][OverflowKinematicQueue][Promoted]")
+		TEXT(" Entry=%s Brick=%d Direct=%d Active=%d Queue=%d CCD=1"),
+		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
+		Module.GetDamageLifecycleBrickId(), bDirectImpact ? 1 : 0,
+		JuryDemoFixedSixActivePhysicsBodyCount,
+		JuryDemoFixedSixOverflowKinematicModules.Num());
+	return true;
+}
+
+bool AABTSM73StableBuildingActor::PromoteJuryDemoFixedSixOverflowForDirectImpact(
+	AABTSM7BuildingModule& Module, FString& OutError)
+{
+	return PromoteJuryDemoFixedSixOverflowModule(Module, true, OutError);
+}
+
+void AABTSM73StableBuildingActor::TickJuryDemoFixedSixOverflowKinematic(
+	const float DeltaSeconds)
+{
+	if (JuryDemoFixedSixOverflowKinematicModules.IsEmpty()) return;
+	JuryDemoFixedSixOverflowAccumulatorSeconds += FMath::Max(0.0f, DeltaSeconds);
+	while (JuryDemoFixedSixOverflowAccumulatorSeconds >= FixedSixSimulationDeltaSeconds)
+	{
+		JuryDemoFixedSixOverflowAccumulatorSeconds -= FixedSixSimulationDeltaSeconds;
+		for (const TWeakObjectPtr<AABTSM7BuildingModule>& Weak :
+			JuryDemoFixedSixOverflowKinematicModules)
+		{
+			AABTSM7BuildingModule* Module = Weak.Get();
+			if (Module == nullptr || !Module->IsOverflowKinematic()) continue;
+			UWorld* World = GetWorld();
+			if (World == nullptr) continue;
+			FCollisionQueryParams Params(
+				SCENE_QUERY_STAT(M7OverflowKinematicGroundProbe), false, Module);
+			FHitResult Hit;
+			UStaticMeshComponent* Mesh = Module->GetMeshComponent();
+			const FVector Start = Module->GetActorLocation();
+			const FVector End = Module->PredictOverflowKinematicLocation(
+				FixedSixSimulationDeltaSeconds);
+			const FVector HalfExtent = Mesh != nullptr
+				? Mesh->Bounds.BoxExtent.GetAbs() : FVector(18.0f);
+			const FCollisionShape Shape = FCollisionShape::MakeBox(HalfExtent);
+			const bool bContact = World->SweepSingleByChannel(Hit, Start, End,
+				Module->GetActorQuat(), ABTSDeveloperObstacleChannel, Shape, Params);
+			Module->TickOverflowKinematic(FixedSixSimulationDeltaSeconds,
+				bContact ? &Hit.Location : nullptr);
+			if (bContact)
+			{
+				FString PromotionError;
+				PromoteJuryDemoFixedSixOverflowModule(*Module, false,
+					PromotionError);
+			}
+		}
+		JuryDemoFixedSixOverflowKinematicModules.RemoveAll(
+			[](const TWeakObjectPtr<AABTSM7BuildingModule>& Weak)
+			{ return !Weak.IsValid() || !Weak->IsOverflowKinematic(); });
+	}
 }
 
 void AABTSM73StableBuildingActor::TickJuryDemoFixedSixChaosValidation(
@@ -1364,6 +1526,28 @@ bool FABTSM7FixedSixDisconnectedSupportTest::RunTest(const FString& Parameters)
 		CanPublishExactIndependentSupportClosure(127, 1, 128));
 	TestFalse(TEXT("Over-cap closure rejects atomically without a recycle fallback"),
 		CanPublishExactIndependentSupportClosure(1, 128, 128));
+	int32 Dynamic129 = 0;
+	int32 Queue129 = 0;
+	TestTrue(TEXT("129-brick closure receives a visible per-brick overflow plan"),
+		BuildOverflowKinematicPublicationPlan(0, 129, 128, 16,
+			Dynamic129, Queue129));
+	TestEqual(TEXT("129 closure preserves all affected identities"),
+		Dynamic129 + Queue129, 129);
+	TestTrue(TEXT("129 closure keeps exact Chaos bodies within the cap"),
+		Dynamic129 <= 128);
+	TestTrue(TEXT("129 closure queues rather than recycles the overflow brick"),
+		Queue129 > 0);
+	int32 Dynamic256 = 0;
+	int32 Queue256 = 0;
+	TestTrue(TEXT("256-brick closure receives a deterministic overflow plan"),
+		BuildOverflowKinematicPublicationPlan(0, 256, 128, 16,
+			Dynamic256, Queue256));
+	TestEqual(TEXT("256 closure preserves all affected identities"),
+		Dynamic256 + Queue256, 256);
+	TestTrue(TEXT("256 closure never exceeds the exact Chaos cap"),
+		Dynamic256 <= 128);
+	TestEqual(TEXT("Overflow publication reserves emergency exact slots"),
+		Dynamic256, 112);
 	return true;
 }
 
