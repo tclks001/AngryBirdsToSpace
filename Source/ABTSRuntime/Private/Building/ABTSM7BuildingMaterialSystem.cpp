@@ -861,6 +861,7 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 	{
 		return false;
 	}
+	bool bQueuedBuildingDamageEpoch = false;
 	if (AABTSM73StableBuildingActor* Building =
 		Module.GetDamageLifecycleOwner())
 	{
@@ -870,21 +871,23 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 				: Module.GetModuleKind() == EABTSM7ModuleKind::SpringPiston
 					? PistonEffectRadiusCM : 0.0f;
 		FString ActivationError;
-		if (!Building->ActivateDeferredJuryDemoFixedSixChaosForFirstHit(
-			Module, ActivationError, InitialImpactRadiusCM))
+		if (!Building->QueueJuryDemoFixedSixDamageSeed(
+			Module, InitialImpactRadiusCM, ActivationError))
 		{
 			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitRejected]")
-				TEXT(" Module=%s Reason=%s DamageDropped=1"),
+				TEXT("[ABTS][M7][DamageEpoch][SeedRejected]")
+				TEXT(" Module=%s Reason=%s"),
 				*Module.GetName(), *ActivationError);
 			return false;
 		}
+		bQueuedBuildingDamageEpoch = true;
 	}
 	const FABTSM7MaterialProfile& Profile =
 		GetProfile(Module.GetBuildingMaterial());
 	const float Scale = GetBirdThresholdScale(BirdId);
 	const float Knock = Profile.KnockSpeedCMPerSec * Scale;
 	const float Break = Profile.BreakSpeedCMPerSec * Scale;
+	bool bOverflowDirectFallback = false;
 	if (Module.IsOverflowKinematic())
 	{
 		FString PromotionError;
@@ -897,14 +900,20 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 		}
 		else
 		{
-			// QueryOnly queue bricks remain explicitly routed by this hit path.
-			// If all reserved slots are exhausted, reject the bird interaction
-			// rather than silently letting it tunnel through a fake collision.
-			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][M7][OverflowKinematicQueue][DirectRejected]")
-				TEXT(" Module=%s Reason=%s FailClosed=1"),
+			// No exact slot is not permission to leave a visibly unsupported
+			// brick static. Keep its independent deterministic motion and let the
+			// building damage epoch resolve the rest of its support closure.
+			bOverflowDirectFallback = true;
+			Module.AddOverflowKinematicImpact(
+				IncomingVelocity.GetSafeNormal()
+					* FMath::Max(50.0f, NormalSpeedCMPerSec
+						* Profile.PushVelocityTransfer),
+				IncomingVelocity.GetSafeNormal() * 60.0f,
+				/*DamageGain=*/0.0f);
+			UE_LOG(LogABTSRuntime, Verbose,
+				TEXT("[ABTS][M7][OverflowKinematic][DirectFallback]")
+				TEXT(" Module=%s Reason=%s VisibleIndependent=1"),
 				*Module.GetName(), *PromotionError);
-			return false;
 		}
 	}
 	const bool bDamageBreak = Module.ApplyImpactDamage(
@@ -963,7 +972,12 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 			// Preserve SiteUniformTangentGravity and the wake/sleep identity.
 			Module.ApplyDynamicImpactImpulse(TransferImpulse);
 		}
-		else
+		else if (Module.IsOverflowKinematic() && !bOverflowDirectFallback)
+		{
+			Module.AddOverflowKinematicImpact(TransferImpulse,
+				IncomingVelocity.GetSafeNormal() * 60.0f, /*DamageGain=*/0.0f);
+		}
+		else if (!bQueuedBuildingDamageEpoch)
 		{
 			ActivateModuleForLaunch(Module, TransferImpulse);
 		}
@@ -1218,6 +1232,17 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 		{
 			continue;
 		}
+		if (Candidate->IsOverflowKinematic())
+		{
+			const FVector Delta = Candidate->GetActorLocation() - Origin;
+			const float ImpactSpeed = ImpulseSpeedCMPerSec * (1.0f
+				- Delta.Size() / FMath::Max(1.0f, ImpulseRadiusCM));
+			const FABTSM7MaterialProfile& Profile =
+				GetProfile(Candidate->GetBuildingMaterial());
+			Candidate->AddOverflowKinematicImpact(Delta.GetSafeNormal() * ImpactSpeed,
+				Delta.GetSafeNormal() * 120.0f, ComputeDamageGain(Profile,
+					ImpactSpeed, Profile.BreakSpeedCMPerSec));
+		}
 		AABTSM7BuildingModule*& Existing = BlastSeeds.FindOrAdd(Building);
 		if (Existing == nullptr
 			|| FVector::DistSquared(Candidate->GetActorLocation(), Origin)
@@ -1251,11 +1276,11 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 	for (const TPair<AABTSM73StableBuildingActor*, AABTSM7BuildingModule*>& Pair : SortedBlastSeeds)
 	{
 		FString ClosureError;
-		if (!Pair.Key->ActivateJuryDemoFixedSixImpactSupportClosure(
+		if (!Pair.Key->QueueJuryDemoFixedSixDamageSeed(
 			*Pair.Value, ImpulseRadiusCM, ClosureError))
 		{
 			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][M7][FixedSixSupportClosure][BlastRejected] Building=%s Seed=%d Reason=%s"),
+				TEXT("[ABTS][M7][DamageEpoch][BlastSeedRejected] Building=%s Seed=%d Reason=%s"),
 				*GetNameSafe(Pair.Key), Pair.Value->GetDamageLifecycleBrickId(),
 				*ClosureError);
 			RejectedBlastBuildings.Add(Pair.Key);
@@ -1266,8 +1291,8 @@ void AABTSM7BuildingMaterialSystem::ApplyRadialBlast(const FVector& Origin, cons
 		}
 	}
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M7][FixedSixSupportClosure][BlastDiscovery]")
-		TEXT(" Radius=%.1f Discovered=%d Promoted=%d Rejected=%d SameTransaction=1"),
+		TEXT("[ABTS][M7][DamageEpoch][BlastQueued]")
+		TEXT(" Radius=%.1f Discovered=%d Queued=%d Rejected=%d SameTransaction=1"),
 		ImpulseRadiusCM, SortedBlastSeeds.Num(), PromotedBlastBuildingCount,
 		RejectedBlastBuildings.Num());
 	for (UHierarchicalInstancedStaticMeshComponent* HISM : {WoodBrickHISM.Get(), StoneBrickHISM.Get(), IronBrickHISM.Get(), GlassBrickHISM.Get(), CrystalBrickHISM.Get()})
@@ -1385,7 +1410,7 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 {
 	int32 FrozenCount = 0;
-	int32 RecycledAirborneCount = 0;
+	int32 AnalyticFallbackCount = 0;
 	int32 SimulatingBefore = 0;
 	TArray<AABTSM7BuildingModule*> SleepingModules;
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
@@ -1476,9 +1501,20 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 		AABTSM7BuildingModule* Module = WeakModule.Get();
 		if (Module == nullptr || !Module->IsDynamic()) continue;
 		// The only remaining dynamics are awake or have no contact path to a
-		// certified root. Recycle them rather than creating suspended statics.
+		// certified root.  They must leave Chaos without becoming hidden debris
+		// or suspended statics: their owning building continues each brick as a
+		// visible analytic body until a real contact proves it can settle.
+		FString OverflowError;
+		if (AABTSM73StableBuildingActor* Building =
+			Module->GetDamageLifecycleOwner(); Building != nullptr
+			&& Building->AdoptJuryDemoFixedSixDynamicAsOverflow(*Module,
+				OverflowError))
+		{
+			++AnalyticFallbackCount;
+			continue;
+		}
+		// Non-fixed-six legacy modules retain their existing recovery behavior.
 		Module->RecycleUnsupportedDebris();
-		++RecycledAirborneCount;
 	}
 
 	int32 SimulatingAfter = 0;
@@ -1490,11 +1526,11 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 		SimulatingAfter += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][WalkReturnFreeze] FrozenGroundReachable=%d GroundRoots=%d SupportEdges=%d RecycledAirborneOrAwake=%d SimulatingBefore=%d SimulatingAfter=%d NoFloatingStatic=1"),
+		TEXT("[ABTS][M7][WalkReturnFreeze] FrozenGroundReachable=%d GroundRoots=%d SupportEdges=%d AnalyticFallback=%d SimulatingBefore=%d SimulatingAfter=%d NoFloatingStatic=1"),
 		FrozenCount,
 		GroundRoots.Num(),
 		SupportEdgeCount,
-		RecycledAirborneCount,
+		AnalyticFallbackCount,
 		SimulatingBefore,
 		SimulatingAfter);
 	ensureAlwaysMsgf(SimulatingAfter == 0,

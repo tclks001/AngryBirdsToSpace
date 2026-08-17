@@ -405,6 +405,8 @@ void AABTSM7BuildingModule::ActivateDynamic(const FVector& Impulse, const FVecto
 {
 	bOverflowKinematic = false;
 	bOverflowPendingBreak = false;
+	bOverflowKinematicSettled = false;
+	OverflowKinematicGroundedFrames = 0;
 	OverflowKinematicLinearVelocity = FVector::ZeroVector;
 	OverflowKinematicAngularVelocityDegrees = FVector::ZeroVector;
 	bPlanarGravity = false;
@@ -619,6 +621,8 @@ void AABTSM7BuildingModule::BeginOverflowKinematic(
 {
 	if (bBroken || bRecycled || !IsValid(Visual)) return;
 	bDynamic = false;
+	bOverflowKinematicSettled = false;
+	OverflowKinematicGroundedFrames = 0;
 	bSiteUniformGravity = true;
 	bPlanarGravity = true;
 	PlanarGravityUp = InSiteUp.GetSafeNormal();
@@ -626,6 +630,8 @@ void AABTSM7BuildingModule::BeginOverflowKinematic(
 	GravityAccelerationCMPerSec2 = FMath::Max(0.0f, InGravityAcceleration);
 	bOverflowKinematic = true;
 	bOverflowPendingBreak = false;
+	bOverflowKinematicSettled = false;
+	OverflowKinematicGroundedFrames = 0;
 	OverflowKinematicLinearVelocity = InitialLinearVelocity;
 	OverflowKinematicAngularVelocityDegrees = InitialAngularVelocityDegrees;
 	Visual->SetSimulatePhysics(false);
@@ -640,6 +646,10 @@ void AABTSM7BuildingModule::BeginOverflowKinematic(
 FVector AABTSM7BuildingModule::PredictOverflowKinematicLocation(
 	const float FixedDeltaSeconds) const
 {
+	if (bOverflowKinematicSettled)
+	{
+		return GetActorLocation();
+	}
 	const float DeltaSeconds = FMath::Max(0.0f, FixedDeltaSeconds);
 	const FVector PredictedVelocity = OverflowKinematicLinearVelocity
 		- PlanarGravityUp * GravityAccelerationCMPerSec2 * DeltaSeconds;
@@ -647,9 +657,10 @@ FVector AABTSM7BuildingModule::PredictOverflowKinematicLocation(
 }
 
 void AABTSM7BuildingModule::TickOverflowKinematic(const float FixedDeltaSeconds,
-	const FVector* ClampedContactLocation)
+	const FVector* GroundContactLocation)
 {
 	if (!bOverflowKinematic || bBroken || bRecycled || !IsValid(Visual)) return;
+	if (bOverflowKinematicSettled) return;
 	const float DeltaSeconds = FMath::Max(0.0f, FixedDeltaSeconds);
 	OverflowKinematicLinearVelocity -= PlanarGravityUp
 		* GravityAccelerationCMPerSec2 * DeltaSeconds;
@@ -661,14 +672,24 @@ void AABTSM7BuildingModule::TickOverflowKinematic(const float FixedDeltaSeconds,
 			FMath::DegreesToRadians(AngularSpeed * DeltaSeconds));
 		NewRotation = (DeltaRotation * NewRotation).GetNormalized();
 	}
-	const bool bClampedToContact = ClampedContactLocation != nullptr;
-	const FVector NewLocation = bClampedToContact ? *ClampedContactLocation
+	const bool bGroundedContact = GroundContactLocation != nullptr;
+	const FVector NewLocation = bGroundedContact ? *GroundContactLocation
 		: GetActorLocation() + OverflowKinematicLinearVelocity * DeltaSeconds;
-	if (bClampedToContact)
+	if (bGroundedContact)
 	{
-		// No slot may never turn a ground hit into a hidden/penetrating brick.
+		// A fallback brick may settle only at a verified terrain/foundation
+		// contact.  It remains visible and independently addressable; this is
+		// deliberately not a suspended static proxy.
 		OverflowKinematicLinearVelocity = FVector::ZeroVector;
 		OverflowKinematicAngularVelocityDegrees = FVector::ZeroVector;
+		constexpr int32 RequiredGroundedFrames = 30;
+		++OverflowKinematicGroundedFrames;
+		bOverflowKinematicSettled =
+			OverflowKinematicGroundedFrames >= RequiredGroundedFrames;
+	}
+	else
+	{
+		OverflowKinematicGroundedFrames = 0;
 	}
 	SetActorLocationAndRotation(NewLocation, NewRotation,
 		false, nullptr, ETeleportType::TeleportPhysics);
@@ -680,6 +701,8 @@ void AABTSM7BuildingModule::AddOverflowKinematicImpact(
 	const float DamageGain)
 {
 	if (!bOverflowKinematic || bBroken || bRecycled) return;
+	bOverflowKinematicSettled = false;
+	OverflowKinematicGroundedFrames = 0;
 	OverflowKinematicLinearVelocity += VelocityDelta;
 	OverflowKinematicAngularVelocityDegrees += AngularVelocityDeltaDegrees;
 	if (ApplyImpactDamage(DamageGain))
@@ -687,6 +710,27 @@ void AABTSM7BuildingModule::AddOverflowKinematicImpact(
 		// Retain the brick until it receives an exact body; never hide/destroy it.
 		bOverflowPendingBreak = true;
 	}
+}
+
+bool AABTSM7BuildingModule::FreezeSettledOverflowKinematic()
+{
+	if (!bOverflowKinematic || !bOverflowKinematicSettled || bBroken
+		|| bRecycled || !IsValid(Visual))
+	{
+		return false;
+	}
+	// Settling is awarded only by the actor's swept terrain/foundation/settled
+	// support check after thirty fixed 60 Hz contacts.  This never turns an
+	// airborne low-velocity brick into a static collider.
+	bOverflowKinematic = false;
+	bOverflowPendingBreak = false;
+	bDynamic = false;
+	Visual->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	Visual->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	Visual->SetSimulatePhysics(false);
+	Visual->SetCollisionObjectType(ABTSDeveloperObstacleChannel);
+	Visual->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	return true;
 }
 
 bool AABTSM7BuildingModule::CanFreezeAsGroundedRoot() const
