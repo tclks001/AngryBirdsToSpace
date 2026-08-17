@@ -94,6 +94,9 @@ deadlock: the MoviePlayer screen completes, the in-game handoff cover reaches
 its 92 percent pre-Ready cap, and the actor needed to open the gate never gets
 another world tick. Shipping logging remains enabled for startup/authority
 diagnostics; this does not enable developer gameplay options or the console.
+The first game-world handoff also preserves the MoviePlayer foreground clock
+and uses the same black visual field, so progress continues rather than visibly
+starting a second, differently styled loading pass.
 
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9

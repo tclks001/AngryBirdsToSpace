@@ -292,7 +292,15 @@ void UABTSGameViewportClient::RefreshStartupWorldState()
 	if (StartupTrackedWorld.Get() != GameWorld)
 	{
 		StartupTrackedWorld = GameWorld;
-		StartupForegroundStartSeconds = FPlatformTime::Seconds();
+		// The first game world is the continuation of the MoviePlayer startup,
+		// not a second load. Preserve the process-level foreground clock so the
+		// Canvas bridge continues the same progress instead of restarting at 0.
+		// Later world travel is a genuinely new handoff and gets a fresh clock.
+		if (bStartupWorldHasBeenTracked)
+		{
+			StartupForegroundStartSeconds = FPlatformTime::Seconds();
+		}
+		bStartupWorldHasBeenTracked = true;
 		bStartupGateRequired = false;
 		bStartupAuthorityReady = false;
 		bStartupWorldReady = false;
@@ -715,7 +723,10 @@ void UABTSGameViewportClient::DrawStartupHandoffCover(
 	// This Canvas bridge deliberately mirrors the asset-free MoviePlayer page.
 	// It survives the one-or-more presents between MoviePlayer teardown and the
 	// first fully initialized front-end draw without depending on Slate lifetime.
-	const FLinearColor Background(0.008f, 0.018f, 0.038f, 1.0f);
+	// Canvas colors take a different render path from the early Slate widget.
+	// An absolute black backdrop avoids the previous blue gamma shift and makes
+	// the handoff read as one uninterrupted loading page.
+	const FLinearColor Background(0.0f, 0.0f, 0.0f, 1.0f);
 	const FLinearColor Accent(0.18f, 0.82f, 0.94f, 1.0f);
 	const FLinearColor Text(0.72f, 0.82f, 0.92f, 1.0f);
 	Canvas.K2_DrawTexture(
@@ -736,7 +747,7 @@ void UABTSGameViewportClient::DrawStartupHandoffCover(
 	DrawLabel(
 		Canvas,
 		TEXT("ANGRY BIRDS TO SPACE"),
-		Center - FVector2D(0.0f, 78.0f * Scale),
+		Center - FVector2D(0.0f, 30.0f * Scale),
 		1.34f * Scale,
 		FLinearColor(0.31f, 0.91f, 1.0f, 1.0f),
 		true,
@@ -746,7 +757,7 @@ void UABTSGameViewportClient::DrawStartupHandoffCover(
 		bStartupAuthorityReady
 			? TEXT("WORLD READY")
 			: TEXT("GENERATING PLANETARY WORLD"),
-		Center - FVector2D(0.0f, 24.0f * Scale),
+		Center + FVector2D(0.0f, 18.0f * Scale),
 		0.72f * Scale,
 		Text,
 		false,
@@ -757,8 +768,8 @@ void UABTSGameViewportClient::DrawStartupHandoffCover(
 		bStartupAuthorityReady);
 	const FVector2D TrackMin(
 		Center.X - Width * 0.5f,
-		Center.Y + 22.0f * Scale);
-	const FVector2D TrackSize(Width, 14.0f * Scale);
+		Center.Y + 44.0f * Scale);
+	const FVector2D TrackSize(Width, 10.0f * Scale);
 	Canvas.K2_DrawTexture(
 		Canvas.DefaultTexture,
 		TrackMin,

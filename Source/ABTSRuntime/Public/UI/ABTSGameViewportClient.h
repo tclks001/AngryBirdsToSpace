@@ -157,6 +157,7 @@ private:
 	bool bCaptureMode = false;
 	bool bScreenshotRequested = false;
 	bool bStartupGateRequired = false;
+	bool bStartupWorldHasBeenTracked = false;
 	bool bStartupAuthorityReady = false;
 	bool bStartupWorldReady = false;
 	bool bStartupWorldFailed = false;
