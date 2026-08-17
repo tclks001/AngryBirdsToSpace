@@ -2042,9 +2042,14 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 		EABTSM73GenerationAlgorithm::RecursiveSupportDAG;
 	GenerationSummary.RejectReason.Reset();
 	bJuryDemoFixedSixStaticRegistrationAccepted = true;
-	// Static registration is a distinct prerequisite. M6 must continue to wait
-	// until the production Site-uniform Chaos observer accepts this building.
-	IdleValidationState = EABTSM73IdleValidationState::Pending;
+	// This is the authoritative M6 startup transition for the fixed-six
+	// release path. Exact identity, static HISM/module ownership and the frozen
+	// tangent support have all passed at this point. The release buildings defer
+	// Chaos promotion until a real first hit, so waiting for the later E1
+	// binding/Prepare batch here creates a circular WorldReady dependency.
+	// Accepted therefore means "static-ready and safely deferred", never that
+	// destruction Chaos has already started or been certified.
+	IdleValidationState = EABTSM73IdleValidationState::Accepted;
 	bIdleValidationRunning = false;
 	bDAG4ValidationRunning = false;
 	SetActorTickEnabled(false);
@@ -2055,7 +2060,7 @@ void AABTSM73StableBuildingActor::InitializeJuryDemoFixedSixStaticRegistration(
 		TEXT(" Production=%llu Device=%llu Contract=V%d Placement=%llu")
 		TEXT(" Bricks=%d Devices=%d Caps=%d Modules=%d")
 		TEXT(" ResultHash=%llu DynamicEnvelopeRequired=%d")
-		TEXT(" Authority=StaticRegistration Chaos=NotEvaluated Accepted=1"),
+		TEXT(" Authority=StaticReadyDeferred Chaos=DeferredUntilFirstHit Accepted=1"),
 		*GetName(), *Entry.ManifestEntryId.ToString(), Entry.EncounterIndex,
 		Entry.DifficultyTier, Entry.DeterministicSeed, Entry.SourceLayoutHash,
 		Entry.DescriptorHash, Entry.StaticGeometryHash,

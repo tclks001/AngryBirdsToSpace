@@ -215,6 +215,21 @@ public:
 	/** Removes every staged instance/module before destroying an atomic batch. */
 	void RollbackJuryDemoFixedSixStaticRegistration(const FString& Reason);
 	bool IsJuryDemoFixedSixStaticRegistrationAccepted() const;
+	/** M6 startup authority: exact static identity is accepted while Chaos is deferred. */
+	bool IsJuryDemoFixedSixStaticReadyDeferredForValidation() const
+	{
+		return IsJuryDemoFixedSixStaticRegistrationAccepted()
+			&& IdleValidationState == EABTSM73IdleValidationState::Accepted
+			&& !bJuryDemoFixedSixChaosRunning;
+	}
+	/** True only after the deferred first-hit representation has been armed. */
+	bool IsJuryDemoFixedSixChaosDeferredUntilFirstHitForValidation() const
+	{
+		return IsJuryDemoFixedSixStaticReadyDeferredForValidation()
+			&& bJuryDemoFixedSixChaosPrepared
+			&& bJuryDemoFixedSixChaosDeferredUntilFirstHit
+			&& !bJuryDemoFixedSixChaosDeferredActivated;
+	}
 	int32 GetJuryDemoFixedSixStaticModuleCount() const;
 	FName GetJuryDemoFixedSixManifestEntryId() const;
 	int32 GetJuryDemoFixedSixEncounterIndex() const;
