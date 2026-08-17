@@ -119,17 +119,20 @@ first discovered, so the blue front page cannot leak between the two technical
 owners. The result is one continuous player-facing loading page rather than a
 second, differently styled loading pass.
 
-The earlier pause-ownership source fix was verified by a full UE 5.8
-Development Editor build and the fresh `ABTS.UI` NullRHI suite (4/4). A clean
-Shipping BuildCookRun also completed with ExitCode 0 at candidate `a2244b4`;
-the archived package is
-`G:\\ABTS\\Artifacts\\RC9.3\\candidate-a2244b4-20260817-Shipping`. This is a
-startup-P0 validation package and intentionally excludes the rejected M7
-coarse/queued-brick experiments. Visible packaged startup acceptance remains
-required before promoting it as the release candidate. The later single-page
-visual/progress contract above is implemented on the active integration
-candidate and remains pending the next serialized build, fresh `ABTS.UI` run,
-and packaged Development/Shipping regression smoke.
+The unified handoff was verified by a full UE 5.8 Development Editor build and
+the fresh `ABTS.UI` NullRHI suite (4/4). The active candidate also integrates
+the M7 fixed-six static-startup acceptance and one-closure-per-building damage
+epoch changes. Its full Shipping BuildCookRun completed with ExitCode 0 at
+candidate `7e40760`; the archived package is
+`G:\\ABTS\\Artifacts\\RC9.3\\candidate-7e40760-20260817-Shipping`. A packaged
+Shipping player-path D3D11 offscreen trace reached `AuthorityReady=1`,
+`PresentationReady=1`, and `WorldReady=1` roughly two seconds after BeginPlay.
+All six buildings were already `Accepted=6`, with `Pending=0`, `Running=0`,
+`Rejected=0`, and `WorldFailed=0`; the evidence is
+`G:\\ABTS\\Logs\\RC9.3\\StartupTrace-candidate-7e40760-20260817-Shipping-playerpath.log`.
+This closes the previously reproduced Shipping-only startup wait in automated
+packaged evidence. Visible packaged acceptance and real first-hit per-brick
+performance/collapse quality remain required before final release promotion.
 
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
