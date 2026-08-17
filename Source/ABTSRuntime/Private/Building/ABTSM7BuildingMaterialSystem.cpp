@@ -861,6 +861,20 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 	{
 		return false;
 	}
+	const FABTSM7MaterialProfile& Profile =
+		GetProfile(Module.GetBuildingMaterial());
+	const float Scale = GetBirdThresholdScale(BirdId);
+	const float Knock = Profile.KnockSpeedCMPerSec * Scale;
+	const float Break = Profile.BreakSpeedCMPerSec * Scale;
+	// Fixed-Six static bricks must not launch synchronously from a contact
+	// callback.  Preserve the exact per-brick momentum in the building epoch
+	// and apply it only after the support closure has published that brick.
+	const bool bQueueTransferImpulse = bApplyGameplayTransferImpulse
+		&& (NormalSpeedCMPerSec >= Knock || BirdId == EABTSBirdId::Black);
+	const FVector QueuedTransferImpulse = bQueueTransferImpulse
+		? IncomingVelocity.GetSafeNormal()
+			* NormalSpeedCMPerSec * Profile.PushVelocityTransfer
+		: FVector::ZeroVector;
 	bool bQueuedBuildingDamageEpoch = false;
 	if (AABTSM73StableBuildingActor* Building =
 		Module.GetDamageLifecycleOwner())
@@ -872,7 +886,7 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 					? PistonEffectRadiusCM : 0.0f;
 		FString ActivationError;
 		if (!Building->QueueJuryDemoFixedSixDamageSeed(
-			Module, InitialImpactRadiusCM, ActivationError))
+			Module, InitialImpactRadiusCM, QueuedTransferImpulse, ActivationError))
 		{
 			UE_LOG(LogABTSRuntime, Error,
 				TEXT("[ABTS][M7][DamageEpoch][SeedRejected]")
@@ -882,11 +896,6 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 		}
 		bQueuedBuildingDamageEpoch = true;
 	}
-	const FABTSM7MaterialProfile& Profile =
-		GetProfile(Module.GetBuildingMaterial());
-	const float Scale = GetBirdThresholdScale(BirdId);
-	const float Knock = Profile.KnockSpeedCMPerSec * Scale;
-	const float Break = Profile.BreakSpeedCMPerSec * Scale;
 	bool bOverflowDirectFallback = false;
 	if (Module.IsOverflowKinematic())
 	{
@@ -976,10 +985,9 @@ bool AABTSM7BuildingMaterialSystem::ApplyImpactToModule(
 		Building->NotifyJuryDemoE1ModuleDamage(
 			Module, Cause, false, NormalSpeedCMPerSec);
 	}
-	if (NormalSpeedCMPerSec >= Knock && bApplyGameplayTransferImpulse)
+	if (bQueueTransferImpulse)
 	{
-		const FVector TransferImpulse = IncomingVelocity.GetSafeNormal()
-			* NormalSpeedCMPerSec * Profile.PushVelocityTransfer;
+		const FVector TransferImpulse = QueuedTransferImpulse;
 		if (Module.IsDynamic())
 		{
 			// Preserve SiteUniformTangentGravity and the wake/sleep identity.

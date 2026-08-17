@@ -267,6 +267,7 @@ public:
 	bool QueueJuryDemoFixedSixDamageSeed(
 		AABTSM7BuildingModule& TriggerModule,
 		float ImpactRadiusCM,
+		const FVector& ImpactVelocityCMPerSec,
 		FString& OutError);
 	/**
 	 * Queues one radial blast as a single building-scoped epoch.  The caller
@@ -302,6 +303,15 @@ public:
 	{
 		return JuryDemoFixedSixDamageEpoch;
 	}
+#if WITH_DEV_AUTOMATION_TESTS
+	/**
+	 * Isolated runtime worlds have no production GameMode terrain-override
+	 * authority.  This test seam arms the same Tick publication branch after
+	 * the fixture has already prepared exact static modules; it never exists in
+	 * a shipping build and cannot bypass the production first-hit gate.
+	 */
+	bool ArmJuryDemoFixedSixDamageEpochTickForAutomation(FString& OutError);
+#endif
 	/** Promotes one visible overflow brick for an explicit bird/device impact. */
 	bool PromoteJuryDemoFixedSixOverflowForDirectImpact(
 		AABTSM7BuildingModule& Module, FString& OutError);
@@ -475,6 +485,8 @@ private:
 		FString& OutError) const;
 	bool QueueJuryDemoFixedSixDamageBrickIds(
 		TConstArrayView<int32> SeedBrickIds,
+		int32 ImpulseBrickId,
+		const FVector& ImpulseVelocityCMPerSec,
 		FString& OutError);
 	bool ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
 		TConstArrayView<int32> TriggerBrickIds,
@@ -664,6 +676,8 @@ private:
 	TSet<int32> JuryDemoFixedSixRemovedSupportBrickIds;
 	/** One stable building-scoped BrickId batch, resolved once from Tick. */
 	TArray<int32> JuryDemoFixedSixQueuedDamageSeedBrickIds;
+	/** Per-brick momentum is coalesced with the damage epoch and only applied after publication. */
+	TMap<int32, FVector> JuryDemoFixedSixQueuedImpulseVelocityByBrickId;
 	uint64 JuryDemoFixedSixDamageEpoch = 0;
 	/** Stable BrickId order; entries remain visible and independent until promoted. */
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> JuryDemoFixedSixOverflowKinematicModules;
