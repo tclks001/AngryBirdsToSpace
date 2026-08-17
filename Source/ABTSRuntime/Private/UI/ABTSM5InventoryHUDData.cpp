@@ -181,6 +181,33 @@ bool FABTSM5InventoryHUDData::ConsumesPrimaryPointer(
 			&& Layout.HotbarShell.IsInsideOrOn(ScreenPosition));
 }
 
+const TCHAR* FABTSM5InventoryHUDData::GetRecipeHitBoxPrefix()
+{
+	return TEXT("ABTS_M5_Recipe_");
+}
+
+bool FABTSM5InventoryHUDData::TryParseRecipeHitBoxIndex(
+	const FName& HitBoxName,
+	int32& OutRecipeIndex)
+{
+	OutRecipeIndex = INDEX_NONE;
+	const FString Name = HitBoxName.ToString();
+	const FString Prefix(GetRecipeHitBoxPrefix());
+	if (!Name.StartsWith(Prefix, ESearchCase::CaseSensitive)) return false;
+
+	const FString Suffix = Name.RightChop(Prefix.Len());
+	if (Suffix.IsEmpty()) return false;
+	for (const TCHAR Character : Suffix)
+	{
+		if (!FChar::IsDigit(Character)) return false;
+	}
+
+	const int64 ParsedIndex = FCString::Atoi64(*Suffix);
+	if (ParsedIndex < 0 || ParsedIndex > MAX_int32) return false;
+	OutRecipeIndex = static_cast<int32>(ParsedIndex);
+	return true;
+}
+
 const TCHAR* FABTSM5InventoryHUDData::GetItemIconAssetPath(const EABTSItemId ItemId)
 {
 	switch (ItemId)

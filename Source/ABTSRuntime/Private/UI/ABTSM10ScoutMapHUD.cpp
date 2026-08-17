@@ -501,7 +501,6 @@ void AABTSM10ScoutMapHUD::DrawTrajectoryPreview(
 
 	FABTSM6TrajectoryPreview Preview;
 	if (!System.CopyCurrentTrajectoryPreview(Preview)
-		|| Preview.SlingshotTier != EABTSSlingshotTier::Reinforced
 		|| !Preview.bHasPrimarySurfaceLanding)
 	{
 		return;

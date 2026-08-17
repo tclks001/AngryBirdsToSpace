@@ -24,6 +24,8 @@ class AABTSM9Satellite;
 enum class EABTSM9SatelliteFlightCameraIntent : uint8;
 enum class EABTSM9SatelliteFlightCameraPhase : uint8;
 class UHierarchicalInstancedStaticMeshComponent;
+class UInstancedStaticMeshComponent;
+class UMaterialInstanceDynamic;
 class USceneComponent;
 class UStaticMeshComponent;
 class UPhysicalMaterial;
@@ -224,7 +226,9 @@ private:
 	FVector GetBirdInPouchLocation(const FQuat& PouchRotation) const;
 	void RebuildCurrentTrajectoryPreview();
 	void ClearCurrentTrajectoryPreview();
-	void DrawPredictedTrajectory() const;
+	void DrawPredictedTrajectory();
+	void EnsureTrajectoryVisualMaterials();
+	void ClearTrajectoryVisualInstances();
 	FVector ComputeLaunchVelocity() const;
 	const FABTSM6LaunchProfile* FindLaunchProfile(EABTSSlingshotTier Tier) const;
 	const FABTSM6LaunchProfile* GetActiveLaunchProfile() const;
@@ -405,6 +409,21 @@ private:
 	TObjectPtr<USceneComponent> VisualRoot;
 	UPROPERTY(VisibleAnywhere, Category = "ABTS|M6|Visual")
 	TObjectPtr<UStaticMeshComponent> PouchVisualMesh;
+	/** Shipping-safe world-depth trajectory underlay; instances exist only while Pulling. */
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M6|Visual")
+	TObjectPtr<UInstancedStaticMeshComponent> TrajectoryUnderlayInstances;
+	/** Shipping-safe cyan trajectory core; it consumes the same authoritative M6 preview. */
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M6|Visual")
+	TObjectPtr<UInstancedStaticMeshComponent> TrajectoryCoreInstances;
+	/** Shipping-safe amber terminal point, separated to retain its accepted visual hierarchy. */
+	UPROPERTY(VisibleAnywhere, Category = "ABTS|M6|Visual")
+	TObjectPtr<UInstancedStaticMeshComponent> TrajectoryEndpointInstances;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TrajectoryUnderlayMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TrajectoryCoreMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TrajectoryEndpointMaterial;
 	FABTSSlingshotVisualSlot ActivePouchVisualSlot;
 	TArray<TWeakObjectPtr<AABTSM6DestructibleProxy>> DynamicProxies;
 	TMap<uint64, float> HISMDamageByStableKey;

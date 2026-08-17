@@ -80,6 +80,29 @@ bool FABTSM5InventoryHUDVisualLayoutTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Unknown action icon fails closed"), FABTSM5InventoryHUDData::GetActionIconUV(
 		static_cast<EABTSM5ActionIcon>(255), InvalidActionUV));
 
+	for (int32 RecipeIndex = 0; RecipeIndex < 12; ++RecipeIndex)
+	{
+		int32 ParsedRecipeIndex = INDEX_NONE;
+		const FName HitBoxName(*FString::Printf(
+			TEXT("%s%d"),
+			FABTSM5InventoryHUDData::GetRecipeHitBoxPrefix(),
+			RecipeIndex));
+		TestTrue(TEXT("Recipe hit-box index parses"),
+			FABTSM5InventoryHUDData::TryParseRecipeHitBoxIndex(HitBoxName, ParsedRecipeIndex));
+		TestEqual(TEXT("Recipe hit-box preserves its exact row index"), ParsedRecipeIndex, RecipeIndex);
+	}
+	for (const FName InvalidName : {
+		FName(TEXT("ABTS_M5_Recipe_")),
+		FName(TEXT("ABTS_M5_Recipe_-1")),
+		FName(TEXT("ABTS_M5_Recipe_1x")),
+		FName(TEXT("ABTS_M5_Other_1")) })
+	{
+		int32 ParsedRecipeIndex = 99;
+		TestFalse(TEXT("Malformed recipe hit-box fails closed"),
+			FABTSM5InventoryHUDData::TryParseRecipeHitBoxIndex(InvalidName, ParsedRecipeIndex));
+		TestEqual(TEXT("Malformed recipe hit-box clears its output"), ParsedRecipeIndex, INDEX_NONE);
+	}
+
 	FBox2D FittedBox;
 	TestTrue(TEXT("Square icon fits a wide card"), FABTSM5InventoryHUDData::FitAspectRatio(
 		FBox2D(FVector2D(10.0f, 20.0f), FVector2D(130.0f, 100.0f)),

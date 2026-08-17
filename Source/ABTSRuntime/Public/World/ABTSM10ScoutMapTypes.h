@@ -70,7 +70,7 @@ struct FABTSM10ScoutMapSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Icons", meta = (ClampMin = "6.0", ClampMax = "128.0"))
 	float BirdIconSizePx = 28.0f;
 
-	/** Shows the reinforced-slingshot prediction only when its landing lies inside this scout snapshot. */
+	/** Shows the active slingshot prediction when its landing lies inside this scout snapshot. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory Preview")
 	bool bShowReinforcedTrajectoryPreview = true;
 

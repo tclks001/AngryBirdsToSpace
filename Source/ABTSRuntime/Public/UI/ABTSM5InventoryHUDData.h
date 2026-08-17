@@ -80,6 +80,12 @@ public:
 		const FVector2D& ScreenPosition,
 		bool bCraftingInterfaceOpen);
 
+	/** Stable recipe-hit-box naming contract shared by drawing, hover and click routing. */
+	static const TCHAR* GetRecipeHitBoxPrefix();
+
+	/** Parses only a complete non-negative decimal suffix; malformed names fail closed. */
+	static bool TryParseRecipeHitBoxIndex(const FName& HitBoxName, int32& OutRecipeIndex);
+
 	static const TCHAR* GetItemIconAssetPath(EABTSItemId ItemId);
 
 	static const TCHAR* GetActionIconAtlasAssetPath();

@@ -396,7 +396,10 @@ FName AABTSM5InventoryHUD::MakeInventoryItemName(const int32 VisibleItemIndex) c
 
 FName AABTSM5InventoryHUD::MakeRecipeName(const int32 RecipeIndex) const
 {
-	return FName(*FString::Printf(TEXT("ABTS_M5_Recipe_%d"), RecipeIndex));
+	return FName(*FString::Printf(
+		TEXT("%s%d"),
+		FABTSM5InventoryHUDData::GetRecipeHitBoxPrefix(),
+		RecipeIndex));
 }
 
 void AABTSM5InventoryHUD::DrawHotbar(AABTSCraftingSystem& System)
@@ -730,9 +733,8 @@ FString AABTSM5InventoryHUD::BuildFailureTooltip(
 
 void AABTSM5InventoryHUD::DrawTooltip(AABTSCraftingSystem& System)
 {
-	const FString HoverName = HoveredHitBox.ToString();
-	if (!HoverName.StartsWith(TEXT("ABTS_M5_Recipe_"))) return;
-	const int32 Index = FCString::Atoi(*HoverName.RightChop(16));
+	int32 Index = INDEX_NONE;
+	if (!FABTSM5InventoryHUDData::TryParseRecipeHitBoxIndex(HoveredHitBox, Index)) return;
 	if (!VisibleRecipeIds.IsValidIndex(Index)) return;
 	const FABTSCraftingRecipe* Recipe = System.GetCatalog()->FindRecipe(VisibleRecipeIds[Index]);
 	if (Recipe == nullptr) return;
@@ -913,8 +915,8 @@ void AABTSM5InventoryHUD::NotifyHitBoxClick(const FName BoxName)
 		}
 		return;
 	}
-	if (!Name.StartsWith(TEXT("ABTS_M5_Recipe_"))) return;
-	const int32 Index = FCString::Atoi(*Name.RightChop(16));
+	int32 Index = INDEX_NONE;
+	if (!FABTSM5InventoryHUDData::TryParseRecipeHitBoxIndex(BoxName, Index)) return;
 	if (!VisibleRecipeIds.IsValidIndex(Index)) return;
 	const FABTSCraftingRecipe* Recipe = System->GetCatalog()->FindRecipe(VisibleRecipeIds[Index]);
 	if (Recipe == nullptr) return;

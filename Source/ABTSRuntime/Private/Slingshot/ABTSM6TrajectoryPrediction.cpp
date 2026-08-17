@@ -67,6 +67,7 @@ bool AABTSM6SlingshotSystem::CopyCurrentTrajectoryPreview(
 
 void AABTSM6SlingshotSystem::ClearCurrentTrajectoryPreview()
 {
+	ClearTrajectoryVisualInstances();
 	bCurrentTrajectoryPreviewValid = false;
 	CurrentTrajectoryPreview = FABTSM6TrajectoryPreview();
 	LastTrajectoryPreviewStart = FVector::ZeroVector;

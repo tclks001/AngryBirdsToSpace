@@ -9,9 +9,12 @@
 #include "Camera/ABTSM6SlingshotCamera.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "DrawDebugHelpers.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -32,11 +35,7 @@
 
 namespace
 {
-	// DrawDebugPoint depth priority 0 maps to the world depth group. Every visual
-	// layer of the prediction must share it so occlusion remains spatially honest.
-	constexpr uint8 FlightTrajectoryWorldDepthPriority = 0;
-	static_assert(FlightTrajectoryWorldDepthPriority == 0,
-		"World trajectory layers must remain world-depth tested.");
+	constexpr float BasicShapeSphereDiameterCM = 100.0f;
 
 	TAutoConsoleVariable<float> CVarFlightWorldTrajectoryCoreScale(
 		TEXT("abts.UI.Flight.WorldTrajectory.CoreScale"), 0.62f,
@@ -88,6 +87,41 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 	PouchVisualMesh->SetGenerateOverlapEvents(false);
 	PouchVisualMesh->SetHiddenInGame(true);
 	PouchVisualMesh->SetVisibility(false);
+	const auto ConfigureTrajectoryInstances = [this](
+		TObjectPtr<UInstancedStaticMeshComponent>& OutComponent,
+		const TCHAR* ComponentName)
+	{
+		OutComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(ComponentName);
+		OutComponent->SetupAttachment(VisualRoot);
+		OutComponent->SetMobility(EComponentMobility::Movable);
+		OutComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		OutComponent->SetGenerateOverlapEvents(false);
+		OutComponent->SetCanEverAffectNavigation(false);
+		OutComponent->SetCastShadow(false);
+		OutComponent->bAffectDistanceFieldLighting = false;
+		OutComponent->bAffectDynamicIndirectLighting = false;
+		OutComponent->SetHiddenInGame(true);
+		OutComponent->SetVisibility(false);
+	};
+	ConfigureTrajectoryInstances(TrajectoryUnderlayInstances, TEXT("FlightTrajectoryUnderlay"));
+	ConfigureTrajectoryInstances(TrajectoryCoreInstances, TEXT("FlightTrajectoryCore"));
+	ConfigureTrajectoryInstances(TrajectoryEndpointInstances, TEXT("FlightTrajectoryEndpoint"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(
+		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereMesh.Succeeded())
+	{
+		TrajectoryUnderlayInstances->SetStaticMesh(SphereMesh.Object);
+		TrajectoryCoreInstances->SetStaticMesh(SphereMesh.Object);
+		TrajectoryEndpointInstances->SetStaticMesh(SphereMesh.Object);
+	}
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicShapeMaterial(
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicShapeMaterial.Succeeded())
+	{
+		TrajectoryUnderlayInstances->SetMaterial(0, BasicShapeMaterial.Object);
+		TrajectoryCoreInstances->SetMaterial(0, BasicShapeMaterial.Object);
+		TrajectoryEndpointInstances->SetMaterial(0, BasicShapeMaterial.Object);
+	}
 	ProxyClass = AABTSM6DestructibleProxy::StaticClass();
 	CameraClass = AABTSM6SlingshotCamera::StaticClass();
 	DebugTwigSlingshotClass = AABTSM71TwigSlingshotActor::StaticClass();
@@ -135,6 +169,7 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 void AABTSM6SlingshotSystem::BeginPlay()
 {
 	Super::BeginPlay();
+	EnsureTrajectoryVisualMaterials();
 	bStartupPhysicsWarmupComplete = !bEnableStartupPhysicsWarmup;
 	bStartupPhysicsWarmupFailed = false;
 	bStartupPhysicsWarmupStarted = false;
@@ -780,10 +815,63 @@ FVector AABTSM6SlingshotSystem::GetBirdInPouchLocation(const FQuat& PouchRotatio
 	return PouchLocation + PouchRotation.RotateVector(FVector(0.0f, 0.0f, BirdInPouchOffsetCM));
 }
 
-void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
+void AABTSM6SlingshotSystem::EnsureTrajectoryVisualMaterials()
 {
-	if (LaunchState != EABTSM6LaunchState::Pulling || !bCurrentTrajectoryPreviewValid) return;
+	const auto EnsureMaterial = [this](
+		UInstancedStaticMeshComponent* Component,
+		TObjectPtr<UMaterialInstanceDynamic>& Material,
+		const FLinearColor& Color)
+	{
+		if (Component == nullptr) return;
+		if (Material == nullptr && Component->GetMaterial(0) != nullptr)
+		{
+			Material = UMaterialInstanceDynamic::Create(Component->GetMaterial(0), this);
+			if (Material != nullptr) Component->SetMaterial(0, Material);
+		}
+		if (Material != nullptr)
+		{
+			Material->SetVectorParameterValue(TEXT("Color"), Color);
+			Material->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		}
+	};
 	const FABTSUIThemeSnapshot Theme = FABTSUITheme::Get();
+	EnsureMaterial(TrajectoryUnderlayInstances, TrajectoryUnderlayMaterial, Theme.SlotBorder);
+	EnsureMaterial(TrajectoryCoreInstances, TrajectoryCoreMaterial, Theme.AccentSecondary);
+	EnsureMaterial(TrajectoryEndpointInstances, TrajectoryEndpointMaterial, Theme.AccentPrimary);
+}
+
+void AABTSM6SlingshotSystem::ClearTrajectoryVisualInstances()
+{
+	for (UInstancedStaticMeshComponent* Component : {
+		TrajectoryUnderlayInstances.Get(),
+		TrajectoryCoreInstances.Get(),
+		TrajectoryEndpointInstances.Get() })
+	{
+		if (Component == nullptr) continue;
+		Component->ClearInstances();
+		Component->SetVisibility(false, true);
+		Component->SetHiddenInGame(true, true);
+	}
+}
+
+void AABTSM6SlingshotSystem::DrawPredictedTrajectory()
+{
+	if (LaunchState != EABTSM6LaunchState::Pulling || !bCurrentTrajectoryPreviewValid)
+	{
+		ClearTrajectoryVisualInstances();
+		return;
+	}
+	EnsureTrajectoryVisualMaterials();
+	if (TrajectoryUnderlayInstances == nullptr
+		|| TrajectoryCoreInstances == nullptr
+		|| TrajectoryEndpointInstances == nullptr
+		|| TrajectoryUnderlayInstances->GetStaticMesh() == nullptr
+		|| TrajectoryCoreInstances->GetStaticMesh() == nullptr
+		|| TrajectoryEndpointInstances->GetStaticMesh() == nullptr)
+	{
+		ClearTrajectoryVisualInstances();
+		return;
+	}
 	const float UnderlaySize = TrajectoryPointSize * FMath::Clamp(
 		CVarFlightWorldTrajectoryUnderlayScale.GetValueOnGameThread(), 1.0f, 2.0f);
 	const float CoreSize = TrajectoryPointSize * FMath::Clamp(
@@ -792,9 +880,6 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 		CVarFlightWorldTrajectoryEndpointScale.GetValueOnGameThread(), 1.0f, 2.5f);
 	const float ForegroundDepthBiasCM = FMath::Clamp(
 		CVarFlightWorldTrajectoryForegroundDepthBiasCM.GetValueOnGameThread(), 0.05f, 3.0f);
-	const FColor UnderlayColor = Theme.SlotBorder.ToFColorSRGB();
-	const FColor CoreColor = Theme.AccentSecondary.ToFColorSRGB();
-	const FColor EndpointColor = Theme.AccentPrimary.ToFColorSRGB();
 	FVector ViewLocation = FVector::ZeroVector;
 	FRotator ViewRotation = FRotator::ZeroRotator;
 	const APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
@@ -807,6 +892,12 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 		FMath::Clamp(TrajectorySampleCount, 8, 128),
 		CurrentTrajectoryPreview.WorldPoints.Num());
 	const int32 LastVisibleIndex = FMath::Max(0, (VisiblePointCount - 1) & ~1);
+	TArray<FTransform> UnderlayTransforms;
+	TArray<FTransform> CoreTransforms;
+	TArray<FTransform> EndpointTransforms;
+	UnderlayTransforms.Reserve((VisiblePointCount + 1) / 2);
+	CoreTransforms.Reserve((VisiblePointCount + 1) / 2);
+	EndpointTransforms.Reserve(1);
 	for (int32 Index = 0; Index < VisiblePointCount; ++Index)
 	{
 		if ((Index & 1) == 0)
@@ -815,13 +906,32 @@ void AABTSM6SlingshotSystem::DrawPredictedTrajectory() const
 			const FVector ForegroundPoint = bHasPlayerView
 				? Point + (ViewLocation - Point).GetSafeNormal() * ForegroundDepthBiasCM
 				: Point;
-			DrawDebugPoint(GetWorld(), Point, UnderlaySize, UnderlayColor, false, 0.0f,
-				FlightTrajectoryWorldDepthPriority);
-			DrawDebugPoint(GetWorld(), ForegroundPoint,
-				Index == LastVisibleIndex ? EndpointSize : CoreSize,
-				Index == LastVisibleIndex ? EndpointColor : CoreColor,
-				false, 0.0f, FlightTrajectoryWorldDepthPriority);
+			UnderlayTransforms.Emplace(
+				FQuat::Identity,
+				Point,
+				FVector(UnderlaySize / BasicShapeSphereDiameterCM));
+			TArray<FTransform>& ForegroundTransforms =
+				Index == LastVisibleIndex ? EndpointTransforms : CoreTransforms;
+			ForegroundTransforms.Emplace(
+				FQuat::Identity,
+				ForegroundPoint,
+				FVector((Index == LastVisibleIndex ? EndpointSize : CoreSize)
+					/ BasicShapeSphereDiameterCM));
 		}
+	}
+	TrajectoryUnderlayInstances->ClearInstances();
+	TrajectoryCoreInstances->ClearInstances();
+	TrajectoryEndpointInstances->ClearInstances();
+	TrajectoryUnderlayInstances->AddInstances(UnderlayTransforms, false, true, false);
+	TrajectoryCoreInstances->AddInstances(CoreTransforms, false, true, false);
+	TrajectoryEndpointInstances->AddInstances(EndpointTransforms, false, true, false);
+	for (UInstancedStaticMeshComponent* Component : {
+		TrajectoryUnderlayInstances.Get(),
+		TrajectoryCoreInstances.Get(),
+		TrajectoryEndpointInstances.Get() })
+	{
+		Component->SetHiddenInGame(false, true);
+		Component->SetVisibility(Component->GetInstanceCount() > 0, true);
 	}
 }
 
