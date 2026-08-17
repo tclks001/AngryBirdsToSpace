@@ -68,6 +68,22 @@ device, or specially highlighted brick.
 
 ## RC9 packaged cinematic acceptance
 
+### User-accepted RC9.2 baseline
+
+The user completed an in-game acceptance pass on
+`candidate-c9037ca-20260817-Development` on August 17, 2026. The following
+items are accepted and are removed from the open investigation queue:
+
+- the loading progress page remains present until the correct entry UI, with
+  no erroneous intermediate frame;
+- the opening camera and bird animation play correctly;
+- the stylized sky, star field, and low-poly clouds render correctly;
+- all four finale controls respond to pointer input.
+
+Later candidates require only a normal packaged startup/finale regression
+smoke for these accepted paths. Do not reopen their root-cause investigations
+unless a later package visibly regresses one of them.
+
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
   Development, and Shipping hard-locks playback even if a skip request is
