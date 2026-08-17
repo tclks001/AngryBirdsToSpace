@@ -25,6 +25,9 @@ public:
 	bool HandleFinalePrimaryPressed(
 		AABTSM11FinaleInteractionSystem& System,
 		const FVector2D& MousePosition);
+	bool HandleFinaleEndScreenPressed(
+		AABTSM11FinaleInteractionSystem& System,
+		const FVector2D& MousePosition);
 	bool HandleFinalePrimaryReleased(
 		AABTSM11FinaleInteractionSystem& System,
 		const FVector2D& MousePosition);
@@ -53,6 +56,7 @@ public:
 private:
 	AABTSM11FinaleInteractionSystem* FindInteractionSystem() const;
 	void DrawFinaleLayer(AABTSM11FinaleInteractionSystem& System);
+	void DrawFinaleEndScreen(AABTSM11FinaleInteractionSystem& System);
 	void DrawMissionStrip(AABTSM11FinaleInteractionSystem& System);
 	void DrawFacetedPanel(
 		const FBox2D& Box,
@@ -275,6 +279,7 @@ private:
 	FVector2D HudPlayerViewOrigin = FVector2D::ZeroVector;
 	FVector2D HudPlayerViewSize = FVector2D::ZeroVector;
 	FVector2D HudCanvasSize = FVector2D::ZeroVector;
+	FBox2D HudEndGameButton = FBox2D(EForceInit::ForceInit);
 	FABTSUIThemeSnapshot HudTheme;
 	bool bHudCompactLayout = false;
 	bool bHudLayoutValid = false;

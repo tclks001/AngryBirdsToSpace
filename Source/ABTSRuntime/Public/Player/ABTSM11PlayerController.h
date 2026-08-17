@@ -31,6 +31,7 @@ private:
 	void M11PrimaryDoubleClicked();
 	void M11Power(float Value);
 	void M11Cancel();
+	void M11EndScreenConfirm();
 	void M11OrbitPressed();
 	void M11OrbitReleased();
 	void SetM11FinaleInputMode(bool bActive);

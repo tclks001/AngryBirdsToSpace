@@ -92,6 +92,14 @@ enum class EABTSM11FailureReason : uint8
 ABTSRUNTIME_API bool ABTSM11IsResettableFinaleState(
 	EABTSM11FinaleInteractionState State);
 
+/** Pure gate shared by the post-hit completion, HUD and controller routes. */
+ABTSRUNTIME_API bool ABTSM11ShouldShowFinaleEndScreen(
+	bool bProductionBinding,
+	bool bTimelineSucceeded);
+ABTSRUNTIME_API bool ABTSM11ShouldExitFromFinaleEndScreen(
+	bool bEndScreenActive,
+	bool bActivationRequested);
+
 /**
  * Resolves terminal audio without promoting an Editor Candidate to a
  * production rescue. Production success requires physical target contact;

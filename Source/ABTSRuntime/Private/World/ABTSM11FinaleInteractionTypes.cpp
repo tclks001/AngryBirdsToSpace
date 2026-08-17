@@ -130,6 +130,20 @@ bool ABTSM11IsResettableFinaleState(
 	}
 }
 
+bool ABTSM11ShouldShowFinaleEndScreen(
+	const bool bProductionBinding,
+	const bool bTimelineSucceeded)
+{
+	return bProductionBinding && bTimelineSucceeded;
+}
+
+bool ABTSM11ShouldExitFromFinaleEndScreen(
+	const bool bEndScreenActive,
+	const bool bActivationRequested)
+{
+	return bEndScreenActive && bActivationRequested;
+}
+
 EABTSM11FinaleAudioCue ABTSM11ResolveFinaleCompletionAudioCue(
 	const bool bEditorCandidateMode,
 	const bool bPhysicalTargetHit,

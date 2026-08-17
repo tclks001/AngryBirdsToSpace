@@ -2,6 +2,8 @@
 
 #include "World/ABTSM11FinalePostHitCinematicPreview.h"
 
+#include "World/ABTSM11FinaleInteractionSystem.h"
+
 #include "ABTSRuntime.h"
 #include "Audio/ABTSAudioWorldSubsystem.h"
 #include "Camera/CameraComponent.h"
@@ -1352,6 +1354,14 @@ void AABTSM11FinalePostHitCinematicPreview::FinishPreview(
 		else
 		{
 			PreviewController->SetViewTarget(SavedViewTarget);
+		}
+	}
+	if (ABTSM11ShouldShowFinaleEndScreen(bProductionBinding, bFinalSuccess))
+	{
+		if (AABTSM11FinaleInteractionSystem* Interaction =
+			Cast<AABTSM11FinaleInteractionSystem>(GetOwner()))
+		{
+			Interaction->ShowFinaleEndScreen();
 		}
 	}
 	const FString Artifact = bCaptureEnabled

@@ -94,6 +94,10 @@ void AABTSM11PlayerController::SetupInputComponent()
 		IE_Released,
 		this,
 		&AABTSM11PlayerController::M11OrbitReleased);
+	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this,
+		&AABTSM11PlayerController::M11EndScreenConfirm);
+	InputComponent->BindKey(EKeys::Gamepad_FaceButton_Bottom, IE_Pressed, this,
+		&AABTSM11PlayerController::M11EndScreenConfirm);
 }
 
 void AABTSM11PlayerController::PlayerTick(const float DeltaTime)
@@ -190,7 +194,17 @@ void AABTSM11PlayerController::PrimaryWorldInteract()
 		// cached layout can still overlap the bottom control deck.
 		float MouseX = 0.0f;
 		float MouseY = 0.0f;
-		if (Interaction->IsAiming()
+		if (Interaction->IsFinaleEndScreenActive()
+			&& GetMousePosition(MouseX, MouseY))
+		{
+			if (AABTSM11FinaleHUD* FinaleHud =
+				Cast<AABTSM11FinaleHUD>(GetHUD()))
+			{
+				FinaleHud->HandleFinaleEndScreenPressed(
+					*Interaction, FVector2D(MouseX, MouseY));
+			}
+		}
+		else if (Interaction->IsAiming()
 			&& GetMousePosition(MouseX, MouseY))
 		{
 			if (AABTSM11FinaleHUD* FinaleHud =
@@ -314,6 +328,15 @@ void AABTSM11PlayerController::M11Cancel()
 		Interaction != nullptr && Interaction->IsFinaleActive())
 	{
 		Interaction->CancelStabilizerOrResetAttempt();
+	}
+}
+
+void AABTSM11PlayerController::M11EndScreenConfirm()
+{
+	if (AABTSM11FinaleInteractionSystem* Interaction =
+		FindM11Interaction(); Interaction != nullptr)
+	{
+		Interaction->RequestFinaleEndGame();
 	}
 }
 
