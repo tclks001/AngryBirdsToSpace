@@ -248,6 +248,10 @@ private:
 		FVector& OutExtent,
 		FName& OutFacilityName) const;
 	EABTSM6ImpactMaterial ResolveMaterial(const UPrimitiveComponent* Component) const;
+	bool ResolveResourceRewardItem(const UHierarchicalInstancedStaticMeshComponent& HISM, EABTSItemId& OutItemId) const;
+	void AwardResourceReward(EABTSItemId ItemId, const FVector& WorldLocation, const TCHAR* Source);
+	void AwardResourceRewardForHISM(const UHierarchicalInstancedStaticMeshComponent& HISM, const FVector& WorldLocation, const TCHAR* Source);
+	void AwardResourceRewardForProxy(AABTSM6DestructibleProxy& Proxy, const TCHAR* Source);
 	const FABTSM6BirdImpactProfile& GetBirdProfile(EABTSBirdId BirdId) const;
 	const FABTSM6MaterialImpactProfile& GetMaterialProfile(EABTSM6ImpactMaterial Material) const;
 	bool PromoteOrBreakHISM(UHierarchicalInstancedStaticMeshComponent& HISM, int32 InstanceIndex, EABTSM6ImpactMaterial Material, const FABTSM6MaterialImpactProfile& MaterialProfile, float NormalSpeedCMPerSec, const FVector& ImpulseDirection, float KnockThreshold, float BreakThreshold, float AccumulatedDamage = 0.0f);
@@ -426,6 +430,7 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> TrajectoryEndpointMaterial;
 	FABTSSlingshotVisualSlot ActivePouchVisualSlot;
 	TArray<TWeakObjectPtr<AABTSM6DestructibleProxy>> DynamicProxies;
+	TMap<TWeakObjectPtr<AABTSM6DestructibleProxy>, EABTSItemId> ResourceRewardByProxy;
 	TMap<uint64, float> HISMDamageByStableKey;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UPhysicalMaterial>> RuntimeImpactPhysicalMaterials;

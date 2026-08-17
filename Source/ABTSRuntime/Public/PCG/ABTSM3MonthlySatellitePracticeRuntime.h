@@ -232,6 +232,7 @@ private:
 	void LogGravityEvidence(float DeltaSeconds);
 	void ClearOwnedRuntime();
 	void RefreshReadyState();
+	void RetireReleasePracticeSlingshotPresentation();
 
 	UPROPERTY(Transient)
 	TObjectPtr<AABTSM3Planet> PrimaryPlanet;
@@ -277,5 +278,6 @@ private:
 	bool bTrajectoryCertificationAttempted = false;
 	bool bPracticeSlingshotReady = false;
 	bool bPracticePouchInteractionReady = false;
+	bool bReleasePracticeSlingshotPresentationRetired = false;
 	float GravityEvidenceLogRemainingSeconds = 0.0f;
 };

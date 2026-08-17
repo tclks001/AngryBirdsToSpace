@@ -147,6 +147,30 @@ This closes the previously reproduced Shipping-only startup wait in automated
 packaged evidence. Visible packaged acceptance and real first-hit per-brick
 performance/collapse quality remain required before final release promotion.
 
+### Compact full-Chaos release fallback
+
+The release fallback keeps E1 and E2 geometry and compresses E3--E6 to the
+E1--E2 body-count range. Its frozen catalog contains 1,246 static modules in
+total and no building exceeds 384 modules. A struck building promotes all of
+its live bricks to independent Chaos bodies in one transaction; it does not
+use queued wake-up, coarse rigid clusters, or retained floating visuals. The
+published fallback identity is Catalog `266A1C866B486ECE`, Layout
+`54BF4BFB41500542`, with E2--E6 placements
+`A91A9FB5D79AE1CE/B610F10D832204C9/1828F2227A37D50D/2190A844CF15E5CF/52471DEE83A1FB40`
+and unchanged E1 `1C267DFD88E65BAB`.
+
+The first fallback Shipping package is archived at
+`G:\\ABTS\\Artifacts\\RC9.3\\candidate-0ce8335-lowbrick-fullchaos-materialstable-20260817-Shipping`.
+It is the recoverable release floor, not the final promotion candidate. The
+next candidate must preserve static/dynamic building material identity and
+remove the launch-to-walk corruption path: settlement timeout may not replace
+the stable-hold certificate, and walk return freezes every dynamic module at
+its certified Chaos transform while preserving Query-and-Physics collision.
+The same release batch adds direct 1--4 bird selection, retires the internal
+satellite-practice slingshot presentation in Shipping only, and awards exactly
+two Wood/Stone items for each destroyed map tree/rock without treating
+building modules as resources.
+
 - RC9 Development and Shipping both play the opening and post-hit finale
   cinematics. `abts.Debug.SkipCinematics` therefore defaults to `0` for RC9
   Development, and Shipping hard-locks playback even if a skip request is

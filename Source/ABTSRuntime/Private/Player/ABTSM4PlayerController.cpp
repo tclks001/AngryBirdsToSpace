@@ -44,6 +44,10 @@ void AABTSM4PlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
 	InputComponent->BindAction(TEXT("ABTS_CycleBird"), IE_Pressed, this, &AABTSM4PlayerController::CycleBird);
+	InputComponent->BindAction(TEXT("ABTS_SelectBird1"), IE_Pressed, this, &AABTSM4PlayerController::SelectRedBird);
+	InputComponent->BindAction(TEXT("ABTS_SelectBird2"), IE_Pressed, this, &AABTSM4PlayerController::SelectBlueBird);
+	InputComponent->BindAction(TEXT("ABTS_SelectBird3"), IE_Pressed, this, &AABTSM4PlayerController::SelectYellowBird);
+	InputComponent->BindAction(TEXT("ABTS_SelectBird4"), IE_Pressed, this, &AABTSM4PlayerController::SelectBlackBird);
 	InputComponent->BindAction(TEXT("ABTS_CameraOrbitHold"), IE_Pressed, this, &AABTSM4PlayerController::BeginOrbitInput);
 	InputComponent->BindAction(TEXT("ABTS_CameraOrbitHold"), IE_Released, this, &AABTSM4PlayerController::EndOrbitInput);
 	InputComponent->BindAction(TEXT("ABTS_CameraRecenter"), IE_Pressed, this, &AABTSM4PlayerController::RecenterCamera);
@@ -118,6 +122,34 @@ void AABTSM4PlayerController::CycleBird()
 	{
 		if (It->CycleControlledBird()) return;
 	}
+}
+
+void AABTSM4PlayerController::SelectRedBird()
+{
+	SelectBird(EABTSBirdId::Red);
+}
+
+void AABTSM4PlayerController::SelectBlueBird()
+{
+	SelectBird(EABTSBirdId::Blue);
+}
+
+void AABTSM4PlayerController::SelectYellowBird()
+{
+	SelectBird(EABTSBirdId::Yellow);
+}
+
+void AABTSM4PlayerController::SelectBlackBird()
+{
+	SelectBird(EABTSBirdId::Black);
+}
+
+void AABTSM4PlayerController::SelectBird(const EABTSBirdId BirdId)
+{
+	if (bGameplayInputBlocked) return;
+	AABTSBirdParty* Party = FindParty();
+	if (Party == nullptr) return;
+	Party->SwitchControlledBird(BirdId);
 }
 
 void AABTSM4PlayerController::BeginOrbitInput()

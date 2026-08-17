@@ -12,6 +12,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Crafting/ABTSCraftingSystem.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
@@ -19,6 +20,7 @@
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "Guide/ABTSGuideEvents.h"
+#include "Inventory/ABTSInventoryComponent.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Movement/ABTSRadialForceMovementComponent.h"
 #include "Movement/ABTSChaosBirdMovementComponent.h"
@@ -1062,6 +1064,80 @@ EABTSM6ImpactMaterial AABTSM6SlingshotSystem::ResolveMaterial(const UPrimitiveCo
 		? EABTSM6ImpactMaterial::Terrain : EABTSM6ImpactMaterial::Building;
 }
 
+bool AABTSM6SlingshotSystem::ResolveResourceRewardItem(
+	const UHierarchicalInstancedStaticMeshComponent& HISM,
+	EABTSItemId& OutItemId) const
+{
+	const AActor* HISMOwner = HISM.GetOwner();
+	if ((Planet.IsValid() && &HISM == Planet->ForestHISM.Get())
+		|| (HISMOwner != nullptr && HISMOwner->IsA<AABTSM71TreeHISMActor>()))
+	{
+		OutItemId = EABTSItemId::Wood;
+		return true;
+	}
+	if ((Planet.IsValid() && &HISM == Planet->RockHISM.Get())
+		|| (HISMOwner != nullptr && HISMOwner->IsA<AABTSM71RockHISMActor>()))
+	{
+		OutItemId = EABTSItemId::Stone;
+		return true;
+	}
+	return false;
+}
+
+void AABTSM6SlingshotSystem::AwardResourceReward(
+	const EABTSItemId ItemId,
+	const FVector& WorldLocation,
+	const TCHAR* Source)
+{
+	constexpr int32 RewardQuantity = 2;
+	for (TActorIterator<AABTSCraftingSystem> It(GetWorld()); It; ++It)
+	{
+		UABTSInventoryComponent* Inventory = It->GetInventory();
+		if (Inventory == nullptr || !Inventory->AddItem(ItemId, RewardQuantity))
+		{
+			continue;
+		}
+		UE_LOG(LogABTSRuntime, Log,
+			TEXT("[ABTS][M6][ResourceBreakReward] Item=%s Quantity=%d Source=%s Location=%s"),
+			*ABTSGetItemFallbackLabel(ItemId),
+			RewardQuantity,
+			Source,
+			*WorldLocation.ToCompactString());
+		return;
+	}
+	UE_LOG(LogABTSRuntime, Warning,
+		TEXT("[ABTS][M6][ResourceBreakReward] Awarded=0 Item=%s Quantity=%d Source=%s Reason=InventoryUnavailable"),
+		*ABTSGetItemFallbackLabel(ItemId),
+		RewardQuantity,
+		Source);
+}
+
+void AABTSM6SlingshotSystem::AwardResourceRewardForHISM(
+	const UHierarchicalInstancedStaticMeshComponent& HISM,
+	const FVector& WorldLocation,
+	const TCHAR* Source)
+{
+	EABTSItemId ItemId = EABTSItemId::Wood;
+	if (ResolveResourceRewardItem(HISM, ItemId))
+	{
+		AwardResourceReward(ItemId, WorldLocation, Source);
+	}
+}
+
+void AABTSM6SlingshotSystem::AwardResourceRewardForProxy(
+	AABTSM6DestructibleProxy& Proxy,
+	const TCHAR* Source)
+{
+	const TWeakObjectPtr<AABTSM6DestructibleProxy> Key(&Proxy);
+	const EABTSItemId* ItemId = ResourceRewardByProxy.Find(Key);
+	if (ItemId == nullptr)
+	{
+		return;
+	}
+	AwardResourceReward(*ItemId, Proxy.GetActorLocation(), Source);
+	ResourceRewardByProxy.Remove(Key);
+}
+
 float AABTSM6SlingshotSystem::ComputeDamageGain(
 	const FABTSM6MaterialImpactProfile& MaterialProfile,
 	const float NormalSpeedCMPerSec,
@@ -1171,10 +1247,11 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 	if (!HISM.GetInstanceTransform(InstanceIndex, Transform, true)) return false;
 	UStaticMesh* Mesh = HISM.GetStaticMesh();
 	const uint64 DamageKey = GetHISMDamageKey(HISM, InstanceIndex);
-	HISM.RemoveInstance(InstanceIndex);
+	if (!HISM.RemoveInstance(InstanceIndex)) return false;
 	HISMDamageByStableKey.Remove(DamageKey);
 	if (AccumulatedDamage >= MaterialProfile.BreakDamage || NormalSpeedCMPerSec >= BreakThreshold * 1.35f)
 	{
+		AwardResourceRewardForHISM(HISM, Transform.GetLocation(), TEXT("PromoteBreak"));
 		UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][Break] Material=%d Speed=%.1f Damage=%.1f/%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec, AccumulatedDamage, MaterialProfile.BreakDamage);
 		return true;
 	}
@@ -1194,6 +1271,11 @@ bool AABTSM6SlingshotSystem::PromoteOrBreakHISM(
 			Proxy->ActivateProxy(Mesh, Transform, Material, MaterialProfile, ImpulseDirection.GetSafeNormal() * NormalSpeedCMPerSec * MaterialProfile.PushVelocityTransfer, Planet->GetPlanetCenterWorld(), 980.0f, AccumulatedDamage);
 		}
 		DynamicProxies.Add(Proxy);
+		EABTSItemId RewardItem = EABTSItemId::Wood;
+		if (ResolveResourceRewardItem(HISM, RewardItem))
+		{
+			ResourceRewardByProxy.Add(Proxy, RewardItem);
+		}
 	}
 	return true;
 }
@@ -1348,7 +1430,12 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 			HISMDamageByStableKey.Add(DamageKey, DamageAfter);
 			if (DamageAfter >= MaterialProfile.BreakDamage && NormalSpeedCMPerSec < KnockThreshold)
 			{
-				HISM->RemoveInstance(Hit.Item);
+				FTransform BrokenTransform;
+				HISM->GetInstanceTransform(Hit.Item, BrokenTransform, true);
+				if (HISM->RemoveInstance(Hit.Item))
+				{
+					AwardResourceRewardForHISM(*HISM, BrokenTransform.GetLocation(), TEXT("AccumulatedImpact"));
+				}
 				HISMDamageByStableKey.Remove(DamageKey);
 				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][HISMDamageBreak] Material=%d Damage=%.1f/%.1f"), static_cast<int32>(Material), DamageAfter, MaterialProfile.BreakDamage);
 			}
@@ -1362,6 +1449,7 @@ void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float
 			const bool bBroken = Proxy->ApplyImpactDamage(ComputeDamageGain(MaterialProfile, NormalSpeedCMPerSec, BreakThreshold));
 			if (bBroken || NormalSpeedCMPerSec >= BreakThreshold * 1.35f)
 			{
+				AwardResourceRewardForProxy(*Proxy, TEXT("DirectImpact"));
 				Proxy->Shatter();
 				DynamicProxies.RemoveAllSwap([Proxy](const TWeakObjectPtr<AABTSM6DestructibleProxy>& Entry){ return !Entry.IsValid() || Entry.Get() == Proxy; });
 				UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M6][ProxyBreak] Material=%d Speed=%.1f"), static_cast<int32>(Material), NormalSpeedCMPerSec);
@@ -1394,7 +1482,11 @@ void AABTSM6SlingshotSystem::HandleProxyImpact(AABTSM6DestructibleProxy& Proxy, 
 		const float Damage = ComputeDamageGain(TargetProfile, NormalSpeedCMPerSec, ProxyChainBreakSpeedCMPerSec);
 		PromoteOrBreakHISM(*HISM, Hit.Item, TargetMaterial, TargetProfile, NormalSpeedCMPerSec, Proxy.GetMeshComponent()->GetPhysicsLinearVelocity(), ProxyChainBreakSpeedCMPerSec * 0.65f, ProxyChainBreakSpeedCMPerSec, Damage);
 	}
-	if (NormalSpeedCMPerSec >= ProxyChainBreakSpeedCMPerSec) Proxy.Shatter();
+	if (NormalSpeedCMPerSec >= ProxyChainBreakSpeedCMPerSec)
+	{
+		AwardResourceRewardForProxy(Proxy, TEXT("ChainImpact"));
+		Proxy.Shatter();
+	}
 }
 
 bool AABTSM6SlingshotSystem::TryManualBlackDetonation(AActor* ClickedActor)
@@ -1439,7 +1531,11 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 			const FVector Delta = Transform.GetLocation() - LaunchedBird->GetActorLocation();
 			if (Delta.Size() <= BlackExplosionRadiusCM)
 			{
-				if (HISM->RemoveInstance(Index)) ++BrokenInstances;
+				if (HISM->RemoveInstance(Index))
+				{
+					AwardResourceRewardForHISM(*HISM, Transform.GetLocation(), TEXT("BlackExplosion"));
+					++BrokenInstances;
+				}
 			}
 			else
 			{
@@ -1458,6 +1554,7 @@ void AABTSM6SlingshotSystem::DetonateBlackBird(const bool bManual)
 		const FVector Delta = Proxy->GetActorLocation() - LaunchedBird->GetActorLocation();
 		if (Delta.SizeSquared() <= FMath::Square(BlackExplosionRadiusCM))
 		{
+			AwardResourceRewardForProxy(*Proxy, TEXT("BlackExplosion"));
 			Proxy->Shatter(); DynamicProxies.RemoveAtSwap(Index); ++BrokenProxies;
 		}
 		else if (Delta.SizeSquared() <= FMath::Square(BlackExplosionImpulseRadiusCM))

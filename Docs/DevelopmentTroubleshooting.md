@@ -430,3 +430,12 @@
 | --- | --- | --- | --- |
 | P0 | Shipping 中拉动弹弓时，世界轨迹和左上角 Scout Map 均没有预览；Development/Editor 的预测数据仍可用 | 世界轨迹仅通过 `DrawDebugPoint` 绘制，该 helper 在 Shipping 被裁剪；Scout Map 又把有效预览硬限制为 `Reinforced`，普通发射阶段即使已经发布权威 `FABTSM6TrajectoryPreview` 也会被拒绝 | 世界层使用 native ISM 正式组件消费原有权威预览，退出 Pulling 时清空；Scout Map 消费所有具有主星落点的当前有效预览，而画中画/轨道全览继续保留其原等级语义。Development Editor 编译通过；下一 Shipping 候选必须由玩家同时确认世界圆点轨迹和左上角地图弧线可见、落点方向一致 |
 | P0 | 制作栏点击任意配方都会打开并制作工作台 | 命中框前缀 `ABTS_M5_Recipe_` 实际长度为 15，HUD 却硬编码 `RightChop(16)`；单数字索引被截成空串后 `Atoi(\"\")` 变成 0，因此所有点击均路由到排序后的第 0 个 WorkbenchKit | 命名、悬停和点击共享同一个严格前缀解析器；后缀必须非空且全为数字，畸形命中框 fail closed。`ABTS.M5.UI.VisualLayout` fresh NullRHI 成功，日志为 `G:/ABTS/Logs/RC9.3/Integration-RecipeRouting-20260817-161041-FreshNullRHI.log`；下一 Shipping 候选仍须逐项点击至少三个不同配方并确认页面标题、资源消耗和产物一致 |
+
+## 22. 低积木全 Chaos 发行保底与模式交接（2026-08-17）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P0 | 建筑在发射阶段看似稳定，但退出发射返回行走时顶部突然坠落；部分积木相互穿插，另有横梁悬空冻结 | Settlement 超时无条件进入返回流程；旧行走冻结只保留 sleeping support closure，其余仍 awake 的低速刚体被切成 `QueryOnly` 解析式回退。模式边界由真实砖-砖 Chaos 碰撞切换为无砖间碰撞的运动，再冻结错误快照 | 超时且仍有 active body 时重新开启稳定保持窗，不允许以超时替代物理稳定证书；正式返回只在稳定后冻结全部动态模块的当前 Chaos transform，保留 `QueryAndPhysics` 碰撞身份，不再进入 analytic/query-only fallback。包内验收必须证明返回行走前后模块 transform 连续、无新穿插、无新增悬浮、屋顶不会因模式切换才开始坠落 |
+| P1 | 教程提示按 `2` 选择青翎，但数字键无响应，只有 Tab 或头像点击有效 | 输入配置只有 `ABTS_CycleBird=Tab`，控制器没有 1–4 的直接选择动作 | 增加 `ABTS_SelectBird1..4` 与 One..Four 映射，统一调用现有 Party `SwitchControlledBird` 权威入口；输入被玩法门锁定时仍拒绝。下一包逐项验证 1=绯翼、2=青翎、3=棱喙、4=玄爪 |
+| P1 | 月球下方仍能看到轨迹认证使用的强化弹弓 | 生产运行时为了认证必须生成练习弹弓，但认证完成后没有区分内部载体与发行表现 | 保留认证 Actor 与结果，不改变轨迹/冻结身份；仅 Shipping 在 RuntimeReady 后关闭三件练习 Actor 的碰撞并隐藏表现。Development 保留调试可见性；Shipping 必须确认月下无该弹弓，认证仍 Ready |
+| P1 | 撞碎地图树木或岩石没有玩法产出 | 场景 HISM/临时破坏代理的破坏事务只移除视觉与碰撞，没有连接背包 | 只对主星/M71 的树与岩石资源身份发奖：每个真正击碎的实体直接向背包加入 2 Wood 或 2 Stone。直接撞碎、累积损伤、连锁破碎与黑鸟爆炸共用一次性发奖；固定六栋的木/石建筑模块明确排除。下一包分别击碎一棵树和一块岩石，背包应各增加 2，重复代理销毁不得二次发奖 |

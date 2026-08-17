@@ -1311,6 +1311,35 @@ void AABTSM3MonthlySatellitePracticeRuntime::RefreshReadyState()
 		&& bTrajectoryCertified
 		&& bPracticeSlingshotReady
 		&& bPracticePouchInteractionReady;
+
+	RetireReleasePracticeSlingshotPresentation();
+}
+
+void AABTSM3MonthlySatellitePracticeRuntime::RetireReleasePracticeSlingshotPresentation()
+{
+#if UE_BUILD_SHIPPING
+	if (!bRuntimeReady || bReleasePracticeSlingshotPresentationRetired)
+	{
+		return;
+	}
+
+	for (AActor* PracticeActor : {
+		static_cast<AActor*>(RuntimePracticeStakeA.Get()),
+		static_cast<AActor*>(RuntimePracticeStakeB.Get()),
+		static_cast<AActor*>(RuntimePracticeCord.Get()) })
+	{
+		if (!IsValid(PracticeActor))
+		{
+			continue;
+		}
+		PracticeActor->SetActorEnableCollision(false);
+		PracticeActor->SetActorHiddenInGame(true);
+	}
+
+	bReleasePracticeSlingshotPresentationRetired = true;
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][Release][SatellitePracticeSlingshot] Retired=1 Visibility=Hidden Collision=Disabled CertificationState=Preserved"));
+#endif
 }
 
 bool AABTSM3MonthlySatellitePracticeRuntime::BindProductionE1BuildingModuleTarget(
@@ -1614,6 +1643,7 @@ void AABTSM3MonthlySatellitePracticeRuntime::ClearOwnedRuntime()
 	bTrajectoryCertified = false;
 	bTrajectoryCertificationAttempted = false;
 	bPracticeSlingshotReady = false;
+	bReleasePracticeSlingshotPresentationRetired = false;
 }
 
 void AABTSM3MonthlySatellitePracticeRuntime::EndPlay(

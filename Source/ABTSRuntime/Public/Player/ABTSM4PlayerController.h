@@ -8,6 +8,7 @@
 
 class AABTSM4PartyCamera;
 class AABTSBirdParty;
+enum class EABTSBirdId : uint8;
 
 /** M4 local controller: persistent clickable party HUD and Tab cycling. */
 UCLASS()
@@ -46,6 +47,11 @@ protected:
 
 private:
 	void CycleBird();
+	void SelectRedBird();
+	void SelectBlueBird();
+	void SelectYellowBird();
+	void SelectBlackBird();
+	void SelectBird(EABTSBirdId BirdId);
 	void BeginOrbitInput();
 	void EndOrbitInput();
 	void ApplyOrbitYaw(float Value);

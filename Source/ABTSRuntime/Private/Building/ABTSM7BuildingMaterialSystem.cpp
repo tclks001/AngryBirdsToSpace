@@ -1418,9 +1418,11 @@ void AABTSM7BuildingMaterialSystem::FreezeDynamicModules()
 int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 {
 	int32 FrozenCount = 0;
-	int32 AnalyticFallbackCount = 0;
 	int32 SimulatingBefore = 0;
-	TArray<AABTSM7BuildingModule*> SleepingModules;
+	int32 AwakeBefore = 0;
+	float MaximumLinearSpeed = 0.0f;
+	float MaximumAngularSpeed = 0.0f;
+	TArray<AABTSM7BuildingModule*> DynamicModules;
 	for (int32 Index = Modules.Num() - 1; Index >= 0; --Index)
 	{
 		AABTSM7BuildingModule* Module = Modules[Index].Get();
@@ -1434,14 +1436,18 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 			continue;
 		}
 		UStaticMeshComponent* Body = Module->GetMeshComponent();
-		SimulatingBefore += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
-		if (Body != nullptr && Body->IsSimulatingPhysics()
-			&& !Body->IsAnyRigidBodyAwake())
+		if (Body != nullptr && Body->IsSimulatingPhysics())
 		{
-			SleepingModules.Add(Module);
+			++SimulatingBefore;
+			AwakeBefore += Body->IsAnyRigidBodyAwake() ? 1 : 0;
+			MaximumLinearSpeed = FMath::Max(MaximumLinearSpeed,
+				Body->GetPhysicsLinearVelocity().Size());
+			MaximumAngularSpeed = FMath::Max(MaximumAngularSpeed,
+				Body->GetPhysicsAngularVelocityInDegrees().Size());
 		}
+		DynamicModules.Add(Module);
 	}
-	SleepingModules.Sort([](const AABTSM7BuildingModule& Left,
+	DynamicModules.Sort([](const AABTSM7BuildingModule& Left,
 		const AABTSM7BuildingModule& Right)
 	{
 		const int32 LeftId = Left.GetDamageLifecycleBrickId();
@@ -1449,80 +1455,16 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 		return LeftId != RightId ? LeftId < RightId
 			: Left.GetFName().LexicalLess(Right.GetFName());
 	});
-	TMap<const AABTSM7BuildingModule*, int32> SleepingIndex;
-	for (int32 Index = 0; Index < SleepingModules.Num(); ++Index)
+	for (AABTSM7BuildingModule* Module : DynamicModules)
 	{
-		SleepingIndex.Add(SleepingModules[Index], Index);
-	}
-	TArray<TArray<int32>> SupportChildren;
-	SupportChildren.SetNum(SleepingModules.Num());
-	TArray<int32> GroundRoots;
-	int32 SupportEdgeCount = 0;
-	UWorld* World = GetWorld();
-	for (int32 UpperIndex = 0; UpperIndex < SleepingModules.Num(); ++UpperIndex)
-	{
-		AABTSM7BuildingModule& Upper = *SleepingModules[UpperIndex];
-		if (Upper.CanFreezeAsGroundedRoot())
-		{
-			GroundRoots.Add(UpperIndex);
-			continue;
-		}
-		if (World == nullptr) continue;
-		UStaticMeshComponent* UpperBody = Upper.GetMeshComponent();
-		const FVector Up = Upper.GetCurrentGravityUp();
-		const FBoxSphereBounds Bounds = UpperBody->Bounds;
-		const float DownExtent = FMath::Abs(Up.X) * Bounds.BoxExtent.X
-			+ FMath::Abs(Up.Y) * Bounds.BoxExtent.Y
-			+ FMath::Abs(Up.Z) * Bounds.BoxExtent.Z;
-		FCollisionQueryParams QueryParams(
-			SCENE_QUERY_STAT(M7SettledSupportClosure), false, &Upper);
-		FHitResult SupportHit;
-		const FVector Start = Bounds.Origin - Up * FMath::Max(0.0f,
-			DownExtent - 1.0f);
-		if (!World->LineTraceSingleByChannel(SupportHit, Start,
-			Start - Up * 10.0f, ABTSDeveloperObstacleChannel, QueryParams))
-		{
-			continue;
-		}
-		AABTSM7BuildingModule* Lower = Cast<AABTSM7BuildingModule>(
-			SupportHit.GetActor());
-		const int32* LowerIndex = Lower != nullptr ? SleepingIndex.Find(Lower) : nullptr;
-		if (LowerIndex != nullptr
-			&& Lower->GetDamageLifecycleOwner()
-				== Upper.GetDamageLifecycleOwner()
-			&& FVector::DotProduct(Lower->GetActorLocation()
-				- Upper.GetActorLocation(), Up) < -1.0f)
-		{
-			SupportChildren[*LowerIndex].Add(UpperIndex);
-			++SupportEdgeCount;
-		}
-	}
-	TArray<int32> FreezeOrder;
-	BuildGroundReachableFreezeOrder(SupportChildren, GroundRoots, FreezeOrder);
-	for (const int32 Index : FreezeOrder)
-	{
-		SleepingModules[Index]->Freeze();
+		// UpdatePhysicsSettlement has already certified a continuous stable
+		// window with authoritative QueryAndPhysics contacts.  Freeze every
+		// certified body at that exact Chaos transform.  Do not switch any brick
+		// to the query-only overflow integrator at the Walk boundary: doing so
+		// discards brick/brick collision and creates the visible interpenetration
+		// and delayed roof collapse reported in packaged play.
+		Module->Freeze();
 		++FrozenCount;
-	}
-	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : Modules)
-	{
-		AABTSM7BuildingModule* Module = WeakModule.Get();
-		if (Module == nullptr || !Module->IsDynamic()) continue;
-		// The only remaining dynamics are awake or have no contact path to a
-		// certified root.  They must leave Chaos without becoming hidden debris
-		// or suspended statics: their owning building continues each brick as a
-		// visible analytic body until a real contact proves it can settle.
-		FString OverflowError;
-		if (AABTSM73StableBuildingActor* Building =
-			Module->GetDamageLifecycleOwner(); Building != nullptr
-			&& Building->AdoptJuryDemoFixedSixDynamicAsOverflow(*Module,
-				OverflowError))
-		{
-			++AnalyticFallbackCount;
-			continue;
-		}
-		// Non-fixed-six legacy modules retain their existing recovery behavior.
-		Module->RecycleUnsupportedDebris();
 	}
 
 	int32 SimulatingAfter = 0;
@@ -1534,13 +1476,13 @@ int32 AABTSM7BuildingMaterialSystem::FreezeAllDynamicModulesForWalkReturn()
 		SimulatingAfter += Body != nullptr && Body->IsSimulatingPhysics() ? 1 : 0;
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M7][WalkReturnFreeze] FrozenGroundReachable=%d GroundRoots=%d SupportEdges=%d AnalyticFallback=%d SimulatingBefore=%d SimulatingAfter=%d NoFloatingStatic=1"),
+		TEXT("[ABTS][M7][WalkReturnFreeze] FrozenCertifiedStable=%d SimulatingBefore=%d AwakeBefore=%d SimulatingAfter=%d MaxLinear=%.3f MaxAngular=%.3f CollisionSemantics=PreservedQueryAndPhysics AnalyticFallback=0"),
 		FrozenCount,
-		GroundRoots.Num(),
-		SupportEdgeCount,
-		AnalyticFallbackCount,
 		SimulatingBefore,
-		SimulatingAfter);
+		AwakeBefore,
+		SimulatingAfter,
+		MaximumLinearSpeed,
+		MaximumAngularSpeed);
 	ensureAlwaysMsgf(SimulatingAfter == 0,
 		TEXT("Walk return left %d M7 module components simulating"),
 		SimulatingAfter);
