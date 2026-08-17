@@ -244,8 +244,20 @@ public:
 		const AABTSM7BuildingModule& TriggerModule,
 		float ImpactRadiusCM,
 		FString& OutError);
+	/**
+	 * Coalesces a real same-building hit into the next game-thread damage epoch.
+	 * The epoch publishes every unsupported brick once; callers must never retry
+	 * a per-brick closure synchronously from a contact callback.
+	 */
+	bool QueueJuryDemoFixedSixDamageSeed(
+		AABTSM7BuildingModule& TriggerModule,
+		float ImpactRadiusCM,
+		FString& OutError);
 	/** Promotes one visible overflow brick for an explicit bird/device impact. */
 	bool PromoteJuryDemoFixedSixOverflowForDirectImpact(
+		AABTSM7BuildingModule& Module, FString& OutError);
+	/** Walk-return fallback: retire an unresolved exact body into its own visible analytic state, never an airborne static. */
+	bool AdoptJuryDemoFixedSixDynamicAsOverflow(
 		AABTSM7BuildingModule& Module, FString& OutError);
 	void RejectJuryDemoFixedSixChaosValidation(const FString& Reason);
 	bool CopyJuryDemoFixedSixChaosResult(
@@ -407,6 +419,12 @@ private:
 		TArray<AABTSM7BuildingModule*>& OutPhysicsModules,
 		TArray<int32>* OutAffectedBrickIds,
 		FString& OutError) const;
+	bool ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+		TConstArrayView<AABTSM7BuildingModule*> TriggerModules,
+		float ImpactRadiusCM,
+		uint64 DamageEpoch,
+		FString& OutError);
+	void ResolveQueuedJuryDemoFixedSixDamageTransaction();
 	bool BuildResolvedStructure(bool bAllowFlatEditorFallback, struct FABTSM73GroundContext& OutContext,
 		struct FABTSM73StructureData& OutData, FString& OutError,
 		const AABTSM7BuildingMaterialSystem* MaterialProfileSource = nullptr);
@@ -588,6 +606,11 @@ private:
 	uint64 JuryDemoFixedSixChaosActivationFrame = 0;
 	int32 JuryDemoFixedSixActivePhysicsBodyCount = 0;
 	TSet<int32> JuryDemoFixedSixRemovedSupportBrickIds;
+	/** One stable building-scoped batch, resolved once from Tick. */
+	TArray<TWeakObjectPtr<AABTSM7BuildingModule>>
+		JuryDemoFixedSixQueuedDamageSeeds;
+	float JuryDemoFixedSixQueuedDamageRadiusCM = 0.0f;
+	uint64 JuryDemoFixedSixDamageEpoch = 0;
 	/** Stable BrickId order; entries remain visible and independent until promoted. */
 	TArray<TWeakObjectPtr<AABTSM7BuildingModule>> JuryDemoFixedSixOverflowKinematicModules;
 	float JuryDemoFixedSixOverflowAccumulatorSeconds = 0.0f;

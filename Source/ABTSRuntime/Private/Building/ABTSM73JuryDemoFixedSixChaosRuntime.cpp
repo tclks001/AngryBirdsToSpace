@@ -15,6 +15,7 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
+#include "Terrain/ABTSM3Planet.h"
 #include "World/ABTSCollisionChannels.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -667,7 +668,7 @@ bool AABTSM73StableBuildingActor::BuildJuryDemoFixedSixSupportClosure(
 		{
 			if (AABTSM7BuildingModule* Module = RuntimeModules[BrickId].Get();
 				Module != nullptr && !Module->IsBroken() && !Module->IsRecycled()
-				&& !Module->IsDynamic())
+				&& !Module->IsDynamic() && !Module->IsOverflowKinematic())
 			{
 				OutPhysicsModules.Add(Module);
 			}
@@ -879,47 +880,161 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 	const float ImpactRadiusCM,
 	FString& OutError)
 {
+	TArray<AABTSM7BuildingModule*> SingleSeed =
+		{const_cast<AABTSM7BuildingModule*>(&TriggerModule)};
+	return ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+		SingleSeed, ImpactRadiusCM, ++JuryDemoFixedSixDamageEpoch, OutError);
+}
+
+bool AABTSM73StableBuildingActor::QueueJuryDemoFixedSixDamageSeed(
+	AABTSM7BuildingModule& TriggerModule, const float ImpactRadiusCM,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (!bJuryDemoFixedSixChaosPrepared
+		|| TriggerModule.GetDamageLifecycleOwner() != this
+		|| TriggerModule.IsBroken() || TriggerModule.IsRecycled())
+	{
+		OutError = TEXT("FixedSixDamageEpochSeedIdentityRejected");
+		return false;
+	}
+	if (TriggerModule.IsDynamic() || TriggerModule.IsOverflowKinematic())
+	{
+		// The direct material path still applies its accumulated damage/impulse
+		// to this already-independent brick.  It must not recursively derive a
+		// frozen graph merely because a dense contact island reported it again.
+		return true;
+	}
+	// Once every still-live brick has already published to an independent
+	// dynamic or analytic state, a further contact must retain its direct
+	// damage semantics but has no frozen support graph left to derive.  Treat
+	// it as a successful no-op instead of rebuilding an O(N^2) closure every
+	// contact window.
+	bool bHasFrozenCandidate = false;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	{
+		const AABTSM7BuildingModule* Candidate = WeakModule.Get();
+		if (Candidate != nullptr && !Candidate->IsBroken()
+			&& !Candidate->IsRecycled() && !Candidate->IsDynamic()
+			&& !Candidate->IsOverflowKinematic())
+		{
+			bHasFrozenCandidate = true;
+			break;
+		}
+	}
+	if (!bHasFrozenCandidate)
+	{
+		return true;
+	}
+	if (!JuryDemoFixedSixQueuedDamageSeeds.ContainsByPredicate(
+		[&TriggerModule](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+		{ return Candidate.Get() == &TriggerModule; }))
+	{
+		JuryDemoFixedSixQueuedDamageSeeds.Add(&TriggerModule);
+	}
+	JuryDemoFixedSixQueuedDamageRadiusCM = FMath::Max(
+		JuryDemoFixedSixQueuedDamageRadiusCM, FMath::Max(0.0f, ImpactRadiusCM));
+	SetActorTickEnabled(true);
+	return true;
+}
+
+void AABTSM73StableBuildingActor::ResolveQueuedJuryDemoFixedSixDamageTransaction()
+{
+	if (JuryDemoFixedSixQueuedDamageSeeds.IsEmpty()) return;
+	TArray<AABTSM7BuildingModule*> SeedModules;
+	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakSeed :
+		JuryDemoFixedSixQueuedDamageSeeds)
+	{
+		if (AABTSM7BuildingModule* Seed = WeakSeed.Get();
+			Seed != nullptr && !Seed->IsRecycled())
+		{
+			SeedModules.Add(Seed);
+		}
+	}
+	const float RadiusCM = JuryDemoFixedSixQueuedDamageRadiusCM;
+	JuryDemoFixedSixQueuedDamageSeeds.Reset();
+	JuryDemoFixedSixQueuedDamageRadiusCM = 0.0f;
+	if (SeedModules.IsEmpty()) return;
+	SeedModules.Sort([](const AABTSM7BuildingModule& Left,
+		const AABTSM7BuildingModule& Right)
+	{
+		return Left.GetDamageLifecycleBrickId() < Right.GetDamageLifecycleBrickId();
+	});
+	FString TransactionError;
+	const uint64 Epoch = ++JuryDemoFixedSixDamageEpoch;
+	const double BeginSeconds = FPlatformTime::Seconds();
+	if (!ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+		SeedModules, RadiusCM, Epoch, TransactionError))
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][DamageEpoch][Rejected] Entry=%s Epoch=%llu Seeds=%d Reason=%s"),
+			JuryDemoFixedSixStaticEntry.IsSet()
+				? *JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString() : TEXT("None"),
+			Epoch, SeedModules.Num(), *TransactionError);
+		return;
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][DamageEpoch][Resolved] Entry=%s Epoch=%llu Seeds=%d TotalMS=%.3f ClosureOnce=1"),
+		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(), Epoch,
+		SeedModules.Num(), (FPlatformTime::Seconds() - BeginSeconds) * 1000.0);
+}
+
+bool AABTSM73StableBuildingActor::
+ActivateJuryDemoFixedSixImpactSupportClosureTransaction(
+	const TConstArrayView<AABTSM7BuildingModule*> TriggerModules,
+	const float ImpactRadiusCM,
+	const uint64 DamageEpoch,
+	FString& OutError)
+{
 	OutError.Reset();
 	if (!bJuryDemoFixedSixChaosPrepared
 		|| bJuryDemoFixedSixChaosDeferredActivationInProgress
-		|| TriggerModule.GetDamageLifecycleOwner() != this
-		|| !RuntimeModules.ContainsByPredicate([&TriggerModule](
-			const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
-			{ return Candidate.Get() == &TriggerModule; }))
+		|| TriggerModules.IsEmpty())
 	{
 		OutError = TEXT("FixedSixDeferredFirstHitIdentityRejected");
 		return false;
 	}
 	TArray<AABTSM7BuildingModule*> SeedModules;
 	const float EffectiveRadiusCM = FMath::Max(0.0f, ImpactRadiusCM);
-	const FVector TriggerLocation = TriggerModule.GetActorLocation();
 	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
 		JuryDemoFixedSixStaticEntry.GetValue();
 	AABTSM7BuildingModule* NearestBrickSeed = nullptr;
 	float NearestBrickDistanceSquared = TNumericLimits<float>::Max();
-	for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
+	for (AABTSM7BuildingModule* TriggerModule : TriggerModules)
 	{
-		AABTSM7BuildingModule* Candidate = WeakModule.Get();
-		if (Candidate == nullptr || Candidate->IsBroken() || Candidate->IsRecycled()
-			|| !Entry.Bricks.IsValidIndex(Candidate->GetDamageLifecycleBrickId()))
+		if (TriggerModule == nullptr
+			|| TriggerModule->GetDamageLifecycleOwner() != this
+			|| !RuntimeModules.ContainsByPredicate([TriggerModule](
+				const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+				{ return Candidate.Get() == TriggerModule; }))
 		{
-			continue;
+			OutError = TEXT("FixedSixDamageEpochSeedIdentityRejected");
+			return false;
 		}
-		const float DistanceSquared = FVector::DistSquared(
-			Candidate->GetActorLocation(), TriggerLocation);
-		if (DistanceSquared < NearestBrickDistanceSquared
-			|| (FMath::IsNearlyEqual(DistanceSquared, NearestBrickDistanceSquared)
-				&& (NearestBrickSeed == nullptr || Candidate->GetDamageLifecycleBrickId()
-					< NearestBrickSeed->GetDamageLifecycleBrickId())))
+		const FVector TriggerLocation = TriggerModule->GetActorLocation();
+		for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule : RuntimeModules)
 		{
-			NearestBrickSeed = Candidate;
-			NearestBrickDistanceSquared = DistanceSquared;
-		}
-		if (Candidate == &TriggerModule || EffectiveRadiusCM <= 0.0f
-			|| FVector::DistSquared(Candidate->GetActorLocation(), TriggerLocation)
-				<= FMath::Square(EffectiveRadiusCM))
-		{
-			SeedModules.Add(Candidate);
+			AABTSM7BuildingModule* Candidate = WeakModule.Get();
+			if (Candidate == nullptr || Candidate->IsBroken() || Candidate->IsRecycled()
+				|| !Entry.Bricks.IsValidIndex(Candidate->GetDamageLifecycleBrickId()))
+			{
+				continue;
+			}
+			const float DistanceSquared = FVector::DistSquared(
+				Candidate->GetActorLocation(), TriggerLocation);
+			if (DistanceSquared < NearestBrickDistanceSquared
+				|| (FMath::IsNearlyEqual(DistanceSquared, NearestBrickDistanceSquared)
+					&& (NearestBrickSeed == nullptr || Candidate->GetDamageLifecycleBrickId()
+						< NearestBrickSeed->GetDamageLifecycleBrickId())))
+			{
+				NearestBrickSeed = Candidate;
+				NearestBrickDistanceSquared = DistanceSquared;
+			}
+			if (Candidate == TriggerModule || EffectiveRadiusCM <= 0.0f
+				|| DistanceSquared <= FMath::Square(EffectiveRadiusCM))
+			{
+				SeedModules.Add(Candidate);
+			}
 		}
 	}
 	// A barrel or piston is not itself a support-graph brick.  Its first hit
@@ -942,6 +1057,7 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 			SeedModules.RemoveAt(SeedIndex);
 		}
 	}
+	const double DeriveBeginSeconds = FPlatformTime::Seconds();
 	TArray<AABTSM7BuildingModule*> SupportClosureModules;
 	TArray<int32> AffectedBrickIds;
 	if (!BuildJuryDemoFixedSixSupportClosure(SeedModules, SupportClosureModules,
@@ -949,6 +1065,8 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 	{
 		return false;
 	}
+	const double DeriveMilliseconds = (FPlatformTime::Seconds()
+		- DeriveBeginSeconds) * 1000.0;
 	const bool bWasDeferredActivated = bJuryDemoFixedSixChaosDeferredActivated;
 	if (SupportClosureModules.IsEmpty())
 	{
@@ -965,7 +1083,7 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 			TEXT("[ABTS][M7][FixedSixSupportClosure][NoOp]")
 			TEXT(" Entry=%s Trigger=%s ActiveBodies=%d Reason=AlreadyDynamicOrRecycled"),
 			*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
-			*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount);
+			*GetNameSafe(SeedModules[0]), JuryDemoFixedSixActivePhysicsBodyCount);
 		return true;
 	}
 	int32 ActualActiveBodyCount = 0;
@@ -977,10 +1095,13 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 			++ActualActiveBodyCount;
 		}
 	}
-	ensureAlwaysMsgf(JuryDemoFixedSixActivePhysicsBodyCount
-		== ActualActiveBodyCount,
-		TEXT("Fixed-six active-body ledger drift: ledger=%d actual=%d"),
-		JuryDemoFixedSixActivePhysicsBodyCount, ActualActiveBodyCount);
+	if (JuryDemoFixedSixActivePhysicsBodyCount != ActualActiveBodyCount)
+	{
+		UE_LOG(LogABTSRuntime, Warning,
+			TEXT("[ABTS][M7][DamageEpoch][LedgerRebased] Entry=%s Epoch=%llu Ledger=%d Actual=%d"),
+			*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(), DamageEpoch,
+			JuryDemoFixedSixActivePhysicsBodyCount, ActualActiveBodyCount);
+	}
 	JuryDemoFixedSixActivePhysicsBodyCount = ActualActiveBodyCount;
 
 	TSet<int32> SeedBrickIds;
@@ -1006,8 +1127,10 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 		JuryDemoFixedSixOverflowEmergencyReserveBodies, ImmediateBodyCount,
 		OverflowBodyCount))
 	{
-		OutError = TEXT("FixedSixSupportClosureNoPublicationSlots");
-		return false;
+		// Body capacity changes only the exact-Chaos subset. Every affected
+		// brick still publishes into the visible independent analytic fallback.
+		ImmediateBodyCount = 0;
+		OverflowBodyCount = SupportClosureModules.Num();
 	}
 	TArray<AABTSM7BuildingModule*> PhysicsModules;
 	TArray<AABTSM7BuildingModule*> OverflowModules;
@@ -1017,9 +1140,12 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 	{
 		OverflowModules.Add(SupportClosureModules[ModuleIndex]);
 	}
-	ensureAlwaysMsgf(OverflowModules.Num() == OverflowBodyCount,
-		TEXT("Overflow publication plan drift: planned=%d actual=%d"),
-		OverflowBodyCount, OverflowModules.Num());
+	if (OverflowModules.Num() != OverflowBodyCount)
+	{
+		OutError = TEXT("FixedSixDamageEpochPublicationPlanDrift");
+		return false;
+	}
+	const double PublishBeginSeconds = FPlatformTime::Seconds();
 	bJuryDemoFixedSixChaosDeferredActivationInProgress = true;
 	if (!bJuryDemoFixedSixChaosDeferredActivated)
 	{
@@ -1040,7 +1166,7 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 				return false;
 			}
 		}
-		const FVector GameplayImpactWorld = TriggerLocation;
+		const FVector GameplayImpactWorld = SeedModules[0]->GetActorLocation();
 		if (!ActivatePreparedJuryDemoFixedSixChaosValidation(
 			OutError, &GameplayImpactWorld, &PhysicsModules))
 		{
@@ -1107,23 +1233,39 @@ ActivateJuryDemoFixedSixImpactSupportClosure(
 			++PostActivationActualActiveBodyCount;
 		}
 	}
-	ensureAlwaysMsgf(PostActivationActualActiveBodyCount
-		== JuryDemoFixedSixActivePhysicsBodyCount
-		&& PostActivationActualActiveBodyCount <= FixedSixGameplayMaximumActiveBodies,
-		TEXT("Fixed-six active-body publication invalid: ledger=%d actual=%d limit=%d"),
-		JuryDemoFixedSixActivePhysicsBodyCount,
-		PostActivationActualActiveBodyCount,
-		FixedSixGameplayMaximumActiveBodies);
+	if (PostActivationActualActiveBodyCount > FixedSixGameplayMaximumActiveBodies)
+	{
+		OutError = TEXT("FixedSixDamageEpochActiveBodyLimitInvariantBroken");
+		bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+		return false;
+	}
 	JuryDemoFixedSixActivePhysicsBodyCount = PostActivationActualActiveBodyCount;
 	bJuryDemoFixedSixChaosDeferredActivationInProgress = false;
+	const int32 NewlyUnsupportedCount = SupportClosureModules.Num();
+	const int32 PublishedCount = PhysicsModules.Num() + OverflowModules.Num();
+	const int32 UnpublishedUnsupportedCount = FMath::Max(0,
+		NewlyUnsupportedCount - PublishedCount);
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][FixedSixDeferredChaos][FirstHitActivated]")
-	TEXT(" Entry=%s Trigger=%s ActiveBodies=%d NewBodies=%d QueueBodies=%d Affected=%d OverflowQueue=1 IndependentBrickBodies=1")
+	TEXT(" Entry=%s Epoch=%llu Trigger=%s ActiveBodies=%d NewBodies=%d QueueBodies=%d Affected=%d DeriveMS=%.3f PublishMS=%.3f OverflowQueue=1 IndependentBrickBodies=1")
 		TEXT(" TerrainBuildingResponse=Block PadsBuildingResponse=Block")
 		TEXT(" CCD=1 SiteUniformGravity=1 DamageTransaction=Continue"),
 		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(),
-		*TriggerModule.GetName(), JuryDemoFixedSixActivePhysicsBodyCount,
-		PhysicsModules.Num(), OverflowModules.Num(), AffectedBrickIds.Num());
+		DamageEpoch, *GetNameSafe(SeedModules[0]), JuryDemoFixedSixActivePhysicsBodyCount,
+		PhysicsModules.Num(), OverflowModules.Num(), AffectedBrickIds.Num(),
+		DeriveMilliseconds, (FPlatformTime::Seconds() - PublishBeginSeconds) * 1000.0);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][DamageEpoch][Summary]")
+		TEXT(" Entry=%s Epoch=%llu Derivations=1 ClosureMS=%.3f Unsupported=%d Published=%d UnpublishedUnsupported=%d QueueDrop=0 ActivateMS=%.3f"),
+		*JuryDemoFixedSixStaticEntry->ManifestEntryId.ToString(), DamageEpoch,
+		DeriveMilliseconds, NewlyUnsupportedCount, PublishedCount,
+		UnpublishedUnsupportedCount,
+		(FPlatformTime::Seconds() - PublishBeginSeconds) * 1000.0);
+	if (UnpublishedUnsupportedCount != 0)
+	{
+		OutError = TEXT("FixedSixDamageEpochUnpublishedUnsupportedInvariantBroken");
+		return false;
+	}
 	SetActorTickEnabled(!JuryDemoFixedSixOverflowKinematicModules.IsEmpty());
 	return true;
 }
@@ -1175,9 +1317,14 @@ bool AABTSM73StableBuildingActor::PromoteJuryDemoFixedSixOverflowModule(
 		Mesh->SetPhysicsAngularVelocityInDegrees(AngularVelocity);
 		Mesh->WakeAllRigidBodies();
 	}
-	JuryDemoFixedSixOverflowKinematicModules.RemoveAll(
-		[&Module](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
-		{ return Candidate.Get() == &Module; });
+	for (int32 Index = JuryDemoFixedSixOverflowKinematicModules.Num() - 1;
+		Index >= 0; --Index)
+	{
+		if (JuryDemoFixedSixOverflowKinematicModules[Index].Get() == &Module)
+		{
+			JuryDemoFixedSixOverflowKinematicModules.RemoveAt(Index);
+		}
+	}
 	JuryDemoFixedSixActivePhysicsBodyCount = ActualActive + 1;
 	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M7][OverflowKinematicQueue][Promoted]")
@@ -1195,6 +1342,46 @@ bool AABTSM73StableBuildingActor::PromoteJuryDemoFixedSixOverflowForDirectImpact
 	return PromoteJuryDemoFixedSixOverflowModule(Module, true, OutError);
 }
 
+bool AABTSM73StableBuildingActor::AdoptJuryDemoFixedSixDynamicAsOverflow(
+	AABTSM7BuildingModule& Module, FString& OutError)
+{
+	OutError.Reset();
+	if (!bJuryDemoFixedSixChaosPrepared || Module.GetDamageLifecycleOwner() != this
+		|| !Module.IsDynamic() || Module.IsBroken() || Module.IsRecycled())
+	{
+		OutError = TEXT("FixedSixWalkReturnOverflowIdentityInvalid");
+		return false;
+	}
+	UStaticMeshComponent* Mesh = Module.GetMeshComponent();
+	const FVector LinearVelocity = Mesh != nullptr
+		? Mesh->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+	const FVector AngularVelocity = Mesh != nullptr
+		? Mesh->GetPhysicsAngularVelocityInDegrees() : FVector::ZeroVector;
+	Module.BeginOverflowKinematic(LinearVelocity, AngularVelocity,
+		JuryDemoFixedSixChaosSiteUp, FixedSixGravityCMPerSec2);
+	if (!JuryDemoFixedSixOverflowKinematicModules.ContainsByPredicate(
+		[&Module](const TWeakObjectPtr<AABTSM7BuildingModule>& Candidate)
+		{ return Candidate.Get() == &Module; }))
+	{
+		JuryDemoFixedSixOverflowKinematicModules.Add(&Module);
+		JuryDemoFixedSixOverflowKinematicModules.Sort([](
+			const TWeakObjectPtr<AABTSM7BuildingModule>& Left,
+			const TWeakObjectPtr<AABTSM7BuildingModule>& Right)
+		{
+			const AABTSM7BuildingModule* LeftModule = Left.Get();
+			const AABTSM7BuildingModule* RightModule = Right.Get();
+			return LeftModule != nullptr && RightModule != nullptr
+				? LeftModule->GetDamageLifecycleBrickId()
+					< RightModule->GetDamageLifecycleBrickId()
+				: LeftModule != nullptr;
+		});
+	}
+	JuryDemoFixedSixActivePhysicsBodyCount = FMath::Max(0,
+		JuryDemoFixedSixActivePhysicsBodyCount - 1);
+	SetActorTickEnabled(true);
+	return true;
+}
+
 void AABTSM73StableBuildingActor::TickJuryDemoFixedSixOverflowKinematic(
 	const float DeltaSeconds)
 {
@@ -1208,11 +1395,22 @@ void AABTSM73StableBuildingActor::TickJuryDemoFixedSixOverflowKinematic(
 		{
 			AABTSM7BuildingModule* Module = Weak.Get();
 			if (Module == nullptr || !Module->IsOverflowKinematic()) continue;
+			if (Module->HasOverflowPendingBreak())
+			{
+				const EABTSM7ModuleKind Kind = Module->GetModuleKind();
+				const EABTSM7BuildingMaterial Material = Module->GetBuildingMaterial();
+				if (Module->BreakModule() && Kind == EABTSM7ModuleKind::Brick
+					&& RuntimeMaterialSystem.IsValid())
+				{
+					RuntimeMaterialSystem->OnMaterialRecovered.Broadcast(Material, 1);
+				}
+				continue;
+			}
 			UWorld* World = GetWorld();
 			if (World == nullptr) continue;
 			FCollisionQueryParams Params(
 				SCENE_QUERY_STAT(M7OverflowKinematicGroundProbe), false, Module);
-			FHitResult Hit;
+			TArray<FHitResult> Hits;
 			UStaticMeshComponent* Mesh = Module->GetMeshComponent();
 			const FVector Start = Module->GetActorLocation();
 			const FVector End = Module->PredictOverflowKinematicLocation(
@@ -1220,20 +1418,60 @@ void AABTSM73StableBuildingActor::TickJuryDemoFixedSixOverflowKinematic(
 			const FVector HalfExtent = Mesh != nullptr
 				? Mesh->Bounds.BoxExtent.GetAbs() : FVector(18.0f);
 			const FCollisionShape Shape = FCollisionShape::MakeBox(HalfExtent);
-			const bool bContact = World->SweepSingleByChannel(Hit, Start, End,
-				Module->GetActorQuat(), ABTSDeveloperObstacleChannel, Shape, Params);
-			Module->TickOverflowKinematic(FixedSixSimulationDeltaSeconds,
-				bContact ? &Hit.Location : nullptr);
-			if (bContact)
+			World->SweepMultiByChannel(Hits, Start, End, Module->GetActorQuat(),
+				ABTSDeveloperObstacleChannel, Shape, Params);
+			const FVector* GroundLocation = nullptr;
+			FVector ResolvedGroundLocation = FVector::ZeroVector;
+			bool bDynamicContact = false;
+			for (const FHitResult& Hit : Hits)
+			{
+				const bool bTerrain = Cast<AABTSM3Planet>(Hit.GetActor()) != nullptr;
+				const bool bFrozenSupport =
+					IsJuryDemoFixedSixGroundSupportPrimitive(Hit.GetComponent());
+				const AABTSM7BuildingModule* HitModule =
+					Cast<AABTSM7BuildingModule>(Hit.GetActor());
+				const bool bSettledBrickSupport = HitModule != nullptr
+					&& HitModule != Module && HitModule->IsOverflowKinematicSettled();
+				if (bTerrain || bFrozenSupport || bSettledBrickSupport)
+				{
+					ResolvedGroundLocation = Hit.Location;
+					GroundLocation = &ResolvedGroundLocation;
+					break;
+				}
+				if (HitModule != nullptr)
+				{
+					bDynamicContact |= HitModule->IsDynamic();
+				}
+			}
+			if (bDynamicContact)
 			{
 				FString PromotionError;
-				PromoteJuryDemoFixedSixOverflowModule(*Module, false,
-					PromotionError);
+				if (PromoteJuryDemoFixedSixOverflowModule(*Module, false,
+					PromotionError))
+				{
+					continue;
+				}
+			}
+			Module->TickOverflowKinematic(FixedSixSimulationDeltaSeconds,
+				GroundLocation);
+		}
+		for (int32 Index = JuryDemoFixedSixOverflowKinematicModules.Num() - 1;
+			Index >= 0; --Index)
+		{
+			const TWeakObjectPtr<AABTSM7BuildingModule>& Weak =
+				JuryDemoFixedSixOverflowKinematicModules[Index];
+			if (!Weak.IsValid() || !Weak->IsOverflowKinematic())
+			{
+				JuryDemoFixedSixOverflowKinematicModules.RemoveAt(Index);
+				continue;
+			}
+			if (AABTSM7BuildingModule* Module = Weak.Get();
+				Module != nullptr && Module->IsOverflowKinematicSettled())
+			{
+				Module->FreezeSettledOverflowKinematic();
+				JuryDemoFixedSixOverflowKinematicModules.RemoveAt(Index);
 			}
 		}
-		JuryDemoFixedSixOverflowKinematicModules.RemoveAll(
-			[](const TWeakObjectPtr<AABTSM7BuildingModule>& Weak)
-			{ return !Weak.IsValid() || !Weak->IsOverflowKinematic(); });
 	}
 }
 

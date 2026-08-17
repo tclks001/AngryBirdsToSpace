@@ -154,9 +154,13 @@ public:
 		float InGravityAcceleration);
 	FVector PredictOverflowKinematicLocation(float FixedDeltaSeconds) const;
 	void TickOverflowKinematic(float FixedDeltaSeconds,
-		const FVector* ClampedContactLocation = nullptr);
+		const FVector* GroundContactLocation = nullptr);
 	void AddOverflowKinematicImpact(const FVector& VelocityDelta,
 		const FVector& AngularVelocityDeltaDegrees, float DamageGain);
+	/** True only after a verified ground contact remained quiet for the fixed hold. */
+	bool IsOverflowKinematicSettled() const { return bOverflowKinematicSettled; }
+	/** Converts a proven, settled analytic brick back to an independently addressable static support. */
+	bool FreezeSettledOverflowKinematic();
 	/** Associates a real production module with its owning frozen building. */
 	void ConfigureDamageLifecycleOwner(
 		AABTSM73StableBuildingActor* InOwner,
@@ -209,6 +213,8 @@ private:
 	bool bRecycled = false;
 	bool bOverflowKinematic = false;
 	bool bOverflowPendingBreak = false;
+	bool bOverflowKinematicSettled = false;
+	int32 OverflowKinematicGroundedFrames = 0;
 	FVector OverflowKinematicLinearVelocity = FVector::ZeroVector;
 	FVector OverflowKinematicAngularVelocityDegrees = FVector::ZeroVector;
 
