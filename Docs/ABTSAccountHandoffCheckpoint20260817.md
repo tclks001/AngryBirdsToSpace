@@ -64,6 +64,16 @@
 
 玩家也已接受“低积木全 Chaos”作为发行保底方向，允许其动力传播不完美；材质统一后应优先产出可进入、可游玩的 Shipping，再继续改善其他问题。
 
+玩家随后在最新 Shipping 包
+`candidate-64695b7-releasefixes-r2-20260817-Shipping` 中实测确认以下四项通过：
+
+- 退出发射模式、返回行走时，建筑顶部不再延迟突然掉落；
+- 数字键 `2` 可以选择青翎；
+- Shipping 中月球下方的 debug 强化弹弓已隐藏；
+- 摧毁树和石头会把对应资源奖励直接加入背包。
+
+这四项已经从开放问题队列移除。除非后续包出现肉眼可见回退，新会话不得重复修复或重开根因调查。**除本文明确写为玩家实测通过的项目外，其他问题均未验收。**
+
 ## 4. 现有可运行包与边界
 
 最新已归档包（不包含 `93fb25e`、`8c6ba66`、`26b88d0`）：
@@ -74,6 +84,8 @@
   `G:\ABTS\Artifacts\RC9.3\candidate-64695b7-releasefixes-r2-20260817-Shipping\Windows`
 
 它们是当前最近的可运行基线，不是最终验收包。当前 HEAD 尚未重新 Cook/Package；这是有意停止在可审计 checkpoint，而不是遗漏。
+
+其中 Shipping 包只对第 3 节列出的四个最新项目取得了玩家验收，不代表该包或其他功能已整体通过。
 
 更早、可恢复的低积木材质稳定 Shipping floor：
 
@@ -112,7 +124,7 @@ UE 5.8 `AngryBirdsToSpaceEditor Win64 Development`：**Succeeded**。
 2. 重新运行第 5 节三个聚焦测试；全部通过后才打新包。
 3. BuildCookRun 新 Development 和 Shipping 到 `G:\ABTS\Artifacts\RC9.3`，包名包含精确短 SHA。
 4. 先做无 GUI 的 packaged startup/world-ready smoke，再交给玩家做可见验收。
-5. 玩家优先检查：
+5. 下列项目仍未获得玩家验收，玩家优先检查：
    - Shipping 能进入正确 V3 世界；
    - 低积木建筑静态/Chaos 材质一致；
    - 蓝鸟命中后能够回归；
@@ -124,23 +136,20 @@ UE 5.8 `AngryBirdsToSpaceEditor Win64 Development`：**Succeeded**。
 
 ## 7. 仍需跟进的问题
 
-### 建筑第一优先级
+### 已关闭：发射转行走时建筑延迟垮塌
 
-玩家明确把“退出发射模式、返回行走时建筑顶部才突然掉落”列为建筑第一号问题。现象还包括：
+玩家已在最新 Shipping 包中确认，“退出发射模式、返回行走时建筑顶部才突然掉落”问题已经解决。该验收同时覆盖此前在模式切换时才暴露的建筑延迟垮塌现象。
 
-- 发射观察阶段建筑看似稳定，切回行走才垮塌；
-- 部分 bricks 在切换时相互穿插/融合；
-- 横梁或上层出现悬空。
-
-不得把它解释为普通动力传播。需要审计 flight-to-walk settlement/freeze 的顺序、碰撞保持和 certified Chaos transform 捕获；冻结时不得瞬移、禁用 Query/Physics collision 或把仍运动的 bodies 强制叠到一起。低积木方向本身已被玩家接受。
+不要继续把它列为建筑第一号问题，也不要在没有新包可见回退证据时重新修改 flight-to-walk settlement/freeze。低积木方向本身已被玩家接受。
 
 ### 其他未完成/未验收
 
 - 偶现发射视角穿到地底：低优先级，已记录。
-- `d568238` 的数字 2 选青翎、Shipping 隐藏月下 debug 弹弓、树/石奖励需要新包回归。
 - `46a4aef` 的 Shipping 轨迹/侦察图与制作配方路由需要新包回归。
 - `93fb25e` 的 E5 槽扩展、强化配方 1 铁、黄鸟木穿透尚未打包给玩家。
 - `26b88d0` 的开局逐鸟贴地只有编译和纯 Timeline 证据，没有可见打包证据。
+
+数字 `2` 选青翎、Shipping 隐藏月下 debug 弹弓、树/石奖励以及发射转行走时建筑延迟垮塌均已玩家验收，不属于本节。除此之外，不得从“源码存在”“自动化通过”或本次四项验收推导任何其他问题已经通过。
 
 ## 8. 下一版本玩法引导（已排队，尚未实现）
 
@@ -163,4 +172,3 @@ UE 5.8 `AngryBirdsToSpaceEditor Win64 Development`：**Succeeded**。
 - 不结束用户或其他工作树的 Unreal 进程；禁用 Live Coding/Hot Reload。
 - 当前账号额度只剩约 4%，因此本 checkpoint 后不再扩展实现。接手账号应从第 6 节继续，不重复大范围历史审查。
 - 简单日志提取/机械检查用低成本模型；跨系统契约、发行裁决和失败圆弧算法才使用高能力模型。
-
