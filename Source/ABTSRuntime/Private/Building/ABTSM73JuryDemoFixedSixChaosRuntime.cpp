@@ -876,32 +876,38 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(
 	if (Entry.ManifestEntryId == FName(TEXT("E1ColumnBreak")))
 	{
 		JuryDemoE1DamageLifecycleState.RecordChaosActivated();
-		if (!RuntimeMaterialSystem->OnMaterialRecovered.IsBound())
+		// Validation-only activation must not award gameplay inventory. Every
+		// real first hit (direct brick or black-bird blast) supplies the gameplay
+		// impact pointer through the same atomic activation path.
+		if (GameplayImpactWorld != nullptr)
 		{
-			OutError = TEXT("E1CrystalImmediateRecoveryRouteMissing");
-			return false;
+			if (!RuntimeMaterialSystem->OnMaterialRecovered.IsBound())
+			{
+				OutError = TEXT("E1CrystalImmediateRecoveryRouteMissing");
+				return false;
+			}
+			NotifyJuryDemoE1ModuleDamage(
+				*E1CrystalModule,
+				EABTSM73E1DamageCause::ModuleContact,
+				true,
+				0.0f);
+			const FString CrystalName = E1CrystalModule->GetName();
+			const FVector CrystalLocation = E1CrystalModule->GetActorLocation();
+			if (!E1CrystalModule->BreakModule())
+			{
+				OutError = TEXT("E1CrystalImmediateBreakRejected");
+				return false;
+			}
+			RuntimeMaterialSystem->OnMaterialRecovered.Broadcast(
+				EABTSM7BuildingMaterial::Crystal,
+				1);
+			UE_LOG(LogABTSRuntime, Display,
+				TEXT("[ABTS][M7][E1CrystalChaosReward]")
+				TEXT(" Consumed=1 Module=%s CrystalCoreQuantity=1")
+				TEXT(" Trigger=E1ChaosActivated Location=%s"),
+				*CrystalName,
+				*CrystalLocation.ToCompactString());
 		}
-		NotifyJuryDemoE1ModuleDamage(
-			*E1CrystalModule,
-			EABTSM73E1DamageCause::ModuleContact,
-			true,
-			0.0f);
-		const FString CrystalName = E1CrystalModule->GetName();
-		const FVector CrystalLocation = E1CrystalModule->GetActorLocation();
-		if (!E1CrystalModule->BreakModule())
-		{
-			OutError = TEXT("E1CrystalImmediateBreakRejected");
-			return false;
-		}
-		RuntimeMaterialSystem->OnMaterialRecovered.Broadcast(
-			EABTSM7BuildingMaterial::Crystal,
-			1);
-		UE_LOG(LogABTSRuntime, Display,
-			TEXT("[ABTS][M7][E1CrystalChaosReward]")
-			TEXT(" Consumed=1 Module=%s CrystalCoreQuantity=1")
-			TEXT(" Trigger=E1ChaosActivated Location=%s"),
-			*CrystalName,
-			*CrystalLocation.ToCompactString());
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7][E1DamageLifecycle]")
 			TEXT(" Event=ChaosActivated RealModules=%d TargetBricks=%d")
