@@ -463,3 +463,9 @@
 | 优先级 | 现象 | 根因 | 处理与下一验收门 |
 | --- | --- | --- | --- |
 | P0 | 第二轮 Standalone 定向采样中，玩家在画中画内仍不能明显看到 E1；11 次发射有 10 次接触卫星、0 次直接命中 E1，发射 5/7/8/9/10 的最终停点形成主簇，而旧 E1 Site 与该簇相差约四分之一球面 | E1 仍冻结在历史 `178° backside` 校准代理的径向投影。该点能维护旧校准身份，却没有消费玩家真实操作形成的落点分布；仅移动可见 Actor 会使 MapFreeze、真实建筑、54 Brick OBB、碰撞和 M6 绑定分裂 | 摘录 `M3-RC9-001`：以 `E1LandingSamples-20260818T053640Z-43416-55406.csv` 的 5/7/8/9/10 号 Final 径向单位向量均值冻结新 SiteUp `(0.422328650,-0.896977363,-0.130652678)`，新 Site 为 `(-3536.076,13362.185,-3177.064)`；整套 Site/真实 E1/54 Brick 联集/碰撞/M6/runtime binding 原子搬迁。新增 `OperatorLandingClusterPlacementV1` 身份证明，但明确不冒充数值轨迹认证；用户 Standalone 确认前不补完整自动化、不打包。Integration 新冻结值：E1 Placement `0x7399100AA594331A`、Layout `0xDFBFCF65414711C6`、Registration `0x0C2DB4694EEE8C04`；普通 Development Editor 编译通过。位置验收重点：画中画能明显看到 E1、常见落点覆盖建筑、击打难度显著下降 |
+
+## 27. 卫星画中画只显示 E1 阴影（2026-08-18，待玩家位置验收）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P0 | E1 新位置本身可接受，但 `SATELLITE LANDING PREVIEW` 内只能看到建筑阴影，看不到建筑本体；截图中阴影位于画面上沿附近 | 卫星画中画一直以预测接触点为焦点和固定 `1200 cm` 距离。E1 是高于球面的完整建筑，接触点仍在画面内时，建筑 Bounds 中心可能已经越过上边缘；此外旧 ShowOnly 逻辑只在终点已分类为 `SatelliteE5` 时加入 E1，普通近失误的 `SatelliteBody` 预览没有稳定视觉参照 | 画中画改为读取 E1 Actor 的完整展示 Bounds，以 Bounds center 为焦点，并按 Bounds sphere 与当前 FOV 只增不减地扩大拍摄距离；所有卫星终点（`SatelliteBody` 与 `SatelliteE5`）都把真实 E1 Actor 加入 ShowOnly，轨迹仍围绕权威终点绘制。日志新增 `SatelliteLandingPreview E1Framing ... AlwaysVisible=1`。Development Editor 编译通过；用户 Standalone 必须确认建筑本体完整进入画中画，阴影与本体同时可见，且近失误时仍能用 E1 修正瞄准 |

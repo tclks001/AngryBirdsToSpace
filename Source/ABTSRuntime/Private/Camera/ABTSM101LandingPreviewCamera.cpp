@@ -515,6 +515,38 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 		return;
 	}
 
+	FVector E1BoundsCenter = E5Target.GetActorLocation();
+	FVector E1BoundsExtent = FVector::ZeroVector;
+	E5Target.GetActorBounds(
+		/*bOnlyCollidingComponents=*/false,
+		E1BoundsCenter,
+		E1BoundsExtent,
+		/*bIncludeFromChildActors=*/true);
+	if (E1BoundsCenter.ContainsNaN() || E1BoundsExtent.ContainsNaN())
+	{
+		E1BoundsCenter = E5Target.GetActorLocation();
+		E1BoundsExtent = FVector::ZeroVector;
+	}
+	// The old PIP framed the ground contact. A tall E1 could therefore sit just
+	// outside the upper edge while its shadow remained inside the crop. E1 is
+	// the gameplay subject, so centre the capture on its real presentation
+	// bounds and increase distance only as much as required to fit the building.
+	const FVector CaptureFocus = E1BoundsExtent.IsNearlyZero()
+		? LandingWorld
+		: E1BoundsCenter;
+	const float HalfFovRadians = FMath::DegreesToRadians(
+		FMath::Clamp(Settings.LandingViewFieldOfViewDegrees, 10.0f, 120.0f)
+			* 0.5f);
+	const float BoundsFitDistance = E1BoundsExtent.IsNearlyZero()
+		? 0.0f
+		: E1BoundsExtent.Size()
+			/ FMath::Max(FMath::Tan(HalfFovRadians), 0.01f)
+			* 1.20f;
+	const float CaptureDistance = FMath::Max(
+		Settings.LandingViewCameraDistanceCM,
+		BoundsFitDistance);
+	CameraLocation = CaptureFocus - Look * CaptureDistance;
+
 	SceneCapture->PrimitiveRenderMode =
 		ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	// Use final color so the satellite surface consumes the same world lighting,
@@ -528,11 +560,11 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	SceneCapture->ShowFlags.SetLighting(SatellitePreviewPolicy.bUseWorldLighting);
 	SceneCapture->ClearShowOnlyComponents();
 	SceneCapture->ShowOnlyActorComponents(&Satellite);
-	if (Preview.TerminalType
-		== EABTSM6TrajectoryTerminalType::SatelliteE5)
-	{
-		SceneCapture->ShowOnlyActorComponents(&E5Target);
-	}
+	// E1 is a permanent visual reference for every satellite-terminal preview,
+	// not only for the rare trajectory already classified as a direct E1 hit.
+	// This also ensures near misses classified as SatelliteBody still show the
+	// building the player is trying to correct toward.
+	SceneCapture->ShowOnlyActorComponents(&E5Target);
 	SceneCapture->ShowOnlyComponent(TrajectoryPointInstances);
 	SceneCapture->ShowOnlyComponent(TrajectoryEndpoint);
 	const FQuat CaptureRotation =
@@ -547,6 +579,17 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	RebuildTrajectoryPointsAround(
 		Preview,
 		TerminalSegmentStartIndex);
+	UE_LOG(LogABTSRuntime, Verbose,
+		TEXT("[ABTS][M10.1][SatelliteLandingPreview][E1Framing]")
+		TEXT(" Terminal=%s Target=%s BoundsCenter=%s BoundsExtent=%s")
+		TEXT(" Landing=%s Focus=%s Distance=%.1f AlwaysVisible=1"),
+		*UEnum::GetValueAsString(Preview.TerminalType),
+		*GetNameSafe(&E5Target),
+		*E1BoundsCenter.ToCompactString(),
+		*E1BoundsExtent.ToCompactString(),
+		*LandingWorld.ToCompactString(),
+		*CaptureFocus.ToCompactString(),
+		CaptureDistance);
 	CaptureWithPersistentHistory(CaptureTransform);
 }
 
