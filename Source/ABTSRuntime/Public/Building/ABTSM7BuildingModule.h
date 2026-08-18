@@ -196,6 +196,9 @@ public:
 	}
 	float GetCurrentDamage() const { return CurrentDamage; }
 	float GetBreakDamage() const { return BreakDamage; }
+	/** Release gameplay durability applied only to real runtime brick Actors.
+	 * Frozen material/geometry identities and authored devices remain unchanged. */
+	static constexpr float RuntimeBrickBreakDamageScale = 0.10f;
 	/** Read-only visual surface used by the M7 stylized adapter; collision proxies never publish twice. */
 	UPrimitiveComponent* GetStylizedPresentationPrimitive() const;
 	/** Crystal targets and authored devices are gameplay weak-point semantics. */

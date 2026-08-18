@@ -357,7 +357,12 @@ void AABTSM7BuildingModule::ConfigureVoxelDevice(
 
 void AABTSM7BuildingModule::ConfigureImpactPhysics(const FABTSM7MaterialProfile& Profile)
 {
-	BreakDamage = FMath::Max(1.0f, Profile.BreakDamage);
+	BreakDamage = FMath::Max(
+		1.0f,
+		Profile.BreakDamage
+			* (ModuleKind == EABTSM7ModuleKind::Brick
+				? RuntimeBrickBreakDamageScale
+				: 1.0f));
 	ImpactPhysicalMaterial = NewObject<UPhysicalMaterial>(this, NAME_None, RF_Transient);
 	ImpactPhysicalMaterial->Friction = Profile.DynamicFriction;
 	ImpactPhysicalMaterial->StaticFriction = Profile.StaticFriction;
