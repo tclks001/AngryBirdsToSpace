@@ -2623,13 +2623,16 @@ void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 					FVector::ZeroVector,
 					CrystalGravity))
 			{
+				++JuryDemoFixedSixActivePhysicsBodyCount;
 				UE_LOG(LogABTSRuntime, Display,
 					TEXT("[ABTS][M7][E1CrystalSupportLoss]")
 					TEXT(" Activated=1 Module=%s SiteUp=%s Gravity=%.1f")
-					TEXT(" Cause=E1ChaosActivated MovementRecoveryArmed=1"),
+					TEXT(" ActiveBodies=%d Cause=E1ChaosActivated")
+					TEXT(" MovementRecoveryArmed=1"),
 					*CrystalModule->GetName(),
 					*CrystalGravity.SiteUp.ToCompactString(),
-					CrystalGravity.GravityAccelerationCMPerSec2);
+					CrystalGravity.GravityAccelerationCMPerSec2,
+					JuryDemoFixedSixActivePhysicsBodyCount);
 			}
 			else
 			{
