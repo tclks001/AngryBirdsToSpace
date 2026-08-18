@@ -3,11 +3,15 @@
 #include "Camera/ABTSM101LandingPreviewCamera.h"
 
 #include "ABTSRuntime.h"
+#include "Building/ABTSM73StableBuildingActor.h"
+#include "Building/ABTSM7BuildingModule.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Rendering/ABTSStylizedRenderingTypes.h"
@@ -55,6 +59,71 @@ namespace
 			ScreenUp = FVector::VectorPlaneProject(FVector::RightVector, Look).GetSafeNormal();
 		}
 		return ScreenUp.IsNearlyZero() ? FVector::UpVector : ScreenUp;
+	}
+
+	void GatherRealE1PreviewPrimitives(
+		AActor& E1Actor,
+		TArray<UPrimitiveComponent*>& OutPrimitives,
+		FBox& OutWorldBounds)
+	{
+		OutPrimitives.Reset();
+		OutWorldBounds = FBox(EForceInit::ForceInit);
+		auto AddPrimitive = [&OutPrimitives, &OutWorldBounds](
+			UPrimitiveComponent* Primitive)
+		{
+			if (!IsValid(Primitive)
+				|| !Primitive->IsRegistered()
+				|| !Primitive->IsVisible()
+				|| Primitive->bHiddenInGame)
+			{
+				return;
+			}
+			OutPrimitives.AddUnique(Primitive);
+			OutWorldBounds += Primitive->Bounds.GetBox();
+		};
+
+		TInlineComponentArray<UPrimitiveComponent*> ActorPrimitives(&E1Actor);
+		for (UPrimitiveComponent* Primitive : ActorPrimitives)
+		{
+			AddPrimitive(Primitive);
+		}
+
+		AABTSM73StableBuildingActor* StableE1 =
+			Cast<AABTSM73StableBuildingActor>(&E1Actor);
+		if (StableE1 == nullptr || StableE1->GetWorld() == nullptr)
+		{
+			return;
+		}
+
+		// Before first-hit preparation, the real E1 presentation is held by the
+		// per-material HISMs on the stable building Actor.
+		TArray<TPair<UPrimitiveComponent*, EABTSM7BuildingMaterial>>
+			StaticPreviewComponents;
+		StableE1->GatherPreviewComponentsForStylizedAdapter(
+			StaticPreviewComponents);
+		for (const TPair<UPrimitiveComponent*, EABTSM7BuildingMaterial>& Pair
+			: StaticPreviewComponents)
+		{
+			AddPrimitive(Pair.Key);
+		}
+
+		// Deferred-Chaos preparation replaces those HISMs with real independent
+		// AABTSM7BuildingModule Actors. They are owned by the material system, not
+		// attached child components of StableE1, so ShowOnlyActorComponents alone
+		// cannot render them. Follow the explicit damage-lifecycle owner instead.
+		for (TActorIterator<AABTSM7BuildingModule> It(StableE1->GetWorld());
+			It; ++It)
+		{
+			AABTSM7BuildingModule* Module = *It;
+			if (!IsValid(Module)
+				|| Module->IsBroken()
+				|| Module->IsRecycled()
+				|| Module->GetDamageLifecycleOwner() != StableE1)
+			{
+				continue;
+			}
+			AddPrimitive(Module->GetStylizedPresentationPrimitive());
+		}
 	}
 }
 
@@ -515,13 +584,18 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 		return;
 	}
 
-	FVector E1BoundsCenter = E5Target.GetActorLocation();
-	FVector E1BoundsExtent = FVector::ZeroVector;
-	E5Target.GetActorBounds(
-		/*bOnlyCollidingComponents=*/false,
-		E1BoundsCenter,
-		E1BoundsExtent,
-		/*bIncludeFromChildActors=*/true);
+	TArray<UPrimitiveComponent*> RealE1Primitives;
+	FBox RealE1WorldBounds(EForceInit::ForceInit);
+	GatherRealE1PreviewPrimitives(
+		E5Target,
+		RealE1Primitives,
+		RealE1WorldBounds);
+	FVector E1BoundsCenter = RealE1WorldBounds.IsValid
+		? RealE1WorldBounds.GetCenter()
+		: E5Target.GetActorLocation();
+	FVector E1BoundsExtent = RealE1WorldBounds.IsValid
+		? RealE1WorldBounds.GetExtent()
+		: FVector::ZeroVector;
 	if (E1BoundsCenter.ContainsNaN() || E1BoundsExtent.ContainsNaN())
 	{
 		E1BoundsCenter = E5Target.GetActorLocation();
@@ -560,11 +634,10 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	SceneCapture->ShowFlags.SetLighting(SatellitePreviewPolicy.bUseWorldLighting);
 	SceneCapture->ClearShowOnlyComponents();
 	SceneCapture->ShowOnlyActorComponents(&Satellite);
-	// E1 is a permanent visual reference for every satellite-terminal preview,
-	// not only for the rare trajectory already classified as a direct E1 hit.
-	// This also ensures near misses classified as SatelliteBody still show the
-	// building the player is trying to correct toward.
-	SceneCapture->ShowOnlyActorComponents(&E5Target);
+	for (UPrimitiveComponent* Primitive : RealE1Primitives)
+	{
+		SceneCapture->ShowOnlyComponent(Primitive);
+	}
 	SceneCapture->ShowOnlyComponent(TrajectoryPointInstances);
 	SceneCapture->ShowOnlyComponent(TrajectoryEndpoint);
 	const FQuat CaptureRotation =
@@ -582,14 +655,16 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	UE_LOG(LogABTSRuntime, Verbose,
 		TEXT("[ABTS][M10.1][SatelliteLandingPreview][E1Framing]")
 		TEXT(" Terminal=%s Target=%s BoundsCenter=%s BoundsExtent=%s")
-		TEXT(" Landing=%s Focus=%s Distance=%.1f AlwaysVisible=1"),
+		TEXT(" Landing=%s Focus=%s Distance=%.1f RealPrimitives=%d")
+		TEXT(" ExplicitModuleOwnership=1 AlwaysVisible=1"),
 		*UEnum::GetValueAsString(Preview.TerminalType),
 		*GetNameSafe(&E5Target),
 		*E1BoundsCenter.ToCompactString(),
 		*E1BoundsExtent.ToCompactString(),
 		*LandingWorld.ToCompactString(),
 		*CaptureFocus.ToCompactString(),
-		CaptureDistance);
+		CaptureDistance,
+		RealE1Primitives.Num());
 	CaptureWithPersistentHistory(CaptureTransform);
 }
 

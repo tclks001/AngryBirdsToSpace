@@ -468,7 +468,7 @@
 
 | 优先级 | 现象 | 根因 | 修复与验收门 |
 | --- | --- | --- | --- |
-| P0 | E1 新位置本身可接受，但 `SATELLITE LANDING PREVIEW` 内只能看到建筑阴影，看不到建筑本体；截图中阴影位于画面上沿附近 | 卫星画中画一直以预测接触点为焦点和固定 `1200 cm` 距离。E1 是高于球面的完整建筑，接触点仍在画面内时，建筑 Bounds 中心可能已经越过上边缘；此外旧 ShowOnly 逻辑只在终点已分类为 `SatelliteE5` 时加入 E1，普通近失误的 `SatelliteBody` 预览没有稳定视觉参照 | 画中画改为读取 E1 Actor 的完整展示 Bounds，以 Bounds center 为焦点，并按 Bounds sphere 与当前 FOV 只增不减地扩大拍摄距离；所有卫星终点（`SatelliteBody` 与 `SatelliteE5`）都把真实 E1 Actor 加入 ShowOnly，轨迹仍围绕权威终点绘制。日志新增 `SatelliteLandingPreview E1Framing ... AlwaysVisible=1`。Development Editor 编译通过；用户 Standalone 必须确认建筑本体完整进入画中画，阴影与本体同时可见，且近失误时仍能用 E1 修正瞄准 |
+| P0 | E1 新位置本身可接受，但 `SATELLITE LANDING PREVIEW` 内只能看到建筑阴影，看不到建筑本体；首轮把 StableBuilding Actor 加入 ShowOnly 并按 Bounds 取景后复测仍只有阴影 | 首轮只解决了取景和 `SatelliteBody` 分类。真实 E1 在 deferred-Chaos 准备前由 StableBuilding 的材质 HISM 展示，准备后则由 56 个独立 `AABTSM7BuildingModule` Actor 展示；这些 Module 的 Actor owner 是 MaterialSystem，既不是 StableBuilding 组件，也不是其 ChildActor。`ShowOnlyActorComponents(E1Actor)` 因而没有纳入真实本体，SceneCapture 却仍可能得到其投影阴影 | 画中画显式解析真实 E1 展示身份：先收集 StableBuilding 自身和四族 HISM，再按 `DamageLifecycleOwner==E1` 收集所有未破坏 Module 的实际展示 primitive；每个 primitive 逐项加入 ShowOnly，完整 Bounds 也只由同一集合计算。该规则同时覆盖静态预览和首击后的动态 E1，且对 `SatelliteBody`/`SatelliteE5` 一律启用。日志必须输出 `RealPrimitives>0 / ExplicitModuleOwnership=1 / AlwaysVisible=1`。用户 Standalone 必须确认建筑本体与阴影同时可见 |
 
 ## 28. E1 Crystal 移动后散落导致流程卡死（2026-08-18，待玩家验收）
 
