@@ -242,6 +242,22 @@ private:
 	void UpdateActiveLaunchTelemetry();
 	void FinalizeActiveLaunchTelemetry(const FVector& LandingWorldLocation);
 	void HandleBirdImpact(const FHitResult& Hit, float NormalSpeedCMPerSec, const FVector& IncomingVelocity);
+	void InitializeE1LandingDiagnostics();
+	void BeginE1LandingDiagnostic(const FVector& InitialVelocity);
+	void RecordE1LandingImpact(
+		const FHitResult& Hit,
+		float NormalSpeedCMPerSec,
+		const FVector& IncomingVelocity);
+	void RecordE1LandingFinal(const FVector& LandingWorldLocation);
+	void AppendE1LandingDiagnosticRow(
+		const TCHAR* Phase,
+		const FVector& SampleWorldLocation,
+		const FVector& SampleWorldVelocity,
+		float NormalSpeedCMPerSec,
+		const AActor* ImpactActor,
+		const UPrimitiveComponent* ImpactComponent,
+		bool bSatelliteBodyContact,
+		bool bDirectE1Contact);
 	bool ResolveImpactFacilityObservationAnchor(
 		const FHitResult& Hit,
 		FVector& OutAnchor,
@@ -473,6 +489,13 @@ private:
 	FVector PendingCompletedLandingLocation = FVector::ZeroVector;
 	EABTSBirdId PendingCompletedBirdId = EABTSBirdId::Red;
 	bool bHasPendingLaunchCompletion = false;
+	/** PIE/opt-in Development only; Shipping never creates landing diagnostics. */
+	bool bE1LandingDiagnosticEnabled = false;
+	FString E1LandingDiagnosticPath;
+	int32 E1LandingDiagnosticLaunchSequence = 0;
+	int32 E1LandingDiagnosticContactIndex = 0;
+	bool bE1LandingDiagnosticHitTarget = false;
+	FVector E1LandingDiagnosticInitialVelocity = FVector::ZeroVector;
 	UPROPERTY(EditAnywhere, Category = "ABTS|M6|Debug")
 	bool bSpawnDebugSlingshotsAtStart = false;
 	UPROPERTY(VisibleInstanceOnly, Category = "ABTS|M6|Calibration")

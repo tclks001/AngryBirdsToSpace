@@ -174,6 +174,7 @@ AABTSM6SlingshotSystem::AABTSM6SlingshotSystem()
 void AABTSM6SlingshotSystem::BeginPlay()
 {
 	Super::BeginPlay();
+	InitializeE1LandingDiagnostics();
 	EnsureTrajectoryVisualMaterials();
 	bStartupPhysicsWarmupComplete = !bEnableStartupPhysicsWarmup;
 	bStartupPhysicsWarmupFailed = false;
@@ -965,6 +966,7 @@ void AABTSM6SlingshotSystem::ReleaseLaunch()
 	// until the bird actually leaves the pouch.
 	LaunchState = EABTSM6LaunchState::Flying;
 	LaunchedBird->LaunchFromSlingshot(Velocity, GetResolvedFlightAirDragPerSecond());
+	BeginE1LandingDiagnostic(Velocity);
 	if (bCalibrationModeEnabled && ActiveCord.IsValid())
 	{
 		ActiveLaunchCalibrationTelemetry = FABTSM6LaunchCalibrationTelemetry();
@@ -1340,6 +1342,7 @@ bool AABTSM6SlingshotSystem::ResolveImpactFacilityObservationAnchor(
 void AABTSM6SlingshotSystem::HandleBirdImpact(const FHitResult& Hit, const float NormalSpeedCMPerSec, const FVector& IncomingVelocity)
 {
 	if ((LaunchState != EABTSM6LaunchState::Flying && LaunchState != EABTSM6LaunchState::Settling) || !LaunchedBird.IsValid()) return;
+	RecordE1LandingImpact(Hit, NormalSpeedCMPerSec, IncomingVelocity);
 	LaunchedBird->NotifySlingshotPresentationImpact();
 	if (SlingshotCamera)
 	{

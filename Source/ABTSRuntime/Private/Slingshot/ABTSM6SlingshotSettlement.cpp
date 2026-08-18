@@ -182,6 +182,7 @@ void AABTSM6SlingshotSystem::BeginReturn()
 	PendingCompletedBirdId = LaunchedBird->GetBirdId();
 	PendingCompletedLandingLocation = LaunchedBird->GetActorLocation();
 	bHasPendingLaunchCompletion = true;
+	RecordE1LandingFinal(PendingCompletedLandingLocation);
 	FinalizeActiveLaunchTelemetry(PendingCompletedLandingLocation);
 	FreezeDynamicProxies();
 	const int32 WalkFrozenBuildingBodies = BuildingMaterialSystem.IsValid()
