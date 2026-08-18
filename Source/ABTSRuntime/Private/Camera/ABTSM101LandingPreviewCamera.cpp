@@ -82,7 +82,8 @@ namespace
 			OutWorldBounds += Primitive->Bounds.GetBox();
 		};
 
-		TInlineComponentArray<UPrimitiveComponent*> ActorPrimitives(&E1Actor);
+		TInlineComponentArray<UPrimitiveComponent*> ActorPrimitives;
+		E1Actor.GetComponents(ActorPrimitives);
 		for (UPrimitiveComponent* Primitive : ActorPrimitives)
 		{
 			AddPrimitive(Primitive);
@@ -652,7 +653,7 @@ void AABTSM101LandingPreviewCamera::RefreshSatelliteCapture(
 	RebuildTrajectoryPointsAround(
 		Preview,
 		TerminalSegmentStartIndex);
-	UE_LOG(LogABTSRuntime, Verbose,
+	UE_LOG(LogABTSRuntime, Display,
 		TEXT("[ABTS][M10.1][SatelliteLandingPreview][E1Framing]")
 		TEXT(" Terminal=%s Target=%s BoundsCenter=%s BoundsExtent=%s")
 		TEXT(" Landing=%s Focus=%s Distance=%.1f RealPrimitives=%d")
