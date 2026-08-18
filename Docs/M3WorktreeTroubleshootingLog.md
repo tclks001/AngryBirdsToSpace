@@ -1130,6 +1130,30 @@ M3-JURY-007 建立时六栋均为非方形占地，因此测试把“Site Y 是�
 - `ABTS.M3.Monthly.SatellitePreview.03RuntimePracticeSnapshot` 必须同时断言：冻结候选为 `1960`、runtime 的 frozen-preview record 为 `1960`、实际 gameplay satellite gravity 与二者精确一致；并继续断言真实 union proxy overlap 和 `SampleCount=0`。
 - UE 5.8 Development Editor 增量构建 `12 actions / Result: Succeeded`。fresh NullRHI `Saved/Logs/M3RC5-FrozenGameplayGravity-20260816-172428-FreshNullRHI.log` 中，`03RuntimePracticeSnapshot` 精确 `1/1 Success / EXIT CODE: 0`，记录 `Ready=1 / GameplayGravity=1960.0 / FrozenPreviewGravity=1960.0 / GravityMatchesFrozenPreview=1 / ProxyOverlapBrickId=0 / ProxyOverlapCount=54 / SampleCount=0 / TrajectoryHash=102C2ECF35AF1AB1`；未启动 D3D、可见 PIE 或全量门。
 
+### M3-RC9-001：旧 E1 背面冻结点与玩家 Standalone 主落点簇相差约四分之一球面
+
+**现象**
+
+- 2026-08-18 的 Standalone 定向采样共记录 11 次发射、10 次卫星接触、0 次 E1 直接命中。玩家在画中画中不能明显辨认 E1；
+- `E1LandingSamples-20260818T053640Z-43416-55406.csv` 中，发射 5、7、8、9、10 的最终停点形成主簇；旧 E1 Site 为 `(-3735.873,15423.465,-3769.480)`，与主簇归一化均值方向明显分离。
+
+**根因**
+
+旧 Site 仍冻结在历史 `178° backside` 校准代理的球面径向投影。该位置证明过旧代理/真实 Brick 联集身份与历史校准可达性，但没有消费本轮玩家实际操作形成的落点分布；继续只旋转建筑或移动可见代理会使 MapFreeze、真实 E1 Actor、54 Brick OBB、M6 Target 与 runtime binding 分裂。
+
+**修复**
+
+- 以主簇 5/7/8/9/10 的卫星径向单位向量归一化均值 `(0.422328650,-0.896977363,-0.130652678)` 冻结新 Site；在当前卫星中心/半径下为 `(-3536.076,13362.185,-3177.064)`；
+- 整个 `SatelliteSiteWorldTransform` 搬迁，Site X 取朝实际发射点方向在新切平面的投影。真实 E1 建筑、54 Brick OBB 联集、碰撞、MapFreeze placement、M6 target 与 runtime exact binding 继续只消费同一 Site；
+- 新增独立 `OperatorLandingClusterPlacementV1` 身份证明。它覆盖采样方向、Site transform、完整 E1 union identity 与稳定 witness BrickId，但明确不冒充数值轨迹证书；`bProductionTargetTrajectoryCertified` 保持 false，等待用户 Standalone 位置确认后再补新的自动化/弹道证据；
+- 未修改共享冻结常量、共同地图、M7/M11 文件或二进制资产。新 Layout/Placement/Registration 先由 M3 发布 pending 值，交给 Integration 原子重冻结。
+
+**当前证据与待验收**
+
+- UE 5.8 Development Editor 普通构建成功：`24/24 actions / Result: Succeeded`；
+- 为提取 pending identity 只运行一次现有 MapFreeze 单项，日志 `Saved/Logs/M3-E1Relocation-HashExtraction-20260818-141412-FreshNullRHI.log`。新 Site 为 `(-3536.08,13362.18,-3177.06)`，E1 Placement `7399100AA594331A`、TargetIdentity `B666B56A3FA98612`、PlacementProof `B087C915ADD374EA`；M3 当前分支 pending Satellite/Layout/Registration 为 `6FC8FDA6EB150CDB / 2D627BD38D6EE9D9 / 42D1F5BC129FDB20`；
+- 该单项按预期未作为通过证据：旧自动化仍硬断言 `production-trajectory certified`，因此 `EXIT CODE: -1`。遵照用户指令，本轮不更新整套自动化、不打包；先由 Integration 合入并更新其当前共享 seal，再由用户在 Standalone 检查画中画可见性和实际命中难度。
+
 ## 15. 新条目模板
 
 ```markdown

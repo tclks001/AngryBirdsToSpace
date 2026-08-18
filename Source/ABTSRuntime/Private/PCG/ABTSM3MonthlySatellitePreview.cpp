@@ -482,7 +482,103 @@ struct FResolvedProductionTarget
 	uint64 TargetIdentityHash = 0;
 	FABTSCalibrationGravitySnapshot Gravity;
 	FABTSCalibrationSweepSummary TrajectorySummary;
+	bool bProductionPlacementCertified = false;
+	uint64 ProductionPlacementProofHash = 0;
 };
+
+uint64 ComputeProductionTargetUnionIdentityHashPrivate(
+	const FFrozenE1BuildingModuleSource& Source,
+	const FTransform& SiteWorldTransform);
+
+FVector GetFrozenE1OperatorLandingClusterDirection()
+{
+	// Normalized mean of operator Standalone final positions 5, 7, 8, 9 and
+	// 10 from E1LandingSamples-20260818T053640Z-43416-55406.csv.
+	return FVector(0.422328650, -0.896977363, -0.130652678)
+		.GetSafeNormal();
+}
+
+bool BuildFrozenE1OperatorLandingClusterSiteTransform(
+	const FVector& LaunchWorld,
+	const FVector& SatelliteCenterWorld,
+	const float SatelliteRadiusCM,
+	FTransform& OutSiteWorldTransform)
+{
+	const FVector SiteUp = GetFrozenE1OperatorLandingClusterDirection();
+	FVector SiteX = FVector::VectorPlaneProject(
+		LaunchWorld - SatelliteCenterWorld,
+		SiteUp).GetSafeNormal();
+	if (SiteX.IsNearlyZero())
+	{
+		SiteX = FVector::VectorPlaneProject(
+			FVector::UpVector,
+			SiteUp).GetSafeNormal();
+	}
+	const FVector SiteY = FVector::CrossProduct(SiteUp, SiteX).GetSafeNormal();
+	SiteX = FVector::CrossProduct(SiteY, SiteUp).GetSafeNormal();
+	if (SiteUp.IsNearlyZero() || SiteX.IsNearlyZero() || SiteY.IsNearlyZero()
+		|| FMath::Abs(FVector::DotProduct(SiteUp, SiteX)) > 0.001f)
+	{
+		return false;
+	}
+	OutSiteWorldTransform = FTransform(
+		FRotationMatrix::MakeFromXZ(SiteX, SiteUp).ToQuat(),
+		SatelliteCenterWorld + SiteUp * SatelliteRadiusCM,
+		FVector::OneVector);
+	return OutSiteWorldTransform.IsValid();
+}
+
+bool ApplyFrozenE1OperatorLandingClusterPlacement(
+	const FVector& LaunchWorld,
+	const FFrozenE1BuildingModuleSource& FrozenE1,
+	FResolvedProductionTarget& InOutTarget,
+	FString& OutFailure)
+{
+	FTransform SiteWorldTransform = FTransform::Identity;
+	if (!BuildFrozenE1OperatorLandingClusterSiteTransform(
+			LaunchWorld,
+			InOutTarget.SatelliteCenterWorld,
+			InOutTarget.Gravity.SatelliteRadiusCM,
+			SiteWorldTransform))
+	{
+		OutFailure = TEXT("FrozenE1OperatorLandingClusterFrame");
+		return false;
+	}
+	const FFrozenE1BuildingModuleSource::FBuildingModule* WitnessModule =
+		FrozenE1.BuildingModules.FindByPredicate(
+			[](const FFrozenE1BuildingModuleSource::FBuildingModule& Module)
+			{
+				return Module.BrickId == 16;
+			});
+	if (WitnessModule == nullptr)
+	{
+		OutFailure = TEXT("FrozenE1OperatorLandingClusterWitness");
+		return false;
+	}
+	InOutTarget.SiteWorldTransform = SiteWorldTransform;
+	InOutTarget.SiteYawDegrees = 0.0f;
+	InOutTarget.DescriptorHash = FrozenE1.DescriptorHash;
+	InOutTarget.TargetModuleId = WitnessModule->BrickId;
+	InOutTarget.TargetWorldTransform =
+		WitnessModule->SiteLocalTransform * SiteWorldTransform;
+	InOutTarget.TargetHalfExtentCM = WitnessModule->HalfExtentCM;
+	InOutTarget.TargetIdentityHash =
+		ComputeProductionTargetUnionIdentityHashPrivate(
+			FrozenE1,
+			SiteWorldTransform);
+	FCanonicalHash64 ProofHash;
+	ProofHash.AddInt32(1);
+	ProofHash.AddVector(GetFrozenE1OperatorLandingClusterDirection());
+	ProofHash.AddVector(SiteWorldTransform.GetLocation());
+	ProofHash.AddQuat(SiteWorldTransform.GetRotation());
+	ProofHash.AddUInt64(InOutTarget.TargetIdentityHash);
+	ProofHash.AddInt32(InOutTarget.TargetModuleId);
+	InOutTarget.ProductionPlacementProofHash = ProofHash.Get();
+	InOutTarget.bProductionPlacementCertified =
+		InOutTarget.TargetIdentityHash != 0
+		&& InOutTarget.ProductionPlacementProofHash != 0;
+	return InOutTarget.bProductionPlacementCertified;
+}
 
 uint64 ComputeProductionTargetUnionIdentityHashPrivate(
 	const FFrozenE1BuildingModuleSource& Source,
@@ -1688,6 +1784,8 @@ bool SelectAndCertifyFrozenE1Target(
 				FrozenE1, OutTarget.SiteWorldTransform);
 		const bool bCacheIdentityExact =
 			Cached->LegacyProxyHash == ExpectedLegacyProxyTrajectoryHash
+			&& OutTarget.bProductionPlacementCertified
+			&& OutTarget.ProductionPlacementProofHash != 0
 			&& FrozenE1.BuildingModules.ContainsByPredicate(
 				[&OutTarget](
 					const FFrozenE1BuildingModuleSource::FBuildingModule& Module)
@@ -1921,6 +2019,25 @@ bool SelectAndCertifyFrozenE1Target(
 			OutTarget.TrajectorySummary.LargestSuccessIslandSamples);
 		return false;
 	}
+	const FVector CertifiedLegacySite =
+		OutTarget.SiteWorldTransform.GetLocation();
+	if (!ApplyFrozenE1OperatorLandingClusterPlacement(
+			LaunchWorld,
+			FrozenE1,
+			OutTarget,
+			OutFailure))
+	{
+		return false;
+	}
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M3R5.1][FrozenE1OperatorLandingClusterPlacement] Source=StandaloneFinals Launches=5,7,8,9,10 SampleFile=E1LandingSamples-20260818T053640Z-43416-55406.csv LegacySite=%s NewSite=%s SiteUp=%s WitnessBrickId=%d TargetIdentity=%016llX PlacementProof=%016llX UserStandaloneRecheckRequired=1"),
+		*CertifiedLegacySite.ToCompactString(),
+		*OutTarget.SiteWorldTransform.GetLocation().ToCompactString(),
+		*OutTarget.SiteWorldTransform.GetUnitAxis(EAxis::Z).ToCompactString(),
+		OutTarget.TargetModuleId,
+		static_cast<unsigned long long>(OutTarget.TargetIdentityHash),
+		static_cast<unsigned long long>(
+			OutTarget.ProductionPlacementProofHash));
 	FFrozenE1CertificateCacheEntry& Cached =
 		CertificateCache.Add(CertificationKey);
 	Cached.Target = OutTarget;
@@ -2220,27 +2337,24 @@ bool FABTSM3MonthlySatellitePreviewBuilder::Build(
 		Candidate.ProductionTargetModuleId = ProductionTarget.TargetModuleId;
 		Candidate.ProductionTargetIdentityHash = static_cast<int64>(
 			ProductionTarget.TargetIdentityHash);
-		Candidate.bProductionTargetTrajectoryCertified =
-			TargetAuthority
-				== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
-			&& SpatialCandidate.SourceRouteCandidateId
-				== RequiredCertifiedSourceCandidateId
-			&& ABTSM3R51SatellitePreviewPrivate::
-				IsM3ProductionTrajectoryCertified(
-					ProductionTarget.TrajectorySummary,
-					FrozenPreset);
-		Candidate.ProductionTargetTrajectoryHash = static_cast<int64>(
-			ProductionTarget.TrajectorySummary.ResultHash);
+		Candidate.bProductionTargetTrajectoryCertified = false;
+		Candidate.ProductionTargetTrajectoryHash = 0;
 		const FVector TowardLaunch =
 			(Candidate.LaunchWorldLocation - Candidate.SatelliteCenterWorld).GetSafeNormal();
 		const FVector TowardTarget =
 			(Candidate.E5TargetWorldTransform.GetLocation() - Candidate.SatelliteCenterWorld).GetSafeNormal();
 		Candidate.bE5OnSatelliteBackside =
 			FVector::DotProduct(TowardLaunch, TowardTarget) < 0.0;
-		if (!Candidate.bE5OnSatelliteBackside)
+		Candidate.bE1OperatorLandingClusterPlacement =
+			ProductionTarget.bProductionPlacementCertified;
+		Candidate.E1OperatorLandingClusterPlacementHash =
+			static_cast<int64>(
+				ProductionTarget.ProductionPlacementProofHash);
+		if (!Candidate.bE5OnSatelliteBackside
+			&& !Candidate.bE1OperatorLandingClusterPlacement)
 		{
 			return ABTSM3R51SatellitePreviewPrivate::Reject(OutResult, EABTSM3MonthlySatellitePreviewRejectReason::TargetTransformFailed,
-				TEXT("E5NotBackside"), OutFailure);
+				TEXT("E1PlacementAuthority"), OutFailure);
 		}
 		Candidate.CandidateHash = static_cast<int64>(ComputeCandidateHash(Candidate));
 	}
@@ -2259,8 +2373,8 @@ bool FABTSM3MonthlySatellitePreviewBuilder::Build(
 			|| CertifiedCandidate->TargetAuthority != TargetAuthority
 			|| CertifiedCandidate->ProductionTargetDescriptorHash == 0
 			|| CertifiedCandidate->ProductionTargetIdentityHash == 0
-			|| !CertifiedCandidate->bProductionTargetTrajectoryCertified
-			|| CertifiedCandidate->ProductionTargetTrajectoryHash == 0)
+			|| !CertifiedCandidate->bE1OperatorLandingClusterPlacement
+			|| CertifiedCandidate->E1OperatorLandingClusterPlacementHash == 0)
 		{
 			return ABTSM3R51SatellitePreviewPrivate::Reject(
 				OutResult,
@@ -2389,6 +2503,8 @@ uint64 FABTSM3MonthlySatellitePreviewBuilder::ComputeCandidateHash(
 	Hash.AddBool(Candidate.bProductionTargetTrajectoryCertified);
 	Hash.AddInt64(Candidate.ProductionTargetTrajectoryHash);
 	Hash.AddBool(Candidate.bE5OnSatelliteBackside);
+	Hash.AddBool(Candidate.bE1OperatorLandingClusterPlacement);
+	Hash.AddInt64(Candidate.E1OperatorLandingClusterPlacementHash);
 	return Hash.Get();
 }
 
@@ -2594,6 +2710,57 @@ EvaluateFrozenE1LegacyProxyOverlap(
 		return false;
 	}
 	return true;
+}
+
+bool FABTSM3MonthlySatellitePreviewBuilder::
+EvaluateFrozenE1OperatorLandingClusterPlacement(
+	const FVector& LaunchWorldLocation,
+	const FABTSCalibrationGravitySnapshot& CalibrationGravity,
+	const FTransform& SiteWorldTransform,
+	uint64& OutTargetIdentityHash,
+	uint64& OutPlacementProofHash,
+	FString& OutFailure)
+{
+	using namespace ABTSM3R51SatellitePreviewPrivate;
+	OutTargetIdentityHash = 0;
+	OutPlacementProofHash = 0;
+	OutFailure.Reset();
+	FFrozenE1BuildingModuleSource FrozenE1;
+	FTransform ExpectedSiteWorldTransform = FTransform::Identity;
+	if (!ResolveFrozenE1BuildingModuleSource(FrozenE1, OutFailure)
+		|| !SiteWorldTransform.IsValid()
+		|| CalibrationGravity.SatelliteRadiusCM <= 0.0f
+		|| !BuildFrozenE1OperatorLandingClusterSiteTransform(
+			LaunchWorldLocation,
+			CalibrationGravity.SatelliteCenterWorld,
+			CalibrationGravity.SatelliteRadiusCM,
+			ExpectedSiteWorldTransform))
+	{
+		OutFailure = FString::Printf(
+			TEXT("FrozenE1LandingClusterSource:%s"),
+			*OutFailure);
+		return false;
+	}
+	if (!SiteWorldTransform.Equals(ExpectedSiteWorldTransform, 0.01f))
+	{
+		OutFailure = FString::Printf(
+			TEXT("FrozenE1LandingClusterTransform:Expected=%s:Actual=%s"),
+			*ExpectedSiteWorldTransform.GetLocation().ToCompactString(),
+			*SiteWorldTransform.GetLocation().ToCompactString());
+		return false;
+	}
+	OutTargetIdentityHash = ComputeProductionTargetUnionIdentityHashPrivate(
+		FrozenE1,
+		SiteWorldTransform);
+	FCanonicalHash64 ProofHash;
+	ProofHash.AddInt32(1);
+	ProofHash.AddVector(GetFrozenE1OperatorLandingClusterDirection());
+	ProofHash.AddVector(SiteWorldTransform.GetLocation());
+	ProofHash.AddQuat(SiteWorldTransform.GetRotation());
+	ProofHash.AddUInt64(OutTargetIdentityHash);
+	ProofHash.AddInt32(16);
+	OutPlacementProofHash = ProofHash.Get();
+	return OutTargetIdentityHash != 0 && OutPlacementProofHash != 0;
 }
 
 uint64 FABTSM3MonthlySatellitePreviewBuilder::ComputeResultHash(

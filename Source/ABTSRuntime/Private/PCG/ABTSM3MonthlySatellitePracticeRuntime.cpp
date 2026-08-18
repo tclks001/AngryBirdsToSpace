@@ -484,8 +484,12 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 	ApplyGravityOverride(true);
 	RefreshReadyState();
 
+	const TCHAR* const AttackabilityPolicy =
+		CandidateSnapshot.bE1OperatorLandingClusterPlacement
+			? TEXT("OperatorLandingClusterPlacementV1")
+			: TEXT("ReachableLegacyProxyOverlapV1");
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f FrozenPreviewGravity=%.1f GameplayGravity=%.1f GravityMatchesFrozenPreview=%d Policy=ReachableLegacyProxyOverlapV1 NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 ProxyOverlapBrickId=%d ProxyOverlapCount=%d E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticeInteraction=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice] Ready=%d Candidate=%d ReplacedLegacySatellites=%d SatelliteCenter=%s Radius=%.1f FrozenPreviewGravity=%.1f GameplayGravity=%.1f GravityMatchesFrozenPreview=%d Policy=%s NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 ProxyOverlapBrickId=%d ProxyOverlapCount=%d E5Center=%s E5HalfExtent=%s SatelliteCollision=%d E5Collision=%d M6Target=%d ProductionProfile=%d TrajectoryCertified=%d PracticeSlingshot=%d PracticeInteraction=%d PracticePouch=%s LaunchProfileHash=%016llX ProductionProfileHash=%016llX PresetHash=%016llX BaselineGravitySnapshotHash=%016llX TrajectoryHash=%016llX RuntimeLayoutSnapshotHash=%016llX UserStandaloneRecheckRequired=%d"),
 		bRuntimeReady ? 1 : 0,
 		RuntimeSnapshot.SourceRouteCandidateId,
 		SupersededSatellites.Num(),
@@ -497,6 +501,7 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 			RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2,
 			RuntimeSnapshot.CalibrationSatelliteSurfaceGravityCMPerSec2,
 			0.01f) ? 1 : 0,
+		AttackabilityPolicy,
 		RuntimeSnapshot.ProxyOverlapBrickId,
 		RuntimeSnapshot.ProxyOverlapBrickCount,
 		*RuntimeSnapshot.E5WorldTransform.GetLocation().ToCompactString(),
@@ -522,7 +527,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::ActivateSnapshot()
 		static_cast<unsigned long long>(
 			static_cast<uint64>(RuntimeSnapshot.TrajectoryCertificationHash)),
 		static_cast<unsigned long long>(
-			static_cast<uint64>(RuntimeSnapshot.RuntimeLayoutSnapshotHash)));
+			static_cast<uint64>(RuntimeSnapshot.RuntimeLayoutSnapshotHash)),
+		CandidateSnapshot.bE1OperatorLandingClusterPlacement ? 1 : 0);
 	return bRuntimeReady;
 }
 
@@ -1178,31 +1184,50 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 	uint64 UnionTargetIdentityHash = 0;
 	uint64 OverlapHash = 0;
 	FString UnionFailure;
-	const bool bProxyOverlap = bProductionBuildingModuleTarget
+	const bool bLandingClusterPlacement =
+		CandidateSnapshot.bE1OperatorLandingClusterPlacement;
+	const bool bPlacementProof = bProductionBuildingModuleTarget
+		&& bLandingClusterPlacement
 		? FABTSM3MonthlySatellitePreviewBuilder::
-			EvaluateFrozenE1LegacyProxyOverlap(
+			EvaluateFrozenE1OperatorLandingClusterPlacement(
 				LaunchFrame.RestPouchWorldLocation,
 				FrozenPreviewGravity,
 				CandidateSnapshot.SatelliteSiteWorldTransform,
-				FrozenPreset,
-				OverlapBrickId,
-				OverlapBrickCount,
 				UnionTargetIdentityHash,
 				OverlapHash,
 				UnionFailure)
-		: false;
+		: bProductionBuildingModuleTarget
+			&& FABTSM3MonthlySatellitePreviewBuilder::
+				EvaluateFrozenE1LegacyProxyOverlap(
+					LaunchFrame.RestPouchWorldLocation,
+					FrozenPreviewGravity,
+					CandidateSnapshot.SatelliteSiteWorldTransform,
+					FrozenPreset,
+					OverlapBrickId,
+					OverlapBrickCount,
+					UnionTargetIdentityHash,
+					OverlapHash,
+					UnionFailure);
 	const bool bExactFrozenUnionIdentity = bProductionBuildingModuleTarget
 		&& CandidateSnapshot.ProductionTargetDescriptorHash != 0
 		&& UnionTargetIdentityHash == static_cast<uint64>(
 			CandidateSnapshot.ProductionTargetIdentityHash);
-	if (!bProxyOverlap || !bExactFrozenUnionIdentity)
+	const bool bPlacementHashExact = !bLandingClusterPlacement
+		|| OverlapHash == static_cast<uint64>(
+			CandidateSnapshot.E1OperatorLandingClusterPlacementHash);
+	if (!bPlacementProof || !bExactFrozenUnionIdentity || !bPlacementHashExact)
 	{
 		UE_LOG(LogABTSRuntime, Error,
-			TEXT("[ABTS][M3R5.1][RuntimePractice] CertificationRejected Policy=ReachableLegacyProxyOverlapV1 NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 GameplayGravity=%.1f FrozenPreviewGravity=%.1f GravityMatchesFrozenPreview=%d ProxyOverlapBrickId=%d ProxyOverlapCount=%d ExactUnionIdentity=%d Failure=%s"),
+			TEXT("[ABTS][M3R5.1][RuntimePractice] CertificationRejected Policy=%s NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 GameplayGravity=%.1f FrozenPreviewGravity=%.1f GravityMatchesFrozenPreview=%d ProxyOverlapBrickId=%d ProxyOverlapCount=%d ExactUnionIdentity=%d PlacementHashExact=%d Failure=%s"),
+			bLandingClusterPlacement
+				? TEXT("OperatorLandingClusterPlacementV1")
+				: TEXT("ReachableLegacyProxyOverlapV1"),
 			RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2, FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2,
 			FMath::IsNearlyEqual(RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2, FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2, 0.01f) ? 1 : 0,
 			OverlapBrickId, OverlapBrickCount,
-			bExactFrozenUnionIdentity ? 1 : 0, *UnionFailure);
+			bExactFrozenUnionIdentity ? 1 : 0,
+			bPlacementHashExact ? 1 : 0,
+			*UnionFailure);
 		return false;
 	}
 	bTrajectoryCertified = true;
@@ -1236,7 +1261,10 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 				RuntimeSnapshot.PracticeStakeACellId,
 				RuntimeSnapshot.PracticeStakeBCellId));
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] Policy=ReachableLegacyProxyOverlapV1 NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 GameplayGravity=%.1f FrozenPreviewGravity=%.1f GravityMatchesFrozenPreview=%d Certified=%d ProductionBuildingModule=%d ExactOBBUnion=%d ProxyOverlapBrickId=%d ProxyOverlapCount=%d TargetIdentity=%016llX OverlapHash=%016llX"),
+		TEXT("[ABTS][M3R5.1][RuntimePractice][TrajectoryCertification] Policy=%s NumericalTrajectoryRequired=0 ExactCrystalRequired=0 SampleCount=0 GameplayGravity=%.1f FrozenPreviewGravity=%.1f GravityMatchesFrozenPreview=%d Certified=%d ProductionBuildingModule=%d ExactOBBUnion=%d ProxyOverlapBrickId=%d ProxyOverlapCount=%d TargetIdentity=%016llX PlacementProof=%016llX UserStandaloneRecheckRequired=%d"),
+		bLandingClusterPlacement
+			? TEXT("OperatorLandingClusterPlacementV1")
+			: TEXT("ReachableLegacyProxyOverlapV1"),
 		RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2,
 		FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2,
 		FMath::IsNearlyEqual(RuntimeSnapshot.SatelliteSurfaceGravityCMPerSec2, FrozenPreviewGravity.SatelliteSurfaceGravityCMPerSec2, 0.01f) ? 1 : 0,
@@ -1246,7 +1274,8 @@ bool AABTSM3MonthlySatellitePracticeRuntime::CertifyTrajectoryLayout()
 		OverlapBrickId,
 		OverlapBrickCount,
 		static_cast<unsigned long long>(UnionTargetIdentityHash),
-		static_cast<unsigned long long>(OverlapHash));
+		static_cast<unsigned long long>(OverlapHash),
+		bLandingClusterPlacement ? 1 : 0);
 	return bTrajectoryCertified;
 }
 

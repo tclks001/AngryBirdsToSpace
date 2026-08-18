@@ -421,7 +421,8 @@ bool FABTSM3JuryMapFreezeV3Builder::Build(
 	if (!SatellitePreviewResult.bPreviewResultValid
 		|| SatellitePreviewResult.WorldSeed != FrozenWorldSeed
 		|| SatelliteCandidate == nullptr
-		|| !SatelliteCandidate->bE5OnSatelliteBackside
+		|| (!SatelliteCandidate->bE5OnSatelliteBackside
+			&& !SatelliteCandidate->bE1OperatorLandingClusterPlacement)
 		|| static_cast<uint64>(SatelliteCandidate->SourceSpatialCandidateHash)
 			!= FrozenSourceSpatialCandidateHash
 		|| static_cast<uint64>(SatelliteCandidate->CandidateHash)
@@ -440,8 +441,11 @@ bool FABTSM3JuryMapFreezeV3Builder::Build(
 		const bool bFrozenTargetIdentityReady =
 			SatelliteCandidate->TargetAuthority
 				== EABTSM3MonthlySatelliteTargetAuthority::FrozenE1BuildingModules
-			&& SatelliteCandidate->bProductionTargetTrajectoryCertified
-			&& SatelliteCandidate->ProductionTargetTrajectoryHash != 0
+			&& ((SatelliteCandidate->bProductionTargetTrajectoryCertified
+					&& SatelliteCandidate->ProductionTargetTrajectoryHash != 0)
+				|| (SatelliteCandidate->bE1OperatorLandingClusterPlacement
+					&& SatelliteCandidate->
+						E1OperatorLandingClusterPlacementHash != 0))
 			&& SatelliteCandidate->ProductionTargetDescriptorHash != 0
 			&& SatelliteCandidate->ProductionTargetModuleId != INDEX_NONE
 			&& SatelliteCandidate->ProductionTargetIdentityHash != 0

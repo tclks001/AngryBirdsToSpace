@@ -196,6 +196,15 @@ struct ABTSRUNTIME_API FABTSM3MonthlySatellitePreviewCandidate
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	bool bE5OnSatelliteBackside = false;
 
+	/** Final E1 site was frozen from the August 18 Standalone landing cluster. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	bool bE1OperatorLandingClusterPlacement = false;
+
+	/** Deterministic identity proof for the operator-sampled placement. This is
+	 * deliberately separate from the numerical trajectory certificate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
+	int64 E1OperatorLandingClusterPlacementHash = 0;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ABTS|M3|Monthly Satellite Preview")
 	int64 CandidateHash = 0;
 };
@@ -320,6 +329,17 @@ public:
 		int32& OutOverlapBrickCount,
 		uint64& OutTargetIdentityHash,
 		uint64& OutOverlapHash,
+		FString& OutFailure);
+
+	/** Release placement proof for the E1 site selected from the operator's
+	 * August 18 Standalone landing cluster. This validates identity and frame;
+	 * it intentionally does not claim a numerical trajectory certificate. */
+	static bool EvaluateFrozenE1OperatorLandingClusterPlacement(
+		const FVector& LaunchWorldLocation,
+		const FABTSCalibrationGravitySnapshot& CalibrationGravity,
+		const FTransform& SiteWorldTransform,
+		uint64& OutTargetIdentityHash,
+		uint64& OutPlacementProofHash,
 		FString& OutFailure);
 
 	static uint64 ComputeResultHash(

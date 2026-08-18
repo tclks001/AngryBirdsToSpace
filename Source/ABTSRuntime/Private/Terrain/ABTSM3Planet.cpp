@@ -2495,7 +2495,8 @@ bool AABTSM3Planet::DrawMonthlyLogicRegionDebugOverlay(
 		}
 	}
 	if (SatellitePreview != nullptr
-		&& SatellitePreview->bE5OnSatelliteBackside
+		&& (SatellitePreview->bE5OnSatelliteBackside
+			|| SatellitePreview->bE1OperatorLandingClusterPlacement)
 		&& LogicalCells.IsValidIndex(
 			SatellitePreview->ReferenceSlotACellId)
 		&& LogicalCells.IsValidIndex(
