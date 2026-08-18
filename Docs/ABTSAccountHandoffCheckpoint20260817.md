@@ -5,6 +5,105 @@
 
 ## 0. 2026-08-18 接手后 P0 关闭与新包
 
+### 2026-08-18 可见回归后替代候选
+
+玩家对 `candidate-9f24bcd-20260818-Shipping` 的首次可见检查发现新的原子 P0：
+
+- 地图没有普通弹弓槽；
+- 地图没有任何掉落材料；
+- 开局没有提示；
+- Development 使用任意 Cell 放桩 Debug 后，匹配的弹弓弦也无法连接两根桩。
+
+该 `9f24bcd` 包不得继续测试或晋级。`a2534e2` 的 Development/Shipping
+只用于中间诊断，也不得交付。唯一替代候选的代码身份为：
+
+`7d0793a80c0863c0735829c5ddec5aae3ad0d844`
+`test(release): expose shipping starter inventory state`
+
+其功能修复提交为父提交：
+
+`a2534e2d89659a0989e797c5a93529d60cff85ea`
+`fix(release): restore production slingshot resources`
+
+根因和修复：
+
+- Candidate 4 原始槽规划成功，为 8 组 × 7 槽，普通弦权威为 1200 cm。
+- 旧发行适配先删除最终 V3 表面上的水面、建筑和重复槽，再只从幸存槽
+  启动 BFS；某组全部原始槽失效时搜索队列为空，产生结构非法的空组。
+- 生产代码随后把该失败结果配置为 `PreviewTest`，把普通弦最大长度归零；
+  M5.1 槽门 fail closed 后不再生成材料，也不发布 `Guide.World.Ready`。
+- 新适配保留每组全部原始 Cell 作为稳定拓扑遍历根，即使根本身非法，也能
+  穿过水面/建筑 envelope 找到最终合法地表；每组必须原子得到 12 个全局唯一槽。
+- 已激活的冻结 Candidate 4 以 `AcceptedMonthly` 权威配置。显式 Preview/Test
+  的身份和 fail-closed 行为保持不变。
+
+新 fresh 联合自动化精确 8/8 Success：
+
+- `ABTS.Guide.P0.EventCatalog`
+- `ABTS.Guide.P0.FastForwardAndSubjectIsolation`
+- `ABTS.Guide.P0.RuleSequence`
+- `ABTS.M11C.Unit.FinaleEndScreenPolicy`
+- `ABTS.M11C.Unit.PreviewReleasePlayback`
+- `ABTS.M51.OrdinarySlots.PreviewAdapter`
+- `ABTS.M51.SlingshotAssembly.Runtime`
+- `ABTS.Presentation.Opening.Timeline`
+
+日志：
+
+`G:\ABTS\Logs\RC9.3\Integration-P0-candidate-7d0793a-20260818-Combined-FreshNullRHI.log`
+
+其中 M5.1 自动化新增覆盖：
+
+- 全部原始组根失效时仍能穿越到合法生产地表；
+- 无法达到 12 槽时保持输入快照不变并 fail closed；
+- `AcceptedMonthly` 快照保持 1200 cm 普通弦权威；
+- Development 任意 Cell 放置的两根匹配普通桩能够用普通弦连接。
+
+最终替代包：
+
+- Development：
+  `G:\ABTS\Artifacts\RC9.3\candidate-7d0793a-m51resources-20260818-Development`
+- Shipping：
+  `G:\ABTS\Artifacts\RC9.3\candidate-7d0793a-m51resources-20260818-Shipping`
+
+两个 BuildCookRun 均为完整 cook，均为
+`BUILD SUCCESSFUL / AutomationTool ExitCode=0`。日志：
+
+- `G:\ABTS\Logs\RC9.3\BuildCookRun-candidate-7d0793a-m51resources-20260818-Development.log`
+- `G:\ABTS\Logs\RC9.3\BuildCookRun-candidate-7d0793a-m51resources-20260818-Shipping.log`
+
+Shipping packaged D3D11 player-path trace 直接证明：
+
+- `WorldReady=1 / WorldFailed=0`
+- 六栋建筑 `Accepted=6 / Rejected=0`
+- `M51 Ready=1 / Rejected=0`
+- `OrdinarySlots=96`
+- `Pickups=62`
+- `MaxCord=1200`
+- `Authority=AcceptedMonthly`
+- `StarterBranch=0 / StarterFiber=0 / InventoryStacks=0`
+- `Guide=Guide.P0.CollectResources`
+
+证据：
+
+`G:\ABTS\Logs\RC9.3\StartupTrace-candidate-7d0793a-m51resources-20260818-Shipping.log`
+
+Development packaged trace 同样证明 96 槽、62 材料与 1200 cm 权威；其
+Blueprint 调试满背包为 `Branch=99 / Fiber=99 / Stacks=16`，所以 Guide 按设计
+快进到 `InstallTwigStakes`，不得用于替代 Shipping 的初始收集提示证据。
+
+包文件 SHA-256 清单：
+
+`G:\ABTS\Logs\RC9.3\Manifest-candidate-7d0793a-m51resources-20260818.txt`
+
+本轮只获得无 GUI 和自动化证据。玩家仍需在新的 `7d0793a` Shipping 包中可见确认：
+
+- 地图上能看到并使用普通弹弓槽；
+- 地图材料可见并可拾取；
+- 开局“先收集材料”提示可见；
+- 拾取/制作普通桩和普通弦后能够连接；
+- 后续此前未测试项目继续保持未验收。
+
 接手后已恢复被外部工具回退/删除的四个工作树 Git 引用，并在集成候选
 `integration/candidate-rc93-exact-bricks` 上完成第 6 节 P0。当前发行代码身份为：
 
