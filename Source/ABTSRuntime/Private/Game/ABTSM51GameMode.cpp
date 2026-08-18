@@ -10,105 +10,6 @@
 #include "World/ABTSM51OrdinarySlingshotSlotPreview.h"
 #include "World/ABTSM51WorldSystem.h"
 
-namespace
-{
-constexpr int32 ReleaseSlotsPerOrdinaryGroup = 12;
-
-bool IsReleaseOrdinarySlotCellUsable(
-	const AABTSM3Planet& Planet,
-	const int32 CellId,
-	const int32 ExcludedFinaleCellId)
-{
-	const TArray<FABTSM3CellState>& CellStates =
-		Planet.GetGeneratedCellStates();
-	return Planet.LogicalCells.IsValidIndex(CellId)
-		&& CellStates.IsValidIndex(CellId)
-		&& CellId != ExcludedFinaleCellId
-		&& CellStates[CellId].bBuildable
-		&& !CellStates[CellId].bWater
-		&& !CellStates[CellId].bBuildingAnchor;
-}
-
-int32 ExpandReleaseOrdinarySlotGroups(
-	const AABTSM3Planet& Planet,
-	const int32 ExcludedFinaleCellId,
-	FABTSM51OrdinarySlingshotSlotSnapshot& InOutSnapshot)
-{
-	TSet<int32> UsedCells;
-	int32 RemovedInvalidSlots = 0;
-	for (FABTSM51OrdinarySlingshotSlotGroup& Group :
-		InOutSnapshot.SlotGroups)
-	{
-		for (int32 Index = Group.SlotCellIds.Num() - 1;
-			Index >= 0;
-			--Index)
-		{
-			const int32 CellId = Group.SlotCellIds[Index];
-			if (!IsReleaseOrdinarySlotCellUsable(
-					Planet,
-					CellId,
-					ExcludedFinaleCellId)
-				|| UsedCells.Contains(CellId))
-			{
-				Group.SlotCellIds.RemoveAt(Index);
-				++RemovedInvalidSlots;
-				continue;
-			}
-			UsedCells.Add(CellId);
-		}
-	}
-
-	int32 AddedSlots = 0;
-	for (FABTSM51OrdinarySlingshotSlotGroup& Group :
-		InOutSnapshot.SlotGroups)
-	{
-		TArray<int32> SearchQueue = Group.SlotCellIds;
-		SearchQueue.Sort();
-		int32 QueueIndex = 0;
-		while (Group.SlotCellIds.Num() < ReleaseSlotsPerOrdinaryGroup
-			&& QueueIndex < SearchQueue.Num())
-		{
-			const int32 SourceCellId = SearchQueue[QueueIndex++];
-			if (!Planet.LogicalCells.IsValidIndex(SourceCellId))
-			{
-				continue;
-			}
-			TArray<int32> OrderedNeighbors =
-				Planet.LogicalCells[SourceCellId].NeighborCellIds;
-			OrderedNeighbors.Sort();
-			for (const int32 NeighborCellId : OrderedNeighbors)
-			{
-				if (Group.SlotCellIds.Num()
-					>= ReleaseSlotsPerOrdinaryGroup)
-				{
-					break;
-				}
-				if (UsedCells.Contains(NeighborCellId)
-					|| !IsReleaseOrdinarySlotCellUsable(
-						Planet,
-						NeighborCellId,
-						ExcludedFinaleCellId))
-				{
-					continue;
-				}
-				UsedCells.Add(NeighborCellId);
-				Group.SlotCellIds.Add(NeighborCellId);
-				SearchQueue.Add(NeighborCellId);
-				++AddedSlots;
-			}
-		}
-	}
-
-	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M5.1][OrdinarySlots][ReleaseCapacity] Groups=%d TargetPerGroup=%d RemovedInvalid=%d Added=%d"),
-		InOutSnapshot.SlotGroups.Num(),
-		ReleaseSlotsPerOrdinaryGroup,
-		RemovedInvalidSlots,
-		AddedSlots);
-	return AddedSlots;
-}
-}
-
 AABTSM51GameMode::AABTSM51GameMode()
 {
 	PlayerControllerClass = AABTSM51PlayerController::StaticClass();
@@ -181,18 +82,53 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 					ExplicitPreviewCandidateId,
 					Snapshot,
 					PreviewFailure);
-		if (bSnapshotBuilt
+		const bool bProductionCandidate =
+			bSnapshotBuilt
 			&& !bPreviewRequested
-			&& ActiveFinalePreview != nullptr)
+			&& ActiveFinalePreview != nullptr;
+		bool bReleaseSnapshotReady = bSnapshotBuilt;
+		if (bProductionCandidate)
 		{
-			ExpandReleaseOrdinarySlotGroups(
-				*Planet,
+			int32 RemovedInvalidSlots = 0;
+			int32 AddedSlots = 0;
+			bReleaseSnapshotReady =
+				FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+					AdaptToProductionSurface(
+				Planet->LogicalCells,
+				Planet->GetGeneratedCellStates(),
 				ActiveFinalePreview->AnchorCellId,
-				Snapshot);
+				Snapshot,
+				PreviewFailure,
+				&RemovedInvalidSlots,
+				&AddedSlots);
+			if (bReleaseSnapshotReady)
+			{
+				UE_LOG(LogABTSRuntime, Log,
+					TEXT("[ABTS][M5.1][OrdinarySlots][ReleaseCapacity] Accepted=1 Groups=%d TargetPerGroup=%d RemovedInvalid=%d Added=%d Failure=None"),
+					Snapshot.SlotGroups.Num(),
+					FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+						RequiredSlotsPerGroup,
+					RemovedInvalidSlots,
+					AddedSlots);
+			}
+			else
+			{
+				UE_LOG(LogABTSRuntime, Error,
+					TEXT("[ABTS][M5.1][OrdinarySlots][ReleaseCapacity] Accepted=0 Groups=%d TargetPerGroup=%d RemovedInvalid=%d Added=%d Failure=%s"),
+					Snapshot.SlotGroups.Num(),
+					FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+						RequiredSlotsPerGroup,
+					RemovedInvalidSlots,
+					AddedSlots,
+					*PreviewFailure);
+			}
 		}
-		bPreviewConfigured = bSnapshotBuilt
-			&& System->ConfigurePreviewOrdinarySlingshotSlotSnapshot(
-				Snapshot);
+		bPreviewConfigured = bReleaseSnapshotReady
+			&& (bProductionCandidate
+				? System->ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
+					Snapshot)
+				: System->ConfigurePreviewOrdinarySlingshotSlotSnapshot(
+					Snapshot));
 		if (!bPreviewConfigured)
 		{
 			if (Planet == nullptr)
@@ -201,10 +137,21 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 			}
 			// A requested Preview/Test mode must fail closed instead of silently
 			// returning to the compatibility TaskGraph slot pairs.
-			System->ConfigurePreviewOrdinarySlingshotSlotSnapshot(
-				FABTSM51OrdinarySlingshotSlotSnapshot());
+			if (bProductionCandidate)
+			{
+				System->ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
+					FABTSM51OrdinarySlingshotSlotSnapshot());
+			}
+			else
+			{
+				System->ConfigurePreviewOrdinarySlingshotSlotSnapshot(
+					FABTSM51OrdinarySlingshotSlotSnapshot());
+			}
 			UE_LOG(LogABTSRuntime, Error,
-				TEXT("[ABTS][M5.1][OrdinarySlots][PreviewTest] Rejected Candidate=%d Reason=%s MonthlyAccepted=0"),
+				TEXT("[ABTS][M5.1][OrdinarySlots][%s] Rejected Candidate=%d Reason=%s MonthlyAccepted=0"),
+				bProductionCandidate
+					? TEXT("FrozenProduction")
+					: TEXT("PreviewTest"),
 				ExplicitPreviewCandidateId,
 				*PreviewFailure);
 		}
@@ -262,12 +209,17 @@ void AABTSM51GameMode::OnInitialPlayerPlaced(
 			FTransform::Identity);
 	}
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][M5.1] Entry ready=%d StartCell=%d PreviewTest=%d Candidate=%d OrdinaryConfigured=%d FinaleConfigured=%d MonthlyAccepted=0"),
+		TEXT("[ABTS][M5.1] Entry ready=%d StartCell=%d CandidateFrame=%d ExplicitPreviewTest=%d Candidate=%d OrdinaryConfigured=%d OrdinaryAuthority=%d FinaleConfigured=%d MonthlyAccepted=0"),
 		System ? 1 : 0,
 		SpawnCellId,
 		bResolvedPreviewRequested ? 1 : 0,
+		bPreviewRequested ? 1 : 0,
 		bResolvedPreviewRequested ? ExplicitPreviewCandidateId : INDEX_NONE,
 		bPreviewConfigured ? 1 : 0,
+		System != nullptr
+			? static_cast<int32>(
+				System->GetOrdinarySlotSnapshotAuthority())
+			: 0,
 		bFinalePreviewConfigured ? 1 : 0);
 }
 

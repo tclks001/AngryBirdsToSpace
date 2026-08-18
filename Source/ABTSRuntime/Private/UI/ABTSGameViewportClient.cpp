@@ -14,6 +14,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformMisc.h"
+#include "Guide/ABTSGuideWorldSubsystem.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "InputCoreTypes.h"
@@ -31,6 +32,7 @@
 #include "UI/ABTSGameUserSettings.h"
 #include "UI/ABTSUITheme.h"
 #include "UnrealClient.h"
+#include "World/ABTSM51WorldSystem.h"
 
 namespace
 {
@@ -330,6 +332,9 @@ void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
 		&& UGameplayStatics::IsGamePaused(GameWorld);
 	int32 GateCount = 0;
 	TArray<FString> GateStates;
+	int32 M51Count = 0;
+	TArray<FString> M51States;
+	FString ActiveGuideId = TEXT("None");
 	if (GameWorld != nullptr)
 	{
 		for (TActorIterator<AABTSM6SlingshotSystem> It(GameWorld); It; ++It)
@@ -337,12 +342,27 @@ void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
 			++GateCount;
 			GateStates.Add(It->BuildStartupPhysicsDiagnosticSummary());
 		}
+		for (TActorIterator<AABTSM51WorldSystem> It(GameWorld); It; ++It)
+		{
+			++M51Count;
+			M51States.Add(It->BuildReleaseDiagnosticSummary());
+		}
+		if (const UABTSGuideWorldSubsystem* GuideSubsystem =
+			GameWorld->GetSubsystem<UABTSGuideWorldSubsystem>())
+		{
+			FABTSGuidePresentationSnapshot ActiveGuide;
+			if (GuideSubsystem->GetActiveGuide(ActiveGuide))
+			{
+				ActiveGuideId = ActiveGuide.GuideId.ToString();
+			}
+		}
 	}
 	const FString State = FString::Printf(
 		TEXT("World=%s BegunPlay=%d WorldSeconds=%.3f Paused=%d")
 		TEXT(" FrontEnd=%d MenuVisible=%d MenuPage=%d Canvas=%d")
 		TEXT(" GateCount=%d GateRequired=%d AuthorityDiscovered=%d AuthorityReady=%d")
-		TEXT(" PresentationReady=%d WorldReady=%d WorldFailed=%d Draws=%d Gates=[%s]"),
+		TEXT(" PresentationReady=%d WorldReady=%d WorldFailed=%d Draws=%d Gates=[%s]")
+		TEXT(" M51Count=%d M51=[%s] Guide=%s"),
 		GameWorld != nullptr ? *GameWorld->GetName() : TEXT("None"),
 		bHasBegunPlay ? 1 : 0,
 		GameWorld != nullptr ? GameWorld->GetTimeSeconds() : -1.0f,
@@ -359,7 +379,10 @@ void UABTSGameViewportClient::WriteStartupDiagnosticTrace()
 		bStartupWorldReady ? 1 : 0,
 		bStartupWorldFailed ? 1 : 0,
 		StartupReadyPresentationFrameCount,
-		*FString::Join(GateStates, TEXT(" | ")));
+		*FString::Join(GateStates, TEXT(" | ")),
+		M51Count,
+		*FString::Join(M51States, TEXT(" | ")),
+		*ActiveGuideId);
 	if (NowSeconds < NextStartupDiagnosticTraceSeconds)
 	{
 		return;

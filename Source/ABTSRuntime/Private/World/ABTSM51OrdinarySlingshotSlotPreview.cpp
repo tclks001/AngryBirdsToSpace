@@ -3,6 +3,25 @@
 #include "World/ABTSM51OrdinarySlingshotSlotPreview.h"
 
 #include "PCG/ABTSM3MonthlySlingshotField.h"
+#include "PCG/ABTSM3TaskGraphTypes.h"
+#include "Planet/ABTSM2Planet.h"
+
+namespace
+{
+	bool IsProductionSlotCellUsable(
+		const TArray<FABTSM2Cell>& Cells,
+		const TArray<FABTSM3CellState>& CellStates,
+		const int32 CellId,
+		const int32 ExcludedFinaleCellId)
+	{
+		return Cells.IsValidIndex(CellId)
+			&& CellStates.IsValidIndex(CellId)
+			&& CellId != ExcludedFinaleCellId
+			&& CellStates[CellId].bBuildable
+			&& !CellStates[CellId].bWater
+			&& !CellStates[CellId].bBuildingAnchor;
+	}
+}
 
 bool FABTSM51OrdinarySlingshotSlotPreviewAdapter::
 	BuildFromExplicitCandidate(
@@ -71,6 +90,141 @@ bool FABTSM51OrdinarySlingshotSlotPreviewAdapter::
 		OutSnapshot = FABTSM51OrdinarySlingshotSlotSnapshot();
 		OutFailure = TEXT("AdaptedSnapshotInvalid");
 		return false;
+	}
+	return true;
+}
+
+bool FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+	AdaptToProductionSurface(
+		const TArray<FABTSM2Cell>& Cells,
+		const TArray<FABTSM3CellState>& CellStates,
+		const int32 ExcludedFinaleCellId,
+		FABTSM51OrdinarySlingshotSlotSnapshot& InOutSnapshot,
+		FString& OutFailure,
+		int32* OutRemovedInvalidSlots,
+		int32* OutAddedSlots)
+{
+	OutFailure.Reset();
+	if (OutRemovedInvalidSlots != nullptr)
+	{
+		*OutRemovedInvalidSlots = 0;
+	}
+	if (OutAddedSlots != nullptr)
+	{
+		*OutAddedSlots = 0;
+	}
+	if (Cells.IsEmpty()
+		|| Cells.Num() != CellStates.Num()
+		|| !InOutSnapshot.IsStructurallyUsable())
+	{
+		OutFailure = TEXT("InvalidSourceSnapshotOrSurface");
+		return false;
+	}
+
+	FABTSM51OrdinarySlingshotSlotSnapshot Candidate =
+		InOutSnapshot;
+	TSet<int32> UsedCells;
+	int32 RemovedInvalidSlots = 0;
+	int32 AddedSlots = 0;
+	for (int32 GroupIndex = 0;
+		GroupIndex < Candidate.SlotGroups.Num();
+		++GroupIndex)
+	{
+		FABTSM51OrdinarySlingshotSlotGroup& Group =
+			Candidate.SlotGroups[GroupIndex];
+		const TArray<int32> OriginalRoots = Group.SlotCellIds;
+		Group.SlotCellIds.Reset();
+
+		for (const int32 CellId : OriginalRoots)
+		{
+			if (!IsProductionSlotCellUsable(
+					Cells,
+					CellStates,
+					CellId,
+					ExcludedFinaleCellId)
+				|| UsedCells.Contains(CellId))
+			{
+				++RemovedInvalidSlots;
+				continue;
+			}
+			UsedCells.Add(CellId);
+			Group.SlotCellIds.Add(CellId);
+		}
+
+		TArray<int32> SearchQueue;
+		TSet<int32> VisitedCells;
+		for (const int32 RootCellId : OriginalRoots)
+		{
+			if (Cells.IsValidIndex(RootCellId)
+				&& !VisitedCells.Contains(RootCellId))
+			{
+				VisitedCells.Add(RootCellId);
+				SearchQueue.Add(RootCellId);
+			}
+		}
+		SearchQueue.Sort();
+
+		int32 QueueIndex = 0;
+		while (Group.SlotCellIds.Num() < RequiredSlotsPerGroup
+			&& QueueIndex < SearchQueue.Num())
+		{
+			const int32 SourceCellId = SearchQueue[QueueIndex++];
+			TArray<int32> OrderedNeighbors =
+				Cells[SourceCellId].NeighborCellIds;
+			OrderedNeighbors.Sort();
+			for (const int32 NeighborCellId : OrderedNeighbors)
+			{
+				if (!Cells.IsValidIndex(NeighborCellId)
+					|| VisitedCells.Contains(NeighborCellId))
+				{
+					continue;
+				}
+
+				// Traverse every topology Cell, including water and building
+				// envelopes. A whole authored group can be invalid on the final
+				// surface, and valid release terrain may lie beyond that envelope.
+				VisitedCells.Add(NeighborCellId);
+				SearchQueue.Add(NeighborCellId);
+				if (Group.SlotCellIds.Num() >= RequiredSlotsPerGroup
+					|| UsedCells.Contains(NeighborCellId)
+					|| !IsProductionSlotCellUsable(
+						Cells,
+						CellStates,
+						NeighborCellId,
+						ExcludedFinaleCellId))
+				{
+					continue;
+				}
+				UsedCells.Add(NeighborCellId);
+				Group.SlotCellIds.Add(NeighborCellId);
+				++AddedSlots;
+			}
+		}
+
+		if (Group.SlotCellIds.Num() < RequiredSlotsPerGroup)
+		{
+			OutFailure = FString::Printf(
+				TEXT("GroupCapacity:%d:%d/%d"),
+				GroupIndex,
+				Group.SlotCellIds.Num(),
+				RequiredSlotsPerGroup);
+			return false;
+		}
+	}
+
+	if (!Candidate.IsStructurallyUsable())
+	{
+		OutFailure = TEXT("AdaptedSnapshotInvalid");
+		return false;
+	}
+	InOutSnapshot = MoveTemp(Candidate);
+	if (OutRemovedInvalidSlots != nullptr)
+	{
+		*OutRemovedInvalidSlots = RemovedInvalidSlots;
+	}
+	if (OutAddedSlots != nullptr)
+	{
+		*OutAddedSlots = AddedSlots;
 	}
 	return true;
 }

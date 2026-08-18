@@ -25,6 +25,30 @@ AABTSM51WorldSystem::AABTSM51WorldSystem()
 	CraftingStationClass = AABTSCraftingStation::StaticClass();
 }
 
+FString AABTSM51WorldSystem::BuildReleaseDiagnosticSummary() const
+{
+	const TCHAR* AuthorityName = TEXT("None");
+	switch (OrdinarySlotSnapshotAuthority)
+	{
+	case EABTSM51OrdinarySlingshotSlotSnapshotAuthority::AcceptedMonthly:
+		AuthorityName = TEXT("AcceptedMonthly");
+		break;
+	case EABTSM51OrdinarySlingshotSlotSnapshotAuthority::PreviewTest:
+		AuthorityName = TEXT("PreviewTest");
+		break;
+	default:
+		break;
+	}
+	return FString::Printf(
+		TEXT("Ready=%d Rejected=%d OrdinarySlots=%d Pickups=%d MaxCord=%d Authority=%s"),
+		bInitialized ? 1 : 0,
+		bInitializationRejected ? 1 : 0,
+		OrdinarySlots.Num(),
+		Pickups.Num(),
+		GetActiveOrdinaryMaxCordLengthCM(),
+		AuthorityName);
+}
+
 void AABTSM51WorldSystem::BeginPlay()
 {
 	Super::BeginPlay();

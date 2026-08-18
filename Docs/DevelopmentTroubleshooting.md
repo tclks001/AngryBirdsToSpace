@@ -445,3 +445,9 @@
 | 优先级 | 现象 | 根因 | 修复与验收门 |
 | --- | --- | --- | --- |
 | P0 | E5 河岸附近部分冻结弹弓槽落在水中或河对岸，玩家一侧仅剩 3 个可用槽；两个普通弹弓占用后无法再放强化弹弓桩，形成进度卡死 | 正式流程消费已冻结的月度候选时仍把普通槽快照配置为 `PreviewTest`，因此跳过最终地表的水面、可建造性和建筑占位检查；原候选每组仅 7 个槽，损失数个后没有发行冗余 | 不改变 M3 Candidate/Layout/MapFreeze 身份，只在正式活动候选的生产消费边界剔除水面、不可建造、建筑锚点、终局锚点及重复 Cell，再从每组剩余有效 Cell 以稳定 CellId 邻接顺序扩展到 12 个槽。显式 Preview/Test 保持冻结快照不变。编译门通过；下一 Development/Shipping 包必须在 E5 玩家一侧确认至少可同时放置两个普通弹弓和一套强化弹弓，且新增槽不在水面或建筑内 |
+
+## 24. RC9.3 候选普通槽原子拒绝（2026-08-18）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P0 | `candidate-9f24bcd-20260818-Shipping` 进入正确 V3 世界，但地图没有任何普通弹弓槽、材料或开局提示；Development 开启任意 Cell 放桩后，匹配的普通弹弓弦也不能连接两个桩 | 四个表象来自同一个 M5.1 原子拒绝。Candidate 4 原始槽快照已成功生成（8 组 × 7 槽，`MaxCord=1200`），但发行清理先删除最终 V3 表面上的水面、建筑和重复槽，再只从清理后幸存槽做 BFS。某些组的 7 个根全部失效后，搜索队列为空，结果至少一组少于两个槽，结构校验失败。生产活动 Candidate 又错误配置为 `PreviewTest`；失败快照把 `MaxCord` 解析成 0，`SpawnSlingshotHoles` fail closed，后续材料生成与 `Guide.World.Ready` 均不执行。Developer 任意 Cell 只绕过槽放置，不绕过 0 cm 弦长权威 | 将最终表面适配抽为 Integration-owned 原子适配器：保留每组全部原始 Cell 作为拓扑遍历根，即使根位于水面/建筑区也继续穿越，按稳定 CellId 邻接顺序寻找最终合法且全局唯一的 12 个槽；无法达到容量仍原子 fail closed。已激活的冻结 Candidate 4 使用 `AcceptedMonthly` 权威配置，显式 Preview/Test 不变；1200 cm 弦长随同一有效快照发布。真实 `L_ABTS_M11` 当前源码得到 `AcceptedMonthlySnapshot Accepted=1 / Holes=96 / MaxCord=1200 / Pickups=62 / Ready=1 Rejected=0`，Guide 先激活 `CollectResources`；Development 调试满背包随后正常快进到 `InstallTwigStakes`。ForceUnity 通过；联合 fresh 自动化 8/8，包括全失效根穿越、适配失败原子性和 Developer 桩连接。替代 Shipping 还必须证明调试背包硬关闭且 packaged trace 保持 `Guide.P0.CollectResources` |

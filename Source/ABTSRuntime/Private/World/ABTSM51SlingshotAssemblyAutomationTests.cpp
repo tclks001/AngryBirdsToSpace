@@ -288,6 +288,55 @@ bool FABTSM51SlingshotAssemblyRuntimeTest::RunTest(
 		UWorld* World = ScopedWorld.Get();
 		AABTSM51WorldSystem* System = nullptr;
 		UABTSInventoryComponent* Inventory = nullptr;
+		TestTrue(
+			TEXT("Accepted production-snapshot connection fixture is ready"),
+			World != nullptr
+				&& PrepareAssemblyRuntime(
+					*World,
+					EABTSItemId::SimpleCord,
+					2,
+					System,
+					Inventory));
+		if (World != nullptr && System != nullptr && Inventory != nullptr)
+		{
+			TestTrue(
+				TEXT("Accepted production snapshot configures the ordinary cord authority"),
+				System->ConfigureAcceptedOrdinarySlingshotSlotSnapshot(
+					MakeValidSlotSnapshot()));
+			AABTSM51SlingshotStake* First =
+				SpawnTestStake(
+					*World,
+					FVector(0.0, 0.0, 0.0),
+					EABTSItemId::SimpleStake,
+					1);
+			AABTSM51SlingshotStake* Second =
+				SpawnTestStake(
+					*World,
+					FVector(200.0, 0.0, 0.0),
+					EABTSItemId::SimpleStake,
+					2);
+			TestTrue(
+				TEXT("Developer-placed first stake selects under accepted authority"),
+				First != nullptr
+					&& System->SelectStakeForHeldCord(*First));
+			TestTrue(
+				TEXT("Developer-placed matching stakes connect under the 1200 cm production authority"),
+				Second != nullptr
+					&& System->SelectStakeForHeldCord(*Second));
+			TestTrue(
+				TEXT("Accepted production authority commits both developer-placed endpoints"),
+				First != nullptr
+					&& Second != nullptr
+					&& First->HasCord()
+					&& Second->HasCord());
+		}
+	}
+
+	{
+		FScopedM51SlingshotAssemblyWorld ScopedWorld;
+		UWorld* World = ScopedWorld.Get();
+		AABTSM51WorldSystem* System = nullptr;
+		UABTSInventoryComponent* Inventory = nullptr;
 		if (World != nullptr
 			&& PrepareAssemblyRuntime(
 				*World,

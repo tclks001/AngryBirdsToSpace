@@ -83,6 +83,14 @@ public:
 	{
 		return OrdinarySlotSnapshotAuthority;
 	}
+	bool IsWorldContentInitialized() const { return bInitialized; }
+	bool IsWorldInitializationRejected() const
+	{
+		return bInitializationRejected;
+	}
+	int32 GetOrdinarySlotCount() const { return OrdinarySlots.Num(); }
+	int32 GetPickupCount() const { return Pickups.Num(); }
+	FString BuildReleaseDiagnosticSummary() const;
 
 private:
 	bool InitializeWorldContent();

@@ -8,6 +8,8 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "PCG/ABTSM3MonthlySlingshotField.h"
+#include "PCG/ABTSM3TaskGraphTypes.h"
+#include "Planet/ABTSM2Planet.h"
 #include "World/ABTSM51OrdinarySlingshotSlotPreview.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM51WorldSystem.h"
@@ -123,6 +125,46 @@ bool SnapshotsEqual(
 	}
 	return true;
 }
+
+void BuildReleaseTraversalFixture(
+	TArray<FABTSM2Cell>& OutCells,
+	TArray<FABTSM3CellState>& OutStates,
+	FABTSM51OrdinarySlingshotSlotSnapshot& OutSnapshot)
+{
+	constexpr int32 CellCount = 60;
+	OutCells.SetNum(CellCount);
+	OutStates.SetNum(CellCount);
+	for (int32 CellId = 0; CellId < CellCount; ++CellId)
+	{
+		if (CellId > 0)
+		{
+			OutCells[CellId].NeighborCellIds.Add(CellId - 1);
+		}
+		if (CellId + 1 < CellCount)
+		{
+			OutCells[CellId].NeighborCellIds.Add(CellId + 1);
+		}
+		OutStates[CellId].bWater = true;
+	}
+	for (int32 CellId = 7; CellId <= 18; ++CellId)
+	{
+		OutStates[CellId].bWater = false;
+		OutStates[CellId].bBuildable = true;
+	}
+	for (int32 CellId = 41; CellId <= 52; ++CellId)
+	{
+		OutStates[CellId].bWater = false;
+		OutStates[CellId].bBuildable = true;
+	}
+
+	OutSnapshot.LayoutHash = 0x51A0ull;
+	OutSnapshot.CandidateHash = 0x51B0ull;
+	OutSnapshot.MaxCordLengthCM = 1200;
+	OutSnapshot.SlotGroups.AddDefaulted_GetRef().SlotCellIds =
+		{0, 1, 2, 3, 4, 5, 6};
+	OutSnapshot.SlotGroups.AddDefaulted_GetRef().SlotCellIds =
+		{59, 58, 57, 56, 55, 54, 53};
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -179,6 +221,82 @@ bool FABTSM51OrdinarySlingshotSlotPreviewAdapterTest::RunTest(
 		TEXT("The Preview/Test adapter does not mutate or promote its M3 source"),
 		FABTSM3MonthlySlingshotFieldResult::StaticStruct()
 			->CompareScriptStruct(&Source, &SourceBefore, 0));
+
+	TArray<FABTSM2Cell> ReleaseCells;
+	TArray<FABTSM3CellState> ReleaseStates;
+	FABTSM51OrdinarySlingshotSlotSnapshot ReleaseSnapshot;
+	BuildReleaseTraversalFixture(
+		ReleaseCells,
+		ReleaseStates,
+		ReleaseSnapshot);
+	const FABTSM51OrdinarySlingshotSlotSnapshot ReleaseBefore =
+		ReleaseSnapshot;
+	int32 RemovedInvalidSlots = 0;
+	int32 AddedSlots = 0;
+	TestTrue(
+		TEXT("Production adaptation traverses beyond wholly invalid group roots"),
+		FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+			AdaptToProductionSurface(
+				ReleaseCells,
+				ReleaseStates,
+				INDEX_NONE,
+				ReleaseSnapshot,
+				Failure,
+				&RemovedInvalidSlots,
+				&AddedSlots));
+	TestEqual(
+		TEXT("Both release groups remain present"),
+		ReleaseSnapshot.SlotGroups.Num(),
+		2);
+	for (int32 GroupIndex = 0;
+		GroupIndex < ReleaseSnapshot.SlotGroups.Num();
+		++GroupIndex)
+	{
+		TestEqual(
+			*FString::Printf(
+				TEXT("Release group %d reaches the required capacity"),
+				GroupIndex),
+			ReleaseSnapshot.SlotGroups[GroupIndex].SlotCellIds.Num(),
+			FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+				RequiredSlotsPerGroup);
+	}
+	TestEqual(
+		TEXT("All invalid authored roots are removed"),
+		RemovedInvalidSlots,
+		14);
+	TestEqual(
+		TEXT("The topology walk contributes every release slot"),
+		AddedSlots,
+		24);
+	TestEqual(
+		TEXT("Production adaptation preserves the 1200 cm cord authority"),
+		ReleaseSnapshot.MaxCordLengthCM,
+		1200);
+	TestTrue(
+		TEXT("Adapted release snapshot remains structurally usable"),
+		ReleaseSnapshot.IsStructurallyUsable());
+
+	TArray<FABTSM2Cell> ImpossibleCells = ReleaseCells;
+	TArray<FABTSM3CellState> ImpossibleStates = ReleaseStates;
+	for (FABTSM3CellState& State : ImpossibleStates)
+	{
+		State.bWater = true;
+		State.bBuildable = false;
+	}
+	FABTSM51OrdinarySlingshotSlotSnapshot Impossible =
+		ReleaseBefore;
+	TestFalse(
+		TEXT("Insufficient production terrain still fails closed"),
+		FABTSM51OrdinarySlingshotSlotReleaseAdapter::
+			AdaptToProductionSurface(
+				ImpossibleCells,
+				ImpossibleStates,
+				INDEX_NONE,
+				Impossible,
+				Failure));
+	TestTrue(
+		TEXT("Failed production adaptation is atomic"),
+		SnapshotsEqual(Impossible, ReleaseBefore));
 
 	FABTSM51OrdinarySlingshotSlotSnapshot Missing;
 	TestFalse(
