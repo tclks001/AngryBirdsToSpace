@@ -260,7 +260,8 @@ bool FABTSM3StylizedSemanticAdapter::TryResolveMonthlySatellitePreviewElement(
 	case EABTSM3StylizedSatellitePreviewElement::SatelliteSurface:
 		break;
 	case EABTSM3StylizedSatellitePreviewElement::BacksideE5Target:
-		if (!Candidate.bE5OnSatelliteBackside)
+		if (!Candidate.bE5OnSatelliteBackside
+			&& !Candidate.bE1OperatorLandingClusterPlacement)
 		{
 			return false;
 		}
