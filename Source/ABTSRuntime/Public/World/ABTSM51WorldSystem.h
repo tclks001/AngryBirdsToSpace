@@ -18,6 +18,7 @@ class AABTSM51SlingshotDirtHole;
 class AABTSM51SlingshotStake;
 class APawn;
 class UABTSInventoryComponent;
+struct FABTSM3CellState;
 
 /** CellTopo-driven M5.1 pickup, placement and slingshot assembly owner. */
 UCLASS()
@@ -91,6 +92,11 @@ public:
 	int32 GetOrdinarySlotCount() const { return OrdinarySlots.Num(); }
 	int32 GetPickupCount() const { return Pickups.Num(); }
 	FString BuildReleaseDiagnosticSummary() const;
+	/** Pure release placement policy used by runtime and focused automation. */
+	static bool IsToolPlacementCellEligible(
+		const FABTSM3CellState& State,
+		bool bOccupied,
+		float MaximumSlopeDegrees = 45.0f);
 
 private:
 	bool InitializeWorldContent();

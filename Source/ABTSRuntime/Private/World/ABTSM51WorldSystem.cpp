@@ -421,11 +421,10 @@ int32 AABTSM51WorldSystem::SelectPlacementCell(const FVector& UnitDirection) con
 		// not a frozen M7 building pad. Keep water, building anchors and occupied
 		// cells fail-closed, but allow ordinary terrain up to a broad slope limit
 		// instead of inheriting M3's strict 8-degree building-site flag.
-		if (States[CellId].bWater
-			|| States[CellId].bBuildingAnchor
-			|| States[CellId].LogicalSlopeDegrees
-				> MaxToolPlacementSlopeDegrees
-			|| IsCellOccupied(CellId))
+		if (!IsToolPlacementCellEligible(
+				States[CellId],
+				IsCellOccupied(CellId),
+				MaxToolPlacementSlopeDegrees))
 		{
 			continue;
 		}
@@ -433,6 +432,20 @@ int32 AABTSM51WorldSystem::SelectPlacementCell(const FVector& UnitDirection) con
 		if (Dot > BestDot) { BestDot = Dot; BestCell = CellId; }
 	}
 	return BestCell;
+}
+
+bool AABTSM51WorldSystem::IsToolPlacementCellEligible(
+	const FABTSM3CellState& State,
+	const bool bOccupied,
+	const float MaximumSlopeDegrees)
+{
+	return !bOccupied
+		&& !State.bWater
+		&& !State.bBuildingAnchor
+		&& !State.bBuildingRoadExclusion
+		&& FMath::IsFinite(State.LogicalSlopeDegrees)
+		&& State.LogicalSlopeDegrees
+			<= FMath::Clamp(MaximumSlopeDegrees, 0.0f, 60.0f);
 }
 
 int32 AABTSM51WorldSystem::SelectDeveloperStakeCell(const FVector& UnitDirection) const

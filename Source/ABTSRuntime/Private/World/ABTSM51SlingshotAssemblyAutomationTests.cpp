@@ -11,6 +11,7 @@
 #include "Inventory/ABTSInventoryComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
+#include "PCG/ABTSM3TaskGraphTypes.h"
 #include "World/ABTSM51OrdinarySlingshotSlotSnapshot.h"
 #include "World/ABTSM51WorldActors.h"
 #include "World/ABTSM51WorldSystem.h"
@@ -30,6 +31,55 @@ FABTSM51OrdinarySlingshotSlotSnapshot MakeValidSlotSnapshot()
 		Snapshot.SlotGroups.AddDefaulted_GetRef();
 	Second.SlotCellIds = {4, 5};
 	return Snapshot;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM51ToolPlacementSlopePolicyTest,
+	"ABTS.M51.ToolPlacement.SlopePolicy",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM51ToolPlacementSlopePolicyTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	FABTSM3CellState OrdinarySlope;
+	OrdinarySlope.bBuildable = false;
+	OrdinarySlope.LogicalSlopeDegrees = 30.0f;
+	TestTrue(
+		TEXT("Tool placement accepts ordinary non-buildable terrain below 45 degrees"),
+		AABTSM51WorldSystem::IsToolPlacementCellEligible(
+			OrdinarySlope, false, 45.0f));
+
+	FABTSM3CellState Steep = OrdinarySlope;
+	Steep.LogicalSlopeDegrees = 46.0f;
+	TestFalse(
+		TEXT("Tool placement rejects terrain above the independent slope limit"),
+		AABTSM51WorldSystem::IsToolPlacementCellEligible(
+			Steep, false, 45.0f));
+
+	FABTSM3CellState Water = OrdinarySlope;
+	Water.bWater = true;
+	TestFalse(TEXT("Tool placement still rejects water"),
+		AABTSM51WorldSystem::IsToolPlacementCellEligible(
+			Water, false, 45.0f));
+
+	FABTSM3CellState BuildingAnchor = OrdinarySlope;
+	BuildingAnchor.bBuildingAnchor = true;
+	TestFalse(TEXT("Tool placement still rejects building anchors"),
+		AABTSM51WorldSystem::IsToolPlacementCellEligible(
+			BuildingAnchor, false, 45.0f));
+
+	FABTSM3CellState BuildingEnvelope = OrdinarySlope;
+	BuildingEnvelope.bBuildingRoadExclusion = true;
+	TestFalse(TEXT("Tool placement still rejects protected building envelopes"),
+		AABTSM51WorldSystem::IsToolPlacementCellEligible(
+			BuildingEnvelope, false, 45.0f));
+
+	TestFalse(TEXT("Tool placement still rejects occupied cells"),
+		AABTSM51WorldSystem::IsToolPlacementCellEligible(
+			OrdinarySlope, true, 45.0f));
+	return true;
 }
 
 class FScopedM51SlingshotAssemblyWorld
