@@ -272,8 +272,10 @@ bool FABTSM73DAG3CWeakNodeDamageRoutingTest::RunTest(
 	}
 	TestEqual(TEXT("Weak module keeps the authored Wood material"),
 		WeakModule->GetBuildingMaterial(), WoodProfile->Material);
-	TestEqual(TEXT("Weak module BreakDamage uses the copied runtime profile"),
-		WeakModule->GetBreakDamage(), WoodProfile->BreakDamage);
+	TestEqual(TEXT("Weak runtime brick uses the release durability scale"),
+		WeakModule->GetBreakDamage(),
+		WoodProfile->BreakDamage
+			* AABTSM7BuildingModule::RuntimeBrickBreakDamageScale);
 	TestEqual(TEXT("DAG3-C material identity uses the runtime profile"),
 		Playability.Material, WoodProfile->Material);
 
