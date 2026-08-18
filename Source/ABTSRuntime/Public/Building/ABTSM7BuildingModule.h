@@ -239,10 +239,14 @@ private:
 	FVector PlanarGravityUp = FVector::UpVector;
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicalMaterial> ImpactPhysicalMaterial;
+	FTransform CrystalLifecycleInitialTransform = FTransform::Identity;
+	bool bCrystalMovementRecoveryArmed = false;
+	bool bCrystalMovementRecoveryConsumed = false;
 	float CurrentDamage = 0.0f;
 	float BreakDamage = 100.0f;
 	float LastDamageImpactSeconds = -BIG_NUMBER;
 	float ContactDamageGraceSeconds = 0.20f;
 	float ContactDamageEnabledTimeSeconds = 0.0f;
+	bool TryConsumeCrystalMovementRecovery();
 	bool DetectSleepingTerrainPenetration(FString& OutDiagnostic) const;
 };

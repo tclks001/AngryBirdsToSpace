@@ -483,6 +483,10 @@ void AABTSM7BuildingModule::ConfigureDamageLifecycleOwner(
 		: INDEX_NONE;
 	bCrystalLifecycleTarget = InOwner != nullptr
 		&& bInCrystalLifecycleTarget;
+	CrystalLifecycleInitialTransform = GetActorTransform();
+	CrystalLifecycleInitialTransform.SetScale3D(FVector::OneVector);
+	bCrystalMovementRecoveryArmed = bCrystalLifecycleTarget;
+	bCrystalMovementRecoveryConsumed = false;
 }
 
 bool AABTSM7BuildingModule::ActivateDynamicSiteUniform(
@@ -901,6 +905,10 @@ bool AABTSM7BuildingModule::BreakModule()
 void AABTSM7BuildingModule::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (TryConsumeCrystalMovementRecovery())
+	{
+		return;
+	}
 	if (!bDynamic || !Visual->IsSimulatingPhysics()) return;
 	// UPrimitiveComponent::AddForce invalidates the particle and forces its
 	// state back to Dynamic every frame, so a supported body can never enter
@@ -929,6 +937,106 @@ void AABTSM7BuildingModule::Tick(const float DeltaSeconds)
 		: (PlanetCenter - GetActorLocation()).GetSafeNormal();
 	TryApplyNonInvalidatingAcceleration(
 		*Visual, GravityDirection * GravityAccelerationCMPerSec2);
+}
+
+bool AABTSM7BuildingModule::TryConsumeCrystalMovementRecovery()
+{
+	if (!bCrystalMovementRecoveryArmed
+		|| bCrystalMovementRecoveryConsumed
+		|| !bCrystalLifecycleTarget
+		|| bBroken
+		|| bRecycled
+		|| (!bDynamic && !bOverflowKinematic)
+		|| !IsValid(Visual))
+	{
+		return false;
+	}
+
+	FTransform CurrentTransform = GetActorTransform();
+	CurrentTransform.SetScale3D(FVector::OneVector);
+	const float TranslationCM = FVector::Distance(
+		CurrentTransform.GetLocation(),
+		CrystalLifecycleInitialTransform.GetLocation());
+	const float RotationDegrees = FMath::RadiansToDegrees(
+		CurrentTransform.GetRotation().AngularDistance(
+			CrystalLifecycleInitialTransform.GetRotation()));
+	const float LinearSpeedCMPerSec = bOverflowKinematic
+		? OverflowKinematicLinearVelocity.Size()
+		: Visual->GetPhysicsLinearVelocity().Size();
+	const float AngularSpeedDegreesPerSec = bOverflowKinematic
+		? OverflowKinematicAngularVelocityDegrees.Size()
+		: Visual->GetPhysicsAngularVelocityInDegrees().Size();
+	constexpr float MovementTranslationThresholdCM = 1.0f;
+	constexpr float MovementRotationThresholdDegrees = 0.5f;
+	constexpr float MovementLinearSpeedThresholdCMPerSec = 2.0f;
+	constexpr float MovementAngularSpeedThresholdDegreesPerSec = 1.0f;
+	const bool bMoved =
+		TranslationCM >= MovementTranslationThresholdCM
+		|| RotationDegrees >= MovementRotationThresholdDegrees
+		|| LinearSpeedCMPerSec >= MovementLinearSpeedThresholdCMPerSec
+		|| AngularSpeedDegreesPerSec
+			>= MovementAngularSpeedThresholdDegreesPerSec;
+	if (!bMoved)
+	{
+		return false;
+	}
+
+	AABTSM7BuildingMaterialSystem* MaterialSystem =
+		Cast<AABTSM7BuildingMaterialSystem>(GetOwner());
+	AABTSM73StableBuildingActor* Building =
+		DamageLifecycleOwner.Get();
+	if (MaterialSystem == nullptr
+		|| Building == nullptr
+		|| !MaterialSystem->OnMaterialRecovered.IsBound())
+	{
+		UE_LOG(LogABTSRuntime, Error,
+			TEXT("[ABTS][M7][E1CrystalMovementRecovery]")
+			TEXT(" Consumed=0 Module=%s MaterialSystem=%s Building=%s")
+			TEXT(" RecoveryBound=%d TranslationCM=%.3f RotationDeg=%.3f")
+			TEXT(" LinearSpeed=%.3f AngularSpeed=%.3f"),
+			*GetName(),
+			*GetNameSafe(MaterialSystem),
+			*GetNameSafe(Building),
+			MaterialSystem != nullptr
+				&& MaterialSystem->OnMaterialRecovered.IsBound() ? 1 : 0,
+			TranslationCM,
+			RotationDegrees,
+			LinearSpeedCMPerSec,
+			AngularSpeedDegreesPerSec);
+		return false;
+	}
+
+	const FString ModuleName = GetName();
+	const FVector RecoveryLocation = GetActorLocation();
+	bCrystalMovementRecoveryConsumed = true;
+	const float MovementSpeedCMPerSec =
+		FMath::Max(LinearSpeedCMPerSec, AngularSpeedDegreesPerSec);
+	Building->NotifyJuryDemoE1ModuleDamage(
+		*this,
+		EABTSM73E1DamageCause::ModuleContact,
+		true,
+		MovementSpeedCMPerSec);
+	if (!BreakModule())
+	{
+		bCrystalMovementRecoveryConsumed = false;
+		return false;
+	}
+
+	MaterialSystem->OnMaterialRecovered.Broadcast(
+		EABTSM7BuildingMaterial::Crystal,
+		1);
+	UE_LOG(LogABTSRuntime, Display,
+		TEXT("[ABTS][M7][E1CrystalMovementRecovery]")
+		TEXT(" Consumed=1 Module=%s TranslationCM=%.3f RotationDeg=%.3f")
+		TEXT(" LinearSpeed=%.3f AngularSpeed=%.3f")
+		TEXT(" CrystalCoreQuantity=1 Location=%s"),
+		*ModuleName,
+		TranslationCM,
+		RotationDegrees,
+		LinearSpeedCMPerSec,
+		AngularSpeedDegreesPerSec,
+		*RecoveryLocation.ToCompactString());
+	return true;
 }
 
 bool AABTSM7BuildingModule::DetectSleepingTerrainPenetration(
