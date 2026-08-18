@@ -1843,8 +1843,16 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 		return true;
 	}
 	constexpr double AspectRatio = 16.0 / 9.0;
-	constexpr double SafeHorizontalNdc = 0.88;
-	constexpr double SafeVerticalNdc = 0.84;
+	constexpr double SafeFollowerHorizontalNdc = 0.88;
+	constexpr double SafeFollowerVerticalNdc = 0.84;
+	// The M3 director owns the primary bird's intentional screen anchor.
+	// IncomingReveal can validly place it below the follower-safe composition
+	// area. Retreatment along the primary ray deliberately preserves that
+	// anchor, so applying the follower limit to subject zero is unsatisfiable.
+	// Keep the primary inside a looser visible-frame boundary while using the
+	// original safe-area contract for the three followers.
+	constexpr double VisiblePrimaryHorizontalNdc = 0.96;
+	constexpr double VisiblePrimaryVerticalNdc = 0.96;
 	constexpr double InitialRetreatSearchLimitCM = 30000.0;
 	constexpr double MaximumRetreatSearchLimitCM = 120000.0;
 	const double TanHalfHorizontal = FMath::Tan(
@@ -1906,6 +1914,37 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 			return false;
 		};
 		const FVector CandidateLocation = BuildCandidateLocation(RetreatCM);
+		const FVector PrimaryCandidateOffset =
+			PrimaryTargetPosition - CandidateLocation;
+		const double PrimaryCandidateDepth =
+			FVector::DotProduct(PrimaryCandidateOffset, Forward);
+		const double PrimaryCenterX =
+			FVector::DotProduct(PrimaryCandidateOffset, Right)
+				/ (PrimaryCandidateDepth * TanHalfHorizontal);
+		const double PrimaryCenterY =
+			FVector::DotProduct(PrimaryCandidateOffset, Up)
+				/ (PrimaryCandidateDepth * TanHalfVertical);
+		const FABTSM11FinaleFormationCameraSubject& PrimarySubject =
+			FormationSubjects[0];
+		const double PrimaryConservativeDepth =
+			PrimaryCandidateDepth - PrimarySubject.RadiusCM;
+		const double PrimaryRadiusX = PrimarySubject.RadiusCM
+			/ (PrimaryConservativeDepth * TanHalfHorizontal);
+		const double PrimaryRadiusY = PrimarySubject.RadiusCM
+			/ (PrimaryConservativeDepth * TanHalfVertical);
+		const bool bDirectorPrimaryUsesVisibleFrame =
+			FMath::Abs(PrimaryCenterX) + PrimaryRadiusX
+				> SafeFollowerHorizontalNdc
+			|| FMath::Abs(PrimaryCenterY) + PrimaryRadiusY
+				> SafeFollowerVerticalNdc;
+		const double SharedHorizontalLimit =
+			bDirectorPrimaryUsesVisibleFrame
+				? VisiblePrimaryHorizontalNdc
+				: SafeFollowerHorizontalNdc;
+		const double SharedVerticalLimit =
+			bDirectorPrimaryUsesVisibleFrame
+				? VisiblePrimaryVerticalNdc
+				: SafeFollowerVerticalNdc;
 		for (int32 SubjectIndex = 0;
 			SubjectIndex < FormationSubjects.Num();
 			++SubjectIndex)
@@ -1943,19 +1982,22 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 				/ (ConservativeDepth * TanHalfHorizontal);
 			const double RadiusY = Subject.RadiusCM
 				/ (ConservativeDepth * TanHalfVertical);
-			if (FMath::Abs(CenterX) + RadiusX > SafeHorizontalNdc
-				|| FMath::Abs(CenterY) + RadiusY > SafeVerticalNdc)
+			const bool bPrimarySubject = SubjectIndex == 0;
+			if (FMath::Abs(CenterX) + RadiusX > SharedHorizontalLimit
+				|| FMath::Abs(CenterY) + RadiusY > SharedVerticalLimit)
 			{
 				return RejectFit(FString::Printf(
-					TEXT("FormationSubjectOutsideFrame Index=%d Retreat=%.3f CenterNdc=(%.6f,%.6f) RadiusNdc=(%.6f,%.6f) Limits=(%.3f,%.3f) Depth=%.6f RadiusCM=%.6f"),
+					TEXT("FormationSubjectOutsideFrame Index=%d Role=%s DirectorPrimaryVisibleFrame=%d Retreat=%.3f CenterNdc=(%.6f,%.6f) RadiusNdc=(%.6f,%.6f) Limits=(%.3f,%.3f) Depth=%.6f RadiusCM=%.6f"),
 					SubjectIndex,
+					bPrimarySubject ? TEXT("DirectorPrimary") : TEXT("Follower"),
+					bDirectorPrimaryUsesVisibleFrame ? 1 : 0,
 					RetreatCM,
 					CenterX,
 					CenterY,
 					RadiusX,
 					RadiusY,
-					SafeHorizontalNdc,
-					SafeVerticalNdc,
+					SharedHorizontalLimit,
+					SharedVerticalLimit,
 					Depth,
 					Subject.RadiusCM));
 			}

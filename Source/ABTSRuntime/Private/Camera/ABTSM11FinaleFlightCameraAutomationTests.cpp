@@ -1886,10 +1886,14 @@ bool FABTSM11CFlightCameraFormationAdaptiveRetreatTest::RunTest(
 	if (FlightCamera != nullptr)
 	{
 		TArray<FABTSM11FinaleFormationCameraSubject> Subjects;
-		Subjects.Add({FVector(1000.0, 0.0, 0.0), 84.0});
-		Subjects.Add({FVector(1000.0, 0.0, -6800.0), 84.0});
-		Subjects.Add({FVector(1000.0, 250.0, -500.0), 84.0});
-		Subjects.Add({FVector(1000.0, -250.0, -1000.0), 84.0});
+		// Reproduce the production IncomingReveal relationship: the director
+		// intentionally anchors the primary below the follower-safe 0.84 NDC
+		// boundary. Retreatment preserves this centre anchor, so subject zero
+		// must use the visible-frame contract rather than the follower contract.
+		Subjects.Add({FVector(1000.0, 0.0, -237.0), 84.0});
+		Subjects.Add({FVector(1000.0, 0.0, -850.0), 84.0});
+		Subjects.Add({FVector(1000.0, 250.0, -600.0), 84.0});
+		Subjects.Add({FVector(1000.0, -250.0, -700.0), 84.0});
 		FVector CameraLocation = FVector::ZeroVector;
 		FString Failure;
 		TestTrue(
@@ -1907,6 +1911,20 @@ bool FABTSM11CFlightCameraFormationAdaptiveRetreatTest::RunTest(
 		TestTrue(
 			TEXT("Adaptive formation retreat remains bounded"),
 			-CameraLocation.X < 120000.0);
+		const double TanHalfVertical = FMath::Tan(
+			FMath::DegreesToRadians(25.0)) / (16.0 / 9.0);
+		const FVector PrimaryOffset = Subjects[0].Center - CameraLocation;
+		const double PrimaryDepth = PrimaryOffset.X;
+		const double PrimaryCenterNdcY =
+			PrimaryOffset.Z / (PrimaryDepth * TanHalfVertical);
+		const double PrimaryRadiusNdcY = Subjects[0].RadiusCM
+			/ ((PrimaryDepth - Subjects[0].RadiusCM) * TanHalfVertical);
+		TestTrue(
+			TEXT("Director primary remains outside the follower-safe boundary"),
+			FMath::Abs(PrimaryCenterNdcY) + PrimaryRadiusNdcY > 0.84);
+		TestTrue(
+			TEXT("Director primary remains inside the visible-frame boundary"),
+			FMath::Abs(PrimaryCenterNdcY) + PrimaryRadiusNdcY < 0.96);
 		TestTrue(
 			TEXT("Successful adaptive retreat does not publish a failure"),
 			Failure.IsEmpty());
