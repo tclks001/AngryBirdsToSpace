@@ -3,6 +3,102 @@
 > 目标：在不丢失当前多工作树上下文的前提下，把 8 月 18 日发行收敛交给另一账号继续执行。
 > 本文记录的是证据状态，不把“源码存在”“自动化通过”和“玩家实测通过”混为一谈。
 
+## 0. 2026-08-18 接手后 P0 关闭与新包
+
+接手后已恢复被外部工具回退/删除的四个工作树 Git 引用，并在集成候选
+`integration/candidate-rc93-exact-bricks` 上完成第 6 节 P0。当前发行代码身份为：
+
+`9f24bcd4d411b7003da397b2fa6c5097a4685418`
+`fix(release): accept long valid terminal arcs`
+
+该修复保持 HUD 与实际 Playback 消费同一个权威 plan：
+
+- 将 F4 合格包络到物理接触的候选时长上限从展示用的 12 秒扩展到 600 秒；
+- 保留逐样本 acceleration、jerk、净空、朝向、单调接近和精确接触门；
+- 对无法构造“起点切向且穿过 UFO 中心”的近径向输入，确定性搜索 UFO
+  物理接触球上的精确接触点并构造真实圆弧，不退回 Canvas 假轨迹或普通位置插值；
+- 增加 Source、中心圆、接触球圆、时长候选和形状候选计数，失败仍然 fail closed。
+
+### Fresh 构建与聚焦自动化
+
+唯一引擎：
+
+`C:\Program Files\Epic Games\UE_5.8`
+
+结果：
+
+- Development Editor 普通全链接：Succeeded。
+- Development Editor `-ForceUnity -DisableAdaptiveUnity` 全链接：Succeeded。
+- fresh NullRHI 聚焦测试：3/3 Success。
+  - `ABTS.Presentation.Opening.Timeline`
+  - `ABTS.M11C.Unit.FinaleEndScreenPolicy`
+  - `ABTS.M11C.Unit.PreviewReleasePlayback`
+- 完成标记：`**** TEST COMPLETE. EXIT CODE: 0 ****`
+- 日志：
+  `G:\ABTS\Logs\RC9.3\Integration-P0-candidate-9f24bcd-20260818-ThreeFocused-FreshNullRHI.log`
+
+第 5 节记录的邻域输入失败已关闭；本次 fresh
+`PreviewReleasePlayback` 不再报告 `NoGeometricCandidate`。
+
+### 新 Development / Shipping 包
+
+两个 BuildCookRun 均使用上述唯一 UE 5.8，均为完整 cook，结果均为
+`BUILD SUCCESSFUL / ExitCode=0`：
+
+- Development：
+  `G:\ABTS\Artifacts\RC9.3\candidate-9f24bcd-20260818-Development`
+- Shipping：
+  `G:\ABTS\Artifacts\RC9.3\candidate-9f24bcd-20260818-Shipping`
+
+UAT 日志：
+
+- `G:\ABTS\Logs\RC9.3\BuildCookRun-candidate-9f24bcd-20260818-Development.log`
+- `G:\ABTS\Logs\RC9.3\BuildCookRun-candidate-9f24bcd-20260818-Shipping.log`
+
+包清单及 SHA-256：
+
+`G:\ABTS\Logs\RC9.3\Manifest-candidate-9f24bcd-20260818.txt`
+
+### Packaged player-path smoke
+
+Development 与 Shipping 都从归档包的实际可执行文件启动，使用 D3D11 离屏渲染，
+不带 `-unattended`，因此走真实前台门禁。两个进程均达到：
+
+- `World=L_ABTS_M11`
+- `AuthorityReady=1`
+- `PresentationReady=1`
+- `WorldReady=1`
+- `WorldFailed=0`
+- `BuildingAccepted=6`
+- `BuildingRejected=0`
+- `Expected=6`
+- `Registered=6`
+- `SetupRejected=0`
+
+证据：
+
+- `G:\ABTS\Logs\RC9.3\StartupTrace-candidate-9f24bcd-20260818-Development-playerpath.log`
+- `G:\ABTS\Logs\RC9.3\StartupTrace-candidate-9f24bcd-20260818-Shipping-playerpath.log`
+
+Smoke 完成后只结束了本次命令启动且通过绝对可执行路径和 trace 参数确认归属的
+两个包进程，没有结束其他 Unreal 或用户进程。
+
+### 仍需玩家可见验收
+
+上述证据关闭代码、自动化、Cook、Package 和无 GUI startup/world-ready P0，
+但不能替代玩家可见手感/像素验收。第 6 节第 5 项仍需使用新 Shipping 包逐项检查：
+
+- Shipping 进入正确 V3 世界；
+- 低积木建筑静态/Chaos 材质一致；
+- 蓝鸟命中后能够回归；
+- E5 有足够槽安装普通与强化弹弓；
+- 黄鸟穿木后速度保留；
+- 左下轨迹末端为连续圆弧；
+- 终局动画后停在 `F I N E` 页面并能正常退出；
+- 开局五只鸟在坡面上均不悬空。
+
+在玩家完成这组可见回归前，新包状态是“可交付验收候选”，不是“玩家最终验收通过”。
+
 ## 1. 接手入口
 
 - 原始集成工作树：`C:\workspace\AngryBirdsToSpace`
