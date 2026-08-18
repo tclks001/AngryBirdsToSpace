@@ -195,13 +195,13 @@ struct ABTSRUNTIME_API FABTSJuryDemoFixedSixContract
 	/** Exact M3 V2 result published after dynamic-envelope reservation. */
 	static constexpr uint64 FrozenV2LayoutHash = 0x7029074579FDC52Eull;
 	/** Exact M3 Map Freeze V3 result published by Integration. */
-	static constexpr uint64 FrozenV3LayoutHash = 0x54BF4BFB41500542ull;
+	static constexpr uint64 FrozenV3LayoutHash = 0xDFBFCF65414711C6ull;
 	inline static constexpr uint64 FrozenV3PlacementHashes[ExpectedSiteCount] = {
 		0xA91A9FB5D79AE1CEull,
 		0xB610F10D832204C9ull,
 		0x1828F2227A37D50Dull,
 		0x2190A844CF15E5CFull,
-		0x1C267DFD88E65BABull,
+		0x7399100AA594331Aull,
 		0x52471DEE83A1FB40ull
 	};
 

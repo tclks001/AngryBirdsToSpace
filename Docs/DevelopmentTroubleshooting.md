@@ -457,3 +457,9 @@
 | 优先级 | 现象 | 根因 | 处理与下一验收门 |
 | --- | --- | --- | --- |
 | P0 诊断 | 玩家在 `candidate-7d0793a-m51resources-20260818-Shipping` 连续发射后反馈 E1 在卫星上的位置偏、难以命中，希望按实际落点调整；现有文件系统中无法找到本次手动 Shipping 会话的逐发射落点 | 项目有 `FHitResult`、卫星接触和返回前最终落点，但 Shipping 按发行策略不保留全局文本日志；已有 project-owned startup trace 只记录启动门。M6 没有把“发射输入—卫星/E1 接触—最终落点—当前 E1 Bounds/局部偏差”写入独立文件，因此不能从配置、Pipeline Cache 或旧 smoke 反推玩家落点，更不能在无数据时猜测移动冻结 E1。后续 Editor Standalone 普通日志可恢复 8 个静止落点，蓝鸟精确 Reveal 与最后静止样本只差 6.3 cm，但落点相对 E1 分散在 42°–158°、中位约 105°，没有稳定聚类；按中位方向需移动约 2.14 km，不能作为位置修复依据 | 新增 `ABTSM6E1LandingDiagnostics.cpp`，在 PIE 及 Editor 发起的 `-PIEVIACONSOLE` Standalone 自动启用，或非 Shipping Development 使用 `-ABTSE1LandingTrace` 显式启用；Shipping 编译分支硬关闭。每次发射写 `Saved/Logs/E1LandingSamples-<UTC>-<PID>-<ActorId>.csv`，记录 Launch/卫星或 E1 Contact/Final，包含 Pull、Aim、速度、卫星中心/半径、E1 Actor/Bounds、局部 Forward/Right/Radial 偏差、球面角距离、Bounds 距离及直接命中标志。普通与 ForceUnity 编译通过；`ABTS.M6.E1LandingDiagnostics.Frame` 与 `ABTS.M6.SlingshotVisual.SpaceFourBirdFrame` fresh 2/2。下一步由玩家用原 Standalone 方式重复发射，并只保留“确实在瞄准 E1 附近”的 miss；Integration 再按 Final/Contact 分布计算稳健切向位移。在形成紧聚类前禁止移动 E1 或重新打包 |
+
+## 26. E1 按 Standalone 主落点簇重新冻结（2026-08-18，待玩家位置验收）
+
+| 优先级 | 现象 | 根因 | 处理与下一验收门 |
+| --- | --- | --- | --- |
+| P0 | 第二轮 Standalone 定向采样中，玩家在画中画内仍不能明显看到 E1；11 次发射有 10 次接触卫星、0 次直接命中 E1，发射 5/7/8/9/10 的最终停点形成主簇，而旧 E1 Site 与该簇相差约四分之一球面 | E1 仍冻结在历史 `178° backside` 校准代理的径向投影。该点能维护旧校准身份，却没有消费玩家真实操作形成的落点分布；仅移动可见 Actor 会使 MapFreeze、真实建筑、54 Brick OBB、碰撞和 M6 绑定分裂 | 摘录 `M3-RC9-001`：以 `E1LandingSamples-20260818T053640Z-43416-55406.csv` 的 5/7/8/9/10 号 Final 径向单位向量均值冻结新 SiteUp `(0.422328650,-0.896977363,-0.130652678)`，新 Site 为 `(-3536.076,13362.185,-3177.064)`；整套 Site/真实 E1/54 Brick 联集/碰撞/M6/runtime binding 原子搬迁。新增 `OperatorLandingClusterPlacementV1` 身份证明，但明确不冒充数值轨迹认证；用户 Standalone 确认前不补完整自动化、不打包。Integration 新冻结值：E1 Placement `0x7399100AA594331A`、Layout `0xDFBFCF65414711C6`、Registration `0x0C2DB4694EEE8C04`；普通 Development Editor 编译通过。位置验收重点：画中画能明显看到 E1、常见落点覆盖建筑、击打难度显著下降 |
