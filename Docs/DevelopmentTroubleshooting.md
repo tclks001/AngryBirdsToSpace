@@ -469,3 +469,9 @@
 | 优先级 | 现象 | 根因 | 修复与验收门 |
 | --- | --- | --- | --- |
 | P0 | E1 新位置本身可接受，但 `SATELLITE LANDING PREVIEW` 内只能看到建筑阴影，看不到建筑本体；截图中阴影位于画面上沿附近 | 卫星画中画一直以预测接触点为焦点和固定 `1200 cm` 距离。E1 是高于球面的完整建筑，接触点仍在画面内时，建筑 Bounds 中心可能已经越过上边缘；此外旧 ShowOnly 逻辑只在终点已分类为 `SatelliteE5` 时加入 E1，普通近失误的 `SatelliteBody` 预览没有稳定视觉参照 | 画中画改为读取 E1 Actor 的完整展示 Bounds，以 Bounds center 为焦点，并按 Bounds sphere 与当前 FOV 只增不减地扩大拍摄距离；所有卫星终点（`SatelliteBody` 与 `SatelliteE5`）都把真实 E1 Actor 加入 ShowOnly，轨迹仍围绕权威终点绘制。日志新增 `SatelliteLandingPreview E1Framing ... AlwaysVisible=1`。Development Editor 编译通过；用户 Standalone 必须确认建筑本体完整进入画中画，阴影与本体同时可见，且近失误时仍能用 E1 修正瞄准 |
+
+## 28. E1 Crystal 移动后散落导致流程卡死（2026-08-18，待玩家验收）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P0 | E1 主体被破坏后，Crystal cap 可能被抛到卫星其他位置；水晶仍需承受普通材料累计伤害，玩家可能找不到或难以再次击碎，无法取得 Crystal Core | Crystal 已有唯一 lifecycle target 身份，但仍完全复用普通 Brick 的碰撞伤害门；“从建筑冻结位置脱离”没有被解释为已经成功取得水晶。既有 M7→M8 恢复事件可以正式映射到背包 `CrystalCore`，但只有普通 Break 路径才会发布 | 摘录 `M7-BC-143`：唯一 Crystal lifecycle module 在动态或 overflow 状态下监测冻结 Transform。平移 `>=1 cm`、旋转 `>=0.5°`、线速度 `>=2 cm/s` 或角速度 `>=1°/s` 任一成立，即只执行一次 Break，按 `ModuleContact` 完成 E1 物理链，并发布既有 `OnMaterialRecovered(Crystal,1)`；M8 继续以正式映射向背包加入恰好 1 个 `CrystalCore`。恢复订阅者不存在时 fail closed，不销毁、不伪发奖；consumed guard 防止重复奖励。Development Editor 编译通过，E1 lifecycle fresh NullRHI `1/1`。Standalone 必须确认水晶首次移动即消失、背包 Crystal Core 恰好 `+1`，日志只出现一次 `E1CrystalMovementRecovery Consumed=1` |
