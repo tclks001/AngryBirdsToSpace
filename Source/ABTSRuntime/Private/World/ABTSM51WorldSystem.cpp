@@ -39,14 +39,31 @@ FString AABTSM51WorldSystem::BuildReleaseDiagnosticSummary() const
 	default:
 		break;
 	}
+	const AABTSCraftingSystem* ResolvedCraftingSystem =
+		FindCraftingSystem();
+	const UABTSInventoryComponent* Inventory =
+		ResolvedCraftingSystem != nullptr
+			? ResolvedCraftingSystem->GetInventory()
+			: nullptr;
 	return FString::Printf(
-		TEXT("Ready=%d Rejected=%d OrdinarySlots=%d Pickups=%d MaxCord=%d Authority=%s"),
+		TEXT("Ready=%d Rejected=%d OrdinarySlots=%d Pickups=%d")
+		TEXT(" MaxCord=%d Authority=%s StarterBranch=%d")
+		TEXT(" StarterFiber=%d InventoryStacks=%d"),
 		bInitialized ? 1 : 0,
 		bInitializationRejected ? 1 : 0,
 		OrdinarySlots.Num(),
 		Pickups.Num(),
 		GetActiveOrdinaryMaxCordLengthCM(),
-		AuthorityName);
+		AuthorityName,
+		Inventory != nullptr
+			? Inventory->GetQuantity(EABTSItemId::Branch)
+			: INDEX_NONE,
+		Inventory != nullptr
+			? Inventory->GetQuantity(EABTSItemId::PlantFiber)
+			: INDEX_NONE,
+		Inventory != nullptr
+			? Inventory->GetOrderedStacks().Num()
+			: INDEX_NONE);
 }
 
 void AABTSM51WorldSystem::BeginPlay()
