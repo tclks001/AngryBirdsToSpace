@@ -758,6 +758,7 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(
 	const FABTSM73JuryDemoFixedSixStaticEntry& Entry =
 		JuryDemoFixedSixStaticEntry.GetValue();
 	int32 E1CrystalTargetCount = 0;
+	AABTSM7BuildingModule* E1CrystalModule = nullptr;
 	FABTSM73E1DestructibleModuleTargetSet E1TargetSet;
 	if (Entry.ManifestEntryId == FName(TEXT("E1ColumnBreak")))
 	{
@@ -777,9 +778,13 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(
 				OutError = TEXT("E1DamageLifecycleRealModuleIdentityInvalid");
 				return false;
 			}
-			E1CrystalTargetCount += Module->IsCrystalLifecycleTarget() ? 1 : 0;
+			if (Module->IsCrystalLifecycleTarget())
+			{
+				++E1CrystalTargetCount;
+				E1CrystalModule = Module;
+			}
 		}
-		if (E1CrystalTargetCount != 1)
+		if (E1CrystalTargetCount != 1 || E1CrystalModule == nullptr)
 		{
 			OutError = FString::Printf(
 				TEXT("E1DamageLifecycleCrystalTargetCountInvalid:%d"),
@@ -826,6 +831,32 @@ ActivatePreparedJuryDemoFixedSixChaosValidation(
 	if (Entry.ManifestEntryId == FName(TEXT("E1ColumnBreak")))
 	{
 		JuryDemoE1DamageLifecycleState.RecordChaosActivated();
+		if (!RuntimeMaterialSystem->OnMaterialRecovered.IsBound())
+		{
+			OutError = TEXT("E1CrystalImmediateRecoveryRouteMissing");
+			return false;
+		}
+		NotifyJuryDemoE1ModuleDamage(
+			*E1CrystalModule,
+			EABTSM73E1DamageCause::ModuleContact,
+			true,
+			0.0f);
+		const FString CrystalName = E1CrystalModule->GetName();
+		const FVector CrystalLocation = E1CrystalModule->GetActorLocation();
+		if (!E1CrystalModule->BreakModule())
+		{
+			OutError = TEXT("E1CrystalImmediateBreakRejected");
+			return false;
+		}
+		RuntimeMaterialSystem->OnMaterialRecovered.Broadcast(
+			EABTSM7BuildingMaterial::Crystal,
+			1);
+		UE_LOG(LogABTSRuntime, Display,
+			TEXT("[ABTS][M7][E1CrystalChaosReward]")
+			TEXT(" Consumed=1 Module=%s CrystalCoreQuantity=1")
+			TEXT(" Trigger=E1ChaosActivated Location=%s"),
+			*CrystalName,
+			*CrystalLocation.ToCompactString());
 		UE_LOG(LogABTSRuntime, Display,
 			TEXT("[ABTS][M7][E1DamageLifecycle]")
 			TEXT(" Event=ChaosActivated RealModules=%d TargetBricks=%d")

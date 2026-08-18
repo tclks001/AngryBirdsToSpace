@@ -2582,67 +2582,6 @@ void AABTSM73StableBuildingActor::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	ResolveQueuedJuryDemoFixedSixDamageTransaction();
-	if (JuryDemoE1DamageLifecycleState.bChaosActivated
-		&& JuryDemoFixedSixStaticEntry.IsSet()
-		&& JuryDemoFixedSixStaticEntry->ManifestEntryId
-			== FName(TEXT("E1ColumnBreak")))
-	{
-		// The frozen support graph contains only the 54 descriptor Bricks. The
-		// Crystal cap is an auxiliary lifecycle module, so a brick support loss
-		// can activate every structural body while leaving the cap static above
-		// an empty seat. Once E1 has accepted its first-hit Chaos transaction,
-		// explicitly give the unique Crystal the same site-uniform gravity
-		// authority. Its module-level movement rule then atomically recovers it
-		// as soon as Chaos produces real displacement.
-		AABTSM7BuildingModule* CrystalModule = nullptr;
-		for (const TWeakObjectPtr<AABTSM7BuildingModule>& WeakModule
-			: RuntimeModules)
-		{
-			AABTSM7BuildingModule* Module = WeakModule.Get();
-			if (Module == nullptr || !Module->IsCrystalLifecycleTarget()
-				|| Module->IsBroken() || Module->IsRecycled()
-				|| Module->IsDynamic() || Module->IsOverflowKinematic())
-			{
-				continue;
-			}
-			if (CrystalModule != nullptr)
-			{
-				CrystalModule = nullptr;
-				break;
-			}
-			CrystalModule = Module;
-		}
-		if (CrystalModule != nullptr)
-		{
-			FABTSM7SiteUniformGravityPolicy CrystalGravity;
-			constexpr float E1CrystalGravityCMPerSec2 = 980.0f;
-			if (CopyJuryDemoSiteUniformGravityPolicy(
-					E1CrystalGravityCMPerSec2,
-					CrystalGravity)
-				&& CrystalModule->ActivateDynamicSiteUniform(
-					FVector::ZeroVector,
-					CrystalGravity))
-			{
-				++JuryDemoFixedSixActivePhysicsBodyCount;
-				UE_LOG(LogABTSRuntime, Display,
-					TEXT("[ABTS][M7][E1CrystalSupportLoss]")
-					TEXT(" Activated=1 Module=%s SiteUp=%s Gravity=%.1f")
-					TEXT(" ActiveBodies=%d Cause=E1ChaosActivated")
-					TEXT(" MovementRecoveryArmed=1"),
-					*CrystalModule->GetName(),
-					*CrystalGravity.SiteUp.ToCompactString(),
-					CrystalGravity.GravityAccelerationCMPerSec2,
-					JuryDemoFixedSixActivePhysicsBodyCount);
-			}
-			else
-			{
-				UE_LOG(LogABTSRuntime, Error,
-					TEXT("[ABTS][M7][E1CrystalSupportLoss]")
-					TEXT(" Activated=0 Module=%s Reason=GravityOrChaosActivation"),
-					*CrystalModule->GetName());
-			}
-		}
-	}
 	TickJuryDemoFixedSixOverflowKinematic(DeltaSeconds);
 	if (bJuryDemoFixedSixChaosRunning)
 	{
