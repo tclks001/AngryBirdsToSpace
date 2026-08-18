@@ -11,7 +11,7 @@
 
 namespace
 {
-	constexpr float DefaultGroundMovementSpeedMultiplier = 2.0f;
+	constexpr float M1DefaultGroundMovementSpeedMultiplier = 2.0f;
 }
 
 AABTSM1BirdCharacter::AABTSM1BirdCharacter()
@@ -51,7 +51,7 @@ void AABTSM1BirdCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	GetCharacterMovement()->MaxWalkSpeed *=
-		DefaultGroundMovementSpeedMultiplier;
+		M1DefaultGroundMovementSpeedMultiplier;
 	ApplyBirdVisualTransform();
 }
 

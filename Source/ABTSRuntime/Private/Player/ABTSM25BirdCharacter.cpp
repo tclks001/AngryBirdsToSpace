@@ -26,7 +26,7 @@
 
 namespace
 {
-	constexpr float DefaultGroundMovementSpeedMultiplier = 2.0f;
+	constexpr float M25DefaultGroundMovementSpeedMultiplier = 2.0f;
 }
 
 AABTSM25BirdCharacter::AABTSM25BirdCharacter()
@@ -124,11 +124,11 @@ void AABTSM25BirdCharacter::UnPossessed()
 void AABTSM25BirdCharacter::ConfigureMovementMode()
 {
 	RadialMovement->SetGameplayWalkingSpeedMultiplier(
-		DefaultGroundMovementSpeedMultiplier);
+		M25DefaultGroundMovementSpeedMultiplier);
 	ForceMovement->SetGameplayWalkingSpeedMultiplier(
-		DefaultGroundMovementSpeedMultiplier);
+		M25DefaultGroundMovementSpeedMultiplier);
 	ChaosMovement->SetGameplayWalkingSpeedMultiplier(
-		DefaultGroundMovementSpeedMultiplier);
+		M25DefaultGroundMovementSpeedMultiplier);
 	bool bUseCollisionGroundingExperiment = false;
 	float CollisionGroundMaxAngleDegrees = 55.0f;
 	for (TActorIterator<AABTSMovementModeSelector> It(GetWorld()); It; ++It)
