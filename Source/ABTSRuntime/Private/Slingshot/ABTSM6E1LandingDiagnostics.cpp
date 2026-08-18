@@ -116,8 +116,13 @@ void AABTSM6SlingshotSystem::InitializeE1LandingDiagnostics()
 	E1LandingDiagnosticPath.Reset();
 #else
 	const UWorld* World = GetWorld();
+	const bool bEditorStandalone =
+		FParse::Param(
+			FCommandLine::Get(),
+			TEXT("PIEVIACONSOLE"));
 	bE1LandingDiagnosticEnabled = World != nullptr
 		&& (World->WorldType == EWorldType::PIE
+			|| bEditorStandalone
 			|| FParse::Param(
 				FCommandLine::Get(),
 				TEXT("ABTSE1LandingTrace")));
@@ -157,9 +162,10 @@ void AABTSM6SlingshotSystem::InitializeE1LandingDiagnostics()
 		return;
 	}
 	UE_LOG(LogABTSRuntime, Display,
-		TEXT("[ABTS][M6][E1LandingTrace] Armed Path=%s PIE=%d"),
+		TEXT("[ABTS][M6][E1LandingTrace] Armed Path=%s PIE=%d EditorStandalone=%d"),
 		*E1LandingDiagnosticPath,
-		World->WorldType == EWorldType::PIE ? 1 : 0);
+		World->WorldType == EWorldType::PIE ? 1 : 0,
+		bEditorStandalone ? 1 : 0);
 #endif
 }
 
