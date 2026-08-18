@@ -220,6 +220,25 @@ public:
 	{
 		return LastM2TransitScreenXInTargetRadii;
 	}
+#if WITH_DEV_AUTOMATION_TESTS
+	bool ApplyM6FormationSafetyEnvelopeForTesting(
+		const FVector& PrimaryTargetPosition,
+		TConstArrayView<FABTSM11FinaleFormationCameraSubject>
+			FormationSubjects,
+		const FQuat& CameraRotation,
+		double HorizontalFovDegrees,
+		FVector& InOutCameraLocation,
+		FString* OutFailureReason = nullptr) const
+	{
+		return ApplyM6FormationSafetyEnvelope(
+			PrimaryTargetPosition,
+			FormationSubjects,
+			CameraRotation,
+			HorizontalFovDegrees,
+			InOutCameraLocation,
+			OutFailureReason);
+	}
+#endif
 	EABTSM11FinaleCameraStage GetLastDirectorStage() const
 	{
 		return LastDirectorStage;
@@ -258,7 +277,8 @@ private:
 			FormationSubjects,
 		const FQuat& CameraRotation,
 		double HorizontalFovDegrees,
-		FVector& InOutCameraLocation) const;
+		FVector& InOutCameraLocation,
+		FString* OutFailureReason = nullptr) const;
 
 	bool BuildAuthorityFrame(
 		const FVector& TargetPosition,

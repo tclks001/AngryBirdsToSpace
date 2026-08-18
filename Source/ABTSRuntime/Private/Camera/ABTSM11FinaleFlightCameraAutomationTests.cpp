@@ -1839,6 +1839,84 @@ bool FABTSM11CFlightCameraAuthorityFrameTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FABTSM11CFlightCameraFormationAdaptiveRetreatTest,
+	"ABTS.M11C.Unit.FlightCameraFormationAdaptiveRetreat",
+	EAutomationTestFlags::EditorContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FABTSM11CFlightCameraFormationAdaptiveRetreatTest::RunTest(
+	const FString& Parameters)
+{
+	(void)Parameters;
+	const UWorld::InitializationValues WorldValues =
+		UWorld::InitializationValues()
+			.InitializeScenes(false)
+			.AllowAudioPlayback(false)
+			.RequiresHitProxies(false)
+			.CreatePhysicsScene(false)
+			.CreateNavigation(false)
+			.CreateAISystem(false)
+			.ShouldSimulatePhysics(false)
+			.EnableTraceCollision(false)
+			.SetTransactional(false)
+			.CreateFXSystem(false);
+	UWorld* World = UWorld::CreateWorld(
+		EWorldType::Game,
+		false,
+		TEXT("ABTSM11CFormationAdaptiveRetreatWorld"),
+		nullptr,
+		true,
+		ERHIFeatureLevel::Num,
+		&WorldValues);
+	TestNotNull(TEXT("Transient formation camera World is created"), World);
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AABTSM11FinaleFlightCamera* FlightCamera =
+		World->SpawnActor<AABTSM11FinaleFlightCamera>(
+			AABTSM11FinaleFlightCamera::StaticClass(),
+			FTransform::Identity,
+			SpawnParameters);
+	TestNotNull(TEXT("Formation flight camera spawns"), FlightCamera);
+	if (FlightCamera != nullptr)
+	{
+		TArray<FABTSM11FinaleFormationCameraSubject> Subjects;
+		Subjects.Add({FVector(1000.0, 0.0, 0.0), 84.0});
+		Subjects.Add({FVector(1000.0, 0.0, -6800.0), 84.0});
+		Subjects.Add({FVector(1000.0, 250.0, -500.0), 84.0});
+		Subjects.Add({FVector(1000.0, -250.0, -1000.0), 84.0});
+		FVector CameraLocation = FVector::ZeroVector;
+		FString Failure;
+		TestTrue(
+			TEXT("Formation safety expands beyond the former 30000 cm limit"),
+			FlightCamera->ApplyM6FormationSafetyEnvelopeForTesting(
+				Subjects[0].Center,
+				Subjects,
+				FQuat::Identity,
+				50.0,
+				CameraLocation,
+				&Failure));
+		TestTrue(
+			TEXT("Adaptive formation retreat exceeds the former fixed limit"),
+			-CameraLocation.X > 30000.0);
+		TestTrue(
+			TEXT("Adaptive formation retreat remains bounded"),
+			-CameraLocation.X < 120000.0);
+		TestTrue(
+			TEXT("Successful adaptive retreat does not publish a failure"),
+			Failure.IsEmpty());
+	}
+	World->DestroyWorld(false);
+	World->RemoveFromRoot();
+	return FlightCamera != nullptr;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FABTSM11CFlightCameraScopedFXAATest,
 	"ABTS.M11C.Unit.FlightCameraScopedFXAA",
 	EAutomationTestFlags::EditorContext

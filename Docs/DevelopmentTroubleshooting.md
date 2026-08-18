@@ -481,3 +481,16 @@
 | 优先级 | 现象 | 根因 | 修复与验收门 |
 | --- | --- | --- | --- |
 | P1 | 建筑能倒塌但坠落砖块不易继续破碎；工作台/熔炉在多数普通坡面提示 `NoBuildableCell`，只能寻找 M3 严格平缓区 | Runtime Brick 仍使用 Profile 的完整 `BreakDamage=100`；工具放置又直接复用 M3 `bBuildable`，该标志按 `MaxBuildSlopeDegrees=8°` 为正式建筑 Pad 生成，远严于无碰撞的交互型工作台/熔炉需求 | 摘录 `M7-BC-146`：真实 Brick Actor 的 runtime BreakDamage 降为材料 Profile 的 10%，不改冻结材料/PCG/Descriptor 身份。Integration 的 M5.1 工具放置不再要求 `bBuildable`，改为独立 `MaxToolPlacementSlopeDegrees=45°`；水面、正式建筑锚点、已占用 Cell、距离与鼠标 Snap 门继续 fail closed。放置成功日志记录实际坡度与 45° 上限。Standalone 验证倒塌/掉落更易碎，并在平地、中坡、较陡坡分别尝试工作台和熔炉 |
+
+## 30. 终局飞行相机子原因与默认移动速度翻倍（2026-08-18）
+
+| 优先级 | 现象 | 根因/风险 | 处理与下一验收门 |
+| --- | --- | --- | --- |
+| P0 诊断 | 终局轨迹已显示合法且 Release 为 `F4=1 / Physical=1 / Transfer=1`，发射后仍立即黑屏回退；旧日志只有统一的 `FlightCameraAuthoritySampleRejected` | `UpdateAuthoritySample` 的十个直接失败出口以及四鸟安全画幅内部失败均折叠成同一上层原因，无法区分 authority frame、M3/M2 directed frame、转场位置/旋转或 M6 formation safety；表现层故障又被玩法 fail-closed 放大成发射失败 | 每个直接失败出口输出 `[FlightCamera][AuthoritySampleRejected] SubReason=...`，共同携带 Stage、Shot、进度、目标/切线/Up、相机与上一目标、Delta、Subjects 和 M2 Blend；M6 安全画幅额外输出失败鸟索引、深度、半径、NDC、退镜距离与 30000 cm 上限。下一次复现直接按该行确定具体分支，本次不改变失败策略 |
+| P1 | 默认地面移动速度偏慢，长距离探索使玩家烦躁；直接只改速度会使脚步单位时间播放约翻倍 | 三套地面移动实现各自冻结 `680 cm/s` 默认上限，M1 CharacterMovement 为 `620 cm/s`；脚步按真实路程累计，旧速度映射为 60→680、步距 440→272 cm | M1 默认改为 `1240 cm/s`；Legacy/Force/Chaos 的地面上限改为 `1360 cm/s`，加速度与制动响应同步翻倍以保持达到/停止最大速度的时间尺度。脚步速度映射改为 120→1360，步距改为 880→544 cm，播放门与单帧传送保护距离也翻倍，响度和音高曲线按对应的 2 倍速度重映射，因此默认满速下播放频率保持不变 |
+
+## 31. M11 四鸟首帧安全画幅固定退镜上限（2026-08-18）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P0 | 合法 F4 发射在 `CruiseToBody / IncomingReveal` 首帧立即回退；新子原因显示 `FormationMaximumRetreatRejected`，第 1 只跟随鸟在退镜 `30000 cm` 后纵向边缘仍为 `0.842985 + 0.009533 > 0.84` | 四鸟安全画幅把 300 m 当作硬上限。当前跟随鸟仍从弹袋展开，首帧跨度很大；该样本只差约 0.0125 NDC，几何本身有限且继续退镜可解，却被固定上限误判为技术失败 | 保留沿主鸟视线退镜和二分最小解；先搜索 30000 cm，若仍不满足则以 2 倍有界扩展到 60000/120000 cm。只有 120000 cm 仍无法容纳、非有限几何或鸟位于不可解的相机背面才 fail closed。新增 `ABTS.M11C.Unit.FlightCameraFormationAdaptiveRetreat`，构造必须超过旧 30000 cm 才能容纳的四鸟首帧并要求成功且最终退镜小于 120000 cm |

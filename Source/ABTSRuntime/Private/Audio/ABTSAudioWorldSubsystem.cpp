@@ -16,7 +16,7 @@ namespace
 	constexpr float PullAttackSeconds = 0.012f;
 	constexpr float ReleaseSnapAttackSeconds = 0.008f;
 	constexpr float ReleaseResonanceAttackSeconds = 0.012f;
-	constexpr float FootstepCadenceScale = 0.25f;
+	constexpr float FootstepCadenceScale = 0.125f;
 	constexpr float FootstepVolumeScale = 0.50f;
 
 	template <typename T>
@@ -301,14 +301,14 @@ float UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(const float Pull
 float UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(const float TangentialSpeedCMPerSec)
 {
 	const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
-		FVector2D(60.0f, 680.0f), FVector2D(0.0f, 1.0f), TangentialSpeedCMPerSec);
+		FVector2D(120.0f, 1360.0f), FVector2D(0.0f, 1.0f), TangentialSpeedCMPerSec);
 	return FMath::Lerp(110.0f, 68.0f, SpeedAlpha) / FootstepCadenceScale;
 }
 
 float UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(const float TangentialSpeedCMPerSec)
 {
 	const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
-		FVector2D(60.0f, 680.0f), FVector2D(0.0f, 1.0f), TangentialSpeedCMPerSec);
+		FVector2D(120.0f, 1360.0f), FVector2D(0.0f, 1.0f), TangentialSpeedCMPerSec);
 	return FMath::Lerp(0.24f, 0.54f, SpeedAlpha) * FootstepVolumeScale;
 }
 
@@ -496,10 +496,10 @@ void UABTSAudioWorldSubsystem::PlayFootstep(
 	const EABTSFootstepSurface Surface,
 	const float TangentialSpeedCMPerSec)
 {
-	if (!bAudioReady || TangentialSpeedCMPerSec < 60.0f) return;
+	if (!bAudioReady || TangentialSpeedCMPerSec < 120.0f) return;
 	const float DirectCategoryVolume = MasterMix && SFXClass ? 1.0f : RuntimeSFXVolume;
 	const float Pitch = FMath::GetMappedRangeValueClamped(
-		FVector2D(60.0f, 680.0f), FVector2D(0.96f, 1.04f), TangentialSpeedCMPerSec);
+		FVector2D(120.0f, 1360.0f), FVector2D(0.96f, 1.04f), TangentialSpeedCMPerSec);
 	PlayOneShot(
 		SelectFootstep(Surface),
 		SFXClass,

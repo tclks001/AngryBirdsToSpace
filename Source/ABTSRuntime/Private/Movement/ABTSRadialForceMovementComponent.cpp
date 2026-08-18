@@ -96,6 +96,12 @@ void UABTSRadialForceMovementComponent::SetDeveloperWalkingSpeedMultiplier(const
 	DeveloperWalkingSpeedMultiplier = FMath::Clamp(InMultiplier, 1.0f, 10.0f);
 }
 
+void UABTSRadialForceMovementComponent::SetGameplayWalkingSpeedMultiplier(
+	const float InMultiplier)
+{
+	GameplayWalkingSpeedMultiplier = FMath::Max(0.0f, InMultiplier);
+}
+
 void UABTSRadialForceMovementComponent::ConfigureCollisionGroundingExperiment(
 	const bool bEnabled,
 	const float MaxGroundAngleDegrees)
@@ -350,8 +356,13 @@ void UABTSRadialForceMovementComponent::SimulateSubstep(
 	}
 	const FVector SatelliteGravityForce = AppliedSatelliteAcceleration * MassKG;
 	const FVector SupportForce = Surface.RadialUp * (MassKG * Surface.OutwardSupportAccelerationCMPerSec2);
-	const float EffectiveMaxGroundSpeed = DesignMaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
-	const FVector MoveForce = MoveDirection * (MassKG * GroundMoveAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier * ControlScale * InputMagnitude);
+	const float EffectiveWalkingMultiplier =
+		GameplayWalkingSpeedMultiplier * DeveloperWalkingSpeedMultiplier;
+	const float EffectiveMaxGroundSpeed =
+		DesignMaxGroundSpeedCMPerSec * EffectiveWalkingMultiplier;
+	const FVector MoveForce = MoveDirection
+		* (MassKG * GroundMoveAccelerationCMPerSec2
+			* EffectiveWalkingMultiplier * ControlScale * InputMagnitude);
 	FVector DragForce = -TangentVelocity * (MassKG * DragPerSecond);
 	const float TangentSpeed = TangentVelocity.Size();
 	if (Surface.bGrounded && TangentSpeed > EffectiveMaxGroundSpeed)

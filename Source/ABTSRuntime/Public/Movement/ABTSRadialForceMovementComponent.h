@@ -26,6 +26,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void SetMoveInput(const FVector& Direction, float Scale);
+	/** Production locomotion multiplier, applied after serialized component defaults. */
+	void SetGameplayWalkingSpeedMultiplier(float InMultiplier);
 	/** Debug-only walking multiplier. It affects ground control only, never M6 ballistic velocity. */
 	void SetDeveloperWalkingSpeedMultiplier(float InMultiplier);
 	void QueueJump();
@@ -72,7 +74,7 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Force", meta = (ClampMin = "0.0", UIMax = "1.0"))
 	float AirControlScale = 0.28f;
 
-	/** Linear tangent drag. 3600 / 5.3 gives a terminal ground speed near 680 cm/s. */
+	/** Linear tangent drag. The gameplay multiplier scales acceleration and the design speed together. */
 	UPROPERTY(EditAnywhere, Category = "ABTS|Force Movement|Drag", meta = (ClampMin = "0.0", UIMax = "20.0"))
 	float GroundDragPerSecond = 5.3f;
 
@@ -129,6 +131,7 @@ private:
 	bool bUseCollisionNormalGroundingExperiment = false;
 	bool bCollisionGrounded = false;
 	float CollisionGroundMaxAngleDegrees = 55.0f;
+	float GameplayWalkingSpeedMultiplier = 1.0f;
 	float DeveloperWalkingSpeedMultiplier = 1.0f;
 	FABTSBlockingImpactDelegate BlockingImpact;
 };

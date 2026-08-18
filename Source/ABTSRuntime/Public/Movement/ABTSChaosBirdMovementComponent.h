@@ -28,6 +28,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void SetChaosEnabled(bool bEnabled);
+	/** Production locomotion multiplier, applied after serialized component defaults. */
+	void SetGameplayWalkingSpeedMultiplier(float InMultiplier);
 	/** Debug-only walking multiplier. It affects tangential steering, never launch velocity. */
 	void SetDeveloperWalkingSpeedMultiplier(float InMultiplier);
 	/** Enables constant-direction gravity for the standalone M7.1 floor. */
@@ -92,6 +94,7 @@ private:
 	bool bBallisticFlight = false;
 	float LastGroundContactAgeSeconds = BIG_NUMBER;
 	float BallisticAirDragPerSecond = 0.08f;
+	float GameplayWalkingSpeedMultiplier = 1.0f;
 	float DeveloperWalkingSpeedMultiplier = 1.0f;
 	FVector PreviousPhysicsVelocity = FVector::ZeroVector;
 	FABTSChaosBlockingImpactDelegate BlockingImpact;

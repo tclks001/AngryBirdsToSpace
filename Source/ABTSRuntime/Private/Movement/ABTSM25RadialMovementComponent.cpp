@@ -49,6 +49,12 @@ void UABTSM25RadialMovementComponent::SetDeveloperWalkingSpeedMultiplier(const f
 	DeveloperWalkingSpeedMultiplier = FMath::Clamp(InMultiplier, 1.0f, 10.0f);
 }
 
+void UABTSM25RadialMovementComponent::SetGameplayWalkingSpeedMultiplier(
+	const float InMultiplier)
+{
+	GameplayWalkingSpeedMultiplier = FMath::Max(0.0f, InMultiplier);
+}
+
 void UABTSM25RadialMovementComponent::ConfigureCollisionGroundingExperiment(
 	const bool bEnabled,
 	const float MaxGroundAngleDegrees)
@@ -165,9 +171,14 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 		}
 		const float InputMagnitude = TangentInput.Size();
 		const FVector SurfaceMoveDirection = FVector::VectorPlaneProject(TangentInput, SurfaceNormal).GetSafeNormal();
-		const float EffectiveMaxGroundSpeed = MaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
-		const float EffectiveAcceleration = GroundAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier;
-		const float EffectiveBraking = GroundBrakingCMPerSec2 * DeveloperWalkingSpeedMultiplier;
+		const float EffectiveWalkingMultiplier =
+			GameplayWalkingSpeedMultiplier * DeveloperWalkingSpeedMultiplier;
+		const float EffectiveMaxGroundSpeed =
+			MaxGroundSpeedCMPerSec * EffectiveWalkingMultiplier;
+		const float EffectiveAcceleration =
+			GroundAccelerationCMPerSec2 * EffectiveWalkingMultiplier;
+		const float EffectiveBraking =
+			GroundBrakingCMPerSec2 * EffectiveWalkingMultiplier;
 		const FVector TargetGroundVelocity = SurfaceMoveDirection * (InputMagnitude * EffectiveMaxGroundSpeed);
 		const float ChangeRate = TangentInput.IsNearlyZero()
 			? EffectiveBraking
@@ -184,8 +195,12 @@ void UABTSM25RadialMovementComponent::IntegrateMotion(const float DeltaTime)
 	}
 	else
 	{
-		const float EffectiveMaxGroundSpeed = MaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
-		Velocity += TangentInput * GroundAccelerationCMPerSec2 * DeveloperWalkingSpeedMultiplier * AirControlScale * DeltaTime;
+		const float EffectiveWalkingMultiplier =
+			GameplayWalkingSpeedMultiplier * DeveloperWalkingSpeedMultiplier;
+		const float EffectiveMaxGroundSpeed =
+			MaxGroundSpeedCMPerSec * EffectiveWalkingMultiplier;
+		Velocity += TangentInput * GroundAccelerationCMPerSec2
+			* EffectiveWalkingMultiplier * AirControlScale * DeltaTime;
 		const FVector TangentVelocity = FVector::VectorPlaneProject(Velocity, Up);
 		if (TangentVelocity.SizeSquared() > FMath::Square(EffectiveMaxGroundSpeed))
 		{

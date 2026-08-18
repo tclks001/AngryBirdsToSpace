@@ -78,7 +78,7 @@ Capsule Sweep 首次命中阻挡物后，未消耗位移会投影到碰撞面切
 5. 保存地图。若希望本阶段成为默认入口，在 **Project Settings > Maps & Modes** 将 Game Default Map 与 Editor Startup Map 改为 `L_ABTS_M25`。
 6. 在 PIE 中使用 WASD 移动；按 **Space** 跳跃。可在 `AABTSM25BirdCharacter` 的 `RadialMovement` Details 中调整引力、跳跃速度、空中控制和最大移动速度。
 
-建议首轮保持默认参数：`GravityAcceleration=980`、`JumpSpeed=620`、`MaxGroundSpeed=680`。这会产生约 0.8 秒的完整跳跃往返，便于观察。
+当前发行默认参数为：`GravityAcceleration=980`、`JumpSpeed=620`、`MaxGroundSpeed=1360`。跳跃纵向参数不变；地面最大速度、加速度和制动响应均为原来的 2 倍。
 
 ## 5. 验收
 

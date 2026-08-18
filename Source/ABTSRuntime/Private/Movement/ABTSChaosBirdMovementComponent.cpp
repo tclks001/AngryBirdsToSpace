@@ -53,6 +53,12 @@ void UABTSChaosBirdMovementComponent::SetDeveloperWalkingSpeedMultiplier(const f
 	DeveloperWalkingSpeedMultiplier = FMath::Clamp(InMultiplier, 1.0f, 10.0f);
 }
 
+void UABTSChaosBirdMovementComponent::SetGameplayWalkingSpeedMultiplier(
+	const float InMultiplier)
+{
+	GameplayWalkingSpeedMultiplier = FMath::Max(0.0f, InMultiplier);
+}
+
 void UABTSChaosBirdMovementComponent::ConfigurePlanarTestMode(
 	const bool bEnabled,
 	const FVector& InPlaneOrigin,
@@ -224,12 +230,15 @@ void UABTSChaosBirdMovementComponent::ApplyRadialForces(const float DeltaTime)
 	}
 
 	const FVector Input = PendingMoveVector.GetClampedToMaxSize(1.0f);
-	const float EffectiveMaxGroundSpeed = MaxGroundSpeedCMPerSec * DeveloperWalkingSpeedMultiplier;
+	const float EffectiveWalkingMultiplier =
+		GameplayWalkingSpeedMultiplier * DeveloperWalkingSpeedMultiplier;
+	const float EffectiveMaxGroundSpeed =
+		MaxGroundSpeedCMPerSec * EffectiveWalkingMultiplier;
 	const FVector DesiredTangentVelocity = FVector::VectorPlaneProject(Input, RadialUp).GetClampedToMaxSize(1.0f)
 		* EffectiveMaxGroundSpeed;
 	const FVector CurrentTangentVelocity = FVector::VectorPlaneProject(Body->GetPhysicsLinearVelocity(), RadialUp);
 	const float Acceleration = (Input.IsNearlyZero() ? GroundBrakingCMPerSec2 : GroundAccelerationCMPerSec2)
-		* DeveloperWalkingSpeedMultiplier;
+		* EffectiveWalkingMultiplier;
 	const FVector DeltaVelocity = (DesiredTangentVelocity - CurrentTangentVelocity)
 		.GetClampedToMaxSize(FMath::Max(0.0f, Acceleration) * DeltaTime);
 	Body->AddImpulse(DeltaVelocity * Mass, NAME_None, false);

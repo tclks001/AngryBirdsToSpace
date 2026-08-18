@@ -9,6 +9,11 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
+namespace
+{
+	constexpr float DefaultGroundMovementSpeedMultiplier = 2.0f;
+}
+
 AABTSM1BirdCharacter::AABTSM1BirdCharacter()
 {
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 60.0f);
@@ -45,6 +50,8 @@ AABTSM1BirdCharacter::AABTSM1BirdCharacter()
 void AABTSM1BirdCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	GetCharacterMovement()->MaxWalkSpeed *=
+		DefaultGroundMovementSpeedMultiplier;
 	ApplyBirdVisualTransform();
 }
 

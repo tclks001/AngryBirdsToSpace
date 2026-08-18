@@ -1823,8 +1823,21 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 		FormationSubjects,
 	const FQuat& CameraRotation,
 	const double HorizontalFovDegrees,
-	FVector& InOutCameraLocation) const
+	FVector& InOutCameraLocation,
+	FString* OutFailureReason) const
 {
+	if (OutFailureReason != nullptr)
+	{
+		OutFailureReason->Reset();
+	}
+	const auto Reject = [OutFailureReason](FString Reason)
+	{
+		if (OutFailureReason != nullptr)
+		{
+			*OutFailureReason = MoveTemp(Reason);
+		}
+		return false;
+	};
 	if (FormationSubjects.Num() <= 1)
 	{
 		return true;
@@ -1832,7 +1845,8 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 	constexpr double AspectRatio = 16.0 / 9.0;
 	constexpr double SafeHorizontalNdc = 0.88;
 	constexpr double SafeVerticalNdc = 0.84;
-	constexpr double MaximumRetreatCM = 30000.0;
+	constexpr double InitialRetreatSearchLimitCM = 30000.0;
+	constexpr double MaximumRetreatSearchLimitCM = 120000.0;
 	const double TanHalfHorizontal = FMath::Tan(
 		FMath::DegreesToRadians(HorizontalFovDegrees * 0.5));
 	const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
@@ -1841,7 +1855,11 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 		|| TanHalfHorizontal <= UE_DOUBLE_SMALL_NUMBER
 		|| TanHalfVertical <= UE_DOUBLE_SMALL_NUMBER)
 	{
-		return false;
+		return Reject(FString::Printf(
+			TEXT("FormationFovRejected Fov=%.6f TanH=%.9f TanV=%.9f"),
+			HorizontalFovDegrees,
+			TanHalfHorizontal,
+			TanHalfVertical));
 	}
 	const FVector Forward = CameraRotation.GetForwardVector();
 	const FVector Right = CameraRotation.GetRightVector();
@@ -1853,7 +1871,12 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 	if (!FMath::IsFinite(PrimaryDepth)
 		|| PrimaryDepth <= UE_DOUBLE_SMALL_NUMBER)
 	{
-		return false;
+		return Reject(FString::Printf(
+			TEXT("FormationPrimaryDepthRejected Depth=%.6f Primary=%s Camera=%s Forward=%s"),
+			PrimaryDepth,
+			*PrimaryTargetPosition.ToCompactString(),
+			*InOutCameraLocation.ToCompactString(),
+			*Forward.ToCompactString()));
 	}
 	const FVector BaseLocation = InOutCameraLocation;
 	const auto BuildCandidateLocation = [&](const double RetreatCM)
@@ -1866,21 +1889,50 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 			- Right * (PrimaryRight * RetreatCM / PrimaryDepth)
 			- Up * (PrimaryUp * RetreatCM / PrimaryDepth);
 	};
-	const auto Fits = [&](const double RetreatCM)
+	const auto Fits = [&](
+		const double RetreatCM,
+		FString* OutFitFailure) -> bool
 	{
-		const FVector CandidateLocation = BuildCandidateLocation(RetreatCM);
-		for (const FABTSM11FinaleFormationCameraSubject& Subject
-			: FormationSubjects)
+		if (OutFitFailure != nullptr)
 		{
+			OutFitFailure->Reset();
+		}
+		const auto RejectFit = [OutFitFailure](FString Reason)
+		{
+			if (OutFitFailure != nullptr)
+			{
+				*OutFitFailure = MoveTemp(Reason);
+			}
+			return false;
+		};
+		const FVector CandidateLocation = BuildCandidateLocation(RetreatCM);
+		for (int32 SubjectIndex = 0;
+			SubjectIndex < FormationSubjects.Num();
+			++SubjectIndex)
+		{
+			const FABTSM11FinaleFormationCameraSubject& Subject =
+				FormationSubjects[SubjectIndex];
 			if (!Subject.IsUsable())
 			{
-				return false;
+				return RejectFit(FString::Printf(
+					TEXT("FormationSubjectRejected Index=%d Center=%s Radius=%.6f Retreat=%.3f"),
+					SubjectIndex,
+					*Subject.Center.ToCompactString(),
+					Subject.RadiusCM,
+					RetreatCM));
 			}
 			const FVector Offset = Subject.Center - CandidateLocation;
 			const double Depth = FVector::DotProduct(Offset, Forward);
 			if (Depth <= Subject.RadiusCM + 1.0)
 			{
-				return false;
+				return RejectFit(FString::Printf(
+					TEXT("FormationSubjectBehindCamera Index=%d Depth=%.6f Radius=%.6f Retreat=%.3f Center=%s Camera=%s"),
+					SubjectIndex,
+					Depth,
+					Subject.RadiusCM,
+					RetreatCM,
+					*Subject.Center.ToCompactString(),
+					*CandidateLocation.ToCompactString()));
 			}
 			const double ConservativeDepth = Depth - Subject.RadiusCM;
 			const double CenterX = FVector::DotProduct(Offset, Right)
@@ -1894,25 +1946,52 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 			if (FMath::Abs(CenterX) + RadiusX > SafeHorizontalNdc
 				|| FMath::Abs(CenterY) + RadiusY > SafeVerticalNdc)
 			{
-				return false;
+				return RejectFit(FString::Printf(
+					TEXT("FormationSubjectOutsideFrame Index=%d Retreat=%.3f CenterNdc=(%.6f,%.6f) RadiusNdc=(%.6f,%.6f) Limits=(%.3f,%.3f) Depth=%.6f RadiusCM=%.6f"),
+					SubjectIndex,
+					RetreatCM,
+					CenterX,
+					CenterY,
+					RadiusX,
+					RadiusY,
+					SafeHorizontalNdc,
+					SafeVerticalNdc,
+					Depth,
+					Subject.RadiusCM));
 			}
 		}
 		return true;
 	};
-	if (Fits(0.0))
+	FString FitFailure;
+	if (Fits(0.0, &FitFailure))
 	{
+		if (OutFailureReason != nullptr)
+		{
+			OutFailureReason->Reset();
+		}
 		return true;
 	}
-	if (!Fits(MaximumRetreatCM))
+	double High = InitialRetreatSearchLimitCM;
+	while (!Fits(High, &FitFailure)
+		&& High < MaximumRetreatSearchLimitCM)
 	{
-		return false;
+		High = FMath::Min(
+			MaximumRetreatSearchLimitCM,
+			High * 2.0);
+	}
+	if (!Fits(High, &FitFailure))
+	{
+		return Reject(FString::Printf(
+			TEXT("FormationAdaptiveRetreatRejected InitialLimit=%.3f MaxRetreat=%.3f Detail={%s}"),
+			InitialRetreatSearchLimitCM,
+			MaximumRetreatSearchLimitCM,
+			*FitFailure));
 	}
 	double Low = 0.0;
-	double High = MaximumRetreatCM;
 	for (int32 Iteration = 0; Iteration < 32; ++Iteration)
 	{
 		const double Mid = (Low + High) * 0.5;
-		if (Fits(Mid))
+		if (Fits(Mid, nullptr))
 		{
 			High = Mid;
 		}
@@ -1922,7 +2001,18 @@ bool AABTSM11FinaleFlightCamera::ApplyM6FormationSafetyEnvelope(
 		}
 	}
 	InOutCameraLocation = BuildCandidateLocation(High);
-	return !InOutCameraLocation.ContainsNaN();
+	if (InOutCameraLocation.ContainsNaN())
+	{
+		return Reject(FString::Printf(
+			TEXT("FormationRetreatLocationNonFinite Retreat=%.6f Base=%s"),
+			High,
+			*BaseLocation.ToCompactString()));
+	}
+	if (OutFailureReason != nullptr)
+	{
+		OutFailureReason->Reset();
+	}
+	return true;
 }
 
 bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
@@ -1934,9 +2024,43 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 	const TConstArrayView<FABTSM11FinaleFormationCameraSubject>
 		FormationSubjects)
 {
+	const auto RejectSample = [&](
+		const TCHAR* SubReason,
+		const FString& Detail = FString()) -> bool
+	{
+		const EABTSM11FinaleCameraStage Stage =
+			DirectorSample != nullptr
+			? DirectorSample->Selection.Stage
+			: EABTSM11FinaleCameraStage::Unavailable;
+		const EABTSM11FinaleCameraShotPhase ShotPhase =
+			DirectorSample != nullptr
+			? DirectorSample->Selection.ShotPhase
+			: EABTSM11FinaleCameraShotPhase::Authority;
+		UE_LOG(
+			LogABTSRuntime,
+			Warning,
+			TEXT("[ABTS][M11-C][FlightCamera][AuthoritySampleRejected] SubReason=%s Detail={%s} Stage=%s Shot=%s StageProgress=%.6f ShotProgress=%.6f Target=%s Tangent=%s PreferredUp=%s Camera=%s LastTarget=%s Delta=%.6f Subjects=%d M2Blend=%.6f"),
+			SubReason,
+			Detail.IsEmpty() ? TEXT("None") : *Detail,
+			ABTSM11FinaleCameraDirector::StageLabel(Stage),
+			ABTSM11FinaleCameraDirector::ShotPhaseLabel(ShotPhase),
+			DirectorSample != nullptr
+				? DirectorSample->Selection.StageProgress : -1.0,
+			DirectorSample != nullptr
+				? DirectorSample->Selection.ShotProgress : -1.0,
+			*TargetPosition.ToCompactString(),
+			*TrajectoryTangent.ToCompactString(),
+			*PreferredUp.ToCompactString(),
+			*GetActorLocation().ToCompactString(),
+			*LastAuthorityTargetPosition.ToCompactString(),
+			DeltaSeconds,
+			FormationSubjects.Num(),
+			LastM2BlendAlpha);
+		return false;
+	};
 	if (!bAuthorityFollowActive)
 	{
-		return false;
+		return RejectSample(TEXT("AuthorityFollowInactive"));
 	}
 	EnsureFinaleAntiAliasingOverride();
 	const FVector AuthorityTargetTranslation =
@@ -1948,7 +2072,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		PreferredUp,
 		Frame))
 	{
-		return false;
+		return RejectSample(TEXT("AuthorityFrameRejected"));
 	}
 	LastAuthorityForward = Frame.TrajectoryForward;
 	LastTransportedUp = Frame.TransportedUp;
@@ -2040,7 +2164,10 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 				Diagnostics);
 		if (!bBuilt)
 		{
-			return false;
+			return RejectSample(
+				bM3Window
+					? TEXT("M3DirectedFrameRejected")
+					: TEXT("M2DirectedFrameRejected"));
 		}
 		LastM2BlendAlpha = Diagnostics.DirectorBlendAlpha;
 		LastM2RetreatAlpha = Diagnostics.RetreatAlpha;
@@ -2062,7 +2189,15 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		if (BlendedOffsetDirection.IsNearlyZero()
 			|| !FMath::IsFinite(BlendedOffsetDistance))
 		{
-			return false;
+			return RejectSample(
+				TEXT("DirectedBlendOffsetRejected"),
+				FString::Printf(
+					TEXT("Direction=%s Distance=%.6f Baseline=%s Directed=%s Alpha=%.6f"),
+					*BlendedOffsetDirection.ToCompactString(),
+					BlendedOffsetDistance,
+					*BaselineOffset.ToCompactString(),
+					*DirectedOffset.ToCompactString(),
+					LastM2BlendAlpha));
 		}
 		DesiredTransform.SetLocation(
 			TargetPosition
@@ -2096,6 +2231,7 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		1.0);
 	FVector SmoothedLocation = FVector::ZeroVector;
 	FQuat SmoothedRotation = FQuat::Identity;
+	FString LocationAwareRotationFailure;
 	const auto BuildLocationAwareDesiredRotation =
 		[&](const FVector& CameraLocation, FQuat& OutRotation) -> bool
 	{
@@ -2126,6 +2262,11 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 			DirectorSample->TargetCenter,
 			DirectedRotationAtLocation))
 		{
+			LocationAwareRotationFailure = FString::Printf(
+				TEXT("PlanetAnchoredRotationRejected Camera=%s Up=%s TargetCenter=%s"),
+				*CameraLocation.ToCompactString(),
+				*LocationAwareUp.ToCompactString(),
+				*DirectorSample->TargetCenter.ToCompactString());
 			return false;
 		}
 		OutRotation = FQuat::Slerp(
@@ -2158,7 +2299,9 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 		SmoothedLocation,
 		SmoothedRotation))
 	{
-		return false;
+		return RejectSample(
+			TEXT("StandardSmoothedFrameRejected"),
+			LocationAwareRotationFailure);
 	}
 	const bool bM3InterBodyComposition = bM3DirectorFrozenEnabled
 		&& DirectorSample != nullptr
@@ -2276,7 +2419,13 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 			ReleaseAlpha,
 			SmoothedLocation))
 		{
-			return false;
+			return RejectSample(
+				TEXT("M3LaunchReleaseLocationRejected"),
+				FString::Printf(
+					TEXT("Safe=%s Directed=%s ReleaseAlpha=%.6f"),
+					*SafeLocation.ToCompactString(),
+					*DesiredTransform.GetLocation().ToCompactString(),
+					ReleaseAlpha));
 		}
 
 		FQuat BirdAnchoredRotation;
@@ -2285,12 +2434,23 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 			SmoothedLocation,
 			TargetPosition,
 			GetActorQuat().GetUpVector(),
-			BirdAnchoredRotation)
-			|| !BuildLocationAwareDesiredRotation(
-				SmoothedLocation,
-				LocationAwareDesiredRotation))
+			BirdAnchoredRotation))
 		{
-			return false;
+			return RejectSample(
+				TEXT("M3BirdAnchoredRotationRejected"),
+				FString::Printf(
+					TEXT("Camera=%s Bird=%s Up=%s"),
+					*SmoothedLocation.ToCompactString(),
+					*TargetPosition.ToCompactString(),
+					*GetActorQuat().GetUpVector().ToCompactString()));
+		}
+		if (!BuildLocationAwareDesiredRotation(
+			SmoothedLocation,
+			LocationAwareDesiredRotation))
+		{
+			return RejectSample(
+				TEXT("M3LocationAwareRotationRejected"),
+				LocationAwareRotationFailure);
 		}
 		const FQuat ReleasedDesiredRotation = FQuat::Slerp(
 			BirdAnchoredRotation,
@@ -2323,14 +2483,18 @@ bool AABTSM11FinaleFlightCamera::UpdateAuthoritySample(
 					/ FinalRotationDeltaRadians).GetNormalized();
 		}
 	}
+	FString FormationSafetyFailure;
 	if (!ApplyM6FormationSafetyEnvelope(
 		TargetPosition,
 		FormationSubjects,
 		SmoothedRotation,
 		DesiredFovDegrees,
-		SmoothedLocation))
+		SmoothedLocation,
+		&FormationSafetyFailure))
 	{
-		return false;
+		return RejectSample(
+			TEXT("M6FormationSafetyRejected"),
+			FormationSafetyFailure);
 	}
 	SetActorLocationAndRotation(
 		SmoothedLocation,

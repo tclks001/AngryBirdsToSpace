@@ -24,6 +24,11 @@
 #include "UObject/ConstructorHelpers.h"
 #include "World/ABTSCollisionChannels.h"
 
+namespace
+{
+	constexpr float DefaultGroundMovementSpeedMultiplier = 2.0f;
+}
+
 AABTSM25BirdCharacter::AABTSM25BirdCharacter()
 {
 	RadialMovement = CreateDefaultSubobject<UABTSM25RadialMovementComponent>(TEXT("RadialMovement"));
@@ -118,6 +123,12 @@ void AABTSM25BirdCharacter::UnPossessed()
 
 void AABTSM25BirdCharacter::ConfigureMovementMode()
 {
+	RadialMovement->SetGameplayWalkingSpeedMultiplier(
+		DefaultGroundMovementSpeedMultiplier);
+	ForceMovement->SetGameplayWalkingSpeedMultiplier(
+		DefaultGroundMovementSpeedMultiplier);
+	ChaosMovement->SetGameplayWalkingSpeedMultiplier(
+		DefaultGroundMovementSpeedMultiplier);
 	bool bUseCollisionGroundingExperiment = false;
 	float CollisionGroundMaxAngleDegrees = 55.0f;
 	for (TActorIterator<AABTSMovementModeSelector> It(GetWorld()); It; ++It)
@@ -960,7 +971,7 @@ void AABTSM25BirdCharacter::UpdateBirdLocomotionAudio(const float DeltaSeconds)
 		const float TangentialTravelCM = FVector::VectorPlaneProject(
 			CurrentLocation - PreviousLocomotionAudioLocation,
 			WorldUp).Size();
-		if (TangentialSpeedCMPerSec >= 60.0f && TangentialTravelCM <= 220.0f)
+		if (TangentialSpeedCMPerSec >= 120.0f && TangentialTravelCM <= 440.0f)
 		{
 			AccumulatedFootstepDistanceCM += TangentialTravelCM;
 			const float StepSpacingCM = UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(
@@ -976,7 +987,7 @@ void AABTSM25BirdCharacter::UpdateBirdLocomotionAudio(const float DeltaSeconds)
 					StepSpacingCM);
 			}
 		}
-		else if (TangentialSpeedCMPerSec < 60.0f || TangentialTravelCM > 220.0f)
+		else if (TangentialSpeedCMPerSec < 120.0f || TangentialTravelCM > 440.0f)
 		{
 			AccumulatedFootstepDistanceCM = 0.0f;
 		}

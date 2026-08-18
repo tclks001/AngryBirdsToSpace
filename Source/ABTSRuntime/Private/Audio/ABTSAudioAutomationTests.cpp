@@ -25,19 +25,19 @@ bool FABTSAudioMappingTest::RunTest(const FString& Parameters)
 		&& UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(0.5f)
 		< UABTSAudioWorldSubsystem::ComputePullLoopVolumeMultiplier(1.0f));
 	TestTrue(TEXT("Faster movement shortens the distance between footsteps"),
-		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(100.0f)
-		> UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(600.0f));
-	TestEqual(TEXT("Footstep cadence is one quarter of the original low-speed rate"),
-		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(60.0f), 440.0f);
-	TestEqual(TEXT("Footstep cadence is one quarter of the original high-speed rate"),
-		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(680.0f), 272.0f);
+		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(200.0f)
+		> UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(1200.0f));
+	TestEqual(TEXT("Doubled low speed uses doubled travel per footstep"),
+		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(120.0f), 880.0f);
+	TestEqual(TEXT("Doubled high speed uses doubled travel per footstep"),
+		UABTSAudioWorldSubsystem::ComputeFootstepSpacingCM(1360.0f), 544.0f);
 	TestTrue(TEXT("Faster movement raises footstep volume"),
-		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(100.0f)
-		< UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(600.0f));
+		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(200.0f)
+		< UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(1200.0f));
 	TestEqual(TEXT("Low-speed footstep volume is reduced by half"),
-		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(60.0f), 0.12f);
+		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(120.0f), 0.12f);
 	TestEqual(TEXT("High-speed footstep volume is reduced by half"),
-		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(680.0f), 0.27f);
+		UABTSAudioWorldSubsystem::ComputeFootstepVolumeMultiplier(1360.0f), 0.27f);
 	TestTrue(TEXT("Harder landings are louder"),
 		UABTSAudioWorldSubsystem::ComputeLandingVolumeMultiplier(200.0f)
 		< UABTSAudioWorldSubsystem::ComputeLandingVolumeMultiplier(800.0f));
