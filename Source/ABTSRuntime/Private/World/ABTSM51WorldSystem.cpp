@@ -417,7 +417,18 @@ int32 AABTSM51WorldSystem::SelectPlacementCell(const FVector& UnitDirection) con
 	const TArray<FABTSM3CellState>& States = Planet->GetGeneratedCellStates();
 	for (int32 CellId = 0; CellId < States.Num(); ++CellId)
 	{
-		if (!States[CellId].bBuildable || States[CellId].bWater || IsCellOccupied(CellId)) continue;
+		// Workbench/Furnace placement is a lightweight interaction placeholder,
+		// not a frozen M7 building pad. Keep water, building anchors and occupied
+		// cells fail-closed, but allow ordinary terrain up to a broad slope limit
+		// instead of inheriting M3's strict 8-degree building-site flag.
+		if (States[CellId].bWater
+			|| States[CellId].bBuildingAnchor
+			|| States[CellId].LogicalSlopeDegrees
+				> MaxToolPlacementSlopeDegrees
+			|| IsCellOccupied(CellId))
+		{
+			continue;
+		}
 		const float Dot = FVector::DotProduct(UnitDirection, Planet->LogicalCells[CellId].UnitCenter);
 		if (Dot > BestDot) { BestDot = Dot; BestCell = CellId; }
 	}
@@ -482,7 +493,11 @@ bool AABTSM51WorldSystem::PlaceHeldToolAtAim(APlayerController& Controller)
 	Station->SetCellId(CellId);
 	OccupiedCells.Add(CellId);
 	Inventory->RemoveItem(Held, 1);
-	UE_LOG(LogABTSRuntime, Log, TEXT("[ABTS][M5.1][Place] Tool=%s Cell=%d"), *ABTSGetItemFallbackLabel(Held), CellId);
+	UE_LOG(LogABTSRuntime, Log,
+		TEXT("[ABTS][M5.1][Place] Tool=%s Cell=%d Slope=%.2f SlopeLimit=%.2f"),
+		*ABTSGetItemFallbackLabel(Held), CellId,
+		Planet->GetGeneratedCellStates()[CellId].LogicalSlopeDegrees,
+		MaxToolPlacementSlopeDegrees);
 	return true;
 }
 

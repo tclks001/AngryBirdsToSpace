@@ -135,6 +135,12 @@ private:
 	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Placement", meta = (ClampMin = "0.1", ClampMax = "15.0"))
 	float MaxPlacementSnapDegrees = 3.5f;
 
+	/** Workbench/Furnace only: broad local terrain slope allowance. It does not
+	 * alter M3 building-pad generation, slingshot slots, bridges, or water gates. */
+	UPROPERTY(EditAnywhere, Category = "ABTS|M5.1|Placement",
+		meta = (ClampMin = "0.0", ClampMax = "60.0", Units = "deg"))
+	float MaxToolPlacementSlopeDegrees = 45.0f;
+
 	/**
 	 * Retained only for serialized Blueprint compatibility. Ordinary assembly
 	 * now uses CompatibilityMaxCordLengthCM or the accepted snapshot value.

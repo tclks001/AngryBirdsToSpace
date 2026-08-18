@@ -475,3 +475,9 @@
 | 优先级 | 现象 | 根因 | 修复与验收门 |
 | --- | --- | --- | --- |
 | P0 | E1 主体被破坏后，Crystal cap 可能被抛到卫星其他位置；首轮“移动即回收”加入后复测又发现 Crystal 根本没有随下方结构进入 Chaos，因此仍悬在已消失的座梁位置 | Crystal 是 `Entry.Caps` 辅助模块，而首击支撑闭包只遍历 54 个 `Entry.Bricks`。实机日志明确为 `Visible=56 / CertifiedBodies=56 / Bodies=54 / ActiveBodies=54`：结构 Brick 已进入 Chaos，唯一 Crystal 仍静态，所以移动回收条件永远不会发生 | 摘录 `M7-BC-143/144`：E1 首击事务发布 `bChaosActivated` 后，StableBuilding 精确查找唯一静态 Crystal lifecycle module，并以同一 SiteUniform gravity policy 将它加入真实 Chaos，同时更新活动刚体账本；随后平移 `>=1 cm`、旋转 `>=0.5°`、线速度 `>=2 cm/s` 或角速度 `>=1°/s` 任一成立，即只执行一次 Break，按 `ModuleContact` 完成物理链并发布 `OnMaterialRecovered(Crystal,1)`，由 M8 向背包加入恰好 1 个 `CrystalCore`。恢复订阅者缺失时 fail closed。Standalone 必须依次出现一次 `E1CrystalSupportLoss Activated=1` 与一次 `E1CrystalMovementRecovery Consumed=1`，水晶先真实下落再被回收 |
+
+## 29. 保底 Shipping 后的砖块碎裂与工具放置易用性（2026-08-18，待玩家验收）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P1 | 建筑能倒塌但坠落砖块不易继续破碎；工作台/熔炉在多数普通坡面提示 `NoBuildableCell`，只能寻找 M3 严格平缓区 | Runtime Brick 仍使用 Profile 的完整 `BreakDamage=100`；工具放置又直接复用 M3 `bBuildable`，该标志按 `MaxBuildSlopeDegrees=8°` 为正式建筑 Pad 生成，远严于无碰撞的交互型工作台/熔炉需求 | 摘录 `M7-BC-146`：真实 Brick Actor 的 runtime BreakDamage 降为材料 Profile 的 10%，不改冻结材料/PCG/Descriptor 身份。Integration 的 M5.1 工具放置不再要求 `bBuildable`，改为独立 `MaxToolPlacementSlopeDegrees=45°`；水面、正式建筑锚点、已占用 Cell、距离与鼠标 Snap 门继续 fail closed。放置成功日志记录实际坡度与 45° 上限。Standalone 验证倒塌/掉落更易碎，并在平地、中坡、较陡坡分别尝试工作台和熔炉 |
