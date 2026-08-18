@@ -494,3 +494,9 @@
 | 优先级 | 现象 | 根因 | 修复与验收门 |
 | --- | --- | --- | --- |
 | P0 | 合法 F4 发射在 `CruiseToBody / IncomingReveal` 首帧立即回退；新子原因显示 `FormationMaximumRetreatRejected`，第 1 只跟随鸟在退镜 `30000 cm` 后纵向边缘仍为 `0.842985 + 0.009533 > 0.84` | 四鸟安全画幅把 300 m 当作硬上限。当前跟随鸟仍从弹袋展开，首帧跨度很大；该样本只差约 0.0125 NDC，几何本身有限且继续退镜可解，却被固定上限误判为技术失败 | 保留沿主鸟视线退镜和二分最小解；先搜索 30000 cm，若仍不满足则以 2 倍有界扩展到 60000/120000 cm。只有 120000 cm 仍无法容纳、非有限几何或鸟位于不可解的相机背面才 fail closed。新增 `ABTS.M11C.Unit.FlightCameraFormationAdaptiveRetreat`，构造必须超过旧 30000 cm 才能容纳的四鸟首帧并要求成功且最终退镜小于 120000 cm |
+
+## 32. Shipping 开局动画暂停音乐（2026-08-18，待 Standalone 验收）
+
+| 优先级 | 现象 | 根因 | 修复与验收门 |
+| --- | --- | --- | --- |
+| P1 | Shipping 加载完成后 Explore 音乐开始播放，点击 Begin 进入 42 秒开局动画时音乐停止，动画结束解除暂停后从原处继续或重新可闻 | 开局生产绑定使用 `PlayerController::SetPause(true)` 冻结 Gameplay；四轨持久音乐组件虽然非空间且保持同步播放，但被创建为普通 Gameplay Sound，`bIsUISound=0`，因此引擎在全局 Pause 时自动暂停 ActiveSound | 仅四轨持久音乐以 `bIsUISound=1` 注册，使其在开局 Gameplay Pause 中继续同一时间线；弹弓拉弦等 Gameplay loop 保持 `bIsUISound=0`。启动日志新增 `MusicPauseResilient=4`；`ABTS.Audio.ReleaseAndMusicMapping` 冻结音乐/Gameplay loop 的暂停策略。Standalone 验收要求加载完成后音乐开始，点击 Begin 前后无静音、无重新起拍，动画结束仍连续播放 |

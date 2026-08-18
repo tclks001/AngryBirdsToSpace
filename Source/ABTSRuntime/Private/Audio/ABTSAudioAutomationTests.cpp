@@ -56,6 +56,12 @@ bool FABTSAudioMappingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Explore is harmony-led"), Harmony > 0.0f && Bass == 0.0f && Melody == 0.0f && Percussion == 0.0f);
 	UABTSAudioWorldSubsystem::GetMusicStemTargets(EABTSMusicState::Finale, Bass, Harmony, Melody, Percussion);
 	TestTrue(TEXT("Finale enables every stem"), Bass > 0.0f && Harmony > 0.0f && Melody > 0.0f && Percussion > 0.0f);
+	TestTrue(
+		TEXT("Persistent music continues while opening gameplay is paused"),
+		UABTSAudioWorldSubsystem::ShouldPersistentAudioPlayWhenPaused(true));
+	TestFalse(
+		TEXT("Persistent gameplay interaction loops still obey pause"),
+		UABTSAudioWorldSubsystem::ShouldPersistentAudioPlayWhenPaused(false));
 
 	const UABTSAudioSettings* Settings = GetDefault<UABTSAudioSettings>();
 	TestFalse(TEXT("Bass default path is configured"), Settings->BassStem.IsNull());

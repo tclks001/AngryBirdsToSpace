@@ -112,6 +112,7 @@ void UABTSAudioWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	const float DirectCategoryVolume = MasterMix && MusicClass ? 1.0f : RuntimeMusicVolume;
 	int32 LoadedMusicStemCount = 0;
 	int32 ActiveMusicStemCount = 0;
+	int32 PauseResilientMusicStemCount = 0;
 	for (int32 Index = 0; Index < MusicSounds.Num(); ++Index)
 	{
 		USoundBase* Sound = MusicSounds[Index];
@@ -122,10 +123,15 @@ void UABTSAudioWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			// the same musical position instead of restarting the wave.
 			Sound->VirtualizationMode = EVirtualizationMode::PlayWhenSilent;
 		}
-		UAudioComponent* Component = CreatePersistentComponent(Sound, MusicClass, false);
+		UAudioComponent* Component = CreatePersistentComponent(
+			Sound,
+			MusicClass,
+			false,
+			ShouldPersistentAudioPlayWhenPaused(true));
 		MusicComponents.Add(Component);
 		if (Component && Index < UE_ARRAY_COUNT(InitialTargets))
 		{
+			PauseResilientMusicStemCount += Component->bIsUISound ? 1 : 0;
 			const float InitialVolume = InitialTargets[Index] * Settings->MusicVolume * DirectCategoryVolume;
 			Component->FadeIn(0.0f, InitialVolume);
 			ActiveMusicStemCount += Component->IsActive() ? 1 : 0;
@@ -142,10 +148,11 @@ void UABTSAudioWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		+ (IsValid(ReleaseResonanceComponent) ? 1 : 0);
 	bAudioReady = true;
 	UE_LOG(LogABTSRuntime, Log,
-		TEXT("[ABTS][Audio] Ready MusicLoaded=%d MusicComponents=%d MusicActive=%d State=%d Targets=(%.2f,%.2f,%.2f,%.2f) SoundClasses=%d MasterMix=%d SlingshotPrepared=%d PrimeRequested=%d BirdChirps=%d Footsteps=(%d,%d) Pickup=%d"),
+		TEXT("[ABTS][Audio] Ready MusicLoaded=%d MusicComponents=%d MusicActive=%d MusicPauseResilient=%d State=%d Targets=(%.2f,%.2f,%.2f,%.2f) SoundClasses=%d MasterMix=%d SlingshotPrepared=%d PrimeRequested=%d BirdChirps=%d Footsteps=(%d,%d) Pickup=%d"),
 		LoadedMusicStemCount,
 		MusicComponents.Num(),
 		ActiveMusicStemCount,
+		PauseResilientMusicStemCount,
 		static_cast<int32>(MusicState),
 		InitialTargets[0], InitialTargets[1], InitialTargets[2], InitialTargets[3],
 		MusicClass && SFXClass && UIClass && AmbienceClass ? 4 : 0,
@@ -206,7 +213,11 @@ void UABTSAudioWorldSubsystem::LoadCatalog()
 	MasterMix = LoadOptional(Settings->MasterSoundMix);
 }
 
-UAudioComponent* UABTSAudioWorldSubsystem::CreatePersistentComponent(USoundBase* Sound, USoundClass* SoundClass, const bool bSpatialized)
+UAudioComponent* UABTSAudioWorldSubsystem::CreatePersistentComponent(
+	USoundBase* Sound,
+	USoundClass* SoundClass,
+	const bool bSpatialized,
+	const bool bPlayWhenPaused)
 {
 	UWorld* World = GetWorld();
 	if (World == nullptr || Sound == nullptr) return nullptr;
@@ -214,11 +225,20 @@ UAudioComponent* UABTSAudioWorldSubsystem::CreatePersistentComponent(USoundBase*
 	Component->SetAutoActivate(false);
 	Component->bAutoDestroy = false;
 	Component->bAllowSpatialization = bSpatialized;
-	Component->SetUISound(false);
+	Component->SetUISound(bPlayWhenPaused);
 	Component->SetSound(Sound);
 	Component->SoundClassOverride = SoundClass;
 	Component->RegisterComponentWithWorld(World);
 	return Component;
+}
+
+bool UABTSAudioWorldSubsystem::ShouldPersistentAudioPlayWhenPaused(
+	const bool bIsMusic)
+{
+	// Production opening cinematics pause gameplay for their full duration.
+	// Music is non-spatial and must keep the same synchronized stem timeline
+	// through that pause; interaction loops remain gameplay sounds.
+	return bIsMusic;
 }
 
 void UABTSAudioWorldSubsystem::PlayOneShot(

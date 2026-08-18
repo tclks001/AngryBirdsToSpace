@@ -96,10 +96,15 @@ public:
 	static float ComputeLandingVolumeMultiplier(float DownwardSpeedCMPerSec);
 	static EABTSFootstepSurface ResolveFootstepSurfaceFromSemanticName(const FString& SemanticName);
 	static void GetMusicStemTargets(EABTSMusicState State, float& OutBass, float& OutHarmony, float& OutMelody, float& OutPercussion);
+	static bool ShouldPersistentAudioPlayWhenPaused(bool bIsMusic);
 
 private:
 	void LoadCatalog();
-	UAudioComponent* CreatePersistentComponent(USoundBase* Sound, USoundClass* SoundClass, bool bSpatialized);
+	UAudioComponent* CreatePersistentComponent(
+		USoundBase* Sound,
+		USoundClass* SoundClass,
+		bool bSpatialized,
+		bool bPlayWhenPaused = false);
 	void PlayOneShot(USoundBase* Sound, USoundClass* SoundClass, const FVector& WorldLocation, bool bSpatialized, float Volume, float Pitch = 1.0f);
 	USoundBase* SelectImpact(EABTSM6ImpactMaterial Material);
 	USoundBase* SelectFootstep(EABTSFootstepSurface Surface);
