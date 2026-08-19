@@ -1,0 +1,2 @@
+# README media uses Git LFS. Run `git lfs install` before committing/pushing.
+Docs/Media/README/*.mp4 filter=lfs diff=lfs merge=lfs -text
